@@ -8900,10 +8900,21 @@ async function renderKhoInbox(){
 }
 
 // ---------- Form Nguyên liệu (thêm mới / sửa), có quy cách đóng gói ----------
-let editingItemId = null;      // null = đang ở chế độ Thêm mới
+let editingItemId = null;      // id nguyên liệu đang sửa
+// Form THÊM MỚI trước đây nằm thẳng đầu tab: một khối dài gần hai màn hình (đơn vị
+// pha chế, quy cách, tồn ban đầu, ngưỡng, giá vốn, theo dõi & kiểm kê) luôn đứng
+// trên danh mục, nên vào tab Nguyên liệu là thấy form chứ không thấy nguyên liệu.
+// Giờ nó nằm sau nút "+ Nguyên liệu mới" và mở trong sheet — cùng chỗ với form sửa,
+// không phải hai kiểu trình bày cho cùng một form.
+let addingItem = false;
 let itemFormDraft = {packagingUnits: []};
 
-function resetItemForm(){ editingItemId = null; itemFormDraft = {packagingUnits: []}; renderKhoItems(); }
+function startAddItem(){
+  editingItemId = null; adjustingItemId = null;
+  addingItem = true; itemFormDraft = {packagingUnits: []};
+  renderKhoItems();
+}
+function resetItemForm(){ editingItemId = null; addingItem = false; itemFormDraft = {packagingUnits: []}; renderKhoItems(); }
 
 // ══════════════════════════════════════════════════════════════════════════
 // [FIX-sua-ton] CHỈNH TỒN KHO NGUYÊN LIỆU
@@ -8924,7 +8935,7 @@ let itemAdjustDraft = null;   // {newQty, reason}
 function startAdjustItem(id){
   const it = INVENTORY_ITEMS.find(x=>x.id===id);
   if(!it) return;
-  editingItemId = null;       // không mở hai sheet chồng nhau
+  editingItemId = null; addingItem = false;   // không mở hai sheet chồng nhau
   adjustingItemId = id;
   itemAdjustDraft = { newQty: Number(it.currentStock)||0, reason: '' };
   renderKhoItems();
@@ -8995,7 +9006,7 @@ async function submitItemAdjust(){
 function startEditItem(id){
   const it = INVENTORY_ITEMS.find(x=>x.id===id);
   if(!it) return;
-  editingItemId = id;
+  editingItemId = id; addingItem = false;
   itemFormDraft = {packagingUnits: (it.packagingUnits||[]).map(p=>({name:p.name, refUnit:'base', refQty:p.baseQty}))};
   renderKhoItems();
 }
@@ -9385,15 +9396,18 @@ function renderKhoItems(){
   // Khi đang LỌC thì ẩn form thêm mới đi: lúc đó người dùng đang đi xử lý mấy
   // món có vấn đề, form thêm nguyên liệu chỉ chen ngang và đẩy danh sách xuống.
   box.innerHTML = `
-    ${(editingItem || khoItemsFilter) ? '' : `<div class="card">${renderInventoryItemFormFields(null)}<button class="btn" style="margin-top:10px" onclick="submitInventoryItem()">Thêm nguyên liệu</button></div>`}
+    ${khoItemsFilter ? '' : `<button class="btn" style="width:auto;padding:0 20px;margin-bottom:14px" onclick="startAddItem()">+ Nguyên liệu mới</button>`}
     ${filterChip}
-    ${khoItemsFilter ? '' : `<div class="sec-title" style="margin-top:${editingItem?'0':'14px'}">Danh mục nguyên liệu (${INVENTORY_ITEMS.length})</div>`}
+    ${khoItemsFilter ? '' : `<div class="sec-title" style="margin-top:0">Danh mục nguyên liệu (${INVENTORY_ITEMS.length})</div>`}
     ${listHtml}
   `;
 
   const adjustingItem = adjustingItemId ? INVENTORY_ITEMS.find(x=>x.id===adjustingItemId) : null;
-  if(editingItem){
-    openEditSheet('Sửa nguyên liệu', renderInventoryItemFormFields(editingItem) + `<button class="btn" style="margin-top:14px" onclick="submitInventoryItem()">${ic('save',15)} Lưu thay đổi</button>`, resetItemForm);
+  if(editingItem || addingItem){
+    openEditSheet(editingItem ? 'Sửa nguyên liệu' : 'Nguyên liệu mới',
+      renderInventoryItemFormFields(editingItem) +
+      `<button class="btn" style="margin-top:14px" onclick="submitInventoryItem()">${ic('save',15)} ${editingItem?'Lưu thay đổi':'Thêm nguyên liệu'}</button>`,
+      resetItemForm);
   } else if(adjustingItem){
     // [FIX-sua-ton] Sheet RIÊNG cho việc chỉnh số tồn — tách hẳn khỏi sheet sửa thông
     // tin nguyên liệu, vì đây là hai việc khác hẳn nhau.
@@ -9482,7 +9496,7 @@ async function submitInventoryItem(){
       });
       toast('✅ Đã thêm nguyên liệu');
     }
-    editingItemId = null; itemFormDraft = {packagingUnits: []};
+    editingItemId = null; addingItem = false; itemFormDraft = {packagingUnits: []};
     INVENTORY_ITEMS = await loadInventoryItems();
     // Giá vốn nguyên liệu đổi → mọi định mức/bao bì dùng nó đều đổi giá vốn theo.
     await invalidateSalesCache('giá vốn nguyên liệu');
