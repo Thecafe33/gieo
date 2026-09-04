@@ -12029,6 +12029,32 @@ async function renderKhoStockCount(){
       // thấy con số lệch mà không biết lệch vì đếm sai hay vì chọn nhầm "Hộp"/"Chai".
       const rawLine = (it.countedInput!=null && it.countedUnitLabel && it.countedUnitLabel!==it.unit)
         ? `<div style="font-size:10.5px;color:#aaa;text-align:right;margin-top:1px;">(nhân viên gõ: ${fmtNum(it.countedInput,2)} ${it.countedUnitLabel})</div>` : '';
+
+      // [NEW] Dòng đếm theo CHAI — đối chiếu theo ĐƠN VỊ, không theo ml.
+      // Phần trong chai đang mở không ai đo được nên KHÔNG đưa vào phép trừ; nếu đưa vào thì
+      // lần kiểm kê nào cũng lệch, hai tuần sau không ai nhìn màu đỏ nữa và cơ chế chết.
+      if(it.countMode === 'unit'){
+        const dv = escapeHtmlAttr(it.countUnitName || '');
+        const lechNguyen = Number(it.varianceSealedUnits)||0;
+        const lechMo = Number(it.varianceOpenUnits)||0;
+        // Lệch chai NGUYÊN dù chỉ 1 là chuyện thật — chai nguyên đếm được chính xác,
+        // không có lý do gì để sai. Khác hẳn lệch theo ml vốn luôn lăn tăn vài phần trăm.
+        const doNguyen = lechNguyen !== 0;
+        // Đếm được nhiều chai mở hơn số hệ thống biết = có chai được khui mà không quét mã.
+        const moChui = lechMo > 0;
+        return `<div style="padding:6px 0;font-size:12.5px;${doNguyen?'color:#c0392b;font-weight:700;':''}">
+          <div style="display:flex;justify-content:space-between;gap:8px;">
+            <span>${it.name} <span class="tier tier-green" style="margin-left:2px;font-size:9.5px;">theo ${dv}</span></span>
+            <span style="white-space:nowrap">${it.countedSealedUnits} / ${it.expectedSealedUnits} ${dv} nguyên${lechNguyen?` (${lechNguyen>0?'+':''}${lechNguyen})`:''}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;gap:8px;font-weight:400;color:${moChui?'#b45309':'#999'};font-size:11.5px;margin-top:2px;">
+            <span>${moChui?'Có chai mở mà không quét mã':'Đang mở'}</span>
+            <span style="white-space:nowrap">${it.countedOpenUnits} / ${it.expectedOpenUnits} đang mở${lechMo?` (${lechMo>0?'+':''}${lechMo})`:''}</span>
+          </div>
+          ${doNguyen?`<div style="font-size:11px;color:#c0392b;margin-top:2px;">Duyệt sẽ điều chỉnh tồn ${lechNguyen>0?'+':''}${fmtNum(it.varianceBase,0)} ${escapeHtmlAttr(it.unit||'')}</div>`:''}
+        </div>`;
+      }
+
       return `<div style="padding:4px 0;font-size:12.5px;${over?'color:#c0392b;font-weight:700;':''}">
         <div style="display:flex;justify-content:space-between;">
           <span>${it.name}${isPkg?' <span class="tier tier-blue" style="margin-left:4px;font-size:9.5px;">Bao bì</span>':''}</span>
