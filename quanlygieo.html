@@ -4313,27 +4313,31 @@ const NAV_SECTIONS = [
     {key:'entry:exp',  ic:'cashout', label:'Chi phí',       go:"goEntry('exp')"},
     {key:'entry:cash', ic:'coins',   label:'Tiền mặt',      go:"goEntry('cash')"},
   ]},
-  // Kho — gập/mở, vì một mình nó đã có 14 mục con.
+  // Kho — gập/mở. Chia theo NHỊP công việc chứ không theo loại dữ liệu:
+  //   Cần xử lý  → việc đang chờ ngay hôm nay (màn mặc định khi vào Kho)
+  //   Hàng hoá   → danh mục, sửa thỉnh thoảng
+  //   Hoạt động  → việc lặp lại + tra cứu
+  //   Cài đặt    → đặt một lần rồi quên, nên đẩy xuống cuối
+  // Cách chia cũ ("Danh mục / Nhập hàng / Vận hành / Lịch sử") trộn cấu hình một
+  // lần (Lý do hao hụt, Checklist ca) chung với việc hằng ngày (Refill, Kiểm kê),
+  // và để "Nhập hàng loạt" — vốn là nhập DANH MỤC từ Excel — trong nhóm "Nhập
+  // hàng", ai đọc cũng tưởng là đưa hàng vào kho.
   { group:'Kho', collapsible:true, items:[
-    {key:'kho:items',        label:'Nguyên liệu',     go:"goKho('items')",        sub:'Danh mục'},
+    {key:'kho:inbox',        label:'Cần xử lý',       go:"goKho('inbox')",        sub:'Bắt đầu ở đây'},
+    {key:'kho:items',        label:'Nguyên liệu',     go:"goKho('items')",        sub:'Hàng hoá'},
     {key:'kho:prep',         label:'Chế biến cấp 1',  go:"goKho('prep')"},
-    {key:'kho:toppingcogs',  label:'GOGS Topping',    go:"goKho('toppingcogs')"},
     {key:'kho:packaging',    label:'Bao bì',          go:"goKho('packaging')"},
-    {key:'entry:cogs',       label:'GOGS Món',        go:"goEntry('cogs')"},
-    {key:'kho:recipe',       label:'Định mức',        go:"goKho('recipe')"},
-    {key:'kho:location',     label:'Vị trí kho',      go:"goKho('location')"},
-    {key:'kho:stockin',      label:'Nhập kho nhanh',  go:"goKho('stockin')",      sub:'Nhập hàng'},
-    {key:'kho:po',           label:'Đặt hàng (PO)',   go:"goKho('po')"},
-    {key:'kho:bulkimport',   label:'Nhập hàng loạt',  go:"goKho('bulkimport')"},
-    {key:'kho:refill',       label:'Refill',          go:"goKho('refill')",       sub:'Vận hành kho'},
-    {key:'kho:locstock',     label:'Tồn theo vị trí', go:"goKho('locstock')"},
+    {key:'kho:toppingcogs',  label:'GOGS Topping',    go:"goKho('toppingcogs')"},
+    {key:'kho:po',           label:'Đặt & nhận hàng', go:"goKho('po')",           sub:'Hoạt động'},
     {key:'kho:stockcount',   label:'Kiểm kê',         go:"goKho('stockcount')"},
+    {key:'kho:containers',   label:'Chai & tem kho',  go:"goKho('containers')"},
+    {key:'kho:refill',       label:'Refill',          go:"goKho('refill')"},
+    {key:'kho:locstock',     label:'Tồn theo vị trí', go:"goKho('locstock')"},
+    {key:'kho:history',      label:'Lịch sử kho',     go:"goKho('history')"},
+    {key:'kho:location',     label:'Vị trí kho',      go:"goKho('location')",     sub:'Cài đặt kho'},
     {key:'kho:wastereasons', label:'Lý do hao hụt',   go:"goKho('wastereasons')"},
     {key:'kho:checklist',    label:'Checklist ca',    go:"goKho('checklist')"},
-    {key:'kho:containers',   label:'Chai & tem kho',  go:"goKho('containers')"},
-    {key:'kho:history',      label:'Kho nguyên liệu', go:"goKho('history')",      sub:'Lịch sử'},
-    {key:'kho:prephistory',  label:'Chế biến',        go:"goKho('prephistory')"},
-    {key:'kho:prepbatches',  label:'Lô chế biến',     go:"goKho('prepbatches')"},
+    {key:'kho:bulkimport',   label:'Nhập danh mục từ Excel', go:"goKho('bulkimport')"},
   ]},
   { group:'Nhân sự', items:[
     {key:'entry:nv',       ic:'users',     label:'Nhân viên',      go:"goEntry('nv')"},
@@ -4351,9 +4355,14 @@ const NAV_SECTIONS = [
   ]},
   // [BÊ TỪ POS] Hai màn này trước nằm trong app POS — chuyển sang đây vì sửa giá
   // và cấu hình khuyến mãi là việc của chủ quán, không phải của nhân viên bán hàng.
+  // [SỬA] "Định mức" mở ra là DANH SÁCH MÓN TRONG MENU để khai công thức, và
+  // "GOGS Món" là giá vốn của món — cả hai là thuộc tính của MÓN, không phải của
+  // kho. Để trong nhóm Kho thì sửa món phải nhảy qua nhảy lại hai nhóm.
   { group:'Menu & Khuyến mãi', items:[
-    {key:'mn', ic:'clipboard', label:'Quản lý Menu', go:"switchScreen('mn')"},
-    {key:'tg', ic:'coins',     label:'Khuyến mãi',   go:"switchScreen('tg')"},
+    {key:'mn',           ic:'clipboard', label:'Quản lý Menu', go:"switchScreen('mn')"},
+    {key:'kho:recipe',   ic:'note',      label:'Định mức món', go:"goKho('recipe')"},
+    {key:'entry:cogs',   ic:'coins',     label:'GOGS Món',     go:"goEntry('cogs')"},
+    {key:'tg',           ic:'coins',     label:'Khuyến mãi',   go:"switchScreen('tg')"},
   ]},
   { group:'Kiểm toán', items:[
     {key:'entry:audit', ic:'detective', label:'Kiểm toán', go:"goEntry('audit')"},
@@ -4389,6 +4398,13 @@ function currentNavKey(){
 // Giờ khoNavOpen là NGUỒN SỰ THẬT DUY NHẤT: vào Kho thì goKho() tự mở, còn
 // gập/mở lúc nào là quyền của người dùng, kể cả khi đang đứng trong Kho.
 let khoNavOpen = false;
+// Tập mục con thực sự nằm trong nhánh Kho của sidebar — lấy thẳng từ NAV_SECTIONS
+// để khỏi phải nhớ đồng bộ hai danh sách. "Định mức món" và "GOGS Món" render bằng
+// bộ máy Kho nhưng đứng ở nhóm Menu, nên không được tính là đang ở trong Kho.
+const KHO_SIDEBAR_SUBS = (()=>{
+  const sec = NAV_SECTIONS.find(x=>x.collapsible) || {items:[]};
+  return new Set(sec.items.filter(i=>i.key.startsWith('kho:')).map(i=>i.key.slice(4)));
+})();
 function toggleKhoNav(ev){
   if(ev) ev.stopPropagation();
   khoNavOpen = !khoNavOpen;
@@ -4438,7 +4454,7 @@ function renderSidebarNav(){
   const nav = document.getElementById('sidebarNav');
   if(!nav) return;
   const cur = currentNavKey();
-  const inKho = cur.startsWith('kho:');
+  const inKho = cur.startsWith('kho:') && KHO_SIDEBAR_SUBS.has(cur.slice(4));
   const q = noAccent(navQuery);
   const khoExpanded = q ? true : khoNavOpen;   // đang tìm kiếm thì luôn mở để thấy kết quả
   const match = it => !q || noAccent(it.label).includes(q);
@@ -5163,7 +5179,9 @@ async function computeStoreHealth(){
   const today = dkey(new Date());
   const yest = dkey(new Date(Date.now() - 86400000));
   const out = [];
-  const push = (tier, label, count, onclick, err) => out.push({tier, label, count, onclick, err:!!err});
+  // `zone` để màn "Cần xử lý" trong tab Kho lấy đúng phần việc của kho mà không
+  // phải đoán qua chuỗi onclick — một nguồn dữ liệu, hai chỗ hiển thị.
+  const push = (tier, label, count, onclick, err, zone) => out.push({tier, label, count, onclick, err:!!err, zone:zone||''});
 
   const [alertsRes, scRes, expRes, closingRes, itemsRes, overrideRes, openingRes] = await Promise.allSettled([
     fstore.collection('alerts_gieogieo').where('status','==','new').get(),
@@ -5206,8 +5224,8 @@ async function computeStoreHealth(){
 
   if(scRes.status==='fulfilled'){
     const n = scRes.value.length;
-    if(n) push('red', 'Phiếu kiểm kê chờ duyệt', n, `goKho('stockcount')`);
-  } else { console.warn('storeHealth: kiểm kê lỗi', scRes.reason); push('red','Kiểm kê chờ duyệt — không kiểm tra được','!',`goKho('stockcount')`,true); }
+    if(n) push('red', 'Phiếu kiểm kê chờ duyệt', n, `goKho('stockcount')`, false, 'kho');
+  } else { console.warn('storeHealth: kiểm kê lỗi', scRes.reason); push('red','Kiểm kê chờ duyệt — không kiểm tra được','!',`goKho('stockcount')`,true,'kho'); }
 
   // ---- Chai & tem kho ----
   // Ba việc này nếu không nổi lên đây thì POS ghi vết xong bỏ đó, không ai đọc.
@@ -5220,18 +5238,18 @@ async function computeStoreHealth(){
     if(rv.status==='fulfilled' && rv.value.length){
       const tong = rv.value.reduce((s,c)=>s+(Number(c.wasteBase)||0),0);
       push('red', `Báo hết khi chai còn nhiều — cần xem lại${tong>0?` (bỏ phí ~${fmtNum(tong,0)} đơn vị)`:''}`,
-           rv.value.length, `goContainers('review')`);
+           rv.value.length, `goContainers('review')`, false, 'kho');
     }
     if(mo.status==='fulfilled'){
       const quaHan = mo.value.filter(c=>c.expiresAt && new Date(c.expiresAt) <= new Date());
       // ĐỎ chứ không vàng: hàng đã mở quá hạn là chuyện an toàn thực phẩm, không phải
       // chuyện sổ sách — pha cho khách uống rồi mới biết thì đã muộn.
-      if(quaHan.length) push('red', 'Hàng đã mở QUÁ HẠN còn ở quầy', quaHan.length, `goContainers('expired')`);
+      if(quaHan.length) push('red', 'Hàng đã mở QUÁ HẠN còn ở quầy', quaHan.length, `goContainers('expired')`, false, 'kho');
     }
     if(chuaDan.status==='fulfilled'){
       // Chỉ tính tem để quá 2 ngày — tem của lần nhận hàng sáng nay chưa dán là bình thường.
       const cu = chuaDan.value.filter(c=>c.receivedAt && (Date.now() - new Date(c.receivedAt)) > 2*86400000);
-      if(cu.length) push('yellow', 'Tem đã sinh quá 2 ngày mà chưa dán', cu.length, `goContainers('unlabeled')`);
+      if(cu.length) push('yellow', 'Tem đã sinh quá 2 ngày mà chưa dán', cu.length, `goContainers('unlabeled')`, false, 'kho');
     }
   }catch(err){ console.warn('storeHealth: chai & tem lỗi', err); }
 
@@ -5260,11 +5278,20 @@ async function computeStoreHealth(){
   if(itemsRes.status==='fulfilled'){
     const items = itemsRes.value;
     const neg = items.filter(it=>Number(it.currentStock)<0);
-    if(neg.length) push('red', 'Nguyên liệu có tồn kho ÂM', neg.length, `goKho('items','negative')`);
+    if(neg.length) push('red', 'Nguyên liệu có tồn kho ÂM', neg.length, `goKho('items','negative')`, false, 'kho');
     // 🟡 dưới ngưỡng cảnh báo — nên xem, chưa phải cháy nhà
     const low = items.filter(it=>itemStockManaged(it) && Number(it.minStock)>0 && Number(it.currentStock)<Number(it.minStock) && Number(it.currentStock)>=0);
-    if(low.length) push('yellow', 'Nguyên liệu dưới ngưỡng cảnh báo', low.length, `goKho('items','low')`);
-  } else { console.warn('storeHealth: nguyên liệu lỗi', itemsRes.reason); push('red','Tồn kho — không kiểm tra được','!',`goKho('items')`,true); }
+    if(low.length) push('yellow', 'Nguyên liệu dưới ngưỡng cảnh báo', low.length, `goKho('items','low')`, false, 'kho');
+  } else { console.warn('storeHealth: nguyên liệu lỗi', itemsRes.reason); push('red','Tồn kho — không kiểm tra được','!',`goKho('items')`,true,'kho'); }
+
+  // ---- Đơn đặt hàng chưa nhận đủ ----
+  // Đơn treo ở trạng thái pending/partial nghĩa là hàng đã đặt mà chưa về đủ. Không
+  // có chỗ nào nhắc thì đơn nằm im, tới lúc hết hàng mới nhớ ra là đã đặt từ tuần trước.
+  try{
+    const pos = await loadPurchaseOrders();
+    const treo = pos.filter(po => po.status==='pending' || po.status==='partial');
+    if(treo.length) push('yellow', 'Đơn đặt hàng chưa nhận đủ', treo.length, `goKho('po')`, false, 'kho');
+  }catch(err){ console.warn('storeHealth: PO lỗi', err); }
 
   // 🟡 Nhân viên đã bấm "Không refill được — ghi lý do" khi đóng ngày (GĐ4/PHẦN 5.3).
   // Đây KHÔNG phải lỗi của nhân viên — nhưng chủ quán cần biết để đặt hàng bù.
@@ -8730,34 +8757,31 @@ async function confirmClearCache(){
 // sử) nằm PHẲNG trên 1 thanh tab cuộn ngang — người dùng phải cuộn dò từng
 // nút, không có gợi ý nào về việc các mục này liên quan/khác nhau ra sao.
 //
-// Giờ nhóm lại theo ĐÚNG BẢN CHẤT CÔNG VIỆC — 2 tầng thay vì 1 tầng phẳng:
-//   1. Danh mục   → Nguyên liệu, Vị trí kho, Định mức        (cấu hình 1 lần)
-//   2. Nhập hàng  → Nhập kho nhanh, Đặt hàng (PO)             (đưa hàng vào)
-//   3. Vận hành   → Refill, Kiểm kê, Lý do hao hụt            (việc lặp lại hàng ngày/tuần)
-//   4. Lịch sử    → Lịch sử giao dịch kho                     (chỉ xem)
-// Tầng 1 chỉ 4 lựa chọn (đủ nhỏ để không cần cuộn, dùng .seg chia đều đẹp).
-// Tầng 2 tối đa 3 lựa chọn/nhóm (dùng .filter-bar/.ftag như cũ, nhưng giờ mỗi
-// thanh chỉ còn 2-3 nút thay vì 9 — không còn bị bóp/cuộn dò nữa). Nhóm chỉ có
-// 1 mục con (Lịch sử) thì bỏ hẳn tầng 2, vào thẳng nội dung.
+// Lần chia nhóm ĐẦU ("Danh mục / Nhập hàng / Vận hành / Lịch sử") vẫn còn rối vì
+// nó chia theo LOẠI DỮ LIỆU: cấu hình đặt-một-lần (Lý do hao hụt, Checklist ca)
+// nằm chung với việc hằng ngày (Refill, Kiểm kê); "Nhập hàng loạt" — thực chất là
+// nhập DANH MỤC từ Excel — nằm trong nhóm "Nhập hàng" nên ai cũng tưởng nó đưa
+// hàng vào kho; ba tab lịch sử tách rời cho cùng một câu hỏi.
+//
+// Giờ chia theo NHỊP CÔNG VIỆC (danh sách thật nằm ở NAV_SECTIONS):
+//   Bắt đầu ở đây → Cần xử lý           (việc đang chờ hôm nay — màn mặc định)
+//   Hàng hoá      → Nguyên liệu, Chế biến, Bao bì, GOGS Topping   (sửa thỉnh thoảng)
+//   Hoạt động     → Đặt & nhận hàng, Kiểm kê, Chai & tem, Refill,
+//                   Tồn theo vị trí, Lịch sử kho                  (lặp lại + tra cứu)
+//   Cài đặt kho   → Vị trí, Lý do hao hụt, Checklist ca, Nhập Excel (đặt rồi quên)
+// "Định mức món" và "GOGS Món" đã chuyển sang nhóm Menu — chúng là thuộc tính của
+// MÓN chứ không phải của kho. "Nhập kho nhanh" gộp vào màn Đặt & nhận hàng, ba tab
+// lịch sử gộp thành một tab đổi nguồn bằng chip.
 // ============================================================
-const KHO_GROUPS = {
-  danhmuc:  { label:'Danh mục',   ic:'clipboard', subs:[{k:'items',label:'Nguyên liệu'},{k:'prep',label:'Chế biến cấp 1'},{k:'toppingcogs',label:'GOGS Topping'},{k:'packaging',label:'Bao bì'},{k:'recipe',label:'Định mức'},{k:'location',label:'Vị trí kho'}] },
-  nhaphang: { label:'Nhập hàng',  ic:'download',  subs:[{k:'stockin',label:'Nhập kho nhanh'},{k:'po',label:'Đặt hàng (PO)'},{k:'bulkimport',label:'Nhập hàng loạt'}] },
-  vanhanh:  { label:'Vận hành',   ic:'settings',  subs:[{k:'refill',label:'Refill'},{k:'locstock',label:'Tồn theo vị trí'},{k:'stockcount',label:'Kiểm kê'},{k:'wastereasons',label:'Lý do hao hụt'},{k:'checklist',label:'Checklist ca'},{k:'containers',label:'Chai & tem kho'}] },
-  lichsu:   { label:'Lịch sử',    ic:'clock',     subs:[{k:'history',label:'Kho nguyên liệu'},{k:'prephistory',label:'Chế biến'},{k:'prepbatches',label:'Lô chế biến'}] }
-};
-let curKhoGroup = 'danhmuc';
-let curKhoSub = 'items'; // items | recipe | stockin | po | stockcount | wastereasons | refill | history | location
+let curKhoSub = 'inbox'; // inbox | items | prep | packaging | toppingcogs | po | stockcount
+                         // | containers | refill | locstock | history | location
+                         // | wastereasons | checklist | bulkimport | recipe (đứng ở nhóm Menu)
 
 // [FIX] Bộ lọc tạm cho danh sách Nguyên liệu — để link từ "Sức khoẻ quán" mở ra
 // ĐÚNG mấy món đang có vấn đề, thay vì đổ ra cả danh mục rồi bắt tự dò.
 // null = không lọc · 'low' = dưới ngưỡng cảnh báo · 'negative' = tồn âm
 let khoItemsFilter = null;
 
-function khoGroupOfSub(sub){
-  for(const [g,cfg] of Object.entries(KHO_GROUPS)) if(cfg.subs.some(s=>s.k===sub)) return g;
-  return 'danhmuc';
-}
 // [FIX] Điều hướng tới một mục con cụ thể trong tab Kho.
 // TRƯỚC ĐÂY các link ở màn "Sức khoẻ quán"/nudge chỉ set curEntryTab='kho' rồi
 // render — nhưng curKhoGroup/curKhoSub là biến toàn cục GIỮ NGUYÊN giá trị của
@@ -8766,9 +8790,10 @@ function khoGroupOfSub(sub){
 // Giờ mọi link đều đi qua đây và nói rõ muốn tới mục con nào.
 function goKho(sub, filter){
   curEntryTab = 'kho';
-  khoNavOpen = true;              // đi thẳng vào một mục Kho thì bung nhóm ra cho thấy đang ở đâu
-  curKhoSub = sub || 'items';
-  curKhoGroup = khoGroupOfSub(curKhoSub);
+  curKhoSub = sub || 'inbox';
+  // Bung nhánh Kho ra cho thấy đang đứng ở đâu — trừ mấy màn dùng chung bộ máy Kho
+  // nhưng đứng ở nhóm khác (Định mức món), bung ra là chỉ sai chỗ.
+  if(KHO_SIDEBAR_SUBS.has(curKhoSub)) khoNavOpen = true;
   khoItemsFilter = filter || null;
   switchScreen('entry');
 }
@@ -8792,13 +8817,13 @@ async function renderEntryKho(){
   // triệu chứng "màn hình đơ"). Lỗi này ảnh hưởng MỌI mục con của Kho, không
   // riêng đường vào từ Sức khoẻ quán.
   body.innerHTML = '<div id="khoBody"><div class="muted">Đang tải...</div></div>';
-  if(curKhoSub==='items') renderKhoItems();
+  if(curKhoSub==='inbox') renderKhoInbox();
+  else if(curKhoSub==='items') renderKhoItems();
   else if(curKhoSub==='prep') renderKhoPrep();
   else if(curKhoSub==='toppingcogs') renderKhoToppingCogs();
   else if(curKhoSub==='packaging') renderKhoPackaging();
   else if(curKhoSub==='location') renderKhoLocation();
   else if(curKhoSub==='recipe') renderKhoRecipe();
-  else if(curKhoSub==='stockin') renderKhoStockin();
   else if(curKhoSub==='po') renderKhoPO();
   else if(curKhoSub==='bulkimport') renderKhoBulkImport();
   else if(curKhoSub==='refill') renderKhoRefill();
@@ -8807,9 +8832,62 @@ async function renderEntryKho(){
   else if(curKhoSub==='containers') renderKhoContainers();
   else if(curKhoSub==='wastereasons') renderKhoWasteReasons();
   else if(curKhoSub==='checklist') renderKhoChecklist();
+  // 'stockin' đã gộp vào màn Đặt & nhận hàng; 'prephistory'/'prepbatches' đã gộp
+  // vào tab Lịch sử kho. Giữ lại đường chuyển hướng vì link cũ (bookmark, nudge)
+  // vẫn có thể trỏ tới, và rơi vào nhánh else bên dưới thì màn đứng trắng.
+  else if(curKhoSub==='stockin') { curKhoSub='po'; renderKhoPO(); }
+  else if(curKhoSub==='prephistory') { khoHistSrc='prep'; curKhoSub='history'; renderKhoHistory(); }
+  else if(curKhoSub==='prepbatches') { khoHistSrc='batches'; curKhoSub='history'; renderKhoHistory(); }
   else if(curKhoSub==='history') renderKhoHistory();
-  else if(curKhoSub==='prephistory') renderKhoPrepHistory();
-  else if(curKhoSub==='prepbatches') renderKhoPrepBatches();
+  else renderKhoInbox();
+}
+
+// ------------------------------------------------------------
+// TAB "Cần xử lý" — màn mặc định khi vào Kho.
+//
+// Vì sao cần: trước đây vào Kho là rơi thẳng vào mục con của lần trước — đứng ở
+// "Checklist ca" từ tuần trước thì hôm nay mở ra vẫn là Checklist ca, không có
+// dấu hiệu nào cho biết đang có 2 phiếu kiểm kê chờ duyệt và 18 tem chưa dán.
+//
+// Dùng LẠI computeStoreHealth() chứ không tự đếm lần nữa: hai chỗ đếm song song
+// là hai chỗ lệch nhau. Ở đây chỉ lọc ra phần zone==='kho'.
+// ------------------------------------------------------------
+async function renderKhoInbox(){
+  const box = document.getElementById('khoBody');
+  if(!box) return;
+  showLoading(box);
+  let list = [];
+  try{ list = await computeStoreHealth(); }
+  catch(err){
+    console.error('renderKhoInbox lỗi', err);
+    box.innerHTML = '<div class="muted">Không kiểm tra được. Bấm nút tải lại ở góc trên để thử lại.</div>';
+    return;
+  }
+  const viec = list.filter(x=>x.zone==='kho');
+  const red = viec.filter(x=>x.tier==='red');
+  const yellow = viec.filter(x=>x.tier==='yellow');
+  const row = x=>`<div class="health-item ${x.tier}" onclick="${x.onclick}">
+      <div class="hi-label">${x.label}</div>
+      <div class="hi-count">${x.count} ›</div>
+    </div>`;
+  // Lối tắt tới việc hằng ngày — để màn này vẫn là điểm xuất phát ngay cả những
+  // hôm kho sạch việc, chứ không phải một trang trống rồi lại phải mở sidebar.
+  const tat = [
+    ['Đặt & nhận hàng', 'po',         'download'],
+    ['Kiểm kê',         'stockcount', 'clipboard'],
+    ['Chai & tem kho',  'containers', 'package'],
+    ['Lịch sử kho',     'history',    'clock']
+  ].map(([l,k,i])=>`<div class="health-item gray" onclick="goKho('${k}')"><div class="hi-label">${ic(i)} ${l}</div><div class="hi-count">›</div></div>`).join('');
+
+  box.innerHTML = `
+    ${(!red.length && !yellow.length)
+      ? `<div class="health-all-clear">${ic('check',20)} Kho đang ổn<div style="font-size:12px;font-weight:500;color:var(--gt);margin-top:6px;">Không có việc kho nào cần xử lý.</div></div>`
+      : ''}
+    ${red.length ? `<div class="health-group-title">${icDot('var(--bad)')} Cần xử lý ngay (${red.length})</div>${red.map(row).join('')}` : ''}
+    ${yellow.length ? `<div class="health-group-title">${icDot('var(--warn)')} Nên xem (${yellow.length})</div>${yellow.map(row).join('')}` : ''}
+    <div class="health-group-title">Việc hằng ngày</div>
+    ${tat}
+  `;
 }
 
 // ---------- Form Nguyên liệu (thêm mới / sửa), có quy cách đóng gói ----------
@@ -10881,9 +10959,9 @@ function prepAdjustStart(prepId){
   if(!p) return;
   prepAdjustId = prepId;
   prepAdjustDraft = { newQty: Number(p.currentStock)||0, reason: '' };
-  renderKhoPrepHistory();
+  renderKhoHistPrep();
 }
-function prepAdjustCancel(){ prepAdjustId=null; prepAdjustDraft=null; renderKhoPrepHistory(); }
+function prepAdjustCancel(){ prepAdjustId=null; prepAdjustDraft=null; renderKhoHistPrep(); }
 function prepAdjustField(f, v){ prepAdjustDraft[f] = f==='newQty' ? (Number(v)||0) : v; }
 // Cập nhật riêng dòng chênh lệch — KHÔNG vẽ lại cả màn, nếu không ô đang gõ sẽ mất
 // con trỏ sau mỗi ký tự.
@@ -11000,7 +11078,7 @@ async function submitPrepAdjust(){
     logAudit('update','prep_stock_adjust',p.id,{from:oldQty,to:newQty,reason});
     toast(`✅ Đã chỉnh tồn ${p.name}: ${fmtNum(oldQty,1)} → ${fmtNum(newQty,1)} ${p.unit||''}`);
     prepAdjustId=null; prepAdjustDraft=null;
-    renderKhoPrepHistory();
+    renderKhoHistPrep();
   }catch(err){
     console.error('submitPrepAdjust failed', err);
     showError('Chỉnh tồn thất bại: '+(err.code||err.message||err));
@@ -11039,15 +11117,16 @@ function groupPrepTxs(txs){
   return out.sort((a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
 }
 
-async function renderKhoPrepHistory(){
-  const box = document.getElementById('khoBody');
+async function renderKhoHistPrep(){
+  const box = document.getElementById('khoHistBody');
+  if(!box) return;
   showLoading(box);
   let preps=[], txs=[];
   try{
     await ensureAuth();
     [preps, txs] = await Promise.all([loadPrepItems(), loadPrepTransactions()]);
   }catch(err){
-    console.error('renderKhoPrepHistory failed', err);
+    console.error('renderKhoHistPrep failed', err);
     box.innerHTML = '<div class="muted">Không tải được dữ liệu chế biến.</div>';
     return;
   }
@@ -11453,8 +11532,17 @@ async function removeStorageLocation(id){
   catch(err){ console.error(err); showError('Xoá thất bại: '+(err.code||err.message||err)); }
 }
 
-async function renderKhoStockin(){
-  const box = document.getElementById('khoBody');
+// ------------------------------------------------------------
+// NHẬP KHO NHANH — không còn là tab riêng.
+//
+// Vì sao gộp: trước đây có BA đường đưa hàng vào kho (tab này, tab Đặt hàng, và
+// màn nhận hàng bên POS) nằm ba chỗ, không chỗ nào nói cái nào dùng khi nào.
+// Giờ nó là khối phụ ngay dưới màn "Đặt & nhận hàng": mở một màn là thấy cả hai
+// đường, đường chính (theo đơn) ở trên, đường chữa cháy (không theo đơn) ở dưới.
+// ------------------------------------------------------------
+function renderKhoStockin(){
+  const box = document.getElementById('stockinBox');
+  if(!box) return;
   if(INVENTORY_ITEMS.length===0){
     box.innerHTML = '<div class="muted">Chưa có nguyên liệu nào — thêm ở tab "Nguyên liệu" trước.</div>';
     return;
@@ -11639,7 +11727,11 @@ async function renderKhoPO(){
     ${draftHtml}
     <div class="sec-title" style="margin-top:14px">Đơn đặt hàng gần đây</div>
     ${listHtml}
+    <div class="sec-title" style="margin-top:18px">Nhập kho nhanh — không theo đơn</div>
+    <div class="small-note" style="margin-bottom:8px">Dùng khi mua lẻ ngoài kế hoạch, hoặc chữa lại một lần nhận hàng ghi sót. Nhận hàng bình thường thì nhân viên làm bên POS theo đơn ở trên — đi đường đó mới có đối chiếu thiếu/thừa và sinh tem.</div>
+    <div id="stockinBox"></div>
   `;
+  renderKhoStockin();
 }
 async function submitPurchaseOrder(){
   // Đọc từ state, không từ DOM — ô có thể vừa bị vẽ lại vì lý do khác.
@@ -12563,8 +12655,9 @@ async function clMove(id, dir){
 // [GĐ4] TAB "Lô chế biến" — chỉ ĐỌC. Đây là số liệu để chỉnh dailyTarget:
 // thấy tỷ lệ bỏ cao nghĩa là đang nấu thừa.
 // ------------------------------------------------------------
-async function renderKhoPrepBatches(){
-  const box = document.getElementById('khoBody');
+async function renderKhoHistBatches(){
+  const box = document.getElementById('khoHistBody');
+  if(!box) return;
   showLoading(box);
   let batches = [];
   try{ await ensureAuth(); batches = await loadPrepBatches(80); }
@@ -12831,8 +12924,37 @@ function _histRender(){
   `;
 }
 
+// ------------------------------------------------------------
+// TAB "Lịch sử kho" — một tab, ba nguồn.
+//
+// Trước đây là ba mục con riêng (Kho nguyên liệu / Chế biến / Lô chế biến) cho
+// cùng một câu hỏi "chuyện gì đã xảy ra", nên phải nhớ nguồn nào nằm ở tab nào.
+// Giờ chọn nguồn bằng chip ngay trong tab. Muốn xem lịch sử của MỘT món cụ thể
+// thì dùng nút đồng hồ trên từng dòng ở tab Nguyên liệu / Chế biến — nhanh hơn
+// nhiều so với dò trong danh sách chung này.
+// ------------------------------------------------------------
+let khoHistSrc = 'items';   // items | prep | batches
+const KHO_HIST_SRC = [
+  { k:'items',   label:'Kho nguyên liệu' },
+  { k:'prep',    label:'Bán thành phẩm'  },
+  { k:'batches', label:'Lô chế biến'     }
+];
+function khoHistSetSrc(k){ khoHistSrc = k; renderKhoHistory(); }
 async function renderKhoHistory(){
   const box = document.getElementById('khoBody');
+  if(!box) return;
+  box.innerHTML = `
+    <div class="filter-bar">${KHO_HIST_SRC.map(x=>
+      `<button class="ftag ${khoHistSrc===x.k?'active':''}" onclick="khoHistSetSrc('${x.k}')">${x.label}</button>`).join('')}</div>
+    <div id="khoHistBody"><div class="muted">Đang tải...</div></div>`;
+  if(khoHistSrc==='prep') return renderKhoHistPrep();
+  if(khoHistSrc==='batches') return renderKhoHistBatches();
+  return renderKhoHistItems();
+}
+
+async function renderKhoHistItems(){
+  const box = document.getElementById('khoHistBody');
+  if(!box) return;
   showLoading(box);
   let txs = [], counts = [], receivings = [], locations = [];
   try{
