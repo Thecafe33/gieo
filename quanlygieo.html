@@ -2115,7 +2115,7 @@ async function runDataIntegrityCheck(){
     });
   });
   items.forEach(it=>{
-    if(Number(it.currentStock) < 0) issues.push({type:'Tồn kho âm', detail:`${it.name}: currentStock = ${it.currentStock}`});
+    if(itemStockManaged(it) && Number(it.currentStock) < 0) issues.push({type:'Tồn kho âm', detail:`${it.name}: currentStock = ${it.currentStock}`});
     Object.entries(it.locationStock||{}).forEach(([locId, qty])=>{
       if(Number(qty) < 0) issues.push({type:'Tồn kho âm theo vị trí', detail:`${it.name} tại vị trí ${locIds.has(locId) ? (locations.find(l=>l.id===locId)||{}).name : '(đã xoá)'}: ${qty}`});
     });
@@ -2884,8 +2884,76 @@ function addInventoryItem(data){
     // hay không, dùng để áp "Ngưỡng cảnh báo lệch (%) — Bao bì" riêng lúc duyệt
     // kiểm kê thay vì ngưỡng chung (xem renderKhoStockCount()).
     isPackagingMaterial: !!data.isPackagingMaterial,
+    // ---- Theo dõi & kiểm kê theo ĐƠN VỊ (chai/hộp/bao) — xem itemTrackingMode() ----
+    trackingMode: data.trackingMode || 'none',
+    countUnitName: data.countUnitName || '',
+    stockManaged: data.stockManaged !== false,
+    openShelfLifeHours: Number(data.openShelfLifeHours) || 0,
     updatedAt: new Date().toISOString()
   });
+}
+
+// ============================================================
+// [NEW] MỨC THEO DÕI NGUYÊN LIỆU — nền cho việc kiểm kê theo CHAI thay vì theo ml
+// ------------------------------------------------------------
+// Vấn đề gốc: hệ thống trừ kho theo ml (đúng, vì định mức là ml) nhưng con người chỉ
+// đếm được theo chai. Bắt nhân viên ước lượng "2.660ml" là bắt họ đoán, mà số đoán đó
+// vào sổ thì còn tệ hơn không kiểm kê.
+//
+// Ba mức, KHÔNG phải hai — vì thực tế có ba loại hàng khác hẳn nhau:
+//   'unit'  — dán tem từng đơn vị: syrup, trà, sữa. Mỗi chai một mã, biết chai nào đang
+//             mở, ai mở, mở khi nào, hạn tới bao giờ.
+//   'batch' — dán tem theo LÔ NHẬP: bánh flan 100 hũ, trân châu. Không thể dán 100 tem,
+//             và hũ còn phải tái sử dụng nên không dán được. Nhưng vẫn cần biết lô nhập
+//             ngày nào, hạn bao giờ → 1 tem cho cả lô, dán lên thùng.
+//   'none'  — không truy vết: ly, ống hút, nắp. Giá trị một cái quá nhỏ so với giá một
+//             con tem; chỉ đếm số lượng như hiện nay.
+//
+// MẶC ĐỊNH LÀ 'none' (ngược với staffCounts vốn mặc định true). Nếu mặc định bật thì
+// toàn bộ nguyên liệu cũ — kể cả 10.000 cái ly — đột nhiên đòi tem ngay ngày đầu.
+//
+// stockManaged là chuyện KHÁC HẲN: nước lọc từ máy chảy ra không có sự kiện nhập, không
+// đếm được, nên nếu vẫn trừ kho theo định mức thì tồn âm vô hạn và cảnh báo thành rác.
+// Đây không phải "không dán tem" mà là "không quản kho".
+// ============================================================
+const TRACKING_MODES = {
+  none:  { label:'Không truy vết', short:'—',       desc:'Chỉ đếm số lượng. Dùng cho ly, ống hút, nắp — thứ mà giá một con tem gần bằng giá món hàng.' },
+  batch: { label:'Theo lô nhập',   short:'Lô',      desc:'Một mã cho cả lần nhập, dán lên thùng/khay. Dùng cho bánh flan, trân châu — không dán nổi từng hũ nhưng vẫn cần biết lô nào, hạn bao giờ.' },
+  unit:  { label:'Từng đơn vị',    short:'Từng cái',desc:'Mỗi chai/hộp một mã riêng. Biết chai nào đang mở, ai mở, hạn tới bao giờ, và chai nào biến mất giữa chừng.' }
+};
+function itemTrackingMode(it){
+  const m = it && it.trackingMode;
+  return TRACKING_MODES[m] ? m : 'none';
+}
+function itemStockManaged(it){ return !it || it.stockManaged !== false; }
+
+// Quy cách dùng làm ĐƠN VỊ KIỂM KÊ (nhân viên đếm theo cái này), kèm hệ số quy đổi ra
+// đơn vị pha chế. Chưa chọn hoặc quy cách đã bị xoá thì rơi về đơn vị pha chế — luôn
+// tồn tại nên không bao giờ trả về null.
+function itemCountUnit(it){
+  const base = { name: (it && it.unit) || '', baseQty: 1, isBase: true };
+  if(!it || !it.countUnitName) return base;
+  const p = (it.packagingUnits||[]).find(x=>x.name === it.countUnitName);
+  if(!p || !(Number(p.baseQty) > 0)) return base;
+  return { name: p.name, baseQty: Number(p.baseQty), isBase: false };
+}
+
+// Gợi ý mức theo dõi theo GIÁ TRỊ một đơn vị kiểm kê. Tem nhiệt ~30–60đ/cái, nên dán tem
+// cho món 500đ/cái là vô lý, còn chai syrup 250.000đ thì con tem không đáng kể.
+// Chỉ GỢI Ý — quyết định vẫn là của chủ quán, vì còn yếu tố hạn dùng và khả năng dán.
+const TAG_WORTH_THRESHOLD = 20000;
+// Một chỗ duy nhất định nghĩa quy tắc gợi ý. Cả helper lẫn form đều gọi vào đây, để
+// không có chuyện sửa ngưỡng một bên mà bên kia vẫn gợi ý theo số cũ.
+function suggestModeByValue(giaTriDonVi, isPackaging){
+  if(isPackaging) return 'none';
+  if(giaTriDonVi >= TAG_WORTH_THRESHOLD) return 'unit';
+  if(giaTriDonVi >= TAG_WORTH_THRESHOLD/4) return 'batch';
+  return 'none';
+}
+function suggestTrackingMode(it){
+  if(!itemStockManaged(it)) return 'none';
+  const cu = itemCountUnit(it);
+  return suggestModeByValue((Number(it && it.costPerUnit)||0) * cu.baseQty, !!(it && it.isPackagingMaterial));
 }
 // Bật/tắt nhanh việc nhân viên phải kiểm kê 1 món (dùng ở bảng cấu hình kiểm kê).
 function setItemStaffCounts(id, val){
@@ -5043,7 +5111,7 @@ async function computeStoreHealth(){
     const neg = items.filter(it=>Number(it.currentStock)<0);
     if(neg.length) push('red', 'Nguyên liệu có tồn kho ÂM', neg.length, `goKho('items','negative')`);
     // 🟡 dưới ngưỡng cảnh báo — nên xem, chưa phải cháy nhà
-    const low = items.filter(it=>Number(it.minStock)>0 && Number(it.currentStock)<Number(it.minStock) && Number(it.currentStock)>=0);
+    const low = items.filter(it=>itemStockManaged(it) && Number(it.minStock)>0 && Number(it.currentStock)<Number(it.minStock) && Number(it.currentStock)>=0);
     if(low.length) push('yellow', 'Nguyên liệu dưới ngưỡng cảnh báo', low.length, `goKho('items','low')`);
   } else { console.warn('storeHealth: nguyên liệu lỗi', itemsRes.reason); push('red','Tồn kho — không kiểm tra được','!',`goKho('items')`,true); }
 
@@ -5259,7 +5327,7 @@ async function renderToday(){
   // [GĐ6] hdrSub đã bỏ — tiêu đề topbar giờ hiển thị TÊN MÀN đang mở (setScreenTitle),
   // ngày tháng vẫn có ở từng màn nên không cần lặp lại trên thanh tiêu đề.
 
-  const lowStockItems = invItems.filter(it=> Number(it.minStock)>0 && Number(it.currentStock) < Number(it.minStock));
+  const lowStockItems = invItems.filter(it=> itemStockManaged(it) && Number(it.minStock)>0 && Number(it.currentStock) < Number(it.minStock));
   const nudge = document.getElementById('todayNudge');
   let nudgeHtml = '';
   if(lowStockItems.length) nudgeHtml += `<div class="nudge"><span>${ic('package')} ${lowStockItems.length} nguyên liệu sắp hết: ${lowStockItems.map(i=>i.name).join(', ')}.</span><button onclick="goKho('items','low')">Xem kho</button></div>`;
@@ -8700,7 +8768,7 @@ function itemPkgAddRow(){
   const el = document.getElementById('pkgName'+(itemFormDraft.packagingUnits.length-1));
   if(el) el.focus();
 }
-function itemPkgRemoveRow(idx){ itemFormDraft.packagingUnits.splice(idx,1); renderItemPkgBox(); syncItemUnitSelects(); }
+function itemPkgRemoveRow(idx){ itemFormDraft.packagingUnits.splice(idx,1); renderItemPkgBox(); syncItemUnitSelects(); renderTrackingBox(); }
 
 // [SỬA LỖI] Trước đây hàm này gọi renderItemPkgBox() mỗi khi đổi TÊN quy cách,
 // mà sự kiện lại là `onchange` (kích hoạt lúc rời ô). Hậu quả: gõ xong tên rồi
@@ -8724,6 +8792,7 @@ function itemPkgRowChange(idx, field, val){
   }
   refreshPkgConversionLabels();
   syncItemUnitSelects(); // quy cách đổi -> dropdown đơn vị của 3 ô số phải đổi theo ngay
+  renderTrackingBox();   // ...và danh sách "nhân viên đếm theo" cũng vậy
 }
 // Cập nhật lại danh sách đơn vị tham chiếu trong từng <select> mà không đụng tới
 // các ô input (giữ nguyên focus và vị trí con trỏ của ô người dùng đang gõ).
@@ -8925,19 +8994,101 @@ function renderInventoryItemFormFields(editingItem){
       <div class="small-note">Tắt đi thì món này biến mất khỏi màn Kiểm kê bên POS — nhân viên khỏi đếm những thứ ít giá trị hoặc khó đếm. Tồn kho <b>vẫn tự trừ theo định mức mỗi khi bán</b>, chỉ là không còn ai đối chiếu với thực tế, nên sai lệch tích luỹ sẽ không được phát hiện. Bạn vẫn tự chỉnh số qua "Nhập kho" khi cần.</div>
 
       <label style="display:flex;align-items:flex-start;gap:9px;margin:14px 0 4px;font-size:13px;cursor:pointer">
-        <input type="checkbox" id="invIsPackaging" ${(editingItem && editingItem.isPackagingMaterial) ? 'checked' : ''} style="width:20px;height:20px;flex-shrink:0;margin-top:1px">
+        <input type="checkbox" id="invIsPackaging" ${(editingItem && editingItem.isPackagingMaterial) ? 'checked' : ''} onchange="renderTrackingBox()" style="width:20px;height:20px;flex-shrink:0;margin-top:1px">
         <b>Đây là vật tư bao bì (túi, ống hút, muỗng, khay...)</b>
       </label>
       <div class="small-note">Khi BẬT: lúc duyệt kiểm kê, món này dùng "Ngưỡng cảnh báo lệch (%) — Bao bì" riêng (thường để CAO hơn nguyên liệu pha chế, vì bao bì hay lệch do khách yêu cầu khác thường) thay vì ngưỡng chung — xem cấu hình ở tab Kiểm kê.</div>
+
+      <div class="sec-title">Theo dõi &amp; kiểm kê</div>
+
+      <label style="display:flex;align-items:flex-start;gap:9px;margin:0 0 4px;font-size:13px;cursor:pointer">
+        <input type="checkbox" id="invStockManaged" ${(editingItem && editingItem.stockManaged === false) ? '' : 'checked'} onchange="renderTrackingBox()" style="width:20px;height:20px;flex-shrink:0;margin-top:1px">
+        <b>Có quản lý tồn kho</b>
+      </label>
+      <div class="small-note">Tắt cho những thứ <b>không có sự kiện nhập và không đếm được</b> — nước lọc từ máy, đá tự làm. Để bật cho những thứ đó thì tồn sẽ bị trừ theo định mức mỗi ly bán ra mà không bao giờ được cộng lại, tụt xuống âm vô hạn và mọi cảnh báo kho thành rác. Tắt rồi thì món này biến khỏi kiểm kê và khỏi mọi cảnh báo tồn.</div>
+
+      <div id="invTrackingBox"></div>
   `;
+}
+
+// ---------- Khối "Theo dõi & kiểm kê" — vẽ riêng vì phụ thuộc 3 ô khác trên form ----------
+// (có quản kho hay không, quy cách nào đang khai, có phải vật tư bao bì hay không)
+function renderTrackingBox(){
+  const box = document.getElementById('invTrackingBox');
+  if(!box) return;
+  const editingItem = editingItemId ? INVENTORY_ITEMS.find(x=>x.id===editingItemId) : null;
+  const managed = document.getElementById('invStockManaged')?.checked !== false;
+  if(!managed){
+    box.innerHTML = '<div class="empty-hint" style="margin-top:10px">Không quản lý tồn kho — không kiểm kê, không dán tem, không cảnh báo tồn.</div>';
+    return;
+  }
+  const isPkg = !!document.getElementById('invIsPackaging')?.checked;
+  const rows = (itemFormDraft.packagingUnits||[]).filter(r=>r.name && r.name.trim() && Number(r.refQty)>0);
+  const baseUnit = currentBaseUnit();
+  // Ưu tiên giá trị ĐANG chọn trên form; chỉ khi khối chưa từng vẽ mới lấy từ bản ghi.
+  // Không có bước này thì mỗi lần vẽ lại (đổi quy cách, tick bao bì...) lựa chọn dở dang
+  // bị nuốt mất, người dùng chọn xong quay lại thấy như chưa chọn gì.
+  const prevMode = document.getElementById('invTrackingMode')?.value;
+  let cur = TRACKING_MODES[prevMode] ? prevMode : (editingItem ? itemTrackingMode(editingItem) : 'none');
+  // Tick "vật tư bao bì" trong khi đang chọn "Từng đơn vị" → hạ xuống "Theo lô" NGAY trên
+  // màn hình, khớp với chốt an toàn lúc lưu. Không có dòng này thì nút vừa mờ vừa sáng và
+  // người dùng tưởng mình vẫn đang chọn "Từng đơn vị" cho tới lúc lưu xong mới biết khác.
+  if(isPkg && cur === 'unit') cur = 'batch';
+  const prevCountUnit = document.getElementById('invCountUnit')?.value;
+  const curCountUnit = prevCountUnit != null ? prevCountUnit : ((editingItem && editingItem.countUnitName) || '');
+  const prevShelf = document.getElementById('invOpenShelfLife')?.value;
+
+  // Giá trị một đơn vị kiểm kê — cơ sở để gợi ý có đáng dán tem không.
+  const chosen = rows.find(r=>r.name===curCountUnit);
+  const heSo = chosen ? pkgRowBaseQty(rows, rows.indexOf(chosen)) : 1;
+  const donGia = Number(document.getElementById('invCost')?.value)||0;
+  const heSoGia = Number(document.getElementById('invCostUnit')?.value)||1;
+  const giaMoiDonVi = heSoGia>0 ? (donGia/heSoGia)*heSo : 0;
+  const goiY = suggestModeByValue(giaMoiDonVi, isPkg);
+
+  box.innerHTML = `
+      <div class="field" style="margin-top:14px"><label for="invCountUnit">Nhân viên đếm theo</label>
+        <select id="invCountUnit" onchange="renderTrackingBox()">
+          <option value="" ${!curCountUnit?'selected':''}>${escapeHtmlAttr(baseUnit)} (đơn vị pha chế)</option>
+          ${rows.map(r=>`<option value="${escapeHtmlAttr(r.name)}" ${r.name===curCountUnit?'selected':''}>${escapeHtmlAttr(r.name)}</option>`).join('')}
+        </select>
+        <div class="hint">${chosen
+          ? `Lúc kiểm kê nhân viên đếm "còn mấy ${escapeHtmlAttr(chosen.name)}". 1 ${escapeHtmlAttr(chosen.name)} = ${fmtNum(heSo,2)} ${escapeHtmlAttr(baseUnit)}${giaMoiDonVi>0?` · trị giá ~${fmt(giaMoiDonVi)}`:''}.`
+          : `Đang đếm theo ${escapeHtmlAttr(baseUnit)} — chỉ hợp lý nếu món này thật sự đong đếm được bằng ${escapeHtmlAttr(baseUnit)}. Khai quy cách ở trên rồi chọn lại để nhân viên đếm theo chai/hộp.`}</div>
+      </div>
+
+      <div class="field"><label>Mức theo dõi</label>
+        <div class="seg" style="margin-bottom:8px">
+          ${Object.entries(TRACKING_MODES).map(([k,m])=>{
+            const chan = isPkg && k==='unit';
+            return `<button type="button" data-tm="${k}" class="${cur===k?'active':''}" ${chan?'disabled style="opacity:.4"':''}
+              onclick="${chan?'':`setTrackingMode('${k}')`}">${m.label}</button>`;
+          }).join('')}
+        </div>
+        <input type="hidden" id="invTrackingMode" value="${cur}">
+        <div class="hint">${TRACKING_MODES[cur].desc}</div>
+        ${isPkg ? `<div class="small-note" style="color:var(--warn)">Đã tick "vật tư bao bì" nên không chọn được mức "Từng đơn vị" — không ai dán tem cho 10.000 cái ly.</div>` : ''}
+        ${(!isPkg && goiY!==cur) ? `<div class="small-note" style="color:var(--gm)">Gợi ý: <b>${TRACKING_MODES[goiY].label}</b>${giaMoiDonVi>0?` — một ${escapeHtmlAttr(chosen?chosen.name:baseUnit)} trị giá ~${fmt(giaMoiDonVi)}, so với ~50đ một con tem`:''}. Đây chỉ là gợi ý theo giá trị; bạn còn phải cân xem có dán được lên bao bì đó không.</div>` : ''}
+      </div>
+
+      ${cur!=='none' ? `
+      <div class="field" style="margin-bottom:0"><label for="invOpenShelfLife">Hạn dùng sau khi mở (giờ)</label>
+        <input type="number" id="invOpenShelfLife" inputmode="numeric" step="1" min="0" value="${prevShelf != null ? escapeHtmlAttr(prevShelf) : (editingItem ? (Number(editingItem.openShelfLifeHours)||0) : 0)}">
+        <div class="hint">In lên tem và dùng để cảnh báo "còn hàng đã mở quá hạn". Để <b>0</b> nếu món này không có hạn sau khi mở. VD sữa tươi 72, syrup 720 (30 ngày).</div>
+      </div>` : ''}`;
+}
+function setTrackingMode(m){
+  const el = document.getElementById('invTrackingMode');
+  if(el) el.value = m;
+  renderTrackingBox();
 }
 
 function renderKhoItems(){
   const box = document.getElementById('khoBody');
   const editingItem = editingItemId ? INVENTORY_ITEMS.find(x=>x.id===editingItemId) : null;
   // [FIX] Lọc theo khoItemsFilter khi được mở từ link "Sức khoẻ quán"/nudge.
-  const isLow = it => Number(it.minStock)>0 && Number(it.currentStock) < Number(it.minStock) && Number(it.currentStock)>=0;
-  const isNeg = it => Number(it.currentStock) < 0;
+  const isLow = it => itemStockManaged(it) && Number(it.minStock)>0 && Number(it.currentStock) < Number(it.minStock) && Number(it.currentStock)>=0;
+  const isNeg = it => itemStockManaged(it) && Number(it.currentStock) < 0;
   const shown = khoItemsFilter==='low' ? INVENTORY_ITEMS.filter(isLow)
               : khoItemsFilter==='negative' ? INVENTORY_ITEMS.filter(isNeg)
               : INVENTORY_ITEMS;
@@ -8957,10 +9108,20 @@ function renderKhoItems(){
       const neg = isNeg(it), low = isLow(it);
       const pkgSummary = (it.packagingUnits&&it.packagingUnits.length) ? ' · ' + it.packagingUnits.map(p=>`1 ${p.name}=${fmtNum(p.baseQty,0)}${it.unit}`).join(', ') : '';
       const noCount = it.staffCounts === false;
+      // Nhãn mức theo dõi — nhìn danh sách là biết món nào đang dán tem, món nào không,
+      // không phải mở từng món ra xem.
+      const managed = itemStockManaged(it);
+      const tm = itemTrackingMode(it);
+      const cu = itemCountUnit(it);
+      const tmTag = !managed ? '<span class="tier tier-blue" style="margin-left:4px">Không quản kho</span>'
+                  : tm==='unit'  ? '<span class="tier tier-green" style="margin-left:4px">Tem từng ' + escapeHtmlAttr(cu.name) + '</span>'
+                  : tm==='batch' ? '<span class="tier tier-amber" style="margin-left:4px">Tem theo lô</span>' : '';
+      const countLine = managed && !cu.isBase
+        ? ` · đếm theo ${escapeHtmlAttr(cu.name)} (1=${fmtNum(cu.baseQty,0)}${escapeHtmlAttr(it.unit||'')})` : '';
       return `<div class="litem">
-        <div class="li-l"><div>${it.name} ${neg?'<span class="tier tier-red" style="margin-left:4px">Tồn ÂM</span>':(low?'<span class="tier tier-amber" style="margin-left:4px">Sắp hết</span>':'')}${noCount?'<span class="tier tier-blue" style="margin-left:4px">NV không kiểm kê</span>':''}</div>
-        <div>Ngưỡng ${fmtNum(it.minStock,0)} ${it.unit}${it.costPerUnit?(' · ~'+fmt(it.costPerUnit)+'/'+it.unit):''}${pkgSummary}</div></div>
-        <div class="li-r"><span style="${neg?'color:var(--bad);font-weight:800':''}">${fmtNum(it.currentStock,1)} ${it.unit}</span>
+        <div class="li-l"><div>${it.name} ${neg?'<span class="tier tier-red" style="margin-left:4px">Tồn ÂM</span>':(low?'<span class="tier tier-amber" style="margin-left:4px">Sắp hết</span>':'')}${noCount?'<span class="tier tier-blue" style="margin-left:4px">NV không kiểm kê</span>':''}${tmTag}</div>
+        <div>Ngưỡng ${fmtNum(it.minStock,0)} ${it.unit}${it.costPerUnit?(' · ~'+fmt(it.costPerUnit)+'/'+it.unit):''}${pkgSummary}${countLine}</div></div>
+        <div class="li-r"><span style="${neg?'color:var(--bad);font-weight:800':(managed?'':'color:var(--ink-4)')}">${managed ? fmtNum(it.currentStock,1)+' '+escapeHtmlAttr(it.unit||'') : '—'}</span>
           <button class="btn ${neg?'':'outline'} sm" style="width:auto;padding:0 10px;margin-left:6px" onclick="startAdjustItem('${it.id}')">Sửa tồn</button>
           <button class="iconbtn" onclick="startEditItem('${it.id}')" title="Sửa thông tin nguyên liệu">${ic('pencil')}</button>
           <button class="iconbtn" onclick="removeInventoryItem('${it.id}')">${ic('x')}</button>
@@ -8996,6 +9157,7 @@ function renderKhoItems(){
   }
   renderItemPkgBox();       // điền vào #itemPkgBox — chỉ 1 bản tồn tại trong DOM lúc này (add HOẶC sửa)
   syncItemUnitSelects();    // nạp dropdown đơn vị cho các ô số (phụ thuộc quy cách vừa render)
+  renderTrackingBox();      // khối "Theo dõi & kiểm kê" — phụ thuộc quy cách + 2 ô tick ở trên
 }
 // [NEW — mục 1] Tính lại costPerUnit cho MỌI bán thành phẩm đang dùng nguyên
 // liệu vừa đổi giá. Trước đây giá CB chỉ tính lại khi mở form CB rồi bấm Lưu —
@@ -9045,18 +9207,29 @@ async function submitInventoryItem(){
   // không vô tình loại món khỏi kiểm kê chỉ vì lỗi hiển thị.
   const staffCounts = document.getElementById('invStaffCounts')?.checked !== false;
   const isPackagingMaterial = !!document.getElementById('invIsPackaging')?.checked;
+  // ---- Theo dõi & kiểm kê ----
+  const stockManaged = document.getElementById('invStockManaged')?.checked !== false;
+  const countUnitName = stockManaged ? (document.getElementById('invCountUnit')?.value || '') : '';
+  let trackingMode = stockManaged ? (document.getElementById('invTrackingMode')?.value || 'none') : 'none';
+  // Hai chốt an toàn, phòng khi ô tick bị đổi SAU lúc chọn mức: vật tư bao bì không bao giờ
+  // dán tem từng cái, và món không quản kho thì không có gì để dán tem cả.
+  if(isPackagingMaterial && trackingMode === 'unit') trackingMode = 'batch';
+  if(!TRACKING_MODES[trackingMode]) trackingMode = 'none';
+  const openShelfLifeHours = trackingMode === 'none' ? 0 : (Number(document.getElementById('invOpenShelfLife')?.value) || 0);
   let savedItemId = null; // id nguyên liệu vừa lưu — để lan giá sang bán thành phẩm
   try{
     if(editingItemId){
       savedItemId = editingItemId;
-      await updateInventoryItemMeta(editingItemId, { name, minStock, costPerUnit, packagingUnits, staffCounts, isPackagingMaterial });
+      await updateInventoryItemMeta(editingItemId, { name, minStock, costPerUnit, packagingUnits, staffCounts, isPackagingMaterial,
+        trackingMode, countUnitName, stockManaged, openShelfLifeHours });
       toast('✅ Đã lưu thay đổi');
     } else {
       // Nguyên liệu MỚI thì chưa CB nào dùng được nó, không cần lan giá.
       await addInventoryItem({
         name, unit: document.getElementById('invUnit').value,
         currentStock: v('invStart') * f('invStartUnit'),
-        minStock, costPerUnit, packagingUnits, staffCounts, isPackagingMaterial
+        minStock, costPerUnit, packagingUnits, staffCounts, isPackagingMaterial,
+        trackingMode, countUnitName, stockManaged, openShelfLifeHours
       });
       toast('✅ Đã thêm nguyên liệu');
     }
@@ -11762,7 +11935,9 @@ let staffCountCfgOpen = false;
 function toggleStaffCountCfg(){ staffCountCfgOpen = !staffCountCfgOpen; renderKhoStockCount(); }
 
 function renderStaffCountConfigBox(){
-  const items = INVENTORY_ITEMS || [];
+  // Món không quản kho (nước lọc, đá tự làm) không có gì để đếm — loại khỏi danh sách
+  // cấu hình luôn, để chủ quán không phải tự nhớ mà bỏ tick từng món.
+  const items = (INVENTORY_ITEMS || []).filter(itemStockManaged);
   const on  = items.filter(it => it.staffCounts !== false);
   const off = items.filter(it => it.staffCounts === false);
   const row = (it)=>`
