@@ -629,6 +629,7 @@ input[type=checkbox],input[type=radio]{accent-color:var(--gd);width:20px;height:
 .iconbtn:has([data-ic="pencil"]){background:var(--bb);color:var(--bi);}
 .iconbtn:has([data-ic="check"]){background:var(--ok-bg);color:var(--ok);}
 .iconbtn:has([data-ic="pause"]),.iconbtn:has([data-ic="play"]){background:var(--warn-bg);color:var(--warn);}
+.iconbtn:has([data-ic="clock"]){background:var(--fill);color:var(--ink-2);}
 .iconbtn:has([data-ic="dots"]),
 .iconbtn:has([data-ic="chevronUp"]),.iconbtn:has([data-ic="chevronDown"]),
 .iconbtn:has([data-ic="arrowUp"]),.iconbtn:has([data-ic="arrowDown"]){background:var(--fill);color:var(--ink-2);}
@@ -9274,6 +9275,7 @@ function renderKhoItems(){
         <div>Ngưỡng ${fmtNum(it.minStock,0)} ${it.unit}${it.costPerUnit?(' · ~'+fmt(it.costPerUnit)+'/'+it.unit):''}${pkgSummary}${countLine}</div></div>
         <div class="li-r"><span style="${neg?'color:var(--bad);font-weight:800':(managed?'':'color:var(--ink-4)')}">${managed ? fmtNum(it.currentStock,1)+' '+escapeHtmlAttr(it.unit||'') : '—'}</span>
           <button class="btn ${neg?'':'outline'} sm" style="width:auto;padding:0 10px;margin-left:6px" onclick="startAdjustItem('${it.id}')">Sửa tồn</button>
+          <button class="iconbtn" onclick="openItemHistory('${it.id}')" title="Lịch sử biến động tồn kho">${ic('clock')}</button>
           <button class="iconbtn" onclick="startEditItem('${it.id}')" title="Sửa thông tin nguyên liệu">${ic('pencil')}</button>
           <button class="iconbtn" onclick="removeInventoryItem('${it.id}')">${ic('x')}</button>
         </div>
@@ -9632,6 +9634,7 @@ async function renderKhoPrep(){
           <div>${prepShelfLabel(p)}${Number(p.prepTimeMinutes)>0 ? ' · Nấu ~'+p.prepTimeMinutes+' phút' : ''}${Number(p.dailyTarget)>0 ? ' · Cần/ngày '+fmtNum(p.dailyTarget,0)+' '+escapeHtmlAttr(p.unit||'') : ''}</div>
         </div>
         <div class="li-r">
+          <button class="iconbtn" onclick="openPrepHistory('${p.id}')" title="Lịch sử biến động tồn">${ic('clock')}</button>
           <button class="iconbtn" onclick="prepStartEdit('${p.id}')">${ic('pencil')}</button>
           <button class="iconbtn" onclick="doDeletePrepItem('${p.id}')">${ic('x')}</button>
         </div>
@@ -12619,6 +12622,213 @@ function qlFmtDT(iso){
   if(!iso) return '—';
   const d = new Date(iso); const p2 = n=>String(n).padStart(2,'0');
   return `${p2(d.getDate())}/${p2(d.getMonth()+1)} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
+}
+
+// ============================================================
+// [NEW] LỊCH SỬ MỘT NGUYÊN LIỆU / BÁN THÀNH PHẨM
+//
+// Vì sao cần: tab "Lịch sử kho" đang trộn 50 giao dịch GẦN NHẤT CỦA TẤT CẢ nguyên
+// liệu vào một danh sách. Muốn biết riêng "chai syrup đào tháng này đi đâu hết" thì
+// không có đường nào — quán bán vài trăm ly một ngày là mọi thứ trôi mất trong vài
+// phút. Đây là màn xem MỘT món, mới nhất trước, kèm số tồn còn lại sau mỗi lần đổi.
+//
+// Bán ra được GỘP THEO NGÀY (giống groupPrepTxs bên bán thành phẩm): mỗi ly bán ra
+// là một giao dịch, không gộp thì các sự kiện đáng soi — nhập kho, hao hụt, Quản lý
+// chỉnh tồn — bị đẩy khỏi tầm nhìn ngay lập tức.
+//
+// VỀ CHỈ MỤC FIRESTORE: lọc theo itemId + sắp xếp theo createdAt cần composite index.
+// Nếu dự án chưa tạo, KHÔNG chết màn hình: lui về đọc 1.500 giao dịch gần nhất của
+// mọi nguyên liệu rồi lọc trong máy, và nói rõ đang xem bản rút gọn + đưa link tạo
+// chỉ mục Firestore trả về trong chính thông báo lỗi.
+// ============================================================
+let _histCtx = null;  // { kind:'item'|'prep', id, name, unit, rows, filter, partial, indexUrl }
+
+const HIST_GROUPS = [
+  { key:'all',    label:'Tất cả'      },
+  { key:'in',     label:'Vào kho'     },
+  { key:'out',    label:'Ra kho'      },
+  { key:'waste',  label:'Hao hụt'     },
+  { key:'adjust', label:'Điều chỉnh'  }
+];
+// Xếp mọi loại giao dịch (kể cả type cũ chữ thường) vào 4 nhóm để lọc cho gọn.
+function _histGroupOf(t){
+  const ty = String(t.type||'').toUpperCase();
+  if(ty==='WASTE') return 'waste';
+  if(ty==='ADJUSTMENT') return 'adjust';
+  if(ty==='RECEIVING' || ty==='PRODUCTION' || ty==='STOCK_IN') return 'in';
+  if(ty==='CONSUMPTION' || ty==='SALE') return 'out';
+  // TRANSFER/LOC_SET và các loại lạ: xếp theo dấu của số lượng.
+  return (Number(t.qty)||0) >= 0 ? 'in' : 'out';
+}
+function _histIsMissingIndex(err){
+  const m = String((err && (err.code||err.message)) || '');
+  return /failed-precondition|requires an index|index/i.test(m);
+}
+function _histIndexUrl(err){
+  const m = String((err && err.message) || '').match(/https:\/\/\S+/);
+  return m ? m[0].replace(/[).,]+$/,'') : '';
+}
+
+async function _histLoad(coll, field, id){
+  try{
+    const snap = await fstore.collection(coll).where(field,'==',id)
+      .orderBy('createdAt','desc').limit(400).get();
+    return { rows: snap.docs.map(d=>({id:d.id, ...d.data()})), partial:false, indexUrl:'' };
+  }catch(err){
+    if(!_histIsMissingIndex(err)) throw err;
+    console.warn('[lịch sử] chưa có composite index, lui về quét gần đúng', err);
+    const snap = await fstore.collection(coll).orderBy('createdAt','desc').limit(1500).get();
+    return {
+      rows: snap.docs.map(d=>({id:d.id, ...d.data()})).filter(t=>t[field]===id),
+      partial:true, indexUrl:_histIndexUrl(err)
+    };
+  }
+}
+
+async function openItemHistory(itemId){
+  const it = INVENTORY_ITEMS.find(x=>x.id===itemId);
+  if(!it){ toast('⚠️ Không tìm thấy nguyên liệu'); return; }
+  _histCtx = { kind:'item', id:itemId, name:it.name||'', unit:it.unit||'',
+               stock:Number(it.currentStock)||0, rows:[], filter:'all', partial:false, indexUrl:'' };
+  openEditSheet('Lịch sử — ' + (it.name||''), '<div id="histBody"></div>', ()=>{ _histCtx=null; });
+  _histRenderLoading();
+  try{
+    const r = await _histLoad('stock_transactions_gieogieo','itemId',itemId);
+    Object.assign(_histCtx, r);
+  }catch(err){
+    console.error('openItemHistory failed', err);
+    _histRenderError(err); return;
+  }
+  _histRender();
+}
+
+async function openPrepHistory(prepId){
+  const p = PREP_ITEMS.find(x=>x.id===prepId);
+  if(!p){ toast('⚠️ Không tìm thấy bán thành phẩm'); return; }
+  _histCtx = { kind:'prep', id:prepId, name:p.name||'', unit:p.unit||'',
+               stock:Number(p.currentStock)||0, rows:[], filter:'all', partial:false, indexUrl:'' };
+  openEditSheet('Lịch sử — ' + (p.name||''), '<div id="histBody"></div>', ()=>{ _histCtx=null; });
+  _histRenderLoading();
+  try{
+    const r = await _histLoad('prep_transactions_gieogieo','prepId',prepId);
+    Object.assign(_histCtx, r);
+  }catch(err){
+    console.error('openPrepHistory failed', err);
+    _histRenderError(err); return;
+  }
+  _histRender();
+}
+
+function _histRenderLoading(){
+  const box = document.getElementById('histBody');
+  if(box) showLoading(box);
+}
+function _histRenderError(err){
+  const box = document.getElementById('histBody');
+  if(box) box.innerHTML = '<div class="muted">Không đọc được lịch sử: '+escapeHtmlAttr(String(err.code||err.message||err))+'</div>';
+}
+function histSetFilter(f){ if(_histCtx){ _histCtx.filter = f; _histRender(); } }
+
+// Gộp các lượt BÁN RA cùng ngày thành một dòng. Chỉ gộp bán ra thường: hao hụt,
+// điều chỉnh, nhập kho — mỗi dòng là một sự kiện riêng cần truy được, không gộp.
+function _histCollapseSales(rows){
+  const out = [], g = {};
+  rows.forEach(t=>{
+    const ty = String(t.type||'').toUpperCase();
+    const isSale = (ty==='CONSUMPTION' || ty==='SALE') && !t.reversal;
+    if(!isSale){ out.push(t); return; }
+    const day = t.businessDate || String(t.createdAt||'').slice(0,10);
+    const key = 'sale|'+day;
+    if(!g[key]){ g[key] = { ...t, _grouped:true, _count:0, qty:0, resultingStock:null }; out.push(g[key]); }
+    g[key]._count += 1;
+    g[key].qty = (Number(g[key].qty)||0) + (Number(t.qty)||0);
+    if(String(t.createdAt||'') > String(g[key].createdAt||'')) g[key].createdAt = t.createdAt;
+  });
+  return out.sort((a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
+}
+
+function _histRender(){
+  const box = document.getElementById('histBody');
+  if(!box || !_histCtx) return;
+  const c = _histCtx, unit = escapeHtmlAttr(c.unit||'');
+  const all = _histCollapseSales(c.rows);
+  const rows = c.filter==='all' ? all : all.filter(t=>_histGroupOf(t)===c.filter);
+
+  const chips = HIST_GROUPS.map(g=>{
+    const n = g.key==='all' ? all.length : all.filter(t=>_histGroupOf(t)===g.key).length;
+    return `<button class="ftag ${c.filter===g.key?'active':''}" onclick="histSetFilter('${g.key}')">${g.label} (${n})</button>`;
+  }).join('');
+
+  // Gom theo ngày, mới nhất trước — mỗi ngày kèm tổng biến động ròng của ngày đó.
+  const byDay = {};
+  rows.forEach(t=>{
+    const d = t.businessDate || String(t.createdAt||'').slice(0,10) || '(không rõ ngày)';
+    (byDay[d] = byDay[d] || []).push(t);
+  });
+  const days = Object.keys(byDay).sort((a,b)=>b.localeCompare(a));
+
+  const typeLabelOf = t=>{
+    const ty = String(t.type||'').toUpperCase();
+    if(STOCK_TX_TYPES[ty]) return [STOCK_TX_TYPES[ty].label, STOCK_TX_TYPES[ty].color];
+    const L = {STOCK_IN:['Nhập kho','green'], SALE:['Bán ra','blue'], PRODUCTION:['Nấu ra lô','green'],
+               ADJUSTMENT:['Điều chỉnh','amber'], WASTE:['Hao hụt','red']};
+    return L[ty] || [t.type||'—','blue'];
+  };
+
+  const body = days.length ? days.map(d=>{
+    const list = byDay[d];
+    const net = list.reduce((s,t)=>s+(Number(t.qty)||0),0);
+    const netTxt = (net>0?'+':'') + fmtNum(net,1) + ' ' + unit;
+    return `
+      <div class="sec-title" style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-top:12px">
+        <span>${escapeHtmlAttr(d)}</span>
+        <span style="font-weight:800;text-transform:none;color:${net>0?'var(--ok)':(net<0?'var(--bad)':'var(--gt)')}">${netTxt}</span>
+      </div>
+      ${list.map(t=>{
+        const [lb,col] = typeLabelOf(t);
+        const q = Number(t.qty)||0;
+        // Dòng đã gộp là tổng của CẢ NGÀY — in giờ của lượt bán cuối cùng vào đó thì
+        // trông như một giao dịch đơn lẻ lúc 15:33, sai hẳn ý nghĩa.
+        const gio = t._grouped ? 'cả ngày' : String(t.createdAt||'').slice(11,16);
+        const con = t.resultingStock==null ? '' :
+          `<div class="small-note">còn lại ${fmtNum(t.resultingStock,1)} ${unit}</div>`;
+        const meta = [
+          t._grouped ? `${t._count} lượt bán` : '',
+          t.staff ? escapeHtmlAttr(t.staff) : '',
+          t.note ? escapeHtmlAttr(t.note) : '',
+          t.reason ? escapeHtmlAttr(t.reason) : '',
+          t.source==='pos' ? 'từ POS' : ''
+        ].filter(Boolean).join(' · ');
+        return `<div class="litem">
+          <div class="li-l">
+            <div>${escapeHtmlAttr(gio || '--:--')} <span class="tier tier-${col}" style="margin-left:4px">${lb}</span></div>
+            ${meta ? `<div>${meta}</div>` : ''}
+          </div>
+          <div class="li-r" style="text-align:right;display:block">
+            <div style="font-weight:800;color:${q>0?'var(--ok)':(q<0?'var(--bad)':'var(--gt)')}">${(q>0?'+':'')+fmtNum(q,1)} ${unit}</div>
+            ${con}
+          </div>
+        </div>`;
+      }).join('')}`;
+  }).join('') : '<div class="muted" style="margin-top:12px">Không có giao dịch nào ở nhóm này.</div>';
+
+  const canhBao = c.partial ? `
+    <div class="card" style="margin-bottom:10px;padding:12px 14px">
+      <div style="font-size:12.5px;font-weight:700;color:var(--warn)">Đang xem bản rút gọn</div>
+      <div class="small-note" style="margin-top:4px">Firestore chưa có chỉ mục cho truy vấn này nên chỉ quét được 1.500 giao dịch gần nhất của TẤT CẢ nguyên liệu rồi lọc ra món này — món ít biến động có thể trông như không có lịch sử.
+      ${c.indexUrl ? `<br><a href="${escapeHtmlAttr(c.indexUrl)}" target="_blank" rel="noopener">Bấm đây để Firestore tạo chỉ mục</a> (một lần, vài phút), sau đó mở lại màn này.` : ''}</div>
+    </div>` : '';
+
+  box.innerHTML = `
+    <div class="card" style="margin-bottom:10px;padding:12px 14px">
+      <div style="font-size:12.5px;color:var(--gt)">Tồn hiện tại</div>
+      <div style="font-size:20px;font-weight:800;color:var(--td)">${fmtNum(c.stock,1)} ${unit}</div>
+      <div class="small-note" style="margin-top:2px">${all.length} dòng · mới nhất trước${c.partial?'':' · tối đa 400 giao dịch gần nhất'}</div>
+    </div>
+    ${canhBao}
+    <div class="filter-bar" style="margin-bottom:2px">${chips}</div>
+    ${body}
+  `;
 }
 
 async function renderKhoHistory(){
