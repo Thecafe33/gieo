@@ -17,6 +17,9 @@ import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.appcompat.app.AppCompatActivity
+import com.google.mlkit.vision.barcode.common.Barcode
+import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import net.posprinter.IConnectListener
@@ -38,6 +41,7 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var webView: WebView
     private lateinit var bridge: PrinterBridge
+    private lateinit var scanner: ScannerBridge
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -69,7 +73,27 @@ class MainActivity : AppCompatActivity() {
         bridge = PrinterBridge(this)
         webView.addJavascriptInterface(bridge, "AndroidPrinter")
 
+        // Cầu nối quét mã tem kho. Tách RIÊNG khỏi AndroidPrinter (không nhét thêm hàm vào
+        // đó) vì hai thứ không liên quan gì nhau: máy in có thể mất kết nối mà quét vẫn chạy
+        // và ngược lại. Trang web tự dò `window.AndroidScanner` để biết có quét được không —
+        // mở bằng Chrome thường thì không có đối tượng này và web tự lui về nhập tay.
+        scanner = ScannerBridge(this)
+        webView.addJavascriptInterface(scanner, "AndroidScanner")
+
         webView.loadUrl("https://the-cafe-33.web.app/posgieo.html")
+    }
+
+    /**
+     * Gọi một câu lệnh JS trong trang web. Luôn đẩy về luồng chính vì evaluateJavascript
+     * bắt buộc chạy trên luồng đã tạo WebView, còn kết quả quét thì trả về từ luồng khác.
+     * Nuốt lỗi: WebView có thể đã bị huỷ khi kết quả về tới nơi (nhân viên thoát app giữa
+     * chừng) — lúc đó không có gì để làm ngoài việc bỏ qua.
+     */
+    fun evalJs(js: String) {
+        runOnUiThread {
+            try { webView.evaluateJavascript(js, null) }
+            catch (e: Throwable) { Log.w(TAG, "evalJs", e) }
+        }
     }
 
     private fun requestNeededPermissions() {
@@ -592,5 +616,148 @@ class PrinterBridge(private val context: Context) {
         try { billSocket?.close() } catch (e: Exception) { }
         temExecutor.shutdownNow()
         btExecutor.shutdownNow()
+    }
+}
+
+/**
+ * Cầu nối QUÉT MÃ — JS ⇄ Android.
+ *
+ * ══════════════════════════════════════════════════════════════════════════════
+ * Dùng để quét mã trên tem dán vào chai/hộp nguyên liệu (lúc mở, lúc báo hết, lúc kiểm kê).
+ *
+ * VÌ SAO KHÔNG DÙNG getUserMedia TRONG TRANG WEB:
+ * Trang web đang chạy qua HTTPS nên về nguyên tắc gọi camera được, NHƯNG WebView không
+ * tự chuyển quyền camera cho trang: phải override WebChromeClient.onPermissionRequest()
+ * và phải xin thêm quyền CAMERA cho app. Thiếu một trong hai thì getUserMedia hỏng CÂM
+ * LẶNG — không hộp thoại, không lỗi rõ ràng — dù điện thoại đã cấp đủ quyền cho app.
+ *
+ * Cách ở đây tránh hẳn chuyện đó: giao diện quét do Google Play Services mở trong tiến
+ * trình RIÊNG của nó, nên app này KHÔNG cần quyền CAMERA, không cần đụng vào
+ * onPermissionRequest, và không phải tự dựng khung ngắm camera trong trang web.
+ * Đổi lại là máy phải có Google Play Services — điện thoại quán thì luôn có.
+ *
+ * CÁCH DÙNG TỪ TRANG WEB:
+ *     AndroidScanner.scan("<id-bất-kỳ>")
+ * rồi app gọi ngược lại đúng một lần:
+ *     window.__androidScanResult({id, ok, code, format, error})
+ *   · ok=true               → `code` là chuỗi đọc được trên tem
+ *   · ok=false, error="cancelled" → nhân viên bấm huỷ (KHÔNG phải lỗi, đừng báo đỏ)
+ *   · ok=false, error=khác  → lỗi thật (chưa tải được module, máy không hỗ trợ...)
+ *
+ * MỖI LƯỢT QUÉT TRẢ KẾT QUẢ ĐÚNG MỘT LẦN. Gọi scan() khi đang có lượt quét dở sẽ bị từ
+ * chối ngay (error="busy") thay vì mở chồng hai màn quét — nhân viên bấm nút hai lần là
+ * chuyện thường, và hai màn quét chồng nhau thì kết quả về loạn thứ tự, gán nhầm chai.
+ * ══════════════════════════════════════════════════════════════════════════════
+ */
+class ScannerBridge(private val activity: MainActivity) {
+
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    // Chốt một-lượt-một: hai lần bấm sát nhau chỉ lọt một.
+    private val scanning = AtomicBoolean(false)
+    // Lượt đang chờ kết quả. Dùng để chó canh giờ biết mình đang huỷ ĐÚNG lượt nào —
+    // nếu chỉ xoá cờ mà không so id thì có thể huỷ oan một lượt vừa mới bắt đầu.
+    @Volatile private var pendingId: String? = null
+
+    /**
+     * Trang web hỏi "máy này quét được không". Có đối tượng AndroidScanner nghĩa là đang
+     * chạy trong app bọc — mở bằng Chrome thường thì cả đối tượng này cũng không tồn tại.
+     * Giữ hàm này để sau còn chỗ trả về false nếu phát hiện máy thiếu Play Services.
+     */
+    @JavascriptInterface
+    fun isAvailable(): Boolean = true
+
+    /** Đánh số phiên bản cầu nối, để trang web biết app có đủ mới không mà bật tính năng. */
+    @JavascriptInterface
+    fun getScannerVersion(): Int = 1
+
+    @JavascriptInterface
+    fun scan(requestId: String) {
+        if (!scanning.compareAndSet(false, true)) {
+            deliver(requestId, false, "", "", "busy")
+            return
+        }
+        pendingId = requestId
+
+        // Chó canh giờ. Nếu vì lý do nào đó không listener nào chạy (nhân viên tắt app giữa
+        // chừng, Play Services bị hệ điều hành thu hồi...) thì cờ `scanning` sẽ kẹt ở true
+        // VĨNH VIỄN và mọi lượt quét sau đều bị từ chối "busy" cho tới khi khởi động lại app.
+        // Hết 2 phút chưa thấy kết quả thì tự mở khoá.
+        mainHandler.postDelayed({
+            if (pendingId == requestId && scanning.get()) {
+                pendingId = null
+                scanning.set(false)
+                deliver(requestId, false, "", "", "timeout")
+            }
+        }, 120_000L)
+
+        // startScan() mở một Activity → bắt buộc gọi từ luồng chính. @JavascriptInterface
+        // chạy trên luồng riêng của WebView nên phải chuyển về đây.
+        activity.runOnUiThread {
+            try {
+                val options = GmsBarcodeScannerOptions.Builder()
+                    // Chỉ nhận đúng hai định dạng đang in trên tem. Thu hẹp danh sách giúp
+                    // giải mã nhanh hơn và không bắt nhầm mã vạch của nhà sản xuất in sẵn
+                    // trên chai — thứ nằm ngay cạnh tem của quán.
+                    .setBarcodeFormats(Barcode.FORMAT_QR_CODE, Barcode.FORMAT_CODE_128)
+                    // Tem kho in nhỏ (~10mm), tự phóng to giúp bắt được mà không phải dí
+                    // sát máy vào chai. Nếu bản thư viện không có hàm này thì bỏ dòng đi.
+                    .enableAutoZoom()
+                    .build()
+                GmsBarcodeScanning.getClient(activity, options)
+                    .startScan()
+                    .addOnSuccessListener { b ->
+                        val code = b.rawValue ?: ""
+                        if (code.isBlank()) finish(requestId, false, "", "", "Mã rỗng — quét lại")
+                        else finish(requestId, true, code, formatName(b.format), "")
+                    }
+                    .addOnCanceledListener {
+                        finish(requestId, false, "", "", "cancelled")
+                    }
+                    .addOnFailureListener { e ->
+                        Log.w(MainActivity.TAG, "[scan] lỗi", e)
+                        finish(requestId, false, "", "", e.message ?: "Không mở được máy quét")
+                    }
+            } catch (e: Throwable) {
+                // Máy thiếu Play Services, hoặc module quét chưa tải được. Phải trả kết quả
+                // chứ không được im lặng — nếu không trang web sẽ treo mãi ở "đang quét" và
+                // nhân viên không biết phải làm gì.
+                Log.w(MainActivity.TAG, "[scan] không khởi tạo được", e)
+                finish(requestId, false, "", "", e.message ?: "Máy không hỗ trợ quét mã")
+            }
+        }
+    }
+
+    /**
+     * Kết thúc một lượt: mở khoá rồi trả kết quả. Chỉ trả nếu lượt này CHƯA bị chó canh giờ
+     * huỷ — tránh gửi hai kết quả cho cùng một lượt (phía web bỏ qua cái thứ hai, nhưng
+     * không nên dựa vào đó).
+     */
+    private fun finish(requestId: String, ok: Boolean, code: String, format: String, error: String) {
+        if (pendingId != requestId) return
+        pendingId = null
+        scanning.set(false)
+        deliver(requestId, ok, code, format, error)
+    }
+
+    private fun formatName(format: Int): String = when (format) {
+        Barcode.FORMAT_QR_CODE -> "QR"
+        Barcode.FORMAT_CODE_128 -> "CODE128"
+        else -> "OTHER"
+    }
+
+    /**
+     * Trả kết quả về trang web. Dựng bằng JSONObject chứ không nối chuỗi tay: nội dung mã
+     * và câu lỗi đều là chuỗi ngoài tầm kiểm soát, nối tay là có ngày một dấu nháy làm vỡ
+     * câu lệnh JS.
+     */
+    private fun deliver(requestId: String, ok: Boolean, code: String, format: String, error: String) {
+        val payload = JSONObject()
+            .put("id", requestId)
+            .put("ok", ok)
+            .put("code", code)
+            .put("format", format)
+            .put("error", error)
+        activity.evalJs("window.__androidScanResult && window.__androidScanResult($payload);")
     }
 }
