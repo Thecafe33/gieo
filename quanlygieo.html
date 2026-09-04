@@ -2894,6 +2894,126 @@ function addInventoryItem(data){
 }
 
 // ============================================================
+// [NEW] CHAI & TEM KHO — chỗ chủ quán nhìn lại những gì nhân viên đã làm với tem
+// ------------------------------------------------------------
+// POS ghi lại ba thứ mà nếu không có ai đọc thì coi như không tồn tại:
+//   · Báo hết khi chai còn NHIỀU  → cờ needsReview. Đây là lỗ hổng lớn nhất của cả cơ chế:
+//     làm đổ nguyên chai rồi khui ra bấm "đã hết" là mất tích hợp pháp. POS cố tình KHÔNG
+//     chặn (chặn thì nhân viên không báo gì cả, còn tệ hơn) mà để lại vết có tên người —
+//     vết đó phải nổi lên đây.
+//   · Chai đã mở QUÁ HẠN            → an toàn thực phẩm, và là lý do chính đáng nhất để bắt
+//     nhân viên dán tem. Đây là thứ trả cổ tức hằng ngày chứ không phải mỗi lần kiểm kê.
+//   · Tem sinh ra mà chưa dán       → để lâu thì chai không có tem, mà hệ thống lại tưởng có.
+// ============================================================
+const CTN_COLL = 'stock_containers_gieogieo';
+let ctnFilter = 'review';      // review | expired | unlabeled | open | all
+let CONTAINERS_CACHE = [];
+
+function goContainers(filter){
+  ctnFilter = filter || 'review';
+  goKho('containers');
+}
+
+// Đọc theo trạng thái. Không đọc cả collection: quán chạy vài tháng là hàng nghìn bản ghi
+// 'finished', mà màn này chỉ cần đúng phần đang có vấn đề.
+async function loadContainersFor(filter){
+  const c = fstore.collection(CTN_COLL);
+  if(filter === 'review')    return (await c.where('needsReview','==',true).get()).docs.map(d=>({id:d.id,...d.data()}));
+  if(filter === 'unlabeled') return (await c.where('status','==','sealed').where('labelPrinted','==',false).get()).docs.map(d=>({id:d.id,...d.data()}));
+  // 'expired' và 'open' cùng đọc danh sách chai đang mở rồi lọc phía client — Firestore
+  // không so sánh được expiresAt <= "bây giờ" mà không cần index riêng, và số chai đang mở
+  // luôn nhỏ (vài chục) nên lọc ở client là đủ.
+  const mo = (await c.where('status','==','open').get()).docs.map(d=>({id:d.id,...d.data()}));
+  if(filter === 'expired') return mo.filter(x=>x.expiresAt && new Date(x.expiresAt) <= new Date());
+  return mo;
+}
+
+// Nhãn lý do chọn tay — POS lưu mã ngắn (tem_mo, tem_bong...), ở đây phải dịch ra chữ
+// người đọc được. Mã lạ (bản POS mới hơn) thì hiện nguyên mã còn hơn nuốt mất thông tin.
+const CTN_REASON_LABEL = {
+  scanned:  'Đã quét mã',
+  tem_mo:   'Tem mờ / rách',
+  tem_bong: 'Tem bong mất',
+  may_loi:  'Máy quét lỗi',
+  chua_tem: 'Chai chưa có tem',
+  khong_ro: 'Không nêu lý do'
+};
+function ctnReasonLabel(k){ return CTN_REASON_LABEL[k] || k || ''; }
+
+function ctnExpiryText(c){
+  if(!c.expiresAt) return {text: c.openShelfLifeHours ? '' : 'Không đặt hạn', cls:'muted-sm'};
+  const gio = Math.round((new Date(c.expiresAt) - Date.now())/3600000);
+  if(gio <= 0)  return {text:'QUÁ HẠN '+Math.abs(Math.round(gio/24))+' ngày', cls:'tier tier-red'};
+  if(gio <= 24) return {text:'Còn '+gio+' giờ', cls:'tier tier-amber'};
+  return {text:'Còn '+Math.round(gio/24)+' ngày', cls:'muted-sm'};
+}
+
+async function renderKhoContainers(){
+  const box = document.getElementById('khoBody');
+  showLoading(box);
+  const tabs = [
+    ['review',    'Cần xem lại'],
+    ['expired',   'Quá hạn sau mở'],
+    ['open',      'Đang mở'],
+    ['unlabeled', 'Tem chưa dán']
+  ];
+  let list = [];
+  try{
+    await ensureAuth();
+    list = await loadContainersFor(ctnFilter);
+  }catch(err){
+    console.error('renderKhoContainers lỗi', err);
+    box.innerHTML = '<div class="muted">Không đọc được danh sách chai. '+(err.code||err.message||'')+'</div>';
+    return;
+  }
+  CONTAINERS_CACHE = list;
+  const nav = `<div class="filter-bar">${tabs.map(([k,l])=>
+      `<button class="ftag ${ctnFilter===k?'active':''}" onclick="ctnFilter='${k}'; renderKhoContainers();">${l}</button>`).join('')}</div>`;
+
+  const giaiThich = {
+    review: 'Nhân viên báo hết khi chai còn hơn 25% dung tích. Không phải lúc nào cũng là gian — chai có thể bị đổ, hỏng, hoặc định mức khai thiếu nên sổ còn nhiều hơn thực tế. Nhưng lặp lại ở cùng một người thì cần hỏi.',
+    expired: 'Hàng đã mở nắp quá hạn sử dụng. Đây là chuyện an toàn thực phẩm, không phải chuyện kho — nên xử lý ngay chứ không đợi kiểm kê.',
+    open: 'Toàn bộ chai/hộp đang mở dở trong quán.',
+    unlabeled: 'Mã đã sinh khi nhận hàng nhưng chưa ai dán tem lên chai. Để lâu thì chai không có tem mà hệ thống vẫn tưởng có — lúc kiểm kê sẽ không quét được.'
+  }[ctnFilter];
+
+  if(!list.length){
+    box.innerHTML = nav + `<div class="empty-hint">Không có chai nào trong nhóm này.</div>
+      <div class="small-note" style="margin-top:10px">${giaiThich}</div>`;
+    return;
+  }
+
+  // Sắp xếp: nặng nhất lên đầu — quá hạn lâu nhất, hoặc bỏ phí nhiều nhất.
+  const sorted = list.slice().sort((a,b)=>
+    ctnFilter==='review' ? (Number(b.wasteBase)||0) - (Number(a.wasteBase)||0)
+    : String(a.expiresAt||a.receivedAt||'').localeCompare(String(b.expiresAt||b.receivedAt||'')));
+
+  box.innerHTML = nav + `<div class="small-note" style="margin-bottom:12px">${giaiThich}</div>` +
+    `<div>` + sorted.map(c=>{
+      const ex = ctnExpiryText(c);
+      const p2 = n => String(n).padStart(2,'0');
+      const dt = iso => { const d = iso?new Date(iso):null; return (d && !isNaN(d)) ? `${p2(d.getDate())}/${p2(d.getMonth()+1)}` : ''; };
+      const tyLe = (Number(c.baseQty)>0 && Number(c.wasteBase)>0) ? Math.round(c.wasteBase/c.baseQty*100) : 0;
+      const phu = ctnFilter==='review'
+        ? `Báo hết ${dt(c.finishedAt)} bởi <b>${escapeHtmlAttr(c.finishedBy||'—')}</b> · còn <b>${fmtNum(c.wasteBase,0)} ${escapeHtmlAttr(c.unit||'')}</b> (${tyLe}% chai)`
+        : ctnFilter==='unlabeled'
+        ? `Nhận ${dt(c.receivedAt)} bởi ${escapeHtmlAttr(c.receivedBy||'—')}`
+        : `Mở ${dt(c.openedAt)} bởi ${escapeHtmlAttr(c.openedBy||'—')}`;
+      const nhan = ctnFilter==='review'
+        ? `<span class="tier tier-${tyLe>=50?'red':'amber'}">${tyLe}% còn lại</span>`
+        : (ex.text ? `<span class="${ex.cls}">${ex.text}</span>` : '');
+      return `<div class="litem">
+        <div class="li-l">
+          <div>${escapeHtmlAttr(c.itemName||'')} <span class="muted-sm" style="letter-spacing:.4px">${escapeHtmlAttr(c.code||'')}</span></div>
+          <div>${phu}</div>
+          ${c.finishScanned===false && ctnFilter==='review' ? `<div class="muted-sm">Chọn tay, không quét mã${c.finishReason?' · '+escapeHtmlAttr(ctnReasonLabel(c.finishReason)):''}</div>` : ''}
+        </div>
+        <div class="li-r">${nhan}</div>
+      </div>`;
+    }).join('') + `</div>`;
+}
+
+// ============================================================
 // [NEW] MỨC THEO DÕI NGUYÊN LIỆU — nền cho việc kiểm kê theo CHAI thay vì theo ml
 // ------------------------------------------------------------
 // Vấn đề gốc: hệ thống trừ kho theo ml (đúng, vì định mức là ml) nhưng con người chỉ
@@ -4206,6 +4326,7 @@ const NAV_SECTIONS = [
     {key:'kho:stockcount',   label:'Kiểm kê',         go:"goKho('stockcount')"},
     {key:'kho:wastereasons', label:'Lý do hao hụt',   go:"goKho('wastereasons')"},
     {key:'kho:checklist',    label:'Checklist ca',    go:"goKho('checklist')"},
+    {key:'kho:containers',   label:'Chai & tem kho',  go:"goKho('containers')"},
     {key:'kho:history',      label:'Kho nguyên liệu', go:"goKho('history')",      sub:'Lịch sử'},
     {key:'kho:prephistory',  label:'Chế biến',        go:"goKho('prephistory')"},
     {key:'kho:prepbatches',  label:'Lô chế biến',     go:"goKho('prepbatches')"},
@@ -5083,6 +5204,32 @@ async function computeStoreHealth(){
     const n = scRes.value.length;
     if(n) push('red', 'Phiếu kiểm kê chờ duyệt', n, `goKho('stockcount')`);
   } else { console.warn('storeHealth: kiểm kê lỗi', scRes.reason); push('red','Kiểm kê chờ duyệt — không kiểm tra được','!',`goKho('stockcount')`,true); }
+
+  // ---- Chai & tem kho ----
+  // Ba việc này nếu không nổi lên đây thì POS ghi vết xong bỏ đó, không ai đọc.
+  // Đọc riêng từng nhóm và nuốt lỗi từng nhóm: quán chưa bật tính năng tem thì collection
+  // chưa tồn tại, không được để nó làm trắng cả trang Sức khoẻ quán.
+  try{
+    const [rv, mo, chuaDan] = await Promise.allSettled([
+      loadContainersFor('review'), loadContainersFor('open'), loadContainersFor('unlabeled')
+    ]);
+    if(rv.status==='fulfilled' && rv.value.length){
+      const tong = rv.value.reduce((s,c)=>s+(Number(c.wasteBase)||0),0);
+      push('red', `Báo hết khi chai còn nhiều — cần xem lại${tong>0?` (bỏ phí ~${fmtNum(tong,0)} đơn vị)`:''}`,
+           rv.value.length, `goContainers('review')`);
+    }
+    if(mo.status==='fulfilled'){
+      const quaHan = mo.value.filter(c=>c.expiresAt && new Date(c.expiresAt) <= new Date());
+      // ĐỎ chứ không vàng: hàng đã mở quá hạn là chuyện an toàn thực phẩm, không phải
+      // chuyện sổ sách — pha cho khách uống rồi mới biết thì đã muộn.
+      if(quaHan.length) push('red', 'Hàng đã mở QUÁ HẠN còn ở quầy', quaHan.length, `goContainers('expired')`);
+    }
+    if(chuaDan.status==='fulfilled'){
+      // Chỉ tính tem để quá 2 ngày — tem của lần nhận hàng sáng nay chưa dán là bình thường.
+      const cu = chuaDan.value.filter(c=>c.receivedAt && (Date.now() - new Date(c.receivedAt)) > 2*86400000);
+      if(cu.length) push('yellow', 'Tem đã sinh quá 2 ngày mà chưa dán', cu.length, `goContainers('unlabeled')`);
+    }
+  }catch(err){ console.warn('storeHealth: chai & tem lỗi', err); }
 
   // Ngày treo — POS bảo nhân viên "báo Quản lý", nên bên này BẮT BUỘC phải thấy,
   // nếu không cảnh báo bên POS treo vĩnh viễn mà không ai xử lý được.
@@ -8592,7 +8739,7 @@ async function confirmClearCache(){
 const KHO_GROUPS = {
   danhmuc:  { label:'Danh mục',   ic:'clipboard', subs:[{k:'items',label:'Nguyên liệu'},{k:'prep',label:'Chế biến cấp 1'},{k:'toppingcogs',label:'GOGS Topping'},{k:'packaging',label:'Bao bì'},{k:'recipe',label:'Định mức'},{k:'location',label:'Vị trí kho'}] },
   nhaphang: { label:'Nhập hàng',  ic:'download',  subs:[{k:'stockin',label:'Nhập kho nhanh'},{k:'po',label:'Đặt hàng (PO)'},{k:'bulkimport',label:'Nhập hàng loạt'}] },
-  vanhanh:  { label:'Vận hành',   ic:'settings',  subs:[{k:'refill',label:'Refill'},{k:'locstock',label:'Tồn theo vị trí'},{k:'stockcount',label:'Kiểm kê'},{k:'wastereasons',label:'Lý do hao hụt'},{k:'checklist',label:'Checklist ca'}] },
+  vanhanh:  { label:'Vận hành',   ic:'settings',  subs:[{k:'refill',label:'Refill'},{k:'locstock',label:'Tồn theo vị trí'},{k:'stockcount',label:'Kiểm kê'},{k:'wastereasons',label:'Lý do hao hụt'},{k:'checklist',label:'Checklist ca'},{k:'containers',label:'Chai & tem kho'}] },
   lichsu:   { label:'Lịch sử',    ic:'clock',     subs:[{k:'history',label:'Kho nguyên liệu'},{k:'prephistory',label:'Chế biến'},{k:'prepbatches',label:'Lô chế biến'}] }
 };
 let curKhoGroup = 'danhmuc';
@@ -8653,6 +8800,7 @@ async function renderEntryKho(){
   else if(curKhoSub==='refill') renderKhoRefill();
   else if(curKhoSub==='locstock') renderKhoLocStock();
   else if(curKhoSub==='stockcount') renderKhoStockCount();
+  else if(curKhoSub==='containers') renderKhoContainers();
   else if(curKhoSub==='wastereasons') renderKhoWasteReasons();
   else if(curKhoSub==='checklist') renderKhoChecklist();
   else if(curKhoSub==='history') renderKhoHistory();
