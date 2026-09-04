@@ -603,15 +603,24 @@ input[type=checkbox],input[type=radio]{accent-color:var(--gd);width:20px;height:
   background:var(--card);border:1px solid rgba(230,227,223,.8);
   border-radius:var(--r-md);padding:14px 15px;margin-bottom:9px;min-height:64px;
   display:flex;justify-content:space-between;align-items:center;gap:12px;
+  /* Cho phép XUỐNG DÒNG. Trước đây .li-r có flex-shrink:0 + nowrap còn .li-l chỉ
+     min-width:0 — nên khi khối phải rộng hơn chỗ trống (ô 360px ở giao diện
+     tablet, dòng có 4 nút) thì .li-l bị bóp về gần 0: chữ rớt mỗi dòng một từ,
+     còn khối phải tràn ra ngoài thẻ, đè lên nhau. Giờ hết chỗ thì khối phải tự
+     xuống hàng dưới, không món nào bị nghiền nữa. */
+  flex-wrap:wrap;row-gap:8px;
   box-shadow:var(--sh-1);
   transition:box-shadow .16s ease,border-color .16s ease,transform .14s var(--ease-out);
 }
-.litem .li-l{min-width:0;}
+.litem .li-l{min-width:0;flex:1 1 190px;}
 .litem .li-l div:first-child{font-size:15.5px;font-weight:600;color:var(--td);line-height:1.35;}
 .litem .li-l div:last-child{font-size:13.5px;color:var(--gt);margin-top:3px;line-height:1.45;}
 .litem .li-r{
   font-size:15px;font-weight:650;text-align:right;white-space:nowrap;
   font-variant-numeric:tabular-nums;display:flex;align-items:center;gap:9px;flex-shrink:0;
+  /* margin-left:auto để khi xuống hàng vẫn dính lề phải; flex-wrap để chính dãy
+     nút cũng gãy được nếu thẻ hẹp hơn cả dãy nút. */
+  margin-left:auto;flex-wrap:wrap;justify-content:flex-end;
 }
 /* Nút icon trong danh sách: TRÒN và CÓ MÀU theo hành động, thay cho một dãy
    nút xám vuông bo góc giống hệt nhau (trước đây phải đọc icon mới biết nút nào
@@ -9336,7 +9345,13 @@ function renderKhoItems(){
       // "Sắp hết" nên hai tình huống rất khác nhau trông y như nhau. Sắp hết là cần
       // nhập thêm; tồn âm là SỔ SÁCH ĐANG SAI, phải chỉnh lại số.
       const neg = isNeg(it), low = isLow(it);
-      const pkgSummary = (it.packagingUnits&&it.packagingUnits.length) ? ' · ' + it.packagingUnits.map(p=>`1 ${p.name}=${fmtNum(p.baseQty,0)}${it.unit}`).join(', ') : '';
+      const cuName = itemCountUnit(it).name;
+      const pkgSummary = (it.packagingUnits&&it.packagingUnits.length)
+        ? ' · ' + it.packagingUnits.map(p=>{
+            const t = `1 ${escapeHtmlAttr(p.name)}=${fmtNum(p.baseQty,0)}${escapeHtmlAttr(it.unit||'')}`;
+            return p.name === cuName ? `<b>${t}</b>` : t;
+          }).join(', ')
+        : '';
       const noCount = it.staffCounts === false;
       // Nhãn mức theo dõi — nhìn danh sách là biết món nào đang dán tem, món nào không,
       // không phải mở từng món ra xem.
@@ -9346,16 +9361,19 @@ function renderKhoItems(){
       const tmTag = !managed ? '<span class="tier tier-blue" style="margin-left:4px">Không quản kho</span>'
                   : tm==='unit'  ? '<span class="tier tier-green" style="margin-left:4px">Tem từng ' + escapeHtmlAttr(cu.name) + '</span>'
                   : tm==='batch' ? '<span class="tier tier-amber" style="margin-left:4px">Tem theo lô</span>' : '';
-      const countLine = managed && !cu.isBase
-        ? ` · đếm theo ${escapeHtmlAttr(cu.name)} (1=${fmtNum(cu.baseQty,0)}${escapeHtmlAttr(it.unit||'')})` : '';
+      // tmTag đã nói "Tem từng Gói"/"Tem theo lô" rồi, và quy cách dùng để đếm đã
+      // được in đậm ở pkgSummary — chỉ viết thêm khi không có nhãn nào cả.
+      const countLine = (managed && !cu.isBase && !tmTag)
+        ? ` · đếm theo ${escapeHtmlAttr(cu.name)}` : '';
       return `<div class="litem">
         <div class="li-l"><div>${it.name} ${neg?'<span class="tier tier-red" style="margin-left:4px">Tồn ÂM</span>':(low?'<span class="tier tier-amber" style="margin-left:4px">Sắp hết</span>':'')}${noCount?'<span class="tier tier-blue" style="margin-left:4px">NV không kiểm kê</span>':''}${tmTag}</div>
         <div>Ngưỡng ${fmtNum(it.minStock,0)} ${it.unit}${it.costPerUnit?(' · ~'+fmt(it.costPerUnit)+'/'+it.unit):''}${pkgSummary}${countLine}</div></div>
         <div class="li-r"><span style="${neg?'color:var(--bad);font-weight:800':(managed?'':'color:var(--ink-4)')}">${managed ? fmtNum(it.currentStock,1)+' '+escapeHtmlAttr(it.unit||'') : '—'}</span>
           <button class="btn ${neg?'':'outline'} sm" style="width:auto;padding:0 10px;margin-left:6px" onclick="startAdjustItem('${it.id}')">Sửa tồn</button>
-          <button class="iconbtn" onclick="openItemHistory('${it.id}')" title="Lịch sử biến động tồn kho">${ic('clock')}</button>
           <button class="iconbtn" onclick="startEditItem('${it.id}')" title="Sửa thông tin nguyên liệu">${ic('pencil')}</button>
-          <button class="iconbtn" onclick="removeInventoryItem('${it.id}')">${ic('x')}</button>
+          ${renderMoreMenuBtn('inv_'+it.id, `
+            <button onclick="openItemHistory('${it.id}')">${ic('clock',15)} Lịch sử biến động</button>
+            <button class="danger" onclick="removeInventoryItem('${it.id}')">${ic('trash',15)} Xoá nguyên liệu</button>`)}
         </div>
       </div>`;
     }).join('') : (khoItemsFilter
