@@ -1120,6 +1120,14 @@ html.phone-ui .nav-search .ns-kbd{display:none;}
       </div>
     </div>
 
+    <!-- 🆕 KHÁCH HÀNG -->
+    <div class="screen" id="screen-customer">
+      <div class="wrap">
+        <div id="reportSubNavCustomer"></div>
+        <div id="customerBody"></div>
+      </div>
+    </div>
+
     <!-- ENTRY -->
     <div class="screen" id="screen-entry">
       <div class="wrap">
@@ -4106,6 +4114,7 @@ const NAV_SECTIONS = [
     {key:'health', ic:'pulse',    label:'Sức khỏe tài chính', go:"switchScreen('health')"},
     {key:'report', ic:'chart',    label:'Báo cáo kỳ',         go:"switchScreen('report')"},
     {key:'mix',    ic:'clipboard', label:'Phân tích bán hàng', go:"switchScreen('mix')"},
+    {key:'customer', ic:'users',   label:'Khách hàng',          go:"switchScreen('customer')"},
   ]},
   { group:'Vận hành', items:[
     {key:'entry:ops',  ic:'note',    label:'Ghi chú ngày',  go:"goEntry('ops')"},
@@ -4537,10 +4546,367 @@ async function renderMix(){
   `;
 }
 
-const REPORT_SCREENS = [ {s:'today',label:'Hôm nay'}, {s:'health',label:'Tài chính'}, {s:'report',label:'Theo kỳ'}, {s:'mix',label:'Bán hàng'} ];
+
+// ============================================================
+// [NEW] KHÁCH HÀNG — ai đã quay lại mua của Gieo Gieo
+// ------------------------------------------------------------
+// Ba màn báo cáo sẵn có trả lời "quán làm ăn thế nào", màn Phân tích bán hàng
+// trả lời "bán cái gì". Màn này trả lời câu thứ ba: "BÁN CHO AI, và ai chịu
+// quay lại" — khách mới tốn tiền kéo về, khách quay lại mới là phần lãi thật.
+//
+// Nguồn dữ liệu: đọc thẳng từng bill trong kỳ (giống màn Phân tích bán hàng),
+// vì thông tin khách nằm trong bill chứ không có ở bản tổng hợp theo ngày.
+//
+// ⚠️ MỘT ĐIỀU PHẢI NÓI RÕ: app Quản lý này TRƯỚC ĐÂY CHƯA TỪNG đọc trường
+// khách hàng nào trong bill — toàn bộ code cũ chỉ dùng total/itemsArray/date/
+// method/billCode/time/staff. Nghĩa là tôi không có cách nào biết chắc POS lưu
+// số điện thoại khách ở tên trường nào. Nên hàm resolveCustomer() bên dưới dò
+// một loạt tên trường thông dụng; nếu không thấy trường nào khớp, màn hình sẽ
+// LIỆT KÊ ĐÚNG các trường thật sự có trong bill để đối chiếu và chỉnh một dòng,
+// thay vì hiện "0 khách" rồi để người dùng tưởng quán không có khách quay lại.
+// ============================================================
+
+// Tên trường có thể chứa SĐT/định danh khách, xếp theo thứ tự ưu tiên.
+const KH_FIELD_PHONE = ['phone','customerPhone','memberPhone','userPhone','buyerPhone',
+                        'sdt','soDienThoai','soDT','tel','mobile','customerId','memberId'];
+const KH_FIELD_NAME  = ['customerName','memberName','tenKhach','buyerName','userName'];
+const KH_FIELD_OBJ   = ['customer','member','khach','khachHang','buyer','user'];
+
+// SĐT Việt Nam 9–11 chữ số; +84/84 quy về 0. Giá trị không ra số điện thoại mà
+// vẫn là chuỗi ngắn (mã thành viên) thì vẫn nhận làm định danh — thà nhóm được
+// khách theo mã còn hơn bỏ sót cả tập dữ liệu.
+function khNormId(v){
+  const s = String(v==null?'':v).trim();
+  if(!s) return null;
+  let d = s.replace(/[^0-9]/g,'');
+  if(d.length>=11 && d.startsWith('84')) d = '0'+d.slice(2);
+  if(d.length>=9 && d.length<=11) return d;
+  if(s.length>=3 && s.length<=32) return s;   // mã khách dạng chữ
+  return null;
+}
+function khIsPhone(id){ return /^0\d{8,10}$/.test(id||''); }
+
+// Trả về {id, ten, via} — via = tên trường đã dùng, để báo lại cho người dùng biết.
+function resolveCustomer(o){
+  if(!o || typeof o!=='object') return null;
+  for(const k of KH_FIELD_PHONE){
+    const id = khNormId(o[k]);
+    if(id) return { id, ten:khPickName(o), via:k };
+  }
+  for(const k of KH_FIELD_OBJ){
+    const c = o[k];
+    if(!c) continue;
+    if(typeof c === 'string' || typeof c === 'number'){
+      const id = khNormId(c);
+      if(id) return { id, ten:khPickName(o), via:k };
+      continue;
+    }
+    if(typeof c === 'object'){
+      for(const pk of KH_FIELD_PHONE){
+        const id = khNormId(c[pk]);
+        if(id) return { id, ten:c.name||c.tenKhach||c.fullName||khPickName(o)||null, via:k+'.'+pk };
+      }
+    }
+  }
+  return null;
+}
+function khPickName(o){
+  for(const k of KH_FIELD_NAME) if(o[k] && String(o[k]).trim()) return String(o[k]).trim();
+  return null;
+}
+
+let khPeriod = 'month';                  // today | week | month | custom
+let khCustom = { from:null, to:null };
+let khFilter = 'all';                    // all | back | loyal | risk
+let KH_LAST = null;                      // kết quả kỳ gần nhất, để mở chi tiết 1 khách không phải đọc lại
+
+function khSetPeriod(p){ khPeriod = p; khFilter='all'; renderCustomer(); }
+function khSetCustom(f,v){ khCustom[f]=v; }
+function khApplyCustom(){
+  if(!khCustom.from || !khCustom.to || khCustom.from > khCustom.to){ toast('⚠️ Chọn khoảng ngày hợp lệ'); return; }
+  khPeriod='custom'; renderCustomer();
+}
+function khSetFilter(f){ khFilter = (khFilter===f ? 'all' : f); renderCustomer(); }
+function khRange(){
+  const now = new Date();
+  if(khPeriod==='today') return { start:new Date(now), end:new Date(now), label:'Hôm nay' };
+  if(khPeriod==='week'){ const s=new Date(now); s.setDate(s.getDate()-6); return { start:s, end:new Date(now), label:'7 ngày gần nhất' }; }
+  if(khPeriod==='month'){ const s=new Date(now); s.setDate(s.getDate()-29); return { start:s, end:new Date(now), label:'30 ngày gần nhất' }; }
+  return { start:new Date(khCustom.from+'T12:00:00'), end:new Date(khCustom.to+'T12:00:00'), label:`${khCustom.from} → ${khCustom.to}` };
+}
+
+async function computeCustomerReport(start, end){
+  const days = [];
+  let d = new Date(start);
+  while(d <= end){ days.push(new Date(d)); d.setDate(d.getDate()+1); }
+  const all = await Promise.all(days.map(x=>fetchOrdersForDate(x).catch(err=>{ console.warn('khách: đọc bill lỗi', err); return null; })));
+  const loiNgay = days.filter((_,i)=>all[i]===null).length;
+
+  const kh = {};                 // id -> hồ sơ khách
+  const truongTrongBill = {};    // chẩn đoán: các trường thật sự có trong bill
+  const viaDem = {};             // trường nào đang dùng để nhận diện, đếm bao nhiêu bill
+  let soBill=0, doanhThu=0, billCoKhach=0, dtCoKhach=0;
+
+  days.forEach((day,i)=>{
+    const list = all[i] || [];
+    const ngay = dkey(day);
+    soBill += list.length;
+    list.forEach(o=>{
+      const tong = Number(o.total)||0;
+      doanhThu += tong;
+      Object.keys(o||{}).forEach(k=>{ truongTrongBill[k] = (truongTrongBill[k]||0)+1; });
+
+      const c = resolveCustomer(o);
+      if(!c) return;
+      viaDem[c.via] = (viaDem[c.via]||0)+1;
+      billCoKhach++; dtCoKhach += tong;
+
+      const p = kh[c.id] || (kh[c.id] = {
+        id:c.id, ten:c.ten||null, soBill:0, tongChi:0,
+        ngay:new Set(), lanDau:ngay, lanCuoi:ngay, mon:{}, topping:{}, soLy:0
+      });
+      if(!p.ten && c.ten) p.ten = c.ten;
+      p.soBill++; p.tongChi += tong;
+      p.ngay.add(ngay);
+      if(ngay < p.lanDau) p.lanDau = ngay;
+      if(ngay > p.lanCuoi) p.lanCuoi = ngay;
+
+      (o.itemsArray||[]).forEach(it=>{
+        if(!it) return;
+        const q = Number(it.qty)||0;
+        if(!q) return;
+        p.soLy += q;
+        const ten = it.name || '(không tên)';
+        const m = p.mon[ten] || (p.mon[ten] = { ten, ly:0, tien:0 });
+        m.ly += q;
+        m.tien += ((Number(it.price)||0) + (Number(it.toppingSum)||0)) * q;
+        (it.toppings||[]).forEach(t=>{
+          const tn = (t && (t.name || t.id)) || '(không tên)';
+          p.topping[tn] = (p.topping[tn]||0) + Math.max(1, Number(t && t.qty)||1) * q;
+        });
+      });
+    });
+  });
+
+  const homNay = dkey(new Date());
+  const cachNgay = (a,b)=> Math.round((new Date(b+'T12:00:00') - new Date(a+'T12:00:00'))/86400000);
+
+  const dsKhach = Object.values(kh).map(p=>{
+    const soNgayGhe = p.ngay.size;
+    const khoangCach = soNgayGhe>1 ? cachNgay(p.lanDau,p.lanCuoi)/(soNgayGhe-1) : null;
+    const chuaGhe = cachNgay(p.lanCuoi, homNay);
+    // "Nguy cơ rời bỏ": đã từng quay lại đều đặn mà nay vắng gấp đôi nhịp cũ.
+    // Chặn dưới 14 ngày để khách tuần nào cũng ghé không bị gắn cờ oan chỉ vì
+    // lỡ một tuần.
+    const nguyCo = soNgayGhe>=2 && chuaGhe > Math.max(14, (khoangCach||0)*2);
+    const monTop = Object.values(p.mon).sort((a,b)=>b.ly-a.ly);
+    const tpTop  = Object.entries(p.topping).sort((a,b)=>b[1]-a[1]);
+    return {
+      ...p, ngay:[...p.ngay].sort(), soNgayGhe, khoangCach, chuaGhe, nguyCo,
+      chiTB: p.soBill ? p.tongChi/p.soBill : 0,
+      monYeuThich: monTop[0] || null, monTop, tpTop,
+      nhom: soNgayGhe>=5 ? 'loyal' : (soNgayGhe>=2 ? 'back' : 'new')
+    };
+  }).sort((a,b)=> b.soNgayGhe-a.soNgayGhe || b.tongChi-a.tongChi);
+
+  const quayLai = dsKhach.filter(x=>x.soNgayGhe>=2);
+  const thanThiet = dsKhach.filter(x=>x.nhom==='loyal');
+  const nguyCo = dsKhach.filter(x=>x.nguyCo);
+
+  // Món được chính nhóm khách QUAY LẠI chọn nhiều nhất — khác với "món bán chạy"
+  // toàn quán, vì món kéo khách quay lại mới là món đáng giữ giá và giữ chất.
+  const monQuayLai = {};
+  quayLai.forEach(k=>Object.values(k.mon).forEach(m=>{
+    const r = monQuayLai[m.ten] || (monQuayLai[m.ten] = { ten:m.ten, ly:0, tien:0, khach:0 });
+    r.ly += m.ly; r.tien += m.tien; r.khach++;
+  }));
+
+  return {
+    soNgay: days.length, loiNgay, soBill, doanhThu, billCoKhach, dtCoKhach,
+    dsKhach, quayLai, thanThiet, nguyCo,
+    monQuayLai: Object.values(monQuayLai).sort((a,b)=>b.ly-a.ly),
+    truongTrongBill, viaDem,
+    dtQuayLai: quayLai.reduce((s,x)=>s+x.tongChi,0)
+  };
+}
+
+async function renderCustomer(){
+  const body = document.getElementById('customerBody');
+  renderReportSubNav();
+  const {start,end,label} = khRange();
+  const soNgay = Math.round((new Date(dkey(end)) - new Date(dkey(start)))/86400000)+1;
+  const segs = [['today','Hôm nay'],['week','7 ngày'],['month','30 ngày'],['custom','Tuỳ chọn']];
+  const head = `
+    <div class="seg">${segs.map(([k,l])=>`<button class="${khPeriod===k?'active':''}" onclick="khSetPeriod('${k}')">${l}</button>`).join('')}</div>
+    ${khPeriod==='custom' ? `
+    <div class="card"><div class="grid2">
+      <div class="field"><label>Từ ngày</label><input type="date" value="${khCustom.from||''}" onchange="khSetCustom('from',this.value)"></div>
+      <div class="field"><label>Đến ngày</label><input type="date" value="${khCustom.to||''}" onchange="khSetCustom('to',this.value)"></div>
+    </div><button class="btn" onclick="khApplyCustom()">Xem</button></div>` : ''}`;
+
+  if(khPeriod==='custom' && (!khCustom.from || !khCustom.to)){
+    body.innerHTML = head + '<div class="empty-hint">Chọn khoảng ngày rồi bấm Xem.</div>'; return;
+  }
+  if(soNgay > MIX_MAX_DAYS){
+    body.innerHTML = head + `<div class="alert red"><span class="ic">${ic('alert',15)}</span><div>Kỳ dài ${soNgay} ngày — vượt mức ${MIX_MAX_DAYS} ngày. Màn này đọc từng bill nên kỳ càng dài càng chậm; chia nhỏ ra xem từng tháng.</div></div>`;
+    return;
+  }
+  body.innerHTML = head + '<div class="muted">Đang đọc bill từng ngày...</div>';
+
+  let r;
+  try{
+    await ensureAuth();
+    r = await computeCustomerReport(start, end);
+    KH_LAST = r;
+  }catch(err){
+    console.error('renderCustomer failed', err);
+    body.innerHTML = head + '<div class="muted">Không đọc được dữ liệu bán hàng: '+(err.code||err.message||err)+'</div>';
+    return;
+  }
+
+  if(!r.soBill){ body.innerHTML = head + `<div class="empty-hint">Không có bill nào trong kỳ ${label}.</div>`; return; }
+
+  // Không nhận diện được khách nào → nói rõ lý do và đưa luôn danh sách trường
+  // thật sự có trong bill, thay vì hiện "0 khách" mập mờ.
+  if(!r.billCoKhach){
+    const truong = Object.entries(r.truongTrongBill).sort((a,b)=>b[1]-a[1]).map(([k,n])=>`<code>${escapeHtmlAttr(k)}</code> (${n})`).join(', ');
+    body.innerHTML = head + `
+      <div class="alert amber"><span class="ic">${ic('alert',15)}</span><div>
+        <b>Chưa nhận diện được khách nào trong ${r.soBill} bill của kỳ ${escapeHtmlAttr(label)}.</b><br>
+        Màn này nhóm khách theo số điện thoại/mã thành viên lưu trong bill. Đã dò các tên trường
+        thông dụng (${KH_FIELD_PHONE.slice(0,6).join(', ')}...) nhưng không thấy trường nào khớp.
+      </div></div>
+      <div class="card">
+        <div class="card-h"><h3>Các trường thật sự có trong bill</h3></div>
+        <div class="small-note" style="line-height:1.9">${truong || '—'}</div>
+        <div class="divider"></div>
+        <div class="small-note">Nếu POS có lưu SĐT khách mà tên trường không nằm trong danh sách trên,
+        báo lại đúng tên trường đó — chỉ cần thêm một dòng vào <code>KH_FIELD_PHONE</code> là màn này chạy.
+        Nếu POS chưa lưu SĐT vào bill thì phải bổ sung ở POS trước, ở đây không dựng lại được.</div>
+      </div>`;
+    return;
+  }
+
+  const tong = r.dsKhach.length;
+  const tyLeQuayLai = tong ? r.quayLai.length/tong*100 : 0;
+  const phuSong = r.soBill ? r.billCoKhach/r.soBill*100 : 0;
+  const dtQuayLaiPct = r.dtCoKhach ? r.dtQuayLai/r.dtCoKhach*100 : 0;
+  const via = Object.entries(r.viaDem).sort((a,b)=>b[1]-a[1])[0];
+
+  const loc = { all:r.dsKhach, back:r.quayLai, loyal:r.thanThiet, risk:r.nguyCo }[khFilter] || r.dsKhach;
+  const tenLoc = { all:'Tất cả khách', back:'Khách quay lại', loyal:'Khách thân thiết', risk:'Nguy cơ rời bỏ' }[khFilter];
+
+  const chipHtml = (k,label,n)=>`<button class="ftag ${khFilter===k?'active':''}" onclick="khSetFilter('${k}')">${label} · ${n}</button>`;
+
+  body.innerHTML = head + `
+    <div class="kgrid">
+      <div class="kcard kcard-wide">
+        <div class="klabel">Khách quay lại</div>
+        <div class="kval disp">${r.quayLai.length}<span style="font-size:.55em"> / ${tong} khách</span></div>
+        <div class="ksub">${fmtNum(tyLeQuayLai,1)}% số khách nhận diện được đã mua từ 2 ngày khác nhau trở lên</div>
+        <div class="meter"><div class="meter-bar"><div class="meter-fill ${tyLeQuayLai>=30?'green':tyLeQuayLai>=15?'amber':'red'}" style="width:${Math.min(100,tyLeQuayLai)}%"></div></div>
+          <div class="meter-foot"><span>${fmtNum(dtQuayLaiPct,0)}% doanh thu (đã nhận diện) đến từ nhóm này</span></div></div>
+      </div>
+      <div class="kcard"><div class="klabel">Khách thân thiết</div><div class="kval disp">${r.thanThiet.length}</div><div class="ksub">ghé từ 5 ngày trở lên</div></div>
+      <div class="kcard"><div class="klabel">Nguy cơ rời bỏ</div><div class="kval disp">${r.nguyCo.length}</div><div class="ksub">từng quay lại đều, nay vắng gấp đôi nhịp cũ</div></div>
+      <div class="kcard"><div class="klabel">Chi trung bình / khách</div><div class="kval disp">${fmt(tong? r.dsKhach.reduce((s,x)=>s+x.tongChi,0)/tong : 0)}</div><div class="ksub">trong kỳ ${escapeHtmlAttr(label)}</div></div>
+      <div class="kcard"><div class="klabel">Bill có nhận diện khách</div><div class="kval disp">${fmtNum(phuSong,0)}%</div><div class="ksub">${r.billCoKhach}/${r.soBill} bill${via?` · theo trường <b>${escapeHtmlAttr(via[0])}</b>`:''}</div></div>
+    </div>
+
+    ${phuSong < 60 ? `<div class="alert amber" style="margin-top:12px"><span class="ic">${ic('alert',15)}</span><div>
+      Chỉ ${fmtNum(phuSong,0)}% bill có thông tin khách, nên mọi con số ở đây chỉ nói về phần đó — không phải toàn bộ khách của quán.
+      Muốn nhìn đúng thực tế thì phải xin SĐT đều tay hơn ở quầy.</div></div>` : ''}
+
+    <div class="alert blue" style="margin-top:12px"><span class="ic">${ic('question',15)}</span><div>
+      "Khách mới" ở đây nghĩa là <b>chỉ mua 1 ngày TRONG KỲ ĐANG XEM</b>. Người đã là khách quen từ trước
+      mà kỳ này chỉ ghé một lần vẫn bị xếp là mới — kỳ xem càng dài thì con số càng sát thực tế.</div></div>
+
+    <div class="sec-title">Lọc nhanh</div>
+    <div class="filter-bar">
+      ${chipHtml('all','Tất cả',tong)}
+      ${chipHtml('back','Quay lại',r.quayLai.length)}
+      ${chipHtml('loyal','Thân thiết',r.thanThiet.length)}
+      ${chipHtml('risk','Nguy cơ rời',r.nguyCo.length)}
+    </div>
+
+    <div class="sec-title">${escapeHtmlAttr(tenLoc)} (${loc.length})</div>
+    ${loc.length ? `<div class="card" style="padding:6px 0"><div style="overflow-x:auto"><table class="kt" style="min-width:620px">
+      <thead><tr><th>Khách</th><th style="text-align:right">Ngày ghé</th><th style="text-align:right">Bill</th><th style="text-align:right">Tổng chi</th><th style="text-align:right">TB/bill</th><th style="text-align:right">Cách nhau</th><th style="text-align:right">Vắng</th><th>Món yêu thích</th></tr></thead>
+      <tbody>${loc.slice(0,60).map(k=>`
+        <tr onclick="khOpenDetail('${escapeHtmlAttr(k.id)}')" style="cursor:pointer">
+          <td>${khTenHienThi(k)}${k.nguyCo?' <span class="tier tier-amber">nguy cơ rời</span>':''}${k.nhom==='loyal'?' <span class="tier tier-green">thân thiết</span>':''}</td>
+          <td style="text-align:right">${k.soNgayGhe}</td>
+          <td style="text-align:right">${k.soBill}</td>
+          <td style="text-align:right">${fmt(k.tongChi)}</td>
+          <td style="text-align:right">${fmt(k.chiTB)}</td>
+          <td style="text-align:right">${k.khoangCach!=null?fmtNum(k.khoangCach,1)+' ngày':'—'}</td>
+          <td style="text-align:right">${k.chuaGhe} ngày</td>
+          <td>${k.monYeuThich?escapeHtmlAttr(k.monYeuThich.ten)+' <span class="small-note">×'+k.monYeuThich.ly+'</span>':'—'}</td>
+        </tr>`).join('')}</tbody></table></div>
+      ${loc.length>60?`<div class="small-note" style="padding:10px 14px">Hiện 60/${loc.length} khách đầu bảng (xếp theo số ngày ghé).</div>`:''}
+    </div>` : '<div class="empty-hint">Không có khách nào trong nhóm này.</div>'}
+
+    <div class="sec-title">Món kéo khách quay lại</div>
+    ${r.monQuayLai.length ? `<div class="card" style="padding:6px 0"><div style="overflow-x:auto"><table class="kt" style="min-width:520px">
+      <thead><tr><th>Món</th><th style="text-align:right">Khách quay lại mua</th><th style="text-align:right">Ly</th><th style="text-align:right">Doanh thu</th></tr></thead>
+      <tbody>${r.monQuayLai.slice(0,20).map(m=>`<tr>
+        <td>${escapeHtmlAttr(m.ten)}</td>
+        <td style="text-align:right">${m.khach} khách</td>
+        <td style="text-align:right">${m.ly}</td>
+        <td style="text-align:right">${fmt(m.tien)}</td></tr>`).join('')}</tbody></table></div></div>
+      <div class="small-note">Đây là món được chính nhóm khách QUAY LẠI chọn — khác với "món bán chạy" ở màn Phân tích bán hàng (tính cả khách vãng lai). Món ở đầu bảng này là món đáng giữ chất và giữ giá nhất.</div>`
+      : '<div class="empty-hint">Chưa có khách quay lại nào trong kỳ để rút ra món yêu thích.</div>'}
+
+    ${r.loiNgay?`<div class="small-note" style="margin-top:12px;color:var(--bad)">${r.loiNgay} ngày trong kỳ đọc lỗi — số liệu đang thiếu phần đó.</div>`:''}
+  `;
+}
+
+function khTenHienThi(k){
+  const ten = k.ten ? escapeHtmlAttr(k.ten) : null;
+  const id  = escapeHtmlAttr(k.id);
+  if(ten) return `${ten} <span class="small-note">${id}</span>`;
+  return khIsPhone(k.id) ? id : `<span class="small-note">mã</span> ${id}`;
+}
+
+// Chi tiết 1 khách — mở popup dùng chung, đọc từ kết quả kỳ vừa tính nên không
+// phải đọc lại Firebase.
+function khOpenDetail(id){
+  if(!KH_LAST) return;
+  const k = KH_LAST.dsKhach.find(x=>x.id===id);
+  if(!k){ toast('Không tìm thấy khách này'); return; }
+  const nhomLabel = k.nhom==='loyal' ? '<span class="tier tier-green">Thân thiết</span>'
+                  : k.nhom==='back'  ? '<span class="tier tier-blue">Quay lại</span>'
+                  : '<span class="tier tier-amber">Mới trong kỳ</span>';
+  openEditSheet(k.ten || (khIsPhone(k.id)?k.id:'Khách '+k.id), `
+    <div class="card" style="margin-top:0">
+      <div class="card-h"><h3>${khIsPhone(k.id)?'SĐT '+escapeHtmlAttr(k.id):'Mã '+escapeHtmlAttr(k.id)}</h3>${nhomLabel}${k.nguyCo?' <span class="tier tier-amber">nguy cơ rời</span>':''}</div>
+      <div class="row"><span class="rl">Số ngày ghé quán</span><span class="rv">${k.soNgayGhe} ngày · ${k.soBill} bill</span></div>
+      <div class="row"><span class="rl">Tổng chi</span><span class="rv">${fmt(k.tongChi)}</span></div>
+      <div class="row"><span class="rl">Trung bình mỗi bill</span><span class="rv">${fmt(k.chiTB)}</span></div>
+      <div class="row"><span class="rl">Tổng số ly đã mua</span><span class="rv">${k.soLy}</span></div>
+      <div class="row"><span class="rl">Lần đầu → lần gần nhất</span><span class="rv">${k.lanDau} → ${k.lanCuoi}</span></div>
+      <div class="row"><span class="rl">Cách nhau trung bình</span><span class="rv">${k.khoangCach!=null?fmtNum(k.khoangCach,1)+' ngày':'— (mới ghé 1 ngày)'}</span></div>
+      <div class="row"><span class="rl">Vắng mặt</span><span class="rv">${k.chuaGhe} ngày</span></div>
+    </div>
+
+    <div class="sec-title">Món đã mua</div>
+    <div class="card" style="padding:6px 0"><div style="overflow-x:auto"><table class="kt" style="min-width:380px">
+      <thead><tr><th>Món</th><th style="text-align:right">Ly</th><th style="text-align:right">Tiền</th></tr></thead>
+      <tbody>${k.monTop.map(m=>`<tr><td>${escapeHtmlAttr(m.ten)}</td><td style="text-align:right">${m.ly}</td><td style="text-align:right">${fmt(m.tien)}</td></tr>`).join('')}</tbody>
+    </table></div></div>
+
+    ${k.tpTop.length ? `<div class="sec-title">Topping hay gọi</div>
+    <div class="card">${k.tpTop.slice(0,8).map(([tn,n])=>`<div class="row"><span class="rl">${escapeHtmlAttr(tn)}</span><span class="rv">${n} phần</span></div>`).join('')}</div>` : ''}
+
+    <div class="sec-title">Các ngày đã ghé</div>
+    <div class="card"><div class="small-note" style="line-height:2">${k.ngay.map(d=>`<span class="tier tier-blue" style="margin-right:6px">${d}</span>`).join('')}</div></div>
+  `);
+}
+
+const REPORT_SCREENS = [ {s:'today',label:'Hôm nay'}, {s:'health',label:'Tài chính'}, {s:'report',label:'Theo kỳ'}, {s:'mix',label:'Bán hàng'}, {s:'customer',label:'Khách hàng'} ];
 function renderReportSubNav(){
   const html = `<div class="report-subnav">${REPORT_SCREENS.map(r=>`<button class="${curScreen===r.s?'active':''}" onclick="switchScreen('${r.s}')">${r.label}</button>`).join('')}</div>`;
-  ['reportSubNavToday','reportSubNavHealth','reportSubNavReport','reportSubNavMix'].forEach(id=>{
+  ['reportSubNavToday','reportSubNavHealth','reportSubNavReport','reportSubNavMix','reportSubNavCustomer'].forEach(id=>{
     const el = document.getElementById(id);
     if(el) el.innerHTML = html;
   });
@@ -4575,6 +4941,7 @@ function switchScreen(s){
   if(s==='health') renderHealth();
   if(s==='report') renderReport();
   if(s==='mix') renderMix();
+  if(s==='customer') renderCustomer();
   if(s==='entry') renderEntry();
   if(s==='sim') runSim();
 }
@@ -9026,9 +9393,76 @@ function toppingCogsStartEdit(toppingId){
     qtyPerServing: Number(rec.qtyPerServing)||0,
     note: rec.note || ''
   } : newToppingCogsDraft();
-  renderKhoToppingCogs();
+  openEditSheet(
+    'GOGS: ' + (TOPPINGS.find(x=>x.id===toppingId)||{}).name,
+    toppingCogsFormHtml(),
+    // Đóng popup bằng ✕/bấm nền mờ = huỷ: xoá nháp và vẽ lại danh sách cho khớp.
+    ()=>{ toppingCogsEditingId=null; toppingCogsDraft=null; renderKhoToppingCogs(); }
+  );
+  renderToppingCogsEditor();
 }
-function toppingCogsCancelEdit(){ toppingCogsEditingId=null; toppingCogsDraft=null; renderKhoToppingCogs(); }
+// [SỬA — theo phản hồi] Trước đây form sửa GOGS được vẽ Ở ĐẦU TRANG, nên bấm
+// sửa một topping nằm giữa/cuối danh sách là phải vuốt ngược lên tận trên mới
+// thấy form, sửa xong lại vuốt xuống tìm lại chỗ cũ. Giờ dùng đúng popup dùng
+// chung (openEditSheet) như các màn khác: mở ngay tại chỗ đang đứng, đóng lại
+// là về đúng vị trí cũ trong danh sách.
+function toppingCogsCancelEdit(){ closeEditSheet(); }
+
+// Nội dung form — tách riêng để vẽ lại được phần thân popup khi đổi cách quy
+// đổi sản lượng, mà không phải đóng/mở lại popup.
+function toppingCogsFormHtml(){
+  const d = toppingCogsDraft;
+  if(!d) return '';
+  return `
+      <div class="sec-title" style="margin-top:0">Đầu vào cho 1 mẻ</div>
+      <div id="tpcEditorBox"></div>
+      <button type="button" class="btn outline sm" style="margin-top:6px" onclick="toppingCogsAddInput()">+ Thêm đầu vào</button>
+
+      <div class="sec-title">Sản lượng &amp; giá thành</div>
+      <div class="field"><label>Cách quy đổi sản lượng mẻ</label>
+        <select onchange="toppingCogsFieldChange('yieldMode',this.value); toppingCogsRerenderSheet();">
+          <option value="servings" ${d.yieldMode==='servings'?'selected':''}>Đếm phần — 1 mẻ chia ra được bao nhiêu PHẦN topping</option>
+          <option value="weight" ${d.yieldMode==='weight'?'selected':''}>Cân/đo — 1 mẻ thu được bao nhiêu GRAM/ML</option>
+        </select>
+      </div>
+      ${d.yieldMode==='weight' ? `
+      <div class="grid2">
+        <div class="field"><label>Tổng thu được (cân/đo)</label>
+          <input type="number" inputmode="decimal" step="0.01" value="${d.batchYield}" oninput="toppingCogsFieldChange('batchYield',this.value)">
+        </div>
+        <div class="field"><label>Đơn vị</label>
+          <select onchange="toppingCogsFieldChange('yieldUnit',this.value)">
+            ${['g','ml'].map(u=>`<option ${u===d.yieldUnit?'selected':''}>${u}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div class="field"><label>Mỗi phần topping dùng bao nhiêu ${escapeHtmlAttr(d.yieldUnit)}</label>
+        <input type="number" inputmode="decimal" step="0.01" value="${d.qtyPerServing}" oninput="toppingCogsFieldChange('qtyPerServing',this.value)" placeholder="VD: 30">
+      </div>` : `
+      <div class="field"><label>Mẻ này chia ra được bao nhiêu phần</label>
+        <input type="number" inputmode="decimal" step="1" value="${d.batchYield}" oninput="toppingCogsFieldChange('batchYield',this.value)" placeholder="VD: 40">
+      </div>`}
+      <div class="card" style="margin-bottom:0">
+        <div class="row"><span class="rl">Tổng chi phí đầu vào/mẻ</span><span class="rv" id="tpcTotalCost">—</span></div>
+        <div class="row"><span class="rl">Giá vốn/${d.yieldMode==='weight'?escapeHtmlAttr(d.yieldUnit):'phần'}</span><span class="rv" id="tpcCostPerBatchUnit">—</span></div>
+      </div>
+      <div class="unit-explainer" style="margin-top:10px">Giá vốn mỗi lần thêm topping: <b id="tpcCostPerServing">—</b><br>
+        Đây là con số được cộng thẳng vào GOGS mỗi khi topping này được TẶNG KÈM miễn phí. Nếu topping này được BÁN (khách trả tiền), giá vốn sẽ tính vào nhóm "COGS Topping" riêng, không cộng vào giá vốn món.</div>
+
+      <div class="field" style="margin-top:10px"><label>Ghi chú <span class="small-note" style="font-weight:400">(để dễ thao tác — vd cách đong, lưu ý khi nấu, nguồn hàng...)</span></label>
+        <textarea rows="3" oninput="toppingCogsFieldChange('note',this.value)" placeholder="VD: 1 phần = 1 muỗng múc chuẩn ở quầy, xem hình dán trên nắp hũ...">${escapeHtmlAttr(d.note||'')}</textarea>
+      </div>
+
+      <button class="btn" style="margin-top:10px" onclick="submitToppingCogs()">${ic('save',15)} Lưu GOGS topping</button>
+      <button class="btn outline" style="margin-top:8px" onclick="toppingCogsCancelEdit()">Huỷ</button>`;
+}
+// Vẽ lại thân popup tại chỗ (đổi cách quy đổi sản lượng thì cả cụm ô nhập đổi theo).
+function toppingCogsRerenderSheet(){
+  const body = document.querySelector('#editSheetWrap .edit-sheet-body');
+  if(!body) return;
+  body.innerHTML = toppingCogsFormHtml();
+  renderToppingCogsEditor();
+}
 function toppingCogsAddInput(){
   // Mặc định lấy nguyên liệu thô nếu có, không thì lấy chế biến cấp 1 — tránh
   // thêm dòng "rỗng" không chọn được gì khi 1 trong 2 danh mục chưa có dữ liệu.
@@ -9136,6 +9570,7 @@ async function submitToppingCogs(){
     TOPPING_RECIPES = await loadToppingRecipes();
     toast('✅ Đã lưu GOGS topping');
     toppingCogsEditingId=null; toppingCogsDraft=null;
+    closeEditSheet(true);        // im lặng: chính nhánh này đã lo việc vẽ lại danh sách
     renderKhoToppingCogs();
   }catch(err){ console.error(err); showError('Lưu thất bại: '+(err.code||err.message||err)); }
 }
@@ -9162,53 +9597,6 @@ async function renderKhoToppingCogs(){
     box.innerHTML = '<div class="muted">Chưa có topping nào — thêm topping ở tab Menu → Toppings trước, rồi quay lại đây khai giá vốn.</div>';
     return;
   }
-  const formHtml = toppingCogsDraft ? (()=>{
-    const t = TOPPINGS.find(x=>x.id===toppingCogsEditingId) || {};
-    return `
-    <div class="card">
-      <div class="sec-title" style="margin-top:0">GOGS cho topping: ${escapeHtmlAttr(t.name||'')}</div>
-      <div class="sec-title">Đầu vào cho 1 mẻ</div>
-      <div id="tpcEditorBox"></div>
-      <button type="button" class="btn outline sm" style="margin-top:6px" onclick="toppingCogsAddInput()">+ Thêm đầu vào</button>
-
-      <div class="sec-title">Sản lượng &amp; giá thành</div>
-      <div class="field"><label>Cách quy đổi sản lượng mẻ</label>
-        <select onchange="toppingCogsFieldChange('yieldMode',this.value); renderKhoToppingCogs();">
-          <option value="servings" ${toppingCogsDraft.yieldMode==='servings'?'selected':''}>Đếm phần — 1 mẻ chia ra được bao nhiêu PHẦN topping</option>
-          <option value="weight" ${toppingCogsDraft.yieldMode==='weight'?'selected':''}>Cân/đo — 1 mẻ thu được bao nhiêu GRAM/ML</option>
-        </select>
-      </div>
-      ${toppingCogsDraft.yieldMode==='weight' ? `
-      <div class="grid2">
-        <div class="field"><label>Tổng thu được (cân/đo)</label>
-          <input type="number" inputmode="decimal" step="0.01" value="${toppingCogsDraft.batchYield}" oninput="toppingCogsFieldChange('batchYield',this.value)">
-        </div>
-        <div class="field"><label>Đơn vị</label>
-          <select onchange="toppingCogsFieldChange('yieldUnit',this.value)">
-            ${['g','ml'].map(u=>`<option ${u===toppingCogsDraft.yieldUnit?'selected':''}>${u}</option>`).join('')}
-          </select>
-        </div>
-      </div>
-      <div class="field"><label>Mỗi phần topping dùng bao nhiêu ${escapeHtmlAttr(toppingCogsDraft.yieldUnit)}</label>
-        <input type="number" inputmode="decimal" step="0.01" value="${toppingCogsDraft.qtyPerServing}" oninput="toppingCogsFieldChange('qtyPerServing',this.value)" placeholder="VD: 30">
-      </div>` : `
-      <div class="field"><label>Mẻ này chia ra được bao nhiêu phần</label>
-        <input type="number" inputmode="decimal" step="1" value="${toppingCogsDraft.batchYield}" oninput="toppingCogsFieldChange('batchYield',this.value)" placeholder="VD: 40">
-      </div>`}
-      <div class="row"><span class="rl">Tổng chi phí đầu vào/mẻ</span><span class="rv" id="tpcTotalCost">—</span></div>
-      <div class="row"><span class="rl">Giá vốn/${toppingCogsDraft.yieldMode==='weight'?escapeHtmlAttr(toppingCogsDraft.yieldUnit):'phần'}</span><span class="rv" id="tpcCostPerBatchUnit">—</span></div>
-      <div class="unit-explainer" style="margin-top:10px">Giá vốn mỗi lần thêm topping: <b id="tpcCostPerServing">—</b><br>
-        Đây là con số được cộng thẳng vào GOGS mỗi khi topping này được TẶNG KÈM miễn phí. Nếu topping này được BÁN (khách trả tiền), giá vốn sẽ tính vào nhóm "COGS Topping" riêng, không cộng vào giá vốn món.</div>
-
-      <div class="field" style="margin-top:10px"><label>Ghi chú <span class="small-note" style="font-weight:400">(để dễ thao tác — vd cách đong, lưu ý khi nấu, nguồn hàng...)</span></label>
-        <textarea rows="3" oninput="toppingCogsFieldChange('note',this.value)" placeholder="VD: 1 phần = 1 muỗng múc chuẩn ở quầy, xem hình dán trên nắp hũ...">${escapeHtmlAttr(toppingCogsDraft.note||'')}</textarea>
-      </div>
-
-      <button class="btn" style="margin-top:10px" onclick="submitToppingCogs()">${ic('save',15)} Lưu GOGS topping</button>
-      <button class="btn outline" style="margin-top:8px" onclick="toppingCogsCancelEdit()">Huỷ</button>
-    </div>`;
-  })() : '';
-
   const toppingPcts = TOPPINGS.map(t=>{
     const rec = TOPPING_RECIPES[t.id];
     const priceTogo = Number(t.priceTogo)||0;
@@ -9216,11 +9604,10 @@ async function renderKhoToppingCogs(){
   }).filter(p=>p!=null);
   const avgToppingPct = toppingPcts.length ? toppingPcts.reduce((a,c)=>a+c,0)/toppingPcts.length : null;
   box.innerHTML = `
-    ${formHtml}
     <div class="card">
       <div class="row"><span class="rl">%GOGS trung bình — toàn bộ topping (đã khai, theo giá To Go)</span><span class="rv" style="font-weight:700">${avgToppingPct!=null ? fmtNum(avgToppingPct,1)+'%' : '—'}</span></div>
     </div>
-    <div class="sec-title" style="margin-top:${toppingCogsDraft?'14px':'0'}">Danh sách topping (${TOPPINGS.length})</div>
+    <div class="sec-title">Danh sách topping (${TOPPINGS.length})</div>
     ${TOPPINGS.map(t=>{
       const rec = TOPPING_RECIPES[t.id];
       const priceTogo = Number(t.priceTogo)||0;
@@ -9244,7 +9631,6 @@ async function renderKhoToppingCogs(){
       </div>`;
     }).join('')}
   `;
-  if(toppingCogsDraft) renderToppingCogsEditor();
 }
 
 // ============================================================
@@ -13293,6 +13679,108 @@ document.addEventListener('keydown', ev=>{
     startY = null; sheet = null; curY = 0;
   });
 })();
+
+// ============================================================
+// [NEW] DẤU PHÂN CÁCH HÀNG NGHÌN TRONG Ô NHẬP TIỀN
+// ------------------------------------------------------------
+// Vấn đề: gõ 9200000 vào ô "Lương cứng / tháng" thì không ai đọc nổi đó là
+// 9 triệu 2 hay 92 triệu — phải đếm số 0 bằng mắt. Ô nhập cần hiện 9.200.000.
+//
+// Vướng mắc: <input type="number"> KHÔNG chấp nhận dấu chấm, nên bắt buộc phải
+// đổi sang type="text". Mà đổi xong thì hơn 100 chỗ đang đọc `el.value` (cả
+// oninput lẫn lúc bấm Lưu) sẽ nhận về chuỗi "9.200.000" → Number() ra 9.2 hoặc
+// NaN. Sửa tay từng chỗ vừa dài vừa dễ sót một chỗ rồi ghi số sai vào sổ.
+//
+// Cách làm ở đây: ghi đè thuộc tính `value` của RIÊNG từng ô đã nâng cấp —
+// người dùng NHÌN thấy "9.200.000", còn mọi đoạn mã đọc `el.value` vẫn nhận
+// đúng "9200000". Không phải sửa một dòng nào trong các hàm sẵn có.
+//
+// Ô nào được nâng cấp: chỉ ô SỐ NGUYÊN mà nhãn có ký hiệu tiền (đ) — quy ước
+// đặt nhãn sẵn có của app. Ô định lượng (step=0.01), phần trăm, ngày tháng,
+// số lượng... giữ nguyên, vì thêm dấu chấm vào đó là sai nghĩa.
+// ============================================================
+
+// Chỉ giữ chữ số; số âm giữ dấu trừ (có ô "chênh lệch" nhập số âm).
+function moneyRaw(v){
+  const str = String(v==null?'':v);
+  const neg = /^\s*-/.test(str);
+  const digits = str.replace(/[^0-9]/g,'');
+  return digits ? (neg?'-':'')+digits : '';
+}
+function moneyDisplay(v){
+  const raw = moneyRaw(v);
+  if(raw==='' || raw==='-') return raw;
+  return Number(raw).toLocaleString('vi-VN');
+}
+
+const MONEY_LABEL_RE = /\(\s*đ\s*[\/)]|\(\s*đ\s*\)|\bVNĐ\b|\bVND\b/i;
+function looksLikeMoneyField(input){
+  if(input.dataset.moneyDone) return false;
+  if(input.dataset.money === 'off') return false;
+  if(input.dataset.money === 'on') return true;
+  if(input.type !== 'number') return false;
+  // step lẻ = ô định lượng/đơn giá nhỏ (đ/ml), không phải ô tiền nguyên
+  const step = input.getAttribute('step');
+  if(step && step !== '1' && Number(step) < 1) return false;
+  const field = input.closest('.field');
+  const label = field && field.querySelector('label');
+  return !!(label && MONEY_LABEL_RE.test(label.textContent || ''));
+}
+
+function upgradeMoneyInput(input){
+  input.dataset.moneyDone = '1';
+  // type=number không nhận dấu chấm → phải là text; inputmode giữ bàn phím số.
+  input.type = 'text';
+  input.setAttribute('inputmode','numeric');
+  input.autocomplete = 'off';
+
+  const proto = Object.getPrototypeOf(input);
+  const base  = Object.getOwnPropertyDescriptor(proto, 'value');
+  if(!base || !base.get || !base.set) return;   // trình duyệt lạ → thôi, để nguyên
+
+  // Đây là mấu chốt: MÀN HÌNH giữ "9.200.000", còn el.value trả về "9200000".
+  Object.defineProperty(input, 'value', {
+    configurable: true,
+    get(){ return moneyRaw(base.get.call(input)); },
+    set(v){ base.set.call(input, moneyDisplay(v)); }
+  });
+  base.set.call(input, moneyDisplay(base.get.call(input)));
+
+  // Gõ tới đâu chấm tới đó, đồng thời giữ con trỏ đúng chỗ: đếm số CHỮ SỐ đứng
+  // trước con trỏ rồi đặt lại sau khi chèn dấu chấm (nếu chỉ nhớ vị trí ký tự
+  // thì mỗi lần thêm dấu chấm con trỏ lại nhảy lùi một ô).
+  input.addEventListener('input', ()=>{
+    const el = input;
+    const before = base.get.call(el);
+    const pos = el.selectionStart || 0;
+    const digitsBefore = (before.slice(0,pos).match(/[0-9]/g)||[]).length;
+    const after = moneyDisplay(before);
+    if(after === before) return;
+    base.set.call(el, after);
+    let seen = 0, newPos = after.length;
+    for(let i=0;i<after.length;i++){
+      if(/[0-9]/.test(after[i])) seen++;
+      if(seen === digitsBefore){ newPos = i+1; break; }
+    }
+    if(digitsBefore === 0) newPos = after.length;
+    try{ el.setSelectionRange(newPos,newPos); }catch(e){}
+  });
+}
+
+// Các màn đều vẽ lại bằng innerHTML nên ô mới xuất hiện liên tục — quét lại sau
+// mỗi lần DOM đổi, gom nhiều thay đổi liên tiếp vào một lượt cho khỏi tốn.
+let _moneyScanTimer = null;
+function scanMoneyInputs(){
+  document.querySelectorAll('input[type="number"],input[data-money="on"]').forEach(inp=>{
+    if(looksLikeMoneyField(inp)) upgradeMoneyInput(inp);
+  });
+}
+function scheduleMoneyScan(){
+  clearTimeout(_moneyScanTimer);
+  _moneyScanTimer = setTimeout(scanMoneyInputs, 60);
+}
+new MutationObserver(scheduleMoneyScan).observe(document.body, {childList:true, subtree:true});
+scanMoneyInputs();
 
 // ---------- 5. Đóng ô tìm khi đóng drawer ----------
 // Mở drawer lần sau phải thấy đủ menu, không dính bộ lọc của lần trước.
