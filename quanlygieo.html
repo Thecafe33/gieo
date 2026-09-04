@@ -4047,6 +4047,9 @@ function addPurchaseOrder(data){
     status: 'pending',
     lines: data.lines.map(l=>({
       itemId: l.itemId, name: l.name, unit: l.unit,
+      orderUnitName: l.orderUnitName || l.unit || '',
+      orderUnitFactor: Number(l.orderUnitFactor)||1,
+      qtyExpectedOrder: Number(l.qtyExpectedOrder)||0,
       qtyExpectedBase: Number(l.qtyExpectedBase)||0,
       receivedGoodBase: 0, receivedDamagedBase: 0, wrongProduct: false
     })),
@@ -11540,6 +11543,25 @@ function poDraftLineChange(idx, field, val){
   // lại để nạp đúng danh sách đơn vị của nguyên liệu mới.
   else if(field==='itemId'){ poDraftLines[idx].itemId = val; poDraftLines[idx].unitFactor = 1; renderPoDraftLines(); }
 }
+// Nhãn của đơn vị ứng với hệ số quy đổi đang chọn. Đặt "3 gói" thì phải lưu lại chữ
+// "gói" — nếu chỉ lưu 3.000 g thì cả PO lẫn màn nhận hàng bên POS đều hiện đơn vị pha
+// chế, người đặt hàng không nhận ra đơn mình vừa tạo.
+function poUnitLabelFor(it, factor){
+  if(!it) return '';
+  const f = Number(factor)||1;
+  if(f === 1) return it.unit || '';
+  const pk = (it.packagingUnits||[]).find(p => (Number(p.baseQty)||0) === f);
+  return pk ? pk.name : (it.unit || '');
+}
+// Viết số lượng theo ĐÚNG đơn vị đã đặt, kèm quy đổi ra đơn vị pha chế trong ngoặc để
+// vẫn đối chiếu được với tồn kho. Đơn cũ (chưa có orderUnitFactor) rơi về đơn vị gốc.
+function poQtyText(l, base){
+  const f = Number(l.orderUnitFactor)||1;
+  const b = Number(base)||0;
+  if(f <= 1) return `${fmtNum(b,1)} ${l.unit||''}`;
+  return `${fmtNum(b/f,2)} ${l.orderUnitName||l.unit||''} (${fmtNum(b,0)} ${l.unit||''})`;
+}
+
 // Tách ra khỏi renderKhoPO() để dùng lại được cho cả hai đường vẽ.
 function poUnitOptsFor(itemId, cur){
   const it = INVENTORY_ITEMS.find(x=>x.id===itemId); if(!it) return '';
@@ -11596,8 +11618,8 @@ async function renderKhoPO(){
       const flag = l.wrongProduct ? ' · <span style="color:#c0392b">sai sản phẩm</span>'
         : (l.receivedGoodBase < l.qtyExpectedBase ? ' · <span style="color:#c0392b">thiếu</span>'
         : (l.receivedGoodBase > l.qtyExpectedBase ? ' · <span style="color:#2980b9">thừa</span>' : ''));
-      const dmg = l.receivedDamagedBase>0 ? ` · hư hỏng ${fmtNum(l.receivedDamagedBase,1)} ${l.unit}` : '';
-      return `${l.name}: đặt ${fmtNum(l.qtyExpectedBase,1)} ${l.unit} — đã nhận ${fmtNum(l.receivedGoodBase,1)} ${l.unit}${dmg}${flag}`;
+      const dmg = l.receivedDamagedBase>0 ? ` · hư hỏng ${poQtyText(l, l.receivedDamagedBase)}` : '';
+      return `${l.name}: đặt ${poQtyText(l, l.qtyExpectedBase)} — đã nhận ${poQtyText(l, l.receivedGoodBase)}${dmg}${flag}`;
     }).join('<br>');
     return `<div class="litem" style="align-items:flex-start">
       <div class="li-l">
@@ -11623,7 +11645,15 @@ async function submitPurchaseOrder(){
   if(!poDraftLines.length){ toast('⚠️ Thêm ít nhất 1 nguyên liệu'); return; }
   const lines = poDraftLines.map(l=>{
     const it = INVENTORY_ITEMS.find(x=>x.id===l.itemId);
-    return { itemId: l.itemId, name: it?it.name:'', unit: it?it.unit:'', qtyExpectedBase: (Number(l.qty)||0) * (Number(l.unitFactor)||1) };
+    const f = Number(l.unitFactor)||1;
+    const qty = Number(l.qty)||0;
+    return {
+      itemId: l.itemId, name: it?it.name:'', unit: it?it.unit:'',
+      // Giữ CẢ HAI: số theo đơn vị đặt (để hiển thị, để POS đếm) và số quy ra đơn vị
+      // pha chế (để cộng tồn kho). Trước đây chỉ giữ vế sau nên đơn vị đặt biến mất.
+      orderUnitName: poUnitLabelFor(it, f), orderUnitFactor: f, qtyExpectedOrder: qty,
+      qtyExpectedBase: qty * f
+    };
   }).filter(l=>l.qtyExpectedBase>0);
   if(!lines.length){ toast('⚠️ Số lượng đặt phải lớn hơn 0'); return; }
   try{
