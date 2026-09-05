@@ -10,7 +10,22 @@
 <title>Gieo Gieo — Quản lý cửa hàng</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400..800&display=swap" rel="stylesheet">
+<!-- Bắt tay sẵn với hai máy chủ Firebase ngay từ dòng đầu: đăng nhập và lượt đọc
+     đầu tiên khỏi phải tốn thêm một vòng DNS + TLS. -->
+<link rel="preconnect" href="https://firestore.googleapis.com" crossorigin>
+<link rel="preconnect" href="https://identitytoolkit.googleapis.com" crossorigin>
+<link rel="preconnect" href="https://www.gstatic.com" crossorigin>
+<!-- [TỐC ĐỘ] Font KHÔNG được chặn render. Thẻ <link rel="stylesheet"> thường là
+     tài nguyên chặn hiển thị: trình duyệt dừng cả việc vẽ lẫn việc chạy script cho
+     tới khi tải xong file CSS này từ fonts.googleapis.com. Đo tại chỗ: nó chiếm
+     12,5 GIÂY và kéo domInteractive lên đúng 12,6s — toàn bộ phần còn lại của app
+     nằm chờ nó. Mẹo media="print" khiến trình duyệt coi đây là CSS cho máy in (không
+     chặn), tải xong thì onload đổi lại thành "all" để font vẫn áp dụng bình thường.
+     Chưa kịp tải thì chữ hiện bằng font hệ thống trong danh sách dự phòng — vẫn đọc
+     được ngay, không phải màn trắng. -->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400..800&display=swap"
+      media="print" onload="this.media='all';this.onload=null">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400..800&display=swap"></noscript>
 <style>
 /* ==========================================================================
    GIEO GIEO — QUẢN LÝ · HỆ THIẾT KẾ v4 ("Aurora")
@@ -1479,6 +1494,26 @@ const db = firebase.database();
 const fstore = firebase.firestore();
 const auth = firebase.auth();
 
+// [TỐC ĐỘ] Bật bộ nhớ đệm ngoại tuyến của Firestore (IndexedDB). PHẢI gọi ngay
+// sau firebase.firestore(), trước bất kỳ lượt đọc/ghi nào.
+//
+// Nói rõ nó làm gì và KHÔNG làm gì, kẻo hiểu nhầm:
+//  · KHÔNG làm lượt đọc bình thường nhanh hơn — get() vẫn hỏi máy chủ trước.
+//  · CÓ tác dụng khi mạng chập chờn hoặc mất sóng: thay vì treo rồi báo lỗi, app
+//    trả ngay dữ liệu lần trước. Quán dùng 4G, mất sóng vài giây là chuyện thường.
+//  · Ghi lúc mất mạng được xếp hàng, có sóng lại thì tự đẩy lên.
+// Trình duyệt không hỗ trợ, hoặc mở nhiều tab mà không đồng bộ được, thì bỏ qua —
+// app chạy y như cũ, không được để nó chặn khởi động.
+// Bọc trong try + kiểm tra kiểu: đây là dòng chạy ở CẤP CAO NHẤT của script, ném
+// lỗi ở đây là chết cả app (mọi khai báo phía dưới không kịp chạy). Một tính năng
+// tăng tốc tuyệt đối không được có quyền làm sập app.
+try{
+  if(typeof fstore.enablePersistence === 'function'){
+    fstore.enablePersistence({ synchronizeTabs: true })
+      .catch(err => console.warn('[tốc độ] không bật được bộ đệm ngoại tuyến (app vẫn chạy bình thường):', err && err.code));
+  }
+}catch(err){ console.warn('[tốc độ] bỏ qua bộ đệm ngoại tuyến:', err); }
+
 // Dùng lại đúng tài khoản đăng nhập đã có ở file mẫu (GieoGieo Store OS)
 // để khớp với rules Firebase hiện tại của project "the-cafe-33".
 let _authReady = null;
@@ -1508,6 +1543,7 @@ function setSync(busy){
 }
 async function reloadCurrent(){
   clearError();
+  memoDropAll();   // bấm Tải lại là muốn số MỚI, không phải số trong bộ đệm
   try{ await ensureAuth(); await loadConfig(); }catch(err){ console.warn('reload config failed', err); }
   if(curScreen==='storehealth') renderStoreHealth();
   else if(curScreen==='inbox') renderAlertInbox();
@@ -2877,11 +2913,32 @@ const STOCK_TX_TYPES = {
   LOC_SET:     {label:'Đặt tồn vị trí',  color:'blue'}
 };
 
+// ============================================================
+// [TỐC ĐỘ] BỘ NHỚ ĐỆM NGẮN HẠN CHO HAI DANH MỤC BỊ ĐỌC LẠI NHIỀU NHẤT
+//
+// Vấn đề: renderEntryKho() gọi loadInventoryItems() MỖI LẦN đổi mục con, và
+// renderKhoPrep() gọi loadPrepItems() mỗi lần vào tab Chế biến. Bấm qua lại 5 mục
+// trong tab Kho là 5 lần đọc trọn cả collection, dữ liệu y hệt nhau.
+//
+// Đệm 20 giây — đủ để đi lại giữa các tab không tốn lượt đọc nào, và ngắn tới mức
+// hàng POS vừa nhập vẫn hiện gần như tức thì. MỌI chỗ GHI đều gọi memoDrop* ngay
+// nên số sau khi tự mình sửa luôn là số mới, không phải đợi hết 20 giây.
+// ============================================================
+const MEMO_TTL = 20000;
+const _memo = { items:null, itemsAt:0, preps:null, prepsAt:0 };
+function memoDropItems(){ _memo.items = null; }
+function memoDropPreps(){ _memo.preps = null; }
+function memoDropAll(){ memoDropItems(); memoDropPreps(); }
+
 async function loadInventoryItems(){
+  if(_memo.items && Date.now() - _memo.itemsAt < MEMO_TTL) return _memo.items;
   const snap = await fstore.collection('inventory_items_gieogieo').get();
-  return snap.docs.map(d=>({id:d.id, ...d.data()})).sort((a,b)=>(a.name||'').localeCompare(b.name||'','vi'));
+  const list = snap.docs.map(d=>({id:d.id, ...d.data()})).sort((a,b)=>(a.name||'').localeCompare(b.name||'','vi'));
+  _memo.items = list; _memo.itemsAt = Date.now();
+  return list;
 }
 function addInventoryItem(data){
+  memoDropItems();
   return fstore.collection('inventory_items_gieogieo').add({
     name: data.name, unit: data.unit, currentStock: Number(data.currentStock)||0,
     minStock: Number(data.minStock)||0, costPerUnit: Number(data.costPerUnit)||0,
@@ -3091,13 +3148,16 @@ function suggestTrackingMode(it){
 }
 // Bật/tắt nhanh việc nhân viên phải kiểm kê 1 món (dùng ở bảng cấu hình kiểm kê).
 function setItemStaffCounts(id, val){
+  memoDropItems();
   return fstore.collection('inventory_items_gieogieo').doc(id)
     .update({ staffCounts: !!val, updatedAt: new Date().toISOString() });
 }
 function updateInventoryItemMeta(id, data){
+  memoDropItems();
   return fstore.collection('inventory_items_gieogieo').doc(id).update({...data, updatedAt: new Date().toISOString()});
 }
 function deleteInventoryItem(id){
+  memoDropItems();
   return fstore.collection('inventory_items_gieogieo').doc(id).delete();
 }
 
@@ -3113,6 +3173,7 @@ function deleteInventoryItem(id){
 //   referenceId   — tuỳ chọn, tham chiếu tới PO/đơn hàng/lần kiểm kho liên quan
 //   locationId    — tuỳ chọn, chỉ có khi giao dịch gắn với 1 vị trí kho cụ thể (TRANSFER)
 async function applyStockTransaction({itemId, type, qty, note, staff, businessDate, source, referenceId, locationId}){
+  memoDropItems();   // tồn kho vừa đổi — số trong bộ đệm không còn đúng
   const itemRef = fstore.collection('inventory_items_gieogieo').doc(itemId);
   const txRef = fstore.collection('stock_transactions_gieogieo').doc();
   await fstore.runTransaction(async (t)=>{
@@ -3278,6 +3339,7 @@ function deleteStorageLocation(id){
 // ghi rõ trong tài liệu .md, KHÔNG che giấu.
 // ------------------------------------------------------------
 async function applyStockTransfer({itemId, fromLocationId, toLocationId, qty, note, staff, businessDate, source, referenceId}){
+  memoDropItems();   // locationStock của món này vừa đổi
   if(fromLocationId === toLocationId) throw new Error('Vị trí nguồn và đích phải khác nhau');
   const itemRef = fstore.collection('inventory_items_gieogieo').doc(itemId);
   const txRef = fstore.collection('stock_transactions_gieogieo').doc();
@@ -3403,9 +3465,12 @@ function deleteRecipe(menuRefKey){
 // ------------------------------------------------------------
 let PREP_ITEMS = [];
 async function loadPrepItems(){
+  if(_memo.preps && Date.now() - _memo.prepsAt < MEMO_TTL) return _memo.preps;
   const snap = await fstore.collection('prep_items_gieogieo').get();
-  return snap.docs.map(d=>({id:d.id, ...d.data()}))
+  const list = snap.docs.map(d=>({id:d.id, ...d.data()}))
     .sort((a,b)=>String(a.code||'').localeCompare(String(b.code||''),'vi'));
+  _memo.preps = list; _memo.prepsAt = Date.now();
+  return list;
 }
 // Tính lại chi phí 1 mẻ + đơn giá/đơn vị thành phẩm từ giá vốn nguyên liệu thô
 // hiện tại. Luôn tính lại lúc lưu (không tin số cũ) — giá nguyên liệu đổi thì
@@ -3472,12 +3537,15 @@ function computePrepCost(batchInputs, batchYield){
   return { totalInputCost: totalInput, costPerUnit: y>0 ? totalInput/y : 0 };
 }
 function addPrepItem(data){
+  memoDropPreps();
   return fstore.collection('prep_items_gieogieo').add({...data, currentStock:0, active:true, createdAt:new Date().toISOString()});
 }
 function updatePrepItem(id, data){
+  memoDropPreps();
   return fstore.collection('prep_items_gieogieo').doc(id).update({...data, updatedAt:new Date().toISOString()});
 }
 function deletePrepItem(id){
+  memoDropPreps();
   return fstore.collection('prep_items_gieogieo').doc(id).delete();
 }
 
@@ -5196,12 +5264,21 @@ async function computeStoreHealth(){
   // phải đoán qua chuỗi onclick — một nguồn dữ liệu, hai chỗ hiển thị.
   const push = (tier, label, count, onclick, err, zone) => out.push({tier, label, count, onclick, err:!!err, zone:zone||''});
 
+  // [TỐC ĐỘ] Bắn TRƯỚC cả ba nhóm việc phía dưới (chai & tem, ngày treo, đơn đặt
+  // hàng) rồi mới await. Trước đây chúng nằm trong ba khối try...await xếp hàng sau
+  // nhóm này, thành bốn lượt chờ nối đuôi nhau; giờ tất cả đi chung một lượt.
+  const ctnP   = Promise.allSettled([loadContainersFor('review'), loadContainersFor('open'), loadContainersFor('unlabeled')]);
+  const staleP = loadStaleClosingDays(30).catch(err=>{ console.warn('storeHealth: ngày treo lỗi', err); return []; });
+  const poP    = loadPurchaseOrders().catch(err=>{ console.warn('storeHealth: PO lỗi', err); return []; });
+
   const [alertsRes, scRes, expRes, closingRes, itemsRes, overrideRes, openingRes] = await Promise.allSettled([
     fstore.collection('alerts_gieogieo').where('status','==','new').get(),
     loadStockCountsForReview(),
     fstore.collection('expenses_gieogieo').where('status','==','pending_review').get(),
     loadDailyClosing(yest),
-    loadInventoryItems(),
+    // [TỐC ĐỘ] init() đã nạp INVENTORY_ITEMS rồi, và mọi chỗ ghi đều nạp lại ngay
+    // sau khi ghi — đọc lại ở đây chỉ tốn thêm một lượt mà số liệu y hệt.
+    (INVENTORY_ITEMS.length ? Promise.resolve(INVENTORY_ITEMS) : loadInventoryItems()),
     loadDailyClosing(today),
     loadDailyOpening(yest)
   ]);
@@ -5245,9 +5322,7 @@ async function computeStoreHealth(){
   // Đọc riêng từng nhóm và nuốt lỗi từng nhóm: quán chưa bật tính năng tem thì collection
   // chưa tồn tại, không được để nó làm trắng cả trang Sức khoẻ quán.
   try{
-    const [rv, mo, chuaDan] = await Promise.allSettled([
-      loadContainersFor('review'), loadContainersFor('open'), loadContainersFor('unlabeled')
-    ]);
+    const [rv, mo, chuaDan] = await ctnP;
     if(rv.status==='fulfilled' && rv.value.length){
       const tong = rv.value.reduce((s,c)=>s+(Number(c.wasteBase)||0),0);
       push('red', `Báo hết khi chai còn nhiều — cần xem lại${tong>0?` (bỏ phí ~${fmtNum(tong,0)} đơn vị)`:''}`,
@@ -5268,10 +5343,10 @@ async function computeStoreHealth(){
 
   // Ngày treo — POS bảo nhân viên "báo Quản lý", nên bên này BẮT BUỘC phải thấy,
   // nếu không cảnh báo bên POS treo vĩnh viễn mà không ai xử lý được.
-  try{
-    const stale = await loadStaleClosingDays(30);
+  {
+    const stale = await staleP;
     if(stale.length) push('red', `Ngày chưa đóng sổ (nhân viên đang thấy cảnh báo trên POS)`, stale.length, `goEntry('cash')`);
-  }catch(err){ console.warn('storeHealth: ngày treo lỗi', err); }
+  }
 
   if(expRes.status==='fulfilled'){
     const n = expRes.value.size;
@@ -5300,11 +5375,10 @@ async function computeStoreHealth(){
   // ---- Đơn đặt hàng chưa nhận đủ ----
   // Đơn treo ở trạng thái pending/partial nghĩa là hàng đã đặt mà chưa về đủ. Không
   // có chỗ nào nhắc thì đơn nằm im, tới lúc hết hàng mới nhớ ra là đã đặt từ tuần trước.
-  try{
-    const pos = await loadPurchaseOrders();
-    const treo = pos.filter(po => po.status==='pending' || po.status==='partial');
+  {
+    const treo = (await poP).filter(po => po.status==='pending' || po.status==='partial');
     if(treo.length) push('yellow', 'Đơn đặt hàng chưa nhận đủ', treo.length, `goKho('po')`, false, 'kho');
-  }catch(err){ console.warn('storeHealth: PO lỗi', err); }
+  }
 
   // 🟡 Nhân viên đã bấm "Không refill được — ghi lý do" khi đóng ngày (GĐ4/PHẦN 5.3).
   // Đây KHÔNG phải lỗi của nhân viên — nhưng chủ quán cần biết để đặt hàng bù.
@@ -6301,15 +6375,24 @@ async function loadStaleClosingDays(daysBack=30){
   }
   const out = [];
   try{
-    const results = await Promise.all(keys.map(k=>Promise.all([
-      fstore.collection('daily_openings_gieogieo').doc(k).get(),
-      fstore.collection('daily_closings_gieogieo').doc(k).get()
-    ])));
-    results.forEach(([openSnap, closeSnap], i)=>{
-      if(!openSnap.exists) return;               // ngày nghỉ, không mở ca → không có gì để đóng
-      const c = closeSnap.exists ? closeSnap.data() : null;
+    // [TỐC ĐỘ] TRƯỚC ĐÂY: 30 ngày × 2 collection = 60 lượt đọc lẻ bắn cùng lúc,
+    // chỉ để dựng danh sách vài ngày treo. Mã tài liệu chính là chuỗi ngày
+    // "YYYY-MM-DD" nên xếp theo thứ tự chữ cũng là xếp theo thời gian — quét một
+    // KHOẢNG mã tài liệu là xong, 2 truy vấn thay cho 60.
+    const docId = firebase.firestore.FieldPath.documentId();
+    const dau = keys[keys.length-1], cuoi = keys[0];   // keys đang từ mới → cũ
+    const rangeGet = coll => fstore.collection(coll)
+      .where(docId, '>=', dau).where(docId, '<=', cuoi).get();
+    const [openSnap, closeSnap] = await Promise.all([
+      rangeGet('daily_openings_gieogieo'), rangeGet('daily_closings_gieogieo')
+    ]);
+    const moCa = new Set(); openSnap.forEach(d=>moCa.add(d.id));
+    const dong = {};        closeSnap.forEach(d=>dong[d.id] = d.data());
+    keys.forEach(k=>{
+      if(!moCa.has(k)) return;                 // ngày nghỉ, không mở ca → không có gì để đóng
+      const c = dong[k] || null;
       if(c && c.status==='closed') return;
-      out.push({ dateKey: keys[i], status: c ? c.status : null, closing: c });
+      out.push({ dateKey: k, status: c ? c.status : null, closing: c });
     });
   }catch(err){ console.warn('loadStaleClosingDays lỗi:', err); }
   return out.sort((a,b)=>a.dateKey.localeCompare(b.dateKey));
@@ -11024,6 +11107,7 @@ async function submitPrepAdjust(){
   const now = new Date().toISOString();
   try{
     // 1. Tồn tổng + nhật ký (transaction để không đè lẫn thao tác khác)
+    memoDropPreps();
     const prepRef = fstore.collection('prep_items_gieogieo').doc(p.id);
     const txRef = fstore.collection('prep_transactions_gieogieo').doc();
     await fstore.runTransaction(async t=>{
@@ -14167,13 +14251,16 @@ function saveTopping() {
     return;
   }
   clearError();
-  try{
-    await loadConfig();
-  }catch(err){
-    console.warn('loadConfig failed', err);
-    showError('Không đọc được cấu hình (targets/labor) từ Firestore — đang dùng giá trị mặc định. Kiểm tra quyền đọc các collection *_gieogieo trong Firestore rules.');
+  // [TỐC ĐỘ] Hai cái này không phụ thuộc nhau — chạy song song, một vòng mạng
+  // thay vì hai.
+  {
+    const [cfg, hr] = await Promise.allSettled([loadConfig(), loadHrSettings()]);
+    if(cfg.status==='rejected'){
+      console.warn('loadConfig failed', cfg.reason);
+      showError('Không đọc được cấu hình (targets/labor) từ Firestore — đang dùng giá trị mặc định. Kiểm tra quyền đọc các collection *_gieogieo trong Firestore rules.');
+    }
+    if(hr.status==='rejected') console.warn('loadHrSettings failed (dùng mặc định — Labor cost vẫn tính theo cách cũ):', hr.reason);
   }
-  try{ await loadHrSettings(); }catch(err){ console.warn('loadHrSettings failed (dùng mặc định — Labor cost vẫn tính theo cách cũ):', err); }
   // [SỬA — người dùng phát hiện] Trước đây RECIPES/INVENTORY_ITEMS/PREP_ITEMS/COGS_TOGO
   // chỉ được load LƯỜI khi mở đúng tab Kho/COGS tương ứng — nếu chủ quán vào thẳng "Hôm
   // nay" trước (trường hợp bình thường nhất!), 4 biến này RỖNG lúc aggregateOrders() chạy,
@@ -14181,16 +14268,25 @@ function saveTopping() {
   // ai biết. Giờ nạp đủ ở init, TRƯỚC renderToday() — để COGS thật (dù tính từ định mức
   // hay nhập tay) luôn sẵn sàng ngay từ màn đầu tiên, bất kể chủ quán mở tab nào trước.
   try{
-    await Promise.all([loadRecipes(), loadCogsMaps()]);
-    INVENTORY_ITEMS = await loadInventoryItems();
-    PREP_ITEMS = await loadPrepItems();
-    TOPPING_RECIPES = await loadToppingRecipes();
-    PACKAGING_PRESETS = await loadPackagingPresets();
-    PACKAGING_ITEM_OVERRIDES = await loadPackagingItemOverrides();
-    PACKAGING_BAGGING_RULES = await loadPackagingBaggingRules();
-    PACKAGING_RULES = await loadPackagingRules();
-    PACKAGING_RULES_CONFIG = await loadPackagingRulesConfig();
-    PACKAGING_BAGGING_TABLE = await loadPackagingBaggingTable();
+    // [TỐC ĐỘ] TRƯỚC ĐÂY 9 lệnh `await` xếp hàng: mỗi cái đợi cái trước xong mới
+    // gửi đi, dù chẳng cái nào cần kết quả của cái nào. Đo tại chỗ với độ trễ
+    // 120ms/lượt: riêng đoạn này ngốn 1,3 giây; trên 4G Việt Nam (200–400ms/lượt)
+    // là 2–4 giây trắng màn. Gửi hết cùng lúc thì tổng thời gian bằng lượt CHẬM
+    // NHẤT chứ không phải tổng của chín lượt.
+    const [rec, cogs, inv, prep, top, pres, ovr, bag, rules, rulesCfg, bagTbl] = await Promise.all([
+      loadRecipes(), loadCogsMaps(), loadInventoryItems(), loadPrepItems(), loadToppingRecipes(),
+      loadPackagingPresets(), loadPackagingItemOverrides(), loadPackagingBaggingRules(),
+      loadPackagingRules(), loadPackagingRulesConfig(), loadPackagingBaggingTable()
+    ]);
+    INVENTORY_ITEMS = inv;
+    PREP_ITEMS = prep;
+    TOPPING_RECIPES = top;
+    PACKAGING_PRESETS = pres;
+    PACKAGING_ITEM_OVERRIDES = ovr;
+    PACKAGING_BAGGING_RULES = bag;
+    PACKAGING_RULES = rules;
+    PACKAGING_RULES_CONFIG = rulesCfg;
+    PACKAGING_BAGGING_TABLE = bagTbl;
   }catch(err){
     console.warn('Nạp dữ liệu COGS (recipes/items/preps) lúc khởi động thất bại — COGS thật sẽ tạm rơi về % benchmark cho tới khi tải lại:', err);
   }
