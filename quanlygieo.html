@@ -808,6 +808,33 @@ table.kt tr:last-child td{border-bottom:none;}
 .tg-toggle-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;}
 .tg-toggle-label{font-size:14px;font-weight:600;color:var(--td);}
 
+/* ---------- Biểu đồ cột "Bill theo giờ" (màn Hôm nay) ----------
+   Một chuỗi số liệu duy nhất nên không cần chú giải: tiêu đề mục đã nói đang vẽ
+   gì. Cột dùng đúng màu nhấn sẵn có của app, chữ dùng token chữ — không tô chữ
+   theo màu cột. Trục và lưới để nhạt, số liệu là thứ duy nhất được phép đậm. */
+.hchart{background:var(--card);border:1px solid rgba(230,227,223,.8);border-radius:var(--r-md);
+  padding:16px 14px 12px;box-shadow:var(--sh-1);}
+.hchart-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:14px;padding:0 2px;}
+.hchart-hero{font-size:26px;font-weight:800;color:var(--td);letter-spacing:-.02em;line-height:1;}
+.hchart-hero span{font-size:13px;font-weight:600;color:var(--gt);letter-spacing:0;margin-left:4px;}
+.hchart-note{font-size:12px;color:var(--gt);text-align:right;line-height:1.5;}
+/* Cuộn ngang khi nhiều giờ hơn bề ngang màn — không bao giờ bóp cột nhỏ hơn ngón tay. */
+.hchart-scroll{overflow-x:auto;scrollbar-width:none;}
+.hchart-scroll::-webkit-scrollbar{display:none;}
+.hbars{display:flex;align-items:flex-end;gap:2px;min-width:100%;}
+.hbar{flex:1 0 30px;display:flex;flex-direction:column;align-items:center;gap:0;cursor:default;}
+.hbar-n{font-size:12px;font-weight:700;color:var(--td);line-height:1;margin-bottom:5px;font-variant-numeric:tabular-nums;}
+.hbar-n.zero{color:var(--ink-4);font-weight:600;}
+/* 4px bo tròn ở ĐẦU cột, vuông ở chân — chân cột phải nằm đúng trên đường nền. */
+.hbar-fill{width:100%;max-width:24px;background:var(--gd);border-radius:4px 4px 0 0;min-height:2px;
+  transition:filter .12s ease;}
+.hbar-fill.empty{background:var(--fill);}
+.hbar:hover .hbar-fill{filter:brightness(.92);}
+.hbar-h{font-size:11px;color:var(--gt);margin-top:7px;line-height:1;font-variant-numeric:tabular-nums;}
+.hbar.peak .hbar-h{color:var(--td);font-weight:700;}
+.hchart-base{height:1px;background:var(--line-2);margin-top:0;}
+.hchart-empty{padding:26px 8px;text-align:center;color:var(--gt);font-size:13.5px;}
+
 /* ==========================================================================
    16. LỚP MÁY TÍNH BẢNG / MÀN LỚN  (html.tab-ui)
    --------------------------------------------------------------------------
@@ -1107,6 +1134,8 @@ html.phone-ui .nav-search .ns-kbd{display:none;}
         <div id="todayNudge"></div>
         <div class="sec-title">Chỉ số hôm nay</div>
         <div class="kgrid" id="todayGrid"></div>
+        <div class="sec-title">Bill theo giờ</div>
+        <div id="todayHourly"></div>
         <div class="sec-title">Cảnh báo</div>
         <div id="todayAlerts"></div>
       </div>
@@ -2211,11 +2240,26 @@ function computeUnitCogsFromRecipe(itemId, size){
   }
   return cost;
 }
+// Giờ của một bill, lấy từ o.time do POS ghi dạng "HH:MM". Trả null nếu bill không
+// có giờ (dữ liệu cũ) — không đoán bừa, thà bỏ ra khỏi biểu đồ còn hơn dồn hết vào 0h.
+function orderHour(o){
+  const m = String((o && o.time) || '').match(/^(\d{1,2}):/);
+  if(!m) return null;
+  const h = Number(m[1]);
+  return (h >= 0 && h <= 23) ? h : null;
+}
+
 function aggregateOrders(orders){
   let revenue=0, bills=0, items=0, toppingBills=0, toppingRevenue=0, cogsActual=0, revenueUncosted=0,
       toppingCogsActual=0, toppingRevenueUncosted=0;
+  // Đếm bill theo từng giờ. Gắn vào ĐÂY chứ không tính riêng ở màn Hôm nay vì hàm này
+  // là chỗ duy nhất đọc qua từng bill, và kết quả của nó được ghi vào cache ngày —
+  // nghĩa là các ngày đã chốt sổ về sau cũng có sẵn phân bố giờ, khỏi đọc lại RTDB.
+  const byHour = {};
   orders.forEach(o=>{
     bills++;
+    const h = orderHour(o);
+    if(h != null) byHour[h] = (byHour[h] || 0) + 1;
     revenue += Number(o.total)||0;
     let hasTopping = false;
     const cogsMap = COGS_TOGO;
@@ -2269,7 +2313,7 @@ function aggregateOrders(orders){
     if(hasTopping) toppingBills++;
     revenueUncosted += Number(o.foodTotal)||0; // đồ ăn (food_gieogieo) chưa có UI nhập COGS -> tạm ước tính %
   });
-  return {revenue,bills,items,toppingBills,toppingRevenue,cogsActual,revenueUncosted,toppingCogsActual,toppingRevenueUncosted};
+  return {revenue,bills,items,toppingBills,toppingRevenue,cogsActual,revenueUncosted,toppingCogsActual,toppingRevenueUncosted,byHour};
 }
 
 function rawMixFromOrders(orders){
@@ -5625,6 +5669,8 @@ async function renderToday(){
       ${c.ratio!=null ? meterHTML(c.ratio, c.status) : ''}
     </div>`).join('');
 
+  renderTodayHourly((salesRes.perDay[0] || {}).byHour);
+
   document.getElementById('todayAlerts').innerHTML = renderAlerts(generateAlerts(kpi, kpi.targetCfg));
   clearError();
   }catch(err){
@@ -5633,6 +5679,73 @@ async function renderToday(){
   }finally{
     setSync(false);
   }
+}
+
+// ============================================================
+// [NEW] BIỂU ĐỒ "BILL THEO GIỜ" — màn Hôm nay
+//
+// Câu hỏi nó trả lời: giờ nào đông, giờ nào vắng. Chỉ nhìn tổng "142 bill/ngày"
+// thì không biết nên xếp mấy người ca chiều, hay có nên mở sớm hơn không.
+//
+// Vì sao là biểu đồ cột chứ không phải bảng: đây là ĐỘ LỚN theo một trục thời
+// gian có thứ tự — mắt so chiều cao nhanh hơn nhiều so với đọc 14 con số. Vẫn in
+// số ngay trên đầu mỗi cột nên không phải rê chuột mới biết chính xác bao nhiêu.
+//
+// Chỉ vẽ từ giờ có bill ĐẦU TIÊN tới giờ có bill CUỐI CÙNG (và ít nhất tới giờ
+// hiện tại). Vẽ đủ 0–23 thì hai phần ba biểu đồ là cột rỗng lúc quán đóng cửa,
+// làm phần có dữ liệu bị nén lại còn một dúm.
+// ============================================================
+function renderTodayHourly(byHour){
+  const box = document.getElementById('todayHourly');
+  if(!box) return;
+  const dem = byHour || {};
+  const gio = Object.keys(dem).map(Number).filter(h=>dem[h]>0).sort((a,b)=>a-b);
+
+  if(!gio.length){
+    box.innerHTML = '<div class="hchart"><div class="hchart-empty">Chưa có bill nào hôm nay.</div></div>';
+    return;
+  }
+  const gioHienTai = new Date().getHours();
+  const dau = gio[0];
+  const cuoi = Math.max(gio[gio.length-1], Math.min(gioHienTai, 23));
+  const cot = [];
+  for(let h = dau; h <= cuoi; h++) cot.push({ h, n: dem[h] || 0 });
+
+  const tong = cot.reduce((a,c)=>a+c.n, 0);
+  const cao = Math.max(...cot.map(c=>c.n));
+  const dinh = cot.filter(c=>c.n === cao).map(c=>c.h);
+  // Trung bình tính trên số giờ ĐÃ MỞ BÁN (số cột), không chia cho 24 — chia cho
+  // 24 thì quán nào cũng ra một con số bé tí vô nghĩa.
+  const tb = tong / cot.length;
+
+  const PX = 132;   // chiều cao vùng vẽ
+  box.innerHTML = `
+    <div class="hchart">
+      <div class="hchart-head">
+        <div>
+          <div class="hchart-hero">${fmtNum(tb,1)}<span>bill/giờ</span></div>
+          <div class="hchart-note" style="text-align:left;margin-top:3px;">${tong} bill trong ${cot.length} giờ mở bán</div>
+        </div>
+        <div class="hchart-note">Đông nhất<br><b style="color:var(--td);font-size:13.5px;">${dinh.map(h=>pad(h)+'h').join(', ')}</b> · ${cao} bill</div>
+      </div>
+      <div class="hchart-scroll">
+        <div>
+          <div class="hbars" style="height:${PX + 20}px;">
+            ${cot.map(c=>{
+              const hi = cao ? Math.round((c.n / cao) * PX) : 0;
+              return `<div class="hbar${c.n===cao?' peak':''}" title="${pad(c.h)}:00–${pad(c.h)}:59 · ${c.n} bill">
+                <div class="hbar-n${c.n?'':' zero'}">${c.n}</div>
+                <div class="hbar-fill${c.n?'':' empty'}" style="height:${Math.max(hi, c.n?4:2)}px"></div>
+              </div>`;
+            }).join('')}
+          </div>
+          <div class="hchart-base"></div>
+          <div class="hbars">
+            ${cot.map(c=>`<div class="hbar${c.n===cao?' peak':''}"><div class="hbar-h">${pad(c.h)}</div></div>`).join('')}
+          </div>
+        </div>
+      </div>
+    </div>`;
 }
 
 // ============================================================
