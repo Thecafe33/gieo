@@ -1012,6 +1012,9 @@ function setSync(busy){
 }
 async function reloadCurrent(){
   clearError();
+  // Nút tải lại phải ra số THẬT: xoá nhớ tạm nguyên liệu trước, nếu không màn
+  // Sức khoẻ quán có thể vẽ lại bằng đúng dữ liệu cũ vừa bị nghi ngờ.
+  invalidateInventoryCache();
   try{ await ensureAuth(); await loadConfig(); }catch(err){ console.warn('reload config failed', err); }
   if(curScreen==='storehealth') renderStoreHealth();
   else if(curScreen==='inbox') renderAlertInbox();
@@ -2382,7 +2385,30 @@ async function loadInventoryItems(){
   const snap = await fstore.collection('inventory_items_gieogieo').get();
   return snap.docs.map(d=>({id:d.id, ...d.data()})).sort((a,b)=>(a.name||'').localeCompare(b.name||'','vi'));
 }
+
+// [TỐC ĐỘ] Bản có nhớ tạm của loadInventoryItems — DÙNG RẤT HẠN CHẾ, cố ý.
+//
+// Lúc khởi động, inventory_items_gieogieo bị tải TRỌN COLLECTION hai lần cách
+// nhau vài chục mili giây: một lần ở init(), một lần nữa trong computeStoreHealth().
+// Hai lần đọc y hệt nhau cho cùng một dữ liệu.
+//
+// Vì sao KHÔNG cho 15 chỗ gọi loadInventoryItems() còn lại dùng chung cache này:
+// phần lớn chúng chạy NGAY SAU một lệnh ghi (nhập kho, sửa giá vốn, kiểm kê) và
+// bắt buộc phải thấy số mới. Một cache dùng chung sẽ trả về tồn kho cũ ngay sau
+// khi vừa nhập hàng — sai ở đúng chỗ nguy hiểm nhất. Nên cache này chỉ phục vụ
+// đúng cặp init() ↔ computeStoreHealth(); mọi nơi khác vẫn gọi thẳng bản gốc và
+// luôn nhận dữ liệu tươi.
+let _invCache = null, _invCacheAt = 0;
+const INV_CACHE_TTL_MS = 10000;
+function invalidateInventoryCache(){ _invCache = null; _invCacheAt = 0; }
+async function loadInventoryItemsCached(){
+  if(_invCache && (Date.now() - _invCacheAt) < INV_CACHE_TTL_MS) return _invCache;
+  const items = await loadInventoryItems();
+  _invCache = items; _invCacheAt = Date.now();
+  return items;
+}
 function addInventoryItem(data){
+  invalidateInventoryCache();
   return fstore.collection('inventory_items_gieogieo').add({
     name: data.name, unit: data.unit, currentStock: Number(data.currentStock)||0,
     minStock: Number(data.minStock)||0, costPerUnit: Number(data.costPerUnit)||0,
@@ -2404,13 +2430,16 @@ function addInventoryItem(data){
 }
 // Bật/tắt nhanh việc nhân viên phải kiểm kê 1 món (dùng ở bảng cấu hình kiểm kê).
 function setItemStaffCounts(id, val){
+  invalidateInventoryCache();
   return fstore.collection('inventory_items_gieogieo').doc(id)
     .update({ staffCounts: !!val, updatedAt: new Date().toISOString() });
 }
 function updateInventoryItemMeta(id, data){
+  invalidateInventoryCache();
   return fstore.collection('inventory_items_gieogieo').doc(id).update({...data, updatedAt: new Date().toISOString()});
 }
 function deleteInventoryItem(id){
+  invalidateInventoryCache();
   return fstore.collection('inventory_items_gieogieo').doc(id).delete();
 }
 
@@ -2426,6 +2455,10 @@ function deleteInventoryItem(id){
 //   referenceId   — tuỳ chọn, tham chiếu tới PO/đơn hàng/lần kiểm kho liên quan
 //   locationId    — tuỳ chọn, chỉ có khi giao dịch gắn với 1 vị trí kho cụ thể (TRANSFER)
 async function applyStockTransaction({itemId, type, qty, note, staff, businessDate, source, referenceId, locationId}){
+  // Hàm này đổi currentStock → mọi bản chụp nguyên liệu đang nhớ tạm đều hết hạn
+  // ngay lập tức. Xoá TRƯỚC khi ghi: nếu ghi xong mới xoá mà giữa chừng có lượt
+  // đọc xen vào, lượt đó sẽ nạp lại đúng số cũ rồi đóng dấu thời gian mới.
+  invalidateInventoryCache();
   const itemRef = fstore.collection('inventory_items_gieogieo').doc(itemId);
   const txRef = fstore.collection('stock_transactions_gieogieo').doc();
   await fstore.runTransaction(async (t)=>{
@@ -2464,7 +2497,12 @@ async function loadStockCounts(limitN=20){
 // kho theo số đếm sai/gian lận mà không ai kiểm lại.
 // ------------------------------------------------------------
 async function loadStockCountsForReview(){
-  const snap = await fstore.collection('stock_counts_gieogieo').where('status','==','pending_review').get();
+  // [TỐC ĐỘ] Chặn trần giống 2 truy vấn "chờ xử lý" còn lại ở màn Sức khoẻ quán —
+  // xem lý do đầy đủ ở chú thích HEALTH_QUERY_CAP. Phiếu kiểm kê là doc NẶNG (chứa
+  // cả mảng items của mọi nguyên liệu đếm được), nên tồn đọng ở đây tốn băng thông
+  // hơn hẳn alerts hay expenses.
+  const snap = await fstore.collection('stock_counts_gieogieo')
+    .where('status','==','pending_review').limit(HEALTH_QUERY_CAP).get();
   return snap.docs.map(d=>({id:d.id, ...d.data()})).sort((a,b)=>(a.createdAt||'').localeCompare(b.createdAt||''));
 }
 async function approveStockCount(countId, reviewerNote){
@@ -2592,6 +2630,7 @@ function deleteStorageLocation(id){
 // ------------------------------------------------------------
 async function applyStockTransfer({itemId, fromLocationId, toLocationId, qty, note, staff, businessDate, source, referenceId}){
   if(fromLocationId === toLocationId) throw new Error('Vị trí nguồn và đích phải khác nhau');
+  invalidateInventoryCache();
   const itemRef = fstore.collection('inventory_items_gieogieo').doc(itemId);
   const txRef = fstore.collection('stock_transactions_gieogieo').doc();
   await fstore.runTransaction(async (t)=>{
@@ -4059,27 +4098,50 @@ document.getElementById('healthSeg').addEventListener('click', e=>{
 // trắng cả trang; mục đó hiện "không kiểm tra được" thay vì biến mất âm thầm
 // (biến mất âm thầm nguy hiểm hơn: chủ quán tưởng không có vấn đề gì).
 // ============================================================
+// [TỐC ĐỘ] Trần cho 3 truy vấn "chờ xử lý" của màn Sức khoẻ quán.
+//
+// Ba truy vấn alerts/expenses/stock_counts trước đây KHÔNG có .limit(): chúng tải
+// về TOÀN BỘ bản ghi chưa xử lý. Nếu chủ quán không bấm "đã xử lý" thì số này chỉ
+// có tăng, nên app mở ngày càng chậm — đây chính là lý do "hôm nay load chậm hơn
+// hôm qua". Chặn trần lại thì thời gian mở app thành hằng số, không phụ thuộc vào
+// việc tồn đọng bao nhiêu.
+//
+// Đánh đổi: vượt trần thì con số hiển thị KHÔNG còn chính xác. Tuyệt đối không
+// được hiện "200" như thể đó là số thật — chủ quán sẽ tin sai. Hiện "200+" và đẩy
+// thêm một cảnh báo riêng, vì tồn đọng tới mức đó tự nó đã là việc cần biết.
+const HEALTH_QUERY_CAP = 200;
+function capLabel(n){ return n >= HEALTH_QUERY_CAP ? HEALTH_QUERY_CAP + '+' : n; }
+
 async function computeStoreHealth(){
   const today = dkey(new Date());
   const yest = dkey(new Date(Date.now() - 86400000));
   const out = [];
   const push = (tier, label, count, onclick, err) => out.push({tier, label, count, onclick, err:!!err});
 
-  const [alertsRes, scRes, expRes, closingRes, itemsRes, overrideRes, openingRes] = await Promise.allSettled([
-    fstore.collection('alerts_gieogieo').where('status','==','new').get(),
+  // [TỐC ĐỘ] loadStaleClosingDays() được kéo VÀO khối song song này. Trước đây nó
+  // bị `await` riêng ở giữa hàm, sau khi khối này đã xong — tức là một vòng chờ
+  // mạng nữa xếp hàng phía sau, không chồng lấn với gì cả.
+  const [alertsRes, scRes, expRes, closingRes, itemsRes, overrideRes, openingRes, staleRes] = await Promise.allSettled([
+    fstore.collection('alerts_gieogieo').where('status','==','new').limit(HEALTH_QUERY_CAP).get(),
     loadStockCountsForReview(),
-    fstore.collection('expenses_gieogieo').where('status','==','pending_review').get(),
+    fstore.collection('expenses_gieogieo').where('status','==','pending_review').limit(HEALTH_QUERY_CAP).get(),
     loadDailyClosing(yest),
-    loadInventoryItems(),
+    loadInventoryItemsCached(),
     loadDailyClosing(today),
-    loadDailyOpening(yest)
+    loadDailyOpening(yest),
+    loadStaleClosingDays(30)
   ]);
-
   // 🔴 Cảnh báo do POS tạo — tách theo loại vì hai việc cần xử lý khác hẳn nhau:
   // chênh lệch giao ca là chuyện đối chiếu người/ca, còn thiếu định mức là việc
   // chủ quán phải tự vào khai công thức.
   if(alertsRes.status==='fulfilled'){
     const docs = alertsRes.value.docs.map(d=>d.data());
+    // Chạm trần = danh sách đang bị cắt, nên MỌI con số tách theo loại bên dưới chỉ
+    // là phần đọc được, không phải tổng thật. Báo thẳng ra thay vì để chủ quán nhìn
+    // mấy con số đã bị cắt mà tưởng là đủ.
+    if(docs.length >= HEALTH_QUERY_CAP){
+      push('yellow', `Đang tồn hơn ${HEALTH_QUERY_CAP} cảnh báo chưa xử lý — các số dưới đây chỉ tính trên ${HEALTH_QUERY_CAP} cái đọc được`, capLabel(docs.length), `switchScreen('inbox')`);
+    }
     const nGiaoCa = docs.filter(a=>a.type==='handover_variance').length;
     const nTienGiaoCa = docs.filter(a=>a.type==='handover_cash_variance').length;
     const nPrepCount = docs.filter(a=>a.type==='prep_count_variance').length;
@@ -4106,19 +4168,19 @@ async function computeStoreHealth(){
 
   if(scRes.status==='fulfilled'){
     const n = scRes.value.length;
-    if(n) push('red', 'Phiếu kiểm kê chờ duyệt', n, `goKho('stockcount')`);
+    if(n) push('red', 'Phiếu kiểm kê chờ duyệt', capLabel(n), `goKho('stockcount')`);
   } else { console.warn('storeHealth: kiểm kê lỗi', scRes.reason); push('red','Kiểm kê chờ duyệt — không kiểm tra được','!',`goKho('stockcount')`,true); }
 
   // Ngày treo — POS bảo nhân viên "báo Quản lý", nên bên này BẮT BUỘC phải thấy,
   // nếu không cảnh báo bên POS treo vĩnh viễn mà không ai xử lý được.
-  try{
-    const stale = await loadStaleClosingDays(30);
+  if(staleRes.status==='fulfilled'){
+    const stale = staleRes.value;
     if(stale.length) push('red', `Ngày chưa đóng sổ (nhân viên đang thấy cảnh báo trên POS)`, stale.length, `goEntry('cash')`);
-  }catch(err){ console.warn('storeHealth: ngày treo lỗi', err); }
+  } else { console.warn('storeHealth: ngày treo lỗi', staleRes.reason); }
 
   if(expRes.status==='fulfilled'){
     const n = expRes.value.size;
-    if(n) push('red', 'Chi phí chờ duyệt', n, `curEntryTab='exp'; switchScreen('entry')`);
+    if(n) push('red', 'Chi phí chờ duyệt', capLabel(n), `curEntryTab='exp'; switchScreen('entry')`);
   } else { console.warn('storeHealth: chi phí lỗi', expRes.reason); push('red','Chi phí chờ duyệt — không kiểm tra được','!',`curEntryTab='exp'; switchScreen('entry')`,true); }
 
   // 🔴 Hôm qua ĐÃ MỞ CA mà chưa đóng ngày — dấu hiệu ca tối bỏ dở quy trình kết ca.
@@ -5127,6 +5189,21 @@ function renderStaleDaysBox(stale){
     </div>`;
 }
 
+// [TỐC ĐỘ] Trước đây hàm này bắn 60 lệnh .get() LẺ mỗi lần mở app (30 ngày × 2
+// collection) — nặng nhất trong cả đường khởi động. Nay đảo lại thứ tự hỏi:
+//
+//   1. MỘT query khoảng ngày trên daily_closings_gieogieo → biết ngày nào đã đóng.
+//   2. Ngày "ứng viên" = 30 ngày trừ đi các ngày đã đóng. Quán chạy bình thường
+//      thì còn 0-2 ngày.
+//   3. Chỉ với ứng viên mới hỏi daily_openings để biết hôm đó có mở ca không.
+//
+// Vì sao KHÔNG dùng luôn range query cho daily_openings (sẽ còn gọn hơn nữa):
+// cả app này chỉ đọc collection đó bằng .doc(k).get(), tức kiểu `get`, chưa bao
+// giờ `list`. Nếu Firestore rules cho `get` mà không cho `list` thì range query
+// ném lỗi, rơi vào catch, trả về [] — và cảnh báo đỏ "ngày chưa đóng sổ" BIẾN MẤT
+// IM LẶNG, đúng thứ màn Sức khoẻ quán sinh ra để tránh. Giữ nguyên kiểu `get`
+// cho openings là đổi ít rủi ro nhất. Còn daily_closings thì range query đã được
+// dùng sẵn ở loadRecentClosings/computeCashVarianceSummary nên chắc chắn chạy được.
 async function loadStaleClosingDays(daysBack=30){
   const keys = [];
   for(let i=1;i<=daysBack;i++){
@@ -5135,15 +5212,30 @@ async function loadStaleClosingDays(daysBack=30){
   }
   const out = [];
   try{
-    const results = await Promise.all(keys.map(k=>Promise.all([
-      fstore.collection('daily_openings_gieogieo').doc(k).get(),
-      fstore.collection('daily_closings_gieogieo').doc(k).get()
-    ])));
-    results.forEach(([openSnap, closeSnap], i)=>{
+    const startKey = keys[keys.length-1], endKey = keys[0];   // keys[] đi lùi: [hôm qua ... cũ nhất]
+    const closeSnap = await fstore.collection('daily_closings_gieogieo')
+      .where('businessDate','>=',startKey).where('businessDate','<=',endKey).get();
+    const closings = {};
+    // Khoá theo doc.id trước, businessDate chỉ là dự phòng: doc id CHÍNH LÀ dateKey
+    // (mọi nơi ghi collection này đều dùng .doc(dateKey)), nên nếu có doc cũ lỡ
+    // thiếu field businessDate thì vẫn nhận ra được — thiếu sót đó mà bỏ qua sẽ
+    // làm một ngày ĐÃ ĐÓNG bị báo đỏ nhầm là "chưa đóng sổ".
+    closeSnap.forEach(doc=>{ const c = doc.data() || {}; closings[doc.id || c.businessDate] = c; });
+
+    // Ngày đã 'closed' thì xong hẳn, không cần biết có mở ca hay không.
+    const candidates = keys.filter(k=>{
+      const c = closings[k];
+      return !(c && c.status==='closed');
+    });
+
+    const openSnaps = await Promise.all(
+      candidates.map(k=> fstore.collection('daily_openings_gieogieo').doc(k).get())
+    );
+    openSnaps.forEach((openSnap, i)=>{
       if(!openSnap.exists) return;               // ngày nghỉ, không mở ca → không có gì để đóng
-      const c = closeSnap.exists ? closeSnap.data() : null;
-      if(c && c.status==='closed') return;
-      out.push({ dateKey: keys[i], status: c ? c.status : null, closing: c });
+      const k = candidates[i];
+      const c = closings[k] || null;
+      out.push({ dateKey: k, status: c ? c.status : null, closing: c });
     });
   }catch(err){ console.warn('loadStaleClosingDays lỗi:', err); }
   return out.sort((a,b)=>a.dateKey.localeCompare(b.dateKey));
@@ -10440,6 +10532,7 @@ let locStockShowAll = false;
 // Ghi 1 dòng ledger cho mỗi lần đặt số — không có vết thì lần sau nhìn con số lạ
 // sẽ không ai biết là do đếm lại hay do lỗi.
 async function setLocationStock({itemId, locationId, locationName, qty, staff}){
+  invalidateInventoryCache();
   const itemRef = fstore.collection('inventory_items_gieogieo').doc(itemId);
   const txRef = fstore.collection('stock_transactions_gieogieo').doc();
   await fstore.runTransaction(async (t)=>{
@@ -10899,6 +10992,14 @@ async function renderKhoStockCount(){
 
   const threshold = Number(FINANCE.stockCountVarianceThresholdPct)||0;
   const pkgThreshold = Number(FINANCE.packagingVarianceThresholdPct)||0;
+  // Danh sách bị chặn trần (xem HEALTH_QUERY_CAP). Màn này là nơi DUYỆT, nên
+  // cắt bớt mà không nói là nguy hiểm: chủ quán duyệt hết những gì nhìn thấy rồi
+  // tưởng đã sạch, trong khi vẫn còn phiếu chờ không hiện ra.
+  const cappedHtml = pending.length >= HEALTH_QUERY_CAP ? `
+    <div class="card" style="margin-bottom:12px;border-left:4px solid var(--warn)">
+      <div style="font-weight:800;font-size:13px;color:#b8860b;margin-bottom:4px">${ic('alert',14)} Đang hiện ${HEALTH_QUERY_CAP} phiếu đầu tiên</div>
+      <div class="small-note">Còn phiếu chờ duyệt chưa hiện ra. Duyệt bớt danh sách này rồi mở lại màn để thấy phần còn lại.</div>
+    </div>` : '';
   const thresholdHtml = `
     <div class="card" style="margin-bottom:12px">
       <div class="field"><label>Ngưỡng cảnh báo lệch (%) — Nguyên liệu — dòng lệch quá ngưỡng này sẽ tô đỏ để lưu ý trước khi duyệt</label>
@@ -10914,7 +11015,7 @@ async function renderKhoStockCount(){
     + (pending.length ? '' : '<div class="muted">Không có lần kiểm kê nào đang chờ duyệt.</div>');
   if(!pending.length) return;
 
-  box.innerHTML = thresholdHtml + renderStaffCountConfigBox() + pending.map(c=>{
+  box.innerHTML = cappedHtml + thresholdHtml + renderStaffCountConfigBox() + pending.map(c=>{
     const rows = (c.items||[]).map(it=>{
       const invItem = (INVENTORY_ITEMS||[]).find(x=>x.id===it.itemId);
       const isPkg = !!(invItem && invItem.isPackagingMaterial);
@@ -12486,6 +12587,14 @@ function saveTopping() {
 
 (async function init(){
   setSync(true);
+
+  // [TỐC ĐỘ] Vẽ khung điều hướng TRƯỚC khi chạm tới mạng. renderSidebarNav()/
+  // renderReportSubNav() không đọc dữ liệu nào (chỉ NAV_SECTIONS + biến đếm mặc
+  // định 0), nên gọi sớm được — chủ quán thấy giao diện ngay thay vì màn trắng
+  // suốt mấy giây đầu. Số liệu vẫn điền vào sau, đúng như cũ.
+  renderSidebarNav();
+  renderReportSubNav();
+
   try{
     await ensureAuth();
   }catch(err){
@@ -12494,40 +12603,69 @@ function saveTopping() {
     return;
   }
   clearError();
-  try{
-    await loadConfig();
-  }catch(err){
-    console.warn('loadConfig failed', err);
+
+  // ============================================================
+  // [TỐC ĐỘ] NẠP SONG SONG — trước đây 11 loader này bị `await` NỐI ĐUÔI nhau,
+  // mỗi cái một vòng chờ mạng riêng, cộng lại là 13 lượt chờ tuần tự trước khi
+  // màn hình đầu tiên hiện ra. Đã rà từng hàm: tất cả đều CHỈ ĐỌC, không hàm nào
+  // ghi, và không hàm nào đọc biến global của hàm khác lúc đang nạp (mỗi hàm gán
+  // vào đúng global của riêng nó). Nên chạy song song là tương đương hoàn toàn
+  // về kết quả, chỉ khác thời gian.
+  //
+  // Dùng allSettled chứ KHÔNG dùng all — và đây là sửa một bug âm thầm chứ không
+  // chỉ là tối ưu: bản cũ bọc cả chuỗi trong MỘT try/catch, nên chỉ cần một
+  // collection lỗi (hoặc rules chặn) là mọi loader ĐỨNG SAU nó không chạy nữa —
+  // mất luôn PACKAGING_RULES, BAGGING_TABLE... mà chỉ hiện đúng một dòng cảnh
+  // báo chung chung. Với allSettled, một collection hỏng không kéo theo 10 cái
+  // còn lại, và ta biết ĐÍCH DANH phần nào hỏng.
+  //
+  // Lý do phải nạp đủ ở đây (giữ nguyên từ bản trước — vẫn đúng, chỉ đổi cách
+  // nạp chứ không đổi thời điểm): [SỬA — người dùng phát hiện] RECIPES/
+  // INVENTORY_ITEMS/PREP_ITEMS/COGS_TOGO trước kia chỉ được load LƯỜI khi mở
+  // đúng tab Kho/COGS tương ứng — nếu chủ quán vào thẳng "Hôm nay" trước (trường
+  // hợp bình thường nhất!), 4 biến này RỖNG lúc aggregateOrders() chạy, khiến
+  // COGS thật LUÔN = 0 dù đã nhập/khai đầy đủ, âm thầm rơi về % benchmark mà
+  // không ai biết.
+  // ============================================================
+  const BOOT_LOADS = [
+    ['cấu hình (targets/labor)', loadConfig],
+    ['cấu hình nhân sự',         loadHrSettings],
+    ['định mức món',             loadRecipes],
+    ['GOGS mang về',             loadCogsMaps],
+    ['nguyên liệu',              async ()=>{ INVENTORY_ITEMS = await loadInventoryItemsCached(); }],
+    ['bán thành phẩm',           async ()=>{ PREP_ITEMS = await loadPrepItems(); }],
+    ['GOGS topping',             loadToppingRecipes],
+    ['bao bì theo size',         loadPackagingPresets],
+    ['bao bì riêng theo món',    loadPackagingItemOverrides],
+    ['quy tắc đóng túi',         loadPackagingBaggingRules],
+    ['quy tắc bao bì',           loadPackagingRules],
+    ['kích hoạt bao bì',         loadPackagingRulesConfig],
+    ['bảng túi theo số ly',      loadPackagingBaggingTable]
+  ];
+  const bootRes = await Promise.allSettled(BOOT_LOADS.map(([, fn])=> fn()));
+  const bootFailed = [];
+  bootRes.forEach((r, i)=>{
+    if(r.status === 'rejected'){
+      bootFailed.push(BOOT_LOADS[i][0]);
+      console.warn('[khởi động] Nạp "' + BOOT_LOADS[i][0] + '" thất bại:', r.reason);
+    }
+  });
+
+  // loadConfig hỏng là chuyện khác hẳn mấy cái còn lại: CONFIG rơi về DEFAULTS
+  // nên MỌI mục tiêu/chỉ số trên màn hình đều sai, phải báo riêng và báo rõ.
+  if(bootRes[0].status === 'rejected'){
     showError('Không đọc được cấu hình (targets/labor) từ Firestore — đang dùng giá trị mặc định. Kiểm tra quyền đọc các collection *_gieogieo trong Firestore rules.');
+  }else if(bootFailed.length){
+    showError('Chưa nạp được: ' + bootFailed.join(', ') + '. Giá vốn (COGS) thật có thể tạm rơi về % benchmark cho tới khi tải lại.');
   }
-  try{ await loadHrSettings(); }catch(err){ console.warn('loadHrSettings failed (dùng mặc định — Labor cost vẫn tính theo cách cũ):', err); }
-  // [SỬA — người dùng phát hiện] Trước đây RECIPES/INVENTORY_ITEMS/PREP_ITEMS/COGS_TOGO
-  // chỉ được load LƯỜI khi mở đúng tab Kho/COGS tương ứng — nếu chủ quán vào thẳng "Hôm
-  // nay" trước (trường hợp bình thường nhất!), 4 biến này RỖNG lúc aggregateOrders() chạy,
-  // khiến COGS thật LUÔN = 0 dù đã nhập/khai đầy đủ, âm thầm rơi về % benchmark mà không
-  // ai biết. Giờ nạp đủ ở init, TRƯỚC renderToday() — để COGS thật (dù tính từ định mức
-  // hay nhập tay) luôn sẵn sàng ngay từ màn đầu tiên, bất kể chủ quán mở tab nào trước.
-  try{
-    await Promise.all([loadRecipes(), loadCogsMaps()]);
-    INVENTORY_ITEMS = await loadInventoryItems();
-    PREP_ITEMS = await loadPrepItems();
-    TOPPING_RECIPES = await loadToppingRecipes();
-    PACKAGING_PRESETS = await loadPackagingPresets();
-    PACKAGING_ITEM_OVERRIDES = await loadPackagingItemOverrides();
-    PACKAGING_BAGGING_RULES = await loadPackagingBaggingRules();
-    PACKAGING_RULES = await loadPackagingRules();
-    PACKAGING_RULES_CONFIG = await loadPackagingRulesConfig();
-    PACKAGING_BAGGING_TABLE = await loadPackagingBaggingTable();
-  }catch(err){
-    console.warn('Nạp dữ liệu COGS (recipes/items/preps) lúc khởi động thất bại — COGS thật sẽ tạm rơi về % benchmark cho tới khi tải lại:', err);
-  }
+
   document.getElementById('simLabor').value = laborMonthlyTotal(CONFIG.labor);
   document.getElementById('simAov').value = CONFIG.targets.aov;
   document.getElementById('simBills').value = CONFIG.targets.billsPerDay;
   document.getElementById('simCogs').value = CONFIG.targets.cogsPct;
-  // [GĐ6] Vẽ sidebar + thanh chuyển báo cáo, rồi vào màn mặc định "Sức khoẻ quán".
-  renderSidebarNav();
-  renderReportSubNav();
+  // [GĐ6] Sidebar + thanh chuyển báo cáo đã vẽ ở đầu hàm (cả hai đều không phụ
+  // thuộc dữ liệu). renderStoreHealth() bên dưới sẽ tự vẽ lại sidebar một lần nữa
+  // để gắn chấm đỏ khi có việc cần xử lý.
   // [BÊ TỪ POS] Gắn listener đồng bộ cấu hình khuyến mãi/phí sàn — gắn MỘT LẦN
   // ở init (không đặt trong switchScreen, kẻo mỗi lần đổi màn lại chồng thêm một
   // listener nữa lên cùng một node Firebase).
