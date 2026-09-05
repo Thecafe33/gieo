@@ -1,6 +1,8 @@
 # Kế hoạch: Cân bán thành phẩm theo dụng cụ đựng (trừ bì tự động)
 
-> Trạng thái: **kế hoạch, chưa code**. Mốc so sánh: commit `6aad9fd` (bản POS + Quản lý đang chạy thật ở quán).
+> Trạng thái: **đã code xong cả 3 luồng**. Mốc so sánh: commit `6aad9fd` (bản POS + Quản lý đang chạy thật ở quán).
+>
+> **Việc còn lại của bạn trước khi dùng thật:** mở rules Firebase Storage cho đường dẫn `prep_vessels/` (xem mục 8). Nếu rules chỉ đang mở cho `kiosk/` thì upload ảnh sẽ báo lỗi 403 với chữ nói rõ nguyên nhân.
 
 ---
 
@@ -27,6 +29,7 @@ Cho phép **cân cả vật đựng**, hệ thống tự trừ bì và cộng nh
 | Khai dụng cụ ở đâu | **Thư viện dùng chung** — 1 danh mục riêng, mỗi BTP chọn tối đa 5 dụng cụ từ đó |
 | Số bì | **Khoá cứng theo số Quản lý khai** — nhân viên không sửa được |
 | Kết ca | **Giữ nguyên nhập đúng từng lô**, chỉ thêm nút cân cho mỗi ô |
+| Đơn vị | Mọi bán thành phẩm đã quy về **gram** — bỏ hẳn `gramsPerUnit`, không cần khai tỷ trọng |
 
 ---
 
@@ -63,19 +66,18 @@ vesselIds: ['id1','id2','id3'],   // tối đa 5, thứ tự = thứ tự hiện
 gramsPerUnit: 1                   // xem 3.3
 ```
 
-### 3.3 Bẫy đơn vị: cân ra **gam**, mà BTP có thể tính bằng **ml**
+### 3.3 Đơn vị: chỉ cân được thứ quy đổi từ gram
 
-Cân bao giờ cũng cho ra gam. Nhưng `unit` của BTP đang có cả `ml` (cốt trà sữa, syrup). Trừ bì gam ra khỏi số gam rồi cộng thẳng vào tồn tính bằng ml là lẫn đơn vị — đúng loại lỗi mà file POS đã phải ghi chú xử lý ở `prepUnitInfoPOS()`.
+Cân bao giờ cũng cho ra gam. Vì bạn đã quy mọi bán thành phẩm về gram nên **không cần khai tỷ trọng gì cả** — chỉ còn một bảng quy đổi cứng:
 
-**Xử lý:** thêm `gramsPerUnit` vào BTP (mặc định `1`).
-
-```
-số ròng (theo đơn vị BTP) = (số trên cân tính bằng g − bì tính bằng g) / gramsPerUnit
+```js
+const VESSEL_UNIT_FACTOR = { g: 1, kg: 1000 };   // 1 đơn vị BTP = ? gam
 ```
 
-- `unit === 'g'` → ô này ẩn hẳn, luôn = 1, nhân viên không thấy gì khác.
-- `unit === 'ml'` → form Quản lý hiện ô "1 ml nặng bao nhiêu gam?" kèm giải thích: *"Nước = 1. Cốt trà sữa có đường ≈ 1,03. Để 1 nếu quán quy ước 1ml = 1g."*
-- `unit` là `phần`/`cái` → **không cho gắn dụng cụ**, ẩn hẳn tính năng cân (cân đếm được cái thì không cần trừ bì).
+- `g` / `kg` → cân được, số ròng = `(số trên cân − bì) / hệ số`
+- `ml`, `l`, `cái`, `miếng` → **ẩn hẳn tính năng**. Bên Quản lý không cho gắn dụng cụ và nói rõ lý do; bên POS không hiện nút cân. Ẩn đi chứ không hiện ra rồi cho số sai — `ml` cần biết tỷ trọng, `cái` thì đếm chứ không cân.
+
+Chặn ở **cả hai đầu** là cố ý: đơn vị của bán thành phẩm có thể bị đổi *sau khi* đã gắn dụng cụ, chặn một đầu là lọt.
 
 ### 3.4 Ghi vết mọi lần cân
 
@@ -247,41 +249,63 @@ Ghi `weighings` vào bản ghi huỷ. Phần suy ngược ra hao hụt nguyên l
 
 ---
 
-## 7. Thứ tự làm — 5 bước, mỗi bước xong là chạy được
+## 7. Đã làm những gì
 
-| # | Việc | File | Xong thì có gì |
+| # | Việc | File | Commit |
 |---|---|---|---|
-| 1 | Màn "Dụng cụ đựng" + upload/nén ảnh | quanlygieo | Khai được thư viện dụng cụ, chưa ai dùng tới |
-| 2 | Gắn `vesselIds` + `gramsPerUnit` vào form Chế biến cấp 1 | quanlygieo | Cấu hình đủ, POS chưa đổi |
-| 3 | `PrepWeighPad` + ráp vào luồng **Nhập BTP thu được** | posgieo | Luồng quan trọng nhất chạy thật, đo phản hồi nhân viên |
-| 4 | Ráp vào **Kết ca** | posgieo | Kết ca nhanh hơn |
-| 5 | Ráp vào **Huỷ BTP** (kèm cách "lấy hiệu") | posgieo | Đủ 3 luồng |
+| 1 | Màn "Kho → Dụng cụ đựng" + upload/nén/xoá ảnh trên Firebase Storage | quanlygieo | `03ce516` |
+| 2 | Lưới chọn tối đa 5 dụng cụ trong form Chế biến cấp 1 | quanlygieo | `03ce516` |
+| 3 | Bộ cân `openWeighPad` + luồng **Nhập BTP thu được** | posgieo | `ba4addf` |
+| 4 | Luồng **Đếm BTP kết ca** (từng lô + ô tổng cân nhanh) | posgieo | `ba4addf` |
+| 5 | Luồng **Huỷ BTP**, kèm kiểu "cân phần còn lại rồi lấy hiệu" | posgieo | `ba4addf` |
 
-Bước 3 là bước đáng chạy thử vài ngày trước khi làm 4–5: nếu ảnh/thao tác có gì vướng thì sửa một chỗ, chưa lan ra hai màn kia.
+### Ảnh được xoá thật lúc nào
 
----
+Nút **Xoá ảnh** và **Đổi ảnh** đều xoá thật khỏi Firebase Storage, nhưng **lúc bấm Lưu** chứ không phải lúc bấm nút. Lý do: xoá ngay lúc bấm sẽ phá mất ảnh của bản ghi đang lưu nếu ngay sau đó bạn bấm Huỷ — để lại một dòng trỏ vào URL chết. Cụ thể:
+
+- **Bấm Lưu** → xoá ảnh cũ bị thay + ảnh upload thừa trong phiên (đổi ảnh 3 lần thì 2 tấm đầu là rác).
+- **Bấm Huỷ** → xoá ảnh vừa upload trong phiên; ảnh cũ **giữ nguyên** vì bản ghi vẫn đang dùng.
+- **Xoá cả dụng cụ** → xoá hết ảnh của nó, và gỡ id khỏi các bán thành phẩm đang trỏ tới.
 
 ## 8. Rủi ro cần canh
 
 | Rủi ro | Xử lý |
 |---|---|
-| **Lẫn đơn vị g/ml** — nguy hiểm nhất, sai ngầm không ai thấy | `gramsPerUnit` + chặn gắn dụng cụ cho BTP đơn vị `phần`/`cái` + hiện rõ phép tính trên màn cân |
+| **Lẫn đơn vị** — sai ngầm không ai thấy | Chỉ cho cân `g`/`kg`; `ml`/`cái`/`miếng` bị chặn ở **cả** Quản lý lẫn POS. Màn cân luôn hiện rõ phép tính `1.430 g − 130 g bì = 1.300 g` |
 | Bì khai sai 1 lần → sai mọi lần cân của mọi BTP dùng khay đó | Màn Quản lý hiện *"Đang dùng cho N bán thành phẩm"*; sửa bì thì bắt xác nhận |
 | Khay ướt/dính làm bì lệch | Đã chốt khoá cứng số bì. Nếu về sau thấy lệch thật thì mở lại — nhưng phải có vết ghi lại, không sửa ngầm |
 | Ảnh làm POS chậm | Nén ≤720px/~60KB + nạp trước + skeleton |
-| Firebase Storage rules chặn đường dẫn mới `prep_vessels/` | **Kiểm tra trước khi làm bước 1** — nếu rules chỉ mở cho `kiosk/` thì phải sửa rules |
+| Firebase Storage rules chặn đường dẫn mới `prep_vessels/` | **Việc còn lại của bạn.** Nếu rules chỉ mở cho `kiosk/` thì upload báo lỗi 403 kèm chữ nói rõ nguyên nhân, phải sửa rules |
 | Dữ liệu cũ không có `weighings` | Mọi chỗ đọc đều phải chịu được thiếu field (`weighings \|\| []`) |
 | Xoá dụng cụ mà BTP còn trỏ vào | Cảnh báo khi xoá; POS gặp id lạ thì bỏ qua dụng cụ đó, không vỡ màn |
 
 ## 9. Kiểm thử
 
-1. Khay nhựa bì 130g, cân 1.430g → ra đúng **1.300 g**
-2. Ca 2L hai phân loại: đổi có nắp ↔ không nắp → số ròng đổi đúng theo bì, ảnh đổi mềm
-3. Cân 3 lần (ca 2L + 2 khay) → tổng đúng bằng tổng 3 số ròng
-4. Cốt trà sữa đơn vị `ml`, `gramsPerUnit = 1.03`, cân 1.235g − bì 245g → **961 ml**
-5. Gõ số cân nhỏ hơn bì → bị chặn, có chữ giải thích
-6. BTP chưa gắn dụng cụ → không thấy nút ⚖️, gõ tay vẫn chạy y như cũ
-7. Kết ca, BTP có 3 lô → cân riêng từng lô, tổng khớp, `submitPrepCount` ghi đúng từng lô
-8. Huỷ nửa khay bằng cách "cân phần còn lại" → số huỷ = số lô ghi − số cân
-9. Ngắt mạng khi mở bộ cân → vẫn cân được bằng tên + bì
-10. Mở Quản lý sửa bì từ 130 → 135 → lần cân sau ra số mới, lần cân cũ đã lưu **không** đổi
+Chạy bằng Chromium (Playwright), dựng đúng đoạn CSS + JS lấy thẳng ra từ hai file thật, không phải bản chép tay.
+
+**Bộ cân POS — 30/30 đạt:**
+1. Khay bì 130 g, cân 1.430 → ra đúng **1.300 g**
+2. Ca 2L hai phân loại: đổi có nắp ↔ không nắp → số ròng đổi theo đúng bì, ảnh đổi theo phân loại
+3. Cân 2 lần (ca 2L 1.120 + khay 1.400) → tổng **2.520**
+4. Đơn vị `kg`: (2.310 − 310) / 1000 → **2 kg**
+5. Gõ số nhỏ hơn bì → báo đỏ *"nhẹ hơn cả bì"*, bấm Xong không đóng được
+6. Ô TỔNG cộng cả lần đang gõ dở; chốt lần cân xong tổng **không nhảy**; bấm Xong **không cộng đúp**
+7. Bấm Xong khi còn lần gõ dở → tự gộp nốt, ra 2 dòng
+8. Bỏ một lần cân → tổng trừ đúng
+9. Bấm ✕ → đóng, **không** gọi callback lưu
+10. `ml` không cân được, `g` cân được, id lạ không cân được
+
+**Phía Quản lý — 29/29 đạt:**
+1. Nén ảnh: PNG **nền trong suốt** 1600×900 → ra JPEG **vuông 720×720**, góc ảnh là **trắng** (không phải đen), dưới 150 KB
+2. Upload đúng thư mục `prep_vessels/<id>/`, đúng dạng JPEG đã nén
+3. Lưu đúng tên + 2 phân loại kèm bì 310/245 + `imagePath` để xoá được sau
+4. Đổi ảnh rồi **bấm Huỷ** → xoá đúng 1 ảnh rác, **không** đụng ảnh đang dùng, bản ghi vẫn trỏ ảnh cũ
+5. Đổi ảnh rồi **bấm Lưu** → ảnh cũ bị xoá thật khỏi Storage
+6. Nút Xoá ảnh → xoá thật, bản ghi hết `imageUrl`
+7. Lưới chọn: bấm là chọn, bấm lại là bỏ, chặn đúng ở 5 dụng cụ, đơn vị `ml` thì ẩn lưới và nói rõ lý do
+
+**Còn phải thử tay ở quán** (không tự động hoá được):
+- Rules Storage có cho ghi `prep_vessels/` không
+- Kết ca thật với một bán thành phẩm đang có 3 lô
+- Huỷ nửa khay bằng kiểu "cân phần còn lại"
+- Ngắt mạng khi mở bộ cân → phải vẫn cân được bằng tên + số bì (ảnh thay bằng chữ cái đầu)
