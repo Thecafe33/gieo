@@ -150,7 +150,7 @@ b{font-weight:700;}
 .hb-gl{position:absolute;left:0;right:0;height:1px;background:var(--line);}
 .hb-gt{position:absolute;left:-26px;width:22px;text-align:right;font-size:9.5px;color:var(--gt);
        transform:translateY(-50%);font-variant-numeric:tabular-nums;line-height:1;}
-.hb-col{position:relative;flex:1 1 0;min-width:20px;display:flex;flex-direction:column;
+.hb-col{position:relative;flex:1 1 0;min-width:16px;display:flex;flex-direction:column;
         justify-content:flex-end;align-items:center;height:100%;cursor:default;}
 .hb-bar{width:100%;max-width:24px;background:var(--gd);
         border-radius:4px 4px 0 0;   /* bo đầu dữ liệu, vuông ở chân trục */
@@ -168,7 +168,7 @@ b{font-weight:700;}
         font-variant-numeric:tabular-nums;white-space:nowrap;
         background:rgba(255,255,255,.85);border-radius:3px;padding:0 2px;line-height:1.25;}
 .hb-xrow{display:flex;gap:2px;padding-left:26px;margin-top:5px;}
-.hb-x{flex:1 1 0;min-width:20px;text-align:center;font-size:9.5px;color:var(--gt);
+.hb-x{flex:1 1 0;min-width:16px;text-align:center;font-size:9.5px;color:var(--gt);
       font-variant-numeric:tabular-nums;}
 .hb-x.on{color:var(--td);font-weight:700;}
 .hb-foot{font-size:11px;color:var(--gt);padding:8px 4px 0;line-height:1.45;}
@@ -4591,6 +4591,11 @@ async function renderToday(){
 // ------------------------------------------------------------
 // Trục Y làm tròn lên số đẹp (1/2/5 × 10^n) để vạch lưới đọc được, thay vì
 // những mốc lẻ như 3.6 / 7.2.
+// Khung giờ mặc định của biểu đồ. Đổi 2 số này là đổi bề ngang biểu đồ; khung
+// vẫn tự nới ra nếu ngày đó có bill nằm ngoài khoảng.
+const HB_HOUR_FROM = 7;    // cột đầu: 7h-8h sáng
+const HB_HOUR_TO   = 22;   // cột cuối: 22h-23h → trục đọc là "7h-23h"
+
 function niceCeil(v){
   if(!(v>0)) return 1;
   const mag = Math.pow(10, Math.floor(Math.log10(v)));
@@ -4622,7 +4627,17 @@ function renderHourlyBills(dayAgg){
     return;
   }
 
-  const from = hrs[0], to = hrs[hrs.length-1];
+  // Khung giờ CỐ ĐỊNH 7h sáng → 11h tối (cột cuối là 22h-23h). Chủ quán chốt bán
+  // tới 8-9h tối, nên khung này luôn phủ trọn giờ mở cửa và giữ bề ngang biểu đồ
+  // ổn định giữa các ngày — ngày vắng với ngày đông so sánh được với nhau, thay
+  // vì mỗi ngày một độ rộng khác nhau như bản trước.
+  //
+  // NHƯNG khung cố định không được phép nuốt dữ liệu: nếu có bill nằm ngoài
+  // 7h-23h (bán muộn bất thường, bill test lúc rạng sáng, POS ghi sai giờ) thì
+  // NỚI khung ra cho vừa. Cắt cứng theo khung là làm mất bill khỏi biểu đồ đúng
+  // vào lúc con số đó bất thường nhất và đáng xem nhất.
+  const from = Math.min(HB_HOUR_FROM, hrs[0]);
+  const to   = Math.max(HB_HOUR_TO,   hrs[hrs.length-1]);
   const span = [];
   for(let h=from; h<=to; h++){
     const b = hourly[h] || {bills:0, revenue:0};
@@ -4665,7 +4680,17 @@ function renderHourlyBills(dayAgg){
     </div>`;
   }).join('');
 
-  const xHtml = span.map(x=>`<div class="hb-x ${x.bills===peak.bills&&x.bills>0?'on':''}">${x.h}h</div>`).join('');
+  // Trên 12 cột thì ghi nhãn cách 1 giờ (7h, 9h, 11h...) — ghi đủ 16-17 nhãn trên
+  // màn điện thoại là chúng dính vào nhau thành một dải chữ đặc, không đọc nổi.
+  // Giờ đông nhất LUÔN được ghi nhãn dù rơi vào nhịp nào.
+  // Chỉ giãn nhãn khi thật sự chật. Giao diện máy tính bảng rộng gấp 2-3 lần nên
+  // 16-17 nhãn nằm thoải mái — giấu bớt ở đó là phí chỗ mà vẫn mất thông tin.
+  const sparse = span.length > 12 && !(typeof isTabletUiOn === 'function' && isTabletUiOn());
+  const xHtml = span.map((x,i)=>{
+    const isPeak = x.bills===peak.bills && x.bills>0;
+    const show = !sparse || isPeak || (x.h % 2 === (span[0].h % 2));
+    return `<div class="hb-x ${isPeak?'on':''}">${show ? x.h+'h' : ''}</div>`;
+  }).join('');
 
   const tableHtml = span.map(x=>`<div class="hb-trow"><span>${x.h}h–${x.h+1}h</span><span>${x.bills} bill${x.revenue?' · '+fmt(x.revenue):''}</span></div>`).join('');
 
@@ -4678,14 +4703,14 @@ function renderHourlyBills(dayAgg){
       </div>
       <div class="hb-read" id="hbReadout"></div>
       <div class="hb-scroll" onmouseleave="hbPick(null)">
-        <div style="min-width:${Math.max(span.length*22+26, 0)}px">
+        <div style="min-width:${span.length*16 + (span.length-1)*2 + 26}px">
           <div class="hb-plot"><div class="hb-grid">${gridHtml}</div>${colsHtml}</div>
           <div class="hb-xrow">${xHtml}</div>
         </div>
       </div>
       <div class="hb-foot">
         Trung bình <b>${fmtNum(avgPerOpenHour,1)} bill/giờ</b> trên ${openHours} giờ có bán.
-        ${span.some(x=>x.bills===0) ? ` Giờ không có bill nào để cột xám — đó là giờ vẫn mở mà không bán được gì.` : ''}
+        ${span.some(x=>x.bills===0) ? ` Giờ không có bill nào để cột xám.` : ''}
         ${unknown ? `<br><span class="hb-warn">${ic('alert',13)} ${unknown} bill không đọc được giờ nên chưa vào biểu đồ</span> (tổng số bill ở phần Chỉ số vẫn đếm đủ).` : ''}
       </div>
       <details class="hb-table">
