@@ -4451,6 +4451,7 @@ const NAV_SECTIONS = [
     {key:'kho:inbox',        label:'Cần xử lý',       go:"goKho('inbox')",        sub:'Bắt đầu ở đây'},
     {key:'kho:items',        label:'Nguyên liệu',     go:"goKho('items')",        sub:'Hàng hoá'},
     {key:'kho:prep',         label:'Chế biến cấp 1',  go:"goKho('prep')"},
+    {key:'kho:vessels',      label:'Dụng cụ đựng',    go:"goKho('vessels')"},
     {key:'kho:packaging',    label:'Bao bì',          go:"goKho('packaging')"},
     {key:'kho:toppingcogs',  label:'GOGS Topping',    go:"goKho('toppingcogs')"},
     {key:'kho:po',           label:'Đặt & nhận hàng', go:"goKho('po')",           sub:'Hoạt động'},
@@ -9029,6 +9030,7 @@ async function renderEntryKho(){
   if(curKhoSub==='inbox') renderKhoInbox();
   else if(curKhoSub==='items') renderKhoItems();
   else if(curKhoSub==='prep') renderKhoPrep();
+  else if(curKhoSub==='vessels') renderKhoVessels();
   else if(curKhoSub==='toppingcogs') renderKhoToppingCogs();
   else if(curKhoSub==='packaging') renderKhoPackaging();
   else if(curKhoSub==='location') renderKhoLocation();
@@ -9735,8 +9737,10 @@ function newPrepDraft(){
   // prepTimeMinutes — thời gian chế biến dự kiến, POS đếm ngược từ lúc bấm "Bắt đầu";
   //   trong lúc đang chế biến vẫn cho mở ca bán hàng, không bắt nhân viên đứng chờ.
   // dailyTarget — lượng cần CHUẨN BỊ mỗi ngày, POS lấy để tính "cần nấu bao nhiêu".
-  return { code:'CB'+String(next).padStart(2,'0'), name:'', unit:'ml', wastePct:0, batchYield:0, batchInputs:[],
-           shelfLifeType:'endOfDay', shelfLifeHours:0, prepTimeMinutes:0, dailyTarget:0 };
+  return { code:'CB'+String(next).padStart(2,'0'), name:'', unit:'g', wastePct:0, batchYield:0, batchInputs:[],
+           shelfLifeType:'endOfDay', shelfLifeHours:0, prepTimeMinutes:0, dailyTarget:0,
+           // [MỚI] Dụng cụ đựng để nhân viên cân cả vật đựng, hệ thống tự trừ bì.
+           vesselIds:[] };
 }
 function prepResetForm(){ editingPrepId=null; prepDraft=null; renderKhoPrep(); }
 function prepStartNew(){ editingPrepId=null; prepDraft=newPrepDraft(); renderKhoPrep(); }
@@ -9749,7 +9753,9 @@ function prepStartEdit(id){
                 // mặc định 'endOfDay' vì đó là trường hợp an toàn nhất: thà bị nhắc bỏ
                 // cuối ngày còn hơn để BTP quá hạn mà hệ thống tưởng vẫn dùng được.
                 shelfLifeType:p.shelfLifeType||'endOfDay', shelfLifeHours:Number(p.shelfLifeHours)||0,
-                prepTimeMinutes:Number(p.prepTimeMinutes)||0, dailyTarget:Number(p.dailyTarget)||0 };
+                prepTimeMinutes:Number(p.prepTimeMinutes)||0, dailyTarget:Number(p.dailyTarget)||0,
+                // BTP khai trước khi có tính năng cân trừ bì chưa có field này.
+                vesselIds:(p.vesselIds||[]).slice(0) };
   renderKhoPrep();
 }
 function prepAddInput(){
@@ -9857,6 +9863,66 @@ function renderPrepEditor(){
     </div>`).join('') || '<div class="empty-hint">Chưa có nguyên liệu đầu vào nào cho mẻ này.</div>';
   refreshPrepTotals();
 }
+
+// ---------- [MỚI] Gắn dụng cụ đựng cho bán thành phẩm ----------
+// Tối đa 5 — không phải giới hạn kỹ thuật mà là giới hạn của thao tác thật: nhân
+// viên đứng trước cân, phải nhìn lưới ảnh và chọn trong 1 giây. Quá 5 ô là bắt đầu
+// phải đọc chữ, chậm hơn cả gõ tay — đúng thứ tính năng này sinh ra để tránh.
+const PREP_MAX_VESSELS = 5;
+
+function prepToggleVessel(id){
+  if(!prepDraft) return;
+  const cur = prepDraft.vesselIds || (prepDraft.vesselIds = []);
+  const i = cur.indexOf(id);
+  if(i >= 0) cur.splice(i,1);
+  else{
+    if(cur.length >= PREP_MAX_VESSELS){ toast('⚠️ Tối đa ' + PREP_MAX_VESSELS + ' dụng cụ — bỏ bớt một cái trước'); return; }
+    cur.push(id);   // thứ tự chọn = thứ tự hiện trên POS
+  }
+  renderPrepVesselPicker();
+}
+
+function renderPrepVesselPicker(){
+  const box = document.getElementById('prepVesselBox');
+  if(!box || !prepDraft) return;
+
+  // Cân luôn cho ra gam. Đơn vị không quy đổi được từ gam thì ẩn hẳn tính năng chứ
+  // KHÔNG hiện ra rồi cho ra số sai — 'ml' cần tỷ trọng, 'cái' thì đếm chứ không cân.
+  if(!vesselUnitSupported(prepDraft.unit)){
+    box.innerHTML = `<div class="empty-hint">Bán thành phẩm này đang tính bằng <b>${escapeHtmlAttr(prepDraft.unit||'')}</b> nên không cân trừ bì được — cân chỉ cho ra gam.<br>Đổi đơn vị sang <b>g</b> (hoặc kg) thì phần chọn dụng cụ sẽ hiện ra.</div>`;
+    return;
+  }
+  if(!VESSELS.length){
+    box.innerHTML = `<div class="empty-hint">Chưa khai dụng cụ đựng nào.<br>Vào <b>Kho → Dụng cụ đựng</b> khai khay/ca kèm trọng lượng bì trước, rồi quay lại đây gắn cho bán thành phẩm này.</div>`;
+    return;
+  }
+
+  const chon = prepDraft.vesselIds || [];
+  const day = chon.length >= PREP_MAX_VESSELS;
+  box.innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(124px,1fr));gap:10px;">
+      ${VESSELS.map(v=>{
+        const i = chon.indexOf(v.id);
+        const dangChon = i >= 0;
+        const mo = !dangChon && day;   // đã đủ 5 thì làm mờ phần còn lại
+        const anh = v.imageUrl
+          ? `<img src="${escapeHtmlAttr(v.imageUrl)}" alt="" style="width:100%;height:100%;object-fit:contain;">`
+          : `<span style="color:var(--ink-4);font-size:22px;font-weight:700;">${escapeHtmlAttr((v.name||'?').trim().charAt(0).toUpperCase())}</span>`;
+        const bis = (v.variants||[]).map(x=>Number(x.tareG)||0);
+        const biTxt = bis.length ? (Math.min(...bis)===Math.max(...bis) ? fmtNum(bis[0],0)+' g' : fmtNum(Math.min(...bis),0)+'–'+fmtNum(Math.max(...bis),0)+' g') : '—';
+        return `
+        <div onclick="${mo ? '' : `prepToggleVessel('${v.id}')`}" style="cursor:${mo?'not-allowed':'pointer'};opacity:${mo?.4:1};background:var(--card);border:${dangChon?'2px solid var(--gd)':'1.5px solid var(--line)'};border-radius:20px;padding:10px;text-align:center;position:relative;transition:border-color .15s ease,transform .12s ease;${dangChon?'box-shadow:0 4px 16px -8px var(--accent-glow);':''}">
+          ${dangChon ? `<div style="position:absolute;top:6px;right:6px;width:22px;height:22px;border-radius:50%;background:var(--gd);color:#fff;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;">${i+1}</div>` : ''}
+          <div style="width:100%;aspect-ratio:1/1;background:#fff;border-radius:14px;display:flex;align-items:center;justify-content:center;overflow:hidden;margin-bottom:7px;">${anh}</div>
+          <div style="font-size:13px;font-weight:650;color:var(--td);line-height:1.3;">${escapeHtmlAttr(v.name||'')}</div>
+          <div style="font-size:11.5px;color:var(--gt);margin-top:2px;">bì ${biTxt}${(v.variants||[]).length>1 ? ' · '+v.variants.length+' kiểu' : ''}</div>
+        </div>`;
+      }).join('')}
+    </div>
+    <div class="small-note">${chon.length ? 'Đã chọn ' + chon.length + '/' + PREP_MAX_VESSELS + ' — số trong vòng tròn là thứ tự hiện trên POS.' : 'Chưa chọn dụng cụ nào — POS vẫn cho nhân viên gõ tay như hiện tại, không chặn gì.'}</div>`;
+}
+
+
 // [NEW] Nhãn hạn dùng hiển thị trong danh sách. BTP khai TRƯỚC khi có tính năng
 // này chưa có field → coi như 'endOfDay' (mặc định an toàn), và gắn dấu ⚠ để chủ
 // quán biết là chưa cấu hình chứ không phải đã chọn.
@@ -9870,7 +9936,13 @@ function prepShelfLabel(p){
 async function renderKhoPrep(){
   const box = document.getElementById('khoBody');
   showLoading(box);
-  try{ await ensureAuth(); PREP_ITEMS = await loadPrepItems(); }
+  try{
+    await ensureAuth();
+    // Nạp song song: danh sách dụng cụ chỉ để vẽ lưới chọn, hỏng thì vẫn phải sửa
+    // được công thức nên KHÔNG cho nó chặn cả màn.
+    const [_p, _v] = await Promise.all([loadPrepItems(), loadVessels().catch(err=>{ console.warn('loadVessels lỗi', err); return []; })]);
+    PREP_ITEMS = _p; VESSELS = _v;
+  }
   catch(err){ console.error('loadPrepItems failed', err); box.innerHTML='<div class="muted">Không tải được danh sách chế biến.</div>'; return; }
 
   const formHtml = prepDraft ? `
@@ -9879,7 +9951,7 @@ async function renderKhoPrep(){
       <div class="grid2">
         <div class="field"><label>Mã CB</label><input type="text" value="${escapeHtmlAttr(prepDraft.code)}" oninput="prepFieldChange('code',this.value)" placeholder="VD: CB07"></div>
         <div class="field"><label>Đơn vị thành phẩm</label>
-          <select onchange="prepFieldChange('unit',this.value); renderPrepEditor();">${STOCK_UNITS.map(u=>`<option ${u===prepDraft.unit?'selected':''}>${u}</option>`).join('')}</select>
+          <select onchange="prepFieldChange('unit',this.value); renderPrepEditor(); renderPrepVesselPicker();">${STOCK_UNITS.map(u=>`<option ${u===prepDraft.unit?'selected':''}>${u}</option>`).join('')}</select>
         </div>
       </div>
       <div class="field"><label>Tên thành phẩm</label><input type="text" value="${escapeHtmlAttr(prepDraft.name)}" oninput="prepFieldChange('name',this.value)" placeholder="VD: Cốt Trà Sữa Nguyên Lá"></div>
@@ -9928,6 +10000,10 @@ async function renderKhoPrep(){
       </div>
       <div id="prepShelfWarn" class="small-note" style="color:#c0392b;margin-top:6px"></div>
 
+      <div class="sec-title">Dụng cụ đựng khi cân</div>
+      <div class="unit-explainer">Chọn những thứ bán thành phẩm này thực sự nằm trong — VD thạch trà: <b>khay nhựa lớn</b> lúc đổ ra và <b>khay inox</b> lúc fill ra quầy.<br>Ở POS, nhân viên bấm ảnh cái khay đang cân rồi đặt nguyên cả khay lên cân; hệ thống tự trừ bì và cộng nhiều lần cân lại thành số thật. Khai ở <b>Kho → Dụng cụ đựng</b>.</div>
+      <div id="prepVesselBox"></div>
+
       <button class="btn" style="margin-top:10px" onclick="submitPrepItem()">${editingPrepId?ic('save',15)+' Lưu thay đổi':'Thêm thành phẩm'}</button>
       <button class="btn outline" style="margin-top:8px" onclick="prepResetForm()">Huỷ</button>
     </div>` : `<button class="btn" onclick="prepStartNew()">+ Thêm thành phẩm chế biến</button>`;
@@ -9940,7 +10016,7 @@ async function renderKhoPrep(){
         <div class="li-l">
           <div>${escapeHtmlAttr(p.code||'')} · ${escapeHtmlAttr(p.name||'')}</div>
           <div>Tồn <b>${fmtNum(p.currentStock,1)} ${escapeHtmlAttr(p.unit||'')}</b> · 1 mẻ ra ${fmtNum(p.batchYield,0)} ${escapeHtmlAttr(p.unit||'')} · ${fmtUnitPrice(p.costPerUnit)}/${escapeHtmlAttr(p.unit||'')}</div>
-          <div>${prepShelfLabel(p)}${Number(p.prepTimeMinutes)>0 ? ' · Nấu ~'+p.prepTimeMinutes+' phút' : ''}${Number(p.dailyTarget)>0 ? ' · Cần/ngày '+fmtNum(p.dailyTarget,0)+' '+escapeHtmlAttr(p.unit||'') : ''}</div>
+          <div>${prepShelfLabel(p)}${Number(p.prepTimeMinutes)>0 ? ' · Nấu ~'+p.prepTimeMinutes+' phút' : ''}${Number(p.dailyTarget)>0 ? ' · Cần/ngày '+fmtNum(p.dailyTarget,0)+' '+escapeHtmlAttr(p.unit||'') : ''}${(p.vesselIds||[]).length ? ' · Cân bằng '+p.vesselIds.length+' dụng cụ' : ''}</div>
         </div>
         <div class="li-r">
           <button class="iconbtn" onclick="openPrepHistory('${p.id}')" title="Lịch sử biến động tồn">${ic('clock')}</button>
@@ -9949,7 +10025,7 @@ async function renderKhoPrep(){
         </div>
       </div>`).join('') : '<div class="muted">Chưa có thành phẩm chế biến nào</div>'}
   `;
-  if(prepDraft) renderPrepEditor();
+  if(prepDraft){ renderPrepEditor(); renderPrepVesselPicker(); }
 }
 async function submitPrepItem(){
   if(!prepDraft.name.trim()){ toast('⚠️ Nhập tên thành phẩm'); return; }
@@ -9993,7 +10069,12 @@ async function submitPrepItem(){
                  shelfLifeType: prepDraft.shelfLifeType || 'endOfDay',
                  shelfLifeHours: prepDraft.shelfLifeType==='hours' ? (Number(prepDraft.shelfLifeHours)||0) : 0,
                  prepTimeMinutes: Number(prepDraft.prepTimeMinutes)||0,
-                 dailyTarget: Number(prepDraft.dailyTarget)||0 };
+                 dailyTarget: Number(prepDraft.dailyTarget)||0,
+                 // [MỚI] Chỉ giữ id còn tồn tại thật — dụng cụ bị xoá trong lúc form
+                 // đang mở mà lưu lại id chết thì POS hiện ô trống không bấm được.
+                 vesselIds: vesselUnitSupported(prepDraft.unit)
+                   ? (prepDraft.vesselIds||[]).filter(id=>VESSELS.some(v=>v.id===id)).slice(0, PREP_MAX_VESSELS)
+                   : [] };
   try{
     if(editingPrepId){ await updatePrepItem(editingPrepId, data); logAudit('update','prep_item',editingPrepId,data); toast('✅ Đã lưu'); }
     else { const ref = await addPrepItem(data); logAudit('create','prep_item',ref.id,data); toast('✅ Đã thêm thành phẩm'); }
@@ -10004,6 +10085,454 @@ async function doDeletePrepItem(id){
   if(!confirm('Xoá thành phẩm chế biến này? Công thức món đang dùng nó sẽ không tự xoá theo — cần sửa lại thủ công.')) return;
   try{ await deletePrepItem(id); logAudit('delete','prep_item',id,{}); toast('🗑 Đã xoá'); renderKhoPrep(); }
   catch(err){ console.error(err); showError('Xoá thất bại: '+(err.code||err.message||err)); }
+}
+
+// ============================================================================
+// [MỚI] DỤNG CỤ ĐỰNG — prep_vessels_gieogieo
+// ----------------------------------------------------------------------------
+// VIỆC NÓ GIẢI QUYẾT: ở quán, một bán thành phẩm không nằm gọn trong một chỗ.
+// Thạch trà đổ ra khay nhựa lớn, rồi fill dần sang khay inox dùng ngoài quầy;
+// cốt trà sữa nằm trong ca 2L. Mỗi lần cần biết "còn bao nhiêu" (nấu xong, kết
+// ca, huỷ) nhân viên phải bê từng thứ lên cân, tự nhẩm trừ bì, rồi cộng lại.
+// Nhẩm sai là sai thẳng vào tồn kho và giá vốn, không có gì báo.
+//
+// Giờ khai sẵn từng dụng cụ kèm TRỌNG LƯỢNG BÌ, POS cân cả vật đựng rồi tự trừ.
+//
+// VÌ SAO LÀ THƯ VIỆN DÙNG CHUNG, không nhét thẳng vào từng bán thành phẩm:
+// khay inox dùng cho 6 loại thạch. Khai riêng thì phải upload cùng một tấm ảnh 6
+// lần và gõ lại 130g 6 lần; hôm nào đổi khay khác là phải nhớ sửa đủ 6 chỗ —
+// sót một chỗ là lệch ngầm. Ở đây sửa bì một chỗ là đúng hết mọi bán thành phẩm.
+//
+// PHÂN LOẠI CÂN (variants): cùng MỘT dụng cụ vẫn có nhiều cách cân cho ra bì khác
+// nhau — ca 2L cân cả nắp là 310g, bỏ nắp ra là 245g. Nếu ép mỗi dụng cụ một số bì
+// thì nhân viên hoặc phải nhớ tháo nắp (không ai nhớ), hoặc số luôn lệch đúng bằng
+// cân nặng cái nắp. Nên mỗi dụng cụ mang một danh sách phân loại, mỗi phân loại
+// một số bì và một ảnh riêng để nhìn là biết đang chọn kiểu nào.
+//
+// ⚠️ ĐỪNG NHẦM với `stock_containers_gieogieo` ("Chai & tem kho") — cái đó là từng
+// CHAI NGUYÊN LIỆU đã mở kèm tem và hạn, hoàn toàn khác. Trùng khái niệm là nguồn
+// gốc của những lỗi khó truy nhất, nên tên collection cố ý tách hẳn ra.
+// ============================================================================
+const VESSEL_COLL = 'prep_vessels_gieogieo';
+
+// Cân bao giờ cũng cho ra GAM. Chỉ đơn vị nào quy đổi được từ gam mới trừ bì được:
+// 'ml'/'l' cần biết tỷ trọng (nước 1, cốt có đường ~1,03) — đoán bừa là sai ngầm;
+// 'cái'/'miếng' thì đếm chứ không cân. Với các đơn vị đó, tính năng tự ẩn đi chứ
+// KHÔNG hiện ra rồi cho ra số sai.
+const VESSEL_UNIT_FACTOR = { g: 1, kg: 1000 };   // 1 đơn vị bán thành phẩm = ? gam
+function vesselUnitFactor(unit){ return VESSEL_UNIT_FACTOR[unit] || 0; }
+function vesselUnitSupported(unit){ return vesselUnitFactor(unit) > 0; }
+
+let VESSELS = [];
+let vesselDraft = null;        // {id, code, name, note, imageUrl, imagePath, variants:[...]}
+let editingVesselId = null;
+// Ảnh đã upload trong PHIÊN sửa này nhưng có thể chưa được dùng (nhân viên đổi ảnh
+// mấy lần rồi bấm Huỷ). Và ảnh cũ bị thay/bị gỡ, chỉ được xoá thật KHI LƯU THÀNH
+// CÔNG — xoá ngay lúc bấm sẽ phá mất ảnh của bản ghi đang lưu nếu người dùng bấm
+// Huỷ ngay sau đó, để lại một dòng trỏ vào URL chết.
+let _vesselSessionUploads = [];
+let _vesselPendingDelete  = [];
+
+async function loadVessels(){
+  const snap = await fstore.collection(VESSEL_COLL).get();
+  return snap.docs.map(d=>({id:d.id, ...d.data()}))
+    .sort((a,b)=>String(a.code||'').localeCompare(String(b.code||''),'vi'));
+}
+
+// ---------- Kho ảnh trên Firebase Storage ----------
+// Dùng REST + idToken thay vì SDK firebase-storage: file Quản lý chưa nạp SDK đó,
+// và cách này POS đã chạy thật nhiều tháng cho ảnh màn hình phụ (kcDoUpload).
+// Nạp thêm ~40KB SDK chỉ để làm đúng việc 20 dòng này làm được là không đáng.
+const VESSEL_STORAGE_BUCKET = 'the-cafe-33.firebasestorage.app';
+
+function vesselStorageUrl(path){
+  return 'https://firebasestorage.googleapis.com/v0/b/' + VESSEL_STORAGE_BUCKET
+       + '/o/' + encodeURIComponent(path);
+}
+
+async function vesselUploadBlob(blob, path, onProgress){
+  const user = await ensureAuth();
+  const token = await user.getIdToken(true);
+  const encoded = encodeURIComponent(path);
+  const url = 'https://firebasestorage.googleapis.com/v0/b/' + VESSEL_STORAGE_BUCKET
+            + '/o?uploadType=media&name=' + encoded;
+  return new Promise((resolve, reject)=>{
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url, true);
+    xhr.setRequestHeader('Authorization', 'Bearer ' + token);
+    xhr.setRequestHeader('Content-Type', blob.type || 'image/jpeg');
+    xhr.upload.onprogress = e=>{ if(e.lengthComputable && onProgress) onProgress(Math.round(e.loaded/e.total*100)); };
+    xhr.onload = ()=>{
+      if(xhr.status >= 200 && xhr.status < 300){
+        let res = {};
+        try{ res = JSON.parse(xhr.responseText); }catch(e){}
+        resolve(vesselStorageUrl(path) + '?alt=media' + (res.downloadTokens ? '&token=' + res.downloadTokens : ''));
+      }else if(xhr.status === 403 || xhr.status === 401){
+        // Nói thẳng nguyên nhân hay gặp nhất thay vì để lại một mã lỗi trần trụi:
+        // rules của Storage có thể mới chỉ mở cho đường dẫn kiosk/.
+        reject(new Error('Firebase Storage từ chối ghi vào "prep_vessels/" (HTTP ' + xhr.status + '). Cần mở rules cho đường dẫn này.'));
+      }else reject(new Error('Tải ảnh lên thất bại (HTTP ' + xhr.status + ')'));
+    };
+    xhr.onerror = ()=>reject(new Error('Lỗi mạng khi tải ảnh lên'));
+    xhr.send(blob);
+  });
+}
+
+// Xoá THẬT file khỏi Storage. 404 coi như xong — file đã không còn thì mục tiêu
+// (không còn file) vẫn đạt, ném lỗi ở đây chỉ làm hỏng luồng lưu.
+async function vesselDeleteStoragePath(path){
+  if(!path) return;
+  const user = await ensureAuth();
+  const token = await user.getIdToken(true);
+  const r = await fetch(vesselStorageUrl(path), { method:'DELETE', headers:{ Authorization:'Bearer ' + token } });
+  if(!r.ok && r.status !== 404) throw new Error('Xoá ảnh thất bại (HTTP ' + r.status + ')');
+}
+
+// Dọn ảnh rác — chạy nền, KHÔNG chặn và KHÔNG báo lỗi ra màn: một file thừa nằm
+// lại trên Storage không làm sai số liệu nào, còn chặn nhân viên lưu vì nó thì có.
+function vesselPurgePaths(paths){
+  (paths||[]).filter(Boolean).forEach(p=>{
+    vesselDeleteStoragePath(p).catch(err=>console.warn('[Dụng cụ] không xoá được ảnh cũ', p, err));
+  });
+}
+
+// Nén ảnh TRƯỚC khi upload. Ba việc, đều bắt buộc:
+//   1. Thu về ô VUÔNG — POS xếp các dụng cụ thành lưới ô vuông, ảnh mỗi cái một
+//      tỷ lệ thì lưới nhìn lệch hẳn.
+//   2. TÔ NỀN TRẮNG trước khi vẽ — ảnh PNG nền trong suốt mà bỏ bước này sẽ ra
+//      nền ĐEN sau khi chuyển sang JPEG, đúng ngược ý đồ "nền trắng".
+//   3. Hạ xuống ≤720px / JPEG 0.82 — ảnh 4MB chụp từ điện thoại làm màn cân trên
+//      tablet giật rõ rệt; sau khi nén thường còn 40–80KB.
+async function vesselCompressImage(file){
+  const MAX = 720;
+  let src = null, w = 0, h = 0, bmp = null;
+  try{
+    bmp = await createImageBitmap(file);
+    src = bmp; w = bmp.width; h = bmp.height;
+  }catch(e){
+    // Đường lui cho trình duyệt/định dạng mà createImageBitmap không đọc được.
+    const objUrl = URL.createObjectURL(file);
+    try{
+      src = await new Promise((res, rej)=>{
+        const im = new Image();
+        im.onload = ()=>res(im);
+        im.onerror = ()=>rej(new Error('Không đọc được ảnh này. Thử chụp lại hoặc lưu sang JPG/PNG.'));
+        im.src = objUrl;
+      });
+      w = src.naturalWidth; h = src.naturalHeight;
+    } finally { setTimeout(()=>URL.revokeObjectURL(objUrl), 30000); }
+  }
+  if(!w || !h) throw new Error('Ảnh không hợp lệ');
+  const side = Math.max(1, Math.min(MAX, Math.max(w, h)));
+  const scale = Math.min(1, MAX / Math.max(w, h));
+  const dw = Math.max(1, Math.round(w * scale)), dh = Math.max(1, Math.round(h * scale));
+  const cv = document.createElement('canvas');
+  cv.width = side; cv.height = side;
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, side, side);
+  ctx.drawImage(src, Math.round((side - dw) / 2), Math.round((side - dh) / 2), dw, dh);
+  if(bmp && bmp.close) bmp.close();
+  const blob = await new Promise(res=>cv.toBlob(res, 'image/jpeg', 0.82));
+  if(!blob) throw new Error('Không nén được ảnh');
+  return blob;
+}
+
+// ---------- Nháp ----------
+function newVesselDraft(){
+  const nums = VESSELS.map(v=>parseInt(String(v.code||'').replace(/\D/g,''),10)).filter(n=>!isNaN(n));
+  const next = (nums.length ? Math.max(...nums) : 0) + 1;
+  return {
+    // Lấy sẵn id THẬT của Firestore ngay lúc mở form, chưa lưu gì cả. Nhờ vậy ảnh
+    // upload trước khi bấm Lưu vẫn nằm đúng thư mục của dụng cụ này, không phải
+    // đẻ ra thư mục "tmp" rồi đi dọn.
+    id: fstore.collection(VESSEL_COLL).doc().id,
+    code: 'DC' + String(next).padStart(2,'0'),
+    name: '', note: '', imageUrl: '', imagePath: '',
+    variants: [{ id: 'v' + Date.now(), label: 'Mặc định', tareG: 0, imageUrl: '', imagePath: '' }]
+  };
+}
+function vesselStartNew(){
+  editingVesselId = null;
+  vesselDraft = newVesselDraft();
+  _vesselSessionUploads = []; _vesselPendingDelete = [];
+  renderKhoVessels();
+}
+function vesselStartEdit(id){
+  const v = VESSELS.find(x=>x.id===id); if(!v) return;
+  editingVesselId = id;
+  vesselDraft = {
+    id: v.id, code: v.code||'', name: v.name||'', note: v.note||'',
+    imageUrl: v.imageUrl||'', imagePath: v.imagePath||'',
+    variants: (v.variants||[]).map(x=>({ id:x.id, label:x.label||'', tareG:Number(x.tareG)||0,
+                                         imageUrl:x.imageUrl||'', imagePath:x.imagePath||'' }))
+  };
+  if(!vesselDraft.variants.length) vesselDraft.variants = [{ id:'v'+Date.now(), label:'Mặc định', tareG:0, imageUrl:'', imagePath:'' }];
+  _vesselSessionUploads = []; _vesselPendingDelete = [];
+  renderKhoVessels();
+}
+function vesselResetForm(){
+  // Bấm Huỷ: ảnh vừa upload trong phiên này thành rác, dọn luôn. Ảnh cũ trong
+  // _vesselPendingDelete thì GIỮ NGUYÊN — bản ghi đã lưu vẫn đang trỏ vào nó.
+  vesselPurgePaths(_vesselSessionUploads);
+  _vesselSessionUploads = []; _vesselPendingDelete = [];
+  editingVesselId = null; vesselDraft = null;
+  renderKhoVessels();
+}
+function vesselFieldChange(field, val){
+  if(!vesselDraft) return;
+  vesselDraft[field] = val;   // không render lại — gõ tới đâu giữ con trỏ tới đó
+}
+function vesselVariantChange(idx, field, val){
+  const vr = vesselDraft && vesselDraft.variants[idx]; if(!vr) return;
+  vr[field] = (field === 'tareG') ? (Number(val)||0) : val;
+}
+function vesselAddVariant(){
+  if(!vesselDraft) return;
+  vesselDraft.variants.push({ id:'v'+Date.now()+Math.floor(Math.random()*1000), label:'', tareG:0, imageUrl:'', imagePath:'' });
+  renderVesselVariants();
+}
+function vesselRemoveVariant(idx){
+  if(!vesselDraft) return;
+  if(vesselDraft.variants.length <= 1){ toast('⚠️ Phải giữ ít nhất 1 phân loại cân'); return; }
+  const vr = vesselDraft.variants[idx];
+  if(vr && vr.imagePath) _vesselPendingDelete.push(vr.imagePath);
+  vesselDraft.variants.splice(idx,1);
+  renderVesselVariants();
+}
+
+// ---------- Chọn / đổi / xoá ảnh ----------
+// target: 'main' cho ảnh chính, hoặc số thứ tự phân loại.
+function vesselPickImage(target){
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.accept = 'image/*';
+  inp.onchange = ()=>{ const f = inp.files && inp.files[0]; if(f) vesselHandleImageFile(target, f); };
+  inp.click();
+}
+async function vesselHandleImageFile(target, file){
+  const boxId = (target === 'main') ? 'vesselImgMain' : ('vesselImgVar' + target);
+  const setStatus = txt=>{
+    const el = document.getElementById(boxId + 'Status');
+    if(el) el.textContent = txt;
+  };
+  setStatus('Đang nén ảnh...');
+  try{
+    const blob = await vesselCompressImage(file);
+    setStatus('Đang tải lên 0%');
+    const path = 'prep_vessels/' + vesselDraft.id + '/'
+               + (target === 'main' ? 'main' : 'var-' + target) + '-' + Date.now() + '.jpg';
+    const url = await vesselUploadBlob(blob, path, p=>setStatus('Đang tải lên ' + p + '%'));
+    _vesselSessionUploads.push(path);
+    const holder = (target === 'main') ? vesselDraft : vesselDraft.variants[target];
+    if(!holder){ vesselPurgePaths([path]); return; }   // dòng vừa bị xoá giữa chừng
+    if(holder.imagePath) _vesselPendingDelete.push(holder.imagePath);   // ảnh cũ, xoá khi lưu
+    holder.imageUrl = url; holder.imagePath = path;
+    if(target === 'main') renderVesselMainImage(); else renderVesselVariants();
+    toast('✅ Đã tải ảnh lên');
+  }catch(err){
+    console.error('vesselHandleImageFile lỗi', err);
+    setStatus('');
+    showError(err.message || String(err));
+  }
+}
+function vesselClearImage(target){
+  const holder = (target === 'main') ? vesselDraft : (vesselDraft && vesselDraft.variants[target]);
+  if(!holder || !holder.imageUrl) return;
+  if(holder.imagePath) _vesselPendingDelete.push(holder.imagePath);
+  holder.imageUrl = ''; holder.imagePath = '';
+  if(target === 'main') renderVesselMainImage(); else renderVesselVariants();
+  toast('🗑 Đã gỡ ảnh — xoá hẳn khỏi Firebase khi bấm Lưu');
+}
+
+// Ô ảnh vuông bo tròn, nền trắng — cùng ngôn ngữ hình với màn cân bên POS để chủ
+// quán thấy đúng thứ nhân viên sẽ thấy.
+function vesselImageBox(target, url, size){
+  const s = size || 108;
+  const inner = url
+    ? `<img src="${escapeHtmlAttr(url)}" alt="" style="width:100%;height:100%;object-fit:contain;border-radius:16px;">`
+    : `<div style="color:var(--ink-4);font-size:12px;text-align:center;line-height:1.4;padding:6px;">Chưa có<br>ảnh</div>`;
+  return `
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+      <div style="width:${s}px;height:${s}px;flex-shrink:0;background:#fff;border:1.5px solid var(--line);border-radius:20px;display:flex;align-items:center;justify-content:center;overflow:hidden;box-shadow:var(--sh-1);">${inner}</div>
+      <div style="display:flex;flex-direction:column;gap:7px;">
+        <button type="button" class="btn outline sm" onclick="vesselPickImage(${target === 'main' ? "'main'" : target})">${url ? 'Đổi ảnh' : 'Chọn ảnh'}</button>
+        ${url ? `<button type="button" class="btn outline sm" style="color:var(--bad);border-color:var(--bad)" onclick="vesselClearImage(${target === 'main' ? "'main'" : target})">Xoá ảnh</button>` : ''}
+        <div id="vesselImg${target === 'main' ? 'Main' : 'Var' + target}Status" class="small-note" style="margin-top:0"></div>
+      </div>
+    </div>`;
+}
+function renderVesselMainImage(){
+  const box = document.getElementById('vesselImgMain');
+  if(box && vesselDraft) box.innerHTML = vesselImageBox('main', vesselDraft.imageUrl, 116);
+}
+function renderVesselVariants(){
+  const box = document.getElementById('vesselVariantBox');
+  if(!box || !vesselDraft) return;
+  const nhieu = vesselDraft.variants.length > 1;
+  box.innerHTML = vesselDraft.variants.map((vr, idx)=>`
+    <div class="pkg-row">
+      <div class="pkg-row-h">
+        <span class="pkg-row-n">Phân loại ${idx+1}</span>
+        ${nhieu ? `<button class="iconbtn" onclick="vesselRemoveVariant(${idx})" aria-label="Xoá phân loại ${idx+1}">${ic('x')}</button>` : ''}
+      </div>
+      <div class="grid2">
+        <div class="field"><label>Nhãn hiện trên POS</label>
+          <input type="text" value="${escapeHtmlAttr(vr.label)}" oninput="vesselVariantChange(${idx},'label',this.value)" placeholder="VD: Cân cả nắp">
+        </div>
+        <div class="field"><label>Trọng lượng bì</label>
+          <div class="pkg-eq">
+            <input type="number" inputmode="decimal" step="1" value="${vr.tareG}" oninput="vesselVariantChange(${idx},'tareG',this.value)" placeholder="VD: 310">
+            <span class="unit-tag">g</span>
+          </div>
+        </div>
+      </div>
+      <div class="field" style="margin-bottom:0"><label>Ảnh riêng cho phân loại này (bỏ trống thì dùng ảnh chính)</label>
+        <div id="vesselImgVar${idx}">${vesselImageBox(idx, vr.imageUrl, 92)}</div>
+      </div>
+    </div>`).join('');
+}
+
+// ---------- Lưu / xoá ----------
+async function submitVessel(){
+  if(!vesselDraft) return;
+  const name = String(vesselDraft.name||'').trim();
+  if(!name){ toast('⚠️ Nhập tên dụng cụ'); return; }
+  const variants = vesselDraft.variants
+    .map(v=>({ id:v.id, label:String(v.label||'').trim() || 'Mặc định',
+               tareG:Number(v.tareG)||0, imageUrl:v.imageUrl||'', imagePath:v.imagePath||'' }));
+  if(!variants.length){ toast('⚠️ Phải có ít nhất 1 phân loại cân'); return; }
+  // Bì = 0 nghĩa là "cân không có bì", về mặt số học vẫn chạy đúng — nhưng gần như
+  // chắc chắn là quên nhập, nên hỏi lại thay vì chặn cứng.
+  const thieuBi = variants.filter(v=>!(v.tareG > 0));
+  if(thieuBi.length && !confirm(
+      `${thieuBi.length} phân loại đang để bì = 0 g (${thieuBi.map(v=>v.label).join(', ')}).\n\n`+
+      `Nhân viên cân xong sẽ KHÔNG bị trừ bì gì cả, số vào kho tính cả trọng lượng vật đựng.\n\nVẫn lưu?`)) return;
+
+  const data = {
+    code: String(vesselDraft.code||'').trim(),
+    name, note: String(vesselDraft.note||'').trim(),
+    imageUrl: vesselDraft.imageUrl||'', imagePath: vesselDraft.imagePath||'',
+    variants, active: true, updatedAt: new Date().toISOString()
+  };
+  try{
+    if(editingVesselId){
+      await fstore.collection(VESSEL_COLL).doc(editingVesselId).update(data);
+      logAudit('update','prep_vessel',editingVesselId,data);
+      toast('✅ Đã lưu');
+    }else{
+      await fstore.collection(VESSEL_COLL).doc(vesselDraft.id).set({ ...data, createdAt: new Date().toISOString() });
+      logAudit('create','prep_vessel',vesselDraft.id,data);
+      toast('✅ Đã thêm dụng cụ');
+    }
+    // Lưu xong mới xoá thật: ảnh bị thay/bị gỡ + ảnh upload thừa trong phiên này
+    // (đổi ảnh 3 lần thì 2 tấm đầu là rác) mà bản vừa lưu không còn trỏ tới.
+    const dangDung = new Set([data.imagePath, ...variants.map(v=>v.imagePath)].filter(Boolean));
+    vesselPurgePaths([..._vesselPendingDelete, ..._vesselSessionUploads].filter(p=>!dangDung.has(p)));
+    _vesselSessionUploads = []; _vesselPendingDelete = [];
+    editingVesselId = null; vesselDraft = null;
+    renderKhoVessels();
+  }catch(err){
+    console.error('submitVessel lỗi', err);
+    showError('Lưu thất bại: ' + (err.code||err.message||err));
+  }
+}
+
+// Bán thành phẩm nào đang gắn dụng cụ này. Dùng ở 2 chỗ: hiện trong danh sách để
+// chủ quán biết sửa bì sẽ ảnh hưởng những đâu, và cảnh báo trước khi xoá.
+function vesselUsedByPreps(vesselId){
+  return (PREP_ITEMS||[]).filter(p=>(p.vesselIds||[]).includes(vesselId));
+}
+async function doDeleteVessel(id){
+  const v = VESSELS.find(x=>x.id===id); if(!v) return;
+  const dung = vesselUsedByPreps(id);
+  const canhBao = dung.length
+    ? `\n\n⚠️ Đang được ${dung.length} bán thành phẩm dùng: ${dung.map(p=>p.name).join(', ')}.\nCác bán thành phẩm đó sẽ mất lựa chọn cân bằng dụng cụ này.`
+    : '';
+  if(!confirm(`Xoá dụng cụ "${v.name}"?${canhBao}\n\nẢnh của nó cũng bị xoá hẳn khỏi Firebase.`)) return;
+  try{
+    await fstore.collection(VESSEL_COLL).doc(id).delete();
+    vesselPurgePaths([v.imagePath, ...(v.variants||[]).map(x=>x.imagePath)]);
+    // Gỡ id khỏi các bán thành phẩm đang trỏ tới — để lại id chết thì POS phải
+    // đi lọc mọi lúc, và màn Quản lý hiện "5 dụng cụ" mà thật ra chỉ còn 4.
+    await Promise.allSettled(dung.map(p=>fstore.collection('prep_items_gieogieo').doc(p.id)
+      .update({ vesselIds: (p.vesselIds||[]).filter(x=>x!==id), updatedAt: new Date().toISOString() })));
+    logAudit('delete','prep_vessel',id,{ name:v.name });
+    toast('🗑 Đã xoá');
+    renderKhoVessels();
+  }catch(err){
+    console.error('doDeleteVessel lỗi', err);
+    showError('Xoá thất bại: ' + (err.code||err.message||err));
+  }
+}
+
+// ---------- Màn hình ----------
+async function renderKhoVessels(){
+  const box = document.getElementById('khoBody');
+  if(!box) return;
+  showLoading(box);
+  try{
+    await ensureAuth();
+    [VESSELS, PREP_ITEMS] = await Promise.all([loadVessels(), loadPrepItems()]);
+  }catch(err){
+    console.error('renderKhoVessels lỗi', err);
+    box.innerHTML = '<div class="muted">Không tải được danh sách dụng cụ.</div>';
+    showError('Không đọc được dụng cụ đựng: ' + (err.code||err.message||err));
+    return;
+  }
+
+  const formHtml = vesselDraft ? `
+    <div class="card">
+      <div class="sec-title" style="margin-top:0">${editingVesselId ? 'Sửa dụng cụ đựng' : 'Dụng cụ đựng mới'}</div>
+      <div class="grid2">
+        <div class="field"><label>Mã</label><input type="text" value="${escapeHtmlAttr(vesselDraft.code)}" oninput="vesselFieldChange('code',this.value)" placeholder="VD: DC03"></div>
+        <div class="field"><label>Tên dụng cụ</label><input type="text" value="${escapeHtmlAttr(vesselDraft.name)}" oninput="vesselFieldChange('name',this.value)" placeholder="VD: Khay inox quầy"></div>
+      </div>
+      <div class="field"><label>Ảnh minh hoạ chính</label>
+        <div id="vesselImgMain"></div>
+        <div class="small-note">Chụp trên nền trắng, lấy trọn cái khay/ca. Ảnh tự được thu về ô vuông 720px, tô nền trắng và nén còn khoảng 50KB nên POS mở rất nhanh.</div>
+      </div>
+      <div class="field"><label>Ghi chú (không bắt buộc)</label>
+        <input type="text" value="${escapeHtmlAttr(vesselDraft.note)}" oninput="vesselFieldChange('note',this.value)" placeholder="VD: Khay trắng vuông để đổ thạch">
+      </div>
+
+      <div class="sec-title">Phân loại cân</div>
+      <div class="unit-explainer">Cùng một dụng cụ nhưng cân theo mấy kiểu thì bì khác nhau — ca 2L cân cả nắp nặng hơn cân không nắp đúng bằng cái nắp. Mỗi kiểu khai một dòng ở đây, nhân viên ở POS chỉ việc chọn đúng kiểu mình đang cân.<br>Chỉ có một kiểu cân thì để nguyên một dòng, POS sẽ không hỏi gì thêm.</div>
+      <div id="vesselVariantBox"></div>
+      <button type="button" class="btn outline sm" style="margin-top:6px" onclick="vesselAddVariant()">+ Thêm phân loại</button>
+
+      <button class="btn" style="margin-top:14px" onclick="submitVessel()">${editingVesselId ? ic('save',15)+' Lưu thay đổi' : 'Thêm dụng cụ'}</button>
+      <button class="btn outline" style="margin-top:8px" onclick="vesselResetForm()">Huỷ</button>
+    </div>` : `<button class="btn" onclick="vesselStartNew()">+ Thêm dụng cụ đựng</button>`;
+
+  box.innerHTML = `
+    ${formHtml}
+    <div class="sec-title">Danh sách dụng cụ (${VESSELS.length})</div>
+    ${VESSELS.length ? VESSELS.map(v=>{
+      const vars = v.variants||[];
+      const bis = vars.map(x=>Number(x.tareG)||0);
+      const biTxt = bis.length ? (Math.min(...bis) === Math.max(...bis)
+        ? 'bì ' + fmtNum(bis[0],0) + ' g'
+        : 'bì ' + fmtNum(Math.min(...bis),0) + '–' + fmtNum(Math.max(...bis),0) + ' g') : 'chưa khai bì';
+      const dung = vesselUsedByPreps(v.id);
+      const anh = v.imageUrl
+        ? `<img src="${escapeHtmlAttr(v.imageUrl)}" alt="" style="width:100%;height:100%;object-fit:contain;">`
+        : `<span style="color:var(--ink-4);font-size:17px;font-weight:700;">${escapeHtmlAttr((v.name||'?').trim().charAt(0).toUpperCase())}</span>`;
+      return `
+      <div class="litem">
+        <div style="width:54px;height:54px;flex-shrink:0;background:#fff;border:1px solid var(--line);border-radius:15px;display:flex;align-items:center;justify-content:center;overflow:hidden;">${anh}</div>
+        <div class="li-l">
+          <div>${escapeHtmlAttr(v.code||'')} · ${escapeHtmlAttr(v.name||'')}</div>
+          <div>${vars.length} phân loại · ${biTxt}${v.note ? ' · ' + escapeHtmlAttr(v.note) : ''}</div>
+          <div>${dung.length ? 'Đang dùng cho ' + dung.length + ' bán thành phẩm: ' + dung.map(p=>escapeHtmlAttr(p.name)).join(', ') : 'Chưa gắn vào bán thành phẩm nào'}</div>
+        </div>
+        <div class="li-r">
+          <button class="iconbtn" onclick="vesselStartEdit('${v.id}')">${ic('pencil')}</button>
+          <button class="iconbtn" onclick="doDeleteVessel('${v.id}')">${ic('x')}</button>
+        </div>
+      </div>`;
+    }).join('') : `<div class="empty-hint">Chưa có dụng cụ nào.<br>Khai khay nhựa lớn, khay inox, ca 2L… kèm trọng lượng bì, rồi vào <b>Chế biến cấp 1</b> gắn cho từng bán thành phẩm. Nhân viên sẽ cân được cả vật đựng và hệ thống tự trừ bì.</div>`}
+  `;
+  if(vesselDraft){ renderVesselMainImage(); renderVesselVariants(); }
 }
 
 // ============================================================
