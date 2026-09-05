@@ -10143,22 +10143,38 @@ async function loadVessels(){
 // Dùng REST + idToken thay vì SDK firebase-storage: file Quản lý chưa nạp SDK đó,
 // và cách này POS đã chạy thật nhiều tháng cho ảnh màn hình phụ (kcDoUpload).
 // Nạp thêm ~40KB SDK chỉ để làm đúng việc 20 dòng này làm được là không đáng.
-const VESSEL_STORAGE_BUCKET = 'the-cafe-33.firebasestorage.app';
+// TÊN BUCKET — chỗ này đã có sẵn một cái bẫy trong dự án: firebaseConfig khai
+// "the-cafe-33.appspot.com", nhưng code upload đang chạy thật của POS (kcDoUpload)
+// lại gõ cứng "the-cafe-33.firebasestorage.app". Dự án Firebase cũ dùng đuôi
+// .appspot.com, dự án tạo sau 10/2024 dùng .firebasestorage.app; thường hai tên
+// trỏ về cùng một bucket nhưng KHÔNG phải lúc nào cũng vậy.
+//
+// Gõ cứng một tên rồi đoán sai thì MỌI lần upload đều 404, mà nhìn vào rules thì
+// chẳng thấy gì sai — kiểu lỗi tốn cả buổi để tìm. Nên: thử tên trong config
+// trước, hỏng thì thử tên kia, rồi NHỚ cái nào chạy được cho những lần sau.
+const VESSEL_BUCKETS = (()=>{
+  let cfg = '';
+  try{ cfg = (firebase.app().options || {}).storageBucket || ''; }catch(e){}
+  if(!cfg) cfg = 'the-cafe-33.firebasestorage.app';
+  const alt = cfg.endsWith('.appspot.com')
+    ? cfg.replace(/\.appspot\.com$/, '.firebasestorage.app')
+    : cfg.replace(/\.firebasestorage\.app$/, '.appspot.com');
+  return (alt && alt !== cfg) ? [cfg, alt] : [cfg];
+})();
+let _vesselBucketOk = null;   // tên đã xác nhận chạy được trong phiên này
 
-function vesselStorageUrl(path){
-  return 'https://firebasestorage.googleapis.com/v0/b/' + VESSEL_STORAGE_BUCKET
-       + '/o/' + encodeURIComponent(path);
+function vesselStorageUrl(bucket, path){
+  return 'https://firebasestorage.googleapis.com/v0/b/' + bucket + '/o/' + encodeURIComponent(path);
+}
+function vesselBucketCandidates(){
+  return _vesselBucketOk ? [_vesselBucketOk] : VESSEL_BUCKETS;
 }
 
-async function vesselUploadBlob(blob, path, onProgress){
-  const user = await ensureAuth();
-  const token = await user.getIdToken(true);
-  const encoded = encodeURIComponent(path);
-  const url = 'https://firebasestorage.googleapis.com/v0/b/' + VESSEL_STORAGE_BUCKET
-            + '/o?uploadType=media&name=' + encoded;
+function _vesselUploadTo(bucket, blob, path, token, onProgress){
   return new Promise((resolve, reject)=>{
     const xhr = new XMLHttpRequest();
-    xhr.open('POST', url, true);
+    xhr.open('POST', 'https://firebasestorage.googleapis.com/v0/b/' + bucket
+                   + '/o?uploadType=media&name=' + encodeURIComponent(path), true);
     xhr.setRequestHeader('Authorization', 'Bearer ' + token);
     xhr.setRequestHeader('Content-Type', blob.type || 'image/jpeg');
     xhr.upload.onprogress = e=>{ if(e.lengthComputable && onProgress) onProgress(Math.round(e.loaded/e.total*100)); };
@@ -10166,26 +10182,64 @@ async function vesselUploadBlob(blob, path, onProgress){
       if(xhr.status >= 200 && xhr.status < 300){
         let res = {};
         try{ res = JSON.parse(xhr.responseText); }catch(e){}
-        resolve(vesselStorageUrl(path) + '?alt=media' + (res.downloadTokens ? '&token=' + res.downloadTokens : ''));
-      }else if(xhr.status === 403 || xhr.status === 401){
-        // Nói thẳng nguyên nhân hay gặp nhất thay vì để lại một mã lỗi trần trụi:
-        // rules của Storage có thể mới chỉ mở cho đường dẫn kiosk/.
-        reject(new Error('Firebase Storage từ chối ghi vào "prep_vessels/" (HTTP ' + xhr.status + '). Cần mở rules cho đường dẫn này.'));
-      }else reject(new Error('Tải ảnh lên thất bại (HTTP ' + xhr.status + ')'));
+        resolve(vesselStorageUrl(bucket, path) + '?alt=media' + (res.downloadTokens ? '&token=' + res.downloadTokens : ''));
+      }else{
+        const err = new Error('HTTP ' + xhr.status);
+        err.status = xhr.status;
+        reject(err);
+      }
     };
-    xhr.onerror = ()=>reject(new Error('Lỗi mạng khi tải ảnh lên'));
+    xhr.onerror = ()=>{ const e = new Error('mạng'); e.status = 0; reject(e); };
     xhr.send(blob);
   });
 }
 
+async function vesselUploadBlob(blob, path, onProgress){
+  const user = await ensureAuth();
+  const token = await user.getIdToken(true);
+  const list = vesselBucketCandidates();
+  let last = null;
+  for(let i = 0; i < list.length; i++){
+    try{
+      const url = await _vesselUploadTo(list[i], blob, path, token, onProgress);
+      _vesselBucketOk = list[i];
+      return url;
+    }catch(err){
+      last = err;
+      // 404 = sai TÊN BUCKET → còn tên khác thì thử tiếp. 401/403 là quyền,
+      // 0 là mạng — hai cái đó thử tên khác cũng vô ích, dừng luôn.
+      if(err.status === 404 && i < list.length - 1) continue;
+      break;
+    }
+  }
+  if(last && (last.status === 403 || last.status === 401)){
+    // Nói thẳng nguyên nhân thay vì để lại một mã lỗi trần trụi.
+    throw new Error('Firebase Storage từ chối ghi vào "prep_vessels/" (HTTP ' + last.status
+      + '). Kiểm tra đã đăng nhập chưa, và rules có cho ghi đường dẫn này không.');
+  }
+  if(last && last.status === 404){
+    throw new Error('Không tìm thấy kho ảnh (đã thử ' + VESSEL_BUCKETS.join(' và ')
+      + '). Kiểm tra tên bucket trong Firebase Console.');
+  }
+  throw new Error('Tải ảnh lên thất bại' + (last ? ' (' + last.message + ')' : ''));
+}
+
 // Xoá THẬT file khỏi Storage. 404 coi như xong — file đã không còn thì mục tiêu
-// (không còn file) vẫn đạt, ném lỗi ở đây chỉ làm hỏng luồng lưu.
+// (không còn file) vẫn đạt, ném lỗi ở đây chỉ làm hỏng luồng lưu. Cũng thử lần
+// lượt các tên bucket, vì ảnh cũ có thể do phiên trước upload lên tên kia.
 async function vesselDeleteStoragePath(path){
   if(!path) return;
   const user = await ensureAuth();
   const token = await user.getIdToken(true);
-  const r = await fetch(vesselStorageUrl(path), { method:'DELETE', headers:{ Authorization:'Bearer ' + token } });
-  if(!r.ok && r.status !== 404) throw new Error('Xoá ảnh thất bại (HTTP ' + r.status + ')');
+  let last = null;
+  for(const bucket of vesselBucketCandidates()){
+    const r = await fetch(vesselStorageUrl(bucket, path),
+      { method:'DELETE', headers:{ Authorization:'Bearer ' + token } });
+    if(r.ok || r.status === 204){ _vesselBucketOk = bucket; return; }
+    if(r.status !== 404) { last = r.status; break; }   // lỗi quyền: thử tên khác cũng vô ích
+    last = 404;
+  }
+  if(last && last !== 404) throw new Error('Xoá ảnh thất bại (HTTP ' + last + ')');
 }
 
 // Dọn ảnh rác — chạy nền, KHÔNG chặn và KHÔNG báo lỗi ra màn: một file thừa nằm

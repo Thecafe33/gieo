@@ -2,7 +2,7 @@
 
 > Trạng thái: **đã code xong cả 3 luồng**. Mốc so sánh: commit `6aad9fd` (bản POS + Quản lý đang chạy thật ở quán).
 >
-> **Việc còn lại của bạn trước khi dùng thật:** mở rules Firebase Storage cho đường dẫn `prep_vessels/` (xem mục 8). Nếu rules chỉ đang mở cho `kiosk/` thì upload ảnh sẽ báo lỗi 403 với chữ nói rõ nguyên nhân.
+> **Rules Firebase Storage: không phải sửa gì.** Rules hiện tại dùng `match /{allPaths=**}` nên đã phủ sẵn `prep_vessels/`; `allow write: if request.auth != null` cho cả upload lẫn xoá (hai app đều đăng nhập trước khi làm gì), `allow read: if true` cho POS hiện ảnh không cần token.
 
 ---
 
@@ -274,7 +274,8 @@ Nút **Xoá ảnh** và **Đổi ảnh** đều xoá thật khỏi Firebase Stor
 | Bì khai sai 1 lần → sai mọi lần cân của mọi BTP dùng khay đó | Màn Quản lý hiện *"Đang dùng cho N bán thành phẩm"*; sửa bì thì bắt xác nhận |
 | Khay ướt/dính làm bì lệch | Đã chốt khoá cứng số bì. Nếu về sau thấy lệch thật thì mở lại — nhưng phải có vết ghi lại, không sửa ngầm |
 | Ảnh làm POS chậm | Nén ≤720px/~60KB + nạp trước + skeleton |
-| Firebase Storage rules chặn đường dẫn mới `prep_vessels/` | **Việc còn lại của bạn.** Nếu rules chỉ mở cho `kiosk/` thì upload báo lỗi 403 kèm chữ nói rõ nguyên nhân, phải sửa rules |
+| Firebase Storage rules chặn `prep_vessels/` | **Đã kiểm tra: không dính.** `match /{allPaths=**}` phủ mọi đường dẫn. Nếu về sau rules bị siết lại thì upload báo 403 kèm chữ nói rõ nguyên nhân |
+| **Tên bucket** — `firebaseConfig` khai `.appspot.com` nhưng code upload đang chạy của POS gõ cứng `.firebasestorage.app` | Không gõ cứng nữa: thử tên trong config trước, gặp 404 thì thử tên kia, rồi nhớ cái nào chạy được. Gõ cứng mà đoán sai thì mọi lần upload đều 404 trong khi rules nhìn vào chẳng thấy gì sai |
 | Dữ liệu cũ không có `weighings` | Mọi chỗ đọc đều phải chịu được thiếu field (`weighings \|\| []`) |
 | Xoá dụng cụ mà BTP còn trỏ vào | Cảnh báo khi xoá; POS gặp id lạ thì bỏ qua dụng cụ đó, không vỡ màn |
 
@@ -294,9 +295,11 @@ Chạy bằng Chromium (Playwright), dựng đúng đoạn CSS + JS lấy thẳn
 9. Bấm ✕ → đóng, **không** gọi callback lưu
 10. `ml` không cân được, `g` cân được, id lạ không cân được
 
-**Phía Quản lý — 29/29 đạt:**
+**Phía Quản lý — 37/37 đạt:**
 1. Nén ảnh: PNG **nền trong suốt** 1600×900 → ra JPEG **vuông 720×720**, góc ảnh là **trắng** (không phải đen), dưới 150 KB
-2. Upload đúng thư mục `prep_vessels/<id>/`, đúng dạng JPEG đã nén
+2. Upload đúng thư mục `prep_vessels/<id>/`, đúng dạng JPEG đã nén, thử tên bucket trong `firebaseConfig` trước
+3. Tên bucket sai (404) → tự thử sang tên kia, upload vẫn thành công, nhớ lại cho lần sau đi thẳng
+4. Lỗi 403 → báo đúng là vấn đề quyền/rules và **không** phí công thử tên bucket khác; cả hai tên đều 404 → báo "không tìm thấy kho ảnh"
 3. Lưu đúng tên + 2 phân loại kèm bì 310/245 + `imagePath` để xoá được sau
 4. Đổi ảnh rồi **bấm Huỷ** → xoá đúng 1 ảnh rác, **không** đụng ảnh đang dùng, bản ghi vẫn trỏ ảnh cũ
 5. Đổi ảnh rồi **bấm Lưu** → ảnh cũ bị xoá thật khỏi Storage
@@ -304,7 +307,6 @@ Chạy bằng Chromium (Playwright), dựng đúng đoạn CSS + JS lấy thẳn
 7. Lưới chọn: bấm là chọn, bấm lại là bỏ, chặn đúng ở 5 dụng cụ, đơn vị `ml` thì ẩn lưới và nói rõ lý do
 
 **Còn phải thử tay ở quán** (không tự động hoá được):
-- Rules Storage có cho ghi `prep_vessels/` không
 - Kết ca thật với một bán thành phẩm đang có 3 lô
 - Huỷ nửa khay bằng kiểu "cân phần còn lại"
 - Ngắt mạng khi mở bộ cân → phải vẫn cân được bằng tên + số bì (ảnh thay bằng chữ cái đầu)
