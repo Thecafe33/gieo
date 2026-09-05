@@ -59,11 +59,10 @@ Cho phép **cân cả vật đựng**, hệ thống tự trừ bì và cộng nh
 
 ⚠️ **Không đặt tên là `stock_containers_gieogieo`** — tên đó đã có rồi và là thứ hoàn toàn khác (chai nguyên liệu đã mở + tem, màn "Chai & tem kho"). Trùng khái niệm là nguồn gốc của mọi lỗi khó truy sau này.
 
-### 3.2 `prep_items_gieogieo` — thêm 2 field
+### 3.2 `prep_items_gieogieo` — thêm 1 field
 
 ```js
 vesselIds: ['id1','id2','id3'],   // tối đa 5, thứ tự = thứ tự hiện trên POS
-gramsPerUnit: 1                   // xem 3.3
 ```
 
 ### 3.3 Đơn vị: chỉ cân được thứ quy đổi từ gram
@@ -133,11 +132,11 @@ Có thanh tiến trình + xem trước ngay sau khi chọn file. Thay ảnh thì
 Thêm một khối mới vào `renderKhoPrep()` (dòng ~9877), đặt ngay dưới mục "Hạn dùng & Kế hoạch ngày":
 
 > **Dụng cụ đựng khi cân** (tối đa 5)
-> [lưới ô vuông ảnh, bấm để chọn/bỏ chọn từ thư viện]
-> [khi `unit ≠ 'g'`: ô "1 {unit} nặng ? gam"]
+> [lưới ô vuông ảnh, bấm để chọn/bỏ chọn từ thư viện, ô đang chọn có số thứ tự]
 > *Chưa chọn dụng cụ nào → POS vẫn cho gõ tay như hiện tại, không chặn gì.*
+> *Đơn vị không phải g/kg → ẩn hẳn lưới, nói rõ vì sao.*
 
-Lưu thêm `vesselIds` + `gramsPerUnit` trong `submitPrepItem()` (dòng ~9958). Nhớ thêm `gramsPerUnit` vào `PREP_NUMERIC_FIELDS` (dòng ~9774) — field số mà quên khai vào mảng đó là đúng cái bẫy đã có ghi chú sẵn ở ngay trên dòng đó.
+Lưu thêm `vesselIds` trong `submitPrepItem()`, có lọc bỏ id của dụng cụ vừa bị xoá giữa chừng — lưu lại id chết thì POS hiện ô trống bấm không được.
 
 ---
 
@@ -147,10 +146,10 @@ Lưu thêm `vesselIds` + `gramsPerUnit` trong `submitPrepItem()` (dòng ~9958). 
 
 ```js
 openWeighPad({
-  prepId, unit, gramsPerUnit,
+  prepId, unit,
   title: 'Cân cốt trà sữa vừa nấu',
-  initialLines: [],           // mở lại để sửa
-  onDone: ({ netTotal, lines }) => { ... }
+  onDone: (netTotal, lines) => { ... },   // số ròng + bảng kê từng lần cân
+  onManual: () => { ... }                 // nhân viên chọn "tự gõ số tổng"
 })
 ```
 
