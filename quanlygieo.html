@@ -135,6 +135,62 @@ b{font-weight:700;}
 .kcard.kcard-wide .meter-bar{background:rgba(255,255,255,.24);}
 .kcard.kcard-wide .meter-foot{color:rgba(255,255,255,.68);}
 
+/* ---------- biểu đồ cột: bill theo giờ ---------- */
+/* Cột mảnh, lưới nhạt, không viền quanh cột — khoảng trắng làm việc tách cột,
+   không phải nét kẻ. Chữ trên trục dùng token chữ (--gt/--td), KHÔNG dùng màu
+   của cột: màu accent nhạt đọc như chữ sẽ chìm trên nền trắng. */
+.hb-card{padding:14px 12px 10px;}
+.hb-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:0 4px 10px;}
+.hb-title{font-size:12.5px;font-weight:700;color:var(--td);}
+.hb-peak{font-size:11.5px;color:var(--gt);font-weight:600;}
+.hb-scroll{overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;}
+.hb-plot{position:relative;display:flex;align-items:flex-end;gap:2px;height:132px;min-width:100%;padding-left:26px;}
+/* lưới: hairline, liền nét, lùi hẳn về sau */
+.hb-grid{position:absolute;left:26px;right:0;top:0;bottom:0;pointer-events:none;}
+.hb-gl{position:absolute;left:0;right:0;height:1px;background:var(--line);}
+.hb-gt{position:absolute;left:-26px;width:22px;text-align:right;font-size:9.5px;color:var(--gt);
+       transform:translateY(-50%);font-variant-numeric:tabular-nums;line-height:1;}
+.hb-col{position:relative;flex:1 1 0;min-width:20px;display:flex;flex-direction:column;
+        justify-content:flex-end;align-items:center;height:100%;cursor:default;}
+.hb-bar{width:100%;max-width:24px;background:var(--gd);
+        border-radius:4px 4px 0 0;   /* bo đầu dữ liệu, vuông ở chân trục */
+        min-height:2px;transition:height .35s ease;}
+/* Giờ mở bán mà 0 bill: vẫn vẽ một mẩu xám 3px. Để trống hẳn thì cột đó biến
+   mất khỏi biểu đồ và người xem tưởng giờ đó quán đóng cửa — trong khi ý nghĩa
+   thật là "có mở, có trả lương, mà không bán được gì". */
+.hb-col.zero .hb-bar{background:var(--gt);opacity:.5;height:3px!important;border-radius:2px;}
+.hb-col.peak .hb-bar{background:var(--gm);}
+/* Nhãn giá trị đặt ngay TRÊN NÓC THANH (bottom tính theo chiều cao thanh), không
+   đặt ở đỉnh cột: cột luôn cao 100% khung, nên neo theo đỉnh cột sẽ làm con số
+   lơ lửng tách rời khỏi thanh của nó mỗi khi thanh thấp. Nền trắng mờ để con số
+   không lẫn vào vạch lưới chạy ngang phía sau. */
+.hb-val{position:absolute;font-size:10px;font-weight:800;color:var(--td);
+        font-variant-numeric:tabular-nums;white-space:nowrap;
+        background:rgba(255,255,255,.85);border-radius:3px;padding:0 2px;line-height:1.25;}
+.hb-xrow{display:flex;gap:2px;padding-left:26px;margin-top:5px;}
+.hb-x{flex:1 1 0;min-width:20px;text-align:center;font-size:9.5px;color:var(--gt);
+      font-variant-numeric:tabular-nums;}
+.hb-x.on{color:var(--td);font-weight:700;}
+.hb-foot{font-size:11px;color:var(--gt);padding:8px 4px 0;line-height:1.45;}
+.hb-foot b{color:var(--td);}
+.hb-warn{color:#b8860b;font-weight:600;}
+/* Đọc số: MỘT dòng dùng chung ngay dưới tiêu đề, đổi nội dung khi chạm/rê vào
+   cột. Cố ý KHÔNG dùng tooltip nổi trên đầu cột: app này chạy chủ yếu trên điện
+   thoại (không có hover), và tooltip nowrap ở cột ngoài rìa vừa bị khung cuộn cắt
+   mất vừa làm phình chiều rộng cuộn của cả biểu đồ. Một dòng cố định thì không
+   bao giờ bị cắt, chạm được bằng ngón tay, và vẫn đọc được bằng chuột. */
+.hb-read{font-size:11.5px;color:var(--gt);padding:0 4px 8px;min-height:17px;}
+.hb-read b{color:var(--td);}
+.hb-col.sel .hb-bar{background:var(--gm);}
+.hb-col.sel.zero .hb-bar{background:var(--gt);opacity:1;}
+.hb-table{margin-top:10px;border-top:1px solid var(--line);padding-top:8px;}
+.hb-table summary{font-size:11.5px;color:var(--gt);cursor:pointer;font-weight:600;}
+.hb-trow{display:flex;justify-content:space-between;font-size:11.5px;padding:3px 2px;color:var(--td);}
+.hb-trow span:last-child{font-variant-numeric:tabular-nums;color:var(--gt);}
+html.tab-ui .hb-plot{height:180px;}
+html.tab-ui .hb-col{min-width:30px;}
+html.tab-ui .hb-x{min-width:30px;font-size:10.5px;}
+
 /* ---------- meter (thanh % mục tiêu) ---------- */
 .meter{margin-top:8px;margin-bottom:2px;}
 .meter-bar{height:6px;border-radius:6px;background:var(--line);overflow:hidden;}
@@ -607,6 +663,7 @@ html.phone-ui .hamburger-btn{display:flex;}
         <div id="todayNudge"></div>
         <div class="sec-title">Chỉ số hôm nay</div>
         <div class="kgrid" id="todayGrid"></div>
+        <div id="todayHourly"></div>
         <div class="sec-title">Cảnh báo</div>
         <div id="todayAlerts"></div>
       </div>
@@ -1755,6 +1812,61 @@ function rawMixFromOrders(orders){
   });
   return Object.values(map);
 }
+// ============================================================
+// BILL THEO GIỜ — dữ liệu cho biểu đồ cột ở màn "Hôm nay"
+//
+// Mục đích: chủ quán nhìn được khung giờ nào đông, khung giờ nào chết, để xếp ca
+// cho đúng thay vì đoán.
+//
+// CẢNH BÁO VỀ NGUỒN GIỜ: `o.time` do app POS ghi, file này KHÔNG kiểm soát định
+// dạng đó (chỗ khác trong app chỉ in thẳng ra màn hình chứ chưa từng bóc tách).
+// Nên parser dưới đây cố ý chịu được nhiều dạng ('14:35', '14h35', '2:05 PM',
+// '05/09/2026 14:35', chuỗi ISO...) và khi không đọc nổi thì ĐẾM RIÊNG chứ không
+// im lặng bỏ qua — bill bị bỏ qua âm thầm sẽ làm biểu đồ thấp hơn thực tế mà
+// không ai biết, đúng kiểu sai nguy hiểm nhất.
+// ------------------------------------------------------------
+function orderHour(o){
+  if(!o) return null;
+  // 1) o.time — giờ POS ghi tại quầy, ưu tiên tuyệt đối vì đây là giờ BÁN thật.
+  if(typeof o.time === 'string' && o.time){
+    const m = /(\d{1,2})\s*[:hg]\s*(\d{2})/i.exec(o.time);
+    if(m){
+      let h = Number(m[1]);
+      const mins = Number(m[2]);
+      if(h>=0 && h<=23 && mins>=0 && mins<=59){
+        // 12h + AM/PM: POS Việt gần như chắc chắn dùng 24h, nhưng nhận thêm dạng
+        // 12h thì không mất gì mà phòng được trường hợp đổi định dạng sau này.
+        if(/p\.?m/i.test(o.time) && h < 12) h += 12;
+        else if(/a\.?m/i.test(o.time) && h === 12) h = 0;
+        return h;
+      }
+    }
+  }
+  // 2) createdAt — dự phòng. Dùng getHours() tức GIỜ MÁY ĐANG XEM: quán và chủ
+  // quán cùng ở Việt Nam nên trùng nhau; nếu mở app ở múi giờ khác thì con số
+  // này lệch, và đó là lý do o.time luôn được ưu tiên trước.
+  if(o.createdAt){
+    const d = new Date(o.createdAt);
+    if(!isNaN(d)) return d.getHours();
+  }
+  return null;
+}
+
+// Trả về {hours:{'8':{bills,revenue}, ...}, unknown:n} — `unknown` là số bill
+// không đọc được giờ, PHẢI được hiện lên chứ không được nuốt.
+function hourlyFromOrders(orders){
+  const hours = {};
+  let unknown = 0;
+  (orders||[]).forEach(o=>{
+    const h = orderHour(o);
+    if(h == null){ unknown++; return; }
+    if(!hours[h]) hours[h] = {bills:0, revenue:0};
+    hours[h].bills++;
+    hours[h].revenue += Number(o.total)||0;
+  });
+  return {hours, unknown};
+}
+
 function combineMix(perDaySales){
   const map = {};
   let totalUnits=0, totalRevenue=0;
@@ -1814,7 +1926,11 @@ async function fetchSalesRange(startDate, endDate){
     const orders = fetchedResults[idx];
     const agg = aggregateOrders(orders);
     const mix = rawMixFromOrders(orders);
-    const dayAgg = {...agg, mix};
+    // Bill theo giờ tính LUÔN Ở ĐÂY từ mảng orders đã có sẵn trong tay — không
+    // tốn thêm lượt đọc nào. Nhờ vậy ngày cũ đã chốt sổ cũng được ghi kèm vào
+    // cache, xem lại sau này không phải kéo đơn thô về nữa.
+    const hourly = hourlyFromOrders(orders);
+    const dayAgg = {...agg, mix, hourly: hourly.hours, hourlyUnknown: hourly.unknown};
     if(isCacheable(d)) writeCachedDay(key, dayAgg);
     return {date:key, ...dayAgg};
   });
@@ -4447,6 +4563,10 @@ async function renderToday(){
       ${c.ratio!=null ? meterHTML(c.ratio, c.status) : ''}
     </div>`).join('');
 
+  // Bill theo giờ — dữ liệu đã được fetchSalesRange tính sẵn từ chính mảng đơn
+  // nó vừa đọc, nên không tốn thêm lượt gọi mạng nào.
+  renderHourlyBills(salesRes.perDay[0]);
+
   document.getElementById('todayAlerts').innerHTML = renderAlerts(generateAlerts(kpi, kpi.targetCfg));
   clearError();
   }catch(err){
@@ -4455,6 +4575,147 @@ async function renderToday(){
   }finally{
     setSync(false);
   }
+}
+
+// ============================================================
+// BIỂU ĐỒ CỘT — BILL THEO GIỜ (màn "Hôm nay")
+//
+// Đọc gì từ biểu đồ này: khung giờ nào đông, khung giờ nào chết — để xếp ca cho
+// đúng thay vì đoán. Giờ CÓ MỞ BÁN mà 0 bill vẫn được vẽ (cột xám, cao 2px):
+// một giờ trống nằm giữa hai giờ đông chính là thông tin đáng giá nhất ở đây,
+// bỏ nó đi thì biểu đồ trông đẹp mà vô dụng.
+//
+// Khoảng giờ hiển thị = từ bill ĐẦU TIÊN tới bill CUỐI CÙNG trong ngày. Cố ý
+// không cắm cứng "6h-23h": quán đổi giờ mở cửa là biểu đồ tự đổi theo, không
+// phải sửa code, và cũng không có cả dãy cột rỗng vô nghĩa ở hai đầu.
+// ------------------------------------------------------------
+// Trục Y làm tròn lên số đẹp (1/2/5 × 10^n) để vạch lưới đọc được, thay vì
+// những mốc lẻ như 3.6 / 7.2.
+function niceCeil(v){
+  if(!(v>0)) return 1;
+  const mag = Math.pow(10, Math.floor(Math.log10(v)));
+  const n = v/mag;
+  return (n<=1?1:n<=2?2:n<=5?5:10) * mag;
+}
+
+function renderHourlyBills(dayAgg){
+  const box = document.getElementById('todayHourly');
+  if(!box) return;
+
+  const hourly = (dayAgg && dayAgg.hourly) || null;
+  const unknown = Number(dayAgg && dayAgg.hourlyUnknown) || 0;
+  const hrs = hourly ? Object.keys(hourly).map(Number).filter(h=>h>=0&&h<=23).sort((a,b)=>a-b) : [];
+
+  // Ba trạng thái "không có gì để vẽ" phải nói RÕ KHÁC NHAU, vì cách xử lý khác
+  // hẳn nhau: chưa bán / POS không ghi giờ / ngày cũ lưu trước khi có tính năng.
+  if(!hrs.length){
+    let msg;
+    if(hourly && unknown > 0){
+      msg = `<span class="hb-warn">${ic('alert',13)} Có ${unknown} bill nhưng không đọc được giờ bán từ dữ liệu POS.</span> Biểu đồ theo giờ cần trường giờ trên từng bill — báo lại để kiểm tra phía POS.`;
+    }else if(hourly){
+      msg = 'Chưa có bill nào hôm nay.';
+    }else{
+      msg = 'Ngày này được lưu trước khi có biểu đồ theo giờ nên không còn chi tiết giờ. Các ngày từ nay trở đi sẽ có.';
+    }
+    box.innerHTML = `<div class="sec-title">Bill theo giờ</div>
+      <div class="card hb-card"><div class="hb-foot" style="padding-top:0">${msg}</div></div>`;
+    return;
+  }
+
+  const from = hrs[0], to = hrs[hrs.length-1];
+  const span = [];
+  for(let h=from; h<=to; h++){
+    const b = hourly[h] || {bills:0, revenue:0};
+    span.push({h, bills:Number(b.bills)||0, revenue:Number(b.revenue)||0});
+  }
+  const totalBills = span.reduce((s,x)=>s+x.bills,0);
+  // Toàn số 0 (dữ liệu hỏng hoặc ngày chưa có bill): không được vẽ biểu đồ rỗng
+  // rồi khoe "Đông nhất 8h (0 bill)" — vô nghĩa và làm người xem tưởng có bán.
+  if(totalBills === 0){
+    box.innerHTML = `<div class="sec-title">Bill theo giờ</div>
+      <div class="card hb-card"><div class="hb-foot" style="padding-top:0">Chưa có bill nào hôm nay.</div></div>`;
+    return;
+  }
+  const maxBills = Math.max(...span.map(x=>x.bills), 1);
+  // Bill là SỐ NGUYÊN nên vạch trục cũng phải nguyên. Chốt bước nhảy nguyên trước
+  // (1/2/5/10...) rồi mới nhân lên, thay vì làm tròn đỉnh rồi chia 4 — cách sau
+  // cho ra những vạch như 1,3 / 2,5 / 3,8 khi quán bán ít, đọc rất vô lý.
+  const yStep = Math.max(1, niceCeil(maxBills/4));
+  const yMax = yStep*4;
+  const peak = span.reduce((a,b)=> b.bills>a.bills ? b : a, span[0]);
+  const openHours = span.filter(x=>x.bills>0).length;
+  const avgPerOpenHour = openHours ? totalBills/openHours : 0;
+
+  // 4 vạch lưới ở 0 / 25 / 50 / 75 / 100% của yMax.
+  const gridHtml = [0,1,2,3,4].map(i=>`
+    <div class="hb-gl" style="bottom:${i*25}%"></div>
+    <div class="hb-gt" style="bottom:${i*25}%">${yStep*i}</div>`).join('');
+
+  // Nhãn số CHỈ đặt trên cột cao nhất — số trên mọi cột thì 12-16 cột trên màn
+  // điện thoại sẽ chồng lên nhau và không ai đọc. Số của các cột còn lại nằm ở
+  // tooltip và ở bảng bên dưới, không cột nào bị giấu số.
+  const colsHtml = span.map(x=>{
+    const pct = (x.bills/yMax)*100;
+    const isPeak = x.bills===peak.bills && x.bills>0;
+    const cls = x.bills===0 ? 'zero' : (isPeak ? 'peak' : '');
+    return `<div class="hb-col ${cls}" data-h="${x.h}" data-b="${x.bills}" data-r="${x.revenue}"
+         onclick="hbPick(this)" onmouseenter="hbPick(this)">
+      ${isPeak ? `<div class="hb-val" style="bottom:calc(${Math.max(pct,1.5)}% + 3px)">${x.bills}</div>` : ''}
+      <div class="hb-bar" style="height:${x.bills===0 ? 0 : Math.max(pct,1.5)}%"></div>
+    </div>`;
+  }).join('');
+
+  const xHtml = span.map(x=>`<div class="hb-x ${x.bills===peak.bills&&x.bills>0?'on':''}">${x.h}h</div>`).join('');
+
+  const tableHtml = span.map(x=>`<div class="hb-trow"><span>${x.h}h–${x.h+1}h</span><span>${x.bills} bill${x.revenue?' · '+fmt(x.revenue):''}</span></div>`).join('');
+
+  box.innerHTML = `
+    <div class="sec-title">Bill theo giờ</div>
+    <div class="card hb-card">
+      <div class="hb-head">
+        <div class="hb-title">${from}h–${to+1}h · ${totalBills} bill</div>
+        <div class="hb-peak">Đông nhất ${peak.h}h (${peak.bills} bill)</div>
+      </div>
+      <div class="hb-read" id="hbReadout"></div>
+      <div class="hb-scroll" onmouseleave="hbPick(null)">
+        <div style="min-width:${Math.max(span.length*22+26, 0)}px">
+          <div class="hb-plot"><div class="hb-grid">${gridHtml}</div>${colsHtml}</div>
+          <div class="hb-xrow">${xHtml}</div>
+        </div>
+      </div>
+      <div class="hb-foot">
+        Trung bình <b>${fmtNum(avgPerOpenHour,1)} bill/giờ</b> trên ${openHours} giờ có bán.
+        ${span.some(x=>x.bills===0) ? ` Giờ không có bill nào để cột xám — đó là giờ vẫn mở mà không bán được gì.` : ''}
+        ${unknown ? `<br><span class="hb-warn">${ic('alert',13)} ${unknown} bill không đọc được giờ nên chưa vào biểu đồ</span> (tổng số bill ở phần Chỉ số vẫn đếm đủ).` : ''}
+      </div>
+      <details class="hb-table">
+        <summary>Xem dạng bảng</summary>
+        ${tableHtml}
+      </details>
+    </div>`;
+
+  // Mặc định hiện giờ đông nhất — mở màn ra là đã có thông tin, không phải chạm
+  // mới thấy gì.
+  HB_DEFAULT_HOUR = peak.bills > 0 ? peak.h : null;
+  hbPick(null);
+}
+
+// Đổi nội dung dòng đọc số. Gọi với null = quay về mặc định (giờ đông nhất).
+let HB_DEFAULT_HOUR = null;
+function hbPick(el){
+  const box = document.getElementById('todayHourly');
+  const out = document.getElementById('hbReadout');
+  if(!box || !out) return;
+  let target = el;
+  if(!target && HB_DEFAULT_HOUR != null){
+    target = box.querySelector(`.hb-col[data-h="${HB_DEFAULT_HOUR}"]`);
+  }
+  box.querySelectorAll('.hb-col.sel').forEach(c=>c.classList.remove('sel'));
+  if(!target){ out.innerHTML = ''; return; }
+  target.classList.add('sel');
+  const h = Number(target.dataset.h), b = Number(target.dataset.b), r = Number(target.dataset.r);
+  out.innerHTML = `${h}h–${h+1}h · <b>${b} bill</b>${r ? ' · ' + fmt(r) : ''}`
+    + (b === 0 ? ' <span style="color:var(--gt)">— giờ này không bán được gì</span>' : '');
 }
 
 // ============================================================
