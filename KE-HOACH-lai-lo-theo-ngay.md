@@ -1,6 +1,9 @@
 # Kế hoạch: Lãi/lỗ theo ngày — và hoà vốn là hệ quả của nó
 
 > **Chưa code gì.** Đây là bản để bạn duyệt. Chỗ nào sai ý, nói tôi sửa trước khi bắt đầu.
+>
+> Cập nhật lần này: thêm mục **§7 Tính lại** và **§8 Chờ số thực tế → Chốt sổ** theo hai
+> quyết định bạn vừa chốt.
 
 ---
 
@@ -103,79 +106,180 @@ chuẩn nhất cuối cùng"*:
 |---|---|---|---|
 | 🟡 **Đang chạy** | Ngày chưa kết ca | **Dự đoán** theo lịch làm việc đã xếp | Dự đoán |
 | 🔵 **Đã chốt ngày** | Đã kết ca | **Thật** theo chấm công | Dự đoán |
-| 🟢 **Đã chốt tháng** | Đã có hoá đơn điện/nước/… của tháng | Thật | **Thật**, thay số dự đoán |
+| 🟢 **Đã chốt tháng** | Đã có đủ hoá đơn điện/nước/… của tháng | Thật | **Thật**, thay số dự đoán |
 
 Mỗi con số lãi/lỗ luôn đi kèm một trong ba dấu này. Ngày hôm nay lúc 3 giờ chiều là 🟡 —
 vẫn xem được, nhưng bạn biết nó chưa chốt.
-
-Khi bạn nhập hoá đơn điện thật của tháng 9, **các ngày trong tháng 9 được tính lại** và
-chuyển sang 🟢. Đó là lý do tháng là con số chuẩn cuối cùng, đúng như bạn nói.
 
 ---
 
 ## 6. Chi phí dự đoán vs thực tế — phần cần làm mới
 
-Đây là **thứ duy nhất thật sự chưa có**. Cần thêm khái niệm *chi phí định kỳ*:
+Đây là **thứ duy nhất thật sự chưa có**. Form chi phí hiện tại chỉ có **một trục thời
+gian** (ngày ghi, hoặc kỳ bắt đầu → kết thúc), nên không tách được *kỳ sử dụng* khỏi
+*ngày trả tiền*. Cần bốn trường:
 
 ```
-Khoản: "Tiền điện"
-  Chu kỳ:        hằng tháng
-  Số dự đoán:    2.000.000 đ/tháng
-  Thực tế:
-     Tháng 8 → 2.150.000 đ  (đã có hoá đơn)  🟢
-     Tháng 9 → chưa có       → dùng 2.000.000 dự đoán  🟡
+Khoản:        Tiền điện
+Kỳ sử dụng:   1/9  →  30/9        ← chi phí rơi vào đây, chia đều theo ngày
+Số tiền:      2.150.000
+Loại số:      ● thực tế   ○ dự đoán
+Ngày trả:     5/10        (để trống = chưa trả)
 ```
 
-Có số thật thì số thật thắng, các ngày trong tháng đó tính lại. Chưa có thì dùng dự
-đoán, và **màn hình phải ghi rõ là dự đoán** chứ không hiện như số đã đo.
+Ba mốc ngày hoàn toàn khác nhau, và trước giờ app gộp làm một:
+
+| Mốc | Ví dụ tiền điện tháng 9 | Dùng để làm gì |
+|---|---|---|
+| **Kỳ sử dụng** | 1/9 → 30/9 | Chi phí rơi vào 30 ngày này |
+| **Ngày có hoá đơn** | 5/10 | Số dự đoán bị thay bằng số thật |
+| **Ngày trả tiền** | 5/10 | Tiền rời két — chỉ màn Tiền mặt dùng |
+
+Đơn nhập hàng (PO) **để trống kỳ sử dụng** — nó phân bổ theo lượng bán/hao thật (§4),
+không chia đều theo ngày.
 
 Gợi ý: số dự đoán tháng sau **tự lấy trung bình 3 tháng gần nhất** đã có số thật, thay
 vì bắt bạn gõ lại — nhưng vẫn sửa tay được.
 
 ---
 
-## 7. Chi phí trả trước dài hạn (mặt bằng trả theo năm)
+## 7. Hoá đơn về muộn → **TÍNH LẠI** (bạn đã chốt)
+
+> *"tôi chọn tính lại, tháng nào phải gánh đúng chi phí tháng đó"*
+
+**Quy tắc:** số thật về lúc nào cũng được, nó luôn quay về **đúng kỳ sử dụng** của nó.
+Các ngày trong kỳ đó được tính lại. Không có chuyện đẩy chênh lệch sang tháng sau.
+
+### Ví dụ bằng số
+
+Dự đoán tiền điện tháng 9 là **2.000.000**. Trong suốt tháng 9, mỗi ngày gánh
+`2.000.000 ÷ 30 = 66.667đ`, đánh dấu 🟡.
+
+Ngày 5/10 hoá đơn về: **2.150.000**.
+
+| | Trước 5/10 | Sau 5/10 |
+|---|---:|---:|
+| Điện/ngày của tháng 9 | 66.667 🟡 | **71.667** 🟢 |
+| Lãi ngày 12/9 (ví dụ) | 420.000 | **415.000** |
+| Lãi cả tháng 9 | 8.500.000 | **8.350.000** |
+
+Tháng 9 giảm đúng 150.000. **Tháng 10 không bị dính gì cả.**
+
+### Hệ quả phải nói trước
+
+- **Con số của một tháng đã xem có thể đổi.** Bạn xem lãi tháng 9 hôm 1/10 là 8,50tr;
+  xem lại hôm 6/10 thành 8,35tr. Đây là **đúng như bạn yêu cầu**, không phải lỗi — nhưng
+  app phải nói rõ vì sao đổi, nên mỗi tháng sẽ có dòng *"đã tính lại ngày 5/10: tiền điện
+  2.000.000 → 2.150.000"*.
+- **Tháng đã chốt sổ (§8) thì không tự đổi nữa.** Nếu có số thật về sau khi đã chốt, app
+  hỏi bạn trước rồi mới mở lại tháng đó.
+
+---
+
+## 8. "Chờ số thực tế" → **Chốt sổ** (bạn đã chốt)
+
+> *"hết tháng ở bảng sức khoẻ quán sẽ phải luôn hiện ra thông báo có chi phí chưa có
+> thực tế … khi đó đầy đủ những thứ cần số liệu thực tế → bảng lời lãi cuối cùng mới
+> chính xác và lúc này chốt sổ"*
+
+### Một tháng có đúng ba trạng thái
+
+| Trạng thái | Điều kiện | Bảng Sức khoẻ quán hiện gì |
+|---|---|---|
+| 🟡 **Đang chạy** | Tháng chưa hết | Lãi/lỗ tạm tính, ghi rõ "chưa hết tháng" |
+| 🟠 **Chờ số thực tế** | Tháng đã hết, còn ≥1 khoản đang là dự đoán | **Băng cảnh báo luôn hiện**, liệt kê từng khoản còn thiếu |
+| 🟢 **Đã chốt sổ** | Không còn khoản dự đoán nào + bạn bấm **Chốt sổ** | Con số cuối cùng, khoá lại |
+
+### Băng "Chờ số thực tế" — hình dung
+
+```
+┌────────────────────────────────────────────────────────┐
+│ ⚠  THÁNG 9 CHƯA CHỐT — còn 2 khoản chờ số thực tế      │
+│                                                        │
+│   Tiền điện     dự đoán 2.000.000   [ Nhập số thật ]   │
+│   Tiền nước     dự đoán   350.000   [ Nhập số thật ]   │
+│                                                        │
+│   Lãi tạm tính 8.500.000 — có thể lệch tới ±235.000    │
+│   khi có đủ hoá đơn.                                   │
+└────────────────────────────────────────────────────────┘
+```
+
+Ba điểm trong thiết kế này:
+
+1. **Luôn hiện, không tắt được**, từ ngày 1 của tháng sau cho tới khi đủ số thật. Đúng ý
+   *"sẽ phải luôn hiện ra"*. Tắt được là sẽ có ngày bạn tắt rồi quên.
+2. **Nói được sai lệch tối đa.** App biết dự đoán là 2.000.000, và biết 3 tháng trước
+   dao động thế nào → ước được biên độ. Con số "±235.000" đáng tin hơn một cảnh báo suông.
+3. **Nút nhập số thật nằm ngay trong băng**, không bắt bạn đi tìm mục Chi phí.
+
+### Nút "Chốt sổ"
+
+Chỉ **bật lên được khi không còn khoản dự đoán nào**. Bấm vào:
+- Ghi lại con số lãi/lỗ cuối cùng của tháng đó + ngày chốt + ai chốt.
+- Từ đó tháng hiện màu 🟢, và mọi màn hình đọc số **đã chốt** thay vì tính lại mỗi lần —
+  nhanh hơn, và quan trọng hơn: con số bạn đã đọc sẽ không tự đổi sau lưng.
+
+Nếu sau khi chốt vẫn có hoá đơn về: app **không tự sửa**, mà hiện dòng
+*"Có 1 số thật về sau ngày chốt — mở lại tháng 9?"* để bạn quyết.
+
+### Tháng đã chốt hiển thị khác tháng chưa chốt
+
+| | Chưa chốt | Đã chốt |
+|---|---|---|
+| Con số | "Lãi **tạm tính**" | "Lãi tháng 9" |
+| Màu/dấu | 🟠 kèm băng cảnh báo | 🟢 kèm "chốt ngày 6/10" |
+| Có tính lại không | Có, mỗi lần mở | Không, đọc số đã ghi |
+
+---
+
+## 9. Chi phí trả trước dài hạn (mặt bằng trả theo năm)
 
 Cơ chế **đã có sẵn** trong app: chi phí "Có kỳ hạn" với ngày bắt đầu → ngày kết thúc,
 tự chia đều theo ngày. Mặt bằng 120tr trả cho 1/1/2026 → 31/12/2026 sẽ tự thành
 328.767đ/ngày.
 
-Cần bổ sung đúng **hai trường**:
-- **Ngày thực chi** — hôm nào tiền thật sự rời két (để màn Tiền mặt dùng)
-- **Đã chi / chưa chi** — khoản chưa chi vẫn tính vào lãi/lỗ nhưng chưa trừ tiền mặt
+Với bốn trường ở §6, hai kiểu mặt bằng ghi nhận khác nhau đúng như bạn cần:
 
-Nhờ vậy: mặt bằng A trả trước cả năm và mặt bằng B trả hằng tháng đều ghi nhận được, và
-đều phân bổ đúng vào từng ngày.
+| | Mặt bằng A — trả cả năm | Mặt bằng B — trả hằng tháng |
+|---|---|---|
+| Kỳ sử dụng | 1/1/2026 → 31/12/2026 | 1/9 → 30/9 |
+| Số tiền | 120.000.000 (thực tế) | 10.000.000 (thực tế) |
+| Ngày trả | 28/12/2025 — **đã chi** | để trống — **chưa chi** |
+| Vào lãi/lỗ | 328.767đ/ngày, cả 365 ngày | 333.333đ/ngày, 30 ngày tháng 9 |
+| Vào tiền mặt | −120tr ngày 28/12/2025 | chưa trừ, đang nợ |
 
 ---
 
-## 8. Hiển thị ở đâu
+## 10. Hiển thị ở đâu
 
 | Màn | Nội dung |
 |---|---|
 | **Hôm nay** | Thẻ lớn **"Lãi/lỗ hôm nay"** kèm dấu 🟡/🔵. Bấm vào xem tách từng dòng (doanh thu − COGS − lương − …). Thẻ hoà vốn ngày giữ nguyên, đặt ngay dưới |
-| **Sức khoẻ tài chính** | Bảng **lãi/lỗ từng ngày** trong kỳ đang xem + biểu đồ cột (cột đỏ = ngày lỗ). Dòng tổng cuối bảng chính là lãi kỳ đó |
-| **Báo cáo kỳ** | Tổng tuần/tháng, so với kỳ trước |
-| **Chi phí** | Khu vực mới: **Chi phí định kỳ** — khai dự đoán, nhập số thực tế từng tháng |
+| **Sức khoẻ quán** | Băng **"Chờ số thực tế"** (§8) trên cùng · bảng **lãi/lỗ từng ngày** + biểu đồ cột (cột đỏ = ngày lỗ) · dòng tổng cuối bảng chính là lãi kỳ đó · nút **Chốt sổ** |
+| **Báo cáo kỳ** | Tổng tuần/tháng, so với kỳ trước, có nhãn đã chốt / chưa chốt |
+| **Chi phí** | Khu vực mới: **Chi phí định kỳ** — khai dự đoán, nhập số thực tế từng tháng, xem tháng nào còn thiếu |
 
 ---
 
-## 9. Chia làm 4 đợt — mỗi đợt xong bạn duyệt rồi mới đi tiếp
+## 11. Chia làm 5 đợt — mỗi đợt xong bạn duyệt rồi mới đi tiếp
 
 | Đợt | Nội dung | Kết quả nhìn thấy được |
 |---|---|---|
 | **1** | Máy tính lãi/lỗ theo ngày, dùng dữ liệu đang có. Thẻ "Lãi/lỗ hôm nay" ở tab Hôm nay | Biết hôm nay lãi hay lỗ |
-| **2** | Bảng + biểu đồ lãi/lỗ từng ngày ở Sức khoẻ tài chính; tổng tuần/tháng | Cộng ra lãi tháng |
-| **3** | Chi phí định kỳ: dự đoán vs thực tế, ba mức tin cậy 🟡🔵🟢 | Số tháng thành số chuẩn |
-| **4** | Ngày thực chi + đã chi/chưa chi; nối lại điểm hoà vốn cho khớp cách tính mới | Đủ như bạn mô tả |
+| **2** | Bảng + biểu đồ lãi/lỗ từng ngày ở Sức khoẻ quán; tổng tuần/tháng | Cộng ra lãi tháng |
+| **3** | Chi phí định kỳ: 4 trường ở §6, dự đoán vs thực tế, ba mức 🟡🔵🟢, **tính lại** khi số thật về | Số tháng thành số chuẩn |
+| **4** | Băng **Chờ số thực tế** + nút **Chốt sổ** + trạng thái tháng | Không bao giờ quên hoá đơn về muộn |
+| **5** | Ngày thực chi / đã chi–chưa chi cho màn Tiền mặt; nối lại điểm hoà vốn cho khớp cách tính mới | Đủ như bạn mô tả |
 
-Làm đợt 1 trước cũng có ích ngay, kể cả khi chưa làm 3 và 4.
+Làm đợt 1 trước cũng có ích ngay, kể cả khi chưa làm 3–5.
 
 ---
 
-## 10. Cần bạn chốt trước khi tôi bắt đầu
+## 12. Còn 5 câu cần bạn chốt trước khi tôi bắt đầu code
 
-1. **Nguyên liệu nhập kho tính khi bán, không tính khi mua** (mục 4) — đồng ý không?
+Hai câu bạn vừa trả lời (tính lại · chốt sổ) đã ghi ở §7 và §8. Còn năm câu này:
+
+1. **Nguyên liệu nhập kho tính khi bán, không tính khi mua** (§4) — đồng ý không?
    Đây là quyết định ảnh hưởng lớn nhất tới con số hằng ngày.
 
 2. **Lương ngày chưa kết ca lấy dự đoán từ đâu?**
@@ -194,9 +298,12 @@ Làm đợt 1 trước cũng có ích ngay, kể cả khi chưa làm 3 và 4.
 5. **Bán qua app (GrabFood…) có phí sàn** — có tách riêng để tính biên đúng cho từng
    kênh không, hay gộp chung như hiện tại?
 
+> Bạn chỉ cần trả lời số thứ tự, ví dụ *"1 đồng ý, 2 chọn a, 3 trừ, 4 không, 5 gộp"*.
+> Trả lời xong là tôi bắt tay vào đợt 1.
+
 ---
 
-## 11. Việc tôi làm sai lần trước, và cách tránh lặp lại
+## 13. Việc tôi làm sai lần trước, và cách tránh lặp lại
 
 Lần trước tôi hỏi 2 câu hẹp rồi tự quyết công thức, cách tính lương, cửa sổ dữ liệu và
 vị trí hiển thị — bạn chỉ thấy kết quả sau khi mọi thứ đã viết xong. Với chỉ số tài
