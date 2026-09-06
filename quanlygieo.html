@@ -1165,6 +1165,7 @@ html.phone-ui .nav-search .ns-kbd{display:none;}
       <div class="wrap">
         <div id="reportSubNavToday"></div>
         <div id="todayNudge"></div>
+        <div id="todayBep"></div>
         <div class="sec-title">Chỉ số hôm nay</div>
         <div class="kgrid" id="todayGrid"></div>
         <div class="sec-title">Bill theo giờ</div>
@@ -2819,7 +2820,12 @@ async function loadExpenseCategories(){
   return snap.docs.map(d=>({id:d.id, ...d.data()})).sort((a,b)=>(a.label||'').localeCompare(b.label||'','vi'));
 }
 function addExpenseCategory(label){
-  return fstore.collection('expense_categories_gieogieo').add({label, active:true, createdAt:new Date().toISOString()});
+  // costType đoán sẵn theo tên để chủ quán chỉ phải soát lại, không phải khai từ đầu.
+  return fstore.collection('expense_categories_gieogieo').add({
+    label, active:true, costType: guessCostType(label), createdAt:new Date().toISOString()});
+}
+function setExpenseCategoryCostType(id, costType){
+  return fstore.collection('expense_categories_gieogieo').doc(id).update({costType});
 }
 function toggleExpenseCategory(id, active){
   return fstore.collection('expense_categories_gieogieo').doc(id).update({active});
@@ -4368,6 +4374,247 @@ function computeKPIs({perDaySales, opsSum, expList, assets, actualLaborByDate, l
     wastePct,wasteAmount,remakePct,remakeCups, targetCfg};
 }
 
+// ============================================================================
+// [MỚI] ĐIỂM HOÀ VỐN — mức doanh thu tối thiểu để không phải bù tiền túi
+// ----------------------------------------------------------------------------
+// Trước đây app chỉ có TARGET (aov × số bill). Target trả lời "muốn đạt bao nhiêu",
+// nhưng không trả lời câu hỏi đứng trước nó và quan trọng hơn: "bán tới đâu thì
+// hết lỗ?". Hai câu hỏi khác nhau, và ngưỡng hoà vốn phải đọc TRƯỚC target.
+//
+// CÔNG THỨC:
+//     Biên đóng góp %  = 1 − (giá vốn hàng bán + biến phí khác) / doanh thu
+//     Hoà vốn          = chi phí cố định ÷ biên đóng góp %
+//
+// Biên đóng góp là phần trăm mỗi đồng doanh thu còn lại SAU khi trả biến phí, để
+// đắp vào chi phí cố định. Bán thêm 1 ly chỉ góp được đúng phần đó, nên cần
+// (cố định ÷ biên) đồng doanh thu mới đắp đủ.
+//
+// BA ĐIỀU PHẢI NÓI THẲNG, vì đây là con số chủ quán sẽ ra quyết định:
+//  1. LƯƠNG được tính là CHI PHÍ CỐ ĐỊNH — kể cả lương giờ. Ở quán nhỏ, lịch làm
+//     đặt trước theo ca chứ không co giãn theo từng ly bán ra, nên xếp vào biến
+//     phí sẽ làm ngưỡng hoà vốn thấp hơn thực tế một cách nguy hiểm.
+//  2. Dùng CỬA SỔ 30 NGÀY gần nhất, không dùng riêng hôm nay. Tiền thuê trả một
+//     lần trong tháng: lấy đúng ngày hôm nay thì hôm trả tiền thuê ngưỡng vọt lên
+//     trời, còn 29 ngày kia thì tưởng như không mất tiền thuê.
+//  3. Biên đóng góp lấy từ số bán THẬT trong cửa sổ đó. Chưa đủ dữ liệu thì lùi
+//     về target COGS% và NÓI RÕ là ước tính, chứ không lặng lẽ đưa ra một con số
+//     trông như đã đo.
+// ============================================================================
+
+// Đoán loại chi phí theo TÊN, chỉ để điền sẵn cho chủ quán soát lại — không phải
+// để tin tuyệt đối. Cố định = trả đều đặn dù bán được hay không. Biến đổi = càng
+// bán nhiều càng tốn.
+const EXP_VARIABLE_HINTS = ['đá','ship','vận chuyển','giao hàng','bao bì','ly','ống hút',
+  'vật tư tiêu hao','nguyên liệu','phí ngân hàng','phí sàn','hoa hồng','chiết khấu','gas','túi'];
+function guessCostType(label){
+  const s = String(label || '').toLowerCase();
+  return EXP_VARIABLE_HINTS.some(k => s.includes(k)) ? 'variable' : 'fixed';
+}
+// Danh mục chưa khai loại → coi là CỐ ĐỊNH. Đây là phía an toàn: xếp nhầm một
+// khoản biến đổi vào cố định làm ngưỡng hoà vốn CAO hơn thực tế (thận trọng),
+// còn nhầm chiều ngược lại làm ngưỡng THẤP hơn — tưởng đã lãi trong khi đang lỗ.
+function costTypeOf(label, cats){
+  const c = (cats || []).find(x => (x.label || '') === label);
+  return (c && c.costType) ? c.costType : guessCostType(label);
+}
+
+// Chia danh sách chi phí thành cố định / biến đổi. `expList` là các bản ghi ĐÃ lọc
+// theo kỳ; `amountOf` cho phép nơi gọi truyền cách tính tiền riêng (phân bổ theo kỳ).
+function splitExpensesByCostType(expList, cats, amountOf){
+  const tien = amountOf || (e => Number(e.amount || 0));
+  let coDinh = 0, bienDoi = 0;
+  (expList || []).forEach(e => {
+    if (costTypeOf(e.category, cats) === 'variable') bienDoi += tien(e);
+    else coDinh += tien(e);
+  });
+  return { coDinh, bienDoi };
+}
+
+// Lõi tính toán — hàm THUẦN, không đụng mạng, để kiểm thử được bằng số cụ thể.
+//   doanhThu, giaVon, bienPhiKhac, chiPhiCoDinh: tiền trong CÙNG một kỳ
+//   khauHaoThang: khấu hao 1 tháng (quy về cùng số ngày bên trong)
+//   soNgay: số ngày của kỳ
+//   cogsPctFallback: % giá vốn theo target, dùng khi kỳ chưa có doanh thu
+function computeBreakEvenCore({ doanhThu, giaVon, bienPhiKhac, chiPhiCoDinh, khauHaoThang, soNgay, cogsPctFallback }) {
+  const ngay = Math.max(1, Number(soNgay) || 1);
+  const dt = Number(doanhThu) || 0;
+  const uocTinh = !(dt > 0);
+  // Chưa có doanh thu thì không đo được biên thật — lùi về target COGS% và đánh
+  // dấu là ước tính.
+  const tyLeBienPhi = uocTinh
+    ? (Number(cogsPctFallback) || 0) / 100
+    : ((Number(giaVon) || 0) + (Number(bienPhiKhac) || 0)) / dt;
+  const bienDongGop = 1 - tyLeBienPhi;
+
+  const coDinhKy = Number(chiPhiCoDinh) || 0;
+  const khauHaoKy = (Number(khauHaoThang) || 0) / 30 * ngay;
+
+  // Biên ≤ 0 nghĩa là mỗi đồng doanh thu đã lỗ ngay từ biến phí — bán càng nhiều
+  // càng lỗ, KHÔNG tồn tại điểm hoà vốn. Trả null chứ không chia cho số âm rồi
+  // đưa ra một con số vô nghĩa.
+  const khongTheHoaVon = !(bienDongGop > 0.0001);
+  const hoaVonKy   = khongTheHoaVon ? null : coDinhKy / bienDongGop;
+  const hoaVonKyKH = khongTheHoaVon ? null : (coDinhKy + khauHaoKy) / bienDongGop;
+
+  return {
+    soNgay: ngay, doanhThu: dt, uocTinh, khongTheHoaVon,
+    tyLeBienPhi, bienDongGop,
+    chiPhiCoDinh: coDinhKy, khauHaoKy,
+    // Chưa khai chi phí cố định nào thì ngưỡng bằng 0 — nhưng 0đ KHÔNG có nghĩa
+    // là "bán 0 đồng cũng hoà vốn". Gắn cờ để màn hình nói rõ là chưa đủ dữ liệu.
+    chuaKhaiChiPhi: coDinhKy <= 0,
+    hoaVonKy, hoaVonNgay: hoaVonKy === null ? null : hoaVonKy / ngay,
+    hoaVonKyKH, hoaVonNgayKH: hoaVonKyKH === null ? null : hoaVonKyKH / ngay,
+    // Còn thiếu bao nhiêu nữa mới hoà vốn (âm = đã vượt qua)
+    conThieu: hoaVonKy === null ? null : hoaVonKy - dt,
+    datHoaVon: hoaVonKy !== null && dt >= hoaVonKy
+  };
+}
+
+// Nạp dữ liệu 30 ngày gần nhất rồi tính. Nhớ theo NGÀY: ngưỡng hoà vốn nhích rất
+// chậm, đọc lại mỗi lần mở màn Hôm nay chỉ tốn lượt mạng vô ích.
+let _bepCache = null;   // { key, data }
+const BEP_WINDOW_DAYS = 30;
+
+async function computeBreakEvenWindow(force){
+  const homNay = dkey(new Date());
+  if (!force && _bepCache && _bepCache.key === homNay) return _bepCache.data;
+
+  const end = new Date();
+  const start = new Date(); start.setDate(start.getDate() - (BEP_WINDOW_DAYS - 1));
+
+  const [salesRes, expAll, assets, cats, laborByDate] = await Promise.all([
+    fetchSalesRange(start, end),
+    loadExpensesAll(),
+    loadAssetsAll(),
+    loadExpenseCategories().catch(() => []),
+    HR_SETTINGS.useActualLaborCost
+      ? computeActualLaborCostByDate(dkey(start), dkey(end)).catch(() => null)
+      : Promise.resolve(null)
+  ]);
+
+  const expList = filterExpenses(expAll, start, end);
+  const { coDinh, bienDoi } = splitExpensesByCostType(expList, cats,
+    e => expenseAllocatedAmount(e, start, end));
+
+  const kpi = computeKPIs({
+    perDaySales: salesRes.perDay, opsSum: {}, expList, assets,
+    actualLaborByDate: laborByDate, ledgerWasteValue: null, drinkWasteCups: 0
+  });
+
+  const data = computeBreakEvenCore({
+    doanhThu: kpi.revenue,
+    giaVon: kpi.cogs,
+    bienPhiKhac: bienDoi,
+    // Lương LUÔN nằm ở cố định — xem ghi chú đầu khối.
+    chiPhiCoDinh: coDinh + kpi.laborCost,
+    khauHaoThang: monthlyDepreciation(assets),
+    soNgay: salesRes.dayCount || BEP_WINDOW_DAYS,
+    cogsPctFallback: (kpi.targetCfg && kpi.targetCfg.targets ? kpi.targetCfg.targets.cogsPct : 33)
+  });
+  data.chiPhiLuong = kpi.laborCost;
+  data.chiPhiCoDinhKhac = coDinh;
+
+  _bepCache = { key: homNay, data };
+  return data;
+}
+
+// ---------------------------------------------------------------------------
+// [MỚI] KHỐI HIỂN THỊ ĐIỂM HOÀ VỐN
+// Đọc theo đúng thứ tự chủ quán cần: HOÀ VỐN trước, TARGET sau. Thanh tiến độ có
+// hai vạch nên nhìn một cái là biết hôm nay đã qua vạch sống sót chưa, rồi mới
+// tới chuyện có đạt mục tiêu hay không.
+// ---------------------------------------------------------------------------
+
+// Thanh có hai vạch: hoà vốn (xám đậm) và mục tiêu (hồng). Phần đã đạt tô màu
+// theo mức đã qua — đỏ khi chưa hoà vốn, xanh khi đã qua hoà vốn, hồng khi vượt
+// mục tiêu. Màu là thứ đọc được từ xa, con số là thứ đọc khi đứng gần.
+function bepBarHTML(daBan, mucHoaVon, mucTarget){
+  const tran = Math.max(daBan, mucTarget || 0, mucHoaVon || 0) * 1.06 || 1;
+  const pct = v => Math.max(0, Math.min(100, (v / tran) * 100));
+  const quaHoaVon = mucHoaVon != null && daBan >= mucHoaVon;
+  const quaTarget = mucTarget > 0 && daBan >= mucTarget;
+  const mau = quaTarget ? 'var(--gd)' : quaHoaVon ? 'var(--ok)' : 'var(--bad)';
+  const vach = (v, mauVach, nhan) => v == null || v <= 0 ? '' : `
+      <div style="position:absolute;left:${pct(v)}%;top:-3px;bottom:-3px;width:2.5px;background:${mauVach};border-radius:2px;"></div>
+      <div style="position:absolute;left:${pct(v)}%;top:14px;transform:translateX(-50%);font-size:10px;font-weight:700;color:${mauVach};white-space:nowrap;">${nhan}</div>`;
+  return `
+    <div style="position:relative;height:14px;background:var(--fill);border-radius:99px;margin:10px 0 26px;">
+      <div style="position:absolute;left:0;top:0;bottom:0;width:${pct(daBan)}%;background:${mau};border-radius:99px;transition:width .3s;"></div>
+      ${vach(mucHoaVon, 'var(--ink-2)', 'Hoà vốn')}
+      ${vach(mucTarget, 'var(--gd)', 'Mục tiêu')}
+    </div>`;
+}
+
+// Một dòng gọn cho màn Hôm nay: đã bán bao nhiêu so với ngưỡng hoà vốn NGÀY.
+function bepTodayHTML(bep, doanhThuHomNay, targetNgay){
+  if (!bep) return '';
+  if (bep.khongTheHoaVon) {
+    return `<div class="card" style="border:1.5px solid var(--bad-line);background:var(--bad-bg);">
+      <div style="font-weight:700;color:var(--bad);margin-bottom:4px;">${ic('alert',15)} Không có điểm hoà vốn</div>
+      <div style="font-size:13px;line-height:1.6;color:var(--bad);">Giá vốn và biến phí đang ngốn hết ${fmtPct(bep.tyLeBienPhi)} doanh thu — bán thêm một ly là lỗ thêm. Phải sửa giá bán hoặc giá vốn trước, không có mức doanh thu nào cứu được.</div>
+    </div>`;
+  }
+  const nguong = bep.hoaVonNgay;
+  const con = nguong - doanhThuHomNay;
+  const dat = doanhThuHomNay >= nguong;
+  return `
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;">
+        <span style="font-size:13px;font-weight:700;color:var(--gt);text-transform:uppercase;letter-spacing:.05em;">Hoà vốn hôm nay</span>
+        <span style="font-size:13px;font-weight:700;color:${dat ? 'var(--ok)' : 'var(--bad)'};">
+          ${bep.chuaKhaiChiPhi ? 'Chưa khai chi phí' : dat ? 'Đã qua hoà vốn' : 'Còn thiếu ' + fmt(con)}
+        </span>
+      </div>
+      <div style="font-size:26px;font-weight:750;color:var(--td);margin-top:2px;">${fmt(nguong)}<span style="font-size:14px;font-weight:600;color:var(--gt);">/ngày</span></div>
+      ${bepBarHTML(doanhThuHomNay, nguong, targetNgay)}
+      <div class="small-note" style="margin-top:0">
+        ${bep.chuaKhaiChiPhi
+          ? 'Chưa ghi chi phí cố định nào trong 30 ngày qua nên ngưỡng đang là 0 — <b>không phải</b> đã hoà vốn. Ghi tiền thuê/điện/nước ở mục Chi phí thì số này mới có nghĩa.'
+          : `Biên đóng góp <b>${fmtPct(bep.bienDongGop)}</b> · chi phí cố định <b>${fmt(bep.chiPhiCoDinh / bep.soNgay)}</b>/ngày${bep.uocTinh ? ' · <b style="color:var(--warn)">ước tính</b> vì 30 ngày qua chưa có doanh thu' : ''}<br>
+             Kể cả khấu hao tài sản: <b>${bep.hoaVonNgayKH == null ? '—' : fmt(bep.hoaVonNgayKH)}</b>/ngày`}
+      </div>
+    </div>`;
+}
+
+// Khối đầy đủ cho màn Sức khoẻ tài chính — có cả cách tính, vì đây là con số để
+// ra quyết định chứ không phải để ngắm.
+function bepHealthHTML(bep, doanhThuKy, targetKy, soNgayKy){
+  if (!bep) return '';
+  if (bep.khongTheHoaVon) {
+    return `<div class="sec-title">Điểm hoà vốn</div>
+      <div class="card" style="border:1.5px solid var(--bad-line);background:var(--bad-bg);">
+        <div style="font-weight:700;color:var(--bad);margin-bottom:6px;">${ic('alert',15)} Không tồn tại điểm hoà vốn</div>
+        <div style="font-size:13.5px;line-height:1.65;color:var(--bad);">Biến phí (giá vốn + biến phí khác) đang chiếm <b>${fmtPct(bep.tyLeBienPhi)}</b> doanh thu, tức mỗi đồng bán ra đã lỗ trước khi tính tới tiền thuê hay lương. Bán nhiều hơn chỉ lỗ nhanh hơn.</div>
+      </div>`;
+  }
+  // Ngưỡng hoà vốn của CHÍNH KỲ ĐANG XEM (cửa sổ 30 ngày chỉ dùng để lấy chi phí
+  // cố định/ngày và biên đóng góp — hai thứ ổn định), nhân theo số ngày của kỳ.
+  const ngay = Math.max(1, soNgayKy || 1);
+  const nguongKy = bep.hoaVonNgay * ngay;
+  const nguongKyKH = bep.hoaVonNgayKH == null ? null : bep.hoaVonNgayKH * ngay;
+  const con = nguongKy - doanhThuKy;
+  const dat = doanhThuKy >= nguongKy;
+  return `
+    <div class="sec-title">Điểm hoà vốn</div>
+    <div class="card">
+      ${bep.chuaKhaiChiPhi ? `<div class="nudge" style="margin-bottom:12px"><span>${ic('alert')} Chưa ghi chi phí cố định nào trong 30 ngày qua — ngưỡng đang là 0đ, <b>không phải</b> đã hoà vốn.</span><button onclick="goEntry('exp')">Ghi chi phí</button></div>` : ''}
+      <div class="row"><span class="rl"><b>Doanh thu cần đạt để hoà vốn</b><div class="small-note" style="margin-top:2px">${ngay} ngày · chưa kể khấu hao</div></span>
+        <span class="rv" style="font-size:19px;color:${dat ? 'var(--ok)' : 'var(--bad)'}"><b>${fmt(nguongKy)}</b></span></div>
+      <div class="row"><span class="rl">Đã bán được</span><span class="rv">${fmt(doanhThuKy)}</span></div>
+      <div class="row"><span class="rl">${dat ? 'Đã vượt hoà vốn' : 'Còn thiếu'}</span>
+        <span class="rv" style="color:${dat ? 'var(--ok)' : 'var(--bad)'}"><b>${fmt(Math.abs(con))}</b></span></div>
+      ${bepBarHTML(doanhThuKy, nguongKy, targetKy)}
+      <div class="row"><span class="rl">Kể cả khấu hao tài sản</span><span class="rv">${nguongKyKH == null ? '—' : fmt(nguongKyKH)}</span></div>
+      <div class="unit-explainer" style="margin-top:12px">
+        <b>Cách tính</b> — chi phí cố định ÷ biên đóng góp.<br>
+        Biên đóng góp <b>${fmtPct(bep.bienDongGop)}</b>: mỗi 100đ bán ra còn lại ${fmtNum(bep.bienDongGop * 100, 0)}đ sau khi trả giá vốn và biến phí, để đắp vào chi phí cố định.<br>
+        Chi phí cố định <b>${fmt(bep.chiPhiCoDinh / bep.soNgay * ngay)}</b> cho ${ngay} ngày — gồm lương ${fmt(bep.chiPhiLuong / bep.soNgay * ngay)} và chi phí cố định khác ${fmt(bep.chiPhiCoDinhKhac / bep.soNgay * ngay)}.<br>
+        <span style="opacity:.85">Lương tính là chi phí <b>cố định</b> kể cả lương giờ, vì lịch làm đặt trước theo ca chứ không co giãn theo từng ly bán ra. Chi phí cố định và biên đóng góp lấy trung bình <b>30 ngày gần nhất</b> để tiền thuê trả một lần trong tháng không làm ngưỡng nhảy vọt.${bep.uocTinh ? ' <b style="color:var(--warn)">Biên đóng góp đang là ƯỚC TÍNH theo target COGS%</b> vì 30 ngày qua chưa có doanh thu.' : ''}</span>
+      </div>
+    </div>`;
+}
+
 // ------------------------------------------------------------
 // STATUS / THRESHOLD RULES
 // ------------------------------------------------------------
@@ -5719,6 +5966,16 @@ async function renderToday(){
       ${c.ratio!=null ? meterHTML(c.ratio, c.status) : ''}
     </div>`).join('');
 
+  // Ngưỡng hoà vốn nạp NỀN: nó cần cửa sổ 30 ngày nên chậm hơn phần còn lại của
+  // màn. Chờ nó xong mới vẽ cả màn là bắt chủ quán nhìn màn trắng lâu hơn vì một
+  // khối phụ. Hỏng thì chỉ thiếu khối đó, không ảnh hưởng gì khác.
+  computeBreakEvenWindow()
+    .then(bep => {
+      const el = document.getElementById('todayBep');
+      if (el && curScreen === 'today') el.innerHTML = bepTodayHTML(bep, kpi.revenue, dailyTarget);
+    })
+    .catch(err => console.warn('[Hoà vốn] không tính được (bỏ qua):', err));
+
   renderTodayHourly((salesRes.perDay[0] || {}).byHour);
 
   document.getElementById('todayAlerts').innerHTML = renderAlerts(generateAlerts(kpi, kpi.targetCfg));
@@ -6013,6 +6270,7 @@ async function renderHealth(){
 
   document.getElementById('healthBody').innerHTML = `
     ${rangeLabel}
+    <div id="healthBep"></div>
     <div class="card">
       <div class="card-h"><h3>${ic('coins')} Sales</h3></div>
       ${metricRowHTML('Doanh thu', fmt(kpi.revenue), mRev, sRev)}
@@ -6076,6 +6334,14 @@ async function renderHealth(){
       ${rowPlainHTML('EBIT', fmt(kpi.ebit))}
     </div>
   `;
+  // Ngưỡng hoà vốn dùng cửa sổ 30 ngày riêng nên nạp NỀN, không giữ cả màn lại chờ.
+  computeBreakEvenWindow()
+    .then(bep => {
+      const el = document.getElementById('healthBep');
+      if (el && curScreen === 'health') el.innerHTML = bepHealthHTML(bep, kpi.revenue, dailyTarget, salesRes.dayCount);
+    })
+    .catch(err => console.warn('[Hoà vốn] không tính được (bỏ qua):', err));
+
   clearError();
   }catch(err){
     console.error('renderHealth failed', err);
@@ -6393,8 +6659,23 @@ async function renderEntryExp(){
         <div style="display:flex;gap:6px"><input type="text" id="expCatNew" placeholder="VD: Đá cây, Ship..." style="flex:1"><button class="btn" style="width:auto;padding:0 14px" onclick="submitExpenseCategory()">+</button></div>
       </div>
       ${!cats.length ? `<button class="btn outline sm" style="margin-bottom:10px" onclick="seedExpenseCategories()">${ic('plus',14)} Tạo nhanh ${EXP_CATEGORIES_SEED.length} danh mục tiếng Việt thường dùng</button>` : ''}
-      ${cats.length ? cats.map(c=>`<div class="litem"><div class="li-l">${c.label} ${chipOnOff(c.active!==false)}</div>
-        <div class="li-r"><button class="iconbtn" onclick="toggleExpenseCategory('${c.id}', ${c.active===false}).then(renderEntryExp)">${c.active===false?ic('play'):ic('pause')}</button><button class="iconbtn" onclick="deleteExpenseCategory('${c.id}').then(renderEntryExp)">${ic('x')}</button></div></div>`).join('')
+      ${cats.length ? `<div class="unit-explainer" style="margin-bottom:10px">
+        <b>Cố định</b> = trả đều đặn dù bán được hay không (thuê nhà, internet, phần mềm).
+        <b>Biến đổi</b> = càng bán nhiều càng tốn (đá cây, ship, bao bì).<br>
+        Phân loại này quyết định <b>điểm hoà vốn</b>. Xếp nhầm một khoản biến đổi vào cố định thì ngưỡng hoà vốn chỉ cao hơn thực tế; nhầm chiều ngược lại thì ngưỡng THẤP hơn — tưởng đã lãi trong khi đang lỗ.
+      </div>` : ''}
+      ${cats.length ? cats.map(c=>{
+        const ct = c.costType || guessCostType(c.label);
+        const chuaKhai = !c.costType;
+        return `<div class="litem"><div class="li-l"><div>${c.label} ${chipOnOff(c.active!==false)}</div>
+          <div style="margin-top:5px;display:flex;gap:5px;align-items:center;flex-wrap:wrap">
+            ${['fixed','variable'].map(v=>`<button onclick="setExpenseCategoryCostType('${c.id}','${v}').then(renderEntryExp)"
+                style="padding:5px 11px;border-radius:99px;font-size:12px;font-weight:700;cursor:pointer;
+                border:1.5px solid ${ct===v?'var(--gd)':'var(--line)'};background:${ct===v?'var(--gl)':'var(--card)'};color:${ct===v?'var(--gd)':'var(--gt)'}">${v==='fixed'?'Cố định':'Biến đổi'}</button>`).join('')}
+            ${chuaKhai?'<span class="small-note" style="margin-top:0">— đang đoán theo tên, bấm để chốt</span>':''}
+          </div></div>
+          <div class="li-r"><button class="iconbtn" onclick="toggleExpenseCategory('${c.id}', ${c.active===false}).then(renderEntryExp)">${c.active===false?ic('play'):ic('pause')}</button><button class="iconbtn" onclick="deleteExpenseCategory('${c.id}').then(renderEntryExp)">${ic('x')}</button></div></div>`;
+      }).join('')
         : `<div class="muted">Chưa cấu hình — đang dùng danh sách mặc định có sẵn trong code.</div>`}
     </div>
     <div class="card">
