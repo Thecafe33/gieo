@@ -195,7 +195,8 @@ Bản ghi cũ không có 4 trường này → **chưa đạt mốc**, mốc bắ
 ### `assets_gieogieo`
 `purchaseDate` **quyết định từ ngày nào tài sản bắt đầu khấu hao**. Form điền sẵn ngày
 hôm nay → đây là cái bẫy đã gây lỗi thật (khấu hao cả kỳ 6 ngày chỉ bằng 1 ngày).
-Màn Tài sản nay hiện ngày mua + cảnh báo.
+Màn Tài sản nay hiện ngày mua + cảnh báo, và **có nút Sửa** (`openAssetEdit`) — trước
+đây khai sai phải xoá rồi thêm lại, rất dễ gõ sai tiếp. Bản ghi sửa có thêm `updatedAt`.
 
 ---
 
@@ -226,6 +227,11 @@ Màn Tài sản nay hiện ngày mua + cảnh báo.
 | `computeCapitalRecovery(force)` | Nạp dữ liệu + cache phiên `_thvCache`; tự ghi mốc khi vừa chạm 100%. Trần quét `THV_MAX_DAYS = 730` ngày |
 | `thvCardHTML(data, plHomNay)` / `thvChiTietHTML` / `thvBarHTML` / `thvToggleChiTiet` | Thẻ Thu hồi vốn ở màn Hôm nay (`#todayThv`) — **nạp NỀN** |
 | `thvHealthHTML(data, tienKy, soNgayKy)` | Khối Thu hồi vốn ở màn Sức khoẻ tài chính (`#healthThv`) |
+| `assetFormFieldsHTML(a, pre, ghiChuNgay)` | 5 ô của tài sản, **dùng chung** form Thêm (`pre='ast'`) và popup Sửa (`pre='astE'`) |
+| `assetFormRead(pre)` / `assetPreviewBind(pre, outId)` | Đọc + kiểm tra 5 ô (trả `null` nếu sai) / dòng xem trước khấu hao cập nhật khi gõ |
+| `openAssetEdit(id)` / `submitAssetEdit(id)` / `updateAsset(id, data)` | **Sửa tài sản** (popup dùng chung `openEditSheet`) |
+| `removeAsset(id)` | Xoá tài sản — **có hỏi lại**, nói rõ khấu hao quá khứ sẽ biến mất |
+| `assetCacheDirty()` | Mọi thay đổi tài sản xoá cả `_thvCache` lẫn `_bepCache` |
 
 Hàm đã **XOÁ** (bị thẻ gộp thay thế, đừng dựng lại):
 `plTodayHTML`, `bepTodayHTML`, `bepDoiChieuHTML`.
@@ -310,6 +316,7 @@ Chạy: `node <tên>.mjs` (Playwright + Chromium tại `/opt/pw-browsers/chromiu
 | `thvtest.mjs` | 49 | Thu hồi vốn — hàm thuần (luỹ kế, mốc, ngày lỗ, mốc không phụ thuộc số tháng khấu hao) |
 | `thv2test.mjs` | 32 | Thu hồi vốn — dựng HTML thật của thẻ + khối, 2 giai đoạn |
 | `thvboot.mjs` | 10 | Mở file HTML thật trong Chromium (Firebase giả tối thiểu), cắm thẻ vào DOM |
+| `asstest.mjs` | 32 | Sửa tài sản: điền sẵn đúng số, xem trước khấu hao, chặn số vô lý, xoá phải hỏi lại |
 | `beptest` 22 · `bepe2e` 13 · `qltest` 14 · `togtest` 23 · `cbtest` 13 · `khotest` 24 · `postest` 20 · `hangtest` 15 · `embedpos` 6 | | các phần trước |
 
 **Phương pháp:** `page.route()` chặn `gstatic.com/firebasejs` → nạp `fbmem.js`
@@ -344,7 +351,8 @@ Chạy: `node <tên>.mjs` (Playwright + Chromium tại `/opt/pw-browsers/chromiu
   kế sai theo. Trần quét là 730 ngày — quá 2 năm thì màn hình nói rõ phần bị cắt.
 - Khoản **cọc mặt bằng / sửa chữa / biển hiệu** chưa khai thành tài sản thì **không**
   nằm trong tổng vốn cần thu hồi.
-- Chủ quán cần **sửa "Ngày mua" của tài sản** về đúng ngày thật, và xem lại
+- Chủ quán cần **sửa "Ngày mua" của tài sản** về đúng ngày thật (nay bấm nút Sửa ngay
+  trong danh sách, không phải xoá rồi thêm lại), và xem lại
   "Thời gian sử dụng (tháng)" — phải là thời gian **dùng được thật của máy**, không phải
   thời gian muốn thu hồi vốn. (Đang thấy khấu hao ~6tr/tháng so với doanh thu ~773k/ngày
   → nhiều khả năng khai quá ngắn.)

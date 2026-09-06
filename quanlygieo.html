@@ -4342,12 +4342,14 @@ async function loadReceivingRecords(limitN=20){
 // ------------------------------------------------------------
 // ASSETS / CAPEX — Firestore collection assets_gieogieo
 // ------------------------------------------------------------
-// Mọi thay đổi tài sản đều làm đổi TỔNG VỐN ĐẦU TƯ (mẫu số của % thu hồi vốn) và
-// cả mốc bắt đầu — xoá cache trong phiên, nếu không thẻ Thu hồi vốn còn hiện số cũ
-// tới hết ngày.
-function addAsset(data){ _thvCache = null; return fstore.collection('assets_gieogieo').add({...data, active:true, createdAt:new Date().toISOString()}); }
-function toggleAsset(id, active){ _thvCache = null; return fstore.collection('assets_gieogieo').doc(id).update({active}); }
-function deleteAsset(id){ _thvCache = null; return fstore.collection('assets_gieogieo').doc(id).delete(); }
+// Mọi thay đổi tài sản đều làm đổi TỔNG VỐN ĐẦU TƯ (mẫu số của % thu hồi vốn), mốc
+// bắt đầu, VÀ mức khấu hao đang chạy (nằm trong ngưỡng hoà vốn) — xoá cả hai cache
+// trong phiên, nếu không hai màn đó còn hiện số cũ tới hết ngày.
+function assetCacheDirty(){ _thvCache = null; _bepCache = null; }
+function addAsset(data){ assetCacheDirty(); return fstore.collection('assets_gieogieo').add({...data, active:true, createdAt:new Date().toISOString()}); }
+function toggleAsset(id, active){ assetCacheDirty(); return fstore.collection('assets_gieogieo').doc(id).update({active}); }
+function deleteAsset(id){ assetCacheDirty(); return fstore.collection('assets_gieogieo').doc(id).delete(); }
+function updateAsset(id, data){ assetCacheDirty(); return fstore.collection('assets_gieogieo').doc(id).update({...data, updatedAt:new Date().toISOString()}); }
 async function loadAssetsAll(){
   const snap = await fstore.collection('assets_gieogieo').get();
   return snap.docs.map(d=>({id:d.id, ...d.data()}));
@@ -16031,25 +16033,71 @@ async function submitRecipe(){
   }catch(err){ console.error(err); showError('Lưu định mức thất bại: '+(err.code||err.message||err)); }
 }
 
+// Các ô của tài sản dùng CHUNG cho form Thêm và popup Sửa. Viết hai bản thì sớm muộn
+// hai chỗ lệch nhau — thêm ô mới ở form này rồi quên ô kia.
+//   pre       — tiền tố id ('ast' cho form thêm, 'astE' cho popup sửa)
+//   ghiChuNgay— đoạn nhắc dưới ô Ngày mua (hai chỗ nhắc hai chuyện khác nhau)
+function assetFormFieldsHTML(a, pre, ghiChuNgay){
+  const v = a || {};
+  return `
+    <div class="field"><label>Tên tài sản</label><input type="text" id="${pre}Name" placeholder="VD: Máy dập nắp" value="${escapeHtmlAttr(v.name||'')}"></div>
+    <div class="grid2">
+      <div class="field"><label>Ngày mua</label><input type="date" id="${pre}Date" value="${v.purchaseDate || dkey(new Date())}"></div>
+      <div class="field"><label>Giá trị mua (đ)</label><input type="number" id="${pre}Cost" value="${Number(v.purchaseCost)||0}"></div>
+    </div>
+    ${ghiChuNgay ? `<div class="hint" style="margin:-4px 0 10px">${ghiChuNgay}</div>` : ''}
+    <div class="grid2">
+      <div class="field"><label>Thời gian sử dụng (tháng)</label><input type="number" id="${pre}Life" value="${Number(v.usefulLifeMonths)||60}"></div>
+      <div class="field"><label>Giá trị thu hồi (đ)</label><input type="number" id="${pre}Residual" value="${Number(v.residualValue)||0}"></div>
+    </div>`;
+}
+
+// Đọc 5 ô ra một object + kiểm tra tại chỗ. Trả null nếu có lỗi (đã toast).
+function assetFormRead(pre){
+  const name = (document.getElementById(pre+'Name').value||'').trim();
+  const purchaseDate = document.getElementById(pre+'Date').value;
+  const purchaseCost = Number(document.getElementById(pre+'Cost').value)||0;
+  const usefulLifeMonths = Number(document.getElementById(pre+'Life').value)||0;
+  const residualValue = Number(document.getElementById(pre+'Residual').value)||0;
+  if(!purchaseDate){ toast('⚠️ Chọn ngày mua — không có ngày thì khấu hao tính cho MỌI ngày'); return null; }
+  if(purchaseCost <= 0){ toast('⚠️ Giá trị mua phải lớn hơn 0'); return null; }
+  if(usefulLifeMonths < 1){ toast('⚠️ Thời gian sử dụng phải từ 1 tháng trở lên'); return null; }
+  if(residualValue > purchaseCost){ toast('⚠️ Giá trị thu hồi đang lớn hơn giá mua'); return null; }
+  return { name: name || 'Tài sản', purchaseDate, purchaseCost, usefulLifeMonths, residualValue };
+}
+
+// Dòng xem trước khấu hao, cập nhật ngay khi gõ — để thấy hậu quả TRƯỚC khi lưu,
+// thay vì lưu xong mới phát hiện khấu hao nhảy lên 6tr/tháng.
+function assetPreviewBind(pre, outId){
+  const ve = ()=>{
+    const cost = Number(document.getElementById(pre+'Cost').value)||0;
+    const life = Number(document.getElementById(pre+'Life').value)||0;
+    const res  = Number(document.getElementById(pre+'Residual').value)||0;
+    const thang = life >= 1 ? Math.max((cost-res)/life, 0) : 0;
+    const el = document.getElementById(outId);
+    if(el) el.innerHTML = life >= 1
+      ? `Khấu hao <b>${fmt(thang)}/tháng</b> ≈ <b>${fmt(thang/30)}/ngày</b> trừ vào lãi · vốn cần thu hồi <b>${fmt(cost)}</b>`
+      : '<b style="color:var(--warn)">Thời gian sử dụng phải từ 1 tháng trở lên</b>';
+  };
+  ['Cost','Life','Residual'].forEach(k=>{
+    const el = document.getElementById(pre+k);
+    if(el) el.addEventListener('input', ve);
+  });
+  ve();
+}
+
 async function renderEntryAsset(){
   const body = document.getElementById('entryBody');
   body.innerHTML = `
     <div class="card">
-      <div class="field"><label>Tên tài sản</label><input type="text" id="astName" placeholder="VD: Máy dập nắp"></div>
-      <div class="grid2">
-        <div class="field"><label>Ngày mua</label><input type="date" id="astDate" value="${dkey(new Date())}"></div>
-        <div class="field"><label>Giá trị mua (đ)</label><input type="number" id="astCost" value="0"></div>
-      </div>
-      <div class="hint" style="margin:-4px 0 10px">Ô này điền sẵn ngày hôm nay — <b>nhớ sửa về đúng ngày mua thật</b>. Khấu hao chỉ được tính <b>kể từ ngày này trở đi</b>: khai máy mua năm ngoái nhưng để ngày hôm nay thì lãi/lỗ của mọi ngày trước đó sẽ thiếu hẳn phần khấu hao.</div>
-      <div class="grid2">
-        <div class="field"><label>Thời gian sử dụng (tháng)</label><input type="number" id="astLife" value="60"></div>
-        <div class="field"><label>Giá trị thu hồi (đ)</label><input type="number" id="astResidual" value="0"></div>
-      </div>
+      ${assetFormFieldsHTML(null, 'ast', 'Ô này điền sẵn ngày hôm nay — <b>nhớ sửa về đúng ngày mua thật</b>. Khấu hao chỉ được tính <b>kể từ ngày này trở đi</b>: khai máy mua năm ngoái nhưng để ngày hôm nay thì lãi/lỗ của mọi ngày trước đó sẽ thiếu hẳn phần khấu hao.')}
+      <div class="small-note" id="astPreview" style="margin-bottom:10px"></div>
       <button class="btn" onclick="submitAsset()">Thêm tài sản</button>
     </div>
     <div class="sec-title">Danh sách tài sản</div>
     <div id="astList"><div class="muted">Đang tải...</div></div>
   `;
+  assetPreviewBind('ast', 'astPreview');
   let assets = [];
   try{ await ensureAuth(); assets = await loadAssetsAll(); }catch(err){ console.warn('loadAssetsAll failed', err); showError('Không đọc được tài sản: ' + (err.code||err.message||err)); document.getElementById('astList').innerHTML = '<div class="muted">Không tải được.</div>'; return; }
   const dep = monthlyDepreciation(assets, dkey(new Date()));
@@ -16065,22 +16113,68 @@ async function renderEntryAsset(){
     return `<div class="litem">
       <div class="li-l"><div>${a.name} ${a.active===false?'(ngưng)':''}</div><div>${fmt(a.purchaseCost)} · ${a.usefulLifeMonths} tháng · KH ${fmt(d)}/tháng</div>
         <div>Mua ngày <b>${a.purchaseDate || '— chưa ghi'}</b>${chuaChay?' <span style="color:var(--warn)">· chưa tới ngày, chưa tính khấu hao</span>':''}${!a.purchaseDate?' <span style="color:var(--warn)">· không có ngày mua thì tính khấu hao cho MỌI ngày</span>':''}</div></div>
-      <div class="li-r"><button class="iconbtn" onclick="toggleAsset('${a.id}', ${a.active===false}).then(renderEntryAsset)">${a.active===false?ic('play'):ic('pause')}</button> <button class="iconbtn" onclick="deleteAsset('${a.id}').then(renderEntryAsset)">${ic('x')}</button></div>
+      <div class="li-r"><button class="iconbtn" onclick="openAssetEdit('${a.id}')">${ic('pencil')}</button> <button class="iconbtn" onclick="toggleAsset('${a.id}', ${a.active===false}).then(renderEntryAsset)">${a.active===false?ic('play'):ic('pause')}</button> <button class="iconbtn" onclick="removeAsset('${a.id}')">${ic('trash')}</button></div>
     </div>`;
   }).join('') : `<div class="muted">Chưa có tài sản nào</div>`) +
   `<div class="card" style="margin-top:8px"><div class="row"><span class="rl"><b>Tổng khấu hao / tháng</b><div class="small-note" style="margin-top:2px">≈ ${fmt(dep/30)}/ngày trừ vào lãi hằng ngày</div></span><span class="rv">${fmt(dep)}</span></div>
   <div class="row"><span class="rl">Tổng CAPEX (đang active)<div class="small-note" style="margin-top:2px">cũng chính là <b>tổng vốn đầu tư</b> mà thẻ "Thu hồi vốn" ở màn Hôm nay đang đo tiến độ lấy lại</div></span><span class="rv">${fmt(totalCapex(assets))}</span></div></div>`;
 }
 async function submitAsset(){
-  await addAsset({
-    name: document.getElementById('astName').value || 'Tài sản',
-    purchaseDate: document.getElementById('astDate').value,
-    purchaseCost: Number(document.getElementById('astCost').value)||0,
-    usefulLifeMonths: Number(document.getElementById('astLife').value)||60,
-    residualValue: Number(document.getElementById('astResidual').value)||0
-  });
-  toast('✅ Đã thêm tài sản');
-  renderEntryAsset();
+  const data = assetFormRead('ast');
+  if(!data) return;
+  try{
+    await addAsset(data);
+    logAudit('create','asset','', data);
+    toast('✅ Đã thêm tài sản');
+    renderEntryAsset();
+  }catch(err){ console.error(err); showError('Không thêm được tài sản: '+(err.code||err.message||err)); }
+}
+
+// [MỚI] SỬA tài sản. Trước đây khai sai một ô là phải xoá rồi thêm lại — vừa mất bản
+// ghi cũ, vừa rất dễ gõ sai tiếp ô khác. Ba con số ở đây (ngày mua, giá mua, thời gian
+// sử dụng) quyết định khấu hao của MỌI ngày trong quá khứ lẫn tổng vốn cần thu hồi,
+// nên popup nói thẳng ra điều đó trước khi chủ quán bấm Lưu.
+async function openAssetEdit(id){
+  let a = null;
+  try{ await ensureAuth(); const all = await loadAssetsAll(); a = all.find(x=>x.id===id); }
+  catch(err){ showError('Không đọc được tài sản: '+(err.code||err.message||err)); return; }
+  if(!a){ toast('⚠️ Không tìm thấy tài sản này'); return; }
+  const khCu = (Number(a.purchaseCost||0)-Number(a.residualValue||0))/(Number(a.usefulLifeMonths)||1);
+  openEditSheet('Sửa tài sản — ' + (a.name||''), `
+    <div class="unit-explainer" style="margin-bottom:10px">
+      Đang là: <b>${fmt(a.purchaseCost)}</b> · ${a.usefulLifeMonths||'—'} tháng · mua ngày <b>${a.purchaseDate||'— chưa ghi'}</b> · khấu hao <b>${fmt(khCu)}/tháng</b>.<br>
+      Sửa <b>ngày mua</b>, <b>giá mua</b> hay <b>thời gian sử dụng</b> sẽ tính lại khấu hao của <b>mọi ngày trong quá khứ</b> — lãi/lỗ, ngưỡng hoà vốn và tiến độ thu hồi vốn đều đổi theo. Tháng đã chốt sổ vẫn giữ số đã ghi cho tới khi bạn mở lại sổ.
+    </div>
+    ${assetFormFieldsHTML(a, 'astE', '<b>Thời gian sử dụng</b> là thời gian dùng được thật của máy, <b>không phải</b> thời gian bạn muốn thu hồi vốn — khai ngắn quá thì khấu hao phồng lên và ngày nào cũng thấy lỗ.')}
+    <div class="small-note" id="astEPreview" style="margin-bottom:10px"></div>
+    <button class="btn" onclick="submitAssetEdit('${a.id}')">${ic('save',15)} Lưu thay đổi</button>
+  `);
+  assetPreviewBind('astE', 'astEPreview');
+}
+async function submitAssetEdit(id){
+  const data = assetFormRead('astE');
+  if(!data) return;
+  try{
+    await updateAsset(id, data);
+    logAudit('update','asset',id, data);
+    closeEditSheet(true);
+    toast('✅ Đã sửa tài sản — lãi/lỗ và tiến độ thu hồi vốn đã tính lại');
+    renderEntryAsset();
+  }catch(err){ console.error(err); showError('Không lưu được tài sản: '+(err.code||err.message||err)); }
+}
+// Xoá thì hỏi lại: xoá tài sản là XOÁ HẲN phần khấu hao của nó khỏi mọi ngày đã qua,
+// lãi/lỗ quá khứ sẽ đổi. Muốn ngưng dùng thì bấm Tạm dừng chứ đừng xoá.
+async function removeAsset(id){
+  let a = null;
+  try{ const all = await loadAssetsAll(); a = all.find(x=>x.id===id); }catch(err){ /* vẫn cho xoá */ }
+  const ten = a ? `"${a.name}" (${fmt(a.purchaseCost)})` : 'tài sản này';
+  if(!confirm(`Xoá hẳn ${ten}?\n\nKhấu hao của nó sẽ biến mất khỏi MỌI ngày đã qua — lãi/lỗ quá khứ và tiến độ thu hồi vốn sẽ đổi.\n\nNếu chỉ muốn ngưng dùng, bấm nút Tạm dừng thay vì Xoá. Nếu chỉ khai sai số, bấm nút Sửa.`)) return;
+  try{
+    await deleteAsset(id);
+    logAudit('delete','asset',id, a ? {name:a.name, purchaseCost:a.purchaseCost} : {});
+    toast('🗑 Đã xoá tài sản');
+    renderEntryAsset();
+  }catch(err){ console.error(err); showError('Không xoá được: '+(err.code||err.message||err)); }
 }
 
 function renderEntryTarget(){
