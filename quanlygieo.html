@@ -567,7 +567,26 @@ html.phone-ui .sync{padding:9px;}
 .field textarea{resize:vertical;min-height:88px;line-height:1.55;}
 .field .hint{font-size:12.5px;color:var(--gt);margin-top:6px;line-height:1.55;}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
-input[type=checkbox],input[type=radio]{accent-color:var(--gd);width:20px;height:20px;}
+/* [FIX] Ô TICK BỊ LUẬT CỦA Ô NHẬP CHỮ NUỐT MẤT.
+   `.field input` ở trên đặt `appearance:none` (để tự vẽ ô nhập chữ), cộng border +
+   border-radius + padding 13px + min-height bằng cỡ ngón tay. Áp lên một ô tick thì
+   nó XOÁ SẠCH dấu tick và biến ô thành một khung bo tròn RỖNG: nhìn không biết đang
+   bật hay tắt, bấm vào cũng không thấy gì đổi.
+   Luật `input[type=checkbox]` cũ tuy đứng sau và thắng ở width/height, nhưng KHÔNG
+   hoàn tác appearance/border/padding nên ô vẫn rỗng. Phải hoàn tác đủ, và đặt độ ưu
+   tiên cao hơn `.field input` bằng cách nêu cả `.field`.
+   Phải nêu THÊM `html.tab-ui .field input` (luật riêng cho giao diện tablet, đặt ở
+   cuối file và ép min-height:46px) — không nêu thì ô tick vẫn cao 46px như ô nhập
+   chữ. Đây đúng là lỗi bộ kiểm thử bắt được sau lần sửa đầu. */
+input[type=checkbox],input[type=radio],
+.field input[type=checkbox],.field input[type=radio],
+html.tab-ui .field input[type=checkbox],html.tab-ui .field input[type=radio]{
+  appearance:auto;-webkit-appearance:auto;
+  width:20px;height:20px;min-height:0;padding:0;
+  border:none;border-radius:0;background:none;box-shadow:none;
+  accent-color:var(--gd);flex-shrink:0;cursor:pointer;
+}
+.field input[type=checkbox]:focus,.field input[type=radio]:focus{box-shadow:none;outline:2px solid var(--gd);outline-offset:2px;}
 
 /* ---------- Nút ---------- */
 .btn{
@@ -8341,11 +8360,16 @@ async function renderEntryLuong(){
 
   body.innerHTML = `
     <div class="card">
-      <div class="field" style="margin-bottom:8px">
-        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
-          <input type="checkbox" id="luongToggle" ${HR_SETTINGS.useActualLaborCost?'checked':''} onchange="submitLaborToggle(this.checked)" style="width:22px;height:22px;">
-          Dùng Labor cost TÍNH THẬT từ chấm công (thay cho ước lượng thủ công ở tab COGS/Mục tiêu)
-        </label>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:10px;">
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:15px;font-weight:650;color:var(--td);line-height:1.4;">Dùng Labor cost TÍNH THẬT từ chấm công</div>
+          <div style="font-size:12.5px;color:var(--gt);margin-top:3px;">thay cho ước lượng thủ công ở tab COGS/Mục tiêu</div>
+        </div>
+        <div class="togo-toggle-wrap ${HR_SETTINGS.useActualLaborCost?'active':''}" style="flex-shrink:0"
+             onclick="submitLaborToggle(!HR_SETTINGS.useActualLaborCost)">
+          <div class="togo-switch"></div>
+          <span class="togo-status">${HR_SETTINGS.useActualLaborCost?'Bật':'Tắt'}</span>
+        </div>
       </div>
       <div class="small-note">Khi TẮT: KPI Sức khỏe/Báo cáo dùng số Labor ước lượng thủ công như trước (tab Cấu hình → Mục tiêu → Cấu hình Labor). Khi BẬT: dùng đúng lương cứng/giờ đã khai cho từng nhân viên × giờ chấm công thật. Chỉ nên bật sau khi đã khai đủ Hình thức lương cho tất cả nhân viên ở tab Nhân viên.</div>
     </div>
