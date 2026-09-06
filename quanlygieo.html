@@ -4924,6 +4924,159 @@ function plTodayHTML(pl){
     </div>`;
 }
 
+
+// ---------------------------------------------------------------------------
+// [MỚI — đợt 2] LÃI/LỖ TỪNG NGÀY — màn Sức khoẻ tài chính
+//
+// Cùng một máy tính với thẻ ở màn Hôm nay (computeDayPL) — cố ý KHÔNG viết công
+// thức thứ hai cho kỳ. Tổng kỳ = cộng các ngày, nên con số tuần/tháng không bao
+// giờ có thể lệch với con số ngày.
+//
+// Ba thứ đọc theo đúng thứ tự chủ quán cần:
+//   1. Kỳ này lãi hay lỗ bao nhiêu, và có bao nhiêu NGÀY LỖ (số này quan trọng
+//      không kém: lãi 5tr/tháng nhưng 12 ngày lỗ là một câu chuyện khác hẳn với
+//      lãi 5tr mà ngày nào cũng dương).
+//   2. Biểu đồ cột — cột đỏ tụt xuống dưới vạch 0 là ngày lỗ. Nhìn hình thấy
+//      ngay ngày nào bất thường, không phải dò 30 con số.
+//   3. Bảng từng ngày, mặc định đóng, cho ai muốn xem con số cụ thể.
+// ---------------------------------------------------------------------------
+
+// Gom các ngày theo THÁNG — dùng khi kỳ xem quá dài để vẽ từng ngày (xem năm thì
+// 365 cột không đọc được gì). Vẫn là cộng các ngày lại, chỉ khác mức gom.
+function plGroupByMonth(days){
+  const nhom = new Map();
+  (days||[]).forEach(d=>{
+    const k = (d.date||'').slice(0,7);
+    if(!nhom.has(k)) nhom.set(k, []);
+    nhom.get(k).push(d);
+  });
+  return [...nhom.entries()].map(([k, ds])=>{
+    const t = plSumDays(ds);
+    t.key = k;
+    t.nhan = 'T' + Number(k.slice(5,7));
+    t.nhanDay = VN_MONTHS[Number(k.slice(5,7))-1] + '/' + k.slice(0,4);
+    return t;
+  });
+}
+
+// Biểu đồ cột hai chiều quanh vạch 0. Không dùng thư viện: chỉ là các khối chia
+// tỷ lệ, nên không tải thêm gì và không hỏng khi mất mạng.
+// Chiều cao vùng dương/âm chia theo đúng tỷ lệ giữa ngày lãi cao nhất và ngày lỗ
+// nặng nhất — nếu chia đôi cứng thì một ngày lỗ 50k trông sâu ngang một ngày lãi
+// 2tr, đọc sai hoàn toàn.
+const PL_CHART_H = 132;
+function plChartHTML(rows){
+  if(!rows || rows.length < 2) return '';
+  const maxDuong = Math.max(0, ...rows.map(r=>r.lai));
+  const maxAm    = Math.max(0, ...rows.map(r=>-r.lai));
+  const bien = (maxDuong + maxAm) || 1;
+  const hDuong = PL_CHART_H * (maxDuong / bien);
+  const hAm    = PL_CHART_H - hDuong;
+  const rong = rows.length > 45 ? 10 : rows.length > 24 ? 14 : 22;
+  const cot = rows.map(r=>{
+    const laLo = r.lai < 0;
+    const h = Math.max(2, PL_CHART_H * (Math.abs(r.lai) / bien));
+    const mau = laLo ? 'var(--bad)' : 'var(--ok)';
+    return `<div style="width:${rong}px;flex:0 0 auto;display:flex;flex-direction:column;align-items:center;"
+                 title="${r.nhanDay || r.nhan}: ${r.lai<0?'lỗ ':'lãi '}${fmt(Math.abs(r.lai))}">
+        <div style="height:${hDuong}px;width:100%;display:flex;align-items:flex-end;justify-content:center;">
+          ${laLo ? '' : `<div style="width:70%;height:${h}px;background:${mau};border-radius:3px 3px 0 0;"></div>`}
+        </div>
+        <div style="height:1.5px;width:100%;background:var(--line-2);"></div>
+        <div style="height:${hAm}px;width:100%;display:flex;align-items:flex-start;justify-content:center;">
+          ${laLo ? `<div style="width:70%;height:${h}px;background:${mau};border-radius:0 0 3px 3px;"></div>` : ''}
+        </div>
+        <div style="font-size:9.5px;color:var(--gt);margin-top:3px;white-space:nowrap;">${r.nhan}</div>
+      </div>`;
+  }).join('');
+  return `<div style="overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:2px;">
+      <div style="display:flex;gap:3px;align-items:stretch;min-width:min-content;">${cot}</div>
+    </div>`;
+}
+
+function plToggleBang(){
+  const box = document.getElementById('healthPLTable');
+  const btn = document.getElementById('healthPLTableToggle');
+  if(!box) return;
+  const dangAn = box.hasAttribute('hidden');
+  if(dangAn) box.removeAttribute('hidden'); else box.setAttribute('hidden','');
+  if(btn) btn.innerHTML = (dangAn ? 'Thu gọn bảng ' + ic('chevronUp',14) : 'Xem bảng từng ngày ' + ic('chevronDown',14));
+}
+
+// Nhãn ngày ngắn cho bảng: "T2 05/09". Thứ trong tuần có ích thật — ngày lỗ hay
+// rơi vào cùng một thứ là một manh mối về lịch mở cửa/xếp ca.
+const PL_DOW = ['CN','T2','T3','T4','T5','T6','T7'];
+function plNhanNgay(dateKey){
+  const d = new Date(dateKey+'T00:00:00');
+  if(isNaN(d.getTime())) return dateKey;
+  return PL_DOW[d.getDay()] + ' ' + pad(d.getDate()) + '/' + pad(d.getMonth()+1);
+}
+
+function plHealthHTML(tong, days, soNgayKy){
+  if(!tong) return '';
+  const laLai = tong.lai >= 0;
+  const mau = laLai ? 'var(--ok)' : 'var(--bad)';
+  const nhieuNgay = (days||[]).length > 1;
+  // Kỳ dài quá thì gom theo tháng — 365 cột ngày không đọc được gì.
+  const theoThang = (days||[]).length > 62;
+  const cot = theoThang
+    ? plGroupByMonth(days)
+    : (days||[]).map(d=>({ ...d, nhan: String(new Date(d.date+'T00:00:00').getDate()), nhanDay: plNhanNgay(d.date) }));
+
+  const hangBang = (days||[]).map(d=>{
+    const lo = d.lai < 0;
+    return `<div class="row">
+      <span class="rl">${plNhanNgay(d.date)}
+        <div class="small-note" style="margin-top:1px">${fmt(d.doanhThu)}${d.mucTinCay!=='chot-ngay' ? ' · đang chạy' : ''}</div></span>
+      <span class="rv" style="color:${lo?'var(--bad)':'var(--td)'}">${lo?'−':''}${fmt(Math.abs(d.lai))}</span>
+    </div>`;
+  }).join('');
+
+  return `
+    <div class="sec-title" style="margin-top:0">Lãi/lỗ kỳ này</div>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+        <span style="font-size:13px;font-weight:700;color:var(--gt);text-transform:uppercase;letter-spacing:.05em;">${laLai?'Lãi':'Lỗ'} ${soNgayKy||tong.soNgay} ngày</span>
+        ${plChipTinCay(tong.mucTinCay)}
+      </div>
+      <div style="font-size:30px;font-weight:750;color:${mau};margin-top:2px;line-height:1.15;">${laLai?'':'−'}${fmt(Math.abs(tong.lai))}</div>
+      <div class="small-note" style="margin-top:4px">
+        Trước khấu hao: <b>${tong.laiTruocKhauHao>=0?'':'−'}${fmt(Math.abs(tong.laiTruocKhauHao))}</b>
+        ${tong.doanhThu ? ` · biên lãi <b>${fmtPct(tong.bienLaiPct)}</b>` : ''}
+        ${nhieuNgay ? ` · trung bình <b>${tong.lai/Math.max(1,tong.soNgay)>=0?'':'−'}${fmt(Math.abs(tong.lai/Math.max(1,tong.soNgay)))}</b>/ngày` : ''}
+      </div>
+      ${nhieuNgay ? `<div class="small-note" style="margin-top:2px">
+        <b style="color:${tong.soNgayLo?'var(--bad)':'var(--ok)'}">${tong.soNgayLo}</b>/${tong.soNgay} ngày lỗ</div>` : ''}
+
+      ${plChartHTML(cot)}
+      ${nhieuNgay ? `<div class="small-note" style="margin-top:2px">Cột đỏ tụt xuống dưới vạch là ngày lỗ${theoThang?' — kỳ này dài nên gom theo tháng':''}.</div>` : ''}
+
+      <div style="border-top:1px solid var(--line);margin:12px 0 2px"></div>
+      ${plRowHTML('Doanh thu', '+', tong.doanhThu)}
+      ${plRowHTML('Giá vốn hàng bán', '−', tong.giaVon)}
+      ${plRowHTML('Hao hụt & huỷ', '−', tong.haoHut)}
+      ${plRowHTML('Chi phí biến đổi', '−', tong.bienPhiKhac)}
+      ${tong.phiKenh>0 ? plRowHTML('Phí sàn', '−', tong.phiKenh) : ''}
+      ${plRowHTML('Lương', '−', tong.luong)}
+      ${plRowHTML('Chi phí cố định', '−', tong.chiPhiCoDinh)}
+      ${plRowHTML('Khấu hao', '−', tong.khauHao)}
+      <div class="row" style="border-top:1.5px solid var(--line);margin-top:4px;padding-top:8px">
+        <span class="rl"><b>${laLai?'Lãi':'Lỗ'} kỳ này</b></span>
+        <span class="rv" style="color:${mau};font-size:17px"><b>${laLai?'':'−'}${fmt(Math.abs(tong.lai))}</b></span>
+      </div>
+
+      ${nhieuNgay ? `
+      <button id="healthPLTableToggle" onclick="plToggleBang()" style="margin-top:10px;background:none;border:none;padding:6px 0;color:var(--gd);font-weight:700;font-size:12.5px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;">Xem bảng từng ngày ${ic('chevronDown',14)}</button>
+      <div id="healthPLTable" hidden style="margin-top:2px;">${hangBang}</div>` : ''}
+
+      <div class="unit-explainer" style="margin-top:12px">
+        Con số kỳ này là <b>tổng các ngày cộng lại</b>, không tính bằng một công thức riêng — nên nó luôn khớp với thẻ "Lãi/lỗ hôm nay" ở màn Hôm nay.<br>
+        Chi phí trả một lần cho nhiều ngày (thuê mặt bằng, tiền điện) được <b>chia đều theo ngày</b>, không dồn hết vào ngày ghi sổ. Tiền nhập hàng không nằm ở đây — nó vào giá vốn khi bán ra.
+        ${tong.coUocTinh ? `<br><span style="color:var(--warn)">Trong kỳ còn ngày đang chạy hoặc còn số ước tính, nên con số này chưa phải số cuối cùng.</span>` : ''}
+      </div>
+    </div>`;
+}
+
 // ------------------------------------------------------------
 // STATUS / THRESHOLD RULES
 // ------------------------------------------------------------
@@ -6582,12 +6735,29 @@ async function renderHealth(){
   try{
   await ensureAuth();
   const {start,end} = periodRange(curHealthPeriod);
-  const [salesRes, opsAll, expAll, assets, ledgerReal, cashVariance, actualLaborByDate, actualHours] = await Promise.all([
+  const [salesRes, opsAll, expAll, assets, ledgerReal, cashVariance, actualLaborByDate, actualHours, expCats, emps, scheds] = await Promise.all([
     fetchSalesRange(start,end), loadDailyOpsAll(), loadExpensesAll(), loadAssetsAll(),
     computeLedgerRealMetrics(start,end), computeCashVarianceSummary(start,end),
     HR_SETTINGS.useActualLaborCost ? computeActualLaborCostByDate(dkey(start), dkey(end)) : Promise.resolve(null),
-    computeActualHoursTotal(start, end)
+    computeActualHoursTotal(start, end),
+    // Ba thứ cho khối "Lãi/lỗ kỳ này": nhãn cố định/biến đổi của danh mục chi phí,
+    // nhân viên và lịch làm việc (để ngày chưa kết ca có lương dự đoán). Hỏng thì
+    // khối lãi/lỗ vẫn tính được với dữ liệu còn lại, không kéo sập cả màn.
+    loadExpenseCategories().catch(()=>[]),
+    loadEmployees().catch(()=>[]),
+    loadSchedulesForRange(dkey(start), dkey(end)).catch(()=>[])
   ]);
+  // LÃI/LỖ TỪNG NGÀY — dùng chung máy tính với thẻ ở màn Hôm nay. Mọi dữ liệu cần
+  // thiết đã nằm trong Promise.all ở trên nên không tốn thêm lượt mạng nào.
+  const plLaborDuDoan = plPredictedLaborByDate(emps, scheds, dkey(start), dkey(end));
+  const plWasteByDate = (ledgerReal && ledgerReal.wasteByDate) || {};
+  const plHomNayKey = dkey(new Date());
+  const plDays = salesRes.perDay.map(day => computeDayPL({
+    day, expList: expAll, cats: expCats, assets,
+    laborActual: actualLaborByDate, laborPredicted: plLaborDuDoan,
+    wasteValue: plWasteByDate[day.date] || 0, homNayKey: plHomNayKey
+  }));
+  const plTong = plSumDays(plDays);
   const opsSum = sumDailyOps(opsAll, start, end);
   const kpi = computeKPIs({
     perDaySales: salesRes.perDay, opsSum, expList: filterExpenses(expAll, start, end), assets, actualLaborByDate,
@@ -6608,6 +6778,7 @@ async function renderHealth(){
 
   document.getElementById('healthBody').innerHTML = `
     ${rangeLabel}
+    ${plHealthHTML(plTong, plDays, salesRes.dayCount)}
     <div id="healthBep"></div>
     <div class="card">
       <div class="card-h"><h3>${ic('coins')} Sales</h3></div>

@@ -285,6 +285,22 @@ Làm đợt 1 trước cũng có ích ngay, kể cả khi chưa làm 3–5.
 | 4 | Tiền chủ quán rút có phải chi phí? | **Không** | Không có dòng nào cho khoản này. Thẻ ghi rõ: đây là lợi nhuận quán làm ra, rút tiền là **chia** lợi nhuận đó |
 | 5 | Phí sàn (GrabFood…) | **Chưa bán qua sàn, nhưng ghi chú sẵn** | Có sẵn dòng `phiKenh` và hàm `plChannelFeeForDay(day)` làm **một chỗ cắm duy nhất** — khi nào bán qua sàn chỉ điền hàm đó, dòng "Phí sàn" tự hiện, lãi/lỗ tự trừ. Ghi rõ luôn điều kiện tiên quyết: POS phải ghi doanh thu **theo kênh** trước đã, chứ đoán một tỷ lệ phí ở đó còn tệ hơn để 0 |
 
+### Đợt 2 — đã xong
+
+- Khối **"Lãi/lỗ kỳ này"** ở màn **Sức khoẻ tài chính**, đặt trên khối hoà vốn. Dùng
+  đúng bộ lọc kỳ sẵn có (hôm nay / 7 ngày / tháng / năm / tự chọn) nên **tổng tuần và
+  tổng tháng** có ngay, không cần màn riêng.
+- **Biểu đồ cột** quanh vạch 0: cột đỏ tụt xuống dưới vạch là ngày lỗ. Chiều cao chia
+  theo đúng tỷ lệ, nên một ngày lỗ 50k không trông sâu ngang một ngày lãi 2tr.
+- Dòng **"3/14 ngày lỗ"** — lãi 5tr/tháng mà 12 ngày lỗ là chuyện khác hẳn với lãi 5tr
+  mà ngày nào cũng dương.
+- **Bảng từng ngày** (mặc định đóng), có thứ trong tuần: ngày lỗ hay rơi vào cùng một
+  thứ là một manh mối về lịch mở cửa/xếp ca.
+- Kỳ dài hơn 62 ngày (xem cả năm) tự **gom cột theo tháng** — 365 cột thì không đọc
+  được gì.
+- 27 kiểm thử, trong đó có phép đối chiếu quan trọng nhất: **số tổng trên màn = cộng
+  đúng từng dòng trong bảng ngày**.
+
 ### Đợt 1 — đã xong
 
 - Máy tính lãi/lỗ theo ngày (`computeDayPL`, `plSumDays`, `computeDailyPLRange`) — hàm
@@ -296,7 +312,7 @@ Làm đợt 1 trước cũng có ích ngay, kể cả khi chưa làm 3–5.
 - 51 kiểm thử: công thức, lương dự đoán từ lịch (kể cả ca qua đêm và OT), cộng ngày ra
   kỳ, và chạy thật trên màn Hôm nay.
 
-Còn lại đợt 2 → 5 như bảng ở §11.
+Còn lại đợt 3 → 5 như bảng ở §11.
 
 ---
 
