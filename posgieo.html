@@ -7193,7 +7193,7 @@ function renderPrepWasteForm() {
       <div style="display:flex;gap:7px;">
         ${canModeBtn('discard','Cân phần đổ đi','đổ ra khay/thùng rồi cân')}
         ${canModeBtn('remain','Cân phần còn lại','hệ thống lấy hiệu ra số đã đổ')}
-      </div>` : '';
+      </div>` : prepWeighHintHTML(p.id);
 
   const khoiLo = lo.length ? `
       ${khoiCan}
@@ -7607,6 +7607,22 @@ function preloadVesselImagesPOS(prepIds) {
 function weighBtnHTML(onclickExpr, size) {
   const s = size || 44;
   return `<button type="button" onclick="${onclickExpr}" title="Cân bằng dụng cụ đựng" style="flex-shrink:0;width:${s}px;height:${s}px;border-radius:13px;border:1.5px solid var(--gd);background:#fff;color:var(--gd);font-size:${Math.round(s * 0.42)}px;line-height:1;cursor:pointer;">⚖️</button>`;
+}
+
+// Vì sao bán thành phẩm này chưa cân trừ bì được. Ẩn nút im lặng là thứ khiến
+// người dùng tưởng tính năng không tồn tại rồi đi hỏi — thà nói ra một dòng, kèm
+// đúng đường đi để bật nó lên. Trả '' khi đã cân được (không ai cần đọc gì thêm).
+function prepWeighHintHTML(prepId) {
+  if (prepCanWeighPOS(prepId)) return '';
+  const p = (PREP_ITEMS_CACHE_POS || []).find(x => x.id === prepId) || {};
+  const ten = wpEsc(p.name || 'món này');
+  const lyDo = !posVesselUnitFactor(p.unit)
+    ? `đang tính bằng <b>${wpEsc(p.unit || '?')}</b>, mà cân chỉ cho ra gam nên không trừ bì được`
+    : 'chưa được gắn dụng cụ đựng nào';
+  return `<div style="margin:10px 0 2px;padding:9px 11px;background:#fbfaf5;border:1px dashed #ddd6c2;border-radius:11px;font-size:11px;color:#8a8471;line-height:1.55;">
+      ⚖️ <b>Cân cả khay chưa bật cho ${ten}</b> — ${lyDo}.<br>
+      Bật ở app Quản lý: <b>Kho → Dụng cụ đựng</b> khai khay/ca kèm trọng lượng bì, rồi <b>Kho → Chế biến cấp 1</b> chọn dụng cụ cho món này.
+    </div>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -8461,7 +8477,7 @@ function openPrepFinishForm(batchId) {
       <div style="font-size:12.5px;color:#999;margin-bottom:10px;">Bắt đầu lúc ${fmtDateTimeShort(b.startedAt)} · ${b.batchRatio} mẻ</div>
       <div class="wal-input-label" style="margin:0 0 6px;">Thực tế thu được (cân/đong)</div>
       ${prepCanWeighPOS(b.prepId) ? `
-      <button type="button" onclick="openPrepFinishWeigh()" style="width:100%;margin-bottom:10px;padding:14px;background:#fff;color:var(--gd);border:1.5px solid var(--gd);border-radius:14px;font-family:'Google Sans',sans-serif;font-size:14.5px;font-weight:700;cursor:pointer;">⚖️ Cân cả khay — hệ thống tự trừ bì</button>` : ''}
+      <button type="button" onclick="openPrepFinishWeigh()" style="width:100%;margin-bottom:10px;padding:14px;background:#fff;color:var(--gd);border:1.5px solid var(--gd);border-radius:14px;font-family:'Google Sans',sans-serif;font-size:14.5px;font-weight:700;cursor:pointer;">⚖️ Cân cả khay — hệ thống tự trừ bì</button>` : prepWeighHintHTML(b.prepId)}
       <div class="wal-input-group" style="margin-bottom:2px;display:flex;align-items:center;gap:8px;">
         <input id="prepFinishQty" type="number" inputmode="decimal" step="0.01" placeholder="Cân xong gõ số vào đây" oninput="onPrepFinishQtyInput(true)" style="flex:1;">
         <span style="font-size:13px;font-weight:700;color:var(--gd);white-space:nowrap;">${b.unit || ''}</span>
@@ -12097,6 +12113,7 @@ function renderPrepCountScreen(lines) {
     <div class="wal-section" style="margin:0 0 14px;">
       <div class="wal-section-title">Đếm bán thành phẩm cuối ngày</div>
       <div style="font-size:12px;color:#999;margin-bottom:10px;line-height:1.5;">Cân/đong số <b>thực tế còn lại</b> của từng loại. Số này là tồn đầu ngày mai để tính cần nấu bao nhiêu — đếm sai là mai nấu thiếu hoặc thừa.</div>
+      ${_prepCountState.some(l => prepCanWeighPOS(l.prepId)) ? '' : prepWeighHintHTML((_prepCountState[0] || {}).prepId)}
       ${_prepCountState.map((l, i) => l.perBatch ? renderPrepCountLinePerBatch(l, i) : renderPrepCountLineSingle(l, i)).join('')}
       ${renderPinInput('prepCountStaff')}
     </div>

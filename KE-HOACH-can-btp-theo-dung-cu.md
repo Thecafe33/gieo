@@ -111,13 +111,21 @@ Chặn khi lưu: phải có ≥1 phân loại; mọi bì phải > 0; tên không
 
 Xoá: nếu dụng cụ đang được BTP nào gắn thì cảnh báo có tên các BTP đó, bắt xác nhận (không xoá ngầm — POS đang trỏ vào id đó).
 
-### 4.2 Upload ảnh
+### 4.2 Upload ảnh — ba tầng, tự xuống tầng dưới khi tầng trên hỏng
 
-`quanlygieo.html` chưa nạp `firebase-storage-compat.js` và **không cần nạp**: POS đã có sẵn cách upload bằng REST + idToken (`kcDoUpload()`, POS dòng ~18780). Chép nguyên cách đó sang, chỉ đổi đường dẫn:
+Bản đầu tự gọi REST bằng `XMLHttpRequest` (chép cách `kcDoUpload()` của POS) và **ở máy thật bị chặn ngay ở tầng mạng**: `xhr.onerror`, status 0, không có mã HTTP nào để lần. Đó là dấu hiệu trình duyệt chặn *trước khi* request kịp đi — gần như luôn là CORS (POST kèm `Authorization` + `Content-Type: image/jpeg` bắt buộc phải qua preflight OPTIONS), hoặc trang mở bằng `file://` nên Origin là `null`.
 
-```
-prep_vessels/<vesselId>/<timestamp>.jpg
-```
+| Tầng | Cách | Khi nào dùng |
+|---|---|---|
+| 1 | **SDK Storage** (`firebase-storage-compat`) | Mặc định. Đường mà hàng triệu web app đang chạy — Google đã cấu hình sẵn CORS cho nó, SDK tự thử lại và tự lấy đúng tên bucket trong `firebaseConfig` |
+| 2 | REST như cũ | Khi SDK không nạp được (mất mạng lúc tải gstatic). Có dò tên bucket `.appspot.com` ↔ `.firebasestorage.app` |
+| 3 | **Nhúng thẳng vào Firestore** dạng data URI | Khi cả hai tầng trên hỏng. Xấu hơn nhưng **chắc chắn chạy ở bất cứ đâu Firestore chạy được** — mà cả app đã sống bằng Firestore rồi |
+
+Đường dẫn trên Storage: `prep_vessels/<vesselId>/<timestamp>.jpg`
+
+Ảnh nhúng nén nhỏ hơn (360px thay vì 720px) để không phình tài liệu Firestore, và có trần 140KB. `imagePath` để rỗng nên mọi chỗ dọn ảnh tự bỏ qua — không có file nào trên Storage để mà xoá. **POS không phải sửa gì**: nó chỉ đọc `imageUrl`, mà data URI gán thẳng vào `<img src>` cũng chạy y hệt một đường link.
+
+Rơi xuống tầng 3 thì **nói rõ ra** kèm nguyên văn lỗi Storage trả về, và ô ảnh hiện nhãn "Ảnh nhúng trong dữ liệu" — im lặng ở đây là để chủ quán tưởng mọi thứ bình thường trong khi có một vấn đề hạ tầng cần sửa. Storage hỏng một lần thì lần sau đi thẳng xuống tầng nhúng, không bắt chờ hết timeout mạng cho mỗi tấm ảnh.
 
 **Nén trước khi upload** (bắt buộc — POS chạy trên tablet, ảnh 4MB từ điện thoại sẽ làm màn cân giật):
 1. Đọc file → `createImageBitmap`
@@ -133,7 +141,7 @@ Thêm một khối mới vào `renderKhoPrep()` (dòng ~9877), đặt ngay dư�
 
 > **Dụng cụ đựng khi cân** (tối đa 5)
 > [lưới ô vuông ảnh, bấm để chọn/bỏ chọn từ thư viện, ô đang chọn có số thứ tự]
-> *Chưa chọn dụng cụ nào → POS vẫn cho gõ tay như hiện tại, không chặn gì.*
+> *Chưa chọn dụng cụ nào → POS vẫn cho gõ tay như hiện tại, không chặn gì, nhưng có hiện một dòng nói rõ vì sao chưa có nút cân và cách bật.*
 > *Đơn vị không phải g/kg → ẩn hẳn lưới, nói rõ vì sao.*
 
 Lưu thêm `vesselIds` trong `submitPrepItem()`, có lọc bỏ id của dụng cụ vừa bị xoá giữa chừng — lưu lại id chết thì POS hiện ô trống bấm không được.
@@ -295,11 +303,12 @@ Chạy bằng Chromium (Playwright), dựng đúng đoạn CSS + JS lấy thẳn
 9. Bấm ✕ → đóng, **không** gọi callback lưu
 10. `ml` không cân được, `g` cân được, id lạ không cân được
 
-**Phía Quản lý — 37/37 đạt:**
+**Phía Quản lý — 38/38 đạt:**
 1. Nén ảnh: PNG **nền trong suốt** 1600×900 → ra JPEG **vuông 720×720**, góc ảnh là **trắng** (không phải đen), dưới 150 KB
-2. Upload đúng thư mục `prep_vessels/<id>/`, đúng dạng JPEG đã nén, thử tên bucket trong `firebaseConfig` trước
-3. Tên bucket sai (404) → tự thử sang tên kia, upload vẫn thành công, nhớ lại cho lần sau đi thẳng
-4. Lỗi 403 → báo đúng là vấn đề quyền/rules và **không** phí công thử tên bucket khác; cả hai tên đều 404 → báo "không tìm thấy kho ảnh"
+2. Tầng 1: SDK chạy được thì dùng SDK, **không đụng** tới REST
+3. Tầng 2: không có SDK → rơi xuống REST; tên bucket sai (404) → tự thử sang tên kia
+4. Tầng 3: cả SDK lẫn REST hỏng → nhúng vào Firestore, ảnh dưới 140KB, giữ lại nguyên văn lỗi Storage để báo cho chủ quán, và lần sau đi thẳng không chờ timeout lại
+5. Ảnh nhúng → `imagePath` rỗng, không gọi xoá Storage vô ích
 3. Lưu đúng tên + 2 phân loại kèm bì 310/245 + `imagePath` để xoá được sau
 4. Đổi ảnh rồi **bấm Huỷ** → xoá đúng 1 ảnh rác, **không** đụng ảnh đang dùng, bản ghi vẫn trỏ ảnh cũ
 5. Đổi ảnh rồi **bấm Lưu** → ảnh cũ bị xoá thật khỏi Storage
