@@ -303,7 +303,11 @@ Chạy bằng Chromium (Playwright), dựng đúng đoạn CSS + JS lấy thẳn
 9. Bấm ✕ → đóng, **không** gọi callback lưu
 10. `ml` không cân được, `g` cân được, id lạ không cân được
 
-**Phía Quản lý — 38/38 đạt:**
+**Chạy trên FILE THẬT, không phải bản trích** (Firebase giả có nhớ, nạp trọn `posgieo.html` / `quanlygieo.html`) **— 27/27 đạt:**
+- Quản lý (14): khai 10 dụng cụ → ảnh lên Storage → lưới chọn hiện đủ 10 → bấm 2 ô → **`vesselIds` xuống Firestore** → mở lại vẫn nhớ 2 lựa chọn; chưa gắn thì hiện nhắc "còn một bước nữa" kèm nút sang Chế biến cấp 1, gắn xong thì hết nhắc
+- POS (13): chưa gắn → không nút, có nói lý do; đã gắn → nút ⚖️ hiện, bộ cân mở, trừ bì đúng, số đổ vào đúng ô của lô; "cân phần còn lại" lấy hiệu đúng; đơn vị ml → ẩn và nói rõ vì sao
+
+**Phía Quản lý (bản trích, tập trung vào ảnh) — 38/38 đạt:**
 1. Nén ảnh: PNG **nền trong suốt** 1600×900 → ra JPEG **vuông 720×720**, góc ảnh là **trắng** (không phải đen), dưới 150 KB
 2. Tầng 1: SDK chạy được thì dùng SDK, **không đụng** tới REST
 3. Tầng 2: không có SDK → rơi xuống REST; tên bucket sai (404) → tự thử sang tên kia

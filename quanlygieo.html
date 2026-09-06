@@ -10021,7 +10021,8 @@ async function renderKhoPrep(){
         <div class="li-l">
           <div>${escapeHtmlAttr(p.code||'')} · ${escapeHtmlAttr(p.name||'')}</div>
           <div>Tồn <b>${fmtNum(p.currentStock,1)} ${escapeHtmlAttr(p.unit||'')}</b> · 1 mẻ ra ${fmtNum(p.batchYield,0)} ${escapeHtmlAttr(p.unit||'')} · ${fmtUnitPrice(p.costPerUnit)}/${escapeHtmlAttr(p.unit||'')}</div>
-          <div>${prepShelfLabel(p)}${Number(p.prepTimeMinutes)>0 ? ' · Nấu ~'+p.prepTimeMinutes+' phút' : ''}${Number(p.dailyTarget)>0 ? ' · Cần/ngày '+fmtNum(p.dailyTarget,0)+' '+escapeHtmlAttr(p.unit||'') : ''}${(p.vesselIds||[]).length ? ' · Cân bằng '+p.vesselIds.length+' dụng cụ' : ''}</div>
+          <div>${prepShelfLabel(p)}${Number(p.prepTimeMinutes)>0 ? ' · Nấu ~'+p.prepTimeMinutes+' phút' : ''}${Number(p.dailyTarget)>0 ? ' · Cần/ngày '+fmtNum(p.dailyTarget,0)+' '+escapeHtmlAttr(p.unit||'') : ''}${(p.vesselIds||[]).length ? ' · ⚖️ Cân bằng '+p.vesselIds.length+' dụng cụ'
+             : (VESSELS.length && vesselUnitSupported(p.unit) ? ' · <span style="color:var(--warn);font-weight:600">chưa gắn dụng cụ cân</span>' : '')}</div>
         </div>
         <div class="li-r">
           <button class="iconbtn" onclick="openPrepHistory('${p.id}')" title="Lịch sử biến động tồn">${ic('clock')}</button>
@@ -10638,8 +10639,26 @@ async function renderKhoVessels(){
       <button class="btn outline" style="margin-top:8px" onclick="vesselResetForm()">Huỷ</button>
     </div>` : `<button class="btn" onclick="vesselStartNew()">+ Thêm dụng cụ đựng</button>`;
 
+  // [MỚI] BƯỚC CÒN THIẾU. Khai dụng cụ xong là mới xong MỘT NỬA — phải vào Chế
+  // biến cấp 1 gắn cho từng bán thành phẩm thì POS mới hiện nút cân. Không nói ra
+  // thì người dùng khai 10 dụng cụ, sang POS không thấy gì, và kết luận là hỏng.
+  // (Đúng chuyện đã xảy ra.)
+  const _daGan = PREP_ITEMS.filter(p=>(p.vesselIds||[]).length).length;
+  const _saiDonVi = PREP_ITEMS.filter(p=>!vesselUnitSupported(p.unit)).length;
+  const nhacHtml = (VESSELS.length && !_daGan) ? `
+    <div class="card" style="border:1.5px solid var(--warn-line);background:var(--warn-bg);">
+      <div style="font-weight:700;color:var(--warn);margin-bottom:6px;">${ic('alert',15)} Còn một bước nữa thì POS mới cân được</div>
+      <div style="font-size:13.5px;line-height:1.65;color:var(--warn);">
+        Đã khai <b>${VESSELS.length} dụng cụ</b> nhưng <b>chưa gắn cho bán thành phẩm nào</b>.
+        Thư viện này chỉ là danh mục — phải vào <b>Chế biến cấp 1</b>, mở từng món và chọn dụng cụ nó đang đựng thì nút ⚖️ bên POS mới hiện ra.
+        ${_saiDonVi ? `<br><br>Lưu ý: <b>${_saiDonVi}</b> bán thành phẩm đang tính bằng đơn vị không cân trừ bì được (ml, cái, miếng…) — đổi đơn vị sang <b>g</b> trước thì mới gắn được.` : ''}
+      </div>
+      <button class="btn" style="margin-top:12px" onclick="goKho('prep')">Sang Chế biến cấp 1 để gắn →</button>
+    </div>` : '';
+
   box.innerHTML = `
     ${formHtml}
+    ${vesselDraft ? '' : nhacHtml}
     <div class="sec-title">Danh sách dụng cụ (${VESSELS.length})</div>
     ${VESSELS.length ? VESSELS.map(v=>{
       const vars = v.variants||[];
