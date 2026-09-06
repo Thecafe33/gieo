@@ -1202,6 +1202,7 @@ html.phone-ui .nav-search .ns-kbd{display:none;}
         <div id="todayHealth"></div>
         <div class="sec-title">Chỉ số hôm nay</div>
         <div class="kgrid" id="todayGrid"></div>
+        <div id="todayThv"></div>
         <div class="sec-title">Bill theo giờ</div>
         <div id="todayHourly"></div>
         <div class="sec-title">Cảnh báo</div>
@@ -2495,7 +2496,14 @@ const DEFAULTS = {
   targets: {aov:46000, billsPerDay:60, ipt:1.73, cogsPct:33, laborCupTarget:3000, laborBillTarget:5200, wasteTargetPct:3, remakeTargetPct:2, stockoutTargetPct:2},
   labor: {fulltimeCost:6500000, parttimeHourly:18000, parttimeCount:2, parttimeHoursPerPerson:75}
 };
-const FINANCE_DEFAULTS = {cashReserve:0, initialInvestment:0, stockCountVarianceThresholdPct:5, packagingVarianceThresholdPct:8, cashToleranceAmount:0, handoverToleranceAmount:null, openingCashNextDayDefault:0, useActualWaste:false};
+const FINANCE_DEFAULTS = {cashReserve:0, initialInvestment:0, stockCountVarianceThresholdPct:5, packagingVarianceThresholdPct:8, cashToleranceAmount:0, handoverToleranceAmount:null, openingCashNextDayDefault:0, useActualWaste:false,
+  // [THU HỒI VỐN] Bốn trường của cơ chế thu hồi vốn (KE-HOACH-thu-hoi-von.md).
+  // Bản ghi cũ không có 4 trường này → coi như CHƯA đạt mốc, mốc bắt đầu tự tính
+  // từ ngày mua tài sản sớm nhất. Không được coi null là "đã thu hồi xong".
+  recoveryStartDate:null,      // 'YYYY-MM-DD' chủ quán khai đè, null = tự tính
+  recoveryReachedDate:null,    // ngày ĐẦU TIÊN luỹ kế chạm 100% — ghi một lần, không tự xoá
+  recoveryReachedAt:null,      // ISO, lúc app ghi mốc
+  recoveryReachedCapital:0};   // tổng vốn đầu tư TẠI THỜI ĐIỂM đạt mốc
 
 let CONFIG_HISTORY = []; // [{id, effectiveFrom:'YYYY-MM-DD', targets:{...}, labor:{...}}], sorted asc theo effectiveFrom
 let CONFIG = JSON.parse(JSON.stringify(DEFAULTS));
@@ -4334,9 +4342,12 @@ async function loadReceivingRecords(limitN=20){
 // ------------------------------------------------------------
 // ASSETS / CAPEX — Firestore collection assets_gieogieo
 // ------------------------------------------------------------
-function addAsset(data){ return fstore.collection('assets_gieogieo').add({...data, active:true, createdAt:new Date().toISOString()}); }
-function toggleAsset(id, active){ return fstore.collection('assets_gieogieo').doc(id).update({active}); }
-function deleteAsset(id){ return fstore.collection('assets_gieogieo').doc(id).delete(); }
+// Mọi thay đổi tài sản đều làm đổi TỔNG VỐN ĐẦU TƯ (mẫu số của % thu hồi vốn) và
+// cả mốc bắt đầu — xoá cache trong phiên, nếu không thẻ Thu hồi vốn còn hiện số cũ
+// tới hết ngày.
+function addAsset(data){ _thvCache = null; return fstore.collection('assets_gieogieo').add({...data, active:true, createdAt:new Date().toISOString()}); }
+function toggleAsset(id, active){ _thvCache = null; return fstore.collection('assets_gieogieo').doc(id).update({active}); }
+function deleteAsset(id){ _thvCache = null; return fstore.collection('assets_gieogieo').doc(id).delete(); }
 async function loadAssetsAll(){
   const snap = await fstore.collection('assets_gieogieo').get();
   return snap.docs.map(d=>({id:d.id, ...d.data()}));
@@ -5636,6 +5647,287 @@ function plLaiCardHTML(pl, be){
         </div>
       </div>
     </div>`;
+}
+
+// ============================================================
+// THU HỒI VỐN — SỔ THỨ HAI, CHẠY SONG SONG VỚI KHẤU HAO
+// (đặc tả: KE-HOACH-thu-hoi-von.md, chủ quán duyệt 4 lựa chọn)
+//
+// Câu hỏi nó trả lời KHÁC hẳn sổ lãi/lỗ cũ:
+//   · Sổ cũ  : "tính cả hao mòn máy móc thì hôm nay quán có lời không?"
+//   · Sổ này : "tôi đã lấy lại được bao nhiêu trong số vốn bỏ ra mở quán?"
+//
+// Vì sao tiền thu hồi lấy con số TRƯỚC khấu hao (= lãi cũ + khấu hao ngày):
+//   Khấu hao KHÔNG phải tiền ra khỏi túi. Tháng nào cũng trừ 6tr khấu hao nhưng
+//   không ai cầm 6tr đó đi đâu — nó nằm lại trong két, và chính khoản nằm lại đó
+//   LÀ tiền thu hồi vốn. Lấy lãi sau khấu hao thì đếm thiếu đúng phần đó; lấy
+//   riêng phần khấu hao phân bổ thì thu đủ 100% LUÔN mất đúng bằng số tháng đã
+//   khai — trái thẳng với yêu cầu "không phụ thuộc thời gian khấu hao".
+//
+// KHÔNG sửa một dòng nào của computeDayPL/plBreakEven/plLaiCardHTML: thẻ Lãi/lỗ
+// hôm nay phải hiện y như cũ để chủ quán vẫn đối chiếu được hai cách tính.
+// ============================================================
+let _thvCache = null;          // { key:'YYYY-MM-DD', data }
+const THV_MAX_DAYS = 730;      // trần an toàn: không quét quá 2 năm đổ về trước
+
+// Tiền thu hồi vốn của MỘT ngày = doanh thu − mọi chi phí vận hành, KHÔNG trừ
+// khấu hao. Bằng đúng dòng "Trước khấu hao" đã hiện sẵn trên thẻ Lãi/lỗ, nên hai
+// màn không bao giờ lệch nhau.
+function thvTienNgay(pl){
+  if(!pl) return 0;
+  return (Number(pl.lai)||0) + (Number(pl.khauHao)||0);
+}
+
+// Tổng vốn đầu tư = TỔNG NGUYÊN GIÁ tài sản đang active (chủ quán chốt phương án
+// này, không dùng ô "Vốn đầu tư ban đầu"). Nguyên giá, KHÔNG trừ giá trị thu hồi:
+// bỏ ra 50tr thì phải lấy lại đủ 50tr.
+function thvTongVon(assets){ return totalCapex(assets||[]); }
+
+// Mốc bắt đầu tính: ngày mua SỚM NHẤT trong các tài sản đang active — đó là ngày
+// đồng vốn đầu tiên bỏ ra. Chủ quán khai đè được ở màn Cấu hình → Tài chính.
+function thvMocBatDau(assets, khaiTay){
+  if(khaiTay) return khaiTay;
+  const ngay = (assets||[]).filter(a=>a.active!==false && a.purchaseDate).map(a=>a.purchaseDate).sort();
+  return ngay.length ? ngay[0] : null;
+}
+
+// Hàm THUẦN — kiểm thử được, không đụng mạng.
+//   days      : mảng kết quả computeDayPL (thứ tự nào cũng được, tự sắp lại)
+//   tongVon   : tổng vốn đầu tư
+//   mocDaDat  : ngày đã ghi vào sổ (FINANCE.recoveryReachedDate) hoặc null
+function thvCompute({ days, tongVon, mocDaDat }){
+  const ds = [...(days||[])].sort((a,b)=> String(a.date||'') < String(b.date||'') ? -1 : 1);
+  const von = Number(tongVon) || 0;
+  let luyKe = 0, ngayDatMoiTinh = null, soNgayAm = 0;
+  const theoThang = new Map();
+  ds.forEach(d=>{
+    const tien = thvTienNgay(d);
+    // Ngày lỗ (doanh thu không đắp nổi chi phí vận hành) TRỪ VÀO luỹ kế, không
+    // làm tròn thành 0 — nếu không, quán lỗ 15 ngày / lãi 15 ngày vẫn hiện "đang
+    // thu hồi đều đặn", tức là màn hình nói dối đúng lúc cần sự thật nhất.
+    if(tien < 0) soNgayAm++;
+    luyKe += tien;
+    if(ngayDatMoiTinh == null && von > 0 && luyKe >= von) ngayDatMoiTinh = d.date;
+    const mk = String(d.date||'').slice(0,7);
+    const cur = theoThang.get(mk) || { thang: mk, tien: 0, luyKe: 0, soNgay: 0 };
+    cur.tien += tien; cur.luyKe = luyKe; cur.soNgay++;
+    theoThang.set(mk, cur);
+  });
+  // Mốc ĐÃ GHI là chuyện đã xảy ra — không tính lại theo tổng vốn của HÔM NAY.
+  // Mua thêm tài sản làm tiến độ tụt xuống, nhưng không xoá được ngày đã đạt.
+  const ngayDat = mocDaDat || ngayDatMoiTinh;
+  let tienSauMoc = 0;
+  if(ngayDat) ds.forEach(d=>{ if(String(d.date||'') > ngayDat) tienSauMoc += thvTienNgay(d); });
+
+  const conCan = Math.max(0, von - luyKe);
+  // Tốc độ để ước "còn bao lâu nữa": trung bình 30 ngày GẦN NHẤT, không phải trung
+  // bình cả đời quán — tháng đầu mới mở không nói lên tốc độ của hiện tại.
+  const cuoi = ds.slice(-30);
+  const tocDoNgay = cuoi.length ? cuoi.reduce((s,d)=>s+thvTienNgay(d),0)/cuoi.length : 0;
+  return {
+    tongVon: von,
+    daThuHoi: luyKe,
+    conCan,
+    pct: von > 0 ? luyKe / von * 100 : null,
+    daDu: von > 0 && luyKe >= von,
+    ngayDat, ngayDatMoiTinh, daGhiMoc: !!mocDaDat,
+    tienSauMoc,
+    soNgay: ds.length, soNgayAm,
+    tocDoNgay, tocDoThang: tocDoNgay * 30,
+    soThangConLai: (tocDoNgay > 0 && conCan > 0) ? conCan / (tocDoNgay * 30) : null,
+    chuaKhaiVon: !(von > 0),
+    theoThang: [...theoThang.values()].map(m=>({ ...m, pct: von > 0 ? m.luyKe / von * 100 : null }))
+  };
+}
+
+// Nạp NỀN, y hệt khối hoà vốn 30 ngày: luỹ kế phải cộng mọi ngày từ mốc bắt đầu
+// tới hôm nay (có thể vài trăm ngày), trong khi màn Hôm nay chỉ cần đọc 1 ngày —
+// giữ cả màn lại chờ nó là vô lý. Nhớ trong bộ nhớ phiên theo ngày hôm nay.
+async function computeCapitalRecovery(force){
+  const homNay = dkey(new Date());
+  if(!force && _thvCache && _thvCache.key === homNay) return _thvCache.data;
+
+  const assets = await loadAssetsAll();
+  const tongVon = thvTongVon(assets);
+  const moc = thvMocBatDau(assets, FINANCE.recoveryStartDate);
+
+  // Chưa khai tài sản nào có ngày mua → không có mốc để đếm từ đâu. Nói ra, không
+  // âm thầm lấy 30 ngày gần nhất rồi bảo "đã thu hồi 12%".
+  if(!moc){
+    const data = { ...thvCompute({ days: [], tongVon, mocDaDat: FINANCE.recoveryReachedDate }),
+      moc: null, chuaCoMoc: true, batDauThat: null, biCatBot: false,
+      vonKhaiTay: Number(FINANCE.initialInvestment)||0, vonLucDatMoc: Number(FINANCE.recoveryReachedCapital)||0 };
+    _thvCache = { key: homNay, data };
+    return data;
+  }
+
+  const end = new Date();
+  let start = new Date(moc + 'T00:00:00');
+  const somNhat = new Date(); somNhat.setDate(somNhat.getDate() - (THV_MAX_DAYS - 1));
+  somNhat.setHours(0,0,0,0);
+  const biCatBot = start < somNhat;
+  if(biCatBot) start = somNhat;
+
+  const { days } = await computeDailyPLRange(start, end);
+  const data = thvCompute({ days, tongVon, mocDaDat: FINANCE.recoveryReachedDate });
+  data.moc = moc;
+  data.batDauThat = dkey(start);
+  data.biCatBot = biCatBot;
+  data.chuaCoMoc = false;
+  data.vonKhaiTay = Number(FINANCE.initialInvestment)||0;
+  data.vonLucDatMoc = Number(FINANCE.recoveryReachedCapital)||0;
+
+  // Vừa chạm 100% lần đầu → GHI MỐC một lần. Ghi hỏng thì chỉ mất phần "nhớ", số
+  // vẫn tính lại được ở lần sau; không kéo sập màn.
+  if(data.daDu && !FINANCE.recoveryReachedDate && data.ngayDat){
+    saveFinance({ recoveryReachedDate: data.ngayDat, recoveryReachedAt: new Date().toISOString(),
+                  recoveryReachedCapital: tongVon })
+      .then(()=>{ data.daGhiMoc = true; })
+      .catch(err=>console.warn('[Thu hồi vốn] không ghi được mốc (bỏ qua):', err));
+  }
+
+  _thvCache = { key: homNay, data };
+  return data;
+}
+
+// Thanh tiến độ. Phần đã thu hồi tô xanh; chạm 100% đổi sang màu thương hiệu.
+function thvBarHTML(pct){
+  const p = Math.max(0, Math.min(100, Number(pct)||0));
+  const mau = p >= 100 ? 'var(--gd)' : p > 0 ? 'var(--ok)' : 'var(--bad)';
+  return `<div style="height:12px;border-radius:999px;background:var(--line);overflow:hidden;margin-top:10px">
+      <div style="height:100%;width:${p}%;background:${mau};border-radius:999px;transition:width .35s ease"></div>
+    </div>`;
+}
+
+function thvToggleChiTiet(){
+  const box = document.getElementById('thvRows');
+  const btn = document.getElementById('thvToggle');
+  if(!box) return;
+  const dangAn = box.hasAttribute('hidden');
+  if(dangAn) box.removeAttribute('hidden'); else box.setAttribute('hidden','');
+  if(btn) btn.innerHTML = (dangAn ? 'Thu gọn ' + ic('chevronUp',14) : 'Xem cách tính ' + ic('chevronDown',14));
+}
+
+// Thẻ ở màn Hôm nay. plHomNay để hiện "hôm nay góp thêm bao nhiêu".
+function thvCardHTML(data, plHomNay){
+  if(!data) return '';
+  const khung = (noiDung) => `<div class="kgrid" style="margin-top:12px"><div class="kcard" style="grid-column:1 / -1">${noiDung}</div></div>`;
+
+  if(data.chuaCoMoc || data.chuaKhaiVon){
+    return khung(`
+      <div class="klabel">${ic('coins',15)} Thu hồi vốn đầu tư</div>
+      <div class="ksub" style="margin-top:8px">
+        ${data.chuaKhaiVon
+          ? 'Chưa khai tài sản nào nên chưa biết <b>tổng vốn đầu tư</b> là bao nhiêu — không có mẫu số thì không tính được % thu hồi.'
+          : 'Tài sản đã khai nhưng <b>chưa có ngày mua</b>, nên không biết bắt đầu đếm từ ngày nào.'}
+        Khai ở màn <b>Tài sản</b> (hoặc gõ ngày bắt đầu ở Cấu hình → Tài chính).
+      </div>
+      <button class="btn" style="margin-top:10px;align-self:flex-start" onclick="goEntry('asset')">Khai tài sản</button>`);
+  }
+
+  const tienHomNay = thvTienNgay(plHomNay);
+  const pct = data.pct || 0;
+  const dongHomNay = `Hôm nay góp thêm <b style="color:${tienHomNay>=0?'var(--ok)':'var(--bad)'}">${tienHomNay>=0?'':'−'}${fmt(Math.abs(tienHomNay))}</b>`;
+
+  // Cảnh báo khi ô "Vốn đầu tư ban đầu" khai khác tổng tài sản — chủ quán chốt lấy
+  // tổng CAPEX, nên phải nói ra để không tưởng app đang đòi thu hồi con số kia.
+  const chenhVonKhai = (data.vonKhaiTay > 0 && Math.abs(data.vonKhaiTay - data.tongVon) > 1)
+    ? `<div class="ksub" style="color:var(--warn);margin-top:6px">Ô "Vốn đầu tư ban đầu" đang khai <b>${fmt(data.vonKhaiTay)}</b>, nhưng cơ chế này dùng <b>tổng tài sản ${fmt(data.tongVon)}</b>. Khoản cọc mặt bằng/sửa chữa muốn được thu hồi thì khai thành tài sản.</div>` : '';
+
+  const ghiChuCat = data.biCatBot
+    ? `<div class="ksub" style="color:var(--warn);margin-top:6px">Chỉ cộng từ ${data.batDauThat} (trần ${THV_MAX_DAYS} ngày) — mốc thật là ${data.moc}, phần trước đó chưa được tính.</div>` : '';
+  const ghiChuNgayAm = data.soNgayAm
+    ? `<div class="ksub" style="margin-top:6px">${data.soNgayAm} ngày lỗ đã <b>trừ vào</b> luỹ kế (những ngày đó quán phải bù tiền, không góp được đồng nào).</div>` : '';
+
+  // GIAI ĐOẠN 2 — đã ghi mốc đạt 100%.
+  if(data.daGhiMoc || data.daDu){
+    const vonTang = data.tongVon - (data.vonLucDatMoc || data.tongVon);
+    const tutTienDo = (data.daGhiMoc && vonTang > 1 && !data.daDu);
+    return khung(`
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+        <span class="klabel">${ic('coins',15)} Thu hồi vốn đầu tư</span>
+        <span class="tier tier-green">${ic('check',13)} Đã thu hồi 100%</span>
+      </div>
+      <div class="kval disp" style="color:var(--ok)">${fmt(data.tienSauMoc)}</div>
+      <div class="ksub">Tiền thật quán mang lại <b>kể từ ngày đạt mốc ${data.ngayDat || '—'}</b> — vốn ${fmt(data.vonLucDatMoc || data.tongVon)} đã lấy lại đủ, từ đây là lãi thật.</div>
+      <div class="ksub" style="margin-top:4px">${dongHomNay}</div>
+      ${tutTienDo ? `<div class="ksub" style="color:var(--warn);margin-top:6px">Đã từng đạt 100% ngày <b>${data.ngayDat}</b> với vốn ${fmt(data.vonLucDatMoc)}. Sau đó khai thêm tài sản <b>${fmt(vonTang)}</b> nên tính trên tổng vốn hiện tại ${fmt(data.tongVon)} thì tiến độ là <b>${fmtNum(pct,0)}%</b> — tự quyết coi đó là vốn của quán này hay quán sau.</div>${thvBarHTML(pct)}` : ''}
+      ${chenhVonKhai}${ghiChuCat}${ghiChuNgayAm}
+      ${thvChiTietHTML(data, tienHomNay)}`);
+  }
+
+  // GIAI ĐOẠN 1 — đang thu hồi.
+  const duKien = data.soThangConLai != null
+    ? `Tốc độ 30 ngày gần nhất <b>${fmt(data.tocDoThang)}/tháng</b> → dự kiến còn <b>~${fmtNum(data.soThangConLai,1)} tháng</b>`
+    : (data.tocDoNgay > 0 ? '' : `<b style="color:var(--warn)">30 ngày gần nhất không dương</b> — với tốc độ này quán chưa thu hồi thêm được đồng nào.`);
+  return khung(`
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+      <span class="klabel">${ic('coins',15)} Thu hồi vốn đầu tư</span>
+      <span class="tier" style="background:var(--warn-bg);color:var(--warn)">Chưa thu hồi đủ</span>
+    </div>
+    <div class="kval disp">${fmt(Math.max(0,data.daThuHoi))} <span style="font-size:17px;color:var(--gt);font-weight:600">/ ${fmt(data.tongVon)}</span></div>
+    ${thvBarHTML(pct)}
+    <div class="ksub" style="margin-top:8px"><b>${fmtNum(Math.max(0,pct),1)}%</b> · còn cần <b>${fmt(data.conCan)}</b> · ${dongHomNay}</div>
+    ${duKien ? `<div class="ksub" style="margin-top:4px">${duKien}</div>` : ''}
+    ${chenhVonKhai}${ghiChuCat}${ghiChuNgayAm}
+    ${thvChiTietHTML(data, tienHomNay)}`);
+}
+
+// Phần "Xem cách tính" — mở ra mới hiện, để thẻ vẫn gọn.
+function thvChiTietHTML(data, tienHomNay){
+  return `
+    <button id="thvToggle" onclick="thvToggleChiTiet()" style="margin-top:10px;background:none;border:none;padding:6px 0;color:var(--gd);font-weight:700;font-size:12.5px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;align-self:flex-start">Xem cách tính ${ic('chevronDown',14)}</button>
+    <div id="thvRows" hidden style="margin-top:2px">
+      <div class="row"><span class="rl">Tổng vốn đầu tư<div class="small-note" style="margin-top:1px">tổng nguyên giá tài sản đang dùng, không trừ giá trị thu hồi</div></span><span class="rv">${fmt(data.tongVon)}</span></div>
+      <div class="row"><span class="rl">Đã thu hồi<div class="small-note" style="margin-top:1px">cộng ${data.soNgay} ngày, từ ${data.batDauThat || '—'} tới hôm nay</div></span><span class="rv" style="color:${data.daThuHoi>=0?'var(--ok)':'var(--bad)'}">${data.daThuHoi>=0?'':'−'}${fmt(Math.abs(data.daThuHoi))}</span></div>
+      <div class="row"><span class="rl">Còn cần thu hồi</span><span class="rv">${fmt(data.conCan)}</span></div>
+      <div class="row"><span class="rl">Hôm nay góp thêm</span><span class="rv" style="color:${tienHomNay>=0?'var(--ok)':'var(--bad)'}">${tienHomNay>=0?'':'−'}${fmt(Math.abs(tienHomNay))}</span></div>
+      <div class="unit-explainer" style="margin-top:10px">
+        <b>Tiền thu hồi vốn của một ngày = doanh thu − giá vốn − hao hụt − chi phí biến đổi − lương − chi phí cố định.</b> <b>Không</b> trừ khấu hao.<br>
+        Bằng đúng dòng <b>"Trước khấu hao"</b> trên thẻ Lãi/lỗ ở trên: <b>lãi + khấu hao của ngày đó</b>.<br>
+        Vì sao không trừ khấu hao: khấu hao không phải tiền ra khỏi túi — nó nằm lại trong két, và chính khoản nằm lại đó là vốn được thu hồi. Nên một ngày <b>lỗ theo sổ cũ</b> vẫn có thể <b>thu hồi vốn được</b>, hai con số không mâu thuẫn.<br>
+        Mốc 100% <b>không phụ thuộc</b> "Thời gian sử dụng (tháng)" đã khai ở Tài sản: bán tốt thì đủ sớm hơn, bán kém thì muộn hơn.
+      </div>
+    </div>`;
+}
+
+// Khối ở màn Sức khoẻ tài chính — có thêm tiền thu hồi CỦA KỲ ĐANG XEM và bảng
+// từng tháng. tienKy lấy thẳng plTong.laiTruocKhauHao (cùng một phép cộng).
+function thvHealthHTML(data, tienKy, soNgayKy){
+  if(!data) return '';
+  if(data.chuaCoMoc || data.chuaKhaiVon){
+    return `<div class="card"><div class="card-h"><h3>${ic('coins')} Thu hồi vốn</h3></div>
+      <div class="muted">${data.chuaKhaiVon ? 'Chưa khai tài sản nào nên chưa có tổng vốn đầu tư để đo tiến độ.' : 'Tài sản chưa có ngày mua nên chưa biết đếm từ ngày nào.'}</div></div>`;
+  }
+  const pct = data.pct || 0;
+  const daXong = data.daGhiMoc || data.daDu;
+  const bang = data.theoThang.length ? `
+    <div style="overflow-x:auto;margin-top:10px">
+      <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+        <thead><tr style="text-align:right;color:var(--gt)">
+          <th style="text-align:left;padding:6px 8px;font-weight:650">Tháng</th>
+          <th style="padding:6px 8px;font-weight:650">Thu hồi trong tháng</th>
+          <th style="padding:6px 8px;font-weight:650">Luỹ kế</th>
+          <th style="padding:6px 8px;font-weight:650">%</th>
+        </tr></thead>
+        <tbody>${data.theoThang.map(m=>`<tr style="text-align:right;border-top:1px solid var(--line)">
+          <td style="text-align:left;padding:6px 8px">${monthLabelVN(m.thang+'-01')}</td>
+          <td style="padding:6px 8px;color:${m.tien>=0?'var(--ok)':'var(--bad)'}">${m.tien>=0?'':'−'}${fmt(Math.abs(m.tien))}</td>
+          <td style="padding:6px 8px">${fmt(m.luyKe)}</td>
+          <td style="padding:6px 8px"><b>${m.pct!=null?fmtNum(Math.max(0,m.pct),0)+'%':'—'}</b></td>
+        </tr>`).join('')}</tbody>
+      </table>
+    </div>` : '';
+  return `<div class="card">
+    <div class="card-h"><h3>${ic('coins')} Thu hồi vốn</h3>${daXong?'<span class="tier tier-green">Đã thu hồi 100%</span>':`<span class="tier" style="background:var(--warn-bg);color:var(--warn)">${fmtNum(Math.max(0,pct),0)}%</span>`}</div>
+    ${rowInfoHTML('Thu hồi được trong kỳ đang xem', `${Number(tienKy)>=0?'':'−'}${fmt(Math.abs(Number(tienKy)||0))}${soNgayKy?` · ${soNgayKy} ngày`:''}`)}
+    ${rowInfoHTML('Luỹ kế đã thu hồi', fmt(data.daThuHoi))}
+    ${rowInfoHTML('Tổng vốn đầu tư', fmt(data.tongVon))}
+    ${rowInfoHTML(daXong ? 'Đạt 100% ngày' : 'Còn cần thu hồi', daXong ? (data.ngayDat||'—') : fmt(data.conCan))}
+    ${thvBarHTML(pct)}
+    <div class="small-note" style="margin-top:8px">Tiền thu hồi của một ngày = lãi/lỗ ngày đó <b>cộng lại phần khấu hao</b> (khấu hao không phải tiền ra khỏi túi). Cột "Thu hồi trong tháng" chính là dòng <b>Trước khấu hao</b> của tháng đó.</div>
+    ${bang}
+  </div>`;
 }
 
 // ------------------------------------------------------------
@@ -7041,6 +7333,16 @@ async function renderToday(){
       ${c.ratio!=null ? meterHTML(c.ratio, c.status) : ''}
     </div>`).join('');
 
+  // THU HỒI VỐN — nạp NỀN. Nó phải cộng mọi ngày từ mốc bắt đầu tới hôm nay nên
+  // chậm hơn hẳn phần trên; giữ cả màn lại chờ nó là vô lý. Hiện khung chờ trước.
+  const thvBox = document.getElementById('todayThv');
+  if(thvBox && !thvBox.innerHTML) thvBox.innerHTML = '<div class="kgrid" style="margin-top:12px"><div class="kcard" style="grid-column:1 / -1"><div class="klabel">Thu hồi vốn đầu tư</div><div class="ksub" style="margin-top:6px">Đang cộng luỹ kế từ ngày mở quán…</div></div></div>';
+  computeCapitalRecovery()
+    .then(thv => { const el = document.getElementById('todayThv');
+      if(el && curScreen === 'today') el.innerHTML = thvCardHTML(thv, plHomNay); })
+    .catch(err => { console.warn('[Thu hồi vốn] không tính được (bỏ qua):', err);
+      const el = document.getElementById('todayThv'); if(el) el.innerHTML = ''; });
+
   // Biên đóng góp 30 ngày nạp NỀN — CHỈ dùng làm số tham chiếu cho ngày chưa có
   // doanh thu (lúc đó không đo được biên của chính hôm nay). Ngưỡng hoà vốn hiện
   // trên màn luôn tính từ số của chính ngày hôm nay, xem plBreakEven().
@@ -7383,6 +7685,7 @@ async function renderHealth(){
   document.getElementById('healthBody').innerHTML = `
     ${rangeLabel}
     ${plHealthHTML(plTong, plDays, salesRes.dayCount, plRecalcNotes(expAll, start, end), plBook)}
+    <div id="healthThv"></div>
     <div id="healthBep"></div>
     <div class="card">
       <div class="card-h"><h3>${ic('coins')} Sales</h3></div>
@@ -7447,6 +7750,16 @@ async function renderHealth(){
       ${rowPlainHTML('EBIT', fmt(kpi.ebit))}
     </div>
   `;
+  // Thu hồi vốn phải cộng luỹ kế từ ngày mở quán → nạp NỀN như khối hoà vốn.
+  // Tiền thu hồi CỦA KỲ ĐANG XEM lấy thẳng plTong.laiTruocKhauHao — cùng một phép
+  // cộng với thẻ ở màn Hôm nay, không có công thức thứ hai.
+  computeCapitalRecovery()
+    .then(thv => {
+      const el = document.getElementById('healthThv');
+      if (el && curScreen === 'health') el.innerHTML = thvHealthHTML(thv, plTong.laiTruocKhauHao, plTong.soNgay);
+    })
+    .catch(err => console.warn('[Thu hồi vốn] không tính được (bỏ qua):', err));
+
   // Ngưỡng hoà vốn dùng cửa sổ 30 ngày riêng nên nạp NỀN, không giữ cả màn lại chờ.
   computeBreakEvenWindow()
     .then(bep => {
@@ -15756,7 +16069,7 @@ async function renderEntryAsset(){
     </div>`;
   }).join('') : `<div class="muted">Chưa có tài sản nào</div>`) +
   `<div class="card" style="margin-top:8px"><div class="row"><span class="rl"><b>Tổng khấu hao / tháng</b><div class="small-note" style="margin-top:2px">≈ ${fmt(dep/30)}/ngày trừ vào lãi hằng ngày</div></span><span class="rv">${fmt(dep)}</span></div>
-  <div class="row"><span class="rl">Tổng CAPEX (đang active)</span><span class="rv">${fmt(totalCapex(assets))}</span></div></div>`;
+  <div class="row"><span class="rl">Tổng CAPEX (đang active)<div class="small-note" style="margin-top:2px">cũng chính là <b>tổng vốn đầu tư</b> mà thẻ "Thu hồi vốn" ở màn Hôm nay đang đo tiến độ lấy lại</div></span><span class="rv">${fmt(totalCapex(assets))}</span></div></div>`;
 }
 async function submitAsset(){
   await addAsset({
@@ -15817,6 +16130,9 @@ function renderEntryTarget(){
     <div class="card">
       <div class="field"><label>Cash reserve hiện có (đ)</label><input type="number" id="fCash" value="${f.cashReserve}"></div>
       <div class="field"><label>Vốn đầu tư ban đầu (đ) <span class="small-note">— để trống/0 để tự tính từ tổng CAPEX</span></label><input type="number" id="fInv" value="${f.initialInvestment}"></div>
+      <div class="field"><label>Ngày bắt đầu tính thu hồi vốn <span class="small-note">— để trống = tự lấy ngày mua tài sản sớm nhất</span></label><input type="date" id="fRecStart" value="${f.recoveryStartDate||''}"></div>
+      <div class="hint" style="margin:-4px 0 10px">Cơ chế <b>Thu hồi vốn</b> đo tiến độ lấy lại vốn trên <b>tổng nguyên giá tài sản đang dùng</b> (xem "Tổng CAPEX" ở màn Tài sản), <b>không</b> lấy ô "Vốn đầu tư ban đầu" phía trên — ô đó chỉ dùng cho màn What-if. Khoản cọc mặt bằng, sửa chữa, biển hiệu muốn được tính vào tiến độ thu hồi thì <b>khai thành tài sản</b>.</div>
+      ${f.recoveryReachedDate ? `<div class="hint" style="margin:-4px 0 10px">Đã ghi mốc <b>thu hồi đủ 100%</b> ngày <b>${f.recoveryReachedDate}</b>, với tổng vốn ${fmt(f.recoveryReachedCapital||0)}. Mốc này không tự xoá.</div>` : ''}
       <button class="btn" onclick="submitFinance()">Lưu</button>
     </div>
   `;
@@ -15851,7 +16167,11 @@ async function saveConfigVersion(){
   renderEntryTarget(); runSim();
 }
 async function submitFinance(){
-  await saveFinance({cashReserve:Number(fCash.value), initialInvestment:Number(fInv.value)});
+  await saveFinance({cashReserve:Number(fCash.value), initialInvestment:Number(fInv.value),
+    // Ô trống = null (tự lấy ngày mua tài sản sớm nhất), KHÔNG lưu chuỗi rỗng —
+    // chuỗi rỗng lọt vào thvMocBatDau() sẽ bị coi là "chủ quán đã khai".
+    recoveryStartDate: document.getElementById('fRecStart').value || null});
+  _thvCache = null; // mốc đổi thì luỹ kế phải tính lại, không dùng số cũ trong phiên
   toast('✅ Đã lưu tài chính');
 }
 

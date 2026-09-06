@@ -42,6 +42,7 @@ Khi chủ quán nói "sai", kiểm lại bằng số trước khi phản biện.
 | `KE-HOACH-lai-lo-theo-ngay.md` | Kế hoạch lãi/lỗ theo ngày, 5 đợt, đã xong cả 5 |
 | `DAC-TA-diem-hoa-von.md` | Đặc tả điểm hoà vốn + 3 mục sửa lỗi (§8, §9, §10) |
 | `KE-HOACH-can-btp-theo-dung-cu.md` | Kế hoạch cân bán thành phẩm theo dụng cụ đựng |
+| `KE-HOACH-thu-hoi-von.md` | Cơ chế THU HỒI VỐN — chủ quán đã duyệt, đã code xong |
 
 ---
 
@@ -111,6 +112,25 @@ Giá vốn ước theo target COGS% **KHÔNG** chặn mức cao nhất (nó khô
 
 ---
 
+### 4.6 Thu hồi vốn (sổ thứ hai, chạy SONG SONG — không thay sổ cũ)
+
+```
+Tiền thu hồi vốn một ngày = lãi/lỗ ngày đó + khấu hao ngày đó
+                          = pl.laiTruocKhauHao
+Đã thu hồi   = TỔNG tiền thu hồi của mọi ngày, từ mốc bắt đầu → hôm nay
+% thu hồi    = Đã thu hồi / Tổng vốn đầu tư × 100%
+Tổng vốn     = totalCapex(assets)  — nguyên giá, KHÔNG trừ residual
+Mốc bắt đầu  = ngày mua tài sản sớm nhất, hoặc FINANCE.recoveryStartDate
+```
+
+- Khấu hao **không** phải tiền ra khỏi túi → nó nằm lại trong két, chính nó **là** vốn
+  được thu hồi. Vì vậy một ngày **lỗ theo sổ cũ vẫn có thể thu hồi vốn được**; hai con
+  số không mâu thuẫn.
+- Mốc 100% **không phụ thuộc** `usefulLifeMonths`: bán tốt thì đủ sớm hơn, bán kém thì
+  muộn hơn. Đây là yêu cầu gốc của chủ quán.
+- Chạm 100% lần đầu → **ghi mốc** vào `finance_gieogieo/current`, không tự xoá. Mua
+  thêm tài sản sau đó làm tiến độ tụt xuống dưới 100% và màn hình **nói ra** chuyện đó.
+
 ## 5. QUYẾT ĐỊNH CHỦ QUÁN ĐÃ CHỐT (không tự đổi)
 
 | # | Quyết định |
@@ -124,6 +144,7 @@ Giá vốn ước theo target COGS% **KHÔNG** chặn mức cao nhất (nó khô
 | 7 | **Băng "chờ số thực tế" luôn hiện, KHÔNG cho tắt.** Đủ số thật mới bật được nút Chốt sổ. |
 | 8 | **Chi phí phân bổ**, không dùng tiền thực chi, cho con số lãi/lỗ. Dòng tiền là màn riêng. |
 | 9 | Bán thành phẩm **quy hết về gram**, không dùng ml/tỷ trọng. |
+| 10 | **Thu hồi vốn = lãi TRƯỚC khấu hao**, ngày lỗ **trừ vào** luỹ kế, mẫu số **LUÔN là tổng CAPEX** (không dùng ô "Vốn đầu tư ban đầu"), mua thêm tài sản sau khi đạt mốc thì **tiến độ tụt xuống kèm ghi chú**. Sổ lãi/lỗ cũ **giữ nguyên 100%**. |
 
 ---
 
@@ -160,6 +181,17 @@ Tháng đã chốt hiện **số đã ghi**, không tính lại. Có số thật
 ```
 Prep item có `vesselIds: []` (tối đa **5**, hằng số `PREP_MAX_VESSELS`).
 
+### `finance_gieogieo/current` (4 trường MỚI — thu hồi vốn)
+```js
+{
+  recoveryStartDate: 'YYYY-MM-DD' | null,   // mốc bắt đầu, null = ngày mua tài sản sớm nhất
+  recoveryReachedDate: 'YYYY-MM-DD' | null, // ngày ĐẦU TIÊN chạm 100% — ghi một lần, không tự xoá
+  recoveryReachedAt: ISO string,
+  recoveryReachedCapital: number            // tổng vốn TẠI THỜI ĐIỂM đạt mốc
+}
+```
+Bản ghi cũ không có 4 trường này → **chưa đạt mốc**, mốc bắt đầu tự tính.
+
 ### `assets_gieogieo`
 `purchaseDate` **quyết định từ ngày nào tài sản bắt đầu khấu hao**. Form điền sẵn ngày
 hôm nay → đây là cái bẫy đã gây lỗi thật (khấu hao cả kỳ 6 ngày chỉ bằng 1 ngày).
@@ -188,6 +220,12 @@ Màn Tài sản nay hiện ngày mua + cảnh báo.
 | `plUocSaiLechPct(expList, category)` | Học sai lệch dự đoán từ lịch sử. **Chưa có lịch sử → trả `null`, KHÔNG bịa tỷ lệ.** |
 | `computeBreakEvenWindow(force)` / `computeBreakEvenCore(...)` | Hoà vốn KỲ (cửa sổ 30 ngày) |
 | `computeLedgerRealMetrics(start, end)` | Nay trả thêm `wasteByDate` (hao hụt theo từng ngày) |
+| `thvTienNgay(pl)` | Tiền thu hồi vốn một ngày = `pl.lai + pl.khauHao` |
+| `thvTongVon(assets)` / `thvMocBatDau(assets, khaiTay)` | Tổng vốn (= `totalCapex`) / mốc bắt đầu |
+| `thvCompute({days, tongVon, mocDaDat})` | **Hàm thuần** — luỹ kế, %, ngày đạt mốc, tiền sau mốc, tốc độ 30 ngày, bảng theo tháng |
+| `computeCapitalRecovery(force)` | Nạp dữ liệu + cache phiên `_thvCache`; tự ghi mốc khi vừa chạm 100%. Trần quét `THV_MAX_DAYS = 730` ngày |
+| `thvCardHTML(data, plHomNay)` / `thvChiTietHTML` / `thvBarHTML` / `thvToggleChiTiet` | Thẻ Thu hồi vốn ở màn Hôm nay (`#todayThv`) — **nạp NỀN** |
+| `thvHealthHTML(data, tienKy, soNgayKy)` | Khối Thu hồi vốn ở màn Sức khoẻ tài chính (`#healthThv`) |
 
 Hàm đã **XOÁ** (bị thẻ gộp thay thế, đừng dựng lại):
 `plTodayHTML`, `bepTodayHTML`, `bepDoiChieuHTML`.
@@ -205,6 +243,7 @@ CHỈ SỐ HÔM NAY (#todayGrid):
    ├ thẻ DOANH THU (wide, 5 màu, 2 vạch mốc)
    ├ thẻ LÃI/LỖ + HOÀ VỐN (gộp, có bảng tách từng dòng)
    └ Số bill · AOV · IPT · Items bán ra
+#todayThv      — thẻ THU HỒI VỐN (nạp nền, ngoài #todayGrid)
 #todayHourly   — bill theo giờ
 #todayAlerts   — cảnh báo KPI
 ```
@@ -268,6 +307,9 @@ Chạy: `node <tên>.mjs` (Playwright + Chromium tại `/opt/pw-browsers/chromiu
 | `pl6test.mjs` | 6 | Khấu hao mức đang chạy |
 | `pl7test.mjs` | 15 | Bẫy ngày mua tài sản |
 | `pl8test.mjs` | 31 | Hoà vốn ngày, 5 mức màu, gộp thẻ, gộp màn |
+| `thvtest.mjs` | 49 | Thu hồi vốn — hàm thuần (luỹ kế, mốc, ngày lỗ, mốc không phụ thuộc số tháng khấu hao) |
+| `thv2test.mjs` | 32 | Thu hồi vốn — dựng HTML thật của thẻ + khối, 2 giai đoạn |
+| `thvboot.mjs` | 10 | Mở file HTML thật trong Chromium (Firebase giả tối thiểu), cắm thẻ vào DOM |
 | `beptest` 22 · `bepe2e` 13 · `qltest` 14 · `togtest` 23 · `cbtest` 13 · `khotest` 24 · `postest` 20 · `hangtest` 15 · `embedpos` 6 | | các phần trước |
 
 **Phương pháp:** `page.route()` chặn `gstatic.com/firebasejs` → nạp `fbmem.js`
@@ -298,6 +340,10 @@ Chạy: `node <tên>.mjs` (Playwright + Chromium tại `/opt/pw-browsers/chromiu
 
 ## 13. VIỆC CÒN LẠI / GỢI Ý TIẾP
 
+- **Thu hồi vốn chỉ đếm được từ ngày mua tài sản sớm nhất.** Khai sai ngày mua thì luỹ
+  kế sai theo. Trần quét là 730 ngày — quá 2 năm thì màn hình nói rõ phần bị cắt.
+- Khoản **cọc mặt bằng / sửa chữa / biển hiệu** chưa khai thành tài sản thì **không**
+  nằm trong tổng vốn cần thu hồi.
 - Chủ quán cần **sửa "Ngày mua" của tài sản** về đúng ngày thật, và xem lại
   "Thời gian sử dụng (tháng)" — phải là thời gian **dùng được thật của máy**, không phải
   thời gian muốn thu hồi vốn. (Đang thấy khấu hao ~6tr/tháng so với doanh thu ~773k/ngày

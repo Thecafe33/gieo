@@ -1,7 +1,13 @@
 # KẾ HOẠCH — Cơ chế THU HỒI VỐN (chạy song song với khấu hao)
 
-> Trạng thái: **CHỜ CHỦ QUÁN DUYỆT**. Chưa viết dòng code nào cho tính năng này.
+> Trạng thái: **CHỦ QUÁN ĐÃ DUYỆT — ĐÃ CODE XONG**.
 > Viết theo đúng quy tắc §2 CONTEXTMASTER: kế hoạch → chủ quán duyệt → code.
+>
+> Bốn lựa chọn chủ quán chốt:
+> 1. Tiền thu hồi/ngày = **lãi trước khấu hao** ✔
+> 2. Ngày lỗ **trừ vào luỹ kế** ✔
+> 3. Tổng vốn đầu tư = **LUÔN lấy tổng CAPEX tài sản** (không dùng ô "Vốn đầu tư ban đầu")
+> 4. Mua thêm tài sản sau khi đạt mốc → **tiến độ tụt xuống, có ghi chú rõ** ✔
 
 ---
 
@@ -107,22 +113,22 @@ quét từ ngày có đơn hàng đầu tiên thì mỗi lần POS có dữ li�
 
 ---
 
-## 5. Tổng vốn đầu tư gồm những gì
+## 5. Tổng vốn đầu tư gồm những gì — CHỦ QUÁN CHỐT
 
 ```
-Tổng vốn đầu tư = FINANCE.initialInvestment   (ô "Vốn đầu tư ban đầu" nếu đã khai > 0)
-                  ngược lại = TỔNG nguyên giá các tài sản đang active (totalCapex)
+Tổng vốn đầu tư = TỔNG NGUYÊN GIÁ các tài sản đang active  (totalCapex)
 ```
 
-Đây **đúng logic đang chạy sẵn** ở màn What-if của app, không phát minh thêm quy tắc mới.
+**Luôn** lấy tổng CAPEX. Ô "Vốn đầu tư ban đầu" ở màn Cấu hình → Tài chính **không**
+tham gia vào cơ chế này (nó vẫn dùng cho màn What-if như cũ).
 
 Hai điểm phải nói rõ:
 - Lấy **nguyên giá**, **không trừ giá trị thu hồi (residual)**. Chủ quán nói "thu hồi
   100% vốn cố định đã đầu tư" — bỏ ra 50tr thì phải lấy lại 50tr.
-- Ô "Vốn đầu tư ban đầu" là chỗ để khai **những khoản không nằm trong danh sách tài
-  sản**: tiền cọc mặt bằng, sửa chữa, biển hiệu, vốn lưu động ban đầu. Nếu chủ quán
-  bỏ 50tr nhưng danh sách tài sản chỉ có 38tr máy móc thì **phải gõ 50.000.000 vào ô
-  này**, nếu không app chỉ đòi thu hồi 38tr. Màn hình sẽ nhắc câu này ngay tại chỗ.
+- Khoản **không nằm trong danh sách tài sản** (cọc mặt bằng, sửa chữa, biển hiệu) muốn
+  được tính vào tiến độ thu hồi thì **phải khai thành tài sản**. Nếu ô "Vốn đầu tư ban
+  đầu" đang khai một con số khác tổng CAPEX, thẻ Thu hồi vốn **nói thẳng ra sự chênh
+  lệch đó** thay vì để chủ quán tưởng app đang đòi thu hồi con số kia.
 
 ---
 
@@ -206,7 +212,7 @@ Cách xử lý:
 | 1 | Tiền thu hồi/ngày = **lãi trước khấu hao** (§1) | Chỉ lấy phần khấu hao phân bổ / hoặc lãi sau khấu hao |
 | 2 | Ngày lỗ **trừ vào luỹ kế** (§3) | Ngày lỗ tính bằng 0, luỹ kế chỉ đi lên |
 | 3 | Mốc bắt đầu = **ngày mua tài sản sớm nhất** (§4) | Chủ quán gõ tay ngày khai trương |
-| 4 | Tổng vốn = ô "Vốn đầu tư ban đầu", trống thì lấy tổng CAPEX (§5) | Luôn lấy tổng CAPEX |
+| 4 | ~~Tổng vốn = ô "Vốn đầu tư ban đầu"~~ → **chủ quán chốt: LUÔN lấy tổng CAPEX** (§5) | — đã chốt |
 | 5 | Dùng **nguyên giá**, không trừ residual (§5) | Trừ residual |
 | 6 | Mua thêm tài sản sau mốc → tiến độ tụt, có ghi chú (§6) | Khoá cứng mốc 100%, tài sản mới không tính |
 | 7 | Giai đoạn 2 hiện "tiền thật mang lại từ ngày đạt mốc" (§6) | Chỉ hiện chữ "đã thu hồi đủ", không đếm tiếp |
@@ -234,3 +240,27 @@ Cách xử lý:
    (chứng minh mốc **không** phụ thuộc số tháng khấu hao — yêu cầu §3).
 7. Tổng vốn = 0 (chưa khai gì) → không chia cho 0, hiện "chưa khai vốn đầu tư".
 8. Sổ lãi/lỗ cũ **không đổi một đồng** trước và sau khi thêm tính năng.
+
+---
+
+## 13. ĐÃ LÀM (bám đúng kế hoạch trên)
+
+| Nơi | Nội dung |
+|---|---|
+| `FINANCE_DEFAULTS` | +4 trường `recoveryStartDate / recoveryReachedDate / recoveryReachedAt / recoveryReachedCapital` |
+| `thvTienNgay(pl)` | tiền thu hồi của một ngày = `pl.lai + pl.khauHao` |
+| `thvTongVon(assets)` | = `totalCapex(assets)` |
+| `thvMocBatDau(assets, khaiTay)` | ngày mua sớm nhất, hoặc ngày chủ quán khai đè |
+| `thvCompute({days, tongVon, mocDaDat})` | **hàm thuần** — luỹ kế, %, mốc đạt, tiền sau mốc, tốc độ 30 ngày, bảng theo tháng |
+| `computeCapitalRecovery(force)` | nạp dữ liệu + cache phiên `_thvCache`, tự ghi mốc khi vừa chạm 100% |
+| `thvCardHTML` / `thvChiTietHTML` / `thvBarHTML` / `thvToggleChiTiet` | thẻ ở màn **Hôm nay** (`#todayThv`), nạp NỀN |
+| `thvHealthHTML` | khối ở màn **Sức khoẻ tài chính** (`#healthThv`), có bảng từng tháng |
+| màn Cấu hình → Tài chính | thêm ô "Ngày bắt đầu tính thu hồi vốn" + ghi chú mẫu số là tổng CAPEX |
+| màn Tài sản | dòng "Tổng CAPEX" nói rõ đây cũng là tổng vốn cần thu hồi |
+| `addAsset/toggleAsset/deleteAsset`, `submitFinance` | xoá `_thvCache` khi tổng vốn/mốc đổi |
+
+**Kiểm thử:** `thvtest.mjs` 49 assertion (hàm thuần) · `thv2test.mjs` 32 assertion
+(dựng HTML thật) · `thvboot.mjs` 10 assertion (mở file HTML thật trong Chromium).
+Có kiểm chứng bằng máy rằng `computeDayPL`, `plSumDays`, `plBreakEven`,
+`plLaiCardHTML`, `plHealthHTML`, `monthlyDepreciation`, `computeKPIs`,
+`computeDailyPLRange` **giữ nguyên từng ký tự** — sổ lãi/lỗ cũ không đổi một đồng.
