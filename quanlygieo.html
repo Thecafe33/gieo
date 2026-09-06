@@ -10322,7 +10322,11 @@ async function vesselUploadImage(file, path, onProgress){
   }
   // ---- Tầng 3: nhúng vào Firestore ----
   if(onProgress) onProgress(-1);   // báo cho nơi gọi đổi chữ trạng thái
-  const nho = await vesselCompressImage(file, 360, 0.72);
+  // Đo thật trên ảnh dụng cụ (nền trắng, ít chi tiết): 480px/0.78 ra khoảng 8–12KB
+  // — rẻ tới mức không đáng tiết kiệm thêm. Mà POS hiện ảnh này ở thẻ lớn 158px
+  // trên màn tablet 2x, tức là cần khoảng 320px thật; để 360 là vừa đủ sát ngưỡng,
+  // 480 thì còn dư để ảnh không bị rỗ.
+  const nho = await vesselCompressImage(file, 480, 0.78);
   const url = await new Promise((res, rej)=>{
     const fr = new FileReader();
     fr.onload = ()=>res(fr.result);
