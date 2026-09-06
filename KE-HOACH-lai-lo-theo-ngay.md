@@ -275,31 +275,28 @@ Làm đợt 1 trước cũng có ích ngay, kể cả khi chưa làm 3–5.
 
 ---
 
-## 12. Còn 5 câu cần bạn chốt trước khi tôi bắt đầu code
+## 12. Năm câu đã chốt — và đợt 1 đã làm xong
 
-Hai câu bạn vừa trả lời (tính lại · chốt sổ) đã ghi ở §7 và §8. Còn năm câu này:
+| # | Câu hỏi | Bạn chốt | Đã cài vào code thế nào |
+|---|---|---|---|
+| 1 | Nguyên liệu tính khi mua hay khi bán? | **Khi bán** | Bảng lãi/lỗ **không có dòng nào đọc đơn nhập hàng**. Tiền nhập vào giá vốn khi bán, vào hao hụt khi hư/đổ. Thẻ ghi rõ điều này để không ai tưởng là quên |
+| 2 | Lương ngày chưa kết ca lấy từ đâu? | **Lịch làm việc đã xếp** | `plPredictedLaborByDate()` — giờ theo lịch × đơn giá, có áp ngưỡng OT theo ngày; lương cứng chia đều theo tháng. Ngày đã qua thì lấy chấm công thật |
+| 3 | Khấu hao có trừ vào lãi hôm nay? | **Có** | Trừ vào con số chính, kèm dòng phụ *"Trước khấu hao"* để vẫn đọc được cảm giác tiền mặt |
+| 4 | Tiền chủ quán rút có phải chi phí? | **Không** | Không có dòng nào cho khoản này. Thẻ ghi rõ: đây là lợi nhuận quán làm ra, rút tiền là **chia** lợi nhuận đó |
+| 5 | Phí sàn (GrabFood…) | **Chưa bán qua sàn, nhưng ghi chú sẵn** | Có sẵn dòng `phiKenh` và hàm `plChannelFeeForDay(day)` làm **một chỗ cắm duy nhất** — khi nào bán qua sàn chỉ điền hàm đó, dòng "Phí sàn" tự hiện, lãi/lỗ tự trừ. Ghi rõ luôn điều kiện tiên quyết: POS phải ghi doanh thu **theo kênh** trước đã, chứ đoán một tỷ lệ phí ở đó còn tệ hơn để 0 |
 
-1. **Nguyên liệu nhập kho tính khi bán, không tính khi mua** (§4) — đồng ý không?
-   Đây là quyết định ảnh hưởng lớn nhất tới con số hằng ngày.
+### Đợt 1 — đã xong
 
-2. **Lương ngày chưa kết ca lấy dự đoán từ đâu?**
-   (a) Lịch làm việc đã xếp cho ngày đó, hay
-   (b) Trung bình lương/ngày của 7 ngày gần nhất, hay
-   (c) Chưa kết ca thì để trống, không đoán.
+- Máy tính lãi/lỗ theo ngày (`computeDayPL`, `plSumDays`, `computeDailyPLRange`) — hàm
+  thuần, kiểm thử được bằng số cụ thể.
+- Thẻ **"Lãi/lỗ hôm nay"** trên tab Hôm nay, đặt trên thẻ hoà vốn, có dấu mức tin cậy
+  và bảng tách từng dòng bấm ra xem.
+- Hao hụt giờ gom được **theo từng ngày** (`wasteByDate`), để đợt 2 vẽ bảng từng ngày
+  mà không phải đọc ledger lần thứ hai.
+- 51 kiểm thử: công thức, lương dự đoán từ lịch (kể cả ca qua đêm và OT), cộng ngày ra
+  kỳ, và chạy thật trên màn Hôm nay.
 
-3. **Khấu hao có trừ vào "lãi hôm nay" không?**
-   Trừ → đúng kế toán, nhưng số lãi thấp hơn tiền thật còn trong két.
-   Không trừ → giống cảm giác tiền mặt, nhưng quên mất máy móc đang mòn dần.
-   Tôi nghiêng về **hiện lãi ĐÃ trừ khấu hao, kèm một dòng nhỏ "trước khấu hao"**.
-
-4. **Tiền bạn rút ra hằng tháng** có tính là chi phí không? Nếu bạn tự đứng quán và
-   không nhận lương, thì "lãi" hiện tại đang bao gồm cả công sức của bạn.
-
-5. **Bán qua app (GrabFood…) có phí sàn** — có tách riêng để tính biên đúng cho từng
-   kênh không, hay gộp chung như hiện tại?
-
-> Bạn chỉ cần trả lời số thứ tự, ví dụ *"1 đồng ý, 2 chọn a, 3 trừ, 4 không, 5 gộp"*.
-> Trả lời xong là tôi bắt tay vào đợt 1.
+Còn lại đợt 2 → 5 như bảng ở §11.
 
 ---
 

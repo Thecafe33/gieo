@@ -1165,6 +1165,7 @@ html.phone-ui .nav-search .ns-kbd{display:none;}
       <div class="wrap">
         <div id="reportSubNavToday"></div>
         <div id="todayNudge"></div>
+        <div id="todayPL"></div>
         <div id="todayBep"></div>
         <div class="sec-title">Chỉ số hôm nay</div>
         <div class="kgrid" id="todayGrid"></div>
@@ -4615,6 +4616,314 @@ function bepHealthHTML(bep, doanhThuKy, targetKy, soNgayKy){
     </div>`;
 }
 
+
+// ============================================================================
+// [MỚI — đợt 1] LÃI/LỖ THEO NGÀY
+// ----------------------------------------------------------------------------
+// Câu hỏi nó trả lời: HÔM NAY quán lãi hay lỗ bao nhiêu — và cộng 30 ngày như vậy
+// lại phải ra ĐÚNG lãi của tháng. Đó là ràng buộc thiết kế quan trọng nhất ở đây:
+// số tuần/tháng luôn là TỔNG CÁC NGÀY, không có phép tính riêng cho kỳ. Nếu kỳ
+// được tính bằng một công thức khác thì hai con số sẽ lệch nhau và không ai biết
+// tin số nào.
+//
+//   Lãi/lỗ ngày = Doanh thu
+//               − Giá vốn hàng bán
+//               − Hao hụt & huỷ trong ngày
+//               − Chi phí biến đổi phát sinh trong ngày
+//               − Lương ngày đó
+//               − Chi phí cố định phân bổ cho ngày đó
+//               − Khấu hao phân bổ cho ngày đó
+//
+// SÁU QUYẾT ĐỊNH ĐÃ CHỐT VỚI CHỦ QUÁN TRƯỚC KHI CODE (KE-HOACH-lai-lo-theo-ngay.md):
+//
+//  1. DÙNG CHI PHÍ PHÂN BỔ, KHÔNG DÙNG TIỀN THỰC CHI. Mặt bằng trả 1 năm 120tr đi
+//     vào lãi/lỗ 328k mỗi ngày suốt 365 ngày, chứ không lỗ 120tr đúng hôm ký hợp
+//     đồng rồi 364 ngày sau lãi ảo. Dòng tiền là câu hỏi khác, có tab Tiền mặt lo.
+//
+//  2. NGUYÊN LIỆU TÍNH KHI BÁN, KHÔNG TÍNH KHI MUA. Hôm nhập 5tr bột, "lãi hôm nay"
+//     KHÔNG giảm 5tr — tiền đó biến thành hàng đang nằm trong kho. Nó chỉ thành
+//     chi phí khi bán ra (vào giá vốn) hoặc khi hư/đổ (vào hao hụt). Vì vậy ở đây
+//     KHÔNG có dòng nào đọc đơn nhập hàng, và đó là CỐ Ý.
+//
+//  3. LƯƠNG NGÀY CHƯA KẾT CA LẤY TỪ LỊCH LÀM VIỆC ĐÃ XẾP; ngày đã qua lấy chấm
+//     công thật. Xem plPredictedLaborByDate().
+//
+//  4. KHẤU HAO CÓ TRỪ vào lãi hôm nay — kèm một dòng phụ "trước khấu hao" để vẫn
+//     đọc được cảm giác tiền mặt còn trong két.
+//
+//  5. TIỀN CHỦ QUÁN RÚT KHÔNG PHẢI CHI PHÍ. Con số này trả lời "quán mang lại bao
+//     nhiêu lợi nhuận"; rút tiền là CHIA lợi nhuận đó, không phải chi phí làm ra
+//     nó. Nếu sau này chủ quán muốn tự trả lương cho mình thì khai như một nhân
+//     viên lương cứng bình thường, không phải sửa chỗ này.
+//
+//  6. CHƯA BÁN QUA SÀN nên phí sàn = 0. Vẫn để sẵn dòng `phiKenh` và hàm
+//     plChannelFeeForDay() làm MỘT chỗ cắm duy nhất: khi nào bán GrabFood/
+//     ShopeeFood thì chỉ điền hàm đó, không phải sửa công thức lẫn màn hình.
+// ============================================================================
+
+// Phí theo kênh bán (GrabFood/ShopeeFood…) của MỘT ngày — HIỆN TẠI LUÔN 0 vì quán
+// chỉ bán tại chỗ.
+//
+// KHI NÀO CẦN SỬA: lúc bắt đầu bán qua sàn. Trả về tổng phí sàn của ngày đó là
+// xong — dòng "Phí sàn" tự hiện trong bảng tách chi phí, lãi/lỗ tự trừ.
+// ĐIỀU KIỆN TIÊN QUYẾT: POS phải ghi được doanh thu THEO KÊNH vào mỗi đơn (vd
+// order.channel = 'tai-quan' | 'grab' | 'shopee'), rồi aggregateOrders() gom thành
+// day.byChannel. Chưa có dữ liệu đó thì đừng đoán một tỷ lệ phí ở đây — biên lãi
+// của hai kênh chênh nhau rất xa, đoán sai còn tệ hơn để 0 và ghi rõ là chưa tính.
+function plChannelFeeForDay(day){
+  return 0;
+}
+
+// Giờ công theo LỊCH ĐÃ XẾP của một ca. Ca qua đêm (22:00 → 02:00) phải cộng thêm
+// 24h, không thì ra số âm rồi bị bỏ qua và ngày đó tự dưng không có lương ai.
+function plScheduledHours(s){
+  if(!s || s.isOff || !s.startTime || !s.endTime) return 0;
+  const toMin = t => { const p = String(t).split(':'); return (Number(p[0])||0)*60 + (Number(p[1])||0); };
+  let mins = toMin(s.endTime) - toMin(s.startTime);
+  if(mins < 0) mins += 24*60;
+  return mins/60;
+}
+
+// Lương DỰ ĐOÁN của từng ngày, tính từ LỊCH LÀM VIỆC đã xếp — dùng cho ngày chưa
+// kết ca (thường là hôm nay). Cố ý dựng cùng cấu trúc với
+// computeActualLaborCostByDate() để hai con số so được với nhau:
+//   · lương giờ  → giờ THEO LỊCH × đơn giá, có áp ngưỡng OT theo NGÀY (gom giờ của
+//     tất cả ca trong ngày trước khi tính tiền — cùng lý do đã ghi ở hàm thật)
+//   · lương cứng → fixedMonthlySalary ÷ số ngày trong tháng, y hệt bản thật
+// Ngày không xếp lịch cho ai thì chỉ còn phần lương cứng — đúng, vì lương cứng vẫn
+// phải trả dù hôm đó không xếp ai vào ca.
+function plPredictedLaborByDate(employees, schedules, startKey, endKey){
+  const empById = {}; (employees||[]).forEach(e=>{ empById[e.id] = e; });
+  const byDate = {};
+  const hoursByEmpDate = {};   // { "empId|date": tổng giờ theo lịch }
+  (schedules||[]).forEach(s=>{
+    const emp = empById[s.employeeId];
+    if(!emp || (emp.payType!=='hourly_full' && emp.payType!=='hourly_part')) return;
+    const h = plScheduledHours(s);
+    if(h <= 0) return;
+    const k = s.employeeId + '|' + s.date;
+    hoursByEmpDate[k] = (hoursByEmpDate[k]||0) + h;
+  });
+  Object.entries(hoursByEmpDate).forEach(([k, h])=>{
+    const sep = k.indexOf('|');
+    const { amount } = computeWageForDayHours(empById[k.slice(0,sep)], h);
+    const date = k.slice(sep+1);
+    byDate[date] = (byDate[date]||0) + amount;
+  });
+  let cur = new Date(startKey+'T00:00:00');
+  const end = new Date(endKey+'T00:00:00');
+  while(cur <= end){
+    const key = dkey(cur), dim = daysInMonth(cur);
+    (employees||[]).forEach(emp=>{
+      if(isFixedPayType(emp) && emp.active!==false)
+        byDate[key] = (byDate[key]||0) + (Number(emp.fixedMonthlySalary)||0)/dim;
+    });
+    cur.setDate(cur.getDate()+1);
+  }
+  return byDate;
+}
+
+// Lãi/lỗ của MỘT ngày. Hàm THUẦN — mọi thứ phải đọc mạng đều truyền vào, để kiểm
+// thử được bằng số cụ thể và để bảng "từng ngày" (đợt 2) dùng lại y nguyên chứ
+// không viết một công thức thứ hai.
+//   day          — một dòng của fetchSalesRange().perDay
+//   expList      — TOÀN BỘ chi phí (chưa lọc); hàm tự lọc trạng thái và tự phân bổ
+//   cats         — danh mục chi phí, để biết khoản nào cố định/biến đổi
+//   laborActual  — {date: tiền} từ computeActualLaborCostByDate()
+//   laborPredicted — {date: tiền} từ plPredictedLaborByDate()
+//   wasteValue   — giá trị hao hụt & huỷ CỦA ĐÚNG NGÀY ĐÓ
+//   homNayKey    — 'YYYY-MM-DD' của hôm nay (truyền vào để test được ngày khác)
+function computeDayPL({ day, expList, cats, assets, laborActual, laborPredicted, wasteValue, homNayKey }){
+  const dateKey = (day && day.date) || homNayKey || dkey(new Date());
+  const cfg = configForDate(dateKey);
+  const dObj = new Date(dateKey+'T00:00:00');
+  const dim = daysInMonth(dObj);
+  const doanhThu = Number(day && day.revenue) || 0;
+  const dangUocTinh = [];   // liệt kê thứ đang là số ước tính — băng "chờ số thực tế" ở đợt 4 sẽ dùng lại
+
+  // GIÁ VỐN — cùng cách tính với computeKPIs(): phần món đã khai định mức lấy giá
+  // vốn THẬT, phần chưa khai ước theo target COGS% của ĐÚNG ngày đó (configForDate,
+  // không lấy target hiện tại áp ngược cho quá khứ). Topping bán tính riêng vì
+  // margin nhóm topping khác nhóm đồ uống.
+  const cogsPct = (cfg.targets.cogsPct||0)/100;
+  const chuaKhaiMon = (day && day.revenueUncosted!=null) ? day.revenueUncosted : doanhThu;
+  const chuaKhaiTopping = (day && day.toppingRevenueUncosted!=null)
+    ? day.toppingRevenueUncosted : (Number(day && day.toppingRevenue)||0);
+  const giaVonMon = (Number(day && day.cogsActual)||0) + chuaKhaiMon*cogsPct;
+  const giaVonTopping = (Number(day && day.toppingCogsActual)||0) + chuaKhaiTopping*cogsPct;
+  const giaVon = giaVonMon + giaVonTopping;
+  if(chuaKhaiMon + chuaKhaiTopping > 0) dangUocTinh.push('giá vốn của phần món chưa khai định mức');
+
+  // HAO HỤT & HUỶ — nguyên liệu hư + bán thành phẩm huỷ + ly đổ, lấy từ ledger.
+  // KHÔNG trùng với giá vốn: giá vốn là nguyên liệu đi vào ly ĐÃ BÁN, còn đây là
+  // phần mất đi mà không bán được.
+  const haoHut = Number(wasteValue) || 0;
+
+  // CHI PHÍ trong ngày — phân bổ đúng ngày (khoản có kỳ hạn chia đều theo ngày,
+  // xem expenseAllocatedAmount). Chỉ tính khoản ĐÃ DUYỆT, giống hệt filterExpenses:
+  // chi phí nhân viên gửi từ POS còn chờ duyệt thì chưa vào lãi/lỗ.
+  const { coDinh, bienDoi } = splitExpensesByCostType(
+    (expList||[]).filter(e => e.status!=='pending_review' && e.status!=='rejected'),
+    cats, e => expenseAllocatedAmount(e, dObj, dObj));
+
+  // LƯƠNG — quyết định số 3. Thứ tự ưu tiên có chủ đích:
+  //   · Chưa bật "lương thật" → giữ nguyên cách tính cũ của app (ngân sách lương
+  //     tháng ÷ số ngày) để không có hai con số Labor khác nhau trong cùng một app.
+  //   · Ngày chưa qua (hôm nay trở đi) và ĐÃ XẾP LỊCH → lấy lịch. Đây là lý do tồn
+  //     tại của phần dự đoán: 3 giờ chiều mà lấy chấm công thì lương mới chạy được
+  //     nửa ca, lãi hôm nay trông đẹp giả tạo rồi tối mới tụt xuống.
+  //   · Ngày đã qua → chấm công thật.
+  let luong, luongLaDuDoan = false, luongNguon;
+  const luongThat = (laborActual && laborActual[dateKey]!=null) ? laborActual[dateKey] : null;
+  const luongLich = (laborPredicted && laborPredicted[dateKey]!=null) ? laborPredicted[dateKey] : null;
+  const laNgayDangChay = dateKey >= (homNayKey || dkey(new Date()));
+  if(!HR_SETTINGS.useActualLaborCost){
+    luong = laborMonthlyTotal(cfg.labor)/dim; luongLaDuDoan = true; luongNguon = 'ngân sách lương tháng';
+  } else if(laNgayDangChay && luongLich!=null){
+    luong = luongLich; luongLaDuDoan = true; luongNguon = 'lịch làm việc đã xếp';
+  } else if(luongThat!=null){
+    luong = luongThat; luongNguon = 'chấm công thật';
+  } else if(luongLich!=null){
+    luong = luongLich; luongLaDuDoan = true; luongNguon = 'lịch làm việc đã xếp';
+  } else {
+    luong = laborMonthlyTotal(cfg.labor)/dim; luongLaDuDoan = true; luongNguon = 'ngân sách lương tháng';
+  }
+  if(luongLaDuDoan) dangUocTinh.push('lương (' + luongNguon + ')');
+
+  // KHẤU HAO — nguyên giá ÷ số tháng sử dụng, rồi ÷ số ngày trong tháng đó. Tài sản
+  // mua sau ngày này hoặc đã hết thời gian khấu hao không được tính (monthlyDepreciation
+  // nhận dateKey để lọc), nên số của tháng 3 không dính máy mua tháng 7.
+  const khauHao = monthlyDepreciation(assets||[], dateKey)/dim;
+
+  const phiKenh = plChannelFeeForDay(day);
+
+  const tongChiPhi = giaVon + haoHut + bienDoi + phiKenh + luong + coDinh + khauHao;
+  const lai = doanhThu - tongChiPhi;
+  return {
+    date: dateKey, doanhThu,
+    giaVon, giaVonMon, giaVonTopping, haoHut,
+    bienPhiKhac: bienDoi, phiKenh, luong, luongLaDuDoan, luongNguon,
+    chiPhiCoDinh: coDinh, khauHao, tongChiPhi,
+    lai, laiTruocKhauHao: lai + khauHao,
+    bienLaiPct: doanhThu ? lai/doanhThu : 0,
+    dangUocTinh,
+    // Đợt 3–4 sẽ thêm mức 'chot-thang' khi mọi chi phí định kỳ của tháng đã có số
+    // thực tế. Ở đợt 1 chỉ có hai mức, và KHÔNG nói dối là đã chốt.
+    mucTinCay: (laNgayDangChay || luongLaDuDoan) ? 'dang-chay' : 'chot-ngay'
+  };
+}
+
+// Tổng của một dải ngày = CỘNG CÁC NGÀY LẠI. Không có công thức riêng cho tuần/
+// tháng — đây chính là ràng buộc "cộng 30 ngày ra đúng lãi tháng" mà chủ quán yêu cầu.
+function plSumDays(days){
+  const keys = ['doanhThu','giaVon','giaVonMon','giaVonTopping','haoHut','bienPhiKhac',
+    'phiKenh','luong','chiPhiCoDinh','khauHao','tongChiPhi','lai','laiTruocKhauHao'];
+  const out = {}; keys.forEach(k=>{ out[k] = 0; });
+  (days||[]).forEach(d=>keys.forEach(k=>{ out[k] += Number(d[k])||0; }));
+  out.soNgay = (days||[]).length;
+  out.soNgayLo = (days||[]).filter(d=>d.lai < 0).length;
+  out.bienLaiPct = out.doanhThu ? out.lai/out.doanhThu : 0;
+  out.coUocTinh = (days||[]).some(d=>d.mucTinCay !== 'chot-ngay');
+  out.mucTinCay = out.coUocTinh ? 'dang-chay' : 'chot-ngay';
+  return out;
+}
+
+// Lãi/lỗ TỪNG NGÀY của một dải ngày — một lần đọc mạng cho cả dải, dùng cho bảng
+// và biểu đồ ở đợt 2, và cho tổng tuần/tháng.
+async function computeDailyPLRange(startDate, endDate){
+  const startKey = dkey(startDate), endKey = dkey(endDate);
+  const [salesRes, expAll, assets, cats, employees, schedules, ledger, laborActual] = await Promise.all([
+    fetchSalesRange(startDate, endDate),
+    loadExpensesAll(),
+    loadAssetsAll(),
+    loadExpenseCategories().catch(()=>[]),
+    loadEmployees().catch(()=>[]),
+    loadSchedulesForRange(startKey, endKey).catch(()=>[]),
+    computeLedgerRealMetrics(startDate, endDate).catch(()=>null),
+    HR_SETTINGS.useActualLaborCost
+      ? computeActualLaborCostByDate(startKey, endKey).catch(()=>null)
+      : Promise.resolve(null)
+  ]);
+  const laborPredicted = plPredictedLaborByDate(employees, schedules, startKey, endKey);
+  const wasteByDate = (ledger && ledger.wasteByDate) || {};
+  const homNayKey = dkey(new Date());
+  const days = salesRes.perDay.map(day => computeDayPL({
+    day, expList: expAll, cats, assets,
+    laborActual, laborPredicted,
+    wasteValue: wasteByDate[day.date] || 0,
+    homNayKey
+  }));
+  return { days, tong: plSumDays(days), salesRes };
+}
+
+// ---------------------------------------------------------------------------
+// [MỚI] HIỂN THỊ LÃI/LỖ — màn Hôm nay
+// ---------------------------------------------------------------------------
+
+// Dấu mức tin cậy. Đi kèm MỌI con số lãi/lỗ, vì một con số "lãi 420k" đọc lúc 3
+// giờ chiều và đọc sau khi chốt tháng là hai thứ khác nhau.
+function plChipTinCay(muc){
+  if(muc === 'chot-thang') return '<span class="tier tier-green">Đã chốt tháng</span>';
+  if(muc === 'chot-ngay')  return '<span class="tier" style="background:var(--bb);color:var(--bi)">Đã chốt ngày</span>';
+  return '<span class="tier" style="background:var(--warn-bg);color:var(--warn)">Đang chạy</span>';
+}
+
+// Một dòng trong bảng tách chi phí. `dau` là '+' hoặc '−' để đọc được ngay là
+// khoản này cộng vào hay trừ đi, không phải suy từ màu.
+function plRowHTML(nhan, dau, so, ghiChu){
+  return `<div class="row"><span class="rl">${nhan}${ghiChu?`<div class="small-note" style="margin-top:1px">${ghiChu}</div>`:''}</span>
+    <span class="rv" style="color:${dau==='−'?'var(--bad)':'var(--td)'}">${dau} ${fmt(so)}</span></div>`;
+}
+
+function plToggleChiTiet(){
+  const box = document.getElementById('todayPLRows');
+  const btn = document.getElementById('todayPLToggle');
+  if(!box) return;
+  const dangAn = box.hasAttribute('hidden');
+  if(dangAn) box.removeAttribute('hidden'); else box.setAttribute('hidden','');
+  if(btn) btn.innerHTML = (dangAn ? 'Thu gọn ' + ic('chevronUp',14) : 'Xem tách từng dòng ' + ic('chevronDown',14));
+}
+
+function plTodayHTML(pl){
+  if(!pl) return '';
+  const laLai = pl.lai >= 0;
+  const mau = laLai ? 'var(--ok)' : 'var(--bad)';
+  const chuaBan = pl.doanhThu <= 0;
+  return `
+    <div class="card" style="border:1.5px solid ${laLai?'var(--ok-line)':'var(--bad-line)'};">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+        <span style="font-size:13px;font-weight:700;color:var(--gt);text-transform:uppercase;letter-spacing:.05em;">${laLai?'Lãi':'Lỗ'} hôm nay</span>
+        ${plChipTinCay(pl.mucTinCay)}
+      </div>
+      <div style="font-size:30px;font-weight:750;color:${mau};margin-top:2px;line-height:1.15;">${laLai?'':'−'}${fmt(Math.abs(pl.lai))}</div>
+      <div class="small-note" style="margin-top:4px">
+        Trước khấu hao: <b>${pl.laiTruocKhauHao>=0?'':'−'}${fmt(Math.abs(pl.laiTruocKhauHao))}</b>
+        ${pl.doanhThu ? ` · biên lãi <b>${fmtPct(pl.bienLaiPct)}</b>` : ''}
+      </div>
+      ${chuaBan ? `<div class="small-note" style="margin-top:6px;color:var(--warn)">Hôm nay chưa có doanh thu — con số đang là toàn bộ chi phí của một ngày (thuê, lương, khấu hao vẫn chạy dù chưa bán được ly nào).</div>` : ''}
+      <button id="todayPLToggle" onclick="plToggleChiTiet()" style="margin-top:10px;background:none;border:none;padding:6px 0;color:var(--gd);font-weight:700;font-size:12.5px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;">Xem tách từng dòng ${ic('chevronDown',14)}</button>
+      <div id="todayPLRows" hidden style="margin-top:2px;">
+        ${plRowHTML('Doanh thu', '+', pl.doanhThu)}
+        ${plRowHTML('Giá vốn hàng bán', '−', pl.giaVon, pl.giaVonTopping>0 ? `gồm topping bán ${fmt(pl.giaVonTopping)}` : '')}
+        ${plRowHTML('Hao hụt & huỷ', '−', pl.haoHut, 'nguyên liệu hư + bán thành phẩm huỷ + ly đổ')}
+        ${plRowHTML('Chi phí biến đổi', '−', pl.bienPhiKhac, 'khoản đã duyệt, danh mục gắn nhãn Biến đổi')}
+        ${pl.phiKenh>0 ? plRowHTML('Phí sàn', '−', pl.phiKenh) : ''}
+        ${plRowHTML('Lương', '−', pl.luong, pl.luongNguon)}
+        ${plRowHTML('Chi phí cố định', '−', pl.chiPhiCoDinh, 'thuê/điện/nước… chia đều theo ngày')}
+        ${plRowHTML('Khấu hao', '−', pl.khauHao, 'nguyên giá ÷ số tháng sử dụng')}
+        <div class="row" style="border-top:1.5px solid var(--line);margin-top:4px;padding-top:8px">
+          <span class="rl"><b>${laLai?'Lãi':'Lỗ'} hôm nay</b></span>
+          <span class="rv" style="color:${mau};font-size:17px"><b>${laLai?'':'−'}${fmt(Math.abs(pl.lai))}</b></span>
+        </div>
+        <div class="unit-explainer" style="margin-top:10px">
+          Tiền <b>nhập hàng</b> không nằm trong bảng này: hôm nhập 5tr bột thì 5tr đó biến thành hàng trong kho, chỉ thành chi phí khi bán ra (vào giá vốn) hoặc khi hư/đổ (vào hao hụt). Ngày chi tiền xem ở tab Tiền mặt.<br>
+          Tiền <b>chủ quán rút</b> cũng không tính là chi phí — đây là lợi nhuận quán làm ra, rút tiền là chia lợi nhuận đó.
+          ${pl.dangUocTinh.length ? `<br><span style="color:var(--warn)">Còn đang ước tính: ${pl.dangUocTinh.join('; ')}.</span>` : ''}
+        </div>
+      </div>
+    </div>`;
+}
+
 // ------------------------------------------------------------
 // STATUS / THRESHOLD RULES
 // ------------------------------------------------------------
@@ -5910,7 +6219,7 @@ async function renderToday(){
   try{
   await ensureAuth();
   const today = new Date();
-  const [salesRes, opsToday, expAll, assets, invItems, expCatsToday, actualLaborByDate, ledgerRealToday] = await Promise.all([
+  const [salesRes, opsToday, expAll, assets, invItems, expCatsToday, actualLaborByDate, ledgerRealToday, empsToday, schedToday] = await Promise.all([
     fetchSalesRange(today, today),
     loadDailyOpsOne(dkey(today)),
     loadExpensesAll(),
@@ -5921,7 +6230,12 @@ async function renderToday(){
     // Hôm nay khi chủ quán còn dùng cách tính Labor cũ (mặc định).
     HR_SETTINGS.useActualLaborCost ? computeActualLaborCostByDate(dkey(today), dkey(today)) : Promise.resolve(null),
     // Waste + số ly đổ luôn đọc từ ledger — không còn công tắc, không còn ô gõ tay.
-    computeLedgerRealMetrics(today, today)
+    computeLedgerRealMetrics(today, today),
+    // Hai thứ cho "Lãi/lỗ hôm nay": danh sách nhân viên + lịch làm việc HÔM NAY, để
+    // ngày chưa kết ca vẫn có con số lương dự đoán. Hỏng thì coi như chưa xếp lịch —
+    // lãi/lỗ vẫn tính được (rơi về chấm công thật), không kéo sập cả màn.
+    loadEmployees().catch(()=>[]),
+    loadSchedulesForDate(dkey(today)).catch(()=>[])
   ]);
   const kpi = computeKPIs({
     perDaySales: salesRes.perDay, opsSum: {},
@@ -5965,6 +6279,19 @@ async function renderToday(){
       ${c.sub?`<div class="ksub">${c.sub}</div>`:''}
       ${c.ratio!=null ? meterHTML(c.ratio, c.status) : ''}
     </div>`).join('');
+
+  // LÃI/LỖ HÔM NAY — vẽ ngay, không nạp nền như khối hoà vốn: mọi thứ nó cần đã nằm
+  // trong cùng một Promise.all ở trên, chờ thêm một lượt mạng nữa chỉ để nó xuất hiện
+  // muộn hơn phần dưới là vô nghĩa. Đây là con số đầu tiên chủ quán tìm khi mở app.
+  const plHomNay = computeDayPL({
+    day: salesRes.perDay[0] || {date: dkey(today), revenue: 0},
+    expList: expAll, cats: expCatsToday, assets,
+    laborActual: actualLaborByDate,
+    laborPredicted: plPredictedLaborByDate(empsToday, schedToday, dkey(today), dkey(today)),
+    wasteValue: ledgerRealToday ? ledgerRealToday.wasteValue : 0,
+    homNayKey: dkey(today)
+  });
+  document.getElementById('todayPL').innerHTML = plTodayHTML(plHomNay);
 
   // Ngưỡng hoà vốn nạp NỀN: nó cần cửa sổ 30 ngày nên chậm hơn phần còn lại của
   // màn. Chờ nó xong mới vẽ cả màn là bắt chủ quán nhìn màn trắng lâu hơn vì một
@@ -6147,6 +6474,15 @@ async function computeLedgerRealMetrics(startDate, endDate){
   ]);
   const costOf = id => { const it = items.find(x=>x.id===id); return it ? Number(it.costPerUnit)||0 : 0; };
   let wasteValue=0, wasteCount=0, consumptionValue=0, consumptionCount=0, adjustmentValue=0, adjustmentCount=0;
+  // [MỚI] Hao hụt gom theo TỪNG NGÀY, không chỉ tổng cả kỳ — lãi/lỗ theo ngày cần
+  // biết đúng ngày nào mất bao nhiêu. Cộng dồn ngay trong vòng lặp đang có thay vì
+  // đọc ledger lần thứ hai ở nơi khác, để hai con số không bao giờ lệch nhau.
+  const wasteByDate = {};
+  const ghiNhanHaoHutNgay = (t, val) => {
+    const d = t && t.businessDate;
+    if(!d || !val) return;
+    wasteByDate[d] = (wasteByDate[d]||0) + val;
+  };
   // ĐỔ LY THÀNH PHẨM — thay hẳn cho ô "Remake" gõ tay ở tab Vận hành ngày.
   // Một lần nhân viên bấm đổ sinh ra NHIỀU dòng ledger (mỗi nguyên liệu/bán thành
   // phẩm một dòng) nên phải gom theo wasteEventId, nếu không sẽ đếm 1 ly thành 5.
@@ -6161,7 +6497,7 @@ async function computeLedgerRealMetrics(startDate, endDate){
     const t = doc.data();
     const cost = costOf(t.itemId);
     const val = Math.abs(Number(t.qty)||0) * cost;
-    if(t.type==='WASTE'){ wasteValue += val; wasteCount++; ghiNhanDoLy(t, val); }
+    if(t.type==='WASTE'){ wasteValue += val; wasteCount++; ghiNhanDoLy(t, val); ghiNhanHaoHutNgay(t, val); }
     else if(t.type==='CONSUMPTION'){ consumptionValue += val; consumptionCount++; }
     else if(t.type==='ADJUSTMENT'){ adjustmentValue += val; adjustmentCount++; }
   });
@@ -6184,6 +6520,7 @@ async function computeLedgerRealMetrics(startDate, endDate){
     if(!tc && Number(t.qty)) prepWasteMissingCost++;
     prepWasteValue += tc;
     prepWasteCount++;
+    ghiNhanHaoHutNgay(t, tc);
   });
   // Gộp vào tổng Waste thật — KHÔNG double-count: nguyên liệu thô đã bị trừ khỏi kho từ
   // lúc NẤU MẺ (ghi ở stock_transactions dạng CONSUMPTION), còn đây là giá trị bán thành
@@ -6191,6 +6528,7 @@ async function computeLedgerRealMetrics(startDate, endDate){
   return {
     wasteValue: wasteValue + prepWasteValue,
     wasteCount: wasteCount + prepWasteCount,
+    wasteByDate,
     wasteRawValue: wasteValue, wasteRawCount: wasteCount,
     prepWasteValue, prepWasteCount, prepWasteMissingCost,
     prepAdjValue, prepAdjCount,
