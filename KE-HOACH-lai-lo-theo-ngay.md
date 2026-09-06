@@ -285,6 +285,25 @@ Làm đợt 1 trước cũng có ích ngay, kể cả khi chưa làm 3–5.
 | 4 | Tiền chủ quán rút có phải chi phí? | **Không** | Không có dòng nào cho khoản này. Thẻ ghi rõ: đây là lợi nhuận quán làm ra, rút tiền là **chia** lợi nhuận đó |
 | 5 | Phí sàn (GrabFood…) | **Chưa bán qua sàn, nhưng ghi chú sẵn** | Có sẵn dòng `phiKenh` và hàm `plChannelFeeForDay(day)` làm **một chỗ cắm duy nhất** — khi nào bán qua sàn chỉ điền hàm đó, dòng "Phí sàn" tự hiện, lãi/lỗ tự trừ. Ghi rõ luôn điều kiện tiên quyết: POS phải ghi doanh thu **theo kênh** trước đã, chứ đoán một tỷ lệ phí ở đó còn tệ hơn để 0 |
 
+### Đợt 3 — đã xong
+
+- Form chi phí có đủ **bốn trường** ở §6: kỳ sử dụng · số tiền · **số thật / dự đoán** ·
+  ngày trả tiền. "Từ ngày → đến ngày" đổi nhãn thành **"Kỳ sử dụng"** cho khỏi lẫn với
+  ngày trả tiền.
+- Chi phí dự đoán **vẫn được tính vào lãi/lỗ** — bỏ ra thì con số thiếu hẳn một khoản và
+  trông đẹp giả tạo — nhưng ngày đó không được coi là đã đủ số thật.
+- **Ba dấu tin cậy thật sự chạy**, kèm chú thích ngay dưới con số:
+  🟡 Đang chạy · 🔵 Chờ hoá đơn · 🟢 Đủ số thật.
+  Mức của cả kỳ = **mức yếu nhất** của các ngày: một ngày chờ hoá đơn là cả tháng chưa chốt.
+- Khu **"Chờ số thật"** ở đầu màn Chi phí + khối nhắc trong "Lãi/lỗ kỳ này", nêu đích danh
+  từng khoản và số tiền nó đang chiếm trong kỳ.
+- Nút **"Nhập số thật"** mở popup có sẵn số dự đoán cũ và kỳ sử dụng để đối chiếu hoá đơn.
+  Lưu xong app **giữ lại số cũ** (`estimatedAmount` + `actualAt`) và hiện dòng
+  *"Đã tính lại — Tiền điện: 2.000.000 → 2.150.000 (ngày 05/10)"*. Số của một tháng đã xem
+  rồi vẫn có thể đổi — đúng như bạn chốt — nhưng **không đổi lặng lẽ sau lưng**.
+- 38 kiểm thử, gồm phép quan trọng nhất: hoá đơn tháng 9 về muộn thì **ngày 12/9 gánh
+  thêm đúng 5.000đ**, còn **ngày của tháng 10 không dính gì cả**.
+
 ### Đợt 2 — đã xong
 
 - Khối **"Lãi/lỗ kỳ này"** ở màn **Sức khoẻ tài chính**, đặt trên khối hoà vốn. Dùng
@@ -312,7 +331,7 @@ Làm đợt 1 trước cũng có ích ngay, kể cả khi chưa làm 3–5.
 - 51 kiểm thử: công thức, lương dự đoán từ lịch (kể cả ca qua đêm và OT), cộng ngày ra
   kỳ, và chạy thật trên màn Hôm nay.
 
-Còn lại đợt 3 → 5 như bảng ở §11.
+Còn lại đợt 4 và 5 như bảng ở §11.
 
 ---
 

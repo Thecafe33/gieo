@@ -2767,6 +2767,11 @@ const EXP_CATEGORIES_SEED = ['Tiền thuê nhà','Tiền điện','Tiền nướ
 function addExpense(data){
   return fstore.collection('expenses_gieogieo').add({
     ...data,
+    // [đợt 3] Mặc định là SỐ THẬT — chỉ khoản nào chủ quán chủ động đánh dấu mới là
+    // dự đoán. Mặc định ngược lại sẽ làm mọi khoản chi phí bình thường bị coi là
+    // chưa chốt và báo động giả suốt ngày.
+    amountKind: data.amountKind === 'estimate' ? 'estimate' : 'actual',
+    paidDate: data.paidDate || null,
     status: data.status || 'approved', source: data.source || 'management',
     staff: data.staff || '', paymentMethodId: data.paymentMethodId || null,
     paymentMethodLabel: data.paymentMethodLabel || null, baseType: data.baseType || null,
@@ -2801,6 +2806,37 @@ function expenseAllocatedAmount(e, rangeStart, rangeEnd){
   if(d>=rangeStart && d<=rangeEnd) return Number(e.amount||0);
   return 0;
 }
+// ============================================================================
+// [MỚI — đợt 3] CHI PHÍ DỰ ĐOÁN vs SỐ THẬT
+// ----------------------------------------------------------------------------
+// Tiền điện tháng 9 dùng từ 1/9 tới 30/9 nhưng hoá đơn tới 5/10 mới về. Form chi
+// phí trước đây chỉ có MỘT trục thời gian nên không tách được ba mốc hoàn toàn
+// khác nhau này:
+//   · kỳ sử dụng   (startDate → endDate) — chi phí RƠI VÀO đây, chia đều theo ngày
+//   · số thật hay số dự đoán (amountKind) — có hoá đơn chưa
+//   · ngày trả tiền (paidDate)            — tiền rời két, CHỈ dòng tiền dùng
+//
+// QUY TẮC ĐÃ CHỐT VỚI CHỦ QUÁN: hoá đơn về muộn thì TÍNH LẠI đúng kỳ sử dụng của
+// nó — "tháng nào phải gánh đúng chi phí tháng đó" — chứ không đẩy chênh lệch sang
+// tháng sau. Vì lãi/lỗ luôn tính lại từ dữ liệu gốc mỗi lần mở màn, việc tính lại
+// tự xảy ra; thứ phải làm thêm là NÓI RÕ cho chủ quán biết số đã đổi (xem
+// plRecalcNotes) chứ không đổi lặng lẽ sau lưng.
+//
+// BẢN GHI CŨ (ghi trước khi có trường này) coi là SỐ THẬT: chủ quán ghi khi đã
+// biết số tiền, nên không có bản ghi cũ nào tự dưng bị coi là chưa chốt.
+// ============================================================================
+function expenseIsEstimate(e){ return !!e && e.amountKind === 'estimate'; }
+
+// Thay số dự đoán bằng số thật khi hoá đơn về. Giữ lại số cũ (estimatedAmount) và
+// mốc thời gian (actualAt) để màn hình giải thích được vì sao lãi của tháng đã xem
+// lại đổi — sửa đè mà không để dấu vết là cách nhanh nhất làm chủ quán mất tin.
+function setExpenseActual(id, amount, oldAmount){
+  return fstore.collection('expenses_gieogieo').doc(id).update({
+    amount: Number(amount)||0, amountKind: 'actual',
+    estimatedAmount: Number(oldAmount)||0, actualAt: new Date().toISOString()
+  });
+}
+
 function filterExpenses(list, startDate, endDate){
   // Chỉ tính vào báo cáo/KPI các chi phí ĐÃ DUYỆT — bản ghi cũ/Management tự nhập không có
   // field `status` (trước Giai đoạn 8) được coi là đã duyệt ngầm định (status===undefined),
@@ -4762,9 +4798,19 @@ function computeDayPL({ day, expList, cats, assets, laborActual, laborPredicted,
   // CHI PHÍ trong ngày — phân bổ đúng ngày (khoản có kỳ hạn chia đều theo ngày,
   // xem expenseAllocatedAmount). Chỉ tính khoản ĐÃ DUYỆT, giống hệt filterExpenses:
   // chi phí nhân viên gửi từ POS còn chờ duyệt thì chưa vào lãi/lỗ.
-  const { coDinh, bienDoi } = splitExpensesByCostType(
-    (expList||[]).filter(e => e.status!=='pending_review' && e.status!=='rejected'),
-    cats, e => expenseAllocatedAmount(e, dObj, dObj));
+  const expDuyet = (expList||[]).filter(e => e.status!=='pending_review' && e.status!=='rejected');
+  const { coDinh, bienDoi } = splitExpensesByCostType(expDuyet, cats,
+    e => expenseAllocatedAmount(e, dObj, dObj));
+  // [đợt 3] Khoản nào của ĐÚNG ngày này còn là SỐ DỰ ĐOÁN (chưa có hoá đơn). Vẫn
+  // được tính vào lãi/lỗ — bỏ ra thì con số thiếu hẳn một khoản và trông đẹp giả
+  // tạo — nhưng ngày đó KHÔNG được coi là đã đủ số thật.
+  const choSoThat = [];
+  expDuyet.forEach(e=>{
+    if(!expenseIsEstimate(e)) return;
+    const v = expenseAllocatedAmount(e, dObj, dObj);
+    if(v > 0) choSoThat.push({ id: e.id, category: e.category, tien: v });
+  });
+  if(choSoThat.length) dangUocTinh.push('chi phí chưa có hoá đơn: ' + choSoThat.map(x=>x.category).join(', '));
 
   // LƯƠNG — quyết định số 3. Thứ tự ưu tiên có chủ đích:
   //   · Chưa bật "lương thật" → giữ nguyên cách tính cũ của app (ngân sách lương
@@ -4806,10 +4852,16 @@ function computeDayPL({ day, expList, cats, assets, laborActual, laborPredicted,
     chiPhiCoDinh: coDinh, khauHao, tongChiPhi,
     lai, laiTruocKhauHao: lai + khauHao,
     bienLaiPct: doanhThu ? lai/doanhThu : 0,
-    dangUocTinh,
-    // Đợt 3–4 sẽ thêm mức 'chot-thang' khi mọi chi phí định kỳ của tháng đã có số
-    // thực tế. Ở đợt 1 chỉ có hai mức, và KHÔNG nói dối là đã chốt.
-    mucTinCay: (laNgayDangChay || luongLaDuDoan) ? 'dang-chay' : 'chot-ngay'
+    dangUocTinh, choSoThat,
+    // Ba mức, theo đúng thứ tự chắc chắn dần:
+    //   dang-chay  — ngày chưa xong, hoặc lương còn là số dự đoán
+    //   chot-ngay  — ngày đã xong nhưng còn chi phí chờ hoá đơn
+    //   chot-thang — không còn khoản chi phí nào là số dự đoán
+    // Giá vốn ước theo target COGS% KHÔNG chặn mức cao nhất: nó không phải thứ chờ
+    // hoá đơn, mà là hệ quả của việc chưa khai định mức — vẫn liệt kê ở dangUocTinh
+    // để nói rõ, nhưng đợi nó thì không ngày nào lên được mức đủ số thật.
+    mucTinCay: (laNgayDangChay || luongLaDuDoan) ? 'dang-chay'
+             : (choSoThat.length ? 'chot-ngay' : 'chot-thang')
   };
 }
 
@@ -4823,8 +4875,21 @@ function plSumDays(days){
   out.soNgay = (days||[]).length;
   out.soNgayLo = (days||[]).filter(d=>d.lai < 0).length;
   out.bienLaiPct = out.doanhThu ? out.lai/out.doanhThu : 0;
-  out.coUocTinh = (days||[]).some(d=>d.mucTinCay !== 'chot-ngay');
-  out.mucTinCay = out.coUocTinh ? 'dang-chay' : 'chot-ngay';
+  // Mức tin cậy của cả kỳ = mức YẾU NHẤT trong các ngày. Một ngày chờ hoá đơn là cả
+  // tháng chưa chốt được — gộp theo kiểu "đa số ngày đã xong" sẽ nói dối đúng vào
+  // lúc chủ quán cần sự thật nhất.
+  const mucList = (days||[]).map(d=>d.mucTinCay);
+  out.mucTinCay = mucList.includes('dang-chay') ? 'dang-chay'
+                : mucList.includes('chot-ngay') ? 'chot-ngay' : 'chot-thang';
+  out.coUocTinh = out.mucTinCay !== 'chot-thang';
+  // Gộp khoản chờ số thật theo BẢN GHI chi phí: tiền điện trải 30 ngày phải hiện
+  // MỘT dòng với tổng tiền của kỳ, không phải 30 dòng giống hệt nhau.
+  const gop = new Map();
+  (days||[]).forEach(d=>(d.choSoThat||[]).forEach(k=>{
+    const cur = gop.get(k.id) || { id:k.id, category:k.category, tien:0 };
+    cur.tien += k.tien; gop.set(k.id, cur);
+  }));
+  out.khoanChoSoThat = [...gop.values()].sort((a,b)=>b.tien-a.tien);
   return out;
 }
 
@@ -4863,9 +4928,31 @@ async function computeDailyPLRange(startDate, endDate){
 // Dấu mức tin cậy. Đi kèm MỌI con số lãi/lỗ, vì một con số "lãi 420k" đọc lúc 3
 // giờ chiều và đọc sau khi chốt tháng là hai thứ khác nhau.
 function plChipTinCay(muc){
-  if(muc === 'chot-thang') return '<span class="tier tier-green">Đã chốt tháng</span>';
-  if(muc === 'chot-ngay')  return '<span class="tier" style="background:var(--bb);color:var(--bi)">Đã chốt ngày</span>';
+  if(muc === 'chot-thang') return '<span class="tier tier-green">Đủ số thật</span>';
+  if(muc === 'chot-ngay')  return '<span class="tier" style="background:var(--bb);color:var(--bi)">Chờ hoá đơn</span>';
   return '<span class="tier" style="background:var(--warn-bg);color:var(--warn)">Đang chạy</span>';
+}
+// Chú thích ba dấu — đặt cạnh con số, vì một cái chip mà không ai biết nghĩa gì thì
+// chỉ là trang trí.
+function plChuThichTinCay(){
+  return `<div class="small-note" style="margin-top:8px;line-height:1.7">
+    ${plChipTinCay('dang-chay')} ngày chưa xong, hoặc lương còn lấy theo lịch làm việc.<br>
+    ${plChipTinCay('chot-ngay')} ngày đã xong nhưng còn chi phí đang là số dự đoán (VD tiền điện chưa có hoá đơn).<br>
+    ${plChipTinCay('chot-thang')} mọi chi phí đã có số thật — con số này không đổi nữa.</div>`;
+}
+
+// Các khoản ĐÃ ĐƯỢC THAY BẰNG SỐ THẬT mà kỳ đang xem có dính. "Tháng nào gánh đúng
+// chi phí tháng đó" nghĩa là số của một tháng đã xem RỒI vẫn có thể đổi — nên phải
+// nói rõ đổi cái gì, từ bao nhiêu sang bao nhiêu, ngày nào. Đổi lặng lẽ là cách
+// nhanh nhất làm chủ quán mất tin vào con số.
+function plRecalcNotes(expList, start, end){
+  return (expList||[])
+    .filter(e => e.actualAt && e.estimatedAmount != null && expenseAllocatedAmount(e, start, end) > 0)
+    .map(e => ({ category: e.category, cu: Number(e.estimatedAmount)||0,
+                 moi: Number(e.amount)||0, ngay: String(e.actualAt).slice(0,10) }))
+    .filter(x => x.cu !== x.moi)
+    .sort((a,b)=> b.ngay.localeCompare(a.ngay))
+    .slice(0, 5);
 }
 
 // Một dòng trong bảng tách chi phí. `dau` là '+' hoặc '−' để đọc được ngay là
@@ -4900,6 +4987,7 @@ function plTodayHTML(pl){
         Trước khấu hao: <b>${pl.laiTruocKhauHao>=0?'':'−'}${fmt(Math.abs(pl.laiTruocKhauHao))}</b>
         ${pl.doanhThu ? ` · biên lãi <b>${fmtPct(pl.bienLaiPct)}</b>` : ''}
       </div>
+      ${(pl.choSoThat||[]).length ? `<div class="small-note" style="margin-top:6px;color:var(--warn)">Đang tính theo số dự đoán cho: <b>${pl.choSoThat.map(k=>k.category).join(', ')}</b> — con số sẽ đổi khi hoá đơn về.</div>` : ''}
       ${chuaBan ? `<div class="small-note" style="margin-top:6px;color:var(--warn)">Hôm nay chưa có doanh thu — con số đang là toàn bộ chi phí của một ngày (thuê, lương, khấu hao vẫn chạy dù chưa bán được ly nào).</div>` : ''}
       <button id="todayPLToggle" onclick="plToggleChiTiet()" style="margin-top:10px;background:none;border:none;padding:6px 0;color:var(--gd);font-weight:700;font-size:12.5px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;">Xem tách từng dòng ${ic('chevronDown',14)}</button>
       <div id="todayPLRows" hidden style="margin-top:2px;">
@@ -5012,8 +5100,8 @@ function plNhanNgay(dateKey){
   return PL_DOW[d.getDay()] + ' ' + pad(d.getDate()) + '/' + pad(d.getMonth()+1);
 }
 
-function plHealthHTML(tong, days, soNgayKy){
-  if(!tong) return '';
+function plHealthHTML(tong, days, soNgayKy, ghiChuTinhLai){
+  if(!tong || !tong.soNgay) return '';
   const laLai = tong.lai >= 0;
   const mau = laLai ? 'var(--ok)' : 'var(--bad)';
   const nhieuNgay = (days||[]).length > 1;
@@ -5069,10 +5157,25 @@ function plHealthHTML(tong, days, soNgayKy){
       <button id="healthPLTableToggle" onclick="plToggleBang()" style="margin-top:10px;background:none;border:none;padding:6px 0;color:var(--gd);font-weight:700;font-size:12.5px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;">Xem bảng từng ngày ${ic('chevronDown',14)}</button>
       <div id="healthPLTable" hidden style="margin-top:2px;">${hangBang}</div>` : ''}
 
+      ${(tong.khoanChoSoThat||[]).length ? `
+      <div class="nudge" style="margin-top:12px">
+        <span>${ic('hourglass')} Còn <b>${tong.khoanChoSoThat.length}</b> khoản đang là <b>số dự đoán</b>, tổng <b>${fmt(tong.khoanChoSoThat.reduce((s,k)=>s+k.tien,0))}</b> trong kỳ này — lãi/lỗ ở trên vẫn có thể đổi khi hoá đơn về:<br>
+        ${tong.khoanChoSoThat.map(k=>`· ${k.category} — ${fmt(k.tien)}`).join('<br>')}</span>
+        <button onclick="goEntry('exp')">Nhập số thật</button>
+      </div>` : ''}
+
+      ${(ghiChuTinhLai||[]).length ? `
+      <div class="small-note" style="margin-top:10px;line-height:1.7">
+        <b>Đã tính lại</b> — kỳ này gánh đúng số thật khi hoá đơn về:<br>
+        ${ghiChuTinhLai.map(g=>`· ${g.category}: ${fmt(g.cu)} → <b>${fmt(g.moi)}</b> (ngày ${g.ngay.slice(8,10)}/${g.ngay.slice(5,7)})`).join('<br>')}
+      </div>` : ''}
+
+      ${plChuThichTinCay()}
+
       <div class="unit-explainer" style="margin-top:12px">
         Con số kỳ này là <b>tổng các ngày cộng lại</b>, không tính bằng một công thức riêng — nên nó luôn khớp với thẻ "Lãi/lỗ hôm nay" ở màn Hôm nay.<br>
         Chi phí trả một lần cho nhiều ngày (thuê mặt bằng, tiền điện) được <b>chia đều theo ngày</b>, không dồn hết vào ngày ghi sổ. Tiền nhập hàng không nằm ở đây — nó vào giá vốn khi bán ra.
-        ${tong.coUocTinh ? `<br><span style="color:var(--warn)">Trong kỳ còn ngày đang chạy hoặc còn số ước tính, nên con số này chưa phải số cuối cùng.</span>` : ''}
+        ${tong.coUocTinh ? `<br><span style="color:var(--warn)">Trong kỳ còn ngày đang chạy hoặc còn chi phí chờ hoá đơn, nên con số này chưa phải số cuối cùng.</span>` : ''}
       </div>
     </div>`;
 }
@@ -6778,7 +6881,7 @@ async function renderHealth(){
 
   document.getElementById('healthBody').innerHTML = `
     ${rangeLabel}
-    ${plHealthHTML(plTong, plDays, salesRes.dayCount)}
+    ${plHealthHTML(plTong, plDays, salesRes.dayCount, plRecalcNotes(expAll, start, end))}
     <div id="healthBep"></div>
     <div class="card">
       <div class="card-h"><h3>${ic('coins')} Sales</h3></div>
@@ -7067,6 +7170,9 @@ function expTypeChanged(type){
   document.getElementById('expPeriodFields').style.display = type==='period' ? '' : 'none';
   document.querySelectorAll('#expTypeSeg button').forEach(b=>b.classList.toggle('active', b.dataset.type===type));
 }
+function expKindChanged(kind){
+  document.querySelectorAll('#expKindSeg button').forEach(b=>b.classList.toggle('active', b.dataset.kind===kind));
+}
 function expCatChanged(){
   const cat = document.getElementById('expCat').value;
   expTypeChanged(EXP_RECURRING_DEFAULT.includes(cat) ? 'period' : 'onetime');
@@ -7104,6 +7210,10 @@ async function renderEntryExp(){
   const usingFallbackCats = !EXP_CATEGORIES_CACHE.length;
   const catOptions = usingFallbackCats ? EXP_CATEGORIES : EXP_CATEGORIES_CACHE.map(c=>c.label);
   const pending = list.filter(e=>e.status==='pending_review');
+  // [đợt 3] Khoản đang là SỐ DỰ ĐOÁN — đặt ngay đầu màn Chi phí, vì đây là việc duy
+  // nhất trong màn này có hạn chót thật: hoá đơn về mà không nhập thì lãi/lỗ của cả
+  // tháng đó sai và không ai biết.
+  const duDoan = list.filter(e => expenseIsEstimate(e) && e.status!=='rejected');
 
   body.innerHTML = `
     ${usingFallbackCats ? `<div class="nudge" style="margin-bottom:12px"><span>${ic('alert')} Chưa cấu hình danh mục chi phí — đang tạm dùng danh sách mặc định. Nhân viên KHÔNG ghi được chi phí ở POS cho tới khi bạn cấu hình danh mục thật. Mở phần "Cấu hình Danh mục" bên dưới rồi bấm "Tạo nhanh" là xong.</span><button onclick="expConfigOpen=true; renderEntryExp();">Cấu hình ngay</button></div>` : ''}
@@ -7122,6 +7232,17 @@ async function renderEntryExp(){
       </div>`).join('')}
     ` : ''}
 
+    ${duDoan.length ? `
+    <div class="sec-title">${ic('hourglass')} Chờ số thật (${duDoan.length})</div>
+    <div class="card" style="border:1.5px solid var(--warn-line);background:var(--warn-bg);">
+      <div class="small-note" style="margin:0 0 8px;color:var(--warn)">Những khoản này đang tính vào lãi/lỗ bằng <b>số dự đoán</b>. Hoá đơn về thì bấm "Nhập số thật" — app tính lại đúng kỳ sử dụng của nó, tháng nào gánh chi phí tháng đó.</div>
+      ${duDoan.map(e=>`<div class="litem" style="background:var(--card)">
+        <div class="li-l"><div>${e.category} <span class="tier" style="margin-left:4px;background:var(--warn-bg);color:var(--warn)">Dự đoán</span></div>
+          <div>${e.periodType==='period' ? `${e.startDate} → ${e.endDate}` : (e.date||'')}${e.note?' · '+e.note:''}</div></div>
+        <div class="li-r">${fmt(e.amount)}<br><button class="btn outline sm" style="width:auto;padding:0 10px;margin-top:4px" onclick="openExpenseActual('${e.id}')">Nhập số thật</button></div>
+      </div>`).join('')}
+    </div>` : ''}
+
     <div class="card">
       <div class="field"><label>Danh mục</label>
         <select id="expCat" onchange="expCatChanged()">${catOptions.map(c=>`<option>${c}</option>`).join('')}</select>
@@ -7133,7 +7254,7 @@ async function renderEntryExp(){
           <button type="button" data-type="onetime" onclick="expTypeChanged('onetime')">Một lần</button>
           <button type="button" data-type="period" class="active" onclick="expTypeChanged('period')">Có kỳ hạn</button>
         </div>
-        <div class="hint">"Có kỳ hạn": chi phí sẽ được chia đều theo từng ngày trong khoảng thời gian bên dưới khi tính KPI theo ngày/tuần/tháng. VD: thuê 3 tháng 9.000.000đ → app tự chia đều theo đúng số ngày của 3 tháng đó.</div>
+        <div class="hint">"Có kỳ hạn": chi phí được chia đều theo từng ngày trong <b>kỳ sử dụng</b> bên dưới. VD: thuê 3 tháng 9.000.000đ → app tự chia đều theo đúng số ngày của 3 tháng đó, không dồn hết vào ngày ghi sổ.</div>
       </div>
 
       <div id="expOnetimeFields" style="display:none">
@@ -7141,9 +7262,21 @@ async function renderEntryExp(){
       </div>
       <div id="expPeriodFields">
         <div class="grid2">
-          <div class="field"><label>Từ ngày</label><input type="date" id="expStart" value="${monthStartKey}"></div>
-          <div class="field"><label>Đến ngày</label><input type="date" id="expEnd" value="${monthEndKey}"></div>
+          <div class="field"><label>Kỳ sử dụng — từ ngày</label><input type="date" id="expStart" value="${monthStartKey}"></div>
+          <div class="field"><label>đến ngày</label><input type="date" id="expEnd" value="${monthEndKey}"></div>
         </div>
+      </div>
+
+      <div class="field"><label>Loại số</label>
+        <div class="seg" id="expKindSeg">
+          <button type="button" data-kind="actual" class="active" onclick="expKindChanged('actual')">Số thật</button>
+          <button type="button" data-kind="estimate" onclick="expKindChanged('estimate')">Dự đoán</button>
+        </div>
+        <div class="hint">Chọn <b>Dự đoán</b> khi chưa có hoá đơn — VD tiền điện tháng này, đầu tháng sau mới về. App vẫn tính vào lãi/lỗ (bỏ ra thì con số thiếu hẳn một khoản và trông đẹp giả tạo), nhưng đánh dấu là chưa chốt và nhắc bạn nhập số thật khi hoá đơn về.</div>
+      </div>
+
+      <div class="field"><label>Ngày trả tiền (tuỳ chọn)</label><input type="date" id="expPaid" value="">
+        <div class="hint">Để trống = <b>chưa trả</b>. Ngày này KHÔNG ảnh hưởng lãi/lỗ — chi phí luôn rơi vào kỳ sử dụng ở trên. Nó dùng cho dòng tiền: mặt bằng trả cả năm một lần và mặt bằng trả hằng tháng ghi khác nhau ở đây.</div>
       </div>
 
       ${PAYMENT_METHODS_CACHE.length ? `
@@ -7213,9 +7346,13 @@ async function renderEntryExp(){
       ? `${e.startDate} → ${e.endDate} <span style="color:var(--gt)">(${daysBetweenInclusive(new Date(e.startDate+'T00:00:00'), new Date(e.endDate+'T00:00:00'))} ngày, ${fmt(Number(e.amount||0)/daysBetweenInclusive(new Date(e.startDate+'T00:00:00'), new Date(e.endDate+'T00:00:00')))}/ngày)</span>`
       : e.date;
     const st = stMap[e.status];
+    const laDuDoan = expenseIsEstimate(e);
+    const daTinhLai = e.actualAt && e.estimatedAmount != null && Number(e.estimatedAmount) !== Number(e.amount);
     return `<div class="litem">
-      <div class="li-l"><div>${e.category} · ${isPeriod?'Có kỳ hạn':'Một lần'} ${st?`<span class="tier tier-${st[1]}" style="margin-left:4px">${st[0]}</span>`:''}</div><div>${when}${e.paymentMethodLabel?(' · '+e.paymentMethodLabel):''}${e.staff?(' · '+e.staff):''}${e.note?' · '+e.note:''}</div></div>
-      <div class="li-r">${fmt(e.amount)}<br><button class="iconbtn" onclick="removeExpense('${e.id}')">${ic('x')}</button></div>
+      <div class="li-l"><div>${e.category} · ${isPeriod?'Có kỳ hạn':'Một lần'} ${st?`<span class="tier tier-${st[1]}" style="margin-left:4px">${st[0]}</span>`:''}${laDuDoan?`<span class="tier" style="margin-left:4px;background:var(--warn-bg);color:var(--warn)">Dự đoán</span>`:''}</div>
+        <div>${when}${e.paymentMethodLabel?(' · '+e.paymentMethodLabel):''}${e.staff?(' · '+e.staff):''}${e.note?' · '+e.note:''}</div>
+        <div>${e.paidDate ? 'Đã trả ngày '+e.paidDate : '<span style="color:var(--warn)">Chưa trả tiền</span>'}${daTinhLai?` · đã tính lại từ ${fmt(e.estimatedAmount)}`:''}</div></div>
+      <div class="li-r">${fmt(e.amount)}<br>${laDuDoan?`<button class="iconbtn" title="Nhập số thật" onclick="openExpenseActual('${e.id}')">${ic('check')}</button>`:''}<button class="iconbtn" onclick="removeExpense('${e.id}')">${ic('x')}</button></div>
     </div>`;
   }).join('') : `<div class="muted">Chưa có chi phí nào</div>`;
 }
@@ -7227,17 +7364,60 @@ async function submitExpense(){
   const pmSel = document.getElementById('expPayMethod');
   const pm = pmSel && pmSel.value ? PAYMENT_METHODS_CACHE.find(m=>m.id===pmSel.value) : null;
   const pmFields = pm ? {paymentMethodId:pm.id, paymentMethodLabel:pm.label, baseType:pm.baseType} : {};
+  const kindBtn = document.querySelector('#expKindSeg button.active');
+  const amountKind = kindBtn ? kindBtn.dataset.kind : 'actual';
+  const paidEl = document.getElementById('expPaid');
+  const paidDate = (paidEl && paidEl.value) || null;
+  const extra = { amountKind, paidDate, ...pmFields };
   if(type==='period'){
     const startDate = document.getElementById('expStart').value;
     const endDate = document.getElementById('expEnd').value;
     if(new Date(endDate) < new Date(startDate)){ toast('⚠️ "Đến ngày" phải sau "Từ ngày"'); return; }
-    await addExpense({ periodType:'period', startDate, endDate, category, amount, note, ...pmFields });
+    await addExpense({ periodType:'period', startDate, endDate, category, amount, note, ...extra });
   } else {
     const date = document.getElementById('expDate').value;
-    await addExpense({ periodType:'onetime', date, category, amount, note, ...pmFields });
+    await addExpense({ periodType:'onetime', date, category, amount, note, ...extra });
   }
   toast('✅ Đã thêm chi phí');
   renderEntryExp();
+}
+// [đợt 3] Thay số dự đoán bằng số thật. Mở popup dùng chung thay vì prompt() — đây
+// là con số tiền, và người nhập cần thấy lại số cũ + kỳ sử dụng để đối chiếu với tờ
+// hoá đơn đang cầm trên tay.
+async function openExpenseActual(id){
+  let e = null;
+  try{ const all = await loadExpensesAll(); e = all.find(x=>x.id===id); }
+  catch(err){ showError('Không đọc được khoản chi phí: '+(err.code||err.message||err)); return; }
+  if(!e){ toast('⚠️ Không tìm thấy khoản này'); return; }
+  const ky = e.periodType==='period' ? `${e.startDate} → ${e.endDate}` : (e.date||'');
+  openEditSheet('Nhập số thật — ' + e.category, `
+    <div class="unit-explainer" style="margin-bottom:10px">
+      Kỳ sử dụng <b>${ky}</b><br>
+      Số đang dùng (dự đoán): <b>${fmt(e.amount)}</b><br>
+      Nhập số trên hoá đơn vào đây — app <b>tính lại đúng kỳ sử dụng này</b>, không đẩy chênh lệch sang tháng sau.
+    </div>
+    <div class="field"><label>Số tiền trên hoá đơn (đ)</label>
+      <input type="number" id="expActualAmt" value="${Number(e.amount)||0}"></div>
+    <div class="field"><label>Ngày trả tiền (tuỳ chọn)</label>
+      <input type="date" id="expActualPaid" value="${e.paidDate||''}">
+      <div class="hint">Chỉ dùng cho dòng tiền, không ảnh hưởng lãi/lỗ.</div></div>
+    <button class="btn" onclick="submitExpenseActual('${e.id}', ${Number(e.amount)||0})">Lưu số thật</button>
+  `);
+}
+async function submitExpenseActual(id, oldAmount){
+  const amount = Number(document.getElementById('expActualAmt').value)||0;
+  const paid = document.getElementById('expActualPaid').value || null;
+  if(amount <= 0){ toast('⚠️ Số tiền phải lớn hơn 0'); return; }
+  try{
+    await setExpenseActual(id, amount, oldAmount);
+    if(paid) await fstore.collection('expenses_gieogieo').doc(id).update({paidDate: paid});
+    logAudit('update','expense',id,{amountKind:'actual', from:oldAmount, to:amount});
+    closeEditSheet(true);
+    const chenh = amount - oldAmount;
+    toast(chenh === 0 ? '✅ Đã ghi nhận số thật'
+      : `✅ Đã tính lại — kỳ này ${chenh>0?'gánh thêm':'nhẹ đi'} ${fmt(Math.abs(chenh))}`);
+    renderEntryExp();
+  }catch(err){ console.error(err); showError('Không lưu được số thật: '+(err.code||err.message||err)); }
 }
 async function removeExpense(id){
   await deleteExpense(id); toast('🗑 Đã xoá'); renderEntryExp();
