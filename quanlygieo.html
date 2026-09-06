@@ -4906,6 +4906,11 @@ function computeDayPL({ day, expList, cats, assets, laborActual, laborPredicted,
   // mua sau ngày này hoặc đã hết thời gian khấu hao không được tính (monthlyDepreciation
   // nhận dateKey để lọc), nên số của tháng 3 không dính máy mua tháng 7.
   const khauHao = monthlyDepreciation(assets||[], dateKey)/dim;
+  // Tài sản chỉ được khấu hao KỂ TỪ ngày mua đã khai. Ngày trước ngày mua thì khấu hao
+  // bằng 0 — đúng về kế toán, nhưng nhìn vào bảng thì rất khó hiểu: khai tài sản rồi
+  // mà cả kỳ 6 ngày chỉ có một ngày mang khấu hao. Ghi lại cờ này để màn hình NÓI RA
+  // thay vì để chủ quán tự đoán.
+  const coTaiSan = (assets||[]).some(a => a.active !== false);
 
   const phiKenh = plChannelFeeForDay(day);
 
@@ -4916,6 +4921,7 @@ function computeDayPL({ day, expList, cats, assets, laborActual, laborPredicted,
     giaVon, giaVonMon, giaVonTopping, haoHut,
     bienPhiKhac: bienDoi, phiKenh, luong, luongLaDuDoan, luongNguon,
     chiPhiCoDinh: coDinh, khauHao, tongChiPhi,
+    coTaiSan,
     lai, laiTruocKhauHao: lai + khauHao,
     bienLaiPct: doanhThu ? lai/doanhThu : 0,
     dangUocTinh, choSoThat,
@@ -4940,6 +4946,8 @@ function plSumDays(days){
   (days||[]).forEach(d=>keys.forEach(k=>{ out[k] += Number(d[k])||0; }));
   out.soNgay = (days||[]).length;
   out.soNgayLo = (days||[]).filter(d=>d.lai < 0).length;
+  out.soNgayCoKhauHao = (days||[]).filter(d=>d.khauHao > 0).length;
+  out.coTaiSan = (days||[]).some(d=>d.coTaiSan);
   out.bienLaiPct = out.doanhThu ? out.lai/out.doanhThu : 0;
   // Mức tin cậy của cả kỳ = mức YẾU NHẤT trong các ngày. Một ngày chờ hoá đơn là cả
   // tháng chưa chốt được — gộp theo kiểu "đa số ngày đã xong" sẽ nói dối đúng vào
@@ -5064,7 +5072,10 @@ function plTodayHTML(pl){
         ${pl.phiKenh>0 ? plRowHTML('Phí sàn', '−', pl.phiKenh) : ''}
         ${plRowHTML('Lương', '−', pl.luong, pl.luongNguon)}
         ${plRowHTML('Chi phí cố định', '−', pl.chiPhiCoDinh, 'thuê/điện/nước… chia đều theo ngày')}
-        ${plRowHTML('Khấu hao', '−', pl.khauHao, 'nguyên giá ÷ số tháng sử dụng')}
+        ${plRowHTML('Khấu hao', '−', pl.khauHao,
+          (pl.coTaiSan && !(pl.khauHao > 0))
+            ? '<b style="color:var(--warn)">đang là 0đ</b> — tài sản đã khai có <b>ngày mua sau hôm nay</b>, hoặc đã hết thời gian khấu hao'
+            : 'nguyên giá ÷ số tháng sử dụng')}
         <div class="row" style="border-top:1.5px solid var(--line);margin-top:4px;padding-top:8px">
           <span class="rl"><b>${laLai?'Lãi':'Lỗ'} hôm nay</b></span>
           <span class="rv" style="color:${mau};font-size:17px"><b>${laLai?'':'−'}${fmt(Math.abs(pl.lai))}</b></span>
@@ -5219,7 +5230,15 @@ function plHealthHTML(tong, days, soNgayKy, ghiChuTinhLai, book){
       ${tong.phiKenh>0 ? plRowHTML('Phí sàn', '−', tong.phiKenh) : ''}
       ${plRowHTML('Lương', '−', so.luong)}
       ${plRowHTML('Chi phí cố định', '−', so.chiPhiCoDinh)}
-      ${plRowHTML('Khấu hao', '−', so.khauHao)}
+      ${plRowHTML('Khấu hao', '−', so.khauHao,
+        (!daChot && tong.coTaiSan && tong.soNgayCoKhauHao < tong.soNgay)
+          ? `<b style="color:var(--warn)">chỉ ${tong.soNgayCoKhauHao}/${tong.soNgay} ngày trong kỳ có khấu hao</b> — tài sản chỉ được khấu hao kể từ <b>ngày mua</b> đã khai`
+          : 'nguyên giá ÷ số tháng sử dụng')}
+      ${(!daChot && tong.coTaiSan && tong.soNgayCoKhauHao < tong.soNgay) ? `
+      <div class="nudge" style="margin-top:8px">
+        <span>${ic('alert')} Nếu tài sản thật ra đã mua từ trước, sửa lại <b>Ngày mua</b> ở tab Tài sản — các ngày trước đó mới có khấu hao. Form điền sẵn ngày hôm nay nên rất dễ để nguyên mà không để ý.</span>
+        <button onclick="goEntry('asset')">Sửa tài sản</button>
+      </div>` : ''}
       <div class="row" style="border-top:1.5px solid var(--line);margin-top:4px;padding-top:8px">
         <span class="rl"><b>${laLai?'Lãi':'Lỗ'} ${daChot ? book.nhan : 'kỳ này'}</b></span>
         <span class="rv" style="color:${mau};font-size:17px"><b>${laLai?'':'−'}${fmt(Math.abs(so.lai))}</b></span>
@@ -15584,6 +15603,7 @@ async function renderEntryAsset(){
         <div class="field"><label>Ngày mua</label><input type="date" id="astDate" value="${dkey(new Date())}"></div>
         <div class="field"><label>Giá trị mua (đ)</label><input type="number" id="astCost" value="0"></div>
       </div>
+      <div class="hint" style="margin:-4px 0 10px">Ô này điền sẵn ngày hôm nay — <b>nhớ sửa về đúng ngày mua thật</b>. Khấu hao chỉ được tính <b>kể từ ngày này trở đi</b>: khai máy mua năm ngoái nhưng để ngày hôm nay thì lãi/lỗ của mọi ngày trước đó sẽ thiếu hẳn phần khấu hao.</div>
       <div class="grid2">
         <div class="field"><label>Thời gian sử dụng (tháng)</label><input type="number" id="astLife" value="60"></div>
         <div class="field"><label>Giá trị thu hồi (đ)</label><input type="number" id="astResidual" value="0"></div>
@@ -15596,14 +15616,22 @@ async function renderEntryAsset(){
   let assets = [];
   try{ await ensureAuth(); assets = await loadAssetsAll(); }catch(err){ console.warn('loadAssetsAll failed', err); showError('Không đọc được tài sản: ' + (err.code||err.message||err)); document.getElementById('astList').innerHTML = '<div class="muted">Không tải được.</div>'; return; }
   const dep = monthlyDepreciation(assets, dkey(new Date()));
-  document.getElementById('astList').innerHTML = (assets.length ? assets.map(a=>{
+  // [SỬA] Trước đây danh sách KHÔNG hiện ngày mua ở đâu cả, trong khi đó chính là thứ
+  // quyết định từ ngày nào tài sản bắt đầu vào chi phí. Chủ quán thấy lãi/lỗ thiếu khấu
+  // hao mà không có cách nào biết vì sao.
+  const homNayKey = dkey(new Date());
+  const moiKhai = assets.filter(a=>a.active!==false && a.purchaseDate && a.purchaseDate >= homNayKey);
+  document.getElementById('astList').innerHTML = (moiKhai.length ? `<div class="nudge" style="margin-bottom:10px"><span>${ic('alert')} ${moiKhai.length} tài sản đang ghi ngày mua là <b>hôm nay</b>. Nếu thật ra mua từ trước, sửa lại ngày mua — không thì lãi/lỗ của mọi ngày trước đó sẽ thiếu phần khấu hao.</span></div>` : '') +
+  (assets.length ? assets.map(a=>{
     const d = (Number(a.purchaseCost||0)-Number(a.residualValue||0))/(Number(a.usefulLifeMonths)||1);
+    const chuaChay = a.purchaseDate && a.purchaseDate > homNayKey;
     return `<div class="litem">
-      <div class="li-l"><div>${a.name} ${a.active===false?'(ngưng)':''}</div><div>${fmt(a.purchaseCost)} · ${a.usefulLifeMonths} tháng · KH ${fmt(d)}/tháng</div></div>
+      <div class="li-l"><div>${a.name} ${a.active===false?'(ngưng)':''}</div><div>${fmt(a.purchaseCost)} · ${a.usefulLifeMonths} tháng · KH ${fmt(d)}/tháng</div>
+        <div>Mua ngày <b>${a.purchaseDate || '— chưa ghi'}</b>${chuaChay?' <span style="color:var(--warn)">· chưa tới ngày, chưa tính khấu hao</span>':''}${!a.purchaseDate?' <span style="color:var(--warn)">· không có ngày mua thì tính khấu hao cho MỌI ngày</span>':''}</div></div>
       <div class="li-r"><button class="iconbtn" onclick="toggleAsset('${a.id}', ${a.active===false}).then(renderEntryAsset)">${a.active===false?ic('play'):ic('pause')}</button> <button class="iconbtn" onclick="deleteAsset('${a.id}').then(renderEntryAsset)">${ic('x')}</button></div>
     </div>`;
   }).join('') : `<div class="muted">Chưa có tài sản nào</div>`) +
-  `<div class="card" style="margin-top:8px"><div class="row"><span class="rl"><b>Tổng khấu hao / tháng</b></span><span class="rv">${fmt(dep)}</span></div>
+  `<div class="card" style="margin-top:8px"><div class="row"><span class="rl"><b>Tổng khấu hao / tháng</b><div class="small-note" style="margin-top:2px">≈ ${fmt(dep/30)}/ngày trừ vào lãi hằng ngày</div></span><span class="rv">${fmt(dep)}</span></div>
   <div class="row"><span class="rl">Tổng CAPEX (đang active)</span><span class="rv">${fmt(totalCapex(assets))}</span></div></div>`;
 }
 async function submitAsset(){
