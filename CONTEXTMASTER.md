@@ -1,0 +1,306 @@
+# CONTEXT MASTER — dự án Gieo Gieo (POS + Quản lý)
+
+> Tài liệu bàn giao. Chỉ chứa thông tin cần để tiếp tục công việc.
+> Cập nhật tới commit `623b7b1`.
+
+---
+
+## 1. Bối cảnh kỹ thuật
+
+- **Hai app HTML một file**, dùng chung một Firebase project `the-cafe-33`:
+  - `posgieo.html` (~20.400 dòng) — POS cho nhân viên, chạy trên tablet
+  - `quanlygieo.html` (~16.300 dòng) — app Quản lý cho chủ quán
+- Dữ liệu: **Firestore**. Đơn hàng đọc từ **Realtime Database** (`orders_gieogieo/{month}/{day}`,
+  archive `orders_gieogieo_archive/{month}_{day}_{year}`).
+- **Firebase Storage KHÔNG truy cập được** từ môi trường của chủ quán (chặn ở tầng mạng,
+  cả REST lẫn SDK). Ảnh dụng cụ đựng đang **nhúng base64 vào Firestore** (nén 480px,
+  chất lượng 0.78, ~8–12KB/ảnh). Có nhớ trạng thái "Storage hỏng" trong localStorage 24h
+  (`ql_vessel_storage_down`) để không thử lại vô ích.
+- Nhánh làm việc: **`claude/semi-product-container-input-r1be70`** — CHƯA merge, CHƯA mở PR.
+- Ngôn ngữ giao diện + comment code: **tiếng Việt**.
+
+---
+
+## 2. QUY TẮC LÀM VIỆC (chủ quán đã yêu cầu rõ)
+
+> *"bạn tự quyết rất nhiều vấn đề, chưa đưa ra kế hoạch để thực hiện cho tôi biết trước
+> khi code! Thậm chí tôi còn không rõ công thức bạn sẽ làm như thế nào!"*
+
+**Mọi việc lớn hơn một chỗ sửa nhỏ: KẾ HOẠCH → CHỦ QUÁN DUYỆT → CODE.**
+Kế hoạch luôn phải có phần "những gì tôi tự quyết" để chủ quán bác được, và phải nêu
+công thức bằng số cụ thể.
+
+Chủ quán phát hiện lỗi rất tốt — đã bắt được 3 lỗi thật mà kiểm thử không bắt được.
+Khi chủ quán nói "sai", kiểm lại bằng số trước khi phản biện.
+
+---
+
+## 3. Tài liệu trong repo
+
+| File | Nội dung |
+|---|---|
+| `KE-HOACH-lai-lo-theo-ngay.md` | Kế hoạch lãi/lỗ theo ngày, 5 đợt, đã xong cả 5 |
+| `DAC-TA-diem-hoa-von.md` | Đặc tả điểm hoà vốn + 3 mục sửa lỗi (§8, §9, §10) |
+| `KE-HOACH-can-btp-theo-dung-cu.md` | Kế hoạch cân bán thành phẩm theo dụng cụ đựng |
+
+---
+
+## 4. CÔNG THỨC CỐT LÕI
+
+### 4.1 Lãi/lỗ một ngày (`computeDayPL`)
+
+```
+Lãi/lỗ ngày = Doanh thu
+            − Giá vốn hàng bán
+            − Hao hụt & huỷ
+            − Chi phí biến đổi
+            − Phí sàn (hiện = 0)
+            − Lương
+            − Chi phí cố định phân bổ
+            − Khấu hao phân bổ
+```
+
+**Ràng buộc bất di bất dịch:** tuần/tháng = **TỔNG CÁC NGÀY**, không có công thức riêng
+cho kỳ. Nếu viết hai công thức thì sớm muộn hai con số lệch nhau.
+
+### 4.2 Điểm hoà vốn của NGÀY (`plBreakEven`) — đã sửa lỗi
+
+```
+Biên đóng góp = 1 − (giá vốn + hao hụt + biến phí + phí sàn) / doanh thu
+Hoà vốn       = (lương + chi phí cố định + KHẤU HAO) / biên đóng góp
+```
+
+- **Khấu hao CỘNG THẲNG vào** — chỉ còn MỘT ngưỡng, không còn "ngưỡng chưa trừ khấu hao"
+  kèm "ngưỡng kể cả khấu hao".
+- Lấy số của **chính ngày đó**, không lấy trung bình 30 ngày.
+- Đẳng thức luôn đúng: `lãi = (doanh thu − hoà vốn) × biên đóng góp`.
+  **Trên ngưỡng ⟺ có lãi.** Đây là bất biến quan trọng nhất, có test canh.
+- Ngày chưa có doanh thu → mượn biên 30 ngày (`computeBreakEvenWindow`) làm tham chiếu,
+  hiện kèm chữ "ước tính".
+
+### 4.3 Điểm hoà vốn của KỲ (`computeBreakEvenCore` + `computeBreakEvenWindow`)
+
+Vẫn dùng cửa sổ **30 ngày** cho màn Sức khoẻ tài chính. Lấy số từ `computeDailyPLRange`.
+Khấu hao dùng **mức đang chạy hôm nay** (`monthlyDepreciation(assets, homNay)`), KHÔNG
+dùng trung bình quá khứ — vì ngưỡng là câu hỏi hướng tới phía trước.
+
+### 4.4 Năm mức sức khoẻ của ngày (`plMucSucKhoe`)
+
+| Mức | Điều kiện | Nhãn |
+|---|---|---|
+| `red` | doanh thu < hoà vốn | Chưa đủ đắp chi phí — hôm nay đang lỗ |
+| `amber` | ≥ hoà vốn, < mục tiêu | Đã hết lỗ, nhưng chưa tới mục tiêu |
+| `green` | ≥ mục tiêu | Đạt mục tiêu tối thiểu |
+| `blue` | ≥ 1,15 × mục tiêu | Vượt mục tiêu — ngày tốt |
+| `top` | ≥ 1,45 × mục tiêu | Vượt xa mục tiêu — ngày rất tốt |
+
+Hằng số: `PL_LV_TOT = 1.15`, `PL_LV_RATTOT = 1.45`. Chọn để khớp ví dụ chủ quán đưa
+(mục tiêu 1,68tr → 2,0tr là "tốt", 2,5tr là "rất tốt").
+CSS: `.kcard-wide.lv-red|lv-amber|lv-green|lv-blue|lv-top`.
+
+### 4.5 Ba mức tin cậy của một ngày (`mucTinCay`)
+
+| Giá trị | Nhãn | Điều kiện |
+|---|---|---|
+| `dang-chay` | Đang chạy | ngày chưa xong HOẶC lương là số dự đoán |
+| `chot-ngay` | Chờ hoá đơn | ngày đã xong, còn chi phí `amountKind:'estimate'` |
+| `chot-thang` | Đủ số thật | không còn khoản dự đoán nào |
+
+Mức của KỲ = **mức yếu nhất** của các ngày.
+Giá vốn ước theo target COGS% **KHÔNG** chặn mức cao nhất (nó không chờ hoá đơn).
+
+---
+
+## 5. QUYẾT ĐỊNH CHỦ QUÁN ĐÃ CHỐT (không tự đổi)
+
+| # | Quyết định |
+|---|---|
+| 1 | **Nguyên liệu tính khi BÁN**, không tính khi mua. Nhập 5tr bột → lãi hôm nay KHÔNG giảm 5tr. Thành chi phí khi bán ra (giá vốn) hoặc hư/đổ (hao hụt). Tab PO chỉ để cập nhật đơn giá. |
+| 2 | **Lương ngày chưa kết ca lấy từ LỊCH LÀM VIỆC đã xếp**; ngày đã qua lấy chấm công thật. |
+| 3 | **Khấu hao CÓ trừ** vào lãi, kèm dòng phụ "trước khấu hao". |
+| 4 | **Tiền chủ quán rút KHÔNG phải chi phí** — đó là chia lợi nhuận. |
+| 5 | **Chưa bán qua sàn** → phí sàn = 0, nhưng để sẵn chỗ cắm `plChannelFeeForDay(day)`. Điều kiện tiên quyết khi mở rộng: POS phải ghi doanh thu THEO KÊNH trước. |
+| 6 | **Hoá đơn về muộn → TÍNH LẠI** đúng kỳ sử dụng. "Tháng nào phải gánh đúng chi phí tháng đó." Không đẩy chênh lệch sang tháng sau. |
+| 7 | **Băng "chờ số thực tế" luôn hiện, KHÔNG cho tắt.** Đủ số thật mới bật được nút Chốt sổ. |
+| 8 | **Chi phí phân bổ**, không dùng tiền thực chi, cho con số lãi/lỗ. Dòng tiền là màn riêng. |
+| 9 | Bán thành phẩm **quy hết về gram**, không dùng ml/tỷ trọng. |
+
+---
+
+## 6. MÔ HÌNH DỮ LIỆU (các trường MỚI thêm)
+
+### `expenses_gieogieo`
+```js
+{
+  category, amount, note, status,            // cũ
+  periodType: 'onetime' | 'period',          // cũ
+  date | startDate + endDate,                // cũ — startDate/endDate = KỲ SỬ DỤNG
+  amountKind: 'actual' | 'estimate',         // MỚI (đợt 3)
+  paidDate: 'YYYY-MM-DD' | null,             // MỚI (đợt 3) — null = chưa trả
+  estimatedAmount: number,                   // MỚI — số dự đoán cũ, giữ để giải thích
+  actualAt: ISO string                       // MỚI — lúc thay bằng số thật
+}
+```
+**Bản ghi cũ (không có `amountKind`) = SỐ THẬT và ĐÃ TRẢ.** Không được coi là chưa chốt /
+chưa trả, nếu không chủ quán sẽ thấy danh sách công nợ dài toàn khoản đã trả từ đời nào.
+
+### `book_closings_gieogieo` (MỚI, đợt 4)
+doc id = `'YYYY-MM'`. Ảnh chụp lãi/lỗ lúc chốt sổ:
+```js
+{ monthKey, closedAt, closedBy, lai, laiTruocKhauHao, doanhThu, giaVon, haoHut,
+  bienPhiKhac, luong, chiPhiCoDinh, khauHao, tongChiPhi, soNgay, soNgayLo }
+```
+Tháng đã chốt hiện **số đã ghi**, không tính lại. Có số thật về sau → app hỏi
+"mở lại tháng?", KHÔNG tự sửa.
+
+### `prep_vessels_gieogieo` (dụng cụ đựng)
+```js
+{ code, name, imageUrl, imagePath, note, active,
+  variants: [{ id, label, tareG, imageUrl, imagePath }] }
+```
+Prep item có `vesselIds: []` (tối đa **5**, hằng số `PREP_MAX_VESSELS`).
+
+### `assets_gieogieo`
+`purchaseDate` **quyết định từ ngày nào tài sản bắt đầu khấu hao**. Form điền sẵn ngày
+hôm nay → đây là cái bẫy đã gây lỗi thật (khấu hao cả kỳ 6 ngày chỉ bằng 1 ngày).
+Màn Tài sản nay hiện ngày mua + cảnh báo.
+
+---
+
+## 7. HÀM CHÍNH (quanlygieo.html)
+
+| Hàm | Việc |
+|---|---|
+| `computeDayPL({day, expList, cats, assets, laborActual, laborPredicted, wasteValue, homNayKey})` | Lãi/lỗ MỘT ngày. Hàm thuần, kiểm thử được. |
+| `plSumDays(days)` | Cộng các ngày ra kỳ + mức tin cậy yếu nhất + gộp `khoanChoSoThat` |
+| `computeDailyPLRange(start, end)` | Nạp dữ liệu + tính cả dải. Trả `{days, tong, salesRes, assets}` |
+| `plBreakEven(pl, bienDuPhong)` | Hoà vốn của ngày (khấu hao đã cộng vào) |
+| `plMucSucKhoe(dt, hoaVon, target)` | 5 mức màu |
+| `plMeterHTML(dt, hoaVon, target)` | Thanh đo 2 vạch mốc |
+| `plLaiCardHTML(pl, be)` | **Thẻ GỘP** lãi + hoà vốn (màn Hôm nay) |
+| `plHealthHTML(tong, days, soNgayKy, ghiChuTinhLai, book)` | Khối lãi/lỗ kỳ (Sức khoẻ tài chính) |
+| `plChartHTML(rows)` / `plGroupByMonth(days)` | Biểu đồ cột quanh vạch 0; >62 ngày gom theo tháng |
+| `plPredictedLaborByDate(emps, scheds, s, e)` / `plScheduledHours(s)` | Lương dự đoán từ lịch (xử lý ca qua đêm, OT theo ngày) |
+| `plRecalcNotes(expList, start, end)` | Dòng "đã tính lại: X → Y ngày Z" |
+| `expenseIsEstimate` / `expenseIsUnpaid` / `setExpenseActual` / `markExpensePaid` | Dự đoán vs thật, công nợ |
+| `trangThaiThang(monthKey, expList, closings)` | 3 trạng thái tháng |
+| `chotSoThang(mk)` / `moLaiThang(mk)` / `bookAlertHTML` / `renderBookAlerts(targetId)` | Chốt sổ |
+| `plUocSaiLechPct(expList, category)` | Học sai lệch dự đoán từ lịch sử. **Chưa có lịch sử → trả `null`, KHÔNG bịa tỷ lệ.** |
+| `computeBreakEvenWindow(force)` / `computeBreakEvenCore(...)` | Hoà vốn KỲ (cửa sổ 30 ngày) |
+| `computeLedgerRealMetrics(start, end)` | Nay trả thêm `wasteByDate` (hao hụt theo từng ngày) |
+
+Hàm đã **XOÁ** (bị thẻ gộp thay thế, đừng dựng lại):
+`plTodayHTML`, `bepTodayHTML`, `bepDoiChieuHTML`.
+
+---
+
+## 8. CẤU TRÚC MÀN HÌNH (sau khi gộp)
+
+**Màn "Hôm nay" = Sức khoẻ quán** (landing, `curScreen = 'today'`):
+```
+#todayBook     — băng chốt sổ / chờ số thực tế
+#todayNudge    — nhắc nguyên liệu sắp hết, chưa cấu hình danh mục…
+#todayHealth   — danh sách việc cần xử lý (từ computeStoreHealth)
+CHỈ SỐ HÔM NAY (#todayGrid):
+   ├ thẻ DOANH THU (wide, 5 màu, 2 vạch mốc)
+   ├ thẻ LÃI/LỖ + HOÀ VỐN (gộp, có bảng tách từng dòng)
+   └ Số bill · AOV · IPT · Items bán ra
+#todayHourly   — bill theo giờ
+#todayAlerts   — cảnh báo KPI
+```
+- `switchScreen('storehealth')` **tự chuyển hướng** sang `'today'` (mọi nút cũ vẫn chạy).
+- `renderStoreHealth(targetId)` và `renderBookAlerts(targetId)` nhận targetId dùng chung.
+- Khi ở màn Hôm nay (`targetId === 'todayHealth'`): không có việc gì → **một dòng gọn**;
+  lời mời chốt sổ chỉ hiện cho **tháng gần nhất**.
+- Sidebar: một mục `{key:'today', label:'Hôm nay · Sức khoẻ quán'}`, chấm đỏ ở đó.
+
+**Màn "Sức khoẻ tài chính"** (`health`): khối "Lãi/lỗ kỳ này" (biểu đồ + bảng ngày +
+chốt sổ) → khối hoà vốn 30 ngày → các card KPI cũ.
+
+**Màn "Chi phí"** (`goEntry('exp')`): Chờ duyệt POS → **Chờ số thật** → **Chưa trả tiền**
+→ form (4 trường: kỳ sử dụng · số tiền · số thật/dự đoán · ngày trả) → cấu hình danh mục
+(Cố định/Biến đổi) → Gần đây.
+
+---
+
+## 9. BA LỖI THẬT CHỦ QUÁN ĐÃ BẮT (đã sửa — đừng để tái diễn)
+
+1. **Khấu hao trong ngưỡng hoà vốn lấy trung bình quá khứ.** Tài sản vừa nhập → cửa sổ
+   30 ngày chỉ có ~1 ngày có khấu hao → ngưỡng thấp hơn thực tế gần 300.000đ/ngày.
+   → Sửa: dùng **mức đang chạy hôm nay**.
+2. **Khấu hao cả kỳ 6 ngày = đúng 1 ngày.** Do form Tài sản điền sẵn ngày mua = hôm nay,
+   và danh sách tài sản KHÔNG hiện ngày mua ở đâu cả.
+   → Sửa: hiện ngày mua, cảnh báo, và bảng lãi/lỗ ghi rõ "chỉ N/M ngày có khấu hao".
+3. **Ngưỡng hoà vốn không cộng khấu hao** → "đã qua hoà vốn" mà vẫn lỗ.
+   → Sửa: cộng thẳng vào, và lấy số của chính ngày đó.
+
+**Bài học chung:** khi một con số có thể bằng 0 hoặc thấp bất thường vì một điều kiện
+ẩn (ngày mua, chưa khai, chưa duyệt), **màn hình phải nói ra**, không để chủ quán tự đoán.
+
+---
+
+## 10. Tính năng CÂN TRỪ BÌ (đã xong, giai đoạn trước)
+
+- Mỗi bán thành phẩm gắn tối đa **5 dụng cụ đựng**; mỗi dụng cụ có nhiều **phân loại cân**
+  (vd "ca 2L có nắp" / "không nắp"), mỗi phân loại có `tareG` và ảnh minh hoạ.
+- Áp dụng ở 3 luồng POS: nhập BTP thực tế sau nấu, đếm khi kết ca, huỷ BTP.
+- Màn huỷ BTP: **3 nút lớn bo tròn** — Nhập tay / Cân trừ bì / Bỏ hết.
+  Câu hỏi cân gì rút còn 2 lựa chọn: "Cân phần sẽ huỷ" / "Cân phần còn dùng được".
+- **KHÔNG tự mở bàn phím** khi chọn phân loại dụng cụ.
+- Icon cân là **cân điện tử** (SVG), không dùng emoji ⚖️.
+- `pwMode()` là nguồn mặc định DUY NHẤT (từng có bug: hiển thị mặc định `remain` còn
+  tính toán mặc định `discard`).
+
+---
+
+## 11. KIỂM THỬ
+
+Thư mục: `/tmp/claude-0/-home-user-gieo/<session>/scratchpad/`
+Chạy: `node <tên>.mjs` (Playwright + Chromium tại `/opt/pw-browsers/chromium-1194/chrome-linux/chrome`)
+
+| File | Số assertion | Nội dung |
+|---|---|---|
+| `pltest.mjs` | 51 | Công thức ngày, lương dự đoán, cộng ngày ra kỳ |
+| `pl2test.mjs` | 27 | Bảng + biểu đồ kỳ |
+| `pl3test.mjs` | 38 | Dự đoán vs số thật, tính lại |
+| `pl4test.mjs` | 42 | Chốt sổ, băng chờ số thật |
+| `pl5test.mjs` | 23 | Công nợ, đẳng thức hoà vốn |
+| `pl6test.mjs` | 6 | Khấu hao mức đang chạy |
+| `pl7test.mjs` | 15 | Bẫy ngày mua tài sản |
+| `pl8test.mjs` | 31 | Hoà vốn ngày, 5 mức màu, gộp thẻ, gộp màn |
+| `beptest` 22 · `bepe2e` 13 · `qltest` 14 · `togtest` 23 · `cbtest` 13 · `khotest` 24 · `postest` 20 · `hangtest` 15 · `embedpos` 6 | | các phần trước |
+
+**Phương pháp:** `page.route()` chặn `gstatic.com/firebasejs` → nạp `fbmem.js`
+(Firestore giả trong bộ nhớ), rồi mở **file HTML thật**. Lưu ý:
+- `fbmem` chỉ hỗ trợ filter `==` và `in`; `>=`/`<=` bị bỏ qua (trả hết).
+- `window.__DB` bị closure giữ → **phải mutate**, không được gán lại object mới.
+- `loadInventoryItems()` có memo 20s → gọi `memoDropItems()` sau khi seed.
+- Đơn hàng đọc từ RTDB (fbmem trả null) → **ghi đè `fetchSalesRange`** để seed doanh thu.
+- `innerText` bị `text-transform:uppercase` ảnh hưởng → regex phải dùng cờ `i`.
+
+`chk.sh <file.html>` — trích script lớn nhất rồi `node --check` (kiểm cú pháp nhanh).
+
+---
+
+## 12. GIỚI HẠN ĐÃ BIẾT (nói trước, đừng phóng đại độ chính xác)
+
+- **Không có lịch sử lương.** Đổi lương một nhân viên thì các ngày trước đó cũng tính
+  theo mức mới (giới hạn sẵn có của app).
+- **Không có lịch sử giá `costPerUnit`** của nguyên liệu.
+- Phân loại **Cố định / Biến đổi** do chủ quán khai; đoán sẵn theo tên (`guessCostType`),
+  chưa khai thì coi là **cố định** (phía an toàn).
+- Băng chốt sổ chỉ quét **3 tháng gần nhất** (`BOOK_LOOKBACK_MONTHS`) và chỉ tháng có
+  bản ghi chi phí.
+- Hoà vốn của NGÀY nhích theo ngày (đánh đổi có chủ ý, đổi lấy tính nhất quán).
+- Chưa tách biên theo kênh bán.
+
+---
+
+## 13. VIỆC CÒN LẠI / GỢI Ý TIẾP
+
+- Chủ quán cần **sửa "Ngày mua" của tài sản** về đúng ngày thật, và xem lại
+  "Thời gian sử dụng (tháng)" — phải là thời gian **dùng được thật của máy**, không phải
+  thời gian muốn thu hồi vốn. (Đang thấy khấu hao ~6tr/tháng so với doanh thu ~773k/ngày
+  → nhiều khả năng khai quá ngắn.)
+- Nhánh chưa merge, chưa mở PR.
+- Chưa có màn dòng tiền đầy đủ (mới có danh sách "Chưa trả tiền" ở màn Chi phí).
