@@ -2503,7 +2503,12 @@ const FINANCE_DEFAULTS = {cashReserve:0, initialInvestment:0, stockCountVariance
   recoveryStartDate:null,      // 'YYYY-MM-DD' chủ quán khai đè, null = tự tính
   recoveryReachedDate:null,    // ngày ĐẦU TIÊN luỹ kế chạm 100% — ghi một lần, không tự xoá
   recoveryReachedAt:null,      // ISO, lúc app ghi mốc
-  recoveryReachedCapital:0};   // tổng vốn đầu tư TẠI THỜI ĐIỂM đạt mốc
+  recoveryReachedCapital:0,    // tổng vốn đầu tư TẠI THỜI ĐIỂM đạt mốc
+  // [TIÊU HAO] Mốc bắt đầu ghi nhận theo quy trình mới (tem kho + kiểm kê định kỳ).
+  // Dữ liệu trước mốc vẫn đọc được, nhưng mọi phân tích phải nói rõ nó thuộc giai
+  // đoạn cũ — trộn hai giai đoạn vào một trung bình là cách chắc chắn nhất để ra
+  // một con số không mô tả đúng giai đoạn nào.
+  usageTrackingStart:'2026-09-06'};
 
 let CONFIG_HISTORY = []; // [{id, effectiveFrom:'YYYY-MM-DD', targets:{...}, labor:{...}}], sorted asc theo effectiveFrom
 let CONFIG = JSON.parse(JSON.stringify(DEFAULTS));
@@ -3082,10 +3087,16 @@ function saveHrSettings(patch){
 // TRẠNG THÁI HIỆN TẠI (đã chốt cùng bạn):
 //   - Đơn vị định mức: trọng lượng/thể tích THẬT (g, ml, cái) — không quy đổi "phần".
 //   - Nhập kho: cho phép ghi từ cả app Quản lý và app POS.
-//   - TRỪ KHO TỰ ĐỘNG THEO BILL: CHƯA BẬT — vì itemsArray của POS hiện chưa có itemId
-//     để khớp chính xác món ↔ nguyên liệu. Khi POS được cập nhật thêm itemId vào mỗi
-//     dòng hàng lúc confirmPay(), chỉ cần bật lại đoạn gọi applyStockTransaction(type:'sale')
-//     trong fetchOrdersForDate()/aggregateOrders() (hiện đang để trống có chủ đích).
+//   - TRỪ KHO TỰ ĐỘNG THEO BILL: **ĐÃ BẬT** (ghi chú cũ ở đây nói "chưa bật vì POS
+//     chưa có itemId" — đã lạc hậu, xoá ngày 06/09/2026). POS nay ghi itemId vào từng
+//     dòng hàng và tự trừ kho ngay lúc thanh toán: applySalesConsumptionPOS() nở định
+//     mức món ra nguyên liệu / bán thành phẩm / topping / bao bì / túi rồi ghi
+//     CONSUMPTION vào stock_transactions_gieogieo. Món chưa khai định mức thì KHÔNG
+//     trừ được gam nào, và POS ghi cảnh báo alerts_gieogieo/type='missing_recipe'
+//     kèm hitCount — đó chính là nguồn tính ĐỘ PHỦ ĐỊNH MỨC ở màn Lệch kho (thDoPhu).
+//     Hệ quả quan trọng: tổng CONSUMPTION trong sổ kho CHÍNH LÀ "tiêu hao lý thuyết
+//     theo công thức" — app Quản lý không được nở định mức lần thứ hai để tính lại,
+//     làm thế là có hai con số cho cùng một thứ.
 // ------------------------------------------------------------
 let INVENTORY_ITEMS = [];
 const STOCK_UNITS = ['g','ml','cái','kg','l','miếng'];
@@ -5932,6 +5943,694 @@ function thvHealthHTML(data, tienKy, soNgayKy){
   </div>`;
 }
 
+// ============================================================
+// TIÊU HAO THỰC TẾ · LỆCH KHO · ĐỀ XUẤT ĐỊNH LƯỢNG
+// (đặc tả: KE-HOACH-tieu-hao-thuc-te.md)
+//
+// Câu hỏi: "định mức bảo 100 ly hết 5kg, kho lại hụt 5,5kg — 0,5kg kia đi đâu?"
+//
+// Ba con số, ba nguồn KHÁC NHAU, không được lẫn vào nhau:
+//   LÝ THUYẾT = tổng CONSUMPTION trong sổ kho. POS nở định mức món ra nguyên liệu
+//               rồi trừ ngay lúc thanh toán (applySalesConsumptionPOS bên POS), nên
+//               đây CHÍNH LÀ "lẽ ra hết bao nhiêu theo công thức" — không cần đọc
+//               lại từng bill để tính lại một lần nữa.
+//   THỰC TẾ   = tồn đầu + nhập − tồn cuối, đo bằng ĐẾM TAY (stock_counts đã duyệt).
+//               Đây là thứ duy nhất biết được cả phần biến mất mà không ai khai.
+//   HAO HỤT   = tổng WASTE đã ghi. TÁCH RIÊNG, không trộn vào hai số trên.
+//
+//   Chênh chưa giải thích được = THỰC TẾ − LÝ THUYẾT − HAO HỤT ĐÃ GHI
+//
+// Vì sao phải tách "hao hụt đã ghi" ra: đổ vỡ và khai sai định mức là hai nguyên
+// nhân xử lý hoàn toàn khác nhau. Gộp một cột "lệch" thì không phân biệt được.
+//
+// KHÔNG có phiếu kiểm kê kẹp hai đầu kỳ thì KHÔNG có số thực tế — lúc đó trả về
+// duLieuDu:false kèm lý do, tuyệt đối không lấy tạm ledger rồi gọi đó là thực tế.
+// ============================================================
+
+const TH_TYPES = ['CONSUMPTION','WASTE','RECEIVING','ADJUSTMENT','TRANSFER','LOC_SET'];
+const TH_LECH_BAT_THUONG = 0.30;   // |chênh chưa giải thích| > 30% lý thuyết → gắn cờ
+const TH_MIN_KY = 3;               // dưới 3 kỳ thì chưa đề xuất định lượng
+const TH_CV_MAX = 0.20;            // hệ số biến thiên trên 20% → "dao động mạnh"
+
+// Bản ghi cũ dùng chữ thường ('waste','stock_in','adjustment') — quy về chuẩn hoa,
+// nếu không thì hao hụt của tháng trước rơi hết vào ô "khác" và biến mất khỏi phép trừ.
+function thChuanType(t){
+  const s = String(t||'').toUpperCase();
+  if(s === 'STOCK_IN') return 'RECEIVING';
+  if(s === 'SALE') return 'CONSUMPTION';
+  return TH_TYPES.includes(s) ? s : 'KHAC';
+}
+
+// Gom nhật ký kho thành { itemId: { date: { CONSUMPTION, WASTE, ... } } }, mọi số
+// đều DƯƠNG (ledger lưu số âm cho phần trừ ra — lấy trị tuyệt đối cho dễ đọc).
+function thGomLedger(txs){
+  const out = {};
+  (txs||[]).forEach(tx=>{
+    const itemId = tx.itemId; if(!itemId) return;
+    const date = tx.businessDate || String(tx.createdAt||'').slice(0,10);
+    if(!date) return;
+    const loai = thChuanType(tx.type);
+    out[itemId] = out[itemId] || {};
+    const o = out[itemId][date] = out[itemId][date] || { CONSUMPTION:0, WASTE:0, RECEIVING:0, ADJUSTMENT:0, TRANSFER:0, LOC_SET:0, KHAC:0, soDong:0 };
+    o[loai] += Math.abs(Number(tx.qty)||0);
+    o.soDong++;
+  });
+  return out;
+}
+
+// Cộng ledger của một nguyên liệu trong khoảng (tu, den] — MỞ ở đầu, ĐÓNG ở cuối.
+// Phiếu kiểm kê ngày a là tồn CUỐI ngày a, nên tiêu hao của kỳ là các ngày a+1..b.
+function thCongLedger(theoNgayCuaItem, tuKhongGomKhong, den){
+  const t = { CONSUMPTION:0, WASTE:0, RECEIVING:0, ADJUSTMENT:0, TRANSFER:0, LOC_SET:0, KHAC:0, soDong:0 };
+  Object.entries(theoNgayCuaItem||{}).forEach(([d, o])=>{
+    if(d > tuKhongGomKhong && d <= den) TH_TYPES.concat('KHAC','soDong').forEach(k=>{ t[k] += Number(o[k])||0; });
+  });
+  return t;
+}
+
+// Các phiếu kiểm kê ĐÃ DUYỆT có đếm nguyên liệu này, sắp theo ngày tăng dần.
+// Phiếu chưa duyệt KHÔNG dùng: số đếm chưa được ai kiểm lại thì chưa phải sự thật.
+function thPhieuCuaItem(counts, itemId){
+  return (counts||[])
+    .filter(c => c.status === 'approved')
+    .map(c => {
+      const d = (c.items||[]).find(x => x.itemId === itemId);
+      return d ? { countId: c.id, date: c.businessDate || String(c.createdAt||'').slice(0,10),
+                   qty: Number(d.countedBase)||0, expected: Number(d.expectedBase)||0,
+                   variance: Number(d.varianceBase)||0, countedBy: c.countedBy||'' } : null;
+    })
+    .filter(x => x && x.date)
+    .sort((a,b)=> a.date < b.date ? -1 : 1);
+}
+
+// Một KỲ = khoảng giữa hai phiếu kiểm kê LIÊN TIẾP của chính nguyên liệu đó.
+// Không dùng khoảng ngày chủ quán chọn làm kỳ: hai đầu kỳ phải là hai lần ĐẾM TAY,
+// nếu không thì "tồn đầu"/"tồn cuối" là số sổ chứ không phải số thật.
+function thTinhMotKy(phieuDau, phieuCuoi, ledgerItem){
+  const led = thCongLedger(ledgerItem, phieuDau.date, phieuCuoi.date);
+  const tonDau = phieuDau.qty, tonCuoi = phieuCuoi.qty;
+  const nhap = led.RECEIVING;
+  const thucTe = tonDau + nhap - tonCuoi;
+  const lyThuyet = led.CONSUMPTION;
+  const haoHut = led.WASTE;
+  const chenh = thucTe - lyThuyet;
+  const chuaGiaiThich = thucTe - lyThuyet - haoHut;
+  const batThuong = [];
+  if(thucTe < 0) batThuong.push('Tiêu hao thực tế ÂM — tồn cuối lớn hơn tồn đầu cộng nhập. Nhiều khả năng đếm sót lần đầu, hoặc nhập hàng chưa ghi vào sổ.');
+  if(lyThuyet > 0 && Math.abs(chuaGiaiThich) > TH_LECH_BAT_THUONG * lyThuyet)
+    batThuong.push('Lệch chưa giải thích được vượt ' + Math.round(TH_LECH_BAT_THUONG*100) + '% so với định mức.');
+  if(lyThuyet <= 0 && thucTe > 0) batThuong.push('Có tiêu hao thật nhưng định mức trừ ra 0 — món dùng nguyên liệu này chưa khai định mức.');
+  if(led.ADJUSTMENT > 0) batThuong.push('Có điều chỉnh sổ giữa kỳ (' + fmtNum(led.ADJUSTMENT,1) + ') — số sổ đã bị sửa tay, đọc kỹ trước khi kết luận.');
+  if(led.TRANSFER > 0) batThuong.push('Có chuyển kho giữa kỳ (' + fmtNum(led.TRANSFER,1) + ') — nếu chỉ đếm một vị trí thì con số này làm lệch kết quả.');
+  return {
+    kyTu: phieuDau.date, kyDen: phieuCuoi.date,
+    soNgay: Math.max(0, Math.round((new Date(phieuCuoi.date+'T12:00:00') - new Date(phieuDau.date+'T12:00:00'))/86400000)),
+    tonDau, tonCuoi, nhap, thucTe, lyThuyet, haoHutDaGhi: haoHut,
+    dieuChinh: led.ADJUSTMENT, chuyenKho: led.TRANSFER, soDongLedger: led.soDong,
+    chenh, chuaGiaiThich,
+    pctChenh: lyThuyet > 0 ? chenh/lyThuyet*100 : null,
+    heSo: lyThuyet > 0 ? thucTe/lyThuyet : null,
+    countIdDau: phieuDau.countId, countIdCuoi: phieuCuoi.countId,
+    batThuong
+  };
+}
+
+function thTrungVi(arr){
+  const a = (arr||[]).filter(x=>typeof x === 'number' && isFinite(x)).slice().sort((x,y)=>x-y);
+  if(!a.length) return null;
+  const m = Math.floor(a.length/2);
+  return a.length % 2 ? a[m] : (a[m-1]+a[m])/2;
+}
+// Hệ số biến thiên = độ lệch chuẩn ÷ trung bình. Đo mức DAO ĐỘNG, không đo mức lệch:
+// hệ số lúc 1,02 lúc 1,04 là đáng tin; lúc 0,7 lúc 1,5 thì trung bình 1,1 vô nghĩa.
+function thCV(arr){
+  const a = (arr||[]).filter(x=>typeof x === 'number' && isFinite(x));
+  if(a.length < 2) return null;
+  const tb = a.reduce((s,x)=>s+x,0)/a.length;
+  if(!(Math.abs(tb) > 0)) return null;
+  const pv = a.reduce((s,x)=>s+(x-tb)*(x-tb),0)/(a.length-1);
+  return Math.sqrt(pv)/Math.abs(tb);
+}
+function thDoTinCay(soKy, cv){
+  if(soKy < TH_MIN_KY) return { muc:'chuaDu', nhan:'Chưa đủ dữ liệu', giaiThich:'Mới có '+soKy+' kỳ có đủ hai phiếu kiểm kê — cần ít nhất '+TH_MIN_KY+' kỳ mới nói được gì chắc chắn.' };
+  if(cv != null && cv > TH_CV_MAX) return { muc:'daoDong', nhan:'Dao động mạnh', giaiThich:'Hệ số giữa các kỳ dao động '+fmtNum(cv*100,0)+'% — số trung bình chưa đáng tin, nên tìm nguyên nhân trước khi sửa định mức.' };
+  return { muc:'du', nhan:'Đáng tin', giaiThich:soKy+' kỳ, dao động '+(cv==null?'—':fmtNum(cv*100,0)+'%')+'.' };
+}
+
+// Đối chiếu TOÀN BỘ nguyên liệu. Hàm THUẦN — không đụng mạng, kiểm thử được.
+//   items  : danh mục nguyên liệu
+//   txs    : stock_transactions trong khoảng đã đọc
+//   counts : stock_counts trong khoảng đã đọc
+//   denKey : chỉ xét phiếu kiểm kê tới ngày này
+function thDoiChieu({ items, txs, counts, tuKey, denKey }){
+  const ledger = thGomLedger(txs);
+  const rows = (items||[]).map(it=>{
+    const phieu = thPhieuCuaItem(counts, it.id).filter(p => (!tuKey || p.date >= tuKey) && (!denKey || p.date <= denKey));
+    const led = ledger[it.id] || {};
+    const base = { itemId: it.id, ten: it.name||'', donVi: it.unit||'', giaVon: Number(it.costPerUnit)||0,
+                   soPhieu: phieu.length, cacKy: [], kyGanNhat: null,
+                   heSoTrungVi: null, cv: null, soKy: 0, tinCay: null, duLieuDu: false, thieuLyDo: '' };
+    if(phieu.length < 2){
+      base.thieuLyDo = phieu.length === 0
+        ? 'Chưa có phiếu kiểm kê nào (đã duyệt) đếm nguyên liệu này trong khoảng đang xem.'
+        : 'Mới có 1 phiếu kiểm kê. Cần HAI lần đếm mới đo được đã dùng hết bao nhiêu giữa hai lần đó.';
+      // Vẫn đưa ra phần ledger để nhìn được, nhưng KHÔNG gọi đó là "thực tế".
+      const t = thCongLedger(led, tuKey ? _thLui1Ngay(tuKey) : '0000-00-00', denKey || '9999-12-31');
+      base.chiCoLedger = { lyThuyet: t.CONSUMPTION, haoHutDaGhi: t.WASTE, nhap: t.RECEIVING, dieuChinh: t.ADJUSTMENT };
+      return base;
+    }
+    for(let i=1;i<phieu.length;i++) base.cacKy.push(thTinhMotKy(phieu[i-1], phieu[i], led));
+    base.kyGanNhat = base.cacKy[base.cacKy.length-1];
+    const heSo = base.cacKy.map(k=>k.heSo).filter(x=>x!=null);
+    base.soKy = heSo.length;
+    base.heSoTrungVi = thTrungVi(heSo);
+    base.cv = thCV(heSo);
+    base.tinCay = thDoTinCay(base.soKy, base.cv);
+    base.duLieuDu = true;
+    base.coBatThuong = base.cacKy.some(k=>k.batThuong.length);
+    return base;
+  });
+  // Nặng nhất lên đầu: lệch chưa giải thích được QUY RA TIỀN, vì 100g bột sữa và
+  // 100g đường là hai mức thiệt hại rất khác nhau.
+  rows.forEach(r=>{
+    r.tienLech = r.kyGanNhat ? Math.abs(r.kyGanNhat.chuaGiaiThich) * r.giaVon : 0;
+  });
+  rows.sort((a,b)=> b.tienLech - a.tienLech);
+  const coSo = rows.filter(r=>r.duLieuDu);
+  return {
+    rows,
+    tongQuan: {
+      soNguyenLieu: rows.length,
+      soCoDuLieu: coSo.length,
+      soThieuDuLieu: rows.length - coSo.length,
+      soBatThuong: rows.filter(r=>r.coBatThuong).length,
+      tienLechTong: coSo.reduce((s,r)=>s+r.tienLech,0)
+    }
+  };
+}
+function _thLui1Ngay(k){
+  const d = new Date(k+'T12:00:00'); d.setDate(d.getDate()-1); return dkey(d);
+}
+
+// Độ phủ định mức — POS ghi cảnh báo 'missing_recipe' mỗi khi bán một món mà
+// KHÔNG trừ được kho (chưa khai định mức / thiếu GOGS topping), kèm hitCount.
+// Không có con số này thì mọi kết luận về "lệch 6%" đều treo lơ lửng: 30% số ly
+// không được trừ kho đã đủ ăn hết phần chênh đó.
+function thDoPhu(alerts, soLyBanRa, tuKey, denKey){
+  const ds = (alerts||[]).filter(a => a.type === 'missing_recipe'
+    && (!tuKey || (a.businessDate||'') >= tuKey) && (!denKey || (a.businessDate||'') <= denKey));
+  const soLuotHut = ds.reduce((s,a)=>s+(Number(a.hitCount)||0), 0);
+  const mon = {};
+  ds.forEach(a=>{
+    const k = (a.itemName||'?') + (a.size ? ' ('+a.size+')' : '');
+    mon[k] = (mon[k]||0) + (Number(a.hitCount)||0);
+  });
+  const tong = Number(soLyBanRa)||0;
+  return {
+    soLuotHut, soLyBanRa: tong,
+    doPhu: tong > 0 ? Math.max(0, (tong - soLuotHut)/tong) : null,
+    monThieuDinhMuc: Object.entries(mon).map(([ten,soLuot])=>({ten, soLuot})).sort((a,b)=>b.soLuot-a.soLuot)
+  };
+}
+
+// ------------------------------------------------------------
+// NẠP DỮ LIỆU cho màn Lệch kho. Đọc thẳng theo businessDate nên không kéo cả
+// collection về — quán chạy vài tháng là hàng nghìn dòng ledger.
+// ------------------------------------------------------------
+async function thLoadDuLieu(startKey, endKey){
+  const [items, txs, counts, alerts] = await Promise.all([
+    loadInventoryItems(),
+    fstore.collection('stock_transactions_gieogieo')
+      .where('businessDate','>=',startKey).where('businessDate','<=',endKey).get()
+      .then(s=>s.docs.map(d=>({id:d.id,...d.data()}))),
+    // Phiếu kiểm kê: lấy RỘNG hơn khoảng đang xem 60 ngày về trước, vì "tồn đầu kỳ"
+    // là phiếu gần nhất TRƯỚC ngày bắt đầu — cắt đúng khoảng thì kỳ đầu luôn thiếu mốc.
+    fstore.collection('stock_counts_gieogieo')
+      .where('businessDate','>=',_thLuiNgay(startKey,60)).where('businessDate','<=',endKey).get()
+      .then(s=>s.docs.map(d=>({id:d.id,...d.data()}))),
+    fstore.collection('alerts_gieogieo').where('type','==','missing_recipe').get()
+      .then(s=>s.docs.map(d=>({id:d.id,...d.data()}))).catch(()=>[])
+  ]);
+  return { items, txs, counts, alerts };
+}
+function _thLuiNgay(k, n){
+  const d = new Date(k+'T12:00:00'); d.setDate(d.getDate()-n); return dkey(d);
+}
+
+// ------------------------------------------------------------
+// NGÀY ĐẶC BIỆT — special_days_gieogieo, doc id = 'YYYY-MM-DD'
+//
+// App KHÔNG nhúng lịch Âm: Tết ta đổi mỗi năm, nhúng một bảng lịch âm vào file
+// HTML là dựng sẵn một chỗ sẽ sai âm thầm vài năm nữa mà không ai để ý. Chủ quán
+// khai tay từng ngày, mỗi ngày mất năm giây, và đó là số liệu đúng.
+// Ngày chưa khai thì trong JSON ghi null — KHÔNG mặc định là "ngày thường",
+// vì "chưa khai" và "đã xác nhận là ngày thường" là hai chuyện khác nhau.
+// ------------------------------------------------------------
+const SPECIAL_DAY_TYPES = [
+  ['le',        'Lễ'],
+  ['tet',       'Tết'],
+  ['khuyenmai', 'Khuyến mãi'],
+  ['su_kien',   'Sự kiện gần quán'],
+  ['thoi_tiet', 'Thời tiết bất thường'],
+  ['dong_cua',  'Nghỉ / đóng cửa'],
+  ['khac',      'Khác']
+];
+function specialDayLabel(loai){
+  const f = SPECIAL_DAY_TYPES.find(x=>x[0]===loai);
+  return f ? f[1] : (loai||'');
+}
+async function loadSpecialDays(startKey, endKey){
+  let q = fstore.collection('special_days_gieogieo');
+  if(startKey && endKey) q = q.where(firebase.firestore.FieldPath.documentId(),'>=',startKey)
+                              .where(firebase.firestore.FieldPath.documentId(),'<=',endKey);
+  const snap = await q.get();
+  return snap.docs.map(d=>({date:d.id, ...d.data()})).sort((a,b)=> a.date < b.date ? 1 : -1);
+}
+function saveSpecialDay(date, data){
+  return fstore.collection('special_days_gieogieo').doc(date)
+    .set({...data, date, updatedAt:new Date().toISOString()}, {merge:true});
+}
+function deleteSpecialDay(date){
+  return fstore.collection('special_days_gieogieo').doc(date).delete();
+}
+
+// ------------------------------------------------------------
+// SỔ ĐỀ XUẤT ĐỊNH LƯỢNG — recipe_suggestions_gieogieo
+//
+// Nguyên tắc §10 của chủ quán: dữ liệu gốc → dữ liệu tính → phân tích → đề xuất là
+// BỐN TẦNG RIÊNG. Công thức khai 50g mà phân tích ra 47g thì 50g vẫn phải còn
+// nguyên ở recipes_gieogieo; 47g nằm ở đây với trạng thái "đề xuất", và chỉ ghi
+// đè khi chủ quán bấm Áp dụng — lúc đó giá trị cũ được chép vào chính bản ghi đề
+// xuất, nên lúc nào cũng quay lại được.
+// ------------------------------------------------------------
+async function loadRecipeSuggestions(){
+  const snap = await fstore.collection('recipe_suggestions_gieogieo').get();
+  return snap.docs.map(d=>({id:d.id, ...d.data()}))
+    .sort((a,b)=> String(b.taoLuc||'').localeCompare(String(a.taoLuc||'')));
+}
+function addRecipeSuggestion(data){
+  return fstore.collection('recipe_suggestions_gieogieo').add({
+    ...data, trangThai:'de_xuat', taoLuc:new Date().toISOString()
+  });
+}
+function setRecipeSuggestionState(id, patch){
+  return fstore.collection('recipe_suggestions_gieogieo').doc(id).update(patch);
+}
+
+// Nguyên liệu này đang bị dùng ở những công thức nào — quét cả ba nơi có định lượng.
+// Trả về danh sách chỗ SỬA ĐƯỢC, mỗi chỗ kèm giá trị hiện tại.
+function thNoiDungNguyenLieu(itemId){
+  const out = [];
+  Object.entries(RECIPES||{}).forEach(([key, rec])=>{
+    Object.entries((rec && rec.sizes) || {}).forEach(([size, rows])=>{
+      (rows||[]).forEach((row,idx)=>{
+        if(row && row.refType !== 'prep' && row.refType !== 'topping' && row.itemId === itemId)
+          out.push({ scope:'recipe', targetKey:key, size, idx, qty:Number(row.qty)||0,
+                     nhan:'Định mức món · ' + key.replace(/^togo:/,'') + ' · size ' + size });
+      });
+    });
+  });
+  (PREP_ITEMS||[]).forEach(p=>{
+    (p.batchInputs||[]).forEach((row,idx)=>{
+      if(row && row.itemId === itemId)
+        out.push({ scope:'prep', targetKey:p.id, size:null, idx, qty:Number(row.qty)||0,
+                   nhan:'Mẻ chế biến · ' + (p.name||p.code||p.id) });
+    });
+  });
+  Object.entries(TOPPING_RECIPES||{}).forEach(([tid, rec])=>{
+    ((rec && rec.batchInputs)||[]).forEach((row,idx)=>{
+      if(row && row.refType !== 'prep' && row.itemId === itemId)
+        out.push({ scope:'topping', targetKey:tid, size:null, idx, qty:Number(row.qty)||0,
+                   nhan:'Mẻ topping · ' + ((TOPPINGS.find(t=>t.id===tid)||{}).name || tid) });
+    });
+  });
+  return out;
+}
+
+// Ghi đè giá trị mới vào đúng chỗ, sau khi đã chép giá trị cũ vào bản ghi đề xuất.
+// Đọc lại bản gốc ngay trước khi ghi: đề xuất tạo tuần trước mà công thức đã bị
+// sửa tay từ đó thì không được đè lên bản sửa tay mà không nói gì.
+async function thApDungDeXuat(sg){
+  if(sg.scope === 'recipe'){
+    await loadRecipes();
+    const rec = RECIPES[sg.targetKey];
+    const rows = rec && rec.sizes && rec.sizes[sg.size];
+    if(!rows || !rows[sg.idx]) throw new Error('Công thức đã đổi cấu trúc — không tìm thấy dòng cần sửa');
+    const cu = Number(rows[sg.idx].qty)||0;
+    if(rows[sg.idx].itemId !== sg.itemId) throw new Error('Dòng này giờ là nguyên liệu khác — không áp dụng để tránh sửa nhầm');
+    const sizes = JSON.parse(JSON.stringify(rec.sizes));
+    sizes[sg.size][sg.idx].qty = sg.giaTriDeXuat;
+    await saveRecipe(sg.targetKey, sizes);
+    return cu;
+  }
+  if(sg.scope === 'prep'){
+    PREP_ITEMS = await loadPrepItems();
+    const p = PREP_ITEMS.find(x=>x.id===sg.targetKey);
+    if(!p) throw new Error('Không còn bán thành phẩm này');
+    const inputs = JSON.parse(JSON.stringify(p.batchInputs||[]));
+    if(!inputs[sg.idx] || inputs[sg.idx].itemId !== sg.itemId) throw new Error('Công thức mẻ đã đổi — không tìm thấy đúng dòng');
+    const cu = Number(inputs[sg.idx].qty)||0;
+    inputs[sg.idx].qty = sg.giaTriDeXuat;
+    const cost = computePrepCost(inputs, prepEffectiveYield(p));
+    await updatePrepItem(p.id, { batchInputs: inputs, costPerUnit: cost.costPerUnit, totalInputCost: cost.totalInputCost });
+    return cu;
+  }
+  if(sg.scope === 'topping'){
+    await loadToppingRecipes();
+    const rec = TOPPING_RECIPES[sg.targetKey];
+    if(!rec) throw new Error('Không còn cấu hình GOGS của topping này');
+    const inputs = JSON.parse(JSON.stringify(rec.batchInputs||[]));
+    if(!inputs[sg.idx] || inputs[sg.idx].itemId !== sg.itemId) throw new Error('Công thức mẻ topping đã đổi — không tìm thấy đúng dòng');
+    const cu = Number(inputs[sg.idx].qty)||0;
+    inputs[sg.idx].qty = sg.giaTriDeXuat;
+    const cost = computeToppingCost(inputs, rec.batchYield, rec.yieldMode, rec.qtyPerServing);
+    await saveToppingRecipe(sg.targetKey, { ...rec, batchInputs: inputs,
+      costPerBatchUnit: cost.costPerBatchUnit, costPerServing: cost.costPerServing, totalInputCost: cost.totalInputCost });
+    return cu;
+  }
+  throw new Error('Loại đề xuất không hợp lệ: ' + sg.scope);
+}
+
+// ============================================================
+// MÀN "LỆCH KHO" — đặt ba con số cạnh nhau rồi hỏi phần chênh đi đâu
+// ============================================================
+let thFrom = null, thTo = null;
+let thKetQua = null;      // { rows, tongQuan, doPhu, soLy }
+let thMoRong = {};        // itemId → true, mở xem từng kỳ
+let thDeXuatList = [];    // sổ đề xuất đang chờ
+let _thBusy = false;
+
+function thMocBatDauGhiNhan(){
+  return FINANCE.usageTrackingStart || '2026-09-06';
+}
+function thToggleRow(itemId){
+  thMoRong[itemId] = !thMoRong[itemId];
+  thVeBang();
+}
+
+async function renderKhoLech(){
+  const box = document.getElementById('khoBody');
+  const homNay = dkey(new Date());
+  // Mốc bắt đầu ghi nhận là hôm nay hoặc mới vài ngày thì khoảng mặc định chỉ dài
+  // vài ngày — chưa có nổi hai phiếu kiểm kê nào, mở ra là một màn trống trơn. Lúc
+  // đó nới về 30 ngày để còn có cái mà nhìn, và NÓI RÕ phần trước mốc là giai đoạn cũ.
+  const lui30 = _thLuiNgay(homNay, 30);
+  if(!thFrom) thFrom = thMocBatDauGhiNhan() < lui30 ? thMocBatDauGhiNhan() : lui30;
+  if(!thTo) thTo = homNay;
+  const truocMoc = thFrom < thMocBatDauGhiNhan();
+  box.innerHTML = `
+    <div class="card">
+      <div class="grid2">
+        <div class="field"><label>Từ ngày</label><input type="date" id="thFrom" value="${thFrom}"></div>
+        <div class="field" style="margin-bottom:0"><label>Đến ngày</label><input type="date" id="thTo" value="${thTo}"></div>
+      </div>
+      <div class="small-note" style="margin-top:8px">Mốc bắt đầu ghi nhận: <b>${thMocBatDauGhiNhan()}</b> (sửa ở Cấu hình → Mục tiêu → Tài chính).${truocMoc ? ' Khoảng đang mở <b>bắt đầu trước mốc</b> vì từ mốc tới nay chưa đủ dài — phần trước mốc thuộc giai đoạn cũ, đọc tham khảo thôi, đừng trộn vào cùng một trung bình.' : ' Dữ liệu trước mốc vẫn đọc được nhưng chưa chạy theo quy trình mới.'}</div>
+      <button class="btn" style="margin-top:10px" onclick="thChay()">${ic('search',15)} Đối chiếu</button>
+    </div>
+    <div class="unit-explainer" style="margin-bottom:12px">
+      <b>Ba con số, ba nguồn khác nhau:</b><br>
+      <b>Lý thuyết</b> — POS trừ kho theo định mức ngay lúc thanh toán. Đây là "lẽ ra hết bao nhiêu".<br>
+      <b>Thực tế</b> — tồn đầu + nhập − tồn cuối, đo bằng <b>hai lần đếm tay</b>. Đây là "hết thật bao nhiêu".<br>
+      <b>Hao hụt đã ghi</b> — phần nhân viên đã khai đổ/hỏng, để riêng một cột.<br>
+      <b>Chênh chưa giải thích = Thực tế − Lý thuyết − Hao hụt đã ghi.</b> Đây mới là phần cần đi tìm.<br>
+      Chưa có <b>hai phiếu kiểm kê đã duyệt</b> kẹp hai đầu thì không có số thực tế — màn này sẽ nói thẳng là thiếu chứ không lấy tạm số sổ.
+    </div>
+    <div id="thBody"></div>`;
+  if(thKetQua) thVeBang();
+}
+
+async function thChay(){
+  if(_thBusy){ toast('⏳ Đang chạy...'); return; }
+  thFrom = document.getElementById('thFrom').value;
+  thTo   = document.getElementById('thTo').value;
+  if(!thFrom || !thTo || thFrom > thTo){ toast('⚠️ Chọn khoảng ngày hợp lệ'); return; }
+  _thBusy = true;
+  const body = document.getElementById('thBody');
+  body.innerHTML = '<div class="card"><div class="muted">Đang đọc sổ kho, phiếu kiểm kê và doanh số...</div></div>';
+  try{
+    await ensureAuth();
+    const [du, sales, sg] = await Promise.all([
+      thLoadDuLieu(thFrom, thTo),
+      fetchSalesRange(new Date(thFrom+'T12:00:00'), new Date(thTo+'T12:00:00')).catch(()=>({totals:{items:0}})),
+      loadRecipeSuggestions().catch(()=>[])
+    ]);
+    // Định mức + BTP + topping: cần cho việc tạo đề xuất (biết nguyên liệu nằm ở công thức nào).
+    await Promise.all([ loadRecipes().catch(()=>({})), loadPrepItems().then(l=>{PREP_ITEMS=l;}).catch(()=>{}),
+                        loadToppingRecipes().catch(()=>({})), loadMenuForManager().catch(()=>{}) ]);
+    const kq = thDoiChieu({ items: du.items, txs: du.txs, counts: du.counts, tuKey: thFrom, denKey: thTo });
+    kq.doPhu = thDoPhu(du.alerts, (sales.totals||{}).items||0, thFrom, thTo);
+    kq.soPhieuChoDuyet = du.counts.filter(c=>c.status==='pending_review').length;
+    thKetQua = kq;
+    thDeXuatList = sg;
+    thVeBang();
+  }catch(err){
+    console.error('thChay lỗi', err);
+    body.innerHTML = '<div class="card"><div class="muted">Không đối chiếu được: '+(err.code||err.message||err)+'</div></div>';
+  }finally{ _thBusy = false; }
+}
+
+function thBadgeTinCay(t){
+  if(!t) return '';
+  const mau = t.muc==='du' ? 'tier tier-green'
+            : t.muc==='daoDong' ? 'tier" style="background:var(--warn-bg);color:var(--warn)'
+            : 'tier" style="background:var(--bb);color:var(--bi)';
+  return `<span class="${mau}">${t.nhan}</span>`;
+}
+function thSoHTML(nhan, so, donVi, mau){
+  return `<div style="min-width:96px"><div class="small-note">${nhan}</div>
+    <div style="font-weight:700;font-size:14px;${mau?'color:'+mau:''}">${fmtNum(so,1)} <span style="font-weight:500;font-size:11px;color:var(--gt)">${donVi||''}</span></div></div>`;
+}
+
+function thVeBang(){
+  const box = document.getElementById('thBody');
+  if(!box || !thKetQua) return;
+  const { rows, tongQuan, doPhu } = thKetQua;
+  const dp = doPhu || {};
+  const coDuLieu = rows.filter(r=>r.duLieuDu);
+  const thieu = rows.filter(r=>!r.duLieuDu);
+
+  const khoiDoPhu = `
+    <div class="card">
+      <div class="card-h"><h3>${ic('clipboard')} Độ phủ định mức</h3>
+        ${dp.doPhu==null ? '<span class="tier" style="background:var(--bb);color:var(--bi)">Chưa bán ly nào</span>'
+          : `<span class="tier tier-${dp.doPhu>=0.95?'green':dp.doPhu>=0.8?'amber':'red'}">${fmtNum(dp.doPhu*100,1)}%</span>`}</div>
+      ${rowInfoHTML('Số ly bán ra trong kỳ', fmtNum(dp.soLyBanRa,0))}
+      ${rowInfoHTML('Lượt bán KHÔNG trừ được kho', fmtNum(dp.soLuotHut,0))}
+      <div class="small-note" style="margin-top:8px">Món chưa khai định mức vẫn bán bình thường nhưng <b>không trừ gam nguyên liệu nào</b> — phần đó rơi hết vào cột "chênh chưa giải thích". Độ phủ ${dp.doPhu==null?'—':fmtNum(dp.doPhu*100,0)+'%'} mà lệch 6% thì con số 6% chưa nói lên điều gì.</div>
+      ${(dp.monThieuDinhMuc||[]).length ? `<div style="margin-top:8px">${dp.monThieuDinhMuc.slice(0,8).map(m=>
+        `<div class="row"><span class="rl">${escapeHtmlAttr(m.ten)}</span><span class="rv" style="color:var(--bad)">${m.soLuot} lượt</span></div>`).join('')}
+        <button class="btn outline sm" style="margin-top:8px" onclick="goKho('recipe')">Khai định mức</button></div>` : ''}
+    </div>`;
+
+  const khoiTong = `
+    <div class="card">
+      <div class="card-h"><h3>${ic('coins')} Tổng quan</h3>
+        <span class="tier tier-${tongQuan.soBatThuong?'red':'green'}">${tongQuan.soBatThuong} bất thường</span></div>
+      ${rowInfoHTML('Nguyên liệu đối chiếu được', `${tongQuan.soCoDuLieu}/${tongQuan.soNguyenLieu}`)}
+      ${rowInfoHTML('Thiếu phiếu kiểm kê', tongQuan.soThieuDuLieu)}
+      ${rowInfoHTML('Tiền lệch chưa giải thích (kỳ gần nhất)', fmt(tongQuan.tienLechTong))}
+      ${thKetQua.soPhieuChoDuyet ? `<div class="nudge" style="margin-top:8px"><span>${ic('alert')} ${thKetQua.soPhieuChoDuyet} phiếu kiểm kê <b>chưa duyệt</b> — chưa được tính vào đây.</span><button onclick="goKho('stockcount')">Duyệt</button></div>` : ''}
+    </div>`;
+
+  const theRow = (r)=>{
+    const k = r.kyGanNhat;
+    const mo = !!thMoRong[r.itemId];
+    if(!r.duLieuDu){
+      return `<div class="card" style="opacity:.85">
+        <div class="card-h"><h3>${escapeHtmlAttr(r.ten)}</h3><span class="tier" style="background:var(--bb);color:var(--bi)">Chưa đủ dữ liệu</span></div>
+        <div class="small-note">${r.thieuLyDo}</div>
+        ${r.chiCoLedger ? `<div class="small-note" style="margin-top:6px">Sổ kho trong khoảng: định mức trừ <b>${fmtNum(r.chiCoLedger.lyThuyet,1)} ${r.donVi}</b> · hao hụt đã ghi <b>${fmtNum(r.chiCoLedger.haoHutDaGhi,1)}</b> · nhập <b>${fmtNum(r.chiCoLedger.nhap,1)}</b>. <b>Đây KHÔNG phải tiêu hao thực tế</b> — chưa đo được.</div>` : ''}
+        <button class="btn outline sm" style="margin-top:8px" onclick="goKho('stockcount')">Xem kiểm kê</button>
+      </div>`;
+    }
+    const xau = k.chuaGiaiThich > 0;
+    return `<div class="card">
+      <div class="card-h"><h3>${escapeHtmlAttr(r.ten)}</h3>${thBadgeTinCay(r.tinCay)}</div>
+      <div class="small-note" style="margin-bottom:8px">Kỳ gần nhất <b>${k.kyTu} → ${k.kyDen}</b> (${k.soNgay} ngày, giữa hai lần đếm tay)</div>
+      <div style="display:flex;flex-wrap:wrap;gap:12px 18px;margin-bottom:8px">
+        ${thSoHTML('Tồn đầu', k.tonDau, r.donVi)}
+        ${thSoHTML('Nhập', k.nhap, r.donVi)}
+        ${thSoHTML('Tồn cuối', k.tonCuoi, r.donVi)}
+        ${thSoHTML('Thực tế', k.thucTe, r.donVi)}
+        ${thSoHTML('Lý thuyết', k.lyThuyet, r.donVi)}
+        ${thSoHTML('Hao hụt đã ghi', k.haoHutDaGhi, r.donVi)}
+      </div>
+      <div class="row" style="border-top:1.5px solid var(--line);padding-top:8px">
+        <span class="rl"><b>Chênh chưa giải thích được</b>
+          <div class="small-note" style="margin-top:1px">${fmtNum(k.thucTe,1)} − ${fmtNum(k.lyThuyet,1)} − ${fmtNum(k.haoHutDaGhi,1)}</div></span>
+        <span class="rv" style="color:${Math.abs(k.chuaGiaiThich)<0.001?'var(--td)':(xau?'var(--bad)':'var(--ok)')};font-size:16px">
+          <b>${k.chuaGiaiThich>=0?'':'−'}${fmtNum(Math.abs(k.chuaGiaiThich),1)} ${r.donVi}</b>
+          ${r.giaVon>0?`<div class="small-note">≈ ${fmt(Math.abs(k.chuaGiaiThich)*r.giaVon)}</div>`:''}</span>
+      </div>
+      ${k.heSo!=null ? `<div class="row"><span class="rl">Hệ số thực tế / định mức<div class="small-note" style="margin-top:1px">${r.soKy} kỳ · trung vị ${r.heSoTrungVi!=null?fmtNum(r.heSoTrungVi,3):'—'}${r.cv!=null?' · dao động '+fmtNum(r.cv*100,0)+'%':''}</div></span>
+        <span class="rv"><b>${fmtNum(k.heSo,3)}</b></span></div>` : ''}
+      ${k.batThuong.map(b=>`<div class="alert red" style="margin-top:8px"><span class="ic">${ic('alert',14)}</span><div>${b}</div></div>`).join('')}
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+        <button class="btn outline sm" onclick="thToggleRow('${r.itemId}')">${mo?'Thu gọn':'Xem '+r.soKy+' kỳ'}</button>
+        ${r.heSoTrungVi!=null ? `<button class="btn sm" onclick="thMoDeXuat('${r.itemId}')">${ic('pencil',14)} Tạo đề xuất định lượng</button>` : ''}
+      </div>
+      ${mo ? `<div style="overflow-x:auto;margin-top:10px"><table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead><tr style="text-align:right;color:var(--gt)">
+          <th style="text-align:left;padding:5px 6px">Kỳ</th><th style="padding:5px 6px">Tồn đầu</th><th style="padding:5px 6px">Nhập</th>
+          <th style="padding:5px 6px">Tồn cuối</th><th style="padding:5px 6px">Thực tế</th><th style="padding:5px 6px">Lý thuyết</th>
+          <th style="padding:5px 6px">Hao hụt</th><th style="padding:5px 6px">Chênh</th><th style="padding:5px 6px">Hệ số</th></tr></thead>
+        <tbody>${r.cacKy.map(x=>`<tr style="text-align:right;border-top:1px solid var(--line)">
+          <td style="text-align:left;padding:5px 6px">${x.kyTu}→${x.kyDen}</td>
+          <td style="padding:5px 6px">${fmtNum(x.tonDau,1)}</td><td style="padding:5px 6px">${fmtNum(x.nhap,1)}</td>
+          <td style="padding:5px 6px">${fmtNum(x.tonCuoi,1)}</td><td style="padding:5px 6px">${fmtNum(x.thucTe,1)}</td>
+          <td style="padding:5px 6px">${fmtNum(x.lyThuyet,1)}</td><td style="padding:5px 6px">${fmtNum(x.haoHutDaGhi,1)}</td>
+          <td style="padding:5px 6px;color:${x.chuaGiaiThich>0?'var(--bad)':'var(--ok)'}">${fmtNum(x.chuaGiaiThich,1)}</td>
+          <td style="padding:5px 6px">${x.heSo!=null?fmtNum(x.heSo,3):'—'}</td></tr>`).join('')}</tbody></table></div>` : ''}
+    </div>`;
+  };
+
+  const cho = thDeXuatList.filter(s=>s.trangThai==='de_xuat');
+  const khoiDeXuat = cho.length ? `
+    <div class="sec-title">Đề xuất định lượng đang chờ (${cho.length})</div>
+    <div class="small-note" style="margin-bottom:8px">Đề xuất <b>chưa</b> sửa công thức. Bấm Áp dụng mới ghi đè, và giá trị cũ được lưu lại trong chính đề xuất này để quay về được.</div>
+    ${cho.map(s=>`<div class="card">
+      <div class="card-h"><h3>${escapeHtmlAttr(s.nhan||'')}</h3><span class="tier" style="background:var(--warn-bg);color:var(--warn)">Đề xuất</span></div>
+      ${rowInfoHTML('Nguyên liệu', escapeHtmlAttr(s.tenNguyenLieu||s.itemId))}
+      ${rowInfoHTML('Đang khai', fmtNum(s.giaTriGoc,3)+' '+(s.donVi||''))}
+      ${rowInfoHTML('Đề xuất', `<b>${fmtNum(s.giaTriDeXuat,3)} ${s.donVi||''}</b> (×${fmtNum(s.heSo,3)})`)}
+      ${rowInfoHTML('Căn cứ', `${s.soKy} kỳ · ${s.doTinCay==='du'?'đáng tin':s.doTinCay==='daoDong'?'dao động mạnh':'chưa đủ dữ liệu'}${s.cv!=null?' · dao động '+fmtNum(s.cv*100,0)+'%':''} · ${s.kyTu}→${s.kyDen}`)}
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button class="btn sm" onclick="thApDung('${s.id}')">${ic('check',14)} Áp dụng</button>
+        <button class="btn outline sm" onclick="thTuChoi('${s.id}')">Từ chối</button>
+      </div>
+    </div>`).join('')}` : '';
+
+  box.innerHTML = khoiTong + khoiDoPhu + khoiDeXuat +
+    (coDuLieu.length ? `<div class="sec-title">Đối chiếu được (${coDuLieu.length}) — nặng nhất trước</div>` + coDuLieu.map(theRow).join('') : '') +
+    (thieu.length ? `<div class="sec-title">Chưa đủ dữ liệu (${thieu.length})</div>
+      <div class="small-note" style="margin-bottom:8px">Cần <b>hai phiếu kiểm kê đã duyệt</b> có đếm nguyên liệu đó thì mới đo được tiêu hao thực tế.</div>` +
+      thieu.map(theRow).join('') : '');
+}
+
+// ---------- tạo đề xuất ----------
+function thMoDeXuat(itemId){
+  const r = (thKetQua.rows||[]).find(x=>x.itemId===itemId);
+  if(!r) return;
+  const noi = thNoiDungNguyenLieu(itemId);
+  if(!noi.length){
+    openEditSheet('Tạo đề xuất — ' + r.ten,
+      `<div class="unit-explainer">Nguyên liệu này <b>không nằm trong công thức nào</b> (định mức món, mẻ chế biến, mẻ topping) nên không có chỗ nào để sửa định lượng.<br>
+       Lệch của nó nhiều khả năng là <b>hao hụt vận hành</b> chứ không phải lỗi công thức.</div>`);
+    return;
+  }
+  const heSo = r.heSoTrungVi;
+  const canhBao = r.tinCay.muc !== 'du'
+    ? `<div class="alert red" style="margin-bottom:10px"><span class="ic">${ic('alert',14)}</span><div><b>${r.tinCay.nhan}.</b> ${r.tinCay.giaiThich} Vẫn tạo được đề xuất, nhưng nên đợi thêm dữ liệu trước khi áp dụng.</div></div>` : '';
+  openEditSheet('Tạo đề xuất — ' + r.ten, `
+    ${canhBao}
+    <div class="unit-explainer" style="margin-bottom:10px">
+      Hệ số thực tế/định mức: <b>${fmtNum(heSo,3)}</b> (trung vị ${r.soKy} kỳ${r.cv!=null?', dao động '+fmtNum(r.cv*100,0)+'%':''}).<br>
+      Đề xuất = định lượng đang khai <b>× ${fmtNum(heSo,3)}</b>. Công thức gốc <b>không đổi</b> cho tới khi bạn bấm Áp dụng ở danh sách đề xuất.
+    </div>
+    ${noi.map((n,i)=>`<label class="litem" style="cursor:pointer;align-items:center">
+      <input type="checkbox" class="thSgChk" data-idx="${i}" checked style="margin-right:10px;width:18px;height:18px">
+      <div class="li-l"><div>${escapeHtmlAttr(n.nhan)}</div>
+        <div>${fmtNum(n.qty,3)} ${r.donVi} → <b>${fmtNum(n.qty*heSo,3)} ${r.donVi}</b></div></div></label>`).join('')}
+    <button class="btn" style="margin-top:12px" onclick="thTaoDeXuat('${itemId}')">${ic('save',15)} Ghi ${noi.length} đề xuất</button>
+  `);
+  _thNoiTam = noi;
+}
+let _thNoiTam = [];
+async function thTaoDeXuat(itemId){
+  const r = (thKetQua.rows||[]).find(x=>x.itemId===itemId);
+  if(!r) return;
+  const chon = [...document.querySelectorAll('.thSgChk')].filter(c=>c.checked).map(c=>_thNoiTam[Number(c.dataset.idx)]);
+  if(!chon.length){ toast('⚠️ Chưa chọn chỗ nào'); return; }
+  const k = r.kyGanNhat;
+  try{
+    await Promise.all(chon.map(n => addRecipeSuggestion({
+      scope: n.scope, targetKey: n.targetKey, size: n.size, idx: n.idx, nhan: n.nhan,
+      itemId, tenNguyenLieu: r.ten, donVi: r.donVi,
+      giaTriGoc: n.qty, giaTriDeXuat: Math.round(n.qty * r.heSoTrungVi * 1000)/1000,
+      heSo: r.heSoTrungVi, cv: r.cv, soKy: r.soKy, doTinCay: r.tinCay.muc,
+      kyTu: r.cacKy[0].kyTu, kyDen: k.kyDen, nguon: 'app'
+    })));
+    closeEditSheet(true);
+    toast('✅ Đã ghi ' + chon.length + ' đề xuất — công thức gốc chưa đổi');
+    thDeXuatList = await loadRecipeSuggestions();
+    thVeBang();
+  }catch(err){ console.error(err); showError('Không ghi được đề xuất: '+(err.code||err.message||err)); }
+}
+async function thApDung(id){
+  const s = thDeXuatList.find(x=>x.id===id);
+  if(!s) return;
+  if(!confirm(`Áp dụng đề xuất này?\n\n${s.nhan}\n${s.tenNguyenLieu}: ${fmtNum(s.giaTriGoc,3)} → ${fmtNum(s.giaTriDeXuat,3)} ${s.donVi||''}\n\nCông thức sẽ được ghi đè. Giá trị cũ được lưu lại trong đề xuất này nên quay về được.`)) return;
+  try{
+    const cu = await thApDungDeXuat(s);
+    await setRecipeSuggestionState(id, { trangThai:'da_ap_dung', apDungLuc:new Date().toISOString(), giaTriTruocKhiApDung: cu });
+    logAudit('update','recipe_suggestion',id,{scope:s.scope, targetKey:s.targetKey, tu:cu, den:s.giaTriDeXuat});
+    toast('✅ Đã áp dụng — giá trị cũ ' + fmtNum(cu,3) + ' đã được lưu lại');
+    thDeXuatList = await loadRecipeSuggestions();
+    thVeBang();
+  }catch(err){ console.error(err); showError('Không áp dụng được: '+(err.message||err)); }
+}
+async function thTuChoi(id){
+  try{
+    await setRecipeSuggestionState(id, { trangThai:'tu_choi', tuChoiLuc:new Date().toISOString() });
+    toast('Đã bỏ qua đề xuất');
+    thDeXuatList = await loadRecipeSuggestions();
+    thVeBang();
+  }catch(err){ console.error(err); showError('Không lưu được: '+(err.code||err.message||err)); }
+}
+
+// ============================================================
+// MÀN "NGÀY ĐẶC BIỆT"
+// ============================================================
+let _sdList = null;
+async function renderEntryNgayDacBiet(){
+  const body = document.getElementById('entryBody');
+  body.innerHTML = `
+    <div class="card">
+      <div class="grid2">
+        <div class="field"><label>Ngày</label><input type="date" id="sdDate" value="${dkey(new Date())}"></div>
+        <div class="field"><label>Loại</label><select id="sdType">${SPECIAL_DAY_TYPES.map(([k,l])=>`<option value="${k}">${l}</option>`).join('')}</select></div>
+      </div>
+      <div class="field"><label>Tên / ghi chú</label><input type="text" id="sdName" placeholder="VD: Quốc khánh 2/9, hoặc: giảm 20% toàn menu"></div>
+      <button class="btn" onclick="submitSpecialDay()">${ic('save',15)} Lưu ngày này</button>
+    </div>
+    <div class="unit-explainer" style="margin-bottom:12px">
+      Dùng để sau này giải thích những ngày bán vọt lên hoặc tụt hẳn — và để phần dự báo không lấy một ngày lễ ra làm chuẩn cho mọi thứ 5 khác.<br>
+      App <b>không tự biết lịch Âm</b>: Tết ta đổi ngày mỗi năm, nhúng sẵn một bảng lịch âm vào app là dựng sẵn một chỗ sẽ sai âm thầm vài năm nữa. Khai tay mất năm giây và luôn đúng.<br>
+      Ngày chưa khai thì trong file JSON ghi <b>null</b> — "chưa khai" khác với "đã xác nhận là ngày thường".
+    </div>
+    <div class="sec-title">Đã khai</div>
+    <div id="sdList"><div class="muted">Đang tải...</div></div>`;
+  try{
+    await ensureAuth();
+    _sdList = await loadSpecialDays();
+  }catch(err){
+    console.error('loadSpecialDays lỗi', err);
+    document.getElementById('sdList').innerHTML = '<div class="muted">Không đọc được: '+(err.code||err.message||err)+'</div>';
+    return;
+  }
+  document.getElementById('sdList').innerHTML = _sdList.length
+    ? _sdList.map(d=>`<div class="litem">
+        <div class="li-l"><div>${d.date} · <b>${specialDayLabel(d.loai)}</b></div><div>${escapeHtmlAttr(d.ten||'')}</div></div>
+        <div class="li-r"><button class="iconbtn" onclick="removeSpecialDay('${d.date}')">${ic('trash')}</button></div>
+      </div>`).join('')
+    : '<div class="muted">Chưa khai ngày nào.</div>';
+}
+async function submitSpecialDay(){
+  const date = document.getElementById('sdDate').value;
+  if(!date){ toast('⚠️ Chọn ngày'); return; }
+  try{
+    await saveSpecialDay(date, { loai: document.getElementById('sdType').value,
+                                 ten: (document.getElementById('sdName').value||'').trim() });
+    toast('✅ Đã lưu ' + date);
+    renderEntryNgayDacBiet();
+  }catch(err){ console.error(err); showError('Không lưu được: '+(err.code||err.message||err)); }
+}
+async function removeSpecialDay(date){
+  if(!confirm('Xoá đánh dấu ngày ' + date + '?')) return;
+  try{ await deleteSpecialDay(date); toast('🗑 Đã xoá'); renderEntryNgayDacBiet(); }
+  catch(err){ console.error(err); showError('Không xoá được: '+(err.code||err.message||err)); }
+}
+
 // ------------------------------------------------------------
 // STATUS / THRESHOLD RULES
 // ------------------------------------------------------------
@@ -6071,6 +6770,7 @@ const NAV_SECTIONS = [
     {key:'kho:toppingcogs',  label:'GOGS Topping',    go:"goKho('toppingcogs')"},
     {key:'kho:po',           label:'Đặt & nhận hàng', go:"goKho('po')",           sub:'Hoạt động'},
     {key:'kho:stockcount',   label:'Kiểm kê',         go:"goKho('stockcount')"},
+    {key:'kho:lechkho',      label:'Lệch kho & định lượng', go:"goKho('lechkho')"},
     {key:'kho:containers',   label:'Hàng đang mở & tem', go:"goKho('containers')"},
     {key:'kho:refill',       label:'Refill',          go:"goKho('refill')"},
     {key:'kho:locstock',     label:'Tồn theo vị trí', go:"goKho('locstock')"},
@@ -6091,6 +6791,7 @@ const NAV_SECTIONS = [
     {key:'entry:asset',  ic:'package',  label:'Tài sản',   go:"goEntry('asset')"},
     {key:'entry:target', ic:'settings', label:'Mục tiêu',  go:"goEntry('target')"},
     {key:'sim',          ic:'sliders',  label:'Mô phỏng',  go:"switchScreen('sim')"},
+    {key:'entry:ngaydacbiet', ic:'calendar', label:'Ngày đặc biệt', go:"goEntry('ngaydacbiet')"},
     {key:'entry:export', ic:'download', label:'Trích xuất dữ liệu', go:"goEntry('export')"},
     {key:'entry:dondep', ic:'trash',    label:'Dọn dữ liệu', go:"goEntry('dondep')"},
   ]},
@@ -7898,7 +8599,8 @@ function renderEntry(){
   if(curEntryTab==='cash') renderEntryCash();
   if(curEntryTab==='cogs') renderEntryCogs();
   if(curEntryTab==='kho') renderEntryKho();
-  if(curEntryTab==='asset') renderEntryAsset();
+  if(curEntryTab==='ngaydacbiet') renderEntryNgayDacBiet();
+  else if(curEntryTab==='asset') renderEntryAsset();
   if(curEntryTab==='target') renderEntryTarget();
   if(curEntryTab==='nv') renderEntryNv();
   if(curEntryTab==='lich') renderEntryLich();
@@ -10269,13 +10971,22 @@ const EXPORT_CONFIG_COLLS = [
   'storage_locations_gieogieo', 'packaging_rules_gieogieo', 'packaging_presets_gieogieo',
   'packaging_item_overrides_gieogieo', 'packaging_rules_config_gieogieo',
   'packaging_bagging_table_gieogieo', 'packaging_bagging_rules_gieogieo',
-  'waste_reasons_gieogieo', 'shift_checklists_gieogieo'
+  'waste_reasons_gieogieo', 'shift_checklists_gieogieo',
+  // [TIÊU HAO] Ba nguồn mới. special_days + recipe_suggestions nhỏ, lấy trọn.
+  // recipe_suggestions phải nằm trong file: nó là TẦNG "đề xuất", tách khỏi tầng
+  // "dữ liệu gốc" (recipes_gieogieo) — Claude cần thấy cả hai mới biết cái nào đã
+  // được áp dụng, cái nào còn đang chờ, và giá trị trước khi áp dụng là bao nhiêu.
+  'special_days_gieogieo', 'recipe_suggestions_gieogieo'
 ];
 // Có trường businessDate → lọc thẳng trên Firestore, không kéo cả collection về.
 const EXPORT_RANGE_COLLS = [
   'stock_transactions_gieogieo', 'prep_transactions_gieogieo', 'prep_batches_gieogieo',
   'stock_counts_gieogieo', 'employee_shifts_gieogieo', 'shift_segments_gieogieo',
-  'daily_openings_gieogieo', 'daily_closings_gieogieo'
+  'daily_openings_gieogieo', 'daily_closings_gieogieo',
+  // [TIÊU HAO] Tem từng chai/gói — mã 8 ký tự POS tự sinh khi nhận hàng. Đây là
+  // nguồn duy nhất biết được một chai mở lúc nào, hết lúc nào, còn thừa bao nhiêu
+  // lúc báo hết, và có quá hạn sau khi mở hay không.
+  'stock_containers_gieogieo'
 ];
 // Nhỏ hoặc không chắc có businessDate → lấy hết rồi lọc trong JS.
 const EXPORT_SMALL_COLLS = ['alerts_gieogieo', 'handover_records_gieogieo', 'receiving_records_gieogieo', 'purchase_orders_gieogieo'];
@@ -10375,6 +11086,125 @@ function _expSummarizeBatches(batches, prepItems){
   });
 }
 
+// ---------- [TIÊU HAO] các khối mới trong file JSON ----------
+const _EXP_THU = ['Chủ nhật','Thứ 2','Thứ 3','Thứ 4','Thứ 5','Thứ 6','Thứ 7'];
+function _expThuTrongTuan(dateKey){
+  const d = new Date(dateKey+'T12:00:00');
+  return isNaN(d) ? null : _EXP_THU[d.getDay()];
+}
+
+// Lịch sử theo NGÀY — mỗi ngày một dòng, đủ thứ để trả lời "thứ 7 có đông hơn không"
+// mà không phải tự join 5 bảng. Ngày đặc biệt để null khi CHƯA KHAI: "chưa khai"
+// khác hẳn "đã xác nhận là ngày thường", và gộp hai thứ đó lại là cách làm hỏng
+// mọi kết luận về mùa vụ.
+function _expLichSuTheoNgay(dates, banHangTheoNgay, batches, prepTxs, specialDays){
+  const sdMap = {};
+  (specialDays||[]).forEach(d=> sdMap[d.date || d.id] = d);
+  const meTheoNgay = {}, huyTheoNgay = {};
+  (batches||[]).forEach(b=>{
+    const d = b.businessDate || String(b.startedAt||'').slice(0,10);
+    if(!d) return;
+    (meTheoNgay[d] = meTheoNgay[d] || []).push({
+      prepId: b.prepId, prepName: b.prepName, soMe: Number(b.batchRatio)||0,
+      canThucTe: Number(b.qtyInitial)||0, conLai: Number(b.qtyRemaining)||0,
+      batDau: b.startedAt, xongLuc: b.finishedAt, trangThai: b.status
+    });
+  });
+  (prepTxs||[]).forEach(t=>{
+    const d = t.businessDate || String(t.createdAt||'').slice(0,10);
+    if(!d || String(t.type).toUpperCase() !== 'WASTE') return;
+    (huyTheoNgay[d] = huyTheoNgay[d] || []).push({
+      prepId: t.prepId, prepName: t.prepName, qty: Math.abs(Number(t.qty)||0), unit: t.unit, note: t.note||''
+    });
+  });
+  return dates.map(d=>{
+    const bh = banHangTheoNgay[d] || {};
+    const sd = sdMap[d];
+    return {
+      ngay: d, thu: _expThuTrongTuan(d), ngayTrongThang: Number(d.slice(8,10)), thang: Number(d.slice(5,7)),
+      // null = CHƯA KHAI. Không suy ra "ngày thường".
+      ngayDacBiet: sd ? { loai: sd.loai, ten: sd.ten||'' } : null,
+      soBill: bh.soBill||0, soLy: bh.soLy||0, doanhThu: bh.doanhThu||0,
+      banTheoMon: bh.mon||{}, banTheoTopping: bh.topping||{},
+      meDaNau: meTheoNgay[d] || [], banThanhPhamHuy: huyTheoNgay[d] || []
+    };
+  });
+}
+
+// Tem từng chai/gói — vòng đời và hạn sau khi mở. Chỉ giữ trường có ích cho phân
+// tích, bỏ phần in tem.
+function _expTomTatTem(containers){
+  return (containers||[]).map(c=>({
+    code: c.code, itemId: c.itemId, itemName: c.itemName, unit: c.unit,
+    dungTich: Number(c.baseQty)||0, trangThai: c.status,
+    nhanLuc: c.receivedAt, moLuc: c.openedAt, hetLuc: c.finishedAt,
+    hanSauKhiMo: c.expiresAt, soGioHanSauMo: Number(c.openShelfLifeHours)||0,
+    quaHanKhiConMo: !!(c.status==='open' && c.expiresAt && new Date(c.expiresAt) <= new Date()),
+    thuaKhiBaoHet: Number(c.wasteBase)||0, cachTinhThua: c.wasteBasis||'',
+    lyDoBaoHet: c.finishReason||'', daQuetMa: !!c.finishScanned, canXemLai: !!c.needsReview,
+    nguoiMo: c.openedBy||'', nguoiBaoHet: c.finishedBy||''
+  }));
+}
+
+// Phần hướng dẫn cho Claude. Viết thành NHIỆM VỤ cụ thể chứ không phải khẩu hiệu,
+// và nói rõ khi nào thì phải trả lời "chưa đủ dữ liệu" — đây là yêu cầu gắt nhất
+// của chủ quán: thà nói chưa đủ còn hơn đưa một con số nghe như chắc chắn.
+function _expHuongDanPhanTich(){
+  return {
+    boi_canh: 'Quán trà sữa mang đi Gieo Gieo. Mô hình kho 4 tầng: nguyên liệu thô → chế biến cấp 1 (bán thành phẩm) → topping → món bán. POS trừ kho TỰ ĐỘNG theo định mức ngay lúc thanh toán.',
+    ba_con_so_khac_nhau: {
+      ly_thuyet: 'Tổng CONSUMPTION trong stock_transactions — chính là lượng POS đã trừ theo định mức. Đây là "lẽ ra hết bao nhiêu".',
+      thuc_te: 'tồn đầu + nhập − tồn cuối, đo bằng HAI phiếu kiểm kê ĐÃ DUYỆT (stock_counts, status=approved). Đây là "hết thật bao nhiêu".',
+      hao_hut_da_ghi: 'Tổng WASTE — phần nhân viên đã khai đổ/hỏng. TÁCH RIÊNG, không trộn vào hai số trên.',
+      chenh_chua_giai_thich: 'thực tế − lý thuyết − hao hụt đã ghi. Đây mới là phần cần đi tìm nguyên nhân.'
+    },
+    nhiem_vu: [
+      '1. Tính tiêu hao thực tế của từng nguyên liệu theo từng kỳ (giữa hai lần kiểm kê).',
+      '2. So với tiêu hao lý thuyết theo định mức.',
+      '3. Tính chênh lệch, tỷ lệ chênh, và phần hao hụt đã được khai.',
+      '4. Chỉ ra dữ liệu bất thường (đã gắn cờ sẵn ở doi_chieu_dinh_muc[].cacKy[].batThuong) và nêu giả thuyết nguyên nhân.',
+      '5. Tính mức tiêu hao trung bình đáng tin: dùng TRUNG VỊ, nêu số kỳ và hệ số biến thiên.',
+      '6. Chỉ ra nguyên liệu nào đang thất thoát nhiều nhất TÍNH THEO TIỀN, không phải theo số lượng.',
+      '7. Chỉ ra món nào nhiều khả năng gây lệch (đối chiếu banTheoMon với nguyên liệu lệch).',
+      '8. Đề xuất sửa định mức món (recipes_gieogieo.sizes[size][].qty).',
+      '9. Đề xuất sửa định lượng mẻ chế biến (prep_items.batchInputs) và mẻ topping (topping_recipes.batchInputs).',
+      '10. Đề xuất cỡ mẻ (batchYield) nếu lô cân thật lệch nhiều so với số khai.',
+      '11. Phân tích tốc độ tiêu thụ bán thành phẩm/topping theo ngày và theo giờ nếu có.',
+      '12. Phân tích tỷ lệ dư cuối ngày và tỷ lệ phải huỷ.',
+      '13. Phân tích hạn sử dụng: tem quá hạn khi còn đang mở, phần thừa lúc báo hết (tem[].thuaKhiBaoHet).',
+      '14. Dự báo nhu cầu từng ngày cho bán thành phẩm/topping.',
+      '15. Tính riêng theo THỨ trong tuần (lich_su_theo_ngay[].thu).',
+      '16. Xem xu hướng theo ngày trong tháng và theo tháng.',
+      '17. Xem ngày đặc biệt (lich_su_theo_ngay[].ngayDacBiet) — null nghĩa là CHƯA KHAI, không phải ngày thường.',
+      '18. Đề xuất số phần cần chuẩn bị mỗi ngày.',
+      '19. Đề xuất số mẻ cần nấu (theo prep_items.batchYield hoặc yieldActualAvg nếu đã đủ 3 lô).',
+      '20. Đề xuất thời điểm nấu (dựa prepTimeMinutes, shelfLifeType/shelfLifeHours và phân bố bill theo giờ).',
+      '21. Đánh giá nguy cơ thiếu hàng / dư hàng / phải huỷ cho từng đề xuất.',
+      '22. Đề xuất cách giảm thất thoát, ưu tiên hàng HSD ngắn, khó bảo quản, tỷ lệ huỷ cao, giá trị nguyên liệu cao.'
+    ],
+    bat_buoc: [
+      'Luôn đọc do_phu_dinh_muc TRƯỚC khi kết luận về mức lệch. Độ phủ 70% nghĩa là 30% số ly bán ra KHÔNG trừ kho gam nào — phần đó rơi hết vào "chênh chưa giải thích", nên mọi tỷ lệ lệch đều bị thổi lên.',
+      'Nguyên liệu có duLieuDu=false thì KHÔNG được đưa ra kết luận về tiêu hao thực tế — chỉ được nói là chưa đo được và cần thêm phiếu kiểm kê.',
+      'Dưới 3 kỳ, hoặc hệ số biến thiên trên 20%: phải nói rõ "chưa đủ tin cậy", không được đưa một con số như thể đã chắc chắn.',
+      'KHÔNG loại bỏ dòng bất thường khỏi phép tính rồi im lặng. Dòng bất thường đã được gắn cờ, hãy phân tích riêng và nói ra.',
+      'Phân biệt rõ HAO HỤT VẬN HÀNH (đổ, hỏng, cân sai, lấy dư) với LỖI ĐỊNH MỨC (công thức khai sai) — hai nguyên nhân này xử lý khác hẳn nhau.',
+      'Mọi đề xuất phải nêu: giá trị hiện tại → giá trị đề xuất → căn cứ (số kỳ, hệ số, độ dao động) → rủi ro nếu áp dụng sai.',
+      'Nếu dữ liệu không đủ để trả lời một mục, hãy nói thẳng là không đủ và nêu CẦN THÊM GÌ (thêm phiếu kiểm kê, khai định mức cho món nào, ghi hao hụt kỹ hơn).'
+    ]
+  };
+}
+function _expNguyenTacDuLieu(){
+  return {
+    bon_tang: ['1. Dữ liệu gốc — cauHinh, duLieuTheoNgay: KHÔNG bị sửa, không bị lọc.',
+               '2. Dữ liệu tính — tomTat, doi_chieu_dinh_muc, lich_su_theo_ngay: cộng lại từ tầng 1, luôn tính lại được.',
+               '3. Phân tích — do Claude làm, nằm ngoài file này.',
+               '4. Đề xuất — recipe_suggestions_gieogieo, có trạng thái de_xuat/da_ap_dung/tu_choi.'],
+    khong_ghi_de: 'Công thức khai 50g mà phân tích ra 47g thì 50g vẫn nằm nguyên ở recipes_gieogieo. 47g nằm ở recipe_suggestions với trạng thái "de_xuat". Chỉ khi chủ quán bấm Áp dụng thì recipes mới đổi, và giá trị cũ được chép vào giaTriTruocKhiApDung nên luôn quay lại được.',
+    du_lieu_bat_thuong: 'Không xoá, không bỏ qua. Được gắn cờ ở doi_chieu_dinh_muc[].cacKy[].batThuong kèm lý do, và vẫn nằm nguyên trong dữ liệu gốc.',
+    moc_bat_dau_ghi_nhan: 'usage_tracking_start — từ ngày này quán chạy quy trình mới (tem kho từng chai + kiểm kê định kỳ). Dữ liệu trước mốc vẫn có trong file nhưng thuộc giai đoạn cũ, không nên trộn chung khi tính trung bình.'
+  };
+}
+
 // ---------- dựng bản trích xuất ----------
 async function buildExportPayload(mode){
   const startKey = exportFrom, endKey = exportTo;
@@ -10427,6 +11257,29 @@ async function buildExportPayload(mode){
     setStatus('Đang đọc bill... '+k);
   }
 
+  // [TIÊU HAO] Tem đang sống (sealed/open) không nằm trong khoảng ngày nhận hàng —
+  // chai nhận từ tháng trước mà đang mở thì vẫn phải có trong file, vì nó đang giữ
+  // hàng và đang chạy hạn sử dụng.
+  const temDangSong = await _expSafe('tem đang mở/nguyên', async()=>{
+    const snap = await fstore.collection('stock_containers_gieogieo').where('status','in',['sealed','open']).get();
+    return snap.docs.map(d=>({id:d.id, ...d.data()}));
+  }, errors) || [];
+  const temTrongKy = rangeData['stock_containers_gieogieo'] || [];
+  const temGop = [...temTrongKy];
+  const daCo = new Set(temTrongKy.map(x=>x.id));
+  temDangSong.forEach(x=>{ if(!daCo.has(x.id)) temGop.push(x); });
+
+  setStatus('Đang đối chiếu định mức với kiểm kê...');
+  // Đọc RIÊNG cho phần đối chiếu: phiếu kiểm kê phải lấy rộng hơn khoảng đang xem
+  // (tồn đầu kỳ là phiếu gần nhất TRƯỚC ngày bắt đầu), nên không dùng lại rangeData.
+  const doiChieu = await _expSafe('đối chiếu định mức', async()=>{
+    const du = await thLoadDuLieu(startKey, endKey);
+    const kq = thDoiChieu({ items: du.items, txs: du.txs, counts: du.counts, tuKey: startKey, denKey: endKey });
+    const soLy = Object.values(_expSummarizeOrders(ordersByDate)).reduce((s,d)=>s+(d.soLy||0),0);
+    kq.doPhu = thDoPhu(du.alerts, soLy, startKey, endKey);
+    return kq;
+  }, errors);
+
   setStatus('Đang cộng số liệu...');
   const tomTat = {
     banHangTheoNgay: _expSummarizeOrders(ordersByDate),
@@ -10439,6 +11292,17 @@ async function buildExportPayload(mode){
 
   const payload = {
     _mota: 'Trích xuất dữ liệu Gieo Gieo để đối chiếu định mức / chế biến / tồn kho. Mọi số lượng theo đơn vị pha chế đã khai ở inventory_items.',
+    huong_dan_phan_tich: _expHuongDanPhanTich(),
+    nguyen_tac_du_lieu: _expNguyenTacDuLieu(),
+    usage_tracking_start: (cfg['finance_gieogieo/current'] || {}).usageTrackingStart || null,
+    // Kết quả TÍNH TOÁN (tầng 2) — luôn dựng lại được từ dữ liệu gốc bên dưới.
+    doi_chieu_dinh_muc: doiChieu ? doiChieu.rows : null,
+    do_phu_dinh_muc: doiChieu ? doiChieu.doPhu : null,
+    tong_quan_lech: doiChieu ? doiChieu.tongQuan : null,
+    lich_su_theo_ngay: _expLichSuTheoNgay(dates, _expSummarizeOrders(ordersByDate),
+      rangeData['prep_batches_gieogieo'], rangeData['prep_transactions_gieogieo'],
+      cfg['special_days_gieogieo']),
+    tem_kho: _expTomTatTem(temGop),
     _taoLuc: new Date().toISOString(),
     _khoang: { tuNgay: startKey, denNgay: endKey, soNgay: dates.length },
     _cheDo: mode,
@@ -10510,6 +11374,9 @@ async function runExport(mode){
         <div class="row"><span class="rl">Lô chế biến trong kỳ</span><span class="rv">${t.loCheBien.length}</span></div>
         <div class="row"><span class="rl">Món đã khai định mức</span><span class="rv">${(payload.cauHinh['recipes_gieogieo']||[]).length}</span></div>
         <div class="row"><span class="rl">Phiếu kiểm kê</span><span class="rv">${(payload.duLieuTheoNgay['stock_counts_gieogieo']||[]).length}</span></div>
+        <div class="row"><span class="rl">Nguyên liệu đối chiếu được<div class="small-note" style="margin-top:2px">cần 2 phiếu kiểm kê đã duyệt kẹp hai đầu kỳ</div></span><span class="rv">${payload.tong_quan_lech ? payload.tong_quan_lech.soCoDuLieu + '/' + payload.tong_quan_lech.soNguyenLieu : '—'}</span></div>
+        <div class="row"><span class="rl">Độ phủ định mức<div class="small-note" style="margin-top:2px">% số ly bán ra CÓ trừ được kho</div></span><span class="rv" style="color:${payload.do_phu_dinh_muc && payload.do_phu_dinh_muc.doPhu!=null && payload.do_phu_dinh_muc.doPhu<0.8 ? 'var(--bad)':'inherit'}">${payload.do_phu_dinh_muc && payload.do_phu_dinh_muc.doPhu!=null ? fmtNum(payload.do_phu_dinh_muc.doPhu*100,1)+'%' : '—'}</span></div>
+        <div class="row"><span class="rl">Tem kho trong file</span><span class="rv">${(payload.tem_kho||[]).length}</span></div>
         ${payload._loiKhiDoc.length ? `<div class="row"><span class="rl">Phần đọc lỗi</span><span class="rv" style="color:var(--bad)">${payload._loiKhiDoc.length}</span></div>` : ''}
       </div>
       ${soDongKho===0 && soBill>0 ? `<div class="alert red"><span class="ic">!</span><div>Có ${soBill} bill nhưng <b>không đọc được dòng giao dịch kho nào</b> trong khoảng này. Nhiều khả năng dữ liệu kho nằm ngoài khoảng ngày đã chọn, hoặc bị chặn quyền đọc. Đổi khoảng ngày rồi thử lại trước khi gửi file đi.</div></div>` : ''}
@@ -10925,6 +11792,7 @@ async function renderEntryKho(){
   else if(curKhoSub==='locstock') renderKhoLocStock();
   else if(curKhoSub==='stockcount') renderKhoStockCount();
   else if(curKhoSub==='containers') renderKhoContainers();
+  else if(curKhoSub==='lechkho') renderKhoLech();
   else if(curKhoSub==='wastereasons') renderKhoWasteReasons();
   else if(curKhoSub==='checklist') renderKhoChecklist();
   // 'stockin' đã gộp vào màn Đặt & nhận hàng; 'prephistory'/'prepbatches' đã gộp
@@ -16225,6 +17093,7 @@ function renderEntryTarget(){
       <div class="field"><label>Cash reserve hiện có (đ)</label><input type="number" id="fCash" value="${f.cashReserve}"></div>
       <div class="field"><label>Vốn đầu tư ban đầu (đ) <span class="small-note">— để trống/0 để tự tính từ tổng CAPEX</span></label><input type="number" id="fInv" value="${f.initialInvestment}"></div>
       <div class="field"><label>Ngày bắt đầu tính thu hồi vốn <span class="small-note">— để trống = tự lấy ngày mua tài sản sớm nhất</span></label><input type="date" id="fRecStart" value="${f.recoveryStartDate||''}"></div>
+      <div class="field"><label>Mốc bắt đầu ghi nhận tiêu hao <span class="small-note">— ngày bắt đầu chạy tem kho + kiểm kê định kỳ</span></label><input type="date" id="fUsageStart" value="${f.usageTrackingStart||'2026-09-06'}"></div>
       <div class="hint" style="margin:-4px 0 10px">Cơ chế <b>Thu hồi vốn</b> đo tiến độ lấy lại vốn trên <b>tổng nguyên giá tài sản đang dùng</b> (xem "Tổng CAPEX" ở màn Tài sản), <b>không</b> lấy ô "Vốn đầu tư ban đầu" phía trên — ô đó chỉ dùng cho màn What-if. Khoản cọc mặt bằng, sửa chữa, biển hiệu muốn được tính vào tiến độ thu hồi thì <b>khai thành tài sản</b>.</div>
       ${f.recoveryReachedDate ? `<div class="hint" style="margin:-4px 0 10px">Đã ghi mốc <b>thu hồi đủ 100%</b> ngày <b>${f.recoveryReachedDate}</b>, với tổng vốn ${fmt(f.recoveryReachedCapital||0)}. Mốc này không tự xoá.</div>` : ''}
       <button class="btn" onclick="submitFinance()">Lưu</button>
@@ -16264,7 +17133,9 @@ async function submitFinance(){
   await saveFinance({cashReserve:Number(fCash.value), initialInvestment:Number(fInv.value),
     // Ô trống = null (tự lấy ngày mua tài sản sớm nhất), KHÔNG lưu chuỗi rỗng —
     // chuỗi rỗng lọt vào thvMocBatDau() sẽ bị coi là "chủ quán đã khai".
-    recoveryStartDate: document.getElementById('fRecStart').value || null});
+    recoveryStartDate: document.getElementById('fRecStart').value || null,
+    usageTrackingStart: document.getElementById('fUsageStart').value || null});
+  thFrom = null; // mốc đổi thì màn Lệch kho phải lấy lại khoảng mặc định mới
   _thvCache = null; // mốc đổi thì luỹ kế phải tính lại, không dùng số cũ trong phiên
   toast('✅ Đã lưu tài chính');
 }

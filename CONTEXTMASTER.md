@@ -43,6 +43,7 @@ Khi chủ quán nói "sai", kiểm lại bằng số trước khi phản biện.
 | `DAC-TA-diem-hoa-von.md` | Đặc tả điểm hoà vốn + 3 mục sửa lỗi (§8, §9, §10) |
 | `KE-HOACH-can-btp-theo-dung-cu.md` | Kế hoạch cân bán thành phẩm theo dụng cụ đựng |
 | `KE-HOACH-thu-hoi-von.md` | Cơ chế THU HỒI VỐN — chủ quán đã duyệt, đã code xong |
+| `KE-HOACH-tieu-hao-thuc-te.md` | Tiêu hao thực tế · lệch kho · đề xuất định lượng · dự báo (Đợt 1 xong, Đợt 2 chờ dữ liệu) |
 
 ---
 
@@ -131,6 +132,29 @@ Mốc bắt đầu  = ngày mua tài sản sớm nhất, hoặc FINANCE.recovery
 - Chạm 100% lần đầu → **ghi mốc** vào `finance_gieogieo/current`, không tự xoá. Mua
   thêm tài sản sau đó làm tiến độ tụt xuống dưới 100% và màn hình **nói ra** chuyện đó.
 
+### 4.7 Lệch kho — ba con số, ba nguồn KHÁC NHAU
+
+```
+LÝ THUYẾT = Σ CONSUMPTION trong stock_transactions
+            (POS tự nở định mức và trừ kho ngay lúc thanh toán — applySalesConsumptionPOS)
+THỰC TẾ   = tồn đầu + nhập − tồn cuối, đo bằng HAI phiếu kiểm kê ĐÃ DUYỆT
+HAO HỤT   = Σ WASTE đã ghi — TÁCH RIÊNG, không trộn vào hai số trên
+
+Chênh chưa giải thích = THỰC TẾ − LÝ THUYẾT − HAO HỤT ĐÃ GHI
+Hệ số hiệu chỉnh      = THỰC TẾ ÷ LÝ THUYẾT   → định lượng đề xuất = định lượng cũ × hệ số
+```
+
+- **Kỳ = khoảng giữa HAI lần đếm tay**, không phải khoảng ngày chủ quán chọn. Phiếu ngày
+  a là tồn cuối ngày a, nên tiêu hao của kỳ là các ngày a+1..b.
+- `ADJUSTMENT` và `TRANSFER` **không** trừ vào tiêu hao thực tế (một cái là hệ quả của
+  chính phiếu kiểm kê, một cái chỉ đổi chỗ) — nhưng có thì phải **gắn cờ nói ra**.
+- Thiếu hai phiếu → `duLieuDu:false` + lý do. **Không** lấy tạm ledger gọi là thực tế.
+- Đề xuất dùng **TRUNG VỊ**, cần ≥ 3 kỳ và hệ số biến thiên ≤ 20% mới gọi là đáng tin.
+- **Độ phủ định mức** (`thDoPhu`, từ cảnh báo `missing_recipe` của POS) đi kèm mọi kết
+  quả: độ phủ 70% thì mọi tỷ lệ lệch đều bị thổi lên — nói con số lệch mà giấu độ phủ
+  là nói dối bằng số thật.
+- Xếp theo **TIỀN** lệch, không theo số lượng: 10g trà ô long nặng hơn 100g đường.
+
 ## 5. QUYẾT ĐỊNH CHỦ QUÁN ĐÃ CHỐT (không tự đổi)
 
 | # | Quyết định |
@@ -144,6 +168,7 @@ Mốc bắt đầu  = ngày mua tài sản sớm nhất, hoặc FINANCE.recovery
 | 7 | **Băng "chờ số thực tế" luôn hiện, KHÔNG cho tắt.** Đủ số thật mới bật được nút Chốt sổ. |
 | 8 | **Chi phí phân bổ**, không dùng tiền thực chi, cho con số lãi/lỗ. Dòng tiền là màn riêng. |
 | 9 | Bán thành phẩm **quy hết về gram**, không dùng ml/tỷ trọng. |
+| 11 | **Lệch kho**: thực tế đo bằng kiểm kê, thiếu phiếu thì **báo "chưa đủ dữ liệu"** chứ không lấy ledger; hao hụt đã ghi **tách riêng** khỏi chênh chưa giải thích; đề xuất định lượng **không tự áp dụng**, phải bấm Áp dụng và **lưu giá trị cũ**; dòng bất thường **gắn cờ, không xoá**; ngày lễ/Tết **khai tay** (app không nhúng lịch Âm). |
 | 10 | **Thu hồi vốn = lãi TRƯỚC khấu hao**, ngày lỗ **trừ vào** luỹ kế, mẫu số **LUÔN là tổng CAPEX** (không dùng ô "Vốn đầu tư ban đầu"), mua thêm tài sản sau khi đạt mốc thì **tiến độ tụt xuống kèm ghi chú**. Sổ lãi/lỗ cũ **giữ nguyên 100%**. |
 
 ---
@@ -181,13 +206,35 @@ Tháng đã chốt hiện **số đã ghi**, không tính lại. Có số thật
 ```
 Prep item có `vesselIds: []` (tối đa **5**, hằng số `PREP_MAX_VESSELS`).
 
+### `special_days_gieogieo` (MỚI) — doc id = 'YYYY-MM-DD'
+```js
+{ date, loai:'le'|'tet'|'khuyenmai'|'su_kien'|'thoi_tiet'|'dong_cua'|'khac', ten, updatedAt }
+```
+Ngày CHƯA KHAI → trong JSON là `null`, **không** mặc định là "ngày thường".
+
+### `recipe_suggestions_gieogieo` (MỚI) — sổ đề xuất, TÁCH khỏi công thức gốc
+```js
+{ scope:'recipe'|'prep'|'topping', targetKey, size, idx, itemId, tenNguyenLieu, donVi,
+  giaTriGoc, giaTriDeXuat, heSo, cv, soKy, doTinCay:'du'|'daoDong'|'chuaDu',
+  kyTu, kyDen, nguon:'app'|'claude', nhan,
+  trangThai:'de_xuat'|'da_ap_dung'|'tu_choi', taoLuc, apDungLuc, giaTriTruocKhiApDung }
+```
+Bấm **Áp dụng** mới ghi đè công thức, và **chép giá trị cũ** vào `giaTriTruocKhiApDung`.
+
+### `stock_containers_gieogieo` (POS ghi, Quản lý đọc) — TEM TỪNG CHAI/GÓI
+Mã **8 ký tự ngẫu nhiên**, bảng 32 chữ đã bỏ I/L/O/U. Vòng đời `sealed → open → finished`,
+`expiresAt` tính từ lúc mở, `wasteBase` = phần thừa lúc báo hết, `needsReview` khi báo
+hết lúc còn > 25%. **Đây chính là "mã riêng cho từng nguyên liệu"** — không cần thêm
+trường `code` vào `inventory_items`.
+
 ### `finance_gieogieo/current` (4 trường MỚI — thu hồi vốn)
 ```js
 {
   recoveryStartDate: 'YYYY-MM-DD' | null,   // mốc bắt đầu, null = ngày mua tài sản sớm nhất
   recoveryReachedDate: 'YYYY-MM-DD' | null, // ngày ĐẦU TIÊN chạm 100% — ghi một lần, không tự xoá
   recoveryReachedAt: ISO string,
-  recoveryReachedCapital: number            // tổng vốn TẠI THỜI ĐIỂM đạt mốc
+  recoveryReachedCapital: number,           // tổng vốn TẠI THỜI ĐIỂM đạt mốc
+  usageTrackingStart: 'YYYY-MM-DD'          // mốc bắt đầu ghi nhận tiêu hao (mặc định 2026-09-06)
 }
 ```
 Bản ghi cũ không có 4 trường này → **chưa đạt mốc**, mốc bắt đầu tự tính.
@@ -232,6 +279,14 @@ Màn Tài sản nay hiện ngày mua + cảnh báo, và **có nút Sửa** (`ope
 | `openAssetEdit(id)` / `submitAssetEdit(id)` / `updateAsset(id, data)` | **Sửa tài sản** (popup dùng chung `openEditSheet`) |
 | `removeAsset(id)` | Xoá tài sản — **có hỏi lại**, nói rõ khấu hao quá khứ sẽ biến mất |
 | `assetCacheDirty()` | Mọi thay đổi tài sản xoá cả `_thvCache` lẫn `_bepCache` |
+| `thDoiChieu({items,txs,counts,tuKey,denKey})` | **Hàm thuần** — đối chiếu lý thuyết/thực tế từng nguyên liệu, từng kỳ |
+| `thGomLedger` / `thCongLedger` / `thPhieuCuaItem` / `thTinhMotKy` | Bộ máy con của `thDoiChieu` |
+| `thTrungVi` / `thCV` / `thDoTinCay` | Trung vị · hệ số biến thiên · 3 mức tin cậy (`TH_MIN_KY`=3, `TH_CV_MAX`=0,2) |
+| `thDoPhu(alerts, soLy, tu, den)` | Độ phủ định mức từ cảnh báo `missing_recipe` |
+| `thLoadDuLieu` / `renderKhoLech` / `thChay` / `thVeBang` | Nạp dữ liệu + màn **Lệch kho & định lượng** |
+| `thNoiDungNguyenLieu(itemId)` / `thApDungDeXuat(sg)` | Tìm mọi chỗ dùng nguyên liệu / ghi đè có lưu giá trị cũ |
+| `loadSpecialDays` / `saveSpecialDay` / `renderEntryNgayDacBiet` | Ngày lễ/Tết/khuyến mãi |
+| `_expHuongDanPhanTich` / `_expNguyenTacDuLieu` / `_expLichSuTheoNgay` / `_expTomTatTem` | Bốn khối mới trong file JSON |
 
 Hàm đã **XOÁ** (bị thẻ gộp thay thế, đừng dựng lại):
 `plTodayHTML`, `bepTodayHTML`, `bepDoiChieuHTML`.
@@ -317,6 +372,8 @@ Chạy: `node <tên>.mjs` (Playwright + Chromium tại `/opt/pw-browsers/chromiu
 | `thv2test.mjs` | 32 | Thu hồi vốn — dựng HTML thật của thẻ + khối, 2 giai đoạn |
 | `thvboot.mjs` | 10 | Mở file HTML thật trong Chromium (Firebase giả tối thiểu), cắm thẻ vào DOM |
 | `asstest.mjs` | 32 | Sửa tài sản: điền sẵn đúng số, xem trước khấu hao, chặn số vô lý, xoá phải hỏi lại |
+| `thtest.mjs` | 53 | Lệch kho — hàm thuần (ví dụ 5kg/5,5kg, thiếu phiếu, cờ bất thường, trung vị/CV, xếp theo tiền) |
+| `th2test.mjs` | 49 | Màn Lệch kho, tạo/áp dụng đề xuất (công thức gốc không đổi tới khi bấm Áp dụng), 4 khối JSON |
 | `beptest` 22 · `bepe2e` 13 · `qltest` 14 · `togtest` 23 · `cbtest` 13 · `khotest` 24 · `postest` 20 · `hangtest` 15 · `embedpos` 6 | | các phần trước |
 
 **Phương pháp:** `page.route()` chặn `gstatic.com/firebasejs` → nạp `fbmem.js`

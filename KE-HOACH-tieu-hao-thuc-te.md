@@ -1,7 +1,37 @@
 # KẾ HOẠCH — TIÊU HAO THỰC TẾ · LỆCH KHO · ĐỀ XUẤT ĐỊNH LƯỢNG · DỰ BÁO MẺ
 
-> Trạng thái: **CHỜ CHỦ QUÁN DUYỆT**. Chưa viết dòng code nào.
+> Trạng thái: **CHỦ QUÁN ĐÃ DUYỆT ĐỢT 1 — ĐÃ CODE XONG**. Đợt 2 (dự báo) để sau.
 > Quy tắc §2 CONTEXTMASTER: kế hoạch → chủ quán duyệt → code.
+>
+> Chủ quán chốt: (1) làm Đợt 1 — ghi nhận + đối chiếu + JSON; (2) thiếu phiếu kiểm kê
+> thì **báo "chưa đủ dữ liệu"**, không lấy tạm ledger; (3) mã nguyên liệu — **POS đã tự
+> sinh rồi**, xem §0b.
+
+---
+
+## 0b. HAI PHÁT HIỆN TỪ FILE POS — đổi thiết kế theo hướng NHẸ HƠN
+
+**a) POS đã tự trừ kho theo bill.** `applySalesConsumptionPOS` nở định mức món ra
+nguyên liệu / bán thành phẩm / topping / bao bì / túi, ghi thẳng `CONSUMPTION` vào
+`stock_transactions_gieogieo` ngay lúc thanh toán, và ghi cảnh báo `missing_recipe`
+(kèm `hitCount`) cho món chưa khai định mức.
+
+→ **Tiêu hao lý thuyết đã nằm sẵn trong sổ kho.** Không cần đọc lại từng bill để tính
+lại một lần nữa — vừa nhẹ hơn nhiều, vừa tránh việc app Quản lý và app POS có hai cách
+nở định mức khác nhau rồi ra hai con số khác nhau.
+(Ghi chú trong `quanlygieo.html` nói "POS chưa có itemId, chưa bật trừ kho tự động" là
+**đã lạc hậu** — đã sửa lại.)
+
+**b) "Mã riêng cho từng nguyên liệu" thực chất là MÃ TEM TỪNG CHAI/GÓI.**
+`stock_containers_gieogieo`: mỗi lần nhận hàng, POS sinh mã **8 ký tự ngẫu nhiên** từ
+bảng 32 chữ đã bỏ I, L, O, U (hay đọc nhầm thành 1, 1, 0, V trên tem in nhiệt), kiểm
+tra trùng rồi in tem. Mỗi chai có vòng đời riêng: `sealed → open → finished`, có
+`expiresAt` tính từ lúc mở, có `wasteBase` (phần còn thừa lúc báo hết) và cờ
+`needsReview` khi báo hết lúc còn trên 25%.
+
+→ **KHÔNG thêm ô "Mã" vào `inventory_items`** như kế hoạch ban đầu. Dựng thêm một hệ
+mã thứ hai chỉ tạo ra hai thứ cùng tên "mã" mà không khớp nhau. Thay vào đó dữ liệu tem
+được đưa vào file JSON (`tem_kho`) để phân tích hạn dùng và phần thừa.
 
 ---
 
@@ -275,3 +305,28 @@ một ngày dùng gấp > 3 lần trung vị.
 - `aggregateOrders` / `computeUnitCogsFromRecipe` — **đọc lại chứ không sửa**.
 - `recipes_gieogieo`, `prep_items_gieogieo` — chỉ ghi khi chủ quán bấm Áp dụng.
 - Màn Trích xuất hiện tại — chỉ **thêm** khối, không bỏ khối nào.
+
+---
+
+## 10. ĐÃ LÀM — ĐỢT 1
+
+| Nơi | Nội dung |
+|---|---|
+| `thGomLedger` · `thCongLedger` · `thPhieuCuaItem` · `thTinhMotKy` | Bộ máy đối chiếu, **hàm thuần** |
+| `thDoiChieu({items,txs,counts,tuKey,denKey})` | Kết quả từng nguyên liệu: từng kỳ · hệ số · trung vị · dao động · độ tin cậy · cờ bất thường, xếp theo **TIỀN** lệch |
+| `thTrungVi` · `thCV` · `thDoTinCay` | Trung vị (không phải trung bình), hệ số biến thiên, 3 mức tin cậy |
+| `thDoPhu(alerts, soLy, …)` | Độ phủ định mức từ cảnh báo `missing_recipe` của POS |
+| `thLoadDuLieu` | Đọc ledger + kiểm kê (rộng thêm 60 ngày về trước) + cảnh báo |
+| Màn **Kho → Lệch kho & định lượng** | Bảng đối chiếu, mở xem từng kỳ, cờ bất thường, độ phủ, phiếu chờ duyệt |
+| `special_days_gieogieo` + màn **Cấu hình → Ngày đặc biệt** | 7 loại ngày, khai tay |
+| `recipe_suggestions_gieogieo` + `thNoiDungNguyenLieu` + `thApDungDeXuat` | Sổ đề xuất tách khỏi công thức gốc, áp dụng được cho **định mức món · mẻ chế biến · mẻ topping**, lưu giá trị cũ |
+| `_expHuongDanPhanTich` · `_expNguyenTacDuLieu` | 22 nhiệm vụ + 7 nguyên tắc bắt buộc trong file JSON |
+| `_expLichSuTheoNgay` · `_expTomTatTem` | Lịch sử theo ngày (thứ, ngày đặc biệt, mẻ nấu, huỷ) + tem kho |
+| `FINANCE.usageTrackingStart` | Mốc bắt đầu ghi nhận, mặc định 06/09/2026 |
+
+**Kiểm thử:** `thtest.mjs` 53 assertion (hàm thuần) · `th2test.mjs` 49 assertion
+(mở file HTML thật trong Chromium: màn Lệch kho, tạo/áp dụng đề xuất, khối JSON).
+
+**Chưa làm (Đợt 2, sau ~4 tuần dữ liệu):** dự báo nhu cầu theo thứ/xu hướng/ngày đặc
+biệt, đề xuất số phần và số mẻ, thời điểm nấu, sổ `prep_forecasts_gieogieo` để đối
+chiếu dự báo với thực tế. Công thức đã chốt sẵn ở §5.
