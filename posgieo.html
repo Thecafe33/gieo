@@ -3210,6 +3210,7 @@ function chanMaTrung(c) {
 
 async function openStockUseScreen() {
   showScreen('stockUseScreen');
+  _stockUseFilter = '';   // mở lại màn là danh sách đầy đủ, không dính bộ lọc lần trước
   const box = document.getElementById('stockUseBody');
   showLoading(box);
   await loadOpenContainers();
@@ -3225,31 +3226,32 @@ function stockExpiryLabel(c) {
   return { text: 'Còn ' + Math.round(gio / 24) + ' ngày', color: '#999' };
 }
 
-function renderStockUseList() {
-  const box = document.getElementById('stockUseBody');
+// Lọc theo tên — chỉ hiện khi danh sách dài. Quán khui vài chục loại thì cuộn
+// tay tìm một dòng là chậm hơn gõ hai chữ.
+let _stockUseFilter = '';
+const STOCK_USE_FILTER_TU = 8;
+
+function stockUseSetFilter(v) { _stockUseFilter = v; renderStockUseRows(); }
+
+// Vẽ RIÊNG phần danh sách, để lọc không làm mất con trỏ trong ô tìm.
+function renderStockUseRows() {
+  const box = document.getElementById('stockUseRows');
   if (!box) return;
-  const list = STOCK_OPEN_LIST;
-  const coQuet = typeof posScanAvailable === 'function' && posScanAvailable();
-
-  box.innerHTML = `
-    <div class="wal-section" style="margin:0 0 14px;">
-      <div class="wal-section-title">Khui hàng mới</div>
-      <div style="font-size:11.5px;color:#999;line-height:1.6;margin-bottom:10px;">
-        Khui chai, gói hay hộp nào thì quét mã trên tem của chính thứ đó. Hệ thống ghi lại
-        ngày mở, người mở và hạn dùng sau khi mở.
-      </div>
-      <button onclick="scanToOpenContainer()" style="width:100%;padding:15px;background:var(--gd);color:#fff;border:none;border-radius:14px;font-family:'Google Sans',sans-serif;font-size:15px;font-weight:700;cursor:pointer;"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-4px;margin-right:7px;"><path d="M3.2 8.4A2.2 2.2 0 0 1 5.4 6.2h1.9l1.3-2h6.8l1.3 2h1.9a2.2 2.2 0 0 1 2.2 2.2v8.4a2.2 2.2 0 0 1-2.2 2.2H5.4a2.2 2.2 0 0 1-2.2-2.2z"/><circle cx="12" cy="12.6" r="3.4"/></svg>Quét mã để mở</button>
-      ${coQuet ? '' : '<div style="font-size:11.5px;color:#c0392b;margin-top:8px;line-height:1.5;">Máy này chưa quét được — cần mở bằng app của quán bản mới.</div>'}
-    </div>
-
-    <div class="wal-section" style="margin:0 0 14px;">
-      <div class="wal-section-title">Đang dùng (${list.length})</div>
-      ${list.length ? list.map(c => {
-        const ex = stockExpiryLabel(c);
-        const moNgay = c.openedAt ? new Date(c.openedAt) : null;
-        const p2 = n => String(n).padStart(2, '0');
-        const moStr = moNgay && !isNaN(moNgay) ? `${p2(moNgay.getDate())}/${p2(moNgay.getMonth() + 1)}` : '';
-        return `
+  const tu = _stockUseFilter.trim().toLowerCase();
+  const list = tu
+    ? STOCK_OPEN_LIST.filter(c => ((c.itemName || '') + ' ' + (c.code || '')).toLowerCase().includes(tu))
+    : STOCK_OPEN_LIST;
+  if (!list.length) {
+    box.innerHTML = `<div style="text-align:center;padding:24px;color:#bbb;font-size:13px;">${
+      tu ? 'Không có mục nào khớp "' + wpEsc(_stockUseFilter) + '"' : 'Chưa có thứ gì đang mở.'}</div>`;
+    return;
+  }
+  box.innerHTML = list.map(c => {
+    const ex = stockExpiryLabel(c);
+    const moNgay = c.openedAt ? new Date(c.openedAt) : null;
+    const p2 = n => String(n).padStart(2, '0');
+    const moStr = moNgay && !isNaN(moNgay) ? `${p2(moNgay.getDate())}/${p2(moNgay.getMonth() + 1)}` : '';
+    return `
         <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid #f0f0f0;">
           <div style="min-width:0;">
             <div style="font-weight:700;font-size:14px;color:var(--td);">${c.itemName || ''}</div>
@@ -3258,16 +3260,44 @@ function renderStockUseList() {
           </div>
           <button onclick="startFinishContainer('${c.id}')" style="flex-shrink:0;height:44px;padding:0 16px;background:#fff;color:var(--gd);border:1.5px solid var(--gd);border-radius:12px;font-family:'Google Sans',sans-serif;font-size:13px;font-weight:700;cursor:pointer;">Đã hết</button>
         </div>`;
-      }).join('') : '<div style="text-align:center;padding:24px;color:#bbb;font-size:13px;">Chưa có thứ gì đang mở.</div>'}
+  }).join('');
+}
+
+function renderStockUseList() {
+  const box = document.getElementById('stockUseBody');
+  if (!box) return;
+  const list = STOCK_OPEN_LIST;
+  const coQuet = typeof posScanAvailable === 'function' && posScanAvailable();
+  const dai = list.length >= STOCK_USE_FILTER_TU;
+
+  // [FIX] HAI nút quét đặt NGAY ĐẦU MÀN, cạnh nhau.
+  // Trước đây "Quét mã báo hết" nằm ở khối cuối cùng, DƯỚI cả danh sách đang mở.
+  // Quán khui vài chục loại là nó rơi xuống tận đáy: nhân viên không bao giờ cuộn
+  // tới, nên không hề biết có chức năng đó. Hai việc này ngang hàng nhau (khui ra
+  // / báo hết) nên phải nằm cùng chỗ, và phải thấy được ngay khi mở màn.
+  box.innerHTML = `
+    <div class="wal-section" style="margin:0 0 14px;">
+      <div class="wal-section-title">Quét mã trên tem</div>
+      <div style="display:flex;gap:9px;">
+        <button onclick="scanToOpenContainer()" style="flex:1;padding:15px 8px;background:var(--gd);color:#fff;border:none;border-radius:14px;font-family:'Google Sans',sans-serif;font-size:14.5px;font-weight:700;cursor:pointer;"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-4px;margin-right:7px;"><path d="M3.2 8.4A2.2 2.2 0 0 1 5.4 6.2h1.9l1.3-2h6.8l1.3 2h1.9a2.2 2.2 0 0 1 2.2 2.2v8.4a2.2 2.2 0 0 1-2.2 2.2H5.4a2.2 2.2 0 0 1-2.2-2.2z"/><circle cx="12" cy="12.6" r="3.4"/></svg>Khui ra</button>
+        <button onclick="scanToFinishContainer()" style="flex:1;padding:15px 8px;background:#fff;color:var(--gd);border:1.5px solid var(--gd);border-radius:14px;font-family:'Google Sans',sans-serif;font-size:14.5px;font-weight:700;cursor:pointer;"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-4px;margin-right:7px;"><path d="M3.2 8.4A2.2 2.2 0 0 1 5.4 6.2h1.9l1.3-2h6.8l1.3 2h1.9a2.2 2.2 0 0 1 2.2 2.2v8.4a2.2 2.2 0 0 1-2.2 2.2H5.4a2.2 2.2 0 0 1-2.2-2.2z"/><circle cx="12" cy="12.6" r="3.4"/></svg>Báo hết</button>
+      </div>
+      <div style="font-size:11.5px;color:#999;line-height:1.6;margin-top:10px;">
+        Khui chai, gói hay hộp nào thì quét mã trên tem của chính thứ đó — hệ thống ghi lại
+        ngày mở, người mở và hạn dùng. Dùng hết cũng quét, nhanh hơn và không sợ bấm nhầm.
+      </div>
+      ${coQuet ? '' : '<div style="font-size:11.5px;color:#c0392b;margin-top:8px;line-height:1.5;">Máy này chưa quét được — cần mở bằng app của quán bản mới.</div>'}
     </div>
 
     <div class="wal-section" style="margin:0;">
-      <div class="wal-section-title">Báo hết bằng cách quét</div>
-      <div style="font-size:11.5px;color:#999;line-height:1.6;margin-bottom:10px;">
-        Nhanh hơn tìm trong danh sách, và không sợ bấm nhầm.
-      </div>
-      <button onclick="scanToFinishContainer()" style="width:100%;padding:14px;background:#fff;color:var(--gd);border:1.5px solid var(--gd);border-radius:14px;font-family:'Google Sans',sans-serif;font-size:15px;font-weight:700;cursor:pointer;"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-4px;margin-right:7px;"><path d="M3.2 8.4A2.2 2.2 0 0 1 5.4 6.2h1.9l1.3-2h6.8l1.3 2h1.9a2.2 2.2 0 0 1 2.2 2.2v8.4a2.2 2.2 0 0 1-2.2 2.2H5.4a2.2 2.2 0 0 1-2.2-2.2z"/><circle cx="12" cy="12.6" r="3.4"/></svg>Quét mã báo hết</button>
+      <div class="wal-section-title">Đang mở (${list.length})</div>
+      ${dai ? `
+      <div class="wal-input-group" style="margin-bottom:10px;">
+        <input id="stockUseSearch" type="text" placeholder="Tìm theo tên hoặc mã..." value="${wpEsc(_stockUseFilter)}" oninput="stockUseSetFilter(this.value)">
+      </div>` : ''}
+      <div id="stockUseRows"></div>
     </div>`;
+  renderStockUseRows();
 }
 
 // ---------- MỞ CHAI ----------
