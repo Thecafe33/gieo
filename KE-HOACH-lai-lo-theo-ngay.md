@@ -285,6 +285,24 @@ Làm đợt 1 trước cũng có ích ngay, kể cả khi chưa làm 3–5.
 | 4 | Tiền chủ quán rút có phải chi phí? | **Không** | Không có dòng nào cho khoản này. Thẻ ghi rõ: đây là lợi nhuận quán làm ra, rút tiền là **chia** lợi nhuận đó |
 | 5 | Phí sàn (GrabFood…) | **Chưa bán qua sàn, nhưng ghi chú sẵn** | Có sẵn dòng `phiKenh` và hàm `plChannelFeeForDay(day)` làm **một chỗ cắm duy nhất** — khi nào bán qua sàn chỉ điền hàm đó, dòng "Phí sàn" tự hiện, lãi/lỗ tự trừ. Ghi rõ luôn điều kiện tiên quyết: POS phải ghi doanh thu **theo kênh** trước đã, chứ đoán một tỷ lệ phí ở đó còn tệ hơn để 0 |
 
+### Đợt 4 — đã xong
+
+- **Băng nhắc ở màn Sức khoẻ quán**, luôn hiện từ khi tháng kết thúc cho tới khi đủ số
+  thật, **không có nút tắt** — tắt được là sẽ có ngày bấm tắt rồi quên, mà quên nhập
+  hoá đơn điện thì lãi/lỗ cả tháng đó sai vĩnh viễn.
+- Băng nêu **đích danh từng khoản** và số tiền nó đang chiếm, kèm **sai lệch có thể
+  xảy ra** — học từ lịch sử của chính danh mục đó (lần trước dự đoán 2.000.000, hoá đơn
+  về 2.150.000 → lệch 7,5%). Khoản chưa từng có số thật thì nói thẳng là **chưa ước
+  được**, không bịa ra một tỷ lệ trông như đã đo.
+- Nút **"Nhập số thật"** ngay trong băng, không bắt đi tìm màn Chi phí.
+- Nút **Chốt sổ** chỉ mở khoá khi **không còn khoản dự đoán nào**. Bấm hay không là
+  bạn quyết — máy không tự chốt, vì sẽ có ngày nó chốt đúng lúc một hoá đơn còn đang
+  trên đường về.
+- Tháng đã chốt hiện **số đã ghi**, không tính lại mỗi lần mở. Nếu sau đó vẫn có số
+  thật về, app **không tự sửa** mà hỏi *"mở lại tháng 8?"*.
+- 42 kiểm thử, gồm: chặn chốt khi còn khoản chờ; dữ liệu đổi sau khi chốt thì con số
+  đã chốt **giữ nguyên** nhưng có báo lệch; mở lại thì quay về tính từ dữ liệu gốc.
+
 ### Đợt 3 — đã xong
 
 - Form chi phí có đủ **bốn trường** ở §6: kỳ sử dụng · số tiền · **số thật / dự đoán** ·
@@ -331,7 +349,7 @@ Làm đợt 1 trước cũng có ích ngay, kể cả khi chưa làm 3–5.
 - 51 kiểm thử: công thức, lương dự đoán từ lịch (kể cả ca qua đêm và OT), cộng ngày ra
   kỳ, và chạy thật trên màn Hôm nay.
 
-Còn lại đợt 4 và 5 như bảng ở §11.
+Còn lại đợt 5 như bảng ở §11.
 
 ---
 

@@ -1147,6 +1147,7 @@ html.phone-ui .nav-search .ns-kbd{display:none;}
     <!-- 🆕 SỨC KHOẺ QUÁN (GĐ6 kế hoạch V3 — PHẦN 6.4) — landing mặc định -->
     <div class="screen active" id="screen-storehealth">
       <div class="wrap">
+        <div id="storeHealthBook"></div>
         <div id="storeHealthBody"><div class="muted">Đang kiểm tra...</div></div>
       </div>
     </div>
@@ -5100,9 +5101,15 @@ function plNhanNgay(dateKey){
   return PL_DOW[d.getDay()] + ' ' + pad(d.getDate()) + '/' + pad(d.getMonth()+1);
 }
 
-function plHealthHTML(tong, days, soNgayKy, ghiChuTinhLai){
+function plHealthHTML(tong, days, soNgayKy, ghiChuTinhLai, book){
   if(!tong || !tong.soNgay) return '';
-  const laLai = tong.lai >= 0;
+  // [đợt 4] Tháng ĐÃ CHỐT SỔ hiện SỐ ĐÃ GHI, không tính lại. Con số chủ quán đã đọc
+  // và đã dùng để ra quyết định thì không được đổi sau lưng — nếu có số thật về sau,
+  // app hỏi chứ không tự sửa.
+  const daChot = !!(book && book.chot);
+  const so = daChot ? book.chot : tong;
+  const lechSauChot = daChot ? (tong.lai - Number(book.chot.lai||0)) : 0;
+  const laLai = so.lai >= 0;
   const mau = laLai ? 'var(--ok)' : 'var(--bad)';
   const nhieuNgay = (days||[]).length > 1;
   // Kỳ dài quá thì gom theo tháng — 365 cột ngày không đọc được gì.
@@ -5124,13 +5131,13 @@ function plHealthHTML(tong, days, soNgayKy, ghiChuTinhLai){
     <div class="sec-title" style="margin-top:0">Lãi/lỗ kỳ này</div>
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
-        <span style="font-size:13px;font-weight:700;color:var(--gt);text-transform:uppercase;letter-spacing:.05em;">${laLai?'Lãi':'Lỗ'} ${soNgayKy||tong.soNgay} ngày</span>
-        ${plChipTinCay(tong.mucTinCay)}
+        <span style="font-size:13px;font-weight:700;color:var(--gt);text-transform:uppercase;letter-spacing:.05em;">${daChot ? `${laLai?'Lãi':'Lỗ'} ${book.nhan}` : `${laLai?'Lãi':'Lỗ'} ${soNgayKy||tong.soNgay} ngày`}</span>
+        ${daChot ? `<span class="tier tier-green">Đã chốt sổ ${String(book.chot.closedAt||'').slice(8,10)}/${String(book.chot.closedAt||'').slice(5,7)}</span>` : plChipTinCay(tong.mucTinCay)}
       </div>
-      <div style="font-size:30px;font-weight:750;color:${mau};margin-top:2px;line-height:1.15;">${laLai?'':'−'}${fmt(Math.abs(tong.lai))}</div>
+      <div style="font-size:30px;font-weight:750;color:${mau};margin-top:2px;line-height:1.15;">${laLai?'':'−'}${fmt(Math.abs(so.lai))}</div>
       <div class="small-note" style="margin-top:4px">
-        Trước khấu hao: <b>${tong.laiTruocKhauHao>=0?'':'−'}${fmt(Math.abs(tong.laiTruocKhauHao))}</b>
-        ${tong.doanhThu ? ` · biên lãi <b>${fmtPct(tong.bienLaiPct)}</b>` : ''}
+        Trước khấu hao: <b>${so.laiTruocKhauHao>=0?'':'−'}${fmt(Math.abs(so.laiTruocKhauHao))}</b>
+        ${so.doanhThu ? ` · biên lãi <b>${fmtPct(so.doanhThu ? so.lai/so.doanhThu : 0)}</b>` : ''}
         ${nhieuNgay ? ` · trung bình <b>${tong.lai/Math.max(1,tong.soNgay)>=0?'':'−'}${fmt(Math.abs(tong.lai/Math.max(1,tong.soNgay)))}</b>/ngày` : ''}
       </div>
       ${nhieuNgay ? `<div class="small-note" style="margin-top:2px">
@@ -5140,22 +5147,35 @@ function plHealthHTML(tong, days, soNgayKy, ghiChuTinhLai){
       ${nhieuNgay ? `<div class="small-note" style="margin-top:2px">Cột đỏ tụt xuống dưới vạch là ngày lỗ${theoThang?' — kỳ này dài nên gom theo tháng':''}.</div>` : ''}
 
       <div style="border-top:1px solid var(--line);margin:12px 0 2px"></div>
-      ${plRowHTML('Doanh thu', '+', tong.doanhThu)}
-      ${plRowHTML('Giá vốn hàng bán', '−', tong.giaVon)}
-      ${plRowHTML('Hao hụt & huỷ', '−', tong.haoHut)}
-      ${plRowHTML('Chi phí biến đổi', '−', tong.bienPhiKhac)}
+      ${plRowHTML('Doanh thu', '+', so.doanhThu)}
+      ${plRowHTML('Giá vốn hàng bán', '−', so.giaVon)}
+      ${plRowHTML('Hao hụt & huỷ', '−', so.haoHut)}
+      ${plRowHTML('Chi phí biến đổi', '−', so.bienPhiKhac)}
       ${tong.phiKenh>0 ? plRowHTML('Phí sàn', '−', tong.phiKenh) : ''}
-      ${plRowHTML('Lương', '−', tong.luong)}
-      ${plRowHTML('Chi phí cố định', '−', tong.chiPhiCoDinh)}
-      ${plRowHTML('Khấu hao', '−', tong.khauHao)}
+      ${plRowHTML('Lương', '−', so.luong)}
+      ${plRowHTML('Chi phí cố định', '−', so.chiPhiCoDinh)}
+      ${plRowHTML('Khấu hao', '−', so.khauHao)}
       <div class="row" style="border-top:1.5px solid var(--line);margin-top:4px;padding-top:8px">
-        <span class="rl"><b>${laLai?'Lãi':'Lỗ'} kỳ này</b></span>
-        <span class="rv" style="color:${mau};font-size:17px"><b>${laLai?'':'−'}${fmt(Math.abs(tong.lai))}</b></span>
+        <span class="rl"><b>${laLai?'Lãi':'Lỗ'} ${daChot ? book.nhan : 'kỳ này'}</b></span>
+        <span class="rv" style="color:${mau};font-size:17px"><b>${laLai?'':'−'}${fmt(Math.abs(so.lai))}</b></span>
       </div>
 
       ${nhieuNgay ? `
       <button id="healthPLTableToggle" onclick="plToggleBang()" style="margin-top:10px;background:none;border:none;padding:6px 0;color:var(--gd);font-weight:700;font-size:12.5px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;">Xem bảng từng ngày ${ic('chevronDown',14)}</button>
       <div id="healthPLTable" hidden style="margin-top:2px;">${hangBang}</div>` : ''}
+
+      ${daChot ? `
+      <div class="small-note" style="margin-top:12px;line-height:1.7">
+        Sổ đã chốt — con số này <b>không tính lại nữa</b>, kể cả khi dữ liệu bên dưới thay đổi.
+        ${Math.abs(lechSauChot) > 1000 ? `<br><span style="color:var(--warn)">Dữ liệu hiện tại đang cho ra ${fmt(Math.abs(lechSauChot))} ${lechSauChot>0?'cao hơn':'thấp hơn'} số đã chốt — có số thật về sau ngày chốt.</span>` : ''}
+        <br><button class="btn outline sm" style="width:auto;padding:0 14px;margin-top:8px" onclick="moLaiThang('${book.monthKey}')">Mở lại ${book.nhan}</button>
+      </div>` : ''}
+
+      ${(book && book.daXong && !daChot && !(tong.khoanChoSoThat||[]).length) ? `
+      <div class="nudge" style="margin-top:12px;border-color:var(--ok-line);background:var(--ok-bg)">
+        <span>${ic('check',15,'var(--ok)')} <b>${book.nhan} đã đủ số thật</b> — mọi chi phí đều đã có hoá đơn, bảng lời lãi giờ mới chính xác. Chốt sổ để đóng băng con số này.</span>
+        <button onclick="chotSoThang('${book.monthKey}')">Chốt sổ</button>
+      </div>` : ''}
 
       ${(tong.khoanChoSoThat||[]).length ? `
       <div class="nudge" style="margin-top:12px">
@@ -5178,6 +5198,267 @@ function plHealthHTML(tong, days, soNgayKy, ghiChuTinhLai){
         ${tong.coUocTinh ? `<br><span style="color:var(--warn)">Trong kỳ còn ngày đang chạy hoặc còn chi phí chờ hoá đơn, nên con số này chưa phải số cuối cùng.</span>` : ''}
       </div>
     </div>`;
+}
+
+
+// ============================================================================
+// [MỚI — đợt 4] CHỜ SỐ THỰC TẾ → CHỐT SỔ
+// ----------------------------------------------------------------------------
+// Yêu cầu của chủ quán, nguyên văn: "hết tháng ở bảng sức khoẻ quán sẽ phải LUÔN
+// hiện ra thông báo có chi phí chưa có thực tế… khi đó đầy đủ những thứ cần số
+// liệu thực tế → bảng lời lãi cuối cùng mới chính xác và lúc này chốt sổ".
+//
+// MỘT THÁNG CÓ ĐÚNG BA TRẠNG THÁI:
+//   🟡 đang chạy      — tháng chưa hết
+//   🟠 chờ số thực tế — tháng đã hết, còn ít nhất 1 khoản là số dự đoán
+//   🟢 đã chốt sổ     — không còn khoản dự đoán nào VÀ chủ quán đã bấm Chốt sổ
+//
+// BA QUYẾT ĐỊNH TRONG THIẾT KẾ NÀY:
+//
+//  1. BĂNG NHẮC KHÔNG TẮT ĐƯỢC. Tắt được là sẽ có ngày bấm tắt rồi quên, mà quên
+//     nhập hoá đơn điện thì lãi/lỗ cả tháng đó sai vĩnh viễn. Nó chỉ biến mất khi
+//     việc đã xong thật.
+//
+//  2. CHỐT SỔ LÀ VIỆC CỦA NGƯỜI, KHÔNG PHẢI CỦA MÁY. Máy chỉ mở khoá nút khi hết
+//     khoản dự đoán; bấm hay không là chủ quán quyết. Tự động chốt sẽ có ngày chốt
+//     đúng lúc một hoá đơn còn đang trên đường về.
+//
+//  3. CHỐT XONG LÀ ĐÓNG BĂNG CON SỐ. Tháng đã chốt hiện SỐ ĐÃ GHI chứ không tính
+//     lại mỗi lần mở — con số chủ quán đã đọc và đã dùng để ra quyết định thì không
+//     được đổi sau lưng. Nếu sau đó vẫn có số thật về, app KHÔNG tự sửa mà hỏi
+//     "mở lại tháng 9?" để chính chủ quán quyết.
+// ============================================================================
+
+const BOOKCLOSE_COLL = 'book_closings_gieogieo';   // doc id = 'YYYY-MM'
+
+async function loadBookClosings(){
+  const snap = await fstore.collection(BOOKCLOSE_COLL).get();
+  const out = {};
+  snap.forEach(d=>{ out[d.id] = { id: d.id, ...d.data() }; });
+  return out;
+}
+
+function monthKeyOf(dateKeyOrDate){
+  const k = typeof dateKeyOrDate === 'string' ? dateKeyOrDate : dkey(dateKeyOrDate);
+  return k.slice(0,7);
+}
+function monthRangeOf(monthKey){
+  const y = Number(monthKey.slice(0,4)), m = Number(monthKey.slice(5,7));
+  return { start: new Date(y, m-1, 1), end: new Date(y, m, 0) };
+}
+function monthLabelVN(monthKey){
+  return VN_MONTHS[Number(monthKey.slice(5,7))-1] + '/' + monthKey.slice(0,4);
+}
+// Tháng đã kết thúc chưa (so với hôm nay). Tháng đang chạy thì chưa có gì để chốt.
+function monthDaXong(monthKey){
+  const { end } = monthRangeOf(monthKey);
+  const homNay = new Date(); homNay.setHours(0,0,0,0);
+  return end < homNay;
+}
+// Kỳ đang xem có đúng là TRỌN MỘT THÁNG ĐÃ XONG không — chỉ khi đó mới nói tới
+// chuyện chốt sổ. Xem 7 ngày hay nửa tháng thì không có "sổ" nào để chốt.
+function plKyLaThangDaXong(start, end){
+  if(!start || !end) return null;
+  const mk = monthKeyOf(start);
+  if(monthKeyOf(end) !== mk) return null;
+  const r = monthRangeOf(mk);
+  if(dkey(start) !== dkey(r.start) || dkey(end) !== dkey(r.end)) return null;
+  return monthDaXong(mk) ? mk : null;
+}
+
+// Các khoản còn là SỐ DỰ ĐOÁN có dính vào tháng này, kèm phần tiền rơi vào tháng đó.
+function khoanDuDoanCuaThang(expList, monthKey){
+  const { start, end } = monthRangeOf(monthKey);
+  return (expList||[])
+    .filter(e => e.status!=='pending_review' && e.status!=='rejected' && expenseIsEstimate(e))
+    .map(e => ({ id:e.id, category:e.category, tien: expenseAllocatedAmount(e, start, end) }))
+    .filter(x => x.tien > 0);
+}
+
+// Sai lệch có thể xảy ra, ước theo LỊCH SỬ của chính danh mục đó: những lần đã thay
+// số thật cho biết dự đoán của khoản này thường trượt bao nhiêu phần trăm.
+// Chưa có lịch sử thì trả null — KHÔNG bịa ra một tỷ lệ trông như đã đo.
+function plUocSaiLechPct(expList, category){
+  const ls = (expList||[]).filter(e => e.category===category
+    && Number(e.estimatedAmount) > 0 && e.actualAt);
+  if(!ls.length) return null;
+  return Math.max(...ls.map(e =>
+    Math.abs((Number(e.amount)||0) - Number(e.estimatedAmount)) / Number(e.estimatedAmount)));
+}
+// Trả về {tien, thieu} — `thieu` là các danh mục CHƯA có lịch sử nên không góp được
+// gì vào con số ước lượng. Không nói ra thì "±150.000" trông như đã tính đủ mọi
+// khoản, trong khi có khoản chưa được tính tới chút nào.
+function plUocSaiLechTien(expList, khoanList){
+  let co = false, tong = 0; const thieu = [];
+  (khoanList||[]).forEach(k=>{
+    const pct = plUocSaiLechPct(expList, k.category);
+    if(pct != null){ co = true; tong += k.tien * pct; }
+    else thieu.push(k.category);
+  });
+  return co ? { tien: tong, thieu } : null;
+}
+
+// Trạng thái của một tháng, gộp đủ mọi thứ màn hình cần để khỏi tính lại ở 3 nơi.
+function trangThaiThang(monthKey, expList, closings){
+  const chot = (closings || {})[monthKey] || null;
+  const khoan = khoanDuDoanCuaThang(expList, monthKey);
+  const daXong = monthDaXong(monthKey);
+  let trangThai;
+  if(!daXong) trangThai = 'dang-chay';
+  else if(khoan.length) trangThai = 'cho-so-that';
+  else trangThai = chot ? 'da-chot' : 'du-so-that';
+  return {
+    monthKey, nhan: monthLabelVN(monthKey), trangThai, daXong, khoan, chot,
+    tienDuDoan: khoan.reduce((s,k)=>s+k.tien, 0),
+    saiLech: plUocSaiLechTien(expList, khoan),
+    // Số thật về SAU ngày chốt — app không tự sửa, chỉ hỏi.
+    coSoThatVeSauKhiChot: !!(chot && (expList||[]).some(e =>
+      e.actualAt && e.actualAt > (chot.closedAt || '') &&
+      expenseAllocatedAmount(e, monthRangeOf(monthKey).start, monthRangeOf(monthKey).end) > 0))
+  };
+}
+
+// Ba tháng gần nhất ĐÃ XONG. Không quét cả năm: một quán mới cài app mà bị nhắc
+// chốt sổ 12 tháng chưa từng ghi gì thì băng nhắc thành rác ngay ngày đầu.
+const BOOK_LOOKBACK_MONTHS = 3;
+function cacThangCanNhac(expList, closings){
+  const out = [];
+  const now = new Date();
+  for(let i = 1; i <= BOOK_LOOKBACK_MONTHS; i++){
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const mk = dkey(d).slice(0,7);
+    const { start, end } = monthRangeOf(mk);
+    // Tháng không có bản ghi chi phí nào thì coi như quán chưa dùng app tháng đó —
+    // không nhắc, vì không có gì để chốt.
+    const coDuLieu = (expList||[]).some(e => expenseAllocatedAmount(e, start, end) > 0);
+    if(!coDuLieu) continue;
+    out.push(trangThaiThang(mk, expList, closings));
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Hành động: chốt sổ / mở lại
+// ---------------------------------------------------------------------------
+
+// Chốt sổ một tháng. Tính lại lãi/lỗ của tháng đó NGAY LÚC BẤM rồi ghi lại thành
+// ảnh chụp — từ đó màn hình đọc số đã ghi, không tính lại nữa.
+async function chotSoThang(monthKey){
+  try{
+    const [expAll, closings] = await Promise.all([loadExpensesAll(), loadBookClosings()]);
+    const tt = trangThaiThang(monthKey, expAll, closings);
+    if(!tt.daXong){ toast('⚠️ Tháng chưa kết thúc, chưa chốt sổ được'); return; }
+    if(tt.khoan.length){
+      toast('⚠️ Còn ' + tt.khoan.length + ' khoản chờ số thật — nhập xong mới chốt được');
+      return;
+    }
+    if(tt.chot){ toast('Tháng này đã chốt sổ rồi'); return; }
+    setSync(true);
+    const { start, end } = monthRangeOf(monthKey);
+    const { tong } = await computeDailyPLRange(start, end);
+    await fstore.collection(BOOKCLOSE_COLL).doc(monthKey).set({
+      monthKey, closedAt: new Date().toISOString(), closedBy: 'management',
+      lai: tong.lai, laiTruocKhauHao: tong.laiTruocKhauHao, doanhThu: tong.doanhThu,
+      giaVon: tong.giaVon, haoHut: tong.haoHut, bienPhiKhac: tong.bienPhiKhac,
+      luong: tong.luong, chiPhiCoDinh: tong.chiPhiCoDinh, khauHao: tong.khauHao,
+      tongChiPhi: tong.tongChiPhi, soNgay: tong.soNgay, soNgayLo: tong.soNgayLo
+    });
+    logAudit('close_book','month',monthKey,{lai: tong.lai});
+    toast('✅ Đã chốt sổ ' + monthLabelVN(monthKey) + ' — ' + (tong.lai>=0?'lãi ':'lỗ ') + fmt(Math.abs(tong.lai)));
+    if(curScreen==='storehealth') renderStoreHealth();
+    if(curScreen==='health') renderHealth();
+  }catch(err){
+    console.error('chotSoThang lỗi', err);
+    showError('Không chốt sổ được: ' + (err.code||err.message||err));
+  }finally{ setSync(false); }
+}
+
+// Mở lại tháng đã chốt — xoá ảnh chụp để màn hình quay về tính từ dữ liệu gốc.
+// Chỉ chạy khi chính chủ quán bấm, và có xác nhận, vì nó làm một con số đã công bố
+// đổi đi.
+async function moLaiThang(monthKey){
+  if(!confirm('Mở lại sổ ' + monthLabelVN(monthKey) + '?\n\nCon số lãi/lỗ đã chốt sẽ được tính lại theo dữ liệu mới nhất và có thể khác số cũ.')) return;
+  try{
+    await fstore.collection(BOOKCLOSE_COLL).doc(monthKey).delete();
+    logAudit('reopen_book','month',monthKey,{});
+    toast('Đã mở lại ' + monthLabelVN(monthKey));
+    if(curScreen==='storehealth') renderStoreHealth();
+    if(curScreen==='health') renderHealth();
+  }catch(err){ console.error(err); showError('Không mở lại được: '+(err.code||err.message||err)); }
+}
+
+// Đi tới màn Sức khoẻ tài chính, mở đúng tháng đó.
+function xemThang(monthKey){
+  const { start } = monthRangeOf(monthKey);
+  healthMonthAnchor = new Date(start.getFullYear(), start.getMonth(), 1);
+  curHealthPeriod = 'month';
+  switchScreen('health');
+}
+
+// ---------------------------------------------------------------------------
+// Băng nhắc ở màn Sức khoẻ quán
+// ---------------------------------------------------------------------------
+function bookAlertHTML(dsThang){
+  const can = (dsThang||[]).filter(t => t.trangThai==='cho-so-that' || t.trangThai==='du-so-that'
+    || (t.trangThai==='da-chot' && t.coSoThatVeSauKhiChot));
+  if(!can.length) return '';
+  return can.map(t=>{
+    if(t.trangThai==='cho-so-that'){
+      return `<div class="card" style="border:1.5px solid var(--warn-line);background:var(--warn-bg);margin-bottom:10px">
+        <div style="font-weight:750;color:var(--warn);display:flex;align-items:center;gap:6px;">
+          ${ic('alert',16,'var(--warn)')} ${t.nhan.toUpperCase()} CHƯA CHỐT — còn ${t.khoan.length} khoản chờ số thật
+        </div>
+        <div style="margin-top:8px;font-size:13.5px;line-height:1.75;color:var(--td)">
+          ${t.khoan.map(k=>`<div style="display:flex;justify-content:space-between;gap:10px"><span>${k.category}</span><b>dự đoán ${fmt(k.tien)}</b></div>`).join('')}
+        </div>
+        <div class="small-note" style="margin-top:8px">
+          Lãi/lỗ ${t.nhan} đang là số <b>tạm tính</b>${t.saiLech ? ` — có thể lệch tới <b>±${fmt(t.saiLech.tien)}</b> khi có đủ hoá đơn` : ''}.
+          ${t.saiLech && t.saiLech.thieu.length ? `Chưa tính được phần <b>${t.saiLech.thieu.join(', ')}</b> — khoản này chưa từng có số thật nên chưa biết nó thường lệch bao nhiêu.` : ''}
+          ${!t.saiLech ? 'Chưa đủ lịch sử để ước sai lệch — lần đầu nhập số thật cho các khoản này, app sẽ học được.' : ''}
+        </div>
+        <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+          <button class="btn sm" style="width:auto;padding:0 14px" onclick="goEntry('exp')">Nhập số thật</button>
+          <button class="btn outline sm" style="width:auto;padding:0 14px" onclick="xemThang('${t.monthKey}')">Xem ${t.nhan}</button>
+        </div>
+      </div>`;
+    }
+    if(t.trangThai==='du-so-that'){
+      return `<div class="card" style="border:1.5px solid var(--ok-line);background:var(--ok-bg);margin-bottom:10px">
+        <div style="font-weight:750;color:var(--ok);display:flex;align-items:center;gap:6px;">
+          ${ic('check',16,'var(--ok)')} ${t.nhan.toUpperCase()} ĐÃ ĐỦ SỐ THẬT
+        </div>
+        <div class="small-note" style="margin-top:6px">Mọi chi phí của tháng này đều đã có số thật — bảng lời lãi giờ mới chính xác. Chốt sổ để đóng băng con số, từ đó nó không đổi nữa.</div>
+        <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+          <button class="btn sm" style="width:auto;padding:0 14px" onclick="chotSoThang('${t.monthKey}')">Chốt sổ ${t.nhan}</button>
+          <button class="btn outline sm" style="width:auto;padding:0 14px" onclick="xemThang('${t.monthKey}')">Xem lại trước khi chốt</button>
+        </div>
+      </div>`;
+    }
+    // đã chốt nhưng có số thật về sau
+    return `<div class="card" style="border:1.5px solid var(--bi-line);background:var(--bb);margin-bottom:10px">
+      <div style="font-weight:750;color:var(--bi);display:flex;align-items:center;gap:6px;">
+        ${ic('alert',16,'var(--bi)')} ${t.nhan.toUpperCase()} — có số thật về SAU ngày chốt
+      </div>
+      <div class="small-note" style="margin-top:6px">App <b>không tự sửa</b> con số đã chốt. Mở lại tháng thì lãi/lỗ được tính lại theo số mới nhất.</div>
+      <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+        <button class="btn sm" style="width:auto;padding:0 14px" onclick="moLaiThang('${t.monthKey}')">Mở lại ${t.nhan}</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// Nạp và vẽ băng nhắc. Chạy NỀN sau danh sách sức khoẻ: nó chỉ cần 2 collection nhỏ,
+// nhưng hỏng thì cũng không được che mất danh sách việc cần xử lý.
+async function renderBookAlerts(){
+  const box = document.getElementById('storeHealthBook');
+  if(!box) return;
+  try{
+    const [expAll, closings] = await Promise.all([loadExpensesAll(), loadBookClosings()]);
+    if(curScreen !== 'storehealth') return;
+    box.innerHTML = bookAlertHTML(cacThangCanNhac(expAll, closings));
+  }catch(err){
+    console.warn('[Chốt sổ] không đọc được (bỏ qua):', err);
+  }
 }
 
 // ------------------------------------------------------------
@@ -6306,6 +6587,10 @@ async function renderStoreHealth(){
   catch(err){ console.error('renderStoreHealth lỗi', err); box.innerHTML = '<div class="muted">Không kiểm tra được. Bấm nút tải lại ở góc trên để thử lại.</div>'; setSync(false); return; }
   setSync(false);
 
+  // [đợt 4] Băng "chờ số thực tế" / "chốt sổ" — nạp nền, không giữ danh sách việc
+  // cần xử lý lại chờ nó.
+  renderBookAlerts();
+
   const red = list.filter(x=>x.tier==='red');
   const yellow = list.filter(x=>x.tier==='yellow');
   STORE_HEALTH_ISSUE_COUNT = red.length;  // chỉ 🔴 mới bật chấm đỏ ở sidebar — nếu 🟡 cũng bật thì chấm đỏ gần như luôn sáng và mất hết ý nghĩa
@@ -6838,7 +7123,7 @@ async function renderHealth(){
   try{
   await ensureAuth();
   const {start,end} = periodRange(curHealthPeriod);
-  const [salesRes, opsAll, expAll, assets, ledgerReal, cashVariance, actualLaborByDate, actualHours, expCats, emps, scheds] = await Promise.all([
+  const [salesRes, opsAll, expAll, assets, ledgerReal, cashVariance, actualLaborByDate, actualHours, expCats, emps, scheds, bookClosings] = await Promise.all([
     fetchSalesRange(start,end), loadDailyOpsAll(), loadExpensesAll(), loadAssetsAll(),
     computeLedgerRealMetrics(start,end), computeCashVarianceSummary(start,end),
     HR_SETTINGS.useActualLaborCost ? computeActualLaborCostByDate(dkey(start), dkey(end)) : Promise.resolve(null),
@@ -6848,7 +7133,8 @@ async function renderHealth(){
     // khối lãi/lỗ vẫn tính được với dữ liệu còn lại, không kéo sập cả màn.
     loadExpenseCategories().catch(()=>[]),
     loadEmployees().catch(()=>[]),
-    loadSchedulesForRange(dkey(start), dkey(end)).catch(()=>[])
+    loadSchedulesForRange(dkey(start), dkey(end)).catch(()=>[]),
+    loadBookClosings().catch(()=>({}))
   ]);
   // LÃI/LỖ TỪNG NGÀY — dùng chung máy tính với thẻ ở màn Hôm nay. Mọi dữ liệu cần
   // thiết đã nằm trong Promise.all ở trên nên không tốn thêm lượt mạng nào.
@@ -6861,6 +7147,13 @@ async function renderHealth(){
     wasteValue: plWasteByDate[day.date] || 0, homNayKey: plHomNayKey
   }));
   const plTong = plSumDays(plDays);
+  // [đợt 4] Chỉ khi kỳ đang xem đúng bằng TRỌN MỘT THÁNG ĐÃ XONG thì mới có "sổ" để
+  // chốt. Xem 7 ngày hay nửa tháng thì không có gì để chốt cả.
+  const plMonthKey = plKyLaThangDaXong(start, end);
+  const plBook = plMonthKey
+    ? { monthKey: plMonthKey, nhan: monthLabelVN(plMonthKey), daXong: true,
+        chot: bookClosings[plMonthKey] || null }
+    : null;
   const opsSum = sumDailyOps(opsAll, start, end);
   const kpi = computeKPIs({
     perDaySales: salesRes.perDay, opsSum, expList: filterExpenses(expAll, start, end), assets, actualLaborByDate,
@@ -6881,7 +7174,7 @@ async function renderHealth(){
 
   document.getElementById('healthBody').innerHTML = `
     ${rangeLabel}
-    ${plHealthHTML(plTong, plDays, salesRes.dayCount, plRecalcNotes(expAll, start, end))}
+    ${plHealthHTML(plTong, plDays, salesRes.dayCount, plRecalcNotes(expAll, start, end), plBook)}
     <div id="healthBep"></div>
     <div class="card">
       <div class="card-h"><h3>${ic('coins')} Sales</h3></div>
