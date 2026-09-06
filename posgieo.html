@@ -7186,13 +7186,19 @@ function renderPrepWasteForm() {
   //     Cân phần CÒN LẠI trong khay rồi lấy hiệu với số hệ thống đang ghi mới là
   //     thao tác thật. Thiếu kiểu này thì nút cân vô dụng đúng lúc hay dùng nhất.
   const coCan = prepCanWeighPOS(p.id);
-  const canMode = khoTxState.pwWeighMode || 'discard';
-  const canModeBtn = (val, label, sub) => `<button type="button" onclick="pwSetWeighMode('${val}')" style="flex:1;padding:9px 8px;border-radius:12px;border:1.5px solid ${canMode===val?'var(--gd)':'#e6e1d2'};background:${canMode===val?'#FDE6EA':'#fff'};color:${canMode===val?'var(--gd)':'#888'};font-family:'Google Sans',sans-serif;font-weight:700;font-size:12px;cursor:pointer;line-height:1.35;">${label}<div style="font-size:10px;font-weight:600;opacity:.85;">${sub}</div></button>`;
+  // MẶC ĐỊNH là 'remain'. Ngoài đời đổ bớt nửa khay thì KHÔNG ai đi hót phần đã đổ
+  // vào thùng rác ra để cân — người ta cân chỗ CÒN LẠI trong khay. Bản đầu mặc
+  // định 'discard' là chọn theo cách nói của phần mềm chứ không theo việc thật.
+  const canMode = pwMode();
+  // Nhãn viết bằng ĐỘNG TÁC chứ không bằng khái niệm. "Cân phần đổ đi / cân phần
+  // còn lại" đọc thoáng qua không hiểu, phải ngẫm mới ra — lời phàn nàn có thật
+  // từ người dùng đầu tiên.
+  const canModeBtn = (val, label, sub) => `<button type="button" onclick="pwSetWeighMode('${val}')" style="flex:1;padding:11px 10px;border-radius:13px;border:1.5px solid ${canMode===val?'var(--gd)':'#e6e1d2'};background:${canMode===val?'#FDE6EA':'#fff'};color:${canMode===val?'var(--gd)':'#777'};font-family:'Google Sans',sans-serif;font-weight:700;font-size:12.5px;cursor:pointer;line-height:1.4;text-align:left;">${canMode===val?'● ':'○ '}${label}<div style="font-size:11px;font-weight:500;opacity:.9;margin-top:2px;">${sub}</div></button>`;
   const khoiCan = coCan ? `
-      <div class="wal-input-label" style="margin:14px 0 6px;">Bấm ⚖️ thì đang cân cái gì?</div>
-      <div style="display:flex;gap:7px;">
-        ${canModeBtn('discard','Cân phần đổ đi','đổ ra khay/thùng rồi cân')}
-        ${canModeBtn('remain','Cân phần còn lại','hệ thống lấy hiệu ra số đã đổ')}
+      <div class="wal-input-label" style="margin:16px 0 7px;">Bạn sẽ đặt cái gì lên cân?</div>
+      <div style="display:flex;gap:8px;">
+        ${canModeBtn('remain','Khay sau khi đã đổ bớt','Máy lấy số cũ trừ số vừa cân, ra phần đã đổ')}
+        ${canModeBtn('discard','Chỗ đã đổ ra','Đã hót riêng ra khay/thùng rồi mới cân')}
       </div>` : prepWeighHintHTML(p.id);
 
   const khoiLo = lo.length ? `
@@ -7210,13 +7216,17 @@ function renderPrepWasteForm() {
           <div style="font-size:11px;color:${quaHan ? '#c0392b' : '#999'};margin:3px 0 8px;font-weight:${quaHan ? '700' : '400'};">
             Nấu ${fmtDateTimeShort(b.finishedAt)} · HSD ${prepExpiryLabel(b)}${quaHan ? ' · QUÁ HẠN' : ''}
           </div>
-          <div style="display:flex;align-items:center;gap:8px;">
+          ${coCan ? weighBtnWide(`pwWeighBatch('${b.id}',${con})`,
+              canMode === 'remain' ? 'Cân khay còn lại của lô này' : 'Cân chỗ đã đổ của lô này',
+              canMode === 'remain' ? 'Đặt cả khay lên cân — máy tự trừ bì rồi tính ra phần đã đổ'
+                                   : 'Đặt cả khay lên cân — máy tự trừ bì') : ''}
+          <div style="display:flex;align-items:center;gap:8px;${coCan ? 'margin-top:9px;' : ''}">
+            ${coCan ? '<span style="font-size:11.5px;color:#aaa;font-weight:600;flex-shrink:0;">hoặc</span>' : ''}
             <div class="wal-input-group" style="flex:1;margin-bottom:0;">
-              <input id="pwB_${b.id}" type="number" inputmode="decimal" step="0.01" min="0" max="${con}" placeholder="0" oninput="pwManualEdit('${b.id}')">
+              <input id="pwB_${b.id}" type="number" inputmode="decimal" step="0.01" min="0" max="${con}" placeholder="${coCan ? 'Gõ tay số đã đổ' : '0'}" oninput="pwManualEdit('${b.id}')">
             </div>
             <span style="font-size:12.5px;font-weight:700;color:var(--gm);">${p.unit || ''}</span>
-            ${coCan ? weighBtnHTML(`pwWeighBatch('${b.id}',${con})`, 42) : ''}
-            <button type="button" onclick="pwFillBatch('${b.id}',${con})" style="flex-shrink:0;height:42px;padding:0 14px;background:#fff;color:var(--gd);border:1.5px solid var(--gd);border-radius:12px;font-family:'Google Sans',sans-serif;font-size:12.5px;font-weight:700;cursor:pointer;">Cả lô</button>
+            <button type="button" onclick="pwFillBatch('${b.id}',${con})" style="flex-shrink:0;height:42px;padding:0 14px;background:#fff;color:var(--gd);border:1.5px solid var(--gd);border-radius:12px;font-family:'Google Sans',sans-serif;font-size:12.5px;font-weight:700;cursor:pointer;">Đổ cả lô</button>
           </div>
           <div id="pwW_${b.id}"></div>
         </div>`;
@@ -7228,10 +7238,13 @@ function renderPrepWasteForm() {
         Nhập thẳng số lượng huỷ bên dưới; hệ thống chỉ trừ tồn tổng, không gắn được vào lô nào.
       </div>
       <div class="wal-input-label" style="margin:10px 0 6px;">Số lượng huỷ</div>
+      ${coCan ? weighBtnWide('pwWeighPlain()',
+          canMode === 'remain' ? 'Cân chỗ còn lại' : 'Cân chỗ đã đổ',
+          'Đặt cả vật đựng lên cân — máy tự trừ bì') + '<div style="height:9px;"></div>' : ''}
       <div class="wal-input-group" style="margin-bottom:2px;display:flex;align-items:center;gap:8px;">
-        <input id="pwQty" type="number" inputmode="decimal" step="0.01" placeholder="0" oninput="pwManualEdit('plain')" style="flex:1;">
+        ${coCan ? '<span style="font-size:11.5px;color:#aaa;font-weight:600;flex-shrink:0;">hoặc</span>' : ''}
+        <input id="pwQty" type="number" inputmode="decimal" step="0.01" placeholder="${coCan ? 'Gõ tay số đã đổ' : '0'}" oninput="pwManualEdit('plain')" style="flex:1;">
         <span style="font-size:13px;font-weight:700;color:var(--gd);white-space:nowrap;">${p.unit || ''}</span>
-        ${coCan ? weighBtnHTML(`pwWeighPlain()`, 42) : ''}
       </div>
       <div id="pwW_plain"></div>`;
 
@@ -7272,6 +7285,13 @@ function renderPrepWasteForm() {
 // ---------------------------------------------------------------------------
 let _pwWeighings = {};
 
+// MỘT nguồn duy nhất cho kiểu cân đang chọn.
+// Trước đây mặc định được viết lặp ở 3 chỗ ('discard' ở phần tính, 'remain' ở phần
+// hiển thị) — màn hình tô sáng "khay còn lại" trong khi máy lại tính theo "chỗ đã
+// đổ", ra số sai mà không có dấu hiệu nào. Đúng loại lỗi chỉ lộ ra khi hai chỗ
+// lệch nhau, nên phải chỉ có một chỗ định nghĩa.
+function pwMode() { return khoTxState.pwWeighMode || 'remain'; }
+
 function pwSetWeighMode(mode) {
   khoTxState.pwWeighMode = mode;
   // Đổi kiểu cân làm mọi số đã cân trước đó đổi nghĩa — bỏ hết bảng kê đi chứ
@@ -7293,7 +7313,7 @@ function pwManualEdit(key) {
 // Đổ kết quả cân vào một ô. `con` = số hệ thống đang ghi cho chỗ đó, dùng khi
 // nhân viên chọn kiểu "cân phần còn lại".
 function _pwApplyWeigh(key, inputId, con, unit, total, lines, redoExpr) {
-  const remain = (khoTxState.pwWeighMode || 'discard') === 'remain';
+  const remain = pwMode() === 'remain';
   let qty = total;
   if (remain) {
     qty = Math.round((con - total) * 100) / 100;
@@ -7319,10 +7339,10 @@ function pwWeighBatch(batchId, con) {
   const p = PREP_ITEMS_CACHE_POS.find(x => x.id === khoTxState.prepId);
   if (!p) return;
   const b = pwBatchesFor(p.id).find(x => x.id === batchId) || {};
-  const remain = (khoTxState.pwWeighMode || 'discard') === 'remain';
+  const remain = pwMode() === 'remain';
   openWeighPad({
     prepId: p.id, unit: p.unit,
-    title: (remain ? 'Cân phần CÒN LẠI của lô ' : 'Cân phần ĐỔ ĐI của lô ') + (b.batchCode || ''),
+    title: (remain ? 'Cân khay CÒN LẠI của lô ' : 'Cân chỗ ĐÃ ĐỔ của lô ') + (b.batchCode || ''),
     onDone: (total, lines) => _pwApplyWeigh(batchId, 'pwB_' + batchId, con, p.unit || '', total, lines, `pwWeighBatch('${batchId}',${con})`)
   });
 }
@@ -7330,10 +7350,10 @@ function pwWeighBatch(batchId, con) {
 function pwWeighPlain() {
   const p = PREP_ITEMS_CACHE_POS.find(x => x.id === khoTxState.prepId);
   if (!p) return;
-  const remain = (khoTxState.pwWeighMode || 'discard') === 'remain';
+  const remain = pwMode() === 'remain';
   openWeighPad({
     prepId: p.id, unit: p.unit,
-    title: remain ? 'Cân phần CÒN LẠI' : 'Cân phần ĐỔ ĐI',
+    title: remain ? 'Cân chỗ CÒN LẠI' : 'Cân chỗ ĐÃ ĐỔ',
     // Không có lô nào thì mốc để lấy hiệu là tồn tổng đang ghi.
     onDone: (total, lines) => _pwApplyWeigh('plain', 'pwQty', Number(p.currentStock) || 0, p.unit || '', total, lines, 'pwWeighPlain()')
   });
@@ -7602,11 +7622,27 @@ function preloadVesselImagesPOS(prepIds) {
   urls.forEach(u => { const im = new Image(); im.src = u; });
 }
 
-// Nút ⚖️ đặt cạnh một ô nhập. Trả về '' nếu bán thành phẩm không cân được —
-// nơi gọi chỉ việc nhét chuỗi này vào, không phải tự đi kiểm tra điều kiện.
+// Nút cân dạng CHIP — luôn có CHỮ đi kèm biểu tượng.
+//
+// Bản đầu chỉ là một ô vuông mang mỗi emoji ⚖️. Ở máy thật, chủ quán không nhận
+// ra đó là nút bấm: "tôi tưởng nó là biểu tượng cung Thiên Bình". Một biểu tượng
+// trơ không nói được là bấm được, càng không nói được bấm vào thì ra gì.
 function weighBtnHTML(onclickExpr, size) {
-  const s = size || 44;
-  return `<button type="button" onclick="${onclickExpr}" title="Cân bằng dụng cụ đựng" style="flex-shrink:0;width:${s}px;height:${s}px;border-radius:13px;border:1.5px solid var(--gd);background:#fff;color:var(--gd);font-size:${Math.round(s * 0.42)}px;line-height:1;cursor:pointer;">⚖️</button>`;
+  const cao = (size && size < 42) ? 36 : 42;
+  return `<button type="button" onclick="${onclickExpr}" style="flex-shrink:0;height:${cao}px;padding:0 12px;border-radius:12px;border:1.5px solid var(--gd);background:#fff;color:var(--gd);font-family:'Google Sans',sans-serif;font-size:${cao > 38 ? '12.5' : '11.5'}px;font-weight:700;cursor:pointer;white-space:nowrap;">⚖️ Cân</button>`;
+}
+
+// Nút cân CHÍNH — to, đầy dòng, có câu giải thích bên dưới. Dùng ở chỗ cân là
+// việc chính; ô gõ tay lùi xuống thành phương án phụ, đúng thứ tự thật.
+function weighBtnWide(onclickExpr, label, sub) {
+  return `<button type="button" onclick="${onclickExpr}" style="width:100%;padding:13px 14px;background:var(--gl);color:var(--gm);border:1.5px solid var(--gd);border-radius:14px;font-family:'Google Sans',sans-serif;cursor:pointer;text-align:left;display:flex;align-items:center;gap:11px;">
+      <span style="font-size:22px;line-height:1;">⚖️</span>
+      <span style="flex:1;min-width:0;">
+        <span style="display:block;font-size:14.5px;font-weight:700;">${label}</span>
+        ${sub ? `<span style="display:block;font-size:11.5px;font-weight:500;opacity:.9;margin-top:1px;">${sub}</span>` : ''}
+      </span>
+      <span style="font-size:17px;opacity:.55;">&rsaquo;</span>
+    </button>`;
 }
 
 // Vì sao bán thành phẩm này chưa cân trừ bì được. Ẩn nút im lặng là thứ khiến
@@ -8476,10 +8512,12 @@ function openPrepFinishForm(batchId) {
       <div class="wal-section-title">Hoàn thành: ${b.prepName || ''}</div>
       <div style="font-size:12.5px;color:#999;margin-bottom:10px;">Bắt đầu lúc ${fmtDateTimeShort(b.startedAt)} · ${b.batchRatio} mẻ</div>
       <div class="wal-input-label" style="margin:0 0 6px;">Thực tế thu được (cân/đong)</div>
-      ${prepCanWeighPOS(b.prepId) ? `
-      <button type="button" onclick="openPrepFinishWeigh()" style="width:100%;margin-bottom:10px;padding:14px;background:#fff;color:var(--gd);border:1.5px solid var(--gd);border-radius:14px;font-family:'Google Sans',sans-serif;font-size:14.5px;font-weight:700;cursor:pointer;">⚖️ Cân cả khay — hệ thống tự trừ bì</button>` : prepWeighHintHTML(b.prepId)}
+      ${prepCanWeighPOS(b.prepId)
+        ? weighBtnWide('openPrepFinishWeigh()', 'Cân cả khay vừa nấu', 'Đặt nguyên khay/nồi lên cân — máy tự trừ bì') + '<div style="height:9px;"></div>'
+        : prepWeighHintHTML(b.prepId)}
       <div class="wal-input-group" style="margin-bottom:2px;display:flex;align-items:center;gap:8px;">
-        <input id="prepFinishQty" type="number" inputmode="decimal" step="0.01" placeholder="Cân xong gõ số vào đây" oninput="onPrepFinishQtyInput(true)" style="flex:1;">
+        ${prepCanWeighPOS(b.prepId) ? '<span style="font-size:11.5px;color:#aaa;font-weight:600;flex-shrink:0;">hoặc</span>' : ''}
+        <input id="prepFinishQty" type="number" inputmode="decimal" step="0.01" placeholder="Gõ tay số đã cân" oninput="onPrepFinishQtyInput(true)" style="flex:1;">
         <span style="font-size:13px;font-weight:700;color:var(--gd);white-space:nowrap;">${b.unit || ''}</span>
       </div>
       <div id="prepFinishWeighInfo"></div>
@@ -12138,12 +12176,13 @@ function renderPrepCountLineSingle(l, i) {
             </div>
             ${l.hasExpired ? '<span style="background:#fee2e2;color:#c0392b;font-size:10.5px;font-weight:800;border-radius:6px;padding:3px 7px;white-space:nowrap;">HẾT HẠN</span>' : ''}
           </div>
+          ${prepCanWeighPOS(l.prepId) ? weighBtnWide(`prepCountWeigh(${i})`, 'Cân cả khay còn lại', 'Đặt nguyên khay lên cân — máy tự trừ bì') + '<div style="height:8px;"></div>' : ''}
           <div style="display:flex;gap:8px;align-items:center;">
+            ${prepCanWeighPOS(l.prepId) ? '<span style="font-size:11.5px;color:#aaa;font-weight:600;flex-shrink:0;">hoặc</span>' : ''}
             <div class="wal-input-group" style="flex:1;margin-bottom:0;">
-              <input id="pcQty${i}" type="number" inputmode="decimal" step="0.01" placeholder="Còn lại..." oninput="prepCountSetQty(${i},this.value,true)">
+              <input id="pcQty${i}" type="number" inputmode="decimal" step="0.01" placeholder="${prepCanWeighPOS(l.prepId) ? 'Gõ tay' : 'Còn lại...'}" oninput="prepCountSetQty(${i},this.value,true)">
             </div>
             <span style="font-size:12.5px;font-weight:700;color:var(--gd);white-space:nowrap;">${l.unit || ''}</span>
-            ${prepCanWeighPOS(l.prepId) ? weighBtnHTML(`prepCountWeigh(${i})`, 44) : ''}
             <button id="pcDiscard${i}" onclick="prepCountToggleDiscard(${i})" style="padding:10px 12px;border-radius:11px;border:1.5px solid #e6e1d2;background:#fff;color:#888;font-family:'Google Sans',sans-serif;font-weight:700;font-size:12px;cursor:pointer;white-space:nowrap;">Bỏ hết</button>
           </div>
           <div id="pcWeigh${i}"></div>
@@ -12182,7 +12221,7 @@ function renderPrepCountLinePerBatch(l, i) {
             </div>
             <span style="font-size:12.5px;font-weight:700;color:var(--gd);white-space:nowrap;">${l.unit || ''}</span>
             ${prepCanWeighPOS(l.prepId) ? weighBtnHTML(`prepCountWeighSmart(${i})`, 44) : ''}
-            <button id="pcDiscard${i}" onclick="prepCountToggleDiscard(${i})" style="padding:10px 12px;border-radius:11px;border:1.5px solid #e6e1d2;background:#fff;color:#888;font-family:'Google Sans',sans-serif;font-weight:700;font-size:12px;cursor:pointer;white-space:nowrap;">Bỏ hết</button>
+            <button id="pcDiscard${i}" onclick="prepCountToggleDiscard(${i})" style="padding:10px 10px;border-radius:11px;border:1.5px solid #e6e1d2;background:#fff;color:#888;font-family:'Google Sans',sans-serif;font-weight:700;font-size:12px;cursor:pointer;white-space:nowrap;">Bỏ hết</button>
           </div>
           <div style="font-size:10.5px;color:#aaa;margin-top:4px;">Gõ tổng nhanh để hệ thống gợi ý chia theo lô cũ trước, rồi soát lại từng lô theo tem thật bên dưới — hoặc bỏ qua ô này và gõ thẳng từng lô.</div>
           ${batchRows}
