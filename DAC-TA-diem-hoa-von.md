@@ -135,3 +135,49 @@ Lãi = (Doanh thu − Doanh thu hoà vốn) × Biên đóng góp
 ```
 
 Bán đúng ngưỡng hoà vốn thì lãi bằng **0** — không phải xấp xỉ 0.
+
+---
+
+## 9. [Sửa lỗi — chủ quán phát hiện] Hai chỗ sai và một chỗ tôi nói quá lời
+
+Chủ quán hỏi: *"điểm hoà vốn và lãi không khớp với doanh thu?"* — bán 773.000đ, ngưỡng
+444.199đ, màn hình ghi "đã qua hoà vốn", nhưng lãi chỉ 81.383đ. Nhẩm theo công thức
+thì phải ra ~220.000đ. Kiểm lại thì đúng là có lỗi.
+
+### Lỗi 1 — Khấu hao trong ngưỡng lấy trung bình quá khứ (ĐÃ SỬA)
+
+Ngưỡng "kể cả khấu hao" hiện **454.248đ/ngày**, tức chỉ nhích thêm 10.049đ so với mức
+tiền mặt. Trong khi khấu hao thật của **một ngày** đã là 202.266đ. Đúng ra ngưỡng phải
+là **745.639đ/ngày**.
+
+Nguyên nhân: tài sản vừa được nhập vào app, nên trong cửa sổ 30 ngày chỉ có ~1 ngày
+mang khấu hao. Lấy trung bình quá khứ cho một câu hỏi **hướng tới phía trước** là sai:
+máy vừa mua thì 30 ngày qua chưa gánh gì, nhưng từ nay tháng nào cũng phải gánh.
+
+Đã sửa: khấu hao trong ngưỡng lấy **mức đang chạy của hôm nay**. Các dòng khác (thuê,
+lương) vẫn lấy trung bình 30 ngày vì chúng ổn định; riêng khấu hao nhảy bậc đúng hôm
+mua tài sản.
+
+### Lỗi 2 — Tôi nói quá lời ở đợt 5 (ĐÃ SỬA CÂU CHỮ)
+
+Tôi viết "hai khối luôn khớp nhau: lãi = (doanh thu − hoà vốn) × biên đóng góp". Đẳng
+thức đó chỉ đúng **trong chính cửa sổ 30 ngày**, không đúng khi nhẩm chéo giữa *lãi hôm
+nay* và *ngưỡng 30 ngày*. Chủ quán nhẩm chéo là hoàn toàn hợp lý vì tôi đã viết như thế.
+
+### Không phải lỗi — nhưng phải giải thích trên màn hình
+
+Hai con số trả lời hai câu hỏi khác nhau:
+
+| | Ngưỡng hoà vốn | Lãi hôm nay |
+|---|---|---|
+| Chi phí lấy từ | **trung bình 30 ngày** | **đúng hôm nay** |
+| Khấu hao | **chưa trừ** | **đã trừ** |
+
+Đã thêm **bảng đối chiếu** ngay trong thẻ hoà vốn, ba dòng cộng lại đúng bằng lãi thật:
+
+```
+Theo mức trung bình 30 ngày                    + 242.101
+Chi phí thật hôm nay cao/thấp hơn trung bình   −   7.914
+Khấu hao tài sản hôm nay                       − 200.000
+= Lãi hôm nay                                     34.187
+```

@@ -4548,7 +4548,7 @@ async function computeBreakEvenWindow(force){
   const end = new Date();
   const start = new Date(); start.setDate(start.getDate() - (BEP_WINDOW_DAYS - 1));
 
-  const { tong } = await computeDailyPLRange(start, end);
+  const { tong, assets } = await computeDailyPLRange(start, end);
   const cfg = configForDate(homNay);
   const soNgay = tong.soNgay || BEP_WINDOW_DAYS;
 
@@ -4560,8 +4560,19 @@ async function computeBreakEvenWindow(force){
     bienPhiKhac: tong.haoHut + tong.bienPhiKhac + tong.phiKenh,
     // Lương LUÔN nằm ở cố định — xem ghi chú đầu khối.
     chiPhiCoDinh: tong.luong + tong.chiPhiCoDinh,
-    // Quy khấu hao của cửa sổ về "một tháng 30 ngày" cho khớp tham số của hàm lõi.
-    khauHaoThang: tong.khauHao / Math.max(1, soNgay) * 30,
+    // [SỬA LỖI — chủ quán phát hiện] Khấu hao ở đây phải là MỨC ĐANG CHẠY của hôm nay,
+    // KHÔNG phải trung bình 30 ngày qua.
+    //
+    // Vì sao: ngưỡng hoà vốn là câu hỏi HƯỚNG TỚI PHÍA TRƯỚC — "từ giờ mỗi ngày phải
+    // bán bao nhiêu mới không lỗ". Máy móc vừa mua tuần trước thì 30 ngày qua gần như
+    // chưa có khấu hao nào, nhưng từ nay tháng nào cũng phải gánh. Lấy trung bình quá
+    // khứ làm ngưỡng thấp hơn thực tế rất xa: quán vừa sắm tài sản khấu hao 6tr/tháng
+    // thấy ngưỡng "kể cả khấu hao" chỉ nhích thêm 10.000đ/ngày, trong khi đúng ra phải
+    // nhích thêm hơn 300.000đ/ngày.
+    //
+    // Các dòng còn lại vẫn lấy từ cửa sổ 30 ngày vì chúng ổn định (tiền thuê, lương);
+    // riêng khấu hao nhảy bậc đúng hôm mua tài sản nên phải đọc mức hiện tại.
+    khauHaoThang: monthlyDepreciation(assets, homNay),
     soNgay,
     cogsPctFallback: cfg.targets.cogsPct
   });
@@ -4605,7 +4616,39 @@ function bepBarHTML(daBan, mucHoaVon, mucTarget){
 }
 
 // Một dòng gọn cho màn Hôm nay: đã bán bao nhiêu so với ngưỡng hoà vốn NGÀY.
-function bepTodayHTML(bep, doanhThuHomNay, targetNgay){
+// [MỚI] Bảng ĐỐI CHIẾU: vì sao "đã qua hoà vốn" mà lãi hôm nay lại là con số khác với
+// phép nhẩm (doanh thu − ngưỡng) × biên đóng góp.
+//
+// Hai con số trả lời hai câu hỏi khác nhau và KHÔNG thể bằng nhau:
+//   · Ngưỡng hoà vốn — lấy chi phí và biên TRUNG BÌNH 30 NGÀY, và là mức TRƯỚC khấu
+//     hao. Dùng trung bình là cố ý: tiền thuê trả một lần trong tháng, nếu lấy đúng
+//     hôm nay thì ngày trả tiền ngưỡng vọt lên trời còn 29 ngày kia tưởng miễn phí.
+//   · Lãi hôm nay — lấy chi phí THẬT của đúng hôm nay, và ĐÃ trừ khấu hao.
+//
+// Không giải thích thì chủ quán thấy hai con số "đá nhau" và mất tin cả hai. Nên thay
+// vì giấu, bày thẳng ra ba dòng chênh lệch cộng lại đúng bằng con số lãi thật.
+function bepDoiChieuHTML(bep, pl){
+  if(!bep || !pl || bep.khongTheHoaVon || bep.hoaVonNgay == null) return '';
+  const theoMoHinh = (pl.doanhThu - bep.hoaVonNgay) * bep.bienDongGop;
+  const chenhChiPhi = pl.laiTruocKhauHao - theoMoHinh;
+  const dong = (nhan, so, phu, dam) => `<div class="row">
+      <span class="rl">${dam?`<b>${nhan}</b>`:nhan}${phu?`<div class="small-note" style="margin-top:1px">${phu}</div>`:''}</span>
+      <span class="rv" style="color:${so<0?'var(--bad)':'var(--td)'}">${so<0?'−':'+'} ${fmt(Math.abs(so))}</span></div>`;
+  return `
+    <div style="border-top:1px solid var(--line);margin-top:12px;padding-top:10px">
+      <div style="font-size:12.5px;font-weight:700;color:var(--gt);margin-bottom:2px;">Vì sao lãi hôm nay không bằng phép nhẩm từ ngưỡng?</div>
+      ${dong('Theo mức trung bình 30 ngày', theoMoHinh, `bán ${fmt(pl.doanhThu)}, vượt ngưỡng ${fmt(pl.doanhThu - bep.hoaVonNgay)}`)}
+      ${dong(chenhChiPhi >= 0 ? 'Chi phí thật hôm nay THẤP hơn mức trung bình' : 'Chi phí thật hôm nay CAO hơn mức trung bình', chenhChiPhi, 'giá vốn, hao hụt, lương, chi phí của đúng hôm nay')}
+      ${dong('Khấu hao tài sản hôm nay', -pl.khauHao, 'ngưỡng ở trên là mức TRƯỚC khấu hao')}
+      <div class="row" style="border-top:1.5px solid var(--line);padding-top:8px">
+        <span class="rl"><b>${pl.lai>=0?'Lãi':'Lỗ'} hôm nay</b></span>
+        <span class="rv" style="color:${pl.lai>=0?'var(--ok)':'var(--bad)'};font-size:16px"><b>${pl.lai>=0?'':'−'}${fmt(Math.abs(pl.lai))}</b></span>
+      </div>
+      <div class="small-note" style="margin-top:6px">Ngưỡng lấy <b>trung bình 30 ngày</b> là cố ý: tiền thuê trả một lần trong tháng, nếu tính đúng hôm nay thì hôm trả tiền ngưỡng vọt lên trời còn 29 ngày kia tưởng như không mất tiền thuê.</div>
+    </div>`;
+}
+
+function bepTodayHTML(bep, doanhThuHomNay, targetNgay, pl){
   if (!bep) return '';
   if (bep.khongTheHoaVon) {
     return `<div class="card" style="border:1.5px solid var(--bad-line);background:var(--bad-bg);">
@@ -4624,7 +4667,7 @@ function bepTodayHTML(bep, doanhThuHomNay, targetNgay){
           ${bep.chuaKhaiChiPhi ? 'Chưa khai chi phí' : dat ? 'Đã qua hoà vốn' : 'Còn thiếu ' + fmt(con)}
         </span>
       </div>
-      <div style="font-size:26px;font-weight:750;color:var(--td);margin-top:2px;">${fmt(nguong)}<span style="font-size:14px;font-weight:600;color:var(--gt);">/ngày</span></div>
+      <div style="font-size:26px;font-weight:750;color:var(--td);margin-top:2px;">${fmt(nguong)}<span style="font-size:14px;font-weight:600;color:var(--gt);">/ngày · chưa trừ khấu hao</span></div>
       ${bepBarHTML(doanhThuHomNay, nguong, targetNgay)}
       <div class="small-note" style="margin-top:0">
         ${bep.chuaKhaiChiPhi
@@ -4632,6 +4675,7 @@ function bepTodayHTML(bep, doanhThuHomNay, targetNgay){
           : `Biên đóng góp <b>${fmtPct(bep.bienDongGop)}</b> · chi phí cố định <b>${fmt(bep.chiPhiCoDinh / bep.soNgay)}</b>/ngày${bep.uocTinh ? ' · <b style="color:var(--warn)">ước tính</b> vì 30 ngày qua chưa có doanh thu' : ''}<br>
              Kể cả khấu hao tài sản: <b>${bep.hoaVonNgayKH == null ? '—' : fmt(bep.hoaVonNgayKH)}</b>/ngày`}
       </div>
+      ${bepDoiChieuHTML(bep, pl)}
     </div>`;
 }
 
@@ -4667,7 +4711,7 @@ function bepHealthHTML(bep, doanhThuKy, targetKy, soNgayKy){
       <div class="unit-explainer" style="margin-top:12px">
         <b>Cách tính</b> — chi phí cố định ÷ biên đóng góp.<br>
         Biên đóng góp <b>${fmtPct(bep.bienDongGop)}</b>: mỗi 100đ bán ra còn lại ${fmtNum(bep.bienDongGop * 100, 0)}đ sau khi trả giá vốn, hao hụt và biến phí, để đắp vào chi phí cố định.<br>
-        Lấy đúng bộ số của bảng <b>Lãi/lỗ</b> ở trên, nên hai khối luôn khớp nhau: <b>lãi = (doanh thu − doanh thu hoà vốn) × biên đóng góp</b>.<br>
+        Lấy đúng bộ số của bảng <b>Lãi/lỗ</b> ở trên, nhưng <b>tính trên cửa sổ 30 ngày gần nhất</b> chứ không phải kỳ bạn đang xem. Đẳng thức <b>lãi = (doanh thu − hoà vốn) × biên đóng góp</b> đúng tuyệt đối <i>trong chính 30 ngày đó</i>; xem kỳ khác thì hai con số trả lời hai câu hỏi khác nhau, đừng nhẩm chéo. Ngưỡng cũng là mức <b>trước khấu hao</b>.<br>
         Chi phí cố định <b>${fmt(bep.chiPhiCoDinh / bep.soNgay * ngay)}</b> cho ${ngay} ngày — gồm lương ${fmt(bep.chiPhiLuong / bep.soNgay * ngay)} và chi phí cố định khác ${fmt(bep.chiPhiCoDinhKhac / bep.soNgay * ngay)}.<br>
         <span style="opacity:.85">Lương tính là chi phí <b>cố định</b> kể cả lương giờ, vì lịch làm đặt trước theo ca chứ không co giãn theo từng ly bán ra. Chi phí cố định và biên đóng góp lấy trung bình <b>30 ngày gần nhất</b> để tiền thuê trả một lần trong tháng không làm ngưỡng nhảy vọt.${bep.uocTinh ? ' <b style="color:var(--warn)">Biên đóng góp đang là ƯỚC TÍNH theo target COGS%</b> vì 30 ngày qua chưa có doanh thu.' : ''}</span>
       </div>
@@ -4940,7 +4984,7 @@ async function computeDailyPLRange(startDate, endDate){
     wasteValue: wasteByDate[day.date] || 0,
     homNayKey
   }));
-  return { days, tong: plSumDays(days), salesRes };
+  return { days, tong: plSumDays(days), salesRes, assets };
 }
 
 // ---------------------------------------------------------------------------
@@ -6861,7 +6905,7 @@ async function renderToday(){
   computeBreakEvenWindow()
     .then(bep => {
       const el = document.getElementById('todayBep');
-      if (el && curScreen === 'today') el.innerHTML = bepTodayHTML(bep, kpi.revenue, dailyTarget);
+      if (el && curScreen === 'today') el.innerHTML = bepTodayHTML(bep, kpi.revenue, dailyTarget, plHomNay);
     })
     .catch(err => console.warn('[Hoà vốn] không tính được (bỏ qua):', err));
 
