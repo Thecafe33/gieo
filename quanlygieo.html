@@ -379,6 +379,36 @@ html.phone-ui .sync{padding:9px;}
 .kcard.kcard-wide .meter-foot{color:rgba(255,255,255,.85);}
 .kcard.kcard-wide .tier{background:rgba(255,255,255,.2);color:#fff;}
 
+/* ---- 5 MỨC SỨC KHOẺ CỦA NGÀY ----
+   Màu là thứ đọc được từ xa, trước cả khi kịp đọc con số. Thang này bám đúng
+   những mốc CÓ THẬT trong kinh doanh chứ không phải màu cho vui:
+     đỏ    — chưa đủ đắp chi phí, hôm nay đang lỗ
+     vàng  — đã hết lỗ nhưng chưa tới mục tiêu
+     xanh  — đạt mục tiêu tối thiểu
+     lam   — vượt mục tiêu
+     tím   — vượt xa, ngày rất tốt
+   Dùng gradient tối màu để chữ trắng luôn đủ tương phản ở cả hai chế độ sáng/tối. */
+.kcard.kcard-wide.lv-red{background:linear-gradient(140deg,#E8515D 0%,#D2333F 48%,#A81F2C 100%);
+  box-shadow:0 8px 24px -10px rgba(210,51,63,.55),var(--sh-1);}
+.kcard.kcard-wide.lv-amber{background:linear-gradient(140deg,#D89A2A 0%,#B87D12 48%,#93610A 100%);
+  box-shadow:0 8px 24px -10px rgba(184,125,18,.5),var(--sh-1);}
+.kcard.kcard-wide.lv-green{background:linear-gradient(140deg,#1BA96F 0%,#12855A 48%,#0B6644 100%);
+  box-shadow:0 8px 24px -10px rgba(18,133,90,.5),var(--sh-1);}
+.kcard.kcard-wide.lv-blue{background:linear-gradient(140deg,#3B72C9 0%,#2B57A8 48%,#1D3F80 100%);
+  box-shadow:0 8px 24px -10px rgba(43,87,168,.5),var(--sh-1);}
+.kcard.kcard-wide.lv-top{background:linear-gradient(135deg,#12855A 0%,#2B57A8 38%,#6D3BC9 72%,#B7284A 100%);
+  box-shadow:0 10px 28px -10px rgba(109,59,201,.55),var(--sh-1);}
+
+/* Thanh đo có VẠCH MỐC (hoà vốn / mục tiêu).
+   Lớp mốc phải nằm NGOÀI .meter-bar: .meter-bar có overflow:hidden để bo tròn phần
+   đã đạt, đặt nhãn bên trong thì nhãn bị cắt mất sạch. */
+.meter-wrap{position:relative;}
+.meter-marks{position:absolute;left:0;right:0;top:0;height:0;pointer-events:none;}
+.meter-mark{position:absolute;top:-3px;width:2px;height:14px;border-radius:2px;background:#fff;
+  box-shadow:0 0 0 1px rgba(0,0,0,.18);}
+.meter-mark-lbl{position:absolute;top:14px;transform:translateX(-50%);font-size:9.5px;font-weight:700;
+  white-space:nowrap;color:rgba(255,255,255,.92);}
+
 /* ==========================================================================
    6. THANH TIẾN ĐỘ / CHỈ SỐ NHỎ
    ========================================================================== */
@@ -1145,7 +1175,9 @@ html.phone-ui .nav-search .ns-kbd{display:none;}
     <div id="errBanner" style="display:none"></div>
 
     <!-- 🆕 SỨC KHOẺ QUÁN (GĐ6 kế hoạch V3 — PHẦN 6.4) — landing mặc định -->
-    <div class="screen active" id="screen-storehealth">
+    <!-- [GỘP MÀN] Khung cũ giữ lại rỗng để các id cũ không văng lỗi; nội dung đã
+         chuyển hẳn sang màn Hôm nay. -->
+    <div class="screen" id="screen-storehealth">
       <div class="wrap">
         <div id="storeHealthBook"></div>
         <div id="storeHealthBody"><div class="muted">Đang kiểm tra...</div></div>
@@ -1155,19 +1187,19 @@ html.phone-ui .nav-search .ns-kbd{display:none;}
     <!-- 🆕 HỘP THƯ CẢNH BÁO (PHẦN 4.7) — mở từ mục "Chênh lệch giao ca" ở Sức khoẻ quán -->
     <div class="screen" id="screen-inbox">
       <div class="wrap">
-        <button onclick="switchScreen('storehealth')" style="background:none;border:none;color:var(--gd);font-weight:700;font-size:12.5px;margin-bottom:10px;cursor:pointer;padding:6px 0;">← Sức khoẻ quán</button>
+        <button onclick="switchScreen('storehealth')" style="background:none;border:none;color:var(--gd);font-weight:700;font-size:12.5px;margin-bottom:10px;cursor:pointer;padding:6px 0;">← Hôm nay</button>
         <div class="sec-title" style="margin-top:0">Hộp thư cảnh báo</div>
         <div id="inboxBody"><div class="muted">Đang tải...</div></div>
       </div>
     </div>
 
     <!-- TODAY -->
-    <div class="screen" id="screen-today">
+    <div class="screen active" id="screen-today">
       <div class="wrap">
         <div id="reportSubNavToday"></div>
+        <div id="todayBook"></div>
         <div id="todayNudge"></div>
-        <div id="todayPL"></div>
-        <div id="todayBep"></div>
+        <div id="todayHealth"></div>
         <div class="sec-title">Chỉ số hôm nay</div>
         <div class="kgrid" id="todayGrid"></div>
         <div class="sec-title">Bill theo giờ</div>
@@ -1615,7 +1647,7 @@ async function reloadCurrent(){
   clearError();
   memoDropAll();   // bấm Tải lại là muốn số MỚI, không phải số trong bộ đệm
   try{ await ensureAuth(); await loadConfig(); }catch(err){ console.warn('reload config failed', err); }
-  if(curScreen==='storehealth') renderStoreHealth();
+  if(curScreen==='today') renderToday();
   else if(curScreen==='inbox') renderAlertInbox();
   else if(curScreen==='today') renderToday();
   else if(curScreen==='health') renderHealth();
@@ -4616,69 +4648,6 @@ function bepBarHTML(daBan, mucHoaVon, mucTarget){
 }
 
 // Một dòng gọn cho màn Hôm nay: đã bán bao nhiêu so với ngưỡng hoà vốn NGÀY.
-// [MỚI] Bảng ĐỐI CHIẾU: vì sao "đã qua hoà vốn" mà lãi hôm nay lại là con số khác với
-// phép nhẩm (doanh thu − ngưỡng) × biên đóng góp.
-//
-// Hai con số trả lời hai câu hỏi khác nhau và KHÔNG thể bằng nhau:
-//   · Ngưỡng hoà vốn — lấy chi phí và biên TRUNG BÌNH 30 NGÀY, và là mức TRƯỚC khấu
-//     hao. Dùng trung bình là cố ý: tiền thuê trả một lần trong tháng, nếu lấy đúng
-//     hôm nay thì ngày trả tiền ngưỡng vọt lên trời còn 29 ngày kia tưởng miễn phí.
-//   · Lãi hôm nay — lấy chi phí THẬT của đúng hôm nay, và ĐÃ trừ khấu hao.
-//
-// Không giải thích thì chủ quán thấy hai con số "đá nhau" và mất tin cả hai. Nên thay
-// vì giấu, bày thẳng ra ba dòng chênh lệch cộng lại đúng bằng con số lãi thật.
-function bepDoiChieuHTML(bep, pl){
-  if(!bep || !pl || bep.khongTheHoaVon || bep.hoaVonNgay == null) return '';
-  const theoMoHinh = (pl.doanhThu - bep.hoaVonNgay) * bep.bienDongGop;
-  const chenhChiPhi = pl.laiTruocKhauHao - theoMoHinh;
-  const dong = (nhan, so, phu, dam) => `<div class="row">
-      <span class="rl">${dam?`<b>${nhan}</b>`:nhan}${phu?`<div class="small-note" style="margin-top:1px">${phu}</div>`:''}</span>
-      <span class="rv" style="color:${so<0?'var(--bad)':'var(--td)'}">${so<0?'−':'+'} ${fmt(Math.abs(so))}</span></div>`;
-  return `
-    <div style="border-top:1px solid var(--line);margin-top:12px;padding-top:10px">
-      <div style="font-size:12.5px;font-weight:700;color:var(--gt);margin-bottom:2px;">Vì sao lãi hôm nay không bằng phép nhẩm từ ngưỡng?</div>
-      ${dong('Theo mức trung bình 30 ngày', theoMoHinh, `bán ${fmt(pl.doanhThu)}, vượt ngưỡng ${fmt(pl.doanhThu - bep.hoaVonNgay)}`)}
-      ${dong(chenhChiPhi >= 0 ? 'Chi phí thật hôm nay THẤP hơn mức trung bình' : 'Chi phí thật hôm nay CAO hơn mức trung bình', chenhChiPhi, 'giá vốn, hao hụt, lương, chi phí của đúng hôm nay')}
-      ${dong('Khấu hao tài sản hôm nay', -pl.khauHao, 'ngưỡng ở trên là mức TRƯỚC khấu hao')}
-      <div class="row" style="border-top:1.5px solid var(--line);padding-top:8px">
-        <span class="rl"><b>${pl.lai>=0?'Lãi':'Lỗ'} hôm nay</b></span>
-        <span class="rv" style="color:${pl.lai>=0?'var(--ok)':'var(--bad)'};font-size:16px"><b>${pl.lai>=0?'':'−'}${fmt(Math.abs(pl.lai))}</b></span>
-      </div>
-      <div class="small-note" style="margin-top:6px">Ngưỡng lấy <b>trung bình 30 ngày</b> là cố ý: tiền thuê trả một lần trong tháng, nếu tính đúng hôm nay thì hôm trả tiền ngưỡng vọt lên trời còn 29 ngày kia tưởng như không mất tiền thuê.</div>
-    </div>`;
-}
-
-function bepTodayHTML(bep, doanhThuHomNay, targetNgay, pl){
-  if (!bep) return '';
-  if (bep.khongTheHoaVon) {
-    return `<div class="card" style="border:1.5px solid var(--bad-line);background:var(--bad-bg);">
-      <div style="font-weight:700;color:var(--bad);margin-bottom:4px;">${ic('alert',15)} Không có điểm hoà vốn</div>
-      <div style="font-size:13px;line-height:1.6;color:var(--bad);">Giá vốn và biến phí đang ngốn hết ${fmtPct(bep.tyLeBienPhi)} doanh thu — bán thêm một ly là lỗ thêm. Phải sửa giá bán hoặc giá vốn trước, không có mức doanh thu nào cứu được.</div>
-    </div>`;
-  }
-  const nguong = bep.hoaVonNgay;
-  const con = nguong - doanhThuHomNay;
-  const dat = doanhThuHomNay >= nguong;
-  return `
-    <div class="card">
-      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;">
-        <span style="font-size:13px;font-weight:700;color:var(--gt);text-transform:uppercase;letter-spacing:.05em;">Hoà vốn hôm nay</span>
-        <span style="font-size:13px;font-weight:700;color:${dat ? 'var(--ok)' : 'var(--bad)'};">
-          ${bep.chuaKhaiChiPhi ? 'Chưa khai chi phí' : dat ? 'Đã qua hoà vốn' : 'Còn thiếu ' + fmt(con)}
-        </span>
-      </div>
-      <div style="font-size:26px;font-weight:750;color:var(--td);margin-top:2px;">${fmt(nguong)}<span style="font-size:14px;font-weight:600;color:var(--gt);">/ngày · chưa trừ khấu hao</span></div>
-      ${bepBarHTML(doanhThuHomNay, nguong, targetNgay)}
-      <div class="small-note" style="margin-top:0">
-        ${bep.chuaKhaiChiPhi
-          ? 'Chưa ghi chi phí cố định nào trong 30 ngày qua nên ngưỡng đang là 0 — <b>không phải</b> đã hoà vốn. Ghi tiền thuê/điện/nước ở mục Chi phí thì số này mới có nghĩa.'
-          : `Biên đóng góp <b>${fmtPct(bep.bienDongGop)}</b> · chi phí cố định <b>${fmt(bep.chiPhiCoDinh / bep.soNgay)}</b>/ngày${bep.uocTinh ? ' · <b style="color:var(--warn)">ước tính</b> vì 30 ngày qua chưa có doanh thu' : ''}<br>
-             Kể cả khấu hao tài sản: <b>${bep.hoaVonNgayKH == null ? '—' : fmt(bep.hoaVonNgayKH)}</b>/ngày`}
-      </div>
-      ${bepDoiChieuHTML(bep, pl)}
-    </div>`;
-}
-
 // Khối đầy đủ cho màn Sức khoẻ tài chính — có cả cách tính, vì đây là con số để
 // ra quyết định chứ không phải để ngắm.
 function bepHealthHTML(bep, doanhThuKy, targetKy, soNgayKy){
@@ -5045,50 +5014,6 @@ function plToggleChiTiet(){
   if(btn) btn.innerHTML = (dangAn ? 'Thu gọn ' + ic('chevronUp',14) : 'Xem tách từng dòng ' + ic('chevronDown',14));
 }
 
-function plTodayHTML(pl){
-  if(!pl) return '';
-  const laLai = pl.lai >= 0;
-  const mau = laLai ? 'var(--ok)' : 'var(--bad)';
-  const chuaBan = pl.doanhThu <= 0;
-  return `
-    <div class="card" style="border:1.5px solid ${laLai?'var(--ok-line)':'var(--bad-line)'};">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
-        <span style="font-size:13px;font-weight:700;color:var(--gt);text-transform:uppercase;letter-spacing:.05em;">${laLai?'Lãi':'Lỗ'} hôm nay</span>
-        ${plChipTinCay(pl.mucTinCay)}
-      </div>
-      <div style="font-size:30px;font-weight:750;color:${mau};margin-top:2px;line-height:1.15;">${laLai?'':'−'}${fmt(Math.abs(pl.lai))}</div>
-      <div class="small-note" style="margin-top:4px">
-        Trước khấu hao: <b>${pl.laiTruocKhauHao>=0?'':'−'}${fmt(Math.abs(pl.laiTruocKhauHao))}</b>
-        ${pl.doanhThu ? ` · biên lãi <b>${fmtPct(pl.bienLaiPct)}</b>` : ''}
-      </div>
-      ${(pl.choSoThat||[]).length ? `<div class="small-note" style="margin-top:6px;color:var(--warn)">Đang tính theo số dự đoán cho: <b>${pl.choSoThat.map(k=>k.category).join(', ')}</b> — con số sẽ đổi khi hoá đơn về.</div>` : ''}
-      ${chuaBan ? `<div class="small-note" style="margin-top:6px;color:var(--warn)">Hôm nay chưa có doanh thu — con số đang là toàn bộ chi phí của một ngày (thuê, lương, khấu hao vẫn chạy dù chưa bán được ly nào).</div>` : ''}
-      <button id="todayPLToggle" onclick="plToggleChiTiet()" style="margin-top:10px;background:none;border:none;padding:6px 0;color:var(--gd);font-weight:700;font-size:12.5px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;">Xem tách từng dòng ${ic('chevronDown',14)}</button>
-      <div id="todayPLRows" hidden style="margin-top:2px;">
-        ${plRowHTML('Doanh thu', '+', pl.doanhThu)}
-        ${plRowHTML('Giá vốn hàng bán', '−', pl.giaVon, pl.giaVonTopping>0 ? `gồm topping bán ${fmt(pl.giaVonTopping)}` : '')}
-        ${plRowHTML('Hao hụt & huỷ', '−', pl.haoHut, 'nguyên liệu hư + bán thành phẩm huỷ + ly đổ')}
-        ${plRowHTML('Chi phí biến đổi', '−', pl.bienPhiKhac, 'khoản đã duyệt, danh mục gắn nhãn Biến đổi')}
-        ${pl.phiKenh>0 ? plRowHTML('Phí sàn', '−', pl.phiKenh) : ''}
-        ${plRowHTML('Lương', '−', pl.luong, pl.luongNguon)}
-        ${plRowHTML('Chi phí cố định', '−', pl.chiPhiCoDinh, 'thuê/điện/nước… chia đều theo ngày')}
-        ${plRowHTML('Khấu hao', '−', pl.khauHao,
-          (pl.coTaiSan && !(pl.khauHao > 0))
-            ? '<b style="color:var(--warn)">đang là 0đ</b> — tài sản đã khai có <b>ngày mua sau hôm nay</b>, hoặc đã hết thời gian khấu hao'
-            : 'nguyên giá ÷ số tháng sử dụng')}
-        <div class="row" style="border-top:1.5px solid var(--line);margin-top:4px;padding-top:8px">
-          <span class="rl"><b>${laLai?'Lãi':'Lỗ'} hôm nay</b></span>
-          <span class="rv" style="color:${mau};font-size:17px"><b>${laLai?'':'−'}${fmt(Math.abs(pl.lai))}</b></span>
-        </div>
-        <div class="unit-explainer" style="margin-top:10px">
-          Tiền <b>nhập hàng</b> không nằm trong bảng này: hôm nhập 5tr bột thì 5tr đó biến thành hàng trong kho, chỉ thành chi phí khi bán ra (vào giá vốn) hoặc khi hư/đổ (vào hao hụt). Ngày chi tiền xem ở tab Tiền mặt.<br>
-          Tiền <b>chủ quán rút</b> cũng không tính là chi phí — đây là lợi nhuận quán làm ra, rút tiền là chia lợi nhuận đó.
-          ${pl.dangUocTinh.length ? `<br><span style="color:var(--warn)">Còn đang ước tính: ${pl.dangUocTinh.join('; ')}.</span>` : ''}
-        </div>
-      </div>
-    </div>`;
-}
-
 
 // ---------------------------------------------------------------------------
 // [MỚI — đợt 2] LÃI/LỖ TỪNG NGÀY — màn Sức khoẻ tài chính
@@ -5449,7 +5374,7 @@ async function chotSoThang(monthKey){
     });
     logAudit('close_book','month',monthKey,{lai: tong.lai});
     toast('✅ Đã chốt sổ ' + monthLabelVN(monthKey) + ' — ' + (tong.lai>=0?'lãi ':'lỗ ') + fmt(Math.abs(tong.lai)));
-    if(curScreen==='storehealth') renderStoreHealth();
+    if(curScreen==='today') renderToday();
     if(curScreen==='health') renderHealth();
   }catch(err){
     console.error('chotSoThang lỗi', err);
@@ -5466,7 +5391,7 @@ async function moLaiThang(monthKey){
     await fstore.collection(BOOKCLOSE_COLL).doc(monthKey).delete();
     logAudit('reopen_book','month',monthKey,{});
     toast('Đã mở lại ' + monthLabelVN(monthKey));
-    if(curScreen==='storehealth') renderStoreHealth();
+    if(curScreen==='today') renderToday();
     if(curScreen==='health') renderHealth();
   }catch(err){ console.error(err); showError('Không mở lại được: '+(err.code||err.message||err)); }
 }
@@ -5483,8 +5408,17 @@ function xemThang(monthKey){
 // Băng nhắc ở màn Sức khoẻ quán
 // ---------------------------------------------------------------------------
 function bookAlertHTML(dsThang){
-  const can = (dsThang||[]).filter(t => t.trangThai==='cho-so-that' || t.trangThai==='du-so-that'
+  let can = (dsThang||[]).filter(t => t.trangThai==='cho-so-that' || t.trangThai==='du-so-that'
     || (t.trangThai==='da-chot' && t.coSoThatVeSauKhiChot));
+  // Tháng CÒN THIẾU số thật thì tháng nào cũng phải nhắc — đó là việc có hạn chót.
+  // Nhưng lời mời "chốt sổ đi" thì chỉ hiện cho THÁNG GẦN NHẤT: xếp ba tấm thiệp mời
+  // giống hệt nhau lên đầu màn chính là cách nhanh nhất biến chúng thành rác.
+  let daMoiChot = false;
+  can = can.filter(t=>{
+    if(t.trangThai !== 'du-so-that') return true;
+    if(daMoiChot) return false;
+    daMoiChot = true; return true;
+  });
   if(!can.length) return '';
   return can.map(t=>{
     if(t.trangThai==='cho-so-that'){
@@ -5533,16 +5467,175 @@ function bookAlertHTML(dsThang){
 
 // Nạp và vẽ băng nhắc. Chạy NỀN sau danh sách sức khoẻ: nó chỉ cần 2 collection nhỏ,
 // nhưng hỏng thì cũng không được che mất danh sách việc cần xử lý.
-async function renderBookAlerts(){
-  const box = document.getElementById('storeHealthBook');
+async function renderBookAlerts(targetId){
+  const box = document.getElementById(targetId || 'storeHealthBook');
   if(!box) return;
   try{
     const [expAll, closings] = await Promise.all([loadExpensesAll(), loadBookClosings()]);
-    if(curScreen !== 'storehealth') return;
+    if(curScreen !== 'storehealth' && curScreen !== 'today') return;
     box.innerHTML = bookAlertHTML(cacThangCanNhac(expAll, closings));
   }catch(err){
     console.warn('[Chốt sổ] không đọc được (bỏ qua):', err);
   }
+}
+
+
+// ============================================================================
+// [SỬA LỖI LỚN — chủ quán phát hiện] ĐIỂM HOÀ VỐN CỦA CHÍNH NGÀY ĐÓ
+// ----------------------------------------------------------------------------
+// Chủ quán chỉ ra: "nếu điểm hoà vốn là 444K, bán được 450K → chưa trừ khấu hao
+// 220K, vậy lãi lại là lỗ?". Hoàn toàn đúng. Một ngưỡng mang tên "hoà vốn" mà bán
+// đúng ngưỡng vẫn lỗ thì ngưỡng đó sai, không cách nào biện hộ.
+//
+// HAI THỨ ĐÃ SỬA:
+//
+//  1. KHẤU HAO CỘNG THẲNG VÀO chi phí cố định. Không còn chuyện đưa ra một ngưỡng
+//     "chưa trừ khấu hao" rồi thêm một ngưỡng phụ "kể cả khấu hao" bên dưới — hai
+//     con số cho cùng một câu hỏi thì con số nào cũng mất tin.
+//
+//  2. LẤY SỐ CỦA CHÍNH NGÀY ĐÓ, không lấy trung bình 30 ngày. Trước đây ngưỡng
+//     tính trên cửa sổ 30 ngày còn lãi tính trên hôm nay, nên hai con số không thể
+//     khớp và phải dựng cả một bảng đối chiếu để giải thích. Nay cùng một bộ số:
+//
+//         Biên đóng góp = 1 − (giá vốn + hao hụt + biến phí) / doanh thu
+//         Hoà vốn       = (lương + chi phí cố định + khấu hao) / biên đóng góp
+//
+//     Đẳng thức tự nhiên đúng, không cần giải thích gì thêm:
+//         lãi = (doanh thu − hoà vốn) × biên đóng góp
+//     Bán trên ngưỡng là LÃI, dưới ngưỡng là LỖ — đúng nghĩa của chữ "hoà vốn".
+//
+// ĐÁNH ĐỔI đã cân nhắc: lấy số của chính ngày thì ngưỡng nhích lên xuống theo ngày
+// (một khoản sửa chữa ghi hôm nay sẽ đẩy ngưỡng hôm nay lên). Nhưng đó là SỰ THẬT —
+// hôm nay có khoản đó thì hôm nay đúng là phải bán nhiều hơn mới hết lỗ. Chi phí
+// dài hạn (thuê, lương tháng) đã được chia đều theo ngày từ đợt 1 nên không gây
+// nhảy vọt. Đổi lại được thứ quan trọng hơn nhiều: hai con số không bao giờ đá nhau.
+// ============================================================================
+function plBreakEven(pl, bienDuPhong){
+  if(!pl) return null;
+  const dt = Number(pl.doanhThu) || 0;
+  const bienPhi = (pl.giaVon||0) + (pl.haoHut||0) + (pl.bienPhiKhac||0) + (pl.phiKenh||0);
+  // Khấu hao nằm TRONG chi phí cố định — máy móc mòn dần là chi phí thật, doanh thu
+  // phải đắp được cả nó thì mới gọi là hoà vốn.
+  const coDinh = (pl.luong||0) + (pl.chiPhiCoDinh||0) + (pl.khauHao||0);
+  // Chưa bán được đồng nào thì không đo được biên của hôm nay — mượn biên tham chiếu
+  // (30 ngày gần nhất) và nói rõ là ước tính, chứ không chia cho 0.
+  const uocTinh = !(dt > 0);
+  const bienDongGop = uocTinh ? (Number(bienDuPhong) || 0) : 1 - bienPhi / dt;
+  const khongTheHoaVon = !(bienDongGop > 0.0001);
+  const hoaVon = khongTheHoaVon ? null : coDinh / bienDongGop;
+  return {
+    hoaVon, bienDongGop, coDinh, bienPhi, uocTinh, khongTheHoaVon,
+    tyLeBienPhi: 1 - bienDongGop,
+    chuaKhaiChiPhi: coDinh <= 0,
+    dat: hoaVon != null && dt >= hoaVon,
+    conThieu: hoaVon == null ? null : hoaVon - dt
+  };
+}
+
+// Năm mức sức khoẻ của ngày, theo đúng thang chủ quán mô tả.
+// Mốc đỏ/vàng là mốc THẬT (hoà vốn, mục tiêu); mốc lam/tím là bội số của mục tiêu.
+// Hai mốc này chọn để khớp đúng thang chủ quán mô tả: với mục tiêu 1,68tr thì
+// 2,0tr phải là "tốt" (2,0/1,68 = 1,19) và 2,5tr là "rất tốt" (2,5/1,68 = 1,49).
+const PL_LV_TOT = 1.15;     // vượt mục tiêu 15% → ngày tốt
+const PL_LV_RATTOT = 1.45;  // vượt 45% → ngày rất tốt
+function plMucSucKhoe(doanhThu, hoaVon, target){
+  const dt = Number(doanhThu) || 0;
+  const hv = (hoaVon == null || !isFinite(hoaVon)) ? null : hoaVon;
+  const tg = Number(target) || 0;
+  if(hv != null && dt < hv) return 'red';
+  if(tg > 0){
+    if(dt < tg) return 'amber';
+    if(dt < tg * PL_LV_TOT) return 'green';
+    if(dt < tg * PL_LV_RATTOT) return 'blue';
+    return 'top';
+  }
+  // Chưa đặt mục tiêu thì chỉ phân biệt được lỗ/lãi — không bịa thêm mức.
+  return hv == null ? 'amber' : 'green';
+}
+const PL_LV_TEXT = {
+  red:   'Chưa đủ đắp chi phí — hôm nay đang lỗ',
+  amber: 'Đã hết lỗ, nhưng chưa tới mục tiêu',
+  green: 'Đạt mục tiêu tối thiểu',
+  blue:  'Vượt mục tiêu — ngày tốt',
+  top:   'Vượt xa mục tiêu — ngày rất tốt'
+};
+
+// Thanh đo có hai vạch mốc: hoà vốn và mục tiêu. Nằm ngay trên thẻ doanh thu nên
+// nhìn một cái là biết hôm nay đứng ở đâu giữa hai mốc đó.
+function plMeterHTML(doanhThu, hoaVon, target){
+  const dt = Number(doanhThu) || 0;
+  const hv = (hoaVon == null || !isFinite(hoaVon)) ? null : hoaVon;
+  const tg = Number(target) || 0;
+  const tran = Math.max(dt, tg, hv || 0) * 1.08 || 1;
+  const pct = v => Math.max(0, Math.min(100, v / tran * 100));
+  const vach = (v, nhan) => (v == null || v <= 0) ? '' :
+    `<div class="meter-mark" style="left:${pct(v)}%"></div>
+     <div class="meter-mark-lbl" style="left:${pct(v)}%">${nhan}</div>`;
+  return `
+    <div class="meter" style="margin-top:14px">
+      <div class="meter-wrap">
+        <div class="meter-bar"><div class="meter-fill" style="width:${pct(dt)}%"></div></div>
+        <div class="meter-marks">${vach(hv,'Hoà vốn')}${vach(tg,'Mục tiêu')}</div>
+      </div>
+      <div class="meter-foot" style="margin-top:22px"><span>${hv!=null ? (dt>=hv ? `Trên hoà vốn ${fmt(dt-hv)}` : `Còn thiếu ${fmt(hv-dt)} mới hoà vốn`) : 'Chưa tính được hoà vốn'}</span><span>${tg>0 ? fmtNum(dt/tg*100,0)+'% mục tiêu' : ''}</span></div>
+    </div>`;
+}
+
+// ---------------------------------------------------------------------------
+// THẺ GỘP: lãi/lỗ + hoà vốn trong CÙNG một ô
+// Chủ quán: "có điểm hoà vốn → phải hiện luôn lãi, chứ sao lại tách ra 2 cái, tốn
+// thời gian xem". Đúng — hai con số này là hai mặt của cùng một phép tính, tách ra
+// hai thẻ chỉ bắt người đọc tự ghép lại trong đầu.
+// ---------------------------------------------------------------------------
+function plLaiCardHTML(pl, be){
+  if(!pl) return '';
+  const laLai = pl.lai >= 0;
+  const mau = laLai ? 'var(--ok)' : 'var(--bad)';
+  return `
+    <div class="kcard kcard-plai" style="grid-column:1 / -1">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+        <span class="klabel">${laLai ? 'Lãi' : 'Lỗ'} hôm nay</span>
+        ${plChipTinCay(pl.mucTinCay)}
+      </div>
+      <div class="kval disp" style="color:${mau}">${laLai ? '' : '−'}${fmt(Math.abs(pl.lai))}</div>
+      <div class="ksub" style="margin-top:2px">Trước khấu hao: <b>${pl.laiTruocKhauHao>=0?'':'−'}${fmt(Math.abs(pl.laiTruocKhauHao))}</b>${pl.doanhThu ? ` · biên lãi <b>${fmtPct(pl.bienLaiPct)}</b>` : ''}</div>
+      <div class="ksub">
+        ${be && be.hoaVon != null
+          ? `Hoà vốn hôm nay <b>${fmt(be.hoaVon)}</b>${be.uocTinh ? ' <b style="color:var(--warn)">(ước tính)</b>' : ''} · bán <b>${fmt(pl.doanhThu)}</b> → ${be.dat ? `<b style="color:var(--ok)">trên ngưỡng ${fmt(pl.doanhThu-be.hoaVon)}</b>` : `<b style="color:var(--bad)">còn thiếu ${fmt(be.conThieu)}</b>`}`
+          : (be && be.khongTheHoaVon
+              ? `<b style="color:var(--bad)">Không có điểm hoà vốn</b> — giá vốn và hao hụt đang ngốn hết ${fmtPct(be.tyLeBienPhi)} doanh thu, bán thêm một ly là lỗ thêm.`
+              : 'Chưa tính được điểm hoà vốn')}
+      </div>
+      ${(pl.choSoThat||[]).length ? `<div class="ksub" style="color:var(--warn);margin-top:6px">Đang tính theo số dự đoán cho: <b>${pl.choSoThat.map(k=>k.category).join(', ')}</b> — con số sẽ đổi khi hoá đơn về.</div>` : ''}
+      ${pl.doanhThu<=0 ? `<div class="ksub" style="color:var(--warn);margin-top:6px">Hôm nay chưa có doanh thu — con số đang là toàn bộ chi phí của một ngày (thuê, lương, khấu hao vẫn chạy dù chưa bán được ly nào).</div>` : ''}
+      <button id="todayPLToggle" onclick="plToggleChiTiet()" style="margin-top:10px;background:none;border:none;padding:6px 0;color:var(--gd);font-weight:700;font-size:12.5px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;align-self:flex-start">Xem tách từng dòng ${ic('chevronDown',14)}</button>
+      <div id="todayPLRows" hidden style="margin-top:2px;">
+        ${plRowHTML('Doanh thu', '+', pl.doanhThu)}
+        ${plRowHTML('Giá vốn hàng bán', '−', pl.giaVon, pl.giaVonTopping>0 ? `gồm topping bán ${fmt(pl.giaVonTopping)}` : '')}
+        ${plRowHTML('Hao hụt & huỷ', '−', pl.haoHut, 'nguyên liệu hư + bán thành phẩm huỷ + ly đổ')}
+        ${plRowHTML('Chi phí biến đổi', '−', pl.bienPhiKhac, 'khoản đã duyệt, danh mục gắn nhãn Biến đổi')}
+        ${pl.phiKenh>0 ? plRowHTML('Phí sàn', '−', pl.phiKenh) : ''}
+        ${plRowHTML('Lương', '−', pl.luong, pl.luongNguon)}
+        ${plRowHTML('Chi phí cố định', '−', pl.chiPhiCoDinh, 'thuê/điện/nước… chia đều theo ngày')}
+        ${plRowHTML('Khấu hao', '−', pl.khauHao,
+          (pl.coTaiSan && !(pl.khauHao > 0))
+            ? '<b style="color:var(--warn)">đang là 0đ</b> — tài sản đã khai có <b>ngày mua sau hôm nay</b>, hoặc đã hết thời gian khấu hao'
+            : 'nguyên giá ÷ số tháng sử dụng · <b>đã nằm trong ngưỡng hoà vốn</b>')}
+        <div class="row" style="border-top:1.5px solid var(--line);margin-top:4px;padding-top:8px">
+          <span class="rl"><b>${laLai?'Lãi':'Lỗ'} hôm nay</b></span>
+          <span class="rv" style="color:${mau};font-size:17px"><b>${laLai?'':'−'}${fmt(Math.abs(pl.lai))}</b></span>
+        </div>
+        ${be && be.hoaVon != null ? `<div class="unit-explainer" style="margin-top:10px">
+          <b>Hoà vốn hôm nay = ${fmt(be.hoaVon)}</b> — lấy (lương + chi phí cố định + khấu hao) ${fmt(be.coDinh)} chia cho biên đóng góp ${fmtPct(be.bienDongGop)}.<br>
+          Khấu hao <b>đã cộng thẳng vào</b>, nên bán trên ngưỡng là lãi thật, không phải "lãi nhưng chưa trừ khấu hao".<br>
+          Kiểm lại: (${fmt(pl.doanhThu)} − ${fmt(be.hoaVon)}) × ${fmtPct(be.bienDongGop)} = <b>${pl.lai>=0?'':'−'}${fmt(Math.abs(pl.lai))}</b>.
+        </div>` : ''}
+        <div class="unit-explainer" style="margin-top:10px">
+          Tiền <b>nhập hàng</b> không nằm trong bảng này: hôm nhập 5tr bột thì 5tr đó biến thành hàng trong kho, chỉ thành chi phí khi bán ra (vào giá vốn) hoặc khi hư/đổ (vào hao hụt).<br>
+          Tiền <b>chủ quán rút</b> cũng không tính là chi phí — đây là lợi nhuận quán làm ra.
+        </div>
+      </div>
+    </div>`;
 }
 
 // ------------------------------------------------------------
@@ -5600,7 +5693,8 @@ function renderAlerts(alerts){
 // ============================================================
 // UI STATE / NAV
 // ============================================================
-let curScreen = 'storehealth'; // [GĐ6] landing đổi từ 'today' → 'storehealth' (PHẦN 6.4)
+// [GỘP MÀN] Landing là 'today' — nay chính nó đã bao gồm phần Sức khoẻ quán.
+let curScreen = 'today';
 let curEntryTab = 'ops';
 // [BỎ] ENTRY_GROUPS / entryGroupOfTab — cấu trúc nhóm 2 tầng của thanh chip
 // cũ ở màn Nhập liệu. Mọi mục đã chuyển thẳng lên sidebar (NAV_SECTIONS),
@@ -5651,9 +5745,10 @@ let reportWeekOffset = 0;
 //   'kho:items'    — mục con trong Kho
 // ============================================================
 const NAV_SECTIONS = [
-  { items:[ {key:'storehealth', ic:'stethoscope', label:'Sức khoẻ quán', go:"switchScreen('storehealth')"} ]},
+  // [GỘP MÀN] "Sức khoẻ quán" và "Hôm nay" nay là MỘT màn: mở ra thấy luôn việc cần
+  // xử lý và tình trạng của ngày, không phải nhảy qua nhảy lại hai chỗ.
+  { items:[ {key:'today', ic:'stethoscope', label:'Hôm nay · Sức khoẻ quán', go:"switchScreen('today')"} ]},
   { group:'Báo cáo', items:[
-    {key:'today',  ic:'calendar', label:'Hôm nay',            go:"switchScreen('today')"},
     {key:'health', ic:'pulse',    label:'Sức khỏe tài chính', go:"switchScreen('health')"},
     {key:'report', ic:'chart',    label:'Báo cáo kỳ',         go:"switchScreen('report')"},
     {key:'mix',    ic:'clipboard', label:'Phân tích bán hàng', go:"switchScreen('mix')"},
@@ -5814,7 +5909,7 @@ function renderSidebarNav(){
   const itemHtml = (it, indent)=>`
     <button class="sidebar-item${indent?' sub':''} ${cur===it.key?'active':''}" onclick="${it.go}">
       ${it.ic ? `<span class="sb-ic">${ic(it.ic,18)}</span>` : ''}<span>${it.label}</span>
-      ${it.key==='storehealth' && STORE_HEALTH_ISSUE_COUNT>0 ? '<span class="sb-dot"></span>' : ''}
+      ${it.key==='today' && STORE_HEALTH_ISSUE_COUNT>0 ? '<span class="sb-dot"></span>' : ''}
     </button>`;
 
   let found = 0;
@@ -6474,6 +6569,9 @@ function renderReportSubNav(){
 }
 
 function switchScreen(s){
+  // [GỘP MÀN] Giữ lại tên cũ để mọi nút/đường dẫn cũ trong app không gãy — nó chỉ
+  // đưa về đúng màn Hôm nay đã gộp.
+  if(s === 'storehealth') s = 'today';
   curScreen = s;
   document.querySelectorAll('.screen').forEach(el=>el.classList.remove('active'));
   document.getElementById('screen-'+s).classList.add('active');
@@ -6496,7 +6594,6 @@ function switchScreen(s){
   // Ở đây phải nạp menu từ Firebase trước, vì app Quản lý không giữ sẵn như POS.
   if(s==='mn') loadMenuForManager().then(renderMnList).catch(err=>{ console.error(err); showError('Không tải được menu: '+(err.message||err)); });
   if(s==='tg') loadMenuForManager().then(()=>{ loadTogoSettings(); loadTgAdminUI(); loadAppFeeSettings(); }).catch(err=>{ console.error(err); showError('Không tải được menu: '+(err.message||err)); });
-  if(s==='storehealth') renderStoreHealth();
   if(s==='inbox') renderAlertInbox();
   if(s==='today') renderToday();
   if(s==='health') renderHealth();
@@ -6662,9 +6759,15 @@ async function computeStoreHealth(){
   return out;
 }
 
-async function renderStoreHealth(){
-  const box = document.getElementById('storeHealthBody');
-  box.innerHTML = '<div class="muted">Đang kiểm tra...</div>';
+// [GỘP MÀN] Chủ quán: "tab tôi dùng nhiều nhất là hôm nay… có thể biến tab hôm nay
+// thành sức khoẻ quán, mở vào là thấy luôn, vừa thấy được thông báo, vừa thấy được
+// tình trạng". Đúng — hai màn này hỏi cùng một câu "quán đang thế nào", tách ra chỉ
+// bắt mở hai chỗ. Giờ danh sách việc cần xử lý nằm ngay đầu màn Hôm nay, trên các
+// chỉ số. Hàm nhận targetId để dùng chung cho cả hai khung, không nhân đôi logic.
+async function renderStoreHealth(targetId){
+  const box = document.getElementById(targetId || 'storeHealthBody');
+  if(!box) return;
+  if(!box.innerHTML.trim()) box.innerHTML = '<div class="muted">Đang kiểm tra...</div>';
   setSync(true);
   let list = [];
   try{ await ensureAuth(); list = await computeStoreHealth(); }
@@ -6673,7 +6776,7 @@ async function renderStoreHealth(){
 
   // [đợt 4] Băng "chờ số thực tế" / "chốt sổ" — nạp nền, không giữ danh sách việc
   // cần xử lý lại chờ nó.
-  renderBookAlerts();
+  renderBookAlerts(targetId === 'todayHealth' ? 'todayBook' : 'storeHealthBook');
 
   const red = list.filter(x=>x.tier==='red');
   const yellow = list.filter(x=>x.tier==='yellow');
@@ -6685,15 +6788,19 @@ async function renderStoreHealth(){
       <div class="hi-count">${x.count} ›</div>
     </div>`;
 
+  const gonGang = targetId === 'todayHealth';   // nằm chung màn Hôm nay thì phải nhường chỗ cho các chỉ số
   box.innerHTML = `
     ${(!red.length && !yellow.length)
-      ? `<div class="health-all-clear">${ic('check',20)} Mọi thứ ổn<div style="font-size:12px;font-weight:500;color:var(--gt);margin-top:6px;">Không có việc gì cần xử lý ngay.</div></div>`
+      ? (gonGang
+          ? `<div style="display:flex;align-items:center;gap:7px;color:var(--ok);font-weight:700;font-size:13px;padding:2px 0 10px;">${ic('check',15,'var(--ok)')} Không có việc gì cần xử lý ngay</div>`
+          : `<div class="health-all-clear">${ic('check',20)} Mọi thứ ổn<div style="font-size:12px;font-weight:500;color:var(--gt);margin-top:6px;">Không có việc gì cần xử lý ngay.</div></div>`)
       : ''}
     ${red.length ? `<div class="health-group-title">${icDot('var(--bad)')} Cần xử lý ngay (${red.length})</div>${red.map(row).join('')}` : ''}
     ${yellow.length ? `<div class="health-group-title">${icDot('var(--warn)')} Nên xem (${yellow.length})</div>${yellow.map(row).join('')}` : ''}
-    <div class="health-group-title">Xem thêm</div>
-    <div class="health-item gray" onclick="switchScreen('today')"><div class="hi-label">${ic('calendar')} Chỉ số hôm nay</div><div class="hi-count">›</div></div>
-    <div class="health-item gray" onclick="switchScreen('inbox')"><div class="hi-label">${ic('inbox')} Hộp thư cảnh báo (cả đã xử lý)</div><div class="hi-count">›</div></div>
+    ${gonGang ? '' : '<div class="health-group-title">Xem thêm</div><div class="health-item gray" onclick="switchScreen(\'today\')"><div class="hi-label">'+ic('calendar')+' Chỉ số hôm nay</div><div class="hi-count">›</div></div>'}
+    ${gonGang
+      ? `<button onclick="switchScreen('inbox')" style="background:none;border:none;padding:4px 0 8px;color:var(--gd);font-weight:700;font-size:12.5px;cursor:pointer;display:inline-flex;align-items:center;gap:5px;">${ic('inbox',14)} Hộp thư cảnh báo (cả đã xử lý)</button>`
+      : `<div class="health-item gray" onclick="switchScreen('inbox')"><div class="hi-label">${ic('inbox')} Hộp thư cảnh báo (cả đã xử lý)</div><div class="hi-count">›</div></div>`}
   `;
 }
 
@@ -6884,26 +6991,8 @@ async function renderToday(){
   if(!activeExpCats.length) nudgeHtml += `<div class="nudge"><span>${ic('ban')} Chưa cấu hình danh mục chi phí — nhân viên KHÔNG thể ghi chi phí ở POS cho tới khi có ít nhất 1 danh mục.</span><button onclick="expConfigOpen=true; goEntry('exp')">Cấu hình ngay</button></div>`;
   nudge.innerHTML = nudgeHtml;
 
-  const t = kpi.targetCfg.targets;
-  const dailyTarget = t.aov*t.billsPerDay;
-  const revRatio = achievement(kpi.revenue, dailyTarget, 'higher');
-  const revStatus = revRatio==null ? {level:'blue',label:'—'} : statusHigherBetter(kpi.revenue, dailyTarget, 0.1);
-
-  const cards = [
-    {label:'Doanh thu', val: fmt(kpi.revenue), sub:`Mục tiêu ngày: ${fmt(dailyTarget)}`, ratio: revRatio, status: revStatus, wide:true},
-    {label:'Số bill', val: kpi.bills, ratio: achievement(kpi.bills, t.billsPerDay, 'higher'), status: statusHigherBetter(kpi.bills, t.billsPerDay, 0.1), sub:`Mục tiêu: ${t.billsPerDay} bill`},
-    {label:'AOV', val: fmt(kpi.aov), ratio: achievement(kpi.aov, t.aov, 'higher'), status: statusAOV(kpi.aov, t.aov)},
-    {label:'IPT', val: fmtNum(kpi.ipt,2)+' món/bill', ratio: achievement(kpi.ipt, t.ipt, 'higher'), status: statusHigherBetter(kpi.ipt, t.ipt, 0.08)},
-    {label:'Items bán ra', val: kpi.items, sub:`${kpi.toppingBills} bill có topping`},
-    {label:'Contribution', val: fmt(kpi.contribution)}
-  ];
-  document.getElementById('todayGrid').innerHTML = cards.map(c=>`
-    <div class="kcard ${c.wide?'kcard-wide':''}">
-      <div class="klabel">${c.label}</div>
-      <div class="kval disp">${c.val}</div>
-      ${c.sub?`<div class="ksub">${c.sub}</div>`:''}
-      ${c.ratio!=null ? meterHTML(c.ratio, c.status) : ''}
-    </div>`).join('');
+  // [GỘP MÀN] Việc cần xử lý + băng chốt sổ, vẽ nền để không giữ các chỉ số lại chờ.
+  renderStoreHealth('todayHealth');
 
   // LÃI/LỖ HÔM NAY — vẽ ngay, không nạp nền như khối hoà vốn: mọi thứ nó cần đã nằm
   // trong cùng một Promise.all ở trên, chờ thêm một lượt mạng nữa chỉ để nó xuất hiện
@@ -6916,17 +7005,52 @@ async function renderToday(){
     wasteValue: ledgerRealToday ? ledgerRealToday.wasteValue : 0,
     homNayKey: dkey(today)
   });
-  document.getElementById('todayPL').innerHTML = plTodayHTML(plHomNay);
 
-  // Ngưỡng hoà vốn nạp NỀN: nó cần cửa sổ 30 ngày nên chậm hơn phần còn lại của
-  // màn. Chờ nó xong mới vẽ cả màn là bắt chủ quán nhìn màn trắng lâu hơn vì một
-  // khối phụ. Hỏng thì chỉ thiếu khối đó, không ảnh hưởng gì khác.
+  const t = kpi.targetCfg.targets;
+  const dailyTarget = t.aov*t.billsPerDay;
+
+  // ĐIỂM HOÀ VỐN CỦA CHÍNH HÔM NAY — cùng bộ số với lãi/lỗ, khấu hao đã cộng vào.
+  // Chưa bán được đồng nào thì mượn biên đóng góp 30 ngày làm tham chiếu (nạp nền,
+  // xem bên dưới); lúc đó ngưỡng hiện kèm chữ "ước tính".
+  const plBE = plBreakEven(plHomNay, _bepCache && _bepCache.data ? _bepCache.data.bienDongGop : (1 - t.cogsPct/100));
+  const mucSK = plMucSucKhoe(kpi.revenue, plBE ? plBE.hoaVon : null, dailyTarget);
+
+  const cards = [
+    {label:'Số bill', val: kpi.bills, ratio: achievement(kpi.bills, t.billsPerDay, 'higher'), status: statusHigherBetter(kpi.bills, t.billsPerDay, 0.1), sub:`Mục tiêu: ${t.billsPerDay} bill`},
+    {label:'AOV', val: fmt(kpi.aov), ratio: achievement(kpi.aov, t.aov, 'higher'), status: statusAOV(kpi.aov, t.aov)},
+    {label:'IPT', val: fmtNum(kpi.ipt,2)+' món/bill', ratio: achievement(kpi.ipt, t.ipt, 'higher'), status: statusHigherBetter(kpi.ipt, t.ipt, 0.08)},
+    {label:'Items bán ra', val: kpi.items, sub:`${kpi.toppingBills} bill có topping`}
+  ];
+  // Thẻ DOANH THU đổi màu theo 5 mức sức khoẻ, và mang luôn hai vạch mốc hoà vốn /
+  // mục tiêu — nhìn màu là biết tình trạng trước cả khi đọc con số.
+  const theDoanhThu = `
+    <div class="kcard kcard-wide lv-${mucSK}">
+      <div class="klabel">Doanh thu</div>
+      <div class="kval disp">${fmt(kpi.revenue)}</div>
+      <div class="ksub"><b>${PL_LV_TEXT[mucSK]}</b></div>
+      ${plMeterHTML(kpi.revenue, plBE ? plBE.hoaVon : null, dailyTarget)}
+    </div>`;
+  document.getElementById('todayGrid').innerHTML =
+    theDoanhThu +
+    plLaiCardHTML(plHomNay, plBE) +
+    cards.map(c=>`
+    <div class="kcard">
+      <div class="klabel">${c.label}</div>
+      <div class="kval disp">${c.val}</div>
+      ${c.sub?`<div class="ksub">${c.sub}</div>`:''}
+      ${c.ratio!=null ? meterHTML(c.ratio, c.status) : ''}
+    </div>`).join('');
+
+  // Biên đóng góp 30 ngày nạp NỀN — CHỈ dùng làm số tham chiếu cho ngày chưa có
+  // doanh thu (lúc đó không đo được biên của chính hôm nay). Ngưỡng hoà vốn hiện
+  // trên màn luôn tính từ số của chính ngày hôm nay, xem plBreakEven().
+  // Chỉ vẽ lại MỘT lần, đúng lần đầu nạp được biên tham chiếu. Không có chốt chặn
+  // này thì renderToday → nạp biên (lần sau lấy từ cache, xong ngay) → renderToday →
+  // lặp vô tận.
+  const cầnNạpBiên = !_bepCache;
   computeBreakEvenWindow()
-    .then(bep => {
-      const el = document.getElementById('todayBep');
-      if (el && curScreen === 'today') el.innerHTML = bepTodayHTML(bep, kpi.revenue, dailyTarget, plHomNay);
-    })
-    .catch(err => console.warn('[Hoà vốn] không tính được (bỏ qua):', err));
+    .then(() => { if (cầnNạpBiên && curScreen === 'today' && !(kpi.revenue > 0)) renderToday(); })
+    .catch(err => console.warn('[Hoà vốn] không lấy được biên tham chiếu (bỏ qua):', err));
 
   renderTodayHourly((salesRes.perDay[0] || {}).byHour);
 

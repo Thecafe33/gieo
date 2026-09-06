@@ -181,3 +181,37 @@ Chi phí thật hôm nay cao/thấp hơn trung bình   −   7.914
 Khấu hao tài sản hôm nay                       − 200.000
 = Lãi hôm nay                                     34.187
 ```
+
+---
+
+## 10. [Viết lại — chủ quán phát hiện lỗi logic] Hoà vốn nay CỘNG THẲNG khấu hao
+
+Chủ quán: *"nếu là điểm hoà vốn phải + trực tiếp khấu hao vào, chứ tại sao lại bỏ khấu
+hao ra rồi mở rộng ra mới cộng khấu hao vào… nếu điểm hoà vốn là 444K, khi tôi bán được
+450K → chưa trừ khấu hao 220K vậy lãi lại là lỗ?"*
+
+Đúng. **Một ngưỡng mang tên "hoà vốn" mà bán đúng ngưỡng vẫn lỗ thì ngưỡng đó sai**,
+không có cách nào biện hộ. Đã viết lại:
+
+| | Trước | Nay |
+|---|---|---|
+| Khấu hao | ngưỡng chính **chưa trừ**, có một ngưỡng phụ "kể cả khấu hao" bên dưới | **cộng thẳng vào chi phí cố định**, chỉ còn MỘT ngưỡng |
+| Số liệu | chi phí và biên **trung bình 30 ngày** | **của chính ngày đó**, cùng bộ số với lãi/lỗ |
+| Hệ quả | "đã qua hoà vốn" mà vẫn lỗ | trên ngưỡng là **lãi thật**, dưới ngưỡng là lỗ |
+
+```
+Biên đóng góp = 1 − (giá vốn + hao hụt + biến phí) / doanh thu
+Hoà vốn       = (lương + chi phí cố định + khấu hao) / biên đóng góp
+```
+
+Đẳng thức tự nhiên đúng, không cần bảng đối chiếu nào để giải thích:
+`lãi = (doanh thu − hoà vốn) × biên đóng góp`
+
+**Đánh đổi đã cân nhắc:** lấy số của chính ngày thì ngưỡng nhích lên xuống theo ngày.
+Nhưng đó là sự thật — hôm nay có khoản sửa chữa thì hôm nay đúng là phải bán nhiều hơn
+mới hết lỗ. Chi phí dài hạn (thuê, lương tháng) đã chia đều theo ngày từ đợt 1 nên không
+gây nhảy vọt. Đổi lại được thứ quan trọng hơn: **hai con số không bao giờ đá nhau nữa**.
+
+Mục 8 và 9 ở trên nói về cách tính CŨ (cửa sổ 30 ngày) — giữ lại để đối chiếu lịch sử;
+khối hoà vốn ở màn Sức khoẻ tài chính vẫn dùng cách đó cho cả KỲ, còn màn Hôm nay dùng
+cách mới cho từng NGÀY.
