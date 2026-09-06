@@ -10171,6 +10171,40 @@ async function loadVessels(){
 // gán thẳng vào <img src> cũng chạy y hệt một đường link.
 const VESSEL_EMBED_MAX_KB = 140;   // trần cho ảnh nhúng — Firestore giới hạn 1 MiB/tài liệu
 
+// Hạn giờ cho MỖI lần thử Storage.
+// SDK Firebase mặc định âm thầm thử lại tới 2 PHÚT trước khi chịu báo lỗi. Khi
+// request bị chặn ở tầng mạng, hậu quả nhìn thấy là thanh tiến trình đứng ở "0%"
+// bất động — không lỗi, không tiến triển, và người dùng bỏ cuộc trước cả SDK.
+// Đó đúng là thứ đã xảy ra ở máy thật. 12 giây là quá đủ cho một tấm ảnh 50KB
+// trên mạng bình thường; quá mốc đó thì coi như hỏng và đi đường khác ngay.
+const VESSEL_UPLOAD_TIMEOUT = 12000;
+
+// Nhớ QUA CÁC LẦN MỞ APP là Storage không dùng được. Không nhớ thì mỗi lần mở lại
+// app là tấm ảnh đầu tiên lại phải chờ hết 12 giây vô ích. Hết hạn sau 1 ngày để
+// còn tự thử lại khi hạ tầng được sửa.
+const VESSEL_DOWN_KEY = 'ql_vessel_storage_down';
+function vesselLoadDownFlag(){
+  try{
+    const v = localStorage.getItem(VESSEL_DOWN_KEY);
+    if(!v) return false;
+    const o = JSON.parse(v);
+    if(Date.now() - (o.at || 0) > 86400000){ localStorage.removeItem(VESSEL_DOWN_KEY); return false; }
+    if(o.err) _vesselStorageErr = o.err;
+    return true;
+  }catch(e){ return false; }
+}
+function vesselMarkStorageDown(err){
+  _vesselStorageDown = true;
+  _vesselStorageErr = err;
+  try{ localStorage.setItem(VESSEL_DOWN_KEY, JSON.stringify({ at: Date.now(), err })); }catch(e){}
+}
+function vesselRetryStorage(){
+  _vesselStorageDown = false; _vesselStorageErr = '';
+  try{ localStorage.removeItem(VESSEL_DOWN_KEY); }catch(e){}
+  toast('Sẽ thử lại Firebase Storage ở lần tải ảnh tới');
+  renderKhoVessels();
+}
+
 // Tên bucket dự phòng cho tầng 2. Dự án Firebase cũ dùng đuôi .appspot.com, dự án
 // tạo sau 10/2024 dùng .firebasestorage.app; thường hai tên trỏ về cùng một bucket
 // nhưng không phải lúc nào cũng vậy, mà gõ cứng rồi đoán sai thì mọi lần upload
@@ -10200,13 +10234,27 @@ function vesselIsEmbedded(url){ return typeof url === 'string' && url.startsWith
 // ---- Tầng 1: SDK ----
 function _vesselUploadViaSDK(blob, path, onProgress){
   return new Promise((resolve, reject)=>{
-    let task;
-    try{ task = firebase.storage().ref(path).put(blob, { contentType: blob.type || 'image/jpeg' }); }
-    catch(err){ reject(err); return; }
+    let task = null, xong = false, dongHo = null;
+    const ketThuc = fn => (...a)=>{ if(xong) return; xong = true; clearTimeout(dongHo); fn(...a); };
+    const thanhCong = ketThuc(resolve), thatBai = ketThuc(reject);
+    try{
+      const st = firebase.storage();
+      // Cắt luôn cơ chế thử lại 2 phút của SDK — nó chính là thủ phạm làm thanh
+      // tiến trình treo ở 0%.
+      try{ st.setMaxUploadRetryTime(VESSEL_UPLOAD_TIMEOUT); }catch(e){}
+      try{ st.setMaxOperationRetryTime(VESSEL_UPLOAD_TIMEOUT); }catch(e){}
+      task = st.ref(path).put(blob, { contentType: blob.type || 'image/jpeg' });
+    }catch(err){ thatBai(err); return; }
+    dongHo = setTimeout(()=>{
+      try{ task && task.cancel(); }catch(e){}
+      const e = new Error('Firebase Storage không phản hồi sau ' + Math.round(VESSEL_UPLOAD_TIMEOUT/1000) + ' giây (nhiều khả năng bị chặn ở tầng mạng/CORS)');
+      e.code = 'storage/timeout';
+      thatBai(e);
+    }, VESSEL_UPLOAD_TIMEOUT);
     task.on('state_changed',
       snap=>{ if(onProgress && snap.totalBytes) onProgress(Math.round(snap.bytesTransferred / snap.totalBytes * 100)); },
-      err=>reject(err),
-      async ()=>{ try{ resolve(await task.snapshot.ref.getDownloadURL()); }catch(err){ reject(err); } }
+      err=>thatBai(err),
+      ()=>{ task.snapshot.ref.getDownloadURL().then(thanhCong, thatBai); }
     );
   });
 }
@@ -10230,6 +10278,9 @@ function _vesselUploadTo(bucket, blob, path, token, onProgress){
       }
     };
     xhr.onerror = ()=>{ const e = new Error('trình duyệt chặn request (CORS hoặc mất mạng)'); e.status = 0; reject(e); };
+    // Cùng lý do với SDK: thà hỏng nhanh còn hơn treo im lặng.
+    xhr.timeout = VESSEL_UPLOAD_TIMEOUT;
+    xhr.ontimeout = ()=>{ const e = new Error('Firebase Storage không phản hồi sau ' + Math.round(VESSEL_UPLOAD_TIMEOUT/1000) + ' giây'); e.status = 0; reject(e); };
     xhr.send(blob);
   });
 }
@@ -10257,6 +10308,7 @@ async function _vesselUploadViaREST(blob, path, onProgress){
 // Kết quả upload: { url, embedded }. `embedded` = true nghĩa là ảnh nằm trong
 // Firestore chứ không có file nào trên Storage để mà xoá.
 async function vesselUploadImage(file, path, onProgress){
+  if(!_vesselStorageDown && vesselLoadDownFlag()) _vesselStorageDown = true;
   if(!_vesselStorageDown){
     const blob = await vesselCompressImage(file, 720, 0.82);
     const cach = vesselHasStorageSDK() ? _vesselUploadViaSDK : _vesselUploadViaREST;
@@ -10265,13 +10317,11 @@ async function vesselUploadImage(file, path, onProgress){
     }catch(err){
       console.warn('[Dụng cụ] Storage hỏng, chuyển sang nhúng ảnh vào Firestore:', err);
       const ma = (err && (err.code || err.status));
-      // Sai QUYỀN thì nhúng cũng không cứu được vấn đề gốc, nhưng vẫn nhúng để chủ
-      // quán làm việc tiếp được — chỉ nói rõ ra ở toast bên ngoài.
-      _vesselStorageDown = true;
-      _vesselStorageErr = (ma ? '[' + ma + '] ' : '') + (err && err.message ? err.message : String(err));
+      vesselMarkStorageDown((ma ? '[' + ma + '] ' : '') + (err && err.message ? err.message : String(err)));
     }
   }
   // ---- Tầng 3: nhúng vào Firestore ----
+  if(onProgress) onProgress(-1);   // báo cho nơi gọi đổi chữ trạng thái
   const nho = await vesselCompressImage(file, 360, 0.72);
   const url = await new Promise((res, rej)=>{
     const fr = new FileReader();
@@ -10444,7 +10494,8 @@ async function vesselHandleImageFile(target, file){
   try{
     const path = 'prep_vessels/' + vesselDraft.id + '/'
                + (target === 'main' ? 'main' : 'var-' + target) + '-' + Date.now() + '.jpg';
-    const r = await vesselUploadImage(file, path, p=>setStatus('Đang tải lên ' + p + '%'));
+    const r = await vesselUploadImage(file, path, p=>setStatus(
+      p < 0 ? 'Storage không phản hồi — đang lưu ảnh vào dữ liệu...' : 'Đang tải lên ' + p + '%'));
     // Ảnh nhúng nằm trong Firestore, không có file nào trên Storage → imagePath rỗng
     // để mọi chỗ dọn ảnh tự bỏ qua nó.
     const luuPath = r.embedded ? '' : path;
@@ -10456,10 +10507,9 @@ async function vesselHandleImageFile(target, file){
     if(target === 'main') renderVesselMainImage(); else renderVesselVariants();
     if(r.embedded){
       setStatus('');
-      // Nói rõ chứ không im lặng: ảnh vẫn dùng được nhưng nằm chỗ khác, và có một
-      // vấn đề hạ tầng cần sửa. Im lặng ở đây là để chủ quán tưởng mọi thứ bình thường.
-      toast('✅ Đã lưu ảnh (nhúng thẳng vào dữ liệu — Firebase Storage không truy cập được)');
-      showError('Không tải được ảnh lên Firebase Storage nên ảnh được nhúng thẳng vào dữ liệu — vẫn dùng bình thường, chỉ nặng hơn một chút.\n\nLý do Storage báo về: ' + _vesselStorageErr);
+      // Nói rõ chứ không im lặng, nhưng chỉ một dòng toast: lý do đầy đủ đã nằm ở
+      // thẻ cố định trên màn danh sách, bung hộp lỗi mỗi tấm ảnh chỉ tổ phiền.
+      toast('✅ Đã lưu ảnh (nhúng vào dữ liệu — Storage không truy cập được)');
     }else{
       toast('✅ Đã tải ảnh lên');
     }
@@ -10656,8 +10706,22 @@ async function renderKhoVessels(){
       <button class="btn" style="margin-top:12px" onclick="goKho('prep')">Sang Chế biến cấp 1 để gắn →</button>
     </div>` : '';
 
+  // Storage đang hỏng thì nói ra MỘT chỗ cố định, kèm nguyên văn lỗi và nút thử
+  // lại — thay vì mỗi lần tải ảnh lại bung một hộp lỗi rồi biến mất.
+  if(!_vesselStorageDown) vesselLoadDownFlag();
+  const storageHtml = _vesselStorageDown ? `
+    <div class="card" style="border:1.5px solid var(--line);background:var(--surface-2);">
+      <div style="font-weight:700;color:var(--ink-2);margin-bottom:6px;">${ic('alert',15)} Ảnh đang lưu thẳng vào dữ liệu</div>
+      <div style="font-size:13px;line-height:1.65;color:var(--gt);">
+        Không tải được ảnh lên Firebase Storage nên hệ thống nhúng ảnh thẳng vào dữ liệu. <b>Mọi thứ vẫn chạy bình thường</b> — ảnh chỉ nén nhỏ hơn một chút và nằm cùng chỗ với dữ liệu dụng cụ.<br>
+        <span style="font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:var(--ink-4);">${escapeHtmlAttr(_vesselStorageErr || 'không rõ lý do')}</span>
+      </div>
+      <button class="btn outline sm" style="margin-top:10px" onclick="vesselRetryStorage()">Thử lại Firebase Storage</button>
+    </div>` : '';
+
   box.innerHTML = `
     ${formHtml}
+    ${vesselDraft ? '' : storageHtml}
     ${vesselDraft ? '' : nhacHtml}
     <div class="sec-title">Danh sách dụng cụ (${VESSELS.length})</div>
     ${VESSELS.length ? VESSELS.map(v=>{

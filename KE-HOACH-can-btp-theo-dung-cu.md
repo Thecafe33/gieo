@@ -125,7 +125,11 @@ Bản đầu tự gọi REST bằng `XMLHttpRequest` (chép cách `kcDoUpload()`
 
 Ảnh nhúng nén nhỏ hơn (360px thay vì 720px) để không phình tài liệu Firestore, và có trần 140KB. `imagePath` để rỗng nên mọi chỗ dọn ảnh tự bỏ qua — không có file nào trên Storage để mà xoá. **POS không phải sửa gì**: nó chỉ đọc `imageUrl`, mà data URI gán thẳng vào `<img src>` cũng chạy y hệt một đường link.
 
-Rơi xuống tầng 3 thì **nói rõ ra** kèm nguyên văn lỗi Storage trả về, và ô ảnh hiện nhãn "Ảnh nhúng trong dữ liệu" — im lặng ở đây là để chủ quán tưởng mọi thứ bình thường trong khi có một vấn đề hạ tầng cần sửa. Storage hỏng một lần thì lần sau đi thẳng xuống tầng nhúng, không bắt chờ hết timeout mạng cho mỗi tấm ảnh.
+**Hạn giờ 12 giây cho mỗi lần thử Storage — đây là điểm quyết định.** SDK Firebase mặc định âm thầm thử lại tới **2 phút** trước khi chịu báo lỗi. Khi request bị chặn ở tầng mạng, thứ người dùng nhìn thấy là thanh tiến trình **đứng ở "0%" bất động**: không lỗi, không tiến triển, và người dùng bỏ cuộc trước cả SDK. Đó đúng là thứ đã xảy ra ở máy thật. Nay quá 12 giây là huỷ tác vụ, hạ luôn `setMaxUploadRetryTime`, và đi đường khác ngay.
+
+Rơi xuống tầng 3 thì **nói rõ ra**: một thẻ cố định trên màn Dụng cụ đựng ghi nguyên văn lỗi Storage kèm nút **"Thử lại Firebase Storage"** (dùng khi hạ tầng đã sửa), và ô ảnh mang nhãn "Ảnh nhúng trong dữ liệu". Im lặng ở đây là để chủ quán tưởng mọi thứ bình thường trong khi có vấn đề hạ tầng cần sửa.
+
+Trạng thái "Storage hỏng" được **nhớ trong localStorage 1 ngày** — không nhớ thì mỗi lần mở lại app, tấm ảnh đầu tiên lại phải chờ vô ích hết 12 giây. Hết 1 ngày thì tự thử lại.
 
 **Nén trước khi upload** (bắt buộc — POS chạy trên tablet, ảnh 4MB từ điện thoại sẽ làm màn cân giật):
 1. Đọc file → `createImageBitmap`
@@ -303,7 +307,8 @@ Chạy bằng Chromium (Playwright), dựng đúng đoạn CSS + JS lấy thẳn
 9. Bấm ✕ → đóng, **không** gọi callback lưu
 10. `ml` không cân được, `g` cân được, id lạ không cân được
 
-**Chạy trên FILE THẬT, không phải bản trích** (Firebase giả có nhớ, nạp trọn `posgieo.html` / `quanlygieo.html`) **— 27/27 đạt:**
+**Chạy trên FILE THẬT, không phải bản trích** (Firebase giả có nhớ, nạp trọn `posgieo.html` / `quanlygieo.html`) **— 42/42 đạt:**
+- Storage treo ở 0% (15): bỏ cuộc trong ~12s thay vì treo mãi, huỷ tác vụ, hạ `setMaxUploadRetryTime` từ 2 phút xuống 12s, ảnh vẫn lưu được bằng cách nhúng, `imagePath` rỗng, nhớ lại nên tấm thứ 2 đi thẳng (<3s), mở lại app vẫn nhớ, màn hình nói rõ + có nút thử lại, và bấm "Thử lại" sau khi hạ tầng sửa thì quay về dùng Storage
 - Quản lý (14): khai 10 dụng cụ → ảnh lên Storage → lưới chọn hiện đủ 10 → bấm 2 ô → **`vesselIds` xuống Firestore** → mở lại vẫn nhớ 2 lựa chọn; chưa gắn thì hiện nhắc "còn một bước nữa" kèm nút sang Chế biến cấp 1, gắn xong thì hết nhắc
 - POS (13): chưa gắn → không nút, có nói lý do; đã gắn → nút ⚖️ hiện, bộ cân mở, trừ bì đúng, số đổ vào đúng ô của lô; "cân phần còn lại" lấy hiệu đúng; đơn vị ml → ẩn và nói rõ vì sao
 
