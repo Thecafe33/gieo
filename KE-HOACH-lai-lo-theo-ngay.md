@@ -285,6 +285,30 @@ Làm đợt 1 trước cũng có ích ngay, kể cả khi chưa làm 3–5.
 | 4 | Tiền chủ quán rút có phải chi phí? | **Không** | Không có dòng nào cho khoản này. Thẻ ghi rõ: đây là lợi nhuận quán làm ra, rút tiền là **chia** lợi nhuận đó |
 | 5 | Phí sàn (GrabFood…) | **Chưa bán qua sàn, nhưng ghi chú sẵn** | Có sẵn dòng `phiKenh` và hàm `plChannelFeeForDay(day)` làm **một chỗ cắm duy nhất** — khi nào bán qua sàn chỉ điền hàm đó, dòng "Phí sàn" tự hiện, lãi/lỗ tự trừ. Ghi rõ luôn điều kiện tiên quyết: POS phải ghi doanh thu **theo kênh** trước đã, chứ đoán một tỷ lệ phí ở đó còn tệ hơn để 0 |
 
+### Đợt 5 — đã xong (hết kế hoạch)
+
+**Dòng tiền — đã chi / chưa chi:**
+- Khu **"Chưa trả tiền"** ở màn Chi phí: khoản đã tính vào lãi/lỗ nhưng tiền chưa rời
+  két, kèm tổng. Nút **"Đã trả"** hỏi đúng ngày trả chứ không mặc định là hôm nay.
+- Nhờ vậy hai kiểu mặt bằng ghi nhận khác nhau đúng như bạn cần: **trả cả năm** (đã chi
+  từ 28/12, vẫn phân bổ 328.767đ mỗi ngày suốt 365 ngày) vs **trả hằng tháng** (mỗi
+  tháng một khoản chưa chi tới hạn, hiện trong danh sách công nợ).
+- Bản ghi cũ (trước đợt 3, không có trường ngày trả) coi là **đã trả, không rõ ngày** —
+  nếu coi là chưa trả thì ngày bật tính năng này bạn sẽ thấy một danh sách công nợ dài
+  toàn khoản đã trả từ đời nào, nhìn một lần là hết tin vào nó mãi mãi.
+
+**Nối lại điểm hoà vốn:**
+- Hoà vốn từng là **cách tính thứ hai** chạy song song với lãi/lỗ. Nay đọc thẳng cùng
+  bộ số, nên hai khối không thể lệch nhau.
+- Sửa được một sai sót thật: cách cũ **không tính hao hụt & huỷ vào đâu cả**, làm ngưỡng
+  hoà vốn thấp hơn thực tế đúng bằng phần hàng bị hư — sai về phía nguy hiểm, có lúc báo
+  "đã qua hoà vốn" trong khi quán vẫn đang lỗ.
+- Có một **đẳng thức luôn đúng** để canh: `lãi = (doanh thu − doanh thu hoà vốn) × biên
+  đóng góp`. Bán đúng ngưỡng thì lãi bằng 0, không phải xấp xỉ 0. Đã có bài kiểm thử
+  chạy trên cả số giả lẫn dữ liệu thật.
+- 23 kiểm thử mới; 2 bài cũ của khối hoà vốn được sửa lại vì chúng đang canh theo cách
+  tính cũ (đã ghi rõ lý do trong chính bài kiểm thử).
+
 ### Đợt 4 — đã xong
 
 - **Băng nhắc ở màn Sức khoẻ quán**, luôn hiện từ khi tháng kết thúc cho tới khi đủ số
@@ -349,7 +373,7 @@ Làm đợt 1 trước cũng có ích ngay, kể cả khi chưa làm 3–5.
 - 51 kiểm thử: công thức, lương dự đoán từ lịch (kể cả ca qua đêm và OT), cộng ngày ra
   kỳ, và chạy thật trên màn Hôm nay.
 
-Còn lại đợt 5 như bảng ở §11.
+**Cả 5 đợt đã xong.** Kế hoạch này khép lại ở đây.
 
 ---
 

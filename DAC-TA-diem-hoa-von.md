@@ -109,3 +109,29 @@ Vào **Chi phí → Cấu hình Danh mục**: mỗi danh mục có hai nút **C�
 
 Với mọi việc lớn hơn một chỗ sửa nhỏ, tôi sẽ đưa **kế hoạch + công thức + các quyết
 định cần chốt** cho bạn duyệt trước, rồi mới code.
+
+---
+
+## 8. [Cập nhật — đợt 5 của kế hoạch lãi/lỗ theo ngày] Hoà vốn nay lấy số từ bảng lãi/lỗ
+
+Khi làm xong bảng **lãi/lỗ theo ngày**, khối hoà vốn này trở thành **cách tính thứ hai**
+chạy song song — và hai cách tính khác nhau thì sớm muộn ra hai con số khác nhau. Đã nối
+lại: hoà vốn giờ đọc thẳng cùng bộ số của bảng lãi/lỗ.
+
+**Hai thứ đổi, và đều là sửa sai:**
+
+| | Trước | Nay |
+|---|---|---|
+| Hao hụt & huỷ | **Không tính vào đâu cả** → ngưỡng hoà vốn thấp hơn thực tế đúng bằng phần hàng bị hư | Tính vào **biến phí** |
+| Khấu hao của kỳ | Lấy tròn 1 tháng | Cộng theo **từng ngày** (nguyên giá ÷ số tháng ÷ số ngày của đúng tháng đó), cùng cách với bảng lãi/lỗ |
+
+Sai sót về hao hụt là sai **về phía nguy hiểm**: ngưỡng thấp hơn thật nghĩa là có lúc
+màn hình báo "đã qua hoà vốn" trong khi quán vẫn đang lỗ.
+
+**Đẳng thức luôn đúng từ nay** (có bài kiểm thử canh):
+
+```
+Lãi = (Doanh thu − Doanh thu hoà vốn) × Biên đóng góp
+```
+
+Bán đúng ngưỡng hoà vốn thì lãi bằng **0** — không phải xấp xỉ 0.

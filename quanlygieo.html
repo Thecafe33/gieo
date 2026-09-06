@@ -2828,6 +2828,21 @@ function expenseAllocatedAmount(e, rangeStart, rangeEnd){
 // ============================================================================
 function expenseIsEstimate(e){ return !!e && e.amountKind === 'estimate'; }
 
+// [đợt 5] Khoản CHƯA TRẢ TIỀN — chi phí đã tính vào lãi/lỗ (nó rơi vào kỳ sử dụng)
+// nhưng tiền chưa rời két.
+//
+// BẢN GHI CŨ (ghi trước khi có trường paidDate — nhận ra bằng việc không có cả
+// amountKind) coi là ĐÃ TRẢ, không rõ ngày. Nếu coi là chưa trả thì đúng ngày bật
+// tính năng này chủ quán sẽ thấy một danh sách công nợ dài toàn khoản đã trả từ đời
+// nào — nhìn một lần là hết tin vào danh sách đó mãi mãi.
+function expenseIsUnpaid(e){
+  if(!e || e.amountKind === undefined) return false;
+  return !e.paidDate;
+}
+function markExpensePaid(id, paidDate){
+  return fstore.collection('expenses_gieogieo').doc(id).update({ paidDate });
+}
+
 // Thay số dự đoán bằng số thật khi hoá đơn về. Giữ lại số cũ (estimatedAmount) và
 // mốc thời gian (actualAt) để màn hình giải thích được vì sao lãi của tháng đã xem
 // lại đổi — sửa đè mà không để dấu vết là cách nhanh nhất làm chủ quán mất tin.
@@ -4514,6 +4529,18 @@ function computeBreakEvenCore({ doanhThu, giaVon, bienPhiKhac, chiPhiCoDinh, kha
 let _bepCache = null;   // { key, data }
 const BEP_WINDOW_DAYS = 30;
 
+// [SỬA — đợt 5] Trước đây khối này tự đọc dữ liệu và tự tính bằng computeKPIs, tức
+// là MỘT CÁCH TÍNH THỨ HAI song song với lãi/lỗ theo ngày. Hai cách tính khác nhau
+// thì sớm muộn ra hai con số khác nhau, và chủ quán không biết tin số nào. Tệ nhất:
+// cách cũ KHÔNG tính hao hụt & huỷ vào biến phí, nên ngưỡng hoà vốn thấp hơn thực tế
+// đúng bằng phần hàng bị hư — sai về phía nguy hiểm.
+//
+// Giờ hoà vốn lấy thẳng từ cùng bộ số của lãi/lỗ theo ngày:
+//     biến phí     = giá vốn + hao hụt & huỷ + chi phí biến đổi + phí sàn
+//     chi phí cố định = lương + chi phí cố định phân bổ
+// Nhờ vậy có một đẳng thức luôn đúng, và có bài kiểm thử canh nó:
+//     lãi = (doanh thu − doanh thu hoà vốn) × biên đóng góp
+// Bán đúng ngưỡng hoà vốn thì lãi bằng 0 — không phải "xấp xỉ", mà đúng bằng 0.
 async function computeBreakEvenWindow(force){
   const homNay = dkey(new Date());
   if (!force && _bepCache && _bepCache.key === homNay) return _bepCache.data;
@@ -4521,37 +4548,30 @@ async function computeBreakEvenWindow(force){
   const end = new Date();
   const start = new Date(); start.setDate(start.getDate() - (BEP_WINDOW_DAYS - 1));
 
-  const [salesRes, expAll, assets, cats, laborByDate] = await Promise.all([
-    fetchSalesRange(start, end),
-    loadExpensesAll(),
-    loadAssetsAll(),
-    loadExpenseCategories().catch(() => []),
-    HR_SETTINGS.useActualLaborCost
-      ? computeActualLaborCostByDate(dkey(start), dkey(end)).catch(() => null)
-      : Promise.resolve(null)
-  ]);
-
-  const expList = filterExpenses(expAll, start, end);
-  const { coDinh, bienDoi } = splitExpensesByCostType(expList, cats,
-    e => expenseAllocatedAmount(e, start, end));
-
-  const kpi = computeKPIs({
-    perDaySales: salesRes.perDay, opsSum: {}, expList, assets,
-    actualLaborByDate: laborByDate, ledgerWasteValue: null, drinkWasteCups: 0
-  });
+  const { tong } = await computeDailyPLRange(start, end);
+  const cfg = configForDate(homNay);
+  const soNgay = tong.soNgay || BEP_WINDOW_DAYS;
 
   const data = computeBreakEvenCore({
-    doanhThu: kpi.revenue,
-    giaVon: kpi.cogs,
-    bienPhiKhac: bienDoi,
+    doanhThu: tong.doanhThu,
+    giaVon: tong.giaVon,
+    // Hao hụt & huỷ xếp vào BIẾN PHÍ: càng bán/càng nấu nhiều thì càng hao, và đây
+    // là tiền thật đã mất nên doanh thu vẫn phải gánh nó.
+    bienPhiKhac: tong.haoHut + tong.bienPhiKhac + tong.phiKenh,
     // Lương LUÔN nằm ở cố định — xem ghi chú đầu khối.
-    chiPhiCoDinh: coDinh + kpi.laborCost,
-    khauHaoThang: monthlyDepreciation(assets),
-    soNgay: salesRes.dayCount || BEP_WINDOW_DAYS,
-    cogsPctFallback: (kpi.targetCfg && kpi.targetCfg.targets ? kpi.targetCfg.targets.cogsPct : 33)
+    chiPhiCoDinh: tong.luong + tong.chiPhiCoDinh,
+    // Quy khấu hao của cửa sổ về "một tháng 30 ngày" cho khớp tham số của hàm lõi.
+    khauHaoThang: tong.khauHao / Math.max(1, soNgay) * 30,
+    soNgay,
+    cogsPctFallback: cfg.targets.cogsPct
   });
-  data.chiPhiLuong = kpi.laborCost;
-  data.chiPhiCoDinhKhac = coDinh;
+  data.chiPhiLuong = tong.luong;
+  data.chiPhiCoDinhKhac = tong.chiPhiCoDinh;
+  data.haoHut = tong.haoHut;
+  // Lãi thật của chính cửa sổ đó — để màn hình đối chiếu được hai con số, và để
+  // thấy ngay nếu chúng lệch nhau.
+  data.laiKy = tong.lai;
+  data.mucTinCay = tong.mucTinCay;
 
   _bepCache = { key: homNay, data };
   return data;
@@ -4646,7 +4666,8 @@ function bepHealthHTML(bep, doanhThuKy, targetKy, soNgayKy){
       <div class="row"><span class="rl">Kể cả khấu hao tài sản</span><span class="rv">${nguongKyKH == null ? '—' : fmt(nguongKyKH)}</span></div>
       <div class="unit-explainer" style="margin-top:12px">
         <b>Cách tính</b> — chi phí cố định ÷ biên đóng góp.<br>
-        Biên đóng góp <b>${fmtPct(bep.bienDongGop)}</b>: mỗi 100đ bán ra còn lại ${fmtNum(bep.bienDongGop * 100, 0)}đ sau khi trả giá vốn và biến phí, để đắp vào chi phí cố định.<br>
+        Biên đóng góp <b>${fmtPct(bep.bienDongGop)}</b>: mỗi 100đ bán ra còn lại ${fmtNum(bep.bienDongGop * 100, 0)}đ sau khi trả giá vốn, hao hụt và biến phí, để đắp vào chi phí cố định.<br>
+        Lấy đúng bộ số của bảng <b>Lãi/lỗ</b> ở trên, nên hai khối luôn khớp nhau: <b>lãi = (doanh thu − doanh thu hoà vốn) × biên đóng góp</b>.<br>
         Chi phí cố định <b>${fmt(bep.chiPhiCoDinh / bep.soNgay * ngay)}</b> cho ${ngay} ngày — gồm lương ${fmt(bep.chiPhiLuong / bep.soNgay * ngay)} và chi phí cố định khác ${fmt(bep.chiPhiCoDinhKhac / bep.soNgay * ngay)}.<br>
         <span style="opacity:.85">Lương tính là chi phí <b>cố định</b> kể cả lương giờ, vì lịch làm đặt trước theo ca chứ không co giãn theo từng ly bán ra. Chi phí cố định và biên đóng góp lấy trung bình <b>30 ngày gần nhất</b> để tiền thuê trả một lần trong tháng không làm ngưỡng nhảy vọt.${bep.uocTinh ? ' <b style="color:var(--warn)">Biên đóng góp đang là ƯỚC TÍNH theo target COGS%</b> vì 30 ngày qua chưa có doanh thu.' : ''}</span>
       </div>
@@ -7507,6 +7528,11 @@ async function renderEntryExp(){
   // nhất trong màn này có hạn chót thật: hoá đơn về mà không nhập thì lãi/lỗ của cả
   // tháng đó sai và không ai biết.
   const duDoan = list.filter(e => expenseIsEstimate(e) && e.status!=='rejected');
+  // [đợt 5] Khoản đã tính vào lãi/lỗ nhưng tiền chưa rời két. Đây là chỗ phân biệt
+  // mặt bằng trả cả năm một lần (đã chi, còn phân bổ suốt 365 ngày) với mặt bằng trả
+  // hằng tháng (mỗi tháng một khoản chưa chi tới hạn).
+  const chuaTra = list.filter(e => expenseIsUnpaid(e) && e.status!=='rejected' && e.status!=='pending_review');
+  const tongChuaTra = chuaTra.reduce((t,e)=>t+(Number(e.amount)||0), 0);
 
   body.innerHTML = `
     ${usingFallbackCats ? `<div class="nudge" style="margin-bottom:12px"><span>${ic('alert')} Chưa cấu hình danh mục chi phí — đang tạm dùng danh sách mặc định. Nhân viên KHÔNG ghi được chi phí ở POS cho tới khi bạn cấu hình danh mục thật. Mở phần "Cấu hình Danh mục" bên dưới rồi bấm "Tạo nhanh" là xong.</span><button onclick="expConfigOpen=true; renderEntryExp();">Cấu hình ngay</button></div>` : ''}
@@ -7533,6 +7559,17 @@ async function renderEntryExp(){
         <div class="li-l"><div>${e.category} <span class="tier" style="margin-left:4px;background:var(--warn-bg);color:var(--warn)">Dự đoán</span></div>
           <div>${e.periodType==='period' ? `${e.startDate} → ${e.endDate}` : (e.date||'')}${e.note?' · '+e.note:''}</div></div>
         <div class="li-r">${fmt(e.amount)}<br><button class="btn outline sm" style="width:auto;padding:0 10px;margin-top:4px" onclick="openExpenseActual('${e.id}')">Nhập số thật</button></div>
+      </div>`).join('')}
+    </div>` : ''}
+
+    ${chuaTra.length ? `
+    <div class="sec-title">${ic('coins')} Chưa trả tiền (${chuaTra.length}) · ${fmt(tongChuaTra)}</div>
+    <div class="card">
+      <div class="small-note" style="margin:0 0 8px">Những khoản này <b>đã được tính vào lãi/lỗ</b> rồi — chi phí luôn rơi vào kỳ sử dụng của nó. Đây chỉ là tiền <b>chưa rời két</b>. Trả xong thì bấm "Đã trả".</div>
+      ${chuaTra.map(e=>`<div class="litem">
+        <div class="li-l"><div>${e.category}${expenseIsEstimate(e)?` <span class="tier" style="margin-left:4px;background:var(--warn-bg);color:var(--warn)">Dự đoán</span>`:''}</div>
+          <div>${e.periodType==='period' ? `Kỳ sử dụng ${e.startDate} → ${e.endDate}` : (e.date||'')}${e.note?' · '+e.note:''}</div></div>
+        <div class="li-r">${fmt(e.amount)}<br><button class="btn outline sm" style="width:auto;padding:0 10px;margin-top:4px" onclick="openExpensePaid('${e.id}')">Đã trả</button></div>
       </div>`).join('')}
     </div>` : ''}
 
@@ -7644,7 +7681,7 @@ async function renderEntryExp(){
     return `<div class="litem">
       <div class="li-l"><div>${e.category} · ${isPeriod?'Có kỳ hạn':'Một lần'} ${st?`<span class="tier tier-${st[1]}" style="margin-left:4px">${st[0]}</span>`:''}${laDuDoan?`<span class="tier" style="margin-left:4px;background:var(--warn-bg);color:var(--warn)">Dự đoán</span>`:''}</div>
         <div>${when}${e.paymentMethodLabel?(' · '+e.paymentMethodLabel):''}${e.staff?(' · '+e.staff):''}${e.note?' · '+e.note:''}</div>
-        <div>${e.paidDate ? 'Đã trả ngày '+e.paidDate : '<span style="color:var(--warn)">Chưa trả tiền</span>'}${daTinhLai?` · đã tính lại từ ${fmt(e.estimatedAmount)}`:''}</div></div>
+        <div>${e.paidDate ? 'Đã trả ngày '+e.paidDate : (expenseIsUnpaid(e) ? '<span style="color:var(--warn)">Chưa trả tiền</span>' : 'Đã trả — không rõ ngày')}${daTinhLai?` · đã tính lại từ ${fmt(e.estimatedAmount)}`:''}</div></div>
       <div class="li-r">${fmt(e.amount)}<br>${laDuDoan?`<button class="iconbtn" title="Nhập số thật" onclick="openExpenseActual('${e.id}')">${ic('check')}</button>`:''}<button class="iconbtn" onclick="removeExpense('${e.id}')">${ic('x')}</button></div>
     </div>`;
   }).join('') : `<div class="muted">Chưa có chi phí nào</div>`;
@@ -7711,6 +7748,34 @@ async function submitExpenseActual(id, oldAmount){
       : `✅ Đã tính lại — kỳ này ${chenh>0?'gánh thêm':'nhẹ đi'} ${fmt(Math.abs(chenh))}`);
     renderEntryExp();
   }catch(err){ console.error(err); showError('Không lưu được số thật: '+(err.code||err.message||err)); }
+}
+// [đợt 5] Đánh dấu đã trả tiền. Hỏi NGÀY trả chứ không mặc định im lặng là hôm nay:
+// khoản trả trễ mấy hôm mà ghi hôm nay thì dòng tiền của cả hai ngày đều sai.
+async function openExpensePaid(id){
+  let e = null;
+  try{ const all = await loadExpensesAll(); e = all.find(x=>x.id===id); }
+  catch(err){ showError('Không đọc được khoản chi phí: '+(err.code||err.message||err)); return; }
+  if(!e){ toast('⚠️ Không tìm thấy khoản này'); return; }
+  const ky = e.periodType==='period' ? `${e.startDate} → ${e.endDate}` : (e.date||'');
+  openEditSheet('Đã trả tiền — ' + e.category, `
+    <div class="unit-explainer" style="margin-bottom:10px">
+      Kỳ sử dụng <b>${ky}</b> · số tiền <b>${fmt(e.amount)}</b><br>
+      Ghi ngày trả <b>không làm lãi/lỗ đổi</b> — chi phí đã nằm ở kỳ sử dụng rồi. Nó chỉ trả lời câu hỏi khác: hôm nào tiền rời két.
+    </div>
+    <div class="field"><label>Ngày trả tiền</label>
+      <input type="date" id="expPaidDate" value="${dkey(new Date())}"></div>
+    <button class="btn" onclick="submitExpensePaid('${e.id}')">Lưu</button>
+  `);
+}
+async function submitExpensePaid(id){
+  const d = document.getElementById('expPaidDate').value;
+  if(!d){ toast('⚠️ Chọn ngày trả tiền'); return; }
+  try{
+    await markExpensePaid(id, d);
+    closeEditSheet(true);
+    toast('✅ Đã ghi nhận trả tiền ngày ' + d);
+    renderEntryExp();
+  }catch(err){ console.error(err); showError('Không lưu được: '+(err.code||err.message||err)); }
 }
 async function removeExpense(id){
   await deleteExpense(id); toast('🗑 Đã xoá'); renderEntryExp();
