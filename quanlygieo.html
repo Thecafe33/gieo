@@ -3055,7 +3055,7 @@ const CTN_REASON_LABEL = {
   tem_mo:   'Tem mờ / rách',
   tem_bong: 'Tem bong mất',
   may_loi:  'Máy quét lỗi',
-  chua_tem: 'Chai chưa có tem',
+  chua_tem: 'Chưa có tem',
   khong_ro: 'Không nêu lý do'
 };
 function ctnReasonLabel(k){ return CTN_REASON_LABEL[k] || k || ''; }
@@ -3083,7 +3083,7 @@ async function renderKhoContainers(){
     list = await loadContainersFor(ctnFilter);
   }catch(err){
     console.error('renderKhoContainers lỗi', err);
-    box.innerHTML = '<div class="muted">Không đọc được danh sách chai. '+(err.code||err.message||'')+'</div>';
+    box.innerHTML = '<div class="muted">Không đọc được danh sách hàng đang mở. '+(err.code||err.message||'')+'</div>';
     return;
   }
   CONTAINERS_CACHE = list;
@@ -3091,14 +3091,14 @@ async function renderKhoContainers(){
       `<button class="ftag ${ctnFilter===k?'active':''}" onclick="ctnFilter='${k}'; renderKhoContainers();">${l}</button>`).join('')}</div>`;
 
   const giaiThich = {
-    review: 'Nhân viên báo hết khi chai còn hơn 25% dung tích. Không phải lúc nào cũng là gian — chai có thể bị đổ, hỏng, hoặc định mức khai thiếu nên sổ còn nhiều hơn thực tế. Nhưng lặp lại ở cùng một người thì cần hỏi.',
+    review: 'Nhân viên báo hết khi hàng còn hơn 25%. Không phải lúc nào cũng là gian — có thể bị đổ, hỏng, hoặc định mức khai thiếu nên sổ còn nhiều hơn thực tế. Nhưng lặp lại ở cùng một người thì cần hỏi.',
     expired: 'Hàng đã mở nắp quá hạn sử dụng. Đây là chuyện an toàn thực phẩm, không phải chuyện kho — nên xử lý ngay chứ không đợi kiểm kê.',
-    open: 'Toàn bộ chai/hộp đang mở dở trong quán.',
-    unlabeled: 'Mã đã sinh khi nhận hàng nhưng chưa ai dán tem lên chai. Để lâu thì chai không có tem mà hệ thống vẫn tưởng có — lúc kiểm kê sẽ không quét được.'
+    open: 'Toàn bộ chai, gói, hộp đang mở dở trong quán.',
+    unlabeled: 'Mã đã sinh khi nhận hàng nhưng chưa ai dán tem lên. Để lâu thì hàng không có tem mà hệ thống vẫn tưởng có — lúc kiểm kê sẽ không quét được.'
   }[ctnFilter];
 
   if(!list.length){
-    box.innerHTML = nav + `<div class="empty-hint">Không có chai nào trong nhóm này.</div>
+    box.innerHTML = nav + `<div class="empty-hint">Không có mục nào trong nhóm này.</div>
       <div class="small-note" style="margin-top:10px">${giaiThich}</div>`;
     return;
   }
@@ -3115,7 +3115,7 @@ async function renderKhoContainers(){
       const dt = iso => { const d = iso?new Date(iso):null; return (d && !isNaN(d)) ? `${p2(d.getDate())}/${p2(d.getMonth()+1)}` : ''; };
       const tyLe = (Number(c.baseQty)>0 && Number(c.wasteBase)>0) ? Math.round(c.wasteBase/c.baseQty*100) : 0;
       const phu = ctnFilter==='review'
-        ? `Báo hết ${dt(c.finishedAt)} bởi <b>${escapeHtmlAttr(c.finishedBy||'—')}</b> · còn <b>${fmtNum(c.wasteBase,0)} ${escapeHtmlAttr(c.unit||'')}</b> (${tyLe}% chai)`
+        ? `Báo hết ${dt(c.finishedAt)} bởi <b>${escapeHtmlAttr(c.finishedBy||'—')}</b> · còn <b>${fmtNum(c.wasteBase,0)} ${escapeHtmlAttr(c.unit||'')}</b> (${tyLe}% còn lại)`
         : ctnFilter==='unlabeled'
         ? `Nhận ${dt(c.receivedAt)} bởi ${escapeHtmlAttr(c.receivedBy||'—')}`
         : `Mở ${dt(c.openedAt)} bởi ${escapeHtmlAttr(c.openedBy||'—')}`;
@@ -3159,7 +3159,7 @@ async function renderKhoContainers(){
 const TRACKING_MODES = {
   none:  { label:'Không truy vết', short:'—',       desc:'Chỉ đếm số lượng. Dùng cho ly, ống hút, nắp — thứ mà giá một con tem gần bằng giá món hàng.' },
   batch: { label:'Theo lô nhập',   short:'Lô',      desc:'Một mã cho cả lần nhập, dán lên thùng/khay. Dùng cho bánh flan, trân châu — không dán nổi từng hũ nhưng vẫn cần biết lô nào, hạn bao giờ.' },
-  unit:  { label:'Từng đơn vị',    short:'Từng cái',desc:'Mỗi chai/hộp một mã riêng. Biết chai nào đang mở, ai mở, hạn tới bao giờ, và chai nào biến mất giữa chừng.' }
+  unit:  { label:'Từng đơn vị',    short:'Từng cái',desc:'Mỗi chai/gói/hộp một mã riêng. Biết cái nào đang mở, ai mở, hạn tới bao giờ, và cái nào biến mất giữa chừng.' }
 };
 function itemTrackingMode(it){
   const m = it && it.trackingMode;
@@ -4461,7 +4461,7 @@ const NAV_SECTIONS = [
     {key:'kho:toppingcogs',  label:'GOGS Topping',    go:"goKho('toppingcogs')"},
     {key:'kho:po',           label:'Đặt & nhận hàng', go:"goKho('po')",           sub:'Hoạt động'},
     {key:'kho:stockcount',   label:'Kiểm kê',         go:"goKho('stockcount')"},
-    {key:'kho:containers',   label:'Chai & tem kho',  go:"goKho('containers')"},
+    {key:'kho:containers',   label:'Hàng đang mở & tem', go:"goKho('containers')"},
     {key:'kho:refill',       label:'Refill',          go:"goKho('refill')"},
     {key:'kho:locstock',     label:'Tồn theo vị trí', go:"goKho('locstock')"},
     {key:'kho:history',      label:'Lịch sử kho',     go:"goKho('history')"},
@@ -5375,7 +5375,7 @@ async function computeStoreHealth(){
     const [rv, mo, chuaDan] = await ctnP;
     if(rv.status==='fulfilled' && rv.value.length){
       const tong = rv.value.reduce((s,c)=>s+(Number(c.wasteBase)||0),0);
-      push('red', `Báo hết khi chai còn nhiều — cần xem lại${tong>0?` (bỏ phí ~${fmtNum(tong,0)} đơn vị)`:''}`,
+      push('red', `Báo hết khi hàng còn nhiều — cần xem lại${tong>0?` (bỏ phí ~${fmtNum(tong,0)} đơn vị)`:''}`,
            rv.value.length, `goContainers('review')`, false, 'kho');
     }
     if(mo.status==='fulfilled'){
@@ -9091,7 +9091,7 @@ async function renderKhoInbox(){
   const tat = [
     ['Đặt & nhận hàng', 'po',         'download'],
     ['Kiểm kê',         'stockcount', 'clipboard'],
-    ['Chai & tem kho',  'containers', 'package'],
+    ['Hàng đang mở & tem', 'containers', 'package'],
     ['Lịch sử kho',     'history',    'clock']
   ].map(([l,k,i])=>`<div class="health-item gray" onclick="goKho('${k}')"><div class="hi-label">${ic(i)} ${l}</div><div class="hi-count">›</div></div>`).join('');
 
@@ -13303,7 +13303,7 @@ async function renderKhoStockCount(){
             <span style="white-space:nowrap">${it.countedSealedUnits} / ${it.expectedSealedUnits} ${dv} nguyên${lechNguyen?` (${lechNguyen>0?'+':''}${lechNguyen})`:''}</span>
           </div>
           <div style="display:flex;justify-content:space-between;gap:8px;font-weight:400;color:${moChui?'#b45309':'#999'};font-size:11.5px;margin-top:2px;">
-            <span>${moChui?'Có chai mở mà không quét mã':'Đang mở'}</span>
+            <span>${moChui?'Có hàng mở mà không quét mã':'Đang mở'}</span>
             <span style="white-space:nowrap">${it.countedOpenUnits} / ${it.expectedOpenUnits} đang mở${lechMo?` (${lechMo>0?'+':''}${lechMo})`:''}</span>
           </div>
           ${doNguyen?`<div style="font-size:11px;color:#c0392b;margin-top:2px;">Duyệt sẽ điều chỉnh tồn ${lechNguyen>0?'+':''}${fmtNum(it.varianceBase,0)} ${escapeHtmlAttr(it.unit||'')}</div>`:''}
