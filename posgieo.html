@@ -7693,23 +7693,60 @@ async function ensurePrepVesselsPOS(force) {
   return PREP_VESSELS_CACHE_POS;
 }
 
-// Dụng cụ của một bán thành phẩm, ĐÚNG THỨ TỰ Quản lý đã xếp. Lọc bỏ id chết
-// (dụng cụ vừa bị xoá) để lưới không có ô trống bấm không được.
-function vesselsForPrepPOS(prepId) {
-  const p = (PREP_ITEMS_CACHE_POS || []).find(x => x.id === prepId);
-  if (!p || !posVesselUnitFactor(p.unit)) return [];
-  return (p.vesselIds || [])
+// Dụng cụ đã gắn cho MỘT món, ĐÚNG THỨ TỰ Quản lý đã xếp. Lọc bỏ id chết (dụng
+// cụ vừa bị xoá) để lưới không có ô trống bấm không được.
+// Dùng chung cho bán thành phẩm và nguyên liệu — hai bên khai cùng một thư viện
+// prep_vessels_gieogieo, chỉ khác chỗ lấy danh sách id.
+function _vesselsByIdsPOS(ids, unit) {
+  if (!posVesselUnitFactor(unit)) return [];
+  return (ids || [])
     .map(id => PREP_VESSELS_CACHE_POS.find(v => v.id === id))
     .filter(v => v && (v.variants || []).length);
 }
+
+function vesselsForPrepPOS(prepId) {
+  const p = (PREP_ITEMS_CACHE_POS || []).find(x => x.id === prepId);
+  return p ? _vesselsByIdsPOS(p.vesselIds, p.unit) : [];
+}
 function prepCanWeighPOS(prepId) { return vesselsForPrepPOS(prepId).length > 0; }
+
+// [MỚI] NGUYÊN LIỆU DÙNG NGAY cũng cân được.
+//
+// Vì sao cần: trân châu trắng, thạch dừa Đài Loan... là nguyên liệu đóng gói sẵn,
+// mở ra dùng luôn, được khai thẳng làm nguyên liệu thô của topping. Chúng hao
+// theo tay múc chứ không theo định mức, nên cuối ca phải cân đúng như bán thành
+// phẩm. Trước đây bộ cân khoá cứng theo prepId nên nhóm này chỉ gõ tay được — mà
+// gõ tay chính là chỗ sai vào thẳng tồn kho.
+// Quản lý gắn dụng cụ ở: Kho → Nguyên liệu → mục "Cân cuối ca".
+function vesselsForItemPOS(itemId) {
+  const it = (KHO_ITEMS_CACHE || []).find(x => x.id === itemId);
+  return it ? _vesselsByIdsPOS(it.vesselIds, it.unit) : [];
+}
+function itemCanWeighPOS(itemId) { return vesselsForItemPOS(itemId).length > 0; }
+
+// Nạp danh mục nguyên liệu nếu màn hiện tại chưa có. Hỏng thì chỉ mất nút cân,
+// KHÔNG được chặn màn nào — cùng nguyên tắc với ensurePrepVesselsPOS().
+async function ensureKhoItemsPOS(force) {
+  if (!force && KHO_ITEMS_CACHE.length) return KHO_ITEMS_CACHE;
+  try {
+    const snap = await fstore.collection('inventory_items_gieogieo').get();
+    KHO_ITEMS_CACHE = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+      .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'vi'));
+  } catch (err) {
+    console.warn('[Dụng cụ] không nạp được nguyên liệu (bỏ qua, vẫn gõ tay được):', err);
+  }
+  return KHO_ITEMS_CACHE;
+}
 
 // Nạp trước ảnh ngay khi mở màn, để lúc bấm vào là ảnh đã có sẵn. Trên tablet ở
 // quán (4G, chập chờn) chờ ảnh tải lúc đang cầm khay là đủ để nhân viên bỏ qua
 // tính năng và quay về gõ tay.
-function preloadVesselImagesPOS(prepIds) {
+function preloadVesselImagesPOS(prepIds) { _preloadVesselsPOS((prepIds || []).map(vesselsForPrepPOS)); }
+// Bản cho nguyên liệu — cùng lý do, dùng ở màn đếm giao ca.
+function preloadVesselImagesForItemsPOS(itemIds) { _preloadVesselsPOS((itemIds || []).map(vesselsForItemPOS)); }
+function _preloadVesselsPOS(danhSach) {
   const urls = new Set();
-  (prepIds || []).forEach(pid => vesselsForPrepPOS(pid).forEach(v => {
+  (danhSach || []).forEach(ds => (ds || []).forEach(v => {
     if (v.imageUrl) urls.add(v.imageUrl);
     (v.variants || []).forEach(x => { if (x.imageUrl) urls.add(x.imageUrl); });
   }));
@@ -7822,15 +7859,22 @@ function wpTotal() {
   return Math.round((wpLinesTotal() + (r.ok ? r.net : 0)) * 100) / 100;
 }
 
-// opts: { prepId, unit, title, onDone(netTotal, lines), onManual() }
+// opts: { prepId | itemId, unit, title, onDone(netTotal, lines), onManual() }
+// prepId = bán thành phẩm; itemId = nguyên liệu dùng ngay. Truyền đúng MỘT trong hai.
 async function openWeighPad(opts) {
   await ensurePrepVesselsPOS();
-  const vessels = vesselsForPrepPOS(opts.prepId);
-  if (!vessels.length) { toast('⚠️ Bán thành phẩm này chưa gắn dụng cụ đựng nào'); return; }
-  const p = (PREP_ITEMS_CACHE_POS || []).find(x => x.id === opts.prepId) || {};
-  const unit = opts.unit || p.unit || 'g';
+  if (opts.itemId) await ensureKhoItemsPOS();
+  const vessels = opts.itemId ? vesselsForItemPOS(opts.itemId) : vesselsForPrepPOS(opts.prepId);
+  if (!vessels.length) {
+    toast(opts.itemId ? '⚠️ Nguyên liệu này chưa gắn dụng cụ đựng nào' : '⚠️ Bán thành phẩm này chưa gắn dụng cụ đựng nào');
+    return;
+  }
+  const goc = (opts.itemId
+    ? (KHO_ITEMS_CACHE || []).find(x => x.id === opts.itemId)
+    : (PREP_ITEMS_CACHE_POS || []).find(x => x.id === opts.prepId)) || {};
+  const unit = opts.unit || goc.unit || 'g';
   _wp = {
-    prepId: opts.prepId, unit, factor: posVesselUnitFactor(unit) || 1,
+    prepId: opts.prepId || null, itemId: opts.itemId || null, unit, factor: posVesselUnitFactor(unit) || 1,
     title: opts.title || 'Cân bán thành phẩm',
     vessels, lines: [],
     cur: { vesselId: vessels.length === 1 ? vessels[0].id : null, variantId: null, grossG: '' },
@@ -11667,6 +11711,36 @@ function handoverIsOverThreshold(diff, base) {
   return Math.abs(diff) > nguong;
 }
 
+// [MỚI] Nạp danh mục nguyên liệu + thư viện dụng cụ cho màn đếm giao ca, để nút
+// cân hiện được. Bọc riêng: hỏng thì chỉ mất nút cân, TUYỆT ĐỐI không chặn kết ca.
+async function warmHandoverWeighPOS(lines) {
+  try {
+    await Promise.all([ensureKhoItemsPOS(), ensurePrepVesselsPOS()]);
+    preloadVesselImagesForItemsPOS((lines || []).map(l => l.itemId));
+  } catch (err) { console.warn('[Đếm giao ca] không nạp được dụng cụ (vẫn gõ tay được):', err); }
+}
+
+// Đơn vị trên Refill Rule được CHÉP LẠI lúc tạo rule. Nguyên liệu đổi đơn vị sau
+// đó thì rule vẫn giữ đơn vị cũ — cân theo nhầm đơn vị là sai 1000 lần (g ↔ kg),
+// mà số này ghi thẳng vào đối chiếu giao ca. Nên chỉ cho cân khi đơn vị của rule
+// KHỚP đơn vị hiện tại của nguyên liệu; lệch thì ẩn nút, gõ tay như trước.
+function handoverCanWeighPOS(l) {
+  const it = (KHO_ITEMS_CACHE || []).find(x => x.id === l.itemId);
+  if (!it) return false;
+  if (l.unit && it.unit && l.unit !== it.unit) return false;
+  return itemCanWeighPOS(l.itemId);
+}
+
+// Vì sao chưa có nút cân nào ở màn này — nói ra một dòng kèm đúng đường bật, thay
+// vì ẩn im lặng để người dùng tưởng tính năng không tồn tại (cùng lý do với
+// prepWeighHintHTML của bán thành phẩm).
+function handoverWeighHintHTML() {
+  return `<div style="margin:2px 0 10px;padding:9px 11px;background:#fbfaf5;border:1px dashed #ddd6c2;border-radius:11px;font-size:11px;color:#8a8471;line-height:1.55;">
+      <b>Cân trừ bì chưa bật cho các món ở đây</b> — đang phải đếm/gõ tay.<br>
+      Bật ở app Quản lý: <b>Kho → Dụng cụ đựng</b> khai khay/ca kèm trọng lượng bì, rồi <b>Kho → Nguyên liệu</b> mở từng món, mục <b>"Cân cuối ca"</b> chọn dụng cụ. Chỉ nguyên liệu tính bằng <b>g</b> hoặc <b>kg</b> mới cân trừ bì được.
+    </div>`;
+}
+
 // ---------- CUỐI CA ----------
 async function computeHandoverCloseLinesPOS() {
   const ruleSnap = await fstore.collection('refill_rules_gieogieo').where('active', '==', true).get();
@@ -11679,32 +11753,71 @@ async function computeHandoverCloseLinesPOS() {
     seen.add(r.itemId);
     lines.push({ ruleId: r.id, itemId: r.itemId, itemName: r.itemName, unit: r.unit, locationId: r.destLocationId, locationName: r.destLocationName });
   }
+  if (lines.length) await warmHandoverWeighPOS(lines);
   return lines;
 }
 
 let _handoverCloseState = [];
 function renderHandoverCloseScreen(lines) {
-  _handoverCloseState = lines.map(l => ({ ...l, counted: null }));
+  _handoverCloseState = lines.map(l => ({ ...l, counted: null, weighings: [] }));
   const box = document.getElementById('shiftBody');
   box.innerHTML = `
     <div class="wal-section" style="margin:0 0 14px;">
       <div class="wal-section-title">Đếm giao ca — cuối ca</div>
       <div style="font-size:12px;color:#999;margin-bottom:10px;line-height:1.5;">Đếm THỰC TẾ còn lại ở quầy cho từng món dưới đây. Ca sáng mai sẽ đếm lại độc lập để đối chiếu — đếm đúng số thật, không áng chừng.</div>
+      ${_handoverCloseState.some(l => handoverCanWeighPOS(l)) ? '' : handoverWeighHintHTML()}
       ${_handoverCloseState.map((l, i) => `
         <div style="padding:10px 0;border-bottom:1px solid #f0f0f0;">
           <div style="font-size:13.5px;font-weight:700;color:var(--td);margin-bottom:6px;">${l.itemName} <span style="font-weight:400;color:#999;font-size:11.5px;">· ${l.locationName}</span></div>
+          ${handoverCanWeighPOS(l) ? weighBtnWide(`handoverCloseWeigh(${i})`, 'Cân trừ bì', 'Đặt nguyên khay/hũ lên cân — máy tự trừ bì') + '<div style="height:8px;"></div>' : ''}
           <div style="display:flex;gap:8px;align-items:center;">
+            ${handoverCanWeighPOS(l) ? '<span style="font-size:11.5px;color:#aaa;font-weight:600;flex-shrink:0;">hoặc</span>' : ''}
             <div class="wal-input-group" style="flex:1;margin-bottom:0;">
-              <input id="hcQty${i}" type="number" inputmode="decimal" step="0.01" placeholder="Đếm được..." style="height:48px;font-size:16px;" oninput="_handoverCloseState[${i}].counted=(this.value===''?null:(Number(this.value)||0))">
+              <input id="hcQty${i}" type="number" inputmode="decimal" step="0.01" placeholder="${handoverCanWeighPOS(l) ? 'Gõ tay' : 'Đếm được...'}" style="height:48px;font-size:16px;" oninput="handoverCloseSetQty(${i},this.value,true)">
             </div>
             <span style="font-size:12.5px;font-weight:700;color:var(--gd);white-space:nowrap;">${l.unit || ''}</span>
           </div>
+          <div id="hcWeigh${i}"></div>
         </div>`).join('')}
       ${renderPinInput('handoverCloseStaff')}
     </div>
     <button onclick="submitHandoverClose()" style="width:100%;padding:14px;background:var(--gd);color:#fff;border:none;border-radius:14px;font-weight:700;font-size:15px;cursor:pointer;">Xác nhận &amp; tiếp tục kết ca</button>
   `;
 }
+// goTay = nhân viên tự gõ đè lên số vừa cân. Bảng kê cân không còn khớp số sắp
+// lưu thì bỏ đi, chứ không lưu kèm một bảng kê cộng ra số khác — cùng cách xử lý
+// với màn đếm bán thành phẩm.
+function handoverCloseSetQty(i, val, goTay) {
+  const l = _handoverCloseState[i];
+  if (!l) return;
+  l.counted = (val === '' || val === null) ? null : (Number(val) || 0);
+  if (goTay && (l.weighings || []).length) {
+    const cu = l.weighings.reduce((s, w) => s + (Number(w.net) || 0), 0);
+    if (Math.abs(cu - (l.counted || 0)) > 0.005) {
+      l.weighings = [];
+      const el = document.getElementById('hcWeigh' + i);
+      if (el) el.innerHTML = '';
+    }
+  }
+}
+
+function handoverCloseWeigh(i) {
+  const l = _handoverCloseState[i];
+  if (!l) return;
+  openWeighPad({
+    itemId: l.itemId, unit: l.unit,
+    title: 'Cân ' + (l.itemName || '') + ' còn lại',
+    onDone: (total, lines) => {
+      l.weighings = lines;
+      const inp = document.getElementById('hcQty' + i);
+      if (inp) inp.value = total;
+      const el = document.getElementById('hcWeigh' + i);
+      if (el) el.innerHTML = weighSummaryHTML(lines, l.unit, `handoverCloseWeigh(${i})`);
+      handoverCloseSetQty(i, total);
+    }
+  });
+}
+
 async function submitHandoverClose() {
   if (_posSubmitBusy) { toast('⏳ Đang xử lý, vui lòng đợi giây lát...'); return; }
   _posSubmitBusy = true;
@@ -11718,7 +11831,10 @@ async function _submitHandoverCloseImpl() {
   const now = new Date().toISOString();
   const lines = _handoverCloseState.map(l => ({
     itemId: l.itemId, itemName: l.itemName, unit: l.unit, locationId: l.locationId,
-    countedQty: Number(l.counted) || 0
+    countedQty: Number(l.counted) || 0,
+    // Bảng kê từng lần cân — để sau này tra được con số này từ đâu ra (mấy khay,
+    // bì bao nhiêu), thay vì chỉ có một số trơ không ai kiểm lại được.
+    weighings: (l.weighings || [])
   }));
   try {
     await fstore.collection('handover_counts_gieogieo').doc(`${shiftState.businessDate}_close`).set({
@@ -11780,6 +11896,7 @@ async function computeHandoverOpenLinesPOS() {
     seen.add(r.itemId);
     lines.push({ ruleId: r.id, itemId: r.itemId, itemName: r.itemName, unit: r.unit, locationId: r.destLocationId, locationName: r.destLocationName });
   }
+  if (lines.length) await warmHandoverWeighPOS(lines);
   return lines;
 }
 
@@ -11795,7 +11912,7 @@ async function renderHandoverOpenScreen(lines) {
       closeQty: prevLine ? (Number(prevLine.countedQty) || 0) : null,
       closeDate: prev ? prev.dateKey : null,
       closeStaff: prev ? prev.staff : '', closeStaffId: prev ? prev.staffEmployeeId : '',
-      counted1: null, counted2: null
+      counted1: null, counted2: null, weighings1: [], weighings2: []
     };
   });
   _renderHandoverOpenStage1();
@@ -11811,16 +11928,54 @@ function _renderHandoverOpenStage1() {
           <div style="font-size:13.5px;font-weight:700;color:var(--td);margin-bottom:6px;">${l.itemName} <span style="font-weight:400;color:#999;font-size:11.5px;">· ${l.locationName}</span></div>
           <div style="display:flex;gap:8px;align-items:center;">
             <div class="wal-input-group" style="flex:1;margin-bottom:0;">
-              <input id="hoQty${i}" type="number" inputmode="decimal" step="0.01" placeholder="Đếm được..." style="height:48px;font-size:16px;" oninput="_handoverOpenState[${i}].counted1=(this.value===''?null:(Number(this.value)||0))">
+              <input id="hoQty${i}" type="number" inputmode="decimal" step="0.01" placeholder="${handoverCanWeighPOS(l) ? 'Gõ tay hoặc bấm cân' : 'Đếm được...'}" style="height:48px;font-size:16px;" oninput="handoverOpenSetQty(${i},1,this.value,true)">
             </div>
+            ${handoverCanWeighPOS(l) ? weighBtnHTML(`handoverOpenWeigh(${i},1)`, 44) : ''}
             <span style="font-size:12.5px;font-weight:700;color:var(--gd);white-space:nowrap;">${l.unit || ''}</span>
           </div>
+          <div id="hoWeigh1_${i}"></div>
         </div>`).join('')}
       ${renderPinInput('handoverOpenStaff')}
     </div>
     <button onclick="submitHandoverOpenStage1()" style="width:100%;padding:14px;background:var(--gd);color:#fff;border:none;border-radius:14px;font-weight:700;font-size:15px;cursor:pointer;">Xác nhận đếm</button>
   `;
 }
+// Hai vòng đếm mù dùng CHUNG một cặp hàm, chỉ khác số vòng (1|2) — chép thành hai
+// bản là hai chỗ để lệch nhau khi sửa.
+function handoverOpenSetQty(i, vong, val, goTay) {
+  const l = _handoverOpenState[i];
+  if (!l) return;
+  const so = (val === '' || val === null) ? null : (Number(val) || 0);
+  const kCount = vong === 2 ? 'counted2' : 'counted1';
+  const kWeigh = vong === 2 ? 'weighings2' : 'weighings1';
+  l[kCount] = so;
+  if (goTay && (l[kWeigh] || []).length) {
+    const cu = l[kWeigh].reduce((s, w) => s + (Number(w.net) || 0), 0);
+    if (Math.abs(cu - (so || 0)) > 0.005) {
+      l[kWeigh] = [];
+      const el = document.getElementById(`hoWeigh${vong}_${i}`);
+      if (el) el.innerHTML = '';
+    }
+  }
+}
+
+function handoverOpenWeigh(i, vong) {
+  const l = _handoverOpenState[i];
+  if (!l) return;
+  openWeighPad({
+    itemId: l.itemId, unit: l.unit,
+    title: 'Cân ' + (l.itemName || '') + (vong === 2 ? ' (đếm lại)' : ''),
+    onDone: (total, lines) => {
+      l[vong === 2 ? 'weighings2' : 'weighings1'] = lines;
+      const inp = document.getElementById(vong === 2 ? `hoQty2_${i}` : `hoQty${i}`);
+      if (inp) inp.value = total;
+      const el = document.getElementById(`hoWeigh${vong}_${i}`);
+      if (el) el.innerHTML = weighSummaryHTML(lines, l.unit, `handoverOpenWeigh(${i},${vong})`);
+      handoverOpenSetQty(i, vong, total);
+    }
+  });
+}
+
 async function submitHandoverOpenStage1() {
   if (_posSubmitBusy) { toast('⏳ Đang xử lý, vui lòng đợi giây lát...'); return; }
   _posSubmitBusy = true;
@@ -11852,10 +12007,12 @@ function _renderHandoverOpenStage2(needRecount) {
           <div style="font-size:13.5px;font-weight:700;color:var(--td);margin-bottom:6px;">${l.itemName} <span style="font-weight:400;color:#999;font-size:11.5px;">· ${l.locationName}</span></div>
           <div style="display:flex;gap:8px;align-items:center;">
             <div class="wal-input-group" style="flex:1;margin-bottom:0;">
-              <input id="hoQty2_${idx}" type="number" inputmode="decimal" step="0.01" placeholder="Đếm lại..." style="height:48px;font-size:16px;" oninput="_handoverOpenState[${idx}].counted2=(this.value===''?null:(Number(this.value)||0))">
+              <input id="hoQty2_${idx}" type="number" inputmode="decimal" step="0.01" placeholder="Đếm lại..." style="height:48px;font-size:16px;" oninput="handoverOpenSetQty(${idx},2,this.value,true)">
             </div>
+            ${handoverCanWeighPOS(l) ? weighBtnHTML(`handoverOpenWeigh(${idx},2)`, 44) : ''}
             <span style="font-size:12.5px;font-weight:700;color:var(--gd);white-space:nowrap;">${l.unit || ''}</span>
           </div>
+          <div id="hoWeigh2_${idx}"></div>
         </div>`;
       }).join('')}
     </div>
@@ -11883,7 +12040,10 @@ async function _finalizeHandoverOpen() {
     const recountRequired = l.counted2 !== null;
     lines.push({
       itemId: l.itemId, itemName: l.itemName, unit: l.unit, locationId: l.locationId,
-      countedQty: l.counted1, countedQty2: l.counted2, recountRequired
+      countedQty: l.counted1, countedQty2: l.counted2, recountRequired,
+      // Bảng kê từng lần cân của mỗi vòng — để Quản lý tra ngược con số, xem lệch
+      // là do cân thiếu một khay hay do hàng hụt thật.
+      weighings: (l.weighings1 || []), weighings2: (l.weighings2 || [])
     });
     if (recountRequired && l.closeQty !== null) {
       // Đếm lại lần 2 mà KHỚP lần 1 → ca sáng đếm chuẩn, lệch với ca tối nhiều
