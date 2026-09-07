@@ -34,9 +34,27 @@ vào chân.
 | 5 | Topping hợp món | `topping.pairs` + `sales_assist_stats_gieogieo` + hồ sơ khách |
 | 6 | Gợi ý bổ sung (món ruột) | `customers/{sđt}.assist_profile` |
 
-Cùng lúc có nhiều gợi ý thì xếp theo ưu tiên rồi cắt còn ≤ 3. Ở màn order chỉ
-hiện gợi ý **quan trọng nhất**; hai cái còn lại nằm sau nút "Còn N gợi ý nữa".
-Trong giỏ hàng và màn thanh toán thì hiện đủ.
+Cùng lúc có nhiều gợi ý thì xếp theo ưu tiên rồi cắt còn ≤ 3.
+
+**Hiện ở đâu, hiện thế nào**
+
+| Chỗ | Hiện gì |
+|---|---|
+| Pill nổi ở màn order | Đúng **một** thẻ mỏng (~55px): icon · câu nói · nút · `+N ⌄`. Đang cuộn thì trượt đi, dừng cuộn thì trượt về — không vướng tay lúc lướt tìm món |
+| Giỏ hàng | Đủ ≤ 3 thẻ |
+| Màn thanh toán | Đủ ≤ 3 thẻ, cập nhật lại ngay sau khi tra SĐT |
+
+Mỗi thẻ là **một dòng**: chữ bên trái, nút bên phải — nhân viên liếc một cái là
+thấy cả câu nói lẫn việc phải bấm.
+
+`ASSIST_MAIN_HIDE` giữ danh sách loại gợi ý **không** được lên pill màn order.
+Hiện có `customer_check`: SĐT chỉ nhập được ở màn thanh toán, nên mọi gợi ý dựa
+trên hồ sơ khách bản chất là việc "kiểm tra lại trước khi chốt" — đúng chỗ của
+nó là giỏ hàng và màn thanh toán. Gợi ý tem thì vẫn để lại ở màn order: "mời
+khách mua thêm 1 ly cho đủ tem" là việc phải làm ngay lúc đang order.
+
+Câu nói có hai bản: `text` (đầy đủ, cho giỏ hàng và màn thanh toán) và `short`
+(gọn, cho pill thu gọn — để không bị cắt mất đúng phần lý do khách gật đầu).
 
 Gợi ý tem bám sát đúng luật đang chạy thật trong `loyaltyAddStamps()`: trần
 2 tem/ngày/khách, và bill đã hưởng "mua X tặng Y" thì không tích tem — nếu

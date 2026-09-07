@@ -629,6 +629,43 @@ html.tab-ui .kmini .kmval{font-size:21px;}
 .field textarea{resize:vertical;min-height:88px;line-height:1.55;}
 .field .hint{font-size:12.5px;color:var(--gt);margin-top:6px;line-height:1.55;}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;}
+@media (max-width:560px){.grid3{grid-template-columns:1fr;}}
+
+/* ---------- [NEW-ASSIST] Hàng xếp thứ tự ưu tiên gợi ý ---------- */
+.as-rank{
+  display:flex;align-items:center;gap:12px;
+  background:var(--card);border:1px solid var(--line);border-radius:var(--r-md);
+  padding:12px 14px;margin-bottom:9px;transition:opacity .15s ease;
+}
+.as-rank.off{opacity:.5;}
+.as-rank-no{
+  width:30px;height:30px;flex-shrink:0;border-radius:50%;
+  background:var(--gl);color:var(--gm);font-size:14px;font-weight:800;
+  display:flex;align-items:center;justify-content:center;
+}
+.as-rank-body{flex:1;min-width:0;}
+.as-rank-name{font-size:14.5px;font-weight:650;color:var(--td);}
+.as-rank-note{font-size:12.5px;color:var(--gt);line-height:1.5;margin-top:3px;}
+.as-rank-ctrl{display:flex;align-items:center;gap:4px;flex-shrink:0;}
+.as-rank-ctrl .iconbtn:disabled{opacity:.25;pointer-events:none;}
+/* Công tắc bật/tắt — ô tick vuông trong một hàng toàn nút tròn nhìn rất lạc lõng */
+.as-sw{position:relative;display:inline-block;width:44px;height:26px;flex-shrink:0;margin-left:4px;cursor:pointer;}
+.as-sw input{position:absolute;opacity:0;width:100%;height:100%;margin:0;cursor:pointer;}
+.as-sw span{position:absolute;inset:0;background:var(--line-2);border-radius:999px;transition:background .18s ease;}
+.as-sw span::after{content:'';position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;
+  background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.25);transition:transform .18s var(--ease-out);}
+.as-sw input:checked + span{background:var(--gd);}
+.as-sw input:checked + span::after{transform:translateX(18px);}
+.as-sw input:focus-visible + span{outline:2px solid var(--gd);outline-offset:2px;}
+
+/* ---------- [NEW-ASSIST] Khối một điều kiện của chiến dịch ---------- */
+.as-cond{
+  background:var(--surface-2);border:1px solid var(--line);
+  border-radius:var(--r-md);padding:14px;margin-bottom:12px;
+}
+.as-cond-h{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;}
+.as-cond-n{font-size:12.5px;font-weight:700;color:var(--gt);text-transform:uppercase;letter-spacing:.06em;}
 /* [FIX] Ô TICK BỊ LUẬT CỦA Ô NHẬP CHỮ NUỐT MẤT.
    `.field input` ở trên đặt `appearance:none` (để tự vẽ ô nhập chữ), cộng border +
    border-radius + padding 13px + min-height bằng cỡ ngón tay. Áp lên một ô tick thì
@@ -20050,20 +20087,23 @@ function renderAssistCfg() {
   const tp = c.topping, ly = c.loyalty, cc = c.customerCheck;
   const menu = getActiveMenu();
 
-  const kindRows = Object.keys(ASSIST_KIND_LABEL).map(k => {
+  const thuTu = assistKindOrder();
+  const kindRows = thuTu.map((k, i) => {
     const kc = c.kinds[k] || { enabled: true, rank: 6 };
-    return `<div class="pkg-row">
-      <div class="pkg-row-h">
-        <span class="pkg-row-n">${escapeHtmlAttr(ASSIST_KIND_LABEL[k])}</span>
-        <label style="display:flex;align-items:center;gap:7px;font-size:13px;font-weight:650;color:var(--ink-2);cursor:pointer;">
-          <input type="checkbox" ${kc.enabled !== false ? 'checked' : ''} onchange="assistSetKind('${k}','enabled',this.checked)"> Bật
+    const tat = kc.enabled === false;
+    return `<div class="as-rank${tat ? ' off' : ''}">
+      <div class="as-rank-no">${i + 1}</div>
+      <div class="as-rank-body">
+        <div class="as-rank-name">${escapeHtmlAttr(ASSIST_KIND_LABEL[k])}</div>
+        <div class="as-rank-note">${escapeHtmlAttr(ASSIST_KIND_NOTE[k] || '')}</div>
+      </div>
+      <div class="as-rank-ctrl">
+        <button class="iconbtn" ${i === 0 ? 'disabled' : ''} onclick="assistMoveKind('${k}',-1)" title="Lên trên">${ic('chevronUp')}</button>
+        <button class="iconbtn" ${i === thuTu.length - 1 ? 'disabled' : ''} onclick="assistMoveKind('${k}',1)" title="Xuống dưới">${ic('chevronDown')}</button>
+        <label class="as-sw" title="${tat ? 'Đang tắt' : 'Đang bật'}">
+          <input type="checkbox" ${tat ? '' : 'checked'} onchange="assistSetKind('${k}','enabled',this.checked)"><span></span>
         </label>
       </div>
-      <div class="pkg-eq">
-        <input type="number" min="1" max="9" value="${Number(kc.rank) || 6}" onchange="assistSetKind('${k}','rank',this.value)">
-        <span class="unit-tag">Thứ tự ưu tiên</span>
-      </div>
-      <div class="pkg-out">${escapeHtmlAttr(ASSIST_KIND_NOTE[k] || '')}</div>
     </div>`;
   }).join('');
 
@@ -20112,7 +20152,7 @@ function renderAssistCfg() {
 
     <div class="card">
       <div class="card-h"><h3>${ic('sliders', 17)} Thứ tự ưu tiên</h3></div>
-      <div class="hint" style="margin-bottom:12px">Số nhỏ hơn = quan trọng hơn = được chọn trước khi cắt còn ${c.maxSuggestions} gợi ý.</div>
+      <div class="hint" style="margin-bottom:14px">Trên cùng là quan trọng nhất. Khi có nhiều gợi ý cùng lúc, POS lấy từ trên xuống rồi cắt còn ${c.maxSuggestions}.</div>
       ${kindRows}
     </div>
 
@@ -20229,10 +20269,29 @@ function assistSetTop(k, v) {
   else assistCfg[k] = !!v;
   assistTouch();
 }
+// Danh sách loại gợi ý theo đúng thứ tự ưu tiên hiện tại.
+function assistKindOrder() {
+  return Object.keys(ASSIST_KIND_LABEL)
+    .sort((a, b) => (Number((assistCfg.kinds[a] || {}).rank) || 9) - (Number((assistCfg.kinds[b] || {}).rank) || 9));
+}
+// Đổi chỗ với hàng trên/dưới rồi đánh số lại cả danh sách — rank luôn là
+// 1..n liền mạch, không bao giờ có hai loại cùng số.
+function assistMoveKind(k, huong) {
+  const ds = assistKindOrder();
+  const i = ds.indexOf(k), j = i + huong;
+  if (i < 0 || j < 0 || j >= ds.length) return;
+  ds[i] = ds[j]; ds[j] = k;
+  ds.forEach((n, idx) => {
+    assistCfg.kinds[n] = assistCfg.kinds[n] || { enabled: true };
+    assistCfg.kinds[n].rank = idx + 1;
+  });
+  assistTouch(); renderAssistCfg();
+}
+
 function assistSetKind(k, field, v) {
   assistCfg.kinds[k] = assistCfg.kinds[k] || { enabled: true, rank: 6 };
   assistCfg.kinds[k][field] = field === 'rank' ? Math.max(1, Math.min(9, Number(v) || 6)) : !!v;
-  assistTouch();
+  assistTouch(); renderAssistCfg();
 }
 function assistSetTp(k, v) { assistCfg.topping[k] = Math.max(0, Number(v) || 0); assistTouch(); }
 function assistSetTpRate(v) { assistCfg.topping.minRate = Math.max(0, Math.min(100, Number(v) || 0)) / 100; assistTouch(); }
@@ -20322,19 +20381,21 @@ function _assistCampForm(cp, i) {
   const types = [...new Set(menu.map(m => m.type).filter(Boolean))];
   const conds = (cp.conditions || []).map((c, ci) => {
     let extra = '';
-    if (c.type === 'qty_size') extra = `<input type="text" value="${escapeHtmlAttr(c.size || '')}" placeholder="M / L" onchange="assistCampCond(${i},${ci},'size',this.value)">`;
-    else if (c.type === 'qty_item') extra = `<select onchange="assistCampCond(${i},${ci},'itemId',this.value)"><option value="">— món —</option>${menu.map(m => `<option value="${m.id}" ${c.itemId === m.id ? 'selected' : ''}>${escapeHtmlAttr(m.name)}</option>`).join('')}</select>`;
-    else if (c.type === 'qty_type') extra = `<select onchange="assistCampCond(${i},${ci},'menuType',this.value)"><option value="">— nhóm —</option>${types.map(t => `<option value="${escapeHtmlAttr(t)}" ${c.menuType === t ? 'selected' : ''}>${escapeHtmlAttr(t)}</option>`).join('')}</select>`;
-    return `<div class="pkg-row">
-      <div class="pkg-row-h"><span class="pkg-row-n">Điều kiện ${ci + 1}</span>
-        <button class="iconbtn" onclick="assistCampCondDel(${i},${ci})">${ic('trash')}</button></div>
-      <div class="pkg-eq">
-        <select onchange="assistCampCond(${i},${ci},'type',this.value)">
-          ${ASSIST_COND_TYPES.map(([k, l]) => `<option value="${k}" ${c.type === k ? 'selected' : ''}>${l}</option>`).join('')}
-        </select>
+    const oNhap = (nhan, ruot) => `<div class="field" style="margin-bottom:0"><label>${nhan}</label>${ruot}</div>`;
+    if (c.type === 'qty_size') extra = oNhap('Size', `<input type="text" value="${escapeHtmlAttr(c.size || '')}" placeholder="VD: L" onchange="assistCampCond(${i},${ci},'size',this.value)">`);
+    else if (c.type === 'qty_item') extra = oNhap('Món', `<select onchange="assistCampCond(${i},${ci},'itemId',this.value)"><option value="">— chọn món —</option>${menu.map(m => `<option value="${m.id}" ${c.itemId === m.id ? 'selected' : ''}>${escapeHtmlAttr(m.name)}</option>`).join('')}</select>`);
+    else if (c.type === 'qty_type') extra = oNhap('Nhóm menu', `<select onchange="assistCampCond(${i},${ci},'menuType',this.value)"><option value="">— chọn nhóm —</option>${types.map(t => `<option value="${escapeHtmlAttr(t)}" ${c.menuType === t ? 'selected' : ''}>${escapeHtmlAttr(t)}</option>`).join('')}</select>`);
+    return `<div class="as-cond">
+      <div class="as-cond-h"><span class="as-cond-n">Điều kiện ${ci + 1}</span>
+        <button class="iconbtn" onclick="assistCampCondDel(${i},${ci})" title="Xoá điều kiện">${ic('trash')}</button></div>
+      <div class="${extra ? 'grid3' : 'grid2'}">
+        <div class="field" style="margin-bottom:0"><label>Đếm theo</label>
+          <select onchange="assistCampCond(${i},${ci},'type',this.value)">
+            ${ASSIST_COND_TYPES.map(([k, l]) => `<option value="${k}" ${c.type === k ? 'selected' : ''}>${l}</option>`).join('')}
+          </select></div>
         ${extra}
-        <input type="number" min="1" value="${Number(c.min) || 1}" onchange="assistCampCond(${i},${ci},'min',this.value)">
-        <span class="unit-tag">tối thiểu</span>
+        <div class="field" style="margin-bottom:0"><label>Tối thiểu</label>
+          <input type="number" min="1" value="${Number(c.min) || 1}" onchange="assistCampCond(${i},${ci},'min',this.value)"></div>
       </div>
     </div>`;
   }).join('');

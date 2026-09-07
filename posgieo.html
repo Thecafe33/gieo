@@ -468,7 +468,50 @@ body{font-family:'Google Sans',sans-serif;background:var(--bg);max-width:430px;m
    trong popup vẫn nhìn thấy. */
 .toast{position:fixed;bottom:100px;left:50%;transform:translateX(-50%) translateY(20px);background:#1f2430;color:#fff;padding:13px 20px;border-radius:16px;font-size:14px;font-weight:600;line-height:1.45;z-index:10000;opacity:0;transition:all .3s;pointer-events:none;white-space:pre-wrap;overflow-wrap:anywhere;text-align:center;max-width:min(420px,calc(100vw - 32px));width:max-content;box-shadow:0 10px 30px rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.14);}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
-/* [NEW-ASSIST] Có pill gợi ý ở màn order → đẩy toast lên trên nó, đừng che chữ */
+/* ══════════════════════════════════════════════════════════════════════════
+   [NEW-ASSIST] TRỢ LÝ BÁN HÀNG — thẻ gợi ý
+   Một thẻ = MỘT DÒNG: icon · chữ bên trái · nút bên phải. Không xuống dòng
+   riêng cho nút — nhân viên liếc một cái là thấy cả câu nói lẫn việc phải bấm.
+   ══════════════════════════════════════════════════════════════════════════ */
+.as-wrap{display:flex;flex-direction:column;gap:8px;}
+.as-card{display:flex;align-items:center;gap:10px;border-radius:26px;padding:9px 10px 9px 15px;border:1.5px solid;box-shadow:0 6px 20px rgba(0,0,0,.07);}
+.as-ic{font-size:18px;line-height:1;flex-shrink:0;}
+.as-tx{flex:1;min-width:0;font-size:12.5px;font-weight:600;line-height:1.4;
+  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;}
+.as-card.compact .as-tx{-webkit-line-clamp:2;}
+.as-act{display:flex;align-items:center;gap:6px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end;max-width:52%;}
+.as-card.compact .as-act{max-width:46%;}
+.as-btn{border:none;border-radius:999px;padding:9px 14px;font-family:'Google Sans',sans-serif;
+  font-size:12.5px;font-weight:700;color:#fff;cursor:pointer;white-space:nowrap;}
+.as-chip{background:#fff;border-radius:999px;padding:8px 13px;font-family:'Google Sans',sans-serif;
+  font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap;border:1.5px solid;line-height:1.15;}
+.as-chip small{display:block;font-size:9px;font-weight:600;opacity:.6;}
+.as-x{background:none;border:none;font-size:15px;line-height:1;cursor:pointer;padding:4px;flex-shrink:0;opacity:.45;}
+.as-more{background:rgba(255,255,255,.75);border:1.5px solid;border-radius:999px;padding:7px 11px;
+  font-family:'Google Sans',sans-serif;font-size:12px;font-weight:800;cursor:pointer;white-space:nowrap;flex-shrink:0;}
+
+/* [NEW-ASSIST] Pill nổi KHÔNG được che lưới bấm món.
+   #sm là flex column cao 100vh, .mg là con flex:1 nên co lại đúng bằng phần
+   padding thêm vào — tức khung cuộn của lưới menu KẾT THÚC ngay trên pill,
+   không phải chỉ thêm khoảng trắng ở cuối (thêm khoảng trắng thì cuộn tới đâu
+   pill vẫn đè lên món ở đó). --assist-h do assistRender() cập nhật theo chiều
+   cao thật của pill sau mỗi lần vẽ. */
+/* Chỗ cuộn của màn order là CẢ TRANG chứ không phải riêng lưới (.mg cao theo
+   nội dung, #sm chỉ đặt min-height:100vh) — nên .mg{padding-bottom:120px} là
+   khoảng chừa cho thanh footer ở cuối trang. Pill đứng trên footer thì phải
+   chừa thêm đúng chiều cao của nó, nếu không hàng món cuối cùng vĩnh viễn nằm
+   dưới pill và không bấm được. */
+body.assist-main-on #sm{padding-bottom:var(--assist-h, 0px);}
+
+/* Và vì là phần tử nổi, cuộn giữa chừng thì nó vẫn nằm đè lên vài ô món —
+   đúng như thanh footer vẫn làm từ trước. Cách xử lý: ĐANG CUỘN THÌ TRƯỢT ĐI,
+   dừng cuộn thì trượt về. Nhân viên lướt tìm món hay bấm món ở đáy màn hình
+   đều không bị vướng, mà gợi ý thì không mất. Chỉ áp dụng lúc thu gọn — đang
+   mở rộng ra đọc mà nó tự biến mất thì rất khó chịu. */
+#assistBarMain{transition:transform .22s cubic-bezier(.4,0,.2,1),opacity .18s ease;}
+#assistBarMain.as-away{transform:translateX(-50%) translateY(130%);opacity:0;pointer-events:none;}
+/* Toast cũng neo ở bottom:100px — đúng vùng pill đứng, mà lại bật lên đúng lúc
+   nhân viên vừa thêm món, tức đúng lúc gợi ý mới hiện ra và đang cần đọc. */
 body.assist-main-on .toast{bottom:calc(100px + var(--assist-h, 0px) + 10px);}
 ::-webkit-scrollbar{width:0;}
 /* Archive status badge */
@@ -694,7 +737,7 @@ body.assist-main-on .toast{bottom:calc(100px + var(--assist-h, 0px) + 10px);}
        NHẤT, còn lại thu sau nút "Còn N gợi ý nữa" — màn order phải thoáng để
        bấm món. position:fixed ngay trên .mfooter (cũng fixed), z-index thấp
        hơn footer để không che nút Thanh toán. -->
-  <div id="assistBarMain" style="display:none;position:fixed;bottom:92px;left:50%;transform:translateX(-50%);width:100%;max-width:430px;padding:0 12px;z-index:19;box-sizing:border-box;max-height:52vh;overflow-y:auto;"></div>
+  <div id="assistBarMain" style="display:none;position:fixed;bottom:92px;left:50%;transform:translateX(-50%);width:100%;max-width:430px;padding:0 12px;z-index:19;box-sizing:border-box;max-height:42vh;overflow-y:auto;"></div>
   <div class="mfooter">
     <div onclick="openCartDrawer()" style="cursor:pointer;-webkit-tap-highlight-color:transparent;">
       <div class="ftl">TỔNG TẠM TÍNH <span style="font-size:10px;color:var(--gm)">▲ GIỎ HÀNG</span></div>
@@ -20597,6 +20640,7 @@ function assistProviderTogoPromo(out) {
         tone: 'gift',
         score: 200,
         text: `Đơn đã đủ ${buyQty} ly — báo khách được tặng <b>${soLuot * freeQty} ly</b>, mời khách chọn món tặng.`,
+        short: `Đủ ${buyQty} ly — khách được tặng <b>${soLuot * freeQty} ly</b>.`,
         actLabel: 'Đã báo khách',
         act: { type: 'none' },
         meta: { promo: 'togo_gift', state: 'met', buyQty, freeQty, have: totalQty }
@@ -20613,6 +20657,7 @@ function assistProviderTogoPromo(out) {
           tone: 'gift',
           score: 190 - thieu,
           text: `Đơn hiện có ${totalQty} ly — mời khách mua thêm <b>${thieu} ly</b> để được tặng ${freeQty} ly.`,
+          short: `Thêm <b>${thieu} ly</b> nữa → khách được tặng ${freeQty} ly.`,
           actLabel: 'Thêm món',
           act: { type: 'menu' },
           meta: { promo: 'togo_gift', state: 'near', gap: thieu, buyQty, freeQty, have: totalQty }
@@ -20631,6 +20676,7 @@ function assistProviderTogoPromo(out) {
         tone: 'gift',
         score: 170 - thieu,
         text: `Mời khách mua thêm <b>${thieu} ly</b> để được giảm ${d.pct}% cả đơn.`,
+        short: `Thêm <b>${thieu} ly</b> nữa → giảm ${d.pct}% cả đơn.`,
         actLabel: 'Thêm món',
         act: { type: 'menu' },
         meta: { promo: 'togo_discount', state: 'near', gap: thieu, pct: d.pct }
@@ -20777,6 +20823,7 @@ function assistProviderLoyalty(out) {
       tone: 'gift',
       score: 160 + freeDrink,
       text: `Khách đã đủ ${target} tem — báo khách được nhận <b>${freeDrink} ly miễn phí</b>, bấm "Đổi ngay" ở thẻ khách hàng.`,
+      short: `Khách có <b>${freeDrink} ly miễn phí</b> — báo khách đổi.`,
       actLabel: 'Đã báo khách',
       act: { type: 'none' },
       meta: { loyalty: 'free_available', freeDrink }
@@ -20805,6 +20852,7 @@ function assistProviderLoyalty(out) {
       tone: 'gift',
       score: 155,
       text: `Sau đơn này khách đủ <b>${target} tem</b> — báo khách lần tới được 1 ly miễn phí.`,
+      short: `Sau đơn này khách đủ <b>${target} tem</b>.`,
       actLabel: 'Đã báo khách',
       act: { type: 'none' },
       meta: { loyalty: 'will_reach', stamps, add: seThem, target }
@@ -20825,6 +20873,7 @@ function assistProviderLoyalty(out) {
       tone: 'gift',
       score: 150 - thieu,
       text: `Khách sắp đủ ${target} tem — mời khách mua thêm <b>${coTheThem} ly</b> để nhận 1 ly miễn phí.`,
+      short: `Thêm <b>${coTheThem} ly</b> là khách đủ ${target} tem.`,
       actLabel: 'Thêm món',
       act: { type: 'menu' },
       meta: { loyalty: 'near', stamps, gap: thieu, target }
@@ -20867,6 +20916,7 @@ function assistProviderUpsell(out) {
         tone: 'info',
         score: 120 - Math.min(60, Math.round(best.chenh / 1000)),
         text: `Mời khách nâng <b>${assistEsc(best.m.name)}</b> lên size ${assistEsc(best.bigger.label)} — chỉ thêm ${fmt(best.chenh)}.`,
+        short: `Nâng <b>${assistEsc(best.m.name)}</b> lên size ${assistEsc(best.bigger.label)}: +${fmt(best.chenh)}.`,
         actLabel: 'Đổi size ' + best.bigger.label,
         act: { type: 'upsize', cartKey: best.x.key, size: best.bigger.label },
         meta: { upsell: 'upsize', itemId: best.m.id, fromSize: best.x.c.size, toSize: best.bigger.label, delta: best.chenh }
@@ -20976,6 +21026,7 @@ function assistProviderTopping(out) {
       tone: 'info',
       score: 60 + diem[0].s,
       text: `Gợi ý thêm topping cho <b>${assistEsc(tenMon)}</b> — chạm vào topping khi khách đồng ý:`,
+      short: `Thêm topping cho <b>${assistEsc(tenMon)}</b>?`,
       chips: diem.map(d => ({
         label: d.t.name,
         sub: d.ly[0] || '',
@@ -21033,67 +21084,82 @@ const ASSIST_TONE = {
   info: { bg: '#eff6ff', bd: '#93c5fd', fg: '#1e40af' }
 };
 
-let _assistCurrent = [];   // danh sách đang hiển thị — dùng cho nút bấm tra lại
+// Loại gợi ý KHÔNG được lên pill nổi ở màn order.
+// SĐT chỉ nhập được ở màn thanh toán, nên mọi gợi ý dựa trên hồ sơ khách bản
+// chất là việc "kiểm tra lại trước khi chốt" — đúng chỗ của nó là giỏ hàng và
+// màn thanh toán. Đẩy lên màn order thì hoặc chưa có dữ liệu để nói, hoặc nói
+// đúng lúc nhân viên đang bấm món và không ai đọc. (Gợi ý tem thì vẫn để lại:
+// "mời khách mua thêm 1 ly cho đủ tem" là việc phải làm NGAY lúc đang order,
+// không phải lúc đã chốt xong đơn.)
+const ASSIST_MAIN_HIDE = ['customer_check'];
 
-function _assistCardHTML(s, idx) {
-  const tone = ASSIST_TONE[s.tone] || ASSIST_TONE.info;
-  const chips = (s.chips || []).map((c, ci) => `
-    <button onclick="assistChip(${idx},${ci})"
-      style="background:#fff;border:1.5px solid ${tone.bd};border-radius:999px;padding:8px 13px;font-family:'Google Sans',sans-serif;font-size:13px;font-weight:700;color:${tone.fg};cursor:pointer;display:inline-flex;flex-direction:column;align-items:flex-start;line-height:1.2;gap:1px;">
-      <span>+ ${assistEsc(c.label)}</span>
-      ${c.sub ? `<span style="font-size:9.5px;font-weight:600;opacity:.65;">${assistEsc(c.sub)}</span>` : ''}
-    </button>`).join('');
-  const mainBtn = s.actLabel ? `
-    <button onclick="assistAccept(${idx})"
-      style="background:${tone.fg};color:#fff;border:none;border-radius:10px;padding:8px 13px;font-family:'Google Sans',sans-serif;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap;">${assistEsc(s.actLabel)}</button>` : '';
-  return `
-  <div style="background:${tone.bg};border:1.5px solid ${tone.bd};border-radius:14px;padding:10px 12px;display:flex;gap:9px;align-items:flex-start;">
-    <span style="font-size:17px;line-height:1.3;flex-shrink:0;">${s.icon || '💡'}</span>
-    <div style="flex:1;min-width:0;">
-      <div style="font-size:12.5px;font-weight:600;color:${tone.fg};line-height:1.45;">${s.text}</div>
-      ${chips ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">${chips}</div>` : ''}
-      ${mainBtn ? `<div style="display:flex;gap:8px;margin-top:8px;">${mainBtn}</div>` : ''}
-    </div>
-    <button onclick="assistSkip(${idx})" title="Bỏ qua gợi ý này"
-      style="background:none;border:none;color:${tone.fg};opacity:.45;font-size:15px;line-height:1;cursor:pointer;padding:2px 0 2px 2px;flex-shrink:0;">✕</button>
+let _assistCurrent = [];   // danh sách đang hiển thị — nút bấm tra lại theo chỉ số
+
+function _assistChipHTML(c, idx, ci, tone, showSub) {
+  return `<button class="as-chip" style="border-color:${tone.bd};color:${tone.fg};" onclick="assistChip(${idx},${ci})">
+    + ${assistEsc(c.label)}${(showSub && c.sub) ? `<small>${assistEsc(c.sub)}</small>` : ''}</button>`;
+}
+
+// Một thẻ = một dòng: icon · chữ · nút. `compact` (dùng cho pill nổi ở màn
+// order) chỉ hiện MỘT hành động — lựa chọn tốt nhất — để dòng không bị vỡ;
+// mở rộng ra mới thấy đủ các lựa chọn còn lại.
+function _assistCardHTML(s, idx, compact, moreCount) {
+  const t = ASSIST_TONE[s.tone] || ASSIST_TONE.info;
+  const chips = s.chips || [];
+  let act = '';
+  if (chips.length) {
+    act = (compact ? chips.slice(0, 1) : chips).map((c, ci) => _assistChipHTML(c, idx, ci, t, !compact)).join('');
+  } else if (s.actLabel) {
+    act = `<button class="as-btn" style="background:${t.fg};" onclick="assistAccept(${idx})">${assistEsc(s.actLabel)}</button>`;
+  }
+  // Còn gợi ý khác → nút đếm để mở rộng, thay cho nút bỏ qua (bỏ qua vẫn có
+  // đủ ở trạng thái mở rộng). Chỉ một gợi ý → cho bỏ qua ngay tại chỗ.
+  const duoi = (compact && moreCount > 0)
+    ? `<button class="as-more" style="border-color:${t.bd};color:${t.fg};" onclick="assistToggleMain()" title="Xem các gợi ý còn lại">+${moreCount} ⌄</button>`
+    : `<button class="as-x" style="color:${t.fg};" onclick="assistSkip(${idx})" title="Bỏ qua gợi ý này">✕</button>`;
+  return `<div class="as-card${compact ? ' compact' : ''}" style="background:${t.bg};border-color:${t.bd};">
+    <span class="as-ic">${s.icon || '💡'}</span>
+    <div class="as-tx" style="color:${t.fg};">${compact ? (s.short || s.text) : s.text}</div>
+    <div class="as-act">${act}</div>
+    ${duoi}
   </div>`;
 }
 
-// Vẽ ra cả ba chỗ. `scope`:
-//   main — pill nổi trên màn menu: CHỈ gợi ý quan trọng nhất (+ nút mở rộng),
-//          vì màn order cần thoáng để bấm món.
+// Vẽ ra cả ba chỗ:
+//   main — pill nổi ở màn order. Thu gọn còn ĐÚNG MỘT thẻ; lưới menu tự co lại
+//          đúng bằng chiều cao pill (xem CSS body.assist-main-on #sm) nên pill
+//          không bao giờ đè lên món hay nút bấm.
 //   cart / sc — thanh đầy đủ (tối đa 3), lúc này nhân viên đang rà lại đơn.
 function assistRender() {
-  const list = _assistCurrent;
+  const all = _assistCurrent.map((s, i) => ({ s, i }));
+  const wrap = h => h ? `<div class="as-wrap">${h}</div>` : '';
+  const full = wrap(all.map(x => _assistCardHTML(x.s, x.i, false)).join(''));
+
   const nodeCart = document.getElementById('assistBarCart');
   const nodeSc   = document.getElementById('assistBarSc');
   const nodeMain = document.getElementById('assistBarMain');
+  if (nodeCart) { nodeCart.innerHTML = full; nodeCart.style.display = full ? 'block' : 'none'; }
+  if (nodeSc)   { nodeSc.innerHTML   = full; nodeSc.style.display   = full ? 'block' : 'none'; }
+  if (!nodeMain) return;
 
-  const full = list.map((s, i) => _assistCardHTML(s, i)).join('');
-  const wrap = html => html ? `<div style="display:flex;flex-direction:column;gap:8px;">${html}</div>` : '';
-  if (nodeCart) { nodeCart.innerHTML = wrap(full); nodeCart.style.display = full ? 'block' : 'none'; }
-  if (nodeSc)   { nodeSc.innerHTML   = wrap(full); nodeSc.style.display   = full ? 'block' : 'none'; }
-
-  if (nodeMain) {
-    if (!list.length) { nodeMain.innerHTML = ''; nodeMain.style.display = 'none'; }
-    else {
-      const con = list.length - 1;
-      const body = _assistMainExpanded
-        ? wrap(full)
-        : wrap(_assistCardHTML(list[0], 0)) + (con > 0
-            ? `<button onclick="assistToggleMain()" style="margin-top:6px;width:100%;background:#fff;border:1.5px dashed #d1d5db;border-radius:12px;padding:7px;font-family:'Google Sans',sans-serif;font-size:11.5px;font-weight:700;color:#6b7280;cursor:pointer;">Còn ${con} gợi ý nữa ▾</button>`
-            : '');
-      const thuGon = _assistMainExpanded
-        ? `<button onclick="assistToggleMain()" style="margin-top:6px;width:100%;background:#fff;border:1.5px dashed #d1d5db;border-radius:12px;padding:7px;font-family:'Google Sans',sans-serif;font-size:11.5px;font-weight:700;color:#6b7280;cursor:pointer;">Thu gọn ▴</button>`
-        : '';
-      nodeMain.innerHTML = body + thuGon;
-      nodeMain.style.display = 'block';
-    }
-    // Báo cho CSS biết pill đang cao bao nhiêu để đẩy toast lên trên nó.
-    const co = nodeMain.style.display === 'block';
-    document.body.classList.toggle('assist-main-on', co);
-    document.body.style.setProperty('--assist-h', co ? nodeMain.offsetHeight + 'px' : '0px');
+  const mainList = all.filter(x => ASSIST_MAIN_HIDE.indexOf(x.s.kind) < 0);
+  if (!mainList.length) {
+    nodeMain.innerHTML = '';
+    nodeMain.style.display = 'none';
+  } else if (_assistMainExpanded) {
+    const t = ASSIST_TONE[mainList[0].s.tone] || ASSIST_TONE.info;
+    nodeMain.innerHTML = wrap(mainList.map(x => _assistCardHTML(x.s, x.i, false)).join(''))
+      + `<button class="as-more" style="width:100%;margin-top:8px;border-color:${t.bd};color:${t.fg};padding:9px;" onclick="assistToggleMain()">Thu gọn ⌃</button>`;
+    nodeMain.style.display = 'block';
+  } else {
+    nodeMain.innerHTML = wrap(_assistCardHTML(mainList[0].s, mainList[0].i, true, mainList.length - 1));
+    nodeMain.style.display = 'block';
   }
+  // Báo chiều cao thật của pill cho CSS: lưới menu co lại đúng ngần này, và
+  // toast nhảy lên trên pill thay vì đè lên nó.
+  const co = nodeMain.style.display === 'block';
+  document.body.classList.toggle('assist-main-on', co);
+  document.body.style.setProperty('--assist-h', co ? nodeMain.offsetHeight + 'px' : '0px');
 }
 
 // Tính lại + ghi nhận lượt hiển thị + vẽ. Gọi sau MỌI thay đổi giỏ hàng/khách.
@@ -21119,6 +21185,16 @@ function assistRefresh() {
 }
 
 function assistToggleMain() { _assistMainExpanded = !_assistMainExpanded; assistRender(); }
+
+// Trượt pill đi trong lúc cuộn (xem ghi chú ở CSS #assistBarMain.as-away).
+let _assistScrollTimer = null;
+window.addEventListener('scroll', () => {
+  const n = document.getElementById('assistBarMain');
+  if (!n || n.style.display !== 'block' || _assistMainExpanded) return;
+  n.classList.add('as-away');
+  clearTimeout(_assistScrollTimer);
+  _assistScrollTimer = setTimeout(() => n.classList.remove('as-away'), 480);
+}, { passive: true });
 
 // Nút bấm truyền CHỈ SỐ trong _assistCurrent (xem ghi chú ở _assistCardHTML).
 function _assistAt(idx) { return _assistCurrent[Number(idx)] || null; }
