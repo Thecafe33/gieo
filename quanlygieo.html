@@ -7269,8 +7269,6 @@ const NAV_SECTIONS = [
     {key:'kho:toppingcogs',  label:'GOGS Topping',    go:"goKho('toppingcogs')"},
     {key:'kho:po',           label:'Đặt & nhận hàng', go:"goKho('po')",           sub:'Hoạt động'},
     {key:'kho:stockcount',   label:'Kiểm kê',         go:"goKho('stockcount')"},
-    {key:'kho:lechkho',      label:'Lệch kho & định lượng', go:"goKho('lechkho')"},
-    {key:'kho:dubao',        label:'Dự báo & số mẻ',  go:"goKho('dubao')"},
     {key:'kho:containers',   label:'Hàng đang mở & tem', go:"goKho('containers')"},
     {key:'kho:refill',       label:'Refill',          go:"goKho('refill')"},
     {key:'kho:locstock',     label:'Tồn theo vị trí', go:"goKho('locstock')"},
@@ -7279,6 +7277,16 @@ const NAV_SECTIONS = [
     {key:'kho:wastereasons', label:'Lý do hao hụt',   go:"goKho('wastereasons')"},
     {key:'kho:checklist',    label:'Checklist ca',    go:"goKho('checklist')"},
     {key:'kho:bulkimport',   label:'Nhập danh mục từ Excel', go:"goKho('bulkimport')"},
+  ]},
+  // [GOM MÀN] Bốn mục này TRƯỚC ĐÂY nằm rải: hai cái trong nhánh Kho (vốn đã 16
+  // mục), hai cái trong Cấu hình. Nhưng chúng không phải việc kho hằng ngày cũng
+  // không phải cấu hình đặt-một-lần — chúng là việc ĐỌC SỐ: đối chiếu, dự báo,
+  // trích xuất. Gom lại một chỗ để nhánh Kho còn đúng phần vận hành hàng hoá.
+  { group:'Phân tích & dữ liệu', items:[
+    {key:'kho:lechkho',       ic:'detective', label:'Lệch kho & định lượng', go:"goKho('lechkho')",  sub:'Sau mỗi lần kiểm kê'},
+    {key:'kho:dubao',         ic:'chart',     label:'Dự báo & số mẻ',        go:"goKho('dubao')",    sub:'Trước khi nấu'},
+    {key:'entry:ngaydacbiet', ic:'calendar',  label:'Ngày đặc biệt',         go:"goEntry('ngaydacbiet')", sub:'Khai trước ngày lễ'},
+    {key:'entry:export',      ic:'download',  label:'Trích xuất dữ liệu',    go:"goEntry('export')", sub:'Gửi Claude phân tích'},
   ]},
   { group:'Nhân sự', items:[
     {key:'entry:nv',       ic:'users',     label:'Nhân viên',      go:"goEntry('nv')"},
@@ -7291,8 +7299,6 @@ const NAV_SECTIONS = [
     {key:'entry:asset',  ic:'package',  label:'Tài sản',   go:"goEntry('asset')"},
     {key:'entry:target', ic:'settings', label:'Mục tiêu',  go:"goEntry('target')"},
     {key:'sim',          ic:'sliders',  label:'Mô phỏng',  go:"switchScreen('sim')"},
-    {key:'entry:ngaydacbiet', ic:'calendar', label:'Ngày đặc biệt', go:"goEntry('ngaydacbiet')"},
-    {key:'entry:export', ic:'download', label:'Trích xuất dữ liệu', go:"goEntry('export')"},
     {key:'entry:dondep', ic:'trash',    label:'Dọn dữ liệu', go:"goEntry('dondep')"},
   ]},
   // [BÊ TỪ POS] Hai màn này trước nằm trong app POS — chuyển sang đây vì sửa giá
@@ -18552,7 +18558,13 @@ function saveTopping() {
   // listener nữa lên cùng một node Firebase).
   syncTgSettingsFromCloud();
   syncAppFeeFromCloud();
-  await renderStoreHealth();
+  // [SỬA LỖI — chủ quán phát hiện] TRƯỚC ĐÂY dòng này là renderStoreHealth(): nó chỉ
+  // vẽ danh sách "việc cần xử lý", KHÔNG vẽ các chỉ số của màn Hôm nay. Màn mặc định
+  // là 'today' nhưng init không đi qua switchScreen() nên renderToday() không bao giờ
+  // chạy — mở app lần đầu là trống trơn, phải bấm Tải lại mới có số.
+  // renderToday() đã tự gọi renderStoreHealth('todayHealth') bên trong (và nó gọi
+  // tiếp renderBookAlerts('todayBook')), nên gọi đúng một hàm này là đủ cả ba khối.
+  await renderToday();
 })();
 
 // ============================================================

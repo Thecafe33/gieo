@@ -369,6 +369,13 @@ CHỈ SỐ HÔM NAY (#todayGrid):
   lời mời chốt sổ chỉ hiện cho **tháng gần nhất**.
 - Sidebar: một mục `{key:'today', label:'Hôm nay · Sức khoẻ quán'}`, chấm đỏ ở đó.
 
+**Nhóm sidebar "Phân tích & dữ liệu"** (tách khỏi Kho và Cấu hình): Lệch kho & định
+lượng · Dự báo & số mẻ · Ngày đặc biệt · Trích xuất dữ liệu. Chúng không phải việc kho
+hằng ngày cũng không phải cấu hình đặt-một-lần — chúng là việc ĐỌC SỐ. Hai mục đầu vẫn
+dùng bộ máy màn Kho (`goKho('lechkho'|'dubao')`, vẽ vào `#khoBody`), chỉ đổi chỗ đứng
+trên sidebar; vì không còn nằm trong section `collapsible` nên `KHO_SIDEBAR_SUBS` không
+chứa chúng và nhánh Kho không tự bung ra khi mở.
+
 **Màn "Sức khoẻ tài chính"** (`health`): khối "Lãi/lỗ kỳ này" (biểu đồ + bảng ngày +
 chốt sổ) → khối hoà vốn 30 ngày → các card KPI cũ.
 
@@ -388,6 +395,11 @@ chốt sổ) → khối hoà vốn 30 ngày → các card KPI cũ.
    → Sửa: hiện ngày mua, cảnh báo, và bảng lãi/lỗ ghi rõ "chỉ N/M ngày có khấu hao".
 3. **Ngưỡng hoà vốn không cộng khấu hao** → "đã qua hoà vốn" mà vẫn lỗ.
    → Sửa: cộng thẳng vào, và lấy số của chính ngày đó.
+4. **Mở app lần đầu không có chỉ số nào**, phải bấm Tải lại mới hiện. `init()` kết thúc
+   bằng `renderStoreHealth()` — hàm đó chỉ vẽ danh sách "việc cần xử lý". Màn mặc định
+   là `today` nhưng init KHÔNG đi qua `switchScreen()` nên `renderToday()` không bao giờ
+   chạy. → Sửa: init gọi `renderToday()` (nó tự gọi `renderStoreHealth('todayHealth')`
+   và `renderBookAlerts('todayBook')` bên trong). Có `navtest.mjs` canh.
 
 **Bài học chung:** khi một con số có thể bằng 0 hoặc thấp bất thường vì một điều kiện
 ẩn (ngày mua, chưa khai, chưa duyệt), **màn hình phải nói ra**, không để chủ quán tự đoán.
@@ -430,6 +442,7 @@ Chạy: `node <tên>.mjs` (Playwright + Chromium tại `/opt/pw-browsers/chromiu
 | `thtest.mjs` | 53 | Lệch kho — hàm thuần (ví dụ 5kg/5,5kg, thiếu phiếu, cờ bất thường, trung vị/CV, xếp theo tiền) |
 | `th2test.mjs` | 49 | Màn Lệch kho, tạo/áp dụng đề xuất (công thức gốc không đổi tới khi bấm Áp dụng), 4 khối JSON |
 | `dbtest.mjs` | 55 | Dự báo — hàm thuần (trung vị cùng thứ, kẹp xu hướng, ngày đặc biệt, quy tắc số mẻ) |
+| `navtest.mjs` | 19 | Mở app lần đầu có chỉ số ngay (canh đúng lỗi §9.4) + nhóm "Phân tích & dữ liệu" |
 | `db2test.mjs` | 57 | Màn Dự báo trên file HTML thật — ví dụ trân châu (tồn 15 · dự báo 70 · mẻ 30 → 2 mẻ, dư 5) + nhánh topping |
 | `beptest` 22 · `bepe2e` 13 · `qltest` 14 · `togtest` 23 · `cbtest` 13 · `khotest` 24 · `postest` 20 · `hangtest` 15 · `embedpos` 6 | | các phần trước |
 
@@ -472,3 +485,13 @@ Chạy: `node <tên>.mjs` (Playwright + Chromium tại `/opt/pw-browsers/chromiu
   → nhiều khả năng khai quá ngắn.)
 - Nhánh chưa merge, chưa mở PR.
 - Chưa có màn dòng tiền đầy đủ (mới có danh sách "Chưa trả tiền" ở màn Chi phí).
+
+---
+
+## 14. BẢN GIẢ FIREBASE TRONG KIỂM THỬ — hai chỗ phải đúng
+
+Test nào để `init()` chạy trọn (vd `navtest.mjs`) thì bản giả phải:
+- `onAuthStateChanged(cb)` gọi cb **bất đồng bộ** (`setTimeout(...,0)`) và trả hàm huỷ.
+  Gọi đồng bộ sẽ ném `Cannot access 'unsub' before initialization` trong `ensureAuth` —
+  lỗi của bản giả, không phải của app.
+- Có `signInWithEmailAndPassword` (app dùng hàm này, không dùng `signInAnonymously`).
