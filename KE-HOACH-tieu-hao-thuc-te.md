@@ -354,6 +354,30 @@ mỏng, nên bật sớm không hại gì mà tới lúc đủ dữ liệu là c
 3. **Ưu tiên ít huỷ hơn ít thiếu, nhưng chỉ với hàng hạn ngắn.** Thiếu ≤ 25% một mẻ
    thì không nấu thêm cả mẻ. Hàng để được sang mai thì làm tròn lên — dư không mất gì.
 
-**Kiểm thử:** `dbtest.mjs` 55 assertion (hàm thuần) · `db2test.mjs` 35 assertion
+### Topping cũng được dự báo
+
+Topping **không có sổ tồn riêng** trong app, nên lịch sử tiêu thụ của nó lấy từ chính
+bill đã bán: `aggregateOrders` nay đếm luôn `toppingMix` (số PHẦN từng topping, **gồm
+cả topping tặng** — khách không trả tiền nhưng vẫn ăn hết nguyên liệu như thường), và
+con số đó nằm trong **cache ngày**, nên ngày đã chốt vẫn tra được mà không phải đọc lại
+Realtime DB.
+
+Ba chỗ dễ sai, xử lý ngược nhau:
+- Ngày cache **cũ** (ghi trước khi có `toppingMix`) → **bỏ hẳn khỏi lịch sử**, coi là
+  "bán 0 phần" thì dự báo tụt xuống vô cớ. Màn hình nói rõ có bao nhiêu ngày như vậy.
+- Ngày **có** `toppingMix` mà topping đó không xuất hiện → hôm đó bán 0 phần **thật**,
+  phải điền 0; không điền thì trung vị chỉ tính ngày có bán và bị đẩy lên cao.
+- **Tồn đầu ngày của topping coi như 0** (app không theo dõi tồn topping) — nói thẳng
+  trên màn để hôm nào còn thừa thì tự trừ bớt số mẻ.
+
+Số phần mỗi mẻ: `yieldMode:'servings'` → `batchYield`; `yieldMode:'weight'` →
+`batchYield ÷ qtyPerServing`. Topping chưa khai mẻ (yield 0) bị bỏ qua, không chia cho 0.
+
+**Xu hướng cân theo THỨ.** Cửa sổ 14 ngày thiếu vài ngày (mất mạng, ngày cache cũ) là
+chuyện thường, mà thiếu đúng một ngày thứ 7 thì trung bình cả cửa sổ tụt hẳn — hoá ra
+"xu hướng giảm" chỉ vì một ngày vắng dữ liệu. Nên so **từng thứ với chính thứ đó** rồi
+mới lấy trung bình, và dưới 4 thứ chung thì không so nữa (coi như đi ngang).
+
+**Kiểm thử:** `dbtest.mjs` 55 assertion (hàm thuần) · `db2test.mjs` 57 assertion
 (màn Dự báo trên file HTML thật, đúng ví dụ trân châu hoàng kim: tồn 15 · dự báo 70 ·
-mẻ 30 → **2 mẻ, tổng 75, dư 5**).
+mẻ 30 → **2 mẻ, tổng 75, dư 5**; và nhánh topping).

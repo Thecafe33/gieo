@@ -55,6 +55,23 @@ const kq = await p.evaluate(async () => {
     {prepId:'ct', status:'active', qtyRemaining:300, businessDate:lui(1), expiresAt:'2099-01-01T00:00:00Z'}
   ];
   window.loadSpecialDays = async()=>[];
+  // Topping: trân châu trắng bán 25 phần vào đúng thứ của ngày đích, 10 phần ngày
+  // thường; 6 ngày cũ KHÔNG có toppingMix (cache ghi trước khi có tính năng).
+  window.loadToppingRecipes = async()=>{ TOPPING_RECIPES = {
+    tp1: { batchInputs:[{refType:'item',itemId:'i1',qty:500}], yieldMode:'servings', batchYield:20 },
+    tp2: { batchInputs:[{refType:'item',itemId:'i2',qty:800}], yieldMode:'weight', batchYield:2000, qtyPerServing:50 },
+    tp3: { batchInputs:[{refType:'item',itemId:'i3',qty:100}], yieldMode:'servings', batchYield:0 }
+  }; return TOPPING_RECIPES; };
+  window.loadMenuForManager = async()=>{ TOPPINGS = [{id:'tp1',name:'Trân châu trắng'},{id:'tp2',name:'Thạch dừa'},{id:'tp3',name:'Chưa khai mẻ'}]; };
+  window.fetchSalesRange = async()=>{
+    const perDay = [];
+    for(let n=56;n>=1;n--){
+      const d = lui(n), thu = new Date(d+'T12:00:00').getDay();
+      if(n <= 6){ perDay.push({date:d, revenue:0}); continue; }   // ngày cache cũ: KHÔNG có toppingMix
+      perDay.push({ date:d, revenue:0, toppingMix: thu===THU_DICH ? {tp1:25, tp2:8} : {tp1:10} });
+    }
+    return { perDay, totals:{items:0}, dayCount:perDay.length, cachedCount:0 };
+  };
   window.loadPrepForecasts = async()=>out.forecasts || [];
   window.savePrepForecast = async(date,prepId,data)=>{ out.luu.push({date,prepId,data}); };
 
@@ -68,12 +85,22 @@ const kq = await p.evaluate(async () => {
   await window.dbChay();
   out.man = document.getElementById('dbBody').textContent.replace(/\s+/g,' ');
 
-  const tc = dbKetQua.find(x=>x.prep.id==='tc');
+  const tc = dbKetQua.find(x=>x.id==='tc');
   out.tc = { duBao: tc.dubao.duBao, nen: tc.dubao.nen, nguonNen: tc.dubao.nguonNen,
              tinCay: tc.dubao.tinCay.muc, ton: tc.ton.dung, tonHetHan: tc.ton.hetHan,
              soMe: tc.keHoach.soMe, sanXuat: tc.keHoach.sanXuat, tongKhaDung: tc.keHoach.tongKhaDung,
              duKienDu: tc.keHoach.duKienDu, duKienHuy: tc.keHoach.duKienHuy, quyTac: tc.keHoach.quyTac };
-  const ct = dbKetQua.find(x=>x.prep.id==='ct');
+  out.tp1 = (()=>{ const x = dbKetQua.find(y=>y.id==='tp:tp1');
+    return { ten:x.ten, donVi:x.donVi, yieldMoiMe:x.yieldMoiMe, duBao:x.dubao.duBao, nen:x.dubao.nen,
+             soMe:x.keHoach.soMe, tongKhaDung:x.keHoach.tongKhaDung, duKienHuy:x.keHoach.duKienHuy,
+             ton:x.ton.dung, ghiChuTon:x.ghiChuTon, soNgay:x.dubao.soNgayCoDuLieu }; })();
+  out.tp2Yield = (dbKetQua.find(y=>y.id==='tp:tp2')||{}).yieldMoiMe;
+  out.tp2NenCo0 = (()=>{ const x = dbKetQua.find(y=>y.id==='tp:tp2'); return x ? x.dubao.nen : null; })();
+  const _tph = thLichSuTopping((await window.fetchSalesRange()).perDay);
+  out.tp2So0 = Object.values(_tph.lichSu.tp2||{}).filter(v=>v.dung===0).length;
+  out.tp3Co = !!dbKetQua.find(y=>y.id==='tp:tp3');
+  out.thieuNgayTopping = dbThieuNgayTopping;
+  const ct = dbKetQua.find(x=>x.id==='ct');
   out.ct = { duBao: ct.dubao.duBao, tinCay: ct.dubao.tinCay.muc, giaiThich: ct.dubao.tinCay.giaiThich, keHoach: ct.keHoach };
 
   await window.dbLuuKeHoach();
@@ -86,6 +113,8 @@ const kq = await p.evaluate(async () => {
   out.dc = dbDoiChieu.filter(x=>!x.chuaCoThucTe).map(x=>({date:x.date, duBao:x.duBao,
     thucTeDung:x.thucTeDung, thucTeHuy:x.thucTeHuy, duBan:x.duBan}));
   out.manDC = document.getElementById('dbBody').textContent.replace(/\s+/g,' ');
+  out.dem = demToppingDong({qty:3, toppings:[{id:'tp1', qty:2}, {_freeTpId:'tpFree'}]}, {});
+  out.demTuAgg = aggregateOrders([{ total:0, itemsArray:[{qty:3, toppings:[{id:'tp1', qty:2}]}] }]).toppingMix;
   return out;
 });
 
@@ -120,16 +149,42 @@ ok(kq.ct.tinCay === 'chuaDu', 'đánh dấu chưa đủ dữ liệu');
 ok(/cần ít nhất 7 ngày/.test(kq.ct.giaiThich), 'nói rõ cần thêm bao nhiêu');
 ok(/Chưa dự báo được/.test(kq.man), 'màn hình nói thẳng ra');
 
-console.log('4. Lưu kế hoạch để hôm sau đối chiếu');
-ok(kq.daLuu.length === 1, 'chỉ lưu dòng có dự báo — được '+kq.daLuu.length);
+console.log('4. Topping — lịch sử lấy từ bill đã bán');
+ok(kq.tp1.ten === 'Trân châu trắng', 'lấy đúng tên topping');
+ok(kq.tp1.donVi === 'phần', 'đơn vị là phần');
+gan(kq.tp1.yieldMoiMe, 20, 'mẻ chia được 20 phần (yieldMode servings)');
+gan(kq.tp2Yield, 40, 'mẻ cân 2000g, mỗi phần 50g → 40 phần (yieldMode weight)');
+ok(kq.tp3Co === false, 'topping chưa khai mẻ (yield 0) bị bỏ qua, không chia cho 0');
+gan(kq.tp1.nen, 25, 'nền = trung vị cùng thứ của topping');
+gan(kq.tp1.duBao, 25, 'dự báo 25 phần');
+gan(kq.tp1.ton, 0, 'tồn topping coi như 0');
+ok(/chưa theo dõi tồn topping/.test(kq.tp1.ghiChuTon||''), 'và NÓI RÕ vì sao — "'+(kq.tp1.ghiChuTon||'').slice(0,50)+'…"');
+gan(kq.tp1.soMe, 2, 'cần 26,25 phần, mẻ 20 phần → thiếu 6,25 vượt ¼ mẻ nên vẫn phải nấu mẻ thứ hai');
+gan(kq.tp1.tongKhaDung, 40, 'tổng khả dụng 40 phần');
+gan(kq.tp1.duKienHuy, 15, 'và nói thẳng: dự kiến phải đổ 15 phần');
+gan(kq.thieuNgayTopping, 6, '6 ngày cache cũ không có số topping — đếm và nói ra');
+gan(kq.tp1.soNgay, 50, 'và bị loại khỏi lịch sử: còn 50 ngày');
+gan(kq.tp2NenCo0, 8, 'thạch dừa: nền = 8 phần (chỉ bán vào đúng thứ đó)');
+gan(kq.tp2So0, 42, 'ngày CÓ số liệu mà thạch dừa không xuất hiện = bán 0 phần THẬT, phải điền 0');
+ok(/6 ngày/.test(kq.man), 'màn hình nói ra số ngày thiếu dữ liệu topping');
+ok(/gồm cả topping/.test(kq.man), 'nói rõ có tính cả topping tặng');
+
+console.log('5. Lưu kế hoạch để hôm sau đối chiếu');
+ok(kq.daLuu.length === 3, 'lưu 1 bán thành phẩm + 2 topping — được '+kq.daLuu.length);
 ok(kq.daLuu[0].prepId === 'tc', 'đúng bán thành phẩm');
+ok(kq.daLuu.some(x=>x.prepId==='tp:tp1'), 'topping lưu với khoá tp:<id> để đối chiếu chung một sổ');
 gan(kq.daLuu[0].duBao, 70, 'lưu con số dự báo');
 gan(kq.daLuu[0].soMe, 2, 'lưu số mẻ đề xuất');
 gan(kq.daLuu[0].tonDau, 15, 'lưu tồn đầu ngày');
 gan(kq.daLuu[0].nen, 70, 'lưu cả CĂN CỨ (nền) để sau truy lại được');
 ok(kq.daLuu[0].doTinCay === 'du', 'lưu độ tin cậy tại thời điểm dự báo');
 
-console.log('5. Đối chiếu dự báo cũ với thực tế');
+console.log('6. Đếm topping dùng chung một phép đếm');
+ok(kq.dem && kq.dem.tp1 === 6, 'dòng 3 ly, mỗi ly 2 phần trân châu → 6 phần — được '+(kq.dem||{}).tp1);
+ok(kq.dem && kq.dem.tpFree === 3, 'topping TẶNG cũng tính (khách không trả tiền nhưng vẫn ăn nguyên liệu)');
+ok(kq.demTuAgg && kq.demTuAgg.tp1 === 6, 'aggregateOrders dùng ĐÚNG hàm đếm đó, không có phép đếm thứ hai');
+
+console.log('7. Đối chiếu dự báo cũ với thực tế');
 ok(kq.dc.length === 1, 'có 1 dòng đối chiếu');
 gan(kq.dc[0].duBao, 70, 'dự báo cũ');
 gan(kq.dc[0].thucTeDung, 70, 'thực bán');

@@ -2334,9 +2334,30 @@ function orderHour(o){
   return (h >= 0 && h <= 23) ? h : null;
 }
 
+// Đếm số PHẦN topping của MỘT dòng hàng vào bảng out. Tách ra thành hàm riêng vì
+// có hai nơi cần đúng phép đếm này (bản ghi ngày và bản trích xuất JSON) — viết
+// hai lần thì sớm muộn hai chỗ đếm khác nhau, mà đây là mẫu số của cả dự báo.
+// Topping TẶNG (_freeTpId) cũng tính: khách không trả tiền nhưng vẫn ăn hết
+// nguyên liệu như thường.
+function demToppingDong(it, out){
+  const qty = Number(it && it.qty)||0;
+  ((it && it.toppings)||[]).forEach(t=>{
+    const tid = t && (t.id || t._freeTpId);
+    if(!tid) return;
+    out[tid] = (out[tid]||0) + Math.max(1, Number(t.qty)||1) * qty;
+  });
+  return out;
+}
+
 function aggregateOrders(orders){
   let revenue=0, bills=0, items=0, toppingBills=0, toppingRevenue=0, cogsActual=0, revenueUncosted=0,
       toppingCogsActual=0, toppingRevenueUncosted=0;
+  // [DỰ BÁO TOPPING] Đếm số PHẦN từng topping đã dùng trong ngày — gồm cả topping
+  // TẶNG (khách không trả tiền nhưng vẫn ăn hết nguyên liệu như thường).
+  // Đếm ở đây vì aggregateOrders là chỗ DUY NHẤT đọc qua từng bill, và kết quả của
+  // nó được ghi vào cache ngày — nghĩa là ngày đã chốt về sau vẫn tra được số topping
+  // mà không phải đọc lại toàn bộ đơn hàng từ Realtime DB.
+  const toppingMix = {};
   // Đếm bill theo từng giờ. Gắn vào ĐÂY chứ không tính riêng ở màn Hôm nay vì hàm này
   // là chỗ duy nhất đọc qua từng bill, và kết quả của nó được ghi vào cache ngày —
   // nghĩa là các ngày đã chốt sổ về sau cũng có sẵn phân bố giờ, khỏi đọc lại RTDB.
@@ -2390,6 +2411,7 @@ function aggregateOrders(orders){
       }
       toppingCogsActual += tp.paidRealCost * qty;
       toppingRevenueUncosted += tp.paidUncostedRevenue * qty;
+      demToppingDong(it, toppingMix);
     });
     // [NEW — GĐ2] Tầng B: chi phí túi/khay tính 1 LẦN CHO CẢ ĐƠN (không phải theo
     // từng dòng như Tầng A ở trên) — vì túi/khay phụ thuộc TOÀN BỘ các ly trong
@@ -2398,7 +2420,7 @@ function aggregateOrders(orders){
     if(hasTopping) toppingBills++;
     revenueUncosted += Number(o.foodTotal)||0; // đồ ăn (food_gieogieo) chưa có UI nhập COGS -> tạm ước tính %
   });
-  return {revenue,bills,items,toppingBills,toppingRevenue,cogsActual,revenueUncosted,toppingCogsActual,toppingRevenueUncosted,byHour};
+  return {revenue,bills,items,toppingBills,toppingRevenue,cogsActual,revenueUncosted,toppingCogsActual,toppingRevenueUncosted,byHour,toppingMix};
 }
 
 function rawMixFromOrders(orders){
@@ -6673,6 +6695,44 @@ function thLichSuBTP(prepTxs){
   return out;
 }
 
+// Số PHẦN thu được từ MỘT mẻ topping. Hai kiểu khai đều quy về "phần" vì đó là
+// đơn vị khách nhận được, cũng là đơn vị đếm khi bán.
+function thToppingPhanMoiMe(rec){
+  if(!rec) return 0;
+  const y = Number(rec.batchYield)||0;
+  if(rec.yieldMode === 'weight'){
+    const q = Number(rec.qtyPerServing)||0;
+    return q > 0 ? y/q : 0;   // mẻ cân được y gram, mỗi phần q gram
+  }
+  return y;                    // yieldMode 'servings': mẻ chia được y phần
+}
+
+// Lịch sử tiêu thụ TOPPING, lấy từ bản ghi ngày của doanh số (aggregateOrders đã
+// đếm sẵn toppingMix và số đó nằm trong cache ngày).
+//
+// Hai chỗ dễ sai, xử lý ngược nhau:
+//   · Ngày cache CŨ (ghi trước khi có toppingMix) → KHÔNG có trường này. Bỏ hẳn
+//     ngày đó ra khỏi lịch sử; coi là "bán 0 phần" thì dự báo tụt xuống vô cớ.
+//   · Ngày CÓ toppingMix nhưng topping đó không xuất hiện → hôm đó bán 0 phần THẬT.
+//     Phải điền 0, nếu không trung vị chỉ tính những ngày có bán và bị đẩy lên cao.
+function thLichSuTopping(perDay){
+  const out = {}, ngayThieu = [];
+  const ngayCo = [];
+  (perDay||[]).forEach(d=>{
+    if(!d || !d.date) return;
+    if(!d.toppingMix){ ngayThieu.push(d.date); return; }
+    ngayCo.push(d.date);
+    Object.entries(d.toppingMix).forEach(([tid,q])=>{
+      out[tid] = out[tid] || {};
+      out[tid][d.date] = { dung: Number(q)||0, huy:0, nau:0 };
+    });
+  });
+  Object.keys(out).forEach(tid=>{
+    ngayCo.forEach(d=>{ if(!out[tid][d]) out[tid][d] = { dung:0, huy:0, nau:0 }; });
+  });
+  return { lichSu: out, ngayThieuDuLieu: ngayThieu, soNgayCo: ngayCo.length };
+}
+
 function dbThu(dateKey){ const d = new Date(dateKey+'T12:00:00'); return isNaN(d) ? null : d.getDay(); }
 function dbLui(dateKey, n){ const d = new Date(dateKey+'T12:00:00'); d.setDate(d.getDate()-n); return dkey(d); }
 
@@ -6715,12 +6775,26 @@ function thDuBao({ lichSuNgay, ngayDich, ngayDacBiet, soTuan }){
   //   · So bằng TRUNG BÌNH MỖI NGÀY, không phải tổng: ngày nghỉ/thiếu dữ liệu làm
   //     hai cửa sổ có số ngày khác nhau thì tổng không so được với nhau.
   //   · BỎ ngày đặc biệt ra: một đợt khuyến mãi tuần trước không phải là xu hướng.
-  const tbNgayThuong = (tu, den) => {
-    const v = cacNgay.filter(d => d >= tu && d <= den && !dd[d]).map(d => ls[d].dung);
+  //   · So TỪNG THỨ với chính thứ đó rồi mới lấy trung bình. Cửa sổ thiếu vài ngày
+  //     (mất mạng, ngày cache cũ không có số) là chuyện thường, mà thiếu đúng một
+  //     ngày thứ 7 thì trung bình cả cửa sổ tụt hẳn — hoá ra "xu hướng giảm" chỉ vì
+  //     một ngày vắng dữ liệu. Cân theo thứ thì lỗ hổng đó không đẻ ra xu hướng giả.
+  const theoThu = (tu, den) => {
+    const m = {};
+    cacNgay.filter(d => d >= tu && d <= den && !dd[d])
+           .forEach(d => { const t = dbThu(d); (m[t] = m[t] || []).push(ls[d].dung); });
+    return m;
+  };
+  const mGan = theoThu(dbLui(ngayDich,14), dbLui(ngayDich,1));
+  const mTruoc = theoThu(dbLui(ngayDich,28), dbLui(ngayDich,15));
+  const thuChung = Object.keys(mGan).filter(t => mTruoc[t] && mTruoc[t].length);
+  const tbCua = (m) => {
+    const v = thuChung.map(t => m[t].reduce((s,x)=>s+x,0)/m[t].length);
     return v.length ? v.reduce((s,x)=>s+x,0)/v.length : null;
   };
-  const gan   = tbNgayThuong(dbLui(ngayDich,14), dbLui(ngayDich,1));
-  const truoc = tbNgayThuong(dbLui(ngayDich,28), dbLui(ngayDich,15));
+  // Dưới 4 thứ chung thì hai cửa sổ không so được với nhau một cách công bằng.
+  const gan   = thuChung.length >= 4 ? tbCua(mGan)   : null;
+  const truoc = thuChung.length >= 4 ? tbCua(mTruoc) : null;
   let xuHuong = 1;
   if(gan > 0 && truoc > 0){
     xuHuong = Math.min(DB_XU_HUONG_MAX, Math.max(DB_XU_HUONG_MIN, gan/truoc));
@@ -6887,26 +6961,63 @@ async function dbChay(){
   try{
     await ensureAuth();
     const tu = dbLui(dbNgay, DB_SO_TUAN*7), den = dbLui(dbNgay, 1);
-    const [preps, txs, batches, sdays, forecasts] = await Promise.all([
+    const denSales = dkey(new Date()) < den ? den : dkey(new Date());
+    const [preps, txs, batches, sdays, forecasts, salesRes, tpRec] = await Promise.all([
       loadPrepItems(),
       loadPrepTxRange(tu, dkey(new Date())),          // tới hôm nay, để đối chiếu dự báo cũ
       loadPrepBatches(400).catch(()=>[]),
       loadSpecialDays(tu, dbNgay).catch(()=>[]),
-      loadPrepForecasts(tu, dbNgay).catch(()=>[])
+      loadPrepForecasts(tu, dbNgay).catch(()=>[]),
+      // Topping không có sổ tồn riêng, lịch sử tiêu thụ phải lấy từ doanh số. Đọc
+      // qua fetchSalesRange để dùng lại cache ngày, không đọc lại Realtime DB.
+      fetchSalesRange(new Date(tu+'T12:00:00'), new Date(denSales+'T12:00:00')).catch(()=>({perDay:[]})),
+      loadToppingRecipes().catch(()=>({}))
     ]);
+    await loadMenuForManager().catch(()=>{});
     PREP_ITEMS = preps;
-    const lichSu = thLichSuBTP(txs);
+    const lichSuBtp = thLichSuBTP(txs);
+    const tpHist = thLichSuTopping(salesRes.perDay);
+    dbThieuNgayTopping = tpHist.ngayThieuDuLieu.length;
     const ddMap = {}; (sdays||[]).forEach(d=> ddMap[d.date] = d);
-    dbKetQua = preps.filter(p=>p.active!==false).map(p=>{
-      const ton = thTonDungDuoc(batches, p.id, dbNgay, p.shelfLifeType);
-      const dubao = thDuBao({ lichSuNgay: lichSu[p.id]||{}, ngayDich: dbNgay, ngayDacBiet: ddMap });
+
+    const mot = ({ id, ten, donVi, shelfLifeType, yieldMoiMe, ton, lichSuNgay, loai, ghiChuTon, phu }) => {
+      const dubao = thDuBao({ lichSuNgay, ngayDich: dbNgay, ngayDacBiet: ddMap });
       const keHoach = dubao.duBao == null ? null : thKeHoachNau({
-        duBao: dubao.duBao, tonDungDuoc: ton.dung,
-        yieldMoiMe: prepEffectiveYield(p), shelfLifeType: p.shelfLifeType
+        duBao: dubao.duBao, tonDungDuoc: ton.dung, yieldMoiMe, shelfLifeType
       });
-      return { prep:p, ton, dubao, keHoach, daLuu: forecasts.some(f=>f.date===dbNgay && f.prepId===p.id) };
-    });
-    dbDoiChieu = thDoiChieuDuBao(forecasts.filter(f=>f.date < dkey(new Date())), lichSu).slice(0, 20);
+      return { loai, id, ten, donVi, shelfLifeType, yieldMoiMe, ton, ghiChuTon, phu: phu||null, dubao, keHoach,
+               daLuu: forecasts.some(f=>f.date===dbNgay && f.prepId===id) };
+    };
+
+    const rowsBtp = preps.filter(p=>p.active!==false).map(p=> mot({
+      loai:'btp', id:p.id, ten:p.name||'', donVi:p.unit||'', shelfLifeType:p.shelfLifeType,
+      yieldMoiMe: prepEffectiveYield(p),
+      ton: thTonDungDuoc(batches, p.id, dbNgay, p.shelfLifeType),
+      lichSuNgay: lichSuBtp[p.id]||{}, ghiChuTon:'', phu: p
+    }));
+
+    // Topping: chỉ những cái đã khai công thức mẻ. Không có sổ tồn topping nên tồn
+    // đầu ngày coi như 0 — NÓI RÕ ra, vì hôm nào còn thừa thì phải tự trừ đi.
+    const rowsTp = Object.entries(tpRec||{}).map(([tid, rec])=>{
+      const phan = thToppingPhanMoiMe(rec);
+      if(!(phan > 0)) return null;
+      const ten = ((typeof TOPPINGS !== 'undefined' ? TOPPINGS : []).find(t=>t.id===tid)||{}).name || tid;
+      return mot({
+        loai:'topping', id:'tp:'+tid, ten, donVi:'phần',
+        // Topping chưa có ô khai hạn dùng — coi như hàng bỏ cuối ca (phía an toàn cho
+        // trân châu/thạch), tức là áp quy tắc "thiếu nhẹ hơn đổ cả mẻ".
+        shelfLifeType:'endOfDay', yieldMoiMe: phan,
+        ton: { dung:0, hetHan:0 },
+        ghiChuTon:'App chưa theo dõi tồn topping riêng — coi như đầu ngày còn 0 phần. Nếu tối qua còn thừa thì tự trừ bớt số mẻ.',
+        lichSuNgay: tpHist.lichSu[tid] || {}
+      });
+    }).filter(Boolean);
+
+    dbKetQua = rowsBtp.concat(rowsTp);
+    // Gộp hai nguồn lịch sử để đối chiếu dự báo cũ — topping lưu với khoá 'tp:<id>'.
+    const lichSuGop = { ...lichSuBtp };
+    Object.entries(tpHist.lichSu).forEach(([tid, v])=>{ lichSuGop['tp:'+tid] = v; });
+    dbDoiChieu = thDoiChieuDuBao(forecasts.filter(f=>f.date < dkey(new Date())), lichSuGop).slice(0, 20);
     dbNgayDacBiet = ddMap[dbNgay] || null;
     dbVeBang();
   }catch(err){
@@ -6915,6 +7026,7 @@ async function dbChay(){
   }finally{ _dbBusy = false; }
 }
 let dbNgayDacBiet = null;
+let dbThieuNgayTopping = 0;
 
 function dbVeBang(){
   const box = document.getElementById('dbBody');
@@ -6931,19 +7043,20 @@ function dbVeBang(){
   </div>`;
 
   const theCard = (x)=>{
-    const p = x.prep, d = x.dubao, k = x.keHoach;
-    const dv = p.unit||'';
+    const p = x.phu, d = x.dubao, k = x.keHoach;
+    const dv = x.donVi||'';
     if(!k){
       return `<div class="card" style="opacity:.9">
-        <div class="card-h"><h3>${escapeHtmlAttr(p.name||'')}</h3><span class="tier" style="background:var(--bb);color:var(--bi)">${d.tinCay.nhan}</span></div>
+        <div class="card-h"><h3>${escapeHtmlAttr(x.ten)}</h3><span class="tier" style="background:var(--bb);color:var(--bi)">${d.tinCay.nhan}</span></div>
         <div class="small-note">${d.tinCay.giaiThich}</div>
         ${rowInfoHTML('Tồn còn dùng được', `${fmtNum(x.ton.dung,0)} ${dv}`)}
         ${x.ton.hetHan>0 ? `<div class="small-note" style="color:var(--warn);margin-top:4px">${fmtNum(x.ton.hetHan,0)} ${dv} đã quá hạn / không mang sang được — không tính vào tồn dùng được.</div>` : ''}
+        ${x.ghiChuTon ? `<div class="small-note" style="margin-top:4px">${x.ghiChuTon}</div>` : ''}
       </div>`;
     }
     const thieu = k.nguyCoThieu > 0;
     return `<div class="card">
-      <div class="card-h"><h3>${escapeHtmlAttr(p.name||'')}</h3>
+      <div class="card-h"><h3>${escapeHtmlAttr(x.ten)}</h3>
         <span class="tier tier-${d.tinCay.muc==='du'?'green':'amber'}">${d.tinCay.nhan}</span></div>
       <div style="display:flex;flex-wrap:wrap;gap:12px 18px;margin:4px 0 8px">
         ${thSoHTML('Tồn đầu ngày', x.ton.dung, dv)}
@@ -6953,7 +7066,7 @@ function dbVeBang(){
       </div>
       <div class="row" style="border-top:1.5px solid var(--line);padding-top:8px">
         <span class="rl"><b>Đề xuất nấu</b>
-          <div class="small-note" style="margin-top:1px">${fmtNum(prepEffectiveYield(p),0)} ${dv}/mẻ${p.prepTimeMinutes>0?' · nấu ~'+p.prepTimeMinutes+' phút':''}${prepShelfLabel(p)?' · '+prepShelfLabel(p):''}</div></span>
+          <div class="small-note" style="margin-top:1px">${fmtNum(x.yieldMoiMe,0)} ${dv}/mẻ${p && p.prepTimeMinutes>0?' · nấu ~'+p.prepTimeMinutes+' phút':''}${p && prepShelfLabel(p)?' · '+prepShelfLabel(p):(x.loai==='topping'?' · coi như bỏ cuối ca':'')}</div></span>
         <span class="rv" style="font-size:17px"><b>${k.soMe} mẻ</b> <span style="font-size:12px;color:var(--gt)">= ${fmtNum(k.sanXuat,0)} ${dv}</span></span>
       </div>
       <div class="row">
@@ -6966,6 +7079,7 @@ function dbVeBang(){
       <div class="small-note" style="margin-top:4px">Nền ${fmtNum(d.nen,0)} ${dv} (${d.nguonNen}, ${d.soMauCungThu} lần cùng thứ) × xu hướng ${fmtNum(d.xuHuong,2)}${d.heSoDacBiet!==1?' × ngày đặc biệt '+fmtNum(d.heSoDacBiet,2):''} · đệm ${fmtNum(k.demDaDung*100,0)}%</div>
       ${d.ghiChu.map(g=>`<div class="small-note" style="color:var(--warn);margin-top:4px">${g}</div>`).join('')}
       ${x.ton.hetHan>0 ? `<div class="small-note" style="color:var(--warn);margin-top:4px">${fmtNum(x.ton.hetHan,0)} ${dv} đã quá hạn / không mang sang được — KHÔNG tính vào tồn đầu ngày.</div>` : ''}
+      ${x.ghiChuTon ? `<div class="small-note" style="margin-top:4px">${x.ghiChuTon}</div>` : ''}
       ${x.daLuu ? '<div class="small-note" style="color:var(--ok);margin-top:6px">Đã lưu kế hoạch cho ngày này.</div>' : ''}
     </div>`;
   };
@@ -6982,9 +7096,12 @@ function dbVeBang(){
         <div class="small-note">${f.saiSoPct!=null?(f.saiSo>0?'+':'')+fmtNum(f.saiSoPct,0)+'%':'—'}</div></div>
     </div>`).join('')}` : '';
 
+  const btp = coSo.filter(x=>x.loai==='btp'), tp = coSo.filter(x=>x.loai==='topping');
   box.innerHTML = dau +
-    (coSo.length ? `<div class="sec-title">Đề xuất sản xuất (${coSo.length})</div>` + coSo.map(theCard).join('') +
-      `<button class="btn" style="margin-top:10px" onclick="dbLuuKeHoach()">${ic('save',15)} Lưu kế hoạch ngày ${dbNgay}</button>
+    (btp.length ? `<div class="sec-title">Bán thành phẩm (${btp.length})</div>` + btp.map(theCard).join('') : '') +
+    (tp.length ? `<div class="sec-title">Topping (${tp.length})</div>
+      <div class="small-note" style="margin-bottom:8px">Lịch sử topping lấy từ chính bill đã bán (gồm cả topping <b>tặng</b> — khách không trả tiền nhưng vẫn ăn hết nguyên liệu như thường).${dbThieuNgayTopping?` <b>${dbThieuNgayTopping} ngày</b> cũ không có số liệu topping (đã lưu cache trước khi có tính năng này) nên bị loại khỏi lịch sử — không coi là bán 0.`:''}</div>` + tp.map(theCard).join('') : '') +
+    (coSo.length ? `<button class="btn" style="margin-top:10px" onclick="dbLuuKeHoach()">${ic('save',15)} Lưu kế hoạch ngày ${dbNgay}</button>
        <div class="small-note" style="margin-top:6px">Lưu để hôm sau đối chiếu dự báo với thực tế. Lưu <b>không</b> tạo lệnh nấu — nhân viên vẫn nấu ở POS như thường.</div>` : '') +
     (chuaDu.length ? `<div class="sec-title">Chưa dự báo được (${chuaDu.length})</div>` + chuaDu.map(theCard).join('') : '') +
     khoiDoiChieu;
@@ -6994,8 +7111,8 @@ async function dbLuuKeHoach(){
   const rows = (dbKetQua||[]).filter(x=>x.keHoach);
   if(!rows.length){ toast('⚠️ Chưa có dòng nào để lưu'); return; }
   try{
-    await Promise.all(rows.map(x => savePrepForecast(dbNgay, x.prep.id, {
-      prepName: x.prep.name||'', unit: x.prep.unit||'',
+    await Promise.all(rows.map(x => savePrepForecast(dbNgay, x.id, {
+      loai: x.loai, prepName: x.ten, unit: x.donVi,
       duBao: x.dubao.duBao, nen: x.dubao.nen, nguonNen: x.dubao.nguonNen,
       xuHuong: x.dubao.xuHuong, heSoDacBiet: x.dubao.heSoDacBiet,
       soNgayCoDuLieu: x.dubao.soNgayCoDuLieu, soMauCungThu: x.dubao.soMauCungThu,
@@ -7004,7 +7121,7 @@ async function dbLuuKeHoach(){
       canSanXuat: x.keHoach.can, soMe: x.keHoach.soMe, sanXuat: x.keHoach.sanXuat,
       tongKhaDung: x.keHoach.tongKhaDung, duKienDu: x.keHoach.duKienDu,
       duKienHuy: x.keHoach.duKienHuy, nguyCoThieu: x.keHoach.nguyCoThieu,
-      yieldMoiMe: prepEffectiveYield(x.prep), shelfLifeType: x.prep.shelfLifeType||'',
+      yieldMoiMe: x.yieldMoiMe, shelfLifeType: x.shelfLifeType||'',
       ngayDacBiet: dbNgayDacBiet ? dbNgayDacBiet.loai : null
     })));
     toast('✅ Đã lưu kế hoạch ' + rows.length + ' bán thành phẩm');
@@ -11673,7 +11790,20 @@ async function buildExportPayload(mode){
       .where('date','>=',startKey).where('date','<=',endKey).get();
     return snap.docs.map(d=>({id:d.id, ...d.data()}));
   }, errors) || [];
-  const duBaoDoiChieu = thDoiChieuDuBao(duBaoDaLuu, thLichSuBTP(rangeData['prep_transactions_gieogieo']));
+  // Dự báo TOPPING lưu với khoá 'tp:<id>' — lịch sử của nó nằm ở bill chứ không ở
+  // ledger bán thành phẩm, nên phải đếm riêng rồi gộp vào, nếu không mọi dòng dự
+  // báo topping đều hiện "chưa có thực tế" dù ngày đó đã bán xong từ lâu.
+  const tpLichSuExp = {};
+  Object.entries(ordersByDate).forEach(([d, list])=>{
+    const mix = {};
+    (list||[]).forEach(o => (o.itemsArray||[]).forEach(it => demToppingDong(it, mix)));
+    Object.entries(mix).forEach(([tid,q])=>{
+      const k = 'tp:'+tid;
+      (tpLichSuExp[k] = tpLichSuExp[k] || {})[d] = { dung:q, huy:0, nau:0 };
+    });
+  });
+  const duBaoDoiChieu = thDoiChieuDuBao(duBaoDaLuu,
+    { ...thLichSuBTP(rangeData['prep_transactions_gieogieo']), ...tpLichSuExp });
 
   setStatus('Đang cộng số liệu...');
   const tomTat = {

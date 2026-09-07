@@ -180,6 +180,16 @@ Số mẻ: hàng hạn ngắn → làm tròn XUỐNG nếu thiếu ≤ 25% một
 - Mỗi lần lưu kế hoạch, ghi cả **căn cứ** (nền, xu hướng, độ tin cậy) vào
   `prep_forecasts_gieogieo` — không có nó thì không đánh giá được dự báo tốt lên hay
   xấu đi.
+- **Xu hướng cân theo THỨ**: so từng thứ với chính thứ đó rồi mới lấy trung bình. Cửa
+  sổ thiếu đúng một ngày thứ 7 là đủ đẻ ra "xu hướng giảm" hoàn toàn tưởng tượng.
+  Dưới 4 thứ chung giữa hai cửa sổ thì không so nữa, coi như đi ngang.
+- **Topping** cũng được dự báo: `aggregateOrders` đếm `toppingMix` (số phần từng
+  topping, **gồm cả topping tặng**) vào bản ghi ngày → nằm trong cache ngày.
+  Ngày cache CŨ không có trường này thì **loại khỏi lịch sử** (không phải "bán 0");
+  ngày CÓ trường mà topping không xuất hiện thì **điền 0** (bán 0 phần thật).
+  Tồn đầu ngày của topping coi như 0 — app không theo dõi tồn topping riêng.
+  Số phần mỗi mẻ: `servings` → `batchYield`; `weight` → `batchYield ÷ qtyPerServing`.
+  Dự báo topping lưu chung sổ với khoá `tp:<toppingId>`.
 
 ## 5. QUYẾT ĐỊNH CHỦ QUÁN ĐÃ CHỐT (không tự đổi)
 
@@ -323,6 +333,9 @@ Màn Tài sản nay hiện ngày mua + cảnh báo, và **có nút Sửa** (`ope
 | `loadSpecialDays` / `saveSpecialDay` / `renderEntryNgayDacBiet` | Ngày lễ/Tết/khuyến mãi |
 | `_expHuongDanPhanTich` / `_expNguyenTacDuLieu` / `_expLichSuTheoNgay` / `_expTomTatTem` | Bốn khối mới trong file JSON |
 | `thLichSuBTP(prepTxs)` | Lịch sử BTP theo ngày — tách `dung` / `huy` / `nau` |
+| `demToppingDong(it, out)` | Đếm số phần topping của một dòng hàng — **dùng chung** cho bản ghi ngày và bản trích xuất |
+| `thLichSuTopping(perDay)` | Lịch sử topping từ `toppingMix`; loại ngày cache cũ, điền 0 cho ngày bán 0 |
+| `thToppingPhanMoiMe(rec)` | Số phần mỗi mẻ topping (2 kiểu khai yield) |
 | `thDuBao({lichSuNgay, ngayDich, ngayDacBiet})` | **Hàm thuần** — dự báo một ngày, trả `null` khi chưa đủ dữ liệu |
 | `thKeHoachNau({duBao, tonDungDuoc, yieldMoiMe, shelfLifeType})` | Số mẻ · dư · phải đổ · nguy cơ thiếu |
 | `thTonDungDuoc(batches, prepId, ngay, shelfLifeType)` | Tồn đầu ngày còn hạn (lô hết hạn tách riêng) |
@@ -417,7 +430,7 @@ Chạy: `node <tên>.mjs` (Playwright + Chromium tại `/opt/pw-browsers/chromiu
 | `thtest.mjs` | 53 | Lệch kho — hàm thuần (ví dụ 5kg/5,5kg, thiếu phiếu, cờ bất thường, trung vị/CV, xếp theo tiền) |
 | `th2test.mjs` | 49 | Màn Lệch kho, tạo/áp dụng đề xuất (công thức gốc không đổi tới khi bấm Áp dụng), 4 khối JSON |
 | `dbtest.mjs` | 55 | Dự báo — hàm thuần (trung vị cùng thứ, kẹp xu hướng, ngày đặc biệt, quy tắc số mẻ) |
-| `db2test.mjs` | 35 | Màn Dự báo trên file HTML thật — ví dụ trân châu: tồn 15 · dự báo 70 · mẻ 30 → 2 mẻ, dư 5 |
+| `db2test.mjs` | 57 | Màn Dự báo trên file HTML thật — ví dụ trân châu (tồn 15 · dự báo 70 · mẻ 30 → 2 mẻ, dư 5) + nhánh topping |
 | `beptest` 22 · `bepe2e` 13 · `qltest` 14 · `togtest` 23 · `cbtest` 13 · `khotest` 24 · `postest` 20 · `hangtest` 15 · `embedpos` 6 | | các phần trước |
 
 **Phương pháp:** `page.route()` chặn `gstatic.com/firebasejs` → nạp `fbmem.js`
