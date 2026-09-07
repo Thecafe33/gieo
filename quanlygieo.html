@@ -1241,6 +1241,7 @@ html.phone-ui .nav-search .ns-kbd{display:none;}
         <div id="todayHealth" hidden></div>
         <div class="kgrid" id="todayGrid"></div>
         <div class="kmini-grid" id="todayMini"></div>
+        <div id="todayKhoFeed"></div>
         <div class="sec-title">Doanh thu &amp; giờ công theo khung giờ</div>
         <div id="todayHourly"></div>
         <div id="todayThv"></div>
@@ -3467,6 +3468,25 @@ const CTN_REASON_LABEL = {
 };
 function ctnReasonLabel(k){ return CTN_REASON_LABEL[k] || k || ''; }
 
+// [FIX] Trước đây mục "Báo hết khi hàng còn nhiều" KHÔNG có đường đóng lại: cờ
+// needsReview do POS bật, không ai tắt được, nên cảnh báo nằm mãi ở Sức khoẻ quán
+// và dần bị bỏ qua — cùng số phận với mọi cảnh báo không tắt được.
+// Đánh dấu đã xem chỉ tắt CỜ, không xoá bản ghi: chai đó vẫn nằm trong lịch sử với
+// đủ tên người, tỷ lệ còn lại, lý do — cần tra lại vẫn còn.
+async function ctnMarkReviewed(id){
+  try{
+    await fstore.collection(CTN_COLL).doc(id).update({
+      needsReview: false, reviewedAt: new Date().toISOString(), reviewedBy: 'management'
+    });
+    logAudit('review','stock_container',id,{});
+    toast('✅ Đã đánh dấu xem rồi');
+    renderKhoContainers();
+  }catch(err){
+    console.error('ctnMarkReviewed lỗi', err);
+    showError('Không đánh dấu được: '+(err.code||err.message||err));
+  }
+}
+
 function ctnExpiryText(c){
   if(!c.expiresAt) return {text: c.openShelfLifeHours ? '' : 'Không đặt hạn', cls:'muted-sm'};
   const gio = Math.round((new Date(c.expiresAt) - Date.now())/3600000);
@@ -3535,9 +3555,70 @@ async function renderKhoContainers(){
           <div>${phu}</div>
           ${c.finishScanned===false && ctnFilter==='review' ? `<div class="muted-sm">Chọn tay, không quét mã${c.finishReason?' · '+escapeHtmlAttr(ctnReasonLabel(c.finishReason)):''}</div>` : ''}
         </div>
-        <div class="li-r">${nhan}</div>
+        <div class="li-r">${nhan}${ctnFilter==='review'
+          ? `<button class="btn outline sm" style="width:auto;padding:0 10px;margin-left:8px" onclick="ctnMarkReviewed('${c.id}')">Đã xem</button>`
+          : ''}</div>
       </div>`;
     }).join('') + `</div>`;
+}
+
+// ------------------------------------------------------------
+// [MỚI] HOẠT ĐỘNG KHO HÔM NAY — nhân viên vừa MỞ gói nào, vừa BÁO HẾT gói nào.
+//
+// Vì sao đáng hiện ở màn Hôm nay: hai thao tác này là lúc hàng thật sự rời kho, và
+// là hai thứ chủ quán ở nhà không thể nhìn thấy. Biết "10h05 mở chai syrup thứ hai
+// trong ngày" hay "vừa báo hết trân châu" thì mới kịp hỏi hoặc kịp đặt hàng — đọc
+// lại sau một tuần thì chỉ còn là con số.
+//
+// Đọc theo mốc thời gian nên chỉ cần chỉ mục mặc định của Firestore; bản ghi chưa
+// mở/chưa báo hết có openedAt/finishedAt = null nên tự nằm ngoài phép so sánh.
+// ------------------------------------------------------------
+async function computeKhoFeedToday(){
+  const dau = new Date(); dau.setHours(0,0,0,0);
+  const moc = dau.toISOString();
+  const c = fstore.collection(CTN_COLL);
+  const [moSnap, hetSnap] = await Promise.all([
+    c.where('openedAt','>=',moc).get().catch(err=>{ console.warn('[Kho] không đọc được hàng vừa mở:', err); return null; }),
+    c.where('finishedAt','>=',moc).get().catch(err=>{ console.warn('[Kho] không đọc được hàng vừa báo hết:', err); return null; })
+  ]);
+  const ra = [];
+  if(moSnap) moSnap.forEach(d=>{ const x = d.data();
+    ra.push({ loai:'mo', at:x.openedAt, ten:x.itemName||'', ma:x.code||'', ai:x.openedBy||'', hsd:x.expiresAt||null }); });
+  if(hetSnap) hetSnap.forEach(d=>{ const x = d.data();
+    ra.push({ loai:'het', at:x.finishedAt, ten:x.itemName||'', ma:x.code||'', ai:x.finishedBy||'',
+              quet:x.finishScanned !== false, lyDo:x.finishReason||'', thua:Number(x.wasteBase)||0,
+              donVi:x.unit||'', xemLai:!!x.needsReview }); });
+  ra.sort((a,b)=> String(b.at||'').localeCompare(String(a.at||'')));
+  return ra;
+}
+
+function khoFeedHTML(list){
+  if(!list || !list.length) return '';
+  const gio = iso => { const d = iso?new Date(iso):null; return (d && !isNaN(d)) ? `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}` : ''; };
+  const hien = list.slice(0, 8);
+  return `
+    <div class="sec-title">Hoạt động kho hôm nay</div>
+    <div class="card">
+      ${hien.map(e=>{
+        const la = e.loai==='mo';
+        const mau = la ? 'var(--bi)' : 'var(--gd)';
+        const nhan = la ? 'Vừa mở' : 'Báo hết';
+        const phu = la
+          ? `${e.ai ? 'bởi '+escapeHtmlAttr(e.ai) : ''}${e.hsd ? ' · hạn sau mở '+fmtDateVN(new Date(e.hsd)) : ''}`
+          : `${e.ai ? 'bởi '+escapeHtmlAttr(e.ai) : ''}${e.quet ? ' · đã quét mã' : ' · chọn tay'+(e.lyDo?' ('+escapeHtmlAttr(ctnReasonLabel(e.lyDo))+')':'')}${e.thua>0 ? ` · còn thừa ${fmtNum(e.thua,0)} ${escapeHtmlAttr(e.donVi)}` : ''}`;
+        return `<div class="row" style="align-items:flex-start">
+          <span class="rl" style="flex:1;min-width:0">
+            <b style="color:${mau}">${nhan}</b> · ${escapeHtmlAttr(e.ten)}
+            <span class="muted-sm" style="letter-spacing:.4px">${escapeHtmlAttr(e.ma)}</span>
+            ${e.xemLai ? '<span class="tier tier-amber" style="margin-left:4px">còn nhiều — cần xem</span>' : ''}
+            <div class="small-note" style="margin-top:2px">${phu}</div>
+          </span>
+          <span class="rv">${gio(e.at)}</span>
+        </div>`;
+      }).join('')}
+      ${list.length > hien.length ? `<div class="small-note">…và ${list.length-hien.length} lượt nữa hôm nay.</div>` : ''}
+      <button class="btn outline sm" style="width:auto;padding:0 12px;margin-top:8px" onclick="goContainers('open')">Xem hàng đang mở</button>
+    </div>`;
 }
 
 // ============================================================
@@ -8866,6 +8947,15 @@ async function renderToday(){
         : miniCardHTML('DT / giờ công', '—', gc.boQuen ? `${gc.boQuen} ca quên check-out` : 'Chưa có chấm công hôm nay');
     })
     .catch(err => console.warn('[Giờ công] bỏ qua:', err));
+
+  // HOẠT ĐỘNG KHO HÔM NAY — nạp nền. Không có lượt nào thì không hiện gì cả, thay vì
+  // để lại một thẻ rỗng chiếm chỗ.
+  computeKhoFeedToday()
+    .then(list => {
+      const el = document.getElementById('todayKhoFeed');
+      if(el && curScreen === 'today') el.innerHTML = khoFeedHTML(list);
+    })
+    .catch(err => console.warn('[Kho] không đọc được hoạt động hôm nay (bỏ qua):', err));
 
   // VỐN TRONG KHO — nạp nền: phải đọc 30 ngày ledger nên chậm hơn phần trên.
   computeInventoryHealth()
