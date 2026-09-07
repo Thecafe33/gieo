@@ -365,9 +365,44 @@ html.phone-ui .sync{padding:9px;}
 .kmini.st-bad .kmval{color:var(--bad);}
 .kmini.st-warn .kmval{color:var(--warn);}
 .kmini.st-ok .kmval{color:var(--ok);}
+/* Thẻ Doanh thu bị dính sát thanh "việc cần xử lý" phía trên — hai khối khác
+   hẳn nhau về vai trò, cần một nhịp thở giữa chúng. */
+#todayGrid{margin-top:14px;}
 html.tab-ui .kmini-grid{grid-template-columns:repeat(6,1fr);gap:12px;}
 html.tab-ui .kmini{padding:14px 14px 12px;border-radius:var(--r-xl);}
 html.tab-ui .kmini .kmval{font-size:21px;}
+
+/* ---------- Tiêu đề mục GẬP ĐƯỢC ----------
+   Dùng cho những khối "xem thì hay, không xem cũng chẳng sao" (hoạt động kho).
+   Mặc định gập lại để màn Hôm nay không dài ra vì thứ mỗi tuần mới cần đọc. */
+.sec-fold{display:flex;align-items:center;gap:8px;width:100%;background:none;border:none;
+  padding:14px 2px 6px;font-family:inherit;cursor:pointer;text-align:left;}
+.sec-fold .sf-t{font-size:12.5px;font-weight:800;color:var(--gt);text-transform:uppercase;letter-spacing:.06em;}
+.sec-fold .sf-c{font-size:11px;font-weight:800;color:var(--gm);background:var(--gl);border-radius:999px;padding:2px 8px;flex-shrink:0;}
+.sec-fold .sf-ch{margin-left:auto;color:var(--gt);display:inline-flex;transition:transform .15s var(--ease-out);}
+.sec-fold[aria-expanded="true"] .sf-ch{transform:rotate(180deg);}
+
+/* ---------- Bảng tin BILL BÁN HÀNG (màn Hôm nay) ----------
+   Để chủ quán vừa xem camera vừa đối chiếu bill mà không phải mở lại POS.
+   Bill mới về thì TỰ BUNG chi tiết một lát rồi thu lại — đúng khoảnh khắc cần
+   nhìn là lúc nó vừa xảy ra; để nguyên bung hết thì vài chục bill sau là một
+   trang dài vô tận. */
+.bfeed{display:flex;flex-direction:column;gap:7px;}
+.bfeed-row{background:var(--card);border:1px solid rgba(230,227,223,.7);border-radius:var(--r-md);
+  box-shadow:var(--sh-1);overflow:hidden;transition:border-color .3s ease;}
+.bfeed-row.moi{border-color:var(--gd);box-shadow:0 0 0 3px var(--accent-glow);}
+.bfeed-head{display:flex;align-items:center;gap:10px;padding:10px 12px;cursor:pointer;width:100%;
+  background:none;border:none;font-family:inherit;text-align:left;}
+.bfeed-time{font-size:12px;font-weight:800;color:var(--gm);font-variant-numeric:tabular-nums;flex-shrink:0;}
+.bfeed-main{flex:1;min-width:0;}
+.bfeed-items{font-size:13px;font-weight:650;color:var(--td);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.bfeed-meta{font-size:10.5px;color:var(--gt);margin-top:2px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.bfeed-total{font-size:14.5px;font-weight:800;color:var(--td);flex-shrink:0;font-variant-numeric:tabular-nums;}
+.bfeed-tag{font-size:9.5px;font-weight:800;border-radius:999px;padding:1px 7px;white-space:nowrap;}
+.bfeed-body{padding:2px 12px 11px;border-top:1px dashed var(--line-2);}
+.bfeed-li{display:flex;justify-content:space-between;gap:10px;padding:5px 0;font-size:12.5px;color:var(--td);}
+.bfeed-li .bl-tp{font-size:11px;color:var(--gt);padding-left:12px;}
+.bfeed-kv{display:flex;justify-content:space-between;gap:10px;font-size:12px;color:var(--gt);padding:3px 0;}
 
 /* Thanh tóm tắt "việc cần xử lý" — một dòng, bấm mới bung danh sách ra. Danh
    sách đầy đủ nằm ngay đầu màn Hôm nay đẩy mọi chỉ số xuống dưới nếp gấp. */
@@ -1278,6 +1313,7 @@ html.phone-ui .nav-search .ns-kbd{display:none;}
         <div id="todayHealth" hidden></div>
         <div class="kgrid" id="todayGrid"></div>
         <div class="kmini-grid" id="todayMini"></div>
+        <div id="todayBills"></div>
         <div id="todayKhoFeed"></div>
         <div class="sec-title">Doanh thu &amp; giờ công theo khung giờ</div>
         <div id="todayHourly"></div>
@@ -3637,12 +3673,29 @@ async function computeKhoFeedToday(){
   return ra;
 }
 
+// Gập lại theo mặc định: đây là thứ mỗi vài ngày mới cần đọc, không đáng chiếm
+// một khoảng màn hình cố định ở màn xem hằng ngày. Số lượt vẫn hiện trên tiêu đề
+// nên vẫn biết hôm nay kho có động tĩnh gì mà không cần mở.
+let _khoFeedMo = false;
+function toggleKhoFeed(){ _khoFeedMo = !_khoFeedMo; _khoFeedRedraw(); }
+let _khoFeedCache = null;
+function _khoFeedRedraw(){
+  const el = document.getElementById('todayKhoFeed');
+  if(el) el.innerHTML = khoFeedHTML(_khoFeedCache);
+}
+
 function khoFeedHTML(list){
+  _khoFeedCache = list;
   if(!list || !list.length) return '';
   const gio = iso => { const d = iso?new Date(iso):null; return (d && !isNaN(d)) ? `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}` : ''; };
   const hien = list.slice(0, 8);
-  return `
-    <div class="sec-title">Hoạt động kho hôm nay</div>
+  const dauMuc = `<button class="sec-fold" aria-expanded="${_khoFeedMo}" onclick="toggleKhoFeed()">
+      <span class="sf-t">Hoạt động kho hôm nay</span>
+      <span class="sf-c">${list.length} lượt</span>
+      <span class="sf-ch">${ic('chevronDown',15)}</span>
+    </button>`;
+  if(!_khoFeedMo) return dauMuc;
+  return dauMuc + `
     <div class="card">
       ${hien.map(e=>{
         const la = e.loai==='mo';
@@ -6003,6 +6056,13 @@ function plLaiCardHTML(pl, be){
   if(!pl) return '';
   const laLai = pl.lai >= 0;
   const mau = laLai ? 'var(--ok)' : 'var(--bad)';
+  // Ghi chú dồn hết vào phần mở rộng — mặt thẻ chỉ đếm số lưu ý trên nút bấm.
+  const dsGhiChu = [];
+  if((pl.choSoThat||[]).length) dsGhiChu.push(`Đang tính theo <b>số dự đoán</b> cho: <b>${pl.choSoThat.map(k=>k.category).join(', ')}</b> — con số sẽ đổi khi hoá đơn về.`);
+  if(pl.doanhThu<=0) dsGhiChu.push('Hôm nay chưa có doanh thu — con số đang là toàn bộ chi phí của một ngày (thuê, lương, khấu hao vẫn chạy dù chưa bán được ly nào).');
+  const soGhiChuPL = dsGhiChu.length;
+  const ghiChuPL = soGhiChuPL
+    ? `<div class="alert amber" style="margin-bottom:10px"><span class="ic">!</span><div>${dsGhiChu.join('<br>')}</div></div>` : '';
   return `
     <div class="kcard kcard-plai" style="grid-column:1 / -1">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
@@ -6018,10 +6078,9 @@ function plLaiCardHTML(pl, be){
               ? `<b style="color:var(--bad)">Không có điểm hoà vốn</b> — giá vốn và hao hụt đang ngốn hết ${fmtPct(be.tyLeBienPhi)} doanh thu, bán thêm một ly là lỗ thêm.`
               : 'Chưa tính được điểm hoà vốn')}
       </div>
-      ${(pl.choSoThat||[]).length ? `<div class="ksub" style="color:var(--warn);margin-top:6px">Đang tính theo số dự đoán cho: <b>${pl.choSoThat.map(k=>k.category).join(', ')}</b> — con số sẽ đổi khi hoá đơn về.</div>` : ''}
-      ${pl.doanhThu<=0 ? `<div class="ksub" style="color:var(--warn);margin-top:6px">Hôm nay chưa có doanh thu — con số đang là toàn bộ chi phí của một ngày (thuê, lương, khấu hao vẫn chạy dù chưa bán được ly nào).</div>` : ''}
-      <button id="todayPLToggle" onclick="plToggleChiTiet()" style="margin-top:10px;background:none;border:none;padding:6px 0;color:var(--gd);font-weight:700;font-size:12.5px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;align-self:flex-start">Xem tách từng dòng ${ic('chevronDown',14)}</button>
+      <button id="todayPLToggle" onclick="plToggleChiTiet()" style="margin-top:10px;background:none;border:none;padding:6px 0;color:var(--gd);font-weight:700;font-size:12.5px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;align-self:flex-start">Xem tách từng dòng${soGhiChuPL ? ` · ${soGhiChuPL} lưu ý` : ''} ${ic('chevronDown',14)}</button>
       <div id="todayPLRows" hidden style="margin-top:2px;">
+        ${ghiChuPL}
         ${plRowHTML('Doanh thu', '+', pl.doanhThu)}
         ${plRowHTML('Giá vốn hàng bán', '−', pl.giaVon, pl.giaVonTopping>0 ? `gồm topping bán ${fmt(pl.giaVonTopping)}` : '')}
         ${plRowHTML('Hao hụt & huỷ', '−', pl.haoHut, 'nguyên liệu hư + bán thành phẩm huỷ + ly đổ')}
@@ -6253,14 +6312,15 @@ function thvCardHTML(data, plHomNay){
       <div class="ksub">Tiền thật quán mang lại <b>kể từ ngày đạt mốc ${data.ngayDat || '—'}</b> — vốn ${fmt(data.vonLucDatMoc || data.tongVon)} đã lấy lại đủ, từ đây là lãi thật.</div>
       <div class="ksub" style="margin-top:4px">${dongHomNay}</div>
       ${tutTienDo ? `<div class="ksub" style="color:var(--warn);margin-top:6px">Đã từng đạt 100% ngày <b>${data.ngayDat}</b> với vốn ${fmt(data.vonLucDatMoc)}. Sau đó khai thêm tài sản <b>${fmt(vonTang)}</b> nên tính trên tổng vốn hiện tại ${fmt(data.tongVon)} thì tiến độ là <b>${fmtNum(pct,0)}%</b> — tự quyết coi đó là vốn của quán này hay quán sau.</div>${thvBarHTML(pct)}` : ''}
-      ${chenhVonKhai}${ghiChuCat}${ghiChuNgayAm}
-      ${thvChiTietHTML(data, tienHomNay)}`);
+      ${thvChiTietHTML(data, tienHomNay, [chenhVonKhai, ghiChuCat, ghiChuNgayAm])}`);
   }
 
   // GIAI ĐOẠN 1 — đang thu hồi.
   const duKien = data.soThangConLai != null
-    ? `Tốc độ 30 ngày gần nhất <b>${fmt(data.tocDoThang)}/tháng</b> → dự kiến còn <b>~${fmtNum(data.soThangConLai,1)} tháng</b>`
+    ? `Dự kiến còn <b>~${fmtNum(data.soThangConLai,1)} tháng</b>`
     : (data.tocDoNgay > 0 ? '' : `<b style="color:var(--warn)">30 ngày gần nhất không dương</b> — với tốc độ này quán chưa thu hồi thêm được đồng nào.`);
+  const duKienDai = data.soThangConLai != null
+    ? `<div class="ksub">Tốc độ 30 ngày gần nhất <b>${fmt(data.tocDoThang)}/tháng</b> → dự kiến còn <b>~${fmtNum(data.soThangConLai,1)} tháng</b> là thu hồi đủ vốn.</div>` : '';
   return khung(`
     <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
       <span class="klabel">${ic('coins',15)} Thu hồi vốn đầu tư</span>
@@ -6270,15 +6330,16 @@ function thvCardHTML(data, plHomNay){
     ${thvBarHTML(pct)}
     <div class="ksub" style="margin-top:8px"><b>${fmtNum(Math.max(0,pct),1)}%</b> · còn cần <b>${fmt(data.conCan)}</b> · ${dongHomNay}</div>
     ${duKien ? `<div class="ksub" style="margin-top:4px">${duKien}</div>` : ''}
-    ${chenhVonKhai}${ghiChuCat}${ghiChuNgayAm}
-    ${thvChiTietHTML(data, tienHomNay)}`);
+    ${thvChiTietHTML(data, tienHomNay, [duKienDai, chenhVonKhai, ghiChuCat, ghiChuNgayAm])}`);
 }
 
 // Phần "Xem cách tính" — mở ra mới hiện, để thẻ vẫn gọn.
-function thvChiTietHTML(data, tienHomNay){
+function thvChiTietHTML(data, tienHomNay, ghiChu){
+  const ds = (ghiChu || []).filter(x => x && String(x).trim());
   return `
-    <button id="thvToggle" onclick="thvToggleChiTiet()" style="margin-top:10px;background:none;border:none;padding:6px 0;color:var(--gd);font-weight:700;font-size:12.5px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;align-self:flex-start">Xem cách tính ${ic('chevronDown',14)}</button>
+    <button id="thvToggle" onclick="thvToggleChiTiet()" style="margin-top:10px;background:none;border:none;padding:6px 0;color:var(--gd);font-weight:700;font-size:12.5px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;align-self:flex-start">Xem cách tính${ds.length ? ` · ${ds.length} lưu ý` : ''} ${ic('chevronDown',14)}</button>
     <div id="thvRows" hidden style="margin-top:2px">
+      ${ds.join('')}
       <div class="row"><span class="rl">Tổng vốn đầu tư<div class="small-note" style="margin-top:1px">tổng nguyên giá tài sản đang dùng, không trừ giá trị thu hồi</div></span><span class="rv">${fmt(data.tongVon)}</span></div>
       <div class="row"><span class="rl">Đã thu hồi<div class="small-note" style="margin-top:1px">cộng ${data.soNgay} ngày, từ ${data.batDauThat || '—'} tới hôm nay</div></span><span class="rv" style="color:${data.daThuHoi>=0?'var(--ok)':'var(--bad)'}">${data.daThuHoi>=0?'':'−'}${fmt(Math.abs(data.daThuHoi))}</span></div>
       <div class="row"><span class="rl">Còn cần thu hồi</span><span class="rv">${fmt(data.conCan)}</span></div>
@@ -8465,6 +8526,9 @@ function switchScreen(s){
   // Ở đây phải nạp menu từ Firebase trước, vì app Quản lý không giữ sẵn như POS.
   if(s==='mn') loadMenuForManager().then(renderMnList).catch(err=>{ console.error(err); showError('Không tải được menu: '+(err.message||err)); });
   if(s==='tg') loadMenuForManager().then(()=>{ loadTogoSettings(); loadTgAdminUI(); loadAppFeeSettings(); }).catch(err=>{ console.error(err); showError('Không tải được menu: '+(err.message||err)); });
+  // Bảng tin bill chỉ nghe khi đang đứng ở màn Hôm nay — sang màn khác thì gỡ,
+  // không giữ một listener realtime chạy nền suốt phiên.
+  if(s === 'today') attachBillFeed(); else detachBillFeed();
   if(s==='assist') renderAssist().catch(err=>{ console.error(err); showError('Không mở được Trợ lý bán hàng: '+(err.message||err)); });
   if(s==='inbox') renderAlertInbox();
   if(s==='today') renderToday();
@@ -8906,6 +8970,12 @@ async function renderToday(){
   // [GỘP MÀN] Việc cần xử lý + băng chốt sổ, vẽ nền để không giữ các chỉ số lại chờ.
   renderStoreHealth('todayHealth');
 
+  // Bảng tin bill: gắn listener (tự bỏ qua nếu đã nghe đúng ngày) rồi vẽ lại
+  // ngay bằng dữ liệu đang có — renderToday() xoá sạch nội dung các ô nên không
+  // vẽ lại thì bảng tin biến mất mỗi lần bấm Tải lại.
+  attachBillFeed();
+  renderBillFeed();
+
   // LÃI/LỖ HÔM NAY — vẽ ngay, không nạp nền như khối hoà vốn: mọi thứ nó cần đã nằm
   // trong cùng một Promise.all ở trên, chờ thêm một lượt mạng nữa chỉ để nó xuất hiện
   // muộn hơn phần dưới là vô nghĩa. Đây là con số đầu tiên chủ quán tìm khi mở app.
@@ -8920,6 +8990,13 @@ async function renderToday(){
 
   const t = kpi.targetCfg.targets;
   const dailyTarget = t.aov*t.billsPerDay;
+  // Hai mục tiêu SUY RA từ mục tiêu đã khai — xem ghi chú ở miniCards bên dưới.
+  const mtLyBanRa = (Number(t.billsPerDay)||0) * (Number(t.ipt)||0);
+  const mtDTGioCong = (() => {
+    const gioCong = Number((kpi.targetCfg.labor||{}).parttimeHourly) || 0;
+    const tyLeLuong = (Number(t.aov) > 0) ? (Number(t.laborBillTarget)||0) / Number(t.aov) : 0;
+    return (gioCong > 0 && tyLeLuong > 0) ? gioCong / tyLeLuong : 0;
+  })();
 
   // ĐIỂM HOÀ VỐN CỦA CHÍNH HÔM NAY — cùng bộ số với lãi/lỗ, khấu hao đã cộng vào.
   // Chưa bán được đồng nào thì mượn biên đóng góp 30 ngày làm tham chiếu (nạp nền,
@@ -8935,7 +9012,8 @@ async function renderToday(){
     {label:'Số bill', val: kpi.bills, st: statusHigherBetter(kpi.bills, t.billsPerDay, 0.1), sub:`MT ${t.billsPerDay}`},
     {label:'AOV', val: fmtGon(kpi.aov), st: statusAOV(kpi.aov, t.aov), sub:`MT ${fmtGon(t.aov)}`},
     {label:'IPT', val: fmtNum(kpi.ipt,2), st: statusHigherBetter(kpi.ipt, t.ipt, 0.08), sub:`MT ${fmtNum(t.ipt,2)} món/bill`},
-    {label:'Ly bán ra', val: kpi.items, sub:`${kpi.toppingBills} bill có topping`}
+    {label:'Ly bán ra', val: kpi.items, st: mtLyBanRa > 0 ? statusHigherBetter(kpi.items, mtLyBanRa, 0.1) : null,
+      sub: mtLyBanRa > 0 ? `MT ${fmtNum(mtLyBanRa,0)} · ${kpi.toppingBills} bill có topping` : `${kpi.toppingBills} bill có topping`}
   ];
   // Thẻ DOANH THU đổi màu theo 5 mức sức khoẻ, và mang luôn hai vạch mốc hoà vốn /
   // mục tiêu — nhìn màu là biết tình trạng trước cả khi đọc con số.
@@ -8988,9 +9066,11 @@ async function renderToday(){
       if(!el) return;
       // Doanh thu trên mỗi giờ công — thước đo xếp lịch. Chưa ai chấm công thì nói
       // thẳng là chưa có dữ liệu, KHÔNG hiện 0đ (0đ đọc như "làm không ra tiền").
+      const dtGio = kpi.revenue / gc.total;
       el.innerHTML = gc.total > 0
-        ? miniCardHTML('DT / giờ công', fmtGon(kpi.revenue / gc.total),
-            `${fmtNum(gc.total,1)}h công${gc.dangChay?' · '+gc.dangChay+' ca đang chạy':''}`)
+        ? miniCardHTML('DT / giờ công', fmtGon(dtGio),
+            `${mtDTGioCong > 0 ? `MT ${fmtGon(mtDTGioCong)} · ` : ''}${fmtNum(gc.total,1)}h công${gc.dangChay?' · '+gc.dangChay+' ca đang chạy':''}`,
+            mtDTGioCong > 0 ? statusHigherBetter(dtGio, mtDTGioCong, 0.1) : null)
         : miniCardHTML('DT / giờ công', '—', gc.boQuen ? `${gc.boQuen} ca quên check-out` : 'Chưa có chấm công hôm nay');
     })
     .catch(err => console.warn('[Giờ công] bỏ qua:', err));
@@ -9108,13 +9188,208 @@ function renderTodayGioCong(byHour, revByHour, gc, tongDT){
           <div class="hbars">
             ${cot.map(c=>`<div class="hbar${doCao(c)===cao&&cao>0?' peak':''}"><div class="hbar-h">${pad(c.h)}</div></div>`).join('')}
           </div>
+          ${coTien ? `<div class="hbars" style="margin-top:2px;">
+            ${cot.map(c=>`<div class="hbar"><div class="hbar-h" style="color:${c.bill?'var(--gm)':'var(--ink-4)'};font-weight:${c.bill?'800':'600'}">${c.bill || '·'}</div></div>`).join('')}
+          </div>` : ''}
+          ${(coTien && !(tongGC > 0)) ? `<div class="hchart-note" style="text-align:left;margin-top:6px;">Hàng số <b style="color:var(--gm)">tím</b> dưới trục giờ là <b>số bill</b> bán trong khung giờ đó.</div>` : ''}
           ${tongGC > 0 ? `<div class="hbars" style="margin-top:2px;">
             ${cot.map(c=>`<div class="hbar"><div class="hbar-h" style="color:${c.gc>0&&!c.bill?'var(--bad)':'var(--gt)'};font-weight:${c.gc>0&&!c.bill?'800':'600'}">${c.gc>0.05?fmtNum(c.gc,1):'·'}</div></div>`).join('')}
           </div>
-          <div class="hchart-note" style="text-align:left;margin-top:6px;">Hàng dưới cùng là <b>số giờ công</b> đứng trong khung giờ đó (1,0 = một người trọn giờ). Số <b style="color:var(--bad)">đỏ</b> là giờ có người mà không bán được bill nào.</div>` : ''}
+          <div class="hchart-note" style="text-align:left;margin-top:6px;">Dưới trục giờ: hàng <b style="color:var(--gm)">tím</b> là <b>số bill</b>, hàng cuối là <b>số giờ công</b> đứng trong khung đó (1,0 = một người trọn giờ). Số <b style="color:var(--bad)">đỏ</b> là giờ có người mà không bán được bill nào.</div>` : ''}
         </div>
       </div>
     </div>`;
+}
+
+
+// ============================================================
+// [NEW] BẢNG TIN BILL BÁN HÀNG — màn Hôm nay
+//
+// Vì sao có: chủ quán ngồi xem camera thì muốn đối chiếu ngay "ly vừa đưa cho
+// khách đó đã vào bill chưa, bao nhiêu tiền" — mà muốn xem thì phải mở lại app
+// POS ở một tab khác. Đưa thẳng vào màn Hôm nay là bỏ được cái bước đó.
+//
+// Nghe REALTIME (child_added/changed/removed) đúng node POS đang ghi, nên bill
+// vừa chốt là hiện ngay, không cần bấm tải lại. Bill mới TỰ BUNG chi tiết —
+// đúng khoảnh khắc cần nhìn là lúc nó vừa xảy ra — rồi tự thu lại khi có bill
+// kế tiếp, để danh sách không phình ra thành một trang dài vô tận.
+//
+// CHỈ ĐỌC. Không có nút sửa/xoá ở đây: sửa bill là việc của POS, nơi có đủ
+// chốt chặn (PIN quản lý, hoàn kho, huỷ tem). Thêm đường sửa thứ hai ở app
+// Quản lý là tạo ra một lối đi vòng qua toàn bộ những chốt chặn đó.
+// ============================================================
+const BF_MAX = 15;              // giữ nhiều nhất ngần này bill trong bộ nhớ
+const BF_SHOW = 6;              // hiện sẵn ngần này, còn lại nằm sau nút "xem thêm"
+
+let _bfRef = null;              // ref RTDB đang nghe
+let _bfPath = null;             // path tương ứng, để biết đã qua ngày mới chưa
+let _bfList = [];               // [{key, o}] — mới nhất đứng đầu
+let _bfOpen = new Set();        // key đang mở chi tiết
+let _bfAutoOpen = null;         // key được TỰ mở (khác với key người dùng tự bấm)
+let _bfMoi = new Set();         // key vừa về — viền sáng vài giây
+let _bfMocGan = 0;              // mốc lúc gắn listener — xem ghi chú ở bfLaBillMoi()
+let _bfXemHet = false;
+
+function bfPathHomNay(){
+  const d = new Date();
+  return `orders_gieogieo/${MONTH_KEYS[d.getMonth()]}/${pad(d.getDate())}`;
+}
+
+function attachBillFeed(){
+  const path = bfPathHomNay();
+  if(_bfRef && _bfPath === path) return;   // đang nghe đúng ngày rồi, không gắn lại
+  detachBillFeed();
+  _bfPath = path;
+  _bfMocGan = Date.now(); _bfList = []; _bfMoi.clear(); _bfOpen.clear(); _bfAutoOpen = null;
+
+  // limitToLast: chỉ kéo về mấy bill cuối, không nạp cả ngày. Node này có thể
+  // vài trăm bill vào cuối ngày cao điểm.
+  _bfRef = db.ref(path).limitToLast(BF_MAX);
+
+  _bfRef.on('child_added', snap => {
+    const o = snap.val(); if(!o) return;
+    _bfList = _bfList.filter(x => x.key !== snap.key);
+    _bfList.unshift({ key: snap.key, o });
+    if(_bfList.length > BF_MAX) _bfList.length = BF_MAX;
+    if(bfLaBillMoi(o)){
+      // Bill MỚI: tự bung chi tiết, và thu cái tự-bung trước đó lại (chỉ thu cái
+      // do app tự mở — cái người dùng tự bấm thì để nguyên).
+      if(_bfAutoOpen && _bfAutoOpen !== snap.key) _bfOpen.delete(_bfAutoOpen);
+      _bfOpen.add(snap.key); _bfAutoOpen = snap.key;
+      _bfMoi.add(snap.key);
+      setTimeout(() => { _bfMoi.delete(snap.key); renderBillFeed(); }, 6000);
+    }
+    renderBillFeed();
+  }, err => {
+    console.warn('[Bill] không nghe được đơn mới:', err);
+    const el = document.getElementById('todayBills');
+    if(el) el.innerHTML = bfTieuDe(0) + `<div class="empty-hint">Không đọc được bill hôm nay: ${escapeHtmlAttr(err.code || err.message || String(err))}</div>`;
+  });
+
+  // Sửa đơn (POS có bước "gọi thêm") và xoá đơn — không bắt hai sự kiện này thì
+  // bảng tin sẽ đứng yên với con số cũ, tệ hơn là không hiện gì.
+  _bfRef.on('child_changed', snap => {
+    const i = _bfList.findIndex(x => x.key === snap.key);
+    if(i >= 0){ _bfList[i].o = snap.val(); renderBillFeed(); }
+  });
+  _bfRef.on('child_removed', snap => {
+    _bfList = _bfList.filter(x => x.key !== snap.key);
+    _bfOpen.delete(snap.key);
+    renderBillFeed();
+  });
+
+}
+
+// Bill này là bill VỪA BÁN, hay là bill cũ Firebase trả về lúc mới gắn listener?
+//
+// Cách hiển nhiên là "đợi once('value') resolve rồi mới coi là mới" — nhưng nó
+// dựa vào thứ tự giữa hai lời gọi Firebase, thứ không có gì bảo đảm và cũng
+// không kiểm chứng được bằng bài test. Dùng thẳng giờ ghi đơn thì đúng trong
+// mọi thứ tự: mạng chậm, listener gắn lại giữa chừng, hay node hôm nay đang
+// rỗng lúc mở app.
+//
+// Trừ hao 3 giây cho lệch giờ giữa máy POS và máy đang xem — thà một bill vừa
+// bán bị coi là cũ (chỉ mất hiệu ứng tự bung) còn hơn cả chục bill cũ đồng loạt
+// bung ra lúc mở app.
+function bfLaBillMoi(o){
+  const t = Date.parse(o && o.createdAt);
+  return !isNaN(t) && t >= _bfMocGan - 3000;
+}
+
+function detachBillFeed(){
+  if(_bfRef){ try{ _bfRef.off(); }catch(e){} }
+  _bfRef = null; _bfPath = null;
+}
+
+function bfToggle(key){
+  if(_bfOpen.has(key)) _bfOpen.delete(key); else _bfOpen.add(key);
+  if(_bfAutoOpen === key) _bfAutoOpen = null;   // đã có người động vào, thôi tự thu
+  renderBillFeed();
+}
+function bfXemHet(){ _bfXemHet = !_bfXemHet; renderBillFeed(); }
+
+function bfTieuDe(n){
+  return `<div class="sec-title" style="display:flex;align-items:center;gap:8px">Bill bán hàng
+    ${n ? `<span class="sf-c">${n} bill gần nhất</span>` : ''}
+    <span class="muted-sm" style="margin-left:auto;text-transform:none;letter-spacing:0">tự cập nhật</span></div>`;
+}
+
+// Nhãn phương thức thanh toán — màu để liếc phát biết ngay tiền mặt hay chuyển khoản.
+function bfTagMethod(m){
+  const s = String(m || '');
+  if(/TIỀN MẶT/i.test(s))     return `<span class="bfeed-tag" style="background:var(--ok-bg);color:var(--ok)">Tiền mặt</span>`;
+  if(/CHUYỂN KHOẢN/i.test(s)) return `<span class="bfeed-tag" style="background:var(--bb);color:var(--bi)">Chuyển khoản</span>`;
+  if(/TÍNH RIÊNG/i.test(s))   return `<span class="bfeed-tag" style="background:var(--warn-bg);color:var(--warn)">Tính riêng</span>`;
+  return s ? `<span class="bfeed-tag" style="background:var(--fill);color:var(--gt)">${escapeHtmlAttr(s)}</span>` : '';
+}
+
+const BF_ICE = { chung:'Đá chung', rieng:'Đá riêng', khong:'Không đá' };
+
+function bfDongMon(c){
+  const sl = Number(c.qty) || 1;
+  const tp = (c.toppings || []).filter(Boolean);
+  const tienTp = tp.reduce((a,t)=> a + (Number(t.price)||0) * Math.max(1, Number(t.qty)||1), 0);
+  const thanhTien = ((Number(c.price)||0) + tienTp) * sl;
+  const nhanDa = (!c.isFood && c.ice && c.ice !== 'chung') ? ` · ${BF_ICE[c.ice] || c.ice}` : '';
+  return `<div class="bfeed-li">
+      <span><b>${sl}×</b> ${escapeHtmlAttr(c.name || '')}${c.size ? ` <span class="muted-sm">${escapeHtmlAttr(c.size)}</span>` : ''}${c.isFree ? ' <span class="bfeed-tag" style="background:var(--ok-bg);color:var(--ok)">tặng</span>' : ''}<span class="muted-sm">${escapeHtmlAttr(nhanDa)}</span></span>
+      <span style="flex-shrink:0;font-variant-numeric:tabular-nums">${c.isFree || thanhTien === 0 ? '0đ' : fmt(thanhTien)}</span>
+    </div>`
+    + tp.map(t => `<div class="bfeed-li bl-tp"><span>+ ${escapeHtmlAttr(t.name||'')}${Math.max(1,Number(t.qty)||1) > 1 ? ` ×${Math.max(1,Number(t.qty)||1)}` : ''}</span><span>${Number(t.price) ? fmt((Number(t.price)||0) * Math.max(1,Number(t.qty)||1)) : 'tặng'}</span></div>`).join('');
+}
+
+function bfChiTiet(o){
+  const mon = (o.itemsArray || []);
+  const kv = (k, v) => `<div class="bfeed-kv"><span>${k}</span><span style="color:var(--td);font-weight:650">${v}</span></div>`;
+  const phu = [];
+  if(o.billCode) phu.push(kv('Mã bill', escapeHtmlAttr(o.billCode)));
+  if(o.customerName || o.phone) phu.push(kv('Khách', `${escapeHtmlAttr(o.customerName||'')}${o.phone ? ` · ${escapeHtmlAttr(o.phone)}` : ''}`));
+  if(o.voucherUsed) phu.push(kv('Khuyến mãi', escapeHtmlAttr(String(o.voucherUsed))));
+  if(Number(o.discountAmt) > 0) phu.push(kv('Đã giảm', '−' + fmt(o.discountAmt)));
+  if(Number(o.cashGiven) > 0 && Number(o.cashChange) > 0)
+    phu.push(kv('Khách đưa / thối', `${fmt(o.cashGiven)} / ${fmt(o.cashChange)}`));
+  if(o.bankOrderId) phu.push(kv('Mã CK', escapeHtmlAttr(o.bankOrderId)));
+  return `<div class="bfeed-body">
+    ${mon.length ? mon.map(bfDongMon).join('') : `<div class="small-note">${escapeHtmlAttr(o.items || 'Không có chi tiết món')}</div>`}
+    <div style="border-top:1px solid var(--line);margin-top:6px;padding-top:6px">${phu.join('') || '<div class="small-note">Không có thông tin thêm.</div>'}</div>
+  </div>`;
+}
+
+function renderBillFeed(){
+  const el = document.getElementById('todayBills');
+  if(!el || curScreen !== 'today') return;
+  if(!_bfList.length){
+    el.innerHTML = bfTieuDe(0) + '<div class="empty-hint">Chưa có bill nào hôm nay.</div>';
+    return;
+  }
+  const hien = _bfXemHet ? _bfList : _bfList.slice(0, BF_SHOW);
+  el.innerHTML = bfTieuDe(_bfList.length) + `<div class="bfeed">` + hien.map(({key, o}) => {
+    const mo = _bfOpen.has(key);
+    const soLy = (o.itemsArray || []).reduce((a,c)=> a + (Number(c.qty)||0), 0);
+    const tomTat = (o.itemsArray || []).map(c => `${Number(c.qty)||1}× ${c.name||''}`).join(', ') || (o.items || '');
+    return `<div class="bfeed-row${_bfMoi.has(key) ? ' moi' : ''}">
+      <button class="bfeed-head" onclick="bfToggle('${key}')" aria-expanded="${mo}">
+        <span class="bfeed-time">${escapeHtmlAttr(o.time || '')}</span>
+        <span class="bfeed-main">
+          <span class="bfeed-items">${escapeHtmlAttr(tomTat)}</span>
+          <span class="bfeed-meta">
+            ${bfTagMethod(o.method)}
+            <span>${soLy || '?'} món</span>
+            ${o.isToGo ? '<span>· mang đi</span>' : ''}
+            ${o.isShip ? '<span>· ship</span>' : ''}
+            ${o.isAppSale ? '<span>· qua app</span>' : ''}
+            ${o.customerName ? `<span>· ${escapeHtmlAttr(o.customerName)}</span>` : ''}
+          </span>
+        </span>
+        <span class="bfeed-total">${fmt(o.total)}</span>
+        <span class="sf-ch" style="transform:rotate(${mo ? 180 : 0}deg)">${ic('chevronDown',15)}</span>
+      </button>
+      ${mo ? bfChiTiet(o) : ''}
+    </div>`;
+  }).join('') + `</div>`
+  + (_bfList.length > BF_SHOW
+      ? `<button class="btn outline sm" style="width:auto;padding:0 14px;margin-top:9px" onclick="bfXemHet()">${_bfXemHet ? 'Thu gọn' : `Xem thêm ${_bfList.length - BF_SHOW} bill`}</button>`
+      : '');
 }
 
 // Thẻ chỉ số MINI — dùng ở màn Hôm nay. st là object trạng thái của statusXxx().
