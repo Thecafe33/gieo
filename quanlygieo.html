@@ -3185,6 +3185,12 @@ function addInventoryItem(data){
     countUnitName: data.countUnitName || '',
     stockManaged: data.stockManaged !== false,
     openShelfLifeHours: Number(data.openShelfLifeHours) || 0,
+    // [MỚI] vesselIds — dụng cụ đựng dùng để CÂN món này ở POS (tự trừ bì), lấy
+    // chung thư viện prep_vessels_gieogieo với bán thành phẩm. Dành cho nguyên
+    // liệu MỞ GÓI RA LÀ DÙNG NGAY (trân châu, thạch dừa...) — thứ hao trong ngày
+    // theo tay múc chứ không theo định mức, nên cuối ca phải cân như BTP.
+    // Rỗng = POS không hiện nút cân, nhân viên gõ tay như trước.
+    vesselIds: Array.isArray(data.vesselIds) ? data.vesselIds : [],
     updatedAt: new Date().toISOString()
   });
 }
@@ -12400,10 +12406,10 @@ let itemFormDraft = {packagingUnits: []};
 
 function startAddItem(){
   editingItemId = null; adjustingItemId = null;
-  addingItem = true; itemFormDraft = {packagingUnits: []};
+  addingItem = true; itemFormDraft = {packagingUnits: [], vesselIds: []};
   renderKhoItems();
 }
-function resetItemForm(){ editingItemId = null; addingItem = false; itemFormDraft = {packagingUnits: []}; renderKhoItems(); }
+function resetItemForm(){ editingItemId = null; addingItem = false; itemFormDraft = {packagingUnits: [], vesselIds: []}; _itemVesselTried = false; renderKhoItems(); }
 
 // ══════════════════════════════════════════════════════════════════════════
 // [FIX-sua-ton] CHỈNH TỒN KHO NGUYÊN LIỆU
@@ -12496,7 +12502,8 @@ function startEditItem(id){
   const it = INVENTORY_ITEMS.find(x=>x.id===id);
   if(!it) return;
   editingItemId = id; addingItem = false;
-  itemFormDraft = {packagingUnits: (it.packagingUnits||[]).map(p=>({name:p.name, refUnit:'base', refQty:p.baseQty}))};
+  itemFormDraft = {packagingUnits: (it.packagingUnits||[]).map(p=>({name:p.name, refUnit:'base', refQty:p.baseQty})),
+                   vesselIds: (it.vesselIds||[]).slice(0)};
   renderKhoItems();
 }
 function itemPkgAddRow(){
@@ -12681,7 +12688,7 @@ function renderInventoryItemFormFields(editingItem){
         <label>Đơn vị pha chế <span class="small-note">(đơn vị nhỏ nhất, dùng trong công thức)</span></label>
         ${editingItem
           ? `<input type="text" value="${escapeHtmlAttr(editingItem.unit)}" disabled style="opacity:.6"><div class="small-note">Không đổi được sau khi tạo (để không lệch số liệu cũ)</div>`
-          : `<select id="invUnit" onchange="renderItemPkgBox(); syncItemUnitSelects();">${STOCK_UNITS.map(u=>`<option>${u}</option>`).join('')}</select>`}
+          : `<select id="invUnit" onchange="renderItemPkgBox(); syncItemUnitSelects(); renderItemVesselPicker();">${STOCK_UNITS.map(u=>`<option>${u}</option>`).join('')}</select>`}
       </div>
 
       <!-- Giải thích bằng ví dụ thật của quán — trả lời đúng câu hỏi "cái nào dùng
@@ -12747,6 +12754,13 @@ function renderInventoryItemFormFields(editingItem){
       <div class="small-note">Tắt cho những thứ <b>không có sự kiện nhập và không đếm được</b> — nước lọc từ máy, đá tự làm. Để bật cho những thứ đó thì tồn sẽ bị trừ theo định mức mỗi ly bán ra mà không bao giờ được cộng lại, tụt xuống âm vô hạn và mọi cảnh báo kho thành rác. Tắt rồi thì món này biến khỏi kiểm kê và khỏi mọi cảnh báo tồn.</div>
 
       <div id="invTrackingBox"></div>
+
+      <div class="sec-title">Cân cuối ca — nguyên liệu dùng ngay</div>
+      <div class="unit-explainer">Dành cho nguyên liệu <b>mở gói ra là dùng luôn</b>, không qua chế biến — trân châu trắng, thạch dừa Đài Loan, thạch nha đam... Loại này trong ngày bị múc/chia bằng tay nên tồn thực tế không bao giờ khớp định mức, phải <b>cân cuối ca giống bán thành phẩm</b>.<br><br>
+        Chọn ở đây những thứ món này thực sự nằm trong, POS sẽ hiện nút ⚖️ để nhân viên đặt nguyên khay lên cân và tự trừ bì. Khai khay/ca kèm trọng lượng bì ở <b>Kho → Dụng cụ đựng</b>.<br><br>
+        <b>Lưu ý:</b> phần này chỉ quyết định <i>có cân được hay không</i>. Còn món này <b>có bị bắt đếm cuối ca hay không</b> là do <b>Kho → Refill</b>: mở rule của món, bật "Bắt đếm khi giao ca" rồi chọn <b>Cuối ca</b>. Nguyên liệu chưa mở gói / trừ chuẩn theo định mức thì đừng bật — để kiểm kê định kỳ lo.</div>
+      <div id="invVesselBox"></div>
+      <button type="button" class="btn outline sm" style="margin-top:8px" onclick="goKho('refill')">Sang Refill để bật đếm cuối ca →</button>
   `;
 }
 
@@ -12822,6 +12836,62 @@ function setTrackingMode(m){
   renderTrackingBox();
 }
 
+// ---------- [MỚI] Gắn dụng cụ CÂN cho nguyên liệu dùng ngay ----------
+// Vì sao nguyên liệu cũng cần cân, không chỉ bán thành phẩm: trân châu trắng /
+// thạch dừa đóng gói sẵn mở ra là dùng ngay, được khai thẳng làm nguyên liệu thô
+// của topping. Chúng hao theo tay múc chứ không theo định mức, nên cuối ca phải
+// cân đúng như BTP — trước đây nút cân bên POS khoá cứng theo prepId nên nhóm này
+// chỉ gõ tay được.
+// Dùng CHUNG thư viện dụng cụ (prep_vessels_gieogieo) và chung giới hạn 5 cái với
+// bán thành phẩm — nhân viên đứng trước cân phải chọn trong một giây.
+let _itemVesselTried = false;   // đã thử nạp VESSELS cho form này chưa (tránh nạp vòng lặp)
+
+function itemToggleVessel(id){
+  const cur = itemFormDraft.vesselIds || (itemFormDraft.vesselIds = []);
+  const i = cur.indexOf(id);
+  if(i >= 0) cur.splice(i,1);
+  else{
+    if(cur.length >= PREP_MAX_VESSELS){ toast('⚠️ Tối đa ' + PREP_MAX_VESSELS + ' dụng cụ — bỏ bớt một cái trước'); return; }
+    cur.push(id);   // thứ tự chọn = thứ tự hiện trên POS
+  }
+  renderItemVesselPicker();
+}
+
+function renderItemVesselPicker(){
+  const box = document.getElementById('invVesselBox');
+  if(!box) return;
+
+  // Cân luôn cho ra gam — 'ml'/'l' cần tỷ trọng, 'cái'/'miếng' thì đếm chứ không
+  // cân. Đơn vị không quy đổi được thì ẩn hẳn, không hiện ra rồi cho số sai.
+  const unit = currentBaseUnit();
+  if(!vesselUnitSupported(unit)){
+    box.innerHTML = `<div class="empty-hint">Nguyên liệu này tính bằng <b>${escapeHtmlAttr(unit||'—')}</b> nên không cân trừ bì được — cân chỉ cho ra gam. Chỉ nguyên liệu tính bằng <b>g</b> hoặc <b>kg</b> mới gắn được dụng cụ.</div>`;
+    return;
+  }
+
+  // Màn Nguyên liệu không nạp VESSELS (chỉ màn Chế biến/Dụng cụ mới nạp) — nạp lười
+  // đúng một lần khi form mở. Hỏng thì chỉ mất lưới ảnh, KHÔNG chặn việc sửa nguyên liệu.
+  if(!VESSELS.length && !_itemVesselTried){
+    _itemVesselTried = true;
+    box.innerHTML = '<div class="empty-hint">Đang tải danh sách dụng cụ…</div>';
+    loadVessels()
+      .then(v => { VESSELS = v; })
+      .catch(err => console.warn('[Dụng cụ] không nạp được cho form nguyên liệu', err))
+      .finally(() => renderItemVesselPicker());
+    return;
+  }
+  if(!VESSELS.length){
+    box.innerHTML = `<div class="empty-hint">Chưa khai dụng cụ đựng nào.<br>Vào <b>Kho → Dụng cụ đựng</b> khai khay/ca kèm trọng lượng bì trước, rồi quay lại đây gắn cho nguyên liệu này.</div>`;
+    return;
+  }
+
+  const chon = itemFormDraft.vesselIds || [];
+  box.innerHTML = vesselPickerGridHTML(chon, 'itemToggleVessel')
+    + `<div class="small-note">${chon.length
+        ? 'Đã chọn ' + chon.length + '/' + PREP_MAX_VESSELS + ' — số trong vòng tròn là thứ tự hiện trên POS.'
+        : 'Chưa chọn dụng cụ nào — POS vẫn cho nhân viên gõ tay như hiện tại, không chặn gì.'}</div>`;
+}
+
 function renderKhoItems(){
   const box = document.getElementById('khoBody');
   const editingItem = editingItemId ? INVENTORY_ITEMS.find(x=>x.id===editingItemId) : null;
@@ -12866,7 +12936,7 @@ function renderKhoItems(){
       const countLine = (managed && !cu.isBase && !tmTag)
         ? ` · đếm theo ${escapeHtmlAttr(cu.name)}` : '';
       return `<div class="litem">
-        <div class="li-l"><div>${it.name} ${neg?'<span class="tier tier-red" style="margin-left:4px">Tồn ÂM</span>':(low?'<span class="tier tier-amber" style="margin-left:4px">Sắp hết</span>':'')}${noCount?'<span class="tier tier-blue" style="margin-left:4px">NV không kiểm kê</span>':''}${tmTag}</div>
+        <div class="li-l"><div>${it.name} ${neg?'<span class="tier tier-red" style="margin-left:4px">Tồn ÂM</span>':(low?'<span class="tier tier-amber" style="margin-left:4px">Sắp hết</span>':'')}${noCount?'<span class="tier tier-blue" style="margin-left:4px">NV không kiểm kê</span>':''}${(it.vesselIds||[]).length?'<span class="tier tier-green" style="margin-left:4px">⚖️ Cân được</span>':''}${tmTag}</div>
         <div>Ngưỡng ${fmtNum(it.minStock,0)} ${it.unit}${it.costPerUnit?(' · ~'+fmt(it.costPerUnit)+'/'+it.unit):''}${pkgSummary}${countLine}</div></div>
         <div class="li-r"><span style="${neg?'color:var(--bad);font-weight:800':(managed?'':'color:var(--ink-4)')}">${managed ? fmtNum(it.currentStock,1)+' '+escapeHtmlAttr(it.unit||'') : '—'}</span>
           <button class="btn ${neg?'':'outline'} sm" style="width:auto;padding:0 10px;margin-left:6px" onclick="startAdjustItem('${it.id}')">Sửa tồn</button>
@@ -12909,6 +12979,7 @@ function renderKhoItems(){
   renderItemPkgBox();       // điền vào #itemPkgBox — chỉ 1 bản tồn tại trong DOM lúc này (add HOẶC sửa)
   syncItemUnitSelects();    // nạp dropdown đơn vị cho các ô số (phụ thuộc quy cách vừa render)
   renderTrackingBox();      // khối "Theo dõi & kiểm kê" — phụ thuộc quy cách + 2 ô tick ở trên
+  renderItemVesselPicker(); // lưới dụng cụ cân — phụ thuộc đơn vị đang chọn ở trên
 }
 // [NEW — mục 1] Tính lại costPerUnit cho MỌI bán thành phẩm đang dùng nguyên
 // liệu vừa đổi giá. Trước đây giá CB chỉ tính lại khi mở form CB rồi bấm Lưu —
@@ -12967,12 +13038,22 @@ async function submitInventoryItem(){
   if(isPackagingMaterial && trackingMode === 'unit') trackingMode = 'batch';
   if(!TRACKING_MODES[trackingMode]) trackingMode = 'none';
   const openShelfLifeHours = trackingMode === 'none' ? 0 : (Number(document.getElementById('invOpenShelfLife')?.value) || 0);
+  // ---- Dụng cụ cân (nguyên liệu dùng ngay) ----
+  // Đơn vị không cân được thì xoá sạch lựa chọn — giữ lại chỉ làm POS hiện nút cân
+  // cho ra số sai đơn vị. Ngược lại, khi VESSELS chưa nạp được (mất mạng lúc mở
+  // form) thì KHÔNG lọc theo danh sách rỗng, vì lọc lúc đó = xoá trắng cấu hình cũ
+  // của món chỉ vì một lần tải hỏng.
+  const baseUnitNow = currentBaseUnit();
+  const vesselIds = !vesselUnitSupported(baseUnitNow) ? []
+    : (VESSELS.length
+        ? (itemFormDraft.vesselIds||[]).filter(id=>VESSELS.some(v=>v.id===id)).slice(0, PREP_MAX_VESSELS)
+        : (itemFormDraft.vesselIds||[]).slice(0, PREP_MAX_VESSELS));
   let savedItemId = null; // id nguyên liệu vừa lưu — để lan giá sang bán thành phẩm
   try{
     if(editingItemId){
       savedItemId = editingItemId;
       await updateInventoryItemMeta(editingItemId, { name, minStock, costPerUnit, packagingUnits, staffCounts, isPackagingMaterial,
-        trackingMode, countUnitName, stockManaged, openShelfLifeHours });
+        trackingMode, countUnitName, stockManaged, openShelfLifeHours, vesselIds });
       toast('✅ Đã lưu thay đổi');
     } else {
       // Nguyên liệu MỚI thì chưa CB nào dùng được nó, không cần lan giá.
@@ -12980,7 +13061,7 @@ async function submitInventoryItem(){
         name, unit: document.getElementById('invUnit').value,
         currentStock: v('invStart') * f('invStartUnit'),
         minStock, costPerUnit, packagingUnits, staffCounts, isPackagingMaterial,
-        trackingMode, countUnitName, stockManaged, openShelfLifeHours
+        trackingMode, countUnitName, stockManaged, openShelfLifeHours, vesselIds
       });
       toast('✅ Đã thêm nguyên liệu');
     }
@@ -13169,6 +13250,36 @@ function prepToggleVessel(id){
   renderPrepVesselPicker();
 }
 
+// [MỚI] Lưới ảnh chọn dụng cụ — DÙNG CHUNG cho bán thành phẩm (renderPrepVesselPicker)
+// và nguyên liệu dùng ngay (renderItemVesselPicker). Hai chỗ phải trông và bấm y hệt
+// nhau: nhân viên khai một kiểu, nhìn ở POS cũng một kiểu.
+//   chon      — mảng id đang chọn, THỨ TỰ chọn = thứ tự hiện trên POS
+//   toggleFn  — tên hàm bật/tắt của màn gọi ('prepToggleVessel' | 'itemToggleVessel')
+function vesselPickerGridHTML(chon, toggleFn){
+  const day = chon.length >= PREP_MAX_VESSELS;
+  return `
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(124px,1fr));gap:10px;">
+      ${VESSELS.map(v=>{
+        const i = chon.indexOf(v.id);
+        const dangChon = i >= 0;
+        const mo = !dangChon && day;   // đã đủ 5 thì làm mờ phần còn lại
+        const anh = v.imageUrl
+          ? `<img src="${escapeHtmlAttr(v.imageUrl)}" alt="" style="width:100%;height:100%;object-fit:contain;">`
+          : `<span style="color:var(--ink-4);font-size:22px;font-weight:700;">${escapeHtmlAttr((v.name||'?').trim().charAt(0).toUpperCase())}</span>`;
+        const bis = (v.variants||[]).map(x=>Number(x.tareG)||0);
+        const biTxt = bis.length ? (Math.min(...bis)===Math.max(...bis) ? fmtNum(bis[0],0)+' g' : fmtNum(Math.min(...bis),0)+'–'+fmtNum(Math.max(...bis),0)+' g') : '—';
+        return `
+        <div onclick="${mo ? '' : `${toggleFn}('${v.id}')`}" style="cursor:${mo?'not-allowed':'pointer'};opacity:${mo?.4:1};background:var(--card);border:${dangChon?'2px solid var(--gd)':'1.5px solid var(--line)'};border-radius:20px;padding:10px;text-align:center;position:relative;transition:border-color .15s ease,transform .12s ease;${dangChon?'box-shadow:0 4px 16px -8px var(--accent-glow);':''}">
+          ${dangChon ? `<div style="position:absolute;top:6px;right:6px;width:22px;height:22px;border-radius:50%;background:var(--gd);color:#fff;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;">${i+1}</div>` : ''}
+          <div style="width:100%;aspect-ratio:1/1;background:#fff;border-radius:14px;display:flex;align-items:center;justify-content:center;overflow:hidden;margin-bottom:7px;">${anh}</div>
+          <div style="font-size:13px;font-weight:650;color:var(--td);line-height:1.3;">${escapeHtmlAttr(v.name||'')}</div>
+          <div style="font-size:11.5px;color:var(--gt);margin-top:2px;">bì ${biTxt}${(v.variants||[]).length>1 ? ' · '+v.variants.length+' kiểu' : ''}</div>
+        </div>`;
+      }).join('')}
+    </div>
+`;
+}
+
 function renderPrepVesselPicker(){
   const box = document.getElementById('prepVesselBox');
   if(!box || !prepDraft) return;
@@ -13185,27 +13296,7 @@ function renderPrepVesselPicker(){
   }
 
   const chon = prepDraft.vesselIds || [];
-  const day = chon.length >= PREP_MAX_VESSELS;
-  box.innerHTML = `
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(124px,1fr));gap:10px;">
-      ${VESSELS.map(v=>{
-        const i = chon.indexOf(v.id);
-        const dangChon = i >= 0;
-        const mo = !dangChon && day;   // đã đủ 5 thì làm mờ phần còn lại
-        const anh = v.imageUrl
-          ? `<img src="${escapeHtmlAttr(v.imageUrl)}" alt="" style="width:100%;height:100%;object-fit:contain;">`
-          : `<span style="color:var(--ink-4);font-size:22px;font-weight:700;">${escapeHtmlAttr((v.name||'?').trim().charAt(0).toUpperCase())}</span>`;
-        const bis = (v.variants||[]).map(x=>Number(x.tareG)||0);
-        const biTxt = bis.length ? (Math.min(...bis)===Math.max(...bis) ? fmtNum(bis[0],0)+' g' : fmtNum(Math.min(...bis),0)+'–'+fmtNum(Math.max(...bis),0)+' g') : '—';
-        return `
-        <div onclick="${mo ? '' : `prepToggleVessel('${v.id}')`}" style="cursor:${mo?'not-allowed':'pointer'};opacity:${mo?.4:1};background:var(--card);border:${dangChon?'2px solid var(--gd)':'1.5px solid var(--line)'};border-radius:20px;padding:10px;text-align:center;position:relative;transition:border-color .15s ease,transform .12s ease;${dangChon?'box-shadow:0 4px 16px -8px var(--accent-glow);':''}">
-          ${dangChon ? `<div style="position:absolute;top:6px;right:6px;width:22px;height:22px;border-radius:50%;background:var(--gd);color:#fff;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;">${i+1}</div>` : ''}
-          <div style="width:100%;aspect-ratio:1/1;background:#fff;border-radius:14px;display:flex;align-items:center;justify-content:center;overflow:hidden;margin-bottom:7px;">${anh}</div>
-          <div style="font-size:13px;font-weight:650;color:var(--td);line-height:1.3;">${escapeHtmlAttr(v.name||'')}</div>
-          <div style="font-size:11.5px;color:var(--gt);margin-top:2px;">bì ${biTxt}${(v.variants||[]).length>1 ? ' · '+v.variants.length+' kiểu' : ''}</div>
-        </div>`;
-      }).join('')}
-    </div>
+  box.innerHTML = vesselPickerGridHTML(chon, 'prepToggleVessel') + `
     <div class="small-note">${chon.length ? 'Đã chọn ' + chon.length + '/' + PREP_MAX_VESSELS + ' — số trong vòng tròn là thứ tự hiện trên POS.' : 'Chưa chọn dụng cụ nào — POS vẫn cho nhân viên gõ tay như hiện tại, không chặn gì.'}</div>`;
 }
 
@@ -13943,7 +14034,14 @@ async function renderKhoVessels(){
   showLoading(box);
   try{
     await ensureAuth();
-    [VESSELS, PREP_ITEMS] = await Promise.all([loadVessels(), loadPrepItems()]);
+    // Nạp thêm nguyên liệu: từ nay dụng cụ gắn được cho CẢ nguyên liệu dùng ngay,
+    // nên lời nhắc "chưa gắn cho gì cả" bên dưới phải đếm cả hai bên.
+    // Nguyên liệu chỉ dùng cho LỜI NHẮC bên dưới nên hỏng thì bỏ qua, giữ danh
+    // sách đang có — không được để nó làm hỏng cả màn Dụng cụ.
+    [VESSELS, PREP_ITEMS, INVENTORY_ITEMS] = await Promise.all([
+      loadVessels(), loadPrepItems(),
+      loadInventoryItems().catch(err=>{ console.warn('renderKhoVessels: không nạp được nguyên liệu', err); return INVENTORY_ITEMS; })
+    ]);
   }catch(err){
     console.error('renderKhoVessels lỗi', err);
     box.innerHTML = '<div class="muted">Không tải được danh sách dụng cụ.</div>';
@@ -13980,16 +14078,19 @@ async function renderKhoVessels(){
   // thì người dùng khai 10 dụng cụ, sang POS không thấy gì, và kết luận là hỏng.
   // (Đúng chuyện đã xảy ra.)
   const _daGan = PREP_ITEMS.filter(p=>(p.vesselIds||[]).length).length;
+  const _daGanNL = INVENTORY_ITEMS.filter(it=>(it.vesselIds||[]).length).length;
   const _saiDonVi = PREP_ITEMS.filter(p=>!vesselUnitSupported(p.unit)).length;
-  const nhacHtml = (VESSELS.length && !_daGan) ? `
+  const nhacHtml = (VESSELS.length && !_daGan && !_daGanNL) ? `
     <div class="card" style="border:1.5px solid var(--warn-line);background:var(--warn-bg);">
       <div style="font-weight:700;color:var(--warn);margin-bottom:6px;">${ic('alert',15)} Còn một bước nữa thì POS mới cân được</div>
       <div style="font-size:13.5px;line-height:1.65;color:var(--warn);">
-        Đã khai <b>${VESSELS.length} dụng cụ</b> nhưng <b>chưa gắn cho bán thành phẩm nào</b>.
-        Thư viện này chỉ là danh mục — phải vào <b>Chế biến cấp 1</b>, mở từng món và chọn dụng cụ nó đang đựng thì nút ⚖️ bên POS mới hiện ra.
+        Đã khai <b>${VESSELS.length} dụng cụ</b> nhưng <b>chưa gắn cho món nào</b>.
+        Thư viện này chỉ là danh mục — phải mở từng món và chọn dụng cụ nó đang đựng thì nút ⚖️ bên POS mới hiện ra:
+        bán thành phẩm gắn ở <b>Chế biến cấp 1</b>, còn nguyên liệu dùng ngay (trân châu, thạch dừa đóng gói sẵn) gắn ở <b>Nguyên liệu</b> — mục "Cân cuối ca".
         ${_saiDonVi ? `<br><br>Lưu ý: <b>${_saiDonVi}</b> bán thành phẩm đang tính bằng đơn vị không cân trừ bì được (ml, cái, miếng…) — đổi đơn vị sang <b>g</b> trước thì mới gắn được.` : ''}
       </div>
       <button class="btn" style="margin-top:12px" onclick="goKho('prep')">Sang Chế biến cấp 1 để gắn →</button>
+      <button class="btn outline" style="margin-top:8px" onclick="goKho('items')">Sang Nguyên liệu để gắn →</button>
     </div>` : '';
 
   // Storage đang hỏng thì nói ra MỘT chỗ cố định, kèm nguyên văn lỗi và nút thử
