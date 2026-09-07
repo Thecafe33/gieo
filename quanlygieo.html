@@ -2034,6 +2034,8 @@ async function clearSalesCache(){
 // thành công rồi, dọn cache chỉ là bước phụ — thất bại thì chỉ cảnh báo console,
 // người dùng vẫn còn nút "Xoá cache" thủ công để chạy lại.
 async function invalidateSalesCache(reason){
+  // Đổi giá/định mức → mọi giá vốn dẫn xuất đã nhớ đều hết hạn.
+  _costMemo = {};
   try{
     const n = await clearSalesCache();
     if(n) console.info(`[cache] Đã xoá ${n} ngày cache do đổi cấu hình: ${reason||''}`);
@@ -2348,7 +2350,171 @@ async function runDataIntegrityCheck(){
 //   3. Chưa có cả 2 → rơi về % benchmark như cũ (revenueUncosted).
 // Nhờ vậy tab "COGS" không biến mất mà đổi vai trò: chỉ còn cần cho món NÀO CHƯA
 // CÓ định mức, thay vì phải gõ tay TOÀN BỘ menu như trước.
-function computeUnitCogsFromRecipe(itemId, size){
+// ============================================================================
+// [MỚI] LỊCH SỬ GIÁ NGUYÊN LIỆU — price_history_gieogieo
+// ----------------------------------------------------------------------------
+// BỆNH ĐÃ CHỮA: trước đây mỗi nguyên liệu chỉ có MỘT con số costPerUnit "hiện tại".
+// Mọi báo cáo — GOGS, waste, tiêu hao — đều nhân số lượng với con số đó. Nên hôm nay
+// nhà cung cấp tăng giá, sửa lại giá trong app, thì báo cáo THÁNG TRƯỚC cũng đổi
+// theo: lãi/lỗ, COGS%, biên món của một tháng đã đóng sổ tự nhiên khác đi. Số liệu
+// quá khứ mà biết tự đổi thì không dùng để ra quyết định được nữa.
+//
+// CÁCH CHỮA: giá không bị GHI ĐÈ nữa. Mỗi lần đổi giá là một MỐC MỚI có ngày bắt
+// đầu hiệu lực; giá cũ nằm nguyên đó. Mọi phép tính đều hỏi "ngày X thì món này giá
+// bao nhiêu" thay vì "món này giá bao nhiêu".
+//
+// Doc shape:
+//   itemId, itemName, unit
+//   price          — giá MỚI, theo ĐƠN VỊ PHA CHẾ (đ/g, đ/ml...) — cùng đơn vị với
+//                    costPerUnit, để không phải quy đổi ở chỗ đọc
+//   oldPrice       — giá ngay TRƯỚC mốc này (null nếu là mốc gốc). Đây là mảnh ghép
+//                    quan trọng nhất: nhờ nó mà những ngày TRƯỚC mốc đầu tiên vẫn
+//                    tra được đúng giá cũ, dù lúc đó chưa có tính năng lịch sử giá.
+//   effectiveFrom  — 'YYYY-MM-DD', áp dụng TỪ ngày này trở đi
+//   source         — 'manual' (sửa tay ở Kho) | 'po' (cập nhật khi tạo đơn đặt hàng)
+//                  | 'seed' (mốc gốc lúc tạo nguyên liệu)
+//   poId, supplier, note, by, createdAt
+//
+// BA QUY TẮC TRA GIÁ (xem itemCostOn), cố ý viết ra vì cả hệ thống phụ thuộc:
+//   1. Có mốc ≤ ngày cần tra  → lấy mốc GẦN NHẤT trước đó. (giá giữ nguyên cho tới
+//      khi có mốc mới — "không báo đổi giá thì không tự đổi")
+//   2. Ngày cần tra NẰM TRƯỚC mốc đầu tiên → lấy `oldPrice` của mốc đầu tiên.
+//   3. Chưa có mốc nào       → lấy costPerUnit hiện tại (chưa có gì để dựng lại).
+// ============================================================================
+const PRICE_COLL = 'price_history_gieogieo';
+let PRICE_HISTORY = null;      // { itemId: [ {effectiveFrom, price, oldPrice, ...}, ... ] } — TĂNG dần theo ngày
+let _priceLoadedAt = 0;
+
+async function ensurePriceHistory(force){
+  if(!force && PRICE_HISTORY && Date.now() - _priceLoadedAt < 300000) return PRICE_HISTORY;
+  const idx = {};
+  try{
+    const snap = await fstore.collection(PRICE_COLL).get();
+    snap.forEach(d=>{
+      const r = { id: d.id, ...d.data() };
+      if(!r.itemId || !r.effectiveFrom) return;
+      (idx[r.itemId] = idx[r.itemId] || []).push(r);
+    });
+    Object.values(idx).forEach(list => list.sort((a,b)=>
+      String(a.effectiveFrom).localeCompare(String(b.effectiveFrom)) ||
+      String(a.createdAt||'').localeCompare(String(b.createdAt||''))));
+    PRICE_HISTORY = idx;
+    _priceLoadedAt = Date.now();
+  }catch(err){
+    // Không đọc được thì rơi về giá hiện tại — sai kiểu CŨ, nhưng không được làm
+    // trắng báo cáo. Có cảnh báo trong console để còn lần ra.
+    console.warn('[Giá] không đọc được lịch sử giá (tạm dùng giá hiện tại):', err);
+    PRICE_HISTORY = PRICE_HISTORY || {};
+  }
+  _costMemo = {};
+  return PRICE_HISTORY;
+}
+
+// Giá của MỘT nguyên liệu tại MỘT ngày (đ / đơn vị pha chế).
+// dateKey rỗng = "bây giờ" → dùng costPerUnit hiện tại, giữ nguyên hành vi cũ cho
+// mọi màn cấu hình (khai định mức, xem giá vốn menu...).
+function itemCostOn(itemId, dateKey){
+  const it = INVENTORY_ITEMS.find(x=>x.id===itemId);
+  const hienTai = it ? Number(it.costPerUnit)||0 : 0;
+  if(!dateKey) return hienTai;
+  const list = PRICE_HISTORY && PRICE_HISTORY[itemId];
+  if(!list || !list.length) return hienTai;
+  let chon = null;
+  for(const r of list){
+    if(String(r.effectiveFrom) <= dateKey) chon = r; else break;
+  }
+  if(chon) return Number(chon.price)||0;
+  const dau = list[0];
+  return dau.oldPrice != null ? Number(dau.oldPrice)||0 : (Number(dau.price)||0);
+}
+
+// Lịch sử của 1 nguyên liệu, MỚI trước — để hiển thị.
+function priceHistoryFor(itemId){
+  const list = (PRICE_HISTORY && PRICE_HISTORY[itemId]) || [];
+  return list.slice().reverse();
+}
+
+// Ghi một MỐC GIÁ MỚI. Không bao giờ sửa/xoá mốc cũ — đó là toàn bộ lý do tồn tại
+// của bảng này. Trả về true nếu có ghi (giá thực sự đổi).
+async function recordItemPriceChange({itemId, itemName, unit, newPrice, oldPrice, effectiveFrom, source, poId, supplier, note}){
+  const moi = Number(newPrice)||0;
+  const cu  = oldPrice == null ? null : (Number(oldPrice)||0);
+  if(cu != null && Math.abs(moi - cu) < 1e-9) return false;   // không đổi thì không ghi
+  const doc = {
+    itemId, itemName: itemName||'', unit: unit||'',
+    price: moi, oldPrice: cu,
+    effectiveFrom: effectiveFrom || dkey(new Date()),
+    source: source || 'manual',
+    poId: poId || null, supplier: supplier || '', note: note || '',
+    by: 'management',
+    createdAt: new Date().toISOString()
+  };
+  await fstore.collection(PRICE_COLL).add(doc);
+  // Nạp lại index ngay để mọi phép tính sau đó thấy mốc mới, không phải chờ 5 phút.
+  await ensurePriceHistory(true);
+  logAudit('price_change','inventory_item',itemId,{
+    oldPrice: cu, newPrice: moi, effectiveFrom: doc.effectiveFrom, source: doc.source, poId: doc.poId
+  });
+  return true;
+}
+
+// ----------------------------------------------------------------------------
+// GIÁ VỐN DẪN XUẤT THEO NGÀY — bán thành phẩm, topping, bao bì
+//
+// Ba thứ này KHÔNG cần bảng lịch sử riêng: giá vốn của chúng vốn được TÍNH RA từ
+// giá nguyên liệu thô theo công thức đã khai (batchInputs / items). Chỉ cần tính
+// lại đúng công thức đó bằng giá nguyên liệu CỦA NGÀY ĐÓ là ra con số của ngày đó.
+// Thêm một bảng lịch sử nữa cho chúng chỉ tạo ra nguồn sự thật thứ hai để lệch.
+//
+// Giới hạn phải nói thẳng: nếu CÔNG THỨC (định mức, yield) bị sửa thì quá khứ vẫn
+// đổi theo — đây là lịch sử GIÁ, không phải lịch sử CÔNG THỨC.
+//
+// Memo: một ngày bán 200 bill × vài dòng, mỗi dòng lại tra topping/bao bì — không
+// nhớ thì cùng một phép tính chạy lại hàng nghìn lần.
+// ----------------------------------------------------------------------------
+let _costMemo = {};
+function _memoCost(key, fn){
+  if(key in _costMemo) return _costMemo[key];
+  const v = fn();
+  _costMemo[key] = v;
+  return v;
+}
+
+function prepCostOn(prepId, dateKey){
+  const p = PREP_ITEMS.find(x=>x.id===prepId);
+  if(!p) return 0;
+  if(!dateKey) return Number(p.costPerUnit)||0;
+  return _memoCost('prep|'+prepId+'|'+dateKey, ()=>{
+    const inputs = p.batchInputs || [];
+    if(!inputs.length) return Number(p.costPerUnit)||0;   // chưa khai công thức: chỉ còn số đang lưu
+    const y = prepEffectiveYield(p);
+    if(!(y > 0)) return Number(p.costPerUnit)||0;
+    const tong = inputs.reduce((s,r)=> s + (Number(r.qty)||0) * itemCostOn(r.itemId, dateKey), 0);
+    return tong / y;
+  });
+}
+
+function toppingCostOn(toppingId, dateKey){
+  const rec = TOPPING_RECIPES[toppingId];
+  if(!rec) return 0;
+  if(!dateKey) return Number(rec.costPerServing)||0;
+  return _memoCost('tp|'+toppingId+'|'+dateKey, ()=>{
+    const inputs = rec.batchInputs || [];
+    if(!inputs.length) return Number(rec.costPerServing)||0;
+    const y = Number(rec.batchYield)||0;
+    if(!(y > 0)) return Number(rec.costPerServing)||0;
+    const tong = inputs.reduce((s,r)=>{
+      const gia = r.refType === 'prep' ? prepCostOn(r.prepId, dateKey) : itemCostOn(r.itemId, dateKey);
+      return s + (Number(r.qty)||0) * gia;
+    }, 0);
+    const moiDonVi = tong / y;
+    return rec.yieldMode === 'weight' ? moiDonVi * (Number(rec.qtyPerServing)||0) : moiDonVi;
+  });
+}
+
+// dateKey = ngày phát sinh của bill. Truyền vào thì mọi giá đều lấy theo mốc có
+// hiệu lực NGÀY ĐÓ; bỏ trống thì dùng giá hiện tại (các màn cấu hình đang xem menu).
+function computeUnitCogsFromRecipe(itemId, size, dateKey){
   const recipe = RECIPES['togo:'+itemId];
   const rows = recipe && recipe.sizes && recipe.sizes[size];
   if(!rows || !rows.length) return null; // chưa khai định mức cho đúng size này — không tính được
@@ -2356,18 +2522,15 @@ function computeUnitCogsFromRecipe(itemId, size){
   for(const row of rows){
     const qty = Number(row.qty)||0;
     if(row.refType==='prep'){
-      const p = PREP_ITEMS.find(x=>x.id===row.prepId);
-      cost += qty * (p ? Number(p.costPerUnit)||0 : 0);
+      cost += qty * prepCostOn(row.prepId, dateKey);
     } else if(row.refType==='topping'){
       // [NEW] Topping ĐÍNH KÈM SẴN trong món (vd trà sữa mặc định có trân châu) —
       // khác với topping BÁN THÊM ở giỏ hàng: đây là 1 THÀNH PHẦN CỐ ĐỊNH của công
       // thức, dùng đúng costPerServing đã khai ở GOGS Topping. qty = số phần topping
       // có sẵn trong đúng size này (thường 1, có thể nhiều hơn với size lớn).
-      const rec = TOPPING_RECIPES[row.toppingId];
-      cost += qty * (rec ? Number(rec.costPerServing)||0 : 0);
+      cost += qty * toppingCostOn(row.toppingId, dateKey);
     } else {
-      const it = INVENTORY_ITEMS.find(x=>x.id===row.itemId);
-      cost += qty * (it ? Number(it.costPerUnit)||0 : 0);
+      cost += qty * itemCostOn(row.itemId, dateKey);
     }
   }
   return cost;
@@ -2396,7 +2559,11 @@ function demToppingDong(it, out){
   return out;
 }
 
-function aggregateOrders(orders){
+// dateKey — NGÀY của lô bill này. Mọi giá vốn bên trong đều tra theo mốc giá có
+// hiệu lực ngày đó, nên chạy lại hàm này cho một ngày cũ luôn ra đúng con số cũ,
+// dù hôm nay giá nguyên liệu đã khác. Đây chính là chỗ trước đây làm báo cáo quá
+// khứ tự đổi mỗi lần chủ quán sửa giá.
+function aggregateOrders(orders, dateKey){
   let revenue=0, bills=0, items=0, toppingBills=0, toppingRevenue=0, cogsActual=0, revenueUncosted=0,
       toppingCogsActual=0, toppingRevenueUncosted=0;
   // [DỰ BÁO TOPPING] Đếm số PHẦN từng topping đã dùng trong ngày — gồm cả topping
@@ -2432,7 +2599,7 @@ function aggregateOrders(orders){
       if(it.toppings && it.toppings.length) hasTopping = true;
       const baseLineRevenue = (Number(it.price)||0) * qty;
       // Vế 1: tự tính từ định mức (ưu tiên) — null nếu chưa khai định mức cho size này.
-      const recipeCogs = it.itemId && it.size ? computeUnitCogsFromRecipe(it.itemId, it.size) : null;
+      const recipeCogs = it.itemId && it.size ? computeUnitCogsFromRecipe(it.itemId, it.size, dateKey) : null;
       // Vế 2: nhập tay (dự phòng) — chỉ dùng khi KHÔNG có định mức.
       const entry = cogsMap[it.itemId];
       const manualCogs = (entry && it.size && entry[it.size]!=null && entry[it.size]!=='') ? Number(entry[it.size]) : null;
@@ -2446,7 +2613,7 @@ function aggregateOrders(orders){
       //    Topping → gom vào toppingCogsActual/toppingRevenueUncosted, KHÔNG cộng
       //    vào giá vốn món, để margin của món và margin của nhóm Topping tính đúng,
       //    tách bạch, không lẫn vào nhau.
-      const tp = computeToppingsCogsForLine(it.toppings);
+      const tp = computeToppingsCogsForLine(it.toppings, dateKey);
       // [NEW — Bao bì] Cộng thẳng giá vốn bao bì vào giá vốn món, ĐỘC LẬP với việc
       // món đã khai định mức pha chế hay chưa. Từ GĐ1 "Bao bì phức tạp": ưu tiên
       // override riêng theo món+topping (packagingCostForLine) nếu có khai, rơi về
@@ -2456,8 +2623,8 @@ function aggregateOrders(orders){
       // thì rơi về mô hình BỘ cũ để không làm gãy báo cáo trong lúc chuyển đổi.
       const lineHasTopping = !!(it.toppings && it.toppings.length);
       const packCost = !it.size ? 0
-        : (pkgRulesActive() ? packagingCostForCupLine(it)
-                            : packagingCostForLine(it.itemId, it.size, lineHasTopping));
+        : (pkgRulesActive() ? packagingCostForCupLine(it, dateKey)
+                            : packagingCostForLine(it.itemId, it.size, lineHasTopping, dateKey));
       if(unitCogs!=null){
         cogsActual += (unitCogs + tp.freeCost + packCost) * qty;
       } else {
@@ -2471,7 +2638,7 @@ function aggregateOrders(orders){
     // [NEW — GĐ2] Tầng B: chi phí túi/khay tính 1 LẦN CHO CẢ ĐƠN (không phải theo
     // từng dòng như Tầng A ở trên) — vì túi/khay phụ thuộc TOÀN BỘ các ly trong
     // cùng bill (đá chung/riêng + tổng số ly), không gán riêng được cho 1 dòng.
-    cogsActual += computeBaggingCostForOrder(o);
+    cogsActual += computeBaggingCostForOrder(o, dateKey);
     if(hasTopping) toppingBills++;
     revenueUncosted += Number(o.foodTotal)||0; // đồ ăn (food_gieogieo) chưa có UI nhập COGS -> tạm ước tính %
   });
@@ -2534,6 +2701,9 @@ function writeCachedDay(dateKey, dayAgg){
 }
 
 async function fetchSalesRange(startDate, endDate){
+  // Lịch sử giá phải có TRƯỚC khi tính bất kỳ ngày nào — thiếu nó thì mọi ngày rơi
+  // về giá hiện tại, đúng cái bệnh đang chữa.
+  await ensurePriceHistory();
   const days = [];
   let d = new Date(startDate);
   while(d <= endDate){ days.push(new Date(d)); d.setDate(d.getDate()+1); }
@@ -2550,7 +2720,7 @@ async function fetchSalesRange(startDate, endDate){
     if(cached[key]) return {date:key, ...cached[key]};
     const idx = missing.findIndex(m=>dkey(m)===key);
     const orders = fetchedResults[idx];
-    const agg = aggregateOrders(orders);
+    const agg = aggregateOrders(orders, key);
     const mix = rawMixFromOrders(orders);
     const dayAgg = {...agg, mix};
     if(isCacheable(d)) writeCachedDay(key, dayAgg);
@@ -3912,14 +4082,17 @@ function deleteToppingRecipe(toppingId){
 //    tính %COGS benchmark, cũng thuộc sổ Topping riêng (không lẫn vào món).
 // tId khớp topping ưu tiên lấy t.id (topping trả phí, POS đã vá thêm field này),
 // nếu không có thì lấy t._freeTpId (topping TẶNG — POS đã lưu sẵn field này).
-function computeToppingsCogsForLine(toppings){
+function computeToppingsCogsForLine(toppings, dateKey){
   let freeCost = 0, paidRealCost = 0, paidUncostedRevenue = 0;
   (toppings||[]).forEach(t=>{
     const isFree = !!(t && t._freeTpMark);
     const tId = t && (t.id || t._freeTpId);
     const rec = tId ? TOPPING_RECIPES[tId] : null;
     const q = Math.max(1, Number(t && t.qty)||1);
-    const realCost = (rec && Number(rec.costPerServing) > 0) ? Number(rec.costPerServing) * q : 0;
+    // Giá vốn topping theo ĐÚNG NGÀY của bill (tính lại từ công thức + giá nguyên
+    // liệu ngày đó), không lấy costPerServing đang lưu — số đang lưu là giá HÔM NAY.
+    const donGia = (rec && tId) ? toppingCostOn(tId, dateKey) : 0;
+    const realCost = donGia > 0 ? donGia * q : 0;
     if(isFree){
       // Topping tặng chưa khai GOGS: tạm coi giá vốn = 0 (không có doanh thu để ước
       // tính thay, và không nên tự suy diễn giá trị) — sẽ hiện cảnh báo "Chưa khai GOGS"
@@ -3970,11 +4143,11 @@ async function loadPackagingPresets(){
   PACKAGING_PRESETS = map;
   return map;
 }
-function computePackagingItemsCost(items){
-  return (items||[]).reduce((s,r)=>{
-    const it = INVENTORY_ITEMS.find(x=>x.id===r.itemId);
-    return s + (Number(r.qty)||0) * (it ? Number(it.costPerUnit)||0 : 0);
-  },0);
+// Mọi đường tính bao bì (bộ theo size, override theo món, quy tắc theo vật tư,
+// túi/khay theo bill) đều đi qua đúng hàm này — nên chỉ cần một chỗ này biết ngày
+// là cả tầng bao bì tính đúng theo lịch sử giá.
+function computePackagingItemsCost(items, dateKey){
+  return (items||[]).reduce((s,r)=> s + (Number(r.qty)||0) * itemCostOn(r.itemId, dateKey), 0);
 }
 function savePackagingPreset(sizeKey, data){
   return fstore.collection('packaging_presets_gieogieo').doc(sizeKey).set({...data, updatedAt:new Date().toISOString()});
@@ -4044,8 +4217,8 @@ function resolvePackagingItemsForLine(itemId, size, hasTopping){
   const def = PACKAGING_PRESETS[sizeKey];
   return (def && def.items) || [];
 }
-function packagingCostForLine(itemId, size, hasTopping){
-  return computePackagingItemsCost(resolvePackagingItemsForLine(itemId, size, hasTopping));
+function packagingCostForLine(itemId, size, hasTopping, dateKey){
+  return computePackagingItemsCost(resolvePackagingItemsForLine(itemId, size, hasTopping), dateKey);
 }
 
 // ============================================================
@@ -4199,8 +4372,8 @@ function pkgCtxFromLine(it){
   return { menuItemId, size, ice: it.ice, toppings,
            hasTopping: lineHasToppingTrigger(menuItemId, size, toppings) };
 }
-function packagingCostForCupLine(it){
-  return computePackagingItemsCost(resolvePackagingForCup(pkgCtxFromLine(it)));
+function packagingCostForCupLine(it, dateKey){
+  return computePackagingItemsCost(resolvePackagingForCup(pkgCtxFromLine(it)), dateKey);
 }
 // [NEW] Giá vốn bao bì của 1 ly cho màn CẤU HÌNH GOGS (tab Định mức/COGS).
 //
@@ -4362,9 +4535,9 @@ function computeBaggingPlan(cups, trayThreshold){
   const chungSingle = chungCount % 2;
   return { bagSingle: chungSingle, bagDouble: riengCount + chungDouble, tray: 0 };
 }
-function computeBaggingCostForOrder(order){
+function computeBaggingCostForOrder(order, dateKey){
   // Ưu tiên BẢNG mới nếu đã khai; chưa khai thì dùng công thức cũ.
-  if(pkgBagTableActive()) return computePackagingItemsCost(computeBaggingItemsForOrder(order));
+  if(pkgBagTableActive()) return computePackagingItemsCost(computeBaggingItemsForOrder(order), dateKey);
   const plan = computeBaggingPlan(cupsIceListForOrder(order), PACKAGING_BAGGING_RULES.trayThreshold);
   // Guard `kit && kit.items`: hàm này nằm trong aggregateOrders() — đường tính COGS
   // LÕI của mọi báo cáo. Nếu 1 kit bị thiếu/null trong dữ liệu (doc ghi lỗi, ghi từ
@@ -4372,7 +4545,7 @@ function computeBaggingCostForOrder(order){
   // riêng phần bao bì. Thiếu kit thì coi như chi phí 0 và đi tiếp.
   const kitCost = (kit, count) => {
     if(!count || !kit || !kit.items) return 0;
-    return count * computePackagingItemsCost(kit.items);
+    return count * computePackagingItemsCost(kit.items, dateKey);
   };
   const r = PACKAGING_BAGGING_RULES;
   return kitCost(r.bagSingle, plan.bagSingle) + kitCost(r.bagDouble, plan.bagDouble) + kitCost(r.tray, plan.tray);
@@ -4419,6 +4592,12 @@ function addPurchaseOrder(data){
       orderUnitFactor: Number(l.orderUnitFactor)||1,
       qtyExpectedOrder: Number(l.qtyExpectedOrder)||0,
       qtyExpectedBase: Number(l.qtyExpectedBase)||0,
+      // [MỚI] Giá của CHÍNH lần đặt này — giữ lại cả theo đơn vị đặt (đ/thùng, để
+      // đối chiếu với hoá đơn nhà cung cấp) lẫn theo đơn vị pha chế (đ/g, để khớp
+      // với mốc giá đã ghi). null = lần này không khai giá, dùng giá đang có.
+      unitPriceOrder: l.unitPriceOrder == null ? null : Number(l.unitPriceOrder)||0,
+      unitPriceBase:  l.unitPriceBase  == null ? null : Number(l.unitPriceBase)||0,
+      priceChanged: !!l.priceChanged,
       receivedGoodBase: 0, receivedDamagedBase: 0, wrongProduct: false
     })),
     createdAt: new Date().toISOString(),
@@ -7546,15 +7725,15 @@ function mixRange(){
 
 // Giá vốn 1 dòng ly = định mức món + topping khách gọi thêm + bao bì thật của dòng đó.
 // Dùng lại đúng 3 hàm mà màn Định mức/GOGS đang dùng, để con số không lệch giữa 2 màn.
-function mixLineCogs(it){
-  const rec = computeUnitCogsFromRecipe(it.itemId, it.size);
-  const tp = computeToppingsCogsForLine(it.toppings);
+function mixLineCogs(it, dateKey){
+  const rec = computeUnitCogsFromRecipe(it.itemId, it.size, dateKey);
+  const tp = computeToppingsCogsForLine(it.toppings, dateKey);
   // packagingCostForCupLine chỉ chạy engine quy tắc MỚI; quán chưa khai quy tắc nào
   // thì nó trả về rỗng và giá vốn bao bì thành 0, đẩy biên lãi cao giả tạo. Rơi về
   // mô hình "bộ theo size" y như packagingCostForMenuSize đang làm.
   let pkg = 0;
   try{
-    pkg = (pkgRulesActive() ? packagingCostForCupLine(it) : packagingCostForLine(it.itemId, it.size, !!(it.toppings||[]).length)) || 0;
+    pkg = (pkgRulesActive() ? packagingCostForCupLine(it, dateKey) : packagingCostForLine(it.itemId, it.size, !!(it.toppings||[]).length, dateKey)) || 0;
   }catch(e){ pkg = 0; }
   return {
     cogs: (rec==null?0:rec) + (tp.paidRealCost||0) + (tp.freeCost||0) + pkg,
@@ -7563,6 +7742,9 @@ function mixLineCogs(it){
 }
 
 async function computeMixReport(start, end){
+  // Biên lãi từng món phải đọc giá nguyên liệu CỦA NGÀY BÁN, nếu không thì mở lại
+  // báo cáo tháng trước sau một lần đổi giá là biên món đổi theo.
+  await ensurePriceHistory();
   const days = [];
   let d = new Date(start);
   while(d <= end){ days.push(new Date(d)); d.setDate(d.getDate()+1); }
@@ -7593,7 +7775,7 @@ async function computeMixReport(start, end){
         const k = it.itemId + '|' + (it.size||'-');
         if(!mon[k]) mon[k] = { itemId:it.itemId, size:it.size||'-', ten:it.name||'(không tên)', ly:0, tang:0, dt:0, cogs:0, chuaKhai:false };
         const m = mon[k];
-        const lc = mixLineCogs(it);
+        const lc = mixLineCogs(it, key);
         if(tang) m.tang += q; else m.ly += q;
         m.dt += (Number(it.price)||0)*q + (Number(it.toppingSum)||0)*q;
         m.cogs += lc.cogs*q;
@@ -8888,6 +9070,7 @@ function renderHealthPeriodNav(){
 // ------------------------------------------------------------
 async function computeLedgerRealMetrics(startDate, endDate){
   const startKey = dkey(startDate), endKey = dkey(endDate);
+  await ensurePriceHistory();
   const [txSnap, items, prepTxSnap] = await Promise.all([
     fstore.collection('stock_transactions_gieogieo').where('businessDate','>=',startKey).where('businessDate','<=',endKey).get(),
     loadInventoryItems(),
@@ -8898,7 +9081,10 @@ async function computeLedgerRealMetrics(startDate, endDate){
     // công nấu) mà lại không được đếm — làm số Waste thật thấp giả tạo.
     fstore.collection('prep_transactions_gieogieo').where('businessDate','>=',startKey).where('businessDate','<=',endKey).get()
   ]);
-  const costOf = id => { const it = items.find(x=>x.id===id); return it ? Number(it.costPerUnit)||0 : 0; };
+  // [SỬA] Trước đây định giá bằng costPerUnit HIỆN TẠI nên hao hụt/tiêu hao của
+  // tháng trước bị tính lại theo giá hôm nay. Giờ mỗi giao dịch được định giá bằng
+  // mốc giá có hiệu lực ĐÚNG NGÀY nó phát sinh (t.businessDate).
+  const costOf = (id, ngay) => itemCostOn(id, ngay);
   let wasteValue=0, wasteCount=0, consumptionValue=0, consumptionCount=0, adjustmentValue=0, adjustmentCount=0;
   // [MỚI] Hao hụt gom theo TỪNG NGÀY, không chỉ tổng cả kỳ — lãi/lỗ theo ngày cần
   // biết đúng ngày nào mất bao nhiêu. Cộng dồn ngay trong vòng lặp đang có thay vì
@@ -8921,7 +9107,7 @@ async function computeLedgerRealMetrics(startDate, endDate){
   };
   txSnap.forEach(doc=>{
     const t = doc.data();
-    const cost = costOf(t.itemId);
+    const cost = costOf(t.itemId, t.businessDate);
     const val = Math.abs(Number(t.qty)||0) * cost;
     if(t.type==='WASTE'){ wasteValue += val; wasteCount++; ghiNhanDoLy(t, val); ghiNhanHaoHutNgay(t, val); }
     else if(t.type==='CONSUMPTION'){ consumptionValue += val; consumptionCount++; }
@@ -9041,6 +9227,7 @@ async function computeInventoryHealth(soNgay){
   const now = new Date();
   const endKey = dkey(now);
   const startKey = dkey(new Date(Date.now() - (nNgay-1)*86400000));
+  await ensurePriceHistory();
   const [items, preps, txSnap, batchSnap] = await Promise.all([
     loadInventoryItems(),
     loadPrepItems().catch(err=>{ console.warn('[Kho] không đọc được bán thành phẩm:', err); return []; }),
@@ -9066,13 +9253,15 @@ async function computeInventoryHealth(soNgay){
   const tongVon = vonNL + vonBaoBi + vonBTP;
 
   // Tiêu hao thật trong cửa sổ + món nào đã được đụng tới
-  const costOf = id => { const it = items.find(x=>x.id===id); return it ? Number(it.costPerUnit)||0 : 0; };
+  // Tiêu hao định giá theo giá CỦA NGÀY tiêu hao; còn tồn kho ở trên định giá theo
+  // giá HIỆN TẠI — đúng bản chất: tồn là tiền đang nằm đó bây giờ, tiêu hao là tiền
+  // đã tiêu lúc đó.
   let tieuHao = 0;
   const ngayCoBan = new Set(), daDung = new Set();
   txSnap.forEach(doc=>{
     const t = doc.data();
     if(t.type !== 'CONSUMPTION') return;
-    tieuHao += Math.abs(Number(t.qty)||0) * costOf(t.itemId);
+    tieuHao += Math.abs(Number(t.qty)||0) * itemCostOn(t.itemId, t.businessDate);
     if(t.businessDate) ngayCoBan.add(t.businessDate);
     if(t.itemId) daDung.add(t.itemId);
   });
@@ -9306,7 +9495,7 @@ async function renderHealth(){
 
     <div class="card">
       <div class="card-h"><h3>${ic('link')} Số liệu thật từ Ledger</h3></div>
-      <div class="small-note" style="margin-bottom:8px">Đọc trực tiếp stock_transactions_gieogieo (nguyên liệu thô) + prep_transactions_gieogieo (bán thành phẩm) + daily_closings_gieogieo. Nguyên liệu thô định giá theo costPerUnit HIỆN TẠI (không có lịch sử giá); bán thành phẩm dùng totalCost đã lưu tại thời điểm huỷ.</div>
+      <div class="small-note" style="margin-bottom:8px">Đọc trực tiếp stock_transactions_gieogieo (nguyên liệu thô) + prep_transactions_gieogieo (bán thành phẩm) + daily_closings_gieogieo. Nguyên liệu thô định giá theo <b>mốc giá có hiệu lực đúng ngày giao dịch</b> (Kho → Nguyên liệu → Lịch sử giá), không phải giá hôm nay; bán thành phẩm dùng totalCost đã lưu tại thời điểm huỷ.</div>
       ${rowInfoHTML('GOGS — tiêu hao theo bán hàng (CONSUMPTION)', `${fmt(ledgerReal.consumptionValue)} · ${ledgerReal.consumptionCount} giao dịch`)}
       ${rowInfoHTML('Waste thật (từ ledger)', `${fmt(ledgerReal.wasteValue)} · ${ledgerReal.wasteCount} giao dịch`)}
       ${ledgerReal.prepWasteCount ? rowInfoHTML('— trong đó huỷ bán thành phẩm', `${fmt(ledgerReal.prepWasteValue)} · ${ledgerReal.prepWasteCount} giao dịch`) : ''}
@@ -11856,6 +12045,10 @@ const EXPORT_CONFIG_COLLS = [
   'packaging_item_overrides_gieogieo', 'packaging_rules_config_gieogieo',
   'packaging_bagging_table_gieogieo', 'packaging_bagging_rules_gieogieo',
   'waste_reasons_gieogieo', 'shift_checklists_gieogieo',
+  // [GIÁ] Lịch sử giá nguyên liệu — BẮT BUỘC có trong bản sao lưu: thiếu nó thì
+  // mọi báo cáo cũ dựng lại từ file sẽ tính bằng giá hiện tại, đúng cái bệnh mà
+  // bảng này sinh ra để chữa.
+  'price_history_gieogieo',
   // [TIÊU HAO] Ba nguồn mới. special_days + recipe_suggestions nhỏ, lấy trọn.
   // recipe_suggestions phải nằm trong file: nó là TẦNG "đề xuất", tách khỏi tầng
   // "dữ liệu gốc" (recipes_gieogieo) — Claude cần thấy cả hai mới biết cái nào đã
@@ -13105,6 +13298,15 @@ function renderInventoryItemFormFields(editingItem){
         <div class="small-note" id="invCostPreview" style="color:var(--gm);font-weight:600"></div>
       </div>
 
+      ${editingItem ? `
+      <div class="field"><label>Giá mới áp dụng từ ngày</label>
+        <input type="date" id="invCostFrom" value="${dkey(new Date())}" max="${dkey(new Date())}">
+        <div class="hint">Đổi giá <b>KHÔNG ghi đè</b> giá cũ — hệ thống tạo một mốc giá mới bắt đầu từ ngày này. Mọi báo cáo TRƯỚC ngày này vẫn tính theo giá cũ, nên số liệu tháng trước không bị đổi theo. Lùi ngày lại nếu thực tế giá đã tăng từ trước mà giờ mới khai.</div>
+      </div>
+      <div class="field" style="margin-bottom:0"><label>Lịch sử giá</label>
+        <div id="invPriceHistory"><div class="small-note">Đang đọc lịch sử giá…</div></div>
+      </div>` : ''}
+
       <label style="display:flex;align-items:flex-start;gap:9px;margin:10px 0 4px;font-size:13px;cursor:pointer">
         <input type="checkbox" id="invStaffCounts" ${(!editingItem || editingItem.staffCounts !== false) ? 'checked' : ''} style="width:20px;height:20px;flex-shrink:0;margin-top:1px">
         <b>Nhân viên phải kiểm kê món này</b>
@@ -13134,6 +13336,37 @@ function renderInventoryItemFormFields(editingItem){
       <div id="invVesselBox"></div>
       <button type="button" class="btn outline sm" style="margin-top:8px" onclick="goKho('refill')">Sang Refill để bật đếm cuối ca →</button>
   `;
+}
+
+// ---------- Lịch sử giá của nguyên liệu đang sửa ----------
+// Nạp NỀN: mở form ra là sửa được ngay, bảng lịch sử điền sau. Hỏng thì chỉ mất
+// bảng này, không chặn việc sửa nguyên liệu.
+const PRICE_SOURCE_LABEL = { manual:'sửa tay', po:'theo đơn đặt hàng', seed:'mốc gốc' };
+function renderItemPriceHistory(){
+  const box = document.getElementById('invPriceHistory');
+  if(!box || !editingItemId) return;
+  const it = INVENTORY_ITEMS.find(x=>x.id===editingItemId);
+  ensurePriceHistory().then(()=>{
+    const el = document.getElementById('invPriceHistory');
+    if(!el || editingItemId !== (it && it.id)) return;
+    const list = priceHistoryFor(editingItemId);
+    if(!list.length){
+      el.innerHTML = `<div class="small-note">Chưa có mốc giá nào được ghi. Giá <b>${fmtUnitPrice(Number(it&&it.costPerUnit)||0)}/${escapeHtmlAttr((it&&it.unit)||'')}</b> hiện đang được dùng cho MỌI ngày. Lần đổi giá tới sẽ tạo mốc đầu tiên, và những ngày trước mốc đó sẽ tự dùng lại giá cũ.</div>`;
+      return;
+    }
+    el.innerHTML = list.map(r=>{
+      const nguon = PRICE_SOURCE_LABEL[r.source] || r.source || '';
+      const cu = r.oldPrice != null ? `${fmtUnitPrice(r.oldPrice)} → ` : '';
+      return `<div class="row">
+        <span class="rl">Từ ${fmtDateVN(new Date(r.effectiveFrom+'T00:00:00'))}<span class="row-info-tag">· ${escapeHtmlAttr(nguon)}${r.supplier?' · '+escapeHtmlAttr(r.supplier):''}</span></span>
+        <span class="rv">${cu}<b>${fmtUnitPrice(r.price)}</b>/${escapeHtmlAttr(r.unit||(it&&it.unit)||'')}</span>
+      </div>`;
+    }).join('') + `<div class="small-note">Mốc cũ không bao giờ bị xoá hay sửa — đó là thứ giữ cho báo cáo quá khứ không đổi.</div>`;
+  }).catch(err=>{
+    console.warn('[Giá] không đọc được lịch sử:', err);
+    const el = document.getElementById('invPriceHistory');
+    if(el) el.innerHTML = '<div class="small-note">Không đọc được lịch sử giá.</div>';
+  });
 }
 
 // ---------- Khối "Theo dõi & kiểm kê" — vẽ riêng vì phụ thuộc 3 ô khác trên form ----------
@@ -13264,6 +13497,45 @@ function renderItemVesselPicker(){
         : 'Chưa chọn dụng cụ nào — POS vẫn cho nhân viên gõ tay như hiện tại, không chặn gì.'}</div>`;
 }
 
+// Ngày đang tra ở khối "Tra giá theo ngày" (màn Nguyên liệu).
+let khoPriceAsOfDate = null;
+function khoPriceAsOfChanged(val){
+  khoPriceAsOfDate = val || dkey(new Date());
+  renderPriceAsOf();
+}
+// Bảng giá tại MỘT ngày. Chỉ liệt kê món CÓ mốc giá — món chưa có mốc thì giá của
+// mọi ngày đều bằng giá hiện tại, in ra chỉ làm dài bảng mà không nói thêm điều gì;
+// số lượng món như vậy được nói gọn trong một dòng bên dưới.
+function renderPriceAsOf(){
+  const box = document.getElementById('khoPriceAsOfBox');
+  if(!box) return;
+  const ngay = khoPriceAsOfDate || dkey(new Date());
+  ensurePriceHistory().then(()=>{
+    const el = document.getElementById('khoPriceAsOfBox');
+    if(!el) return;
+    const coLichSu = INVENTORY_ITEMS.filter(it => (PRICE_HISTORY && PRICE_HISTORY[it.id] || []).length);
+    const chuaCo = INVENTORY_ITEMS.length - coLichSu.length;
+    if(!coLichSu.length){
+      el.innerHTML = `<div class="small-note">Chưa nguyên liệu nào có mốc giá. Mọi ngày đang dùng giá hiện tại — lần đổi giá tới (sửa tay hoặc khai giá khi tạo đơn đặt hàng) sẽ tạo mốc đầu tiên.</div>`;
+      return;
+    }
+    const rows = coLichSu.map(it=>{
+      const giaNgay = itemCostOn(it.id, ngay);
+      const giaNay = Number(it.costPerUnit)||0;
+      const khac = Math.abs(giaNgay - giaNay) > 1e-9;
+      return `<div class="row">
+        <span class="rl">${escapeHtmlAttr(it.name)}</span>
+        <span class="rv"><b>${fmtUnitPrice(giaNgay)}</b>/${escapeHtmlAttr(it.unit||'')}${khac?` <span class="small-note">· nay ${fmtUnitPrice(giaNay)}</span>`:''}</span>
+      </div>`;
+    }).join('');
+    el.innerHTML = rows + (chuaCo ? `<div class="small-note">${chuaCo} nguyên liệu khác chưa có mốc giá nào — ngày nào cũng tính theo giá hiện tại của chúng.</div>` : '');
+  }).catch(err=>{
+    console.warn('[Giá] không tra được:', err);
+    const el = document.getElementById('khoPriceAsOfBox');
+    if(el) el.innerHTML = '<div class="small-note">Không đọc được lịch sử giá.</div>';
+  });
+}
+
 function renderKhoItems(){
   const box = document.getElementById('khoBody');
   const editingItem = editingItemId ? INVENTORY_ITEMS.find(x=>x.id===editingItemId) : null;
@@ -13330,6 +13602,15 @@ function renderKhoItems(){
     ${filterChip}
     ${khoItemsFilter ? '' : `<div class="sec-title" style="margin-top:0">Danh mục nguyên liệu (${INVENTORY_ITEMS.length})</div>`}
     ${listHtml}
+    ${khoItemsFilter ? '' : `
+    <div class="sec-title" style="margin-top:18px">Tra giá theo ngày</div>
+    <div class="card">
+      <div class="small-note" style="margin-bottom:8px">Trả lời đúng câu hỏi "ngày đó món này giá bao nhiêu" — chính là mức giá mà mọi báo cáo của ngày đó đang dùng để tính giá vốn.</div>
+      <div class="field" style="margin-bottom:8px"><label>Xem giá vào ngày</label>
+        <input type="date" id="khoPriceAsOf" value="${escapeHtmlAttr(khoPriceAsOfDate||dkey(new Date()))}" max="${dkey(new Date())}" onchange="khoPriceAsOfChanged(this.value)">
+      </div>
+      <div id="khoPriceAsOfBox"><div class="small-note">Đang đọc lịch sử giá…</div></div>
+    </div>`}
   `;
 
   const adjustingItem = adjustingItemId ? INVENTORY_ITEMS.find(x=>x.id===adjustingItemId) : null;
@@ -13352,6 +13633,8 @@ function renderKhoItems(){
   syncItemUnitSelects();    // nạp dropdown đơn vị cho các ô số (phụ thuộc quy cách vừa render)
   renderTrackingBox();      // khối "Theo dõi & kiểm kê" — phụ thuộc quy cách + 2 ô tick ở trên
   renderItemVesselPicker(); // lưới dụng cụ cân — phụ thuộc đơn vị đang chọn ở trên
+  renderItemPriceHistory(); // các mốc giá đã ghi — nạp nền
+  renderPriceAsOf();        // bảng tra giá theo ngày — nạp nền
 }
 // [NEW — mục 1] Tính lại costPerUnit cho MỌI bán thành phẩm đang dùng nguyên
 // liệu vừa đổi giá. Trước đây giá CB chỉ tính lại khi mở form CB rồi bấm Lưu —
@@ -13420,22 +13703,52 @@ async function submitInventoryItem(){
     : (VESSELS.length
         ? (itemFormDraft.vesselIds||[]).filter(id=>VESSELS.some(v=>v.id===id)).slice(0, PREP_MAX_VESSELS)
         : (itemFormDraft.vesselIds||[]).slice(0, PREP_MAX_VESSELS));
+  // ---- Mốc giá ----
+  // Giá cũ lấy từ bản ghi đang có; ngày áp dụng do người dùng chọn (mặc định hôm nay).
+  const itemCu = editingItemId ? INVENTORY_ITEMS.find(x=>x.id===editingItemId) : null;
+  const giaCu = itemCu ? Number(itemCu.costPerUnit)||0 : null;
+  const ngayApDung = (document.getElementById('invCostFrom')?.value) || dkey(new Date());
+  if(ngayApDung > dkey(new Date())){ toast('⚠️ Ngày áp dụng giá không được ở tương lai'); return; }
+  const doiGia = !!itemCu && Math.abs(giaCu - costPerUnit) > 1e-9;
+
   let savedItemId = null; // id nguyên liệu vừa lưu — để lan giá sang bán thành phẩm
+  let idMoiTao = null;    // id nguyên liệu VỪA TẠO — để ghi mốc giá gốc đúng món
   try{
     if(editingItemId){
       savedItemId = editingItemId;
       await updateInventoryItemMeta(editingItemId, { name, minStock, costPerUnit, packagingUnits, staffCounts, isPackagingMaterial,
         trackingMode, countUnitName, stockManaged, openShelfLifeHours, vesselIds });
-      toast('✅ Đã lưu thay đổi');
+      // Ghi mốc giá SAU khi lưu thành công — không được để lịch sử có mốc mà bản ghi
+      // chính thì lưu hỏng. Ghi mốc hỏng cũng không nuốt lỗi: báo rõ để chủ quán biết
+      // giá đã đổi nhưng lịch sử chưa ghi được.
+      if(doiGia){
+        try{
+          await recordItemPriceChange({ itemId: editingItemId, itemName: name, unit: itemCu.unit,
+            newPrice: costPerUnit, oldPrice: giaCu, effectiveFrom: ngayApDung, source: 'manual' });
+          toast(`✅ Đã lưu · giá mới ${fmtUnitPrice(costPerUnit)}/${itemCu.unit} áp dụng từ ${ngayApDung}`);
+        }catch(err){
+          console.error('[Giá] ghi mốc giá thất bại', err);
+          showError('Đã lưu nguyên liệu nhưng CHƯA ghi được mốc giá — báo cáo cũ có thể bị tính theo giá mới. Thử sửa lại giá một lần nữa.');
+        }
+      } else toast('✅ Đã lưu thay đổi');
     } else {
       // Nguyên liệu MỚI thì chưa CB nào dùng được nó, không cần lan giá.
-      await addInventoryItem({
+      const refMoi = await addInventoryItem({
         name, unit: document.getElementById('invUnit').value,
         currentStock: v('invStart') * f('invStartUnit'),
         minStock, costPerUnit, packagingUnits, staffCounts, isPackagingMaterial,
         trackingMode, countUnitName, stockManaged, openShelfLifeHours, vesselIds
       });
+      idMoiTao = refMoi && refMoi.id;
       toast('✅ Đã thêm nguyên liệu');
+    }
+    // Nguyên liệu MỚI: ghi luôn một mốc GỐC để về sau tra ngày nào cũng có căn cứ,
+    // không phải suy từ "giá hiện tại" (thứ sẽ đổi).
+    if(!editingItemId && costPerUnit > 0 && idMoiTao){
+      try{
+        await recordItemPriceChange({ itemId: idMoiTao, itemName: name, unit: document.getElementById('invUnit')?.value || '',
+          newPrice: costPerUnit, oldPrice: null, effectiveFrom: dkey(new Date()), source: 'seed' });
+      }catch(err){ console.warn('[Giá] không ghi được mốc gốc (bỏ qua):', err); }
     }
     editingItemId = null; addingItem = false; itemFormDraft = {packagingUnits: []};
     INVENTORY_ITEMS = await loadInventoryItems();
@@ -16349,7 +16662,7 @@ let poDraftLines = []; // [{itemId, qty, unitFactor}] — dòng đang soạn PO 
 // Trước đây thêm 1 nguyên liệu là gọi renderKhoPO() vẽ lại cả màn → hai ô này bị
 // xoá trắng, và ô chọn ĐƠN VỊ của mọi dòng cũ nhảy về đơn vị gốc (hàm dựng option
 // không đánh dấu selected), nên nhìn như phải nhập lại từ đầu.
-let poDraftMeta = { supplier:'', note:'' };
+let poDraftMeta = { supplier:'', note:'', priceFrom: dkey(new Date()) };
 function poMetaChange(field, val){ poDraftMeta[field] = val; }
 
 // Chỉ vẽ lại KHỐI DÒNG, không vẽ lại cả màn — thêm/xoá dòng không còn phải đọc
@@ -16357,15 +16670,54 @@ function poMetaChange(field, val){ poDraftMeta[field] = val; }
 function renderPoDraftLines(){
   const el = document.getElementById('poDraftLines');
   if(el) el.innerHTML = poDraftLinesHtml();
+  poDraftLines.forEach((_,i)=>poRefreshPriceNote(i));
 }
 function poAddDraftLine(){
   if(!INVENTORY_ITEMS.length) return;
-  poDraftLines.push({itemId: INVENTORY_ITEMS[0].id, qty: 0, unitFactor: 1});
+  poDraftLines.push({itemId: INVENTORY_ITEMS[0].id, qty: 0, unitFactor: 1, priceOrder: null});
   renderPoDraftLines();
 }
 function poRemoveDraftLine(idx){ poDraftLines.splice(idx,1); renderPoDraftLines(); }
+
+// Giá hiện hành của 1 nguyên liệu quy về ĐƠN VỊ ĐẶT đang chọn (đ/thùng...).
+function poGiaHienTai(l){
+  const it = INVENTORY_ITEMS.find(x=>x.id===l.itemId);
+  return (Number(it && it.costPerUnit)||0) * (Number(l.unitFactor)||1);
+}
+// Dòng nhắc dưới ô giá: chỉ đổi ĐÚNG dòng chữ đó, không vẽ lại cả form (vẽ lại là
+// mất số đang gõ ở các dòng khác — cùng lý do với bảng cân bên POS).
+function poRefreshPriceNote(idx){
+  const el = document.getElementById('poPriceNote'+idx);
+  const l = poDraftLines[idx];
+  if(!el || !l) return;
+  const it = INVENTORY_ITEMS.find(x=>x.id===l.itemId);
+  const dvDat = poUnitLabelFor(it, Number(l.unitFactor)||1);
+  const cu = poGiaHienTai(l);
+  if(l.priceOrder == null || !(l.priceOrder > 0)){
+    el.innerHTML = `Giá hiện tại <b>${fmtUnitPrice(cu)}</b>/${escapeHtmlAttr(dvDat)} — để trống nếu lần này giá không đổi.`;
+    el.style.color = '';
+    return;
+  }
+  const chenh = l.priceOrder - cu;
+  if(Math.abs(chenh) < 1e-9){
+    el.innerHTML = `Bằng đúng giá hiện tại — sẽ không tạo mốc giá mới.`;
+    el.style.color = '';
+    return;
+  }
+  const pct = cu > 0 ? Math.round(Math.abs(chenh)/cu*1000)/10 : null;
+  el.innerHTML = `${chenh > 0 ? '▲ Tăng' : '▼ Giảm'} <b>${fmt(Math.abs(chenh))}</b>/${escapeHtmlAttr(dvDat)}${pct!=null?` · ${pct}%`:''} so với giá hiện tại (${fmtUnitPrice(cu)}) → <b>có thay đổi giá</b>, sẽ tạo mốc giá mới từ ngày đã chọn.`;
+  el.style.color = chenh > 0 ? 'var(--bad)' : 'var(--ok)';
+}
 function poDraftLineChange(idx, field, val){
   if(field==='qty') poDraftLines[idx].qty = Number(val)||0;
+  // Giá gõ theo ĐƠN VỊ ĐẶT (đ/thùng, đ/bao) — đúng cách nhà cung cấp báo giá.
+  // Để trống = lần này giá không đổi, hệ thống dùng tiếp giá đang có.
+  else if(field==='priceOrder'){
+    const raw = String(val==null?'':val).trim();
+    poDraftLines[idx].priceOrder = raw === '' ? null : (Number(raw)||0);
+    poRefreshPriceNote(idx);
+    return;
+  }
   else if(field==='unitFactor') poDraftLines[idx].unitFactor = Number(val)||1;
   // Đổi nguyên liệu thì quy cách đóng gói cũ không còn đúng → về đơn vị gốc và vẽ
   // lại để nạp đúng danh sách đơn vị của nguyên liệu mới.
@@ -16410,11 +16762,18 @@ function poDraftLinesHtml(){
           ${INVENTORY_ITEMS.map(x=>`<option value="${x.id}" ${x.id===l.itemId?'selected':''}>${escapeHtmlAttr(x.name)}</option>`).join('')}
         </select>
       </div>
-      <div class="field" style="margin-bottom:0"><label>Số lượng đặt</label>
+      <div class="field"><label>Số lượng đặt</label>
         <div class="pkg-eq">
           <input type="number" inputmode="decimal" step="0.01" value="${l.qty}" oninput="poDraftLineChange(${idx},'qty',this.value)">
           <select onchange="poDraftLineChange(${idx},'unitFactor',this.value)">${poUnitOptsFor(l.itemId, l.unitFactor)}</select>
         </div>
+      </div>
+      <div class="field" style="margin-bottom:0"><label>Giá lần này (tuỳ chọn)</label>
+        <div class="pkg-eq">
+          <input type="number" inputmode="decimal" step="0.01" placeholder="${fmtNum(poGiaHienTai(l),0)}" value="${l.priceOrder == null ? '' : l.priceOrder}" oninput="poDraftLineChange(${idx},'priceOrder',this.value)">
+          <span class="unit-tag">đ/${escapeHtmlAttr(poUnitLabelFor(INVENTORY_ITEMS.find(x=>x.id===l.itemId), Number(l.unitFactor)||1))}</span>
+        </div>
+        <div class="hint" id="poPriceNote${idx}"></div>
       </div>
     </div>`).join('');
 }
@@ -16432,8 +16791,13 @@ async function renderKhoPO(){
   const draftHtml = `
     <div class="card">
       <div class="field"><label>Nhà cung cấp (tuỳ chọn)</label><input type="text" id="poSupplier" placeholder="VD: Đại lý sữa ABC" value="${escapeHtmlAttr(poDraftMeta.supplier)}" oninput="poMetaChange('supplier',this.value)"></div>
+      <div class="unit-explainer">Mỗi dòng có ô <b>"Giá lần này"</b> — chỉ điền khi nhà cung cấp báo giá KHÁC giá đang lưu. Để trống thì hệ thống dùng tiếp giá hiện tại, không phải nhập lại mỗi lần đặt hàng.<br>Giá mới <b>không ghi đè</b> giá cũ: nó tạo một mốc giá mới bắt đầu từ ngày bên dưới, nên báo cáo của những ngày trước đó vẫn giữ nguyên giá cũ.</div>
       <div id="poDraftLines">${poDraftLinesHtml()}</div>
       <button class="btn outline sm" onclick="poAddDraftLine()" style="margin-bottom:10px">+ Thêm nguyên liệu</button>
+      <div class="field"><label>Giá mới áp dụng từ ngày</label>
+        <input type="date" id="poPriceFrom" value="${escapeHtmlAttr(poDraftMeta.priceFrom||dkey(new Date()))}" max="${dkey(new Date())}" onchange="poMetaChange('priceFrom',this.value)">
+        <div class="hint">Mặc định hôm nay. Lùi lại nếu giá này thực ra đã áp dụng từ lần nhập trước.</div>
+      </div>
       <div class="field"><label>Ghi chú</label><input type="text" id="poNote" placeholder="Ghi chú cho đơn đặt hàng" value="${escapeHtmlAttr(poDraftMeta.note)}" oninput="poMetaChange('note',this.value)"></div>
       <button class="btn" onclick="submitPurchaseOrder()">${ic('note',15)} Tạo đơn đặt hàng</button>
     </div>
@@ -16447,7 +16811,10 @@ async function renderKhoPO(){
         : (l.receivedGoodBase < l.qtyExpectedBase ? ' · <span style="color:#c0392b">thiếu</span>'
         : (l.receivedGoodBase > l.qtyExpectedBase ? ' · <span style="color:#2980b9">thừa</span>' : ''));
       const dmg = l.receivedDamagedBase>0 ? ` · hư hỏng ${poQtyText(l, l.receivedDamagedBase)}` : '';
-      return `${l.name}: đặt ${poQtyText(l, l.qtyExpectedBase)} — đã nhận ${poQtyText(l, l.receivedGoodBase)}${dmg}${flag}`;
+      const gia = l.unitPriceOrder != null
+        ? ` · ${fmtUnitPrice(l.unitPriceOrder)}/${escapeHtmlAttr(l.orderUnitName||l.unit||'')}${l.priceChanged?' <span class="tier tier-amber">đổi giá</span>':''}`
+        : '';
+      return `${l.name}: đặt ${poQtyText(l, l.qtyExpectedBase)} — đã nhận ${poQtyText(l, l.receivedGoodBase)}${dmg}${flag}${gia}`;
     }).join('<br>');
     return `<div class="litem" style="align-items:flex-start">
       <div class="li-l">
@@ -16475,12 +16842,21 @@ async function submitPurchaseOrder(){
   const supplier = (poDraftMeta.supplier||'').trim();
   const note = (poDraftMeta.note||'').trim();
   if(!poDraftLines.length){ toast('⚠️ Thêm ít nhất 1 nguyên liệu'); return; }
+  const ngayApDung = poDraftMeta.priceFrom || dkey(new Date());
+  if(ngayApDung > dkey(new Date())){ toast('⚠️ Ngày áp dụng giá không được ở tương lai'); return; }
   const lines = poDraftLines.map(l=>{
     const it = INVENTORY_ITEMS.find(x=>x.id===l.itemId);
     const f = Number(l.unitFactor)||1;
     const qty = Number(l.qty)||0;
+    // Giá gõ theo đơn vị đặt → quy về đơn vị pha chế để so với costPerUnit.
+    const giaDat = (l.priceOrder != null && l.priceOrder > 0) ? Number(l.priceOrder) : null;
+    const giaBase = giaDat != null && f > 0 ? giaDat / f : null;
+    const giaCu = Number(it && it.costPerUnit)||0;
     return {
       itemId: l.itemId, name: it?it.name:'', unit: it?it.unit:'',
+      unitPriceOrder: giaDat, unitPriceBase: giaBase,
+      priceChanged: giaBase != null && Math.abs(giaBase - giaCu) > 1e-9,
+      giaCuBase: giaCu,
       // Giữ CẢ HAI: số theo đơn vị đặt (để hiển thị, để POS đếm) và số quy ra đơn vị
       // pha chế (để cộng tồn kho). Trước đây chỉ giữ vế sau nên đơn vị đặt biến mất.
       orderUnitName: poUnitLabelFor(it, f), orderUnitFactor: f, qtyExpectedOrder: qty,
@@ -16489,10 +16865,36 @@ async function submitPurchaseOrder(){
   }).filter(l=>l.qtyExpectedBase>0);
   if(!lines.length){ toast('⚠️ Số lượng đặt phải lớn hơn 0'); return; }
   try{
-    await addPurchaseOrder({ supplier, note, lines, createdBy: '' });
+    const poRef = await addPurchaseOrder({ supplier, note, lines, createdBy: '' });
     toast('✅ Đã tạo đơn đặt hàng — POS sẽ thấy khi nhận hàng');
+
+    // ---- Cập nhật giá cho những dòng CÓ đổi giá ----
+    // Hai việc, đúng thứ tự: ghi MỐC GIÁ (lịch sử, không xoá được) rồi mới cập nhật
+    // costPerUnit (giá "hiện tại" dùng cho giao dịch mới). Ngược lại thì có lúc giá
+    // hiện tại đã đổi mà lịch sử chưa có mốc — báo cáo cũ sẽ bị tính theo giá mới.
+    const doiGia = lines.filter(l=>l.priceChanged);
+    let daGhi = 0, loi = 0;
+    for(const l of doiGia){
+      try{
+        await recordItemPriceChange({ itemId: l.itemId, itemName: l.name, unit: l.unit,
+          newPrice: l.unitPriceBase, oldPrice: l.giaCuBase, effectiveFrom: ngayApDung,
+          source: 'po', poId: poRef && poRef.id, supplier });
+        await updateInventoryItemMeta(l.itemId, { costPerUnit: l.unitPriceBase });
+        daGhi++;
+      }catch(err){ console.error('[Giá] cập nhật theo PO thất bại', l.itemId, err); loi++; }
+    }
+    if(daGhi){
+      INVENTORY_ITEMS = await loadInventoryItems();
+      // Giá đổi → giá vốn bán thành phẩm dùng nguyên liệu đó cũng đổi, và các ngày
+      // đã cache phải được tính lại theo ĐÚNG mốc giá (ngày cũ vẫn ra số cũ).
+      await Promise.all(doiGia.map(l=>recalcPrepCostsUsingItem(l.itemId).catch(()=>0)));
+      await invalidateSalesCache('cập nhật giá theo đơn đặt hàng');
+      toast(`✅ Đã tạo mốc giá mới cho ${daGhi} nguyên liệu, áp dụng từ ${ngayApDung}`);
+    }
+    if(loi) showError(`${loi} nguyên liệu chưa cập nhật được giá — đơn hàng vẫn đã tạo. Vào Kho → Nguyên liệu sửa giá tay cho những món đó.`);
+
     poDraftLines = [];
-    poDraftMeta = { supplier:'', note:'' };
+    poDraftMeta = { supplier:'', note:'', priceFrom: dkey(new Date()) };
     renderKhoPO();
   }catch(err){ console.error(err); showError('Tạo đơn đặt hàng thất bại: '+(err.code||err.message||err)); }
 }
@@ -19005,7 +19407,10 @@ function saveTopping() {
     const [rec, cogs, inv, prep, top, pres, ovr, bag, rules, rulesCfg, bagTbl] = await Promise.all([
       loadRecipes(), loadCogsMaps(), loadInventoryItems(), loadPrepItems(), loadToppingRecipes(),
       loadPackagingPresets(), loadPackagingItemOverrides(), loadPackagingBaggingRules(),
-      loadPackagingRules(), loadPackagingRulesConfig(), loadPackagingBaggingTable()
+      loadPackagingRules(), loadPackagingRulesConfig(), loadPackagingBaggingTable(),
+      // Lịch sử giá đi cùng lượt này: thiếu nó thì màn đầu tiên tính COGS bằng giá
+      // hiện tại cho MỌI ngày — đúng cái bệnh đang chữa.
+      ensurePriceHistory().catch(err=>{ console.warn('[Giá] không nạp được lịch sử giá:', err); return null; })
     ]);
     INVENTORY_ITEMS = inv;
     PREP_ITEMS = prep;
