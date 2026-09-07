@@ -20922,9 +20922,17 @@ function assistProviderTopping(out) {
   const minRate = Number(cfg.minRate) || 0;
   const minSample = Number(cfg.minSample) || 0;
 
+  // [QUAN TRỌNG] Bỏ qua ly thuộc chương trình TẶNG topping cho thành viên đang
+  // chạy. Mời khách MUA đúng cái mà quán đang sẵn sàng TẶNG là tự bắn vào chân:
+  // hoặc khách mua rồi phát hiện ra đáng lẽ được tặng, hoặc nhân viên phải rút
+  // lại lời mời. Luồng tặng topping đã có sẵn (renderFreeTpReminder nhắc xin SĐT,
+  // checkFreeToppingMemberPromo mở popup chọn ở màn thanh toán) — để nó lo.
+  const freeTpOn = !!(togoSettings.freeTopping && togoSettings.freeTopping.enabled);
+
   // Ưu tiên ly CHƯA có topping (cơ hội upsale rõ nhất), rồi tới ly đắt tiền hơn.
   const ungVien = assistPaidLines()
     .filter(x => !x.c.isFood && !x.c.freeTpApplied)
+    .filter(x => !(freeTpOn && isFreeTpEligibleItem(x.c.itemId)))
     .sort((a, b) => {
       const aTrong = (a.c.toppings || []).length === 0 ? 0 : 1;
       const bTrong = (b.c.toppings || []).length === 0 ? 0 : 1;
