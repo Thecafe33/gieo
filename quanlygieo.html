@@ -6631,6 +6631,388 @@ async function removeSpecialDay(date){
   catch(err){ console.error(err); showError('Không xoá được: '+(err.code||err.message||err)); }
 }
 
+// ============================================================
+// DỰ BÁO & SỐ MẺ (Đợt 2 của KE-HOACH-tieu-hao-thuc-te.md)
+//
+// Mục tiêu KHÔNG phải "đủ hàng" mà là: đủ phục vụ + dư ít + huỷ ít nhất.
+// Khi phải chọn giữa thiếu nhẹ và nấu dư nhiều, ưu tiên ít lãng phí — nhưng CHỈ
+// với hàng hạn ngắn (nấu thêm được trong ngày); hàng để được sang mai thì làm
+// tròn lên, vì dư hôm nay không mất gì.
+//
+// Nguyên tắc gắt nhất: CHƯA ĐỦ DỮ LIỆU THÌ NÓI CHƯA ĐỦ. Quán mới chạy quy trình
+// mới từ 06/09/2026, vài tuần đầu chưa phân biệt được "thứ 7 đông hơn thật" với
+// "tuần đó vừa có khuyến mãi" — đưa ra một con số nghe như chắc chắn lúc đó là
+// tệ hơn không đưa gì.
+// ============================================================
+const DB_SO_TUAN = 8;          // nhìn lại tối đa 8 tuần cùng thứ
+const DB_MIN_NGAY = 7;         // dưới 7 ngày có dữ liệu → chưa dự báo
+const DB_MIN_CUNG_THU = 2;     // dưới 2 lần cùng thứ → hạ một bậc tin cậy
+const DB_XU_HUONG_MIN = 0.80;  // kẹp xu hướng: một tuần bão không được kéo dự báo xuống 40%
+const DB_XU_HUONG_MAX = 1.25;
+const DB_DEM_HAN_NGAN = 0.05;  // đệm an toàn 5% cho hàng bỏ trong ngày
+const DB_DEM_DE_DUOC = 0.10;   // 10% cho hàng để được sang mai (dư không mất gì)
+const DB_NGUONG_LAM_TRON_XUONG = 0.25; // thiếu ≤ 25% một mẻ thì chấp nhận thiếu, không nấu thêm cả mẻ
+
+// Lịch sử theo ngày của từng bán thành phẩm, từ ledger BTP.
+//   dung = CONSUMPTION (bán ra), huy = WASTE, nau = PRODUCTION
+// "Dùng" và "huỷ" phải TÁCH: nấu 100 bán 60 đổ 40 mà gộp thành "tiêu thụ 100"
+// thì hôm sau lại nấu 100, và lại đổ 40.
+function thLichSuBTP(prepTxs){
+  const out = {};
+  (prepTxs||[]).forEach(t=>{
+    const id = t.prepId; if(!id) return;
+    const d = t.businessDate || String(t.createdAt||'').slice(0,10); if(!d) return;
+    const loai = String(t.type||'').toUpperCase();
+    out[id] = out[id] || {};
+    const o = out[id][d] = out[id][d] || { dung:0, huy:0, nau:0 };
+    const q = Math.abs(Number(t.qty)||0);
+    if(loai === 'CONSUMPTION') o.dung += q;
+    else if(loai === 'WASTE') o.huy += q;
+    else if(loai === 'PRODUCTION') o.nau += q;
+  });
+  return out;
+}
+
+function dbThu(dateKey){ const d = new Date(dateKey+'T12:00:00'); return isNaN(d) ? null : d.getDay(); }
+function dbLui(dateKey, n){ const d = new Date(dateKey+'T12:00:00'); d.setDate(d.getDate()-n); return dkey(d); }
+
+// Dự báo lượng DÙNG của một ngày.
+//   lichSuNgay : { 'YYYY-MM-DD': {dung, huy, nau} } của đúng một bán thành phẩm
+//   ngayDich   : ngày cần dự báo
+//   ngayDacBiet: { 'YYYY-MM-DD': {loai, ten} } — ngày CHƯA KHAI thì không có khoá
+function thDuBao({ lichSuNgay, ngayDich, ngayDacBiet, soTuan }){
+  const ls = lichSuNgay || {};
+  const dd = ngayDacBiet || {};
+  const ghiChu = [];
+  // Chỉ lấy ngày TRƯỚC ngày đích — dùng chính ngày đích để dự báo nó là gian lận.
+  const cacNgay = Object.keys(ls).filter(d => d < ngayDich).sort();
+  if(cacNgay.length < DB_MIN_NGAY){
+    return { duBao:null, nen:null, xuHuong:null, heSoDacBiet:null,
+      soNgayCoDuLieu: cacNgay.length, soMauCungThu: 0,
+      tinCay:{ muc:'chuaDu', nhan:'Chưa đủ dữ liệu',
+        giaiThich:'Mới có '+cacNgay.length+' ngày có số liệu, cần ít nhất '+DB_MIN_NGAY+' ngày. Chưa dự báo được — cứ nấu theo kinh nghiệm và để hệ thống ghi nhận thêm.' },
+      ghiChu };
+  }
+
+  const thuDich = dbThu(ngayDich);
+  const gioiHan = dbLui(ngayDich, (soTuan || DB_SO_TUAN) * 7);
+  // NỀN = trung vị của CÙNG THỨ. Trung vị chứ không phải trung bình: một hôm đổ
+  // nguyên nồi hoặc một hôm đoàn khách 30 người không được kéo lệch cả tháng.
+  const cungThuThuong = cacNgay.filter(d => d >= gioiHan && dbThu(d) === thuDich && !dd[d]).map(d => ls[d].dung);
+  const moiNgayThuong = cacNgay.filter(d => !dd[d]).map(d => ls[d].dung);
+  let nen, nguonNen;
+  if(cungThuThuong.length >= DB_MIN_CUNG_THU){ nen = thTrungVi(cungThuThuong); nguonNen = 'cùng thứ'; }
+  else {
+    nen = thTrungVi(moiNgayThuong.length ? moiNgayThuong : cacNgay.map(d=>ls[d].dung));
+    nguonNen = 'mọi ngày';
+    ghiChu.push('Mới có ' + cungThuThuong.length + ' lần cùng thứ trong ' + (soTuan||DB_SO_TUAN) + ' tuần — đang lấy trung vị MỌI NGÀY thay vì riêng thứ này.');
+  }
+
+  // XU HƯỚNG = 14 ngày ngay trước ngày đích so với 14 ngày liền trước đó.
+  // Ba chi tiết nhỏ nhưng quyết định con số:
+  //   · Hai cửa sổ phải DÀI BẰNG NHAU và cùng chứa số ngày cuối tuần như nhau —
+  //     lệch một ngày thứ 7 là đủ ra "xu hướng giảm 12%" hoàn toàn tưởng tượng.
+  //   · So bằng TRUNG BÌNH MỖI NGÀY, không phải tổng: ngày nghỉ/thiếu dữ liệu làm
+  //     hai cửa sổ có số ngày khác nhau thì tổng không so được với nhau.
+  //   · BỎ ngày đặc biệt ra: một đợt khuyến mãi tuần trước không phải là xu hướng.
+  const tbNgayThuong = (tu, den) => {
+    const v = cacNgay.filter(d => d >= tu && d <= den && !dd[d]).map(d => ls[d].dung);
+    return v.length ? v.reduce((s,x)=>s+x,0)/v.length : null;
+  };
+  const gan   = tbNgayThuong(dbLui(ngayDich,14), dbLui(ngayDich,1));
+  const truoc = tbNgayThuong(dbLui(ngayDich,28), dbLui(ngayDich,15));
+  let xuHuong = 1;
+  if(gan > 0 && truoc > 0){
+    xuHuong = Math.min(DB_XU_HUONG_MAX, Math.max(DB_XU_HUONG_MIN, gan/truoc));
+    if(gan/truoc > DB_XU_HUONG_MAX || gan/truoc < DB_XU_HUONG_MIN)
+      ghiChu.push('Xu hướng thật là ×' + fmtNum(gan/truoc,2) + ', đã kẹp lại còn ×' + fmtNum(xuHuong,2) + ' để một giai đoạn bất thường không kéo dự báo đi quá xa.');
+  } else ghiChu.push('Chưa đủ 4 tuần để đo xu hướng — tạm coi là đi ngang.');
+
+  // NGÀY ĐẶC BIỆT: học từ chính những ngày cùng loại ĐÃ TỪNG xảy ra. Chưa có ngày
+  // nào cùng loại thì hệ số 1,00 và NÓI RÕ là chưa có căn cứ — không bịa "lễ thì
+  // nhân 1,5" vì con số đó không đến từ dữ liệu của quán này.
+  let heSoDacBiet = 1, mauDacBiet = 0;
+  const loaiDich = dd[ngayDich] && dd[ngayDich].loai;
+  if(loaiDich){
+    const nenThuong = thTrungVi(moiNgayThuong);
+    const tyLe = cacNgay.filter(d => dd[d] && dd[d].loai === loaiDich && nenThuong > 0)
+                        .map(d => ls[d].dung / nenThuong);
+    mauDacBiet = tyLe.length;
+    if(tyLe.length){
+      heSoDacBiet = thTrungVi(tyLe);
+      ghiChu.push('Ngày này khai là "' + specialDayLabel(loaiDich) + '" — học từ ' + tyLe.length + ' ngày cùng loại trước đó, hệ số ×' + fmtNum(heSoDacBiet,2) + '.');
+    } else {
+      ghiChu.push('Ngày này khai là "' + specialDayLabel(loaiDich) + '" nhưng CHƯA có ngày cùng loại nào trong lịch sử — không có căn cứ để nhân hệ số, đang để ×1,00. Tự cân nhắc thêm.');
+    }
+  }
+
+  const duBao = Math.max(0, (nen||0) * xuHuong * heSoDacBiet);
+  const tinCay = (nguonNen === 'cùng thứ' && cacNgay.length >= 21)
+      ? { muc:'du', nhan:'Đáng tin', giaiThich: cungThuThuong.length + ' lần cùng thứ · ' + cacNgay.length + ' ngày dữ liệu.' }
+      : { muc:'yeu', nhan:'Tạm dùng', giaiThich:'Có ' + cacNgay.length + ' ngày dữ liệu' + (nguonNen==='cùng thứ' ? '' : ', chưa đủ mẫu cùng thứ') + ' — dùng làm tham khảo, chưa nên tin tuyệt đối.' };
+  return { duBao, nen, nguonNen, xuHuong, heSoDacBiet, mauDacBiet,
+           soNgayCoDuLieu: cacNgay.length, soMauCungThu: cungThuThuong.length, tinCay, ghiChu };
+}
+
+// Từ dự báo ra KẾ HOẠCH NẤU. Hàm thuần.
+function thKeHoachNau({ duBao, tonDungDuoc, yieldMoiMe, shelfLifeType, demPct }){
+  const db = Number(duBao)||0;
+  const ton = Number(tonDungDuoc)||0;
+  const y = Number(yieldMoiMe)||0;
+  const hanNgan = shelfLifeType === 'endOfDay' || shelfLifeType === 'hours';
+  const dem = demPct != null ? demPct : (hanNgan ? DB_DEM_HAN_NGAN : DB_DEM_DE_DUOC);
+  const can = Math.max(0, db * (1 + dem) - ton);
+  if(!(y > 0)) return { can, soMe:null, sanXuat:0, thieuYield:true,
+    lyDo:'Chưa khai "khối lượng thu được mỗi mẻ" nên không quy ra số mẻ được.' };
+
+  const meTho = can / y;
+  const meXuong = Math.floor(meTho);
+  const thieuNeuXuong = can - meXuong * y;
+  let soMe, quyTac;
+  if(hanNgan && meXuong >= 0 && thieuNeuXuong <= DB_NGUONG_LAM_TRON_XUONG * y){
+    soMe = meXuong;
+    quyTac = 'Hàng hạn ngắn: thiếu ' + fmtNum(thieuNeuXuong,0) + ' (dưới ' + Math.round(DB_NGUONG_LAM_TRON_XUONG*100) + '% một mẻ) nên KHÔNG nấu thêm cả mẻ — thiếu nhẹ vẫn hơn đổ đi một mẻ.';
+  } else {
+    soMe = Math.ceil(meTho);
+    quyTac = hanNgan
+      ? 'Hàng hạn ngắn: phần thiếu quá lớn nên vẫn phải nấu thêm một mẻ.'
+      : 'Hàng để được sang ngày sau: làm tròn lên, dư hôm nay không mất gì.';
+  }
+  const sanXuat = soMe * y;
+  const tongKhaDung = ton + sanXuat;
+  const duKienDu = tongKhaDung - db;
+  return {
+    can, meTho, soMe, sanXuat, tongKhaDung,
+    duKienDu, nguyCoThieu: duKienDu < 0 ? -duKienDu : 0,
+    // Hàng bỏ cuối ca thì phần dư là phần PHẢI ĐỔ. Hàng để được thì dư chuyển sang
+    // mai, không tính là huỷ — nhưng vẫn hiện ra để thấy đang tồn bao nhiêu.
+    duKienHuy: shelfLifeType === 'endOfDay' ? Math.max(0, duKienDu) : 0,
+    demDaDung: dem, hanNgan, quyTac
+  };
+}
+
+// Tồn CÒN DÙNG ĐƯỢC tại đầu ngày đích: cộng các lô còn hàng và CHƯA hết hạn tính
+// tới đầu ngày đó. Lô hết hạn không phải là hàng — cộng vào là tự lừa mình rồi
+// hôm sau vừa thiếu vừa phải đổ.
+function thTonDungDuoc(batches, prepId, ngayDich, shelfLifeType){
+  const mocISO = ngayDich + 'T00:00:00';
+  let dung = 0, hetHan = 0;
+  (batches||[]).forEach(b=>{
+    if(b.prepId !== prepId) return;
+    if(b.status !== 'active') return;
+    const con = Number(b.qtyRemaining)||0;
+    if(!(con > 0)) return;
+    // Hàng bỏ cuối ca: lô nấu từ ngày trước không mang sang được.
+    if(shelfLifeType === 'endOfDay' && (b.businessDate || String(b.finishedAt||'').slice(0,10)) < ngayDich){ hetHan += con; return; }
+    if(b.expiresAt && new Date(b.expiresAt) <= new Date(mocISO)){ hetHan += con; return; }
+    dung += con;
+  });
+  return { dung, hetHan };
+}
+
+// So dự báo đã lưu với thực tế đã xảy ra — không có bước này thì không bao giờ
+// biết dự báo đang tốt lên hay xấu đi.
+function thDoiChieuDuBao(forecasts, lichSuBTP){
+  return (forecasts||[]).map(f=>{
+    const ls = (lichSuBTP||{})[f.prepId] || {};
+    const that = ls[f.date];
+    if(!that) return { ...f, thucTeDung:null, thucTeHuy:null, saiSo:null, saiSoPct:null, chuaCoThucTe:true };
+    const saiSo = (Number(f.duBao)||0) - that.dung;
+    return { ...f, thucTeDung: that.dung, thucTeHuy: that.huy, thucTeNau: that.nau,
+      saiSo, saiSoPct: that.dung > 0 ? saiSo/that.dung*100 : null,
+      // "Đúng" nghĩa là đủ bán mà không phải đổ nhiều — không phải trúng phóc con số.
+      duBan: (Number(f.tongKhaDung)||0) >= that.dung,
+      chuaCoThucTe:false };
+  });
+}
+
+// ------------------------------------------------------------
+// SỔ DỰ BÁO — prep_forecasts_gieogieo, doc id = 'YYYY-MM-DD_<prepId>'
+// Ghi lại ĐÚNG con số đã đề xuất tại thời điểm đề xuất, kèm căn cứ. Không có sổ
+// này thì không bao giờ biết dự báo đang tốt lên hay xấu đi — mà đó chính là thứ
+// quyết định có nên tin nó hay không.
+// ------------------------------------------------------------
+async function loadPrepForecasts(startKey, endKey){
+  let q = fstore.collection('prep_forecasts_gieogieo');
+  if(startKey && endKey) q = q.where('date','>=',startKey).where('date','<=',endKey);
+  const snap = await q.get();
+  return snap.docs.map(d=>({id:d.id, ...d.data()})).sort((a,b)=> a.date < b.date ? 1 : -1);
+}
+function savePrepForecast(date, prepId, data){
+  return fstore.collection('prep_forecasts_gieogieo').doc(date + '_' + prepId)
+    .set({ ...data, date, prepId, luuLuc:new Date().toISOString() }, {merge:true});
+}
+async function loadPrepTxRange(startKey, endKey){
+  const snap = await fstore.collection('prep_transactions_gieogieo')
+    .where('businessDate','>=',startKey).where('businessDate','<=',endKey).get();
+  return snap.docs.map(d=>({id:d.id, ...d.data()}));
+}
+
+// ============================================================
+// MÀN "DỰ BÁO & SỐ MẺ"
+// ============================================================
+let dbNgay = null;          // ngày cần lên kế hoạch
+let dbKetQua = null;        // [{prep, duBao, keHoach, ton}]
+let dbDoiChieu = null;      // đối chiếu dự báo cũ với thực tế
+let _dbBusy = false;
+
+function dbNgayMai(){ const d = new Date(); d.setDate(d.getDate()+1); return dkey(d); }
+
+async function renderKhoDuBao(){
+  const box = document.getElementById('khoBody');
+  if(!dbNgay) dbNgay = dbNgayMai();
+  box.innerHTML = `
+    <div class="card">
+      <div class="field" style="margin-bottom:8px"><label>Lên kế hoạch cho ngày</label>
+        <input type="date" id="dbNgay" value="${dbNgay}"></div>
+      <button class="btn" onclick="dbChay()">${ic('chart',15)} Tính đề xuất</button>
+    </div>
+    <div class="unit-explainer" style="margin-bottom:12px">
+      Mục tiêu <b>không phải "đủ hàng"</b> mà là: đủ phục vụ · dư ít · huỷ ít nhất.<br>
+      Nền lấy <b>trung vị cùng thứ</b> trong 8 tuần gần nhất (trung vị chứ không phải trung bình — một hôm đoàn khách 30 người không được kéo lệch cả tháng), nhân với xu hướng 14 ngày và hệ số ngày đặc biệt <b>học từ chính lịch sử quán</b>.<br>
+      Hàng <b>bỏ cuối ca</b>: thiếu dưới ¼ mẻ thì không nấu thêm cả mẻ — thiếu nhẹ vẫn hơn đổ đi một mẻ. Hàng <b>để được sang mai</b> thì làm tròn lên, dư không mất gì.<br>
+      Chưa đủ ${DB_MIN_NGAY} ngày dữ liệu thì <b>không dự báo</b> — sẽ nói thẳng là chưa đủ chứ không đưa một con số nghe như chắc chắn.
+    </div>
+    <div id="dbBody"></div>`;
+  if(dbKetQua) dbVeBang();
+}
+
+async function dbChay(){
+  if(_dbBusy){ toast('⏳ Đang tính...'); return; }
+  dbNgay = document.getElementById('dbNgay').value;
+  if(!dbNgay){ toast('⚠️ Chọn ngày'); return; }
+  _dbBusy = true;
+  const body = document.getElementById('dbBody');
+  body.innerHTML = '<div class="card"><div class="muted">Đang đọc lịch sử tiêu thụ, lô đang còn và ngày đặc biệt...</div></div>';
+  try{
+    await ensureAuth();
+    const tu = dbLui(dbNgay, DB_SO_TUAN*7), den = dbLui(dbNgay, 1);
+    const [preps, txs, batches, sdays, forecasts] = await Promise.all([
+      loadPrepItems(),
+      loadPrepTxRange(tu, dkey(new Date())),          // tới hôm nay, để đối chiếu dự báo cũ
+      loadPrepBatches(400).catch(()=>[]),
+      loadSpecialDays(tu, dbNgay).catch(()=>[]),
+      loadPrepForecasts(tu, dbNgay).catch(()=>[])
+    ]);
+    PREP_ITEMS = preps;
+    const lichSu = thLichSuBTP(txs);
+    const ddMap = {}; (sdays||[]).forEach(d=> ddMap[d.date] = d);
+    dbKetQua = preps.filter(p=>p.active!==false).map(p=>{
+      const ton = thTonDungDuoc(batches, p.id, dbNgay, p.shelfLifeType);
+      const dubao = thDuBao({ lichSuNgay: lichSu[p.id]||{}, ngayDich: dbNgay, ngayDacBiet: ddMap });
+      const keHoach = dubao.duBao == null ? null : thKeHoachNau({
+        duBao: dubao.duBao, tonDungDuoc: ton.dung,
+        yieldMoiMe: prepEffectiveYield(p), shelfLifeType: p.shelfLifeType
+      });
+      return { prep:p, ton, dubao, keHoach, daLuu: forecasts.some(f=>f.date===dbNgay && f.prepId===p.id) };
+    });
+    dbDoiChieu = thDoiChieuDuBao(forecasts.filter(f=>f.date < dkey(new Date())), lichSu).slice(0, 20);
+    dbNgayDacBiet = ddMap[dbNgay] || null;
+    dbVeBang();
+  }catch(err){
+    console.error('dbChay lỗi', err);
+    body.innerHTML = '<div class="card"><div class="muted">Không tính được: '+(err.code||err.message||err)+'</div></div>';
+  }finally{ _dbBusy = false; }
+}
+let dbNgayDacBiet = null;
+
+function dbVeBang(){
+  const box = document.getElementById('dbBody');
+  if(!box || !dbKetQua) return;
+  const coSo = dbKetQua.filter(x=>x.dubao.duBao != null);
+  const chuaDu = dbKetQua.filter(x=>x.dubao.duBao == null);
+  const thu = _expThuTrongTuan(dbNgay);
+
+  const dau = `<div class="card">
+    <div class="card-h"><h3>${ic('calendar')} ${thu} · ${dbNgay}</h3>
+      ${dbNgayDacBiet ? `<span class="tier" style="background:var(--warn-bg);color:var(--warn)">${specialDayLabel(dbNgayDacBiet.loai)}</span>` : ''}</div>
+    ${dbNgayDacBiet ? `<div class="small-note">Đã khai: <b>${escapeHtmlAttr(dbNgayDacBiet.ten||'')}</b></div>` : `<div class="small-note">Ngày này chưa khai là ngày đặc biệt. Nếu có lễ/khuyến mãi thì <b>khai trước</b> ở Cấu hình → Ngày đặc biệt rồi tính lại.</div>`}
+    ${rowInfoHTML('Bán thành phẩm dự báo được', `${coSo.length}/${dbKetQua.length}`)}
+  </div>`;
+
+  const theCard = (x)=>{
+    const p = x.prep, d = x.dubao, k = x.keHoach;
+    const dv = p.unit||'';
+    if(!k){
+      return `<div class="card" style="opacity:.9">
+        <div class="card-h"><h3>${escapeHtmlAttr(p.name||'')}</h3><span class="tier" style="background:var(--bb);color:var(--bi)">${d.tinCay.nhan}</span></div>
+        <div class="small-note">${d.tinCay.giaiThich}</div>
+        ${rowInfoHTML('Tồn còn dùng được', `${fmtNum(x.ton.dung,0)} ${dv}`)}
+        ${x.ton.hetHan>0 ? `<div class="small-note" style="color:var(--warn);margin-top:4px">${fmtNum(x.ton.hetHan,0)} ${dv} đã quá hạn / không mang sang được — không tính vào tồn dùng được.</div>` : ''}
+      </div>`;
+    }
+    const thieu = k.nguyCoThieu > 0;
+    return `<div class="card">
+      <div class="card-h"><h3>${escapeHtmlAttr(p.name||'')}</h3>
+        <span class="tier tier-${d.tinCay.muc==='du'?'green':'amber'}">${d.tinCay.nhan}</span></div>
+      <div style="display:flex;flex-wrap:wrap;gap:12px 18px;margin:4px 0 8px">
+        ${thSoHTML('Tồn đầu ngày', x.ton.dung, dv)}
+        ${thSoHTML('Dự báo bán', d.duBao, dv)}
+        ${thSoHTML('Cần sản xuất', k.can, dv)}
+        ${thSoHTML('Tổng khả dụng', k.tongKhaDung, dv)}
+      </div>
+      <div class="row" style="border-top:1.5px solid var(--line);padding-top:8px">
+        <span class="rl"><b>Đề xuất nấu</b>
+          <div class="small-note" style="margin-top:1px">${fmtNum(prepEffectiveYield(p),0)} ${dv}/mẻ${p.prepTimeMinutes>0?' · nấu ~'+p.prepTimeMinutes+' phút':''}${prepShelfLabel(p)?' · '+prepShelfLabel(p):''}</div></span>
+        <span class="rv" style="font-size:17px"><b>${k.soMe} mẻ</b> <span style="font-size:12px;color:var(--gt)">= ${fmtNum(k.sanXuat,0)} ${dv}</span></span>
+      </div>
+      <div class="row">
+        <span class="rl">${thieu ? 'Nguy cơ THIẾU' : 'Dự kiến dư'}</span>
+        <span class="rv" style="color:${thieu?'var(--bad)':(k.duKienHuy>0?'var(--warn)':'var(--ok)')}">
+          ${thieu ? fmtNum(k.nguyCoThieu,0)+' '+dv : fmtNum(k.duKienDu,0)+' '+dv}
+          ${k.duKienHuy>0 ? `<div class="small-note" style="color:var(--warn)">dự kiến phải đổ ${fmtNum(k.duKienHuy,0)} ${dv} cuối ca</div>` : ''}</span>
+      </div>
+      <div class="small-note" style="margin-top:8px">${k.quyTac}</div>
+      <div class="small-note" style="margin-top:4px">Nền ${fmtNum(d.nen,0)} ${dv} (${d.nguonNen}, ${d.soMauCungThu} lần cùng thứ) × xu hướng ${fmtNum(d.xuHuong,2)}${d.heSoDacBiet!==1?' × ngày đặc biệt '+fmtNum(d.heSoDacBiet,2):''} · đệm ${fmtNum(k.demDaDung*100,0)}%</div>
+      ${d.ghiChu.map(g=>`<div class="small-note" style="color:var(--warn);margin-top:4px">${g}</div>`).join('')}
+      ${x.ton.hetHan>0 ? `<div class="small-note" style="color:var(--warn);margin-top:4px">${fmtNum(x.ton.hetHan,0)} ${dv} đã quá hạn / không mang sang được — KHÔNG tính vào tồn đầu ngày.</div>` : ''}
+      ${x.daLuu ? '<div class="small-note" style="color:var(--ok);margin-top:6px">Đã lưu kế hoạch cho ngày này.</div>' : ''}
+    </div>`;
+  };
+
+  const dc = (dbDoiChieu||[]).filter(x=>!x.chuaCoThucTe);
+  const khoiDoiChieu = dc.length ? `
+    <div class="sec-title">Dự báo cũ so với thực tế (${dc.length})</div>
+    <div class="small-note" style="margin-bottom:8px">"Đúng" ở đây nghĩa là <b>đủ bán mà không phải đổ nhiều</b>, không phải trúng phóc con số.</div>
+    ${dc.slice(0,10).map(f=>`<div class="litem">
+      <div class="li-l"><div>${f.date} · ${escapeHtmlAttr(f.prepName||f.prepId)}</div>
+        <div>Dự báo <b>${fmtNum(f.duBao,0)}</b> · thực bán <b>${fmtNum(f.thucTeDung,0)}</b>${f.thucTeHuy>0?' · đổ '+fmtNum(f.thucTeHuy,0):''}</div></div>
+      <div class="li-r" style="text-align:right">
+        <div style="color:${f.duBan?'var(--ok)':'var(--bad)'};font-weight:700">${f.duBan?'Đủ bán':'Thiếu'}</div>
+        <div class="small-note">${f.saiSoPct!=null?(f.saiSo>0?'+':'')+fmtNum(f.saiSoPct,0)+'%':'—'}</div></div>
+    </div>`).join('')}` : '';
+
+  box.innerHTML = dau +
+    (coSo.length ? `<div class="sec-title">Đề xuất sản xuất (${coSo.length})</div>` + coSo.map(theCard).join('') +
+      `<button class="btn" style="margin-top:10px" onclick="dbLuuKeHoach()">${ic('save',15)} Lưu kế hoạch ngày ${dbNgay}</button>
+       <div class="small-note" style="margin-top:6px">Lưu để hôm sau đối chiếu dự báo với thực tế. Lưu <b>không</b> tạo lệnh nấu — nhân viên vẫn nấu ở POS như thường.</div>` : '') +
+    (chuaDu.length ? `<div class="sec-title">Chưa dự báo được (${chuaDu.length})</div>` + chuaDu.map(theCard).join('') : '') +
+    khoiDoiChieu;
+}
+
+async function dbLuuKeHoach(){
+  const rows = (dbKetQua||[]).filter(x=>x.keHoach);
+  if(!rows.length){ toast('⚠️ Chưa có dòng nào để lưu'); return; }
+  try{
+    await Promise.all(rows.map(x => savePrepForecast(dbNgay, x.prep.id, {
+      prepName: x.prep.name||'', unit: x.prep.unit||'',
+      duBao: x.dubao.duBao, nen: x.dubao.nen, nguonNen: x.dubao.nguonNen,
+      xuHuong: x.dubao.xuHuong, heSoDacBiet: x.dubao.heSoDacBiet,
+      soNgayCoDuLieu: x.dubao.soNgayCoDuLieu, soMauCungThu: x.dubao.soMauCungThu,
+      doTinCay: x.dubao.tinCay.muc,
+      tonDau: x.ton.dung, tonHetHan: x.ton.hetHan,
+      canSanXuat: x.keHoach.can, soMe: x.keHoach.soMe, sanXuat: x.keHoach.sanXuat,
+      tongKhaDung: x.keHoach.tongKhaDung, duKienDu: x.keHoach.duKienDu,
+      duKienHuy: x.keHoach.duKienHuy, nguyCoThieu: x.keHoach.nguyCoThieu,
+      yieldMoiMe: prepEffectiveYield(x.prep), shelfLifeType: x.prep.shelfLifeType||'',
+      ngayDacBiet: dbNgayDacBiet ? dbNgayDacBiet.loai : null
+    })));
+    toast('✅ Đã lưu kế hoạch ' + rows.length + ' bán thành phẩm');
+    dbKetQua.forEach(x=>{ if(x.keHoach) x.daLuu = true; });
+    dbVeBang();
+  }catch(err){ console.error(err); showError('Không lưu được kế hoạch: '+(err.code||err.message||err)); }
+}
+
 // ------------------------------------------------------------
 // STATUS / THRESHOLD RULES
 // ------------------------------------------------------------
@@ -6771,6 +7153,7 @@ const NAV_SECTIONS = [
     {key:'kho:po',           label:'Đặt & nhận hàng', go:"goKho('po')",           sub:'Hoạt động'},
     {key:'kho:stockcount',   label:'Kiểm kê',         go:"goKho('stockcount')"},
     {key:'kho:lechkho',      label:'Lệch kho & định lượng', go:"goKho('lechkho')"},
+    {key:'kho:dubao',        label:'Dự báo & số mẻ',  go:"goKho('dubao')"},
     {key:'kho:containers',   label:'Hàng đang mở & tem', go:"goKho('containers')"},
     {key:'kho:refill',       label:'Refill',          go:"goKho('refill')"},
     {key:'kho:locstock',     label:'Tồn theo vị trí', go:"goKho('locstock')"},
@@ -10978,6 +11361,8 @@ const EXPORT_CONFIG_COLLS = [
   // được áp dụng, cái nào còn đang chờ, và giá trị trước khi áp dụng là bao nhiêu.
   'special_days_gieogieo', 'recipe_suggestions_gieogieo'
 ];
+// Dự báo đã lưu — lọc theo trường `date`, không phải businessDate.
+const EXPORT_FORECAST_COLL = 'prep_forecasts_gieogieo';
 // Có trường businessDate → lọc thẳng trên Firestore, không kéo cả collection về.
 const EXPORT_RANGE_COLLS = [
   'stock_transactions_gieogieo', 'prep_transactions_gieogieo', 'prep_batches_gieogieo',
@@ -11280,6 +11665,16 @@ async function buildExportPayload(mode){
     return kq;
   }, errors);
 
+  // [DỰ BÁO] Dự báo đã lưu + kết quả thật của chính những ngày đó. Đây là mục §8
+  // "dữ liệu dự báo trước đó và kết quả thực tế sau dự báo" — không có cặp này thì
+  // không đánh giá được dự báo đang tốt lên hay xấu đi.
+  const duBaoDaLuu = await _expSafe('dự báo đã lưu', async()=>{
+    const snap = await fstore.collection(EXPORT_FORECAST_COLL)
+      .where('date','>=',startKey).where('date','<=',endKey).get();
+    return snap.docs.map(d=>({id:d.id, ...d.data()}));
+  }, errors) || [];
+  const duBaoDoiChieu = thDoiChieuDuBao(duBaoDaLuu, thLichSuBTP(rangeData['prep_transactions_gieogieo']));
+
   setStatus('Đang cộng số liệu...');
   const tomTat = {
     banHangTheoNgay: _expSummarizeOrders(ordersByDate),
@@ -11303,6 +11698,9 @@ async function buildExportPayload(mode){
       rangeData['prep_batches_gieogieo'], rangeData['prep_transactions_gieogieo'],
       cfg['special_days_gieogieo']),
     tem_kho: _expTomTatTem(temGop),
+    // Dự báo đã đưa ra ↔ chuyện đã thật sự xảy ra. `chuaCoThucTe:true` = ngày chưa
+    // tới hoặc chưa có giao dịch nào — KHÔNG được hiểu là bán 0.
+    du_bao_va_thuc_te: duBaoDoiChieu,
     _taoLuc: new Date().toISOString(),
     _khoang: { tuNgay: startKey, denNgay: endKey, soNgay: dates.length },
     _cheDo: mode,
@@ -11793,6 +12191,7 @@ async function renderEntryKho(){
   else if(curKhoSub==='stockcount') renderKhoStockCount();
   else if(curKhoSub==='containers') renderKhoContainers();
   else if(curKhoSub==='lechkho') renderKhoLech();
+  else if(curKhoSub==='dubao') renderKhoDuBao();
   else if(curKhoSub==='wastereasons') renderKhoWasteReasons();
   else if(curKhoSub==='checklist') renderKhoChecklist();
   // 'stockin' đã gộp vào màn Đặt & nhận hàng; 'prephistory'/'prepbatches' đã gộp

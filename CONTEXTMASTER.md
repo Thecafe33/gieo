@@ -43,7 +43,7 @@ Khi chủ quán nói "sai", kiểm lại bằng số trước khi phản biện.
 | `DAC-TA-diem-hoa-von.md` | Đặc tả điểm hoà vốn + 3 mục sửa lỗi (§8, §9, §10) |
 | `KE-HOACH-can-btp-theo-dung-cu.md` | Kế hoạch cân bán thành phẩm theo dụng cụ đựng |
 | `KE-HOACH-thu-hoi-von.md` | Cơ chế THU HỒI VỐN — chủ quán đã duyệt, đã code xong |
-| `KE-HOACH-tieu-hao-thuc-te.md` | Tiêu hao thực tế · lệch kho · đề xuất định lượng · dự báo (Đợt 1 xong, Đợt 2 chờ dữ liệu) |
+| `KE-HOACH-tieu-hao-thuc-te.md` | Tiêu hao thực tế · lệch kho · đề xuất định lượng · dự báo mẻ (đã xong cả 2 đợt) |
 
 ---
 
@@ -155,6 +155,32 @@ Hệ số hiệu chỉnh      = THỰC TẾ ÷ LÝ THUYẾT   → định lượ
   là nói dối bằng số thật.
 - Xếp theo **TIỀN** lệch, không theo số lượng: 10g trà ô long nặng hơn 100g đường.
 
+### 4.8 Dự báo & số mẻ
+
+```
+Dự báo ngày D = nền × xu hướng × hệ số ngày đặc biệt
+   nền      = TRUNG VỊ lượng DÙNG của CÙNG THỨ trong 8 tuần (bỏ ngày đặc biệt)
+   xu hướng = TB/ngày 14 ngày trước D  ÷  TB/ngày 14 ngày liền trước đó,
+              kẹp [0,80 – 1,25], bỏ ngày đặc biệt khỏi cả hai cửa sổ
+   đặc biệt = trung vị tỷ lệ của các ngày CÙNG LOẠI đã xảy ra; chưa có → 1,00 + nói rõ
+
+Cần sản xuất = max(0, dự báo × (1 + đệm) − tồn đầu ngày CÒN DÙNG ĐƯỢC)
+   đệm 5% (hàng bỏ trong ngày) · 10% (hàng để được sang mai)
+Số mẻ: hàng hạn ngắn → làm tròn XUỐNG nếu thiếu ≤ 25% một mẻ, ngược lại lên
+       hàng để được  → luôn làm tròn LÊN
+```
+
+- **Dưới 7 ngày dữ liệu → `duBao: null`**, không dự báo. Dưới 2 lần cùng thứ thì hạ
+  xuống mức "tạm dùng" và lấy trung vị mọi ngày.
+- Ngày đích **không** được dùng chính nó để dự báo nó.
+- **Tồn đầu ngày chỉ tính lô còn hạn**; lô quá hạn / không mang sang được tách riêng
+  và hiện ra — cộng vào là tự lừa mình rồi hôm sau vừa thiếu vừa phải đổ.
+- `dung` / `huy` / `nau` **tách ba cột**: nấu 100 bán 60 đổ 40 mà gộp thành "tiêu thụ
+  100" thì hôm sau lại nấu 100 và lại đổ 40.
+- Mỗi lần lưu kế hoạch, ghi cả **căn cứ** (nền, xu hướng, độ tin cậy) vào
+  `prep_forecasts_gieogieo` — không có nó thì không đánh giá được dự báo tốt lên hay
+  xấu đi.
+
 ## 5. QUYẾT ĐỊNH CHỦ QUÁN ĐÃ CHỐT (không tự đổi)
 
 | # | Quyết định |
@@ -205,6 +231,15 @@ Tháng đã chốt hiện **số đã ghi**, không tính lại. Có số thật
   variants: [{ id, label, tareG, imageUrl, imagePath }] }
 ```
 Prep item có `vesselIds: []` (tối đa **5**, hằng số `PREP_MAX_VESSELS`).
+
+### `prep_forecasts_gieogieo` (MỚI) — doc id = 'YYYY-MM-DD_<prepId>'
+```js
+{ date, prepId, prepName, unit, duBao, nen, nguonNen, xuHuong, heSoDacBiet,
+  soNgayCoDuLieu, soMauCungThu, doTinCay:'du'|'yeu'|'chuaDu',
+  tonDau, tonHetHan, canSanXuat, soMe, sanXuat, tongKhaDung,
+  duKienDu, duKienHuy, nguyCoThieu, yieldMoiMe, shelfLifeType, ngayDacBiet, luuLuc }
+```
+Lưu cả **căn cứ**, không chỉ con số — để sau còn truy lại vì sao hôm đó đề xuất thế.
 
 ### `special_days_gieogieo` (MỚI) — doc id = 'YYYY-MM-DD'
 ```js
@@ -287,6 +322,13 @@ Màn Tài sản nay hiện ngày mua + cảnh báo, và **có nút Sửa** (`ope
 | `thNoiDungNguyenLieu(itemId)` / `thApDungDeXuat(sg)` | Tìm mọi chỗ dùng nguyên liệu / ghi đè có lưu giá trị cũ |
 | `loadSpecialDays` / `saveSpecialDay` / `renderEntryNgayDacBiet` | Ngày lễ/Tết/khuyến mãi |
 | `_expHuongDanPhanTich` / `_expNguyenTacDuLieu` / `_expLichSuTheoNgay` / `_expTomTatTem` | Bốn khối mới trong file JSON |
+| `thLichSuBTP(prepTxs)` | Lịch sử BTP theo ngày — tách `dung` / `huy` / `nau` |
+| `thDuBao({lichSuNgay, ngayDich, ngayDacBiet})` | **Hàm thuần** — dự báo một ngày, trả `null` khi chưa đủ dữ liệu |
+| `thKeHoachNau({duBao, tonDungDuoc, yieldMoiMe, shelfLifeType})` | Số mẻ · dư · phải đổ · nguy cơ thiếu |
+| `thTonDungDuoc(batches, prepId, ngay, shelfLifeType)` | Tồn đầu ngày còn hạn (lô hết hạn tách riêng) |
+| `thDoiChieuDuBao(forecasts, lichSu)` | Dự báo đã lưu ↔ thực tế |
+| `renderKhoDuBao` / `dbChay` / `dbVeBang` / `dbLuuKeHoach` | Màn **Dự báo & số mẻ** |
+| `loadPrepForecasts` / `savePrepForecast` / `loadPrepTxRange` | Sổ dự báo `prep_forecasts_gieogieo` |
 
 Hàm đã **XOÁ** (bị thẻ gộp thay thế, đừng dựng lại):
 `plTodayHTML`, `bepTodayHTML`, `bepDoiChieuHTML`.
@@ -374,6 +416,8 @@ Chạy: `node <tên>.mjs` (Playwright + Chromium tại `/opt/pw-browsers/chromiu
 | `asstest.mjs` | 32 | Sửa tài sản: điền sẵn đúng số, xem trước khấu hao, chặn số vô lý, xoá phải hỏi lại |
 | `thtest.mjs` | 53 | Lệch kho — hàm thuần (ví dụ 5kg/5,5kg, thiếu phiếu, cờ bất thường, trung vị/CV, xếp theo tiền) |
 | `th2test.mjs` | 49 | Màn Lệch kho, tạo/áp dụng đề xuất (công thức gốc không đổi tới khi bấm Áp dụng), 4 khối JSON |
+| `dbtest.mjs` | 55 | Dự báo — hàm thuần (trung vị cùng thứ, kẹp xu hướng, ngày đặc biệt, quy tắc số mẻ) |
+| `db2test.mjs` | 35 | Màn Dự báo trên file HTML thật — ví dụ trân châu: tồn 15 · dự báo 70 · mẻ 30 → 2 mẻ, dư 5 |
 | `beptest` 22 · `bepe2e` 13 · `qltest` 14 · `togtest` 23 · `cbtest` 13 · `khotest` 24 · `postest` 20 · `hangtest` 15 · `embedpos` 6 | | các phần trước |
 
 **Phương pháp:** `page.route()` chặn `gstatic.com/firebasejs` → nạp `fbmem.js`

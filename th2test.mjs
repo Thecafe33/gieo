@@ -146,7 +146,12 @@ const gan=(a,b,m,e=0.001)=>ok(a!=null&&Math.abs(a-b)<=e, `${m} — được ${a}
 
 console.log('\n1. Màn Lệch kho');
 ok(kq.coONgay, 'có ô chọn khoảng ngày');
-ok(kq.mocMacDinh==='2026-08-07', 'mốc mới quá (hôm nay) → nới mặc định về 30 ngày — được '+kq.mocMacDinh);
+// Mốc ghi nhận (06/09/2026) mới hơn "hôm nay − 30 ngày" nên màn hình phải nới ra
+// 30 ngày. Tính kỳ vọng theo ngày chạy test, không ghim cứng — ghim cứng thì mai
+// chạy lại là đỏ mà chẳng có gì hỏng.
+const _l30 = new Date(); _l30.setDate(_l30.getDate()-30);
+const _mong = `${_l30.getFullYear()}-${String(_l30.getMonth()+1).padStart(2,'0')}-${String(_l30.getDate()).padStart(2,'0')}`;
+ok(kq.mocMacDinh===_mong, 'mốc mới quá (hôm nay) → nới mặc định về 30 ngày — được '+kq.mocMacDinh+', cần '+_mong);
 ok(/bắt đầu trước mốc/.test(kq.ghiChuMoc||''), 'và NÓI RÕ khoảng đang mở bắt đầu trước mốc ghi nhận');
 ok(kq.giaiThichBaConSo, 'có giải thích ba con số khác nhau');
 

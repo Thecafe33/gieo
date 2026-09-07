@@ -1,6 +1,6 @@
 # KẾ HOẠCH — TIÊU HAO THỰC TẾ · LỆCH KHO · ĐỀ XUẤT ĐỊNH LƯỢNG · DỰ BÁO MẺ
 
-> Trạng thái: **CHỦ QUÁN ĐÃ DUYỆT ĐỢT 1 — ĐÃ CODE XONG**. Đợt 2 (dự báo) để sau.
+> Trạng thái: **ĐÃ CODE XONG CẢ ĐỢT 1 VÀ ĐỢT 2.**
 > Quy tắc §2 CONTEXTMASTER: kế hoạch → chủ quán duyệt → code.
 >
 > Chủ quán chốt: (1) làm Đợt 1 — ghi nhận + đối chiếu + JSON; (2) thiếu phiếu kiểm kê
@@ -327,6 +327,33 @@ một ngày dùng gấp > 3 lần trung vị.
 **Kiểm thử:** `thtest.mjs` 53 assertion (hàm thuần) · `th2test.mjs` 49 assertion
 (mở file HTML thật trong Chromium: màn Lệch kho, tạo/áp dụng đề xuất, khối JSON).
 
-**Chưa làm (Đợt 2, sau ~4 tuần dữ liệu):** dự báo nhu cầu theo thứ/xu hướng/ngày đặc
-biệt, đề xuất số phần và số mẻ, thời điểm nấu, sổ `prep_forecasts_gieogieo` để đối
-chiếu dự báo với thực tế. Công thức đã chốt sẵn ở §5.
+---
+
+## 11. ĐÃ LÀM — ĐỢT 2 (dự báo & số mẻ)
+
+Dựng luôn bộ máy thay vì đợi 4 tuần: nó **tự nói "chưa đủ dữ liệu"** khi lịch sử còn
+mỏng, nên bật sớm không hại gì mà tới lúc đủ dữ liệu là chạy được ngay.
+
+| Hàm | Việc |
+|---|---|
+| `thLichSuBTP(prepTxs)` | Lịch sử theo ngày, **tách** dùng / huỷ / nấu (nấu 100 bán 60 đổ 40 mà gộp thành "tiêu thụ 100" thì hôm sau lại nấu 100 và lại đổ 40) |
+| `thDuBao({lichSuNgay, ngayDich, ngayDacBiet})` | Nền = **trung vị cùng thứ** 8 tuần · xu hướng 14 ngày (kẹp 0,80–1,25, so bằng trung bình/ngày, bỏ ngày đặc biệt) · hệ số ngày đặc biệt **học từ lịch sử quán** |
+| `thKeHoachNau({duBao, tonDungDuoc, yieldMoiMe, shelfLifeType})` | Cần sản xuất · số mẻ · tổng khả dụng · dự kiến dư · **dự kiến phải đổ** · nguy cơ thiếu |
+| `thTonDungDuoc(batches, prepId, ngay, shelfLifeType)` | Tồn đầu ngày **còn dùng được** — lô hết hạn tách riêng, không cộng vào |
+| `thDoiChieuDuBao(forecasts, lichSu)` | Dự báo đã lưu ↔ thực tế đã xảy ra |
+| Màn **Kho → Dự báo & số mẻ** | Chọn ngày (mặc định ngày mai), đề xuất từng bán thành phẩm, lưu kế hoạch |
+| `prep_forecasts_gieogieo` | Sổ dự báo, doc id `YYYY-MM-DD_<prepId>`, lưu cả **căn cứ** (nền, xu hướng, độ tin cậy) |
+| `du_bao_va_thuc_te` trong JSON | Mục §8 "dữ liệu dự báo trước đó + kết quả thực tế sau dự báo" |
+
+**Ba quy tắc quan trọng nhất:**
+1. **Dưới 7 ngày dữ liệu → không dự báo.** Trả `duBao: null` kèm câu "cần ít nhất 7
+   ngày", không đưa một con số nghe như chắc chắn.
+2. **Ngày đặc biệt chỉ nhân hệ số khi đã từng có ngày cùng loại.** Chưa có thì để
+   ×1,00 và nói rõ "chưa có căn cứ" — không bịa "lễ thì nhân 1,5", vì con số đó không
+   đến từ dữ liệu của quán này.
+3. **Ưu tiên ít huỷ hơn ít thiếu, nhưng chỉ với hàng hạn ngắn.** Thiếu ≤ 25% một mẻ
+   thì không nấu thêm cả mẻ. Hàng để được sang mai thì làm tròn lên — dư không mất gì.
+
+**Kiểm thử:** `dbtest.mjs` 55 assertion (hàm thuần) · `db2test.mjs` 35 assertion
+(màn Dự báo trên file HTML thật, đúng ví dụ trân châu hoàng kim: tồn 15 · dự báo 70 ·
+mẻ 30 → **2 mẻ, tổng 75, dư 5**).
