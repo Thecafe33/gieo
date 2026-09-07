@@ -1445,6 +1445,14 @@ html.phone-ui .nav-search .ns-kbd{display:none;}
     </div>
     </div>
 
+    <!-- ===== [NEW-ASSIST] TRỢ LÝ BÁN HÀNG ===== -->
+    <div class="screen" id="screen-assist">
+      <div class="wrap">
+        <div id="assistSubNav"></div>
+        <div id="assistBody"></div>
+      </div>
+    </div>
+
     <!-- ===== [BÊ TỪ POS] QUẢN LÝ MENU ===== -->
     <div class="screen" id="screen-mn">
     <div id="mn">
@@ -7632,6 +7640,7 @@ const NAV_SECTIONS = [
     {key:'kho:recipe',   ic:'note',      label:'Định mức món', go:"goKho('recipe')"},
     {key:'entry:cogs',   ic:'coins',     label:'GOGS Món',     go:"goEntry('cogs')"},
     {key:'tg',           ic:'coins',     label:'Khuyến mãi',   go:"switchScreen('tg')"},
+    {key:'assist',       ic:'robot',     label:'Trợ lý bán hàng', go:"switchScreen('assist')"},
   ]},
   { group:'Kiểm toán', items:[
     {key:'entry:audit', ic:'detective', label:'Kiểm toán', go:"goEntry('audit')"},
@@ -8419,6 +8428,7 @@ function switchScreen(s){
   // Ở đây phải nạp menu từ Firebase trước, vì app Quản lý không giữ sẵn như POS.
   if(s==='mn') loadMenuForManager().then(renderMnList).catch(err=>{ console.error(err); showError('Không tải được menu: '+(err.message||err)); });
   if(s==='tg') loadMenuForManager().then(()=>{ loadTogoSettings(); loadTgAdminUI(); loadAppFeeSettings(); }).catch(err=>{ console.error(err); showError('Không tải được menu: '+(err.message||err)); });
+  if(s==='assist') renderAssist().catch(err=>{ console.error(err); showError('Không mở được Trợ lý bán hàng: '+(err.message||err)); });
   if(s==='inbox') renderAlertInbox();
   if(s==='today') renderToday();
   if(s==='health') renderHealth();
@@ -19866,6 +19876,951 @@ closeSidebar = function(){
     renderSidebarNav();
   }
 };
+
+// ════════════════════════════════════════════════════════════════════════════
+// [NEW-ASSIST] TRỢ LÝ BÁN HÀNG — BẢNG ĐIỀU KHIỂN PHÍA QUẢN LÝ
+// ════════════════════════════════════════════════════════════════════════════
+// Bên POS chỉ CHẠY gợi ý; toàn bộ phần "gợi ý cái gì, ưu tiên ra sao, chương
+// trình nào đang chạy" nằm ở đây — đúng nguyên tắc đã áp cho Menu và Khuyến
+// mãi: nhân viên bán hàng không phải là người quyết định chính sách bán hàng.
+//
+// Bốn tab:
+//   Cấu hình  — công tắc, trần số gợi ý, thứ tự ưu tiên, ngưỡng gợi ý topping,
+//               cặp món–topping, topping đang đẩy bán, tem, cảnh báo thói quen.
+//   Chiến dịch— chỗ khai 8.8 / 9.9 / sinh nhật quán mà KHÔNG đụng vào code.
+//   Upsale    — luật tự khai + công tắc gợi ý nâng size.
+//   Hiệu quả  — gợi ý nào thật sự làm tăng AOV, gợi ý nào khách hay từ chối,
+//               topping nào upsale tốt nhất, ca nào thực hiện tốt. Kèm hai nút
+//               dựng lại dữ liệu nền (bảng tần suất & hồ sơ thói quen khách).
+//
+// ⚠️ ASSIST_DEFAULT_CFG dưới đây phải KHỚP với ASSIST_DEFAULT_CONFIG bên POS.
+// Hai app đọc chung một node Firebase; lệch mặc định thì máy chưa cấu hình sẽ
+// chạy theo một luật khác với màn hình đang hiển thị ở đây.
+// ════════════════════════════════════════════════════════════════════════════
+
+const ASSIST_CFG_PATH   = 'sales_assist_config_gieogieo';
+const ASSIST_STATS_PATH = 'sales_assist_stats_gieogieo';
+const ASSIST_LOG_COLL   = 'sales_assist_logs_gieogieo';
+const ASSIST_MAX_HARD   = 3;
+
+const ASSIST_DEFAULT_CFG = {
+  enabled: true, maxSuggestions: 3, logEnabled: true,
+  kinds: {
+    customer_check: { enabled: true, rank: 1 },
+    promo_near:     { enabled: true, rank: 2 },
+    loyalty:        { enabled: true, rank: 3 },
+    upsell:         { enabled: true, rank: 4 },
+    topping:        { enabled: true, rank: 5 },
+    other:          { enabled: true, rank: 6 }
+  },
+  topping: { maxCards: 2, maxPerCard: 3, minRate: 0.12, minSample: 5,
+             pushToppingIds: [], pushBoost: 30, customerBoost: 45,
+             excludeToppingIds: [], pairs: {} },
+  upsell: { autoUpsize: { enabled: true, minGapPrice: 0 }, rules: [] },
+  campaigns: [],
+  loyalty: { enabled: true, stampTarget: 6, dailyCap: 2, nearGap: 2 },
+  customerCheck: { ice: true, topping: true, size: true, favItem: false, minOrders: 2, minRatio: 0.6 }
+};
+
+const ASSIST_KIND_LABEL = {
+  customer_check: 'Xác nhận thông tin khách',
+  promo_near:     'Khuyến mãi gần đạt điều kiện',
+  loyalty:        'Quyền lợi tem tích luỹ',
+  upsell:         'Upsale tăng AOV',
+  topping:        'Topping hợp món',
+  other:          'Gợi ý bổ sung khác'
+};
+const ASSIST_KIND_NOTE = {
+  customer_check: 'Chống chọn sai (đá, size, topping quen) — nên để trên cùng: mời hụt một ly chỉ mất một cơ hội, làm sai đơn của khách quen thì mất khách.',
+  promo_near:     'Đơn chỉ còn thiếu một chút là đạt khuyến mãi — nói ra là khách gật.',
+  loyalty:        'Tem sắp đủ hoặc đã đủ. Vừa tăng đơn này vừa kéo khách quay lại.',
+  upsell:         'Nâng size / mời thêm món theo luật quán khai.',
+  topping:        'Gợi ý topping hợp với đúng món khách đang mua.',
+  other:          'Món ruột của khách và các gợi ý phụ.'
+};
+
+const ASSIST_COND_TYPES = [
+  ['qty_total', 'Tổng số ly trong đơn'],
+  ['qty_size',  'Số ly theo size'],
+  ['qty_item',  'Số ly của một món'],
+  ['qty_type',  'Số ly theo nhóm menu'],
+  ['amount',    'Tổng tiền đơn (đ)']
+];
+
+let assistCfg = JSON.parse(JSON.stringify(ASSIST_DEFAULT_CFG));
+let assistTab = 'cfg';
+let assistDirty = false;
+let assistPairItemId = '';          // món đang mở trong bảng cặp món–topping
+let assistCampOpen = -1;            // chiến dịch đang mở form
+let assistUpsOpen = -1;
+let assistPerfRange = { from: dkey(new Date(Date.now() - 6 * 86400000)), to: dkey(new Date()) };
+let assistPerfData = null;
+
+// Trộn nông giống hệt bên POS — thêm khoá mới ở bản sau không làm vỡ dữ liệu cũ.
+function _assistMergeCfg(raw) {
+  const d = ASSIST_DEFAULT_CFG, c = raw || {};
+  const kinds = {};
+  Object.keys(d.kinds).forEach(n => { kinds[n] = Object.assign({}, d.kinds[n], (c.kinds || {})[n] || {}); });
+  return {
+    enabled: c.enabled !== false,
+    maxSuggestions: Math.max(1, Math.min(ASSIST_MAX_HARD, Number(c.maxSuggestions) || d.maxSuggestions)),
+    logEnabled: c.logEnabled !== false,
+    kinds,
+    topping: Object.assign({}, d.topping, c.topping || {}),
+    upsell: Object.assign({}, d.upsell, c.upsell || {}, {
+      autoUpsize: Object.assign({}, d.upsell.autoUpsize, (c.upsell || {}).autoUpsize || {}),
+      rules: Array.isArray((c.upsell || {}).rules) ? (c.upsell || {}).rules : []
+    }),
+    campaigns: Array.isArray(c.campaigns) ? c.campaigns : [],
+    loyalty: Object.assign({}, d.loyalty, c.loyalty || {}),
+    customerCheck: Object.assign({}, d.customerCheck, c.customerCheck || {})
+  };
+}
+
+async function loadAssistCfg() {
+  const snap = await db.ref(ASSIST_CFG_PATH).once('value');
+  assistCfg = _assistMergeCfg(snap.val());
+  assistDirty = false;
+}
+async function saveAssistCfg() {
+  await db.ref(ASSIST_CFG_PATH).set(assistCfg);
+  assistDirty = false;
+}
+async function assistSave() {
+  try {
+    await saveAssistCfg();
+    toast('✅ Đã lưu — các máy POS nhận ngay, không cần tải lại');
+    renderAssist();
+  } catch (err) {
+    console.error('saveAssistCfg lỗi', err);
+    showError('Không lưu được cấu hình: ' + (err.code || err.message || err));
+  }
+}
+function assistTouch() {
+  assistDirty = true;
+  const bar = document.getElementById('assistSaveBar');
+  if (bar) bar.style.display = 'block';
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// KHUNG MÀN
+// ────────────────────────────────────────────────────────────────────────────
+const ASSIST_TABS = [['cfg', 'Cấu hình'], ['camp', 'Chiến dịch'], ['ups', 'Upsale'], ['perf', 'Hiệu quả']];
+
+function assistSetTab(t) { assistTab = t; renderAssist(); }
+
+async function renderAssist() {
+  const body = document.getElementById('assistBody');
+  const nav = document.getElementById('assistSubNav');
+  nav.innerHTML = `<div class="report-subnav">${ASSIST_TABS.map(([k, l]) =>
+    `<button class="${assistTab === k ? 'active' : ''}" onclick="assistSetTab('${k}')">${l}</button>`).join('')}</div>`;
+  body.innerHTML = '<div class="muted">Đang tải...</div>';
+  try {
+    await ensureAuth();
+    await loadMenuForManager();
+    if (!assistDirty) await loadAssistCfg();
+  } catch (err) {
+    console.error('renderAssist lỗi', err);
+    body.innerHTML = '<div class="muted">Không đọc được cấu hình: ' + (err.code || err.message || err) + '</div>';
+    return;
+  }
+  if (assistTab === 'cfg')  return renderAssistCfg();
+  if (assistTab === 'camp') return renderAssistCampaigns();
+  if (assistTab === 'ups')  return renderAssistUpsell();
+  return renderAssistPerf();
+}
+
+function _assistSaveBar() {
+  return `<div id="assistSaveBar" style="display:${assistDirty ? 'block' : 'none'};position:sticky;bottom:0;padding:12px 0 4px;background:linear-gradient(to top,var(--bg) 70%,transparent);z-index:5;">
+    <button class="btn" onclick="assistSave()">${ic('save', 15)} Lưu cấu hình Trợ lý bán hàng</button>
+  </div>`;
+}
+
+function _assistChip(label, on, onclickExpr) {
+  return `<button onclick="${onclickExpr}" style="border-radius:999px;padding:8px 13px;font-family:inherit;font-size:13px;font-weight:650;cursor:pointer;
+    border:1.5px solid ${on ? 'var(--gd)' : 'var(--line)'};background:${on ? 'var(--gl)' : 'var(--card)'};color:${on ? 'var(--gm)' : 'var(--gt)'};">
+    ${on ? '✓ ' : ''}${escapeHtmlAttr(label)}</button>`;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// TAB 1 — CẤU HÌNH
+// ────────────────────────────────────────────────────────────────────────────
+function renderAssistCfg() {
+  const c = assistCfg;
+  const tp = c.topping, ly = c.loyalty, cc = c.customerCheck;
+  const menu = getActiveMenu();
+
+  const kindRows = Object.keys(ASSIST_KIND_LABEL).map(k => {
+    const kc = c.kinds[k] || { enabled: true, rank: 6 };
+    return `<div class="pkg-row">
+      <div class="pkg-row-h">
+        <span class="pkg-row-n">${escapeHtmlAttr(ASSIST_KIND_LABEL[k])}</span>
+        <label style="display:flex;align-items:center;gap:7px;font-size:13px;font-weight:650;color:var(--ink-2);cursor:pointer;">
+          <input type="checkbox" ${kc.enabled !== false ? 'checked' : ''} onchange="assistSetKind('${k}','enabled',this.checked)"> Bật
+        </label>
+      </div>
+      <div class="pkg-eq">
+        <input type="number" min="1" max="9" value="${Number(kc.rank) || 6}" onchange="assistSetKind('${k}','rank',this.value)">
+        <span class="unit-tag">Thứ tự ưu tiên</span>
+      </div>
+      <div class="pkg-out">${escapeHtmlAttr(ASSIST_KIND_NOTE[k] || '')}</div>
+    </div>`;
+  }).join('');
+
+  const pairItems = Object.keys(tp.pairs || {}).filter(id => (tp.pairs[id] || []).length);
+  const pairSummary = pairItems.length
+    ? pairItems.map(id => {
+        const m = menu.find(x => x.id === id);
+        const names = (tp.pairs[id] || []).map(t => (TOPPINGS.find(x => x.id === t) || {}).name).filter(Boolean);
+        return `<div class="litem">
+          <div class="li-l"><div><b>${escapeHtmlAttr(m ? m.name : '(món đã xoá)')}</b></div><div>${escapeHtmlAttr(names.join(' · '))}</div></div>
+          <div class="li-r"><button class="iconbtn" onclick="assistClearPair('${id}')">${ic('trash')}</button></div>
+        </div>`;
+      }).join('')
+    : '<div class="muted">Chưa khai cặp nào — hệ thống sẽ chỉ dựa vào số liệu bán thật.</div>';
+
+  const curPairs = assistPairItemId ? (tp.pairs[assistPairItemId] || []) : [];
+
+  document.getElementById('assistBody').innerHTML = `
+    <div class="card">
+      <div class="card-h"><h3>${ic('robot', 18)} Trợ lý bán hàng</h3></div>
+      <div class="unit-explainer" style="margin-top:0">
+        POS tự đọc giỏ hàng, lịch sử khách, khuyến mãi và tem tích luỹ rồi đưa cho nhân viên <b>câu nói sẵn</b> —
+        không phải dữ liệu thô. Mọi gợi ý chỉ là <b>đề xuất</b>: POS không bao giờ tự thêm món, thêm topping hay
+        đổi size; phải có nhân viên chạm nút sau khi đã hỏi khách.
+      </div>
+      <div class="field" style="margin-bottom:10px">
+        <label style="display:flex;align-items:center;gap:9px;cursor:pointer;">
+          <input type="checkbox" ${c.enabled ? 'checked' : ''} onchange="assistSetTop('enabled',this.checked)">
+          Bật Trợ lý bán hàng trên toàn bộ máy POS
+        </label>
+      </div>
+      <div class="field" style="margin-bottom:10px">
+        <label style="display:flex;align-items:center;gap:9px;cursor:pointer;">
+          <input type="checkbox" ${c.logEnabled ? 'checked' : ''} onchange="assistSetTop('logEnabled',this.checked)">
+          Ghi nhật ký hiệu quả từng gợi ý (cần bật để tab Hiệu quả có số)
+        </label>
+      </div>
+      <div class="field">
+        <label>Số gợi ý hiện cùng lúc</label>
+        <select onchange="assistSetTop('maxSuggestions',this.value)">
+          ${[1, 2, 3].map(n => `<option value="${n}" ${c.maxSuggestions === n ? 'selected' : ''}>${n} gợi ý</option>`).join('')}
+        </select>
+        <div class="hint">Trần cứng là 3 — hạ xuống được, nâng lên thì không. Màn order càng nhiều chữ, nhân viên càng bỏ qua hết.</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-h"><h3>${ic('sliders', 17)} Thứ tự ưu tiên</h3></div>
+      <div class="hint" style="margin-bottom:12px">Số nhỏ hơn = quan trọng hơn = được chọn trước khi cắt còn ${c.maxSuggestions} gợi ý.</div>
+      ${kindRows}
+    </div>
+
+    <div class="card">
+      <div class="card-h"><h3>${ic('coins', 17)} Gợi ý topping</h3></div>
+      <div class="unit-explainer" style="margin-top:0">
+        Điểm của một topping với một món cộng từ bốn nguồn: <b>cặp quán khai</b> (+60, luôn thắng số liệu),
+        <b>đang đẩy bán</b>, <b>chính khách đó hay dùng</b>, và <b>tỉ lệ bán thật</b>.
+        Topping không thuộc nguồn nào và chưa đủ mẫu thì <b>không</b> được gợi ý — thà im còn hơn gợi ý bừa.
+      </div>
+      <div class="grid2">
+        <div class="field"><label>Số món được gợi ý cùng lúc</label>
+          <input type="number" min="1" max="3" value="${Number(tp.maxCards) || 2}" onchange="assistSetTp('maxCards',this.value)"></div>
+        <div class="field"><label>Số topping trong một gợi ý</label>
+          <input type="number" min="1" max="3" value="${Number(tp.maxPerCard) || 3}" onchange="assistSetTp('maxPerCard',this.value)"></div>
+      </div>
+      <div class="grid2">
+        <div class="field"><label>Tỉ lệ tối thiểu (%)</label>
+          <input type="number" min="0" max="100" value="${Math.round((Number(tp.minRate) || 0) * 100)}" onchange="assistSetTpRate(this.value)">
+          <div class="hint">Bao nhiêu % khách mua món đó có chọn topping đó thì mới đáng gợi ý.</div></div>
+        <div class="field"><label>Số ly đã bán tối thiểu</label>
+          <input type="number" min="0" value="${Number(tp.minSample) || 0}" onchange="assistSetTp('minSample',this.value)">
+          <div class="hint">Bán mới 3 ly mà suy ra tỉ lệ là tự lừa mình.</div></div>
+      </div>
+      <div class="field">
+        <label>Topping đang cần đẩy bán</label>
+        <div style="display:flex;flex-wrap:wrap;gap:7px;">
+          ${TOPPINGS.map(t => _assistChip(t.name, (tp.pushToppingIds || []).includes(t.id), `assistToggleList('pushToppingIds','${t.id}')`)).join('') || '<span class="muted-sm">Chưa có topping nào</span>'}
+        </div>
+        <div class="hint">Được cộng thêm điểm nên dễ lọt vào 3 lựa chọn — nhưng vẫn phải hợp với món khách đang mua.</div>
+      </div>
+      <div class="field">
+        <label>Không bao giờ gợi ý</label>
+        <div style="display:flex;flex-wrap:wrap;gap:7px;">
+          ${TOPPINGS.map(t => _assistChip(t.name, (tp.excludeToppingIds || []).includes(t.id), `assistToggleList('excludeToppingIds','${t.id}')`)).join('') || '<span class="muted-sm">Chưa có topping nào</span>'}
+        </div>
+        <div class="hint">Topping sắp ngừng bán, hay hết hàng, hoặc làm lâu — loại hẳn khỏi gợi ý.</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-h"><h3>${ic('link', 17)} Cặp món – topping</h3></div>
+      <div class="hint" style="margin-bottom:12px">Kinh nghiệm của quán, luôn được ưu tiên hơn số liệu. Dùng cho món mới chưa có dữ liệu bán, hoặc khi bạn biết chắc cặp nào ngon.</div>
+      <div class="field">
+        <label>Chọn món</label>
+        <select onchange="assistPickPairItem(this.value)">
+          <option value="">— Chọn món để khai topping đi kèm —</option>
+          ${menu.map(m => `<option value="${m.id}" ${assistPairItemId === m.id ? 'selected' : ''}>${escapeHtmlAttr(m.name)}</option>`).join('')}
+        </select>
+      </div>
+      ${assistPairItemId ? `<div class="field">
+        <label>Topping gợi ý cho món này</label>
+        <div style="display:flex;flex-wrap:wrap;gap:7px;">
+          ${TOPPINGS.map(t => _assistChip(t.name, curPairs.includes(t.id), `assistTogglePair('${t.id}')`)).join('')}
+        </div>
+      </div>` : ''}
+      <div class="sec-title">Đã khai</div>
+      ${pairSummary}
+    </div>
+
+    <div class="card">
+      <div class="card-h"><h3>${ic('users', 17)} Cảnh báo theo thói quen khách</h3></div>
+      <div class="unit-explainer" style="margin-top:0">
+        Sau khi nhân viên nhập SĐT, POS so thói quen đã ghi nhận với những gì đang chọn. Lệch thì nhắc
+        <b>hỏi lại khách</b> — không tự sửa. Hồ sơ thói quen được cộng dồn sau mỗi đơn có SĐT; khách cũ
+        chưa có hồ sơ thì dựng lại ở tab <b>Hiệu quả</b>.
+      </div>
+      <div class="field">
+        <div style="display:flex;flex-wrap:wrap;gap:7px;">
+          ${_assistChip('Đá chung / đá riêng', cc.ice !== false, "assistToggleCC('ice')")}
+          ${_assistChip('Topping hay dùng', cc.topping !== false, "assistToggleCC('topping')")}
+          ${_assistChip('Size hay mua', cc.size !== false, "assistToggleCC('size')")}
+          ${_assistChip('Món ruột', cc.favItem === true, "assistToggleCC('favItem')")}
+        </div>
+      </div>
+      <div class="grid2">
+        <div class="field"><label>Số đơn tối thiểu</label>
+          <input type="number" min="1" value="${Number(cc.minOrders) || 2}" onchange="assistSetCC('minOrders',this.value)">
+          <div class="hint">Khách mới mua 1 lần thì chưa gọi là "thường".</div></div>
+        <div class="field"><label>Tỉ lệ tối thiểu (%)</label>
+          <input type="number" min="1" max="100" value="${Math.round((Number(cc.minRatio) || 0.6) * 100)}" onchange="assistSetCCRatio(this.value)">
+          <div class="hint">Thói quen phải chiếm ít nhất ngần này lượt mua.</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-h"><h3>${ic('receipt', 17)} Quyền lợi tem</h3></div>
+      <div class="field">
+        <label style="display:flex;align-items:center;gap:9px;cursor:pointer;">
+          <input type="checkbox" ${ly.enabled !== false ? 'checked' : ''} onchange="assistSetLoy('enabled',this.checked)">
+          Gợi ý theo tem tích luỹ
+        </label>
+      </div>
+      <div class="grid2">
+        <div class="field"><label>Đủ bao nhiêu tem thì tặng 1 ly</label>
+          <input type="number" min="1" value="${Number(ly.stampTarget) || 6}" onchange="assistSetLoy('stampTarget',this.value)"></div>
+        <div class="field"><label>Trần tem / ngày / khách</label>
+          <input type="number" min="1" value="${Number(ly.dailyCap) || 2}" onchange="assistSetLoy('dailyCap',this.value)"></div>
+      </div>
+      <div class="field"><label>Còn thiếu tối đa mấy tem thì mới mời thêm</label>
+        <input type="number" min="1" value="${Number(ly.nearGap) || 2}" onchange="assistSetLoy('nearGap',this.value)">
+        <div class="hint">Thiếu 5 tem mà mời khách mua thêm 5 ly là ép mua, khách khó chịu.</div></div>
+      <div class="alert amber"><span class="ic">!</span><div>
+        Hai số trên phải khớp với luật tem đang chạy thật trong POS (hiện là <b>6 tem</b>, trần <b>2 tem/ngày</b>).
+        Đặt lệch thì POS sẽ hứa với khách một đằng, cộng tem một nẻo.
+      </div></div>
+    </div>
+
+    ${_assistSaveBar()}`;
+}
+
+function assistSetTop(k, v) {
+  if (k === 'maxSuggestions') assistCfg.maxSuggestions = Math.max(1, Math.min(ASSIST_MAX_HARD, Number(v) || 3));
+  else assistCfg[k] = !!v;
+  assistTouch();
+}
+function assistSetKind(k, field, v) {
+  assistCfg.kinds[k] = assistCfg.kinds[k] || { enabled: true, rank: 6 };
+  assistCfg.kinds[k][field] = field === 'rank' ? Math.max(1, Math.min(9, Number(v) || 6)) : !!v;
+  assistTouch();
+}
+function assistSetTp(k, v) { assistCfg.topping[k] = Math.max(0, Number(v) || 0); assistTouch(); }
+function assistSetTpRate(v) { assistCfg.topping.minRate = Math.max(0, Math.min(100, Number(v) || 0)) / 100; assistTouch(); }
+function assistToggleList(field, id) {
+  const arr = assistCfg.topping[field] || (assistCfg.topping[field] = []);
+  const i = arr.indexOf(id);
+  if (i >= 0) arr.splice(i, 1); else arr.push(id);
+  assistTouch(); renderAssistCfg();
+}
+function assistPickPairItem(id) { assistPairItemId = id; renderAssistCfg(); }
+function assistTogglePair(tid) {
+  if (!assistPairItemId) return;
+  const p = assistCfg.topping.pairs || (assistCfg.topping.pairs = {});
+  const arr = p[assistPairItemId] || (p[assistPairItemId] = []);
+  const i = arr.indexOf(tid);
+  if (i >= 0) arr.splice(i, 1); else arr.push(tid);
+  if (!arr.length) delete p[assistPairItemId];
+  assistTouch(); renderAssistCfg();
+}
+function assistClearPair(id) {
+  if (!confirm('Bỏ toàn bộ topping đã khai cho món này?')) return;
+  delete assistCfg.topping.pairs[id];
+  assistTouch(); renderAssistCfg();
+}
+function assistToggleCC(k) { assistCfg.customerCheck[k] = !assistCfg.customerCheck[k]; assistTouch(); renderAssistCfg(); }
+function assistSetCC(k, v) { assistCfg.customerCheck[k] = Math.max(1, Number(v) || 1); assistTouch(); }
+function assistSetCCRatio(v) { assistCfg.customerCheck.minRatio = Math.max(0.01, Math.min(1, (Number(v) || 60) / 100)); assistTouch(); }
+function assistSetLoy(k, v) {
+  assistCfg.loyalty[k] = (k === 'enabled') ? !!v : Math.max(1, Number(v) || 1);
+  assistTouch();
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// TAB 2 — CHIẾN DỊCH KHUYẾN MÃI CẤU HÌNH ĐƯỢC
+// ────────────────────────────────────────────────────────────────────────────
+// Đây là chỗ trả lời yêu cầu "không hard-code 8.8 / 9.9". Một chiến dịch =
+// khoảng thời gian + danh sách điều kiện đếm trên giỏ + ba câu nói. POS chỉ
+// việc đếm và chọn câu phù hợp:
+//   · đủ hết điều kiện          → câu "đã đủ"
+//   · thiếu ĐÚNG MỘT điều kiện  → câu "gần đủ" (nếu khoảng thiếu ≤ ngưỡng)
+//   · thiếu điều kiện theo size, mà giỏ đã có sẵn ngần ấy ly ở size khác
+//                               → câu "đổi size"
+// Thiếu từ hai điều kiện trở lên thì im — còn xa quá, nói ra chỉ làm phiền.
+const ASSIST_WEEKDAYS = [[1, 'T2'], [2, 'T3'], [3, 'T4'], [4, 'T5'], [5, 'T6'], [6, 'T7'], [0, 'CN']];
+
+function renderAssistCampaigns() {
+  const list = assistCfg.campaigns || [];
+  const rows = list.map((cp, i) => i === assistCampOpen ? _assistCampForm(cp, i) : `
+    <div class="litem" onclick="assistCampOpenIdx(${i})" style="cursor:pointer">
+      <div class="li-l">
+        <div><b>${escapeHtmlAttr(cp.name || 'Chiến dịch chưa đặt tên')}</b> ${cp.enabled === false ? '<span class="muted-sm">(đang tắt)</span>' : ''}</div>
+        <div>${escapeHtmlAttr(_assistCampSummary(cp))}</div>
+      </div>
+      <div class="li-r">${ic('pencil')}</div>
+    </div>`).join('');
+
+  document.getElementById('assistBody').innerHTML = `
+    <div class="card">
+      <div class="card-h"><h3>${ic('calendar', 17)} Chiến dịch theo ngày / sự kiện</h3></div>
+      <div class="unit-explainer" style="margin-top:0">
+        Khai 8.8, 9.9, sinh nhật quán… ngay tại đây, không cần sửa code. POS đọc điều kiện, đếm trên giỏ hàng
+        rồi đọc đúng câu bạn viết cho nhân viên nói.<br>
+        Trong câu nói dùng được các chỗ điền: <b>{thieu}</b> còn thiếu bao nhiêu · <b>{can}</b> cần bao nhiêu ·
+        <b>{co}</b> đang có bao nhiêu · <b>{size}</b> size của điều kiện · <b>{doi}</b> số ly cần đổi size.
+      </div>
+      <button class="btn outline" onclick="assistCampAdd()">${ic('check', 15)} Thêm chiến dịch</button>
+    </div>
+    ${rows || '<div class="empty-hint">Chưa có chiến dịch nào. Hai chương trình thường ngày (mua X tặng Y, giảm theo số ly) vẫn chạy từ màn <b>Khuyến mãi</b> — ở đây chỉ dành cho chương trình theo ngày/sự kiện.</div>'}
+    ${_assistSaveBar()}`;
+}
+
+function _assistCampSummary(cp) {
+  const dk = [];
+  (cp.conditions || []).forEach(c => {
+    if (c.type === 'qty_total') dk.push(`≥ ${c.min} ly`);
+    else if (c.type === 'qty_size') dk.push(`≥ ${c.min} ly size ${c.size}`);
+    else if (c.type === 'qty_item') { const m = getActiveMenu().find(x => x.id === c.itemId); dk.push(`≥ ${c.min} ly ${m ? m.name : '(món đã xoá)'}`); }
+    else if (c.type === 'qty_type') dk.push(`≥ ${c.min} ly nhóm ${c.menuType}`);
+    else if (c.type === 'amount') dk.push(`≥ ${fmt(c.min)}`);
+  });
+  const tg = (cp.from || cp.to) ? `${cp.from || '…'} → ${cp.to || '…'}` : 'mọi ngày';
+  return (dk.join(' + ') || 'chưa có điều kiện') + ' · ' + tg;
+}
+
+function _assistCampForm(cp, i) {
+  const menu = getActiveMenu();
+  const types = [...new Set(menu.map(m => m.type).filter(Boolean))];
+  const conds = (cp.conditions || []).map((c, ci) => {
+    let extra = '';
+    if (c.type === 'qty_size') extra = `<input type="text" value="${escapeHtmlAttr(c.size || '')}" placeholder="M / L" onchange="assistCampCond(${i},${ci},'size',this.value)">`;
+    else if (c.type === 'qty_item') extra = `<select onchange="assistCampCond(${i},${ci},'itemId',this.value)"><option value="">— món —</option>${menu.map(m => `<option value="${m.id}" ${c.itemId === m.id ? 'selected' : ''}>${escapeHtmlAttr(m.name)}</option>`).join('')}</select>`;
+    else if (c.type === 'qty_type') extra = `<select onchange="assistCampCond(${i},${ci},'menuType',this.value)"><option value="">— nhóm —</option>${types.map(t => `<option value="${escapeHtmlAttr(t)}" ${c.menuType === t ? 'selected' : ''}>${escapeHtmlAttr(t)}</option>`).join('')}</select>`;
+    return `<div class="pkg-row">
+      <div class="pkg-row-h"><span class="pkg-row-n">Điều kiện ${ci + 1}</span>
+        <button class="iconbtn" onclick="assistCampCondDel(${i},${ci})">${ic('trash')}</button></div>
+      <div class="pkg-eq">
+        <select onchange="assistCampCond(${i},${ci},'type',this.value)">
+          ${ASSIST_COND_TYPES.map(([k, l]) => `<option value="${k}" ${c.type === k ? 'selected' : ''}>${l}</option>`).join('')}
+        </select>
+        ${extra}
+        <input type="number" min="1" value="${Number(c.min) || 1}" onchange="assistCampCond(${i},${ci},'min',this.value)">
+        <span class="unit-tag">tối thiểu</span>
+      </div>
+    </div>`;
+  }).join('');
+
+  return `<div class="card">
+    <div class="card-h"><h3>${ic('calendar', 17)} Sửa chiến dịch</h3>
+      <button class="btn sm outline" onclick="assistCampOpenIdx(-1)">Thu gọn</button></div>
+    <div class="field"><label>Tên chiến dịch</label>
+      <input type="text" value="${escapeHtmlAttr(cp.name || '')}" placeholder="VD: Ưu đãi 9.9" onchange="assistCampSet(${i},'name',this.value)"></div>
+    <div class="field"><label style="display:flex;align-items:center;gap:9px;cursor:pointer;">
+      <input type="checkbox" ${cp.enabled !== false ? 'checked' : ''} onchange="assistCampSet(${i},'enabled',this.checked)"> Đang chạy</label></div>
+    <div class="grid2">
+      <div class="field"><label>Từ ngày</label><input type="date" value="${cp.from || ''}" onchange="assistCampSet(${i},'from',this.value)"></div>
+      <div class="field"><label>Đến ngày</label><input type="date" value="${cp.to || ''}" onchange="assistCampSet(${i},'to',this.value)"></div>
+    </div>
+    <div class="field"><label>Chỉ chạy các thứ (bỏ trống = mọi ngày)</label>
+      <div style="display:flex;flex-wrap:wrap;gap:7px;">
+        ${ASSIST_WEEKDAYS.map(([d, l]) => _assistChip(l, (cp.weekdays || []).map(Number).includes(d), `assistCampWeekday(${i},${d})`)).join('')}
+      </div></div>
+    <div class="field"><label>Áp dụng cho</label>
+      <select onchange="assistCampSet(${i},'scope',this.value)">
+        <option value="all" ${(cp.scope || 'all') === 'all' ? 'selected' : ''}>Tất cả</option>
+        <option value="togo" ${cp.scope === 'togo' ? 'selected' : ''}>Chỉ To Go</option>
+        <option value="dinein" ${cp.scope === 'dinein' ? 'selected' : ''}>Chỉ tại quán</option>
+      </select></div>
+
+    <div class="sec-title">Điều kiện (phải đạt đủ tất cả)</div>
+    ${conds || '<div class="muted">Chưa có điều kiện nào — chiến dịch sẽ không bao giờ chạy.</div>'}
+    <button class="btn outline" onclick="assistCampCondAdd(${i})">+ Thêm điều kiện</button>
+
+    <div class="sec-title">Câu nói cho nhân viên</div>
+    <div class="field"><label>Khi đã đủ điều kiện</label>
+      <textarea onchange="assistCampSet(${i},'sayMet',this.value)" placeholder="Đơn đã đủ điều kiện — báo khách nhận 1 ly size M miễn phí.">${escapeHtmlAttr(cp.sayMet || '')}</textarea></div>
+    <div class="field"><label>Khi còn thiếu một chút</label>
+      <textarea onchange="assistCampSet(${i},'sayNear',this.value)" placeholder="Thêm {thieu} ly size L nữa để nhận thêm 1 ly size M miễn phí.">${escapeHtmlAttr(cp.sayNear || '')}</textarea></div>
+    <div class="grid2">
+      <div class="field"><label>Còn thiếu tối đa bao nhiêu thì mới mời</label>
+        <input type="number" min="1" value="${Number(cp.nearGap) || 1}" onchange="assistCampSet(${i},'nearGap',this.value)"></div>
+      <div class="field"><label>Gợi ý đổi size từ</label>
+        <input type="text" value="${escapeHtmlAttr(cp.swapFromSize || '')}" placeholder="VD: M" onchange="assistCampSet(${i},'swapFromSize',this.value)">
+        <div class="hint">Bỏ trống nếu không cần.</div></div>
+    </div>
+    <div class="field"><label>Câu gợi ý đổi size</label>
+      <textarea onchange="assistCampSet(${i},'saySwap',this.value)" placeholder="Nếu khách đổi {doi} ly sang size L, khách được tặng 1 ly size M.">${escapeHtmlAttr(cp.saySwap || '')}</textarea>
+      <div class="hint">Chỉ hiện khi giỏ đã có sẵn đủ số ly ở size cần đổi — đúng tình huống "khách đang có 2 ly M".</div></div>
+
+    <button class="btn danger" onclick="assistCampDel(${i})">${ic('trash', 15)} Xoá chiến dịch</button>
+  </div>`;
+}
+
+function assistCampOpenIdx(i) { assistCampOpen = i; renderAssistCampaigns(); }
+function assistCampAdd() {
+  assistCfg.campaigns = assistCfg.campaigns || [];
+  assistCfg.campaigns.push({
+    id: 'camp_' + Date.now().toString(36), name: '', enabled: true,
+    from: '', to: '', weekdays: [], scope: 'all',
+    conditions: [{ type: 'qty_total', min: 2 }], nearGap: 1,
+    swapFromSize: '', sayNear: '', sayMet: '', saySwap: ''
+  });
+  assistCampOpen = assistCfg.campaigns.length - 1;
+  assistTouch(); renderAssistCampaigns();
+}
+function assistCampSet(i, field, v) {
+  const cp = assistCfg.campaigns[i]; if (!cp) return;
+  cp[field] = (field === 'nearGap') ? Math.max(1, Number(v) || 1)
+            : (field === 'enabled') ? !!v : v;
+  assistTouch();
+  if (field === 'name' || field === 'enabled') renderAssistCampaigns();
+}
+function assistCampWeekday(i, d) {
+  const cp = assistCfg.campaigns[i]; if (!cp) return;
+  cp.weekdays = (cp.weekdays || []).map(Number);
+  const j = cp.weekdays.indexOf(d);
+  if (j >= 0) cp.weekdays.splice(j, 1); else cp.weekdays.push(d);
+  assistTouch(); renderAssistCampaigns();
+}
+function assistCampCondAdd(i) {
+  const cp = assistCfg.campaigns[i]; if (!cp) return;
+  cp.conditions = cp.conditions || [];
+  cp.conditions.push({ type: 'qty_total', min: 2 });
+  assistTouch(); renderAssistCampaigns();
+}
+function assistCampCondDel(i, ci) {
+  const cp = assistCfg.campaigns[i]; if (!cp) return;
+  cp.conditions.splice(ci, 1);
+  assistTouch(); renderAssistCampaigns();
+}
+function assistCampCond(i, ci, field, v) {
+  const cp = assistCfg.campaigns[i]; if (!cp || !cp.conditions[ci]) return;
+  cp.conditions[ci][field] = (field === 'min') ? Math.max(1, Number(v) || 1) : v;
+  assistTouch();
+  if (field === 'type') renderAssistCampaigns();
+}
+function assistCampDel(i) {
+  if (!confirm('Xoá chiến dịch này?')) return;
+  assistCfg.campaigns.splice(i, 1);
+  assistCampOpen = -1;
+  assistTouch(); renderAssistCampaigns();
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// TAB 3 — UPSALE
+// ────────────────────────────────────────────────────────────────────────────
+function renderAssistUpsell() {
+  const u = assistCfg.upsell;
+  const menu = getActiveMenu();
+  const rows = (u.rules || []).map((r, i) => i === assistUpsOpen ? _assistUpsForm(r, i, menu) : `
+    <div class="litem" onclick="assistUpsOpenIdx(${i})" style="cursor:pointer">
+      <div class="li-l"><div><b>${escapeHtmlAttr(r.name || 'Luật chưa đặt tên')}</b> ${r.enabled === false ? '<span class="muted-sm">(đang tắt)</span>' : ''}</div>
+        <div>${escapeHtmlAttr(r.say || '')}</div></div>
+      <div class="li-r">${ic('pencil')}</div>
+    </div>`).join('');
+
+  document.getElementById('assistBody').innerHTML = `
+    <div class="card">
+      <div class="card-h"><h3>${ic('arrowUp', 17)} Nâng size tự động</h3></div>
+      <div class="field"><label style="display:flex;align-items:center;gap:9px;cursor:pointer;">
+        <input type="checkbox" ${u.autoUpsize.enabled !== false ? 'checked' : ''} onchange="assistSetUpsize('enabled',this.checked)">
+        Gợi ý nâng size khi món còn size lớn hơn</label>
+        <div class="hint">POS tự tính chênh lệch tiền và đọc thành câu ("chỉ thêm 7.000đ"), chọn đúng ly có chênh lệch rẻ nhất — dễ gật đầu nhất, không phải ly đắt nhất.</div></div>
+      <div class="field"><label>Chỉ gợi ý khi chênh lệch trên (đ)</label>
+        <input type="number" min="0" value="${Number(u.autoUpsize.minGapPrice) || 0}" onchange="assistSetUpsize('minGapPrice',this.value)">
+        <div class="hint">0 = gợi ý mọi mức chênh.</div></div>
+    </div>
+
+    <div class="card">
+      <div class="card-h"><h3>${ic('note', 17)} Luật upsale tự khai</h3></div>
+      <div class="unit-explainer" style="margin-top:0">
+        Dùng cho những câu mời không suy ra được từ menu: mời món ăn kèm, mời mua mang về cho người nhà,
+        mời thử món mới… Chỗ điền dùng được: <b>{qty}</b> số ly trong đơn · <b>{tong}</b> tổng tiền đơn.
+      </div>
+      <button class="btn outline" onclick="assistUpsAdd()">${ic('check', 15)} Thêm luật</button>
+    </div>
+    ${rows || '<div class="empty-hint">Chưa có luật nào.</div>'}
+    ${_assistSaveBar()}`;
+}
+
+function _assistUpsForm(r, i, menu) {
+  const w = r.when || {};
+  return `<div class="card">
+    <div class="card-h"><h3>${ic('note', 17)} Sửa luật upsale</h3>
+      <button class="btn sm outline" onclick="assistUpsOpenIdx(-1)">Thu gọn</button></div>
+    <div class="field"><label>Tên luật (chỉ để bạn dễ nhớ)</label>
+      <input type="text" value="${escapeHtmlAttr(r.name || '')}" onchange="assistUpsSet(${i},'name',this.value)"></div>
+    <div class="field"><label style="display:flex;align-items:center;gap:9px;cursor:pointer;">
+      <input type="checkbox" ${r.enabled !== false ? 'checked' : ''} onchange="assistUpsSet(${i},'enabled',this.checked)"> Đang chạy</label></div>
+    <div class="field"><label>Câu nói cho nhân viên</label>
+      <textarea onchange="assistUpsSet(${i},'say',this.value)" placeholder="Đơn đang có {qty} ly — mời khách lấy thêm một phần bánh ăn kèm.">${escapeHtmlAttr(r.say || '')}</textarea></div>
+    <div class="field"><label>Nút hành động</label>
+      <select onchange="assistUpsSet(${i},'kind',this.value)">
+        <option value="custom" ${r.kind !== 'attach' ? 'selected' : ''}>Chỉ ghi nhận "đã hỏi khách"</option>
+        <option value="attach" ${r.kind === 'attach' ? 'selected' : ''}>Mở màn chọn món để thêm</option>
+      </select></div>
+
+    <div class="sec-title">Chỉ hiện khi</div>
+    <div class="grid2">
+      <div class="field"><label>Đơn có ít nhất (ly)</label>
+        <input type="number" min="0" value="${Number(w.minQty) || 0}" onchange="assistUpsWhen(${i},'minQty',this.value)"></div>
+      <div class="field"><label>Đơn từ (đ)</label>
+        <input type="number" min="0" value="${Number(w.minAmount) || 0}" onchange="assistUpsWhen(${i},'minAmount',this.value)"></div>
+    </div>
+    <div class="field"><label style="display:flex;align-items:center;gap:9px;cursor:pointer;">
+      <input type="checkbox" ${w.requireNoFood ? 'checked' : ''} onchange="assistUpsWhen(${i},'requireNoFood',this.checked)">
+      Chỉ khi đơn chưa có món ăn kèm nào</label></div>
+    <div class="field"><label>Chỉ khi đơn có một trong các món (bỏ trống = mọi món)</label>
+      <div style="display:flex;flex-wrap:wrap;gap:7px;max-height:200px;overflow-y:auto;">
+        ${menu.map(m => _assistChip(m.name, (w.itemIds || []).includes(m.id), `assistUpsItem(${i},'${m.id}')`)).join('')}
+      </div></div>
+    <button class="btn danger" onclick="assistUpsDel(${i})">${ic('trash', 15)} Xoá luật</button>
+  </div>`;
+}
+
+function assistSetUpsize(k, v) {
+  assistCfg.upsell.autoUpsize[k] = (k === 'enabled') ? !!v : Math.max(0, Number(v) || 0);
+  assistTouch();
+}
+function assistUpsOpenIdx(i) { assistUpsOpen = i; renderAssistUpsell(); }
+function assistUpsAdd() {
+  assistCfg.upsell.rules = assistCfg.upsell.rules || [];
+  assistCfg.upsell.rules.push({ id: 'ups_' + Date.now().toString(36), name: '', enabled: true, kind: 'custom', say: '', when: {} });
+  assistUpsOpen = assistCfg.upsell.rules.length - 1;
+  assistTouch(); renderAssistUpsell();
+}
+function assistUpsSet(i, field, v) {
+  const r = assistCfg.upsell.rules[i]; if (!r) return;
+  r[field] = (field === 'enabled') ? !!v : v;
+  assistTouch();
+  if (field === 'name' || field === 'enabled' || field === 'kind') renderAssistUpsell();
+}
+function assistUpsWhen(i, field, v) {
+  const r = assistCfg.upsell.rules[i]; if (!r) return;
+  r.when = r.when || {};
+  r.when[field] = (field === 'requireNoFood') ? !!v : Math.max(0, Number(v) || 0);
+  assistTouch();
+}
+function assistUpsItem(i, id) {
+  const r = assistCfg.upsell.rules[i]; if (!r) return;
+  r.when = r.when || {}; r.when.itemIds = r.when.itemIds || [];
+  const j = r.when.itemIds.indexOf(id);
+  if (j >= 0) r.when.itemIds.splice(j, 1); else r.when.itemIds.push(id);
+  assistTouch(); renderAssistUpsell();
+}
+function assistUpsDel(i) {
+  if (!confirm('Xoá luật này?')) return;
+  assistCfg.upsell.rules.splice(i, 1);
+  assistUpsOpen = -1;
+  assistTouch(); renderAssistUpsell();
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// TAB 4 — HIỆU QUẢ + DỰNG LẠI DỮ LIỆU NỀN
+// ────────────────────────────────────────────────────────────────────────────
+async function renderAssistPerf() {
+  const body = document.getElementById('assistBody');
+  const head = `
+    <div class="card">
+      <div class="card-h"><h3>${ic('chart', 17)} Hiệu quả gợi ý</h3></div>
+      <div class="grid2">
+        <div class="field"><label>Từ ngày</label><input type="date" value="${assistPerfRange.from}" onchange="assistPerfSet('from',this.value)"></div>
+        <div class="field"><label>Đến ngày</label><input type="date" value="${assistPerfRange.to}" onchange="assistPerfSet('to',this.value)"></div>
+      </div>
+      <button class="btn" onclick="assistPerfLoad()">${ic('search', 15)} Xem</button>
+    </div>`;
+
+  const tools = `
+    <div class="card">
+      <div class="card-h"><h3>${ic('refresh', 17)} Dữ liệu nền của trợ lý</h3></div>
+      <div class="unit-explainer" style="margin-top:0">
+        Hai bảng dưới đây là thứ khiến gợi ý "đúng món" thay vì gợi ý bừa. Chạy lại sau mỗi lần đổi menu lớn,
+        hoặc mỗi tuần một lần. POS đọc được ngay, không cần tải lại app.
+      </div>
+      <div class="field"><label>Quét bao nhiêu ngày gần nhất</label>
+        <input type="number" id="assistBuildDays" min="7" max="180" value="60">
+        <div class="hint">Càng nhiều ngày càng chính xác nhưng càng lâu — mỗi ngày là một lượt đọc.</div></div>
+      <button class="btn outline" id="assistBtnStats" onclick="assistRebuildStats()">${ic('chart', 15)} Dựng lại bảng tần suất món – topping</button>
+      <div class="hint" style="margin:8px 0 14px">Đếm trong lịch sử bán: mỗi món đã bán bao nhiêu ly, trong đó bao nhiêu ly có kèm từng loại topping.</div>
+      <button class="btn outline" id="assistBtnProfile" onclick="assistRebuildProfiles()">${ic('users', 15)} Dựng lại hồ sơ thói quen khách</button>
+      <div class="alert amber" style="margin-top:8px"><span class="ic">!</span><div>
+        Dựng lại hồ sơ sẽ <b>ghi đè</b> hồ sơ hiện có bằng đúng những gì đọc được trong khoảng ngày trên.
+        Chạy một lần khi mới bật tính năng (để khách cũ cũng có hồ sơ); sau đó POS tự cộng dồn sau mỗi đơn,
+        không cần chạy lại thường xuyên.
+      </div></div>
+      <div id="assistBuildLog" style="margin-top:10px"></div>
+    </div>`;
+
+  body.innerHTML = head + (assistPerfData ? _assistPerfHTML(assistPerfData) : '<div class="empty-hint">Chọn khoảng ngày rồi bấm Xem.</div>') + tools;
+}
+
+function assistPerfSet(k, v) { assistPerfRange[k] = v; }
+
+async function assistPerfLoad() {
+  const body = document.getElementById('assistBody');
+  const from = assistPerfRange.from, to = assistPerfRange.to;
+  if (!from || !to || from > to) { toast('⚠️ Khoảng ngày không hợp lệ'); return; }
+  try {
+    await ensureAuth();
+    const snap = await fstore.collection(ASSIST_LOG_COLL)
+      .where('businessDate', '>=', from).where('businessDate', '<=', to).get();
+    assistPerfData = _assistAggregate(snap.docs.map(d => d.data()));
+  } catch (err) {
+    console.error('assistPerfLoad lỗi', err);
+    showError('Không đọc được nhật ký gợi ý: ' + (err.code || err.message || err));
+    return;
+  }
+  renderAssistPerf();
+}
+
+// Gộp số. Cẩn thận với chữ "nhờ gợi ý": ta chỉ đo được TƯƠNG QUAN (đơn có gợi
+// ý được thực hiện thì to hơn), không chứng minh được NHÂN QUẢ — nên nhãn hiển
+// thị phải nói đúng như vậy, đừng để chủ quán đọc nhầm thành cam kết.
+function _assistAggregate(logs) {
+  const kinds = {}, toppings = {}, staff = {};
+  let shown = 0, accepted = 0, applied = 0;
+  let upliftSum = 0, upliftN = 0;
+  const donCoApDung = [], donKhongApDung = [];
+
+  logs.forEach(l => {
+    const sugs = l.suggestions || [];
+    shown += sugs.length;
+    const coApDung = sugs.some(s => s.applied);
+    const uplift = (Number(l.totalFinal) || 0) - (Number(l.totalBefore) || 0);
+    if (coApDung) { donCoApDung.push(Number(l.totalFinal) || 0); upliftSum += uplift; upliftN++; }
+    else donKhongApDung.push(Number(l.totalFinal) || 0);
+
+    sugs.forEach(s => {
+      if (s.action === 'accepted') accepted++;
+      if (s.applied) applied++;
+      const k = kinds[s.kind] || (kinds[s.kind] = { shown: 0, accepted: 0, applied: 0, uplift: 0 });
+      k.shown++;
+      if (s.action === 'accepted') k.accepted++;
+      if (s.applied) { k.applied++; k.uplift += uplift; }
+      if (s.kind === 'topping' && s.meta) {
+        (s.meta.toppingNames || []).forEach(n => {
+          const t = toppings[n] || (toppings[n] = { shown: 0, applied: 0 });
+          t.shown++;
+          if (s.applied && (s.chosen === n || !s.chosen)) t.applied++;
+        });
+      }
+    });
+
+    (l.staffOnShift || []).forEach(e => {
+      const key = e.name || e.id || '—';
+      const st = staff[key] || (staff[key] = { shown: 0, accepted: 0, applied: 0, orders: 0 });
+      st.orders++; st.shown += sugs.length;
+      st.accepted += sugs.filter(s => s.action === 'accepted').length;
+      st.applied += sugs.filter(s => s.applied).length;
+    });
+  });
+
+  const tb = arr => arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : 0;
+  return {
+    orders: logs.length, shown, accepted, applied,
+    aovApDung: tb(donCoApDung), aovKhong: tb(donKhongApDung),
+    nApDung: donCoApDung.length, nKhong: donKhongApDung.length,
+    upliftTB: upliftN ? Math.round(upliftSum / upliftN) : 0,
+    kinds, toppings, staff
+  };
+}
+
+function _assistPct(a, b) { return b > 0 ? Math.round(a * 100 / b) + '%' : '—'; }
+
+function _assistPerfHTML(d) {
+  if (!d.orders) return '<div class="empty-hint">Không có đơn nào có gợi ý trong khoảng này. Kiểm tra công tắc "Ghi nhật ký hiệu quả" ở tab Cấu hình.</div>';
+
+  const kindRows = Object.entries(d.kinds).sort((a, b) => b[1].shown - a[1].shown).map(([k, v]) => `
+    <tr><td>${escapeHtmlAttr(ASSIST_KIND_LABEL[k] || k)}</td>
+      <td style="text-align:right">${v.shown}</td>
+      <td style="text-align:right">${_assistPct(v.accepted, v.shown)}</td>
+      <td style="text-align:right">${_assistPct(v.applied, v.shown)}</td></tr>`).join('');
+
+  const tpRows = Object.entries(d.toppings).sort((a, b) => b[1].applied - a[1].applied).slice(0, 10).map(([n, v]) => `
+    <tr><td>${escapeHtmlAttr(n)}</td>
+      <td style="text-align:right">${v.shown}</td>
+      <td style="text-align:right">${v.applied}</td>
+      <td style="text-align:right">${_assistPct(v.applied, v.shown)}</td></tr>`).join('');
+
+  const stRows = Object.entries(d.staff).sort((a, b) => b[1].applied - a[1].applied).map(([n, v]) => `
+    <tr><td>${escapeHtmlAttr(n)}</td>
+      <td style="text-align:right">${v.orders}</td>
+      <td style="text-align:right">${_assistPct(v.accepted, v.shown)}</td>
+      <td style="text-align:right">${_assistPct(v.applied, v.shown)}</td></tr>`).join('');
+
+  const tbl = (title, head, rows, note) => `
+    <div class="card">
+      <div class="card-h"><h3>${title}</h3></div>
+      <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:14px">
+        <thead><tr style="color:var(--gt);font-size:12.5px;text-align:left">${head}</tr></thead>
+        <tbody>${rows || '<tr><td colspan="4" class="muted">Chưa có dữ liệu</td></tr>'}</tbody>
+      </table></div>
+      ${note ? `<div class="hint" style="margin-top:10px">${note}</div>` : ''}
+    </div>`;
+
+  return `
+    <div class="card">
+      <div class="card-h"><h3>${ic('pulse', 17)} Tổng quan</h3></div>
+      <div class="row"><span class="rl">Đơn có gợi ý</span><span class="rv">${d.orders}</span></div>
+      <div class="row"><span class="rl">Số gợi ý đã hiện</span><span class="rv">${d.shown}</span></div>
+      <div class="row"><span class="rl">Nhân viên có thực hiện</span><span class="rv">${_assistPct(d.accepted, d.shown)}</span></div>
+      <div class="row"><span class="rl">Khách thật sự đồng ý</span><span class="rv">${_assistPct(d.applied, d.shown)}</span></div>
+      <div class="row"><span class="rl">AOV đơn có gợi ý được nhận (${d.nApDung} đơn)</span><span class="rv">${fmt(d.aovApDung)}</span></div>
+      <div class="row"><span class="rl">AOV đơn không nhận gợi ý nào (${d.nKhong} đơn)</span><span class="rv">${fmt(d.aovKhong)}</span></div>
+      <div class="row"><span class="rl">Đơn tăng thêm sau khi gợi ý hiện ra</span><span class="rv">${fmt(d.upliftTB)}</span></div>
+      <div class="hint" style="margin-top:10px">
+        "Khách thật sự đồng ý" không lấy từ cú bấm nút mà suy ra bằng cách so giỏ hàng lúc gợi ý hiện ra với đơn
+        lúc chốt — nhân viên bấm "đã hỏi khách" rồi khách vẫn từ chối thì vẫn tính là không.<br>
+        Hai dòng AOV là <b>tương quan, không phải nhân quả</b>: đơn to vốn dễ chạm ngưỡng khuyến mãi nên cũng dễ
+        có gợi ý hơn. Dùng để so xu hướng giữa các loại gợi ý, đừng đọc thành "gợi ý làm tăng ngần này tiền".
+      </div>
+    </div>
+    ${tbl('Theo loại gợi ý', '<th>Loại</th><th style="text-align:right">Hiện</th><th style="text-align:right">NV thực hiện</th><th style="text-align:right">Khách đồng ý</th>', kindRows,
+      'Loại có tỉ lệ "NV thực hiện" thấp: hoặc câu chữ khó nói, hoặc gợi ý sai thời điểm. Loại "NV thực hiện" cao mà "khách đồng ý" thấp: nhân viên có mời nhưng khách không thích — nên xem lại nội dung.')}
+    ${tbl('Topping upsale tốt nhất', '<th>Topping</th><th style="text-align:right">Được gợi ý</th><th style="text-align:right">Bán được</th><th style="text-align:right">Tỉ lệ</th>', tpRows,
+      'Topping tỉ lệ cao thì cân nhắc đưa vào "cặp món – topping" cho đúng những món hay đi kèm.')}
+    ${tbl('Theo ca trực', '<th>Nhân viên</th><th style="text-align:right">Đơn</th><th style="text-align:right">NV thực hiện</th><th style="text-align:right">Khách đồng ý</th>', stRows,
+      'Tính theo người đang check-in lúc chốt đơn, nên ca có hai người thì cả hai cùng được ghi nhận — dùng để nhìn xu hướng theo ca, không phải để chấm điểm từng người.')}`;
+}
+
+// ── Dựng bảng tần suất món – topping ──────────────────────────────────────
+// Quét lịch sử bán N ngày, đếm: mỗi món bán bao nhiêu ly, trong đó bao nhiêu ly
+// có kèm từng loại topping. POS lấy tỉ lệ này làm một trong bốn nguồn điểm.
+// Đọc qua fetchOrdersForDate nên tự xử lý cả những ngày đã bị archive.
+async function assistRebuildStats() {
+  const days = Math.max(7, Math.min(180, Number(document.getElementById('assistBuildDays').value) || 60));
+  const btn = document.getElementById('assistBtnStats');
+  const log = document.getElementById('assistBuildLog');
+  btn.disabled = true;
+  const items = {}, tops = {};
+  let soDon = 0;
+  try {
+    await ensureAuth();
+    for (let i = 0; i < days; i++) {
+      const d = new Date(Date.now() - i * 86400000);
+      log.innerHTML = `<div class="muted">Đang đọc ngày ${dkey(d)} (${i + 1}/${days})...</div>`;
+      const orders = await fetchOrdersForDate(d);
+      soDon += orders.length;
+      orders.forEach(o => (o.itemsArray || []).forEach(c => {
+        if (!c || !c.itemId || c.isFood) return;
+        const q = Number(c.qty) || 1;
+        const rec = items[c.itemId] || (items[c.itemId] = { name: c.name || '', cups: 0, toppings: {} });
+        rec.cups += q;
+        (c.toppings || []).forEach(t => {
+          if (!t) return;
+          const tid = t.id || ('name:' + (t.name || ''));
+          const tr = rec.toppings[tid] || (rec.toppings[tid] = { name: t.name || '', cups: 0 });
+          tr.cups += q;
+          const g = tops[tid] || (tops[tid] = { name: t.name || '', cups: 0 });
+          g.cups += q;
+        });
+      }));
+    }
+    await db.ref(ASSIST_STATS_PATH).set({ items, toppings: tops, days, updatedAt: new Date().toISOString(), orders: soDon });
+    const soMon = Object.keys(items).length;
+    log.innerHTML = `<div class="alert green"><span class="ic">✓</span><div>Đã dựng xong từ <b>${soDon}</b> đơn / ${days} ngày — ${soMon} món có dữ liệu. Các máy POS nhận ngay.</div></div>`;
+    toast('✅ Đã dựng lại bảng tần suất');
+  } catch (err) {
+    console.error('assistRebuildStats lỗi', err);
+    log.innerHTML = `<div class="alert red"><span class="ic">!</span><div>Lỗi: ${escapeHtmlAttr(err.code || err.message || String(err))}</div></div>`;
+  } finally { btn.disabled = false; }
+}
+
+// ── Dựng lại hồ sơ thói quen khách ────────────────────────────────────────
+// Nguồn cho toàn bộ phần cá nhân hoá (nhắc đá riêng, topping quen, size quen).
+// Bình thường POS tự cộng dồn sau mỗi đơn; hàm này để chạy MỘT LẦN lúc mới bật
+// tính năng, cho khách cũ cũng có hồ sơ ngay thay vì phải đợi họ quay lại đủ
+// vài lần. Ghi theo lô 400 doc — Firestore giới hạn 500 thao tác một batch.
+async function assistRebuildProfiles() {
+  const days = Math.max(7, Math.min(180, Number(document.getElementById('assistBuildDays').value) || 60));
+  if (!confirm(`Dựng lại hồ sơ thói quen từ ${days} ngày gần nhất?\n\nHồ sơ hiện có của những khách xuất hiện trong khoảng này sẽ bị GHI ĐÈ bằng số đọc được.`)) return;
+  const btn = document.getElementById('assistBtnProfile');
+  const log = document.getElementById('assistBuildLog');
+  btn.disabled = true;
+  const prof = {};
+  try {
+    await ensureAuth();
+    for (let i = 0; i < days; i++) {
+      const d = new Date(Date.now() - i * 86400000);
+      log.innerHTML = `<div class="muted">Đang đọc ngày ${dkey(d)} (${i + 1}/${days})...</div>`;
+      const orders = await fetchOrdersForDate(d);
+      orders.forEach(o => {
+        const phone = String(o.phone || '').trim();
+        if (!phone) return;
+        const lines = (o.itemsArray || []).filter(c => c && c.itemId && !c._discountId && !c._vKey && !c.isFree);
+        if (!lines.length) return;
+        const p = prof[phone] || (prof[phone] = { orders: 0, ice: {}, toppings: {}, items: {}, sizes: {}, lastAt: null });
+        p.orders++;
+        if (!p.lastAt || (o.createdAt || '') > p.lastAt) p.lastAt = o.createdAt || null;
+        lines.forEach(c => {
+          const q = Number(c.qty) || 1;
+          if (!c.isFood) {
+            const im = c.ice || 'chung';
+            p.ice[im] = (p.ice[im] || 0) + q;
+            if (c.size) p.sizes[c.size] = (p.sizes[c.size] || 0) + q;
+          }
+          p.items[c.itemId] = (p.items[c.itemId] || 0) + q;
+          (c.toppings || []).forEach(t => {
+            const id = t.id || ('name:' + (t.name || ''));
+            p.toppings[id] = (p.toppings[id] || 0) + q;
+          });
+        });
+      });
+    }
+
+    const phones = Object.keys(prof);
+    let ghi = 0;
+    for (let i = 0; i < phones.length; i += 400) {
+      const lo = phones.slice(i, i + 400);
+      const batch = fstore.batch();
+      lo.forEach(ph => {
+        const p = prof[ph];
+        p.builtAt = new Date().toISOString();
+        p.builtFromDays = days;
+        // merge:true — chỉ đụng vào assist_profile, KHÔNG được chạm tới điểm,
+        // tem hay voucher của khách.
+        batch.set(fstore.collection('customers').doc(ph), { assist_profile: p }, { merge: true });
+      });
+      await batch.commit();
+      ghi += lo.length;
+      log.innerHTML = `<div class="muted">Đang ghi hồ sơ ${ghi}/${phones.length}...</div>`;
+    }
+    log.innerHTML = `<div class="alert green"><span class="ic">✓</span><div>Đã dựng hồ sơ cho <b>${phones.length}</b> khách từ ${days} ngày gần nhất.</div></div>`;
+    toast('✅ Đã dựng lại hồ sơ thói quen khách');
+  } catch (err) {
+    console.error('assistRebuildProfiles lỗi', err);
+    log.innerHTML = `<div class="alert red"><span class="ic">!</span><div>Lỗi: ${escapeHtmlAttr(err.code || err.message || String(err))}</div></div>`;
+  } finally { btn.disabled = false; }
+}
 
 </script>
 </body>
