@@ -347,6 +347,38 @@ html.phone-ui .sync{padding:9px;}
    5. LƯỚI CHỈ SỐ (KPI)
    ========================================================================== */
 .kgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+
+/* ---------- Thẻ chỉ số MINI (màn Hôm nay) ----------
+   Vì sao có loại thẻ này: 6 chỉ số phụ (bill, AOV, IPT, ly, doanh thu/giờ công,
+   vốn trong kho) mà mỗi cái một thẻ lớn thì chiếm 3 màn hình cuộn. Thẻ lớn để
+   dành cho 2 con số người ta mở app ra là tìm — doanh thu và lãi/lỗ; phần còn
+   lại xếp 3 cột, đọc lướt được trong một cái nhìn.
+   Không có thanh meter ở đây: thay bằng TÔ MÀU chính con số theo trạng thái
+   (đỏ/vàng/xanh) + một dòng mục tiêu bé bên dưới — cùng lượng thông tin, tốn
+   một phần ba chiều cao. */
+.kmini-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px;}
+.kmini{background:var(--card);border-radius:var(--r-lg);padding:11px 11px 10px;
+  border:1px solid rgba(230,227,223,.7);box-shadow:var(--sh-1);min-width:0;}
+.kmini .kmlabel{font-size:10px;font-weight:800;color:var(--gt);text-transform:uppercase;letter-spacing:.4px;line-height:1.25;}
+.kmini .kmval{font-size:17.5px;font-weight:800;color:var(--td);margin-top:4px;line-height:1.15;letter-spacing:-.2px;overflow-wrap:anywhere;}
+.kmini .kmsub{font-size:10.5px;color:var(--gt);margin-top:3px;line-height:1.35;overflow-wrap:anywhere;}
+.kmini.st-bad .kmval{color:var(--bad);}
+.kmini.st-warn .kmval{color:var(--warn);}
+.kmini.st-ok .kmval{color:var(--ok);}
+html.tab-ui .kmini-grid{grid-template-columns:repeat(6,1fr);gap:12px;}
+html.tab-ui .kmini{padding:14px 14px 12px;border-radius:var(--r-xl);}
+html.tab-ui .kmini .kmval{font-size:21px;}
+
+/* Thanh tóm tắt "việc cần xử lý" — một dòng, bấm mới bung danh sách ra. Danh
+   sách đầy đủ nằm ngay đầu màn Hôm nay đẩy mọi chỉ số xuống dưới nếp gấp. */
+.hbar-sum{display:flex;align-items:center;gap:9px;width:100%;text-align:left;cursor:pointer;
+  background:var(--card);border:1px solid rgba(230,227,223,.7);border-radius:var(--r-lg);
+  box-shadow:var(--sh-1);padding:11px 13px;font-family:inherit;margin-bottom:2px;}
+.hbar-sum .hbs-txt{flex:1;min-width:0;font-size:13px;font-weight:700;color:var(--td);line-height:1.4;}
+.hbar-sum .hbs-cnt{font-size:12px;font-weight:800;color:var(--gt);flex-shrink:0;}
+.hbar-sum.ok{border-color:rgba(27,169,111,.35);}
+.hbar-sum.warn{border-color:rgba(216,154,42,.45);}
+.hbar-sum.bad{border-color:rgba(232,81,93,.45);}
 .kcard{
   background:var(--card);border-radius:var(--r-lg);
   padding:16px 16px 14px;box-shadow:var(--sh-1);
@@ -1196,15 +1228,22 @@ html.phone-ui .nav-search .ns-kbd{display:none;}
     <!-- TODAY -->
     <div class="screen active" id="screen-today">
       <div class="wrap">
+        <!-- [BỐ CỤC] Thứ tự đặt theo đúng thứ tự câu hỏi mỗi sáng: hôm nay bán
+             được bao nhiêu / lãi hay lỗ → các chỉ số phụ → giờ nào đẻ ra tiền →
+             việc tồn đọng. Danh sách "việc cần xử lý" trước đây nằm nguyên trên
+             đầu, dài 5–10 dòng, đẩy toàn bộ chỉ số xuống dưới nếp gấp; giờ thu
+             lại thành MỘT thanh tóm tắt, bấm mới bung ra. Không mất cảnh báo —
+             thanh vẫn đỏ và vẫn đếm đúng số việc. -->
         <div id="reportSubNavToday"></div>
         <div id="todayBook"></div>
         <div id="todayNudge"></div>
-        <div id="todayHealth"></div>
-        <div class="sec-title">Chỉ số hôm nay</div>
+        <div id="todayHealthBar"></div>
+        <div id="todayHealth" hidden></div>
         <div class="kgrid" id="todayGrid"></div>
-        <div id="todayThv"></div>
-        <div class="sec-title">Bill theo giờ</div>
+        <div class="kmini-grid" id="todayMini"></div>
+        <div class="sec-title">Doanh thu &amp; giờ công theo khung giờ</div>
         <div id="todayHourly"></div>
+        <div id="todayThv"></div>
         <div class="sec-title">Cảnh báo</div>
         <div id="todayAlerts"></div>
       </div>
@@ -1808,6 +1847,14 @@ function showLoading(el, text){
 }
 
 function fmt(n){ return Math.round(n||0).toLocaleString('vi-VN') + 'đ'; }
+// Tiền viết GỌN cho thẻ mini — "1,2tr" / "380k". Chỉ dùng ở chỗ chật; mọi con số
+// người ta phải đối chiếu với hoá đơn thì vẫn viết đủ bằng fmt().
+function fmtGon(n){
+  const v = Math.round(Number(n)||0), a = Math.abs(v);
+  if(a >= 1000000) return (v/1000000).toFixed(a >= 10000000 ? 0 : 1).replace('.',',') + 'tr';
+  if(a >= 10000)   return Math.round(v/1000) + 'k';
+  return v.toLocaleString('vi-VN') + 'đ';
+}
 
 // ============================================================
 // 🆕 KẾ HOẠCH V3 — PHẦN 6.2: popup sửa DÙNG CHUNG (bottom sheet). Trước đây bấm
@@ -2362,10 +2409,18 @@ function aggregateOrders(orders){
   // là chỗ duy nhất đọc qua từng bill, và kết quả của nó được ghi vào cache ngày —
   // nghĩa là các ngày đã chốt sổ về sau cũng có sẵn phân bố giờ, khỏi đọc lại RTDB.
   const byHour = {};
+  // [MỚI] DOANH THU theo giờ, không chỉ số bill. Số bill nói giờ nào ĐÔNG, doanh
+  // thu nói giờ nào ĐÁNG mở cửa — hai chuyện khác nhau khi giờ trưa toàn ly nhỏ
+  // còn giờ chiều là bill nhiều món. Ngày đã nằm trong cache trước bản này không
+  // có trường mới; nơi vẽ tự rơi về đếm bill và nói rõ đang xem số nào.
+  const revByHour = {};
   orders.forEach(o=>{
     bills++;
     const h = orderHour(o);
-    if(h != null) byHour[h] = (byHour[h] || 0) + 1;
+    if(h != null){
+      byHour[h] = (byHour[h] || 0) + 1;
+      revByHour[h] = (revByHour[h] || 0) + (Number(o.total)||0);
+    }
     revenue += Number(o.total)||0;
     let hasTopping = false;
     const cogsMap = COGS_TOGO;
@@ -2420,7 +2475,7 @@ function aggregateOrders(orders){
     if(hasTopping) toppingBills++;
     revenueUncosted += Number(o.foodTotal)||0; // đồ ăn (food_gieogieo) chưa có UI nhập COGS -> tạm ước tính %
   });
-  return {revenue,bills,items,toppingBills,toppingRevenue,cogsActual,revenueUncosted,toppingCogsActual,toppingRevenueUncosted,byHour,toppingMix};
+  return {revenue,bills,items,toppingBills,toppingRevenue,cogsActual,revenueUncosted,toppingCogsActual,toppingRevenueUncosted,byHour,revByHour,toppingMix};
 }
 
 function rawMixFromOrders(orders){
@@ -8296,11 +8351,13 @@ async function renderStoreHealth(targetId){
     </div>`;
 
   const gonGang = targetId === 'todayHealth';   // nằm chung màn Hôm nay thì phải nhường chỗ cho các chỉ số
+  // [BỐ CỤC] Ở màn Hôm nay, danh sách việc nằm trong khối GẤP LẠI; phần nhìn thấy
+  // ngay chỉ là một thanh đếm số việc. Trạng thái mở/đóng nhớ theo máy — chủ quán
+  // nào quen xem danh sách thì mở một lần là xong.
+  if(gonGang) renderTodayHealthBar(red.length, yellow.length);
   box.innerHTML = `
-    ${(!red.length && !yellow.length)
-      ? (gonGang
-          ? `<div style="display:flex;align-items:center;gap:7px;color:var(--ok);font-weight:700;font-size:13px;padding:2px 0 10px;">${ic('check',15,'var(--ok)')} Không có việc gì cần xử lý ngay</div>`
-          : `<div class="health-all-clear">${ic('check',20)} Mọi thứ ổn<div style="font-size:12px;font-weight:500;color:var(--gt);margin-top:6px;">Không có việc gì cần xử lý ngay.</div></div>`)
+    ${(!red.length && !yellow.length && !gonGang)
+      ? `<div class="health-all-clear">${ic('check',20)} Mọi thứ ổn<div style="font-size:12px;font-weight:500;color:var(--gt);margin-top:6px;">Không có việc gì cần xử lý ngay.</div></div>`
       : ''}
     ${red.length ? `<div class="health-group-title">${icDot('var(--bad)')} Cần xử lý ngay (${red.length})</div>${red.map(row).join('')}` : ''}
     ${yellow.length ? `<div class="health-group-title">${icDot('var(--warn)')} Nên xem (${yellow.length})</div>${yellow.map(row).join('')}` : ''}
@@ -8309,6 +8366,44 @@ async function renderStoreHealth(targetId){
       ? `<button onclick="switchScreen('inbox')" style="background:none;border:none;padding:4px 0 8px;color:var(--gd);font-weight:700;font-size:12.5px;cursor:pointer;display:inline-flex;align-items:center;gap:5px;">${ic('inbox',14)} Hộp thư cảnh báo (cả đã xử lý)</button>`
       : `<div class="health-item gray" onclick="switchScreen('inbox')"><div class="hi-label">${ic('inbox')} Hộp thư cảnh báo (cả đã xử lý)</div><div class="hi-count">›</div></div>`}
   `;
+  if(gonGang) applyTodayHealthOpen();
+}
+
+// ---------- Thanh tóm tắt "việc cần xử lý" của màn Hôm nay ----------
+let _todayHealthMo = false;
+try{ _todayHealthMo = localStorage.getItem('ql_today_health_open') === '1'; }catch(e){}
+function toggleTodayHealth(){
+  _todayHealthMo = !_todayHealthMo;
+  try{ localStorage.setItem('ql_today_health_open', _todayHealthMo ? '1' : '0'); }catch(e){}
+  applyTodayHealthOpen();
+}
+let _todayHealthTrong = true;   // hôm nay không có việc nào cần xử lý
+function applyTodayHealthOpen(){
+  const list = document.getElementById('todayHealth');
+  const chev = document.getElementById('todayHealthChev');
+  const txt  = document.getElementById('todayHealthMore');
+  // Sạch việc thì phần còn lại chỉ là nút vào Hộp thư — luôn hiện, vì lúc đó thanh
+  // tóm tắt không có gì để bấm mở.
+  if(list) list.hidden = _todayHealthTrong ? false : !_todayHealthMo;
+  if(chev) chev.style.transform = _todayHealthMo ? 'rotate(180deg)' : '';
+  if(txt)  txt.textContent = _todayHealthMo ? 'Thu gọn ' : 'Xem ';
+}
+function renderTodayHealthBar(soDo, soVang){
+  _todayHealthTrong = !soDo && !soVang;
+  const bar = document.getElementById('todayHealthBar');
+  if(!bar) return;
+  if(!soDo && !soVang){
+    bar.innerHTML = `<div class="hbar-sum ok" style="cursor:default">${ic('check',16,'var(--ok)')}<span class="hbs-txt">Không có việc gì cần xử lý ngay</span></div>`;
+    return;
+  }
+  const phan = [];
+  if(soDo)   phan.push(`<b>${soDo}</b> việc cần xử lý ngay`);
+  if(soVang) phan.push(`<b>${soVang}</b> việc nên xem`);
+  bar.innerHTML = `<button class="hbar-sum ${soDo ? 'bad' : 'warn'}" onclick="toggleTodayHealth()">
+      ${icDot(soDo ? 'var(--bad)' : 'var(--warn)', 10)}
+      <span class="hbs-txt">${phan.join(' · ')}</span>
+      <span class="hbs-cnt"><span id="todayHealthMore">Xem </span><span id="todayHealthChev" style="display:inline-block;transition:transform .15s">${ic('chevronDown',13)}</span></span>
+    </button>`;
 }
 
 // ============================================================
@@ -8522,11 +8617,15 @@ async function renderToday(){
   const plBE = plBreakEven(plHomNay, _bepCache && _bepCache.data ? _bepCache.data.bienDongGop : (1 - t.cogsPct/100));
   const mucSK = plMucSucKhoe(kpi.revenue, plBE ? plBE.hoaVon : null, dailyTarget);
 
-  const cards = [
-    {label:'Số bill', val: kpi.bills, ratio: achievement(kpi.bills, t.billsPerDay, 'higher'), status: statusHigherBetter(kpi.bills, t.billsPerDay, 0.1), sub:`Mục tiêu: ${t.billsPerDay} bill`},
-    {label:'AOV', val: fmt(kpi.aov), ratio: achievement(kpi.aov, t.aov, 'higher'), status: statusAOV(kpi.aov, t.aov)},
-    {label:'IPT', val: fmtNum(kpi.ipt,2)+' món/bill', ratio: achievement(kpi.ipt, t.ipt, 'higher'), status: statusHigherBetter(kpi.ipt, t.ipt, 0.08)},
-    {label:'Items bán ra', val: kpi.items, sub:`${kpi.toppingBills} bill có topping`}
+  // [BỐ CỤC] Bốn chỉ số phụ này trước đây là 4 THẺ LỚN có thanh meter, chiếm hai
+  // màn cuộn. Giờ thành thẻ mini 3 cột: giá trị được TÔ MÀU theo đúng trạng thái
+  // cũ (đỏ/vàng/xanh) và mục tiêu viết một dòng bé bên dưới — không mất thông tin
+  // nào, mà xem hết trong một cái nhìn.
+  const miniCards = [
+    {label:'Số bill', val: kpi.bills, st: statusHigherBetter(kpi.bills, t.billsPerDay, 0.1), sub:`MT ${t.billsPerDay}`},
+    {label:'AOV', val: fmtGon(kpi.aov), st: statusAOV(kpi.aov, t.aov), sub:`MT ${fmtGon(t.aov)}`},
+    {label:'IPT', val: fmtNum(kpi.ipt,2), st: statusHigherBetter(kpi.ipt, t.ipt, 0.08), sub:`MT ${fmtNum(t.ipt,2)} món/bill`},
+    {label:'Ly bán ra', val: kpi.items, sub:`${kpi.toppingBills} bill có topping`}
   ];
   // Thẻ DOANH THU đổi màu theo 5 mức sức khoẻ, và mang luôn hai vạch mốc hoà vốn /
   // mục tiêu — nhìn màu là biết tình trạng trước cả khi đọc con số.
@@ -8537,16 +8636,15 @@ async function renderToday(){
       <div class="ksub"><b>${PL_LV_TEXT[mucSK]}</b></div>
       ${plMeterHTML(kpi.revenue, plBE ? plBE.hoaVon : null, dailyTarget)}
     </div>`;
-  document.getElementById('todayGrid').innerHTML =
-    theDoanhThu +
-    plLaiCardHTML(plHomNay, plBE) +
-    cards.map(c=>`
-    <div class="kcard">
-      <div class="klabel">${c.label}</div>
-      <div class="kval disp">${c.val}</div>
-      ${c.sub?`<div class="ksub">${c.sub}</div>`:''}
-      ${c.ratio!=null ? meterHTML(c.ratio, c.status) : ''}
-    </div>`).join('');
+  document.getElementById('todayGrid').innerHTML = theDoanhThu + plLaiCardHTML(plHomNay, plBE);
+  // Hai ô cuối (doanh thu/giờ công và vốn trong kho) cần thêm một lượt đọc dữ liệu
+  // nên để chỗ trống có nhãn sẵn, điền sau — giữ đúng khung lưới, không nhảy chỗ.
+  document.getElementById('todayMini').innerHTML =
+    miniCards.map(c=>miniCardHTML(c.label, c.val, c.sub, c.st)).join('')
+    // display:contents — ô bọc chỉ để thay nội dung sau, không được tự thành một ô
+    // của lưới (nếu không thẻ mini sẽ nằm lồng bên trong, lệch hẳn hàng).
+    + `<div id="miniSPLH" style="display:contents">${miniCardHTML('DT / giờ công', '…', 'Đang đọc chấm công')}</div>`
+    + `<div id="miniKho" style="display:contents">${miniCardHTML('Vốn trong kho', '…', 'Đang cộng tồn kho')}</div>`;
 
   // THU HỒI VỐN — nạp NỀN. Nó phải cộng mọi ngày từ mốc bắt đầu tới hôm nay nên
   // chậm hơn hẳn phần trên; giữ cả màn lại chờ nó là vô lý. Hiện khung chờ trước.
@@ -8569,7 +8667,35 @@ async function renderToday(){
     .then(() => { if (cầnNạpBiên && curScreen === 'today' && !(kpi.revenue > 0)) renderToday(); })
     .catch(err => console.warn('[Hoà vốn] không lấy được biên tham chiếu (bỏ qua):', err));
 
-  renderTodayHourly((salesRes.perDay[0] || {}).byHour);
+  // BIỂU ĐỒ GIỜ — vẽ ngay với doanh thu, giờ công điền sau khi đọc xong chấm công.
+  const dayRow = salesRes.perDay[0] || {};
+  renderTodayGioCong(dayRow.byHour, dayRow.revByHour, null, kpi.revenue);
+  computeStaffHoursByHour(dkey(today))
+    .then(gc => {
+      if(curScreen !== 'today') return;
+      renderTodayGioCong(dayRow.byHour, dayRow.revByHour, gc, kpi.revenue);
+      const el = document.getElementById('miniSPLH');
+      if(!el) return;
+      // Doanh thu trên mỗi giờ công — thước đo xếp lịch. Chưa ai chấm công thì nói
+      // thẳng là chưa có dữ liệu, KHÔNG hiện 0đ (0đ đọc như "làm không ra tiền").
+      el.innerHTML = gc.total > 0
+        ? miniCardHTML('DT / giờ công', fmtGon(kpi.revenue / gc.total),
+            `${fmtNum(gc.total,1)}h công${gc.dangChay?' · '+gc.dangChay+' ca đang chạy':''}`)
+        : miniCardHTML('DT / giờ công', '—', gc.boQuen ? `${gc.boQuen} ca quên check-out` : 'Chưa có chấm công hôm nay');
+    })
+    .catch(err => console.warn('[Giờ công] bỏ qua:', err));
+
+  // VỐN TRONG KHO — nạp nền: phải đọc 30 ngày ledger nên chậm hơn phần trên.
+  computeInventoryHealth()
+    .then(kho => {
+      const el = document.getElementById('miniKho');
+      if(el && curScreen === 'today') el.innerHTML = khoMiniHTML(kho);
+    })
+    .catch(err => {
+      console.warn('[Kho] không tính được vốn tồn (bỏ qua):', err);
+      const el = document.getElementById('miniKho');
+      if(el) el.innerHTML = miniCardHTML('Vốn trong kho', '—', 'Không đọc được kho');
+    });
 
   document.getElementById('todayAlerts').innerHTML = renderAlerts(generateAlerts(kpi, kpi.targetCfg));
   clearError();
@@ -8582,69 +8708,103 @@ async function renderToday(){
 }
 
 // ============================================================
-// [NEW] BIỂU ĐỒ "BILL THEO GIỜ" — màn Hôm nay
+// [NEW] BIỂU ĐỒ "DOANH THU & GIỜ CÔNG THEO KHUNG GIỜ" — màn Hôm nay
 //
-// Câu hỏi nó trả lời: giờ nào đông, giờ nào vắng. Chỉ nhìn tổng "142 bill/ngày"
-// thì không biết nên xếp mấy người ca chiều, hay có nên mở sớm hơn không.
+// Trước đây biểu đồ này chỉ đếm SỐ BILL. Số bill nói giờ nào đông, nhưng không
+// trả lời được câu hỏi tốn tiền nhất của quán: "khung giờ này có đáng để hai
+// người đứng không?". Giờ mỗi cột là DOANH THU của khung giờ đó, và ngay dưới
+// cột là SỐ GIỜ CÔNG thật đang đứng trong khung đó (đọc từ chấm công). Đặt cạnh
+// nhau thì tự lộ ra: 9–11h mỗi giờ công đẻ ra 60k, 14–16h đẻ ra 180k.
 //
-// Vì sao là biểu đồ cột chứ không phải bảng: đây là ĐỘ LỚN theo một trục thời
-// gian có thứ tự — mắt so chiều cao nhanh hơn nhiều so với đọc 14 con số. Vẫn in
-// số ngay trên đầu mỗi cột nên không phải rê chuột mới biết chính xác bao nhiêu.
+// Vì sao là biểu đồ cột: đây là ĐỘ LỚN trên một trục thời gian có thứ tự — mắt so
+// chiều cao nhanh hơn đọc 14 con số. Vẫn in số trên đầu mỗi cột nên không cần rê
+// chuột mới biết chính xác.
 //
-// Chỉ vẽ từ giờ có bill ĐẦU TIÊN tới giờ có bill CUỐI CÙNG (và ít nhất tới giờ
-// hiện tại). Vẽ đủ 0–23 thì hai phần ba biểu đồ là cột rỗng lúc quán đóng cửa,
-// làm phần có dữ liệu bị nén lại còn một dúm.
+// Ngày nằm trong cache TRƯỚC bản này không có revByHour → tự rơi về đếm bill và
+// nói rõ trên tiêu đề là đang xem số bill, chứ không vẽ một biểu đồ rỗng.
+//
+// Khoảng giờ vẽ = từ giờ đầu tiên tới giờ cuối cùng CÓ BILL HOẶC CÓ NGƯỜI ĐỨNG.
+// Cố ý gộp cả giờ công vào: giờ có người mà không có doanh thu chính là thứ cần
+// nhìn thấy nhất, cắt nó đi thì biểu đồ chỉ còn khen chứ không chỉ ra chỗ lỗ.
 // ============================================================
-function renderTodayHourly(byHour){
+function renderTodayGioCong(byHour, revByHour, gc, tongDT){
   const box = document.getElementById('todayHourly');
   if(!box) return;
   const dem = byHour || {};
-  const gio = Object.keys(dem).map(Number).filter(h=>dem[h]>0).sort((a,b)=>a-b);
+  const tien = revByHour || null;             // null = ngày cache cũ, chưa có doanh thu theo giờ
+  const gcH = (gc && gc.byHour) || {};
+  const coTien = !!tien && Object.keys(tien).length > 0;
 
-  if(!gio.length){
+  const gioCoSo = new Set();
+  Object.keys(dem).forEach(h => { if(dem[h] > 0) gioCoSo.add(Number(h)); });
+  Object.keys(gcH).forEach(h => { if(gcH[h] > 0.05) gioCoSo.add(Number(h)); });
+
+  if(!gioCoSo.size){
     box.innerHTML = '<div class="hchart"><div class="hchart-empty">Chưa có bill nào hôm nay.</div></div>';
     return;
   }
+  const ds = [...gioCoSo].sort((a,b)=>a-b);
   const gioHienTai = new Date().getHours();
-  const dau = gio[0];
-  const cuoi = Math.max(gio[gio.length-1], Math.min(gioHienTai, 23));
+  const dau = ds[0];
+  const cuoi = Math.max(ds[ds.length-1], Math.min(gioHienTai, 23));
   const cot = [];
-  for(let h = dau; h <= cuoi; h++) cot.push({ h, n: dem[h] || 0 });
+  for(let h = dau; h <= cuoi; h++){
+    cot.push({ h, bill: dem[h] || 0, tien: coTien ? (tien[h] || 0) : null, gc: gcH[h] || 0 });
+  }
+  const doCao = c => coTien ? (c.tien || 0) : c.bill;
+  const cao = Math.max(...cot.map(doCao));
+  const tongBill = cot.reduce((a,c)=>a+c.bill, 0);
+  const dinh = cot.filter(c=>doCao(c) === cao && cao > 0).map(c=>c.h);
+  const tongGC = (gc && gc.total) || 0;
 
-  const tong = cot.reduce((a,c)=>a+c.n, 0);
-  const cao = Math.max(...cot.map(c=>c.n));
-  const dinh = cot.filter(c=>c.n === cao).map(c=>c.h);
-  // Trung bình tính trên số giờ ĐÃ MỞ BÁN (số cột), không chia cho 24 — chia cho
-  // 24 thì quán nào cũng ra một con số bé tí vô nghĩa.
-  const tb = tong / cot.length;
+  // Câu tiêu đề: ưu tiên doanh thu/giờ công (thước đo xếp lịch). Chưa chấm công thì
+  // lùi về bill/giờ mở bán như cũ — vẫn hữu ích, và nói rõ vì sao chưa có số kia.
+  const hero = tongGC > 0
+    ? `<div class="hchart-hero">${fmtGon(tongDT / tongGC)}<span>/ giờ công</span></div>
+       <div class="hchart-note" style="text-align:left;margin-top:3px;">${fmtNum(tongGC,1)} giờ công · ${tongBill} bill${coTien ? '' : ' · chưa có doanh thu theo giờ cho ngày này'}</div>`
+    : `<div class="hchart-hero">${fmtNum(tongBill / cot.length,1)}<span>bill/giờ</span></div>
+       <div class="hchart-note" style="text-align:left;margin-top:3px;">${tongBill} bill trong ${cot.length} giờ${gc && gc.boQuen ? ` · ${gc.boQuen} ca quên check-out nên chưa tính giờ công` : ' · chưa có chấm công'}</div>`;
 
-  const PX = 132;   // chiều cao vùng vẽ
+  const PX = 132;
   box.innerHTML = `
     <div class="hchart">
       <div class="hchart-head">
-        <div>
-          <div class="hchart-hero">${fmtNum(tb,1)}<span>bill/giờ</span></div>
-          <div class="hchart-note" style="text-align:left;margin-top:3px;">${tong} bill trong ${cot.length} giờ mở bán</div>
-        </div>
-        <div class="hchart-note">Đông nhất<br><b style="color:var(--td);font-size:13.5px;">${dinh.map(h=>pad(h)+'h').join(', ')}</b> · ${cao} bill</div>
+        <div>${hero}</div>
+        <div class="hchart-note">${coTien ? 'Cao nhất' : 'Đông nhất'}<br><b style="color:var(--td);font-size:13.5px;">${dinh.map(h=>pad(h)+'h').join(', ') || '—'}</b> · ${coTien ? fmtGon(cao) : cao + ' bill'}</div>
       </div>
       <div class="hchart-scroll">
         <div>
           <div class="hbars" style="height:${PX + 20}px;">
             ${cot.map(c=>{
-              const hi = cao ? Math.round((c.n / cao) * PX) : 0;
-              return `<div class="hbar${c.n===cao?' peak':''}" title="${pad(c.h)}:00–${pad(c.h)}:59 · ${c.n} bill">
-                <div class="hbar-n${c.n?'':' zero'}">${c.n}</div>
-                <div class="hbar-fill${c.n?'':' empty'}" style="height:${Math.max(hi, c.n?4:2)}px"></div>
+              const v = doCao(c);
+              const hi = cao ? Math.round((v / cao) * PX) : 0;
+              const nhan = coTien ? (c.tien ? fmtGon(c.tien) : '') : (c.bill || '');
+              return `<div class="hbar${v===cao&&cao>0?' peak':''}" title="${pad(c.h)}:00–${pad(c.h)}:59 · ${c.bill} bill${coTien?` · ${fmt(c.tien||0)}`:''}${c.gc?` · ${fmtNum(c.gc,1)} giờ công`:''}">
+                <div class="hbar-n${v?'':' zero'}">${nhan}</div>
+                <div class="hbar-fill${v?'':' empty'}" style="height:${Math.max(hi, v?4:2)}px"></div>
               </div>`;
             }).join('')}
           </div>
           <div class="hchart-base"></div>
           <div class="hbars">
-            ${cot.map(c=>`<div class="hbar${c.n===cao?' peak':''}"><div class="hbar-h">${pad(c.h)}</div></div>`).join('')}
+            ${cot.map(c=>`<div class="hbar${doCao(c)===cao&&cao>0?' peak':''}"><div class="hbar-h">${pad(c.h)}</div></div>`).join('')}
           </div>
+          ${tongGC > 0 ? `<div class="hbars" style="margin-top:2px;">
+            ${cot.map(c=>`<div class="hbar"><div class="hbar-h" style="color:${c.gc>0&&!c.bill?'var(--bad)':'var(--gt)'};font-weight:${c.gc>0&&!c.bill?'800':'600'}">${c.gc>0.05?fmtNum(c.gc,1):'·'}</div></div>`).join('')}
+          </div>
+          <div class="hchart-note" style="text-align:left;margin-top:6px;">Hàng dưới cùng là <b>số giờ công</b> đứng trong khung giờ đó (1,0 = một người trọn giờ). Số <b style="color:var(--bad)">đỏ</b> là giờ có người mà không bán được bill nào.</div>` : ''}
         </div>
       </div>
+    </div>`;
+}
+
+// Thẻ chỉ số MINI — dùng ở màn Hôm nay. st là object trạng thái của statusXxx().
+function miniCardHTML(label, val, sub, st){
+  const lop = !st ? '' : (st.level === 'red' ? ' st-bad' : st.level === 'amber' ? ' st-warn' : st.level === 'green' ? ' st-ok' : '');
+  return `<div class="kmini${lop}">
+      <div class="kmlabel">${label}</div>
+      <div class="kmval">${val}</div>
+      ${sub ? `<div class="kmsub">${sub}</div>` : ''}
     </div>`;
 }
 
@@ -8841,6 +9001,205 @@ async function computeActualHoursTotal(startDate, endDate){
   return {hours, openShifts, inProgress};
 }
 
+// ============================================================================
+// [MỚI] VỐN NẰM TRONG KHO — giá trị tồn, số ngày tồn, hàng ngủ đông
+// ----------------------------------------------------------------------------
+// Câu hỏi nó trả lời: "lãi thì có lãi, nhưng tiền đâu mất rồi?". Quán nhỏ hiếm khi
+// chết vì biên lãi thấp — chết vì tiền nằm chết trong kho: mua sỉ cho rẻ, mua thừa
+// vì sợ hết hàng, rồi hết hạn phải đổ. P&L KHÔNG bao giờ nói ra chuyện này: hàng
+// nằm trong kho là TÀI SẢN, không phải chi phí, nên lãi lỗ vẫn đẹp trong khi ví hết
+// tiền.
+//
+// BA CON SỐ, theo đúng thứ tự cần đọc:
+//   1. Vốn đang nằm trong kho  — tổng tiền đang bị giam (nguyên liệu + bao bì + BTP).
+//   2. Số ngày tồn (DOH)       — kho đang gánh được bao nhiêu ngày bán. Quán trà sữa
+//      lành mạnh thường 7–14 ngày; trên 21 ngày là mua quá nhiều hoặc bán chậm hơn
+//      lúc nhập.
+//   3. Hàng ngủ đông           — có tồn mà 30 ngày qua KHÔNG bị tiêu hao lần nào.
+//      Đây là tiền chết thật sự, và cũng là danh sách món sắp phải đổ đi.
+//
+// BA QUYẾT ĐỊNH TÍNH TOÁN, nói thẳng vì con số này dùng để ra quyết định mua hàng:
+//  a. Mẫu số của DOH là TIÊU HAO THẬT (ledger CONSUMPTION × giá vốn), chia cho số
+//     NGÀY CÓ BÁN trong cửa sổ — không chia cho 30. Quán nghỉ 8 ngày trong tháng mà
+//     chia cho 30 thì DOH bị thổi lên gần gấp đôi, chủ quán tưởng đang ôm hàng.
+//  b. BTP (cốt/thạch đã nấu) KHÔNG tính vào DOH — nó chỉ sống được vài ngày, đo bằng
+//     "mấy ngày bán" là vô nghĩa. Tách riêng thành một dòng.
+//  c. Tồn ÂM tính là 0 khi cộng vốn. Tồn âm là sổ sách sai, không phải tiền âm —
+//     cộng số âm vào sẽ làm tổng vốn thấp giả tạo, che mất chỗ đang thực sự giam tiền.
+// ============================================================================
+const KHO_CUA_SO_NGAY = 30;      // cửa sổ đo tiêu hao & xét ngủ đông
+const KHO_DOH_CAO = 21;          // trên ngưỡng này là đang ôm hàng
+const KHO_DOH_VUA = 14;          // trong khoảng 14–21 thì nên để ý
+
+// Nhớ 5 phút: khối này đọc 30 ngày ledger + toàn bộ danh mục, mà chủ quán hay
+// nhảy qua lại Hôm nay ↔ Tài chính. Không nhớ thì mỗi lần chuyển màn là một lượt
+// đọc nặng, trong khi số liệu kho gần như không đổi trong vài phút.
+let _khoCache = null;   // {at, nNgay, data}
+async function computeInventoryHealth(soNgay){
+  const nNgay = soNgay || KHO_CUA_SO_NGAY;
+  if(_khoCache && _khoCache.nNgay === nNgay && Date.now() - _khoCache.at < 300000) return _khoCache.data;
+  const now = new Date();
+  const endKey = dkey(now);
+  const startKey = dkey(new Date(Date.now() - (nNgay-1)*86400000));
+  const [items, preps, txSnap, batchSnap] = await Promise.all([
+    loadInventoryItems(),
+    loadPrepItems().catch(err=>{ console.warn('[Kho] không đọc được bán thành phẩm:', err); return []; }),
+    fstore.collection('stock_transactions_gieogieo').where('businessDate','>=',startKey).where('businessDate','<=',endKey).get(),
+    // Quán chưa bật tính năng lô thì collection này chưa tồn tại — không được để nó
+    // làm hỏng cả khối, chỉ mất dòng "BTP quá hạn".
+    fstore.collection('prep_batches_gieogieo').where('status','==','active').get()
+      .catch(err=>{ console.warn('[Kho] không đọc được lô BTP:', err); return null; })
+  ]);
+
+  const dong = [];   // từng món đang giam tiền
+  let vonNL = 0, vonBaoBi = 0, soTonAm = 0;
+  items.forEach(it=>{
+    if(!itemStockManaged(it)) return;                       // nước lọc/đá tự làm: không có tồn để nói
+    if(Number(it.currentStock) < 0) soTonAm++;
+    const v = Math.max(0, Number(it.currentStock)||0) * (Number(it.costPerUnit)||0);
+    if(it.isPackagingMaterial) vonBaoBi += v; else vonNL += v;
+    if(v > 0) dong.push({ id: it.id, name: it.name || '', unit: it.unit || '',
+                          qty: Number(it.currentStock)||0, value: v, baoBi: !!it.isPackagingMaterial });
+  });
+  const prepList = (preps||[]).filter(x=>x.active!==false);
+  const vonBTP = prepList.reduce((t,x)=>t + Math.max(0, Number(x.currentStock)||0) * (Number(x.costPerUnit)||0), 0);
+  const tongVon = vonNL + vonBaoBi + vonBTP;
+
+  // Tiêu hao thật trong cửa sổ + món nào đã được đụng tới
+  const costOf = id => { const it = items.find(x=>x.id===id); return it ? Number(it.costPerUnit)||0 : 0; };
+  let tieuHao = 0;
+  const ngayCoBan = new Set(), daDung = new Set();
+  txSnap.forEach(doc=>{
+    const t = doc.data();
+    if(t.type !== 'CONSUMPTION') return;
+    tieuHao += Math.abs(Number(t.qty)||0) * costOf(t.itemId);
+    if(t.businessDate) ngayCoBan.add(t.businessDate);
+    if(t.itemId) daDung.add(t.itemId);
+  });
+  const soNgayCoBan = ngayCoBan.size;
+  const tieuHaoNgay = soNgayCoBan ? tieuHao / soNgayCoBan : 0;
+  const vonXoayVong = vonNL + vonBaoBi;                    // phần được đo bằng DOH
+  const soNgayTon = tieuHaoNgay > 0 ? vonXoayVong / tieuHaoNgay : null;
+  const vongQuayThang = soNgayTon ? 30 / soNgayTon : null;
+
+  const nguDong = dong.filter(x=>!daDung.has(x.id)).sort((a,b)=>b.value-a.value);
+  const chonVon = dong.slice().sort((a,b)=>b.value-a.value).slice(0,5);
+
+  // Lô BTP đã quá hạn mà vẫn đang 'active' — tiền đã tốn công nấu, sắp phải đổ.
+  let btpQuaHan = 0, btpQuaHanLo = 0;
+  if(batchSnap){
+    const costPrep = id => { const x = prepList.find(y=>y.id===id); return x ? Number(x.costPerUnit)||0 : 0; };
+    batchSnap.forEach(d=>{
+      const b = d.data();
+      const ngayNau = String(b.finishedAt||'').slice(0,10);
+      const het = (b.expiresAt && new Date(b.expiresAt) <= now)
+               || (b.shelfLifeType === 'endOfDay' && ngayNau && ngayNau < endKey);
+      if(!het) return;
+      btpQuaHanLo++;
+      btpQuaHan += Math.max(0, Number(b.qtyRemaining)||0) * costPrep(b.prepId);
+    });
+  }
+
+  const ketQua = { tongVon, vonNL, vonBaoBi, vonBTP, vonXoayVong, tieuHao, tieuHaoNgay, soNgayCoBan,
+           soNgayTon, vongQuayThang, nguDong, chonVon, btpQuaHan, btpQuaHanLo, soTonAm,
+           cuaSoNgay: nNgay, coTieuHao: tieuHaoNgay > 0 };
+  _khoCache = { at: Date.now(), nNgay, data: ketQua };
+  return ketQua;
+}
+
+// Mức "ôm hàng" — cùng bảng màu với các chỉ số khác để nhìn màu là biết ngay.
+function khoMucDoh(soNgayTon){
+  if(soNgayTon == null) return '';
+  if(soNgayTon > KHO_DOH_CAO) return 'st-bad';
+  if(soNgayTon > KHO_DOH_VUA) return 'st-warn';
+  return 'st-ok';
+}
+
+// Thẻ MINI ở màn Hôm nay — chỉ 2 điều: đang giam bao nhiêu tiền, gánh được mấy ngày.
+function khoMiniHTML(kho){
+  if(!kho) return '';
+  const phu = kho.soNgayTon != null
+    ? `≈ ${fmtNum(kho.soNgayTon,0)} ngày bán${kho.nguDong.length ? ` · ${kho.nguDong.length} món ngủ đông` : ''}`
+    : 'Chưa đo được tiêu hao';
+  return `<div class="kmini ${khoMucDoh(kho.soNgayTon)}" onclick="switchScreen('health')" style="cursor:pointer">
+      <div class="kmlabel">Vốn trong kho</div>
+      <div class="kmval">${fmtGon(kho.tongVon)}</div>
+      <div class="kmsub">${phu}</div>
+    </div>`;
+}
+
+// Khối đầy đủ ở màn Tài chính — nơi chủ quán ngồi xem và ra quyết định mua hàng.
+function khoCardHTML(kho){
+  if(!kho) return '';
+  const dongMon = (x)=>`<div class="row"><span class="rl">${escapeHtmlAttr(x.name)}</span><span class="rv">${fmt(x.value)} · ${fmtNum(x.qty,1)} ${escapeHtmlAttr(x.unit)}</span></div>`;
+  const dohTxt = kho.soNgayTon != null
+    ? `${fmtNum(kho.soNgayTon,1)} ngày${kho.soNgayTon > KHO_DOH_CAO ? ' — đang ôm hàng' : (kho.soNgayTon > KHO_DOH_VUA ? ' — hơi nhiều' : '')}`
+    : '— (chưa có tiêu hao nào trong cửa sổ)';
+  return `
+    <div class="card">
+      <div class="card-h"><h3>${ic('package')} Vốn nằm trong kho</h3>${kho.soNgayTon!=null?`<span class="tier tier-${kho.soNgayTon>KHO_DOH_CAO?'red':(kho.soNgayTon>KHO_DOH_VUA?'amber':'green')}">${fmtNum(kho.soNgayTon,0)} ngày</span>`:''}</div>
+      <div class="small-note" style="margin-bottom:8px">Tồn hiện tại × giá vốn hiện tại. Tiêu hao đo từ ledger CONSUMPTION ${kho.cuaSoNgay} ngày gần nhất, chia cho <b>${kho.soNgayCoBan||0} ngày thực sự có bán</b> (không chia đều cho ${kho.cuaSoNgay} — ngày nghỉ không được làm loãng con số).</div>
+      ${rowInfoHTML('Tổng vốn đang giam', fmt(kho.tongVon))}
+      ${rowInfoHTML('— Nguyên liệu', fmt(kho.vonNL))}
+      ${rowInfoHTML('— Bao bì, vật tư', fmt(kho.vonBaoBi))}
+      ${rowInfoHTML('— Bán thành phẩm đã nấu', fmt(kho.vonBTP))}
+      ${rowInfoHTML('Tiêu hao trung bình mỗi ngày bán', fmt(kho.tieuHaoNgay))}
+      ${rowInfoHTML('Số ngày tồn (nguyên liệu + bao bì)', dohTxt)}
+      ${rowInfoHTML('Vòng quay kho', kho.vongQuayThang != null ? `${fmtNum(kho.vongQuayThang,2)} vòng/tháng` : '—')}
+      ${kho.btpQuaHanLo ? `<div class="small-note" style="color:var(--bad);margin-top:6px">${ic('alert',13,'var(--bad)')} <b>${kho.btpQuaHanLo} lô bán thành phẩm đã quá hạn</b> mà vẫn đang tính là hàng dùng được — trị giá ${fmt(kho.btpQuaHan)}. Bỏ ở bước đếm cuối ca để tồn kho về đúng thực tế.</div>` : ''}
+      ${kho.soTonAm ? `<div class="small-note" style="color:var(--warn);margin-top:6px">${kho.soTonAm} nguyên liệu đang có tồn ÂM — đã tính là 0đ ở đây, nên tổng vốn thật có thể cao hơn.</div>` : ''}
+
+      ${kho.chonVon.length ? `<div class="sec-title" style="margin-top:14px">Đang giam tiền nhiều nhất</div>${kho.chonVon.map(dongMon).join('')}` : ''}
+
+      ${kho.nguDong.length ? `
+        <div class="sec-title" style="margin-top:14px">Ngủ đông — còn hàng mà ${kho.cuaSoNgay} ngày không dùng tới (${kho.nguDong.length})</div>
+        <div class="small-note" style="margin-bottom:6px">Tổng <b>${fmt(kho.nguDong.reduce((t,x)=>t+x.value,0))}</b> nằm chết ở đây. Hoặc đưa vào món để bán ra, hoặc chấp nhận bỏ — để nguyên thì vẫn mất tiền, chỉ là mất chậm.</div>
+        ${kho.nguDong.slice(0,8).map(dongMon).join('')}
+        ${kho.nguDong.length>8 ? `<div class="small-note">…và ${kho.nguDong.length-8} món nữa.</div>` : ''}` : ''}
+    </div>`;
+}
+
+// ============================================================================
+// [MỚI] GIỜ CÔNG THEO KHUNG GIỜ — để đặt cạnh doanh thu theo giờ
+// ----------------------------------------------------------------------------
+// Đọc chấm công THẬT (employee_shifts_gieogieo), rải số giờ công vào từng khung
+// giờ theo phần GIAO NHAU thật: ca 7h30–12h00 góp 0,5 giờ vào khung 7h và trọn 1
+// giờ vào các khung 8,9,10,11. Không làm tròn về "ca sáng/ca chiều" — chính nửa
+// giờ lệch đó là chỗ quyết định nên cho ai về sớm.
+//
+// Ca CHƯA check-out của ngày CŨ bị bỏ qua hoàn toàn (không đoán giờ ra) — cùng
+// nguyên tắc với computeActualHoursTotal, để hai con số không bao giờ đá nhau.
+// ============================================================================
+async function computeStaffHoursByHour(dateKey){
+  const byHour = {};
+  let total = 0, dangChay = 0, boQuen = 0;
+  try{
+    const snap = await fstore.collection('employee_shifts_gieogieo').where('businessDate','==',dateKey).get();
+    const now = Date.now();
+    snap.forEach(d=>{
+      const s = d.data();
+      if(!s.checkedInAt) return;
+      const vao = new Date(s.checkedInAt).getTime();
+      if(isNaN(vao)) return;
+      let ra;
+      if(s.checkedOutAt){ ra = new Date(s.checkedOutAt).getTime(); if(isNaN(ra)) return; }
+      else if(isShiftInProgress(s)){ ra = now; dangChay++; }
+      else { boQuen++; return; }
+      if(ra <= vao) return;
+      total += (ra - vao)/3600000;
+      const d0 = new Date(vao);
+      let moc = new Date(d0.getFullYear(), d0.getMonth(), d0.getDate(), d0.getHours()).getTime();
+      while(moc < ra){
+        const het = moc + 3600000;
+        const giao = Math.min(ra, het) - Math.max(vao, moc);
+        if(giao > 0){ const h = new Date(moc).getHours(); byHour[h] = (byHour[h]||0) + giao/3600000; }
+        moc = het;
+      }
+    });
+  }catch(err){ console.warn('[Giờ công] không đọc được chấm công (bỏ qua, biểu đồ vẫn vẽ):', err); }
+  return { byHour, total, dangChay, boQuen };
+}
+
 async function renderHealth(){
   setSync(true);
   renderHealthPeriodNav();
@@ -8902,6 +9261,7 @@ async function renderHealth(){
     ${plHealthHTML(plTong, plDays, salesRes.dayCount, plRecalcNotes(expAll, start, end), plBook)}
     <div id="healthThv"></div>
     <div id="healthBep"></div>
+    <div id="healthKho"></div>
     <div class="card">
       <div class="card-h"><h3>${ic('coins')} Sales</h3></div>
       ${metricRowHTML('Doanh thu', fmt(kpi.revenue), mRev, sRev)}
@@ -8931,6 +9291,9 @@ async function renderHealth(){
       ${metricRowHTML('Labor / Cup', fmt(kpi.laborPerCup), mLC, sLC)}
       ${rowInfoHTML('Labor / Bill', fmt(kpi.laborPerBill))}
       ${rowInfoHTML('Giờ công THẬT (từ chấm công)', `${fmtNum(actualHours.hours,1)}h${actualHours.inProgress ? ` · ${actualHours.inProgress} ca đang chạy (tạm tính)` : ''}${actualHours.openShifts ? ` · ${ic('alert',13)} ${actualHours.openShifts} ca bỏ quên chưa check-out (không tính được)` : ''}`)}
+      ${rowInfoHTML('Doanh thu / giờ công', actualHours.hours > 0 ? fmt(kpi.revenue/actualHours.hours) : '— (chưa có chấm công trong kỳ)')}
+      ${rowInfoHTML('Ly / giờ công', actualHours.hours > 0 ? `${fmtNum(kpi.items/actualHours.hours,1)} ly` : '—')}
+      <div class="small-note">Doanh thu/giờ công là thước đo xếp lịch: nó nói mỗi giờ đứng quầy đẻ ra bao nhiêu tiền. Xem khung giờ nào đang lỗ giờ công thì mở màn <b>Hôm nay</b> — biểu đồ theo khung giờ có kèm số người đứng từng giờ.</div>
     </div>
 
     <div class="card">
@@ -8974,6 +9337,15 @@ async function renderHealth(){
       if (el && curScreen === 'health') el.innerHTML = thvHealthHTML(thv, plTong.laiTruocKhauHao, plTong.soNgay);
     })
     .catch(err => console.warn('[Thu hồi vốn] không tính được (bỏ qua):', err));
+
+  // VỐN NẰM TRONG KHO — nạp NỀN (đọc 30 ngày ledger + toàn bộ danh mục). Hỏng thì
+  // chỉ mất khối này, phần lãi lỗ phía trên đã hiện xong từ trước.
+  computeInventoryHealth()
+    .then(kho => {
+      const el = document.getElementById('healthKho');
+      if(el && curScreen === 'health') el.innerHTML = khoCardHTML(kho);
+    })
+    .catch(err => console.warn('[Kho] không tính được vốn tồn (bỏ qua):', err));
 
   // Ngưỡng hoà vốn dùng cửa sổ 30 ngày riêng nên nạp NỀN, không giữ cả màn lại chờ.
   computeBreakEvenWindow()
