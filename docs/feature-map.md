@@ -4,6 +4,8 @@ Tài liệu tham chiếu cho kế hoạch cải tổ UX/IA (`kehoachcaitoquanlyg
 
 Quét lần đầu: 2026-09-08. File gốc: `quanlygieo.html` (~23.000 dòng, single-file HTML/CSS/JS, backend Firebase — Firestore do app này sở hữu, Realtime Database chỉ đọc từ app POS).
 
+Ngày 2026-09-08 (cùng ngày, phiên sau) đã đọc thêm `posgieo.html` (app POS — sibling app, ~22.100 dòng, dùng chung Firebase project `the-cafe-33`) để có bức tranh đầy đủ hai phía. Các kết luận quan trọng rút ra được ghi trực tiếp vào các mục liên quan bên dưới (đánh dấu "xem posgieo.html").
+
 ---
 
 ## 1. Feature Map
@@ -43,7 +45,7 @@ Cột "Trạng thái" đối chiếu với 26 Phase của kế hoạch cải t�
 | Idempotency chuẩn hoá (Phase 12) | `referenceId` đã dùng ở nhiều nơi (vd. dòng 10628, 10666) nhưng không có pattern thống nhất tài liệu hoá | | | 🟡 Có nền tảng, chưa chuẩn hoá thành quy ước chung |
 | Versioning recipe/định lượng (Phase 15) | `recipes_gieogieo` không thấy field version | | | 🔴 Chưa có |
 | Simulation cho recipe (Phase 17) | `screen-sim` mới có labor/targets, chưa có "đổi định lượng → xem GOGS dự kiến" | | | 🟡 Một phần |
-| Branch Health (Phase 18) | chưa xác nhận multi-branch trong data model hiện tại | | | ⚪ Chưa xác định — cần kiểm tra có field chi nhánh không trước khi làm |
+| Branch Health (Phase 17) | — | — | — | ⚫ **Đã xác định 2026-09-08 — KHÔNG áp dụng**: đọc `posgieo.html` xác nhận quán chỉ có MỘT địa điểm, bán mang đi (comment gốc "Gieo Gieo chỉ bán mang đi", không table/dine-in), `firebaseConfig` khai một lần cho cả app, không có `branchId`/`storeId`/bộ chọn chi nhánh nào. `locationId` có tồn tại nhưng là vị trí lưu trữ TRONG một quán (quầy pha vs kho tổng), không phải nhiều quán. Bỏ khỏi backlog cho tới khi quán thật sự mở thêm chi nhánh |
 
 Chú thích trạng thái: 🟢 đã đúng vị trí · 🟡 có nhưng chưa đủ như kế hoạch mô tả · 🔴 chưa có · ⚪ protected/chưa xác định.
 
@@ -59,10 +61,10 @@ Chú thích trạng thái: 🟢 đã đúng vị trí · 🟡 có nhưng chưa �
 | **BTP (Chế biến cấp 1)** | Kho → Chế biến cấp 1 · nút 🕐 → Lịch sử + Giải thích tồn kho (mới, dùng chung `_histRender`) · Kho → Lịch sử kho (chip "Bán thành phẩm") |
 | **Container (chai/tem)** | Kho → Hàng đang mở & tem (`ctnFilter`: cần soát / hết hạn / chưa dán tem / đang mở / tất cả) |
 | **Sản phẩm / Menu** | 🔒 Quản lý Menu (protected) · Định mức món · GOGS Món |
-| **Bill** | 🔒 Lịch sử bill (protected) |
+| **Bill** | 🔒 Lịch sử bill (protected). Nguồn: RTDB `orders_gieogieo/{thángKey}/{ngày}` (xác nhận qua `posgieo.html`) — không có field nhân viên trực tiếp (suy ra qua ca làm), không có chỉ mục theo SĐT khách |
 | **Nhân viên** | Nhân sự → Nhân viên, Lịch làm việc, Chấm công, Lương |
 | **Ca làm** | Vận hành → Tiền mặt (giao ca) · Kho → Checklist ca |
-| **Chi nhánh** | Chưa xác nhận có trong data model — cần kiểm tra trước khi làm Phase 18 |
+| **Chi nhánh** | **Không tồn tại** — xác nhận 2026-09-08 qua `posgieo.html`: quán chỉ có một địa điểm (to-go only, không table/dine-in) |
 | **Nhà cung cấp** | Kho → Đặt & nhận hàng (field `supplier` trên PO) — chưa có màn quản lý nhà cung cấp riêng |
 
 Object "Nguyên liệu" hiện có điểm truy cập gần nhất với ví dụ trong kế hoạch (mục 3, "Sữa tươi"): Tổng quan (dòng trong danh sách) · Tồn kho (cùng dòng) · Giao dịch + Giải thích tồn kho + **Container** (cả ba trong cùng sheet 🕐 — xem §3) · Kiểm kê (Kho → Kiểm kê, lọc theo món) · Lệch kho (Kho → Lệch kho). Còn thiếu: **Giá nhập** ngay tại từng dòng (có "Tra giá theo ngày" nhưng là block riêng cuối trang, chưa gắn theo từng dòng nguyên liệu) và **Kiểm kê/Lệch kho** chưa có link/tab trực tiếp từ trong sheet 🕐 — vẫn phải quay ra Kho.
@@ -141,7 +143,8 @@ File thay đổi: `quanlygieo.html` — thêm `NAV_ITEM_BY_KEY`, `navRecent`/`na
 
 Theo đúng thứ tự ưu tiên của kế hoạch, các hạng mục ⭐⭐⭐⭐⭐/⭐⭐⭐⭐ còn thiếu nhiều nhất:
 
-1. **Command Search — mở rộng thêm** (Phase 4) — thêm Bill (số bill, SĐT khách) vào cùng cơ chế tìm ở §3 (nguồn RTDB, cần cách tiếp cận khác Nguyên liệu/BTP/Nhân viên), giữ đúng nguyên tắc "vẫn một ô tìm, không tạo màn riêng".
+1. **Command Search — mở rộng thêm** (Phase 4) — thêm Bill vào cùng cơ chế tìm ở §3. Đã đọc `posgieo.html` để hiểu rõ khó khăn thật: bill nằm ở RTDB `orders_gieogieo/{thángKey}/{ngày}` (không phải Firestore), **không có field số điện thoại làm chỉ mục phẳng** và **không có field nhân viên trên chính order** (suy ra bằng cách khớp giờ tạo bill với ca làm) — tìm theo SĐT sẽ phải quét từng ngày chứ không query thẳng được như Nguyên liệu/BTP/Nhân viên. Cần cân nhắc: chỉ tìm trong khoảng ngày gần đây (vd 30 ngày) để giới hạn số lượt đọc, hoặc bỏ qua tìm theo SĐT và chỉ tìm theo mã bill (billCode, dễ hơn nếu đoán được ngày từ mã).
 2. **Context Navigation — mở rộng thêm** (Phase 5) — làm tương tự sheet 🕐 cho BTP (container không áp dụng nhưng có thể thêm link liên quan khác); Bill/Nhân viên hiện chưa có "trang đối tượng" nào để gắn related actions vào.
-3. **Integrity Rules — thêm rule còn thiếu** (Phase 11) — "GOGS Integrity" (bill hoàn tất chưa có consumption tương ứng), "Container Integrity", "Recipe Integrity" đúng nghĩa kế hoạch liệt kê — bổ sung vào `runDataIntegrityCheck()` đã nối vào Alert Inbox ở §3. ("Ledger ≠ Container" coi như xong — xem §3.)
+3. **Integrity Rules — thêm rule còn thiếu** (Phase 11) — "GOGS Integrity" (bill hoàn tất chưa có consumption tương ứng — phía POS gọi `applySalesConsumptionPOS()` ngay sau khi tạo order và có cơ chế `reportMissingRecipePOS()` riêng cho món chưa khai định mức, đã tận dụng thành alert `missing_recipe` có sẵn; rule integrity mới nên nhắm vào trường hợp KHÁC: order tồn tại nhưng consumption bị lỗi/thiếu do lỗi mạng — POS đã tự bọc try/catch không chặn bán hàng, nghĩa là những lần lỗi này chỉ nằm im, không có dấu vết nào khác ngoài thiếu transaction), "Container Integrity", "Recipe Integrity" đúng nghĩa kế hoạch liệt kê — bổ sung vào `runDataIntegrityCheck()` đã nối vào Alert Inbox ở §3. ("Ledger ≠ Container" coi như xong — xem §3.)
 4. Cân nhắc thêm cảnh báo TỰ ĐỘNG cho món "chưa chốt mốc tồn lịch sử" vào `runDataIntegrityCheck()`/Alert Inbox (hiện chỉ thấy khi mở sheet 🕐 của đúng món đó) — cần chốt mốc rồi mới đối chiếu Ledger≠Container được, nên đây là điều kiện tiên quyết đang bị ẩn.
+5. ~~Branch Health (Phase 17)~~ — bỏ khỏi backlog, xem dòng "Branch Health" ở §1: quán chỉ có một địa điểm, không có dữ liệu để xây tính năng này.
