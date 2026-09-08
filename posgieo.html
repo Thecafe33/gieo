@@ -3676,8 +3676,12 @@ async function loadPendingStockLabels() {
     // còn đường nào in ra nữa. Chỉ bỏ chai đã dùng hết — tem cho chai đã hết là vô nghĩa.
     const snap = await fstore.collection(STOCK_CONTAINERS_COLL)
       .where('labelPrinted', '==', false).get();
+    // Bỏ 'finished' (tem cho chai đã hết là vô nghĩa) và bỏ 'voided' — tem sinh nhầm do
+    // phiếu nhận ghi thừa, Quản lý đã huỷ. Không lọc voided ở đây thì 27 con tem ma vẫn
+    // nằm trong hàng chờ dán và vẫn tính vào chấm đỏ, nhân viên cứ thế in ra dán lên
+    // những lon không tồn tại — đúng cái mà việc huỷ tem sinh ra để chặn.
     STOCK_LABEL_PENDING = snap.docs.map(d => ({ id: d.id, ...d.data() }))
-      .filter(c => c.status !== 'finished')
+      .filter(c => c.status !== 'finished' && c.status !== 'voided')
       .sort((a, b) => String(a.receivedAt || '').localeCompare(String(b.receivedAt || '')));
   } catch (err) {
     console.warn('loadPendingStockLabels lỗi', err);
