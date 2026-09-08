@@ -20370,6 +20370,73 @@ function _histRenderError(err){
 function histSetFilter(f){ if(_histCtx){ _histCtx.filter = f; _histRender(); } }
 
 // ------------------------------------------------------------
+// "DÙNG TRONG CÔNG THỨC NÀO" — recipe usage ngược (phát hiện #19, UX Scenario
+// Audit Phase 20): trước đây chỉ tra được CHIỀU THUẬN (mở một món ở Định mức →
+// thấy nó dùng nguyên liệu/BTP gì), không tra được CHIỀU NGƯỢC (đang xem MỘT
+// nguyên liệu/BTP → món nào đang dùng nó). Quét toàn bộ `recipes_gieogieo` +
+// menu POS để trả lời — không phải chuyện rẻ (đọc cả collection, không lọc
+// theo itemId được vì đó không phải field lập chỉ mục ở đây), nên để BẤM MỚI
+// TẢI thay vì tự động chạy mỗi lần mở sheet, giống cách "Kiểm tra toàn vẹn dữ
+// liệu" ở Alert Inbox cũng để thủ công vì lý do tương tự.
+// ------------------------------------------------------------
+async function histLoadRecipeUsage(){
+  if(!_histCtx || _histCtx.recipeUsageLoading) return;
+  _histCtx.recipeUsageLoading = true;
+  _histRender();
+  try{
+    const [menu, recipes] = await Promise.all([
+      loadPosMenu('togo').catch(()=>[]),
+      Object.keys(RECIPES).length ? Promise.resolve(RECIPES) : loadRecipes().catch(()=>({}))
+    ]);
+    const kind = _histCtx.kind, id = _histCtx.id;
+    const usage = [];
+    Object.entries(recipes).forEach(([menuRefKey, rec])=>{
+      Object.entries(rec.sizes||{}).forEach(([size, rows])=>{
+        (rows||[]).forEach(row=>{
+          // Dòng cũ không có refType mặc định là 'item' (quy ước có sẵn ở
+          // recipeRowType — xem chú thích openRecipeEditor).
+          const ty = row.refType || 'item';
+          const hit = kind==='item' ? (ty==='item' && row.itemId===id) : (ty==='prep' && row.prepId===id);
+          if(!hit) return;
+          const menuId = menuRefKey.split(':')[1];
+          const m = menu.find(x=>x.id===menuId);
+          usage.push({ menuName: m ? m.name : '(món không còn trong menu POS)', size, qty: row.qty, unit: row.unit });
+        });
+      });
+    });
+    if(_histCtx) _histCtx.recipeUsage = usage;
+  }catch(err){
+    console.error('histLoadRecipeUsage lỗi', err);
+    toast('⚠️ Không tải được danh sách món dùng nguyên liệu này');
+  }
+  if(_histCtx) _histCtx.recipeUsageLoading = false;
+  _histRender();
+}
+function _histRecipeUsageHtml(c){
+  if(!c.recipeUsage && !c.recipeUsageLoading){
+    return `
+      <div class="card" style="margin-bottom:10px;padding:12px 14px">
+        <div class="card-h"><h3>${ic('note')} Dùng trong công thức nào</h3></div>
+        <div class="small-note" style="margin-bottom:8px">Quét toàn bộ định mức món trong menu — hơi tốn một lượt đọc nên để bấm mới tải.</div>
+        <button class="btn outline sm" style="width:auto;padding:0 12px" onclick="histLoadRecipeUsage()">Tải danh sách</button>
+      </div>`;
+  }
+  if(c.recipeUsageLoading){
+    return `<div class="card" style="margin-bottom:10px;padding:12px 14px"><div class="muted">Đang quét định mức...</div></div>`;
+  }
+  const list = c.recipeUsage || [];
+  return `
+    <div class="card" style="margin-bottom:10px;padding:12px 14px">
+      <div class="card-h"><h3>${ic('note')} Dùng trong công thức (${list.length})</h3>
+        <button class="btn outline sm" style="width:auto;padding:0 10px" onclick="closeEditSheet(); goKho('recipe');">Xem Định mức món</button></div>
+      ${list.length ? list.map(u=>`
+        <div class="row"><span class="rl">${escapeHtmlAttr(u.menuName)} <span class="small-note">(size ${escapeHtmlAttr(u.size)})</span></span>
+          <span class="rv">${fmtNum(Number(u.qty)||0,2)} ${escapeHtmlAttr(u.unit||'')}</span></div>`).join('')
+        : '<div class="small-note">Không món nào trong menu POS dùng nguyên liệu/BTP này theo định mức đã khai.</div>'}
+    </div>`;
+}
+
+// ------------------------------------------------------------
 // GIẢI THÍCH TỒN KHO (Stock Explanation) — kế hoạch cải tổ UX, Phase 9.
 //
 // Không phải màn riêng: đây là một khối thêm vào NGAY sheet "Lịch sử" đã có
@@ -20656,6 +20723,7 @@ function _histRender(){
     ${canhBao}
     ${_histContainerHtml(c)}
     ${_histReconcileHtml(c)}
+    ${_histRecipeUsageHtml(c)}
     ${_histBreakdownHtml(c)}
     <div class="filter-bar" style="margin-bottom:2px">${chips}</div>
     ${exactFilterNote}

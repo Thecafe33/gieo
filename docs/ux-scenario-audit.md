@@ -30,7 +30,7 @@ Cột "Số click" đếm từ màn "Hôm nay" (mặc định lúc mở app), kh
 | 16 | Doanh thu hôm nay so với mục tiêu? | Hôm nay (control tower) | 0 | 🟢 |
 | 17 | Ai đã duyệt phiếu kiểm kê hôm qua? | Kiểm toán → nhật ký (`auditLogList`, action "approve") | 1 | 🟢 nếu biết vào Kiểm toán; tên nhóm không gợi ý rõ "xem ai duyệt gì" |
 | 18 | Container nào sắp hết hạn sau khi mở? | Kho → Container → tab "Quá hạn sau mở" | 2 | 🟢 |
-| 19 | Nguyên liệu "sữa tươi" được dùng trong những món nào (recipe usage ngược)? | — | — | 🔴 **Lỗ hổng** — không có "xem 1 nguyên liệu được dùng ở công thức nào", chỉ có chiều ngược (từ món → xem nguyên liệu trong Định mức). Muốn biết phải mở từng món |
+| 19 | Nguyên liệu "sữa tươi" được dùng trong những món nào (recipe usage ngược)? | Ctrl+K → sheet 🕐 → khối "Dùng trong công thức nào" → bấm "Tải danh sách" | 3 | 🟢 **Đã sửa cùng ngày** — bấm mới quét (không tự động, xem "Cập nhật" cuối trang) |
 | 20 | Xem lại toàn bộ hao hụt tháng này | Kho → Lịch sử kho, lọc "Hao hụt" theo khoảng ngày, hoặc Báo cáo kỳ | 2 | 🟢 |
 | 21 | Chi phí tháng này bao nhiêu, khoản nào lớn nhất? | Vận hành → Chi phí, hoặc Báo cáo kỳ | 1 | 🟢 |
 | 22 | Có cảnh báo tồn kho ≠ tem (Ledger≠Container) nào chưa xử lý? | Hộp thư cảnh báo → thẻ "Kiểm tra toàn vẹn dữ liệu" | 1-2 | 🟡 Thẻ này chỉ báo tham chiếu hỏng + tồn âm; **KHÔNG tự động quét Ledger≠Container cho mọi món** — phải mở từng sheet 🕐 mới thấy. Xem mục 4 ở "Việc tiếp theo" |
@@ -42,16 +42,18 @@ Cột "Số click" đếm từ màn "Hôm nay" (mặc định lúc mở app), kh
 
 ## Tổng kết
 
-- **19/25 (76%) mượt** (🟢, sau khi sửa #2 cùng ngày) — không cần cải tổ thêm.
+- **20/25 (80%) mượt** (🟢, sau khi sửa #2 và #19 cùng ngày) — không cần cải tổ thêm.
 - **4/25 (16%) có ma sát** (🟡) — tới được nhưng vòng vèo hoặc thiếu link trực tiếp.
-- **1/25 (4%) còn là lỗ hổng thật** (🔴) — tính năng không tồn tại, không phải vấn đề tìm đường:
-  - **#19 — Xem một nguyên liệu được dùng trong công thức nào (recipe usage ngược).** Cần quét toàn bộ `recipes_gieogieo` tìm dòng nào tham chiếu `itemId` này — tính toán không khó nhưng cần đọc kỹ cấu trúc `recipes_gieogieo.sizes` trước khi làm (giống cách đã thận trọng với container ở phiên trước).
-  - ~~#2~~ đã sửa cùng ngày, xem "Cập nhật" cuối trang.
+- **0/25 lỗ hổng còn treo** — cả hai lỗ hổng phát hiện được (#2, #19) đã sửa cùng ngày, xem "Cập nhật" cuối trang.
 - **1 mục cần xác minh trên trình duyệt thật** (#4 — bill đã trừ kho chưa) trước khi kết luận có phải lỗ hổng hay không.
 - **#9 và #22** không phải lỗ hổng mới mà là phần MỞ RỘNG của việc đã làm (Transaction Drill-down cho ADJUSTMENT, và tự động hoá rule Ledger≠Container) — đã có trong danh sách "việc tiếp theo" ở `feature-map.md`.
 
 ## Khuyến nghị
 
-Không sửa gì trong lượt audit này (đúng tinh thần Sprint 6 — audit trước, sửa sau, và một phiên đã thay đổi rất nhiều thứ, cần được test trước khi cộng dồn thêm). Ưu tiên cho lượt tiếp theo nếu muốn đóng nốt các lỗ hổng: mục #2 (lọc hao hụt theo nhân viên) — thấp rủi ro, dữ liệu đã có sẵn, chỉ cần thêm UI lọc vào Lịch sử kho.
+Không sửa gì trong lượt audit ban đầu (đúng tinh thần Sprint 6 — audit trước, sửa sau). Sau đó đã sửa cả hai lỗ hổng phát hiện được trong cùng phiên vì cả hai đều thấp rủi ro (dữ liệu/hàm nền đã có sẵn, chỉ thiếu UI/điểm vào).
 
-**Cập nhật (cùng ngày, ngay sau audit):** đã làm mục #2 — xem `feature-map.md` §3. Ô lọc theo tên nhân viên chỉ áp dụng cho phần "Nguyên liệu" của Lịch sử kho (nguồn `renderKhoHistItems`), lọc trong phạm vi GẦN ĐÂY đã tải (50 giao dịch/10 phiếu kiểm kho/15 phiếu nhận toàn cửa hàng), không phải audit toàn bộ lịch sử — không giải quyết trọn vẹn tình huống #2 cho trường hợp cần tra CŨ hơn phạm vi đó, nhưng đáp ứng đúng nhu cầu thường gặp nhất ("gần đây nhân viên này có ghi gì bất thường không").
+**Cập nhật (cùng ngày, ngay sau audit):**
+- **#2 đã sửa** — xem `feature-map.md` §3. Ô lọc theo tên nhân viên chỉ áp dụng cho phần "Nguyên liệu" của Lịch sử kho (nguồn `renderKhoHistItems`), lọc trong phạm vi GẦN ĐÂY đã tải (50 giao dịch/10 phiếu kiểm kho/15 phiếu nhận toàn cửa hàng), không phải audit toàn bộ lịch sử — không giải quyết trọn vẹn tình huống #2 cho trường hợp cần tra CŨ hơn phạm vi đó, nhưng đáp ứng đúng nhu cầu thường gặp nhất ("gần đây nhân viên này có ghi gì bất thường không").
+- **#19 đã sửa** — xem `feature-map.md` §3. Thêm khối "Dùng trong công thức nào" vào sheet 🕐 (cả Nguyên liệu lẫn BTP) — quét `recipes_gieogieo` tìm dòng tham chiếu đúng `itemId`/`prepId` đang xem. Vì phải đọc cả collection (không lọc theo itemId được ở tầng Firestore do đây không phải field lập chỉ mục) nên để BẤM MỚI TẢI, không tự động chạy mỗi lần mở sheet.
+
+Việc tiếp theo (còn treo, không phải từ audit này mà từ các phiên trước): mở rộng Command Search sang Bill, thêm rule Integrity mới (GOGS/Container/Recipe Integrity đúng nghĩa), Transaction Drill-down cho RECEIVING/WASTE/ADJUSTMENT — xem `feature-map.md` §4.
