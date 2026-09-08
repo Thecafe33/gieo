@@ -826,6 +826,16 @@ html.tab-ui .field input[type=checkbox],html.tab-ui .field input[type=radio]{
   font-size:13.5px;line-height:1.7;color:var(--gm);
   background:var(--gl);border-radius:var(--r-md);padding:14px 16px;margin:2px 0 16px;
 }
+/* Gộp các ghi chú dài (từng nằm rải rác dưới mỗi field) vào một khối gấp lại
+   được — form nguyên liệu trước đây có ~7 đoạn giải thích dài, mở popup lên
+   là một màn chữ. Field vẫn giữ nhãn phụ ngắn (VD "đơn vị nhỏ nhất"); phần
+   LÝ DO/HẬU QUẢ dài dồn hết vào đây, mặc định gấp lại. */
+.field-help{margin:2px 0 16px;}
+.field-help summary{cursor:pointer;font-size:13px;font-weight:650;color:var(--gm);padding:8px 2px;list-style:none;}
+.field-help summary::-webkit-details-marker{display:none;}
+.field-help summary::before{content:'▸ ';}
+.field-help[open] summary::before{content:'▾ ';}
+.field-help .unit-explainer{margin:6px 0 0;}
 
 /* ==========================================================================
    11. DÒNG DANH SÁCH
@@ -15575,22 +15585,48 @@ function renderInventoryItemFormFields(editingItem){
   return `
       <div class="field"><label>Tên nguyên liệu</label><input type="text" id="invName" placeholder="VD: Sữa tươi" value="${editingItem? escapeHtmlAttr(editingItem.name) : ''}"></div>
 
+      <details class="field-help">
+        <summary>Giải thích các mục trong form này</summary>
+        <div class="unit-explainer">
+          <b>Đơn vị pha chế</b> — đơn vị nhỏ nhất, chỉ hệ thống dùng để tính công thức và tự
+          trừ kho khi bán (VD công thức "100ml sữa" → đơn vị pha chế là <b>ml</b>). Bạn không
+          bao giờ phải nhập tay theo ml — khai <b>quy cách đóng gói</b> bên dưới (VD: 1 Hộp =
+          1000ml, 1 Thùng = 12 Hộp), rồi mọi ô số phía sau đều cho chọn Thùng/Hộp/ml tuỳ lúc
+          nào tiện nhất. Đơn vị pha chế không đổi được sau khi tạo, để không lệch số liệu cũ.<br><br>
+
+          <b>Giá mới áp dụng từ ngày</b> — đổi giá <b>không ghi đè</b> giá cũ, hệ thống tạo một
+          mốc giá mới bắt đầu từ ngày này; mọi báo cáo trước ngày này vẫn tính theo giá cũ. Lùi
+          ngày lại nếu thực tế giá đã tăng từ trước mà giờ mới khai.<br><br>
+
+          <b>Nhân viên phải kiểm kê món này</b> — tắt đi thì món này biến mất khỏi màn Kiểm kê
+          bên POS (dùng cho món ít giá trị hoặc khó đếm). Tồn kho vẫn tự trừ theo định mức mỗi
+          khi bán, chỉ là không còn ai đối chiếu với thực tế, nên sai lệch tích luỹ sẽ không
+          được phát hiện — vẫn tự chỉnh số qua "Nhập kho" khi cần.<br><br>
+
+          <b>Vật tư bao bì</b> (túi, ống hút, muỗng, khay...) — bật thì lúc duyệt kiểm kê, món
+          này dùng "Ngưỡng cảnh báo lệch (%) — Bao bì" riêng (thường cao hơn nguyên liệu pha
+          chế, vì bao bì hay lệch do khách yêu cầu khác thường) thay vì ngưỡng chung.<br><br>
+
+          <b>Có quản lý tồn kho</b> — tắt cho những thứ không có sự kiện nhập và không đếm được
+          (nước lọc từ máy, đá tự làm). Bật cho những thứ đó thì tồn sẽ bị trừ theo định mức mỗi
+          ly bán ra mà không bao giờ được cộng lại, tụt xuống âm vô hạn và mọi cảnh báo kho
+          thành rác. Tắt rồi thì món này biến khỏi kiểm kê và khỏi mọi cảnh báo tồn.<br><br>
+
+          <b>Cân cuối ca</b> — dành cho nguyên liệu mở gói ra là dùng luôn, không qua chế biến
+          (trân châu trắng, thạch dừa Đài Loan...). Loại này trong ngày bị múc/chia bằng tay nên
+          tồn thực tế không bao giờ khớp định mức, phải cân cuối ca giống bán thành phẩm — POS
+          hiện nút ⚖️ để nhân viên đặt nguyên khay lên cân và tự trừ bì (khai khay/ca ở Kho →
+          Dụng cụ đựng). Phần này chỉ quyết định <i>có cân được hay không</i>; món <b>có bị bắt
+          đếm cuối ca hay không</b> là ở Kho → Refill (mở rule của món, bật "Bắt đếm khi giao ca"
+          → chọn Cuối ca). Nguyên liệu chưa mở gói/trừ chuẩn theo định mức thì đừng bật.
+        </div>
+      </details>
+
       <div class="field">
         <label>Đơn vị pha chế <span class="small-note">(đơn vị nhỏ nhất, dùng trong công thức)</span></label>
         ${editingItem
-          ? `<input type="text" value="${escapeHtmlAttr(editingItem.unit)}" disabled style="opacity:.6"><div class="small-note">Không đổi được sau khi tạo (để không lệch số liệu cũ)</div>`
+          ? `<input type="text" value="${escapeHtmlAttr(editingItem.unit)}" disabled style="opacity:.6">`
           : `<select id="invUnit" onchange="renderItemPkgBox(); syncItemUnitSelects(); renderItemVesselPicker();">${STOCK_UNITS.map(u=>`<option>${u}</option>`).join('')}</select>`}
-      </div>
-
-      <!-- Giải thích bằng ví dụ thật của quán — trả lời đúng câu hỏi "cái nào dùng
-           để pha chế, cái nào để kiểm kê". Đặt giữa 2 khối liên quan để người đọc
-           nối được 2 khái niệm với nhau. -->
-      <div class="unit-explainer">
-        <b>Đơn vị pha chế</b> là đơn vị nhỏ nhất, chỉ hệ thống dùng — để tính công thức
-        và tự trừ kho khi bán (VD công thức "100ml sữa" → đơn vị pha chế là <b>ml</b>).<br><br>
-        <b>Bạn không bao giờ phải nhập tay theo ml.</b> Khai các quy cách bên dưới
-        (VD: 1 Hộp = 1000ml, 1 Thùng = 12 Hộp), rồi mọi ô số phía sau — tồn kho, ngưỡng,
-        giá vốn, nhập kho, kiểm kê — đều cho chọn Thùng/Hộp/ml tuỳ lúc nào tiện nhất.
       </div>
 
       <div class="field">
@@ -15627,7 +15663,6 @@ function renderInventoryItemFormFields(editingItem){
       ${editingItem ? `
       <div class="field"><label>Giá mới áp dụng từ ngày</label>
         <input type="date" id="invCostFrom" value="${dkey(new Date())}" max="${dkey(new Date())}">
-        <div class="hint">Đổi giá <b>KHÔNG ghi đè</b> giá cũ — hệ thống tạo một mốc giá mới bắt đầu từ ngày này. Mọi báo cáo TRƯỚC ngày này vẫn tính theo giá cũ, nên số liệu tháng trước không bị đổi theo. Lùi ngày lại nếu thực tế giá đã tăng từ trước mà giờ mới khai.</div>
       </div>
       <div class="field" style="margin-bottom:0"><label>Lịch sử giá</label>
         <div id="invPriceHistory"><div class="small-note">Đang đọc lịch sử giá…</div></div>
@@ -15637,13 +15672,11 @@ function renderInventoryItemFormFields(editingItem){
         <input type="checkbox" id="invStaffCounts" ${(!editingItem || editingItem.staffCounts !== false) ? 'checked' : ''} style="width:20px;height:20px;flex-shrink:0;margin-top:1px">
         <b>Nhân viên phải kiểm kê món này</b>
       </label>
-      <div class="small-note">Tắt đi thì món này biến mất khỏi màn Kiểm kê bên POS — nhân viên khỏi đếm những thứ ít giá trị hoặc khó đếm. Tồn kho <b>vẫn tự trừ theo định mức mỗi khi bán</b>, chỉ là không còn ai đối chiếu với thực tế, nên sai lệch tích luỹ sẽ không được phát hiện. Bạn vẫn tự chỉnh số qua "Nhập kho" khi cần.</div>
 
       <label style="display:flex;align-items:flex-start;gap:9px;margin:14px 0 4px;font-size:13px;cursor:pointer">
         <input type="checkbox" id="invIsPackaging" ${(editingItem && editingItem.isPackagingMaterial) ? 'checked' : ''} onchange="renderTrackingBox()" style="width:20px;height:20px;flex-shrink:0;margin-top:1px">
         <b>Đây là vật tư bao bì (túi, ống hút, muỗng, khay...)</b>
       </label>
-      <div class="small-note">Khi BẬT: lúc duyệt kiểm kê, món này dùng "Ngưỡng cảnh báo lệch (%) — Bao bì" riêng (thường để CAO hơn nguyên liệu pha chế, vì bao bì hay lệch do khách yêu cầu khác thường) thay vì ngưỡng chung — xem cấu hình ở tab Kiểm kê.</div>
 
       <div class="sec-title">Theo dõi &amp; kiểm kê</div>
 
@@ -15651,14 +15684,10 @@ function renderInventoryItemFormFields(editingItem){
         <input type="checkbox" id="invStockManaged" ${(editingItem && editingItem.stockManaged === false) ? '' : 'checked'} onchange="renderTrackingBox()" style="width:20px;height:20px;flex-shrink:0;margin-top:1px">
         <b>Có quản lý tồn kho</b>
       </label>
-      <div class="small-note">Tắt cho những thứ <b>không có sự kiện nhập và không đếm được</b> — nước lọc từ máy, đá tự làm. Để bật cho những thứ đó thì tồn sẽ bị trừ theo định mức mỗi ly bán ra mà không bao giờ được cộng lại, tụt xuống âm vô hạn và mọi cảnh báo kho thành rác. Tắt rồi thì món này biến khỏi kiểm kê và khỏi mọi cảnh báo tồn.</div>
 
       <div id="invTrackingBox"></div>
 
       <div class="sec-title">Cân cuối ca — nguyên liệu dùng ngay</div>
-      <div class="unit-explainer">Dành cho nguyên liệu <b>mở gói ra là dùng luôn</b>, không qua chế biến — trân châu trắng, thạch dừa Đài Loan, thạch nha đam... Loại này trong ngày bị múc/chia bằng tay nên tồn thực tế không bao giờ khớp định mức, phải <b>cân cuối ca giống bán thành phẩm</b>.<br><br>
-        Chọn ở đây những thứ món này thực sự nằm trong, POS sẽ hiện nút ⚖️ để nhân viên đặt nguyên khay lên cân và tự trừ bì. Khai khay/ca kèm trọng lượng bì ở <b>Kho → Dụng cụ đựng</b>.<br><br>
-        <b>Lưu ý:</b> phần này chỉ quyết định <i>có cân được hay không</i>. Còn món này <b>có bị bắt đếm cuối ca hay không</b> là do <b>Kho → Refill</b>: mở rule của món, bật "Bắt đếm khi giao ca" rồi chọn <b>Cuối ca</b>. Nguyên liệu chưa mở gói / trừ chuẩn theo định mức thì đừng bật — để kiểm kê định kỳ lo.</div>
       <div id="invVesselBox"></div>
       <button type="button" class="btn outline sm" style="margin-top:8px" onclick="goKho('refill')">Sang Refill để bật đếm cuối ca →</button>
   `;
@@ -15729,6 +15758,36 @@ function renderTrackingBox(){
   const heSoGia = Number(document.getElementById('invCostUnit')?.value)||1;
   const giaMoiDonVi = heSoGia>0 ? (donGia/heSoGia)*heSo : 0;
   const goiY = suggestModeByValue(giaMoiDonVi, isPkg);
+
+  // [MỚI] Đơn vị pha chế đã là "cái" — nguyên liệu đếm rời từng gói/hộp (không đo
+  // bằng ml/g) thì bản thân MỘT CÁI đã là một đối tượng dán tem được, không cần
+  // khai quy cách đóng gói hay chọn giữa "theo lô"/"từng đơn vị" như hàng đo bằng
+  // ml/g. Rút gọn thành một công tắc bật/tắt duy nhất — vừa đúng yêu cầu "1 nút
+  // on/off" vừa tránh đúng cái bẫy khiến tem không sinh được: trước đây phải khai
+  // một quy cách giả kiểu "1 gói = 1 cái" (tỷ lệ 1:1) thì mới bật được "Từng đơn
+  // vị", mà tỷ lệ 1:1 lại bị (bên POS) hiểu nhầm là "chưa chọn gì" — xem
+  // createContainersForReceipt() bên posgieo.html, đã sửa cùng lúc với bản này.
+  if(baseUnit === 'cái'){
+    box.innerHTML = `
+      <label style="display:flex;align-items:flex-start;gap:9px;margin:0 0 4px;font-size:13px;cursor:${isPkg?'default':'pointer'}">
+        <input type="checkbox" id="invTrackUnitCai" ${cur==='unit'?'checked':''} ${isPkg?'disabled':''}
+          onchange="setTrackingMode(this.checked?'unit':'none')" style="width:20px;height:20px;flex-shrink:0;margin-top:1px">
+        <b>In tem cho từng cái khi nhận hàng</b>
+      </label>
+      <input type="hidden" id="invTrackingMode" value="${cur}">
+      <div class="small-note">${isPkg
+        ? 'Đã tick "vật tư bao bì" ở trên nên không dán tem từng cái được — không ai dán tem cho hàng nghìn cái ly/ống hút.'
+        : (cur==='unit'
+            ? 'Mỗi cái nhận vào kho sẽ có một tem riêng — biết cái nào đang dùng, ai lấy, còn bao nhiêu, hạn tới bao giờ.'
+            : 'Đang KHÔNG dán tem — chỉ đếm tổng số lượng, không truy vết từng cái.')}</div>
+
+      ${cur!=='none' ? `
+      <div class="field" style="margin-top:10px;margin-bottom:0"><label for="invOpenShelfLife">Hạn dùng sau khi mở (giờ)</label>
+        <input type="number" id="invOpenShelfLife" inputmode="numeric" step="1" min="0" value="${prevShelf != null ? escapeHtmlAttr(prevShelf) : (editingItem ? (Number(editingItem.openShelfLifeHours)||0) : 0)}">
+        <div class="hint">In lên tem và dùng để cảnh báo "còn hàng đã mở quá hạn". Để <b>0</b> nếu món này không có hạn sau khi mở.</div>
+      </div>` : ''}`;
+    return;
+  }
 
   box.innerHTML = `
       <div class="field" style="margin-top:14px"><label for="invCountUnit">Nhân viên đếm theo</label>
