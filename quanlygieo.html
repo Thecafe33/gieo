@@ -3769,6 +3769,220 @@ async function renderKhoLegacyStock(box, tabs){
 
 // Chốt mốc = ghi nhận "phần tồn KHÔNG có tem nào đại diện là bấy nhiêu". Không đụng
 // currentStock: con số tồn không sai ở đây, chỉ có cách DIỄN GIẢI nó là thiếu một vế.
+// ============================================================
+// [FIX] SỬA PHIẾU NHẬN HÀNG GHI THỪA
+//
+// Nhân viên gõ 30 hộp sữa đặc trong khi đơn chỉ có 3. Một cú gõ nhầm để lại BỐN dấu vết,
+// sửa thiếu một cái là sổ sai theo một kiểu khác:
+//   1. currentStock đã cộng dư 27 hộp
+//   2. một dòng ledger RECEIVING ghi số 30
+//   3. 30 con tem 'sealed' đã sinh ra, 27 con không có hàng thật đứng sau
+//   4. dòng tương ứng trong receiving_records_gieogieo
+//
+// Vì sao SỬA TẠI CHỖ chứ không ghi một phiếu nhận âm để bù: báo cáo tiêu hao thực tế
+// tính "thực tế = tồn đầu + NHẬP − tồn cuối" với NHẬP = tổng RECEIVING cộng bằng
+// Math.abs(qty) (xem thGomLedger + thTinhMotKy). Một dòng RECEIVING âm sẽ CỘNG THÊM 27
+// hộp vào "nhập" chứ không trừ đi — hoá 57, sai nặng hơn lúc chưa sửa. Ghi ADJUSTMENT
+// cũng không cứu được: nó sửa đúng currentStock nhưng "nhập" vẫn đứng ở 30, nên tiêu hao
+// thực tế vẫn phồng lên 27 hộp và cả kỳ bị gắn cờ "lệch chưa giải thích được".
+//
+// Nên: sửa thẳng con số trên dòng ledger, giữ vết bằng correctedFromQty/At/By/Reason,
+// và huỷ tem bằng status 'voided' chứ không xoá document — tem đã in ra rồi thì còn tra
+// lại được mã nào đã bị huỷ để đi bóc khỏi kệ. Mọi truy vấn tem trong app đều lọc theo
+// status 'sealed'/'open' nên tem voided tự rơi ra khỏi tồn, khỏi kiểm kê, khỏi "tem chưa dán".
+// ============================================================
+
+let FIXREC_CACHE = [], FIXREC_CTN = [], fixRecOpenId = null;
+
+async function renderKhoFixReceipt(box, tabs){
+  const nav = `<div class="filter-bar">${tabs.map(([k,l])=>
+      `<button class="ftag ${ctnFilter===k?'active':''}" onclick="ctnFilter='${k}'; renderKhoContainers();">${l}</button>`).join('')}</div>`;
+  try{
+    await ensureAuth();
+    INVENTORY_ITEMS = await loadInventoryItems();
+    FIXREC_CACHE = await loadReceivingRecords(20);
+  }catch(err){
+    console.error('renderKhoFixReceipt lỗi', err);
+    box.innerHTML = nav + '<div class="muted">Không đọc được phiếu nhận. '+(err.code||err.message||'')+'</div>';
+    return;
+  }
+  FIXREC_CTN = [];
+  if(fixRecOpenId){
+    try{
+      FIXREC_CTN = (await fstore.collection(CTN_COLL).where('receiveRefId','==',fixRecOpenId).get())
+        .docs.map(d=>({id:d.id, ...d.data()}));
+    }catch(err){ console.warn('[sửa phiếu nhận] không đọc được tem của phiếu', err); }
+  }
+
+  const p2 = n => String(n).padStart(2,'0');
+  const dt = iso => { const d = iso?new Date(iso):null; return (d && !isNaN(d)) ? `${p2(d.getDate())}/${p2(d.getMonth()+1)} ${p2(d.getHours())}:${p2(d.getMinutes())}` : ''; };
+
+  const than = FIXREC_CACHE.map(r=>{
+    const mo = r.id === fixRecOpenId;
+    const dongs = (r.lines||[]).filter(l=>Number(l.qtyGoodBase)>0);
+    const dau = `<div class="litem" style="cursor:pointer" onclick="fixRecToggle('${r.id}')">
+        <div class="li-l">
+          <div>${dt(r.createdAt)} · ${escapeHtmlAttr(r.supplier||'không ghi nhà cung cấp')}</div>
+          <div class="muted-sm">${escapeHtmlAttr(r.staff||'—')} · ${dongs.length} dòng${r.correctedAt?' · <b>đã sửa</b>':''}</div>
+        </div>
+        <div class="li-r">${mo?'▴':'▾'}</div>
+      </div>`;
+    if(!mo) return dau;
+    const chiTiet = dongs.map((l,i)=>{
+      const it = INVENTORY_ITEMS.find(x=>x.id===l.itemId);
+      const tem = FIXREC_CTN.filter(c=>c.itemId===l.itemId);
+      const song = tem.filter(c=>c.status==='sealed'||c.status==='open');
+      const huy  = tem.filter(c=>c.status==='voided');
+      const daDung = tem.filter(c=>c.status==='open'||c.status==='finished');
+      const heSo = fixRecHeSo(it, tem);
+      const soDv = heSo>0 ? (Number(l.qtyGoodBase)||0)/heSo : null;
+      return `<div class="litem" style="padding-left:16px">
+        <div class="li-l">
+          <div>${escapeHtmlAttr(l.name||'')}</div>
+          <div class="muted-sm">Đã ghi nhận <b>${fmtNum(l.qtyGoodBase,0)} ${escapeHtmlAttr(l.unit||'')}</b>${soDv!=null&&heSo>1?` (= ${fmtNum(soDv,0)} × ${fmtNum(heSo,0)})`:''}</div>
+          ${tem.length?`<div class="muted-sm">${song.length} tem còn sống${huy.length?` · ${huy.length} đã huỷ`:''}${daDung.length?` · <b style="color:var(--warn)">${daDung.length} đã mở/đã dùng</b>`:''}</div>`:'<div class="muted-sm">Món này không dán tem</div>'}
+        </div>
+        <div class="li-r"><button class="btn outline sm" style="width:auto;padding:0 10px" onclick="suaDongPhieuNhan('${r.id}', ${i})">Sửa số</button></div>
+      </div>`;
+    }).join('');
+    return dau + chiTiet + (dongs.length?'':'<div class="litem" style="padding-left:16px"><div class="li-l"><div class="muted-sm">Phiếu này không có dòng nào nhận hàng lành.</div></div></div>');
+  }).join('');
+
+  box.innerHTML = nav +
+    `<div class="small-note" style="margin-bottom:12px">Gõ nhầm số lượng lúc nhận hàng (30 hộp thay vì 3) thì phải sửa ở <b>ba chỗ cùng lúc</b>: tồn kho, dòng nhập trong sổ, và đám tem đã sinh ra. Sửa ở đây làm đủ cả ba trong một lần bấm. Tem thừa bị <b>huỷ</b> chứ không xoá — còn tra lại được mã nào cần đi bóc khỏi kệ.</div>` +
+    (FIXREC_CACHE.length ? than : '<div class="empty-hint">Chưa có phiếu nhận hàng nào.</div>');
+}
+
+function fixRecToggle(id){ fixRecOpenId = (fixRecOpenId===id) ? null : id; renderKhoContainers(); }
+
+// Hệ số quy đổi "một tem = bao nhiêu đơn vị pha chế". Ưu tiên đọc từ chính con tem đã
+// sinh (đó là con số hệ thống THẬT SỰ đã dùng), chỉ khi không có tem mới suy từ cấu hình.
+function fixRecHeSo(it, tem){
+  const t = (tem||[]).find(c=>Number(c.baseQty)>0);
+  if(t && (t.trackingMode||'unit') !== 'batch') return Number(t.baseQty);
+  if(t) return 0;                       // theo lô: 1 tem = cả lô, không quy ra "mấy cái"
+  const dv = it ? itemCountUnit(it) : null;
+  return dv && Number(dv.baseQty)>0 ? Number(dv.baseQty) : 1;
+}
+
+async function suaDongPhieuNhan(recId, lineIdx){
+  const rec = FIXREC_CACHE.find(r=>r.id===recId);
+  if(!rec){ toast('⚠️ Danh sách đã cũ, mở lại màn này'); return; }
+  const dongs = (rec.lines||[]).filter(l=>Number(l.qtyGoodBase)>0);
+  const l = dongs[lineIdx];
+  if(!l){ toast('⚠️ Không tìm thấy dòng này'); return; }
+  const it = INVENTORY_ITEMS.find(x=>x.id===l.itemId);
+  const tem = FIXREC_CTN.filter(c=>c.itemId===l.itemId);
+  const theoLo = tem.length && (tem[0].trackingMode === 'batch');
+  const heSo = theoLo ? 1 : fixRecHeSo(it, tem);
+  const daGhiBase = Number(l.qtyGoodBase)||0;
+  const donVi = (!theoLo && heSo>1 && tem.length) ? (tem[0].countUnitName || 'đơn vị') : (l.unit||'');
+  const daGhi = (!theoLo && heSo>1 && tem.length) ? daGhiBase/heSo : daGhiBase;
+
+  const nhap = prompt(
+    `Sửa dòng "${l.name}" của phiếu nhận này.\n\n`
+    + `Hệ thống đang ghi:  ${fmtNum(daGhi,2)} ${donVi}\n`
+    + (tem.length ? `Tem đã sinh:        ${tem.filter(c=>c.status==='sealed'||c.status==='open').length} con\n` : '')
+    + `\nNhập SỐ ĐÚNG theo đơn hàng thật (${donVi}):`,
+    String(daGhi));
+  if(nhap === null) return;
+  const soDung = Number(nhap);
+  if(!isFinite(soDung) || soDung < 0){ toast('⚠️ Nhập một số không âm'); return; }
+  const baseDung = (!theoLo && heSo>1 && tem.length) ? soDung*heSo : soDung;
+  const thua = daGhiBase - baseDung;
+  if(Math.abs(thua) < 1e-9){ toast('⚠️ Số mới trùng số cũ, không có gì để sửa'); return; }
+  if(thua < 0){ toast('⚠️ Màn này chỉ sửa phiếu ghi THỪA. Nhận thiếu thì ghi một phiếu nhận bổ sung để giá vốn vào đúng lô.'); return; }
+
+  // Tem nào được phép huỷ: chỉ tem còn NGUYÊN SEAL. Tem đã mở/đã báo hết nghĩa là hàng đó
+  // có thật và đã vào ly khách — huỷ nó đi là xoá mất một sự thật đã xảy ra.
+  let huy = [];
+  if(!theoLo && tem.length){
+    const song = tem.filter(c=>c.status==='sealed'||c.status==='open');
+    const nguyen = tem.filter(c=>c.status==='sealed' && !c.openedAt)
+                      .sort((a,b)=>String(b.receivedAt||'').localeCompare(String(a.receivedAt||'')));
+    const canHuy = song.length - soDung;
+    if(canHuy > nguyen.length){
+      toast(`⚠️ Cần huỷ ${canHuy} tem nhưng chỉ còn ${nguyen.length} tem nguyên seal — số còn lại đã mở/đã dùng, không huỷ được`);
+    }
+    huy = nguyen.slice(0, Math.max(0, Math.min(canHuy, nguyen.length)));
+    // Tem của phiếu này đã bị mở/báo hết = nhân viên đã quét những con tem lẽ ra không tồn
+    // tại. Tồn kho vẫn trừ đủ phần ghi thừa (đó là phần đã cộng dư lúc nhận), nhưng phải
+    // nói ra để chủ quán còn đi soát lại, đừng để nó lặng lẽ chảy vào đối chiếu cuối kỳ.
+    const daDung = tem.filter(c=>c.status==='open'||c.status==='finished');
+    if(daDung.length) toast(`⚠️ ${daDung.length} tem của phiếu này đã được mở/báo hết — kiểm tra lại số liệu của những con đó: ${daDung.slice(0,5).map(c=>c.code).join(', ')}`);
+  }
+
+  const tonHienTai = Number(it && it.currentStock) || 0;
+  if(!confirm(
+    `Sửa "${l.name}": ${fmtNum(daGhi,2)} → ${fmtNum(soDung,2)} ${donVi}\n\n`
+    + `· Tồn kho: ${fmtNum(tonHienTai,2)} → ${fmtNum(tonHienTai-thua,2)} ${l.unit||''}\n`
+    + `· Dòng NHẬP trong sổ sửa còn ${fmtNum(baseDung,2)} ${l.unit||''}\n`
+    + (huy.length ? `· Huỷ ${huy.length} tem: ${huy.slice(0,8).map(c=>c.code).join(', ')}${huy.length>8?'…':''}\n` : '')
+    + `\nNhớ đi bóc những con tem đã in ra khỏi kệ.`)) return;
+
+  try{
+    await ensureAuth();
+    const nowISO = new Date().toISOString();
+    const lyDo = `Sửa phiếu nhận ghi thừa: ${fmtNum(daGhi,2)} → ${fmtNum(soDung,2)} ${donVi}`;
+
+    // 1) Huỷ tem thừa (hoặc hạ dung tích nếu là tem theo lô).
+    if(huy.length){
+      const b = fstore.batch();
+      huy.forEach(c=>b.update(fstore.collection(CTN_COLL).doc(c.id), {
+        status:'voided', voidedAt: nowISO, voidedBy:'management', voidReason: lyDo, needsReview:false
+      }));
+      await b.commit();
+    } else if(theoLo && tem.length){
+      await fstore.collection(CTN_COLL).doc(tem[0].id).update({
+        baseQtyOriginal: Number(tem[0].baseQty)||0, baseQty: baseDung,
+        correctedAt: nowISO, correctedBy:'management', correctReason: lyDo
+      });
+    }
+
+    // 2) Sửa dòng ledger RECEIVING + tồn kho trong CÙNG một transaction, để không bao giờ
+    //    tồn tại trạng thái "đã trừ tồn nhưng sổ vẫn ghi 30" hay ngược lại.
+    let dongLedger = [];
+    try{
+      dongLedger = (await fstore.collection('stock_transactions_gieogieo').where('referenceId','==',recId).get())
+        .docs.filter(d=>{ const t=d.data(); return t.type==='RECEIVING' && t.itemId===l.itemId && !t.correctedAt; });
+    }catch(err){ console.warn('[sửa phiếu nhận] không đọc được dòng ledger', err); }
+    memoDropItems();
+    const itemRef = fstore.collection('inventory_items_gieogieo').doc(l.itemId);
+    await fstore.runTransaction(async t=>{
+      const doc = await t.get(itemRef);
+      if(!doc.exists) throw new Error('Nguyên liệu không tồn tại');
+      const cur = Number(doc.data().currentStock)||0;
+      t.update(itemRef, {currentStock: cur - thua, updatedAt: nowISO});
+      dongLedger.forEach(d=>{
+        const cu = d.data();
+        t.update(d.ref, {
+          qty: baseDung,
+          correctedFromQty: Number(cu.qty)||0,
+          correctedAt: nowISO, correctedBy:'management', correctReason: lyDo,
+          // Số "còn lại sau giao dịch" chụp lúc đó nay không còn đúng nữa. Để null thay vì
+          // một con số sai — màn lịch sử kho tự bỏ dòng "còn lại" khi gặp null.
+          resultingStock: null,
+          note: `[ĐÃ SỬA] ${lyDo} · ` + (cu.note||'')
+        });
+      });
+    });
+
+    // 3) Cập nhật lại chính phiếu nhận, để lần sau mở ra không thấy con số cũ.
+    const lines = (rec.lines||[]).map(x => (x.itemId===l.itemId && Number(x.qtyGoodBase)===daGhiBase)
+      ? {...x, qtyGoodBase: baseDung, qtyGoodBaseOriginal: daGhiBase, correctNote: lyDo} : x);
+    await fstore.collection('receiving_records_gieogieo').doc(recId).update({
+      lines, correctedAt: nowISO, correctedBy:'management', correctReason: lyDo
+    });
+
+    logAudit('adjust','receiving_record',recId,{itemId:l.itemId, tu:daGhiBase, den:baseDung, temHuy:huy.length, soDongLedger:dongLedger.length});
+    toast(`✅ Đã sửa · trừ ${fmtNum(thua,0)} ${l.unit||''} khỏi tồn${huy.length?` · huỷ ${huy.length} tem`:''}`);
+    renderKhoContainers();
+  }catch(err){
+    console.error('suaDongPhieuNhan lỗi', err);
+    showError('Không sửa được: '+(err.code||err.message||err));
+  }
+}
+
 async function chotTonLichSu(idx){
   const r = LEGACY_ROWS_CACHE[idx];
   if(!r){ toast('⚠️ Danh sách đã cũ, mở lại màn này'); return; }
@@ -3932,9 +4146,11 @@ async function renderKhoContainers(){
     ['expired',   'Quá hạn sau mở'],
     ['open',      'Đang mở'],
     ['unlabeled', 'Tem chưa dán'],
-    ['legacy',    'Tồn lịch sử']
+    ['legacy',    'Tồn lịch sử'],
+    ['fixreceipt','Sửa phiếu nhận']
   ];
   if(ctnFilter === 'legacy'){ await renderKhoLegacyStock(box, tabs); return; }
+  if(ctnFilter === 'fixreceipt'){ await renderKhoFixReceipt(box, tabs); return; }
   let list = [];
   try{
     await ensureAuth();

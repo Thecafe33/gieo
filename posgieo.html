@@ -3263,7 +3263,10 @@ async function findContainerByCode(code) {
     // chai Trà đen có thể trừ chai Trà lài, và sổ kho sai mà không ai biết. Thà từ chối.
     // Chai đã dùng hết không còn trên kệ nên không tính vào việc phân định trùng; giữ lại để
     // nơi gọi vẫn báo được "đã báo hết trước đó" thay vì "không có mã này".
-    const song = tatCa.filter(c => c.status !== 'finished');
+    // 'voided' = tem sinh nhầm đã bị Quản lý huỷ khi sửa phiếu nhận ghi thừa. Nó không
+    // còn đại diện cho hàng nào, nên KHÔNG được tính vào việc phân định trùng mã (không thì
+    // một con tem đã huỷ làm kẹt luôn con tem thật cùng mã), và cũng không được mở.
+    const song = tatCa.filter(c => c.status !== 'finished' && c.status !== 'voided');
     if (song.length > 1) return { _trungMa: true, code: ma, soChai: song.length };
     return song[0] || tatCa[0];
   } catch (err) { console.warn('findContainerByCode lỗi', err); return null; }
@@ -3380,6 +3383,7 @@ async function scanToOpenContainer() {
   if (chanMaTrung(c)) return;
   if (!c) { toast('❌ Không có mã ' + r.code + ' trong hệ thống'); return; }
   // Quét nhầm trạng thái là chuyện thường — nói rõ đang ở đâu thay vì báo lỗi chung chung.
+  if (c.status === 'voided')   { toast('⛔ ' + c.code + ' đã bị huỷ (phiếu nhận ghi thừa) — bóc tem này bỏ đi, đừng dùng'); return; }
   if (c.status === 'open')     { toast('ℹ️ ' + c.code + ' đang mở rồi — muốn báo hết thì bấm "Đã hết"'); return; }
   if (c.status === 'finished') { toast('ℹ️ ' + c.code + ' đã báo hết trước đó'); return; }
   openConfirmOpenSheet(c);
@@ -3443,6 +3447,7 @@ async function scanToFinishContainer() {
   const c = await findContainerByCode(r.code);
   if (chanMaTrung(c)) return;
   if (!c) { toast('❌ Không có mã ' + r.code + ' trong hệ thống'); return; }
+  if (c.status === 'voided')   { toast('⛔ ' + c.code + ' đã bị huỷ (phiếu nhận ghi thừa) — bóc tem này bỏ đi, đừng dùng'); return; }
   if (c.status === 'sealed')   { toast('ℹ️ ' + c.code + ' còn nguyên seal — mở trước đã'); return; }
   if (c.status === 'finished') { toast('ℹ️ ' + c.code + ' đã báo hết trước đó'); return; }
   // Quét được = cầm đúng chai trên tay, không cần hỏi lý do.
