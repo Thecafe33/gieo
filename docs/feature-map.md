@@ -32,7 +32,7 @@ Cột "Trạng thái" đối chiếu với 26 Phase của kế hoạch cải t�
 | **Khuyến mãi** | `screen-tg`, HTML 1439‑1578 | chương trình KM | 🔒 **PROTECTED** | ⚪ Không đụng UI |
 | Trợ lý bán hàng | `screen-assist` (nằm giữa hai tab protected nhưng KHÔNG protected) | | thấp | 🟢 |
 | Kiểm toán | nhóm **Kiểm toán** | | thấp | 🟢 |
-| Tìm nhanh sidebar (`navSearch`, Ctrl/⌘+K) | `onNavSearch()` / `renderSidebarNav()` | nhãn nav + **Nguyên liệu, BTP** | thấp | 🟡 **Mở rộng 2026-09-08** — gõ ≥2 ký tự giờ tìm cả tên nguyên liệu/BTP (không chỉ 40+ nhãn nav), mỗi kết quả có nút "Giải thích tồn kho" đi thẳng vào Phase 9. Còn thiếu Bill/Nhân viên/Transaction như Phase 4 mô tả đầy đủ |
+| Tìm nhanh sidebar (`navSearch`, Ctrl/⌘+K) | `onNavSearch()` / `renderSidebarNav()` | nhãn nav + **Nguyên liệu, BTP, Nhân viên** | thấp | 🟡 **Mở rộng 2026-09-08** — gõ ≥2 ký tự giờ tìm cả tên nguyên liệu/BTP/nhân viên (không chỉ 40+ nhãn nav); nguyên liệu/BTP có nút "Giải thích tồn kho" (Phase 9), nhân viên có nút tới Chấm công/Lương/Hồ sơ. Còn thiếu Bill/Transaction như Phase 4 mô tả đầy đủ |
 | Breadcrumb-lite (`hdrKicker`/`hdrTitle`) | `switchScreen()` dòng ~9342 | | thấp | 🟡 Có 2 tầng (Nhóm › Mục), không phải breadcrumb bấm được từng cấp; không có deep link / URL hash |
 | Context Navigation (tab liên quan ngay tại object) | sheet "Lịch sử" (nút 🕐) ở Nguyên liệu | Nguyên liệu | thấp | 🟡 **Một phần, mới thêm 2026-09-08** — sheet 🕐 giờ gộp sẵn Container đang mở CỦA ĐÚNG món đó + Giải thích tồn kho + Giao dịch trong cùng một chỗ (không cần rời khỏi Nguyên liệu). Còn thiếu: chưa gắn Kiểm kê/Lệch kho ngay tại đây, và BTP/các object khác chưa có tương tự |
 | Related Actions | rải rác, vd. nudge "Duyệt phiếu kiểm kê" trong Lệch kho, nút "Khai định mức" khi thiếu recipe | | | 🟡 Có từng phần theo ngữ cảnh nhưng không nhất quán theo mọi màn |
@@ -82,20 +82,22 @@ File thay đổi: `quanlygieo.html`, hàm mới `_histTypeLabel`, `HIST_EXTRA_TY
 
 **Phase 4 — Command Search ("Find Anything"), một phần**, mở rộng ngay ô tìm sidebar đã có (`onNavSearch`/`renderSidebarNav`), không tạo ô tìm/màn tìm kiếm riêng:
 
-- Gõ ≥2 ký tự (đã bỏ dấu) giờ tìm thêm trong `INVENTORY_ITEMS`/`PREP_ITEMS` (tên nguyên liệu, tên BTP), không chỉ 40+ nhãn mục điều hướng như trước. Kết quả hiện dưới nhóm "Tìm thấy trong dữ liệu", kèm tồn hiện tại và hai nút: **Giải thích tồn kho** (mở thẳng khối vừa làm ở Phase 9) và **Xem danh mục** (tới Kho → Nguyên liệu/Chế biến cấp 1).
-- `INVENTORY_ITEMS`/`PREP_ITEMS` bình thường chỉ có dữ liệu sau khi đã từng mở đúng màn Kho tương ứng — thêm `_ensureSearchIndexes()` tải nền hai mảng này ngay khi người dùng bắt đầu gõ tìm (dùng `ensureAuth()` + cache 20s sẵn có của `loadInventoryItems`/`loadPrepItems`, không đọc lại Firestore nếu đã có), và tự vẽ lại kết quả khi tải xong. Trong lúc chờ, ô tìm nói rõ "Đang tải dữ liệu…" thay vì im lặng báo "không tìm thấy".
-- Chưa tìm được Bill/Nhân viên/Transaction như ví dụ đầy đủ trong kế hoạch — xem mục 1 ở §4.
+- Gõ ≥2 ký tự (đã bỏ dấu) giờ tìm thêm trong `INVENTORY_ITEMS`/`PREP_ITEMS`/nhân viên (`employees_gieogieo`), không chỉ 40+ nhãn mục điều hướng như trước. Nguyên liệu/BTP hiện tồn hiện tại + hai nút: **Giải thích tồn kho** (Phase 9) và **Xem danh mục**. Nhân viên hiện tên (+ "Đã nghỉ" nếu có) và ba nút tới Chấm công/Lương/Hồ sơ — chưa lọc sẵn theo tên vì chưa có trang riêng cho từng nhân viên, chỉ đưa thẳng tới đúng màn.
+- `INVENTORY_ITEMS`/`PREP_ITEMS` bình thường chỉ có dữ liệu sau khi đã từng mở đúng màn Kho tương ứng — thêm `_ensureSearchIndexes()` tải nền (Nguyên liệu + BTP + Nhân viên) ngay khi người dùng bắt đầu gõ tìm, và tự vẽ lại kết quả khi tải xong. Trong lúc chờ, ô tìm nói rõ "Đang tải dữ liệu…" thay vì im lặng báo "không tìm thấy".
+- **Sửa lỗi từ lượt trước:** `_ensureSearchIndexes()` bản đầu gọi `loadInventoryItems()`/`loadPrepItems()` nhưng QUÊN gán kết quả vào biến toàn cục `INVENTORY_ITEMS`/`PREP_ITEMS` (hai hàm load chỉ trả về danh sách, không tự gán — mọi chỗ khác trong file đều gán tay sau khi gọi). Hậu quả: tìm kiếm chỉ chạy đúng nếu người dùng LỠ vào Kho→Nguyên liệu/Chế biến trước đó trong phiên — đúng kịch bản mà tính năng này sinh ra để giải quyết, coi như không tải nền được gì cho lần tìm đầu tiên. Đã gán lại đúng.
+- Chưa tìm được Bill như ví dụ đầy đủ trong kế hoạch — xem mục 1 ở §4 (bill nằm ở RTDB, khác nguồn dữ liệu với phần đã làm).
 
-File thay đổi: `quanlygieo.html`, hàm `renderSidebarNav()` (thêm khối kết quả dữ liệu), `onNavSearch()`, hàm mới `_ensureSearchIndexes()` (khoảng dòng 8656‑8750).
+File thay đổi: `quanlygieo.html`, hàm `renderSidebarNav()` (thêm khối kết quả dữ liệu + nhân viên), `onNavSearch()`, hàm `_ensureSearchIndexes()` (khoảng dòng 8656‑8783, đã sửa lỗi gán + thêm nhân viên).
 
 **Phase 5 — Context Navigation, một phần**, vẫn trong cùng sheet "Lịch sử" (nút 🕐 ở Nguyên liệu):
 
 - Thêm khối "📦 Đang mở & tem" hiện đúng các container (`stock_containers_gieogieo`) đang mở CỦA RIÊNG món đang xem — trước đây phải rời Nguyên liệu, qua hẳn màn Container rồi tự dò trong danh sách lẫn lộn mọi món. Chỉ tải khi món có bật dán tem (`itemTrackingMode !== 'none'`) — đa số nguyên liệu không dùng tem nên không tốn lượt đọc thừa.
 - Lọc phía client trên danh sách "đang mở" đã có sẵn (vốn chỉ vài chục bản ghi — xem `loadContainersFor`), **không** thêm `where('itemId',...)` mới để khỏi phải tạo composite index Firestore mới.
 - Nút "Xem màn Container" đóng sheet rồi điều hướng sang màn Container đầy đủ (`goContainers('open')`) cho ai cần thao tác (đánh dấu đã xem, v.v.) — sheet chỉ để XEM nhanh, không thay thế quy trình xử lý container hiện có.
-- Sheet 🕐 giờ gộp: Tồn hiện tại → Container đang mở → Giải thích tồn kho → Lịch sử giao dịch, đúng tinh thần "các chức năng liên quan phải ở gần đối tượng đó" — chỉ còn thiếu Kiểm kê/Lệch kho chưa có link tại chỗ.
+- Sheet 🕐 giờ gộp: Tồn hiện tại → nút Kiểm kê/Lệch kho → Container đang mở → Giải thích tồn kho → Lịch sử giao dịch, đúng tinh thần "các chức năng liên quan phải ở gần đối tượng đó".
+- **Thêm Related Actions (Phase 6)**: hai nút "Kiểm kê" / "Lệch kho & định lượng" ngay trong card "Tồn hiện tại" của sheet — chỉ cho Nguyên liệu (Kiểm kê ở đây là hàng đợi duyệt kiểm kê nguyên liệu; BTP đếm cuối ca theo cơ chế khác, không dùng chung hàng đợi này nên không gắn nhầm). Bấm thì đóng sheet trước khi điều hướng.
 
-File thay đổi: `quanlygieo.html`, hàm mới `_histContainerHtml` (khoảng dòng 20166‑20188), sửa `openItemHistory()` để tải song song container cùng lịch sử giao dịch.
+File thay đổi: `quanlygieo.html`, hàm mới `_histContainerHtml` (khoảng dòng 20166‑20188), sửa `openItemHistory()` để tải song song container cùng lịch sử giao dịch, sửa `_histRender()` thêm `relatedActions`.
 
 **Phase 11 — Integrity Rules → Alert Inbox**, nối một kiểm tra ĐÃ CÓ SẴN từ trước (không viết rule mới) vào đúng nơi kế hoạch yêu cầu:
 
@@ -109,9 +111,9 @@ File thay đổi: `quanlygieo.html`, hàm mới `integrityCheckCardHtml()`, `run
 **Giới hạn đã biết, chưa làm trong phiên này:**
 - Chưa đối chiếu Ledger vs **Container** (tồn vật lý theo chai/tem) như ví dụ "🟢 KHỚP / 🟡 Có chênh lệch" trong kế hoạch — khối Container ở Phase 5 mới chỉ LIỆT KÊ container đang mở, chưa CỘNG SỐ để so với tồn ledger. Cần hiểu rõ `untrackedBase`/trạng thái container trước khi làm phép cộng này cho đúng.
 - Chưa có rule Integrity MỚI nào (Ledger≠Container, GOGS Integrity, Container Integrity, Recipe Integrity đúng nghĩa) — chỉ mới kết nối lại kiểm tra sẵn có.
-- Command Search mới tìm Nguyên liệu/BTP, chưa tìm Bill/Nhân viên/Transaction.
+- Command Search chưa tìm được Bill (khác nguồn dữ liệu — RTDB, không phải Firestore).
 - Context Navigation mới có ở Nguyên liệu (qua sheet 🕐), chưa có ở BTP/Container/Bill/Nhân viên.
-- Chưa test trên trình duyệt thật với dữ liệu Firebase thật (không có quyền truy cập project Firebase `the-cafe-33` trong phiên này) — mới kiểm tra bằng `node --check` (cú pháp hợp lệ) và đọc code đối chiếu thủ công. **Cần người quản lý mở thử trên trình duyệt trước khi tin tưởng hoàn toàn** — đặc biệt: mở Hộp thư cảnh báo, bấm "Kiểm tra ngay" ở thẻ đầu trang và xem có ra đúng danh sách như khi bấm nút tương tự ở tab Kiểm toán không; mở sheet 🕐 của một nguyên liệu CÓ dán tem đang mở chai, xem khối Container có hiện đúng chai đó không; và gõ tìm tên một nguyên liệu, bấm "Giải thích tồn kho" có mở đúng sheet không.
+- Chưa test trên trình duyệt thật với dữ liệu Firebase thật (không có quyền truy cập project Firebase `the-cafe-33` trong phiên này) — mới kiểm tra bằng `node --check` (cú pháp hợp lệ) và đọc code đối chiếu thủ công. **Cần người quản lý mở thử trên trình duyệt trước khi tin tưởng hoàn toàn** — đặc biệt: mở sidebar, gõ tìm tên MỘT NHÂN VIÊN CÓ THẬT ngay khi vừa mở app (chưa vào Nhân sự lần nào trong phiên) để xác nhận lỗi tải nền đã sửa đúng; mở Hộp thư cảnh báo, bấm "Kiểm tra ngay"; mở sheet 🕐 của một nguyên liệu CÓ dán tem đang mở chai và bấm nút Kiểm kê/Lệch kho mới thêm.
 
 ---
 
@@ -119,7 +121,7 @@ File thay đổi: `quanlygieo.html`, hàm mới `integrityCheckCardHtml()`, `run
 
 Theo đúng thứ tự ưu tiên của kế hoạch, các hạng mục ⭐⭐⭐⭐⭐/⭐⭐⭐⭐ còn thiếu nhiều nhất:
 
-1. **Command Search — mở rộng thêm** (Phase 4) — thêm Bill (số bill, SĐT khách) và Nhân viên vào cùng cơ chế tìm ở §3, giữ đúng nguyên tắc "vẫn một ô tìm, không tạo màn riêng".
-2. **Context Navigation — mở rộng thêm** (Phase 5) — thêm link nhanh tới Kiểm kê/Lệch kho ngay trong sheet 🕐; và làm tương tự cho BTP (container không áp dụng cho BTP nhưng Kiểm kê/Lệch kho thì có).
+1. **Command Search — mở rộng thêm** (Phase 4) — thêm Bill (số bill, SĐT khách) vào cùng cơ chế tìm ở §3 (nguồn RTDB, cần cách tiếp cận khác Nguyên liệu/BTP/Nhân viên), giữ đúng nguyên tắc "vẫn một ô tìm, không tạo màn riêng".
+2. **Context Navigation — mở rộng thêm** (Phase 5) — làm tương tự sheet 🕐 cho BTP (container không áp dụng nhưng có thể thêm link liên quan khác); Bill/Nhân viên hiện chưa có "trang đối tượng" nào để gắn related actions vào.
 3. **Integrity Rules — thêm rule mới** (Phase 11) — "Ledger ≠ Container" (đối chiếu số, không chỉ liệt kê), "GOGS Integrity" (bill hoàn tất chưa có consumption tương ứng) — bổ sung vào `runDataIntegrityCheck()` đã nối vào Alert Inbox ở §3, không tạo dashboard riêng.
 4. Container reconciliation cho Giải thích tồn kho (nối tiếp việc đã làm ở §3) — sau khi hiểu rõ `untrackedBase`/trạng thái container. Cùng gốc dữ liệu với mục 3.

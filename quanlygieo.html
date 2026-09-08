@@ -8704,7 +8704,8 @@ function renderSidebarNav(){
   if(q && q.length>=2){
     const mi = (INVENTORY_ITEMS||[]).filter(it=>noAccent(it.name||'').includes(q)).slice(0,8);
     const mp = (PREP_ITEMS||[]).filter(p=>noAccent(p.name||'').includes(q)).slice(0,8);
-    found += mi.length + mp.length;
+    const me = (SEARCH_EMPLOYEES_CACHE||[]).filter(e=>noAccent(e.fullName||'').includes(q)).slice(0,8);
+    found += mi.length + mp.length + me.length;
     const dataRow = (name, id, unit, stock, kind)=>`
       <div class="sidebar-item sub" style="flex-direction:column;align-items:stretch;gap:6px;cursor:default;height:auto;padding:8px 10px 8px 38px">
         <div style="display:flex;justify-content:space-between;gap:8px">
@@ -8717,17 +8718,34 @@ function renderSidebarNav(){
           <button class="btn outline sm" style="width:auto;padding:0 8px" onclick="goKho('${kind==='item'?'items':'prep'}')">Xem danh mục</button>
         </div>
       </div>`;
-    if(mi.length || mp.length){
+    // Nhân viên chưa có "trang riêng" như nguyên liệu/BTP (chỉ có 3 màn danh
+    // sách dùng chung: Nhân viên/Chấm công/Lương) — nên hành động ở đây chỉ là
+    // đi thẳng tới đúng màn, không lọc sẵn theo tên (Related Actions, không
+    // nhân bản nghiệp vụ tìm-trong-danh-sách vốn đã có ở từng màn đó).
+    const empRow = (e)=>`
+      <div class="sidebar-item sub" style="flex-direction:column;align-items:stretch;gap:6px;cursor:default;height:auto;padding:8px 10px 8px 38px">
+        <div style="display:flex;justify-content:space-between;gap:8px">
+          <b style="font-size:13px">${escapeHtmlAttr(e.fullName||'')}</b>
+          ${e.active===false ? '<span class="tier tier-red" style="flex-shrink:0">Đã nghỉ</span>' : ''}
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn outline sm" style="width:auto;padding:0 8px" onclick="goEntry('chamcong')">Chấm công</button>
+          <button class="btn outline sm" style="width:auto;padding:0 8px" onclick="goEntry('luong')">Lương</button>
+          <button class="btn outline sm" style="width:auto;padding:0 8px" onclick="goEntry('nv')">Hồ sơ</button>
+        </div>
+      </div>`;
+    if(mi.length || mp.length || me.length){
       dataResultsHtml = `
         <div class="sidebar-group-label">Tìm thấy trong dữ liệu</div>
         ${mi.map(it=>dataRow(it.name, it.id, it.unit, it.currentStock, 'item')).join('')}
         ${mp.map(p=>dataRow(p.name, p.id, p.unit, p.currentStock, 'prep')).join('')}
+        ${me.map(empRow).join('')}
       `;
-    } else if(!INVENTORY_ITEMS.length && !PREP_ITEMS.length){
-      // Chưa tải xong (lần đầu gõ tìm, chưa từng vào Kho) — nói rõ thay vì im
-      // lặng như không tìm thấy gì, vì _ensureSearchIndexes() đang tải nền và
+    } else if(!INVENTORY_ITEMS.length && !PREP_ITEMS.length && !SEARCH_EMPLOYEES_CACHE.length){
+      // Chưa tải xong (lần đầu gõ tìm trong phiên này) — nói rõ thay vì im lặng
+      // như không tìm thấy gì, vì _ensureSearchIndexes() đang tải nền và
       // renderSidebarNav() sẽ tự chạy lại khi xong.
-      dataResultsHtml = `<div class="small-note" style="padding:6px 10px 0 38px">Đang tải dữ liệu nguyên liệu/BTP để tìm…</div>`;
+      dataResultsHtml = `<div class="small-note" style="padding:6px 10px 0 38px">Đang tải dữ liệu nguyên liệu/BTP/nhân viên để tìm…</div>`;
       loadingHint = true;
     }
   }
@@ -8742,11 +8760,24 @@ function renderSidebarNav(){
 // renderKhoItems/renderKhoPrep). Không tải nền thì tìm "sữa" ngay sau khi mở
 // app lần đầu sẽ ra rỗng dù nguyên liệu đó có tồn tại — sai với kỳ vọng.
 let _searchIdxLoading = false;
+let SEARCH_EMPLOYEES_CACHE = [];
 function _ensureSearchIndexes(){
-  if(_searchIdxLoading || (INVENTORY_ITEMS.length && PREP_ITEMS.length)) return;
+  if(_searchIdxLoading || (INVENTORY_ITEMS.length && PREP_ITEMS.length && SEARCH_EMPLOYEES_CACHE.length)) return;
   _searchIdxLoading = true;
-  ensureAuth().then(()=>Promise.all([loadInventoryItems(), loadPrepItems()]))
-    .then(()=>{ if(navQuery) renderSidebarNav(); })
+  // [FIX] loadInventoryItems()/loadPrepItems() chỉ TRẢ VỀ danh sách — không tự
+  // gán vào biến toàn cục INVENTORY_ITEMS/PREP_ITEMS (mọi nơi khác trong file
+  // đều gán tay sau khi gọi, vd `INVENTORY_ITEMS = await loadInventoryItems()`
+  // ở renderKhoItems). Bản trước của hàm này quên gán, nên tìm kiếm chỉ chạy
+  // đúng SAU KHI đã lỡ vào Kho→Nguyên liệu/Chế biến ít nhất một lần — coi như
+  // không tải nền được gì cho lần tìm đầu tiên, đúng cái lỗi hàm này sinh ra để
+  // sửa.
+  ensureAuth().then(()=>Promise.all([loadInventoryItems(), loadPrepItems(), loadEmployees()]))
+    .then(([items, preps, emps])=>{
+      INVENTORY_ITEMS = items;
+      PREP_ITEMS = preps;
+      SEARCH_EMPLOYEES_CACHE = emps;
+      if(navQuery) renderSidebarNav();
+    })
     .catch(err=>console.warn('Không tải được dữ liệu cho tìm kiếm', err))
     .finally(()=>{ _searchIdxLoading = false; });
 }
@@ -20390,11 +20421,22 @@ function _histRender(){
       ${c.indexUrl ? `<br><a href="${escapeHtmlAttr(c.indexUrl)}" target="_blank" rel="noopener">Bấm đây để Firestore tạo chỉ mục</a> (một lần, vài phút), sau đó mở lại màn này.` : ''}</div>
     </div>` : '';
 
+  // Related Actions (Phase 6) — chỉ cho Nguyên liệu: "đang xem tồn kho của món
+  // này, tiếp theo thường làm gì?" → đi kiểm kê, hoặc xem lệch kho theo kỳ.
+  // BTP không có hai đường này (Kiểm kê ở đây là hàng đợi duyệt kiểm kê NGUYÊN
+  // LIỆU; BTP đếm cuối ca theo cơ chế khác — xem alert 'prep_count_variance').
+  const relatedActions = c.kind==='item' ? `
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+      <button class="btn outline sm" style="width:auto;padding:0 10px" onclick="closeEditSheet(); goKho('stockcount');">${ic('clipboard',13)} Kiểm kê</button>
+      <button class="btn outline sm" style="width:auto;padding:0 10px" onclick="closeEditSheet(); goKho('lechkho');">${ic('detective',13)} Lệch kho & định lượng</button>
+    </div>` : '';
+
   box.innerHTML = `
     <div class="card" style="margin-bottom:10px;padding:12px 14px">
       <div style="font-size:12.5px;color:var(--gt)">Tồn hiện tại</div>
       <div style="font-size:20px;font-weight:800;color:var(--td)">${fmtNum(c.stock,1)} ${unit}</div>
       <div class="small-note" style="margin-top:2px">${all.length} dòng · mới nhất trước${c.partial?'':' · tối đa 400 giao dịch gần nhất'}</div>
+      ${relatedActions}
     </div>
     ${canhBao}
     ${_histContainerHtml(c)}
