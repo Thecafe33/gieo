@@ -38,7 +38,8 @@ Cột "Trạng thái" đối chiếu với 26 Phase của kế hoạch cải t�
 | Related Actions | rải rác, vd. nudge "Duyệt phiếu kiểm kê" trong Lệch kho, nút "Khai định mức" khi thiếu recipe | | | 🟡 Có từng phần theo ngữ cảnh nhưng không nhất quán theo mọi màn |
 | Recent & Favorites | — | — | — | 🔴 **Chưa có** |
 | Transaction Drill-down | breakdown → `histSetFilter(type)` lọc đúng loại giao dịch trong cùng sheet | Nguyên liệu, BTP | thấp | 🟡 **Một phần, mới thêm 2026-09-08** — bấm vào một dòng breakdown thì lọc ra đúng các giao dịch loại đó (ngày giờ, nhân viên, ghi chú, tồn còn lại), nhưng CHƯA nhảy được tới đúng PO/bill/waste-record gốc (referenceId) |
-| Integrity Rules → Alert Inbox (Phase 11) | `runDataIntegrityCheck()` (đã có sẵn, Giai đoạn 12) giờ hiện ngay đầu Hộp thư cảnh báo | Nguyên liệu, Recipe, Refill, PO | thấp | 🟡 **Nối lại 2026-09-08** — kiểm tra tham chiếu hỏng + tồn kho âm vốn chỉ nằm ở tab Kiểm toán, giờ hiện luôn ở Hộp thư (nút "Kiểm tra ngay", dùng chung state với Kiểm toán). Vẫn CHƯA có rule "Ledger ≠ Container" (cộng số so sánh, khác với việc liệt kê container đang mở đã làm ở Phase 5), "GOGS Integrity" (bill hoàn tất chưa có consumption) |
+| Integrity Rules → Alert Inbox (Phase 11) | `runDataIntegrityCheck()` (đã có sẵn, Giai đoạn 12) giờ hiện ngay đầu Hộp thư cảnh báo | Nguyên liệu, Recipe, Refill, PO | thấp | 🟡 **Nối lại 2026-09-08** — kiểm tra tham chiếu hỏng + tồn kho âm vốn chỉ nằm ở tab Kiểm toán, giờ hiện luôn ở Hộp thư (nút "Kiểm tra ngay", dùng chung state với Kiểm toán). Vẫn CHƯA có rule "GOGS Integrity" (bill hoàn tất chưa có consumption), "Container Integrity", "Recipe Integrity" đúng nghĩa kế hoạch |
+| **Đối chiếu sổ kho với tem ("Ledger ≠ Container")** | trong sheet "Lịch sử" (nút 🕐) — `_histReconcileHtml()`, tái dùng `docTemConSongTheoMon()` | Nguyên liệu | thấp | 🟢 **Mới thêm 2026-09-08** — công thức đã có sẵn và đã kiểm chứng ở Kho → Container → Tồn lịch sử, chỉ hiện lại đúng con số đó tại sheet của từng món. Xem §3 |
 | Idempotency chuẩn hoá (Phase 12) | `referenceId` đã dùng ở nhiều nơi (vd. dòng 10628, 10666) nhưng không có pattern thống nhất tài liệu hoá | | | 🟡 Có nền tảng, chưa chuẩn hoá thành quy ước chung |
 | Versioning recipe/định lượng (Phase 15) | `recipes_gieogieo` không thấy field version | | | 🔴 Chưa có |
 | Simulation cho recipe (Phase 17) | `screen-sim` mới có labor/targets, chưa có "đổi định lượng → xem GOGS dự kiến" | | | 🟡 Một phần |
@@ -108,12 +109,20 @@ File thay đổi: `quanlygieo.html`, hàm mới `_histContainerHtml` (khoảng d
 
 File thay đổi: `quanlygieo.html`, hàm mới `integrityCheckCardHtml()`, `runIntegrityCheckFromInbox()` (khoảng dòng 9804‑9850), sửa `renderAlertInbox()` để chèn thẻ này ở cả hai nhánh (có/không có alert).
 
+**"Ledger ≠ Container" — đối chiếu sổ kho với tem, một phần Phase 9/11**, hoá ra công thức này **đã có sẵn và đã đúng** — chỉ bị giấu trong tab Container → Tồn lịch sử:
+
+- Phát hiện khi đọc code: `docTemConSongTheoMon()` + field `untrackedBase` trên `inventory_items_gieogieo` đã cài đặt đúng công thức `sổ kho = tem đang giữ (Σ container sealed+open còn sống) + tồn lịch sử đã chốt`, dùng ở `renderKhoLegacyStock()` (Kho → Container → Tồn lịch sử) — xem chú thích gốc "TỒN LỊCH SỬ TRƯỚC KHI DÁN TEM" (dòng ~3653) trong file. Đây chính là phép đối chiếu kế hoạch mô tả, đã kiểm chứng qua vụ thật (sữa tươi lệch 15.020g) chứ không phải tôi tự nghĩ ra.
+- Thêm khối "Đối chiếu sổ kho với tem" vào sheet 🕐 — **gọi thẳng `docTemConSongTheoMon()` đã có, không viết công thức mới**, chỉ trình bày lại đúng 3 con số (sổ kho / tem đang giữ / tồn lịch sử) + phần chênh nếu có, ngay tại chỗ đang xem món đó.
+- Món **chưa chốt mốc tồn lịch sử** thì hiện rõ 🟡 "Chưa chốt mốc" — KHÔNG hiện 🟢 giả (im lặng bỏ qua sẽ trông như "đang khớp" trong khi thực ra chưa đối chiếu được gì).
+- Phần chênh (nếu có) ghi rõ "không tự tính là hao hụt", có link thẳng tới đúng chỗ xử lý (chốt lại mốc / xoá bằng điều chỉnh) ở Kho → Container → Tồn lịch sử — không nhân bản quy trình xử lý, chỉ làm rõ điểm vào.
+
+File thay đổi: `quanlygieo.html`, hàm mới `_histReconcileHtml()` (khoảng dòng 20298‑20330), sửa `openItemHistory()` để gọi thêm `docTemConSongTheoMon()` song song khi món có dán tem.
+
 **Giới hạn đã biết, chưa làm trong phiên này:**
-- Chưa đối chiếu Ledger vs **Container** (tồn vật lý theo chai/tem) như ví dụ "🟢 KHỚP / 🟡 Có chênh lệch" trong kế hoạch — khối Container ở Phase 5 mới chỉ LIỆT KÊ container đang mở, chưa CỘNG SỐ để so với tồn ledger. Cần hiểu rõ `untrackedBase`/trạng thái container trước khi làm phép cộng này cho đúng.
-- Chưa có rule Integrity MỚI nào (Ledger≠Container, GOGS Integrity, Container Integrity, Recipe Integrity đúng nghĩa) — chỉ mới kết nối lại kiểm tra sẵn có.
+- Chưa có rule Integrity MỚI nào ngoài "Ledger≠Container" (GOGS Integrity — bill hoàn tất chưa có consumption, Container Integrity, Recipe Integrity đúng nghĩa kế hoạch liệt kê) — phần Ledger≠Container coi như xong (tái dùng công thức có sẵn), các rule còn lại vẫn chưa làm.
 - Command Search chưa tìm được Bill (khác nguồn dữ liệu — RTDB, không phải Firestore).
 - Context Navigation mới có ở Nguyên liệu (qua sheet 🕐), chưa có ở BTP/Container/Bill/Nhân viên.
-- Chưa test trên trình duyệt thật với dữ liệu Firebase thật (không có quyền truy cập project Firebase `the-cafe-33` trong phiên này) — mới kiểm tra bằng `node --check` (cú pháp hợp lệ) và đọc code đối chiếu thủ công. **Cần người quản lý mở thử trên trình duyệt trước khi tin tưởng hoàn toàn** — đặc biệt: mở sidebar, gõ tìm tên MỘT NHÂN VIÊN CÓ THẬT ngay khi vừa mở app (chưa vào Nhân sự lần nào trong phiên) để xác nhận lỗi tải nền đã sửa đúng; mở Hộp thư cảnh báo, bấm "Kiểm tra ngay"; mở sheet 🕐 của một nguyên liệu CÓ dán tem đang mở chai và bấm nút Kiểm kê/Lệch kho mới thêm.
+- Chưa test trên trình duyệt thật với dữ liệu Firebase thật (không có quyền truy cập project Firebase `the-cafe-33` trong phiên này) — mới kiểm tra bằng `node --check` (cú pháp hợp lệ) và đọc code đối chiếu thủ công. **Cần người quản lý mở thử trên trình duyệt trước khi tin tưởng hoàn toàn** — đặc biệt quan trọng lần này: mở sheet 🕐 của một nguyên liệu CÓ dán tem, xem khối "Đối chiếu sổ kho với tem" hiện ra có khớp với số đang thấy ở Kho → Container → Tồn lịch sử của ĐÚNG món đó không (hai nơi phải luôn ra cùng một số vì dùng chung một hàm) — đây là số liệu tồn kho nên sai là nghiêm trọng, xin đối chiếu kỹ trước khi tin. Ngoài ra: gõ tìm tên một nhân viên ngay khi vừa mở app; bấm "Kiểm tra ngay" ở Hộp thư cảnh báo; bấm nút Kiểm kê/Lệch kho mới thêm trong sheet 🕐.
 
 ---
 
@@ -123,5 +132,5 @@ Theo đúng thứ tự ưu tiên của kế hoạch, các hạng mục ⭐⭐⭐
 
 1. **Command Search — mở rộng thêm** (Phase 4) — thêm Bill (số bill, SĐT khách) vào cùng cơ chế tìm ở §3 (nguồn RTDB, cần cách tiếp cận khác Nguyên liệu/BTP/Nhân viên), giữ đúng nguyên tắc "vẫn một ô tìm, không tạo màn riêng".
 2. **Context Navigation — mở rộng thêm** (Phase 5) — làm tương tự sheet 🕐 cho BTP (container không áp dụng nhưng có thể thêm link liên quan khác); Bill/Nhân viên hiện chưa có "trang đối tượng" nào để gắn related actions vào.
-3. **Integrity Rules — thêm rule mới** (Phase 11) — "Ledger ≠ Container" (đối chiếu số, không chỉ liệt kê), "GOGS Integrity" (bill hoàn tất chưa có consumption tương ứng) — bổ sung vào `runDataIntegrityCheck()` đã nối vào Alert Inbox ở §3, không tạo dashboard riêng.
-4. Container reconciliation cho Giải thích tồn kho (nối tiếp việc đã làm ở §3) — sau khi hiểu rõ `untrackedBase`/trạng thái container. Cùng gốc dữ liệu với mục 3.
+3. **Integrity Rules — thêm rule còn thiếu** (Phase 11) — "GOGS Integrity" (bill hoàn tất chưa có consumption tương ứng), "Container Integrity", "Recipe Integrity" đúng nghĩa kế hoạch liệt kê — bổ sung vào `runDataIntegrityCheck()` đã nối vào Alert Inbox ở §3. ("Ledger ≠ Container" coi như xong — xem §3.)
+4. Cân nhắc thêm cảnh báo TỰ ĐỘNG cho món "chưa chốt mốc tồn lịch sử" vào `runDataIntegrityCheck()`/Alert Inbox (hiện chỉ thấy khi mở sheet 🕐 của đúng món đó) — cần chốt mốc rồi mới đối chiếu Ledger≠Container được, nên đây là điều kiện tiên quyết đang bị ẩn.
