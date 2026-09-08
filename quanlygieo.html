@@ -3556,6 +3556,13 @@ function addInventoryItem(data){
     countUnitName: data.countUnitName || '',
     stockManaged: data.stockManaged !== false,
     openShelfLifeHours: Number(data.openShelfLifeHours) || 0,
+    // untrackedBase — tồn KHÔNG có tem nào đại diện. Xem khối chú thích ở
+    // chotTonLichSu(). Món tạo mới mà bật dán tem ngay thì toàn bộ tồn khởi tạo là
+    // tồn chưa có tem, nên mốc = currentStock. Món không dán tem để null (chưa cần).
+    untrackedBase: (data.trackingMode && data.trackingMode !== 'none') ? (Number(data.currentStock) || 0) : null,
+    untrackedBaseAt: (data.trackingMode && data.trackingMode !== 'none') ? new Date().toISOString() : null,
+    untrackedBaseBy: (data.trackingMode && data.trackingMode !== 'none') ? 'management' : '',
+    untrackedBaseNote: (data.trackingMode && data.trackingMode !== 'none') ? 'Chốt tự động lúc tạo nguyên liệu' : '',
     // [MỚI] vesselIds — dụng cụ đựng dùng để CÂN món này ở POS (tự trừ bì), lấy
     // chung thư viện prep_vessels_gieogieo với bán thành phẩm. Dành cho nguyên
     // liệu MỞ GÓI RA LÀ DÙNG NGAY (trân châu, thạch dừa...) — thứ hao trong ngày
@@ -3613,6 +3620,283 @@ const CTN_REASON_LABEL = {
 };
 function ctnReasonLabel(k){ return CTN_REASON_LABEL[k] || k || ''; }
 
+// POS ghi lại CĂN CỨ nó đã dùng để kết luận "chai này còn thừa bao nhiêu". Ba trong bốn
+// giá trị nghĩa là KHÔNG ghi hao hụt — phải nói rõ ra, nếu không chủ quán đọc "0 g" rồi
+// tưởng chai nào cũng dùng hết sạch.
+const CTN_BASIS_LABEL = {
+  tinh_duoc:             'Tính được phần thừa',
+  nhieu_chai_mo:         'Nhiều chai cùng mở — không quy được cho chai nào',
+  chua_chot_ton_lich_su: 'Chưa chốt tồn lịch sử — chưa ghi hao hụt',
+  lech_so_sach:          'Sổ dư hơn cả dung tích chai — lệch sổ, không phải hao hụt',
+  ton_lich_su_da_dao:    'Đã đảo về điều chỉnh (tồn lịch sử, không phải hao hụt)',
+  loi_doc:               'Không đọc được dữ liệu lúc báo hết'
+};
+function ctnBasisLabel(k){ return CTN_BASIS_LABEL[k] || k || ''; }
+
+// ============================================================
+// [FIX] TỒN LỊCH SỬ TRƯỚC KHI DÁN TEM — untrackedBase
+//
+// SỰ CỐ GỐC. Quán chạy khoảng một tuần bằng tồn tổng (currentStock) rồi mới bật dán tem.
+// Tem chỉ sinh ra lúc NHẬN HÀNG, nên phần tồn có sẵn từ trước ngày bật tem không có một
+// con tem nào đại diện, mà vẫn nằm nguyên trong currentStock:
+//
+//     currentStock  =  tồn lịch sử (không tem)  +  tồn được tem đại diện
+//
+// Sữa tươi: currentStock 40.020 g, đếm tay tại quán 25 hộp = 25.000 g. 15.020 g chênh ra
+// là số dư của giai đoạn trước migration — hàng đã dùng hết mà sổ chưa trừ, KHÔNG phải sữa
+// đang nằm trong kho và cũng không phải sữa bị đổ đi.
+//
+// Hàm "báo hết" bên POS tính phần thừa bằng (currentStock − chai nguyên), tức mặc định tồn
+// lịch sử = 0, nên dồn cả 15.020 g vào một hộp 1.000 g rồi ghi WASTE. Cái sai là PHÂN LOẠI:
+// hạ trần xuống 1.000 g chỉ đổi một con hao hụt ma to lấy một con hao hụt ma nhỏ. Hao hụt
+// còn chảy vào tỷ lệ hao hụt, giá trị hao hụt, đối chiếu nguyên liệu và mọi KPI dùng WASTE.
+//
+// CÁCH SỬA. Chốt mốc tồn lịch sử một lần cho mỗi món:
+//
+//     untrackedBase = currentStock − Σ baseQty của mọi tem còn sống (sealed + open)
+//
+// Từ đó POS trừ mốc này ra trước khi suy phần thừa, và chỉ ghi WASTE khi thật sự có phần
+// thừa trong chai. Chưa chốt thì POS KHÔNG ghi WASTE (chua_chot_ton_lich_su) — "chưa biết"
+// không được phép biến thành "bằng không" một lần nữa.
+//
+// MỐC NÀY KHÔNG TỰ TRỪ DẦN. Nó là một hằng số lệch sổ, không phải hàng dùng được: GOGS trừ
+// currentStock theo lượng hàng THẬT lấy ra từ các chai có tem, nên khoảng lệch giữ nguyên
+// cho tới khi chủ quán xoá nó bằng một giao dịch ĐIỀU CHỈNH (nút bên dưới) hoặc bằng một
+// lần kiểm kê được duyệt. Xoá bằng ĐIỀU CHỈNH chứ không bằng hao hụt — không có giọt sữa
+// nào bị đổ đi ở đây cả.
+// ============================================================
+
+let LEGACY_ROWS_CACHE = [];
+
+// Đọc mọi tem còn sống, cộng baseQty theo món. 'in' cần Firestore mới nên có đường lui
+// giống openStockCountScreen bên POS.
+async function docTemConSongTheoMon(){
+  const gom = {};
+  const nhet = d => { const c = d.data(); gom[c.itemId] = (gom[c.itemId] || 0) + (Number(c.baseQty) || 0); };
+  try{
+    (await fstore.collection(CTN_COLL).where('status','in',['sealed','open']).get()).docs.forEach(nhet);
+  }catch(err){
+    console.warn('[tồn lịch sử] đọc gộp lỗi, tách làm 2 lượt:', err);
+    const [a,b] = await Promise.all([
+      fstore.collection(CTN_COLL).where('status','==','sealed').get(),
+      fstore.collection(CTN_COLL).where('status','==','open').get()
+    ]);
+    a.docs.forEach(nhet); b.docs.forEach(nhet);
+  }
+  return gom;
+}
+
+// Tem đã báo hết mà phần "còn thừa" LỚN HƠN cả dung tích của chính nó → con số đó không thể
+// là hàng nằm trong chai. Đây chính là dấu vân tay của bug: hao hụt ma sinh từ tồn lịch sử.
+// Lọc theo wasteBase giảm dần nên chỉ cần chỉ mục một trường mặc định của Firestore.
+async function docHaoHutMa(){
+  let docs = [];
+  try{
+    docs = (await fstore.collection(CTN_COLL).where('wasteBase','>',0).orderBy('wasteBase','desc').limit(200).get()).docs;
+  }catch(err){ console.warn('[tồn lịch sử] không đọc được danh sách hao hụt nghi vấn:', err); return []; }
+  return docs.map(d=>({id:d.id, ...d.data()}))
+    .filter(c => !c.reclassifiedAt && Number(c.baseQty) > 0 && Number(c.wasteBase) > Number(c.baseQty) * 1.0001);
+}
+
+async function renderKhoLegacyStock(box, tabs){
+  const nav = `<div class="filter-bar">${tabs.map(([k,l])=>
+      `<button class="ftag ${ctnFilter===k?'active':''}" onclick="ctnFilter='${k}'; renderKhoContainers();">${l}</button>`).join('')}</div>`;
+  let temTheoMon = {}, haoHutMa = [];
+  try{
+    await ensureAuth();
+    INVENTORY_ITEMS = await loadInventoryItems();
+    [temTheoMon, haoHutMa] = await Promise.all([docTemConSongTheoMon(), docHaoHutMa()]);
+  }catch(err){
+    console.error('renderKhoLegacyStock lỗi', err);
+    box.innerHTML = nav + '<div class="muted">Không đọc được dữ liệu tem. '+(err.code||err.message||'')+'</div>';
+    return;
+  }
+
+  const rows = INVENTORY_ITEMS
+    .filter(it => itemStockManaged(it) && itemTrackingMode(it) !== 'none')
+    .map(it => {
+      const ton = Number(it.currentStock) || 0;
+      const tem = Number(temTheoMon[it.id]) || 0;
+      const moc = (it.untrackedBase === null || it.untrackedBase === undefined || !isFinite(Number(it.untrackedBase)))
+        ? null : Number(it.untrackedBase);
+      return { it, ton, tem, moc, deXuat: ton - tem, lech: moc === null ? null : (ton - moc - tem) };
+    })
+    .sort((a,b)=> (a.moc===null?0:1) - (b.moc===null?0:1) || Math.abs(b.deXuat) - Math.abs(a.deXuat));
+  LEGACY_ROWS_CACHE = rows;
+
+  const chuaChot = rows.filter(r=>r.moc===null).length;
+  const giaiThich = `Quán chạy một thời gian bằng tồn tổng trước khi dán tem, nên phần tồn có từ trước ngày dán tem không có con tem nào đại diện. Nếu không chốt mốc đó, POS sẽ tưởng cả phần chênh này đang nằm trong hộp nhân viên vừa báo hết và ghi thành <b>hao hụt</b> — đúng vụ 15.020 g sữa tươi. Chốt mốc một lần cho mỗi món là xong; món chưa chốt thì POS <b>không</b> ghi hao hụt lúc báo hết.`;
+
+  const bangHaoHutMa = !haoHutMa.length ? '' : `
+    <div class="small-note" style="margin:18px 0 8px;color:var(--bad)"><b>Hao hụt ghi sai loại (${haoHutMa.length})</b> — phần "còn thừa" lớn hơn cả dung tích của chính con tem đó, nên không thể là hàng nằm trong hộp. Đảo về ĐIỀU CHỈNH thì tồn kho giữ nguyên (con số tồn hiện tại vốn đã đúng), chỉ các báo cáo hao hụt thôi tính nhầm.</div>
+    ${haoHutMa.map(c=>`<div class="litem">
+      <div class="li-l">
+        <div>${escapeHtmlAttr(c.itemName||'')} <span class="muted-sm" style="letter-spacing:.4px">${escapeHtmlAttr(c.code||'')}</span></div>
+        <div>Ghi <b style="color:var(--bad)">${fmtNum(c.wasteBase,0)} ${escapeHtmlAttr(c.unit||'')}</b> hao hụt cho một tem chỉ chứa ${fmtNum(c.baseQty,0)} ${escapeHtmlAttr(c.unit||'')}</div>
+        <div class="muted-sm">Báo hết bởi ${escapeHtmlAttr(c.finishedBy||'—')}${c.wasteBasis?' · căn cứ: '+escapeHtmlAttr(ctnBasisLabel(c.wasteBasis)):''}</div>
+      </div>
+      <div class="li-r"><button class="btn outline sm" style="width:auto;padding:0 10px" onclick="ctnDaoHaoHutMa('${c.id}')">Đảo về điều chỉnh</button></div>
+    </div>`).join('')}`;
+
+  box.innerHTML = nav +
+    `<div class="small-note" style="margin-bottom:12px">${giaiThich}</div>` +
+    (chuaChot ? `<div class="small-note" style="color:var(--warn);margin-bottom:12px"><b>${chuaChot} món chưa chốt mốc.</b> Chốt càng sớm càng đúng — để lâu thì hàng vào ra vài lượt, con số lịch sử không dựng lại được nữa.</div>` : '') +
+    (!rows.length ? '<div class="empty-hint">Chưa có nguyên liệu nào bật dán tem.</div>' :
+      rows.map((r,i)=>{
+        const dv = escapeHtmlAttr(r.it.unit||'');
+        const mocTxt = r.moc === null
+          ? `<span class="tier tier-amber">Chưa chốt</span>`
+          : `<span class="muted-sm">Mốc ${fmtNum(r.moc,0)} ${dv}</span>`;
+        const lechTxt = r.moc === null ? '' :
+          (Math.abs(r.lech) < 0.5
+            ? `<div class="muted-sm" style="color:var(--ok)">Sổ khớp với tem</div>`
+            : `<div class="muted-sm" style="color:var(--warn)">Sổ đang lệch ${r.lech>0?'dư':'thiếu'} ${fmtNum(Math.abs(r.lech),0)} ${dv} so với tem</div>`);
+        return `<div class="litem">
+          <div class="li-l">
+            <div>${escapeHtmlAttr(r.it.name||'')}</div>
+            <div class="muted-sm">Sổ ${fmtNum(r.ton,0)} ${dv} · tem đang giữ ${fmtNum(r.tem,0)} ${dv} · chênh ${fmtNum(r.deXuat,0)} ${dv}</div>
+            ${lechTxt}
+            ${r.moc!==null && r.moc>0.5 ? `<div class="muted-sm">Tồn lịch sử này chỉ mất đi khi bạn xoá nó bằng một giao dịch điều chỉnh.</div>` : ''}
+          </div>
+          <div class="li-r">${mocTxt}
+            <button class="btn outline sm" style="width:auto;padding:0 10px;margin-left:8px" onclick="chotTonLichSu(${i})">${r.moc===null?'Chốt mốc':'Chốt lại'}</button>
+            ${r.moc!==null && r.moc>0.5 ? `<button class="btn outline sm" style="width:auto;padding:0 10px;margin-left:6px" onclick="xoaTonLichSu(${i})">Xoá khỏi sổ</button>` : ''}
+          </div>
+        </div>`;
+      }).join('')) +
+    bangHaoHutMa;
+}
+
+// Chốt mốc = ghi nhận "phần tồn KHÔNG có tem nào đại diện là bấy nhiêu". Không đụng
+// currentStock: con số tồn không sai ở đây, chỉ có cách DIỄN GIẢI nó là thiếu một vế.
+async function chotTonLichSu(idx){
+  const r = LEGACY_ROWS_CACHE[idx];
+  if(!r){ toast('⚠️ Danh sách đã cũ, mở lại màn này'); return; }
+  const dv = r.it.unit || '';
+  const goiY = Math.max(0, Math.round(r.deXuat * 100) / 100);
+  const nhap = prompt(
+    `Tồn lịch sử của "${r.it.name}" — phần tồn có từ TRƯỚC ngày dán tem, không con tem nào đại diện.
+
+`
+    + `Sổ đang ghi:        ${fmtNum(r.ton,2)} ${dv}
+`
+    + `Tem đang giữ:       ${fmtNum(r.tem,2)} ${dv}
+`
+    + `→ Chênh (đề xuất):  ${fmtNum(goiY,2)} ${dv}
+
+`
+    + `Nếu bạn đã đếm tay và số hộp thực tế khớp với số tem thì cứ để nguyên số đề xuất.`,
+    String(goiY));
+  if(nhap === null) return;
+  const moc = Number(nhap);
+  if(!isFinite(moc) || moc < 0){ toast('⚠️ Nhập một số không âm'); return; }
+  try{
+    await ensureAuth();
+    await updateInventoryItemMeta(r.it.id, {
+      untrackedBase: moc, untrackedBaseAt: new Date().toISOString(),
+      untrackedBaseBy: 'management',
+      untrackedBaseNote: `Chốt tay · sổ ${fmtNum(r.ton,2)} − tem ${fmtNum(r.tem,2)} ${dv}`
+    });
+    logAudit('update','inventory_item',r.it.id,{untrackedBase: moc, truoc: r.moc});
+    toast('✅ Đã chốt tồn lịch sử '+fmtNum(moc,0)+' '+dv);
+    renderKhoContainers();
+  }catch(err){
+    console.error('chotTonLichSu lỗi', err);
+    showError('Không chốt được: '+(err.code||err.message||err));
+  }
+}
+
+// Xoá tồn lịch sử khỏi sổ bằng ĐIỀU CHỈNH — không phải hao hụt. Không có hàng nào bị đổ đi;
+// đây là sai số ghi chép của giai đoạn trước khi dán tem, và ADJUSTMENT đúng là chỗ của nó.
+async function xoaTonLichSu(idx){
+  const r = LEGACY_ROWS_CACHE[idx];
+  if(!r || r.moc === null){ toast('⚠️ Món này chưa chốt mốc'); return; }
+  const dv = r.it.unit || '';
+  if(!confirm(
+    `Xoá ${fmtNum(r.moc,2)} ${dv} tồn lịch sử của "${r.it.name}" khỏi sổ?
+
+`
+    + `Tồn sổ: ${fmtNum(r.ton,2)} → ${fmtNum(r.ton - r.moc,2)} ${dv}
+
+`
+    + `Ghi bằng giao dịch ĐIỀU CHỈNH (không phải hao hụt) — đây là sai số ghi chép của giai đoạn trước khi dán tem, không có hàng nào bị đổ đi.`)) return;
+  try{
+    await ensureAuth();
+    await applyStockTransaction({
+      itemId: r.it.id, type: 'ADJUSTMENT', qty: -r.moc,
+      note: `Xoá tồn lịch sử trước khi dán tem — ${fmtNum(r.moc,2)} ${dv} đã tiêu hao trong giai đoạn chưa truy vết bằng mã. Không phải hao hụt.`,
+      staff: '', source: 'management'
+    });
+    await updateInventoryItemMeta(r.it.id, {
+      untrackedBase: 0, untrackedBaseAt: new Date().toISOString(), untrackedBaseBy: 'management',
+      untrackedBaseNote: `Đã xoá ${fmtNum(r.moc,2)} ${dv} bằng điều chỉnh`
+    });
+    logAudit('adjust','inventory_item',r.it.id,{xoaTonLichSu: r.moc});
+    toast('✅ Đã xoá tồn lịch sử bằng điều chỉnh');
+    renderKhoContainers();
+  }catch(err){
+    console.error('xoaTonLichSu lỗi', err);
+    showError('Không xoá được: '+(err.code||err.message||err));
+  }
+}
+
+// Đảo một dòng hao hụt ma về ĐIỀU CHỈNH.
+//
+// Vì sao ĐỔI LOẠI tại chỗ chứ không ghi một dòng đảo ngược: mọi báo cáo hao hụt trong app
+// cộng WASTE bằng Math.abs(qty), nên một dòng WASTE dương sẽ CỘNG THÊM vào tổng hao hụt chứ
+// không khấu trừ — đảo kiểu đó làm hao hụt nhân đôi. Đổi type sang ADJUSTMENT thì mọi báo
+// cáo tự thôi tính nhầm mà không phải sửa một dòng nào ở phía báo cáo.
+//
+// Vết audit giữ đủ: reclassifiedFrom/At/By/Reason nằm lại trên chính dòng đó, note cũ giữ
+// nguyên phần đuôi, và container giữ wasteBaseOriginal. KHÔNG đụng currentStock — con số tồn
+// hiện tại vốn đã đúng (40.020 − 15.020 = 25.000 = đúng 25 hộp đếm được tại quán), chỉ có
+// nhãn "hao hụt" dán lên phép trừ đó là sai.
+async function ctnDaoHaoHutMa(id){
+  try{
+    await ensureAuth();
+    const ref = fstore.collection(CTN_COLL).doc(id);
+    const doc = await ref.get();
+    if(!doc.exists){ toast('⚠️ Không tìm thấy tem này'); return; }
+    const c = doc.data();
+    const dv = c.unit || '';
+    if(!confirm(
+      `Đảo ${fmtNum(c.wasteBase,2)} ${dv} của tem ${c.code||''} (${c.itemName||''}) từ HAO HỤT sang ĐIỀU CHỈNH?
+
+`
+      + `Tồn kho GIỮ NGUYÊN — chỉ báo cáo hao hụt thôi tính nhầm con số này.`)) return;
+
+    // Lọc theo referenceId (một trường, dùng chỉ mục mặc định) rồi lọc type ở client —
+    // thêm điều kiện type vào truy vấn sẽ đòi chỉ mục ghép phải tạo tay.
+    const snap = await fstore.collection('stock_transactions_gieogieo').where('referenceId','==',id).get();
+    const dong = snap.docs.filter(d => d.data().type === 'WASTE' && !d.data().reclassifiedFrom);
+    if(!dong.length){
+      toast('ℹ️ Không còn dòng hao hụt nào để đảo — chỉ gỡ cờ trên tem');
+    } else {
+      const nowISO = new Date().toISOString();
+      const batch = fstore.batch();
+      dong.forEach(d => batch.update(d.ref, {
+        type: 'ADJUSTMENT',
+        reclassifiedFrom: 'WASTE', reclassifiedAt: nowISO, reclassifiedBy: 'management',
+        reclassifyReason: 'Tồn lịch sử trước khi dán tem bị phân loại nhầm thành hao hụt',
+        note: 'ĐIỀU CHỈNH (đảo từ hao hụt ghi sai loại — tồn lịch sử trước khi dán tem, không có hàng bị đổ đi) · '
+              + (d.data().note || '')
+      }));
+      await batch.commit();
+    }
+    await ref.update({
+      wasteBaseOriginal: Number(c.wasteBase) || 0,
+      wasteBase: 0, wasteBasis: 'ton_lich_su_da_dao',
+      needsReview: false, reclassifiedAt: new Date().toISOString(), reclassifiedBy: 'management'
+    });
+    logAudit('adjust','stock_container',id,{daoHaoHut: Number(c.wasteBase)||0, soDong: dong.length});
+    toast('✅ Đã đảo '+dong.length+' dòng về điều chỉnh');
+    renderKhoContainers();
+  }catch(err){
+    console.error('ctnDaoHaoHutMa lỗi', err);
+    showError('Không đảo được: '+(err.code||err.message||err));
+  }
+}
+
 // [FIX] Trước đây mục "Báo hết khi hàng còn nhiều" KHÔNG có đường đóng lại: cờ
 // needsReview do POS bật, không ai tắt được, nên cảnh báo nằm mãi ở Sức khoẻ quán
 // và dần bị bỏ qua — cùng số phận với mọi cảnh báo không tắt được.
@@ -3647,8 +3931,10 @@ async function renderKhoContainers(){
     ['review',    'Cần xem lại'],
     ['expired',   'Quá hạn sau mở'],
     ['open',      'Đang mở'],
-    ['unlabeled', 'Tem chưa dán']
+    ['unlabeled', 'Tem chưa dán'],
+    ['legacy',    'Tồn lịch sử']
   ];
+  if(ctnFilter === 'legacy'){ await renderKhoLegacyStock(box, tabs); return; }
   let list = [];
   try{
     await ensureAuth();
@@ -3688,6 +3974,7 @@ async function renderKhoContainers(){
       const tyLe = (Number(c.baseQty)>0 && Number(c.wasteBase)>0) ? Math.round(c.wasteBase/c.baseQty*100) : 0;
       const phu = ctnFilter==='review'
         ? `Báo hết ${dt(c.finishedAt)} bởi <b>${escapeHtmlAttr(c.finishedBy||'—')}</b> · còn <b>${fmtNum(c.wasteBase,0)} ${escapeHtmlAttr(c.unit||'')}</b> (${tyLe}% còn lại)`
+          + (c.wasteBasis && c.wasteBasis !== 'tinh_duoc' ? `<div class="muted-sm">${escapeHtmlAttr(ctnBasisLabel(c.wasteBasis))}</div>` : '')
         : ctnFilter==='unlabeled'
         ? `Nhận ${dt(c.receivedAt)} bởi ${escapeHtmlAttr(c.receivedBy||'—')}`
         : `Mở ${dt(c.openedAt)} bởi ${escapeHtmlAttr(c.openedBy||'—')}`;
@@ -15009,8 +15296,22 @@ async function submitInventoryItem(){
   try{
     if(editingItemId){
       savedItemId = editingItemId;
-      await updateInventoryItemMeta(editingItemId, { name, minStock, costPerUnit, packagingUnits, staffCounts, isPackagingMaterial,
-        trackingMode, countUnitName, stockManaged, openShelfLifeHours, vesselIds });
+      // Bật dán tem lần đầu = mốc "từ đây trở đi tem mới đại diện cho hàng". Toàn bộ tồn
+      // đang có tại giây phút này CHƯA có tem nào đại diện, nên nó chính là tồn lịch sử.
+      // Chốt ngay tại đây là cách duy nhất lấy được con số đúng — để đến lúc nhân viên
+      // báo hết chai đầu tiên thì hàng đã vào ra vài lượt, không dựng lại được nữa.
+      // (Bug 15.020 g sữa tươi sinh ra đúng vì bước này trước đây không tồn tại.)
+      const metaLuu = { name, minStock, costPerUnit, packagingUnits, staffCounts, isPackagingMaterial,
+        trackingMode, countUnitName, stockManaged, openShelfLifeHours, vesselIds };
+      const batDauDanTem = trackingMode !== 'none' && itemTrackingMode(itemCu) === 'none';
+      const chuaChotMoc = !itemCu || itemCu.untrackedBase === null || itemCu.untrackedBase === undefined;
+      if(batDauDanTem && chuaChotMoc){
+        metaLuu.untrackedBase = Number(itemCu && itemCu.currentStock) || 0;
+        metaLuu.untrackedBaseAt = new Date().toISOString();
+        metaLuu.untrackedBaseBy = 'management';
+        metaLuu.untrackedBaseNote = 'Chốt tự động lúc bật dán tem';
+      }
+      await updateInventoryItemMeta(editingItemId, metaLuu);
       // Ghi mốc giá SAU khi lưu thành công — không được để lịch sử có mốc mà bản ghi
       // chính thì lưu hỏng. Ghi mốc hỏng cũng không nuốt lỗi: báo rõ để chủ quán biết
       // giá đã đổi nhưng lịch sử chưa ghi được.

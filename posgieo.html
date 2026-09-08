@@ -3495,6 +3495,36 @@ function openConfirmFinishSheet(c, daQuet) {
 // phải để lại vết có tên người.
 const FINISH_REVIEW_RATIO = 0.25;
 
+// ------------------------------------------------------------
+// TỒN LỊCH SỬ TRƯỚC KHI DÁN TEM (untrackedBase)
+//
+// Vì sao field này phải tồn tại. Container/tem chỉ được sinh ra lúc NHẬN HÀNG
+// (createContainersForReceipt). Món nào đã có tồn trong sổ TỪ TRƯỚC ngày bật dán tem thì
+// phần tồn đó không có một con tem nào đại diện, mà vẫn nằm nguyên trong currentStock. Nói
+// cách khác, với món vừa chuyển sang quản lý bằng mã:
+//
+//     currentStock = tồn lịch sử (không có tem)  +  tồn được tem đại diện
+//
+// Sữa tươi là ví dụ đúng chuẩn: currentStock 40.020 g, trong khi đếm tay tại quán ra 25 hộp
+// = 25.000 g. 15.020 g chênh ra KHÔNG phải sữa đang nằm trong kho, cũng không phải sữa bị đổ
+// đi — đó là số dư của giai đoạn trước migration, phần hàng đã dùng hết mà sổ chưa trừ.
+//
+// Trước bản vá này hàm "báo hết" tính phần thừa bằng (currentStock − chai nguyên), tức là
+// mặc định tồn lịch sử = 0. Toàn bộ 15.020 g bị dồn vào một hộp 1.000 g và ghi thành WASTE.
+// Sai ở chỗ PHÂN LOẠI, không phải ở chỗ con số to: hạ trần xuống 1.000 g cũng chỉ đổi một
+// con số hao hụt ma to thành một con số hao hụt ma nhỏ.
+//
+// Trả về null (KHÔNG phải 0) khi chưa ai chốt mốc — "chưa biết" và "biết là bằng không" là
+// hai chuyện khác nhau, và chính việc đánh đồng chúng đã sinh ra bug này. Quản lý chốt mốc
+// ở Kho → Chai & tem kho → Tồn lịch sử.
+// ------------------------------------------------------------
+function tonLichSuCuaMon(itemData) {
+  const v = itemData ? itemData.untrackedBase : null;
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  return isFinite(n) ? n : null;
+}
+
 async function submitFinishContainer(id, daQuet) {
   if (_posSubmitBusy) { toast('⏳ Đang xử lý...'); return; }
   _posSubmitBusy = true;
@@ -3511,40 +3541,85 @@ async function submitFinishContainer(id, daQuet) {
     if (c.status !== 'open') { toast('ℹ️ ' + (c.code || '') + ' không ở trạng thái đang mở'); await openStockUseScreen(); return; }
 
     // ---- Phần còn thừa trong chai ----
-    // Chỉ tính được khi nguyên liệu này CHỈ CÓ ĐÚNG 1 chai đang mở: lúc đó
-    //     phần thừa = tồn sổ − (số chai nguyên còn × dung tích 1 chai)
-    // Nhiều chai cùng mở thì phần thừa nằm rải ở nhiều chai, không quy được cho chai nào —
-    // thà không ghi còn hơn ghi một con số bịa.
+    // Xem khối chú thích của tonLichSuCuaMon() ở trên để hiểu vì sao phép trừ này
+    // BẮT BUỘC phải có mốc tồn lịch sử. Tóm tắt:
+    //     phần thừa = tồn sổ − tồn lịch sử trước khi dán tem − (chai nguyên × dung tích)
+    // Thiếu vế "tồn lịch sử" thì toàn bộ số dư từ thời chưa dán tem bị dồn vào chai
+    // đang mở và ghi thành hao hụt — đúng con số đã tạo ra vụ 15.020 g "hao hụt" sữa
+    // tươi trong khi thực tế không ai đổ đi một giọt nào.
+    //
+    // Bốn kết cục, chỉ MỘT trong bốn được phép sinh ra WASTE:
+    //   tinh_duoc              → đủ căn cứ, phần thừa là hao hụt thật     → ghi WASTE
+    //   nhieu_chai_mo          → thừa nằm rải ở nhiều chai, không quy được → không ghi
+    //   chua_chot_ton_lich_su  → chưa biết mốc lịch sử                     → không ghi, cờ review
+    //   lech_so_sach           → thừa > cả dung tích chai: sổ lệch, không phải hao hụt → không ghi, cờ review
     let duThua = null, cachTinh = 'nhieu_chai_mo';
+    let tonSoLuc = null, tonLichSuLuc = null, nguyenLuc = null, lechSoSach = 0;
     try {
       const [snapOpen, snapSealed, itemDoc] = await Promise.all([
         fstore.collection(STOCK_CONTAINERS_COLL).where('itemId', '==', c.itemId).where('status', '==', 'open').get(),
         fstore.collection(STOCK_CONTAINERS_COLL).where('itemId', '==', c.itemId).where('status', '==', 'sealed').get(),
         fstore.collection('inventory_items_gieogieo').doc(c.itemId).get()
       ]);
-      if (snapOpen.docs.length === 1 && itemDoc.exists) {
-        const tonSo = Number(itemDoc.data().currentStock) || 0;
-        const nguyen = snapSealed.docs.reduce((s, d) => s + (Number(d.data().baseQty) || 0), 0);
-        duThua = tonSo - nguyen;
-        cachTinh = 'tinh_duoc';
+      if (!itemDoc.exists) {
+        cachTinh = 'loi_doc';
+      } else if (snapOpen.docs.length !== 1) {
+        cachTinh = 'nhieu_chai_mo';
+      } else {
+        const itemData = itemDoc.data();
+        const moc = tonLichSuCuaMon(itemData);
+        tonSoLuc = Number(itemData.currentStock) || 0;
+        nguyenLuc = snapSealed.docs.reduce((s, d) => s + (Number(d.data().baseQty) || 0), 0);
+        if (moc === null) {
+          // Món đã bật dán tem TỪ TRƯỚC bản vá này nên chưa ai chốt mốc lịch sử.
+          // Đoán bừa moc = 0 chính là con đường đã sinh ra hao hụt ma — thà không ghi.
+          cachTinh = 'chua_chot_ton_lich_su';
+        } else {
+          tonLichSuLuc = moc;
+          const thua = tonSoLuc - moc - nguyenLuc;
+          const tran = Number(c.baseQty) || 0;
+          if (tran > 0 && thua > tran * 1.0001 + 1e-6) {
+            // Một chai không thể chứa nhiều hơn dung tích của chính nó. Số dư dôi ra là
+            // sai lệch sổ sách (nhập hàng không sinh được tem, mốc lịch sử đã cũ...) —
+            // đó là việc của ĐIỀU CHỈNH, không phải của hao hụt.
+            cachTinh = 'lech_so_sach';
+            lechSoSach = thua;
+          } else {
+            duThua = thua;
+            cachTinh = 'tinh_duoc';
+          }
+        }
       }
     } catch (err) { console.warn('[báo hết] không tính được phần thừa', err); cachTinh = 'loi_doc'; }
 
     const nowISO = new Date().toISOString();
-    const tyLe = (Number(c.baseQty) > 0 && duThua > 0) ? duThua / Number(c.baseQty) : 0;
+    // Chỉ 'tinh_duoc' mới có phần thừa đáng tin để suy ra tỷ lệ còn lại.
+    const coSoThua = cachTinh === 'tinh_duoc' && duThua > 0;
+    const tyLe = (Number(c.baseQty) > 0 && coSoThua) ? duThua / Number(c.baseQty) : 0;
     const canDuyet = tyLe > FINISH_REVIEW_RATIO;
+    // Hai trạng thái "không tính được" bên dưới cũng phải nổi lên màn Quản lý: im lặng
+    // thì món đó vĩnh viễn không ai chốt mốc lịch sử và tem coi như hỏng chức năng.
+    const canXemLai = canDuyet || cachTinh === 'chua_chot_ton_lich_su' || cachTinh === 'lech_so_sach';
 
     await ref.update({
       status: 'finished', finishedAt: nowISO, finishedBy: staffEmp.fullName,
       finishedByEmployeeId: staffEmp.id,
       finishReason: lyDo, finishScanned: !!daQuet,
-      wasteBase: duThua > 0 ? duThua : 0,
+      wasteBase: coSoThua ? duThua : 0,
       wasteBasis: cachTinh,
-      needsReview: canDuyet
+      // Ảnh chụp ba số đã dùng để ra kết luận — không lưu thì sau này không ai dựng
+      // lại được vì sao chai này ghi 0 g còn chai kia ghi 80 g.
+      finishSnapshot: {
+        currentStock: tonSoLuc, untrackedBase: tonLichSuLuc,
+        sealedBase: nguyenLuc, ledgerGap: lechSoSach || 0
+      },
+      needsReview: canXemLai
     });
 
     // Ghi hao hụt phần thừa vào đúng sổ kho, không sửa currentStock trực tiếp.
-    if (duThua > 0) {
+    // ĐIỀU KIỆN cachTinh === 'tinh_duoc' là chốt chặn quan trọng nhất của cả hàm này:
+    // không đủ căn cứ thì KHÔNG sinh WASTE, kể cả khi phép trừ ra một số dương to đẹp.
+    if (coSoThua) {
       try {
         await applyStockTransactionPOS({
           itemId: c.itemId, type: 'WASTE', qty: -duThua,
@@ -3556,13 +3631,17 @@ async function submitFinishContainer(id, daQuet) {
         console.error('[báo hết] ghi hao hụt lỗi', err);
         toast('⚠️ Đã chốt nhưng ghi hao hụt lỗi — báo Quản lý');
       }
-    } else if (duThua < 0) {
+    } else if (cachTinh === 'tinh_duoc' && duThua < 0) {
       // Sổ đang ÍT HƠN thực tế: chai vẫn còn mà sổ đã trừ hết. Không tự sửa số — đây là
       // dấu hiệu định mức pha chế khai thiếu, phải để Quản lý nhìn thấy và sửa định mức.
       toast('⚠️ Sổ đang thiếu ' + fmtPrepQty(Math.abs(duThua)) + ' ' + (c.unit || '') + ' — có thể định mức khai thiếu');
     }
 
-    if (canDuyet) {
+    if (cachTinh === 'chua_chot_ton_lich_su') {
+      toast('✅ Đã chốt ' + (c.code || '') + ' — chưa ghi hao hụt: Quản lý cần chốt tồn lịch sử cho món này');
+    } else if (cachTinh === 'lech_so_sach') {
+      toast('✅ Đã chốt ' + (c.code || '') + ' — sổ đang dư ' + fmtPrepQty(lechSoSach) + ' ' + (c.unit || '') + ', để Quản lý điều chỉnh (không ghi hao hụt)');
+    } else if (canDuyet) {
       toast('⚠️ Báo hết khi còn ~' + Math.round(tyLe * 100) + '% — đã ghi nhận để Quản lý xem lại');
     } else {
       toast('✅ Đã chốt ' + (c.code || ''));
