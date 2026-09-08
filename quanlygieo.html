@@ -262,6 +262,8 @@ html.scrolled .topbar{border-bottom-color:var(--line);background:rgba(243,242,24
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
 #hdrKicker:empty{display:none;}
+.hdr-kicker-link{font:inherit;text-transform:inherit;letter-spacing:inherit;color:inherit;background:none;border:none;padding:0;cursor:pointer;}
+.hdr-kicker-link:hover{color:var(--gd);text-decoration:underline;}
 .brand{color:var(--gd);line-height:1.15;}
 #hdrTitle{
   font-size:21px !important;color:var(--td);letter-spacing:-.03em;line-height:1.2;
@@ -8593,6 +8595,16 @@ const NAV_GROUP = (()=>{
   return m;
 })();
 
+// Mục ĐẦU TIÊN của mỗi nhóm — "quay về cha" cho breadcrumb (Phase 7). App chỉ có
+// 2 tầng thật (Nhóm › Mục, không có tầng "đối tượng" như "Sữa tươi" trong ví dụ
+// kế hoạch), nên "quay về cha" ở đây nghĩa là về mục đầu của nhóm đó — với Kho
+// đúng là 'kho:inbox' ("Bắt đầu ở đây"), khớp luôn với ý đồ đã có.
+const NAV_GROUP_FIRST_KEY = (()=>{
+  const m = {};
+  NAV_SECTIONS.forEach(sec => { if(sec.group && sec.items[0]) m[sec.group] = sec.items[0].key; });
+  return m;
+})();
+
 // Tra lại {ic,label,go} từ nav key — dùng cho "Gần đây"/"Yêu thích" (Phase 8) để
 // vẽ được đúng nút điều hướng gốc mà không phải chép lại dữ liệu. 'inbox' không
 // nằm trong NAV_SECTIONS (vào bằng nudge/link, không qua sidebar) nên khai tay
@@ -8602,6 +8614,35 @@ const NAV_ITEM_BY_KEY = (()=>{
   NAV_SECTIONS.forEach(sec => sec.items.forEach(it => { m[it.key] = it; }));
   return m;
 })();
+
+// ============================================================
+// DEEP LINKING (kế hoạch cải tổ UX, Phase 7) — URL luôn phản ánh đúng màn đang
+// đứng (#kho:items, #entry:nv, #tg...), để gửi link qua chat/note là mở thẳng
+// đúng chỗ thay vì luôn phải "vào Kho rồi bấm Nguyên liệu" lại từ đầu.
+//
+// KHÔNG dùng location.hash = ... (bắn sự kiện hashchange, dễ đệ quy nếu sau
+// này có thêm listener) — dùng history.replaceState để chỉ đổi URL hiển thị,
+// không đẩy thêm một bước vào lịch sử trình duyệt (nếu không, nút Back của
+// trình duyệt sẽ đi qua TỪNG lượt đổi tab trong app, rất khó chịu và không
+// phải điều "deep link" yêu cầu).
+//
+// tryOpenDeepLink() dùng lại ĐÚNG chuỗi `go` đã khai trong NAV_SECTIONS (thứ
+// vẫn đang chạy an toàn qua onclick="${it.go}" ở mọi nút sidebar) — không tự
+// suy diễn lại switchScreen()/goKho()/goEntry() ở đây để khỏi có hai đường
+// điều hướng cho cùng một key mà một ngày nào đó lệch nhau. Hash từ URL chỉ
+// được dùng làm KHOÁ tra vào NAV_ITEM_BY_KEY (whitelist) — không có nhánh nào
+// thực thi trực tiếp nội dung hash, nên không có chỗ cho mã lạ chèn vào.
+// ============================================================
+function updateUrlForNavKey(key){
+  if(!key) return;
+  try{ history.replaceState(null, '', '#'+key); }catch(e){}
+}
+function tryOpenDeepLink(){
+  const key = String(location.hash||'').replace(/^#/, '');
+  if(!key || !NAV_ITEM_BY_KEY[key]) return false;
+  try{ new Function(NAV_ITEM_BY_KEY[key].go)(); return true; }
+  catch(err){ console.warn('[deep link] không mở được', key, err); return false; }
+}
 
 // ============================================================
 // GẦN ĐÂY & YÊU THÍCH (kế hoạch cải tổ UX, Phase 8) — giảm thao tác lặp lại:
@@ -9505,10 +9546,22 @@ function switchScreen(s){
   const navKey = currentNavKey();
   if(t) t.textContent = NAV_LABEL[navKey] || '';
   const k = document.getElementById('hdrKicker');
-  if(k) k.textContent = NAV_GROUP[navKey] || '';
+  if(k){
+    // Breadcrumb bấm được (Phase 7) — "quay về cha": tên nhóm dẫn về mục đầu
+    // của nhóm đó (vd "Kho" → "Cần xử lý"), TRỪ khi đang đứng ngay tại mục đó
+    // rồi thì hiện chữ thường, bấm vào chính mình chẳng để làm gì.
+    const group = NAV_GROUP[navKey] || '';
+    const firstKey = group ? NAV_GROUP_FIRST_KEY[group] : null;
+    if(group && firstKey && firstKey !== navKey && NAV_ITEM_BY_KEY[firstKey]){
+      k.innerHTML = `<button class="hdr-kicker-link" onclick="${NAV_ITEM_BY_KEY[firstKey].go}">${escapeHtmlAttr(group)}</button>`;
+    } else {
+      k.textContent = group;
+    }
+  }
   document.title = (NAV_LABEL[navKey] ? NAV_LABEL[navKey] + ' · ' : '') + 'Gieo Gieo';
   trackNavVisit(navKey);   // Phase 8 — "Gần đây"
   updateFavBtn();          // Phase 8 — nút ⭐ ở topbar phản ánh đúng màn đang đứng
+  updateUrlForNavKey(navKey); // Phase 7 — deep link: URL luôn khớp màn đang đứng
   renderSidebarNav();
   renderReportSubNav();
   closeSidebar();            // trên di động: chọn xong là đóng drawer luôn
@@ -21968,7 +22021,13 @@ function saveTopping() {
   // chạy — mở app lần đầu là trống trơn, phải bấm Tải lại mới có số.
   // renderToday() đã tự gọi renderStoreHealth('todayHealth') bên trong (và nó gọi
   // tiếp renderBookAlerts('todayBook')), nên gọi đúng một hàm này là đủ cả ba khối.
-  await renderToday();
+  //
+  // Deep link (Phase 7) — mở app bằng link có #kho:items thì vào THẲNG đó thay
+  // vì luôn về "Hôm nay" rồi bắt tự bấm lại. tryOpenDeepLink() tự gọi đúng
+  // switchScreen()/goKho()/goEntry() bên trong nếu hash hợp lệ, nên lúc đó
+  // không cần renderToday() nữa — gọi cả hai sẽ vẽ "Hôm nay" một lượt thừa rồi
+  // bị màn đích ghi đè ngay sau đó.
+  if(!tryOpenDeepLink()) await renderToday();
 })();
 
 // ============================================================
