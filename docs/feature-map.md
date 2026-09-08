@@ -38,7 +38,7 @@ Cột "Trạng thái" đối chiếu với 26 Phase của kế hoạch cải t�
 | Related Actions | rải rác, vd. nudge "Duyệt phiếu kiểm kê" trong Lệch kho, nút "Khai định mức" khi thiếu recipe | | | 🟡 Có từng phần theo ngữ cảnh nhưng không nhất quán theo mọi màn |
 | Recent & Favorites | — | — | — | 🔴 **Chưa có** |
 | Transaction Drill-down | breakdown → `histSetFilter(type)` lọc đúng loại giao dịch trong cùng sheet | Nguyên liệu, BTP | thấp | 🟡 **Một phần, mới thêm 2026-09-08** — bấm vào một dòng breakdown thì lọc ra đúng các giao dịch loại đó (ngày giờ, nhân viên, ghi chú, tồn còn lại), nhưng CHƯA nhảy được tới đúng PO/bill/waste-record gốc (referenceId) |
-| Integrity Rules → Alert Inbox (Phase 11) | alerts_gieogieo hiện có 5 loại (xem Object Map) | | | 🟡 Đã có framework, CHƯA có rule "Ledger ≠ Container", "GOGS Integrity", "Container Integrity", "Recipe Integrity" như kế hoạch liệt kê |
+| Integrity Rules → Alert Inbox (Phase 11) | `runDataIntegrityCheck()` (đã có sẵn, Giai đoạn 12) giờ hiện ngay đầu Hộp thư cảnh báo | Nguyên liệu, Recipe, Refill, PO | thấp | 🟡 **Nối lại 2026-09-08** — kiểm tra tham chiếu hỏng + tồn kho âm vốn chỉ nằm ở tab Kiểm toán, giờ hiện luôn ở Hộp thư (nút "Kiểm tra ngay", dùng chung state với Kiểm toán). Vẫn CHƯA có rule "Ledger ≠ Container" (cộng số so sánh, khác với việc liệt kê container đang mở đã làm ở Phase 5), "GOGS Integrity" (bill hoàn tất chưa có consumption) |
 | Idempotency chuẩn hoá (Phase 12) | `referenceId` đã dùng ở nhiều nơi (vd. dòng 10628, 10666) nhưng không có pattern thống nhất tài liệu hoá | | | 🟡 Có nền tảng, chưa chuẩn hoá thành quy ước chung |
 | Versioning recipe/định lượng (Phase 15) | `recipes_gieogieo` không thấy field version | | | 🔴 Chưa có |
 | Simulation cho recipe (Phase 17) | `screen-sim` mới có labor/targets, chưa có "đổi định lượng → xem GOGS dự kiến" | | | 🟡 Một phần |
@@ -97,11 +97,21 @@ File thay đổi: `quanlygieo.html`, hàm `renderSidebarNav()` (thêm khối k�
 
 File thay đổi: `quanlygieo.html`, hàm mới `_histContainerHtml` (khoảng dòng 20166‑20188), sửa `openItemHistory()` để tải song song container cùng lịch sử giao dịch.
 
+**Phase 11 — Integrity Rules → Alert Inbox**, nối một kiểm tra ĐÃ CÓ SẴN từ trước (không viết rule mới) vào đúng nơi kế hoạch yêu cầu:
+
+- `runDataIntegrityCheck()` (viết từ "Giai đoạn 12", rà tham chiếu hỏng ở recipe/refill rule/PO trỏ tới nguyên liệu hoặc vị trí đã xoá, cộng tồn kho âm) trước đây CHỈ hiện ở tab Kiểm toán — nơi chủ quán hiếm khi ghé trừ khi chủ động đi tìm. Giờ thêm thẻ "🔍 Kiểm tra toàn vẹn dữ liệu" ngay đầu **Hộp thư cảnh báo** — đúng màn chủ quán vào mỗi ngày để xử lý vấn đề.
+- Dùng chung biến trạng thái `auditIntegrityIssues` với tab Kiểm toán (không tạo state song song) — chạy kiểm tra ở nơi nào thì nơi kia thấy kết quả ngay, khỏi chạy hai lần cho cùng dữ liệu.
+- Vẫn chạy theo yêu cầu (nút "Kiểm tra ngay"), **không tự động** — giữ đúng lý do bản gốc thiết kế thủ công: hàm này đọc 5 collection, mà Hộp thư là màn được mở nhiều nhất trong ngày.
+- Chưa thêm rule mới nào (Ledger≠Container dạng cộng số, GOGS Integrity, Container Integrity, Recipe Integrity theo đúng nghĩa kế hoạch liệt kê) — chỉ kết nối lại cái đã có.
+
+File thay đổi: `quanlygieo.html`, hàm mới `integrityCheckCardHtml()`, `runIntegrityCheckFromInbox()` (khoảng dòng 9804‑9850), sửa `renderAlertInbox()` để chèn thẻ này ở cả hai nhánh (có/không có alert).
+
 **Giới hạn đã biết, chưa làm trong phiên này:**
-- Chưa đối chiếu Ledger vs **Container** (tồn vật lý theo chai/tem) như ví dụ "🟢 KHỚP / 🟡 Có chênh lệch" trong kế hoạch — khối Container mới chỉ LIỆT KÊ container đang mở, chưa CỘNG SỐ để so với tồn ledger. Cần hiểu rõ `untrackedBase`/trạng thái container trước khi làm phép cộng này cho đúng.
+- Chưa đối chiếu Ledger vs **Container** (tồn vật lý theo chai/tem) như ví dụ "🟢 KHỚP / 🟡 Có chênh lệch" trong kế hoạch — khối Container ở Phase 5 mới chỉ LIỆT KÊ container đang mở, chưa CỘNG SỐ để so với tồn ledger. Cần hiểu rõ `untrackedBase`/trạng thái container trước khi làm phép cộng này cho đúng.
+- Chưa có rule Integrity MỚI nào (Ledger≠Container, GOGS Integrity, Container Integrity, Recipe Integrity đúng nghĩa) — chỉ mới kết nối lại kiểm tra sẵn có.
 - Command Search mới tìm Nguyên liệu/BTP, chưa tìm Bill/Nhân viên/Transaction.
 - Context Navigation mới có ở Nguyên liệu (qua sheet 🕐), chưa có ở BTP/Container/Bill/Nhân viên.
-- Chưa test trên trình duyệt thật với dữ liệu Firebase thật (không có quyền truy cập project Firebase `the-cafe-33` trong phiên này) — mới kiểm tra bằng `node --check` (cú pháp hợp lệ) và đọc code đối chiếu thủ công. **Cần người quản lý mở thử trên trình duyệt trước khi tin tưởng hoàn toàn** — đặc biệt: mở sheet 🕐 của một nguyên liệu CÓ dán tem đang mở chai, xem khối Container có hiện đúng chai đó không; và gõ tìm tên một nguyên liệu, bấm "Giải thích tồn kho" có mở đúng sheet không.
+- Chưa test trên trình duyệt thật với dữ liệu Firebase thật (không có quyền truy cập project Firebase `the-cafe-33` trong phiên này) — mới kiểm tra bằng `node --check` (cú pháp hợp lệ) và đọc code đối chiếu thủ công. **Cần người quản lý mở thử trên trình duyệt trước khi tin tưởng hoàn toàn** — đặc biệt: mở Hộp thư cảnh báo, bấm "Kiểm tra ngay" ở thẻ đầu trang và xem có ra đúng danh sách như khi bấm nút tương tự ở tab Kiểm toán không; mở sheet 🕐 của một nguyên liệu CÓ dán tem đang mở chai, xem khối Container có hiện đúng chai đó không; và gõ tìm tên một nguyên liệu, bấm "Giải thích tồn kho" có mở đúng sheet không.
 
 ---
 
@@ -111,5 +121,5 @@ Theo đúng thứ tự ưu tiên của kế hoạch, các hạng mục ⭐⭐⭐
 
 1. **Command Search — mở rộng thêm** (Phase 4) — thêm Bill (số bill, SĐT khách) và Nhân viên vào cùng cơ chế tìm ở §3, giữ đúng nguyên tắc "vẫn một ô tìm, không tạo màn riêng".
 2. **Context Navigation — mở rộng thêm** (Phase 5) — thêm link nhanh tới Kiểm kê/Lệch kho ngay trong sheet 🕐; và làm tương tự cho BTP (container không áp dụng cho BTP nhưng Kiểm kê/Lệch kho thì có).
-3. **Integrity Rules → Alert Inbox** (Phase 11) — bổ sung rule "Ledger ≠ Container", "GOGS Integrity" (bill hoàn tất chưa có consumption) vào cùng cơ chế `alerts_gieogieo` đã có, không tạo dashboard riêng.
-4. Container reconciliation cho Giải thích tồn kho (nối tiếp việc đã làm ở §3) — sau khi hiểu rõ `untrackedBase`/trạng thái container.
+3. **Integrity Rules — thêm rule mới** (Phase 11) — "Ledger ≠ Container" (đối chiếu số, không chỉ liệt kê), "GOGS Integrity" (bill hoàn tất chưa có consumption tương ứng) — bổ sung vào `runDataIntegrityCheck()` đã nối vào Alert Inbox ở §3, không tạo dashboard riêng.
+4. Container reconciliation cho Giải thích tồn kho (nối tiếp việc đã làm ở §3) — sau khi hiểu rõ `untrackedBase`/trạng thái container. Cùng gốc dữ liệu với mục 3.

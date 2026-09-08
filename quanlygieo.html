@@ -9691,7 +9691,7 @@ async function renderAlertInbox(){
   let list = [];
   try{ await ensureAuth(); list = await loadAlerts(); }
   catch(err){ console.error('renderAlertInbox lỗi', err); box.innerHTML = '<div class="muted">Không tải được cảnh báo. Bấm nút tải lại ở góc trên để thử lại.</div>'; return; }
-  if(!list.length){ box.innerHTML = `<div class="health-all-clear">${ic('check',20)} Chưa có cảnh báo nào</div>`; return; }
+  if(!list.length){ box.innerHTML = `<div id="inboxIntegrityBox">${integrityCheckCardHtml()}</div><div class="health-all-clear">${ic('check',20)} Chưa có cảnh báo nào</div>`; return; }
 
   const card = (a)=>{
     const isNew = a.status==='new';
@@ -9796,9 +9796,59 @@ async function renderAlertInbox(){
   const news = list.filter(a=>a.status==='new');
   const rest = list.filter(a=>a.status!=='new');
   box.innerHTML = `
+    <div id="inboxIntegrityBox">${integrityCheckCardHtml()}</div>
     ${news.length ? `<div class="health-group-title">Chưa xem (${news.length})</div>${news.map(card).join('')}` : `<div class="health-all-clear" style="margin-bottom:14px">${ic('check',20)} Không có cảnh báo mới</div>`}
     ${rest.length ? `<div class="health-group-title">Đã xem / đã xử lý (${rest.length})</div>${rest.map(card).join('')}` : ''}
   `;
+}
+
+// ------------------------------------------------------------
+// INTEGRITY RULES → ALERT INBOX (kế hoạch cải tổ UX, Phase 11).
+//
+// runDataIntegrityCheck() đã có sẵn từ trước (Giai đoạn 12) — rà tham chiếu
+// hỏng (định mức/refill/PO trỏ tới nguyên liệu đã xoá) + tồn kho âm — nhưng
+// trước đây CHỈ hiện ở tab Kiểm toán, tách khỏi nơi chủ quán thật sự vào mỗi
+// ngày để xử lý vấn đề (Hộp thư cảnh báo). Không viết thêm rule mới/collection
+// mới ở đây — chỉ kéo ĐÚNG kiểm tra đã có vào đúng chỗ, và dùng chung state
+// `auditIntegrityIssues` với tab Kiểm toán để hai nơi luôn khớp nhau, không
+// phải chạy kiểm tra hai lần cho cùng một dữ liệu.
+//
+// Vẫn chạy theo yêu cầu (nút bấm), không tự động — runDataIntegrityCheck() đọc
+// 5 collection, mà Hộp thư là màn được mở nhiều nhất trong ngày; tự động chạy
+// mỗi lần mở sẽ đúng ngược lại lý do hàm này được thiết kế "chạy khi cần".
+// ------------------------------------------------------------
+function integrityCheckCardHtml(){
+  if(auditIntegrityIssues == null){
+    return `
+      <div class="card" style="margin-bottom:14px;padding:12px 14px">
+        <div class="card-h"><h3>${ic('detective')} Kiểm tra toàn vẹn dữ liệu</h3></div>
+        <div class="small-note" style="margin-bottom:8px">Rà tham chiếu hỏng (định mức/refill/đơn đặt hàng trỏ tới nguyên liệu đã xoá) và tồn kho âm — cùng một kiểm tra với tab Kiểm toán.</div>
+        <button class="btn outline sm" style="width:auto;padding:0 12px" onclick="runIntegrityCheckFromInbox()">Kiểm tra ngay</button>
+      </div>`;
+  }
+  if(!auditIntegrityIssues.length){
+    return `
+      <div class="card" style="margin-bottom:14px;padding:12px 14px">
+        <div class="card-h"><h3>${ic('detective')} Kiểm tra toàn vẹn dữ liệu</h3><span class="tier tier-green">🟢 Không phát hiện vấn đề</span></div>
+      </div>`;
+  }
+  return `
+    <div class="card" style="margin-bottom:14px;padding:12px 14px">
+      <div class="card-h"><h3>${ic('detective')} Kiểm tra toàn vẹn dữ liệu</h3><span class="tier tier-amber">🟡 ${auditIntegrityIssues.length} vấn đề</span></div>
+      ${auditIntegrityIssues.map(i=>`<div class="row"><span class="rl"><span class="tier tier-amber" style="margin-right:6px">${escapeHtmlAttr(i.type)}</span>${escapeHtmlAttr(i.detail)}</span></div>`).join('')}
+      <button class="btn outline sm" style="width:auto;padding:0 12px;margin-top:8px" onclick="runIntegrityCheckFromInbox()">Kiểm tra lại</button>
+    </div>`;
+}
+async function runIntegrityCheckFromInbox(){
+  const box = document.getElementById('inboxIntegrityBox');
+  if(box) box.innerHTML = '<div class="card" style="margin-bottom:14px;padding:12px 14px"><div class="muted">Đang kiểm tra...</div></div>';
+  try{
+    auditIntegrityIssues = await runDataIntegrityCheck();
+  }catch(err){
+    console.error('runIntegrityCheckFromInbox lỗi', err);
+    toast('⚠️ Kiểm tra thất bại: '+(err.code||err.message||err));
+  }
+  if(box) box.innerHTML = integrityCheckCardHtml();
 }
 
 // ============================================================
