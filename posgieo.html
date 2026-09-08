@@ -1159,7 +1159,7 @@ body.assist-main-on .toast{bottom:calc(100px + var(--assist-h, 0px) + 10px);}
     </button>
   </div>
   <div class="hs"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#bbb" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>
-    <input type="text" placeholder="Tìm theo số tiền, SĐT..." id="hsi" oninput="filterH()">
+    <input type="text" placeholder="Gõ mã bill / SĐT để tra đơn cũ..." id="hsi" oninput="filterH()">
   </div>
   <div style="overflow-y:auto;flex:1;padding-bottom:20px" id="hl"><div style="text-align:center;padding:40px;color:#bbb">Chưa có đơn hàng</div></div>
 </div>
@@ -5407,11 +5407,120 @@ function _pollTemConnectStatus() {
   }, 500);
   _temPollTimer = timer;
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// [NEW-GUARD] BA CHỐT CHẶN CHỐNG "ĐÁ BILL"
+//
+// Vấn đề gốc: doanh thu đã được ẩn khỏi POS, nhưng nhân viên vẫn cộng tay được
+// từng bill trong tab Lịch sử để ra tổng ngày; và vẫn pha nước mà không bấm bill
+// được, vì tem — thứ camera nhìn thấy — có thể lấy từ bill cũ in lại rồi dán.
+//
+// Ba lớp ở đây KHÔNG phải để bắt quả tang. Chúng đóng lại ba lối đi:
+//   Lớp 1 — tem chỉ in lại được trong 20 phút, và mọi lượt in lại đều ghi sổ.
+//           Hết cửa lấy tem của bill hôm qua dán lên ly không bill.
+//   Lớp 2 — danh sách bill ở POS chỉ hiện đơn trong 60 phút gần nhất. Vẫn tra
+//           được đơn cũ bằng mã bill / SĐT, nhưng không còn một danh sách để
+//           cộng dồn ra doanh thu ngày.
+//   Lớp 3 — đếm tiền cuối ca chỉ được 2 lần; hết lượt thì GHI NHẬN mức lệch và
+//           cho qua, thay vì bắt đếm lại tới khi khớp. Xem ghi chú ở
+//           CASH_COUNT_MAX_ATTEMPTS.
+//
+// Ba con số dưới đây là chỗ duy nhất cần sửa nếu quán muốn nới/siết.
+// ════════════════════════════════════════════════════════════════════════════
+const TEM_REPRINT_WINDOW_MIN = 20;   // in lại tem được trong ngần này phút kể từ lúc bấm bill
+const HISTORY_VISIBLE_MIN    = 60;   // danh sách bill ở POS chỉ hiện đơn mới hơn ngần này phút
+const CASH_COUNT_MAX_ATTEMPTS = 2;   // đếm tiền cuối ca tối đa mấy lần rồi ghi nhận lệch
+
+const REPRINT_LOG_COLL = 'label_reprints_gieogieo';
+
+// Bước tiền mặt có HAI trạng thái "xong": khớp ('cash_passed') và lệch-nhưng-đã-
+// ghi-nhận ('cash_variance_recorded'). Mọi chỗ hỏi "đã đối soát tiền mặt chưa"
+// phải hỏi qua hàm này — chỉ so với 'cash_passed' thì ngày lệch sẽ bị đá về đếm
+// lại từ đầu, đúng cái vòng lặp Lớp 3 sinh ra để cắt.
+const CASH_DONE_STATUSES = ['cash_passed', 'cash_variance_recorded'];
+function cashStepDone(st) { return CASH_DONE_STATUSES.includes(st); }
+
+// Ai đang trong ca — dùng cho sổ in lại. POS không có "người đang đăng nhập",
+// nên lấy danh sách đang check-in; ca một người thì đó đúng là người bấm.
+function _guardStaffOnShift() {
+  try {
+    return (_employeeShiftsTodayCache || [])
+      .filter(s => !s.checkedOutAt)
+      .map(s => s.employeeName || s.fullName || s.employeeId || '')
+      .filter(Boolean);
+  } catch (e) { return []; }
+}
+
+function _guardMinsSince(iso) {
+  const t = Date.parse(iso);
+  if (isNaN(t)) return null;
+  return Math.floor((Date.now() - t) / 60000);
+}
+
+// ── LỚP 1: cửa sổ in lại tem ────────────────────────────────────────────────
+// Trả về { ok, minsLeft, why }. Đơn không có createdAt (bill rất cũ) thì KHÔNG
+// cho in lại — không xác định được tuổi thì không thể nói là còn trong cửa sổ.
+function temReprintInfo(o) {
+  if (!o) return { ok: false, minsLeft: 0, why: 'Không tìm thấy đơn' };
+  const mins = _guardMinsSince(o.createdAt);
+  if (mins === null) return { ok: false, minsLeft: 0, why: 'Đơn cũ không có mốc thời gian — không in lại tem được' };
+  if (mins < 0) return { ok: false, minsLeft: 0, why: 'Mốc thời gian đơn không hợp lệ' };
+  const minsLeft = TEM_REPRINT_WINDOW_MIN - mins;
+  if (minsLeft <= 0) return { ok: false, minsLeft: 0, why: `Quá ${TEM_REPRINT_WINDOW_MIN} phút kể từ lúc bấm bill — không in lại tem được nữa. Cần in thì báo Quản lý.` };
+  return { ok: true, minsLeft, why: '' };
+}
+
+// Chốt chặn dùng chung cho MỌI đường in lại tem. Đặt ở từng hàm chứ không chỉ ở
+// nút bấm: nút chỉ là một trong bốn đường vào, và đường nào cũng gọi được từ
+// console của trình duyệt.
+function temReprintGuard(o) {
+  const info = temReprintInfo(o);
+  if (!info.ok) { toast('🔒 ' + info.why); return false; }
+  return true;
+}
+
+// Ghi sổ mọi lượt in lại. In lại trong 20 phút vẫn là việc bình thường (tem kẹt
+// giấy, tem mờ) — nhưng một người in lại 10 lần một ca thì đó là chuyện đáng
+// nhìn, mà không ghi thì không ai biết. Không chặn luồng in nếu ghi sổ lỗi.
+function logReprint(o, kind, scope, chiTiet) {
+  try {
+    fstore.collection(REPRINT_LOG_COLL).add({
+      orderId: o.id || null,
+      billCode: o.billCode || null,
+      businessDate: posDateKey(),
+      orderDate: o.date || null,
+      orderCreatedAt: o.createdAt || null,
+      minutesSinceBill: _guardMinsSince(o.createdAt),
+      kind,                       // 'tem' | 'bill'
+      scope,                      // 'all' | 'item' | 'unit'
+      detail: chiTiet || '',
+      staffOnShift: _guardStaffOnShift(),
+      at: new Date().toISOString()
+    }).catch(err => console.warn('[in lại] không ghi được sổ (không chặn in):', err));
+  } catch (err) { console.warn('[in lại] ghi sổ lỗi:', err); }
+}
+
+// ── LỚP 2: ẩn bill cũ khỏi danh sách ────────────────────────────────────────
+// Cộng tay từng bill trong danh sách là cách dựng lại doanh thu ngày mà không
+// cần màn Doanh thu (vốn đã có mật khẩu). Ẩn danh sách thì bỏ được đường đó,
+// NHƯNG phải chừa lối tra cứu: khách quay lại hỏi bill là việc thật, và nhân
+// viên vẫn cần xoá bill bấm nhầm. Nên: gõ mã bill / SĐT thì tra được mọi đơn,
+// chỉ là không còn một danh sách để cộng.
+function billIsFresh(o) {
+  const mins = _guardMinsSince(o && o.createdAt);
+  if (mins === null) return false;      // không rõ tuổi → coi như cũ
+  return mins < HISTORY_VISIBLE_MIN;
+}
+
 async function printerReprintOrder(orderId) {
   const o = (typeof orders !== 'undefined' ? orders : []).find(x => x.id === orderId);
   if (!o) { toast('Không tìm thấy đơn'); return; }
   if (!POSPrinter.connected) { toast('⚠ Máy in chưa kết nối — vào mục Máy in để kết nối'); return; }
-  try { await POSPrinter.printOrder(o); toast('✅ Đang in lại' + (o.billCode ? ' ' + o.billCode : '')); }
+  try {
+    await POSPrinter.printOrder(o);
+    toast('✅ Đang in lại' + (o.billCode ? ' ' + o.billCode : ''));
+    logReprint(o, 'bill', 'all', o.billCode || '');
+  }
   catch (e) { toast('❌ Lỗi in lại: ' + e.message); }
 }
 
@@ -5629,6 +5738,7 @@ function openTemReprintPicker(orderId) {
   const o = (typeof orders !== 'undefined' ? orders : []).find(x => x.id === orderId);
   if (!o) { toast('Không tìm thấy đơn'); return; }
   if (!(o.itemsArray && o.itemsArray.length)) { toast('Đơn không có món nào'); return; }
+  if (!temReprintGuard(o)) return;   // [NEW-GUARD] hết cửa sổ 20 phút thì không mở picker
 
   let overlay = document.getElementById('tem-reprint-overlay');
   if (!overlay) {
@@ -5699,6 +5809,7 @@ function openTemReprintPicker(orderId) {
 async function temReprintOneUnit(orderId, itemIdx, unitIdx) {
   const o = (typeof orders !== 'undefined' ? orders : []).find(x => x.id === orderId);
   if (!o || !o.itemsArray || !o.itemsArray[itemIdx]) { toast('Không tìm thấy món'); return; }
+  if (!temReprintGuard(o)) return;   // [NEW-GUARD]
   if (!(await temEnsureConnected())) { toast('⚠ Không nối được máy in tem — kiểm tra máy in đã bật & cùng WiFi'); return; }
   const item = o.itemsArray[itemIdx];
   const { start, total } = _temCupInfoForItem(o, itemIdx);
@@ -5712,6 +5823,7 @@ async function temReprintOneUnit(orderId, itemIdx, unitIdx) {
     toast('❌ Không gửi được tem: ' + _nhan + ((_st && _st.lastError) ? ' — ' + _st.lastError : ''));
   } else {
     toast('✅ Đang in lại 1 tem: ' + _nhan);
+    logReprint(o, 'tem', 'unit', _nhan);
   }
 }
 
@@ -5728,20 +5840,24 @@ function _temCupInfoForItem(order, idx) {
 async function temReprintOneItem(orderId, idx) {
   const o = (typeof orders !== 'undefined' ? orders : []).find(x => x.id === orderId);
   if (!o || !o.itemsArray || !o.itemsArray[idx]) { toast('Không tìm thấy món'); return; }
+  if (!temReprintGuard(o)) return;   // [NEW-GUARD]
   if (!(await temEnsureConnected())) { toast('⚠ Không nối được máy in tem — kiểm tra máy in đã bật & cùng WiFi'); return; }
   const item = o.itemsArray[idx];
   const { start, total } = _temCupInfoForItem(o, idx);
   POSTemPrinter.printLabelsForItems(o, [item], total, start);
   toast('✅ Đang in lại tem: ' + item.name);
+  logReprint(o, 'tem', 'item', item.name);
 }
 
 async function temReprintAll(orderId) {
   const o = (typeof orders !== 'undefined' ? orders : []).find(x => x.id === orderId);
   if (!o) { toast('Không tìm thấy đơn'); return; }
+  if (!temReprintGuard(o)) return;   // [NEW-GUARD]
   if (!(await temEnsureConnected())) { toast('⚠ Không nối được máy in tem — kiểm tra máy in đã bật & cùng WiFi'); return; }
   const overlay = document.getElementById('tem-reprint-overlay');
   if (overlay) overlay.remove();
   toast('✅ Đang in lại toàn bộ tem...');
+  logReprint(o, 'tem', 'all', `${(o.itemsArray||[]).length} món`);
   await POSTemPrinter.printLabelsForItems(o, o.itemsArray || []);
 }
 
@@ -10632,6 +10748,7 @@ function _staleStatusLabel(st) {
   if (!st) return 'chưa bắt đầu kết ca';
   if (st === 'pending') return 'đối soát tiền mặt chưa khớp';
   if (st === 'cash_passed') return 'đã đối soát tiền mặt, chưa xong bước sau';
+  if (st === 'cash_variance_recorded') return 'tiền mặt lệch (đã ghi nhận), chưa xong bước sau';
   if (st === 'bank_passed') return 'đã đối soát xong, chưa bàn giao';
   if (st === 'handed_over') return 'đã bàn giao, chưa xác nhận đóng ngày';
   return st;
@@ -10721,7 +10838,7 @@ function resumeClosePipelinePOS() {
   const st = shiftState.closing && shiftState.closing.status;
   if (st === 'handed_over') { renderDailyClosingChecklist(); return; }
   if (st === 'bank_passed') { renderShiftHandoverForm(); return; }
-  if (st === 'cash_passed') { proceedAfterCashPass(); return; }
+  if (cashStepDone(st)) { proceedAfterCashPass(); return; }
   renderShiftCloseCountForm();
 }
 
@@ -10899,13 +11016,13 @@ function renderShiftDashboard() {
   // phiên. Không khôi phục được (ghi Firestore hỏng lúc đó, hoặc dữ liệu cũ từ
   // trước khi có tính năng này) → quay về cửa vào, bắt check-out hết + ký lại,
   // rồi beginCloseShiftPOS sẽ tự nhảy đúng bước đang dở.
-  if (closing && ['cash_passed', 'bank_passed', 'handed_over'].includes(closing.status)) {
+  if (closing && [...CASH_DONE_STATUSES, 'bank_passed', 'handed_over'].includes(closing.status)) {
     restoreCloseSessionPOS(closing);
     if (!_closeSession) { beginCloseShiftPOS(); return; }
   }
   if (closing && closing.status === 'handed_over') { renderDailyClosingChecklist(); return; }
   if (closing && closing.status === 'bank_passed') { renderShiftHandoverForm(); return; }
-  if (closing && closing.status === 'cash_passed') { proceedAfterCashPass(); return; }
+  if (closing && cashStepDone(closing.status)) { proceedAfterCashPass(); return; }
   box.innerHTML = renderStaleShiftWarning() + renderSegmentBlockPOS() + `
     <div class="wal-section" style="margin:0 0 14px;">
       <div class="wal-section-title">Trạng thái ca</div>
@@ -11593,7 +11710,11 @@ async function renderShiftCloseReview() {
   `;
 }
 
-function renderShiftCloseCountForm() {
+// [NEW-GUARD Lớp 3] `canGhiChu` = lần đếm này là lần CUỐI (đã đếm lệch một lần
+// rồi). Khi đó hiện thêm ô ghi lý do: lần này đếm xong là chốt, dù còn lệch —
+// nên phải lấy được lời giải thích của chính người đang đếm, lúc họ còn nhớ.
+// Hiện ô này ở mọi lần đếm thì nó thành một ô trống bị bỏ qua theo thói quen.
+function renderShiftCloseCountForm(canGhiChu) {
   const box = document.getElementById('shiftBody');
   _shiftCloseDenoms = cfEmptyDenoms();
   box.innerHTML = closeSessionBannerPOS() + `
@@ -11602,6 +11723,12 @@ function renderShiftCloseCountForm() {
       <div id="shiftCloseGrid" style="display:flex;flex-direction:column;gap:6px;"></div>
       <div style="text-align:right;font-weight:700;font-size:16px;color:var(--gd);margin-top:10px;" id="shiftCloseTotal">0đ</div>
     </div>
+    ${canGhiChu ? `
+    <div class="wal-section" style="margin:0 0 14px;">
+      <div class="wal-section-title">Lý do lệch <span style="color:var(--gd)">*</span></div>
+      <div style="font-size:12px;color:#999;line-height:1.5;margin:-2px 0 8px;">Lần đếm cuối. Ghi rõ chuyện đã xảy ra trong ca (thối nhầm, khách trả thiếu, quên ghi khoản chi…) — Quản lý đọc dòng này để biết vì sao lệch.</div>
+      <textarea id="shiftCloseNote" rows="3" placeholder="VD: Thối nhầm cho khách 20.000đ lúc trưa, đã báo ca trưởng" style="width:100%;box-sizing:border-box;padding:12px;border:1.5px solid #e5e5e5;border-radius:14px;font-size:14px;font-family:inherit;line-height:1.5;resize:vertical;outline:none;" oninput="this.style.borderColor='#e5e5e5'"></textarea>
+    </div>` : ''}
     <div class="wal-section" style="margin:0 0 14px;">
       ${renderPinInput('shiftCloseStaff')}
     </div>
@@ -11649,22 +11776,74 @@ async function _submitShiftCloseImpl() {
     }
     const diff = actualCash - expected; // KHÔNG render biến này ra DOM, chỉ dùng để so sánh
     const passed = Math.abs(diff) <= tolerance;
+
+    // [NEW-GUARD Lớp 3] ĐẾM TỐI ĐA MẤY LẦN.
+    //
+    // Trước đây vòng "đếm lại" KHÔNG có giới hạn: chưa khớp thì bắt đếm lại, mãi
+    // tới khi khớp mới cho kết ca. Hai hậu quả, cả hai đều tệ:
+    //   · Người trung thực bị kẹt — lệch 2.000đ do thối nhầm cũng không kết ca được.
+    //   · Người muốn gian có thể RÀ: tăng/giảm một mệnh giá rồi thử lại tới khi
+    //     hệ thống báo khớp. Mỗi lần thử đều được ghi vào `attempts`, nhưng vì cuối
+    //     cùng bao giờ cũng "khớp" nên bản ghi đó thành vô nghĩa.
+    //
+    // Giờ: đếm tối đa CASH_COUNT_MAX_ATTEMPTS lần. Hết lượt thì GHI NHẬN đúng số
+    // đã đếm kèm mức lệch và CHO QUA, trạng thái 'cash_variance_recorded' (khác
+    // 'cash_passed' — Quản lý phân biệt được ngay). Số liệu thật thì có ích;
+    // một con số khớp do rà ra thì không.
     const closingRef = fstore.collection('daily_closings_gieogieo').doc(shiftState.businessDate);
-    const attempt = { actualCash, expectedCash: expected, variance: diff, passed, staff, staffEmployeeId: staffEmp.id, enteredAt: new Date().toISOString() };
+    const soLanTruoc = await closingRef.get()
+      .then(d => (d.exists ? (d.data().attempts || []).length : 0))
+      .catch(() => 0);
+    const hetLuot = !passed && (soLanTruoc + 1) >= CASH_COUNT_MAX_ATTEMPTS;
+
+    // Hết lượt mà chưa khớp thì bắt ghi rõ vì sao — người đếm là người biết
+    // trong ca có chuyện gì. Không có dòng này thì Quản lý chỉ thấy một con số
+    // lệch trơ trọi, không đoán được nguyên nhân.
+    let lyDoLech = '';
+    if (hetLuot) {
+      lyDoLech = (document.getElementById('shiftCloseNote') || {}).value || '';
+      lyDoLech = String(lyDoLech).trim();
+      if (lyDoLech.length < 5) {
+        // Thiếu dòng ghi chú thì đừng bắt đếm lại từ đầu — giữ nguyên số vừa đếm,
+        // chỉ đòi phần còn thiếu. Bắt đếm lại ở đây là dạy nhân viên rằng ô ghi
+        // chú là một hình phạt, và họ sẽ gõ bừa cho xong.
+        const soDaDem = Object.assign({}, _shiftCloseDenoms);
+        toast('⚠️ Đây là lần đếm cuối — ghi rõ lý do lệch trước khi kết ca');
+        renderShiftCloseCountForm(true);
+        _shiftCloseDenoms = soDaDem;
+        cfRenderDenomGrid('shiftCloseGrid', _shiftCloseDenoms, 'shiftChangeCloseDenom');
+        const oTong = document.getElementById('shiftCloseTotal');
+        if (oTong) oTong.textContent = cfDenomTotal(_shiftCloseDenoms).toLocaleString('vi-VN') + 'đ';
+        const oNote = document.getElementById('shiftCloseNote');
+        if (oNote) { oNote.value = lyDoLech; oNote.style.borderColor = 'var(--gd)'; oNote.focus(); }
+        return;
+      }
+    }
+
+    const attempt = { actualCash, expectedCash: expected, variance: diff, passed, staff, staffEmployeeId: staffEmp.id, enteredAt: new Date().toISOString(), ...(lyDoLech ? { note: lyDoLech } : {}) };
+    const chotSo = passed || hetLuot;
     await closingRef.set({
       businessDate: shiftState.businessDate,
-      status: passed ? 'cash_passed' : 'pending',
+      status: passed ? 'cash_passed' : (hetLuot ? 'cash_variance_recorded' : 'pending'),
       attempts: firebase.firestore.FieldValue.arrayUnion(attempt),
-      ...(passed ? { cashPassedAt: new Date().toISOString(), finalActualCash: actualCash, finalExpectedCash: expected, finalVariance: diff, closingStaff: staff } : {})
+      ...(chotSo ? {
+        cashPassedAt: new Date().toISOString(),
+        finalActualCash: actualCash, finalExpectedCash: expected, finalVariance: diff,
+        closingStaff: staff,
+        varianceAccepted: hetLuot || null,
+        varianceNote: lyDoLech || null,
+        attemptCount: soLanTruoc + 1
+      } : {})
     }, { merge: true });
-    if (passed) {
+    if (chotSo) {
       // [GIAO CA] Chốt sổ đoạn ca cuối cùng của ngày. Lỗi ở đây KHÔNG được chặn
       // kết ca — tiền đã đối soát xong, bản ghi đoạn ca chỉ là sổ phụ cho Quản lý.
       if (closeSeg) {
         try {
           await fstore.collection(SEG_COLL).doc(segDocId(shiftState.businessDate, closeSeg.seq)).set({
             endAt: new Date().toISOString(), endType: 'close', endCash: actualCash,
-            expectedEndCash: expected, variance: diff, withinTolerance: true,
+            expectedEndCash: expected, variance: diff, withinTolerance: passed,
+            ...(hetLuot ? { varianceAccepted: true, varianceNote: lyDoLech } : {}),
             ...(closeMetrics ? { cashSales: closeMetrics.cashSales, cashExpenses: closeMetrics.cashExpenses, unattributedSales: closeMetrics.unattributedSales || 0 } : {}),
             closingStaff: staff, closingStaffId: staffEmp.id,
             status: 'closed'
@@ -11672,19 +11851,22 @@ async function _submitShiftCloseImpl() {
           await closingRef.set({ segmentCount: (Number(closeSeg.seq) || 1), lastSegmentStartCash: Number(closeSeg.startCash) || 0 }, { merge: true });
         } catch (err) { console.warn('[Giao ca] Không ghi được đoạn ca cuối (đã đối soát xong):', err); }
       }
-      toast('✅ Đã đối soát tiền mặt');
-      shiftState.closing = { status: 'cash_passed', finalActualCash: actualCash, closingStaff: staff };
+      toast(passed ? '✅ Đã đối soát tiền mặt' : '⚠️ Đã ghi nhận mức lệch — Quản lý sẽ xem lại');
+      shiftState.closing = { status: passed ? 'cash_passed' : 'cash_variance_recorded', finalActualCash: actualCash, closingStaff: staff };
       proceedAfterCashPass();
     } else {
-      toast('⚠️ Số tiền chưa khớp');
+      toast('⚠️ Số tiền chưa khớp — còn 1 lần đếm');
       box.innerHTML = `
         <div style="text-align:center;padding:24px 16px;">
           <div style="font-size:32px;margin-bottom:8px;">⚠️</div>
           <div style="font-weight:700;font-size:15px;color:var(--td);margin-bottom:8px;">Số tiền chưa khớp</div>
           <div style="font-size:13px;color:#999;line-height:1.6;">Vui lòng đếm lại hoặc kiểm tra các khoản thu/chi trong ngày — có thể có bill bị bỏ sót, chi tiêu chưa ghi, hoặc nhập sai hình thức thanh toán.</div>
+          <div style="margin-top:12px;background:#fff7e6;border:1.5px solid #fbbf24;border-radius:14px;padding:12px 14px;font-size:12.5px;font-weight:600;color:#92400e;line-height:1.55;text-align:left;">
+            Đây là <b>lần đếm cuối</b>. Lần này đếm xong, dù còn lệch hệ thống vẫn <b>ghi nhận đúng số bạn đếm</b> và cho kết ca — nhưng phải <b>ghi rõ lý do</b>. Không cần đếm đi đếm lại cho khớp.
+          </div>
         </div>
         <button onclick="renderShiftCloseReview()" style="width:100%;padding:12px;background:none;border:1px solid #ddd;color:var(--gt);border-radius:14px;font-weight:600;font-size:13px;cursor:pointer;margin-bottom:10px;">← Rà soát lại thu/chi</button>
-        <button onclick="renderShiftCloseCountForm()" style="width:100%;padding:14px;background:var(--gd);color:#fff;border:none;border-radius:14px;font-weight:700;font-size:15px;cursor:pointer;">Đếm lại tiền mặt</button>
+        <button onclick="renderShiftCloseCountForm(true)" style="width:100%;padding:14px;background:var(--gd);color:#fff;border:none;border-radius:14px;font-weight:700;font-size:15px;cursor:pointer;">Đếm lại tiền mặt</button>
       `;
     }
   } catch (err) {
@@ -17913,14 +18095,35 @@ function drawChart(period, filteredOrders) {
 // ============================================================
 function renderH(f = '') {
   const list = document.getElementById('hl'), fl = f.toLowerCase();
-  const filtered = fl ? orders.filter(o =>
+  // [NEW-GUARD Lớp 2] KHÔNG gõ gì → chỉ hiện đơn trong HISTORY_VISIBLE_MIN phút
+  // gần nhất. Có gõ (từ 3 ký tự) → tìm trong TOÀN BỘ đơn, kể cả đơn cũ.
+  //   Vì sao vậy: một danh sách đầy đủ là thứ cộng tay ra được doanh thu ngày —
+  //   đúng con số đã cố ý giấu khỏi POS. Còn tra một đơn cụ thể (khách quay lại
+  //   hỏi bill, nhân viên cần xoá bill bấm nhầm) thì vẫn phải làm được, và tra
+  //   đích danh từng đơn thì không dựng lại được tổng.
+  const timKiem = fl.length >= 3;
+  const khop = o =>
     o.total.toString().includes(fl) ||
     (o.phone && o.phone.includes(fl)) ||
-    String(o.id).includes(fl)
-  ) : orders;
-  if (!filtered.length) { list.innerHTML = `<div style="text-align:center;padding:40px;color:#bbb">Không có đơn hàng</div>`; return; }
+    (o.billCode && String(o.billCode).toLowerCase().includes(fl)) ||
+    String(o.id).includes(fl);
+  const filtered = timKiem ? orders.filter(khop) : orders.filter(billIsFresh);
+  const soAn = timKiem ? 0 : orders.length - filtered.length;
+  const dongAn = soAn > 0
+    ? `<div style="margin:0 16px 12px;background:#fff7e6;border:1.5px solid #fbbf24;border-radius:14px;padding:12px 14px;display:flex;align-items:flex-start;gap:9px;">
+         <span style="font-size:17px;line-height:1.3;flex-shrink:0;">🔒</span>
+         <span style="font-size:12.5px;font-weight:600;color:#92400e;line-height:1.5;">
+           <b>${soAn} đơn cũ đã ẩn</b> — danh sách chỉ hiện đơn trong ${HISTORY_VISIBLE_MIN} phút gần nhất.
+           Cần tra đơn cũ thì gõ <b>mã bill</b> hoặc <b>số điện thoại</b> vào ô tìm bên trên.
+         </span>
+       </div>`
+    : '';
+  if (!filtered.length) {
+    list.innerHTML = dongAn + `<div style="text-align:center;padding:40px;color:#bbb">${timKiem ? 'Không tìm thấy đơn nào khớp' : 'Chưa có đơn nào trong ' + HISTORY_VISIBLE_MIN + ' phút gần đây'}</div>`;
+    return;
+  }
   const grp = {}; filtered.forEach(o => { if (!grp[o.date]) grp[o.date] = []; grp[o.date].push(o); });
-  list.innerHTML = Object.keys(grp).map(d =>
+  list.innerHTML = dongAn + Object.keys(grp).map(d =>
     `<div class="hdg"><div class="hdl">${d}</div>${grp[d].map(o => {
       const isShipOrder = o.isShip === true;
       const isAppOrder  = o.isAppSale === true;

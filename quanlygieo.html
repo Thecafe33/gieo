@@ -11161,6 +11161,7 @@ function staleStatusLabelMgmt(st){
   if(!st) return 'chưa bắt đầu kết ca';
   if(st==='pending') return 'đối soát tiền mặt chưa khớp';
   if(st==='cash_passed') return 'đã đối soát tiền mặt, chưa xong bước sau';
+  if(st==='cash_variance_recorded') return 'tiền mặt lệch (đã ghi nhận), chưa xong bước sau';
   if(st==='bank_passed') return 'đã đối soát xong, chưa bàn giao';
   if(st==='handed_over') return 'đã bàn giao, chưa xác nhận đóng ngày';
   return st;
@@ -11293,6 +11294,45 @@ async function submitCashSettings(){
   try{ await saveFinance({cashToleranceAmount, handoverToleranceAmount, openingCashNextDayDefault}); toast('✅ Đã lưu cấu hình'); }
   catch(err){ console.error(err); showError('Lưu thất bại: '+(err.code||err.message||err)); }
 }
+// [NEW-GUARD Lớp 3] MỨC LỆCH TỪNG LẦN ĐẾM.
+//
+// Trước đây màn này chỉ hiện MỘT con số: "đã thử N lần". Con số đó không nói
+// được điều duy nhất đáng quan tâm — mỗi lần đếm ra bao nhiêu. Người rà (đếm đi
+// đếm lại, mỗi lần cộng/trừ đúng một mệnh giá cho tới khi hệ thống báo khớp) và
+// người đếm nhầm thật rồi đếm lại đúng, cả hai đều ra "2 lần" y hệt nhau.
+//
+// Bung từng lần ra thì hai trường hợp đó trông khác hẳn: người đếm nhầm nhảy
+// một bước rồi dừng; người rà đi từng nấc 10.000đ / 20.000đ về phía 0. Thêm cột
+// "so với lần trước" để nhìn thấy đúng cái bước nhảy đó mà không phải trừ tay.
+function cashAttemptsCardHTML(closing){
+  const ds = (closing && closing.attempts) || [];
+  if(ds.length < 2 && !(closing && closing.varianceAccepted)) return '';   // 1 lần, khớp ngay → không có gì để soi
+  const nhieuLan = ds.length > 1;
+  return `
+    <div class="sec-title">${ic('alert')} Các lần đếm tiền mặt</div>
+    <div class="card">
+      ${closing.varianceAccepted ? `
+        <div class="small-note" style="margin:0 0 10px;padding:9px 11px;background:var(--warn-bg);border-radius:11px;color:var(--warn);line-height:1.55">
+          Ngày này <b>hết lượt đếm mà vẫn lệch</b>. POS đã ghi nhận đúng số nhân viên đếm được và cho kết ca — không ép đếm tới khi khớp, để con số còn là số thật.
+          ${closing.varianceNote ? `<div style="margin-top:6px;color:var(--td)"><b>Nhân viên ghi:</b> ${escapeHtmlAttr(closing.varianceNote)}</div>` : '<div style="margin-top:6px">Không có ghi chú lý do.</div>'}
+        </div>` : ''}
+      ${ds.map((a,i)=>{
+        const v = Number(a.variance)||0;
+        const truoc = i>0 ? (Number(ds[i-1].variance)||0) : null;
+        const buoc = truoc===null ? null : v - truoc;
+        return `<div class="row">
+          <span class="rl">Lần ${i+1}${a.staff?(' · '+escapeHtmlAttr(a.staff)):''}${a.enteredAt?(' · '+new Date(a.enteredAt).toLocaleTimeString('vi-VN')):''}
+            ${a.note?`<div class="small-note" style="margin-top:2px">${escapeHtmlAttr(a.note)}</div>`:''}</span>
+          <span class="rv"><span style="display:flex;flex-direction:column;align-items:flex-end;gap:1px">
+            <span>${fmt(a.actualCash)} <span style="color:${v===0?'var(--ok)':'var(--bad)'}">(${v>0?'+':''}${fmt(v)})</span></span>
+            ${buoc!==null&&buoc!==0?`<span class="small-note" style="margin:0">so lần trước: ${buoc>0?'+':''}${fmt(buoc)}</span>`:''}
+          </span></span>
+        </div>`;
+      }).join('')}
+      ${nhieuLan ? `<div class="small-note" style="margin-top:8px">Nhiều lần đếm với bước nhảy đúng bằng một mệnh giá (10.000đ, 20.000đ, 50.000đ…) là dấu hiệu đang <b>rà cho khớp</b> chứ không phải đếm lại. Đối chiếu với camera khung giờ kết ca.</div>` : ''}
+    </div>`;
+}
+
 function renderCashDetail(detail, checklist){
   const { opening, closing, openingCash, cashOrders, cashSales, cashExpenses, cashExpenseTotal, expected, bankOrders, expectedBank, handover } = detail;
   const el = document.getElementById('cashDetail');
@@ -11301,13 +11341,18 @@ function renderCashDetail(detail, checklist){
     return;
   }
   // [Giai đoạn 10-11] closing.status: (không có)/'pending' → 'cash_passed' → 'bank_passed' → 'handed_over' → 'closed'.
-  const cashDone = closing && ['cash_passed','bank_passed','handed_over','closed'].includes(closing.status);
+  // 'cash_variance_recorded' = đã đếm hết số lần cho phép mà vẫn lệch → POS ghi
+  // nhận đúng số đếm được và cho đi tiếp (xem CASH_COUNT_MAX_ATTEMPTS bên POS).
+  // Bước tiền mặt COI NHƯ XONG, nhưng là "xong có lệch" — không được hiển thị
+  // giống PASS, vì đây chính là ngày cần Quản lý nhìn.
+  const cashDone = closing && ['cash_passed','cash_variance_recorded','bank_passed','handed_over','closed'].includes(closing.status);
+  const lechDaGhi = !!(closing && closing.varianceAccepted);
   const bankDone = closing && ['bank_passed','handed_over','closed'].includes(closing.status);
   const handedOver = closing && ['handed_over','closed'].includes(closing.status);
   const isClosed = closing && closing.status==='closed';
   const actual = cashDone ? closing.finalActualCash : null;
   const variance = cashDone ? closing.finalVariance : null;
-  const stLabel = isClosed ? ['Đã đóng ngày','green'] : handedOver ? ['Đã bàn giao — chưa đóng ngày','blue'] : bankDone ? ['Chờ bàn giao','blue'] : cashDone ? ['Tiền mặt PASS — chờ đối soát chuyển khoản','blue'] : ['Chưa kết ca','amber'];
+  const stLabel = isClosed ? ['Đã đóng ngày','green'] : handedOver ? ['Đã bàn giao — chưa đóng ngày','blue'] : bankDone ? ['Chờ bàn giao','blue'] : cashDone ? (lechDaGhi ? ['Tiền mặt LỆCH — đã ghi nhận, chờ đối soát chuyển khoản','amber'] : ['Tiền mặt PASS — chờ đối soát chuyển khoản','blue']) : ['Chưa kết ca','amber'];
   el.innerHTML = `
     <div class="card">
       <div class="row"><span class="rl">Trạng thái</span><span class="rv"><span class="tier tier-${stLabel[1]}">${stLabel[0]}</span></span></div>
@@ -11321,6 +11366,7 @@ function renderCashDetail(detail, checklist){
       ${opening.staff ? `<div class="row"><span class="rl">Nhân viên mở ca</span><span class="rv">${opening.staff}</span></div>` : ''}
       ${closing && closing.attempts ? `<div class="row"><span class="rl">Số lần thử đối soát tiền mặt</span><span class="rv">${closing.attempts.length}${closing.attempts.length>1?' '+ic('alert',13,'var(--warn)'):''}</span></div>` : ''}
     </div>
+    ${cashAttemptsCardHTML(closing)}
     ${expectedBank>0 ? `
     <div class="card">
       <div class="row"><span class="rl"><b>Expected Chuyển khoản</b></span><span class="rv"><b>${fmt(expectedBank)}</b></span></div>
@@ -11375,12 +11421,12 @@ function renderCashDetail(detail, checklist){
 }
 function renderCashHistory(history){
   const el = document.getElementById('cashHistory');
-  const stMap = {closed:['Đã đóng ngày','green'], handed_over:['Đã bàn giao','blue'], bank_passed:['Chờ bàn giao','blue'], cash_passed:['Chờ đối soát bank','blue'], pending:['Chưa khớp','amber']};
+  const stMap = {closed:['Đã đóng ngày','green'], handed_over:['Đã bàn giao','blue'], bank_passed:['Chờ bàn giao','blue'], cash_passed:['Chờ đối soát bank','blue'], cash_variance_recorded:['Lệch — đã ghi nhận','amber'], pending:['Chưa khớp','amber']};
   el.innerHTML = history.length ? history.map(h=>{
     const st = stMap[h.status] || ['Chưa khớp','amber'];
     return `<div class="litem" style="cursor:pointer" onclick="cashViewDate='${h.businessDate}'; document.getElementById('cashViewDateInput').value='${h.businessDate}'; renderEntryCash();">
       <div class="li-l"><div>${h.businessDate} <span class="tier tier-${st[1]}" style="margin-left:4px">${st[0]}</span></div>
-      <div>${(h.attempts||[]).length} lần thử tiền mặt${h.status==='handed_over'?(' · bàn giao lúc '+new Date(h.handoverAt).toLocaleTimeString('vi-VN')):''}</div></div>
+      <div>${(h.attempts||[]).length} lần thử tiền mặt${h.varianceAccepted?` · <b style="color:var(--bad)">lệch ${Number(h.finalVariance)>0?'+':''}${fmt(h.finalVariance)}</b>`:''}${h.status==='handed_over'?(' · bàn giao lúc '+new Date(h.handoverAt).toLocaleTimeString('vi-VN')):''}</div></div>
       <div class="li-r">›</div>
     </div>`;
   }).join('') : '<div class="muted">Chưa có lịch sử kết ca.</div>';
@@ -13564,11 +13610,14 @@ async function renderEntryAudit(){
       <div class="field" style="margin-bottom:0"><label>Xem ngày</label>
         <div style="display:flex;gap:6px">
           <input type="date" id="auditViewDateInput" value="${auditViewDate}" style="flex:1">
-          <button class="btn" style="width:auto;padding:0 16px" onclick="auditViewDate=document.getElementById('auditViewDateInput').value; renderAuditEmployeeActivity();">Xem</button>
+          <button class="btn" style="width:auto;padding:0 16px" onclick="auditViewDate=document.getElementById('auditViewDateInput').value; renderAuditEmployeeActivity(); renderAuditReprints();">Xem</button>
         </div>
       </div>
     </div>
     <div id="auditEmployeeList" class="card"><div class="muted">Đang tải...</div></div>
+
+    <div class="sec-title" style="margin-top:14px">In lại tem / bill (theo ngày đã chọn ở trên)</div>
+    <div id="auditReprintList" class="card"><div class="muted">Đang tải...</div></div>
 
     <div class="sec-title" style="margin-top:14px">Kiểm tra tính toàn vẹn dữ liệu</div>
     <div class="card">
@@ -13586,7 +13635,58 @@ async function renderEntryAudit(){
     document.getElementById('auditLogList').innerHTML = '<div class="muted">Không tải được nhật ký.</div>';
   }
   renderAuditEmployeeActivity();
+  renderAuditReprints();
 }
+
+// ── [NEW-GUARD Lớp 1] SỔ IN LẠI TEM / BILL ──────────────────────────────────
+//
+// POS đã khoá in lại tem sau 20 phút, nên đường "lấy tem bill cũ dán lên ly
+// không bấm bill" đã đóng. Nhưng trong 20 phút thì in lại vẫn hợp lệ — tem kẹt
+// giấy, tem mờ, khách làm rơi — nên không thể chặn nốt. Cái chặn được là sự
+// KHUẤT MẮT: mỗi lượt in lại đều ghi vào `label_reprints_gieogieo`, và ở đây
+// Quản lý nhìn thấy chúng.
+//
+// Một hai lượt/ca là bình thường, đừng đi hỏi. Đáng nhìn là: một người in lại
+// hàng chục lần, hoặc cùng một bill bị in lại nhiều lần liên tiếp — đối chiếu
+// với camera đúng khung giờ đó.
+async function renderAuditReprints(){
+  const el = document.getElementById('auditReprintList');
+  if(!el) return;
+  showLoading(el);
+  try{
+    // Chỉ lọc theo ngày, sắp xếp ở client: thêm orderBy vào query sẽ đòi một
+    // composite index mà quán chưa tạo, và query hỏng thì mục này im lặng trống.
+    const snap = await fstore.collection('label_reprints_gieogieo')
+      .where('businessDate','==',auditViewDate).limit(300).get();
+    const ds = snap.docs.map(d=>d.data()).sort((a,b)=> String(b.at||'').localeCompare(String(a.at||'')));
+    if(!ds.length){ el.innerHTML = '<div class="muted">Không có lượt in lại nào ngày này.</div>'; return; }
+
+    const theoBill = {};
+    ds.forEach(r=>{ const k = r.billCode || r.orderId || '(không rõ)'; theoBill[k] = (theoBill[k]||0)+1; });
+    const nghiNgo = Object.entries(theoBill).filter(([,n])=>n>=3).sort((a,b)=>b[1]-a[1]);
+
+    const nhan = { tem:'Tem', bill:'Bill' };
+    const pham = { all:'cả đơn', item:'một món', unit:'một ly' };
+    el.innerHTML =
+      `<div class="row"><span class="rl"><b>Tổng lượt in lại</b></span><span class="rv"><b>${ds.length}</b></span></div>`
+      + (nghiNgo.length ? `<div class="small-note" style="margin:8px 0;padding:9px 11px;background:var(--warn-bg);border-radius:11px;color:var(--warn);line-height:1.55">
+          ${ic('alert',13)} Bill bị in lại từ 3 lượt trở lên: ${nghiNgo.map(([k,n])=>`<b>${escapeHtmlAttr(k)}</b> (${n})`).join(', ')}. Xem camera khung giờ tương ứng.
+        </div>` : '')
+      + ds.slice(0,120).map(r=>`<div class="row">
+          <span class="rl">${(r.at||'').replace('T',' ').slice(11,16)} · ${nhan[r.kind]||escapeHtmlAttr(String(r.kind||''))} ${pham[r.scope]||escapeHtmlAttr(String(r.scope||''))}
+            ${r.detail?`<div class="small-note" style="margin-top:2px">${escapeHtmlAttr(String(r.detail))}</div>`:''}</span>
+          <span class="rv small-note"><span style="display:flex;flex-direction:column;align-items:flex-end;gap:1px">
+            <span>${escapeHtmlAttr(r.billCode || (r.orderId||'').slice(0,8) || '')}${r.minutesSinceBill!=null?` · sau ${r.minutesSinceBill}'`:''}</span>
+            ${(r.staffOnShift||[]).length?`<span>${escapeHtmlAttr((r.staffOnShift||[]).join(', '))}</span>`:''}
+          </span></span>
+        </div>`).join('')
+      + (ds.length>120 ? `<div class="small-note" style="margin-top:6px">... và ${ds.length-120} lượt khác</div>` : '');
+  }catch(err){
+    console.error('renderAuditReprints failed', err);
+    el.innerHTML = '<div class="muted">Không tải được sổ in lại: '+(err.code||err.message||err)+'</div>';
+  }
+}
+
 function renderAuditLogList(logs){
   const el = document.getElementById('auditLogList');
   const actionLabel = {approve:['Duyệt','green'], reject:['Từ chối','red'], cancel:['Huỷ','amber']};
