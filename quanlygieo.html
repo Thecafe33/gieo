@@ -1693,13 +1693,17 @@ html.phone-ui .nav-search .ns-kbd{display:none;}
 </div>
 
 <!-- Popup SỬA PHIẾU NHẬN — quy trình 3 bước, xem mục openFixRecWizard() -->
-<div id="fixrec-popup" style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:320;display:none;align-items:center;justify-content:center;backdrop-filter:blur(3px);padding:20px;" onclick="if(event.target===this)closeFixRecWizard()">
-  <div style="background:#FFFCF0;border-radius:28px;padding:22px 20px;width:100%;max-width:460px;max-height:92vh;overflow-y:auto;animation:pi .22s ease;">
+<!-- overflow-x:hidden + min-width:0 + overflow-wrap:anywhere trên thẻ: thẻ này là FLEX ITEM,
+     mà flex item mặc định min-width:auto nên nó KHÔNG chịu co xuống dưới bề rộng nội dung —
+     một dòng chữ dài bên trong là cả thẻ phình to hơn màn hình, rồi justify-content:center
+     đẩy mất luôn nửa trái ra ngoài. Chốt cả ba thứ thì không nội dung nào làm được điều đó. -->
+<div id="fixrec-popup" style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:320;display:none;align-items:center;justify-content:center;backdrop-filter:blur(3px);padding:16px;overflow-y:auto;overflow-x:hidden;" onclick="if(event.target===this)closeFixRecWizard()">
+  <div style="background:#FFFCF0;border-radius:28px;padding:20px 18px;width:100%;max-width:460px;min-width:0;box-sizing:border-box;margin:auto;max-height:92vh;overflow-y:auto;overflow-wrap:anywhere;animation:pi .22s ease;">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
       <span id="fixrec-title" style="font-size:18px;font-weight:700;color:var(--td);">Sửa phiếu nhận</span>
       <button onclick="closeFixRecWizard()" style="background:#e0e0e0;border:none;border-radius:50%;width:34px;height:34px;cursor:pointer;font-size:16px;color:#666;display:flex;align-items:center;justify-content:center;">✕</button>
     </div>
-    <div id="fixrec-steps" style="display:flex;gap:6px;margin-bottom:16px;"></div>
+    <div id="fixrec-steps" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px;"></div>
     <div id="fixrec-body"></div>
   </div>
 </div>
@@ -4002,10 +4006,12 @@ function fixRecWizRender(){
   const p2 = n => String(n).padStart(2,'0');
   const d = w.rec.createdAt ? new Date(w.rec.createdAt) : null;
   if(title) title.textContent = 'Sửa phiếu nhận' + (d && !isNaN(d) ? ` ${p2(d.getDate())}/${p2(d.getMonth()+1)}` : '');
-  const ten = ['Chọn dòng','Nhập số & lý do','Soát & xác nhận'];
+  // Nhãn NGẮN. Nhãn dài là thứ đã đẩy hàng bước rộng hơn thẻ và kéo cả popup tràn ra ngoài
+  // màn hình; flex:1 1 0 + min-width:0 để ba ô luôn chia đều phần rộng có thật, không đòi thêm.
+  const ten = ['Chọn dòng','Nhập số','Xác nhận'];
   if(steps) steps.innerHTML = ten.map((t,i)=>{
     const n = i+1, xong = n < w.step, dang = n === w.step;
-    return `<div style="flex:1;text-align:center;font-size:10.5px;font-weight:700;letter-spacing:.3px;padding:7px 4px;border-radius:10px;
+    return `<div style="flex:1 1 0;min-width:0;text-align:center;font-size:11px;font-weight:700;letter-spacing:.2px;padding:8px 4px;border-radius:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
       background:${dang?'var(--gd)':(xong?'#dcfce7':'#eee')};color:${dang?'#fff':(xong?'#16a34a':'#aaa')};">${n}. ${t}</div>`;
   }).join('');
 
@@ -4053,8 +4059,8 @@ function fixRecWizB2(body){
       <div class="hint">Lý do này được lưu vĩnh viễn vào nhật ký của phiếu và của đơn đặt hàng — sau này soát lại còn biết chuyện gì đã xảy ra.</div></div>
     <div id="fixrecTomTat"></div>
     <div style="display:flex;gap:8px;margin-top:12px">
-      ${fixRecWizDongs().length>1?`<button class="btn outline" style="flex:0 0 auto;padding:0 16px" onclick="fixRecWizGo(1)">‹ Quay lại</button>`:''}
-      <button class="btn" style="flex:1" onclick="fixRecWizTiepTuc()">Tiếp tục ›</button>
+      ${fixRecWizDongs().length>1?`<button class="btn outline sm" style="flex:0 0 auto;min-width:0" onclick="fixRecWizGo(1)">‹ Quay lại</button>`:''}
+      <button class="btn" style="flex:1 1 0;min-width:0;width:auto" onclick="fixRecWizTiepTuc()">Tiếp tục ›</button>
     </div>`;
   fixRecWizRenderTomTat();
 }
@@ -4095,14 +4101,14 @@ function fixRecWizB3(body){
     </div>
     ${c.huy.length?`<div class="card" style="margin:0 0 12px;padding:14px">
       <div style="font-size:12px;font-weight:700;color:var(--bad);margin-bottom:6px">HUỶ ${c.huy.length} TEM — đi bóc khỏi kệ nếu đã dán</div>
-      <div style="font-size:12px;color:#666;line-height:1.8;word-break:break-all">${c.huy.map(x=>escapeHtmlAttr(x.code||'')).join(' · ')}</div>
+      <div style="font-size:12px;color:#666;line-height:1.8;word-break:keep-all;overflow-wrap:normal">${c.huy.map(x=>escapeHtmlAttr(x.code||'')).join(' · ')}</div>
       ${c.giu.length?`<div style="font-size:12px;font-weight:700;color:var(--ok);margin:10px 0 6px">GIỮ LẠI ${c.giu.length} TEM</div>
-      <div style="font-size:12px;color:#666;line-height:1.8;word-break:break-all">${c.giu.map(x=>escapeHtmlAttr(x.code||'')).join(' · ')}</div>`:''}
+      <div style="font-size:12px;color:#666;line-height:1.8;word-break:keep-all;overflow-wrap:normal">${c.giu.map(x=>escapeHtmlAttr(x.code||'')).join(' · ')}</div>`:''}
     </div>`:''}
     ${c.thieuTem?`<div class="small-note" style="color:var(--bad);margin-bottom:10px">Cần huỷ ${c.canHuy} tem nhưng chỉ còn ${c.nguyen.length} tem nguyên seal. ${c.thieuTem} con còn lại đã mở/đã báo hết — hàng đó đã vào ly khách, không huỷ được. Tồn kho vẫn trừ đủ phần ghi thừa; soát lại những con đã dùng.</div>`:''}
     <div style="display:flex;gap:8px">
-      <button class="btn outline" style="flex:0 0 auto;padding:0 16px" onclick="fixRecWizGo(2)">‹ Sửa lại</button>
-      <button class="btn" style="flex:1" id="fixrecGo" onclick="fixRecWizApply()">Xác nhận sửa</button>
+      <button class="btn outline sm" style="flex:0 0 auto;min-width:0" onclick="fixRecWizGo(2)">‹ Sửa lại</button>
+      <button class="btn" style="flex:1 1 0;min-width:0;width:auto" id="fixrecGo" onclick="fixRecWizApply()">Xác nhận sửa</button>
     </div>`;
 }
 
@@ -18880,8 +18886,8 @@ async function renderKhoPO(){
         </div>`).join('')}
       </div>
       <div class="li-r">
-        ${['partial','received'].includes(po.status) ? `<button class="iconbtn" onclick="poMoSuaPhieuNhan('${po.id}')">${ic('note',15)} Sửa số đã nhận</button>` : ''}
-        ${activeStatuses.includes(po.status) ? `<button class="iconbtn" onclick="confirmCancelPO('${po.id}')">${ic('x',15)} Huỷ</button>` : ''}
+        ${['partial','received'].includes(po.status) ? `<button class="btn outline sm" onclick="poMoSuaPhieuNhan('${po.id}')">${ic('note',14)} Sửa số đã nhận</button>` : ''}
+        ${activeStatuses.includes(po.status) ? `<button class="iconbtn" onclick="confirmCancelPO('${po.id}')">${ic('x',15)}</button>` : ''}
       </div>
     </div>`;
   }).join('') : '<div class="muted">Chưa có đơn đặt hàng nào.</div>';
