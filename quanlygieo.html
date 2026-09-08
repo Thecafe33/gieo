@@ -15818,7 +15818,10 @@ function renderTrackingBox(){
       <div class="field" style="margin-top:10px;margin-bottom:0"><label for="invOpenShelfLife">Hạn dùng sau khi mở (giờ)</label>
         <input type="number" id="invOpenShelfLife" inputmode="numeric" step="1" min="0" value="${prevShelf != null ? escapeHtmlAttr(prevShelf) : (editingItem ? (Number(editingItem.openShelfLifeHours)||0) : 0)}">
         <div class="hint">In lên tem và dùng để cảnh báo "còn hàng đã mở quá hạn". Để <b>0</b> nếu món này không có hạn sau khi mở.</div>
-      </div>` : ''}`;
+      </div>` : ''}
+      ${(cur==='unit' && editingItem) ? '<div id="invMissingTagBox" style="margin-top:12px"></div>' : ''}`;
+    // [GÁN TEM CHO MÓN ĐANG THIẾU — xem renderMissingTagBlock() để gỡ toàn bộ tính năng]
+    if(cur==='unit' && editingItem) renderMissingTagBlock(editingItem);
     return;
   }
 
@@ -15858,6 +15861,111 @@ function setTrackingMode(m){
   if(el) el.value = m;
   renderTrackingBox();
 }
+
+// ============================================================
+// [MỚI — KHỐI DỄ GỠ] GÁN TEM CHO MÓN ĐANG THIẾU
+//
+// Bật "In tem cho từng cái" cho một món ĐANG có sẵn tồn kho thì tem chỉ sinh ra từ lúc
+// này về sau — mỗi lần POS nhận hàng mới. Số đang tồn kho từ TRƯỚC KHI bật (lô cũ) không
+// tự có tem: nhân viên không có gì để quét, kiểm kê không đối chiếu được cho phần đó.
+// Khối này cho Quản lý sinh thẳng số tem còn thiếu — không qua phiếu nhận hàng nào — để in
+// & dán lên đúng những cái đang có sẵn ở quán, đóng khoảng trống lại.
+//
+// GỠ BỎ TOÀN BỘ TÍNH NĂNG: xoá 2 chỗ —
+//   (1) trong renderTrackingBox(): dòng `<div id="invMissingTagBox">...` và dòng gọi
+//       renderMissingTagBlock(editingItem) ngay sau đó.
+//   (2) toàn bộ khối hàm từ đây tới hết genMissingTagsForItem() bên dưới.
+// Không có chỗ nào khác trong file gọi tới các hàm này.
+// ============================================================
+async function renderMissingTagBlock(editingItem){
+  const box = document.getElementById('invMissingTagBox');
+  if(!box) return;
+  box.innerHTML = '<div class="small-note">Đang kiểm tra số tem còn thiếu…</div>';
+  let thieu = 0, tongTem = 0;
+  try{
+    // Tái dùng ĐÚNG hàm đã có cho "Tồn lịch sử" — cùng một câu hỏi ("tem còn sống của
+    // món này cộng lại bao nhiêu"), không viết lại phép đọc Firestore lần hai.
+    const gom = await docTemConSongTheoMon();
+    tongTem = gom[editingItem.id] || 0;
+    thieu = Math.max(0, Math.round((Number(editingItem.currentStock)||0) - tongTem));
+  }catch(err){
+    console.warn('[gán tem thiếu] không đọc được số tem hiện có:', err);
+    box.innerHTML = '';
+    return;
+  }
+  if(!document.getElementById('invMissingTagBox')) return; // form đã đóng trong lúc chờ đọc
+  if(thieu < 1){ box.innerHTML = ''; return; }
+  box.innerHTML = `
+    <div style="background:#fffbe8;border:1px solid #fde68a;padding:12px;border-radius:10px;">
+      <div style="font-weight:700;font-size:13px;margin-bottom:4px">Gán tem cho món đang thiếu</div>
+      <div class="small-note" style="margin-bottom:8px">Tồn kho hiện ghi <b>${fmtNum(editingItem.currentStock,0)} ${escapeHtmlAttr(editingItem.unit||'')}</b>, nhưng chỉ có <b>${tongTem}</b> mã tem đang sống — ước tính còn <b>${thieu}</b> cái chưa có mã (thường là lô cũ, nhập trước khi bật tính năng này).</div>
+      <div class="field" style="margin-bottom:8px"><input type="number" id="invMissingTagQty" value="${thieu}" min="1" max="200" step="1" style="max-width:120px"></div>
+      <button type="button" class="btn outline sm" style="width:auto;padding:0 14px" onclick="genMissingTagsForItem('${editingItem.id}')">Sinh mã tem</button>
+      <div class="small-note" style="margin-top:8px">Sinh xong vào <b>Kho → Container → Tem chưa dán</b> (hoặc bên POS → Tem kho) để in & dán lên từng cái đang có sẵn ở quán — không phải hàng sắp nhập.</div>
+    </div>`;
+}
+
+// Cùng thuật toán/bảng chữ với genStockContainerCode() bên posgieo.html (8 ký tự, bảng
+// Crockford bỏ I/L/O/U) để mã sinh từ Quản lý và mã sinh từ POS trông giống hệt nhau,
+// không phân biệt được nguồn gốc nhìn bằng mắt trên tem in ra.
+async function mgmtGenContainerCode(){
+  const abc = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+  let code = '';
+  for(let lan=0; lan<5; lan++){
+    const a = new Uint8Array(8);
+    (window.crypto||window.msCrypto).getRandomValues(a);
+    code = '';
+    for(let i=0;i<8;i++) code += abc[a[i] & 31];
+    try{
+      const snap = await fstore.collection(CTN_COLL).where('code','==',code).limit(1).get();
+      if(snap.empty) return code;
+      console.warn('[gán tem thiếu] bốc trúng mã đã có, bốc lại:', code);
+    }catch(err){
+      console.warn('[gán tem thiếu] không kiểm tra được trùng, dùng thẳng mã ngẫu nhiên:', err);
+      return code;
+    }
+  }
+  return code;
+}
+
+async function genMissingTagsForItem(itemId){
+  const it = INVENTORY_ITEMS.find(x=>x.id===itemId);
+  if(!it){ toast('❌ Không tìm thấy nguyên liệu'); return; }
+  const el = document.getElementById('invMissingTagQty');
+  const n = Math.floor(Number(el && el.value))||0;
+  if(n<1){ toast('⚠️ Nhập số lượng hợp lệ'); return; }
+  if(n>200){ toast('⚠️ Tối đa 200 mã một lần — chia nhỏ ra nếu thật sự cần nhiều hơn'); return; }
+  if(!confirm('Sinh '+n+' mã tem cho "'+it.name+'"?\n\nMỗi mã đại diện đúng 1 cái ĐANG CÓ SẴN ở quán (không phải hàng sắp nhập) — sinh xong nhớ in & dán lên từng cái tương ứng.')) return;
+  const nowISO = new Date().toISOString();
+  const p2 = x=>String(x).padStart(2,'0');
+  const d = new Date();
+  const businessDate = d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate());
+  let ok = 0;
+  for(let i=0;i<n;i++){
+    try{
+      const code = await mgmtGenContainerCode();
+      await fstore.collection(CTN_COLL).add({
+        code, itemId: it.id, itemName: it.name||'', unit: it.unit||'',
+        trackingMode: 'unit', countUnitName: it.countUnitName || it.unit || '',
+        baseQty: 1, status: 'sealed', labelPrinted: false,
+        openShelfLifeHours: Number(it.openShelfLifeHours)||0,
+        receivedAt: nowISO, receivedBy: 'Quản lý — gán tem thiếu', receivedByEmployeeId: '',
+        receiveRefId: '', businessDate,
+        openedAt: null, openedBy: null, expiresAt: null,
+        finishedAt: null, finishedBy: null, finishReason: '', wasteBase: 0,
+        // đánh dấu để phân biệt với tem sinh từ phiếu nhận thật — không phải hàng vừa mua về,
+        // hữu ích nếu sau này cần lọc riêng hoặc kiểm tra lại.
+        backfilled: true, backfillReason: 'missing_tag_gap'
+      });
+      ok++;
+    }catch(err){ console.error('[gán tem thiếu] ghi bản ghi lỗi', err); break; }
+  }
+  toast(ok>0 ? ('✅ Đã sinh '+ok+' mã — vào Tem chưa dán để in') : '❌ Sinh mã thất bại');
+  if(ok>0) renderTrackingBox();
+}
+// ============================================================
+// [KẾT THÚC KHỐI GÁN TEM CHO MÓN ĐANG THIẾU]
+// ============================================================
 
 // ---------- [MỚI] Gắn dụng cụ CÂN cho nguyên liệu dùng ngay ----------
 // Vì sao nguyên liệu cũng cần cân, không chỉ bán thành phẩm: trân châu trắng /
