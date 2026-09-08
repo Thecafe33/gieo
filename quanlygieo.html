@@ -289,6 +289,8 @@ html.phone-ui .sync{padding:9px;}
 }
 .hib:active,.hamburger-btn:active{background:var(--fill-2);transform:scale(.92);}
 #reloadBtn.spin{animation:spin .8s linear infinite;}
+#favToggleBtn.active{color:var(--warn);background:var(--warn-bg);}
+#favToggleBtn.active .ic-svg{fill:currentColor;}
 
 #errBanner{
   margin:0 14px 10px;border-radius:var(--r-sm);
@@ -1330,6 +1332,7 @@ html.phone-ui .nav-search .ns-kbd{display:none;}
         </div>
         <div class="topbar-actions">
           <div class="sync"><span class="dot busy" id="syncDot"></span><span id="syncTxt">syncing</span></div>
+          <button id="favToggleBtn" class="hib" onclick="toggleCurrentFavorite()" title="Đánh dấu màn này là yêu thích"></button>
           <button id="uiModeBtn" class="hib" onclick="cycleUiMode()" title="Đổi giao diện"></button>
           <button id="reloadBtn" class="hib" onclick="reloadCurrent()" aria-label="Tải lại"></button>
         </div>
@@ -1946,7 +1949,8 @@ const ICON_PATHS = {
   chevronDown: '<path d="M6 9.5l6 6 6-6"/>',
   arrowUp:     '<path d="M12 20V4.5M6 10.5L12 4.5l6 6"/>',
   arrowDown:   '<path d="M12 4v15.5M6 13.5l6 6 6-6"/>',
-  dots:        '<circle cx="5.5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="18.5" cy="12" r="1.6"/>'
+  dots:        '<circle cx="5.5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="18.5" cy="12" r="1.6"/>',
+  star:        '<path d="M12 2L15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26z"/>'
 };
 function ic(name, size, color){
   const p = ICON_PATHS[name];
@@ -1981,6 +1985,7 @@ function icDot(color, size){
 // xong — điền thẳng icon vào 2 nút bằng ID, không cần đợi DOMContentLoaded.
 document.getElementById('hamburgerBtn').innerHTML = ic('menu', 20);
 document.getElementById('reloadBtn').innerHTML = ic('refresh', 18);
+document.getElementById('favToggleBtn').innerHTML = ic('star', 18);
 
 // ============================================================
 // [FIX] Nháy màn khi tải lại.
@@ -8588,6 +8593,60 @@ const NAV_GROUP = (()=>{
   return m;
 })();
 
+// Tra lại {ic,label,go} từ nav key — dùng cho "Gần đây"/"Yêu thích" (Phase 8) để
+// vẽ được đúng nút điều hướng gốc mà không phải chép lại dữ liệu. 'inbox' không
+// nằm trong NAV_SECTIONS (vào bằng nudge/link, không qua sidebar) nên khai tay
+// giống cách NAV_LABEL/NAV_GROUP đã làm ở trên, khỏi lệch ba chỗ.
+const NAV_ITEM_BY_KEY = (()=>{
+  const m = { inbox: {key:'inbox', ic:'inbox', label:'Hộp thư cảnh báo', go:"switchScreen('inbox')"} };
+  NAV_SECTIONS.forEach(sec => sec.items.forEach(it => { m[it.key] = it; }));
+  return m;
+})();
+
+// ============================================================
+// GẦN ĐÂY & YÊU THÍCH (kế hoạch cải tổ UX, Phase 8) — giảm thao tác lặp lại:
+// "Kiểm kê" xong quay lại "Lệch kho" mỗi ngày thì khỏi phải mở lại nhánh Kho
+// rồi bấm tiếp mỗi lần. Lưu localStorage — sở thích riêng của người dùng trên
+// MÁY này (giống gieo_ui_mode/gieo_ui_nav_off đã lưu kiểu này), không đồng bộ
+// qua Firebase vì không phải dữ liệu nghiệp vụ.
+// ============================================================
+const NAV_RECENT_KEY = 'gieo_nav_recent';
+const NAV_FAV_KEY = 'gieo_nav_favorites';
+const NAV_RECENT_MAX = 6;
+// 'today'/'inbox' luôn có lối vào riêng (mục đầu sidebar + chấm đỏ cảnh báo) —
+// cho vào "Gần đây" thì mục nào cũng dẫn ra hai cái này, mất hết tác dụng.
+const NAV_RECENT_EXCLUDE = new Set(['today','inbox']);
+
+function _navPrefsLoad(key){
+  try{ const v = JSON.parse(localStorage.getItem(key)||'[]'); return Array.isArray(v) ? v : []; }
+  catch(e){ return []; }
+}
+let navRecent = _navPrefsLoad(NAV_RECENT_KEY);
+let navFavorites = _navPrefsLoad(NAV_FAV_KEY);
+
+function trackNavVisit(key){
+  if(!key || NAV_RECENT_EXCLUDE.has(key) || !NAV_ITEM_BY_KEY[key]) return;
+  navRecent = [key, ...navRecent.filter(k=>k!==key)].slice(0, NAV_RECENT_MAX);
+  try{ localStorage.setItem(NAV_RECENT_KEY, JSON.stringify(navRecent)); }catch(e){}
+}
+function isNavFavorite(key){ return navFavorites.includes(key); }
+function toggleCurrentFavorite(){
+  const key = currentNavKey();
+  if(!NAV_ITEM_BY_KEY[key]){ toast('⚠️ Màn này chưa hỗ trợ đánh dấu yêu thích'); return; }
+  const i = navFavorites.indexOf(key);
+  if(i>=0) navFavorites.splice(i,1); else navFavorites.push(key);
+  try{ localStorage.setItem(NAV_FAV_KEY, JSON.stringify(navFavorites)); }catch(e){}
+  updateFavBtn();
+  renderSidebarNav();
+}
+function updateFavBtn(){
+  const btn = document.getElementById('favToggleBtn');
+  if(!btn) return;
+  const on = isNavFavorite(currentNavKey());
+  btn.classList.toggle('active', on);
+  btn.title = on ? 'Bỏ đánh dấu yêu thích' : 'Đánh dấu màn này là yêu thích';
+}
+
 function currentNavKey(){
   if(curScreen !== 'entry') return curScreen;
   if(curEntryTab === 'kho') return 'kho:' + curKhoSub;
@@ -8669,7 +8728,7 @@ function renderSidebarNav(){
     </button>`;
 
   let found = 0;
-  const navSectionsHtml = NAV_SECTIONS.map(sec=>{
+  const navSectionHtmlList = NAV_SECTIONS.map(sec=>{
     const items = sec.items.filter(match);
     if(!items.length) return '';
     found += items.length;
@@ -8693,7 +8752,7 @@ function renderSidebarNav(){
     return `
       ${sec.group ? `<div class="sidebar-group-label">${sec.group}</div>` : ''}
       ${items.map(it=>itemHtml(it,false)).join('')}`;
-  }).join('');
+  });
 
   // "Find Anything" (Phase 4) — cùng ô tìm, cùng danh sách, nhưng khi gõ đủ dài
   // thì KHÔNG chỉ lọc tên 40+ mục điều hướng nữa mà còn tìm thẳng trong dữ liệu
@@ -8749,6 +8808,26 @@ function renderSidebarNav(){
       loadingHint = true;
     }
   }
+
+  // Gần đây & Yêu thích (Phase 8) — chỉ hiện khi KHÔNG đang tìm kiếm (đang gõ
+  // tìm thì người dùng đã biết chính xác muốn gì, chen thêm hai khối này chỉ
+  // đẩy kết quả tìm xuống dưới màn hình). Dùng lại itemHtml() nên bấm vào vẫn
+  // đi đúng chỗ và vẫn tô "active" đúng như mục gốc trong danh sách chính.
+  let favRecentHtml = '';
+  if(!q){
+    const favItems = navFavorites.map(k=>NAV_ITEM_BY_KEY[k]).filter(Boolean);
+    const recentItems = navRecent.map(k=>NAV_ITEM_BY_KEY[k]).filter(Boolean);
+    favRecentHtml =
+      (favItems.length ? `<div class="sidebar-group-label">⭐ Yêu thích</div>${favItems.map(it=>itemHtml(it,false)).join('')}` : '') +
+      (recentItems.length ? `<div class="sidebar-group-label">Gần đây</div>${recentItems.map(it=>itemHtml(it,false)).join('')}` : '');
+  }
+
+  // Chèn Gần đây/Yêu thích NGAY SAU mục "Hôm nay" (phần tử đầu của
+  // navSectionHtmlList) chứ không phải lên trên cùng — "Hôm nay" là điểm vào
+  // quan trọng nhất (Control Tower), không để hai khối mới đẩy nó xuống.
+  const navSectionsHtml = favRecentHtml
+    ? [navSectionHtmlList[0], favRecentHtml, ...navSectionHtmlList.slice(1)].join('')
+    : navSectionHtmlList.join('');
 
   nav.innerHTML = navSectionsHtml + dataResultsHtml;
   if(!found && !loadingHint) nav.innerHTML = `<div class="nav-empty">Không có mục nào khớp “${escapeHtmlAttr(navQuery)}”</div>`;
@@ -9428,6 +9507,8 @@ function switchScreen(s){
   const k = document.getElementById('hdrKicker');
   if(k) k.textContent = NAV_GROUP[navKey] || '';
   document.title = (NAV_LABEL[navKey] ? NAV_LABEL[navKey] + ' · ' : '') + 'Gieo Gieo';
+  trackNavVisit(navKey);   // Phase 8 — "Gần đây"
+  updateFavBtn();          // Phase 8 — nút ⭐ ở topbar phản ánh đúng màn đang đứng
   renderSidebarNav();
   renderReportSubNav();
   closeSidebar();            // trên di động: chọn xong là đóng drawer luôn
@@ -21871,6 +21952,11 @@ function saveTopping() {
   // [GĐ6] Vẽ sidebar + thanh chuyển báo cáo, rồi vào màn mặc định "Sức khoẻ quán".
   renderSidebarNav();
   renderReportSubNav();
+  // Init không đi qua switchScreen() (xem chú thích renderToday() ngay dưới) nên
+  // nút ⭐ ở topbar cũng phải tự cập nhật ở đây, không thì màn mặc định 'today'
+  // có lỡ được đánh dấu yêu thích thì nút vẫn hiện trạng thái tắt cho tới khi
+  // đổi màn một lần.
+  updateFavBtn();
   // [BÊ TỪ POS] Gắn listener đồng bộ cấu hình khuyến mãi/phí sàn — gắn MỘT LẦN
   // ở init (không đặt trong switchScreen, kẻo mỗi lần đổi màn lại chồng thêm một
   // listener nữa lên cùng một node Firebase).

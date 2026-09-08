@@ -36,7 +36,7 @@ Cột "Trạng thái" đối chiếu với 26 Phase của kế hoạch cải t�
 | Breadcrumb-lite (`hdrKicker`/`hdrTitle`) | `switchScreen()` dòng ~9342 | | thấp | 🟡 Có 2 tầng (Nhóm › Mục), không phải breadcrumb bấm được từng cấp; không có deep link / URL hash |
 | Context Navigation (tab liên quan ngay tại object) | sheet "Lịch sử" (nút 🕐) ở Nguyên liệu | Nguyên liệu | thấp | 🟡 **Một phần, mới thêm 2026-09-08** — sheet 🕐 giờ gộp sẵn Container đang mở CỦA ĐÚNG món đó + Giải thích tồn kho + Giao dịch trong cùng một chỗ (không cần rời khỏi Nguyên liệu). Còn thiếu: chưa gắn Kiểm kê/Lệch kho ngay tại đây, và BTP/các object khác chưa có tương tự |
 | Related Actions | rải rác, vd. nudge "Duyệt phiếu kiểm kê" trong Lệch kho, nút "Khai định mức" khi thiếu recipe | | | 🟡 Có từng phần theo ngữ cảnh nhưng không nhất quán theo mọi màn |
-| Recent & Favorites | — | — | — | 🔴 **Chưa có** |
+| Recent & Favorites | Sidebar (dưới mục "Hôm nay") + nút ⭐ trên topbar | mọi nav key | thấp | 🟢 **Mới thêm 2026-09-08** — xem §3 |
 | Transaction Drill-down | breakdown → `histSetFilter(type)` lọc đúng loại giao dịch trong cùng sheet | Nguyên liệu, BTP | thấp | 🟡 **Một phần, mới thêm 2026-09-08** — bấm vào một dòng breakdown thì lọc ra đúng các giao dịch loại đó (ngày giờ, nhân viên, ghi chú, tồn còn lại), nhưng CHƯA nhảy được tới đúng PO/bill/waste-record gốc (referenceId) |
 | Integrity Rules → Alert Inbox (Phase 11) | `runDataIntegrityCheck()` (đã có sẵn, Giai đoạn 12) giờ hiện ngay đầu Hộp thư cảnh báo | Nguyên liệu, Recipe, Refill, PO | thấp | 🟡 **Nối lại 2026-09-08** — kiểm tra tham chiếu hỏng + tồn kho âm vốn chỉ nằm ở tab Kiểm toán, giờ hiện luôn ở Hộp thư (nút "Kiểm tra ngay", dùng chung state với Kiểm toán). Vẫn CHƯA có rule "GOGS Integrity" (bill hoàn tất chưa có consumption), "Container Integrity", "Recipe Integrity" đúng nghĩa kế hoạch |
 | **Đối chiếu sổ kho với tem ("Ledger ≠ Container")** | trong sheet "Lịch sử" (nút 🕐) — `_histReconcileHtml()`, tái dùng `docTemConSongTheoMon()` | Nguyên liệu | thấp | 🟢 **Mới thêm 2026-09-08** — công thức đã có sẵn và đã kiểm chứng ở Kho → Container → Tồn lịch sử, chỉ hiện lại đúng con số đó tại sheet của từng món. Xem §3 |
@@ -118,11 +118,22 @@ File thay đổi: `quanlygieo.html`, hàm mới `integrityCheckCardHtml()`, `run
 
 File thay đổi: `quanlygieo.html`, hàm mới `_histReconcileHtml()` (khoảng dòng 20298‑20330), sửa `openItemHistory()` để gọi thêm `docTemConSongTheoMon()` song song khi món có dán tem.
 
+**Phase 8 — Gần đây & Yêu thích**, giảm thao tác lặp lại giữa các mục điều hướng hay dùng:
+
+- **Gần đây**: tự động ghi nhận — mỗi lần chuyển màn (`switchScreen()`), mục vừa vào được đẩy lên đầu danh sách "Gần đây" trong sidebar (tối đa 6 mục, không trùng). Không tính "Hôm nay"/"Hộp thư cảnh báo" vào đây vì hai mục đó đã có lối vào riêng cố định — tính vào chỉ làm loãng danh sách.
+- **Yêu thích**: nút hình ⭐ mới ở topbar (cạnh nút đổi giao diện/tải lại) — bấm để đánh dấu/bỏ đánh dấu MÀN ĐANG ĐỨNG. Nút tự đổi màu (viền hổ phách + sao tô đặc) khi màn hiện tại đã được đánh dấu.
+- Cả hai lưu ở `localStorage` (`gieo_nav_recent`, `gieo_nav_favorites`) — sở thích riêng theo từng máy, giống cách `gieo_ui_mode` đã lưu, không phải dữ liệu nghiệp vụ nên không đồng bộ qua Firebase.
+- Hiện ngay dưới mục "Hôm nay" trong sidebar (không đẩy "Hôm nay" xuống), và **ẩn khi đang gõ tìm** — tránh chen vào lúc người dùng đã biết chính xác muốn tìm gì.
+- Không cần xây UI đánh dấu riêng cho từng dòng trong sidebar (40+ mục) — chỉ MỘT nút ở topbar áp dụng cho màn hiện tại, an toàn hơn nhiều so với sửa markup dùng chung cho mọi `.sidebar-item`.
+
+File thay đổi: `quanlygieo.html` — thêm `NAV_ITEM_BY_KEY`, `navRecent`/`navFavorites` + hàm `trackNavVisit()`, `toggleCurrentFavorite()`, `updateFavBtn()` (khoảng dòng 8594‑8650); nút `#favToggleBtn` trong topbar tĩnh + icon `star` mới trong `ICON_PATHS`; gọi `trackNavVisit()`/`updateFavBtn()` trong `switchScreen()` và trong khối khởi động ứng dụng; `renderSidebarNav()` chèn hai khối này ngay sau mục "Hôm nay".
+
 **Giới hạn đã biết, chưa làm trong phiên này:**
 - Chưa có rule Integrity MỚI nào ngoài "Ledger≠Container" (GOGS Integrity — bill hoàn tất chưa có consumption, Container Integrity, Recipe Integrity đúng nghĩa kế hoạch liệt kê) — phần Ledger≠Container coi như xong (tái dùng công thức có sẵn), các rule còn lại vẫn chưa làm.
 - Command Search chưa tìm được Bill (khác nguồn dữ liệu — RTDB, không phải Firestore).
 - Context Navigation mới có ở Nguyên liệu (qua sheet 🕐), chưa có ở BTP/Container/Bill/Nhân viên.
-- Chưa test trên trình duyệt thật với dữ liệu Firebase thật (không có quyền truy cập project Firebase `the-cafe-33` trong phiên này) — mới kiểm tra bằng `node --check` (cú pháp hợp lệ) và đọc code đối chiếu thủ công. **Cần người quản lý mở thử trên trình duyệt trước khi tin tưởng hoàn toàn** — đặc biệt quan trọng lần này: mở sheet 🕐 của một nguyên liệu CÓ dán tem, xem khối "Đối chiếu sổ kho với tem" hiện ra có khớp với số đang thấy ở Kho → Container → Tồn lịch sử của ĐÚNG món đó không (hai nơi phải luôn ra cùng một số vì dùng chung một hàm) — đây là số liệu tồn kho nên sai là nghiêm trọng, xin đối chiếu kỹ trước khi tin. Ngoài ra: gõ tìm tên một nhân viên ngay khi vừa mở app; bấm "Kiểm tra ngay" ở Hộp thư cảnh báo; bấm nút Kiểm kê/Lệch kho mới thêm trong sheet 🕐.
+- Yêu thích chỉ đánh dấu được các màn có trong `NAV_SECTIONS`/`inbox` (mọi mục điều hướng chính) — không đánh dấu được một đối tượng cụ thể (vd. "món Sữa tươi này" không có khái niệm yêu thích riêng, chỉ có "màn Nguyên liệu" nói chung).
+- Chưa test trên trình duyệt thật với dữ liệu Firebase thật (không có quyền truy cập project Firebase `the-cafe-33` trong phiên này) — mới kiểm tra bằng `node --check` (cú pháp hợp lệ) và đọc code đối chiếu thủ công. **Cần người quản lý mở thử trên trình duyệt trước khi tin tưởng hoàn toàn** — đặc biệt quan trọng: (1) mở sheet 🕐 của một nguyên liệu CÓ dán tem, xem khối "Đối chiếu sổ kho với tem" có khớp với số đang thấy ở Kho → Container → Tồn lịch sử của ĐÚNG món đó không — đây là số liệu tồn kho nên sai là nghiêm trọng; (2) bấm nút ⭐ ở topbar tại vài màn khác nhau, xem sidebar có hiện đúng mục vừa đánh dấu dưới "⭐ Yêu thích" không, và bấm lại có bỏ đánh dấu đúng không; (3) chuyển qua vài màn khác nhau rồi xem "Gần đây" trong sidebar có cập nhật đúng thứ tự không.
 
 ---
 
