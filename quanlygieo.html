@@ -3792,7 +3792,27 @@ async function renderKhoLegacyStock(box, tabs){
 // status 'sealed'/'open' nên tem voided tự rơi ra khỏi tồn, khỏi kiểm kê, khỏi "tem chưa dán".
 // ============================================================
 
-let FIXREC_CACHE = [], FIXREC_CTN = [], fixRecOpenId = null;
+let FIXREC_CACHE = [], FIXREC_CTN = [], fixRecOpenId = null, fixRecPoId = null;
+
+// Vào thẳng phiếu nhận của một đơn đặt hàng, không bắt mò trong danh sách. Đơn nào cũng
+// biết phiếu nhận của mình (receiving_records lưu poId), nên chỗ tự nhiên để bấm "sửa số
+// đã nhận" là ngay trên đơn đó ở tab Đặt hàng — không phải trong màn hàng đang mở.
+async function poMoSuaPhieuNhan(poId){
+  try{
+    await ensureAuth();
+    const snap = await fstore.collection('receiving_records_gieogieo').where('poId','==',poId).get();
+    const recs = snap.docs.map(d=>({id:d.id, ...d.data()}))
+      .sort((a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
+    if(!recs.length){ toast('ℹ️ Đơn này chưa có phiếu nhận nào để sửa'); return; }
+    fixRecPoId = poId;
+    fixRecOpenId = recs.length === 1 ? recs[0].id : null;
+    ctnFilter = 'fixreceipt';
+    goKho('containers');
+  }catch(err){
+    console.error('poMoSuaPhieuNhan lỗi', err);
+    showError('Không mở được phiếu nhận: '+(err.code||err.message||err));
+  }
+}
 
 async function renderKhoFixReceipt(box, tabs){
   const nav = `<div class="filter-bar">${tabs.map(([k,l])=>
@@ -3800,7 +3820,11 @@ async function renderKhoFixReceipt(box, tabs){
   try{
     await ensureAuth();
     INVENTORY_ITEMS = await loadInventoryItems();
-    FIXREC_CACHE = await loadReceivingRecords(20);
+    FIXREC_CACHE = fixRecPoId
+      ? (await fstore.collection('receiving_records_gieogieo').where('poId','==',fixRecPoId).get())
+          .docs.map(d=>({id:d.id, ...d.data()}))
+          .sort((a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||'')))
+      : await loadReceivingRecords(20);
   }catch(err){
     console.error('renderKhoFixReceipt lỗi', err);
     box.innerHTML = nav + '<div class="muted">Không đọc được phiếu nhận. '+(err.code||err.message||'')+'</div>';
@@ -3841,6 +3865,9 @@ async function renderKhoFixReceipt(box, tabs){
           <div>${escapeHtmlAttr(l.name||'')}</div>
           <div class="muted-sm">Đã ghi nhận <b>${fmtNum(l.qtyGoodBase,0)} ${escapeHtmlAttr(l.unit||'')}</b>${soDv!=null&&heSo>1?` (= ${fmtNum(soDv,0)} × ${fmtNum(heSo,0)})`:''}</div>
           ${tem.length?`<div class="muted-sm">${song.length} tem còn sống${huy.length?` · ${huy.length} đã huỷ`:''}${daDung.length?` · <b style="color:var(--warn)">${daDung.length} đã mở/đã dùng</b>`:''}</div>`:'<div class="muted-sm">Món này không dán tem</div>'}
+          ${song.length?`<div class="muted-sm">Mã còn dùng: ${song.slice(0,14).map(c=>escapeHtmlAttr(c.code||'')).join(', ')}${song.length>14?` … (+${song.length-14})`:''}</div>`:''}
+          ${huy.length?`<div class="muted-sm" style="color:var(--bad)">Mã đã huỷ: ${huy.slice(0,14).map(c=>escapeHtmlAttr(c.code||'')).join(', ')}${huy.length>14?` … (+${huy.length-14})`:''}</div>`:''}
+          ${fixRecLichSuSua(r, l.itemId)}
         </div>
         <div class="li-r"><button class="btn outline sm" style="width:auto;padding:0 10px" onclick="suaDongPhieuNhan('${r.id}', ${i})">Sửa số</button></div>
       </div>`;
@@ -3849,8 +3876,22 @@ async function renderKhoFixReceipt(box, tabs){
   }).join('');
 
   box.innerHTML = nav +
-    `<div class="small-note" style="margin-bottom:12px">Gõ nhầm số lượng lúc nhận hàng (30 hộp thay vì 3) thì phải sửa ở <b>ba chỗ cùng lúc</b>: tồn kho, dòng nhập trong sổ, và đám tem đã sinh ra. Sửa ở đây làm đủ cả ba trong một lần bấm. Tem thừa bị <b>huỷ</b> chứ không xoá — còn tra lại được mã nào cần đi bóc khỏi kệ.</div>` +
+    (fixRecPoId ? `<div class="small-note" style="margin-bottom:10px">Đang xem phiếu nhận của <b>một đơn đặt hàng</b>. <a href="#" onclick="fixRecPoId=null;renderKhoContainers();return false;">Xem tất cả phiếu nhận</a></div>` : '') +
+    `<div class="small-note" style="margin-bottom:12px">Gõ nhầm số lượng lúc nhận hàng (30 hộp thay vì 3) thì phải sửa ở <b>bốn chỗ cùng lúc</b>: tồn kho, dòng nhập trong sổ, đám tem đã sinh, và số "đã nhận" trên đơn đặt hàng. Sửa ở đây làm đủ cả bốn trong một lần bấm, và <b>ghi lại nhật ký sửa</b> ngay trên phiếu — số cũ, số mới, ai sửa, vì sao.</div>` +
     (FIXREC_CACHE.length ? than : '<div class="empty-hint">Chưa có phiếu nhận hàng nào.</div>');
+}
+
+// Nhật ký sửa nằm ngay trên phiếu, hiện thẳng ở dòng bị sửa. Phiếu KHÔNG được im lặng
+// mang con số mới: sau này soát lại phải đọc được "hôm đó ghi 30, sửa còn 3, vì sao".
+function fixRecLichSuSua(rec, itemId){
+  const ls = (rec.corrections||[]).filter(x=>x.itemId===itemId);
+  if(!ls.length) return '';
+  return ls.map(x=>`<div class="small-note" style="color:var(--warn);margin-top:4px">
+      ${ic('alert',12)} Đã sửa ${String(x.at||'').replace('T',' ').slice(0,16)} bởi ${escapeHtmlAttr(x.by||'—')}:
+      <b>${fmtNum(x.fromBase,0)} → ${fmtNum(x.toBase,0)} ${escapeHtmlAttr(rec.lines&&rec.lines[0]?(rec.lines.find(l=>l.itemId===itemId)||{}).unit||'':'')}</b>
+      · lý do: ${escapeHtmlAttr(x.reason||'—')}
+      ${x.voidedCodes&&x.voidedCodes.length?`<br>Huỷ ${x.voidedCodes.length} tem: ${escapeHtmlAttr(x.voidedCodes.slice(0,10).join(', '))}${x.voidedCodes.length>10?'…':''}` : ''}
+    </div>`).join('');
 }
 
 function fixRecToggle(id){ fixRecOpenId = (fixRecOpenId===id) ? null : id; renderKhoContainers(); }
@@ -3912,6 +3953,13 @@ async function suaDongPhieuNhan(recId, lineIdx){
     if(daDung.length) toast(`⚠️ ${daDung.length} tem của phiếu này đã được mở/báo hết — kiểm tra lại số liệu của những con đó: ${daDung.slice(0,5).map(c=>c.code).join(', ')}`);
   }
 
+  // Lý do BẮT BUỘC. Một con số trong sổ bị sửa mà không kèm lý do thì ba tháng sau không ai
+  // dựng lại được chuyện gì đã xảy ra — đúng thứ làm cả cuốn sổ mất giá trị đối chiếu.
+  const lyDoNguoiDung = String(prompt(
+    `Vì sao phải sửa dòng "${l.name}" từ ${fmtNum(daGhi,2)} xuống ${fmtNum(soDung,2)} ${donVi}?\n\n`
+    + `VD: nhân viên gõ nhầm 30 thay vì 3 · giao thiếu so với phiếu · nhập trùng phiếu`, '') || '').trim();
+  if(!lyDoNguoiDung){ toast('⚠️ Phải ghi lý do — phiếu nhận sẽ lưu lại lý do này'); return; }
+
   const tonHienTai = Number(it && it.currentStock) || 0;
   if(!confirm(
     `Sửa "${l.name}": ${fmtNum(daGhi,2)} → ${fmtNum(soDung,2)} ${donVi}\n\n`
@@ -3923,7 +3971,7 @@ async function suaDongPhieuNhan(recId, lineIdx){
   try{
     await ensureAuth();
     const nowISO = new Date().toISOString();
-    const lyDo = `Sửa phiếu nhận ghi thừa: ${fmtNum(daGhi,2)} → ${fmtNum(soDung,2)} ${donVi}`;
+    const lyDo = `Sửa phiếu nhận ghi thừa: ${fmtNum(daGhi,2)} → ${fmtNum(soDung,2)} ${donVi} · ${lyDoNguoiDung}`;
 
     // 1) Huỷ tem thừa (hoặc hạ dung tích nếu là tem theo lô).
     if(huy.length){
@@ -3967,20 +4015,63 @@ async function suaDongPhieuNhan(recId, lineIdx){
       });
     });
 
-    // 3) Cập nhật lại chính phiếu nhận, để lần sau mở ra không thấy con số cũ.
+    // 3) Cập nhật phiếu nhận VÀ ghi nhật ký sửa. `corrections` là mảng CHỈ THÊM, không bao
+    //    giờ ghi đè: phiếu mang con số mới nhưng vẫn kể lại được đầy đủ từng lần sửa, số cũ,
+    //    số mới, ai sửa, vì sao, huỷ những mã tem nào. Sửa mà không để lại vết thì cuốn sổ
+    //    mất sạch giá trị đối chiếu.
+    const buoc = {
+      at: nowISO, by: 'management', itemId: l.itemId, name: l.name || '',
+      fromBase: daGhiBase, toBase: baseDung, deltaBase: -thua,
+      reason: lyDoNguoiDung,
+      voidedCodes: huy.map(c=>c.code||''), keptCodes: (theoLo?[]:tem.filter(c=>(c.status==='sealed'||c.status==='open') && !huy.some(h=>h.id===c.id)).map(c=>c.code||'')),
+      ledgerTxIds: dongLedger.map(d=>d.id)
+    };
     const lines = (rec.lines||[]).map(x => (x.itemId===l.itemId && Number(x.qtyGoodBase)===daGhiBase)
-      ? {...x, qtyGoodBase: baseDung, qtyGoodBaseOriginal: daGhiBase, correctNote: lyDo} : x);
+      ? {...x, qtyGoodBase: baseDung,
+         // Giữ con số GỐC của lần nhận đầu tiên, không để lần sửa thứ hai đè mất nó.
+         qtyGoodBaseOriginal: (x.qtyGoodBaseOriginal != null ? x.qtyGoodBaseOriginal : daGhiBase),
+         correctNote: lyDo} : x);
     await fstore.collection('receiving_records_gieogieo').doc(recId).update({
-      lines, correctedAt: nowISO, correctedBy:'management', correctReason: lyDo
+      lines, corrections: (rec.corrections||[]).concat([buoc]),
+      correctedAt: nowISO, correctedBy:'management', correctReason: lyDo
     });
 
-    logAudit('adjust','receiving_record',recId,{itemId:l.itemId, tu:daGhiBase, den:baseDung, temHuy:huy.length, soDongLedger:dongLedger.length});
+    // 4) Đơn đặt hàng cũng phải hạ số "đã nhận" xuống, nếu không đơn vẫn khoe đã nhận đủ 30
+    //    và trạng thái vẫn là 'received' — đối chiếu đặt/nhận sai từ gốc.
+    if(rec.poId){
+      try{ await poTruSoDaNhan(rec.poId, l.itemId, thua, buoc); }
+      catch(err){ console.error('[sửa phiếu nhận] cập nhật đơn đặt hàng lỗi', err);
+        toast('⚠️ Đã sửa phiếu nhưng chưa cập nhật được đơn đặt hàng — mở tab Đặt hàng kiểm tra'); }
+    }
+
+    logAudit('adjust','receiving_record',recId,{itemId:l.itemId, tu:daGhiBase, den:baseDung, lyDo:lyDoNguoiDung, temHuy:huy.length, soDongLedger:dongLedger.length});
     toast(`✅ Đã sửa · trừ ${fmtNum(thua,0)} ${l.unit||''} khỏi tồn${huy.length?` · huỷ ${huy.length} tem`:''}`);
     renderKhoContainers();
   }catch(err){
     console.error('suaDongPhieuNhan lỗi', err);
     showError('Không sửa được: '+(err.code||err.message||err));
   }
+}
+
+// Hạ số "đã nhận" trên đơn đặt hàng và tính lại trạng thái. Dùng runTransaction vì POS có
+// thể đang ghi nhận hàng cho chính đơn này cùng lúc.
+async function poTruSoDaNhan(poId, itemId, thua, buoc){
+  const ref = fstore.collection('purchase_orders_gieogieo').doc(poId);
+  await fstore.runTransaction(async t=>{
+    const doc = await t.get(ref);
+    if(!doc.exists) return;
+    const data = doc.data();
+    const lines = (data.lines||[]).map(l=> l.itemId!==itemId ? l
+      : {...l, receivedGoodBase: Math.max(0, (Number(l.receivedGoodBase)||0) - thua)});
+    const duNhan  = lines.every(l => (Number(l.receivedGoodBase)||0) >= (Number(l.qtyExpectedBase)||0));
+    const coNhan  = lines.some(l => (Number(l.receivedGoodBase)||0) > 0);
+    // Đơn đã huỷ thì để yên trạng thái — sửa số không được hồi sinh một đơn đã đóng.
+    const status = data.status === 'cancelled' ? data.status
+      : (duNhan ? 'received' : (coNhan ? 'partial' : 'pending'));
+    t.update(ref, { lines, status,
+      corrections: (data.corrections||[]).concat([buoc]),
+      updatedAt: new Date().toISOString() });
+  });
 }
 
 async function chotTonLichSu(idx){
@@ -18631,8 +18722,16 @@ async function renderKhoPO(){
         <div>${po.supplier || '(không ghi nhà cung cấp)'} <span class="tier tier-${st.color}" style="margin-left:4px">${st.label}</span></div>
         <div style="margin-top:4px">${lines}</div>
         <div class="small-note" style="margin-top:4px">${(po.createdAt||'').replace('T',' ').slice(0,16)}${po.note?(' · '+po.note):''}</div>
+        ${(po.corrections||[]).map(x=>`<div class="small-note" style="color:var(--warn);margin-top:4px">
+          ${ic('alert',12)} Đã sửa số đã nhận ${String(x.at||'').replace('T',' ').slice(0,16)} bởi ${escapeHtmlAttr(x.by||'—')} ·
+          ${escapeHtmlAttr(x.name||'')}: <b>${fmtNum(x.fromBase,0)} → ${fmtNum(x.toBase,0)}</b> · lý do: ${escapeHtmlAttr(x.reason||'—')}
+          ${x.voidedCodes&&x.voidedCodes.length?`<br>Huỷ ${x.voidedCodes.length} tem: ${escapeHtmlAttr(x.voidedCodes.slice(0,10).join(', '))}${x.voidedCodes.length>10?'…':''}`:''}
+        </div>`).join('')}
       </div>
-      <div class="li-r">${activeStatuses.includes(po.status) ? `<button class="iconbtn" onclick="confirmCancelPO('${po.id}')">${ic('x',15)} Huỷ</button>` : ''}</div>
+      <div class="li-r">
+        ${['partial','received'].includes(po.status) ? `<button class="iconbtn" onclick="poMoSuaPhieuNhan('${po.id}')">${ic('note',15)} Sửa số đã nhận</button>` : ''}
+        ${activeStatuses.includes(po.status) ? `<button class="iconbtn" onclick="confirmCancelPO('${po.id}')">${ic('x',15)} Huỷ</button>` : ''}
+      </div>
     </div>`;
   }).join('') : '<div class="muted">Chưa có đơn đặt hàng nào.</div>';
 
