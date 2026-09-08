@@ -20079,13 +20079,24 @@ async function _histLoad(coll, field, id){
 async function openItemHistory(itemId){
   const it = INVENTORY_ITEMS.find(x=>x.id===itemId);
   if(!it){ toast('⚠️ Không tìm thấy nguyên liệu'); return; }
+  const tm = itemTrackingMode(it);
   _histCtx = { kind:'item', id:itemId, name:it.name||'', unit:it.unit||'',
-               stock:Number(it.currentStock)||0, rows:[], filter:'all', partial:false, indexUrl:'' };
+               stock:Number(it.currentStock)||0, rows:[], filter:'all', partial:false, indexUrl:'',
+               trackingMode: tm, containers:[] };
   openEditSheet('Lịch sử — ' + (it.name||''), '<div id="histBody"></div>', ()=>{ _histCtx=null; });
   _histRenderLoading();
   try{
-    const r = await _histLoad('stock_transactions_gieogieo','itemId',itemId);
+    // Context Navigation (Phase 5) — món có dán tem thì kéo luôn "đang mở & tem"
+    // của ĐÚNG món này vào cùng sheet, khỏi phải rời khỏi đây rồi lọc lại ở màn
+    // Container. Chỉ đọc khi món thực sự có theo dõi tem — đa số nguyên liệu
+    // không dán tem, đọc thêm cho chúng chỉ tốn lượt đọc vô ích. Lọc phía client
+    // trên danh sách "đang mở" (vốn đã nhỏ — vài chục bản ghi, xem loadContainersFor)
+    // thay vì thêm where('itemId',...) để khỏi cần tạo composite index mới.
+    const jobs = [ _histLoad('stock_transactions_gieogieo','itemId',itemId) ];
+    if(tm !== 'none') jobs.push(loadContainersFor('open').then(l=>l.filter(c=>c.itemId===itemId)).catch(()=>[]));
+    const [r, containers] = await Promise.all(jobs);
     Object.assign(_histCtx, r);
+    if(containers) _histCtx.containers = containers;
   }catch(err){
     console.error('openItemHistory failed', err);
     _histRenderError(err); return;
@@ -20152,6 +20163,32 @@ function _histTypeLabel(ty){
   return null;
 }
 const HIST_TYPE_ORDER = ['RECEIVING','TRANSFER','CONSUMPTION','PRODUCTION','WASTE','ADJUSTMENT','LOC_SET','STOCK_IN','SALE'];
+
+// ------------------------------------------------------------
+// CONTEXT NAVIGATION (Phase 5) — "đang xem một nguyên liệu, các chức năng liên
+// quan phải ở gần đối tượng đó". Container (chai/tem) là chức năng liên quan
+// hay bị hỏi nhất khi đang xem MỘT nguyên liệu cụ thể ("chai sữa đang mở còn
+// bao nhiêu, ai mở"), nhưng trước đây phải rời khỏi Nguyên liệu, qua hẳn màn
+// Container rồi tự dò trong danh sách lẫn lộn mọi món. Giờ hiện thẳng trong
+// cùng sheet — chỉ với món có bật dán tem (itemTrackingMode !== 'none').
+// ------------------------------------------------------------
+function _histContainerHtml(c){
+  if(c.kind !== 'item' || !c.trackingMode || c.trackingMode === 'none') return '';
+  const list = c.containers || [];
+  const dt = iso => { const d = iso ? new Date(iso) : null; return (d && !isNaN(d)) ? `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}` : '—'; };
+  const rows = list.map(x=>`
+    <div class="row">
+      <span class="rl">${escapeHtmlAttr(x.code||'(chưa có mã)')}
+        <div class="small-note" style="margin-top:1px">Mở ${dt(x.openedAt)} bởi ${escapeHtmlAttr(x.openedBy||'—')}</div></span>
+      <span class="rv">${x.expiresAt ? 'hạn '+dt(x.expiresAt) : ''}</span>
+    </div>`).join('');
+  return `
+    <div class="card" style="margin-bottom:10px;padding:12px 14px">
+      <div class="card-h"><h3>${ic('package')} Đang mở & tem${list.length?` (${list.length})`:''}</h3>
+        <button class="btn outline sm" style="width:auto;padding:0 10px" onclick="closeEditSheet(); goContainers('open');">Xem màn Container</button></div>
+      ${list.length ? rows : '<div class="small-note">Không có chai/gói nào đang mở cho món này ngay lúc này.</div>'}
+    </div>`;
+}
 
 function _histTypeBreakdown(c){
   const byType = {};   // rawTy (đã hoa) → {label, sum}
@@ -20310,6 +20347,7 @@ function _histRender(){
       <div class="small-note" style="margin-top:2px">${all.length} dòng · mới nhất trước${c.partial?'':' · tối đa 400 giao dịch gần nhất'}</div>
     </div>
     ${canhBao}
+    ${_histContainerHtml(c)}
     ${_histBreakdownHtml(c)}
     <div class="filter-bar" style="margin-bottom:2px">${chips}</div>
     ${exactFilterNote}

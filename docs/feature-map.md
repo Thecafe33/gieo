@@ -34,7 +34,7 @@ Cột "Trạng thái" đối chiếu với 26 Phase của kế hoạch cải t�
 | Kiểm toán | nhóm **Kiểm toán** | | thấp | 🟢 |
 | Tìm nhanh sidebar (`navSearch`, Ctrl/⌘+K) | `onNavSearch()` / `renderSidebarNav()` | nhãn nav + **Nguyên liệu, BTP** | thấp | 🟡 **Mở rộng 2026-09-08** — gõ ≥2 ký tự giờ tìm cả tên nguyên liệu/BTP (không chỉ 40+ nhãn nav), mỗi kết quả có nút "Giải thích tồn kho" đi thẳng vào Phase 9. Còn thiếu Bill/Nhân viên/Transaction như Phase 4 mô tả đầy đủ |
 | Breadcrumb-lite (`hdrKicker`/`hdrTitle`) | `switchScreen()` dòng ~9342 | | thấp | 🟡 Có 2 tầng (Nhóm › Mục), không phải breadcrumb bấm được từng cấp; không có deep link / URL hash |
-| Context Navigation (tab liên quan ngay tại object) | — | — | — | 🔴 **Chưa có** — xem đối tượng (vd. một nguyên liệu) chưa có dải tab "Tổng quan / Kho / Container / Giao dịch / Kiểm kê" như Phase 5 mô tả |
+| Context Navigation (tab liên quan ngay tại object) | sheet "Lịch sử" (nút 🕐) ở Nguyên liệu | Nguyên liệu | thấp | 🟡 **Một phần, mới thêm 2026-09-08** — sheet 🕐 giờ gộp sẵn Container đang mở CỦA ĐÚNG món đó + Giải thích tồn kho + Giao dịch trong cùng một chỗ (không cần rời khỏi Nguyên liệu). Còn thiếu: chưa gắn Kiểm kê/Lệch kho ngay tại đây, và BTP/các object khác chưa có tương tự |
 | Related Actions | rải rác, vd. nudge "Duyệt phiếu kiểm kê" trong Lệch kho, nút "Khai định mức" khi thiếu recipe | | | 🟡 Có từng phần theo ngữ cảnh nhưng không nhất quán theo mọi màn |
 | Recent & Favorites | — | — | — | 🔴 **Chưa có** |
 | Transaction Drill-down | breakdown → `histSetFilter(type)` lọc đúng loại giao dịch trong cùng sheet | Nguyên liệu, BTP | thấp | 🟡 **Một phần, mới thêm 2026-09-08** — bấm vào một dòng breakdown thì lọc ra đúng các giao dịch loại đó (ngày giờ, nhân viên, ghi chú, tồn còn lại), nhưng CHƯA nhảy được tới đúng PO/bill/waste-record gốc (referenceId) |
@@ -54,7 +54,7 @@ Chú thích trạng thái: 🟢 đã đúng vị trí · 🟡 có nhưng chưa �
 
 | Object | Điểm truy cập hiện có |
 |---|---|
-| **Nguyên liệu** | Kho → Nguyên liệu (danh sách, sửa tồn, sửa thông tin) · nút 🕐 → Lịch sử + **Giải thích tồn kho** (mới) · Kho → Lệch kho & định lượng (đối chiếu theo kỳ) · Kho → Kiểm kê · Kho → Đặt & nhận hàng · Menu & Khuyến mãi → Định mức món (recipe dùng nguyên liệu) · Tra giá theo ngày (cuối màn Nguyên liệu) |
+| **Nguyên liệu** | Kho → Nguyên liệu (danh sách, sửa tồn, sửa thông tin) · nút 🕐 → Lịch sử + **Giải thích tồn kho** + **Container đang mở của đúng món này** (cả hai mới) · Kho → Lệch kho & định lượng (đối chiếu theo kỳ) · Kho → Kiểm kê · Kho → Đặt & nhận hàng · Menu & Khuyến mãi → Định mức món (recipe dùng nguyên liệu) · Tra giá theo ngày (cuối màn Nguyên liệu) · Tìm nhanh sidebar (mới) |
 | **BTP (Chế biến cấp 1)** | Kho → Chế biến cấp 1 · nút 🕐 → Lịch sử + Giải thích tồn kho (mới, dùng chung `_histRender`) · Kho → Lịch sử kho (chip "Bán thành phẩm") |
 | **Container (chai/tem)** | Kho → Hàng đang mở & tem (`ctnFilter`: cần soát / hết hạn / chưa dán tem / đang mở / tất cả) |
 | **Sản phẩm / Menu** | 🔒 Quản lý Menu (protected) · Định mức món · GOGS Món |
@@ -64,7 +64,7 @@ Chú thích trạng thái: 🟢 đã đúng vị trí · 🟡 có nhưng chưa �
 | **Chi nhánh** | Chưa xác nhận có trong data model — cần kiểm tra trước khi làm Phase 18 |
 | **Nhà cung cấp** | Kho → Đặt & nhận hàng (field `supplier` trên PO) — chưa có màn quản lý nhà cung cấp riêng |
 
-Object "Nguyên liệu" hiện có điểm truy cập gần nhất với ví dụ trong kế hoạch (mục 3, "Sữa tươi"): Tổng quan (dòng trong danh sách) · Tồn kho (cùng dòng) · Giao dịch + Giải thích tồn kho (sheet 🕐) · Kiểm kê (Kho → Kiểm kê, lọc theo món) · Lệch kho (Kho → Lệch kho). Còn thiếu: **Container theo đúng nguyên liệu đó** (màn Container hiện lọc theo trạng thái chai, chưa lọc theo tên nguyên liệu từ phía màn Nguyên liệu) và **Giá nhập** (có "Tra giá theo ngày" nhưng là block riêng cuối trang, chưa gắn theo từng dòng nguyên liệu).
+Object "Nguyên liệu" hiện có điểm truy cập gần nhất với ví dụ trong kế hoạch (mục 3, "Sữa tươi"): Tổng quan (dòng trong danh sách) · Tồn kho (cùng dòng) · Giao dịch + Giải thích tồn kho + **Container** (cả ba trong cùng sheet 🕐 — xem §3) · Kiểm kê (Kho → Kiểm kê, lọc theo món) · Lệch kho (Kho → Lệch kho). Còn thiếu: **Giá nhập** ngay tại từng dòng (có "Tra giá theo ngày" nhưng là block riêng cuối trang, chưa gắn theo từng dòng nguyên liệu) và **Kiểm kê/Lệch kho** chưa có link/tab trực tiếp từ trong sheet 🕐 — vẫn phải quay ra Kho.
 
 ---
 
@@ -88,10 +88,20 @@ File thay đổi: `quanlygieo.html`, hàm mới `_histTypeLabel`, `HIST_EXTRA_TY
 
 File thay đổi: `quanlygieo.html`, hàm `renderSidebarNav()` (thêm khối kết quả dữ liệu), `onNavSearch()`, hàm mới `_ensureSearchIndexes()` (khoảng dòng 8656‑8750).
 
+**Phase 5 — Context Navigation, một phần**, vẫn trong cùng sheet "Lịch sử" (nút 🕐 ở Nguyên liệu):
+
+- Thêm khối "📦 Đang mở & tem" hiện đúng các container (`stock_containers_gieogieo`) đang mở CỦA RIÊNG món đang xem — trước đây phải rời Nguyên liệu, qua hẳn màn Container rồi tự dò trong danh sách lẫn lộn mọi món. Chỉ tải khi món có bật dán tem (`itemTrackingMode !== 'none'`) — đa số nguyên liệu không dùng tem nên không tốn lượt đọc thừa.
+- Lọc phía client trên danh sách "đang mở" đã có sẵn (vốn chỉ vài chục bản ghi — xem `loadContainersFor`), **không** thêm `where('itemId',...)` mới để khỏi phải tạo composite index Firestore mới.
+- Nút "Xem màn Container" đóng sheet rồi điều hướng sang màn Container đầy đủ (`goContainers('open')`) cho ai cần thao tác (đánh dấu đã xem, v.v.) — sheet chỉ để XEM nhanh, không thay thế quy trình xử lý container hiện có.
+- Sheet 🕐 giờ gộp: Tồn hiện tại → Container đang mở → Giải thích tồn kho → Lịch sử giao dịch, đúng tinh thần "các chức năng liên quan phải ở gần đối tượng đó" — chỉ còn thiếu Kiểm kê/Lệch kho chưa có link tại chỗ.
+
+File thay đổi: `quanlygieo.html`, hàm mới `_histContainerHtml` (khoảng dòng 20166‑20188), sửa `openItemHistory()` để tải song song container cùng lịch sử giao dịch.
+
 **Giới hạn đã biết, chưa làm trong phiên này:**
-- Chưa đối chiếu Ledger vs **Container** (tồn vật lý theo chai/tem) như ví dụ "🟢 KHỚP / 🟡 Có chênh lệch" trong kế hoạch — cơ chế container hiện tại (`stock_containers_gieogieo`, `untrackedBase`) phức tạp hơn một phép cộng đơn giản (có trạng thái sealed/open/finished, `needsReview`...) nên cần nghiên cứu kỹ hơn trước khi làm, để tránh đưa ra con số reconciliation sai.
+- Chưa đối chiếu Ledger vs **Container** (tồn vật lý theo chai/tem) như ví dụ "🟢 KHỚP / 🟡 Có chênh lệch" trong kế hoạch — khối Container mới chỉ LIỆT KÊ container đang mở, chưa CỘNG SỐ để so với tồn ledger. Cần hiểu rõ `untrackedBase`/trạng thái container trước khi làm phép cộng này cho đúng.
 - Command Search mới tìm Nguyên liệu/BTP, chưa tìm Bill/Nhân viên/Transaction.
-- Chưa test trên trình duyệt thật với dữ liệu Firebase thật (không có quyền truy cập project Firebase `the-cafe-33` trong phiên này) — mới kiểm tra bằng `node --check` (cú pháp hợp lệ) và đọc code đối chiếu thủ công. **Cần người quản lý mở thử trên trình duyệt trước khi tin tưởng hoàn toàn** — đặc biệt: gõ tìm tên một nguyên liệu có thật, xem kết quả + bấm "Giải thích tồn kho" có mở đúng sheet không.
+- Context Navigation mới có ở Nguyên liệu (qua sheet 🕐), chưa có ở BTP/Container/Bill/Nhân viên.
+- Chưa test trên trình duyệt thật với dữ liệu Firebase thật (không có quyền truy cập project Firebase `the-cafe-33` trong phiên này) — mới kiểm tra bằng `node --check` (cú pháp hợp lệ) và đọc code đối chiếu thủ công. **Cần người quản lý mở thử trên trình duyệt trước khi tin tưởng hoàn toàn** — đặc biệt: mở sheet 🕐 của một nguyên liệu CÓ dán tem đang mở chai, xem khối Container có hiện đúng chai đó không; và gõ tìm tên một nguyên liệu, bấm "Giải thích tồn kho" có mở đúng sheet không.
 
 ---
 
@@ -100,6 +110,6 @@ File thay đổi: `quanlygieo.html`, hàm `renderSidebarNav()` (thêm khối k�
 Theo đúng thứ tự ưu tiên của kế hoạch, các hạng mục ⭐⭐⭐⭐⭐/⭐⭐⭐⭐ còn thiếu nhiều nhất:
 
 1. **Command Search — mở rộng thêm** (Phase 4) — thêm Bill (số bill, SĐT khách) và Nhân viên vào cùng cơ chế tìm ở §3, giữ đúng nguyên tắc "vẫn một ô tìm, không tạo màn riêng".
-2. **Context Navigation** (Phase 5) — thêm dải tab "Tổng quan / Kho / Giao dịch / Kiểm kê" ngay tại từng nguyên liệu, thay vì phải rời khỏi màn Nguyên liệu để vào Kiểm kê/Lệch kho.
+2. **Context Navigation — mở rộng thêm** (Phase 5) — thêm link nhanh tới Kiểm kê/Lệch kho ngay trong sheet 🕐; và làm tương tự cho BTP (container không áp dụng cho BTP nhưng Kiểm kê/Lệch kho thì có).
 3. **Integrity Rules → Alert Inbox** (Phase 11) — bổ sung rule "Ledger ≠ Container", "GOGS Integrity" (bill hoàn tất chưa có consumption) vào cùng cơ chế `alerts_gieogieo` đã có, không tạo dashboard riêng.
 4. Container reconciliation cho Giải thích tồn kho (nối tiếp việc đã làm ở §3) — sau khi hiểu rõ `untrackedBase`/trạng thái container.
