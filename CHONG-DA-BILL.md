@@ -59,12 +59,28 @@ chọn. Màn này tự gom nhóm và tô vàng những bill bị in lại **từ
 
 ## Lớp 2 — danh sách bill 60 phút
 
-`renderH()` chỉ liệt kê đơn mới hơn 60 phút, và hiện một dòng vàng nói thẳng còn
-bao nhiêu đơn đang ẩn — ẩn im lặng sẽ khiến nhân viên tưởng mất đơn rồi bấm lại.
+`renderH()` chỉ liệt kê đơn mới hơn 60 phút. Vẫn chừa lối tra cứu — khách quay
+lại hỏi bill là việc thật — nhưng **đơn cũ và đơn mới đi theo hai luật khác hẳn
+nhau**:
 
-Vẫn chừa lối tra cứu: **gõ từ 3 ký tự** vào ô tìm thì tra được **mọi** đơn theo
-mã bill / SĐT / số tiền. Khách quay lại hỏi bill là việc thật, và nhân viên vẫn
-cần tìm được bill bấm nhầm để xoá. Cái mất đi chỉ là *một danh sách để cộng dồn*.
+| | Luật khớp |
+|---|---|
+| Đơn còn trong 60 phút | tìm lỏng như cũ: khớp một phần mã bill / SĐT / số tiền |
+| Đơn cũ hơn | chỉ khớp **đúng và đủ**: nguyên mã bill (≥ 4 ký tự sau khi bỏ `#`, `-`, `.`) hoặc **đủ** số điện thoại (≥ 9 số) |
+
+Đây không phải cầu kỳ thừa. Tìm lỏng trên đơn cũ là một lỗ thủng bằng **cả lớp
+chặn này**: mã bill có dạng `#40-07.09.26`, phần ngày giống nhau ở mọi bill trong
+ngày — gõ `.09.` là ra sạch danh sách. Khớp theo số tiền cũng vậy, gõ `000` khớp
+gần hết. Ba phím là vượt.
+
+Chuẩn hoá trước khi so nên gõ `40-07.09.26`, `40 07 09 26` hay `#40-07.09.26`
+đều ra **đúng một** bill — tiện cho người tra thật, mà không có cách nào gõ ra
+nhiều bill cùng lúc.
+
+**Không** treo dòng "N đơn cũ đã ẩn" ở đầu danh sách. Dòng đó vừa chỉ luôn đường
+lách, vừa tự khai ra số bill của ngày — mà số bill × giá trung bình chính là
+doanh thu, thứ lớp này sinh ra để giấu. Luật tra đơn cũ chỉ hiện khi tìm **không
+ra**, đúng lúc nhân viên thật sự cần đến nó.
 
 ## Lớp 3 — Lịch sử bill bên Quản lý
 
@@ -130,5 +146,6 @@ Chưa làm, vì cần chốt trước hai điều với quán:
   Lớp 4 nằm trong `_submitShiftCloseImpl` + `renderShiftCloseCountForm(canGhiChu)`.
 * `quanlygieo.html` — `renderAuditReprints()` (tab Kiểm toán) và
   `cashAttemptsCardHTML()` (tab Sổ quỹ).
-* Kiểm thử: `guards.test.js` (logic + đọc file, 84 mục) và `guards.browser.js`
-  (POS thật trong Chromium, 13 mục).
+* Kiểm thử: `guards.test.js` (logic + đọc file, 90 mục) và `guards.browser.js`
+  (POS thật trong Chromium, 22 mục — trong đó 7 mục thử đúng các đường lách của
+  ô tìm: `.09.`, `08.09`, `000`, `09`, `#`, SĐT thiếu số, mã thiếu ký tự).

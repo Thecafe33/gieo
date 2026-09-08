@@ -1159,7 +1159,7 @@ body.assist-main-on .toast{bottom:calc(100px + var(--assist-h, 0px) + 10px);}
     </button>
   </div>
   <div class="hs"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#bbb" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>
-    <input type="text" placeholder="Gõ mã bill / SĐT để tra đơn cũ..." id="hsi" oninput="filterH()">
+    <input type="text" placeholder="Tìm đơn theo mã bill / SĐT..." id="hsi" oninput="filterH()">
   </div>
   <div style="overflow-y:auto;flex:1;padding-bottom:20px" id="hl"><div style="text-align:center;padding:40px;color:#bbb">Chưa có đơn hàng</div></div>
 </div>
@@ -18094,36 +18094,57 @@ function drawChart(period, filteredOrders) {
 // HISTORY
 // ============================================================
 function renderH(f = '') {
-  const list = document.getElementById('hl'), fl = f.toLowerCase();
+  const list = document.getElementById('hl'), fl = f.toLowerCase().trim();
   // [NEW-GUARD Lớp 2] KHÔNG gõ gì → chỉ hiện đơn trong HISTORY_VISIBLE_MIN phút
-  // gần nhất. Có gõ (từ 3 ký tự) → tìm trong TOÀN BỘ đơn, kể cả đơn cũ.
-  //   Vì sao vậy: một danh sách đầy đủ là thứ cộng tay ra được doanh thu ngày —
-  //   đúng con số đã cố ý giấu khỏi POS. Còn tra một đơn cụ thể (khách quay lại
-  //   hỏi bill, nhân viên cần xoá bill bấm nhầm) thì vẫn phải làm được, và tra
-  //   đích danh từng đơn thì không dựng lại được tổng.
+  // gần nhất. Vì sao: một danh sách đầy đủ là thứ cộng tay ra được doanh thu
+  // ngày — đúng con số đã cố ý giấu khỏi POS.
+  //
+  // Có gõ thì tra được cả đơn cũ, nhưng theo LUẬT KHÁC HẲN đơn mới:
+  //
+  //   Đơn còn trong 60 phút — tìm lỏng như cũ (khớp một phần mã / SĐT / số tiền).
+  //     Chúng vốn đã hiện sẵn, tìm chỉ để lọc cho nhanh, không lộ thêm gì.
+  //
+  //   Đơn cũ hơn — chỉ khớp ĐÚNG VÀ ĐỦ: nguyên mã bill, hoặc đủ số điện thoại.
+  //     Tìm lỏng trên đơn cũ chính là một lỗ thủng bằng cả lớp chặn này: mã bill
+  //     có dạng "#40-07.09.26" nên phần ngày GIỐNG NHAU ở mọi bill trong ngày —
+  //     gõ ".09." là ra sạch danh sách. Số tiền cũng vậy, gõ "000" khớp gần hết.
+  //     Ba phím là vượt lớp chặn.
+  //
+  // Tra đúng một đơn (khách quay lại hỏi bill) thì vẫn làm được như thường; cái
+  // không làm được là quét ra một danh sách để cộng.
   const timKiem = fl.length >= 3;
-  const khop = o =>
+  const chuMa  = x => String(x || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const chuSo  = x => String(x || '').replace(/\D/g, '');
+  const maTim = chuMa(fl), sdtTim = chuSo(fl);
+
+  const khopMoi = o =>
     o.total.toString().includes(fl) ||
     (o.phone && o.phone.includes(fl)) ||
     (o.billCode && String(o.billCode).toLowerCase().includes(fl)) ||
     String(o.id).includes(fl);
-  const filtered = timKiem ? orders.filter(khop) : orders.filter(billIsFresh);
-  const soAn = timKiem ? 0 : orders.length - filtered.length;
-  const dongAn = soAn > 0
-    ? `<div style="margin:0 16px 12px;background:#fff7e6;border:1.5px solid #fbbf24;border-radius:14px;padding:12px 14px;display:flex;align-items:flex-start;gap:9px;">
-         <span style="font-size:17px;line-height:1.3;flex-shrink:0;">🔒</span>
-         <span style="font-size:12.5px;font-weight:600;color:#92400e;line-height:1.5;">
-           <b>${soAn} đơn cũ đã ẩn</b> — danh sách chỉ hiện đơn trong ${HISTORY_VISIBLE_MIN} phút gần nhất.
-           Cần tra đơn cũ thì gõ <b>mã bill</b> hoặc <b>số điện thoại</b> vào ô tìm bên trên.
-         </span>
-       </div>`
-    : '';
+
+  // Bỏ dấu chấm/gạch/thăng hai bên rồi so bằng: nhân viên gõ "40-07.09.26" hay
+  // "4007092 6" đều ra đúng một bill, nhưng không có cách nào gõ ra nhiều bill.
+  const khopCu = o =>
+    (maTim.length >= 4 && chuMa(o.billCode) === maTim) ||
+    (sdtTim.length >= 9 && chuSo(o.phone) === sdtTim) ||
+    (fl.length >= 15 && String(o.id).toLowerCase() === fl);
+
+  const filtered = timKiem
+    ? orders.filter(o => (billIsFresh(o) ? khopMoi(o) : khopCu(o)))
+    : orders.filter(billIsFresh);
   if (!filtered.length) {
-    list.innerHTML = dongAn + `<div style="text-align:center;padding:40px;color:#bbb">${timKiem ? 'Không tìm thấy đơn nào khớp' : 'Chưa có đơn nào trong ' + HISTORY_VISIBLE_MIN + ' phút gần đây'}</div>`;
+    // Chỉ khi tìm KHÔNG RA mới nói luật tra đơn cũ — lúc đó nhân viên đang thật
+    // sự cần nó. Không treo sẵn một dòng hướng dẫn ở đầu danh sách: dòng đó vừa
+    // chỉ luôn đường lách, vừa (nếu kèm số đơn đang ẩn) tự khai ra số bill của
+    // ngày, mà số bill × giá trung bình chính là doanh thu — thứ lớp này giấu.
+    list.innerHTML = `<div style="text-align:center;padding:40px 26px;color:#bbb;line-height:1.6">${timKiem
+      ? 'Không tìm thấy đơn nào khớp.<br><span style="font-size:12.5px">Đơn cũ hơn ' + HISTORY_VISIBLE_MIN + ' phút phải gõ <b>đúng mã bill</b> hoặc <b>đủ số điện thoại</b>.</span>'
+      : 'Chưa có đơn nào trong ' + HISTORY_VISIBLE_MIN + ' phút gần đây'}</div>`;
     return;
   }
   const grp = {}; filtered.forEach(o => { if (!grp[o.date]) grp[o.date] = []; grp[o.date].push(o); });
-  list.innerHTML = dongAn + Object.keys(grp).map(d =>
+  list.innerHTML = Object.keys(grp).map(d =>
     `<div class="hdg"><div class="hdl">${d}</div>${grp[d].map(o => {
       const isShipOrder = o.isShip === true;
       const isAppOrder  = o.isAppSale === true;
