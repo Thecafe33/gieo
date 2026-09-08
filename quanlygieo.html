@@ -8631,6 +8631,7 @@ function noAccent(str){
 }
 function onNavSearch(v){
   navQuery = (v||'').trim();
+  if(navQuery) _ensureSearchIndexes();
   renderSidebarNav();
 }
 // Enter = mở mục đầu tiên đang lọc ra; Esc = xoá ô tìm.
@@ -8668,7 +8669,7 @@ function renderSidebarNav(){
     </button>`;
 
   let found = 0;
-  nav.innerHTML = NAV_SECTIONS.map(sec=>{
+  const navSectionsHtml = NAV_SECTIONS.map(sec=>{
     const items = sec.items.filter(match);
     if(!items.length) return '';
     found += items.length;
@@ -8693,7 +8694,61 @@ function renderSidebarNav(){
       ${sec.group ? `<div class="sidebar-group-label">${sec.group}</div>` : ''}
       ${items.map(it=>itemHtml(it,false)).join('')}`;
   }).join('');
-  if(!found) nav.innerHTML = `<div class="nav-empty">Không có mục nào khớp “${escapeHtmlAttr(navQuery)}”</div>`;
+
+  // "Find Anything" (Phase 4) — cùng ô tìm, cùng danh sách, nhưng khi gõ đủ dài
+  // thì KHÔNG chỉ lọc tên 40+ mục điều hướng nữa mà còn tìm thẳng trong dữ liệu
+  // nghiệp vụ đang có sẵn trong bộ nhớ (Nguyên liệu, BTP). Không tạo màn tìm
+  // kiếm riêng — vẫn là ô này, vẫn là sidebar này.
+  let dataResultsHtml = '';
+  let loadingHint = false;
+  if(q && q.length>=2){
+    const mi = (INVENTORY_ITEMS||[]).filter(it=>noAccent(it.name||'').includes(q)).slice(0,8);
+    const mp = (PREP_ITEMS||[]).filter(p=>noAccent(p.name||'').includes(q)).slice(0,8);
+    found += mi.length + mp.length;
+    const dataRow = (name, id, unit, stock, kind)=>`
+      <div class="sidebar-item sub" style="flex-direction:column;align-items:stretch;gap:6px;cursor:default;height:auto;padding:8px 10px 8px 38px">
+        <div style="display:flex;justify-content:space-between;gap:8px">
+          <b style="font-size:13px">${escapeHtmlAttr(name||'')}</b>
+          <span class="small-note" style="flex-shrink:0">${fmtNum(Number(stock)||0,1)} ${escapeHtmlAttr(unit||'')}</span>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn outline sm" style="width:auto;padding:0 8px"
+            onclick="${kind==='item'?`openItemHistory('${id}')`:`openPrepHistory('${id}')`}">${ic('search',13)} Giải thích tồn kho</button>
+          <button class="btn outline sm" style="width:auto;padding:0 8px" onclick="goKho('${kind==='item'?'items':'prep'}')">Xem danh mục</button>
+        </div>
+      </div>`;
+    if(mi.length || mp.length){
+      dataResultsHtml = `
+        <div class="sidebar-group-label">Tìm thấy trong dữ liệu</div>
+        ${mi.map(it=>dataRow(it.name, it.id, it.unit, it.currentStock, 'item')).join('')}
+        ${mp.map(p=>dataRow(p.name, p.id, p.unit, p.currentStock, 'prep')).join('')}
+      `;
+    } else if(!INVENTORY_ITEMS.length && !PREP_ITEMS.length){
+      // Chưa tải xong (lần đầu gõ tìm, chưa từng vào Kho) — nói rõ thay vì im
+      // lặng như không tìm thấy gì, vì _ensureSearchIndexes() đang tải nền và
+      // renderSidebarNav() sẽ tự chạy lại khi xong.
+      dataResultsHtml = `<div class="small-note" style="padding:6px 10px 0 38px">Đang tải dữ liệu nguyên liệu/BTP để tìm…</div>`;
+      loadingHint = true;
+    }
+  }
+
+  nav.innerHTML = navSectionsHtml + dataResultsHtml;
+  if(!found && !loadingHint) nav.innerHTML = `<div class="nav-empty">Không có mục nào khớp “${escapeHtmlAttr(navQuery)}”</div>`;
+}
+
+// Tải nền INVENTORY_ITEMS/PREP_ITEMS ngay khi người dùng bắt đầu gõ tìm — hai
+// mảng này bình thường chỉ có dữ liệu SAU KHI đã từng mở Kho → Nguyên liệu/Chế
+// biến cấp 1 ít nhất một lần (loadInventoryItems/loadPrepItems được gọi từ
+// renderKhoItems/renderKhoPrep). Không tải nền thì tìm "sữa" ngay sau khi mở
+// app lần đầu sẽ ra rỗng dù nguyên liệu đó có tồn tại — sai với kỳ vọng.
+let _searchIdxLoading = false;
+function _ensureSearchIndexes(){
+  if(_searchIdxLoading || (INVENTORY_ITEMS.length && PREP_ITEMS.length)) return;
+  _searchIdxLoading = true;
+  ensureAuth().then(()=>Promise.all([loadInventoryItems(), loadPrepItems()]))
+    .then(()=>{ if(navQuery) renderSidebarNav(); })
+    .catch(err=>console.warn('Không tải được dữ liệu cho tìm kiếm', err))
+    .finally(()=>{ _searchIdxLoading = false; });
 }
 function openSidebar(){
   document.getElementById('sidebar').classList.add('open');

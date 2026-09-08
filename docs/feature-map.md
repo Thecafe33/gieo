@@ -32,7 +32,7 @@ Cột "Trạng thái" đối chiếu với 26 Phase của kế hoạch cải t�
 | **Khuyến mãi** | `screen-tg`, HTML 1439‑1578 | chương trình KM | 🔒 **PROTECTED** | ⚪ Không đụng UI |
 | Trợ lý bán hàng | `screen-assist` (nằm giữa hai tab protected nhưng KHÔNG protected) | | thấp | 🟢 |
 | Kiểm toán | nhóm **Kiểm toán** | | thấp | 🟢 |
-| Tìm nhanh sidebar (`navSearch`, Ctrl/⌘+K) | `onNavSearch()`, dòng 8624‑8697 | chỉ nhãn 40+ mục nav | thấp | 🟡 Có nhưng CHỈ lọc tên mục điều hướng — chưa tìm được nguyên liệu/bill/nhân viên cụ thể như Phase 4 mô tả ("Find Anything") |
+| Tìm nhanh sidebar (`navSearch`, Ctrl/⌘+K) | `onNavSearch()` / `renderSidebarNav()` | nhãn nav + **Nguyên liệu, BTP** | thấp | 🟡 **Mở rộng 2026-09-08** — gõ ≥2 ký tự giờ tìm cả tên nguyên liệu/BTP (không chỉ 40+ nhãn nav), mỗi kết quả có nút "Giải thích tồn kho" đi thẳng vào Phase 9. Còn thiếu Bill/Nhân viên/Transaction như Phase 4 mô tả đầy đủ |
 | Breadcrumb-lite (`hdrKicker`/`hdrTitle`) | `switchScreen()` dòng ~9342 | | thấp | 🟡 Có 2 tầng (Nhóm › Mục), không phải breadcrumb bấm được từng cấp; không có deep link / URL hash |
 | Context Navigation (tab liên quan ngay tại object) | — | — | — | 🔴 **Chưa có** — xem đối tượng (vd. một nguyên liệu) chưa có dải tab "Tổng quan / Kho / Container / Giao dịch / Kiểm kê" như Phase 5 mô tả |
 | Related Actions | rải rác, vd. nudge "Duyệt phiếu kiểm kê" trong Lệch kho, nút "Khai định mức" khi thiếu recipe | | | 🟡 Có từng phần theo ngữ cảnh nhưng không nhất quán theo mọi màn |
@@ -80,9 +80,18 @@ Object "Nguyên liệu" hiện có điểm truy cập gần nhất với ví d�
 
 File thay đổi: `quanlygieo.html`, hàm mới `_histTypeLabel`, `HIST_EXTRA_TYPE_LABEL`, `HIST_TYPE_ORDER`, `_histTypeBreakdown`, `_histBreakdownHtml` (khoảng dòng 20085‑20152); sửa `_histRender()` để chèn khối này + hỗ trợ lọc theo type chính xác.
 
+**Phase 4 — Command Search ("Find Anything"), một phần**, mở rộng ngay ô tìm sidebar đã có (`onNavSearch`/`renderSidebarNav`), không tạo ô tìm/màn tìm kiếm riêng:
+
+- Gõ ≥2 ký tự (đã bỏ dấu) giờ tìm thêm trong `INVENTORY_ITEMS`/`PREP_ITEMS` (tên nguyên liệu, tên BTP), không chỉ 40+ nhãn mục điều hướng như trước. Kết quả hiện dưới nhóm "Tìm thấy trong dữ liệu", kèm tồn hiện tại và hai nút: **Giải thích tồn kho** (mở thẳng khối vừa làm ở Phase 9) và **Xem danh mục** (tới Kho → Nguyên liệu/Chế biến cấp 1).
+- `INVENTORY_ITEMS`/`PREP_ITEMS` bình thường chỉ có dữ liệu sau khi đã từng mở đúng màn Kho tương ứng — thêm `_ensureSearchIndexes()` tải nền hai mảng này ngay khi người dùng bắt đầu gõ tìm (dùng `ensureAuth()` + cache 20s sẵn có của `loadInventoryItems`/`loadPrepItems`, không đọc lại Firestore nếu đã có), và tự vẽ lại kết quả khi tải xong. Trong lúc chờ, ô tìm nói rõ "Đang tải dữ liệu…" thay vì im lặng báo "không tìm thấy".
+- Chưa tìm được Bill/Nhân viên/Transaction như ví dụ đầy đủ trong kế hoạch — xem mục 1 ở §4.
+
+File thay đổi: `quanlygieo.html`, hàm `renderSidebarNav()` (thêm khối kết quả dữ liệu), `onNavSearch()`, hàm mới `_ensureSearchIndexes()` (khoảng dòng 8656‑8750).
+
 **Giới hạn đã biết, chưa làm trong phiên này:**
 - Chưa đối chiếu Ledger vs **Container** (tồn vật lý theo chai/tem) như ví dụ "🟢 KHỚP / 🟡 Có chênh lệch" trong kế hoạch — cơ chế container hiện tại (`stock_containers_gieogieo`, `untrackedBase`) phức tạp hơn một phép cộng đơn giản (có trạng thái sealed/open/finished, `needsReview`...) nên cần nghiên cứu kỹ hơn trước khi làm, để tránh đưa ra con số reconciliation sai.
-- Chưa test trên trình duyệt thật với dữ liệu Firebase thật (không có quyền truy cập project Firebase `the-cafe-33` trong phiên này) — mới kiểm tra bằng `node --check` (cú pháp hợp lệ) và đọc code đối chiếu thủ công. **Cần người quản lý mở thử trên trình duyệt trước khi tin tưởng hoàn toàn.**
+- Command Search mới tìm Nguyên liệu/BTP, chưa tìm Bill/Nhân viên/Transaction.
+- Chưa test trên trình duyệt thật với dữ liệu Firebase thật (không có quyền truy cập project Firebase `the-cafe-33` trong phiên này) — mới kiểm tra bằng `node --check` (cú pháp hợp lệ) và đọc code đối chiếu thủ công. **Cần người quản lý mở thử trên trình duyệt trước khi tin tưởng hoàn toàn** — đặc biệt: gõ tìm tên một nguyên liệu có thật, xem kết quả + bấm "Giải thích tồn kho" có mở đúng sheet không.
 
 ---
 
@@ -90,7 +99,7 @@ File thay đổi: `quanlygieo.html`, hàm mới `_histTypeLabel`, `HIST_EXTRA_TY
 
 Theo đúng thứ tự ưu tiên của kế hoạch, các hạng mục ⭐⭐⭐⭐⭐/⭐⭐⭐⭐ còn thiếu nhiều nhất:
 
-1. **Command Search thật** (Phase 4) — nâng `onNavSearch` từ lọc nhãn nav sang tìm cả tên nguyên liệu/BTP/nhân viên/bill, trả kết quả kèm hành động (giống ví dụ "sữa" trong kế hoạch).
+1. **Command Search — mở rộng thêm** (Phase 4) — thêm Bill (số bill, SĐT khách) và Nhân viên vào cùng cơ chế tìm ở §3, giữ đúng nguyên tắc "vẫn một ô tìm, không tạo màn riêng".
 2. **Context Navigation** (Phase 5) — thêm dải tab "Tổng quan / Kho / Giao dịch / Kiểm kê" ngay tại từng nguyên liệu, thay vì phải rời khỏi màn Nguyên liệu để vào Kiểm kê/Lệch kho.
 3. **Integrity Rules → Alert Inbox** (Phase 11) — bổ sung rule "Ledger ≠ Container", "GOGS Integrity" (bill hoàn tất chưa có consumption) vào cùng cơ chế `alerts_gieogieo` đã có, không tạo dashboard riêng.
 4. Container reconciliation cho Giải thích tồn kho (nối tiếp việc đã làm ở §3) — sau khi hiểu rõ `untrackedBase`/trạng thái container.
