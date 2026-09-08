@@ -8,12 +8,13 @@ Hai lỗ hổng cần bịt:
    Camera chỉ thấy "có tem" nên coi như hợp lệ; tem đó lấy từ một bill cũ bấm
    **in lại**.
 
-Không lớp nào dưới đây bắt được quả tang. Chúng đóng đường đi và **để lại dấu**,
-để việc gian phải trả giá bằng một dấu vết Quản lý nhìn thấy được.
+Bốn lớp đầu không bắt được quả tang — chúng đóng đường đi và **để lại dấu**, để
+việc gian phải trả giá bằng một dấu vết Quản lý nhìn thấy được. Lớp 5 thì đối
+chiếu hai con số độc lập và chỉ thẳng ra số ly không có bill.
 
 ---
 
-## Bốn lớp đang chạy
+## Năm lớp đang chạy
 
 | Lớp | Bịt cái gì | Ở đâu |
 |---|---|---|
@@ -21,6 +22,7 @@ Không lớp nào dưới đây bắt được quả tang. Chúng đóng đườ
 | 2 | Danh sách bill ở POS chỉ hiện đơn trong **60 phút** gần nhất | POS → Lịch sử đơn |
 | 3 | Toàn bộ màn Lịch sử đơn được clone sang Quản lý, có quyền xoá | Quản lý → Lịch sử bill |
 | 4 | Đếm tiền cuối ca tối đa **2 lần**, hết lượt thì ghi nhận mức lệch | POS + Quản lý → Sổ quỹ |
+| 5 | Đối chiếu **bao bì đã dùng thật ↔ số bill lẽ ra phải dùng** | Quản lý → Kiểm toán |
 
 Ba con số 20 / 60 / 2 nằm cạnh nhau ở đầu khối `[NEW-GUARD]` trong `posgieo.html`
 (`TEM_REPRINT_WINDOW_MIN`, `HISTORY_VISIBLE_MIN`, `CASH_COUNT_MAX_ATTEMPTS`) —
@@ -126,16 +128,57 @@ không thấy gì.
 
 ---
 
-## Còn lại gì
+## Lớp 5 — đối chiếu bao bì với bill
 
-**Lớp 5 — đếm nắp/ly cuối ca.** Đây là lớp **duy nhất** thực sự bắt được việc đá
-bill: số ly đã bán theo bill phải khớp số nắp/ly đã dùng thật. Bốn lớp trên chỉ
-làm việc đó khó và để lại dấu, không chứng minh được.
+Lớp **duy nhất** thực sự *bắt* được đá bill. Bốn lớp trên chỉ làm việc đó khó và
+để lại dấu; lớp này đối chiếu hai con số độc lập và nói thẳng có bao nhiêu ly ra
+khỏi quầy mà không có bill.
 
-Chưa làm, vì cần chốt trước hai điều với quán:
+Cả hai vế đã có sẵn trong hệ thống từ trước, chỉ chưa ai nối lại:
 
-1. Mã bao bì nào là **1 ly = 1 cái** — nắp hay ly?
-2. Đầu ca có sẵn số tồn của mã đó để so cuối ca không?
+| Vế | Lấy từ | Công thức |
+|---|---|---|
+| **Thật** | đếm giao ca (`handover_counts_gieogieo`) | đếm đầu ca + refill trong ngày − đếm cuối ca |
+| **Bill** | engine bao bì đang trừ kho (`packaging_rules_gieogieo`) | mỗi ly → đúng 1 loại ly theo size |
+
+**Vì sao không dùng sổ kho `CONSUMPTION` làm vế đối chứng**, dù nó có sẵn và dễ
+đọc hơn: sổ đó do *chính việc bấm bill* sinh ra. Không bấm bill thì cũng không có
+dòng sổ. Nó luôn khớp với bill kể cả khi đá bill — lấy nó làm đối chứng là tự lừa
+mình. Chỉ số **đếm tay** mới là quan sát độc lập.
+
+Vế bill chạy đúng engine đang trừ kho, nên **"size M dùng ly PP500, size L dùng
+ly PP700" không phải khai lại** ở đây — nhóm `ly` trong Kho → Bao bì là
+*exclusive* (mỗi ly ra đúng một kết quả) và đã lọc theo size. Sửa ở đó là báo cáo
+này đi theo.
+
+**Hao hụt đã khai (WASTE) được trừ ra khỏi vế thật.** Không trừ thì một ca làm vỡ
+chồng ly hiện lên y hệt một ca đá bill — và cảnh báo sai kiểu đó giết chết cả
+tính năng, vài lần là không ai thèm đọc nữa.
+
+**Bật ở đâu:** Kho → Refill → **⚙ Cấu hình** của dòng ly:
+
+1. Bật **"Phải đếm tay khi giao ca"**, chọn **Đếm lúc nào = Cuối ca** (hoặc Cả hai).
+   Không có số đếm cuối ca thì không có gì để trừ — ô đối chiếu sẽ không hiện.
+2. Bật **"Đối chiếu số đã dùng với số bán ra theo bill"**.
+3. Đặt **dung sai**. Rơi vỡ và đếm nhầm một hai cái là chuyện thường; để 0 thì
+   lệch một cái cũng bị nêu tên.
+
+Hai field mới trên refill rule: `varianceCheck` (boolean), `varianceTolerance` (số).
+
+**Xem ở đâu:** Quản lý → **Kiểm toán** → *Đối chiếu bao bì với bill*, theo ngày
+đang chọn. Mỗi nguyên liệu hiện đủ phép trừ từ trên xuống, kèm chi tiết theo size
+(`M: 141 ly`), và một trong bốn kết luận:
+
+| Kết luận | Nghĩa |
+|---|---|
+| **Khớp** | lệch trong dung sai |
+| **Dùng nhiều hơn bill** | 🔴 ly ra khỏi quầy mà không có bill — đối chiếu camera |
+| **Dùng ít hơn bill** | đếm nhầm, hoặc refill đã bấm mà chưa chuyển thật. Không phải dấu hiệu đá bill |
+| **Thiếu đếm đầu / cuối ca** | không đủ dữ liệu — nói thẳng là thiếu, không đoán bừa |
+
+Trước khi kết luận từ một con số dương, báo cáo tự nhắc loại trừ ba thứ: rơi vỡ
+chưa khai hao hụt, ly dùng cho việc khác (test, nhân viên uống), và refill đã
+chuyển thật mà chưa bấm ghi nhận.
 
 ---
 
@@ -144,8 +187,10 @@ Chưa làm, vì cần chốt trước hai điều với quán:
 * `posgieo.html` — khối `[NEW-GUARD]` (ngay trước `printerReprintOrder`): ba hằng
   số, `temReprintInfo/Guard`, `logReprint`, `billIsFresh`, `cashStepDone`.
   Lớp 4 nằm trong `_submitShiftCloseImpl` + `renderShiftCloseCountForm(canGhiChu)`.
-* `quanlygieo.html` — `renderAuditReprints()` (tab Kiểm toán) và
-  `cashAttemptsCardHTML()` (tab Sổ quỹ).
+* `quanlygieo.html` — `renderAuditReprints()` và `computeBaoBiVariance()` /
+  `baoBiVarianceHTML()` (tab Kiểm toán), `cashAttemptsCardHTML()` (tab Sổ quỹ),
+  hai field cấu hình ở `addRefillRule` / `updateRefillRuleConfig`.
 * Kiểm thử: `guards.test.js` (logic + đọc file, 90 mục) và `guards.browser.js`
   (POS thật trong Chromium, 22 mục — trong đó 7 mục thử đúng các đường lách của
-  ô tìm: `.09.`, `08.09`, `000`, `09`, `#`, SĐT thiếu số, mã thiếu ký tự).
+  ô tìm: `.09.`, `08.09`, `000`, `09`, `#`, SĐT thiếu số, mã thiếu ký tự), và
+  `lop5.test.js` (41 mục — chạy chính engine bóc từ file trên Firebase giả).

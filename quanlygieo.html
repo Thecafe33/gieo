@@ -4085,6 +4085,12 @@ async function loadRefillRules(){
 //   blockingClose : boolean                     — dưới min thì CHẶN đóng ngày
 // Mặc định an toàn (rule cũ / tạo không chọn gì) = refillTiming:'open', mustCount:false,
 // blockingClose:false — GIỮ NGUYÊN hành vi hiện tại, không đột ngột chặn đóng ngày.
+//
+// [NEW-GUARD Lớp 5] Thêm hai field:
+//   varianceCheck     : boolean — đối chiếu số đã dùng THẬT với số bán ra theo bill
+//   varianceTolerance : number  — lệch trong ngần này (đơn vị của nguyên liệu) thì bỏ qua
+// Chỉ có nghĩa khi mustCount và countTiming gồm 'close': không có số đếm cuối ca
+// thì không có gì để đối chiếu.
 function addRefillRule(data){
   return fstore.collection('refill_rules_gieogieo').add({
     itemId: data.itemId, itemName: data.itemName, unit: data.unit,
@@ -4095,6 +4101,8 @@ function addRefillRule(data){
     mustCount: !!data.mustCount,
     countTiming: data.mustCount ? (data.countTiming || 'both') : null,
     blockingClose: !!data.blockingClose,
+    varianceCheck: !!data.varianceCheck,
+    varianceTolerance: Number(data.varianceTolerance) || 0,
     active: true, createdAt: new Date().toISOString()
   });
 }
@@ -4107,6 +4115,8 @@ function updateRefillRuleConfig(id, data){
     mustCount: !!data.mustCount,
     countTiming: data.mustCount ? (data.countTiming || 'both') : null,
     blockingClose: !!data.blockingClose,
+    varianceCheck: !!data.varianceCheck,
+    varianceTolerance: Number(data.varianceTolerance) || 0,
     updatedAt: new Date().toISOString()
   });
 }
@@ -13610,11 +13620,14 @@ async function renderEntryAudit(){
       <div class="field" style="margin-bottom:0"><label>Xem ngày</label>
         <div style="display:flex;gap:6px">
           <input type="date" id="auditViewDateInput" value="${auditViewDate}" style="flex:1">
-          <button class="btn" style="width:auto;padding:0 16px" onclick="auditViewDate=document.getElementById('auditViewDateInput').value; renderAuditEmployeeActivity(); renderAuditReprints();">Xem</button>
+          <button class="btn" style="width:auto;padding:0 16px" onclick="auditViewDate=document.getElementById('auditViewDateInput').value; renderAuditEmployeeActivity(); renderAuditBaoBi(); renderAuditReprints();">Xem</button>
         </div>
       </div>
     </div>
     <div id="auditEmployeeList" class="card"><div class="muted">Đang tải...</div></div>
+
+    <div class="sec-title" style="margin-top:14px">Đối chiếu bao bì với bill (theo ngày đã chọn ở trên)</div>
+    <div id="auditBaoBiList"><div class="card"><div class="muted">Đang tải...</div></div></div>
 
     <div class="sec-title" style="margin-top:14px">In lại tem / bill (theo ngày đã chọn ở trên)</div>
     <div id="auditReprintList" class="card"><div class="muted">Đang tải...</div></div>
@@ -13635,6 +13648,7 @@ async function renderEntryAudit(){
     document.getElementById('auditLogList').innerHTML = '<div class="muted">Không tải được nhật ký.</div>';
   }
   renderAuditEmployeeActivity();
+  renderAuditBaoBi();
   renderAuditReprints();
 }
 
@@ -13684,6 +13698,193 @@ async function renderAuditReprints(){
   }catch(err){
     console.error('renderAuditReprints failed', err);
     el.innerHTML = '<div class="muted">Không tải được sổ in lại: '+(err.code||err.message||err)+'</div>';
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// [NEW-GUARD Lớp 5] ĐỐI CHIẾU BAO BÌ ĐÃ DÙNG THẬT ↔ SỐ BILL LẼ RA PHẢI DÙNG
+//
+// Đây là lớp DUY NHẤT thực sự BẮT được việc "đá bill" (pha nước, đưa khách,
+// không bấm bill). Bốn lớp kia chỉ làm việc đó khó và để lại dấu; lớp này đối
+// chiếu hai con số độc lập nhau và nói thẳng có bao nhiêu ly ra khỏi quầy mà
+// không có bill.
+//
+// Cả hai vế đều đã có sẵn trong hệ thống, chỉ chưa ai nối lại:
+//
+//   Vế THẬT   — đếm giao ca (handover_counts_gieogieo). Nhân viên đếm tay đầu ca
+//               và cuối ca, có PIN, có đếm mù đối chứng sáng hôm sau.
+//                   đã dùng thật = đếm đầu ca + refill trong ngày − đếm cuối ca
+//               KHÔNG dùng sổ kho CONSUMPTION ở đây, dù nó có sẵn: sổ đó do
+//               chính việc bấm bill sinh ra, nên nó luôn khớp với bill kể cả khi
+//               có đá bill. Lấy nó làm vế đối chứng là tự lừa mình.
+//
+//   Vế BILL   — chạy đúng engine bao bì đang trừ kho (packaging_rules_gieogieo,
+//               nhóm 'ly' là exclusive → mỗi ly ra đúng MỘT loại ly theo size).
+//               Nên "M dùng ly PP500, L dùng ly PP700" không phải khai lại ở đây;
+//               sửa ở Kho → Bao bì là báo cáo này đi theo.
+//
+// Hao hụt đã ghi (WASTE: rơi, vỡ, hỏng) được TRỪ RA khỏi vế thật — không trừ thì
+// một ca làm vỡ chồng ly sẽ hiện y hệt một ca đá bill, và cảnh báo sai kiểu đó
+// giết chết cả tính năng: vài lần là không ai thèm đọc nữa.
+//
+// Chỉ chạy cho Refill Rule có bật varianceCheck (Kho → Refill → ⚙ Cấu hình).
+// ════════════════════════════════════════════════════════════════════════════
+
+// Số đếm chốt của một dòng giao ca. Đầu ca có thể phải đếm lại lần 2 (khi lệch
+// với số cuối ca hôm trước) — khi đó lần 2 mới là số chính thức, đúng như POS
+// đang dùng ở _finalizeHandoverOpen.
+function hvSoChot(line){
+  if(!line) return null;
+  const q2 = line.countedQty2, q1 = line.countedQty;
+  const v = (q2 !== null && q2 !== undefined) ? q2 : q1;
+  return (v === null || v === undefined) ? null : Number(v);
+}
+
+async function computeBaoBiVariance(dateKey){
+  const rules = (await loadRefillRules())
+    .filter(r => r.active !== false && r.varianceCheck && refillCoTheDoiChieu(r));
+  if(!rules.length) return { chuaBat: true, rows: [] };
+
+  // Engine bao bì — nạp nếu màn này được mở trước tab Kho.
+  if(!PACKAGING_RULES.length){
+    PACKAGING_RULES = await loadPackagingRules();
+    PACKAGING_RULES_CONFIG = await loadPackagingRulesConfig();
+  }
+  if(!Object.keys(PACKAGING_PRESETS).length) PACKAGING_PRESETS = await loadPackagingPresets();
+  if(!Object.keys(PACKAGING_ITEM_OVERRIDES || {}).length) PACKAGING_ITEM_OVERRIDES = await loadPackagingItemOverrides();
+
+  const [openSnap, closeSnap, bills, txSnap] = await Promise.all([
+    fstore.collection('handover_counts_gieogieo').doc(dateKey + '_open').get(),
+    fstore.collection('handover_counts_gieogieo').doc(dateKey + '_close').get(),
+    qlLoadBillsOfDate(new Date(dateKey + 'T12:00:00')),
+    // Lọc theo ngày rồi sàng ở client — thêm where cho type/vị trí sẽ đòi
+    // composite index chưa tạo, và query hỏng thì báo cáo im lặng trống.
+    fstore.collection('stock_transactions_gieogieo').where('businessDate', '==', dateKey).get()
+  ]);
+  const dongDau  = (openSnap.exists  ? (openSnap.data().lines  || []) : []);
+  const dongCuoi = (closeSnap.exists ? (closeSnap.data().lines || []) : []);
+  const txs = txSnap.docs.map(d => d.data()).filter(t => t.reversal !== true);
+
+  // ── Vế BILL ───────────────────────────────────────────────────────────────
+  const theoBill = {};   // itemId → số lượng
+  const theoSize = {};   // itemId → { size: số ly }
+  let soLyTrongNgay = 0;
+  bills.forEach(o => (o.itemsArray || []).forEach(it => {
+    const soLy = Number(it.qty) || 0;
+    if(soLy <= 0) return;
+    const pkg = pkgRulesActive()
+      ? resolvePackagingForCup(pkgCtxFromLine(it))
+      : resolvePackagingItemsForLine(it.itemId, it.size, lineHasToppingTrigger(it.itemId || null, it.size, it.toppings || []));
+    if(!pkg.length) return;
+    soLyTrongNgay += soLy;
+    const nhanSize = pkgSizeKey(it.size) || '(không size)';
+    pkg.forEach(x => {
+      theoBill[x.itemId] = (theoBill[x.itemId] || 0) + (Number(x.qty) || 0) * soLy;
+      (theoSize[x.itemId] = theoSize[x.itemId] || {});
+      theoSize[x.itemId][nhanSize] = (theoSize[x.itemId][nhanSize] || 0) + soLy;
+    });
+  }));
+
+  const rows = rules.map(r => {
+    const dauCa  = hvSoChot(dongDau.find(l => l.itemId === r.itemId));
+    const cuoiCa = hvSoChot(dongCuoi.find(l => l.itemId === r.itemId));
+    // Refill = TRANSFER vào đúng vị trí quầy của rule này.
+    const nhap = txs.filter(t => t.itemId === r.itemId && t.type === 'TRANSFER' && t.toLocationId === r.destLocationId)
+                    .reduce((a, t) => a + Math.abs(Number(t.qty) || 0), 0);
+    // Hao hụt đã khai (ledger ghi qty âm cho WASTE — lấy trị tuyệt đối).
+    const hao = txs.filter(t => t.itemId === r.itemId && t.type === 'WASTE')
+                   .reduce((a, t) => a + Math.abs(Number(t.qty) || 0), 0);
+    const banRa = Number(theoBill[r.itemId] || 0);
+    const duLieuDu = dauCa !== null && cuoiCa !== null;
+    const daDung = duLieuDu ? (dauCa + nhap - cuoiCa) : null;
+    const lech = duLieuDu ? (daDung - hao - banRa) : null;
+    const dungSai = Number(r.varianceTolerance) || 0;
+
+    let ketLuan;
+    if(!duLieuDu) ketLuan = dauCa === null && cuoiCa === null ? 'thieu_ca_hai' : (dauCa === null ? 'thieu_dau' : 'thieu_cuoi');
+    else if(Math.abs(lech) <= dungSai) ketLuan = 'khop';
+    else if(lech > 0) ketLuan = 'nghi_ngo';      // dùng NHIỀU hơn bill
+    else ketLuan = 'du';                          // dùng ÍT hơn bill
+
+    return { ruleId: r.id, itemId: r.itemId, itemName: r.itemName, unit: r.unit,
+             viTri: r.destLocationName || '', dauCa, nhap, cuoiCa, hao, daDung,
+             banRa, lech, dungSai, ketLuan, theoSize: theoSize[r.itemId] || {} };
+  });
+
+  return { chuaBat: false, rows, soBill: bills.length, soLyTrongNgay,
+           coDemDauCa: openSnap.exists, coDemCuoiCa: closeSnap.exists };
+}
+
+const BB_KET_LUAN = {
+  khop:        { nhan: 'Khớp',                 mau: 'green' },
+  nghi_ngo:    { nhan: 'Dùng nhiều hơn bill',  mau: 'red' },
+  du:          { nhan: 'Dùng ít hơn bill',     mau: 'amber' },
+  thieu_dau:   { nhan: 'Thiếu đếm đầu ca',     mau: 'amber' },
+  thieu_cuoi:  { nhan: 'Thiếu đếm cuối ca',    mau: 'amber' },
+  thieu_ca_hai:{ nhan: 'Chưa đếm giao ca',     mau: 'amber' }
+};
+
+function baoBiVarianceHTML(kq){
+  if(kq.chuaBat){
+    return `<div class="small-note" style="line-height:1.6">Chưa bật đối chiếu cho nguyên liệu nào.
+      Vào <b>Kho → Refill</b>, mở <b>⚙ Cấu hình</b> của dòng ly (hoặc nắp), bật <b>"Phải đếm tay khi giao ca"</b> với
+      <b>Đếm lúc nào = Cuối ca</b> (hoặc Cả hai), rồi bật <b>"Đối chiếu số đã dùng với số bán ra theo bill"</b>.</div>`;
+  }
+  if(!kq.rows.length) return '<div class="muted">Không có dòng nào để đối chiếu.</div>';
+
+  const nghi = kq.rows.filter(r => r.ketLuan === 'nghi_ngo');
+  const dong = r => {
+    const kl = BB_KET_LUAN[r.ketLuan] || { nhan: r.ketLuan, mau: 'amber' };
+    const dv = r.unit || '';
+    const sizes = Object.entries(r.theoSize).sort((a,b)=>b[1]-a[1]);
+    const cot = (nhan, gt, ghiChu) => `<div class="row"><span class="rl">${nhan}${ghiChu?`<div class="small-note" style="margin-top:2px">${ghiChu}</div>`:''}</span><span class="rv">${gt}</span></div>`;
+    return `
+      <div class="sec-title" style="margin-top:14px">${escapeHtmlAttr(r.itemName || '')}
+        <span class="tier tier-${kl.mau}" style="margin-left:6px">${kl.nhan}</span></div>
+      <div class="card">
+        ${r.daDung === null ? `<div class="small-note" style="line-height:1.55">Không đối chiếu được: ${
+            r.ketLuan==='thieu_dau' ? 'thiếu số đếm ĐẦU ca.' :
+            r.ketLuan==='thieu_cuoi' ? 'thiếu số đếm CUỐI ca.' :
+            'ngày này chưa có đếm giao ca cho món này.'} Kiểm tra Refill Rule có bật "Phải đếm tay khi giao ca" đúng thời điểm chưa.</div>`
+        : `
+        ${cot('Đếm đầu ca', `${fmtNum(r.dauCa,0)} ${dv}`)}
+        ${cot('Refill thêm trong ngày', `+${fmtNum(r.nhap,0)} ${dv}`, r.viTri ? 'chuyển tới ' + escapeHtmlAttr(r.viTri) : '')}
+        ${cot('Đếm cuối ca', `−${fmtNum(r.cuoiCa,0)} ${dv}`)}
+        ${cot(r.hao ? 'Đã rời quầy' : '<b>Đã dùng thật</b>', `${r.hao?'':'<b>'}${fmtNum(r.daDung,0)} ${dv}${r.hao?'':'</b>'}`)}
+        ${r.hao ? cot('Hao hụt đã khai', `−${fmtNum(r.hao,0)} ${dv}`, 'rơi/vỡ đã ghi vào sổ, không tính là thiếu bill') : ''}
+        ${r.hao ? cot('<b>Dùng cho bán hàng</b>', `<b>${fmtNum(r.daDung - r.hao,0)} ${dv}</b>`) : ''}
+        ${cot('<b>Bill lẽ ra phải dùng</b>', `<b>−${fmtNum(r.banRa,0)} ${dv}</b>`,
+              sizes.length ? sizes.map(([sz,n])=>`${escapeHtmlAttr(sz)}: ${fmtNum(n,0)} ly`).join(' · ') : '')}
+        <div class="row"><span class="rl"><b>Lệch</b>${r.dungSai?`<div class="small-note" style="margin-top:2px">bỏ qua nếu trong ±${fmtNum(r.dungSai,0)} ${dv}</div>`:''}</span>
+          <span class="rv" style="color:${r.ketLuan==='khop'?'var(--ok)':r.ketLuan==='nghi_ngo'?'var(--bad)':'var(--warn)'}">
+            <b>${r.lech>0?'+':''}${fmtNum(r.lech,0)} ${dv}</b></span></div>
+        ${r.ketLuan==='nghi_ngo' ? `<div class="small-note" style="margin-top:8px;padding:9px 11px;background:var(--warn-bg);border-radius:11px;color:var(--warn);line-height:1.55">
+            Đã dùng nhiều hơn số bill <b>${fmtNum(r.lech,0)} ${dv}</b>. Nếu định lượng khai đúng 1 ly = 1 cái thì đây là <b>${fmtNum(r.lech,0)} ly ra khỏi quầy mà không có bill</b>.
+            Trước khi kết luận, loại trừ: rơi vỡ chưa khai hao hụt, ly dùng cho việc khác (test, nhân viên uống), và refill có chuyển mà chưa bấm ghi nhận.</div>` : ''}
+        ${r.ketLuan==='du' ? `<div class="small-note" style="margin-top:8px;line-height:1.55">Dùng ÍT hơn bill — thường là đếm nhầm, hoặc refill đã bấm mà chưa chuyển thật. Không phải dấu hiệu đá bill.</div>` : ''}`}
+      </div>`;
+  };
+
+  return `
+    <div class="card">
+      <div class="row"><span class="rl">Bill trong ngày</span><span class="rv">${fmtNum(kq.soBill,0)} bill · ${fmtNum(kq.soLyTrongNgay,0)} ly</span></div>
+      <div class="row"><span class="rl">Đếm giao ca</span><span class="rv">${kq.coDemDauCa?'đầu ca ✓':'đầu ca —'} · ${kq.coDemCuoiCa?'cuối ca ✓':'cuối ca —'}</span></div>
+      ${nghi.length ? `<div class="small-note" style="margin-top:8px;padding:9px 11px;background:var(--warn-bg);border-radius:11px;color:var(--warn);line-height:1.55">
+          ${ic('alert',13)} <b>${nghi.length} nguyên liệu dùng nhiều hơn số bill</b>: ${nghi.map(r=>`${escapeHtmlAttr(r.itemName)} (+${fmtNum(r.lech,0)} ${escapeHtmlAttr(r.unit||'')})`).join(', ')}.
+        </div>` : `<div class="small-note" style="margin-top:8px;color:var(--ok)">${ic('check',13)} Không có nguyên liệu nào dùng vượt số bill.</div>`}
+    </div>
+    ${kq.rows.map(dong).join('')}`;
+}
+
+async function renderAuditBaoBi(){
+  const el = document.getElementById('auditBaoBiList');
+  if(!el) return;
+  showLoading(el);
+  try{
+    el.innerHTML = baoBiVarianceHTML(await computeBaoBiVariance(auditViewDate));
+  }catch(err){
+    console.error('renderAuditBaoBi failed', err);
+    el.innerHTML = '<div class="muted">Không đối chiếu được: ' + (err.code || err.message || err) + '</div>';
   }
 }
 
@@ -18003,7 +18204,8 @@ async function confirmCancelPO(id){
 // refillScreen). Ở đây chỉ CRUD rule + xem nhanh tồn hiện tại theo location đích.
 // ------------------------------------------------------------
 let refillDraft = { itemId: null, sourceLocationId: null, destLocationId: null, targetQty: 0, minQty: 0, maxQty: 0, unitFactor: 1,
-  refillTiming: 'open', mustCount: false, countTiming: 'both', blockingClose: false };
+  refillTiming: 'open', mustCount: false, countTiming: 'both', blockingClose: false,
+  varianceCheck: false, varianceTolerance: 0 };
 let REFILL_RULES = [];             // cache rule đã load, để hàm sửa cấu hình đọc lại
 let refillConfigEditId = null;     // id rule đang mở form "⚙ Cấu hình" (null = không mở cái nào)
 let refillConfigDraft = null;      // draft khi đang sửa cấu hình 1 rule có sẵn
@@ -18018,7 +18220,14 @@ function refillConfigLabel(r){
   const parts = [`Refill: ${REFILL_TIMING_LABEL[r.refillTiming]||'Đầu ca'}`];
   if(r.mustCount) parts.push(`Đếm: ${REFILL_TIMING_LABEL[r.countTiming]||'Cả hai đầu'}`);
   if(r.blockingClose) parts.push(ic('lock',12)+' Chặn đóng ngày');
+  if(r.varianceCheck) parts.push(ic('detective',12)+' Đối chiếu với bill');
   return parts.join(' · ');
+}
+
+// Đối chiếu chỉ chạy được khi có SỐ ĐẾM CUỐI CA. Gom điều kiện vào một hàm để
+// form thêm mới, form sửa và báo cáo không tự diễn giải mỗi nơi một kiểu.
+function refillCoTheDoiChieu(r){
+  return !!(r && r.mustCount && (r.countTiming === 'close' || r.countTiming === 'both'));
 }
 
 // ============================================================
@@ -18288,6 +18497,19 @@ async function renderKhoRefill(){
         </div>
       </div>` : ''}
 
+
+      ${refillCoTheDoiChieu(refillDraft) ? `
+      <label style="display:flex;align-items:center;gap:8px;margin:8px 0 4px;font-size:13px">
+        <input type="checkbox" ${refillDraft.varianceCheck?'checked':''} onchange="refillDraft.varianceCheck=this.checked; renderKhoRefill()">
+        <b>Đối chiếu số đã dùng với số bán ra theo bill</b>
+      </label>
+      ${refillDraft.varianceCheck ? `
+        <div class="small-note" style="margin:-2px 0 8px;line-height:1.55">Cuối ngày lấy <b>đếm đầu ca + refill trong ngày − đếm cuối ca</b> ra số đã dùng THẬT, rồi so với số bill lẽ ra phải dùng (theo <b>Kho → Bao bì</b>). Dùng nhiều hơn bill = có ly ra khỏi quầy mà không có bill. Xem ở <b>Kiểm toán → Đối chiếu bao bì với bill</b>.</div>
+        <div class="field"><label>Bỏ qua nếu lệch trong khoảng (${(INVENTORY_ITEMS.find(x=>x.id===refillDraft.itemId)||{}).unit || 'cái'})</label>
+          <input type="number" step="1" min="0" value="${refillDraft.varianceTolerance||0}" oninput="refillDraft.varianceTolerance=Number(this.value)||0">
+          <div class="hint">Rơi vỡ, đếm nhầm một hai cái là chuyện thường. Để 0 thì lệch một cái cũng bị nêu tên — nhiều cảnh báo quá thì không ai đọc nữa.</div>
+        </div>` : ''}
+      ` : ''}
       ${(refillDraft.refillTiming==='close'||refillDraft.refillTiming==='both') ? `
       <label style="display:flex;align-items:center;gap:8px;margin:8px 0;font-size:13px">
         <input type="checkbox" ${refillDraft.blockingClose?'checked':''} onchange="refillDraft.blockingClose=this.checked; renderKhoRefill()">
@@ -18343,6 +18565,18 @@ async function renderKhoRefill(){
             <button class="${refillConfigDraft.countTiming==='both'?'active':''}" onclick="refillConfigDraft.countTiming='both'; renderKhoRefill()">Cả hai</button>
           </div>
         </div>` : ''}
+      ${refillCoTheDoiChieu(refillConfigDraft) ? `
+      <label style="display:flex;align-items:center;gap:8px;margin:8px 0 4px;font-size:13px">
+        <input type="checkbox" ${refillConfigDraft.varianceCheck?'checked':''} onchange="refillConfigDraft.varianceCheck=this.checked; renderKhoRefill()">
+        <b>Đối chiếu số đã dùng với số bán ra theo bill</b>
+      </label>
+      ${refillConfigDraft.varianceCheck ? `
+        <div class="small-note" style="margin:-2px 0 8px;line-height:1.55">Cuối ngày lấy <b>đếm đầu ca + refill trong ngày − đếm cuối ca</b> ra số đã dùng THẬT, rồi so với số bill lẽ ra phải dùng (theo <b>Kho → Bao bì</b>). Dùng nhiều hơn bill = có ly ra khỏi quầy mà không có bill. Xem ở <b>Kiểm toán → Đối chiếu bao bì với bill</b>.</div>
+        <div class="field"><label>Bỏ qua nếu lệch trong khoảng (${(INVENTORY_ITEMS.find(x=>x.id===refillConfigDraft.itemId)||{}).unit || 'cái'})</label>
+          <input type="number" step="1" min="0" value="${refillConfigDraft.varianceTolerance||0}" oninput="refillConfigDraft.varianceTolerance=Number(this.value)||0">
+          <div class="hint">Rơi vỡ, đếm nhầm một hai cái là chuyện thường. Để 0 thì lệch một cái cũng bị nêu tên — nhiều cảnh báo quá thì không ai đọc nữa.</div>
+        </div>` : ''}
+      ` : ''}
         ${(refillConfigDraft.refillTiming==='close'||refillConfigDraft.refillTiming==='both') ? `
         <label style="display:flex;align-items:center;gap:8px;margin:8px 0;font-size:13px">
           <input type="checkbox" ${refillConfigDraft.blockingClose?'checked':''} onchange="refillConfigDraft.blockingClose=this.checked; renderKhoRefill()">
@@ -18387,11 +18621,13 @@ async function submitRefillRule(){
       destLocationId: dst.id, destLocationName: dst.name,
       targetBase, minBase: refillDraft.minQty*factor, maxBase: refillDraft.maxQty*factor,
       refillTiming: refillDraft.refillTiming, mustCount: refillDraft.mustCount,
-      countTiming: refillDraft.countTiming, blockingClose: refillDraft.blockingClose
+      countTiming: refillDraft.countTiming, blockingClose: refillDraft.blockingClose,
+      varianceCheck: refillDraft.varianceCheck, varianceTolerance: refillDraft.varianceTolerance
     });
     toast('✅ Đã tạo Refill Rule');
     refillDraft = { itemId: null, sourceLocationId: null, destLocationId: null, targetQty: 0, minQty: 0, maxQty: 0, unitFactor: 1,
-      refillTiming: 'open', mustCount: false, countTiming: 'both', blockingClose: false };
+      refillTiming: 'open', mustCount: false, countTiming: 'both', blockingClose: false,
+  varianceCheck: false, varianceTolerance: 0 };
     INVENTORY_ITEMS = await loadInventoryItems();
     renderKhoRefill();
   }catch(err){ console.error(err); showError('Tạo Refill Rule thất bại: '+(err.code||err.message||err)); }
@@ -18407,7 +18643,10 @@ function refillConfigEdit(id){
     refillTiming: r.refillTiming || 'open',
     mustCount: !!r.mustCount,
     countTiming: r.countTiming || 'both',
-    blockingClose: !!r.blockingClose
+    blockingClose: !!r.blockingClose,
+    varianceCheck: !!r.varianceCheck,
+    varianceTolerance: Number(r.varianceTolerance) || 0,
+    itemId: r.itemId || null      // chỉ để hiện đúng đơn vị ở ô dung sai
   };
   renderKhoRefill();
 }
