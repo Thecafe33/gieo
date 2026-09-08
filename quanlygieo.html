@@ -3633,6 +3633,20 @@ async function loadContainersFor(filter){
   const c = fstore.collection(CTN_COLL);
   if(filter === 'review')    return (await c.where('needsReview','==',true).get()).docs.map(d=>({id:d.id,...d.data()}));
   if(filter === 'unlabeled') return (await c.where('status','==','sealed').where('labelPrinted','==',false).get()).docs.map(d=>({id:d.id,...d.data()}));
+  // 'sealed' = toàn bộ tem còn nguyên seal, chưa mở — đúng "đang tồn tại quán". Số này
+  // luôn bằng đúng tồn hiện có tem đại diện (không phình theo lịch sử), nên đọc thẳng
+  // không cần limit, giống 'open' bên dưới.
+  if(filter === 'sealed')    return (await c.where('status','==','sealed').get()).docs.map(d=>({id:d.id,...d.data()}));
+  // 'finishedmonth' = tem đã báo hết TRONG THÁNG NÀY. Không được đọc cả status=='finished'
+  // (hàng nghìn bản ghi sau vài tháng chạy — xem ghi chú ở đầu hàm). Lọc theo finishedAt
+  // (range) trên CHÍNH trường đó thì Firestore tự có index một trường, không cần composite
+  // index thủ công như khi trộn equality (status) với range (finishedAt) trên hai trường
+  // khác nhau. Tem 'sealed'/'open' không có finishedAt nên tự động không lọt vào.
+  if(filter === 'finishedmonth'){
+    const dauThang = new Date(); dauThang.setDate(1); dauThang.setHours(0,0,0,0);
+    const docs = (await c.where('finishedAt','>=',dauThang.toISOString()).orderBy('finishedAt','desc').limit(500).get()).docs;
+    return docs.map(d=>({id:d.id,...d.data()})).filter(x=>x.status==='finished');
+  }
   // 'expired' và 'open' cùng đọc danh sách chai đang mở rồi lọc phía client — Firestore
   // không so sánh được expiresAt <= "bây giờ" mà không cần index riêng, và số chai đang mở
   // luôn nhỏ (vài chục) nên lọc ở client là đủ.
@@ -4412,12 +4426,14 @@ async function renderKhoContainers(){
   const box = document.getElementById('khoBody');
   showLoading(box);
   const tabs = [
-    ['review',    'Cần xem lại'],
-    ['expired',   'Quá hạn sau mở'],
-    ['open',      'Đang mở'],
-    ['unlabeled', 'Tem chưa dán'],
-    ['legacy',    'Tồn lịch sử'],
-    ['fixreceipt','Sửa phiếu nhận']
+    ['review',       'Cần xem lại'],
+    ['sealed',       'Tồn kho (chưa mở)'],
+    ['expired',      'Quá hạn sau mở'],
+    ['open',         'Đang mở'],
+    ['finishedmonth','Đã báo hết (tháng này)'],
+    ['unlabeled',    'Tem chưa dán'],
+    ['legacy',       'Tồn lịch sử'],
+    ['fixreceipt',   'Sửa phiếu nhận']
   ];
   if(ctnFilter === 'legacy'){ await renderKhoLegacyStock(box, tabs); return; }
   if(ctnFilter === 'fixreceipt'){ await renderKhoFixReceipt(box, tabs); return; }
@@ -4436,8 +4452,10 @@ async function renderKhoContainers(){
 
   const giaiThich = {
     review: 'Nhân viên báo hết khi hàng còn hơn 25%. Không phải lúc nào cũng là gian — có thể bị đổ, hỏng, hoặc định mức khai thiếu nên sổ còn nhiều hơn thực tế. Nhưng lặp lại ở cùng một người thì cần hỏi.',
+    sealed: 'Toàn bộ mã còn nguyên seal, chưa ai mở — đây là danh sách "đang có gì tại quán" theo từng mã tem, không phải theo tổng số lượng.',
     expired: 'Hàng đã mở nắp quá hạn sử dụng. Đây là chuyện an toàn thực phẩm, không phải chuyện kho — nên xử lý ngay chứ không đợi kiểm kê.',
     open: 'Toàn bộ chai, gói, hộp đang mở dở trong quán.',
+    finishedmonth: 'Mã đã báo hết, tính từ đầu tháng này tới giờ. Tháng trước xem ở Lịch sử kho (lọc "Hao hụt" hoặc theo tên nhân viên).',
     unlabeled: 'Mã đã sinh khi nhận hàng nhưng chưa ai dán tem lên. Để lâu thì hàng không có tem mà hệ thống vẫn tưởng có — lúc kiểm kê sẽ không quét được.'
   }[ctnFilter];
 
@@ -4447,9 +4465,11 @@ async function renderKhoContainers(){
     return;
   }
 
-  // Sắp xếp: nặng nhất lên đầu — quá hạn lâu nhất, hoặc bỏ phí nhiều nhất.
+  // Sắp xếp: nặng nhất lên đầu — quá hạn lâu nhất, hoặc bỏ phí nhiều nhất. Riêng
+  // 'finishedmonth' thì mới báo hết lên đầu (đọc từ trên xuống theo thời gian gần nhất).
   const sorted = list.slice().sort((a,b)=>
     ctnFilter==='review' ? (Number(b.wasteBase)||0) - (Number(a.wasteBase)||0)
+    : ctnFilter==='finishedmonth' ? String(b.finishedAt||'').localeCompare(String(a.finishedAt||''))
     : String(a.expiresAt||a.receivedAt||'').localeCompare(String(b.expiresAt||b.receivedAt||'')));
 
   box.innerHTML = nav + `<div class="small-note" style="margin-bottom:12px">${giaiThich}</div>` +
@@ -4461,12 +4481,20 @@ async function renderKhoContainers(){
       const phu = ctnFilter==='review'
         ? `Báo hết ${dt(c.finishedAt)} bởi <b>${escapeHtmlAttr(c.finishedBy||'—')}</b> · còn <b>${fmtNum(c.wasteBase,0)} ${escapeHtmlAttr(c.unit||'')}</b> (${tyLe}% còn lại)`
           + (c.wasteBasis && c.wasteBasis !== 'tinh_duoc' ? `<div class="muted-sm">${escapeHtmlAttr(ctnBasisLabel(c.wasteBasis))}</div>` : '')
-        : ctnFilter==='unlabeled'
+        : ctnFilter==='unlabeled' || ctnFilter==='sealed'
         ? `Nhận ${dt(c.receivedAt)} bởi ${escapeHtmlAttr(c.receivedBy||'—')}`
+          + (ctnFilter==='sealed' && c.labelPrinted===false ? `<div class="muted-sm">Chưa dán tem</div>` : '')
+        : ctnFilter==='finishedmonth'
+        ? `Báo hết ${dt(c.finishedAt)} bởi ${escapeHtmlAttr(c.finishedBy||'—')}`
+          + (c.wasteBasis && c.wasteBasis !== 'tinh_duoc' ? `<div class="muted-sm">${escapeHtmlAttr(ctnBasisLabel(c.wasteBasis))}</div>` : '')
         : `Mở ${dt(c.openedAt)} bởi ${escapeHtmlAttr(c.openedBy||'—')}`;
       const nhan = ctnFilter==='review'
         ? `<span class="tier tier-${tyLe>=50?'red':'amber'}">${tyLe}% còn lại</span>`
-        : (ex.text ? `<span class="${ex.cls}">${ex.text}</span>` : '');
+        : ctnFilter==='finishedmonth' && Number(c.wasteBase)>0
+        ? `<span class="muted-sm">còn ${fmtNum(c.wasteBase,0)} ${escapeHtmlAttr(c.unit||'')}</span>`
+        // 'ex' (hạn sau khi mở) không có ý nghĩa với tem chưa mở — badge "Không đặt hạn"
+        // ở đây dễ hiểu lầm là "hết hạn nhận hàng", nên bỏ hẳn cho 'sealed'/'finishedmonth'.
+        : (ex.text && ctnFilter!=='sealed' && ctnFilter!=='finishedmonth') ? `<span class="${ex.cls}">${ex.text}</span>` : '';
       return `<div class="litem">
         <div class="li-l">
           <div>${escapeHtmlAttr(c.itemName||'')} <span class="muted-sm" style="letter-spacing:.4px">${escapeHtmlAttr(c.code||'')}</span></div>
