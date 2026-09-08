@@ -3624,6 +3624,11 @@ const CTN_COLL = 'stock_containers_gieogieo';
 // tạo thẳng doc status:'approved' khi tự phát hiện mất hàng (đường ít dùng hơn — xem
 // reportLostContainerManual()). Xem renderKhoLostReports()/approveLostReport().
 const LOST_REPORTS_COLL = 'stock_lost_reports_gieogieo';
+// [MỚI] Báo mất TEM (Reprint Label) — bên posgieo.html (Kho → Báo mất tem). KHÁC "báo mất
+// hàng" ở trên: cái này KHÔNG đụng tồn kho, chỉ đổi định danh (mã) của container đã tồn
+// tại — nên KHÔNG có bước duyệt (POS đã tự xử lý xong lúc reprint), Quản lý chỉ xem lại
+// lịch sử để đối chiếu. Xem renderKhoLabelReports().
+const LABEL_REPORTS_COLL = 'stock_label_reports_gieogieo';
 let ctnFilter = 'review';      // review | browse | expired | lost | unlabeled | legacy | fixreceipt
 let CONTAINERS_CACHE = [];
 
@@ -4457,16 +4462,18 @@ async function renderKhoContainers(){
   // đọc MỘT LẦN rồi lọc bằng chip ngay trên trình duyệt (xem renderKhoContainerBrowse).
   // Thêm tab "Báo mất hàng" (report + duyệt + danh sách đang mất) — xem renderKhoLostReports.
   const tabs = [
-    ['review',     'Cần xem lại'],
-    ['browse',     'Tồn kho & tem'],
-    ['expired',    'Quá hạn sau mở'],
-    ['lost',       'Báo mất hàng'],
-    ['unlabeled',  'Tem chưa dán'],
-    ['legacy',     'Tồn lịch sử'],
-    ['fixreceipt', 'Sửa phiếu nhận']
+    ['review',      'Cần xem lại'],
+    ['browse',      'Tồn kho & tem'],
+    ['expired',     'Quá hạn sau mở'],
+    ['lost',        'Báo mất hàng'],
+    ['labelreport', 'Báo mất tem'],
+    ['unlabeled',   'Tem chưa dán'],
+    ['legacy',      'Tồn lịch sử'],
+    ['fixreceipt',  'Sửa phiếu nhận']
   ];
   if(ctnFilter === 'browse'){ await renderKhoContainerBrowse(box, tabs); return; }
   if(ctnFilter === 'lost'){ await renderKhoLostReports(box, tabs); return; }
+  if(ctnFilter === 'labelreport'){ await renderKhoLabelReports(box, tabs); return; }
   if(ctnFilter === 'legacy'){ await renderKhoLegacyStock(box, tabs); return; }
   if(ctnFilter === 'fixreceipt'){ await renderKhoFixReceipt(box, tabs); return; }
   let list = [];
@@ -4602,10 +4609,14 @@ function renderKhoContainerBrowseList(){
       : c.status==='lost' ? `Báo mất ${dt(c.lostAt)} bởi ${escapeHtmlAttr(c.lostBy||'—')}`
       : `Nhận ${dt(c.receivedAt)} bởi ${escapeHtmlAttr(c.receivedBy||'—')}`
         + (c.labelPrinted===false ? `<div class="muted-sm">Chưa dán tem</div>` : '');
+    // Đã từng cấp lại tem (originalLabelId khác mã hiện tại) — báo nhẹ để biết mã này
+    // không phải tem gốc, không phải đổi màu thẻ (không liên quan trạng thái tồn kho).
+    const daReprint = c.originalLabelId && c.originalLabelId !== c.code;
     return `<div class="litem" style="${styleFor(c.status)}">
       <div class="li-l">
         <div>${escapeHtmlAttr(c.itemName||'')} <span class="muted-sm" style="letter-spacing:.4px">${escapeHtmlAttr(c.code||'')}</span>
           ${isMoi ? '<span class="tier tier-green" style="margin-left:6px;font-size:9.5px;">Mới nhập</span>' : ''}
+          ${daReprint ? '<span class="tier tier-amber" style="margin-left:6px;font-size:9.5px;">Đã cấp lại tem</span>' : ''}
         </div>
         <div>${phu}</div>
       </div>
@@ -4808,6 +4819,57 @@ async function renderKhoLostReports(box, tabs){
       </div>`).join('')}` : '';
 
   box.innerHTML = nav + manualForm + pendingHtml + currentHtml + histHtml;
+}
+
+// ============================================================
+// [MỚI] TAB "BÁO MẤT TEM" — chỉ XEM LẠI lịch sử, không có bước duyệt.
+//
+// Khác hẳn "Báo mất hàng": báo mất TEM không đụng tồn kho (POS đã tự cấp lại mã ngay lúc
+// đối soát xong — xem missingLabelDoReprint() bên posgieo.html), nên không có gì để Quản
+// lý "duyệt" cả — tab này thuần tuý phục vụ truy vết: nguyên liệu nào, ai làm, lúc nào, lý
+// do gì, thiếu bao nhiêu tem, mã cũ → mã mới ra sao (đúng yêu cầu "Inventory Unit → Batch
+// → Label cũ → Mất/Hỏng → Reprint → Label mới").
+// ============================================================
+async function loadLabelReportsHistory(limitN){
+  const snap = await fstore.collection(LABEL_REPORTS_COLL).orderBy('createdAt','desc').limit(limitN||40).get();
+  return snap.docs.map(d=>({id:d.id, ...d.data()}));
+}
+
+async function renderKhoLabelReports(box, tabs){
+  const nav = `<div class="filter-bar">${tabs.map(([k,l])=>
+      `<button class="ftag ${ctnFilter===k?'active':''}" onclick="ctnFilter='${k}'; renderKhoContainers();">${l}</button>`).join('')}</div>`;
+  box.innerHTML = nav + '<div class="empty-hint">Đang tải…</div>';
+  let history = [];
+  try{
+    await ensureAuth();
+    history = await loadLabelReportsHistory(60);
+  }catch(err){
+    console.error('renderKhoLabelReports lỗi', err);
+    box.innerHTML = nav + '<div class="muted">Không đọc được. '+(err.code||err.message||'')+'</div>';
+    return;
+  }
+  const note = `<div class="small-note" style="margin:12px 0">Đối soát tem (Kho → Báo mất tem bên POS) — chỉ cấp lại ĐỊNH DANH cho hàng đã tồn tại, KHÔNG đụng tồn kho/GOGS/hao hụt. Xem lại đây để biết ai làm, lúc nào, thiếu bao nhiêu tem.</div>`;
+  if(!history.length){
+    box.innerHTML = nav + note + '<div class="empty-hint">Chưa có lần đối soát tem nào.</div>';
+    return;
+  }
+  const p2 = n=>String(n).padStart(2,'0');
+  const dt = iso => { const d = iso?new Date(iso):null; return (d && !isNaN(d)) ? `${p2(d.getDate())}/${p2(d.getMonth()+1)} ${p2(d.getHours())}:${p2(d.getMinutes())}` : '—'; };
+  box.innerHTML = nav + note + `<div>` + history.map(r=>{
+    const anomaly = !!r.anomaly;
+    const n = Number(r.labelsMissingCount)||0;
+    return `<div class="litem" style="${anomaly?'background:#fef2f2;border-color:#fca5a5;':''}">
+      <div class="li-l">
+        <div>${escapeHtmlAttr(r.itemName||'')} ${anomaly?'<span class="tier tier-red" style="margin-left:4px;font-size:9.5px;">Bất thường</span>':''}</div>
+        <div>${anomaly
+          ? `Quét được nhiều hơn tồn hệ thống (tồn ghi ${r.stockBeforeReconcile}, quét được ${(r.scannedCodes||[]).length}) — cần kiểm tra dữ liệu`
+          : (n>0 ? `Thiếu ${n} tem, đã in lại — tồn kho không đổi (${r.stockBeforeReconcile})` : `Đối soát khớp, không cần in lại (${r.stockBeforeReconcile} tem)`)}</div>
+        <div class="muted-sm">Bởi ${escapeHtmlAttr(r.staff||'—')} · ${dt(r.createdAt)}${r.reason?' · '+escapeHtmlAttr(r.reason):''}</div>
+        ${(r.reprinted&&r.reprinted.length) ? `<div class="muted-sm">Mã cũ → mã mới: ${r.reprinted.map(x=>escapeHtmlAttr((x.oldCode||'—')+' → '+(x.newCode||'—'))).join(', ')}</div>` : ''}
+      </div>
+      <div class="li-r"></div>
+    </div>`;
+  }).join('') + `</div>`;
 }
 
 // ------------------------------------------------------------
@@ -10311,6 +10373,22 @@ async function renderAlertInbox(){
         </div>` : ''}
       </div>`;
     }
+    // [MỚI] Đối soát BÁO MẤT TEM quét được nhiều hơn tồn hệ thống đang ghi — không tự xử
+    // lý được (không rõ đâu là tem thật/tem trùng/dữ liệu lệch), chỉ ghi nhận để Quản lý tự
+    // tay kiểm tra (không có nút Duyệt/Từ chối như báo mất hàng, vì không có gì để duyệt —
+    // không giao dịch kho nào phát sinh, chỉ cần "Đã xem").
+    if(a.type==='label_reconcile_anomaly'){
+      return `<div class="alert-card" style="${isNew?'':'opacity:.62;border-color:var(--line)'}">
+        <div class="ac-title">${a.title || 'Đối soát tem bất thường'} ${isNew?'':'<span class="tier tier-green" style="margin-left:4px">Đã xử lý</span>'}</div>
+        <div class="ac-row">Ngày: ${a.businessDate || '—'}${a.staff?` · báo bởi ${escapeHtmlAttr(a.staff)}`:''}</div>
+        <div class="ac-row" style="color:#c0392b;font-weight:700">${escapeHtmlAttr(a.itemName||'')}: quét được ${a.scannedCount} tem, hệ thống chỉ ghi ${a.expected}</div>
+        <div class="ac-infer">Số tem quét được không được vượt tồn hệ thống — có thể có tem trùng mã, hoặc dữ liệu container đang lệch với thực tế. Không có giao dịch kho nào phát sinh (nguyên tắc "báo mất tem không đụng tồn kho" vẫn giữ nguyên). Vào Kho → Container → Báo mất tem xem chi tiết, rồi kiểm tra thủ công.</div>
+        ${isNew ? `<div class="ac-actions">
+          <button onclick="goContainers('labelreport')">Xem chi tiết</button>
+          <button onclick="markAlertStatus('${a.id}','resolved')">Đã xử lý</button>
+        </div>` : ''}
+      </div>`;
+    }
     return `<div class="alert-card" style="${isNew?'':'opacity:.62;border-color:var(--line)'}">
       <div class="ac-title">${a.title || 'Cảnh báo'} ${isNew?'':'<span class="tier tier-green" style="margin-left:4px">Đã xử lý</span>'}</div>
       <div class="ac-row">Ngày: ${a.businessDate || '—'}</div>
@@ -14532,7 +14610,11 @@ const EXPORT_RANGE_COLLS = [
   // báo, ai duyệt, còn chờ hay đã tìm lại) để không lẫn với điều chỉnh kiểm kho thường —
   // đúng tinh thần "mất hàng là mục riêng, không phải waste, không phải điều chỉnh chung"
   // đã áp dụng ở computeLedgerRealMetrics().
-  'stock_lost_reports_gieogieo'
+  'stock_lost_reports_gieogieo',
+  // [MỚI] Phiếu báo mất TEM (reprint label) — KHÁC báo mất hàng ở trên: không sinh giao
+  // dịch kho nào cả (không có gì trong stock_transactions_gieogieo để đối chiếu), nên đây
+  // là NGUỒN DUY NHẤT biết được lịch sử mất/hỏng/cấp lại tem theo nguyên liệu.
+  'stock_label_reports_gieogieo'
 ];
 // Nhỏ hoặc không chắc có businessDate → lấy hết rồi lọc trong JS.
 const EXPORT_SMALL_COLLS = ['alerts_gieogieo', 'handover_records_gieogieo', 'receiving_records_gieogieo', 'purchase_orders_gieogieo'];
@@ -14947,6 +15029,7 @@ async function runExport(mode){
         <div class="row"><span class="rl">Món đã khai định mức</span><span class="rv">${(payload.cauHinh['recipes_gieogieo']||[]).length}</span></div>
         <div class="row"><span class="rl">Phiếu kiểm kê</span><span class="rv">${(payload.duLieuTheoNgay['stock_counts_gieogieo']||[]).length}</span></div>
         <div class="row"><span class="rl">Phiếu báo mất hàng</span><span class="rv">${(payload.duLieuTheoNgay['stock_lost_reports_gieogieo']||[]).length}</span></div>
+        <div class="row"><span class="rl">Phiếu báo mất tem</span><span class="rv">${(payload.duLieuTheoNgay['stock_label_reports_gieogieo']||[]).length}</span></div>
         <div class="row"><span class="rl">Nguyên liệu đối chiếu được<div class="small-note" style="margin-top:2px">cần 2 phiếu kiểm kê đã duyệt kẹp hai đầu kỳ</div></span><span class="rv">${payload.tong_quan_lech ? payload.tong_quan_lech.soCoDuLieu + '/' + payload.tong_quan_lech.soNguyenLieu : '—'}</span></div>
         <div class="row"><span class="rl">Độ phủ định mức<div class="small-note" style="margin-top:2px">% số ly bán ra CÓ trừ được kho</div></span><span class="rv" style="color:${payload.do_phu_dinh_muc && payload.do_phu_dinh_muc.doPhu!=null && payload.do_phu_dinh_muc.doPhu<0.8 ? 'var(--bad)':'inherit'}">${payload.do_phu_dinh_muc && payload.do_phu_dinh_muc.doPhu!=null ? fmtNum(payload.do_phu_dinh_muc.doPhu*100,1)+'%' : '—'}</span></div>
         <div class="row"><span class="rl">Tem kho trong file</span><span class="rv">${(payload.tem_kho||[]).length}</span></div>
