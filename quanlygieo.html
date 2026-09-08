@@ -20685,26 +20685,60 @@ async function renderKhoHistory(){
   box.innerHTML = `
     <div class="filter-bar">${KHO_HIST_SRC.map(x=>
       `<button class="ftag ${khoHistSrc===x.k?'active':''}" onclick="khoHistSetSrc('${x.k}')">${x.label}</button>`).join('')}</div>
+    ${khoHistSrc==='items' ? `
+    <div class="field" style="margin:12px 0 0">
+      <label>Lọc theo tên nhân viên (trong phạm vi gần đây bên dưới)</label>
+      <input type="text" placeholder="VD: Lan" value="${escapeHtmlAttr(khoHistStaffFilter)}" oninput="khoHistSetStaffFilter(this.value)">
+    </div>` : ''}
     <div id="khoHistBody"><div class="muted">Đang tải...</div></div>`;
   if(khoHistSrc==='prep') return renderKhoHistPrep();
   if(khoHistSrc==='batches') return renderKhoHistBatches();
   return renderKhoHistItems();
 }
 
+// UX Scenario Audit (Phase 20, mục #2) phát hiện: không có cách nào xem
+// nhanh "nhân viên A gần đây đã ghi những gì" (đặc biệt là WASTE) — phải tự
+// dò bằng mắt trong danh sách trộn lẫn mọi người. Thêm ô lọc theo tên, CHỈ
+// lọc phía CLIENT trên dữ liệu ĐÃ TẢI (không gọi lại Firestore mỗi lần gõ —
+// tách phần tải dữ liệu (renderKhoHistItems, gọi 1 lần khi vào tab/bấm lọc
+// nguồn) khỏi phần vẽ lại (renderKhoHistItemsBody, gọi lại mỗi lần gõ ô lọc).
+//
+// Giới hạn cần nói rõ: màn này vốn chỉ hiện GẦN ĐÂY (50 giao dịch/10 phiếu
+// kiểm kho/15 phiếu nhận gần nhất của CẢ CỬA HÀNG, không riêng theo ngày) —
+// ô lọc chỉ thu hẹp trong phạm vi đó, không phải audit toàn bộ lịch sử của
+// một nhân viên. Muốn tra xa hơn phải mở sheet 🕐 của từng nguyên liệu.
+let khoHistStaffFilter = '';
+let _khoHistItemsCache = null;   // {txs, counts, receivings, locations} — nạp 1 lần, lọc nhiều lần
+
 async function renderKhoHistItems(){
   const box = document.getElementById('khoHistBody');
   if(!box) return;
   showLoading(box);
-  let txs = [], counts = [], receivings = [], locations = [];
   try{
-    [txs, counts, receivings, locations] = await Promise.all([loadStockTransactions(50), loadStockCounts(10), loadReceivingRecords(15), loadStorageLocations()]);
+    const [txs, counts, receivings, locations] = await Promise.all([loadStockTransactions(50), loadStockCounts(10), loadReceivingRecords(15), loadStorageLocations()]);
     STORAGE_LOCATIONS = locations;
+    _khoHistItemsCache = { txs, counts, receivings, locations };
   }catch(err){
     console.error('loadStockTransactions/loadStockCounts/loadReceivingRecords/loadStorageLocations failed', err);
     box.innerHTML = '<div class="muted">Không tải được lịch sử.</div>';
     showError('Không đọc được lịch sử kho: '+(err.code||err.message||err));
     return;
   }
+  renderKhoHistItemsBody();
+}
+function khoHistSetStaffFilter(v){
+  khoHistStaffFilter = v || '';
+  renderKhoHistItemsBody();
+}
+function renderKhoHistItemsBody(){
+  const box = document.getElementById('khoHistBody');
+  if(!box || !_khoHistItemsCache) return;
+  const { locations } = _khoHistItemsCache;
+  const q = noAccent(khoHistStaffFilter.trim());
+  const matchStaff = name => !q || noAccent(String(name||'')).includes(q);
+  const receivings = _khoHistItemsCache.receivings.filter(r=>matchStaff(r.staff));
+  const counts = _khoHistItemsCache.counts.filter(c=>matchStaff(c.countedBy));
+  const txs = _khoHistItemsCache.txs.filter(tx=>matchStaff(tx.staff));
   const itemName = id => (INVENTORY_ITEMS.find(x=>x.id===id)||{}).name || '(nguyên liệu đã xoá)';
   const locName = id => (locations.find(x=>x.id===id)||{}).name || '(vị trí đã xoá)';
   // Hỗ trợ cả type MỚI (chuẩn hoá, chữ hoa — xem STOCK_TX_TYPES) lẫn type CŨ (chữ thường,
@@ -20714,6 +20748,9 @@ async function renderKhoHistItems(){
     if(STOCK_TX_TYPES[tx.type]) return [STOCK_TX_TYPES[tx.type].label, STOCK_TX_TYPES[tx.type].color];
     return LEGACY_TYPE_LABEL[tx.type] || [tx.type, 'blue'];
   };
+  const emptyMsg = base => q
+    ? `Không có ${base} nào khớp "${escapeHtmlAttr(khoHistStaffFilter)}" trong phạm vi gần đây.`
+    : `Chưa có ${base} nào.`;
   box.innerHTML = `
     <div class="sec-title">Phiếu nhận hàng gần đây (từ POS)</div>
     ${receivings.length ? receivings.map(r=>{
@@ -20736,7 +20773,7 @@ async function renderKhoHistItems(){
         </div>
         <div class="li-r"></div>
       </div>`;
-    }).join('') : '<div class="muted">Chưa có phiếu nhận hàng nào từ POS.</div>'}
+    }).join('') : `<div class="muted">${emptyMsg('phiếu nhận hàng từ POS')}</div>`}
 
     <div class="sec-title">Kiểm kho gần đây (nhập ở app POS — duyệt ở tab "Kiểm kê")</div>
     ${counts.length ? counts.map(c=>{
@@ -20746,7 +20783,7 @@ async function renderKhoHistItems(){
         <div class="li-l"><div>Kiểm kho ${c.countedBy?('· '+c.countedBy):''} <span class="tier tier-${st[1]}" style="margin-left:4px">${st[0]}</span></div><div>${(c.createdAt||'').slice(0,10)} · ${(c.items?Object.keys(c.items).length:0)} nguyên liệu</div></div>
         <div class="li-r"></div>
       </div>`;
-    }).join('') : '<div class="muted">Chưa có lần kiểm kho nào từ POS.</div>'}
+    }).join('') : `<div class="muted">${emptyMsg('lần kiểm kho từ POS')}</div>`}
 
     <div class="sec-title">Biến động kho gần đây</div>
     ${txs.length ? txs.map(tx=>{
@@ -20764,7 +20801,7 @@ async function renderKhoHistItems(){
         <div>${(tx.createdAt||'').replace('T',' ').slice(0,16)} ${tx.staff?('· '+tx.staff):''} ${tx.note?('· '+tx.note):''}${src}</div></div>
         <div class="li-r">${tx.qty>0?'+':''}${fmtNum(tx.qty,1)}<br><span class="small-note">còn ${fmtNum(tx.resultingStock,1)}</span></div>
       </div>`;
-    }).join('') : '<div class="muted">Chưa có biến động kho nào.</div>'}
+    }).join('') : `<div class="muted">${emptyMsg('biến động kho')}</div>`}
   `;
 }
 

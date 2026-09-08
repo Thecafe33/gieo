@@ -13,7 +13,7 @@ Cột "Số click" đếm từ màn "Hôm nay" (mặc định lúc mở app), kh
 | # | Tình huống | Đường đi | Số click | Đánh giá |
 |---|---|---|---|---|
 | 1 | Tại sao sữa tươi bị lệch? | Ctrl+K gõ "sữa" → bấm "Giải thích tồn kho" → xem breakdown + khối "Đối chiếu sổ kho với tem" | 2 | 🟢 |
-| 2 | Nhân viên A hôm qua đã ghi hao hụt (WASTE) những gì? | Ctrl+K gõ tên NV → chỉ có nút Chấm công/Lương/Hồ sơ, **không có "xem hao hụt đã ghi"** | — | 🔴 **Lỗ hổng** — không có cách lọc WASTE theo nhân viên ở bất kỳ đâu trong app. Gần nhất: Kho → Lịch sử kho, lọc WASTE rồi tự dò tên trong `meta` (không có ô lọc theo tên) |
+| 2 | Nhân viên A hôm qua đã ghi hao hụt (WASTE) những gì? | Kho → Lịch sử kho → ô lọc "Lọc theo tên nhân viên" | 2 | 🟢 **Đã sửa cùng ngày** — chỉ trong phạm vi gần đây (xem "Cập nhật" cuối trang) |
 | 3 | Xem container sữa đang mở, ai mở, hạn tới bao giờ | Ctrl+K gõ "sữa" → mở sheet 🕐 → khối "Đang mở & tem" | 2 | 🟢 |
 | 4 | Bill #1023 đã trừ kho chưa? | Lịch sử bill (protected) → mở bill → **chưa xác minh được** màn chi tiết bill có hiện thẳng "đã trừ kho" hay không (chưa đọc lại toàn bộ `qlBillDetailHTML`) | ? | 🟡 **Cần xác minh** — hướng NGƯỢC (transaction→bill) đã làm ở Phase 10, hướng THUẬN (bill→có trừ kho không) chưa xác nhận có sẵn hay chưa |
 | 5 | Kiểm kê bán thành phẩm (BTP) — duyệt phiếu ở đâu? | Kho → Kiểm kê chỉ có hàng đợi duyệt của **Nguyên liệu** (`stock_counts_gieogieo`, field `itemId`) | — | 🔴 **Không rõ ràng** — BTP đếm cuối ca bằng cơ chế khác (ghi đè thẳng, sinh alert `prep_count_variance`), không qua hàng đợi duyệt như Nguyên liệu. Người mới vào Kho → Kiểm kê tìm BTP sẽ không thấy, dễ tưởng thiếu tính năng |
@@ -42,14 +42,16 @@ Cột "Số click" đếm từ màn "Hôm nay" (mặc định lúc mở app), kh
 
 ## Tổng kết
 
-- **18/25 (72%) mượt** (🟢) — không cần cải tổ thêm.
-- **5/25 (20%) có ma sát** (🟡) — tới được nhưng vòng vèo hoặc thiếu link trực tiếp.
-- **2/25 (8%) là lỗ hổng thật** (🔴) — tính năng không tồn tại, không phải vấn đề tìm đường:
-  - **#2 — Xem hao hụt đã ghi theo TỪNG nhân viên.** Đáng làm nhất trong hai lỗ hổng này vì liên quan trực tiếp tới nguyên tắc "phát hiện gian lận/lặp lại thao tác sai" của kế hoạch. Cách làm hợp lý nhất: thêm bộ lọc theo `staff` vào Kho → Lịch sử kho (đã có field `t.staff` sẵn trong dữ liệu, chỉ thiếu UI lọc).
+- **19/25 (76%) mượt** (🟢, sau khi sửa #2 cùng ngày) — không cần cải tổ thêm.
+- **4/25 (16%) có ma sát** (🟡) — tới được nhưng vòng vèo hoặc thiếu link trực tiếp.
+- **1/25 (4%) còn là lỗ hổng thật** (🔴) — tính năng không tồn tại, không phải vấn đề tìm đường:
   - **#19 — Xem một nguyên liệu được dùng trong công thức nào (recipe usage ngược).** Cần quét toàn bộ `recipes_gieogieo` tìm dòng nào tham chiếu `itemId` này — tính toán không khó nhưng cần đọc kỹ cấu trúc `recipes_gieogieo.sizes` trước khi làm (giống cách đã thận trọng với container ở phiên trước).
+  - ~~#2~~ đã sửa cùng ngày, xem "Cập nhật" cuối trang.
 - **1 mục cần xác minh trên trình duyệt thật** (#4 — bill đã trừ kho chưa) trước khi kết luận có phải lỗ hổng hay không.
 - **#9 và #22** không phải lỗ hổng mới mà là phần MỞ RỘNG của việc đã làm (Transaction Drill-down cho ADJUSTMENT, và tự động hoá rule Ledger≠Container) — đã có trong danh sách "việc tiếp theo" ở `feature-map.md`.
 
 ## Khuyến nghị
 
 Không sửa gì trong lượt audit này (đúng tinh thần Sprint 6 — audit trước, sửa sau, và một phiên đã thay đổi rất nhiều thứ, cần được test trước khi cộng dồn thêm). Ưu tiên cho lượt tiếp theo nếu muốn đóng nốt các lỗ hổng: mục #2 (lọc hao hụt theo nhân viên) — thấp rủi ro, dữ liệu đã có sẵn, chỉ cần thêm UI lọc vào Lịch sử kho.
+
+**Cập nhật (cùng ngày, ngay sau audit):** đã làm mục #2 — xem `feature-map.md` §3. Ô lọc theo tên nhân viên chỉ áp dụng cho phần "Nguyên liệu" của Lịch sử kho (nguồn `renderKhoHistItems`), lọc trong phạm vi GẦN ĐÂY đã tải (50 giao dịch/10 phiếu kiểm kho/15 phiếu nhận toàn cửa hàng), không phải audit toàn bộ lịch sử — không giải quyết trọn vẹn tình huống #2 cho trường hợp cần tra CŨ hơn phạm vi đó, nhưng đáp ứng đúng nhu cầu thường gặp nhất ("gần đây nhân viên này có ghi gì bất thường không").
