@@ -20065,6 +20065,92 @@ function _histRenderError(err){
 }
 function histSetFilter(f){ if(_histCtx){ _histCtx.filter = f; _histRender(); } }
 
+// ------------------------------------------------------------
+// GIẢI THÍCH TỒN KHO (Stock Explanation) — kế hoạch cải tổ UX, Phase 9.
+//
+// Không phải màn riêng: đây là một khối thêm vào NGAY sheet "Lịch sử" đã có
+// (mở từ nút đồng hồ ở Nguyên liệu/Chế biến cấp 1) — trả lời "tồn hiện tại
+// hình thành từ đâu" bằng cách cộng dồn ledger theo từng loại giao dịch.
+//
+// Giới hạn cần nói thẳng: _histLoad chỉ lấy tối đa 400 giao dịch gần nhất
+// (hoặc bản rút gọn khi thiếu index — xem c.partial). Với món biến động
+// nhiều, tổng cộng dồn ở đây có thể KHÔNG phải toàn bộ lịch sử — báo rõ thay
+// vì im lặng đưa ra một con số trông có vẻ chính xác nhưng sai.
+//
+// Phần dư (currentStock − tổng ledger đã tải) KHÔNG bị gọi là hao hụt. Phần
+// lớn trường hợp đây là tồn đầu khai tay lúc tạo nguyên liệu (addInventoryItem
+// ghi thẳng currentStock, không qua một dòng ledger nào) — đúng bản chất
+// "LEGACY/chưa qua sổ" mà kế hoạch yêu cầu, không phải WASTE.
+// ------------------------------------------------------------
+// Nhãn cho MỌI type từng xuất hiện ở hai ledger (nguyên liệu lẫn BTP), kể cả
+// type cũ chữ thường trước Giai đoạn 3 và PRODUCTION/SALE riêng của tầng Chế
+// biến. Một chỗ duy nhất để _histRender() (cột "loại") và khối "Giải thích
+// tồn kho" bên dưới cùng đọc — sửa nhãn một nơi, khỏi lệch giữa hai chỗ.
+const HIST_EXTRA_TYPE_LABEL = {
+  STOCK_IN:['Nhập kho','green'], SALE:['Bán ra','blue'], PRODUCTION:['Nấu ra lô','green'],
+  ADJUSTMENT:['Điều chỉnh','amber'], WASTE:['Hao hụt','red']
+};
+function _histTypeLabel(ty){
+  const t = String(ty||'').toUpperCase();
+  if(STOCK_TX_TYPES[t]) return [STOCK_TX_TYPES[t].label, STOCK_TX_TYPES[t].color];
+  if(HIST_EXTRA_TYPE_LABEL[t]) return HIST_EXTRA_TYPE_LABEL[t];
+  return null;
+}
+const HIST_TYPE_ORDER = ['RECEIVING','TRANSFER','CONSUMPTION','PRODUCTION','WASTE','ADJUSTMENT','LOC_SET','STOCK_IN','SALE'];
+
+function _histTypeBreakdown(c){
+  const byType = {};   // rawTy (đã hoa) → {label, sum}
+  let unknownSum = 0, unknownCount = 0;
+  (c.rows||[]).forEach(t=>{
+    const rawTy = String(t.type||'').toUpperCase();
+    const lbl = _histTypeLabel(rawTy);
+    if(!lbl){ unknownSum += Number(t.qty)||0; unknownCount++; return; }
+    if(!byType[rawTy]) byType[rawTy] = { label: lbl[0], sum: 0 };
+    byType[rawTy].sum += Number(t.qty)||0;
+  });
+  const ledgerTotal = Object.values(byType).reduce((s,x)=>s+x.sum, unknownSum);
+  const truncated = !!c.partial || (c.rows||[]).length >= 400;
+  return { byType, unknownSum, unknownCount, ledgerTotal, truncated };
+}
+function _histBreakdownHtml(c){
+  const unit = escapeHtmlAttr(c.unit||'');
+  const bd = _histTypeBreakdown(c);
+  const stock = Number(c.stock)||0;
+  const residual = stock - bd.ledgerTotal;
+  const matched = Math.abs(residual) < 0.001;
+  const rowBtn = (label, val, filterKey)=>`
+    <button class="row" style="width:100%;text-align:left;background:none;border:none;font:inherit;cursor:pointer;color:inherit;padding:8px 0" onclick="histSetFilter('${filterKey}')">
+      <span class="rl">${label}</span>
+      <span class="rv">${val>=0?'+':'−'}${fmtNum(Math.abs(val),1)} ${unit}</span>
+    </button>`;
+  const orderedKeys = Object.keys(bd.byType).sort((a,b)=>{
+    const ia = HIST_TYPE_ORDER.indexOf(a), ib = HIST_TYPE_ORDER.indexOf(b);
+    return (ia<0?99:ia) - (ib<0?99:ib);
+  });
+  const typeRows = orderedKeys.map(k=> rowBtn(bd.byType[k].label, bd.byType[k].sum, k)).join('');
+  const legacyRow = bd.unknownCount
+    ? rowBtn(`Loại chưa nhận diện được (${bd.unknownCount} dòng)`, bd.unknownSum, '_legacy') : '';
+  if(!typeRows && !legacyRow) return '';
+  const badge = matched
+    ? `<span class="tier tier-green">🟢 Khớp với sổ kho</span>`
+    : `<span class="tier tier-amber">🟡 Có phần chưa qua sổ kho</span>`;
+  return `
+    <div class="card" style="margin-bottom:10px;padding:12px 14px">
+      <div class="card-h"><h3>${ic('search')} Tồn hiện tại hình thành từ</h3>${badge}</div>
+      ${typeRows}${legacyRow}
+      ${!matched ? `
+      <div class="row" style="border-top:1px dashed var(--line)">
+        <span class="rl">Số dư chưa qua sổ kho (thường là tồn khai tay lúc tạo món)</span>
+        <span class="rv">${residual>=0?'+':'−'}${fmtNum(Math.abs(residual),1)} ${unit}</span>
+      </div>
+      <div class="small-note" style="margin-top:2px"><b>Không phải hao hụt</b> — chỉ là phần chưa có dòng ledger nào giải thích.${bd.truncated ? ' Ngoài ra danh sách chỉ tải '+((c.rows||[]).length)+' giao dịch gần nhất nên số này có thể còn lẫn giao dịch cũ hơn chưa tính vào.' : ''}</div>` : ''}
+      <div class="row" style="border-top:1.5px solid var(--line);font-weight:700">
+        <span class="rl">Tồn hiện tại</span>
+        <span class="rv">${fmtNum(stock,1)} ${unit}</span>
+      </div>
+    </div>`;
+}
+
 // Gộp các lượt BÁN RA cùng ngày thành một dòng. Chỉ gộp bán ra thường: hao hụt,
 // điều chỉnh, nhập kho — mỗi dòng là một sự kiện riêng cần truy được, không gộp.
 function _histCollapseSales(rows){
@@ -20088,12 +20174,25 @@ function _histRender(){
   if(!box || !_histCtx) return;
   const c = _histCtx, unit = escapeHtmlAttr(c.unit||'');
   const all = _histCollapseSales(c.rows);
-  const rows = c.filter==='all' ? all : all.filter(t=>_histGroupOf(t)===c.filter);
+  // Bấm vào một dòng trong khối "Giải thích tồn kho" lọc theo ĐÚNG loại giao dịch
+  // (RECEIVING/WASTE/...) hoặc '_legacy' — chi tiết hơn 5 chip có sẵn bên dưới
+  // (vốn chỉ gộp thô vào/ra/hao hụt/điều chỉnh), nên xử lý riêng trước khi rơi
+  // về _histGroupOf.
+  const rows = c.filter==='all' ? all
+    : c.filter==='_legacy' ? all.filter(t=>!_histTypeLabel(t.type))
+    : _histTypeLabel(c.filter) ? all.filter(t=>String(t.type||'').toUpperCase()===c.filter)
+    : all.filter(t=>_histGroupOf(t)===c.filter);
 
   const chips = HIST_GROUPS.map(g=>{
     const n = g.key==='all' ? all.length : all.filter(t=>_histGroupOf(t)===g.key).length;
     return `<button class="ftag ${c.filter===g.key?'active':''}" onclick="histSetFilter('${g.key}')">${g.label} (${n})</button>`;
   }).join('');
+  // Lọc theo loại chính xác/legacy không khớp chip nào — nói rõ đang lọc gì và
+  // cho lối thoát nhanh, tránh người dùng tưởng bộ lọc bị treo.
+  const exactFilterLabel = _histTypeLabel(c.filter) ? _histTypeLabel(c.filter)[0]
+    : c.filter==='_legacy' ? 'Loại chưa nhận diện được' : '';
+  const exactFilterNote = exactFilterLabel
+    ? `<div class="small-note" style="margin:6px 0">Đang lọc: <b>${exactFilterLabel}</b> · <a href="#" onclick="histSetFilter('all');return false">Xem tất cả</a></div>` : '';
 
   // Gom theo ngày, mới nhất trước — mỗi ngày kèm tổng biến động ròng của ngày đó.
   const byDay = {};
@@ -20103,13 +20202,7 @@ function _histRender(){
   });
   const days = Object.keys(byDay).sort((a,b)=>b.localeCompare(a));
 
-  const typeLabelOf = t=>{
-    const ty = String(t.type||'').toUpperCase();
-    if(STOCK_TX_TYPES[ty]) return [STOCK_TX_TYPES[ty].label, STOCK_TX_TYPES[ty].color];
-    const L = {STOCK_IN:['Nhập kho','green'], SALE:['Bán ra','blue'], PRODUCTION:['Nấu ra lô','green'],
-               ADJUSTMENT:['Điều chỉnh','amber'], WASTE:['Hao hụt','red']};
-    return L[ty] || [t.type||'—','blue'];
-  };
+  const typeLabelOf = t=> _histTypeLabel(t.type) || [t.type||'—','blue'];
 
   const body = days.length ? days.map(d=>{
     const list = byDay[d];
@@ -20162,7 +20255,9 @@ function _histRender(){
       <div class="small-note" style="margin-top:2px">${all.length} dòng · mới nhất trước${c.partial?'':' · tối đa 400 giao dịch gần nhất'}</div>
     </div>
     ${canhBao}
+    ${_histBreakdownHtml(c)}
     <div class="filter-bar" style="margin-bottom:2px">${chips}</div>
+    ${exactFilterNote}
     ${body}
   `;
 }
