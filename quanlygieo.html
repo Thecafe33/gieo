@@ -10389,6 +10389,21 @@ async function renderAlertInbox(){
         </div>` : ''}
       </div>`;
     }
+    // [MỚI — FIX lỗ hổng đối soát] Nhân viên đã đếm tiền xong (cash_passed), sau đó có
+    // bill tiền mặt mới phát sinh trước khi kết ca xong hẳn — POS đã tự chặn và bắt đếm
+    // lại (xem hasNewCashOrdersSinceCashCount() bên posgieo.html), KHÔNG có gì bị mất/sai,
+    // nhưng Quản lý cần biết việc này đã xảy ra để để ý ngày đó có kết ca kéo dài bất
+    // thường hay không.
+    if(a.type==='cash_recount_forced'){
+      return `<div class="alert-card" style="${isNew?'':'opacity:.62;border-color:var(--line)'}">
+        <div class="ac-title">${a.title || 'Đã bắt đếm lại tiền mặt'} ${isNew?'':'<span class="tier tier-green" style="margin-left:4px">Đã xử lý</span>'}</div>
+        <div class="ac-row">Ngày: ${a.businessDate || '—'}</div>
+        <div class="ac-infer">Nhân viên đã đối soát tiền mặt xong, sau đó có thêm bill tiền mặt được bấm TRƯỚC khi đóng ngày hoàn tất — hệ thống đã tự phát hiện và bắt đếm lại toàn bộ tiền mặt, không cho nhảy qua bằng số cũ. Không có gì sai lệch (đã được chặn đúng lúc), chỉ cần biết để ý nếu lặp lại nhiều lần ở cùng một ca.</div>
+        ${isNew ? `<div class="ac-actions">
+          <button onclick="markAlertStatus('${a.id}','resolved')">Đã xem</button>
+        </div>` : ''}
+      </div>`;
+    }
     return `<div class="alert-card" style="${isNew?'':'opacity:.62;border-color:var(--line)'}">
       <div class="ac-title">${a.title || 'Cảnh báo'} ${isNew?'':'<span class="tier tier-green" style="margin-left:4px">Đã xử lý</span>'}</div>
       <div class="ac-row">Ngày: ${a.businessDate || '—'}</div>
