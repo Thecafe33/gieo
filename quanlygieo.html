@@ -4682,7 +4682,8 @@ async function approveLostReport(id){
     await ctnRef.update({status:'lost', lostAt:nowISO, lostBy:'Quản lý (đã duyệt)', lostFromStatus:c.status, lostReportId:id});
     await applyStockTransaction({
       itemId: rep.itemId, type:'ADJUSTMENT', qty: -(Number(rep.baseQty)||1),
-      note: 'Báo mất hàng đã duyệt — mã '+(rep.code||''), staff:'Quản lý', source:'management', referenceId:id
+      note: 'Báo mất hàng đã duyệt — mã '+(rep.code||''), staff:'Quản lý', source:'management', referenceId:id,
+      reason: 'lost_item'
     });
     await ref.update({status:'approved', reviewedAt:nowISO, reviewedBy:'Quản lý'});
     await markAlertForLostReport(id, 'resolved');
@@ -4731,7 +4732,8 @@ async function reportLostContainerManual(){
     });
     await applyStockTransaction({
       itemId: c.itemId, type:'ADJUSTMENT', qty: -(Number(c.baseQty)||1),
-      note: 'Báo mất hàng (Quản lý nhập trực tiếp) — mã '+ma, staff:'Quản lý', source:'management', referenceId: repRef.id
+      note: 'Báo mất hàng (Quản lý nhập trực tiếp) — mã '+ma, staff:'Quản lý', source:'management', referenceId: repRef.id,
+      reason: 'lost_item'
     });
     logAudit('report','lost_report',repRef.id,{code:ma, itemName:c.itemName});
     toast('✅ Đã báo mất — trừ khỏi tồn kho');
@@ -4972,7 +4974,7 @@ function deleteInventoryItem(id){
 //   source        — 'management' | 'pos', biết bản ghi tạo từ app nào
 //   referenceId   — tuỳ chọn, tham chiếu tới PO/đơn hàng/lần kiểm kho liên quan
 //   locationId    — tuỳ chọn, chỉ có khi giao dịch gắn với 1 vị trí kho cụ thể (TRANSFER)
-async function applyStockTransaction({itemId, type, qty, note, staff, businessDate, source, referenceId, locationId}){
+async function applyStockTransaction({itemId, type, qty, note, staff, businessDate, source, referenceId, locationId, reason}){
   memoDropItems();   // tồn kho vừa đổi — số trong bộ đệm không còn đúng
   const itemRef = fstore.collection('inventory_items_gieogieo').doc(itemId);
   const txRef = fstore.collection('stock_transactions_gieogieo').doc();
@@ -4990,6 +4992,10 @@ async function applyStockTransaction({itemId, type, qty, note, staff, businessDa
     };
     if(referenceId) txData.referenceId = referenceId;
     if(locationId) txData.locationId = locationId;
+    // [MỚI] `reason` phân loại NHỎ HƠN `type` — vd type luôn là 'ADJUSTMENT' cho cả điều
+    // chỉnh kiểm kho lẫn báo mất hàng, nhưng báo cáo cuối kỳ cần tách hẳn "Mất hàng" ra khỏi
+    // "Điều chỉnh" chung (xem computeLedgerRealMetrics) — không đoán qua chữ trong `note`.
+    if(reason) txData.reason = reason;
     t.set(txRef, txData);
   });
 }
@@ -11480,7 +11486,14 @@ async function computeLedgerRealMetrics(startDate, endDate){
   // tháng trước bị tính lại theo giá hôm nay. Giờ mỗi giao dịch được định giá bằng
   // mốc giá có hiệu lực ĐÚNG NGÀY nó phát sinh (t.businessDate).
   const costOf = (id, ngay) => itemCostOn(id, ngay);
+  // [MỚI] lostValue/foundValue — hàng "báo mất" (đã duyệt) và "tìm lại được" ghi bằng
+  // type:'ADJUSTMENT' + reason:'lost_item'/'lost_item_found' (xem approveLostReport() và
+  // submitFoundLostContainer() bên posgieo.html). KHÔNG được gộp vào waste (không phải hao
+  // hụt trong pha chế — có thể do mất/trộm/thất lạc, bản chất khác hẳn) và KHÔNG được gộp
+  // chung vào "Điều chỉnh" (adjustmentValue — vốn là sai số ghi chép/kiểm kê) — cuối kỳ cần
+  // nhìn riêng đúng như một mục P&L/báo cáo tồn kho độc lập.
   let wasteValue=0, wasteCount=0, consumptionValue=0, consumptionCount=0, adjustmentValue=0, adjustmentCount=0;
+  let lostValue=0, lostCount=0, foundValue=0, foundCount=0;
   // [MỚI] Hao hụt gom theo TỪNG NGÀY, không chỉ tổng cả kỳ — lãi/lỗ theo ngày cần
   // biết đúng ngày nào mất bao nhiêu. Cộng dồn ngay trong vòng lặp đang có thay vì
   // đọc ledger lần thứ hai ở nơi khác, để hai con số không bao giờ lệch nhau.
@@ -11506,6 +11519,8 @@ async function computeLedgerRealMetrics(startDate, endDate){
     const val = Math.abs(Number(t.qty)||0) * cost;
     if(t.type==='WASTE'){ wasteValue += val; wasteCount++; ghiNhanDoLy(t, val); ghiNhanHaoHutNgay(t, val); }
     else if(t.type==='CONSUMPTION'){ consumptionValue += val; consumptionCount++; }
+    else if(t.type==='ADJUSTMENT' && t.reason==='lost_item'){ lostValue += val; lostCount++; }
+    else if(t.type==='ADJUSTMENT' && t.reason==='lost_item_found'){ foundValue += val; foundCount++; }
     else if(t.type==='ADJUSTMENT'){ adjustmentValue += val; adjustmentCount++; }
   });
   let prepWasteValue=0, prepWasteCount=0, prepAdjValue=0, prepAdjCount=0, prepWasteMissingCost=0;
@@ -11543,7 +11558,8 @@ async function computeLedgerRealMetrics(startDate, endDate){
     drinkWasteEvents: drinkEvents.size,
     drinkWasteValue: [...drinkEvents.values()].reduce((s,e)=>s+e.value, 0),
     consumptionValue, consumptionCount,
-    adjustmentValue: adjustmentValue + prepAdjValue, adjustmentCount: adjustmentCount + prepAdjCount
+    adjustmentValue: adjustmentValue + prepAdjValue, adjustmentCount: adjustmentCount + prepAdjCount,
+    lostValue, lostCount, foundValue, foundCount, lostNetValue: lostValue - foundValue
   };
 }
 async function computeCashVarianceSummary(startDate, endDate){
@@ -11897,6 +11913,10 @@ async function renderHealth(){
       ${ledgerReal.prepWasteMissingCost ? `<div class="small-note" style="color:var(--warn);margin:-2px 0 8px">${ic('alert',13,'var(--warn)')} ${ledgerReal.prepWasteMissingCost} giao dịch huỷ bán thành phẩm KHÔNG có giá trị tiền (ghi bởi bản POS cũ) — đang được tính là 0đ, nên Waste thật đang thấp hơn thực tế.</div>` : ''}
       ${ledgerReal.prepAdjCount ? rowInfoHTML('— chênh lệch đếm bán thành phẩm (không tính waste)', `${fmt(ledgerReal.prepAdjValue)} · ${ledgerReal.prepAdjCount} giao dịch`) : ''}
       ${rowInfoHTML('Điều chỉnh kiểm kho (ADJUSTMENT)', `${fmt(ledgerReal.adjustmentValue)} · ${ledgerReal.adjustmentCount} giao dịch`)}
+      ${ledgerReal.lostCount || ledgerReal.foundCount ? `
+      ${rowInfoHTML('Mất hàng (đã duyệt)', `${fmt(ledgerReal.lostValue)} · ${ledgerReal.lostCount} mã`)}
+      ${ledgerReal.foundCount ? rowInfoHTML('— trong đó tìm lại được', `${fmt(ledgerReal.foundValue)} · ${ledgerReal.foundCount} mã`) : ''}
+      <div class="small-note" style="margin:-2px 0 8px">Mục riêng, KHÔNG tính vào Waste và KHÔNG gộp vào Điều chỉnh kiểm kho ở trên — xem Kho → Container → Báo mất hàng. Net kỳ này: <b>${fmt(ledgerReal.lostNetValue)}</b>.</div>` : ''}
       ${rowInfoHTML('Cash Variance', `${cashVariance.daysWithVariance}/${cashVariance.totalDays} ngày lệch · tổng ${fmt(cashVariance.totalAbsVariance)} · ${cashVariance.daysClosed} ngày đã đóng`)}
     </div>
 
@@ -14506,7 +14526,13 @@ const EXPORT_RANGE_COLLS = [
   // [TIÊU HAO] Tem từng chai/gói — mã 8 ký tự POS tự sinh khi nhận hàng. Đây là
   // nguồn duy nhất biết được một chai mở lúc nào, hết lúc nào, còn thừa bao nhiêu
   // lúc báo hết, và có quá hạn sau khi mở hay không.
-  'stock_containers_gieogieo'
+  'stock_containers_gieogieo',
+  // [MỚI] Phiếu báo mất hàng — TÁCH RIÊNG khỏi stock_transactions_gieogieo dù cả hai đều
+  // sinh ra một dòng ADJUSTMENT ở đó. File export cần thấy NGUYÊN VĂN phiếu báo mất (ai
+  // báo, ai duyệt, còn chờ hay đã tìm lại) để không lẫn với điều chỉnh kiểm kho thường —
+  // đúng tinh thần "mất hàng là mục riêng, không phải waste, không phải điều chỉnh chung"
+  // đã áp dụng ở computeLedgerRealMetrics().
+  'stock_lost_reports_gieogieo'
 ];
 // Nhỏ hoặc không chắc có businessDate → lấy hết rồi lọc trong JS.
 const EXPORT_SMALL_COLLS = ['alerts_gieogieo', 'handover_records_gieogieo', 'receiving_records_gieogieo', 'purchase_orders_gieogieo'];
@@ -14920,6 +14946,7 @@ async function runExport(mode){
         <div class="row"><span class="rl">Lô chế biến trong kỳ</span><span class="rv">${t.loCheBien.length}</span></div>
         <div class="row"><span class="rl">Món đã khai định mức</span><span class="rv">${(payload.cauHinh['recipes_gieogieo']||[]).length}</span></div>
         <div class="row"><span class="rl">Phiếu kiểm kê</span><span class="rv">${(payload.duLieuTheoNgay['stock_counts_gieogieo']||[]).length}</span></div>
+        <div class="row"><span class="rl">Phiếu báo mất hàng</span><span class="rv">${(payload.duLieuTheoNgay['stock_lost_reports_gieogieo']||[]).length}</span></div>
         <div class="row"><span class="rl">Nguyên liệu đối chiếu được<div class="small-note" style="margin-top:2px">cần 2 phiếu kiểm kê đã duyệt kẹp hai đầu kỳ</div></span><span class="rv">${payload.tong_quan_lech ? payload.tong_quan_lech.soCoDuLieu + '/' + payload.tong_quan_lech.soNguyenLieu : '—'}</span></div>
         <div class="row"><span class="rl">Độ phủ định mức<div class="small-note" style="margin-top:2px">% số ly bán ra CÓ trừ được kho</div></span><span class="rv" style="color:${payload.do_phu_dinh_muc && payload.do_phu_dinh_muc.doPhu!=null && payload.do_phu_dinh_muc.doPhu<0.8 ? 'var(--bad)':'inherit'}">${payload.do_phu_dinh_muc && payload.do_phu_dinh_muc.doPhu!=null ? fmtNum(payload.do_phu_dinh_muc.doPhu*100,1)+'%' : '—'}</span></div>
         <div class="row"><span class="rl">Tem kho trong file</span><span class="rv">${(payload.tem_kho||[]).length}</span></div>
