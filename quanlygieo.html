@@ -694,6 +694,42 @@ html.tab-ui .kmini .kmval{font-size:21px;}
 .as-sw input:checked + span::after{transform:translateX(18px);}
 .as-sw input:focus-visible + span{outline:2px solid var(--gd);outline-offset:2px;}
 
+/* ---------- [NEW] Danh sách bill (bê từ màn Lịch sử của POS) ---------- */
+.qbill-list{display:flex;flex-direction:column;gap:7px;}
+.qbill{display:flex;align-items:center;gap:11px;width:100%;text-align:left;cursor:pointer;
+  background:var(--card);border:1px solid rgba(230,227,223,.8);border-left:4px solid var(--line-2);
+  border-radius:var(--r-md);box-shadow:var(--sh-1);padding:11px 13px;font-family:inherit;
+  transition:border-color .15s ease,transform .1s var(--ease-out);}
+.qbill:active{transform:scale(.995);}
+.qbill.qb-split{border-left-color:#7c3aed;}
+.qbill.qb-bank{border-left-color:var(--gd);}
+.qbill.qb-app{border-left-color:#16a34a;}
+.qbill-time{font-size:12.5px;font-weight:800;color:var(--gm);font-variant-numeric:tabular-nums;flex-shrink:0;}
+.qbill-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;}
+.qbill-t1{font-size:12.5px;color:var(--gt);display:flex;align-items:center;gap:5px;flex-wrap:wrap;}
+.qbill-t2{font-size:13px;font-weight:650;color:var(--td);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.qbill-right{text-align:right;flex-shrink:0;}
+.qbill-total{display:block;font-size:15px;font-weight:800;color:var(--td);font-variant-numeric:tabular-nums;}
+.qbill-m{display:block;font-size:10px;font-weight:700;color:var(--gt);text-transform:uppercase;letter-spacing:.4px;}
+.qbill-badge{font-size:9.5px;font-weight:800;border-radius:999px;padding:1px 7px;white-space:nowrap;}
+
+/* Thẻ hoá đơn khi mở chi tiết */
+.qb-item{display:flex;align-items:flex-start;gap:11px;padding:10px 0;border-bottom:1px solid var(--line);}
+.qb-item:last-child{border-bottom:none;}
+.qb-no{font-size:13px;font-weight:800;color:var(--gt);min-width:16px;flex-shrink:0;}
+.qb-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px;}
+.qb-name{font-size:14.5px;font-weight:650;color:var(--td);}
+.qb-sub{font-size:12px;color:var(--gt);}
+.qb-tps{display:flex;flex-wrap:wrap;gap:5px;margin-top:2px;}
+.qb-tp{font-size:11px;font-weight:650;background:#fff3e0;color:#b45309;border-radius:6px;padding:2px 8px;}
+.qb-tp.add{background:#dbeafe;color:#1d4ed8;}
+.qb-amt{font-size:14.5px;font-weight:800;color:var(--td);flex-shrink:0;font-variant-numeric:tabular-nums;}
+.qb-group{border:1.5px solid var(--line-2);border-radius:var(--r-md);padding:12px;margin-bottom:12px;}
+.qb-group.cash{border-color:var(--ok);}
+.qb-group.bank{border-color:#7c3aed;}
+.qb-group-h{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--td);
+  padding-bottom:8px;margin-bottom:4px;border-bottom:1px solid var(--line);flex-wrap:wrap;}
+
 /* ---------- [NEW-ASSIST] Khối một điều kiện của chiến dịch ---------- */
 .as-cond{
   background:var(--surface-2);border:1px solid var(--line);
@@ -1516,6 +1552,11 @@ html.phone-ui .nav-search .ns-kbd{display:none;}
     </div>
   </div>
     </div>
+    </div>
+
+    <!-- ===== [NEW] LỊCH SỬ BILL (bê từ POS) ===== -->
+    <div class="screen" id="screen-bills">
+      <div class="wrap"><div id="billsBody"></div></div>
     </div>
 
     <!-- ===== [NEW-ASSIST] TRỢ LÝ BÁN HÀNG ===== -->
@@ -7677,6 +7718,7 @@ const NAV_SECTIONS = [
     {key:'entry:ops',  ic:'note',    label:'Ghi chú ngày',  go:"goEntry('ops')"},
     {key:'entry:exp',  ic:'cashout', label:'Chi phí',       go:"goEntry('exp')"},
     {key:'entry:cash', ic:'coins',   label:'Tiền mặt',      go:"goEntry('cash')"},
+    {key:'bills',      ic:'receipt', label:'Lịch sử bill',  go:"goBills()"},
   ]},
   // Kho — gập/mở. Chia theo NHỊP công việc chứ không theo loại dữ liệu:
   //   Cần xử lý  → việc đang chờ ngay hôm nay (màn mặc định khi vào Kho)
@@ -8529,6 +8571,7 @@ function switchScreen(s){
   // Bảng tin bill chỉ nghe khi đang đứng ở màn Hôm nay — sang màn khác thì gỡ,
   // không giữ một listener realtime chạy nền suốt phiên.
   if(s === 'today') attachBillFeed(); else detachBillFeed();
+  if(s === 'bills') renderBills().catch(err=>{ console.error(err); showError('Không mở được Lịch sử bill: '+(err.message||err)); });
   if(s==='assist') renderAssist().catch(err=>{ console.error(err); showError('Không mở được Trợ lý bán hàng: '+(err.message||err)); });
   if(s==='inbox') renderAlertInbox();
   if(s==='today') renderToday();
@@ -9311,7 +9354,8 @@ function bfXemHet(){ _bfXemHet = !_bfXemHet; renderBillFeed(); }
 function bfTieuDe(n){
   return `<div class="sec-title" style="display:flex;align-items:center;gap:8px">Bill bán hàng
     ${n ? `<span class="sf-c">${n} bill gần nhất</span>` : ''}
-    <span class="muted-sm" style="margin-left:auto;text-transform:none;letter-spacing:0">tự cập nhật</span></div>`;
+    <button class="btn outline sm" style="margin-left:auto;width:auto;padding:0 12px;min-height:32px;font-size:12.5px"
+      onclick="goBills()">Xem tất cả ${ic('chevronDown',13)}</button></div>`;
 }
 
 // Nhãn phương thức thanh toán — màu để liếc phát biết ngay tiền mặt hay chuyển khoản.
@@ -9387,9 +9431,420 @@ function renderBillFeed(){
       ${mo ? bfChiTiet(o) : ''}
     </div>`;
   }).join('') + `</div>`
-  + (_bfList.length > BF_SHOW
-      ? `<button class="btn outline sm" style="width:auto;padding:0 14px;margin-top:9px" onclick="bfXemHet()">${_bfXemHet ? 'Thu gọn' : `Xem thêm ${_bfList.length - BF_SHOW} bill`}</button>`
-      : '');
+  + `<button class="btn outline sm" style="width:auto;padding:0 14px;margin-top:9px" onclick="goBills()">Mở lịch sử bill đầy đủ</button>`;
+}
+
+
+// ════════════════════════════════════════════════════════════════════════════
+// [NEW] LỊCH SỬ BILL — bản đầy đủ, bê từ màn "Lịch sử đơn" của POS
+//
+// Vì sao chuyển sang đây: nhân viên tinh ý vẫn cộng tay được tất cả bill trong
+// tab Lịch sử của POS để ra doanh thu ngày, trong khi doanh thu đã được ẩn có
+// chủ đích. Chặn ở POS thì mất luôn khả năng xử lý bill sai — nên quyền đó
+// chuyển hẳn về đây: Quản lý xem đủ, tìm được, xoá được.
+//
+// Giao diện giữ nguyên tinh thần bản POS (nhóm theo ngày, màu theo phương thức,
+// badge SHIP/APP/BỔ SUNG, thẻ hoá đơn đầy đủ) để hai bên nhìn ra cùng một thứ.
+// Đã bỏ hai nút chỉ có nghĩa ở quầy: "thêm topping" (cửa sổ 10 phút) và in lại
+// bill/tem (máy in nằm ở quầy).
+// ════════════════════════════════════════════════════════════════════════════
+let qlBills = [];                 // [{id, ...order, items: itemsArray}]
+let qlBillFrom = dkey(new Date());
+let qlBillTo   = dkey(new Date());
+let qlBillQuery = '';
+let qlBillOpenId = null;          // đang mở chi tiết bill nào
+let qlBillLoading = false;
+
+// Đọc bill của một ngày KÈM KHOÁ (push key) — fetchOrdersForDate() có sẵn chỉ
+// trả Object.values() nên mất khoá, mà không có khoá thì không xoá được đúng
+// bản ghi. Vẫn giữ nguyên đường dự phòng đọc archive như hàm kia.
+async function qlLoadBillsOfDate(d){
+  const month = MONTH_KEYS[d.getMonth()], day = pad(d.getDate()), year = d.getFullYear();
+  const ra = [];
+  const nhan = (key, o) => {
+    if(!o) return;
+    if(o.date){ const y = String(o.date).split('/')[2]; if(String(y) !== String(year)) return; }
+    ra.push({ id: key, ...o, items: o.itemsArray || [] });
+  };
+  try{
+    const snap = await db.ref(`orders_gieogieo/${month}/${day}`).once('value');
+    if(snap.exists()){ const val = snap.val() || {}; Object.keys(val).forEach(k => nhan(k, val[k])); }
+  }catch(e){ console.warn('[Bill] đọc RTDB lỗi', e); }
+  if(!ra.length){
+    try{
+      const doc = await fstore.collection('orders_gieogieo_archive').doc(`${month}_${day}_${year}`).get();
+      if(doc.exists){ const o = (doc.data() || {}).orders || {}; Object.keys(o).forEach(k => nhan(k, o[k])); }
+    }catch(e){ console.warn('[Bill] đọc archive lỗi', e); }
+  }
+  return ra;
+}
+
+const QL_BILL_MAX_DAYS = 62;      // trần an toàn: mỗi ngày là một lượt đọc
+
+async function qlLoadBills(){
+  const from = new Date(qlBillFrom + 'T00:00:00');
+  const to   = new Date(qlBillTo   + 'T00:00:00');
+  if(isNaN(from) || isNaN(to)) throw new Error('Khoảng ngày không hợp lệ');
+  const soNgay = Math.round((to - from) / 86400000) + 1;
+  if(soNgay < 1) throw new Error('Ngày kết thúc phải sau ngày bắt đầu');
+  if(soNgay > QL_BILL_MAX_DAYS) throw new Error(`Kỳ dài ${soNgay} ngày — vượt mức ${QL_BILL_MAX_DAYS} ngày. Màn này đọc từng bill nên chia nhỏ ra xem.`);
+  const ds = [];
+  for(let i = 0; i < soNgay; i++){ const d = new Date(from); d.setDate(d.getDate() + i); ds.push(d); }
+  const nhom = await Promise.all(ds.map(qlLoadBillsOfDate));
+  qlBills = nhom.flat().sort((a,b) =>
+    String(b.createdAt||'').localeCompare(String(a.createdAt||''))
+    || String(b.time||'').localeCompare(String(a.time||''))
+    || String(b.id||'').localeCompare(String(a.id||'')));
+}
+
+// ── Tiện ích topping, bê từ POS để hiển thị y hệt ────────────────────────────
+function qlTpQty(t){ return Math.max(1, Number(t && t.qty) || 1); }
+function qlTpSum(list){ return (list || []).reduce((s,t) => s + (Number(t.price)||0) * qlTpQty(t), 0); }
+function qlTpLabel(t){ return escapeHtmlAttr(t.name || '') + (qlTpQty(t) > 1 ? ` ×${qlTpQty(t)}` : ''); }
+
+// ── KHUNG MÀN ────────────────────────────────────────────────────────────────
+function goBills(from, to){
+  if(from) qlBillFrom = from;
+  if(to)   qlBillTo   = to;
+  qlBillOpenId = null;
+  switchScreen('bills');
+}
+function qlBillSetRange(k, v){ if(k === 'from') qlBillFrom = v; else qlBillTo = v; }
+function qlBillSearch(v){ qlBillQuery = v || ''; qlRenderBillBody(); }
+function qlBillBack(){ qlBillOpenId = null; qlRenderBillBody(); }
+
+async function renderBills(){
+  const body = document.getElementById('billsBody');
+  body.innerHTML = '<div class="muted">Đang đọc bill…</div>';
+  qlBillLoading = true;
+  try{
+    await ensureAuth();
+    await qlLoadBills();
+  }catch(err){
+    console.error('renderBills lỗi', err);
+    body.innerHTML = qlBillHead() + `<div class="empty-hint">${escapeHtmlAttr(err.message || String(err))}</div>`;
+    qlBillLoading = false;
+    return;
+  }
+  qlBillLoading = false;
+  qlRenderBillBody();
+}
+
+function qlBillHead(){
+  return `<div class="card">
+    <div class="grid3">
+      <div class="field" style="margin-bottom:0"><label>Từ ngày</label>
+        <input type="date" value="${qlBillFrom}" onchange="qlBillSetRange('from',this.value)"></div>
+      <div class="field" style="margin-bottom:0"><label>Đến ngày</label>
+        <input type="date" value="${qlBillTo}" onchange="qlBillSetRange('to',this.value)"></div>
+      <div class="field" style="margin-bottom:0"><label>&nbsp;</label>
+        <button class="btn" onclick="renderBills()">${ic('search',15)} Xem</button></div>
+    </div>
+    <div class="field" style="margin-bottom:0;margin-top:12px"><label>Tìm nhanh</label>
+      <input type="text" placeholder="Số tiền, SĐT, mã bill, mã CK…" value="${escapeHtmlAttr(qlBillQuery)}" oninput="qlBillSearch(this.value)"></div>
+  </div>`;
+}
+
+function qlRenderBillBody(){
+  const body = document.getElementById('billsBody');
+  if(!body) return;
+  if(qlBillOpenId){ body.innerHTML = qlBillDetailHTML(qlBillOpenId); return; }
+
+  const fl = qlBillQuery.trim().toLowerCase();
+  const loc = fl ? qlBills.filter(o =>
+      String(o.total).includes(fl)
+      || (o.phone && String(o.phone).includes(fl))
+      || (o.billCode && String(o.billCode).toLowerCase().includes(fl))
+      || (o.bankOrderId && String(o.bankOrderId).toLowerCase().includes(fl))
+      || (o.customerName && o.customerName.toLowerCase().includes(fl))
+    ) : qlBills;
+
+  const tong = loc.reduce((s,o) => s + (Number(o.total)||0), 0);
+  const tomTat = `<div class="card"><div class="row"><span class="rl">${loc.length} bill${fl ? ' khớp tìm kiếm' : ''}</span>
+      <span class="rv" style="font-size:17px"><b>${fmt(tong)}</b></span></div></div>`;
+
+  if(!loc.length){
+    body.innerHTML = qlBillHead() + '<div class="empty-hint">Không có bill nào trong khoảng này.</div>';
+    return;
+  }
+
+  // Nhóm theo ngày, y như bản POS
+  const grp = {};
+  loc.forEach(o => { const d = o.date || '(không rõ ngày)'; (grp[d] = grp[d] || []).push(o); });
+  const ds = Object.keys(grp);
+
+  body.innerHTML = qlBillHead() + tomTat + ds.map(d => {
+    const tongNgay = grp[d].reduce((s,o) => s + (Number(o.total)||0), 0);
+    return `<div class="sec-title" style="display:flex;align-items:center;gap:8px">${escapeHtmlAttr(d)}
+        <span class="sf-c">${grp[d].length} bill · ${fmt(tongNgay)}</span></div>
+      <div class="qbill-list">${grp[d].map(qlBillRowHTML).join('')}</div>`;
+  }).join('');
+}
+
+// Một dòng bill trong danh sách — giữ đúng phân loại màu và badge của POS.
+function qlBillRowHTML(o){
+  const isSplit = o.method === 'TÍNH RIÊNG' || !!(o.splitGroups && o.splitGroups.length);
+  const isBank  = String(o.method||'').includes('CHUYỂN KHOẢN')
+    || !!(o.splitGroups && o.splitGroups.some(g => g && g.method === 'CHUYỂN KHOẢN'));
+  const isApp   = o.isAppSale === true;
+  const lop = isSplit ? ' qb-split' : isBank ? ' qb-bank' : isApp ? ' qb-app' : '';
+  const badge = (bg, fg, txt) => `<span class="qbill-badge" style="background:${bg};color:${fg}">${txt}</span>`;
+  const badges = (o.isShip ? badge('#f59e0b','#78350f','SHIP') : '')
+    + (isApp ? badge('#16a34a','#fff','APP') : '')
+    + ((o.addons && o.addons.length) ? badge('#1d4ed8','#fff','BỔ SUNG') : '');
+
+  let maCK = '';
+  if(isSplit && o.splitGroups){
+    const codes = o.splitGroups.filter(g => g.method === 'CHUYỂN KHOẢN' && g.bankOrderId).map(g => g.bankOrderId);
+    if(codes.length) maCK = `🏦 ${escapeHtmlAttr(codes.join(', '))} · `;
+  } else if(isBank && o.bankOrderId){ maCK = `🏦 ${escapeHtmlAttr(o.bankOrderId)} · `; }
+
+  return `<button class="qbill${lop}" onclick="qlOpenBill('${o.id}')">
+    <span class="qbill-time">${escapeHtmlAttr(o.time || '')}</span>
+    <span class="qbill-main">
+      <span class="qbill-t1">${maCK}${o.billCode ? `<b>${escapeHtmlAttr(o.billCode)}</b> · ` : ''}${escapeHtmlAttr(o.customerName || o.phone || 'Khách vãng lai')}${badges}</span>
+      <span class="qbill-t2">${escapeHtmlAttr(o.items && o.items.map ? o.items.map(c => `${Number(c.qty)||1}× ${c.name||''}`).join(', ') : '')}</span>
+    </span>
+    <span class="qbill-right">
+      <span class="qbill-total">${fmt(o.total)}</span>
+      <span class="qbill-m">${escapeHtmlAttr(o.method || '')}</span>
+    </span>
+  </button>`;
+}
+
+function qlOpenBill(id){ qlBillOpenId = id; qlRenderBillBody(); window.scrollTo(0,0); }
+
+const QL_ICE = { chung:'Đá chung', rieng:'Đá riêng', khong:'Không đá' };
+
+function qlBillDetailHTML(id){
+  const o = qlBills.find(x => x.id === id);
+  if(!o) return qlBillHead() + '<div class="empty-hint">Bill không còn tồn tại (có thể vừa bị xoá).</div>';
+  const mon = o.items && o.items.map ? o.items : [];
+  const isCash = String(o.method||'').includes('TIỀN MẶT');
+
+  const dongMon = (it, i) => {
+    const tp = it.toppings || [];
+    const tienTp = qlTpSum(tp);
+    const thanh = ((Number(it.price)||0) + tienTp) * (Number(it.qty)||1);
+    const chip = t => `<span class="qb-tp${t.addon ? ' add' : ''}">${t.addon ? '<b>THÊM</b> ' : ''}+ ${qlTpLabel(t)}${t.price ? ` <b>+${fmt((Number(t.price)||0)*qlTpQty(t))}</b>` : ''}</span>`;
+    return `<div class="qb-item">
+      <span class="qb-no">${i+1}</span>
+      <span class="qb-body">
+        <span class="qb-name">${escapeHtmlAttr(it.name||'')}${(Number(it.qty)||1) > 1 ? ` <b>×${it.qty}</b>` : ''}${it.isFree ? ' <span class="tier tier-green">tặng</span>' : ''}</span>
+        <span class="qb-sub">${it.size ? escapeHtmlAttr(it.size) + ' · ' : ''}${fmt(it.price)}${(!it.isFood && it.ice && it.ice !== 'chung') ? ' · ' + QL_ICE[it.ice] : ''}</span>
+        ${tp.length ? `<span class="qb-tps">${tp.map(chip).join('')}</span>` : ''}
+      </span>
+      <span class="qb-amt">${fmt(thanh)}</span>
+    </div>`;
+  };
+
+  const nhomTinhRieng = (o.method === 'TÍNH RIÊNG' && o.splitGroups && o.splitGroups.length)
+    ? o.splitGroups.map(g => `<div class="qb-group ${g.method === 'TIỀN MẶT' ? 'cash' : 'bank'}">
+        <div class="qb-group-h">${g.method === 'TIỀN MẶT' ? '💵' : '🏦'} <b>${escapeHtmlAttr(g.method)}</b>
+          <span class="muted-sm">${(g.items||[]).length} món · ${fmt(g.total)}${g.bankOrderId ? ' · Mã CK ' + escapeHtmlAttr(g.bankOrderId) : ''}</span></div>
+        ${(g.items||[]).map((it,i) => dongMon(it,i)).join('')}
+        ${g.method === 'TIỀN MẶT' ? `<div class="bfeed-kv"><span>Khách đưa / thối</span><span>${fmt(g.cashGiven||g.total)} / ${fmt(g.cashChange||0)}</span></div>` : ''}
+      </div>`).join('')
+    : mon.map(dongMon).join('');
+
+  const kv = (k,v) => `<div class="bfeed-kv"><span>${k}</span><span style="color:var(--td);font-weight:650">${v}</span></div>`;
+  const phu = [
+    o.billCode ? kv('Mã bill', escapeHtmlAttr(o.billCode)) : '',
+    kv('Thời điểm', `${escapeHtmlAttr(o.date||'')} ${escapeHtmlAttr(o.time||'')}`),
+    kv('Phương thức', escapeHtmlAttr(o.method||'')),
+    (o.customerName || o.phone) ? kv('Khách', `${escapeHtmlAttr(o.customerName||'')}${o.phone ? ' · ' + escapeHtmlAttr(o.phone) : ''}`) : '',
+    o.voucherUsed ? kv('Khuyến mãi', escapeHtmlAttr(String(o.voucherUsed))) : '',
+    Number(o.discountAmt) > 0 ? kv('Đã giảm', '−' + fmt(o.discountAmt)) : '',
+    o.bankOrderId ? kv('Mã CK', escapeHtmlAttr(o.bankOrderId)) : '',
+    (isCash && Number(o.cashGiven) > 0) ? kv('Khách đưa / thối', `${fmt(o.cashGiven)} / ${fmt(o.cashChange||0)}`) : '',
+    o.isToGo ? kv('Hình thức', 'Mang đi' + (o.isShip ? ' · Ship' : '')) : '',
+    o.isAppSale ? kv('Bán qua app', `phí sàn ${o.appFeePct || 0}%`) : ''
+  ].filter(Boolean).join('');
+
+  const boSung = (o.addons && o.addons.length) ? `
+    <div class="card" style="border:1.5px solid #1d4ed8">
+      <div class="card-h"><h3 style="color:#1d4ed8">Đã bổ sung sau khi bấm bill (${o.addons.length})</h3></div>
+      ${o.addons.map(ad => `<div class="bfeed-kv"><span>${qlFmtDT(ad.at)} · ${escapeHtmlAttr(ad.staff||'')} · ${escapeHtmlAttr(ad.method||'')}</span><span style="color:var(--td);font-weight:650">${fmt(ad.amount)}</span></div>`).join('')}
+    </div>` : '';
+
+  return `
+    <button class="btn outline sm" style="width:auto;padding:0 14px;margin-bottom:12px" onclick="qlBillBack()">← Về danh sách</button>
+    <div class="card">
+      <div class="card-h"><h3>${ic('receipt',17)} ${escapeHtmlAttr(o.billCode || 'Hoá đơn')}</h3>
+        <span class="rv" style="font-size:19px"><b>${fmt(o.total)}</b></span></div>
+      ${nhomTinhRieng || '<div class="muted">Bill không có chi tiết món.</div>'}
+      <div style="border-top:1px solid var(--line);margin-top:10px;padding-top:8px">${phu}</div>
+    </div>
+    ${boSung}
+    <div class="card">
+      <div class="card-h"><h3>${ic('trash',17)} Xoá bill này</h3></div>
+      <div class="unit-explainer" style="margin-top:0">
+        Xoá bill sẽ <b>hoàn nguyên liệu về kho</b> đúng bằng số đã trừ lúc bán (đọc lại từ sổ kho,
+        không tính lại theo định mức — nên đúng cả khi lúc bán quầy hết hàng chỉ trừ được một phần),
+        rồi xoá bản ghi bán hàng. <b>Điểm/tem/voucher đã cộng cho khách thì không tự thu hồi</b> —
+        phải chỉnh tay ở màn Khách hàng nếu cần.
+      </div>
+      <button class="btn danger" onclick="qlAskDeleteBill('${o.id}')">${ic('trash',15)} Xoá bill ${escapeHtmlAttr(o.billCode || '')}</button>
+    </div>`;
+}
+
+// ── XOÁ BILL ────────────────────────────────────────────────────────────────
+// Không đòi mã PIN như bên POS: app này vốn chỉ chủ quán mới vào được, bắt gõ
+// mật khẩu lần nữa chỉ tạo thói quen gõ cho xong. Nhưng VẪN phải có một bước
+// xác nhận — xoá bill là việc không hoàn tác được, và nút xoá nằm ngay dưới
+// thẻ hoá đơn nên rất dễ bấm nhầm. Bước xác nhận nói rõ xoá cái gì, bao nhiêu
+// tiền, và điều gì KHÔNG được tự hoàn.
+function qlAskDeleteBill(id){
+  const o = qlBills.find(x => x.id === id);
+  if(!o) return;
+  const soMon = (o.items && o.items.map ? o.items : []).reduce((s,c) => s + (Number(c.qty)||0), 0);
+  const ov = document.createElement('div');
+  ov.id = 'qlDelBillOverlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1200;display:flex;align-items:center;justify-content:center;padding:24px;';
+  ov.onclick = e => { if(e.target === ov) ov.remove(); };
+  ov.innerHTML = `<div class="card" style="max-width:420px;width:100%;margin:0">
+      <div class="card-h"><h3>${ic('alert',17,'var(--bad)')} Xoá bill này?</h3></div>
+      <div class="row"><span class="rl">Mã bill</span><span class="rv">${escapeHtmlAttr(o.billCode || '—')}</span></div>
+      <div class="row"><span class="rl">Thời điểm</span><span class="rv">${escapeHtmlAttr(o.date||'')} ${escapeHtmlAttr(o.time||'')}</span></div>
+      <div class="row"><span class="rl">Số món</span><span class="rv">${soMon}</span></div>
+      <div class="row"><span class="rl">Số tiền</span><span class="rv"><b>${fmt(o.total)}</b></span></div>
+      <div class="alert amber" style="margin-top:10px"><span class="ic">!</span><div>
+        Nguyên liệu sẽ được hoàn về kho. <b>Điểm/tem/voucher đã cộng cho khách KHÔNG tự thu hồi.</b>
+        Thao tác này không hoàn tác được.</div></div>
+      <div style="display:flex;gap:10px;margin-top:12px">
+        <button class="btn outline" onclick="document.getElementById('qlDelBillOverlay').remove()">Huỷ</button>
+        <button class="btn danger" id="qlDelBillGo" onclick="qlDoDeleteBill('${o.id}')">Xoá bill</button>
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+}
+
+// Hoàn kho ĐỌC TỪ SỔ, không tính lại theo định mức.
+//
+// Bên POS hoàn kho bằng cách chạy lại engine định mức + bao bì rồi cộng ngược.
+// Bê nguyên engine đó sang đây là nhân đôi ~400 dòng logic kho mà hai bản phải
+// khớp nhau vĩnh viễn — lệch một chút là tồn kho sai âm thầm.
+//
+// Ở đây làm ngược lại: đọc chính những giao dịch đã ghi cho đơn này
+// (referenceId = orderId) rồi ghi giao dịch ngược đúng bằng ngần ấy. Không cần
+// biết công thức, và đúng hơn bản tính lại: lúc bán có chặn sàn 0 nên nếu quầy
+// chỉ còn 50ml mà công thức cần 100ml thì sổ ghi 50 — hoàn theo sổ là hoàn 50,
+// hoàn theo định mức là tự sinh ra 50ml không có thật.
+//
+// Giao dịch hoàn được đánh dấu reversal:true và bị bỏ qua ở lần đọc sau, nên
+// lỡ chạy hai lần cũng không cộng dồn.
+async function qlReverseStockForOrder(orderId, billCode){
+  const note = 'Hoàn kho do Quản lý XOÁ ĐƠN' + (billCode ? ' — ' + billCode : '');
+  const ketQua = { nguyenLieu: 0, banThanhPham: 0, loi: 0 };
+
+  let txs = [];
+  try{
+    const snap = await fstore.collection('stock_transactions_gieogieo').where('referenceId','==',orderId).get();
+    txs = snap.docs.map(d => d.data());
+  }catch(err){ console.warn('[Hoàn kho] không đọc được sổ kho:', err); ketQua.loi++; }
+
+  if(txs.some(t => t.reversal === true)){
+    console.info('[Hoàn kho] Đơn', orderId, 'đã được hoàn trước đó — bỏ qua để không cộng dồn.');
+    return { nguyenLieu: 0, banThanhPham: 0, loi: 0, daHoanTruocDo: true };
+  }
+
+  const goc = txs.filter(t => t.reversal !== true && t.type === 'CONSUMPTION' && Number(t.qty) < 0);
+  const gom = {};
+  goc.forEach(t => { gom[t.itemId] = (gom[t.itemId] || 0) + Math.abs(Number(t.qty) || 0); });
+
+  // Không dùng applyStockTransaction() ở đây: nó không nhận cờ `reversal`, mà
+  // gắn cờ bằng một lượt truy vấn sau đó thì có cửa sổ đua — hai lần xoá gần nhau
+  // sẽ thấy nhau chưa gắn cờ và cộng dồn hai lần. Ghi thẳng trong một transaction
+  // để cờ và số tồn luôn đi cùng nhau.
+  const r1 = await Promise.allSettled(Object.keys(gom).map(itemId =>
+    fstore.runTransaction(async t => {
+      const ref = fstore.collection('inventory_items_gieogieo').doc(itemId);
+      const doc = await t.get(ref);
+      if(!doc.exists) throw new Error('Nguyên liệu không còn tồn tại');
+      const next = (Number(doc.data().currentStock) || 0) + gom[itemId];
+      t.update(ref, { currentStock: next, updatedAt: new Date().toISOString() });
+      t.set(fstore.collection('stock_transactions_gieogieo').doc(), {
+        itemId, type: 'ADJUSTMENT', qty: gom[itemId], resultingStock: next,
+        note, staff: 'Quản lý', referenceId: orderId, reversal: true, reversalOf: orderId,
+        createdAt: new Date().toISOString(), businessDate: dkey(new Date()),
+        status: 'posted', source: 'management'
+      });
+    })
+  ));
+  memoDropItems();   // tồn kho vừa đổi
+  r1.forEach(r => { if(r.status === 'fulfilled') ketQua.nguyenLieu++; else { ketQua.loi++; console.warn('[Hoàn kho] nguyên liệu lỗi:', r.reason); } });
+
+  // Bán thành phẩm — sổ riêng, cùng nguyên tắc.
+  let ptxs = [];
+  try{
+    const snap = await fstore.collection('prep_transactions_gieogieo').where('referenceId','==',orderId).get();
+    ptxs = snap.docs.map(d => d.data());
+  }catch(err){ console.warn('[Hoàn kho] không đọc được sổ bán thành phẩm:', err); }
+  const gomPrep = {};
+  ptxs.filter(t => t.reversal !== true && t.type === 'CONSUMPTION' && Number(t.qty) < 0)
+      .forEach(t => { gomPrep[t.prepId] = (gomPrep[t.prepId] || 0) + Math.abs(Number(t.qty) || 0); });
+
+  const r2 = await Promise.allSettled(Object.keys(gomPrep).map(prepId =>
+    fstore.runTransaction(async t => {
+      const ref = fstore.collection('prep_items_gieogieo').doc(prepId);
+      const doc = await t.get(ref);
+      if(!doc.exists) throw new Error('Bán thành phẩm không còn tồn tại');
+      const d = doc.data();
+      const next = (Number(d.currentStock) || 0) + gomPrep[prepId];
+      t.update(ref, { currentStock: next, updatedAt: new Date().toISOString() });
+      t.set(fstore.collection('prep_transactions_gieogieo').doc(), {
+        prepId, prepCode: d.code || '', prepName: d.name || '', unit: d.unit || '',
+        type: 'ADJUSTMENT', qty: gomPrep[prepId], resultingStock: next,
+        note, referenceId: orderId, reversal: true, reversalOf: orderId,
+        createdAt: new Date().toISOString(), businessDate: dkey(new Date()), source: 'management'
+      });
+    })
+  ));
+  r2.forEach(r => { if(r.status === 'fulfilled') ketQua.banThanhPham++; else { ketQua.loi++; console.warn('[Hoàn kho] BTP lỗi:', r.reason); } });
+
+  return ketQua;
+}
+
+async function qlDoDeleteBill(id){
+  const o = qlBills.find(x => x.id === id);
+  if(!o) return;
+  const btn = document.getElementById('qlDelBillGo');
+  if(btn){ btn.disabled = true; btn.textContent = 'Đang xoá…'; }
+  try{
+    await ensureAuth();
+    const kq = await qlReverseStockForOrder(id, o.billCode);
+
+    // Xoá bản ghi bán hàng SAU khi hoàn kho — hoàn kho không cần itemsArray (đọc
+    // từ sổ) nhưng giữ đúng thứ tự này để nếu hoàn lỗi thì bill vẫn còn đó mà rà.
+    const [dd, mm, yyyy] = String(o.date || '').split('/');
+    if(!dd || !mm) throw new Error('Bill thiếu ngày, không xác định được chỗ lưu');
+    await db.ref(`orders_gieogieo/${MONTH_KEYS[parseInt(mm,10)-1]}/${dd}/${id}`).remove();
+
+    // Ghi vết: ai xoá, lúc nào, bill gì, hoàn được bao nhiêu dòng kho.
+    await fstore.collection('bill_deletions_gieogieo').add({
+      orderId: id, billCode: o.billCode || null, businessDate: o.date || null,
+      total: Number(o.total) || 0, method: o.method || '', phone: o.phone || '',
+      itemsSummary: (o.items && o.items.map) ? o.items.map(c => `${c.qty}× ${c.name}`).join(', ') : '',
+      reversed: kq, deletedAt: new Date().toISOString(), deletedBy: 'management'
+    }).catch(err => console.warn('[Xoá bill] không ghi được vết (bill vẫn đã xoá):', err));
+
+    qlBills = qlBills.filter(x => x.id !== id);
+    qlBillOpenId = null;
+    memoDropAll();
+    clearSalesCache().catch(() => {});   // doanh thu ngày đó vừa đổi, bỏ bộ đệm
+
+    const ov = document.getElementById('qlDelBillOverlay'); if(ov) ov.remove();
+    toast(kq.daHoanTruocDo
+      ? '🗑 Đã xoá bill — kho đã được hoàn từ lần trước, không hoàn thêm'
+      : kq.loi
+        ? `🗑 Đã xoá bill — nhưng ${kq.loi} dòng hoàn kho lỗi, kiểm tra lại Kho`
+        : `🗑 Đã xoá bill · hoàn ${kq.nguyenLieu} nguyên liệu, ${kq.banThanhPham} bán thành phẩm`);
+    qlRenderBillBody();
+  }catch(err){
+    console.error('qlDoDeleteBill lỗi', err);
+    const ov = document.getElementById('qlDelBillOverlay'); if(ov) ov.remove();
+    showError('Không xoá được bill: ' + (err.code || err.message || err));
+  }
 }
 
 // Thẻ chỉ số MINI — dùng ở màn Hôm nay. st là object trạng thái của statusXxx().
