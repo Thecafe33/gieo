@@ -1692,6 +1692,18 @@ html.phone-ui .nav-search .ns-kbd{display:none;}
   </div>
 </div>
 
+<!-- Popup SỬA PHIẾU NHẬN — quy trình 3 bước, xem mục openFixRecWizard() -->
+<div id="fixrec-popup" style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:320;display:none;align-items:center;justify-content:center;backdrop-filter:blur(3px);padding:20px;" onclick="if(event.target===this)closeFixRecWizard()">
+  <div style="background:#FFFCF0;border-radius:28px;padding:22px 20px;width:100%;max-width:460px;max-height:92vh;overflow-y:auto;animation:pi .22s ease;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+      <span id="fixrec-title" style="font-size:18px;font-weight:700;color:var(--td);">Sửa phiếu nhận</span>
+      <button onclick="closeFixRecWizard()" style="background:#e0e0e0;border:none;border-radius:50%;width:34px;height:34px;cursor:pointer;font-size:16px;color:#666;display:flex;align-items:center;justify-content:center;">✕</button>
+    </div>
+    <div id="fixrec-steps" style="display:flex;gap:6px;margin-bottom:16px;"></div>
+    <div id="fixrec-body"></div>
+  </div>
+</div>
+
 <!-- [BÊ TỪ POS] popup sửa topping + popup sửa món ăn (lượt ghép trước sót 2 cái này) -->
 <div id="tp-popup" style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:300;display:none;align-items:center;justify-content:center;backdrop-filter:blur(3px);padding:24px;" onclick="if(event.target===this)closeToppingForm()">
   <div style="background:#FFFCF0;border-radius:28px;padding:24px 20px;width:100%;max-width:400px;animation:pi .22s ease;">
@@ -3805,9 +3817,13 @@ async function poMoSuaPhieuNhan(poId){
       .sort((a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
     if(!recs.length){ toast('ℹ️ Đơn này chưa có phiếu nhận nào để sửa'); return; }
     fixRecPoId = poId;
-    fixRecOpenId = recs.length === 1 ? recs[0].id : null;
     ctnFilter = 'fixreceipt';
     goKho('containers');
+    // Một phiếu thì mở thẳng quy trình sửa; nhiều phiếu thì để danh sách cho chọn.
+    if(recs.length === 1){
+      FIXREC_CACHE = recs;
+      setTimeout(()=>openFixRecWizard(recs[0].id), 0);
+    }
   }catch(err){
     console.error('poMoSuaPhieuNhan lỗi', err);
     showError('Không mở được phiếu nhận: '+(err.code||err.message||err));
@@ -3830,74 +3846,44 @@ async function renderKhoFixReceipt(box, tabs){
     box.innerHTML = nav + '<div class="muted">Không đọc được phiếu nhận. '+(err.code||err.message||'')+'</div>';
     return;
   }
-  FIXREC_CTN = [];
-  if(fixRecOpenId){
-    try{
-      FIXREC_CTN = (await fstore.collection(CTN_COLL).where('receiveRefId','==',fixRecOpenId).get())
-        .docs.map(d=>({id:d.id, ...d.data()}));
-    }catch(err){ console.warn('[sửa phiếu nhận] không đọc được tem của phiếu', err); }
-  }
 
   const p2 = n => String(n).padStart(2,'0');
   const dt = iso => { const d = iso?new Date(iso):null; return (d && !isNaN(d)) ? `${p2(d.getDate())}/${p2(d.getMonth()+1)} ${p2(d.getHours())}:${p2(d.getMinutes())}` : ''; };
 
   const than = FIXREC_CACHE.map(r=>{
-    const mo = r.id === fixRecOpenId;
     const dongs = (r.lines||[]).filter(l=>Number(l.qtyGoodBase)>0);
-    const dau = `<div class="litem" style="cursor:pointer" onclick="fixRecToggle('${r.id}')">
+    const sua = (r.corrections||[]).length;
+    return `<div class="litem" style="cursor:pointer" onclick="openFixRecWizard('${r.id}')">
         <div class="li-l">
           <div>${dt(r.createdAt)} · ${escapeHtmlAttr(r.supplier||'không ghi nhà cung cấp')}</div>
-          <div class="muted-sm">${escapeHtmlAttr(r.staff||'—')} · ${dongs.length} dòng${r.correctedAt?' · <b>đã sửa</b>':''}</div>
+          <div class="muted-sm">${escapeHtmlAttr(r.staff||'—')} · ${dongs.map(l=>escapeHtmlAttr(l.name||'')).slice(0,3).join(', ')}${dongs.length>3?` +${dongs.length-3}`:''}</div>
+          ${sua?`<div class="small-note" style="color:var(--warn)">Đã sửa ${sua} lần — mở ra xem nhật ký</div>`:''}
         </div>
-        <div class="li-r">${mo?'▴':'▾'}</div>
+        <div class="li-r"><span class="tier tier-blue">Sửa ›</span></div>
       </div>`;
-    if(!mo) return dau;
-    const chiTiet = dongs.map((l,i)=>{
-      const it = INVENTORY_ITEMS.find(x=>x.id===l.itemId);
-      const tem = FIXREC_CTN.filter(c=>c.itemId===l.itemId);
-      const song = tem.filter(c=>c.status==='sealed'||c.status==='open');
-      const huy  = tem.filter(c=>c.status==='voided');
-      const daDung = tem.filter(c=>c.status==='open'||c.status==='finished');
-      const heSo = fixRecHeSo(it, tem);
-      const soDv = heSo>0 ? (Number(l.qtyGoodBase)||0)/heSo : null;
-      return `<div class="litem" style="padding-left:16px">
-        <div class="li-l">
-          <div>${escapeHtmlAttr(l.name||'')}</div>
-          <div class="muted-sm">Đã ghi nhận <b>${fmtNum(l.qtyGoodBase,0)} ${escapeHtmlAttr(l.unit||'')}</b>${soDv!=null&&heSo>1?` (= ${fmtNum(soDv,0)} × ${fmtNum(heSo,0)})`:''}</div>
-          ${tem.length?`<div class="muted-sm">${song.length} tem còn sống${huy.length?` · ${huy.length} đã huỷ`:''}${daDung.length?` · <b style="color:var(--warn)">${daDung.length} đã mở/đã dùng</b>`:''}</div>`:'<div class="muted-sm">Món này không dán tem</div>'}
-          ${song.length?`<div class="muted-sm">Mã còn dùng: ${song.slice(0,14).map(c=>escapeHtmlAttr(c.code||'')).join(', ')}${song.length>14?` … (+${song.length-14})`:''}</div>`:''}
-          ${huy.length?`<div class="muted-sm" style="color:var(--bad)">Mã đã huỷ: ${huy.slice(0,14).map(c=>escapeHtmlAttr(c.code||'')).join(', ')}${huy.length>14?` … (+${huy.length-14})`:''}</div>`:''}
-          ${fixRecLichSuSua(r, l.itemId)}
-        </div>
-        <div class="li-r"><button class="btn outline sm" style="width:auto;padding:0 10px" onclick="suaDongPhieuNhan('${r.id}', ${i})">Sửa số</button></div>
-      </div>`;
-    }).join('');
-    return dau + chiTiet + (dongs.length?'':'<div class="litem" style="padding-left:16px"><div class="li-l"><div class="muted-sm">Phiếu này không có dòng nào nhận hàng lành.</div></div></div>');
   }).join('');
 
   box.innerHTML = nav +
     (fixRecPoId ? `<div class="small-note" style="margin-bottom:10px">Đang xem phiếu nhận của <b>một đơn đặt hàng</b>. <a href="#" onclick="fixRecPoId=null;renderKhoContainers();return false;">Xem tất cả phiếu nhận</a></div>` : '') +
-    `<div class="small-note" style="margin-bottom:12px">Gõ nhầm số lượng lúc nhận hàng (30 hộp thay vì 3) thì phải sửa ở <b>bốn chỗ cùng lúc</b>: tồn kho, dòng nhập trong sổ, đám tem đã sinh, và số "đã nhận" trên đơn đặt hàng. Sửa ở đây làm đủ cả bốn trong một lần bấm, và <b>ghi lại nhật ký sửa</b> ngay trên phiếu — số cũ, số mới, ai sửa, vì sao.</div>` +
+    `<div class="small-note" style="margin-bottom:12px">Gõ nhầm số lượng lúc nhận hàng (30 hộp thay vì 3) thì phải sửa ở <b>bốn chỗ cùng lúc</b>: tồn kho, dòng nhập trong sổ, đám tem đã sinh, và số "đã nhận" trên đơn đặt hàng. Bấm vào một phiếu để mở quy trình sửa 3 bước — làm đủ cả bốn trong một lần, và ghi lại nhật ký sửa ngay trên phiếu.</div>` +
     (FIXREC_CACHE.length ? than : '<div class="empty-hint">Chưa có phiếu nhận hàng nào.</div>');
 }
 
-// Nhật ký sửa nằm ngay trên phiếu, hiện thẳng ở dòng bị sửa. Phiếu KHÔNG được im lặng
-// mang con số mới: sau này soát lại phải đọc được "hôm đó ghi 30, sửa còn 3, vì sao".
+// Nhật ký sửa nằm ngay trên phiếu. Phiếu KHÔNG được im lặng mang con số mới: sau này soát
+// lại phải đọc được "hôm đó ghi 30, sửa còn 3, ai sửa, vì sao".
 function fixRecLichSuSua(rec, itemId){
-  const ls = (rec.corrections||[]).filter(x=>x.itemId===itemId);
+  const ls = (rec.corrections||[]).filter(x=>!itemId || x.itemId===itemId);
   if(!ls.length) return '';
+  const dv = itemId ? ((rec.lines||[]).find(l=>l.itemId===itemId)||{}).unit||'' : '';
   return ls.map(x=>`<div class="small-note" style="color:var(--warn);margin-top:4px">
-      ${ic('alert',12)} Đã sửa ${String(x.at||'').replace('T',' ').slice(0,16)} bởi ${escapeHtmlAttr(x.by||'—')}:
-      <b>${fmtNum(x.fromBase,0)} → ${fmtNum(x.toBase,0)} ${escapeHtmlAttr(rec.lines&&rec.lines[0]?(rec.lines.find(l=>l.itemId===itemId)||{}).unit||'':'')}</b>
-      · lý do: ${escapeHtmlAttr(x.reason||'—')}
-      ${x.voidedCodes&&x.voidedCodes.length?`<br>Huỷ ${x.voidedCodes.length} tem: ${escapeHtmlAttr(x.voidedCodes.slice(0,10).join(', '))}${x.voidedCodes.length>10?'…':''}` : ''}
+      ${ic('alert',12)} Đã sửa ${String(x.at||'').replace('T',' ').slice(0,16)} bởi ${escapeHtmlAttr(x.by||'—')}${itemId?'':' · '+escapeHtmlAttr(x.name||'')}:
+      <b>${fmtNum(x.fromBase,0)} → ${fmtNum(x.toBase,0)} ${escapeHtmlAttr(dv)}</b> · lý do: ${escapeHtmlAttr(x.reason||'—')}
+      ${x.voidedCodes&&x.voidedCodes.length?`<br>Huỷ ${x.voidedCodes.length} tem: ${escapeHtmlAttr(x.voidedCodes.slice(0,10).join(', '))}${x.voidedCodes.length>10?'…':''}`:''}
     </div>`).join('');
 }
 
-function fixRecToggle(id){ fixRecOpenId = (fixRecOpenId===id) ? null : id; renderKhoContainers(); }
-
-// Hệ số quy đổi "một tem = bao nhiêu đơn vị pha chế". Ưu tiên đọc từ chính con tem đã
-// sinh (đó là con số hệ thống THẬT SỰ đã dùng), chỉ khi không có tem mới suy từ cấu hình.
+// Hệ số quy đổi "một tem = bao nhiêu đơn vị pha chế". Ưu tiên đọc từ chính con tem đã sinh
+// (đó là con số hệ thống THẬT SỰ đã dùng), chỉ khi không có tem mới suy từ cấu hình.
 function fixRecHeSo(it, tem){
   const t = (tem||[]).find(c=>Number(c.baseQty)>0);
   if(t && (t.trackingMode||'unit') !== 'batch') return Number(t.baseQty);
@@ -3906,77 +3892,242 @@ function fixRecHeSo(it, tem){
   return dv && Number(dv.baseQty)>0 ? Number(dv.baseQty) : 1;
 }
 
-async function suaDongPhieuNhan(recId, lineIdx){
+// ============================================================
+// QUY TRÌNH SỬA PHIẾU NHẬN — popup 3 bước
+//
+// Vì sao là popup nhiều bước chứ không phải một cụm prompt() nối nhau: sửa một phiếu nhận
+// đụng vào BỐN chỗ (tồn kho, dòng ledger, tem, đơn đặt hàng) và huỷ vĩnh viễn một nắm tem.
+// Hộp prompt của trình duyệt không hiện được phần "sẽ đổi những gì", không quay lại được,
+// và bấm nhầm Enter là xong. Ba bước tách bạch: CHỌN DÒNG → NHẬP SỐ & LÝ DO → SOÁT & XÁC NHẬN,
+// trong đó bước 3 bày ra đủ số cũ/số mới của cả bốn chỗ cùng danh sách mã tem sắp huỷ.
+// ============================================================
+let FIXREC_WIZ = null;
+
+function closeFixRecWizard(){
+  FIXREC_WIZ = null;
+  const el = document.getElementById('fixrec-popup');
+  if(el) el.style.display = 'none';
+}
+
+async function openFixRecWizard(recId, lineIdx){
   const rec = FIXREC_CACHE.find(r=>r.id===recId);
   if(!rec){ toast('⚠️ Danh sách đã cũ, mở lại màn này'); return; }
-  const dongs = (rec.lines||[]).filter(l=>Number(l.qtyGoodBase)>0);
-  const l = dongs[lineIdx];
-  if(!l){ toast('⚠️ Không tìm thấy dòng này'); return; }
-  const it = INVENTORY_ITEMS.find(x=>x.id===l.itemId);
-  const tem = FIXREC_CTN.filter(c=>c.itemId===l.itemId);
-  const theoLo = tem.length && (tem[0].trackingMode === 'batch');
-  const heSo = theoLo ? 1 : fixRecHeSo(it, tem);
-  const daGhiBase = Number(l.qtyGoodBase)||0;
-  const donVi = (!theoLo && heSo>1 && tem.length) ? (tem[0].countUnitName || 'đơn vị') : (l.unit||'');
-  const daGhi = (!theoLo && heSo>1 && tem.length) ? daGhiBase/heSo : daGhiBase;
-
-  const nhap = prompt(
-    `Sửa dòng "${l.name}" của phiếu nhận này.\n\n`
-    + `Hệ thống đang ghi:  ${fmtNum(daGhi,2)} ${donVi}\n`
-    + (tem.length ? `Tem đã sinh:        ${tem.filter(c=>c.status==='sealed'||c.status==='open').length} con\n` : '')
-    + `\nNhập SỐ ĐÚNG theo đơn hàng thật (${donVi}):`,
-    String(daGhi));
-  if(nhap === null) return;
-  const soDung = Number(nhap);
-  if(!isFinite(soDung) || soDung < 0){ toast('⚠️ Nhập một số không âm'); return; }
-  const baseDung = (!theoLo && heSo>1 && tem.length) ? soDung*heSo : soDung;
-  const thua = daGhiBase - baseDung;
-  if(Math.abs(thua) < 1e-9){ toast('⚠️ Số mới trùng số cũ, không có gì để sửa'); return; }
-  if(thua < 0){ toast('⚠️ Màn này chỉ sửa phiếu ghi THỪA. Nhận thiếu thì ghi một phiếu nhận bổ sung để giá vốn vào đúng lô.'); return; }
-
-  // Tem nào được phép huỷ: chỉ tem còn NGUYÊN SEAL. Tem đã mở/đã báo hết nghĩa là hàng đó
-  // có thật và đã vào ly khách — huỷ nó đi là xoá mất một sự thật đã xảy ra.
-  let huy = [];
-  if(!theoLo && tem.length){
-    const song = tem.filter(c=>c.status==='sealed'||c.status==='open');
-    const nguyen = tem.filter(c=>c.status==='sealed' && !c.openedAt)
-                      .sort((a,b)=>String(b.receivedAt||'').localeCompare(String(a.receivedAt||'')));
-    const canHuy = song.length - soDung;
-    if(canHuy > nguyen.length){
-      toast(`⚠️ Cần huỷ ${canHuy} tem nhưng chỉ còn ${nguyen.length} tem nguyên seal — số còn lại đã mở/đã dùng, không huỷ được`);
-    }
-    huy = nguyen.slice(0, Math.max(0, Math.min(canHuy, nguyen.length)));
-    // Tem của phiếu này đã bị mở/báo hết = nhân viên đã quét những con tem lẽ ra không tồn
-    // tại. Tồn kho vẫn trừ đủ phần ghi thừa (đó là phần đã cộng dư lúc nhận), nhưng phải
-    // nói ra để chủ quán còn đi soát lại, đừng để nó lặng lẽ chảy vào đối chiếu cuối kỳ.
-    const daDung = tem.filter(c=>c.status==='open'||c.status==='finished');
-    if(daDung.length) toast(`⚠️ ${daDung.length} tem của phiếu này đã được mở/báo hết — kiểm tra lại số liệu của những con đó: ${daDung.slice(0,5).map(c=>c.code).join(', ')}`);
+  FIXREC_WIZ = { step:1, recId, rec, lineIdx: (lineIdx==null?null:lineIdx), soDung:'', lyDo:'', dangLuu:false, tem:[] };
+  const pop = document.getElementById('fixrec-popup');
+  if(pop) pop.style.display = 'flex';
+  fixRecWizRender();
+  try{
+    await ensureAuth();
+    FIXREC_WIZ.tem = (await fstore.collection(CTN_COLL).where('receiveRefId','==',recId).get())
+      .docs.map(d=>({id:d.id, ...d.data()}));
+  }catch(err){ console.warn('[sửa phiếu nhận] không đọc được tem của phiếu', err); }
+  if(FIXREC_WIZ){
+    FIXREC_CTN = FIXREC_WIZ.tem;
+    // Phiếu chỉ có ĐÚNG MỘT dòng thì bước "chọn dòng" không có gì để chọn — nhảy thẳng
+    // sang bước nhập, đừng bắt bấm Tiếp cho một danh sách một phần tử.
+    const dongs = fixRecWizDongs();
+    if(FIXREC_WIZ.lineIdx == null && dongs.length === 1) FIXREC_WIZ.lineIdx = 0;
+    if(FIXREC_WIZ.lineIdx != null) FIXREC_WIZ.step = 2;
+    fixRecWizRender();
   }
+}
 
-  // Lý do BẮT BUỘC. Một con số trong sổ bị sửa mà không kèm lý do thì ba tháng sau không ai
-  // dựng lại được chuyện gì đã xảy ra — đúng thứ làm cả cuốn sổ mất giá trị đối chiếu.
-  const lyDoNguoiDung = String(prompt(
-    `Vì sao phải sửa dòng "${l.name}" từ ${fmtNum(daGhi,2)} xuống ${fmtNum(soDung,2)} ${donVi}?\n\n`
-    + `VD: nhân viên gõ nhầm 30 thay vì 3 · giao thiếu so với phiếu · nhập trùng phiếu`, '') || '').trim();
-  if(!lyDoNguoiDung){ toast('⚠️ Phải ghi lý do — phiếu nhận sẽ lưu lại lý do này'); return; }
+function fixRecWizDongs(){
+  const w = FIXREC_WIZ; if(!w) return [];
+  return (w.rec.lines||[]).filter(l=>Number(l.qtyGoodBase)>0);
+}
 
+// Mọi con số của bước 2 và 3 tính ở ĐÚNG MỘT chỗ này, để màn soát và lệnh ghi không bao giờ
+// nói hai con số khác nhau.
+function fixRecWizTinh(){
+  const w = FIXREC_WIZ; if(!w || w.lineIdx==null) return null;
+  const l = fixRecWizDongs()[w.lineIdx];
+  if(!l) return null;
+  const it = INVENTORY_ITEMS.find(x=>x.id===l.itemId);
+  const tem = (w.tem||[]).filter(c=>c.itemId===l.itemId);
+  const theoLo = !!(tem.length && tem[0].trackingMode === 'batch');
+  const heSo = theoLo ? 1 : fixRecHeSo(it, tem);
+  const theoDonVi = !theoLo && heSo>1 && tem.length;
+  const daGhiBase = Number(l.qtyGoodBase)||0;
+  const donVi = theoDonVi ? (tem[0].countUnitName || 'đơn vị') : (l.unit||'');
+  const daGhi = theoDonVi ? daGhiBase/heSo : daGhiBase;
+
+  const song   = tem.filter(c=>c.status==='sealed'||c.status==='open');
+  const daDung = tem.filter(c=>c.status==='open'||c.status==='finished');
+  // Huỷ tem CHƯA IN trước, rồi mới tới tem đã in — bớt được đúng ngần ấy con phải đi bóc
+  // khỏi kệ. Trong mỗi nhóm sắp theo mã để lần nào bấm cũng ra cùng một kết quả; sắp theo
+  // receivedAt thì vô nghĩa vì cả 30 tem của một lượt nhận sinh cùng một giây.
+  const nguyen = tem.filter(c=>c.status==='sealed' && !c.openedAt)
+    .sort((a,b)=> (a.labelPrinted?1:0)-(b.labelPrinted?1:0) || String(a.code||'').localeCompare(String(b.code||'')));
+
+  const raw = String(w.soDung).trim();
+  const soDung = raw==='' ? null : Number(raw);
+  const hopLe = soDung!==null && isFinite(soDung) && soDung>=0;
+  const baseDung = hopLe ? (theoDonVi ? soDung*heSo : soDung) : null;
+  const thua = hopLe ? daGhiBase - baseDung : null;
+
+  let huy = [], giu = song.slice(), canHuy = 0, thieuTem = 0;
+  if(hopLe && !theoLo && tem.length){
+    canHuy = song.length - soDung;
+    thieuTem = Math.max(0, canHuy - nguyen.length);
+    huy = nguyen.slice(0, Math.max(0, Math.min(canHuy, nguyen.length)));
+    giu = song.filter(c=>!huy.some(h=>h.id===c.id));
+  }
   const tonHienTai = Number(it && it.currentStock) || 0;
-  if(!confirm(
-    `Sửa "${l.name}": ${fmtNum(daGhi,2)} → ${fmtNum(soDung,2)} ${donVi}\n\n`
-    + `· Tồn kho: ${fmtNum(tonHienTai,2)} → ${fmtNum(tonHienTai-thua,2)} ${l.unit||''}\n`
-    + `· Dòng NHẬP trong sổ sửa còn ${fmtNum(baseDung,2)} ${l.unit||''}\n`
-    + (huy.length ? `· Huỷ ${huy.length} tem: ${huy.slice(0,8).map(c=>c.code).join(', ')}${huy.length>8?'…':''}\n` : '')
-    + `\nNhớ đi bóc những con tem đã in ra khỏi kệ.`)) return;
+  return { l, it, tem, theoLo, heSo, theoDonVi, daGhiBase, daGhi, donVi, song, daDung, nguyen,
+           soDung, hopLe, baseDung, thua, huy, giu, canHuy, thieuTem, tonHienTai };
+}
 
+function fixRecWizSet(f, v){ if(FIXREC_WIZ){ FIXREC_WIZ[f] = v; if(f==='soDung') fixRecWizRenderTomTat(); } }
+function fixRecWizGo(step){ if(!FIXREC_WIZ) return; FIXREC_WIZ.step = step; fixRecWizRender(); }
+
+function fixRecWizChonDong(i){ if(!FIXREC_WIZ) return; FIXREC_WIZ.lineIdx = i; FIXREC_WIZ.step = 2; fixRecWizRender(); }
+
+function fixRecWizTiepTuc(){
+  const c = fixRecWizTinh();
+  if(!c) return;
+  if(!c.hopLe){ toast('⚠️ Nhập số đúng theo đơn hàng thật'); return; }
+  if(Math.abs(c.thua) < 1e-9){ toast('⚠️ Số mới trùng số cũ, không có gì để sửa'); return; }
+  if(c.thua < 0){ toast('⚠️ Màn này chỉ sửa phiếu ghi THỪA. Nhận thiếu thì ghi một phiếu nhận bổ sung để giá vốn vào đúng lô.'); return; }
+  if(!String(FIXREC_WIZ.lyDo||'').trim()){ toast('⚠️ Phải ghi lý do — phiếu nhận sẽ lưu lại lý do này'); return; }
+  fixRecWizGo(3);
+}
+
+function fixRecWizRender(){
+  const w = FIXREC_WIZ;
+  const body = document.getElementById('fixrec-body');
+  const steps = document.getElementById('fixrec-steps');
+  const title = document.getElementById('fixrec-title');
+  if(!w || !body) return;
+  const p2 = n => String(n).padStart(2,'0');
+  const d = w.rec.createdAt ? new Date(w.rec.createdAt) : null;
+  if(title) title.textContent = 'Sửa phiếu nhận' + (d && !isNaN(d) ? ` ${p2(d.getDate())}/${p2(d.getMonth()+1)}` : '');
+  const ten = ['Chọn dòng','Nhập số & lý do','Soát & xác nhận'];
+  if(steps) steps.innerHTML = ten.map((t,i)=>{
+    const n = i+1, xong = n < w.step, dang = n === w.step;
+    return `<div style="flex:1;text-align:center;font-size:10.5px;font-weight:700;letter-spacing:.3px;padding:7px 4px;border-radius:10px;
+      background:${dang?'var(--gd)':(xong?'#dcfce7':'#eee')};color:${dang?'#fff':(xong?'#16a34a':'#aaa')};">${n}. ${t}</div>`;
+  }).join('');
+
+  if(w.step === 1) return fixRecWizB1(body);
+  if(w.step === 2) return fixRecWizB2(body);
+  return fixRecWizB3(body);
+}
+
+function fixRecWizB1(body){
+  const w = FIXREC_WIZ;
+  const dongs = fixRecWizDongs();
+  body.innerHTML = `
+    <div class="small-note" style="margin-bottom:10px">Phiếu này có ${dongs.length} dòng hàng. Chọn dòng bị ghi sai số lượng.</div>
+    ${dongs.map((l,i)=>{
+      const tem = (w.tem||[]).filter(c=>c.itemId===l.itemId);
+      const song = tem.filter(c=>c.status==='sealed'||c.status==='open').length;
+      return `<div class="litem" style="cursor:pointer" onclick="fixRecWizChonDong(${i})">
+        <div class="li-l">
+          <div>${escapeHtmlAttr(l.name||'')}</div>
+          <div class="muted-sm">Đã ghi nhận <b>${fmtNum(l.qtyGoodBase,0)} ${escapeHtmlAttr(l.unit||'')}</b>${tem.length?` · ${song} tem còn sống`:' · không dán tem'}</div>
+          ${fixRecLichSuSua(w.rec, l.itemId)}
+        </div>
+        <div class="li-r">›</div>
+      </div>`;
+    }).join('') || '<div class="empty-hint">Phiếu này không có dòng nào nhận hàng lành.</div>'}`;
+}
+
+function fixRecWizB2(body){
+  const w = FIXREC_WIZ, c = fixRecWizTinh();
+  if(!c){ body.innerHTML = '<div class="muted">Không đọc được dòng này.</div>'; return; }
+  body.innerHTML = `
+    <div class="card" style="margin:0 0 12px;padding:14px">
+      <div style="font-size:16px;font-weight:700;color:var(--td)">${escapeHtmlAttr(c.l.name||'')}</div>
+      <div class="muted-sm" style="margin-top:4px">Hệ thống đang ghi <b>${fmtNum(c.daGhi,2)} ${escapeHtmlAttr(c.donVi)}</b>${c.theoDonVi?` (= ${fmtNum(c.daGhiBase,0)} ${escapeHtmlAttr(c.l.unit||'')})`:''}</div>
+      ${c.tem.length?`<div class="muted-sm">${c.song.length} tem còn sống${c.daDung.length?` · <b style="color:var(--warn)">${c.daDung.length} đã mở/đã dùng</b>`:''}</div>`:'<div class="muted-sm">Món này không dán tem</div>'}
+      ${fixRecLichSuSua(w.rec, c.l.itemId)}
+    </div>
+    <div class="field"><label>Số ĐÚNG theo đơn hàng thật (${escapeHtmlAttr(c.donVi)})</label>
+      <input type="number" step="0.01" min="0" id="fixrecQty" value="${escapeHtmlAttr(String(w.soDung))}"
+             oninput="fixRecWizSet('soDung', this.value)" placeholder="VD: 3"></div>
+    <div class="field"><label>Lý do sửa (bắt buộc)</label>
+      <input type="text" id="fixrecReason" value="${escapeHtmlAttr(w.lyDo||'')}"
+             oninput="fixRecWizSet('lyDo', this.value)"
+             placeholder="VD: nhân viên gõ nhầm 30 thay vì 3">
+      <div class="hint">Lý do này được lưu vĩnh viễn vào nhật ký của phiếu và của đơn đặt hàng — sau này soát lại còn biết chuyện gì đã xảy ra.</div></div>
+    <div id="fixrecTomTat"></div>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      ${fixRecWizDongs().length>1?`<button class="btn outline" style="flex:0 0 auto;padding:0 16px" onclick="fixRecWizGo(1)">‹ Quay lại</button>`:''}
+      <button class="btn" style="flex:1" onclick="fixRecWizTiepTuc()">Tiếp tục ›</button>
+    </div>`;
+  fixRecWizRenderTomTat();
+}
+
+// Xem trước ngay khi đang gõ: gõ 3 là thấy liền "huỷ 27 tem, tồn còn 4.200" — không phải
+// bấm Tiếp mới biết mình vừa định làm gì.
+function fixRecWizRenderTomTat(){
+  const el = document.getElementById('fixrecTomTat');
+  const c = fixRecWizTinh();
+  if(!el) return;
+  if(!c || !c.hopLe || Math.abs(c.thua) < 1e-9){ el.innerHTML = ''; return; }
+  if(c.thua < 0){
+    el.innerHTML = `<div class="small-note" style="color:var(--bad);margin-top:8px">Số mới LỚN HƠN số đang ghi. Màn này chỉ sửa phiếu ghi thừa — nhận thiếu thì ghi một phiếu nhận bổ sung để giá vốn vào đúng lô.</div>`;
+    return;
+  }
+  el.innerHTML = `<div class="small-note" style="margin-top:8px;line-height:1.7">
+      Sẽ trừ <b>${fmtNum(c.thua,0)} ${escapeHtmlAttr(c.l.unit||'')}</b> khỏi tồn kho${c.huy.length?` và huỷ <b>${c.huy.length} tem</b>`:''}.
+      ${c.thieuTem?`<br><span style="color:var(--bad)">Cần huỷ ${c.canHuy} tem nhưng chỉ còn ${c.nguyen.length} tem nguyên seal — ${c.thieuTem} con còn lại đã mở/đã dùng nên không huỷ được.</span>`:''}
+    </div>`;
+}
+
+function fixRecWizB3(body){
+  const w = FIXREC_WIZ, c = fixRecWizTinh();
+  if(!c || !c.hopLe){ body.innerHTML = '<div class="muted">Thiếu dữ liệu — quay lại bước 2.</div>'; return; }
+  const dvBase = escapeHtmlAttr(c.l.unit||'');
+  const hang = (nhan, cu, moi) => `<div class="row"><span class="rl">${nhan}</span><span class="rv">${cu} → <b>${moi}</b></span></div>`;
+  const poLine = w.rec.poId ? hang('Đơn đặt hàng — đã nhận', `${fmtNum(c.daGhiBase,0)} ${dvBase}`, `${fmtNum(c.baseDung,0)} ${dvBase}`) : '';
+  body.innerHTML = `
+    <div class="small-note" style="margin-bottom:10px">Soát lại lần cuối. Bấm xác nhận là <b>huỷ tem vĩnh viễn</b> và ghi vào sổ kho.</div>
+    <div class="card" style="margin:0 0 12px;padding:14px">
+      <div style="font-size:16px;font-weight:700;color:var(--td);margin-bottom:8px">${escapeHtmlAttr(c.l.name||'')}: ${fmtNum(c.daGhi,2)} → ${fmtNum(c.soDung,2)} ${escapeHtmlAttr(c.donVi)}</div>
+      ${hang('Tồn kho', `${fmtNum(c.tonHienTai,0)} ${dvBase}`, `${fmtNum(c.tonHienTai-c.thua,0)} ${dvBase}`)}
+      ${hang('Dòng NHẬP trong sổ kho', `${fmtNum(c.daGhiBase,0)} ${dvBase}`, `${fmtNum(c.baseDung,0)} ${dvBase}`)}
+      ${poLine}
+      ${c.tem.length?hang('Tem còn sống', `${c.song.length}`, `${c.giu.length}`):''}
+      <div class="small-note" style="margin-top:8px">Lý do: <b>${escapeHtmlAttr(w.lyDo)}</b></div>
+      ${c.tonHienTai-c.thua < 0 ? `<div class="small-note" style="color:var(--warn);margin-top:6px">Tồn sẽ xuống ÂM — phần hàng ghi thừa đã bị bán/trừ qua công thức mấy hôm nay. Đó là số đúng; chạy một lần kiểm kê sau khi sửa để chốt lại.</div>`:''}
+    </div>
+    ${c.huy.length?`<div class="card" style="margin:0 0 12px;padding:14px">
+      <div style="font-size:12px;font-weight:700;color:var(--bad);margin-bottom:6px">HUỶ ${c.huy.length} TEM — đi bóc khỏi kệ nếu đã dán</div>
+      <div style="font-size:12px;color:#666;line-height:1.8;word-break:break-all">${c.huy.map(x=>escapeHtmlAttr(x.code||'')).join(' · ')}</div>
+      ${c.giu.length?`<div style="font-size:12px;font-weight:700;color:var(--ok);margin:10px 0 6px">GIỮ LẠI ${c.giu.length} TEM</div>
+      <div style="font-size:12px;color:#666;line-height:1.8;word-break:break-all">${c.giu.map(x=>escapeHtmlAttr(x.code||'')).join(' · ')}</div>`:''}
+    </div>`:''}
+    ${c.thieuTem?`<div class="small-note" style="color:var(--bad);margin-bottom:10px">Cần huỷ ${c.canHuy} tem nhưng chỉ còn ${c.nguyen.length} tem nguyên seal. ${c.thieuTem} con còn lại đã mở/đã báo hết — hàng đó đã vào ly khách, không huỷ được. Tồn kho vẫn trừ đủ phần ghi thừa; soát lại những con đã dùng.</div>`:''}
+    <div style="display:flex;gap:8px">
+      <button class="btn outline" style="flex:0 0 auto;padding:0 16px" onclick="fixRecWizGo(2)">‹ Sửa lại</button>
+      <button class="btn" style="flex:1" id="fixrecGo" onclick="fixRecWizApply()">Xác nhận sửa</button>
+    </div>`;
+}
+
+async function fixRecWizApply(){
+  const w = FIXREC_WIZ;
+  if(!w || w.dangLuu) return;
+  const c = fixRecWizTinh();
+  if(!c || !c.hopLe || !(c.thua > 0)){ toast('⚠️ Dữ liệu không hợp lệ'); return; }
+  const lyDoNguoiDung = String(w.lyDo||'').trim();
+  if(!lyDoNguoiDung){ toast('⚠️ Phải ghi lý do'); fixRecWizGo(2); return; }
+  w.dangLuu = true;
+  const nut = document.getElementById('fixrecGo');
+  if(nut){ nut.disabled = true; nut.textContent = 'Đang ghi...'; }
+
+  const recId = w.recId, rec = w.rec, l = c.l, huy = c.huy, theoLo = c.theoLo, tem = c.tem;
+  const daGhiBase = c.daGhiBase, baseDung = c.baseDung, thua = c.thua;
   try{
     await ensureAuth();
     const nowISO = new Date().toISOString();
-    const lyDo = `Sửa phiếu nhận ghi thừa: ${fmtNum(daGhi,2)} → ${fmtNum(soDung,2)} ${donVi} · ${lyDoNguoiDung}`;
+    const lyDo = `Sửa phiếu nhận ghi thừa: ${fmtNum(c.daGhi,2)} → ${fmtNum(c.soDung,2)} ${c.donVi} · ${lyDoNguoiDung}`;
 
     // 1) Huỷ tem thừa (hoặc hạ dung tích nếu là tem theo lô).
     if(huy.length){
       const b = fstore.batch();
-      huy.forEach(c=>b.update(fstore.collection(CTN_COLL).doc(c.id), {
+      huy.forEach(x=>b.update(fstore.collection(CTN_COLL).doc(x.id), {
         status:'voided', voidedAt: nowISO, voidedBy:'management', voidReason: lyDo, needsReview:false
       }));
       await b.commit();
@@ -4016,14 +4167,13 @@ async function suaDongPhieuNhan(recId, lineIdx){
     });
 
     // 3) Cập nhật phiếu nhận VÀ ghi nhật ký sửa. `corrections` là mảng CHỈ THÊM, không bao
-    //    giờ ghi đè: phiếu mang con số mới nhưng vẫn kể lại được đầy đủ từng lần sửa, số cũ,
-    //    số mới, ai sửa, vì sao, huỷ những mã tem nào. Sửa mà không để lại vết thì cuốn sổ
-    //    mất sạch giá trị đối chiếu.
+    //    giờ ghi đè: phiếu mang con số mới nhưng vẫn kể lại được đầy đủ từng lần sửa.
     const buoc = {
       at: nowISO, by: 'management', itemId: l.itemId, name: l.name || '',
       fromBase: daGhiBase, toBase: baseDung, deltaBase: -thua,
       reason: lyDoNguoiDung,
-      voidedCodes: huy.map(c=>c.code||''), keptCodes: (theoLo?[]:tem.filter(c=>(c.status==='sealed'||c.status==='open') && !huy.some(h=>h.id===c.id)).map(c=>c.code||'')),
+      voidedCodes: huy.map(x=>x.code||''),
+      keptCodes: theoLo ? [] : c.giu.map(x=>x.code||''),
       ledgerTxIds: dongLedger.map(d=>d.id)
     };
     const lines = (rec.lines||[]).map(x => (x.itemId===l.itemId && Number(x.qtyGoodBase)===daGhiBase)
@@ -4046,15 +4196,16 @@ async function suaDongPhieuNhan(recId, lineIdx){
 
     logAudit('adjust','receiving_record',recId,{itemId:l.itemId, tu:daGhiBase, den:baseDung, lyDo:lyDoNguoiDung, temHuy:huy.length, soDongLedger:dongLedger.length});
     toast(`✅ Đã sửa · trừ ${fmtNum(thua,0)} ${l.unit||''} khỏi tồn${huy.length?` · huỷ ${huy.length} tem`:''}`);
+    closeFixRecWizard();
     renderKhoContainers();
   }catch(err){
-    console.error('suaDongPhieuNhan lỗi', err);
+    console.error('fixRecWizApply lỗi', err);
+    if(FIXREC_WIZ) FIXREC_WIZ.dangLuu = false;
+    if(nut){ nut.disabled = false; nut.textContent = 'Xác nhận sửa'; }
     showError('Không sửa được: '+(err.code||err.message||err));
   }
 }
 
-// Hạ số "đã nhận" trên đơn đặt hàng và tính lại trạng thái. Dùng runTransaction vì POS có
-// thể đang ghi nhận hàng cho chính đơn này cùng lúc.
 async function poTruSoDaNhan(poId, itemId, thua, buoc){
   const ref = fstore.collection('purchase_orders_gieogieo').doc(poId);
   await fstore.runTransaction(async t=>{
