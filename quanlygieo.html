@@ -3619,11 +3619,26 @@ function addInventoryItem(data){
 //   · Tem sinh ra mà chưa dán       → để lâu thì chai không có tem, mà hệ thống lại tưởng có.
 // ============================================================
 const CTN_COLL = 'stock_containers_gieogieo';
-let ctnFilter = 'review';      // review | expired | unlabeled | open | all
+// [MỚI] Phiếu báo mất hàng — cùng nếp stock_counts_gieogieo: POS tạo pending_review (từ
+// bước "Kiểm tra lại" trong Kiểm kê), Quản lý duyệt mới thật sự trừ tồn kho. Quản lý cũng
+// tạo thẳng doc status:'approved' khi tự phát hiện mất hàng (đường ít dùng hơn — xem
+// reportLostContainerManual()). Xem renderKhoLostReports()/approveLostReport().
+const LOST_REPORTS_COLL = 'stock_lost_reports_gieogieo';
+let ctnFilter = 'review';      // review | browse | expired | lost | unlabeled | legacy | fixreceipt
 let CONTAINERS_CACHE = [];
 
+// [SỬA] 'open'/'sealed'/'finishedmonth' không còn là tab riêng (đã gộp vào 'browse') —
+// các lệnh gọi cũ (nút "Xem hàng đang mở", link "Xem màn Container"...) vẫn truyền đúng
+// những từ khoá này, nên dịch sang tab 'browse' + đặt sẵn chip lọc tương ứng thay vì đổi
+// từng nơi gọi.
+const CTN_LEGACY_FILTER_TO_BROWSE = {open:'open', sealed:'sealed', finishedmonth:'finished'};
 function goContainers(filter){
-  ctnFilter = filter || 'review';
+  if(CTN_LEGACY_FILTER_TO_BROWSE[filter]){
+    ctnFilter = 'browse';
+    ctnBrowseSubFilter = CTN_LEGACY_FILTER_TO_BROWSE[filter];
+  } else {
+    ctnFilter = filter || 'review';
+  }
   goKho('containers');
 }
 
@@ -3646,6 +3661,18 @@ async function loadContainersFor(filter){
     const dauThang = new Date(); dauThang.setDate(1); dauThang.setHours(0,0,0,0);
     const docs = (await c.where('finishedAt','>=',dauThang.toISOString()).orderBy('finishedAt','desc').limit(500).get()).docs;
     return docs.map(d=>({id:d.id,...d.data()})).filter(x=>x.status==='finished');
+  }
+  // 'lost' = đã báo mất và Quản lý đã duyệt (trừ khỏi kho). Số này cũng nhỏ như 'open' —
+  // hàng báo mất mà chưa tìm lại được thì không nhiều, đọc thẳng không cần limit.
+  if(filter === 'lost') return (await c.where('status','==','lost').get()).docs.map(d=>({id:d.id,...d.data()}));
+  // [MỚI] 'browse' = màn "Tồn kho & tem" gộp — thay vì 3-4 tab tách rời (sealed/open/
+  // finishedmonth/lost) đọc Firestore riêng từng cái mỗi lần đổi tab, gộp một lần thành một
+  // danh sách rồi lọc bằng chip NGAY TRÊN TRÌNH DUYỆT — đổi chip không tốn thêm lượt đọc nào.
+  if(filter === 'browse'){
+    const [sealed, open, finishedM, lost] = await Promise.all([
+      loadContainersFor('sealed'), loadContainersFor('open'), loadContainersFor('finishedmonth'), loadContainersFor('lost')
+    ]);
+    return [...sealed, ...open, ...finishedM, ...lost];
   }
   // 'expired' và 'open' cùng đọc danh sách chai đang mở rồi lọc phía client — Firestore
   // không so sánh được expiresAt <= "bây giờ" mà không cần index riêng, và số chai đang mở
@@ -4425,16 +4452,21 @@ function ctnExpiryText(c){
 async function renderKhoContainers(){
   const box = document.getElementById('khoBody');
   showLoading(box);
+  // [SỬA] "Tồn kho (chưa mở)" / "Đang mở" / "Đã báo hết (tháng này)" trước đây là 3 tab
+  // tách rời, mỗi lần đổi tab đọc lại Firestore riêng — gộp thành 1 tab "Tồn kho & tem",
+  // đọc MỘT LẦN rồi lọc bằng chip ngay trên trình duyệt (xem renderKhoContainerBrowse).
+  // Thêm tab "Báo mất hàng" (report + duyệt + danh sách đang mất) — xem renderKhoLostReports.
   const tabs = [
-    ['review',       'Cần xem lại'],
-    ['sealed',       'Tồn kho (chưa mở)'],
-    ['expired',      'Quá hạn sau mở'],
-    ['open',         'Đang mở'],
-    ['finishedmonth','Đã báo hết (tháng này)'],
-    ['unlabeled',    'Tem chưa dán'],
-    ['legacy',       'Tồn lịch sử'],
-    ['fixreceipt',   'Sửa phiếu nhận']
+    ['review',     'Cần xem lại'],
+    ['browse',     'Tồn kho & tem'],
+    ['expired',    'Quá hạn sau mở'],
+    ['lost',       'Báo mất hàng'],
+    ['unlabeled',  'Tem chưa dán'],
+    ['legacy',     'Tồn lịch sử'],
+    ['fixreceipt', 'Sửa phiếu nhận']
   ];
+  if(ctnFilter === 'browse'){ await renderKhoContainerBrowse(box, tabs); return; }
+  if(ctnFilter === 'lost'){ await renderKhoLostReports(box, tabs); return; }
   if(ctnFilter === 'legacy'){ await renderKhoLegacyStock(box, tabs); return; }
   if(ctnFilter === 'fixreceipt'){ await renderKhoFixReceipt(box, tabs); return; }
   let list = [];
@@ -4450,12 +4482,11 @@ async function renderKhoContainers(){
   const nav = `<div class="filter-bar">${tabs.map(([k,l])=>
       `<button class="ftag ${ctnFilter===k?'active':''}" onclick="ctnFilter='${k}'; renderKhoContainers();">${l}</button>`).join('')}</div>`;
 
+  // 'sealed'/'open'/'finishedmonth' không còn dẫn tới đây nữa (đã gộp vào tab 'browse'),
+  // nên khối này giờ chỉ còn phục vụ 'review'/'expired'/'unlabeled'.
   const giaiThich = {
     review: 'Nhân viên báo hết khi hàng còn hơn 25%. Không phải lúc nào cũng là gian — có thể bị đổ, hỏng, hoặc định mức khai thiếu nên sổ còn nhiều hơn thực tế. Nhưng lặp lại ở cùng một người thì cần hỏi.',
-    sealed: 'Toàn bộ mã còn nguyên seal, chưa ai mở — đây là danh sách "đang có gì tại quán" theo từng mã tem, không phải theo tổng số lượng.',
     expired: 'Hàng đã mở nắp quá hạn sử dụng. Đây là chuyện an toàn thực phẩm, không phải chuyện kho — nên xử lý ngay chứ không đợi kiểm kê.',
-    open: 'Toàn bộ chai, gói, hộp đang mở dở trong quán.',
-    finishedmonth: 'Mã đã báo hết, tính từ đầu tháng này tới giờ. Tháng trước xem ở Lịch sử kho (lọc "Hao hụt" hoặc theo tên nhân viên).',
     unlabeled: 'Mã đã sinh khi nhận hàng nhưng chưa ai dán tem lên. Để lâu thì hàng không có tem mà hệ thống vẫn tưởng có — lúc kiểm kê sẽ không quét được.'
   }[ctnFilter];
 
@@ -4465,11 +4496,9 @@ async function renderKhoContainers(){
     return;
   }
 
-  // Sắp xếp: nặng nhất lên đầu — quá hạn lâu nhất, hoặc bỏ phí nhiều nhất. Riêng
-  // 'finishedmonth' thì mới báo hết lên đầu (đọc từ trên xuống theo thời gian gần nhất).
+  // Sắp xếp: nặng nhất lên đầu — quá hạn lâu nhất, hoặc bỏ phí nhiều nhất.
   const sorted = list.slice().sort((a,b)=>
     ctnFilter==='review' ? (Number(b.wasteBase)||0) - (Number(a.wasteBase)||0)
-    : ctnFilter==='finishedmonth' ? String(b.finishedAt||'').localeCompare(String(a.finishedAt||''))
     : String(a.expiresAt||a.receivedAt||'').localeCompare(String(b.expiresAt||b.receivedAt||'')));
 
   box.innerHTML = nav + `<div class="small-note" style="margin-bottom:12px">${giaiThich}</div>` +
@@ -4481,20 +4510,12 @@ async function renderKhoContainers(){
       const phu = ctnFilter==='review'
         ? `Báo hết ${dt(c.finishedAt)} bởi <b>${escapeHtmlAttr(c.finishedBy||'—')}</b> · còn <b>${fmtNum(c.wasteBase,0)} ${escapeHtmlAttr(c.unit||'')}</b> (${tyLe}% còn lại)`
           + (c.wasteBasis && c.wasteBasis !== 'tinh_duoc' ? `<div class="muted-sm">${escapeHtmlAttr(ctnBasisLabel(c.wasteBasis))}</div>` : '')
-        : ctnFilter==='unlabeled' || ctnFilter==='sealed'
+        : ctnFilter==='unlabeled'
         ? `Nhận ${dt(c.receivedAt)} bởi ${escapeHtmlAttr(c.receivedBy||'—')}`
-          + (ctnFilter==='sealed' && c.labelPrinted===false ? `<div class="muted-sm">Chưa dán tem</div>` : '')
-        : ctnFilter==='finishedmonth'
-        ? `Báo hết ${dt(c.finishedAt)} bởi ${escapeHtmlAttr(c.finishedBy||'—')}`
-          + (c.wasteBasis && c.wasteBasis !== 'tinh_duoc' ? `<div class="muted-sm">${escapeHtmlAttr(ctnBasisLabel(c.wasteBasis))}</div>` : '')
         : `Mở ${dt(c.openedAt)} bởi ${escapeHtmlAttr(c.openedBy||'—')}`;
       const nhan = ctnFilter==='review'
         ? `<span class="tier tier-${tyLe>=50?'red':'amber'}">${tyLe}% còn lại</span>`
-        : ctnFilter==='finishedmonth' && Number(c.wasteBase)>0
-        ? `<span class="muted-sm">còn ${fmtNum(c.wasteBase,0)} ${escapeHtmlAttr(c.unit||'')}</span>`
-        // 'ex' (hạn sau khi mở) không có ý nghĩa với tem chưa mở — badge "Không đặt hạn"
-        // ở đây dễ hiểu lầm là "hết hạn nhận hàng", nên bỏ hẳn cho 'sealed'/'finishedmonth'.
-        : (ex.text && ctnFilter!=='sealed' && ctnFilter!=='finishedmonth') ? `<span class="${ex.cls}">${ex.text}</span>` : '';
+        : (ex.text ? `<span class="${ex.cls}">${ex.text}</span>` : '');
       return `<div class="litem">
         <div class="li-l">
           <div>${escapeHtmlAttr(c.itemName||'')} <span class="muted-sm" style="letter-spacing:.4px">${escapeHtmlAttr(c.code||'')}</span></div>
@@ -4506,6 +4527,285 @@ async function renderKhoContainers(){
           : ''}</div>
       </div>`;
     }).join('') + `</div>`;
+}
+
+// ============================================================
+// [MỚI] TAB "TỒN KHO & TEM" — gộp sealed/open/finishedmonth/lost vào MỘT danh sách,
+// đọc Firestore đúng MỘT LẦN (loadContainersFor('browse') — xem hàm đó), rồi lọc theo
+// trạng thái bằng chip NGAY TRÊN TRÌNH DUYỆT (không đọc lại). Mỗi thẻ tô màu theo trạng
+// thái để nhìn là biết luôn, không cần đọc chữ: tồn kho = màu mặc định, đang mở = xanh,
+// đã hết = xám, báo mất = đỏ nhạt. Món nhận trong 5 ngày gần đây có thêm nhãn "Mới nhập".
+// ============================================================
+let ctnBrowseSubFilter = 'all'; // 'all'|'sealed'|'open'|'finished'|'lost'
+let CONTAINERS_BROWSE_CACHE = [];
+let _ctnBrowseNavHtml = '';
+const CTN_BROWSE_STATUS_LABEL = { sealed:'Tồn kho', open:'Đang mở', finished:'Đã hết', lost:'Báo mất' };
+const CTN_BROWSE_NEW_MS = 5*24*3600*1000; // "Mới nhập" = nhận trong 5 ngày gần đây
+
+async function renderKhoContainerBrowse(box, tabs){
+  const nav = `<div class="filter-bar">${tabs.map(([k,l])=>
+      `<button class="ftag ${ctnFilter===k?'active':''}" onclick="ctnFilter='${k}'; renderKhoContainers();">${l}</button>`).join('')}</div>`;
+  _ctnBrowseNavHtml = nav;
+  box.innerHTML = nav + '<div class="empty-hint">Đang tải…</div>';
+  let list = [];
+  try{
+    await ensureAuth();
+    list = await loadContainersFor('browse');
+  }catch(err){
+    console.error('renderKhoContainerBrowse lỗi', err);
+    box.innerHTML = nav + '<div class="muted">Không đọc được danh sách. '+(err.code||err.message||'')+'</div>';
+    return;
+  }
+  CONTAINERS_BROWSE_CACHE = list;
+  CONTAINERS_CACHE = list; // giữ tương thích những chỗ khác đang đọc CONTAINERS_CACHE
+  renderKhoContainerBrowseList();
+}
+
+// Đổi chip lọc — KHÔNG đọc lại Firestore, chỉ lọc lại mảng đã tải sẵn.
+function ctnBrowseSetFilter(v){ ctnBrowseSubFilter = v; renderKhoContainerBrowseList(); }
+
+function renderKhoContainerBrowseList(){
+  const box = document.getElementById('khoBody');
+  if(!box) return;
+  const list = CONTAINERS_BROWSE_CACHE;
+  const counts = {sealed:0, open:0, finished:0, lost:0};
+  list.forEach(c=>{ if(counts[c.status]!=null) counts[c.status]++; });
+  const chips = [
+    ['all','Tất cả ('+list.length+')'],
+    ['sealed','Tồn kho ('+counts.sealed+')'],
+    ['open','Đang mở ('+counts.open+')'],
+    ['finished','Đã hết ('+counts.finished+')'],
+    ['lost','Báo mất ('+counts.lost+')']
+  ];
+  const chipsHtml = `<div class="filter-bar" style="margin-top:6px">${chips.map(([k,l])=>
+    `<button class="ftag ${ctnBrowseSubFilter===k?'active':''}" onclick="ctnBrowseSetFilter('${k}')">${l}</button>`).join('')}</div>`;
+  const note = `<div class="small-note" style="margin:10px 0">Gộp cả tồn kho, đang mở, đã báo hết (tháng này) và báo mất vào một chỗ — bấm chip để xem riêng từng nhóm, không tải lại. Đã báo mất — xem/duyệt ở tab "Báo mất hàng".</div>`;
+
+  const filtered = ctnBrowseSubFilter==='all' ? list : list.filter(c=>c.status===ctnBrowseSubFilter);
+  if(!filtered.length){
+    box.innerHTML = _ctnBrowseNavHtml + chipsHtml + note + '<div class="empty-hint">Không có mục nào trong nhóm này.</div>';
+    return;
+  }
+  const sorted = filtered.slice().sort((a,b)=> String(b.receivedAt||'').localeCompare(String(a.receivedAt||'')));
+  const p2 = n=>String(n).padStart(2,'0');
+  const dt = iso => { const d = iso?new Date(iso):null; return (d && !isNaN(d)) ? `${p2(d.getDate())}/${p2(d.getMonth()+1)}` : ''; };
+  const now = Date.now();
+  const styleFor = st => st==='open' ? 'background:#eff6ff;border-color:#93c5fd;'
+    : st==='finished' ? 'background:#f4f4f5;border-color:#d4d4d8;opacity:.85;'
+    : st==='lost' ? 'background:#fef2f2;border-color:#fca5a5;'
+    : ''; // sealed (tồn kho) = mặc định, không đổi màu — đúng ý "màu bình thường"
+
+  box.innerHTML = _ctnBrowseNavHtml + chipsHtml + note + `<div>` + sorted.map(c=>{
+    const isMoi = c.receivedAt && (now - new Date(c.receivedAt).getTime()) <= CTN_BROWSE_NEW_MS;
+    const phu = c.status==='open' ? `Mở ${dt(c.openedAt)} bởi ${escapeHtmlAttr(c.openedBy||'—')}`
+      : c.status==='finished' ? `Báo hết ${dt(c.finishedAt)} bởi ${escapeHtmlAttr(c.finishedBy||'—')}`
+      : c.status==='lost' ? `Báo mất ${dt(c.lostAt)} bởi ${escapeHtmlAttr(c.lostBy||'—')}`
+      : `Nhận ${dt(c.receivedAt)} bởi ${escapeHtmlAttr(c.receivedBy||'—')}`
+        + (c.labelPrinted===false ? `<div class="muted-sm">Chưa dán tem</div>` : '');
+    return `<div class="litem" style="${styleFor(c.status)}">
+      <div class="li-l">
+        <div>${escapeHtmlAttr(c.itemName||'')} <span class="muted-sm" style="letter-spacing:.4px">${escapeHtmlAttr(c.code||'')}</span>
+          ${isMoi ? '<span class="tier tier-green" style="margin-left:6px;font-size:9.5px;">Mới nhập</span>' : ''}
+        </div>
+        <div>${phu}</div>
+      </div>
+      <div class="li-r"><span class="muted-sm">${CTN_BROWSE_STATUS_LABEL[c.status]||c.status||''}</span></div>
+    </div>`;
+  }).join('') + `</div>`;
+}
+
+// ============================================================
+// [MỚI] TAB "BÁO MẤT HÀNG"
+//
+// Hai chiều tạo phiếu:
+//   · POS (chủ yếu) — nhân viên bấm "Không tìm thấy" ở bước "Kiểm tra lại" sau khi gửi
+//     kiểm kê (xem stockCountReportLost() bên posgieo.html) → status:'pending_review',
+//     kèm 1 alert trong Hộp thư để Quản lý biết ngay, không phải tự vào tab này mới thấy.
+//   · Quản lý (ít dùng hơn) — tự phát hiện mất hàng, nhập thẳng mã tem ở đây → duyệt luôn
+//     lúc tạo (reportLostContainerManual), không cần bước chờ vì người tạo và người duyệt
+//     là một.
+// Duyệt (approveLostReport) mới THẬT SỰ trừ tồn kho — đúng nguyên tắc "số nhân viên báo/
+// đếm không được ghi đè thẳng, phải qua duyệt" áp dụng xuyên suốt Kiểm kê. Tìm lại được thì
+// POS cộng lại tồn kho khi quét ở nút "Quét mã hàng tìm lại được" (xem
+// submitFoundLostContainer() bên posgieo.html) — Quản lý không cần làm gì thêm ở đây.
+// ============================================================
+async function loadLostReportsPending(){
+  const snap = await fstore.collection(LOST_REPORTS_COLL).where('status','==','pending_review').get();
+  return snap.docs.map(d=>({id:d.id, ...d.data()}));
+}
+async function loadLostReportsHistory(limitN){
+  const snap = await fstore.collection(LOST_REPORTS_COLL).orderBy('reportedAt','desc').limit(limitN||40).get();
+  return snap.docs.map(d=>({id:d.id, ...d.data()}));
+}
+// Alert trong Hộp thư (nếu có, chỉ phiếu nguồn POS mới có) trỏ đúng phiếu này qua
+// `lostReportId` — đánh dấu resolved cùng lúc phiếu được duyệt/từ chối, đỡ phải vào Hộp
+// thư dọn tay riêng một lần nữa.
+async function markAlertForLostReport(reportId, status){
+  try{
+    const snap = await fstore.collection('alerts_gieogieo').where('lostReportId','==',reportId).limit(1).get();
+    if(!snap.empty) await snap.docs[0].ref.update({status, resolvedAt:new Date().toISOString()});
+  }catch(err){ console.warn('[báo mất hàng] không cập nhật được alert liên quan:', err); }
+}
+
+// approveLostReport/rejectLostReport có thể được bấm từ HAI màn khác nhau — thẻ trong Hộp
+// thư (Phase 11 kéo alert lên đó) hoặc tab Kho → Container → Báo mất hàng. #khoBody/
+// #inboxBody chỉ tồn tại trong DOM khi đang thật sự đứng ở màn đó (goKho()/goEntry() ghi
+// đè innerHTML mỗi lần chuyển tab), nên kiểm tra sự tồn tại là đủ để biết vẽ lại đâu —
+// không cần theo dõi thêm một biến "tab hiện tại" riêng.
+function refreshAfterLostReportAction(){
+  if(document.getElementById('inboxBody')) renderAlertInbox();
+  if(document.getElementById('khoBody')) renderKhoContainers();
+}
+
+async function approveLostReport(id){
+  if(!confirm('Duyệt phiếu báo mất này? Hệ thống sẽ TRỪ ngay khỏi tồn kho.')) return;
+  try{
+    const ref = fstore.collection(LOST_REPORTS_COLL).doc(id);
+    const doc = await ref.get();
+    if(!doc.exists) throw new Error('Không tìm thấy phiếu báo mất này (có thể đã bị xoá)');
+    const rep = doc.data();
+    if(rep.status !== 'pending_review'){ toast('ℹ️ Phiếu này đã được xử lý rồi'); refreshAfterLostReportAction(); return; }
+    const ctnRef = fstore.collection(CTN_COLL).doc(rep.containerId);
+    const ctnDoc = await ctnRef.get();
+    const nowISO = new Date().toISOString();
+    // Mã đã đổi trạng thái từ lúc nhân viên báo tới lúc Quản lý duyệt (ai đó đã tìm ra rồi
+    // quét mở/báo hết, hoặc Quản lý đã huỷ phiếu nhận) — không được đè "lost" lên một
+    // trạng thái đã khác, thà tự huỷ phiếu và báo rõ lý do còn hơn ghi sai sổ.
+    if(!ctnDoc.exists || (ctnDoc.data().status !== 'sealed' && ctnDoc.data().status !== 'open')){
+      await ref.update({status:'rejected', reviewedAt:nowISO, reviewedBy:'Quản lý',
+        reviewNote:'Mã không còn ở trạng thái tồn kho/đang mở lúc duyệt — tự huỷ phiếu, không trừ kho'});
+      toast('⚠️ Mã này không còn ở trạng thái tồn kho/đang mở (có thể đã tìm lại) — đã tự huỷ phiếu');
+      refreshAfterLostReportAction();
+      return;
+    }
+    const c = ctnDoc.data();
+    await ctnRef.update({status:'lost', lostAt:nowISO, lostBy:'Quản lý (đã duyệt)', lostFromStatus:c.status, lostReportId:id});
+    await applyStockTransaction({
+      itemId: rep.itemId, type:'ADJUSTMENT', qty: -(Number(rep.baseQty)||1),
+      note: 'Báo mất hàng đã duyệt — mã '+(rep.code||''), staff:'Quản lý', source:'management', referenceId:id
+    });
+    await ref.update({status:'approved', reviewedAt:nowISO, reviewedBy:'Quản lý'});
+    await markAlertForLostReport(id, 'resolved');
+    logAudit('approve','lost_report',id,{code:rep.code, itemName:rep.itemName});
+    toast('✅ Đã duyệt — trừ khỏi tồn kho');
+    refreshAfterLostReportAction();
+  }catch(err){ console.error(err); showError('Duyệt thất bại: '+(err.code||err.message||err)); }
+}
+
+async function rejectLostReport(id){
+  const note = prompt('Lý do từ chối (tuỳ chọn):') || '';
+  try{
+    await fstore.collection(LOST_REPORTS_COLL).doc(id).update({
+      status:'rejected', reviewedAt:new Date().toISOString(), reviewedBy:'Quản lý', reviewNote:note
+    });
+    await markAlertForLostReport(id, 'resolved');
+    logAudit('reject','lost_report',id,{note});
+    toast('🗑 Đã từ chối báo mất');
+    refreshAfterLostReportAction();
+  }catch(err){ console.error(err); showError('Từ chối thất bại: '+(err.code||err.message||err)); }
+}
+
+// Quản lý tự phát hiện mất hàng, nhập thẳng mã — người tạo và người duyệt là một nên
+// không qua hàng đợi chờ, ghi luôn status:'approved' và trừ kho ngay.
+async function reportLostContainerManual(){
+  const codeInput = document.getElementById('lostManualCode');
+  const ma = String((codeInput && codeInput.value) || '').trim().toUpperCase();
+  if(!ma){ toast('⚠️ Nhập mã tem'); return; }
+  try{
+    const snap = await fstore.collection(CTN_COLL).where('code','==',ma).limit(5).get();
+    const docs = snap.docs.map(d=>({id:d.id, ...d.data()}));
+    const c = docs.find(x=>x.status==='sealed' || x.status==='open');
+    if(!c){ toast('❌ Không tìm thấy mã này đang ở trạng thái tồn kho/đang mở'); return; }
+    if(!confirm('Báo mất "'+(c.itemName||'')+'" (mã '+ma+')? Sẽ trừ ngay khỏi tồn kho.')) return;
+    const nowISO = new Date().toISOString();
+    const repRef = await fstore.collection(LOST_REPORTS_COLL).add({
+      containerId: c.id, code: c.code, itemId: c.itemId, itemName: c.itemName||'',
+      unit: c.unit||'', baseQty: Number(c.baseQty)||1,
+      status:'approved', source:'management',
+      reportedBy:'Quản lý', reportedByEmployeeId:'', reportedAt: nowISO,
+      businessDate: dkey(new Date()), reason:'quan_ly_bao_truc_tiep',
+      reviewedAt: nowISO, reviewedBy:'Quản lý'
+    });
+    await fstore.collection(CTN_COLL).doc(c.id).update({
+      status:'lost', lostAt:nowISO, lostBy:'Quản lý (báo trực tiếp)', lostFromStatus:c.status, lostReportId:repRef.id
+    });
+    await applyStockTransaction({
+      itemId: c.itemId, type:'ADJUSTMENT', qty: -(Number(c.baseQty)||1),
+      note: 'Báo mất hàng (Quản lý nhập trực tiếp) — mã '+ma, staff:'Quản lý', source:'management', referenceId: repRef.id
+    });
+    logAudit('report','lost_report',repRef.id,{code:ma, itemName:c.itemName});
+    toast('✅ Đã báo mất — trừ khỏi tồn kho');
+    if(codeInput) codeInput.value = '';
+    renderKhoContainers();
+  }catch(err){ console.error(err); showError('Báo mất thất bại: '+(err.code||err.message||err)); }
+}
+
+async function renderKhoLostReports(box, tabs){
+  const nav = `<div class="filter-bar">${tabs.map(([k,l])=>
+      `<button class="ftag ${ctnFilter===k?'active':''}" onclick="ctnFilter='${k}'; renderKhoContainers();">${l}</button>`).join('')}</div>`;
+  box.innerHTML = nav + '<div class="empty-hint">Đang tải…</div>';
+  let pending = [], current = [], history = [];
+  try{
+    await ensureAuth();
+    [pending, current, history] = await Promise.all([
+      loadLostReportsPending(), loadContainersFor('lost'), loadLostReportsHistory(40)
+    ]);
+  }catch(err){
+    console.error('renderKhoLostReports lỗi', err);
+    box.innerHTML = nav + '<div class="muted">Không đọc được. '+(err.code||err.message||'')+'</div>';
+    return;
+  }
+  const p2 = n=>String(n).padStart(2,'0');
+  const dt = iso => { const d = iso?new Date(iso):null; return (d && !isNaN(d)) ? `${p2(d.getDate())}/${p2(d.getMonth()+1)} ${p2(d.getHours())}:${p2(d.getMinutes())}` : '—'; };
+
+  const manualForm = `
+    <div class="card" style="margin-bottom:14px">
+      <div style="font-weight:700;font-size:13px;margin-bottom:8px">Báo mất trực tiếp (Quản lý)</div>
+      <div class="small-note" style="margin-bottom:8px">Dùng khi Quản lý TỰ phát hiện mất hàng (không qua kiểm kê) — nhập đúng mã in trên tem. Trừ khỏi tồn kho ngay, không cần chờ duyệt lại vì người báo cũng là người duyệt.</div>
+      <div style="display:flex;gap:8px">
+        <input type="text" id="lostManualCode" placeholder="Nhập mã tem..." style="flex:1;text-transform:uppercase">
+        <button class="btn" style="width:auto;padding:0 16px" onclick="reportLostContainerManual()">Báo mất</button>
+      </div>
+    </div>`;
+
+  const pendingHtml = pending.length ? `
+    <div class="sec-title">Chờ duyệt (${pending.length})</div>
+    ${pending.map(r=>`
+      <div class="litem" style="background:#fffbe8;border-color:#fde68a;">
+        <div class="li-l">
+          <div>${escapeHtmlAttr(r.itemName||'')} <span class="muted-sm" style="letter-spacing:.4px">${escapeHtmlAttr(r.code||'')}</span></div>
+          <div>Báo bởi ${escapeHtmlAttr(r.reportedBy||'—')} · ${dt(r.reportedAt)}</div>
+        </div>
+        <div class="li-r">
+          <button class="btn sm" style="width:auto;padding:0 10px" onclick="approveLostReport('${r.id}')">Duyệt (trừ kho)</button>
+          <button class="btn outline sm" style="width:auto;padding:0 10px;margin-left:6px" onclick="rejectLostReport('${r.id}')">Từ chối</button>
+        </div>
+      </div>`).join('')}` : '<div class="empty-hint" style="margin-bottom:14px">Không có phiếu nào chờ duyệt.</div>';
+
+  const currentHtml = current.length ? `
+    <div class="sec-title" style="margin-top:14px">Đang báo mất, chưa tìm lại (${current.length})</div>
+    ${current.map(c=>`
+      <div class="litem" style="background:#fef2f2;border-color:#fca5a5;">
+        <div class="li-l">
+          <div>${escapeHtmlAttr(c.itemName||'')} <span class="muted-sm" style="letter-spacing:.4px">${escapeHtmlAttr(c.code||'')}</span></div>
+          <div>Báo mất ${dt(c.lostAt)}${c.lostBy?' bởi '+escapeHtmlAttr(c.lostBy):''}</div>
+        </div>
+        <div class="li-r"><span class="muted-sm">Tìm lại: quét ở POS → Kiểm kê</span></div>
+      </div>`).join('')}` : '';
+
+  const STATUS_LABEL = {pending_review:'Chờ duyệt', approved:'Đã duyệt — đã trừ kho', rejected:'Đã từ chối', found_again:'Đã tìm lại — đã cộng lại kho'};
+  const histHtml = history.length ? `
+    <div class="sec-title" style="margin-top:14px">Lịch sử báo mất</div>
+    ${history.map(r=>`
+      <div class="litem">
+        <div class="li-l">
+          <div>${escapeHtmlAttr(r.itemName||'')} <span class="muted-sm" style="letter-spacing:.4px">${escapeHtmlAttr(r.code||'')}</span></div>
+          <div>${escapeHtmlAttr(STATUS_LABEL[r.status]||r.status||'')} · báo bởi ${escapeHtmlAttr(r.reportedBy||'—')} · ${dt(r.reportedAt)}</div>
+        </div>
+        <div class="li-r"></div>
+      </div>`).join('')}` : '';
+
+  box.innerHTML = nav + manualForm + pendingHtml + currentHtml + histHtml;
 }
 
 // ------------------------------------------------------------
@@ -9985,6 +10285,23 @@ async function renderAlertInbox(){
         ${isNew ? `<div class="ac-actions">
           <button onclick="markAlertStatus('${a.id}','seen')">Đã xem</button>
           <button onclick="markAlertStatus('${a.id}','resolved')">Đã xử lý</button>
+        </div>` : ''}
+      </div>`;
+    }
+    // [MỚI] Nhân viên báo mất hàng lúc "Kiểm tra lại" sau kiểm kê (xem
+    // stockCountReportLost() bên posgieo.html). Duyệt/Từ chối NGAY từ đây — không đi qua
+    // markAlertStatus() chung, vì Duyệt còn phải trừ tồn kho + đổi trạng thái mã tem (xem
+    // approveLostReport() ở tab Kho → Container → Báo mất hàng, hàm đó tự đánh dấu alert
+    // này resolved luôn nên không cần gọi thêm gì ở đây).
+    if(a.type==='lost_item_report'){
+      return `<div class="alert-card" style="${isNew?'':'opacity:.62;border-color:var(--line)'}">
+        <div class="ac-title">${a.title || 'Báo mất hàng'} ${isNew?'':'<span class="tier tier-green" style="margin-left:4px">Đã xử lý</span>'}</div>
+        <div class="ac-row">Ngày: ${a.businessDate || '—'}${a.staff?` · báo bởi ${escapeHtmlAttr(a.staff)}`:''}</div>
+        <div class="ac-row">${escapeHtmlAttr(a.itemName||'')} <span class="muted-sm" style="letter-spacing:.4px">${escapeHtmlAttr(a.code||'')}</span></div>
+        <div class="ac-infer">Quét không thấy mã này lúc kiểm kê. Duyệt sẽ trừ ngay khỏi tồn kho; nếu sau này tìm lại được, quét ở POS → Kiểm kê → "Quét mã hàng tìm lại được" để cộng lại — không cần vào đây sửa gì thêm.</div>
+        ${isNew ? `<div class="ac-actions">
+          <button onclick="approveLostReport('${a.lostReportId}')">Duyệt (trừ kho)</button>
+          <button onclick="rejectLostReport('${a.lostReportId}')">Từ chối</button>
         </div>` : ''}
       </div>`;
     }
@@ -20057,6 +20374,7 @@ async function renderKhoStockCount(){
             <span style="white-space:nowrap">${it.countedOpenUnits} / ${it.expectedOpenUnits} đang mở${lechMo?` (${lechMo>0?'+':''}${lechMo})`:''}</span>
           </div>
           ${doNguyen?`<div style="font-size:11px;color:#c0392b;margin-top:2px;">Duyệt sẽ điều chỉnh tồn ${lechNguyen>0?'+':''}${fmtNum(it.varianceBase,0)} ${escapeHtmlAttr(it.unit||'')}</div>`:''}
+          ${Number(it.reportedLostCount)>0?`<div class="muted-sm" style="margin-top:2px;">Số hệ thống ở trên đã TRỪ SẴN ${it.reportedLostCount} mã vừa báo mất lúc kiểm kê này — xem/duyệt riêng ở Kho → Container → Báo mất hàng, không tính đôi ở đây.</div>`:''}
         </div>`;
       }
 
