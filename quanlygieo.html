@@ -10567,6 +10567,18 @@ function qlBillSetRange(k, v){ if(k === 'from') qlBillFrom = v; else qlBillTo = 
 function qlBillSearch(v){ qlBillQuery = v || ''; qlRenderBillList(); }
 function qlBillBack(){ qlBillOpenId = null; qlRenderBillBody(); }
 
+// Mở THẲNG chi tiết một bill cụ thể — Transaction Drill-down (Phase 10), gọi
+// từ dòng CONSUMPTION trong sheet Lịch sử của Nguyên liệu/BTP (xem _histRender).
+// KHÁC goBills(): không được reset qlBillOpenId=null, và phải thu hẹp khoảng
+// ngày về ĐÚNG ngày của giao dịch trước khi nạp — qlBillDetailHTML tra theo id
+// trong qlBills, mà qlBills chỉ có bill của khoảng ngày đang chọn.
+function goBillDetail(orderId, businessDate){
+  if(!orderId) return;
+  if(businessDate){ qlBillFrom = businessDate; qlBillTo = businessDate; }
+  qlBillOpenId = orderId;
+  switchScreen('bills');
+}
+
 async function renderBills(){
   const body = document.getElementById('billsBody');
   body.innerHTML = '<div class="pos-clone"><div class="pc-empty">Đang đọc bill…</div></div>';
@@ -20540,8 +20552,13 @@ function _histRender(){
   // (RECEIVING/WASTE/...) hoặc '_legacy' — chi tiết hơn 5 chip có sẵn bên dưới
   // (vốn chỉ gộp thô vào/ra/hao hụt/điều chỉnh), nên xử lý riêng trước khi rơi
   // về _histGroupOf.
+  // Lọc đúng CONSUMPTION/SALE thì KHÔNG gộp theo ngày (khác các loại khác) —
+  // Transaction Drill-down (Phase 10) cần thấy từng lượt bán riêng để bấm ra
+  // đúng bill đã tạo ra nó; gộp lại thì một dòng đại diện cả ngày, không còn
+  // referenceId của một bill cụ thể nào nữa để trỏ tới.
   const rows = c.filter==='all' ? all
     : c.filter==='_legacy' ? all.filter(t=>!_histTypeLabel(t.type))
+    : (c.filter==='CONSUMPTION' || c.filter==='SALE') ? c.rows.filter(t=>String(t.type||'').toUpperCase()===c.filter)
     : _histTypeLabel(c.filter) ? all.filter(t=>String(t.type||'').toUpperCase()===c.filter)
     : all.filter(t=>_histGroupOf(t)===c.filter);
 
@@ -20590,10 +20607,19 @@ function _histRender(){
           t.reason ? escapeHtmlAttr(t.reason) : '',
           t.source==='pos' ? 'từ POS' : ''
         ].filter(Boolean).join(' · ');
+        // Transaction Drill-down (Phase 10) — CONSUMPTION/SALE không gộp (xem
+        // khai báo `rows` ở trên) có referenceId = đúng khoá bill đã tạo ra
+        // giao dịch này (POS ghi thẳng lúc trừ kho — applySalesConsumptionPOS
+        // → applyStockTransaction{referenceId: orderId}). Bấm ra đúng bill đó,
+        // không dò bằng tay qua Lịch sử bill.
+        const ty2 = String(t.type||'').toUpperCase();
+        const xemBill = (!t._grouped && t.referenceId && (ty2==='CONSUMPTION' || ty2==='SALE'))
+          ? `<button class="btn outline sm" style="width:auto;padding:0 8px;margin-top:4px" onclick="closeEditSheet(); goBillDetail('${t.referenceId}','${escapeHtmlAttr(t.businessDate||'')}')">${ic('receipt',13)} Xem bill</button>` : '';
         return `<div class="litem">
           <div class="li-l">
             <div>${escapeHtmlAttr(gio || '--:--')} <span class="tier tier-${col}" style="margin-left:4px">${lb}</span></div>
             ${meta ? `<div>${meta}</div>` : ''}
+            ${xemBill}
           </div>
           <div class="li-r" style="text-align:right;display:block">
             <div style="font-weight:800;color:${q>0?'var(--ok)':(q<0?'var(--bad)':'var(--gt)')}">${(q>0?'+':'')+fmtNum(q,1)} ${unit}</div>
