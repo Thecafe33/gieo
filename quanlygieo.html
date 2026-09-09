@@ -3785,6 +3785,34 @@ async function docTemConSongTheoMon(){
   return gom;
 }
 
+// [MỚI] Đếm SỐ TEM còn nguyên (sealed) và đang mở dở (open) theo từng nguyên liệu —
+// khác docTemConSongTheoMon() ở trên (hàm đó CỘNG baseQty ra một con số tổng theo
+// đơn vị pha chế). Đặt hàng luôn theo ĐƠN VỊ KIỂM KÊ (VD "còn mấy Gói"), không theo
+// gram/ml, nên danh mục nguyên liệu cần hiện đúng số tem — xem renderKhoItems().
+let _ctnCounts = null;      // { itemId: { sealed, open } }
+let _ctnCountsAt = 0;
+async function loadContainerCountsByItem(force){
+  if(!force && _ctnCounts && Date.now() - _ctnCountsAt < MEMO_TTL) return _ctnCounts;
+  const counts = {};
+  const nhet = d=>{
+    const c = d.data();
+    const cur = counts[c.itemId] || (counts[c.itemId] = { sealed: 0, open: 0 });
+    if(c.status === 'sealed') cur.sealed++; else if(c.status === 'open') cur.open++;
+  };
+  try{
+    (await fstore.collection(CTN_COLL).where('status', 'in', ['sealed', 'open']).get()).docs.forEach(nhet);
+  }catch(err){
+    console.warn('[Kho] đọc gộp số tem lỗi, tách làm 2 lượt:', err);
+    const [a, b] = await Promise.all([
+      fstore.collection(CTN_COLL).where('status', '==', 'sealed').get(),
+      fstore.collection(CTN_COLL).where('status', '==', 'open').get()
+    ]);
+    a.docs.forEach(nhet); b.docs.forEach(nhet);
+  }
+  _ctnCounts = counts; _ctnCountsAt = Date.now();
+  return counts;
+}
+
 // Tem đã báo hết mà phần "còn thừa" LỚN HƠN cả dung tích của chính nó → con số đó không thể
 // là hàng nằm trong chai. Đây chính là dấu vân tay của bug: hao hụt ma sinh từ tồn lịch sử.
 // Lọc theo wasteBase giảm dần nên chỉ cần chỉ mục một trường mặc định của Firestore.
@@ -17320,6 +17348,13 @@ function renderPriceAsOf(){
 function renderKhoItems(){
   const box = document.getElementById('khoBody');
   const editingItem = editingItemId ? INVENTORY_ITEMS.find(x=>x.id===editingItemId) : null;
+  // [MỚI] Số tem còn nguyên/đang mở theo món — đặt hàng luôn tính theo ĐƠN VỊ KIỂM
+  // KÊ (VD "còn mấy Gói"), không theo gram/ml đang hiện sẵn. Nạp NỀN: lần đầu vào
+  // màn chưa có số ngay (tránh màn đứng khựng chờ query), tự vẽ lại khi xong.
+  if(!_ctnCounts){
+    loadContainerCountsByItem().then(()=>{ if(curKhoSub==='items') renderKhoItems(); })
+      .catch(err=> console.warn('[Kho] không đếm được số tem:', err));
+  }
   // [FIX] Lọc theo khoItemsFilter khi được mở từ link "Sức khoẻ quán"/nudge.
   const isLow = it => itemStockManaged(it) && Number(it.minStock)>0 && Number(it.currentStock) < Number(it.minStock) && Number(it.currentStock)>=0;
   const isNeg = it => itemStockManaged(it) && Number(it.currentStock) < 0;
@@ -17360,9 +17395,27 @@ function renderKhoItems(){
       // được in đậm ở pkgSummary — chỉ viết thêm khi không có nhãn nào cả.
       const countLine = (managed && !cu.isBase && !tmTag)
         ? ` · đếm theo ${escapeHtmlAttr(cu.name)}` : '';
+      // [MỚI] Số lượng theo ĐƠN VỊ KIỂM KÊ — đặt hàng nhà cung cấp luôn theo "còn
+      // mấy Gói/Thùng", không theo gram/ml đang hiện ở cột phải. Món có dán tem
+      // (unit/batch) đọc đúng số tem sealed/open thật; món không dán tem chỉ suy ra
+      // MỘT con số ước tính từ tồn kho (không có dữ liệu để tách mở/chưa mở).
+      let ctnLine = '';
+      if(managed && !cu.isBase){
+        if(tm === 'unit' || tm === 'batch'){
+          const cnt = _ctnCounts ? (_ctnCounts[it.id] || { sealed: 0, open: 0 }) : null;
+          const lo = tm === 'batch' ? 'lô' : escapeHtmlAttr(cu.name);
+          ctnLine = cnt
+            ? `<div>Kiểm kê: <b>${cnt.sealed}</b> ${lo} chưa mở${cnt.open ? ` · <b>${cnt.open}</b> ${lo} đang mở` : ''}</div>`
+            : `<div class="small-note">Kiểm kê: đang tải…</div>`;
+        } else {
+          const est = cu.baseQty > 0 ? Math.round((Number(it.currentStock) || 0) / cu.baseQty * 10) / 10 : null;
+          if(est != null) ctnLine = `<div class="small-note">Kiểm kê: ≈${fmtNum(est,1)} ${escapeHtmlAttr(cu.name)} (ước tính theo tồn, món này không dán tem nên không tách được mở/chưa mở)</div>`;
+        }
+      }
       return `<div class="litem">
         <div class="li-l"><div>${it.name} ${neg?'<span class="tier tier-red" style="margin-left:4px">Tồn ÂM</span>':(low?'<span class="tier tier-amber" style="margin-left:4px">Sắp hết</span>':'')}${noCount?'<span class="tier tier-blue" style="margin-left:4px">NV không kiểm kê</span>':''}${(it.vesselIds||[]).length?'<span class="tier tier-green" style="margin-left:4px">⚖️ Cân được</span>':''}${tmTag}</div>
-        <div>Ngưỡng ${fmtNum(it.minStock,0)} ${it.unit}${it.costPerUnit?(' · ~'+fmt(it.costPerUnit)+'/'+it.unit):''}${pkgSummary}${countLine}</div></div>
+        <div>Ngưỡng ${fmtNum(it.minStock,0)} ${it.unit}${it.costPerUnit?(' · ~'+fmt(it.costPerUnit)+'/'+it.unit):''}${pkgSummary}${countLine}</div>
+        ${ctnLine}</div>
         <div class="li-r"><span style="${neg?'color:var(--bad);font-weight:800':(managed?'':'color:var(--ink-4)')}">${managed ? fmtNum(it.currentStock,1)+' '+escapeHtmlAttr(it.unit||'') : '—'}</span>
           <button class="btn ${neg?'':'outline'} sm" style="width:auto;padding:0 10px;margin-left:6px" onclick="startAdjustItem('${it.id}')">Sửa tồn</button>
           <button class="iconbtn" onclick="openItemHistory('${it.id}')" title="Lịch sử biến động tồn kho">${ic('clock')}</button>
