@@ -262,6 +262,8 @@ html.scrolled .topbar{border-bottom-color:var(--line);background:rgba(243,242,24
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
 #hdrKicker:empty{display:none;}
+.hdr-kicker-link{font:inherit;text-transform:inherit;letter-spacing:inherit;color:inherit;background:none;border:none;padding:0;cursor:pointer;}
+.hdr-kicker-link:hover{color:var(--gd);text-decoration:underline;}
 .brand{color:var(--gd);line-height:1.15;}
 #hdrTitle{
   font-size:21px !important;color:var(--td);letter-spacing:-.03em;line-height:1.2;
@@ -289,6 +291,8 @@ html.phone-ui .sync{padding:9px;}
 }
 .hib:active,.hamburger-btn:active{background:var(--fill-2);transform:scale(.92);}
 #reloadBtn.spin{animation:spin .8s linear infinite;}
+#favToggleBtn.active{color:var(--warn);background:var(--warn-bg);}
+#favToggleBtn.active .ic-svg{fill:currentColor;}
 
 #errBanner{
   margin:0 14px 10px;border-radius:var(--r-sm);
@@ -822,6 +826,16 @@ html.tab-ui .field input[type=checkbox],html.tab-ui .field input[type=radio]{
   font-size:13.5px;line-height:1.7;color:var(--gm);
   background:var(--gl);border-radius:var(--r-md);padding:14px 16px;margin:2px 0 16px;
 }
+/* Gộp các ghi chú dài (từng nằm rải rác dưới mỗi field) vào một khối gấp lại
+   được — form nguyên liệu trước đây có ~7 đoạn giải thích dài, mở popup lên
+   là một màn chữ. Field vẫn giữ nhãn phụ ngắn (VD "đơn vị nhỏ nhất"); phần
+   LÝ DO/HẬU QUẢ dài dồn hết vào đây, mặc định gấp lại. */
+.field-help{margin:2px 0 16px;}
+.field-help summary{cursor:pointer;font-size:13px;font-weight:650;color:var(--gm);padding:8px 2px;list-style:none;}
+.field-help summary::-webkit-details-marker{display:none;}
+.field-help summary::before{content:'▸ ';}
+.field-help[open] summary::before{content:'▾ ';}
+.field-help .unit-explainer{margin:6px 0 0;}
 
 /* ==========================================================================
    11. DÒNG DANH SÁCH
@@ -1330,6 +1344,7 @@ html.phone-ui .nav-search .ns-kbd{display:none;}
         </div>
         <div class="topbar-actions">
           <div class="sync"><span class="dot busy" id="syncDot"></span><span id="syncTxt">syncing</span></div>
+          <button id="favToggleBtn" class="hib" onclick="toggleCurrentFavorite()" title="Đánh dấu màn này là yêu thích"></button>
           <button id="uiModeBtn" class="hib" onclick="cycleUiMode()" title="Đổi giao diện"></button>
           <button id="reloadBtn" class="hib" onclick="reloadCurrent()" aria-label="Tải lại"></button>
         </div>
@@ -1946,7 +1961,8 @@ const ICON_PATHS = {
   chevronDown: '<path d="M6 9.5l6 6 6-6"/>',
   arrowUp:     '<path d="M12 20V4.5M6 10.5L12 4.5l6 6"/>',
   arrowDown:   '<path d="M12 4v15.5M6 13.5l6 6 6-6"/>',
-  dots:        '<circle cx="5.5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="18.5" cy="12" r="1.6"/>'
+  dots:        '<circle cx="5.5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="18.5" cy="12" r="1.6"/>',
+  star:        '<path d="M12 2L15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26z"/>'
 };
 function ic(name, size, color){
   const p = ICON_PATHS[name];
@@ -1981,6 +1997,7 @@ function icDot(color, size){
 // xong — điền thẳng icon vào 2 nút bằng ID, không cần đợi DOMContentLoaded.
 document.getElementById('hamburgerBtn').innerHTML = ic('menu', 20);
 document.getElementById('reloadBtn').innerHTML = ic('refresh', 18);
+document.getElementById('favToggleBtn').innerHTML = ic('star', 18);
 
 // ============================================================
 // [FIX] Nháy màn khi tải lại.
@@ -3602,11 +3619,31 @@ function addInventoryItem(data){
 //   · Tem sinh ra mà chưa dán       → để lâu thì chai không có tem, mà hệ thống lại tưởng có.
 // ============================================================
 const CTN_COLL = 'stock_containers_gieogieo';
-let ctnFilter = 'review';      // review | expired | unlabeled | open | all
+// [MỚI] Phiếu báo mất hàng — cùng nếp stock_counts_gieogieo: POS tạo pending_review (từ
+// bước "Kiểm tra lại" trong Kiểm kê), Quản lý duyệt mới thật sự trừ tồn kho. Quản lý cũng
+// tạo thẳng doc status:'approved' khi tự phát hiện mất hàng (đường ít dùng hơn — xem
+// reportLostContainerManual()). Xem renderKhoLostReports()/approveLostReport().
+const LOST_REPORTS_COLL = 'stock_lost_reports_gieogieo';
+// [MỚI] Báo mất TEM (Reprint Label) — bên posgieo.html (Kho → Báo mất tem). KHÁC "báo mất
+// hàng" ở trên: cái này KHÔNG đụng tồn kho, chỉ đổi định danh (mã) của container đã tồn
+// tại — nên KHÔNG có bước duyệt (POS đã tự xử lý xong lúc reprint), Quản lý chỉ xem lại
+// lịch sử để đối chiếu. Xem renderKhoLabelReports().
+const LABEL_REPORTS_COLL = 'stock_label_reports_gieogieo';
+let ctnFilter = 'review';      // review | browse | expired | lost | unlabeled | legacy | fixreceipt
 let CONTAINERS_CACHE = [];
 
+// [SỬA] 'open'/'sealed'/'finishedmonth' không còn là tab riêng (đã gộp vào 'browse') —
+// các lệnh gọi cũ (nút "Xem hàng đang mở", link "Xem màn Container"...) vẫn truyền đúng
+// những từ khoá này, nên dịch sang tab 'browse' + đặt sẵn chip lọc tương ứng thay vì đổi
+// từng nơi gọi.
+const CTN_LEGACY_FILTER_TO_BROWSE = {open:'open', sealed:'sealed', finishedmonth:'finished'};
 function goContainers(filter){
-  ctnFilter = filter || 'review';
+  if(CTN_LEGACY_FILTER_TO_BROWSE[filter]){
+    ctnFilter = 'browse';
+    ctnBrowseSubFilter = CTN_LEGACY_FILTER_TO_BROWSE[filter];
+  } else {
+    ctnFilter = filter || 'review';
+  }
   goKho('containers');
 }
 
@@ -3616,6 +3653,32 @@ async function loadContainersFor(filter){
   const c = fstore.collection(CTN_COLL);
   if(filter === 'review')    return (await c.where('needsReview','==',true).get()).docs.map(d=>({id:d.id,...d.data()}));
   if(filter === 'unlabeled') return (await c.where('status','==','sealed').where('labelPrinted','==',false).get()).docs.map(d=>({id:d.id,...d.data()}));
+  // 'sealed' = toàn bộ tem còn nguyên seal, chưa mở — đúng "đang tồn tại quán". Số này
+  // luôn bằng đúng tồn hiện có tem đại diện (không phình theo lịch sử), nên đọc thẳng
+  // không cần limit, giống 'open' bên dưới.
+  if(filter === 'sealed')    return (await c.where('status','==','sealed').get()).docs.map(d=>({id:d.id,...d.data()}));
+  // 'finishedmonth' = tem đã báo hết TRONG THÁNG NÀY. Không được đọc cả status=='finished'
+  // (hàng nghìn bản ghi sau vài tháng chạy — xem ghi chú ở đầu hàm). Lọc theo finishedAt
+  // (range) trên CHÍNH trường đó thì Firestore tự có index một trường, không cần composite
+  // index thủ công như khi trộn equality (status) với range (finishedAt) trên hai trường
+  // khác nhau. Tem 'sealed'/'open' không có finishedAt nên tự động không lọt vào.
+  if(filter === 'finishedmonth'){
+    const dauThang = new Date(); dauThang.setDate(1); dauThang.setHours(0,0,0,0);
+    const docs = (await c.where('finishedAt','>=',dauThang.toISOString()).orderBy('finishedAt','desc').limit(500).get()).docs;
+    return docs.map(d=>({id:d.id,...d.data()})).filter(x=>x.status==='finished');
+  }
+  // 'lost' = đã báo mất và Quản lý đã duyệt (trừ khỏi kho). Số này cũng nhỏ như 'open' —
+  // hàng báo mất mà chưa tìm lại được thì không nhiều, đọc thẳng không cần limit.
+  if(filter === 'lost') return (await c.where('status','==','lost').get()).docs.map(d=>({id:d.id,...d.data()}));
+  // [MỚI] 'browse' = màn "Tồn kho & tem" gộp — thay vì 3-4 tab tách rời (sealed/open/
+  // finishedmonth/lost) đọc Firestore riêng từng cái mỗi lần đổi tab, gộp một lần thành một
+  // danh sách rồi lọc bằng chip NGAY TRÊN TRÌNH DUYỆT — đổi chip không tốn thêm lượt đọc nào.
+  if(filter === 'browse'){
+    const [sealed, open, finishedM, lost] = await Promise.all([
+      loadContainersFor('sealed'), loadContainersFor('open'), loadContainersFor('finishedmonth'), loadContainersFor('lost')
+    ]);
+    return [...sealed, ...open, ...finishedM, ...lost];
+  }
   // 'expired' và 'open' cùng đọc danh sách chai đang mở rồi lọc phía client — Firestore
   // không so sánh được expiresAt <= "bây giờ" mà không cần index riêng, và số chai đang mở
   // luôn nhỏ (vài chục) nên lọc ở client là đủ.
@@ -3645,7 +3708,12 @@ const CTN_BASIS_LABEL = {
   chua_chot_ton_lich_su: 'Chưa chốt tồn lịch sử — chưa ghi hao hụt',
   lech_so_sach:          'Sổ dư hơn cả dung tích chai — lệch sổ, không phải hao hụt',
   ton_lich_su_da_dao:    'Đã đảo về điều chỉnh (tồn lịch sử, không phải hao hụt)',
-  loi_doc:               'Không đọc được dữ liệu lúc báo hết'
+  loi_doc:               'Không đọc được dữ liệu lúc báo hết',
+  // [MỚI] Container "đơn vị nguyên" (đơn vị pha chế là "cái", tem = đúng 1 cái
+  // rời) — bên posgieo.html cho phép chốt thẳng từ 'sealed' (gộp mở+báo hết
+  // một lượt quét) và luôn ghi wasteBase=0 vì không có khái niệm "còn thừa một
+  // phần" với một cái rời — xem isAtomicUnitContainer()/submitFinishContainer().
+  don_vi_nguyen:         'Dùng nguyên cả đơn vị — không có phần thừa'
 };
 function ctnBasisLabel(k){ return CTN_BASIS_LABEL[k] || k || ''; }
 
@@ -4389,14 +4457,23 @@ function ctnExpiryText(c){
 async function renderKhoContainers(){
   const box = document.getElementById('khoBody');
   showLoading(box);
+  // [SỬA] "Tồn kho (chưa mở)" / "Đang mở" / "Đã báo hết (tháng này)" trước đây là 3 tab
+  // tách rời, mỗi lần đổi tab đọc lại Firestore riêng — gộp thành 1 tab "Tồn kho & tem",
+  // đọc MỘT LẦN rồi lọc bằng chip ngay trên trình duyệt (xem renderKhoContainerBrowse).
+  // Thêm tab "Báo mất hàng" (report + duyệt + danh sách đang mất) — xem renderKhoLostReports.
   const tabs = [
-    ['review',    'Cần xem lại'],
-    ['expired',   'Quá hạn sau mở'],
-    ['open',      'Đang mở'],
-    ['unlabeled', 'Tem chưa dán'],
-    ['legacy',    'Tồn lịch sử'],
-    ['fixreceipt','Sửa phiếu nhận']
+    ['review',      'Cần xem lại'],
+    ['browse',      'Tồn kho & tem'],
+    ['expired',     'Quá hạn sau mở'],
+    ['lost',        'Báo mất hàng'],
+    ['labelreport', 'Báo mất tem'],
+    ['unlabeled',   'Tem chưa dán'],
+    ['legacy',      'Tồn lịch sử'],
+    ['fixreceipt',  'Sửa phiếu nhận']
   ];
+  if(ctnFilter === 'browse'){ await renderKhoContainerBrowse(box, tabs); return; }
+  if(ctnFilter === 'lost'){ await renderKhoLostReports(box, tabs); return; }
+  if(ctnFilter === 'labelreport'){ await renderKhoLabelReports(box, tabs); return; }
   if(ctnFilter === 'legacy'){ await renderKhoLegacyStock(box, tabs); return; }
   if(ctnFilter === 'fixreceipt'){ await renderKhoFixReceipt(box, tabs); return; }
   let list = [];
@@ -4412,10 +4489,11 @@ async function renderKhoContainers(){
   const nav = `<div class="filter-bar">${tabs.map(([k,l])=>
       `<button class="ftag ${ctnFilter===k?'active':''}" onclick="ctnFilter='${k}'; renderKhoContainers();">${l}</button>`).join('')}</div>`;
 
+  // 'sealed'/'open'/'finishedmonth' không còn dẫn tới đây nữa (đã gộp vào tab 'browse'),
+  // nên khối này giờ chỉ còn phục vụ 'review'/'expired'/'unlabeled'.
   const giaiThich = {
     review: 'Nhân viên báo hết khi hàng còn hơn 25%. Không phải lúc nào cũng là gian — có thể bị đổ, hỏng, hoặc định mức khai thiếu nên sổ còn nhiều hơn thực tế. Nhưng lặp lại ở cùng một người thì cần hỏi.',
     expired: 'Hàng đã mở nắp quá hạn sử dụng. Đây là chuyện an toàn thực phẩm, không phải chuyện kho — nên xử lý ngay chứ không đợi kiểm kê.',
-    open: 'Toàn bộ chai, gói, hộp đang mở dở trong quán.',
     unlabeled: 'Mã đã sinh khi nhận hàng nhưng chưa ai dán tem lên. Để lâu thì hàng không có tem mà hệ thống vẫn tưởng có — lúc kiểm kê sẽ không quét được.'
   }[ctnFilter];
 
@@ -4456,6 +4534,342 @@ async function renderKhoContainers(){
           : ''}</div>
       </div>`;
     }).join('') + `</div>`;
+}
+
+// ============================================================
+// [MỚI] TAB "TỒN KHO & TEM" — gộp sealed/open/finishedmonth/lost vào MỘT danh sách,
+// đọc Firestore đúng MỘT LẦN (loadContainersFor('browse') — xem hàm đó), rồi lọc theo
+// trạng thái bằng chip NGAY TRÊN TRÌNH DUYỆT (không đọc lại). Mỗi thẻ tô màu theo trạng
+// thái để nhìn là biết luôn, không cần đọc chữ: tồn kho = màu mặc định, đang mở = xanh,
+// đã hết = xám, báo mất = đỏ nhạt. Món nhận trong 5 ngày gần đây có thêm nhãn "Mới nhập".
+// ============================================================
+let ctnBrowseSubFilter = 'all'; // 'all'|'sealed'|'open'|'finished'|'lost'
+let CONTAINERS_BROWSE_CACHE = [];
+let _ctnBrowseNavHtml = '';
+const CTN_BROWSE_STATUS_LABEL = { sealed:'Tồn kho', open:'Đang mở', finished:'Đã hết', lost:'Báo mất' };
+const CTN_BROWSE_NEW_MS = 5*24*3600*1000; // "Mới nhập" = nhận trong 5 ngày gần đây
+
+async function renderKhoContainerBrowse(box, tabs){
+  const nav = `<div class="filter-bar">${tabs.map(([k,l])=>
+      `<button class="ftag ${ctnFilter===k?'active':''}" onclick="ctnFilter='${k}'; renderKhoContainers();">${l}</button>`).join('')}</div>`;
+  _ctnBrowseNavHtml = nav;
+  box.innerHTML = nav + '<div class="empty-hint">Đang tải…</div>';
+  let list = [];
+  try{
+    await ensureAuth();
+    list = await loadContainersFor('browse');
+  }catch(err){
+    console.error('renderKhoContainerBrowse lỗi', err);
+    box.innerHTML = nav + '<div class="muted">Không đọc được danh sách. '+(err.code||err.message||'')+'</div>';
+    return;
+  }
+  CONTAINERS_BROWSE_CACHE = list;
+  CONTAINERS_CACHE = list; // giữ tương thích những chỗ khác đang đọc CONTAINERS_CACHE
+  renderKhoContainerBrowseList();
+}
+
+// Đổi chip lọc — KHÔNG đọc lại Firestore, chỉ lọc lại mảng đã tải sẵn.
+function ctnBrowseSetFilter(v){ ctnBrowseSubFilter = v; renderKhoContainerBrowseList(); }
+
+function renderKhoContainerBrowseList(){
+  const box = document.getElementById('khoBody');
+  if(!box) return;
+  const list = CONTAINERS_BROWSE_CACHE;
+  const counts = {sealed:0, open:0, finished:0, lost:0};
+  list.forEach(c=>{ if(counts[c.status]!=null) counts[c.status]++; });
+  const chips = [
+    ['all','Tất cả ('+list.length+')'],
+    ['sealed','Tồn kho ('+counts.sealed+')'],
+    ['open','Đang mở ('+counts.open+')'],
+    ['finished','Đã hết ('+counts.finished+')'],
+    ['lost','Báo mất ('+counts.lost+')']
+  ];
+  const chipsHtml = `<div class="filter-bar" style="margin-top:6px">${chips.map(([k,l])=>
+    `<button class="ftag ${ctnBrowseSubFilter===k?'active':''}" onclick="ctnBrowseSetFilter('${k}')">${l}</button>`).join('')}</div>`;
+  const note = `<div class="small-note" style="margin:10px 0">Gộp cả tồn kho, đang mở, đã báo hết (tháng này) và báo mất vào một chỗ — bấm chip để xem riêng từng nhóm, không tải lại. Đã báo mất — xem/duyệt ở tab "Báo mất hàng".</div>`;
+
+  const filtered = ctnBrowseSubFilter==='all' ? list : list.filter(c=>c.status===ctnBrowseSubFilter);
+  if(!filtered.length){
+    box.innerHTML = _ctnBrowseNavHtml + chipsHtml + note + '<div class="empty-hint">Không có mục nào trong nhóm này.</div>';
+    return;
+  }
+  const sorted = filtered.slice().sort((a,b)=> String(b.receivedAt||'').localeCompare(String(a.receivedAt||'')));
+  const p2 = n=>String(n).padStart(2,'0');
+  const dt = iso => { const d = iso?new Date(iso):null; return (d && !isNaN(d)) ? `${p2(d.getDate())}/${p2(d.getMonth()+1)}` : ''; };
+  const now = Date.now();
+  const styleFor = st => st==='open' ? 'background:#eff6ff;border-color:#93c5fd;'
+    : st==='finished' ? 'background:#f4f4f5;border-color:#d4d4d8;opacity:.85;'
+    : st==='lost' ? 'background:#fef2f2;border-color:#fca5a5;'
+    : ''; // sealed (tồn kho) = mặc định, không đổi màu — đúng ý "màu bình thường"
+
+  box.innerHTML = _ctnBrowseNavHtml + chipsHtml + note + `<div>` + sorted.map(c=>{
+    const isMoi = c.receivedAt && (now - new Date(c.receivedAt).getTime()) <= CTN_BROWSE_NEW_MS;
+    const phu = c.status==='open' ? `Mở ${dt(c.openedAt)} bởi ${escapeHtmlAttr(c.openedBy||'—')}`
+      : c.status==='finished' ? `Báo hết ${dt(c.finishedAt)} bởi ${escapeHtmlAttr(c.finishedBy||'—')}`
+      : c.status==='lost' ? `Báo mất ${dt(c.lostAt)} bởi ${escapeHtmlAttr(c.lostBy||'—')}`
+      : `Nhận ${dt(c.receivedAt)} bởi ${escapeHtmlAttr(c.receivedBy||'—')}`
+        + (c.labelPrinted===false ? `<div class="muted-sm">Chưa dán tem</div>` : '');
+    // Đã từng cấp lại tem (originalLabelId khác mã hiện tại) — báo nhẹ để biết mã này
+    // không phải tem gốc, không phải đổi màu thẻ (không liên quan trạng thái tồn kho).
+    const daReprint = c.originalLabelId && c.originalLabelId !== c.code;
+    return `<div class="litem" style="${styleFor(c.status)}">
+      <div class="li-l">
+        <div>${escapeHtmlAttr(c.itemName||'')} <span class="muted-sm" style="letter-spacing:.4px">${escapeHtmlAttr(c.code||'')}</span>
+          ${isMoi ? '<span class="tier tier-green" style="margin-left:6px;font-size:9.5px;">Mới nhập</span>' : ''}
+          ${daReprint ? '<span class="tier tier-amber" style="margin-left:6px;font-size:9.5px;">Đã cấp lại tem</span>' : ''}
+        </div>
+        <div>${phu}</div>
+      </div>
+      <div class="li-r"><span class="muted-sm">${CTN_BROWSE_STATUS_LABEL[c.status]||c.status||''}</span></div>
+    </div>`;
+  }).join('') + `</div>`;
+}
+
+// ============================================================
+// [MỚI] TAB "BÁO MẤT HÀNG"
+//
+// Hai chiều tạo phiếu:
+//   · POS (chủ yếu) — nhân viên bấm "Không tìm thấy" ở bước "Kiểm tra lại" sau khi gửi
+//     kiểm kê (xem stockCountReportLost() bên posgieo.html) → status:'pending_review',
+//     kèm 1 alert trong Hộp thư để Quản lý biết ngay, không phải tự vào tab này mới thấy.
+//   · Quản lý (ít dùng hơn) — tự phát hiện mất hàng, nhập thẳng mã tem ở đây → duyệt luôn
+//     lúc tạo (reportLostContainerManual), không cần bước chờ vì người tạo và người duyệt
+//     là một.
+// Duyệt (approveLostReport) mới THẬT SỰ trừ tồn kho — đúng nguyên tắc "số nhân viên báo/
+// đếm không được ghi đè thẳng, phải qua duyệt" áp dụng xuyên suốt Kiểm kê. Tìm lại được thì
+// POS cộng lại tồn kho khi quét ở nút "Quét mã hàng tìm lại được" (xem
+// submitFoundLostContainer() bên posgieo.html) — Quản lý không cần làm gì thêm ở đây.
+// ============================================================
+async function loadLostReportsPending(){
+  const snap = await fstore.collection(LOST_REPORTS_COLL).where('status','==','pending_review').get();
+  return snap.docs.map(d=>({id:d.id, ...d.data()}));
+}
+async function loadLostReportsHistory(limitN){
+  const snap = await fstore.collection(LOST_REPORTS_COLL).orderBy('reportedAt','desc').limit(limitN||40).get();
+  return snap.docs.map(d=>({id:d.id, ...d.data()}));
+}
+// Alert trong Hộp thư (nếu có, chỉ phiếu nguồn POS mới có) trỏ đúng phiếu này qua
+// `lostReportId` — đánh dấu resolved cùng lúc phiếu được duyệt/từ chối, đỡ phải vào Hộp
+// thư dọn tay riêng một lần nữa.
+async function markAlertForLostReport(reportId, status){
+  try{
+    const snap = await fstore.collection('alerts_gieogieo').where('lostReportId','==',reportId).limit(1).get();
+    if(!snap.empty) await snap.docs[0].ref.update({status, resolvedAt:new Date().toISOString()});
+  }catch(err){ console.warn('[báo mất hàng] không cập nhật được alert liên quan:', err); }
+}
+
+// approveLostReport/rejectLostReport có thể được bấm từ HAI màn khác nhau — thẻ trong Hộp
+// thư (Phase 11 kéo alert lên đó) hoặc tab Kho → Container → Báo mất hàng. #khoBody/
+// #inboxBody chỉ tồn tại trong DOM khi đang thật sự đứng ở màn đó (goKho()/goEntry() ghi
+// đè innerHTML mỗi lần chuyển tab), nên kiểm tra sự tồn tại là đủ để biết vẽ lại đâu —
+// không cần theo dõi thêm một biến "tab hiện tại" riêng.
+function refreshAfterLostReportAction(){
+  if(document.getElementById('inboxBody')) renderAlertInbox();
+  if(document.getElementById('khoBody')) renderKhoContainers();
+}
+
+async function approveLostReport(id){
+  if(!confirm('Duyệt phiếu báo mất này? Hệ thống sẽ TRỪ ngay khỏi tồn kho.')) return;
+  try{
+    const ref = fstore.collection(LOST_REPORTS_COLL).doc(id);
+    const doc = await ref.get();
+    if(!doc.exists) throw new Error('Không tìm thấy phiếu báo mất này (có thể đã bị xoá)');
+    const rep = doc.data();
+    if(rep.status !== 'pending_review'){ toast('ℹ️ Phiếu này đã được xử lý rồi'); refreshAfterLostReportAction(); return; }
+    const ctnRef = fstore.collection(CTN_COLL).doc(rep.containerId);
+    const ctnDoc = await ctnRef.get();
+    const nowISO = new Date().toISOString();
+    // Mã đã đổi trạng thái từ lúc nhân viên báo tới lúc Quản lý duyệt (ai đó đã tìm ra rồi
+    // quét mở/báo hết, hoặc Quản lý đã huỷ phiếu nhận) — không được đè "lost" lên một
+    // trạng thái đã khác, thà tự huỷ phiếu và báo rõ lý do còn hơn ghi sai sổ.
+    if(!ctnDoc.exists || (ctnDoc.data().status !== 'sealed' && ctnDoc.data().status !== 'open')){
+      await ref.update({status:'rejected', reviewedAt:nowISO, reviewedBy:'Quản lý',
+        reviewNote:'Mã không còn ở trạng thái tồn kho/đang mở lúc duyệt — tự huỷ phiếu, không trừ kho'});
+      toast('⚠️ Mã này không còn ở trạng thái tồn kho/đang mở (có thể đã tìm lại) — đã tự huỷ phiếu');
+      refreshAfterLostReportAction();
+      return;
+    }
+    const c = ctnDoc.data();
+    await ctnRef.update({status:'lost', lostAt:nowISO, lostBy:'Quản lý (đã duyệt)', lostFromStatus:c.status, lostReportId:id});
+    await applyStockTransaction({
+      itemId: rep.itemId, type:'ADJUSTMENT', qty: -(Number(rep.baseQty)||1),
+      note: 'Báo mất hàng đã duyệt — mã '+(rep.code||''), staff:'Quản lý', source:'management', referenceId:id,
+      reason: 'lost_item'
+    });
+    await ref.update({status:'approved', reviewedAt:nowISO, reviewedBy:'Quản lý'});
+    await markAlertForLostReport(id, 'resolved');
+    logAudit('approve','lost_report',id,{code:rep.code, itemName:rep.itemName});
+    toast('✅ Đã duyệt — trừ khỏi tồn kho');
+    refreshAfterLostReportAction();
+  }catch(err){ console.error(err); showError('Duyệt thất bại: '+(err.code||err.message||err)); }
+}
+
+async function rejectLostReport(id){
+  const note = prompt('Lý do từ chối (tuỳ chọn):') || '';
+  try{
+    await fstore.collection(LOST_REPORTS_COLL).doc(id).update({
+      status:'rejected', reviewedAt:new Date().toISOString(), reviewedBy:'Quản lý', reviewNote:note
+    });
+    await markAlertForLostReport(id, 'resolved');
+    logAudit('reject','lost_report',id,{note});
+    toast('🗑 Đã từ chối báo mất');
+    refreshAfterLostReportAction();
+  }catch(err){ console.error(err); showError('Từ chối thất bại: '+(err.code||err.message||err)); }
+}
+
+// Quản lý tự phát hiện mất hàng, nhập thẳng mã — người tạo và người duyệt là một nên
+// không qua hàng đợi chờ, ghi luôn status:'approved' và trừ kho ngay.
+async function reportLostContainerManual(){
+  const codeInput = document.getElementById('lostManualCode');
+  const ma = String((codeInput && codeInput.value) || '').trim().toUpperCase();
+  if(!ma){ toast('⚠️ Nhập mã tem'); return; }
+  try{
+    const snap = await fstore.collection(CTN_COLL).where('code','==',ma).limit(5).get();
+    const docs = snap.docs.map(d=>({id:d.id, ...d.data()}));
+    const c = docs.find(x=>x.status==='sealed' || x.status==='open');
+    if(!c){ toast('❌ Không tìm thấy mã này đang ở trạng thái tồn kho/đang mở'); return; }
+    if(!confirm('Báo mất "'+(c.itemName||'')+'" (mã '+ma+')? Sẽ trừ ngay khỏi tồn kho.')) return;
+    const nowISO = new Date().toISOString();
+    const repRef = await fstore.collection(LOST_REPORTS_COLL).add({
+      containerId: c.id, code: c.code, itemId: c.itemId, itemName: c.itemName||'',
+      unit: c.unit||'', baseQty: Number(c.baseQty)||1,
+      status:'approved', source:'management',
+      reportedBy:'Quản lý', reportedByEmployeeId:'', reportedAt: nowISO,
+      businessDate: dkey(new Date()), reason:'quan_ly_bao_truc_tiep',
+      reviewedAt: nowISO, reviewedBy:'Quản lý'
+    });
+    await fstore.collection(CTN_COLL).doc(c.id).update({
+      status:'lost', lostAt:nowISO, lostBy:'Quản lý (báo trực tiếp)', lostFromStatus:c.status, lostReportId:repRef.id
+    });
+    await applyStockTransaction({
+      itemId: c.itemId, type:'ADJUSTMENT', qty: -(Number(c.baseQty)||1),
+      note: 'Báo mất hàng (Quản lý nhập trực tiếp) — mã '+ma, staff:'Quản lý', source:'management', referenceId: repRef.id,
+      reason: 'lost_item'
+    });
+    logAudit('report','lost_report',repRef.id,{code:ma, itemName:c.itemName});
+    toast('✅ Đã báo mất — trừ khỏi tồn kho');
+    if(codeInput) codeInput.value = '';
+    renderKhoContainers();
+  }catch(err){ console.error(err); showError('Báo mất thất bại: '+(err.code||err.message||err)); }
+}
+
+async function renderKhoLostReports(box, tabs){
+  const nav = `<div class="filter-bar">${tabs.map(([k,l])=>
+      `<button class="ftag ${ctnFilter===k?'active':''}" onclick="ctnFilter='${k}'; renderKhoContainers();">${l}</button>`).join('')}</div>`;
+  box.innerHTML = nav + '<div class="empty-hint">Đang tải…</div>';
+  let pending = [], current = [], history = [];
+  try{
+    await ensureAuth();
+    [pending, current, history] = await Promise.all([
+      loadLostReportsPending(), loadContainersFor('lost'), loadLostReportsHistory(40)
+    ]);
+  }catch(err){
+    console.error('renderKhoLostReports lỗi', err);
+    box.innerHTML = nav + '<div class="muted">Không đọc được. '+(err.code||err.message||'')+'</div>';
+    return;
+  }
+  const p2 = n=>String(n).padStart(2,'0');
+  const dt = iso => { const d = iso?new Date(iso):null; return (d && !isNaN(d)) ? `${p2(d.getDate())}/${p2(d.getMonth()+1)} ${p2(d.getHours())}:${p2(d.getMinutes())}` : '—'; };
+
+  const manualForm = `
+    <div class="card" style="margin-bottom:14px">
+      <div style="font-weight:700;font-size:13px;margin-bottom:8px">Báo mất trực tiếp (Quản lý)</div>
+      <div class="small-note" style="margin-bottom:8px">Dùng khi Quản lý TỰ phát hiện mất hàng (không qua kiểm kê) — nhập đúng mã in trên tem. Trừ khỏi tồn kho ngay, không cần chờ duyệt lại vì người báo cũng là người duyệt.</div>
+      <div style="display:flex;gap:8px">
+        <input type="text" id="lostManualCode" placeholder="Nhập mã tem..." style="flex:1;text-transform:uppercase">
+        <button class="btn" style="width:auto;padding:0 16px" onclick="reportLostContainerManual()">Báo mất</button>
+      </div>
+    </div>`;
+
+  const pendingHtml = pending.length ? `
+    <div class="sec-title">Chờ duyệt (${pending.length})</div>
+    ${pending.map(r=>`
+      <div class="litem" style="background:#fffbe8;border-color:#fde68a;">
+        <div class="li-l">
+          <div>${escapeHtmlAttr(r.itemName||'')} <span class="muted-sm" style="letter-spacing:.4px">${escapeHtmlAttr(r.code||'')}</span></div>
+          <div>Báo bởi ${escapeHtmlAttr(r.reportedBy||'—')} · ${dt(r.reportedAt)}</div>
+        </div>
+        <div class="li-r">
+          <button class="btn sm" style="width:auto;padding:0 10px" onclick="approveLostReport('${r.id}')">Duyệt (trừ kho)</button>
+          <button class="btn outline sm" style="width:auto;padding:0 10px;margin-left:6px" onclick="rejectLostReport('${r.id}')">Từ chối</button>
+        </div>
+      </div>`).join('')}` : '<div class="empty-hint" style="margin-bottom:14px">Không có phiếu nào chờ duyệt.</div>';
+
+  const currentHtml = current.length ? `
+    <div class="sec-title" style="margin-top:14px">Đang báo mất, chưa tìm lại (${current.length})</div>
+    ${current.map(c=>`
+      <div class="litem" style="background:#fef2f2;border-color:#fca5a5;">
+        <div class="li-l">
+          <div>${escapeHtmlAttr(c.itemName||'')} <span class="muted-sm" style="letter-spacing:.4px">${escapeHtmlAttr(c.code||'')}</span></div>
+          <div>Báo mất ${dt(c.lostAt)}${c.lostBy?' bởi '+escapeHtmlAttr(c.lostBy):''}</div>
+        </div>
+        <div class="li-r"><span class="muted-sm">Tìm lại: quét ở POS → Kiểm kê</span></div>
+      </div>`).join('')}` : '';
+
+  const STATUS_LABEL = {pending_review:'Chờ duyệt', approved:'Đã duyệt — đã trừ kho', rejected:'Đã từ chối', found_again:'Đã tìm lại — đã cộng lại kho'};
+  const histHtml = history.length ? `
+    <div class="sec-title" style="margin-top:14px">Lịch sử báo mất</div>
+    ${history.map(r=>`
+      <div class="litem">
+        <div class="li-l">
+          <div>${escapeHtmlAttr(r.itemName||'')} <span class="muted-sm" style="letter-spacing:.4px">${escapeHtmlAttr(r.code||'')}</span></div>
+          <div>${escapeHtmlAttr(STATUS_LABEL[r.status]||r.status||'')} · báo bởi ${escapeHtmlAttr(r.reportedBy||'—')} · ${dt(r.reportedAt)}</div>
+        </div>
+        <div class="li-r"></div>
+      </div>`).join('')}` : '';
+
+  box.innerHTML = nav + manualForm + pendingHtml + currentHtml + histHtml;
+}
+
+// ============================================================
+// [MỚI] TAB "BÁO MẤT TEM" — chỉ XEM LẠI lịch sử, không có bước duyệt.
+//
+// Khác hẳn "Báo mất hàng": báo mất TEM không đụng tồn kho (POS đã tự cấp lại mã ngay lúc
+// đối soát xong — xem missingLabelDoReprint() bên posgieo.html), nên không có gì để Quản
+// lý "duyệt" cả — tab này thuần tuý phục vụ truy vết: nguyên liệu nào, ai làm, lúc nào, lý
+// do gì, thiếu bao nhiêu tem, mã cũ → mã mới ra sao (đúng yêu cầu "Inventory Unit → Batch
+// → Label cũ → Mất/Hỏng → Reprint → Label mới").
+// ============================================================
+async function loadLabelReportsHistory(limitN){
+  const snap = await fstore.collection(LABEL_REPORTS_COLL).orderBy('createdAt','desc').limit(limitN||40).get();
+  return snap.docs.map(d=>({id:d.id, ...d.data()}));
+}
+
+async function renderKhoLabelReports(box, tabs){
+  const nav = `<div class="filter-bar">${tabs.map(([k,l])=>
+      `<button class="ftag ${ctnFilter===k?'active':''}" onclick="ctnFilter='${k}'; renderKhoContainers();">${l}</button>`).join('')}</div>`;
+  box.innerHTML = nav + '<div class="empty-hint">Đang tải…</div>';
+  let history = [];
+  try{
+    await ensureAuth();
+    history = await loadLabelReportsHistory(60);
+  }catch(err){
+    console.error('renderKhoLabelReports lỗi', err);
+    box.innerHTML = nav + '<div class="muted">Không đọc được. '+(err.code||err.message||'')+'</div>';
+    return;
+  }
+  const note = `<div class="small-note" style="margin:12px 0">Đối soát tem (Kho → Báo mất tem bên POS) — chỉ cấp lại ĐỊNH DANH cho hàng đã tồn tại, KHÔNG đụng tồn kho/GOGS/hao hụt. Xem lại đây để biết ai làm, lúc nào, thiếu bao nhiêu tem.</div>`;
+  if(!history.length){
+    box.innerHTML = nav + note + '<div class="empty-hint">Chưa có lần đối soát tem nào.</div>';
+    return;
+  }
+  const p2 = n=>String(n).padStart(2,'0');
+  const dt = iso => { const d = iso?new Date(iso):null; return (d && !isNaN(d)) ? `${p2(d.getDate())}/${p2(d.getMonth()+1)} ${p2(d.getHours())}:${p2(d.getMinutes())}` : '—'; };
+  box.innerHTML = nav + note + `<div>` + history.map(r=>{
+    const anomaly = !!r.anomaly;
+    const n = Number(r.labelsMissingCount)||0;
+    return `<div class="litem" style="${anomaly?'background:#fef2f2;border-color:#fca5a5;':''}">
+      <div class="li-l">
+        <div>${escapeHtmlAttr(r.itemName||'')} ${anomaly?'<span class="tier tier-red" style="margin-left:4px;font-size:9.5px;">Bất thường</span>':''}</div>
+        <div>${anomaly
+          ? `Quét được nhiều hơn tồn hệ thống (tồn ghi ${r.stockBeforeReconcile}, quét được ${(r.scannedCodes||[]).length}) — cần kiểm tra dữ liệu`
+          : (n>0 ? `Thiếu ${n} tem, đã in lại — tồn kho không đổi (${r.stockBeforeReconcile})` : `Đối soát khớp, không cần in lại (${r.stockBeforeReconcile} tem)`)}</div>
+        <div class="muted-sm">Bởi ${escapeHtmlAttr(r.staff||'—')} · ${dt(r.createdAt)}${r.reason?' · '+escapeHtmlAttr(r.reason):''}</div>
+        ${(r.reprinted&&r.reprinted.length) ? `<div class="muted-sm">Mã cũ → mã mới: ${r.reprinted.map(x=>escapeHtmlAttr((x.oldCode||'—')+' → '+(x.newCode||'—'))).join(', ')}</div>` : ''}
+      </div>
+      <div class="li-r"></div>
+    </div>`;
+  }).join('') + `</div>`;
 }
 
 // ------------------------------------------------------------
@@ -4622,7 +5036,7 @@ function deleteInventoryItem(id){
 //   source        — 'management' | 'pos', biết bản ghi tạo từ app nào
 //   referenceId   — tuỳ chọn, tham chiếu tới PO/đơn hàng/lần kiểm kho liên quan
 //   locationId    — tuỳ chọn, chỉ có khi giao dịch gắn với 1 vị trí kho cụ thể (TRANSFER)
-async function applyStockTransaction({itemId, type, qty, note, staff, businessDate, source, referenceId, locationId}){
+async function applyStockTransaction({itemId, type, qty, note, staff, businessDate, source, referenceId, locationId, reason}){
   memoDropItems();   // tồn kho vừa đổi — số trong bộ đệm không còn đúng
   const itemRef = fstore.collection('inventory_items_gieogieo').doc(itemId);
   const txRef = fstore.collection('stock_transactions_gieogieo').doc();
@@ -4640,6 +5054,10 @@ async function applyStockTransaction({itemId, type, qty, note, staff, businessDa
     };
     if(referenceId) txData.referenceId = referenceId;
     if(locationId) txData.locationId = locationId;
+    // [MỚI] `reason` phân loại NHỎ HƠN `type` — vd type luôn là 'ADJUSTMENT' cho cả điều
+    // chỉnh kiểm kho lẫn báo mất hàng, nhưng báo cáo cuối kỳ cần tách hẳn "Mất hàng" ra khỏi
+    // "Điều chỉnh" chung (xem computeLedgerRealMetrics) — không đoán qua chữ trong `note`.
+    if(reason) txData.reason = reason;
     t.set(txRef, txData);
   });
 }
@@ -8588,6 +9006,99 @@ const NAV_GROUP = (()=>{
   return m;
 })();
 
+// Mục ĐẦU TIÊN của mỗi nhóm — "quay về cha" cho breadcrumb (Phase 7). App chỉ có
+// 2 tầng thật (Nhóm › Mục, không có tầng "đối tượng" như "Sữa tươi" trong ví dụ
+// kế hoạch), nên "quay về cha" ở đây nghĩa là về mục đầu của nhóm đó — với Kho
+// đúng là 'kho:inbox' ("Bắt đầu ở đây"), khớp luôn với ý đồ đã có.
+const NAV_GROUP_FIRST_KEY = (()=>{
+  const m = {};
+  NAV_SECTIONS.forEach(sec => { if(sec.group && sec.items[0]) m[sec.group] = sec.items[0].key; });
+  return m;
+})();
+
+// Tra lại {ic,label,go} từ nav key — dùng cho "Gần đây"/"Yêu thích" (Phase 8) để
+// vẽ được đúng nút điều hướng gốc mà không phải chép lại dữ liệu. 'inbox' không
+// nằm trong NAV_SECTIONS (vào bằng nudge/link, không qua sidebar) nên khai tay
+// giống cách NAV_LABEL/NAV_GROUP đã làm ở trên, khỏi lệch ba chỗ.
+const NAV_ITEM_BY_KEY = (()=>{
+  const m = { inbox: {key:'inbox', ic:'inbox', label:'Hộp thư cảnh báo', go:"switchScreen('inbox')"} };
+  NAV_SECTIONS.forEach(sec => sec.items.forEach(it => { m[it.key] = it; }));
+  return m;
+})();
+
+// ============================================================
+// DEEP LINKING (kế hoạch cải tổ UX, Phase 7) — URL luôn phản ánh đúng màn đang
+// đứng (#kho:items, #entry:nv, #tg...), để gửi link qua chat/note là mở thẳng
+// đúng chỗ thay vì luôn phải "vào Kho rồi bấm Nguyên liệu" lại từ đầu.
+//
+// KHÔNG dùng location.hash = ... (bắn sự kiện hashchange, dễ đệ quy nếu sau
+// này có thêm listener) — dùng history.replaceState để chỉ đổi URL hiển thị,
+// không đẩy thêm một bước vào lịch sử trình duyệt (nếu không, nút Back của
+// trình duyệt sẽ đi qua TỪNG lượt đổi tab trong app, rất khó chịu và không
+// phải điều "deep link" yêu cầu).
+//
+// tryOpenDeepLink() dùng lại ĐÚNG chuỗi `go` đã khai trong NAV_SECTIONS (thứ
+// vẫn đang chạy an toàn qua onclick="${it.go}" ở mọi nút sidebar) — không tự
+// suy diễn lại switchScreen()/goKho()/goEntry() ở đây để khỏi có hai đường
+// điều hướng cho cùng một key mà một ngày nào đó lệch nhau. Hash từ URL chỉ
+// được dùng làm KHOÁ tra vào NAV_ITEM_BY_KEY (whitelist) — không có nhánh nào
+// thực thi trực tiếp nội dung hash, nên không có chỗ cho mã lạ chèn vào.
+// ============================================================
+function updateUrlForNavKey(key){
+  if(!key) return;
+  try{ history.replaceState(null, '', '#'+key); }catch(e){}
+}
+function tryOpenDeepLink(){
+  const key = String(location.hash||'').replace(/^#/, '');
+  if(!key || !NAV_ITEM_BY_KEY[key]) return false;
+  try{ new Function(NAV_ITEM_BY_KEY[key].go)(); return true; }
+  catch(err){ console.warn('[deep link] không mở được', key, err); return false; }
+}
+
+// ============================================================
+// GẦN ĐÂY & YÊU THÍCH (kế hoạch cải tổ UX, Phase 8) — giảm thao tác lặp lại:
+// "Kiểm kê" xong quay lại "Lệch kho" mỗi ngày thì khỏi phải mở lại nhánh Kho
+// rồi bấm tiếp mỗi lần. Lưu localStorage — sở thích riêng của người dùng trên
+// MÁY này (giống gieo_ui_mode/gieo_ui_nav_off đã lưu kiểu này), không đồng bộ
+// qua Firebase vì không phải dữ liệu nghiệp vụ.
+// ============================================================
+const NAV_RECENT_KEY = 'gieo_nav_recent';
+const NAV_FAV_KEY = 'gieo_nav_favorites';
+const NAV_RECENT_MAX = 6;
+// 'today'/'inbox' luôn có lối vào riêng (mục đầu sidebar + chấm đỏ cảnh báo) —
+// cho vào "Gần đây" thì mục nào cũng dẫn ra hai cái này, mất hết tác dụng.
+const NAV_RECENT_EXCLUDE = new Set(['today','inbox']);
+
+function _navPrefsLoad(key){
+  try{ const v = JSON.parse(localStorage.getItem(key)||'[]'); return Array.isArray(v) ? v : []; }
+  catch(e){ return []; }
+}
+let navRecent = _navPrefsLoad(NAV_RECENT_KEY);
+let navFavorites = _navPrefsLoad(NAV_FAV_KEY);
+
+function trackNavVisit(key){
+  if(!key || NAV_RECENT_EXCLUDE.has(key) || !NAV_ITEM_BY_KEY[key]) return;
+  navRecent = [key, ...navRecent.filter(k=>k!==key)].slice(0, NAV_RECENT_MAX);
+  try{ localStorage.setItem(NAV_RECENT_KEY, JSON.stringify(navRecent)); }catch(e){}
+}
+function isNavFavorite(key){ return navFavorites.includes(key); }
+function toggleCurrentFavorite(){
+  const key = currentNavKey();
+  if(!NAV_ITEM_BY_KEY[key]){ toast('⚠️ Màn này chưa hỗ trợ đánh dấu yêu thích'); return; }
+  const i = navFavorites.indexOf(key);
+  if(i>=0) navFavorites.splice(i,1); else navFavorites.push(key);
+  try{ localStorage.setItem(NAV_FAV_KEY, JSON.stringify(navFavorites)); }catch(e){}
+  updateFavBtn();
+  renderSidebarNav();
+}
+function updateFavBtn(){
+  const btn = document.getElementById('favToggleBtn');
+  if(!btn) return;
+  const on = isNavFavorite(currentNavKey());
+  btn.classList.toggle('active', on);
+  btn.title = on ? 'Bỏ đánh dấu yêu thích' : 'Đánh dấu màn này là yêu thích';
+}
+
 function currentNavKey(){
   if(curScreen !== 'entry') return curScreen;
   if(curEntryTab === 'kho') return 'kho:' + curKhoSub;
@@ -8631,6 +9142,7 @@ function noAccent(str){
 }
 function onNavSearch(v){
   navQuery = (v||'').trim();
+  if(navQuery) _ensureSearchIndexes();
   renderSidebarNav();
 }
 // Enter = mở mục đầu tiên đang lọc ra; Esc = xoá ô tìm.
@@ -8668,7 +9180,7 @@ function renderSidebarNav(){
     </button>`;
 
   let found = 0;
-  nav.innerHTML = NAV_SECTIONS.map(sec=>{
+  const navSectionHtmlList = NAV_SECTIONS.map(sec=>{
     const items = sec.items.filter(match);
     if(!items.length) return '';
     found += items.length;
@@ -8692,8 +9204,113 @@ function renderSidebarNav(){
     return `
       ${sec.group ? `<div class="sidebar-group-label">${sec.group}</div>` : ''}
       ${items.map(it=>itemHtml(it,false)).join('')}`;
-  }).join('');
-  if(!found) nav.innerHTML = `<div class="nav-empty">Không có mục nào khớp “${escapeHtmlAttr(navQuery)}”</div>`;
+  });
+
+  // "Find Anything" (Phase 4) — cùng ô tìm, cùng danh sách, nhưng khi gõ đủ dài
+  // thì KHÔNG chỉ lọc tên 40+ mục điều hướng nữa mà còn tìm thẳng trong dữ liệu
+  // nghiệp vụ đang có sẵn trong bộ nhớ (Nguyên liệu, BTP). Không tạo màn tìm
+  // kiếm riêng — vẫn là ô này, vẫn là sidebar này.
+  let dataResultsHtml = '';
+  let loadingHint = false;
+  if(q && q.length>=2){
+    const mi = (INVENTORY_ITEMS||[]).filter(it=>noAccent(it.name||'').includes(q)).slice(0,8);
+    const mp = (PREP_ITEMS||[]).filter(p=>noAccent(p.name||'').includes(q)).slice(0,8);
+    const me = (SEARCH_EMPLOYEES_CACHE||[]).filter(e=>noAccent(e.fullName||'').includes(q)).slice(0,8);
+    found += mi.length + mp.length + me.length;
+    const dataRow = (name, id, unit, stock, kind)=>`
+      <div class="sidebar-item sub" style="flex-direction:column;align-items:stretch;gap:6px;cursor:default;height:auto;padding:8px 10px 8px 38px">
+        <div style="display:flex;justify-content:space-between;gap:8px">
+          <b style="font-size:13px">${escapeHtmlAttr(name||'')}</b>
+          <span class="small-note" style="flex-shrink:0">${fmtNum(Number(stock)||0,1)} ${escapeHtmlAttr(unit||'')}</span>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn outline sm" style="width:auto;padding:0 8px"
+            onclick="${kind==='item'?`openItemHistory('${id}')`:`openPrepHistory('${id}')`}">${ic('search',13)} Giải thích tồn kho</button>
+          <button class="btn outline sm" style="width:auto;padding:0 8px" onclick="goKho('${kind==='item'?'items':'prep'}')">Xem danh mục</button>
+        </div>
+      </div>`;
+    // Nhân viên chưa có "trang riêng" như nguyên liệu/BTP (chỉ có 3 màn danh
+    // sách dùng chung: Nhân viên/Chấm công/Lương) — nên hành động ở đây chỉ là
+    // đi thẳng tới đúng màn, không lọc sẵn theo tên (Related Actions, không
+    // nhân bản nghiệp vụ tìm-trong-danh-sách vốn đã có ở từng màn đó).
+    const empRow = (e)=>`
+      <div class="sidebar-item sub" style="flex-direction:column;align-items:stretch;gap:6px;cursor:default;height:auto;padding:8px 10px 8px 38px">
+        <div style="display:flex;justify-content:space-between;gap:8px">
+          <b style="font-size:13px">${escapeHtmlAttr(e.fullName||'')}</b>
+          ${e.active===false ? '<span class="tier tier-red" style="flex-shrink:0">Đã nghỉ</span>' : ''}
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn outline sm" style="width:auto;padding:0 8px" onclick="goEntry('chamcong')">Chấm công</button>
+          <button class="btn outline sm" style="width:auto;padding:0 8px" onclick="goEntry('luong')">Lương</button>
+          <button class="btn outline sm" style="width:auto;padding:0 8px" onclick="goEntry('nv')">Hồ sơ</button>
+        </div>
+      </div>`;
+    if(mi.length || mp.length || me.length){
+      dataResultsHtml = `
+        <div class="sidebar-group-label">Tìm thấy trong dữ liệu</div>
+        ${mi.map(it=>dataRow(it.name, it.id, it.unit, it.currentStock, 'item')).join('')}
+        ${mp.map(p=>dataRow(p.name, p.id, p.unit, p.currentStock, 'prep')).join('')}
+        ${me.map(empRow).join('')}
+      `;
+    } else if(!INVENTORY_ITEMS.length && !PREP_ITEMS.length && !SEARCH_EMPLOYEES_CACHE.length){
+      // Chưa tải xong (lần đầu gõ tìm trong phiên này) — nói rõ thay vì im lặng
+      // như không tìm thấy gì, vì _ensureSearchIndexes() đang tải nền và
+      // renderSidebarNav() sẽ tự chạy lại khi xong.
+      dataResultsHtml = `<div class="small-note" style="padding:6px 10px 0 38px">Đang tải dữ liệu nguyên liệu/BTP/nhân viên để tìm…</div>`;
+      loadingHint = true;
+    }
+  }
+
+  // Gần đây & Yêu thích (Phase 8) — chỉ hiện khi KHÔNG đang tìm kiếm (đang gõ
+  // tìm thì người dùng đã biết chính xác muốn gì, chen thêm hai khối này chỉ
+  // đẩy kết quả tìm xuống dưới màn hình). Dùng lại itemHtml() nên bấm vào vẫn
+  // đi đúng chỗ và vẫn tô "active" đúng như mục gốc trong danh sách chính.
+  let favRecentHtml = '';
+  if(!q){
+    const favItems = navFavorites.map(k=>NAV_ITEM_BY_KEY[k]).filter(Boolean);
+    const recentItems = navRecent.map(k=>NAV_ITEM_BY_KEY[k]).filter(Boolean);
+    favRecentHtml =
+      (favItems.length ? `<div class="sidebar-group-label">⭐ Yêu thích</div>${favItems.map(it=>itemHtml(it,false)).join('')}` : '') +
+      (recentItems.length ? `<div class="sidebar-group-label">Gần đây</div>${recentItems.map(it=>itemHtml(it,false)).join('')}` : '');
+  }
+
+  // Chèn Gần đây/Yêu thích NGAY SAU mục "Hôm nay" (phần tử đầu của
+  // navSectionHtmlList) chứ không phải lên trên cùng — "Hôm nay" là điểm vào
+  // quan trọng nhất (Control Tower), không để hai khối mới đẩy nó xuống.
+  const navSectionsHtml = favRecentHtml
+    ? [navSectionHtmlList[0], favRecentHtml, ...navSectionHtmlList.slice(1)].join('')
+    : navSectionHtmlList.join('');
+
+  nav.innerHTML = navSectionsHtml + dataResultsHtml;
+  if(!found && !loadingHint) nav.innerHTML = `<div class="nav-empty">Không có mục nào khớp “${escapeHtmlAttr(navQuery)}”</div>`;
+}
+
+// Tải nền INVENTORY_ITEMS/PREP_ITEMS ngay khi người dùng bắt đầu gõ tìm — hai
+// mảng này bình thường chỉ có dữ liệu SAU KHI đã từng mở Kho → Nguyên liệu/Chế
+// biến cấp 1 ít nhất một lần (loadInventoryItems/loadPrepItems được gọi từ
+// renderKhoItems/renderKhoPrep). Không tải nền thì tìm "sữa" ngay sau khi mở
+// app lần đầu sẽ ra rỗng dù nguyên liệu đó có tồn tại — sai với kỳ vọng.
+let _searchIdxLoading = false;
+let SEARCH_EMPLOYEES_CACHE = [];
+function _ensureSearchIndexes(){
+  if(_searchIdxLoading || (INVENTORY_ITEMS.length && PREP_ITEMS.length && SEARCH_EMPLOYEES_CACHE.length)) return;
+  _searchIdxLoading = true;
+  // [FIX] loadInventoryItems()/loadPrepItems() chỉ TRẢ VỀ danh sách — không tự
+  // gán vào biến toàn cục INVENTORY_ITEMS/PREP_ITEMS (mọi nơi khác trong file
+  // đều gán tay sau khi gọi, vd `INVENTORY_ITEMS = await loadInventoryItems()`
+  // ở renderKhoItems). Bản trước của hàm này quên gán, nên tìm kiếm chỉ chạy
+  // đúng SAU KHI đã lỡ vào Kho→Nguyên liệu/Chế biến ít nhất một lần — coi như
+  // không tải nền được gì cho lần tìm đầu tiên, đúng cái lỗi hàm này sinh ra để
+  // sửa.
+  ensureAuth().then(()=>Promise.all([loadInventoryItems(), loadPrepItems(), loadEmployees()]))
+    .then(([items, preps, emps])=>{
+      INVENTORY_ITEMS = items;
+      PREP_ITEMS = preps;
+      SEARCH_EMPLOYEES_CACHE = emps;
+      if(navQuery) renderSidebarNav();
+    })
+    .catch(err=>console.warn('Không tải được dữ liệu cho tìm kiếm', err))
+    .finally(()=>{ _searchIdxLoading = false; });
 }
 function openSidebar(){
   document.getElementById('sidebar').classList.add('open');
@@ -9340,8 +9957,22 @@ function switchScreen(s){
   const navKey = currentNavKey();
   if(t) t.textContent = NAV_LABEL[navKey] || '';
   const k = document.getElementById('hdrKicker');
-  if(k) k.textContent = NAV_GROUP[navKey] || '';
+  if(k){
+    // Breadcrumb bấm được (Phase 7) — "quay về cha": tên nhóm dẫn về mục đầu
+    // của nhóm đó (vd "Kho" → "Cần xử lý"), TRỪ khi đang đứng ngay tại mục đó
+    // rồi thì hiện chữ thường, bấm vào chính mình chẳng để làm gì.
+    const group = NAV_GROUP[navKey] || '';
+    const firstKey = group ? NAV_GROUP_FIRST_KEY[group] : null;
+    if(group && firstKey && firstKey !== navKey && NAV_ITEM_BY_KEY[firstKey]){
+      k.innerHTML = `<button class="hdr-kicker-link" onclick="${NAV_ITEM_BY_KEY[firstKey].go}">${escapeHtmlAttr(group)}</button>`;
+    } else {
+      k.textContent = group;
+    }
+  }
   document.title = (NAV_LABEL[navKey] ? NAV_LABEL[navKey] + ' · ' : '') + 'Gieo Gieo';
+  trackNavVisit(navKey);   // Phase 8 — "Gần đây"
+  updateFavBtn();          // Phase 8 — nút ⭐ ở topbar phản ánh đúng màn đang đứng
+  updateUrlForNavKey(navKey); // Phase 7 — deep link: URL luôn khớp màn đang đứng
   renderSidebarNav();
   renderReportSubNav();
   closeSidebar();            // trên di động: chọn xong là đóng drawer luôn
@@ -9636,7 +10267,7 @@ async function renderAlertInbox(){
   let list = [];
   try{ await ensureAuth(); list = await loadAlerts(); }
   catch(err){ console.error('renderAlertInbox lỗi', err); box.innerHTML = '<div class="muted">Không tải được cảnh báo. Bấm nút tải lại ở góc trên để thử lại.</div>'; return; }
-  if(!list.length){ box.innerHTML = `<div class="health-all-clear">${ic('check',20)} Chưa có cảnh báo nào</div>`; return; }
+  if(!list.length){ box.innerHTML = `<div id="inboxIntegrityBox">${integrityCheckCardHtml()}</div><div class="health-all-clear">${ic('check',20)} Chưa có cảnh báo nào</div>`; return; }
 
   const card = (a)=>{
     const isNew = a.status==='new';
@@ -9725,6 +10356,54 @@ async function renderAlertInbox(){
         </div>` : ''}
       </div>`;
     }
+    // [MỚI] Nhân viên báo mất hàng lúc "Kiểm tra lại" sau kiểm kê (xem
+    // stockCountReportLost() bên posgieo.html). Duyệt/Từ chối NGAY từ đây — không đi qua
+    // markAlertStatus() chung, vì Duyệt còn phải trừ tồn kho + đổi trạng thái mã tem (xem
+    // approveLostReport() ở tab Kho → Container → Báo mất hàng, hàm đó tự đánh dấu alert
+    // này resolved luôn nên không cần gọi thêm gì ở đây).
+    if(a.type==='lost_item_report'){
+      return `<div class="alert-card" style="${isNew?'':'opacity:.62;border-color:var(--line)'}">
+        <div class="ac-title">${a.title || 'Báo mất hàng'} ${isNew?'':'<span class="tier tier-green" style="margin-left:4px">Đã xử lý</span>'}</div>
+        <div class="ac-row">Ngày: ${a.businessDate || '—'}${a.staff?` · báo bởi ${escapeHtmlAttr(a.staff)}`:''}</div>
+        <div class="ac-row">${escapeHtmlAttr(a.itemName||'')} <span class="muted-sm" style="letter-spacing:.4px">${escapeHtmlAttr(a.code||'')}</span></div>
+        <div class="ac-infer">Quét không thấy mã này lúc kiểm kê. Duyệt sẽ trừ ngay khỏi tồn kho; nếu sau này tìm lại được, quét ở POS → Kiểm kê → "Quét mã hàng tìm lại được" để cộng lại — không cần vào đây sửa gì thêm.</div>
+        ${isNew ? `<div class="ac-actions">
+          <button onclick="approveLostReport('${a.lostReportId}')">Duyệt (trừ kho)</button>
+          <button onclick="rejectLostReport('${a.lostReportId}')">Từ chối</button>
+        </div>` : ''}
+      </div>`;
+    }
+    // [MỚI] Đối soát BÁO MẤT TEM quét được nhiều hơn tồn hệ thống đang ghi — không tự xử
+    // lý được (không rõ đâu là tem thật/tem trùng/dữ liệu lệch), chỉ ghi nhận để Quản lý tự
+    // tay kiểm tra (không có nút Duyệt/Từ chối như báo mất hàng, vì không có gì để duyệt —
+    // không giao dịch kho nào phát sinh, chỉ cần "Đã xem").
+    if(a.type==='label_reconcile_anomaly'){
+      return `<div class="alert-card" style="${isNew?'':'opacity:.62;border-color:var(--line)'}">
+        <div class="ac-title">${a.title || 'Đối soát tem bất thường'} ${isNew?'':'<span class="tier tier-green" style="margin-left:4px">Đã xử lý</span>'}</div>
+        <div class="ac-row">Ngày: ${a.businessDate || '—'}${a.staff?` · báo bởi ${escapeHtmlAttr(a.staff)}`:''}</div>
+        <div class="ac-row" style="color:#c0392b;font-weight:700">${escapeHtmlAttr(a.itemName||'')}: quét được ${a.scannedCount} tem, hệ thống chỉ ghi ${a.expected}</div>
+        <div class="ac-infer">Số tem quét được không được vượt tồn hệ thống — có thể có tem trùng mã, hoặc dữ liệu container đang lệch với thực tế. Không có giao dịch kho nào phát sinh (nguyên tắc "báo mất tem không đụng tồn kho" vẫn giữ nguyên). Vào Kho → Container → Báo mất tem xem chi tiết, rồi kiểm tra thủ công.</div>
+        ${isNew ? `<div class="ac-actions">
+          <button onclick="goContainers('labelreport')">Xem chi tiết</button>
+          <button onclick="markAlertStatus('${a.id}','resolved')">Đã xử lý</button>
+        </div>` : ''}
+      </div>`;
+    }
+    // [MỚI — FIX lỗ hổng đối soát] Nhân viên đã đếm tiền xong (cash_passed), sau đó có
+    // bill tiền mặt mới phát sinh trước khi kết ca xong hẳn — POS đã tự chặn và bắt đếm
+    // lại (xem hasNewCashOrdersSinceCashCount() bên posgieo.html), KHÔNG có gì bị mất/sai,
+    // nhưng Quản lý cần biết việc này đã xảy ra để để ý ngày đó có kết ca kéo dài bất
+    // thường hay không.
+    if(a.type==='cash_recount_forced'){
+      return `<div class="alert-card" style="${isNew?'':'opacity:.62;border-color:var(--line)'}">
+        <div class="ac-title">${a.title || 'Đã bắt đếm lại tiền mặt'} ${isNew?'':'<span class="tier tier-green" style="margin-left:4px">Đã xử lý</span>'}</div>
+        <div class="ac-row">Ngày: ${a.businessDate || '—'}</div>
+        <div class="ac-infer">Nhân viên đã đối soát tiền mặt xong, sau đó có thêm bill tiền mặt được bấm TRƯỚC khi đóng ngày hoàn tất — hệ thống đã tự phát hiện và bắt đếm lại toàn bộ tiền mặt, không cho nhảy qua bằng số cũ. Không có gì sai lệch (đã được chặn đúng lúc), chỉ cần biết để ý nếu lặp lại nhiều lần ở cùng một ca.</div>
+        ${isNew ? `<div class="ac-actions">
+          <button onclick="markAlertStatus('${a.id}','resolved')">Đã xem</button>
+        </div>` : ''}
+      </div>`;
+    }
     return `<div class="alert-card" style="${isNew?'':'opacity:.62;border-color:var(--line)'}">
       <div class="ac-title">${a.title || 'Cảnh báo'} ${isNew?'':'<span class="tier tier-green" style="margin-left:4px">Đã xử lý</span>'}</div>
       <div class="ac-row">Ngày: ${a.businessDate || '—'}</div>
@@ -9741,9 +10420,59 @@ async function renderAlertInbox(){
   const news = list.filter(a=>a.status==='new');
   const rest = list.filter(a=>a.status!=='new');
   box.innerHTML = `
+    <div id="inboxIntegrityBox">${integrityCheckCardHtml()}</div>
     ${news.length ? `<div class="health-group-title">Chưa xem (${news.length})</div>${news.map(card).join('')}` : `<div class="health-all-clear" style="margin-bottom:14px">${ic('check',20)} Không có cảnh báo mới</div>`}
     ${rest.length ? `<div class="health-group-title">Đã xem / đã xử lý (${rest.length})</div>${rest.map(card).join('')}` : ''}
   `;
+}
+
+// ------------------------------------------------------------
+// INTEGRITY RULES → ALERT INBOX (kế hoạch cải tổ UX, Phase 11).
+//
+// runDataIntegrityCheck() đã có sẵn từ trước (Giai đoạn 12) — rà tham chiếu
+// hỏng (định mức/refill/PO trỏ tới nguyên liệu đã xoá) + tồn kho âm — nhưng
+// trước đây CHỈ hiện ở tab Kiểm toán, tách khỏi nơi chủ quán thật sự vào mỗi
+// ngày để xử lý vấn đề (Hộp thư cảnh báo). Không viết thêm rule mới/collection
+// mới ở đây — chỉ kéo ĐÚNG kiểm tra đã có vào đúng chỗ, và dùng chung state
+// `auditIntegrityIssues` với tab Kiểm toán để hai nơi luôn khớp nhau, không
+// phải chạy kiểm tra hai lần cho cùng một dữ liệu.
+//
+// Vẫn chạy theo yêu cầu (nút bấm), không tự động — runDataIntegrityCheck() đọc
+// 5 collection, mà Hộp thư là màn được mở nhiều nhất trong ngày; tự động chạy
+// mỗi lần mở sẽ đúng ngược lại lý do hàm này được thiết kế "chạy khi cần".
+// ------------------------------------------------------------
+function integrityCheckCardHtml(){
+  if(auditIntegrityIssues == null){
+    return `
+      <div class="card" style="margin-bottom:14px;padding:12px 14px">
+        <div class="card-h"><h3>${ic('detective')} Kiểm tra toàn vẹn dữ liệu</h3></div>
+        <div class="small-note" style="margin-bottom:8px">Rà tham chiếu hỏng (định mức/refill/đơn đặt hàng trỏ tới nguyên liệu đã xoá) và tồn kho âm — cùng một kiểm tra với tab Kiểm toán.</div>
+        <button class="btn outline sm" style="width:auto;padding:0 12px" onclick="runIntegrityCheckFromInbox()">Kiểm tra ngay</button>
+      </div>`;
+  }
+  if(!auditIntegrityIssues.length){
+    return `
+      <div class="card" style="margin-bottom:14px;padding:12px 14px">
+        <div class="card-h"><h3>${ic('detective')} Kiểm tra toàn vẹn dữ liệu</h3><span class="tier tier-green">🟢 Không phát hiện vấn đề</span></div>
+      </div>`;
+  }
+  return `
+    <div class="card" style="margin-bottom:14px;padding:12px 14px">
+      <div class="card-h"><h3>${ic('detective')} Kiểm tra toàn vẹn dữ liệu</h3><span class="tier tier-amber">🟡 ${auditIntegrityIssues.length} vấn đề</span></div>
+      ${auditIntegrityIssues.map(i=>`<div class="row"><span class="rl"><span class="tier tier-amber" style="margin-right:6px">${escapeHtmlAttr(i.type)}</span>${escapeHtmlAttr(i.detail)}</span></div>`).join('')}
+      <button class="btn outline sm" style="width:auto;padding:0 12px;margin-top:8px" onclick="runIntegrityCheckFromInbox()">Kiểm tra lại</button>
+    </div>`;
+}
+async function runIntegrityCheckFromInbox(){
+  const box = document.getElementById('inboxIntegrityBox');
+  if(box) box.innerHTML = '<div class="card" style="margin-bottom:14px;padding:12px 14px"><div class="muted">Đang kiểm tra...</div></div>';
+  try{
+    auditIntegrityIssues = await runDataIntegrityCheck();
+  }catch(err){
+    console.error('runIntegrityCheckFromInbox lỗi', err);
+    toast('⚠️ Kiểm tra thất bại: '+(err.code||err.message||err));
+  }
+  if(box) box.innerHTML = integrityCheckCardHtml();
 }
 
 // ============================================================
@@ -10297,6 +11026,18 @@ function qlBillSetRange(k, v){ if(k === 'from') qlBillFrom = v; else qlBillTo = 
 function qlBillSearch(v){ qlBillQuery = v || ''; qlRenderBillList(); }
 function qlBillBack(){ qlBillOpenId = null; qlRenderBillBody(); }
 
+// Mở THẲNG chi tiết một bill cụ thể — Transaction Drill-down (Phase 10), gọi
+// từ dòng CONSUMPTION trong sheet Lịch sử của Nguyên liệu/BTP (xem _histRender).
+// KHÁC goBills(): không được reset qlBillOpenId=null, và phải thu hẹp khoảng
+// ngày về ĐÚNG ngày của giao dịch trước khi nạp — qlBillDetailHTML tra theo id
+// trong qlBills, mà qlBills chỉ có bill của khoảng ngày đang chọn.
+function goBillDetail(orderId, businessDate){
+  if(!orderId) return;
+  if(businessDate){ qlBillFrom = businessDate; qlBillTo = businessDate; }
+  qlBillOpenId = orderId;
+  switchScreen('bills');
+}
+
 async function renderBills(){
   const body = document.getElementById('billsBody');
   body.innerHTML = '<div class="pos-clone"><div class="pc-empty">Đang đọc bill…</div></div>';
@@ -10838,7 +11579,14 @@ async function computeLedgerRealMetrics(startDate, endDate){
   // tháng trước bị tính lại theo giá hôm nay. Giờ mỗi giao dịch được định giá bằng
   // mốc giá có hiệu lực ĐÚNG NGÀY nó phát sinh (t.businessDate).
   const costOf = (id, ngay) => itemCostOn(id, ngay);
+  // [MỚI] lostValue/foundValue — hàng "báo mất" (đã duyệt) và "tìm lại được" ghi bằng
+  // type:'ADJUSTMENT' + reason:'lost_item'/'lost_item_found' (xem approveLostReport() và
+  // submitFoundLostContainer() bên posgieo.html). KHÔNG được gộp vào waste (không phải hao
+  // hụt trong pha chế — có thể do mất/trộm/thất lạc, bản chất khác hẳn) và KHÔNG được gộp
+  // chung vào "Điều chỉnh" (adjustmentValue — vốn là sai số ghi chép/kiểm kê) — cuối kỳ cần
+  // nhìn riêng đúng như một mục P&L/báo cáo tồn kho độc lập.
   let wasteValue=0, wasteCount=0, consumptionValue=0, consumptionCount=0, adjustmentValue=0, adjustmentCount=0;
+  let lostValue=0, lostCount=0, foundValue=0, foundCount=0;
   // [MỚI] Hao hụt gom theo TỪNG NGÀY, không chỉ tổng cả kỳ — lãi/lỗ theo ngày cần
   // biết đúng ngày nào mất bao nhiêu. Cộng dồn ngay trong vòng lặp đang có thay vì
   // đọc ledger lần thứ hai ở nơi khác, để hai con số không bao giờ lệch nhau.
@@ -10864,6 +11612,8 @@ async function computeLedgerRealMetrics(startDate, endDate){
     const val = Math.abs(Number(t.qty)||0) * cost;
     if(t.type==='WASTE'){ wasteValue += val; wasteCount++; ghiNhanDoLy(t, val); ghiNhanHaoHutNgay(t, val); }
     else if(t.type==='CONSUMPTION'){ consumptionValue += val; consumptionCount++; }
+    else if(t.type==='ADJUSTMENT' && t.reason==='lost_item'){ lostValue += val; lostCount++; }
+    else if(t.type==='ADJUSTMENT' && t.reason==='lost_item_found'){ foundValue += val; foundCount++; }
     else if(t.type==='ADJUSTMENT'){ adjustmentValue += val; adjustmentCount++; }
   });
   let prepWasteValue=0, prepWasteCount=0, prepAdjValue=0, prepAdjCount=0, prepWasteMissingCost=0;
@@ -10901,7 +11651,8 @@ async function computeLedgerRealMetrics(startDate, endDate){
     drinkWasteEvents: drinkEvents.size,
     drinkWasteValue: [...drinkEvents.values()].reduce((s,e)=>s+e.value, 0),
     consumptionValue, consumptionCount,
-    adjustmentValue: adjustmentValue + prepAdjValue, adjustmentCount: adjustmentCount + prepAdjCount
+    adjustmentValue: adjustmentValue + prepAdjValue, adjustmentCount: adjustmentCount + prepAdjCount,
+    lostValue, lostCount, foundValue, foundCount, lostNetValue: lostValue - foundValue
   };
 }
 async function computeCashVarianceSummary(startDate, endDate){
@@ -11255,6 +12006,10 @@ async function renderHealth(){
       ${ledgerReal.prepWasteMissingCost ? `<div class="small-note" style="color:var(--warn);margin:-2px 0 8px">${ic('alert',13,'var(--warn)')} ${ledgerReal.prepWasteMissingCost} giao dịch huỷ bán thành phẩm KHÔNG có giá trị tiền (ghi bởi bản POS cũ) — đang được tính là 0đ, nên Waste thật đang thấp hơn thực tế.</div>` : ''}
       ${ledgerReal.prepAdjCount ? rowInfoHTML('— chênh lệch đếm bán thành phẩm (không tính waste)', `${fmt(ledgerReal.prepAdjValue)} · ${ledgerReal.prepAdjCount} giao dịch`) : ''}
       ${rowInfoHTML('Điều chỉnh kiểm kho (ADJUSTMENT)', `${fmt(ledgerReal.adjustmentValue)} · ${ledgerReal.adjustmentCount} giao dịch`)}
+      ${ledgerReal.lostCount || ledgerReal.foundCount ? `
+      ${rowInfoHTML('Mất hàng (đã duyệt)', `${fmt(ledgerReal.lostValue)} · ${ledgerReal.lostCount} mã`)}
+      ${ledgerReal.foundCount ? rowInfoHTML('— trong đó tìm lại được', `${fmt(ledgerReal.foundValue)} · ${ledgerReal.foundCount} mã`) : ''}
+      <div class="small-note" style="margin:-2px 0 8px">Mục riêng, KHÔNG tính vào Waste và KHÔNG gộp vào Điều chỉnh kiểm kho ở trên — xem Kho → Container → Báo mất hàng. Net kỳ này: <b>${fmt(ledgerReal.lostNetValue)}</b>.</div>` : ''}
       ${rowInfoHTML('Cash Variance', `${cashVariance.daysWithVariance}/${cashVariance.totalDays} ngày lệch · tổng ${fmt(cashVariance.totalAbsVariance)} · ${cashVariance.daysClosed} ngày đã đóng`)}
     </div>
 
@@ -13864,7 +14619,17 @@ const EXPORT_RANGE_COLLS = [
   // [TIÊU HAO] Tem từng chai/gói — mã 8 ký tự POS tự sinh khi nhận hàng. Đây là
   // nguồn duy nhất biết được một chai mở lúc nào, hết lúc nào, còn thừa bao nhiêu
   // lúc báo hết, và có quá hạn sau khi mở hay không.
-  'stock_containers_gieogieo'
+  'stock_containers_gieogieo',
+  // [MỚI] Phiếu báo mất hàng — TÁCH RIÊNG khỏi stock_transactions_gieogieo dù cả hai đều
+  // sinh ra một dòng ADJUSTMENT ở đó. File export cần thấy NGUYÊN VĂN phiếu báo mất (ai
+  // báo, ai duyệt, còn chờ hay đã tìm lại) để không lẫn với điều chỉnh kiểm kho thường —
+  // đúng tinh thần "mất hàng là mục riêng, không phải waste, không phải điều chỉnh chung"
+  // đã áp dụng ở computeLedgerRealMetrics().
+  'stock_lost_reports_gieogieo',
+  // [MỚI] Phiếu báo mất TEM (reprint label) — KHÁC báo mất hàng ở trên: không sinh giao
+  // dịch kho nào cả (không có gì trong stock_transactions_gieogieo để đối chiếu), nên đây
+  // là NGUỒN DUY NHẤT biết được lịch sử mất/hỏng/cấp lại tem theo nguyên liệu.
+  'stock_label_reports_gieogieo'
 ];
 // Nhỏ hoặc không chắc có businessDate → lấy hết rồi lọc trong JS.
 const EXPORT_SMALL_COLLS = ['alerts_gieogieo', 'handover_records_gieogieo', 'receiving_records_gieogieo', 'purchase_orders_gieogieo'];
@@ -14278,6 +15043,8 @@ async function runExport(mode){
         <div class="row"><span class="rl">Lô chế biến trong kỳ</span><span class="rv">${t.loCheBien.length}</span></div>
         <div class="row"><span class="rl">Món đã khai định mức</span><span class="rv">${(payload.cauHinh['recipes_gieogieo']||[]).length}</span></div>
         <div class="row"><span class="rl">Phiếu kiểm kê</span><span class="rv">${(payload.duLieuTheoNgay['stock_counts_gieogieo']||[]).length}</span></div>
+        <div class="row"><span class="rl">Phiếu báo mất hàng</span><span class="rv">${(payload.duLieuTheoNgay['stock_lost_reports_gieogieo']||[]).length}</span></div>
+        <div class="row"><span class="rl">Phiếu báo mất tem</span><span class="rv">${(payload.duLieuTheoNgay['stock_label_reports_gieogieo']||[]).length}</span></div>
         <div class="row"><span class="rl">Nguyên liệu đối chiếu được<div class="small-note" style="margin-top:2px">cần 2 phiếu kiểm kê đã duyệt kẹp hai đầu kỳ</div></span><span class="rv">${payload.tong_quan_lech ? payload.tong_quan_lech.soCoDuLieu + '/' + payload.tong_quan_lech.soNguyenLieu : '—'}</span></div>
         <div class="row"><span class="rl">Độ phủ định mức<div class="small-note" style="margin-top:2px">% số ly bán ra CÓ trừ được kho</div></span><span class="rv" style="color:${payload.do_phu_dinh_muc && payload.do_phu_dinh_muc.doPhu!=null && payload.do_phu_dinh_muc.doPhu<0.8 ? 'var(--bad)':'inherit'}">${payload.do_phu_dinh_muc && payload.do_phu_dinh_muc.doPhu!=null ? fmtNum(payload.do_phu_dinh_muc.doPhu*100,1)+'%' : '—'}</span></div>
         <div class="row"><span class="rl">Tem kho trong file</span><span class="rv">${(payload.tem_kho||[]).length}</span></div>
@@ -15293,22 +16060,48 @@ function renderInventoryItemFormFields(editingItem){
   return `
       <div class="field"><label>Tên nguyên liệu</label><input type="text" id="invName" placeholder="VD: Sữa tươi" value="${editingItem? escapeHtmlAttr(editingItem.name) : ''}"></div>
 
+      <details class="field-help">
+        <summary>Giải thích các mục trong form này</summary>
+        <div class="unit-explainer">
+          <b>Đơn vị pha chế</b> — đơn vị nhỏ nhất, chỉ hệ thống dùng để tính công thức và tự
+          trừ kho khi bán (VD công thức "100ml sữa" → đơn vị pha chế là <b>ml</b>). Bạn không
+          bao giờ phải nhập tay theo ml — khai <b>quy cách đóng gói</b> bên dưới (VD: 1 Hộp =
+          1000ml, 1 Thùng = 12 Hộp), rồi mọi ô số phía sau đều cho chọn Thùng/Hộp/ml tuỳ lúc
+          nào tiện nhất. Đơn vị pha chế không đổi được sau khi tạo, để không lệch số liệu cũ.<br><br>
+
+          <b>Giá mới áp dụng từ ngày</b> — đổi giá <b>không ghi đè</b> giá cũ, hệ thống tạo một
+          mốc giá mới bắt đầu từ ngày này; mọi báo cáo trước ngày này vẫn tính theo giá cũ. Lùi
+          ngày lại nếu thực tế giá đã tăng từ trước mà giờ mới khai.<br><br>
+
+          <b>Nhân viên phải kiểm kê món này</b> — tắt đi thì món này biến mất khỏi màn Kiểm kê
+          bên POS (dùng cho món ít giá trị hoặc khó đếm). Tồn kho vẫn tự trừ theo định mức mỗi
+          khi bán, chỉ là không còn ai đối chiếu với thực tế, nên sai lệch tích luỹ sẽ không
+          được phát hiện — vẫn tự chỉnh số qua "Nhập kho" khi cần.<br><br>
+
+          <b>Vật tư bao bì</b> (túi, ống hút, muỗng, khay...) — bật thì lúc duyệt kiểm kê, món
+          này dùng "Ngưỡng cảnh báo lệch (%) — Bao bì" riêng (thường cao hơn nguyên liệu pha
+          chế, vì bao bì hay lệch do khách yêu cầu khác thường) thay vì ngưỡng chung.<br><br>
+
+          <b>Có quản lý tồn kho</b> — tắt cho những thứ không có sự kiện nhập và không đếm được
+          (nước lọc từ máy, đá tự làm). Bật cho những thứ đó thì tồn sẽ bị trừ theo định mức mỗi
+          ly bán ra mà không bao giờ được cộng lại, tụt xuống âm vô hạn và mọi cảnh báo kho
+          thành rác. Tắt rồi thì món này biến khỏi kiểm kê và khỏi mọi cảnh báo tồn.<br><br>
+
+          <b>Cân cuối ca</b> — dành cho nguyên liệu mở gói ra là dùng luôn, không qua chế biến
+          (trân châu trắng, thạch dừa Đài Loan...). Loại này trong ngày bị múc/chia bằng tay nên
+          tồn thực tế không bao giờ khớp định mức, phải cân cuối ca giống bán thành phẩm — POS
+          hiện nút ⚖️ để nhân viên đặt nguyên khay lên cân và tự trừ bì (khai khay/ca ở Kho →
+          Dụng cụ đựng). Phần này chỉ quyết định <i>có cân được hay không</i>; món <b>có bị bắt
+          đếm cuối ca hay không</b> là ở Kho → Refill (mở rule của món, bật "Bắt đếm khi giao ca"
+          → chọn Cuối ca). Nguyên liệu chưa mở gói/trừ chuẩn theo định mức thì đừng bật.
+        </div>
+      </details>
+
       <div class="field">
         <label>Đơn vị pha chế <span class="small-note">(đơn vị nhỏ nhất, dùng trong công thức)</span></label>
         ${editingItem
-          ? `<input type="text" value="${escapeHtmlAttr(editingItem.unit)}" disabled style="opacity:.6"><div class="small-note">Không đổi được sau khi tạo (để không lệch số liệu cũ)</div>`
+          ? `<input type="text" value="${escapeHtmlAttr(editingItem.unit)}" disabled style="opacity:.6">`
           : `<select id="invUnit" onchange="renderItemPkgBox(); syncItemUnitSelects(); renderItemVesselPicker();">${STOCK_UNITS.map(u=>`<option>${u}</option>`).join('')}</select>`}
-      </div>
-
-      <!-- Giải thích bằng ví dụ thật của quán — trả lời đúng câu hỏi "cái nào dùng
-           để pha chế, cái nào để kiểm kê". Đặt giữa 2 khối liên quan để người đọc
-           nối được 2 khái niệm với nhau. -->
-      <div class="unit-explainer">
-        <b>Đơn vị pha chế</b> là đơn vị nhỏ nhất, chỉ hệ thống dùng — để tính công thức
-        và tự trừ kho khi bán (VD công thức "100ml sữa" → đơn vị pha chế là <b>ml</b>).<br><br>
-        <b>Bạn không bao giờ phải nhập tay theo ml.</b> Khai các quy cách bên dưới
-        (VD: 1 Hộp = 1000ml, 1 Thùng = 12 Hộp), rồi mọi ô số phía sau — tồn kho, ngưỡng,
-        giá vốn, nhập kho, kiểm kê — đều cho chọn Thùng/Hộp/ml tuỳ lúc nào tiện nhất.
       </div>
 
       <div class="field">
@@ -15345,7 +16138,6 @@ function renderInventoryItemFormFields(editingItem){
       ${editingItem ? `
       <div class="field"><label>Giá mới áp dụng từ ngày</label>
         <input type="date" id="invCostFrom" value="${dkey(new Date())}" max="${dkey(new Date())}">
-        <div class="hint">Đổi giá <b>KHÔNG ghi đè</b> giá cũ — hệ thống tạo một mốc giá mới bắt đầu từ ngày này. Mọi báo cáo TRƯỚC ngày này vẫn tính theo giá cũ, nên số liệu tháng trước không bị đổi theo. Lùi ngày lại nếu thực tế giá đã tăng từ trước mà giờ mới khai.</div>
       </div>
       <div class="field" style="margin-bottom:0"><label>Lịch sử giá</label>
         <div id="invPriceHistory"><div class="small-note">Đang đọc lịch sử giá…</div></div>
@@ -15355,13 +16147,11 @@ function renderInventoryItemFormFields(editingItem){
         <input type="checkbox" id="invStaffCounts" ${(!editingItem || editingItem.staffCounts !== false) ? 'checked' : ''} style="width:20px;height:20px;flex-shrink:0;margin-top:1px">
         <b>Nhân viên phải kiểm kê món này</b>
       </label>
-      <div class="small-note">Tắt đi thì món này biến mất khỏi màn Kiểm kê bên POS — nhân viên khỏi đếm những thứ ít giá trị hoặc khó đếm. Tồn kho <b>vẫn tự trừ theo định mức mỗi khi bán</b>, chỉ là không còn ai đối chiếu với thực tế, nên sai lệch tích luỹ sẽ không được phát hiện. Bạn vẫn tự chỉnh số qua "Nhập kho" khi cần.</div>
 
       <label style="display:flex;align-items:flex-start;gap:9px;margin:14px 0 4px;font-size:13px;cursor:pointer">
         <input type="checkbox" id="invIsPackaging" ${(editingItem && editingItem.isPackagingMaterial) ? 'checked' : ''} onchange="renderTrackingBox()" style="width:20px;height:20px;flex-shrink:0;margin-top:1px">
         <b>Đây là vật tư bao bì (túi, ống hút, muỗng, khay...)</b>
       </label>
-      <div class="small-note">Khi BẬT: lúc duyệt kiểm kê, món này dùng "Ngưỡng cảnh báo lệch (%) — Bao bì" riêng (thường để CAO hơn nguyên liệu pha chế, vì bao bì hay lệch do khách yêu cầu khác thường) thay vì ngưỡng chung — xem cấu hình ở tab Kiểm kê.</div>
 
       <div class="sec-title">Theo dõi &amp; kiểm kê</div>
 
@@ -15369,14 +16159,10 @@ function renderInventoryItemFormFields(editingItem){
         <input type="checkbox" id="invStockManaged" ${(editingItem && editingItem.stockManaged === false) ? '' : 'checked'} onchange="renderTrackingBox()" style="width:20px;height:20px;flex-shrink:0;margin-top:1px">
         <b>Có quản lý tồn kho</b>
       </label>
-      <div class="small-note">Tắt cho những thứ <b>không có sự kiện nhập và không đếm được</b> — nước lọc từ máy, đá tự làm. Để bật cho những thứ đó thì tồn sẽ bị trừ theo định mức mỗi ly bán ra mà không bao giờ được cộng lại, tụt xuống âm vô hạn và mọi cảnh báo kho thành rác. Tắt rồi thì món này biến khỏi kiểm kê và khỏi mọi cảnh báo tồn.</div>
 
       <div id="invTrackingBox"></div>
 
       <div class="sec-title">Cân cuối ca — nguyên liệu dùng ngay</div>
-      <div class="unit-explainer">Dành cho nguyên liệu <b>mở gói ra là dùng luôn</b>, không qua chế biến — trân châu trắng, thạch dừa Đài Loan, thạch nha đam... Loại này trong ngày bị múc/chia bằng tay nên tồn thực tế không bao giờ khớp định mức, phải <b>cân cuối ca giống bán thành phẩm</b>.<br><br>
-        Chọn ở đây những thứ món này thực sự nằm trong, POS sẽ hiện nút ⚖️ để nhân viên đặt nguyên khay lên cân và tự trừ bì. Khai khay/ca kèm trọng lượng bì ở <b>Kho → Dụng cụ đựng</b>.<br><br>
-        <b>Lưu ý:</b> phần này chỉ quyết định <i>có cân được hay không</i>. Còn món này <b>có bị bắt đếm cuối ca hay không</b> là do <b>Kho → Refill</b>: mở rule của món, bật "Bắt đếm khi giao ca" rồi chọn <b>Cuối ca</b>. Nguyên liệu chưa mở gói / trừ chuẩn theo định mức thì đừng bật — để kiểm kê định kỳ lo.</div>
       <div id="invVesselBox"></div>
       <button type="button" class="btn outline sm" style="margin-top:8px" onclick="goKho('refill')">Sang Refill để bật đếm cuối ca →</button>
   `;
@@ -15448,6 +16234,39 @@ function renderTrackingBox(){
   const giaMoiDonVi = heSoGia>0 ? (donGia/heSoGia)*heSo : 0;
   const goiY = suggestModeByValue(giaMoiDonVi, isPkg);
 
+  // [MỚI] Đơn vị pha chế đã là "cái" — nguyên liệu đếm rời từng gói/hộp (không đo
+  // bằng ml/g) thì bản thân MỘT CÁI đã là một đối tượng dán tem được, không cần
+  // khai quy cách đóng gói hay chọn giữa "theo lô"/"từng đơn vị" như hàng đo bằng
+  // ml/g. Rút gọn thành một công tắc bật/tắt duy nhất — vừa đúng yêu cầu "1 nút
+  // on/off" vừa tránh đúng cái bẫy khiến tem không sinh được: trước đây phải khai
+  // một quy cách giả kiểu "1 gói = 1 cái" (tỷ lệ 1:1) thì mới bật được "Từng đơn
+  // vị", mà tỷ lệ 1:1 lại bị (bên POS) hiểu nhầm là "chưa chọn gì" — xem
+  // createContainersForReceipt() bên posgieo.html, đã sửa cùng lúc với bản này.
+  if(baseUnit === 'cái'){
+    box.innerHTML = `
+      <label style="display:flex;align-items:flex-start;gap:9px;margin:0 0 4px;font-size:13px;cursor:${isPkg?'default':'pointer'}">
+        <input type="checkbox" id="invTrackUnitCai" ${cur==='unit'?'checked':''} ${isPkg?'disabled':''}
+          onchange="setTrackingMode(this.checked?'unit':'none')" style="width:20px;height:20px;flex-shrink:0;margin-top:1px">
+        <b>In tem cho từng cái khi nhận hàng</b>
+      </label>
+      <input type="hidden" id="invTrackingMode" value="${cur}">
+      <div class="small-note">${isPkg
+        ? 'Đã tick "vật tư bao bì" ở trên nên không dán tem từng cái được — không ai dán tem cho hàng nghìn cái ly/ống hút.'
+        : (cur==='unit'
+            ? 'Mỗi cái nhận vào kho sẽ có một tem riêng — biết cái nào đang dùng, ai lấy, còn bao nhiêu, hạn tới bao giờ.'
+            : 'Đang KHÔNG dán tem — chỉ đếm tổng số lượng, không truy vết từng cái.')}</div>
+
+      ${cur!=='none' ? `
+      <div class="field" style="margin-top:10px;margin-bottom:0"><label for="invOpenShelfLife">Hạn dùng sau khi mở (giờ)</label>
+        <input type="number" id="invOpenShelfLife" inputmode="numeric" step="1" min="0" value="${prevShelf != null ? escapeHtmlAttr(prevShelf) : (editingItem ? (Number(editingItem.openShelfLifeHours)||0) : 0)}">
+        <div class="hint">In lên tem và dùng để cảnh báo "còn hàng đã mở quá hạn". Để <b>0</b> nếu món này không có hạn sau khi mở.</div>
+      </div>` : ''}
+      ${(cur==='unit' && editingItem) ? '<div id="invMissingTagBox" style="margin-top:12px"></div>' : ''}`;
+    // [GÁN TEM CHO MÓN ĐANG THIẾU — xem renderMissingTagBlock() để gỡ toàn bộ tính năng]
+    if(cur==='unit' && editingItem) renderMissingTagBlock(editingItem);
+    return;
+  }
+
   box.innerHTML = `
       <div class="field" style="margin-top:14px"><label for="invCountUnit">Nhân viên đếm theo</label>
         <select id="invCountUnit" onchange="renderTrackingBox()">
@@ -15484,6 +16303,111 @@ function setTrackingMode(m){
   if(el) el.value = m;
   renderTrackingBox();
 }
+
+// ============================================================
+// [MỚI — KHỐI DỄ GỠ] GÁN TEM CHO MÓN ĐANG THIẾU
+//
+// Bật "In tem cho từng cái" cho một món ĐANG có sẵn tồn kho thì tem chỉ sinh ra từ lúc
+// này về sau — mỗi lần POS nhận hàng mới. Số đang tồn kho từ TRƯỚC KHI bật (lô cũ) không
+// tự có tem: nhân viên không có gì để quét, kiểm kê không đối chiếu được cho phần đó.
+// Khối này cho Quản lý sinh thẳng số tem còn thiếu — không qua phiếu nhận hàng nào — để in
+// & dán lên đúng những cái đang có sẵn ở quán, đóng khoảng trống lại.
+//
+// GỠ BỎ TOÀN BỘ TÍNH NĂNG: xoá 2 chỗ —
+//   (1) trong renderTrackingBox(): dòng `<div id="invMissingTagBox">...` và dòng gọi
+//       renderMissingTagBlock(editingItem) ngay sau đó.
+//   (2) toàn bộ khối hàm từ đây tới hết genMissingTagsForItem() bên dưới.
+// Không có chỗ nào khác trong file gọi tới các hàm này.
+// ============================================================
+async function renderMissingTagBlock(editingItem){
+  const box = document.getElementById('invMissingTagBox');
+  if(!box) return;
+  box.innerHTML = '<div class="small-note">Đang kiểm tra số tem còn thiếu…</div>';
+  let thieu = 0, tongTem = 0;
+  try{
+    // Tái dùng ĐÚNG hàm đã có cho "Tồn lịch sử" — cùng một câu hỏi ("tem còn sống của
+    // món này cộng lại bao nhiêu"), không viết lại phép đọc Firestore lần hai.
+    const gom = await docTemConSongTheoMon();
+    tongTem = gom[editingItem.id] || 0;
+    thieu = Math.max(0, Math.round((Number(editingItem.currentStock)||0) - tongTem));
+  }catch(err){
+    console.warn('[gán tem thiếu] không đọc được số tem hiện có:', err);
+    box.innerHTML = '';
+    return;
+  }
+  if(!document.getElementById('invMissingTagBox')) return; // form đã đóng trong lúc chờ đọc
+  if(thieu < 1){ box.innerHTML = ''; return; }
+  box.innerHTML = `
+    <div style="background:#fffbe8;border:1px solid #fde68a;padding:12px;border-radius:10px;">
+      <div style="font-weight:700;font-size:13px;margin-bottom:4px">Gán tem cho món đang thiếu</div>
+      <div class="small-note" style="margin-bottom:8px">Tồn kho hiện ghi <b>${fmtNum(editingItem.currentStock,0)} ${escapeHtmlAttr(editingItem.unit||'')}</b>, nhưng chỉ có <b>${tongTem}</b> mã tem đang sống — ước tính còn <b>${thieu}</b> cái chưa có mã (thường là lô cũ, nhập trước khi bật tính năng này).</div>
+      <div class="field" style="margin-bottom:8px"><input type="number" id="invMissingTagQty" value="${thieu}" min="1" max="200" step="1" style="max-width:120px"></div>
+      <button type="button" class="btn outline sm" style="width:auto;padding:0 14px" onclick="genMissingTagsForItem('${editingItem.id}')">Sinh mã tem</button>
+      <div class="small-note" style="margin-top:8px">Sinh xong vào <b>Kho → Container → Tem chưa dán</b> (hoặc bên POS → Tem kho) để in & dán lên từng cái đang có sẵn ở quán — không phải hàng sắp nhập.</div>
+    </div>`;
+}
+
+// Cùng thuật toán/bảng chữ với genStockContainerCode() bên posgieo.html (8 ký tự, bảng
+// Crockford bỏ I/L/O/U) để mã sinh từ Quản lý và mã sinh từ POS trông giống hệt nhau,
+// không phân biệt được nguồn gốc nhìn bằng mắt trên tem in ra.
+async function mgmtGenContainerCode(){
+  const abc = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+  let code = '';
+  for(let lan=0; lan<5; lan++){
+    const a = new Uint8Array(8);
+    (window.crypto||window.msCrypto).getRandomValues(a);
+    code = '';
+    for(let i=0;i<8;i++) code += abc[a[i] & 31];
+    try{
+      const snap = await fstore.collection(CTN_COLL).where('code','==',code).limit(1).get();
+      if(snap.empty) return code;
+      console.warn('[gán tem thiếu] bốc trúng mã đã có, bốc lại:', code);
+    }catch(err){
+      console.warn('[gán tem thiếu] không kiểm tra được trùng, dùng thẳng mã ngẫu nhiên:', err);
+      return code;
+    }
+  }
+  return code;
+}
+
+async function genMissingTagsForItem(itemId){
+  const it = INVENTORY_ITEMS.find(x=>x.id===itemId);
+  if(!it){ toast('❌ Không tìm thấy nguyên liệu'); return; }
+  const el = document.getElementById('invMissingTagQty');
+  const n = Math.floor(Number(el && el.value))||0;
+  if(n<1){ toast('⚠️ Nhập số lượng hợp lệ'); return; }
+  if(n>200){ toast('⚠️ Tối đa 200 mã một lần — chia nhỏ ra nếu thật sự cần nhiều hơn'); return; }
+  if(!confirm('Sinh '+n+' mã tem cho "'+it.name+'"?\n\nMỗi mã đại diện đúng 1 cái ĐANG CÓ SẴN ở quán (không phải hàng sắp nhập) — sinh xong nhớ in & dán lên từng cái tương ứng.')) return;
+  const nowISO = new Date().toISOString();
+  const p2 = x=>String(x).padStart(2,'0');
+  const d = new Date();
+  const businessDate = d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate());
+  let ok = 0;
+  for(let i=0;i<n;i++){
+    try{
+      const code = await mgmtGenContainerCode();
+      await fstore.collection(CTN_COLL).add({
+        code, itemId: it.id, itemName: it.name||'', unit: it.unit||'',
+        trackingMode: 'unit', countUnitName: it.countUnitName || it.unit || '',
+        baseQty: 1, status: 'sealed', labelPrinted: false,
+        openShelfLifeHours: Number(it.openShelfLifeHours)||0,
+        receivedAt: nowISO, receivedBy: 'Quản lý — gán tem thiếu', receivedByEmployeeId: '',
+        receiveRefId: '', businessDate,
+        openedAt: null, openedBy: null, expiresAt: null,
+        finishedAt: null, finishedBy: null, finishReason: '', wasteBase: 0,
+        // đánh dấu để phân biệt với tem sinh từ phiếu nhận thật — không phải hàng vừa mua về,
+        // hữu ích nếu sau này cần lọc riêng hoặc kiểm tra lại.
+        backfilled: true, backfillReason: 'missing_tag_gap'
+      });
+      ok++;
+    }catch(err){ console.error('[gán tem thiếu] ghi bản ghi lỗi', err); break; }
+  }
+  toast(ok>0 ? ('✅ Đã sinh '+ok+' mã — vào Tem chưa dán để in') : '❌ Sinh mã thất bại');
+  if(ok>0) renderTrackingBox();
+}
+// ============================================================
+// [KẾT THÚC KHỐI GÁN TEM CHO MÓN ĐANG THIẾU]
+// ============================================================
 
 // ---------- [MỚI] Gắn dụng cụ CÂN cho nguyên liệu dùng ngay ----------
 // Vì sao nguyên liệu cũng cần cân, không chỉ bán thành phẩm: trân châu trắng /
@@ -19558,9 +20482,16 @@ async function renderKhoStockCount(){
         const doNguyen = lechNguyen !== 0;
         // Đếm được nhiều chai mở hơn số hệ thống biết = có chai được khui mà không quét mã.
         const moChui = lechMo > 0;
+        // [MỚI] Dòng có tem giờ đếm bằng quét mã (bên POS) thay vì gõ tay — báo rõ để Quản
+        // lý biết số này có bằng chứng vật lý (mỗi mã quét được là một tem THẬT sự tồn tại),
+        // trừ khi nhân viên khai tay "không còn tem" cho dòng đang 0/0 (markedEmpty).
+        const nguonBadge = it.markedEmpty
+          ? '<span class="tier tier-amber" style="margin-left:4px;font-size:9.5px;">khai tay: không còn</span>'
+          : it.countedByScan
+          ? '<span class="tier tier-blue" style="margin-left:4px;font-size:9.5px;">đã quét mã</span>' : '';
         return `<div style="padding:6px 0;font-size:12.5px;${doNguyen?'color:#c0392b;font-weight:700;':''}">
           <div style="display:flex;justify-content:space-between;gap:8px;">
-            <span>${it.name} <span class="tier tier-green" style="margin-left:2px;font-size:9.5px;">theo ${dv}</span></span>
+            <span>${it.name} <span class="tier tier-green" style="margin-left:2px;font-size:9.5px;">theo ${dv}</span>${nguonBadge}</span>
             <span style="white-space:nowrap">${it.countedSealedUnits} / ${it.expectedSealedUnits} ${dv} nguyên${lechNguyen?` (${lechNguyen>0?'+':''}${lechNguyen})`:''}</span>
           </div>
           <div style="display:flex;justify-content:space-between;gap:8px;font-weight:400;color:${moChui?'#b45309':'#999'};font-size:11.5px;margin-top:2px;">
@@ -19568,6 +20499,7 @@ async function renderKhoStockCount(){
             <span style="white-space:nowrap">${it.countedOpenUnits} / ${it.expectedOpenUnits} đang mở${lechMo?` (${lechMo>0?'+':''}${lechMo})`:''}</span>
           </div>
           ${doNguyen?`<div style="font-size:11px;color:#c0392b;margin-top:2px;">Duyệt sẽ điều chỉnh tồn ${lechNguyen>0?'+':''}${fmtNum(it.varianceBase,0)} ${escapeHtmlAttr(it.unit||'')}</div>`:''}
+          ${Number(it.reportedLostCount)>0?`<div class="muted-sm" style="margin-top:2px;">Số hệ thống ở trên đã TRỪ SẴN ${it.reportedLostCount} mã vừa báo mất lúc kiểm kê này — xem/duyệt riêng ở Kho → Container → Báo mất hàng, không tính đôi ở đây.</div>`:''}
         </div>`;
       }
 
@@ -20024,13 +20956,35 @@ async function _histLoad(coll, field, id){
 async function openItemHistory(itemId){
   const it = INVENTORY_ITEMS.find(x=>x.id===itemId);
   if(!it){ toast('⚠️ Không tìm thấy nguyên liệu'); return; }
+  const tm = itemTrackingMode(it);
+  const moc = (it.untrackedBase === null || it.untrackedBase === undefined || !isFinite(Number(it.untrackedBase)))
+    ? null : Number(it.untrackedBase);
   _histCtx = { kind:'item', id:itemId, name:it.name||'', unit:it.unit||'',
-               stock:Number(it.currentStock)||0, rows:[], filter:'all', partial:false, indexUrl:'' };
+               stock:Number(it.currentStock)||0, rows:[], filter:'all', partial:false, indexUrl:'',
+               trackingMode: tm, containers:[], untrackedBase: moc, liveContainerSum: 0 };
   openEditSheet('Lịch sử — ' + (it.name||''), '<div id="histBody"></div>', ()=>{ _histCtx=null; });
   _histRenderLoading();
   try{
-    const r = await _histLoad('stock_transactions_gieogieo','itemId',itemId);
+    // Context Navigation (Phase 5) — món có dán tem thì kéo luôn "đang mở & tem"
+    // của ĐÚNG món này vào cùng sheet, khỏi phải rời khỏi đây rồi lọc lại ở màn
+    // Container. Chỉ đọc khi món thực sự có theo dõi tem — đa số nguyên liệu
+    // không dán tem, đọc thêm cho chúng chỉ tốn lượt đọc vô ích. Lọc phía client
+    // trên danh sách "đang mở" (vốn đã nhỏ — vài chục bản ghi, xem loadContainersFor)
+    // thay vì thêm where('itemId',...) để khỏi cần tạo composite index mới.
+    const jobs = [ _histLoad('stock_transactions_gieogieo','itemId',itemId) ];
+    if(tm !== 'none'){
+      jobs.push(loadContainersFor('open').then(l=>l.filter(c=>c.itemId===itemId)).catch(()=>[]));
+      // Đối chiếu Sổ kho vs Tem (Phase 9/11 "Ledger ≠ Container"): TÁI DÙNG NGUYÊN
+      // docTemConSongTheoMon() — hàm đã có sẵn, đang chạy đúng ở tab Kho → Container
+      // → Tồn lịch sử với công thức đã kiểm chứng (xem chú thích "TỒN LỊCH SỬ TRƯỚC
+      // KHI DÁN TEM" phía trên). Không tự viết công thức mới ở đây để khỏi lệch với
+      // màn gốc.
+      jobs.push(docTemConSongTheoMon().catch(()=>({})));
+    }
+    const [r, containers, temMap] = await Promise.all(jobs);
     Object.assign(_histCtx, r);
+    if(containers) _histCtx.containers = containers;
+    if(temMap) _histCtx.liveContainerSum = Number(temMap[itemId]) || 0;
   }catch(err){
     console.error('openItemHistory failed', err);
     _histRenderError(err); return;
@@ -20065,6 +21019,229 @@ function _histRenderError(err){
 }
 function histSetFilter(f){ if(_histCtx){ _histCtx.filter = f; _histRender(); } }
 
+// ------------------------------------------------------------
+// "DÙNG TRONG CÔNG THỨC NÀO" — recipe usage ngược (phát hiện #19, UX Scenario
+// Audit Phase 20): trước đây chỉ tra được CHIỀU THUẬN (mở một món ở Định mức →
+// thấy nó dùng nguyên liệu/BTP gì), không tra được CHIỀU NGƯỢC (đang xem MỘT
+// nguyên liệu/BTP → món nào đang dùng nó). Quét toàn bộ `recipes_gieogieo` +
+// menu POS để trả lời — không phải chuyện rẻ (đọc cả collection, không lọc
+// theo itemId được vì đó không phải field lập chỉ mục ở đây), nên để BẤM MỚI
+// TẢI thay vì tự động chạy mỗi lần mở sheet, giống cách "Kiểm tra toàn vẹn dữ
+// liệu" ở Alert Inbox cũng để thủ công vì lý do tương tự.
+// ------------------------------------------------------------
+async function histLoadRecipeUsage(){
+  if(!_histCtx || _histCtx.recipeUsageLoading) return;
+  _histCtx.recipeUsageLoading = true;
+  _histRender();
+  try{
+    const [menu, recipes] = await Promise.all([
+      loadPosMenu('togo').catch(()=>[]),
+      Object.keys(RECIPES).length ? Promise.resolve(RECIPES) : loadRecipes().catch(()=>({}))
+    ]);
+    const kind = _histCtx.kind, id = _histCtx.id;
+    const usage = [];
+    Object.entries(recipes).forEach(([menuRefKey, rec])=>{
+      Object.entries(rec.sizes||{}).forEach(([size, rows])=>{
+        (rows||[]).forEach(row=>{
+          // Dòng cũ không có refType mặc định là 'item' (quy ước có sẵn ở
+          // recipeRowType — xem chú thích openRecipeEditor).
+          const ty = row.refType || 'item';
+          const hit = kind==='item' ? (ty==='item' && row.itemId===id) : (ty==='prep' && row.prepId===id);
+          if(!hit) return;
+          const menuId = menuRefKey.split(':')[1];
+          const m = menu.find(x=>x.id===menuId);
+          usage.push({ menuName: m ? m.name : '(món không còn trong menu POS)', size, qty: row.qty, unit: row.unit });
+        });
+      });
+    });
+    if(_histCtx) _histCtx.recipeUsage = usage;
+  }catch(err){
+    console.error('histLoadRecipeUsage lỗi', err);
+    toast('⚠️ Không tải được danh sách món dùng nguyên liệu này');
+  }
+  if(_histCtx) _histCtx.recipeUsageLoading = false;
+  _histRender();
+}
+function _histRecipeUsageHtml(c){
+  if(!c.recipeUsage && !c.recipeUsageLoading){
+    return `
+      <div class="card" style="margin-bottom:10px;padding:12px 14px">
+        <div class="card-h"><h3>${ic('note')} Dùng trong công thức nào</h3></div>
+        <div class="small-note" style="margin-bottom:8px">Quét toàn bộ định mức món trong menu — hơi tốn một lượt đọc nên để bấm mới tải.</div>
+        <button class="btn outline sm" style="width:auto;padding:0 12px" onclick="histLoadRecipeUsage()">Tải danh sách</button>
+      </div>`;
+  }
+  if(c.recipeUsageLoading){
+    return `<div class="card" style="margin-bottom:10px;padding:12px 14px"><div class="muted">Đang quét định mức...</div></div>`;
+  }
+  const list = c.recipeUsage || [];
+  return `
+    <div class="card" style="margin-bottom:10px;padding:12px 14px">
+      <div class="card-h"><h3>${ic('note')} Dùng trong công thức (${list.length})</h3>
+        <button class="btn outline sm" style="width:auto;padding:0 10px" onclick="closeEditSheet(); goKho('recipe');">Xem Định mức món</button></div>
+      ${list.length ? list.map(u=>`
+        <div class="row"><span class="rl">${escapeHtmlAttr(u.menuName)} <span class="small-note">(size ${escapeHtmlAttr(u.size)})</span></span>
+          <span class="rv">${fmtNum(Number(u.qty)||0,2)} ${escapeHtmlAttr(u.unit||'')}</span></div>`).join('')
+        : '<div class="small-note">Không món nào trong menu POS dùng nguyên liệu/BTP này theo định mức đã khai.</div>'}
+    </div>`;
+}
+
+// ------------------------------------------------------------
+// GIẢI THÍCH TỒN KHO (Stock Explanation) — kế hoạch cải tổ UX, Phase 9.
+//
+// Không phải màn riêng: đây là một khối thêm vào NGAY sheet "Lịch sử" đã có
+// (mở từ nút đồng hồ ở Nguyên liệu/Chế biến cấp 1) — trả lời "tồn hiện tại
+// hình thành từ đâu" bằng cách cộng dồn ledger theo từng loại giao dịch.
+//
+// Giới hạn cần nói thẳng: _histLoad chỉ lấy tối đa 400 giao dịch gần nhất
+// (hoặc bản rút gọn khi thiếu index — xem c.partial). Với món biến động
+// nhiều, tổng cộng dồn ở đây có thể KHÔNG phải toàn bộ lịch sử — báo rõ thay
+// vì im lặng đưa ra một con số trông có vẻ chính xác nhưng sai.
+//
+// Phần dư (currentStock − tổng ledger đã tải) KHÔNG bị gọi là hao hụt. Phần
+// lớn trường hợp đây là tồn đầu khai tay lúc tạo nguyên liệu (addInventoryItem
+// ghi thẳng currentStock, không qua một dòng ledger nào) — đúng bản chất
+// "LEGACY/chưa qua sổ" mà kế hoạch yêu cầu, không phải WASTE.
+// ------------------------------------------------------------
+// Nhãn cho MỌI type từng xuất hiện ở hai ledger (nguyên liệu lẫn BTP), kể cả
+// type cũ chữ thường trước Giai đoạn 3 và PRODUCTION/SALE riêng của tầng Chế
+// biến. Một chỗ duy nhất để _histRender() (cột "loại") và khối "Giải thích
+// tồn kho" bên dưới cùng đọc — sửa nhãn một nơi, khỏi lệch giữa hai chỗ.
+const HIST_EXTRA_TYPE_LABEL = {
+  STOCK_IN:['Nhập kho','green'], SALE:['Bán ra','blue'], PRODUCTION:['Nấu ra lô','green'],
+  ADJUSTMENT:['Điều chỉnh','amber'], WASTE:['Hao hụt','red']
+};
+function _histTypeLabel(ty){
+  const t = String(ty||'').toUpperCase();
+  if(STOCK_TX_TYPES[t]) return [STOCK_TX_TYPES[t].label, STOCK_TX_TYPES[t].color];
+  if(HIST_EXTRA_TYPE_LABEL[t]) return HIST_EXTRA_TYPE_LABEL[t];
+  return null;
+}
+const HIST_TYPE_ORDER = ['RECEIVING','TRANSFER','CONSUMPTION','PRODUCTION','WASTE','ADJUSTMENT','LOC_SET','STOCK_IN','SALE'];
+
+// ------------------------------------------------------------
+// CONTEXT NAVIGATION (Phase 5) — "đang xem một nguyên liệu, các chức năng liên
+// quan phải ở gần đối tượng đó". Container (chai/tem) là chức năng liên quan
+// hay bị hỏi nhất khi đang xem MỘT nguyên liệu cụ thể ("chai sữa đang mở còn
+// bao nhiêu, ai mở"), nhưng trước đây phải rời khỏi Nguyên liệu, qua hẳn màn
+// Container rồi tự dò trong danh sách lẫn lộn mọi món. Giờ hiện thẳng trong
+// cùng sheet — chỉ với món có bật dán tem (itemTrackingMode !== 'none').
+// ------------------------------------------------------------
+function _histContainerHtml(c){
+  if(c.kind !== 'item' || !c.trackingMode || c.trackingMode === 'none') return '';
+  const list = c.containers || [];
+  const dt = iso => { const d = iso ? new Date(iso) : null; return (d && !isNaN(d)) ? `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}` : '—'; };
+  const rows = list.map(x=>`
+    <div class="row">
+      <span class="rl">${escapeHtmlAttr(x.code||'(chưa có mã)')}
+        <div class="small-note" style="margin-top:1px">Mở ${dt(x.openedAt)} bởi ${escapeHtmlAttr(x.openedBy||'—')}</div></span>
+      <span class="rv">${x.expiresAt ? 'hạn '+dt(x.expiresAt) : ''}</span>
+    </div>`).join('');
+  return `
+    <div class="card" style="margin-bottom:10px;padding:12px 14px">
+      <div class="card-h"><h3>${ic('package')} Đang mở & tem${list.length?` (${list.length})`:''}</h3>
+        <button class="btn outline sm" style="width:auto;padding:0 10px" onclick="closeEditSheet(); goContainers('open');">Xem màn Container</button></div>
+      ${list.length ? rows : '<div class="small-note">Không có chai/gói nào đang mở cho món này ngay lúc này.</div>'}
+    </div>`;
+}
+
+// ------------------------------------------------------------
+// ĐỐI CHIẾU SỔ KHO VỚI TEM — "Ledger ≠ Container" (Phase 9/11 của kế hoạch).
+//
+// Công thức và dữ liệu đều TÁI DÙNG nguyên xi cơ chế đã có ở Kho → Container →
+// Tồn lịch sử (renderKhoLegacyStock/docTemConSongTheoMon, xem chú thích "TỒN
+// LỊCH SỬ TRƯỚC KHI DÁN TEM" phía trên): sổ kho = tem đang giữ (mọi tem
+// sealed+open còn sống) + tồn lịch sử đã chốt (untrackedBase). KHÔNG tự nghĩ ra
+// công thức đối chiếu mới ở đây — chỉ hiện lại đúng con số đó ngay tại sheet
+// của từng món, để khỏi phải nhớ có màn "Tồn lịch sử" riêng mới xem được.
+//
+// Chưa chốt mốc thì KHÔNG đối chiếu được (không phải "chưa có vấn đề gì" —
+// khác hẳn nhau) — nói rõ ra thay vì im lặng bỏ qua.
+// ------------------------------------------------------------
+function _histReconcileHtml(c){
+  if(c.kind !== 'item' || !c.trackingMode || c.trackingMode === 'none') return '';
+  const unit = escapeHtmlAttr(c.unit||'');
+  const ton = Number(c.stock) || 0;
+  const tem = Number(c.liveContainerSum) || 0;
+  const moc = c.untrackedBase; // null = chưa chốt mốc tồn lịch sử
+  if(moc === null){
+    return `
+      <div class="card" style="margin-bottom:10px;padding:12px 14px">
+        <div class="card-h"><h3>${ic('detective')} Đối chiếu sổ kho với tem</h3><span class="tier tier-amber">🟡 Chưa chốt mốc</span></div>
+        <div class="small-note">Món này bật dán tem nhưng chưa chốt "mốc tồn lịch sử" (phần tồn có từ trước ngày bắt đầu dán tem, không có tem nào đại diện) — nên chưa đối chiếu số được, chứ không phải đang khớp.
+        <a href="#" onclick="closeEditSheet(); goContainers('legacy'); return false">Chốt mốc ở Kho → Container → Tồn lịch sử</a>.</div>
+      </div>`;
+  }
+  const lech = ton - moc - tem;
+  const khop = Math.abs(lech) < 0.5;
+  return `
+    <div class="card" style="margin-bottom:10px;padding:12px 14px">
+      <div class="card-h"><h3>${ic('detective')} Đối chiếu sổ kho với tem</h3>
+        <span class="tier tier-${khop?'green':'amber'}">${khop?'🟢 Khớp':'🟡 Có chênh lệch'}</span></div>
+      <div class="row"><span class="rl">Sổ kho (tồn hiện tại)</span><span class="rv">${fmtNum(ton,1)} ${unit}</span></div>
+      <div class="row"><span class="rl">Tem đang giữ (chai/gói còn sống)</span><span class="rv">${fmtNum(tem,1)} ${unit}</span></div>
+      <div class="row"><span class="rl">Tồn lịch sử (mốc đã chốt)</span><span class="rv">${fmtNum(moc,1)} ${unit}</span></div>
+      ${!khop ? `
+      <div class="row" style="border-top:1.5px solid var(--line);font-weight:700">
+        <span class="rl">Chênh</span><span class="rv">${lech>=0?'+':'−'}${fmtNum(Math.abs(lech),1)} ${unit}</span>
+      </div>
+      <div class="small-note" style="margin-top:2px"><b>Không tự tính là hao hụt</b> — <a href="#" onclick="closeEditSheet(); goContainers('legacy'); return false">xem & xử lý ở Kho → Container → Tồn lịch sử</a> (chốt lại mốc hoặc xoá bằng điều chỉnh).</div>` : ''}
+    </div>`;
+}
+
+function _histTypeBreakdown(c){
+  const byType = {};   // rawTy (đã hoa) → {label, sum}
+  let unknownSum = 0, unknownCount = 0;
+  (c.rows||[]).forEach(t=>{
+    const rawTy = String(t.type||'').toUpperCase();
+    const lbl = _histTypeLabel(rawTy);
+    if(!lbl){ unknownSum += Number(t.qty)||0; unknownCount++; return; }
+    if(!byType[rawTy]) byType[rawTy] = { label: lbl[0], sum: 0 };
+    byType[rawTy].sum += Number(t.qty)||0;
+  });
+  const ledgerTotal = Object.values(byType).reduce((s,x)=>s+x.sum, unknownSum);
+  const truncated = !!c.partial || (c.rows||[]).length >= 400;
+  return { byType, unknownSum, unknownCount, ledgerTotal, truncated };
+}
+function _histBreakdownHtml(c){
+  const unit = escapeHtmlAttr(c.unit||'');
+  const bd = _histTypeBreakdown(c);
+  const stock = Number(c.stock)||0;
+  const residual = stock - bd.ledgerTotal;
+  const matched = Math.abs(residual) < 0.001;
+  const rowBtn = (label, val, filterKey)=>`
+    <button class="row" style="width:100%;text-align:left;background:none;border:none;font:inherit;cursor:pointer;color:inherit;padding:8px 0" onclick="histSetFilter('${filterKey}')">
+      <span class="rl">${label}</span>
+      <span class="rv">${val>=0?'+':'−'}${fmtNum(Math.abs(val),1)} ${unit}</span>
+    </button>`;
+  const orderedKeys = Object.keys(bd.byType).sort((a,b)=>{
+    const ia = HIST_TYPE_ORDER.indexOf(a), ib = HIST_TYPE_ORDER.indexOf(b);
+    return (ia<0?99:ia) - (ib<0?99:ib);
+  });
+  const typeRows = orderedKeys.map(k=> rowBtn(bd.byType[k].label, bd.byType[k].sum, k)).join('');
+  const legacyRow = bd.unknownCount
+    ? rowBtn(`Loại chưa nhận diện được (${bd.unknownCount} dòng)`, bd.unknownSum, '_legacy') : '';
+  if(!typeRows && !legacyRow) return '';
+  const badge = matched
+    ? `<span class="tier tier-green">🟢 Khớp với sổ kho</span>`
+    : `<span class="tier tier-amber">🟡 Có phần chưa qua sổ kho</span>`;
+  return `
+    <div class="card" style="margin-bottom:10px;padding:12px 14px">
+      <div class="card-h"><h3>${ic('search')} Tồn hiện tại hình thành từ</h3>${badge}</div>
+      ${typeRows}${legacyRow}
+      ${!matched ? `
+      <div class="row" style="border-top:1px dashed var(--line)">
+        <span class="rl">Số dư chưa qua sổ kho (thường là tồn khai tay lúc tạo món)</span>
+        <span class="rv">${residual>=0?'+':'−'}${fmtNum(Math.abs(residual),1)} ${unit}</span>
+      </div>
+      <div class="small-note" style="margin-top:2px"><b>Không phải hao hụt</b> — chỉ là phần chưa có dòng ledger nào giải thích.${bd.truncated ? ' Ngoài ra danh sách chỉ tải '+((c.rows||[]).length)+' giao dịch gần nhất nên số này có thể còn lẫn giao dịch cũ hơn chưa tính vào.' : ''}</div>` : ''}
+      <div class="row" style="border-top:1.5px solid var(--line);font-weight:700">
+        <span class="rl">Tồn hiện tại</span>
+        <span class="rv">${fmtNum(stock,1)} ${unit}</span>
+      </div>
+    </div>`;
+}
+
 // Gộp các lượt BÁN RA cùng ngày thành một dòng. Chỉ gộp bán ra thường: hao hụt,
 // điều chỉnh, nhập kho — mỗi dòng là một sự kiện riêng cần truy được, không gộp.
 function _histCollapseSales(rows){
@@ -20088,12 +21265,30 @@ function _histRender(){
   if(!box || !_histCtx) return;
   const c = _histCtx, unit = escapeHtmlAttr(c.unit||'');
   const all = _histCollapseSales(c.rows);
-  const rows = c.filter==='all' ? all : all.filter(t=>_histGroupOf(t)===c.filter);
+  // Bấm vào một dòng trong khối "Giải thích tồn kho" lọc theo ĐÚNG loại giao dịch
+  // (RECEIVING/WASTE/...) hoặc '_legacy' — chi tiết hơn 5 chip có sẵn bên dưới
+  // (vốn chỉ gộp thô vào/ra/hao hụt/điều chỉnh), nên xử lý riêng trước khi rơi
+  // về _histGroupOf.
+  // Lọc đúng CONSUMPTION/SALE thì KHÔNG gộp theo ngày (khác các loại khác) —
+  // Transaction Drill-down (Phase 10) cần thấy từng lượt bán riêng để bấm ra
+  // đúng bill đã tạo ra nó; gộp lại thì một dòng đại diện cả ngày, không còn
+  // referenceId của một bill cụ thể nào nữa để trỏ tới.
+  const rows = c.filter==='all' ? all
+    : c.filter==='_legacy' ? all.filter(t=>!_histTypeLabel(t.type))
+    : (c.filter==='CONSUMPTION' || c.filter==='SALE') ? c.rows.filter(t=>String(t.type||'').toUpperCase()===c.filter)
+    : _histTypeLabel(c.filter) ? all.filter(t=>String(t.type||'').toUpperCase()===c.filter)
+    : all.filter(t=>_histGroupOf(t)===c.filter);
 
   const chips = HIST_GROUPS.map(g=>{
     const n = g.key==='all' ? all.length : all.filter(t=>_histGroupOf(t)===g.key).length;
     return `<button class="ftag ${c.filter===g.key?'active':''}" onclick="histSetFilter('${g.key}')">${g.label} (${n})</button>`;
   }).join('');
+  // Lọc theo loại chính xác/legacy không khớp chip nào — nói rõ đang lọc gì và
+  // cho lối thoát nhanh, tránh người dùng tưởng bộ lọc bị treo.
+  const exactFilterLabel = _histTypeLabel(c.filter) ? _histTypeLabel(c.filter)[0]
+    : c.filter==='_legacy' ? 'Loại chưa nhận diện được' : '';
+  const exactFilterNote = exactFilterLabel
+    ? `<div class="small-note" style="margin:6px 0">Đang lọc: <b>${exactFilterLabel}</b> · <a href="#" onclick="histSetFilter('all');return false">Xem tất cả</a></div>` : '';
 
   // Gom theo ngày, mới nhất trước — mỗi ngày kèm tổng biến động ròng của ngày đó.
   const byDay = {};
@@ -20103,13 +21298,7 @@ function _histRender(){
   });
   const days = Object.keys(byDay).sort((a,b)=>b.localeCompare(a));
 
-  const typeLabelOf = t=>{
-    const ty = String(t.type||'').toUpperCase();
-    if(STOCK_TX_TYPES[ty]) return [STOCK_TX_TYPES[ty].label, STOCK_TX_TYPES[ty].color];
-    const L = {STOCK_IN:['Nhập kho','green'], SALE:['Bán ra','blue'], PRODUCTION:['Nấu ra lô','green'],
-               ADJUSTMENT:['Điều chỉnh','amber'], WASTE:['Hao hụt','red']};
-    return L[ty] || [t.type||'—','blue'];
-  };
+  const typeLabelOf = t=> _histTypeLabel(t.type) || [t.type||'—','blue'];
 
   const body = days.length ? days.map(d=>{
     const list = byDay[d];
@@ -20135,10 +21324,19 @@ function _histRender(){
           t.reason ? escapeHtmlAttr(t.reason) : '',
           t.source==='pos' ? 'từ POS' : ''
         ].filter(Boolean).join(' · ');
+        // Transaction Drill-down (Phase 10) — CONSUMPTION/SALE không gộp (xem
+        // khai báo `rows` ở trên) có referenceId = đúng khoá bill đã tạo ra
+        // giao dịch này (POS ghi thẳng lúc trừ kho — applySalesConsumptionPOS
+        // → applyStockTransaction{referenceId: orderId}). Bấm ra đúng bill đó,
+        // không dò bằng tay qua Lịch sử bill.
+        const ty2 = String(t.type||'').toUpperCase();
+        const xemBill = (!t._grouped && t.referenceId && (ty2==='CONSUMPTION' || ty2==='SALE'))
+          ? `<button class="btn outline sm" style="width:auto;padding:0 8px;margin-top:4px" onclick="closeEditSheet(); goBillDetail('${t.referenceId}','${escapeHtmlAttr(t.businessDate||'')}')">${ic('receipt',13)} Xem bill</button>` : '';
         return `<div class="litem">
           <div class="li-l">
             <div>${escapeHtmlAttr(gio || '--:--')} <span class="tier tier-${col}" style="margin-left:4px">${lb}</span></div>
             ${meta ? `<div>${meta}</div>` : ''}
+            ${xemBill}
           </div>
           <div class="li-r" style="text-align:right;display:block">
             <div style="font-weight:800;color:${q>0?'var(--ok)':(q<0?'var(--bad)':'var(--gt)')}">${(q>0?'+':'')+fmtNum(q,1)} ${unit}</div>
@@ -20155,14 +21353,30 @@ function _histRender(){
       ${c.indexUrl ? `<br><a href="${escapeHtmlAttr(c.indexUrl)}" target="_blank" rel="noopener">Bấm đây để Firestore tạo chỉ mục</a> (một lần, vài phút), sau đó mở lại màn này.` : ''}</div>
     </div>` : '';
 
+  // Related Actions (Phase 6) — chỉ cho Nguyên liệu: "đang xem tồn kho của món
+  // này, tiếp theo thường làm gì?" → đi kiểm kê, hoặc xem lệch kho theo kỳ.
+  // BTP không có hai đường này (Kiểm kê ở đây là hàng đợi duyệt kiểm kê NGUYÊN
+  // LIỆU; BTP đếm cuối ca theo cơ chế khác — xem alert 'prep_count_variance').
+  const relatedActions = c.kind==='item' ? `
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+      <button class="btn outline sm" style="width:auto;padding:0 10px" onclick="closeEditSheet(); goKho('stockcount');">${ic('clipboard',13)} Kiểm kê</button>
+      <button class="btn outline sm" style="width:auto;padding:0 10px" onclick="closeEditSheet(); goKho('lechkho');">${ic('detective',13)} Lệch kho & định lượng</button>
+    </div>` : '';
+
   box.innerHTML = `
     <div class="card" style="margin-bottom:10px;padding:12px 14px">
       <div style="font-size:12.5px;color:var(--gt)">Tồn hiện tại</div>
       <div style="font-size:20px;font-weight:800;color:var(--td)">${fmtNum(c.stock,1)} ${unit}</div>
       <div class="small-note" style="margin-top:2px">${all.length} dòng · mới nhất trước${c.partial?'':' · tối đa 400 giao dịch gần nhất'}</div>
+      ${relatedActions}
     </div>
     ${canhBao}
+    ${_histContainerHtml(c)}
+    ${_histReconcileHtml(c)}
+    ${_histRecipeUsageHtml(c)}
+    ${_histBreakdownHtml(c)}
     <div class="filter-bar" style="margin-bottom:2px">${chips}</div>
+    ${exactFilterNote}
     ${body}
   `;
 }
@@ -20189,26 +21403,60 @@ async function renderKhoHistory(){
   box.innerHTML = `
     <div class="filter-bar">${KHO_HIST_SRC.map(x=>
       `<button class="ftag ${khoHistSrc===x.k?'active':''}" onclick="khoHistSetSrc('${x.k}')">${x.label}</button>`).join('')}</div>
+    ${khoHistSrc==='items' ? `
+    <div class="field" style="margin:12px 0 0">
+      <label>Lọc theo tên nhân viên (trong phạm vi gần đây bên dưới)</label>
+      <input type="text" placeholder="VD: Lan" value="${escapeHtmlAttr(khoHistStaffFilter)}" oninput="khoHistSetStaffFilter(this.value)">
+    </div>` : ''}
     <div id="khoHistBody"><div class="muted">Đang tải...</div></div>`;
   if(khoHistSrc==='prep') return renderKhoHistPrep();
   if(khoHistSrc==='batches') return renderKhoHistBatches();
   return renderKhoHistItems();
 }
 
+// UX Scenario Audit (Phase 20, mục #2) phát hiện: không có cách nào xem
+// nhanh "nhân viên A gần đây đã ghi những gì" (đặc biệt là WASTE) — phải tự
+// dò bằng mắt trong danh sách trộn lẫn mọi người. Thêm ô lọc theo tên, CHỈ
+// lọc phía CLIENT trên dữ liệu ĐÃ TẢI (không gọi lại Firestore mỗi lần gõ —
+// tách phần tải dữ liệu (renderKhoHistItems, gọi 1 lần khi vào tab/bấm lọc
+// nguồn) khỏi phần vẽ lại (renderKhoHistItemsBody, gọi lại mỗi lần gõ ô lọc).
+//
+// Giới hạn cần nói rõ: màn này vốn chỉ hiện GẦN ĐÂY (50 giao dịch/10 phiếu
+// kiểm kho/15 phiếu nhận gần nhất của CẢ CỬA HÀNG, không riêng theo ngày) —
+// ô lọc chỉ thu hẹp trong phạm vi đó, không phải audit toàn bộ lịch sử của
+// một nhân viên. Muốn tra xa hơn phải mở sheet 🕐 của từng nguyên liệu.
+let khoHistStaffFilter = '';
+let _khoHistItemsCache = null;   // {txs, counts, receivings, locations} — nạp 1 lần, lọc nhiều lần
+
 async function renderKhoHistItems(){
   const box = document.getElementById('khoHistBody');
   if(!box) return;
   showLoading(box);
-  let txs = [], counts = [], receivings = [], locations = [];
   try{
-    [txs, counts, receivings, locations] = await Promise.all([loadStockTransactions(50), loadStockCounts(10), loadReceivingRecords(15), loadStorageLocations()]);
+    const [txs, counts, receivings, locations] = await Promise.all([loadStockTransactions(50), loadStockCounts(10), loadReceivingRecords(15), loadStorageLocations()]);
     STORAGE_LOCATIONS = locations;
+    _khoHistItemsCache = { txs, counts, receivings, locations };
   }catch(err){
     console.error('loadStockTransactions/loadStockCounts/loadReceivingRecords/loadStorageLocations failed', err);
     box.innerHTML = '<div class="muted">Không tải được lịch sử.</div>';
     showError('Không đọc được lịch sử kho: '+(err.code||err.message||err));
     return;
   }
+  renderKhoHistItemsBody();
+}
+function khoHistSetStaffFilter(v){
+  khoHistStaffFilter = v || '';
+  renderKhoHistItemsBody();
+}
+function renderKhoHistItemsBody(){
+  const box = document.getElementById('khoHistBody');
+  if(!box || !_khoHistItemsCache) return;
+  const { locations } = _khoHistItemsCache;
+  const q = noAccent(khoHistStaffFilter.trim());
+  const matchStaff = name => !q || noAccent(String(name||'')).includes(q);
+  const receivings = _khoHistItemsCache.receivings.filter(r=>matchStaff(r.staff));
+  const counts = _khoHistItemsCache.counts.filter(c=>matchStaff(c.countedBy));
+  const txs = _khoHistItemsCache.txs.filter(tx=>matchStaff(tx.staff));
   const itemName = id => (INVENTORY_ITEMS.find(x=>x.id===id)||{}).name || '(nguyên liệu đã xoá)';
   const locName = id => (locations.find(x=>x.id===id)||{}).name || '(vị trí đã xoá)';
   // Hỗ trợ cả type MỚI (chuẩn hoá, chữ hoa — xem STOCK_TX_TYPES) lẫn type CŨ (chữ thường,
@@ -20218,6 +21466,9 @@ async function renderKhoHistItems(){
     if(STOCK_TX_TYPES[tx.type]) return [STOCK_TX_TYPES[tx.type].label, STOCK_TX_TYPES[tx.type].color];
     return LEGACY_TYPE_LABEL[tx.type] || [tx.type, 'blue'];
   };
+  const emptyMsg = base => q
+    ? `Không có ${base} nào khớp "${escapeHtmlAttr(khoHistStaffFilter)}" trong phạm vi gần đây.`
+    : `Chưa có ${base} nào.`;
   box.innerHTML = `
     <div class="sec-title">Phiếu nhận hàng gần đây (từ POS)</div>
     ${receivings.length ? receivings.map(r=>{
@@ -20240,7 +21491,7 @@ async function renderKhoHistItems(){
         </div>
         <div class="li-r"></div>
       </div>`;
-    }).join('') : '<div class="muted">Chưa có phiếu nhận hàng nào từ POS.</div>'}
+    }).join('') : `<div class="muted">${emptyMsg('phiếu nhận hàng từ POS')}</div>`}
 
     <div class="sec-title">Kiểm kho gần đây (nhập ở app POS — duyệt ở tab "Kiểm kê")</div>
     ${counts.length ? counts.map(c=>{
@@ -20250,7 +21501,7 @@ async function renderKhoHistItems(){
         <div class="li-l"><div>Kiểm kho ${c.countedBy?('· '+c.countedBy):''} <span class="tier tier-${st[1]}" style="margin-left:4px">${st[0]}</span></div><div>${(c.createdAt||'').slice(0,10)} · ${(c.items?Object.keys(c.items).length:0)} nguyên liệu</div></div>
         <div class="li-r"></div>
       </div>`;
-    }).join('') : '<div class="muted">Chưa có lần kiểm kho nào từ POS.</div>'}
+    }).join('') : `<div class="muted">${emptyMsg('lần kiểm kho từ POS')}</div>`}
 
     <div class="sec-title">Biến động kho gần đây</div>
     ${txs.length ? txs.map(tx=>{
@@ -20268,7 +21519,7 @@ async function renderKhoHistItems(){
         <div>${(tx.createdAt||'').replace('T',' ').slice(0,16)} ${tx.staff?('· '+tx.staff):''} ${tx.note?('· '+tx.note):''}${src}</div></div>
         <div class="li-r">${tx.qty>0?'+':''}${fmtNum(tx.qty,1)}<br><span class="small-note">còn ${fmtNum(tx.resultingStock,1)}</span></div>
       </div>`;
-    }).join('') : '<div class="muted">Chưa có biến động kho nào.</div>'}
+    }).join('') : `<div class="muted">${emptyMsg('biến động kho')}</div>`}
   `;
 }
 
@@ -21535,6 +22786,11 @@ function saveTopping() {
   // [GĐ6] Vẽ sidebar + thanh chuyển báo cáo, rồi vào màn mặc định "Sức khoẻ quán".
   renderSidebarNav();
   renderReportSubNav();
+  // Init không đi qua switchScreen() (xem chú thích renderToday() ngay dưới) nên
+  // nút ⭐ ở topbar cũng phải tự cập nhật ở đây, không thì màn mặc định 'today'
+  // có lỡ được đánh dấu yêu thích thì nút vẫn hiện trạng thái tắt cho tới khi
+  // đổi màn một lần.
+  updateFavBtn();
   // [BÊ TỪ POS] Gắn listener đồng bộ cấu hình khuyến mãi/phí sàn — gắn MỘT LẦN
   // ở init (không đặt trong switchScreen, kẻo mỗi lần đổi màn lại chồng thêm một
   // listener nữa lên cùng một node Firebase).
@@ -21546,7 +22802,13 @@ function saveTopping() {
   // chạy — mở app lần đầu là trống trơn, phải bấm Tải lại mới có số.
   // renderToday() đã tự gọi renderStoreHealth('todayHealth') bên trong (và nó gọi
   // tiếp renderBookAlerts('todayBook')), nên gọi đúng một hàm này là đủ cả ba khối.
-  await renderToday();
+  //
+  // Deep link (Phase 7) — mở app bằng link có #kho:items thì vào THẲNG đó thay
+  // vì luôn về "Hôm nay" rồi bắt tự bấm lại. tryOpenDeepLink() tự gọi đúng
+  // switchScreen()/goKho()/goEntry() bên trong nếu hash hợp lệ, nên lúc đó
+  // không cần renderToday() nữa — gọi cả hai sẽ vẽ "Hôm nay" một lượt thừa rồi
+  // bị màn đích ghi đè ngay sau đó.
+  if(!tryOpenDeepLink()) await renderToday();
 })();
 
 // ============================================================
