@@ -1442,6 +1442,19 @@ html.phone-ui .nav-search .ns-kbd{display:none;}
       </div>
     </div>
 
+    <!-- 🆕 LỆCH BÁN THÀNH PHẨM -->
+    <div class="screen" id="screen-btpvariance">
+      <div class="wrap">
+        <div id="reportSubNavBtpvariance"></div>
+        <div class="seg" id="btpVarianceSeg">
+          <button data-p="week" class="active">7 ngày</button>
+          <button data-p="month">Tháng</button>
+          <button data-p="all">60 ngày</button>
+        </div>
+        <div id="btpVarianceBody"></div>
+      </div>
+    </div>
+
     <!-- ENTRY -->
     <div class="screen" id="screen-entry">
       <div class="wrap">
@@ -5427,6 +5440,385 @@ function deletePrepItem(id){
   return fstore.collection('prep_items_gieogieo').doc(id).delete();
 }
 
+// ============================================================
+// [NEW] ĐỐI SOÁT LỆCH BÁN THÀNH PHẨM — prep_variance_gieogieo
+//
+// POS đếm BTP cuối ca rồi GHI ĐÈ THẲNG tồn kho (xem ghi chú ở khối "CHỈNH TỒN
+// BÁN THÀNH PHẨM" phía dưới) — mỗi lần như vậy đã để lại một dòng bất biến
+// prep_transactions_gieogieo (type ADJUSTMENT, có previousStock/resultingStock/
+// qty/businessDate). Đó là dữ liệu GỐC, không đụng tới.
+//
+// Nhưng một con số lệch tại một thời điểm KHÔNG nói lên gì cả — dư 100g hôm nay
+// có thể là hàng thật bán được thêm ngày mai, cũng có thể là đếm sai/đổ bỏ mà
+// quên ghi. Khối này xây một CASE riêng cho mỗi lần lệch, theo dõi tiếp diễn
+// biến các ngày sau bằng chính ledger PRODUCTION/CONSUMPTION/WASTE thật đã có,
+// để tự kết luận (chứ không đoán) phần lệch đó đã thật sự được dùng chưa.
+//
+// Đây là lớp QUAN SÁT THUẦN ĐỌC: không sửa prep_items/prep_batches/
+// prep_transactions, không đổi cách POS hoạt động — chỉ tạo case theo dõi
+// riêng trong collection này.
+//
+// ĐỘ TIN CẬY KHÁC NHAU GIỮA HAI CHIỀU — phải phân biệt rõ khi hiển thị:
+//   Lệch DƯƠNG (dư): xác nhận CHẮC CHẮN bằng "quỹ đạo giả định" — dựng lại tồn
+//     kho NHƯ THỂ không có lần điều chỉnh dư này rồi chạy tiếp các giao dịch
+//     thật. Quỹ đạo giả định tụt xuống ÂM ở đâu thì phần dư đã được dùng thật
+//     tới đó — đây là suy luận từ dữ liệu thật, không phải đoán.
+//   Lệch ÂM (thiếu): không có kế hoạch sản xuất để đối chiếu chắc chắn "nấu bù
+//     vì thiếu" — chỉ ƯỚC LƯỢNG bằng cách so sản lượng mẻ sau đó với mức trung
+//     bình thường ngày (baseline). Mọi số theo hướng này gắn confidence:
+//     'estimated', không bao giờ trộn chung với số 'certain' của chiều dương.
+// ============================================================
+const PREP_VARIANCE_COLL = 'prep_variance_gieogieo';
+// Số ngày theo dõi tiếp một case trước khi ngừng cố truy vết (EXPIRED). Đủ dài
+// để bắt được nhịp bán vài ngày, không dài tới mức số liệu cũ lẫn vào số liệu mới.
+const PREP_VARIANCE_WINDOW_DAYS = 10;
+// Số ngày nhìn lùi để tính "mức nấu bình thường" (baseline) cho chiều âm.
+const PREP_VARIANCE_BASELINE_DAYS = 14;
+
+function pvAddDays(dateKey, n){
+  const d = new Date(dateKey + 'T00:00:00');
+  d.setDate(d.getDate() + n);
+  return dkey(d);
+}
+
+// Hàm THUẦN — quét RECIPES (đã có sẵn, không đoán định mức) tìm mọi món/size có
+// dùng bán thành phẩm này, quy đổi lệch ra "tương đương bao nhiêu phần" theo
+// đúng công thức đang khai. Một BTP có thể nằm trong nhiều món/size nên trả về
+// một mảng, không ép về một con số duy nhất.
+function computeEquivalentPortions(prepId, varianceQty){
+  const out = [];
+  Object.entries(RECIPES || {}).forEach(([menuRefKey, rec])=>{
+    const sizes = (rec && rec.sizes) || {};
+    Object.entries(sizes).forEach(([size, rows])=>{
+      (rows || []).forEach(r=>{
+        if(r.refType === 'prep' && r.prepId === prepId && Number(r.qty) > 0){
+          const qtyPerPortion = Number(r.qty);
+          out.push({ menuRefKey, size, qtyPerPortion, portions: Math.round((varianceQty / qtyPerPortion) * 100) / 100 });
+        }
+      });
+    });
+  });
+  return out;
+}
+
+// Hàm THUẦN — dựng 1 case mới từ đúng 1 dòng prep_transactions (ADJUSTMENT).
+// costPerUnit dùng prepCostOn(tại đúng businessDate của lần đếm) — không dùng
+// costPerUnit hiện tại, vì giá nguyên liệu đầu vào có thể đã đổi từ đó tới nay.
+function buildPrepVarianceCase(tx, txId){
+  const qty = Number(tx.qty) || 0;
+  const theoreticalQty = Number(tx.previousStock) || 0;
+  const actualQty = Number(tx.resultingStock) || 0;
+  const costPerUnit = prepCostOn(tx.prepId, tx.businessDate);
+  const varianceValue = Math.round(qty * costPerUnit);
+  return {
+    sourceTxId: txId,
+    prepId: tx.prepId || '', prepCode: tx.prepCode || '', prepName: tx.prepName || '', unit: tx.unit || '',
+    businessDate: tx.businessDate || '',
+    // POS chưa chắc dùng đúng field 'staff' — dự phòng vài tên field thường gặp;
+    // ghi tay từ Quản lý (submitPrepAdjust) không có tên người nên ghi rõ nguồn.
+    staff: tx.staff || tx.countedBy || tx.by || (tx.source === 'management' ? 'Quản lý (chỉnh tay)' : ''),
+    countedAt: tx.createdAt || '',
+    theoreticalQty, actualQty, varianceQty: qty,
+    variancePct: theoreticalQty > 0 ? Math.round((qty / theoreticalQty) * 1000) / 10 : null,
+    costPerUnit, varianceValue,
+    equivalentPortions: computeEquivalentPortions(tx.prepId, qty),
+    status: 'UNRESOLVED',
+    confidence: qty >= 0 ? 'certain' : 'estimated',
+    realizedQty: 0, realizedValue: 0,
+    unrealizedQty: Math.abs(qty), unrealizedValue: Math.abs(varianceValue),
+    additionalProductionQty: 0, additionalCost: 0,
+    evidenceTxIds: [],
+    windowEndsAt: pvAddDays(tx.businessDate || dkey(new Date()), PREP_VARIANCE_WINDOW_DAYS),
+    resolvedAt: null, resolutionNote: '',
+    createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
+  };
+}
+
+// Hàm THUẦN — CHIỀU DƯƠNG. events: mọi prep_transactions của CÙNG prepId, từ
+// sau ngày lệch tới windowEndsAt, đã gồm cả các ADJUSTMENT khác (để tự phát
+// hiện điểm dừng — mục "không tính trùng cost"). asOfDateKey để hàm biết cửa
+// sổ đã đóng hẳn hay còn đang mở, không phải đoán từ Date.now() bên trong.
+function pvReconcilePositive(kase, events, asOfDateKey){
+  const sorted = [...(events || [])].sort((a, b)=>{
+    const ka = String(a.businessDate || '') + String(a.createdAt || '');
+    const kb = String(b.businessDate || '') + String(b.createdAt || '');
+    return ka < kb ? -1 : (ka > kb ? 1 : 0);
+  });
+  const target = Math.abs(Number(kase.varianceQty) || 0);
+  let shadow = Number(kase.theoreticalQty) || 0;   // quỹ đạo NHƯ THỂ không có phần dư
+  let realized = 0;
+  const evidence = [];
+  let closedStatus = null, resolvedAt = null;
+
+  for(const ev of sorted){
+    if(String(ev.businessDate || '') > kase.windowEndsAt) break;
+    if(ev.type === 'ADJUSTMENT'){ closedStatus = 'ADJUSTED'; resolvedAt = ev.businessDate; evidence.push(ev.id); break; }
+    const delta = ev.type === 'PRODUCTION' ? Math.abs(Number(ev.qty) || 0)
+                : (ev.type === 'CONSUMPTION' || ev.type === 'WASTE') ? -Math.abs(Number(ev.qty) || 0)
+                : 0;
+    if(!delta) continue;
+    shadow += delta;
+    if(shadow < 0){
+      const need = target - realized;
+      const used = Math.min(need, -shadow);
+      realized += used;
+      shadow = 0; // phần thiếu hụt đã được "phần dư" bù — quỹ đạo giả định tiếp tục từ 0
+      evidence.push(ev.id);
+      if(realized >= target - 1e-9){ closedStatus = 'REALIZED'; resolvedAt = ev.businessDate; break; }
+    }
+  }
+
+  const unrealized = Math.max(0, Math.round((target - realized) * 100) / 100);
+  let status = closedStatus;
+  if(!status){
+    if(String(asOfDateKey) > kase.windowEndsAt) status = realized > 0 ? 'PARTIALLY_REALIZED' : 'EXPIRED';
+    else status = realized > 0 ? 'PARTIALLY_REALIZED' : 'CARRY_FORWARD';
+  }
+  return {
+    status, confidence: 'certain',
+    realizedQty: Math.round(realized * 100) / 100,
+    realizedValue: Math.round(realized * (Number(kase.costPerUnit) || 0)),
+    unrealizedQty: unrealized,
+    unrealizedValue: Math.round(unrealized * (Number(kase.costPerUnit) || 0)),
+    evidenceTxIds: evidence,
+    resolvedAt: resolvedAt || kase.resolvedAt || null
+  };
+}
+
+// Hàm THUẦN — CHIỀU ÂM. baselineBatchQty = mức nấu 1 mẻ BÌNH THƯỜNG (do caller
+// tính từ lịch sử PRODUCTION trước ngày lệch, truyền vào để hàm này vẫn thuần).
+// Sản lượng VƯỢT baseline trong cửa sổ theo dõi được coi là "nấu bù" — CHỈ LÀ
+// ƯỚC LƯỢNG, không phải bằng chứng chắc chắn như chiều dương.
+function pvReconcileNegative(kase, events, asOfDateKey, baselineBatchQty){
+  const sorted = [...(events || [])].sort((a, b)=>{
+    const ka = String(a.businessDate || '') + String(a.createdAt || '');
+    const kb = String(b.businessDate || '') + String(b.createdAt || '');
+    return ka < kb ? -1 : (ka > kb ? 1 : 0);
+  });
+  const deficit = Math.abs(Number(kase.varianceQty) || 0);
+  const baseline = Math.max(0, Number(baselineBatchQty) || 0);
+  let matched = 0;
+  const evidence = [];
+  let closedStatus = null, resolvedAt = null;
+
+  for(const ev of sorted){
+    if(String(ev.businessDate || '') > kase.windowEndsAt) break;
+    if(ev.type === 'ADJUSTMENT'){ closedStatus = 'ADJUSTED'; resolvedAt = ev.businessDate; evidence.push(ev.id); break; }
+    if(ev.type !== 'PRODUCTION') continue;
+    const excess = Math.max(0, (Number(ev.qty) || 0) - baseline);
+    if(excess <= 0) continue;
+    const need = deficit - matched;
+    const used = Math.min(need, excess);
+    matched += used;
+    evidence.push(ev.id);
+    if(matched >= deficit - 1e-9){ closedStatus = 'REALIZED'; resolvedAt = ev.businessDate; break; }
+  }
+
+  const unmatched = Math.max(0, Math.round((deficit - matched) * 100) / 100);
+  let status = closedStatus;
+  if(!status){
+    if(String(asOfDateKey) > kase.windowEndsAt) status = 'EXPIRED';
+    else status = matched > 0 ? 'PARTIALLY_REALIZED' : 'UNRESOLVED';
+  }
+  return {
+    status, confidence: 'estimated',
+    realizedQty: Math.round(matched * 100) / 100,
+    realizedValue: Math.round(matched * (Number(kase.costPerUnit) || 0)),
+    unrealizedQty: unmatched,
+    unrealizedValue: Math.round(unmatched * (Number(kase.costPerUnit) || 0)),
+    additionalProductionQty: Math.round(matched * 100) / 100,
+    additionalCost: Math.round(matched * (Number(kase.costPerUnit) || 0)),
+    evidenceTxIds: evidence,
+    resolvedAt: resolvedAt || kase.resolvedAt || null
+  };
+}
+
+// I/O — quét prep_transactions_gieogieo tìm ADJUSTMENT chưa có case, tạo case
+// mới. KHÔNG tự chạy đối soát ở đây (xem reconcilePrepVarianceCases) — tách
+// riêng để lần "ghi nhận" không bị chậm bởi lần "đối chiếu".
+async function ingestPrepVarianceCases(){
+  const todayKey = dkey(new Date());
+  const startKey = pvAddDays(todayKey, -(PREP_VARIANCE_WINDOW_DAYS + PREP_VARIANCE_BASELINE_DAYS + 3));
+  const [txSnap, existingSnap] = await Promise.all([
+    fstore.collection('prep_transactions_gieogieo')
+      .where('businessDate', '>=', startKey).where('businessDate', '<=', todayKey)
+      .where('type', '==', 'ADJUSTMENT').get(),
+    fstore.collection(PREP_VARIANCE_COLL)
+      .where('businessDate', '>=', startKey).where('businessDate', '<=', todayKey).get()
+  ]);
+  const existingIds = new Set(existingSnap.docs.map(d=> d.data().sourceTxId));
+  const toCreate = [];
+  txSnap.forEach(doc=>{
+    if(existingIds.has(doc.id)) return;
+    const tx = doc.data();
+    if(!tx.prepId || !Number(tx.qty)) return;
+    toCreate.push(buildPrepVarianceCase(tx, doc.id));
+  });
+  if(!toCreate.length) return 0;
+  const batch = fstore.batch();
+  toCreate.forEach(c=> batch.set(fstore.collection(PREP_VARIANCE_COLL).doc(), c));
+  await batch.commit();
+  return toCreate.length;
+}
+
+// I/O — đối soát các case còn mở: nạp giao dịch thật CỦA CÙNG BTP trong cửa sổ
+// theo dõi rồi chạy hàm thuần tương ứng. Cache theo ngày (giống _thvCache của
+// Thu hồi vốn) — trong CÙNG một phiên không cần tính lại mỗi lần vào màn.
+let _pvCache = null; // { key:'YYYY-MM-DD', data }
+async function reconcilePrepVarianceCases(force){
+  const todayKey = dkey(new Date());
+  if(!force && _pvCache && _pvCache.key === todayKey) return _pvCache.data;
+
+  const openSnap = await fstore.collection(PREP_VARIANCE_COLL)
+    .where('status', 'in', ['UNRESOLVED', 'CARRY_FORWARD', 'PARTIALLY_REALIZED']).get();
+  const openCases = openSnap.docs.map(d=>({ id: d.id, ...d.data() }));
+
+  const batch = fstore.batch();
+  let dirty = 0;
+  for(const kase of openCases){
+    const evSnap = await fstore.collection('prep_transactions_gieogieo')
+      .where('prepId', '==', kase.prepId)
+      .where('businessDate', '>=', kase.businessDate)
+      .where('businessDate', '<=', kase.windowEndsAt).get();
+    const events = evSnap.docs.filter(d=> d.id !== kase.sourceTxId).map(d=>({ id: d.id, ...d.data() }));
+
+    let updated;
+    if(Number(kase.varianceQty) >= 0){
+      updated = pvReconcilePositive(kase, events, todayKey);
+    } else {
+      const baseSnap = await fstore.collection('prep_transactions_gieogieo')
+        .where('prepId', '==', kase.prepId).where('type', '==', 'PRODUCTION')
+        .where('businessDate', '>=', pvAddDays(kase.businessDate, -PREP_VARIANCE_BASELINE_DAYS))
+        .where('businessDate', '<', kase.businessDate).get();
+      const prodQtys = baseSnap.docs.map(d=> Math.abs(Number(d.data().qty) || 0)).filter(q=> q > 0);
+      const baseline = prodQtys.length ? prodQtys.reduce((s, q)=> s + q, 0) / prodQtys.length : 0;
+      updated = pvReconcileNegative(kase, events, todayKey, baseline);
+    }
+
+    if(updated.status !== kase.status || updated.realizedQty !== kase.realizedQty || updated.additionalCost !== kase.additionalCost){
+      batch.update(fstore.collection(PREP_VARIANCE_COLL).doc(kase.id), { ...updated, updatedAt: new Date().toISOString() });
+      dirty++;
+    }
+  }
+  if(dirty){
+    await batch.commit().catch(err=> console.warn('[Lệch BTP] ghi cập nhật case lỗi (bỏ qua, tính lại lần sau):', err));
+  }
+
+  // Báo cáo nhìn tối đa 60 ngày gần nhất — đủ cho kỳ Tháng, không tải cả lịch sử.
+  const allSnap = await fstore.collection(PREP_VARIANCE_COLL)
+    .where('businessDate', '>=', pvAddDays(todayKey, -60)).get();
+  const data = allSnap.docs.map(d=>({ id: d.id, ...d.data() }));
+  _pvCache = { key: todayKey, data };
+  return data;
+}
+
+// Hàm THUẦN — mục 13 đặc tả: lệch cùng dấu lặp lại nhiều lần liên tiếp không
+// còn nên coi là "nhân viên đếm lệch ngẫu nhiên" nữa, mà là dấu hiệu công thức/
+// định lượng/waste có vấn đề — CHỈ gắn cờ để chủ quán xem lại, không tự kết luận.
+function detectPrepVariancePattern(casesOfPrepId){
+  const sorted = [...(casesOfPrepId || [])].sort((a, b)=> String(a.businessDate||'') < String(b.businessDate||'') ? -1 : 1);
+  const last = sorted.slice(-5);
+  if(last.length < 4) return null;
+  const allPos = last.every(c=> Number(c.varianceQty) > 0);
+  const allNeg = last.every(c=> Number(c.varianceQty) < 0);
+  if(!allPos && !allNeg) return null;
+  const avgPct = last.reduce((s, c)=> s + Math.abs(Number(c.variancePct) || 0), 0) / last.length;
+  if(avgPct < 5) return null;
+  return {
+    direction: allPos ? 'positive' : 'negative',
+    count: last.length, avgPct: Math.round(avgPct * 10) / 10,
+    message: allPos
+      ? 'Lệch dương lặp lại nhiều lần liên tiếp — công thức có thể đang định lượng cao hơn thực tế. Nên xem lại batchYield/batchInputs thay vì luôn coi là nhân viên đếm dư.'
+      : 'Lệch âm lặp lại nhiều lần liên tiếp — có thể định lượng thực tế cao hơn công thức, có waste chưa ghi nhận, hoặc nhân viên dùng vượt định mức.'
+  };
+}
+
+// ------------------------------------------------------------
+// [NEW] MÀN "LỆCH BTP" (nhóm Báo cáo)
+// ------------------------------------------------------------
+const PV_STATUS_LABEL = {
+  UNRESOLVED:          ['Chưa xác nhận',        'amber'],
+  CARRY_FORWARD:       ['Đang theo dõi',        'blue'],
+  PARTIALLY_REALIZED:  ['Một phần đã dùng',     'blue'],
+  REALIZED:            ['Đã xác nhận dùng',     'green'],
+  EXPIRED:             ['Hết hạn theo dõi',     'amber'],
+  ADJUSTED:            ['Bị lần lệch sau ghi đè','amber']
+};
+// Giá trị lệch từ đâu mới đáng để đưa vào danh sách "cần kiểm tra" — dưới mức
+// này thường chỉ là sai số đếm vặt, đưa hết vào sẽ làm danh sách thành rác.
+const PV_FLAG_VALUE_THRESHOLD = 20000;
+
+async function renderBtpVariance(){
+  const body = document.getElementById('btpVarianceBody');
+  if(!body) return;
+  body.innerHTML = '<div class="empty-hint">Đang tải…</div>';
+  try{
+    await Promise.all([loadInventoryItems(), loadPrepItems(), loadRecipes(), ensurePriceHistory()]);
+    await ingestPrepVarianceCases();
+    const all = await reconcilePrepVarianceCases();
+    const days = curBtpVariancePeriod==='week' ? 7 : curBtpVariancePeriod==='month' ? 30 : 60;
+    const fromKey = pvAddDays(dkey(new Date()), -days);
+    const cases = all.filter(c=> String(c.businessDate||'') >= fromKey);
+    body.innerHTML = renderBtpVarianceHTML(cases);
+  }catch(err){
+    console.error('renderBtpVariance failed', err);
+    body.innerHTML = `<div class="empty-hint">Lỗi tải dữ liệu Lệch BTP: ${escapeHtmlAttr(err.message || String(err))}</div>`;
+  }
+}
+
+function renderBtpVarianceHTML(cases){
+  if(!cases.length) return `<div class="empty-hint">Chưa có lần lệch BTP nào trong kỳ này.</div>`;
+
+  const pos = cases.filter(c=> Number(c.varianceQty) > 0);
+  const neg = cases.filter(c=> Number(c.varianceQty) < 0);
+  const sum = (arr, f)=> arr.reduce((s, c)=> s + (Number(c[f]) || 0), 0);
+
+  const posConfirmed = sum(pos, 'realizedValue');
+  const posUnconfirmed = sum(pos, 'unrealizedValue');
+  const negValue = sum(neg, 'varianceValue');           // âm sẵn
+  const negAdditionalCost = sum(neg, 'additionalCost');  // ước lượng
+
+  const flagged = cases.filter(c=> ['UNRESOLVED','EXPIRED'].includes(c.status) && Math.abs(Number(c.varianceValue)||0) >= PV_FLAG_VALUE_THRESHOLD);
+  const byPrep = {};
+  cases.forEach(c=>{ (byPrep[c.prepId] = byPrep[c.prepId] || []).push(c); });
+  const patterns = Object.values(byPrep).map(list=> detectPrepVariancePattern(list)).filter(Boolean);
+
+  return `
+    <div class="sec-title">Tổng hợp kỳ — không phải "lãi thêm"</div>
+    <div class="card">
+      <div class="row"><span class="rl">Lệch dương — đã xác nhận dùng<div class="small-note" style="margin-top:1px">chắc chắn: nếu không có phần dư thì đã không đủ hàng bán tiếp</div></span><span class="rv" style="color:var(--ok)">+${fmt(posConfirmed)}</span></div>
+      <div class="row"><span class="rl">Lệch dương — chưa xác nhận<div class="small-note" style="margin-top:1px">chưa có bằng chứng đã dùng — KHÔNG tính là tiết kiệm</div></span><span class="rv">${fmt(posUnconfirmed)}</span></div>
+      <div class="row"><span class="rl">Lệch âm — giá trị gốc</span><span class="rv" style="color:var(--bad)">${fmt(negValue)}</span></div>
+      <div class="row"><span class="rl">Lệch âm — cost nấu bù (ước lượng)<div class="small-note" style="margin-top:1px">so sản lượng mẻ sau với mức nấu bình thường — không phải bằng chứng trực tiếp</div></span><span class="rv" style="color:var(--bad)">${fmt(negAdditionalCost)}</span></div>
+    </div>
+
+    ${(flagged.length || patterns.length) ? `
+    <div class="sec-title">Cần kiểm tra</div>
+    <div class="card">
+      ${patterns.map(p=>`<div class="ac-infer" style="margin-bottom:8px">⚠️ ${escapeHtmlAttr(p.message)} (${p.count} lần gần nhất, TB ${p.avgPct}%)</div>`).join('')}
+      ${flagged.map(c=>`<div class="row"><span class="rl">${escapeHtmlAttr(c.prepName)} · ${c.businessDate}<div class="small-note" style="margin-top:1px">${escapeHtmlAttr((PV_STATUS_LABEL[c.status]||[c.status])[0])}</div></span><span class="rv">${c.varianceValue>=0?'+':''}${fmt(c.varianceValue)}</span></div>`).join('')}
+    </div>` : ''}
+
+    <div class="sec-title">Danh sách case (${cases.length})</div>
+    <div class="card" style="padding:6px 0"><div style="overflow-x:auto"><table class="kt" style="min-width:640px">
+      <thead><tr><th>Ngày</th><th>BTP</th><th style="text-align:right">Lý thuyết</th><th style="text-align:right">Thực tế</th><th style="text-align:right">Lệch</th><th style="text-align:right">Giá trị</th><th>Trạng thái</th></tr></thead>
+      <tbody>${cases.slice().sort((a,b)=> String(a.businessDate||'') < String(b.businessDate||'') ? 1 : -1).map(c=>{
+        const st = PV_STATUS_LABEL[c.status] || [c.status, 'blue'];
+        return `<tr>
+          <td>${escapeHtmlAttr(c.businessDate||'—')}</td>
+          <td>${escapeHtmlAttr(c.prepName||'')}${c.confidence==='estimated' ? ' <span class="small-note">(ước lượng)</span>' : ''}</td>
+          <td style="text-align:right">${fmtNum(c.theoreticalQty,1)} ${escapeHtmlAttr(c.unit||'')}</td>
+          <td style="text-align:right">${fmtNum(c.actualQty,1)} ${escapeHtmlAttr(c.unit||'')}</td>
+          <td style="text-align:right;color:${Number(c.varianceQty)>=0?'var(--ok)':'var(--bad)'}">${Number(c.varianceQty)>=0?'+':''}${fmtNum(c.varianceQty,1)}${c.variancePct!=null?` (${c.variancePct}%)`:''}</td>
+          <td style="text-align:right">${Number(c.varianceValue)>=0?'+':''}${fmt(c.varianceValue)}</td>
+          <td><span class="tier tier-${st[1]}">${escapeHtmlAttr(st[0])}</span></td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table></div></div>
+    <div class="small-note" style="margin-top:8px">Mỗi dòng ứng đúng 1 lần đếm cuối ca lệch (dữ liệu gốc <b>prep_transactions_gieogieo</b>, không sửa/ghi đè). Số "đã xác nhận dùng" tính chắc chắn từ dữ liệu bán/nấu/hao hụt thật sau đó; số "ước lượng" (lệch âm) chỉ so sánh với mức nấu bình thường, không phải bằng chứng trực tiếp.</div>
+  `;
+}
+
 // ------------------------------------------------------------
 // [NEW] TOPPING — GOGS — topping_recipes_gieogieo
 //
@@ -8047,6 +8439,9 @@ async function renderKhoLech(){
       <b>Chênh chưa giải thích = Thực tế − Lý thuyết − Hao hụt đã ghi.</b> Đây mới là phần cần đi tìm.<br>
       Chưa có <b>hai phiếu kiểm kê đã duyệt</b> kẹp hai đầu thì không có số thực tế — màn này sẽ nói thẳng là thiếu chứ không lấy tạm số sổ.
     </div>
+    <div class="small-note" style="margin:-6px 0 12px">Màn này đối chiếu <b>nguyên liệu thô</b>. Lệch <b>bán thành phẩm</b> (đếm cuối ca ở POS) có màn riêng —
+      <button class="btn outline sm" style="width:auto;padding:0 10px;display:inline-block" onclick="switchScreen('btpvariance')">${ic('detective',13)} Lệch BTP</button>
+    </div>
     <div id="thBody"></div>`;
   if(thKetQua) thVeBang();
 }
@@ -8915,6 +9310,7 @@ const NAV_SECTIONS = [
     {key:'report', ic:'chart',    label:'Báo cáo kỳ',         go:"switchScreen('report')"},
     {key:'mix',    ic:'clipboard', label:'Phân tích bán hàng', go:"switchScreen('mix')"},
     {key:'customer', ic:'users',   label:'Khách hàng',          go:"switchScreen('customer')"},
+    {key:'btpvariance', ic:'detective', label:'Lệch BTP',      go:"switchScreen('btpvariance')"},
   ]},
   { group:'Vận hành', items:[
     {key:'entry:ops',  ic:'note',    label:'Ghi chú ngày',  go:"goEntry('ops')"},
@@ -9934,10 +10330,10 @@ function khOpenDetail(id){
   `);
 }
 
-const REPORT_SCREENS = [ {s:'today',label:'Hôm nay'}, {s:'health',label:'Tài chính'}, {s:'report',label:'Theo kỳ'}, {s:'mix',label:'Bán hàng'}, {s:'customer',label:'Khách hàng'} ];
+const REPORT_SCREENS = [ {s:'today',label:'Hôm nay'}, {s:'health',label:'Tài chính'}, {s:'report',label:'Theo kỳ'}, {s:'mix',label:'Bán hàng'}, {s:'customer',label:'Khách hàng'}, {s:'btpvariance',label:'Lệch BTP'} ];
 function renderReportSubNav(){
   const html = `<div class="report-subnav">${REPORT_SCREENS.map(r=>`<button class="${curScreen===r.s?'active':''}" onclick="switchScreen('${r.s}')">${r.label}</button>`).join('')}</div>`;
-  ['reportSubNavToday','reportSubNavHealth','reportSubNavReport','reportSubNavMix','reportSubNavCustomer'].forEach(id=>{
+  ['reportSubNavToday','reportSubNavHealth','reportSubNavReport','reportSubNavMix','reportSubNavCustomer','reportSubNavBtpvariance'].forEach(id=>{
     const el = document.getElementById(id);
     if(el) el.innerHTML = html;
   });
@@ -9994,6 +10390,7 @@ function switchScreen(s){
   if(s==='report') renderReport();
   if(s==='mix') renderMix();
   if(s==='customer') renderCustomer();
+  if(s==='btpvariance') renderBtpVariance();
   if(s==='entry') renderEntry();
   if(s==='sim') runSim();
 }
@@ -10003,6 +10400,14 @@ document.getElementById('healthSeg').addEventListener('click', e=>{
   curHealthPeriod = b.dataset.p;
   document.querySelectorAll('#healthSeg button').forEach(x=>x.classList.toggle('active', x===b));
   renderHealth();
+});
+
+let curBtpVariancePeriod = 'week';   // week | month | all — lọc CLIENT-SIDE trên dữ liệu đã nạp
+document.getElementById('btpVarianceSeg').addEventListener('click', e=>{
+  const b = e.target.closest('button'); if(!b) return;
+  curBtpVariancePeriod = b.dataset.p;
+  document.querySelectorAll('#btpVarianceSeg button').forEach(x=>x.classList.toggle('active', x===b));
+  renderBtpVariance(true);
 });
 
 // ============================================================
@@ -14629,7 +15034,12 @@ const EXPORT_RANGE_COLLS = [
   // [MỚI] Phiếu báo mất TEM (reprint label) — KHÁC báo mất hàng ở trên: không sinh giao
   // dịch kho nào cả (không có gì trong stock_transactions_gieogieo để đối chiếu), nên đây
   // là NGUỒN DUY NHẤT biết được lịch sử mất/hỏng/cấp lại tem theo nguyên liệu.
-  'stock_label_reports_gieogieo'
+  'stock_label_reports_gieogieo',
+  // [MỚI] Case đối soát lệch bán thành phẩm (xem khối "ĐỐI SOÁT LỆCH BÁN THÀNH PHẨM" ở
+  // gần prep_items_gieogieo) — mỗi case đã tự liên kết ngược tới đúng dòng
+  // prep_transactions_gieogieo (sourceTxId) gây ra nó, nên xuất kèm để không phải suy luận
+  // lại từ ledger thô.
+  'prep_variance_gieogieo'
 ];
 // Nhỏ hoặc không chắc có businessDate → lấy hết rồi lọc trong JS.
 const EXPORT_SMALL_COLLS = ['alerts_gieogieo', 'handover_records_gieogieo', 'receiving_records_gieogieo', 'purchase_orders_gieogieo'];
@@ -17055,6 +17465,7 @@ async function renderKhoPrep(){
 
   box.innerHTML = `
     ${formHtml}
+    <button class="btn outline sm" style="width:auto;padding:0 10px;margin-bottom:10px" onclick="switchScreen('btpvariance')">${ic('detective',13)} Lệch BTP — theo dõi lệch đếm cuối ca</button>
     <div class="sec-title">Danh sách thành phẩm (${PREP_ITEMS.length})</div>
     ${PREP_ITEMS.length ? PREP_ITEMS.map(p=>`
       <div class="litem">
