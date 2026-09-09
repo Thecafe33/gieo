@@ -5521,10 +5521,15 @@ function computeEquivalentPortions(prepId, varianceQty){
           const qtyPerPortion = Number(r.qty);
           const portions = Math.round((varianceQty / qtyPerPortion) * 100) / 100;
           const menuItem = pvMenuItemInfo(menuRefKey);
-          const sellPrice = pvMenuItemPrice(menuRefKey, size);
+          // [FIX] Trước đây thiếu tên/giá thì hiện thẳng menuRefKey (mã firebase thô,
+          // VD "togo:-P-IFB8c6...") ra màn hình — trông như lỗi, không đọc được. Rõ
+          // ràng hơn: đánh dấu menuFound=false và để chỗ hiển thị tự chọn chữ dễ hiểu,
+          // giá bán để null (không phải 0đ — 0đ trông như "món miễn phí", sai nghĩa).
+          const menuFound = !!menuItem;
+          const sellPrice = menuFound ? pvMenuItemPrice(menuRefKey, size) : null;
           out.push({
-            menuRefKey, menuName: (menuItem && menuItem.name) || menuRefKey, size, qtyPerPortion, portions,
-            sellPrice, saleValue: Math.round(portions * sellPrice)
+            menuRefKey, menuName: menuFound ? menuItem.name : '', menuFound, size, qtyPerPortion, portions,
+            sellPrice, saleValue: sellPrice != null ? Math.round(portions * sellPrice) : null
           });
         }
       });
@@ -6038,22 +6043,31 @@ const PV_EVIDENCE_ROLE_LABEL = {
 };
 function pvCaseDetailHTML(c){
   const portions = c.equivalentPortions || [];
+  // [FIX] Case tạo TRƯỚC khi có tính năng giá bán (hoặc món đã bị xoá/đổi tên khỏi
+  // menu) sẽ có menuFound=false — trước đây rơi về hiện thẳng menuRefKey (mã firebase
+  // thô, đọc như lỗi) và giá bán 0đ (trông như "miễn phí", sai nghĩa). Giờ nói thẳng
+  // là chưa xác định được, và gợi ý bấm "Tính lại từ đầu" nếu do case cũ.
   const portionsHTML = portions.length
-    ? portions.map(p=>`<div class="row"><span class="rl">${escapeHtmlAttr(p.menuName||p.menuRefKey)} · size ${escapeHtmlAttr(p.size)}<div class="small-note" style="margin-top:1px">định lượng ${fmtNum(p.qtyPerPortion,1)} ${escapeHtmlAttr(c.unit||'')}/phần · giá bán ${fmt(p.sellPrice||0)}</div></span><span class="rv">${p.portions>=0?'+':''}${fmtNum(p.portions,1)} phần <span class="small-note">(≈${fmt(p.saleValue||0)})</span></span></div>`).join('')
+    ? portions.map(p=>`<div class="row"><span class="rl">${p.menuFound ? escapeHtmlAttr(p.menuName) : '<span style="color:var(--warn)">(chưa xác định được tên món)</span>'} · size ${escapeHtmlAttr(p.size)}<div class="small-note" style="margin-top:1px">định lượng ${fmtNum(p.qtyPerPortion,1)} ${escapeHtmlAttr(c.unit||'')}/phần · giá bán ${p.sellPrice!=null ? fmt(p.sellPrice) : '—'}</div></span><span class="rv">${p.portions>=0?'+':''}${fmtNum(p.portions,1)} phần ${p.saleValue!=null?`<span class="small-note">(≈${fmt(p.saleValue)})</span>`:''}</span></div>`).join('')
     : `<div class="small-note">Không tìm thấy công thức nào đang dùng bán thành phẩm này để quy đổi ra ly.</div>`;
+  const hasUnknownMenu = portions.some(p=> !p.menuFound);
 
   // Giá trị THỰC nếu bán — quy theo đúng phần ĐÃ XÁC NHẬN (dùng/nấu bù), không phải
   // toàn bộ lệch (phần chưa xác nhận không nên gán giá trị doanh thu). Hiện khoảng
-  // min–max giữa các món cùng dùng BTP này — KHÔNG cộng dồn saleValue giữa các món
-  // (xem ghi chú computeEquivalentPortions), vì mỗi dòng là 1 giả định độc lập.
+  // min–max giữa các món CÓ giá (bỏ qua món chưa xác định được) — KHÔNG cộng dồn
+  // saleValue giữa các món (xem ghi chú computeEquivalentPortions), vì mỗi dòng là 1
+  // giả định độc lập.
   const confirmedQty = (Number(c.realizedQty) || 0) + (Number(c.additionalProductionQty) || 0);
   const target = Math.abs(Number(c.varianceQty) || 0);
-  const saleValueHTML = (portions.length && confirmedQty > 0)
+  const knownValues = portions.filter(p=> p.saleValue != null);
+  const saleValueHTML = (knownValues.length && confirmedQty > 0)
     ? (()=>{
-        const scaled = portions.map(p=> Math.round((p.saleValue || 0) * (confirmedQty / target)));
+        const scaled = knownValues.map(p=> Math.round(p.saleValue * (confirmedQty / target)));
         const lo = Math.min(...scaled), hi = Math.max(...scaled);
-        return `<div class="row"><span class="rl">Giá trị thực nếu bán (quy theo phần đã xác nhận)<div class="small-note" style="margin-top:1px">${fmtNum(confirmedQty,1)} ${escapeHtmlAttr(c.unit||'')} đã xác nhận · tuỳ món nào thực bán mà giá trị nằm trong khoảng này</div></span><span class="rv" style="color:var(--ok)">${lo===hi?fmt(lo):`${fmt(lo)} – ${fmt(hi)}`}</span></div>`;
+        return `<div class="row"><span class="rl">Giá trị thực nếu bán (quy theo phần đã xác nhận)<div class="small-note" style="margin-top:1px">${fmtNum(confirmedQty,1)} ${escapeHtmlAttr(c.unit||'')} đã xác nhận · tuỳ món nào thực bán mà giá trị nằm trong khoảng này${hasUnknownMenu ? ' · có món chưa xác định được giá nên khoảng này có thể chưa đủ' : ''}</div></span><span class="rv" style="color:var(--ok)">${lo===hi?fmt(lo):`${fmt(lo)} – ${fmt(hi)}`}</span></div>`;
       })()
+    : (hasUnknownMenu && confirmedQty > 0)
+      ? `<div class="row"><span class="rl">Giá trị thực nếu bán<div class="small-note" style="margin-top:1px">Chưa xác định được — món dùng BTP này không tìm thấy trong menu hiện tại (đã đổi tên/xoá, hoặc case này tạo trước khi có tính năng này). Bấm "Tính lại từ đầu" ở đầu trang nếu muốn thử tính lại.</div></span><span class="rv">—</span></div>`
     : '';
 
   const soldNote = Number(c.varianceQty) < 0
