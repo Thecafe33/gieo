@@ -5476,6 +5476,10 @@ const PREP_VARIANCE_COLL = 'prep_variance_gieogieo';
 const PREP_VARIANCE_WINDOW_DAYS = 10;
 // Số ngày nhìn lùi để tính "mức nấu bình thường" (baseline) cho chiều âm.
 const PREP_VARIANCE_BASELINE_DAYS = 14;
+// Báo cáo nhìn tối đa bao xa (khớp lựa chọn "60 ngày" ở màn hình). "Tính lại từ đầu"
+// PHẢI quét ingest đủ khoảng này + baseline, không thì chỉ dựng lại ~27 ngày gần
+// nhất trong khi báo cáo hứa hẹn 60 ngày — case cũ hơn biến mất sau khi bấm nút.
+const PREP_VARIANCE_REPORT_DAYS = 60;
 
 function pvAddDays(dateKey, n){
   const d = new Date(dateKey + 'T00:00:00');
@@ -5552,8 +5556,8 @@ function buildPrepVarianceCase(tx, txId){
     confidence: qty >= 0 ? 'certain' : 'estimated',
     realizedQty: 0, realizedValue: 0,
     // Hao hụt (bị huỷ/hết hạn) là kết cục KHÁC "đã dùng" — không được gộp chung, xem
-    // pvReconcilePositive. Có riêng để BTP hết hạn cuối ngày (huỷ đều đặn) không bị
-    // báo nhầm thành "đã bán thêm được".
+    // pvReconcilePositiveGroup. Có riêng để BTP hết hạn cuối ngày (huỷ đều đặn) không
+    // bị báo nhầm thành "đã bán thêm được".
     wastedQty: 0, wastedValue: 0,
     unrealizedQty: Math.abs(qty), unrealizedValue: Math.abs(varianceValue),
     additionalProductionQty: 0, additionalCost: 0, windowSoldQty: 0,
@@ -5571,79 +5575,6 @@ function buildPrepVarianceCase(tx, txId){
 // sau ngày lệch tới windowEndsAt, đã gồm cả các ADJUSTMENT khác (để tự phát
 // hiện điểm dừng — mục "không tính trùng cost"). asOfDateKey để hàm biết cửa
 // sổ đã đóng hẳn hay còn đang mở, không phải đoán từ Date.now() bên trong.
-// [FIX] BTP hết hạn cuối ngày (VD trân châu) gần như ngày nào cũng có dòng WASTE huỷ
-// phần thừa — quỹ đạo giả định tụt âm vì WASTE hoàn toàn KHÔNG có nghĩa "phần dư đã
-// bán thêm được", nó nghĩa là "phần dư (và có thể cả phần lẽ ra có) bị đổ bỏ luôn".
-// Gộp chung WASTE với CONSUMPTION như bản trước sẽ báo nhầm "đã xác nhận dùng" cho
-// đúng thứ lẽ ra phải bị coi là hao hụt — nên tách hẳn hai loại bằng chứng, không bao
-// giờ cộng chung vào realizedQty.
-function pvReconcilePositive(kase, events, asOfDateKey){
-  const sorted = [...(events || [])].sort((a, b)=>{
-    const ka = String(a.businessDate || '') + String(a.createdAt || '');
-    const kb = String(b.businessDate || '') + String(b.createdAt || '');
-    return ka < kb ? -1 : (ka > kb ? 1 : 0);
-  });
-  const target = Math.abs(Number(kase.varianceQty) || 0);
-  let shadow = Number(kase.theoreticalQty) || 0;   // quỹ đạo NHƯ THỂ không có phần dư
-  let realized = 0, wasted = 0, soldQty = 0;
-  // [MỚI] evidence giờ lưu NGUYÊN chi tiết giao dịch (ngày/loại/số lượng), không chỉ id
-  // trơn — để màn hình hiện được "lô/giao dịch nào, ngày nào, bao nhiêu" thay vì chỉ
-  // một mã tham chiếu không đọc được.
-  const evidence = [];
-  let closedStatus = null, resolvedAt = null;
-
-  for(const ev of sorted){
-    if(String(ev.businessDate || '') > kase.windowEndsAt) break;
-    if(ev.type === 'ADJUSTMENT'){
-      closedStatus = 'ADJUSTED'; resolvedAt = ev.businessDate;
-      evidence.push({ id: ev.id, type: ev.type, businessDate: ev.businessDate, qty: Number(ev.qty) || 0, role: 'closed_by_new_count' });
-      break;
-    }
-    if(ev.type === 'CONSUMPTION') soldQty += Math.abs(Number(ev.qty) || 0);
-    const delta = ev.type === 'PRODUCTION' ? Math.abs(Number(ev.qty) || 0)
-                : (ev.type === 'CONSUMPTION' || ev.type === 'WASTE') ? -Math.abs(Number(ev.qty) || 0)
-                : 0;
-    if(!delta) continue;
-    shadow += delta;
-    if(shadow < 0){
-      const explained = target - realized - wasted;
-      const used = Math.min(explained, -shadow);
-      if(ev.type === 'WASTE') wasted += used; else realized += used;
-      shadow = 0; // phần thiếu hụt đã được "phần dư" bù — quỹ đạo giả định tiếp tục từ 0
-      evidence.push({ id: ev.id, type: ev.type, businessDate: ev.businessDate, qty: Number(ev.qty) || 0,
-        role: ev.type === 'WASTE' ? 'wasted' : 'realized', explainedQty: Math.round(used * 100) / 100 });
-      if(realized + wasted >= target - 1e-9){
-        // Toàn bộ phần dư giải thích được, nhưng KHÔNG một màu: nếu chỉ có hao hụt
-        // giải thích (chưa có đồng nào từ bán ra thật), đó là WASTED chứ không phải
-        // REALIZED — dù cả hai đều "đóng case", ý nghĩa với chủ quán khác hẳn nhau.
-        closedStatus = (realized > 0) ? 'REALIZED' : 'WASTED';
-        resolvedAt = ev.businessDate; break;
-      }
-    }
-  }
-
-  const unrealized = Math.max(0, Math.round((target - realized - wasted) * 100) / 100);
-  let status = closedStatus;
-  if(!status){
-    if(String(asOfDateKey) > kase.windowEndsAt) status = (realized > 0 || wasted > 0) ? 'PARTIALLY_REALIZED' : 'EXPIRED';
-    else status = (realized > 0 || wasted > 0) ? 'PARTIALLY_REALIZED' : 'CARRY_FORWARD';
-  }
-  return {
-    status, confidence: 'certain',
-    realizedQty: Math.round(realized * 100) / 100,
-    realizedValue: Math.round(realized * (Number(kase.costPerUnit) || 0)),
-    wastedQty: Math.round(wasted * 100) / 100,
-    wastedValue: Math.round(wasted * (Number(kase.costPerUnit) || 0)),
-    unrealizedQty: unrealized,
-    unrealizedValue: Math.round(unrealized * (Number(kase.costPerUnit) || 0)),
-    // Bán được thật trong cửa sổ theo dõi (không phải suy luận) — trả lời thẳng
-    // "đã bán ra bao nhiêu" mà không cần đợi quỹ đạo giả định kết luận.
-    windowSoldQty: Math.round(soldQty * 100) / 100,
-    evidence,
-    resolvedAt: resolvedAt || kase.resolvedAt || null
-  };
-}
-
 // Hàm THUẦN — CHIỀU ÂM. baselineBatchQty = mức nấu 1 mẻ BÌNH THƯỜNG (do caller
 // tính từ lịch sử PRODUCTION trước ngày lệch, truyền vào để hàm này vẫn thuần).
 // Sản lượng VƯỢT baseline trong cửa sổ theo dõi được coi là "nấu bù" — CHỈ LÀ
@@ -5709,9 +5640,21 @@ function pvReconcileNegative(kase, events, asOfDateKey, baselineBatchQty){
 // (xem computeLedgerRealMetrics): chỉ range theo businessDate (field duy nhất,
 // tự có index sẵn), rồi lọc type/prepId trong JS. Làm y hệt ở đây để tính năng
 // chạy được ngay, không bắt chủ quán phải vào Firebase Console tạo index tay.
-async function ingestPrepVarianceCases(){
+// [FIX] Không phải mọi ADJUSTMENT của BTP là lệch đếm cuối ca. Hoàn kho khi xoá/huỷ
+// đơn (xem hàm hoàn kho ~L12027) CŨNG ghi type:'ADJUSTMENT' cho prep_transactions,
+// kèm reversal:true + reversalOf:orderId — trước đây bị nuốt luôn thành 1 case "lệch
+// dương", theo dõi 10 ngày như thể nhân viên đếm dư, dù thực ra chỉ là hoàn tồn do
+// đơn bị xoá. Phải loại các dòng có cờ reversal trước khi coi là lệch đếm.
+function pvIsCountAdjustment(tx){
+  return tx.type === 'ADJUSTMENT' && !tx.reversal && !tx.reversalOf;
+}
+// lookbackDays mặc định đủ cho nhịp quét hằng ngày (window+baseline+đệm). Khi "Tính
+// lại từ đầu" cần quét lại đúng khoảng báo cáo đang hiển thị (tối đa 60 ngày +
+// baseline) — KHÔNG được lặng lẽ chỉ quét 27 ngày rồi để case cũ hơn biến mất.
+async function ingestPrepVarianceCases(lookbackDays){
   const todayKey = dkey(new Date());
-  const startKey = pvAddDays(todayKey, -(PREP_VARIANCE_WINDOW_DAYS + PREP_VARIANCE_BASELINE_DAYS + 3));
+  const days = Number(lookbackDays) > 0 ? Number(lookbackDays) : (PREP_VARIANCE_WINDOW_DAYS + PREP_VARIANCE_BASELINE_DAYS + 3);
+  const startKey = pvAddDays(todayKey, -days);
   const [txSnap, existingSnap] = await Promise.all([
     fstore.collection('prep_transactions_gieogieo')
       .where('businessDate', '>=', startKey).where('businessDate', '<=', todayKey).get(),
@@ -5723,7 +5666,7 @@ async function ingestPrepVarianceCases(){
   txSnap.forEach(doc=>{
     if(existingIds.has(doc.id)) return;
     const tx = doc.data();
-    if(tx.type !== 'ADJUSTMENT') return;
+    if(!pvIsCountAdjustment(tx)) return;
     if(!tx.prepId || !Number(tx.qty)) return;
     toCreate.push(buildPrepVarianceCase(tx, doc.id));
   });
@@ -5742,6 +5685,167 @@ async function ingestPrepVarianceCases(){
 // (kể cả phần baseline nhìn lùi của chiều âm), rồi nhóm theo prepId trong JS —
 // thay vì mỗi case tự query riêng prepId+businessDate (cần composite index, và
 // tốn N lượt đọc thay vì 1).
+// Hàm THUẦN — CHIỀU DƯƠNG, cả NHÓM case của MỘT prepId cùng lúc, KHÔNG double-count.
+//
+// [FIX] Bản đầu chạy mỗi case với quỹ đạo giả định RIÊNG, khởi động lại từ
+// theoreticalQty CỦA CHÍNH CASE ĐÓ — nhưng theoreticalQty của case sinh SAU đã tự
+// nhiên bao gồm luôn phần dư của case sinh TRƯỚC (vì đó là tồn kho thật, đã cộng dồn
+// qua từng lần đếm), nên "chỉ trừ dần qty còn lại của từng giao dịch" không đủ: case
+// sau vẫn có một khoảng đệm (chính là phần dư của case trước) mà quỹ đạo của nó
+// không hề biết là đã bị "case trước" xí phần trong tính toán — dẫn tới tính THIẾU
+// (an toàn hơn tính THỪA, nhưng vẫn sai). Bằng chứng: unit test tự phát hiện ra.
+//
+// Sửa đúng: CHỈ MỘT quỹ đạo giả định cho cả nhóm — bắt đầu từ theoreticalQty của
+// case CŨ NHẤT (mốc thật duy nhất, trước khi có bất kỳ lần dư nào trong nhóm). Mỗi
+// khi quỹ đạo tụt âm, phần thiếu hụt được phân bổ FIFO cho các case ĐÃ TỒN TẠI tại
+// đúng thời điểm đó (case sinh sau ngày xảy ra sự kiện không được tính, vì lúc đó nó
+// chưa xảy ra nên không thể là nguyên nhân).
+//
+// WASTE và CONSUMPTION đều làm quỹ đạo tụt (cả hai đều "lấy hàng ra khỏi kho"), nhưng
+// KHÔNG được gộp cùng một cục: BTP hết hạn cuối ngày (VD trân châu) gần như ngày nào
+// cũng có dòng WASTE huỷ phần thừa — quỹ đạo tụt âm vì WASTE không có nghĩa "phần dư
+// đã bán thêm được", nó nghĩa là "phần dư (và có thể cả phần lẽ ra có) bị đổ bỏ luôn".
+// Tách hẳn hai loại bằng chứng (`wasted` vs `realized`) để không báo nhầm "đã xác
+// nhận dùng" cho đúng thứ lẽ ra phải bị coi là hao hụt.
+function pvReconcilePositiveGroup(casesAsc, events, asOfDateKey){
+  const trueBaseline = casesAsc.length ? (Number(casesAsc[0].theoreticalQty) || 0) : 0;
+  let shadow = trueBaseline;
+  const acc = {};
+  casesAsc.forEach(k=>{
+    acc[k.id] = { target: Math.abs(Number(k.varianceQty) || 0), realized: 0, wasted: 0, evidence: [], closedStatus: null, resolvedAt: null, closed: false };
+  });
+
+  const sortedEvents = [...(events || [])].sort((a, b)=>{
+    const ka = String(a.businessDate || '') + String(a.createdAt || '');
+    const kb = String(b.businessDate || '') + String(b.createdAt || '');
+    return ka < kb ? -1 : (ka > kb ? 1 : 0);
+  });
+
+  const closeExpired = (uptoDateKey)=>{
+    casesAsc.forEach(k=>{
+      const a = acc[k.id];
+      if(a.closed) return;
+      if(String(uptoDateKey) > k.windowEndsAt){ a.closedStatus = (a.realized > 0 || a.wasted > 0) ? 'PARTIALLY_REALIZED' : 'EXPIRED'; a.closed = true; }
+    });
+  };
+
+  for(const ev of sortedEvents){
+    closeExpired(ev.businessDate);
+    if(casesAsc.every(k=> acc[k.id].closed)) break;
+
+    if(ev.type === 'ADJUSTMENT'){
+      casesAsc.forEach(k=>{
+        const a = acc[k.id];
+        if(a.closed || k.businessDate > ev.businessDate) return;
+        a.evidence.push({ id: ev.id, type: ev.type, businessDate: ev.businessDate, qty: Number(ev.qty) || 0, role: 'closed_by_new_count' });
+        a.closedStatus = 'ADJUSTED'; a.resolvedAt = ev.businessDate; a.closed = true;
+      });
+      continue;
+    }
+
+    const delta = ev.type === 'PRODUCTION' ? Math.abs(Number(ev.qty) || 0)
+                : (ev.type === 'CONSUMPTION' || ev.type === 'WASTE') ? -Math.abs(Number(ev.qty) || 0)
+                : 0;
+    if(!delta) continue;
+    shadow += delta;
+    if(shadow < 0){
+      let deficit = -shadow;
+      for(const k of casesAsc){
+        if(deficit <= 1e-9) break;
+        const a = acc[k.id];
+        if(a.closed || k.businessDate > ev.businessDate) continue;
+        const need = a.target - a.realized - a.wasted;
+        if(need <= 1e-9) continue;
+        const take = Math.min(need, deficit);
+        if(ev.type === 'WASTE') a.wasted += take; else a.realized += take;
+        deficit -= take;
+        a.evidence.push({ id: ev.id, type: ev.type, businessDate: ev.businessDate, qty: Number(ev.qty) || 0,
+          role: ev.type === 'WASTE' ? 'wasted' : 'realized', explainedQty: Math.round(take * 100) / 100 });
+        if(a.realized + a.wasted >= a.target - 1e-9){
+          a.closedStatus = (a.realized > 0) ? 'REALIZED' : 'WASTED';
+          a.resolvedAt = ev.businessDate; a.closed = true;
+        }
+      }
+      // Phần deficit không case nào (còn mở, đã tồn tại) giải thích được thì cứ để
+      // quỹ đạo TIẾP TỤC âm thật — trung thực hơn ép về 0 như thể có phép màu.
+      shadow = -deficit;
+    }
+  }
+  closeExpired(asOfDateKey);
+
+  const out = {};
+  casesAsc.forEach(k=>{
+    const a = acc[k.id];
+    const status = a.closedStatus || ((a.realized > 0 || a.wasted > 0) ? 'PARTIALLY_REALIZED' : 'CARRY_FORWARD');
+    const unrealized = Math.max(0, Math.round((a.target - a.realized - a.wasted) * 100) / 100);
+    const windowSoldQty = (events || [])
+      .filter(e=> e.type === 'CONSUMPTION' && e.businessDate >= k.businessDate && e.businessDate <= k.windowEndsAt)
+      .reduce((s, e)=> s + Math.abs(Number(e.qty) || 0), 0);
+    out[k.id] = {
+      status, confidence: 'certain',
+      realizedQty: Math.round(a.realized * 100) / 100, realizedValue: Math.round(a.realized * (Number(k.costPerUnit) || 0)),
+      wastedQty: Math.round(a.wasted * 100) / 100, wastedValue: Math.round(a.wasted * (Number(k.costPerUnit) || 0)),
+      unrealizedQty: unrealized, unrealizedValue: Math.round(unrealized * (Number(k.costPerUnit) || 0)),
+      windowSoldQty: Math.round(windowSoldQty * 100) / 100,
+      evidence: a.evidence, resolvedAt: a.resolvedAt || k.resolvedAt || null
+    };
+  });
+  return out;
+}
+
+// Hàm THUẦN — đối soát TẤT CẢ case đang mở của MỘT prepId CÙNG LÚC, KHÔNG double-count
+// bằng chứng giữa các case chồng cửa sổ (rất hay gặp — quán này lệch gần như mỗi
+// ngày, cửa sổ 10 ngày nên chồng lấn liên tục).
+//   - Case DƯƠNG: dùng pvReconcilePositiveGroup — một quỹ đạo giả định DUY NHẤT cho
+//     cả nhóm (xem lý do ở hàm đó).
+//   - Case ÂM: mỗi case vẫn tự chạy pvReconcileNegative, nhưng chia sẻ một quỹ
+//     "sản lượng vượt baseline còn lại" theo FIFO — ở đây không có vấn đề giống chiều
+//     dương vì "phần vượt baseline" không cộng dồn vào tồn kho nền của case sau theo
+//     kiểu tương tự theoreticalQty, nên chia sẻ trực tiếp theo qty là đúng.
+// Trả về { [caseId]: updated } — không đụng Firestore.
+function pvReconcileCasesForPrep(cases, txs, asOfDateKey){
+  const sorted = [...(cases || [])].sort((a, b)=> String(a.businessDate||'') < String(b.businessDate||'') ? -1 : (String(a.businessDate||'')>String(b.businessDate||'') ? 1 : 0));
+  const out = {};
+
+  const posCases = sorted.filter(k=> Number(k.varianceQty) >= 0);
+  const negCases = sorted.filter(k=> Number(k.varianceQty) < 0);
+
+  if(posCases.length){
+    const posEvents = (txs || []).filter(t=>
+      posCases.some(k=> t.id !== k.sourceTxId && t.businessDate >= k.businessDate && t.businessDate <= k.windowEndsAt));
+    Object.assign(out, pvReconcilePositiveGroup(posCases, posEvents, asOfDateKey));
+  }
+
+  if(negCases.length){
+    const baselineStart0 = pvAddDays(negCases[0].businessDate, -PREP_VARIANCE_BASELINE_DAYS);
+    const prodQtys = (txs || [])
+      .filter(t=> t.type === 'PRODUCTION' && t.businessDate >= baselineStart0 && t.businessDate < negCases[0].businessDate)
+      .map(t=> Math.abs(Number(t.qty) || 0)).filter(q=> q > 0);
+    const baseline = prodQtys.length ? prodQtys.reduce((s, q)=> s + q, 0) / prodQtys.length : 0;
+
+    const remainingExcessByTx = {};
+    for(const kase of negCases){
+      const events = (txs || [])
+        .filter(t=> t.id !== kase.sourceTxId && t.businessDate >= kase.businessDate && t.businessDate <= kase.windowEndsAt)
+        .map(t=>{
+          if(t.type === 'ADJUSTMENT' || t.type !== 'PRODUCTION') return t;
+          const rawExcess = Math.max(0, Math.abs(Number(t.qty) || 0) - baseline);
+          const cap = Object.prototype.hasOwnProperty.call(remainingExcessByTx, t.id) ? remainingExcessByTx[t.id] : rawExcess;
+          return { ...t, qty: baseline + cap }; // pvReconcileNegative tự trừ lại baseline để ra đúng "cap"
+        });
+      const updated = pvReconcileNegative(kase, events, asOfDateKey, baseline);
+      (updated.evidence || []).forEach(e=>{
+        if(e.explainedQty == null) return;
+        const cur = Object.prototype.hasOwnProperty.call(remainingExcessByTx, e.id) ? remainingExcessByTx[e.id] : Math.max(0, Math.abs(Number((txs.find(x=>x.id===e.id)||{}).qty) || 0) - baseline);
+        remainingExcessByTx[e.id] = Math.max(0, Math.round((cur - e.explainedQty) * 100) / 100);
+      });
+      out[kase.id] = updated;
+    }
+  }
+
+  return out;
+}
+
 let _pvCache = null; // { key:'YYYY-MM-DD', data }
 async function reconcilePrepVarianceCases(force){
   const todayKey = dkey(new Date());
@@ -5764,38 +5868,30 @@ async function reconcilePrepVarianceCases(force){
       const t = { id: doc.id, ...doc.data() };
       (byPrep[t.prepId] = byPrep[t.prepId] || []).push(t);
     });
+    const casesByPrep = {};
+    openCases.forEach(k=> (casesByPrep[k.prepId] = casesByPrep[k.prepId] || []).push(k));
 
     const batch = fstore.batch();
     let dirty = 0;
-    for(const kase of openCases){
-      const all = byPrep[kase.prepId] || [];
-      const events = all.filter(t=> t.id !== kase.sourceTxId && t.businessDate >= kase.businessDate && t.businessDate <= kase.windowEndsAt);
-
-      let updated;
-      if(Number(kase.varianceQty) >= 0){
-        updated = pvReconcilePositive(kase, events, todayKey);
-      } else {
-        const baselineStart = pvAddDays(kase.businessDate, -PREP_VARIANCE_BASELINE_DAYS);
-        const prodQtys = all
-          .filter(t=> t.type === 'PRODUCTION' && t.businessDate >= baselineStart && t.businessDate < kase.businessDate)
-          .map(t=> Math.abs(Number(t.qty) || 0)).filter(q=> q > 0);
-        const baseline = prodQtys.length ? prodQtys.reduce((s, q)=> s + q, 0) / prodQtys.length : 0;
-        updated = pvReconcileNegative(kase, events, todayKey, baseline);
-      }
-
-      if(updated.status !== kase.status || updated.realizedQty !== kase.realizedQty || updated.additionalCost !== kase.additionalCost || (updated.wastedQty||0) !== (kase.wastedQty||0)){
-        batch.update(fstore.collection(PREP_VARIANCE_COLL).doc(kase.id), { ...updated, updatedAt: new Date().toISOString() });
-        dirty++;
-      }
-    }
+    Object.entries(casesByPrep).forEach(([prepId, list])=>{
+      const results = pvReconcileCasesForPrep(list, byPrep[prepId] || [], todayKey);
+      list.forEach(kase=>{
+        const updated = results[kase.id];
+        if(updated.status !== kase.status || updated.realizedQty !== kase.realizedQty || updated.additionalCost !== kase.additionalCost || (updated.wastedQty||0) !== (kase.wastedQty||0)){
+          batch.update(fstore.collection(PREP_VARIANCE_COLL).doc(kase.id), { ...updated, updatedAt: new Date().toISOString() });
+          dirty++;
+        }
+      });
+    });
     if(dirty){
       await batch.commit().catch(err=> console.warn('[Lệch BTP] ghi cập nhật case lỗi (bỏ qua, tính lại lần sau):', err));
     }
   }
 
-  // Báo cáo nhìn tối đa 60 ngày gần nhất — đủ cho kỳ Tháng, không tải cả lịch sử.
+  // Báo cáo nhìn tối đa PREP_VARIANCE_REPORT_DAYS ngày gần nhất — đủ cho kỳ Tháng,
+  // không tải cả lịch sử.
   const allSnap = await fstore.collection(PREP_VARIANCE_COLL)
-    .where('businessDate', '>=', pvAddDays(todayKey, -60)).get();
+    .where('businessDate', '>=', pvAddDays(todayKey, -PREP_VARIANCE_REPORT_DAYS)).get();
   const data = allSnap.docs.map(d=>({ id: d.id, ...d.data() }));
   _pvCache = { key: todayKey, data };
   return data;
@@ -5808,7 +5904,7 @@ async function reconcilePrepVarianceCases(force){
 // mãi nếu không dọn lại, vì reconcile chỉ cập nhật status/realized của case đang
 // mở, không tự sửa lại theoreticalQty/actualQty đã lưu từ trước.
 async function rebuildPrepVarianceCases(){
-  if(!confirm('Xoá toàn bộ case Lệch BTP đã tính và tính lại từ đầu?\n\nChỉ xoá dữ liệu ở tab này — KHÔNG đụng tồn kho, lô nấu, hay dữ liệu gốc prep_transactions.\n\nDùng khi vừa sửa lỗi tính toán và muốn số cũ không còn sai.')) return;
+  if(!confirm(`Xoá toàn bộ case Lệch BTP đã tính và tính lại từ đầu (quét đủ ${PREP_VARIANCE_REPORT_DAYS} ngày báo cáo)?\n\nChỉ xoá dữ liệu ở tab này — KHÔNG đụng tồn kho, lô nấu, hay dữ liệu gốc prep_transactions.\n\nDùng khi vừa sửa lỗi tính toán và muốn số cũ không còn sai.`)) return;
   const box = document.getElementById('btpVarianceBody');
   if(box) box.innerHTML = '<div class="empty-hint">Đang xoá và tính lại…</div>';
   try{
@@ -5820,7 +5916,12 @@ async function rebuildPrepVarianceCases(){
       await batch.commit();
     }
     _pvCache = null;
-    await renderBtpVariance();
+    // [FIX] ingestPrepVarianceCases() mặc định chỉ quét ~27 ngày (đủ cho nhịp hằng
+    // ngày) — riêng ở đây phải quét đủ PHẠM VI BÁO CÁO (60 ngày) + baseline, không
+    // thì "Tính lại từ đầu" xoá sạch nhưng chỉ dựng lại được 27 ngày, các case cũ hơn
+    // biến mất luôn dù nút nói "từ đầu".
+    await ingestPrepVarianceCases(PREP_VARIANCE_REPORT_DAYS + PREP_VARIANCE_BASELINE_DAYS);
+    await renderBtpVariance(true);
     toast(`✅ Đã xoá ${docs.length} case cũ và tính lại`);
   }catch(err){
     console.error('rebuildPrepVarianceCases failed', err);
@@ -5941,16 +6042,24 @@ function pvCaseDetailHTML(c){
   </td></tr>`;
 }
 
-async function renderBtpVariance(){
+// [FIX cache] reconcilePrepVarianceCases() cache theo NGÀY (không phải theo lần
+// gọi) — nếu chỉ gọi suông reconcilePrepVarianceCases() thì 1 case vừa ingest xong
+// trong CÙNG ngày hôm nay có thể bị che bởi cache cũ tạo trước khi case đó tồn tại,
+// và người xem không thấy case mới cho tới hôm sau. Ép "force" khi: (a) người bấm
+// đổi kỳ xem chủ động muốn làm mới (forceParam), hoặc (b) ingest vừa tạo case mới.
+async function renderBtpVariance(forceParam){
   const body = document.getElementById('btpVarianceBody');
   if(!body) return;
   body.innerHTML = '<div class="empty-hint">Đang tải…</div>';
   try{
     await Promise.all([loadInventoryItems(), loadPrepItems(), loadRecipes(), ensurePriceHistory()]);
-    await ingestPrepVarianceCases();
-    const all = await reconcilePrepVarianceCases();
+    const createdCount = await ingestPrepVarianceCases();
+    const all = await reconcilePrepVarianceCases(!!forceParam || createdCount > 0);
     const days = curBtpVariancePeriod==='week' ? 7 : curBtpVariancePeriod==='month' ? 30 : 60;
-    const fromKey = pvAddDays(dkey(new Date()), -days);
+    // [FIX lệch 1 ngày] "-days" tính từ hôm nay sẽ ra days+1 ngày lịch (VD "7 ngày"
+    // thành 8 ngày: hôm nay + 7 ngày lùi). "-(days-1)" mới đúng nghĩa "N ngày gần
+    // nhất TÍNH CẢ hôm nay".
+    const fromKey = pvAddDays(dkey(new Date()), -(days - 1));
     const cases = all.filter(c=> String(c.businessDate||'') >= fromKey);
     _pvLastCases = cases;
     body.innerHTML = renderBtpVarianceHTML(cases);
