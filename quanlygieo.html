@@ -5491,6 +5491,26 @@ function pvAddDays(dateKey, n){
 // dùng bán thành phẩm này, quy đổi lệch ra "tương đương bao nhiêu phần" theo
 // đúng công thức đang khai. Một BTP có thể nằm trong nhiều món/size nên trả về
 // một mảng, không ép về một con số duy nhất.
+// menuRefKey dạng "togo:<firebaseKey>" (xem ghi chú recipes_gieogieo) — tra ngược
+// vào MENU_TOGO (đã nạp qua loadMenuForManager()) để lấy tên món + giá bán từng size.
+function pvMenuItemInfo(menuRefKey){
+  const m = /^togo:(.+)$/.exec(menuRefKey || '');
+  if(!m) return null;
+  return (MENU_TOGO || []).find(x=> x.id === m[1]) || null;
+}
+function pvMenuItemPrice(menuRefKey, size){
+  const item = pvMenuItemInfo(menuRefKey);
+  if(!item) return 0;
+  const s = (item.sizes || []).find(sz=> sz.label === size);
+  return s ? Number(s.price) || 0 : 0;
+}
+// Hàm THUẦN — quét RECIPES tìm mọi món/size có dùng bán thành phẩm này, quy đổi lệch
+// ra "tương đương bao nhiêu phần" theo đúng công thức đang khai, KÈM giá trị thực
+// nếu bán (portions × giá bán món đó). Một BTP có thể nằm trong nhiều món/size —
+// mỗi dòng là một GIẢ ĐỊNH RIÊNG "nếu toàn bộ phần lệch này là món X", KHÔNG được
+// cộng saleValue giữa các dòng lại với nhau (sẽ tính trùng cùng một lượng nguyên
+// liệu cho nhiều món cùng lúc) — nơi hiển thị phải dùng khoảng min–max, không phải
+// tổng.
 function computeEquivalentPortions(prepId, varianceQty){
   const out = [];
   Object.entries(RECIPES || {}).forEach(([menuRefKey, rec])=>{
@@ -5499,7 +5519,13 @@ function computeEquivalentPortions(prepId, varianceQty){
       (rows || []).forEach(r=>{
         if(r.refType === 'prep' && r.prepId === prepId && Number(r.qty) > 0){
           const qtyPerPortion = Number(r.qty);
-          out.push({ menuRefKey, size, qtyPerPortion, portions: Math.round((varianceQty / qtyPerPortion) * 100) / 100 });
+          const portions = Math.round((varianceQty / qtyPerPortion) * 100) / 100;
+          const menuItem = pvMenuItemInfo(menuRefKey);
+          const sellPrice = pvMenuItemPrice(menuRefKey, size);
+          out.push({
+            menuRefKey, menuName: (menuItem && menuItem.name) || menuRefKey, size, qtyPerPortion, portions,
+            sellPrice, saleValue: Math.round(portions * sellPrice)
+          });
         }
       });
     });
@@ -6011,9 +6037,24 @@ const PV_EVIDENCE_ROLE_LABEL = {
   nau_bu_uoc_luong: '→ ước lượng là nấu bù', closed_by_new_count: '→ đóng case (bị lần đếm sau ghi đè)'
 };
 function pvCaseDetailHTML(c){
-  const portionsHTML = (c.equivalentPortions && c.equivalentPortions.length)
-    ? c.equivalentPortions.map(p=>`<div class="row"><span class="rl">${escapeHtmlAttr(p.menuRefKey)} · size ${escapeHtmlAttr(p.size)}<div class="small-note" style="margin-top:1px">định lượng ${fmtNum(p.qtyPerPortion,1)} ${escapeHtmlAttr(c.unit||'')}/phần</div></span><span class="rv">${p.portions>=0?'+':''}${fmtNum(p.portions,1)} phần</span></div>`).join('')
+  const portions = c.equivalentPortions || [];
+  const portionsHTML = portions.length
+    ? portions.map(p=>`<div class="row"><span class="rl">${escapeHtmlAttr(p.menuName||p.menuRefKey)} · size ${escapeHtmlAttr(p.size)}<div class="small-note" style="margin-top:1px">định lượng ${fmtNum(p.qtyPerPortion,1)} ${escapeHtmlAttr(c.unit||'')}/phần · giá bán ${fmt(p.sellPrice||0)}</div></span><span class="rv">${p.portions>=0?'+':''}${fmtNum(p.portions,1)} phần <span class="small-note">(≈${fmt(p.saleValue||0)})</span></span></div>`).join('')
     : `<div class="small-note">Không tìm thấy công thức nào đang dùng bán thành phẩm này để quy đổi ra ly.</div>`;
+
+  // Giá trị THỰC nếu bán — quy theo đúng phần ĐÃ XÁC NHẬN (dùng/nấu bù), không phải
+  // toàn bộ lệch (phần chưa xác nhận không nên gán giá trị doanh thu). Hiện khoảng
+  // min–max giữa các món cùng dùng BTP này — KHÔNG cộng dồn saleValue giữa các món
+  // (xem ghi chú computeEquivalentPortions), vì mỗi dòng là 1 giả định độc lập.
+  const confirmedQty = (Number(c.realizedQty) || 0) + (Number(c.additionalProductionQty) || 0);
+  const target = Math.abs(Number(c.varianceQty) || 0);
+  const saleValueHTML = (portions.length && confirmedQty > 0)
+    ? (()=>{
+        const scaled = portions.map(p=> Math.round((p.saleValue || 0) * (confirmedQty / target)));
+        const lo = Math.min(...scaled), hi = Math.max(...scaled);
+        return `<div class="row"><span class="rl">Giá trị thực nếu bán (quy theo phần đã xác nhận)<div class="small-note" style="margin-top:1px">${fmtNum(confirmedQty,1)} ${escapeHtmlAttr(c.unit||'')} đã xác nhận · tuỳ món nào thực bán mà giá trị nằm trong khoảng này</div></span><span class="rv" style="color:var(--ok)">${lo===hi?fmt(lo):`${fmt(lo)} – ${fmt(hi)}`}</span></div>`;
+      })()
+    : '';
 
   const soldNote = Number(c.varianceQty) < 0
     ? `<div class="row"><span class="rl">Đã bán thật trong cửa sổ theo dõi<div class="small-note" style="margin-top:1px">số thật từ giao dịch Bán ra, không phải suy luận</div></span><span class="rv">${fmtNum(c.windowSoldQty||0,1)} ${escapeHtmlAttr(c.unit||'')}</span></div>`
@@ -6034,6 +6075,7 @@ function pvCaseDetailHTML(c){
   return `<tr><td colspan="7" style="background:var(--bg,#f7f7f7);padding:10px 14px">
     <div class="small-note" style="margin-bottom:6px;font-weight:650">Quy đổi ra phần/ly theo công thức</div>
     ${portionsHTML}
+    ${saleValueHTML}
     ${soldNote}
     <div class="small-note" style="margin:10px 0 6px;font-weight:650">Bằng chứng đối soát (theo đúng giao dịch)</div>
     ${evidenceHTML}
@@ -6052,7 +6094,7 @@ async function renderBtpVariance(forceParam){
   if(!body) return;
   body.innerHTML = '<div class="empty-hint">Đang tải…</div>';
   try{
-    await Promise.all([loadInventoryItems(), loadPrepItems(), loadRecipes(), ensurePriceHistory()]);
+    await Promise.all([loadInventoryItems(), loadPrepItems(), loadRecipes(), ensurePriceHistory(), loadMenuForManager()]);
     const createdCount = await ingestPrepVarianceCases();
     const all = await reconcilePrepVarianceCases(!!forceParam || createdCount > 0);
     const days = curBtpVariancePeriod==='week' ? 7 : curBtpVariancePeriod==='month' ? 30 : 60;
