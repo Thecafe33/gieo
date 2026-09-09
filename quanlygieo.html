@@ -5636,13 +5636,17 @@ function pvReconcileNegative(kase, events, asOfDateKey, baselineBatchQty){
 // I/O — quét prep_transactions_gieogieo tìm ADJUSTMENT chưa có case, tạo case
 // mới. KHÔNG tự chạy đối soát ở đây (xem reconcilePrepVarianceCases) — tách
 // riêng để lần "ghi nhận" không bị chậm bởi lần "đối chiếu".
+// [FIX] Firestore đòi composite index nếu trộn where('==',...) với where(range)
+// trên HAI field khác nhau trong cùng 1 query. Cả file này vốn đã tránh kiểu đó
+// (xem computeLedgerRealMetrics): chỉ range theo businessDate (field duy nhất,
+// tự có index sẵn), rồi lọc type/prepId trong JS. Làm y hệt ở đây để tính năng
+// chạy được ngay, không bắt chủ quán phải vào Firebase Console tạo index tay.
 async function ingestPrepVarianceCases(){
   const todayKey = dkey(new Date());
   const startKey = pvAddDays(todayKey, -(PREP_VARIANCE_WINDOW_DAYS + PREP_VARIANCE_BASELINE_DAYS + 3));
   const [txSnap, existingSnap] = await Promise.all([
     fstore.collection('prep_transactions_gieogieo')
-      .where('businessDate', '>=', startKey).where('businessDate', '<=', todayKey)
-      .where('type', '==', 'ADJUSTMENT').get(),
+      .where('businessDate', '>=', startKey).where('businessDate', '<=', todayKey).get(),
     fstore.collection(PREP_VARIANCE_COLL)
       .where('businessDate', '>=', startKey).where('businessDate', '<=', todayKey).get()
   ]);
@@ -5651,6 +5655,7 @@ async function ingestPrepVarianceCases(){
   txSnap.forEach(doc=>{
     if(existingIds.has(doc.id)) return;
     const tx = doc.data();
+    if(tx.type !== 'ADJUSTMENT') return;
     if(!tx.prepId || !Number(tx.qty)) return;
     toCreate.push(buildPrepVarianceCase(tx, doc.id));
   });
@@ -5664,6 +5669,11 @@ async function ingestPrepVarianceCases(){
 // I/O — đối soát các case còn mở: nạp giao dịch thật CỦA CÙNG BTP trong cửa sổ
 // theo dõi rồi chạy hàm thuần tương ứng. Cache theo ngày (giống _thvCache của
 // Thu hồi vốn) — trong CÙNG một phiên không cần tính lại mỗi lần vào màn.
+//
+// [FIX index] MỘT query duy nhất theo businessDate phủ hết mọi case đang mở
+// (kể cả phần baseline nhìn lùi của chiều âm), rồi nhóm theo prepId trong JS —
+// thay vì mỗi case tự query riêng prepId+businessDate (cần composite index, và
+// tốn N lượt đọc thay vì 1).
 let _pvCache = null; // { key:'YYYY-MM-DD', data }
 async function reconcilePrepVarianceCases(force){
   const todayKey = dkey(new Date());
@@ -5673,35 +5683,46 @@ async function reconcilePrepVarianceCases(force){
     .where('status', 'in', ['UNRESOLVED', 'CARRY_FORWARD', 'PARTIALLY_REALIZED']).get();
   const openCases = openSnap.docs.map(d=>({ id: d.id, ...d.data() }));
 
-  const batch = fstore.batch();
-  let dirty = 0;
-  for(const kase of openCases){
-    const evSnap = await fstore.collection('prep_transactions_gieogieo')
-      .where('prepId', '==', kase.prepId)
-      .where('businessDate', '>=', kase.businessDate)
-      .where('businessDate', '<=', kase.windowEndsAt).get();
-    const events = evSnap.docs.filter(d=> d.id !== kase.sourceTxId).map(d=>({ id: d.id, ...d.data() }));
+  if(openCases.length){
+    const minStart = openCases.reduce((m, k)=>{
+      const b = pvAddDays(k.businessDate, -PREP_VARIANCE_BASELINE_DAYS);
+      return (!m || b < m) ? b : m;
+    }, null);
+    const maxEnd = openCases.reduce((m, k)=> (!m || k.windowEndsAt > m) ? k.windowEndsAt : m, todayKey);
+    const txSnap = await fstore.collection('prep_transactions_gieogieo')
+      .where('businessDate', '>=', minStart).where('businessDate', '<=', maxEnd).get();
+    const byPrep = {};
+    txSnap.forEach(doc=>{
+      const t = { id: doc.id, ...doc.data() };
+      (byPrep[t.prepId] = byPrep[t.prepId] || []).push(t);
+    });
 
-    let updated;
-    if(Number(kase.varianceQty) >= 0){
-      updated = pvReconcilePositive(kase, events, todayKey);
-    } else {
-      const baseSnap = await fstore.collection('prep_transactions_gieogieo')
-        .where('prepId', '==', kase.prepId).where('type', '==', 'PRODUCTION')
-        .where('businessDate', '>=', pvAddDays(kase.businessDate, -PREP_VARIANCE_BASELINE_DAYS))
-        .where('businessDate', '<', kase.businessDate).get();
-      const prodQtys = baseSnap.docs.map(d=> Math.abs(Number(d.data().qty) || 0)).filter(q=> q > 0);
-      const baseline = prodQtys.length ? prodQtys.reduce((s, q)=> s + q, 0) / prodQtys.length : 0;
-      updated = pvReconcileNegative(kase, events, todayKey, baseline);
-    }
+    const batch = fstore.batch();
+    let dirty = 0;
+    for(const kase of openCases){
+      const all = byPrep[kase.prepId] || [];
+      const events = all.filter(t=> t.id !== kase.sourceTxId && t.businessDate >= kase.businessDate && t.businessDate <= kase.windowEndsAt);
 
-    if(updated.status !== kase.status || updated.realizedQty !== kase.realizedQty || updated.additionalCost !== kase.additionalCost){
-      batch.update(fstore.collection(PREP_VARIANCE_COLL).doc(kase.id), { ...updated, updatedAt: new Date().toISOString() });
-      dirty++;
+      let updated;
+      if(Number(kase.varianceQty) >= 0){
+        updated = pvReconcilePositive(kase, events, todayKey);
+      } else {
+        const baselineStart = pvAddDays(kase.businessDate, -PREP_VARIANCE_BASELINE_DAYS);
+        const prodQtys = all
+          .filter(t=> t.type === 'PRODUCTION' && t.businessDate >= baselineStart && t.businessDate < kase.businessDate)
+          .map(t=> Math.abs(Number(t.qty) || 0)).filter(q=> q > 0);
+        const baseline = prodQtys.length ? prodQtys.reduce((s, q)=> s + q, 0) / prodQtys.length : 0;
+        updated = pvReconcileNegative(kase, events, todayKey, baseline);
+      }
+
+      if(updated.status !== kase.status || updated.realizedQty !== kase.realizedQty || updated.additionalCost !== kase.additionalCost){
+        batch.update(fstore.collection(PREP_VARIANCE_COLL).doc(kase.id), { ...updated, updatedAt: new Date().toISOString() });
+        dirty++;
+      }
     }
-  }
-  if(dirty){
-    await batch.commit().catch(err=> console.warn('[Lệch BTP] ghi cập nhật case lỗi (bỏ qua, tính lại lần sau):', err));
+    if(dirty){
+      await batch.commit().catch(err=> console.warn('[Lệch BTP] ghi cập nhật case lỗi (bỏ qua, tính lại lần sau):', err));
+    }
   }
 
   // Báo cáo nhìn tối đa 60 ngày gần nhất — đủ cho kỳ Tháng, không tải cả lịch sử.
