@@ -10538,6 +10538,81 @@ function khApplyCustom(){
   khPeriod='custom'; renderCustomer();
 }
 function khSetFilter(f){ khFilter = (khFilter===f ? 'all' : f); renderCustomer(); }
+
+// ── [MỚI] Xuất danh sách khách hàng (SĐT - Tên) dạng text ─────────────────
+// Yêu cầu chủ quán: chỉ cần SĐT + tên, không cần các số liệu khác của màn
+// Khách hàng ở trên. Đọc lại từng bill trong khoảng ngày chọn (giống hệt
+// computeCustomerReport/resolveCustomer) rồi gom theo SĐT, không giới hạn
+// MIX_MAX_DAYS vì đây là thao tác chạy một lần chứ không phải xem lặp lại.
+let khExportRange = { from: dkey(new Date(Date.now()-89*86400000)), to: dkey(new Date()) };
+let khExportRunning = false;
+function khExportSetRange(f,v){ khExportRange[f]=v; }
+async function khExportRun(){
+  if(khExportRunning) return;
+  const {from,to} = khExportRange;
+  if(!from || !to || from > to){ toast('⚠️ Chọn khoảng ngày hợp lệ'); return; }
+  const soNgay = Math.round((new Date(to+'T12:00:00') - new Date(from+'T12:00:00'))/86400000) + 1;
+  if(soNgay > 400){ toast('⚠️ Khoảng quá dài (>400 ngày) — chia nhỏ ra chạy nhiều lần rồi gộp kết quả'); return; }
+  khExportRunning = true;
+  const btn = document.getElementById('khExportBtn');
+  const log = document.getElementById('khExportLog');
+  const out = document.getElementById('khExportOut');
+  const wrap = document.getElementById('khExportOutWrap');
+  if(btn) btn.disabled = true;
+  if(wrap) wrap.style.display = 'none';
+  if(out) out.value = '';
+  const map = {}; // sđt đã chuẩn hoá -> tên (null nếu chưa biết tên)
+  try{
+    await ensureAuth();
+    for(let i=0;i<soNgay;i++){
+      const d = new Date(from+'T12:00:00'); d.setDate(d.getDate()+i);
+      if(log) log.textContent = `Đang đọc ngày ${dkey(d)} (${i+1}/${soNgay})...`;
+      const orders = await fetchOrdersForDate(d).catch(()=>[]);
+      orders.forEach(o=>{
+        const c = resolveCustomer(o);
+        // Chỉ lấy khách nhận diện được ĐÚNG bằng số điện thoại — bỏ mã khách/
+        // định danh không phải SĐT (xem khIsPhone), vì chủ quán chỉ cần SĐT.
+        if(!c || !khIsPhone(c.id)) return;
+        if(!(c.id in map)) map[c.id] = c.ten || null;
+        else if(c.ten && !map[c.id]) map[c.id] = c.ten;
+      });
+    }
+    const rows = Object.keys(map).sort().map(id => `${id} - ${map[id] || '(chưa rõ tên)'}`);
+    if(out) out.value = rows.join(', ');
+    if(wrap) wrap.style.display = rows.length ? '' : 'none';
+    if(log) log.textContent = rows.length
+      ? `Xong — ${rows.length} khách có SĐT, đọc từ ${soNgay} ngày (${from} → ${to}).`
+      : `Không tìm thấy khách nào có SĐT trong khoảng ${from} → ${to}.`;
+  }catch(err){
+    console.error('khExportRun lỗi', err);
+    if(log) log.textContent = 'Lỗi: ' + (err.code || err.message || err);
+  } finally {
+    khExportRunning = false;
+    if(btn) btn.disabled = false;
+  }
+}
+function khExportCopy(){
+  const out = document.getElementById('khExportOut');
+  if(!out || !out.value) return;
+  out.select();
+  const done = () => toast('✅ Đã copy vào clipboard');
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(out.value).then(done).catch(()=>{ try{ document.execCommand('copy'); done(); }catch(e){} });
+  } else {
+    try{ document.execCommand('copy'); done(); }catch(e){}
+  }
+}
+function khExportDownload(){
+  const out = document.getElementById('khExportOut');
+  if(!out || !out.value) return;
+  const blob = new Blob([out.value], {type:'text/plain;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'khach_hang_gieogieo_' + dkey(new Date()) + '.txt';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 3000);
+}
+
 function khRange(){
   const now = new Date();
   if(khPeriod==='today') return { start:new Date(now), end:new Date(now), label:'Hôm nay' };
@@ -10656,7 +10731,25 @@ async function renderCustomer(){
     <div class="card"><div class="grid2">
       <div class="field"><label>Từ ngày</label><input type="date" value="${khCustom.from||''}" onchange="khSetCustom('from',this.value)"></div>
       <div class="field"><label>Đến ngày</label><input type="date" value="${khCustom.to||''}" onchange="khSetCustom('to',this.value)"></div>
-    </div><button class="btn" onclick="khApplyCustom()">Xem</button></div>` : ''}`;
+    </div><button class="btn" onclick="khApplyCustom()">Xem</button></div>` : ''}
+
+    <div class="card" style="margin-top:12px">
+      <div class="card-h"><h3>Xuất danh sách khách hàng (SĐT - Tên)</h3></div>
+      <div class="small-note" style="margin-bottom:8px">Đọc lại từng bill trong khoảng ngày chọn bên dưới (độc lập với kỳ xem ở trên), gom theo số điện thoại — bỏ mã khách không phải SĐT, bỏ trùng. Kỳ càng dài đọc càng lâu.</div>
+      <div class="grid2">
+        <div class="field"><label>Từ ngày</label><input type="date" id="khExportFrom" value="${khExportRange.from||''}" onchange="khExportSetRange('from',this.value)"></div>
+        <div class="field"><label>Đến ngày</label><input type="date" id="khExportTo" value="${khExportRange.to||''}" onchange="khExportSetRange('to',this.value)"></div>
+      </div>
+      <button class="btn" id="khExportBtn" onclick="khExportRun()" style="margin-top:8px">Xuất danh sách</button>
+      <div class="small-note" id="khExportLog" style="margin-top:8px"></div>
+      <div id="khExportOutWrap" style="display:none;margin-top:8px">
+        <textarea id="khExportOut" readonly style="width:100%;min-height:120px;font-family:monospace;font-size:12.5px;padding:8px;border-radius:8px;border:1px solid var(--line);box-sizing:border-box"></textarea>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button class="btn outline sm" style="width:auto;padding:0 14px" onclick="khExportCopy()">Copy</button>
+          <button class="btn outline sm" style="width:auto;padding:0 14px" onclick="khExportDownload()">Tải .txt</button>
+        </div>
+      </div>
+    </div>`;
 
   if(khPeriod==='custom' && (!khCustom.from || !khCustom.to)){
     body.innerHTML = head + '<div class="empty-hint">Chọn khoảng ngày rồi bấm Xem.</div>'; return;
