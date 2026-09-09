@@ -5504,13 +5504,31 @@ function pvMenuItemPrice(menuRefKey, size){
   const s = (item.sizes || []).find(sz=> sz.label === size);
   return s ? Number(s.price) || 0 : 0;
 }
-// Hàm THUẦN — quét RECIPES tìm mọi món/size có dùng bán thành phẩm này, quy đổi lệch
-// ra "tương đương bao nhiêu phần" theo đúng công thức đang khai, KÈM giá trị thực
-// nếu bán (portions × giá bán món đó). Một BTP có thể nằm trong nhiều món/size —
-// mỗi dòng là một GIẢ ĐỊNH RIÊNG "nếu toàn bộ phần lệch này là món X", KHÔNG được
-// cộng saleValue giữa các dòng lại với nhau (sẽ tính trùng cùng một lượng nguyên
-// liệu cho nhiều món cùng lúc) — nơi hiển thị phải dùng khoảng min–max, không phải
-// tổng.
+// [MỚI] BTP không chỉ được món dùng TRỰC TIẾP (recipes_gieogieo) — nó còn có thể là
+// nguyên liệu ĐẦU VÀO của một TOPPING (topping_recipes_gieogieo.batchInputs với
+// refType:'prep'), rồi topping đó mới được khách thêm vào món. Qua bước trung gian
+// này, quét RECIPES không bao giờ tìm thấy — BTP đó "không thuộc món nào" dù thật ra
+// đang bị dùng đều đặn, chỉ là gián tiếp. Quét riêng topping_recipes_gieogieo để bắt
+// đúng trường hợp này.
+function pvToppingsUsingPrep(prepId){
+  const out = [];
+  Object.entries(TOPPING_RECIPES || {}).forEach(([toppingId, rec])=>{
+    (rec && rec.batchInputs || []).forEach(r=>{
+      if(r.refType === 'prep' && r.prepId === prepId && Number(r.qty) > 0){
+        out.push({ toppingId, qtyPerBatch: Number(r.qty), batchYield: Number(rec.batchYield) || 0,
+          yieldMode: rec.yieldMode, qtyPerServing: Number(rec.qtyPerServing) || 0 });
+      }
+    });
+  });
+  return out;
+}
+// Hàm THUẦN — quét RECIPES (dùng trực tiếp trong món) VÀ topping_recipes_gieogieo
+// (dùng gián tiếp qua 1 topping) tìm mọi nơi đang dùng bán thành phẩm này, quy đổi
+// lệch ra "tương đương bao nhiêu phần", KÈM giá trị thực nếu bán (portions × giá bán).
+// Một BTP có thể nằm trong nhiều món/topping — mỗi dòng là một GIẢ ĐỊNH RIÊNG "nếu
+// toàn bộ phần lệch này là món/topping X", KHÔNG được cộng saleValue giữa các dòng
+// lại với nhau (sẽ tính trùng cùng một lượng nguyên liệu cho nhiều nơi cùng lúc) —
+// nơi hiển thị phải dùng khoảng min–max, không phải tổng.
 function computeEquivalentPortions(prepId, varianceQty){
   const out = [];
   Object.entries(RECIPES || {}).forEach(([menuRefKey, rec])=>{
@@ -5529,12 +5547,32 @@ function computeEquivalentPortions(prepId, varianceQty){
           const sellPrice = menuFound ? pvMenuItemPrice(menuRefKey, size) : null;
           out.push({
             menuRefKey, menuName: menuFound ? menuItem.name : '', menuFound, size, qtyPerPortion, portions,
-            sellPrice, saleValue: sellPrice != null ? Math.round(portions * sellPrice) : null
+            sellPrice, saleValue: sellPrice != null ? Math.round(portions * sellPrice) : null, via: 'recipe'
           });
         }
       });
     });
   });
+
+  pvToppingsUsingPrep(prepId).forEach(t=>{
+    if(!(t.batchYield > 0)) return; // chưa khai đủ mẻ topping, không quy đổi được
+    // yieldMode 'servings': batchYield ĐÃ LÀ số phần, 1 phần = 1 đơn vị batchYield.
+    // yieldMode 'weight': batchYield là gram/ml cả mẻ, 1 phần = qtyPerServing gram/ml.
+    const unitTopping = t.yieldMode === 'weight' ? t.qtyPerServing : 1;
+    if(!(unitTopping > 0)) return;
+    const qtyPerPortion = Math.round((t.qtyPerBatch / t.batchYield) * unitTopping * 100) / 100;
+    if(!(qtyPerPortion > 0)) return;
+    const portions = Math.round((varianceQty / qtyPerPortion) * 100) / 100;
+    const top = (TOPPINGS || []).find(x=> x.id === t.toppingId);
+    const menuFound = !!top;
+    const sellPrice = menuFound ? (Number(top.priceTogo) || Number(top.price) || 0) : null;
+    out.push({
+      menuRefKey: 'topping:' + t.toppingId, menuName: menuFound ? top.name : '', menuFound,
+      size: 'phần topping', qtyPerPortion, portions,
+      sellPrice, saleValue: sellPrice != null ? Math.round(portions * sellPrice) : null, via: 'topping'
+    });
+  });
+
   return out;
 }
 
@@ -6048,8 +6086,8 @@ function pvCaseDetailHTML(c){
   // thô, đọc như lỗi) và giá bán 0đ (trông như "miễn phí", sai nghĩa). Giờ nói thẳng
   // là chưa xác định được, và gợi ý bấm "Tính lại từ đầu" nếu do case cũ.
   const portionsHTML = portions.length
-    ? portions.map(p=>`<div class="row"><span class="rl">${p.menuFound ? escapeHtmlAttr(p.menuName) : '<span style="color:var(--warn)">(chưa xác định được tên món)</span>'} · size ${escapeHtmlAttr(p.size)}<div class="small-note" style="margin-top:1px">định lượng ${fmtNum(p.qtyPerPortion,1)} ${escapeHtmlAttr(c.unit||'')}/phần · giá bán ${p.sellPrice!=null ? fmt(p.sellPrice) : '—'}</div></span><span class="rv">${p.portions>=0?'+':''}${fmtNum(p.portions,1)} phần ${p.saleValue!=null?`<span class="small-note">(≈${fmt(p.saleValue)})</span>`:''}</span></div>`).join('')
-    : `<div class="small-note">Không tìm thấy công thức nào đang dùng bán thành phẩm này để quy đổi ra ly.</div>`;
+    ? portions.map(p=>`<div class="row"><span class="rl">${p.menuFound ? escapeHtmlAttr(p.menuName) : '<span style="color:var(--warn)">(chưa xác định được tên)</span>'}${p.via==='topping' ? ' <span class="small-note">(qua topping)</span>' : ''} · ${escapeHtmlAttr(p.size)}<div class="small-note" style="margin-top:1px">định lượng ${fmtNum(p.qtyPerPortion,1)} ${escapeHtmlAttr(c.unit||'')}/phần · giá bán ${p.sellPrice!=null ? fmt(p.sellPrice) : '—'}</div></span><span class="rv">${p.portions>=0?'+':''}${fmtNum(p.portions,1)} phần ${p.saleValue!=null?`<span class="small-note">(≈${fmt(p.saleValue)})</span>`:''}</span></div>`).join('')
+    : `<div class="small-note">Không tìm thấy công thức món nào (kể cả qua topping) đang dùng bán thành phẩm này để quy đổi ra ly.</div>`;
   const hasUnknownMenu = portions.some(p=> !p.menuFound);
 
   // Giá trị THỰC nếu bán — quy theo đúng phần ĐÃ XÁC NHẬN (dùng/nấu bù), không phải
@@ -6108,7 +6146,7 @@ async function renderBtpVariance(forceParam){
   if(!body) return;
   body.innerHTML = '<div class="empty-hint">Đang tải…</div>';
   try{
-    await Promise.all([loadInventoryItems(), loadPrepItems(), loadRecipes(), ensurePriceHistory(), loadMenuForManager()]);
+    await Promise.all([loadInventoryItems(), loadPrepItems(), loadRecipes(), loadToppingRecipes(), ensurePriceHistory(), loadMenuForManager()]);
     const createdCount = await ingestPrepVarianceCases();
     const all = await reconcilePrepVarianceCases(!!forceParam || createdCount > 0);
     const days = curBtpVariancePeriod==='week' ? 7 : curBtpVariancePeriod==='month' ? 30 : 60;
