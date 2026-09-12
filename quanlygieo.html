@@ -3873,7 +3873,8 @@ async function renderKhoLegacyStock(box, tabs){
   LEGACY_ROWS_CACHE = rows;
 
   const chuaChot = rows.filter(r=>r.moc===null).length;
-  const giaiThich = `Quán chạy một thời gian bằng tồn tổng trước khi dán tem, nên phần tồn có từ trước ngày dán tem không có con tem nào đại diện. Nếu không chốt mốc đó, POS sẽ tưởng cả phần chênh này đang nằm trong hộp nhân viên vừa báo hết và ghi thành <b>hao hụt</b> — đúng vụ 15.020 g sữa tươi. Chốt mốc một lần cho mỗi món là xong; món chưa chốt thì POS <b>không</b> ghi hao hụt lúc báo hết.`;
+  const giaiThich = `Quán chạy một thời gian bằng tồn tổng trước khi dán tem, nên phần tồn có từ trước ngày dán tem không có con tem nào đại diện. Nếu không chốt mốc đó, POS sẽ tưởng cả phần chênh này đang nằm trong hộp nhân viên vừa báo hết và ghi thành <b>hao hụt</b> — đúng vụ 15.020 g sữa tươi. Chốt mốc một lần cho mỗi món là xong; món chưa chốt thì POS <b>không</b> ghi hao hụt lúc báo hết.
+  <br><br><b>Món ĐÃ chốt mà vẫn lệch trở lại</b> — không phải chốt sai, mà thường là nhân viên quên quét mở/báo hết cho một vài túi/chai (vẫn lấy hàng dùng bình thường, chỉ quên quét): sổ đã trừ đúng theo công thức, nhưng tem thì vẫn đứng nguyên trạng thái cũ. Bấm "Chốt lại" để đưa số lệch đó vào mốc, hoặc nhắc nhân viên quét đủ hai đầu mở/hết để tem không lệch tiếp.`;
 
   const bangHaoHutMa = !haoHutMa.length ? '' : `
     <div class="small-note" style="margin:18px 0 8px;color:var(--bad)"><b>Hao hụt ghi sai loại (${haoHutMa.length})</b> — phần "còn thừa" lớn hơn cả dung tích của chính con tem đó, nên không thể là hàng nằm trong hộp. Đảo về ĐIỀU CHỈNH thì tồn kho giữ nguyên (con số tồn hiện tại vốn đã đúng), chỉ các báo cáo hao hụt thôi tính nhầm.</div>
@@ -11209,6 +11210,31 @@ async function computeStoreHealth(){
       if(cu.length) push('yellow', 'Tem đã sinh quá 2 ngày mà chưa dán', cu.length, `goContainers('unlabeled')`, false, 'kho');
     }
   }catch(err){ console.warn('storeHealth: chai & tem lỗi', err); }
+
+  // ---- [MỚI] Lệch tem so với sổ kho (đối chiếu LIÊN TỤC, không chỉ lúc chưa chốt mốc) ----
+  // Dùng lại ĐÚNG công thức của renderKhoLegacyStock (Kho → Container → Tồn lịch sử):
+  //     lệch = tồn sổ − mốc tồn lịch sử đã chốt − tổng tem còn sống (sealed+open)
+  // Trước đây công thức này CHỈ hiện ra khi tự vào tận màn "Tồn lịch sử" mới thấy — không có
+  // gì tự nổi lên. Lệch kiểu này hay gặp nhất khi nhân viên quên quét mở/báo hết cho vài chai
+  // (vẫn lấy hàng dùng bình thường, chỉ là quên quét) — ví dụ trân châu tồn 12.000g/6 túi, sau
+  // 1 tuần bán còn 7.200g (đã dùng ~2,4 túi) nhưng hệ thống tem chỉ ghi nhận 1 túi báo hết + 1
+  // đang mở — 4 túi còn lại vẫn đứng "sealed" dù thực tế đã có túi bị bóc ra dùng mà không ai
+  // quét. Đây LÀ đúng dấu hiệu của tình huống đó, không phải hao hụt (nên không tự ghi WASTE),
+  // chỉ nhắc Quản lý vào xem & chốt lại cho khớp.
+  try{
+    const items = itemsRes.status==='fulfilled' ? itemsRes.value : [];
+    const trackedChotRoi = items.filter(it => itemStockManaged(it) && itemTrackingMode(it)!=='none'
+      && it.untrackedBase!==null && it.untrackedBase!==undefined && isFinite(Number(it.untrackedBase)));
+    if(trackedChotRoi.length){
+      const temTheoMon = await docTemConSongTheoMon();
+      const leches = trackedChotRoi.filter(it=>{
+        const lech = (Number(it.currentStock)||0) - (Number(it.untrackedBase)||0) - (Number(temTheoMon[it.id])||0);
+        return Math.abs(lech) >= 0.5;
+      });
+      if(leches.length) push('yellow', `Lệch tem so với sổ kho ở ${leches.length} nguyên liệu — có thể do quên quét mở/báo hết`,
+        leches.length, `goContainers('legacy')`, false, 'kho');
+    }
+  }catch(err){ console.warn('storeHealth: lệch tem/sổ kho lỗi', err); }
 
   // Ngày treo — POS bảo nhân viên "báo Quản lý", nên bên này BẮT BUỘC phải thấy,
   // nếu không cảnh báo bên POS treo vĩnh viễn mà không ai xử lý được.
