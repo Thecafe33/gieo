@@ -3893,8 +3893,12 @@ async function renderKhoLegacyStock(box, tabs){
     (!rows.length ? '<div class="empty-hint">Chưa có nguyên liệu nào bật dán tem.</div>' :
       rows.map((r,i)=>{
         const dv = escapeHtmlAttr(r.it.unit||'');
+        // [FIX] Mốc âm nghĩa là TEM đang thừa so với sổ (không phải "tồn lịch sử" theo
+        // nghĩa gốc) — gọi đúng tên để không đọc nhầm dấu trừ thành lỗi hiển thị.
         const mocTxt = r.moc === null
           ? `<span class="tier tier-amber">Chưa chốt</span>`
+          : r.moc < -0.5
+          ? `<span class="muted-sm">Tem thừa ${fmtNum(Math.abs(r.moc),0)} ${dv}</span>`
           : `<span class="muted-sm">Mốc ${fmtNum(r.moc,0)} ${dv}</span>`;
         const lechTxt = r.moc === null ? '' :
           (Math.abs(r.lech) < 0.5
@@ -3906,6 +3910,7 @@ async function renderKhoLegacyStock(box, tabs){
             <div class="muted-sm">Sổ ${fmtNum(r.ton,0)} ${dv} · tem đang giữ ${fmtNum(r.tem,0)} ${dv} · chênh ${fmtNum(r.deXuat,0)} ${dv}</div>
             ${lechTxt}
             ${r.moc!==null && r.moc>0.5 ? `<div class="muted-sm">Tồn lịch sử này chỉ mất đi khi bạn xoá nó bằng một giao dịch điều chỉnh.</div>` : ''}
+            ${r.moc!==null && r.moc<-0.5 ? `<div class="muted-sm">Không phải hàng mất — chỉ là tem chưa được quét cập nhật kịp theo sổ. Nhắc nhân viên quét đủ mở/hết, hoặc "Chốt lại" để tạm ghi nhận số chênh này.</div>` : ''}
           </div>
           <div class="li-r">${mocTxt}
             <button class="btn outline sm" style="width:auto;padding:0 10px;margin-left:8px" onclick="chotTonLichSu(${i})">${r.moc===null?'Chốt mốc':'Chốt lại'}</button>
@@ -4368,9 +4373,18 @@ async function chotTonLichSu(idx){
   const r = LEGACY_ROWS_CACHE[idx];
   if(!r){ toast('⚠️ Danh sách đã cũ, mở lại màn này'); return; }
   const dv = r.it.unit || '';
-  const goiY = Math.max(0, Math.round(r.deXuat * 100) / 100);
+  // [FIX] TRƯỚC ĐÂY chặn sàn ở 0 (Math.max(0, ...)) — đúng cho ca gốc (sổ NHIỀU hơn tem,
+  // tồn có từ trước khi dán tem) nhưng SAI cho ca ngược lại (tem NHIỀU hơn sổ — ví dụ nhân
+  // viên quên quét mở/báo hết vài túi, sổ đã trừ đúng nhưng tem vẫn đứng nguyên "sealed"):
+  // lúc đó r.deXuat ÂM, kẹp về 0 làm số đề xuất mất hết ý nghĩa — "Chốt lại" bằng 0 không
+  // sửa được gì, chênh lệch vẫn y nguyên. Bỏ kẹp, cho phép mốc ÂM: công thức đối chiếu
+  // (lệch = sổ − mốc − tem) vẫn đúng toán học ở cả hai chiều, chỉ khác cách gọi tên/diễn giải.
+  const goiY = Math.round(r.deXuat * 100) / 100;
+  const amDuong = goiY >= 0
+    ? `Sổ đang NHIỀU hơn tem — phần chênh này thường là tồn có từ TRƯỚC ngày dán tem, không con tem nào đại diện.`
+    : `Tem đang NHIỀU hơn sổ — thường là nhân viên quên quét mở/báo hết cho (các) tem nào đó (sổ đã trừ đúng theo công thức, nhưng tem vẫn đứng nguyên trạng thái cũ). KHÔNG phải hàng bị mất, chỉ là tem chưa được cập nhật theo kịp thực tế.`;
   const nhap = prompt(
-    `Tồn lịch sử của "${r.it.name}" — phần tồn có từ TRƯỚC ngày dán tem, không con tem nào đại diện.
+    `Đối chiếu tồn lịch sử của "${r.it.name}". ${amDuong}
 
 `
     + `Sổ đang ghi:        ${fmtNum(r.ton,2)} ${dv}
@@ -4384,7 +4398,7 @@ async function chotTonLichSu(idx){
     String(goiY));
   if(nhap === null) return;
   const moc = Number(nhap);
-  if(!isFinite(moc) || moc < 0){ toast('⚠️ Nhập một số không âm'); return; }
+  if(!isFinite(moc)){ toast('⚠️ Nhập một số hợp lệ'); return; }
   try{
     await ensureAuth();
     await updateInventoryItemMeta(r.it.id, {
@@ -4393,7 +4407,7 @@ async function chotTonLichSu(idx){
       untrackedBaseNote: `Chốt tay · sổ ${fmtNum(r.ton,2)} − tem ${fmtNum(r.tem,2)} ${dv}`
     });
     logAudit('update','inventory_item',r.it.id,{untrackedBase: moc, truoc: r.moc});
-    toast('✅ Đã chốt tồn lịch sử '+fmtNum(moc,0)+' '+dv);
+    toast('✅ Đã chốt '+(moc<0?'(tem thừa) ':'')+fmtNum(Math.abs(moc),0)+' '+dv);
     renderKhoContainers();
   }catch(err){
     console.error('chotTonLichSu lỗi', err);
@@ -22359,7 +22373,7 @@ function _histReconcileHtml(c){
         <span class="tier tier-${khop?'green':'amber'}">${khop?'🟢 Khớp':'🟡 Có chênh lệch'}</span></div>
       <div class="row"><span class="rl">Sổ kho (tồn hiện tại)</span><span class="rv">${fmtNum(ton,1)} ${unit}</span></div>
       <div class="row"><span class="rl">Tem đang giữ (chai/gói còn sống)</span><span class="rv">${fmtNum(tem,1)} ${unit}</span></div>
-      <div class="row"><span class="rl">Tồn lịch sử (mốc đã chốt)</span><span class="rv">${fmtNum(moc,1)} ${unit}</span></div>
+      <div class="row"><span class="rl">${moc<0?'Tem thừa so với sổ (mốc đã chốt)':'Tồn lịch sử (mốc đã chốt)'}</span><span class="rv">${fmtNum(Math.abs(moc),1)} ${unit}</span></div>
       ${!khop ? `
       <div class="row" style="border-top:1.5px solid var(--line);font-weight:700">
         <span class="rl">Chênh</span><span class="rv">${lech>=0?'+':'−'}${fmtNum(Math.abs(lech),1)} ${unit}</span>
