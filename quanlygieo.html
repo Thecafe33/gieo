@@ -3788,11 +3788,28 @@ function ctnBasisLabel(k){ return CTN_BASIS_LABEL[k] || k || ''; }
 
 let LEGACY_ROWS_CACHE = [];
 
-// Đọc mọi tem còn sống, cộng baseQty theo món. 'in' cần Firestore mới nên có đường lui
-// giống openStockCountScreen bên POS.
+// Đọc mọi tem còn sống, cộng LƯỢNG THẬT CÒN LẠI theo món. 'in' cần Firestore mới nên có
+// đường lui giống openStockCountScreen bên POS.
+//
+// [FIX-fifo-lech-gia] TRƯỚC ĐÂY cộng thẳng baseQty (dung tích DANH NGHĨA) cho cả tem 'open'
+// — coi một chai đang mở dở như còn NGUYÊN VẸN, dù đã rót ra dùng bao nhiêu. Hệ quả: mỗi khi
+// có một lượt bán/nấu mẻ hợp lệ trừ dần chai đang mở (sổ kho giảm đúng, tem thì đứng yên vì
+// baseQty không đổi), phép đối chiếu (sổ − mốc − tem) lập tức lệch đúng bằng đúng lượng vừa
+// bán — dù chẳng có gì sai cả. Đây chính là lý do "vừa chốt khớp, 1-2h sau lại báo lệch dù
+// không quên quét gì" — lỗi nằm ở HÀM ĐỐI CHIẾU, không phải ở nhân viên.
+//
+// Giờ tem 'open' tính đúng phần THẬT SỰ còn lại = baseQty − fifoConsumed (xem
+// fifoAllocateConsumption bên posgieo.html) — giảm dần khớp với sổ kho theo từng lượt bán,
+// y hệt một chai thật vơi dần. Tem chưa từng qua lớp FIFO (mở từ trước khi có tính năng này,
+// fifoConsumed mặc định 0) vẫn tạm tính như cũ (baseQty đầy) — sai số khi đó nhỏ hơn nhiều so
+// với lỗi cũ, và tự hết khi tem đó được thay bằng tem mới "Theo dõi FIFO" qua thời gian.
 async function docTemConSongTheoMon(){
   const gom = {};
-  const nhet = d => { const c = d.data(); gom[c.itemId] = (gom[c.itemId] || 0) + (Number(c.baseQty) || 0); };
+  const nhet = d => {
+    const c = d.data();
+    const con = c.status==='open' ? Math.max(0, (Number(c.baseQty)||0) - (Number(c.fifoConsumed)||0)) : (Number(c.baseQty) || 0);
+    gom[c.itemId] = (gom[c.itemId] || 0) + con;
+  };
   try{
     (await fstore.collection(CTN_COLL).where('status','in',['sealed','open']).get()).docs.forEach(nhet);
   }catch(err){
