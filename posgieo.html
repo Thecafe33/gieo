@@ -3624,7 +3624,15 @@ async function submitOpenContainer(id) {
     await ref.update({
       status: 'open', openedAt: nowISO, openedBy: staffEmp.fullName,
       openedByEmployeeId: staffEmp.id,
-      expiresAt: computeOpenExpiry(c.openShelfLifeHours, nowISO)
+      expiresAt: computeOpenExpiry(c.openShelfLifeHours, nowISO),
+      // [MỚI] Đánh dấu tem này MỞ SAU KHI đã có tính năng phân bổ FIFO (xem
+      // fifoAllocateConsumption) — nghĩa là fifoConsumed của nó theo dõi ĐỦ từ lúc mở, không
+      // thiếu đoạn nào trước đó. Tem mở TRƯỚC bản này (đang 'open' sẵn khi code này lên) sẽ
+      // KHÔNG có cờ này — fifoConsumed của chúng chỉ tính TỪ LÚC code mới bắt đầu chạy, thiếu
+      // phần đã dùng trước đó, nên số ước lượng lúc báo hết (fifoEstimatedWaste) kém tin cậy
+      // hơn. Cờ này để lúc báo hết biết nên tin số ước lượng tới mức nào — xem
+      // submitFinishContainer() và ctnShowUsageDetail() bên quanlygieo.html.
+      fifoTrackedSinceOpen: true
     });
     toast('✅ Đã mở ' + (c.code || ''));
     await openStockUseScreen();
@@ -3887,6 +3895,10 @@ async function submitFinishContainer(id, daQuet) {
     // cùng mở" không có con số nào nên không bao giờ tự cờ được, dù thừa rất nhiều.
     const tyLeFifo = (fifoUocLuong != null && Number(c.baseQty) > 0) ? fifoUocLuong / Number(c.baseQty) : 0;
     const canDuyetFifo = tyLeFifo > FINISH_REVIEW_RATIO;
+    // [MỚI] Tem có cờ fifoTrackedSinceOpen (mở SAU khi tính năng FIFO đã tồn tại — xem
+    // submitOpenContainer) thì fifoConsumed theo dõi ĐỦ từ lúc mở, ước lượng đáng tin hơn hẳn
+    // so với tem mở TRƯỚC bản này (fifoConsumed chỉ tính từ lúc code mới chạy, thiếu đoạn đầu).
+    const fifoDangTin = !!c.fifoTrackedSinceOpen;
     // Hai trạng thái "không tính được" bên dưới cũng phải nổi lên màn Quản lý: im lặng
     // thì món đó vĩnh viễn không ai chốt mốc lịch sử và tem coi như hỏng chức năng.
     const canXemLai = canDuyet || canDuyetFifo || cachTinh === 'chua_chot_ton_lich_su' || cachTinh === 'lech_so_sach';
@@ -3900,7 +3912,7 @@ async function submitFinishContainer(id, daQuet) {
       // [MỚI] Số THAM KHẢO riêng, KHÔNG lẫn vào wasteBase (trường đó chỉ chứa hao hụt đã
       // XÁC NHẬN) — mọi báo cáo hao hụt/GOGS trong app cộng thẳng wasteBase nên không được
       // để một số chưa chắc chắn lọt vào đó.
-      ...(fifoUocLuong != null ? { fifoEstimatedWaste: fifoUocLuong } : {}),
+      ...(fifoUocLuong != null ? { fifoEstimatedWaste: fifoUocLuong, fifoEstimateReliable: fifoDangTin } : {}),
       // Ảnh chụp ba số đã dùng để ra kết luận — không lưu thì sau này không ai dựng
       // lại được vì sao chai này ghi 0 g còn chai kia ghi 80 g.
       finishSnapshot: {
@@ -3938,7 +3950,9 @@ async function submitFinishContainer(id, daQuet) {
     } else if (canDuyet) {
       toast('⚠️ Báo hết khi còn ~' + Math.round(tyLe * 100) + '% — đã ghi nhận để Quản lý xem lại');
     } else if (canDuyetFifo) {
-      toast('⚠️ Ước tính còn ~' + Math.round(tyLeFifo * 100) + '% (nhiều tem cùng mở, chưa chắc chắn) — đã ghi nhận để Quản lý xem lại');
+      toast('⚠️ Ước tính còn ~' + Math.round(tyLeFifo * 100) + '% (nhiều tem cùng mở'
+        + (fifoDangTin ? '' : ', tem mở trước khi có theo dõi FIFO nên chưa chắc chắn')
+        + ') — đã ghi nhận để Quản lý xem lại');
     } else {
       toast('✅ Đã chốt ' + (c.code || ''));
     }
