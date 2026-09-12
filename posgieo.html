@@ -3828,6 +3828,16 @@ async function submitFinishContainer(id, daQuet) {
     //   lech_so_sach           → thừa > cả dung tích chai: sổ lệch, không phải hao hụt → không ghi, cờ review
     let duThua = null, cachTinh = 'nhieu_chai_mo';
     let tonSoLuc = null, tonLichSuLuc = null, nguyenLuc = null, lechSoSach = 0;
+    // [MỚI] Ước lượng riêng theo FIFO (fifoConsumed) — CHỈ dùng làm số THAM KHẢO + cờ xem
+    // lại khi cách tính gốc ở trên bó tay vì có >1 tem cùng mở (nhieu_chai_mo). Trước đây ca
+    // này hoàn toàn mù — nhiều tem cùng mở thì KHÔNG có cách nào quy phần thừa cho đúng tem
+    // nào, nên luôn ghi wasteBase=0 và cũng không lọt được ngưỡng cờ review. Giờ mỗi tem tự
+    // có sổ riêng (fifoConsumed, xem fifoAllocateConsumption) nên tính được NGAY CẢ KHI có
+    // tem khác cùng mở. KHÔNG coi là 'tinh_duoc' và KHÔNG ghi WASTE tự động từ số này: tem có
+    // thể đã mở TỪ TRƯỚC khi tính năng FIFO tồn tại, phần tiêu hao trước đó không nằm trong
+    // fifoConsumed nên số ước lượng có thể cao hơn thực tế — chỉ đủ tin để BÁO cho Quản lý
+    // xem lại, không đủ tin để tự ghi vào sổ hao hụt chính thức.
+    let fifoUocLuong = null;
     try {
       const [snapOpen, snapSealed, itemDoc] = await Promise.all([
         fstore.collection(STOCK_CONTAINERS_COLL).where('itemId', '==', c.itemId).where('status', '==', 'open').get(),
@@ -3838,6 +3848,9 @@ async function submitFinishContainer(id, daQuet) {
         cachTinh = 'loi_doc';
       } else if (snapOpen.docs.length !== 1) {
         cachTinh = 'nhieu_chai_mo';
+        if (typeof c.fifoConsumed === 'number') {
+          fifoUocLuong = Math.max(0, (Number(c.baseQty) || 0) - c.fifoConsumed);
+        }
       } else {
         const itemData = itemDoc.data();
         const moc = tonLichSuCuaMon(itemData);
@@ -3870,9 +3883,13 @@ async function submitFinishContainer(id, daQuet) {
     const coSoThua = cachTinh === 'tinh_duoc' && duThua > 0;
     const tyLe = (Number(c.baseQty) > 0 && coSoThua) ? duThua / Number(c.baseQty) : 0;
     const canDuyet = tyLe > FINISH_REVIEW_RATIO;
+    // [MỚI] Ước lượng FIFO vượt ngưỡng cũng phải lọt cờ xem lại — trước đây ca "nhiều tem
+    // cùng mở" không có con số nào nên không bao giờ tự cờ được, dù thừa rất nhiều.
+    const tyLeFifo = (fifoUocLuong != null && Number(c.baseQty) > 0) ? fifoUocLuong / Number(c.baseQty) : 0;
+    const canDuyetFifo = tyLeFifo > FINISH_REVIEW_RATIO;
     // Hai trạng thái "không tính được" bên dưới cũng phải nổi lên màn Quản lý: im lặng
     // thì món đó vĩnh viễn không ai chốt mốc lịch sử và tem coi như hỏng chức năng.
-    const canXemLai = canDuyet || cachTinh === 'chua_chot_ton_lich_su' || cachTinh === 'lech_so_sach';
+    const canXemLai = canDuyet || canDuyetFifo || cachTinh === 'chua_chot_ton_lich_su' || cachTinh === 'lech_so_sach';
 
     await ref.update({
       status: 'finished', finishedAt: nowISO, finishedBy: staffEmp.fullName,
@@ -3880,6 +3897,10 @@ async function submitFinishContainer(id, daQuet) {
       finishReason: lyDo, finishScanned: !!daQuet,
       wasteBase: coSoThua ? duThua : 0,
       wasteBasis: cachTinh,
+      // [MỚI] Số THAM KHẢO riêng, KHÔNG lẫn vào wasteBase (trường đó chỉ chứa hao hụt đã
+      // XÁC NHẬN) — mọi báo cáo hao hụt/GOGS trong app cộng thẳng wasteBase nên không được
+      // để một số chưa chắc chắn lọt vào đó.
+      ...(fifoUocLuong != null ? { fifoEstimatedWaste: fifoUocLuong } : {}),
       // Ảnh chụp ba số đã dùng để ra kết luận — không lưu thì sau này không ai dựng
       // lại được vì sao chai này ghi 0 g còn chai kia ghi 80 g.
       finishSnapshot: {
@@ -3916,6 +3937,8 @@ async function submitFinishContainer(id, daQuet) {
       toast('✅ Đã chốt ' + (c.code || '') + ' — sổ đang dư ' + fmtPrepQty(lechSoSach) + ' ' + (c.unit || '') + ', để Quản lý điều chỉnh (không ghi hao hụt)');
     } else if (canDuyet) {
       toast('⚠️ Báo hết khi còn ~' + Math.round(tyLe * 100) + '% — đã ghi nhận để Quản lý xem lại');
+    } else if (canDuyetFifo) {
+      toast('⚠️ Ước tính còn ~' + Math.round(tyLeFifo * 100) + '% (nhiều tem cùng mở, chưa chắc chắn) — đã ghi nhận để Quản lý xem lại');
     } else {
       toast('✅ Đã chốt ' + (c.code || ''));
     }

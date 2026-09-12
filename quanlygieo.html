@@ -4567,9 +4567,21 @@ async function renderKhoContainers(){
     return;
   }
 
+  // [MỚI] Ca 'nhieu_chai_mo' (nhiều tem cùng mở) không có wasteBase (chưa đủ tin để ghi
+  // chính thức) nhưng CÓ THỂ có fifoEstimatedWaste — số ước lượng riêng theo tem, chỉ để
+  // xem, không phải hao hụt đã xác nhận. Trước đây ca này luôn hiện "0% còn lại", mù hoàn
+  // toàn; giờ có số ước lượng thì hiện lên, gắn rõ nhãn "ước lượng" để không lẫn với số
+  // wasteBase đã xác nhận.
+  const heSo = c => {
+    const base = Number(c.baseQty) || 0;
+    if (base<=0) return {pct:0, uocLuong:false};
+    if (Number(c.wasteBase) > 0) return {pct: Math.round(c.wasteBase/base*100), uocLuong:false};
+    if (Number(c.fifoEstimatedWaste) > 0) return {pct: Math.round(c.fifoEstimatedWaste/base*100), uocLuong:true};
+    return {pct:0, uocLuong:false};
+  };
   // Sắp xếp: nặng nhất lên đầu — quá hạn lâu nhất, hoặc bỏ phí nhiều nhất.
   const sorted = list.slice().sort((a,b)=>
-    ctnFilter==='review' ? (Number(b.wasteBase)||0) - (Number(a.wasteBase)||0)
+    ctnFilter==='review' ? ((Number(b.wasteBase)||Number(b.fifoEstimatedWaste)||0) - (Number(a.wasteBase)||Number(a.fifoEstimatedWaste)||0))
     : String(a.expiresAt||a.receivedAt||'').localeCompare(String(b.expiresAt||b.receivedAt||'')));
 
   box.innerHTML = nav + `<div class="small-note" style="margin-bottom:12px">${giaiThich}</div>` +
@@ -4577,15 +4589,17 @@ async function renderKhoContainers(){
       const ex = ctnExpiryText(c);
       const p2 = n => String(n).padStart(2,'0');
       const dt = iso => { const d = iso?new Date(iso):null; return (d && !isNaN(d)) ? `${p2(d.getDate())}/${p2(d.getMonth()+1)}` : ''; };
-      const tyLe = (Number(c.baseQty)>0 && Number(c.wasteBase)>0) ? Math.round(c.wasteBase/c.baseQty*100) : 0;
+      const {pct:tyLe, uocLuong} = heSo(c);
+      const soConLai = uocLuong ? Number(c.fifoEstimatedWaste) : Number(c.wasteBase);
       const phu = ctnFilter==='review'
-        ? `Báo hết ${dt(c.finishedAt)} bởi <b>${escapeHtmlAttr(c.finishedBy||'—')}</b> · còn <b>${fmtNum(c.wasteBase,0)} ${escapeHtmlAttr(c.unit||'')}</b> (${tyLe}% còn lại)`
-          + (c.wasteBasis && c.wasteBasis !== 'tinh_duoc' ? `<div class="muted-sm">${escapeHtmlAttr(ctnBasisLabel(c.wasteBasis))}</div>` : '')
+        ? `Báo hết ${dt(c.finishedAt)} bởi <b>${escapeHtmlAttr(c.finishedBy||'—')}</b> · còn <b>${fmtNum(soConLai,0)} ${escapeHtmlAttr(c.unit||'')}</b> (${tyLe}% ${uocLuong?'— ước lượng':'còn lại'})`
+          + (uocLuong ? `<div class="muted-sm">Ước lượng theo tem (FIFO) — lúc báo hết có tem khác của cùng nguyên liệu cũng đang mở nên chưa tính chính thức được, chỉ để tham khảo</div>`
+            : (c.wasteBasis && c.wasteBasis !== 'tinh_duoc' ? `<div class="muted-sm">${escapeHtmlAttr(ctnBasisLabel(c.wasteBasis))}</div>` : ''))
         : ctnFilter==='unlabeled'
         ? `Nhận ${dt(c.receivedAt)} bởi ${escapeHtmlAttr(c.receivedBy||'—')}`
         : `Mở ${dt(c.openedAt)} bởi ${escapeHtmlAttr(c.openedBy||'—')}`;
       const nhan = ctnFilter==='review'
-        ? `<span class="tier tier-${tyLe>=50?'red':'amber'}">${tyLe}% còn lại</span>`
+        ? `<span class="tier tier-${tyLe>=50?'red':'amber'}">${tyLe}%${uocLuong?' ước lượng':' còn lại'}</span>`
         : (ex.text ? `<span class="${ex.cls}">${ex.text}</span>` : '');
       return `<div class="litem">
         <div class="li-l">
@@ -4726,6 +4740,10 @@ function ctnShowUsageDetail(id){
   // khác nghĩa là wasteBase đang mặc định 0 vì CHƯA tính được, không phải "dùng hết sạch"
   // (xem chú thích ở CTN_BASIS_LABEL). Phải cảnh báo rõ, nếu không chủ quán đọc nhầm.
   const chuaTinhDuocThua = c.wasteBasis && c.wasteBasis!=='tinh_duoc' && c.wasteBasis!=='don_vi_nguyen';
+  // [MỚI] wasteBase=0 nhưng có fifoEstimatedWaste (nhiều tem cùng mở lúc báo hết) — số ước
+  // lượng riêng theo tem, CHƯA chính thức, chỉ hiện thêm để tham khảo, không thay wasteBase.
+  const fifoEst = wasteBase<=0 ? Number(c.fifoEstimatedWaste)||0 : 0;
+  const pctFifoEst = (fifoEst>0 && baseQty>0) ? Math.round(fifoEst/baseQty*100) : 0;
 
   let body = `<div class="card" style="margin-top:0">
       <div class="card-h"><h3>${escapeHtmlAttr(c.itemName||'')}</h3>
@@ -4750,6 +4768,8 @@ function ctnShowUsageDetail(id){
       <div class="row"><span class="rl">Hao hụt / còn thừa lúc báo hết</span><span class="rv" style="${wasteBase>0?'color:var(--bad)':''}">${fmtNum(wasteBase,0)} ${dv} (${pctThua}%)</span></div>
       ${c.wasteBasis ? `<div class="small-note" style="margin-top:6px">Căn cứ: ${escapeHtmlAttr(ctnBasisLabel(c.wasteBasis))}</div>` : ''}
       ${chuaTinhDuocThua ? `<div class="small-note" style="margin-top:6px;color:var(--warn)">Lưu ý: hệ thống CHƯA tính được phần thừa thật sự cho lần báo hết này — không có nghĩa là đã dùng hết sạch, chỉ là chưa ghi được hao hụt.</div>` : ''}
+      ${fifoEst>0 ? `<div class="row" style="margin-top:4px"><span class="rl">Ước lượng riêng theo tem (FIFO)</span><span class="rv" style="color:var(--warn)">${fmtNum(fifoEst,0)} ${dv} (${pctFifoEst}%)</span></div>
+        <div class="small-note" style="margin-top:2px;color:var(--warn)">Lúc báo hết có tem khác của cùng nguyên liệu cũng đang mở nên chưa ghi chính thức vào hao hụt — số này chỉ để tham khảo, có thể thấp hơn thực tế nếu tem đã mở từ trước khi có tính năng theo dõi FIFO.</div>` : ''}
       ${c.needsReview ? `<div class="small-note" style="margin-top:6px;color:var(--bad)">⚠️ Đang bị gắn cờ CẦN XEM LẠI — báo hết khi hàng còn hơn 25%.</div>`
         : (c.reviewedAt ? `<div class="small-note" style="margin-top:6px">Đã xem lại lúc ${dt(c.reviewedAt)}${c.reviewedBy?' bởi '+escapeHtmlAttr(c.reviewedBy):''}.</div>` : '')}
       ${c.finishScanned===false ? `<div class="small-note" style="margin-top:6px">Chọn tay, không quét mã${c.finishReason?' · '+escapeHtmlAttr(ctnReasonLabel(c.finishReason)):''}</div>` : ''}
