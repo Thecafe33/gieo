@@ -258,11 +258,18 @@ body{font-family:'Google Sans',sans-serif;background:var(--bg);max-width:430px;m
   background:#e74c3c;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.25);padding:0;cursor:pointer;z-index:11;
   animation:fifoPulse 1.6s ease-in-out infinite;}
 @keyframes fifoPulse{0%,100%{box-shadow:0 0 0 0 rgba(231,76,60,.45)}50%{box-shadow:0 0 0 5px rgba(231,76,60,0)}}
-.fifo-alert-bar{display:none;position:fixed;top:74px;left:50%;transform:translateX(-50%);width:100%;max-width:430px;
-  padding:0 12px;z-index:16;box-sizing:border-box;}
-.fifo-alert-chip{display:flex;align-items:center;gap:8px;background:#fff3f2;border:1.5px solid #f6b4ac;color:#b91c1c;
-  border-radius:16px;padding:10px 14px;font-size:12.5px;font-weight:700;cursor:pointer;box-shadow:0 6px 18px rgba(0,0,0,.08);}
-.fifo-alert-panel{background:#fff;border:1.5px solid #f6b4ac;border-radius:18px;padding:12px 14px;box-shadow:0 10px 28px rgba(0,0,0,.12);max-height:52vh;overflow-y:auto;}
+/* [FIX] TRƯỚC ĐÂY bar này rộng full width (100%, max-width 430px) và luôn tự bung
+   to hết cỡ mỗi khi có tem mới cạn — kể cả ở dạng "thu gọn" (chip) nó vẫn chiếm
+   trọn bề ngang ngay dưới logo, đè lên hàng filter-bar/menu, chặn luôn thao tác
+   bấm món lúc đang bán đông khách. Giờ: (1) width:auto để tự co theo đúng nội
+   dung (chip nhỏ khi thu gọn) thay vì luôn full-width, (2) pointer-events:none ở
+   khung ngoài + chỉ bật lại ở chip/panel bên trong, để phần trong suốt quanh chip
+   không chặn tay chạm xuống filter-bar/menu bên dưới nữa. */
+.fifo-alert-bar{display:none;position:fixed;top:74px;left:50%;transform:translateX(-50%);width:auto;max-width:92vw;
+  z-index:16;box-sizing:border-box;pointer-events:none;}
+.fifo-alert-chip{display:inline-flex;pointer-events:auto;align-items:center;gap:8px;background:#fff3f2;border:1.5px solid #f6b4ac;color:#b91c1c;
+  border-radius:16px;padding:10px 14px;font-size:12.5px;font-weight:700;cursor:pointer;box-shadow:0 6px 18px rgba(0,0,0,.08);white-space:nowrap;}
+.fifo-alert-panel{pointer-events:auto;width:min(92vw,400px);background:#fff;border:1.5px solid #f6b4ac;border-radius:18px;padding:12px 14px;box-shadow:0 10px 28px rgba(0,0,0,.12);max-height:52vh;overflow-y:auto;}
 .fifo-alert-panel-h{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;}
 .fifo-alert-item{padding:10px 0;border-bottom:1px solid #f5e2df;}
 .fifo-alert-item:last-child{border-bottom:none;}
@@ -4026,7 +4033,6 @@ async function unitEngineFinishOpenUnit(id, c, staffEmp, lyDo, daQuet, ref) {
 // ---------- Cảnh báo "cần xác nhận đã hết" trên màn Order ----------
 let FIFO_PENDING_CONFIRM = [];
 let _fifoAlertExpanded = false;
-let _fifoAlertSeenIds = new Set(); // tem nào đã từng tự mở pill ra rồi thì lần refresh sau không tự mở lại nữa
 
 // [UNIT ENGINE v2] "Cần xác nhận đã hết" = tem đang 'open' nhưng unitBase đã <= 0 (nợ FIFO
 // hoặc vừa cạn đúng lúc) — unitBase là bản sao Firestore, đồng bộ sau mỗi lượt bán qua
@@ -4040,9 +4046,11 @@ async function refreshFifoAlert() {
       .sort((a, b) => String(a.openedAt || '').localeCompare(String(b.openedAt || '')));
   } catch (err) { console.warn('[FIFO] refreshFifoAlert lỗi:', err); return; }
   FIFO_PENDING_CONFIRM = list;
-  const coMoiChuaThay = list.some(c => !_fifoAlertSeenIds.has(c.id));
-  list.forEach(c => _fifoAlertSeenIds.add(c.id));
-  if (coMoiChuaThay) _fifoAlertExpanded = true; // có tem MỚI vừa cạn — tự bung pill ra hỏi ngay
+  // [FIX] TRƯỚC ĐÂY có tem mới cạn là tự bung hẳn cái panel to ra giữa màn hình order,
+  // bất kể đang bận bán hàng cỡ nào — đây chính là thứ "che màn hình rất khó chịu khi
+  // đang bán đông khách". Chấm đỏ nhấp nháy cạnh logo + dòng chip nhỏ (đã sửa CSS cho
+  // không còn chiếm hết bề ngang) là đủ để nhân viên biết có việc cần xử lý; panel to
+  // với nút xác nhận chỉ nên hiện khi họ CHỦ ĐỘNG bấm vào lúc rảnh tay.
   renderFifoAlertBar();
 }
 
@@ -4051,11 +4059,40 @@ function toggleFifoAlertBar() {
   renderFifoAlertBar();
 }
 
-// Bấm "Quét mã xác nhận" ngay trong pill — dùng lại đúng luồng quét báo hết đã có
-// (scanToFinishContainer), không viết luồng riêng để khỏi lệch hành vi (lý do, đối
-// chiếu hao hụt... đều xử lý y hệt nút "Báo hết" bình thường).
-function fifoAlertScanNow() {
-  if (typeof scanToFinishContainer === 'function') scanToFinishContainer();
+// Bấm "Quét mã xác nhận" ngay trong pill.
+//
+// [FIX] TRƯỚC ĐÂY gọi thẳng scanToFinishContainer() — hàm đó vẽ sheet "Xác nhận đã
+// hết" vào #stockUseBody, một element chỉ thật sự HIỂN THỊ khi #stockUseScreen đang
+// là màn đang mở. Pill này lại nằm trên màn Order (#sm) — bấm "Quét mã xác nhận" từ
+// đây, quét xong, sheet vẫn được vẽ ra nhưng nằm sau màn Order đang hiện, nhân viên
+// không thấy gì để bấm "Xác nhận đã hết" tiếp. Kết quả: tưởng đã quét xong nhưng vì
+// không bấm được nút xác nhận cuối cùng nên tem chưa bao giờ thật sự được chốt —
+// pill cứ treo mãi dù "đã quét theo đúng nút nhắc nhở". Giờ tự chuyển sang màn Kho
+// trước khi mở sheet, y hệt cách scanToFinishContainerForItem() đã làm cho màn Chế
+// biến.
+//
+// Cũng kiểm tra thêm: mã vừa quét có ĐÚNG là một trong những tem đang bị pill này
+// cảnh báo hay không. Trước đây quét trúng một tem BẤT KỲ đang mở (kể cả tem không
+// nằm trong danh sách cảnh báo) vẫn chạy hết luồng "báo hết" bình thường và tự coi
+// là xong — không giải quyết được cảnh báo nào cả, nhìn như "quét rồi mà pill không
+// biến mất".
+async function fifoAlertScanNow() {
+  if (typeof posScan !== 'function') { toast('⚠️ Máy này chưa quét được'); return; }
+  const r = await posScan();
+  if (!r.ok) { if (r.error !== 'cancelled') toast('⚠️ ' + posScanErrorText(r.error)); return; }
+  const c = await findContainerByCode(r.code);
+  if (chanMaTrung(c)) return;
+  if (!c) { toast('❌ Không có mã ' + r.code + ' trong hệ thống'); return; }
+  if (!FIFO_PENDING_CONFIRM.some(x => x.id === c.id)) {
+    toast('⚠️ Mã ' + (c.code || '') + ' không nằm trong danh sách đang chờ xác nhận ở đây — vào Kho → Đang dùng để báo hết mã này bình thường.');
+    return;
+  }
+  if (c.status === 'voided')   { toast('⛔ ' + c.code + ' đã bị huỷ (phiếu nhận ghi thừa) — bóc tem này bỏ đi, đừng dùng'); return; }
+  if (c.status === 'lost')     { toast('⚠️ ' + c.code + ' đang ở trạng thái "báo mất" — dùng nút "Quét mã hàng tìm lại được" ở Kiểm kê để phục hồi'); return; }
+  if (c.status === 'sealed' && !isAtomicUnitContainer(c)) { toast('ℹ️ ' + c.code + ' còn nguyên seal — mở trước đã'); return; }
+  if (c.status === 'finished') { toast('ℹ️ ' + c.code + ' đã báo hết trước đó'); return; }
+  showScreen('stockUseScreen');
+  openConfirmFinishSheet(c, true);
 }
 
 function renderFifoAlertBar() {
@@ -6392,7 +6429,7 @@ function _handleTemDiscoveryResults(list, manual) {
       window.AndroidPrinter.connectPrinter(match.ip);
       _temSaveIp(match.ip); // [FIX-tem-keepalive] nhớ IP để lần rớt sau nối lại tức thì, khỏi quét lại LAN
       if (pickWrap) pickWrap.style.display = 'none';
-      _pollTemConnectStatus();
+      _pollTemConnectStatus(!manual);
       return;
     }
   }
@@ -6409,7 +6446,7 @@ function _handleTemDiscoveryResults(list, manual) {
     _temSaveIp(d.ip); // [FIX-tem-keepalive] nhớ IP để nối lại tức thì khi rớt
     if (d.mac) POSTemPrinter.setMac(d.mac); // chỉ nhớ MAC thật, không ghi đè bằng giá trị rỗng
     if (pickWrap) pickWrap.style.display = 'none';
-    _pollTemConnectStatus();
+    _pollTemConnectStatus(!manual);
     return;
   }
   // Trường hợp 3: quét thấy nhiều máy (hoặc máy đã nhớ không thấy) — cho chọn 1 lần, nhớ luôn
@@ -6447,7 +6484,17 @@ function temPickerConnectClick() {
 }
 
 let _temPollTimer = null;
-function _pollTemConnectStatus() {
+// [FIX] silent — TRƯỚC ĐÂY hàm này luôn toast khi thất bại, kể cả khi được gọi từ
+// đường "ÂM THẦM" (watchdog nền mỗi 30s, và lượt dò tự động lúc mở app — xem
+// _temQuietReconnect/_handleTemDiscoveryResults). Máy in tem tắt hay ngoài vùng
+// WiFi giữa ca là chuyện thường, nhưng cứ mỗi lượt watchdog lại bắn "❌ Không kết
+// nối được, thử quét lại" — nhân viên đang bận quét mã kho/bán hàng (việc không hề
+// liên quan tới máy in tem) thấy lỗi này hiện lên vài giây sau một thao tác của
+// mình thì tưởng chính thao tác đó thất bại, dù nó đã thành công. Giờ chỉ toast khi
+// đây THẬT SỰ là lượt dò do nhân viên tự bấm (xem chỗ gọi `!manual` ở
+// _handleTemDiscoveryResults) — lượt nền vẫn cập nhật đúng trạng thái (chấm đỏ/xanh
+// cạnh logo), chỉ là không làm phiền bằng toast.
+function _pollTemConnectStatus(silent) {
   const statusEl = document.getElementById('tem-app-connect-status');
   if (statusEl) { statusEl.textContent = 'Đang kết nối...'; statusEl.style.color = '#999'; }
   // [FIX] Trước đây mỗi lần gọi lại tạo thêm một interval mà không dọn cái cũ — vài lượt dò
@@ -6463,7 +6510,7 @@ function _pollTemConnectStatus() {
       if (_temPollTimer === timer) _temPollTimer = null;
       if (ok) _temSyncKeepAlive();
       _refreshTemAppConnectStatus();
-      if (!ok) toast('❌ Không kết nối được, thử quét lại');
+      if (!ok && !silent) toast('❌ Không kết nối được, thử quét lại');
     }
   }, 500);
   _temPollTimer = timer;
