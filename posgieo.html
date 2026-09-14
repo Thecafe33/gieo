@@ -4585,6 +4585,38 @@ async function writeAtomicContainerFinish(ref, c, staffEmp, lyDo, daQuet) {
   });
 }
 
+// [MỚI] Hoàn lại MỘT container "cái" đã bị writeAtomicContainerFinish() chốt 'finished'
+// — dùng khi "Huỷ mẻ" một lô Chế biến đã đi qua cổng quét bắt buộc lúc bắt đầu (xem
+// startPrepBatchGate/prepStartGateScan): nếu không hoàn, tem đó kẹt vĩnh viễn ở
+// 'finished' (coi như đã dùng hết) dù mẻ chưa từng thực sự được nấu — số LƯỢNG thì
+// _reverseIngredientConsumptionPOS() đã cộng lại currentStock đúng rồi, nhưng tem/mã
+// vật lý cụ thể đã quét vẫn không có đường quay lại 'sealed' nếu thiếu hàm này.
+//
+// CHỈ hoàn nếu tem vẫn đang đúng ở 'finished' — nếu từ lúc quét tới giờ nó đã bị đổi
+// trạng thái bởi một thao tác khác (Quản lý báo mất, hoặc trớ trêu hơn là đã bị dùng
+// cho một mẻ MỚI khác) thì ĐỪNG đụng vào, tránh ghi đè lịch sử thật của thao tác sau.
+// Giữ lại finishedAt/finishedBy cũ (không xoá) — chỉ thêm revertedFinish để biết vì
+// sao một tem 'sealed' lại có vết đã từng 'finished' nếu sau này cần soi lại.
+async function _reverseAtomicContainerFinish(containerId, batchId, staffEmp, note) {
+  const ref = fstore.collection(STOCK_CONTAINERS_COLL).doc(containerId);
+  try {
+    const doc = await ref.get();
+    if (!doc.exists) return false;
+    if (doc.data().status !== 'finished') return false;
+    await ref.update({
+      status: 'sealed',
+      revertedFinish: {
+        batchId: batchId || '', at: new Date().toISOString(),
+        by: (staffEmp && staffEmp.fullName) || '', reason: note || ''
+      }
+    });
+    return true;
+  } catch (err) {
+    console.warn('[Huỷ mẻ] hoàn tem đã quét lỗi', containerId, err);
+    return false;
+  }
+}
+
 async function submitFinishContainer(id, daQuet) {
   if (_posSubmitBusy) { toast('⏳ Đang xử lý...'); return; }
   _posSubmitBusy = true;
@@ -9998,18 +10030,38 @@ async function confirmPrepStartAfterScan() {
   if (!st) return;
   if (!st.requirements.every(r => r.scannedIds.length >= r.required)) { toast('⚠️ Quét đủ mã trước khi bắt đầu'); return; }
   const staffEmp = st.staffEmp;
+  // [MỚI] Gom lại ĐÚNG những tem đã quét ở cổng này, gắn vào lô sắp tạo (xem
+  // _startPrepBatchImpl) — để lỡ sau này bấm "Huỷ mẻ" thì biết đường hoàn lại đúng
+  // những tem đó về 'sealed', thay vì để chúng kẹt vĩnh viễn ở 'finished' dù mẻ
+  // chưa từng thực sự nấu (xem _reverseAtomicContainerFinish).
+  const scannedContainerIds = st.requirements.reduce((acc, r) => acc.concat(r.scannedIds), []);
   prepStartScanState = null;
-  await startPrepBatch(staffEmp, true);
+  await startPrepBatch(staffEmp, true, scannedContainerIds);
 }
 
-function cancelPrepStartGate() {
+// [FIX] TRƯỚC ĐÂY huỷ ở bước quét (trước khi bấm "Bắt đầu chế biến thật", nên
+// CHƯA có lô nào được tạo — không giống "Huỷ mẻ" của lô đã cooking, ở đây không có
+// batchId nào để sau này còn đường hoàn lại) chỉ CẢNH BÁO rằng tem đã quét sẽ kẹt
+// vĩnh viễn ở 'finished', không tự hoàn. Giờ tự hoàn lại luôn các tem đã quét về
+// 'sealed' ngay khi xác nhận huỷ — dùng lại đúng _reverseAtomicContainerFinish() của
+// luồng "Huỷ mẻ", vì đằng nào cũng chưa có lô/giao dịch trừ kho thật nào được tạo,
+// nên không có gì để hoàn ngoài đúng các tem này.
+async function cancelPrepStartGate() {
   const st = prepStartScanState;
-  const scanned = st ? st.requirements.reduce((s, r) => s + r.scannedIds.length, 0) : 0;
-  // Đã quét thì tem đó đã bị chốt "dùng hết" thật sự (xem writeAtomicContainerFinish)
-  // — huỷ ở đây chỉ huỷ Ý ĐỊNH nấu mẻ, không tự hoàn lại tem đã quét, nên phải hỏi
-  // lại cho chắc trước khi thoát.
-  if (scanned > 0 && !confirm('Đã quét ' + scanned + ' mã — các mã này đã được ghi nhận dùng hết, không tự hoàn lại khi huỷ. Vẫn huỷ và quay lại?')) return;
+  const scannedIds = st ? st.requirements.reduce((acc, r) => acc.concat(r.scannedIds), []) : [];
+  if (scannedIds.length && !confirm('Đã quét ' + scannedIds.length + ' mã — huỷ sẽ tự hoàn các mã này về trạng thái chưa dùng. Vẫn huỷ và quay lại?')) return;
   prepStartScanState = null;
+  if (scannedIds.length) {
+    const staffEmp = st.staffEmp;
+    const results = await Promise.allSettled(
+      scannedIds.map(cid => _reverseAtomicContainerFinish(cid, '', staffEmp, 'Huỷ ở bước quét trước khi bắt đầu chế biến'))
+    );
+    const ok = results.filter(r => r.status === 'fulfilled' && r.value).length;
+    refreshFifoAlert().catch(() => {});
+    toast(ok === scannedIds.length
+      ? `✅ Đã huỷ và hoàn lại ${ok} mã vừa quét`
+      : `⚠️ Đã huỷ nhưng chỉ hoàn lại được ${ok}/${scannedIds.length} mã — kiểm tra tay các mã còn lại`);
+  }
   renderPrepBatchForm();
 }
 
@@ -10021,13 +10073,13 @@ function cancelPrepStartGate() {
 // preResolvedStaff — khi gọi tiếp sau bước quét mã bắt buộc (xem
 // startPrepBatchGate/confirmPrepStartAfterScan), danh tính đã xác thực PIN một
 // lần ở đầu bước quét rồi, không hỏi lại PIN lần 2 vì màn quét không còn ô PIN.
-async function startPrepBatch(preResolvedStaff, atomicScanDone) {
+async function startPrepBatch(preResolvedStaff, atomicScanDone, atomicScannedContainerIds) {
   if (_posSubmitBusy) { toast('⏳ Đang xử lý, vui lòng đợi giây lát...'); return; }
   _posSubmitBusy = true;
   const restoreBtn = setBtnBusy('prepStartBtn', '⏳ Đang trừ kho nguyên liệu...');
-  try { await _startPrepBatchImpl(preResolvedStaff, atomicScanDone); } finally { _posSubmitBusy = false; restoreBtn(); }
+  try { await _startPrepBatchImpl(preResolvedStaff, atomicScanDone, atomicScannedContainerIds); } finally { _posSubmitBusy = false; restoreBtn(); }
 }
-async function _startPrepBatchImpl(preResolvedStaff, atomicScanDone) {
+async function _startPrepBatchImpl(preResolvedStaff, atomicScanDone, atomicScannedContainerIds) {
   const p = PREP_ITEMS_CACHE_POS.find(x => x.id === prepBatchState.prepId);
   if (!p) { toast('⚠️ Chưa chọn thành phẩm'); return; }
   if (!(prepBatchState.ratio > 0)) { toast('⚠️ Tỷ lệ mẻ phải lớn hơn 0'); return; }
@@ -10125,6 +10177,11 @@ async function _startPrepBatchImpl(preResolvedStaff, atomicScanDone) {
         // quét lại một việc đã xong, chỉ còn nhắc cho lô cũ tạo trước khi có cổng
         // quét này (không có cờ).
         atomicScanDone: !!atomicScanDone,
+        // [MỚI] Đúng những container "cái" đã bị quét-chốt (status → 'finished') ở
+        // cổng quét lúc bắt đầu — xem _reverseAtomicContainerFinish(): "Huỷ mẻ" đọc
+        // đúng danh sách này để hoàn tem về 'sealed', không thì tem coi như dùng hết
+        // vĩnh viễn dù mẻ chưa từng thực sự được nấu.
+        atomicScannedContainerIds: Array.isArray(atomicScannedContainerIds) ? atomicScannedContainerIds : [],
         businessDate: posDateKey(), source: 'pos'
       });
     } catch (setErr) {
@@ -10505,17 +10562,37 @@ async function _submitPrepCancelImpl() {
     refreshFifoAlert().catch(() => {}); // huỷ mẻ có thể vừa "mở lại" phần tem chưa thật sự cạn
   }
 
+  // BƯỚC 3.5 — hoàn lại đúng những tem "cái" đã quét ở cổng quét bắt buộc lúc bắt đầu
+  // (xem startPrepBatchGate/prepStartGateScan) về 'sealed'. Số LƯỢNG nguyên liệu đã
+  // được cộng lại đúng ở BƯỚC 3 rồi, nhưng nếu thiếu bước này thì CHÍNH CÁI TEM đã
+  // quét vẫn kẹt vĩnh viễn ở 'finished' (coi như đã dùng hết) dù mẻ chưa từng thực sự
+  // được nấu — nhân viên quét lại tem cũ ở lần nấu sau sẽ bị báo "đã báo hết trước đó".
+  const atomicIds = Array.isArray(b.atomicScannedContainerIds) ? b.atomicScannedContainerIds : [];
+  let atomicOk = 0, atomicFailed = 0;
+  if (atomicIds.length) {
+    const results = await Promise.allSettled(
+      atomicIds.map(cid => _reverseAtomicContainerFinish(cid, b.id, staffEmp, note))
+    );
+    results.forEach(r => { if (r.status === 'fulfilled' && r.value) atomicOk++; else atomicFailed++; });
+  }
+
   // Ghi lại kết quả hoàn lên chính lô — để Quản lý rà được lô nào hoàn hụt.
   try {
-    await batchRef.update({ cancelReversedCount: ok, cancelReverseFailedCount: failed });
+    await batchRef.update({
+      cancelReversedCount: ok, cancelReverseFailedCount: failed,
+      cancelAtomicRevertedCount: atomicOk, cancelAtomicRevertFailedCount: atomicFailed
+    });
   } catch (err) { console.warn('submitPrepCancel: không ghi được kết quả hoàn', err); }
 
+  const atomicMsg = atomicIds.length
+    ? (atomicFailed ? ` — ${atomicFailed}/${atomicIds.length} tem đã quét CHƯA hoàn lại được, kiểm tra tay` : `, ${atomicOk} tem đã quét cũng được hoàn lại`)
+    : '';
   if (failed) {
-    toast(`⚠️ Đã huỷ mẻ nhưng ${failed}/${ok + failed} nguyên liệu hoàn kho lỗi — báo Quản lý kiểm tra`);
+    toast(`⚠️ Đã huỷ mẻ nhưng ${failed}/${ok + failed} nguyên liệu hoàn kho lỗi — báo Quản lý kiểm tra${atomicMsg}`);
   } else if (ok) {
-    toast(`✅ Đã huỷ mẻ và hoàn ${ok} nguyên liệu về kho`);
+    toast(`✅ Đã huỷ mẻ và hoàn ${ok} nguyên liệu về kho${atomicMsg}`);
   } else {
-    toast('✅ Đã huỷ mẻ (lô này không trừ nguyên liệu nào)');
+    toast(`✅ Đã huỷ mẻ (lô này không trừ nguyên liệu nào)${atomicMsg}`);
   }
   openPrepBatchScreen();     // hàm này tự nạp lại danh sách lô
 }
