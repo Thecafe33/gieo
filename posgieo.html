@@ -4933,8 +4933,25 @@ function isAtomicUnitContainer(c) {
 // Bản kiểm tra cùng ý nghĩa nhưng đọc trực tiếp trên NGUYÊN LIỆU (inventory_items_gieogieo)
 // thay vì trên một container cụ thể — dùng để biết TRƯỚC khi có tem nào cả, ví dụ lúc quét
 // công thức mẻ chế biến xem có nguyên liệu nào cần báo tem không (xem atomicUnitInputsForPrep).
+//
+// [FIX — lỗi logic nghiêm trọng] TRƯỚC ĐÂY chỉ nhìn `unit` (đơn vị PHA CHẾ) — nếu đơn vị
+// pha chế là "cái" thì coi luôn là "mỗi tem = 1 cái, bắt quét được". Sai với nguyên liệu mà
+// đơn vị PHA CHẾ là "cái" nhưng đơn vị IN TEM (đóng gói) lại là một quy cách khác gộp nhiều
+// cái: VD trà 1 hộp = 25 túi, đơn vị pha chế là "cái" (tính theo túi) nhưng tem chỉ in theo
+// HỘP — không hề tồn tại tem riêng cho từng túi để quét. Dùng phép kiểm tra cũ, công thức
+// cần "5 cái" sẽ bắt quét đủ 5 tem, nhưng mọi lượt quét tem Hộp thật đều bị
+// isAtomicUnitContainer() từ chối (baseQty=25>1) — cổng quét KHÔNG BAO GIỜ thoả được, chặn
+// đứng luôn việc bắt đầu chế biến. Phải tính ra đúng baseQty của quy cách đóng gói đang chọn
+// (giống hệt cách createContainersForReceipt() sinh tem) rồi áp cùng điều kiện `baseQty<=1`
+// mà isAtomicUnitContainer() đã dùng cho container — chỉ nguyên liệu nào 1 tem THẬT SỰ đúng
+// bằng 1 cái (như "Kit sữa gạo": đơn vị pha chế = cái, đơn vị in tem cũng = cái, baseQty=1)
+// mới bắt quét.
 function isAtomicUnitItem(it) {
-  return !!it && it.trackingMode === 'unit' && String(it.unit || '').trim().toLowerCase() === 'cái';
+  if (!it || it.trackingMode !== 'unit') return false;
+  if (String(it.unit || '').trim().toLowerCase() !== 'cái') return false;
+  const pk = (it.packagingUnits || []).find(p => p.name === it.countUnitName);
+  const baseQty = pk && Number(pk.baseQty) > 0 ? Number(pk.baseQty) : 1;
+  return !(baseQty > 1);
 }
 
 // [MỚI] Nguyên liệu "đơn vị nguyên" (cái rời) nằm trong công thức mẻ của một bán thành
