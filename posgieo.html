@@ -9802,10 +9802,11 @@ function renderPrepBatchForm() {
           </div>
           <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
             <div style="font-size:13px;font-weight:700;color:var(--gd);white-space:nowrap;">${Number(b.qtyRemaining).toLocaleString('vi-VN')} ${prepUnitInfoPOS(b).oldUnit || prepUnitInfoPOS(b).unit}</div>
+            <button onclick="event.stopPropagation(); openPrepYieldEditForm('${b.id}')" title="Sửa định lượng thu được (cần mã quản lý)" style="width:40px;height:40px;border-radius:10px;border:1.5px solid #b91c1c;background:#fff;color:#b91c1c;font-size:15px;cursor:pointer;">✏️</button>
             <button onclick="event.stopPropagation(); printPrepBatchLabelNow('${b.id}')" title="In lại tem" style="width:40px;height:40px;border-radius:10px;border:1.5px solid var(--gd);background:#fff;color:var(--gd);font-size:15px;cursor:pointer;">🖨</button>
           </div>
         </div>`).join('')}
-      <div style="font-size:11px;color:#bbb;margin-top:8px;">Bấm vào lô để xem lại nội dung tem; bấm 🖨 để in lại tem khi bị bong/mờ hoặc khi chia lô sang hũ khác.</div>
+      <div style="font-size:11px;color:#bbb;margin-top:8px;">Bấm vào lô để xem lại nội dung tem; bấm ✏️ để sửa định lượng thu được nếu ghi sai lúc Hoàn thành (cần mã quản lý); bấm 🖨 để in lại tem khi bị bong/mờ hoặc khi chia lô sang hũ khác.</div>
     </div>` : ''}
 
     <div class="wal-section" style="margin:0 0 14px;">
@@ -10766,6 +10767,166 @@ async function _submitPrepFinishImpl() {
     console.error('submitPrepFinish failed', err);
     toast('❌ Lỗi: ' + (err.code || err.message || err));
   }
+}
+
+// ============================================================================
+// [MỚI] SỬA ĐỊNH LƯỢNG THU ĐƯỢC CỦA LÔ ĐÃ HOÀN THÀNH
+// ----------------------------------------------------------------------------
+// Vấn đề vận hành thật: nhân viên bấm nấu 2 mẻ (trừ nguyên liệu theo đúng 2 mẻ), nhưng
+// thực tế chỉ nấu 1 mẻ mà không ai để ý. Lúc "Hoàn thành" họ cân đúng số THẬT (của 1
+// mẻ) rồi nhập vào — số đó đúng với cân nặng thật, nhưng THẤP hơn hẳn kỳ vọng của "2
+// mẻ", nên báo cáo hiện ra như một khoản hao hụt 50% không có lý do, trong khi lý do
+// thật chỉ là khai nhầm số mẻ chứ không mất mát gì.
+//
+// Trước đây một khi đã "Hoàn thành" thì không có đường sửa lại — muốn đúng số phải nhờ
+// Quản lý can thiệp thẳng dữ liệu. Giờ thêm nút sửa NGAY tại đây, nhưng giới hạn quyền
+// bằng mã quản lý (MANAGER_OVERRIDE_PIN, dùng chung với tab Doanh thu theo đúng yêu
+// cầu) — có đúng mã này thì không cần thêm PIN nhân viên nữa, vì bản thân việc biết mã
+// quản lý đã là định danh đủ cho hành động có rủi ro cao này (sửa thẳng sản lượng đã
+// chốt, ảnh hưởng giá vốn).
+// ============================================================================
+let _yieldEditingBatchId = null;
+
+function openPrepYieldEditForm(batchId) {
+  const b = PREP_BATCHES_CACHE_POS.find(x => x.id === batchId);
+  if (!b) { toast('⚠️ Không tìm thấy lô'); return; }
+  _yieldEditingBatchId = batchId;
+  const box = document.getElementById('prepBatchBody');
+  box.innerHTML = `
+    <div class="wal-section" style="margin:0 0 14px;border:1.5px solid #fca5a5;background:#fef2f2;">
+      <div class="wal-section-title" style="color:#b91c1c;">Sửa định lượng thu được</div>
+      <div style="font-size:12.5px;color:#7f1d1d;margin-bottom:4px;">${b.batchCode || ''} · ${b.prepName || ''}</div>
+      <div style="font-size:12.5px;color:#7f1d1d;">Đang ghi nhận: <b>${fmtPrepQty(b.qtyInitial)} ${b.unit || ''}</b></div>
+      <div style="font-size:11px;color:#991b1b;margin-top:8px;line-height:1.6;">Chỉ dùng khi số đã "Hoàn thành" bị ghi sai (VD: khai nấu 2 mẻ nhưng thực tế chỉ nấu 1 mẻ) — không phải chỗ để ghi hao hụt/đổ bỏ.</div>
+    </div>
+    <div class="wal-section" style="margin:0 0 14px;">
+      <div class="wal-input-label" style="margin:0 0 6px;">Mã xác nhận (quản lý)</div>
+      <div class="wal-input-group" style="margin-bottom:0;">
+        <input id="yieldEditPass" type="password" inputmode="numeric" maxlength="4" placeholder="••••" autocomplete="off"
+          style="width:100%;border:none;outline:none;font-family:'Google Sans',sans-serif;font-size:18px;font-weight:700;letter-spacing:8px;color:var(--td);background:transparent;padding:10px 0;">
+      </div>
+      <div style="font-size:11px;color:#999;margin-top:4px;">Đúng mã này thì khỏi cần nhập thêm mã nhân viên.</div>
+    </div>
+    <div class="wal-section" style="margin:0 0 14px;">
+      <div class="wal-input-label" style="margin:0 0 6px;">Định lượng ĐÚNG thực tế (${b.unit || ''})</div>
+      <div class="wal-input-group" style="margin-bottom:0;">
+        <input id="yieldEditQty" type="number" inputmode="decimal" step="0.01" value="${b.qtyInitial}"
+          style="width:100%;border:none;outline:none;font-family:'Google Sans',sans-serif;font-size:18px;font-weight:700;color:var(--td);background:transparent;padding:10px 0;">
+      </div>
+    </div>
+    <div class="wal-section" style="margin:0 0 14px;">
+      <div class="wal-input-label" style="margin:0 0 6px;">Lý do sửa (bắt buộc)</div>
+      <div class="wal-input-group" style="margin-bottom:0;">
+        <input id="yieldEditReason" type="text" placeholder="VD: khai nấu 2 mẻ nhưng thực tế chỉ nấu 1 mẻ"
+          style="width:100%;border:none;outline:none;font-family:'Google Sans',sans-serif;font-size:14px;color:var(--td);background:transparent;padding:10px 0;">
+      </div>
+    </div>
+    <div id="yieldEditError" style="display:none;font-size:12.5px;font-weight:700;color:#c0392b;margin-bottom:8px;text-align:center;">❌ Sai mã xác nhận</div>
+    <button id="yieldEditSaveBtn" onclick="submitPrepYieldEdit()" style="width:100%;padding:14px;background:#b91c1c;color:#fff;border:none;border-radius:14px;font-weight:700;font-size:15px;cursor:pointer;">Lưu định lượng đã sửa</button>
+    <button onclick="openPrepBatchScreen()" style="width:100%;padding:12px;background:none;border:1px solid #ddd;color:var(--gt);border-radius:14px;font-weight:600;font-size:13px;cursor:pointer;margin-top:8px;">← Quay lại</button>
+  `;
+  setTimeout(() => document.getElementById('yieldEditPass')?.focus(), 120);
+}
+
+async function submitPrepYieldEdit() {
+  if (_posSubmitBusy) { toast('⏳ Đang xử lý, vui lòng đợi giây lát...'); return; }
+  const pass = (document.getElementById('yieldEditPass')?.value || '').trim();
+  const errEl = document.getElementById('yieldEditError');
+  if (pass !== MANAGER_OVERRIDE_PIN) {
+    if (errEl) errEl.style.display = 'block';
+    return;
+  }
+  if (errEl) errEl.style.display = 'none';
+  const newQty = Number(document.getElementById('yieldEditQty')?.value);
+  if (!(newQty > 0)) { toast('⚠️ Nhập định lượng đúng, lớn hơn 0'); return; }
+  const reason = (document.getElementById('yieldEditReason')?.value || '').trim();
+  if (!reason) { toast('⚠️ Phải ghi rõ lý do sửa'); return; }
+  const batchId = _yieldEditingBatchId;
+  const b = PREP_BATCHES_CACHE_POS.find(x => x.id === batchId);
+  if (!b) { toast('⚠️ Không tìm thấy lô'); return; }
+  if (Math.abs(newQty - (Number(b.qtyInitial) || 0)) < 0.005) { toast('⚠️ Số mới trùng số cũ — không có gì để sửa'); return; }
+  if (!(await posConfirm(
+    `Sửa định lượng lô ${b.batchCode || ''} từ ${fmtPrepQty(b.qtyInitial)} thành ${fmtPrepQty(newQty)} ${b.unit || ''}?\n\nLý do: ${reason}`,
+    { danger: true, okText: 'Lưu', cancelText: 'Không' }))) return;
+
+  _posSubmitBusy = true;
+  const restoreBtn = setBtnBusy('yieldEditSaveBtn', '⏳ Đang lưu...');
+  try {
+    await _applyPrepYieldEdit(batchId, newQty, reason);
+    toast('✅ Đã sửa định lượng — nhớ in lại tem mới cho lô này');
+    showPrepLabelCard(batchId);
+  } catch (err) {
+    console.error('submitPrepYieldEdit lỗi', err);
+    toast('❌ Không lưu được: ' + (err.message || err));
+  } finally { _posSubmitBusy = false; restoreBtn(); }
+}
+
+// Áp dụng thật sự — SET THẲNG (không cộng/trừ delta) số dư RT/Firestore của đúng lô
+// này, cùng cách _submitPrepCountImpl() sửa unitBase một lô cụ thể lúc kiểm kê cuối
+// ngày. Đọc RT TƯƠI ngay trước khi tính, vì RT mới là nguồn thật của "còn lại bao
+// nhiêu" (Firestore qtyRemaining chỉ là bản sao) — Firestore qtyInitial cũ + RT hiện
+// tại mới suy đúng được "đã bán/dùng mất bao nhiêu từ lúc hoàn thành tới giờ", phần đó
+// phải được GIỮ NGUYÊN khi đổi tổng số ban đầu, không phải ghi đè về y hệt số mới.
+async function _applyPrepYieldEdit(batchId, newQty, reason) {
+  const b = PREP_BATCHES_CACHE_POS.find(x => x.id === batchId);
+  if (!b) throw new Error('Không tìm thấy lô');
+  const oldQtyInitial = Number(b.qtyInitial) || 0;
+  let liveRemaining = Number(b.qtyRemaining) || 0;
+  try {
+    const rtSnap = await _ueActiveUnitsRef(b.prepId).child(batchId).once('value');
+    if (rtSnap.exists() && typeof rtSnap.val().unitBase === 'number') liveRemaining = rtSnap.val().unitBase;
+  } catch (err) { console.warn('[Sửa định lượng] đọc RT lỗi, dùng số Firestore cache', err); }
+  const daDung = Math.max(0, oldQtyInitial - liveRemaining); // đã bán/dùng mất từ lúc hoàn thành
+  const newRemaining = round2(Math.max(0, newQty - daDung));
+  const nowISO = new Date().toISOString();
+  const p = PREP_ITEMS_CACHE_POS.find(x => x.id === b.prepId) || {};
+  // Lô cũ (nấu trước khi có field inputCost) — tính bù theo công thức hiện tại, cùng
+  // cách refreshPrepYieldStatsPOS() đang làm cho các lô thiếu field này.
+  const batchInputCost = Number(b.inputCost) || prepBatchInputCostPOS(p, Number(b.batchRatio) || 1);
+  const newActualCostPerUnit = newQty > 0 ? batchInputCost / newQty : 0;
+
+  // 1) RT trước — nguồn thật.
+  await _ueRetryAsync(() => _ueActiveUnitsRef(b.prepId).child(batchId).transaction(cur => ({
+    code: (cur && cur.code) || b.batchCode || '', itemName: (cur && cur.itemName) || b.prepName || '',
+    unit: (cur && cur.unit) || b.unit || '', capacity: newQty,
+    openedAt: (cur && cur.openedAt) || Date.now(), unitBase: newRemaining
+  })));
+
+  // 2) Firestore của chính lô — kèm dấu vết sửa (giữ lại TOÀN BỘ lần sửa trước nếu có,
+  // không ghi đè mất lịch sử).
+  await fstore.collection('prep_batches_gieogieo').doc(batchId).update({
+    qtyInitial: newQty, qtyRemaining: newRemaining, unitBase: newRemaining,
+    actualCostPerUnit: newActualCostPerUnit,
+    ...(newRemaining <= 0 ? { status: 'used_up', usedUpAt: nowISO } : {}),
+    yieldEdits: firebase.firestore.FieldValue.arrayUnion({
+      at: nowISO, oldQty: oldQtyInitial, newQty, reason, byManagerCode: true
+    })
+  });
+
+  // 3) Suy lại currentStock từ RT (đã đúng) thay vì cộng/trừ tay delta — an toàn hơn
+  // trước mọi lượt Unit Engine chạy song song khác.
+  await _ueRecomputeCurrentStock(b.prepId, 'prep_batches_gieogieo').catch(() => {});
+
+  // 4) Vết ADJUSTMENT vào ledger để báo cáo/COGS thấy được lý do thay đổi, không chỉ
+  // thấy con số nhảy mà không hiểu vì sao.
+  const delta = round2(newQty - oldQtyInitial);
+  if (delta !== 0) {
+    const gia = Number(p.costPerUnit) || 0;
+    await fstore.collection('prep_transactions_gieogieo').add({
+      prepId: b.prepId, prepCode: b.prepCode || '', prepName: b.prepName || '', unit: b.unit || '',
+      type: 'ADJUSTMENT', qty: delta, totalCost: round2(Math.abs(delta) * gia), costPerUnit: gia,
+      batchId, batchCode: b.batchCode || '',
+      note: `Sửa định lượng thu được lô ${b.batchCode || ''} (mã quản lý) — ${reason}`,
+      reason, source: 'pos', createdAt: nowISO, businessDate: posDateKey()
+    });
+  }
+
+  // 5) Cập nhật cache tại chỗ — màn hình + tem in ngay sau đó phải phản ánh số mới.
+  Object.assign(b, { qtyInitial: newQty, qtyRemaining: newRemaining, unitBase: newRemaining, actualCostPerUnit: newActualCostPerUnit });
+
+  // 6) Số cũ (sai) đã từng được tính vào trung bình yield/giá vốn lúc Hoàn thành —
+  // tính lại với số đã sửa để giá vốn BTP không còn lệch theo sai số cũ.
+  refreshPrepYieldStatsPOS(b.prepId).catch(() => {});
 }
 
 // ============================================================
@@ -18573,6 +18734,12 @@ function showScreen(id) {
 }
 function openSdb() { document.getElementById('sdb').classList.add('open'); document.getElementById('ov').classList.add('show'); }
 function closeSdb() { document.getElementById('sdb').classList.remove('open'); document.getElementById('ov').classList.remove('show'); }
+// Mã quản lý dùng chung cho các thao tác chỉ Quản lý mới được làm — xem tab Doanh thu
+// và nút "Sửa định lượng thu được" ở màn Chế biến (openPrepYieldEditForm). Cùng MỘT
+// mã cho cả hai chỗ theo đúng yêu cầu, gom về một hằng số để sau này đổi mã chỉ sửa
+// một chỗ, khỏi lệch giữa hai nơi.
+const MANAGER_OVERRIDE_PIN = '3337';
+
 // [HIDDEN-CHANGE] Khoá mật khẩu tab Doanh thu — xem ghi chú ẩn trong <head>
 // [SYNC-rvPass-style] Đổi từ prompt() sang popup PIN cùng style với popup xác nhận xoá đơn (del-order-popup)
 function openRevenueScreen() {
@@ -18583,7 +18750,7 @@ function openRevenueScreen() {
 }
 function rvPassConfirm() {
   const pin = document.getElementById('rv-pass-input').value.trim();
-  if (pin !== '3337') {
+  if (pin !== MANAGER_OVERRIDE_PIN) {
     document.getElementById('rv-pass-error').style.display = 'block';
     document.getElementById('rv-pass-input').value = '';
     document.getElementById('rv-pass-input').focus();
