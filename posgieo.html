@@ -234,7 +234,16 @@ function showSwUpdateBanner(version) {
 }
 </script>
 <style>
-:root{--gd:#E23A5D;--gm:#C22B49;--gl:#FDE6EA;--bg:#FFFCF0;--gt:#999;--td:#111;--bb:#E7ECFB;--bi:#1D3F91;}
+:root{--gd:#E23A5D;--gm:#C22B49;--gl:#FDE6EA;--bg:#FFFCF0;--gt:#999;--td:#111;--bb:#E7ECFB;--bi:#1D3F91;
+  /* [MỚI-DS] Token cho chuẩn thiết kế mới (kiểu Apple: nút to, bo tròn nhiều, thông tin rõ) —
+     bắt đầu áp ở màn "Nhận hàng tự do", sẽ dùng lại cho các tab khác sau. Màu --gd/--gl/--bg/--td
+     hiện có được TÁI SỬ DỤNG nguyên vẹn (không tạo bảng màu riêng) để không lệch thương hiệu; đây
+     chỉ là các token PHỤ mà bộ màu cũ chưa có tên (nền thẻ phụ, viền mảnh, mức mờ chữ, 3 màu ngữ
+     nghĩa tốt/hư hỏng/xoá). */
+  --ds-card2:#F4EFE4; --ds-line:#E9E2D2; --ds-ink60:rgba(17,17,17,.62); --ds-ink40:rgba(17,17,17,.38);
+  --ds-good:#1E9E5A; --ds-good-soft:#E3F6EC; --ds-warn:#AD7A15; --ds-warn-soft:#FBF0DC;
+  --ds-danger:#D1354A; --ds-danger-soft:#FBE4E8; --ds-shadow:rgba(30,20,10,.10);
+}
 /* [FIX-webview-textsize] Android WebView có cơ chế "font boosting" / text autosizing riêng —
    tự phóng to cỡ chữ theo cỡ chữ hệ thống + độ hẹp cột, KHÁC với Chrome (Chrome không áp dụng
    autosizing này khi đã có viewport width=device-width). Đây là lý do bọc trong WebView chữ to
@@ -677,6 +686,115 @@ body.assist-main-on .toast{bottom:calc(100px + var(--assist-h, 0px) + 10px);}
 .wal-input-group{background:#f5f5f5;border-radius:14px;padding:12px 14px;margin-bottom:12px;}
 .wal-input-label{font-size:10px;font-weight:700;color:var(--gt);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;}
 .wal-input-group input,.wal-input-group textarea{width:100%;border:none;outline:none;font-family:'Google Sans',sans-serif;font-size:16px;font-weight:600;color:var(--td);background:transparent;resize:none;}
+
+/* ============================================================
+   [MỚI-DS] CHUẨN THIẾT KẾ MỚI (kiểu Apple) — dùng tiền tố ds- để tách khỏi mọi
+   style cũ trong file, không đụng gì tới các màn chưa được thiết kế lại. Bắt
+   đầu ở màn "Nhận hàng tự do" (poReceiveScreen); dùng lại được cho tab khác
+   sau — xem hàm renderPoReceiveForm(). Nguyên tắc: nút/ô bấm to (tối thiểu
+   ~44-56px), bo tròn nhiều, mỗi trạng thái có màu ngữ nghĩa riêng (xanh=tốt,
+   vàng=hư hỏng, đỏ=xoá/sai), MỌI popup nổi GIỮA màn hình (không trượt từ đáy).
+   ============================================================ */
+.ds-sec-h{display:flex;align-items:baseline;justify-content:space-between;margin:0 16px 10px;}
+.ds-sec-h span.t{font-size:12px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;color:var(--ds-ink60);font-family:'Google Sans',sans-serif;}
+.ds-sec-h span.n{font-size:12px;font-weight:700;color:var(--ds-ink40);font-family:'Google Sans',sans-serif;}
+
+.ds-card{background:#fff;border:1px solid var(--ds-line);border-radius:22px;padding:16px;position:relative;
+  margin:0 16px 12px;transition:opacity .18s ease,transform .18s ease;font-family:'Google Sans',sans-serif;}
+.ds-card.wrong{border-color:var(--ds-danger);background:linear-gradient(0deg, var(--ds-danger-soft), var(--ds-danger-soft)), #fff;}
+.ds-card.leaving{opacity:0;transform:scale(.94);}
+.ds-del{position:absolute;top:-9px;right:25px;width:26px;height:26px;border-radius:50%;background:var(--ds-danger);
+  color:#fff;border:3px solid var(--bg);cursor:pointer;display:flex;align-items:center;justify-content:center;
+  font-size:15px;font-weight:800;line-height:1;}
+.ds-del:active{transform:scale(.9);}
+
+.ds-picker-row{display:flex;align-items:center;gap:10px;cursor:pointer;padding:2px 0 12px;border-bottom:1px solid var(--ds-line);margin-bottom:14px;}
+.ds-picker-row .txt{flex:1;min-width:0;}
+.ds-picker-row .name{font-size:17px;font-weight:800;letter-spacing:-.2px;color:var(--td);}
+.ds-picker-row .meta{font-size:12px;color:var(--ds-ink60);font-weight:600;margin-top:2px;}
+.ds-picker-row .chev{color:var(--ds-ink40);font-size:18px;flex-shrink:0;}
+
+.ds-seg{display:flex;gap:6px;background:var(--ds-card2);padding:4px;border-radius:14px;margin-bottom:14px;}
+.ds-seg button{flex:1;border:none;background:none;font-family:'Google Sans',sans-serif;padding:9px 8px;border-radius:11px;
+  font-size:12.5px;font-weight:700;color:var(--ds-ink60);cursor:pointer;white-space:nowrap;}
+.ds-seg button.on{background:#fff;color:var(--td);box-shadow:0 1px 3px var(--ds-shadow);}
+
+.ds-qty-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;}
+.ds-qty-box{background:var(--ds-card2);border-radius:16px;padding:10px 10px 12px;text-align:center;}
+.ds-qty-box .lbl{font-size:11px;font-weight:800;letter-spacing:.3px;text-transform:uppercase;margin-bottom:8px;}
+.ds-qty-box.good .lbl{color:var(--ds-good);}
+.ds-qty-box.dmg .lbl{color:var(--ds-warn);}
+.ds-stepper{display:flex;align-items:center;justify-content:center;gap:6px;}
+.ds-stepbtn{width:34px;height:34px;border-radius:50%;border:none;background:#fff;color:var(--td);
+  font-size:18px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;
+  box-shadow:0 1px 2px var(--ds-shadow);flex-shrink:0;}
+.ds-stepbtn:active{transform:scale(.9);}
+.ds-stepbtn:disabled{opacity:.35;cursor:default;}
+.ds-qtyval{width:56px;border:none;background:none;text-align:center;font-size:19px;font-weight:800;color:var(--td);
+  font-family:ui-monospace,"SF Mono","Roboto Mono",Menlo,Consolas,monospace;}
+.ds-qtyval::-webkit-outer-spin-button,.ds-qtyval::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
+.ds-qtyval:disabled{color:var(--ds-ink40);}
+
+.ds-wrongrow{display:flex;align-items:center;gap:12px;padding:2px 2px 14px;}
+.ds-wrongrow .wt{flex:1;}
+.ds-wrongrow .wt b{font-size:13.5px;font-weight:700;display:block;color:var(--td);}
+.ds-wrongrow .wt span{font-size:11.5px;color:var(--ds-ink60);font-weight:600;}
+.ds-switch{position:relative;width:46px;height:28px;flex-shrink:0;}
+.ds-switch input{opacity:0;width:100%;height:100%;margin:0;cursor:pointer;position:absolute;z-index:1;}
+.ds-switch .track{position:absolute;inset:0;background:var(--ds-line);border-radius:999px;transition:background .15s;}
+.ds-switch .knob{position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:#fff;
+  box-shadow:0 1px 3px rgba(0,0,0,.3);transition:transform .15s;}
+.ds-switch input:checked ~ .track{background:var(--ds-danger);}
+.ds-switch input:checked ~ .knob{transform:translateX(18px);}
+
+.ds-chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;}
+.ds-chip{font-size:11.5px;font-weight:700;padding:5px 10px;border-radius:999px;}
+.ds-chip.good{background:var(--ds-good-soft);color:var(--ds-good);}
+.ds-chip.dmg{background:var(--ds-warn-soft);color:var(--ds-warn);}
+.ds-chip.wrong{background:var(--ds-danger-soft);color:var(--ds-danger);}
+
+.ds-note-input{width:100%;border:1px solid var(--ds-line);background:var(--ds-card2);border-radius:12px;padding:10px 12px;
+  font-family:'Google Sans',sans-serif;font-size:13px;color:var(--td);outline:none;}
+.ds-note-input::placeholder{color:var(--ds-ink40);}
+
+.ds-add-line{width:calc(100% - 32px);margin:0 16px 12px;border:1.6px dashed var(--ds-line);background:var(--ds-card2);
+  border-radius:20px;padding:16px;display:flex;align-items:center;justify-content:center;gap:10px;cursor:pointer;
+  font-family:'Google Sans',sans-serif;font-size:14.5px;font-weight:800;color:var(--gd);}
+.ds-add-line:active{transform:scale(.98);}
+.ds-add-line .plus{width:26px;height:26px;border-radius:50%;background:var(--gd);color:#fff;display:flex;
+  align-items:center;justify-content:center;font-size:16px;font-weight:800;}
+
+.ds-cta{width:100%;border:none;border-radius:18px;padding:17px;font-size:16px;font-weight:800;cursor:pointer;
+  background:var(--gd);color:#fff;font-family:'Google Sans',sans-serif;letter-spacing:.1px;}
+.ds-cta:active{transform:scale(.985);}
+.ds-cta:disabled{background:var(--ds-card2);color:var(--ds-ink40);cursor:default;}
+
+/* [MỚI-DS] Popup CHUẨN — nổi GIỮA màn hình, không trượt từ đáy (đã chốt theo yêu cầu). */
+.ds-sheet-bg{position:fixed;inset:0;background:rgba(10,8,6,.5);z-index:9999;display:none;align-items:center;justify-content:center;padding:20px;}
+.ds-sheet-bg.open{display:flex;}
+.ds-sheet{width:100%;max-width:380px;background:var(--bg);border-radius:26px;max-height:78vh;display:flex;
+  flex-direction:column;box-shadow:0 20px 60px var(--ds-shadow);animation:dsPopIn .16s ease;font-family:'Google Sans',sans-serif;}
+@keyframes dsPopIn{from{opacity:0;transform:scale(.94);}to{opacity:1;transform:scale(1);}}
+.ds-sheet-head{padding:18px 18px 12px;font-size:16px;font-weight:800;text-align:center;border-bottom:1px solid var(--ds-line);color:var(--td);}
+.ds-sheet-search{margin:12px 16px;position:relative;}
+.ds-sheet-search input{width:100%;padding:11px 14px;border-radius:13px;border:1px solid var(--ds-line);background:var(--ds-card2);
+  font-family:'Google Sans',sans-serif;font-size:14px;color:var(--td);outline:none;}
+.ds-sheet-search input::placeholder{color:var(--ds-ink40);}
+.ds-sheet-list{overflow-y:auto;padding:0 8px 18px;}
+.ds-sheet-item{width:100%;text-align:left;border:none;background:none;padding:13px 12px;border-radius:14px;
+  display:flex;align-items:center;justify-content:space-between;gap:10px;cursor:pointer;font-family:'Google Sans',sans-serif;}
+.ds-sheet-item:active{background:var(--ds-card2);}
+.ds-sheet-item .nm{font-size:14.5px;font-weight:700;color:var(--td);}
+.ds-sheet-item .un{font-size:11.5px;font-weight:600;color:var(--ds-ink60);margin-top:2px;}
+.ds-sheet-item .ck{color:var(--gd);font-size:17px;font-weight:800;opacity:0;}
+.ds-sheet-item.sel .ck{opacity:1;}
+.ds-sheet-empty{padding:30px 20px;text-align:center;font-size:13px;color:var(--ds-ink40);font-weight:600;font-family:'Google Sans',sans-serif;}
+
+.ds-bottombar{position:sticky;bottom:0;z-index:5;padding:12px 16px calc(16px + env(safe-area-inset-bottom));
+  background:color-mix(in srgb, var(--bg) 88%, transparent);backdrop-filter:blur(18px) saturate(160%);
+  -webkit-backdrop-filter:blur(18px) saturate(160%);border-top:1px solid var(--ds-line);margin:0 -16px;}
+.ds-bottombar .sum{font-size:12px;font-weight:700;color:var(--ds-ink60);text-align:center;margin-bottom:9px;font-family:'Google Sans',sans-serif;}
+.ds-bottombar .sum b{color:var(--td);font-family:ui-monospace,"SF Mono","Roboto Mono",Menlo,Consolas,monospace;}
 /* ============================================================
    BỘ CÂN BÁN THÀNH PHẨM (trừ bì theo dụng cụ đựng)
    Ô ảnh vuông bo tròn lớn trên nền trắng — ảnh dụng cụ chụp nền trắng sẽ hoà
@@ -18069,7 +18187,7 @@ function renderPoReceiveSelect() {
         </button>`;
       }).join('') : '<div style="font-size:12.5px;color:#bbb;padding:6px 2px;">Không có đơn đặt hàng nào đang chờ.</div>'}
     </div>
-    <button onclick="poSelectFree()" style="width:100%;padding:14px;background:var(--gd);color:#fff;border:none;border-radius:14px;font-weight:700;font-size:14px;cursor:pointer;">Nhận hàng tự do (không theo đơn)</button>
+    <div style="margin:0 16px;"><button class="ds-cta" onclick="poSelectFree()">Nhận hàng tự do (không theo đơn)</button></div>
   `;
 }
 
@@ -18107,6 +18225,50 @@ function poSelectFree() {
   poReceiveState.lines = [];
   renderPoReceiveForm();
 }
+// ============================================================================
+// [MỚI-DS] POPUP CHỌN NGUYÊN LIỆU DÙNG CHUNG — nổi GIỮA màn hình (#dsItemPickerBg trong
+// HTML). Gọi dsOpenItemPicker({title, items, excludeIds, onPick}) từ bất kỳ màn nào cần
+// chọn 1 nguyên liệu, thay vì mỗi màn tự viết lại một cái <select>/danh sách riêng — viết
+// một lần, dùng lại được cho các tab khác khi áp chuẩn thiết kế mới này rộng ra.
+// ============================================================================
+let _dsItemPickerState = null;
+function dsOpenItemPicker(opts) {
+  _dsItemPickerState = { items: opts.items || [], excludeIds: opts.excludeIds || [], onPick: opts.onPick };
+  document.getElementById('dsItemPickerTitle').textContent = opts.title || 'Chọn nguyên liệu';
+  const searchEl = document.getElementById('dsItemPickerSearch');
+  searchEl.value = '';
+  dsRenderItemPickerList('');
+  document.getElementById('dsItemPickerBg').classList.add('open');
+  setTimeout(() => searchEl.focus(), 150);
+}
+function dsCloseItemPicker() {
+  document.getElementById('dsItemPickerBg').classList.remove('open');
+  _dsItemPickerState = null;
+}
+function _dsNormalize(s) { return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); }
+function dsRenderItemPickerList(q) {
+  const st = _dsItemPickerState;
+  if (!st) return;
+  const nq = _dsNormalize(q);
+  const list = st.items.filter(it => _dsNormalize(it.name).indexOf(nq) !== -1);
+  const el = document.getElementById('dsItemPickerList');
+  if (!list.length) { el.innerHTML = '<div class="ds-sheet-empty">Không tìm thấy nguyên liệu nào.</div>'; return; }
+  el.innerHTML = list.map(it => {
+    const disabled = st.excludeIds.indexOf(it.id) !== -1;
+    return `<button class="ds-sheet-item" data-ds-pick="${it.id}" ${disabled ? 'disabled style="opacity:.35"' : ''}>
+      <div><div class="nm">${escHtmlPos(it.name || '')}</div><div class="un">${escHtmlPos(it.unit || '')}</div></div>
+      <div class="ck">›</div>
+    </button>`;
+  }).join('');
+  el.querySelectorAll('[data-ds-pick]').forEach(btn => {
+    btn.onclick = () => {
+      const it = st.items.find(x => x.id === btn.getAttribute('data-ds-pick'));
+      dsCloseItemPicker();
+      if (it && st.onPick) st.onPick(it);
+    };
+  });
+}
+
 // [BUG#31 FIX] KHÔNG cho HAI dòng cùng một nguyên liệu trong một phiếu nhận.
 // Vì sao đây là lỗi thật chứ không phải chuyện thẩm mỹ: mọi id chống-ghi-đúp của luồng nhận
 // hàng đều suy ra từ (idemKey, itemId) — `txId: ${idemKey}_${itemId}_RECEIVING`, tem
@@ -18115,15 +18277,24 @@ function poSelectFree() {
 // rồi" và BỎ QUA: kho không cộng, tem không sinh, nhưng phiếu nhận vẫn ghi nhận đủ cả hai dòng
 // (và `deltas` chỉ còn dòng sau, PO cộng thiếu). Chặn ngay ở chỗ TẠO DÒNG là cách rẻ nhất và
 // không làm mất dữ liệu của ai — nhân viên gộp số lượng vào đúng dòng đã có.
+// [MỚI-DS] Bấm "+ Thêm nguyên liệu" giờ MỞ THẲNG popup chọn (giữa màn hình), không còn
+// tự động gán đại nguyên liệu ĐẦU TIÊN còn trống rồi bắt nhân viên tự sửa lại trong một
+// cái <select> nhỏ xíu — dễ nấu sót/gõ nhầm số vào đúng dòng nhưng sai nguyên liệu.
 function poReceiveAddFreeLine() {
-  if (!KHO_ITEMS_CACHE.length) return;
-  const it = KHO_ITEMS_CACHE.find(x => !poReceiveState.lines.some(l => l.itemId === x.id));
-  if (!it) { toast('⚠️ Mọi nguyên liệu đã có dòng trong phiếu — gộp số lượng vào dòng đã có'); return; }
-  poReceiveState.lines.push({
-    itemId: it.id, name: it.name, unit: it.unit, packagingUnits: it.packagingUnits || [],
-    qtyExpectedBase: null, goodQty: 0, damagedQty: 0, unitFactor: 1, wrongProduct: false, note: ''
+  if (!KHO_ITEMS_CACHE.length) { toast('⚠️ Chưa tải được danh sách nguyên liệu'); return; }
+  const usedIds = poReceiveState.lines.map(l => l.itemId);
+  dsOpenItemPicker({
+    title: 'Thêm nguyên liệu',
+    items: KHO_ITEMS_CACHE,
+    excludeIds: usedIds,
+    onPick(it) {
+      poReceiveState.lines.push({
+        itemId: it.id, name: it.name, unit: it.unit, packagingUnits: it.packagingUnits || [],
+        qtyExpectedBase: null, goodQty: 0, damagedQty: 0, unitFactor: 1, wrongProduct: false, note: ''
+      });
+      renderPoReceiveForm();
+    }
   });
-  renderPoReceiveForm();
 }
 function poReceiveRemoveLine(idx) {
   // [BUG#33 FIX] Dòng đã vào kho thì xoá khỏi form là tạo ra một phiếu nhận không kể hết những gì
@@ -18134,39 +18305,64 @@ function poReceiveRemoveLine(idx) {
     toast('⚠️ Dòng này đã vào kho ở lượt trước — không xoá khỏi phiếu được. Dùng Quản lý ▸ Sửa phiếu nhận nếu cần sửa.');
     return;
   }
-  poReceiveState.lines.splice(idx, 1);
-  renderPoReceiveForm();
+  const card = document.querySelector('[data-po-card="' + idx + '"]');
+  if (card) card.classList.add('leaving');
+  setTimeout(() => { poReceiveState.lines.splice(idx, 1); renderPoReceiveForm(); }, 140);
+}
+// [MỚI-DS] Đổi nguyên liệu của một dòng — mở popup chọn thay vì đổi <select> tại chỗ, và
+// (mới) áp cùng khoá "đã vào kho thì không sửa nữa" mà poReceiveRemoveLine() đã có, vì đổi
+// itemId của một dòng đã ghi kho để lại đúng cùng một kiểu chứng từ mồ côi như xoá dòng đó.
+function poReceiveOpenItemPicker(idx) {
+  const l = poReceiveState.lines[idx];
+  if (l && (poReceiveState.appliedLines || {})[l.itemId]) {
+    toast('⚠️ Dòng này đã vào kho ở lượt trước — không đổi nguyên liệu được. Dùng Quản lý ▸ Sửa phiếu nhận nếu cần sửa.');
+    return;
+  }
+  const usedIds = poReceiveState.lines.filter((x, i) => i !== idx).map(x => x.itemId);
+  dsOpenItemPicker({
+    title: 'Đổi nguyên liệu',
+    items: KHO_ITEMS_CACHE,
+    excludeIds: usedIds,
+    onPick(it) { poReceiveLineChangeItem(idx, it.id); }
+  });
 }
 function poReceiveLineChangeItem(idx, itemId) {
   const it = KHO_ITEMS_CACHE.find(x => x.id === itemId); if (!it) return;
   // [BUG#31 FIX] Xem chú thích ở poReceiveAddFreeLine() — hai dòng cùng itemId làm dòng sau bị
-  // bỏ qua khi ghi kho. Trả ô chọn về nguyên liệu cũ thay vì nhận một trạng thái sai.
+  // bỏ qua khi ghi kho. Popup chọn đã tự loại nguyên liệu trùng khỏi danh sách (excludeIds), nên
+  // nhánh này giờ chỉ còn là lưới an toàn cuối cùng.
   if (poReceiveState.lines.some((x, i) => i !== idx && x.itemId === itemId)) {
     toast('⚠️ Nguyên liệu này đã có dòng khác trong phiếu — gộp số lượng vào dòng đó');
-    renderPoReceiveForm();
     return;
   }
   const l = poReceiveState.lines[idx];
   l.itemId = it.id; l.name = it.name; l.unit = it.unit; l.packagingUnits = it.packagingUnits || []; l.unitFactor = 1;
   renderPoReceiveForm();
 }
+// unitFactor/wrongProduct đổi cả hình dạng thẻ (bộ đếm bật/tắt, viền đỏ) nên render lại
+// toàn bộ; goodQty/damagedQty/note chỉ cập nhật đúng phần xem trước để KHÔNG mất focus
+// đang gõ dở trên chính ô đó.
 function poReceiveLineChangeField(idx, field, val) {
   const l = poReceiveState.lines[idx];
-  if (field === 'goodQty' || field === 'damagedQty') l[field] = Number(val) || 0;
-  else if (field === 'unitFactor') l.unitFactor = Number(val) || 1;
-  else if (field === 'wrongProduct') l.wrongProduct = !!val;
-  else if (field === 'note') l.note = val;
-  refreshPoLinePreview(idx);
+  if (field === 'goodQty' || field === 'damagedQty') { l[field] = Number(val) || 0; poReceiveRefreshLinePreview(idx); return; }
+  if (field === 'unitFactor') { l.unitFactor = Number(val) || 1; renderPoReceiveForm(); return; }
+  if (field === 'wrongProduct') { l.wrongProduct = !!val; renderPoReceiveForm(); return; }
+  if (field === 'note') { l.note = val; return; }
 }
-function refreshPoLinePreview(idx) {
+function poReceiveStepQty(idx, field, dir) {
   const l = poReceiveState.lines[idx];
-  const el = document.getElementById('polPrev' + idx);
-  if (!el) return;
-  const goodBase = (Number(l.goodQty) || 0) * (Number(l.unitFactor) || 1);
-  const dmgBase = (Number(l.damagedQty) || 0) * (Number(l.unitFactor) || 1);
-  el.textContent = l.wrongProduct
-    ? 'Sai sản phẩm — sẽ KHÔNG cộng vào kho, chỉ ghi chú lại cho Quản lý.'
-    : `= nhận tốt ${goodBase.toLocaleString('vi-VN')} ${l.unit}${dmgBase > 0 ? ` · hư hỏng ${dmgBase.toLocaleString('vi-VN')} ${l.unit}` : ''}`;
+  l[field] = Math.max(0, round2((Number(l[field]) || 0) + dir));
+  renderPoReceiveForm();
+}
+function poReceiveRefreshLinePreview(idx) {
+  const l = poReceiveState.lines[idx];
+  const el = document.getElementById('polChips' + idx);
+  if (!el || l.wrongProduct) return;
+  const factor = Number(l.unitFactor) || 1;
+  const goodBase = (Number(l.goodQty) || 0) * factor;
+  const dmgBase = (Number(l.damagedQty) || 0) * factor;
+  el.innerHTML = `<span class="ds-chip good">+${fmtPrepQty(goodBase)} ${escHtmlPos(l.unit || '')} tốt</span>`
+    + (dmgBase > 0 ? `<span class="ds-chip dmg">${fmtPrepQty(dmgBase)} ${escHtmlPos(l.unit || '')} hư hỏng</span>` : '');
 }
 
 function poReceiveOnPhotoChange(input) {
@@ -18187,58 +18383,80 @@ function renderPoReceivePhotoPreview() {
     </div>`).join('');
 }
 
+// [MỚI-DS] Thiết kế lại theo chuẩn mới (xem token/lớp ds-* ở đầu file): nút to dễ bấm, bo
+// tròn nhiều, mỗi trạng thái một màu riêng, chọn nguyên liệu qua popup giữa màn thay vì
+// <select> nhỏ xíu. Phần ẢNH PHIẾU GIAO HÀNG tạm ẨN khỏi giao diện (tính năng chưa triển
+// khai thật ở quán — storageRef thường chưa bật) — các hàm poReceiveOnPhotoChange()/
+// poReceiveUploadPhotos() vẫn giữ nguyên trong file, chỉ là không có gì gọi tới UI của
+// chúng nữa; bật lại UI này sau chỉ cần thêm lại đúng khối HTML gọi poReceiveOnPhotoChange.
+function poReceiveLineCardHtml(l, idx, isFree) {
+  const opts = [{ name: l.unit, baseQty: 1 }, ...(l.packagingUnits || [])];
+  const factor = Number(l.unitFactor) || 1;
+  const goodBase = (Number(l.goodQty) || 0) * factor;
+  const dmgBase = (Number(l.damagedQty) || 0) * factor;
+  const segHtml = opts.map(o => {
+    const on = Number(o.baseQty) === factor;
+    const label = Number(o.baseQty) > 1 ? `${String(o.name || '').split(' (')[0]} ·${o.baseQty}` : (o.name || '');
+    return `<button onclick="poReceiveLineChangeField(${idx},'unitFactor','${o.baseQty}')" class="${on ? 'on' : ''}">${escHtmlPos(label)}</button>`;
+  }).join('');
+  const chips = l.wrongProduct
+    ? `<div class="ds-chips"><span class="ds-chip wrong">Sai sản phẩm — không cộng kho</span></div>`
+    : `<div class="ds-chips" id="polChips${idx}">
+        <span class="ds-chip good">+${fmtPrepQty(goodBase)} ${escHtmlPos(l.unit || '')} tốt</span>
+        ${dmgBase > 0 ? `<span class="ds-chip dmg">${fmtPrepQty(dmgBase)} ${escHtmlPos(l.unit || '')} hư hỏng</span>` : ''}
+      </div>`;
+  return `
+  <div class="ds-card${l.wrongProduct ? ' wrong' : ''}" data-po-card="${idx}">
+    ${isFree ? `<div class="ds-del" onclick="poReceiveRemoveLine(${idx})">–</div>` : ''}
+    ${isFree ? `
+    <div class="ds-picker-row" onclick="poReceiveOpenItemPicker(${idx})">
+      <div class="txt"><div class="name">${escHtmlPos(l.name || 'Chọn nguyên liệu')}</div><div class="meta">Đơn vị pha chế · ${escHtmlPos(l.unit || '')}</div></div>
+      <div class="chev">›</div>
+    </div>` : `
+    <div style="padding:2px 0 12px;border-bottom:1px solid var(--ds-line);margin-bottom:14px;">
+      <div style="font-size:17px;font-weight:800;color:var(--td);">${escHtmlPos(l.name || '')}</div>
+      <div style="font-size:12px;color:var(--ds-ink60);font-weight:600;margin-top:2px;">Đặt: ${poLineQtyText(l, l.qtyExpectedBase)}</div>
+    </div>`}
+    ${opts.length > 1 ? `<div class="ds-seg">${segHtml}</div>` : ''}
+    <div class="ds-qty-grid">
+      <div class="ds-qty-box good"><div class="lbl">Số lượng tốt</div>${poReceiveStepperHtml(idx, 'goodQty', l.goodQty, l.wrongProduct)}</div>
+      <div class="ds-qty-box dmg"><div class="lbl">Hư hỏng</div>${poReceiveStepperHtml(idx, 'damagedQty', l.damagedQty, l.wrongProduct)}</div>
+    </div>
+    <label class="ds-wrongrow">
+      <div class="wt"><b>Sai sản phẩm</b><span>Hàng giao không đúng — không cộng vào kho</span></div>
+      <span class="ds-switch"><input type="checkbox" ${l.wrongProduct ? 'checked' : ''} onchange="poReceiveLineChangeField(${idx},'wrongProduct',this.checked)"><span class="track"></span><span class="knob"></span></span>
+    </label>
+    ${chips}
+    <input class="ds-note-input" placeholder="Ghi chú riêng (không bắt buộc)" value="${String(l.note || '').replace(/"/g, '&quot;')}" oninput="poReceiveLineChangeField(${idx},'note',this.value)">
+  </div>`;
+}
+function poReceiveStepperHtml(idx, field, val, disabled) {
+  return `<div class="ds-stepper">
+    <button class="ds-stepbtn" onclick="poReceiveStepQty(${idx},'${field}',-1)" ${disabled ? 'disabled' : ''}>–</button>
+    <input class="ds-qtyval" type="number" inputmode="decimal" step="0.01" value="${val}" oninput="poReceiveLineChangeField(${idx},'${field}',this.value)" ${disabled ? 'disabled' : ''}>
+    <button class="ds-stepbtn" onclick="poReceiveStepQty(${idx},'${field}',1)" ${disabled ? 'disabled' : ''}>+</button>
+  </div>`;
+}
 function renderPoReceiveForm() {
   const box = document.getElementById('poReceiveBody');
   const isFree = !poReceiveState.poId;
+  const lines = poReceiveState.lines;
   box.innerHTML = `
-    <div class="wal-section" style="margin:0 0 14px;">
-      <div class="wal-section-title">${isFree ? 'Nhận hàng tự do' : ('Theo đơn: ' + (poReceiveState.supplier || '(không ghi NCC)'))}</div>
-      ${poReceiveState.lines.map((l, idx) => `
-        <div style="border:1.5px solid #e6e1d2;border-radius:14px;padding:12px 14px;margin-bottom:10px;">
-          ${isFree ? `
-          <select onchange="poReceiveLineChangeItem(${idx}, this.value)" style="width:100%;border:none;outline:none;font-family:'Google Sans',sans-serif;font-size:14px;font-weight:700;color:var(--td);background:transparent;padding:4px 0 8px;">
-            ${KHO_ITEMS_CACHE.map(it => `<option value="${it.id}" ${it.id === l.itemId ? 'selected' : ''}>${it.name}</option>`).join('')}
-          </select>` : `
-          <div style="font-weight:700;font-size:14px;color:var(--td);">${l.name}</div>
-          <div style="font-size:11.5px;color:#999;margin-top:2px;">Đặt: ${poLineQtyText(l, l.qtyExpectedBase)}</div>`}
-          <div style="display:flex;gap:8px;margin-top:8px;">
-            <div class="wal-input-group" style="flex:1;margin-bottom:0;">
-              <div class="wal-input-label" style="margin-bottom:4px;">SL tốt</div>
-              <input type="number" step="0.01" value="${l.goodQty}" oninput="poReceiveLineChangeField(${idx},'goodQty',this.value)" ${l.wrongProduct ? 'disabled' : ''}>
-            </div>
-            <div class="wal-input-group" style="flex:1;margin-bottom:0;">
-              <div class="wal-input-label" style="margin-bottom:4px;">SL hư hỏng</div>
-              <input type="number" step="0.01" value="${l.damagedQty}" oninput="poReceiveLineChangeField(${idx},'damagedQty',this.value)" ${l.wrongProduct ? 'disabled' : ''}>
-            </div>
-            <div class="wal-input-group" style="flex:1;margin-bottom:0;">
-              <div class="wal-input-label" style="margin-bottom:4px;">Đơn vị</div>
-              <select onchange="poReceiveLineChangeField(${idx},'unitFactor',this.value)">
-                ${[{ label: l.unit, baseQty: 1 }, ...(l.packagingUnits || [])].map(o => `<option value="${o.baseQty}" ${Number(o.baseQty) === (Number(l.unitFactor) || 1) ? 'selected' : ''}>${o.name || o.label}</option>`).join('')}
-              </select>
-            </div>
-          </div>
-          <label style="display:flex;align-items:center;gap:6px;margin-top:8px;font-size:12.5px;color:#c0392b;">
-            <input type="checkbox" ${l.wrongProduct ? 'checked' : ''} onchange="poReceiveLineChangeField(${idx},'wrongProduct',this.checked)"> Sai sản phẩm (không nhận dòng này)
-          </label>
-          <div id="polPrev${idx}" style="font-size:11px;color:#999;margin-top:4px;"></div>
-          <input type="text" placeholder="Ghi chú riêng dòng này (tuỳ chọn)" oninput="poReceiveLineChangeField(${idx},'note',this.value)" style="width:100%;margin-top:6px;border:1px solid #eee;border-radius:8px;padding:6px 8px;font-size:12.5px;">
-          ${isFree ? `<button onclick="poReceiveRemoveLine(${idx})" style="margin-top:6px;background:none;border:none;color:#e74c3c;font-size:12px;cursor:pointer;">✕ Xoá dòng</button>` : ''}
-        </div>`).join('')}
-      ${isFree ? `<button onclick="poReceiveAddFreeLine()" style="width:100%;padding:10px;border:1.5px dashed #e6e1d2;border-radius:12px;background:#fff;color:var(--gd);font-weight:700;font-size:13px;cursor:pointer;">+ Thêm nguyên liệu</button>` : ''}
+    <div class="ds-sec-h" style="margin-top:2px;"><span class="t">${isFree ? 'Nhận hàng tự do' : ('Theo đơn · ' + escHtmlPos(poReceiveState.supplier || '(không ghi NCC)'))}</span><span class="n">${lines.length} dòng</span></div>
+    ${lines.map((l, idx) => poReceiveLineCardHtml(l, idx, isFree)).join('') || `<div style="margin:0 16px 12px;font-size:12.5px;color:var(--ds-ink40);">Chưa có nguyên liệu nào — bấm "Thêm nguyên liệu" bên dưới.</div>`}
+    ${isFree ? `<button class="ds-add-line" onclick="poReceiveAddFreeLine()"><span class="plus">+</span> Thêm nguyên liệu</button>` : ''}
+
+    <div class="ds-sec-h"><span class="t">Ghi chú chung</span></div>
+    <div style="margin:0 16px 12px;">
+      <textarea id="poReceiveNote" placeholder="VD: giao thiếu 1 thùng, hẹn bù đợt sau…" style="width:100%;min-height:52px;resize:vertical;border:1px solid var(--ds-line);background:#fff;border-radius:16px;padding:14px 16px;font-family:'Google Sans',sans-serif;font-size:14px;color:var(--td);outline:none;box-sizing:border-box;"></textarea>
     </div>
-    <div class="wal-section" style="margin:0 0 14px;">
-      <div class="wal-input-label" style="margin:0 0 6px;">Ảnh phiếu giao hàng (tuỳ chọn, tối đa 3)</div>
-      <div id="poReceivePhotoPreview" style="margin-bottom:8px;"></div>
-      ${storageRef ? `<input type="file" accept="image/*" capture="environment" multiple onchange="poReceiveOnPhotoChange(this)">` : `<div style="font-size:11.5px;color:#bbb;">Chưa bật Firebase Storage cho dự án — bỏ qua bước ảnh.</div>`}
-      <div class="wal-input-label" style="margin:12px 0 6px;">Ghi chú chung (tuỳ chọn)</div>
-      <div class="wal-input-group" style="margin-bottom:0;">
-        <input id="poReceiveNote" type="text" placeholder="Ghi chú thêm nếu cần">
-      </div>
-      ${renderPinInput('poReceiveStaff')}
+
+    <div class="ds-card">${renderPinInput('poReceiveStaff')}</div>
+
+    <div style="margin:4px 16px 0;">
+      <button class="ds-cta" onclick="submitPoReceive()">Xác nhận nhận hàng</button>
     </div>
-    <button onclick="submitPoReceive()" style="width:100%;padding:14px;background:var(--gd);color:#fff;border:none;border-radius:14px;font-weight:700;font-size:15px;cursor:pointer;">Xác nhận nhận hàng</button>
   `;
-  poReceiveState.lines.forEach((_, idx) => refreshPoLinePreview(idx));
 }
 
 // [BUG#27 FIX phần ảnh] Đường dẫn ảnh cũ có Date.now() nên MỖI lần bấm "Ghi nhận" lại là một
@@ -25897,6 +26115,18 @@ assistLoadLocalCache();
       <button onclick="phoneClearConfirmCancel()" style="flex:1;padding:14px;background:#f0f0f0;color:#555;border:none;border-radius:14px;font-family:'Google Sans',sans-serif;font-size:15px;font-weight:700;cursor:pointer;">Huỷ</button>
       <button onclick="phoneClearConfirmProceed()" style="flex:1;padding:14px;background:#e74c3c;color:#fff;border:none;border-radius:14px;font-family:'Google Sans',sans-serif;font-size:15px;font-weight:700;cursor:pointer;">Vẫn xoá</button>
     </div>
+  </div>
+</div>
+
+<!-- [MỚI-DS] Popup chọn nguyên liệu dùng chung cho chuẩn thiết kế mới — nổi GIỮA màn
+     hình (đã chốt: mọi popup của chuẩn này đều ở giữa, không trượt từ đáy). Trước mắt
+     dùng cho màn "Nhận hàng tự do" (renderPoReceiveForm/dsOpenItemPicker); dựng thành
+     một popup DÙNG CHUNG (không riêng cho 1 dòng) để tái dùng được cho tab khác sau. -->
+<div class="ds-sheet-bg" id="dsItemPickerBg" onclick="if(event.target===this)dsCloseItemPicker()">
+  <div class="ds-sheet">
+    <div class="ds-sheet-head" id="dsItemPickerTitle">Chọn nguyên liệu</div>
+    <div class="ds-sheet-search"><input id="dsItemPickerSearch" placeholder="Tìm theo tên…" oninput="dsRenderItemPickerList(this.value)"></div>
+    <div class="ds-sheet-list" id="dsItemPickerList"></div>
   </div>
 </div>
 
