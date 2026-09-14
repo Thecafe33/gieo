@@ -1,0 +1,164 @@
+// ════════════════════════════════════════════════════════════════════════════
+// ĐỀ XUẤT Firestore rules cho project the-cafe-33 — CHƯA TRIỂN KHAI.
+//
+// File này là BẢN ĐỀ XUẤT để đọc và cân nhắc, không phải bản đang chạy. Đọc phần
+// "SẼ THAY ĐỔI HÀNH VI GÌ" ở cuối trước khi dán vào Firebase Console.
+//
+// Được suy ra từ CHÍNH CODE của quanlygieo.html + posgieo.html (đã liệt kê đúng những
+// collection nào app thực sự create/update/delete), nên không chặn đường nào app đang dùng
+// — trừ những chỗ ghi rõ ở cuối file.
+//
+// ⚠️ SỰ THẬT PHẢI NÓI TRƯỚC: cả 2 app đăng nhập bằng MỘT tài khoản email/mật khẩu
+// NHÚNG THẲNG trong HTML (signInWithEmailAndPassword('cafe33@xolifa.com', ...)). Vì vậy
+// `request.auth != null` KHÔNG có nghĩa "chỉ người của quán": ai mở trang, bấm View Source
+// là có đúng quyền đó. Rules chỉ giúp giới hạn THIỆT HẠI (xoá sổ sách, sửa nhật ký), không
+// thay được việc phải:
+//   1. Bật App Check (reCAPTCHA v3 cho web) + enforce cho Firestore/RTDB/Storage — buộc mọi
+//      request phải đến từ đúng app/domain của quán, không phải từ curl/Postman.
+//   2. Bỏ mật khẩu dùng chung khỏi mã nguồn: mỗi nhân viên một account thật, hoặc ít nhất
+//      Anonymous Auth + App Check cho trang khách, và tài khoản quản trị riêng cho Management.
+//   3. Firestore rules KHÔNG áp cho Realtime Database. Bill/doanh thu của quán nằm ở RTDB
+//      (orders_gieogieo, billCounters_gieogieo, menu_gieogieo, bank_confirmations,
+//      kiosk_config...) — phải xem và siết RTDB rules riêng, file này không chạm tới.
+// ════════════════════════════════════════════════════════════════════════════
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    // Chỉ cho ĐỔI đúng những field được phép, các field khác phải giữ nguyên.
+    function onlyChanges(fields) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(fields);
+    }
+
+    // ── KHÁCH HÀNG ────────────────────────────────────────────────────────────
+    // GIỮ NGUYÊN Ý ĐỒ CŨ (trang khách tự đổi quà không đăng nhập) nhưng siết lại 2 lỗ:
+    //  · Cũ: `allow read: if true` ⇒ BẤT KỲ AI cũng tải được toàn bộ danh sách khách: số điện
+    //    thoại, điểm, tem, và cả assist_profile (thói quen mua) — dữ liệu cá nhân của khách quán.
+    //  · Cũ: update công khai với `total_points <= resource.data.total_points` ⇒ bất kỳ ai biết
+    //    (hoặc đoán) số điện thoại đều có thể ĐẶT ĐIỂM VỀ 0 hoặc ghi đè myGifts của khách đó.
+    //    Không cần mật khẩu, không để lại dấu vết.
+    // Cách siết mà KHÔNG bỏ tính năng: trang khách cũng phải đăng nhập (Anonymous Auth là đủ,
+    // kèm App Check), rồi mới cho ghi. Nếu quán chấp nhận việc đó thì dùng khối này.
+    match /customers/{phone} {
+      allow read:   if signedIn();
+      allow create: if signedIn();
+      allow update: if signedIn();
+      allow delete: if false;   // như cũ — không bao giờ xoá khách
+    }
+
+    // ── VÍ / CẤU HÌNH VÍ ──────────────────────────────────────────────────────
+    // Cũ để `read: if true` ⇒ số dư ví của mọi người ai cũng đọc được. Siết về signedIn().
+    match /wallets_xolifa/{phone}            { allow read: if signedIn(); allow write: if signedIn(); }
+    match /wallet_config/{doc}               { allow read: if signedIn(); allow write: if signedIn(); }
+    match /wallet_transactions_xolifa/{txId} {
+      allow read:   if signedIn();
+      allow create: if signedIn();
+      allow update, delete: if false;   // sổ giao dịch ví: chỉ thêm, không sửa/xoá
+    }
+
+    // ── luong.html / archive ──────────────────────────────────────────────────
+    match /xolifa_luong/{doc}            { allow read: if signedIn(); allow write: if signedIn(); }
+    match /orders_xolifa_archive/{docId} { allow read: if signedIn(); allow write: if signedIn(); }
+
+    // ── parttime.html — CHẤM CÔNG ─────────────────────────────────────────────
+    // Cũ: `allow read, write: if true` ⇒ bất kỳ ai cũng TẠO/SỬA/XOÁ được bản ghi chấm công của
+    // bất kỳ ai. Nếu số này có dính tới trả lương thì đây là cửa mở để làm giả giờ công, và
+    // không có gì phân biệt được bản ghi thật với bản ghi bịa.
+    match /xolifa_parttime/{username}/attendance/{docId} {
+      allow read:   if signedIn();
+      allow create: if signedIn();
+      allow update: if signedIn();
+      allow delete: if false;   // sửa sai bằng bản ghi hiệu chỉnh, không xoá vết
+    }
+
+    // ── NHẬT KÝ KIỂM TOÁN: CHỈ THÊM ───────────────────────────────────────────
+    // Quan trọng nhất trong file này. Với catch-all cũ, đúng cái credential dùng để VOID chi phí
+    // / cho nhân viên nghỉ / sửa phiếu nhận cũng có quyền SỬA và XOÁ dòng nhật ký của chính thao
+    // tác đó ⇒ nhật ký không chứng minh được gì. Chỉ-thêm thì mới có giá trị đối chứng.
+    // (logAudit() đã được sửa để chịu được rule này: nó tự đặt doc id, và khi ghi lại một dòng
+    // đã tồn tại bị từ chối quyền thì tự nhận ra là "đã ghi rồi" chứ không kẹt hàng đợi.)
+    match /audit_logs_gieogieo/{id} {
+      allow read:   if signedIn();
+      allow create: if signedIn();
+      allow update, delete: if false;
+    }
+
+    // ── SỔ SÁCH TÀI CHÍNH/KHO: KHÔNG XOÁ ──────────────────────────────────────
+    // App không hề gọi .delete() trên các collection này (đã rà bằng grep trên cả 2 file), nên
+    // chặn delete không làm mất đường nào đang dùng — chỉ chặn đường XOÁ SỔ SÁCH.
+    // Vẫn phải cho update: sửa phiếu nhận ghi thừa (#28) update dòng ledger + phiếu nhận, void
+    // chi phí (#26) update status, nhận hàng nhiều lượt (#27) merge dòng.
+    match /stock_transactions_gieogieo/{id} { allow read, create, update: if signedIn(); allow delete: if false; }
+    match /prep_transactions_gieogieo/{id}  { allow read, create, update: if signedIn(); allow delete: if false; }
+    match /expenses_gieogieo/{id}           { allow read, create, update: if signedIn(); allow delete: if false; }
+    match /receiving_records_gieogieo/{id}  { allow read, create, update: if signedIn(); allow delete: if false; }
+    match /receipt_corrections_gieogieo/{id}{ allow read, create, update: if signedIn(); allow delete: if false; }
+    match /purchase_orders_gieogieo/{id}    { allow read, create, update: if signedIn(); allow delete: if false; }
+    match /stock_counts_gieogieo/{id}       { allow read, create, update: if signedIn(); allow delete: if false; }
+    match /stock_containers_gieogieo/{id}   { allow read, create, update: if signedIn(); allow delete: if false; }
+    match /bill_deletions_gieogieo/{id}     { allow read, create, update: if signedIn(); allow delete: if false; }
+    match /label_reprints_gieogieo/{id}     { allow read, create: if signedIn(); allow update, delete: if false; }
+    match /handover_records_gieogieo/{id}   { allow read, create, update: if signedIn(); allow delete: if false; }
+    match /handover_counts_gieogieo/{id}    { allow read, create, update: if signedIn(); allow delete: if false; }
+    match /daily_closings_gieogieo/{id}     { allow read, create, update: if signedIn(); allow delete: if false; }
+    match /daily_openings_gieogieo/{id}     { allow read, create, update: if signedIn(); allow delete: if false; }
+    match /shift_segments_gieogieo/{id}     { allow read, create, update: if signedIn(); allow delete: if false; }
+    match /employee_stock_deductions_gieogieo/{id} { allow read, create, update: if signedIn(); allow delete: if false; }
+
+    // ── MARKER CHỐNG GHI ĐÚP: chỉ thêm, không xoá ─────────────────────────────
+    // Xoá một marker = mở lại đường cộng đúp điểm/tem/voucher/hồ sơ khách cho bill cũ.
+    match /loyalty_bill_effects_gieogieo/{id}     { allow read, create: if signedIn(); allow update, delete: if false; }
+    match /stamp_free_redemptions_gieogieo/{id}   { allow read, create: if signedIn(); allow update, delete: if false; }
+    match /discount_effects_gieogieo/{id}         { allow read, create: if signedIn(); allow update, delete: if false; }
+    match /voucher_effects_gieogieo/{id}          { allow read, create: if signedIn(); allow update, delete: if false; }
+    match /assist_profile_effects_gieogieo/{id}   { allow read, create: if signedIn(); allow update, delete: if false; }
+    match /reversal_unit_claims_gieogieo/{id}     { allow read, create, update: if signedIn(); allow delete: if false; }
+    match /bill_deletion_claims_gieogieo/{id}     { allow read, create, update: if signedIn(); allow delete: if false; }
+    // Claim side-effect checkout CẦN update (processing → done) và cần cho phép ghi lại sau khi
+    // stale; không cho xoá.
+    match /checkout_side_effects_gieogieo/{id}    { allow read, create, update: if signedIn(); allow delete: if false; }
+    match /loyalty_pending_retry_gieogieo/{id}    { allow read, create, update: if signedIn(); allow delete: if false; }
+
+    // ── CHẤM CÔNG / NHÂN SỰ ───────────────────────────────────────────────────
+    // employee_shifts: Management CÓ xoá (sửa ca ghi sai) nên phải để delete — nhưng nhớ rằng mỗi
+    // lần xoá là một lần giờ công biến mất khỏi Labor cost; luôn kèm nhật ký (logAudit) để còn
+    // đối chứng. employees: code đã tự chặn xoá người đã có ca chấm công (#35), rules để mở vì
+    // vẫn cần xoá được người tạo nhầm chưa từng làm ca nào.
+    match /employee_shifts_gieogieo/{id} { allow read, write: if signedIn(); }
+    match /employees_gieogieo/{id}       { allow read, write: if signedIn(); }
+
+    // ── PHẦN CÒN LẠI: như cũ ──────────────────────────────────────────────────
+    // Cấu hình/danh mục (menu, định mức, quy cách, danh mục chi phí, vị trí kho, refill rules,
+    // tài sản, checklist, lịch làm việc, cache báo cáo, alerts...) — app có sửa/xoá bình thường.
+    match /{document=**} {
+      allow read, write: if signedIn();
+    }
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// SẼ THAY ĐỔI HÀNH VI GÌ (đọc trước khi deploy)
+//
+// 1. `customers` + `wallets_xolifa` + `xolifa_parttime/*/attendance` không còn cho đọc/ghi
+//    KHÔNG ĐĂNG NHẬP. Nếu còn trang nào của quán (trang khách xem điểm/đổi quà, trang
+//    parttime chấm công) đang chạy mà KHÔNG gọi signIn thì trang đó sẽ hỏng ngay sau khi
+//    deploy. Cách xử lý: thêm Anonymous Auth vào đúng trang đó (vài dòng:
+//    `await auth.signInAnonymously()` trước khi đọc/ghi) rồi mới deploy rules này. Nếu chưa
+//    làm được thì tạm giữ 3 khối đó như rules cũ, và ưu tiên deploy phần audit/sổ sách trước —
+//    phần đó không ảnh hưởng trang khách.
+//
+// 2. `delete` bị chặn ở các collection sổ sách. Đã rà code: 2 app KHÔNG gọi .delete() trên
+//    những collection đó (chỉ xoá ở: waste_reasons, topping_recipes, storage_locations,
+//    special_days, shift_checklists, refill_rules, recipes, payment_methods, packaging_*,
+//    note_reasons, expense_categories, employees, employee_shifts, assets — tất cả vẫn mở).
+//    Nếu sau này cần xoá thật một dòng sổ sách, sửa bằng nghiệp vụ (void/correction) thay vì
+//    mở lại quyền xoá.
+//
+// 3. `audit_logs_gieogieo` chỉ-thêm: nếu có thao tác nào đang cố GHI ĐÈ một dòng nhật ký thì
+//    nó sẽ bị từ chối. Code hiện tại không làm vậy (mỗi dòng một id mới; lượt ghi lại đã được
+//    xử lý đúng — xem auditFlushPending()).
+//
+// 4. Marker chống-ghi-đúp chỉ-thêm: nếu cần "chạy lại" side-effect của một bill cũ, phải xoá
+//    marker từ Firebase Console (có chủ đích, có người chịu trách nhiệm) thay vì app tự xoá.
+// ════════════════════════════════════════════════════════════════════════════

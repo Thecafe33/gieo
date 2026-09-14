@@ -3075,8 +3075,19 @@ async function auditFlushPending(){
       try{
         await fstore.collection('audit_logs_gieogieo').doc(item.id).set(item.rec);
       }catch(err){
-        // Vẫn lỗi ⇒ giữ nguyên cả hàng đợi và dừng (mạng đang hỏng). Không bao giờ xoá một dòng
-        // chưa ghi được.
+        // [#37] Nếu rules để nhật ký là CHỈ-THÊM (create được, update bị chặn — nên làm, xem
+        // firestore.rules.proposed) thì lần ghi lại của một dòng THẬT RA ĐÃ GHI THÀNH CÔNG (mất
+        // gói ACK) sẽ bị từ chối quyền. Lúc đó phải phân biệt hai ca, nếu không hàng đợi kẹt
+        // vĩnh viễn: doc đã tồn tại ⇒ coi như xong, bỏ khỏi hàng đợi; chưa tồn tại ⇒ giữ lại.
+        const denied = String((err && (err.code || err.message)) || '').includes('permission-denied');
+        if(denied){
+          try{
+            const d = await fstore.collection('audit_logs_gieogieo').doc(item.id).get();
+            if(d.exists){ _auditQueueDrop(item.id); continue; }
+          }catch(e2){ /* không đọc được thì xử như lỗi mạng bên dưới */ }
+        }
+        // Vẫn lỗi ⇒ giữ nguyên cả hàng đợi và dừng (mạng đang hỏng, hoặc thiếu quyền tạo mới —
+        // cả hai đều cần người xử lý). Không bao giờ xoá một dòng chưa ghi được.
         console.warn('[Audit] ghi lại nhật ký còn nợ chưa được, để dành lượt sau:', err);
         break;
       }
