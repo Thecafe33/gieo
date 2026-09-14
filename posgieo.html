@@ -10861,72 +10861,125 @@ async function submitPrepYieldEdit() {
   } finally { _posSubmitBusy = false; restoreBtn(); }
 }
 
-// Áp dụng thật sự — SET THẲNG (không cộng/trừ delta) số dư RT/Firestore của đúng lô
-// này, cùng cách _submitPrepCountImpl() sửa unitBase một lô cụ thể lúc kiểm kê cuối
-// ngày. Đọc RT TƯƠI ngay trước khi tính, vì RT mới là nguồn thật của "còn lại bao
-// nhiêu" (Firestore qtyRemaining chỉ là bản sao) — Firestore qtyInitial cũ + RT hiện
-// tại mới suy đúng được "đã bán/dùng mất bao nhiêu từ lúc hoàn thành tới giờ", phần đó
-// phải được GIỮ NGUYÊN khi đổi tổng số ban đầu, không phải ghi đè về y hệt số mới.
+// Áp dụng thật sự.
+//
+// [SIẾT LẠI — soi lại đường đi dữ liệu lần 2, thấy 3 lỗ hổng so với bản đầu]
+//
+// 1) TRƯỚC ĐÂY tính "đã bán/dùng mất bao nhiêu" từ MỘT lần đọc RT rời (`once('value')`)
+//    RỒI MỚI truyền số đã tính sẵn vào `.transaction()`. Nếu đúng lúc đó có một lượt
+//    BÁN HÀNG đang trừ FIFO vào cùng lô này (unitEngineAllocateConsumption ghi RT),
+//    transaction sẽ CHẠY LẠI với `cur` mới hơn nhưng ta vẫn trả về số `newRemaining`
+//    đã chốt cứng từ lần đọc CŨ — vô tình ghi đè, "hồi sinh" đúng phần vừa bán mất
+//    giữa chừng. Giờ tính "đã dùng" NGAY TRONG callback, dùng `cur` của đúng lần chạy
+//    sẽ được commit (RTDB tự chạy lại callback tới khi không còn tranh chấp).
+//
+// 2) TRƯỚC ĐÂY đọc `b` từ CACHE cục bộ (PREP_BATCHES_CACHE_POS) cho oldQtyInitial và
+//    không kiểm tra lại status — mở form lúc lô đang "active" nhưng giữa lúc gõ lý do
+//    và bấm Lưu, lô có thể đã bị "Huỷ mẻ"/kiểm kê cuối ngày đóng lại ở máy khác. Giờ
+//    đọc THẲNG Firestore ngay trước khi ghi, và CHẶN nếu status không còn 'active'.
+//
+// 3) TRƯỚC ĐÂY chỉ set `status:'used_up'` khi số dư mới về 0, nhưng KHÔNG xử lý chiều
+//    ngược lại: nếu lô đã lỡ thành 'used_up' (bán hết) trước khi sửa, sửa tăng số lên
+//    sẽ để lại một lô "còn hàng thật" (RT/currentStock đều tăng) nhưng status vẫn
+//    'used_up' — biến mất khỏi mục "Lô đang còn" (lọc theo status==='active'), coi như
+//    tồn kho ma, không nơi nào bán được. Giờ luôn đồng bộ lại status theo đúng số dư
+//    mới, cả hai chiều.
 async function _applyPrepYieldEdit(batchId, newQty, reason) {
-  const b = PREP_BATCHES_CACHE_POS.find(x => x.id === batchId);
-  if (!b) throw new Error('Không tìm thấy lô');
-  const oldQtyInitial = Number(b.qtyInitial) || 0;
-  let liveRemaining = Number(b.qtyRemaining) || 0;
-  try {
-    const rtSnap = await _ueActiveUnitsRef(b.prepId).child(batchId).once('value');
-    if (rtSnap.exists() && typeof rtSnap.val().unitBase === 'number') liveRemaining = rtSnap.val().unitBase;
-  } catch (err) { console.warn('[Sửa định lượng] đọc RT lỗi, dùng số Firestore cache', err); }
-  const daDung = Math.max(0, oldQtyInitial - liveRemaining); // đã bán/dùng mất từ lúc hoàn thành
-  const newRemaining = round2(Math.max(0, newQty - daDung));
-  const nowISO = new Date().toISOString();
-  const p = PREP_ITEMS_CACHE_POS.find(x => x.id === b.prepId) || {};
+  // Đọc TƯƠI Firestore ngay trước khi ghi — không tin cache cục bộ cho phần quyết định
+  // đúng/sai này, vì đây là hành động sửa số liệu đã chốt, sai một lần là rất khó dò lại.
+  const batchRef = fstore.collection('prep_batches_gieogieo').doc(batchId);
+  const freshDoc = await batchRef.get();
+  if (!freshDoc.exists) throw new Error('Lô không còn tồn tại (có thể vừa bị xoá)');
+  const fresh = freshDoc.data();
+  if (fresh.status !== 'active') {
+    throw new Error(fresh.status === 'used_up'
+      ? 'Lô này đã bán/dùng hết từ lúc mở form tới giờ — thoát ra xem lại, không sửa tiếp được nữa'
+      : `Lô không còn ở trạng thái "đang còn" (hiện là "${fresh.status || '?'}", có thể vừa bị huỷ/kiểm kê ở máy khác) — thoát ra và thử lại`);
+  }
+  const oldQtyInitial = Number(fresh.qtyInitial) || 0;
+  const qtyRemainingFallback = Number(fresh.qtyRemaining) || 0; // chỉ dùng khi RT thiếu hẳn node
+
+  const p = PREP_ITEMS_CACHE_POS.find(x => x.id === fresh.prepId) || {};
   // Lô cũ (nấu trước khi có field inputCost) — tính bù theo công thức hiện tại, cùng
   // cách refreshPrepYieldStatsPOS() đang làm cho các lô thiếu field này.
-  const batchInputCost = Number(b.inputCost) || prepBatchInputCostPOS(p, Number(b.batchRatio) || 1);
+  const batchInputCost = Number(fresh.inputCost) || prepBatchInputCostPOS(p, Number(fresh.batchRatio) || 1);
   const newActualCostPerUnit = newQty > 0 ? batchInputCost / newQty : 0;
 
-  // 1) RT trước — nguồn thật.
-  await _ueRetryAsync(() => _ueActiveUnitsRef(b.prepId).child(batchId).transaction(cur => ({
-    code: (cur && cur.code) || b.batchCode || '', itemName: (cur && cur.itemName) || b.prepName || '',
-    unit: (cur && cur.unit) || b.unit || '', capacity: newQty,
-    openedAt: (cur && cur.openedAt) || Date.now(), unitBase: newRemaining
-  })));
+  // 1) RT trước — nguồn thật. Tính "đã dùng mất bao nhiêu" NGAY TRONG callback (xem lý
+  // do (1) ở trên) — finalRemaining giữ lại số của LẦN CHẠY CUỐI, chính là số thật sự
+  // được RTDB chấp nhận ghi.
+  let finalRemaining = null;
+  await _ueRetryAsync(() => _ueActiveUnitsRef(fresh.prepId).child(batchId).transaction(cur => {
+    const curBase = (cur && typeof cur.unitBase === 'number') ? cur.unitBase : qtyRemainingFallback;
+    const daDung = Math.max(0, oldQtyInitial - curBase); // đã bán/dùng mất từ lúc hoàn thành
+    finalRemaining = round2(Math.max(0, newQty - daDung));
+    return {
+      code: (cur && cur.code) || fresh.batchCode || '', itemName: (cur && cur.itemName) || fresh.prepName || '',
+      unit: (cur && cur.unit) || fresh.unit || '', capacity: newQty,
+      openedAt: (cur && cur.openedAt) || Date.now(), unitBase: finalRemaining
+    };
+  }));
+  if (finalRemaining === null) throw new Error('Không tính được số dư mới sau khi đồng bộ RT — thử lại');
 
-  // 2) Firestore của chính lô — kèm dấu vết sửa (giữ lại TOÀN BỘ lần sửa trước nếu có,
-  // không ghi đè mất lịch sử).
-  await fstore.collection('prep_batches_gieogieo').doc(batchId).update({
-    qtyInitial: newQty, qtyRemaining: newRemaining, unitBase: newRemaining,
-    actualCostPerUnit: newActualCostPerUnit,
-    ...(newRemaining <= 0 ? { status: 'used_up', usedUpAt: nowISO } : {}),
-    yieldEdits: firebase.firestore.FieldValue.arrayUnion({
-      at: nowISO, oldQty: oldQtyInitial, newQty, reason, byManagerCode: true
-    })
-  });
+  // 2) Firestore của chính lô — kèm dấu vết sửa (arrayUnion giữ lại TOÀN BỘ lần sửa
+  // trước nếu có, không ghi đè mất lịch sử). Đồng bộ status CẢ HAI CHIỀU theo số dư mới
+  // (xem lý do (3) ở trên), không chỉ chiều "về 0".
+  const nowISO = new Date().toISOString();
+  try {
+    await batchRef.update({
+      qtyInitial: newQty, qtyRemaining: finalRemaining, unitBase: finalRemaining,
+      actualCostPerUnit: newActualCostPerUnit,
+      status: finalRemaining <= 0 ? 'used_up' : 'active',
+      usedUpAt: finalRemaining <= 0 ? nowISO : firebase.firestore.FieldValue.delete(),
+      ...(fresh.declaredYieldTotal > 0
+        ? { yieldVariancePct: Math.round((newQty - fresh.declaredYieldTotal) / fresh.declaredYieldTotal * 1000) / 10 }
+        : {}),
+      yieldEdits: firebase.firestore.FieldValue.arrayUnion({
+        at: nowISO, oldQty: oldQtyInitial, newQty, reason, byManagerCode: true
+      })
+    });
+  } catch (err) {
+    // [BUG "RT đã ghi nhưng Firestore lỗi" — cùng lớp lỗi mà mọi flow Unit Engine khác
+    // trong file này đều phải phòng] RT ở bước 1 đã đổi xong — không được để lỗi ở đây
+    // trôi thành thông báo lỗi chung chung "không lưu được", nhân viên sẽ bấm Lưu lại và
+    // tưởng chưa có gì xảy ra trong khi RT đã đổi. Bấm lại vẫn AN TOÀN (transaction ở
+    // bước 1 tự tính lại đúng từ trạng thái RT hiện tại), chỉ cần nói rõ để họ bấm lại
+    // thay vì hoang mang.
+    console.error('[Sửa định lượng] RT đã ghi xong nhưng Firestore lỗi', batchId, err);
+    throw new Error('Đã đồng bộ RT nhưng lưu Firestore lỗi — bấm "Lưu định lượng đã sửa" lại (an toàn, không ghi đôi)');
+  }
 
   // 3) Suy lại currentStock từ RT (đã đúng) thay vì cộng/trừ tay delta — an toàn hơn
   // trước mọi lượt Unit Engine chạy song song khác.
-  await _ueRecomputeCurrentStock(b.prepId, 'prep_batches_gieogieo').catch(() => {});
+  await _ueRecomputeCurrentStock(fresh.prepId, 'prep_batches_gieogieo').catch(() => {});
 
   // 4) Vết ADJUSTMENT vào ledger để báo cáo/COGS thấy được lý do thay đổi, không chỉ
-  // thấy con số nhảy mà không hiểu vì sao.
+  // thấy con số nhảy mà không hiểu vì sao. Lỗi ở bước này KHÔNG throw — số liệu chính
+  // (RT + batch doc) đã lưu đúng rồi, thiếu 1 dòng ledger không đáng để báo "lưu lỗi".
   const delta = round2(newQty - oldQtyInitial);
   if (delta !== 0) {
     const gia = Number(p.costPerUnit) || 0;
     await fstore.collection('prep_transactions_gieogieo').add({
-      prepId: b.prepId, prepCode: b.prepCode || '', prepName: b.prepName || '', unit: b.unit || '',
+      prepId: fresh.prepId, prepCode: fresh.prepCode || '', prepName: fresh.prepName || '', unit: fresh.unit || '',
       type: 'ADJUSTMENT', qty: delta, totalCost: round2(Math.abs(delta) * gia), costPerUnit: gia,
-      batchId, batchCode: b.batchCode || '',
-      note: `Sửa định lượng thu được lô ${b.batchCode || ''} (mã quản lý) — ${reason}`,
+      batchId, batchCode: fresh.batchCode || '',
+      note: `Sửa định lượng thu được lô ${fresh.batchCode || ''} (mã quản lý) — ${reason}`,
       reason, source: 'pos', createdAt: nowISO, businessDate: posDateKey()
-    });
+    }).catch(err => console.warn('[Sửa định lượng] ghi ADJUSTMENT ledger lỗi (số liệu chính đã lưu đúng, chỉ thiếu dòng sổ)', err));
   }
 
   // 5) Cập nhật cache tại chỗ — màn hình + tem in ngay sau đó phải phản ánh số mới.
-  Object.assign(b, { qtyInitial: newQty, qtyRemaining: newRemaining, unitBase: newRemaining, actualCostPerUnit: newActualCostPerUnit });
+  const b = PREP_BATCHES_CACHE_POS.find(x => x.id === batchId);
+  if (b) {
+    Object.assign(b, {
+      qtyInitial: newQty, qtyRemaining: finalRemaining, unitBase: finalRemaining,
+      actualCostPerUnit: newActualCostPerUnit, status: finalRemaining <= 0 ? 'used_up' : 'active'
+    });
+  }
 
   // 6) Số cũ (sai) đã từng được tính vào trung bình yield/giá vốn lúc Hoàn thành —
   // tính lại với số đã sửa để giá vốn BTP không còn lệch theo sai số cũ.
-  refreshPrepYieldStatsPOS(b.prepId).catch(() => {});
+  refreshPrepYieldStatsPOS(fresh.prepId).catch(() => {});
 }
 
 // ============================================================
