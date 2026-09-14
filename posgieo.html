@@ -267,17 +267,17 @@ body{font-family:'Google Sans',sans-serif;background:var(--bg);max-width:430px;m
   background:#e74c3c;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.25);padding:0;cursor:pointer;z-index:11;
   animation:fifoPulse 1.6s ease-in-out infinite;}
 @keyframes fifoPulse{0%,100%{box-shadow:0 0 0 0 rgba(231,76,60,.45)}50%{box-shadow:0 0 0 5px rgba(231,76,60,0)}}
-/* [FIX] TRƯỚC ĐÂY bar này rộng full width (100%, max-width 430px) và luôn tự bung
-   to hết cỡ mỗi khi có tem mới cạn — kể cả ở dạng "thu gọn" (chip) nó vẫn chiếm
-   trọn bề ngang ngay dưới logo, đè lên hàng filter-bar/menu, chặn luôn thao tác
-   bấm món lúc đang bán đông khách. Giờ: (1) width:auto để tự co theo đúng nội
-   dung (chip nhỏ khi thu gọn) thay vì luôn full-width, (2) pointer-events:none ở
-   khung ngoài + chỉ bật lại ở chip/panel bên trong, để phần trong suốt quanh chip
-   không chặn tay chạm xuống filter-bar/menu bên dưới nữa. */
+/* [FIX] TRƯỚC ĐÂY bar này rộng full width (100%, max-width 430px) và luôn tự bung to
+   hết cỡ mỗi khi có tem mới cạn, đè lên hàng filter-bar/menu, chặn luôn thao tác bấm
+   món lúc đang bán đông khách. TRƯỚC ĐÂY còn có thêm một trạng thái "thu gọn" vẽ ra
+   một chip chữ dài ("⚠️ N tem…") mà câu chữ tự nó đã đủ dài để vẫn che gần hết hàng
+   filter-bar dù CSS có co theo nội dung — xem renderFifoAlertBar(): giờ trạng thái thu
+   gọn KHÔNG vẽ gì ở đây nữa, dấu hiệu duy nhất là chấm đỏ nhỏ cạnh logo (#fifoAlertDot);
+   bar này chỉ còn xuất hiện ở dạng panel đầy đủ khi bấm vào chấm đó. width:auto để tự co
+   theo đúng nội dung panel, pointer-events:none ở khung ngoài + chỉ bật lại ở panel bên
+   trong, để phần trong suốt quanh panel không chặn tay chạm xuống filter-bar/menu. */
 .fifo-alert-bar{display:none;position:fixed;top:74px;left:50%;transform:translateX(-50%);width:auto;max-width:92vw;
   z-index:16;box-sizing:border-box;pointer-events:none;}
-.fifo-alert-chip{display:inline-flex;pointer-events:auto;align-items:center;gap:8px;background:#fff3f2;border:1.5px solid #f6b4ac;color:#b91c1c;
-  border-radius:16px;padding:10px 14px;font-size:12.5px;font-weight:700;cursor:pointer;box-shadow:0 6px 18px rgba(0,0,0,.08);white-space:nowrap;}
 .fifo-alert-panel{pointer-events:auto;width:min(92vw,400px);background:#fff;border:1.5px solid #f6b4ac;border-radius:18px;padding:12px 14px;box-shadow:0 10px 28px rgba(0,0,0,.12);max-height:52vh;overflow-y:auto;}
 .fifo-alert-panel-h{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;}
 .fifo-alert-item{padding:10px 0;border-bottom:1px solid #f5e2df;}
@@ -4214,18 +4214,22 @@ async function fifoAlertScanNow() {
   openConfirmFinishSheet(c, true);
 }
 
+// [FIX] TRƯỚC ĐÂY trạng thái "thu gọn" vẫn vẽ ra một cái chip chữ dài ("⚠️ N tem đã dùng
+// hết theo tính toán — bấm để xác nhận") — câu chữ dài nên dù CSS đã co theo nội dung, nó
+// vẫn rộng gần hết màn hình và đè lên đúng hàng phân loại món (filter-bar) ngay dưới logo,
+// chặn luôn việc chọn danh mục lúc đang bán. Giờ trạng thái "thu gọn" KHÔNG vẽ gì thêm ở
+// dưới nữa — chỉ còn đúng chấm đỏ nhỏ đã có sẵn cạnh logo (#fifoAlertDot, nằm giữa nút mở
+// sidebar và chữ "GIEO GIEO") làm dấu hiệu duy nhất; bấm vào chấm đó mới bung bảng chi tiết
+// đầy đủ (#fifoAlertBar), và bảng đó luôn hiện dạng panel to rõ ràng, không còn dạng chip
+// rút gọn nửa vời nữa.
 function renderFifoAlertBar() {
   const dot = document.getElementById('fifoAlertDot');
   const bar = document.getElementById('fifoAlertBar');
   if (!dot || !bar) return;
   const n = FIFO_PENDING_CONFIRM.length;
   dot.style.display = n ? 'block' : 'none';
-  if (!n) { bar.style.display = 'none'; bar.innerHTML = ''; return; }
+  if (!n || !_fifoAlertExpanded) { bar.style.display = 'none'; bar.innerHTML = ''; return; }
   bar.style.display = 'block';
-  if (!_fifoAlertExpanded) {
-    bar.innerHTML = `<div class="fifo-alert-chip" onclick="toggleFifoAlertBar()">⚠️ ${n} tem đã dùng hết theo tính toán — bấm để xác nhận</div>`;
-    return;
-  }
   bar.innerHTML = `
     <div class="fifo-alert-panel">
       <div class="fifo-alert-panel-h">
