@@ -12791,14 +12791,17 @@ async function computeExpectedCashPOS(businessDate, openingCash) {
   const displayDate = posDateKeyToDisplay(businessDate);
   const cashSales = orders.filter(o => o.date === displayDate).reduce((s, o) => s + orderCashAmountPOS(o), 0);
   let cashExpenseTotal = 0;
-  try {
-    const expSnap = await fstore.collection('expenses_gieogieo').where('date', '==', businessDate).get();
-    cashExpenseTotal = expSnap.docs.map(d => d.data())
-      .filter(e => e.baseType === 'cash' && e.status !== 'rejected')
-      .reduce((s, e) => s + (Number(e.amount) || 0), 0);
-  } catch (err) {
-    console.warn('[Cash Reconciliation] Không đọc được chi phí trong ngày:', err);
-  }
+  // [BUG#34 FIX] FAIL-CLOSED. Trước đây lỗi đọc chi phí chỉ console.warn rồi để
+  // cashExpenseTotal = 0 — nghĩa là Expected bị tính CAO HƠN thực tế đúng bằng tổng chi tiền mặt
+  // trong ngày, và vì đây là đối soát MÙ (nhân viên không thấy Expected), hệ quả là app kết luận
+  // "đếm thiếu tiền" đúng số tiền đã chi, bắt đếm lại tới hết lượt rồi ghi vào sổ một khoản
+  // 'cash_variance_recorded' mà nhân viên không hề gây ra. Thà dừng đối soát và bảo thử lại còn
+  // hơn quy kết thiếu hụt cho người đang đếm.
+  const expSnap = await fstore.collection('expenses_gieogieo').where('date', '==', businessDate).get()
+    .catch(err => { throw new Error('Không đọc được chi phí trong ngày — chưa đối soát được, thử lại: ' + (err.message || err)); });
+  cashExpenseTotal = expSnap.docs.map(d => d.data())
+    .filter(e => e.baseType === 'cash' && e.status !== 'rejected')
+    .reduce((s, e) => s + (Number(e.amount) || 0), 0);
   // Cash Refunds = 0 (chưa có luồng hoàn tiền), Cash Adjustments = 0 (chưa có Correction
   // Request flow — mục 12.4, ngoài phạm vi bản đầu).
   return (Number(openingCash) || 0) + cashSales - cashExpenseTotal;
@@ -15655,10 +15658,14 @@ function cashSalesWindowPOS(businessDate, fromMs, toMs) {
   });
   return { total, unattributed };
 }
+// [BUG#34 FIX] FAIL-CLOSED, cùng lý do với computeExpectedCashPOS(): nuốt lỗi đọc ở đây làm
+// Expected của đoạn ca cao hơn thực tế đúng bằng tiền đã chi, và hai người đếm giao ca bị báo
+// lệch oan (rồi lệch đó đi vào sổ). Lỗi đọc thì dừng, không đoán 0.
 async function cashExpensesWindowPOS(businessDate, fromMs, toMs) {
   let total = 0;
-  try {
-    const snap = await fstore.collection('expenses_gieogieo').where('date', '==', businessDate).get();
+  {
+    const snap = await fstore.collection('expenses_gieogieo').where('date', '==', businessDate).get()
+      .catch(err => { throw new Error('Không đọc được chi phí trong ngày — chưa đối soát được, thử lại: ' + (err.message || err)); });
     snap.docs.map(d => d.data())
       .filter(e => e.baseType === 'cash' && e.status !== 'rejected')
       .forEach(e => {
@@ -15668,8 +15675,6 @@ async function cashExpensesWindowPOS(businessDate, fromMs, toMs) {
         if (isNaN(t)) { if (fromMs === null) total += amt; return; }
         if ((fromMs === null || t >= fromMs) && t < toMs) total += amt;
       });
-  } catch (err) {
-    console.warn('[Giao ca] Không đọc được chi phí trong ngày:', err);
   }
   return total;
 }
@@ -17527,18 +17532,45 @@ function poSelectFree() {
   poReceiveState.lines = [];
   renderPoReceiveForm();
 }
+// [BUG#31 FIX] KHÔNG cho HAI dòng cùng một nguyên liệu trong một phiếu nhận.
+// Vì sao đây là lỗi thật chứ không phải chuyện thẩm mỹ: mọi id chống-ghi-đúp của luồng nhận
+// hàng đều suy ra từ (idemKey, itemId) — `txId: ${idemKey}_${itemId}_RECEIVING`, tem
+// `idPrefix: ${idemKey}_ctn_${itemId}`, và `deltas[l.itemId]` khi cập nhật PO. Hai dòng cùng
+// itemId ⇒ dòng thứ hai TRÙNG txId với dòng đầu nên applyStockTransactionPOS coi như "đã ghi
+// rồi" và BỎ QUA: kho không cộng, tem không sinh, nhưng phiếu nhận vẫn ghi nhận đủ cả hai dòng
+// (và `deltas` chỉ còn dòng sau, PO cộng thiếu). Chặn ngay ở chỗ TẠO DÒNG là cách rẻ nhất và
+// không làm mất dữ liệu của ai — nhân viên gộp số lượng vào đúng dòng đã có.
 function poReceiveAddFreeLine() {
   if (!KHO_ITEMS_CACHE.length) return;
-  const it = KHO_ITEMS_CACHE[0];
+  const it = KHO_ITEMS_CACHE.find(x => !poReceiveState.lines.some(l => l.itemId === x.id));
+  if (!it) { toast('⚠️ Mọi nguyên liệu đã có dòng trong phiếu — gộp số lượng vào dòng đã có'); return; }
   poReceiveState.lines.push({
     itemId: it.id, name: it.name, unit: it.unit, packagingUnits: it.packagingUnits || [],
     qtyExpectedBase: null, goodQty: 0, damagedQty: 0, unitFactor: 1, wrongProduct: false, note: ''
   });
   renderPoReceiveForm();
 }
-function poReceiveRemoveLine(idx) { poReceiveState.lines.splice(idx, 1); renderPoReceiveForm(); }
+function poReceiveRemoveLine(idx) {
+  // [BUG#33 FIX] Dòng đã vào kho thì xoá khỏi form là tạo ra một phiếu nhận không kể hết những gì
+  // đã thật sự nhận (và `partial` tính sai theo). Sửa/huỷ phần đã vào kho là việc của
+  // Quản lý ▸ Sửa phiếu nhận.
+  const l = poReceiveState.lines[idx];
+  if (l && (poReceiveState.appliedLines || {})[l.itemId]) {
+    toast('⚠️ Dòng này đã vào kho ở lượt trước — không xoá khỏi phiếu được. Dùng Quản lý ▸ Sửa phiếu nhận nếu cần sửa.');
+    return;
+  }
+  poReceiveState.lines.splice(idx, 1);
+  renderPoReceiveForm();
+}
 function poReceiveLineChangeItem(idx, itemId) {
   const it = KHO_ITEMS_CACHE.find(x => x.id === itemId); if (!it) return;
+  // [BUG#31 FIX] Xem chú thích ở poReceiveAddFreeLine() — hai dòng cùng itemId làm dòng sau bị
+  // bỏ qua khi ghi kho. Trả ô chọn về nguyên liệu cũ thay vì nhận một trạng thái sai.
+  if (poReceiveState.lines.some((x, i) => i !== idx && x.itemId === itemId)) {
+    toast('⚠️ Nguyên liệu này đã có dòng khác trong phiếu — gộp số lượng vào dòng đó');
+    renderPoReceiveForm();
+    return;
+  }
   const l = poReceiveState.lines[idx];
   l.itemId = it.id; l.name = it.name; l.unit = it.unit; l.packagingUnits = it.packagingUnits || []; l.unitFactor = 1;
   renderPoReceiveForm();
@@ -17694,12 +17726,17 @@ async function poReceiveUpdatePODoc(poId, deltasByItemId, idemKey) {
 // [BUG#27 FIX] GHI PHIẾU NHẬN THEO KIỂU CỘNG DỒN, KHÔNG GHI ĐÈ.
 //
 // TRƯỚC ĐÂY chỗ này gọi `recordRef.set({... lines: succeeded ...})` — set() KHÔNG merge, mà
-// idemKey (= id của doc phiếu nhận) lại được giữ CỐ ĐỊNH xuyên suốt các lần bấm lại. Kịch bản
-// mất lịch sử phiếu: lượt 1 có 4 dòng, 3 dòng vào kho thành công → phiếu ghi 3 dòng; nhân viên
-// bấm "Ghi nhận" lại để chạy nốt dòng lỗi; lượt 2 chỉ có ĐÚNG dòng vừa retry là "succeeded"
-// (3 dòng kia no-op ở ledger theo txId nên KHÔNG nằm trong `succeeded`) → set() ghi đè phiếu
-// chỉ còn 1 dòng. Tồn kho vẫn đúng, nhưng CHỨNG TỪ thì mất 3 dòng đã nhận thật: đối soát nhà
-// cung cấp, drill-down ở Management và cả màn "Sửa phiếu nhận" đều đọc từ đây.
+// idemKey (= id của doc phiếu nhận) lại được giữ CỐ ĐỊNH xuyên suốt các lần bấm lại. Nên phiếu
+// nhận của lượt sau ĐÈ SẠCH phiếu của lượt trước: dòng nào không có trong `succeeded` của
+// ĐÚNG LƯỢT NÀY là mất khỏi chứng từ, dù hàng đã thật sự vào kho ở lượt trước.
+// (Dòng đã ghi thành công ở lượt trước thường vẫn nằm trong `succeeded` vì
+// applyStockTransactionPOS trả về alreadyApplied chứ không throw — nhưng nó RƠI RA ngay khi:
+//  · lượt sau chính dòng đó lỗi mạng lúc đọc lại/kiểm tra txId — rất dễ xảy ra vì đang retry
+//    đúng lúc mạng chập chờn;
+//  · nhân viên xoá bớt các dòng "đã xong" khỏi form trước khi bấm lại (UI cho xoá dòng);
+//  · nguyên liệu của dòng đó vừa bị xoá bên Management ⇒ applyStockTransactionPOS throw.)
+// Tồn kho vẫn đúng, nhưng CHỨNG TỪ mất dòng: đối soát nhà cung cấp, drill-down ở Management và
+// cả màn "Sửa phiếu nhận" đều đọc từ đây. Ảnh chứng từ cũng bị thay trắng theo cùng cách.
 //
 // Giờ: transaction trên đúng doc đó, merge theo itemId (dòng cũ giữ nguyên, dòng mới thêm vào,
 // dòng retry thành công cập nhật trạng thái), ảnh chứng từ HỢP nhất hai lượt, và createdAt/
@@ -17746,6 +17783,15 @@ async function _submitPoReceiveImpl() {
   const staff = staffEmp.fullName;
   const hasAnyQty = lines.some(l => l.wrongProduct || (Number(l.goodQty) || 0) > 0 || (Number(l.damagedQty) || 0) > 0);
   if (!hasAnyQty) { toast('⚠️ Nhập số lượng cho ít nhất 1 dòng'); return; }
+  // [BUG#31 FIX] Chốt chặn cuối, fail-closed TRƯỚC mọi lệnh ghi: nếu vì lý do gì đó vẫn còn hai
+  // dòng cùng nguyên liệu (trạng thái cũ còn trong RAM trước khi nạp bản này), thà không ghi còn
+  // hơn ghi một phiếu mà kho chỉ cộng một nửa. Xem poReceiveAddFreeLine().
+  const trung = lines.map(l => l.itemId).filter((id, i, a) => a.indexOf(id) !== i);
+  if (trung.length) {
+    const ten = (lines.find(l => l.itemId === trung[0]) || {}).name || trung[0];
+    toast(`⚠️ "${ten}" có 2 dòng trong phiếu — gộp thành 1 dòng rồi ghi nhận (kho sẽ cộng thiếu nếu để trùng)`);
+    return;
+  }
 
   const generalNote = (document.getElementById('poReceiveNote').value || '').trim();
   // [BUG "nhận hàng cộng kho 2 lần khi retry" — FIX] Trước đây MỖI LẦN gọi hàm này đều sinh
@@ -17768,6 +17814,23 @@ async function _submitPoReceiveImpl() {
     const damagedBase = l.wrongProduct ? 0 : (Number(l.damagedQty) || 0) * factor;
     return { ...l, goodBase, damagedBase };
   });
+
+  // [BUG#33 FIX] Bấm lại SAU KHI một dòng đã vào kho, nhưng với SỐ KHÁC.
+  // Kịch bản: lượt 1 dòng A ghi 10 thành công, dòng B lỗi → giữ form để bấm lại; nhân viên phát
+  // hiện dòng A gõ sai nên sửa 10 → 5 rồi bấm "Ghi nhận" lại. txId của A đã tồn tại nên
+  // applyStockTransactionPOS no-op (kho vẫn 10 — ĐÚNG theo thiết kế chống cộng đúp), NHƯNG phiếu
+  // nhận lại được ghi theo số MỚI là 5 ⇒ sổ kho nói 10, phiếu nói 5, không ai được cảnh báo.
+  // Sửa số đã vào kho là việc của công cụ riêng (Quản lý ▸ Sửa phiếu nhận — nó sửa đồng thời tồn,
+  // ledger, tem và đơn đặt hàng). Ở đây chặn lại và nói rõ, thay vì ghi ra một phiếu sai.
+  const daGhi = poReceiveState.appliedLines || {};
+  const lechSo = computed.filter(l => daGhi[l.itemId] &&
+    (Math.abs((Number(daGhi[l.itemId].goodBase) || 0) - l.goodBase) > 1e-9 ||
+     Math.abs((Number(daGhi[l.itemId].damagedBase) || 0) - l.damagedBase) > 1e-9));
+  if (lechSo.length) {
+    const l0 = lechSo[0], cu = daGhi[l0.itemId];
+    toast(`⚠️ "${l0.name}" đã vào kho ${cu.goodBase} ${l0.unit || ''} ở lượt trước — không sửa được số ở đây. Trả lại đúng số cũ rồi ghi nhận, sau đó sửa bằng Quản lý ▸ Sửa phiếu nhận.`);
+    return;
+  }
 
   try {
     const photoUrls = await poReceiveUploadPhotos(recordRef.id);
@@ -17819,6 +17882,16 @@ async function _submitPoReceiveImpl() {
     }));
     const succeeded = lineOutcomes.filter(r => r.ok).map(r => r.l);
     const failedCount = lineOutcomes.length - succeeded.length;
+    // [BUG#33 FIX] Ghi lại CHỮ KÝ SỐ LƯỢNG của những dòng đã thật sự vào ledger ở lượt này —
+    // chốt chặn ở đầu hàm dựa vào đây để lượt bấm lại không được đổi số của dòng đã vào kho.
+    poReceiveState.appliedLines = poReceiveState.appliedLines || {};
+    lineOutcomes.forEach(r => {
+      if (!r.ok) return;
+      if (!(r.l.goodBase + r.l.damagedBase > 0)) return;   // dòng "sai sản phẩm" không ghi ledger
+      if (!poReceiveState.appliedLines[r.l.itemId]) {
+        poReceiveState.appliedLines[r.l.itemId] = { goodBase: r.l.goodBase, damagedBase: r.l.damagedBase };
+      }
+    });
 
     if (succeeded.length) {
       await poReceiveMergeRecord(recordRef, {
@@ -17841,10 +17914,35 @@ async function _submitPoReceiveImpl() {
       });
     }
 
+    // [BUG#32 FIX] Lỗi cập nhật PO KHÔNG còn bị nuốt. Trước đây `.catch(console.warn)`: kho đúng,
+    // phiếu nhận đúng, nhưng đơn đặt hàng vẫn đứng nguyên "chưa nhận"/số cũ — nhân viên thấy
+    // "✅ Đã ghi nhận hàng" và không ai biết là đối chiếu đặt/nhận đã sai, không cảnh báo, không
+    // có gì chạy lại (đúng cùng lỗ hổng với #25 bên Management). Nay: ghi cảnh báo durable cho
+    // Quản lý + GIỮ NGUYÊN poReceiveState (idemKey cố định) và dừng lại ở form để nhân viên bấm
+    // "Ghi nhận" lại — lượt sau ledger/phiếu tự no-op, chỉ bước PO thực sự chạy lại
+    // (poReceiveUpdatePODoc idempotent theo appliedReceiveRecordIds nên không cộng đúp).
+    let poSyncFailed = null;
     if (poReceiveState.poId && succeeded.length) {
       const deltas = {};
-      succeeded.forEach(l => { deltas[l.itemId] = { good: l.goodBase, damaged: l.damagedBase, wrongProduct: !!l.wrongProduct }; });
-      await poReceiveUpdatePODoc(poReceiveState.poId, deltas, idemKey).catch(err => console.warn('[Giai đoạn 5] Cập nhật PO thất bại:', err));
+      succeeded.forEach(l => {
+        // Cộng dồn theo itemId thay vì gán đè — phòng trường hợp có hai dòng cùng nguyên liệu
+        // lọt qua được (xem chốt chặn ở đầu hàm, BUG#31).
+        const d = deltas[l.itemId] || { good: 0, damaged: 0, wrongProduct: false };
+        deltas[l.itemId] = { good: d.good + l.goodBase, damaged: d.damaged + l.damagedBase,
+                             wrongProduct: d.wrongProduct || !!l.wrongProduct };
+      });
+      try {
+        await poReceiveUpdatePODoc(poReceiveState.poId, deltas, idemKey);
+      } catch (err) {
+        poSyncFailed = err;
+        console.error('[Giai đoạn 5] Cập nhật PO thất bại:', err);
+        fstore.collection('alerts_gieogieo').doc('po_receive_sync_failed_' + idemKey).set({
+          type: 'po_receive_sync_failed', severity: 'danger', status: 'new',
+          title: 'Đã nhận hàng nhưng chưa cập nhật được đơn đặt hàng',
+          note: `Phiếu nhận ${idemKey} (đơn ${poReceiveState.poId}): kho và phiếu nhận đã ghi đúng, nhưng số "đã nhận" trên đơn đặt hàng CHƯA được cập nhật (${(err && (err.message || err)) || 'lỗi không rõ'}). Nhân viên bấm "Ghi nhận" lại là hệ thống tự chạy nốt bước này (không cộng đúp); nếu không, đối soát tay trên tab Đặt hàng.`,
+          poId: poReceiveState.poId, recordId: idemKey, at: new Date().toISOString()
+        }, { merge: true }).catch(() => {});
+      }
     }
 
     // [NEW] Sinh mã + tem cho hàng có theo dõi theo đơn vị. Chạy SAU khi phiếu nhận đã ghi
@@ -17869,6 +17967,13 @@ async function _submitPoReceiveImpl() {
     } catch (err) {
       console.error('[tem kho] sinh mã sau nhận hàng lỗi', err);
       toast('⚠️ Đã nhận hàng nhưng sinh tem lỗi — vào Kho ▸ Tem chờ dán để sinh lại');
+    }
+
+    if (poSyncFailed) {
+      // [BUG#32 FIX] Giữ nguyên state để bấm lại chạy nốt bước PO — xem chú thích ở trên.
+      toast('⚠️ Đã ghi kho + phiếu nhận nhưng CHƯA cập nhật được đơn đặt hàng — bấm "Ghi nhận" lại để chạy nốt (không cộng đúp)');
+      renderPoReceiveForm();
+      return;
     }
 
     if (failedCount > 0) {
