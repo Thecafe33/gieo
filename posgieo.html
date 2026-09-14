@@ -12787,6 +12787,18 @@ function orderCashAmountPOS(o) {
   if ((o.method || '').includes('TIỀN MẶT')) return Math.max(0, (Number(o.total) || 0) - addonTotal) + addonCash;
   return addonCash;
 }
+// [BUG#36 FIX] MỘT ĐIỀU KIỆN DUY NHẤT cho "khoản chi này có thật sự rút tiền khỏi két hay không".
+// TRƯỚC ĐÂY mỗi nơi tự viết filter: P&L bên Management đã loại `voided` (khoản bị Quản lý huỷ),
+// nhưng Expected Cash của POS chỉ loại `rejected` → khoản đã VOID vẫn bị trừ khỏi tiền dự kiến.
+// Hệ quả rất khó lần ra: P&L nhìn ĐÚNG, còn đối soát két lại báo "thừa tiền" đúng bằng số đã void
+// (Expected thấp hơn thực tế) — nhân viên bị hỏi về một khoản thừa không tồn tại. Mọi chỗ tính
+// tiền mặt từ đây dùng chung hàm này để không bao giờ lệch nhau nữa.
+function isExpenseIncludedInCash(e) {
+  if (!e || e.baseType !== 'cash') return false;
+  const st = String(e.status || '');
+  return st !== 'rejected' && st !== 'voided' && st !== 'cancelled';
+}
+
 async function computeExpectedCashPOS(businessDate, openingCash) {
   const displayDate = posDateKeyToDisplay(businessDate);
   const cashSales = orders.filter(o => o.date === displayDate).reduce((s, o) => s + orderCashAmountPOS(o), 0);
@@ -12800,7 +12812,7 @@ async function computeExpectedCashPOS(businessDate, openingCash) {
   const expSnap = await fstore.collection('expenses_gieogieo').where('date', '==', businessDate).get()
     .catch(err => { throw new Error('Không đọc được chi phí trong ngày — chưa đối soát được, thử lại: ' + (err.message || err)); });
   cashExpenseTotal = expSnap.docs.map(d => d.data())
-    .filter(e => e.baseType === 'cash' && e.status !== 'rejected')
+    .filter(isExpenseIncludedInCash)   // [BUG#36 FIX] loại cả 'voided', xem hàm đó
     .reduce((s, e) => s + (Number(e.amount) || 0), 0);
   // Cash Refunds = 0 (chưa có luồng hoàn tiền), Cash Adjustments = 0 (chưa có Correction
   // Request flow — mục 12.4, ngoài phạm vi bản đầu).
@@ -12881,12 +12893,26 @@ async function _doCheckInImpl() {
   if (shifts.some(s => !s.checkedOutAt)) { toast('⚠️ Bạn đã check-in rồi, chưa check-out lần trước'); return; }
   if (shifts.length >= 2) { toast('⚠️ Đã đạt tối đa 2 lần check-in/check-out trong hôm nay'); return; }
   const businessDate = posDateKey();
+  // [BUG#35 FIX] Ghi kèm SNAPSHOT điều khoản lương vào chính ca này.
+  // Trước đây ca chỉ lưu employeeId, nên Management tính lương lịch sử phải join với bản ghi nhân
+  // viên HIỆN TẠI: xoá hẳn nhân viên là mất sạch lương giờ lịch sử của người đó khỏi Labor
+  // cost/P&L các ngày đã chốt, và đổi đơn giá giữa tháng thì những ngày cũ bị tính lại theo đơn
+  // giá mới. Có snapshot thì mỗi ca tự mang đủ căn cứ tính tiền của đúng thời điểm đó.
+  const payTerms = {
+    payType: emp.payType || null,
+    hourlyRate: Number(emp.hourlyRate) || 0,
+    otEnabled: !!emp.otEnabled,
+    otThresholdHours: Number(emp.otThresholdHours) || 8,
+    otRate: Number(emp.otRate) || 0,
+    fixedMonthlySalary: Number(emp.fixedMonthlySalary) || 0,
+    snapshotAt: new Date().toISOString()
+  };
   try {
     const ref = await fstore.collection('employee_shifts_gieogieo').add({
-      employeeId: emp.id, employeeName: emp.fullName, businessDate,
+      employeeId: emp.id, employeeName: emp.fullName, businessDate, payTerms,
       checkedInAt: new Date().toISOString(), checkedOutAt: null
     });
-    _employeeShiftsTodayCache.push({ id: ref.id, employeeId: emp.id, employeeName: emp.fullName, businessDate, checkedInAt: new Date().toISOString(), checkedOutAt: null });
+    _employeeShiftsTodayCache.push({ id: ref.id, employeeId: emp.id, employeeName: emp.fullName, businessDate, payTerms, checkedInAt: new Date().toISOString(), checkedOutAt: null });
     toast(`✅ ${emp.fullName} đã check-in`);
     document.getElementById('checkinPin').value = '';
     renderCheckinBlock();
@@ -13965,7 +13991,11 @@ async function renderShiftCloseReview() {
   let allExpenses = [];
   try {
     const snap = await fstore.collection('expenses_gieogieo').where('date', '==', shiftState.businessDate).get();
-    allExpenses = snap.docs.map(d => d.data()).filter(e => e.status !== 'rejected');
+    // [BUG#36 FIX] Bỏ luôn khoản đã bị Quản lý VOID/huỷ: nó không còn rút tiền khỏi két (Expected
+    // Cash cũng không trừ nữa — xem isExpenseIncludedInCash), nên để nó trong danh sách đối soát
+    // chỉ làm nhân viên tin là đã được tính rồi đi tìm khoản thừa không tồn tại.
+    allExpenses = snap.docs.map(d => d.data())
+      .filter(e => { const st = String(e.status || ''); return st !== 'rejected' && st !== 'voided' && st !== 'cancelled'; });
   } catch (err) {
     console.warn('renderShiftCloseReview load failed', err);
   }
@@ -15667,7 +15697,7 @@ async function cashExpensesWindowPOS(businessDate, fromMs, toMs) {
     const snap = await fstore.collection('expenses_gieogieo').where('date', '==', businessDate).get()
       .catch(err => { throw new Error('Không đọc được chi phí trong ngày — chưa đối soát được, thử lại: ' + (err.message || err)); });
     snap.docs.map(d => d.data())
-      .filter(e => e.baseType === 'cash' && e.status !== 'rejected')
+      .filter(isExpenseIncludedInCash)   // [BUG#36 FIX] loại cả 'voided', xem hàm đó
       .forEach(e => {
         const amt = Number(e.amount) || 0;
         if (!amt) return;

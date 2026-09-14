@@ -1859,6 +1859,14 @@ function ensureAuth(){
     auth.signInWithEmailAndPassword('cafe33@xolifa.com', 'xolifaangiang')
       .catch(err=>{ unsub(); reject(err); });
   });
+  // [BUG#37 FIX] Có mạng + đã đăng nhập là lúc tốt nhất để ghi nốt các dòng nhật ký kiểm toán
+  // còn nợ trong hàng đợi localStorage (doc id sinh sẵn nên không tạo dòng trùng).
+  _authReady.then(()=>{
+    if(typeof auditFlushPending === 'function'){
+      auditFlushPending().catch(err=>console.warn('[Audit] flush hàng đợi lỗi:', err));
+      setInterval(()=>{ auditFlushPending().catch(()=>{}); }, 5*60*1000);
+    }
+  }).catch(()=>{});
   return _authReady;
 }
 
@@ -2358,12 +2366,23 @@ function renderSegmentTimeline(segments, closing){
 // Management được xem TOÀN BỘ (mục 12.6) — khác POS bị giới hạn "blind". Đọc
 // daily_openings_gieogieo/daily_closings_gieogieo (🆕) + tính Cash Sales từ
 // orders_gieogieo (qua fetchOrdersForDate ở trên) + Cash Expenses từ
-// expenses_gieogieo (baseType==='cash', mọi status trừ 'rejected' — vì đối
-// soát tiền mặt cần biết tiền đã thực sự rời quầy, không chờ Management tự
-// duyệt xong mới tính, khác với filterExpenses() dùng cho báo cáo P&L).
+// expenses_gieogieo (baseType==='cash', mọi status trừ 'rejected'/'voided' — xem
+// isExpenseIncludedInCash(): đối soát tiền mặt cần biết tiền đã thực sự rời quầy nên KHÔNG
+// chờ Management duyệt xong mới tính, nhưng khoản đã HUỶ thì tiền chưa từng rời quầy).
+// Khác với filterExpenses() dùng cho báo cáo P&L (còn loại cả 'pending_review').
 // orderCashAmount() PHẢI giống hệt logic bên POS (orderCashAmountPOS trong
 // posgieo.html) — 2 file độc lập nên duplicate, đổi 1 bên nhớ đổi bên kia.
 // ------------------------------------------------------------
+// [BUG#36 FIX] Cùng một định nghĩa với isExpenseIncludedInCash() bên posgieo.html: khoản bị VOID
+// không còn rút tiền khỏi két nên KHÔNG được trừ vào Expected Cash. Trước đây chỗ này (và bên POS)
+// chỉ loại 'rejected', nên sau khi Quản lý huỷ một khoản chi tiền mặt thì P&L đúng mà đối soát két
+// lại báo thừa tiền đúng bằng số đã huỷ — 2 màn nói 2 chuyện, rất khó lần ra.
+// 2 file độc lập nên buộc phải nhân bản; đổi một bên thì đổi bên kia.
+function isExpenseIncludedInCash(e){
+  if(!e || e.baseType !== 'cash') return false;
+  const st = String(e.status||'');
+  return st !== 'rejected' && st !== 'voided' && st !== 'cancelled';
+}
 function orderCashAmount(o){
   if(o.method === 'TÍNH RIÊNG'){
     return (o.splitGroups||[]).filter(g=>g.method==='TIỀN MẶT').reduce((s,g)=>s+(Number(g.total)||0),0);
@@ -2403,7 +2422,7 @@ async function computeCashBreakdownForDate(businessDate){
   ]);
   const cashOrders = orders.filter(o=>orderCashAmount(o)>0);
   const cashSales = cashOrders.reduce((s,o)=>s+orderCashAmount(o),0);
-  const cashExpenses = expAll.filter(e=>e.date===businessDate && e.baseType==='cash' && e.status!=='rejected');
+  const cashExpenses = expAll.filter(e=>e.date===businessDate && isExpenseIncludedInCash(e)); // [BUG#36 FIX]
   const cashExpenseTotal = cashExpenses.reduce((s,e)=>s+(Number(e.amount)||0),0);
   const openingCash = opening ? Number(opening.openingCash)||0 : 0;
   // Cash Refunds + Cash Adjustments = 0 — chưa có luồng hoàn tiền / Correction Request
@@ -3012,11 +3031,73 @@ function saveFinance(data){
 // mục 12.6 muốn drill-down: "Approval", "Adjustment". Không chặn thao tác chính nếu ghi
 // log thất bại (catch âm thầm, chỉ console.warn).
 // ------------------------------------------------------------
+// ══════════════════════════════════════════════════════════════════════════
+// [BUG#37 FIX] NHẬT KÝ KIỂM TOÁN KHÔNG ĐƯỢC BIẾN MẤT VÌ MỘT NHỊP MẤT MẠNG
+//
+// TRƯỚC ĐÂY: `.add(...).catch(console.warn)` — ghi log thất bại là hết, không thử lại, không ai
+// biết. Nghĩa là đúng những thao tác cần vết nhất (huỷ một khoản chi, cho nhân viên nghỉ/xoá,
+// ADJUSTMENT tồn kho, duyệt/từ chối, sửa phiếu nhận) đều có thể XẢY RA MÀ KHÔNG CÓ VẾT: thao tác
+// đã commit thật, chỉ dòng nhật ký là rơi.
+//
+// Vẫn KHÔNG chặn thao tác vì một dòng log (chặn thì nhân viên/Quản lý kẹt việc thật), nhưng:
+//   1) thử lại vài lần (_ueRetryAsync);
+//   2) vẫn lỗi thì xếp vào HÀNG ĐỢI BỀN VỮNG trong localStorage (sống qua F5/đóng máy);
+//   3) tự ghi lại khi mở app và định kỳ, cộng thêm mỗi lần có log mới ghi thành công;
+//   4) nói cho người đang thao tác biết, và hiện số dòng còn nợ ngay trên tab Nhật ký.
+// Doc id sinh sẵn ở client nên ghi lại KHÔNG tạo dòng trùng (mất ACK cũng vậy).
+// ══════════════════════════════════════════════════════════════════════════
+const _AUDIT_QUEUE_LS_KEY = 'gieo_audit_pending_v1';
+function _auditQueueRead(){
+  try{ const raw = localStorage.getItem(_AUDIT_QUEUE_LS_KEY); const a = raw ? JSON.parse(raw) : []; return Array.isArray(a) ? a : []; }
+  catch(e){ return []; }
+}
+function _auditQueueWrite(arr){
+  try{ localStorage.setItem(_AUDIT_QUEUE_LS_KEY, JSON.stringify((arr||[]).slice(-200))); }catch(e){}
+}
+function auditPendingCount(){ return _auditQueueRead().length; }
+function _auditQueuePush(id, rec){
+  const arr = _auditQueueRead().filter(x=>x && x.id !== id);
+  arr.push({ id, rec });
+  _auditQueueWrite(arr);
+}
+function _auditQueueDrop(id){ _auditQueueWrite(_auditQueueRead().filter(x=>x && x.id !== id)); }
+function _auditNewId(){ return 'aud_' + Date.now() + '_' + Math.random().toString(36).slice(2,8); }
+
+let _auditFlushing = false;
+async function auditFlushPending(){
+  if(_auditFlushing) return;
+  const arr = _auditQueueRead();
+  if(!arr.length) return;
+  _auditFlushing = true;
+  try{
+    for(const item of arr){
+      if(!item || !item.id || !item.rec){ _auditQueueDrop(item && item.id); continue; }
+      try{
+        await fstore.collection('audit_logs_gieogieo').doc(item.id).set(item.rec);
+      }catch(err){
+        // Vẫn lỗi ⇒ giữ nguyên cả hàng đợi và dừng (mạng đang hỏng). Không bao giờ xoá một dòng
+        // chưa ghi được.
+        console.warn('[Audit] ghi lại nhật ký còn nợ chưa được, để dành lượt sau:', err);
+        break;
+      }
+      _auditQueueDrop(item.id);
+    }
+  } finally { _auditFlushing = false; }
+}
+
 function logAudit(action, entity, entityId, details){
-  return fstore.collection('audit_logs_gieogieo').add({
+  const id = _auditNewId();
+  const rec = {
     action, entity, entityId: entityId||null, details: details||{},
     actor: 'management', createdAt: new Date().toISOString()
-  }).catch(err=>console.warn('[Audit] Ghi log thất bại (không chặn thao tác):', err));
+  };
+  return _ueRetryAsync(()=> fstore.collection('audit_logs_gieogieo').doc(id).set(rec), 3)
+    .then(()=>{ if(auditPendingCount()) auditFlushPending(); })
+    .catch(err=>{
+      console.warn('[Audit] Ghi log thất bại — đã xếp vào hàng đợi để ghi lại (không chặn thao tác):', err);
+      _auditQueuePush(id, rec);
+      try{ toast('⚠️ Chưa ghi được nhật ký kiểm toán cho thao tác vừa rồi — máy sẽ tự ghi lại khi có mạng'); }catch(e){}
+    });
 }
 async function loadAuditLogsRecent(limitN=50){
   const snap = await fstore.collection('audit_logs_gieogieo').orderBy('createdAt','desc').limit(limitN).get();
@@ -3030,13 +3111,13 @@ function laborMonthlyTotal(labor){
 // [NEW] Labor cost TÍNH THẬT từ nhân viên + chấm công — thay cho số ước lượng
 // thủ công `laborMonthlyTotal()` ở trên KHI chủ quán đã bật HR_SETTINGS.useActualLaborCost.
 //
-// GIỚI HẠN QUAN TRỌNG (ghi rõ, không phóng đại độ chính xác): employees_gieogieo
-// chỉ lưu payType/rate HIỆN TẠI, không versioned theo thời gian như
-// config_history_gieogieo (targets/labor). Nếu chủ quán đổi lương 1 nhân viên,
-// tính lại Labor cost cho các ngày TRƯỚC KHI đổi lương sẽ dùng NHẦM mức lương
-// MỚI (không có lịch sử lương cũ để tra) — giống hệt giới hạn "không có lịch sử
-// giá costPerUnit" đã ghi ở Giai đoạn 4. Chấp nhận đánh đổi này để không phải
-// xây thêm 1 hệ thống versioning riêng cho lương — có thể nâng cấp sau nếu cần.
+// [BUG#35 FIX] GIỚI HẠN CŨ ĐÃ ĐƯỢC THU HẸP: mỗi ca chấm công giờ tự mang SNAPSHOT điều khoản
+// lương (`payTerms`, ghi lúc check-in — xem shiftPayTerms()), nên đổi lương/OT từ hôm nay KHÔNG
+// còn tính lại các ngày cũ theo đơn giá mới, và xoá/tắt nhân viên KHÔNG còn xoá được lương giờ
+// lịch sử của họ. Phần còn lại của giới hạn: những ca ghi TRƯỚC bản sửa này chưa có snapshot nên
+// vẫn rơi về bản ghi nhân viên hiện tại (không có nguồn nào khác để tra); và lương CỨNG vẫn lấy
+// mức hiện tại, chỉ có khoảng thời gian áp dụng là theo mốc tuyển/nghỉ thật
+// (fixedSalaryAppliesOn) chứ không theo công tắc active hôm nay.
 //
 // [FIX-ca-dang-chay] Ca CHƯA CHECK-OUT được xử lý theo NGÀY, không gộp làm một:
 //   · Của chính hôm nay → nhân viên đang trong ca, tính TẠM tới hiện tại nên Labor
@@ -3079,6 +3160,85 @@ function computeWageForDayHours(emp, hoursInDay){
 // tính toán không bao giờ lệch nhau nữa.
 function isFixedPayType(emp){
   return !!emp && emp.payType !== 'hourly_full' && emp.payType !== 'hourly_part';
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// [BUG#35 FIX] LỊCH SỬ LƯƠNG KHÔNG ĐƯỢC PHỤ THUỘC TRẠNG THÁI NHÂN VIÊN HÔM NAY
+//
+// TRƯỚC ĐÂY mọi phép tính Labor cost lịch sử đều join employee_shifts_gieogieo với
+// employees_gieogieo ĐANG CÓ rồi lấy đơn giá/trạng thái HIỆN TẠI:
+//   · `const emp = empById[s.employeeId]; if(!emp) return;` → nhân viên bị XOÁ HẲN thì toàn bộ
+//     giờ công lịch sử của họ biến mất khỏi Labor cost, P&L các ngày đã chốt tự dưng lãi thêm.
+//   · `if(isFixedPayType(emp) && emp.active!==false)` → chỉ cần bấm "Tắt" hôm nay là lương cứng
+//     của người đó bị trừ khỏi CẢ những ngày trước đó (ngày 1–10 đã xem đúng, ngày 11 tắt người
+//     đó thì mở lại ngày 1–10 thấy số khác).
+// Cả hai đều là "sửa quá khứ bằng một cú bấm hôm nay" — không được phép với số liệu kế toán.
+//
+// Nguyên tắc mới:
+//   1. Điều khoản lương của một ca lấy từ SNAPSHOT ghi trên chính ca đó (`payTerms`, POS ghi lúc
+//      check-in). Không có snapshot (ca của bản cũ) mới rơi về bản ghi nhân viên hiện tại.
+//   2. Không tìm được điều khoản nào (nhân viên đã bị xoá hẳn + ca cũ không có snapshot) thì
+//      KHÔNG âm thầm bỏ qua: gom vào LABOR_TERMS_WARNINGS để tab Lương nói rõ ra.
+//   3. Lương cứng tính theo MỐC THỜI GIAN tuyển/nghỉ (createdAt/hiredAt → deactivatedAt), không
+//      theo công tắc `active` hôm nay.
+// ══════════════════════════════════════════════════════════════════════════
+// Cảnh báo được CỘNG DỒN có khử trùng (không hàm nào tự xoá của hàm khác — tab Lương gọi
+// _laborWarnReset() một lần trước khi tính, rồi đọc kết quả sau; KPI chạy nền chỉ thêm vào).
+let LABOR_TERMS_WARNINGS = [];   // [{kind, employeeId, name, hours?}]
+function _laborWarnReset(){ LABOR_TERMS_WARNINGS = []; }
+function _laborWarn(kind, employeeId, name, extra){
+  const cu = LABOR_TERMS_WARNINGS.find(x=>x.kind===kind && x.employeeId===employeeId);
+  if(cu){ if(extra && extra.hours) cu.hours = (cu.hours||0) + extra.hours; return; }
+  LABOR_TERMS_WARNINGS.push(Object.assign({kind, employeeId, name: name||employeeId}, extra||{}));
+}
+
+// Điều khoản lương ÁP DỤNG CHO MỘT CA. Trả về object cùng hình dạng với employee (để
+// computeWageForDayHours dùng lại nguyên vẹn) hoặc null nếu không còn nguồn nào.
+function shiftPayTerms(s, empById){
+  const t = s && s.payTerms;
+  if(t && (t.payType || t.hourlyRate != null || t.fixedMonthlySalary != null)){
+    return { id: s.employeeId, fullName: s.employeeName || '', payType: t.payType || null,
+             hourlyRate: Number(t.hourlyRate)||0, otEnabled: !!t.otEnabled,
+             otThresholdHours: Number(t.otThresholdHours)||8, otRate: Number(t.otRate)||0,
+             fixedMonthlySalary: Number(t.fixedMonthlySalary)||0, _nguon: 'snapshot' };
+  }
+  const emp = empById[s.employeeId];
+  if(emp) return Object.assign({}, emp, { _nguon: 'hiện tại' });
+  // Nhân viên đã bị xoá hẳn và ca không có snapshot ⇒ không thể biết đơn giá. Nói ra, đừng bỏ im.
+  _laborWarn('deleted_no_snapshot', s.employeeId, s.employeeName || s.employeeId);
+  return null;
+}
+function isHourlyTerms(t){ return !!t && (t.payType === 'hourly_full' || t.payType === 'hourly_part'); }
+
+// Ảnh chụp điều khoản lương để ghi kèm vào một ca chấm công (POS ghi bản y hệt lúc check-in).
+function employeePayTermsSnapshot(emp){
+  return {
+    payType: emp.payType || null,
+    hourlyRate: Number(emp.hourlyRate) || 0,
+    otEnabled: !!emp.otEnabled,
+    otThresholdHours: Number(emp.otThresholdHours) || 8,
+    otRate: Number(emp.otRate) || 0,
+    fixedMonthlySalary: Number(emp.fixedMonthlySalary) || 0,
+    snapshotAt: new Date().toISOString()
+  };
+}
+
+// Lương cứng của nhân viên này có tính cho NGÀY dateKey không — theo mốc thời gian, không theo
+// công tắc active hôm nay.
+function fixedSalaryAppliesOn(emp, dateKey){
+  if(!isFixedPayType(emp)) return false;
+  const batDau = String(emp.hiredAt || emp.createdAt || '').slice(0,10);
+  if(batDau && dateKey < batDau) return false;
+  const ketThuc = String(emp.deactivatedAt || '').slice(0,10);
+  if(ketThuc) return dateKey <= ketThuc;
+  if(emp.active === false){
+    // Đã tắt nhưng KHÔNG có mốc nghỉ (bản ghi từ trước bản sửa này): không biết nghỉ từ ngày nào
+    // nên không dám gán lương cho ngày nào cả — nhưng phải nói ra để Quản lý vào khai mốc nghỉ,
+    // thay vì âm thầm làm lệch lịch sử như trước.
+    _laborWarn('inactive_no_leave_date', emp.id, emp.fullName);
+    return false;
+  }
+  return true;
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -3131,22 +3291,24 @@ async function computeActualLaborCostByDate(startDate, endDate){
   // Vế 1 — LƯƠNG GIỜ: GOM GIỜ theo TỪNG NGƯỜI + TỪNG NGÀY trước (không cộng
   // tiền thẳng theo từng ca như bản cũ) — bắt buộc để áp đúng ngưỡng OT theo
   // ngày khi 1 người có nhiều ca/ngày (xem ghi chú computeWageForDayHours ở trên).
-  const hoursByEmpDate = {}; // { "empId|date": tổng giờ }
+  const hoursByEmpDate = {}; // { "empId|date": {hours, terms} }
   const _now = Date.now();
   shifts.forEach(s=>{
-    const emp = empById[s.employeeId];
-    if(!emp || emp.payType!=='hourly_full' && emp.payType!=='hourly_part') return; // lương cứng không tính ở đây
+    // [BUG#35 FIX] Điều khoản lương lấy từ snapshot trên chính ca đó trước — nhân viên bị xoá/tắt
+    // sau này không còn xoá được giờ công lịch sử của họ.
+    const terms = shiftPayTerms(s, empById);
+    if(!isHourlyTerms(terms)) return; // lương cứng (hoặc không xác định được) không tính ở đây
     // [FIX-ca-dang-chay] Ca đang chạy của HÔM NAY được tính tạm tới hiện tại — xem
     // shiftWorkedHours(). Ca treo ngày cũ vẫn trả 0 như trước.
     const hours = shiftWorkedHours(s, _now);
     if(hours<=0) return;
     const key = s.employeeId+'|'+s.businessDate;
-    hoursByEmpDate[key] = (hoursByEmpDate[key]||0) + hours;
+    const o = hoursByEmpDate[key] || (hoursByEmpDate[key] = { hours: 0, terms });
+    o.hours += hours;
   });
-  Object.entries(hoursByEmpDate).forEach(([key, hours])=>{
-    const sep = key.indexOf('|');
-    const employeeId = key.slice(0,sep), date = key.slice(sep+1);
-    const { amount } = computeWageForDayHours(empById[employeeId], hours);
+  Object.entries(hoursByEmpDate).forEach(([key, o])=>{
+    const date = key.slice(key.indexOf('|')+1);
+    const { amount } = computeWageForDayHours(o.terms, o.hours);
     addTo(date, amount);
   });
 
@@ -3160,7 +3322,8 @@ async function computeActualLaborCostByDate(startDate, endDate){
     const dateKey = dkey(cur);
     const dim = daysInMonth(cur);
     employees.forEach(emp=>{
-      if(isFixedPayType(emp) && emp.active!==false){
+      // [BUG#35 FIX] theo mốc tuyển/nghỉ, KHÔNG theo công tắc active hôm nay.
+      if(fixedSalaryAppliesOn(emp, dateKey)){
         addTo(dateKey, (Number(emp.fixedMonthlySalary)||0) / dim);
       }
     });
@@ -3187,41 +3350,49 @@ async function computeActualLaborBreakdownByEmployee(startDate, endDate){
   ]);
   const shifts = shiftsSnap.docs.map(d=>d.data());
   const empById = {}; employees.forEach(e=>empById[e.id]=e);
-  const byEmp = {}; // { employeeId: {hours, otHours, amount} }
-  const ensure = id => byEmp[id] || (byEmp[id] = {hours:0, otHours:0, amount:0});
+  const byEmp = {}; // { employeeId: {hours, otHours, amount, name} }
+  const ensure = id => byEmp[id] || (byEmp[id] = {hours:0, otHours:0, amount:0, name:'', payTypeLabelSrc:null});
   // Lương giờ — GOM GIỜ theo TỪNG NGƯỜI + TỪNG NGÀY trước khi tính tiền, cùng lý
   // do và cùng cách làm như Vế 1 của computeActualLaborCostByDate ở trên (bắt
   // buộc để ngưỡng OT tính đúng theo ngày, không theo từng ca riêng lẻ).
-  const hoursByEmpDate = {}; // { "empId|date": tổng giờ }
+  const hoursByEmpDate = {}; // { "empId|date": {hours, terms} }
   const _now = Date.now();
   shifts.forEach(s=>{
-    const emp = empById[s.employeeId];
-    if(!emp || (emp.payType!=='hourly_full' && emp.payType!=='hourly_part')) return;
+    // [BUG#35 FIX] Cùng nguyên tắc với computeActualLaborCostByDate: snapshot trước, hiện tại sau.
+    const terms = shiftPayTerms(s, empById);
+    if(!isHourlyTerms(terms)) return;
     // [FIX-ca-dang-chay] Cùng quy tắc với computeActualLaborCostByDate.
     const hours = shiftWorkedHours(s, _now);
     if(hours<=0) return;
     const key = s.employeeId+'|'+s.businessDate;
-    hoursByEmpDate[key] = (hoursByEmpDate[key]||0) + hours;
+    const o = hoursByEmpDate[key] || (hoursByEmpDate[key] = { hours: 0, terms, name: s.employeeName || '' });
+    o.hours += hours;
   });
-  Object.entries(hoursByEmpDate).forEach(([key, hours])=>{
-    const sep = key.indexOf('|');
-    const employeeId = key.slice(0,sep);
-    const emp = empById[employeeId];
-    const { amount, otHours } = computeWageForDayHours(emp, hours);
+  Object.entries(hoursByEmpDate).forEach(([key, o])=>{
+    const employeeId = key.slice(0, key.indexOf('|'));
+    const { amount, otHours } = computeWageForDayHours(o.terms, o.hours);
     const bucket = ensure(employeeId);
-    bucket.hours += hours;
+    bucket.hours += o.hours;
     bucket.otHours += otHours;
     bucket.amount += amount;
+    // Giữ tên để tab Lương hiện được cả người đã nghỉ/đã xoá (trước đây chỉ lặp danh sách
+    // employees active nên tiền của họ nằm trong tổng mà không có dòng nào giải thích).
+    if(!bucket.name) bucket.name = o.name || (empById[employeeId]||{}).fullName || employeeId;
+    if(!bucket.payTypeLabelSrc) bucket.payTypeLabelSrc = o.terms;
   });
   // Lương cứng — chia đều theo từng ngày trong khoảng (cùng phương pháp Vế 2 của
   // computeActualLaborCostByDate, chỉ khác là cộng theo TỪNG NGƯỜI thay vì gộp theo ngày).
   let cur = new Date(startDate+'T00:00:00');
   const end = new Date(endDate+'T00:00:00');
   while(cur<=end){
-    const dim = daysInMonth(cur);
+    const dim = daysInMonth(cur), dateKey = dkey(cur);
     employees.forEach(emp=>{
-      if(isFixedPayType(emp) && emp.active!==false){
-        ensure(emp.id).amount += (Number(emp.fixedMonthlySalary)||0)/dim;
+      // [BUG#35 FIX] theo mốc tuyển/nghỉ — xem fixedSalaryAppliesOn().
+      if(fixedSalaryAppliesOn(emp, dateKey)){
+        const b = ensure(emp.id);
+        b.amount += (Number(emp.fixedMonthlySalary)||0)/dim;
+        if(!b.name) b.name = emp.fullName || emp.id;
+        if(!b.payTypeLabelSrc) b.payTypeLabelSrc = emp;
       }
     });
     cur.setDate(cur.getDate()+1);
@@ -3474,9 +3645,29 @@ function toggleEmployeeActive(id, active){
   // `fullName` lúc ký nên không bị ảnh hưởng gì (mục 4 câu 6 NEXT_SESSION_TODO.md).
   // Nhân viên bị tắt chỉ biến mất khỏi danh sách chọn khi POS tạo mới, PIN của
   // họ được "trả lại" cho người khác dùng.
-  return fstore.collection('employees_gieogieo').doc(id).update({active});
+  //
+  // [BUG#35 FIX] GHI MỐC THỜI GIAN. Chỉ một cờ `active` là không đủ để tính lịch sử: lương cứng
+  // của các ngày TRƯỚC khi nghỉ vẫn phải được tính, nên phải biết nghỉ TỪ NGÀY NÀO thay vì suy từ
+  // trạng thái hôm nay (xem fixedSalaryAppliesOn()). Bật lại thì xoá mốc nghỉ và ghi mốc nhận lại.
+  const nowISO = new Date().toISOString();
+  const upd = { active, updatedAt: nowISO,
+    activityLog: firebase.firestore.FieldValue.arrayUnion({ at: nowISO, active: !!active }) };
+  if(active){ upd.deactivatedAt = null; upd.reactivatedAt = nowISO; }
+  else { upd.deactivatedAt = nowISO; }
+  return fstore.collection('employees_gieogieo').doc(id).update(upd);
 }
-function deleteEmployee(id){
+// [BUG#35 FIX] Nhân viên ĐÃ TỪNG có ca chấm công thì KHÔNG được xoá hẳn: employee_shifts vẫn giữ
+// employeeId, nhưng mọi phép tính lương lịch sử cần đơn giá — xoá bản ghi nhân viên là xoá luôn
+// lương giờ lịch sử của người đó khỏi Labor cost/P&L các ngày ĐÃ CHỐT (ca cũ chưa có snapshot
+// payTerms thì không còn nguồn nào để tính lại). Nghỉ việc thì dùng Tắt.
+async function employeeHasShiftHistory(id){
+  const snap = await fstore.collection('employee_shifts_gieogieo').where('employeeId','==',id).limit(1).get();
+  return !snap.empty;
+}
+async function deleteEmployee(id){
+  if(await employeeHasShiftHistory(id)){
+    throw new Error('Nhân viên này đã có ca chấm công — không xoá được (xoá sẽ làm sai lương/lãi lỗ của những ngày đã chốt). Dùng nút Tắt để cho nghỉ việc.');
+  }
   return fstore.collection('employees_gieogieo').doc(id).delete();
 }
 
@@ -15274,7 +15465,7 @@ async function renderEntryNv(){
   const otEnabled = nvFormDraft.otEnabled !== null ? nvFormDraft.otEnabled : (editing ? !!editing.otEnabled : false);
   body.innerHTML = `
     <div class="sec-title">Nhân viên &amp; mã PIN</div>
-    <div class="small-note" style="margin:0 0 10px">Mỗi nhân viên có 1 mã PIN 4 số DUY NHẤT — dùng để xác nhận danh tính ở mọi thao tác ký tên trên POS (thay cho gõ tên tự do). Nhân viên nghỉ việc: bấm "Tắt" — lịch sử các giao dịch cũ vẫn giữ nguyên tên, chỉ ẩn khỏi danh sách chọn khi tạo mới.</div>
+    <div class="small-note" style="margin:0 0 10px">Mỗi nhân viên có 1 mã PIN 4 số DUY NHẤT — dùng để xác nhận danh tính ở mọi thao tác ký tên trên POS (thay cho gõ tên tự do). Nhân viên nghỉ việc: bấm "Tắt" — hệ thống ghi luôn NGÀY NGHỈ nên lương/lãi lỗ những ngày trước đó vẫn tính đủ, người đó chỉ ẩn khỏi danh sách chọn khi tạo mới. Người đã từng có ca chấm công thì KHÔNG xoá được: xoá sẽ làm sai Labor cost của các ngày đã chốt.</div>
     ${editing ? '' : `<div class="card">${renderEmployeeFormFields(null, payType, otEnabled)}<button class="btn" onclick="submitEmployeeForm()">Thêm nhân viên</button></div>`}
 
     <div class="sec-title" style="margin-top:14px">Danh sách (${list.length})</div>
@@ -15282,7 +15473,7 @@ async function renderEntryNv(){
       ${list.length ? list.map(e=>`
         <div class="litem">
           <div class="li-l">
-            <div>${e.fullName || '(chưa đặt tên)'} ${e.active===false ? '<span class="tier tier-red" style="margin-left:4px">Đã nghỉ</span>' : ''}</div>
+            <div>${e.fullName || '(chưa đặt tên)'} ${e.active===false ? '<span class="tier tier-red" style="margin-left:4px">Đã nghỉ' + (e.deactivatedAt ? ' từ '+String(e.deactivatedAt).slice(8,10)+'/'+String(e.deactivatedAt).slice(5,7) : ' (chưa rõ ngày)') + '</span>' : ''}</div>
             <div>Mã PIN: ${e.pin || '—'} · ${payTypeLabel(e)}</div>
           </div>
           <div class="li-r">
@@ -15359,8 +15550,19 @@ async function submitEmployeeForm(){
   }
 }
 async function doDeleteEmployee(id){
-  if(!confirm('Xoá hẳn nhân viên này? (lịch sử giao dịch cũ vẫn giữ nguyên tên, không bị ảnh hưởng — nhưng nếu chỉ muốn ẩn vì nghỉ việc, dùng nút Tắt thay vì Xoá)')) return;
-  try{ await deleteEmployee(id); logAudit('delete','employee',id,{}); toast('🗑 Đã xoá'); renderEntryNv(); }
+  // [BUG#35 FIX] Kiểm tra TRƯỚC khi hỏi: nếu đã có ca chấm công thì không có lựa chọn nào để hỏi.
+  try{
+    if(await employeeHasShiftHistory(id)){
+      showError('Nhân viên này đã có ca chấm công nên KHÔNG xoá được — xoá sẽ làm sai Labor cost/lãi lỗ của những ngày đã chốt. Dùng nút Tắt (hệ thống ghi luôn ngày nghỉ) để cho nghỉ việc; họ sẽ biến mất khỏi danh sách chọn ở POS nhưng lịch sử vẫn tính đúng.');
+      return;
+    }
+  }catch(err){
+    // Không đọc được lịch sử ca ⇒ fail-closed, thà không xoá còn hơn xoá mất căn cứ tính lương.
+    showError('Chưa kiểm tra được lịch sử ca của nhân viên này (lỗi mạng) — chưa xoá. Thử lại sau: '+(err.code||err.message||err));
+    return;
+  }
+  if(!confirm('Xoá hẳn nhân viên này? (chưa từng có ca chấm công nên không ảnh hưởng lịch sử lương)')) return;
+  try{ await deleteEmployee(id); await logAudit('delete','employee',id,{}); toast('🗑 Đã xoá'); renderEntryNv(); }
   catch(err){ toast('❌ ' + (err.message||err)); }
 }
 // escapeHtmlAttr — tránh lỗi hiển thị/injection khi fullName hoặc pin có ký tự
@@ -16721,6 +16923,9 @@ async function ccSubmitAdd(){
       employeeName: emp ? emp.fullName : '(không rõ)',
       businessDate: chamCongViewDate,
       checkedInAt, checkedOutAt,
+      // [BUG#35 FIX] Snapshot điều khoản lương ngay trên ca — xem shiftPayTerms(). Không có nó thì
+      // ca này phụ thuộc bản ghi nhân viên hiện tại, và tắt/xoá người đó sau này là sửa quá khứ.
+      ...(emp ? { payTerms: employeePayTermsSnapshot(emp) } : {}),
       manualEntry: true, manualEditAt: new Date().toISOString()
     });
     _ccAddOpen = false;
@@ -16777,6 +16982,7 @@ async function renderEntryLuong(){
   const monthStart = dkey(new Date(y, m-1, 1));
   const monthEnd = dkey(new Date(y, m, 0));
   let byDate = {}, byEmp = {}, deductByEmpName = {};
+  _laborWarnReset();   // [BUG#35 FIX] cảnh báo hiện bên dưới là của ĐÚNG lượt tính này
   try{
     [byDate, byEmp, deductByEmpName] = await Promise.all([
       computeActualLaborCostByDate(monthStart, monthEnd),
@@ -16815,20 +17021,43 @@ async function renderEntryLuong(){
     <div class="card">
       <div class="row"><span class="rl"><b>Tổng Labor cost tháng này</b></span><span class="rv"><b>${fmt(totalMonth)}</b></span></div>
     </div>
-    ${employees.filter(e=>e.active!==false).map(e=>{
-      const b = byEmp[e.id] || {hours:0, otHours:0, amount:0};
-      const isHourly = e.payType==='hourly_full'||e.payType==='hourly_part';
-      const otNote = (isHourly && b.otHours>0) ? ` · trong đó <span style="color:var(--warn);font-weight:700">${fmtNum(b.otHours,1)}h OT</span>` : '';
-      const deduct = deductByEmpName[e.fullName] || 0;
-      return `<div class="litem">
-        <div class="li-l">
-          <div>${e.fullName}</div>
-          <div>${payTypeLabel(e)}${isHourly ? ` · ${fmtNum(b.hours,1)}h trong tháng${otNote}` : ''}</div>
-          ${deduct>0 ? `<div style="color:var(--bad)">Đền bù mất hàng (chưa trừ vào số bên cạnh): −${fmtNum(deduct)} đ</div>` : ''}
-        </div>
-        <div class="li-r">${fmt(b.amount)}</div>
-      </div>`;
-    }).join('')}
+    ${(() => {
+      // [BUG#35 FIX] TRƯỚC ĐÂY chỉ lặp nhân viên đang active — tiền lương của người đã nghỉ/đã
+      // xoá trong tháng vẫn nằm trong "Tổng Labor cost tháng này" nhưng KHÔNG có dòng nào giải
+      // thích, nên tổng không bao giờ khớp với các dòng cộng lại. Giờ hiện đủ: người đang làm
+      // trước, rồi người đã nghỉ/đã xoá NẾU tháng này còn phát sinh lương.
+      const dangLam = employees.filter(e=>e.active!==false);
+      const idsDangLam = new Set(dangLam.map(e=>e.id));
+      const khac = Object.keys(byEmp)
+        .filter(id => !idsDangLam.has(id) && Math.abs(byEmp[id].amount) > 0.5)
+        .map(id => {
+          const e = employees.find(x=>x.id===id);
+          return e || Object.assign({ id, fullName: (byEmp[id].name || id) + ' (đã xoá khỏi danh sách)' },
+                                     byEmp[id].payTypeLabelSrc || {});
+        });
+      return dangLam.concat(khac).map(e=>{
+        const b = byEmp[e.id] || {hours:0, otHours:0, amount:0};
+        const isHourly = e.payType==='hourly_full'||e.payType==='hourly_part';
+        const otNote = (isHourly && b.otHours>0) ? ` · trong đó <span style="color:var(--warn);font-weight:700">${fmtNum(b.otHours,1)}h OT</span>` : '';
+        const deduct = deductByEmpName[e.fullName] || 0;
+        const nghi = e.active===false ? ' <span class="tier tier-red" style="margin-left:4px">Đã nghỉ</span>' : '';
+        return `<div class="litem">
+          <div class="li-l">
+            <div>${escapeHtmlAttr(e.fullName||'')}${nghi}</div>
+            <div>${payTypeLabel(e)}${isHourly ? ` · ${fmtNum(b.hours,1)}h trong tháng${otNote}` : ''}</div>
+            ${deduct>0 ? `<div style="color:var(--bad)">Đền bù mất hàng (chưa trừ vào số bên cạnh): −${fmtNum(deduct)} đ</div>` : ''}
+          </div>
+          <div class="li-r">${fmt(b.amount)}</div>
+        </div>`;
+      }).join('');
+    })()}
+    ${LABOR_TERMS_WARNINGS.length ? `<div class="card" style="margin-top:10px;border:1.5px solid var(--warn)">
+      <div style="font-size:12.5px;font-weight:700;color:var(--warn);margin-bottom:6px">⚠️ Có dữ liệu lương chưa tính được — số tổng ở trên đang THIẾU</div>
+      ${LABOR_TERMS_WARNINGS.map(w=> w.kind==='deleted_no_snapshot'
+        ? `<div class="small-note">• <b>${escapeHtmlAttr(w.name)}</b>: còn ca chấm công trong kỳ nhưng nhân viên đã bị XOÁ HẲN và ca đó không lưu đơn giá lúc chấm — không tính được lương giờ. Tạo lại nhân viên này (hoặc khai tay khoản lương đó vào Chi phí) rồi xem lại.</div>`
+        : `<div class="small-note">• <b>${escapeHtmlAttr(w.name)}</b>: đã Tắt nhưng KHÔNG có ngày nghỉ việc, nên lương cứng không được tính cho ngày nào trong kỳ. Vào tab Nhân viên bấm Tắt lại (hệ thống sẽ ghi ngày nghỉ) hoặc khai ngày nghỉ đúng để lịch sử tính đủ.</div>`
+      ).join('')}
+    </div>` : ''}
     <div class="small-note" style="margin-top:8px">Số tiền mỗi người đã cộng dồn CẢ lương cứng (chia đều theo ngày) lẫn lương giờ (giờ chấm công thật × đơn giá, có áp dụng OT nếu nhân viên bật OT — ngưỡng OT tính theo TỪNG NGÀY, gộp đủ các ca trong ngày) trong tháng đang xem — xem giới hạn quan trọng ở ghi chú code <code>computeActualLaborCostByDate()</code>: không versioned theo thời gian (đổi lương/OT giữa tháng sẽ tính nhầm cho ngày cũ), ca chưa check-out không được tính vào giờ.</div>
     ${totalDeduct>0 ? `<div class="small-note" style="margin-top:4px;color:var(--bad)">Tổng đền bù mất hàng trong tháng chưa được tìm lại: <b>${fmtNum(totalDeduct)} đ</b> — số này KHÔNG tự trừ vào lương hiển thị ở trên, quán tự trừ tay lúc phát lương. Xem chi tiết ở Kho → Báo mất hàng.</div>` : ''}
   `;
@@ -17711,10 +17940,16 @@ async function renderAuditBaoBi(){
 function renderAuditLogList(logs){
   const el = document.getElementById('auditLogList');
   const actionLabel = {approve:['Duyệt','green'], reject:['Từ chối','red'], cancel:['Huỷ','amber']};
-  el.innerHTML = logs.length ? logs.map(l=>{
+  // [BUG#37 FIX] Nợ nhật ký phải hiện ngay ở đây — đây là chỗ người ta vào để TIN vào nhật ký.
+  const noLog = auditPendingCount();
+  const banner = noLog ? `<div class="small-note" style="color:var(--warn);font-weight:700;margin-bottom:8px">
+      ⚠️ Còn ${noLog} dòng nhật ký chưa ghi lên được (máy này đang giữ, sẽ tự ghi khi có mạng).
+      <a href="#" onclick="auditFlushPending().then(()=>renderEntryAudit());return false;">Thử ghi lại ngay</a>
+    </div>` : '';
+  el.innerHTML = banner + (logs.length ? logs.map(l=>{
     const [label,color] = actionLabel[l.action] || [l.action,'blue'];
     return `<div class="row"><span class="rl"><span class="tier tier-${color}" style="margin-right:6px">${label}</span>${l.entity}${l.entityId?(' · '+l.entityId.slice(0,8)):''}</span><span class="rv small-note">${(l.createdAt||'').replace('T',' ').slice(0,16)}</span></div>`;
-  }).join('') : '<div class="muted">Chưa có nhật ký nào.</div>';
+  }).join('') : '<div class="muted">Chưa có nhật ký nào.</div>');
 }
 async function renderAuditEmployeeActivity(){
   const el = document.getElementById('auditEmployeeList');
@@ -21948,9 +22183,37 @@ async function submitStorageLocation(){
     renderKhoLocation();
   }catch(err){ console.error(err); showError('Lưu vị trí thất bại: '+(err.code||err.message||err)); }
 }
+// [BUG#38 FIX] Xoá một VỊ TRÍ KHO đang được dùng để lại tham chiếu mồ côi ở 2 chỗ không tự lành:
+//   · refill_rules_gieogieo trỏ tới sourceLocationId/destLocationId đã biến mất ⇒ luật refill hỏng
+//     (POS không suy ra được kho nguồn/quầy đích, cảnh báo refill và tồn theo vị trí sai theo).
+//   · inventory_items.locationStock còn key của vị trí đã xoá ⇒ số hàng đó "kẹt" ở một nơi không
+//     còn tồn tại, không màn nào hiện ra để chuyển đi.
+// Kiểm tra TRƯỚC khi xoá và fail-closed nếu không đọc được. Vị trí không dùng nữa thì Tắt.
 async function removeStorageLocation(id){
-  if(!confirm('Xoá vị trí kho này?')) return;
-  try{ await deleteStorageLocation(id); toast('🗑 Đã xoá'); renderKhoLocation(); }
+  let rules = [], stuckItems = [];
+  try{
+    await ensureAuth();
+    const [ruleSnap, items] = await Promise.all([
+      fstore.collection('refill_rules_gieogieo').get(),
+      loadInventoryItems()
+    ]);
+    rules = ruleSnap.docs.map(d=>({id:d.id, ...d.data()}))
+      .filter(r=> r.sourceLocationId===id || r.destLocationId===id);
+    stuckItems = (items||[]).filter(it=> Math.abs(Number((it.locationStock||{})[id])||0) > 1e-9);
+  }catch(err){
+    showError('Chưa kiểm tra được vị trí này có đang được dùng hay không (lỗi mạng) — chưa xoá. Thử lại sau: '+(err.code||err.message||err));
+    return;
+  }
+  if(rules.length || stuckItems.length){
+    showError('Không xoá được vị trí này vì đang được dùng: '
+      + (rules.length ? `${rules.length} luật refill trỏ tới nó (${rules.slice(0,3).map(r=>escapeHtmlAttr(r.itemName||r.id)).join(', ')}${rules.length>3?'…':''})` : '')
+      + (rules.length && stuckItems.length ? ' · ' : '')
+      + (stuckItems.length ? `${stuckItems.length} nguyên liệu còn tồn ghi ở vị trí này (${stuckItems.slice(0,3).map(it=>escapeHtmlAttr(it.name||it.id)).join(', ')}${stuckItems.length>3?'…':''})` : '')
+      + '. Xoá sẽ để lại tham chiếu mồ côi (luật refill hỏng, tồn kho kẹt ở nơi không còn tồn tại). Hãy sửa/xoá các luật refill đó và chuyển hết tồn sang vị trí khác trước, hoặc dùng nút Tắt để ẩn vị trí này.');
+    return;
+  }
+  if(!confirm('Xoá vị trí kho này? (đã kiểm tra: không có luật refill nào trỏ tới và không còn tồn kho ghi ở đây)')) return;
+  try{ await deleteStorageLocation(id); await logAudit('delete','storage_location',id,{}); toast('🗑 Đã xoá'); renderKhoLocation(); }
   catch(err){ console.error(err); showError('Xoá thất bại: '+(err.code||err.message||err)); }
 }
 
