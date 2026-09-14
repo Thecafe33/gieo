@@ -4027,7 +4027,8 @@ async function unitEngineFinishOpenUnit(id, c, staffEmp, lyDo, daQuet, ref) {
     toast('✅ Đã chốt ' + (c.code || ''));
   }
   refreshFifoAlert().catch(() => {});
-  await openStockUseScreen();
+  closeStockScanSheet();
+  _refreshStockUseListIfActive();
 }
 
 // ---------- Cảnh báo "cần xác nhận đã hết" trên màn Order ----------
@@ -4061,15 +4062,16 @@ function toggleFifoAlertBar() {
 
 // Bấm "Quét mã xác nhận" ngay trong pill.
 //
-// [FIX] TRƯỚC ĐÂY gọi thẳng scanToFinishContainer() — hàm đó vẽ sheet "Xác nhận đã
-// hết" vào #stockUseBody, một element chỉ thật sự HIỂN THỊ khi #stockUseScreen đang
-// là màn đang mở. Pill này lại nằm trên màn Order (#sm) — bấm "Quét mã xác nhận" từ
-// đây, quét xong, sheet vẫn được vẽ ra nhưng nằm sau màn Order đang hiện, nhân viên
+// [FIX] TRƯỚC ĐÂY gọi thẳng scanToFinishContainer() — hàm đó (khi đó) vẽ sheet "Xác
+// nhận đã hết" vào #stockUseBody, một element chỉ thật sự HIỂN THỊ khi #stockUseScreen
+// đang là màn đang mở. Pill này lại nằm trên màn Order (#sm) — bấm "Quét mã xác nhận"
+// từ đây, quét xong, sheet vẫn được vẽ ra nhưng nằm sau màn Order đang hiện, nhân viên
 // không thấy gì để bấm "Xác nhận đã hết" tiếp. Kết quả: tưởng đã quét xong nhưng vì
-// không bấm được nút xác nhận cuối cùng nên tem chưa bao giờ thật sự được chốt —
-// pill cứ treo mãi dù "đã quét theo đúng nút nhắc nhở". Giờ tự chuyển sang màn Kho
-// trước khi mở sheet, y hệt cách scanToFinishContainerForItem() đã làm cho màn Chế
-// biến.
+// không bấm được nút xác nhận cuối cùng nên tem chưa bao giờ thật sự được chốt — pill
+// cứ treo mãi dù "đã quét theo đúng nút nhắc nhở". openConfirmFinishSheet() giờ vẽ vào
+// sheet nổi dùng chung (#stockScanSheetOverlay) thay vì #stockUseBody, nên tự hiện đúng
+// ngay trên màn đang đứng — khỏi cần chuyển tab nữa, và cũng khỏi cần chuyển VỀ tab cũ
+// sau khi xong.
 //
 // Cũng kiểm tra thêm: mã vừa quét có ĐÚNG là một trong những tem đang bị pill này
 // cảnh báo hay không. Trước đây quét trúng một tem BẤT KỲ đang mở (kể cả tem không
@@ -4091,7 +4093,6 @@ async function fifoAlertScanNow() {
   if (c.status === 'lost')     { toast('⚠️ ' + c.code + ' đang ở trạng thái "báo mất" — dùng nút "Quét mã hàng tìm lại được" ở Kiểm kê để phục hồi'); return; }
   if (c.status === 'sealed' && !isAtomicUnitContainer(c)) { toast('ℹ️ ' + c.code + ' còn nguyên seal — mở trước đã'); return; }
   if (c.status === 'finished') { toast('ℹ️ ' + c.code + ' đã báo hết trước đó'); return; }
-  showScreen('stockUseScreen');
   openConfirmFinishSheet(c, true);
 }
 
@@ -4240,6 +4241,35 @@ async function scanToOpenContainer() {
   openConfirmOpenSheet(c);
 }
 
+// [MỚI] Sheet xác nhận quét mã kho (mở/báo hết) — NỔI TRÊN đúng tab đang đứng thay vì
+// buộc phải chuyển sang tab Kho mới thấy. Xem chú thích ở #stockScanSheetOverlay trong
+// HTML: trước đây openConfirmOpenSheet()/openConfirmFinishSheet() vẽ thẳng vào
+// #stockUseBody, quét từ tab khác (Chế biến, pill FIFO ở tab Order) thì sheet vẽ ra ở
+// chỗ không hiện, hoặc phải ép chuyển tab rồi tự chuyển tay về tab cũ sau — đúng cái
+// nhân viên phàn nàn là "mắc công chuyển về tab cũ rất mệt".
+function openStockScanSheet(html) {
+  const overlay = document.getElementById('stockScanSheetOverlay');
+  const body = document.getElementById('stockScanSheetBody');
+  if (!overlay || !body) return;
+  body.innerHTML = html;
+  overlay.style.display = 'flex';
+}
+function closeStockScanSheet() {
+  const overlay = document.getElementById('stockScanSheetOverlay');
+  const body = document.getElementById('stockScanSheetBody');
+  if (overlay) overlay.style.display = 'none';
+  if (body) body.innerHTML = '';
+}
+// Sau khi mở/báo hết xong (hoặc bị chặn giữa chừng), danh sách "Đang dùng" cần cập
+// nhật NẾU đang đứng ở tab Kho — nhưng KHÔNG được tự ý chuyển sang tab đó nếu nhân
+// viên đang ở tab khác (đó chính là hành vi cũ gây khó chịu).
+function _refreshStockUseListIfActive() {
+  const screen = document.getElementById('stockUseScreen');
+  if (screen && screen.classList.contains('active')) {
+    loadOpenContainers().then(renderStockUseList).catch(() => {});
+  }
+}
+
 // [MỚI] KHOÁ "1 NGUYÊN LIỆU = 1 BAO ĐANG MỞ"
 // ------------------------------------------------------------
 // VÌ SAO: gốc rễ thật sự của các vụ "báo hết khi còn 70-100%" không phải do 2 tem cùng
@@ -4262,7 +4292,6 @@ function openConfirmOpenSheet(c) {
   const hanStr = han > 0
     ? (han >= 24 ? Math.round(han / 24) + ' ngày' : han + ' giờ')
     : 'không đặt hạn';
-  const box = document.getElementById('stockUseBody');
   // Dùng STOCK_OPEN_LIST (cache đã tải sẵn cho màn Kho → Đang dùng) chỉ để QUYẾT ĐỊNH HIỂN
   // THỊ sheet nào — cache có thể cũ vài giây nên không dùng làm chốt chặn thật. Chốt chặn
   // thật đọc tươi trong submitOpenContainer() ngay trước khi ghi.
@@ -4274,7 +4303,7 @@ function openConfirmOpenSheet(c) {
     && !(typeof x.unitBase === 'number' && x.unitBase <= 0));
   if (dangMoKhac.length) {
     const ds = dangMoKhac.map(x => x.code || '—').join(', ');
-    box.innerHTML = `
+    openStockScanSheet(`
       <div class="wal-section" style="margin:0 0 14px;background:#fef2f2;border:1.5px solid #fca5a5;border-radius:14px;padding:14px;">
         <div style="font-weight:700;color:#b91c1c;margin-bottom:6px;">🔴 ${escHtmlPos(c.itemName || '')} đang có bao khác mở: ${escHtmlPos(ds)}</div>
         <div style="font-size:12.5px;color:#7f1d1d;line-height:1.6;">Mỗi nguyên liệu chỉ nên có 1 bao đang mở tại một thời điểm. Mở thêm bao mới trong khi bao cũ chưa báo hết là nguyên nhân chính khiến hệ thống tính sai hao hụt lúc báo hết sau này. Báo hết bao đang mở trước nếu được.</div>
@@ -4289,10 +4318,10 @@ function openConfirmOpenSheet(c) {
       </div>
       <div class="wal-section" style="margin:0 0 14px;">${renderPinInput('openCtStaff')}</div>
       <button onclick="submitOpenContainer('${c.id}', true)" style="width:100%;padding:15px;background:#c0392b;color:#fff;border:none;border-radius:14px;font-family:'Google Sans',sans-serif;font-size:15px;font-weight:700;cursor:pointer;">Vẫn mở (đã ghi lý do)</button>
-      <button onclick="openStockUseScreen()" style="width:100%;margin-top:8px;padding:13px;background:none;border:1px solid #ddd;color:#888;border-radius:14px;font-family:'Google Sans',sans-serif;font-size:14px;font-weight:700;cursor:pointer;">Huỷ</button>`;
+      <button onclick="closeStockScanSheet()" style="width:100%;margin-top:8px;padding:13px;background:none;border:1px solid #ddd;color:#888;border-radius:14px;font-family:'Google Sans',sans-serif;font-size:14px;font-weight:700;cursor:pointer;">Huỷ</button>`);
     return;
   }
-  box.innerHTML = `
+  openStockScanSheet(`
     <div class="wal-section" style="margin:0 0 14px;">
       <div class="wal-section-title">Xác nhận khui</div>
       <div style="font-size:20px;font-weight:700;color:var(--td);margin:6px 0 2px;">${c.itemName || ''}</div>
@@ -4303,7 +4332,7 @@ function openConfirmOpenSheet(c) {
     </div>
     <div class="wal-section" style="margin:0 0 14px;">${renderPinInput('openCtStaff')}</div>
     <button onclick="submitOpenContainer('${c.id}', false)" style="width:100%;padding:15px;background:var(--gd);color:#fff;border:none;border-radius:14px;font-family:'Google Sans',sans-serif;font-size:15px;font-weight:700;cursor:pointer;">Xác nhận đã mở</button>
-    <button onclick="openStockUseScreen()" style="width:100%;margin-top:8px;padding:13px;background:none;border:1px solid #ddd;color:#888;border-radius:14px;font-family:'Google Sans',sans-serif;font-size:14px;font-weight:700;cursor:pointer;">Huỷ</button>`;
+    <button onclick="closeStockScanSheet()" style="width:100%;margin-top:8px;padding:13px;background:none;border:1px solid #ddd;color:#888;border-radius:14px;font-family:'Google Sans',sans-serif;font-size:14px;font-weight:700;cursor:pointer;">Huỷ</button>`);
 }
 
 async function submitOpenContainer(id, isOverride) {
@@ -4324,7 +4353,7 @@ async function submitOpenContainer(id, isOverride) {
     const c = doc.data();
     // Đọc lại trạng thái ngay trước khi ghi: hai máy cùng quét một chai thì máy sau phải
     // biết chai đã được mở rồi, chứ không ghi đè ngày mở của máy trước.
-    if (c.status !== 'sealed') { toast('ℹ️ ' + (c.code || '') + ' không còn nguyên seal'); await openStockUseScreen(); return; }
+    if (c.status !== 'sealed') { toast('ℹ️ ' + (c.code || '') + ' không còn nguyên seal'); closeStockScanSheet(); _refreshStockUseListIfActive(); return; }
 
     // [MỚI] Chốt chặn thật của khoá "1 nguyên liệu = 1 bao đang mở" — đọc tươi ngay trước
     // khi ghi (khác với gợi ý hiển thị ở openConfirmOpenSheet() dựa vào cache). Bỏ qua nếu
@@ -4355,7 +4384,8 @@ async function submitOpenContainer(id, isOverride) {
       if (blockingDocs.length) {
         const otherCodes = blockingDocs.map(d => d.data().code || '—').join(', ');
         toast('⛔ ' + (c.itemName || 'Nguyên liệu này') + ' đang có bao mở: ' + otherCodes + ' — báo hết bao đó trước, hoặc quét lại và chọn "Vẫn mở" kèm lý do');
-        await openStockUseScreen();
+        closeStockScanSheet();
+        _refreshStockUseListIfActive();
         return;
       }
     }
@@ -4389,12 +4419,14 @@ async function submitOpenContainer(id, isOverride) {
     }
     if (!claimed) {
       toast('ℹ️ ' + (c.code || '') + ' vừa được mở ở máy khác rồi');
-      await openStockUseScreen();
+      closeStockScanSheet();
+      _refreshStockUseListIfActive();
       return;
     }
     await unitEngineOnOpen(id, c).catch(err => console.warn('[UnitEngine] onOpen lỗi (không chặn mở tem)', err));
     toast('✅ Đã mở ' + (c.code || ''));
-    await openStockUseScreen();
+    closeStockScanSheet();
+    _refreshStockUseListIfActive();
   } catch (err) {
     console.error('submitOpenContainer lỗi', err);
     toast('❌ Không lưu được: ' + (err.message || err));
@@ -4447,11 +4479,12 @@ async function scanToFinishContainerForItem(expectedItemId) {
   if (c.status === 'lost')     { toast('⚠️ ' + c.code + ' đang ở trạng thái "báo mất" — dùng nút "Quét mã hàng tìm lại được" ở Kiểm kê để phục hồi'); return; }
   if (c.status === 'sealed' && !isAtomicUnitContainer(c)) { toast('ℹ️ ' + c.code + ' còn nguyên seal — mở trước đã'); return; }
   if (c.status === 'finished') { toast('ℹ️ ' + c.code + ' đã báo hết trước đó'); return; }
-  // Gọi từ màn Chế biến (#prepBatchScreen), nhưng sheet xác nhận vẽ vào
-  // #stockUseBody — element đó chỉ HIỆN khi #stockUseScreen đang là màn đang
-  // mở. Thiếu dòng này thì sau khi quét xong, sheet xác nhận vẽ ra nhưng nằm
-  // sau một màn khác, coi như không thấy gì xảy ra.
-  showScreen('stockUseScreen');
+  // Gọi từ màn Chế biến (#prepBatchScreen) — openConfirmFinishSheet() vẽ vào sheet nổi
+  // dùng chung (#stockScanSheetOverlay), không phải #stockUseBody nữa, nên KHÔNG cần
+  // chuyển sang màn Kho mới thấy được sheet. TRƯỚC ĐÂY có gọi showScreen('stockUseScreen')
+  // ở đây — đúng là sheet hiện ra được, nhưng đẩy nhân viên rời khỏi màn Chế biến đang
+  // làm dở, quét xong phải tự bấm quay lại — đúng thứ bị phàn nàn là "mắc công chuyển về
+  // tab cũ rất mệt".
   openConfirmFinishSheet(c, true);
 }
 
@@ -4469,8 +4502,7 @@ function startFinishContainer(id) {
 function openConfirmFinishSheet(c, daQuet) {
   const cungLoai = STOCK_OPEN_LIST.filter(x => x.itemId === c.itemId).length;
   const canLyDo = !daQuet && cungLoai > 1;
-  const box = document.getElementById('stockUseBody');
-  box.innerHTML = `
+  openStockScanSheet(`
     <div class="wal-section" style="margin:0 0 14px;">
       <div class="wal-section-title">Xác nhận đã hết</div>
       <div style="font-size:20px;font-weight:700;color:var(--td);margin:6px 0 2px;">${c.itemName || ''}</div>
@@ -4492,7 +4524,7 @@ function openConfirmFinishSheet(c, daQuet) {
     </div>` : ''}
     <div class="wal-section" style="margin:0 0 14px;">${renderPinInput('finishCtStaff')}</div>
     <button onclick="submitFinishContainer('${c.id}', ${daQuet})" style="width:100%;padding:15px;background:var(--gd);color:#fff;border:none;border-radius:14px;font-family:'Google Sans',sans-serif;font-size:15px;font-weight:700;cursor:pointer;">Xác nhận đã hết</button>
-    <button onclick="openStockUseScreen()" style="width:100%;margin-top:8px;padding:13px;background:none;border:1px solid #ddd;color:#888;border-radius:14px;font-family:'Google Sans',sans-serif;font-size:14px;font-weight:700;cursor:pointer;">Huỷ</button>`;
+    <button onclick="closeStockScanSheet()" style="width:100%;margin-top:8px;padding:13px;background:none;border:1px solid #ddd;color:#888;border-radius:14px;font-family:'Google Sans',sans-serif;font-size:14px;font-weight:700;cursor:pointer;">Huỷ</button>`);
 }
 
 // Ngưỡng "báo hết khi còn nhiều": còn hơn 25% dung tích mà đã báo hết thì đánh dấu để Quản lý
@@ -4570,7 +4602,7 @@ async function submitFinishContainer(id, daQuet) {
     // Đơn vị nguyên (cái rời) cho phép chốt thẳng từ 'sealed' (mở+dùng hết gộp
     // một lượt quét) — mọi loại khác vẫn phải qua 'open' trước như cũ.
     if (c.status !== 'open' && !(c.status === 'sealed' && laDonViNguyen)) {
-      toast('ℹ️ ' + (c.code || '') + ' không ở trạng thái đang mở'); await openStockUseScreen(); return;
+      toast('ℹ️ ' + (c.code || '') + ' không ở trạng thái đang mở'); closeStockScanSheet(); _refreshStockUseListIfActive(); return;
     }
 
     // Đơn vị nguyên: không có khái niệm "còn thừa một phần" như chai đo được
@@ -4581,7 +4613,8 @@ async function submitFinishContainer(id, daQuet) {
       await writeAtomicContainerFinish(ref, c, staffEmp, lyDo, daQuet);
       toast('✅ Đã chốt ' + (c.code || ''));
       refreshFifoAlert().catch(() => {}); // gỡ khỏi pill "cần xác nhận đã hết" nếu có
-      await openStockUseScreen();
+      closeStockScanSheet();
+      _refreshStockUseListIfActive();
       return;
     }
 
@@ -25551,6 +25584,18 @@ assistLoadLocalCache();
       <button onclick="phoneClearConfirmProceed()" style="flex:1;padding:14px;background:#e74c3c;color:#fff;border:none;border-radius:14px;font-family:'Google Sans',sans-serif;font-size:15px;font-weight:700;cursor:pointer;">Vẫn xoá</button>
     </div>
   </div>
+</div>
+
+<!-- [MỚI] Sheet xác nhận QUÉT MÃ KHO dùng chung (mở/báo hết container) — nổi trên MỌI
+     tab thay vì phải là tab Kho → Đang dùng mới thấy. Xem openConfirmOpenSheet()/
+     openConfirmFinishSheet() trong JS: trước đây 2 hàm này vẽ thẳng vào #stockUseBody,
+     một element chỉ hiện khi đang đứng ở tab Kho — quét mã từ tab khác (Chế biến,
+     pill FIFO ở tab Order...) thì sheet vẽ ra ở chỗ không ai thấy, hoặc buộc phải tự
+     chuyển tab (mất chỗ đang làm dở, đặc biệt khó chịu giữa lúc Chế biến). Giờ sheet
+     nổi lên trên ngay tại tab đang đứng, quét xong ở lại đúng chỗ đó. -->
+<div id="stockScanSheetOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:flex-end;justify-content:center;"
+     onclick="if(event.target===this)closeStockScanSheet()">
+  <div id="stockScanSheetBody" style="background:#fff;border-radius:24px 24px 0 0;width:100%;max-width:480px;padding:22px 20px 32px;max-height:85vh;overflow-y:auto;box-sizing:border-box;"></div>
 </div>
 
 <!-- Modal chọn món (item_free / item_upsize) -->
