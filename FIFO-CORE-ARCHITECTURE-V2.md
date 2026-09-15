@@ -264,6 +264,40 @@ interface RecipeVersion {
 
 ---
 
+# 10b. TÍCH HỢP KẾT QUẢ CHAIN-TRACE — 4 CHUỖI ĐÃ TRACE TRỌN VẸN
+
+> Nguồn: `FIFO-CHAIN-TRACE-BTP-V1.md`, `FIFO-CHAIN-TRACE-RAW-MATERIAL-V1.md`, `FIFO-CHAIN-TRACE-SALES-COGS-PL-V1.md`, `FIFO-CHAIN-TRACE-STOCK-COUNT-V1.md`. Đây không phải audit "tính năng có tồn tại" — đây là trace **trọn vòng đời dữ liệu** cho 4 chuỗi trung tâm, mỗi mắt xích đều xác nhận đọc/ghi field cụ thể. Các mục dưới là fix bắt buộc bổ sung vào thiết kế trên, không phải patch riêng lẻ.
+
+## 10b.1 GAP NGHIÊM TRỌNG NHẤT — "COGS actual" chưa từng tồn tại trong lịch sử hệ thống
+Unit/tem legacy KHÔNG lưu giá vốn (không có field cost trên container, allocation không trả cost). Biến `cogsActual` trong code cũ thực chất là recipe-theoretical (định mức × giá lịch sử) — không phải giá vốn thật của Unit đã FIFO-allocate. **Không có gì để so sánh phát hiện sai lệch khi công thức khai sai hoặc giá nhập đột biến.**
+
+→ `Unit.costBasis` (đã thiết kế ở §1) **không phải cải tiến tuỳ chọn — nó lấp đúng lỗ hổng chưa từng được giải quyết**. Bổ sung bắt buộc: `packages/read-layer/get-cogs.ts` phải trả **2 con số tách biệt** — `cogsTheoretical` (recipe × cost lịch sử) và `cogsActual` (tổng `costBasis` thật của Unit đã allocate cho bill đó) — và `packages/reporting/variance-report.ts` hiển thị variance giữa 2 con số này làm chỉ số chính.
+
+## 10b.2 Waste traceability — chỉ 1/3 đường ghi đúng, dù kỹ thuật đã có sẵn trong chính codebase
+`_submitDrinkWasteImpl` (legacy) xử lý cả prep lẫn nguyên liệu thô trong CÙNG 1 hàm: nhánh prep gọi `unitEngineAllocateConsumption` (đúng), nhánh nguyên liệu thô gọi thẳng ghi sổ (sai, không allocate). Đây là bằng chứng kỹ thuật đúng đã tồn tại, chỉ chưa áp dụng đồng nhất.
+
+→ Bổ sung invariant cho `RecordWaste` (§3.2 AllocateConsumption): **BẮT BUỘC qua FIFO allocate cho MỌI itemKind (`raw` và `prep` như nhau), không có nhánh code riêng bỏ qua allocation theo domain.**
+
+## 10b.3 Approval actions cũng cần idempotency — không chỉ creation actions
+`ApproveStockCount` legacy không kiểm tra status trước khi apply, không có busy-guard — double-click/2 người duyệt cùng lúc cộng đúp variance. §7 (Idempotency) đã thiết kế cho creation/consumption; bổ sung tường minh: **pattern idempotency áp dụng cho MỌI command bao gồm Approval (`ApproveStockCount`, `ApproveLostContainer`, `ApproveExpense`)**, không riêng các command tạo mutation vật chất.
+
+## 10b.4 `ApproveLostContainer` — xác nhận gap Bug #12 lần thứ 3, độc lập, từ 3 góc audit khác nhau
+FIFO audit (grep function), Alerts audit (không có nút xử lý), và giờ Stock-count chain (route duyệt không tồn tại, khiến container "mất" lặp lại vô hạn mỗi kỳ kiểm kho) — cả 3 đều xác nhận độc lập. Nâng ưu tiên: đây là gap có bằng chứng chắc chắn nhất trong toàn bộ audit, nên là 1 trong những command đầu tiên implement ở Phase 8.
+
+## 10b.5 Không được có 2 nguồn "currentStock" lệch nhau âm thầm
+Chain-trace kiểm kho xác nhận: `thDoiChieu` (báo cáo đối chiếu định kỳ) đọc thẳng `countedBase` đã lưu, không qua `currentStock` — nên "miễn nhiễm" với lỗi ở `applyStockTransaction`, NHƯNG hệ quả là 2 nguồn dữ liệu (`currentStock` vận hành hằng ngày vs. số liệu đối chiếu định kỳ) **lệch nhau mà không ai biết**, vì không có phép so sánh nào nối 2 bên.
+
+→ Bổ sung: `packages/read-layer` phải là nguồn DUY NHẤT cho cả 2 mục đích (vận hành hằng ngày lẫn báo cáo đối chiếu định kỳ) — không được phép có 2 đường tính riêng như legacy dù mỗi đường tự nó "đúng" theo logic riêng.
+
+## 10b.6 Correction hồi tố sau chốt sổ — bằng chứng cụ thể nhất cho nguyên tắc đã thiết kế
+`moLaiThang()` legacy xoá thẳng snapshot P&L, kể cả audit log của hành động mở lại cũng ghi tham số rỗng — số đã công bố cho chủ quán biến mất hoàn toàn, không có cách khôi phục. Đây là ví dụ cụ thể nhất xác nhận tại sao `packages/compaction/correction-rebuild.ts` (Snapshot v1 → correction → rebuild → v2, giữ v1) là bắt buộc, không phải nguyên tắc lý thuyết.
+
+## 10b.7 Bổ sung field mới bắt buộc
+- **`Bill.channel`** (dine-in/to-go/app-{tên sàn}) — first-class field ngay từ thiết kế, để `packages/reporting` tách được lãi/lỗ theo kênh. Dữ liệu tương đương (`isAppSale`, `appFeePct`) đã tồn tại ở legacy nhưng chưa từng chảy tới P&L (hard-code trả về 0) — chỉ cần nối đúng đường ống, không cần thuật toán mới.
+- **Addon/bổ sung sau bill phải trigger lại Loyalty** — `RecordAddonConsumption` phải gọi `ApplyLoyalty` cho đúng phần chênh lệch, tránh lặp lại gap "khách trả thêm tiền nhưng không được cộng thêm điểm".
+
+---
+
 # 11. OPEN QUESTIONS — CẦN CHỦ QUÁN/NGƯỜI DÙNG XÁC NHẬN TRƯỚC KHI IMPLEMENT
 
 1. **FIFO order theo `openedAt` hay `receivedAt`?** → Đề xuất giữ `openedAt` (hành vi production đã chạy), nhưng cần xác nhận không có kỳ vọng nghiệp vụ nào khác.
