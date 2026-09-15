@@ -4355,9 +4355,13 @@ async function _applyFifoNotEmpty(containerId, qty, note, staffEmp, weighLines) 
   })));
 
   // 2) Firestore của chính tem — giữ lại TOÀN BỘ lần "báo chưa hết" trước đó nếu có, không
-  // ghi đè mất lịch sử.
+  // ghi đè mất lịch sử. needsReview:true để việc này TỰ hiện lên màn "Chai & tem kho ▸ Cần
+  // xem lại" bên quanlygieo.html — infra đó vốn có sẵn cho "báo hết khi còn nhiều", giờ dùng
+  // chung cho cả "chưa hết": hệ thống tính sai (dù theo chiều nào) đều đáng để chủ quán nhìn
+  // lại, không chỉ nằm im trong sổ giao dịch chờ ai đó chủ động lật ra đọc.
   await ref.update({
     unitBase: qty,
+    needsReview: true, reviewedAt: null, reviewedBy: '',
     notEmptyChecks: firebase.firestore.FieldValue.arrayUnion({
       at: nowISO, by: staffEmp.fullName, byId: staffEmp.id,
       oldUnitBase: isFinite(oldUnitBase) ? oldUnitBase : null, newUnitBase: qty, note,
