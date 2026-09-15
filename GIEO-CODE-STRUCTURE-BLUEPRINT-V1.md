@@ -274,6 +274,34 @@ gieo/
 │   │       ├── scanner-adapter.ts                 # wrap window.AndroidScanner.scan() — Promise LUÔN resolve, không bao giờ reject, timeout 90s
 │   │       └── native-bridge-adapter.ts           # wrap window.AndroidPrinter/window.AndroidScanner (KHÔNG có "window.Android" trần — đã đính chính qua audit)
 │   │
+│   ├── catalog/                                   # MỚI — Menu, Topping, Packaging. Chi tiết: FEATURE-TREE-V1.md §4.1-4.3, §4.8
+│   │   └── src/
+│   │       ├── menu.ts                            # QUANLY sở hữu duy nhất — chặn bug legacy "2 app cùng ghi RTDB"
+│   │       ├── topping.ts
+│   │       └── packaging/                         # preset/override/rules/bagging — versioned (fix §4.8: đổi packaging KHÔNG được tính lại COGS lịch sử)
+│   │
+│   ├── loyalty/                                    # MỚI — Customer, Loyalty, Voucher, Discount, Auto-promotion. Chi tiết: FEATURE-TREE-V1.md §4.4-4.5
+│   │   └── src/
+│   │       ├── customer.ts
+│   │       ├── loyalty-points.ts                  # points + stamps, retry queue THỐNG NHẤT (fix §4.4 bất đối xứng stamp-free)
+│   │       ├── voucher.ts                          # + discount-code.ts — cần UI tạo (fix §4.5, hiện là nguồn ngoại lai)
+│   │       └── promotion.ts                        # togoSettings (mua-N-tặng-1, giảm theo SL, tặng topping)
+│   │
+│   ├── hr/                                         # MỚI — Employee, Shift check-in/out, Work schedule, Payroll. Chi tiết: FEATURE-TREE-V1.md §4.6
+│   │   └── src/
+│   │       ├── employee.ts
+│   │       ├── shift.ts                            # check-in/out — cấp actorId cho MỌI domain khác
+│   │       └── payroll.ts                          # BẮT BUỘC đọc payTerms đã snapshot theo shift, KHÔNG join employee hiện tại (fix §4.6)
+│   │
+│   ├── finance/                                     # MỚI — Expense, Payment methods, Finance settings, Config versions. Chi tiết: FEATURE-TREE-V1.md §3
+│   │   └── src/
+│   │       ├── expense.ts
+│   │       └── config-version.ts
+│   │
+│   ├── alerts/                                      # MỚI — 16 loại cảnh báo, renderer theo schema. Chi tiết: FEATURE-TREE-V1.md §4.9-4.10
+│   │   └── src/
+│   │       └── alert-types/                         # 1 schema/type, không hard-code khuôn UI chung như legacy
+│   │
 │   └── reporting/
 │       └── src/
 │           ├── revenue-report.ts
@@ -284,8 +312,12 @@ gieo/
 │           ├── usage-report.ts
 │           ├── btp-report.ts
 │           ├── variance-report.ts
+│           ├── customer-report.ts                   # MỚI — RFM-lite (quay lại/thân thiết/nguy cơ rời bỏ)
+│           ├── mix-report.ts                         # MỚI — cơ cấu bán hàng
+│           ├── prep-forecast.ts                      # MỚI — advisory only, KHÔNG tự trigger prep batch (§4.11)
 │           ├── store-comparison-report.ts
-│           └── all-stores-report.ts
+│           ├── all-stores-report.ts
+│           └── export-payload.ts                     # MỚI — đọc TẤT CẢ domain khác, xây SAU CÙNG (§2 mục [9])
 │
 ├── apps/
 │   ├── pos/                                       # THIN CLIENT — build ra bundle nạp trong APK WebView (giữ tương thích bridge)
