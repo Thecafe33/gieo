@@ -284,8 +284,7 @@ gieo/
 │   │   └── src/
 │   │       ├── customer.ts
 │   │       ├── loyalty-points.ts                  # points + stamps, retry queue THỐNG NHẤT (fix §4.4 bất đối xứng stamp-free)
-│   │       ├── voucher.ts                          # + discount-code.ts — cần UI tạo (fix §4.5, hiện là nguồn ngoại lai)
-│   │       └── promotion.ts                        # togoSettings (mua-N-tặng-1, giảm theo SL, tặng topping)
+│   │       └── promotion.ts                        # togoSettings (mua-N-tặng-1, giảm theo SL, tặng topping). KHÔNG có voucher/rewards — đã cắt bỏ (rác 1.0, FEATURE-TREE-V1.md §4.5)
 │   │
 │   ├── hr/                                         # MỚI — Employee, Shift check-in/out, Work schedule, Payroll. Chi tiết: FEATURE-TREE-V1.md §4.6
 │   │   └── src/

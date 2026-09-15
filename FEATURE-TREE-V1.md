@@ -49,8 +49,7 @@ STORE
  │     Customer (gốc nhánh — tra cứu theo SĐT, PHẢI đăng ký tay, không tự tạo)
  │       ├── Loyalty points/stamps      (hard dep: Customer + Bill đã ghi)
  │       ├── Stamp-free redemption       (hard dep: Loyalty stamps đủ + Catalog.giftMenu)
- │       ├── Voucher cá nhân             (hard dep: Customer.myGifts — [NGUỒN NGOÀI, xem §4.5])
- │       ├── Discount code               (độc lập Customer — [NGUỒN NGOÀI, xem §4.5])
+ │       ├── ~~Voucher cá nhân (myGifts) / Discount code (rewards)~~ — CẮT BỎ, xem §4.5
  │       └── Auto-promotion (mua-N-tặng-1/giảm-theo-SL/tặng-topping) (đọc Cart + Catalog, KHÔNG cần Customer trừ freeTopping)
  │
  ├── [5] SHIFT / CASH OPERATIONS ────────────────────── packages/commands/shift
@@ -118,8 +117,8 @@ POS cache 1 lần lúc boot (`.once('value')`, dù comment ghi nhầm là realti
 ### 4.4 Bất đối xứng retry: Loyalty có hàng đợi tự chạy lại, Stamp-free thì KHÔNG
 Cùng là side-effect sau thanh toán, cùng claim chung 1 cổng, nhưng khi lỗi mạng: Loyalty tự phục hồi (hàng đợi localStorage + chạy lại mỗi 3 phút), Stamp-free chỉ báo alert rồi bỏ đó. **Fix:** cả 2 phải dùng chung 1 pattern retry (đúng nguyên tắc idempotency thống nhất đã định ở `FIFO-CORE-ARCHITECTURE-V2.md` §7 — mở rộng pattern đó sang toàn bộ checkout side-effects, không chỉ FIFO).
 
-### 4.5 Voucher/Discount (`rewards`, `customers.myGifts`) — KHÔNG có UI tạo trong cả 2 app
-Dữ liệu tới từ nguồn ngoài phạm vi rebuild (Firebase Console tay hoặc tool thứ 3 chưa biết). Đây là 1 "node ngoại lai" thật sự trong cây tính năng. **Quyết định bắt buộc:** Phase Catalog/Loyalty phải bổ sung UI tạo Voucher/Discount code trong `packages/commands/master/ConfigurePromotion` — không thể mãi để hệ thống mới phụ thuộc vào 1 nguồn dữ liệu không xác định.
+### 4.5 Voucher/Discount (`rewards`, `customers.myGifts`) — QUYẾT ĐỊNH: LOẠI BỎ, không mang sang hệ thống mới
+Dữ liệu tới từ nguồn ngoài phạm vi rebuild (Firebase Console tay hoặc tool thứ 3 chưa biết), không có UI tạo trong cả 2 app — xác nhận là tàn dư hệ thống 1.0, không phải feature đang dùng thật. **Quyết định của chủ hệ thống (không phải suy đoán):** KHÔNG đưa `rewards`/`myGifts`/mã giảm giá nhập tay vào hệ thống mới. `packages/loyalty` chỉ còn Customer + Loyalty points/stamps + Stamp-free + Auto-promotion (`togoSettings`) — không có package/command nào cho Voucher/Discount code. Nếu sau này cần lại, đó là feature MỚI thiết kế từ đầu, không phải migrate dữ liệu `rewards` cũ.
 
 ### 4.6 Payroll — snapshot lương tại thời điểm chấm công bị ghi NHƯNG KHÔNG BAO GIỜ ĐƯỢC ĐỌC LẠI
 Legacy đã cố fix đúng vấn đề "đổi lương giữa tháng làm sai lịch sử" bằng cách snapshot `payTerms` vào `employee_shifts` lúc check-in — nhưng code tính lương thật (`computeActualLaborCostByDate`) vẫn join với bảng nhân viên HIỆN TẠI, bỏ qua snapshot đã ghi. Bug tưởng đã sửa nhưng thực ra chưa. **Đây CHÍNH XÁC là vi phạm invariant #14 (CostBasis lịch sử) đã tìm thấy ở Recipe/Cost — lần thứ 3 phát hiện cùng 1 lớp lỗi (Recipe, Packaging, giờ là Lương) → xác nhận đây là lỗ hổng KIẾN TRÚC hệ thống, không phải lỗi cục bộ.** Fix bắt buộc trong `packages/hr`: mọi tính lương lịch sử phải đọc `payTerms` đã snapshot, không join nhân viên hiện tại.
