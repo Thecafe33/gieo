@@ -5107,22 +5107,29 @@ async function openStockLabelScreen() {
 function renderOpenLabelPendingSection() {
   const list = STOCK_OPEN_LABEL_PENDING;
   if (!list.length) return '';
+  // [PHÂN BIỆT LOẠI TEM] Card riêng, nền/viền màu hổ phách + nhãn "TEM MỞ" — để không lẫn
+  // với "TEM NHẬN HÀNG" ở khối bên dưới. Trước đây hai khối dùng chung khuôn card trắng, tiêu
+  // đề đều bắt đầu bằng "Còn N tem..." nên rất dễ nhầm giữa lúc bận, đặc biệt khi cả hai loại
+  // cùng chờ dán một lúc.
   return `
-    <div class="wal-section" style="margin:0 0 14px;">
-      <div class="wal-section-title">Còn ${list.length} tem mở chưa dán</div>
-      <div style="font-size:11.5px;color:#999;line-height:1.6;">
-        Tem mở sinh ra khi báo mở nguyên liệu dùng thẳng (bao bì gốc bị vứt) — in rồi dán vào
-        đúng dụng cụ đựng, dán xong bấm "Đã dán".
+    <div class="wal-section" style="margin:0 0 14px;background:#fffbeb;border:1.5px solid #fde68a;">
+      <div class="wal-section-title" style="color:#92400e;">
+        <span style="display:inline-flex;align-items:center;padding:3px 10px;background:#f59e0b;color:#fff;border-radius:20px;font-size:10.5px;font-weight:800;letter-spacing:.4px;">🏷 TEM MỞ</span>
+        Còn ${list.length} chưa dán
+      </div>
+      <div style="font-size:11.5px;color:#92400e;line-height:1.6;">
+        Sinh ra khi báo mở nguyên liệu dùng thẳng (bao bì gốc bị vứt) — <b>khác với tem nhận
+        hàng</b> ở khối bên dưới. In rồi dán vào đúng dụng cụ đựng, dán xong bấm "Đã dán".
       </div>
       ${list.map(c => `
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid #f0f0f0;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid #fde68a;">
           <div style="min-width:0;">
-            <div style="font-weight:700;font-size:14px;color:var(--td);letter-spacing:.5px;">${escHtmlPos(c.code || '')}</div>
+            <div style="font-weight:700;font-size:14px;color:#78350f;letter-spacing:.5px;">${escHtmlPos(c.code || '')}</div>
             <div style="font-size:11.5px;color:#a16207;">Tem mở cho ${escHtmlPos(c.itemName || '')} chưa được dán</div>
           </div>
           <div style="display:flex;gap:6px;flex-shrink:0;">
-            <button onclick="printOnePendingOpenLabel('${c.id}')" style="height:40px;padding:0 12px;background:#fff;color:var(--gd);border:1.5px solid var(--gd);border-radius:10px;font-family:'Google Sans',sans-serif;font-size:12.5px;font-weight:700;cursor:pointer;">In</button>
-            <button onclick="markOpenLabelStuck('${c.id}')" style="height:40px;padding:0 12px;background:#f5f5f5;color:#666;border:none;border-radius:10px;font-family:'Google Sans',sans-serif;font-size:12.5px;font-weight:700;cursor:pointer;">Đã dán</button>
+            <button onclick="printOnePendingOpenLabel('${c.id}')" style="height:40px;padding:0 12px;background:#fff;color:#b45309;border:1.5px solid #f59e0b;border-radius:10px;font-family:'Google Sans',sans-serif;font-size:12.5px;font-weight:700;cursor:pointer;">In</button>
+            <button onclick="markOpenLabelStuck('${c.id}')" style="height:40px;padding:0 12px;background:#fff7e6;color:#92400e;border:none;border-radius:10px;font-family:'Google Sans',sans-serif;font-size:12.5px;font-weight:700;cursor:pointer;">Đã dán</button>
           </div>
         </div>`).join('')}
     </div>`;
@@ -5186,7 +5193,10 @@ function renderStockLabelList() {
   box.innerHTML = `
     ${openLabelHtml}
     <div class="wal-section" style="margin:0 0 14px;">
-      <div class="wal-section-title">Còn ${list.length} tem chờ dán</div>
+      <div class="wal-section-title">
+        <span style="display:inline-flex;align-items:center;padding:3px 10px;background:#eee;color:#555;border-radius:20px;font-size:10.5px;font-weight:800;letter-spacing:.4px;">📦 TEM NHẬN HÀNG</span>
+        Còn ${list.length} chưa dán
+      </div>
       <div style="font-size:11.5px;color:#999;line-height:1.6;">
         In rồi dán lên đúng chai/gói/hộp. Dán xong bấm "Đã dán" để mã biến khỏi danh sách này.
         Tem in trượt thì cứ bấm in lại — mã không đổi.
