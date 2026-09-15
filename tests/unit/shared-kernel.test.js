@@ -110,17 +110,27 @@ describe('shared-kernel/operation-state', function () {
 describe('shared-kernel/clock', function () {
   var clockLib = GIEO.require('shared-kernel/clock');
 
+  test('clock CỐ Ý không có businessDate — ngày làm việc là trạng thái, không phải phép tính', function () {
+    var c = clockLib.createClock();
+    assert.strictEqual(c.businessDate, undefined,
+      'clock không được tự suy ra ngày làm việc; nguồn là store-context/business-day');
+  });
+
   test('now() tiêm được — test không phụ thuộc giờ thật', function () {
-    var c = clockLib.createClock({ now: function () { return Date.UTC(2026, 0, 15, 5, 0, 0); } });
-    assert.strictEqual(typeof c.now(), 'number');
-    assert.strictEqual(c.businessDate().length, 10);
+    var fixed = Date.UTC(2026, 0, 15, 5, 0, 0);
+    var c = clockLib.createClock({ now: function () { return fixed; } });
+    assert.strictEqual(c.now(), fixed);
+  });
+
+  test('calendarDate là ngày trên tờ lịch', function () {
+    var c = clockLib.createClock();
+    assert.strictEqual(c.calendarDate(new Date(2026, 2, 10, 2, 30).getTime()), '2026-03-10');
+    assert.strictEqual(c.calendarDate(new Date(2026, 2, 10, 23, 59).getTime()), '2026-03-10');
   });
 
   test('eachDay liệt kê từng ngày — nền của quy tắc V3', function () {
     var c = clockLib.createClock();
-    var from = new Date(2026, 0, 1, 12).getTime();
-    var to = new Date(2026, 0, 5, 12).getTime();
-    var days = c.eachDay(from, to);
+    var days = c.eachDay(new Date(2026, 0, 1, 12).getTime(), new Date(2026, 0, 5, 12).getTime());
     assert.deepStrictEqual(days, ['2026-01-01', '2026-01-02', '2026-01-03', '2026-01-04', '2026-01-05']);
   });
 
@@ -135,20 +145,22 @@ describe('shared-kernel/clock', function () {
     assert.throws(function () { c.eachDay(2000, 1000); }, /to < from/);
   });
 
-  test('dayStartHour đẩy giờ sớm về ngày hôm trước', function () {
-    var c = clockLib.createClock({ dayStartHour: 4 });
-    var earlyMorning = new Date(2026, 2, 10, 2, 30).getTime();
-    assert.strictEqual(c.businessDate(earlyMorning), '2026-03-09');
-    var afternoon = new Date(2026, 2, 10, 14, 0).getTime();
-    assert.strictEqual(c.businessDate(afternoon), '2026-03-10');
-  });
-
-  test('dayStartHour ngoài 0..23 bị từ chối', function () {
-    assert.throws(function () { clockLib.createClock({ dayStartHour: 24 }); }, /0\.\.23/);
-  });
-
-  test('monthKey là khoá chốt sổ tháng', function () {
+  test('monthKey nhận cả dateKey lẫn timestamp', function () {
     var c = clockLib.createClock();
+    assert.strictEqual(c.monthKey('2026-11-20'), '2026-11');
     assert.strictEqual(c.monthKey(new Date(2026, 10, 20, 9).getTime()), '2026-11');
+  });
+
+  test('addDays qua ranh giới tháng', function () {
+    var c = clockLib.createClock();
+    assert.strictEqual(c.addDays('2026-01-31', 1), '2026-02-01');
+    assert.strictEqual(c.addDays('2026-03-01', -1), '2026-02-28');
+  });
+
+  test('isDateKey chặn chuỗi rác', function () {
+    var c = clockLib.createClock();
+    assert.strictEqual(c.isDateKey('2026-01-05'), true);
+    assert.strictEqual(c.isDateKey('5/1/2026'), false);
+    assert.strictEqual(c.isDateKey(null), false);
   });
 });

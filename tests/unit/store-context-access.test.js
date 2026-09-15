@@ -146,13 +146,112 @@ describe('store-context/access', function () {
   });
 });
 
+describe('store-context/business-day', function () {
+  var ids = GIEO.require('shared-kernel/ids');
+  var clockLib = GIEO.require('shared-kernel/clock');
+  var BD = GIEO.require('store-context/business-day');
+
+  var STORE = ids.deterministicId('store', ['main']);
+  var QL = ids.deterministicId('actor', ['ql']);
+  var clock = clockLib.createClock();
+  var T = function (h) { return new Date(2026, 2, 10, h).getTime(); };
+
+  function open(dateKey) {
+    return assertOk(BD.openDay({ storeId: STORE, dateKey: dateKey || '2026-03-10', actorId: QL, at: T(7), clock: clock }));
+  }
+
+  test('mở ngày làm việc theo dateKey do người mở chỉ định', function () {
+    var d = open();
+    assert.strictEqual(d.status, 'OPEN');
+    assert.strictEqual(d.dateKey, '2026-03-10');
+    assert.strictEqual(d.openedBy, QL);
+  });
+
+  test('dateKey sai định dạng bị từ chối', function () {
+    assertErr(BD.openDay({ storeId: STORE, dateKey: '10/03/2026', actorId: QL, at: T(7), clock: clock }), 'VALIDATION');
+  });
+
+  test('chốt ngày cần actor, operationId và thời điểm', function () {
+    var d = open();
+    assertErr(BD.closeDay(d, { actorId: QL, at: T(23) }), 'VALIDATION');
+  });
+
+  test('chốt ngày xong thì khoá — đây là gate chặn bán hàng', function () {
+    var d = open();
+    var closed = assertOk(BD.closeDay(d, { actorId: QL, operationId: ids.deterministicId('operation', ['close', '1']), at: T(23) }));
+    assert.strictEqual(closed.status, 'CLOSED');
+    assertErr(BD.assertOperable(closed, 'tạo bill'), 'PRECONDITION');
+  });
+
+  test('chốt 2 lần bị chặn', function () {
+    var d = open();
+    var op = { actorId: QL, operationId: ids.deterministicId('operation', ['close', '2']), at: T(23) };
+    var closed = assertOk(BD.closeDay(d, op));
+    assertErr(BD.closeDay(closed, op), 'PRECONDITION');
+  });
+
+  test('blockingClose: còn việc chưa xong thì không chốt được, và nêu rõ vì sao', function () {
+    var d = open();
+    var r = BD.closeDay(d, {
+      actorId: QL, operationId: ids.deterministicId('operation', ['close', '3']), at: T(23),
+      blockers: ['checklist refill chưa xong', 'ca của Linh chưa kết']
+    });
+    assertErr(r, 'PRECONDITION');
+    assert.strictEqual(r.error.detail.blockers.length, 2);
+  });
+
+  test('không có tham số nào để bỏ qua blockers', function () {
+    var d = open();
+    var r = BD.closeDay(d, {
+      actorId: QL, operationId: ids.deterministicId('operation', ['close', '4']), at: T(23),
+      blockers: ['x'], force: true, ignoreBlockers: true
+    });
+    assertErr(r, 'PRECONDITION');
+  });
+
+  test('chưa mở ngày thì không thao tác được', function () {
+    assertErr(BD.assertOperable(null, 'tạo bill'), 'PRECONDITION');
+  });
+
+  test('ngày đang mở: tìm được đúng 1', function () {
+    var d = open();
+    assert.strictEqual(assertOk(BD.findOpenDay([d], STORE)).dateKey, '2026-03-10');
+  });
+
+  test('2 ngày cùng mở là CONFLICT, không chọn bừa', function () {
+    assertErr(BD.findOpenDay([open('2026-03-10'), open('2026-03-11')], STORE), 'CONFLICT');
+  });
+
+  test('không có ngày nào mở thì NOT_FOUND', function () {
+    assertErr(BD.findOpenDay([], STORE), 'NOT_FOUND');
+  });
+
+  test('đơn bán lúc 0h30 vẫn thuộc ngày làm việc chưa chốt', function () {
+    var d = open('2026-03-10');
+    /* 0h30 hôm sau theo lịch, nhưng ngày làm việc chưa ai chốt. */
+    assertOk(BD.assertOperable(d, 'tạo bill'));
+    assert.strictEqual(d.dateKey, '2026-03-10',
+      'ngày làm việc không được tự nhảy sang 2026-03-11 chỉ vì đồng hồ qua nửa đêm');
+  });
+});
+
 describe('store-context/context', function () {
   var ids = GIEO.require('shared-kernel/ids');
   var access = GIEO.require('store-context/access');
   var ctxLib = GIEO.require('store-context/context');
+  var clockLib = GIEO.require('shared-kernel/clock');
+  var BD = GIEO.require('store-context/business-day');
 
   var ORG = ids.deterministicId('org', ['gieo']);
   var STORE = ids.deterministicId('store', ['main']);
+  var clock = clockLib.createClock();
+
+  function day(storeId) {
+    return assertOk(BD.openDay({
+      storeId: storeId || STORE, dateKey: '2026-04-07',
+      actorId: ids.deterministicId('actor', ['ql']), at: new Date(2026, 3, 7, 7).getTime(), clock: clock
+    }));
+  }
 
   function posActor() {
     return assertOk(access.createActor({
@@ -161,48 +260,67 @@ describe('store-context/context', function () {
     }));
   }
 
-  test('context bắt buộc có actor — chặn gốc gap "Bill không lưu actor"', function () {
-    assertErr(ctxLib.createContext({ organizationId: ORG, storeId: STORE, source: 'POS' }), 'VALIDATION');
-  });
+  function ctx(extra) {
+    return ctxLib.createContext(Object.assign({
+      organizationId: ORG, storeId: STORE, actor: posActor(), source: 'POS', businessDay: day()
+    }, extra || {}));
+  }
 
-  test('actor.source phải khớp context.source', function () {
+  test('context bắt buộc có actor — chặn gốc gap "Bill không lưu actor"', function () {
     assertErr(ctxLib.createContext({
-      organizationId: ORG, storeId: STORE, actor: posActor(), source: 'QUANLY'
+      organizationId: ORG, storeId: STORE, source: 'POS', businessDay: day()
     }), 'VALIDATION');
   });
 
-  test('auditBase mang đủ trường truy vết (§25)', function () {
-    var ctx = assertOk(ctxLib.createContext({
-      organizationId: ORG, storeId: STORE, actor: posActor(), source: 'POS', deviceId: 'may-quay-1'
+  test('context bắt buộc có businessDay — không suy ra ngày từ đồng hồ', function () {
+    assertErr(ctxLib.createContext({
+      organizationId: ORG, storeId: STORE, actor: posActor(), source: 'POS'
+    }), 'VALIDATION');
+  });
+
+  test('businessDay của store khác bị từ chối', function () {
+    assertErr(ctx({ businessDay: day(ids.deterministicId('store', ['khac'])) }), 'VALIDATION');
+  });
+
+  test('businessDate lấy từ ngày đang mở, không phải từ clock', function () {
+    var c = assertOk(ctx({
+      clock: clockLib.createClock({ now: function () { return new Date(2030, 0, 1).getTime(); } })
     }));
-    var a = ctx.auditBase(ids.deterministicId('operation', ['x']));
+    assert.strictEqual(c.businessDate, '2026-04-07', 'businessDate bị đồng hồ lôi đi');
+  });
+
+  test('actor.source phải khớp context.source', function () {
+    assertErr(ctx({ source: 'QUANLY' }), 'VALIDATION');
+  });
+
+  test('auditBase mang đủ trường truy vết (§25)', function () {
+    var c = assertOk(ctx({ deviceId: 'may-quay-1' }));
+    var a = c.auditBase(ids.deterministicId('operation', ['x']));
     ['operationId', 'actorId', 'source', 'organizationId', 'storeId', 'timestamp', 'businessDate'].forEach(function (k) {
       assert.ok(a[k] !== undefined && a[k] !== null, 'thiếu trường audit: ' + k);
     });
     assert.strictEqual(a.deviceId, 'may-quay-1');
+    assert.strictEqual(a.businessDate, '2026-04-07');
   });
 
   test('ctx.authorize mặc định dùng store của context', function () {
-    var ctx = assertOk(ctxLib.createContext({
-      organizationId: ORG, storeId: STORE, actor: posActor(), source: 'POS'
-    }));
     access.registerCommand('T_CtxSale', { authority: 'EXECUTE', mutates: true, sources: ['POS'] });
-    assertOk(ctx.authorize('T_CtxSale'));
+    assertOk(assertOk(ctx()).authorize('T_CtxSale'));
+  });
+
+  test('ctx.assertOperable chặn khi ngày đã chốt', function () {
+    var closed = assertOk(BD.closeDay(day(), {
+      actorId: ids.deterministicId('actor', ['ql']),
+      operationId: ids.deterministicId('operation', ['close', 'ctx']),
+      at: new Date(2026, 3, 7, 23).getTime()
+    }));
+    var c = assertOk(ctx({ businessDay: closed }));
+    assertErr(c.assertOperable('tạo bill'), 'PRECONDITION');
   });
 
   test('system context dùng cho tiến trình nền (§26)', function () {
-    var ctx = assertOk(ctxLib.createSystemContext({ organizationId: ORG, storeId: STORE }));
-    assert.strictEqual(ctx.source, 'SYSTEM');
-    assert.strictEqual(ctx.actor.role, 'SYSTEM_ADMIN');
-  });
-
-  test('clock tiêm được nên businessDate của context xác định', function () {
-    var clockLib = GIEO.require('shared-kernel/clock');
-    var fixed = new Date(2026, 3, 7, 10).getTime();
-    var ctx = assertOk(ctxLib.createContext({
-      organizationId: ORG, storeId: STORE, actor: posActor(), source: 'POS',
-      clock: clockLib.createClock({ now: function () { return fixed; } })
-    }));
-    assert.strictEqual(ctx.businessDate, '2026-04-07');
+    var c = assertOk(ctxLib.createSystemContext({ organizationId: ORG, storeId: STORE, businessDay: day() }));
+    assert.strictEqual(c.source, 'SYSTEM');
+    assert.strictEqual(c.actor.role, 'SYSTEM_ADMIN');
   });
 });

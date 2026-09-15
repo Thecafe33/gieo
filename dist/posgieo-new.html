@@ -225,83 +225,82 @@
  * Clock — nguồn thời gian DUY NHẤT, tiêm được để test.
  *
  * Invariant T4 (UNIFIED-READ-LAYER-CONTRACT-V1.md §7): cấm `new Date()` rải rác.
- * Lý do thực tế: point-in-time resolve (FIFO-COMPACTION-CONTRACT-V1.md §1 V2/V3)
- * chỉ đúng khi mọi nơi đồng ý "bây giờ là lúc nào" và "hôm nay là ngày nào".
- * Legacy tính businessDate ở nhiều chỗ theo nhiều cách, không test được.
+ *
+ * QUAN TRỌNG — clock KHÔNG quyết định `businessDate`.
+ * Đã xác nhận với chủ quán: ngày làm việc đóng lại bằng thao tác "chốt ngày"
+ * ở QUANLY sau khi kết ca, không phải bằng một mốc giờ cố định. Nên businessDate
+ * là TRẠNG THÁI VẬN HÀNH (xem store-context/business-day), không phải phép tính
+ * từ timestamp. Ở đây chỉ có lịch thuần: hôm nay là ngày mấy trên tờ lịch.
+ *
+ * Trộn 2 khái niệm này là cách sinh ra loại bug "doanh thu nhảy sang ngày khác
+ * lúc 0h dù ca chưa kết" — nên chúng được tách bằng tên gọi, không bằng ghi chú.
  */
 GIEO.define('shared-kernel/clock', [], function () {
   'use strict';
-
-  /**
-   * Ranh giới ngày làm việc.
-   *
-   * [CẦN XÁC NHẬN] Mặc định 0h. Chưa có bằng chứng trong tài liệu audit về việc
-   * quán chốt ngày ở giờ khác (ví dụ bán qua nửa đêm thì doanh thu 1h sáng tính
-   * cho ngày hôm trước). Theo invariant #12 "không đoán legacy semantics khi
-   * ambiguous" — để thành tham số cấu hình thay vì hard-code, và phải hỏi chủ
-   * quán trước khi chạy thật. Đổi giá trị này làm đổi mọi báo cáo theo ngày.
-   */
-  var DEFAULT_DAY_START_HOUR = 0;
 
   function pad(n) { return n < 10 ? '0' + n : String(n); }
 
   function createClock(opts) {
     opts = opts || {};
-    var dayStartHour = opts.dayStartHour === undefined ? DEFAULT_DAY_START_HOUR : opts.dayStartHour;
-    if (typeof dayStartHour !== 'number' || dayStartHour < 0 || dayStartHour > 23) {
-      throw new Error('[clock] dayStartHour phải trong 0..23, nhận: ' + dayStartHour);
-    }
     /* now() tiêm được: test truyền hàm cố định, production dùng Date.now. */
     var nowFn = opts.now || function () { return Date.now(); };
 
     function now() { return nowFn(); }
 
-    /** businessDate dạng 'YYYY-MM-DD' theo giờ địa phương, đã trừ ranh giới ngày. */
-    function businessDate(ts) {
+    /** Ngày trên tờ lịch, 'YYYY-MM-DD'. KHÔNG phải businessDate. */
+    function calendarDate(ts) {
       var d = new Date(ts === undefined ? now() : ts);
-      if (dayStartHour > 0 && d.getHours() < dayStartHour) {
-        d = new Date(d.getTime() - 24 * 3600 * 1000);
-      }
       return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
     }
 
-    /** monthKey dạng 'YYYY-MM' — khoá chốt sổ tháng. */
-    function monthKey(ts) {
-      return businessDate(ts).slice(0, 7);
+    /** 'YYYY-MM' — khoá chốt sổ tháng. */
+    function monthKey(dateKeyOrTs) {
+      if (typeof dateKeyOrTs === 'string') return dateKeyOrTs.slice(0, 7);
+      return calendarDate(dateKeyOrTs).slice(0, 7);
     }
 
     /**
-     * Liệt kê từng ngày trong khoảng — nền của quy tắc V3
+     * Liệt kê từng ngày lịch trong khoảng — nền của quy tắc V3
      * ("resolve TỪNG NGÀY, cấm 1 mốc đại diện cả khoảng").
-     * Có hàm này thì không còn lý do để ai đó resolve 1 lần tại ngày cuối kỳ.
+     * Có sẵn hàm này thì không còn lý do để ai đó resolve 1 lần tại ngày cuối kỳ.
      */
     function eachDay(fromTs, toTs) {
       if (toTs < fromTs) throw new Error('[clock] eachDay: to < from');
       var out = [];
-      var cur = new Date(fromTs);
-      var last = businessDate(toTs);
+      var cur = fromTs;
+      var last = calendarDate(toTs);
       for (var guard = 0; guard < 4000; guard++) {
-        var key = businessDate(cur.getTime());
+        var key = calendarDate(cur);
         out.push(key);
         if (key >= last) return out;
-        cur = new Date(cur.getTime() + 24 * 3600 * 1000);
+        cur += 24 * 3600 * 1000;
       }
       throw new Error('[clock] eachDay: khoảng quá dài (>4000 ngày)');
     }
 
+    /** Cộng/trừ ngày trên chuỗi 'YYYY-MM-DD' mà không đụng timestamp. */
+    function addDays(dateKey, n) {
+      var p = dateKey.split('-');
+      var d = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
+      d.setDate(d.getDate() + n);
+      return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+    }
+
+    function isDateKey(s) {
+      return typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
+    }
+
     return {
       now: now,
-      businessDate: businessDate,
+      calendarDate: calendarDate,
       monthKey: monthKey,
       eachDay: eachDay,
-      dayStartHour: dayStartHour
+      addDays: addDays,
+      isDateKey: isDateKey
     };
   }
 
-  return {
-    createClock: createClock,
-    DEFAULT_DAY_START_HOUR: DEFAULT_DAY_START_HOUR
-  };
+  return { createClock: createClock };
 });
 
 /* ===== src/layers/shared-kernel/ids.js ===== */
@@ -774,6 +773,131 @@ GIEO.define('store-context/access', ['shared-kernel/ids', 'shared-kernel/result'
   };
 });
 
+/* ===== src/layers/store-context/business-day.js ===== */
+/**
+ * BusinessDay — "đang thao tác ở ngày làm việc nào".
+ *
+ * Đã xác nhận với chủ quán: **ngày làm việc đóng lại bằng thao tác "chốt ngày"
+ * ở QUANLY sau khi kết ca**, không phải bằng một mốc giờ cố định. Vì vậy
+ * `businessDate` là TRẠNG THÁI VẬN HÀNH, không phải phép tính từ đồng hồ.
+ *
+ * Hệ quả thiết kế:
+ *   - Không hàm nào được tự suy ra businessDate từ timestamp. Ai cần biết hôm
+ *     nay là ngày làm việc nào thì phải ĐỌC ngày đang mở.
+ *   - Một đơn bán lúc 0h30 vẫn thuộc ngày làm việc chưa chốt, đúng như quán
+ *     thật vận hành.
+ *   - `status='CLOSED'` là gate chặn tạo Bill (FEATURE-TREE-V1.md §2 mục [5]).
+ *
+ * Đây là lý do `clock` chỉ còn `calendarDate()` — ngày trên tờ lịch — và cố ý
+ * không có `businessDate()`.
+ */
+GIEO.define('store-context/business-day', [
+  'shared-kernel/ids',
+  'shared-kernel/result'
+], function (ids, R) {
+  'use strict';
+
+  var STATUS = { OPEN: 'OPEN', CLOSED: 'CLOSED' };
+
+  function businessDayId(storeId, dateKey) {
+    return ids.deterministicId('shift', ['day', storeId, dateKey]);
+  }
+
+  /**
+   * Mở ngày làm việc. `dateKey` do người mở chỉ định (thường là ngày lịch hiện
+   * tại, nhưng không bắt buộc — quán mở muộn sau nửa đêm vẫn mở đúng ngày cũ).
+   */
+  function openDay(spec) {
+    if (!spec) return R.err('VALIDATION', 'openDay cần spec');
+    if (!ids.isId(spec.storeId, 'store')) return R.err('VALIDATION', 'openDay cần storeId hợp lệ');
+    if (!spec.clock || !spec.clock.isDateKey(spec.dateKey)) {
+      return R.err('VALIDATION', 'openDay cần dateKey dạng YYYY-MM-DD');
+    }
+    if (!ids.isId(spec.actorId, 'actor')) return R.err('VALIDATION', 'openDay cần actorId');
+    if (typeof spec.at !== 'number') return R.err('VALIDATION', 'openDay cần thời điểm "at"');
+
+    return R.ok({
+      businessDayId: businessDayId(spec.storeId, spec.dateKey),
+      storeId: spec.storeId,
+      dateKey: spec.dateKey,
+      status: STATUS.OPEN,
+      openedAt: spec.at,
+      openedBy: spec.actorId,
+      closedAt: null,
+      closedBy: null,
+      closeOperationId: null
+    });
+  }
+
+  /**
+   * Chốt ngày. Chỉ QUANLY (nút chốt ngày nằm ở QUANLY — xác nhận trực tiếp).
+   *
+   * `blockers` là các lý do CHẶN đóng ngày do domain khác cung cấp (refill
+   * checklist chưa xong, ca chưa kết...). FEATURE-TREE §2 mục [5] gọi đây là
+   * `blockingClose`. Domain này không tự biết các lý do đó nên nhận vào, nhưng
+   * BẮT BUỘC tôn trọng — không có tham số nào để bỏ qua.
+   */
+  function closeDay(day, spec) {
+    if (!day) return R.err('VALIDATION', 'closeDay cần ngày làm việc');
+    if (day.status === STATUS.CLOSED) {
+      return R.err('PRECONDITION', 'ngày ' + day.dateKey + ' đã chốt lúc ' + day.closedAt);
+    }
+    if (!spec || !ids.isId(spec.actorId, 'actor')) return R.err('VALIDATION', 'closeDay cần actorId');
+    if (!spec.operationId) return R.err('VALIDATION', 'closeDay cần operationId');
+    if (typeof spec.at !== 'number') return R.err('VALIDATION', 'closeDay cần thời điểm "at"');
+
+    var blockers = spec.blockers || [];
+    if (blockers.length) {
+      return R.err('PRECONDITION', 'chưa chốt được ngày ' + day.dateKey + ': ' + blockers.join('; '), {
+        blockers: blockers.slice()
+      });
+    }
+
+    return R.ok(Object.assign({}, day, {
+      status: STATUS.CLOSED,
+      closedAt: spec.at,
+      closedBy: spec.actorId,
+      closeOperationId: spec.operationId
+    }));
+  }
+
+  /**
+   * Gate: ngày đã chốt thì khoá bán (FEATURE-TREE §2 mục [5]).
+   * Mọi command tạo/sửa dữ liệu vận hành phải đi qua đây.
+   */
+  function assertOperable(day, what) {
+    if (!day) {
+      return R.err('PRECONDITION', 'chưa mở ngày làm việc — không thực hiện được ' + (what || 'thao tác'));
+    }
+    if (day.status !== STATUS.OPEN) {
+      return R.err('PRECONDITION',
+        'ngày làm việc ' + day.dateKey + ' đã chốt — không thực hiện được ' + (what || 'thao tác') +
+        '. Muốn sửa số liệu ngày đã chốt phải đi qua correction.');
+    }
+    return R.ok(day);
+  }
+
+  /** Ngày đang mở của 1 store. Nhiều ngày mở cùng lúc là sai trạng thái. */
+  function findOpenDay(days, storeId) {
+    var open = days.filter(function (d) { return d.storeId === storeId && d.status === STATUS.OPEN; });
+    if (open.length === 0) return R.err('NOT_FOUND', 'không có ngày làm việc nào đang mở');
+    if (open.length > 1) {
+      return R.err('CONFLICT', 'có ' + open.length + ' ngày làm việc cùng mở: ' +
+        open.map(function (d) { return d.dateKey; }).join(', ') + ' — phải chốt bớt trước');
+    }
+    return R.ok(open[0]);
+  }
+
+  return {
+    STATUS: STATUS,
+    businessDayId: businessDayId,
+    openDay: openDay,
+    closeDay: closeDay,
+    assertOperable: assertOperable,
+    findOpenDay: findOpenDay
+  };
+});
+
 /* ===== src/layers/store-context/context.js ===== */
 /**
  * StoreContext — "đang thao tác ở store nào, ai thao tác, bằng quyền gì".
@@ -785,13 +909,20 @@ GIEO.define('store-context/access', ['shared-kernel/ids', 'shared-kernel/result'
  * duy nhất trong toàn hệ thống, tức là không trả lời được "ai bán đơn này"
  * (FEATURE-TREE-V1.md §4.7). Bắt buộc actor trong context chặn tận gốc khả năng
  * một mutation đi qua mà không có người chịu trách nhiệm.
+ *
+ * `businessDate` phải được CẤP VÀO, không tự tính từ đồng hồ: đã xác nhận với
+ * chủ quán rằng ngày làm việc đóng bằng thao tác "chốt ngày" ở QUANLY, nên
+ * nguồn sự thật là ngày đang mở (store-context/business-day), không phải giờ
+ * hiện tại. Tự suy ra ngày từ timestamp là cách đẩy doanh thu sang ngày khác
+ * lúc 0h dù ca chưa kết.
  */
 GIEO.define('store-context/context', [
   'shared-kernel/ids',
   'shared-kernel/result',
   'shared-kernel/clock',
-  'store-context/access'
-], function (ids, R, clockLib, access) {
+  'store-context/access',
+  'store-context/business-day'
+], function (ids, R, clockLib, access, businessDay) {
   'use strict';
 
   /**
@@ -799,6 +930,7 @@ GIEO.define('store-context/context', [
    * @param spec.actor        kết quả access.createActor()
    * @param spec.source       POS | QUANLY | SYSTEM
    * @param spec.deviceId, spec.appInstanceId   truy vết máy nào gây ra thao tác
+   * @param spec.businessDay  ngày làm việc ĐANG MỞ (store-context/business-day)
    * @param spec.clock        tiêm được để test; mặc định clock thật
    * @param spec.featureFlags bật/tắt đường mới trong giai đoạn shadow
    */
@@ -814,6 +946,18 @@ GIEO.define('store-context/context', [
       return R.err('VALIDATION', 'actor.source (' + spec.actor.source + ') khác context.source (' + spec.source + ')');
     }
 
+    /* Ngày làm việc là trạng thái vận hành, không phải phép tính. Thiếu nó thì
+       từ chối tạo context — thà hỏng ồn ào còn hơn ghi nhầm ngày cho số liệu. */
+    var day = spec.businessDay;
+    if (!day || !day.dateKey) {
+      return R.err('VALIDATION',
+        'context cần businessDay đang mở — businessDate không được suy ra từ đồng hồ ' +
+        '(ngày làm việc chốt bằng thao tác ở QUANLY)');
+    }
+    if (day.storeId !== spec.storeId) {
+      return R.err('VALIDATION', 'businessDay thuộc store khác với context');
+    }
+
     var clock = spec.clock || clockLib.createClock();
     var flags = spec.featureFlags || {};
 
@@ -825,7 +969,8 @@ GIEO.define('store-context/context', [
       deviceId: spec.deviceId || null,
       appInstanceId: spec.appInstanceId || null,
       clock: clock,
-      businessDate: clock.businessDate(),
+      businessDay: day,
+      businessDate: day.dateKey,
       featureFlags: flags,
 
       /** Cổng quyền cho command layer. Đường DUY NHẤT để hỏi "được làm không". */
@@ -846,9 +991,12 @@ GIEO.define('store-context/context', [
           storeId: spec.storeId,
           deviceId: spec.deviceId || null,
           timestamp: clock.now(),
-          businessDate: clock.businessDate()
+          businessDate: day.dateKey
         };
       },
+
+      /** Gate "ngày đã chốt thì khoá bán" — mọi command vận hành gọi trước khi ghi. */
+      assertOperable: function (what) { return businessDay.assertOperable(day, what); },
 
       flag: function (name) { return !!flags[name]; }
     };
@@ -873,6 +1021,7 @@ GIEO.define('store-context/context', [
       storeId: spec.storeId,
       actor: actorR.value,
       source: 'SYSTEM',
+      businessDay: spec.businessDay,
       clock: spec.clock,
       featureFlags: spec.featureFlags
     });
@@ -1087,10 +1236,10 @@ GIEO.define('compaction/versioned-input', [
       var list = byKey[keyOf(kind, subjectId, storeId)] || [];
       var out = {};
       var cur = fromTs;
-      var lastKey = clock.businessDate(toTs);
+      var lastKey = clock.calendarDate(toTs);
 
       for (var guard = 0; guard < 4000; guard++) {
-        var dateKey = clock.businessDate(cur);
+        var dateKey = clock.calendarDate(cur);
         var r = resolveAt(kind, subjectId, storeId, cur);
         if (R.isErr(r)) return r;
 
@@ -1599,7 +1748,7 @@ GIEO.define('app-pos/main', [
       if (R.isOk(r)) throw new Error('cho phép chạy lại operation đã hoàn tất');
       return r.error.kind;
     });
-    check('businessDate', function () { return c.businessDate(); });
+    check('businessDate', function () { return c.calendarDate(); });
 
     var failed = checks.filter(function (x) { return !x.ok; });
     var mods = GIEO.inventory();

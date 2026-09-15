@@ -154,10 +154,10 @@ GIEO.define('compaction/versioned-input', [
       var list = byKey[keyOf(kind, subjectId, storeId)] || [];
       var out = {};
       var cur = fromTs;
-      var lastKey = clock.businessDate(toTs);
+      var lastKey = clock.calendarDate(toTs);
 
       for (var guard = 0; guard < 4000; guard++) {
-        var dateKey = clock.businessDate(cur);
+        var dateKey = clock.calendarDate(cur);
         var r = resolveAt(kind, subjectId, storeId, cur);
         if (R.isErr(r)) return r;
 

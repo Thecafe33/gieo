@@ -82,7 +82,6 @@ Build order theo `FEATURE-TREE-V1.md` §3:
 
 ### Điểm còn treo, cần chủ quán xác nhận
 
-- **Ranh giới ngày làm việc** (`src/layers/shared-kernel/clock.js`) — đang mặc định 0h. Chưa có bằng chứng trong audit về việc quán chốt ngày ở giờ khác. Đổi giá trị này làm đổi mọi báo cáo theo ngày.
 - `FIFO-CORE-ARCHITECTURE-V2.md` §11 OQ#3 (ưu tiên sửa QUANLY reversal race) và OQ#4 (có cần xem lại snapshot v1 sau khi mở lại sổ) — sẽ hỏi khi tới Phase 6.
 
 ### Đã chốt trong phiên code
@@ -90,4 +89,6 @@ Build order theo `FEATURE-TREE-V1.md` §3:
 - FIFO cấp phát theo `openedAt` (giữ hành vi production nhiều năm)
 - `FINISH_REVIEW_RATIO`: **có** xây — gắn `needsReview` + đẩy Alerts
 - Multi-store: `storeId` có mặt mọi nơi, chỉ 1 giá trị thật, **không** xây `ALL_STORES`
-- Lương cứng (`fixedMonthlySalary`) có mặt trong `PayTerms` nhưng **chưa có công thức trừ theo lịch làm việc** — `FIFO-CHAIN-TRACE-PAYROLL-V1.md` mục 4 nói rõ legacy để ngỏ câu hỏi này và hệ thống mới phải quyết định. Sẽ hỏi trước khi code `ComputePayroll` ở `[6]`.
+- **Ngày làm việc chốt bằng thao tác ở QUANLY sau khi kết ca**, không theo mốc giờ. Nên `businessDate` là trạng thái vận hành (`store-context/business-day`), và `clock` cố ý **không có** `businessDate()` — chỉ có `calendarDate()`. Đơn lúc 0h30 vẫn thuộc ngày chưa chốt.
+- `FINISH_REVIEW_RATIO`: **cấu hình ở QUANLY**, không hard-code — đi qua `VersionedInput` kind `config`
+- Lương cứng: **trừ theo `work_schedule`** — nên Work schedule từ optional thành **bắt buộc** cho payroll `[6]`

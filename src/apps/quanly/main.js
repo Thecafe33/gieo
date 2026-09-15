@@ -36,7 +36,7 @@ GIEO.define('app-quanly/main', [
 
     el.innerHTML =
       '<h1 style="font-size:18px;margin:0 0 4px">GIEO Quản lý</h1>' +
-      '<p style="margin:0 0 16px;color:#666">Scaffold — READ-ONLY. ' + esc(c.businessDate()) + '</p>' +
+      '<p style="margin:0 0 16px;color:#666">Scaffold — READ-ONLY. ' + esc(c.calendarDate()) + '</p>' +
       '<p style="padding:8px 12px;border-radius:6px;background:#e8f5e9">' +
         mods.length + ' module đã nạp, 0 vi phạm import-direction ' +
         '<span style="color:#666">(registry chặn ngay lúc nạp trang)</span></p>' +

@@ -2,81 +2,80 @@
  * Clock — nguồn thời gian DUY NHẤT, tiêm được để test.
  *
  * Invariant T4 (UNIFIED-READ-LAYER-CONTRACT-V1.md §7): cấm `new Date()` rải rác.
- * Lý do thực tế: point-in-time resolve (FIFO-COMPACTION-CONTRACT-V1.md §1 V2/V3)
- * chỉ đúng khi mọi nơi đồng ý "bây giờ là lúc nào" và "hôm nay là ngày nào".
- * Legacy tính businessDate ở nhiều chỗ theo nhiều cách, không test được.
+ *
+ * QUAN TRỌNG — clock KHÔNG quyết định `businessDate`.
+ * Đã xác nhận với chủ quán: ngày làm việc đóng lại bằng thao tác "chốt ngày"
+ * ở QUANLY sau khi kết ca, không phải bằng một mốc giờ cố định. Nên businessDate
+ * là TRẠNG THÁI VẬN HÀNH (xem store-context/business-day), không phải phép tính
+ * từ timestamp. Ở đây chỉ có lịch thuần: hôm nay là ngày mấy trên tờ lịch.
+ *
+ * Trộn 2 khái niệm này là cách sinh ra loại bug "doanh thu nhảy sang ngày khác
+ * lúc 0h dù ca chưa kết" — nên chúng được tách bằng tên gọi, không bằng ghi chú.
  */
 GIEO.define('shared-kernel/clock', [], function () {
   'use strict';
-
-  /**
-   * Ranh giới ngày làm việc.
-   *
-   * [CẦN XÁC NHẬN] Mặc định 0h. Chưa có bằng chứng trong tài liệu audit về việc
-   * quán chốt ngày ở giờ khác (ví dụ bán qua nửa đêm thì doanh thu 1h sáng tính
-   * cho ngày hôm trước). Theo invariant #12 "không đoán legacy semantics khi
-   * ambiguous" — để thành tham số cấu hình thay vì hard-code, và phải hỏi chủ
-   * quán trước khi chạy thật. Đổi giá trị này làm đổi mọi báo cáo theo ngày.
-   */
-  var DEFAULT_DAY_START_HOUR = 0;
 
   function pad(n) { return n < 10 ? '0' + n : String(n); }
 
   function createClock(opts) {
     opts = opts || {};
-    var dayStartHour = opts.dayStartHour === undefined ? DEFAULT_DAY_START_HOUR : opts.dayStartHour;
-    if (typeof dayStartHour !== 'number' || dayStartHour < 0 || dayStartHour > 23) {
-      throw new Error('[clock] dayStartHour phải trong 0..23, nhận: ' + dayStartHour);
-    }
     /* now() tiêm được: test truyền hàm cố định, production dùng Date.now. */
     var nowFn = opts.now || function () { return Date.now(); };
 
     function now() { return nowFn(); }
 
-    /** businessDate dạng 'YYYY-MM-DD' theo giờ địa phương, đã trừ ranh giới ngày. */
-    function businessDate(ts) {
+    /** Ngày trên tờ lịch, 'YYYY-MM-DD'. KHÔNG phải businessDate. */
+    function calendarDate(ts) {
       var d = new Date(ts === undefined ? now() : ts);
-      if (dayStartHour > 0 && d.getHours() < dayStartHour) {
-        d = new Date(d.getTime() - 24 * 3600 * 1000);
-      }
       return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
     }
 
-    /** monthKey dạng 'YYYY-MM' — khoá chốt sổ tháng. */
-    function monthKey(ts) {
-      return businessDate(ts).slice(0, 7);
+    /** 'YYYY-MM' — khoá chốt sổ tháng. */
+    function monthKey(dateKeyOrTs) {
+      if (typeof dateKeyOrTs === 'string') return dateKeyOrTs.slice(0, 7);
+      return calendarDate(dateKeyOrTs).slice(0, 7);
     }
 
     /**
-     * Liệt kê từng ngày trong khoảng — nền của quy tắc V3
+     * Liệt kê từng ngày lịch trong khoảng — nền của quy tắc V3
      * ("resolve TỪNG NGÀY, cấm 1 mốc đại diện cả khoảng").
-     * Có hàm này thì không còn lý do để ai đó resolve 1 lần tại ngày cuối kỳ.
+     * Có sẵn hàm này thì không còn lý do để ai đó resolve 1 lần tại ngày cuối kỳ.
      */
     function eachDay(fromTs, toTs) {
       if (toTs < fromTs) throw new Error('[clock] eachDay: to < from');
       var out = [];
-      var cur = new Date(fromTs);
-      var last = businessDate(toTs);
+      var cur = fromTs;
+      var last = calendarDate(toTs);
       for (var guard = 0; guard < 4000; guard++) {
-        var key = businessDate(cur.getTime());
+        var key = calendarDate(cur);
         out.push(key);
         if (key >= last) return out;
-        cur = new Date(cur.getTime() + 24 * 3600 * 1000);
+        cur += 24 * 3600 * 1000;
       }
       throw new Error('[clock] eachDay: khoảng quá dài (>4000 ngày)');
     }
 
+    /** Cộng/trừ ngày trên chuỗi 'YYYY-MM-DD' mà không đụng timestamp. */
+    function addDays(dateKey, n) {
+      var p = dateKey.split('-');
+      var d = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
+      d.setDate(d.getDate() + n);
+      return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+    }
+
+    function isDateKey(s) {
+      return typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
+    }
+
     return {
       now: now,
-      businessDate: businessDate,
+      calendarDate: calendarDate,
       monthKey: monthKey,
       eachDay: eachDay,
-      dayStartHour: dayStartHour
+      addDays: addDays,
+      isDateKey: isDateKey
     };
   }
 
-  return {
-    createClock: createClock,
-    DEFAULT_DAY_START_HOUR: DEFAULT_DAY_START_HOUR
-  };
+  return { createClock: createClock };
 });

@@ -49,7 +49,7 @@ GIEO.define('app-pos/main', [
       if (R.isOk(r)) throw new Error('cho phép chạy lại operation đã hoàn tất');
       return r.error.kind;
     });
-    check('businessDate', function () { return c.businessDate(); });
+    check('businessDate', function () { return c.calendarDate(); });
 
     var failed = checks.filter(function (x) { return !x.ok; });
     var mods = GIEO.inventory();
