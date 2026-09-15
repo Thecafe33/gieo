@@ -1079,6 +1079,1165 @@ GIEO.define('store-context/store', ['shared-kernel/ids', 'shared-kernel/result']
   };
 });
 
+/* ===== src/layers/fifo-core/allocation.js ===== */
+/**
+ * FIFO allocation engine — §3.1 SelectEligibleUnit, §3.2 AllocateConsumption,
+ * §3.3 HandleDebt, §3.4 OpenUnit.
+ *
+ * Contract: FIFO-CORE-ARCHITECTURE-V2.md.
+ *
+ * Đây là NƠI DUY NHẤT trong hệ thống phân bổ tiêu thụ cho Unit. Legacy có 2
+ * engine song song (POS và QUANLY mỗi bên một bản, QUANLY còn tự cài lại thuật
+ * toán "lô cũ nhất trước" trong submitPrepAdjust) — §9 yêu cầu loại bỏ hoàn toàn.
+ *
+ * Hai điểm đáng chú ý:
+ *
+ * 1. Mỗi allocation MANG THEO giá vốn thật của Unit bị trừ. Đây là thứ làm cho
+ *    "COGS actual" tồn tại được — legacy chưa từng có (§10b.1), vì allocation
+ *    của nó không trả về cost.
+ *
+ * 2. `WorkingSet` giữ trạng thái Unit trong SUỐT một operation. Một bill có 3
+ *    món cùng dùng sữa thì requirement thứ 2 và 3 phải thấy số dư đã bị
+ *    requirement thứ 1 trừ — đọc lại từ kho giữa chừng là đọc số cũ.
+ */
+GIEO.define('fifo-core/allocation', [
+  'shared-kernel/ids',
+  'shared-kernel/result',
+  'fifo-core/unit'
+], function (ids, R, unitLib) {
+  'use strict';
+
+  var S = unitLib.STATUS;
+
+  /**
+   * §3.1 — Unit đủ điều kiện cấp phát, sắp theo `openedAt` TĂNG DẦN.
+   *
+   * Đã chốt với chủ quán: giữ `openedAt`, không đổi sang `receivedAt`. Đó là
+   * hành vi production đã chạy nhiều năm; đổi sẽ làm lệch kết quả FIFO trên
+   * dữ liệu đang tồn và làm shadow-compare ở P12 báo divergence hàng loạt.
+   */
+  function selectEligibleUnits(units, itemId) {
+    return units
+      .filter(function (u) {
+        return u.itemId === itemId &&
+          (u.status === S.OPEN || u.status === S.CONSUMING) &&
+          u.remainingQty > 0;
+      })
+      .sort(function (a, b) {
+        if (a.openedAt !== b.openedAt) return a.openedAt - b.openedAt;
+        /* Cùng thời điểm mở thì sắp theo unitId để kết quả TẤT ĐỊNH — nếu không,
+           thứ tự phụ thuộc thứ tự trả về của kho và test sẽ chập chờn. */
+        return a.unitId < b.unitId ? -1 : a.unitId > b.unitId ? 1 : 0;
+      });
+  }
+
+  /**
+   * Trạng thái Unit trong suốt 1 operation. Mọi requirement của cùng operation
+   * dùng chung 1 WorkingSet.
+   */
+  function createWorkingSet(units) {
+    var byId = Object.create(null);
+    var order = [];
+    units.forEach(function (u) {
+      byId[u.unitId] = Object.assign({}, u);
+      order.push(u.unitId);
+    });
+
+    return {
+      all: function () { return order.map(function (id) { return byId[id]; }); },
+      get: function (unitId) { return byId[unitId] || null; },
+      put: function (u) {
+        if (!byId[u.unitId]) order.push(u.unitId);
+        byId[u.unitId] = u;
+      }
+    };
+  }
+
+  /**
+   * §3.2 — phân bổ tuần tự `min(avail, left)` qua các Unit theo thứ tự FIFO.
+   *
+   * KHÔNG tự ghi gì. Trả về kế hoạch: allocations + trạng thái Unit mới +
+   * phần thiếu. Tầng command quyết định biến nó thành mutation hay không.
+   */
+  function allocateConsumption(workingSet, spec) {
+    if (!spec) return R.err('VALIDATION', 'allocateConsumption cần spec');
+    if (!ids.isId(spec.itemId, 'item')) return R.err('VALIDATION', 'cần itemId hợp lệ');
+    if (typeof spec.qty !== 'number' || !(spec.qty > 0)) {
+      return R.err('VALIDATION', 'qty phải là số dương');
+    }
+    if (!spec.operationId) return R.err('VALIDATION', 'allocateConsumption cần operationId');
+
+    var eligible = selectEligibleUnits(workingSet.all(), spec.itemId);
+    var left = spec.qty;
+    var allocations = [];
+    var touched = [];
+
+    for (var i = 0; i < eligible.length && left > 0; i++) {
+      var u = eligible[i];
+      var take = Math.min(u.remainingQty, left);
+      if (take <= 0) continue;
+
+      var next = Object.assign({}, u, { remainingQty: u.remainingQty - take });
+      if (next.status === S.OPEN) next.status = S.CONSUMING;
+
+      allocations.push({
+        unitId: u.unitId,
+        itemId: u.itemId,
+        qty: take,
+        /* Giá vốn THẬT của chính Unit này — nền của cogsActual (§10b.1). */
+        unitCost: u.costBasis.unitCost,
+        cost: take * u.costBasis.unitCost,
+        costBasisVersionId: u.costBasis.versionId,
+        unitBaseBefore: u.remainingQty,
+        unitBaseAfter: next.remainingQty,
+        operationId: spec.operationId
+      });
+
+      workingSet.put(next);
+      touched.push(next);
+      left -= take;
+    }
+
+    return R.ok({
+      itemId: spec.itemId,
+      requestedQty: spec.qty,
+      allocatedQty: spec.qty - left,
+      /* Phần không có Unit nào gánh được. Tầng trên quyết định ghi nợ hay từ chối. */
+      shortfallQty: left,
+      allocations: allocations,
+      totalCost: allocations.reduce(function (s, a) { return s + a.cost; }, 0),
+      /* Thiếu hàng thì KHÔNG có cost thật cho phần thiếu — nói rõ thay vì để
+         tầng trên tưởng totalCost đã đủ. */
+      costComplete: left === 0,
+      touchedUnits: touched
+    });
+  }
+
+  /**
+   * §3.3 — phần thiếu thành NỢ tường minh trên Unit cuối cùng đã dùng.
+   *
+   * Legacy để remainingQty tụt xuống âm. Ở đây số âm vẫn được giữ (tương thích
+   * công thức toán của `_ueComputeAllocation`) NHƯNG kèm field `debt` để tra
+   * được trực tiếp, phục vụ cả FIFO alert lẫn điều kiện compact.
+   */
+  function handleShortfall(workingSet, plan, spec) {
+    if (plan.shortfallQty <= 0) return R.ok({ plan: plan, debtUnit: null });
+
+    var eligible = workingSet.all().filter(function (u) {
+      return u.itemId === plan.itemId && (u.status === S.OPEN || u.status === S.CONSUMING);
+    }).sort(function (a, b) { return a.openedAt - b.openedAt; });
+
+    var target = eligible[eligible.length - 1];
+    if (!target) {
+      return R.err('PRECONDITION',
+        'không có Unit nào đang mở cho item này để gánh nợ ' + plan.shortfallQty +
+        ' — phải mở Unit mới trước khi tiêu thụ');
+    }
+
+    var withNegative = Object.assign({}, target, {
+      remainingQty: target.remainingQty - plan.shortfallQty
+    });
+    var debtR = unitLib.recordDebt(withNegative, {
+      amount: plan.shortfallQty,
+      at: spec.at,
+      operationId: plan.allocations.length ? plan.allocations[0].operationId : spec.operationId
+    });
+    if (R.isErr(debtR)) return debtR;
+
+    workingSet.put(debtR.value);
+    return R.ok({ plan: plan, debtUnit: debtR.value });
+  }
+
+  /**
+   * §3.4 — mở Unit mới, hấp thụ nợ của mọi Unit đang nợ cùng item.
+   * Giữ nguyên `unitEngineOnOpen` của legacy: newRemainingQty = capacity - totalDebt.
+   *
+   * Fix bắt buộc (Bug #15): bước đóng Unit nợ cũ KHÔNG được `.catch(console.warn)`
+   * nuốt lỗi. Ở đây hàm là thuần nên không có chỗ nuốt — nó trả về danh sách
+   * Unit phải cập nhật, và tầng command có nghĩa vụ ghi HẾT hoặc fail cả cụm.
+   */
+  function openUnitAbsorbingDebt(workingSet, spec) {
+    var unit = spec.unit;
+    if (!unit) return R.err('VALIDATION', 'openUnitAbsorbingDebt cần unit');
+
+    var openR = unitLib.open(unit, spec);
+    if (R.isErr(openR)) return openR;
+    var opened = openR.value;
+
+    var debtors = workingSet.all().filter(function (u) {
+      return u.itemId === opened.itemId && u.debt && !u.debt.absorbedByUnitId;
+    });
+
+    var totalDebt = debtors.reduce(function (s, u) { return s + u.debt.amount; }, 0);
+    var absorbed = [];
+
+    for (var i = 0; i < debtors.length; i++) {
+      var a = unitLib.absorbDebt(debtors[i], { byUnitId: opened.unitId, at: spec.at });
+      if (R.isErr(a)) return a;
+      /* Nợ đã chuyển sang Unit mới thì Unit cũ về 0, không giữ số âm nữa. */
+      var settled = Object.assign({}, a.value, { remainingQty: 0 });
+      workingSet.put(settled);
+      absorbed.push(settled);
+    }
+
+    opened = Object.assign({}, opened, { remainingQty: opened.initialQty - totalDebt });
+    workingSet.put(opened);
+
+    return R.ok({
+      unit: opened,
+      absorbedDebtTotal: totalDebt,
+      absorbedUnits: absorbed,
+      /* Nợ lớn hơn cả hũ mới: mở xong vẫn âm. Phải nói ra, không im lặng. */
+      stillInDebt: opened.remainingQty < 0
+    });
+  }
+
+  /**
+   * Phân bổ nhiều requirement trong CÙNG 1 operation (1 bill nhiều món, 1 mẻ
+   * BTP nhiều nguyên liệu). Dùng chung WorkingSet nên requirement sau luôn thấy
+   * số dư đã bị requirement trước trừ.
+   */
+  function allocateMany(workingSet, requirements, spec) {
+    var plans = [];
+    for (var i = 0; i < requirements.length; i++) {
+      var req = requirements[i];
+      var r = allocateConsumption(workingSet, {
+        itemId: req.itemId,
+        qty: req.qty,
+        operationId: spec.operationId
+      });
+      if (R.isErr(r)) return r;
+      plans.push(Object.assign({}, r.value, { requirementRef: req.ref || null }));
+    }
+    return R.ok({
+      plans: plans,
+      totalCost: plans.reduce(function (s, p) { return s + p.totalCost; }, 0),
+      costComplete: plans.every(function (p) { return p.costComplete; }),
+      shortfalls: plans.filter(function (p) { return p.shortfallQty > 0; })
+    });
+  }
+
+  return {
+    selectEligibleUnits: selectEligibleUnits,
+    createWorkingSet: createWorkingSet,
+    allocateConsumption: allocateConsumption,
+    allocateMany: allocateMany,
+    handleShortfall: handleShortfall,
+    openUnitAbsorbingDebt: openUnitAbsorbingDebt
+  };
+});
+
+/* ===== src/layers/fifo-core/ledger.js ===== */
+/**
+ * StockLedgerEntry — MỘT đường ghi sổ kho duy nhất.
+ *
+ * Contract: FIFO-CORE-ARCHITECTURE-V2.md §3.10, §5, §6.
+ *
+ * Thay thế CẢ `stock_transactions_gieogieo` (POS) LẪN `applyStockTransaction`
+ * (QUANLY). Legacy có 2 app ghi thẳng cùng dữ liệu kho bằng 2 công thức độc lập
+ * (LEGACY-FIFO-AUDIT.md §16.3) — đây là đường ghi duy nhất thay cho cả hai.
+ *
+ * ────────────────────────────────────────────────────────────────────────
+ * `untrackedPendingDelta` — root cause lớn nhất toàn bộ audit
+ * (gốc của bug #1/#11/#14/#17/#18, LEGACY-FIFO-AUDIT.md §16.1)
+ *
+ * Legacy: mỗi hàm TỰ QUYẾT ĐỊNH có cộng field này hay không, theo một danh sách
+ * type cứng (`posgieo.html:13313-13315` chỉ match CONSUMPTION/WASTE khi
+ * !deriveFromUnits). RECEIVING không nằm trong danh sách → Bug #11.
+ *
+ * Ở đây nó KHÔNG phải tham số. Truyền vào là bị TỪ CHỐI. Nó được TÍNH bởi
+ * chính hàm này theo đúng một quy tắc, không có danh sách type nào:
+ *
+ *     có unitId cụ thể  → untrackedPendingDelta = 0        (đã có Unit đại diện)
+ *     không có unitId   → untrackedPendingDelta = qtyDelta (LUÔN LUÔN, mọi type)
+ *
+ * Vì không còn ngoại lệ theo type, một `type` mới thêm vào tương lai KHÔNG THỂ
+ * quên cộng field này. Bug #11 và #14 biến mất vì chúng chỉ còn là trường hợp
+ * riêng của quy tắc chung, không phải nhánh cần vá riêng.
+ * ────────────────────────────────────────────────────────────────────────
+ */
+GIEO.define('fifo-core/ledger', ['shared-kernel/ids', 'shared-kernel/result'], function (ids, R) {
+  'use strict';
+
+  var TYPE = {
+    RECEIVING: 'RECEIVING',
+    CONSUMPTION: 'CONSUMPTION',
+    WASTE: 'WASTE',
+    ADJUSTMENT: 'ADJUSTMENT',
+    TRANSFER: 'TRANSFER',
+    REVERSAL: 'REVERSAL',
+    LOST: 'LOST',
+    FOUND: 'FOUND'
+  };
+
+  var DOMAIN = { raw: 'raw', prep: 'prep' };
+
+  function isType(t) { return Object.prototype.hasOwnProperty.call(TYPE, t); }
+
+  /**
+   * Quy tắc §5, tách riêng thành 1 hàm để chỉ có ĐÚNG MỘT nơi trả lời câu hỏi
+   * này trong toàn hệ thống.
+   */
+  function computeUntrackedPendingDelta(unitId, qtyDelta) {
+    return unitId ? 0 : qtyDelta;
+  }
+
+  /**
+   * @param spec.operationId  bắt buộc (invariant #7)
+   * @param spec.domain       'raw' | 'prep'
+   * @param spec.type         TYPE.*
+   * @param spec.itemId, spec.storeId
+   * @param spec.unitId       null khi không đủ Unit đại diện — xem quy tắc §5
+   * @param spec.qtyDelta     dương = vào kho, âm = ra kho
+   * @param spec.businessDate ngày làm việc (trạng thái vận hành, không phải lịch)
+   * @param spec.actorId
+   */
+  function createEntry(spec) {
+    if (!spec) return R.err('VALIDATION', 'createEntry cần spec');
+
+    /* Chặn ở đây, không phải bằng quy ước: nếu để lọt tham số này thì ta đã tái
+       lập đúng cơ chế đã sinh ra 5 bug của legacy. */
+    if (Object.prototype.hasOwnProperty.call(spec, 'untrackedPendingDelta')) {
+      return R.err('VALIDATION',
+        'untrackedPendingDelta KHÔNG phải tham số — nó được tính bắt buộc theo §5. ' +
+        'Truyền tay chính là cơ chế đã gây bug #1/#11/#14/#17/#18.');
+    }
+
+    if (!spec.operationId) return R.err('VALIDATION', 'ledger entry cần operationId');
+    if (!DOMAIN[spec.domain]) return R.err('VALIDATION', "domain phải là 'raw' hoặc 'prep'");
+    if (!isType(spec.type)) return R.err('VALIDATION', 'type không hợp lệ: ' + spec.type);
+    if (!ids.isId(spec.itemId, 'item')) return R.err('VALIDATION', 'ledger entry cần itemId hợp lệ');
+    if (!ids.isId(spec.storeId, 'store')) return R.err('VALIDATION', 'ledger entry cần storeId hợp lệ');
+    if (typeof spec.qtyDelta !== 'number' || !isFinite(spec.qtyDelta)) {
+      return R.err('VALIDATION', 'qtyDelta phải là số hữu hạn');
+    }
+    if (!spec.businessDate) return R.err('VALIDATION', 'ledger entry cần businessDate');
+    if (!ids.isId(spec.actorId, 'actor')) return R.err('VALIDATION', 'ledger entry cần actorId');
+    if (spec.unitId !== undefined && spec.unitId !== null && !ids.isId(spec.unitId, 'unit')) {
+      return R.err('VALIDATION', 'unitId không hợp lệ');
+    }
+
+    var unitId = spec.unitId || null;
+
+    return R.ok({
+      entryId: spec.entryId || ids.deterministicId('ledger', [
+        spec.operationId, spec.type, spec.itemId, unitId || 'no-unit'
+      ]),
+      operationId: spec.operationId,
+      domain: spec.domain,
+      type: spec.type,
+      itemId: spec.itemId,
+      storeId: spec.storeId,
+      unitId: unitId,
+      qtyDelta: spec.qtyDelta,
+      /* Tính, không nhận. */
+      untrackedPendingDelta: computeUntrackedPendingDelta(unitId, spec.qtyDelta),
+      costBasisVersionId: spec.costBasisVersionId || null,
+      unitCost: typeof spec.unitCost === 'number' ? spec.unitCost : null,
+      businessDate: spec.businessDate,
+      actorId: spec.actorId,
+      occurredAt: typeof spec.occurredAt === 'number' ? spec.occurredAt : null,
+      referenceType: spec.referenceType || null,
+      referenceId: spec.referenceId || null,
+      reason: spec.reason || null
+    });
+  }
+
+  /**
+   * §6 — RECEIVING giữ 2 vế như legacy: RECEIVING(+good+damaged) rồi WASTE(-damaged).
+   *
+   * Legacy có contract kế toán này đúng nhưng bất đối xứng ở chỗ RECEIVING không
+   * cộng untrackedPendingDelta còn WASTE thì có (Bug #11). Ở đây cả 2 vế đi qua
+   * cùng `createEntry` nên tự đối xứng — không cần luật riêng cho receiving.
+   *
+   * Phần hàng không sinh đủ Unit đại diện (vượt trần, số dư lẻ do làm tròn, lỗi
+   * giữa chừng — Bug #14) chảy qua đúng cơ chế untrackedPendingDelta thay vì
+   * "biến mất", vì entry đó đơn giản là không có unitId.
+   */
+  function createReceivingEntries(spec) {
+    var good = spec.goodQty || 0;
+    var damaged = spec.damagedQty || 0;
+    if (good < 0 || damaged < 0) return R.err('VALIDATION', 'goodQty/damagedQty không được âm');
+    if (good + damaged <= 0) return R.err('VALIDATION', 'nhận hàng phải có số lượng > 0');
+
+    var base = {
+      operationId: spec.operationId, domain: spec.domain, itemId: spec.itemId,
+      storeId: spec.storeId, businessDate: spec.businessDate, actorId: spec.actorId,
+      occurredAt: spec.occurredAt, referenceType: 'receipt', referenceId: spec.receiptId,
+      costBasisVersionId: spec.costBasisVersionId, unitCost: spec.unitCost
+    };
+
+    var entries = [];
+    var r = createEntry(Object.assign({}, base, {
+      type: TYPE.RECEIVING,
+      qtyDelta: good + damaged,
+      unitId: spec.receivingUnitId || null
+    }));
+    if (R.isErr(r)) return r;
+    entries.push(r.value);
+
+    if (damaged > 0) {
+      var w = createEntry(Object.assign({}, base, {
+        type: TYPE.WASTE,
+        qtyDelta: -damaged,
+        unitId: spec.damagedUnitId || null,
+        reason: spec.damagedReason || 'hàng hỏng khi nhận'
+      }));
+      if (R.isErr(w)) return w;
+      entries.push(w.value);
+    }
+    return R.ok(entries);
+  }
+
+  /** Tổng untrackedPendingDelta của một tập entry — đầu vào của projection. */
+  function sumUntrackedPendingDelta(entries) {
+    return entries.reduce(function (sum, e) { return sum + e.untrackedPendingDelta; }, 0);
+  }
+
+  /**
+   * Kiểm tra bất biến của một tập entry. Dùng trong test và trong snapshot
+   * verifier — nếu có entry nào lệch quy tắc §5 thì dữ liệu đã hỏng ở đâu đó.
+   */
+  function auditEntries(entries) {
+    var bad = [];
+    entries.forEach(function (e) {
+      var expected = computeUntrackedPendingDelta(e.unitId, e.qtyDelta);
+      if (e.untrackedPendingDelta !== expected) {
+        bad.push({
+          entryId: e.entryId,
+          expected: expected,
+          actual: e.untrackedPendingDelta,
+          reason: e.unitId ? 'có unitId thì phải là 0' : 'không có unitId thì phải bằng qtyDelta'
+        });
+      }
+    });
+    return bad.length ? R.err('VALIDATION', bad.length + ' entry vi phạm quy tắc §5', { bad: bad }) : R.ok(entries.length);
+  }
+
+  return {
+    TYPE: TYPE,
+    DOMAIN: DOMAIN,
+    isType: isType,
+    computeUntrackedPendingDelta: computeUntrackedPendingDelta,
+    createEntry: createEntry,
+    createReceivingEntries: createReceivingEntries,
+    sumUntrackedPendingDelta: sumUntrackedPendingDelta,
+    auditEntries: auditEntries
+  };
+});
+
+/* ===== src/layers/fifo-core/projection.js ===== */
+/**
+ * currentStock — PROJECTION, không phải sự thật vật chất.
+ *
+ * Contract: FIFO-CORE-ARCHITECTURE-V2.md §3.10. Invariant #3 của
+ * GIEO-SYSTEM-REBUILD-PLAN.md §1.2.
+ *
+ * Công thức:
+ *   currentStock = untrackedBase
+ *                + untrackedPendingDelta
+ *                + Σ sealed.initialQty
+ *                + Σ open.remainingQty
+ *
+ * Đây là hàm THUẦN DUY NHẤT được phép trả lời "tồn kho hiện tại là bao nhiêu".
+ * Không package nào được tự tính lại công thức này theo cách riêng — đó chính
+ * là lỗ hổng cấu trúc #3 của legacy (2 app, 2 công thức độc lập, lệch nhau âm
+ * thầm), và §10b.5 (2 nguồn currentStock lệch nhau mà không ai biết vì không
+ * có phép so sánh nào nối 2 bên).
+ *
+ * `untrackedBase` là phần tồn không có Unit đại diện — hàng cũ từ trước khi có
+ * hệ thống tem, hoặc hàng nhập không sinh đủ tem. Nó tồn tại vì thực tế quán
+ * như vậy, không phải vì thiết kế cho phép lỏng lẻo.
+ */
+GIEO.define('fifo-core/projection', [
+  'shared-kernel/result',
+  'fifo-core/unit',
+  'fifo-core/ledger'
+], function (R, unitLib, ledgerLib) {
+  'use strict';
+
+  var S = unitLib.STATUS;
+
+  /* Unit nào được tính vào tồn kho. LOST/VOIDED/PHYSICALLY_FINISHED thì không:
+     hàng mất hoặc đã dùng hết không còn là tồn. */
+  function countsTowardStock(unit) {
+    return unit.status === S.SEALED || unit.status === S.OPEN || unit.status === S.CONSUMING;
+  }
+
+  /**
+   * @param spec.units          Unit của đúng itemId+storeId
+   * @param spec.untrackedBase  tồn không có Unit đại diện
+   * @param spec.ledgerEntries  entry chưa được Unit phản ánh (để lấy pending delta)
+   */
+  function computeCurrentStock(spec) {
+    if (!spec) return R.err('VALIDATION', 'computeCurrentStock cần spec');
+    var units = spec.units || [];
+    var untrackedBase = spec.untrackedBase || 0;
+    if (typeof untrackedBase !== 'number' || !isFinite(untrackedBase)) {
+      return R.err('VALIDATION', 'untrackedBase phải là số hữu hạn');
+    }
+
+    var pending = spec.ledgerEntries
+      ? ledgerLib.sumUntrackedPendingDelta(spec.ledgerEntries)
+      : (typeof spec.untrackedPendingDelta === 'number' ? spec.untrackedPendingDelta : 0);
+
+    var sealedQty = 0;
+    var openQty = 0;
+    for (var i = 0; i < units.length; i++) {
+      var u = units[i];
+      if (!countsTowardStock(u)) continue;
+      /* SEALED tính theo initialQty (chưa mở thì chưa tiêu hao);
+         OPEN/CONSUMING tính theo remainingQty. */
+      if (u.status === S.SEALED) sealedQty += u.initialQty;
+      else openQty += u.remainingQty;
+    }
+
+    return R.ok({
+      currentStock: untrackedBase + pending + sealedQty + openQty,
+      breakdown: {
+        untrackedBase: untrackedBase,
+        untrackedPendingDelta: pending,
+        sealedQty: sealedQty,
+        openQty: openQty
+      }
+    });
+  }
+
+  /**
+   * §10b.5 — phát hiện 2 nguồn lệch nhau.
+   *
+   * Legacy có `thDoiChieu` (đối chiếu định kỳ) đọc thẳng countedBase, "miễn
+   * nhiễm" với lỗi ở applyStockTransaction — nhưng hệ quả là 2 nguồn lệch nhau
+   * mà KHÔNG AI BIẾT, vì không có phép so sánh nào nối 2 bên. Đây là phép so
+   * sánh đó.
+   */
+  function compareWithObserved(projected, observedQty, tolerance) {
+    var tol = typeof tolerance === 'number' ? tolerance : 0;
+    var diff = observedQty - projected;
+    return R.ok({
+      projected: projected,
+      observed: observedQty,
+      difference: diff,
+      withinTolerance: Math.abs(diff) <= tol,
+      /* Không tự sửa gì — chỉ báo. Sửa là việc của PhysicalReconciliation. */
+      needsInvestigation: Math.abs(diff) > tol
+    });
+  }
+
+  /** Unit đang nợ — tra trực tiếp, không suy từ dấu của số lượng (§4). */
+  function unitsInDebt(units) {
+    return units.filter(function (u) { return u.debt && !u.debt.absorbedByUnitId; });
+  }
+
+  /** Unit hệ thống coi là đã hết nhưng chưa ai báo — nguồn của FIFO alert. */
+  function unitsSystemExhausted(units) {
+    return units.filter(function (u) {
+      return (u.status === S.OPEN || u.status === S.CONSUMING) && u.remainingQty <= 0;
+    });
+  }
+
+  return {
+    countsTowardStock: countsTowardStock,
+    computeCurrentStock: computeCurrentStock,
+    compareWithObserved: compareWithObserved,
+    unitsInDebt: unitsInDebt,
+    unitsSystemExhausted: unitsSystemExhausted
+  };
+});
+
+/* ===== src/layers/fifo-core/reconciliation.js ===== */
+/**
+ * §3.7 PhysicalReconciliation, §3.8 ReverseAllocation, §3.9 RebuildUnitState.
+ *
+ * Contract: FIFO-CORE-ARCHITECTURE-V2.md.
+ */
+GIEO.define('fifo-core/reconciliation', [
+  'shared-kernel/ids',
+  'shared-kernel/result',
+  'fifo-core/unit'
+], function (ids, R, unitLib) {
+  'use strict';
+
+  var S = unitLib.STATUS;
+
+  /**
+   * §3.7 — nhân viên cân/đếm thực tế rồi ghi nhận số thật.
+   *
+   * Giữ NGUYÊN TUYỆT ĐỐI nguyên tắc `_applyFifoNotEmpty` của legacy:
+   *
+   *     đọc fresh state → delta = actualQty - remainingQty
+   *                     → remainingQty = actualQty   (GHI ĐÈ TUYỆT ĐỐI)
+   *
+   * Điểm mấu chốt là GHI ĐÈ, không phải cộng/trừ delta vào số đang có trong
+   * cache. Cộng delta vào số cũ là cách sinh ra lỗi cộng đúp khi có 2 lần đọc
+   * xen kẽ. `delta` chỉ để ghi sổ cho biết đã lệch bao nhiêu, không dùng để tính.
+   *
+   * Gap legacy đang đóng: `applyStockTransaction` (QUANLY) ghi thẳng currentStock
+   * bỏ qua Unit Engine, nên điều chỉnh kiểm kê bị lần tính lại kế tiếp xoá âm
+   * thầm. Ở đây chỉ có một đường, và nó đi qua Unit.
+   */
+  function physicalReconciliation(unit, spec) {
+    if (unit.status !== S.OPEN && unit.status !== S.CONSUMING) {
+      return R.err('PRECONDITION', 'chỉ đối chiếu vật lý được Unit đang mở, hiện: ' + unit.status);
+    }
+    if (typeof spec.actualQty !== 'number' || !isFinite(spec.actualQty)) {
+      return R.err('VALIDATION', 'actualQty phải là số hữu hạn');
+    }
+    if (spec.actualQty < 0) return R.err('VALIDATION', 'actualQty không được âm');
+    if (spec.actualQty > unit.initialQty) {
+      return R.err('VALIDATION',
+        'actualQty (' + spec.actualQty + ') vượt dung tích ban đầu (' + unit.initialQty + ')');
+    }
+    if (!ids.isId(spec.actorId, 'actor')) return R.err('VALIDATION', 'cần actorId');
+    if (!spec.operationId) return R.err('VALIDATION', 'cần operationId');
+
+    var before = unit.remainingQty;
+    var delta = spec.actualQty - before;
+
+    var record = {
+      operationId: spec.operationId,
+      at: spec.at,
+      actorId: spec.actorId,
+      before: before,
+      actual: spec.actualQty,
+      delta: delta,
+      method: spec.method || 'weighing',
+      reason: spec.reason || null
+    };
+
+    var patch = {
+      /* Ghi đè tuyệt đối. */
+      remainingQty: spec.actualQty,
+      physicalReconciliations: unit.physicalReconciliations.concat([record]),
+      operationId: spec.operationId
+    };
+
+    if (delta !== 0) {
+      var reasons = unit.needsReviewReasons.slice();
+      if (reasons.indexOf(unitLib.REVIEW.PHYSICAL_RECONCILED) === -1) {
+        reasons.push(unitLib.REVIEW.PHYSICAL_RECONCILED);
+      }
+      patch.needsReview = true;
+      patch.needsReviewReasons = reasons;
+    }
+
+    return R.ok({
+      unit: Object.assign({}, unit, patch),
+      delta: delta,
+      /* Ledger ADJUSTMENT phải dùng số MỚI này, không cộng dồn số cũ. */
+      resultingStock: spec.actualQty,
+      record: record
+    });
+  }
+
+  /**
+   * §3.8 — hoàn tác phân bổ.
+   *
+   * ĐÂY LÀ BÙ TRỪ, KHÔNG PHẢI CHẠY LẠI FIFO.
+   * Hoàn đúng những allocation gốc đã ghi, không tính lại FIFO hiện tại để đoán
+   * xem hồi đó đã trừ ở đâu. Chạy lại FIFO sẽ trả hàng về sai Unit khi đã có
+   * thao tác khác xen vào sau đó.
+   *
+   * `coverage`:
+   *   'full'      — có đủ allocation gốc, hoàn chính xác về từng Unit
+   *   'untracked' — không có allocation gốc (dữ liệu legacy), chỉ hoàn được vào
+   *                 phần untracked. Đánh dấu rõ thay vì đoán bừa (invariant #12).
+   *
+   * Fix Bug #17: đây là điểm gọi DUY NHẤT cho reversal. QUANLY không còn
+   * `qlReverseStockForOrder` cộng thẳng currentStock.
+   */
+  function reverseAllocations(workingSet, spec) {
+    if (!spec || !spec.referenceId) return R.err('VALIDATION', 'reverseAllocations cần referenceId');
+    if (!spec.domain) return R.err('VALIDATION', 'reverseAllocations cần domain');
+    if (!spec.operationId) return R.err('VALIDATION', 'reverseAllocations cần operationId');
+
+    var original = spec.originalAllocations;
+    if (!Array.isArray(original)) {
+      return R.err('VALIDATION', 'reverseAllocations cần originalAllocations (mảng) — ' +
+        'hoàn tác là bù trừ theo phân bổ gốc, không phải chạy lại FIFO');
+    }
+
+    if (original.length === 0) {
+      return R.ok({
+        coverage: 'untracked',
+        reversals: [],
+        touchedUnits: [],
+        /* Nói rõ là không truy được, để tầng trên chuyển sang rà tay thay vì
+           lặng lẽ coi như đã hoàn xong. */
+        untrackedQty: typeof spec.fallbackQty === 'number' ? spec.fallbackQty : 0,
+        needsManualReview: true
+      });
+    }
+
+    var reversals = [];
+    var touched = [];
+
+    for (var i = 0; i < original.length; i++) {
+      var a = original[i];
+      var u = workingSet.get(a.unitId);
+      if (!u) {
+        return R.err('NOT_FOUND', 'không tìm thấy Unit ' + a.unitId + ' để hoàn tác — ' +
+          'không được hoàn sang Unit khác thay thế');
+      }
+      if (u.status === S.COMPACTABLE || u.status === S.VOIDED) {
+        /* Fail-closed: Unit đã ở trạng thái cuối thì không sửa số lượng nữa. */
+        return R.err('PRECONDITION',
+          'Unit ' + a.unitId + ' đã ở trạng thái cuối (' + u.status + '), không hoàn tác được');
+      }
+
+      /* Trả lại bằng delta DƯƠNG, giữ nguyên mọi thao tác xảy ra sau đó. */
+      var next = Object.assign({}, u, { remainingQty: u.remainingQty + a.qty });
+      workingSet.put(next);
+      touched.push(next);
+
+      reversals.push({
+        unitId: a.unitId,
+        itemId: a.itemId,
+        qty: a.qty,
+        unitCost: a.unitCost,
+        cost: -(a.qty * a.unitCost),
+        costBasisVersionId: a.costBasisVersionId,
+        unitBaseBefore: u.remainingQty,
+        unitBaseAfter: next.remainingQty,
+        reversesOperationId: a.operationId,
+        operationId: spec.operationId
+      });
+    }
+
+    return R.ok({
+      coverage: 'full',
+      reversals: reversals,
+      touchedUnits: touched,
+      totalCostReversed: reversals.reduce(function (s, r) { return s + r.cost; }, 0),
+      needsManualReview: false
+    });
+  }
+
+  /**
+   * Khoá hoàn tác cố định — §3.8 giữ nguyên quy ước legacy
+   * `'reversal_' + referenceId + '_' + domain + '_' + itemId`.
+   * Cùng input luôn ra cùng id, nên hoàn 2 lần là no-op chứ không cộng đúp.
+   */
+  function reversalOperationId(referenceId, domain, itemId) {
+    return ids.deterministicId('operation', ['reversal', referenceId, domain, itemId]);
+  }
+
+  /**
+   * §3.9 — dựng lại trạng thái Unit từ ledger. Hoàn toàn mới, legacy không có.
+   *
+   * Dùng cho 3 việc:
+   *   - correction sau compaction (snapshot v1 → correction → rebuild → v2)
+   *   - khôi phục khi phát hiện RT lệch Firestore (legacy chỉ dò/vá từng chỗ)
+   *   - làm nguồn xác thực cho snapshot verifier (FIFO-COMPACTION-CONTRACT §4)
+   */
+  function rebuildUnitState(unit, entries) {
+    var relevant = entries
+      .filter(function (e) { return e.unitId === unit.unitId; })
+      .slice()
+      .sort(function (a, b) {
+        if (a.occurredAt !== null && b.occurredAt !== null && a.occurredAt !== b.occurredAt) {
+          return a.occurredAt - b.occurredAt;
+        }
+        return a.operationId < b.operationId ? -1 : a.operationId > b.operationId ? 1 : 0;
+      });
+
+    var qty = unit.initialQty;
+    var applied = [];
+    for (var i = 0; i < relevant.length; i++) {
+      var e = relevant[i];
+      /* RECEIVING đã nằm trong initialQty, cộng lần nữa là tính đúp. */
+      if (e.type === 'RECEIVING') continue;
+      qty += e.qtyDelta;
+      applied.push({ entryId: e.entryId, type: e.type, qtyDelta: e.qtyDelta, resultingQty: qty });
+    }
+
+    return R.ok({
+      unitId: unit.unitId,
+      rebuiltRemainingQty: qty,
+      storedRemainingQty: unit.remainingQty,
+      matches: qty === unit.remainingQty,
+      drift: unit.remainingQty - qty,
+      appliedEntries: applied
+    });
+  }
+
+  /**
+   * So sánh trạng thái đã lưu với trạng thái dựng lại, cho nhiều Unit.
+   * Đây là phép kiểm tra mà legacy không có, nên lệch RT/Firestore chỉ được
+   * phát hiện khi có người tình cờ nhìn thấy.
+   */
+  function detectDrift(units, entries) {
+    var drifted = [];
+    for (var i = 0; i < units.length; i++) {
+      var r = rebuildUnitState(units[i], entries);
+      if (R.isErr(r)) return r;
+      if (!r.value.matches) drifted.push(r.value);
+    }
+    return R.ok({ checked: units.length, drifted: drifted, clean: drifted.length === 0 });
+  }
+
+  return {
+    physicalReconciliation: physicalReconciliation,
+    reverseAllocations: reverseAllocations,
+    reversalOperationId: reversalOperationId,
+    rebuildUnitState: rebuildUnitState,
+    detectDrift: detectDrift
+  };
+});
+
+/* ===== src/layers/fifo-core/unit.js ===== */
+/**
+ * Unit — PHYSICAL TRUTH của hệ thống.
+ *
+ * Contract: FIFO-CORE-ARCHITECTURE-V2.md §1 (data model), §2 (lifecycle), §4 (debt).
+ *
+ * Invariant #3: `currentStock` là PROJECTION, Unit mới là sự thật vật chất.
+ * Không ai được sửa Unit ngoài fifo-core.
+ *
+ * Bốn quyết định khác legacy, mỗi cái đóng một lớp bug cụ thể:
+ *
+ * 1. `costBasis` gắn thẳng trên Unit lúc nhận hàng. Legacy KHÔNG lưu giá trên
+ *    container nên phải tính lại qua PRICE_HISTORY mỗi lần cần — gốc của vi phạm
+ *    invariant #14 lan sang cả BTP lẫn recipe. Quan trọng hơn: không có giá trên
+ *    Unit thì "COGS actual" KHÔNG THỂ tồn tại, và đúng là nó chưa từng tồn tại
+ *    (§10b.1 — `cogsActual` của legacy thực chất là theoretical bị đặt tên sai).
+ *
+ * 2. `initialQty` bất biến, tách khỏi `remainingQty`. Legacy dùng baseQty/unitBase
+ *    nhưng không có ràng buộc nào chặn ghi nhầm vào baseQty.
+ *
+ * 3. `debt` là field tường minh, không phải remainingQty âm ẩn (§4). Tra được
+ *    "unit nào đang nợ" mà không phải kiểm tra dấu.
+ *
+ * 4. `systemExhaustedAt` được LƯU. Legacy chỉ suy diễn tạm thời mỗi lần load nên
+ *    không trả lời được "hệ thống phát hiện hết lúc nào" trong lịch sử.
+ */
+GIEO.define('fifo-core/unit', ['shared-kernel/ids', 'shared-kernel/result'], function (ids, R) {
+  'use strict';
+
+  /* Trạng thái được LƯU. SYSTEM_EXHAUSTED cố ý không có ở đây — nó là suy diễn,
+     không phải hành động (§3.6), nên chỉ ghi systemExhaustedAt. */
+  var STATUS = {
+    RECEIVED: 'RECEIVED',
+    SEALED: 'SEALED',
+    OPEN: 'OPEN',
+    CONSUMING: 'CONSUMING',
+    PHYSICALLY_FINISHED: 'PHYSICALLY_FINISHED',
+    COMPACTABLE: 'COMPACTABLE',
+    LOST: 'LOST',
+    VOIDED: 'VOIDED'
+  };
+
+  var TRANSITIONS = {
+    RECEIVED: ['SEALED', 'VOIDED'],
+    SEALED: ['OPEN', 'LOST', 'VOIDED'],
+    OPEN: ['CONSUMING', 'PHYSICALLY_FINISHED', 'LOST', 'VOIDED'],
+    CONSUMING: ['PHYSICALLY_FINISHED', 'LOST', 'VOIDED'],
+    PHYSICALLY_FINISHED: ['COMPACTABLE', 'VOIDED'],
+    /* LOST quay về được: RestoreFoundContainer (§8). */
+    LOST: ['SEALED', 'OPEN', 'CONSUMING', 'VOIDED'],
+    COMPACTABLE: [],
+    VOIDED: []
+  };
+
+  var ITEM_KIND = { raw: 'raw', prep: 'prep' };
+
+  var REVIEW = {
+    FINISHED_WITH_REMAINDER: 'FINISHED_WITH_REMAINDER',
+    NEGATIVE_REMAINDER: 'NEGATIVE_REMAINDER',
+    RESTORED_FROM_LOST: 'RESTORED_FROM_LOST',
+    PHYSICAL_RECONCILED: 'PHYSICAL_RECONCILED'
+  };
+
+  function isStatus(s) { return Object.prototype.hasOwnProperty.call(STATUS, s); }
+
+  function canTransition(from, to) {
+    return isStatus(from) && isStatus(to) && TRANSITIONS[from].indexOf(to) !== -1;
+  }
+
+  function addReview(unit, reason) {
+    var reasons = unit.needsReviewReasons.slice();
+    if (reasons.indexOf(reason) === -1) reasons.push(reason);
+    return { needsReview: true, needsReviewReasons: reasons };
+  }
+
+  /**
+   * Tạo Unit lúc nhận hàng.
+   * `costBasis` BẮT BUỘC — không có đường nào tạo Unit mà thiếu giá vốn, vì
+   * thiếu nó là tái lập đúng gap §10b.1.
+   */
+  function createUnit(spec) {
+    if (!spec) return R.err('VALIDATION', 'createUnit cần spec');
+    if (!ids.isId(spec.itemId, 'item')) return R.err('VALIDATION', 'createUnit cần itemId hợp lệ');
+    if (!ids.isId(spec.storeId, 'store')) return R.err('VALIDATION', 'createUnit cần storeId hợp lệ');
+    if (!ITEM_KIND[spec.itemKind]) return R.err('VALIDATION', "itemKind phải là 'raw' hoặc 'prep'");
+    if (typeof spec.initialQty !== 'number' || !(spec.initialQty > 0)) {
+      return R.err('VALIDATION', 'initialQty phải là số dương');
+    }
+    if (!spec.costBasis || typeof spec.costBasis.unitCost !== 'number') {
+      return R.err('VALIDATION',
+        'createUnit cần costBasis.unitCost — Unit không có giá vốn thì COGS actual không thể tồn tại (§10b.1)');
+    }
+    if (!spec.operationId) return R.err('VALIDATION', 'createUnit cần operationId (invariant #7)');
+
+    return R.ok({
+      unitId: spec.unitId || ids.newId('unit'),
+      itemId: spec.itemId,
+      storeId: spec.storeId,
+      itemKind: spec.itemKind,
+
+      receiptId: spec.receiptId || null,
+      supplierId: spec.supplierId || null,
+      receivedAt: spec.receivedAt || null,
+      receivedBy: spec.receivedBy || null,
+
+      /* BẤT BIẾN sau khi set. */
+      initialQty: spec.initialQty,
+      remainingQty: spec.initialQty,
+      costBasis: {
+        unitCost: spec.costBasis.unitCost,
+        currency: spec.costBasis.currency || 'VND',
+        /* versionId của CostBasis đã dùng — V4 của cơ chế versioning chung. */
+        versionId: spec.costBasis.versionId || null,
+        source: spec.costBasis.source || 'RECEIVING'
+      },
+
+      status: spec.status === STATUS.RECEIVED ? STATUS.RECEIVED : STATUS.SEALED,
+      openedAt: null,
+      openedBy: null,
+      systemExhaustedAt: null,
+      finishedAt: null,
+      finishedBy: null,
+      finishReason: null,
+      wasteQty: 0,
+
+      debt: null,
+      lostAt: null, lostBy: null, lostReportId: null,
+      foundAt: null, foundBy: null,
+
+      needsReview: false,
+      needsReviewReasons: [],
+      physicalReconciliations: [],
+
+      operationId: spec.operationId
+    });
+  }
+
+  /**
+   * Mở Unit. `openedAt` là khoá sắp xếp FIFO (§3.1) — đã chốt với chủ quán giữ
+   * `openedAt` chứ không đổi sang `receivedAt`, vì đó là hành vi production đã
+   * chạy nhiều năm và đổi sẽ làm lệch kết quả FIFO trên dữ liệu đang tồn.
+   */
+  function open(unit, spec) {
+    if (!canTransition(unit.status, STATUS.OPEN)) {
+      return R.err('PRECONDITION', 'không mở được Unit ở trạng thái ' + unit.status);
+    }
+    if (typeof spec.at !== 'number') return R.err('VALIDATION', 'open cần thời điểm "at"');
+    if (!ids.isId(spec.actorId, 'actor')) return R.err('VALIDATION', 'open cần actorId');
+    if (!spec.operationId) return R.err('VALIDATION', 'open cần operationId');
+
+    return R.ok(Object.assign({}, unit, {
+      status: STATUS.OPEN,
+      openedAt: spec.at,
+      openedBy: spec.actorId,
+      operationId: spec.operationId
+    }));
+  }
+
+  /** OPEN -> CONSUMING: đã có allocation đầu tiên. Legacy gộp 2 state này. */
+  function markConsuming(unit) {
+    if (unit.status === STATUS.CONSUMING) return R.ok(unit);
+    if (!canTransition(unit.status, STATUS.CONSUMING)) {
+      return R.err('PRECONDITION', 'không chuyển sang CONSUMING từ ' + unit.status);
+    }
+    return R.ok(Object.assign({}, unit, { status: STATUS.CONSUMING }));
+  }
+
+  /**
+   * §3.6 — hệ thống phát hiện hết: CHỈ ghi `systemExhaustedAt`, KHÔNG đổi status.
+   * Đây là suy diễn, không phải hành động của người. Ghi lại để có audit trail
+   * mà vẫn giữ đúng nguyên tắc.
+   */
+  function markSystemExhausted(unit, at) {
+    if (unit.status !== STATUS.OPEN && unit.status !== STATUS.CONSUMING) return R.ok(unit);
+    if (unit.remainingQty > 0) return R.ok(unit);
+    if (unit.systemExhaustedAt !== null) return R.ok(unit);
+    return R.ok(Object.assign({}, unit, { systemExhaustedAt: at }));
+  }
+
+  /**
+   * Nhân viên báo hết hũ (§3.5).
+   *
+   * Giữ nguyên 2 quyết định đúng của legacy:
+   *   - `waste = max(0, remainingQty)` — còn dư thì đó là hao hụt
+   *   - remainingQty < 0 là NỢ, KHÔNG phải hao hụt, nên không tạo WASTE
+   *   - không đọc `systemExhaustedAt` để quyết định cho phép: nhân viên được báo
+   *     hết bất kỳ lúc nào miễn status hợp lệ (§2)
+   *
+   * Mới: cờ `needsReview` khi báo hết lúc còn nhiều.
+   * Ngưỡng do QUANLY cấu hình (xác nhận trực tiếp với chủ quán), truyền vào qua
+   * `spec.finishReviewRatio`. fifo-core cố ý KHÔNG tự đọc config — nó là domain
+   * thuần, không được import compaction; tầng command resolve config rồi truyền
+   * xuống. Không truyền thì không gắn cờ, chứ không tự bịa ngưỡng mặc định.
+   */
+  function finish(unit, spec) {
+    if (!canTransition(unit.status, STATUS.PHYSICALLY_FINISHED)) {
+      return R.err('PRECONDITION', 'không báo hết được Unit ở trạng thái ' + unit.status);
+    }
+    if (typeof spec.at !== 'number') return R.err('VALIDATION', 'finish cần thời điểm "at"');
+    if (!ids.isId(spec.actorId, 'actor')) return R.err('VALIDATION', 'finish cần actorId');
+    if (!spec.operationId) return R.err('VALIDATION', 'finish cần operationId');
+
+    var remaining = unit.remainingQty;
+    var waste = Math.max(0, remaining);
+    var patch = {
+      status: STATUS.PHYSICALLY_FINISHED,
+      finishedAt: spec.at,
+      finishedBy: spec.actorId,
+      finishReason: spec.reason || null,
+      wasteQty: waste,
+      remainingQty: 0,
+      operationId: spec.operationId
+    };
+
+    var review = null;
+    if (remaining < 0) {
+      /* Nợ, không phải hao hụt — vẫn cần người nhìn lại. */
+      review = addReview(unit, REVIEW.NEGATIVE_REMAINDER);
+    } else if (typeof spec.finishReviewRatio === 'number' && unit.initialQty > 0) {
+      if (remaining / unit.initialQty > spec.finishReviewRatio) {
+        review = addReview(unit, REVIEW.FINISHED_WITH_REMAINDER);
+      }
+    }
+    if (review) Object.assign(patch, review);
+
+    return R.ok({
+      unit: Object.assign({}, unit, patch),
+      wasteQty: waste,
+      /* Nợ được báo riêng để tầng trên cảnh báo, KHÔNG biến thành WASTE. */
+      debtQty: remaining < 0 ? -remaining : 0,
+      flaggedForReview: !!review
+    });
+  }
+
+  /** §4 — nợ là field tường minh, không phải số âm ẩn. */
+  function recordDebt(unit, spec) {
+    if (typeof spec.amount !== 'number' || !(spec.amount > 0)) {
+      return R.err('VALIDATION', 'debt.amount phải dương — nợ luôn ghi bằng số dương');
+    }
+    return R.ok(Object.assign({}, unit, {
+      debt: {
+        amount: spec.amount,
+        incurredAt: spec.at,
+        incurredByOperationId: spec.operationId,
+        absorbedByUnitId: null,
+        absorbedAt: null
+      }
+    }));
+  }
+
+  function absorbDebt(unit, spec) {
+    if (!unit.debt) return R.err('PRECONDITION', 'Unit không có nợ để hấp thụ');
+    if (unit.debt.absorbedByUnitId) return R.err('PRECONDITION', 'nợ đã được hấp thụ rồi');
+    if (!ids.isId(spec.byUnitId, 'unit')) return R.err('VALIDATION', 'absorbDebt cần byUnitId hợp lệ');
+    return R.ok(Object.assign({}, unit, {
+      debt: Object.assign({}, unit.debt, {
+        absorbedByUnitId: spec.byUnitId,
+        absorbedAt: spec.at
+      })
+    }));
+  }
+
+  function markLost(unit, spec) {
+    if (!canTransition(unit.status, STATUS.LOST)) {
+      return R.err('PRECONDITION', 'không đánh dấu mất được Unit ở trạng thái ' + unit.status);
+    }
+    if (!ids.isId(spec.actorId, 'actor')) return R.err('VALIDATION', 'markLost cần actorId');
+    if (!spec.operationId) return R.err('VALIDATION', 'markLost cần operationId');
+    return R.ok(Object.assign({}, unit, {
+      status: STATUS.LOST,
+      lostAt: spec.at,
+      lostBy: spec.actorId,
+      lostReportId: spec.lostReportId || null,
+      /* Nhớ trạng thái trước khi mất để khôi phục đúng chỗ. */
+      statusBeforeLost: unit.status,
+      operationId: spec.operationId
+    }));
+  }
+
+  /**
+   * §8 — khôi phục container tìm lại được.
+   * Giữ nguyên quyết định nghiệp vụ của legacy: unit "mới nguyên", KHÔNG suy
+   * luận lại phần đã dùng trước khi mất. Nhưng gắn cờ cần rà, vì quãng thời
+   * gian nó biến mất là quãng không ai biết chuyện gì đã xảy ra.
+   */
+  function restoreFound(unit, spec) {
+    if (unit.status !== STATUS.LOST) return R.err('PRECONDITION', 'Unit không ở trạng thái LOST');
+    if (!ids.isId(spec.actorId, 'actor')) return R.err('VALIDATION', 'restoreFound cần actorId');
+    if (!spec.operationId) return R.err('VALIDATION', 'restoreFound cần operationId');
+
+    var back = unit.statusBeforeLost || STATUS.SEALED;
+    if (!canTransition(STATUS.LOST, back)) back = STATUS.SEALED;
+    var review = addReview(unit, REVIEW.RESTORED_FROM_LOST);
+
+    return R.ok(Object.assign({}, unit, {
+      status: back,
+      foundAt: spec.at,
+      foundBy: spec.actorId,
+      operationId: spec.operationId
+    }, review));
+  }
+
+  /**
+   * Trạng thái HIỂN THỊ, gộp cả phần suy diễn.
+   * Dùng cho UI/alert; state máy vẫn là `unit.status`.
+   */
+  function effectiveState(unit) {
+    if (unit.debt && !unit.debt.absorbedByUnitId) return 'DEBT';
+    if ((unit.status === STATUS.OPEN || unit.status === STATUS.CONSUMING) && unit.remainingQty <= 0) {
+      return 'SYSTEM_EXHAUSTED';
+    }
+    return unit.status;
+  }
+
+  /**
+   * Điều kiện CẦN để compact (FIFO-COMPACTION-CONTRACT-V1.md §2.2).
+   * Trả về danh sách lý do CHẶN thay vì true/false, để chỗ gọi nói được vì sao.
+   */
+  function compactBlockers(unit) {
+    var blockers = [];
+    if (unit.status !== STATUS.PHYSICALLY_FINISHED && unit.status !== STATUS.VOIDED) {
+      blockers.push('chưa kết thúc vòng đời (đang ' + unit.status + ')');
+    }
+    if (unit.debt && !unit.debt.absorbedByUnitId) {
+      blockers.push('còn nợ ' + unit.debt.amount + ' chưa được hấp thụ');
+    }
+    if (unit.needsReview) {
+      blockers.push('còn cờ cần rà: ' + unit.needsReviewReasons.join(', '));
+    }
+    return blockers;
+  }
+
+  return {
+    STATUS: STATUS,
+    TRANSITIONS: TRANSITIONS,
+    ITEM_KIND: ITEM_KIND,
+    REVIEW: REVIEW,
+    isStatus: isStatus,
+    canTransition: canTransition,
+    createUnit: createUnit,
+    open: open,
+    markConsuming: markConsuming,
+    markSystemExhausted: markSystemExhausted,
+    finish: finish,
+    recordDebt: recordDebt,
+    absorbDebt: absorbDebt,
+    markLost: markLost,
+    restoreFound: restoreFound,
+    effectiveState: effectiveState,
+    compactBlockers: compactBlockers
+  };
+});
+
 /* ===== src/layers/compaction/versioned-input.js ===== */
 /**
  * VersionedInput — CƠ CHẾ VERSIONING DÙNG CHUNG.
