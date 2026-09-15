@@ -266,12 +266,13 @@ gieo/
 │   │       ├── configuration/                     # UpdateFinancePolicy, UpdateRefillPolicy...
 │   │       └── reporting/                         # BuildStoreReport, ReconcileInventory, ReconcilePrep...
 │   │
-│   ├── protected-adapters/                        # KHÔNG rewrite semantics — chỉ wrap infra cũ (mục 14 Handoff)
+│   ├── protected-adapters/                        # KHÔNG rewrite semantics — chỉ wrap infra cũ. Chi tiết đầy đủ: PROTECTED-INFRASTRUCTURE-ADAPTER-CONTRACT-V1.md
 │   │   └── src/
-│   │       ├── bank-payment-adapter.ts            # wrap genBankOrderId(), VietQR, RTDB bank_confirmations/{orderId} — bankOrderId ≠ operationId
-│   │       ├── printer-adapter.ts                 # wrap window.AndroidPrinter hiện có (đã xác nhận tồn tại trong posgieo.html)
-│   │       ├── scanner-adapter.ts                 # wrap barcode scanner APK — KHÔNG thay bằng web camera
-│   │       └── native-bridge-adapter.ts           # wrap window.Android bridge
+│   │       ├── bank-payment-adapter.ts            # wrap genBankOrderId(), VietQR, RTDB bank_confirmations/{orderId} one-shot — bankOrderId ≠ operationId
+│   │       ├── bill-printer-adapter.ts            # Bluetooth (XprinterBillBridgeEngine), queue TỰ PHỤC HỒI sau lỗi (fix bug legacy: queue cũ bị "đầu độc" vĩnh viễn sau 1 lần in lỗi)
+│   │       ├── label-printer-adapter.ts           # LAN/TCP (AndroidPrinter.printRawBytes — đường DUY NHẤT), encode TSPL/ESC-POS, reconnect 3 lớp
+│   │       ├── scanner-adapter.ts                 # wrap window.AndroidScanner.scan() — Promise LUÔN resolve, không bao giờ reject, timeout 90s
+│   │       └── native-bridge-adapter.ts           # wrap window.AndroidPrinter/window.AndroidScanner (KHÔNG có "window.Android" trần — đã đính chính qua audit)
 │   │
 │   └── reporting/
 │       └── src/
@@ -378,7 +379,7 @@ gieo/
 **Quy tắc debug nhanh (lý do tổ chức theo cách này):**
 - Bug "sai số lượng tồn kho" → luôn bắt đầu ở `packages/fifo-core/src/unit` + `engine/`, không mò trong UI.
 - Bug "UI hiện sai sau khi nén dữ liệu" → luôn ở `packages/read-layer/src/internal/merge-canonical.ts`, vì đó là nơi DUY NHẤT gộp LIVE+COMPACT.
-- Bug "in bill sai/2 lần" → luôn ở `packages/protected-adapters/printer-adapter.ts` hoặc `packages/commands/sales/finalize-order.ts` (idempotency), không phải ở màn hình.
+- Bug "in bill sai/2 lần" → luôn ở `packages/protected-adapters/bill-printer-adapter.ts` (queue) hoặc `packages/commands/sales/finalize-order.ts` (idempotency), không phải ở màn hình.
 - Thêm tính năng mới (vd. thêm 1 loại report) → chỉ thêm 1 file trong `packages/reporting/src/`, không đụng `fifo-core`.
 - Thêm 1 command nghiệp vụ mới → thêm 1 file trong đúng thư mục con của `packages/commands/src/`, theo đúng pipeline có sẵn.
 
