@@ -1,8 +1,10 @@
 # FEATURE TREE — V1 (Cây tính năng tổng thể)
 
-> Đây là tài liệu tổng hợp cuối cùng, đứng trên tất cả các audit trước (`LEGACY-FIFO-AUDIT.md`, `LEGACY-SNAPSHOT-COMPACTION-AUDIT-V1.md`, `PROTECTED-INFRASTRUCTURE-ADAPTER-CONTRACT-V1.md`, và 3 audit mới: loyalty/voucher/customer, menu/pricing/packaging/HR/payroll, finance/alerts/reports/config). Mục đích: trả lời đúng yêu cầu — **luồng dữ liệu đơn giản, không trung gian thừa, đích chính xác, không chồng chéo tính năng, và bản đồ phụ thuộc rõ ràng để biết code cái gì bắt buộc kéo theo cái gì, hoặc chỉ cần chừa điểm nối.**
+> **Nguyên tắc bắt buộc đọc trước:** đây là bản thiết kế cho **HỆ THỐNG MỚI**, không phải danh sách vá lỗi cho `posgieo.html`/`quanlygieo.html`. 2 file HTML cũ chỉ được dùng để trả lời đúng 1 câu hỏi: **"vòng tính năng/chuỗi dữ liệu nào từng tồn tại trong nghiệp vụ thật của quán?"** — không phải "code cũ viết sao thì giữ vậy". Mọi mục dưới đây mô tả **đường đi dữ liệu ĐÚNG cho hệ thống mới lấy FIFO làm gốc**, được đúc kết từ việc khảo sát cơ sở dữ liệu/vòng đời dữ liệu cũ — không phải patch note.
 >
-> Không lặp lại chi tiết đã có ở 4 file trên — chỉ dẫn chiếu. Trọng tâm file này là các domain **chưa từng có tài liệu**: Catalog (Menu/Packaging), Loyalty/Voucher/Promotion, HR/Payroll, Finance/Config, Alerts, Reporting — và cách TẤT CẢ domain khớp vào nhau thành 1 cây duy nhất.
+> Đây là tài liệu tổng hợp cuối cùng, đứng trên tất cả các audit trước — bao gồm `LEGACY-FIFO-AUDIT.md`, `LEGACY-SNAPSHOT-COMPACTION-AUDIT-V1.md`, `PROTECTED-INFRASTRUCTURE-ADAPTER-CONTRACT-V1.md`, 3 audit domain (loyalty/voucher/customer, menu/pricing/packaging/HR/payroll, finance/alerts/reports/config), và **4 chain-trace** (`FIFO-CHAIN-TRACE-BTP-V1.md`, `-RAW-MATERIAL-V1.md`, `-SALES-COGS-PL-V1.md`, `-STOCK-COUNT-V1.md`). Mục đích: **luồng dữ liệu đơn giản, không trung gian thừa, đích chính xác, không chồng chéo tính năng, và cây phải tự nó cho biết chuỗi tính năng nào cần xây, nối vào đâu** — không phải rải rác ở nhiều file phụ lục.
+>
+> §2 dưới đây **không còn là cây tĩnh liệt kê domain** — mỗi domain trung tâm ([2] FIFO/Inventory, [3] Sales/COGS) giờ có **nhánh chuỗi đầy đủ** (entry → correction → actual-vs-theoretical → variance → báo cáo → KPI), vì đây chính là "hướng đi của chuỗi tính năng cần làm" mà cây phải thể hiện được.
 
 ---
 
@@ -33,9 +35,52 @@ STORE
  │     └── Recipe                                    → đã có ở packages/recipe-cost-btp
  │
  ├── [2] FIFO / INVENTORY CORE ─────────────────────── packages/fifo-core (đã thiết kế xong)
- │     Unit, FIFO Engine, currentStock, Ledger
+ │     Unit{costBasis}, FIFO Engine, currentStock (projection), Ledger
+ │     │
+ │     ├── [2a] CHUỖI NGUYÊN LIỆU THÔ (raw) — luồng chuẩn hệ thống mới, đúc kết từ
+ │     │        khảo sát vòng đời dữ liệu cũ (`FIFO-CHAIN-TRACE-RAW-MATERIAL-V1.md`):
+ │     │        ReceiveGoods → Unit{costBasis, sealed}
+ │     │          → OpenContainer → Unit{open}
+ │     │          → CONSUME (bán/BTP/waste) → BẮT BUỘC AllocateConsumption cho MỌI
+ │     │            lý do tiêu hao (bán, đổ ly, hao hụt trực tiếp) — 1 code path DUY
+ │     │            NHẤT, không tách "waste thường" khỏi "waste có allocate" như cũ
+ │     │          → CountStock (actual, tuyệt đối) → ReconcileInventory
+ │     │            (actual vs theoretical CHO SỐ LƯỢNG — 1 phép tính DUY NHẤT dùng
+ │     │            chung bởi cả vận hành hằng ngày lẫn báo cáo đối chiếu định kỳ,
+ │     │            không phải 2 đường tính riêng có thể lệch nhau âm thầm)
+ │     │          → InventoryDailyReport (theo ngày: nhận/dùng/hao hụt/tồn cuối)
+ │     │          → KPI (wasteTargetPct) trong packages/reporting
+ │     │
+ │     ├── [2b] CHUỖI BTP (prep) — CÙNG 1 FIFO Engine với [2a], không phải engine
+ │     │        riêng (`FIFO-CHAIN-TRACE-BTP-V1.md`):
+ │     │        StartPrepBatch (allocate raw) → RecordPrepYield (actual, bắt buộc)
+ │     │          → so sánh actual vs theoretical NGAY khi nhập (không chỉ cảnh báo
+ │     │            trung bình 8 mẻ sau đó — cả 2 lớp đều cần, tức thời + xu hướng)
+ │     │          → CorrectBatchYield (nếu nhập sai — versioned, giữ effective date,
+ │     │            KHÔNG làm trôi COGS lịch sử đã tính — xem [3c])
+ │     │          → ReconcilePrep (actual vs theoretical CHO TỒN BTP — domain này
+ │     │            PHẢI có, dùng chung engine với [2a], không phải xây riêng)
+ │     │          → RecordWaste (BẮT BUỘC ingredientBreakdown cho MỌI trigger, không
+ │     │            chỉ đường "huỷ giữa ca" như cũ)
+ │     │          → BTPDailyReport → KPI (wasteTargetPct gộp raw+prep)
+ │     │
+ │     └── [2c] CHUỖI KIỂM KHO → DUYỆT (`FIFO-CHAIN-TRACE-STOCK-COUNT-V1.md`):
+ │              CountStock (actual tuyệt đối, unit-aware khi có tem)
+ │                → ApproveStockCount / RejectStockCount (idempotent — duyệt đúp
+ │                  không được cộng đúp, cùng pattern idempotency với mọi command)
+ │                → AdjustInventory ĐI QUA FIFO Engine (allocate vào đúng Unit khi
+ │                  xác định được, KHÔNG có code path "ghi thẳng currentStock" song
+ │                  song tồn tại ngoài FIFO Engine)
+ │                → ReportLostContainer → ApproveLostContainer/RejectLostContainer
+ │                  (nhánh BẮT BUỘC PHẢI XÂY — không tồn tại ở hệ thống cũ, xác nhận
+ │                  độc lập 3 lần từ 3 góc audit khác nhau, đây là 1 trong những
+ │                  command ưu tiên cao nhất của Phase 8, không phải "để sau")
  │
  ├── [3] SALES (Bill/Checkout) ─────────────────────── packages/commands/sales
+ │     Bill{channel}                                  ← field MỚI bắt buộc (dine-in/
+ │     │                                                 to-go/app-{sàn}), để [9]
+ │     │                                                 Reporting tách lãi/lỗ theo
+ │     │                                                 kênh — đọc từ [1] Catalog
  │     Cart (snapshot Catalog tại thời điểm thêm món)
  │       → Payment (protected-adapters: bank/cash)
  │       → Consumption (đọc [1]+[2] TẠI THỜI ĐIỂM THANH TOÁN, không phải lúc thêm giỏ)
@@ -43,7 +88,24 @@ STORE
  │            ├─▶ Print (protected-adapters)
  │            ├─▶ [4] Loyalty/Voucher/Promotion finalize
  │            └─▶ [7] Assist/AI (optional, không được chặn luồng)
+ │       → AddonConsumption (thêm sau khi bill đã lưu) → BẮT BUỘC trigger lại [4]
+ │            Loyalty cho đúng phần chênh lệch — không phải "add-only, quên loyalty"
  │       → Reversal                                   → dùng lại packages/fifo-core (không tự chế riêng)
+ │       │
+ │       └── [3c] CHUỖI COGS/P&L (`FIFO-CHAIN-TRACE-SALES-COGS-PL-V1.md`) — ĐÂY LÀ
+ │              CHUỖI QUAN TRỌNG NHẤT PHÁT HIỆN QUA CHAIN-TRACE, PHẢI THIẾT KẾ ĐÚNG
+ │              NGAY TỪ ĐẦU (không phải patch sau):
+ │              getCOGS() PHẢI trả 2 con số tách biệt, không phải 1:
+ │                cogsTheoretical = RecipeVersion(dateKey) × CostHistory(dateKey)
+ │                cogsActual      = Σ costBasis THẬT của các Unit đã FIFO-allocate
+ │                                  cho đúng bill đó (Unit mang costBasis — đây là lý
+ │                                  do costBasis PHẢI ở trên Unit, không phải suy từ
+ │                                  công thức — hệ thống cũ chưa từng có con số này)
+ │                variance = cogsActual − cogsTheoretical → packages/reporting/
+ │                  variance-report.ts hiển thị làm chỉ số CHÍNH, không phải phụ
+ │              → P&L theo channel (đọc Bill.channel) → tách lãi/lỗ theo kênh
+ │              → book_closing (snapshot tháng) → correction giữ v1, KHÔNG xoá khi
+ │                mở lại (packages/compaction/correction-rebuild.ts)
  │
  ├── [4] CUSTOMER / LOYALTY / VOUCHER / PROMOTION ──── packages/loyalty
  │     Customer (gốc nhánh — tra cứu theo SĐT, PHẢI đăng ký tay, không tự tạo)
