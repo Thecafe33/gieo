@@ -4700,6 +4700,13 @@ async function submitOpenContainer(id, isOverride) {
     // máy "thắng" claim này, máy còn lại thấy status không còn 'sealed' ngay trong transaction
     // và tự dừng sạch, không ghi gì cả.
     const nowISO = new Date().toISOString();
+    // [TEM MỞ] Nguyên liệu dùng thẳng không qua chế biến (topping đóng gói sẵn...) mà bao bì
+    // gốc mang mã tem sẽ bị vứt ngay khi mở — cấu hình ở tab Nguyên liệu (quanlygieo.html).
+    // Ghi cờ "cần in tem mở" NGAY TRONG transaction claim, cùng lúc với status:'open': nếu
+    // tách thành một lượt ghi riêng sau đó, lượt ghi đó có thể trượt (mất mạng, đóng app giữa
+    // chừng) và để lại một chai đã mở nhưng vĩnh viễn không lọt vào hàng chờ dán tem mở.
+    const itemCfg = KHO_ITEMS_CACHE.find(x => x.id === c.itemId);
+    const canPrintOpenLabel = !!(itemCfg && itemCfg.printOpenLabel);
     let claimed = true;
     try {
       await fstore.runTransaction(async t => {
@@ -4712,7 +4719,8 @@ async function submitOpenContainer(id, isOverride) {
           expiresAt: computeOpenExpiry(freshDoc.data().openShelfLifeHours, nowISO),
           // [MỚI] Vết audit khi mở bao thứ 2 bất chấp cảnh báo — để Quản lý xem lại biết đích
           // xác vì sao, không phải suy đoán.
-          ...(isOverride ? { openedWithOtherOpen: true, openOverrideReason: overrideReason } : {})
+          ...(isOverride ? { openedWithOtherOpen: true, openOverrideReason: overrideReason } : {}),
+          ...(canPrintOpenLabel ? { openLabelNeeded: true, openLabelPrinted: false } : {})
         });
       });
     } catch (err) {
@@ -4727,12 +4735,71 @@ async function submitOpenContainer(id, isOverride) {
     }
     await unitEngineOnOpen(id, c).catch(err => console.warn('[UnitEngine] onOpen lỗi (không chặn mở tem)', err));
     toast('✅ Đã mở ' + (c.code || ''));
-    closeStockScanSheet();
+    if (canPrintOpenLabel) {
+      openOpenLabelPrintSheet({ id, code: c.code, itemName: c.itemName, unit: c.unit, openedAt: nowISO, openedBy: staffEmp.fullName });
+    } else {
+      closeStockScanSheet();
+    }
     _refreshStockUseListIfActive();
   } catch (err) {
     console.error('submitOpenContainer lỗi', err);
     toast('❌ Không lưu được: ' + (err.message || err));
   } finally { _posSubmitBusy = false; }
+}
+
+// [TEM MỞ] Popup in tem mở ngay sau khi báo mở một nguyên liệu dùng thẳng (xem cờ
+// printOpenLabel ở submitOpenContainer). Tem này giữ NGUYÊN mã cũ của container (không sinh
+// mã mới) kèm giờ mở, để dán vào dụng cụ đựng thay cho bao bì gốc vừa bị vứt.
+let _openLabelPrintCtx = null;
+
+function openOpenLabelPrintSheet(ctx) {
+  _openLabelPrintCtx = ctx;
+  openStockScanSheet(`
+    <div class="wal-section" style="margin:0 0 14px;">
+      <div class="wal-section-title">In tem mở</div>
+      <div style="font-size:20px;font-weight:700;color:var(--td);margin:6px 0 2px;">${escHtmlPos(ctx.itemName || '')}</div>
+      <div style="font-size:13px;color:#999;letter-spacing:.5px;">${escHtmlPos(ctx.code || '')}</div>
+      <div style="font-size:12px;color:#a16207;margin-top:8px;line-height:1.6;">
+        Nguyên liệu này dùng thẳng không qua chế biến — bao bì gốc mang mã ${escHtmlPos(ctx.code || '')}
+        sẽ bị vứt đi. In tem mới (giữ nguyên mã này, kèm giờ mở) và dán ngay vào dụng cụ đựng
+        để không mất dấu.
+      </div>
+    </div>
+    <button id="openLabelPrintBtn" onclick="submitOpenLabelPrintNow()" style="width:100%;padding:15px;background:var(--gd);color:#fff;border:none;border-radius:14px;font-family:'Google Sans',sans-serif;font-size:15px;font-weight:700;cursor:pointer;">🖨 In tem mở</button>
+    <button onclick="deferOpenLabelPrint()" style="width:100%;margin-top:8px;padding:13px;background:none;border:1px solid #ddd;color:#888;border-radius:14px;font-family:'Google Sans',sans-serif;font-size:14px;font-weight:700;cursor:pointer;">Để sau — vào Tem kho in</button>`);
+}
+
+async function submitOpenLabelPrintNow() {
+  const ctx = _openLabelPrintCtx;
+  if (!ctx) { closeStockScanSheet(); return; }
+  const restoreBtn = setBtnBusy('openLabelPrintBtn', '⏳ Đang in...');
+  try {
+    const r = await POSTemPrinter._enqueue(async () => {
+      try { await temEnsureConnected(); } catch (e) { console.warn('[tem mở] nối lại lỗi', e); }
+      return POSTemPrinter.printOpenLabel(ctx, 1);
+    });
+    if (r === false) {
+      toast('⚠ Máy in báo không gửi được — tem vẫn nằm ở "Tem kho ▸ chờ dán"');
+      closeStockScanSheet();
+      refreshStockLabelBadge().catch(() => {});
+      return;
+    }
+    await fstore.collection(STOCK_CONTAINERS_COLL).doc(ctx.id)
+      .update({ openLabelPrinted: true, openLabelPrintedAt: new Date().toISOString() });
+    toast('🖨 Đã in tem mở ' + (ctx.code || ''));
+    closeStockScanSheet();
+  } catch (err) {
+    console.error('submitOpenLabelPrintNow lỗi', err);
+    toast('⚠ Không in được — tem vẫn nằm ở "Tem kho ▸ chờ dán": ' + (err.message || err));
+    closeStockScanSheet();
+    refreshStockLabelBadge().catch(() => {});
+  } finally { restoreBtn(); }
+}
+
+function deferOpenLabelPrint() {
+  closeStockScanSheet();
+  toast('ℹ️ Tem mở đang chờ ở "Tem kho ▸ chờ dán"');
+  refreshStockLabelBadge().catch(() => {});
 }
 
 // ---------- BÁO HẾT ----------
@@ -4974,6 +5041,26 @@ async function submitFinishContainer(id, daQuet) {
 // ============================================================
 let _stockLabelQueue = null;    // tem của lượt nhận hàng vừa xong (ưu tiên in trước)
 let STOCK_LABEL_PENDING = [];   // toàn bộ tem chưa dán, nạp từ Firestore
+let STOCK_OPEN_LABEL_PENDING = []; // [TEM MỞ] tem mở (báo mở nguyên liệu dùng thẳng) chưa dán
+
+// [TEM MỞ] Song song với hàng chờ dán tem NHẬN ở trên, nhưng khác nguồn cờ (openLabelNeeded/
+// openLabelPrinted thay vì labelPrinted) vì đây là tem sinh ra lúc MỞ, không phải lúc nhận —
+// gộp chung một danh sách sẽ không phân biệt nổi "tem gì đang chờ dán" để ghi chú cho đúng.
+async function loadPendingOpenLabels() {
+  try {
+    const snap = await fstore.collection(STOCK_CONTAINERS_COLL)
+      .where('openLabelNeeded', '==', true).where('openLabelPrinted', '==', false).get();
+    // Bỏ 'finished'/'voided' cùng lý do với tem nhận: chai đã hết hoặc bị huỷ thì tem mở
+    // của nó không còn ý nghĩa để dán nữa.
+    STOCK_OPEN_LABEL_PENDING = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+      .filter(c => c.status !== 'finished' && c.status !== 'voided')
+      .sort((a, b) => String(a.openedAt || '').localeCompare(String(b.openedAt || '')));
+  } catch (err) {
+    console.warn('loadPendingOpenLabels lỗi', err);
+    STOCK_OPEN_LABEL_PENDING = [];
+  }
+  return STOCK_OPEN_LABEL_PENDING;
+}
 
 async function loadPendingStockLabels() {
   try {
@@ -5000,8 +5087,8 @@ async function loadPendingStockLabels() {
 async function refreshStockLabelBadge() {
   const badge = document.getElementById('stockLabelBadge');
   if (!badge) return;
-  await loadPendingStockLabels();
-  const n = STOCK_LABEL_PENDING.length;
+  await Promise.all([loadPendingStockLabels(), loadPendingOpenLabels()]);
+  const n = STOCK_LABEL_PENDING.length + STOCK_OPEN_LABEL_PENDING.length;
   badge.textContent = n > 99 ? '99+' : String(n);
   badge.style.display = n ? 'flex' : 'none';
 }
@@ -5010,8 +5097,65 @@ async function openStockLabelScreen() {
   showScreen('stockLabelScreen');
   const box = document.getElementById('stockLabelBody');
   showLoading(box);
-  await loadPendingStockLabels();
+  await Promise.all([loadPendingStockLabels(), loadPendingOpenLabels()]);
   renderStockLabelList();
+}
+
+// [TEM MỞ] Khối riêng cho tem mở chờ dán — ghi chú rõ "Tem mở cho ... chưa được dán" như
+// yêu cầu, và nút "Đã dán" ở đây CHỈ dọn hàng chờ, không đụng gì tới tồn kho/trạng thái
+// container (cùng nguyên tắc với markStockLabelsPrinted của tem nhận).
+function renderOpenLabelPendingSection() {
+  const list = STOCK_OPEN_LABEL_PENDING;
+  if (!list.length) return '';
+  return `
+    <div class="wal-section" style="margin:0 0 14px;">
+      <div class="wal-section-title">Còn ${list.length} tem mở chưa dán</div>
+      <div style="font-size:11.5px;color:#999;line-height:1.6;">
+        Tem mở sinh ra khi báo mở nguyên liệu dùng thẳng (bao bì gốc bị vứt) — in rồi dán vào
+        đúng dụng cụ đựng, dán xong bấm "Đã dán".
+      </div>
+      ${list.map(c => `
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid #f0f0f0;">
+          <div style="min-width:0;">
+            <div style="font-weight:700;font-size:14px;color:var(--td);letter-spacing:.5px;">${escHtmlPos(c.code || '')}</div>
+            <div style="font-size:11.5px;color:#a16207;">Tem mở cho ${escHtmlPos(c.itemName || '')} chưa được dán</div>
+          </div>
+          <div style="display:flex;gap:6px;flex-shrink:0;">
+            <button onclick="printOnePendingOpenLabel('${c.id}')" style="height:40px;padding:0 12px;background:#fff;color:var(--gd);border:1.5px solid var(--gd);border-radius:10px;font-family:'Google Sans',sans-serif;font-size:12.5px;font-weight:700;cursor:pointer;">In</button>
+            <button onclick="markOpenLabelStuck('${c.id}')" style="height:40px;padding:0 12px;background:#f5f5f5;color:#666;border:none;border-radius:10px;font-family:'Google Sans',sans-serif;font-size:12.5px;font-weight:700;cursor:pointer;">Đã dán</button>
+          </div>
+        </div>`).join('')}
+    </div>`;
+}
+
+async function printOnePendingOpenLabel(id) {
+  const c = STOCK_OPEN_LABEL_PENDING.find(x => x.id === id);
+  if (!c) { toast('⚠️ Không tìm thấy tem'); return; }
+  try {
+    const r = await POSTemPrinter._enqueue(async () => {
+      try { await temEnsureConnected(); } catch (e) { console.warn('[tem mở] nối lại lỗi', e); }
+      return POSTemPrinter.printOpenLabel(c, 1);
+    });
+    if (r === false) toast('⚠ Máy in báo không gửi được — thử lại');
+    else toast('🖨 Đã gửi tem mở ' + (c.code || ''));
+  } catch (err) {
+    console.error('printOnePendingOpenLabel lỗi', err);
+    toast('❌ Không in được: ' + (err.message || err));
+  }
+}
+
+// Đánh dấu tem mở đã dán — KHÔNG đụng tồn kho/trạng thái container, thuần tuý dọn hàng chờ.
+async function markOpenLabelStuck(containerId) {
+  try {
+    await fstore.collection(STOCK_CONTAINERS_COLL).doc(containerId)
+      .update({ openLabelPrinted: true, openLabelPrintedAt: new Date().toISOString() });
+    STOCK_OPEN_LABEL_PENDING = STOCK_OPEN_LABEL_PENDING.filter(c => c.id !== containerId);
+    toast('✅ Đã đánh dấu đã dán');
+    renderStockLabelList();
+  } catch (err) {
+    console.error('markOpenLabelStuck lỗi', err);
+    toast('❌ Không lưu được: ' + (err.message || err));
+  }
 }
 
 function renderStockLabelList() {
@@ -5022,9 +5166,15 @@ function renderStockLabelList() {
   const list = STOCK_LABEL_PENDING.slice()
     .sort((a, b) => (vuaNhan.includes(b.id) ? 1 : 0) - (vuaNhan.includes(a.id) ? 1 : 0));
 
+  const openLabelHtml = renderOpenLabelPendingSection();
+
   if (!list.length) {
     _stockLabelQueue = null;
-    box.innerHTML = `<div style="text-align:center;padding:44px 20px;color:#16a34a;font-size:15px;font-weight:700;">Đã dán hết tem<div style="font-size:12.5px;color:#999;font-weight:400;margin-top:8px;line-height:1.6;">Không còn đơn vị hàng nào chờ dán tem. Tem mới sẽ tự hiện ở đây sau mỗi lần nhận hàng.</div></div>`;
+    if (!openLabelHtml) {
+      box.innerHTML = `<div style="text-align:center;padding:44px 20px;color:#16a34a;font-size:15px;font-weight:700;">Đã dán hết tem<div style="font-size:12.5px;color:#999;font-weight:400;margin-top:8px;line-height:1.6;">Không còn đơn vị hàng nào chờ dán tem. Tem mới sẽ tự hiện ở đây sau mỗi lần nhận hàng.</div></div>`;
+    } else {
+      box.innerHTML = openLabelHtml;
+    }
     return;
   }
 
@@ -5034,6 +5184,7 @@ function renderStockLabelList() {
   list.forEach(c => { (nhom[c.itemId] || (nhom[c.itemId] = { ten: c.itemName, items: [] })).items.push(c); });
 
   box.innerHTML = `
+    ${openLabelHtml}
     <div class="wal-section" style="margin:0 0 14px;">
       <div class="wal-section-title">Còn ${list.length} tem chờ dán</div>
       <div style="font-size:11.5px;color:#999;line-height:1.6;">
@@ -6159,6 +6310,30 @@ const POSTemPrinter = {
 
   async printStockLabel(c, copies) {
     return this.printLabel(this.buildStockLabelLines(c), Math.max(1, Number(copies) || 1));
+  },
+
+  // [TEM MỞ] Tem in lại lúc MỞ cho nguyên liệu dùng thẳng (topping đóng gói sẵn...) — bao bì
+  // gốc mang mã c.code bị vứt ngay khi mở, nên tem này GIỮ NGUYÊN mã cũ (không sinh mã mới),
+  // chỉ thêm mốc giờ mở, để dán sang dụng cụ đựng. Xem submitOpenContainer()/openOpenLabelPrintSheet.
+  buildOpenLabelLines(c) {
+    const p2 = n => String(n).padStart(2, '0');
+    const d = c.openedAt ? new Date(c.openedAt) : new Date();
+    const ngayGio = isNaN(d) ? '' : `${p2(d.getDate())}/${p2(d.getMonth() + 1)} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
+    const nvNgan = (c.openedBy || '').trim().split(/\s+/).slice(-2).join(' ');
+    return [
+      { type: 'qr', text: c.code || '', size: 92, align: 'center' },
+      { text: c.itemName || '', size: 22, align: 'center', bold: true, noWrap: true },
+      { type: 'row',
+        left:  { text: 'TEM MỞ', size: 15, bold: true },
+        right: { text: c.code || '', size: 15, bold: true } },
+      { type: 'row',
+        left:  { text: `Mở ${ngayGio}`, size: 12 },
+        right: { text: nvNgan, size: 12 } },
+    ].filter(Boolean);
+  },
+
+  async printOpenLabel(c, copies) {
+    return this.printLabel(this.buildOpenLabelLines(c), Math.max(1, Number(copies) || 1));
   },
 
   buildPrepBatchLabelLines(b) {

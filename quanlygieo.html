@@ -3572,6 +3572,10 @@ function addInventoryItem(data){
     countUnitName: data.countUnitName || '',
     stockManaged: data.stockManaged !== false,
     openShelfLifeHours: Number(data.openShelfLifeHours) || 0,
+    // printOpenLabel — nguyên liệu dùng thẳng không qua chế biến (topping...) mà bao bì gốc
+    // mang mã tem bị vứt ngay khi mở. Bật thì POS in tem mở mới (giữ mã cũ + giờ mở) để dán
+    // sang dụng cụ đựng, xem submitOpenContainer()/POSTemPrinter.printOpenLabel bên posgieo.
+    printOpenLabel: !!data.printOpenLabel,
     // untrackedBase — tồn KHÔNG có tem nào đại diện. Xem khối chú thích ở
     // chotTonLichSu(). Món tạo mới mà bật dán tem ngay thì toàn bộ tồn khởi tạo là
     // tồn chưa có tem, nên mốc = currentStock. Món không dán tem để null (chưa cần).
@@ -15439,6 +15443,8 @@ function renderTrackingBox(){
   const prevCountUnit = document.getElementById('invCountUnit')?.value;
   const curCountUnit = prevCountUnit != null ? prevCountUnit : ((editingItem && editingItem.countUnitName) || '');
   const prevShelf = document.getElementById('invOpenShelfLife')?.value;
+  const prevPrintOpenLabelEl = document.getElementById('invPrintOpenLabel');
+  const printOpenLabelChecked = prevPrintOpenLabelEl ? prevPrintOpenLabelEl.checked : !!(editingItem && editingItem.printOpenLabel);
 
   // Giá trị một đơn vị kiểm kê — cơ sở để gợi ý có đáng dán tem không.
   const chosen = rows.find(r=>r.name===curCountUnit);
@@ -15477,6 +15483,14 @@ function renderTrackingBox(){
       <div class="field" style="margin-bottom:0"><label for="invOpenShelfLife">Hạn dùng sau khi mở (giờ)</label>
         <input type="number" id="invOpenShelfLife" inputmode="numeric" step="1" min="0" value="${prevShelf != null ? escapeHtmlAttr(prevShelf) : (editingItem ? (Number(editingItem.openShelfLifeHours)||0) : 0)}">
         <div class="hint">In lên tem và dùng để cảnh báo "còn hàng đã mở quá hạn". Để <b>0</b> nếu món này không có hạn sau khi mở. VD sữa tươi 72, syrup 720 (30 ngày).</div>
+      </div>
+      <div class="field" style="margin-top:14px;margin-bottom:0">
+        <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;">
+          <input type="checkbox" id="invPrintOpenLabel" ${printOpenLabelChecked ? 'checked' : ''} style="width:20px;height:20px;flex-shrink:0;margin-top:1px">
+          <span>In tem mở khi báo mở
+            <div class="hint" style="margin-top:2px">Dùng cho nguyên liệu dùng thẳng không qua chế biến (topping đóng gói sẵn...) mà bao bì gốc — nơi đang dán mã tem — bị vứt ngay khi mở. Bật lên thì lúc nhân viên quét báo mở ở POS sẽ hiện popup in một tem mới (kèm giờ mở, giữ nguyên mã cũ) để dán vào dụng cụ đựng.</div>
+          </span>
+        </label>
       </div>` : ''}`;
 }
 function setTrackingMode(m){
@@ -15737,6 +15751,9 @@ async function submitInventoryItem(){
   if(isPackagingMaterial && trackingMode === 'unit') trackingMode = 'batch';
   if(!TRACKING_MODES[trackingMode]) trackingMode = 'none';
   const openShelfLifeHours = trackingMode === 'none' ? 0 : (Number(document.getElementById('invOpenShelfLife')?.value) || 0);
+  // In tem mở khi báo mở — chỉ có nghĩa khi món này có dán tem (trackingMode khác 'none'),
+  // ô tick chỉ tồn tại trên form trong trường hợp đó nên chốt luôn ở đây cho chắc.
+  const printOpenLabel = trackingMode !== 'none' && !!document.getElementById('invPrintOpenLabel')?.checked;
   // ---- Dụng cụ cân (nguyên liệu dùng ngay) ----
   // Đơn vị không cân được thì xoá sạch lựa chọn — giữ lại chỉ làm POS hiện nút cân
   // cho ra số sai đơn vị. Ngược lại, khi VESSELS chưa nạp được (mất mạng lúc mở
@@ -15766,7 +15783,7 @@ async function submitInventoryItem(){
       // báo hết chai đầu tiên thì hàng đã vào ra vài lượt, không dựng lại được nữa.
       // (Bug 15.020 g sữa tươi sinh ra đúng vì bước này trước đây không tồn tại.)
       const metaLuu = { name, minStock, costPerUnit, packagingUnits, staffCounts, isPackagingMaterial,
-        trackingMode, countUnitName, stockManaged, openShelfLifeHours, vesselIds };
+        trackingMode, countUnitName, stockManaged, openShelfLifeHours, printOpenLabel, vesselIds };
       const batDauDanTem = trackingMode !== 'none' && itemTrackingMode(itemCu) === 'none';
       const chuaChotMoc = !itemCu || itemCu.untrackedBase === null || itemCu.untrackedBase === undefined;
       if(batDauDanTem && chuaChotMoc){
@@ -15795,7 +15812,7 @@ async function submitInventoryItem(){
         name, unit: document.getElementById('invUnit').value,
         currentStock: v('invStart') * f('invStartUnit'),
         minStock, costPerUnit, packagingUnits, staffCounts, isPackagingMaterial,
-        trackingMode, countUnitName, stockManaged, openShelfLifeHours, vesselIds
+        trackingMode, countUnitName, stockManaged, openShelfLifeHours, printOpenLabel, vesselIds
       });
       idMoiTao = refMoi && refMoi.id;
       toast('✅ Đã thêm nguyên liệu');
