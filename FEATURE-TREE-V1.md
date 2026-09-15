@@ -2,7 +2,7 @@
 
 > **Nguyên tắc bắt buộc đọc trước:** đây là bản thiết kế cho **HỆ THỐNG MỚI**, không phải danh sách vá lỗi cho `posgieo.html`/`quanlygieo.html`. 2 file HTML cũ chỉ được dùng để trả lời đúng 1 câu hỏi: **"vòng tính năng/chuỗi dữ liệu nào từng tồn tại trong nghiệp vụ thật của quán?"** — không phải "code cũ viết sao thì giữ vậy". Mọi mục dưới đây mô tả **đường đi dữ liệu ĐÚNG cho hệ thống mới lấy FIFO làm gốc**, được đúc kết từ việc khảo sát cơ sở dữ liệu/vòng đời dữ liệu cũ — không phải patch note.
 >
-> Đây là tài liệu tổng hợp cuối cùng, đứng trên tất cả các audit trước — bao gồm `LEGACY-FIFO-AUDIT.md`, `LEGACY-SNAPSHOT-COMPACTION-AUDIT-V1.md`, `PROTECTED-INFRASTRUCTURE-ADAPTER-CONTRACT-V1.md`, 3 audit domain (loyalty/voucher/customer, menu/pricing/packaging/HR/payroll, finance/alerts/reports/config), và **4 chain-trace** (`FIFO-CHAIN-TRACE-BTP-V1.md`, `-RAW-MATERIAL-V1.md`, `-SALES-COGS-PL-V1.md`, `-STOCK-COUNT-V1.md`). Mục đích: **luồng dữ liệu đơn giản, không trung gian thừa, đích chính xác, không chồng chéo tính năng, và cây phải tự nó cho biết chuỗi tính năng nào cần xây, nối vào đâu** — không phải rải rác ở nhiều file phụ lục.
+> Đây là tài liệu tổng hợp cuối cùng, đứng trên tất cả các audit trước — bao gồm `LEGACY-FIFO-AUDIT.md`, `LEGACY-SNAPSHOT-COMPACTION-AUDIT-V1.md`, `PROTECTED-INFRASTRUCTURE-ADAPTER-CONTRACT-V1.md`, `DEAD-FEATURE-PRUNING-V1.md`, `POS-QUANLY-PERMISSION-CONTRACT-V1.md`, và **10 chain-trace** (`FIFO-CHAIN-TRACE-BTP-V1.md`, `-RAW-MATERIAL-V1.md`, `-SALES-COGS-PL-V1.md`, `-STOCK-COUNT-V1.md`, `-PAYROLL-V1.md`, `-REVERSAL-CORRECTION-V1.md`, `-LOYALTY-V1.md`, `-ALERTS-V1.md`, `-CATALOG-PROMOTION-V1.md`, `-REPORTING-V1.md`). Mục đích: **luồng dữ liệu đơn giản, không trung gian thừa, đích chính xác, không chồng chéo tính năng, và cây phải tự nó cho biết chuỗi tính năng nào cần xây, nối vào đâu** — không phải rải rác ở nhiều file phụ lục.
 >
 > §2 dưới đây **không còn là cây tĩnh liệt kê domain** — mỗi domain trung tâm ([2] FIFO/Inventory, [3] Sales/COGS) giờ có **nhánh chuỗi đầy đủ** (entry → correction → actual-vs-theoretical → variance → báo cáo → KPI), vì đây chính là "hướng đi của chuỗi tính năng cần làm" mà cây phải thể hiện được.
 
@@ -29,10 +29,23 @@ STORE
  │     (không có role/permission thật ở legacy — chỉ có 1 cấp PIN)
  │
  ├── [1] CATALOG (cấu hình, QUANLY sở hữu, POS chỉ đọc) ── packages/catalog
- │     ├── Menu (món, size, giá)
+ │     ├── Menu (món, size, giá) — giá SNAPSHOT vào Cart/Bill tại thời điểm thêm món,
+ │     │     KHÔNG join động — đây là mẫu ĐÚNG hiếm hoi legacy đã làm, giữ nguyên
+ │     │     nguyên tắc này cho mọi domain khác (xem §1.3)
+ │     ├── Category (entity thật, có thứ tự hiển thị — legacy chỉ suy ra bằng
+ │     │     Set(item.type), không lưu thứ tự → GAP nhỏ, dựng đúng ngay từ đầu)
  │     ├── Topping + Topping Recipe
  │     ├── Packaging (preset/override/rules/bagging — 2 cặp cũ/mới song song)
- │     └── Recipe                                    → đã có ở packages/recipe-cost-btp
+ │     ├── Recipe                                    → đã có ở packages/recipe-cost-btp
+ │     │     Link Menu↔Recipe PHẢI là field con trỏ tường minh (`recipeVersionId`),
+ │     │     KHÔNG phải khớp key ngầm (`'togo:'+menuItemId` như legacy) — khớp key
+ │     │     ngầm làm xoá-tạo-lại 1 món (cách duy nhất "đổi tên" ở legacy) mồ côi
+ │     │     vĩnh viễn recipe cũ (`FIFO-CHAIN-TRACE-CATALOG-PROMOTION-V1.md` §9-10)
+ │     └── isAvailable (sold-out) — PHẢI là trạng thái DẪN XUẤT từ currentStock của
+ │           recipe đang hiệu lực qua read-layer, không phải field tay. Legacy KHÔNG
+ │           có sold-out nào — Catalog và FIFO hoàn toàn tách rời trước khi bán, nhân
+ │           viên bán được vô hạn 1 món dù nguyên liệu = 0 (kho chỉ âm dần, không ai
+ │           chặn ở điểm bán) — gap nghiêm trọng nhất domain Catalog
  │
  ├── [2] FIFO / INVENTORY CORE ─────────────────────── packages/fifo-core (đã thiết kế xong)
  │     Unit{costBasis}, FIFO Engine, currentStock (projection), Ledger
@@ -109,8 +122,17 @@ STORE
  │
  ├── [4] CUSTOMER / LOYALTY / VOUCHER / PROMOTION ──── packages/loyalty
  │     Customer (gốc nhánh — tra cứu theo SĐT, PHẢI đăng ký tay, không tự tạo)
- │       ├── Loyalty points/stamps      (hard dep: Customer + Bill đã ghi)
- │       ├── Stamp-free redemption       (hard dep: Loyalty stamps đủ + Catalog.giftMenu)
+ │       ├── LoyaltyLedger — BẮT BUỘC, không phải field cộng dồn trực tiếp như legacy
+ │       │     (`total_points`/`stamp_count` chỉ là field ghi đè, KHÔNG có sổ cái để
+ │       │     tính lại — nếu số dư trôi, KHÔNG có cách nào phục hồi bằng tính toán,
+ │       │     khác hẳn FIFO còn có `stock_transactions_gieogieo` để dựng lại
+ │       │     currentStock — đây là gap NẶNG HƠN untrackedPendingDelta của FIFO,
+ │       │     `FIFO-CHAIN-TRACE-LOYALTY-V1.md` §8/§10). Số dư hiển thị = tổng ledger.
+ │       ├── Loyalty points/stamps      (hard dep: Customer + Bill đã ghi; idempotent
+ │       │     qua operationId=billId — đây là phần legacy làm ĐÚNG, giữ nguyên)
+ │       ├── Stamp-free redemption       (hard dep: Loyalty stamps đủ + Catalog.giftMenu;
+ │       │     redemption ĐI QUA CHUNG pipeline FIFO/COGS như món trả tiền — giữ
+ │       │     nguyên, đây cũng là mẫu ĐÚNG của legacy)
  │       ├── ~~Voucher cá nhân (myGifts) / Discount code (rewards)~~ — CẮT BỎ, xem §4.5
  │       └── Auto-promotion (mua-N-tặng-1/giảm-theo-SL/tặng-topping) (đọc Cart + Catalog, KHÔNG cần Customer trừ freeTopping)
  │
@@ -153,11 +175,28 @@ STORE
  │
  ├── [8] ALERTS (sink 2 chiều — mọi domain [1]-[7] có thể ghi vào đây) ── packages/alerts
  │     16 loại cảnh báo tự động, KHÔNG ai chủ động tạo tay
+ │     → 1 AlertEngine DUY NHẤT, route theo CẢ (type, severity) — legacy ghi
+ │       severity:'danger' lúc tạo nhưng bucket-hoá chỉ theo type, alert nguy hiểm
+ │       lọt vào chung xô "khác" với alert vặt (`FIFO-CHAIN-TRACE-ALERTS-V1.md` §2)
+ │     → PUSH phải nhất quán theo MỨC ĐỘ NGHIÊM TRỌNG, không theo ai code trước:
+ │       hạn dùng BTP phải push giống hạn dùng chai/hũ đã mở; tồn thấp phải push
+ │       được ở CẢ POS lẫn QUANLY, không chỉ QUANLY như legacy
+ │     → Acknowledgment mặc định theo mẫu FIFO bell (tự xoá khi điều kiện THẬT SỰ
+ │       hết), không phải "bấm Đã xem là tắt" như phần lớn alert legacy
  │     → chỉ 1 nơi đọc: Management inbox
  │
  └── [9] REPORTING (chỉ đọc — không domain nào phụ thuộc ngược vào Reporting) ── packages/reporting
        Revenue/COGS/P&L, Customer (RFM), Mix, Prep forecast (advisory, KHÔNG nối vào [2])
-       → Export/AI payload (đọc TẤT CẢ [0]-[8], xây SAU CÙNG)
+       1 read-layer DUY NHẤT phục vụ CẢ POS lẫn QUANLY — legacy có 2 pipeline doanh
+         thu độc lập (POS tự tính, QUANLY tự tính qua `daily_sales_cache_gieogieo`),
+         không đảm bảo luôn ra cùng 1 số (`FIFO-CHAIN-TRACE-REPORTING-V1.md` §2)
+       Định giá tồn kho dùng `Unit.costBasis` thật, không phải scalar giá gần nhất
+         (legacy: `currentStock × costPerUnit hiện tại`, không phải FIFO cost thật)
+       Phân quyền enforce ở tầng đọc (`AccessContext`/role theo permission contract)
+         — legacy dùng 1 tài khoản Firebase DÙNG CHUNG, 0 role check, ai mở app cũng
+         thấy toàn bộ P&L/COGS/khách hàng — gap nghiêm trọng nhất domain này
+       → Export/AI payload (đọc TẤT CẢ [0]-[8], xây SAU CÙNG) — TÁCH BIỆT khỏi export
+         báo cáo đã định dạng (CSV, chưa tồn tại ở legacy, cần xây thật cho hệ thống mới)
 
 REVERSAL/CORRECTION (cross-cutting PATTERN, không phải 1 domain — mọi nhánh [2][2a]
 [2b][2c][3][3c][6a] đều gọi vào đây thay vì tự chế cơ chế hoàn/sửa riêng) ──
@@ -241,6 +280,8 @@ Mọi domain khác (stock transaction, prep batch, container, expense, cash coun
 ### 4.8 Packaging config đổi → COGS lịch sử bị tính lại (cùng lớp lỗi §4.6, đã biết từ `FIFO-CORE-ARCHITECTURE-V2.md` §13 với Recipe)
 `invalidateSalesCache()` xoá cache mỗi khi sửa packaging preset/override/rules/bagging — xác nhận đây là lỗi mang tính HỆ THỐNG (mọi input vào công thức COGS đều thiếu bất biến lịch sử: Recipe, Cost, Packaging, Payroll — 4/4). **Kết luận kiến trúc:** `RecipeVersion`/`CostBasis` (đã thiết kế) phải mở rộng thành nguyên tắc chung "**mọi input ảnh hưởng số tiền lịch sử đều phải versioned + point-in-time resolve**", áp dụng đồng loạt cho Recipe, Packaging, Cost, Payroll — không xử lý riêng lẻ từng cái.
 
+**Cập nhật (chain-trace Alerts + Reporting, lần 6 và 7 cùng lớp lỗi):** `computeKPIs()` version target ĐÚNG theo `effectiveFrom`, nhưng khi đánh giá 1 khoảng ngày lại chỉ resolve version tại NGÀY CUỐI kỳ rồi áp cho toàn bộ khoảng — làm KPI các ngày đầu kỳ trôi theo target mới (`FIFO-CHAIN-TRACE-ALERTS-V1.md` §5). Tương tự, "Báo cáo kỳ" (tuần này/tuần trước) không hề đóng băng — cả 2 cột đều tính sống, khác hẳn P&L tháng (nơi DUY NHẤT làm đúng freeze-vs-recalculate qua `book_closings_gieogieo`) (`FIFO-CHAIN-TRACE-REPORTING-V1.md` §4-5). **Xác nhận chắc chắn:** nguyên tắc versioning ở trên phải áp dụng cho CẢ cách một report/KPI RESOLVE version theo TỪNG NGÀY trong khoảng, không chỉ theo ngày cuối kỳ — và freeze-vs-recalculate phải là quyết định tường minh cho MỌI báo cáo theo kỳ, không riêng P&L tháng.
+
 ### 4.9 Alerts — 12/16 loại rơi vào khuôn chung, mất nội dung chẩn đoán
 Chỉ 4/16 loại alert có màn xử lý thật với nút hành động trỏ đúng nơi. 12 loại còn lại hiện khuôn chung vốn thiết kế cho 1 loại khác — field `note` (nội dung chẩn đoán chi tiết) **không hiển thị**. **Fix:** `packages/alerts` phải có 1 renderer chung dựa trên schema từng `type`, không phải hard-code từng khuôn UI như legacy.
 
@@ -252,6 +293,24 @@ Dự báo chỉ để người đọc rồi tự tay đi bắt đầu mẻ (`_st
 
 ### 4.12 `storage_locations`/`locationStock` — multi-location CHỈ PHỦ 1 PHẦN nghiệp vụ
 Chỉ luồng Transfer/Refill dùng `locationStock`; RECEIVING/CONSUMPTION/WASTE/ADJUSTMENT vẫn ghi thẳng `currentStock` gộp, không gắn location. **Quyết định:** nếu Phase sau cần multi-location thật, phải mở rộng TẤT CẢ command ghi kho để mang `locationId`, không chỉ 2 luồng đang có — nếu không cần multi-location thật (theo Open Question đã nêu ở `FIFO-CORE-ARCHITECTURE-V2.md` §11.5, hệ thống hiện tại 100% single-store), có thể hạ độ ưu tiên domain này.
+
+### 4.13 Catalog — Menu/Recipe không có sold-out, link Recipe là khớp key ngầm (mới, `FIFO-CHAIN-TRACE-CATALOG-PROMOTION-V1.md`)
+Không có field/flag "hết hàng" nào trên menu item — Catalog và FIFO hoàn toàn tách rời trước khi bán; nhân viên bán được vô hạn 1 món dù nguyên liệu = 0. Đồng thời, link Menu↔Recipe là khớp key ngầm (`'togo:'+menuItemId`), không phải con trỏ — xoá-tạo-lại 1 món (cách duy nhất "đổi tên" ở legacy) làm mồ côi vĩnh viễn recipe cũ và mọi tham chiếu itemId trong togoSettings/campaign (không cascade dọn). **Fix:** `isAvailable` dẫn xuất từ FIFO currentStock qua read-layer; Recipe link là field con trỏ tường minh (`recipeVersionId`), sửa tên món không đổi identity.
+
+### 4.14 Catalog — Campaign builder linh hoạt nhưng chỉ CỐ VẤN, không tự thực thi (mới)
+`assistConfig.campaigns` cho phép cấu hình điều kiện phong phú (qty/amount/ngày/khung giờ) nhưng chỉ đẩy ra gợi ý hiển thị cho nhân viên, KHÔNG BAO GIỜ tự trừ tiền/thêm quà — trong khi 2 chương trình "hằng ngày" (mua-X-tặng-Y, giảm theo SL) lại hard-code riêng và TỰ ĐỘNG thực thi. Dễ khiến chủ quán hiểu lầm 1 campaign đã cấu hình sẽ tự áp dụng. **Quyết định cho hệ thống mới:** nếu giữ 2 tầng, phải đánh dấu rõ auto-execute vs advisory-only trên UI; lý tưởng là 1 rule engine tổng quát để campaign có thể tự thực thi thật, không mãi advisory-only.
+
+### 4.15 Loyalty — số dư chỉ là field cộng dồn, KHÔNG có ledger để tính lại (mới, nghiêm trọng)
+`total_points`/`stamp_count`/`free_drink_available` bị ghi đè trực tiếp trên doc `customers/{phone}`, không có sổ cái lịch sử để reconstruct. Nếu trôi (ghi lỗi, sửa tay Firestore, race hiếm), KHÔNG có cách nào tính lại đúng — nặng hơn cả gap `untrackedPendingDelta` của FIFO (FIFO còn có ledger để về nguyên tắc dựng lại). QUANLY cũng không có màn hình nào xem/sửa số dư loyalty dù cả 2 toast/UI đều nói "Quản lý xử lý tay". **Fix bắt buộc:** `LoyaltyLedger` là entity thật, số dư = tổng ledger, không phải field ghi đè.
+
+### 4.16 Loyalty — Addon và Reversal không kéo theo Loyalty (mới, xác nhận + mở rộng §4.4)
+`submitAddon()` cộng thêm tiền vào bill và trigger lại FIFO/COGS đúng, nhưng KHÔNG gọi lại `loyaltyAddPoints`/`loyaltyAddStamps` — khách mua thêm qua add-on không được cộng thêm điểm/tem. Tương tự, xoá/huỷ bill ở CẢ 2 app chỉ hoàn kho, không hoàn điểm/tem — gap này ít nhất được LEGACY GHI NHẬN CÔNG KHAI trong UI (khác §4.4 là gap ẩn), nhưng QUANLY không hề có màn "xử lý tay" như UI hứa. **Fix:** Addon PHẢI trigger lại Loyalty cho đúng phần chênh lệch (đã có trong cây §2, dòng 91-92); xoá bill phát domain event `OrderVoided` cho `LoyaltyReversalHandler` xử lý tường minh.
+
+### 4.17 Alerts — severity ghi nhưng không dùng để route, PUSH không nhất quán theo mức nghiêm trọng (mới)
+Alert `severity:'danger'` (vd `allocate_rtdb_error`, `label_reconcile_anomaly`) bị bucket-hoá chung với alert vặt vì `computeStoreHealth()` chỉ switch theo `type`. Hạn dùng container đã mở được PUSH (RED) nhưng hạn dùng lô BTP — cùng bản chất rủi ro — chỉ nằm PULL trong màn Tài chính. Tồn thấp chỉ hiện ở QUANLY, nhân viên bán hàng ở POS không được báo. **Fix:** 1 `AlertEngine` route theo (type, severity); PUSH nhất quán theo mức độ rủi ro thật, không theo domain nào code trước.
+
+### 4.18 Reporting — 2 pipeline doanh thu độc lập, cache không invalidate khi xoá/sửa bill cũ, KHÔNG có phân quyền đọc báo cáo (mới, nghiêm trọng nhất domain Reporting)
+POS có màn "DOANH THU" tự tính hoàn toàn độc lập, không biết `daily_sales_cache_gieogieo` tồn tại — 2 nguồn tính doanh thu cho CÙNG 1 dữ liệu gốc, không đảm bảo khớp nhau. Xoá/sửa 1 bill cũ (đã nằm trong cache) ở CẢ POS lẫn QUANLY không hề invalidate cache — số liệu sai có thể tồn tại vô thời hạn. Nghiêm trọng nhất: QUANLY đăng nhập bằng 1 tài khoản Firebase DÙNG CHUNG, 0 role/permission check trong code — bất kỳ ai mở app đều thấy toàn bộ P&L/COGS/dữ liệu khách hàng, mâu thuẫn trực tiếp với 3 tầng quyền đã định trong `POS-QUANLY-PERMISSION-CONTRACT-V1.md`. **Fix:** 1 read-layer duy nhất cho cả 2 app; `ReverseTransaction`/`ReviseState` tự phát tín hiệu invalidate cache liên quan; phân quyền enforce ở tầng đọc bằng `AccessContext`, không phải chỉ ẩn UI.
 
 ---
 
@@ -277,6 +336,9 @@ Quy tắc import bổ sung (nối vào §2 của blueprint): `catalog`, `loyalty
 
 - [ ] Mỗi domain trong cây có đúng 1 package sở hữu, không domain nào ghi chéo vào domain khác (chặn đứng §4.1).
 - [ ] Bảng §3 được dùng làm căn cứ lập lịch code — domain nào build trước domain nào đã rõ ràng, không phải đoán khi bắt tay code.
-- [ ] Cả 12 lỗ hổng ở §4 đều có dòng trong Regression Suite tương ứng (nối vào `GIEO-SYSTEM-REBUILD-PLAN.md` §18) trước khi coi 1 domain là hoàn thành.
+- [ ] Toàn bộ 18 lỗ hổng ở §4 đều có dòng trong Regression Suite tương ứng (nối vào `GIEO-SYSTEM-REBUILD-PLAN.md` §18) trước khi coi 1 domain là hoàn thành.
 - [ ] `Bill` model có `soldByActorId` bắt buộc ngay từ Phase thiết kế đầu tiên (§4.7) — không thêm sau.
-- [ ] Nguyên tắc "mọi input ảnh hưởng số tiền lịch sử phải versioned" (§4.8) áp dụng đồng loạt cho Recipe + Packaging + Cost + Payroll, không xử lý riêng lẻ.
+- [ ] Nguyên tắc "mọi input ảnh hưởng số tiền lịch sử phải versioned + resolve theo TỪNG NGÀY trong khoảng, không theo ngày cuối kỳ" (§4.8, nay đã xác nhận 7 lần độc lập) áp dụng đồng loạt cho Recipe + Packaging + Cost + Payroll + KPI-target + mọi báo cáo theo kỳ, không xử lý riêng lẻ.
+- [ ] `packages/reporting` enforce `AccessContext`/role ở tầng đọc trước khi trả dữ liệu tài chính — legacy có 0% phân quyền thật ở đây (§4.18), đây là gap ưu tiên cao nhất phát hiện lần audit này.
+- [ ] `packages/loyalty` có `LoyaltyLedger` thật (không phải field cộng dồn) trước khi coi domain [4] là hoàn thành (§4.15).
+- [ ] `MenuItem.isAvailable` dẫn xuất từ FIFO currentStock qua read-layer, không phải field tay (§4.13).
