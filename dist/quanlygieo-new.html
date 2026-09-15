@@ -1,0 +1,639 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>GIEO — Quản lý</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  #app { padding: 16px; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+/* GIEO runtime registry */
+/**
+ * GIEO module registry — hệ thống module tối thiểu cho HTML tự chứa.
+ *
+ * Vì sao tồn tại: đã chốt stack HTML thuần, không build/bundler, nên không có
+ * `dependency-cruiser` để enforce import-direction. Blueprint §2 quy tắc 5 nói
+ * rõ vi phạm import-direction phải FAIL chứ không phải "review sau". Registry
+ * này enforce đúng luật đó NGAY LÚC NẠP TRANG, bằng chính bộ luật ở
+ * src/layer-rules.json — cùng 1 nguồn với checker offline tools/.
+ *
+ * Đây KHÔNG phải cấu trúc code legacy. Legacy là 50k dòng phẳng, mọi hàm gọi
+ * thẳng mọi hàm, không có ranh giới nào. Ở đây mỗi module phải khai báo tường
+ * minh nó thuộc layer nào và phụ thuộc gì, và khai báo sai thì trang không chạy.
+ */
+(function (global) {
+  'use strict';
+
+  /* Build script thay thế token dưới bằng nội dung src/layer-rules.json.
+     Khi chạy trực tiếp trong Node (checker/test) thì nạp qua GIEO._loadRules(). */
+  var LAYER_RULES = {
+  "_doc": "Bộ luật import-direction, mã hoá GIEO-CODE-STRUCTURE-BLUEPRINT-V1.md §2 + bảng §4. Dùng chung cho runtime registry (src/runtime/registry.js) và checker offline (tools/check-import-direction.js). Vi phạm = FAIL, không phải 'review sau' (blueprint §2 quy tắc 5).",
+  "_note_bootstrap": "Layer 'bootstrap' KHÔNG có trong blueprint gốc. Bổ sung tối thiểu bắt buộc: blueprint §2 quy tắc 1 cấm apps/* import persistence-firebase/legacy-firebase-adapter, nhưng port do domain core định nghĩa vẫn phải được nối với adapter ở đâu đó. 'bootstrap' là composition root duy nhất làm việc nối đó; apps chỉ import bootstrap. Không có nó thì hoặc apps phải vi phạm quy tắc 1, hoặc domain core phải import ngược adapter (vi phạm quy tắc 2).",
+
+  "layers": {
+    "shared-kernel": {
+      "role": "Kiểu dữ liệu nền tảng: branded ids, Result/error taxonomy, operation state, MutationPlan, clock.",
+      "canImport": []
+    },
+    "store-context": {
+      "role": "Đang thao tác ở org/store nào, ai đang thao tác, quyền gì.",
+      "canImport": ["shared-kernel"]
+    },
+    "fifo-core": {
+      "role": "TRÁI TIM. Physical truth thay đổi thế nào. Pure domain, không biết Firebase.",
+      "canImport": ["shared-kernel", "store-context"]
+    },
+    "traceability": {
+      "role": "Trace 2 chiều: forward supplier->unit->bill, reverse unit->mọi allocation.",
+      "canImport": ["shared-kernel", "store-context", "fifo-core"]
+    },
+    "recipe-cost-btp": {
+      "role": "Recipe/cost/BTP tại thời điểm nào. KHÔNG được import fifo-core (blueprint §4: fifo-core chỉ cho commands/read-layer/traceability/compaction import).",
+      "canImport": ["shared-kernel", "store-context"]
+    },
+    "compaction": {
+      "role": "VersionedInput dùng chung + snapshot + verifier + purge. Contract: FIFO-COMPACTION-CONTRACT-V1.md",
+      "canImport": ["shared-kernel", "store-context", "fifo-core"]
+    },
+    "read-layer": {
+      "role": "CỔNG ĐỌC DUY NHẤT. Nơi duy nhất được biết cả LIVE lẫn COMPACT. Contract: UNIFIED-READ-LAYER-CONTRACT-V1.md",
+      "canImport": ["shared-kernel", "store-context", "fifo-core", "traceability", "recipe-cost-btp", "compaction", "legacy-firebase-adapter"]
+    },
+    "catalog": {
+      "role": "Menu/Category/Topping/Packaging/Recipe link. QUANLY sở hữu duy nhất.",
+      "canImport": ["shared-kernel", "store-context", "recipe-cost-btp"]
+    },
+    "loyalty": {
+      "role": "Customer, LoyaltyLedger, stamp-free, auto-promotion. KHÔNG voucher/rewards (đã cắt).",
+      "canImport": ["shared-kernel", "store-context"]
+    },
+    "hr": {
+      "role": "Employee, shift check-in/out, payroll. Cấp actorId cho mọi mutation.",
+      "canImport": ["shared-kernel", "store-context", "compaction"]
+    },
+    "finance": {
+      "role": "Expense, payment methods, config version.",
+      "canImport": ["shared-kernel", "store-context", "compaction"]
+    },
+    "alerts": {
+      "role": "16 loại cảnh báo, 1 schema/type. Sink 2 chiều, không domain nào phụ thuộc ngược vào nó.",
+      "canImport": ["shared-kernel", "store-context"]
+    },
+    "protected-adapters": {
+      "role": "Bill printer / label printer / scanner / bank. KHÔNG rewrite semantics, chỉ bọc.",
+      "canImport": ["shared-kernel", "store-context"]
+    },
+    "commands": {
+      "role": "Command pipeline dùng chung POS+QUANLY. UI muốn đổi state thì gọi đây.",
+      "canImport": ["shared-kernel", "store-context", "fifo-core", "traceability", "recipe-cost-btp", "compaction", "catalog", "loyalty", "hr", "finance", "alerts", "protected-adapters"]
+    },
+    "reporting": {
+      "role": "Chỉ đọc, qua read-layer. Xây SAU CÙNG.",
+      "canImport": ["shared-kernel", "store-context", "read-layer"]
+    },
+    "persistence-firebase": {
+      "role": "Implement port cho path CANONICAL mới. Adapter, không quyết định kiến trúc.",
+      "canImport": ["shared-kernel", "store-context", "fifo-core", "compaction"]
+    },
+    "legacy-firebase-adapter": {
+      "role": "Đọc schema CŨ -> map sang canonical. CHỈ ĐỌC, không bao giờ ghi path cũ.",
+      "canImport": ["shared-kernel", "store-context"]
+    },
+    "bootstrap": {
+      "role": "Composition root DUY NHẤT: nối port của domain core với adapter thật, rồi trao cho apps. Xem _note_bootstrap.",
+      "canImport": ["shared-kernel", "store-context", "commands", "read-layer", "persistence-firebase", "legacy-firebase-adapter", "protected-adapters", "reporting"]
+    },
+    "app-pos": {
+      "role": "THIN CLIENT. Không sở hữu business state.",
+      "canImport": ["shared-kernel", "store-context", "bootstrap", "commands", "read-layer", "protected-adapters"]
+    },
+    "app-quanly": {
+      "role": "THIN MANAGEMENT UI.",
+      "canImport": ["shared-kernel", "store-context", "bootstrap", "commands", "read-layer", "reporting"]
+    }
+  },
+
+  "hardRules": [
+    "apps KHÔNG BAO GIỜ import trực tiếp fifo-core, compaction, persistence-firebase, legacy-firebase-adapter — chỉ qua commands (ghi) / read-layer (đọc) / bootstrap (wiring).",
+    "Domain core (fifo-core, traceability, recipe-cost-btp, compaction) KHÔNG import Firebase SDK trực tiếp; chúng định nghĩa port, adapter implement.",
+    "legacy-firebase-adapter chỉ đọc, không ghi path cũ (ngoại lệ duy nhất: script trong tools/).",
+    "read-layer là nơi DUY NHẤT được biết cả LIVE lẫn COMPACT cùng lúc.",
+    "Không ai import ngược vào app-pos / app-quanly.",
+    "read-layer KHÔNG import commands (đọc không gọi ghi)."
+  ]
+};
+
+  var modules = Object.create(null);
+  var cache = Object.create(null);
+  var loading = Object.create(null);
+
+  function fail(msg) {
+    throw new Error('[GIEO] ' + msg);
+  }
+
+  function layerOf(id) {
+    var i = id.indexOf('/');
+    if (i <= 0) fail('id module phải dạng "<layer>/<ten>", nhận được: "' + id + '"');
+    return id.slice(0, i);
+  }
+
+  function rulesFor(layer) {
+    if (!LAYER_RULES) fail('chưa nạp layer-rules');
+    var r = LAYER_RULES.layers[layer];
+    if (!r) fail('layer không tồn tại trong layer-rules.json: "' + layer + '"');
+    return r;
+  }
+
+  /**
+   * Kiểm tra 1 cạnh phụ thuộc. Tách riêng để checker offline dùng lại y hệt —
+   * runtime và CI không được phép hiểu luật khác nhau.
+   */
+  function checkEdge(fromId, toId) {
+    var from = layerOf(fromId);
+    var to = layerOf(toId);
+    if (from === to) return null; // trong cùng layer: tự do
+    var allowed = rulesFor(from).canImport;
+    rulesFor(to);
+    if (allowed.indexOf(to) === -1) {
+      return 'VI PHẠM IMPORT-DIRECTION: "' + fromId + '" (layer ' + from +
+        ') không được import "' + toId + '" (layer ' + to + '). ' +
+        'Layer ' + from + ' chỉ được import: [' + allowed.join(', ') + ']. ' +
+        'Xem GIEO-CODE-STRUCTURE-BLUEPRINT-V1.md §2 và src/layer-rules.json.';
+    }
+    return null;
+  }
+
+  function define(id, deps, factory) {
+    if (typeof id !== 'string') fail('define() cần id dạng chuỗi');
+    if (!Array.isArray(deps)) fail('define("' + id + '") cần mảng deps (dùng [] nếu không có)');
+    if (typeof factory !== 'function') fail('define("' + id + '") cần factory là hàm');
+    if (modules[id]) fail('module trùng id: "' + id + '"');
+    layerOf(id);
+
+    for (var i = 0; i < deps.length; i++) {
+      var err = checkEdge(id, deps[i]);
+      if (err) fail(err);
+    }
+    modules[id] = { deps: deps, factory: factory };
+  }
+
+  function require(id) {
+    if (cache[id]) return cache[id];
+    var m = modules[id];
+    if (!m) fail('không tìm thấy module "' + id + '". Thiếu khai báo define() hoặc sai thứ tự nạp?');
+    if (loading[id]) fail('phụ thuộc vòng khi nạp "' + id + '"');
+    loading[id] = true;
+
+    var resolved = [];
+    for (var i = 0; i < m.deps.length; i++) resolved.push(require(m.deps[i]));
+
+    var exports = m.factory.apply(null, resolved);
+    if (exports === undefined) fail('module "' + id + '" không return gì. Factory phải return object exports.');
+    delete loading[id];
+    cache[id] = exports;
+    return exports;
+  }
+
+  /** Báo cáo toàn bộ module đã đăng ký — dùng cho self-test lúc khởi động. */
+  function inventory() {
+    return Object.keys(modules).sort().map(function (id) {
+      return { id: id, layer: layerOf(id), deps: modules[id].deps.slice() };
+    });
+  }
+
+  global.GIEO = {
+    define: define,
+    require: require,
+    inventory: inventory,
+    checkEdge: checkEdge,
+    layerOf: layerOf,
+    _setRules: function (r) { LAYER_RULES = r; },
+    _getRules: function () { return LAYER_RULES; }
+  };
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
+
+/* ===== src/layers/shared-kernel/clock.js ===== */
+/**
+ * Clock — nguồn thời gian DUY NHẤT, tiêm được để test.
+ *
+ * Invariant T4 (UNIFIED-READ-LAYER-CONTRACT-V1.md §7): cấm `new Date()` rải rác.
+ * Lý do thực tế: point-in-time resolve (FIFO-COMPACTION-CONTRACT-V1.md §1 V2/V3)
+ * chỉ đúng khi mọi nơi đồng ý "bây giờ là lúc nào" và "hôm nay là ngày nào".
+ * Legacy tính businessDate ở nhiều chỗ theo nhiều cách, không test được.
+ */
+GIEO.define('shared-kernel/clock', [], function () {
+  'use strict';
+
+  /**
+   * Ranh giới ngày làm việc.
+   *
+   * [CẦN XÁC NHẬN] Mặc định 0h. Chưa có bằng chứng trong tài liệu audit về việc
+   * quán chốt ngày ở giờ khác (ví dụ bán qua nửa đêm thì doanh thu 1h sáng tính
+   * cho ngày hôm trước). Theo invariant #12 "không đoán legacy semantics khi
+   * ambiguous" — để thành tham số cấu hình thay vì hard-code, và phải hỏi chủ
+   * quán trước khi chạy thật. Đổi giá trị này làm đổi mọi báo cáo theo ngày.
+   */
+  var DEFAULT_DAY_START_HOUR = 0;
+
+  function pad(n) { return n < 10 ? '0' + n : String(n); }
+
+  function createClock(opts) {
+    opts = opts || {};
+    var dayStartHour = opts.dayStartHour === undefined ? DEFAULT_DAY_START_HOUR : opts.dayStartHour;
+    if (typeof dayStartHour !== 'number' || dayStartHour < 0 || dayStartHour > 23) {
+      throw new Error('[clock] dayStartHour phải trong 0..23, nhận: ' + dayStartHour);
+    }
+    /* now() tiêm được: test truyền hàm cố định, production dùng Date.now. */
+    var nowFn = opts.now || function () { return Date.now(); };
+
+    function now() { return nowFn(); }
+
+    /** businessDate dạng 'YYYY-MM-DD' theo giờ địa phương, đã trừ ranh giới ngày. */
+    function businessDate(ts) {
+      var d = new Date(ts === undefined ? now() : ts);
+      if (dayStartHour > 0 && d.getHours() < dayStartHour) {
+        d = new Date(d.getTime() - 24 * 3600 * 1000);
+      }
+      return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+    }
+
+    /** monthKey dạng 'YYYY-MM' — khoá chốt sổ tháng. */
+    function monthKey(ts) {
+      return businessDate(ts).slice(0, 7);
+    }
+
+    /**
+     * Liệt kê từng ngày trong khoảng — nền của quy tắc V3
+     * ("resolve TỪNG NGÀY, cấm 1 mốc đại diện cả khoảng").
+     * Có hàm này thì không còn lý do để ai đó resolve 1 lần tại ngày cuối kỳ.
+     */
+    function eachDay(fromTs, toTs) {
+      if (toTs < fromTs) throw new Error('[clock] eachDay: to < from');
+      var out = [];
+      var cur = new Date(fromTs);
+      var last = businessDate(toTs);
+      for (var guard = 0; guard < 4000; guard++) {
+        var key = businessDate(cur.getTime());
+        out.push(key);
+        if (key >= last) return out;
+        cur = new Date(cur.getTime() + 24 * 3600 * 1000);
+      }
+      throw new Error('[clock] eachDay: khoảng quá dài (>4000 ngày)');
+    }
+
+    return {
+      now: now,
+      businessDate: businessDate,
+      monthKey: monthKey,
+      eachDay: eachDay,
+      dayStartHour: dayStartHour
+    };
+  }
+
+  return {
+    createClock: createClock,
+    DEFAULT_DAY_START_HOUR: DEFAULT_DAY_START_HOUR
+  };
+});
+
+/* ===== src/layers/shared-kernel/ids.js ===== */
+/**
+ * Branded IDs — invariant #4 của GIEO-SYSTEM-REBUILD-PLAN.md §1.4 ("Identity phải tách biệt").
+ *
+ * Stack đã chốt là JS thuần nên không có type system để tách UnitId khỏi BillId
+ * lúc biên dịch. Thay vào đó tách ở RUNTIME bằng tiền tố bắt buộc: mọi id mang
+ * sẵn loại của nó, và assertId() từ chối id sai loại ngay tại chỗ dùng.
+ *
+ * Legacy không có ranh giới này — container.code vừa là identity nội bộ vừa là
+ * nhãn người đọc, nên không thể phân biệt "id này là của cái gì" khi debug.
+ */
+GIEO.define('shared-kernel/ids', [], function () {
+  'use strict';
+
+  /* Mọi loại id trong hệ thống. Thêm loại mới = thêm vào đây, không tự chế
+     tiền tố rời rạc ở nơi khác. */
+  var KINDS = [
+    'org', 'store', 'actor', 'employee', 'operation',
+    'unit', 'item', 'receipt', 'supplier', 'ledger',
+    'bill', 'billLine', 'prepBatch', 'prepItem',
+    'recipe', 'recipeVersion', 'costBasis', 'version',
+    'customer', 'shift', 'snapshot', 'alert', 'expense'
+  ];
+
+  var SEP = '_';
+  var kindSet = Object.create(null);
+  KINDS.forEach(function (k) { kindSet[k] = true; });
+
+  function assertKind(kind) {
+    if (!kindSet[kind]) throw new Error('[ids] loại id không hợp lệ: "' + kind + '"');
+  }
+
+  /** Bỏ ký tự có thể phá cấu trúc id hoặc path Firebase. */
+  function sanitize(part) {
+    return String(part).replace(/[^A-Za-z0-9.@+-]/g, '-');
+  }
+
+  var counter = 0;
+
+  /**
+   * Sinh id NGẪU NHIÊN. Chỉ dùng cho thực thể (Unit, Bill...).
+   * TUYỆT ĐỐI không dùng cho operationId của mutation nghiệp vụ — xem
+   * deterministicId(). Legacy dùng .add() random cho mutation là nguồn của
+   * bug #13/#21/#22/#23/#24 (FIFO-CORE-ARCHITECTURE-V2.md §7).
+   */
+  function newId(kind) {
+    assertKind(kind);
+    counter = (counter + 1) % 1e6;
+    var rand = Math.random().toString(36).slice(2, 10);
+    return kind + SEP + Date.now().toString(36) + '-' + rand + '-' + counter.toString(36);
+  }
+
+  /**
+   * Id XÁC ĐỊNH cho mutation — cùng input luôn ra cùng id, nên chạy lại là no-op.
+   * Đây là bước 1 của IdempotencyGuard (FIFO-CORE-ARCHITECTURE-V2.md §7).
+   */
+  function deterministicId(kind, parts) {
+    assertKind(kind);
+    if (!Array.isArray(parts) || parts.length === 0) {
+      throw new Error('[ids] deterministicId cần mảng parts không rỗng');
+    }
+    if (parts.some(function (p) { return p === null || p === undefined || p === ''; })) {
+      throw new Error('[ids] deterministicId: parts không được có phần rỗng — ' + JSON.stringify(parts));
+    }
+    return kind + SEP + parts.map(sanitize).join('.');
+  }
+
+  function kindOf(id) {
+    if (typeof id !== 'string') return null;
+    var i = id.indexOf(SEP);
+    if (i <= 0) return null;
+    var k = id.slice(0, i);
+    return kindSet[k] ? k : null;
+  }
+
+  function isId(id, kind) {
+    assertKind(kind);
+    return kindOf(id) === kind;
+  }
+
+  /** Dùng ở đầu mọi hàm nhận id — sai loại phải nổ ngay, không trôi xuống sâu. */
+  function assertId(id, kind, where) {
+    if (!isId(id, kind)) {
+      throw new Error(
+        '[ids] ' + (where || 'assertId') + ': cần ' + kind + 'Id, nhận được ' +
+        (kindOf(id) ? kindOf(id) + 'Id' : JSON.stringify(id))
+      );
+    }
+    return id;
+  }
+
+  return {
+    KINDS: KINDS.slice(),
+    newId: newId,
+    deterministicId: deterministicId,
+    kindOf: kindOf,
+    isId: isId,
+    assertId: assertId
+  };
+});
+
+/* ===== src/layers/shared-kernel/operation-state.js ===== */
+/**
+ * Operation state machine — invariant #5 ("mutation phải idempotent").
+ *
+ * Mọi mutation nghiệp vụ có đúng 1 operationId và đi qua đúng máy trạng thái này.
+ * Legacy để mỗi hàm tự chế lớp chống-đúp riêng (3/6 đường tiêu thụ thiếu txId,
+ * stock count dùng .add() random) — FIFO-CORE-ARCHITECTURE-V2.md §7.
+ *
+ * Tách FAILED_RETRYABLE khỏi FAILED_MANUAL_REVIEW là có chủ đích: máy được phép
+ * tự thử lại cái thứ nhất, KHÔNG được tự thử lại cái thứ hai.
+ */
+GIEO.define('shared-kernel/operation-state', ['shared-kernel/result'], function (R) {
+  'use strict';
+
+  var STATES = {
+    PENDING: 'PENDING',
+    RUNNING: 'RUNNING',
+    COMPLETED: 'COMPLETED',
+    FAILED_RETRYABLE: 'FAILED_RETRYABLE',
+    FAILED_MANUAL_REVIEW: 'FAILED_MANUAL_REVIEW',
+    CANCELLED: 'CANCELLED'
+  };
+
+  /* COMPLETED và CANCELLED là terminal — không đường ra. Chạy lại 1 operation
+     COMPLETED phải là no-op trả kết quả cũ, không phải làm lại. */
+  var TRANSITIONS = {
+    PENDING: ['RUNNING', 'CANCELLED', 'FAILED_RETRYABLE', 'FAILED_MANUAL_REVIEW'],
+    RUNNING: ['COMPLETED', 'FAILED_RETRYABLE', 'FAILED_MANUAL_REVIEW'],
+    FAILED_RETRYABLE: ['RUNNING', 'CANCELLED', 'FAILED_MANUAL_REVIEW'],
+    FAILED_MANUAL_REVIEW: ['RUNNING', 'CANCELLED'],
+    COMPLETED: [],
+    CANCELLED: []
+  };
+
+  var TERMINAL = { COMPLETED: true, CANCELLED: true };
+
+  function isState(s) { return Object.prototype.hasOwnProperty.call(STATES, s); }
+  function isTerminal(s) { return !!TERMINAL[s]; }
+
+  function canTransition(from, to) {
+    if (!isState(from) || !isState(to)) return false;
+    return TRANSITIONS[from].indexOf(to) !== -1;
+  }
+
+  /** Trả Result thay vì throw: chuyển trạng thái sai là tình huống nghiệp vụ, không phải bug. */
+  function transition(from, to) {
+    if (!isState(from)) return R.err('VALIDATION', 'trạng thái nguồn không hợp lệ: ' + from);
+    if (!isState(to)) return R.err('VALIDATION', 'trạng thái đích không hợp lệ: ' + to);
+    if (isTerminal(from)) {
+      return R.err('PRECONDITION', 'operation đã ở trạng thái cuối "' + from + '", không thể chuyển sang "' + to + '"');
+    }
+    if (!canTransition(from, to)) {
+      return R.err('PRECONDITION', 'không cho phép chuyển "' + from + '" -> "' + to + '"');
+    }
+    return R.ok(to);
+  }
+
+  return {
+    STATES: STATES,
+    TRANSITIONS: TRANSITIONS,
+    isState: isState,
+    isTerminal: isTerminal,
+    canTransition: canTransition,
+    transition: transition
+  };
+});
+
+/* ===== src/layers/shared-kernel/result.js ===== */
+/**
+ * Result + error taxonomy — invariant #11 ("không swallow errors").
+ *
+ * Legacy nuốt lỗi ở nhiều chỗ: `.catch(console.warn)` khi đóng unit nợ (Bug #15),
+ * loyalty trả 0 ngầm khi thiếu Customer, `plChannelFeeForDay()` hard-code trả 0.
+ * Hệ quả chung: lỗi biến thành số 0 hợp lệ trông như dữ liệu thật.
+ *
+ * Ở đây thất bại là GIÁ TRỊ TRẢ VỀ có hình dạng riêng, không thể nhầm với số 0,
+ * và không thể đọc .value mà không xử lý lỗi trước.
+ */
+GIEO.define('shared-kernel/result', [], function () {
+  'use strict';
+
+  /* Phân loại lỗi. Quyết định "thử lại hay không" phải đọc được từ loại lỗi,
+     không phải đoán từ message như legacy. */
+  var ERROR_KINDS = {
+    VALIDATION: 'VALIDATION',                 // input sai — thử lại vô nghĩa
+    FORBIDDEN: 'FORBIDDEN',                   // thiếu quyền — read-layer §5
+    NOT_FOUND: 'NOT_FOUND',
+    CONFLICT: 'CONFLICT',                     // claim đã bị người khác giữ
+    PRECONDITION: 'PRECONDITION',             // trạng thái không cho phép
+    AMBIGUOUS_LEGACY: 'AMBIGUOUS_LEGACY',     // invariant #12 — cấm suy đoán, phải rà tay
+    RETRYABLE: 'RETRYABLE',                   // lỗi hạ tầng tạm thời
+    MANUAL_REVIEW: 'MANUAL_REVIEW'            // hỏng giữa chừng, cần người xử lý
+  };
+
+  var RETRYABLE_KINDS = { RETRYABLE: true };
+
+  function ok(value) {
+    return { ok: true, value: value === undefined ? null : value };
+  }
+
+  function err(kind, message, detail) {
+    if (!ERROR_KINDS[kind]) throw new Error('[result] loại lỗi không hợp lệ: "' + kind + '"');
+    return {
+      ok: false,
+      error: {
+        kind: kind,
+        message: String(message || kind),
+        detail: detail === undefined ? null : detail
+      }
+    };
+  }
+
+  function isOk(r) { return !!(r && r.ok === true); }
+  function isErr(r) { return !!(r && r.ok === false); }
+
+  function isRetryable(r) {
+    return isErr(r) && !!RETRYABLE_KINDS[r.error.kind];
+  }
+
+  /**
+   * Lấy giá trị, nổ nếu là lỗi. Chỉ dùng khi caller ĐÃ kiểm tra isOk(),
+   * hoặc ở ranh giới mà lỗi thật sự là bug lập trình.
+   */
+  function unwrap(r, where) {
+    if (isOk(r)) return r.value;
+    if (isErr(r)) {
+      throw new Error('[result] ' + (where || 'unwrap') + ': ' + r.error.kind + ' — ' + r.error.message);
+    }
+    throw new Error('[result] ' + (where || 'unwrap') + ': không phải Result — ' + JSON.stringify(r));
+  }
+
+  /** Biến đổi giá trị, giữ nguyên lỗi. */
+  function map(r, fn) {
+    return isOk(r) ? ok(fn(r.value)) : r;
+  }
+
+  /** Nối chuỗi bước có thể hỏng; dừng ở lỗi đầu tiên. */
+  function chain(r, fn) {
+    return isOk(r) ? fn(r.value) : r;
+  }
+
+  /** Gom nhiều Result; lỗi đầu tiên thắng. Dùng cho validate nhiều trường. */
+  function all(results) {
+    var out = [];
+    for (var i = 0; i < results.length; i++) {
+      if (isErr(results[i])) return results[i];
+      out.push(results[i].value);
+    }
+    return ok(out);
+  }
+
+  return {
+    ERROR_KINDS: ERROR_KINDS,
+    ok: ok,
+    err: err,
+    isOk: isOk,
+    isErr: isErr,
+    isRetryable: isRetryable,
+    unwrap: unwrap,
+    map: map,
+    chain: chain,
+    all: all
+  };
+});
+
+/* ===== src/apps/quanly/main.js ===== */
+/**
+ * QUANLY entry — THIN MANAGEMENT UI.
+ *
+ * Giai đoạn hiện tại: SCAFFOLD, READ-ONLY. Chưa nối Firebase.
+ * Hiển thị bộ luật import-direction đang có hiệu lực, để ranh giới kiến trúc
+ * là thứ nhìn thấy được chứ không nằm im trong tài liệu.
+ */
+GIEO.define('app-quanly/main', [
+  'shared-kernel/clock',
+  'shared-kernel/result'
+], function (clock, R) {
+  'use strict';
+
+  function esc(s) {
+    return String(s).replace(/[&<>]/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c];
+    });
+  }
+
+  function start() {
+    var c = clock.createClock();
+    var el = document.getElementById('app');
+    var rules = GIEO._getRules();
+    var mods = GIEO.inventory();
+
+    var rows = Object.keys(rules.layers).map(function (name) {
+      var allowed = rules.layers[name].canImport;
+      var count = mods.filter(function (m) { return m.layer === name; }).length;
+      return '<tr>' +
+        '<td style="padding:4px 8px"><code>' + name + '</code></td>' +
+        '<td style="padding:4px 8px;text-align:right;color:' + (count ? '#000' : '#bbb') + '">' + count + '</td>' +
+        '<td style="padding:4px 8px;color:#555">' +
+          (allowed.length ? allowed.map(esc).join(', ') : '<em style="color:#999">không phụ thuộc gì</em>') +
+        '</td></tr>';
+    }).join('');
+
+    el.innerHTML =
+      '<h1 style="font-size:18px;margin:0 0 4px">GIEO Quản lý</h1>' +
+      '<p style="margin:0 0 16px;color:#666">Scaffold — READ-ONLY. ' + esc(c.businessDate()) + '</p>' +
+      '<p style="padding:8px 12px;border-radius:6px;background:#e8f5e9">' +
+        mods.length + ' module đã nạp, 0 vi phạm import-direction ' +
+        '<span style="color:#666">(registry chặn ngay lúc nạp trang)</span></p>' +
+      '<h2 style="font-size:14px;margin-top:20px">Bộ luật import-direction đang hiệu lực</h2>' +
+      '<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:13px;min-width:560px">' +
+        '<thead><tr style="text-align:left;border-bottom:1px solid #ddd">' +
+          '<th style="padding:4px 8px">Layer</th>' +
+          '<th style="padding:4px 8px;text-align:right">Module</th>' +
+          '<th style="padding:4px 8px">Được import</th>' +
+        '</tr></thead><tbody>' + rows + '</tbody></table></div>' +
+      '<h2 style="font-size:14px;margin-top:20px">Luật cứng</h2>' +
+      '<ul style="padding-left:18px;color:#555">' +
+        rules.hardRules.map(function (r) { return '<li>' + esc(r) + '</li>'; }).join('') +
+      '</ul>';
+
+    return R.ok(true);
+  }
+
+  return { start: start };
+});
+
+/* ===== khởi động ===== */
+GIEO.require("app-quanly/main").start();
+
+</script>
+</body>
+</html>
