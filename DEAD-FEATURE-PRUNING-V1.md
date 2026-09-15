@@ -19,7 +19,7 @@
 | **UI SỬA Menu (`#mn`) + Khuyến mãi (`#tg`) trong POS** | Ẩn UI, bản thật đã chuyển hẳn sang QUANLY | **Không mang UI sửa sang POS** — khớp đúng `POS-QUANLY-PERMISSION-CONTRACT-V1.md` (QUANLY sở hữu Product/Promotion Master). |
 | Danh sách "Khách hàng" (`#customers`, list UI trong POS) | Ẩn UI, chỉ 1 view liệt kê | Không mang UI list này sang, **nhưng dữ liệu/logic loyalty phía sau PHẢI giữ** (xem §2). |
 | `isWallet` param trong Loyalty | Code chết 1 phần, không caller nào còn truyền `true` | Bỏ hẳn param khi viết lại (hệ thống mới không có nợ cũ để tương thích ngược). |
-| Web Serial / `XprinterWNN58E` | Còn 1 code path thật (chạy ngoài APK) | **CẦN HỎI** — xem §4. |
+| Web Serial / `XprinterWNN58E` | Còn 1 code path thật (chạy ngoài APK) | **Đã xác nhận với chủ hệ thống: không cần** — chỉ chạy qua APK. Cắt hẳn, xem §4. |
 
 ---
 
@@ -59,11 +59,13 @@ Tên gợi ý "ví" (Wallet đã gỡ) nhưng thực chất là hệ class layou
 
 ---
 
-# 4. CẦN BẠN QUYẾT ĐỊNH — Web Serial (`XprinterWNN58E`)
+# 4. Web Serial (`XprinterWNN58E`) — ĐÃ CHỐT: CẮT HẲN
 
-Khác toàn bộ trường hợp trên (đã xác nhận chết 100%), đường in qua **Web Serial** (không qua APK, chạy thẳng trên Chrome desktop) **vẫn có code path thật sự gọi được** — chỉ bị ẩn nút khi biến `window.AndroidPrinter` tồn tại (tức luôn ẩn trong APK production, nhưng hiện ra nếu ai đó mở file bằng trình duyệt thường).
+Xác nhận với chủ hệ thống: **không cần in qua web, chỉ chạy qua APK.** Quyết định:
 
-**Câu hỏi:** hệ thống mới có còn dự định chạy được ngoài APK (vd. dùng tạm trên máy tính quầy pha khi APK lỗi, hoặc môi trường dev) không? Nếu **không bao giờ** chạy ngoài APK → cắt hẳn Web Serial, `PrinterAdapter` chỉ cần 1 đường Bluetooth qua bridge. Nếu **có** → giữ lại như 1 fallback dự phòng chính thức (không phải code chết ẩn đi như legacy).
+- `BillPrinterAdapter` (`packages/protected-adapters/bill-printer-adapter.ts`) chỉ còn **1 đường duy nhất**: Bluetooth qua `window.AndroidPrinter` (bridge APK) — đúng nguyên tắc đã rút ra ở `PROTECTED-INFRASTRUCTURE-ADAPTER-CONTRACT-V1.md` §2.4 ("chỉ 1 đường, không thêm fallback thứ 2" — bài học từ chính việc xoá RawBT trước đây).
+- Không cần logic feature-detect/ẩn-hiện nút theo `window.AndroidPrinter` tồn tại hay không như legacy — hệ thống mới coi APK là môi trường DUY NHẤT, không cần nhánh dự phòng cho trình duyệt thường.
+- `XprinterWNN58E`/Web Serial: **không mang sang**, xoá hoàn toàn khi viết `bill-printer-adapter.ts`.
 
 ---
 

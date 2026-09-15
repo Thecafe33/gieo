@@ -36,6 +36,7 @@ POSTemPrinter._queue = next.catch(() => {});       // luôn giữ queue ở tr�
 ## 1.3 Engine & giao thức
 - `printBillRawBytes` (bill) khác `printRawBytes` (tem) — 2 hàm bridge riêng trên cùng `window.AndroidPrinter`, không dùng lẫn.
 - Bill in qua `XprinterBillBridgeEngine` — Bluetooth, pipeline: `initPrinter()` → `printCanvasRaster(canvas)` → `feed()`. Nội dung dựng bằng `buildReceiptContent()` → `renderReceiptCanvas()` (canvas raster, không phải lệnh text thuần).
+- **Đã chốt (xem `DEAD-FEATURE-PRUNING-V1.md` §4): KHÔNG mang `XprinterWNN58E`/Web Serial sang.** Hệ thống mới chỉ chạy trong APK, `BillPrinterAdapter` chỉ có 1 đường Bluetooth qua `window.AndroidPrinter`, không cần nhánh dự phòng/feature-detect cho trình duyệt thường như legacy.
 - Kết nối: máy phải **ghép nối Bluetooth trước trong Cài đặt Android** (app không tự pair) → `connectBluetoothApp(mac)` → lưu MAC vào `printer_layout_gieogieo.billPrinterMac` (RTDB, dùng chung mọi máy POS trong quán) → tự kết nối lại lúc khởi động app bằng MAC đã nhớ.
 
 ## 1.4 Reprint bill
@@ -160,6 +161,7 @@ Audit cho thấy legacy trộn lẫn "giao tiếp phần cứng" với "quy tắ
 
 `packages/protected-adapters` coi là PASS khi:
 - [ ] `BillPrinterAdapter` và `LabelPrinterAdapter` có queue độc lập, cả 2 đều tự phục hồi sau lỗi (fix mục 6.1).
+- [ ] `BillPrinterAdapter` chỉ có 1 đường Bluetooth qua APK — không còn Web Serial/`XprinterWNN58E` (đã chốt, không cần hỏi lại).
 - [ ] Encode TSPL + ESC/POS đều có, không auto-detect, setting theo store (đúng hành vi legacy).
 - [ ] Đường gửi tem chỉ 1 đường qua `AndroidPrinter.printRawBytes`, không thêm fallback thứ 2 (đúng bài học lịch sử §2.4).
 - [ ] `ScannerAdapter.scan()` không bao giờ reject, luôn có timeout, có fallback nhập tay (fix mục 6.2).
