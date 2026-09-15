@@ -3572,6 +3572,10 @@ function addInventoryItem(data){
     countUnitName: data.countUnitName || '',
     stockManaged: data.stockManaged !== false,
     openShelfLifeHours: Number(data.openShelfLifeHours) || 0,
+    // printOpenLabel — nguyên liệu dùng thẳng không qua chế biến (topping...) mà bao bì gốc
+    // mang mã tem bị vứt ngay khi mở. Bật thì POS in tem mở mới (giữ mã cũ + giờ mở) để dán
+    // sang dụng cụ đựng, xem submitOpenContainer()/POSTemPrinter.printOpenLabel bên posgieo.
+    printOpenLabel: !!data.printOpenLabel,
     // untrackedBase — tồn KHÔNG có tem nào đại diện. Xem khối chú thích ở
     // chotTonLichSu(). Món tạo mới mà bật dán tem ngay thì toàn bộ tồn khởi tạo là
     // tồn chưa có tem, nên mốc = currentStock. Món không dán tem để null (chưa cần).
@@ -4413,7 +4417,7 @@ async function renderKhoContainers(){
       `<button class="ftag ${ctnFilter===k?'active':''}" onclick="ctnFilter='${k}'; renderKhoContainers();">${l}</button>`).join('')}</div>`;
 
   const giaiThich = {
-    review: 'Nhân viên báo hết khi hàng còn hơn 25%. Không phải lúc nào cũng là gian — có thể bị đổ, hỏng, hoặc định mức khai thiếu nên sổ còn nhiều hơn thực tế. Nhưng lặp lại ở cùng một người thì cần hỏi.',
+    review: 'Gộp hai loại: (1) nhân viên báo HẾT khi hàng còn hơn 25% — có thể bị đổ, hỏng, hoặc định mức khai thiếu; (2) nhân viên báo "CHƯA HẾT" khi hệ thống tính nhầm là đã hết — cân lại đúng thì không sao, nhưng lặp lại nhiều ở một nguyên liệu là dấu hiệu định mức/công thức đang sai. Không phải lúc nào cũng là gian, nhưng lặp lại ở cùng một người/món thì cần hỏi.',
     expired: 'Hàng đã mở nắp quá hạn sử dụng. Đây là chuyện an toàn thực phẩm, không phải chuyện kho — nên xử lý ngay chứ không đợi kiểm kê.',
     open: 'Toàn bộ chai, gói, hộp đang mở dở trong quán.',
     unlabeled: 'Mã đã sinh khi nhận hàng nhưng chưa ai dán tem lên. Để lâu thì hàng không có tem mà hệ thống vẫn tưởng có — lúc kiểm kê sẽ không quét được.'
@@ -4436,20 +4440,27 @@ async function renderKhoContainers(){
       const p2 = n => String(n).padStart(2,'0');
       const dt = iso => { const d = iso?new Date(iso):null; return (d && !isNaN(d)) ? `${p2(d.getDate())}/${p2(d.getMonth()+1)}` : ''; };
       const tyLe = (Number(c.baseQty)>0 && Number(c.wasteBase)>0) ? Math.round(c.wasteBase/c.baseQty*100) : 0;
-      const phu = ctnFilter==='review'
+      // [MỚI] "Chưa hết" — POS ghi mảng notEmptyChecks khi nhân viên cân/đong lại thấy hệ
+      // thống tính NHẦM là đã hết. Container này vẫn 'open' (không phải 'finished' như case
+      // báo-hết-còn-nhiều ở trên), nên ưu tiên đọc nhánh này trước khi rơi về nhánh cũ.
+      const necLast = (c.notEmptyChecks||[]).slice(-1)[0];
+      const phu = (ctnFilter==='review' && necLast)
+        ? `Báo <b>"chưa hết"</b> ${dt(necLast.at)} bởi <b>${escapeHtmlAttr(necLast.by||'—')}</b> · cân lại còn <b>${fmtNum(necLast.newUnitBase,2)} ${escapeHtmlAttr(c.unit||'')}</b>`
+          + `<div class="muted-sm">Hệ thống trước đó tính đã hết (${fmtNum(necLast.oldUnitBase,2)} ${escapeHtmlAttr(c.unit||'')}) · ${necLast.weighMethod==='vessel'?'cân trừ bì':'gõ tay'} · lý do: ${escapeHtmlAttr(necLast.note||'—')}</div>`
+        : ctnFilter==='review'
         ? `Báo hết ${dt(c.finishedAt)} bởi <b>${escapeHtmlAttr(c.finishedBy||'—')}</b> · còn <b>${fmtNum(c.wasteBase,0)} ${escapeHtmlAttr(c.unit||'')}</b> (${tyLe}% còn lại)`
           + (c.wasteBasis && c.wasteBasis !== 'tinh_duoc' ? `<div class="muted-sm">${escapeHtmlAttr(ctnBasisLabel(c.wasteBasis))}</div>` : '')
         : ctnFilter==='unlabeled'
         ? `Nhận ${dt(c.receivedAt)} bởi ${escapeHtmlAttr(c.receivedBy||'—')}`
         : `Mở ${dt(c.openedAt)} bởi ${escapeHtmlAttr(c.openedBy||'—')}`;
       const nhan = ctnFilter==='review'
-        ? `<span class="tier tier-${tyLe>=50?'red':'amber'}">${tyLe}% còn lại</span>`
+        ? (necLast ? `<span class="tier tier-amber">Chưa hết</span>` : `<span class="tier tier-${tyLe>=50?'red':'amber'}">${tyLe}% còn lại</span>`)
         : (ex.text ? `<span class="${ex.cls}">${ex.text}</span>` : '');
       return `<div class="litem">
         <div class="li-l">
           <div>${escapeHtmlAttr(c.itemName||'')} <span class="muted-sm" style="letter-spacing:.4px">${escapeHtmlAttr(c.code||'')}</span></div>
           <div>${phu}</div>
-          ${c.finishScanned===false && ctnFilter==='review' ? `<div class="muted-sm">Chọn tay, không quét mã${c.finishReason?' · '+escapeHtmlAttr(ctnReasonLabel(c.finishReason)):''}</div>` : ''}
+          ${c.finishScanned===false && ctnFilter==='review' && !necLast ? `<div class="muted-sm">Chọn tay, không quét mã${c.finishReason?' · '+escapeHtmlAttr(ctnReasonLabel(c.finishReason)):''}</div>` : ''}
         </div>
         <div class="li-r">${nhan}${ctnFilter==='review'
           ? `<button class="btn outline sm" style="width:auto;padding:0 10px;margin-left:8px" onclick="ctnMarkReviewed('${c.id}')">Đã xem</button>`
@@ -15439,6 +15450,8 @@ function renderTrackingBox(){
   const prevCountUnit = document.getElementById('invCountUnit')?.value;
   const curCountUnit = prevCountUnit != null ? prevCountUnit : ((editingItem && editingItem.countUnitName) || '');
   const prevShelf = document.getElementById('invOpenShelfLife')?.value;
+  const prevPrintOpenLabelEl = document.getElementById('invPrintOpenLabel');
+  const printOpenLabelChecked = prevPrintOpenLabelEl ? prevPrintOpenLabelEl.checked : !!(editingItem && editingItem.printOpenLabel);
 
   // Giá trị một đơn vị kiểm kê — cơ sở để gợi ý có đáng dán tem không.
   const chosen = rows.find(r=>r.name===curCountUnit);
@@ -15477,6 +15490,14 @@ function renderTrackingBox(){
       <div class="field" style="margin-bottom:0"><label for="invOpenShelfLife">Hạn dùng sau khi mở (giờ)</label>
         <input type="number" id="invOpenShelfLife" inputmode="numeric" step="1" min="0" value="${prevShelf != null ? escapeHtmlAttr(prevShelf) : (editingItem ? (Number(editingItem.openShelfLifeHours)||0) : 0)}">
         <div class="hint">In lên tem và dùng để cảnh báo "còn hàng đã mở quá hạn". Để <b>0</b> nếu món này không có hạn sau khi mở. VD sữa tươi 72, syrup 720 (30 ngày).</div>
+      </div>
+      <div class="field" style="margin-top:14px;margin-bottom:0">
+        <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;">
+          <input type="checkbox" id="invPrintOpenLabel" ${printOpenLabelChecked ? 'checked' : ''} style="width:20px;height:20px;flex-shrink:0;margin-top:1px">
+          <span>In tem mở khi báo mở
+            <div class="hint" style="margin-top:2px">Dùng cho nguyên liệu dùng thẳng không qua chế biến (topping đóng gói sẵn...) mà bao bì gốc — nơi đang dán mã tem — bị vứt ngay khi mở. Bật lên thì lúc nhân viên quét báo mở ở POS sẽ hiện popup in một tem mới (kèm giờ mở, giữ nguyên mã cũ) để dán vào dụng cụ đựng.</div>
+          </span>
+        </label>
       </div>` : ''}`;
 }
 function setTrackingMode(m){
@@ -15737,6 +15758,9 @@ async function submitInventoryItem(){
   if(isPackagingMaterial && trackingMode === 'unit') trackingMode = 'batch';
   if(!TRACKING_MODES[trackingMode]) trackingMode = 'none';
   const openShelfLifeHours = trackingMode === 'none' ? 0 : (Number(document.getElementById('invOpenShelfLife')?.value) || 0);
+  // In tem mở khi báo mở — chỉ có nghĩa khi món này có dán tem (trackingMode khác 'none'),
+  // ô tick chỉ tồn tại trên form trong trường hợp đó nên chốt luôn ở đây cho chắc.
+  const printOpenLabel = trackingMode !== 'none' && !!document.getElementById('invPrintOpenLabel')?.checked;
   // ---- Dụng cụ cân (nguyên liệu dùng ngay) ----
   // Đơn vị không cân được thì xoá sạch lựa chọn — giữ lại chỉ làm POS hiện nút cân
   // cho ra số sai đơn vị. Ngược lại, khi VESSELS chưa nạp được (mất mạng lúc mở
@@ -15766,7 +15790,7 @@ async function submitInventoryItem(){
       // báo hết chai đầu tiên thì hàng đã vào ra vài lượt, không dựng lại được nữa.
       // (Bug 15.020 g sữa tươi sinh ra đúng vì bước này trước đây không tồn tại.)
       const metaLuu = { name, minStock, costPerUnit, packagingUnits, staffCounts, isPackagingMaterial,
-        trackingMode, countUnitName, stockManaged, openShelfLifeHours, vesselIds };
+        trackingMode, countUnitName, stockManaged, openShelfLifeHours, printOpenLabel, vesselIds };
       const batDauDanTem = trackingMode !== 'none' && itemTrackingMode(itemCu) === 'none';
       const chuaChotMoc = !itemCu || itemCu.untrackedBase === null || itemCu.untrackedBase === undefined;
       if(batDauDanTem && chuaChotMoc){
@@ -15795,7 +15819,7 @@ async function submitInventoryItem(){
         name, unit: document.getElementById('invUnit').value,
         currentStock: v('invStart') * f('invStartUnit'),
         minStock, costPerUnit, packagingUnits, staffCounts, isPackagingMaterial,
-        trackingMode, countUnitName, stockManaged, openShelfLifeHours, vesselIds
+        trackingMode, countUnitName, stockManaged, openShelfLifeHours, printOpenLabel, vesselIds
       });
       idMoiTao = refMoi && refMoi.id;
       toast('✅ Đã thêm nguyên liệu');
