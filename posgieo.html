@@ -261,12 +261,15 @@ body{font-family:'Google Sans',sans-serif;background:var(--bg);max-width:430px;m
 .hbg{width:44px;height:44px;border:none;background:#FFFCF0;border-radius:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:5px;}
 .hbg span{display:block;width:20px;height:2px;background:#333;border-radius:2px;}
 
-/* [MỚI] Chấm cảnh báo "tem cần xác nhận đã hết" — canh ngay cạnh nút mở sidebar (.hbg),
-   không đè lên onclick của nút đó nên không đụng hành vi mở sidebar sẵn có. */
-.fifo-alert-dot{display:none;position:absolute;top:12px;left:64px;width:15px;height:15px;border-radius:50%;
-  background:#e74c3c;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.25);padding:0;cursor:pointer;z-index:11;
-  animation:fifoPulse 1.6s ease-in-out infinite;}
-@keyframes fifoPulse{0%,100%{box-shadow:0 0 0 0 rgba(231,76,60,.45)}50%{box-shadow:0 0 0 5px rgba(231,76,60,0)}}
+/* [FIX-fifo-btn] Trước đây đây chỉ là một chấm tròn 15px vô danh cạnh logo — nhỏ, không có
+   số, nhìn không biết là cái gì. Giờ vẽ thành hẳn một NÚT giống hệt khuôn nút mở sidebar
+   (.hbg: 44x44, bo góc 12px, nền be nhạt) để rõ ràng đây là một nút bấm được, kèm icon
+   chuông + số đếm (dùng chung class huy hiệu .cb đã có sẵn ở nút giỏ hàng .bch, cho đồng bộ
+   kiểu chữ/màu số trong toàn app thay vì bịa thêm một kiểu badge mới). */
+.fifo-alert-btn{display:none;position:absolute;top:0;left:52px;width:44px;height:44px;border:none;
+  background:#FFFCF0;border-radius:12px;cursor:pointer;align-items:center;justify-content:center;
+  z-index:11;animation:fifoPulse 1.6s ease-in-out infinite;}
+@keyframes fifoPulse{0%,100%{box-shadow:0 0 0 0 rgba(231,76,60,.35)}50%{box-shadow:0 0 0 5px rgba(231,76,60,0)}}
 /* [FIX] TRƯỚC ĐÂY bar này rộng full width (100%, max-width 430px) và luôn tự bung to
    hết cỡ mỗi khi có tem mới cạn, đè lên hàng filter-bar/menu, chặn luôn thao tác bấm
    món lúc đang bán đông khách. TRƯỚC ĐÂY còn có thêm một trạng thái "thu gọn" vẽ ra
@@ -850,8 +853,12 @@ body.assist-main-on .toast{bottom:calc(100px + var(--assist-h, 0px) + 10px);}
 <div id="sm" class="screen active">
   <div class="mh" style="position:relative;">
     <button class="hbg" onclick="openSdb()"><span></span><span></span><span style="width:14px"></span></button>
-    <!-- [MỚI] Chấm cảnh báo "tem cần xác nhận đã hết" theo FIFO — xem refreshFifoAlert() -->
-    <button class="fifo-alert-dot" id="fifoAlertDot" onclick="toggleFifoAlertBar()" title="Có tem cần xác nhận đã hết"></button>
+    <!-- [FIX-fifo-btn] Nút chuông cảnh báo "tem cần xác nhận đã hết" theo FIFO — cùng khuôn
+         44x44 với nút mở sidebar (.hbg) ngay bên trái, kèm số đếm — xem refreshFifoAlert(). -->
+    <button class="fifo-alert-btn" id="fifoAlertDot" onclick="toggleFifoAlertBar()" title="Có tem cần xác nhận đã hết">
+      <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#333" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 00-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
+      <span class="cb" id="fifoAlertBadge"></span>
+    </button>
     <span class="mt" style="font-family:'Google Sans Display',sans-serif;font-size:26px;font-weight:900;letter-spacing:-0.5px;position:absolute;left:50%;transform:translateX(-50%);pointer-events:none;">GIEO GIEO</span>
     <div class="togo-toggle-wrap active" id="togoToggle" onclick="toggleTogo()" style="margin-left:auto;display:none;"><!-- [HIDDEN-CHANGE] ẩn nút chuyển Tại quán/To Go, xem ghi chú ẩn cuối file -->
       <div class="togo-switch"></div>
@@ -4401,16 +4408,23 @@ async function _applyFifoNotEmpty(containerId, qty, note, staffEmp, weighLines) 
 // hết theo tính toán — bấm để xác nhận") — câu chữ dài nên dù CSS đã co theo nội dung, nó
 // vẫn rộng gần hết màn hình và đè lên đúng hàng phân loại món (filter-bar) ngay dưới logo,
 // chặn luôn việc chọn danh mục lúc đang bán. Giờ trạng thái "thu gọn" KHÔNG vẽ gì thêm ở
-// dưới nữa — chỉ còn đúng chấm đỏ nhỏ đã có sẵn cạnh logo (#fifoAlertDot, nằm giữa nút mở
-// sidebar và chữ "GIEO GIEO") làm dấu hiệu duy nhất; bấm vào chấm đó mới bung bảng chi tiết
-// đầy đủ (#fifoAlertBar), và bảng đó luôn hiện dạng panel to rõ ràng, không còn dạng chip
-// rút gọn nửa vời nữa.
+// dưới nữa — chỉ còn đúng nút chuông kèm số đã có sẵn cạnh logo (#fifoAlertDot, nằm giữa
+// nút mở sidebar và chữ "GIEO GIEO") làm dấu hiệu duy nhất; bấm vào nút đó mới bung bảng chi
+// tiết đầy đủ (#fifoAlertBar), và bảng đó luôn hiện dạng panel to rõ ràng, không còn dạng
+// chip rút gọn nửa vời nữa.
+// [FIX-fifo-btn] TRƯỚC ĐÂY dấu hiệu chỉ là một chấm tròn 15px không số — nhìn không biết là
+// cái gì. Giờ là nút chuông cùng khuôn với nút mở sidebar, kèm số đếm thật (huy hiệu .cb).
 function renderFifoAlertBar() {
   const dot = document.getElementById('fifoAlertDot');
+  const badge = document.getElementById('fifoAlertBadge');
   const bar = document.getElementById('fifoAlertBar');
   if (!dot || !bar) return;
   const n = FIFO_PENDING_CONFIRM.length;
-  dot.style.display = n ? 'block' : 'none';
+  dot.style.display = n ? 'flex' : 'none';
+  if (badge) {
+    badge.textContent = n > 9 ? '9+' : String(n);
+    badge.classList.toggle('show', n > 0);
+  }
   if (!n || !_fifoAlertExpanded) { bar.style.display = 'none'; bar.innerHTML = ''; return; }
   bar.style.display = 'block';
   bar.innerHTML = `
