@@ -124,7 +124,26 @@ STORE
  ├── [6] HR / PAYROLL ────────────────────────────────── packages/hr (mở rộng [0])
  │     Employee (đã ở [0]) → Work schedule (optional, chỉ QUANLY dùng so sánh trễ)
  │       → Employee shift (chấm công thật, TÁCH BIỆT khỏi [5] Cash segments)
- │       → Payroll (đọc Employee rate — cần snapshot tại thời điểm, xem §4.6)
+ │       │
+ │       └── [6a] CHUỖI PAYROLL — luồng chuẩn hệ thống mới, đúc kết từ khảo sát
+ │              vòng đời dữ liệu cũ (`FIFO-CHAIN-TRACE-PAYROLL-V1.md`):
+ │              CheckIn → PayTerms{rate,otRate,otThreshold} SNAPSHOT NGAY TRÊN
+ │                shift đó (không phải trường trang trí — computeWage() PHẢI đọc
+ │                từ snapshot này, KHÔNG được join bảng Employee hiện tại)
+ │                → CheckOut (auto-close nếu treo qua ngày, 2 lớp dự phòng)
+ │                → ReviseState (sửa giờ sai — BẮT BUỘC ghi operationId/audit,
+ │                  và BẮT BUỘC phát domain event nếu ca đang sửa là ca "hôm nay
+ │                  đang mở", để mọi actor-gate khác [checklist, ký tên kho/BTP]
+ │                  refresh đồng bộ — không âm thầm khoá quyền không rõ nguyên nhân)
+ │                → ComputePayroll(dateKey) → resolve PayTerms có hiệu lực đúng
+ │                  employee+dateKey đó (cùng nguyên tắc versioned đã áp cho
+ │                  Recipe/CostBasis/Packaging — đây là lần thứ 5 cùng 1 lớp lỗi
+ │                  xuất hiện, xác nhận chắc chắn là nguyên tắc kiến trúc, không
+ │                  phải case riêng)
+ │                → PayrollClosing (snapshot THÁNG bất biến — CHƯA TỪNG TỒN TẠI ở
+ │                  hệ thống cũ, phải xây mới hoàn toàn theo đúng pattern đã có ở
+ │                  `packages/compaction` cho book_closing, correction giữ v1)
+ │                → KPI (laborCupTarget/laborBillTarget, packages/reporting)
  │
  ├── [7] FINANCE / CONFIG ──────────────────────────── packages/finance
  │     Expense (categories/payment methods — hard dep để POS ghi chi phí)
@@ -139,6 +158,37 @@ STORE
  └── [9] REPORTING (chỉ đọc — không domain nào phụ thuộc ngược vào Reporting) ── packages/reporting
        Revenue/COGS/P&L, Customer (RFM), Mix, Prep forecast (advisory, KHÔNG nối vào [2])
        → Export/AI payload (đọc TẤT CẢ [0]-[8], xây SAU CÙNG)
+
+REVERSAL/CORRECTION (cross-cutting PATTERN, không phải 1 domain — mọi nhánh [2][2a]
+[2b][2c][3][3c][6a] đều gọi vào đây thay vì tự chế cơ chế hoàn/sửa riêng) ──
+packages/commands/reversal — luồng chuẩn đúc kết từ khảo sát TOÀN BỘ cách hệ thống
+cũ từng hoàn/sửa dữ liệu (`FIFO-CHAIN-TRACE-REVERSAL-CORRECTION-V1.md`). Hệ thống cũ
+có 3 cơ chế khác nhau do viết ở nhiều thời điểm (không phải do nghiệp vụ đòi hỏi
+khác nhau — 1 trong 3 cơ chế tự nhận trong comment là "lẽ ra nên dùng chung engine
+kia"). Hệ thống mới chỉ cần ĐÚNG 2 pattern, dùng xuyên suốt mọi domain:
+  ├── ReverseTransaction(referenceId, scope) — cho "sự kiện X đã tiêu thụ/tạo ra Y
+  │     đơn vị kho, giờ hoàn ngược": huỷ bill, huỷ mẻ đang nấu, sửa add-on, sửa 1
+  │     dòng ledger sai (ghi dòng ĐẢO + dòng ĐÚNG, referenceId trỏ về dòng gốc —
+  │     ledger append-only thật, KHÔNG update trực tiếp dòng cũ). LUÔN unit/FIFO-
+  │     aware, LUÔN qua claim theo doc ID xác định trước (idempotent tự nhiên) —
+  │     đây là pattern DUY NHẤT, không còn "đường POS" và "đường QUANLY" tách biệt
+  │     như cũ (2 đường cũ khác nhau về CHẤT LƯỢNG THỰC THI chứ không phải Ý ĐỊNH)
+  ├── ReviseState(entityId, field, newValue, reason) — cho "sửa lại 1 con số trạng
+  │     thái đã chốt sai" khi KHÔNG có ý nghĩa tiêu thụ ngược: yield mẻ BTP, giờ
+  │     công payroll, kiểm kê tồn. LUÔN kèm audit-array giữ lịch sử, và BẮT BUỘC
+  │     trả lời rõ "báo cáo lịch sử đóng băng theo giá trị tại thời điểm phát sinh
+  │     hay tính lại theo giá trị mới" — đây là gap lớn nhất xuất hiện ở CẢ Recipe,
+  │     Packaging, BTP yield, Payroll (5 lần độc lập) khi hệ thống cũ không trả
+  │     lời câu hỏi này nhất quán
+  └── Side-effect ngoài kho (loyalty/voucher/lương) KHÔNG nằm trong 2 pattern trên
+        — là domain event riêng (`OrderVoided`, `ContainerFound`...) mà
+        ReverseTransaction/ReviseState chỉ là MỘT trong các handler đăng ký lắng
+        nghe, cùng LoyaltyReversalHandler/VoucherReversalHandler/
+        PayrollDeductionReversalHandler — tránh lặp lại tình trạng "biết cần hoàn
+        nhưng quên/không làm" đã thấy ở hệ thống cũ (loyalty/voucher khi huỷ bill
+        CỐ Ý không tự hoàn — quyết định nghiệp vụ hợp lệ, nhưng nếu chủ quán muốn
+        đổi quyết định đó ở hệ thống mới, chỉ cần thêm 1 handler, không phải sửa
+        lại luồng ReverseTransaction chính)
 
 PROTECTED INFRASTRUCTURE (cross-cutting, không thuộc cây nghiệp vụ) ── packages/protected-adapters
   Bill/Label printer · Scanner · Bank payment      (đã có contract riêng)

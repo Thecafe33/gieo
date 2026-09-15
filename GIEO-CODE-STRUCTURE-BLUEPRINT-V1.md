@@ -232,13 +232,18 @@ gieo/
 │   ├── commands/                                  # command pipeline dùng chung POS + QUANLY
 │   │   └── src/
 │   │       ├── pipeline.ts                        # VALIDATE→READ→CALCULATE→MUTATION_PLAN→IDEMPOTENCY→ENGINE→LEDGER→PROJECT→AUDIT→VERIFY
+│   │       ├── reversal/                          # MỚI — pattern dùng CHUNG cho mọi domain, thay thế 10 đường hoàn/sửa rời rạc của legacy. Chi tiết: FIFO-CHAIN-TRACE-REVERSAL-CORRECTION-V1.md
+│   │       │   ├── reverse-transaction.ts         # sự kiện đã tiêu thụ kho → hoàn ngược (xoá bill, huỷ mẻ, sửa add-on, sửa ledger sai) — unit/FIFO-aware, claim theo doc ID cố định
+│   │       │   ├── revise-state.ts                # sửa trạng thái đã chốt sai KHÔNG có ý nghĩa tiêu thụ ngược (yield BTP, giờ công, kiểm kê) — luôn audit-array + trả lời rõ đóng băng hay tính lại lịch sử
+│   │       │   ├── ledger-correction.ts           # đóng gap "sửa 1 dòng ledger sai" của legacy — ghi đảo+đúng, KHÔNG update dòng cũ
+│   │       │   └── events/                        # OrderVoided, ContainerFound, BatchCancelled — side-effect (loyalty/voucher/payroll) là handler đăng ký riêng, KHÔNG nhét vào reverse-transaction.ts
 │   │       ├── sales/
 │   │       │   ├── start-checkout.ts
 │   │       │   ├── apply-promotion.ts
 │   │       │   ├── capture-payment.ts
 │   │       │   ├── split-payment.ts
 │   │       │   ├── finalize-order.ts
-│   │       │   └── reverse-order.ts
+│   │       │   └── reverse-order.ts               # gọi reversal/reverse-transaction.ts, không tự chế logic hoàn riêng
 │   │       ├── inventory/
 │   │       │   ├── open-container.ts
 │   │       │   ├── mark-out-of-stock.ts
