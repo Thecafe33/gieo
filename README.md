@@ -73,8 +73,9 @@ Luật cứng: `apps` không bao giờ chạm thẳng `fifo-core` / `compaction`
 | Phase | |
 |---|---|
 | P0 Audit | ✅ xong (nhánh tài liệu) |
-| P1 Foundation | ✅ `shared-kernel` + `store-context` — 51 test pass |
-| P2→P13 | ⬜ chưa bắt đầu |
+| P1 Foundation | ✅ `shared-kernel` + `store-context` + `VersionedInput` |
+| `[0]` Identity | ✅ Employee + Shift + PayTerms versioned — 98 test pass |
+| `[1]`→`[9]` | ⬜ chưa bắt đầu |
 
 Build order theo `FEATURE-TREE-V1.md` §3:
 `[0] Identity → [1] Catalog + [2] FIFO Core → [3] Sales → [4] Loyalty + [5] Shift + [6] Payroll → [7] Finance → [8] Alerts → [9] Reporting`
@@ -89,3 +90,4 @@ Build order theo `FEATURE-TREE-V1.md` §3:
 - FIFO cấp phát theo `openedAt` (giữ hành vi production nhiều năm)
 - `FINISH_REVIEW_RATIO`: **có** xây — gắn `needsReview` + đẩy Alerts
 - Multi-store: `storeId` có mặt mọi nơi, chỉ 1 giá trị thật, **không** xây `ALL_STORES`
+- Lương cứng (`fixedMonthlySalary`) có mặt trong `PayTerms` nhưng **chưa có công thức trừ theo lịch làm việc** — `FIFO-CHAIN-TRACE-PAYROLL-V1.md` mục 4 nói rõ legacy để ngỏ câu hỏi này và hệ thống mới phải quyết định. Sẽ hỏi trước khi code `ComputePayroll` ở `[6]`.
