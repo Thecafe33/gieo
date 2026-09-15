@@ -4230,9 +4230,19 @@ async function fifoAlertScanNow() {
 // RT, và ghi một dòng ADJUSTMENT + một mục trong `notEmptyChecks` trên chính tem để biết rõ
 // ai xác nhận, lúc nào, cân được bao nhiêu, vì sao — không chỉ thấy con số tồn kho tự nhảy.
 // ============================================================================
+// Bảng kê các lần cân của popup "Chưa hết" — cùng cách _prepFinishWeighLines làm cho form
+// Hoàn thành mẻ chế biến: giữ lại để lưu kèm vào notEmptyChecks (soi lại được "cân mấy khay,
+// khay nào" thay vì chỉ thấy một con số trần), và tự vứt nếu nhân viên sửa tay đè lên số vừa
+// cân (khớp không còn đúng nữa thì giữ bảng kê cũ là lừa dối, không phải tiện lợi).
+let _fifoNotEmptyWeighLines = [];
 function fifoNotEmptyPrompt(containerId) {
   const c = FIFO_PENDING_CONFIRM.find(x => x.id === containerId);
   if (!c) { toast('⚠️ Không tìm thấy mã này'); return; }
+  _fifoNotEmptyWeighLines = [];
+  // [FIX] Trước đây ô này chỉ cho gõ tay — lệch với mọi màn "cân lại" khác trong app (Hoàn
+  // thành mẻ chế biến, Đếm giao ca cuối ca...) đều ưu tiên cân trừ bì khi nguyên liệu đã gắn
+  // dụng cụ đựng. Dùng lại đúng itemCanWeighPOS()/openWeighPad() để nhất quán toàn hệ thống.
+  const canWeigh = itemCanWeighPOS(c.itemId);
   openStockScanSheet(`
     <div class="wal-section" style="margin:0 0 14px;">
       <div class="wal-section-title">Chưa hết — cân lại</div>
@@ -4242,9 +4252,14 @@ function fifoNotEmptyPrompt(containerId) {
     </div>
     <div class="wal-section" style="margin:0 0 14px;">
       <div class="wal-input-label" style="margin:0 0 6px;">Cân/đong lại còn (${escHtmlPos(c.unit || '')})</div>
-      <div class="wal-input-group" style="margin-bottom:0;">
-        <input id="fifoNotEmptyQty" type="number" inputmode="decimal" step="0.01" placeholder="0" style="width:100%;border:none;outline:none;font-family:'Google Sans',sans-serif;font-size:18px;font-weight:700;color:var(--td);background:transparent;padding:10px 0;">
+      ${canWeigh
+        ? weighBtnWide(`fifoNotEmptyWeigh('${containerId}')`, 'Cân trừ bì', 'Đặt chai/hũ lên cân — máy tự trừ bì') + '<div style="height:9px;"></div>'
+        : ''}
+      <div class="wal-input-group" style="margin-bottom:0;display:flex;align-items:center;gap:8px;">
+        ${canWeigh ? '<span style="font-size:11.5px;color:#aaa;font-weight:600;flex-shrink:0;">hoặc</span>' : ''}
+        <input id="fifoNotEmptyQty" type="number" inputmode="decimal" step="0.01" placeholder="${canWeigh ? 'Gõ tay' : '0'}" oninput="fifoNotEmptyQtyInput(this.value)" style="flex:1;border:none;outline:none;font-family:'Google Sans',sans-serif;font-size:18px;font-weight:700;color:var(--td);background:transparent;padding:10px 0;">
       </div>
+      <div id="fifoNotEmptyWeighInfo"></div>
     </div>
     <div class="wal-section" style="margin:0 0 14px;">
       <div class="wal-input-label" style="margin:0 0 6px;">Lý do / ghi chú (bắt buộc)</div>
@@ -4257,19 +4272,54 @@ function fifoNotEmptyPrompt(containerId) {
     <button onclick="closeStockScanSheet()" style="width:100%;margin-top:8px;padding:13px;background:none;border:1px solid #ddd;color:#888;border-radius:14px;font-family:'Google Sans',sans-serif;font-size:14px;font-weight:700;cursor:pointer;">Huỷ</button>`);
 }
 
+// Mở bộ cân trừ bì cho đúng nguyên liệu của tem này. Cân xong đổ số vào ô đang có rồi chạy
+// tiếp y hệt như khi nhân viên gõ tay — mọi thứ phía sau (validate, lưu) không cần biết số
+// đến từ cân hay gõ tay.
+function fifoNotEmptyWeigh(containerId) {
+  const c = FIFO_PENDING_CONFIRM.find(x => x.id === containerId);
+  if (!c) { toast('⚠️ Không tìm thấy mã này'); return; }
+  openWeighPad({
+    itemId: c.itemId, unit: c.unit,
+    title: 'Cân ' + (c.itemName || ''),
+    onDone: (total, lines) => {
+      _fifoNotEmptyWeighLines = lines;
+      const el = document.getElementById('fifoNotEmptyQty');
+      if (el) el.value = total;
+      const info = document.getElementById('fifoNotEmptyWeighInfo');
+      if (info) info.innerHTML = weighSummaryHTML(lines, c.unit, `fifoNotEmptyWeigh('${containerId}')`);
+    },
+    onManual: () => { const el = document.getElementById('fifoNotEmptyQty'); if (el) el.focus(); }
+  });
+}
+// Gõ tay đè lên số vừa cân mà không còn khớp bảng kê → bảng kê cũ hết ý nghĩa, vứt đi thay
+// vì lưu kèm một bảng kê nói dối (cùng nguyên tắc onPrepFinishQtyInput/handoverCloseSetQty).
+function fifoNotEmptyQtyInput(val) {
+  if (!_fifoNotEmptyWeighLines.length) return;
+  const cu = _fifoNotEmptyWeighLines.reduce((s, l) => s + (Number(l.net) || 0), 0);
+  if (Math.abs(cu - (Number(val) || 0)) > 0.005) {
+    _fifoNotEmptyWeighLines = [];
+    const info = document.getElementById('fifoNotEmptyWeighInfo');
+    if (info) info.innerHTML = '';
+  }
+}
+
 async function submitFifoNotEmpty(containerId) {
   if (_posSubmitBusy) { toast('⏳ Đang xử lý, vui lòng đợi giây lát...'); return; }
   const qty = Number(document.getElementById('fifoNotEmptyQty')?.value);
   if (!(qty > 0)) { toast('⚠️ Nhập số thật cân/đong được, lớn hơn 0 — nếu đúng là đã hết thì dùng "Quét mã xác nhận" thay vì đây'); return; }
   const note = (document.getElementById('fifoNotEmptyNote')?.value || '').trim();
   if (!note) { toast('⚠️ Phải ghi rõ lý do/ghi chú'); return; }
+  // Chụp lại bảng kê NGAY, trước khi chờ PIN — nhân viên có thể bấm mở bộ cân lần nữa trong
+  // lúc đang chờ mạng, biến _fifoNotEmptyWeighLines thành của lần khác (cùng lý do
+  // _submitPrepFinishImpl chụp _prepFinishWeighLines trước mọi await).
+  const weighLines = _fifoNotEmptyWeighLines.slice(0);
   const staffEmp = await resolveStaffPinAndCheckin('fifoNotEmptyStaff');
   if (!staffEmp) return;
 
   _posSubmitBusy = true;
   const restoreBtn = setBtnBusy('fifoNotEmptyBtn', '⏳ Đang lưu...');
   try {
-    await _applyFifoNotEmpty(containerId, qty, note, staffEmp);
+    await _applyFifoNotEmpty(containerId, qty, note, staffEmp, weighLines);
     toast('✅ Đã sửa lại tồn kho — tem vẫn đang mở');
     closeStockScanSheet();
     refreshFifoAlert().catch(() => {});
@@ -4282,7 +4332,7 @@ async function submitFifoNotEmpty(containerId) {
 // Áp dụng thật sự — đọc TƯƠI Firestore ngay trước khi ghi (tem có thể đã bị báo hết/huỷ ở
 // máy khác từ lúc mở popup tới lúc bấm Lưu), ghi THẲNG unitBase đo được vào RT (nguồn thật)
 // rồi Firestore, suy lại currentStock từ RT, và ghi một dòng ADJUSTMENT vào sổ.
-async function _applyFifoNotEmpty(containerId, qty, note, staffEmp) {
+async function _applyFifoNotEmpty(containerId, qty, note, staffEmp, weighLines) {
   const ref = fstore.collection(STOCK_CONTAINERS_COLL).doc(containerId);
   const doc = await ref.get();
   if (!doc.exists) throw new Error('Không tìm thấy mã này (có thể vừa bị xoá)');
@@ -4310,7 +4360,11 @@ async function _applyFifoNotEmpty(containerId, qty, note, staffEmp) {
     unitBase: qty,
     notEmptyChecks: firebase.firestore.FieldValue.arrayUnion({
       at: nowISO, by: staffEmp.fullName, byId: staffEmp.id,
-      oldUnitBase: isFinite(oldUnitBase) ? oldUnitBase : null, newUnitBase: qty, note
+      oldUnitBase: isFinite(oldUnitBase) ? oldUnitBase : null, newUnitBase: qty, note,
+      // Cân bằng dụng cụ hay gõ tay, và cân những gì — cùng cách _submitPrepFinishImpl ghi
+      // weighMethod/weighings, để soi lại được "cân mấy khay, khay nào" chứ không chỉ một số.
+      weighMethod: (weighLines && weighLines.length) ? 'vessel' : 'manual',
+      weighings: weighLines || []
     })
   });
 
