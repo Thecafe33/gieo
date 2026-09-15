@@ -19,11 +19,12 @@ Cặp contract bắt buộc trước khi viết Ledger/Unit persistence:
 ## Lệnh
 
 ```bash
+node tools/run-tests.js                # chạy test  (thêm tham số để lọc theo tên)
 node tools/check-import-direction.js   # kiểm tra ranh giới layer — exit 1 nếu vi phạm
 node tools/build-html.js               # sinh dist/posgieo-new.html + dist/quanlygieo-new.html
 ```
 
-Không cần cài gì. Không npm, không pnpm, không TypeScript, không bundler.
+Không cần cài gì. Không npm, không pnpm, không TypeScript, không bundler, không Vitest.
 
 ---
 
@@ -72,7 +73,7 @@ Luật cứng: `apps` không bao giờ chạm thẳng `fifo-core` / `compaction`
 | Phase | |
 |---|---|
 | P0 Audit | ✅ xong (nhánh tài liệu) |
-| P1 Foundation | 🔨 `shared-kernel` xong — ids / result / clock / operation-state |
+| P1 Foundation | ✅ `shared-kernel` + `store-context` — 51 test pass |
 | P2→P13 | ⬜ chưa bắt đầu |
 
 Build order theo `FEATURE-TREE-V1.md` §3:
