@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>GIEO — Quản lý</title>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
 <style>
   :root { color-scheme: light; --ink:#172033; --muted:#697386; --line:#e8ebf0; --brand:#315c72; --soft:#f4f7f9; }
   * { box-sizing: border-box; }
@@ -92,6 +96,26 @@
 </head>
 <body>
 <div id="app"></div>
+<script>
+/* Config lấy nguyên từ posgieo.html của hệ cũ — cùng project the-cafe-33, nên
+   hệ mới đọc đúng dữ liệu hệ cũ. Đây là dữ liệu CLIENT, ai mở file cũng đọc
+   được; hệ cũ vốn đã như vậy. Cái chặn thật là Firebase Security Rules phía
+   server, không phải chỗ cất chuỗi này. */
+window.GIEO_FIREBASE = {
+ "config": {
+  "apiKey": "AIzaSyCNh1-16gYZ0P30Fkd-2tB-O89PXkPX9Lc",
+  "authDomain": "the-cafe-33.firebaseapp.com",
+  "databaseURL": "https://the-cafe-33-default-rtdb.asia-southeast1.firebasedatabase.app",
+  "projectId": "the-cafe-33",
+  "storageBucket": "the-cafe-33.appspot.com"
+ },
+ "account": {
+  "email": "cafe33@xolifa.com",
+  "password": "xolifaangiang"
+ },
+ "storeId": "store_main"
+};
+</script>
 <script>
 /* GIEO runtime registry */
 /**
@@ -12464,6 +12488,94 @@ GIEO.define('bootstrap/cutover', [
   };
 });
 
+/* ===== src/layers/bootstrap/firebase-app.js ===== */
+/**
+ * Composition root: khởi tạo Firebase và trao handle cho runtime.
+ *
+ * Module này KHÔNG chứa config hay tài khoản. Nó nhận vào.
+ *
+ * Vì sao: hệ cũ đã có sẵn config và tài khoản trong `posgieo.html`. Chép thêm
+ * một bản vào đây là tạo ra bản thứ hai của cùng một bí mật — đổi mật khẩu sau
+ * này sẽ sót một chỗ, và chỗ sót đó là chỗ không ai nhớ. Build script trích
+ * thẳng từ file cũ, nên bí mật vẫn chỉ nằm đúng một nơi.
+ *
+ * Đây cũng là tầng DUY NHẤT được phép biết Firebase tồn tại. Domain core nhận
+ * handle đã khởi tạo nên không bao giờ chạm SDK (blueprint §2 quy tắc 2), và
+ * test chạy được mà không cần mạng.
+ *
+ * GIỚI HẠN CẦN NÓI RÕ: config và tài khoản là dữ liệu CLIENT — ai mở file HTML
+ * cũng đọc được. Hệ cũ đã như vậy suốt thời gian qua. Hệ mới không làm nó tệ
+ * hơn, nhưng cũng không làm nó tốt hơn: cái chặn thật là Firebase Security
+ * Rules phía server, không phải chỗ cất chuỗi này.
+ */
+GIEO.define('bootstrap/firebase-app', [
+  'shared-kernel/result'
+], function (R) {
+  'use strict';
+
+  function missing(config) {
+    return ['apiKey', 'authDomain', 'databaseURL', 'projectId']
+      .filter(function (k) { return !config || !config[k]; });
+  }
+
+  /**
+   * @param spec.config   firebaseConfig (bắt buộc — không có mặc định)
+   * @param spec.account  {email, password} (bắt buộc)
+   * @param spec.sdk      đối tượng `firebase` toàn cục; tiêm vào để test không cần mạng
+   */
+  function init(spec) {
+    spec = spec || {};
+    var gone = missing(spec.config);
+    if (gone.length) {
+      return Promise.resolve(R.err('VALIDATION',
+        'thiếu firebaseConfig: ' + gone.join(', ') + ' — composition root không có giá trị mặc định'));
+    }
+    if (!spec.account || !spec.account.email || !spec.account.password) {
+      return Promise.resolve(R.err('VALIDATION', 'thiếu tài khoản đăng nhập Firebase'));
+    }
+
+    var sdk = spec.sdk || (typeof globalThis !== 'undefined' ? globalThis.firebase : null);
+    if (!sdk || typeof sdk.initializeApp !== 'function') {
+      return Promise.resolve(R.err('NOT_FOUND',
+        'Firebase SDK chưa nạp — kiểm tra kết nối mạng hoặc thẻ <script> của SDK'));
+    }
+
+    try {
+      if (!sdk.apps || !sdk.apps.length) sdk.initializeApp(spec.config);
+    } catch (e) {
+      return Promise.resolve(R.err('MANUAL_REVIEW',
+        'khởi tạo Firebase thất bại: ' + (e && e.message ? e.message : e)));
+    }
+
+    var auth = typeof sdk.auth === 'function' ? sdk.auth() : null;
+    if (!auth || typeof auth.signInWithEmailAndPassword !== 'function') {
+      return Promise.resolve(R.err('NOT_FOUND', 'Firebase Auth chưa nạp — không đăng nhập được'));
+    }
+
+    return Promise.resolve()
+      .then(function () {
+        return auth.signInWithEmailAndPassword(spec.account.email, spec.account.password);
+      })
+      .then(function () {
+        return R.ok({
+          rtdb: sdk.database(),
+          firestore: sdk.firestore(),
+          projectId: spec.config.projectId
+        });
+      })
+      .catch(function (e) {
+        /* Đăng nhập hỏng thì KHÔNG trả handle "chạy tạm". Handle không có quyền
+           làm mọi truy vấn trả rỗng, và rỗng trông y hệt "không có dữ liệu" —
+           đúng kiểu hỏng im lặng mà cả hệ thống này được dựng ra để chặn. */
+        return R.err('RETRYABLE',
+          'đăng nhập Firebase thất bại, KHÔNG chạy với quyền rỗng: ' +
+          (e && e.message ? e.message : e));
+      });
+  }
+
+  return { init: init };
+});
+
 /* ===== src/layers/bootstrap/firebase-read-client.js ===== */
 /** Firebase compat/modular bridge chỉ đọc. Nhận handle đã khởi tạo, không chứa config/credential. */
 GIEO.define('bootstrap/firebase-read-client', ['shared-kernel/result'], function (R) {
@@ -13628,7 +13740,40 @@ GIEO.define('app-quanly/main', [
 });
 
 /* ===== khởi động ===== */
-GIEO.require("app-quanly/main").start();
+(function () {
+  var R = GIEO.require('shared-kernel/result');
+  var fb = GIEO.require('bootstrap/firebase-app');
+  var readClient = GIEO.require('bootstrap/firebase-read-client');
+  var readPort = GIEO.require('legacy-firebase-adapter/read-port');
+  var dataSource = GIEO.require('bootstrap/legacy-data-source');
+  var bootstrap = GIEO.require('bootstrap/runtime');
+  var app = GIEO.require("app-quanly/main");
+  var cfg = globalThis.GIEO_FIREBASE || {};
+
+  function fail(message) {
+    /* Không nối được dữ liệu thì NÓI RA ngay trên màn hình. Khởi động im lặng
+       rồi hiện màn trống là cách người dùng tưởng quán không có hàng. */
+    var el = document.getElementById('app');
+    if (el) {
+      el.innerHTML = '<div class="app-shell"><div class="notice alerts">' +
+        '<strong>Chưa kết nối được dữ liệu cửa hàng</strong><span>' +
+        String(message).replace(/[&<>]/g, '') + '</span></div></div>';
+    }
+  }
+
+  fb.init({ config: cfg.config, account: cfg.account }).then(function (out) {
+    if (R.isErr(out)) return fail(out.error.message);
+    var client = readClient.create({ rtdb: out.value.rtdb, firestore: out.value.firestore });
+    var reader = readPort.createReader(client);
+    globalThis.GIEO_LEGACY_READER = reader;
+    globalThis["GIEO_QUANLY_RUNTIME"] = bootstrap.createRuntime({
+      /* READ_ONLY cho tới khi tiến trình cutover (P13) chuyển quyền ghi. */
+      mode: bootstrap.MODE.READ_ONLY,
+      dataSource: dataSource.create(reader, { storeId: cfg.storeId })
+    });
+    app.start();
+  }).catch(function (e) { fail(e && e.message ? e.message : e); });
+})();
 
 </script>
 </body>

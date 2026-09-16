@@ -30,8 +30,8 @@ const LAYER_ORDER = [
 ];
 
 const APPS = {
-  pos: { out: 'posgieo-new.html', title: 'GIEO — POS', entry: 'app-pos/main' },
-  quanly: { out: 'quanlygieo-new.html', title: 'GIEO — Quản lý', entry: 'app-quanly/main' }
+  pos: { out: 'posgieo-new.html', title: 'GIEO — POS', entry: 'app-pos/main', runtimeGlobal: 'GIEO_POS_RUNTIME' },
+  quanly: { out: 'quanlygieo-new.html', title: 'GIEO — Quản lý', entry: 'app-quanly/main', runtimeGlobal: 'GIEO_QUANLY_RUNTIME' }
 };
 
 function walk(dir, out = []) {
@@ -49,6 +49,34 @@ function section(file) {
   return `\n/* ===== ${rel} ===== */\n` + fs.readFileSync(file, 'utf8');
 }
 
+/**
+ * Trích config + tài khoản từ chính `posgieo.html` đang chạy production.
+ *
+ * KHÔNG chép chúng vào src/. Chép là tạo bản thứ hai của cùng một bí mật, và
+ * khi đổi mật khẩu sẽ sót đúng cái bản không ai nhớ. Ở đây bí mật vẫn nằm đúng
+ * một nơi: file hệ cũ.
+ */
+function legacyFirebase() {
+  const src = fs.readFileSync(path.join(ROOT, 'posgieo.html'), 'utf8');
+
+  const block = /const firebaseConfig = \{([\s\S]*?)\}/.exec(src);
+  if (!block) throw new Error('[build] không tìm thấy firebaseConfig trong posgieo.html');
+  const config = {};
+  for (const m of block[1].matchAll(/(\w+)\s*:\s*"([^"]*)"/g)) {
+    /* Hệ cũ để messagingSenderId/appId là "..." — chúng chỉ cần cho FCM/Analytics.
+       Bỏ qua thay vì mang một chuỗi vô nghĩa sang. */
+    if (m[2] && m[2] !== '...') config[m[1]] = m[2];
+  }
+
+  const cred = /signInWithEmailAndPassword\(\s*'([^']+)'\s*,\s*'([^']+)'\s*\)/.exec(src);
+  if (!cred) throw new Error('[build] không tìm thấy tài khoản đăng nhập trong posgieo.html');
+
+  const sdkVersion = (/firebasejs\/([\d.]+)\//.exec(src) || [])[1];
+  if (!sdkVersion) throw new Error('[build] không đọc được phiên bản Firebase SDK của hệ cũ');
+
+  return { config, account: { email: cred[1], password: cred[2] }, sdkVersion };
+}
+
 function buildBundle(appKey) {
   const rules = fs.readFileSync(path.join(SRC, 'layer-rules.json'), 'utf8');
   const registry = fs
@@ -62,17 +90,60 @@ function buildBundle(appKey) {
     for (const f of walk(path.join(SRC, 'layers', layer))) js += section(f);
   }
   for (const f of walk(path.join(SRC, 'apps', appKey))) js += section(f);
-  js += `\n/* ===== khởi động ===== */\nGIEO.require(${JSON.stringify(APPS[appKey].entry)}).start();\n`;
+  /* Composition root chạy trong trình duyệt: khởi tạo Firebase, dựng runtime
+     READ_ONLY, rồi mới start UI. Config đến từ `window.GIEO_FIREBASE` mà shell
+     đặt vào — không module nào trong src/ chứa bí mật. */
+  js += `
+/* ===== khởi động ===== */
+(function () {
+  var R = GIEO.require('shared-kernel/result');
+  var fb = GIEO.require('bootstrap/firebase-app');
+  var readClient = GIEO.require('bootstrap/firebase-read-client');
+  var readPort = GIEO.require('legacy-firebase-adapter/read-port');
+  var dataSource = GIEO.require('bootstrap/legacy-data-source');
+  var bootstrap = GIEO.require('bootstrap/runtime');
+  var app = GIEO.require(${JSON.stringify(APPS[appKey].entry)});
+  var cfg = globalThis.GIEO_FIREBASE || {};
+
+  function fail(message) {
+    /* Không nối được dữ liệu thì NÓI RA ngay trên màn hình. Khởi động im lặng
+       rồi hiện màn trống là cách người dùng tưởng quán không có hàng. */
+    var el = document.getElementById('app');
+    if (el) {
+      el.innerHTML = '<div class="app-shell"><div class="notice alerts">' +
+        '<strong>Chưa kết nối được dữ liệu cửa hàng</strong><span>' +
+        String(message).replace(/[&<>]/g, '') + '</span></div></div>';
+    }
+  }
+
+  fb.init({ config: cfg.config, account: cfg.account }).then(function (out) {
+    if (R.isErr(out)) return fail(out.error.message);
+    var client = readClient.create({ rtdb: out.value.rtdb, firestore: out.value.firestore });
+    var reader = readPort.createReader(client);
+    globalThis.GIEO_LEGACY_READER = reader;
+    globalThis[${JSON.stringify(APPS[appKey].runtimeGlobal)}] = bootstrap.createRuntime({
+      /* READ_ONLY cho tới khi tiến trình cutover (P13) chuyển quyền ghi. */
+      mode: bootstrap.MODE.READ_ONLY,
+      dataSource: dataSource.create(reader, { storeId: cfg.storeId })
+    });
+    app.start();
+  }).catch(function (e) { fail(e && e.message ? e.message : e); });
+})();
+`;
   return js;
 }
 
-function shell(title, js) {
+function shell(title, js, fb) {
   return `<!doctype html>
 <html lang="vi">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>${title}</title>
+<script src="https://www.gstatic.com/firebasejs/${fb.sdkVersion}/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/${fb.sdkVersion}/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/${fb.sdkVersion}/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/${fb.sdkVersion}/firebase-auth-compat.js"></script>
 <style>
   :root { color-scheme: light; --ink:#172033; --muted:#697386; --line:#e8ebf0; --brand:#315c72; --soft:#f4f7f9; }
   * { box-sizing: border-box; }
@@ -162,6 +233,13 @@ function shell(title, js) {
 <body>
 <div id="app"></div>
 <script>
+/* Config lấy nguyên từ posgieo.html của hệ cũ — cùng project the-cafe-33, nên
+   hệ mới đọc đúng dữ liệu hệ cũ. Đây là dữ liệu CLIENT, ai mở file cũng đọc
+   được; hệ cũ vốn đã như vậy. Cái chặn thật là Firebase Security Rules phía
+   server, không phải chỗ cất chuỗi này. */
+window.GIEO_FIREBASE = ${JSON.stringify({ config: fb.config, account: fb.account, storeId: fb.storeId }, null, 1)};
+</script>
+<script>
 ${js}
 </script>
 </body>
@@ -178,9 +256,13 @@ try {
   process.exit(1);
 }
 
+const fb = legacyFirebase();
+fb.storeId = 'store_main';
+console.log(`  Firebase: project ${fb.config.projectId}, SDK ${fb.sdkVersion}, tài khoản ${fb.account.email}`);
+
 fs.mkdirSync(DIST, { recursive: true });
 for (const [key, cfg] of Object.entries(APPS)) {
-  const html = shell(cfg.title, buildBundle(key));
+  const html = shell(cfg.title, buildBundle(key), fb);
   const dest = path.join(DIST, cfg.out);
   fs.writeFileSync(dest, html);
   console.log(`  ${cfg.out}  ${(html.length / 1024).toFixed(1)} KB`);

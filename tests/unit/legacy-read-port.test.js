@@ -197,3 +197,66 @@ describe('query chưa nối nguồn legacy phải BÁO LỖI, không trả rỗn
     });
   });
 });
+
+describe('bootstrap/firebase-app — composition root không giữ bí mật nào', function () {
+  var FB = GIEO.require('bootstrap/firebase-app');
+  var CFG = { apiKey: 'k', authDomain: 'a', databaseURL: 'd', projectId: 'the-cafe-33' };
+  var ACC = { email: 'x@y.z', password: 'p' };
+
+  function fakeSdk(over) {
+    return Object.assign({
+      apps: [],
+      initializeApp: function () { this.apps = [{}]; },
+      database: function () { return { ref: function () {} }; },
+      firestore: function () { return { collection: function () {} }; },
+      auth: function () {
+        return { signInWithEmailAndPassword: function () { return Promise.resolve({ user: {} }); } };
+      }
+    }, over || {});
+  }
+
+  test('không có config thì từ chối — không có giá trị mặc định nào trong src/', function () {
+    return FB.init({ account: ACC, sdk: fakeSdk() }).then(function (out) {
+      assertErr(out, 'VALIDATION');
+      assert.ok(/không có giá trị mặc định/.test(out.error.message));
+    });
+  });
+
+  test('không có tài khoản thì từ chối', function () {
+    return FB.init({ config: CFG, sdk: fakeSdk() }).then(function (out) {
+      assertErr(out, 'VALIDATION');
+    });
+  });
+
+  test('SDK chưa nạp thì nói rõ, không ném lỗi trần', function () {
+    return FB.init({ config: CFG, account: ACC, sdk: null }).then(function (out) {
+      assertErr(out, 'NOT_FOUND');
+    });
+  });
+
+  test('đăng nhập xong mới trao handle', function () {
+    return FB.init({ config: CFG, account: ACC, sdk: fakeSdk() }).then(function (out) {
+      assertOk(out);
+      assert.ok(out.value.rtdb && out.value.firestore);
+      assert.strictEqual(out.value.projectId, 'the-cafe-33');
+    });
+  });
+
+  test('đăng nhập HỎNG thì KHÔNG trao handle quyền rỗng', function () {
+    var sdk = fakeSdk({
+      auth: function () {
+        return {
+          signInWithEmailAndPassword: function () {
+            return Promise.reject(new Error('sai mật khẩu'));
+          }
+        };
+      }
+    });
+    return FB.init({ config: CFG, account: ACC, sdk: sdk }).then(function (out) {
+      assertErr(out, 'RETRYABLE');
+      /* Quyền rỗng làm mọi truy vấn trả rỗng, và rỗng trông y hệt "không có
+         dữ liệu" — đúng kiểu hỏng im lặng cả hệ này dựng ra để chặn. */
+      assert.ok(/KHÔNG chạy với quyền rỗng/.test(out.error.message));
+    });
+  });
+});
