@@ -53,9 +53,22 @@ GIEO.define('bootstrap/runtime', [
 
   function createRuntime(spec) {
     spec = spec || {};
-    var mode = spec.mode || MODE.READ_ONLY;
-    if (!MODE[mode]) throw new Error('[bootstrap/runtime] mode không hợp lệ: ' + mode);
+    var declaredMode = spec.mode || MODE.READ_ONLY;
+    if (!MODE[declaredMode]) throw new Error('[bootstrap/runtime] mode không hợp lệ: ' + declaredMode);
+    if (spec.cutover && spec.mode) {
+      /* Hai nguồn sự thật cho "được ghi chưa" là đúng một nguồn quá nhiều. */
+      throw new Error('[bootstrap/runtime] có cutover thì KHÔNG đặt mode bằng tay — ' +
+        'quyền ghi do tiến trình cutover (P13) quyết, không do lời gọi');
+    }
     var operationStore = spec.operationStore || pipeline.createInMemoryOperationStore();
+
+    /**
+     * Mode HIỆN TẠI, hỏi lại mỗi lần chứ không chụp một lần lúc dựng: rollback
+     * ở P13 phải có hiệu lực ngay, không đợi khởi động lại app.
+     */
+    function currentMode() {
+      return spec.cutover ? spec.cutover.runtimeMode() : declaredMode;
+    }
 
     function context() {
       return typeof spec.context === 'function' ? spec.context() : spec.context;
@@ -76,6 +89,7 @@ GIEO.define('bootstrap/runtime', [
     function command(name, input) {
       var cmd = COMMANDS[name];
       if (!cmd) return Promise.resolve(R.err('NOT_FOUND', 'command chưa đăng ký: ' + name));
+      var mode = currentMode();
       if (mode === MODE.READ_ONLY) {
         return Promise.resolve(R.err('FORBIDDEN',
           'Hệ thống mới đang READ_ONLY — production cũ vẫn là sole writer'));
@@ -121,15 +135,20 @@ GIEO.define('bootstrap/runtime', [
       return function () {};
     }
 
-    return {
-      mode: mode,
+    var api = {
       query: query,
       watch: watch,
       command: command,
       device: spec.device || {},
+      currentMode: currentMode,
       registeredCommands: function () { return Object.keys(COMMANDS).sort(); },
       registeredQueries: function () { return Object.keys(QUERIES).sort(); }
     };
+
+    /* `mode` đọc như một trường thường để UI không phải biết có cutover hay
+       không, nhưng nó luôn trả giá trị hiện tại. */
+    Object.defineProperty(api, 'mode', { enumerable: true, get: currentMode });
+    return api;
   }
 
   return { MODE: MODE, COMMANDS: COMMANDS, QUERIES: QUERIES, createRuntime: createRuntime };

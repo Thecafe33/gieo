@@ -130,7 +130,15 @@
 | Phase | Nội dung |
 |---|---|
 | P9 / P10 | Thin shell/controller + legacy read port + Firebase SDK read bridge đã xong ở READ_ONLY; Catalog realtime POS và báo cáo doanh thu đã nối qua query gateway; còn cấp Firebase config/handles thật và hoàn thiện các màn nghiệp vụ còn lại |
-| P12 / P13 | Shadow comparison + cutover |
+| P9 / P10 | Còn cấp Firebase config/handles thật |
+| P12 / P13 | Cơ chế đã xây và có test; CHƯA chạy thật — cần dữ liệu production và quyết định của chủ quán |
+
+P12/P13 đã xây cơ chế: `bootstrap/shadow-compare` (ma trận 11 domain × 11 lớp
+kịch bản, cổng mặc định ĐÓNG — ô chưa chạy không phải ô đạt) và
+`bootstrap/cutover` (trình tự OLD STOP → RECONCILE → NEW SOLE WRITER, dual-writer
+không biểu diễn được vì writer là MỘT trường ba giá trị). Runtime lấy quyền ghi
+TỪ cutover, không đặt mode bằng tay. Đây là cơ chế kiểm soát, KHÔNG phải đã
+cutover.
 
 P11 đã nối: `reporting` trước đó có 4 module nhưng KHÔNG app nào với tới được vì
 chúng chưa từng được đăng ký thành query — một báo cáo không đăng ký thì hoặc

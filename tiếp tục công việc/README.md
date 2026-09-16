@@ -16,8 +16,8 @@ Hệ thống production cũ vẫn là sole writer; code mới chưa được ph�
 
 ## Kiểm chứng
 
-- `691/691` test pass.
-- `71` module, `0` vi phạm import-direction.
+- `719/719` test pass.
+- `73` module, `0` vi phạm import-direction.
 - Build thành công `dist/posgieo-new.html` và `dist/quanlygieo-new.html`.
 
 ## Bổ sung ở lượt này — hoàn thiện màn P9/P10 còn lại
@@ -77,6 +77,32 @@ cột phải khai `{label, key}` hoặc `{label, value}`.
 `legacy-data-source` bổ sung các báo cáo kỳ vào danh sách chưa-nối-nguồn: ledger
 cũ chỉ tra được theo `containerCode`, không theo khoảng ngày. Trả lỗi thay vì
 dựng báo cáo rỗng trông như "kỳ này không hao hụt gì".
+
+## Bổ sung ở lượt này — P12 shadow + P13 cutover (cơ chế, chưa chạy thật)
+
+`bootstrap/shadow-compare` — ma trận §16 đầy đủ: 11 domain × 11 lớp kịch bản.
+- Cổng MẶC ĐỊNH ĐÓNG: ô chưa chạy là FAIL, không phải "chắc là giống nhau".
+  Sổ trắng mà kết luận "không còn lệch" là đúng một cách rỗng tuếch.
+- Nhãn "đã giải thích" chỉ có giá trị khi có lý do viết ra VÀ người đứng tên.
+- Chạy lại một ô thì giữ kết quả XẤU NHẤT — chạy tới khi may mắn khớp không
+  xoá được lỗi.
+- Cả hai bên đều thiếu trường = MATERIAL: không so được nghĩa là không biết.
+- `createRun` ném lỗi nếu runtime đang ở mode WRITE.
+
+`bootstrap/cutover` — trình tự §17 và ba luật được cài vào cấu trúc:
+- "Không dual writer": writer là MỘT trường nhận đúng `OLD | NONE | NEW`. Không
+  viết ra được trạng thái cả hai cùng ghi, nên không có gì để quên kiểm tra.
+- "Không partial migration": chỉ một bước đổi writer, và nó đổi toàn bộ.
+- "Cutover một lần": chạy lần hai bị từ chối; rollback là đường riêng, chỉ mở
+  trong cửa sổ đã khai, bắt buộc có lý do, và sau rollback phải làm lại từ đầu.
+- Phase P0..P12 phải PASS kèm BẰNG CHỨNG — ô tick không kèm bằng chứng bị từ chối.
+
+Runtime nay lấy quyền ghi TỪ cutover (`spec.cutover`), hỏi lại mỗi lần gọi chứ
+không chụp lúc dựng, nên rollback có hiệu lực ngay. Đưa cutover kèm `mode` bằng
+tay sẽ ném lỗi: hai nguồn sự thật cho "được ghi chưa" là đúng một nguồn quá nhiều.
+
+**Lưu ý:** đây là CƠ CHẾ kiểm soát. Chưa chạy shadow thật, chưa cutover, hệ cũ
+vẫn là sole writer.
 
 ## Việc tiếp theo
 
