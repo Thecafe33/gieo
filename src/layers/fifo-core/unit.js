@@ -57,8 +57,20 @@ GIEO.define('fifo-core/unit', ['shared-kernel/ids', 'shared-kernel/result'], fun
     FINISHED_WITH_REMAINDER: 'FINISHED_WITH_REMAINDER',
     NEGATIVE_REMAINDER: 'NEGATIVE_REMAINDER',
     RESTORED_FROM_LOST: 'RESTORED_FROM_LOST',
-    PHYSICAL_RECONCILED: 'PHYSICAL_RECONCILED'
+    PHYSICAL_RECONCILED: 'PHYSICAL_RECONCILED',
+    /* Unit tiếp nhận từ hệ cũ: có lượng, KHÔNG có giá vốn. */
+    SEEDED_WITHOUT_COST: 'SEEDED_WITHOUT_COST'
   };
+
+  /**
+   * Xuất xứ của Unit. Đây là ranh giới truy vết của cả hệ thống:
+   *
+   *   NATIVE      — sinh ra trong hệ mới. Truy được toàn bộ vòng đời.
+   *   LEGACY_SEED — tiếp nhận tại mốc cutover. Truy được TỪ mốc đó TRỞ ĐI,
+   *                 và KHÔNG truy ngược trước đó. Không phải vì dữ liệu mất,
+   *                 mà vì đó là quyết định đã chốt: không bám vào quá khứ.
+   */
+  var ORIGIN = { NATIVE: 'NATIVE', LEGACY_SEED: 'LEGACY_SEED' };
 
   function isStatus(s) { return Object.prototype.hasOwnProperty.call(STATUS, s); }
 
@@ -91,7 +103,66 @@ GIEO.define('fifo-core/unit', ['shared-kernel/ids', 'shared-kernel/result'], fun
     }
     if (!spec.operationId) return R.err('VALIDATION', 'createUnit cần operationId (invariant #7)');
 
-    return R.ok({
+    return R.ok(buildUnit(spec, {
+      origin: ORIGIN.NATIVE,
+      costBasis: {
+        unitCost: spec.costBasis.unitCost,
+        currency: spec.costBasis.currency || 'VND',
+        versionId: spec.costBasis.versionId || null,
+        source: spec.costBasis.source || 'RECEIVING'
+      },
+      needsReview: false,
+      needsReviewReasons: []
+    }));
+  }
+
+  /**
+   * Tiếp nhận Unit từ hệ cũ tại mốc cutover.
+   *
+   * CỬA RIÊNG, cố ý không phải một tham số của `createUnit`: nếu nới `createUnit`
+   * cho phép thiếu giá vốn thì đường nhận hàng bình thường cũng nới theo, và gap
+   * §10b.1 quay lại qua chính cái cửa vừa mở. Ở đây giá vốn trống là hợp lệ và
+   * được khai ra; ở đường kia nó vẫn là lỗi.
+   *
+   * `initialQty` = `unitBase` hiện tại của hệ cũ, KHÔNG phải dung tích gốc: từ
+   * mốc này trở đi lô coi như bắt đầu với đúng lượng đang thực có.
+   *
+   * @param spec.seededAt      mốc tiếp nhận (businessDate cutover)
+   * @param spec.legacyRef     mã/lô bên hệ cũ, để đối chiếu bằng mắt khi cần
+   */
+  function seedUnitFromLegacy(spec) {
+    if (!spec) return R.err('VALIDATION', 'seedUnitFromLegacy cần spec');
+    if (!ids.isId(spec.itemId, 'item')) return R.err('VALIDATION', 'seed cần itemId hợp lệ');
+    if (!ids.isId(spec.storeId, 'store')) return R.err('VALIDATION', 'seed cần storeId hợp lệ');
+    if (!ITEM_KIND[spec.itemKind]) return R.err('VALIDATION', "itemKind phải là 'raw' hoặc 'prep'");
+    if (typeof spec.initialQty !== 'number' || !isFinite(spec.initialQty)) {
+      return R.err('VALIDATION', 'seed cần initialQty là số hữu hạn');
+    }
+    if (spec.initialQty <= 0) {
+      /* Lô đã hết hoặc đang âm ở hệ cũ thì KHÔNG mang sang. Mang một lô rỗng
+         sang chỉ tạo ra rác trong FIFO mới, và mang lô âm sang là nhập khẩu
+         luôn cái nợ không ai giải thích được. */
+      return R.err('PRECONDITION',
+        'lô có lượng <= 0 ở hệ cũ thì không tiếp nhận (' + spec.initialQty + ') — ' +
+        'phần chênh này thuộc về hệ cũ, không mang sang',
+        { legacyRef: spec.legacyRef || null });
+    }
+    if (!spec.operationId) return R.err('VALIDATION', 'seed cần operationId (invariant #7)');
+    if (!spec.seededAt) return R.err('VALIDATION', 'seed cần seededAt — mốc tiếp nhận là ranh giới truy vết');
+
+    return R.ok(buildUnit(spec, {
+      origin: ORIGIN.LEGACY_SEED,
+      /* Trống, và NÓI RA là trống. Không lấy giá gần nhất đắp vào. */
+      costBasis: null,
+      seededAt: spec.seededAt,
+      legacyRef: spec.legacyRef || null,
+      needsReview: true,
+      needsReviewReasons: [REVIEW.SEEDED_WITHOUT_COST]
+    }));
+  }
+
+  function buildUnit(spec, extra) {
+    return Object.assign({
       unitId: spec.unitId || ids.newId('unit'),
       itemId: spec.itemId,
       storeId: spec.storeId,
@@ -105,13 +176,6 @@ GIEO.define('fifo-core/unit', ['shared-kernel/ids', 'shared-kernel/result'], fun
       /* BẤT BIẾN sau khi set. */
       initialQty: spec.initialQty,
       remainingQty: spec.initialQty,
-      costBasis: {
-        unitCost: spec.costBasis.unitCost,
-        currency: spec.costBasis.currency || 'VND',
-        /* versionId của CostBasis đã dùng — V4 của cơ chế versioning chung. */
-        versionId: spec.costBasis.versionId || null,
-        source: spec.costBasis.source || 'RECEIVING'
-      },
 
       status: spec.status === STATUS.RECEIVED ? STATUS.RECEIVED : STATUS.SEALED,
       openedAt: null,
@@ -126,12 +190,17 @@ GIEO.define('fifo-core/unit', ['shared-kernel/ids', 'shared-kernel/result'], fun
       lostAt: null, lostBy: null, lostReportId: null,
       foundAt: null, foundBy: null,
 
-      needsReview: false,
-      needsReviewReasons: [],
       physicalReconciliations: [],
 
+      /* Mặc định NATIVE + không có seed. Cửa nào gọi thì cửa đó ghi đè bằng
+         `extra`, nên mọi Unit đều mang xuất xứ tường minh — không có Unit nào
+         "không rõ từ đâu". */
+      origin: ORIGIN.NATIVE,
+      seededAt: null,
+      legacyRef: null,
+
       operationId: spec.operationId
-    });
+    }, extra);
   }
 
   /**
@@ -331,12 +400,14 @@ GIEO.define('fifo-core/unit', ['shared-kernel/ids', 'shared-kernel/result'], fun
 
   return {
     STATUS: STATUS,
+    ORIGIN: ORIGIN,
     TRANSITIONS: TRANSITIONS,
     ITEM_KIND: ITEM_KIND,
     REVIEW: REVIEW,
     isStatus: isStatus,
     canTransition: canTransition,
     createUnit: createUnit,
+    seedUnitFromLegacy: seedUnitFromLegacy,
     open: open,
     markConsuming: markConsuming,
     markSystemExhausted: markSystemExhausted,

@@ -705,3 +705,102 @@ describe('fifo-core/reconciliation', function () {
     });
   });
 });
+
+describe('Tiếp nhận dữ liệu cũ — ranh giới truy vết', function () {
+  var U = GIEO.require('fifo-core/unit');
+  var T = GIEO.require('traceability/trace');
+  var idsL = GIEO.require('shared-kernel/ids');
+  var ST = idsL.deterministicId('store', ['main']);
+  var IT = idsL.deterministicId('item', ['sua']);
+
+  function seed(over) {
+    return U.seedUnitFromLegacy(Object.assign({
+      itemId: IT, storeId: ST, itemKind: 'raw', initialQty: 140,
+      operationId: 'operation_seed_1', seededAt: '2026-09-20', legacyRef: 'K362R02H'
+    }, over || {}));
+  }
+
+  test('lô tiếp nhận có LƯỢNG nhưng KHÔNG có giá vốn, và tự khai điều đó', function () {
+    var u = assertOk(seed());
+    assert.strictEqual(u.initialQty, 140);
+    assert.strictEqual(u.remainingQty, 140);
+    assert.strictEqual(u.costBasis, null);
+    assert.strictEqual(u.origin, U.ORIGIN.LEGACY_SEED);
+    assert.strictEqual(u.seededAt, '2026-09-20');
+    assert.strictEqual(u.legacyRef, 'K362R02H');
+    assert.ok(u.needsReviewReasons.indexOf('SEEDED_WITHOUT_COST') !== -1);
+  });
+
+  test('cửa nhận hàng bình thường VẪN bắt buộc giá vốn — seed không nới nó ra', function () {
+    var out = U.createUnit({
+      itemId: IT, storeId: ST, itemKind: 'raw', initialQty: 100, operationId: 'operation_x'
+    });
+    assertErr(out, 'VALIDATION');
+    assert.ok(/costBasis/.test(out.error.message));
+  });
+
+  test('Unit sinh trong hệ mới mang origin NATIVE', function () {
+    var u = assertOk(U.createUnit({
+      itemId: IT, storeId: ST, itemKind: 'raw', initialQty: 100,
+      costBasis: { unitCost: 30 }, operationId: 'operation_y'
+    }));
+    assert.strictEqual(u.origin, U.ORIGIN.NATIVE);
+    assert.strictEqual(u.seededAt, null);
+  });
+
+  test('lô đã hết hoặc đang âm ở hệ cũ thì KHÔNG mang sang', function () {
+    assertErr(seed({ initialQty: 0 }), 'PRECONDITION');
+    var neg = seed({ initialQty: -1826 });
+    assertErr(neg, 'PRECONDITION');
+    assert.strictEqual(neg.error.detail.legacyRef, 'K362R02H');
+  });
+
+  test('thiếu mốc tiếp nhận thì từ chối — không có mốc thì không có ranh giới', function () {
+    assertErr(seed({ seededAt: null }), 'VALIDATION');
+  });
+
+  test('trace NÓI RA ranh giới thay vì hiện lịch sử cụt như thể đầy đủ', function () {
+    var u = assertOk(seed());
+    var tr = assertOk(T.buildUnitTrace({ unit: u, ledgerEntries: [], allocations: [] }));
+    assert.strictEqual(tr.traceability.complete, false);
+    assert.strictEqual(tr.traceability.completeFrom, '2026-09-20');
+    assert.strictEqual(tr.traceability.legacyRef, 'K362R02H');
+    assert.ok(/không được truy xuất/.test(tr.traceability.note));
+  });
+
+  test('trace của Unit hệ mới khai là ĐẦY ĐỦ', function () {
+    var u = assertOk(U.createUnit({
+      itemId: IT, storeId: ST, itemKind: 'raw', initialQty: 100,
+      costBasis: { unitCost: 30 }, receivedAt: 500, operationId: 'operation_z'
+    }));
+    var tr = assertOk(T.buildUnitTrace({ unit: u, ledgerEntries: [], allocations: [] }));
+    assert.strictEqual(tr.traceability.complete, true);
+    assert.strictEqual(tr.traceability.origin, 'NATIVE');
+  });
+
+  test('câu hỏi về quá khứ KHÔNG bị tính là "chưa trả lời" với lô tiếp nhận', function () {
+    var u = assertOk(seed());
+    var tr = assertOk(T.buildUnitTrace({ unit: u, ledgerEntries: [], allocations: [] }));
+    var missing = T.unanswered(tr);
+    assert.strictEqual(missing.indexOf('cost basis nào'), -1, 'giá vốn nằm ngoài ranh giới');
+    assert.strictEqual(missing.indexOf('nhận từ đâu'), -1);
+    assert.strictEqual(missing.indexOf('ai mở'), -1);
+  });
+
+  test('nhưng quãng đời SAU mốc tiếp nhận thì vẫn phải trả lời được', function () {
+    var u = assertOk(seed());
+    var tr = assertOk(T.buildUnitTrace({ unit: u, ledgerEntries: [], allocations: [] }));
+    assert.strictEqual(T.unanswered(tr).length, 0, 'lô seed mới nhận thì chưa thiếu gì cả');
+
+    /* Bỏ mất allocations = mất phần hệ mới chịu trách nhiệm → phải báo thiếu. */
+    var broken = Object.assign({}, tr, { allocations: null });
+    assert.ok(T.unanswered(broken).indexOf('đã phân bổ cho những gì') !== -1);
+  });
+
+  test('lô tiếp nhận vẫn chạy FIFO bình thường về LƯỢNG', function () {
+    var u = assertOk(seed());
+    var opened = assertOk(U.open(u, { at: 1000, actorId: idsL.deterministicId('actor', ['nv']), operationId: 'operation_open_seed' }));
+    assert.strictEqual(opened.remainingQty, 140);
+    assert.strictEqual(opened.status, 'OPEN');
+  });
+});

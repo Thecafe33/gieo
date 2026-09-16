@@ -103,7 +103,29 @@ GIEO.define('traceability/trace', [
 
       needsReview: unit.needsReview,
       needsReviewReasons: unit.needsReviewReasons,
-      currentState: unitLib.effectiveState(unit)
+      currentState: unitLib.effectiveState(unit),
+
+      /**
+       * RANH GIỚI TRUY VẾT — phần quan trọng nhất của trace một lô tiếp nhận.
+       *
+       * Lô seed từ hệ cũ chỉ truy được TỪ mốc tiếp nhận trở đi. Nếu không nói ra,
+       * màn truy vết sẽ hiện một lịch sử cụt trông y hệt một lịch sử đầy đủ, và
+       * người đọc sẽ kết luận sai từ một khoảng trống mà họ không biết là trống.
+       *
+       * Đây KHÔNG phải dữ liệu bị mất do lỗi: đó là quyết định đã chốt — lấy
+       * FIFO làm gốc cho tương lai, không bám vào quá khứ.
+       */
+      traceability: unit.origin === unitLib.ORIGIN.LEGACY_SEED
+        ? {
+            origin: unit.origin,
+            completeFrom: unit.seededAt,
+            legacyRef: unit.legacyRef,
+            complete: false,
+            note: 'Lô tiếp nhận từ hệ cũ tại ' + unit.seededAt +
+              '. Truy vết đầy đủ từ mốc này trở đi; lịch sử trước đó thuộc hệ cũ và ' +
+              'không được truy xuất — đây là ranh giới đã chốt, không phải dữ liệu thiếu.'
+          }
+        : { origin: unit.origin, completeFrom: unit.receivedAt, legacyRef: null, complete: true, note: null }
     });
   }
 
@@ -114,12 +136,23 @@ GIEO.define('traceability/trace', [
    */
   function unanswered(trace) {
     var missing = [];
-    if (!trace.origin.receiptId && !trace.origin.supplierId) missing.push('nhận từ đâu');
-    if (!trace.origin.supplierId) missing.push('supplier/receipt nào');
+
+    /* Lô seed: những câu hỏi về xuất xứ nằm NGOÀI ranh giới, nên không tính là
+       "chưa trả lời được". Tính chúng vào sẽ biến một quyết định đã chốt thành
+       một danh sách lỗi dài vĩnh viễn, và danh sách lỗi mà không ai sửa được
+       thì chỉ dạy người ta bỏ qua danh sách lỗi. */
+    var seeded = trace.traceability && trace.traceability.complete === false;
+    if (!seeded) {
+      if (!trace.origin.receiptId && !trace.origin.supplierId) missing.push('nhận từ đâu');
+      if (!trace.origin.supplierId) missing.push('supplier/receipt nào');
+      if (!trace.costBasis || typeof trace.costBasis.unitCost !== 'number') missing.push('cost basis nào');
+      if (!trace.opened.at) missing.push('mở lúc nào');
+      if (!trace.opened.by) missing.push('ai mở');
+    }
+
+    /* Những câu này phải trả lời được với MỌI lô, kể cả lô seed — vì chúng nói
+       về quãng đời SAU mốc tiếp nhận, tức phần hệ mới chịu trách nhiệm. */
     if (typeof trace.initialQty !== 'number') missing.push('số lượng ban đầu');
-    if (!trace.costBasis || typeof trace.costBasis.unitCost !== 'number') missing.push('cost basis nào');
-    if (!trace.opened.at) missing.push('mở lúc nào');
-    if (!trace.opened.by) missing.push('ai mở');
     if (!trace.allocations) missing.push('đã phân bổ cho những gì');
     return missing;
   }
