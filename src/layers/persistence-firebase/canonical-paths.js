@@ -89,6 +89,7 @@ GIEO.define('persistence-firebase/canonical-paths', [
     /* Sổ vận hành ca — event record, đọc thẳng. */
     shiftDay: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/shifts/' + a.businessDate; } },
     shiftSegment: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/shifts/' + a.businessDate + '/segments/' + a.seq; } },
+    employee: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/employees/' + a.employeeId; } },
     employeeShift: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/employeeShifts/' + a.shiftId; } },
     /* Compaction thật. */
     monthlySnapshot: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/snapshots/monthly/' + a.period + '/revisions/' + a.revisionNo; } },

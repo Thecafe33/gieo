@@ -67,7 +67,15 @@ GIEO.define('persistence-firebase/atomic-commit', [
         unitSnapshot: ['unitSnapshot', function (x) { return { unitId: x.unitId, revisionNo: x.revisionNo }; }],
         unitSnapshotHead: ['unitSnapshotHead', function (x) { return { unitId: x.unitId }; }],
         monthlySnapshot: ['monthlySnapshot', function (x) { return { period: x.period, revisionNo: x.revisionNo }; }],
-        monthlySnapshotHead: ['monthlySnapshotHead', function (x) { return { period: x.period }; }]
+        monthlySnapshotHead: ['monthlySnapshotHead', function (x) { return { period: x.period }; }],
+        /* Loại bản ghi của đường TIẾP NHẬN dữ liệu cũ. Khai ở đây vì nếu không
+           khai thì `planToWrites` từ chối — và từ chối đúng là hành vi mong muốn
+           cho loại chưa khai, nên cách mở là khai ra, không phải nới luật. */
+        item: ['item', function (x) { return { itemId: x.itemId }; }],
+        recipeVersion: ['recipeVersion', function (x) {
+          return { recipeId: x.recipeId, versionId: x.versionId };
+        }],
+        employee: ['employee', function (x) { return { employeeId: x.employeeId }; }]
       };
       var m = map[r.type];
       if (!m) {

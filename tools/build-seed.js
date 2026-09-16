@@ -104,6 +104,7 @@ Object.keys(activeUnits).forEach((itemId) => {
 });
 
 let seededQty = 0;
+let openCount = 0;
 Object.keys(containers).forEach((id) => {
   const c = containers[id];
   if (c.status === 'finished') { skipped.units.push({ code: c.code, why: 'đã dùng hết ở hệ cũ' }); return; }
@@ -115,13 +116,19 @@ Object.keys(containers).forEach((id) => {
     ? c.baseQty
     : (rt && typeof rt.unitBase === 'number' ? rt.unitBase : c.unitBase);
 
+  /* Hũ đang mở dở giữ nguyên `openedAt` cũ để thứ tự FIFO khớp với kệ thật.
+     Hũ niêm phong không có mốc mở, và cũng không được bịa ra một mốc. */
+  const openedAt = c.status === 'sealed'
+    ? null
+    : (rt && rt.openedAt) || c.openedAt || null;
+
   const out = unitLib.seedUnitFromLegacy({
     unitId: ids.deterministicId('unit', ['seed', c.code]),
     itemId: ids.deterministicId('item', ['legacy', c.itemId || 'unknown']),
     storeId: STORE,
     itemKind: 'raw',
     initialQty: qty,
-    status: 'SEALED',
+    openedAt: openedAt,
     operationId: ids.deterministicId('operation', ['seed', cutoverDate, c.code]),
     seededAt: cutoverDate,
     legacyRef: c.code
@@ -131,6 +138,7 @@ Object.keys(containers).forEach((id) => {
     return;
   }
   seededQty += qty;
+  if (out.value.status === 'OPEN') openCount += 1;
   seed.units.push(out.value);
 });
 
@@ -202,6 +210,7 @@ fs.writeFileSync(outFile, JSON.stringify(seed, null, 1));
 console.log('\n=== TIẾP NHẬN DỮ LIỆU CŨ — mốc ' + cutoverDate + ' ===\n');
 console.log('Mặt hàng   :', seed.items.length);
 console.log('Lô tồn đầu :', seed.units.length, '— tổng lượng', seededQty.toLocaleString('vi-VN'));
+console.log('   trong đó đang mở dở:', openCount, '(giữ nguyên openedAt để FIFO khớp kệ thật)');
 console.log('Công thức  :', seed.recipes.length);
 console.log('Nhân viên  :', seed.employees.length);
 console.log('Kỳ doanh thu đã chốt:', seed.revenue.length);

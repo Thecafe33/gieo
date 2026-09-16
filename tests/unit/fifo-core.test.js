@@ -804,3 +804,64 @@ describe('Tiếp nhận dữ liệu cũ — ranh giới truy vết', function ()
     assert.strictEqual(opened.status, 'OPEN');
   });
 });
+
+describe('Tiếp nhận — hũ đang mở dở phải giữ đúng chỗ trong hàng đợi FIFO', function () {
+  var U = GIEO.require('fifo-core/unit');
+  var A = GIEO.require('fifo-core/allocation');
+  var idsS = GIEO.require('shared-kernel/ids');
+  var ST = idsS.deterministicId('store', ['main']);
+  var IT = idsS.deterministicId('item', ['sua']);
+
+  function seedUnit(ref, qty, openedAt) {
+    return assertOk(U.seedUnitFromLegacy({
+      unitId: idsS.deterministicId('unit', ['seed', ref]),
+      itemId: IT, storeId: ST, itemKind: 'raw', initialQty: qty,
+      openedAt: openedAt || null,
+      operationId: 'operation_seed_' + ref, seededAt: '2026-09-20', legacyRef: ref
+    }));
+  }
+
+  test('lô mở dở được tiếp nhận ở trạng thái ĐANG MỞ, giữ nguyên openedAt', function () {
+    var u = seedUnit('A', 140, 1789363395601);
+    assert.strictEqual(u.status, 'OPEN');
+    assert.strictEqual(u.openedAt, 1789363395601);
+    /* Người mở thuộc hệ cũ — không mang sang, và không bịa. */
+    assert.strictEqual(u.openedBy, null);
+  });
+
+  test('lô niêm phong tiếp nhận vẫn là SEALED, không bịa mốc mở', function () {
+    var u = seedUnit('B', 500, null);
+    assert.strictEqual(u.status, 'SEALED');
+    assert.strictEqual(u.openedAt, null);
+  });
+
+  test('FIFO dùng hũ mở dở TRƯỚC, không đẩy nó xuống cuối hàng', function () {
+    var cu = seedUnit('CU', 100, 1000);      /* mở từ lâu, còn 100 */
+    var moi = seedUnit('MOI', 200, 5000);    /* mở sau, còn 200 */
+    var ws = A.createWorkingSet([moi, cu]);  /* cố ý đưa vào sai thứ tự */
+
+    var out = assertOk(A.allocateConsumption(ws, {
+      itemId: IT, qty: 150, operationId: 'operation_ban_1'
+    }));
+    assert.strictEqual(out.allocations.length, 2);
+    assert.strictEqual(out.allocations[0].unitId, cu.unitId, 'phải trừ hũ mở trước tiên');
+    assert.strictEqual(out.allocations[0].qty, 100);
+    assert.strictEqual(out.allocations[1].unitId, moi.unitId);
+    assert.strictEqual(out.allocations[1].qty, 50);
+  });
+
+  test('lô tiếp nhận không có giá vốn thì allocation NÓI RA là chưa đủ giá', function () {
+    var u = seedUnit('C', 100, 1000);
+    var ws = A.createWorkingSet([u]);
+    var out = assertOk(A.allocateConsumption(ws, {
+      itemId: IT, qty: 50, operationId: 'operation_ban_2'
+    }));
+    /* Lượng vẫn trừ đúng — đó là điều kiện đã chốt. Nhưng giá thì không bịa. */
+    assert.strictEqual(out.allocations[0].qty, 50);
+    assert.strictEqual(out.allocations[0].unitCost, null);
+    assert.strictEqual(out.allocations[0].cost, null);
+    assert.strictEqual(out.costComplete, false, 'có lô không giá vốn thì totalCost chưa phải giá vốn thật');
+    assert.deepStrictEqual(out.unitsWithoutCost, [u.unitId]);
+    assert.strictEqual(out.totalCost, 0, 'không cộng null thành NaN');
+  });
+});

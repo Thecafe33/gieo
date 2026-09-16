@@ -89,6 +89,7 @@ GIEO.define('fifo-core/allocation', [
     var left = spec.qty;
     var allocations = [];
     var touched = [];
+    var unitsWithoutCost = [];
 
     for (var i = 0; i < eligible.length && left > 0; i++) {
       var u = eligible[i];
@@ -98,14 +99,21 @@ GIEO.define('fifo-core/allocation', [
       var next = Object.assign({}, u, { remainingQty: u.remainingQty - take });
       if (next.status === S.OPEN) next.status = S.CONSUMING;
 
+      /* Lô TIẾP NHẬN từ hệ cũ không có giá vốn (xem SEED-CONTRACT-V1.md). Lượng
+         vẫn trừ đúng — đó là điều kiện đã chốt — nhưng giá thì để null và báo ra,
+         tuyệt đối không suy ra một con số. Đọc thẳng `u.costBasis.unitCost` ở
+         đây sẽ ném lỗi ngay ca bán đầu tiên sau cutover. */
+      var hasCost = !!(u.costBasis && typeof u.costBasis.unitCost === 'number');
+      if (!hasCost) unitsWithoutCost.push(u.unitId);
+
       allocations.push({
         unitId: u.unitId,
         itemId: u.itemId,
         qty: take,
         /* Giá vốn THẬT của chính Unit này — nền của cogsActual (§10b.1). */
-        unitCost: u.costBasis.unitCost,
-        cost: take * u.costBasis.unitCost,
-        costBasisVersionId: u.costBasis.versionId,
+        unitCost: hasCost ? u.costBasis.unitCost : null,
+        cost: hasCost ? take * u.costBasis.unitCost : null,
+        costBasisVersionId: hasCost ? u.costBasis.versionId : null,
         unitBaseBefore: u.remainingQty,
         unitBaseAfter: next.remainingQty,
         operationId: spec.operationId
@@ -123,10 +131,15 @@ GIEO.define('fifo-core/allocation', [
       /* Phần không có Unit nào gánh được. Tầng trên quyết định ghi nợ hay từ chối. */
       shortfallQty: left,
       allocations: allocations,
-      totalCost: allocations.reduce(function (s, a) { return s + a.cost; }, 0),
-      /* Thiếu hàng thì KHÔNG có cost thật cho phần thiếu — nói rõ thay vì để
-         tầng trên tưởng totalCost đã đủ. */
-      costComplete: left === 0,
+      /* Chỉ cộng phần CÓ giá. Cộng null vào đây sẽ ra NaN và NaN đi tiếp vào
+         báo cáo thì hỏng im lặng; để 0 thì tổng trông như đã đủ. */
+      totalCost: allocations.reduce(function (s, a) {
+        return s + (typeof a.cost === 'number' ? a.cost : 0);
+      }, 0),
+      /* Thiếu hàng, HOẶC có lô không giá vốn, thì `totalCost` chưa phải giá vốn
+         thật. Nói rõ thay vì để tầng trên tưởng đã đủ. */
+      costComplete: left === 0 && unitsWithoutCost.length === 0,
+      unitsWithoutCost: unitsWithoutCost,
       touchedUnits: touched
     });
   }

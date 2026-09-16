@@ -150,10 +150,25 @@ GIEO.define('fifo-core/unit', ['shared-kernel/ids', 'shared-kernel/result'], fun
     if (!spec.operationId) return R.err('VALIDATION', 'seed cần operationId (invariant #7)');
     if (!spec.seededAt) return R.err('VALIDATION', 'seed cần seededAt — mốc tiếp nhận là ranh giới truy vết');
 
+    /* Hũ đang mở dở trên kệ phải được tiếp nhận ở trạng thái ĐANG MỞ, giữ
+       nguyên `openedAt` cũ.
+       FIFO sắp thứ tự theo `openedAt` (§3.1). Seed một hũ đang mở thành SEALED
+       sẽ đẩy nó xuống cuối hàng đợi, và nhân viên sẽ được bảo mở hũ mới trong
+       khi hũ cũ còn dở trên kệ — sai ngay ca đầu tiên, đúng ở chỗ FIFO được
+       lấy làm gốc. */
+    var opened = typeof spec.openedAt === 'number' || typeof spec.openedAt === 'string';
+    if (opened && !spec.openedAt) {
+      return R.err('VALIDATION', 'lô tiếp nhận ở trạng thái đang mở thì cần openedAt');
+    }
+
     return R.ok(buildUnit(spec, {
       origin: ORIGIN.LEGACY_SEED,
       /* Trống, và NÓI RA là trống. Không lấy giá gần nhất đắp vào. */
       costBasis: null,
+      status: opened ? STATUS.OPEN : STATUS.SEALED,
+      openedAt: opened ? spec.openedAt : null,
+      /* Người mở thuộc về hệ cũ — không mang sang, và không bịa. */
+      openedBy: null,
       seededAt: spec.seededAt,
       legacyRef: spec.legacyRef || null,
       needsReview: true,
