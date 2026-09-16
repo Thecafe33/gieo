@@ -1,5 +1,7 @@
 {
   "_doc": "Bộ luật import-direction, mã hoá GIEO-CODE-STRUCTURE-BLUEPRINT-V1.md §2 + bảng §4. Dùng chung cho runtime registry (src/runtime/registry.js) và checker offline (tools/check-import-direction.js). Vi phạm = FAIL, không phải 'review sau' (blueprint §2 quy tắc 5).",
+  "_note_compaction_is_shared": "FIFO-COMPACTION-CONTRACT-V1.md §1 chốt rằng cơ chế versioning (VersionedInput) là DÙNG CHUNG cho 7 domain: Recipe/Cost/Packaging/BTP-yield/PayTerms/KPI-target/Config, và nó thuộc về compaction. Nên các domain đó (catalog, recipe-cost-btp, hr, finance) phụ thuộc compaction là hệ quả trực tiếp của contract, không phải rò rỉ kiến trúc. Chúng chỉ dùng phần VersionedInput; snapshot/purge vẫn là việc của compaction và tiến trình nền. Thay thế bằng cách tiêm từ ngoài sẽ làm mỗi domain tự cầm một registry khác nhau — đúng thứ contract cấm.",
+
   "_note_bootstrap": "Layer 'bootstrap' KHÔNG có trong blueprint gốc. Bổ sung tối thiểu bắt buộc: blueprint §2 quy tắc 1 cấm apps/* import persistence-firebase/legacy-firebase-adapter, nhưng port do domain core định nghĩa vẫn phải được nối với adapter ở đâu đó. 'bootstrap' là composition root duy nhất làm việc nối đó; apps chỉ import bootstrap. Không có nó thì hoặc apps phải vi phạm quy tắc 1, hoặc domain core phải import ngược adapter (vi phạm quy tắc 2).",
 
   "layers": {
@@ -21,7 +23,7 @@
     },
     "recipe-cost-btp": {
       "role": "Recipe/cost/BTP tại thời điểm nào. KHÔNG được import fifo-core (blueprint §4: fifo-core chỉ cho commands/read-layer/traceability/compaction import).",
-      "canImport": ["shared-kernel", "store-context"]
+      "canImport": ["shared-kernel", "store-context", "compaction"]
     },
     "compaction": {
       "role": "VersionedInput dùng chung + snapshot + verifier + purge. Contract: FIFO-COMPACTION-CONTRACT-V1.md",
@@ -33,7 +35,7 @@
     },
     "catalog": {
       "role": "Menu/Category/Topping/Packaging/Recipe link. QUANLY sở hữu duy nhất.",
-      "canImport": ["shared-kernel", "store-context", "recipe-cost-btp"]
+      "canImport": ["shared-kernel", "store-context", "recipe-cost-btp", "compaction"]
     },
     "loyalty": {
       "role": "Customer, LoyaltyLedger, stamp-free, auto-promotion. KHÔNG voucher/rewards (đã cắt).",

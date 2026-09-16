@@ -35,6 +35,8 @@
      Khi chạy trực tiếp trong Node (checker/test) thì nạp qua GIEO._loadRules(). */
   var LAYER_RULES = {
   "_doc": "Bộ luật import-direction, mã hoá GIEO-CODE-STRUCTURE-BLUEPRINT-V1.md §2 + bảng §4. Dùng chung cho runtime registry (src/runtime/registry.js) và checker offline (tools/check-import-direction.js). Vi phạm = FAIL, không phải 'review sau' (blueprint §2 quy tắc 5).",
+  "_note_compaction_is_shared": "FIFO-COMPACTION-CONTRACT-V1.md §1 chốt rằng cơ chế versioning (VersionedInput) là DÙNG CHUNG cho 7 domain: Recipe/Cost/Packaging/BTP-yield/PayTerms/KPI-target/Config, và nó thuộc về compaction. Nên các domain đó (catalog, recipe-cost-btp, hr, finance) phụ thuộc compaction là hệ quả trực tiếp của contract, không phải rò rỉ kiến trúc. Chúng chỉ dùng phần VersionedInput; snapshot/purge vẫn là việc của compaction và tiến trình nền. Thay thế bằng cách tiêm từ ngoài sẽ làm mỗi domain tự cầm một registry khác nhau — đúng thứ contract cấm.",
+
   "_note_bootstrap": "Layer 'bootstrap' KHÔNG có trong blueprint gốc. Bổ sung tối thiểu bắt buộc: blueprint §2 quy tắc 1 cấm apps/* import persistence-firebase/legacy-firebase-adapter, nhưng port do domain core định nghĩa vẫn phải được nối với adapter ở đâu đó. 'bootstrap' là composition root duy nhất làm việc nối đó; apps chỉ import bootstrap. Không có nó thì hoặc apps phải vi phạm quy tắc 1, hoặc domain core phải import ngược adapter (vi phạm quy tắc 2).",
 
   "layers": {
@@ -56,7 +58,7 @@
     },
     "recipe-cost-btp": {
       "role": "Recipe/cost/BTP tại thời điểm nào. KHÔNG được import fifo-core (blueprint §4: fifo-core chỉ cho commands/read-layer/traceability/compaction import).",
-      "canImport": ["shared-kernel", "store-context"]
+      "canImport": ["shared-kernel", "store-context", "compaction"]
     },
     "compaction": {
       "role": "VersionedInput dùng chung + snapshot + verifier + purge. Contract: FIFO-COMPACTION-CONTRACT-V1.md",
@@ -68,7 +70,7 @@
     },
     "catalog": {
       "role": "Menu/Category/Topping/Packaging/Recipe link. QUANLY sở hữu duy nhất.",
-      "canImport": ["shared-kernel", "store-context", "recipe-cost-btp"]
+      "canImport": ["shared-kernel", "store-context", "recipe-cost-btp", "compaction"]
     },
     "loyalty": {
       "role": "Customer, LoyaltyLedger, stamp-free, auto-promotion. KHÔNG voucher/rewards (đã cắt).",
@@ -2477,6 +2479,602 @@ GIEO.define('compaction/versioned-input', [
     KINDS: KINDS,
     isKind: isKind,
     createRegistry: createRegistry
+  };
+});
+
+/* ===== src/layers/catalog/menu.js ===== */
+/**
+ * Menu + Category — domain [1] CATALOG.
+ *
+ * Chuỗi thật: FIFO-CHAIN-TRACE-CATALOG-PROMOTION-V1.md.
+ * Gap: FEATURE-TREE-V1.md §4.1-4.3, §4.13, §4.14.
+ *
+ * Bốn điểm khác legacy:
+ *
+ * 1. `recipeId` là CON TRỎ TƯỜNG MINH trên MenuItem.
+ *    Legacy khớp key ngầm `'togo:' + menuItemId`, không có con trỏ nào để đổi.
+ *    Hệ quả: xoá-rồi-tạo-lại món (cách duy nhất để đổi tên) sinh key Firebase
+ *    MỚI → recipe cũ mồ côi vĩnh viễn, món mới báo "chưa có định mức" cho tới
+ *    khi có người phát hiện. Có con trỏ thật thì đổi tên chỉ là sửa field
+ *    `name`, và vấn đề mồ côi biến mất từ gốc thiết kế — không cần cơ chế dọn
+ *    dẹp bù đắp.
+ *
+ * 2. Xoá là SOFT-DELETE. Legacy `.remove()` cứng, không cascade, nên tham chiếu
+ *    itemId trong khuyến mãi/quà tặng trỏ vào hư không.
+ *
+ * 3. Category là ENTITY THẬT có thứ tự hiển thị lưu trữ. Legacy tính lại bằng
+ *    `[...new Set(menu.map(m=>m.type))]` mỗi lần render nên thứ tự đổi giữa các
+ *    lần tải.
+ *
+ * 4. Sold-out DẪN XUẤT từ FIFO, không phải cờ tay. Xem computeAvailability().
+ *
+ * Giữ nguyên 1 mẫu ĐÚNG của legacy: giá được snapshot vào giỏ ngay lúc thêm
+ * món (§8 chain-trace) — mẫu đúng hiếm hoi của toàn bộ audit về "không join
+ * sống vào dữ liệu hiện tại cho lịch sử". Xem snapshotPrice().
+ *
+ * QUANLY là nơi DUY NHẤT sửa menu (POS chỉ đọc) — đóng gap §4.1 "2 app cùng
+ * ghi thẳng RTDB, race condition không lock/version". Enforce ở tầng command
+ * qua sources:['QUANLY'], không phải ở đây.
+ */
+GIEO.define('catalog/menu', ['shared-kernel/ids', 'shared-kernel/result'], function (ids, R) {
+  'use strict';
+
+  var SIZES = { M: 'M', L: 'L' };
+
+  function createCategory(spec) {
+    if (!spec || !spec.name) return R.err('VALIDATION', 'category cần name');
+    if (!ids.isId(spec.storeId, 'store')) return R.err('VALIDATION', 'category cần storeId hợp lệ');
+    if (typeof spec.displayOrder !== 'number') {
+      return R.err('VALIDATION', 'category cần displayOrder — thứ tự phải được LƯU, không suy ra lúc render');
+    }
+    return R.ok({
+      categoryId: spec.categoryId || ids.newId('item'),
+      storeId: spec.storeId,
+      name: String(spec.name),
+      displayOrder: spec.displayOrder,
+      archived: false
+    });
+  }
+
+  function sortCategories(categories) {
+    return categories.slice().sort(function (a, b) {
+      if (a.displayOrder !== b.displayOrder) return a.displayOrder - b.displayOrder;
+      return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+    });
+  }
+
+  function createMenuItem(spec) {
+    if (!spec || !spec.name) return R.err('VALIDATION', 'món cần name');
+    if (!ids.isId(spec.storeId, 'store')) return R.err('VALIDATION', 'món cần storeId hợp lệ');
+    if (!spec.prices || typeof spec.prices !== 'object') {
+      return R.err('VALIDATION', 'món cần bảng giá theo size');
+    }
+    var sizes = Object.keys(spec.prices);
+    if (sizes.length === 0) return R.err('VALIDATION', 'món cần ít nhất 1 size có giá');
+    for (var i = 0; i < sizes.length; i++) {
+      var p = spec.prices[sizes[i]];
+      if (typeof p !== 'number' || p < 0) return R.err('VALIDATION', 'giá size ' + sizes[i] + ' không hợp lệ');
+    }
+
+    return R.ok({
+      menuItemId: spec.menuItemId || ids.newId('item'),
+      storeId: spec.storeId,
+      name: String(spec.name),
+      categoryId: spec.categoryId || null,
+      prices: Object.assign({}, spec.prices),
+      /* Con trỏ tường minh. null = chưa khai định mức, và đó là trạng thái
+         NÓI RA ĐƯỢC, khác hẳn legacy chỉ im lặng không tìm thấy key. */
+      recipeId: spec.recipeId || null,
+      toppingIds: (spec.toppingIds || []).slice(),
+      displayOrder: typeof spec.displayOrder === 'number' ? spec.displayOrder : 0,
+      color: spec.color || null,
+      archived: false,
+      archivedAt: null
+    });
+  }
+
+  /** Đổi tên chỉ là sửa field — KHÔNG xoá rồi tạo lại, nên recipe không mồ côi. */
+  function rename(menuItem, newName) {
+    if (!newName) return R.err('VALIDATION', 'tên mới không được rỗng');
+    return R.ok(Object.assign({}, menuItem, { name: String(newName) }));
+  }
+
+  /** Trỏ món sang recipe khác — thao tác độc lập mà legacy không có. */
+  function linkRecipe(menuItem, recipeId) {
+    if (recipeId !== null && !ids.isId(recipeId, 'recipe')) {
+      return R.err('VALIDATION', 'recipeId không hợp lệ');
+    }
+    return R.ok(Object.assign({}, menuItem, { recipeId: recipeId }));
+  }
+
+  /**
+   * Ngưng bán. KHÔNG xoá cứng: mọi tham chiếu tới món (khuyến mãi, quà tặng,
+   * điều kiện chiến dịch) vẫn resolve được thay vì trỏ vào hư không.
+   */
+  function archive(menuItem, at) {
+    if (menuItem.archived) return R.err('PRECONDITION', 'món đã ngưng bán');
+    return R.ok(Object.assign({}, menuItem, { archived: true, archivedAt: at || null }));
+  }
+
+  function restore(menuItem) {
+    if (!menuItem.archived) return R.err('PRECONDITION', 'món đang bán');
+    return R.ok(Object.assign({}, menuItem, { archived: false, archivedAt: null }));
+  }
+
+  /**
+   * Giá đưa vào giỏ — SNAPSHOT, không phải tham chiếu sống.
+   *
+   * Đây là mẫu ĐÚNG của legacy cần giữ nguyên (§8 chain-trace): giá được sao
+   * vào cart ngay lúc thêm món, rồi sao y vào bill. Báo cáo đọc thẳng giá đã
+   * lưu, không join lại menu hiện tại — nên sửa giá menu không làm trôi số
+   * liệu bill/báo cáo lịch sử.
+   */
+  function snapshotPrice(menuItem, size) {
+    var price = menuItem.prices[size];
+    if (typeof price !== 'number') {
+      return R.err('NOT_FOUND', 'món "' + menuItem.name + '" không có giá cho size ' + size);
+    }
+    return R.ok({
+      menuItemId: menuItem.menuItemId,
+      name: menuItem.name,
+      size: size,
+      price: price,
+      recipeId: menuItem.recipeId
+    });
+  }
+
+  /**
+   * SOLD-OUT DẪN XUẤT TỪ FIFO — đóng gap nghiêm trọng nhất của domain này.
+   *
+   * Legacy: KHÔNG có field/flag hết hàng nào. renderMenu() render MỌI món luôn
+   * bấm được. Kho và Catalog hoàn toàn tách rời TRƯỚC khi bán — trừ kho chỉ
+   * chạy SAU khi xác nhận bán, không có bước kiểm tra tồn trước. Nhân viên bán
+   * được vô hạn 1 món dù nguyên liệu = 0; kho chỉ âm dần, không ai chặn.
+   *
+   * Ở đây khả dụng được TÍNH từ tồn kho thật, nên không có "cờ hết hàng" nào
+   * để quên bật/tắt. Hàm thuần: catalog không được import fifo-core hay
+   * read-layer, nên tồn kho được TRUYỀN VÀO; tầng command/read-layer lấy số.
+   *
+   * Món chưa khai định mức thì KHÔNG tự coi là còn hàng — trả `unknown` để UI
+   * nói thật "chưa biết", thay vì đoán rồi bán âm kho.
+   */
+  function computeAvailability(spec) {
+    var menuItem = spec.menuItem;
+    if (menuItem.archived) {
+      return { available: false, reason: 'ARCHIVED', blockingItems: [] };
+    }
+    if (!menuItem.recipeId) {
+      return { available: false, reason: 'NO_RECIPE', unknown: true, blockingItems: [] };
+    }
+
+    var components = spec.recipeComponents;
+    if (!Array.isArray(components) || components.length === 0) {
+      return { available: false, reason: 'NO_RECIPE', unknown: true, blockingItems: [] };
+    }
+
+    var stock = spec.stockByItemId || {};
+    var blocking = [];
+    for (var i = 0; i < components.length; i++) {
+      var c = components[i];
+      var have = stock[c.itemId];
+      if (have === undefined) {
+        /* Thiếu số liệu tồn thì nói không biết, không mặc định là còn. */
+        return { available: false, reason: 'STOCK_UNKNOWN', unknown: true, blockingItems: [c.itemId] };
+      }
+      if (have < c.qty) blocking.push({ itemId: c.itemId, need: c.qty, have: have });
+    }
+
+    return blocking.length
+      ? { available: false, reason: 'OUT_OF_STOCK', blockingItems: blocking }
+      : { available: true, reason: null, blockingItems: [] };
+  }
+
+  /** Menu để render: đã lọc ngưng bán, đã sắp thứ tự ổn định. */
+  function buildMenuView(spec) {
+    var cats = sortCategories((spec.categories || []).filter(function (c) { return !c.archived; }));
+    var items = (spec.menuItems || []).filter(function (m) { return !m.archived; });
+
+    return R.ok(cats.map(function (c) {
+      return {
+        category: c,
+        items: items
+          .filter(function (m) { return m.categoryId === c.categoryId; })
+          .sort(function (a, b) {
+            if (a.displayOrder !== b.displayOrder) return a.displayOrder - b.displayOrder;
+            return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+          })
+      };
+    }));
+  }
+
+  return {
+    SIZES: SIZES,
+    createCategory: createCategory,
+    sortCategories: sortCategories,
+    createMenuItem: createMenuItem,
+    rename: rename,
+    linkRecipe: linkRecipe,
+    archive: archive,
+    restore: restore,
+    snapshotPrice: snapshotPrice,
+    computeAvailability: computeAvailability,
+    buildMenuView: buildMenuView
+  };
+});
+
+/* ===== src/layers/catalog/packaging.js ===== */
+/**
+ * Packaging — bao bì nhiều tầng, ẢNH HƯỞNG COGS nên BẮT BUỘC versioned.
+ *
+ * Gap: FEATURE-TREE-V1.md §4.8 — `invalidateSalesCache()` xoá sạch cache mỗi
+ * khi sửa packaging preset/override/rules/bagging, rồi tính lại COGS LỊCH SỬ
+ * bằng cấu hình HIỆN TẠI. Đây là instance #3 của lớp lỗi đã xác nhận 7 lần
+ * (GIEO-REBUILD-HANDOFF-V2.md §3): mọi input ảnh hưởng số tiền lịch sử phải
+ * versioned + resolve point-in-time.
+ *
+ * Nên packaging KHÔNG có cơ chế lưu riêng — nó đi qua đúng `VersionedInput`
+ * dùng chung với Recipe/Cost/PayTerms/BTP-yield/KPI-target/Config. Sửa riêng lẻ
+ * từng domain là cách domain thứ 8 lại mắc lại đúng lỗi này.
+ *
+ * Bốn tầng giữ nguyên khái niệm của legacy (preset → override → rules →
+ * bagging): cấu trúc đó phản ánh nghiệp vụ thật của quán, chỉ cách lưu là sai.
+ */
+GIEO.define('catalog/packaging', [
+  'shared-kernel/ids',
+  'shared-kernel/result',
+  'compaction/versioned-input'
+], function (ids, R, VI) {
+  'use strict';
+
+  function validateSpec(p) {
+    if (!p || typeof p !== 'object') return 'packaging payload phải là object';
+    if (!Array.isArray(p.items)) return 'packaging cần mảng items';
+    for (var i = 0; i < p.items.length; i++) {
+      var it = p.items[i];
+      if (!ids.isId(it.itemId, 'item')) return 'packaging item[' + i + '] thiếu itemId hợp lệ';
+      if (typeof it.qty !== 'number' || it.qty < 0) return 'packaging item[' + i + '] qty không hợp lệ';
+    }
+    return null;
+  }
+
+  /**
+   * Công bố cấu hình bao bì cho 1 món (hoặc mặc định toàn cửa hàng).
+   * `subjectId` = menuItemId, hoặc '__default__' cho preset chung.
+   */
+  function publishPackaging(registry, spec) {
+    if (!spec) return R.err('VALIDATION', 'publishPackaging cần spec');
+    var subjectId = spec.menuItemId || '__default__';
+
+    var bad = validateSpec(spec.packaging);
+    if (bad) return R.err('VALIDATION', bad);
+
+    return registry.publish({
+      kind: VI.KINDS.packaging,
+      subjectId: subjectId,
+      storeId: spec.storeId,
+      effectiveFrom: spec.effectiveFrom,
+      publishedBy: spec.publishedBy,
+      payload: {
+        /* preset = bộ mặc định; override = đè cho món cụ thể;
+           rules = điều kiện áp (vd chỉ mang đi); bagging = túi đựng theo số ly. */
+        tier: spec.tier || 'preset',
+        items: spec.packaging.items.map(function (it) {
+          return { itemId: it.itemId, qty: it.qty, note: it.note || null };
+        }),
+        rules: spec.packaging.rules || null,
+        bagging: spec.packaging.bagging || null
+      }
+    });
+  }
+
+  /**
+   * Bao bì có hiệu lực TẠI THỜI ĐIỂM BÁN — không phải cấu hình hiện tại.
+   * Món không có override riêng thì rơi về preset chung.
+   */
+  function resolvePackagingAt(registry, spec) {
+    var own = registry.resolveAt(VI.KINDS.packaging, spec.menuItemId, spec.storeId, spec.at);
+    if (R.isOk(own)) return own;
+    var fallback = registry.resolveAt(VI.KINDS.packaging, '__default__', spec.storeId, spec.at);
+    if (R.isOk(fallback)) return fallback;
+    return R.err('NOT_FOUND',
+      'không có cấu hình bao bì hiệu lực cho món "' + spec.menuItemId + '" tại thời điểm đó ' +
+      '(cũng không có preset chung)');
+  }
+
+  /**
+   * Nhu cầu bao bì thành yêu cầu vật chất để FIFO cấp phát.
+   * Trả kèm `versionId` đã dùng (V4) — kết quả ghi vào bill phải mang nó, để
+   * đọc lại lịch sử không phải resolve lại.
+   */
+  function toRequirements(packagingVersion, qty) {
+    if (typeof qty !== 'number' || qty <= 0) return R.err('VALIDATION', 'qty phải dương');
+    var p = packagingVersion.payload;
+    return R.ok({
+      packagingVersionId: packagingVersion.versionId,
+      requirements: p.items.map(function (it) {
+        return { itemId: it.itemId, qty: it.qty * qty, source: 'packaging' };
+      })
+    });
+  }
+
+  /** Túi đựng theo số ly — tách riêng vì nó tính theo ĐƠN, không theo từng món. */
+  function baggingRequirements(packagingVersion, cupCount) {
+    var b = packagingVersion.payload.bagging;
+    if (!b || !b.itemId) return R.ok({ packagingVersionId: packagingVersion.versionId, requirements: [] });
+    var per = b.cupsPerBag || 1;
+    var bags = Math.ceil(cupCount / per);
+    return R.ok({
+      packagingVersionId: packagingVersion.versionId,
+      requirements: bags > 0 ? [{ itemId: b.itemId, qty: bags, source: 'bagging' }] : []
+    });
+  }
+
+  return {
+    publishPackaging: publishPackaging,
+    resolvePackagingAt: resolvePackagingAt,
+    toRequirements: toRequirements,
+    baggingRequirements: baggingRequirements
+  };
+});
+
+/* ===== src/layers/catalog/promotion.js ===== */
+/**
+ * Khuyến mãi — 2 TẦNG TƯỜNG MINH + 1 bộ kiểm tra loại trừ DUY NHẤT.
+ *
+ * Chuỗi thật: FIFO-CHAIN-TRACE-CATALOG-PROMOTION-V1.md §4/§5/§6/§7.
+ *
+ * Ba vấn đề của legacy đang đóng:
+ *
+ * 1. HAI TẦNG BỊ LẪN LỘN. Legacy có `togoSettings` TỰ CHẠY (trừ tiền thật) và
+ *    `assistConfig.campaigns` CHỈ GỢI Ý (không bao giờ tự trừ tiền/thêm quà).
+ *    Chủ quán cấu hình một "chiến dịch" tưởng nó tự chạy như 2 chương trình
+ *    hằng ngày, thực ra chỉ là gợi ý cho nhân viên tự áp tay. Ở đây `tier` là
+ *    field BẮT BUỘC, không có mặc định — người tạo phải nói rõ nó thuộc tầng
+ *    nào.
+ *
+ * 2. ĐIỀU KIỆN BỊ HARD-CODE. Legacy `checkTogoBeforeCheckout()` chỉ biết đúng
+ *    2 dạng (mua X tặng Y theo bội số; đạt ngưỡng số ly → giảm %); tham số cấu
+ *    hình được nhưng LOGIC thì không, nên không tạo được dạng thứ 3. Ở đây
+ *    điều kiện là dữ liệu, đánh giá bằng 1 rule engine tổng quát.
+ *
+ * 3. CHỒNG KHUYẾN MÃI NGẦM ĐỊNH. Legacy loại trừ nhau theo THỨ TỰ CODE (quà
+ *    tặng luôn được check trước), và discount-code KHÔNG hề đối chiếu với
+ *    togoSettings auto-discount — 2 biến độc lập. Hiện vô hại vì discount-code
+ *    đang ẩn UI, nhưng là lỗ hổng thật nếu bật lại. Ở đây `priority` và
+ *    `exclusivityGroup` là field tường minh, và MỌI loại khuyến mãi đi qua
+ *    cùng một bộ kiểm tra.
+ */
+GIEO.define('catalog/promotion', ['shared-kernel/ids', 'shared-kernel/result'], function (ids, R) {
+  'use strict';
+
+  /* Tầng — bắt buộc khai, không mặc định. */
+  var TIER = {
+    /* Tự trừ tiền/thêm quà vào giỏ. */
+    AUTO_EXECUTE: 'AUTO_EXECUTE',
+    /* Chỉ gợi ý cho nhân viên, KHÔNG đụng vào giỏ. */
+    ADVISORY: 'ADVISORY'
+  };
+
+  var CHANNEL = { TOGO: 'TOGO', DINE_IN: 'DINE_IN' };
+
+  /* Điều kiện là DỮ LIỆU, không phải nhánh if trong code. */
+  var CONDITION = {
+    QTY_TOTAL: 'QTY_TOTAL',
+    QTY_SIZE: 'QTY_SIZE',
+    QTY_ITEM: 'QTY_ITEM',
+    QTY_CATEGORY: 'QTY_CATEGORY',
+    AMOUNT: 'AMOUNT',
+    CHANNEL: 'CHANNEL',
+    DAY_OF_WEEK: 'DAY_OF_WEEK',
+    DATE_RANGE: 'DATE_RANGE'
+  };
+
+  /* 5 kiểu giảm giá của legacy được giữ nguyên thiết kế nghiệp vụ (§6/§7 —
+     code còn sống đầy đủ, chỉ ô nhập bị ẩn). Bật/tắt là quyết định vận hành,
+     không phải quyết định kiến trúc. */
+  var EFFECT = {
+    BUY_X_GET_Y: 'BUY_X_GET_Y',
+    PERCENT_OFF: 'PERCENT_OFF',
+    FREE_TOPPING: 'FREE_TOPPING',
+    ITEM_FREE: 'ITEM_FREE',
+    ITEM_UPSIZE: 'ITEM_UPSIZE',
+    ITEM_DISCOUNT: 'ITEM_DISCOUNT',
+    ORDER_DISCOUNT: 'ORDER_DISCOUNT'
+  };
+
+  function createPromotion(spec) {
+    if (!spec || !spec.name) return R.err('VALIDATION', 'khuyến mãi cần name');
+    if (!ids.isId(spec.storeId, 'store')) return R.err('VALIDATION', 'khuyến mãi cần storeId hợp lệ');
+    if (!TIER[spec.tier]) {
+      return R.err('VALIDATION',
+        'khuyến mãi phải khai rõ tier: AUTO_EXECUTE (tự trừ tiền) hay ADVISORY (chỉ gợi ý). ' +
+        'Không có mặc định — lẫn 2 tầng này chính là điểm mơ hồ của hệ thống cũ.');
+    }
+    if (typeof spec.priority !== 'number') {
+      return R.err('VALIDATION', 'khuyến mãi cần priority — thứ tự ưu tiên phải tường minh, không theo thứ tự code');
+    }
+    if (!spec.effect || !EFFECT[spec.effect.type]) {
+      return R.err('VALIDATION', 'khuyến mãi cần effect.type hợp lệ');
+    }
+    var conditions = spec.conditions || [];
+    for (var i = 0; i < conditions.length; i++) {
+      if (!CONDITION[conditions[i].type]) {
+        return R.err('VALIDATION', 'điều kiện không hợp lệ: ' + conditions[i].type);
+      }
+    }
+
+    return R.ok({
+      promotionId: spec.promotionId || ids.newId('item'),
+      storeId: spec.storeId,
+      name: String(spec.name),
+      tier: spec.tier,
+      priority: spec.priority,
+      /* Cùng nhóm = loại trừ nhau. null = không loại trừ ai. */
+      exclusivityGroup: spec.exclusivityGroup || null,
+      conditions: conditions.slice(),
+      effect: Object.assign({}, spec.effect),
+      active: spec.active === undefined ? true : !!spec.active
+    });
+  }
+
+  /** Tổng hợp giỏ hàng — tính 1 lần rồi dùng lại cho mọi điều kiện. */
+  function summarize(cart) {
+    var lines = cart.lines || [];
+    var s = { totalQty: 0, subtotal: 0, bySize: {}, byItem: {}, byCategory: {} };
+    for (var i = 0; i < lines.length; i++) {
+      var l = lines[i];
+      var q = l.qty || 0;
+      s.totalQty += q;
+      s.subtotal += q * (l.price || 0);
+      s.bySize[l.size] = (s.bySize[l.size] || 0) + q;
+      s.byItem[l.menuItemId] = (s.byItem[l.menuItemId] || 0) + q;
+      if (l.categoryId) s.byCategory[l.categoryId] = (s.byCategory[l.categoryId] || 0) + q;
+    }
+    return s;
+  }
+
+  function evalCondition(cond, sum, ctx) {
+    switch (cond.type) {
+      case CONDITION.QTY_TOTAL: return sum.totalQty >= cond.minQty;
+      case CONDITION.QTY_SIZE: return (sum.bySize[cond.size] || 0) >= cond.minQty;
+      case CONDITION.QTY_ITEM: return (sum.byItem[cond.menuItemId] || 0) >= cond.minQty;
+      case CONDITION.QTY_CATEGORY: return (sum.byCategory[cond.categoryId] || 0) >= cond.minQty;
+      case CONDITION.AMOUNT: return sum.subtotal >= cond.minAmount;
+      case CONDITION.CHANNEL: return ctx.channel === cond.channel;
+      case CONDITION.DAY_OF_WEEK:
+        return Array.isArray(cond.days) && cond.days.indexOf(ctx.dayOfWeek) !== -1;
+      case CONDITION.DATE_RANGE:
+        if (cond.from && ctx.dateKey < cond.from) return false;
+        if (cond.to && ctx.dateKey > cond.to) return false;
+        return true;
+      default:
+        /* Điều kiện lạ thì KHÔNG cho qua — fail-closed, không âm thầm bỏ qua. */
+        return false;
+    }
+  }
+
+  function matches(promotion, sum, ctx) {
+    if (!promotion.active) return false;
+    for (var i = 0; i < promotion.conditions.length; i++) {
+      if (!evalCondition(promotion.conditions[i], sum, ctx)) return false;
+    }
+    return true;
+  }
+
+  /** Tính giá trị giảm của 1 effect. Trả cả phần mô tả để hiện cho nhân viên. */
+  function computeEffect(promotion, sum, cart) {
+    var e = promotion.effect;
+    switch (e.type) {
+      case EFFECT.BUY_X_GET_Y: {
+        var sets = e.buyQty > 0 ? Math.floor(sum.totalQty / e.buyQty) : 0;
+        var freeQty = sets * (e.freeQty || 1);
+        return { discountAmount: 0, freeQty: freeQty, giftMenuItemId: e.giftMenuItemId || null };
+      }
+      case EFFECT.PERCENT_OFF:
+      case EFFECT.ORDER_DISCOUNT: {
+        var amt = sum.subtotal * ((e.pct || 0) / 100);
+        if (typeof e.maxAmount === 'number') amt = Math.min(amt, e.maxAmount);
+        return { discountAmount: amt, freeQty: 0 };
+      }
+      case EFFECT.ITEM_DISCOUNT: {
+        var lines = (cart.lines || []).filter(function (l) { return l.menuItemId === e.menuItemId; });
+        var base = lines.reduce(function (s, l) { return s + l.qty * l.price; }, 0);
+        return { discountAmount: base * ((e.pct || 0) / 100), freeQty: 0 };
+      }
+      case EFFECT.ITEM_FREE: {
+        var fl = (cart.lines || []).filter(function (l) { return l.menuItemId === e.menuItemId; });
+        return { discountAmount: fl.length ? fl[0].price : 0, freeQty: 1 };
+      }
+      case EFFECT.ITEM_UPSIZE:
+        return { discountAmount: e.upsizeValue || 0, freeQty: 0, upsize: true };
+      case EFFECT.FREE_TOPPING:
+        return { discountAmount: 0, freeQty: 0, freeToppingId: e.toppingId, freeToppingQty: e.qty || 1 };
+      default:
+        return { discountAmount: 0, freeQty: 0 };
+    }
+  }
+
+  /**
+   * BỘ KIỂM TRA LOẠI TRỪ DUY NHẤT — mọi loại khuyến mãi đi qua đây.
+   *
+   * Legacy để mỗi loại tự kiểm tra rời rạc: discount-code chặn chồng với chính
+   * nó và với voucher khách hàng, nhưng KHÔNG đối chiếu với togoSettings
+   * auto-discount. Ở đây chỉ có một chỗ quyết định, nên không thể có cặp nào
+   * "quên đối chiếu nhau".
+   *
+   * `voucher`/`discountCode` của khách cũng phải truyền vào `extraPromotions`
+   * dưới cùng hình dạng Promotion để chịu chung luật.
+   */
+  function evaluate(spec) {
+    var cart = spec.cart || { lines: [] };
+    var ctx = spec.context || {};
+    var all = (spec.promotions || []).concat(spec.extraPromotions || []);
+    var sum = summarize(cart);
+
+    var eligible = all.filter(function (p) { return matches(p, sum, ctx); });
+
+    /* Ưu tiên cao thắng. Bằng nhau thì theo promotionId để kết quả tất định —
+       không phụ thuộc thứ tự mảng đầu vào như legacy phụ thuộc thứ tự code. */
+    eligible.sort(function (a, b) {
+      if (a.priority !== b.priority) return b.priority - a.priority;
+      return a.promotionId < b.promotionId ? -1 : a.promotionId > b.promotionId ? 1 : 0;
+    });
+
+    var takenGroups = Object.create(null);
+    var applied = [];
+    var advisory = [];
+    var suppressed = [];
+
+    for (var i = 0; i < eligible.length; i++) {
+      var p = eligible[i];
+      var g = p.exclusivityGroup;
+
+      if (g && takenGroups[g]) {
+        suppressed.push({
+          promotionId: p.promotionId,
+          name: p.name,
+          reason: 'loại trừ bởi "' + takenGroups[g].name + '" (cùng nhóm ' + g + ', ưu tiên cao hơn)'
+        });
+        continue;
+      }
+
+      var outcome = {
+        promotionId: p.promotionId,
+        name: p.name,
+        tier: p.tier,
+        priority: p.priority,
+        exclusivityGroup: g,
+        effect: computeEffect(p, sum, cart)
+      };
+
+      /* Tầng ADVISORY chiếm chỗ loại trừ nhưng KHÔNG đụng vào giỏ. */
+      if (g) takenGroups[g] = p;
+      if (p.tier === TIER.AUTO_EXECUTE) applied.push(outcome);
+      else advisory.push(outcome);
+    }
+
+    return R.ok({
+      /* Tự áp vào giỏ. */
+      applied: applied,
+      /* Chỉ hiện cho nhân viên tự quyết — KHÔNG trừ tiền. */
+      advisory: advisory,
+      /* Nói rõ cái nào bị loại và vì sao, thay vì im lặng bỏ qua. */
+      suppressed: suppressed,
+      totalDiscount: applied.reduce(function (s, a) { return s + (a.effect.discountAmount || 0); }, 0),
+      summary: sum
+    });
+  }
+
+  return {
+    TIER: TIER,
+    CHANNEL: CHANNEL,
+    CONDITION: CONDITION,
+    EFFECT: EFFECT,
+    createPromotion: createPromotion,
+    summarize: summarize,
+    matches: matches,
+    computeEffect: computeEffect,
+    evaluate: evaluate
   };
 });
 

@@ -76,7 +76,8 @@ Luật cứng: `apps` không bao giờ chạm thẳng `fifo-core` / `compaction`
 | P1 Foundation | ✅ `shared-kernel` + `store-context` + `VersionedInput` |
 | `[0]` Identity | ✅ Employee + Shift + PayTerms versioned — 98 test pass |
 | `[2]` FIFO Core | ✅ Unit + Ledger + Projection + Allocation + Reconciliation — 188 test pass |
-| `[1]` Catalog, `[3]`→`[9]` | ⬜ chưa bắt đầu |
+| `[1]` Catalog | ✅ Menu + Category + Promotion + Packaging — 233 test pass |
+| `[3]`→`[9]` | ⬜ chưa bắt đầu |
 
 Build order theo `FEATURE-TREE-V1.md` §3:
 `[0] Identity → [1] Catalog + [2] FIFO Core → [3] Sales → [4] Loyalty + [5] Shift + [6] Payroll → [7] Finance → [8] Alerts → [9] Reporting`
