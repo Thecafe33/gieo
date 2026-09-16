@@ -23,8 +23,9 @@ GIEO.define('read-layer/gateway', [
   'read-layer/merge-canonical',
   'fifo-core/projection',
   'traceability/trace',
-  'catalog/menu'
-], function (ids, R, access, merge, projection, traceLib, menuLib) {
+  'catalog/menu',
+  'alerts/alert'
+], function (ids, R, access, merge, projection, traceLib, menuLib, alertLib) {
   'use strict';
 
   /**
@@ -50,7 +51,21 @@ GIEO.define('read-layer/gateway', [
     GetRevenue: registerQuery('GetRevenue', { authority: 'REVIEW_APPROVE_CORRECT' }),
     GetCOGS: registerQuery('GetCOGS', { authority: 'REVIEW_APPROVE_CORRECT' }),
     GetPnL: registerQuery('GetPnL', { authority: 'MASTER_CONFIGURE' }),
-    GetCustomerReport: registerQuery('GetCustomerReport', { authority: 'MASTER_CONFIGURE' })
+    GetCustomerReport: registerQuery('GetCustomerReport', { authority: 'MASTER_CONFIGURE' }),
+    /* Ba query dưới đây sinh ra để P9/P10 không còn màn nào tự đọc nguồn thô.
+       Trước đó màn Ca/Tổng quan/Duyệt chỉ có chỗ trống hard-code, và chỗ trống
+       hard-code chính là nơi người ta sẽ nối thẳng Firebase vào UI. */
+    /* Any-of, đúng kiểu các dòng §21 cho phép nhiều tầng quyền cùng chạy một
+       lệnh: người bán cần thấy ca và cảnh báo để làm việc, quản lý cần thấy
+       chính hai thứ đó trên màn Tổng quan. Khai riêng EXECUTE sẽ khoá quản lý
+       ra khỏi màn của họ. Lọc theo `audience` mới là chỗ quyết ai thấy gì. */
+    GetShiftStatus: registerQuery('GetShiftStatus', {
+      authority: ['EXECUTE', 'REVIEW_APPROVE_CORRECT']
+    }),
+    GetAlerts: registerQuery('GetAlerts', {
+      authority: ['EXECUTE', 'REVIEW_APPROVE_CORRECT']
+    }),
+    GetPendingApprovals: registerQuery('GetPendingApprovals', { authority: 'REVIEW_APPROVE_CORRECT' })
   };
 
   /** Cổng chung: quyền + storeId bắt buộc, trước khi chạm dữ liệu. */
@@ -273,6 +288,140 @@ GIEO.define('read-layer/gateway', [
     });
   }
 
+  /**
+   * Trạng thái ca + két — nguồn cho màn Ca ở POS và ô "hôm nay" ở QUANLY.
+   *
+   * businessDate là TRẠNG THÁI VẬN HÀNH (mở/chốt ở QUANLY), không phải phép tính
+   * từ đồng hồ. Query này vì thế đọc bản ghi ngày làm việc, tuyệt đối không tự
+   * suy ra ngày từ `clock` — suy ra ở UI là cách hai máy hiển thị hai ngày khác
+   * nhau lúc nửa đêm.
+   */
+  function getShiftStatus(ctx, spec) {
+    var g = guard(Q.GetShiftStatus, ctx, spec);
+    if (R.isErr(g)) return g;
+
+    return merge.resolve({
+      computeLive: function () {
+        var day = spec.businessDay || null;
+        var segments = spec.segments || [];
+        var employeeShifts = spec.employeeShifts || [];
+
+        var openSegment = null;
+        for (var i = 0; i < segments.length; i++) {
+          if (segments[i].status === 'OPEN') { openSegment = segments[i]; break; }
+        }
+        var onShift = employeeShifts.filter(function (s) { return s.status === 'OPEN'; });
+
+        return R.ok({
+          businessDate: day ? day.businessDate : null,
+          dayStatus: day ? day.status : null,
+          /* Không có ngày mở = không được bán. Nói thẳng ra, đừng để UI tự đoán. */
+          operable: !!(day && day.status === 'OPEN'),
+          openSegment: openSegment ? {
+            seq: openSegment.seq, openedAt: openSegment.openedAt, openedBy: openSegment.openedBy
+          } : null,
+          closedSegmentCount: segments.filter(function (s) { return s.status === 'CLOSED'; }).length,
+          employeesOnShift: onShift.map(function (s) {
+            return { shiftId: s.shiftId, employeeId: s.employeeId, checkedInAt: s.checkedInAt };
+          })
+        });
+      },
+      computedAt: ctx.clock.now()
+    });
+  }
+
+  /**
+   * Cảnh báo theo đối tượng xem. Dùng `alertLib.bucketize` chứ không tự sắp lại
+   * thứ tự ưu tiên: hai bản xếp hạng khác nhau giữa POS và QUANLY chính là kiểu
+   * lệch mà R3 cấm.
+   *
+   * `audience` bắt buộc — không có mặc định "xem hết", vì mặc định xem hết chính
+   * là cách reporting legacy đi tới 0% phân quyền.
+   */
+  function getAlerts(ctx, spec) {
+    var g = guard(Q.GetAlerts, ctx, spec);
+    if (R.isErr(g)) return g;
+    var audience = spec.audience;
+    if (audience !== alertLib.AUDIENCE.POS && audience !== alertLib.AUDIENCE.QUANLY) {
+      return R.err('VALIDATION', "getAlerts cần audience 'POS' hoặc 'QUANLY'");
+    }
+
+    return merge.resolve({
+      computeLive: function () {
+        var visible = (spec.alerts || []).filter(function (a) {
+          if (a.status === alertLib.STATUS.RESOLVED) return false;
+          return a.audience === audience || a.audience === alertLib.AUDIENCE.BOTH;
+        });
+        var buckets = alertLib.bucketize(visible, { at: ctx.clock.now() });
+        return R.ok({
+          audience: audience,
+          buckets: buckets,
+          /* Đếm theo mức nặng, KHÔNG gộp thành một số tổng: một DANGER không
+             được lẫn vào đám INFO rồi biến mất trong con số "12 cảnh báo". */
+          counts: {
+            DANGER: buckets.DANGER.length,
+            WARNING: buckets.WARNING.length,
+            INFO: buckets.INFO.length
+          },
+          total: visible.length
+        });
+      },
+      computedAt: ctx.clock.now()
+    });
+  }
+
+  var APPROVAL_KINDS = {
+    lostReport: { command: 'ApproveLostContainer', label: 'Báo mất hũ' },
+    stockCount: { command: 'ApproveStockCount', label: 'Kiểm kê' },
+    expense: { command: 'ApproveExpense', label: 'Chi phí' }
+  };
+
+  /**
+   * Việc chờ duyệt, gom từ 3 nguồn về một danh sách có sẵn tên command để chạy.
+   *
+   * Vì sao gắn sẵn `command`: legacy để mỗi màn tự biết "duyệt cái này thì gọi
+   * gì", nên có chỗ duyệt xong mà không chạy hệ quả (gap Bug #12/#16). Ở đây
+   * danh sách và command đi kèm nhau, không có chỗ để nối sai.
+   */
+  function getPendingApprovals(ctx, spec) {
+    var g = guard(Q.GetPendingApprovals, ctx, spec);
+    if (R.isErr(g)) return g;
+
+    return merge.resolve({
+      computeLive: function () {
+        var items = [];
+        var unknown = [];
+        (spec.pending || []).forEach(function (p) {
+          var kind = APPROVAL_KINDS[p.type];
+          if (!kind) {
+            /* Loại chưa khai = KHÔNG dựng nút duyệt. Dựng bừa một nút gọi command
+               đoán được mới là thứ nguy hiểm. */
+            unknown.push(p.type);
+            return;
+          }
+          items.push({
+            type: p.type,
+            label: kind.label,
+            command: kind.command,
+            referenceId: p.referenceId,
+            requestedBy: p.requestedBy || null,
+            requestedAt: p.requestedAt || null,
+            summary: p.summary || null
+          });
+        });
+        return R.ok({
+          items: items,
+          byType: Object.keys(APPROVAL_KINDS).reduce(function (acc, k) {
+            acc[k] = items.filter(function (i) { return i.type === k; }).length;
+            return acc;
+          }, {}),
+          unknownTypes: unknown.filter(function (v, i, a) { return a.indexOf(v) === i; })
+        });
+      },
+      computedAt: ctx.clock.now()
+    });
+  }
+
   return {
     QUERIES: Q,
     registerQuery: registerQuery,
@@ -282,6 +431,9 @@ GIEO.define('read-layer/gateway', [
     getRevenue: getRevenue,
     getCOGS: getCOGS,
     getPnL: getPnL,
-    comparePeriods: comparePeriods
+    comparePeriods: comparePeriods,
+    getShiftStatus: getShiftStatus,
+    getAlerts: getAlerts,
+    getPendingApprovals: getPendingApprovals
   };
 });

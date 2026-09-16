@@ -2,6 +2,8 @@
   "_doc": "Bộ luật import-direction, mã hoá GIEO-CODE-STRUCTURE-BLUEPRINT-V1.md §2 + bảng §4. Dùng chung cho runtime registry (src/runtime/registry.js) và checker offline (tools/check-import-direction.js). Vi phạm = FAIL, không phải 'review sau' (blueprint §2 quy tắc 5).",
   "_note_compaction_is_shared": "FIFO-COMPACTION-CONTRACT-V1.md §1 chốt rằng cơ chế versioning (VersionedInput) là DÙNG CHUNG cho 7 domain: Recipe/Cost/Packaging/BTP-yield/PayTerms/KPI-target/Config, và nó thuộc về compaction. Nên các domain đó (catalog, recipe-cost-btp, hr, finance) phụ thuộc compaction là hệ quả trực tiếp của contract, không phải rò rỉ kiến trúc. Chúng chỉ dùng phần VersionedInput; snapshot/purge vẫn là việc của compaction và tiến trình nền. Thay thế bằng cách tiêm từ ngoài sẽ làm mỗi domain tự cầm một registry khác nhau — đúng thứ contract cấm.",
 
+  "_note_read_layer_alerts": "read-layer phụ thuộc alerts là hệ quả trực tiếp của UNIFIED-READ-LAYER-CONTRACT-V1.md R1 (CỔNG ĐỌC DUY NHẤT): UI không được đọc thẳng bất cứ nguồn nào, nên cảnh báo cũng phải đi qua read-layer. Đây KHÔNG phải vi phạm câu 'không domain nào phụ thuộc ngược vào alerts' trong blueprint: read-layer không phải domain, nó là cổng đọc, và nó chỉ dùng phần xếp hạng/gom nhóm (rank/bucketize) để không viết bản thứ hai của thứ tự ưu tiên cảnh báo — viết bản thứ hai mới là vi phạm R3. alerts vẫn không import ngược lại ai.",
+
   "_note_bootstrap": "Layer 'bootstrap' KHÔNG có trong blueprint gốc. Bổ sung tối thiểu bắt buộc: blueprint §2 quy tắc 1 cấm apps/* import persistence-firebase/legacy-firebase-adapter, nhưng port do domain core định nghĩa vẫn phải được nối với adapter ở đâu đó. 'bootstrap' là composition root duy nhất làm việc nối đó; apps chỉ import bootstrap. Không có nó thì hoặc apps phải vi phạm quy tắc 1, hoặc domain core phải import ngược adapter (vi phạm quy tắc 2).",
 
   "layers": {
@@ -31,7 +33,7 @@
     },
     "read-layer": {
       "role": "CỔNG ĐỌC DUY NHẤT. Nơi duy nhất được biết cả LIVE lẫn COMPACT. Contract: UNIFIED-READ-LAYER-CONTRACT-V1.md",
-      "canImport": ["shared-kernel", "store-context", "fifo-core", "traceability", "recipe-cost-btp", "compaction", "catalog", "legacy-firebase-adapter"]
+      "canImport": ["shared-kernel", "store-context", "fifo-core", "traceability", "recipe-cost-btp", "compaction", "catalog", "alerts", "legacy-firebase-adapter"]
     },
     "catalog": {
       "role": "Menu/Category/Topping/Packaging/Recipe link. QUANLY sở hữu duy nhất.",

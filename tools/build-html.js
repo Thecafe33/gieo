@@ -122,7 +122,25 @@ function shell(title, js) {
   .menu-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:9px; }
   .menu-item { display:flex; flex-direction:column; gap:5px; padding:14px; border:1px solid var(--line); border-radius:14px; text-align:left; background:#fff; }
   .menu-item span { color:var(--muted); font-size:12px; }
+  .menu-item[disabled] { opacity:.55; }
+  .cart { display:flex; flex-direction:column; gap:6px; margin:18px 0 0; padding:0; list-style:none; }
+  .cart li { display:grid; grid-template-columns:minmax(0,1fr) auto auto; align-items:center; gap:10px; padding:10px 12px; border:1px solid var(--line); border-radius:12px; background:#fff; }
+  .cart-name em { color:var(--muted); font-style:normal; font-size:12px; }
+  .cart-qty { display:flex; align-items:center; gap:8px; }
+  .cart-qty button { width:28px; height:28px; border-radius:9px; background:var(--soft); color:var(--ink); font-weight:700; }
+  .cart-money { min-width:88px; text-align:right; font-variant-numeric:tabular-nums; }
+  .approval-list { display:flex; flex-direction:column; gap:8px; margin:18px 0 0; padding:0; list-style:none; }
+  .approval-list li { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto; align-items:center; gap:12px; padding:12px 14px; border:1px solid var(--line); border-radius:13px; background:#fff; }
+  .approval-label { display:flex; flex-direction:column; gap:2px; }
+  .approval-label em { color:var(--muted); font-style:normal; font-size:12px; }
+  .approval-meta { color:var(--muted); font-size:13px; }
+  .approval-list button { padding:9px 14px; border-radius:11px; color:#fff; background:var(--brand); font-weight:700; }
+  .approval-list button[disabled] { opacity:.6; }
+  .notice.alerts { border-color:#f0caca; background:#fff1f1; color:#8e2f2f; }
   @media (max-width:700px) {
+    .cart li { grid-template-columns:minmax(0,1fr) auto; row-gap:6px; }
+    .cart-money { grid-column:1 / -1; text-align:left; }
+    .approval-list li { grid-template-columns:1fr; }
     .app-shell { padding:16px; }
     .workspace { grid-template-columns:1fr; }
     .side-nav { display:grid; grid-template-columns:repeat(4,1fr); overflow:auto; }

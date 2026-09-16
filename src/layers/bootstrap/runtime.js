@@ -37,7 +37,10 @@ GIEO.define('bootstrap/runtime', [
     GetRevenue: reads.getRevenue,
     GetCOGS: reads.getCOGS,
     GetPnL: reads.getPnL,
-    ComparePeriods: reads.comparePeriods
+    ComparePeriods: reads.comparePeriods,
+    GetShiftStatus: reads.getShiftStatus,
+    GetAlerts: reads.getAlerts,
+    GetPendingApprovals: reads.getPendingApprovals
   };
 
   function createRuntime(spec) {

@@ -53,7 +53,25 @@
   .menu-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:9px; }
   .menu-item { display:flex; flex-direction:column; gap:5px; padding:14px; border:1px solid var(--line); border-radius:14px; text-align:left; background:#fff; }
   .menu-item span { color:var(--muted); font-size:12px; }
+  .menu-item[disabled] { opacity:.55; }
+  .cart { display:flex; flex-direction:column; gap:6px; margin:18px 0 0; padding:0; list-style:none; }
+  .cart li { display:grid; grid-template-columns:minmax(0,1fr) auto auto; align-items:center; gap:10px; padding:10px 12px; border:1px solid var(--line); border-radius:12px; background:#fff; }
+  .cart-name em { color:var(--muted); font-style:normal; font-size:12px; }
+  .cart-qty { display:flex; align-items:center; gap:8px; }
+  .cart-qty button { width:28px; height:28px; border-radius:9px; background:var(--soft); color:var(--ink); font-weight:700; }
+  .cart-money { min-width:88px; text-align:right; font-variant-numeric:tabular-nums; }
+  .approval-list { display:flex; flex-direction:column; gap:8px; margin:18px 0 0; padding:0; list-style:none; }
+  .approval-list li { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto; align-items:center; gap:12px; padding:12px 14px; border:1px solid var(--line); border-radius:13px; background:#fff; }
+  .approval-label { display:flex; flex-direction:column; gap:2px; }
+  .approval-label em { color:var(--muted); font-style:normal; font-size:12px; }
+  .approval-meta { color:var(--muted); font-size:13px; }
+  .approval-list button { padding:9px 14px; border-radius:11px; color:#fff; background:var(--brand); font-weight:700; }
+  .approval-list button[disabled] { opacity:.6; }
+  .notice.alerts { border-color:#f0caca; background:#fff1f1; color:#8e2f2f; }
   @media (max-width:700px) {
+    .cart li { grid-template-columns:minmax(0,1fr) auto; row-gap:6px; }
+    .cart-money { grid-column:1 / -1; text-align:left; }
+    .approval-list li { grid-template-columns:1fr; }
     .app-shell { padding:16px; }
     .workspace { grid-template-columns:1fr; }
     .side-nav { display:grid; grid-template-columns:repeat(4,1fr); overflow:auto; }
@@ -90,6 +108,8 @@
   "_doc": "Bộ luật import-direction, mã hoá GIEO-CODE-STRUCTURE-BLUEPRINT-V1.md §2 + bảng §4. Dùng chung cho runtime registry (src/runtime/registry.js) và checker offline (tools/check-import-direction.js). Vi phạm = FAIL, không phải 'review sau' (blueprint §2 quy tắc 5).",
   "_note_compaction_is_shared": "FIFO-COMPACTION-CONTRACT-V1.md §1 chốt rằng cơ chế versioning (VersionedInput) là DÙNG CHUNG cho 7 domain: Recipe/Cost/Packaging/BTP-yield/PayTerms/KPI-target/Config, và nó thuộc về compaction. Nên các domain đó (catalog, recipe-cost-btp, hr, finance) phụ thuộc compaction là hệ quả trực tiếp của contract, không phải rò rỉ kiến trúc. Chúng chỉ dùng phần VersionedInput; snapshot/purge vẫn là việc của compaction và tiến trình nền. Thay thế bằng cách tiêm từ ngoài sẽ làm mỗi domain tự cầm một registry khác nhau — đúng thứ contract cấm.",
 
+  "_note_read_layer_alerts": "read-layer phụ thuộc alerts là hệ quả trực tiếp của UNIFIED-READ-LAYER-CONTRACT-V1.md R1 (CỔNG ĐỌC DUY NHẤT): UI không được đọc thẳng bất cứ nguồn nào, nên cảnh báo cũng phải đi qua read-layer. Đây KHÔNG phải vi phạm câu 'không domain nào phụ thuộc ngược vào alerts' trong blueprint: read-layer không phải domain, nó là cổng đọc, và nó chỉ dùng phần xếp hạng/gom nhóm (rank/bucketize) để không viết bản thứ hai của thứ tự ưu tiên cảnh báo — viết bản thứ hai mới là vi phạm R3. alerts vẫn không import ngược lại ai.",
+
   "_note_bootstrap": "Layer 'bootstrap' KHÔNG có trong blueprint gốc. Bổ sung tối thiểu bắt buộc: blueprint §2 quy tắc 1 cấm apps/* import persistence-firebase/legacy-firebase-adapter, nhưng port do domain core định nghĩa vẫn phải được nối với adapter ở đâu đó. 'bootstrap' là composition root duy nhất làm việc nối đó; apps chỉ import bootstrap. Không có nó thì hoặc apps phải vi phạm quy tắc 1, hoặc domain core phải import ngược adapter (vi phạm quy tắc 2).",
 
   "layers": {
@@ -119,7 +139,7 @@
     },
     "read-layer": {
       "role": "CỔNG ĐỌC DUY NHẤT. Nơi duy nhất được biết cả LIVE lẫn COMPACT. Contract: UNIFIED-READ-LAYER-CONTRACT-V1.md",
-      "canImport": ["shared-kernel", "store-context", "fifo-core", "traceability", "recipe-cost-btp", "compaction", "catalog", "legacy-firebase-adapter"]
+      "canImport": ["shared-kernel", "store-context", "fifo-core", "traceability", "recipe-cost-btp", "compaction", "catalog", "alerts", "legacy-firebase-adapter"]
     },
     "catalog": {
       "role": "Menu/Category/Topping/Packaging/Recipe link. QUANLY sở hữu duy nhất.",
@@ -8450,8 +8470,9 @@ GIEO.define('read-layer/gateway', [
   'read-layer/merge-canonical',
   'fifo-core/projection',
   'traceability/trace',
-  'catalog/menu'
-], function (ids, R, access, merge, projection, traceLib, menuLib) {
+  'catalog/menu',
+  'alerts/alert'
+], function (ids, R, access, merge, projection, traceLib, menuLib, alertLib) {
   'use strict';
 
   /**
@@ -8477,7 +8498,21 @@ GIEO.define('read-layer/gateway', [
     GetRevenue: registerQuery('GetRevenue', { authority: 'REVIEW_APPROVE_CORRECT' }),
     GetCOGS: registerQuery('GetCOGS', { authority: 'REVIEW_APPROVE_CORRECT' }),
     GetPnL: registerQuery('GetPnL', { authority: 'MASTER_CONFIGURE' }),
-    GetCustomerReport: registerQuery('GetCustomerReport', { authority: 'MASTER_CONFIGURE' })
+    GetCustomerReport: registerQuery('GetCustomerReport', { authority: 'MASTER_CONFIGURE' }),
+    /* Ba query dưới đây sinh ra để P9/P10 không còn màn nào tự đọc nguồn thô.
+       Trước đó màn Ca/Tổng quan/Duyệt chỉ có chỗ trống hard-code, và chỗ trống
+       hard-code chính là nơi người ta sẽ nối thẳng Firebase vào UI. */
+    /* Any-of, đúng kiểu các dòng §21 cho phép nhiều tầng quyền cùng chạy một
+       lệnh: người bán cần thấy ca và cảnh báo để làm việc, quản lý cần thấy
+       chính hai thứ đó trên màn Tổng quan. Khai riêng EXECUTE sẽ khoá quản lý
+       ra khỏi màn của họ. Lọc theo `audience` mới là chỗ quyết ai thấy gì. */
+    GetShiftStatus: registerQuery('GetShiftStatus', {
+      authority: ['EXECUTE', 'REVIEW_APPROVE_CORRECT']
+    }),
+    GetAlerts: registerQuery('GetAlerts', {
+      authority: ['EXECUTE', 'REVIEW_APPROVE_CORRECT']
+    }),
+    GetPendingApprovals: registerQuery('GetPendingApprovals', { authority: 'REVIEW_APPROVE_CORRECT' })
   };
 
   /** Cổng chung: quyền + storeId bắt buộc, trước khi chạm dữ liệu. */
@@ -8700,6 +8735,140 @@ GIEO.define('read-layer/gateway', [
     });
   }
 
+  /**
+   * Trạng thái ca + két — nguồn cho màn Ca ở POS và ô "hôm nay" ở QUANLY.
+   *
+   * businessDate là TRẠNG THÁI VẬN HÀNH (mở/chốt ở QUANLY), không phải phép tính
+   * từ đồng hồ. Query này vì thế đọc bản ghi ngày làm việc, tuyệt đối không tự
+   * suy ra ngày từ `clock` — suy ra ở UI là cách hai máy hiển thị hai ngày khác
+   * nhau lúc nửa đêm.
+   */
+  function getShiftStatus(ctx, spec) {
+    var g = guard(Q.GetShiftStatus, ctx, spec);
+    if (R.isErr(g)) return g;
+
+    return merge.resolve({
+      computeLive: function () {
+        var day = spec.businessDay || null;
+        var segments = spec.segments || [];
+        var employeeShifts = spec.employeeShifts || [];
+
+        var openSegment = null;
+        for (var i = 0; i < segments.length; i++) {
+          if (segments[i].status === 'OPEN') { openSegment = segments[i]; break; }
+        }
+        var onShift = employeeShifts.filter(function (s) { return s.status === 'OPEN'; });
+
+        return R.ok({
+          businessDate: day ? day.businessDate : null,
+          dayStatus: day ? day.status : null,
+          /* Không có ngày mở = không được bán. Nói thẳng ra, đừng để UI tự đoán. */
+          operable: !!(day && day.status === 'OPEN'),
+          openSegment: openSegment ? {
+            seq: openSegment.seq, openedAt: openSegment.openedAt, openedBy: openSegment.openedBy
+          } : null,
+          closedSegmentCount: segments.filter(function (s) { return s.status === 'CLOSED'; }).length,
+          employeesOnShift: onShift.map(function (s) {
+            return { shiftId: s.shiftId, employeeId: s.employeeId, checkedInAt: s.checkedInAt };
+          })
+        });
+      },
+      computedAt: ctx.clock.now()
+    });
+  }
+
+  /**
+   * Cảnh báo theo đối tượng xem. Dùng `alertLib.bucketize` chứ không tự sắp lại
+   * thứ tự ưu tiên: hai bản xếp hạng khác nhau giữa POS và QUANLY chính là kiểu
+   * lệch mà R3 cấm.
+   *
+   * `audience` bắt buộc — không có mặc định "xem hết", vì mặc định xem hết chính
+   * là cách reporting legacy đi tới 0% phân quyền.
+   */
+  function getAlerts(ctx, spec) {
+    var g = guard(Q.GetAlerts, ctx, spec);
+    if (R.isErr(g)) return g;
+    var audience = spec.audience;
+    if (audience !== alertLib.AUDIENCE.POS && audience !== alertLib.AUDIENCE.QUANLY) {
+      return R.err('VALIDATION', "getAlerts cần audience 'POS' hoặc 'QUANLY'");
+    }
+
+    return merge.resolve({
+      computeLive: function () {
+        var visible = (spec.alerts || []).filter(function (a) {
+          if (a.status === alertLib.STATUS.RESOLVED) return false;
+          return a.audience === audience || a.audience === alertLib.AUDIENCE.BOTH;
+        });
+        var buckets = alertLib.bucketize(visible, { at: ctx.clock.now() });
+        return R.ok({
+          audience: audience,
+          buckets: buckets,
+          /* Đếm theo mức nặng, KHÔNG gộp thành một số tổng: một DANGER không
+             được lẫn vào đám INFO rồi biến mất trong con số "12 cảnh báo". */
+          counts: {
+            DANGER: buckets.DANGER.length,
+            WARNING: buckets.WARNING.length,
+            INFO: buckets.INFO.length
+          },
+          total: visible.length
+        });
+      },
+      computedAt: ctx.clock.now()
+    });
+  }
+
+  var APPROVAL_KINDS = {
+    lostReport: { command: 'ApproveLostContainer', label: 'Báo mất hũ' },
+    stockCount: { command: 'ApproveStockCount', label: 'Kiểm kê' },
+    expense: { command: 'ApproveExpense', label: 'Chi phí' }
+  };
+
+  /**
+   * Việc chờ duyệt, gom từ 3 nguồn về một danh sách có sẵn tên command để chạy.
+   *
+   * Vì sao gắn sẵn `command`: legacy để mỗi màn tự biết "duyệt cái này thì gọi
+   * gì", nên có chỗ duyệt xong mà không chạy hệ quả (gap Bug #12/#16). Ở đây
+   * danh sách và command đi kèm nhau, không có chỗ để nối sai.
+   */
+  function getPendingApprovals(ctx, spec) {
+    var g = guard(Q.GetPendingApprovals, ctx, spec);
+    if (R.isErr(g)) return g;
+
+    return merge.resolve({
+      computeLive: function () {
+        var items = [];
+        var unknown = [];
+        (spec.pending || []).forEach(function (p) {
+          var kind = APPROVAL_KINDS[p.type];
+          if (!kind) {
+            /* Loại chưa khai = KHÔNG dựng nút duyệt. Dựng bừa một nút gọi command
+               đoán được mới là thứ nguy hiểm. */
+            unknown.push(p.type);
+            return;
+          }
+          items.push({
+            type: p.type,
+            label: kind.label,
+            command: kind.command,
+            referenceId: p.referenceId,
+            requestedBy: p.requestedBy || null,
+            requestedAt: p.requestedAt || null,
+            summary: p.summary || null
+          });
+        });
+        return R.ok({
+          items: items,
+          byType: Object.keys(APPROVAL_KINDS).reduce(function (acc, k) {
+            acc[k] = items.filter(function (i) { return i.type === k; }).length;
+            return acc;
+          }, {}),
+          unknownTypes: unknown.filter(function (v, i, a) { return a.indexOf(v) === i; })
+        });
+      },
+      computedAt: ctx.clock.now()
+    });
+  }
+
   return {
     QUERIES: Q,
     registerQuery: registerQuery,
@@ -8709,7 +8878,10 @@ GIEO.define('read-layer/gateway', [
     getRevenue: getRevenue,
     getCOGS: getCOGS,
     getPnL: getPnL,
-    comparePeriods: comparePeriods
+    comparePeriods: comparePeriods,
+    getShiftStatus: getShiftStatus,
+    getAlerts: getAlerts,
+    getPendingApprovals: getPendingApprovals
   };
 });
 
@@ -11417,6 +11589,28 @@ GIEO.define('bootstrap/legacy-data-source', [
 ], function (R) {
   'use strict';
 
+  /**
+   * Query chưa có đường đọc từ schema cũ, kèm lý do. Danh sách này TỒN TẠI để
+   * "chưa nối" là một lỗi hiện ra, không phải một ô trống trông như dữ liệu.
+   */
+  var NOT_WIRED = {
+    GetAlerts: 'alerts là bảng của hệ thống mới, legacy không có nguồn tương đương',
+    GetShiftStatus: 'ngày làm việc/ca ở legacy nằm rải nhiều path, chưa map canonical',
+    GetPendingApprovals: 'legacy không có hàng đợi duyệt — đây chính là gap Bug #12/#16'
+  };
+
+  /* Caller tự mang dữ liệu canonical thì không cần nguồn legacy nữa. */
+  var CANONICAL_KEYS = {
+    GetAlerts: 'alerts',
+    GetShiftStatus: 'businessDay',
+    GetPendingApprovals: 'pending'
+  };
+
+  function hasCanonicalInput(name, input) {
+    var key = CANONICAL_KEYS[name];
+    return !!(key && input[key] !== undefined);
+  }
+
   function create(reader, defaults) {
     defaults = defaults || {};
     if (!reader) throw new Error('[legacy-data-source] cần legacy reader');
@@ -11458,6 +11652,14 @@ GIEO.define('bootstrap/legacy-data-source', [
             legacyMeta: { source: out.value.source, ambiguous: out.value.ambiguous }
           });
         });
+      }
+      if (NOT_WIRED[name] && !hasCanonicalInput(name, input)) {
+        /* Chưa có nguồn legacy cho query này. Trả LỖI, không trả rỗng.
+           Rỗng và "chưa đọc được" trông giống nhau trên màn hình nhưng nghĩa
+           ngược nhau: một bên là "không có cảnh báo nào", một bên là "không
+           biết có cảnh báo hay không". Legacy sai đúng chỗ này. */
+        return Promise.resolve(R.err('NOT_FOUND',
+          'chưa nối nguồn dữ liệu legacy cho ' + name + ' — ' + NOT_WIRED[name]));
       }
       /* Query đã mang canonical input thì đi thẳng. Không tự suy đoán query lạ. */
       return Promise.resolve(R.ok(input));
@@ -11528,7 +11730,10 @@ GIEO.define('bootstrap/runtime', [
     GetRevenue: reads.getRevenue,
     GetCOGS: reads.getCOGS,
     GetPnL: reads.getPnL,
-    ComparePeriods: reads.comparePeriods
+    ComparePeriods: reads.comparePeriods,
+    GetShiftStatus: reads.getShiftStatus,
+    GetAlerts: reads.getAlerts,
+    GetPendingApprovals: reads.getPendingApprovals
   };
 
   function createRuntime(spec) {
@@ -11633,7 +11838,84 @@ GIEO.define('app-pos/controller', [
       lastError: null
     };
 
-    function snapshot() { return Object.assign({}, state); }
+    /* Giỏ hàng là TRẠNG THÁI CHỌN của màn hình, không phải trạng thái nghiệp vụ.
+       Nó chỉ giữ "người bán đã bấm những món nào" — giá cuối, giảm giá, phí kênh,
+       FIFO và COGS đều do RecordSale quyết. Đây đúng là gate của Phase 9: POS
+       không còn business inventory logic độc lập. */
+    var cart = [];
+
+    function snapshot() {
+      return Object.assign({}, state, { cart: cart.slice(), cartSubtotal: subtotal() });
+    }
+
+    /**
+     * Tạm tính để người bán đọc tại chỗ, CỐ Ý không gọi là "tổng tiền".
+     * Con số có hiệu lực là con số RecordSale trả về; hai chỗ tính tiền độc lập
+     * chính là kiểu lệch mà legacy đã mắc ở doanh thu.
+     */
+    function subtotal() {
+      return cart.reduce(function (sum, line) { return sum + line.unitPrice * line.qty; }, 0);
+    }
+
+    function lineKey(line) {
+      return [line.menuItemId, line.size || '', (line.toppingIds || []).slice().sort().join('+')].join('|');
+    }
+
+    function addLine(line) {
+      if (!line || !line.menuItemId) return R.err('VALIDATION', 'addLine cần menuItemId');
+      if (typeof line.unitPrice !== 'number' || !isFinite(line.unitPrice)) {
+        /* Giá phải đến từ GetMenu. Không có giá thì không thêm — POS không được
+           tự bịa giá, kể cả giá 0. */
+        return R.err('VALIDATION', 'addLine cần unitPrice lấy từ GetMenu');
+      }
+      var qty = typeof line.qty === 'number' && line.qty > 0 ? line.qty : 1;
+      var key = lineKey(line);
+      var existing = cart.filter(function (l) { return l.key === key; })[0];
+      if (existing) existing.qty += qty;
+      else {
+        cart.push({
+          key: key,
+          menuItemId: line.menuItemId,
+          name: line.name || line.menuItemId,
+          size: line.size || null,
+          toppingIds: (line.toppingIds || []).slice(),
+          unitPrice: line.unitPrice,
+          qty: qty
+        });
+      }
+      return R.ok(snapshot());
+    }
+
+    function changeQty(key, delta) {
+      var idx = -1;
+      for (var i = 0; i < cart.length; i++) if (cart[i].key === key) { idx = i; break; }
+      if (idx === -1) return R.err('NOT_FOUND', 'không có dòng ' + key + ' trong giỏ');
+      cart[idx].qty += delta;
+      if (cart[idx].qty <= 0) cart.splice(idx, 1);
+      return R.ok(snapshot());
+    }
+
+    function clearCart() { cart = []; return R.ok(snapshot()); }
+
+    /**
+     * Thanh toán. Giỏ chỉ được dọn khi RecordSale thành công — dọn trước rồi
+     * command hỏng là cách mất đơn mà người bán không biết đơn đã mất.
+     */
+    function checkout(payment) {
+      if (!cart.length) return Promise.resolve(R.err('VALIDATION', 'giỏ hàng trống'));
+      return run('RecordSale', {
+        lines: cart.map(function (l) {
+          return {
+            menuItemId: l.menuItemId, size: l.size,
+            toppingIds: l.toppingIds.slice(), qty: l.qty
+          };
+        }),
+        payment: payment || null
+      }).then(function (out) {
+        if (R.isOk(out)) clearCart();
+        return out;
+      });
+    }
     function navigate(screen) {
       if (['SALE', 'INVENTORY', 'SHIFT'].indexOf(screen) === -1) {
         return R.err('VALIDATION', 'màn POS không hợp lệ: ' + screen);
@@ -11678,7 +11960,15 @@ GIEO.define('app-pos/controller', [
       navigate: navigate,
       readMenu: function (input) { return read('GetMenu', input); },
       watchMenu: watchMenu,
+      addLine: addLine,
+      changeQty: changeQty,
+      clearCart: clearCart,
+      cart: function () { return cart.slice(); },
+      cartSubtotal: subtotal,
+      checkout: checkout,
       readInventory: function (input) { return read('GetInventoryLevel', input); },
+      readShiftStatus: function (input) { return read('GetShiftStatus', input); },
+      readAlerts: function (input) { return read('GetAlerts', Object.assign({ audience: 'POS' }, input || {})); },
       readUnitTrace: function (input) { return read('GetUnitTrace', input); },
       recordSale: function (input) { return run('RecordSale', input); },
       recordWaste: function (input) { return run('RecordWaste', input); },
@@ -11706,39 +11996,76 @@ GIEO.define('app-pos/main', [
     });
   }
 
+  function money(n) { return Number(n || 0).toLocaleString('vi-VN') + ' ₫'; }
+
+  /** Một khung hiển thị dùng chung cho mọi vùng đọc dữ liệu. */
+  function view() { return { loading: false, error: null, data: null }; }
+
+  function applyRead(out) {
+    return R.isErr(out)
+      ? { loading: false, error: out.error, data: null }
+      : { loading: false, error: null, data: out.value.data };
+  }
+
   function start() {
     var el = document.getElementById('app');
     if (!el) return R.err('NOT_FOUND', 'không có #app');
     var runtime = globalThis.GIEO_POS_RUNTIME || bootstrap.createRuntime({ mode: bootstrap.MODE.READ_ONLY });
     var controller = controllerLib.createController(runtime);
-    var traceView = { loading: false, error: null, data: null };
-    var menuView = { loading: true, error: null, data: null };
 
-    function traceMarkup() {
-      if (traceView.loading) return '<div class="empty"><h3>Đang đọc Unit…</h3></div>';
-      if (traceView.error) return '<div class="result error"><strong>Không đọc được Unit</strong><span>' +
-        esc(traceView.error.message) + '</span></div>';
-      if (!traceView.data) return '<div class="empty"><div class="empty-icon">◎</div><h3>Tra một Unit</h3>' +
-        '<p>Dữ liệu được merge từ nguồn legacy qua Unified Read Layer.</p></div>';
-      return '<div class="result"><strong>' + esc(traceView.data.unitId) + '</strong>' +
-        '<span>Còn lại: ' + esc(traceView.data.remainingQty) + '</span>' +
-        '<span>Bill liên quan: ' + esc((traceView.data.billIds || []).length) + '</span></div>';
+    var traceView = view();
+    var menuView = { loading: true, error: null, data: null };
+    var stockView = view();
+    var shiftView = view();
+    var alertView = view();
+    var checkoutView = { busy: false, error: null, bill: null };
+
+    function errorBox(title, error) {
+      return '<div class="result error"><strong>' + esc(title) + '</strong><span>' +
+        esc(error.message) + '</span></div>';
     }
 
-    function content(screen) {
-      if (screen === 'INVENTORY') {
-        return '<section class="panel"><div class="section-head"><div><p class="eyebrow">FIFO</p>' +
-          '<h2>Kho theo từng lô</h2></div></div>' +
-          '<form class="search-row" id="pos-unit-search"><input name="code" aria-label="Mã Unit" ' +
-          'placeholder="Nhập hoặc quét mã Unit" required><button>Tra cứu</button></form>' +
-          traceMarkup() + '</section>';
+    /* ---------- Cảnh báo ---------- */
+
+    function alertBanner() {
+      var d = alertView.data;
+      if (!d || !d.total) return '';
+      var top = d.buckets.DANGER.concat(d.buckets.WARNING).slice(0, 3);
+      return '<div class="notice alerts"><strong>' + esc(d.counts.DANGER) + ' nghiêm trọng · ' +
+        esc(d.counts.WARNING) + ' cảnh báo</strong><span>' +
+        top.map(function (a) { return esc(a.type); }).join(' · ') + '</span></div>';
+    }
+
+    /* ---------- Màn bán hàng ---------- */
+
+    function cartMarkup() {
+      var state = controller.state();
+      if (!state.cart.length) {
+        return '<div class="empty"><div class="empty-icon">＋</div><h3>Chưa chọn món</h3>' +
+          '<p>Bấm vào món ở trên để thêm vào đơn.</p></div>';
       }
-      if (screen === 'SHIFT') {
-        return '<section class="panel"><div class="section-head"><div><p class="eyebrow">Ca làm việc</p>' +
-          '<h2>Ca và két tiền</h2></div><button class="primary" disabled>Chốt ca</button></div>' +
-          '<div class="metric-grid"><article class="metric"><span>Ngày làm việc</span><strong>Chưa kết nối</strong></article>' +
-          '<article class="metric"><span>Trạng thái két</span><strong>—</strong></article></div></section>';
+      return '<ul class="cart">' + state.cart.map(function (l) {
+        return '<li><span class="cart-name">' + esc(l.name) +
+          (l.size ? ' <em>' + esc(l.size) + '</em>' : '') + '</span>' +
+          '<span class="cart-qty">' +
+            '<button data-qty="-1" data-key="' + esc(l.key) + '" aria-label="Bớt một">−</button>' +
+            '<strong>' + esc(l.qty) + '</strong>' +
+            '<button data-qty="1" data-key="' + esc(l.key) + '" aria-label="Thêm một">＋</button>' +
+          '</span><span class="cart-money">' + esc(money(l.unitPrice * l.qty)) + '</span></li>';
+      }).join('') + '</ul>';
+    }
+
+    function checkoutMarkup() {
+      if (checkoutView.busy) return '<div class="result"><span>Đang ghi đơn…</span></div>';
+      if (checkoutView.error) return errorBox('Chưa ghi được đơn', checkoutView.error);
+      if (checkoutView.bill) {
+        return '<div class="result"><strong>Đã ghi đơn ' + esc(checkoutView.bill.billId || '') + '</strong>' +
+          '<span>Tổng chính thức: ' + esc(money(checkoutView.bill.total)) + '</span></div>';
       }
+      return '';
+    }
+
+    function saleScreen() {
       if (menuView.loading) {
         return '<section class="panel"><div class="empty"><h3>Đang tải menu…</h3></div></section>';
       }
@@ -11750,17 +12077,176 @@ GIEO.define('app-pos/main', [
       var menuHtml = groups.map(function (group) {
         return '<div class="menu-group"><h3>' + esc(group.category.name) + '</h3><div class="menu-grid">' +
           group.items.map(function (item) {
-            var prices = Object.keys(item.prices || {}).map(function (size) {
-              return size + ' ' + Number(item.prices[size]).toLocaleString('vi-VN') + '₫';
-            }).join(' · ');
-            return '<button class="menu-item" disabled><strong>' + esc(item.name) + '</strong><span>' +
-              esc(prices) + '</span></button>';
+            var sizes = Object.keys(item.prices || {});
+            return sizes.map(function (size) {
+              return '<button class="menu-item" data-add="1" data-item="' + esc(item.menuItemId) +
+                '" data-size="' + esc(size) + '" data-price="' + esc(item.prices[size]) +
+                '" data-name="' + esc(item.name) + '"><strong>' + esc(item.name) + '</strong><span>' +
+                esc(size) + ' · ' + esc(money(item.prices[size])) + '</span></button>';
+            }).join('');
           }).join('') + '</div></div>';
       }).join('');
+
+      var state = controller.state();
+      var canCheckout = state.cart.length > 0;
       return '<section class="panel"><div class="section-head"><div><p class="eyebrow">Bán hàng</p>' +
-        '<h2>Đơn hiện tại</h2></div><button class="primary" disabled>Thanh toán</button></div>' +
+        '<h2>Đơn hiện tại</h2></div><button class="primary" id="pos-checkout"' +
+        (canCheckout ? '' : ' disabled') + '>Thanh toán</button></div>' +
         (menuHtml || '<div class="empty"><div class="empty-icon">＋</div><h3>Menu đang trống</h3></div>') +
-        '<div class="total-row"><span>Tổng cộng</span><strong>0 ₫</strong></div></section>';
+        cartMarkup() +
+        /* Gọi đúng tên: "tạm tính". Số có hiệu lực là số RecordSale trả về. */
+        '<div class="total-row"><span>Tạm tính (chưa gồm giảm giá/phí kênh)</span><strong>' +
+        esc(money(state.cartSubtotal)) + '</strong></div>' +
+        checkoutMarkup() + '</section>';
+    }
+
+    /* ---------- Màn kho ---------- */
+
+    function traceMarkup() {
+      if (traceView.loading) return '<div class="empty"><h3>Đang đọc Unit…</h3></div>';
+      if (traceView.error) return errorBox('Không đọc được Unit', traceView.error);
+      if (!traceView.data) return '<div class="empty"><div class="empty-icon">◎</div><h3>Tra một Unit</h3>' +
+        '<p>Dữ liệu được merge từ nguồn legacy qua Unified Read Layer.</p></div>';
+      return '<div class="result"><strong>' + esc(traceView.data.unitId) + '</strong>' +
+        '<span>Còn lại: ' + esc(traceView.data.remainingQty) + '</span>' +
+        '<span>Bill liên quan: ' + esc((traceView.data.billIds || []).length) + '</span></div>';
+    }
+
+    function stockMarkup() {
+      if (stockView.loading) return '<div class="empty"><h3>Đang đọc tồn kho…</h3></div>';
+      if (stockView.error) return errorBox('Không đọc được tồn kho', stockView.error);
+      if (!stockView.data) return '';
+      var b = stockView.data.breakdown || {};
+      return '<div class="metric-grid"><article class="metric"><span>Tồn hiện tại</span><strong>' +
+        esc(stockView.data.currentStock) + '</strong></article>' +
+        '<article class="metric"><span>Hũ chưa mở</span><strong>' + esc(b.sealedQty) + '</strong></article>' +
+        '<article class="metric"><span>Hũ đang dùng</span><strong>' + esc(b.openQty) + '</strong></article>' +
+        /* Phần chưa gắn được Unit hiện RIÊNG, không cộng thầm vào tổng rồi im. */
+        '<article class="metric"><span>Chưa gắn Unit</span><strong>' +
+        esc(Number(b.untrackedBase || 0) + Number(b.untrackedPendingDelta || 0)) + '</strong></article></div>';
+    }
+
+    function inventoryScreen() {
+      return '<section class="panel"><div class="section-head"><div><p class="eyebrow">FIFO</p>' +
+        '<h2>Kho theo từng lô</h2></div></div>' + stockMarkup() +
+        '<form class="search-row" id="pos-unit-search"><input name="code" aria-label="Mã Unit" ' +
+        'placeholder="Nhập hoặc quét mã Unit" required><button>Tra cứu</button></form>' +
+        traceMarkup() + '</section>';
+    }
+
+    /* ---------- Màn ca ---------- */
+
+    function shiftScreen() {
+      var head = '<section class="panel"><div class="section-head"><div><p class="eyebrow">Ca làm việc</p>' +
+        '<h2>Ca và két tiền</h2></div><button class="primary" id="pos-close-segment"' +
+        ((shiftView.data && shiftView.data.openSegment) ? '' : ' disabled') + '>Chốt két</button></div>';
+      if (shiftView.loading) return head + '<div class="empty"><h3>Đang đọc trạng thái ca…</h3></div></section>';
+      if (shiftView.error) return head + errorBox('Không đọc được trạng thái ca', shiftView.error) + '</section>';
+      var d = shiftView.data;
+      if (!d) return head + '<div class="empty"><h3>Chưa có dữ liệu ca</h3></div></section>';
+      return head + '<div class="metric-grid">' +
+        '<article class="metric"><span>Ngày làm việc</span><strong>' +
+          esc(d.businessDate || 'Chưa mở ngày') + '</strong></article>' +
+        /* Ngày làm việc là trạng thái vận hành: chưa mở ở QUANLY thì POS nói
+           thẳng là không bán được, không tự suy ngày từ đồng hồ máy. */
+        '<article class="metric"><span>Trạng thái</span><strong>' +
+          esc(d.operable ? 'Đang mở' : 'Chưa mở — không bán được') + '</strong></article>' +
+        '<article class="metric"><span>Két đang mở</span><strong>' +
+          esc(d.openSegment ? ('Lượt ' + d.openSegment.seq) : 'Không') + '</strong></article>' +
+        '<article class="metric"><span>Đang trong ca</span><strong>' +
+          esc(d.employeesOnShift.length) + '</strong></article></div></section>';
+    }
+
+    function content(screen) {
+      if (screen === 'INVENTORY') return inventoryScreen();
+      if (screen === 'SHIFT') return shiftScreen();
+      return saleScreen();
+    }
+
+    /* ---------- Nối sự kiện ---------- */
+
+    function bindNav() {
+      Array.prototype.forEach.call(el.querySelectorAll('[data-screen]'), function (button) {
+        button.addEventListener('click', function () {
+          var screen = button.getAttribute('data-screen');
+          controller.navigate(screen);
+          render();
+          if (screen === 'INVENTORY' && !stockView.data && !stockView.loading) loadStock();
+          if (screen === 'SHIFT' && !shiftView.data && !shiftView.loading) loadShift();
+        });
+      });
+    }
+
+    function bindSale() {
+      Array.prototype.forEach.call(el.querySelectorAll('[data-add]'), function (button) {
+        button.addEventListener('click', function () {
+          checkoutView = { busy: false, error: null, bill: null };
+          controller.addLine({
+            menuItemId: button.getAttribute('data-item'),
+            name: button.getAttribute('data-name'),
+            size: button.getAttribute('data-size'),
+            unitPrice: Number(button.getAttribute('data-price'))
+          });
+          render();
+        });
+      });
+      Array.prototype.forEach.call(el.querySelectorAll('[data-qty]'), function (button) {
+        button.addEventListener('click', function () {
+          controller.changeQty(button.getAttribute('data-key'), Number(button.getAttribute('data-qty')));
+          render();
+        });
+      });
+      var pay = el.querySelector('#pos-checkout');
+      if (pay) pay.addEventListener('click', function () {
+        checkoutView = { busy: true, error: null, bill: null };
+        render();
+        controller.checkout().then(function (out) {
+          checkoutView = R.isErr(out)
+            ? { busy: false, error: out.error, bill: null }
+            : { busy: false, error: null, bill: out.value };
+          render();
+        });
+      });
+    }
+
+    function bindInventory() {
+      var form = el.querySelector('#pos-unit-search');
+      if (!form) return;
+      form.addEventListener('submit', function (event) {
+        event.preventDefault();
+        traceView = { loading: true, error: null, data: null };
+        render();
+        controller.readUnitTrace({ containerCode: form.elements.code.value }).then(function (out) {
+          traceView = applyRead(out);
+          render();
+        });
+      });
+    }
+
+    function bindShift() {
+      var close = el.querySelector('#pos-close-segment');
+      if (!close) return;
+      close.addEventListener('click', function () {
+        var seg = shiftView.data && shiftView.data.openSegment;
+        if (!seg) return;
+        controller.closeCashSegment({ seq: seg.seq }).then(function (out) {
+          if (R.isErr(out)) shiftView = { loading: false, error: out.error, data: shiftView.data };
+          render();
+          if (R.isOk(out)) loadShift();
+        });
+      });
+    }
+
+    function loadStock() {
+      stockView = { loading: true, error: null, data: null };
+      render();
+      controller.readInventory({}).then(function (out) { stockView = applyRead(out); render(); });
+    }
+
+    function loadShift() {
+      shiftView = { loading: true, error: null, data: null };
+      render();
+      controller.readShiftStatus({}).then(function (out) { shiftView = applyRead(out); render(); });
     }
 
     function render() {
@@ -11770,37 +12256,28 @@ GIEO.define('app-pos/main', [
         '<p class="brand">gieo gieo</p><h1>Điểm bán hàng</h1></div>' +
         '<span class="status ' + (readonly ? 'warning' : 'success') + '">' + esc(state.mode) + '</span></header>' +
         (readonly ? '<div class="notice"><strong>Chế độ chỉ đọc</strong><span>Hệ thống cũ vẫn là nơi ghi production duy nhất.</span></div>' : '') +
+        alertBanner() +
         '<main>' + content(state.screen) + '</main>' +
         '<nav class="bottom-nav" aria-label="Điều hướng POS">' +
           '<button data-screen="SALE" class="' + (state.screen === 'SALE' ? 'active' : '') + '"><span>◫</span>Bán hàng</button>' +
           '<button data-screen="INVENTORY" class="' + (state.screen === 'INVENTORY' ? 'active' : '') + '"><span>◉</span>Kho FIFO</button>' +
           '<button data-screen="SHIFT" class="' + (state.screen === 'SHIFT' ? 'active' : '') + '"><span>◷</span>Ca</button>' +
         '</nav></div>';
-      Array.prototype.forEach.call(el.querySelectorAll('[data-screen]'), function (button) {
-        button.addEventListener('click', function () {
-          controller.navigate(button.getAttribute('data-screen'));
-          render();
-        });
-      });
-      var form = el.querySelector('#pos-unit-search');
-      if (form) form.addEventListener('submit', function (event) {
-        event.preventDefault();
-        traceView = { loading: true, error: null, data: null };
-        render();
-        controller.readUnitTrace({ containerCode: form.elements.code.value }).then(function (out) {
-          traceView = R.isErr(out)
-            ? { loading: false, error: out.error, data: null }
-            : { loading: false, error: null, data: out.value.data };
-          render();
-        });
-      });
+      bindNav();
+      bindSale();
+      bindInventory();
+      bindShift();
     }
 
     render();
     controller.watchMenu({}, function (out) {
-      menuView = R.isErr(out)
-        ? { loading: false, error: out.error, data: null }
-        : { loading: false, error: null, data: out.value.data };
+      menuView = applyRead(out);
+      render();
+    });
+    controller.readAlerts({}).then(function (out) {
+      /* Không đọc được cảnh báo thì im lặng bỏ banner, KHÔNG chặn màn bán hàng —
+         nhưng cũng không dựng banner rỗng giả vờ là "không có cảnh báo nào". */
+      alertView = applyRead(out);
       render();
     });
     return R.ok({ mode: runtime.mode });

@@ -4,6 +4,28 @@ GIEO.define('bootstrap/legacy-data-source', [
 ], function (R) {
   'use strict';
 
+  /**
+   * Query chưa có đường đọc từ schema cũ, kèm lý do. Danh sách này TỒN TẠI để
+   * "chưa nối" là một lỗi hiện ra, không phải một ô trống trông như dữ liệu.
+   */
+  var NOT_WIRED = {
+    GetAlerts: 'alerts là bảng của hệ thống mới, legacy không có nguồn tương đương',
+    GetShiftStatus: 'ngày làm việc/ca ở legacy nằm rải nhiều path, chưa map canonical',
+    GetPendingApprovals: 'legacy không có hàng đợi duyệt — đây chính là gap Bug #12/#16'
+  };
+
+  /* Caller tự mang dữ liệu canonical thì không cần nguồn legacy nữa. */
+  var CANONICAL_KEYS = {
+    GetAlerts: 'alerts',
+    GetShiftStatus: 'businessDay',
+    GetPendingApprovals: 'pending'
+  };
+
+  function hasCanonicalInput(name, input) {
+    var key = CANONICAL_KEYS[name];
+    return !!(key && input[key] !== undefined);
+  }
+
   function create(reader, defaults) {
     defaults = defaults || {};
     if (!reader) throw new Error('[legacy-data-source] cần legacy reader');
@@ -45,6 +67,14 @@ GIEO.define('bootstrap/legacy-data-source', [
             legacyMeta: { source: out.value.source, ambiguous: out.value.ambiguous }
           });
         });
+      }
+      if (NOT_WIRED[name] && !hasCanonicalInput(name, input)) {
+        /* Chưa có nguồn legacy cho query này. Trả LỖI, không trả rỗng.
+           Rỗng và "chưa đọc được" trông giống nhau trên màn hình nhưng nghĩa
+           ngược nhau: một bên là "không có cảnh báo nào", một bên là "không
+           biết có cảnh báo hay không". Legacy sai đúng chỗ này. */
+        return Promise.resolve(R.err('NOT_FOUND',
+          'chưa nối nguồn dữ liệu legacy cho ' + name + ' — ' + NOT_WIRED[name]));
       }
       /* Query đã mang canonical input thì đi thẳng. Không tự suy đoán query lạ. */
       return Promise.resolve(R.ok(input));

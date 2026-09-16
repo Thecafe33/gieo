@@ -341,3 +341,112 @@ describe('read-layer — nguồn và đóng băng', function () {
     assertErr(MC.resolve({ computeLive: function () { return GIEO.require('shared-kernel/result').ok(null); } }), 'NOT_FOUND');
   });
 });
+
+describe('P9/P10 — query cho màn Ca / Cảnh báo / Duyệt', function () {
+  var A = GIEO.require('alerts/alert');
+
+  function alertOf(type, data, subjectKey) {
+    return assertOk(A.raise({
+      type: type, storeId: _r.STORE, businessDate: '2026-03-10',
+      subjectKey: subjectKey || type, data: data, at: 1000
+    }));
+  }
+
+  describe('GetShiftStatus', function () {
+    test('ngày chưa mở thì operable=false, KHÔNG suy ngày từ đồng hồ', function () {
+      var out = assertOk(_r.G.getShiftStatus(rCtx(), { businessDay: null, segments: [] }));
+      assert.strictEqual(out.data.businessDate, null);
+      assert.strictEqual(out.data.operable, false);
+    });
+
+    test('đọc đúng két đang mở và người đang trong ca', function () {
+      var out = assertOk(_r.G.getShiftStatus(rCtx(), {
+        businessDay: { businessDate: '2026-03-10', status: 'OPEN' },
+        segments: [
+          { seq: 1, status: 'CLOSED' },
+          { seq: 2, status: 'OPEN', openedAt: 900, openedBy: _r.NV }
+        ],
+        employeeShifts: [
+          { shiftId: 'shift_1', employeeId: 'employee_a', status: 'OPEN', checkedInAt: 800 },
+          { shiftId: 'shift_2', employeeId: 'employee_b', status: 'CLOSED' }
+        ]
+      }));
+      assert.strictEqual(out.data.operable, true);
+      assert.strictEqual(out.data.openSegment.seq, 2);
+      assert.strictEqual(out.data.closedSegmentCount, 1);
+      assert.strictEqual(out.data.employeesOnShift.length, 1);
+    });
+  });
+
+  describe('GetAlerts', function () {
+    var lowStock = function () {
+      return alertOf('LOW_STOCK', { itemId: _r.SUA, currentStock: 2, threshold: 10 });
+    };
+    var cashVariance = function () {
+      return alertOf('CASH_VARIANCE', { segmentId: 'seg_1', variance: -50000 });
+    };
+
+    test('audience bắt buộc — không có mặc định xem hết', function () {
+      assertErr(_r.G.getAlerts(rCtx(), { alerts: [] }), 'VALIDATION');
+      assertErr(_r.G.getAlerts(rCtx(), { alerts: [], audience: 'TAT_CA' }), 'VALIDATION');
+    });
+
+    test('POS không thấy cảnh báo chỉ dành cho QUANLY', function () {
+      var out = assertOk(_r.G.getAlerts(rCtx(), {
+        alerts: [lowStock(), cashVariance()], audience: 'POS'
+      }));
+      assert.strictEqual(out.data.total, 1);
+      assert.strictEqual(out.data.buckets.WARNING[0].type, 'LOW_STOCK');
+    });
+
+    test('đếm tách theo mức nặng, không gộp thành một số tổng', function () {
+      var out = assertOk(_r.G.getAlerts(rCtx('QUANLY_ADMIN', 'QUANLY', _r.BOSS), {
+        alerts: [
+          lowStock(),
+          cashVariance(),
+          alertOf('STOCKOUT', { itemId: _r.SUA, menuItemIds: ['item_1'] })
+        ],
+        audience: 'QUANLY'
+      }));
+      assert.strictEqual(out.data.counts.DANGER, 2);
+      assert.strictEqual(out.data.counts.WARNING, 1);
+      assert.strictEqual(out.data.total, 3);
+    });
+
+    test('cảnh báo đã xử lý không còn hiện', function () {
+      var a = lowStock();
+      var resolved = Object.assign({}, a, { status: A.STATUS.RESOLVED });
+      var out = assertOk(_r.G.getAlerts(rCtx(), { alerts: [resolved], audience: 'POS' }));
+      assert.strictEqual(out.data.total, 0);
+    });
+  });
+
+  describe('GetPendingApprovals', function () {
+    var ctx = function () { return rCtx('QUANLY_ADMIN', 'QUANLY', _r.BOSS); };
+
+    test('mỗi việc mang sẵn command, UI không tự tra bảng', function () {
+      var out = assertOk(_r.G.getPendingApprovals(ctx(), {
+        pending: [
+          { type: 'lostReport', referenceId: 'lost_1' },
+          { type: 'stockCount', referenceId: 'count_1' },
+          { type: 'expense', referenceId: 'expense_1' }
+        ]
+      }));
+      assert.deepStrictEqual(out.data.items.map(function (i) { return i.command; }),
+        ['ApproveLostContainer', 'ApproveStockCount', 'ApproveExpense']);
+      assert.deepStrictEqual(out.data.byType, { lostReport: 1, stockCount: 1, expense: 1 });
+    });
+
+    test('loại chưa khai KHÔNG dựng việc duyệt, mà báo ra', function () {
+      var out = assertOk(_r.G.getPendingApprovals(ctx(), {
+        pending: [{ type: 'khongBietLaGi', referenceId: 'x_1' }, { type: 'lostReport', referenceId: 'lost_1' }]
+      }));
+      assert.strictEqual(out.data.items.length, 1);
+      assert.deepStrictEqual(out.data.unknownTypes, ['khongBietLaGi']);
+    });
+
+    test('nhân viên POS không đọc được hàng đợi duyệt', function () {
+      assertErr(_r.G.getPendingApprovals(rCtx(), { pending: [] }), 'FORBIDDEN');
+    });
+  });
+});

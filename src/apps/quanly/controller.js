@@ -38,6 +38,21 @@ GIEO.define('app-quanly/controller', [
       getRevenue: function (input) { return read('GetRevenue', input); },
       getCOGS: function (input) { return read('GetCOGS', input); },
       getPnL: function (input) { return read('GetPnL', input); },
+      getAlerts: function (input) { return read('GetAlerts', Object.assign({ audience: 'QUANLY' }, input || {})); },
+      getShiftStatus: function (input) { return read('GetShiftStatus', input); },
+      getPendingApprovals: function (input) { return read('GetPendingApprovals', input); },
+      /**
+       * Duyệt theo đúng command mà GetPendingApprovals đã gắn sẵn vào từng việc.
+       * Màn hình KHÔNG tự tra bảng "loại này thì gọi gì" — tra bảng ở UI chính là
+       * chỗ legacy nối thiếu hệ quả sau khi duyệt (Bug #12/#16).
+       */
+      approvePending: function (item, input) {
+        if (!item || !item.command) {
+          return Promise.resolve(R.err('VALIDATION',
+            'việc chờ duyệt không mang sẵn command — từ chối đoán'));
+        }
+        return run(item.command, Object.assign({ referenceId: item.referenceId }, input || {}));
+      },
       approveStockCount: function (input) { return run('ApproveStockCount', input); },
       approveLost: function (input) { return run('ApproveLostContainer', input); },
       approveExpense: function (input) { return run('ApproveExpense', input); },

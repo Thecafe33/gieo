@@ -124,3 +124,120 @@ describe('bootstrap runtime — rollout gate', function () {
     });
   });
 });
+
+describe('P9 — giỏ hàng POS là trạng thái chọn, không phải nghiệp vụ', function () {
+  function posWith(runtime) { return _app.POS.createController(runtime || fakeRuntime()); }
+
+  test('không thêm được món khi giá không đến từ GetMenu', function () {
+    var pos = posWith();
+    assertErr(pos.addLine({ menuItemId: 'item_1', name: 'Trà' }), 'VALIDATION');
+    assert.strictEqual(pos.cart().length, 0);
+  });
+
+  test('cùng món cùng size gộp dòng, khác size tách dòng', function () {
+    var pos = posWith();
+    assertOk(pos.addLine({ menuItemId: 'item_1', size: 'M', unitPrice: 30000 }));
+    assertOk(pos.addLine({ menuItemId: 'item_1', size: 'M', unitPrice: 30000 }));
+    assertOk(pos.addLine({ menuItemId: 'item_1', size: 'L', unitPrice: 40000 }));
+    assert.strictEqual(pos.cart().length, 2);
+    assert.strictEqual(pos.cart()[0].qty, 2);
+    assert.strictEqual(pos.cartSubtotal(), 30000 * 2 + 40000);
+  });
+
+  test('bớt về 0 thì dòng biến mất, không để lại dòng qty âm', function () {
+    var pos = posWith();
+    pos.addLine({ menuItemId: 'item_1', size: 'M', unitPrice: 30000 });
+    var key = pos.cart()[0].key;
+    assertOk(pos.changeQty(key, -1));
+    assert.strictEqual(pos.cart().length, 0);
+    assertErr(pos.changeQty(key, -1), 'NOT_FOUND');
+  });
+
+  test('thanh toán gửi đúng các dòng qua RecordSale, không tự tính tiền', function () {
+    var runtime = fakeRuntime();
+    var pos = posWith(runtime);
+    pos.addLine({ menuItemId: 'item_1', size: 'M', unitPrice: 30000, qty: 2 });
+    return pos.checkout({ method: 'CASH' }).then(function (out) {
+      assertOk(out);
+      var call = runtime.calls[0];
+      assert.strictEqual(call.name, 'RecordSale');
+      assert.deepStrictEqual(call.input.lines, [
+        { menuItemId: 'item_1', size: 'M', toppingIds: [], qty: 2 }
+      ]);
+      /* Không có trường tổng tiền nào do POS tự tính lọt vào command. */
+      assert.strictEqual(call.input.total, undefined);
+      assert.strictEqual(call.input.subtotal, undefined);
+    });
+  });
+
+  test('giỏ trống không gọi command', function () {
+    var runtime = fakeRuntime();
+    return posWith(runtime).checkout().then(function (out) {
+      assertErr(out, 'VALIDATION');
+      assert.strictEqual(runtime.calls.length, 0);
+    });
+  });
+
+  test('RecordSale hỏng thì GIỮ NGUYÊN giỏ — không để mất đơn trong im lặng', function () {
+    var runtime = fakeRuntime();
+    runtime.command = function () { return Promise.resolve(_app.R.err('RETRYABLE', 'mạng lỗi')); };
+    var pos = posWith(runtime);
+    pos.addLine({ menuItemId: 'item_1', size: 'M', unitPrice: 30000 });
+    return pos.checkout().then(function (out) {
+      assertErr(out, 'RETRYABLE');
+      assert.strictEqual(pos.cart().length, 1);
+    });
+  });
+
+  test('READ_ONLY chặn thanh toán nhưng giỏ vẫn còn để bán lại sau', function () {
+    var runtime = _app.BOOT.createRuntime({ mode: _app.BOOT.MODE.READ_ONLY });
+    var pos = posWith(runtime);
+    pos.addLine({ menuItemId: 'item_1', size: 'M', unitPrice: 30000 });
+    return pos.checkout().then(function (out) {
+      assertErr(out, 'FORBIDDEN');
+      assert.strictEqual(pos.cart().length, 1);
+    });
+  });
+});
+
+describe('P9/P10 — màn Ca, Cảnh báo, Duyệt đều đi qua read-layer', function () {
+  test('POS đọc ca và cảnh báo qua query, cảnh báo mặc định audience POS', function () {
+    var runtime = fakeRuntime();
+    var pos = _app.POS.createController(runtime);
+    return Promise.all([pos.readShiftStatus({}), pos.readAlerts({})]).then(function () {
+      assert.deepStrictEqual(runtime.calls.map(function (c) { return c.name; }),
+        ['GetShiftStatus', 'GetAlerts']);
+      assert.strictEqual(runtime.calls[1].input.audience, 'POS');
+    });
+  });
+
+  test('QUANLY đọc cảnh báo với audience QUANLY, không dùng chung của POS', function () {
+    var runtime = fakeRuntime();
+    return _app.QL.createController(runtime).getAlerts({}).then(function () {
+      assert.strictEqual(runtime.calls[0].input.audience, 'QUANLY');
+    });
+  });
+
+  test('duyệt chạy đúng command mà query đã gắn sẵn', function () {
+    var runtime = fakeRuntime();
+    var ql = _app.QL.createController(runtime);
+    return ql.approvePending({
+      type: 'lostReport', command: 'ApproveLostContainer', referenceId: 'lost_1'
+    }).then(function (out) {
+      assertOk(out);
+      assert.strictEqual(runtime.calls[0].kind, 'command');
+      assert.strictEqual(runtime.calls[0].name, 'ApproveLostContainer');
+      assert.strictEqual(runtime.calls[0].input.referenceId, 'lost_1');
+    });
+  });
+
+  test('việc không mang command thì TỪ CHỐI, không đoán command', function () {
+    var runtime = fakeRuntime();
+    return _app.QL.createController(runtime).approvePending({
+      type: 'khongBietLaGi', referenceId: 'x_1'
+    }).then(function (out) {
+      assertErr(out, 'VALIDATION');
+      assert.strictEqual(runtime.calls.length, 0);
+    });
+  });
+});

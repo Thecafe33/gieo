@@ -171,3 +171,29 @@ describe('Firebase SDK read client — không có API ghi', function () {
     assert.strictEqual(removed.listener, registered.listener);
   });
 });
+
+describe('query chưa nối nguồn legacy phải BÁO LỖI, không trả rỗng', function () {
+  function ds() { return _lr.DS.create({ loadUnitTrace: function () {}, loadMenu: function () {}, loadBills: function () {} }); }
+
+  ['GetAlerts', 'GetShiftStatus', 'GetPendingApprovals'].forEach(function (name) {
+    test(name + ' không có nguồn cũ → NOT_FOUND kèm lý do', function () {
+      return ds().forQuery(name, {}).then(function (out) {
+        assertErr(out, 'NOT_FOUND');
+        assert.ok(/chưa nối nguồn/.test(out.error.message), out.error.message);
+      });
+    });
+  });
+
+  test('caller tự mang dữ liệu canonical thì đi thẳng, không bị chặn', function () {
+    return ds().forQuery('GetAlerts', { alerts: [] }).then(function (out) {
+      assertOk(out);
+      assert.deepStrictEqual(out.value.alerts, []);
+    });
+  });
+
+  test('command không bao giờ hydrate được qua đường legacy', function () {
+    return ds().forCommand('RecordSale', {}).then(function (out) {
+      assertErr(out, 'FORBIDDEN');
+    });
+  });
+});
