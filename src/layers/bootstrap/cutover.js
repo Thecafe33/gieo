@@ -222,7 +222,41 @@ GIEO.define('bootstrap/cutover', [
       };
     }
 
+    /**
+     * Khôi phục trạng thái đã lưu. Không có nó thì tải lại trang là quay về
+     * bước đầu, và một hệ thống đã cutover sẽ tự coi mình chưa cutover.
+     */
+    function hydrate(saved) {
+      if (!saved) return R.ok(state());
+      if (saved.step && !Object.prototype.hasOwnProperty.call(STEP, saved.step)) {
+        return R.err('VALIDATION', 'trạng thái cutover đã lưu không hợp lệ: ' + saved.step);
+      }
+      step = saved.step || STEP.NOT_STARTED;
+      cutoverAt = typeof saved.cutoverAt === 'number' ? saved.cutoverAt : null;
+      attempted = !!saved.attempted || step === STEP.NEW_SOLE_WRITER || step === STEP.ROLLED_BACK;
+      if (typeof saved.rollbackWindowMs === 'number') rollbackWindowMs = saved.rollbackWindowMs;
+      (saved.phases || []).forEach(function (p) {
+        if (p && REQUIRED_PHASES.indexOf(p.phase) !== -1) phases[p.phase] = p;
+      });
+      log = (saved.log || []).slice();
+      return R.ok(state());
+    }
+
+    /** Hình dạng đem đi lưu — đọc lại được bằng `hydrate`. */
+    function toPersisted() {
+      return {
+        step: step,
+        cutoverAt: cutoverAt,
+        attempted: attempted,
+        rollbackWindowMs: rollbackWindowMs,
+        phases: REQUIRED_PHASES.map(function (p) { return phases[p]; }).filter(Boolean),
+        log: log.slice()
+      };
+    }
+
     return {
+      hydrate: hydrate,
+      toPersisted: toPersisted,
       recordPhase: recordPhase,
       preconditions: preconditions,
       stopOldWriter: stopOldWriter,

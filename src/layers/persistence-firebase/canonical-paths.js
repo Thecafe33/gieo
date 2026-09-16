@@ -80,22 +80,30 @@ GIEO.define('persistence-firebase/canonical-paths', [
 
     /* Bill — live ở RTDB, archive ở Firestore, giữ đúng phân tầng legacy. */
     billLive: { kind: RTDB, build: function (ctx, a) { return base(ctx) + '/bills/live/' + a.businessDate + '/' + a.billId; } },
-    billArchive: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/bills/archive/' + a.archiveKey; } },
+    billArchive: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/billArchives/' + a.archiveKey; } },
     archiveRegistry: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/archiveRegistry/' + a.businessDate; } },
     billCounter: { kind: RTDB, build: function (ctx, a) { return base(ctx) + '/counters/bill/' + a.businessDate; } },
 
     /* Cache TÍNH-LẠI-ĐƯỢC — không lên cấp thành snapshot bất biến. */
-    dailySalesCache: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/cache/dailySales/' + a.dateKey; } },
+    dailySalesCache: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/dailySalesCache/' + a.dateKey; } },
     /* Sổ vận hành ca — event record, đọc thẳng. */
     shiftDay: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/shifts/' + a.businessDate; } },
     shiftSegment: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/shifts/' + a.businessDate + '/segments/' + a.seq; } },
+    /* Trạng thái tiến trình cutover. Phải NẰM TRONG kho, không nằm trong bộ nhớ
+       tab: tải lại trang mà quyền ghi trở về mặc định thì mọi bảo đảm của P13
+       chỉ tồn tại tới lần F5 đầu tiên. */
+    cutoverState: { kind: FIRESTORE, build: function (ctx) { return base(ctx) + '/system/cutover'; } },
     employee: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/employees/' + a.employeeId; } },
     employeeShift: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/employeeShifts/' + a.shiftId; } },
     /* Compaction thật. */
-    monthlySnapshot: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/snapshots/monthly/' + a.period + '/revisions/' + a.revisionNo; } },
-    monthlySnapshotHead: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/snapshots/monthly/' + a.period + '/head/current'; } },
-    unitSnapshot: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/snapshots/units/' + a.unitId + '/revisions/' + a.revisionNo; } },
-    unitSnapshotHead: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/snapshots/units/' + a.unitId + '/head/current'; } },
+    /* Firestore đòi collection/document xen kẽ, nên path tới một document LUÔN
+       có số đoạn CHẴN. Bốn path dưới đây từng có số đoạn lẻ — trỏ vào một
+       collection chứ không phải một document — và chỉ lộ ra khi ghi thật.
+       `base` đã là 4 đoạn, nên phần đuôi phải chẵn. */
+    monthlySnapshot: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/monthlySnapshots/' + a.period + '.r' + a.revisionNo; } },
+    monthlySnapshotHead: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/monthlySnapshots/' + a.period + '.head'; } },
+    unitSnapshot: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/unitSnapshots/' + a.unitId + '.r' + a.revisionNo; } },
+    unitSnapshotHead: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/unitSnapshots/' + a.unitId + '.head'; } },
 
     loyaltyLedger: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/loyaltyLedger/' + a.entryId; } },
     loyaltyEffects: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/loyaltyEffects/' + a.billId; } },

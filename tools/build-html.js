@@ -90,18 +90,13 @@ function buildBundle(appKey) {
     for (const f of walk(path.join(SRC, 'layers', layer))) js += section(f);
   }
   for (const f of walk(path.join(SRC, 'apps', appKey))) js += section(f);
-  /* Composition root chạy trong trình duyệt: khởi tạo Firebase, dựng runtime
-     READ_ONLY, rồi mới start UI. Config đến từ `window.GIEO_FIREBASE` mà shell
-     đặt vào — không module nào trong src/ chứa bí mật. */
+  /* Composition root chạy trong trình duyệt. Mọi thứ đi qua `bootstrap/startup`
+     — quyền ghi đến từ tiến trình cutover, không hardcode ở đây. */
   js += `
 /* ===== khởi động ===== */
 (function () {
   var R = GIEO.require('shared-kernel/result');
-  var fb = GIEO.require('bootstrap/firebase-app');
-  var readClient = GIEO.require('bootstrap/firebase-read-client');
-  var readPort = GIEO.require('legacy-firebase-adapter/read-port');
-  var dataSource = GIEO.require('bootstrap/legacy-data-source');
-  var bootstrap = GIEO.require('bootstrap/runtime');
+  var startup = GIEO.require('bootstrap/startup');
   var app = GIEO.require(${JSON.stringify(APPS[appKey].entry)});
   var cfg = globalThis.GIEO_FIREBASE || {};
 
@@ -116,16 +111,18 @@ function buildBundle(appKey) {
     }
   }
 
-  fb.init({ config: cfg.config, account: cfg.account }).then(function (out) {
+  startup.start({
+    firebase: { config: cfg.config, account: cfg.account },
+    context: function () { return globalThis.GIEO_CONTEXT || null; },
+    cutoverDate: cfg.cutoverDate,
+    /* Ngày vận hành TRUYỀN VÀO, không đọc đồng hồ máy — businessDate là trạng
+       thái vận hành, không phải phép tính từ clock. */
+    today: globalThis.GIEO_TODAY || null
+  }).then(function (out) {
     if (R.isErr(out)) return fail(out.error.message);
-    var client = readClient.create({ rtdb: out.value.rtdb, firestore: out.value.firestore });
-    var reader = readPort.createReader(client);
-    globalThis.GIEO_LEGACY_READER = reader;
-    globalThis[${JSON.stringify(APPS[appKey].runtimeGlobal)}] = bootstrap.createRuntime({
-      /* READ_ONLY cho tới khi tiến trình cutover (P13) chuyển quyền ghi. */
-      mode: bootstrap.MODE.READ_ONLY,
-      dataSource: dataSource.create(reader, { storeId: cfg.storeId })
-    });
+    globalThis[${JSON.stringify(APPS[appKey].runtimeGlobal)}] = out.value.runtime;
+    globalThis.GIEO_CUTOVER = out.value.cutover;
+    globalThis.GIEO_TAKEOVER = out.value.takeover;
     app.start();
   }).catch(function (e) { fail(e && e.message ? e.message : e); });
 })();
@@ -237,7 +234,7 @@ function shell(title, js, fb) {
    hệ mới đọc đúng dữ liệu hệ cũ. Đây là dữ liệu CLIENT, ai mở file cũng đọc
    được; hệ cũ vốn đã như vậy. Cái chặn thật là Firebase Security Rules phía
    server, không phải chỗ cất chuỗi này. */
-window.GIEO_FIREBASE = ${JSON.stringify({ config: fb.config, account: fb.account, storeId: fb.storeId }, null, 1)};
+window.GIEO_FIREBASE = ${JSON.stringify({ config: fb.config, account: fb.account, storeId: fb.storeId, cutoverDate: fb.cutoverDate }, null, 1)};
 </script>
 <script>
 ${js}
@@ -258,6 +255,9 @@ try {
 
 const fb = legacyFirebase();
 fb.storeId = 'store_main';
+/* Mốc cutover đã chốt với chủ quán. Nằm ở đây vì nó là cấu hình triển khai,
+   không phải luật nghiệp vụ — đổi ngày là build lại, không sửa code. */
+fb.cutoverDate = '2026-09-20';
 console.log(`  Firebase: project ${fb.config.projectId}, SDK ${fb.sdkVersion}, tài khoản ${fb.account.email}`);
 
 fs.mkdirSync(DIST, { recursive: true });

@@ -51,5 +51,9 @@ GIEO.define('bootstrap/legacy-takeover', [
       });
   }
 
-  return { run: run };
+  return {
+    run: run,
+    /* Khối khởi động cần id này để hỏi "đã tiếp nhận chưa" trước khi chạy. */
+    operationIdFor: takeover.takeoverOperationId
+  };
 });

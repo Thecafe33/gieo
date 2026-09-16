@@ -113,7 +113,8 @@ window.GIEO_FIREBASE = {
   "email": "cafe33@xolifa.com",
   "password": "xolifaangiang"
  },
- "storeId": "store_main"
+ "storeId": "store_main",
+ "cutoverDate": "2026-09-20"
 };
 </script>
 <script>
@@ -8576,22 +8577,30 @@ GIEO.define('persistence-firebase/canonical-paths', [
 
     /* Bill — live ở RTDB, archive ở Firestore, giữ đúng phân tầng legacy. */
     billLive: { kind: RTDB, build: function (ctx, a) { return base(ctx) + '/bills/live/' + a.businessDate + '/' + a.billId; } },
-    billArchive: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/bills/archive/' + a.archiveKey; } },
+    billArchive: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/billArchives/' + a.archiveKey; } },
     archiveRegistry: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/archiveRegistry/' + a.businessDate; } },
     billCounter: { kind: RTDB, build: function (ctx, a) { return base(ctx) + '/counters/bill/' + a.businessDate; } },
 
     /* Cache TÍNH-LẠI-ĐƯỢC — không lên cấp thành snapshot bất biến. */
-    dailySalesCache: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/cache/dailySales/' + a.dateKey; } },
+    dailySalesCache: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/dailySalesCache/' + a.dateKey; } },
     /* Sổ vận hành ca — event record, đọc thẳng. */
     shiftDay: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/shifts/' + a.businessDate; } },
     shiftSegment: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/shifts/' + a.businessDate + '/segments/' + a.seq; } },
+    /* Trạng thái tiến trình cutover. Phải NẰM TRONG kho, không nằm trong bộ nhớ
+       tab: tải lại trang mà quyền ghi trở về mặc định thì mọi bảo đảm của P13
+       chỉ tồn tại tới lần F5 đầu tiên. */
+    cutoverState: { kind: FIRESTORE, build: function (ctx) { return base(ctx) + '/system/cutover'; } },
     employee: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/employees/' + a.employeeId; } },
     employeeShift: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/employeeShifts/' + a.shiftId; } },
     /* Compaction thật. */
-    monthlySnapshot: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/snapshots/monthly/' + a.period + '/revisions/' + a.revisionNo; } },
-    monthlySnapshotHead: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/snapshots/monthly/' + a.period + '/head/current'; } },
-    unitSnapshot: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/snapshots/units/' + a.unitId + '/revisions/' + a.revisionNo; } },
-    unitSnapshotHead: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/snapshots/units/' + a.unitId + '/head/current'; } },
+    /* Firestore đòi collection/document xen kẽ, nên path tới một document LUÔN
+       có số đoạn CHẴN. Bốn path dưới đây từng có số đoạn lẻ — trỏ vào một
+       collection chứ không phải một document — và chỉ lộ ra khi ghi thật.
+       `base` đã là 4 đoạn, nên phần đuôi phải chẵn. */
+    monthlySnapshot: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/monthlySnapshots/' + a.period + '.r' + a.revisionNo; } },
+    monthlySnapshotHead: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/monthlySnapshots/' + a.period + '.head'; } },
+    unitSnapshot: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/unitSnapshots/' + a.unitId + '.r' + a.revisionNo; } },
+    unitSnapshotHead: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/unitSnapshots/' + a.unitId + '.head'; } },
 
     loyaltyLedger: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/loyaltyLedger/' + a.entryId; } },
     loyaltyEffects: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/loyaltyEffects/' + a.billId; } },
@@ -8632,6 +8641,140 @@ GIEO.define('persistence-firebase/canonical-paths', [
     protectedPath: protectedPath,
     listNames: listNames
   };
+});
+
+/* ===== src/layers/persistence-firebase/firestore-runner.js ===== */
+/**
+ * Adapter GHI THẬT — `transactionRunner` cho `atomic-commit`.
+ *
+ * Một điều phải nói thẳng vì nó quyết định cả thiết kế: **Firestore và RTDB
+ * không nằm chung được một transaction.** Không có API nào làm việc đó. Vờ như
+ * có sẽ tạo ra một lời hứa nguyên tử mà hệ thống không giữ nổi.
+ *
+ * Nên ranh giới nguyên tử ở đây là:
+ *
+ *     Firestore (CANONICAL)  — một WriteBatch, vào trọn hoặc không vào gì.
+ *     RTDB (LIVE/HOT LAYER)  — chiếu lại SAU khi batch thành công.
+ *
+ * Điều này KHÔNG làm yếu bảo đảm dữ liệu, vì RTDB vốn là projection: nó suy ra
+ * được từ Firestore. Nếu bước chiếu hỏng, nguồn thật vẫn đúng và
+ * `fifo-core/reconciliation.detectDrift` phát hiện được lệch. Ngược lại — ghi
+ * RTDB trước rồi Firestore hỏng — mới là thứ không sửa được, nên thứ tự này là
+ * bắt buộc, không phải tuỳ chọn.
+ *
+ * Lỗi ở bước chiếu KHÔNG bị nuốt: nó được trả về trong kết quả để tầng trên
+ * cảnh báo. Đây đúng là chỗ legacy `.catch(console.warn)` và sinh ra bug #15.
+ */
+GIEO.define('persistence-firebase/firestore-runner', [
+  'shared-kernel/result',
+  'persistence-firebase/canonical-paths'
+], function (R, paths) {
+  'use strict';
+
+  /* Trần của một WriteBatch Firestore. Vượt trần thì batch không còn nguyên tử,
+     nên TỪ CHỐI thay vì tự cắt nhỏ — cắt nhỏ là im lặng đánh mất bảo đảm mà
+     tầng trên đang tin là có. */
+  var BATCH_LIMIT = 500;
+
+  function splitPath(full) {
+    /* Firestore cần cặp collection/doc xen kẽ. Path canonical luôn có số đoạn
+       CHẴN; số lẻ nghĩa là trỏ vào một collection, không phải một document. */
+    var parts = full.split('/').filter(Boolean);
+    if (parts.length % 2 !== 0) return null;
+    return parts;
+  }
+
+  /**
+   * @param spec.firestore  handle Firestore đã khởi tạo
+   * @param spec.rtdb       handle RTDB đã khởi tạo
+   */
+  function create(spec) {
+    spec = spec || {};
+    var firestore = spec.firestore;
+    var rtdb = spec.rtdb;
+    if (!firestore || typeof firestore.batch !== 'function') {
+      throw new Error('[firestore-runner] cần handle Firestore có batch()');
+    }
+    if (!rtdb || typeof rtdb.ref !== 'function') {
+      throw new Error('[firestore-runner] cần handle RTDB có ref()');
+    }
+
+    /* Lỗi chiếu RTDB được giữ lại ở đây để tầng trên đọc — không nuốt, không
+       chỉ log ra console rồi thôi. */
+    var projectionFailures = [];
+
+    function docRef(path) {
+      var parts = splitPath(path);
+      if (!parts) return null;
+      var ref = firestore.collection(parts[0]).doc(parts[1]);
+      for (var i = 2; i < parts.length; i += 2) {
+        ref = ref.collection(parts[i]).doc(parts[i + 1]);
+      }
+      return ref;
+    }
+
+    function runner(writes) {
+      var fsWrites = writes.filter(function (w) { return w.kind === paths.FIRESTORE; });
+      var rtWrites = writes.filter(function (w) { return w.kind === paths.RTDB; });
+
+      if (fsWrites.length > BATCH_LIMIT) {
+        var tooBig = new Error(
+          'plan có ' + fsWrites.length + ' thao tác Firestore, vượt trần ' + BATCH_LIMIT +
+          ' của một batch nguyên tử — TỪ CHỐI thay vì cắt nhỏ và mất tính nguyên tử');
+        tooBig.retryable = false;
+        throw tooBig;
+      }
+
+      var batch = firestore.batch();
+      for (var i = 0; i < fsWrites.length; i++) {
+        var w = fsWrites[i];
+        var ref = docRef(w.path);
+        if (!ref) {
+          var bad = new Error('path canonical không trỏ tới document: ' + w.path);
+          bad.retryable = false;
+          throw bad;
+        }
+        if (w.op === 'remove') batch.delete(ref);
+        else batch.set(ref, w.data);
+      }
+
+      return Promise.resolve()
+        .then(function () { return fsWrites.length ? batch.commit() : null; })
+        .then(function () {
+          /* Tới đây CANONICAL đã an toàn. Bước dưới chỉ chiếu lại tầng nóng. */
+          return Promise.all(rtWrites.map(function (rw) {
+            return Promise.resolve()
+              .then(function () {
+                var ref = rtdb.ref(rw.path);
+                return rw.op === 'remove' ? ref.remove() : ref.set(rw.data);
+              })
+              .catch(function (e) {
+                /* Không ném lên: ném sẽ làm tầng trên tưởng cả transaction hỏng
+                   và thử lại, trong khi Firestore đã ghi xong. */
+                projectionFailures.push({
+                  path: rw.path, message: e && e.message ? e.message : String(e)
+                });
+              });
+          }));
+        })
+        .then(function () {
+          return {
+            firestoreWrites: fsWrites.length,
+            rtdbWrites: rtWrites.length,
+            projectionFailures: projectionFailures.slice()
+          };
+        });
+    }
+
+    return {
+      runner: runner,
+      /** Lệch tầng nóng chưa chiếu được — tầng trên đọc để cảnh báo. */
+      projectionFailures: function () { return projectionFailures.slice(); },
+      clearProjectionFailures: function () { projectionFailures = []; }
+    };
+  }
+
+  return { BATCH_LIMIT: BATCH_LIMIT, create: create };
 });
 
 /* ===== src/layers/read-layer/gateway.js ===== */
@@ -12466,7 +12609,41 @@ GIEO.define('bootstrap/cutover', [
       };
     }
 
+    /**
+     * Khôi phục trạng thái đã lưu. Không có nó thì tải lại trang là quay về
+     * bước đầu, và một hệ thống đã cutover sẽ tự coi mình chưa cutover.
+     */
+    function hydrate(saved) {
+      if (!saved) return R.ok(state());
+      if (saved.step && !Object.prototype.hasOwnProperty.call(STEP, saved.step)) {
+        return R.err('VALIDATION', 'trạng thái cutover đã lưu không hợp lệ: ' + saved.step);
+      }
+      step = saved.step || STEP.NOT_STARTED;
+      cutoverAt = typeof saved.cutoverAt === 'number' ? saved.cutoverAt : null;
+      attempted = !!saved.attempted || step === STEP.NEW_SOLE_WRITER || step === STEP.ROLLED_BACK;
+      if (typeof saved.rollbackWindowMs === 'number') rollbackWindowMs = saved.rollbackWindowMs;
+      (saved.phases || []).forEach(function (p) {
+        if (p && REQUIRED_PHASES.indexOf(p.phase) !== -1) phases[p.phase] = p;
+      });
+      log = (saved.log || []).slice();
+      return R.ok(state());
+    }
+
+    /** Hình dạng đem đi lưu — đọc lại được bằng `hydrate`. */
+    function toPersisted() {
+      return {
+        step: step,
+        cutoverAt: cutoverAt,
+        attempted: attempted,
+        rollbackWindowMs: rollbackWindowMs,
+        phases: REQUIRED_PHASES.map(function (p) { return phases[p]; }).filter(Boolean),
+        log: log.slice()
+      };
+    }
+
     return {
+      hydrate: hydrate,
+      toPersisted: toPersisted,
       recordPhase: recordPhase,
       preconditions: preconditions,
       stopOldWriter: stopOldWriter,
@@ -12822,7 +12999,11 @@ GIEO.define('bootstrap/legacy-takeover', [
       });
   }
 
-  return { run: run };
+  return {
+    run: run,
+    /* Khối khởi động cần id này để hỏi "đã tiếp nhận chưa" trước khi chạy. */
+    operationIdFor: takeover.takeoverOperationId
+  };
 });
 
 /* ===== src/layers/bootstrap/runtime.js ===== */
@@ -13248,6 +13429,161 @@ GIEO.define('bootstrap/shadow-compare', [
     compare: compare,
     createRun: createRun
   };
+});
+
+/* ===== src/layers/bootstrap/startup.js ===== */
+/**
+ * Khối KHỞI ĐỘNG — nơi ba mảnh được cắm điện với nhau.
+ *
+ *   Firebase  →  runtime (quyền ghi do cutover quyết)
+ *             →  tiếp nhận hệ cũ, ĐÚNG MỘT LẦN, tại mốc cutover
+ *
+ * Ba luật được cài ở đây, không nằm ở lời dặn:
+ *
+ *   1. Quyền ghi KHÔNG hardcode. Nó đến từ trạng thái cutover đọc trong kho.
+ *      Trạng thái nằm trong bộ nhớ tab thì mọi bảo đảm của P13 chỉ sống tới
+ *      lần F5 đầu tiên.
+ *
+ *   2. Tiếp nhận chạy đúng một lần. Kiểm bằng bản ghi operation đã tồn tại
+ *      chưa, không bằng một cờ trong localStorage — đổi máy là quên.
+ *
+ *   3. Chưa tới mốc cutover thì KHÔNG tiếp nhận. Tiếp nhận sớm nghĩa là chụp
+ *      tồn đầu sai, và sai từ con số gốc thì mọi thứ sau đó sai theo.
+ */
+GIEO.define('bootstrap/startup', [
+  'shared-kernel/result',
+  'bootstrap/firebase-app',
+  'bootstrap/firebase-read-client',
+  'bootstrap/legacy-data-source',
+  'bootstrap/legacy-takeover',
+  'bootstrap/cutover',
+  'bootstrap/runtime',
+  'legacy-firebase-adapter/read-port',
+  'persistence-firebase/canonical-paths',
+  'persistence-firebase/firestore-runner',
+  'persistence-firebase/atomic-commit'
+], function (R, fbApp, readClientLib, dataSourceLib, takeoverLib, cutoverLib,
+             runtimeLib, readPortLib, paths, runnerLib, commitLib) {
+  'use strict';
+
+  function docPath(name, ctx, args) {
+    var p = paths.path(name, ctx, args);
+    return R.isErr(p) ? null : p.value.path;
+  }
+
+  /** Đọc một document canonical bằng handle Firestore thô. */
+  function readDoc(firestore, fullPath) {
+    var parts = fullPath.split('/').filter(Boolean);
+    if (parts.length % 2 !== 0) return Promise.resolve(null);
+    var ref = firestore.collection(parts[0]).doc(parts[1]);
+    for (var i = 2; i < parts.length; i += 2) ref = ref.collection(parts[i]).doc(parts[i + 1]);
+    return Promise.resolve(ref.get())
+      .then(function (snap) {
+        if (!snap || snap.exists === false) return null;
+        return typeof snap.data === 'function' ? snap.data() : null;
+      })
+      .catch(function () { return null; });
+  }
+
+  /**
+   * @param spec.firebase    {config, account} từ shell
+   * @param spec.context     StoreContext (hoặc hàm trả về)
+   * @param spec.cutoverDate 'YYYY-MM-DD'
+   * @param spec.today       'YYYY-MM-DD' — ngày vận hành hiện tại, TRUYỀN VÀO
+   *                         chứ không đọc đồng hồ máy (xem `store-context`)
+   * @param spec.sdk         tiêm để test không cần mạng
+   */
+  function start(spec) {
+    spec = spec || {};
+    var ctxOf = typeof spec.context === 'function' ? spec.context : function () { return spec.context; };
+
+    return fbApp.init({ config: spec.firebase && spec.firebase.config,
+                        account: spec.firebase && spec.firebase.account,
+                        sdk: spec.sdk })
+      .then(function (fb) {
+        if (R.isErr(fb)) return fb;
+
+        var handles = fb.value;
+        var readClient = readClientLib.create({ rtdb: handles.rtdb, firestore: handles.firestore });
+        var reader = readPortLib.createReader(readClient);
+        var writeRunner = runnerLib.create({ firestore: handles.firestore, rtdb: handles.rtdb });
+        var committer = commitLib.createCommitter({ transactionRunner: writeRunner.runner });
+
+        var ctx = ctxOf();
+        if (!ctx) return R.err('NOT_FOUND', 'chưa có StoreContext để khởi động');
+
+        var cutover = cutoverLib.createCutover({ rollbackWindowMs: spec.rollbackWindowMs });
+        var statePath = docPath('cutoverState', ctx, {});
+
+        return readDoc(handles.firestore, statePath).then(function (saved) {
+          var h = cutover.hydrate(saved);
+          if (R.isErr(h)) return h;
+
+          var runtime = runtimeLib.createRuntime({
+            /* KHÔNG truyền mode: quyền ghi do cutover quyết, và runtime từ chối
+               nhận cả hai. */
+            cutover: cutover,
+            context: ctxOf,
+            dataSource: dataSourceLib.create(reader, { storeId: ctx.storeId }),
+            commit: function (plan, commitCtx) { return committer.commit(plan, commitCtx); },
+            device: spec.device
+          });
+
+          var result = {
+            runtime: runtime,
+            cutover: cutover,
+            reader: reader,
+            committer: committer,
+            writeRunner: writeRunner,
+            takeover: null
+          };
+
+          /* Chưa tới ngày cutover thì dừng ở đây — chạy READ_ONLY như thường. */
+          if (!spec.cutoverDate || !spec.today || spec.today < spec.cutoverDate) {
+            result.takeover = { ran: false, why: 'chưa tới mốc cutover' };
+            return R.ok(result);
+          }
+
+          return maybeTakeover(spec, ctx, handles, reader, committer).then(function (t) {
+            if (R.isErr(t)) return t;
+            result.takeover = t.value;
+            return R.ok(result);
+          });
+        });
+      });
+  }
+
+  /** Tiếp nhận nếu chưa từng chạy. Idempotent theo bản ghi operation trong kho. */
+  function maybeTakeover(spec, ctx, handles, reader, committer) {
+    var opId = takeoverLib.operationIdFor(spec.cutoverDate);
+    var opPath = docPath('operation', ctx, { operationId: opId });
+
+    return readDoc(handles.firestore, opPath).then(function (existing) {
+      if (existing) {
+        /* Đã tiếp nhận rồi. Chạy lại sẽ ghi đè tồn đầu bằng số của hệ cũ HÔM
+           NAY, xoá sạch mọi giao dịch hệ mới đã ghi từ lúc cutover. */
+        return R.ok({ ran: false, why: 'đã tiếp nhận trước đó', operationId: opId });
+      }
+      return takeoverLib.run({
+        reader: reader,
+        cutoverDate: spec.cutoverDate,
+        storeId: ctx.storeId,
+        actorId: spec.actorId || (ctx.actor && ctx.actor.actorId)
+      }).then(function (built) {
+        if (R.isErr(built)) return built;
+        return committer.commit(built.value.plan, ctx).then(function (written) {
+          if (R.isErr(written)) return written;
+          return R.ok({
+            ran: true, operationId: opId,
+            summary: built.value.summary, skipped: built.value.skipped,
+            writeCount: written.value.writeCount
+          });
+        });
+      });
+    });
+  }
+
+  return { start: start };
 });
 
 /* ===== src/apps/pos/controller.js ===== */
@@ -13719,11 +14055,7 @@ GIEO.define('app-pos/main', [
 /* ===== khởi động ===== */
 (function () {
   var R = GIEO.require('shared-kernel/result');
-  var fb = GIEO.require('bootstrap/firebase-app');
-  var readClient = GIEO.require('bootstrap/firebase-read-client');
-  var readPort = GIEO.require('legacy-firebase-adapter/read-port');
-  var dataSource = GIEO.require('bootstrap/legacy-data-source');
-  var bootstrap = GIEO.require('bootstrap/runtime');
+  var startup = GIEO.require('bootstrap/startup');
   var app = GIEO.require("app-pos/main");
   var cfg = globalThis.GIEO_FIREBASE || {};
 
@@ -13738,16 +14070,18 @@ GIEO.define('app-pos/main', [
     }
   }
 
-  fb.init({ config: cfg.config, account: cfg.account }).then(function (out) {
+  startup.start({
+    firebase: { config: cfg.config, account: cfg.account },
+    context: function () { return globalThis.GIEO_CONTEXT || null; },
+    cutoverDate: cfg.cutoverDate,
+    /* Ngày vận hành TRUYỀN VÀO, không đọc đồng hồ máy — businessDate là trạng
+       thái vận hành, không phải phép tính từ clock. */
+    today: globalThis.GIEO_TODAY || null
+  }).then(function (out) {
     if (R.isErr(out)) return fail(out.error.message);
-    var client = readClient.create({ rtdb: out.value.rtdb, firestore: out.value.firestore });
-    var reader = readPort.createReader(client);
-    globalThis.GIEO_LEGACY_READER = reader;
-    globalThis["GIEO_POS_RUNTIME"] = bootstrap.createRuntime({
-      /* READ_ONLY cho tới khi tiến trình cutover (P13) chuyển quyền ghi. */
-      mode: bootstrap.MODE.READ_ONLY,
-      dataSource: dataSource.create(reader, { storeId: cfg.storeId })
-    });
+    globalThis["GIEO_POS_RUNTIME"] = out.value.runtime;
+    globalThis.GIEO_CUTOVER = out.value.cutover;
+    globalThis.GIEO_TAKEOVER = out.value.takeover;
     app.start();
   }).catch(function (e) { fail(e && e.message ? e.message : e); });
 })();

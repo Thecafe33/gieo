@@ -471,3 +471,46 @@ describe('atomic-commit — ghi hết hoặc không ghi gì', function () {
     }).then(function (r) { assertErr(r, 'VALIDATION'); });
   });
 });
+
+describe('Mọi path Firestore phải trỏ tới DOCUMENT, không phải collection', function () {
+  var P = GIEO.require('persistence-firebase/canonical-paths');
+  var idsP = GIEO.require('shared-kernel/ids');
+  var ctxP = {
+    organizationId: idsP.deterministicId('org', ['gieo']),
+    storeId: idsP.deterministicId('store', ['main'])
+  };
+  /* Đủ tham số cho mọi builder — mục đích là kiểm HÌNH DẠNG path, không phải giá trị. */
+  var ARGS = {
+    unitId: 'unit_1', itemId: 'item_1', entryId: 'ledger_1', operationId: 'operation_1',
+    prepItemId: 'prepItem_1', prepBatchId: 'prepBatch_1', countId: 'count_1',
+    reportId: 'report_1', id: 'id_1', recipeId: 'recipe_1', versionId: 'version_1',
+    kind: 'cost', subjectId: 'subject_1', businessDate: '2026-09-20', billId: 'bill_1',
+    dateKey: '2026-09-20', seq: 1, shiftId: 'shift_1', period: '2026-08', revisionNo: 1,
+    customerId: 'customer_1', alertId: 'alert_1', employeeId: 'employee_1', archiveKey: 'sep_20_2026'
+  };
+
+  /* Firestore đòi collection/document xen kẽ. Path lẻ đoạn trỏ vào collection,
+     và lỗi đó chỉ lộ ra lúc GHI THẬT — tức là đúng lúc không được phép hỏng. */
+  test('không path nào có số đoạn lẻ', function () {
+    var bad = [];
+    P.listNames().forEach(function (name) {
+      var out = P.path(name, ctxP, ARGS);
+      if (!out.ok) return;
+      if (out.value.kind !== P.FIRESTORE) return;
+      var segs = out.value.path.split('/').filter(Boolean).length;
+      if (segs % 2 !== 0) bad.push(name + ' -> ' + out.value.path);
+    });
+    assert.deepStrictEqual(bad, [], 'path trỏ vào collection chứ không phải document');
+  });
+
+  test('mọi path đều nằm dưới orgs/{org}/stores/{store}, trừ path protected', function () {
+    var outside = [];
+    P.listNames().forEach(function (name) {
+      var out = P.path(name, ctxP, ARGS);
+      if (out.ok && out.value.path.indexOf('orgs/' + ctxP.organizationId + '/stores/' + ctxP.storeId + '/') !== 0) {
+        outside.push(name);
+      }
+    });
+    assert.deepStrictEqual(outside, []);
+  });
+});
