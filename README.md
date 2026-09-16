@@ -80,7 +80,8 @@ Luật cứng: `apps` không bao giờ chạm thẳng `fifo-core` / `compaction`
 | `[3]` Sales | ✅ Bill + Recipe/Cost versioned + COGS 2 vế + pipeline — 275 test pass |
 | `[4]` Loyalty | ✅ Customer + LoyaltyLedger + Accrual — sổ cái thay field cộng dồn |
 | `[5]` Shift/Cash | ✅ Đoạn ca + đối soát két + blockingClose — 333 test pass |
-| `[6]`→`[9]` | ⬜ chưa bắt đầu |
+| `[6]` Payroll | ✅ Work schedule + ComputePayroll + PayrollClosing — 360 test pass |
+| `[7]`→`[9]` | ⬜ chưa bắt đầu |
 
 Build order theo `FEATURE-TREE-V1.md` §3:
 `[0] Identity → [1] Catalog + [2] FIFO Core → [3] Sales → [4] Loyalty + [5] Shift + [6] Payroll → [7] Finance → [8] Alerts → [9] Reporting`
@@ -95,4 +96,4 @@ Build order theo `FEATURE-TREE-V1.md` §3:
 - Multi-store: `storeId` có mặt mọi nơi, chỉ 1 giá trị thật, **không** xây `ALL_STORES`
 - **Ngày làm việc chốt bằng thao tác ở QUANLY sau khi kết ca**, không theo mốc giờ. Nên `businessDate` là trạng thái vận hành (`store-context/business-day`), và `clock` cố ý **không có** `businessDate()` — chỉ có `calendarDate()`. Đơn lúc 0h30 vẫn thuộc ngày chưa chốt.
 - `FINISH_REVIEW_RATIO`: **cấu hình ở QUANLY**, không hard-code — đi qua `VersionedInput` kind `config`
-- Lương cứng: **trừ theo `work_schedule`** — nên Work schedule từ optional thành **bắt buộc** cho payroll `[6]`
+- Lương cứng: **trừ theo `work_schedule`** — Work schedule từ optional thành **bắt buộc** cho payroll; có lương cứng mà chưa xếp lịch thì từ chối tính, không đoán ngày vắng
