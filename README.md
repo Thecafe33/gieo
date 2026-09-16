@@ -78,7 +78,9 @@ Luật cứng: `apps` không bao giờ chạm thẳng `fifo-core` / `compaction`
 | `[2]` FIFO Core | ✅ Unit + Ledger + Projection + Allocation + Reconciliation — 188 test pass |
 | `[1]` Catalog | ✅ Menu + Category + Promotion + Packaging — 233 test pass |
 | `[3]` Sales | ✅ Bill + Recipe/Cost versioned + COGS 2 vế + pipeline — 275 test pass |
-| `[4]`→`[9]` | ⬜ chưa bắt đầu |
+| `[4]` Loyalty | ✅ Customer + LoyaltyLedger + Accrual — sổ cái thay field cộng dồn |
+| `[5]` Shift/Cash | ✅ Đoạn ca + đối soát két + blockingClose — 333 test pass |
+| `[6]`→`[9]` | ⬜ chưa bắt đầu |
 
 Build order theo `FEATURE-TREE-V1.md` §3:
 `[0] Identity → [1] Catalog + [2] FIFO Core → [3] Sales → [4] Loyalty + [5] Shift + [6] Payroll → [7] Finance → [8] Alerts → [9] Reporting`

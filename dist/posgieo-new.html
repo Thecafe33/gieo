@@ -3493,6 +3493,465 @@ GIEO.define('catalog/promotion', ['shared-kernel/ids', 'shared-kernel/result'], 
   };
 });
 
+/* ===== src/layers/loyalty/accrual.js ===== */
+/**
+ * Tích điểm / tích tem / đổi thưởng — luật nghiệp vụ.
+ *
+ * Chuỗi thật: FIFO-CHAIN-TRACE-LOYALTY-V1.md §2, §3, §4, §5, §6.
+ *
+ * GIỮ NGUYÊN những gì legacy làm đúng (chuỗi này là một trong những chỗ cẩn
+ * thận nhất của hệ thống cũ):
+ *   - điểm tính trên tổng SAU giảm giá, nên tự nhiên không double-dip (§6)
+ *   - ly "mua X tặng Y" KHÔNG được tính tem (fix đã có trong legacy)
+ *   - ly free đổi tem vẫn đi qua FIFO/COGS như món thường — quà tặng vẫn
+ *     tiêu tốn kho thật (§3), nên KHÔNG có nhánh riêng ở đây
+ *
+ * SỬA những gì sai:
+ *   - kết quả là DÒNG SỔ, không phải cộng thẳng vào field số dư
+ *   - addon phải tích điểm cho phần chênh lệch (§4 — legacy bỏ sót hoàn toàn)
+ *   - huỷ bill phát event để hoàn điểm; giữ/không hoàn là CỜ TƯỜNG MINH, không
+ *     phải im lặng bỏ qua rồi bảo "Quản lý xử lý tay" trong khi chưa từng có
+ *     màn hình để xử lý tay (§5)
+ */
+GIEO.define('loyalty/accrual', [
+  'shared-kernel/ids',
+  'shared-kernel/result',
+  'loyalty/ledger',
+  'loyalty/customer'
+], function (ids, R, ledger, customerLib) {
+  'use strict';
+
+  /* Luật của quán, giữ nguyên con số legacy. Đưa ra ngoài thành tham số để
+     đổi luật không phải sửa code — nhưng mặc định khớp hành vi đang chạy. */
+  var DEFAULT_RULES = {
+    pointsPer100: 5,          // dine-in: 5 điểm / 100đ
+    stampPerCup: 1,           // to-go: 1 tem / ly
+    maxStampsPerDay: 2,       // tối đa 2 tem / khách / ngày
+    stampsPerFreeDrink: 6     // 6 tem → 1 ly miễn phí
+  };
+
+  function rulesOf(spec) {
+    return Object.assign({}, DEFAULT_RULES, spec && spec.rules ? spec.rules : {});
+  }
+
+  /**
+   * Số ly được tính tem. Ly tặng (isFree) KHÔNG tính — giữ nguyên fix đã có
+   * trong legacy cho bug "từng cho tem cả ly tặng".
+   */
+  function countableCups(bill) {
+    return (bill.lines || []).reduce(function (s, l) {
+      return s + (l.isFree ? 0 : l.qty);
+    }, 0);
+  }
+
+  /**
+   * Tích cho 1 bill đã thanh toán.
+   *
+   * @param spec.bill              bill đã hoàn tất (total đã SAU giảm giá)
+   * @param spec.customer          khách đã định danh
+   * @param spec.stampsEarnedToday số tem khách đã nhận trong ngày (cho trần/ngày)
+   * @param spec.operationId
+   */
+  function accrueForSale(spec) {
+    var bill = spec.bill;
+    var customer = spec.customer;
+    if (!customer) {
+      /* Không có khách thì không tích — nhưng đây là QUYẾT ĐỊNH TƯỜNG MINH,
+         không phải return 0 ngầm như legacy làm ở chỗ khác. */
+      return R.ok({ entries: [], skipped: 'NO_CUSTOMER' });
+    }
+    if (!spec.operationId) return R.err('VALIDATION', 'accrueForSale cần operationId');
+
+    var rules = rulesOf(spec);
+    var mult = customerLib.accrualMultiplierOf(customer);
+    var entries = [];
+
+    function push(currency, delta, reason) {
+      if (delta === 0) return null;
+      var e = ledger.createEntry({
+        customerId: customer.customerId,
+        storeId: bill.storeId,
+        currency: currency,
+        delta: delta,
+        reason: reason,
+        referenceType: 'bill',
+        referenceId: bill.billId,
+        operationId: spec.operationId,
+        businessDate: bill.businessDate,
+        occurredAt: bill.occurredAt,
+        actorId: bill.soldByActorId
+      });
+      if (R.isErr(e)) return e;
+      entries.push(e.value);
+      return null;
+    }
+
+    if (bill.channel && bill.channel.type === 'DINE_IN') {
+      /* Trên total SAU giảm giá — nên không double-dip với khuyến mãi. */
+      var pts = Math.floor((bill.total / 100) * rules.pointsPer100 * mult);
+      var err = push(ledger.CURRENCY.POINTS, pts, ledger.REASON.EARN_SALE);
+      if (err) return err;
+    } else {
+      var cups = countableCups(bill);
+      var earned = cups * rules.stampPerCup * mult;
+      /* Trần theo ngày — giữ nguyên luật legacy. */
+      var room = Math.max(0, rules.maxStampsPerDay - (spec.stampsEarnedToday || 0));
+      var stamps = Math.min(earned, room);
+      var e2 = push(ledger.CURRENCY.STAMPS, stamps, ledger.REASON.EARN_SALE);
+      if (e2) return e2;
+    }
+
+    return R.ok({ entries: entries, skipped: null });
+  }
+
+  /**
+   * ĐÓNG GAP §4 — addon.
+   *
+   * Legacy `_submitAddonImpl` không có bất kỳ lời gọi tích điểm nào, nên khách
+   * mua thêm mà không được cộng điểm cho phần tiền đó, dù cùng một khách đã
+   * định danh từ đầu bill. Ở đây tích cho ĐÚNG phần chênh lệch.
+   */
+  function accrueForAddon(spec) {
+    var customer = spec.customer;
+    if (!customer) return R.ok({ entries: [], skipped: 'NO_CUSTOMER' });
+    if (!spec.operationId) return R.err('VALIDATION', 'accrueForAddon cần operationId');
+    if (typeof spec.addedAmount !== 'number' || spec.addedAmount <= 0) {
+      return R.err('VALIDATION', 'addon phải có số tiền tăng thêm dương');
+    }
+
+    var rules = rulesOf(spec);
+    var mult = customerLib.accrualMultiplierOf(customer);
+    var pts = Math.floor((spec.addedAmount / 100) * rules.pointsPer100 * mult);
+    if (pts === 0) return R.ok({ entries: [], skipped: 'BELOW_THRESHOLD' });
+
+    var e = ledger.createEntry({
+      customerId: customer.customerId,
+      storeId: spec.storeId,
+      currency: ledger.CURRENCY.POINTS,
+      delta: pts,
+      reason: ledger.REASON.EARN_ADDON,
+      referenceType: 'billAddon',
+      /* referenceId gồm cả seq nên 2 lần addon khác nhau là 2 dòng khác nhau,
+         còn lặp cùng seq thì trùng entryId → không cộng đúp. */
+      referenceId: spec.billId + '.' + spec.addonSeq,
+      operationId: spec.operationId,
+      businessDate: spec.businessDate,
+      occurredAt: spec.occurredAt,
+      actorId: spec.actorId
+    });
+    if (R.isErr(e)) return e;
+    return R.ok({ entries: [e.value], skipped: null });
+  }
+
+  /** Đổi tem lấy ly miễn phí. Số dư kiểm từ SỔ, không từ field. */
+  function redeemStamps(spec) {
+    var rules = rulesOf(spec);
+    var balance = ledger.computeBalance(spec.entries || [], spec.customerId);
+    var need = rules.stampsPerFreeDrink;
+
+    if (balance.STAMPS < need) {
+      return R.err('PRECONDITION',
+        'không đủ tem: có ' + balance.STAMPS + ', cần ' + need);
+    }
+
+    var spend = ledger.createEntry({
+      customerId: spec.customerId, storeId: spec.storeId,
+      currency: ledger.CURRENCY.STAMPS, delta: -need,
+      reason: ledger.REASON.CONVERT_STAMPS,
+      referenceType: 'bill', referenceId: spec.billId,
+      operationId: spec.operationId, businessDate: spec.businessDate,
+      occurredAt: spec.occurredAt, actorId: spec.actorId
+    });
+    if (R.isErr(spend)) return spend;
+
+    var gain = ledger.createEntry({
+      customerId: spec.customerId, storeId: spec.storeId,
+      currency: ledger.CURRENCY.FREE_DRINKS, delta: 1,
+      reason: ledger.REASON.CONVERT_STAMPS,
+      referenceType: 'bill', referenceId: spec.billId,
+      operationId: spec.operationId, businessDate: spec.businessDate,
+      occurredAt: spec.occurredAt, actorId: spec.actorId
+    });
+    if (R.isErr(gain)) return gain;
+
+    return R.ok({ entries: [spend.value, gain.value] });
+  }
+
+  /**
+   * ĐÓNG GAP §5 — huỷ bill.
+   *
+   * Legacy: cả 2 app chỉ hoàn kho, KHÔNG hoàn điểm/tem. Gap này được ghi nhận
+   * CÔNG KHAI (toast POS và cảnh báo QUANLY đều nói "Quản lý xử lý tay") —
+   * nhưng QUANLY chưa bao giờ có màn hình nào để xử lý tay.
+   *
+   * Ở đây giữ/không hoàn là CỜ TƯỜNG MINH `policy`, và cả hai nhánh đều để lại
+   * dấu vết: không hoàn thì trả lý do, không im lặng.
+   */
+  function reverseForVoidedBill(spec) {
+    var policy = spec.policy || 'REVERSE';
+    if (policy !== 'REVERSE' && policy !== 'KEEP') {
+      return R.err('VALIDATION', "policy phải là 'REVERSE' hoặc 'KEEP'");
+    }
+    if (policy === 'KEEP') {
+      return R.ok({
+        entries: [],
+        skipped: 'POLICY_KEEP',
+        note: 'chủ quán chọn giữ điểm/tem khi huỷ bill — quyết định tường minh, không phải bỏ sót'
+      });
+    }
+
+    var original = (spec.entries || []).filter(function (e) {
+      return e.referenceId === spec.billId &&
+        (e.reason === ledger.REASON.EARN_SALE || e.reason === ledger.REASON.EARN_ADDON);
+    });
+    if (original.length === 0) {
+      return R.ok({ entries: [], skipped: 'NOTHING_TO_REVERSE' });
+    }
+
+    var out = [];
+    for (var i = 0; i < original.length; i++) {
+      var o = original[i];
+      /* Bù trừ đúng dòng gốc — cùng nguyên tắc với reversal của FIFO:
+         hoàn theo cái đã ghi, không tính lại theo luật hiện tại. */
+      var e = ledger.createEntry({
+        customerId: o.customerId, storeId: o.storeId,
+        currency: o.currency, delta: -o.delta,
+        reason: ledger.REASON.REVERSAL,
+        referenceType: 'billVoid', referenceId: spec.billId + '.reversal.' + o.currency,
+        operationId: spec.operationId, businessDate: spec.businessDate,
+        occurredAt: spec.occurredAt, actorId: spec.actorId,
+        note: 'hoàn do huỷ bill ' + spec.billId
+      });
+      if (R.isErr(e)) return e;
+      out.push(e.value);
+    }
+    return R.ok({ entries: out, skipped: null });
+  }
+
+  return {
+    DEFAULT_RULES: DEFAULT_RULES,
+    countableCups: countableCups,
+    accrueForSale: accrueForSale,
+    accrueForAddon: accrueForAddon,
+    redeemStamps: redeemStamps,
+    reverseForVoidedBill: reverseForVoidedBill
+  };
+});
+
+/* ===== src/layers/loyalty/customer.js ===== */
+/**
+ * Customer — định danh khách.
+ *
+ * Chuỗi thật: FIFO-CHAIN-TRACE-LOYALTY-V1.md §1, §7.
+ *
+ * Giữ nguyên quyết định nghiệp vụ của legacy: khoá theo SĐT đã chuẩn hoá.
+ * Đơn giản, khớp cách quán thật nhận diện khách (đọc số điện thoại tại quầy).
+ *
+ * Tier là CHỖ NỐI SẴN, không dựng ngay (§7 chain-trace: legacy chưa có tier,
+ * chỉ có nhãn phân khúc thuần đọc-báo-cáo, không nối vào công thức tích điểm).
+ * `accrualMultiplier` mặc định 1 có mặt ngay từ đầu, nên sau này bật tier lên
+ * không phải sửa lại công thức tích điểm — đúng nguyên tắc "chừa vị trí nối
+ * vào" của cây tính năng.
+ */
+GIEO.define('loyalty/customer', ['shared-kernel/ids', 'shared-kernel/result'], function (ids, R) {
+  'use strict';
+
+  /**
+   * Chuẩn hoá SĐT: 84xxx → 0xxx, bỏ khoảng trắng/dấu.
+   * Giữ đúng quy ước legacy để dữ liệu khách cũ khớp được khi migrate.
+   */
+  function normalizePhone(raw) {
+    if (typeof raw !== 'string') return null;
+    var d = raw.replace(/[^0-9+]/g, '');
+    if (d.indexOf('+84') === 0) d = '0' + d.slice(3);
+    else if (d.indexOf('84') === 0 && d.length > 9) d = '0' + d.slice(2);
+    if (!/^0\d{8,10}$/.test(d)) return null;
+    return d;
+  }
+
+  function createCustomer(spec) {
+    if (!spec) return R.err('VALIDATION', 'customer cần spec');
+    var phone = normalizePhone(spec.phone);
+    if (!phone) return R.err('VALIDATION', 'số điện thoại không hợp lệ: ' + spec.phone);
+    if (!ids.isId(spec.storeId, 'store')) return R.err('VALIDATION', 'customer cần storeId hợp lệ');
+
+    return R.ok({
+      /* Id xác định theo SĐT: nhập lại cùng số luôn ra cùng khách, không tạo trùng. */
+      customerId: ids.deterministicId('customer', [phone]),
+      storeId: spec.storeId,
+      phone: phone,
+      name: spec.name || null,
+      /* Chỗ nối cho tier — chưa dùng, nhưng có sẵn nên bật lên không phải sửa
+         công thức tích điểm (§5 luồng chuẩn). */
+      tier: spec.tier || 'STANDARD',
+      accrualMultiplier: typeof spec.accrualMultiplier === 'number' ? spec.accrualMultiplier : 1,
+      createdAt: spec.createdAt || null
+    });
+  }
+
+  /** Hệ số tích điểm theo hạng. Mặc định 1 — không hạng nào thì không lợi gì. */
+  function accrualMultiplierOf(customer) {
+    if (!customer) return 1;
+    var m = customer.accrualMultiplier;
+    return typeof m === 'number' && m > 0 ? m : 1;
+  }
+
+  return {
+    normalizePhone: normalizePhone,
+    createCustomer: createCustomer,
+    accrualMultiplierOf: accrualMultiplierOf
+  };
+});
+
+/* ===== src/layers/loyalty/ledger.js ===== */
+/**
+ * LoyaltyLedger — SỔ CÁI, không phải field cộng dồn.
+ *
+ * Đây là phát hiện quan trọng nhất của chuỗi Loyalty
+ * (FIFO-CHAIN-TRACE-LOYALTY-V1.md §8, FEATURE-TREE-V1.md §4.15).
+ *
+ * Nghịch lý của legacy: tích điểm là một trong những chuỗi được làm CẨN THẬN
+ * NHẤT toàn hệ thống — idempotent qua marker theo billId, Firestore transaction,
+ * hàng đợi retry tự phục hồi — nhưng LƯU TRỮ SAI GỐC:
+ * `total_points`/`stamp_count`/`free_drink_available` là field cộng dồn trực
+ * tiếp trên `customers/{phone}`, và comment tự gọi đó là "single source of truth".
+ *
+ * Vì sao nặng hơn cả `untrackedPendingDelta` của FIFO: FIFO còn có
+ * `stock_transactions_gieogieo` nên về nguyên tắc dựng lại `currentStock` được.
+ * Loyalty thì KHÔNG — `loyalty_bill_effects_gieogieo` chỉ là marker chống trùng
+ * theo billId, không phải sổ cái. Nếu số dư trôi (ghi lỗi, sửa tay Firestore,
+ * race hiếm ngoài phạm vi marker), KHÔNG CÓ CÁCH NÀO tính lại đúng — chỉ có
+ * thể sửa tay mà không kiểm chứng được.
+ *
+ * Ở đây số dư là KẾT QUẢ CỘNG SỔ, không phải thứ được ghi thẳng. Không có hàm
+ * nào set số dư.
+ */
+GIEO.define('loyalty/ledger', ['shared-kernel/ids', 'shared-kernel/result'], function (ids, R) {
+  'use strict';
+
+  var CURRENCY = { POINTS: 'POINTS', STAMPS: 'STAMPS', FREE_DRINKS: 'FREE_DRINKS' };
+
+  var REASON = {
+    EARN_SALE: 'EARN_SALE',
+    EARN_ADDON: 'EARN_ADDON',
+    REDEEM: 'REDEEM',
+    CONVERT_STAMPS: 'CONVERT_STAMPS',
+    REVERSAL: 'REVERSAL',
+    MANUAL_ADJUSTMENT: 'MANUAL_ADJUSTMENT'
+  };
+
+  function isCurrency(c) { return Object.prototype.hasOwnProperty.call(CURRENCY, c); }
+  function isReason(r) { return Object.prototype.hasOwnProperty.call(REASON, r); }
+
+  /**
+   * Một dòng sổ BẤT BIẾN.
+   * `entryId` xác định theo (customer, currency, reason, referenceId) nên ghi
+   * lại cùng một sự kiện không sinh dòng thứ hai.
+   */
+  function createEntry(spec) {
+    if (!spec) return R.err('VALIDATION', 'ledger entry cần spec');
+    if (!ids.isId(spec.customerId, 'customer')) return R.err('VALIDATION', 'cần customerId hợp lệ');
+    if (!ids.isId(spec.storeId, 'store')) return R.err('VALIDATION', 'cần storeId hợp lệ');
+    if (!isCurrency(spec.currency)) return R.err('VALIDATION', 'currency không hợp lệ: ' + spec.currency);
+    if (!isReason(spec.reason)) return R.err('VALIDATION', 'reason không hợp lệ: ' + spec.reason);
+    if (typeof spec.delta !== 'number' || !isFinite(spec.delta) || spec.delta === 0) {
+      return R.err('VALIDATION', 'delta phải là số khác 0');
+    }
+    if (!spec.operationId) return R.err('VALIDATION', 'ledger entry cần operationId');
+    if (!spec.referenceId) {
+      return R.err('VALIDATION', 'ledger entry cần referenceId (billId/lý do) — dòng sổ không nguồn gốc là dòng không kiểm chứng được');
+    }
+    if (!spec.businessDate) return R.err('VALIDATION', 'ledger entry cần businessDate');
+
+    return R.ok({
+      entryId: spec.entryId || ids.deterministicId('ledger', [
+        'loyalty', spec.customerId, spec.currency, spec.reason, spec.referenceId
+      ]),
+      customerId: spec.customerId,
+      storeId: spec.storeId,
+      currency: spec.currency,
+      delta: spec.delta,
+      reason: spec.reason,
+      referenceType: spec.referenceType || 'bill',
+      referenceId: spec.referenceId,
+      operationId: spec.operationId,
+      businessDate: spec.businessDate,
+      occurredAt: typeof spec.occurredAt === 'number' ? spec.occurredAt : null,
+      actorId: spec.actorId || null,
+      note: spec.note || null
+    });
+  }
+
+  /**
+   * Số dư = TỔNG SỔ. Không có hàm set số dư ở bất kỳ đâu, nên không tồn tại
+   * đường làm số dư trôi khỏi lịch sử.
+   */
+  function computeBalance(entries, customerId) {
+    var bal = { POINTS: 0, STAMPS: 0, FREE_DRINKS: 0 };
+    for (var i = 0; i < entries.length; i++) {
+      var e = entries[i];
+      if (customerId && e.customerId !== customerId) continue;
+      bal[e.currency] += e.delta;
+    }
+    return bal;
+  }
+
+  /**
+   * Đối chiếu số dư đang hiển thị với số dư dựng lại từ sổ.
+   *
+   * Legacy không làm được phép này vì không có sổ. Đây là thứ biến "số dư trôi"
+   * từ chuyện không phát hiện được thành chuyện phát hiện được.
+   */
+  function detectDrift(entries, customerId, storedBalance) {
+    var rebuilt = computeBalance(entries, customerId);
+    var drift = {};
+    var clean = true;
+    Object.keys(rebuilt).forEach(function (k) {
+      var stored = (storedBalance && typeof storedBalance[k] === 'number') ? storedBalance[k] : rebuilt[k];
+      if (stored !== rebuilt[k]) {
+        clean = false;
+        drift[k] = { stored: stored, rebuilt: rebuilt[k], difference: stored - rebuilt[k] };
+      }
+    });
+    return R.ok({ customerId: customerId, rebuilt: rebuilt, clean: clean, drift: drift });
+  }
+
+  /**
+   * Sửa tay số dư — vẫn phải đi qua sổ, có lý do và người chịu trách nhiệm.
+   * Legacy không có màn hình nào để "xử lý tay" dù toast bảo Quản lý xử lý tay;
+   * ở đây đường sửa tay tồn tại, nhưng nó là 1 dòng sổ chứ không phải ghi đè.
+   */
+  function adjust(spec) {
+    if (!spec.reasonText) {
+      return R.err('VALIDATION', 'sửa tay số dư phải có lý do — sửa không lý do là sửa không kiểm chứng được');
+    }
+    if (!ids.isId(spec.actorId, 'actor')) return R.err('VALIDATION', 'sửa tay phải có actorId');
+    return createEntry({
+      customerId: spec.customerId,
+      storeId: spec.storeId,
+      currency: spec.currency,
+      delta: spec.delta,
+      reason: REASON.MANUAL_ADJUSTMENT,
+      referenceType: 'manual',
+      referenceId: spec.operationId,
+      operationId: spec.operationId,
+      businessDate: spec.businessDate,
+      occurredAt: spec.occurredAt,
+      actorId: spec.actorId,
+      note: spec.reasonText
+    });
+  }
+
+  return {
+    CURRENCY: CURRENCY,
+    REASON: REASON,
+    createEntry: createEntry,
+    computeBalance: computeBalance,
+    detectDrift: detectDrift,
+    adjust: adjust
+  };
+});
+
 /* ===== src/layers/hr/employee.js ===== */
 /**
  * Employee — domain [0] IDENTITY, gốc của cây tính năng.
@@ -4518,6 +4977,263 @@ GIEO.define('commands/sales', [
     buildRequirements: buildRequirements,
     RecordSale: RecordSale,
     RecordAddon: RecordAddon
+  };
+});
+
+/* ===== src/layers/commands/shift.js ===== */
+/**
+ * Ca / Két tiền — đối soát tiền mặt và giao ca.
+ *
+ * Nguồn: LEGACY-SNAPSHOT-COMPACTION-AUDIT-V1.md §2.2, FEATURE-TREE-V1.md §2 mục [5].
+ *
+ * Đây thuộc nhóm "OPERATIONAL RECORD" của FIFO-COMPACTION-CONTRACT-V1.md §0:
+ * nó LÀ sự kiện đã xảy ra, được ĐỌC THẲNG chứ không tính lại — khác hẳn cache
+ * (tính lại được) và snapshot P&L (đóng băng có chủ đích). Ba khái niệm này
+ * legacy đã tách rất có chủ đích và thiết kế mới không gộp lại.
+ *
+ * QUYẾT ĐỊNH CỦA LEGACY CẦN GIỮ NGUYÊN — sai số KHÔNG cộng dồn giữa các đoạn ca.
+ * Khi giao ca giữa ngày, đoạn sau bắt đầu từ số tiền ĐẾM ĐƯỢC THẬT của đoạn
+ * trước, không phải từ số tiền LẼ RA PHẢI CÓ. Nhờ vậy sai số của đoạn trước
+ * không trôi sang làm bẩn sai số đoạn sau, và mỗi đoạn quy trách nhiệm được cho
+ * đúng người trực đoạn đó. Legacy giải thích điều này ngay trong comment; đây
+ * là thiết kế đúng, không phải chỗ cần "sửa cho gọn".
+ */
+GIEO.define('commands/shift', [
+  'shared-kernel/ids',
+  'shared-kernel/result',
+  'commands/pipeline'
+], function (ids, R, pipeline) {
+  'use strict';
+
+  var STATUS = { OPEN: 'OPEN', CLOSED: 'CLOSED' };
+
+  function segmentId(storeId, businessDate, seq) {
+    return ids.deterministicId('shift', ['seg', storeId, businessDate, String(seq)]);
+  }
+
+  /**
+   * Mở một đoạn ca.
+   * @param spec.startCash tiền mặt đầu đoạn — với đoạn > 1 đây phải là số ĐẾM
+   *        ĐƯỢC của đoạn trước (xem closeSegment.actualEndCash), không phải số
+   *        kỳ vọng.
+   */
+  function openSegment(spec) {
+    if (!ids.isId(spec.storeId, 'store')) return R.err('VALIDATION', 'đoạn ca cần storeId hợp lệ');
+    if (!spec.businessDate) return R.err('VALIDATION', 'đoạn ca cần businessDate');
+    if (typeof spec.seq !== 'number' || spec.seq < 1) return R.err('VALIDATION', 'seq phải >= 1');
+    if (typeof spec.startCash !== 'number' || spec.startCash < 0) {
+      return R.err('VALIDATION', 'startCash phải là số không âm');
+    }
+    if (!ids.isId(spec.actorId, 'actor')) return R.err('VALIDATION', 'đoạn ca cần actorId');
+
+    return R.ok({
+      segmentId: segmentId(spec.storeId, spec.businessDate, spec.seq),
+      storeId: spec.storeId,
+      businessDate: spec.businessDate,
+      seq: spec.seq,
+      status: STATUS.OPEN,
+      startCash: spec.startCash,
+      openedAt: spec.at,
+      openedBy: spec.actorId,
+      /* Nguồn của startCash — để đọc lại biết đoạn này nối từ đâu. */
+      startCashSource: spec.seq === 1 ? 'OPENING_FLOAT' : 'PREVIOUS_SEGMENT_ACTUAL',
+      counts: [],
+      cashSales: 0,
+      cashOut: 0,
+      expectedEndCash: null,
+      actualEndCash: null,
+      variance: null,
+      closedAt: null,
+      closedBy: null
+    });
+  }
+
+  /** Ghi nhận tiền mặt phát sinh trong đoạn. */
+  function recordCashMovement(segment, spec) {
+    if (segment.status !== STATUS.OPEN) return R.err('PRECONDITION', 'đoạn ca đã đóng');
+    if (typeof spec.amount !== 'number' || spec.amount <= 0) {
+      return R.err('VALIDATION', 'số tiền phải dương — chiều đi vào/ra do "direction" quyết định');
+    }
+    if (spec.direction !== 'IN' && spec.direction !== 'OUT') {
+      return R.err('VALIDATION', "direction phải là 'IN' hoặc 'OUT'");
+    }
+    var patch = spec.direction === 'IN'
+      ? { cashSales: segment.cashSales + spec.amount }
+      : { cashOut: segment.cashOut + spec.amount };
+    return R.ok(Object.assign({}, segment, patch));
+  }
+
+  /**
+   * Thêm 1 lần đếm. Legacy cho đếm nhiều lần trước khi chốt — giữ nguyên, và
+   * giữ ĐỦ các lần đếm thay vì chỉ lần cuối, vì chênh lệch giữa các lần đếm
+   * chính là thông tin cần cho người rà soát.
+   */
+  function addCount(segment, spec) {
+    if (segment.status !== STATUS.OPEN) return R.err('PRECONDITION', 'đoạn ca đã đóng');
+    if (typeof spec.countedCash !== 'number' || spec.countedCash < 0) {
+      return R.err('VALIDATION', 'countedCash phải là số không âm');
+    }
+    if (!ids.isId(spec.actorId, 'actor')) return R.err('VALIDATION', 'lần đếm cần actorId');
+
+    return R.ok(Object.assign({}, segment, {
+      counts: segment.counts.concat([{
+        seq: segment.counts.length + 1,
+        countedCash: spec.countedCash,
+        at: spec.at,
+        actorId: spec.actorId,
+        note: spec.note || null
+      }])
+    }));
+  }
+
+  /**
+   * Chốt đoạn ca.
+   *
+   *   expectedEndCash = startCash + cashSales - cashOut
+   *   variance        = actualEndCash - expectedEndCash
+   *
+   * `actualEndCash` lấy từ lần đếm CUỐI CÙNG — không trung bình các lần đếm,
+   * vì đếm lại là để sửa lần trước, không phải để lấy mẫu.
+   */
+  function closeSegment(segment, spec) {
+    if (segment.status !== STATUS.OPEN) return R.err('PRECONDITION', 'đoạn ca đã đóng');
+    if (segment.counts.length === 0) {
+      return R.err('PRECONDITION', 'phải đếm tiền ít nhất 1 lần trước khi chốt đoạn ca');
+    }
+    if (!ids.isId(spec.actorId, 'actor')) return R.err('VALIDATION', 'chốt đoạn ca cần actorId');
+    if (!spec.operationId) return R.err('VALIDATION', 'chốt đoạn ca cần operationId');
+
+    var actual = segment.counts[segment.counts.length - 1].countedCash;
+    var expected = segment.startCash + segment.cashSales - segment.cashOut;
+
+    return R.ok(Object.assign({}, segment, {
+      status: STATUS.CLOSED,
+      expectedEndCash: expected,
+      actualEndCash: actual,
+      variance: actual - expected,
+      closedAt: spec.at,
+      closedBy: spec.actorId,
+      operationId: spec.operationId
+    }));
+  }
+
+  /**
+   * Đoạn kế tiếp — ĐÂY LÀ CHỖ QUYẾT ĐỊNH THIẾT KẾ QUAN TRỌNG.
+   *
+   * Bắt đầu từ `actualEndCash` (đếm được thật), KHÔNG phải `expectedEndCash`.
+   * Nếu bắt đầu từ số kỳ vọng thì sai số của đoạn trước sẽ xuất hiện lại trong
+   * sai số đoạn sau, và người trực đoạn sau bị quy trách nhiệm cho tiền hụt mà
+   * họ không gây ra.
+   */
+  function nextSegment(closedSegment, spec) {
+    if (closedSegment.status !== STATUS.CLOSED) {
+      return R.err('PRECONDITION', 'phải chốt đoạn hiện tại trước khi mở đoạn kế');
+    }
+    return openSegment({
+      storeId: closedSegment.storeId,
+      businessDate: closedSegment.businessDate,
+      seq: closedSegment.seq + 1,
+      startCash: closedSegment.actualEndCash,
+      actorId: spec.actorId,
+      at: spec.at
+    });
+  }
+
+  /**
+   * Tổng hợp cả ngày. Sai số ngày = TỔNG sai số từng đoạn, và luôn nói được
+   * đoạn nào của ai lệch bao nhiêu.
+   */
+  function summarizeDay(segments) {
+    var closed = segments.filter(function (s) { return s.status === STATUS.CLOSED; });
+    return R.ok({
+      segmentCount: segments.length,
+      closedCount: closed.length,
+      allClosed: closed.length === segments.length && segments.length > 0,
+      totalCashSales: segments.reduce(function (s, x) { return s + x.cashSales; }, 0),
+      totalCashOut: segments.reduce(function (s, x) { return s + x.cashOut; }, 0),
+      totalVariance: closed.reduce(function (s, x) { return s + x.variance; }, 0),
+      /* Quy trách nhiệm theo đoạn — thứ mà cộng dồn sai số sẽ làm mất. */
+      varianceBySegment: closed.map(function (s) {
+        return { seq: s.seq, closedBy: s.closedBy, variance: s.variance };
+      })
+    });
+  }
+
+  /**
+   * Lý do CHẶN chốt ngày. FEATURE-TREE §2 mục [5] gọi đây là `blockingClose`.
+   * Trả danh sách để `store-context/business-day.closeDay` từ chối kèm lý do
+   * cụ thể, thay vì chỉ báo "không chốt được".
+   */
+  function closeDayBlockers(spec) {
+    var blockers = [];
+    var segments = spec.segments || [];
+
+    if (segments.length === 0) blockers.push('chưa có đoạn ca nào trong ngày');
+    segments.forEach(function (s) {
+      if (s.status === STATUS.OPEN) blockers.push('đoạn ca #' + s.seq + ' chưa chốt');
+    });
+    (spec.openEmployeeShifts || []).forEach(function (sh) {
+      blockers.push('ca của nhân viên ' + sh.employeeId + ' chưa check-out');
+    });
+    (spec.pendingChecklists || []).forEach(function (c) {
+      if (c.blocking) blockers.push('checklist "' + c.name + '" chưa hoàn tất');
+    });
+    return blockers;
+  }
+
+  var CloseCashSegment = pipeline.defineCommand({
+    name: 'CloseCashSegment',
+    authority: 'EXECUTE',
+    mutates: true,
+    sources: ['POS', 'QUANLY'],
+    operationId: function (input) {
+      return ids.deterministicId('operation', [
+        'closeseg', input.segment.storeId, input.segment.businessDate, String(input.segment.seq)
+      ]);
+    },
+    validate: function (input) {
+      if (!input || !input.segment) return R.err('VALIDATION', 'cần segment');
+      return R.ok(true);
+    },
+    execute: function (input, ctx) {
+      var r = closeSegment(input.segment, {
+        actorId: ctx.actor.actorId,
+        at: ctx.clock.now(),
+        operationId: ids.deterministicId('operation', [
+          'closeseg', input.segment.storeId, input.segment.businessDate, String(input.segment.seq)
+        ])
+      });
+      if (R.isErr(r)) return r;
+
+      var plan = pipeline.emptyPlan();
+      plan.domainRecords.push({ type: 'cashSegment', record: r.value });
+      if (r.value.variance !== 0) {
+        /* Lệch két là việc cần người biết, không phải con số nằm im trong sổ. */
+        plan.events.push({
+          type: 'CashVarianceDetected',
+          segmentId: r.value.segmentId,
+          storeId: r.value.storeId,
+          businessDate: r.value.businessDate,
+          seq: r.value.seq,
+          variance: r.value.variance,
+          closedBy: r.value.closedBy
+        });
+      }
+      return R.ok(plan);
+    }
+  });
+
+  return {
+    STATUS: STATUS,
+    segmentId: segmentId,
+    openSegment: openSegment,
+    recordCashMovement: recordCashMovement,
+    addCount: addCount,
+    closeSegment: closeSegment,
+    nextSegment: nextSegment,
+    summarizeDay: summarizeDay,
+    closeDayBlockers: closeDayBlockers,
+    CloseCashSegment: CloseCashSegment
   };
 });
 
