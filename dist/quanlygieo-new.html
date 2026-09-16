@@ -2240,6 +2240,208 @@ GIEO.define('fifo-core/unit', ['shared-kernel/ids', 'shared-kernel/result'], fun
   };
 });
 
+/* ===== src/layers/traceability/trace.js ===== */
+/**
+ * Traceability graph — trace 2 chiều.
+ *
+ * Contract: GIEO-SYSTEM-REBUILD-PLAN.md §8 (Phase 4),
+ * GIEO-NEW-CHAT-HANDOFF-FLAN-1.md §1.1 (bộ câu hỏi 1 Unit phải trả lời được).
+ *
+ * Forward:  supplier → receipt → unit → open → allocation → bill/BTP/waste/lost
+ * Reverse:  bill/COGS/waste/lost/BTP → xuống tận Unit
+ *
+ * Đây là thứ biện minh cho câu "FIFO là traceability backbone, không phải một
+ * feature của kho": nếu không trả lời được trọn bộ câu hỏi dưới đây thì Unit
+ * chỉ là một con số tồn kho, không phải xương sống truy vết.
+ */
+GIEO.define('traceability/trace', [
+  'shared-kernel/ids',
+  'shared-kernel/result',
+  'fifo-core/unit'
+], function (ids, R, unitLib) {
+  /* eslint-disable no-unused-vars */
+  'use strict';
+
+  /**
+   * Bộ câu hỏi bắt buộc. Khai thành dữ liệu để kiểm được là trace có trả lời
+   * đủ hay không, thay vì tin là đủ.
+   */
+  var REQUIRED_ANSWERS = [
+    'nhận từ đâu', 'supplier/receipt nào', 'số lượng ban đầu', 'cost basis nào',
+    'mở lúc nào', 'ai mở', 'đã phân bổ cho những gì', 'dùng cho bill nào',
+    'dùng cho BTP batch nào', 'recipe version nào', 'hệ thống báo hết lúc nào',
+    'nhân viên báo hết lúc nào', 'waste/lost/adjustment/reversal nào liên quan'
+  ];
+
+  /** Forward trace cho 1 Unit. */
+  function buildUnitTrace(spec) {
+    var unit = spec.unit;
+    if (!unit || !ids.isId(unit.unitId, 'unit')) {
+      return R.err('VALIDATION', 'buildUnitTrace cần unit hợp lệ');
+    }
+
+    var entries = (spec.ledgerEntries || []).filter(function (e) { return e.unitId === unit.unitId; });
+    var allocations = (spec.allocations || []).filter(function (a) { return a.unitId === unit.unitId; });
+
+    var billIds = [];
+    var prepBatchIds = [];
+    var recipeVersionIds = [];
+    allocations.forEach(function (a) {
+      if (a.billId && billIds.indexOf(a.billId) === -1) billIds.push(a.billId);
+      if (a.prepBatchId && prepBatchIds.indexOf(a.prepBatchId) === -1) prepBatchIds.push(a.prepBatchId);
+      (a.recipeVersionIds || []).forEach(function (v) {
+        if (recipeVersionIds.indexOf(v) === -1) recipeVersionIds.push(v);
+      });
+    });
+
+    function byType(t) { return entries.filter(function (e) { return e.type === t; }); }
+
+    return R.ok({
+      unitId: unit.unitId,
+      itemId: unit.itemId,
+      storeId: unit.storeId,
+      itemKind: unit.itemKind,
+
+      origin: {
+        receiptId: unit.receiptId,
+        supplierId: unit.supplierId,
+        receivedAt: unit.receivedAt,
+        receivedBy: unit.receivedBy
+      },
+      initialQty: unit.initialQty,
+      costBasis: unit.costBasis,
+
+      opened: { at: unit.openedAt, by: unit.openedBy },
+
+      /* Từng lần bị trừ, đủ chi tiết để cộng lại ra số dư hiện tại. */
+      allocations: allocations.map(function (a) {
+        return {
+          operationId: a.operationId, qty: a.qty,
+          unitBaseBefore: a.unitBaseBefore, unitBaseAfter: a.unitBaseAfter,
+          unitCost: a.unitCost, cost: a.cost,
+          billId: a.billId || null, prepBatchId: a.prepBatchId || null
+        };
+      }),
+      billIds: billIds,
+      prepBatchIds: prepBatchIds,
+      recipeVersionIds: recipeVersionIds,
+
+      /* Hai mốc ĐỘC LẬP, không suy ra nhau (FIFO-CORE §2). Legacy chỉ suy diễn
+         tạm thời mốc thứ nhất nên không trả lời được nó trong lịch sử. */
+      systemExhaustedAt: unit.systemExhaustedAt,
+      physicallyFinished: {
+        at: unit.finishedAt, by: unit.finishedBy,
+        reason: unit.finishReason, wasteQty: unit.wasteQty
+      },
+
+      debt: unit.debt,
+      lost: unit.lostAt ? { at: unit.lostAt, by: unit.lostBy, reportId: unit.lostReportId } : null,
+      found: unit.foundAt ? { at: unit.foundAt, by: unit.foundBy } : null,
+
+      waste: byType('WASTE'),
+      adjustments: byType('ADJUSTMENT'),
+      reversals: byType('REVERSAL'),
+      physicalReconciliations: unit.physicalReconciliations,
+
+      needsReview: unit.needsReview,
+      needsReviewReasons: unit.needsReviewReasons,
+      currentState: unitLib.effectiveState(unit)
+    });
+  }
+
+  /**
+   * Kiểm trace có trả lời đủ bộ câu hỏi không.
+   * Trả danh sách câu CHƯA trả lời được, thay vì true/false — để nói được
+   * thiếu cái gì.
+   */
+  function unanswered(trace) {
+    var missing = [];
+    if (!trace.origin.receiptId && !trace.origin.supplierId) missing.push('nhận từ đâu');
+    if (!trace.origin.supplierId) missing.push('supplier/receipt nào');
+    if (typeof trace.initialQty !== 'number') missing.push('số lượng ban đầu');
+    if (!trace.costBasis || typeof trace.costBasis.unitCost !== 'number') missing.push('cost basis nào');
+    if (!trace.opened.at) missing.push('mở lúc nào');
+    if (!trace.opened.by) missing.push('ai mở');
+    if (!trace.allocations) missing.push('đã phân bổ cho những gì');
+    return missing;
+  }
+
+  /** Reverse trace: từ 1 bill xuống các Unit đã gánh nó. */
+  function buildBillTrace(spec) {
+    var billId = spec.billId;
+    if (!ids.isId(billId, 'bill')) return R.err('VALIDATION', 'buildBillTrace cần billId hợp lệ');
+
+    var allocations = (spec.allocations || []).filter(function (a) { return a.billId === billId; });
+    var byUnit = Object.create(null);
+    allocations.forEach(function (a) {
+      if (!byUnit[a.unitId]) byUnit[a.unitId] = { unitId: a.unitId, itemId: a.itemId, qty: 0, cost: 0, allocations: [] };
+      byUnit[a.unitId].qty += a.qty;
+      byUnit[a.unitId].cost += a.cost;
+      byUnit[a.unitId].allocations.push(a);
+    });
+
+    return R.ok({
+      billId: billId,
+      units: Object.keys(byUnit).map(function (k) { return byUnit[k]; }),
+      totalActualCost: allocations.reduce(function (s, a) { return s + a.cost; }, 0),
+      recipeVersionIds: (spec.bill && spec.bill.recipeVersionIds) || [],
+      soldByActorId: (spec.bill && spec.bill.soldByActorId) || null
+    });
+  }
+
+  /**
+   * TRACE_DEPENDENCY registry (FIFO-COMPACTION-CONTRACT-V1.md §6).
+   * Compact/purge đọc cái này để trả lời "còn ai cần raw không" — không suy
+   * đoán, không "chắc là hết".
+   */
+  function createDependencyRegistry() {
+    var deps = [];
+    return {
+      register: function (d) {
+        deps.push({
+          sourceType: d.sourceType, sourceId: d.sourceId,
+          referencedBy: d.referencedBy || [], status: 'ACTIVE'
+        });
+        return R.ok(true);
+      },
+      resolveDep: function (sourceType, sourceId) {
+        var found = false;
+        deps = deps.map(function (d) {
+          if (d.sourceType === sourceType && d.sourceId === sourceId) {
+            found = true;
+            return Object.assign({}, d, { status: 'RESOLVED' });
+          }
+          return d;
+        });
+        return found ? R.ok(true) : R.err('NOT_FOUND', 'không có dependency ' + sourceType + '/' + sourceId);
+      },
+      activeFor: function (sourceType, sourceId) {
+        return deps.filter(function (d) {
+          return d.sourceType === sourceType && d.sourceId === sourceId && d.status === 'ACTIVE';
+        });
+      },
+      /** Chỉ được purge khi KHÔNG còn entry ACTIVE nào (invariant C6). */
+      canPurge: function (sourceType, sourceId) {
+        var active = deps.filter(function (d) {
+          return d.sourceType === sourceType && d.sourceId === sourceId && d.status === 'ACTIVE';
+        });
+        return active.length === 0
+          ? R.ok(true)
+          : R.err('PRECONDITION', 'còn ' + active.length + ' tham chiếu đang hoạt động', { active: active });
+      },
+      all: function () { return deps.slice(); }
+    };
+  }
+
+  return {
+    REQUIRED_ANSWERS: REQUIRED_ANSWERS,
+    buildUnitTrace: buildUnitTrace,
+    unanswered: unanswered,
+    buildBillTrace: buildBillTrace,
+    createDependencyRegistry: createDependencyRegistry
+  };
+});
+
 /* ===== src/layers/recipe-cost-btp/cogs.js ===== */
 /**
  * COGS — HAI con số tách biệt + variance.
@@ -4685,6 +4887,958 @@ GIEO.define('hr/work-schedule', ['shared-kernel/ids', 'shared-kernel/result'], f
   };
 });
 
+/* ===== src/layers/finance/config.js ===== */
+/**
+ * Config — cấu hình vận hành, đi qua cơ chế versioning DÙNG CHUNG.
+ *
+ * FEATURE-TREE-V1.md §2 mục [7]: domain này optional với phần còn lại của hệ
+ * thống, mọi thứ CÓ DEFAULT — nên không domain nào phải chờ nó mới chạy được.
+ * Nhưng khi giá trị được đặt thì nó phải versioned, vì có những cấu hình ảnh
+ * hưởng thẳng vào số liệu lịch sử (KPI target là instance #6 của lớp lỗi đã
+ * xác nhận 7 lần: `computeKPIs()` resolve target tại NGÀY CUỐI của cả khoảng
+ * báo cáo rồi áp cho toàn khoảng).
+ *
+ * `FINISH_REVIEW_RATIO` nằm ở đây theo đúng xác nhận của chủ quán: cấu hình ở
+ * QUANLY, không hard-code. fifo-core nhận nó qua tham số nên vẫn là domain
+ * thuần — nó không tự đọc config.
+ */
+GIEO.define('finance/config', [
+  'shared-kernel/result',
+  'compaction/versioned-input'
+], function (R, VI) {
+  'use strict';
+
+  /**
+   * Khoá cấu hình và giá trị mặc định.
+   *
+   * Mặc định có mặt để hệ thống chạy được ngay khi chưa ai cấu hình gì — đúng
+   * nguyên tắc "domain này optional với phần còn lại".
+   */
+  var KEYS = {
+    /* Báo hết hũ khi còn > tỉ lệ này thì gắn needsReview (chủ quán chốt: cấu
+       hình ở QUANLY). 0.25 là con số legacy từng định dùng nhưng chưa bao giờ
+       nối vào code. */
+    finishReviewRatio: { default: 0.25, min: 0, max: 1 },
+    /* Ngưỡng cảnh báo giá vốn / hao hụt — nền của alert chủ động. */
+    cogsPctTarget: { default: null, min: 0, max: 100 },
+    wastePctTarget: { default: null, min: 0, max: 100 },
+    /* Ngưỡng dung sai khi đối chiếu tồn kho. */
+    stockVarianceTolerance: { default: 0, min: 0, max: null },
+    /* Số lần đếm tiền tối đa trước khi chốt đoạn ca. */
+    maxCashCounts: { default: 3, min: 1, max: 20 }
+  };
+
+  function isKey(k) { return Object.prototype.hasOwnProperty.call(KEYS, k); }
+
+  function publishConfig(registry, spec) {
+    if (!spec || !isKey(spec.key)) {
+      return R.err('VALIDATION', 'khoá cấu hình không hợp lệ: ' + (spec && spec.key));
+    }
+    var def = KEYS[spec.key];
+    if (typeof spec.value !== 'number') {
+      return R.err('VALIDATION', 'giá trị cấu hình "' + spec.key + '" phải là số');
+    }
+    if (def.min !== null && spec.value < def.min) {
+      return R.err('VALIDATION', spec.key + ' phải >= ' + def.min);
+    }
+    if (def.max !== null && spec.value > def.max) {
+      return R.err('VALIDATION', spec.key + ' phải <= ' + def.max);
+    }
+
+    return registry.publish({
+      kind: VI.KINDS.config,
+      subjectId: spec.key,
+      storeId: spec.storeId,
+      effectiveFrom: spec.effectiveFrom,
+      publishedBy: spec.publishedBy,
+      payload: { key: spec.key, value: spec.value }
+    });
+  }
+
+  /**
+   * Giá trị có hiệu lực TẠI THỜI ĐIỂM SỰ KIỆN, rơi về mặc định nếu chưa ai đặt.
+   * Trả kèm `versionId` (null khi dùng mặc định) để nơi ghi kết quả lưu lại được.
+   */
+  function resolveConfigAt(registry, spec) {
+    if (!isKey(spec.key)) return R.err('VALIDATION', 'khoá cấu hình không hợp lệ: ' + spec.key);
+    var r = registry.resolveAt(VI.KINDS.config, spec.key, spec.storeId, spec.at);
+    if (R.isOk(r)) {
+      return R.ok({ key: spec.key, value: r.value.payload.value, versionId: r.value.versionId, isDefault: false });
+    }
+    return R.ok({ key: spec.key, value: KEYS[spec.key].default, versionId: null, isDefault: true });
+  }
+
+  /**
+   * KPI target theo TỪNG NGÀY — đóng instance #6.
+   *
+   * Legacy resolve target tại ngày cuối của cả khoảng báo cáo rồi áp cho toàn
+   * khoảng, nên mọi ngày còn lại đều bị so với target sai. Có hàm này thì
+   * không còn lý do làm vậy.
+   */
+  function resolveConfigDaily(registry, spec) {
+    if (!isKey(spec.key)) return R.err('VALIDATION', 'khoá cấu hình không hợp lệ: ' + spec.key);
+    var r = registry.resolveDaily(VI.KINDS.config, spec.key, spec.storeId, spec.fromTs, spec.toTs);
+    if (R.isOk(r)) return r;
+    /* Chưa ai đặt giá trị nào trong kỳ: dùng mặc định cho mọi ngày, và NÓI RÕ
+       là mặc định thay vì giả vờ có cấu hình. */
+    var out = {};
+    var clock = spec.clock;
+    clock.eachDay(spec.fromTs, spec.toTs).forEach(function (dateKey) {
+      out[dateKey] = {
+        dateKey: dateKey,
+        version: null,
+        value: KEYS[spec.key].default,
+        isDefault: true,
+        multipleVersionsInDay: false
+      };
+    });
+    return R.ok(out);
+  }
+
+  return {
+    KEYS: KEYS,
+    isKey: isKey,
+    publishConfig: publishConfig,
+    resolveConfigAt: resolveConfigAt,
+    resolveConfigDaily: resolveConfigDaily
+  };
+});
+
+/* ===== src/layers/finance/expense.js ===== */
+/**
+ * Expense — chi phí vận hành.
+ *
+ * FEATURE-TREE-V1.md §2 mục [7]: hard dep để POS ghi chi phí; phần còn lại của
+ * domain optional.
+ *
+ * Điểm cần đúng ngay từ đầu: chi phí ƯỚC TÍNH và chi phí THẬT phải phân biệt
+ * được. Chain-trace P&L cho thấy `chotSoThang()` chỉ cho chốt khi không còn
+ * chi phí "ước tính chờ số thật" — tức là khái niệm này ĐÃ tồn tại trong
+ * nghiệp vụ thật và là điều kiện chốt sổ, nên nó phải là field tường minh chứ
+ * không phải quy ước ngầm trong ghi chú.
+ */
+GIEO.define('finance/expense', [
+  'shared-kernel/ids',
+  'shared-kernel/result'
+], function (ids, R) {
+  'use strict';
+
+  var STATUS = {
+    /* Số ước tính, chờ hoá đơn thật — CHẶN chốt sổ tháng. */
+    ESTIMATED: 'ESTIMATED',
+    ACTUAL: 'ACTUAL',
+    PENDING_APPROVAL: 'PENDING_APPROVAL',
+    REJECTED: 'REJECTED'
+  };
+
+  /* Chi phí cố định phân bổ đều theo tháng vs biến phí theo phát sinh —
+     phân biệt vì P&L cần tách 2 loại. */
+  var NATURE = { FIXED: 'FIXED', VARIABLE: 'VARIABLE' };
+
+  function createExpense(spec) {
+    if (!spec) return R.err('VALIDATION', 'expense cần spec');
+    if (!ids.isId(spec.storeId, 'store')) return R.err('VALIDATION', 'expense cần storeId hợp lệ');
+    if (!ids.isId(spec.actorId, 'actor')) return R.err('VALIDATION', 'expense cần actorId — ai ghi khoản này');
+    if (!spec.categoryId) return R.err('VALIDATION', 'expense cần categoryId');
+    if (typeof spec.amount !== 'number' || !(spec.amount > 0)) {
+      return R.err('VALIDATION', 'số tiền phải dương');
+    }
+    if (!spec.businessDate) return R.err('VALIDATION', 'expense cần businessDate');
+    if (!STATUS[spec.status]) {
+      return R.err('VALIDATION',
+        'expense phải khai rõ status — ESTIMATED (chờ số thật) hay ACTUAL. ' +
+        'Không phân biệt được thì không biết tháng đã đủ điều kiện chốt sổ chưa.');
+    }
+    if (!NATURE[spec.nature]) return R.err('VALIDATION', "nature phải là FIXED hoặc VARIABLE");
+    if (!spec.operationId) return R.err('VALIDATION', 'expense cần operationId');
+
+    return R.ok({
+      expenseId: spec.expenseId || ids.newId('expense'),
+      storeId: spec.storeId,
+      categoryId: spec.categoryId,
+      amount: spec.amount,
+      nature: spec.nature,
+      status: spec.status,
+      businessDate: spec.businessDate,
+      occurredAt: spec.occurredAt || null,
+      actorId: spec.actorId,
+      paymentMethodId: spec.paymentMethodId || null,
+      note: spec.note || null,
+      operationId: spec.operationId,
+      revisions: []
+    });
+  }
+
+  /**
+   * Thay số ước tính bằng số thật.
+   * Append-only: giữ giá trị cũ để trả lời "trước đây ước bao nhiêu".
+   */
+  function settleEstimate(expense, spec) {
+    if (expense.status !== STATUS.ESTIMATED) {
+      return R.err('PRECONDITION', 'chỉ chốt được khoản đang ở trạng thái ước tính');
+    }
+    if (typeof spec.actualAmount !== 'number' || !(spec.actualAmount > 0)) {
+      return R.err('VALIDATION', 'số thật phải dương');
+    }
+    if (!ids.isId(spec.actorId, 'actor')) return R.err('VALIDATION', 'chốt số thật cần actorId');
+    if (!spec.operationId) return R.err('VALIDATION', 'chốt số thật cần operationId');
+
+    return R.ok(Object.assign({}, expense, {
+      amount: spec.actualAmount,
+      status: STATUS.ACTUAL,
+      revisions: expense.revisions.concat([{
+        operationId: spec.operationId,
+        actorId: spec.actorId,
+        at: spec.at || null,
+        from: { amount: expense.amount, status: expense.status },
+        to: { amount: spec.actualAmount, status: STATUS.ACTUAL },
+        reason: spec.reason || 'có hoá đơn thật'
+      }])
+    }));
+  }
+
+  /**
+   * Lý do CHẶN chốt sổ tháng — giữ nguyên điều kiện nghiệp vụ của legacy
+   * ("chỉ cho chốt khi tháng đã kết thúc VÀ không còn chi phí ước tính chờ số
+   * thật"), nhưng nêu rõ khoản nào thay vì chỉ báo không chốt được.
+   */
+  function closeBookBlockers(expenses) {
+    var blockers = [];
+    (expenses || []).forEach(function (e) {
+      if (e.status === STATUS.ESTIMATED) {
+        blockers.push('khoản "' + e.categoryId + '" (' + e.amount + ') còn là số ước tính, chờ hoá đơn thật');
+      }
+      if (e.status === STATUS.PENDING_APPROVAL) {
+        blockers.push('khoản "' + e.categoryId + '" (' + e.amount + ') chưa được duyệt');
+      }
+    });
+    return blockers;
+  }
+
+  /** Tổng theo loại — đầu vào của P&L. */
+  function summarize(expenses) {
+    var out = { fixed: 0, variable: 0, estimated: 0, actual: 0, total: 0, byCategory: {} };
+    (expenses || []).forEach(function (e) {
+      if (e.status === STATUS.REJECTED) return;
+      if (e.nature === NATURE.FIXED) out.fixed += e.amount; else out.variable += e.amount;
+      if (e.status === STATUS.ESTIMATED) out.estimated += e.amount; else out.actual += e.amount;
+      out.total += e.amount;
+      out.byCategory[e.categoryId] = (out.byCategory[e.categoryId] || 0) + e.amount;
+    });
+    return out;
+  }
+
+  return {
+    STATUS: STATUS,
+    NATURE: NATURE,
+    createExpense: createExpense,
+    settleEstimate: settleEstimate,
+    closeBookBlockers: closeBookBlockers,
+    summarize: summarize
+  };
+});
+
+/* ===== src/layers/alerts/alert.js ===== */
+/**
+ * AlertEngine — MỘT bộ máy cảnh báo, route theo (type, severity).
+ *
+ * Chuỗi thật: FIFO-CHAIN-TRACE-ALERTS-V1.md. Gap: FEATURE-TREE-V1.md §4.9, §4.17.
+ *
+ * Bốn vấn đề của legacy, đóng cả bốn:
+ *
+ * 1. SEVERITY GHI RỒI KHÔNG DÙNG (§2). Alert tự gắn `severity:'danger'` lúc tạo,
+ *    nhưng `computeStoreHealth()` chỉ switch theo `a.type`. Loại nào không nằm
+ *    trong 6 type đặt tên cứng thì rơi hết vào một bucket vàng chung "Cảnh báo
+ *    khác chưa xem" — kể cả loại đã tự gắn nhãn danger. Trường dữ liệu tồn tại
+ *    nhưng bị bỏ qua ở đúng bước quan trọng nhất là xếp hạng ưu tiên.
+ *
+ * 2. PUSH KHÔNG NHẤT QUÁN (§4). Hạn dùng chai/hũ đã mở được push đỏ; hạn dùng
+ *    lô BTP tính đúng nhưng bị chôn trong màn Tài chính. Cùng là "hàng đã mở
+ *    sắp hết hạn", một loại được báo chủ động, một loại phải tự tìm mới thấy.
+ *    Tồn thấp chỉ hiện ở QUANLY — nhân viên đứng bán KHÔNG được báo sắp hết
+ *    nguyên liệu. Ở đây `audience` là thuộc tính của LOẠI cảnh báo, quyết định
+ *    theo mức nghiêm trọng thật, không theo việc ai code trước.
+ *
+ * 3. "ĐÃ XEM" TẮT CẢNH BÁO Y HỆT "ĐÃ XỬ LÝ" (§6). Hệ thống không xác minh vấn
+ *    đề gốc đã được sửa trước khi ngừng nhắc. Ngoại lệ đúng duy nhất là FIFO
+ *    bell — cơ chế duy nhất tự xoá khi điều kiện THẬT SỰ hết. Ở đây pattern đó
+ *    thành mặc định cho mọi loại kiểm chứng được bằng dữ liệu.
+ *
+ * 4. 12/16 LOẠI RƠI VÀO KHUÔN UI CHUNG, mất nội dung chẩn đoán (§4.9). Ở đây
+ *    mỗi loại tự khai trường bắt buộc của nó.
+ */
+GIEO.define('alerts/alert', ['shared-kernel/ids', 'shared-kernel/result'], function (ids, R) {
+  'use strict';
+
+  var SEVERITY = { INFO: 'INFO', WARNING: 'WARNING', DANGER: 'DANGER' };
+  var SEVERITY_RANK = { INFO: 1, WARNING: 2, DANGER: 3 };
+
+  /* Ai cần thấy. Quyết định theo mức nghiêm trọng thật của vấn đề. */
+  var AUDIENCE = { POS: 'POS', QUANLY: 'QUANLY', BOTH: 'BOTH' };
+
+  var RESOLUTION = {
+    /* Tự xoá khi điều kiện hết — pattern của FIFO bell, giờ là mặc định. */
+    AUTO_VERIFIABLE: 'AUTO_VERIFIABLE',
+    /* Không kiểm chứng được bằng dữ liệu → phải link tới hành động đã sửa. */
+    MANUAL_WITH_REFERENCE: 'MANUAL_WITH_REFERENCE'
+  };
+
+  var STATUS = { NEW: 'NEW', SEEN: 'SEEN', RESOLVED: 'RESOLVED', AUTO_CLEARED: 'AUTO_CLEARED' };
+
+  /**
+   * Sổ đăng ký loại cảnh báo. Mỗi loại tự khai severity / audience / cách đóng
+   * / trường bắt buộc — không có khuôn chung nuốt mất nội dung chẩn đoán.
+   */
+  var TYPES = {
+    FIFO_UNIT_EXHAUSTED: {
+      severity: SEVERITY.WARNING, audience: AUDIENCE.POS,
+      resolution: RESOLUTION.AUTO_VERIFIABLE, required: ['unitId', 'itemId']
+    },
+    CONTAINER_EXPIRING: {
+      severity: SEVERITY.DANGER, audience: AUDIENCE.BOTH,
+      resolution: RESOLUTION.AUTO_VERIFIABLE, required: ['unitId', 'itemId', 'expiresAt']
+    },
+    /* Cùng mức với CONTAINER_EXPIRING — cùng là rủi ro an toàn thực phẩm và
+       vốn đọng. Legacy để loại này chôn trong màn Tài chính (§4). */
+    PREP_BATCH_EXPIRING: {
+      severity: SEVERITY.DANGER, audience: AUDIENCE.BOTH,
+      resolution: RESOLUTION.AUTO_VERIFIABLE, required: ['prepBatchId', 'itemId', 'expiresAt']
+    },
+    /* BOTH, không phải chỉ QUANLY — nhân viên đứng bán cần biết để báo khách. */
+    LOW_STOCK: {
+      severity: SEVERITY.WARNING, audience: AUDIENCE.BOTH,
+      resolution: RESOLUTION.AUTO_VERIFIABLE, required: ['itemId', 'currentStock', 'threshold']
+    },
+    STOCKOUT: {
+      severity: SEVERITY.DANGER, audience: AUDIENCE.BOTH,
+      resolution: RESOLUTION.AUTO_VERIFIABLE, required: ['itemId', 'menuItemIds']
+    },
+    UNIT_NEEDS_REVIEW: {
+      severity: SEVERITY.WARNING, audience: AUDIENCE.QUANLY,
+      resolution: RESOLUTION.MANUAL_WITH_REFERENCE, required: ['unitId', 'reasons']
+    },
+    CASH_VARIANCE: {
+      severity: SEVERITY.DANGER, audience: AUDIENCE.QUANLY,
+      resolution: RESOLUTION.MANUAL_WITH_REFERENCE, required: ['segmentId', 'variance']
+    },
+    STOCK_VARIANCE: {
+      severity: SEVERITY.WARNING, audience: AUDIENCE.QUANLY,
+      resolution: RESOLUTION.MANUAL_WITH_REFERENCE, required: ['itemId', 'projected', 'observed']
+    },
+    COGS_OVER_TARGET: {
+      severity: SEVERITY.WARNING, audience: AUDIENCE.QUANLY,
+      resolution: RESOLUTION.AUTO_VERIFIABLE, required: ['cogsPct', 'target', 'dateKey']
+    },
+    MISSING_RECIPE: {
+      severity: SEVERITY.DANGER, audience: AUDIENCE.BOTH,
+      resolution: RESOLUTION.AUTO_VERIFIABLE, required: ['menuItemId']
+    },
+    UNTRACKED_CONSUMPTION: {
+      severity: SEVERITY.DANGER, audience: AUDIENCE.QUANLY,
+      resolution: RESOLUTION.MANUAL_WITH_REFERENCE, required: ['itemId', 'qty']
+    },
+    LOYALTY_DRIFT: {
+      severity: SEVERITY.DANGER, audience: AUDIENCE.QUANLY,
+      resolution: RESOLUTION.MANUAL_WITH_REFERENCE, required: ['customerId', 'drift']
+    },
+    DRIFT_AFTER_CLOSING: {
+      severity: SEVERITY.DANGER, audience: AUDIENCE.QUANLY,
+      resolution: RESOLUTION.MANUAL_WITH_REFERENCE, required: ['period', 'frozen', 'live']
+    },
+    SNAPSHOT_VERIFY_FAILED: {
+      severity: SEVERITY.DANGER, audience: AUDIENCE.QUANLY,
+      resolution: RESOLUTION.MANUAL_WITH_REFERENCE, required: ['scope']
+    },
+    LOST_CONTAINER_PENDING: {
+      severity: SEVERITY.WARNING, audience: AUDIENCE.QUANLY,
+      resolution: RESOLUTION.AUTO_VERIFIABLE, required: ['unitId', 'lostReportId']
+    },
+    DAY_NOT_CLOSED: {
+      severity: SEVERITY.WARNING, audience: AUDIENCE.BOTH,
+      resolution: RESOLUTION.AUTO_VERIFIABLE, required: ['dateKey']
+    }
+  };
+
+  function isType(t) { return Object.prototype.hasOwnProperty.call(TYPES, t); }
+
+  function raise(spec) {
+    if (!spec || !isType(spec.type)) {
+      return R.err('VALIDATION', 'loại cảnh báo chưa đăng ký: ' + (spec && spec.type) +
+        ' — mọi loại phải khai severity/audience/cách đóng, không có khuôn chung');
+    }
+    if (!ids.isId(spec.storeId, 'store')) return R.err('VALIDATION', 'cảnh báo cần storeId hợp lệ');
+    if (!spec.businessDate) return R.err('VALIDATION', 'cảnh báo cần businessDate');
+
+    var def = TYPES[spec.type];
+    var data = spec.data || {};
+    for (var i = 0; i < def.required.length; i++) {
+      if (data[def.required[i]] === undefined || data[def.required[i]] === null) {
+        return R.err('VALIDATION',
+          'cảnh báo ' + spec.type + ' thiếu trường chẩn đoán bắt buộc "' + def.required[i] + '"');
+      }
+    }
+
+    return R.ok({
+      /* Id xác định theo (type, subject): cùng một vấn đề không sinh 20 cảnh báo. */
+      alertId: ids.deterministicId('alert', [spec.type, spec.storeId, spec.subjectKey || 'store']),
+      type: spec.type,
+      storeId: spec.storeId,
+      severity: def.severity,
+      audience: def.audience,
+      resolution: def.resolution,
+      status: STATUS.NEW,
+      subjectKey: spec.subjectKey || null,
+      data: data,
+      businessDate: spec.businessDate,
+      raisedAt: spec.at || null,
+      raisedByOperationId: spec.operationId || null,
+      seenAt: null, seenBy: null,
+      resolvedAt: null, resolvedBy: null, resolvedReferenceId: null,
+      autoClearedAt: null
+    });
+  }
+
+  /**
+   * Xếp hạng — đọc CẢ severity lẫn type.
+   *
+   * Đây là chỗ legacy sai: chỉ switch theo type nên alert `danger` không nằm
+   * trong danh sách cứng bị nuốt vào bucket vàng chung.
+   */
+  function rank(alerts, spec) {
+    spec = spec || {};
+    var audience = spec.audience;
+    return alerts
+      .filter(function (a) {
+        if (a.status === STATUS.RESOLVED || a.status === STATUS.AUTO_CLEARED) return false;
+        if (!audience) return true;
+        return a.audience === audience || a.audience === AUDIENCE.BOTH;
+      })
+      .slice()
+      .sort(function (a, b) {
+        var d = SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity];
+        if (d !== 0) return d;
+        /* Cùng mức thì cũ trước — việc tồn lâu không được lùi xuống cuối. */
+        if (a.raisedAt !== b.raisedAt) return (a.raisedAt || 0) - (b.raisedAt || 0);
+        return a.alertId < b.alertId ? -1 : 1;
+      });
+  }
+
+  /** Không có loại nào rơi vào bucket "khác" — mọi loại đều có nhà. */
+  function bucketize(alerts, spec) {
+    var ranked = rank(alerts, spec);
+    var out = { DANGER: [], WARNING: [], INFO: [] };
+    ranked.forEach(function (a) { out[a.severity].push(a); });
+    return out;
+  }
+
+  /**
+   * "Đã xem" — KHÔNG tắt push.
+   * Legacy để "Đã xem" tắt cảnh báo y hệt "Đã xử lý"; ở đây nó chỉ ghi nhận
+   * người đã nhìn thấy, vấn đề gốc vẫn còn nên vẫn còn hiện.
+   */
+  function markSeen(alert, spec) {
+    if (alert.status !== STATUS.NEW) return R.ok(alert);
+    if (!ids.isId(spec.actorId, 'actor')) return R.err('VALIDATION', 'markSeen cần actorId');
+    return R.ok(Object.assign({}, alert, {
+      status: STATUS.SEEN, seenAt: spec.at || null, seenBy: spec.actorId
+    }));
+  }
+
+  /**
+   * "Đã xử lý" — với loại không tự kiểm chứng được thì BẮT BUỘC link tới hành
+   * động đã sửa (ReviseState / ReverseTransaction / approval...). Không có link
+   * thì đó chỉ là bấm cho khuất mắt.
+   */
+  function resolve(alert, spec) {
+    if (alert.status === STATUS.RESOLVED || alert.status === STATUS.AUTO_CLEARED) {
+      return R.err('PRECONDITION', 'cảnh báo đã đóng');
+    }
+    if (!ids.isId(spec.actorId, 'actor')) return R.err('VALIDATION', 'resolve cần actorId');
+
+    if (alert.resolution === RESOLUTION.AUTO_VERIFIABLE) {
+      return R.err('PRECONDITION',
+        'loại "' + alert.type + '" tự đóng khi điều kiện thật sự hết — không đóng tay được. ' +
+        'Bấm tắt bằng tay là cách bỏ qua vấn đề gốc.');
+    }
+    if (!spec.referenceId) {
+      return R.err('VALIDATION',
+        'đóng cảnh báo "' + alert.type + '" phải kèm referenceId trỏ tới hành động đã sửa — ' +
+        'không có tham chiếu thì không chứng minh được vấn đề đã được xử lý');
+    }
+
+    return R.ok(Object.assign({}, alert, {
+      status: STATUS.RESOLVED,
+      resolvedAt: spec.at || null,
+      resolvedBy: spec.actorId,
+      resolvedReferenceId: spec.referenceId
+    }));
+  }
+
+  /**
+   * Quét lại: loại AUTO_VERIFIABLE nào không còn điều kiện thì tự đóng.
+   *
+   * Đây là pattern của FIFO bell — cơ chế DUY NHẤT của legacy tự xoá đúng khi
+   * điều kiện thật sự hết, thay vì chờ người bấm ẩn. Giờ là mặc định.
+   *
+   * @param spec.stillActiveKeys  danh sách subjectKey còn đang có vấn đề
+   */
+  function reconcile(alerts, spec) {
+    var active = Object.create(null);
+    (spec.stillActiveKeys || []).forEach(function (k) { active[k] = true; });
+
+    var cleared = [];
+    var next = alerts.map(function (a) {
+      if (a.resolution !== RESOLUTION.AUTO_VERIFIABLE) return a;
+      if (a.status === STATUS.RESOLVED || a.status === STATUS.AUTO_CLEARED) return a;
+      if (active[a.subjectKey]) return a;
+      var done = Object.assign({}, a, { status: STATUS.AUTO_CLEARED, autoClearedAt: spec.at || null });
+      cleared.push(done);
+      return done;
+    });
+
+    return R.ok({ alerts: next, cleared: cleared });
+  }
+
+  /**
+   * Kênh ngoài app (push OS / SMS / Zalo) là CHỖ NỐI SẴN (§6 luồng chuẩn).
+   * AlertEngine chỉ phát event; handler bên ngoài đăng ký sau, không phải sửa
+   * lại engine.
+   */
+  function toEvents(alerts) {
+    return alerts.map(function (a) {
+      return {
+        type: 'AlertRaised',
+        alertId: a.alertId,
+        alertType: a.type,
+        severity: a.severity,
+        audience: a.audience,
+        storeId: a.storeId,
+        businessDate: a.businessDate,
+        data: a.data
+      };
+    });
+  }
+
+  return {
+    SEVERITY: SEVERITY,
+    AUDIENCE: AUDIENCE,
+    RESOLUTION: RESOLUTION,
+    STATUS: STATUS,
+    TYPES: TYPES,
+    isType: isType,
+    raise: raise,
+    rank: rank,
+    bucketize: bucketize,
+    markSeen: markSeen,
+    resolve: resolve,
+    reconcile: reconcile,
+    toEvents: toEvents
+  };
+});
+
+/* ===== src/layers/read-layer/gateway.js ===== */
+/**
+ * Read gateway — CỔNG ĐỌC DUY NHẤT.
+ *
+ * Contract: UNIFIED-READ-LAYER-CONTRACT-V1.md.
+ *
+ * Ba invariant nặng nhất được cài vào chính cấu trúc, không phải bằng lời nhắc:
+ *
+ * R3 — MỘT canonical query, MỘT implementation. Legacy có 2 pipeline doanh thu
+ *      độc lập (POS tự tính, QUANLY tự tính) không đảm bảo khớp nhau. Ở đây cả
+ *      hai app gọi cùng một hàm, nên không tồn tại khả năng lệch.
+ *
+ * R5/§5 — PHÂN QUYỀN ĐỌC. Gap đã xác nhận: Reporting legacy có 0% phân quyền —
+ *      QUANLY dùng một tài khoản Firebase dùng chung nên mọi người thấy toàn bộ
+ *      P&L/COGS/khách hàng. Ở đây mọi API đăng ký quyền, và MẶC ĐỊNH ĐÓNG:
+ *      query chưa khai quyền thì bị từ chối.
+ *
+ * R8/§3 — COGS luôn 2 vế. Cấm tồn tại field tên `cogsActual` chứa theoretical.
+ */
+GIEO.define('read-layer/gateway', [
+  'shared-kernel/ids',
+  'shared-kernel/result',
+  'store-context/access',
+  'read-layer/merge-canonical',
+  'fifo-core/projection',
+  'traceability/trace'
+], function (ids, R, access, merge, projection, traceLib) {
+  'use strict';
+
+  /**
+   * Đăng ký query đọc. Đi qua CÙNG sổ quyền với command ghi — quyền đọc không
+   * phải hạng hai.
+   */
+  function registerQuery(name, spec) {
+    access.registerCommand(name, {
+      authority: spec.authority,
+      mutates: false,
+      sources: spec.sources,
+      crossStore: spec.crossStore
+    });
+    return name;
+  }
+
+  var Q = {
+    GetUnitTrace: registerQuery('GetUnitTrace', { authority: 'EXECUTE' }),
+    GetInventoryLevel: registerQuery('GetInventoryLevel', { authority: 'EXECUTE' }),
+    GetConsumption: registerQuery('GetConsumption', { authority: 'REVIEW_APPROVE_CORRECT' }),
+    /* Dữ liệu nhạy cảm mặc định KHÔNG thuộc tầng EXECUTE (quy tắc P3). */
+    GetRevenue: registerQuery('GetRevenue', { authority: 'REVIEW_APPROVE_CORRECT' }),
+    GetCOGS: registerQuery('GetCOGS', { authority: 'REVIEW_APPROVE_CORRECT' }),
+    GetPnL: registerQuery('GetPnL', { authority: 'MASTER_CONFIGURE' }),
+    GetCustomerReport: registerQuery('GetCustomerReport', { authority: 'MASTER_CONFIGURE' })
+  };
+
+  /** Cổng chung: quyền + storeId bắt buộc, trước khi chạm dữ liệu. */
+  function guard(queryName, ctx, spec) {
+    if (!ctx || !ctx.actor) return R.err('FORBIDDEN', 'không có context — mọi read phải biết ai đọc');
+    var storeId = (spec && spec.storeId) || ctx.storeId;
+    if (!ids.isId(storeId, 'store')) {
+      return R.err('VALIDATION', 'mọi query phải nêu rõ storeId (quy tắc P5)');
+    }
+    var auth = access.authorize(ctx.actor, queryName, storeId);
+    if (R.isErr(auth)) return auth;
+    return R.ok(storeId);
+  }
+
+  /** Vòng đời đầy đủ 1 Unit. */
+  function getUnitTrace(ctx, spec) {
+    var g = guard(Q.GetUnitTrace, ctx, spec);
+    if (R.isErr(g)) return g;
+    if (!ids.isId(spec.unitId, 'unit')) return R.err('VALIDATION', 'getUnitTrace cần unitId hợp lệ');
+
+    return merge.resolve({
+      snapshot: spec.snapshot,
+      computeLive: function () {
+        if (!spec.unit) return R.ok(null);
+        return traceLib.buildUnitTrace({
+          unit: spec.unit,
+          ledgerEntries: spec.ledgerEntries || [],
+          allocations: spec.allocations || []
+        });
+      },
+      legacy: spec.legacyTrace,
+      computedAt: ctx.clock.now()
+    });
+  }
+
+  /** Tồn kho hiện tại — công thức DUY NHẤT của fifo-core/projection. */
+  function getInventoryLevel(ctx, spec) {
+    var g = guard(Q.GetInventoryLevel, ctx, spec);
+    if (R.isErr(g)) return g;
+
+    return merge.resolve({
+      computeLive: function () {
+        var r = projection.computeCurrentStock({
+          units: spec.units || [],
+          untrackedBase: spec.untrackedBase || 0,
+          ledgerEntries: spec.ledgerEntries || []
+        });
+        return R.isErr(r) ? r : R.ok(r.value);
+      },
+      computedAt: ctx.clock.now()
+    });
+  }
+
+  /**
+   * Doanh thu — MỘT implementation cho cả POS lẫn QUANLY (R3).
+   * Trừ phí sàn để ra doanh thu thuần: đường ống legacy chưa từng nối.
+   */
+  function getRevenue(ctx, spec) {
+    var g = guard(Q.GetRevenue, ctx, spec);
+    if (R.isErr(g)) return g;
+
+    return merge.resolve({
+      snapshot: spec.snapshot,
+      cache: spec.cache,
+      computeLive: function () {
+        var bills = spec.bills || [];
+        var byChannel = {};
+        var gross = 0, fees = 0, net = 0, discounts = 0;
+
+        bills.forEach(function (b) {
+          gross += b.total;
+          fees += b.channelFee || 0;
+          net += b.netRevenue;
+          discounts += b.discountTotal || 0;
+          var k = b.channel ? b.channel.type : 'UNKNOWN';
+          if (!byChannel[k]) byChannel[k] = { gross: 0, fees: 0, net: 0, billCount: 0 };
+          byChannel[k].gross += b.total;
+          byChannel[k].fees += b.channelFee || 0;
+          byChannel[k].net += b.netRevenue;
+          byChannel[k].billCount += 1;
+        });
+
+        return R.ok({
+          billCount: bills.length,
+          grossRevenue: gross,
+          discountTotal: discounts,
+          channelFees: fees,
+          netRevenue: net,
+          /* Tách theo kênh — dữ liệu legacy đã có nhưng P&L chỉ 1 số tổng. */
+          byChannel: byChannel
+        });
+      },
+      computedAt: ctx.clock.now()
+    });
+  }
+
+  /**
+   * COGS — BẮT BUỘC 2 vế (§3, invariant R8).
+   *
+   * Cộng từ `bill.cogs` đã ghi lúc bán (V4: đọc versionId đã lưu, KHÔNG resolve
+   * lại). Bill nào thiếu vế actual thì tổng actual là null — không bù bằng
+   * theoretical để tổng trông đẹp.
+   */
+  function getCOGS(ctx, spec) {
+    var g = guard(Q.GetCOGS, ctx, spec);
+    if (R.isErr(g)) return g;
+
+    return merge.resolve({
+      snapshot: spec.snapshot,
+      cache: spec.cache,
+      computeLive: function () {
+        var bills = spec.bills || [];
+        var theoretical = 0;
+        var actual = 0;
+        var missingActual = [];
+        var versionIds = [];
+
+        bills.forEach(function (b) {
+          var c = b.cogs;
+          if (!c) { missingActual.push({ billId: b.billId, reason: 'NO_COGS' }); return; }
+          theoretical += c.cogsTheoretical;
+          if (c.cogsActual === null) {
+            missingActual.push({ billId: b.billId, reason: c.cogsActualReason || 'UNKNOWN' });
+          } else {
+            actual += c.cogsActual;
+          }
+          if (c.basis && c.basis.costBasisVersionIds) {
+            versionIds = versionIds.concat(c.basis.costBasisVersionIds);
+          }
+        });
+
+        var actualComplete = missingActual.length === 0 && bills.length > 0;
+        var cogsActual = actualComplete ? actual : null;
+
+        return R.ok({
+          cogsTheoretical: theoretical,
+          cogsActual: cogsActual,
+          cogsActualPartial: actualComplete ? null : actual,
+          variance: cogsActual === null ? null : cogsActual - theoretical,
+          variancePct: (cogsActual === null || theoretical === 0)
+            ? null : ((cogsActual - theoretical) / theoretical) * 100,
+          missingActual: missingActual,
+          basis: {
+            costBasisVersionIds: versionIds.filter(function (v, i, a) { return v && a.indexOf(v) === i; })
+          }
+        });
+      },
+      computedAt: ctx.clock.now()
+    });
+  }
+
+  /**
+   * P&L. Kỳ đã chốt → đọc thẳng snapshot, không tính lại (§3.1 compaction).
+   * `frozen` trong meta cho UI biết cột nào là số đóng băng (quy tắc T3).
+   */
+  function getPnL(ctx, spec) {
+    var g = guard(Q.GetPnL, ctx, spec);
+    if (R.isErr(g)) return g;
+
+    return merge.resolve({
+      snapshot: spec.closing,
+      computeLive: function () {
+        var rev = spec.revenue;
+        var cogs = spec.cogs;
+        var exp = spec.expenses;
+        if (!rev || !cogs) return R.ok(null);
+
+        var grossProfit = rev.netRevenue - (cogs.cogsActual !== null ? cogs.cogsActual : cogs.cogsTheoretical);
+        return R.ok({
+          netRevenue: rev.netRevenue,
+          cogsTheoretical: cogs.cogsTheoretical,
+          cogsActual: cogs.cogsActual,
+          /* Nói rõ lãi đang tính theo vế nào — legacy chỉ có 1 số nên không cần
+             nói, và cũng vì thế không ai biết nó là số gì. */
+          cogsBasisUsed: cogs.cogsActual !== null ? 'ACTUAL' : 'THEORETICAL',
+          grossProfit: grossProfit,
+          expenses: exp ? exp.total : 0,
+          fixedExpenses: exp ? exp.fixed : 0,
+          variableExpenses: exp ? exp.variable : 0,
+          netProfit: grossProfit - (exp ? exp.total : 0),
+          /* Còn khoản ước tính thì lãi này chưa phải số cuối. */
+          hasEstimatedExpenses: !!(exp && exp.estimated > 0)
+        });
+      },
+      computedAt: ctx.clock.now()
+    });
+  }
+
+  /**
+   * So sánh 2 kỳ — mỗi cột mang cờ `frozen` riêng (quy tắc T3).
+   * Legacy để cả 2 cột tính sống nên so sánh trôi theo thời gian.
+   */
+  function comparePeriods(ctx, spec) {
+    var g = guard(Q.GetPnL, ctx, spec);
+    if (R.isErr(g)) return g;
+    if (!spec.current || !spec.previous) {
+      return R.err('VALIDATION', 'so sánh kỳ cần cả 2 kỳ');
+    }
+    return R.ok({
+      current: { data: spec.current.data, frozen: spec.current.meta.frozen },
+      previous: { data: spec.previous.data, frozen: spec.previous.meta.frozen },
+      /* Cả 2 cột đều sống thì so sánh này sẽ đổi theo thời gian — nói ra. */
+      bothLive: !spec.current.meta.frozen && !spec.previous.meta.frozen
+    });
+  }
+
+  return {
+    QUERIES: Q,
+    registerQuery: registerQuery,
+    getUnitTrace: getUnitTrace,
+    getInventoryLevel: getInventoryLevel,
+    getRevenue: getRevenue,
+    getCOGS: getCOGS,
+    getPnL: getPnL,
+    comparePeriods: comparePeriods
+  };
+});
+
+/* ===== src/layers/read-layer/merge-canonical.js ===== */
+/**
+ * merge-canonical — NƠI DUY NHẤT biết cả LIVE lẫn COMPACT.
+ *
+ * Contract: UNIFIED-READ-LAYER-CONTRACT-V1.md §4, invariant R1/R2.
+ *
+ * Gate của Phase 7: không còn UI nào tự branch `if (còn raw) ... else đọc
+ * archive/compact`. Cách duy nhất bảo đảm điều đó là chỉ có đúng một nơi trong
+ * toàn hệ thống được phép biết có hai nguồn.
+ *
+ * Thứ tự resolve (§4.1):
+ *   1. SNAPSHOT (đã chốt/compacted)  → đọc thẳng, KHÔNG tính lại
+ *   2. CACHE (tính lại được)          → nếu còn hợp lệ
+ *   3. LIVE RAW                        → tính từ ledger/unit/bill
+ *   4. LEGACY                          → qua adapter, CHỈ ĐỌC
+ */
+GIEO.define('read-layer/merge-canonical', ['shared-kernel/result'], function (R) {
+  'use strict';
+
+  var SOURCE = { SNAPSHOT: 'SNAPSHOT', CACHE: 'CACHE', LIVE: 'LIVE', LEGACY: 'LEGACY' };
+
+  /**
+   * Bọc kết quả kèm metadata nguồn.
+   *
+   * `meta` để CHẨN ĐOÁN và hiển thị cờ — KHÔNG phải để UI branch logic theo
+   * nguồn (R1). UI đọc `data`, và `data` giống nhau bất kể đến từ đâu.
+   */
+  function wrap(data, meta) {
+    return R.ok({
+      data: data,
+      meta: {
+        sources: (meta && meta.sources) || [],
+        frozen: !!(meta && meta.frozen),
+        versionIds: (meta && meta.versionIds) || {},
+        ambiguous: (meta && meta.ambiguous) || [],
+        computedAt: (meta && meta.computedAt) || null
+      }
+    });
+  }
+
+  /**
+   * Chọn nguồn theo đúng thứ tự ưu tiên.
+   *
+   * @param spec.snapshot  kết quả đã đóng băng (nếu có)
+   * @param spec.cache     kết quả cache còn hợp lệ (nếu có)
+   * @param spec.computeLive  () => Result  — chỉ gọi khi cần
+   * @param spec.legacy    () => Result     — chỉ gọi khi live không có gì
+   */
+  function resolve(spec) {
+    if (spec.snapshot) {
+      /* Đã chốt thì ĐỌC THẲNG. "Con số chủ quán đã đọc và đã dùng để ra quyết
+         định thì không được đổi sau lưng." */
+      return wrap(spec.snapshot, {
+        sources: [SOURCE.SNAPSHOT], frozen: true,
+        versionIds: spec.snapshot.versionIds || {}, computedAt: spec.computedAt
+      });
+    }
+    if (spec.cache) {
+      return wrap(spec.cache, {
+        sources: [SOURCE.CACHE], frozen: false, computedAt: spec.computedAt
+      });
+    }
+
+    if (typeof spec.computeLive === 'function') {
+      var live = spec.computeLive();
+      if (R.isErr(live)) return live;
+      if (live.value !== null && live.value !== undefined) {
+        var sources = [SOURCE.LIVE];
+        var ambiguous = [];
+
+        /* Dữ liệu cũ không đủ nghĩa: đánh dấu AMBIGUOUS, KHÔNG suy đoán
+           (invariant #12). UI/report hiện "cần rà thủ công" thay vì im lặng
+           dựng số. */
+        if (typeof spec.legacy === 'function') {
+          var lg = spec.legacy();
+          if (R.isOk(lg) && lg.value) {
+            sources.push(SOURCE.LEGACY);
+            if (lg.value.ambiguous) ambiguous = ambiguous.concat(lg.value.ambiguous);
+          }
+        }
+        return wrap(live.value, {
+          sources: sources, frozen: false, ambiguous: ambiguous, computedAt: spec.computedAt
+        });
+      }
+    }
+
+    if (typeof spec.legacy === 'function') {
+      var only = spec.legacy();
+      if (R.isErr(only)) return only;
+      if (only.value) {
+        return wrap(only.value, {
+          sources: [SOURCE.LEGACY], frozen: false,
+          ambiguous: only.value.ambiguous || [], computedAt: spec.computedAt
+        });
+      }
+    }
+
+    return R.err('NOT_FOUND', 'không có nguồn nào trả được dữ liệu cho truy vấn này');
+  }
+
+  /**
+   * Cache invalidate THEO PHẠM VI, không xoá sạch (quy tắc K3).
+   *
+   * Legacy `clearSalesCache()`/`invalidateSalesCache()` xoá TOÀN BỘ cache mọi
+   * ngày mỗi khi đổi cấu hình ảnh hưởng giá vốn, rồi tính lại bằng version
+   * HIỆN TẠI — chính là instance #2/#3 của lớp lỗi versioning.
+   *
+   * Ở đây chỉ những ngày bị ảnh hưởng mới bị bỏ, và khi tính lại thì dùng
+   * version lịch sử của từng ngày nên kết quả GIỐNG HỆT kết quả cũ.
+   */
+  function invalidateScope(cacheKeys, spec) {
+    var from = spec.fromDateKey;
+    var to = spec.toDateKey;
+    if (!from || !to) return R.err('VALIDATION', 'invalidate cần phạm vi ngày — cấm xoá sạch cache');
+
+    var kept = [];
+    var dropped = [];
+    cacheKeys.forEach(function (k) {
+      var d = k.dateKey;
+      if (d >= from && d <= to && (!spec.storeId || k.storeId === spec.storeId)) dropped.push(k);
+      else kept.push(k);
+    });
+    return R.ok({ kept: kept, dropped: dropped });
+  }
+
+  return {
+    SOURCE: SOURCE,
+    wrap: wrap,
+    resolve: resolve,
+    invalidateScope: invalidateScope
+  };
+});
+
 /* ===== src/layers/commands/pipeline.js ===== */
 /**
  * Command pipeline — đường ghi DUY NHẤT của cả POS lẫn QUANLY.
@@ -5593,6 +6747,304 @@ GIEO.define('commands/shift', [
     closeDayBlockers: closeDayBlockers,
     CloseCashSegment: CloseCashSegment
   };
+});
+
+/* ===== src/layers/reporting/export-payload.js ===== */
+/**
+ * Export báo cáo ĐÃ ĐỊNH DẠNG.
+ *
+ * Gap (GIEO-REBUILD-HANDOFF-V2.md §4.2, FIFO-CHAIN-TRACE-REPORTING-V1.md §6):
+ * legacy không có export báo cáo nào, chỉ có dump JSON thô. Chain-trace nói rõ
+ * đây là 2 việc KHÁC NHAU và không thay thế nhau được:
+ *   - export báo cáo (CSV tối thiểu) — cho người đọc, cho kế toán
+ *   - trích xuất dữ liệu thô — cho phân tích, vẫn giữ riêng
+ *
+ * Mọi payload mang `computedAt` (§8) để UI luôn hiển thị được độ mới, và mang
+ * nhãn cơ sở giá / cờ đóng băng để người đọc biết con số này là gì.
+ */
+GIEO.define('reporting/export-payload', ['shared-kernel/result'], function (R) {
+  'use strict';
+
+  function esc(v) {
+    if (v === null || v === undefined) return '';
+    var s = String(v);
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+
+  /**
+   * CSV từ danh sách bản ghi + cột khai tường minh.
+   * Khai cột thay vì suy từ khoá object: thứ tự cột phải ổn định giữa các lần
+   * export, nếu không file tháng này và tháng sau không xếp cạnh nhau được.
+   */
+  function toCsv(spec) {
+    var columns = spec.columns;
+    if (!Array.isArray(columns) || columns.length === 0) {
+      return R.err('VALIDATION', 'export CSV phải khai cột — thứ tự cột suy từ object sẽ đổi giữa các lần');
+    }
+    var rows = spec.rows || [];
+    var out = [columns.map(function (c) { return esc(c.label); }).join(',')];
+
+    rows.forEach(function (r) {
+      out.push(columns.map(function (c) {
+        var v = typeof c.value === 'function' ? c.value(r) : r[c.key];
+        return esc(v);
+      }).join(','));
+    });
+
+    return R.ok(out.join('\n'));
+  }
+
+  /**
+   * Bọc 1 báo cáo để xuất ra.
+   * `meta` của read-layer được mang theo nguyên vẹn, nên file xuất ra nói được
+   * số này đến từ đâu và đã đóng băng chưa.
+   */
+  function buildExport(spec) {
+    if (!spec.title) return R.err('VALIDATION', 'export cần tiêu đề');
+    if (!spec.period) return R.err('VALIDATION', 'export cần kỳ báo cáo');
+
+    var meta = spec.meta || {};
+    var csv = toCsv({ columns: spec.columns, rows: spec.rows });
+    if (R.isErr(csv)) return csv;
+
+    return R.ok({
+      title: spec.title,
+      period: spec.period,
+      storeId: spec.storeId,
+      /* §8 — mọi payload mang computedAt, không tuỳ màn hình có hay không. */
+      computedAt: meta.computedAt || spec.computedAt || null,
+      frozen: !!meta.frozen,
+      sources: meta.sources || [],
+      /* Cơ sở giá đi kèm số, không nằm ở chú thích cuối trang. */
+      valuationBasis: spec.valuationBasis || null,
+      ambiguous: meta.ambiguous || [],
+      csv: csv.value,
+      rowCount: (spec.rows || []).length,
+      /* Cảnh báo dán ngay trên file, để người cầm file biết nó chưa chốt. */
+      notices: buildNotices(meta, spec)
+    });
+  }
+
+  function buildNotices(meta, spec) {
+    var n = [];
+    if (!meta.frozen) n.push('Số liệu chưa đóng băng — có thể đổi nếu dữ liệu gốc thay đổi.');
+    if (meta.ambiguous && meta.ambiguous.length) {
+      n.push(meta.ambiguous.length + ' mục dữ liệu cũ không đủ nghĩa, cần rà thủ công.');
+    }
+    if (spec.mixedBasis) n.push('Tổng trộn 2 cơ sở giá — xem nhãn từng dòng.');
+    if (spec.hasEstimatedExpenses) n.push('Còn chi phí ước tính chờ hoá đơn thật — lãi chưa phải số cuối.');
+    return n;
+  }
+
+  /**
+   * Trích xuất thô — GIỮ RIÊNG, không phải thay thế cho export báo cáo.
+   * Chain-trace §6 nói rõ 2 việc này tách biệt.
+   */
+  function rawExtract(spec) {
+    return R.ok({
+      kind: 'RAW_EXTRACT',
+      purpose: 'phân tích/AI — KHÔNG phải báo cáo cho người đọc',
+      storeId: spec.storeId,
+      period: spec.period,
+      computedAt: spec.computedAt || null,
+      data: spec.data || {}
+    });
+  }
+
+  return { toCsv: toCsv, buildExport: buildExport, rawExtract: rawExtract };
+});
+
+/* ===== src/layers/reporting/inventory-valuation.js ===== */
+/**
+ * Định giá tồn kho — dùng `Unit.costBasis` THẬT, không phải giá scalar gần nhất.
+ *
+ * Gap (GIEO-REBUILD-HANDOFF-V2.md §4.2, FIFO-CHAIN-TRACE-REPORTING-V1.md §4):
+ * legacy định giá tồn kho bằng giá gần nhất của mặt hàng, nên tồn gồm nhiều lô
+ * giá khác nhau vẫn bị quy về một giá — sai lệch càng lớn khi giá nhập biến động.
+ *
+ * Điểm thứ hai của §4 cũng quan trọng không kém: khi hiển thị cùng lúc 2 chỉ số
+ * dùng 2 CƠ SỞ GIÁ khác nhau (tồn kho hiện tại vs tiêu hao lịch sử), mỗi số
+ * phải mang nhãn cơ sở giá của chính nó. Legacy chỉ có chú thích nhỏ, nên người
+ * đọc dễ so hai số không cùng gốc. Ở đây `basis` là field của kết quả.
+ */
+GIEO.define('reporting/inventory-valuation', [
+  'shared-kernel/result'
+], function (R) {
+  'use strict';
+
+  var BASIS = {
+    /* Cộng theo giá vốn thật của từng lô còn tồn. */
+    FIFO_ACTUAL: 'FIFO_ACTUAL',
+    /* Chỉ dùng cho phần tồn KHÔNG có Unit đại diện, vì không có lô để hỏi giá. */
+    LATEST_COST: 'LATEST_COST'
+  };
+
+  /**
+   * Giá trị tồn kho theo từng lô.
+   *
+   * Phần `untracked` (tồn không có Unit) được tách riêng và ghi rõ nó dùng cơ
+   * sở giá khác — gộp vào tổng mà không nói là làm người đọc tưởng cả tổng đều
+   * là giá lô thật.
+   */
+  function valuate(spec) {
+    var units = spec.units || [];
+    var trackedValue = 0;
+    var trackedQty = 0;
+    var lines = [];
+
+    for (var i = 0; i < units.length; i++) {
+      var u = units[i];
+      if (u.status !== 'SEALED' && u.status !== 'OPEN' && u.status !== 'CONSUMING') continue;
+      var qty = u.status === 'SEALED' ? u.initialQty : u.remainingQty;
+      if (qty <= 0) continue;
+      if (!u.costBasis || typeof u.costBasis.unitCost !== 'number') {
+        return R.err('PRECONDITION',
+          'Unit ' + u.unitId + ' không có costBasis — không định giá được bằng giá lô thật',
+          { unitId: u.unitId });
+      }
+      var value = qty * u.costBasis.unitCost;
+      trackedValue += value;
+      trackedQty += qty;
+      lines.push({
+        unitId: u.unitId, itemId: u.itemId, qty: qty,
+        unitCost: u.costBasis.unitCost, value: value,
+        costBasisVersionId: u.costBasis.versionId
+      });
+    }
+
+    var untrackedQty = spec.untrackedBase || 0;
+    var untrackedValue = null;
+    if (untrackedQty > 0) {
+      if (typeof spec.latestUnitCost !== 'number') {
+        return R.err('NOT_FOUND',
+          'có ' + untrackedQty + ' tồn không gắn lô nhưng không biết giá gần nhất để định giá phần đó');
+      }
+      untrackedValue = untrackedQty * spec.latestUnitCost;
+    }
+
+    return R.ok({
+      tracked: { qty: trackedQty, value: trackedValue, basis: BASIS.FIFO_ACTUAL, lines: lines },
+      untracked: untrackedQty > 0
+        ? { qty: untrackedQty, value: untrackedValue, basis: BASIS.LATEST_COST, unitCost: spec.latestUnitCost }
+        : null,
+      totalQty: trackedQty + untrackedQty,
+      totalValue: trackedValue + (untrackedValue || 0),
+      /* Tổng trộn 2 cơ sở giá thì phải NÓI RA. */
+      mixedBasis: untrackedQty > 0,
+      computedAt: spec.computedAt || null
+    });
+  }
+
+  /**
+   * Nhãn cơ sở giá cho UI. §4 yêu cầu nhãn đi kèm từng số, không phải chú
+   * thích nhỏ ở cuối màn.
+   */
+  function describeBasis(basis) {
+    return basis === BASIS.FIFO_ACTUAL
+      ? 'giá vốn thật của từng lô còn tồn'
+      : 'giá nhập gần nhất (phần tồn không gắn lô)';
+  }
+
+  return { BASIS: BASIS, valuate: valuate, describeBasis: describeBasis };
+});
+
+/* ===== src/layers/reporting/variance-report.js ===== */
+/**
+ * Variance report — actual vs theoretical là CHỈ SỐ CHÍNH.
+ *
+ * FIFO-CHAIN-TRACE-SALES-COGS-PL-V1.md: "packages/reporting/variance-report
+ * phải hiển thị variance giữa 2 con số này làm chỉ số chính".
+ *
+ * Nguyên lý "Actual ≠ Theoretical" là nguyên lý trung tâm của Master Plan §10
+ * nhưng CHƯA TỪNG được lấp cho domain COGS — nguyên liệu thô có đối chiếu
+ * SỐ LƯỢNG (`thDoiChieu`), còn TIỀN thì không có gì để đối chiếu, vì chưa từng
+ * có vế actual. Báo cáo này là chỗ vế đó cuối cùng được dùng.
+ */
+GIEO.define('reporting/variance-report', ['shared-kernel/result'], function (R) {
+  'use strict';
+
+  var STATUS = { OK: 'OK', OVER: 'OVER', UNDER: 'UNDER', UNKNOWN: 'UNKNOWN' };
+
+  /**
+   * @param spec.cogs       kết quả read-layer.getCOGS (đã có 2 vế)
+   * @param spec.revenue    để tính tỉ lệ giá vốn
+   * @param spec.targetPct  ngưỡng cogsPct của kỳ (resolve theo NGÀY ở tầng trên)
+   * @param spec.tolerancePct
+   */
+  function build(spec) {
+    var c = spec.cogs;
+    if (!c) return R.err('VALIDATION', 'variance-report cần kết quả COGS');
+    var tol = typeof spec.tolerancePct === 'number' ? spec.tolerancePct : 5;
+
+    var status;
+    var message;
+    if (c.cogsActual === null) {
+      /* Không có vế actual thì KHÔNG có variance — nói thẳng, không lấy
+         theoretical so với chính nó rồi báo "khớp". */
+      status = STATUS.UNKNOWN;
+      message = 'chưa đủ dữ liệu lô để tính giá vốn thật' +
+        (c.missingActual && c.missingActual.length ? ' (' + c.missingActual.length + ' bill thiếu)' : '');
+    } else if (Math.abs(c.variancePct) <= tol) {
+      status = STATUS.OK;
+      message = 'giá vốn thật khớp định mức trong ngưỡng ' + tol + '%';
+    } else {
+      status = c.variance > 0 ? STATUS.OVER : STATUS.UNDER;
+      message = (c.variance > 0 ? 'tốn hơn' : 'ít hơn') + ' định mức ' +
+        Math.abs(c.variancePct).toFixed(1) + '%';
+    }
+
+    var netRevenue = spec.revenue ? spec.revenue.netRevenue : null;
+    function pct(v) {
+      return (v === null || !netRevenue) ? null : (v / netRevenue) * 100;
+    }
+
+    var actualPct = pct(c.cogsActual);
+    var overTarget = (typeof spec.targetPct === 'number' && actualPct !== null)
+      ? actualPct > spec.targetPct
+      : null;
+
+    return R.ok({
+      cogsTheoretical: c.cogsTheoretical,
+      cogsActual: c.cogsActual,
+      variance: c.variance,
+      variancePct: c.variancePct,
+      status: status,
+      message: message,
+      /* Hai nguyên nhân gốc mà legacy không phân biệt được vì chỉ có 1 số. */
+      possibleCauses: status === STATUS.OVER || status === STATUS.UNDER
+        ? ['định mức khai sai (dùng nhiều/ít hơn công thức)', 'giá lô nhập lệch giá đang khai']
+        : [],
+      cogsPctTheoretical: pct(c.cogsTheoretical),
+      cogsPctActual: actualPct,
+      targetPct: typeof spec.targetPct === 'number' ? spec.targetPct : null,
+      overTarget: overTarget,
+      missingActual: c.missingActual || []
+    });
+  }
+
+  /**
+   * Vượt ngưỡng thì sinh cảnh báo CHỦ ĐỘNG.
+   *
+   * Gap §6 chain-trace Sales: `cogsPct` legacy có so sánh thật nhưng chỉ hiện
+   * khi người TỰ mở tab Sức khoẻ — không ghi vào alerts, không chặn gì. Ở đây
+   * nó phát ra để alerts domain nhận.
+   */
+  function toAlerts(report, spec) {
+    if (!report.overTarget) return [];
+    return [{
+      type: 'COGS_OVER_TARGET',
+      storeId: spec.storeId,
+      businessDate: spec.businessDate,
+      subjectKey: 'cogs.' + spec.businessDate,
+      data: {
+        cogsPct: report.cogsPctActual,
+        target: report.targetPct,
+        dateKey: spec.businessDate
+      }
+    }];
+  }
+
+  return { STATUS: STATUS, build: build, toAlerts: toAlerts };
 });
 
 /* ===== src/apps/quanly/main.js ===== */

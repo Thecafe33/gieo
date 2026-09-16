@@ -74,14 +74,23 @@ Luật cứng: `apps` không bao giờ chạm thẳng `fifo-core` / `compaction`
 |---|---|
 | P0 Audit | ✅ xong (nhánh tài liệu) |
 | P1 Foundation | ✅ `shared-kernel` + `store-context` + `VersionedInput` |
-| `[0]` Identity | ✅ Employee + Shift + PayTerms versioned — 98 test pass |
-| `[2]` FIFO Core | ✅ Unit + Ledger + Projection + Allocation + Reconciliation — 188 test pass |
-| `[1]` Catalog | ✅ Menu + Category + Promotion + Packaging — 233 test pass |
-| `[3]` Sales | ✅ Bill + Recipe/Cost versioned + COGS 2 vế + pipeline — 275 test pass |
-| `[4]` Loyalty | ✅ Customer + LoyaltyLedger + Accrual — sổ cái thay field cộng dồn |
-| `[5]` Shift/Cash | ✅ Đoạn ca + đối soát két + blockingClose — 333 test pass |
-| `[6]` Payroll | ✅ Work schedule + ComputePayroll + PayrollClosing — 360 test pass |
-| `[7]`→`[9]` | ⬜ chưa bắt đầu |
+| `[0]` Identity | ✅ Employee + Shift + PayTerms versioned |
+| `[2]` FIFO Core | ✅ Unit + Ledger + Projection + Allocation + Reconciliation |
+| `[1]` Catalog | ✅ Menu + Category + Promotion + Packaging |
+| `[3]` Sales | ✅ Bill + Recipe/Cost versioned + COGS 2 vế + pipeline |
+| `[4]` Loyalty | ✅ Customer + LoyaltyLedger + Accrual |
+| `[5]` Shift/Cash | ✅ Đoạn ca + đối soát két + blockingClose |
+| `[6]` Payroll | ✅ Work schedule + ComputePayroll + PayrollClosing |
+| `[7]` Finance | ✅ Expense + Config versioned |
+| `[8]` Alerts | ✅ Route theo (type, severity), tự đóng khi điều kiện hết |
+| `[9]` Reporting | ✅ Định giá FIFO thật + variance + export CSV |
+| P4 Traceability | ✅ Trace 2 chiều + dependency registry |
+| P7 Read layer | ✅ Cổng đọc duy nhất, enforce quyền đọc |
+| P6 Compaction | 🔨 `VersionedInput` xong; snapshot/verifier/purge chưa |
+| P9-P10 UI | ⬜ chưa bắt đầu |
+| P12-P13 Shadow + Cutover | ⬜ chưa bắt đầu |
+
+**454 test pass, 41 module, 0 vi phạm import-direction.**
 
 Build order theo `FEATURE-TREE-V1.md` §3:
 `[0] Identity → [1] Catalog + [2] FIFO Core → [3] Sales → [4] Loyalty + [5] Shift + [6] Payroll → [7] Finance → [8] Alerts → [9] Reporting`

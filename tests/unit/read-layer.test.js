@@ -1,0 +1,343 @@
+/**
+ * P4 Traceability + P7 Unified Read Layer.
+ * Contract: UNIFIED-READ-LAYER-CONTRACT-V1.md.
+ */
+
+var _r = (function () {
+  var ids = GIEO.require('shared-kernel/ids');
+  return {
+    ids: ids,
+    T: GIEO.require('traceability/trace'),
+    G: GIEO.require('read-layer/gateway'),
+    MC: GIEO.require('read-layer/merge-canonical'),
+    U: GIEO.require('fifo-core/unit'),
+    ACCESS: GIEO.require('store-context/access'),
+    CTXL: GIEO.require('store-context/context'),
+    BD: GIEO.require('store-context/business-day'),
+    CLK: GIEO.require('shared-kernel/clock'),
+    STORE: ids.deterministicId('store', ['main']),
+    STORE_B: ids.deterministicId('store', ['b']),
+    ORG: ids.deterministicId('org', ['gieo']),
+    NV: ids.deterministicId('actor', ['nv01']),
+    QL: ids.deterministicId('actor', ['ql']),
+    BOSS: ids.deterministicId('actor', ['boss']),
+    SUA: ids.deterministicId('item', ['sua'])
+  };
+})();
+
+function rCtx(role, source, actorId) {
+  var day = assertOk(_r.BD.openDay({
+    storeId: _r.STORE, dateKey: '2026-03-10', actorId: _r.BOSS,
+    at: new Date(2026, 2, 10, 7).getTime(), clock: _r.CLK.createClock()
+  }));
+  var actor = assertOk(_r.ACCESS.createActor({
+    actorId: actorId || _r.NV, role: role || 'POS_OPERATOR',
+    source: source || 'POS', stores: [_r.STORE]
+  }));
+  return assertOk(_r.CTXL.createContext({
+    organizationId: _r.ORG, storeId: _r.STORE, actor: actor, source: source || 'POS', businessDay: day
+  }));
+}
+
+function fullUnit() {
+  var u = assertOk(_r.U.createUnit({
+    unitId: _r.ids.deterministicId('unit', ['u1']),
+    itemId: _r.SUA, storeId: _r.STORE, itemKind: 'raw', initialQty: 1000,
+    costBasis: { unitCost: 30, versionId: 'version_c1' },
+    receiptId: 'receipt_1', supplierId: 'supplier_a', receivedAt: 500, receivedBy: _r.NV,
+    operationId: 'operation_recv'
+  }));
+  return assertOk(_r.U.open(u, { at: 1000, actorId: _r.NV, operationId: 'operation_open' }));
+}
+
+describe('traceability/trace', function () {
+  var T = _r.T;
+
+  test('trace trả lời đủ bộ câu hỏi của HANDOFF §1.1', function () {
+    var tr = assertOk(T.buildUnitTrace({
+      unit: fullUnit(),
+      allocations: [{
+        unitId: _r.ids.deterministicId('unit', ['u1']), itemId: _r.SUA, qty: 200,
+        unitBaseBefore: 1000, unitBaseAfter: 800, unitCost: 30, cost: 6000,
+        operationId: 'operation_sale1', billId: _r.ids.deterministicId('bill', ['b1']),
+        recipeVersionIds: ['version_r1']
+      }]
+    }));
+    assert.deepStrictEqual(T.unanswered(tr), [], 'trace còn câu chưa trả lời được');
+    assert.strictEqual(tr.billIds.length, 1);
+    assert.deepStrictEqual(tr.recipeVersionIds, ['version_r1']);
+  });
+
+  test('nói rõ THIẾU câu nào thay vì chỉ báo không đủ', function () {
+    var u = Object.assign({}, fullUnit(), { supplierId: null, receiptId: null, openedBy: null });
+    var missing = T.unanswered(assertOk(T.buildUnitTrace({ unit: u })));
+    assert.ok(missing.indexOf('nhận từ đâu') !== -1);
+    assert.ok(missing.indexOf('ai mở') !== -1);
+  });
+
+  test('2 mốc hết hàng ĐỘC LẬP, không suy ra nhau', function () {
+    var u = Object.assign({}, fullUnit(), { systemExhaustedAt: 5000, finishedAt: 9000, finishedBy: _r.NV });
+    var tr = assertOk(T.buildUnitTrace({ unit: u }));
+    assert.strictEqual(tr.systemExhaustedAt, 5000);
+    assert.strictEqual(tr.physicallyFinished.at, 9000);
+  });
+
+  test('reverse trace: từ bill xuống các Unit đã gánh nó', function () {
+    var BILL = _r.ids.deterministicId('bill', ['b1']);
+    var tr = assertOk(T.buildBillTrace({
+      billId: BILL,
+      bill: { recipeVersionIds: ['version_r1'], soldByActorId: _r.NV },
+      allocations: [
+        { billId: BILL, unitId: 'unit_a', itemId: _r.SUA, qty: 100, cost: 3000 },
+        { billId: BILL, unitId: 'unit_a', itemId: _r.SUA, qty: 50, cost: 1500 },
+        { billId: BILL, unitId: 'unit_b', itemId: _r.SUA, qty: 50, cost: 2500 },
+        { billId: 'bill_khac', unitId: 'unit_c', itemId: _r.SUA, qty: 999, cost: 999 }
+      ]
+    }));
+    assert.strictEqual(tr.units.length, 2);
+    assert.strictEqual(tr.totalActualCost, 7000);
+    assert.strictEqual(tr.soldByActorId, _r.NV);
+  });
+
+  describe('TRACE_DEPENDENCY registry (invariant C6)', function () {
+    test('còn tham chiếu ACTIVE thì KHÔNG được purge', function () {
+      var reg = _r.T.createDependencyRegistry();
+      assertOk(reg.register({ sourceType: 'unit', sourceId: 'unit_a', referencedBy: [{ type: 'bill', id: 'b1' }] }));
+      assertErr(reg.canPurge('unit', 'unit_a'), 'PRECONDITION');
+    });
+
+    test('resolved hết thì purge được', function () {
+      var reg = _r.T.createDependencyRegistry();
+      assertOk(reg.register({ sourceType: 'unit', sourceId: 'unit_a' }));
+      assertOk(reg.resolveDep('unit', 'unit_a'));
+      assertOk(reg.canPurge('unit', 'unit_a'));
+    });
+
+    test('chưa từng đăng ký thì không có gì chặn', function () {
+      assertOk(_r.T.createDependencyRegistry().canPurge('unit', 'unit_x'));
+    });
+  });
+});
+
+describe('read-layer — phân quyền đọc (đóng gap 0% của Reporting)', function () {
+  var G = _r.G;
+
+  test('POS operator KHÔNG đọc được P&L', function () {
+    assertErr(G.getPnL(rCtx('POS_OPERATOR', 'POS'), { revenue: {}, cogs: {} }), 'FORBIDDEN');
+  });
+
+  test('POS operator KHÔNG đọc được COGS', function () {
+    assertErr(G.getCOGS(rCtx('POS_OPERATOR', 'POS'), { bills: [] }), 'FORBIDDEN');
+  });
+
+  test('POS operator ĐỌC ĐƯỢC tồn kho — cần cho việc bán hàng', function () {
+    assertOk(G.getInventoryLevel(rCtx('POS_OPERATOR', 'POS'), { units: [], untrackedBase: 100 }));
+  });
+
+  test('QUANLY admin đọc được P&L', function () {
+    assertOk(G.getPnL(rCtx('QUANLY_ADMIN', 'QUANLY', _r.QL), {
+      revenue: { netRevenue: 1000000 },
+      cogs: { cogsTheoretical: 300000, cogsActual: 310000 }
+    }));
+  });
+
+  test('QUANLY operator KHÔNG đọc được P&L (thiếu MASTER)', function () {
+    assertErr(G.getPnL(rCtx('QUANLY_OPERATOR', 'QUANLY', _r.QL), { revenue: {}, cogs: {} }), 'FORBIDDEN');
+  });
+
+  test('từ chối là FORBIDDEN tường minh, KHÔNG trả rỗng/0 (quy tắc P2)', function () {
+    var r = G.getCOGS(rCtx('POS_OPERATOR', 'POS'), { bills: [] });
+    assert.strictEqual(r.ok, false);
+    assert.strictEqual(r.error.kind, 'FORBIDDEN');
+    assert.strictEqual(r.value, undefined);
+  });
+
+  test('storeId bắt buộc trong mọi query (quy tắc P5)', function () {
+    var ctx = rCtx('QUANLY_ADMIN', 'QUANLY', _r.QL);
+    assertErr(G.getRevenue(ctx, { storeId: 'khong-phai-id', bills: [] }), 'VALIDATION');
+  });
+
+  test('không đọc được store ngoài phạm vi', function () {
+    assertErr(G.getRevenue(rCtx('QUANLY_ADMIN', 'QUANLY', _r.QL), {
+      storeId: _r.STORE_B, bills: []
+    }), 'FORBIDDEN');
+  });
+
+  test('query mới chưa khai quyền thì mặc định ĐÓNG', function () {
+    var ctx = rCtx('SYSTEM_ADMIN', 'SYSTEM', _r.BOSS);
+    assertErr(_r.ACCESS.authorize(ctx.actor, 'GetSomethingNew', _r.STORE), 'FORBIDDEN');
+  });
+});
+
+describe('read-layer — doanh thu MỘT implementation (R3)', function () {
+  var G = _r.G;
+
+  function bill(over) {
+    return Object.assign({
+      billId: _r.ids.newId('bill'), total: 100000, discountTotal: 0,
+      channelFee: 0, netRevenue: 100000, channel: { type: 'DINE_IN' }
+    }, over || {});
+  }
+
+  test('phí sàn được TRỪ khỏi doanh thu thuần', function () {
+    var out = assertOk(G.getRevenue(rCtx('QUANLY_ADMIN', 'QUANLY', _r.QL), {
+      bills: [bill(), bill({ channel: { type: 'APP', appName: 'X', feePct: 25 }, channelFee: 25000, netRevenue: 75000 })]
+    }));
+    assert.strictEqual(out.data.grossRevenue, 200000);
+    assert.strictEqual(out.data.channelFees, 25000);
+    assert.strictEqual(out.data.netRevenue, 175000);
+  });
+
+  test('tách theo kênh — legacy chỉ có 1 số tổng dù dữ liệu đã có', function () {
+    var out = assertOk(G.getRevenue(rCtx('QUANLY_ADMIN', 'QUANLY', _r.QL), {
+      bills: [bill(), bill({ channel: { type: 'TO_GO' } })]
+    }));
+    assert.strictEqual(out.data.byChannel.DINE_IN.billCount, 1);
+    assert.strictEqual(out.data.byChannel.TO_GO.billCount, 1);
+  });
+
+  test('POS và QUANLY gọi CÙNG một hàm nên không thể lệch', function () {
+    var bills = [bill()];
+    /* Cùng dữ liệu, cùng implementation — khác nhau chỉ là quyền. */
+    var ql = assertOk(G.getRevenue(rCtx('QUANLY_ADMIN', 'QUANLY', _r.QL), { bills: bills }));
+    var mgr = assertOk(G.getRevenue(rCtx('STORE_MANAGER', 'POS'), { bills: bills }));
+    assert.deepStrictEqual(ql.data, mgr.data);
+  });
+});
+
+describe('read-layer — COGS luôn 2 vế (§3, invariant R8)', function () {
+  var G = _r.G;
+  var ctx = function () { return rCtx('QUANLY_ADMIN', 'QUANLY', _r.QL); };
+
+  function billWith(theo, act, reason) {
+    return {
+      billId: _r.ids.newId('bill'),
+      cogs: {
+        cogsTheoretical: theo, cogsActual: act,
+        cogsActualReason: reason || null,
+        basis: { costBasisVersionIds: ['version_c1'] }
+      }
+    };
+  }
+
+  test('đủ dữ liệu thì có cả 2 vế và variance', function () {
+    var out = assertOk(G.getCOGS(ctx(), { bills: [billWith(9000, 9000), billWith(3000, 4000)] }));
+    assert.strictEqual(out.data.cogsTheoretical, 12000);
+    assert.strictEqual(out.data.cogsActual, 13000);
+    assert.strictEqual(out.data.variance, 1000);
+  });
+
+  test('1 bill thiếu vế actual → TỔNG actual là null, KHÔNG bù bằng theoretical', function () {
+    var out = assertOk(G.getCOGS(ctx(), { bills: [billWith(9000, 9000), billWith(3000, null, 'SHORTFALL')] }));
+    assert.strictEqual(out.data.cogsActual, null, 'theoretical bị bù vào cho tổng trông đẹp');
+    assert.strictEqual(out.data.variance, null);
+    assert.strictEqual(out.data.cogsActualPartial, 9000);
+    assert.strictEqual(out.data.missingActual[0].reason, 'SHORTFALL');
+  });
+
+  test('bill không có cogs thì báo, không im lặng bỏ qua', function () {
+    var out = assertOk(G.getCOGS(ctx(), { bills: [{ billId: _r.ids.newId('bill') }] }));
+    assert.strictEqual(out.data.missingActual[0].reason, 'NO_COGS');
+  });
+
+  test('P&L nói rõ lãi đang tính theo vế nào', function () {
+    var full = assertOk(G.getPnL(ctx(), {
+      revenue: { netRevenue: 1000000 },
+      cogs: { cogsTheoretical: 300000, cogsActual: 310000 },
+      expenses: { total: 200000, fixed: 150000, variable: 50000, estimated: 0 }
+    }));
+    assert.strictEqual(full.data.cogsBasisUsed, 'ACTUAL');
+    assert.strictEqual(full.data.netProfit, 1000000 - 310000 - 200000);
+
+    var partial = assertOk(G.getPnL(ctx(), {
+      revenue: { netRevenue: 1000000 },
+      cogs: { cogsTheoretical: 300000, cogsActual: null },
+      expenses: { total: 0, fixed: 0, variable: 0, estimated: 0 }
+    }));
+    assert.strictEqual(partial.data.cogsBasisUsed, 'THEORETICAL');
+  });
+
+  test('còn chi phí ước tính thì P&L nói rõ chưa phải số cuối', function () {
+    var out = assertOk(G.getPnL(ctx(), {
+      revenue: { netRevenue: 1000000 },
+      cogs: { cogsTheoretical: 300000, cogsActual: 300000 },
+      expenses: { total: 200000, fixed: 100000, variable: 100000, estimated: 50000 }
+    }));
+    assert.strictEqual(out.data.hasEstimatedExpenses, true);
+  });
+});
+
+describe('read-layer — nguồn và đóng băng', function () {
+  var G = _r.G;
+  var MC = _r.MC;
+  var ctx = function () { return rCtx('QUANLY_ADMIN', 'QUANLY', _r.QL); };
+
+  test('kỳ đã chốt → đọc thẳng snapshot, meta.frozen = true', function () {
+    var out = assertOk(G.getPnL(ctx(), { closing: { netProfit: 123456 } }));
+    assert.strictEqual(out.meta.frozen, true);
+    assert.deepStrictEqual(out.meta.sources, ['SNAPSHOT']);
+    assert.strictEqual(out.data.netProfit, 123456);
+  });
+
+  test('chưa chốt → tính sống, frozen = false', function () {
+    var out = assertOk(G.getPnL(ctx(), {
+      revenue: { netRevenue: 100 }, cogs: { cogsTheoretical: 10, cogsActual: 10 }
+    }));
+    assert.strictEqual(out.meta.frozen, false);
+    assert.deepStrictEqual(out.meta.sources, ['LIVE']);
+  });
+
+  test('so sánh 2 kỳ mang cờ frozen RIÊNG cho từng cột (quy tắc T3)', function () {
+    var frozen = assertOk(G.getPnL(ctx(), { closing: { netProfit: 100 } }));
+    var live = assertOk(G.getPnL(ctx(), {
+      revenue: { netRevenue: 200 }, cogs: { cogsTheoretical: 20, cogsActual: 20 }
+    }));
+    var cmp = assertOk(G.comparePeriods(ctx(), { previous: frozen, current: live }));
+    assert.strictEqual(cmp.previous.frozen, true);
+    assert.strictEqual(cmp.current.frozen, false);
+    assert.strictEqual(cmp.bothLive, false);
+  });
+
+  test('cả 2 cột đều sống thì NÓI RA — so sánh sẽ trôi theo thời gian', function () {
+    var a = assertOk(G.getPnL(ctx(), { revenue: { netRevenue: 1 }, cogs: { cogsTheoretical: 1, cogsActual: 1 } }));
+    var b = assertOk(G.getPnL(ctx(), { revenue: { netRevenue: 2 }, cogs: { cogsTheoretical: 1, cogsActual: 1 } }));
+    assert.strictEqual(assertOk(G.comparePeriods(ctx(), { previous: a, current: b })).bothLive, true);
+  });
+
+  test('UI không cần biết nguồn — data giống nhau bất kể đến từ đâu', function () {
+    var fromSnapshot = assertOk(G.getPnL(ctx(), { closing: { netProfit: 100 } }));
+    assert.ok(fromSnapshot.data.netProfit !== undefined);
+    assert.ok(fromSnapshot.meta.sources.length > 0);
+  });
+
+  describe('cache invalidate theo PHẠM VI, không xoá sạch (K3/K4)', function () {
+    var keys = [
+      { storeId: _r.STORE, dateKey: '2026-03-01' },
+      { storeId: _r.STORE, dateKey: '2026-03-10' },
+      { storeId: _r.STORE, dateKey: '2026-03-20' }
+    ];
+
+    test('chỉ bỏ ngày bị ảnh hưởng', function () {
+      var out = assertOk(MC.invalidateScope(keys, {
+        fromDateKey: '2026-03-10', toDateKey: '2026-03-10', storeId: _r.STORE
+      }));
+      assert.strictEqual(out.dropped.length, 1);
+      assert.strictEqual(out.kept.length, 2, 'xoá sạch cache — đúng lỗi clearSalesCache của legacy');
+    });
+
+    test('sửa/xoá bill cũ làm mất cache ĐÚNG ngày đó (K4)', function () {
+      var out = assertOk(MC.invalidateScope(keys, {
+        fromDateKey: '2026-03-01', toDateKey: '2026-03-01', storeId: _r.STORE
+      }));
+      assert.strictEqual(out.dropped[0].dateKey, '2026-03-01');
+    });
+
+    test('không nêu phạm vi thì TỪ CHỐI — cấm xoá sạch', function () {
+      assertErr(MC.invalidateScope(keys, {}), 'VALIDATION');
+    });
+  });
+
+  test('không nguồn nào trả được thì NOT_FOUND, không trả rỗng giả vờ thành công', function () {
+    assertErr(MC.resolve({ computeLive: function () { return GIEO.require('shared-kernel/result').ok(null); } }), 'NOT_FOUND');
+  });
+});
