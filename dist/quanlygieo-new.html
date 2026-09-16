@@ -67,11 +67,19 @@
   .approval-meta { color:var(--muted); font-size:13px; }
   .approval-list button { padding:9px 14px; border-radius:11px; color:#fff; background:var(--brand); font-weight:700; }
   .approval-list button[disabled] { opacity:.6; }
+  .report-sub { margin:26px 0 10px; font-size:14px; }
+  .report { width:100%; margin-top:4px; border-collapse:collapse; font-size:13px; }
+  .report th,.report td { padding:9px 10px; text-align:right; border-bottom:1px solid var(--line); }
+  .report th:first-child,.report td:first-child { text-align:left; }
+  .report th { color:var(--muted); font-weight:600; font-size:12px; }
+  .report td { font-variant-numeric:tabular-nums; }
   .notice.alerts { border-color:#f0caca; background:#fff1f1; color:#8e2f2f; }
   @media (max-width:700px) {
     .cart li { grid-template-columns:minmax(0,1fr) auto; row-gap:6px; }
     .cart-money { grid-column:1 / -1; text-align:left; }
     .approval-list li { grid-template-columns:1fr; }
+    .report { font-size:12px; }
+    .report th,.report td { padding:7px 6px; }
     .app-shell { padding:16px; }
     .workspace { grid-template-columns:1fr; }
     .side-nav { display:grid; grid-template-columns:repeat(4,1fr); overflow:auto; }
@@ -8515,7 +8523,11 @@ GIEO.define('read-layer/gateway', [
     GetPendingApprovals: registerQuery('GetPendingApprovals', { authority: 'REVIEW_APPROVE_CORRECT' })
   };
 
-  /** Cổng chung: quyền + storeId bắt buộc, trước khi chạm dữ liệu. */
+  /**
+   * Cổng chung: quyền + storeId bắt buộc, trước khi chạm dữ liệu.
+   * Được export ra dưới tên `guardRead` để tầng reporting dùng CHUNG đúng một
+   * cổng này — viết cổng thứ hai là cách phân quyền đọc trôi khỏi một chỗ.
+   */
   function guard(queryName, ctx, spec) {
     if (!ctx || !ctx.actor) return R.err('FORBIDDEN', 'không có context — mọi read phải biết ai đọc');
     var storeId = (spec && spec.storeId) || ctx.storeId;
@@ -8872,6 +8884,7 @@ GIEO.define('read-layer/gateway', [
   return {
     QUERIES: Q,
     registerQuery: registerQuery,
+    guardRead: guard,
     getUnitTrace: getUnitTrace,
     getMenu: getMenu,
     getInventoryLevel: getInventoryLevel,
@@ -11243,6 +11256,19 @@ GIEO.define('reporting/export-payload', ['shared-kernel/result'], function (R) {
     if (!Array.isArray(columns) || columns.length === 0) {
       return R.err('VALIDATION', 'export CSV phải khai cột — thứ tự cột suy từ object sẽ đổi giữa các lần');
     }
+    /* Cột phải khai {label, key} hoặc {label, value}. Nhận chuỗi trần thì header
+       sẽ là "undefined" và file vẫn xuất ra bình thường — đúng kiểu hỏng im lặng
+       mà không ai phát hiện cho tới khi mở file. */
+    var bad = columns.filter(function (c) {
+      return !c || typeof c !== 'object' || !c.label ||
+        (c.key === undefined && typeof c.value !== 'function');
+    });
+    if (bad.length) {
+      return R.err('VALIDATION',
+        'cột export phải là {label, key} hoặc {label, value}; ' + bad.length +
+        ' cột không hợp lệ — cột khai sai sẽ xuất ra file có header rỗng');
+    }
+
     var rows = spec.rows || [];
     var out = [columns.map(function (c) { return esc(c.label); }).join(',')];
 
@@ -11408,6 +11434,247 @@ GIEO.define('reporting/inventory-valuation', [
   }
 
   return { BASIS: BASIS, valuate: valuate, describeBasis: describeBasis };
+});
+
+/* ===== src/layers/reporting/report-queries.js ===== */
+/**
+ * Các báo cáo P11 dưới dạng QUERY đăng ký — §15 GIEO-SYSTEM-REBUILD-PLAN.md.
+ *
+ * Vì sao module này tồn tại: tầng `reporting` đã có sẵn định giá tồn, variance,
+ * BTP và export, nhưng không app nào với tới được vì chúng chưa bao giờ được
+ * đăng ký thành query. Một báo cáo không đăng ký thì hoặc là không dùng được,
+ * hoặc sẽ được dùng bằng cách đọc thẳng nguồn thô — và đọc thẳng nguồn thô đúng
+ * là thứ `LIVE + COMPACT → UNIFIED READ → REPORT` sinh ra để cấm.
+ *
+ * Mọi query ở đây đi qua ĐÚNG cổng quyền của read-layer (`guardRead`), không
+ * có sổ quyền thứ hai.
+ */
+GIEO.define('reporting/report-queries', [
+  'shared-kernel/result',
+  'read-layer/gateway',
+  'reporting/usage-report',
+  'reporting/inventory-valuation',
+  'reporting/variance-report',
+  'reporting/btp-report',
+  'reporting/export-payload'
+], function (R, gateway, usage, valuation, variance, btp, exportLib) {
+  'use strict';
+
+  /* Báo cáo quản trị: mặc định KHÔNG thuộc tầng EXECUTE. Người đứng bán không
+     cần đọc giá trị tồn kho hay tỉ lệ giá vốn để làm việc của mình. */
+  var Q = {
+    GetUsageReport: gateway.registerQuery('GetUsageReport', { authority: 'REVIEW_APPROVE_CORRECT' }),
+    GetLossReport: gateway.registerQuery('GetLossReport', { authority: 'REVIEW_APPROVE_CORRECT' }),
+    GetInventoryValuation: gateway.registerQuery('GetInventoryValuation', { authority: 'REVIEW_APPROVE_CORRECT' }),
+    GetVarianceReport: gateway.registerQuery('GetVarianceReport', { authority: 'REVIEW_APPROVE_CORRECT' }),
+    GetBTPReport: gateway.registerQuery('GetBTPReport', { authority: 'REVIEW_APPROVE_CORRECT' }),
+    /* Xuất file mang số ra ngoài hệ thống — để ở tầng cao nhất. */
+    ExportReport: gateway.registerQuery('ExportReport', { authority: 'MASTER_CONFIGURE' })
+  };
+
+  function wrap(data, ctx) {
+    return R.ok({
+      data: data,
+      meta: { sources: ['LIVE'], frozen: false, ambiguous: [], computedAt: ctx.clock.now() }
+    });
+  }
+
+  function getUsageReport(ctx, spec) {
+    var g = gateway.guardRead(Q.GetUsageReport, ctx, spec);
+    if (R.isErr(g)) return g;
+    var r = usage.build({ entries: spec.entries || [], itemNames: spec.itemNames });
+    return R.isErr(r) ? r : wrap(r.value, ctx);
+  }
+
+  function getLossReport(ctx, spec) {
+    var g = gateway.guardRead(Q.GetLossReport, ctx, spec);
+    if (R.isErr(g)) return g;
+    /* Cùng một lần đọc sổ với usage — không có đường đếm hao hụt thứ hai. */
+    var r = usage.build({ entries: spec.entries || [], itemNames: spec.itemNames });
+    if (R.isErr(r)) return r;
+    return wrap(usage.lossOnly(r.value), ctx);
+  }
+
+  function getInventoryValuation(ctx, spec) {
+    var g = gateway.guardRead(Q.GetInventoryValuation, ctx, spec);
+    if (R.isErr(g)) return g;
+    var r = valuation.valuate({
+      units: spec.units || [],
+      untrackedBase: spec.untrackedBase || 0,
+      latestCost: spec.latestCost
+    });
+    return R.isErr(r) ? r : wrap(r.value, ctx);
+  }
+
+  function getVarianceReport(ctx, spec) {
+    var g = gateway.guardRead(Q.GetVarianceReport, ctx, spec);
+    if (R.isErr(g)) return g;
+    var r = variance.build({
+      cogs: spec.cogs, revenue: spec.revenue,
+      targetPct: spec.targetPct, tolerancePct: spec.tolerancePct
+    });
+    return R.isErr(r) ? r : wrap(r.value, ctx);
+  }
+
+  function getBTPReport(ctx, spec) {
+    var g = gateway.guardRead(Q.GetBTPReport, ctx, spec);
+    if (R.isErr(g)) return g;
+    var r = btp.buildDaily({
+      batches: spec.batches || [],
+      consumption: spec.consumption || [],
+      waste: spec.waste || [],
+      dateKey: spec.dateKey
+    });
+    return R.isErr(r) ? r : wrap(r.value, ctx);
+  }
+
+  /**
+   * Xuất file. `meta` của báo cáo gốc đi kèm nguyên vẹn, nên file nói được số
+   * đến từ đâu và đã chốt hay chưa — không có file nào rời khỏi hệ thống mà
+   * không mang theo xuất xứ.
+   */
+  function exportReport(ctx, spec) {
+    var g = gateway.guardRead(Q.ExportReport, ctx, spec);
+    if (R.isErr(g)) return g;
+    if (!spec.meta) {
+      return R.err('VALIDATION',
+        'xuất báo cáo phải kèm meta của truy vấn gốc — file không mang xuất xứ là file không kiểm chứng được');
+    }
+    var r = exportLib.buildExport({
+      title: spec.title, period: spec.period, storeId: spec.storeId || ctx.storeId,
+      columns: spec.columns, rows: spec.rows, meta: spec.meta,
+      valuationBasis: spec.valuationBasis, computedAt: ctx.clock.now()
+    });
+    return R.isErr(r) ? r : R.ok({ data: r.value, meta: spec.meta });
+  }
+
+  return {
+    QUERIES: Q,
+    getUsageReport: getUsageReport,
+    getLossReport: getLossReport,
+    getInventoryValuation: getInventoryValuation,
+    getVarianceReport: getVarianceReport,
+    getBTPReport: getBTPReport,
+    exportReport: exportReport
+  };
+});
+
+/* ===== src/layers/reporting/usage-report.js ===== */
+/**
+ * Báo cáo Waste / Lost / Usage — P11 của GIEO-SYSTEM-REBUILD-PLAN.md §15.
+ *
+ * Ba báo cáo này là BA LÁT CẮT của cùng một cuốn sổ, nên ở đây là một module
+ * đọc ledger một lần rồi tách ra, không phải ba module cộng ba lần. Legacy có
+ * ba đường đếm hao hụt riêng và chúng không khớp nhau — chính là lớp lệch mà
+ * quy tắc R3 ("một canonical query, một implementation") sinh ra để chặn.
+ *
+ * Nguồn DUY NHẤT là ledger. Không đọc `currentStock`, không đọc bất kỳ ô tổng
+ * nào đã được cộng sẵn: ô tổng là projection, và projection sai thì báo cáo sai
+ * theo mà không ai biết.
+ */
+GIEO.define('reporting/usage-report', [
+  'shared-kernel/result'
+], function (R) {
+  'use strict';
+
+  /* Ánh xạ loại bút toán → cột báo cáo. Loại nào chưa khai thì được đếm riêng
+     chứ không im lặng bỏ qua — bỏ qua là cách một dòng hao hụt biến mất. */
+  var BUCKET = {
+    CONSUMPTION: 'consumed',
+    WASTE: 'waste',
+    LOST: 'lost',
+    FOUND: 'found',
+    ADJUSTMENT: 'adjustment',
+    REVERSAL: 'reversal',
+    RECEIVING: 'received',
+    TRANSFER: 'transfer'
+  };
+
+  var COLUMNS = [
+    'itemId', 'received', 'consumed', 'waste', 'lost', 'found',
+    'adjustment', 'reversal', 'net', 'untrackedQty'
+  ];
+
+  function emptyRow(itemId) {
+    return {
+      itemId: itemId,
+      received: 0, consumed: 0, waste: 0, lost: 0, found: 0,
+      adjustment: 0, reversal: 0, transfer: 0,
+      net: 0,
+      /* Phần không gắn được Unit để RIÊNG. Gộp vào tổng là cách legacy làm cho
+         "hao hụt" và "chưa ghi nhận được" trông giống hệt nhau. */
+      untrackedQty: 0,
+      unitIds: []
+    };
+  }
+
+  /**
+   * @param spec.entries     ledger entries trong kỳ (đã lọc theo store/kỳ ở tầng trên)
+   * @param spec.itemNames   {itemId: tên} — chỉ để hiển thị, không ảnh hưởng số
+   */
+  function build(spec) {
+    if (!spec || !Array.isArray(spec.entries)) {
+      return R.err('VALIDATION', 'usage-report cần mảng entries');
+    }
+    var names = spec.itemNames || {};
+    var byItem = Object.create(null);
+    var unknownTypes = [];
+
+    spec.entries.forEach(function (e) {
+      var col = BUCKET[e.type];
+      if (!col) {
+        unknownTypes.push(e.type);
+        return;
+      }
+      var row = byItem[e.itemId] || (byItem[e.itemId] = emptyRow(e.itemId));
+      /* Cột báo cáo là ĐỘ LỚN (hao bao nhiêu), `net` giữ dấu để đối chiếu được
+         với projection. Trộn hai thứ vào một cột là cách số liệu hết đọc được. */
+      row[col] += Math.abs(e.qtyDelta);
+      row.net += e.qtyDelta;
+      if (!e.unitId) row.untrackedQty += Math.abs(e.qtyDelta);
+      else if (row.unitIds.indexOf(e.unitId) === -1) row.unitIds.push(e.unitId);
+    });
+
+    var rows = Object.keys(byItem).sort().map(function (itemId) {
+      return Object.assign({ itemName: names[itemId] || null }, byItem[itemId]);
+    });
+
+    function totalOf(col) {
+      return rows.reduce(function (a, r) { return a + r[col]; }, 0);
+    }
+
+    return R.ok({
+      rows: rows,
+      totals: {
+        received: totalOf('received'),
+        consumed: totalOf('consumed'),
+        waste: totalOf('waste'),
+        lost: totalOf('lost'),
+        found: totalOf('found'),
+        adjustment: totalOf('adjustment'),
+        reversal: totalOf('reversal'),
+        net: totalOf('net'),
+        untrackedQty: totalOf('untrackedQty')
+      },
+      entryCount: spec.entries.length,
+      unknownTypes: unknownTypes.filter(function (v, i, a) { return a.indexOf(v) === i; })
+    });
+  }
+
+  /** Lát cắt hao hụt: chỉ những mặt hàng thật sự có waste/lost trong kỳ. */
+  function lossOnly(report) {
+    return {
+      rows: report.rows.filter(function (r) { return r.waste > 0 || r.lost > 0; }),
+      totalWaste: report.totals.waste,
+      totalLost: report.totals.lost,
+      /* Tìm thấy lại được trừ ra khỏi mất — nhưng hiện cả hai số, vì "mất 10 tìm
+         lại 10" khác hẳn "không mất gì". */
+      netLost: report.totals.lost - report.totals.found,
+      totalFound: report.totals.found
+    };
+  }
+
+  return { COLUMNS: COLUMNS, BUCKET: BUCKET, build: build, lossOnly: lossOnly };
 });
 
 /* ===== src/layers/reporting/variance-report.js ===== */
@@ -11596,14 +11863,25 @@ GIEO.define('bootstrap/legacy-data-source', [
   var NOT_WIRED = {
     GetAlerts: 'alerts là bảng của hệ thống mới, legacy không có nguồn tương đương',
     GetShiftStatus: 'ngày làm việc/ca ở legacy nằm rải nhiều path, chưa map canonical',
-    GetPendingApprovals: 'legacy không có hàng đợi duyệt — đây chính là gap Bug #12/#16'
+    GetPendingApprovals: 'legacy không có hàng đợi duyệt — đây chính là gap Bug #12/#16',
+    /* Ledger cũ chỉ tra được theo containerCode, KHÔNG theo khoảng ngày, nên
+       báo cáo kỳ chưa đọc được từ nguồn cũ. Nói ra, chứ không dựng báo cáo
+       rỗng trông như "kỳ này không hao hụt gì". */
+    GetUsageReport: 'ledger legacy chỉ tra theo containerCode, chưa tra được theo kỳ',
+    GetLossReport: 'ledger legacy chỉ tra theo containerCode, chưa tra được theo kỳ',
+    GetInventoryValuation: 'cần danh sách Unit đang mở toàn kho, legacy chưa có đường đọc theo lô',
+    GetBTPReport: 'mẻ BTP legacy chưa map canonical theo kỳ'
   };
 
   /* Caller tự mang dữ liệu canonical thì không cần nguồn legacy nữa. */
   var CANONICAL_KEYS = {
     GetAlerts: 'alerts',
     GetShiftStatus: 'businessDay',
-    GetPendingApprovals: 'pending'
+    GetPendingApprovals: 'pending',
+    GetUsageReport: 'entries',
+    GetLossReport: 'entries',
+    GetInventoryValuation: 'units',
+    GetBTPReport: 'batches'
   };
 
   function hasCanonicalInput(name, input) {
@@ -11701,8 +11979,9 @@ GIEO.define('bootstrap/runtime', [
   'commands/reversal',
   'commands/approval',
   'commands/shift',
-  'read-layer/gateway'
-], function (R, pipeline, sales, inventory, prep, reversal, approval, shift, reads) {
+  'read-layer/gateway',
+  'reporting/report-queries'
+], function (R, pipeline, sales, inventory, prep, reversal, approval, shift, reads, reports) {
   'use strict';
 
   var MODE = { READ_ONLY: 'READ_ONLY', SHADOW: 'SHADOW', WRITE: 'WRITE' };
@@ -11733,7 +12012,14 @@ GIEO.define('bootstrap/runtime', [
     ComparePeriods: reads.comparePeriods,
     GetShiftStatus: reads.getShiftStatus,
     GetAlerts: reads.getAlerts,
-    GetPendingApprovals: reads.getPendingApprovals
+    GetPendingApprovals: reads.getPendingApprovals,
+    /* P11 — báo cáo đi qua cùng cổng đọc, không có đường tắt về nguồn thô. */
+    GetUsageReport: reports.getUsageReport,
+    GetLossReport: reports.getLossReport,
+    GetInventoryValuation: reports.getInventoryValuation,
+    GetVarianceReport: reports.getVarianceReport,
+    GetBTPReport: reports.getBTPReport,
+    ExportReport: reports.exportReport
   };
 
   function createRuntime(spec) {
@@ -11864,6 +12150,16 @@ GIEO.define('app-quanly/controller', [
       getAlerts: function (input) { return read('GetAlerts', Object.assign({ audience: 'QUANLY' }, input || {})); },
       getShiftStatus: function (input) { return read('GetShiftStatus', input); },
       getPendingApprovals: function (input) { return read('GetPendingApprovals', input); },
+      getUsageReport: function (input) { return read('GetUsageReport', input); },
+      getLossReport: function (input) { return read('GetLossReport', input); },
+      getInventoryValuation: function (input) { return read('GetInventoryValuation', input); },
+      getVarianceReport: function (input) { return read('GetVarianceReport', input); },
+      getBTPReport: function (input) { return read('GetBTPReport', input); },
+      /**
+       * Xuất file. BẮT BUỘC truyền lại `meta` của truy vấn gốc — file rời khỏi
+       * hệ thống mà không mang xuất xứ thì không ai kiểm chứng lại được.
+       */
+      exportReport: function (input) { return read('ExportReport', input); },
       /**
        * Duyệt theo đúng command mà GetPendingApprovals đã gắn sẵn vào từng việc.
        * Màn hình KHÔNG tự tra bảng "loại này thì gọi gì" — tra bảng ở UI chính là
@@ -11924,7 +12220,11 @@ GIEO.define('app-quanly/main', [
     var alertView = view();
     var shiftView = view();
     var approvalView = view();
+    var usageView = view();
+    var valuationView = view();
+    var exportView = { busy: false, error: null, file: null };
     var approvalAction = { busy: null, error: null, done: null };
+    var lastPeriod = null;
 
     function errorBox(title, error) {
       return '<div class="result error"><strong>' + esc(title) + '</strong><span>' +
@@ -12064,10 +12364,60 @@ GIEO.define('app-quanly/main', [
         '</div>';
     }
 
+    function usageMarkup() {
+      if (usageView.loading) return '<div class="empty"><h3>Đang đọc hao hụt…</h3></div>';
+      if (usageView.error) return errorBox('Không đọc được hao hụt/tiêu thụ', usageView.error);
+      var u = usageView.data;
+      if (!u) return '';
+      if (!u.rows.length) return '<div class="result"><span>Kỳ này không có bút toán kho nào.</span></div>';
+      return '<h3 class="report-sub">Tiêu thụ · hao hụt · mất</h3>' +
+        '<table class="report"><thead><tr><th>Mặt hàng</th><th>Nhập</th><th>Dùng</th>' +
+        '<th>Hao</th><th>Mất</th><th>Chưa gắn lô</th></tr></thead><tbody>' +
+        u.rows.map(function (r) {
+          return '<tr><td>' + esc(r.itemName || r.itemId) + '</td><td>' + esc(r.received) +
+            '</td><td>' + esc(r.consumed) + '</td><td>' + esc(r.waste) + '</td><td>' +
+            /* Mất và tìm lại hiện cùng nhau: "mất 10 tìm lại 10" khác hẳn
+               "không mất gì", gộp lại là xoá mất một sự kiện có thật. */
+            esc(r.lost) + (r.found ? ' (tìm lại ' + esc(r.found) + ')' : '') +
+            '</td><td>' + esc(r.untrackedQty) + '</td></tr>';
+        }).join('') + '</tbody></table>' +
+        (u.unknownTypes.length
+          ? '<div class="result error"><strong>Có loại bút toán chưa khai</strong><span>' +
+            esc(u.unknownTypes.join(', ')) + ' — số của các dòng này KHÔNG nằm trong bảng trên.</span></div>'
+          : '');
+    }
+
+    function valuationMarkup() {
+      if (valuationView.loading) return '<div class="empty"><h3>Đang định giá tồn…</h3></div>';
+      if (valuationView.error) return errorBox('Không định giá được tồn kho', valuationView.error);
+      var v = valuationView.data;
+      if (!v) return '';
+      return '<h3 class="report-sub">Giá trị tồn kho</h3><div class="metric-grid">' +
+        metric('Giá trị theo lô thật', money(v.trackedValue)) +
+        metric('Số lượng có lô', v.trackedQty) +
+        /* Phần không có lô dùng cơ sở giá KHÁC — nói ra ngay cạnh số, không để
+           dưới chú thích cuối trang. */
+        metric('Tồn chưa gắn lô', v.untrackedQty) +
+        metric('Giá trị phần chưa gắn lô',
+          v.untrackedValue === null ? 'Không định giá được' : money(v.untrackedValue)) +
+        '</div>';
+    }
+
+    function exportMarkup() {
+      if (exportView.busy) return '<div class="result"><span>Đang dựng file…</span></div>';
+      if (exportView.error) return errorBox('Không xuất được báo cáo', exportView.error);
+      if (!exportView.file) return '';
+      return '<div class="result"><strong>Đã dựng file ' + esc(exportView.file.title) + '</strong>' +
+        '<span>' + esc(exportView.file.rowCount) + ' dòng · kỳ ' + esc(exportView.file.period) + '</span>' +
+        exportView.file.notices.map(function (n) { return '<span>' + esc(n) + '</span>'; }).join('') +
+        '</div>';
+    }
+
     function reportsScreen() {
       var r = reportView.data;
       return '<section class="panel"><div class="section-head"><div><p class="eyebrow">Sổ sách</p>' +
-        '<h2>Doanh thu · COGS · P&amp;L</h2></div>' + frozenTag(reportView) + '</div>' +
+        '<h2>Doanh thu · COGS · P&amp;L</h2></div>' + frozenTag(reportView) +
+        '<button id="ql-export"' + (usageView.data ? '' : ' disabled') + '>Xuất báo cáo</button></div>' +
         '<form class="search-row" id="revenue-search"><input type="date" name="date" required>' +
         '<button>Đọc báo cáo</button></form>' +
         (reportView.loading ? '<div class="empty"><h3>Đang đọc báo cáo…</h3></div>' :
@@ -12078,7 +12428,7 @@ GIEO.define('app-quanly/main', [
             metric('Phí kênh', r ? money(r.channelFees) : '—') +
             metric('Giảm giá', r ? money(r.discountTotal) : '—') +
           '</div>') +
-        cogsMarkup() + pnlMarkup() + '</section>';
+        cogsMarkup() + pnlMarkup() + usageMarkup() + valuationMarkup() + exportMarkup() + '</section>';
     }
 
     function content(screen) {
@@ -12114,8 +12464,18 @@ GIEO.define('app-quanly/main', [
       cogsView = { loading: true, error: null, data: null };
       pnlView = { loading: true, error: null, data: null };
       render();
+      usageView = { loading: true, error: null, data: null };
+      valuationView = { loading: true, error: null, data: null };
+      exportView = { busy: false, error: null, file: null };
+      lastPeriod = businessDate;
       var revenue = controller.getRevenue({ businessDate: businessDate });
       var cogs = controller.getCOGS({ businessDate: businessDate });
+      controller.getUsageReport({ businessDate: businessDate }).then(function (out) {
+        usageView = applyRead(out); render();
+      });
+      controller.getInventoryValuation({ businessDate: businessDate }).then(function (out) {
+        valuationView = applyRead(out); render();
+      });
       revenue.then(function (out) { reportView = applyRead(out); render(); });
       cogs.then(function (out) { cogsView = applyRead(out); render(); });
       Promise.all([revenue, cogs]).then(function (both) {
@@ -12161,6 +12521,35 @@ GIEO.define('app-quanly/main', [
       if (revenueForm) revenueForm.addEventListener('submit', function (event) {
         event.preventDefault();
         loadReports(revenueForm.elements.date.value);
+      });
+
+      var exportBtn = el.querySelector('#ql-export');
+      if (exportBtn) exportBtn.addEventListener('click', function () {
+        if (!usageView.data) return;
+        exportView = { busy: true, error: null, file: null };
+        render();
+        controller.exportReport({
+          title: 'Tiêu thụ và hao hụt',
+          period: lastPeriod,
+          columns: [
+            { key: 'itemId', label: 'Mặt hàng' },
+            { key: 'received', label: 'Nhập' },
+            { key: 'consumed', label: 'Dùng' },
+            { key: 'waste', label: 'Hao' },
+            { key: 'lost', label: 'Mất' },
+            { key: 'found', label: 'Tìm lại' },
+            { key: 'untrackedQty', label: 'Chưa gắn lô' }
+          ],
+          rows: usageView.data.rows,
+          /* meta của chính truy vấn đã dựng ra các dòng này — không bịa một meta
+             mới, vì meta là thứ nói file đến từ đâu. */
+          meta: usageView.meta
+        }).then(function (out) {
+          exportView = R.isErr(out)
+            ? { busy: false, error: out.error, file: null }
+            : { busy: false, error: null, file: out.value.data };
+          render();
+        });
       });
 
       Array.prototype.forEach.call(el.querySelectorAll('[data-approve]'), function (button) {

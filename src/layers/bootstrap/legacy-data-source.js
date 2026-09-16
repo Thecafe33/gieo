@@ -11,14 +11,25 @@ GIEO.define('bootstrap/legacy-data-source', [
   var NOT_WIRED = {
     GetAlerts: 'alerts là bảng của hệ thống mới, legacy không có nguồn tương đương',
     GetShiftStatus: 'ngày làm việc/ca ở legacy nằm rải nhiều path, chưa map canonical',
-    GetPendingApprovals: 'legacy không có hàng đợi duyệt — đây chính là gap Bug #12/#16'
+    GetPendingApprovals: 'legacy không có hàng đợi duyệt — đây chính là gap Bug #12/#16',
+    /* Ledger cũ chỉ tra được theo containerCode, KHÔNG theo khoảng ngày, nên
+       báo cáo kỳ chưa đọc được từ nguồn cũ. Nói ra, chứ không dựng báo cáo
+       rỗng trông như "kỳ này không hao hụt gì". */
+    GetUsageReport: 'ledger legacy chỉ tra theo containerCode, chưa tra được theo kỳ',
+    GetLossReport: 'ledger legacy chỉ tra theo containerCode, chưa tra được theo kỳ',
+    GetInventoryValuation: 'cần danh sách Unit đang mở toàn kho, legacy chưa có đường đọc theo lô',
+    GetBTPReport: 'mẻ BTP legacy chưa map canonical theo kỳ'
   };
 
   /* Caller tự mang dữ liệu canonical thì không cần nguồn legacy nữa. */
   var CANONICAL_KEYS = {
     GetAlerts: 'alerts',
     GetShiftStatus: 'businessDay',
-    GetPendingApprovals: 'pending'
+    GetPendingApprovals: 'pending',
+    GetUsageReport: 'entries',
+    GetLossReport: 'entries',
+    GetInventoryValuation: 'units',
+    GetBTPReport: 'batches'
   };
 
   function hasCanonicalInput(name, input) {

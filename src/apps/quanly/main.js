@@ -34,7 +34,11 @@ GIEO.define('app-quanly/main', [
     var alertView = view();
     var shiftView = view();
     var approvalView = view();
+    var usageView = view();
+    var valuationView = view();
+    var exportView = { busy: false, error: null, file: null };
     var approvalAction = { busy: null, error: null, done: null };
+    var lastPeriod = null;
 
     function errorBox(title, error) {
       return '<div class="result error"><strong>' + esc(title) + '</strong><span>' +
@@ -174,10 +178,60 @@ GIEO.define('app-quanly/main', [
         '</div>';
     }
 
+    function usageMarkup() {
+      if (usageView.loading) return '<div class="empty"><h3>Đang đọc hao hụt…</h3></div>';
+      if (usageView.error) return errorBox('Không đọc được hao hụt/tiêu thụ', usageView.error);
+      var u = usageView.data;
+      if (!u) return '';
+      if (!u.rows.length) return '<div class="result"><span>Kỳ này không có bút toán kho nào.</span></div>';
+      return '<h3 class="report-sub">Tiêu thụ · hao hụt · mất</h3>' +
+        '<table class="report"><thead><tr><th>Mặt hàng</th><th>Nhập</th><th>Dùng</th>' +
+        '<th>Hao</th><th>Mất</th><th>Chưa gắn lô</th></tr></thead><tbody>' +
+        u.rows.map(function (r) {
+          return '<tr><td>' + esc(r.itemName || r.itemId) + '</td><td>' + esc(r.received) +
+            '</td><td>' + esc(r.consumed) + '</td><td>' + esc(r.waste) + '</td><td>' +
+            /* Mất và tìm lại hiện cùng nhau: "mất 10 tìm lại 10" khác hẳn
+               "không mất gì", gộp lại là xoá mất một sự kiện có thật. */
+            esc(r.lost) + (r.found ? ' (tìm lại ' + esc(r.found) + ')' : '') +
+            '</td><td>' + esc(r.untrackedQty) + '</td></tr>';
+        }).join('') + '</tbody></table>' +
+        (u.unknownTypes.length
+          ? '<div class="result error"><strong>Có loại bút toán chưa khai</strong><span>' +
+            esc(u.unknownTypes.join(', ')) + ' — số của các dòng này KHÔNG nằm trong bảng trên.</span></div>'
+          : '');
+    }
+
+    function valuationMarkup() {
+      if (valuationView.loading) return '<div class="empty"><h3>Đang định giá tồn…</h3></div>';
+      if (valuationView.error) return errorBox('Không định giá được tồn kho', valuationView.error);
+      var v = valuationView.data;
+      if (!v) return '';
+      return '<h3 class="report-sub">Giá trị tồn kho</h3><div class="metric-grid">' +
+        metric('Giá trị theo lô thật', money(v.trackedValue)) +
+        metric('Số lượng có lô', v.trackedQty) +
+        /* Phần không có lô dùng cơ sở giá KHÁC — nói ra ngay cạnh số, không để
+           dưới chú thích cuối trang. */
+        metric('Tồn chưa gắn lô', v.untrackedQty) +
+        metric('Giá trị phần chưa gắn lô',
+          v.untrackedValue === null ? 'Không định giá được' : money(v.untrackedValue)) +
+        '</div>';
+    }
+
+    function exportMarkup() {
+      if (exportView.busy) return '<div class="result"><span>Đang dựng file…</span></div>';
+      if (exportView.error) return errorBox('Không xuất được báo cáo', exportView.error);
+      if (!exportView.file) return '';
+      return '<div class="result"><strong>Đã dựng file ' + esc(exportView.file.title) + '</strong>' +
+        '<span>' + esc(exportView.file.rowCount) + ' dòng · kỳ ' + esc(exportView.file.period) + '</span>' +
+        exportView.file.notices.map(function (n) { return '<span>' + esc(n) + '</span>'; }).join('') +
+        '</div>';
+    }
+
     function reportsScreen() {
       var r = reportView.data;
       return '<section class="panel"><div class="section-head"><div><p class="eyebrow">Sổ sách</p>' +
-        '<h2>Doanh thu · COGS · P&amp;L</h2></div>' + frozenTag(reportView) + '</div>' +
+        '<h2>Doanh thu · COGS · P&amp;L</h2></div>' + frozenTag(reportView) +
+        '<button id="ql-export"' + (usageView.data ? '' : ' disabled') + '>Xuất báo cáo</button></div>' +
         '<form class="search-row" id="revenue-search"><input type="date" name="date" required>' +
         '<button>Đọc báo cáo</button></form>' +
         (reportView.loading ? '<div class="empty"><h3>Đang đọc báo cáo…</h3></div>' :
@@ -188,7 +242,7 @@ GIEO.define('app-quanly/main', [
             metric('Phí kênh', r ? money(r.channelFees) : '—') +
             metric('Giảm giá', r ? money(r.discountTotal) : '—') +
           '</div>') +
-        cogsMarkup() + pnlMarkup() + '</section>';
+        cogsMarkup() + pnlMarkup() + usageMarkup() + valuationMarkup() + exportMarkup() + '</section>';
     }
 
     function content(screen) {
@@ -224,8 +278,18 @@ GIEO.define('app-quanly/main', [
       cogsView = { loading: true, error: null, data: null };
       pnlView = { loading: true, error: null, data: null };
       render();
+      usageView = { loading: true, error: null, data: null };
+      valuationView = { loading: true, error: null, data: null };
+      exportView = { busy: false, error: null, file: null };
+      lastPeriod = businessDate;
       var revenue = controller.getRevenue({ businessDate: businessDate });
       var cogs = controller.getCOGS({ businessDate: businessDate });
+      controller.getUsageReport({ businessDate: businessDate }).then(function (out) {
+        usageView = applyRead(out); render();
+      });
+      controller.getInventoryValuation({ businessDate: businessDate }).then(function (out) {
+        valuationView = applyRead(out); render();
+      });
       revenue.then(function (out) { reportView = applyRead(out); render(); });
       cogs.then(function (out) { cogsView = applyRead(out); render(); });
       Promise.all([revenue, cogs]).then(function (both) {
@@ -271,6 +335,35 @@ GIEO.define('app-quanly/main', [
       if (revenueForm) revenueForm.addEventListener('submit', function (event) {
         event.preventDefault();
         loadReports(revenueForm.elements.date.value);
+      });
+
+      var exportBtn = el.querySelector('#ql-export');
+      if (exportBtn) exportBtn.addEventListener('click', function () {
+        if (!usageView.data) return;
+        exportView = { busy: true, error: null, file: null };
+        render();
+        controller.exportReport({
+          title: 'Tiêu thụ và hao hụt',
+          period: lastPeriod,
+          columns: [
+            { key: 'itemId', label: 'Mặt hàng' },
+            { key: 'received', label: 'Nhập' },
+            { key: 'consumed', label: 'Dùng' },
+            { key: 'waste', label: 'Hao' },
+            { key: 'lost', label: 'Mất' },
+            { key: 'found', label: 'Tìm lại' },
+            { key: 'untrackedQty', label: 'Chưa gắn lô' }
+          ],
+          rows: usageView.data.rows,
+          /* meta của chính truy vấn đã dựng ra các dòng này — không bịa một meta
+             mới, vì meta là thứ nói file đến từ đâu. */
+          meta: usageView.meta
+        }).then(function (out) {
+          exportView = R.isErr(out)
+            ? { busy: false, error: out.error, file: null }
+            : { busy: false, error: null, file: out.value.data };
+          render();
+        });
       });
 
       Array.prototype.forEach.call(el.querySelectorAll('[data-approve]'), function (button) {

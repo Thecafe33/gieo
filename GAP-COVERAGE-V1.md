@@ -132,4 +132,12 @@
 | P9 / P10 | Thin shell/controller + legacy read port + Firebase SDK read bridge đã xong ở READ_ONLY; Catalog realtime POS và báo cáo doanh thu đã nối qua query gateway; còn cấp Firebase config/handles thật và hoàn thiện các màn nghiệp vụ còn lại |
 | P12 / P13 | Shadow comparison + cutover |
 
+P11 đã nối: `reporting` trước đó có 4 module nhưng KHÔNG app nào với tới được vì
+chúng chưa từng được đăng ký thành query — một báo cáo không đăng ký thì hoặc
+không dùng được, hoặc sẽ bị dùng bằng cách đọc thẳng nguồn thô. Nay có
+`reporting/report-queries` đăng ký qua đúng sổ quyền của read-layer, cộng
+`reporting/usage-report` (Waste/Lost/Usage là ba lát cắt của MỘT lần đọc sổ,
+không phải ba đường đếm riêng như legacy). Store comparison / ALL_STORES vẫn chỉ
+chừa chỗ theo quyết định single-store đã chốt.
+
 P6 đã hoàn tất: Unit/Book snapshot append-only theo revision, verifier, lifecycle, drift alert, correction giữ v1/tạo v2, unified read, archive registry tập trung không trần 60 ngày và purge safety gate. Race hoàn đơn đồng thời là release gate bắt buộc đã có test 1-winner/1-commit; gate này phải tiếp tục xanh trước P12/P13.

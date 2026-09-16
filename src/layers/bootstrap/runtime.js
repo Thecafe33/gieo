@@ -8,8 +8,9 @@ GIEO.define('bootstrap/runtime', [
   'commands/reversal',
   'commands/approval',
   'commands/shift',
-  'read-layer/gateway'
-], function (R, pipeline, sales, inventory, prep, reversal, approval, shift, reads) {
+  'read-layer/gateway',
+  'reporting/report-queries'
+], function (R, pipeline, sales, inventory, prep, reversal, approval, shift, reads, reports) {
   'use strict';
 
   var MODE = { READ_ONLY: 'READ_ONLY', SHADOW: 'SHADOW', WRITE: 'WRITE' };
@@ -40,7 +41,14 @@ GIEO.define('bootstrap/runtime', [
     ComparePeriods: reads.comparePeriods,
     GetShiftStatus: reads.getShiftStatus,
     GetAlerts: reads.getAlerts,
-    GetPendingApprovals: reads.getPendingApprovals
+    GetPendingApprovals: reads.getPendingApprovals,
+    /* P11 — báo cáo đi qua cùng cổng đọc, không có đường tắt về nguồn thô. */
+    GetUsageReport: reports.getUsageReport,
+    GetLossReport: reports.getLossReport,
+    GetInventoryValuation: reports.getInventoryValuation,
+    GetVarianceReport: reports.getVarianceReport,
+    GetBTPReport: reports.getBTPReport,
+    ExportReport: reports.exportReport
   };
 
   function createRuntime(spec) {

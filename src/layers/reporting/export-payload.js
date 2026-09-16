@@ -29,6 +29,19 @@ GIEO.define('reporting/export-payload', ['shared-kernel/result'], function (R) {
     if (!Array.isArray(columns) || columns.length === 0) {
       return R.err('VALIDATION', 'export CSV phải khai cột — thứ tự cột suy từ object sẽ đổi giữa các lần');
     }
+    /* Cột phải khai {label, key} hoặc {label, value}. Nhận chuỗi trần thì header
+       sẽ là "undefined" và file vẫn xuất ra bình thường — đúng kiểu hỏng im lặng
+       mà không ai phát hiện cho tới khi mở file. */
+    var bad = columns.filter(function (c) {
+      return !c || typeof c !== 'object' || !c.label ||
+        (c.key === undefined && typeof c.value !== 'function');
+    });
+    if (bad.length) {
+      return R.err('VALIDATION',
+        'cột export phải là {label, key} hoặc {label, value}; ' + bad.length +
+        ' cột không hợp lệ — cột khai sai sẽ xuất ra file có header rỗng');
+    }
+
     var rows = spec.rows || [];
     var out = [columns.map(function (c) { return esc(c.label); }).join(',')];
 

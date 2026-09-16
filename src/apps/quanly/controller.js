@@ -41,6 +41,16 @@ GIEO.define('app-quanly/controller', [
       getAlerts: function (input) { return read('GetAlerts', Object.assign({ audience: 'QUANLY' }, input || {})); },
       getShiftStatus: function (input) { return read('GetShiftStatus', input); },
       getPendingApprovals: function (input) { return read('GetPendingApprovals', input); },
+      getUsageReport: function (input) { return read('GetUsageReport', input); },
+      getLossReport: function (input) { return read('GetLossReport', input); },
+      getInventoryValuation: function (input) { return read('GetInventoryValuation', input); },
+      getVarianceReport: function (input) { return read('GetVarianceReport', input); },
+      getBTPReport: function (input) { return read('GetBTPReport', input); },
+      /**
+       * Xuất file. BẮT BUỘC truyền lại `meta` của truy vấn gốc — file rời khỏi
+       * hệ thống mà không mang xuất xứ thì không ai kiểm chứng lại được.
+       */
+      exportReport: function (input) { return read('ExportReport', input); },
       /**
        * Duyệt theo đúng command mà GetPendingApprovals đã gắn sẵn vào từng việc.
        * Màn hình KHÔNG tự tra bảng "loại này thì gọi gì" — tra bảng ở UI chính là

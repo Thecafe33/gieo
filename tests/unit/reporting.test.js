@@ -243,3 +243,65 @@ describe('reporting/export-payload — export ĐÃ ĐỊNH DẠNG (fix §6, lega
     assert.ok(/KHÔNG phải báo cáo/.test(raw.purpose));
   });
 });
+
+describe('P11 — usage / waste / lost từ MỘT lần đọc sổ', function () {
+  var U = GIEO.require('reporting/usage-report');
+  var ids = GIEO.require('shared-kernel/ids');
+  var SUA = ids.deterministicId('item', ['sua']);
+  var DUONG = ids.deterministicId('item', ['duong']);
+  var U1 = ids.deterministicId('unit', ['u1']);
+
+  function e(type, itemId, qtyDelta, unitId) {
+    return { entryId: type + itemId + qtyDelta, type: type, itemId: itemId, qtyDelta: qtyDelta, unitId: unitId || null };
+  }
+
+  test('tách đúng cột, net giữ dấu còn cột hao là độ lớn', function () {
+    var r = assertOk(U.build({ entries: [
+      e('RECEIVING', SUA, 1000, U1),
+      e('CONSUMPTION', SUA, -300, U1),
+      e('WASTE', SUA, -50, U1)
+    ] }));
+    var row = r.rows[0];
+    assert.strictEqual(row.received, 1000);
+    assert.strictEqual(row.consumed, 300);
+    assert.strictEqual(row.waste, 50);
+    assert.strictEqual(row.net, 650);
+  });
+
+  test('phần không gắn được Unit để RIÊNG, không lẫn vào hao hụt', function () {
+    var r = assertOk(U.build({ entries: [
+      e('CONSUMPTION', SUA, -100, U1),
+      e('CONSUMPTION', SUA, -40, null)
+    ] }));
+    assert.strictEqual(r.rows[0].consumed, 140);
+    assert.strictEqual(r.rows[0].untrackedQty, 40);
+    assert.strictEqual(r.rows[0].waste, 0);
+  });
+
+  test('loại bút toán chưa khai được BÁO RA, không im lặng bỏ qua', function () {
+    var r = assertOk(U.build({ entries: [e('MOT_LOAI_LA', SUA, -10, U1)] }));
+    assert.deepStrictEqual(r.unknownTypes, ['MOT_LOAI_LA']);
+    assert.strictEqual(r.rows.length, 0);
+  });
+
+  test('mất và tìm lại hiện cùng nhau, không triệt tiêu thành 0', function () {
+    var r = assertOk(U.build({ entries: [
+      e('LOST', SUA, -200, U1),
+      e('FOUND', SUA, 200, U1)
+    ] }));
+    var loss = U.lossOnly(r);
+    assert.strictEqual(loss.totalLost, 200);
+    assert.strictEqual(loss.totalFound, 200);
+    assert.strictEqual(loss.netLost, 0);
+    assert.strictEqual(loss.rows.length, 1, 'mặt hàng từng mất phải còn trong danh sách');
+  });
+
+  test('nhiều mặt hàng tách dòng, tổng cộng đúng', function () {
+    var r = assertOk(U.build({ entries: [
+      e('WASTE', SUA, -50, U1),
+      e('WASTE', DUONG, -20, U1)
+    ] }));
+    assert.strictEqual(r.rows.length, 2);
+    assert.strictEqual(r.totals.waste, 70);
+  });
+});

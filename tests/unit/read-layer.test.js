@@ -450,3 +450,64 @@ describe('P9/P10 — query cho màn Ca / Cảnh báo / Duyệt', function () {
     });
   });
 });
+
+describe('P11 — báo cáo là query có quyền, không phải đường tắt về nguồn thô', function () {
+  var RQ = GIEO.require('reporting/report-queries');
+  var U1 = _r.ids.deterministicId('unit', ['u1']);
+
+  function boss() { return rCtx('QUANLY_ADMIN', 'QUANLY', _r.BOSS); }
+  function entry(type, qtyDelta, unitId) {
+    return { entryId: type + qtyDelta, type: type, itemId: _r.SUA, qtyDelta: qtyDelta, unitId: unitId || null };
+  }
+
+  test('nhân viên POS không đọc được báo cáo hao hụt hay giá trị tồn', function () {
+    assertErr(RQ.getUsageReport(rCtx(), { entries: [] }), 'FORBIDDEN');
+    assertErr(RQ.getInventoryValuation(rCtx(), { units: [] }), 'FORBIDDEN');
+  });
+
+  test('xuất file là tầng quyền cao nhất — quản lý thường không xuất được', function () {
+    var manager = rCtx('QUANLY_OPERATOR', 'QUANLY', _r.QL);
+    assertErr(RQ.exportReport(manager, {
+      title: 'x', period: '2026-03-10', columns: [{ key: 'a', label: 'A' }], rows: [], meta: {}
+    }), 'FORBIDDEN');
+  });
+
+  test('báo cáo trả kèm meta, đúng khuôn của mọi query đọc', function () {
+    var out = assertOk(RQ.getUsageReport(boss(), {
+      entries: [entry('WASTE', -50, U1)]
+    }));
+    assert.strictEqual(out.data.totals.waste, 50);
+    assert.ok(out.meta.computedAt, 'thiếu computedAt');
+    assert.strictEqual(out.meta.frozen, false);
+  });
+
+  test('xuất file KHÔNG có meta gốc thì bị từ chối', function () {
+    assertErr(RQ.exportReport(boss(), {
+      title: 'Hao hụt', period: '2026-03-10', columns: [{ key: 'itemId', label: 'Mặt hàng' }], rows: []
+    }), 'VALIDATION');
+  });
+
+  test('xuất file mang theo xuất xứ và cảnh báo chưa chốt', function () {
+    var usage = assertOk(RQ.getUsageReport(boss(), { entries: [entry('WASTE', -50, U1)] }));
+    var out = assertOk(RQ.exportReport(boss(), {
+      title: 'Hao hụt', period: '2026-03-10',
+      columns: [{ key: 'itemId', label: 'Mặt hàng' }, { key: 'waste', label: 'Hao' }],
+      rows: usage.data.rows, meta: usage.meta
+    }));
+    assert.strictEqual(out.data.frozen, false);
+    assert.ok(out.data.notices.length > 0, 'file chưa chốt phải có cảnh báo dán kèm');
+    assert.ok(/Mặt hàng,Hao/.test(out.data.csv), out.data.csv);
+  });
+
+  test('cột export khai sai bị TỪ CHỐI, không xuất file header rỗng', function () {
+    assertErr(RQ.exportReport(boss(), {
+      title: 'Hao hụt', period: '2026-03-10', columns: ['itemId'], rows: [], meta: {}
+    }), 'VALIDATION');
+  });
+
+  test('định giá tồn từ chối Unit không có costBasis, không quy về giá gần nhất', function () {
+    var u = fullUnit();
+    var broken = Object.assign({}, u, { costBasis: null });
+    assertErr(RQ.getInventoryValuation(boss(), { units: [broken] }), 'PRECONDITION');
+  });
+});

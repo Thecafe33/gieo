@@ -16,8 +16,8 @@ Hệ thống production cũ vẫn là sole writer; code mới chưa được ph�
 
 ## Kiểm chứng
 
-- `679/679` test pass.
-- `69` module, `0` vi phạm import-direction.
+- `691/691` test pass.
+- `71` module, `0` vi phạm import-direction.
 - Build thành công `dist/posgieo-new.html` và `dist/quanlygieo-new.html`.
 
 ## Bổ sung ở lượt này — hoàn thiện màn P9/P10 còn lại
@@ -54,6 +54,29 @@ Hai điểm đáng ghi:
 `src/layer-rules.json` thêm `read-layer → alerts` kèm ghi chú lý do: R1 buộc mọi
 đường đọc đi qua read-layer, và dùng lại `bucketize` để không viết bản thứ hai
 của thứ tự ưu tiên cảnh báo (vi phạm R3).
+
+## Bổ sung ở lượt này — P11 Reporting
+
+Tầng `reporting` đã có 4 module từ trước nhưng runtime chỉ mở cổng `read-layer`,
+nên không app nào với tới được. Đã nối:
+
+- `reporting/report-queries` — đăng ký `GetUsageReport`, `GetLossReport`,
+  `GetInventoryValuation`, `GetVarianceReport`, `GetBTPReport`, `ExportReport`
+  qua ĐÚNG sổ quyền của read-layer (`guardRead`), không có sổ quyền thứ hai.
+  Xuất file để ở tầng `MASTER_CONFIGURE`.
+- `reporting/usage-report` — Waste / Lost / Usage là ba lát cắt của MỘT lần đọc
+  ledger. Legacy có ba đường đếm hao hụt riêng và chúng không khớp nhau.
+  Mất và tìm-lại hiện cùng nhau; phần không gắn được Unit để riêng.
+- QUANLY màn Báo cáo: thêm bảng tiêu thụ/hao hụt, giá trị tồn kho, và nút xuất
+  file. File bắt buộc mang `meta` của chính truy vấn đã dựng ra các dòng đó.
+
+Test lại bắt được một lỗi thật: `export-payload.toCsv` nhận cột dạng chuỗi trần
+rồi sinh header `undefined` mà vẫn xuất file bình thường. Đã siết ở nguồn —
+cột phải khai `{label, key}` hoặc `{label, value}`.
+
+`legacy-data-source` bổ sung các báo cáo kỳ vào danh sách chưa-nối-nguồn: ledger
+cũ chỉ tra được theo `containerCode`, không theo khoảng ngày. Trả lỗi thay vì
+dựng báo cáo rỗng trông như "kỳ này không hao hụt gì".
 
 ## Việc tiếp theo
 

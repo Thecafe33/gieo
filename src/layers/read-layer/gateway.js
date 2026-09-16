@@ -68,7 +68,11 @@ GIEO.define('read-layer/gateway', [
     GetPendingApprovals: registerQuery('GetPendingApprovals', { authority: 'REVIEW_APPROVE_CORRECT' })
   };
 
-  /** Cổng chung: quyền + storeId bắt buộc, trước khi chạm dữ liệu. */
+  /**
+   * Cổng chung: quyền + storeId bắt buộc, trước khi chạm dữ liệu.
+   * Được export ra dưới tên `guardRead` để tầng reporting dùng CHUNG đúng một
+   * cổng này — viết cổng thứ hai là cách phân quyền đọc trôi khỏi một chỗ.
+   */
   function guard(queryName, ctx, spec) {
     if (!ctx || !ctx.actor) return R.err('FORBIDDEN', 'không có context — mọi read phải biết ai đọc');
     var storeId = (spec && spec.storeId) || ctx.storeId;
@@ -425,6 +429,7 @@ GIEO.define('read-layer/gateway', [
   return {
     QUERIES: Q,
     registerQuery: registerQuery,
+    guardRead: guard,
     getUnitTrace: getUnitTrace,
     getMenu: getMenu,
     getInventoryLevel: getInventoryLevel,
