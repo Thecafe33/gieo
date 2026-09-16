@@ -36,6 +36,22 @@ GIEO.define('legacy-firebase-adapter/read-port', [
       return call('firestoreQuery', [p.path, query || {}]);
     }
 
+    /**
+     * Đọc TRỌN một collection/nhánh legacy. Dùng cho lần TIẾP NHẬN duy nhất lúc
+     * cutover — hệ mới tự đọc hệ cũ, không cần ai export tay.
+     *
+     * Vẫn chỉ đọc: `firestoreQuery`/`rtdbGet` là hai hàm duy nhất đi ra ngoài,
+     * và client được inject không phơi bất kỳ API ghi nào.
+     */
+    function loadAll(name) {
+      var p = paths.get(name);
+      return (p.kind === paths.RTDB ? rtdb(name) : firestoreQuery(name, {}))
+        .then(function (out) {
+          if (R.isErr(out)) return out;
+          return R.ok(out.value || {});
+        });
+    }
+
     function loadUnit(spec) {
       spec = spec || {};
       if (!spec.containerCode) {
@@ -162,6 +178,7 @@ GIEO.define('legacy-firebase-adapter/read-port', [
     }
 
     return {
+      loadAll: loadAll,
       loadUnit: loadUnit,
       loadLedger: loadLedger,
       loadUnitTrace: loadUnitTrace,

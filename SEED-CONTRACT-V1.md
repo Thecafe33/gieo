@@ -75,27 +75,27 @@ gợi ý cho lần nhập tới, KHÔNG phải giá vốn lô. Dùng nó làm gi
 
 ---
 
-## 4. Chạy
+## 4. Ai chạy việc này
+
+**Hệ mới tự chạy**, một lần, lúc cutover. Không có bước export tay, không có
+file trung gian, không cần ai chuẩn bị dữ liệu sẵn.
 
 ```
-node tools/build-seed.js <thư-mục-export> <ngày-cutover> [thư-mục-ra]
+bootstrap/legacy-takeover.run()     đọc đủ nguồn hệ cũ qua read port (CHỈ ĐỌC)
+        ↓
+commands/takeover.buildPlan()       luật tiếp nhận — không biết dữ liệu từ đâu
+        ↓
+persistence-firebase/atomic-commit  ĐÚNG đường ghi của mọi mutation khác
 ```
 
-Kết quả thử trên export 2026-09-15, mốc giả định 2026-09-20:
+Tách làm hai tầng vì luật tiếp nhận phải kiểm được mà không cần Firebase, còn
+phần nối thì kiểm bằng một reader giả.
 
-```
-Mặt hàng   : 50
-Lô tồn đầu : 137  — tổng lượng 77.586,25
-Công thức  : 24
-Nhân viên  : 2
-Kỳ doanh thu đã chốt: 1
+`operationId` xác định theo ngày cutover: bật app lại lần hai ghi vào đúng các
+path cũ, **không** nhân đôi tồn đầu.
 
-KHÔNG tiếp nhận:
-  32 lô đã dùng hết
-   3 lô có lượng <= 0  (-1826, -125, 0)
-```
-
-File seed KHÔNG vào repo (`.gitignore`).
+Đọc hụt một nguồn thì DỪNG — không tiếp nhận một phần. Tiếp nhận thiếu công
+thức còn tệ hơn chưa tiếp nhận.
 
 ---
 
