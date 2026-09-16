@@ -5704,6 +5704,881 @@ GIEO.define('alerts/alert', ['shared-kernel/ids', 'shared-kernel/result'], funct
   };
 });
 
+/* ===== src/layers/protected-adapters/bank-payment.js ===== */
+/**
+ * BankPaymentAdapter — chuyển khoản VietQR.
+ *
+ * Contract: PROTECTED-INFRASTRUCTURE-ADAPTER-CONTRACT-V1.md §4.
+ *
+ * Bắt tay MỘT LẦN: webhook (ngoài repo này) ghi vào `bank_confirmations/{orderId}`,
+ * client lắng nghe node đó, có bản ghi thì coi là đã thanh toán rồi XOÁ node ngay.
+ *
+ * ────────────────────────────────────────────────────────────────────────
+ * 🔴 RỦI RO ĐÃ BIẾT, GIỮ NGUYÊN CÓ CHỦ ĐÍCH (§4.2)
+ *
+ * Adapter này KHÔNG đối chiếu số tiền. Nó chỉ kiểm tra bản ghi TỒN TẠI; field
+ * `amount` chỉ để hiển thị. Việc đối soát số tiền nằm hoàn toàn ở phía webhook
+ * ghi vào `bank_confirmations` — thứ nằm NGOÀI hai file HTML đã audit nên
+ * không kiểm chứng được từ đây.
+ *
+ * Contract quyết định: giữ đúng contract "tin tưởng sự tồn tại của bản ghi tại
+ * path one-shot", NHƯNG phải cảnh báo rõ. Nên adapter này:
+ *   - không tự thêm đối chiếu phía client (làm vậy là đổi semantics của một
+ *     ranh giới protected),
+ *   - TRẢ VỀ cờ `amountNotVerifiedClientSide` trên mọi lần xác nhận, để không
+ *     ai đọc code này mà tưởng số tiền đã được kiểm.
+ *
+ * Ai viết lại webhook ở repo/service khác: ĐÂY là chỗ bắt buộc phải validate
+ * `addInfo`/số tiền trước khi ghi. Hiện tại đó là một giả định ngầm.
+ * ────────────────────────────────────────────────────────────────────────
+ *
+ * §4.5 — `bankOrderId ≠ operationId`. Mã này chỉ định danh giao dịch NGÂN HÀNG,
+ * KHÔNG được dùng làm khoá idempotency cho command nội bộ.
+ */
+GIEO.define('protected-adapters/bank-payment', ['shared-kernel/result'], function (R) {
+  'use strict';
+
+  function pad2(n) { return n < 10 ? '0' + n : String(n); }
+
+  /**
+   * Sinh mã giao dịch ngân hàng — giữ đúng định dạng legacy `'GG' + ddHHmmss`.
+   * Định dạng này có ý nghĩa với người đối soát sao kê, nên không đổi.
+   */
+  function genBankOrderId(at) {
+    var d = new Date(at);
+    return 'GG' + pad2(d.getDate()) + pad2(d.getHours()) + pad2(d.getMinutes()) + pad2(d.getSeconds());
+  }
+
+  function createBankPayment(opts) {
+    opts = opts || {};
+    var store = opts.confirmationStore;
+    if (!store) throw new Error('[bank-payment] cần confirmationStore (RTDB bank_confirmations)');
+    var clock = opts.clock;
+    if (!clock) throw new Error('[bank-payment] cần clock');
+
+    var active = Object.create(null);
+
+    /** Dựng URL ảnh QR. Tài khoản cố định của quán, cấu hình ở ngoài. */
+    function buildQrUrl(spec) {
+      if (!opts.bankAccount) return R.err('PRECONDITION', 'chưa cấu hình tài khoản nhận tiền');
+      if (typeof spec.amount !== 'number' || !(spec.amount > 0)) {
+        return R.err('VALIDATION', 'số tiền phải dương');
+      }
+      return R.ok({
+        bankOrderId: spec.bankOrderId,
+        url: opts.qrBaseUrl + '?acc=' + encodeURIComponent(opts.bankAccount)
+          + '&amount=' + spec.amount
+          + '&addInfo=' + encodeURIComponent(spec.bankOrderId),
+        amount: spec.amount
+      });
+    }
+
+    /**
+     * Mở một lượt chờ chuyển khoản.
+     *
+     * KHÔNG có timeout (§4.3). Legacy không có `setTimeout` nào tự đóng popup,
+     * và đó là quyết định nghiệp vụ hợp lý — nhân viên toàn quyền quyết định
+     * khi nào huỷ. Không tự ý thêm vào.
+     */
+    function open(spec) {
+      var bankOrderId = spec.bankOrderId || genBankOrderId(clock.now());
+      var qr = buildQrUrl({ bankOrderId: bankOrderId, amount: spec.amount });
+      if (R.isErr(qr)) return qr;
+
+      var session = {
+        bankOrderId: bankOrderId,
+        amount: spec.amount,
+        qrUrl: qr.value.url,
+        openedAt: clock.now(),
+        status: 'WAITING',
+        /* §4.5 — nói rõ ngay trong dữ liệu để không ai dùng nhầm. */
+        notAnOperationId: true
+      };
+      active[bankOrderId] = session;
+
+      /* Lắng nghe node one-shot. Cả hai đường (webhook và bấm tay) đều đi vào
+         cùng một hàm settle. */
+      var unsubscribe = store.listen(bankOrderId, function (snapshot) {
+        if (!snapshot) return;
+        settle(bankOrderId, 'WEBHOOK', snapshot);
+      });
+      session.unsubscribe = unsubscribe;
+
+      return R.ok(session);
+    }
+
+    /**
+     * Chốt một lượt. Dùng chung cho webhook lẫn bấm tay — §4.1 nói rõ đường
+     * thủ công chạy ĐÚNG callback y hệt đường tự động, không có luồng riêng.
+     */
+    function settle(bankOrderId, source, snapshot) {
+      var session = active[bankOrderId];
+      if (!session) return R.err('NOT_FOUND', 'không có lượt chờ nào cho ' + bankOrderId);
+      if (session.status !== 'WAITING') {
+        /* One-shot: chốt lần hai là no-op có kiểm soát. */
+        return R.ok(Object.assign({}, session, { replayed: true }));
+      }
+
+      session.status = 'CONFIRMED';
+      session.confirmedAt = clock.now();
+      session.source = source;
+      if (session.unsubscribe) session.unsubscribe();
+
+      /* Xoá node NGAY — bắt tay một lần. */
+      store.remove(bankOrderId);
+      delete active[bankOrderId];
+
+      if (typeof opts.onConfirmed === 'function') opts.onConfirmed(session);
+
+      return R.ok({
+        bankOrderId: bankOrderId,
+        source: source,
+        amountShown: snapshot && typeof snapshot.amount === 'number' ? snapshot.amount : null,
+        expectedAmount: session.amount,
+        /* Cờ này luôn true. Đọc code ở đây mà tưởng số tiền đã được kiểm là
+           hiểu sai một ranh giới protected — xem ghi chú đầu file. */
+        amountNotVerifiedClientSide: true,
+        confirmedAt: session.confirmedAt
+      });
+    }
+
+    /** Nhân viên bấm "ĐÃ CHUYỂN KHOẢN XONG". */
+    function confirmManually(bankOrderId) {
+      return settle(bankOrderId, 'MANUAL', null);
+    }
+
+    /** Nhân viên tự đóng popup. */
+    function cancel(bankOrderId) {
+      var session = active[bankOrderId];
+      if (!session) return R.err('NOT_FOUND', 'không có lượt chờ nào cho ' + bankOrderId);
+      if (session.unsubscribe) session.unsubscribe();
+      session.status = 'CANCELLED';
+      delete active[bankOrderId];
+      return R.ok(session);
+    }
+
+    function activeCount() { return Object.keys(active).length; }
+
+    return {
+      genBankOrderId: genBankOrderId,
+      buildQrUrl: buildQrUrl,
+      open: open,
+      confirmManually: confirmManually,
+      cancel: cancel,
+      activeCount: activeCount
+    };
+  }
+
+  return { genBankOrderId: genBankOrderId, createBankPayment: createBankPayment };
+});
+
+/* ===== src/layers/protected-adapters/bill-printer.js ===== */
+/**
+ * BillPrinterAdapter — máy in bill, Bluetooth qua APK.
+ *
+ * Contract: PROTECTED-INFRASTRUCTURE-ADAPTER-CONTRACT-V1.md §1.
+ *
+ * Ba điều đã chốt, giữ nguyên:
+ *   - CHỈ một đường Bluetooth qua `AndroidPrinter.printBillRawBytes`.
+ *     KHÔNG mang `XprinterWNN58E`/Web Serial sang (DEAD-FEATURE-PRUNING §4) —
+ *     hệ thống mới chỉ chạy trong APK nên không cần nhánh dự phòng cho trình
+ *     duyệt thường như legacy.
+ *   - In bill KHÔNG BAO GIỜ chặn hay rollback việc trừ kho/ghi bill. Order và
+ *     ledger đã chốt TRƯỚC khi in được gọi; in hỏng chỉ báo, không tạo lại đơn,
+ *     không hoàn kho (§1.1).
+ *   - Máy phải ghép nối Bluetooth trước trong Cài đặt Android; app không tự
+ *     pair, chỉ nhớ MAC và tự nối lại lúc khởi động.
+ *
+ * Một điều PHẢI SỬA: hàng đợi tự phục hồi — xem `protected-adapters/print-queue`.
+ *
+ * Cửa sổ thời gian cho phép in lại, log chống gian lận, giới hạn hiển thị lịch
+ * sử bill KHÔNG nằm ở đây — chúng là business rule, thuộc `packages/commands`
+ * (ranh giới §5).
+ */
+GIEO.define('protected-adapters/bill-printer', [
+  'shared-kernel/result',
+  'protected-adapters/print-queue'
+], function (R, queueLib) {
+  'use strict';
+
+  /**
+   * @param opts.bridge      native-bridge
+   * @param opts.encodeBill  (content) => bytes — rasterize canvas thành byte
+   * @param opts.onError
+   */
+  function createBillPrinter(opts) {
+    opts = opts || {};
+    var bridge = opts.bridge;
+    if (!bridge) throw new Error('[bill-printer] cần bridge');
+
+    /* Queue RIÊNG của máy in bill — tem kẹt giấy không được làm nghẽn in bill. */
+    var queue = queueLib.createPrintQueue({ name: 'bill-printer', onError: opts.onError });
+
+    var state = { enabled: true, mac: null, connected: false };
+
+    function setEnabled(v) { state.enabled = !!v; }
+    function isEnabled() { return state.enabled; }
+
+    /** Nhớ MAC. Legacy lưu ở `printer_layout_gieogieo.billPrinterMac` (dùng
+        chung mọi máy POS trong quán) — adapter chỉ giữ giá trị, nơi lưu là
+        việc của tầng persistence. */
+    function rememberMac(mac) {
+      state.mac = mac || null;
+      return R.ok(state.mac);
+    }
+
+    function connect(mac) {
+      var target = mac || state.mac;
+      if (!target) {
+        return Promise.resolve(R.err('PRECONDITION',
+          'chưa có địa chỉ máy in bill — phải ghép nối Bluetooth trong Cài đặt Android trước'));
+      }
+      return bridge.connectBluetooth(target).then(function (r) {
+        state.connected = R.isOk(r);
+        if (R.isOk(r)) state.mac = target;
+        return r;
+      });
+    }
+
+    /** Tự nối lại lúc khởi động bằng MAC đã nhớ. */
+    function reconnectOnBoot() {
+      if (!state.mac) return Promise.resolve(R.ok({ skipped: 'NO_REMEMBERED_MAC' }));
+      return connect(state.mac);
+    }
+
+    /**
+     * In một bill.
+     *
+     * LUÔN trả Promise đã resolve — lỗi in là giá trị trả về. Caller (luồng
+     * thanh toán) gọi fire-and-forget và KHÔNG được để kết quả ở đây ảnh hưởng
+     * tới việc bill đã ghi và kho đã trừ.
+     */
+    function print(content, label) {
+      if (!state.enabled) {
+        return Promise.resolve(R.ok({ skipped: 'PRINTER_DISABLED' }));
+      }
+      return queue.enqueue(function () {
+        var bytes = opts.encodeBill ? opts.encodeBill(content) : content;
+        return bridge.printBillRawBytes(bytes).then(function (r) {
+          if (R.isErr(r)) throw new Error(r.error.message);
+          return true;
+        });
+      }, label || 'bill');
+    }
+
+    /**
+     * In lại. Về mặt kỹ thuật giống hệt in lần đầu — "in thuần tuý", không có
+     * side-effect nào khác (§1.4). Việc có được in lại hay không, và ghi log
+     * chống gian lận, là quyết định của tầng command.
+     */
+    function reprint(content, label) {
+      return print(content, label || 'reprint-bill');
+    }
+
+    function openCashDrawer() { return bridge.openCashDrawer(); }
+
+    return {
+      setEnabled: setEnabled,
+      isEnabled: isEnabled,
+      rememberMac: rememberMac,
+      connect: connect,
+      reconnectOnBoot: reconnectOnBoot,
+      print: print,
+      reprint: reprint,
+      openCashDrawer: openCashDrawer,
+      drain: queue.drain,
+      queueStats: queue.snapshot,
+      queueHealthy: queue.isHealthy,
+      state: function () { return Object.assign({}, state); }
+    };
+  }
+
+  return { createBillPrinter: createBillPrinter };
+});
+
+/* ===== src/layers/protected-adapters/label-printer.js ===== */
+/**
+ * LabelPrinterAdapter — máy in tem, LAN/TCP qua APK.
+ *
+ * Contract: PROTECTED-INFRASTRUCTURE-ADAPTER-CONTRACT-V1.md §2.
+ *
+ * Phức tạp hơn máy in bill nhiều, và ĐỘ PHỨC TẠP ĐÓ LÀ CẦN THIẾT — máy in tem
+ * tự đóng socket sau 30-90s nhàn rỗi và chỉ nhận MỘT phiên TCP tại một thời
+ * điểm. Ba lớp chống rớt dưới đây mỗi lớp giải quyết một race condition thật
+ * đã được vá qua nhiều đợt, không phải dư thừa (§2.5):
+ *
+ *   1. Nhớ IP cuối (cấp MÁY, không lưu cloud vì IP đổi theo DHCP) → nối lại
+ *      ngay trước khi in.
+ *   2. Watchdog nền định kỳ — chỉ chạy nếu APK hỗ trợ, phải FEATURE-DETECT.
+ *   3. Khoá single-flight chống gọi connect chồng lấp — bắt buộc vì máy chỉ
+ *      nhận một phiên.
+ *
+ * Hai điều KHÔNG được làm:
+ *   - KHÔNG thêm đường gửi fallback thứ hai (§2.4). Legacy từng có fallback qua
+ *     app trung gian và đã CỐ Ý xoá vì gây văng WebView khi máy in mất kết nối.
+ *   - KHÔNG auto-detect giao thức theo model máy (§2.3) — nhân viên chọn tay,
+ *     mặc định TSPL.
+ */
+GIEO.define('protected-adapters/label-printer', [
+  'shared-kernel/result',
+  'protected-adapters/print-queue'
+], function (R, queueLib) {
+  'use strict';
+
+  /* TSPL có lệnh SIZE/GAP/OFFSET để máy tự canh tem → khuyến nghị mặc định.
+     ESC/POS không có khái niệm khổ tem nên dễ in đè. */
+  var ENGINE = { TSPL: 'TSPL', ESCPOS: 'ESCPOS' };
+
+  function createLabelPrinter(opts) {
+    opts = opts || {};
+    var bridge = opts.bridge;
+    if (!bridge) throw new Error('[label-printer] cần bridge');
+
+    /* Queue RIÊNG — độc lập với máy in bill (gate §8). */
+    var queue = queueLib.createPrintQueue({ name: 'label-printer', onError: opts.onError });
+
+    var state = {
+      enabled: true,
+      engine: opts.engine || ENGINE.TSPL,
+      ip: null,
+      port: opts.port || 9100,
+      connected: false,
+      keepAliveOn: false
+    };
+
+    /* Lớp 3 — single-flight. Nhiều lời gọi cùng lúc dùng CHUNG một promise
+       kết nối, vì máy chỉ nhận một phiên TCP. */
+    var connecting = null;
+
+    function setEngine(engine) {
+      if (!ENGINE[engine]) return R.err('VALIDATION', 'giao thức không hợp lệ: ' + engine);
+      /* Chọn tay, không auto-detect theo model (§2.3). */
+      state.engine = engine;
+      return R.ok(state.engine);
+    }
+
+    function setEnabled(v) { state.enabled = !!v; }
+    function isEnabled() { return state.enabled; }
+
+    /** Lớp 1 — nhớ IP cấp MÁY. Không lưu cloud: IP đổi theo DHCP. */
+    function rememberIp(ip, port) {
+      state.ip = ip || null;
+      if (port) state.port = port;
+      state.connected = false;
+      return R.ok({ ip: state.ip, port: state.port });
+    }
+
+    /**
+     * Lớp 3 — bảo đảm đã kết nối, chống gọi chồng lấp.
+     * Nhiều lượt in song song cùng chờ một lời gọi connect duy nhất.
+     */
+    function ensureConnected() {
+      if (state.connected) return Promise.resolve(R.ok({ reused: true }));
+      if (connecting) return connecting;
+      if (!state.ip) {
+        return Promise.resolve(R.err('PRECONDITION', 'chưa biết IP máy in tem'));
+      }
+
+      connecting = bridge.connectLan(state.ip, state.port).then(function (r) {
+        state.connected = R.isOk(r);
+        connecting = null;
+        return r;
+      }, function (e) {
+        connecting = null;
+        state.connected = false;
+        return R.err('RETRYABLE', 'kết nối máy in tem lỗi: ' + (e && e.message ? e.message : e));
+      });
+      return connecting;
+    }
+
+    /**
+     * Lớp 2 — watchdog nền. FEATURE-DETECT vì chỉ APK bản mới có.
+     * Open Question §7.1 chưa được trả lời nên KHÔNG giả định luôn sẵn có.
+     */
+    function startKeepAlive() {
+      if (!bridge.supportsKeepAlive()) {
+        return Promise.resolve(R.ok({
+          skipped: 'APK_KHONG_HO_TRO',
+          note: 'APK này thiếu setTemKeepAlive/getTemStatus — dựa vào lớp 1 và 3'
+        }));
+      }
+      return bridge.setKeepAlive(true).then(function (r) {
+        state.keepAliveOn = R.isOk(r);
+        return r;
+      });
+    }
+
+    /** Dựng byte theo giao thức đang chọn. Khác nhau ở header/footer lệnh. */
+    function encode(bitmap, spec) {
+      if (state.engine === ENGINE.TSPL) {
+        return {
+          engine: ENGINE.TSPL,
+          /* SIZE/GAP/OFFSET để máy tự canh tem. */
+          header: { size: spec.size, gap: spec.gap, offset: spec.offset || 0 },
+          bitmap: bitmap
+        };
+      }
+      return { engine: ENGINE.ESCPOS, header: null, bitmap: bitmap };
+    }
+
+    /**
+     * In tem. Nối lại ngay trước khi in (lớp 1), qua queue tự phục hồi.
+     * Đường gửi DUY NHẤT là `printRawBytes` — không fallback.
+     */
+    function print(bitmap, spec, label) {
+      if (!state.enabled) return Promise.resolve(R.ok({ skipped: 'PRINTER_DISABLED' }));
+
+      return queue.enqueue(function () {
+        return ensureConnected().then(function (c) {
+          if (R.isErr(c)) throw new Error(c.error.message);
+          var payload = encode(bitmap, spec || {});
+          var bytes = opts.encodeLabel ? opts.encodeLabel(payload) : payload;
+          return bridge.printRawBytes(bytes).then(function (r) {
+            if (R.isErr(r)) {
+              /* Mất kết nối giữa chừng: đánh dấu để lượt sau nối lại,
+                 KHÔNG thử đường gửi khác. */
+              state.connected = false;
+              throw new Error(r.error.message);
+            }
+            return true;
+          });
+        });
+      }, label || 'tem');
+    }
+
+    /**
+     * In nhiều tem. Vẫn tuần tự qua queue vì máy chỉ nhận một phiên — song
+     * song hoá ở đây là cách làm rớt kết nối.
+     */
+    function printBatch(items, spec) {
+      var results = [];
+      var chain = Promise.resolve();
+      items.forEach(function (it, i) {
+        chain = chain.then(function () {
+          return print(it, spec, 'tem-' + (i + 1)).then(function (r) { results.push(r); });
+        });
+      });
+      return chain.then(function () {
+        return R.ok({
+          total: results.length,
+          ok: results.filter(function (r) { return R.isOk(r); }).length,
+          failed: results.filter(function (r) { return R.isErr(r); }).length,
+          results: results
+        });
+      });
+    }
+
+    return {
+      ENGINE: ENGINE,
+      setEngine: setEngine,
+      setEnabled: setEnabled,
+      isEnabled: isEnabled,
+      rememberIp: rememberIp,
+      ensureConnected: ensureConnected,
+      startKeepAlive: startKeepAlive,
+      encode: encode,
+      print: print,
+      printBatch: printBatch,
+      drain: queue.drain,
+      queueStats: queue.snapshot,
+      queueHealthy: queue.isHealthy,
+      state: function () { return Object.assign({}, state); }
+    };
+  }
+
+  return { ENGINE: ENGINE, createLabelPrinter: createLabelPrinter };
+});
+
+/* ===== src/layers/protected-adapters/native-bridge.js ===== */
+/**
+ * Cầu nối APK — bọc `window.AndroidPrinter` / `window.AndroidScanner`.
+ *
+ * Contract: PROTECTED-INFRASTRUCTURE-ADAPTER-CONTRACT-V1.md §1.3, §2.4, §3.1.
+ *
+ * Hai điều đã đính chính qua audit và phải giữ đúng:
+ *   - KHÔNG có `window.Android` trần — chỉ có `AndroidPrinter` và `AndroidScanner`.
+ *   - `printBillRawBytes` (bill) và `printRawBytes` (tem) là HAI hàm bridge
+ *     RIÊNG trên cùng `AndroidPrinter`, không dùng lẫn.
+ *
+ * Bridge được TIÊM VÀO chứ không đọc thẳng `window`, để test chạy được không
+ * cần APK và để không có code nào lén gọi `window.AndroidPrinter` ở nơi khác.
+ */
+GIEO.define('protected-adapters/native-bridge', ['shared-kernel/result'], function (R) {
+  'use strict';
+
+  /**
+   * @param opts.printer  đối tượng giống window.AndroidPrinter
+   * @param opts.scanner  đối tượng giống window.AndroidScanner
+   */
+  function createNativeBridge(opts) {
+    opts = opts || {};
+    var printer = opts.printer || null;
+    var scanner = opts.scanner || null;
+
+    /**
+     * Cầu nối hứa trả Promise<Result> — nên nó KHÔNG ĐƯỢC reject.
+     * Cầu nối native reject là chuyện thường (mất kết nối, hết giấy); để
+     * rejection lọt ra ngoài thì nơi gọi mất cơ hội xử lý, ví dụ máy in tem
+     * không kịp đánh dấu là đã rớt kết nối và lượt sau dùng lại phiên đã chết.
+     */
+    function settle(promise, what) {
+      return Promise.resolve(promise).then(
+        function (v) { return R.ok(v === undefined ? true : v); },
+        function (e) {
+          return R.err('RETRYABLE', what + ' lỗi: ' + (e && e.message ? e.message : e));
+        }
+      );
+    }
+
+    function requirePrinter(method) {
+      if (!printer || typeof printer[method] !== 'function') {
+        /* §2.4: bridge không sẵn sàng thì BÁO LỖI RÕ RÀNG, tuyệt đối không thử
+           đường khác. Legacy từng có fallback qua app trung gian và đã cố ý xoá
+           vì gây văng WebView khi máy in mất kết nối. */
+        return R.err('PRECONDITION',
+          'cầu nối APK thiếu "' + method + '" — báo lỗi thay vì thử đường gửi khác ' +
+          '(bài học từ chính lịch sử sửa lỗi của hệ thống cũ)');
+      }
+      return R.ok(printer);
+    }
+
+    return {
+      hasPrinter: function () { return !!printer; },
+      hasScanner: function () { return !!scanner; },
+
+      /** Đường gửi cho máy in BILL (Bluetooth). */
+      printBillRawBytes: function (bytes) {
+        var g = requirePrinter('printBillRawBytes');
+        if (R.isErr(g)) return Promise.resolve(g);
+        return settle(printer.printBillRawBytes(bytes), 'in bill');
+      },
+
+      /** Đường gửi cho máy in TEM (LAN/TCP) — đường DUY NHẤT, không fallback. */
+      printRawBytes: function (bytes) {
+        var g = requirePrinter('printRawBytes');
+        if (R.isErr(g)) return Promise.resolve(g);
+        return settle(printer.printRawBytes(bytes), 'in tem');
+      },
+
+      connectBluetooth: function (mac) {
+        var g = requirePrinter('connectBluetoothApp');
+        if (R.isErr(g)) return Promise.resolve(g);
+        return settle(printer.connectBluetoothApp(mac), 'kết nối Bluetooth');
+      },
+
+      connectLan: function (ip, port) {
+        var g = requirePrinter('connectPrinter');
+        if (R.isErr(g)) return Promise.resolve(g);
+        return settle(printer.connectPrinter(ip, port), 'kết nối LAN');
+      },
+
+      /**
+       * Watchdog LAN chỉ có ở APK bản mới → FEATURE-DETECT như legacy.
+       * Open Question §7.1 chưa được trả lời (không rõ mọi máy production đã
+       * lên bản mới chưa), nên KHÔNG giả định là luôn có.
+       */
+      supportsKeepAlive: function () {
+        return !!(printer && typeof printer.setTemKeepAlive === 'function'
+          && typeof printer.getTemStatus === 'function');
+      },
+      setKeepAlive: function (enabled) {
+        if (!printer || typeof printer.setTemKeepAlive !== 'function') {
+          return Promise.resolve(R.err('PRECONDITION', 'APK này không hỗ trợ watchdog LAN'));
+        }
+        return settle(printer.setTemKeepAlive(enabled), 'bật watchdog');
+      },
+      getTemStatus: function () {
+        if (!printer || typeof printer.getTemStatus !== 'function') {
+          return Promise.resolve(R.err('PRECONDITION', 'APK này không hỗ trợ getTemStatus'));
+        }
+        return settle(printer.getTemStatus(), 'đọc trạng thái máy in tem');
+      },
+
+      openCashDrawer: function () {
+        if (!printer || typeof printer.openCashDrawer !== 'function') {
+          return Promise.resolve(R.err('PRECONDITION', 'APK này không hỗ trợ mở ngăn kéo'));
+        }
+        return settle(printer.openCashDrawer(), 'mở ngăn kéo');
+      },
+
+      /** Máy quét — chỉ khởi động, kết quả về qua callback toàn cục (§3.1). */
+      startScan: function (scanId) {
+        if (!scanner || typeof scanner.scan !== 'function') {
+          return R.err('PRECONDITION', 'APK này không có máy quét');
+        }
+        try {
+          scanner.scan(scanId);
+          return R.ok(true);
+        } catch (e) {
+          return R.err('RETRYABLE', 'gọi máy quét lỗi: ' + e.message);
+        }
+      }
+    };
+  }
+
+  return { createNativeBridge: createNativeBridge };
+});
+
+/* ===== src/layers/protected-adapters/print-queue.js ===== */
+/**
+ * Hàng đợi in TỰ PHỤC HỒI — đây là BUG THẬT phải sửa, không phải giữ nguyên.
+ *
+ * Contract: PROTECTED-INFRASTRUCTURE-ADAPTER-CONTRACT-V1.md §1.2, §6.1.
+ *
+ * ────────────────────────────────────────────────────────────────────────
+ * Legacy `POSPrinter._queue = Promise.resolve()`, mọi lệnh in chain kiểu
+ *     this._queue = this._queue.then(() => this._doPrint(order));
+ * KHÔNG có `.catch()` phục hồi. Một lần in lỗi (mất kết nối, hết giấy) làm
+ * `_queue` thành Promise rejected VĨNH VIỄN → mọi lệnh in bill sau đó, kể cả
+ * reprint, im lặng không chạy nữa cho tới khi reload app.
+ *
+ * Pattern ĐÚNG đã có sẵn ngay trong chính codebase legacy, ở máy in tem:
+ *     var next = _queue.then(fn, fn);   // lỗi lượt trước không chặn lượt sau
+ *     _queue = next.catch(function(){});// luôn giữ queue ở trạng thái chạy được
+ *
+ * Contract §6 nói rõ: đây là lỗi kỹ thuật thuần tuý, không phải quyết định
+ * nghiệp vụ, nên KHÔNG được "giữ nguyên để tương thích".
+ * ────────────────────────────────────────────────────────────────────────
+ *
+ * Gate §8 đòi bill printer và label printer có queue ĐỘC LẬP — máy in tem kẹt
+ * giấy không được làm nghẽn in bill. Nên đây là factory, mỗi adapter tự tạo
+ * một instance riêng.
+ */
+GIEO.define('protected-adapters/print-queue', ['shared-kernel/result'], function (R) {
+  'use strict';
+
+  /**
+   * @param opts.name     tên để báo lỗi cho người đọc
+   * @param opts.onError  gọi khi một lượt in hỏng (toast/alert) — KHÔNG chặn lượt sau
+   */
+  function createPrintQueue(opts) {
+    opts = opts || {};
+    var name = opts.name || 'printer';
+    var chain = Promise.resolve();
+    var stats = { queued: 0, done: 0, failed: 0 };
+
+    /**
+     * Xếp một lượt in. LUÔN trả Promise<Result> đã resolve — lỗi in là giá trị
+     * trả về, không phải exception, vì in hỏng không được làm sập luồng bán hàng.
+     */
+    function enqueue(job, label) {
+      stats.queued += 1;
+
+      var result = chain.then(runJob, runJob);
+
+      /* Mấu chốt: chain kế tiếp LUÔN là một promise đã được nuốt lỗi, nên một
+         lượt hỏng không bao giờ đầu độc những lượt sau. */
+      chain = result.catch(function () {});
+      return result;
+
+      function runJob() {
+        return Promise.resolve()
+          .then(job)
+          .then(function (value) {
+            stats.done += 1;
+            return R.ok(value === undefined ? true : value);
+          })
+          .catch(function (e) {
+            stats.failed += 1;
+            var err = R.err('RETRYABLE',
+              '[' + name + '] in hỏng' + (label ? ' (' + label + ')' : '') + ': ' + (e && e.message ? e.message : e));
+            if (typeof opts.onError === 'function') {
+              /* Handler người dùng hỏng cũng không được làm nghẽn hàng đợi. */
+              try { opts.onError(err, label); } catch (ignored) { /* noop */ }
+            }
+            return err;
+          });
+      }
+    }
+
+    /** Chờ hàng đợi rỗng — dùng cho test và cho lúc tắt app. */
+    function drain() {
+      return chain.then(function () { return R.ok(Object.assign({}, stats)); });
+    }
+
+    function snapshot() { return Object.assign({}, stats); }
+
+    /**
+     * Hàng đợi có còn chạy được không. Ở legacy câu này luôn là "không" sau
+     * lần lỗi đầu tiên; ở đây nó luôn là "có" theo thiết kế, và test chứng minh.
+     */
+    function isHealthy() {
+      return chain instanceof Promise;
+    }
+
+    return {
+      name: name,
+      enqueue: enqueue,
+      drain: drain,
+      snapshot: snapshot,
+      isHealthy: isHealthy
+    };
+  }
+
+  return { createPrintQueue: createPrintQueue };
+});
+
+/* ===== src/layers/protected-adapters/scanner.js ===== */
+/**
+ * ScannerAdapter — máy quét mã, qua UI native.
+ *
+ * Contract: PROTECTED-INFRASTRUCTURE-ADAPTER-CONTRACT-V1.md §3.
+ *
+ * WebView không tự cấp quyền camera cho app quán (thiếu `onPermissionRequest`),
+ * nên việc quét giao hẳn cho UI native. Kết quả về qua global callback +
+ * pending-map, KHÔNG phải Promise trực tiếp từ native.
+ *
+ * CONTRACT CỐT LÕI: `scan()` LUÔN RESOLVE, KHÔNG BAO GIỜ REJECT.
+ * Caller luôn nhận `{ok, code, format, error}` và tự xử lý `ok:false` — không
+ * dùng try/catch cho luồng lỗi bình thường. Quét không ra mã là chuyện thường
+ * ngày ở quầy, không phải ngoại lệ chương trình.
+ *
+ * MỘT THỨ BỔ SUNG SO VỚI LEGACY (§3.3, §6.2): fallback NHẬP MÃ BẰNG TAY.
+ * Audit không tìm thấy ô nhập tay nào khi máy quét timeout/lỗi, và khi hoàn
+ * toàn không có scanner cũng không thấy input thay thế. Contract kết luận đây
+ * nhiều khả năng là gap thật và yêu cầu bổ sung tường minh.
+ *
+ * Đối chiếu mã trùng (`chanMaTrung`) KHÔNG nằm ở đây — adapter chỉ trả mã thô;
+ * validate thuộc Unit Identity ở `packages/commands` (ranh giới §5).
+ */
+GIEO.define('protected-adapters/scanner', ['shared-kernel/ids', 'shared-kernel/result'], function (ids, R) {
+  'use strict';
+
+  var DEFAULT_TIMEOUT_MS = 90000;
+
+  var FAIL = {
+    NO_SCANNER: 'NO_SCANNER',
+    TIMEOUT: 'TIMEOUT',
+    BRIDGE_ERROR: 'BRIDGE_ERROR',
+    CANCELLED: 'CANCELLED'
+  };
+
+  function createScanner(opts) {
+    opts = opts || {};
+    var bridge = opts.bridge;
+    if (!bridge) throw new Error('[scanner] cần bridge');
+
+    var timeoutMs = opts.timeoutMs || DEFAULT_TIMEOUT_MS;
+    var setTimer = opts.setTimeout || function (fn, ms) { return setTimeout(fn, ms); };
+    var clearTimer = opts.clearTimeout || function (t) { return clearTimeout(t); };
+
+    /* pending-map: native gọi ngược đúng một lần, đối chiếu theo id. */
+    var pending = Object.create(null);
+    var seq = 0;
+
+    function available() { return bridge.hasScanner(); }
+
+    /**
+     * Quét một mã. LUÔN resolve.
+     * Kết quả: `{ok:true, code, format, source}` hoặc `{ok:false, reason, message}`.
+     */
+    function scan(label) {
+      seq += 1;
+      var scanId = ids.deterministicId('operation', ['scan', String(Date.now()), String(seq)]);
+
+      if (!available()) {
+        /* Không có máy quét KHÔNG phải lỗi chương trình — caller chuyển sang
+           nhập tay. */
+        return Promise.resolve({
+          ok: false, reason: FAIL.NO_SCANNER,
+          message: 'máy này không có máy quét — nhập mã bằng tay',
+          canFallbackToManual: true
+        });
+      }
+
+      return new Promise(function (resolve) {
+        var done = false;
+        function finish(result) {
+          if (done) return;
+          done = true;
+          clearTimer(timer);
+          delete pending[scanId];
+          resolve(result);
+        }
+
+        /* Timeout đề phòng app native treo — không có nó thì Promise treo mãi. */
+        var timer = setTimer(function () {
+          finish({
+            ok: false, reason: FAIL.TIMEOUT,
+            message: 'máy quét không phản hồi sau ' + Math.round(timeoutMs / 1000) + 's',
+            canFallbackToManual: true
+          });
+        }, timeoutMs);
+
+        pending[scanId] = finish;
+
+        var started = bridge.startScan(scanId);
+        if (R.isErr(started)) {
+          finish({
+            ok: false, reason: FAIL.BRIDGE_ERROR,
+            message: started.error.message,
+            canFallbackToManual: true
+          });
+        }
+      });
+    }
+
+    /**
+     * Native gọi ngược. Gắn hàm này vào `window.__androidScanResult`.
+     * Kết quả lạ (id không còn chờ, gọi hai lần) bị bỏ qua có kiểm soát.
+     */
+    function handleNativeResult(res) {
+      if (!res || !res.id) return R.err('VALIDATION', 'kết quả quét thiếu id');
+      var finish = pending[res.id];
+      if (!finish) {
+        /* Đến muộn sau timeout, hoặc gọi lần hai. Không nổ, nhưng cũng không
+           im lặng hoàn toàn — trả về để nơi gọi ghi log nếu muốn. */
+        return R.err('NOT_FOUND', 'không có lượt quét nào đang chờ id ' + res.id);
+      }
+      if (res.cancelled) {
+        finish({ ok: false, reason: FAIL.CANCELLED, message: 'người dùng huỷ quét', canFallbackToManual: true });
+        return R.ok(true);
+      }
+      if (!res.code) {
+        finish({ ok: false, reason: FAIL.BRIDGE_ERROR, message: res.error || 'không đọc được mã', canFallbackToManual: true });
+        return R.ok(true);
+      }
+      finish({ ok: true, code: String(res.code), format: res.format || null, source: 'SCANNER' });
+      return R.ok(true);
+    }
+
+    /**
+     * FALLBACK NHẬP TAY — bổ sung so với legacy (§6.2).
+     * Trả về CÙNG hình dạng với `scan()` để nơi gọi không phải rẽ nhánh theo
+     * nguồn; `source` phân biệt để tầng nghiệp vụ ghi audit nếu cần.
+     */
+    function manualEntry(code) {
+      var trimmed = typeof code === 'string' ? code.trim() : '';
+      if (!trimmed) {
+        return { ok: false, reason: FAIL.BRIDGE_ERROR, message: 'mã nhập tay rỗng', canFallbackToManual: true };
+      }
+      return { ok: true, code: trimmed, format: null, source: 'MANUAL' };
+    }
+
+    /** Huỷ mọi lượt đang chờ — dùng khi đóng màn hình. */
+    function cancelAll() {
+      Object.keys(pending).forEach(function (id) {
+        pending[id]({ ok: false, reason: FAIL.CANCELLED, message: 'đóng màn hình', canFallbackToManual: true });
+      });
+      return R.ok(true);
+    }
+
+    function pendingCount() { return Object.keys(pending).length; }
+
+    return {
+      FAIL: FAIL,
+      available: available,
+      scan: scan,
+      handleNativeResult: handleNativeResult,
+      manualEntry: manualEntry,
+      cancelAll: cancelAll,
+      pendingCount: pendingCount
+    };
+  }
+
+  return { DEFAULT_TIMEOUT_MS: DEFAULT_TIMEOUT_MS, createScanner: createScanner };
+});
+
 /* ===== src/layers/read-layer/gateway.js ===== */
 /**
  * Read gateway — CỔNG ĐỌC DUY NHẤT.

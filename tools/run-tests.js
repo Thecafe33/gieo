@@ -50,15 +50,30 @@ globalThis.describe = function (name, fn) {
   current = prev;
 };
 
+/* Test trả về Promise được chờ ở cuối — adapter phần cứng vốn bất đồng bộ,
+   chạy chúng đồng bộ thì mọi assertion trong .then() sẽ bị bỏ qua im lặng. */
+const pending = [];
+
 globalThis.test = function (name, fn) {
   const full = current ? current + ' › ' + name : name;
   if (filter && !full.toLowerCase().includes(filter.toLowerCase())) return;
+  let out;
   try {
-    fn();
-    results.push({ full, ok: true });
+    out = fn();
   } catch (e) {
     results.push({ full, ok: false, err: e });
+    return;
   }
+  if (out && typeof out.then === 'function') {
+    pending.push(
+      out.then(
+        () => results.push({ full, ok: true }),
+        (e) => results.push({ full, ok: false, err: e })
+      )
+    );
+    return;
+  }
+  results.push({ full, ok: true });
 };
 
 globalThis.assert = assert;
@@ -83,6 +98,9 @@ for (const f of testFiles) {
   }
 }
 
+(async function report() {
+await Promise.all(pending);
+
 const failed = results.filter((r) => !r.ok);
 for (const r of failed) {
   console.error(`\n  ✗ ${r.full}\n    ${r.err.message.split('\n')[0]}`);
@@ -97,3 +115,4 @@ console.log(
   ` (${testFiles.length} file, ${GIEO.inventory().length} module)`
 );
 process.exit(failed.length ? 1 : 0);
+})();

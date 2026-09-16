@@ -102,11 +102,12 @@
 
 ## Protected Infrastructure
 
-| Gap | Trạng thái |
-|---|---|
-| `POSPrinter._queue` bị đầu độc vĩnh viễn sau 1 lần in lỗi | ⬜ **CHƯA LÀM** — `protected-adapters` chưa xây |
-| Container/Unit không rollback nếu in tem lỗi | ⬜ **CHƯA LÀM** |
-| Bank payment không đối chiếu số tiền phía client | ⬜ **CHƯA LÀM** — giữ nguyên hành vi, chỉ gắn cờ rủi ro |
+| Gap | Đã giải quyết ở | Test |
+|---|---|---|
+| `POSPrinter._queue` bị đầu độc vĩnh viễn sau 1 lần in lỗi | `protected-adapters/print-queue` — dùng pattern tự phục hồi đã có sẵn ở máy in tem | `một lượt hỏng KHÔNG đầu độc mọi lượt sau`, `reprint cũng chạy được sau lỗi` |
+| Container/Unit không rollback nếu in tem lỗi | Giữ nguyên — đây là quyết định ĐÚNG (§2.2). Unit lifecycle không có state "chờ tem" nào chặn | — |
+| Bank payment không đối chiếu số tiền phía client | Giữ nguyên semantics + cờ `amountNotVerifiedClientSide` trên mọi lần chốt | `KHÔNG đối chiếu số tiền phía client, và NÓI RÕ điều đó` |
+| Scanner không có fallback nhập tay (§3.3) | `protected-adapters/scanner.manualEntry` — bổ sung so với legacy | `FALLBACK NHẬP TAY — bổ sung so với legacy` |
 
 ---
 
@@ -129,7 +130,6 @@
 | Phase | Nội dung |
 |---|---|
 | P6 | `compaction` — snapshot builder / verifier / purge (đã có `VersionedInput`) |
-| P1 (adapter) | `protected-adapters` — bill printer (kèm **fix** poisoned queue), label printer, scanner, bank |
 | P1 (adapter) | `legacy-firebase-adapter` + `persistence-firebase` |
 | P9 / P10 | UI POS + QUANLY |
 | P12 / P13 | Shadow comparison + cutover |
