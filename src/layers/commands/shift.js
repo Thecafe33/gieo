@@ -200,7 +200,8 @@ GIEO.define('commands/shift', [
 
   var CloseCashSegment = pipeline.defineCommand({
     name: 'CloseCashSegment',
-    authority: 'EXECUTE',
+    /* Nhân viên kết ca, nhưng Quản lý cũng chốt hộ được khi cần. */
+    authority: ['EXECUTE', 'REVIEW_APPROVE_CORRECT'],
     mutates: true,
     sources: ['POS', 'QUANLY'],
     operationId: function (input) {

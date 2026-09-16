@@ -616,10 +616,25 @@ GIEO.define('store-context/access', ['shared-kernel/ids', 'shared-kernel/result'
    */
   var registry = Object.create(null);
 
+  /** Chấp nhận 1 authority hoặc mảng authority; trả về mảng đã kiểm hợp lệ. */
+  function normalizeAuthorities(a) {
+    var list = Array.isArray(a) ? a : [a];
+    var out = [];
+    for (var i = 0; i < list.length; i++) {
+      if (!AUTHORITY[list[i]]) return [];
+      if (out.indexOf(list[i]) === -1) out.push(list[i]);
+    }
+    return out;
+  }
+
   /**
    * @param {string} name        tên command, vd 'ApproveLostContainer'
    * @param {object} spec
-   *   authority   {string}   lớp quyền tối thiểu cần có
+   *   authority   {string|string[]} lớp quyền chấp nhận được. Mảng nghĩa là
+   *               BẤT KỲ lớp nào trong đó cũng đủ — vì ma trận §21 có những
+   *               command chạy dưới authority khác nhau tuỳ app (vd "Found":
+   *               POS làm bằng EXECUTE, QUANLY làm bằng REVIEW/CORRECT).
+   *               Một giá trị duy nhất là trường hợp riêng của mảng 1 phần tử.
    *   mutates     {boolean}  có đổi business state không (ảnh hưởng luật §23)
    *   sources     {string[]} app nào được gọi; bỏ trống = mọi app
    *   crossStore  {boolean}  có được thao tác nhiều store cùng lúc không (§23)
@@ -627,7 +642,8 @@ GIEO.define('store-context/access', ['shared-kernel/ids', 'shared-kernel/result'
   function registerCommand(name, spec) {
     if (!name || typeof name !== 'string') throw new Error('[access] registerCommand cần tên');
     if (registry[name]) throw new Error('[access] command đăng ký trùng: "' + name + '"');
-    if (!AUTHORITY[spec && spec.authority]) {
+    var authorities = normalizeAuthorities(spec && spec.authority);
+    if (authorities.length === 0) {
       throw new Error('[access] command "' + name + '" cần authority hợp lệ');
     }
     if (typeof spec.mutates !== 'boolean') {
@@ -635,7 +651,7 @@ GIEO.define('store-context/access', ['shared-kernel/ids', 'shared-kernel/result'
     }
     registry[name] = {
       name: name,
-      authority: spec.authority,
+      authorities: authorities,
       mutates: spec.mutates,
       sources: spec.sources ? spec.sources.slice() : null,
       crossStore: !!spec.crossStore
@@ -703,9 +719,10 @@ GIEO.define('store-context/access', ['shared-kernel/ids', 'shared-kernel/result'
       return R.err('FORBIDDEN', 'command "' + commandName + '" không gọi được từ ' + actor.source +
         ' (chỉ: ' + cmd.sources.join(', ') + ')');
     }
-    if (!hasAuthority(actor, cmd.authority)) {
-      return R.err('FORBIDDEN', 'vai trò ' + actor.role + ' thiếu quyền ' + cmd.authority +
-        ' cho command "' + commandName + '"');
+    var ok = cmd.authorities.some(function (a) { return hasAuthority(actor, a); });
+    if (!ok) {
+      return R.err('FORBIDDEN', 'vai trò ' + actor.role + ' thiếu quyền ' +
+        cmd.authorities.join(' hoặc ') + ' cho command "' + commandName + '"');
     }
     if (!ids.isId(targetStoreId, 'store')) {
       return R.err('VALIDATION', 'authorize cần targetStoreId hợp lệ — mọi thao tác phải nêu rõ store');
@@ -726,7 +743,7 @@ GIEO.define('store-context/access', ['shared-kernel/ids', 'shared-kernel/result'
       actorId: actor.actorId,
       command: commandName,
       storeId: targetStoreId,
-      authority: cmd.authority,
+      authorities: cmd.authorities.slice(),
       mutates: cmd.mutates
     });
   }
@@ -5839,6 +5856,584 @@ GIEO.define('read-layer/merge-canonical', ['shared-kernel/result'], function (R)
   };
 });
 
+/* ===== src/layers/commands/approval.js ===== */
+/**
+ * Lệnh duyệt.
+ *
+ * Nguồn: FIFO-CORE-ARCHITECTURE-V2.md §8, §10b.3, §10b.4;
+ *        FIFO-CHAIN-TRACE-STOCK-COUNT-V1.md "FIX BẮT BUỘC".
+ *
+ * §10b.3 — IDEMPOTENCY ÁP CHO CẢ HÀNH ĐỘNG DUYỆT, không chỉ hành động tạo.
+ * Legacy `ApproveStockCount` không kiểm tra status trước khi apply và không có
+ * busy-guard, nên double-click hoặc 2 người duyệt cùng lúc cộng đúp variance.
+ * Ở đây mọi duyệt đi qua pipeline chung nên có claim + id xác định.
+ *
+ * §10b.4 — `ApproveLostContainer` LÀ GAP CÓ BẰNG CHỨNG CHẮC CHẮN NHẤT TOÀN BỘ
+ * AUDIT, xác nhận ĐỘC LẬP 3 LẦN từ 3 góc khác nhau:
+ *   - FIFO audit: grep `approveLostReport` trong quanlygieo.html → 0 kết quả
+ *   - Alerts audit: không có nút xử lý nào cho báo mất
+ *   - Stock-count chain: route duyệt không tồn tại, khiến container "mất" lặp
+ *     lại vô hạn mỗi kỳ kiểm kho
+ * Hệ quả ở legacy: Unit KHÔNG BAO GIỜ đạt tới nhánh LOST, dù logic nhánh LOST
+ * và logic khôi phục `submitFoundLostContainer` đều đã viết sẵn và đúng — chúng
+ * chỉ không bao giờ chạy tới vì thiếu đúng mắt xích này.
+ */
+GIEO.define('commands/approval', [
+  'shared-kernel/ids',
+  'shared-kernel/result',
+  'commands/pipeline',
+  'fifo-core/unit',
+  'fifo-core/reconciliation'
+], function (ids, R, pipeline, unitLib, reconciliation) {
+  'use strict';
+
+  var COUNT_STATUS = {
+    PENDING: 'PENDING',
+    APPROVED: 'APPROVED',
+    /* Legacy chỉ có `approved` và một con số `failedCount`. Chain-trace yêu cầu
+       state này để biết phiếu chưa áp hết và dòng nào còn lại. */
+    PARTIALLY_APPLIED: 'PARTIALLY_APPLIED',
+    REJECTED: 'REJECTED'
+  };
+
+  /**
+   * ApproveLostContainer — MẮT XÍCH LEGACY CHƯA TỪNG CÓ.
+   *
+   * ReportLostContainer (POS) → lostReport PENDING_REVIEW
+   *                           → ApproveLostContainer (QUANLY, ở đây)
+   *                           → Unit vào nhánh LOST
+   *                           → RestoreFoundContainer chạy được khi tìm lại
+   */
+  var ApproveLostContainer = pipeline.defineCommand({
+    name: 'ApproveLostContainer',
+    authority: 'REVIEW_APPROVE_CORRECT',
+    mutates: true,
+    sources: ['QUANLY'],
+
+    operationId: function (input) {
+      return ids.deterministicId('operation', ['approvelost', input.lostReportId]);
+    },
+
+    validate: function (input) {
+      if (!input || !input.lostReportId) return R.err('VALIDATION', 'cần lostReportId');
+      if (!input.decision || (input.decision !== 'APPROVE' && input.decision !== 'REJECT')) {
+        return R.err('VALIDATION', "decision phải là 'APPROVE' hoặc 'REJECT'");
+      }
+      if (!input.reason) {
+        return R.err('VALIDATION', 'duyệt/từ chối báo mất phải có lý do (§25 — approval bắt buộc có reason)');
+      }
+      return R.ok(true);
+    },
+
+    execute: function (input, ctx) {
+      var report = input.lostReport;
+      if (!report) return R.err('NOT_FOUND', 'không tìm thấy phiếu báo mất');
+      if (report.status !== 'PENDING_REVIEW') {
+        /* Fail-closed: duyệt lại phiếu đã xử lý là no-op có kiểm soát, không
+           phải áp lần hai (§27 invariant 8). */
+        return R.err('PRECONDITION', 'phiếu báo mất đã được xử lý (' + report.status + ')');
+      }
+
+      var opId = ids.deterministicId('operation', ['approvelost', input.lostReportId]);
+      var plan = pipeline.emptyPlan();
+
+      if (input.decision === 'REJECT') {
+        plan.domainRecords.push({
+          type: 'lostReport',
+          record: Object.assign({}, report, {
+            status: 'REJECTED', reviewedBy: ctx.actor.actorId,
+            reviewedAt: ctx.clock.now(), reviewReason: input.reason
+          })
+        });
+        return R.ok(plan);
+      }
+
+      var unit = (input.units || []).filter(function (u) { return u.unitId === report.unitId; })[0];
+      if (!unit) return R.err('NOT_FOUND', 'không tìm thấy lô ' + report.unitId);
+
+      var lost = unitLib.markLost(unit, {
+        at: ctx.clock.now(), actorId: ctx.actor.actorId,
+        operationId: opId, lostReportId: input.lostReportId
+      });
+      if (R.isErr(lost)) return lost;
+
+      plan.unitChanges.push(lost.value);
+      plan.domainRecords.push({
+        type: 'lostReport',
+        record: Object.assign({}, report, {
+          status: 'APPROVED', reviewedBy: ctx.actor.actorId,
+          reviewedAt: ctx.clock.now(), reviewReason: input.reason
+        })
+      });
+      plan.ledgerEntries.push({
+        domain: 'raw', type: 'LOST', itemId: unit.itemId, storeId: ctx.storeId,
+        unitId: unit.unitId, qtyDelta: -unit.remainingQty,
+        businessDate: ctx.businessDate, actorId: ctx.actor.actorId,
+        occurredAt: ctx.clock.now(),
+        referenceType: 'lostReport', referenceId: input.lostReportId, reason: input.reason
+      });
+      /* Trừ trách nhiệm nhân viên là side-effect, đi qua handler đăng ký riêng. */
+      plan.events.push({
+        type: 'ContainerFound',
+        unitId: unit.unitId, storeId: ctx.storeId, businessDate: ctx.businessDate,
+        lostReportId: input.lostReportId, direction: 'LOST_APPROVED'
+      });
+      plan.projectionRecomputes.push({ itemId: unit.itemId, storeId: ctx.storeId });
+      return R.ok(plan);
+    }
+  });
+
+  /**
+   * ApproveStockCount — duyệt phiếu kiểm kê.
+   *
+   * Bốn yêu cầu của chain-trace:
+   *  1. đi qua ĐÚNG đường điều chỉnh của FIFO Engine, không có code path ghi
+   *     thẳng currentStock song song như `applyStockTransaction`
+   *  2. idempotent (§10b.3)
+   *  3. dòng lỗi lưu CHÍNH XÁC dòng nào, không chỉ một con số failedCount
+   *  4. có state PARTIALLY_APPLIED thay vì luôn APPROVED
+   */
+  var ApproveStockCount = pipeline.defineCommand({
+    name: 'ApproveStockCount',
+    authority: 'REVIEW_APPROVE_CORRECT',
+    mutates: true,
+    sources: ['QUANLY'],
+
+    operationId: function (input) {
+      return ids.deterministicId('operation', ['approvecount', input.stockCountId]);
+    },
+
+    validate: function (input) {
+      if (!input || !input.stockCountId) return R.err('VALIDATION', 'cần stockCountId');
+      if (!input.reason) return R.err('VALIDATION', 'duyệt kiểm kê phải có lý do');
+      return R.ok(true);
+    },
+
+    execute: function (input, ctx) {
+      var count = input.stockCount;
+      if (!count) return R.err('NOT_FOUND', 'không tìm thấy phiếu kiểm kê');
+      if (count.status !== COUNT_STATUS.PENDING && count.status !== COUNT_STATUS.PARTIALLY_APPLIED) {
+        return R.err('PRECONDITION', 'phiếu kiểm kê đã duyệt (' + count.status + ')');
+      }
+
+      var opId = ids.deterministicId('operation', ['approvecount', input.stockCountId]);
+      var plan = pipeline.emptyPlan();
+      var applied = [];
+      var failed = [];
+
+      var unitsById = Object.create(null);
+      (input.units || []).forEach(function (u) { unitsById[u.unitId] = u; });
+
+      (count.lines || []).forEach(function (line) {
+        /* Dòng đã áp ở lần duyệt trước thì bỏ qua — đây là phần làm cho việc
+           duyệt lại phiếu PARTIALLY_APPLIED không cộng đúp. */
+        if (line.applied) { applied.push(line.itemId); return; }
+
+        if (line.unitId) {
+          var unit = unitsById[line.unitId];
+          if (!unit) {
+            failed.push({ itemId: line.itemId, unitId: line.unitId, reason: 'không tìm thấy lô' });
+            return;
+          }
+          var rc = reconciliation.physicalReconciliation(unit, {
+            actualQty: line.countedQty, at: ctx.clock.now(),
+            actorId: ctx.actor.actorId,
+            operationId: ids.deterministicId('operation', ['approvecount', input.stockCountId, line.itemId]),
+            method: 'stock_count', reason: input.reason
+          });
+          if (R.isErr(rc)) {
+            /* Lưu CHÍNH XÁC dòng nào hỏng và vì sao — legacy chỉ có failedCount. */
+            failed.push({ itemId: line.itemId, unitId: line.unitId, reason: rc.error.message });
+            return;
+          }
+          plan.unitChanges.push(rc.value.unit);
+          plan.ledgerEntries.push({
+            domain: 'raw', type: 'ADJUSTMENT', itemId: line.itemId, storeId: ctx.storeId,
+            unitId: line.unitId, qtyDelta: rc.value.delta,
+            businessDate: ctx.businessDate, actorId: ctx.actor.actorId,
+            occurredAt: ctx.clock.now(),
+            referenceType: 'stockCount', referenceId: input.stockCountId, reason: input.reason
+          });
+        } else {
+          plan.ledgerEntries.push({
+            domain: 'raw', type: 'ADJUSTMENT', itemId: line.itemId, storeId: ctx.storeId,
+            unitId: null, qtyDelta: line.delta,
+            businessDate: ctx.businessDate, actorId: ctx.actor.actorId,
+            occurredAt: ctx.clock.now(),
+            referenceType: 'stockCount', referenceId: input.stockCountId, reason: input.reason
+          });
+        }
+        applied.push(line.itemId);
+        plan.projectionRecomputes.push({ itemId: line.itemId, storeId: ctx.storeId });
+      });
+
+      plan.domainRecords.push({
+        type: 'stockCount',
+        record: Object.assign({}, count, {
+          /* Còn dòng lỗi thì KHÔNG phải APPROVED — nói đúng trạng thái thật. */
+          status: failed.length ? COUNT_STATUS.PARTIALLY_APPLIED : COUNT_STATUS.APPROVED,
+          approvedBy: ctx.actor.actorId,
+          approvedAt: ctx.clock.now(),
+          approveOperationId: opId,
+          appliedItemIds: applied,
+          failedLines: failed,
+          lines: (count.lines || []).map(function (l) {
+            return Object.assign({}, l, {
+              applied: l.applied || applied.indexOf(l.itemId) !== -1
+            });
+          })
+        })
+      });
+
+      if (failed.length) {
+        plan.events.push({
+          type: 'StockCountPartiallyApplied',
+          stockCountId: input.stockCountId, storeId: ctx.storeId,
+          businessDate: ctx.businessDate, failedLines: failed
+        });
+      }
+
+      return R.ok(plan);
+    }
+  });
+
+  var ApproveExpense = pipeline.defineCommand({
+    name: 'ApproveExpense',
+    authority: 'REVIEW_APPROVE_CORRECT',
+    mutates: true,
+    sources: ['QUANLY'],
+    operationId: function (input) {
+      return ids.deterministicId('operation', ['approveexp', input.expenseId]);
+    },
+    validate: function (input) {
+      if (!input || !ids.isId(input.expenseId, 'expense')) return R.err('VALIDATION', 'cần expenseId hợp lệ');
+      if (!input.reason) return R.err('VALIDATION', 'duyệt chi phí phải có lý do');
+      return R.ok(true);
+    },
+    execute: function (input, ctx) {
+      var e = input.expense;
+      if (!e) return R.err('NOT_FOUND', 'không tìm thấy khoản chi');
+      if (e.status !== 'PENDING_APPROVAL') {
+        return R.err('PRECONDITION', 'khoản chi không ở trạng thái chờ duyệt (' + e.status + ')');
+      }
+      var plan = pipeline.emptyPlan();
+      plan.domainRecords.push({
+        type: 'expense',
+        record: Object.assign({}, e, {
+          status: input.decision === 'REJECT' ? 'REJECTED' : 'ACTUAL',
+          approvedBy: ctx.actor.actorId, approvedAt: ctx.clock.now(), approveReason: input.reason
+        })
+      });
+      return R.ok(plan);
+    }
+  });
+
+  return {
+    COUNT_STATUS: COUNT_STATUS,
+    ApproveLostContainer: ApproveLostContainer,
+    ApproveStockCount: ApproveStockCount,
+    ApproveExpense: ApproveExpense
+  };
+});
+
+/* ===== src/layers/commands/inventory.js ===== */
+/**
+ * Lệnh kho — waste / nhận hàng / kiểm kê / mất-tìm-thấy.
+ *
+ * Chuỗi thật: FIFO-CHAIN-TRACE-RAW-MATERIAL-V1.md, FIFO-CHAIN-TRACE-STOCK-COUNT-V1.md.
+ * Gap: FIFO-CORE-ARCHITECTURE-V2.md §10b.2, §8, §9.
+ *
+ * Thay thế `applyStockTransaction` của QUANLY — §9 yêu cầu KHÔNG giữ bất kỳ hàm
+ * nào ghi thẳng Firestore từ phía QUANLY. Ở đây không tồn tại code path nào ghi
+ * thẳng `currentStock`: mọi thay đổi vật chất đi qua FIFO Engine, nên điều chỉnh
+ * kiểm kê không còn bị lần recompute kế tiếp xoá âm thầm như legacy.
+ */
+GIEO.define('commands/inventory', [
+  'shared-kernel/ids',
+  'shared-kernel/result',
+  'commands/pipeline',
+  'fifo-core/unit',
+  'fifo-core/allocation',
+  'fifo-core/reconciliation'
+], function (ids, R, pipeline, unitLib, allocation, reconciliation) {
+  'use strict';
+
+  /**
+   * RecordWaste — hao hụt.
+   *
+   * §10b.2: legacy `_submitDrinkWasteImpl` xử lý cả prep lẫn nguyên liệu thô
+   * trong CÙNG một hàm, nhưng nhánh prep gọi allocate qua FIFO (đúng) còn nhánh
+   * nguyên liệu thô ghi thẳng sổ (sai, không allocate). Đây là bằng chứng kỹ
+   * thuật đúng ĐÃ tồn tại sẵn, chỉ chưa áp dụng đồng nhất.
+   *
+   * Invariant ở đây: BẮT BUỘC allocate qua FIFO cho MỌI itemKind — không có
+   * nhánh code riêng bỏ qua allocation theo domain.
+   */
+  var RecordWaste = pipeline.defineCommand({
+    name: 'RecordWaste',
+    /* §21: "Waste | YES | REVIEW/CORRECT". */
+    authority: ['EXECUTE', 'REVIEW_APPROVE_CORRECT'],
+    mutates: true,
+    sources: ['POS', 'QUANLY'],
+
+    operationId: function (input) {
+      return ids.deterministicId('operation', ['waste', input.wasteRef, input.itemId]);
+    },
+
+    validate: function (input) {
+      if (!input || !ids.isId(input.itemId, 'item')) return R.err('VALIDATION', 'RecordWaste cần itemId hợp lệ');
+      if (typeof input.qty !== 'number' || !(input.qty > 0)) return R.err('VALIDATION', 'qty phải dương');
+      if (!input.wasteRef) return R.err('VALIDATION', 'RecordWaste cần wasteRef để id xác định (bug #21)');
+      if (!input.reason) return R.err('VALIDATION', 'hao hụt phải có lý do');
+      if (input.domain !== 'raw' && input.domain !== 'prep') {
+        return R.err('VALIDATION', "domain phải là 'raw' hoặc 'prep' — cả hai đi CÙNG một đường");
+      }
+      return R.ok(true);
+    },
+
+    execute: function (input, ctx) {
+      var plan = pipeline.emptyPlan();
+      var opId = ids.deterministicId('operation', ['waste', input.wasteRef, input.itemId]);
+      var ws = allocation.createWorkingSet(input.units || []);
+
+      /* Cùng một lời gọi cho raw lẫn prep. Không có nhánh rẽ theo domain. */
+      var r = allocation.allocateConsumption(ws, {
+        itemId: input.itemId, qty: input.qty, operationId: opId
+      });
+      if (R.isErr(r)) return r;
+      var alloc = r.value;
+
+      if (alloc.shortfallQty > 0 && !input.allowUntracked) {
+        return R.err('PRECONDITION',
+          'không đủ lô để gánh ' + input.qty + ' hao hụt (thiếu ' + alloc.shortfallQty + ') — ' +
+          'ghi thẳng sổ mà không allocate chính là lỗi nhánh nguyên liệu thô của legacy',
+          { shortfallQty: alloc.shortfallQty });
+      }
+
+      plan.unitChanges = alloc.touchedUnits;
+      alloc.allocations.forEach(function (a) {
+        plan.ledgerEntries.push({
+          domain: input.domain, type: 'WASTE', itemId: a.itemId, storeId: ctx.storeId,
+          unitId: a.unitId, qtyDelta: -a.qty, unitCost: a.unitCost,
+          costBasisVersionId: a.costBasisVersionId,
+          businessDate: ctx.businessDate, actorId: ctx.actor.actorId,
+          occurredAt: ctx.clock.now(),
+          referenceType: 'waste', referenceId: input.wasteRef, reason: input.reason
+        });
+      });
+
+      /* Phần không có lô gánh vẫn phải vào sổ, qua đúng cơ chế
+         untrackedPendingDelta (entry không có unitId) — không "biến mất". */
+      if (alloc.shortfallQty > 0) {
+        plan.ledgerEntries.push({
+          domain: input.domain, type: 'WASTE', itemId: input.itemId, storeId: ctx.storeId,
+          unitId: null, qtyDelta: -alloc.shortfallQty,
+          businessDate: ctx.businessDate, actorId: ctx.actor.actorId,
+          occurredAt: ctx.clock.now(),
+          referenceType: 'waste', referenceId: input.wasteRef,
+          reason: input.reason + ' (phần không truy được lô)'
+        });
+      }
+
+      /* §10b.2 cũng nói: chỉ 1/3 đường ghi waste của legacy có ingredientBreakdown
+         dù kỹ thuật đã có sẵn. Ở đây nó luôn có, vì allocation vốn đã trả ra. */
+      plan.domainRecords.push({
+        type: 'wasteRecord',
+        record: {
+          wasteRef: input.wasteRef, itemId: input.itemId, qty: input.qty,
+          domain: input.domain, reason: input.reason,
+          actorId: ctx.actor.actorId, businessDate: ctx.businessDate,
+          ingredientBreakdown: alloc.allocations.map(function (a) {
+            return { unitId: a.unitId, qty: a.qty, cost: a.cost };
+          }),
+          wasteCost: alloc.totalCost,
+          costComplete: alloc.costComplete
+        }
+      });
+
+      plan.projectionRecomputes.push({ itemId: input.itemId, storeId: ctx.storeId });
+      return R.ok(plan);
+    }
+  });
+
+  /**
+   * AdjustInventory — điều chỉnh tồn, thay `applyStockTransaction` của QUANLY.
+   *
+   * Legacy ghi thẳng `currentStock` bỏ qua Unit Engine, nên điều chỉnh kiểm kê
+   * bị lần tính lại kế tiếp xoá âm thầm. Ở đây điều chỉnh đi qua Unit: hoặc là
+   * đối chiếu vật lý trên một Unit cụ thể, hoặc là ledger entry không có unitId
+   * (tự cộng `untrackedPendingDelta` theo quy tắc §5).
+   */
+  var AdjustInventory = pipeline.defineCommand({
+    name: 'AdjustInventory',
+    authority: 'REVIEW_APPROVE_CORRECT',
+    mutates: true,
+    sources: ['QUANLY'],
+
+    operationId: function (input) {
+      return ids.deterministicId('operation', ['adjust', input.adjustRef, input.itemId]);
+    },
+
+    validate: function (input) {
+      if (!input || !ids.isId(input.itemId, 'item')) return R.err('VALIDATION', 'cần itemId hợp lệ');
+      if (!input.adjustRef) return R.err('VALIDATION', 'cần adjustRef để id xác định');
+      if (!input.reason) return R.err('VALIDATION', 'điều chỉnh kho phải có lý do');
+      var hasUnit = !!input.unitId;
+      if (hasUnit && typeof input.actualQty !== 'number') {
+        return R.err('VALIDATION', 'điều chỉnh trên 1 lô cụ thể cần actualQty (số cân được)');
+      }
+      if (!hasUnit && typeof input.qtyDelta !== 'number') {
+        return R.err('VALIDATION', 'điều chỉnh phần không gắn lô cần qtyDelta');
+      }
+      return R.ok(true);
+    },
+
+    execute: function (input, ctx) {
+      var plan = pipeline.emptyPlan();
+      var opId = ids.deterministicId('operation', ['adjust', input.adjustRef, input.itemId]);
+
+      if (input.unitId) {
+        var unit = (input.units || []).filter(function (u) { return u.unitId === input.unitId; })[0];
+        if (!unit) return R.err('NOT_FOUND', 'không tìm thấy lô ' + input.unitId);
+
+        /* GHI ĐÈ TUYỆT ĐỐI qua Unit Engine — không cộng delta vào số cache. */
+        var rc = reconciliation.physicalReconciliation(unit, {
+          actualQty: input.actualQty, at: ctx.clock.now(),
+          actorId: ctx.actor.actorId, operationId: opId,
+          method: input.method || 'stock_count', reason: input.reason
+        });
+        if (R.isErr(rc)) return rc;
+
+        plan.unitChanges.push(rc.value.unit);
+        plan.ledgerEntries.push({
+          domain: input.domain || 'raw', type: 'ADJUSTMENT', itemId: input.itemId,
+          storeId: ctx.storeId, unitId: input.unitId,
+          qtyDelta: rc.value.delta,
+          businessDate: ctx.businessDate, actorId: ctx.actor.actorId,
+          occurredAt: ctx.clock.now(),
+          referenceType: 'adjustment', referenceId: input.adjustRef, reason: input.reason
+        });
+        plan.domainRecords.push({ type: 'reconciliationRecord', record: rc.value.record });
+      } else {
+        plan.ledgerEntries.push({
+          domain: input.domain || 'raw', type: 'ADJUSTMENT', itemId: input.itemId,
+          storeId: ctx.storeId, unitId: null, qtyDelta: input.qtyDelta,
+          businessDate: ctx.businessDate, actorId: ctx.actor.actorId,
+          occurredAt: ctx.clock.now(),
+          referenceType: 'adjustment', referenceId: input.adjustRef, reason: input.reason
+        });
+      }
+
+      plan.projectionRecomputes.push({ itemId: input.itemId, storeId: ctx.storeId });
+      return R.ok(plan);
+    }
+  });
+
+  /** ReportLostContainer — POS báo mất. Chỉ tạo phiếu CHỜ DUYỆT. */
+  var ReportLostContainer = pipeline.defineCommand({
+    name: 'ReportLostContainer',
+    authority: 'EXECUTE',
+    mutates: true,
+    sources: ['POS'],
+
+    operationId: function (input) {
+      return ids.deterministicId('operation', ['lostreport', input.unitId]);
+    },
+
+    validate: function (input) {
+      if (!input || !ids.isId(input.unitId, 'unit')) return R.err('VALIDATION', 'cần unitId hợp lệ');
+      if (!input.reason) return R.err('VALIDATION', 'báo mất phải có lý do');
+      return R.ok(true);
+    },
+
+    execute: function (input, ctx) {
+      var plan = pipeline.emptyPlan();
+      plan.domainRecords.push({
+        type: 'lostReport',
+        record: {
+          lostReportId: ids.deterministicId('operation', ['lostreport', input.unitId]),
+          unitId: input.unitId,
+          /* CHỜ DUYỆT — Unit chưa vào nhánh LOST cho tới khi QUANLY duyệt.
+             Đây chính là mắt xích legacy thiếu (Bug #12). */
+          status: 'PENDING_REVIEW',
+          reportedBy: ctx.actor.actorId,
+          reportedAt: ctx.clock.now(),
+          businessDate: ctx.businessDate,
+          reason: input.reason
+        }
+      });
+      plan.events.push({
+        type: 'LostContainerReported',
+        unitId: input.unitId, storeId: ctx.storeId, businessDate: ctx.businessDate
+      });
+      return R.ok(plan);
+    }
+  });
+
+  /**
+   * RestoreFoundContainer — tìm lại được.
+   *
+   * §8: giữ nguyên toàn bộ quyết định nghiệp vụ của legacy
+   * (`submitFoundLostContainer`) — Unit "mới nguyên", KHÔNG suy luận lại phần
+   * đã dùng trước khi mất. Chỉ thêm `operationId` xuyên suốt (fix Bug #24, nơi
+   * bước ADJUSTMENT không có txId).
+   */
+  var RestoreFoundContainer = pipeline.defineCommand({
+    name: 'RestoreFoundContainer',
+    /* Ma trận §21: "Found | YES | REVIEW/CORRECT" — POS làm bằng EXECUTE,
+       QUANLY làm bằng REVIEW/CORRECT. Cùng một command, hai lối vào hợp lệ. */
+    authority: ['EXECUTE', 'REVIEW_APPROVE_CORRECT'],
+    mutates: true,
+    sources: ['POS', 'QUANLY'],
+
+    operationId: function (input) {
+      return ids.deterministicId('operation', ['found', input.unitId]);
+    },
+
+    validate: function (input) {
+      if (!input || !ids.isId(input.unitId, 'unit')) return R.err('VALIDATION', 'cần unitId hợp lệ');
+      return R.ok(true);
+    },
+
+    execute: function (input, ctx) {
+      var unit = (input.units || []).filter(function (u) { return u.unitId === input.unitId; })[0];
+      if (!unit) return R.err('NOT_FOUND', 'không tìm thấy lô ' + input.unitId);
+
+      var opId = ids.deterministicId('operation', ['found', input.unitId]);
+      var r = unitLib.restoreFound(unit, {
+        at: ctx.clock.now(), actorId: ctx.actor.actorId, operationId: opId
+      });
+      if (R.isErr(r)) return r;
+
+      var plan = pipeline.emptyPlan();
+      plan.unitChanges.push(r.value);
+      plan.ledgerEntries.push({
+        domain: 'raw', type: 'FOUND', itemId: unit.itemId, storeId: ctx.storeId,
+        unitId: unit.unitId, qtyDelta: r.value.remainingQty,
+        businessDate: ctx.businessDate, actorId: ctx.actor.actorId,
+        occurredAt: ctx.clock.now(),
+        referenceType: 'found', referenceId: input.unitId,
+        reason: 'tìm lại được container đã báo mất'
+      });
+      /* Hoàn khoản trừ trách nhiệm nhân viên là SIDE-EFFECT, đi qua event. */
+      plan.events.push({
+        type: 'ContainerFound',
+        unitId: unit.unitId, storeId: ctx.storeId, businessDate: ctx.businessDate,
+        lostReportId: unit.lostReportId
+      });
+      plan.projectionRecomputes.push({ itemId: unit.itemId, storeId: ctx.storeId });
+      return R.ok(plan);
+    }
+  });
+
+  return {
+    RecordWaste: RecordWaste,
+    AdjustInventory: AdjustInventory,
+    ReportLostContainer: ReportLostContainer,
+    RestoreFoundContainer: RestoreFoundContainer
+  };
+});
+
 /* ===== src/layers/commands/pipeline.js ===== */
 /**
  * Command pipeline — đường ghi DUY NHẤT của cả POS lẫn QUANLY.
@@ -6095,6 +6690,327 @@ GIEO.define('commands/pipeline', [
     defineCommand: defineCommand,
     run: run,
     emptyPlan: emptyPlan
+  };
+});
+
+/* ===== src/layers/commands/reversal.js ===== */
+/**
+ * Reversal / Correction — ĐÚNG 2 PATTERN, thay cho 10 đường rời rạc của legacy.
+ *
+ * Chuỗi thật: FIFO-CHAIN-TRACE-REVERSAL-CORRECTION-V1.md.
+ *
+ * Legacy có 10 cơ chế hoàn/sửa khác nhau về chất lượng dù cùng ý định — chính
+ * code legacy tự nhận trong comment rằng "lẽ ra nên dùng chung engine". Kết
+ * luận thiết kế: chỉ cần 2 pattern + domain event cho side-effect.
+ *
+ *   ReverseTransaction — sự kiện ĐÃ TIÊU THỤ kho, giờ hoàn ngược.
+ *                        (xoá bill, huỷ mẻ đang nấu, sửa add-on, sửa ledger sai)
+ *   ReviseState        — sửa một con số trạng thái đã chốt sai, KHÔNG có ý
+ *                        nghĩa tiêu thụ ngược. (yield BTP, giờ công, kiểm kê)
+ *
+ * SIDE-EFFECT NGOÀI KHO KHÔNG NẰM TRONG 2 PATTERN TRÊN.
+ * Bằng chứng từ legacy: xoá bill CỐ Ý không hoàn loyalty (quyết định nghiệp vụ
+ * hợp lệ, ghi rõ trong comment/toast), còn ở Found-after-Lost thì logic hoàn
+ * deduction đã viết sẵn nhưng tầng tạo deduction chưa từng tồn tại. Hai tình
+ * huống khác nhau, cùng một bài học: side-effect phải là handler đăng ký riêng
+ * lắng nghe domain event, không phải nhánh if/else trong hàm hoàn chính.
+ *
+ * Lợi ích cụ thể: chủ quán đổi ý "có hoàn điểm khi huỷ bill không" thì thêm/bớt
+ * một handler, không phải sửa lại luồng hoàn.
+ */
+GIEO.define('commands/reversal', [
+  'shared-kernel/ids',
+  'shared-kernel/result',
+  'commands/pipeline',
+  'fifo-core/allocation',
+  'fifo-core/reconciliation'
+], function (ids, R, pipeline, allocation, reconciliation) {
+  'use strict';
+
+  /**
+   * Câu hỏi mà legacy để ngỏ ở MỌI trường hợp đã audit: báo cáo lịch sử đóng
+   * băng theo giá trị tại thời điểm phát sinh, hay tính lại theo giá trị mới?
+   * Ở đây nó là field BẮT BUỘC — không có mặc định để rơi vào.
+   */
+  var HISTORICAL_POLICY = {
+    /* Số đã công bố giữ nguyên; sửa chỉ ảnh hưởng từ nay về sau. */
+    FREEZE: 'FREEZE',
+    /* Tính lại lịch sử theo giá trị mới — phải có lý do rõ. */
+    RECOMPUTE: 'RECOMPUTE'
+  };
+
+  /* Sự kiện domain. Handler đăng ký riêng, không sửa file này khi thêm/bớt. */
+  var EVENTS = {
+    OrderVoided: 'OrderVoided',
+    ContainerFound: 'ContainerFound',
+    BatchCancelled: 'BatchCancelled',
+    StateRevised: 'StateRevised'
+  };
+
+  function createEventBus() {
+    var handlers = Object.create(null);
+    return {
+      on: function (eventType, name, fn) {
+        if (!EVENTS[eventType]) throw new Error('[reversal] sự kiện chưa khai: ' + eventType);
+        (handlers[eventType] || (handlers[eventType] = [])).push({ name: name, fn: fn });
+      },
+      /** Trả kết quả TỪNG handler — một handler hỏng không được nuốt im lặng. */
+      emit: function (event) {
+        var list = handlers[event.type] || [];
+        return list.map(function (h) {
+          try {
+            return { handler: h.name, result: h.fn(event) };
+          } catch (e) {
+            return { handler: h.name, result: R.err('MANUAL_REVIEW', h.name + ' ném lỗi: ' + e.message) };
+          }
+        });
+      },
+      handlersFor: function (eventType) {
+        return (handlers[eventType] || []).map(function (h) { return h.name; });
+      }
+    };
+  }
+
+  /**
+   * ReverseTransaction — MỘT API cho mọi trường hợp hoàn kho.
+   *
+   * Hoàn theo phân bổ GỐC, không chạy lại FIFO (fifo-core/reconciliation §3.8).
+   * Claim theo doc id xác định nên idempotent tự nhiên, không phải check-then-act.
+   */
+  var ReverseTransaction = pipeline.defineCommand({
+    name: 'ReverseTransaction',
+    authority: 'REVIEW_APPROVE_CORRECT',
+    mutates: true,
+    sources: ['POS', 'QUANLY'],
+
+    operationId: function (input) {
+      return reconciliation.reversalOperationId(input.referenceId, input.domain, input.itemId || 'all');
+    },
+
+    validate: function (input) {
+      if (!input || !input.referenceId) return R.err('VALIDATION', 'ReverseTransaction cần referenceId');
+      if (!input.domain) return R.err('VALIDATION', 'ReverseTransaction cần domain');
+      if (!input.reason) {
+        return R.err('VALIDATION', 'hoàn giao dịch phải có lý do — hoàn không lý do là hoàn không kiểm chứng được');
+      }
+      if (!Array.isArray(input.originalAllocations)) {
+        return R.err('VALIDATION',
+          'ReverseTransaction cần originalAllocations — hoàn là BÙ TRỪ theo phân bổ gốc, ' +
+          'không phải chạy lại FIFO để đoán hồi đó đã trừ ở đâu');
+      }
+      return R.ok(true);
+    },
+
+    execute: function (input, ctx) {
+      var plan = pipeline.emptyPlan();
+      var opId = reconciliation.reversalOperationId(input.referenceId, input.domain, input.itemId || 'all');
+      var ws = allocation.createWorkingSet(input.units || []);
+
+      var r = reconciliation.reverseAllocations(ws, {
+        referenceId: input.referenceId,
+        domain: input.domain,
+        operationId: opId,
+        originalAllocations: input.originalAllocations,
+        fallbackQty: input.fallbackQty
+      });
+      if (R.isErr(r)) return r;
+      var rev = r.value;
+
+      plan.unitChanges = rev.touchedUnits;
+      rev.reversals.forEach(function (x) {
+        plan.ledgerEntries.push({
+          domain: input.domain,
+          type: 'REVERSAL',
+          itemId: x.itemId,
+          storeId: ctx.storeId,
+          unitId: x.unitId,
+          /* Trả lại bằng delta DƯƠNG — giữ nguyên mọi thao tác xảy ra sau đó. */
+          qtyDelta: x.qty,
+          unitCost: x.unitCost,
+          costBasisVersionId: x.costBasisVersionId,
+          businessDate: ctx.businessDate,
+          actorId: ctx.actor.actorId,
+          occurredAt: ctx.clock.now(),
+          referenceType: input.referenceType || 'reversal',
+          referenceId: input.referenceId,
+          reason: input.reason
+        });
+      });
+
+      if (rev.coverage === 'untracked') {
+        /* Dữ liệu legacy không truy được phân bổ gốc. Đánh dấu để rà tay —
+           KHÔNG đoán bừa (invariant #12). */
+        plan.domainRecords.push({
+          type: 'manualReviewTask',
+          record: {
+            reason: 'AMBIGUOUS_LEGACY',
+            referenceId: input.referenceId,
+            qty: rev.untrackedQty,
+            note: 'không truy được phân bổ gốc — cần rà thủ công trước khi coi là đã hoàn'
+          }
+        });
+      }
+
+      /* Side-effect ĐI QUA EVENT, không phải if/else ở đây. */
+      if (input.eventType) {
+        if (!EVENTS[input.eventType]) {
+          return R.err('VALIDATION', 'sự kiện chưa khai: ' + input.eventType);
+        }
+        plan.events.push(Object.assign({
+          type: input.eventType,
+          referenceId: input.referenceId,
+          storeId: ctx.storeId,
+          businessDate: ctx.businessDate,
+          reversedBy: ctx.actor.actorId,
+          reason: input.reason
+        }, input.eventData || {}));
+      }
+
+      plan.projectionRecomputes = rev.reversals.map(function (x) {
+        return { itemId: x.itemId, storeId: ctx.storeId };
+      });
+
+      return R.ok(plan);
+    }
+  });
+
+  /**
+   * ReviseState — sửa con số đã chốt sai, KHÔNG có ý nghĩa tiêu thụ ngược.
+   *
+   * Hai thứ bắt buộc mà legacy thiếu ở mọi trường hợp đã audit:
+   *   - audit-array giữ giá trị trước (append-only, không ghi đè)
+   *   - `historicalPolicy` trả lời rõ đóng băng hay tính lại lịch sử
+   */
+  var ReviseState = pipeline.defineCommand({
+    name: 'ReviseState',
+    authority: 'REVIEW_APPROVE_CORRECT',
+    mutates: true,
+    sources: ['QUANLY'],
+
+    operationId: function (input) {
+      return ids.deterministicId('operation', ['revise', input.entityType, input.entityId, input.field]);
+    },
+
+    validate: function (input) {
+      if (!input || !input.entityId) return R.err('VALIDATION', 'ReviseState cần entityId');
+      if (!input.entityType) return R.err('VALIDATION', 'ReviseState cần entityType');
+      if (!input.field) return R.err('VALIDATION', 'ReviseState cần field');
+      if (input.newValue === undefined) return R.err('VALIDATION', 'ReviseState cần newValue');
+      if (!input.reason) return R.err('VALIDATION', 'sửa trạng thái phải có lý do');
+      if (!HISTORICAL_POLICY[input.historicalPolicy]) {
+        return R.err('VALIDATION',
+          'ReviseState phải khai historicalPolicy: FREEZE (số đã công bố giữ nguyên) ' +
+          'hay RECOMPUTE (tính lại lịch sử). Legacy để ngỏ câu này ở mọi trường hợp, ' +
+          'nên không ai biết báo cáo cũ có đổi hay không.');
+      }
+      return R.ok(true);
+    },
+
+    execute: function (input, ctx) {
+      var plan = pipeline.emptyPlan();
+      var opId = ids.deterministicId('operation', ['revise', input.entityType, input.entityId, input.field]);
+
+      plan.domainRecords.push({
+        type: 'stateRevision',
+        record: {
+          entityType: input.entityType,
+          entityId: input.entityId,
+          field: input.field,
+          /* Append-only: giá trị cũ giữ lại để trả lời "số nào từng đúng". */
+          before: input.currentValue === undefined ? null : input.currentValue,
+          after: input.newValue,
+          historicalPolicy: input.historicalPolicy,
+          reason: input.reason,
+          actorId: ctx.actor.actorId,
+          at: ctx.clock.now(),
+          operationId: opId
+        }
+      });
+
+      /* RECOMPUTE mới đụng tới báo cáo cũ; FREEZE thì không. Quyết định này
+         hiện ra trong plan, không nằm ngầm trong đầu người bấm nút. */
+      if (input.historicalPolicy === HISTORICAL_POLICY.RECOMPUTE && input.affectedScope) {
+        plan.projectionRecomputes.push(input.affectedScope);
+      }
+
+      plan.events.push({
+        type: EVENTS.StateRevised,
+        entityType: input.entityType,
+        entityId: input.entityId,
+        field: input.field,
+        historicalPolicy: input.historicalPolicy,
+        storeId: ctx.storeId,
+        businessDate: ctx.businessDate
+      });
+
+      return R.ok(plan);
+    }
+  });
+
+  /**
+   * LedgerCorrection — đóng gap "sửa 1 dòng ledger sai".
+   *
+   * Ghi dòng ĐẢO + dòng ĐÚNG, `referenceId` trỏ về dòng gốc. KHÔNG update dòng
+   * cũ — ledger append-only THẬT, không lặp lại pattern mutate-tại-chỗ của
+   * `ctnDaoHaoHutMa` legacy.
+   */
+  var CorrectLedgerEntry = pipeline.defineCommand({
+    name: 'CorrectLedgerEntry',
+    authority: 'REVIEW_APPROVE_CORRECT',
+    mutates: true,
+    sources: ['QUANLY'],
+
+    operationId: function (input) {
+      return ids.deterministicId('operation', ['ledgerfix', input.originalEntry.entryId]);
+    },
+
+    validate: function (input) {
+      if (!input || !input.originalEntry) return R.err('VALIDATION', 'cần dòng ledger gốc');
+      if (!input.corrected) return R.err('VALIDATION', 'cần nội dung đúng');
+      if (!input.reason) return R.err('VALIDATION', 'sửa ledger phải có lý do');
+      return R.ok(true);
+    },
+
+    execute: function (input, ctx) {
+      var plan = pipeline.emptyPlan();
+      var o = input.originalEntry;
+
+      /* Dòng ĐẢO. */
+      plan.ledgerEntries.push({
+        domain: o.domain, type: o.type, itemId: o.itemId, storeId: o.storeId,
+        unitId: o.unitId, qtyDelta: -o.qtyDelta,
+        businessDate: ctx.businessDate, actorId: ctx.actor.actorId,
+        occurredAt: ctx.clock.now(),
+        referenceType: 'ledgerCorrection', referenceId: o.entryId,
+        reason: 'đảo dòng sai: ' + input.reason
+      });
+
+      /* Dòng ĐÚNG. */
+      plan.ledgerEntries.push({
+        domain: o.domain,
+        type: input.corrected.type || o.type,
+        itemId: input.corrected.itemId || o.itemId,
+        storeId: o.storeId,
+        unitId: input.corrected.unitId !== undefined ? input.corrected.unitId : o.unitId,
+        qtyDelta: input.corrected.qtyDelta,
+        businessDate: ctx.businessDate, actorId: ctx.actor.actorId,
+        occurredAt: ctx.clock.now(),
+        referenceType: 'ledgerCorrection', referenceId: o.entryId,
+        reason: 'thay cho dòng sai: ' + input.reason
+      });
+
+      plan.projectionRecomputes.push({ itemId: o.itemId, storeId: o.storeId });
+      return R.ok(plan);
+    }
+  });
+
+  return {
+    HISTORICAL_POLICY: HISTORICAL_POLICY,
+    EVENTS: EVENTS,
+    createEventBus: createEventBus,
+    ReverseTransaction: ReverseTransaction,
+    ReviseState: ReviseState,
+    CorrectLedgerEntry: CorrectLedgerEntry
   };
 });
 
@@ -6695,7 +7611,8 @@ GIEO.define('commands/shift', [
 
   var CloseCashSegment = pipeline.defineCommand({
     name: 'CloseCashSegment',
-    authority: 'EXECUTE',
+    /* Nhân viên kết ca, nhưng Quản lý cũng chốt hộ được khi cần. */
+    authority: ['EXECUTE', 'REVIEW_APPROVE_CORRECT'],
     mutates: true,
     sources: ['POS', 'QUANLY'],
     operationId: function (input) {

@@ -42,10 +42,25 @@ GIEO.define('store-context/access', ['shared-kernel/ids', 'shared-kernel/result'
    */
   var registry = Object.create(null);
 
+  /** Chấp nhận 1 authority hoặc mảng authority; trả về mảng đã kiểm hợp lệ. */
+  function normalizeAuthorities(a) {
+    var list = Array.isArray(a) ? a : [a];
+    var out = [];
+    for (var i = 0; i < list.length; i++) {
+      if (!AUTHORITY[list[i]]) return [];
+      if (out.indexOf(list[i]) === -1) out.push(list[i]);
+    }
+    return out;
+  }
+
   /**
    * @param {string} name        tên command, vd 'ApproveLostContainer'
    * @param {object} spec
-   *   authority   {string}   lớp quyền tối thiểu cần có
+   *   authority   {string|string[]} lớp quyền chấp nhận được. Mảng nghĩa là
+   *               BẤT KỲ lớp nào trong đó cũng đủ — vì ma trận §21 có những
+   *               command chạy dưới authority khác nhau tuỳ app (vd "Found":
+   *               POS làm bằng EXECUTE, QUANLY làm bằng REVIEW/CORRECT).
+   *               Một giá trị duy nhất là trường hợp riêng của mảng 1 phần tử.
    *   mutates     {boolean}  có đổi business state không (ảnh hưởng luật §23)
    *   sources     {string[]} app nào được gọi; bỏ trống = mọi app
    *   crossStore  {boolean}  có được thao tác nhiều store cùng lúc không (§23)
@@ -53,7 +68,8 @@ GIEO.define('store-context/access', ['shared-kernel/ids', 'shared-kernel/result'
   function registerCommand(name, spec) {
     if (!name || typeof name !== 'string') throw new Error('[access] registerCommand cần tên');
     if (registry[name]) throw new Error('[access] command đăng ký trùng: "' + name + '"');
-    if (!AUTHORITY[spec && spec.authority]) {
+    var authorities = normalizeAuthorities(spec && spec.authority);
+    if (authorities.length === 0) {
       throw new Error('[access] command "' + name + '" cần authority hợp lệ');
     }
     if (typeof spec.mutates !== 'boolean') {
@@ -61,7 +77,7 @@ GIEO.define('store-context/access', ['shared-kernel/ids', 'shared-kernel/result'
     }
     registry[name] = {
       name: name,
-      authority: spec.authority,
+      authorities: authorities,
       mutates: spec.mutates,
       sources: spec.sources ? spec.sources.slice() : null,
       crossStore: !!spec.crossStore
@@ -129,9 +145,10 @@ GIEO.define('store-context/access', ['shared-kernel/ids', 'shared-kernel/result'
       return R.err('FORBIDDEN', 'command "' + commandName + '" không gọi được từ ' + actor.source +
         ' (chỉ: ' + cmd.sources.join(', ') + ')');
     }
-    if (!hasAuthority(actor, cmd.authority)) {
-      return R.err('FORBIDDEN', 'vai trò ' + actor.role + ' thiếu quyền ' + cmd.authority +
-        ' cho command "' + commandName + '"');
+    var ok = cmd.authorities.some(function (a) { return hasAuthority(actor, a); });
+    if (!ok) {
+      return R.err('FORBIDDEN', 'vai trò ' + actor.role + ' thiếu quyền ' +
+        cmd.authorities.join(' hoặc ') + ' cho command "' + commandName + '"');
     }
     if (!ids.isId(targetStoreId, 'store')) {
       return R.err('VALIDATION', 'authorize cần targetStoreId hợp lệ — mọi thao tác phải nêu rõ store');
@@ -152,7 +169,7 @@ GIEO.define('store-context/access', ['shared-kernel/ids', 'shared-kernel/result'
       actorId: actor.actorId,
       command: commandName,
       storeId: targetStoreId,
-      authority: cmd.authority,
+      authorities: cmd.authorities.slice(),
       mutates: cmd.mutates
     });
   }
