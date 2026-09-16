@@ -88,11 +88,12 @@ Luật cứng: `apps` không bao giờ chạm thẳng `fifo-core` / `compaction`
 | `[9]` Reporting | ✅ Định giá FIFO thật + variance + export CSV |
 | P4 Traceability | ✅ Trace 2 chiều + dependency registry |
 | P7 Read layer | ✅ Cổng đọc duy nhất, enforce quyền đọc |
+| P5 BTP | ✅ PrepBatch + yield versioned + actual-vs-theoretical + báo cáo ngày |
 | P6 Compaction | 🔨 `VersionedInput` xong; snapshot/verifier/purge chưa |
 | P9-P10 UI | ⬜ chưa bắt đầu |
 | P12-P13 Shadow + Cutover | ⬜ chưa bắt đầu |
 
-**492 test pass, 44 module, 0 vi phạm import-direction.**
+**523 test pass, 47 module, 0 vi phạm import-direction.**
 
 Build order theo `FEATURE-TREE-V1.md` §3:
 `[0] Identity → [1] Catalog + [2] FIFO Core → [3] Sales → [4] Loyalty + [5] Shift + [6] Payroll → [7] Finance → [8] Alerts → [9] Reporting`

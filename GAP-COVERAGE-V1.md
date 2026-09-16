@@ -47,9 +47,10 @@
 
 | Gap | Trạng thái |
 |---|---|
-| Không có actual-vs-theoretical cho tồn BTP | ⬜ **CHƯA LÀM** — `recipe-cost-btp/btp` chưa xây |
-| Chỉ 1/3 đường ghi waste có `ingredientBreakdown` | ✅ `commands/inventory.RecordWaste` luôn có — `luôn có ingredientBreakdown` |
-| Báo cáo BTP ngày tính đúng nhưng không render | ⬜ **CHƯA LÀM** — thuộc UI (P9/P10) |
+| Không có actual-vs-theoretical cho tồn BTP | ✅ `recipe-cost-btp/btp.computeVariance` — cùng công thức với raw. Test: `hụt so với lý thuyết bị PHÁT HIỆN` |
+| Sửa yield làm trôi COGS lịch sử | ✅ yield qua `VersionedInput`. Test: `sửa yield KHÔNG làm trôi COGS ngày cũ` |
+| Chỉ 1/3 đường ghi waste có `ingredientBreakdown` | ✅ `commands/inventory.RecordWaste` luôn có. Test: `waste BTP luôn có ingredientBreakdown, bất kể trigger từ đâu` |
+| Báo cáo BTP ngày tính đúng nhưng không render | ✅ `reporting/btp-report.buildDaily` + CSV. Test: `reporting/btp-report — {nấu, dùng, huỷ} theo ngày` |
 
 ## Payroll
 
@@ -127,7 +128,6 @@
 
 | Phase | Nội dung |
 |---|---|
-| P5 (phần BTP) | `recipe-cost-btp/btp` — PrepBatch, yield, actual-vs-theoretical cho tồn BTP |
 | P6 | `compaction` — snapshot builder / verifier / purge (đã có `VersionedInput`) |
 | P1 (adapter) | `protected-adapters` — bill printer (kèm **fix** poisoned queue), label printer, scanner, bank |
 | P1 (adapter) | `legacy-firebase-adapter` + `persistence-firebase` |
