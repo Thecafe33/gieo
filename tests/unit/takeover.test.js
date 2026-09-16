@@ -101,10 +101,10 @@ describe('commands/takeover — luật tiếp nhận', function () {
     assert.strictEqual(emp.payTerms.hourlyRate, 20000);
   });
 
-  test('PIN của hệ cũ KHÔNG mang sang', function () {
+  test('PIN 4 số của hệ cũ mang sang NGUYÊN VẸN', function () {
     var emp = buildOk().plan.domainRecords
       .filter(function (r) { return r.type === 'employee'; })[0].record;
-    assert.strictEqual(emp.pin, undefined);
+    assert.strictEqual(emp.pin, '3326', 'nhân viên phải đăng nhập bằng đúng mã họ vẫn dùng');
   });
 
   test('doanh thu đã chốt đóng băng nguyên trạng, hệ mới không tính lại', function () {

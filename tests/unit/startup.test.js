@@ -287,10 +287,10 @@ describe('startup — tiếp nhận CHẠY THẬT tại mốc cutover', function
       assert.strictEqual(unit.status, 'OPEN');
       assert.strictEqual(unit.seededAt, '2026-09-20');
 
-      /* PIN hệ cũ không được mang sang. */
+      /* PIN hệ cũ mang sang nguyên vẹn — nhân viên đăng nhập như cũ. */
       var emp = fb.docs[base + '/employees/' + _su.ids.deterministicId('employee', ['legacy', 'e1'])];
       assert.ok(emp);
-      assert.strictEqual(emp.pin, undefined);
+      assert.strictEqual(emp.pin, '3326');
 
       /* Bản ghi operation phải nằm trong cùng lần ghi — nếu không, lần bật app
          sau sẽ tiếp nhận lại và ghi đè tồn đầu. */

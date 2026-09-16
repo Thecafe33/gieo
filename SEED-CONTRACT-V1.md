@@ -20,7 +20,7 @@ Mục tiêu KHÔNG phải migrate 100%. Mục tiêu là lấy FIFO làm gốc ch
 |---|---|---|
 | Mã sản phẩm / mặt hàng | ✅ | kèm đơn vị, quy cách, tồn tối thiểu |
 | Định lượng / công thức | ✅ | version đầu hiệu lực TỪ mốc cutover |
-| Nhân viên | ✅ | kèm điều khoản lương; **PIN không mang sang** |
+| Nhân viên | ✅ | kèm điều khoản lương **và PIN 4 số** — nhân viên đăng nhập như cũ |
 | Doanh thu đã chốt | ✅ | đóng băng nguyên trạng, hệ mới không tính lại |
 | Tồn đầu kỳ theo lô | ✅ | `unitBase` hiện tại, `costBasis` trống |
 

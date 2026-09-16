@@ -147,7 +147,10 @@ GIEO.define('commands/takeover', [
           otRate: typeof e.otRate === 'number' ? e.otRate : null,
           otThresholdHours: typeof e.otThresholdHours === 'number' ? e.otThresholdHours : null
         },
-        /* PIN KHÔNG mang sang — hệ mới tự cấp, không kế thừa mã đăng nhập cũ. */
+        /* PIN mang sang NGUYÊN VẸN. Tiếp nhận nghĩa là nhân viên đăng nhập bằng
+           đúng mã họ vẫn dùng — bắt cả quán học lại PIN mới trong ngày cutover
+           là tự tạo ra một sự cố không liên quan gì tới FIFO. */
+        pin: e.pin || null,
         origin: ORIGIN, legacyRef: id
       };
     }).filter(Boolean);
