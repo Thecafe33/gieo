@@ -80,7 +80,8 @@ GIEO.define('persistence-firebase/canonical-paths', [
 
     /* Bill — live ở RTDB, archive ở Firestore, giữ đúng phân tầng legacy. */
     billLive: { kind: RTDB, build: function (ctx, a) { return base(ctx) + '/bills/live/' + a.businessDate + '/' + a.billId; } },
-    billArchive: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/bills/archive/' + a.businessDate; } },
+    billArchive: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/bills/archive/' + a.archiveKey; } },
+    archiveRegistry: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/archiveRegistry/' + a.businessDate; } },
     billCounter: { kind: RTDB, build: function (ctx, a) { return base(ctx) + '/counters/bill/' + a.businessDate; } },
 
     /* Cache TÍNH-LẠI-ĐƯỢC — không lên cấp thành snapshot bất biến. */
@@ -90,8 +91,10 @@ GIEO.define('persistence-firebase/canonical-paths', [
     shiftSegment: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/shifts/' + a.businessDate + '/segments/' + a.seq; } },
     employeeShift: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/employeeShifts/' + a.shiftId; } },
     /* Compaction thật. */
-    monthlySnapshot: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/snapshots/monthly/' + a.period; } },
-    unitSnapshot: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/snapshots/' + a.period + '/' + a.unitId; } },
+    monthlySnapshot: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/snapshots/monthly/' + a.period + '/revisions/' + a.revisionNo; } },
+    monthlySnapshotHead: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/snapshots/monthly/' + a.period + '/head/current'; } },
+    unitSnapshot: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/snapshots/units/' + a.unitId + '/revisions/' + a.revisionNo; } },
+    unitSnapshotHead: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/snapshots/units/' + a.unitId + '/head/current'; } },
 
     loyaltyLedger: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/loyaltyLedger/' + a.entryId; } },
     loyaltyEffects: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/loyaltyEffects/' + a.billId; } },

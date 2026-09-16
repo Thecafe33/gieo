@@ -117,7 +117,7 @@
 |---|---|
 | Menu: 2 app cùng ghi RTDB, race condition | ✅ `catalog/menu` + `sources:['QUANLY']` ở tầng command |
 | Path mismatch `food_gieogieo` vs `food_menu_gieogieo` | ✅ mọi path legacy tập trung 1 file `legacy-paths.js`. Test: `mọi path legacy khai ở một nơi` |
-| Giá menu không real-time tới POS | ⬜ thuộc UI/persistence — chưa xây |
+| Giá menu không real-time tới POS | ✅ Firebase RTDB subscription → legacy mapper → runtime `GetMenu` watch → POS; có unsubscribe, không phơi API ghi. Test: `menu realtime`, `subscription RTDB` |
 | Bất đối xứng retry Loyalty vs Stamp-free | ✅ `loyalty/ledger` — cùng một đường ghi cho mọi loại |
 | 12/16 alert rơi vào khuôn UI chung | ✅ `alerts/alert.TYPES` — mỗi loại khai trường bắt buộc riêng |
 | `prep_forecasts` tách rời luồng nấu thật | ⬜ chưa xây (advisory only, đúng thiết kế) |
@@ -129,8 +129,7 @@
 
 | Phase | Nội dung |
 |---|---|
-| P6 | `compaction` — snapshot builder / verifier / purge (đã có `VersionedInput`) |
-| P9 / P10 | UI POS + QUANLY |
+| P9 / P10 | Thin shell/controller + legacy read port + Firebase SDK read bridge đã xong ở READ_ONLY; Catalog realtime POS và báo cáo doanh thu đã nối qua query gateway; còn cấp Firebase config/handles thật và hoàn thiện các màn nghiệp vụ còn lại |
 | P12 / P13 | Shadow comparison + cutover |
 
-**Ba thứ đầu là điều kiện để chạy được với dữ liệu thật.** Hiện tại toàn bộ domain là hàm thuần, chạy và kiểm được bằng test nhưng chưa nối vào Firebase — đúng trạng thái READ-ONLY mà chủ hệ thống yêu cầu.
+P6 đã hoàn tất: Unit/Book snapshot append-only theo revision, verifier, lifecycle, drift alert, correction giữ v1/tạo v2, unified read, archive registry tập trung không trần 60 ngày và purge safety gate. Race hoàn đơn đồng thời là release gate bắt buộc đã có test 1-winner/1-commit; gate này phải tiếp tục xanh trước P12/P13.

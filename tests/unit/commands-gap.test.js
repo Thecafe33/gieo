@@ -365,6 +365,31 @@ describe('Reversal — 2 pattern thay 10 đường của legacy', function () {
     assert.strictEqual(assertOk(run(REV.ReverseTransaction, input, c, store)).replayed, true);
   });
 
+  test('RELEASE GATE: 2 QUANLY hoàn đồng thời chỉ một claim/commit thắng', function () {
+    var store = _g.PIPE.createInMemoryOperationStore();
+    var c = qlCtx();
+    var u = Object.assign({}, gUnit(1000, 'race'), { remainingQty: 800 });
+    var input = {
+      referenceId: 'bill_race', domain: 'raw', itemId: _g.SUA, reason: 'xoá bill', units: [u],
+      originalAllocations: [{ unitId: u.unitId, itemId: _g.SUA, qty: 200, unitCost: 30, operationId: 'op1' }]
+    };
+    var commits = 0;
+    function delayedCommit() {
+      commits += 1;
+      return new Promise(function (resolve) {
+        setTimeout(function () { resolve(GIEO.require('shared-kernel/result').ok({ committed: true })); }, 5);
+      });
+    }
+    return Promise.all([
+      _g.PIPE.runAndCommit(REV.ReverseTransaction, input, c, { operationStore: store, commit: delayedCommit }),
+      _g.PIPE.runAndCommit(REV.ReverseTransaction, input, c, { operationStore: store, commit: delayedCommit })
+    ]).then(function (results) {
+      assert.strictEqual(commits, 1, 'race đã chạy commit hơn một lần');
+      assert.strictEqual(results.filter(function (x) { return x.ok; }).length, 1);
+      assert.strictEqual(results.filter(function (x) { return !x.ok && x.error.kind === 'CONFLICT'; }).length, 1);
+    });
+  });
+
   test('không truy được phân bổ gốc → tạo việc RÀ TAY, không im lặng coi là xong', function () {
     var out = assertOk(run(REV.ReverseTransaction, {
       referenceId: 'bill_cu', domain: 'raw', itemId: _g.SUA, reason: 'xoá bill cũ',

@@ -57,11 +57,17 @@ GIEO.define('persistence-firebase/atomic-commit', [
     (plan.domainRecords || []).forEach(function (r) {
       var map = {
         bill: ['billLive', function (x) { return { businessDate: x.businessDate, billId: x.billId }; }],
+        billArchive: ['billArchive', function (x) { return { archiveKey: x.archiveKey }; }],
+        archiveRegistry: ['archiveRegistry', function (x) { return { businessDate: x.businessDate }; }],
         prepBatch: ['prepBatch', function (x) { return { prepBatchId: x.prepBatchId }; }],
         lostReport: ['lostReport', function (x) { return { reportId: x.lostReportId }; }],
         stockCount: ['stockCount', function (x) { return { countId: x.stockCountId }; }],
         cashSegment: ['shiftSegment', function (x) { return { businessDate: x.businessDate, seq: x.seq }; }],
-        expense: ['auditLog', function (x) { return { id: x.expenseId }; }]
+        expense: ['auditLog', function (x) { return { id: x.expenseId }; }],
+        unitSnapshot: ['unitSnapshot', function (x) { return { unitId: x.unitId, revisionNo: x.revisionNo }; }],
+        unitSnapshotHead: ['unitSnapshotHead', function (x) { return { unitId: x.unitId }; }],
+        monthlySnapshot: ['monthlySnapshot', function (x) { return { period: x.period, revisionNo: x.revisionNo }; }],
+        monthlySnapshotHead: ['monthlySnapshotHead', function (x) { return { period: x.period }; }]
       };
       var m = map[r.type];
       if (!m) {
@@ -75,6 +81,19 @@ GIEO.define('persistence-firebase/atomic-commit', [
 
     (plan.traceChanges || []).forEach(function (t, i) {
       add('traceDependency', { id: (plan.operationId || 'op') + '.' + i }, t);
+    });
+
+    /* Purge chỉ nhận path canonical CỤ THỂ từ compaction safety gate. Chặn
+       snapshot ở cả domain lẫn adapter để invariant C3 không phụ thuộc một lớp. */
+    (plan.rawRemovals || []).forEach(function (r) {
+      var prefix = 'orgs/' + ctx.organizationId + '/stores/' + ctx.storeId + '/';
+      if (!r || (r.kind !== paths.RTDB && r.kind !== paths.FIRESTORE) ||
+          typeof r.path !== 'string' || r.path.indexOf(prefix) !== 0 ||
+          /(^|\/)snapshots\//.test(r.path)) {
+        errors.push('rawRemoval không phải path canonical an toàn');
+        return;
+      }
+      writes.push({ kind: r.kind, path: r.path, op: 'remove', data: null });
     });
 
     if (plan.audit) {

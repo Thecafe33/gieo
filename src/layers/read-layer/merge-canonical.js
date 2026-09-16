@@ -49,9 +49,10 @@ GIEO.define('read-layer/merge-canonical', ['shared-kernel/result'], function (R)
     if (spec.snapshot) {
       /* Đã chốt thì ĐỌC THẲNG. "Con số chủ quán đã đọc và đã dùng để ra quyết
          định thì không được đổi sau lưng." */
-      return wrap(spec.snapshot, {
+      var snapshotData = spec.snapshot.canonical || spec.snapshot.values || spec.snapshot;
+      return wrap(snapshotData, {
         sources: [SOURCE.SNAPSHOT], frozen: true,
-        versionIds: spec.snapshot.versionIds || {}, computedAt: spec.computedAt
+        versionIds: spec.snapshot.versionIds || snapshotData.versionIds || {}, computedAt: spec.computedAt
       });
     }
     if (spec.cache) {

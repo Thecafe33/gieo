@@ -195,10 +195,15 @@ GIEO.define('commands/pipeline', [
 
     /* 7. COMMIT — ranh giới nguyên tử */
     if (!deps.commit) {
-      store.update(operationId, { status: STATES.COMPLETED, result: plan, dryRun: true });
+      /* runAndCommit dùng planningOnly: giữ claim ở RUNNING cho tới khi
+         transaction thật kết thúc. Nếu đánh COMPLETED tại đây, request thứ hai
+         có thể nhận replay giả trong lúc commit đầu vẫn đang pending/hỏng. */
+      if (!deps.planningOnly) {
+        store.update(operationId, { status: STATES.COMPLETED, result: plan, dryRun: true });
+      }
       return R.ok({
         operationId: operationId,
-        status: STATES.COMPLETED,
+        status: deps.planningOnly ? STATES.RUNNING : STATES.COMPLETED,
         /* Giữ cùng hình dạng với đường commit thật — caller không phải phân biệt
            dry-run hay không để biết đây có phải lần chạy đầu. */
         replayed: false,
@@ -252,7 +257,10 @@ GIEO.define('commands/pipeline', [
 
     /* Chạy pha dựng plan ở chế độ dry-run để tái dùng nguyên vẹn mọi chốt chặn
        (validate → authorize → gate ngày → idempotency) mà không nhân bản logic. */
-    var planned = run(command, input, ctx, { operationStore: deps.operationStore });
+    var planned = run(command, input, ctx, {
+      operationStore: deps.operationStore,
+      planningOnly: true
+    });
     if (R.isErr(planned)) return Promise.resolve(planned);
     if (planned.value.replayed) return Promise.resolve(planned.value);
 

@@ -250,6 +250,9 @@ GIEO.define('legacy-firebase-adapter/mappers', [
     });
 
     var channelType = o.isAppSale ? 'APP' : (o.isToGo ? 'TO_GO' : 'DINE_IN');
+    var total = typeof o.total === 'number' ? o.total : null;
+    var feePct = channelType === 'APP' && typeof o.appFeePct === 'number' ? o.appFeePct : 0;
+    var channelFee = total === null ? null : total * feePct / 100;
 
     return R.ok({
       bill: {
@@ -265,12 +268,14 @@ GIEO.define('legacy-firebase-adapter/mappers', [
           appName: o.appName || null,
           /* appFeePct ĐÃ có trong legacy nhưng chưa bao giờ được đọc — map sang
              để đường ống P&L theo kênh dùng được ngay. */
-          feePct: channelType === 'APP' && typeof o.appFeePct === 'number' ? o.appFeePct : 0
+          feePct: feePct
         },
         lines: lines,
         subtotal: typeof o.subtotal === 'number' ? o.subtotal : null,
         discountTotal: typeof o.discount === 'number' ? o.discount : 0,
-        total: typeof o.total === 'number' ? o.total : null,
+        total: total,
+        channelFee: channelFee,
+        netRevenue: total === null ? null : total - channelFee,
         /* Không tự tính netRevenue nếu thiếu total — thà để null còn hơn số sai. */
         status: 'COMPLETED',
         legacySource: { billId: spec.billId }
@@ -279,12 +284,55 @@ GIEO.define('legacy-firebase-adapter/mappers', [
     });
   }
 
+  /** Menu legacy → Catalog canonical. Category/recipe link được đánh dấu là suy ra. */
+  function mapMenu(spec) {
+    if (!ids.isId(spec.storeId, 'store')) return R.err('VALIDATION', 'mapMenu cần storeId');
+    var raw = spec.items || {};
+    var categories = [];
+    var categoryByName = Object.create(null);
+    var menuItems = [];
+    var ambiguous = [];
+
+    Object.keys(raw).forEach(function (key, index) {
+      var item = raw[key] || {};
+      if (!item.name) return;
+      var categoryName = item.type || 'Khác';
+      if (!categoryByName[categoryName]) {
+        categoryByName[categoryName] = ids.deterministicId('item', ['legacy-category', categoryName]);
+        categories.push({
+          categoryId: categoryByName[categoryName], storeId: spec.storeId,
+          name: categoryName, displayOrder: categories.length, archived: false,
+          versionSource: 'legacy-inferred'
+        });
+      }
+      var prices = {};
+      if (typeof item.priceM === 'number') prices.M = item.priceM;
+      if (typeof item.priceL === 'number') prices.L = item.priceL;
+      if (!Object.keys(prices).length && typeof item.price === 'number') prices.M = item.price;
+      var menuItemId = ids.deterministicId('item', ['legacy-menu', key]);
+      menuItems.push({
+        menuItemId: menuItemId, storeId: spec.storeId, name: item.name,
+        categoryId: categoryByName[categoryName], prices: prices,
+        recipeId: ids.deterministicId('recipe', ['legacy', (spec.recipePrefix || 'togo:') + key]),
+        toppingIds: [], displayOrder: typeof item.displayOrder === 'number' ? item.displayOrder : index,
+        color: item.color || null, archived: false, archivedAt: null,
+        legacySource: { key: key, channel: spec.channel || 'TO_GO' }
+      });
+      ambiguous.push({
+        code: AMBIGUOUS.NO_RECIPE_VERSION,
+        detail: 'recipeId của món ' + key + ' được suy từ key legacy, chưa chứng minh recipe version lịch sử'
+      });
+    });
+    return R.ok({ categories: categories, menuItems: menuItems, ambiguous: ambiguous });
+  }
+
   return {
     AMBIGUOUS: AMBIGUOUS,
     STATUS_MAP: STATUS_MAP,
     mapUnit: mapUnit,
     mapLedgerEntry: mapLedgerEntry,
     mapRecipe: mapRecipe,
-    mapBill: mapBill
+    mapBill: mapBill,
+    mapMenu: mapMenu
   };
 });

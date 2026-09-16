@@ -91,18 +91,14 @@ Luật cứng: `apps` không bao giờ chạm thẳng `fifo-core` / `compaction`
 | P5 BTP | ✅ PrepBatch + yield versioned + actual-vs-theoretical + báo cáo ngày |
 | Protected adapters | ✅ Bill/label printer + scanner + bank, kèm **fix** queue bị đầu độc |
 | Adapter Firebase | ✅ `legacy-firebase-adapter` (chỉ đọc) + `persistence-firebase` (ghi nguyên tử) |
-| P6 Compaction | 🔨 `VersionedInput` xong; snapshot/verifier/purge chưa |
-| P9-P10 UI | ⬜ chưa bắt đầu |
+| P6 Compaction | ✅ `VersionedInput` + Unit/Book snapshot + verifier + lifecycle + archive registry + purge gate |
+| P9-P10 UI | 🔨 shell/controller, legacy read port, Firebase SDK read bridge, Catalog realtime và Reporting READ_ONLY đã xong; chờ cấp Firebase config/handles thật |
 | P12-P13 Shadow + Cutover | ⬜ chưa bắt đầu |
 
-**617 test pass, 57 module, 0 vi phạm import-direction.**
+**654 test pass, 69 module, 0 vi phạm import-direction.**
 
 Build order theo `FEATURE-TREE-V1.md` §3:
 `[0] Identity → [1] Catalog + [2] FIFO Core → [3] Sales → [4] Loyalty + [5] Shift + [6] Payroll → [7] Finance → [8] Alerts → [9] Reporting`
-
-### Điểm còn treo, cần chủ quán xác nhận
-
-- `FIFO-CORE-ARCHITECTURE-V2.md` §11 OQ#3 (ưu tiên sửa QUANLY reversal race) và OQ#4 (có cần xem lại snapshot v1 sau khi mở lại sổ) — sẽ hỏi khi tới Phase 6.
 
 ### Đã chốt trong phiên code
 
@@ -111,3 +107,5 @@ Build order theo `FEATURE-TREE-V1.md` §3:
 - **Ngày làm việc chốt bằng thao tác ở QUANLY sau khi kết ca**, không theo mốc giờ. Nên `businessDate` là trạng thái vận hành (`store-context/business-day`), và `clock` cố ý **không có** `businessDate()` — chỉ có `calendarDate()`. Đơn lúc 0h30 vẫn thuộc ngày chưa chốt.
 - `FINISH_REVIEW_RATIO`: **cấu hình ở QUANLY**, không hard-code — đi qua `VersionedInput` kind `config`
 - Lương cứng: **trừ theo `work_schedule`** — Work schedule từ optional thành **bắt buộc** cho payroll; có lương cứng mà chưa xếp lịch thì từ chối tính, không đoán ngày vắng
+- Mở lại kỳ đã chốt: **giữ v1 vĩnh viễn, tạo v2** có `supersedesSnapshotId`, actor/lý do/phạm vi; persistence tách head khỏi từng revision và read-layer đọc snapshot được chọn mà không tính lại.
+- Race 2 QUANLY hoàn cùng giao dịch: **release gate bắt buộc trước shadow/cutover**. `runAndCommit` giữ atomic claim ở `RUNNING` đến khi commit thật hoàn tất; test đồng thời bắt buộc đúng 1 winner/commit.

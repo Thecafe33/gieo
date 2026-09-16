@@ -22,8 +22,9 @@ GIEO.define('read-layer/gateway', [
   'store-context/access',
   'read-layer/merge-canonical',
   'fifo-core/projection',
-  'traceability/trace'
-], function (ids, R, access, merge, projection, traceLib) {
+  'traceability/trace',
+  'catalog/menu'
+], function (ids, R, access, merge, projection, traceLib, menuLib) {
   'use strict';
 
   /**
@@ -42,6 +43,7 @@ GIEO.define('read-layer/gateway', [
 
   var Q = {
     GetUnitTrace: registerQuery('GetUnitTrace', { authority: 'EXECUTE' }),
+    GetMenu: registerQuery('GetMenu', { authority: 'EXECUTE' }),
     GetInventoryLevel: registerQuery('GetInventoryLevel', { authority: 'EXECUTE' }),
     GetConsumption: registerQuery('GetConsumption', { authority: 'REVIEW_APPROVE_CORRECT' }),
     /* Dữ liệu nhạy cảm mặc định KHÔNG thuộc tầng EXECUTE (quy tắc P3). */
@@ -98,6 +100,22 @@ GIEO.define('read-layer/gateway', [
         });
         return R.isErr(r) ? r : R.ok(r.value);
       },
+      computedAt: ctx.clock.now()
+    });
+  }
+
+  /** Catalog canonical; POS chỉ đọc, không bao giờ ghi menu. */
+  function getMenu(ctx, spec) {
+    var g = guard(Q.GetMenu, ctx, spec);
+    if (R.isErr(g)) return g;
+    return merge.resolve({
+      cache: spec.cache,
+      computeLive: function () {
+        return menuLib.buildMenuView({
+          categories: spec.categories || [], menuItems: spec.menuItems || []
+        });
+      },
+      legacy: spec.legacyMeta ? function () { return R.ok(spec.legacyMeta); } : null,
       computedAt: ctx.clock.now()
     });
   }
@@ -259,6 +277,7 @@ GIEO.define('read-layer/gateway', [
     QUERIES: Q,
     registerQuery: registerQuery,
     getUnitTrace: getUnitTrace,
+    getMenu: getMenu,
     getInventoryLevel: getInventoryLevel,
     getRevenue: getRevenue,
     getCOGS: getCOGS,

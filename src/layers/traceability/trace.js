@@ -66,6 +66,7 @@ GIEO.define('traceability/trace', [
         receivedBy: unit.receivedBy
       },
       initialQty: unit.initialQty,
+      remainingQty: unit.remainingQty,
       costBasis: unit.costBasis,
 
       opened: { at: unit.openedAt, by: unit.openedBy },

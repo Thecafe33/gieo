@@ -5,10 +5,63 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>GIEO — Quản lý</title>
 <style>
-  :root { color-scheme: light dark; }
+  :root { color-scheme: light; --ink:#172033; --muted:#697386; --line:#e8ebf0; --brand:#315c72; --soft:#f4f7f9; }
   * { box-sizing: border-box; }
-  body { margin: 0; font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-  #app { padding: 16px; }
+  body { margin:0; min-height:100vh; background:#f5f6f8; color:var(--ink); font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; }
+  button,input { font:inherit; }
+  button { border:0; cursor:pointer; }
+  button:disabled { cursor:not-allowed; opacity:.46; }
+  .app-shell { width:min(1120px,100%); min-height:100vh; margin:auto; padding:24px; }
+  .topbar { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:16px; }
+  .topbar h1,.panel h2,.empty h3 { margin:0; letter-spacing:-.025em; }
+  .topbar h1 { font-size:24px; }
+  .brand,.eyebrow { margin:0 0 2px; color:var(--brand); font-size:12px; font-weight:750; letter-spacing:.08em; text-transform:uppercase; }
+  .status { display:inline-flex; align-items:center; padding:5px 9px; border-radius:999px; font-size:11px; font-weight:750; letter-spacing:.04em; }
+  .status.warning { color:#8a4b08; background:#fff0d8; }
+  .status.success { color:#176b43; background:#dcf6e8; }
+  .status.neutral { color:#596273; background:#eef0f4; }
+  .notice { display:flex; gap:8px; padding:11px 14px; margin-bottom:16px; border:1px solid #f1d7ac; border-radius:14px; color:#76501d; background:#fff9ed; }
+  .notice span { color:#8a6b43; }
+  .panel { min-height:440px; padding:22px; border:1px solid var(--line); border-radius:22px; background:#fff; box-shadow:0 14px 42px rgba(35,45,65,.06); }
+  .section-head { display:flex; align-items:center; justify-content:space-between; gap:16px; }
+  .section-head h2 { font-size:20px; }
+  .primary,.search-row button,.section-head button { padding:10px 15px; border-radius:12px; color:#fff; background:var(--brand); font-weight:700; }
+  .empty { display:grid; place-items:center; align-content:center; min-height:300px; text-align:center; color:var(--muted); }
+  .empty-icon { display:grid; place-items:center; width:52px; height:52px; margin-bottom:12px; border-radius:16px; background:var(--soft); color:var(--brand); font-size:25px; }
+  .empty h3 { color:var(--ink); font-size:17px; }
+  .empty p { max-width:450px; margin:6px auto 0; }
+  .total-row { display:flex; justify-content:space-between; padding-top:16px; border-top:1px solid var(--line); font-size:16px; }
+  .metric-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin-top:22px; }
+  .metric { padding:18px; border-radius:16px; background:var(--soft); }
+  .metric span { display:block; color:var(--muted); font-size:12px; }
+  .metric strong { display:block; margin-top:8px; font-size:20px; }
+  .bottom-nav { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:14px; padding:7px; border:1px solid var(--line); border-radius:17px; background:#fff; }
+  .bottom-nav button { display:grid; place-items:center; gap:2px; padding:8px; border-radius:11px; color:var(--muted); background:transparent; }
+  .bottom-nav button span { font-size:17px; }
+  .bottom-nav button.active,.side-nav button.active { color:var(--brand); background:#eaf0f3; font-weight:700; }
+  .workspace { display:grid; grid-template-columns:190px minmax(0,1fr); gap:14px; }
+  .side-nav { display:flex; flex-direction:column; gap:5px; padding:8px; height:max-content; border:1px solid var(--line); border-radius:17px; background:#fff; }
+  .side-nav button { padding:11px 12px; border-radius:11px; text-align:left; color:var(--muted); background:transparent; }
+  .search-row { display:flex; gap:8px; margin-top:20px; }
+  .search-row input { flex:1; min-width:0; padding:11px 13px; border:1px solid var(--line); border-radius:12px; background:#fafbfc; }
+  .result { display:flex; flex-direction:column; gap:5px; margin-top:18px; padding:16px; border:1px solid var(--line); border-radius:15px; background:var(--soft); }
+  .result span { color:var(--muted); }
+  .result.error { color:#8e2f2f; border-color:#f0caca; background:#fff1f1; }
+  .trace-grid { display:grid; grid-template-columns:2fr 1fr 1fr; gap:10px; }
+  .menu-group { margin-top:20px; }
+  .menu-group h3 { margin:0 0 9px; font-size:14px; }
+  .menu-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:9px; }
+  .menu-item { display:flex; flex-direction:column; gap:5px; padding:14px; border:1px solid var(--line); border-radius:14px; text-align:left; background:#fff; }
+  .menu-item span { color:var(--muted); font-size:12px; }
+  @media (max-width:700px) {
+    .app-shell { padding:16px; }
+    .workspace { grid-template-columns:1fr; }
+    .side-nav { display:grid; grid-template-columns:repeat(4,1fr); overflow:auto; }
+    .side-nav button { text-align:center; white-space:nowrap; padding:9px 10px; }
+    .metric-grid { grid-template-columns:1fr; }
+    .menu-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .notice { flex-direction:column; gap:1px; }
+  }
 </style>
 </head>
 <body>
@@ -62,11 +115,11 @@
     },
     "compaction": {
       "role": "VersionedInput dùng chung + snapshot + verifier + purge. Contract: FIFO-COMPACTION-CONTRACT-V1.md",
-      "canImport": ["shared-kernel", "store-context", "fifo-core"]
+      "canImport": ["shared-kernel", "store-context", "fifo-core", "traceability"]
     },
     "read-layer": {
       "role": "CỔNG ĐỌC DUY NHẤT. Nơi duy nhất được biết cả LIVE lẫn COMPACT. Contract: UNIFIED-READ-LAYER-CONTRACT-V1.md",
-      "canImport": ["shared-kernel", "store-context", "fifo-core", "traceability", "recipe-cost-btp", "compaction", "legacy-firebase-adapter"]
+      "canImport": ["shared-kernel", "store-context", "fifo-core", "traceability", "recipe-cost-btp", "compaction", "catalog", "legacy-firebase-adapter"]
     },
     "catalog": {
       "role": "Menu/Category/Topping/Packaging/Recipe link. QUANLY sở hữu duy nhất.",
@@ -2326,6 +2379,7 @@ GIEO.define('traceability/trace', [
         receivedBy: unit.receivedBy
       },
       initialQty: unit.initialQty,
+      remainingQty: unit.remainingQty,
       costBasis: unit.costBasis,
 
       opened: { at: unit.openedAt, by: unit.openedBy },
@@ -3122,6 +3176,789 @@ GIEO.define('recipe-cost-btp/recipe', [
     resolveRecipeAt: resolveRecipeAt,
     toRequirements: toRequirements,
     requireRecipe: requireRecipe
+  };
+});
+
+/* ===== src/layers/compaction/archive.js ===== */
+/** Archive bill: copy đủ chi tiết trước, xác nhận đích, rồi mới cho xoá nguồn. */
+GIEO.define('compaction/archive', [
+  'shared-kernel/ids',
+  'shared-kernel/result'
+], function (ids, R) {
+  'use strict';
+
+  var STATUS = {
+    PENDING: 'PENDING',
+    FAILED: 'FAILED',
+    DESTINATION_WRITTEN: 'DESTINATION_WRITTEN',
+    COMPLETED: 'COMPLETED'
+  };
+
+  function parts(dateKey) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateKey || '');
+    return m ? { year: m[1], month: m[2], day: m[3] } : null;
+  }
+  function archiveKey(dateKey) {
+    var p = parts(dateKey);
+    return p ? p.month + '_' + p.day + '_' + p.year : null;
+  }
+  function operationIdFor(dateKey, stage) {
+    return ids.deterministicId('operation', ['archive-bills', dateKey, stage]);
+  }
+
+  function createRegistry(seed) {
+    var rows = Object.create(null);
+    (seed || []).forEach(function (r) { rows[r.businessDate] = Object.freeze(Object.assign({}, r)); });
+
+    function put(record) {
+      rows[record.businessDate] = Object.freeze(Object.assign({}, record));
+      return R.ok(rows[record.businessDate]);
+    }
+    return {
+      register: function (businessDate, at) {
+        if (!parts(businessDate)) return R.err('VALIDATION', 'businessDate phải dạng YYYY-MM-DD');
+        if (rows[businessDate]) return R.ok(rows[businessDate]);
+        return put({
+          businessDate: businessDate, archiveKey: archiveKey(businessDate),
+          status: STATUS.PENDING, attempts: 0, lastError: null,
+          destinationRef: null, updatedAt: at || null
+        });
+      },
+      markFailed: function (businessDate, error, at) {
+        var current = rows[businessDate];
+        if (!current) return R.err('NOT_FOUND', 'ngày chưa đăng ký archive');
+        return put(Object.assign({}, current, {
+          status: STATUS.FAILED, attempts: current.attempts + 1,
+          lastError: String(error || 'unknown'), updatedAt: at || null
+        }));
+      },
+      markDestinationWritten: function (businessDate, destinationRef, at) {
+        var current = rows[businessDate];
+        if (!current) return R.err('NOT_FOUND', 'ngày chưa đăng ký archive');
+        if (!destinationRef) return R.err('VALIDATION', 'cần destinationRef chứng minh đã ghi đích');
+        return put(Object.assign({}, current, {
+          status: STATUS.DESTINATION_WRITTEN, attempts: current.attempts + 1,
+          lastError: null, destinationRef: destinationRef, updatedAt: at || null
+        }));
+      },
+      markCompleted: function (businessDate, at) {
+        var current = rows[businessDate];
+        if (!current || current.status !== STATUS.DESTINATION_WRITTEN) {
+          return R.err('PRECONDITION', 'chưa có bằng chứng ghi archive đích');
+        }
+        return put(Object.assign({}, current, { status: STATUS.COMPLETED, updatedAt: at || null }));
+      },
+      get: function (businessDate) { return rows[businessDate] || null; },
+      pending: function () {
+        return Object.keys(rows).map(function (k) { return rows[k]; })
+          .filter(function (r) { return r.status !== STATUS.COMPLETED; })
+          .sort(function (a, b) { return a.businessDate < b.businessDate ? -1 : 1; });
+      },
+      all: function () { return Object.keys(rows).map(function (k) { return rows[k]; }); }
+    };
+  }
+
+  function buildWritePlan(spec) {
+    spec = spec || {};
+    var p = parts(spec.businessDate);
+    if (!p) return R.err('VALIDATION', 'archive cần businessDate dạng YYYY-MM-DD');
+    if (!spec.orders || typeof spec.orders !== 'object' || Array.isArray(spec.orders)) {
+      return R.err('VALIDATION', 'archive cần object orders nguyên bản');
+    }
+    var key = archiveKey(spec.businessDate);
+    return R.ok({
+      operationId: operationIdFor(spec.businessDate, 'write'),
+      domainRecords: [{
+        type: 'billArchive',
+        record: {
+          archiveKey: key, businessDate: spec.businessDate,
+          month: p.month, day: p.day, year: p.year,
+          orders: spec.orders, archivedAt: spec.at || null
+        }
+      }],
+      audit: { command: 'ArchiveBillsWrite', actorId: spec.actorId || null, reason: 'archive_before_delete' }
+    });
+  }
+
+  function buildRemovalPlan(spec) {
+    spec = spec || {};
+    var record = spec.registry && spec.registry.get(spec.businessDate);
+    if (!record || record.status !== STATUS.DESTINATION_WRITTEN || !record.destinationRef) {
+      return R.err('PRECONDITION', 'chưa xác nhận ghi archive đích — cấm xoá nguồn');
+    }
+    if (!(spec.sourceRecords || []).length) return R.err('VALIDATION', 'cần sourceRecords cụ thể');
+    return R.ok({
+      operationId: operationIdFor(spec.businessDate, 'remove-source'),
+      rawRemovals: spec.sourceRecords.map(function (r) { return { kind: r.kind, path: r.path }; }),
+      audit: { command: 'ArchiveBillsRemoveSource', actorId: spec.actorId || null, reason: record.destinationRef }
+    });
+  }
+
+  return {
+    STATUS: STATUS,
+    archiveKey: archiveKey,
+    operationIdFor: operationIdFor,
+    createRegistry: createRegistry,
+    buildWritePlan: buildWritePlan,
+    buildRemovalPlan: buildRemovalPlan
+  };
+});
+
+/* ===== src/layers/compaction/book-snapshot.js ===== */
+/** Snapshot sổ sách — §3: đóng băng, drift và correction append-only. */
+GIEO.define('compaction/book-snapshot', [
+  'shared-kernel/ids',
+  'shared-kernel/result'
+], function (ids, R) {
+  'use strict';
+
+  var STATUS = { OPEN: 'OPEN', CLOSED: 'CLOSED', SUPERSEDED: 'SUPERSEDED' };
+
+  function snapshotIdFor(period, revisionNo) {
+    return ids.deterministicId('snapshot', ['book', period, String(revisionNo)]);
+  }
+  function closeOperationId(period, revisionNo) {
+    return ids.deterministicId('operation', ['compact', 'book', period, String(revisionNo)]);
+  }
+  function isPeriod(p) { return typeof p === 'string' && /^\d{4}-\d{2}(-\d{2})?$/.test(p); }
+
+  function normalizeValues(values) {
+    var out = Object.create(null);
+    var invalid = [];
+    Object.keys(values).sort().forEach(function (k) {
+      if (typeof values[k] !== 'number' || !isFinite(values[k])) invalid.push(k);
+      else out[k] = values[k];
+    });
+    return invalid.length
+      ? R.err('VALIDATION', 'values chứa chỉ số không hữu hạn: ' + invalid.join(', '))
+      : R.ok(out);
+  }
+
+  function createBook() {
+    var byPeriod = Object.create(null);
+    function revisionsOf(period) { return byPeriod[period] || []; }
+    function currentOf(period) {
+      var list = revisionsOf(period);
+      for (var i = list.length - 1; i >= 0; i--) {
+        if (list[i].status === STATUS.CLOSED) return list[i];
+      }
+      return null;
+    }
+
+    function close(spec) {
+      if (!spec || !isPeriod(spec.period)) {
+        return R.err('VALIDATION', 'close cần period dạng YYYY-MM hoặc YYYY-MM-DD');
+      }
+      if (!spec.values || typeof spec.values !== 'object') return R.err('VALIDATION', 'close cần values');
+      if (!ids.isId(spec.closedBy, 'actor')) {
+        return R.err('VALIDATION', 'close cần closedBy hợp lệ — không có ai chốt thì không phải chốt sổ');
+      }
+      if (typeof spec.closedAt !== 'number') return R.err('VALIDATION', 'close cần closedAt');
+      var existing = currentOf(spec.period);
+      if (existing) {
+        return R.err('CONFLICT',
+          'kỳ ' + spec.period + ' đã chốt ở revision ' + existing.revisionNo +
+          ' — muốn đổi số phải dùng correct() (§3.3), không chốt đè',
+          { snapshotId: existing.snapshotId });
+      }
+      var normalized = normalizeValues(spec.values);
+      if (R.isErr(normalized)) return normalized;
+      var snap = Object.freeze({
+        snapshotId: snapshotIdFor(spec.period, 1),
+        operationId: closeOperationId(spec.period, 1),
+        period: spec.period, revisionNo: 1, supersedesSnapshotId: null,
+        status: STATUS.CLOSED,
+        values: Object.freeze(normalized.value),
+        sourceRefs: Object.freeze((spec.sourceRefs || []).slice()),
+        closedBy: spec.closedBy, closedAt: spec.closedAt, correction: null
+      });
+      byPeriod[spec.period] = revisionsOf(spec.period).concat([snap]);
+      return R.ok(snap);
+    }
+
+    function read(period, recompute) {
+      var snap = currentOf(period);
+      if (snap) {
+        return R.ok({
+          source: 'FROZEN', period: period, values: snap.values,
+          snapshotId: snap.snapshotId, revisionNo: snap.revisionNo
+        });
+      }
+      if (typeof recompute !== 'function') {
+        return R.err('NOT_FOUND', 'kỳ ' + period + ' chưa chốt và không có hàm tính lại');
+      }
+      var live = recompute(period);
+      if (R.isErr(live)) return live;
+      return R.ok({ source: 'LIVE', period: period, values: live.value, snapshotId: null, revisionNo: null });
+    }
+
+    function detectDrift(period, recompute) {
+      var snap = currentOf(period);
+      if (!snap) return R.err('NOT_FOUND', 'kỳ ' + period + ' chưa chốt, không có gì để trôi');
+      if (typeof recompute !== 'function') return R.err('VALIDATION', 'detectDrift cần hàm tính lại');
+      var live = recompute(period);
+      if (R.isErr(live)) return live;
+      var normalized = normalizeValues(live.value);
+      if (R.isErr(normalized)) return normalized;
+      var liveValues = normalized.value;
+      var diffs = [];
+      var keys = Object.keys(snap.values).concat(Object.keys(liveValues));
+      var seen = Object.create(null);
+      keys.forEach(function (k) {
+        if (seen[k]) return;
+        seen[k] = true;
+        var frozen = snap.values[k], current = liveValues[k];
+        if (frozen !== current) {
+          diffs.push({
+            key: k,
+            frozen: typeof frozen === 'number' ? frozen : null,
+            live: typeof current === 'number' ? current : null
+          });
+        }
+      });
+      return R.ok({
+        period: period, snapshotId: snap.snapshotId,
+        drifted: diffs.length > 0, diffs: diffs,
+        alert: diffs.length ? {
+          type: 'DRIFT_AFTER_CLOSING',
+          payload: { period: period, frozen: snap.values, live: liveValues, diffs: diffs }
+        } : null
+      });
+    }
+
+    function correct(spec) {
+      if (!spec || !isPeriod(spec.period)) return R.err('VALIDATION', 'correct cần period hợp lệ');
+      var prev = currentOf(spec.period);
+      if (!prev) return R.err('NOT_FOUND', 'kỳ ' + spec.period + ' chưa chốt — không có gì để sửa');
+      var missing = ['reason', 'actorId', 'scopeAffected'].filter(function (f) {
+        var v = spec[f];
+        if (Array.isArray(v)) return v.length === 0;
+        return !v || (typeof v === 'string' && !v.trim());
+      });
+      if (typeof spec.at !== 'number') missing.push('at');
+      if (spec.actorId && !ids.isId(spec.actorId, 'actor')) missing.push('actorId hợp lệ');
+      if (missing.length) {
+        return R.err('VALIDATION',
+          'correction bị từ chối — audit thiếu: ' + missing.join(', ') + ' (invariant C4)');
+      }
+      if (!spec.values || typeof spec.values !== 'object') return R.err('VALIDATION', 'correct cần values mới');
+      var normalized = normalizeValues(spec.values);
+      if (R.isErr(normalized)) return normalized;
+      var revisionNo = prev.revisionNo + 1;
+      var nextId = snapshotIdFor(spec.period, revisionNo);
+      var next = Object.freeze({
+        snapshotId: nextId,
+        operationId: closeOperationId(spec.period, revisionNo),
+        period: spec.period, revisionNo: revisionNo,
+        supersedesSnapshotId: prev.snapshotId, status: STATUS.CLOSED,
+        values: Object.freeze(normalized.value),
+        sourceRefs: Object.freeze((spec.sourceRefs || prev.sourceRefs).slice()),
+        closedBy: spec.actorId, closedAt: spec.at,
+        correction: Object.freeze({
+          actorId: spec.actorId, at: spec.at, reason: spec.reason,
+          scopeAffected: Object.freeze([].concat(spec.scopeAffected)),
+          beforeVersionId: prev.snapshotId, afterVersionId: nextId
+        })
+      });
+      var list = revisionsOf(spec.period).map(function (s) {
+        return s.snapshotId === prev.snapshotId
+          ? Object.freeze(Object.assign({}, s, { status: STATUS.SUPERSEDED }))
+          : s;
+      });
+      byPeriod[spec.period] = list.concat([next]);
+      return R.ok({
+        current: next,
+        superseded: byPeriod[spec.period].filter(function (s) { return s.snapshotId === prev.snapshotId; })[0]
+      });
+    }
+
+    function getRevision(period, revisionNo) {
+      var found = revisionsOf(period).filter(function (s) { return s.revisionNo === revisionNo; })[0];
+      return found ? R.ok(found) : R.err('NOT_FOUND', 'không có revision ' + revisionNo + ' của kỳ ' + period);
+    }
+    function history(period) { return revisionsOf(period).slice(); }
+    function hydrate(snapshots) {
+      (snapshots || []).forEach(function (s) {
+        byPeriod[s.period] = revisionsOf(s.period).concat([Object.freeze(s)]);
+      });
+      Object.keys(byPeriod).forEach(function (p) {
+        byPeriod[p] = byPeriod[p].slice().sort(function (a, b) { return a.revisionNo - b.revisionNo; });
+      });
+      return R.ok(true);
+    }
+
+    return {
+      close: close, read: read, detectDrift: detectDrift, correct: correct,
+      getRevision: getRevision, history: history,
+      current: function (period) { return currentOf(period); }, hydrate: hydrate
+    };
+  }
+
+  return {
+    STATUS: STATUS,
+    snapshotIdFor: snapshotIdFor,
+    closeOperationId: closeOperationId,
+    createBook: createBook
+  };
+});
+
+/* ===== src/layers/compaction/lifecycle.js ===== */
+/** Trạng thái P6: LIVE → CLOSED → SNAPSHOT_READY → COMPACTED → ARCHIVED/PURGED_RAW. */
+GIEO.define('compaction/lifecycle', ['shared-kernel/result'], function (R) {
+  'use strict';
+  var STATE = {
+    LIVE: 'LIVE', CLOSED: 'CLOSED', SNAPSHOT_READY: 'SNAPSHOT_READY',
+    COMPACTED: 'COMPACTED', ARCHIVED: 'ARCHIVED', PURGED_RAW: 'PURGED_RAW'
+  };
+  var NEXT = {
+    LIVE: ['CLOSED'],
+    CLOSED: ['SNAPSHOT_READY'],
+    SNAPSHOT_READY: ['COMPACTED'],
+    COMPACTED: ['ARCHIVED', 'PURGED_RAW'],
+    ARCHIVED: ['PURGED_RAW'],
+    PURGED_RAW: []
+  };
+
+  function start(scopeType, scopeId) {
+    if (!scopeType || !scopeId) return R.err('VALIDATION', 'lifecycle cần scopeType/scopeId');
+    return R.ok({ scopeType: scopeType, scopeId: scopeId, state: STATE.LIVE, history: [] });
+  }
+  function transition(record, to, spec) {
+    spec = spec || {};
+    if (!record || !NEXT[record.state] || NEXT[record.state].indexOf(to) === -1) {
+      return R.err('PRECONDITION', 'không chuyển compaction từ ' + (record && record.state) + ' sang ' + to);
+    }
+    if (to === STATE.SNAPSHOT_READY && !spec.snapshotId) {
+      return R.err('VALIDATION', 'SNAPSHOT_READY cần snapshotId');
+    }
+    if (to === STATE.COMPACTED && (!spec.snapshot || spec.snapshot.verified !== true)) {
+      return R.err('PRECONDITION', 'chỉ snapshot verified PASS mới được COMPACTED');
+    }
+    if ((to === STATE.ARCHIVED || to === STATE.PURGED_RAW) && spec.systemControlled !== true) {
+      return R.err('FORBIDDEN', to + ' chỉ do system-controlled process chạy');
+    }
+    return R.ok(Object.assign({}, record, {
+      state: to,
+      snapshotId: spec.snapshotId || (spec.snapshot && spec.snapshot.snapshotId) || record.snapshotId || null,
+      history: record.history.concat([{
+        from: record.state, to: to, at: spec.at || null,
+        operationId: spec.operationId || null
+      }])
+    }));
+  }
+
+  return { STATE: STATE, start: start, transition: transition };
+});
+
+/* ===== src/layers/compaction/purge.js ===== */
+/** Safety gate cho purge. Tuổi chỉ chọn ứng viên, không cấp quyền xoá. */
+GIEO.define('compaction/purge', [
+  'shared-kernel/ids',
+  'shared-kernel/result'
+], function (ids, R) {
+  'use strict';
+
+  function operationIdFor(sourceType, sourceId, snapshotId) {
+    return ids.deterministicId('operation', ['purge', sourceType, sourceId, snapshotId]);
+  }
+
+  function check(spec) {
+    spec = spec || {};
+    var blockers = [];
+    if (spec.systemControlled !== true) blockers.push('purge chỉ được chạy bởi system-controlled process');
+    if (!spec.snapshot || spec.snapshot.verified !== true) blockers.push('snapshot chưa verified PASS');
+    if ((spec.unresolvedCorrections || []).length) blockers.push('còn correction chưa resolved');
+    if ((spec.unresolvedReferences || []).length) blockers.push('còn reference chưa resolved');
+    if (spec.dependencyRegistry && spec.sourceType && spec.sourceId) {
+      var dep = spec.dependencyRegistry.canPurge(spec.sourceType, spec.sourceId);
+      if (R.isErr(dep)) blockers.push(dep.error.message);
+    } else {
+      blockers.push('thiếu TRACE_DEPENDENCY registry để chứng minh an toàn');
+    }
+
+    return R.ok({ allowed: blockers.length === 0, blockers: blockers });
+  }
+
+  function buildPlan(spec) {
+    var c = check(spec);
+    if (R.isErr(c)) return c;
+    if (!c.value.allowed) return R.err('PRECONDITION', 'không được purge: ' + c.value.blockers.join('; '), c.value);
+    if (!spec.sourceType || !spec.sourceId) return R.err('VALIDATION', 'purge cần sourceType/sourceId');
+    if (!(spec.rawRecords || []).length) return R.err('VALIDATION', 'purge cần rawRecords cụ thể');
+    var operationId = operationIdFor(spec.sourceType, spec.sourceId, spec.snapshot.snapshotId);
+    if (spec.operationId && spec.operationId !== operationId) {
+      return R.err('VALIDATION', 'operationId purge không đúng id xác định');
+    }
+    if ((spec.rawRecords || []).some(function (r) { return /(^|\/)snapshots\//.test(r.path || ''); })) {
+      return R.err('FORBIDDEN', 'purge raw không bao giờ được xoá snapshot/revision (invariant C3)');
+    }
+    return R.ok({
+      operationId: operationId,
+      sourceType: spec.sourceType,
+      sourceId: spec.sourceId,
+      snapshotId: spec.snapshot.snapshotId,
+      rawRemovals: (spec.rawRecords || []).map(function (r) { return { kind: r.kind, path: r.path }; }),
+      audit: { command: 'PurgeRaw', reason: spec.reason || 'verified_compaction', actorId: spec.actorId || null }
+    });
+  }
+
+  /** §5.4: cleanup handshake ngân hàng không bao giờ chỉ dựa vào tuổi. */
+  function canDeleteBankConfirmation(spec) {
+    spec = spec || {};
+    if (spec.systemControlled !== true) {
+      return R.err('FORBIDDEN', 'cleanup bank confirmation chỉ do system-controlled process chạy');
+    }
+    if (!spec.bankOrderId) return R.err('VALIDATION', 'cần bankOrderId');
+    if (spec.billExists === true) return R.ok({ allowed: true, reason: 'BILL_EXISTS' });
+    if (spec.longExpired !== true) {
+      return R.ok({ allowed: false, reason: 'NO_BILL_AND_NOT_LONG_EXPIRED' });
+    }
+    if (!spec.dependencyRegistry) {
+      return R.err('PRECONDITION', 'thiếu dependency registry — tuổi không đủ để xoá');
+    }
+    var safe = spec.dependencyRegistry.canPurge('bankConfirmation', spec.bankOrderId);
+    return R.isErr(safe)
+      ? R.ok({ allowed: false, reason: 'ACTIVE_DEPENDENCY', detail: safe.error })
+      : R.ok({ allowed: true, reason: 'LONG_EXPIRED_AND_NO_REFERENCE' });
+  }
+
+  return {
+    operationIdFor: operationIdFor,
+    check: check,
+    buildPlan: buildPlan,
+    canDeleteBankConfirmation: canDeleteBankConfirmation
+  };
+});
+
+/* ===== src/layers/compaction/snapshot-verifier.js ===== */
+/** RAW → rebuild → compare → PASS mới được compact (§4, invariant C5). */
+GIEO.define('compaction/snapshot-verifier', [
+  'shared-kernel/result',
+  'fifo-core/ledger',
+  'fifo-core/reconciliation',
+  'fifo-core/projection',
+  'compaction/unit-snapshot'
+], function (R, ledgerLib, reconciliation, projection, unitSnapshot) {
+  'use strict';
+
+  function sorted(list) { return (list || []).slice().sort(); }
+  function sameList(a, b) { return JSON.stringify(sorted(a)) === JSON.stringify(sorted(b)); }
+  function canonical(v) {
+    if (Array.isArray(v)) return v.map(canonical);
+    if (v && typeof v === 'object') {
+      var out = {};
+      Object.keys(v).sort().forEach(function (k) { out[k] = canonical(v[k]); });
+      return out;
+    }
+    return v;
+  }
+  function sameValue(a, b) { return JSON.stringify(canonical(a)) === JSON.stringify(canonical(b)); }
+  function sum(list, fn) {
+    return (list || []).reduce(function (total, row) { return total + (fn(row) || 0); }, 0);
+  }
+
+  function verify(input) {
+    input = input || {};
+    var snapshot = input.snapshot;
+    var unit = input.unit;
+    if (!snapshot || !unit) return R.err('VALIDATION', 'verifier cần snapshot và raw unit');
+    if (snapshot.unitId !== unit.unitId) return R.err('VALIDATION', 'snapshot và raw unit khác identity');
+    if (!input.projectionInput || typeof input.observedCurrentStock !== 'number') {
+      return R.err('VALIDATION', 'verifier cần projectionInput và observedCurrentStock');
+    }
+
+    var gate = unitSnapshot.assessCompactability(Object.assign({}, input.compactability || {}, { unit: unit }));
+    if (R.isErr(gate)) return gate;
+    if (!gate.value.compactable) {
+      return R.err('PRECONDITION', 'Unit chưa đủ điều kiện verify/compact', gate.value);
+    }
+
+    var entries = input.entries || [];
+    var allocations = input.allocations || [];
+    var cogsLines = input.cogsLines || [];
+    var failures = [];
+    var missing = unitSnapshot.missingFields(snapshot);
+    if (missing.length) failures.push({ check: 'REQUIRED_FIELDS', missing: missing });
+
+    var ledgerAudit = ledgerLib.auditEntries(entries);
+    if (R.isErr(ledgerAudit)) failures.push({ check: 'LEDGER_INVARIANTS', detail: ledgerAudit.error });
+
+    var rebuilt = reconciliation.rebuildUnitState(unit, entries);
+    if (R.isErr(rebuilt)) return rebuilt;
+    if (!rebuilt.value.matches || rebuilt.value.rebuiltRemainingQty !== snapshot.finalRemainingQty) {
+      failures.push({
+        check: 'REMAINING_QTY',
+        expected: snapshot.finalRemainingQty,
+        actual: rebuilt.value.rebuiltRemainingQty
+      });
+    }
+
+    var allocationQty = sum(allocations, function (a) { return a.qty; });
+    var frozenAllocationQty = sum(snapshot.consumption, function (a) { return a.qty; });
+    if (allocationQty !== frozenAllocationQty) {
+      failures.push({ check: 'ALLOCATION_TOTAL', expected: frozenAllocationQty, actual: allocationQty });
+    }
+
+    function ledgerTotal(type) {
+      return sum(entries.filter(function (e) { return e.type === type; }),
+        function (e) { return Math.abs(e.qtyDelta); });
+    }
+    var waste = ledgerTotal(ledgerLib.TYPE.WASTE);
+    if (waste !== snapshot.wasteQty) {
+      failures.push({ check: 'WASTE_TOTAL', expected: snapshot.wasteQty, actual: waste });
+    }
+
+    var cogs = sum(cogsLines, function (line) { return line.amount; });
+    var frozenCogs = sum(snapshot.cogsLines, function (line) { return line.amount; });
+    if (cogs !== frozenCogs) failures.push({ check: 'COGS_TOTAL', expected: frozenCogs, actual: cogs });
+
+    var rebuiltSnapshot = unitSnapshot.buildUnitSnapshot({
+      unit: unit, entries: entries, allocations: allocations, cogsLines: cogsLines,
+      variance: input.variance || null, revisionNo: snapshot.revisionNo,
+      supersedesSnapshotId: snapshot.supersedesSnapshotId
+    });
+    if (R.isErr(rebuiltSnapshot)) return rebuiltSnapshot;
+    if (!sameList(snapshot.billIds, rebuiltSnapshot.value.billIds)) failures.push({ check: 'BILL_REFERENCES' });
+    if (!sameList(snapshot.prepBatchIds, rebuiltSnapshot.value.prepBatchIds)) failures.push({ check: 'BTP_REFERENCES' });
+    if (!sameList(snapshot.recipeVersionIds, rebuiltSnapshot.value.recipeVersionIds)) {
+      failures.push({ check: 'RECIPE_VERSION_REFERENCES' });
+    }
+    if (!sameList(snapshot.ledgerEntryIds, rebuiltSnapshot.value.ledgerEntryIds)) {
+      failures.push({ check: 'LEDGER_REFERENCES' });
+    }
+    if (!sameValue(snapshot.canonical, rebuiltSnapshot.value.canonical)) {
+      failures.push({ check: 'CANONICAL_TRACE' });
+    }
+
+    var projected = projection.computeCurrentStock(input.projectionInput);
+    if (R.isErr(projected)) return projected;
+    if (projected.value.currentStock !== input.observedCurrentStock) {
+      failures.push({
+        check: 'CURRENT_STOCK',
+        expected: input.observedCurrentStock,
+        actual: projected.value.currentStock
+      });
+    }
+
+    var passed = failures.length === 0;
+    return R.ok({
+      passed: passed,
+      snapshot: Object.freeze(Object.assign({}, snapshot, {
+        verified: passed,
+        verifiedAt: typeof input.verifiedAt === 'number' ? input.verifiedAt : null,
+        verifiedBy: input.verifiedBy || null,
+        verification: Object.freeze({ failures: failures.slice() })
+      })),
+      failures: failures,
+      alert: passed ? null : {
+        type: 'SNAPSHOT_VERIFY_FAILED',
+        payload: { scope: snapshot.snapshotId, failures: failures }
+      }
+    });
+  }
+
+  return { verify: verify };
+});
+
+/* ===== src/layers/compaction/unit-snapshot.js ===== */
+/**
+ * Snapshot Unit — §2 của FIFO-COMPACTION-CONTRACT-V1.md.
+ * Tách cổng compactability khỏi bước dựng snapshot; tuổi không cấp quyền dọn.
+ */
+GIEO.define('compaction/unit-snapshot', [
+  'shared-kernel/ids',
+  'shared-kernel/result',
+  'fifo-core/unit',
+  'fifo-core/ledger',
+  'traceability/trace'
+], function (ids, R, unitLib, ledgerLib, traceLib) {
+  'use strict';
+
+  var S = unitLib.STATUS;
+  var TERMINAL = [S.PHYSICALLY_FINISHED, S.LOST, S.COMPACTABLE];
+
+  function assessCompactability(input) {
+    if (!input || !input.unit) return R.err('VALIDATION', 'assessCompactability cần unit');
+    var u = input.unit;
+    var blockers = [];
+
+    if (!Array.isArray(input.pendingOperations) || !Array.isArray(input.approvals) ||
+        !Array.isArray(input.activeDependencies)) {
+      blockers.push({
+        code: 'COMPACTABILITY_INPUT_INCOMPLETE',
+        detail: 'phải nạp pendingOperations, approvals và activeDependencies kể cả khi rỗng'
+      });
+    }
+
+    if (TERMINAL.indexOf(u.status) === -1) {
+      blockers.push({ code: 'NOT_TERMINAL', detail: 'status=' + u.status });
+    }
+    if (u.status === S.LOST) {
+      var approved = (input.approvals || []).some(function (a) {
+        return a.unitId === u.unitId && a.type === 'ApproveLostContainer' && a.status === 'COMPLETED';
+      });
+      if (!approved) blockers.push({ code: 'LOST_NOT_APPROVED', detail: u.lostReportId || null });
+    }
+
+    var pending = (input.pendingOperations || []).filter(function (o) {
+      return !o.unitIds || o.unitIds.indexOf(u.unitId) !== -1;
+    });
+    if (pending.length) {
+      blockers.push({
+        code: 'OPERATION_UNRESOLVED',
+        detail: pending.map(function (o) { return o.operationId; })
+      });
+    }
+
+    var unresolvedApprovals = (input.approvals || []).filter(function (a) {
+      return a.unitId === u.unitId && a.status !== 'COMPLETED' && a.status !== 'REJECTED';
+    });
+    if (unresolvedApprovals.length) {
+      blockers.push({
+        code: 'APPROVAL_UNRESOLVED',
+        detail: unresolvedApprovals.map(function (a) { return a.type; })
+      });
+    }
+
+    var active = input.activeDependencies || [];
+    if (active.length) blockers.push({ code: 'TRACE_DEPENDENCY_ACTIVE', detail: active.length });
+
+    var debtQty = u.debt && (u.debt.amount || u.debt.qty) ? (u.debt.amount || u.debt.qty) : 0;
+    var absorbed = input.debtAbsorbedBy || (u.debt && u.debt.absorbedByUnitId);
+    if (debtQty > 0 && !absorbed) blockers.push({ code: 'DEBT_UNABSORBED', detail: debtQty });
+
+    return R.ok({ unitId: u.unitId, compactable: blockers.length === 0, blockers: blockers });
+  }
+
+  function sumBy(list, fn) {
+    return list.reduce(function (acc, x) { return acc + (fn(x) || 0); }, 0);
+  }
+
+  function uniq(list) {
+    var seen = Object.create(null), out = [];
+    list.forEach(function (x) {
+      if (x === null || x === undefined || seen[x]) return;
+      seen[x] = true;
+      out.push(x);
+    });
+    return out;
+  }
+
+  function buildUnitSnapshot(input) {
+    if (!input || !input.unit) return R.err('VALIDATION', 'buildUnitSnapshot cần unit');
+    var u = input.unit;
+    var entries = input.entries || [];
+    var allocations = input.allocations || [];
+    var cogsLines = input.cogsLines || [];
+
+    var foreign = entries.filter(function (e) { return e.unitId !== u.unitId; });
+    if (foreign.length) {
+      return R.err('VALIDATION',
+        'entries chứa ' + foreign.length + ' bút toán của unit khác — snapshot sẽ sai',
+        { unitId: u.unitId });
+    }
+
+    var revisionNo = input.revisionNo || 1;
+    if (revisionNo > 1 && !input.supersedesSnapshotId) {
+      return R.err('VALIDATION', 'revision > 1 phải trỏ supersedesSnapshotId');
+    }
+    var snapshotId = ids.deterministicId('snapshot', ['unit', u.unitId, String(revisionNo)]);
+    var billIds = uniq(allocations
+      .filter(function (a) { return a.domain === 'sale' || a.targetType === 'bill'; })
+      .map(function (a) { return a.targetRef; })
+      .concat(cogsLines.map(function (c) { return c.billId; })));
+    var prepBatchIds = uniq(allocations
+      .filter(function (a) { return a.domain === 'prep' || a.targetType === 'prepBatch'; })
+      .map(function (a) { return a.targetRef; }));
+    var recipeVersionIds = uniq(cogsLines.map(function (c) { return c.recipeVersionId; }));
+    var traceAllocations = allocations.map(function (a) {
+      var recipeIds = a.recipeVersionIds || uniq(cogsLines.filter(function (c) {
+        return c.billId && c.billId === (a.billId || (a.targetType === 'bill' ? a.targetRef : null));
+      }).map(function (c) { return c.recipeVersionId; }));
+      return Object.assign({}, a, {
+        billId: a.billId || (a.targetType === 'bill' ? a.targetRef : null),
+        prepBatchId: a.prepBatchId || (a.targetType === 'prepBatch' ? a.targetRef : null),
+        recipeVersionIds: recipeIds
+      });
+    });
+    var canonical = traceLib.buildUnitTrace({
+      unit: u, ledgerEntries: entries, allocations: traceAllocations
+    });
+    if (R.isErr(canonical)) return canonical;
+
+    function totalOf(type) {
+      return sumBy(entries.filter(function (e) { return e.type === type; }),
+        function (e) { return Math.abs(e.qtyDelta); });
+    }
+
+    return R.ok(Object.freeze({
+      snapshotId: snapshotId,
+      revisionNo: revisionNo,
+      supersedesSnapshotId: input.supersedesSnapshotId || null,
+      unitId: u.unitId, itemId: u.itemId, storeId: u.storeId, itemKind: u.itemKind,
+      receiptId: u.receiptId, supplierId: u.supplierId,
+      receivedAt: u.receivedAt, receivedBy: u.receivedBy,
+      initialQty: u.initialQty, finalRemainingQty: u.remainingQty, costBasis: u.costBasis,
+      openedAt: u.openedAt, openedBy: u.openedBy,
+      consumption: allocations.map(function (a) {
+        return {
+          operationId: a.operationId, qty: a.qty, domain: a.domain,
+          targetRef: a.targetRef, unitCost: typeof a.unitCost === 'number' ? a.unitCost : null,
+          cost: typeof a.cost === 'number' ? a.cost : null
+        };
+      }),
+      billIds: billIds,
+      prepBatchIds: prepBatchIds,
+      recipeVersionIds: recipeVersionIds,
+      cogsLines: cogsLines.map(function (c) {
+        return {
+          amount: c.amount,
+          costBasisVersionId: c.costBasisVersionId || null,
+          recipeVersionId: c.recipeVersionId || null,
+          billId: c.billId || null
+        };
+      }),
+      wasteQty: totalOf(ledgerLib.TYPE.WASTE),
+      lostQty: totalOf(ledgerLib.TYPE.LOST),
+      adjustmentQty: sumBy(entries.filter(function (e) {
+        return e.type === ledgerLib.TYPE.ADJUSTMENT;
+      }), function (e) { return e.qtyDelta; }),
+      reversalQty: totalOf(ledgerLib.TYPE.REVERSAL),
+      systemExhaustedAt: u.systemExhaustedAt,
+      finishedAt: u.finishedAt, finishedBy: u.finishedBy, finishReason: u.finishReason,
+      needsReview: !!u.needsReview,
+      needsReviewReasons: (u.needsReviewReasons || []).slice(),
+      variance: input.variance || null,
+      ledgerEntryIds: entries.map(function (e) { return e.entryId; }),
+      canonical: canonical.value,
+      builtAt: input.builtAt || null,
+      builtBy: input.builtBy || null
+    }));
+  }
+
+  var REQUIRED_FIELDS = [
+    'unitId', 'itemId', 'storeId', 'itemKind',
+    'receiptId', 'receivedAt', 'initialQty', 'costBasis',
+    'openedAt', 'consumption', 'billIds', 'prepBatchIds',
+    'recipeVersionIds', 'cogsLines', 'wasteQty', 'lostQty',
+    'adjustmentQty', 'reversalQty', 'systemExhaustedAt',
+    'finishedAt', 'needsReview', 'needsReviewReasons',
+    'variance', 'revisionNo', 'canonical'
+  ];
+
+  function missingFields(snapshot) {
+    if (!snapshot) return REQUIRED_FIELDS.slice();
+    return REQUIRED_FIELDS.filter(function (f) {
+      return !Object.prototype.hasOwnProperty.call(snapshot, f);
+    });
+  }
+
+  return {
+    TERMINAL_STATUSES: TERMINAL.slice(),
+    REQUIRED_FIELDS: REQUIRED_FIELDS,
+    assessCompactability: assessCompactability,
+    buildUnitSnapshot: buildUnitSnapshot,
+    missingFields: missingFields
   };
 });
 
@@ -6963,6 +7800,9 @@ GIEO.define('legacy-firebase-adapter/mappers', [
     });
 
     var channelType = o.isAppSale ? 'APP' : (o.isToGo ? 'TO_GO' : 'DINE_IN');
+    var total = typeof o.total === 'number' ? o.total : null;
+    var feePct = channelType === 'APP' && typeof o.appFeePct === 'number' ? o.appFeePct : 0;
+    var channelFee = total === null ? null : total * feePct / 100;
 
     return R.ok({
       bill: {
@@ -6978,12 +7818,14 @@ GIEO.define('legacy-firebase-adapter/mappers', [
           appName: o.appName || null,
           /* appFeePct ĐÃ có trong legacy nhưng chưa bao giờ được đọc — map sang
              để đường ống P&L theo kênh dùng được ngay. */
-          feePct: channelType === 'APP' && typeof o.appFeePct === 'number' ? o.appFeePct : 0
+          feePct: feePct
         },
         lines: lines,
         subtotal: typeof o.subtotal === 'number' ? o.subtotal : null,
         discountTotal: typeof o.discount === 'number' ? o.discount : 0,
-        total: typeof o.total === 'number' ? o.total : null,
+        total: total,
+        channelFee: channelFee,
+        netRevenue: total === null ? null : total - channelFee,
         /* Không tự tính netRevenue nếu thiếu total — thà để null còn hơn số sai. */
         status: 'COMPLETED',
         legacySource: { billId: spec.billId }
@@ -6992,14 +7834,234 @@ GIEO.define('legacy-firebase-adapter/mappers', [
     });
   }
 
+  /** Menu legacy → Catalog canonical. Category/recipe link được đánh dấu là suy ra. */
+  function mapMenu(spec) {
+    if (!ids.isId(spec.storeId, 'store')) return R.err('VALIDATION', 'mapMenu cần storeId');
+    var raw = spec.items || {};
+    var categories = [];
+    var categoryByName = Object.create(null);
+    var menuItems = [];
+    var ambiguous = [];
+
+    Object.keys(raw).forEach(function (key, index) {
+      var item = raw[key] || {};
+      if (!item.name) return;
+      var categoryName = item.type || 'Khác';
+      if (!categoryByName[categoryName]) {
+        categoryByName[categoryName] = ids.deterministicId('item', ['legacy-category', categoryName]);
+        categories.push({
+          categoryId: categoryByName[categoryName], storeId: spec.storeId,
+          name: categoryName, displayOrder: categories.length, archived: false,
+          versionSource: 'legacy-inferred'
+        });
+      }
+      var prices = {};
+      if (typeof item.priceM === 'number') prices.M = item.priceM;
+      if (typeof item.priceL === 'number') prices.L = item.priceL;
+      if (!Object.keys(prices).length && typeof item.price === 'number') prices.M = item.price;
+      var menuItemId = ids.deterministicId('item', ['legacy-menu', key]);
+      menuItems.push({
+        menuItemId: menuItemId, storeId: spec.storeId, name: item.name,
+        categoryId: categoryByName[categoryName], prices: prices,
+        recipeId: ids.deterministicId('recipe', ['legacy', (spec.recipePrefix || 'togo:') + key]),
+        toppingIds: [], displayOrder: typeof item.displayOrder === 'number' ? item.displayOrder : index,
+        color: item.color || null, archived: false, archivedAt: null,
+        legacySource: { key: key, channel: spec.channel || 'TO_GO' }
+      });
+      ambiguous.push({
+        code: AMBIGUOUS.NO_RECIPE_VERSION,
+        detail: 'recipeId của món ' + key + ' được suy từ key legacy, chưa chứng minh recipe version lịch sử'
+      });
+    });
+    return R.ok({ categories: categories, menuItems: menuItems, ambiguous: ambiguous });
+  }
+
   return {
     AMBIGUOUS: AMBIGUOUS,
     STATUS_MAP: STATUS_MAP,
     mapUnit: mapUnit,
     mapLedgerEntry: mapLedgerEntry,
     mapRecipe: mapRecipe,
-    mapBill: mapBill
+    mapBill: mapBill,
+    mapMenu: mapMenu
   };
+});
+
+/* ===== src/layers/legacy-firebase-adapter/read-port.js ===== */
+/** Read port schema cũ. Firebase client được inject; module không có bất kỳ API ghi nào. */
+GIEO.define('legacy-firebase-adapter/read-port', [
+  'shared-kernel/result',
+  'legacy-firebase-adapter/legacy-paths',
+  'legacy-firebase-adapter/mappers'
+], function (R, paths, mappers) {
+  'use strict';
+
+  function createReader(client) {
+    client = client || {};
+
+    function call(name, args) {
+      if (typeof client[name] !== 'function') {
+        return Promise.resolve(R.err('NOT_FOUND', 'legacy read client thiếu ' + name));
+      }
+      return Promise.resolve().then(function () { return client[name].apply(null, args); })
+        .then(function (value) { return value && typeof value.ok === 'boolean' ? value : R.ok(value); })
+        .catch(function (e) {
+          return R.err('RETRYABLE', 'đọc legacy thất bại: ' + (e && e.message ? e.message : e));
+        });
+    }
+    function join(base, suffix) { return suffix ? base + '/' + String(suffix).replace(/^\/+/, '') : base; }
+    function rtdb(name, suffix) {
+      var p = paths.get(name);
+      if (p.kind !== paths.RTDB) return Promise.resolve(R.err('VALIDATION', name + ' không phải RTDB'));
+      return call('rtdbGet', [join(p.path, suffix)]);
+    }
+    function firestoreDoc(name, docId) {
+      var p = paths.get(name);
+      if (p.kind !== paths.FIRESTORE) return Promise.resolve(R.err('VALIDATION', name + ' không phải Firestore'));
+      return call('firestoreGet', [p.path, docId]);
+    }
+    function firestoreQuery(name, query) {
+      var p = paths.get(name);
+      if (p.kind !== paths.FIRESTORE) return Promise.resolve(R.err('VALIDATION', name + ' không phải Firestore'));
+      return call('firestoreQuery', [p.path, query || {}]);
+    }
+
+    function loadUnit(spec) {
+      spec = spec || {};
+      if (!spec.containerCode) {
+        return Promise.resolve(R.err('VALIDATION', 'loadUnit cần containerCode legacy'));
+      }
+      return firestoreDoc('stockContainers', spec.containerCode).then(function (container) {
+        if (R.isErr(container)) return container;
+        if (!container.value) return R.err('NOT_FOUND', 'không tìm thấy container ' + spec.containerCode);
+        var raw = Object.assign({ code: spec.containerCode }, container.value);
+        var itemId = spec.itemId || raw.itemId;
+        if (!itemId) return R.err('AMBIGUOUS_LEGACY', 'container không có itemId để tìm active unit');
+        return rtdb('activeUnits', itemId + '/' + (spec.activeUnitId || spec.containerCode)).then(function (active) {
+          var rt = R.isOk(active) ? active.value : null;
+          return mappers.mapUnit({
+            container: raw, rtUnit: rt, storeId: spec.storeId, itemKind: spec.itemKind || 'raw'
+          });
+        });
+      });
+    }
+
+    function loadLedger(spec) {
+      spec = spec || {};
+      return firestoreQuery(spec.domain === 'prep' ? 'prepTransactions' : 'stockTransactions', {
+        where: [{ field: 'containerCode', op: '==', value: spec.containerCode }]
+      }).then(function (rows) {
+        if (R.isErr(rows)) return rows;
+        var mapped = [];
+        var ambiguous = [];
+        Object.keys(rows.value || {}).forEach(function (id) {
+          var out = mappers.mapLedgerEntry({
+            tx: Object.assign({ id: id }, rows.value[id]), storeId: spec.storeId,
+            domain: spec.domain || 'raw'
+          });
+          if (R.isOk(out)) {
+            mapped.push(out.value.entry);
+            ambiguous = ambiguous.concat(out.value.ambiguous || []);
+          }
+        });
+        return R.ok({ entries: mapped, ambiguous: ambiguous });
+      });
+    }
+
+    function loadUnitTrace(spec) {
+      return Promise.all([loadUnit(spec), loadLedger(spec)]).then(function (rows) {
+        if (R.isErr(rows[0])) return rows[0];
+        if (R.isErr(rows[1])) return rows[1];
+        return R.ok({
+          unit: rows[0].value.unit,
+          ledgerEntries: rows[1].value.entries,
+          allocations: [],
+          ambiguous: (rows[0].value.ambiguous || []).concat(rows[1].value.ambiguous || []),
+          sourceDrift: rows[0].value.sourceDrift
+        });
+      });
+    }
+
+    function loadBills(spec) {
+      spec = spec || {};
+      var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(spec.businessDate || '');
+      if (!m) return Promise.resolve(R.err('VALIDATION', 'loadBills cần businessDate YYYY-MM-DD'));
+      var archiveKey = m[2] + '_' + m[3] + '_' + m[1];
+      return rtdb('orders', Number(m[2]) + '/' + Number(m[3])).then(function (live) {
+        if (R.isOk(live) && live.value && Object.keys(live.value).length) {
+          return R.ok({ source: 'LEGACY_LIVE', orders: live.value });
+        }
+        return firestoreDoc('ordersArchive', archiveKey).then(function (archived) {
+          if (R.isErr(archived)) return archived;
+          return R.ok({ source: 'LEGACY_ARCHIVE', orders: (archived.value && archived.value.orders) || {} });
+        });
+      }).then(function (rows) {
+        if (R.isErr(rows)) return rows;
+        var bills = [], ambiguous = [];
+        Object.keys(rows.value.orders).forEach(function (id) {
+          var mapped = mappers.mapBill({
+            order: rows.value.orders[id], billId: id,
+            storeId: spec.storeId, businessDate: spec.businessDate
+          });
+          if (R.isOk(mapped)) {
+            bills.push(mapped.value.bill);
+            ambiguous = ambiguous.concat(mapped.value.ambiguous || []);
+          }
+        });
+        return R.ok({ bills: bills, ambiguous: ambiguous, source: rows.value.source });
+      });
+    }
+
+    function loadMenu(spec) {
+      spec = spec || {};
+      var source = spec.legacyMenuSource === 'menu' ? 'menu' : 'menuTogo';
+      return rtdb(source, null).then(function (rows) {
+        if (R.isErr(rows)) return rows;
+        return mappers.mapMenu({
+          items: rows.value || {}, storeId: spec.storeId,
+          channel: source === 'menuTogo' ? 'TO_GO' : 'DINE_IN',
+          recipePrefix: source === 'menuTogo' ? 'togo:' : 'dinein:'
+        });
+      });
+    }
+
+    function watchMenu(spec, listener) {
+      spec = spec || {};
+      if (typeof listener !== 'function') throw new Error('watchMenu cần listener');
+      if (typeof client.rtdbSubscribe !== 'function') {
+        listener(R.err('NOT_FOUND', 'legacy read client thiếu rtdbSubscribe'));
+        return function () {};
+      }
+      var source = spec.legacyMenuSource === 'menu' ? 'menu' : 'menuTogo';
+      var path = paths.get(source).path;
+      try {
+        return client.rtdbSubscribe(path, function (items) {
+          listener(mappers.mapMenu({
+            items: items || {}, storeId: spec.storeId,
+            channel: source === 'menuTogo' ? 'TO_GO' : 'DINE_IN',
+            recipePrefix: source === 'menuTogo' ? 'togo:' : 'dinein:'
+          }));
+        }, function (error) {
+          listener(R.err('RETRYABLE', 'theo dõi menu legacy thất bại: ' +
+            (error && error.message ? error.message : error)));
+        });
+      } catch (error) {
+        listener(R.err('RETRYABLE', 'khởi tạo theo dõi menu thất bại: ' + error.message));
+        return function () {};
+      }
+    }
+
+    return {
+      loadUnit: loadUnit,
+      loadLedger: loadLedger,
+      loadUnitTrace: loadUnitTrace,
+      loadBills: loadBills,
+      loadMenu: loadMenu,
+      watchMenu: watchMenu
+    };
+  }
+
+  return { createReader: createReader };
 });
 
 /* ===== src/layers/persistence-firebase/atomic-commit.js ===== */
@@ -7062,11 +8124,17 @@ GIEO.define('persistence-firebase/atomic-commit', [
     (plan.domainRecords || []).forEach(function (r) {
       var map = {
         bill: ['billLive', function (x) { return { businessDate: x.businessDate, billId: x.billId }; }],
+        billArchive: ['billArchive', function (x) { return { archiveKey: x.archiveKey }; }],
+        archiveRegistry: ['archiveRegistry', function (x) { return { businessDate: x.businessDate }; }],
         prepBatch: ['prepBatch', function (x) { return { prepBatchId: x.prepBatchId }; }],
         lostReport: ['lostReport', function (x) { return { reportId: x.lostReportId }; }],
         stockCount: ['stockCount', function (x) { return { countId: x.stockCountId }; }],
         cashSegment: ['shiftSegment', function (x) { return { businessDate: x.businessDate, seq: x.seq }; }],
-        expense: ['auditLog', function (x) { return { id: x.expenseId }; }]
+        expense: ['auditLog', function (x) { return { id: x.expenseId }; }],
+        unitSnapshot: ['unitSnapshot', function (x) { return { unitId: x.unitId, revisionNo: x.revisionNo }; }],
+        unitSnapshotHead: ['unitSnapshotHead', function (x) { return { unitId: x.unitId }; }],
+        monthlySnapshot: ['monthlySnapshot', function (x) { return { period: x.period, revisionNo: x.revisionNo }; }],
+        monthlySnapshotHead: ['monthlySnapshotHead', function (x) { return { period: x.period }; }]
       };
       var m = map[r.type];
       if (!m) {
@@ -7080,6 +8148,19 @@ GIEO.define('persistence-firebase/atomic-commit', [
 
     (plan.traceChanges || []).forEach(function (t, i) {
       add('traceDependency', { id: (plan.operationId || 'op') + '.' + i }, t);
+    });
+
+    /* Purge chỉ nhận path canonical CỤ THỂ từ compaction safety gate. Chặn
+       snapshot ở cả domain lẫn adapter để invariant C3 không phụ thuộc một lớp. */
+    (plan.rawRemovals || []).forEach(function (r) {
+      var prefix = 'orgs/' + ctx.organizationId + '/stores/' + ctx.storeId + '/';
+      if (!r || (r.kind !== paths.RTDB && r.kind !== paths.FIRESTORE) ||
+          typeof r.path !== 'string' || r.path.indexOf(prefix) !== 0 ||
+          /(^|\/)snapshots\//.test(r.path)) {
+        errors.push('rawRemoval không phải path canonical an toàn');
+        return;
+      }
+      writes.push({ kind: r.kind, path: r.path, op: 'remove', data: null });
     });
 
     if (plan.audit) {
@@ -7286,7 +8367,8 @@ GIEO.define('persistence-firebase/canonical-paths', [
 
     /* Bill — live ở RTDB, archive ở Firestore, giữ đúng phân tầng legacy. */
     billLive: { kind: RTDB, build: function (ctx, a) { return base(ctx) + '/bills/live/' + a.businessDate + '/' + a.billId; } },
-    billArchive: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/bills/archive/' + a.businessDate; } },
+    billArchive: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/bills/archive/' + a.archiveKey; } },
+    archiveRegistry: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/archiveRegistry/' + a.businessDate; } },
     billCounter: { kind: RTDB, build: function (ctx, a) { return base(ctx) + '/counters/bill/' + a.businessDate; } },
 
     /* Cache TÍNH-LẠI-ĐƯỢC — không lên cấp thành snapshot bất biến. */
@@ -7296,8 +8378,10 @@ GIEO.define('persistence-firebase/canonical-paths', [
     shiftSegment: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/shifts/' + a.businessDate + '/segments/' + a.seq; } },
     employeeShift: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/employeeShifts/' + a.shiftId; } },
     /* Compaction thật. */
-    monthlySnapshot: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/snapshots/monthly/' + a.period; } },
-    unitSnapshot: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/snapshots/' + a.period + '/' + a.unitId; } },
+    monthlySnapshot: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/snapshots/monthly/' + a.period + '/revisions/' + a.revisionNo; } },
+    monthlySnapshotHead: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/snapshots/monthly/' + a.period + '/head/current'; } },
+    unitSnapshot: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/snapshots/units/' + a.unitId + '/revisions/' + a.revisionNo; } },
+    unitSnapshotHead: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/snapshots/units/' + a.unitId + '/head/current'; } },
 
     loyaltyLedger: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/loyaltyLedger/' + a.entryId; } },
     loyaltyEffects: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/loyaltyEffects/' + a.billId; } },
@@ -7365,8 +8449,9 @@ GIEO.define('read-layer/gateway', [
   'store-context/access',
   'read-layer/merge-canonical',
   'fifo-core/projection',
-  'traceability/trace'
-], function (ids, R, access, merge, projection, traceLib) {
+  'traceability/trace',
+  'catalog/menu'
+], function (ids, R, access, merge, projection, traceLib, menuLib) {
   'use strict';
 
   /**
@@ -7385,6 +8470,7 @@ GIEO.define('read-layer/gateway', [
 
   var Q = {
     GetUnitTrace: registerQuery('GetUnitTrace', { authority: 'EXECUTE' }),
+    GetMenu: registerQuery('GetMenu', { authority: 'EXECUTE' }),
     GetInventoryLevel: registerQuery('GetInventoryLevel', { authority: 'EXECUTE' }),
     GetConsumption: registerQuery('GetConsumption', { authority: 'REVIEW_APPROVE_CORRECT' }),
     /* Dữ liệu nhạy cảm mặc định KHÔNG thuộc tầng EXECUTE (quy tắc P3). */
@@ -7441,6 +8527,22 @@ GIEO.define('read-layer/gateway', [
         });
         return R.isErr(r) ? r : R.ok(r.value);
       },
+      computedAt: ctx.clock.now()
+    });
+  }
+
+  /** Catalog canonical; POS chỉ đọc, không bao giờ ghi menu. */
+  function getMenu(ctx, spec) {
+    var g = guard(Q.GetMenu, ctx, spec);
+    if (R.isErr(g)) return g;
+    return merge.resolve({
+      cache: spec.cache,
+      computeLive: function () {
+        return menuLib.buildMenuView({
+          categories: spec.categories || [], menuItems: spec.menuItems || []
+        });
+      },
+      legacy: spec.legacyMeta ? function () { return R.ok(spec.legacyMeta); } : null,
       computedAt: ctx.clock.now()
     });
   }
@@ -7602,6 +8704,7 @@ GIEO.define('read-layer/gateway', [
     QUERIES: Q,
     registerQuery: registerQuery,
     getUnitTrace: getUnitTrace,
+    getMenu: getMenu,
     getInventoryLevel: getInventoryLevel,
     getRevenue: getRevenue,
     getCOGS: getCOGS,
@@ -7662,9 +8765,10 @@ GIEO.define('read-layer/merge-canonical', ['shared-kernel/result'], function (R)
     if (spec.snapshot) {
       /* Đã chốt thì ĐỌC THẲNG. "Con số chủ quán đã đọc và đã dùng để ra quyết
          định thì không được đổi sau lưng." */
-      return wrap(spec.snapshot, {
+      var snapshotData = spec.snapshot.canonical || spec.snapshot.values || spec.snapshot;
+      return wrap(snapshotData, {
         sources: [SOURCE.SNAPSHOT], frozen: true,
-        versionIds: spec.snapshot.versionIds || {}, computedAt: spec.computedAt
+        versionIds: spec.snapshot.versionIds || snapshotData.versionIds || {}, computedAt: spec.computedAt
       });
     }
     if (spec.cache) {
@@ -8519,10 +9623,15 @@ GIEO.define('commands/pipeline', [
 
     /* 7. COMMIT — ranh giới nguyên tử */
     if (!deps.commit) {
-      store.update(operationId, { status: STATES.COMPLETED, result: plan, dryRun: true });
+      /* runAndCommit dùng planningOnly: giữ claim ở RUNNING cho tới khi
+         transaction thật kết thúc. Nếu đánh COMPLETED tại đây, request thứ hai
+         có thể nhận replay giả trong lúc commit đầu vẫn đang pending/hỏng. */
+      if (!deps.planningOnly) {
+        store.update(operationId, { status: STATES.COMPLETED, result: plan, dryRun: true });
+      }
       return R.ok({
         operationId: operationId,
-        status: STATES.COMPLETED,
+        status: deps.planningOnly ? STATES.RUNNING : STATES.COMPLETED,
         /* Giữ cùng hình dạng với đường commit thật — caller không phải phân biệt
            dry-run hay không để biết đây có phải lần chạy đầu. */
         replayed: false,
@@ -8576,7 +9685,10 @@ GIEO.define('commands/pipeline', [
 
     /* Chạy pha dựng plan ở chế độ dry-run để tái dùng nguyên vẹn mọi chốt chặn
        (validate → authorize → gate ngày → idempotency) mà không nhân bản logic. */
-    var planned = run(command, input, ctx, { operationStore: deps.operationStore });
+    var planned = run(command, input, ctx, {
+      operationStore: deps.operationStore,
+      planningOnly: true
+    });
     if (R.isErr(planned)) return Promise.resolve(planned);
     if (planned.value.replayed) return Promise.resolve(planned.value);
 
@@ -10225,62 +11337,457 @@ GIEO.define('reporting/variance-report', ['shared-kernel/result'], function (R) 
   return { STATUS: STATUS, build: build, toAlerts: toAlerts };
 });
 
-/* ===== src/apps/quanly/main.js ===== */
-/**
- * QUANLY entry — THIN MANAGEMENT UI.
- *
- * Giai đoạn hiện tại: SCAFFOLD, READ-ONLY. Chưa nối Firebase.
- * Hiển thị bộ luật import-direction đang có hiệu lực, để ranh giới kiến trúc
- * là thứ nhìn thấy được chứ không nằm im trong tài liệu.
- */
-GIEO.define('app-quanly/main', [
-  'shared-kernel/clock',
-  'shared-kernel/result'
-], function (clock, R) {
+/* ===== src/layers/bootstrap/firebase-read-client.js ===== */
+/** Firebase compat/modular bridge chỉ đọc. Nhận handle đã khởi tạo, không chứa config/credential. */
+GIEO.define('bootstrap/firebase-read-client', ['shared-kernel/result'], function (R) {
   'use strict';
 
-  function esc(s) {
-    return String(s).replace(/[&<>]/g, function (c) {
-      return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c];
+  function create(spec) {
+    spec = spec || {};
+    var rtdb = spec.rtdb;
+    var firestore = spec.firestore;
+
+    function rtdbGet(path) {
+      if (!rtdb || typeof rtdb.ref !== 'function') {
+        return Promise.reject(new Error('chưa cấp Firebase RTDB handle'));
+      }
+      return Promise.resolve(rtdb.ref(path).once('value')).then(function (snap) {
+        return snap && typeof snap.val === 'function' ? snap.val() : null;
+      });
+    }
+    function rtdbSubscribe(path, onValue, onError) {
+      if (!rtdb || typeof rtdb.ref !== 'function') {
+        throw new Error('chưa cấp Firebase RTDB handle');
+      }
+      var ref = rtdb.ref(path);
+      if (!ref || typeof ref.on !== 'function' || typeof ref.off !== 'function') {
+        throw new Error('Firebase RTDB handle không hỗ trợ subscription');
+      }
+      function handle(snapshot) {
+        onValue(snapshot && typeof snapshot.val === 'function' ? snapshot.val() : null);
+      }
+      ref.on('value', handle, onError);
+      return function unsubscribe() { ref.off('value', handle); };
+    }
+    function collection(name) {
+      if (!firestore || typeof firestore.collection !== 'function') {
+        throw new Error('chưa cấp Firestore handle');
+      }
+      return firestore.collection(name);
+    }
+    function firestoreGet(name, id) {
+      return Promise.resolve().then(function () { return collection(name).doc(id).get(); })
+        .then(function (snap) {
+          if (!snap || snap.exists === false) return null;
+          return typeof snap.data === 'function' ? snap.data() : null;
+        });
+    }
+    function firestoreQuery(name, query) {
+      return Promise.resolve().then(function () {
+        var ref = collection(name);
+        (query.where || []).forEach(function (w) { ref = ref.where(w.field, w.op, w.value); });
+        if (query.orderBy) ref = ref.orderBy(query.orderBy.field, query.orderBy.direction || 'asc');
+        if (query.limit) ref = ref.limit(query.limit);
+        return ref.get();
+      }).then(function (snap) {
+        var out = Object.create(null);
+        if (snap && typeof snap.forEach === 'function') {
+          snap.forEach(function (doc) { out[doc.id] = doc.data(); });
+        }
+        return out;
+      });
+    }
+
+    return {
+      rtdbGet: rtdbGet,
+      rtdbSubscribe: rtdbSubscribe,
+      firestoreGet: firestoreGet,
+      firestoreQuery: firestoreQuery,
+      assertReadOnly: function () { return R.ok(true); }
+    };
+  }
+
+  return { create: create };
+});
+
+/* ===== src/layers/bootstrap/legacy-data-source.js ===== */
+/** Dịch query UI thành dữ liệu canonical từ legacy read port, chỉ đọc. */
+GIEO.define('bootstrap/legacy-data-source', [
+  'shared-kernel/result'
+], function (R) {
+  'use strict';
+
+  function create(reader, defaults) {
+    defaults = defaults || {};
+    if (!reader) throw new Error('[legacy-data-source] cần legacy reader');
+
+    function forQuery(name, input) {
+      input = Object.assign({}, defaults, input || {});
+      if (name === 'GetUnitTrace' && input.containerCode) {
+        return reader.loadUnitTrace(input).then(function (out) {
+          if (R.isErr(out)) return out;
+          return R.ok({
+            storeId: input.storeId,
+            unitId: out.value.unit.unitId,
+            unit: out.value.unit,
+            ledgerEntries: out.value.ledgerEntries,
+            allocations: out.value.allocations,
+            legacyTrace: function () {
+              return R.ok({ ambiguous: out.value.ambiguous, sourceDrift: out.value.sourceDrift });
+            }
+          });
+        });
+      }
+      if (name === 'GetMenu' && !input.menuItems) {
+        return reader.loadMenu(input).then(function (out) {
+          if (R.isErr(out)) return out;
+          return R.ok({
+            storeId: input.storeId,
+            categories: out.value.categories,
+            menuItems: out.value.menuItems,
+            legacyMeta: { ambiguous: out.value.ambiguous }
+          });
+        });
+      }
+      if ((name === 'GetRevenue' || name === 'GetCOGS') && input.businessDate && !input.bills) {
+        return reader.loadBills(input).then(function (out) {
+          if (R.isErr(out)) return out;
+          return R.ok({
+            storeId: input.storeId,
+            bills: out.value.bills,
+            legacyMeta: { source: out.value.source, ambiguous: out.value.ambiguous }
+          });
+        });
+      }
+      /* Query đã mang canonical input thì đi thẳng. Không tự suy đoán query lạ. */
+      return Promise.resolve(R.ok(input));
+    }
+
+    function forCommand() {
+      return Promise.resolve(R.err('FORBIDDEN',
+        'legacy-data-source chỉ đọc — command không được hydrate từ đường này'));
+    }
+
+    function watchQuery(name, input, listener) {
+      input = Object.assign({}, defaults, input || {});
+      if (name !== 'GetMenu' || typeof reader.watchMenu !== 'function') return null;
+      return reader.watchMenu(input, function (out) {
+        if (R.isErr(out)) return listener(out);
+        listener(R.ok({
+          storeId: input.storeId,
+          categories: out.value.categories,
+          menuItems: out.value.menuItems,
+          legacyMeta: { ambiguous: out.value.ambiguous }
+        }));
+      });
+    }
+
+    return { forQuery: forQuery, forCommand: forCommand, watchQuery: watchQuery };
+  }
+
+  return { create: create };
+});
+
+/* ===== src/layers/bootstrap/runtime.js ===== */
+/** Composition root duy nhất cho apps: query qua read-layer, mutation qua commands. */
+GIEO.define('bootstrap/runtime', [
+  'shared-kernel/result',
+  'commands/pipeline',
+  'commands/sales',
+  'commands/inventory',
+  'commands/prep',
+  'commands/reversal',
+  'commands/approval',
+  'commands/shift',
+  'read-layer/gateway'
+], function (R, pipeline, sales, inventory, prep, reversal, approval, shift, reads) {
+  'use strict';
+
+  var MODE = { READ_ONLY: 'READ_ONLY', SHADOW: 'SHADOW', WRITE: 'WRITE' };
+  var COMMANDS = {
+    RecordSale: sales.RecordSale,
+    RecordAddon: sales.RecordAddon,
+    RecordWaste: inventory.RecordWaste,
+    AdjustInventory: inventory.AdjustInventory,
+    ReportLostContainer: inventory.ReportLostContainer,
+    RestoreFoundContainer: inventory.RestoreFoundContainer,
+    RecordPrepProduction: prep.RecordPrepProduction,
+    EditPrepYield: prep.EditPrepYield,
+    ReverseTransaction: reversal.ReverseTransaction,
+    ReviseState: reversal.ReviseState,
+    CorrectLedgerEntry: reversal.CorrectLedgerEntry,
+    ApproveLostContainer: approval.ApproveLostContainer,
+    ApproveStockCount: approval.ApproveStockCount,
+    ApproveExpense: approval.ApproveExpense,
+    CloseCashSegment: shift.CloseCashSegment
+  };
+  var QUERIES = {
+    GetMenu: reads.getMenu,
+    GetUnitTrace: reads.getUnitTrace,
+    GetInventoryLevel: reads.getInventoryLevel,
+    GetRevenue: reads.getRevenue,
+    GetCOGS: reads.getCOGS,
+    GetPnL: reads.getPnL,
+    ComparePeriods: reads.comparePeriods
+  };
+
+  function createRuntime(spec) {
+    spec = spec || {};
+    var mode = spec.mode || MODE.READ_ONLY;
+    if (!MODE[mode]) throw new Error('[bootstrap/runtime] mode không hợp lệ: ' + mode);
+    var operationStore = spec.operationStore || pipeline.createInMemoryOperationStore();
+
+    function context() {
+      return typeof spec.context === 'function' ? spec.context() : spec.context;
+    }
+    function query(name, input) {
+      var fn = QUERIES[name];
+      if (!fn) return Promise.resolve(R.err('NOT_FOUND', 'query chưa đăng ký: ' + name));
+      var ctx = context();
+      if (!ctx) return Promise.resolve(R.err('NOT_FOUND', 'chưa có StoreContext để đọc dữ liệu'));
+      var hydrated = spec.dataSource && typeof spec.dataSource.forQuery === 'function'
+        ? spec.dataSource.forQuery(name, input || {})
+        : R.ok(input || {});
+      return Promise.resolve(hydrated).then(function (resolved) {
+        if (R.isErr(resolved)) return resolved;
+        return fn(ctx, resolved.value);
+      });
+    }
+    function command(name, input) {
+      var cmd = COMMANDS[name];
+      if (!cmd) return Promise.resolve(R.err('NOT_FOUND', 'command chưa đăng ký: ' + name));
+      if (mode === MODE.READ_ONLY) {
+        return Promise.resolve(R.err('FORBIDDEN',
+          'Hệ thống mới đang READ_ONLY — production cũ vẫn là sole writer'));
+      }
+      var ctx = context();
+      if (!ctx) return Promise.resolve(R.err('NOT_FOUND', 'chưa có StoreContext để chạy command'));
+      var hydrated = spec.dataSource && typeof spec.dataSource.forCommand === 'function'
+        ? spec.dataSource.forCommand(name, input || {})
+        : R.ok(input || {});
+      return Promise.resolve(hydrated).then(function (resolved) {
+        if (R.isErr(resolved)) return resolved;
+        if (mode === MODE.SHADOW) {
+          return pipeline.run(cmd, resolved.value, ctx, { operationStore: operationStore });
+        }
+        if (typeof spec.commit !== 'function') {
+          return R.err('VALIDATION', 'WRITE mode cần atomic commit adapter');
+        }
+        return pipeline.runAndCommit(cmd, resolved.value, ctx, {
+          operationStore: operationStore,
+          commit: spec.commit,
+          rollback: spec.rollback
+        });
+      });
+    }
+    function watch(name, input, listener) {
+      if (typeof listener !== 'function') throw new Error('[bootstrap/runtime] watch cần listener');
+      var fn = QUERIES[name];
+      if (!fn) {
+        listener(R.err('NOT_FOUND', 'query chưa đăng ký: ' + name));
+        return function () {};
+      }
+      function resolve(hydrated) {
+        if (R.isErr(hydrated)) return listener(hydrated);
+        var ctx = context();
+        if (!ctx) return listener(R.err('NOT_FOUND', 'chưa có StoreContext để đọc dữ liệu'));
+        listener(fn(ctx, hydrated.value));
+      }
+      if (spec.dataSource && typeof spec.dataSource.watchQuery === 'function') {
+        var unsubscribe = spec.dataSource.watchQuery(name, input || {}, resolve);
+        if (typeof unsubscribe === 'function') return unsubscribe;
+      }
+      query(name, input).then(listener);
+      return function () {};
+    }
+
+    return {
+      mode: mode,
+      query: query,
+      watch: watch,
+      command: command,
+      device: spec.device || {},
+      registeredCommands: function () { return Object.keys(COMMANDS).sort(); },
+      registeredQueries: function () { return Object.keys(QUERIES).sort(); }
+    };
+  }
+
+  return { MODE: MODE, COMMANDS: COMMANDS, QUERIES: QUERIES, createRuntime: createRuntime };
+});
+
+/* ===== src/apps/quanly/controller.js ===== */
+/** QUANLY controller: drill qua read-layer, sửa/duyệt qua command pipeline. */
+GIEO.define('app-quanly/controller', [
+  'shared-kernel/result',
+  'bootstrap/runtime'
+], function (R, bootstrap) {
+  'use strict';
+
+  function createController(runtime) {
+    runtime = runtime || bootstrap.createRuntime({ mode: bootstrap.MODE.READ_ONLY });
+    var state = { mode: runtime.mode, screen: 'OVERVIEW', lastResult: null, lastError: null };
+    function snapshot() { return Object.assign({}, state); }
+    function navigate(screen) {
+      if (['OVERVIEW', 'TRACE', 'APPROVALS', 'REPORTS'].indexOf(screen) === -1) {
+        return R.err('VALIDATION', 'màn QUANLY không hợp lệ: ' + screen);
+      }
+      state.screen = screen;
+      return R.ok(snapshot());
+    }
+    function read(name, input) {
+      return Promise.resolve(runtime.query(name, input || {})).then(function (out) {
+        if (R.isErr(out)) state.lastError = out.error;
+        else state.lastResult = out.value;
+        return out;
+      });
+    }
+    function run(name, input) {
+      return runtime.command(name, input || {}).then(function (out) {
+        if (R.isErr(out)) state.lastError = out.error;
+        else state.lastResult = out.value;
+        return out;
+      });
+    }
+
+    return {
+      state: snapshot,
+      navigate: navigate,
+      getUnitTrace: function (input) { return read('GetUnitTrace', input); },
+      getRevenue: function (input) { return read('GetRevenue', input); },
+      getCOGS: function (input) { return read('GetCOGS', input); },
+      getPnL: function (input) { return read('GetPnL', input); },
+      approveStockCount: function (input) { return run('ApproveStockCount', input); },
+      approveLost: function (input) { return run('ApproveLostContainer', input); },
+      approveExpense: function (input) { return run('ApproveExpense', input); },
+      adjustInventory: function (input) { return run('AdjustInventory', input); },
+      reverseOrder: function (input) { return run('ReverseTransaction', input); }
+    };
+  }
+
+  return { createController: createController };
+});
+
+/* ===== src/apps/quanly/main.js ===== */
+/** QUANLY thin client — điều tra qua read-layer, sửa qua commands. */
+GIEO.define('app-quanly/main', [
+  'shared-kernel/result',
+  'bootstrap/runtime',
+  'app-quanly/controller'
+], function (R, bootstrap, controllerLib) {
+  'use strict';
+
+  function esc(value) {
+    return String(value).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
     });
   }
 
   function start() {
-    var c = clock.createClock();
     var el = document.getElementById('app');
-    var rules = GIEO._getRules();
-    var mods = GIEO.inventory();
+    if (!el) return R.err('NOT_FOUND', 'không có #app');
+    var runtime = globalThis.GIEO_QUANLY_RUNTIME || bootstrap.createRuntime({ mode: bootstrap.MODE.READ_ONLY });
+    var controller = controllerLib.createController(runtime);
+    var traceView = { loading: false, error: null, data: null };
+    var reportView = { loading: false, error: null, data: null };
 
-    var rows = Object.keys(rules.layers).map(function (name) {
-      var allowed = rules.layers[name].canImport;
-      var count = mods.filter(function (m) { return m.layer === name; }).length;
-      return '<tr>' +
-        '<td style="padding:4px 8px"><code>' + name + '</code></td>' +
-        '<td style="padding:4px 8px;text-align:right;color:' + (count ? '#000' : '#bbb') + '">' + count + '</td>' +
-        '<td style="padding:4px 8px;color:#555">' +
-          (allowed.length ? allowed.map(esc).join(', ') : '<em style="color:#999">không phụ thuộc gì</em>') +
-        '</td></tr>';
-    }).join('');
+    function traceMarkup() {
+      if (traceView.loading) return '<div class="empty"><h3>Đang dựng timeline…</h3></div>';
+      if (traceView.error) return '<div class="result error"><strong>Không thể truy vết</strong><span>' +
+        esc(traceView.error.message) + '</span></div>';
+      if (!traceView.data) return '<div class="empty"><div class="empty-icon">⌕</div><h3>Chọn một Unit để điều tra</h3>' +
+        '<p>Read Layer tự chọn LIVE hoặc snapshot lịch sử; màn hình không branch theo nguồn.</p></div>';
+      return '<div class="trace-grid"><article class="result"><span>Unit</span><strong>' +
+        esc(traceView.data.unitId) + '</strong></article><article class="result"><span>Bill</span><strong>' +
+        esc((traceView.data.billIds || []).length) + '</strong></article><article class="result"><span>BTP</span><strong>' +
+        esc((traceView.data.prepBatchIds || []).length) + '</strong></article></div>';
+    }
 
-    el.innerHTML =
-      '<h1 style="font-size:18px;margin:0 0 4px">GIEO Quản lý</h1>' +
-      '<p style="margin:0 0 16px;color:#666">Scaffold — READ-ONLY. ' + esc(c.calendarDate()) + '</p>' +
-      '<p style="padding:8px 12px;border-radius:6px;background:#e8f5e9">' +
-        mods.length + ' module đã nạp, 0 vi phạm import-direction ' +
-        '<span style="color:#666">(registry chặn ngay lúc nạp trang)</span></p>' +
-      '<h2 style="font-size:14px;margin-top:20px">Bộ luật import-direction đang hiệu lực</h2>' +
-      '<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:13px;min-width:560px">' +
-        '<thead><tr style="text-align:left;border-bottom:1px solid #ddd">' +
-          '<th style="padding:4px 8px">Layer</th>' +
-          '<th style="padding:4px 8px;text-align:right">Module</th>' +
-          '<th style="padding:4px 8px">Được import</th>' +
-        '</tr></thead><tbody>' + rows + '</tbody></table></div>' +
-      '<h2 style="font-size:14px;margin-top:20px">Luật cứng</h2>' +
-      '<ul style="padding-left:18px;color:#555">' +
-        rules.hardRules.map(function (r) { return '<li>' + esc(r) + '</li>'; }).join('') +
-      '</ul>';
+    function content(screen) {
+      if (screen === 'TRACE') {
+        return '<section class="panel"><div class="section-head"><div><p class="eyebrow">Truy vết hai chiều</p>' +
+          '<h2>Unit → Bill / BTP / Waste</h2></div></div><div class="search-row">' +
+          '<form id="ql-unit-search" style="display:contents"><input name="code" aria-label="Mã Unit" ' +
+          'placeholder="Nhập hoặc quét mã Unit" required><button>Tra cứu</button></form></div>' +
+          traceMarkup() + '</section>';
+      }
+      if (screen === 'APPROVALS') {
+        return '<section class="panel"><div class="section-head"><div><p class="eyebrow">Kiểm soát</p>' +
+          '<h2>Việc chờ duyệt</h2></div><span class="status neutral">0 việc</span></div>' +
+          '<div class="empty"><div class="empty-icon">✓</div><h3>Chưa có dữ liệu duyệt</h3>' +
+          '<p>Kiểm kê, báo mất và chi phí chỉ được thay đổi qua command có audit.</p></div></section>';
+      }
+      if (screen === 'REPORTS') {
+        return '<section class="panel"><div class="section-head"><div><p class="eyebrow">Sổ sách</p>' +
+          '<h2>Doanh thu · COGS · P&amp;L</h2></div><button disabled>Xuất báo cáo</button></div>' +
+          '<form class="search-row" id="revenue-search"><input type="date" name="date" required>' +
+          '<button>Đọc doanh thu</button></form>' +
+          (reportView.loading ? '<div class="empty"><h3>Đang đọc báo cáo…</h3></div>' :
+            reportView.error ? '<div class="result error"><strong>Không đọc được báo cáo</strong><span>' +
+              esc(reportView.error.message) + '</span></div>' :
+            '<div class="metric-grid"><article class="metric"><span>Doanh thu thuần</span><strong>' +
+              (reportView.data ? Number(reportView.data.netRevenue).toLocaleString('vi-VN') + ' ₫' : '—') +
+              '</strong></article><article class="metric"><span>Số đơn</span><strong>' +
+              (reportView.data ? esc(reportView.data.billCount) : '—') +
+              '</strong></article><article class="metric"><span>Phí kênh</span><strong>' +
+              (reportView.data ? Number(reportView.data.channelFees).toLocaleString('vi-VN') + ' ₫' : '—') +
+              '</strong></article></div>') + '</section>';
+      }
+      return '<section class="panel"><div class="section-head"><div><p class="eyebrow">Tổng quan cửa hàng</p>' +
+        '<h2>Hôm nay</h2></div><span class="status neutral">Chưa đồng bộ</span></div>' +
+        '<div class="metric-grid"><article class="metric"><span>Doanh thu</span><strong>—</strong></article>' +
+        '<article class="metric"><span>Cảnh báo</span><strong>—</strong></article>' +
+        '<article class="metric"><span>Unit cần rà</span><strong>—</strong></article></div></section>';
+    }
 
-    return R.ok(true);
+    function render() {
+      var state = controller.state();
+      var readonly = state.mode === bootstrap.MODE.READ_ONLY;
+      el.innerHTML = '<div class="app-shell management"><header class="topbar"><div>' +
+        '<p class="brand">gieo gieo</p><h1>Quản lý vận hành</h1></div>' +
+        '<span class="status ' + (readonly ? 'warning' : 'success') + '">' + esc(state.mode) + '</span></header>' +
+        (readonly ? '<div class="notice"><strong>Chế độ chỉ đọc</strong><span>Mọi chỉnh sửa đang bị khóa cho tới shadow/cutover.</span></div>' : '') +
+        '<div class="workspace"><aside class="side-nav" aria-label="Điều hướng quản lý">' +
+          '<button data-screen="OVERVIEW" class="' + (state.screen === 'OVERVIEW' ? 'active' : '') + '">Tổng quan</button>' +
+          '<button data-screen="TRACE" class="' + (state.screen === 'TRACE' ? 'active' : '') + '">Truy vết FIFO</button>' +
+          '<button data-screen="APPROVALS" class="' + (state.screen === 'APPROVALS' ? 'active' : '') + '">Duyệt &amp; sửa</button>' +
+          '<button data-screen="REPORTS" class="' + (state.screen === 'REPORTS' ? 'active' : '') + '">Báo cáo</button>' +
+        '</aside><main>' + content(state.screen) + '</main></div></div>';
+      Array.prototype.forEach.call(el.querySelectorAll('[data-screen]'), function (button) {
+        button.addEventListener('click', function () {
+          controller.navigate(button.getAttribute('data-screen'));
+          render();
+        });
+      });
+      var form = el.querySelector('#ql-unit-search');
+      if (form) form.addEventListener('submit', function (event) {
+        event.preventDefault();
+        traceView = { loading: true, error: null, data: null };
+        var code = form.elements.code.value;
+        render();
+        controller.getUnitTrace({ containerCode: code }).then(function (out) {
+          traceView = R.isErr(out)
+            ? { loading: false, error: out.error, data: null }
+            : { loading: false, error: null, data: out.value.data };
+          render();
+        });
+      });
+      var revenueForm = el.querySelector('#revenue-search');
+      if (revenueForm) revenueForm.addEventListener('submit', function (event) {
+        event.preventDefault();
+        var date = revenueForm.elements.date.value;
+        reportView = { loading: true, error: null, data: null };
+        render();
+        controller.getRevenue({ businessDate: date }).then(function (out) {
+          reportView = R.isErr(out)
+            ? { loading: false, error: out.error, data: null }
+            : { loading: false, error: null, data: out.value.data };
+          render();
+        });
+      });
+    }
+
+    render();
+    return R.ok({ mode: runtime.mode });
   }
 
   return { start: start };
