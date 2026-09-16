@@ -90,11 +90,12 @@ Luật cứng: `apps` không bao giờ chạm thẳng `fifo-core` / `compaction`
 | P7 Read layer | ✅ Cổng đọc duy nhất, enforce quyền đọc |
 | P5 BTP | ✅ PrepBatch + yield versioned + actual-vs-theoretical + báo cáo ngày |
 | Protected adapters | ✅ Bill/label printer + scanner + bank, kèm **fix** queue bị đầu độc |
+| Adapter Firebase | ✅ `legacy-firebase-adapter` (chỉ đọc) + `persistence-firebase` (ghi nguyên tử) |
 | P6 Compaction | 🔨 `VersionedInput` xong; snapshot/verifier/purge chưa |
 | P9-P10 UI | ⬜ chưa bắt đầu |
 | P12-P13 Shadow + Cutover | ⬜ chưa bắt đầu |
 
-**573 test pass, 53 module, 0 vi phạm import-direction.**
+**617 test pass, 57 module, 0 vi phạm import-direction.**
 
 Build order theo `FEATURE-TREE-V1.md` §3:
 `[0] Identity → [1] Catalog + [2] FIFO Core → [3] Sales → [4] Loyalty + [5] Shift + [6] Payroll → [7] Finance → [8] Alerts → [9] Reporting`

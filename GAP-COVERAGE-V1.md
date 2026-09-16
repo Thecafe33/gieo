@@ -116,7 +116,7 @@
 | Gap | Trạng thái |
 |---|---|
 | Menu: 2 app cùng ghi RTDB, race condition | ✅ `catalog/menu` + `sources:['QUANLY']` ở tầng command |
-| Path mismatch `food_gieogieo` vs `food_menu_gieogieo` | ⬜ thuộc `legacy-firebase-adapter` — chưa xây |
+| Path mismatch `food_gieogieo` vs `food_menu_gieogieo` | ✅ mọi path legacy tập trung 1 file `legacy-paths.js`. Test: `mọi path legacy khai ở một nơi` |
 | Giá menu không real-time tới POS | ⬜ thuộc UI/persistence — chưa xây |
 | Bất đối xứng retry Loyalty vs Stamp-free | ✅ `loyalty/ledger` — cùng một đường ghi cho mọi loại |
 | 12/16 alert rơi vào khuôn UI chung | ✅ `alerts/alert.TYPES` — mỗi loại khai trường bắt buộc riêng |
@@ -130,7 +130,6 @@
 | Phase | Nội dung |
 |---|---|
 | P6 | `compaction` — snapshot builder / verifier / purge (đã có `VersionedInput`) |
-| P1 (adapter) | `legacy-firebase-adapter` + `persistence-firebase` |
 | P9 / P10 | UI POS + QUANLY |
 | P12 / P13 | Shadow comparison + cutover |
 

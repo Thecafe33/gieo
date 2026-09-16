@@ -232,6 +232,58 @@ GIEO.define('commands/pipeline', [
   }
 
   /**
+   * Chạy command RỒI GHI THẬT.
+   *
+   * `run()` ở trên cố ý đồng bộ: nó dựng MutationPlan, và dựng plan là việc
+   * thuần tính toán. Nhưng ghi Firebase thì bất đồng bộ. Trộn hai thứ vào một
+   * hàm lúc trả Promise lúc trả giá trị là API dễ dùng sai, nên tách hẳn:
+   *
+   *   run()           → dry-run, đồng bộ, dùng cho shadow/simulate và test
+   *   runAndCommit()  → Promise, dùng khi đã có adapter ghi thật
+   *
+   * Giai đoạn hiện tại hệ thống chạy READ-ONLY nên đường dùng chủ yếu vẫn là
+   * run(); runAndCommit() có sẵn để cutover không phải sửa lại pipeline.
+   */
+  function runAndCommit(command, input, ctx, deps) {
+    deps = deps || {};
+    if (typeof deps.commit !== 'function') {
+      return Promise.resolve(R.err('VALIDATION', 'runAndCommit cần deps.commit'));
+    }
+
+    /* Chạy pha dựng plan ở chế độ dry-run để tái dùng nguyên vẹn mọi chốt chặn
+       (validate → authorize → gate ngày → idempotency) mà không nhân bản logic. */
+    var planned = run(command, input, ctx, { operationStore: deps.operationStore });
+    if (R.isErr(planned)) return Promise.resolve(planned);
+    if (planned.value.replayed) return Promise.resolve(planned.value);
+
+    var plan = planned.value.plan;
+    return Promise.resolve()
+      .then(function () { return deps.commit(plan, ctx); })
+      .then(function (committed) {
+        if (R.isErr(committed)) {
+          var rolledBack = null;
+          if (deps.rollback) rolledBack = deps.rollback(plan, ctx);
+          deps.operationStore.update(plan.operationId, {
+            status: R.isRetryable(committed) ? STATES.FAILED_RETRYABLE : STATES.FAILED_MANUAL_REVIEW,
+            error: committed.error.message,
+            rolledBack: rolledBack ? R.isOk(rolledBack) : false
+          });
+          return committed;
+        }
+        deps.operationStore.update(plan.operationId, {
+          status: STATES.COMPLETED, result: committed.value, dryRun: false
+        });
+        return R.ok({
+          operationId: plan.operationId,
+          status: STATES.COMPLETED,
+          replayed: false,
+          plan: plan,
+          result: committed.value
+        });
+      });
+  }
+
+  /**
    * MutationPlan rỗng — command bồi vào. Một plan mang TẤT CẢ thay đổi của một
    * operation (vật chất + ledger + projection + trace), để commit được nguyên tử.
    */
@@ -252,6 +304,7 @@ GIEO.define('commands/pipeline', [
     createInMemoryOperationStore: createInMemoryOperationStore,
     defineCommand: defineCommand,
     run: run,
+    runAndCommit: runAndCommit,
     emptyPlan: emptyPlan
   };
 });

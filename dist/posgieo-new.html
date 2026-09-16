@@ -6579,6 +6579,767 @@ GIEO.define('protected-adapters/scanner', ['shared-kernel/ids', 'shared-kernel/r
   return { DEFAULT_TIMEOUT_MS: DEFAULT_TIMEOUT_MS, createScanner: createScanner };
 });
 
+/* ===== src/layers/legacy-firebase-adapter/legacy-paths.js ===== */
+/**
+ * TẤT CẢ path Firebase CŨ tập trung ở MỘT file.
+ *
+ * Contract: LEGACY-FIREBASE-PATH-MAP-V1.md §4.
+ *
+ * Legacy format chuỗi path rải rác trong nhiều chục chỗ, nên đổi một path là
+ * phải đi tìm khắp 50k dòng. Ở đây một hằng số / một path.
+ *
+ * ADAPTER NÀY CHỈ ĐỌC. Không hàm nào ở đây ghi, và `assertReadOnly()` tồn tại
+ * để nếu ai đó thêm đường ghi thì nó hỏng ồn ào chứ không âm thầm ghi vào dữ
+ * liệu production đang chạy.
+ */
+GIEO.define('legacy-firebase-adapter/legacy-paths', ['shared-kernel/result'], function (R) {
+  'use strict';
+
+  var RTDB = 'RTDB';
+  var FIRESTORE = 'FIRESTORE';
+
+  /** kind: RTDB (dữ liệu nóng) vs FIRESTORE — giữ nguyên phân tầng của legacy. */
+  var PATHS = {
+    /* ── Unit / FIFO ────────────────────────────────────────────────── */
+    activeUnits: { kind: RTDB, path: 'active_units_gieogieo', keyed: 'itemId/containerId' },
+    stockContainers: { kind: FIRESTORE, path: 'stock_containers_gieogieo' },
+    prepBatches: { kind: FIRESTORE, path: 'prep_batches_gieogieo' },
+    stockTransactions: { kind: FIRESTORE, path: 'stock_transactions_gieogieo' },
+    prepTransactions: { kind: FIRESTORE, path: 'prep_transactions_gieogieo' },
+    inventoryItems: { kind: FIRESTORE, path: 'inventory_items_gieogieo' },
+    prepItems: { kind: FIRESTORE, path: 'prep_items_gieogieo' },
+    reversalUnitClaims: { kind: FIRESTORE, path: 'reversal_unit_claims_gieogieo' },
+    stockCounts: { kind: FIRESTORE, path: 'stock_counts_gieogieo' },
+    stockLostReports: { kind: FIRESTORE, path: 'stock_lost_reports_gieogieo' },
+    employeeStockDeductions: { kind: FIRESTORE, path: 'employee_stock_deductions_gieogieo' },
+    refillRules: { kind: FIRESTORE, path: 'refill_rules_gieogieo' },
+    storageLocations: { kind: FIRESTORE, path: 'storage_locations_gieogieo' },
+    purchaseOrders: { kind: FIRESTORE, path: 'purchase_orders_gieogieo' },
+    receivingRecords: { kind: FIRESTORE, path: 'receiving_records_gieogieo' },
+
+    /* ── Recipe / Cost / BTP ────────────────────────────────────────── */
+    recipes: { kind: FIRESTORE, path: 'recipes_gieogieo' },
+    toppingRecipes: { kind: FIRESTORE, path: 'topping_recipes_gieogieo' },
+    priceHistory: { kind: FIRESTORE, path: 'price_history_gieogieo' },
+    cogsTogo: { kind: FIRESTORE, path: 'cogs_gieogieo/togo' },
+    prepForecasts: { kind: FIRESTORE, path: 'prep_forecasts_gieogieo' },
+    packagingPresets: { kind: FIRESTORE, path: 'packaging_presets_gieogieo' },
+
+    /* ── Bill / Order ───────────────────────────────────────────────── */
+    orders: { kind: RTDB, path: 'orders_gieogieo', keyed: 'month/day/billId' },
+    ordersArchive: { kind: FIRESTORE, path: 'orders_gieogieo_archive', keyed: 'month_day_year' },
+    billCounters: { kind: RTDB, path: 'billCounters_gieogieo' },
+    billDeletions: { kind: FIRESTORE, path: 'bill_deletions_gieogieo' },
+    sessionDisplay: { kind: RTDB, path: 'session_display_gieogieo' },
+
+    /* ── Snapshot / chốt sổ ─────────────────────────────────────────── */
+    dailySalesCache: { kind: FIRESTORE, path: 'daily_sales_cache_gieogieo' },
+    dailyClosings: { kind: FIRESTORE, path: 'daily_closings_gieogieo' },
+    dailyOpenings: { kind: FIRESTORE, path: 'daily_openings_gieogieo' },
+    handoverRecords: { kind: FIRESTORE, path: 'handover_records_gieogieo' },
+    shiftSegments: { kind: FIRESTORE, path: 'shift_segments_gieogieo' },
+    bookClosings: { kind: FIRESTORE, path: 'book_closings_gieogieo' },
+    employeeShifts: { kind: FIRESTORE, path: 'employee_shifts_gieogieo' },
+
+    /* ── Loyalty ────────────────────────────────────────────────────── */
+    customers: { kind: FIRESTORE, path: 'customers' },
+    loyaltyBillEffects: { kind: FIRESTORE, path: 'loyalty_bill_effects_gieogieo' },
+    loyaltyPendingRetry: { kind: FIRESTORE, path: 'loyalty_pending_retry_gieogieo' },
+    stampFreeRedemptions: { kind: FIRESTORE, path: 'stamp_free_redemptions_gieogieo' },
+
+    /* ── Khác ───────────────────────────────────────────────────────── */
+    employees: { kind: FIRESTORE, path: 'employees_gieogieo' },
+    workSchedules: { kind: FIRESTORE, path: 'work_schedules_gieogieo' },
+    expenses: { kind: FIRESTORE, path: 'expenses_gieogieo' },
+    alerts: { kind: FIRESTORE, path: 'alerts_gieogieo' },
+    auditLogs: { kind: FIRESTORE, path: 'audit_logs_gieogieo' },
+    configHistory: { kind: FIRESTORE, path: 'config_history_gieogieo' },
+    menu: { kind: RTDB, path: 'menu_gieogieo' },
+    menuTogo: { kind: RTDB, path: 'menu_togo_gieogieo' },
+    toppings: { kind: RTDB, path: 'toppings_gieogieo' },
+
+    /**
+     * PROTECTED — GIỮ NGUYÊN PATH, KHÔNG ĐỔI.
+     * Webhook ngân hàng nằm ngoài phạm vi rebuild; đổi path là phá webhook đang
+     * chạy production (LEGACY-FIREBASE-PATH-MAP-V1.md §2.5).
+     */
+    bankConfirmations: { kind: RTDB, path: 'bank_confirmations', protected: true }
+  };
+
+  /* Path legacy CỐ Ý không migrate — ngoài phạm vi FIFO Core (§3). Liệt kê ra
+     để phân biệt "đã cân nhắc rồi bỏ" với "quên mất". */
+  var NOT_MIGRATED = [
+    'employees_gieogieo', 'work_schedules_gieogieo', 'hr_settings_gieogieo',
+    'expenses_gieogieo', 'expense_categories_gieogieo', 'payment_methods_gieogieo',
+    'customers', 'rewards', 'alerts_gieogieo',
+    'menu_gieogieo', 'menu_togo_gieogieo', 'toppings_gieogieo', 'food_gieogieo',
+    'config_history_gieogieo', 'audit_logs_gieogieo', 'finance_gieogieo/current',
+    'daily_ops_gieogieo'
+  ];
+
+  function get(name) {
+    var p = PATHS[name];
+    if (!p) throw new Error('[legacy-paths] không có path tên "' + name + '"');
+    return p;
+  }
+
+  /**
+   * Chốt chặn read-only. Gọi ở mọi chỗ định ghi — không có chỗ nào gọi là đúng.
+   * Ngoại lệ duy nhất là script migration/cutover trong tools/, chạy ngoài
+   * adapter này.
+   */
+  function assertReadOnly(operation, pathName) {
+    return R.err('FORBIDDEN',
+      'legacy-firebase-adapter CHỈ ĐỌC — từ chối "' + operation + '" lên "' + pathName + '". ' +
+      'Hệ thống cũ vẫn đang chạy production; ghi canonical đi qua persistence-firebase, ' +
+      'migration đi qua script riêng ở tools/.');
+  }
+
+  function isProtected(name) {
+    return !!(PATHS[name] && PATHS[name].protected);
+  }
+
+  return {
+    RTDB: RTDB,
+    FIRESTORE: FIRESTORE,
+    PATHS: PATHS,
+    NOT_MIGRATED: NOT_MIGRATED,
+    get: get,
+    assertReadOnly: assertReadOnly,
+    isProtected: isProtected
+  };
+});
+
+/* ===== src/layers/legacy-firebase-adapter/mappers.js ===== */
+/**
+ * Mapper: schema CŨ → canonical model.
+ *
+ * Contract: LEGACY-FIREBASE-PATH-MAP-V1.md §1, §4.
+ *
+ * Nguyên tắc: path canonical KHÔNG copy tên field cũ 1:1. Domain core quyết
+ * định field (FIFO-CORE-ARCHITECTURE-V2.md §1), adapter chỉ map.
+ *
+ * Mapper KHÔNG đoán. Dữ liệu cũ thiếu nghĩa thì đánh dấu `AMBIGUOUS` và trả
+ * kèm cờ — invariant #12 ("không đoán legacy semantics khi ambiguous"). Phần
+ * lớn giá trị của adapter này nằm ở chỗ nói ra được cái gì KHÔNG biết.
+ */
+GIEO.define('legacy-firebase-adapter/mappers', [
+  'shared-kernel/ids',
+  'shared-kernel/result'
+], function (ids, R) {
+  'use strict';
+
+  var AMBIGUOUS = {
+    NO_COST_BASIS: 'NO_COST_BASIS',
+    NO_ACTOR: 'NO_ACTOR',
+    NO_RECIPE_VERSION: 'NO_RECIPE_VERSION',
+    NO_SUPPLIER: 'NO_SUPPLIER',
+    NEGATIVE_UNIT_BASE: 'NEGATIVE_UNIT_BASE'
+  };
+
+  /* Legacy status → canonical lifecycle (FIFO-CORE-ARCHITECTURE-V2.md §2). */
+  var STATUS_MAP = {
+    sealed: 'SEALED',
+    open: 'OPEN',
+    finished: 'PHYSICALLY_FINISHED',
+    used_up: 'PHYSICALLY_FINISHED',
+    lost: 'LOST',
+    voided: 'VOIDED'
+  };
+
+  function flag(list, code, detail) {
+    list.push({ code: code, detail: detail || null });
+  }
+
+  /**
+   * Unit — phải xử lý CẢ HAI nguồn và merge đúng như `_ueRecomputeCurrentStock`.
+   *
+   * `stock_containers_gieogieo` (Firestore) là nguồn thật cho sealed/finished;
+   * `active_units_gieogieo` (RTDB) là phản chiếu real-time của unit ĐANG MỞ.
+   * Hai nguồn có thể lệch nhau — legacy có biến `_ueRtStale` cho đúng chuyện
+   * này. Merge phải nói ra khi lệch, không im lặng chọn một bên.
+   *
+   * @param spec.container  bản ghi Firestore
+   * @param spec.rtUnit     bản ghi RTDB tương ứng (nếu có)
+   */
+  function mapUnit(spec) {
+    var c = spec.container;
+    if (!c || !c.code) return R.err('VALIDATION', 'bản ghi container thiếu code');
+    if (!ids.isId(spec.storeId, 'store')) return R.err('VALIDATION', 'mapUnit cần storeId hợp lệ');
+
+    var ambiguous = [];
+    var status = STATUS_MAP[c.status] || null;
+    if (!status) {
+      return R.err('AMBIGUOUS_LEGACY',
+        'status legacy không nhận ra: "' + c.status + '" — không đoán, phải rà thủ công',
+        { code: c.code });
+    }
+
+    /* Legacy KHÔNG lưu giá vốn trên container. Đây là gốc của gap "COGS actual
+       chưa từng tồn tại" — Unit migrate sang không có costBasis thật, và phải
+       NÓI RA thay vì bịa một con số. */
+    var costBasis = null;
+    if (typeof c.unitCost === 'number') {
+      costBasis = { unitCost: c.unitCost, currency: 'VND', versionId: null, source: 'LEGACY' };
+    } else {
+      flag(ambiguous, AMBIGUOUS.NO_COST_BASIS,
+        'container legacy không lưu giá vốn — COGS actual cho Unit này không tính được');
+    }
+
+    if (!c.supplierId && !c.receiveRefId) flag(ambiguous, AMBIGUOUS.NO_SUPPLIER);
+
+    /* Merge 2 nguồn. RTDB thắng cho số dư của unit đang mở, đúng như legacy —
+       nhưng lệch thì ghi nhận. */
+    var remaining = typeof c.unitBase === 'number' ? c.unitBase : null;
+    var rtRemaining = spec.rtUnit && typeof spec.rtUnit.unitBase === 'number'
+      ? spec.rtUnit.unitBase : null;
+    var drift = null;
+    if (rtRemaining !== null && remaining !== null && rtRemaining !== remaining) {
+      drift = { firestore: remaining, rtdb: rtRemaining, difference: rtRemaining - remaining };
+    }
+    if (rtRemaining !== null && (status === 'OPEN' || status === 'CONSUMING')) {
+      remaining = rtRemaining;
+    }
+
+    /* Nợ FIFO ở legacy là unitBase ÂM, không có field debt. Chuyển thành field
+       tường minh (§4) và đánh dấu để rà. */
+    var debt = null;
+    if (remaining !== null && remaining < 0) {
+      debt = {
+        amount: -remaining, incurredAt: null, incurredByOperationId: null,
+        absorbedByUnitId: null, absorbedAt: null
+      };
+      flag(ambiguous, AMBIGUOUS.NEGATIVE_UNIT_BASE,
+        'legacy biểu diễn nợ bằng số âm, không biết nợ phát sinh lúc nào / bởi thao tác nào');
+    }
+
+    return R.ok({
+      unit: {
+        unitId: ids.deterministicId('unit', ['legacy', c.code]),
+        itemId: ids.deterministicId('item', ['legacy', c.itemId || 'unknown']),
+        storeId: spec.storeId,
+        itemKind: spec.itemKind || 'raw',
+        receiptId: c.receiveRefId || null,
+        supplierId: c.supplierId || null,
+        receivedAt: c.createdAt || null,
+        receivedBy: c.createdBy || null,
+        initialQty: typeof c.baseQty === 'number' ? c.baseQty : null,
+        remainingQty: remaining,
+        costBasis: costBasis,
+        status: status,
+        openedAt: c.openedAt || null,
+        openedBy: c.openedBy || null,
+        /* Legacy không lưu mốc này — nó chỉ suy diễn tạm thời mỗi lần load. */
+        systemExhaustedAt: null,
+        finishedAt: c.finishedAt || null,
+        finishedBy: c.finishedBy || null,
+        finishReason: c.finishReason || null,
+        wasteQty: typeof c.wasteBase === 'number' ? c.wasteBase : 0,
+        debt: debt,
+        lostAt: c.lostAt || null, lostBy: c.lostBy || null, lostReportId: c.lostReportId || null,
+        foundAt: null, foundBy: null,
+        needsReview: ambiguous.length > 0,
+        needsReviewReasons: ambiguous.map(function (a) { return a.code; }),
+        physicalReconciliations: (c.notEmptyChecks || []).map(function (n) {
+          return {
+            operationId: null, at: n.at || null, actorId: n.by || null,
+            before: null, actual: n.qty, delta: null,
+            method: 'weighing', reason: null
+          };
+        }),
+        operationId: null,
+        legacySource: { code: c.code, id: c.id || null }
+      },
+      ambiguous: ambiguous,
+      /* Lệch 2 nguồn là thông tin cho shadow-compare, không phải lỗi map. */
+      sourceDrift: drift
+    });
+  }
+
+  /** Ledger — gộp stock_transactions và prep_transactions, phân biệt bằng domain. */
+  function mapLedgerEntry(spec) {
+    var t = spec.tx;
+    if (!t) return R.err('VALIDATION', 'thiếu bản ghi giao dịch');
+    if (!ids.isId(spec.storeId, 'store')) return R.err('VALIDATION', 'mapLedgerEntry cần storeId');
+
+    var ambiguous = [];
+    if (!t.staffEmployeeId && !t.actorId) flag(ambiguous, AMBIGUOUS.NO_ACTOR);
+
+    var unitId = t.containerCode
+      ? ids.deterministicId('unit', ['legacy', t.containerCode])
+      : null;
+    var qtyDelta = typeof t.qtyDelta === 'number' ? t.qtyDelta : (t.qty || 0);
+
+    return R.ok({
+      entry: {
+        entryId: ids.deterministicId('ledger', ['legacy', t.id || String(t.txId || Math.random())]),
+        operationId: t.txId || null,
+        domain: spec.domain || 'raw',
+        type: (t.type || 'ADJUSTMENT').toUpperCase(),
+        itemId: ids.deterministicId('item', ['legacy', t.itemId || 'unknown']),
+        storeId: spec.storeId,
+        unitId: unitId,
+        qtyDelta: qtyDelta,
+        /* Quy tắc §5 áp NGAY lúc map — dữ liệu cũ vào canonical cũng phải tuân
+           đúng luật, không có ngoại lệ cho dữ liệu migrate. */
+        untrackedPendingDelta: unitId ? 0 : qtyDelta,
+        costBasisVersionId: null,
+        unitCost: typeof t.unitCost === 'number' ? t.unitCost : null,
+        businessDate: t.dateKey || null,
+        actorId: t.staffEmployeeId || t.actorId || null,
+        occurredAt: t.createdAt || null,
+        referenceType: t.refType || null,
+        referenceId: t.refId || null,
+        reason: t.reason || null
+      },
+      ambiguous: ambiguous
+    });
+  }
+
+  /**
+   * Recipe — legacy KHÔNG có versioning, ghi đè trực tiếp.
+   *
+   * §4 yêu cầu tự tạo `versionId` giả từ `updatedAt` và đánh dấu
+   * `versionSource: 'legacy-inferred'` để phân biệt với version thật tạo sau
+   * cutover. Nói rõ: version này KHÔNG chứng minh được công thức tại thời điểm
+   * bill cũ là gì — chỉ là ảnh chụp lúc migrate.
+   */
+  function mapRecipe(spec) {
+    var r = spec.recipe;
+    if (!r) return R.err('VALIDATION', 'thiếu bản ghi recipe');
+    if (!spec.menuRefKey) return R.err('VALIDATION', 'mapRecipe cần menuRefKey');
+
+    var ambiguous = [{
+      code: AMBIGUOUS.NO_RECIPE_VERSION,
+      detail: 'legacy ghi đè recipe trực tiếp — version này chỉ là ảnh chụp lúc migrate, ' +
+        'KHÔNG chứng minh được công thức tại thời điểm các bill cũ'
+    }];
+
+    var rows = [];
+    Object.keys(r).forEach(function (size) {
+      if (!r[size] || typeof r[size] !== 'object') return;
+      rows.push({
+        size: size,
+        components: Object.keys(r[size]).map(function (refId) {
+          return { refType: 'item', refId: refId, qty: r[size][refId] };
+        })
+      });
+    });
+
+    return R.ok({
+      recipeId: ids.deterministicId('recipe', ['legacy', spec.menuRefKey]),
+      versionId: ids.deterministicId('version', ['legacy', spec.menuRefKey, String(r.updatedAt || 0)]),
+      versionSource: 'legacy-inferred',
+      effectiveFrom: r.updatedAt || null,
+      components: rows.reduce(function (acc, x) { acc[x.size] = x.components; return acc; }, {}),
+      ambiguous: ambiguous
+    });
+  }
+
+  /** Bill — giữ nguyên chi tiết, KHÔNG aggregate. */
+  function mapBill(spec) {
+    var o = spec.order;
+    if (!o) return R.err('VALIDATION', 'thiếu bản ghi order');
+    if (!ids.isId(spec.storeId, 'store')) return R.err('VALIDATION', 'mapBill cần storeId');
+
+    var ambiguous = [];
+    /* Ngoại lệ duy nhất của toàn hệ thống cũ: Bill không lưu ai bán (§4.7). */
+    if (!o.soldBy && !o.staffEmployeeId) {
+      flag(ambiguous, AMBIGUOUS.NO_ACTOR,
+        'bill legacy không lưu người bán — chỉ có gate "có ai đó đang check-in"');
+    }
+
+    var lines = (o.itemsArray || []).map(function (l, i) {
+      return {
+        billLineId: ids.deterministicId('billLine', ['legacy', spec.billId, String(i)]),
+        menuItemId: ids.deterministicId('item', ['legacy', l.id || l.name || 'unknown']),
+        name: l.name || null,
+        size: l.size || null,
+        qty: l.qty || 1,
+        /* Giá đã snapshot sẵn trong bill — phần legacy làm ĐÚNG, giữ nguyên. */
+        price: typeof l.price === 'number' ? l.price : null,
+        isFree: !!l.isFree
+      };
+    });
+
+    var channelType = o.isAppSale ? 'APP' : (o.isToGo ? 'TO_GO' : 'DINE_IN');
+
+    return R.ok({
+      bill: {
+        billId: ids.deterministicId('bill', ['legacy', spec.billId]),
+        storeId: spec.storeId,
+        businessDate: spec.businessDate || null,
+        occurredAt: o.createdAt || null,
+        soldByActorId: o.soldBy || o.staffEmployeeId || null,
+        customerId: o.customerPhone
+          ? ids.deterministicId('customer', [o.customerPhone]) : null,
+        channel: {
+          type: channelType,
+          appName: o.appName || null,
+          /* appFeePct ĐÃ có trong legacy nhưng chưa bao giờ được đọc — map sang
+             để đường ống P&L theo kênh dùng được ngay. */
+          feePct: channelType === 'APP' && typeof o.appFeePct === 'number' ? o.appFeePct : 0
+        },
+        lines: lines,
+        subtotal: typeof o.subtotal === 'number' ? o.subtotal : null,
+        discountTotal: typeof o.discount === 'number' ? o.discount : 0,
+        total: typeof o.total === 'number' ? o.total : null,
+        /* Không tự tính netRevenue nếu thiếu total — thà để null còn hơn số sai. */
+        status: 'COMPLETED',
+        legacySource: { billId: spec.billId }
+      },
+      ambiguous: ambiguous
+    });
+  }
+
+  return {
+    AMBIGUOUS: AMBIGUOUS,
+    STATUS_MAP: STATUS_MAP,
+    mapUnit: mapUnit,
+    mapLedgerEntry: mapLedgerEntry,
+    mapRecipe: mapRecipe,
+    mapBill: mapBill
+  };
+});
+
+/* ===== src/layers/persistence-firebase/atomic-commit.js ===== */
+/**
+ * Ranh giới ghi NGUYÊN TỬ cho MutationPlan.
+ *
+ * Contract: GIEO-SYSTEM-REBUILD-PLAN.md §2 (data flow chuẩn),
+ * FIFO-CORE-ARCHITECTURE-V2.md §7 (idempotency).
+ *
+ * Một `MutationPlan` mang TẤT CẢ thay đổi của một operation: vật chất (Unit) +
+ * ledger + projection + trace + domain record. Ghi hết hoặc không ghi gì.
+ *
+ * Vì sao điều này quan trọng hơn vẻ ngoài: legacy có những chỗ allocate xong
+ * rồi ghi sổ hỏng mà không rollback (bug #21), và những chỗ ghi `currentStock`
+ * tách rời khỏi ledger nên hai bên lệch nhau âm thầm. Cả hai biến mất nếu
+ * không tồn tại đường ghi từng phần.
+ *
+ * Module này KHÔNG import Firebase SDK. Nó nhận một `transactionRunner` được
+ * tiêm vào — adapter thật cho nó một transaction Firestore, test cho nó bản
+ * in-memory. Nhờ vậy domain core không bao giờ chạm SDK (blueprint §2 quy tắc 2).
+ */
+GIEO.define('persistence-firebase/atomic-commit', [
+  'shared-kernel/result',
+  'shared-kernel/operation-state',
+  'persistence-firebase/canonical-paths'
+], function (R, opState, paths) {
+  'use strict';
+
+  /**
+   * Dịch MutationPlan thành danh sách thao tác ghi có path cụ thể.
+   * Tách riêng để kiểm được plan sinh ra đúng những path nào mà không cần ghi thật.
+   */
+  function planToWrites(plan, ctx) {
+    var writes = [];
+    var errors = [];
+
+    function add(name, args, data, op) {
+      var p = paths.path(name, ctx, args);
+      if (R.isErr(p)) { errors.push(p.error.message); return; }
+      writes.push({ kind: p.value.kind, path: p.value.path, op: op || 'set', data: data });
+    }
+
+    (plan.unitChanges || []).forEach(function (u) {
+      add('unit', { unitId: u.unitId }, u);
+      /* Live layer chỉ phản chiếu unit đang mở — hũ đã hết thì gỡ khỏi RTDB,
+         đúng vai trò "hot layer" của legacy. */
+      if (u.status === 'OPEN' || u.status === 'CONSUMING') {
+        add('unitLive', { itemId: u.itemId, unitId: u.unitId }, {
+          unitBase: u.remainingQty, status: u.status, openedAt: u.openedAt
+        });
+      } else {
+        add('unitLive', { itemId: u.itemId, unitId: u.unitId }, null, 'remove');
+      }
+    });
+
+    (plan.ledgerEntries || []).forEach(function (e) {
+      add('ledger', { entryId: e.entryId || null }, e);
+    });
+
+    (plan.domainRecords || []).forEach(function (r) {
+      var map = {
+        bill: ['billLive', function (x) { return { businessDate: x.businessDate, billId: x.billId }; }],
+        prepBatch: ['prepBatch', function (x) { return { prepBatchId: x.prepBatchId }; }],
+        lostReport: ['lostReport', function (x) { return { reportId: x.lostReportId }; }],
+        stockCount: ['stockCount', function (x) { return { countId: x.stockCountId }; }],
+        cashSegment: ['shiftSegment', function (x) { return { businessDate: x.businessDate, seq: x.seq }; }],
+        expense: ['auditLog', function (x) { return { id: x.expenseId }; }]
+      };
+      var m = map[r.type];
+      if (!m) {
+        /* Loại bản ghi chưa khai path là lỗi cấu hình, không phải chuyện bỏ qua
+           được — ghi vào hư không là cách dữ liệu biến mất im lặng. */
+        errors.push('domainRecord loại "' + r.type + '" chưa khai path canonical');
+        return;
+      }
+      add(m[0], m[1](r.record), r.record);
+    });
+
+    (plan.traceChanges || []).forEach(function (t, i) {
+      add('traceDependency', { id: (plan.operationId || 'op') + '.' + i }, t);
+    });
+
+    if (plan.audit) {
+      add('auditLog', { id: plan.operationId }, plan.audit);
+    }
+
+    if (errors.length) {
+      return R.err('VALIDATION', 'không dịch được plan thành path: ' + errors.join('; '), { errors: errors });
+    }
+    return R.ok(writes);
+  }
+
+  /**
+   * @param deps.transactionRunner  (fn) => Promise — chạy fn trong 1 transaction
+   * @param deps.operationStore     kho operation để claim/hoàn tất
+   */
+  function createCommitter(deps) {
+    deps = deps || {};
+    var runner = deps.transactionRunner;
+    if (typeof runner !== 'function') {
+      throw new Error('[atomic-commit] cần transactionRunner — module này không tự import Firebase SDK');
+    }
+
+    /**
+     * Ghi cả plan trong một transaction.
+     *
+     * Bản ghi `operations/{operationId}` được ghi TRONG CÙNG transaction với dữ
+     * liệu — nếu tách ra, sẽ có cửa sổ mà dữ liệu đã ghi nhưng operation chưa
+     * đánh dấu hoàn tất, và lần chạy lại sẽ ghi đúp.
+     */
+    function commit(plan, ctx) {
+      if (!plan || !plan.operationId) {
+        return Promise.resolve(R.err('VALIDATION', 'plan thiếu operationId'));
+      }
+      var w = planToWrites(plan, ctx);
+      if (R.isErr(w)) return Promise.resolve(w);
+      var writes = w.value;
+
+      var opPath = paths.path('operation', ctx, { operationId: plan.operationId });
+      if (R.isErr(opPath)) return Promise.resolve(opPath);
+
+      writes.push({
+        kind: opPath.value.kind,
+        path: opPath.value.path,
+        op: 'set',
+        data: {
+          operationId: plan.operationId,
+          status: opState.STATES.COMPLETED,
+          command: plan.audit ? plan.audit.command : null,
+          actorId: plan.audit ? plan.audit.actorId : null,
+          storeId: ctx.storeId,
+          businessDate: ctx.businessDate,
+          completedAt: ctx.clock.now(),
+          writeCount: writes.length
+        }
+      });
+
+      return Promise.resolve()
+        .then(function () { return runner(writes); })
+        .then(function () {
+          return R.ok({
+            operationId: plan.operationId,
+            writeCount: writes.length,
+            paths: writes.map(function (x) { return x.path; })
+          });
+        })
+        .catch(function (e) {
+          /* Transaction hỏng = KHÔNG có gì được ghi. Không cần rollback thủ
+             công, nhưng phải nói rõ là thử lại được hay cần người xử lý. */
+          var retryable = !!(e && e.retryable);
+          return R.err(retryable ? 'RETRYABLE' : 'MANUAL_REVIEW',
+            'ghi nguyên tử thất bại, KHÔNG có thay đổi nào được ghi: ' +
+            (e && e.message ? e.message : e));
+        });
+    }
+
+    return { commit: commit, planToWrites: planToWrites };
+  }
+
+  /**
+   * Transaction runner in-memory — cho test và cho chế độ shadow/simulate,
+   * đúng giai đoạn READ-ONLY hiện tại (hệ thống cũ vẫn chạy production).
+   */
+  function createInMemoryRunner(opts) {
+    opts = opts || {};
+    var store = Object.create(null);
+    var committed = [];
+    var failNext = 0;
+
+    function runner(writes) {
+      if (failNext > 0) {
+        failNext -= 1;
+        var e = new Error(opts.failMessage || 'transaction hỏng');
+        e.retryable = !!opts.failRetryable;
+        throw e;
+      }
+      /* Áp tất cả hoặc không áp gì — dựng bản nháp rồi mới gán. */
+      var draft = Object.assign(Object.create(null), store);
+      writes.forEach(function (w) {
+        if (w.op === 'remove') delete draft[w.path];
+        else draft[w.path] = w.data;
+      });
+      store = draft;
+      committed.push(writes);
+      return true;
+    }
+
+    return {
+      runner: runner,
+      failOnce: function () { failNext += 1; },
+      read: function (path) { return store[path]; },
+      keys: function () { return Object.keys(store).sort(); },
+      commitCount: function () { return committed.length; }
+    };
+  }
+
+  return {
+    planToWrites: planToWrites,
+    createCommitter: createCommitter,
+    createInMemoryRunner: createInMemoryRunner
+  };
+});
+
+/* ===== src/layers/persistence-firebase/canonical-paths.js ===== */
+/**
+ * Path CANONICAL mới — `orgs/{orgId}/stores/{storeId}/<domain>/{id}`.
+ *
+ * Contract: LEGACY-FIREBASE-PATH-MAP-V1.md §2.
+ *
+ * Hai quyết định đã chốt và giữ:
+ *   - RTDB vẫn là "live/hot layer", KHÔNG chuyển hết sang Firestore. Phân tầng
+ *     này ở legacy là ĐÚNG; rebuild chỉ đổi namespace + schema, không đổi động
+ *     cơ lưu trữ.
+ *   - `bank_confirmations` GIỮ NGUYÊN path cũ — webhook nằm ngoài phạm vi
+ *     rebuild, đổi path là phá webhook đang chạy production.
+ *
+ * `storeId` có mặt trong MỌI path ngay từ đầu dù hệ thống hiện tại single-store
+ * (đã chốt: chừa chỗ, không xây ALL_STORES). Thêm về sau nghĩa là phải sửa mọi
+ * path và dữ liệu cũ thì không có gì để điền vào.
+ */
+GIEO.define('persistence-firebase/canonical-paths', [
+  'shared-kernel/ids',
+  'shared-kernel/result'
+], function (ids, R) {
+  'use strict';
+
+  var RTDB = 'RTDB';
+  var FIRESTORE = 'FIRESTORE';
+
+  function base(ctx) {
+    return 'orgs/' + ctx.organizationId + '/stores/' + ctx.storeId;
+  }
+
+  /**
+   * Mọi builder nhận ctx có organizationId + storeId. Không có biến thể nào bỏ
+   * qua storeId, nên không tồn tại đường ghi "quên" phạm vi cửa hàng.
+   */
+  function validateCtx(ctx) {
+    if (!ctx || !ids.isId(ctx.organizationId, 'org')) {
+      return R.err('VALIDATION', 'path canonical cần organizationId hợp lệ');
+    }
+    if (!ids.isId(ctx.storeId, 'store')) {
+      return R.err('VALIDATION', 'path canonical cần storeId hợp lệ');
+    }
+    return R.ok(true);
+  }
+
+  var BUILDERS = {
+    /* Live layer — RTDB, phản chiếu unit đang mở cho UI POS. */
+    unitLive: { kind: RTDB, build: function (ctx, a) { return base(ctx) + '/units/live/' + a.itemId + '/' + a.unitId; } },
+    /* Nguồn thật của Unit. */
+    unit: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/units/' + a.unitId; } },
+    prepUnit: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/prepUnits/' + a.unitId; } },
+    /* Ledger GỘP raw + prep, phân biệt bằng field domain. */
+    ledger: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/ledger/' + a.entryId; } },
+    /* Operation record dùng chung MỌI domain — tổng quát hoá từ
+       reversal_unit_claims_gieogieo vốn chỉ dùng cho reversal. */
+    operation: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/operations/' + a.operationId; } },
+    item: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/items/' + a.itemId; } },
+    prepItem: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/prepItems/' + a.prepItemId; } },
+    prepBatch: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/prepBatches/' + a.prepBatchId; } },
+    stockCount: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/stockCounts/' + a.countId; } },
+    lostReport: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/lostReports/' + a.reportId; } },
+    purchaseOrder: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/purchaseOrders/' + a.id; } },
+    receivingRecord: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/receivingRecords/' + a.id; } },
+
+    /* Recipe CÓ tầng version — legacy ghi đè trực tiếp, đây là chỗ sửa. */
+    recipeVersion: {
+      kind: FIRESTORE,
+      build: function (ctx, a) { return base(ctx) + '/recipes/' + a.recipeId + '/versions/' + a.versionId; }
+    },
+    /* CostBasis append-only — giữ nguyên mô hình price_history, phần ĐÚNG duy
+       nhất của legacy về versioning. */
+    costBasis: {
+      kind: FIRESTORE,
+      build: function (ctx, a) { return base(ctx) + '/costBasis/' + a.itemId + '/history/' + a.entryId; }
+    },
+    versionedInput: {
+      kind: FIRESTORE,
+      build: function (ctx, a) { return base(ctx) + '/versions/' + a.kind + '/' + a.subjectId + '/' + a.versionId; }
+    },
+    packagingConfig: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/packagingConfig/' + a.id; } },
+    manualCostOverride: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/manualCostOverrides/' + a.itemId; } },
+
+    /* Bill — live ở RTDB, archive ở Firestore, giữ đúng phân tầng legacy. */
+    billLive: { kind: RTDB, build: function (ctx, a) { return base(ctx) + '/bills/live/' + a.businessDate + '/' + a.billId; } },
+    billArchive: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/bills/archive/' + a.businessDate; } },
+    billCounter: { kind: RTDB, build: function (ctx, a) { return base(ctx) + '/counters/bill/' + a.businessDate; } },
+
+    /* Cache TÍNH-LẠI-ĐƯỢC — không lên cấp thành snapshot bất biến. */
+    dailySalesCache: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/cache/dailySales/' + a.dateKey; } },
+    /* Sổ vận hành ca — event record, đọc thẳng. */
+    shiftDay: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/shifts/' + a.businessDate; } },
+    shiftSegment: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/shifts/' + a.businessDate + '/segments/' + a.seq; } },
+    employeeShift: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/employeeShifts/' + a.shiftId; } },
+    /* Compaction thật. */
+    monthlySnapshot: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/snapshots/monthly/' + a.period; } },
+    unitSnapshot: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/snapshots/' + a.period + '/' + a.unitId; } },
+
+    loyaltyLedger: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/loyaltyLedger/' + a.entryId; } },
+    loyaltyEffects: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/loyaltyEffects/' + a.billId; } },
+    customer: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/customers/' + a.customerId; } },
+    alert: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/alerts/' + a.alertId; } },
+    auditLog: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/auditLogs/' + a.id; } },
+    traceDependency: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/traceDependencies/' + a.id; } }
+  };
+
+  function path(name, ctx, args) {
+    var b = BUILDERS[name];
+    if (!b) return R.err('VALIDATION', 'không có path canonical tên "' + name + '"');
+    var v = validateCtx(ctx);
+    if (R.isErr(v)) return v;
+    return R.ok({ kind: b.kind, path: b.build(ctx, args || {}) });
+  }
+
+  /**
+   * Path PROTECTED giữ nguyên tên cũ, KHÔNG nằm dưới namespace orgs/.
+   * Tách riêng để không ai vô tình "chuẩn hoá" nó theo mẫu chung.
+   */
+  var PROTECTED = {
+    bankConfirmation: { kind: RTDB, build: function (a) { return 'bank_confirmations/' + a.bankOrderId; } }
+  };
+
+  function protectedPath(name, args) {
+    var p = PROTECTED[name];
+    if (!p) return R.err('VALIDATION', 'không có protected path "' + name + '"');
+    return R.ok({ kind: p.kind, path: p.build(args || {}), isProtected: true });
+  }
+
+  function listNames() { return Object.keys(BUILDERS).sort(); }
+
+  return {
+    RTDB: RTDB,
+    FIRESTORE: FIRESTORE,
+    path: path,
+    protectedPath: protectedPath,
+    listNames: listNames
+  };
+});
+
 /* ===== src/layers/read-layer/gateway.js ===== */
 /**
  * Read gateway — CỔNG ĐỌC DUY NHẤT.
@@ -7795,6 +8556,58 @@ GIEO.define('commands/pipeline', [
   }
 
   /**
+   * Chạy command RỒI GHI THẬT.
+   *
+   * `run()` ở trên cố ý đồng bộ: nó dựng MutationPlan, và dựng plan là việc
+   * thuần tính toán. Nhưng ghi Firebase thì bất đồng bộ. Trộn hai thứ vào một
+   * hàm lúc trả Promise lúc trả giá trị là API dễ dùng sai, nên tách hẳn:
+   *
+   *   run()           → dry-run, đồng bộ, dùng cho shadow/simulate và test
+   *   runAndCommit()  → Promise, dùng khi đã có adapter ghi thật
+   *
+   * Giai đoạn hiện tại hệ thống chạy READ-ONLY nên đường dùng chủ yếu vẫn là
+   * run(); runAndCommit() có sẵn để cutover không phải sửa lại pipeline.
+   */
+  function runAndCommit(command, input, ctx, deps) {
+    deps = deps || {};
+    if (typeof deps.commit !== 'function') {
+      return Promise.resolve(R.err('VALIDATION', 'runAndCommit cần deps.commit'));
+    }
+
+    /* Chạy pha dựng plan ở chế độ dry-run để tái dùng nguyên vẹn mọi chốt chặn
+       (validate → authorize → gate ngày → idempotency) mà không nhân bản logic. */
+    var planned = run(command, input, ctx, { operationStore: deps.operationStore });
+    if (R.isErr(planned)) return Promise.resolve(planned);
+    if (planned.value.replayed) return Promise.resolve(planned.value);
+
+    var plan = planned.value.plan;
+    return Promise.resolve()
+      .then(function () { return deps.commit(plan, ctx); })
+      .then(function (committed) {
+        if (R.isErr(committed)) {
+          var rolledBack = null;
+          if (deps.rollback) rolledBack = deps.rollback(plan, ctx);
+          deps.operationStore.update(plan.operationId, {
+            status: R.isRetryable(committed) ? STATES.FAILED_RETRYABLE : STATES.FAILED_MANUAL_REVIEW,
+            error: committed.error.message,
+            rolledBack: rolledBack ? R.isOk(rolledBack) : false
+          });
+          return committed;
+        }
+        deps.operationStore.update(plan.operationId, {
+          status: STATES.COMPLETED, result: committed.value, dryRun: false
+        });
+        return R.ok({
+          operationId: plan.operationId,
+          status: STATES.COMPLETED,
+          replayed: false,
+          plan: plan,
+          result: committed.value
+        });
+      });
+  }
+
+  /**
    * MutationPlan rỗng — command bồi vào. Một plan mang TẤT CẢ thay đổi của một
    * operation (vật chất + ledger + projection + trace), để commit được nguyên tử.
    */
@@ -7815,6 +8628,7 @@ GIEO.define('commands/pipeline', [
     createInMemoryOperationStore: createInMemoryOperationStore,
     defineCommand: defineCommand,
     run: run,
+    runAndCommit: runAndCommit,
     emptyPlan: emptyPlan
   };
 });
