@@ -10,6 +10,8 @@ Thay thế `posgieo.html` / `quanlygieo.html`, lấy **FIFO làm gốc** (tracea
 
 **Điểm vào duy nhất: [`GIEO-REBUILD-HANDOFF-V2.md`](GIEO-REBUILD-HANDOFF-V2.md)** — mục §1 có bản đồ đọc toàn bộ tài liệu còn lại theo đúng thứ tự. Đừng nhảy thẳng vào code.
 
+**[`GAP-COVERAGE-V1.md`](GAP-COVERAGE-V1.md)** — bảng đối chiếu từng gap ở HANDOFF-V2 §4 → code đã giải quyết ở đâu → test nào chứng minh. Đây là cách kiểm được quy tắc "mọi gap là yêu cầu, không phải ghi chú".
+
 Cặp contract bắt buộc trước khi viết Ledger/Unit persistence:
 - [`FIFO-COMPACTION-CONTRACT-V1.md`](FIFO-COMPACTION-CONTRACT-V1.md) — gồm cơ chế versioning **dùng chung** cho 7 domain (HANDOFF-V2 §3)
 - [`UNIFIED-READ-LAYER-CONTRACT-V1.md`](UNIFIED-READ-LAYER-CONTRACT-V1.md)
@@ -90,7 +92,7 @@ Luật cứng: `apps` không bao giờ chạm thẳng `fifo-core` / `compaction`
 | P9-P10 UI | ⬜ chưa bắt đầu |
 | P12-P13 Shadow + Cutover | ⬜ chưa bắt đầu |
 
-**454 test pass, 41 module, 0 vi phạm import-direction.**
+**492 test pass, 44 module, 0 vi phạm import-direction.**
 
 Build order theo `FEATURE-TREE-V1.md` §3:
 `[0] Identity → [1] Catalog + [2] FIFO Core → [3] Sales → [4] Loyalty + [5] Shift + [6] Payroll → [7] Finance → [8] Alerts → [9] Reporting`
