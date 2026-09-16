@@ -77,7 +77,8 @@ Luật cứng: `apps` không bao giờ chạm thẳng `fifo-core` / `compaction`
 | `[0]` Identity | ✅ Employee + Shift + PayTerms versioned — 98 test pass |
 | `[2]` FIFO Core | ✅ Unit + Ledger + Projection + Allocation + Reconciliation — 188 test pass |
 | `[1]` Catalog | ✅ Menu + Category + Promotion + Packaging — 233 test pass |
-| `[3]`→`[9]` | ⬜ chưa bắt đầu |
+| `[3]` Sales | ✅ Bill + Recipe/Cost versioned + COGS 2 vế + pipeline — 275 test pass |
+| `[4]`→`[9]` | ⬜ chưa bắt đầu |
 
 Build order theo `FEATURE-TREE-V1.md` §3:
 `[0] Identity → [1] Catalog + [2] FIFO Core → [3] Sales → [4] Loyalty + [5] Shift + [6] Payroll → [7] Finance → [8] Alerts → [9] Reporting`
@@ -89,7 +90,6 @@ Build order theo `FEATURE-TREE-V1.md` §3:
 ### Đã chốt trong phiên code
 
 - FIFO cấp phát theo `openedAt` (giữ hành vi production nhiều năm)
-- `FINISH_REVIEW_RATIO`: **có** xây — gắn `needsReview` + đẩy Alerts
 - Multi-store: `storeId` có mặt mọi nơi, chỉ 1 giá trị thật, **không** xây `ALL_STORES`
 - **Ngày làm việc chốt bằng thao tác ở QUANLY sau khi kết ca**, không theo mốc giờ. Nên `businessDate` là trạng thái vận hành (`store-context/business-day`), và `clock` cố ý **không có** `businessDate()` — chỉ có `calendarDate()`. Đơn lúc 0h30 vẫn thuộc ngày chưa chốt.
 - `FINISH_REVIEW_RATIO`: **cấu hình ở QUANLY**, không hard-code — đi qua `VersionedInput` kind `config`
