@@ -10,11 +10,35 @@ var _l = (function () {
     C: GIEO.require('loyalty/customer'),
     L: GIEO.require('loyalty/ledger'),
     A: GIEO.require('loyalty/accrual'),
+    LOY: GIEO.require('commands/loyalty'),
+    SALES: GIEO.require('commands/sales'),
+    PIPE: GIEO.require('commands/pipeline'),
+    ACCESS: GIEO.require('store-context/access'),
+    CTXL: GIEO.require('store-context/context'),
+    BD: GIEO.require('store-context/business-day'),
+    CLK: GIEO.require('shared-kernel/clock'),
+    DE: GIEO.require('bootstrap/domain-events'),
+    BOOT: GIEO.require('bootstrap/runtime'),
     STORE: ids.deterministicId('store', ['main']),
+    ORG: ids.deterministicId('org', ['gieo']),
+    BOSS: ids.deterministicId('actor', ['boss']),
     NV: ids.deterministicId('actor', ['nv01']),
     BILL: ids.deterministicId('bill', ['b1'])
   };
 })();
+
+function loyCtx(source, role, actorId) {
+  var day = assertOk(_l.BD.openDay({
+    storeId: _l.STORE, dateKey: '2026-03-10', actorId: _l.BOSS,
+    at: new Date(2026, 2, 10, 7).getTime(), clock: _l.CLK.createClock()
+  }));
+  var actor = assertOk(_l.ACCESS.createActor({
+    actorId: actorId || _l.NV, role: role || 'POS_OPERATOR', source: source || 'POS', stores: [_l.STORE]
+  }));
+  return assertOk(_l.CTXL.createContext({
+    organizationId: _l.ORG, storeId: _l.STORE, actor: actor, source: source || 'POS', businessDay: day
+  }));
+}
 
 function cust(over) {
   return assertOk(_l.C.createCustomer(Object.assign({ phone: '0912345678', storeId: _l.STORE }, over || {})));
@@ -336,6 +360,150 @@ describe('loyalty/accrual', function () {
         rules: { pointsPer100: 10 }
       }));
       assert.strictEqual(out.entries[0].delta, -5000);
+    });
+  });
+});
+
+describe('commands/loyalty — L9: bọc accrual.js thành command thật', function () {
+  var LOY = _l.LOY;
+  var PIPE = _l.PIPE;
+
+  function run(cmd, input) {
+    return PIPE.run(cmd, input, loyCtx(), { operationStore: PIPE.createInMemoryOperationStore() });
+  }
+
+  test('AccrueLoyaltyForSale sinh domainRecord loyaltyLedgerEntry thật', function () {
+    var out = assertOk(run(LOY.AccrueLoyaltyForSale, {
+      bill: mkBill({ total: 100000 }), customer: cust()
+    }));
+    assert.strictEqual(out.plan.domainRecords.length, 1);
+    assert.strictEqual(out.plan.domainRecords[0].type, 'loyaltyLedgerEntry');
+    assert.strictEqual(out.plan.domainRecords[0].record.delta, 5000);
+  });
+
+  test('AccrueLoyaltyForSale không có customer thì plan rỗng, không lỗi (accrual tự skip)', function () {
+    var out = assertOk(run(LOY.AccrueLoyaltyForSale, { bill: mkBill(), customer: null }));
+    assert.strictEqual(out.plan.domainRecords.length, 0);
+  });
+
+  test('AccrueLoyaltyForSale gọi lại cùng bill (operationId xác định) là no-op replay', function () {
+    var store = PIPE.createInMemoryOperationStore();
+    var input = { bill: mkBill({ total: 100000 }), customer: cust() };
+    var c = loyCtx();
+    var first = assertOk(PIPE.run(LOY.AccrueLoyaltyForSale, input, c, { operationStore: store }));
+    var second = assertOk(PIPE.run(LOY.AccrueLoyaltyForSale, input, c, { operationStore: store }));
+    assert.strictEqual(first.replayed, false);
+    assert.strictEqual(second.replayed, true);
+  });
+
+  test('AccrueLoyaltyForAddon sinh đúng dòng sổ cho phần chênh lệch', function () {
+    var out = assertOk(run(LOY.AccrueLoyaltyForAddon, {
+      billId: _l.BILL, addonSeq: 1, addedAmount: 20000, customer: cust(),
+      storeId: _l.STORE, businessDate: '2026-03-10', actorId: _l.NV
+    }));
+    assert.strictEqual(out.plan.domainRecords[0].record.delta, 1000);
+    assert.strictEqual(out.plan.domainRecords[0].record.reason, 'EARN_ADDON');
+  });
+
+  test('ReverseLoyaltyForVoidedBill THIẾU policy bị từ chối — L5 chưa chốt, không được ngầm định', function () {
+    assertErr(run(LOY.ReverseLoyaltyForVoidedBill, {
+      billId: _l.BILL, entries: [], storeId: _l.STORE, businessDate: '2026-03-10'
+    }), 'VALIDATION');
+  });
+
+  test('ReverseLoyaltyForVoidedBill với policy REVERSE tường minh thì hoàn đúng dòng gốc', function () {
+    var original = assertOk(_l.L.createEntry({
+      customerId: cust().customerId, storeId: _l.STORE, currency: 'POINTS', delta: 5000,
+      reason: 'EARN_SALE', referenceId: _l.BILL, operationId: 'op', businessDate: '2026-03-10'
+    }));
+    var out = assertOk(PIPE.run(LOY.ReverseLoyaltyForVoidedBill, {
+      billId: _l.BILL, policy: 'REVERSE', entries: [original],
+      storeId: _l.STORE, businessDate: '2026-03-10'
+    }, loyCtx('QUANLY', 'QUANLY_ADMIN'), { operationStore: PIPE.createInMemoryOperationStore() }));
+    assert.strictEqual(out.plan.domainRecords[0].record.delta, -5000);
+  });
+});
+
+describe('bootstrap/domain-events — routeEvents (L9: tầng "ai lắng nghe, gọi gì")', function () {
+  var DE = _l.DE;
+
+  test('SaleCompleted có bill denormalized → route AccrueLoyaltyForSale', function () {
+    var routes = DE.routeEvents([{ type: 'SaleCompleted', bill: mkBill(), customer: cust() }]);
+    assert.strictEqual(routes.length, 1);
+    assert.strictEqual(routes[0].command, 'AccrueLoyaltyForSale');
+    assert.strictEqual(routes[0].input.customer.customerId, cust().customerId);
+  });
+
+  test('SaleCompleted THIẾU bill (event cũ chưa mang denormalized) thì bỏ qua route, không gọi command với input rỗng', function () {
+    var routes = DE.routeEvents([{ type: 'SaleCompleted', customerId: cust().customerId }]);
+    assert.strictEqual(routes.length, 0);
+  });
+
+  test('SaleAmountIncreased → route AccrueLoyaltyForAddon', function () {
+    var routes = DE.routeEvents([{
+      type: 'SaleAmountIncreased', billId: _l.BILL, addonSeq: 1, addedAmount: 20000
+    }]);
+    assert.strictEqual(routes[0].command, 'AccrueLoyaltyForAddon');
+    assert.strictEqual(routes[0].input.addedAmount, 20000);
+  });
+
+  test('OrderVoided → route ReverseLoyaltyForVoidedBill, billId lấy từ referenceId', function () {
+    var routes = DE.routeEvents([{
+      type: 'OrderVoided', referenceId: _l.BILL, loyaltyPolicy: 'KEEP', reversedBy: _l.NV
+    }]);
+    assert.strictEqual(routes[0].command, 'ReverseLoyaltyForVoidedBill');
+    assert.strictEqual(routes[0].input.billId, _l.BILL);
+    assert.strictEqual(routes[0].input.policy, 'KEEP');
+  });
+
+  test('OrderVoided KHÔNG tự đặt mặc định policy — L5 chưa chốt, để lộ ra thành undefined chứ không bịa', function () {
+    var routes = DE.routeEvents([{ type: 'OrderVoided', referenceId: _l.BILL, reversedBy: _l.NV }]);
+    assert.strictEqual(routes[0].input.policy, undefined);
+  });
+
+  test('event lạ (chưa khai route) bị bỏ qua, không ném lỗi', function () {
+    assert.deepStrictEqual(DE.routeEvents([{ type: 'KhongTonTai' }]), []);
+  });
+
+  test('mảng rỗng/undefined trả mảng rỗng', function () {
+    assert.deepStrictEqual(DE.routeEvents([]), []);
+    assert.deepStrictEqual(DE.routeEvents(undefined), []);
+  });
+});
+
+describe('L9 end-to-end — bootstrap/runtime tự chạy tiếp side-effect sau khi command gốc xong', function () {
+  var BOOT = _l.BOOT;
+
+  function shadowRuntime() {
+    var c = loyCtx();
+    return BOOT.createRuntime({ mode: BOOT.MODE.SHADOW, context: function () { return c; } });
+  }
+
+  test('RecordAddon có customer denormalized → tự động chạy AccrueLoyaltyForAddon, sinh dòng sổ thật', function () {
+    var runtime = shadowRuntime();
+    return runtime.command('RecordAddon', {
+      billId: _l.BILL, addonSeq: 1, addedAmount: 20000,
+      customerId: cust().customerId, loyaltyCustomer: cust()
+    }).then(function (out) {
+      assertOk(out);
+      assert.strictEqual(out.value.sideEffects.length, 1);
+      var fx = out.value.sideEffects[0];
+      assert.strictEqual(fx.command, 'AccrueLoyaltyForAddon');
+      assert.strictEqual(fx.sourceEvent, 'SaleAmountIncreased');
+      assertOk(fx.result);
+      var loyaltyPlan = fx.result.value.plan;
+      assert.strictEqual(loyaltyPlan.domainRecords[0].type, 'loyaltyLedgerEntry');
+      assert.strictEqual(loyaltyPlan.domainRecords[0].record.delta, 1000);
+    });
+  });
+
+  test('RecordAddon KHÔNG có customer thì không phát sinh sideEffects nào', function () {
+    var runtime = shadowRuntime();
+    return runtime.command('RecordAddon', {
+      billId: _l.BILL, addonSeq: 2, addedAmount: 20000
+    }).then(function (out) {
+      assertOk(out);
+      assert.strictEqual(out.value.sideEffects, undefined);
     });
   });
 });

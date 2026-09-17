@@ -165,6 +165,7 @@ GIEO.define('commands/reversal', [
           referenceId: input.referenceId,
           storeId: ctx.storeId,
           businessDate: ctx.businessDate,
+          occurredAt: ctx.clock.now(),
           reversedBy: ctx.actor.actorId,
           reason: input.reason
         }, input.eventData || {}));

@@ -13,9 +13,14 @@ GIEO.define('bootstrap/runtime', [
   'commands/business-day',
   'commands/shift',
   'commands/payroll',
+  'commands/loyalty',
   'read-layer/gateway',
-  'reporting/report-queries'
-], function (R, pipeline, sales, inventory, receiving, stockCount, catalog, prep, reversal, approval, businessDay, shift, payroll, reads, reports) {
+  'reporting/report-queries',
+  'bootstrap/domain-events'
+], function (
+  R, pipeline, sales, inventory, receiving, stockCount, catalog, prep, reversal, approval,
+  businessDay, shift, payroll, loyalty, reads, reports, domainEvents
+) {
   'use strict';
 
   var MODE = { READ_ONLY: 'READ_ONLY', SHADOW: 'SHADOW', WRITE: 'WRITE' };
@@ -51,7 +56,13 @@ GIEO.define('bootstrap/runtime', [
     CheckOut: shift.CheckOut,
     CloseCashSegment: shift.CloseCashSegment,
     ReviseAttendance: payroll.ReviseAttendance,
-    ClosePayroll: payroll.ClosePayroll
+    ClosePayroll: payroll.ClosePayroll,
+    /* L9 — chỉ được RUNTIME gọi tiếp qua domain-events dispatch, nhưng vẫn
+       đăng ký công khai: idempotency/quyền/audit phải đi qua đúng 1 cổng,
+       không có đường tắt riêng cho command "nội bộ". */
+    AccrueLoyaltyForSale: loyalty.AccrueLoyaltyForSale,
+    AccrueLoyaltyForAddon: loyalty.AccrueLoyaltyForAddon,
+    ReverseLoyaltyForVoidedBill: loyalty.ReverseLoyaltyForVoidedBill
   };
   var QUERIES = {
     GetMenu: reads.getMenu,
@@ -110,6 +121,33 @@ GIEO.define('bootstrap/runtime', [
         return fn(ctx, resolved.value);
       });
     }
+    /**
+     * L9 — sau khi command mutate xong, dịch `plan.events` thành các command
+     * tiếp theo (đăng nhập ở `bootstrap/domain-events.js`) và CHẠY THẬT qua
+     * lại đúng `command()` này — không có đường ghi tắt riêng cho side-effect.
+     * Một handler hỏng không được nuốt im lặng (cùng nguyên tắc với
+     * `reversal.js#createEventBus`): kết quả từng side-effect gắn vào
+     * `result.value.sideEffects` để caller/log thấy, nhưng KHÔNG lật ngược
+     * kết quả OK của command gốc — bán hàng/hoàn kho đã xong thật rồi,
+     * loyalty lỗi là việc cần rà tay, không phải lý do rollback giao dịch
+     * chính (đúng tinh thần decoupled retry mà legacy vốn đã làm, chỉ tự chế
+     * kém hơn).
+     */
+    function dispatchDomainEvents(result) {
+      if (R.isErr(result)) return Promise.resolve(result);
+      var plan = result.value && result.value.plan;
+      if (!plan || !plan.events || !plan.events.length) return Promise.resolve(result);
+      var routes = domainEvents.routeEvents(plan.events);
+      if (!routes.length) return Promise.resolve(result);
+      return Promise.all(routes.map(function (route) {
+        return command(route.command, route.input).then(function (out) {
+          return { command: route.command, sourceEvent: route.sourceEvent, result: out };
+        });
+      })).then(function (sideEffects) {
+        result.value.sideEffects = sideEffects;
+        return result;
+      });
+    }
     function command(name, input) {
       var cmd = COMMANDS[name];
       if (!cmd) return Promise.resolve(R.err('NOT_FOUND', 'command chưa đăng ký: ' + name));
@@ -125,17 +163,20 @@ GIEO.define('bootstrap/runtime', [
         : R.ok(input || {});
       return Promise.resolve(hydrated).then(function (resolved) {
         if (R.isErr(resolved)) return resolved;
+        var ran;
         if (mode === MODE.SHADOW) {
-          return pipeline.run(cmd, resolved.value, ctx, { operationStore: operationStore });
+          ran = Promise.resolve(pipeline.run(cmd, resolved.value, ctx, { operationStore: operationStore }));
+        } else {
+          if (typeof spec.commit !== 'function') {
+            return R.err('VALIDATION', 'WRITE mode cần atomic commit adapter');
+          }
+          ran = pipeline.runAndCommit(cmd, resolved.value, ctx, {
+            operationStore: operationStore,
+            commit: spec.commit,
+            rollback: spec.rollback
+          });
         }
-        if (typeof spec.commit !== 'function') {
-          return R.err('VALIDATION', 'WRITE mode cần atomic commit adapter');
-        }
-        return pipeline.runAndCommit(cmd, resolved.value, ctx, {
-          operationStore: operationStore,
-          commit: spec.commit,
-          rollback: spec.rollback
-        });
+        return ran.then(dispatchDomainEvents);
       });
     }
     function watch(name, input, listener) {

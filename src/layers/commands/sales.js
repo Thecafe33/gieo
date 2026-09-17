@@ -309,12 +309,23 @@ GIEO.define('commands/sales', [
         return { itemId: r.itemId, storeId: bill.storeId };
       });
 
-      /* Loyalty là handler đăng ký riêng, không nhét vào lệnh bán. */
+      /*
+       * Loyalty là handler đăng ký riêng, không nhét vào lệnh bán — nhưng
+       * event vẫn mang sẵn `bill`/`customer` denormalized để
+       * `bootstrap/domain-events.js` (L9) gọi tiếp AccrueLoyaltyForSale mà
+       * không phải tự tra dữ liệu (đúng nguyên tắc "denormalized command
+       * input"). `deps.loyaltyCustomer` là optional: caller đã tra khách ở
+       * bước L1 thì mang theo, không có thì loyalty/accrual.js tự skip
+       * tường minh (customer null), không đoán.
+       */
       if (bill.customerId) {
         plan.events.push({
           type: 'SaleCompleted',
           billId: bill.billId,
           customerId: bill.customerId,
+          bill: finalized,
+          customer: deps.loyaltyCustomer || null,
+          stampsEarnedToday: deps.loyaltyStampsEarnedToday || 0,
           netRevenue: finalized.netRevenue,
           storeId: bill.storeId,
           businessDate: bill.businessDate
@@ -368,14 +379,21 @@ GIEO.define('commands/sales', [
       });
 
       if (input.customerId) {
-        /* Đúng phần CHÊNH LỆCH, không phải tổng bill. */
+        /*
+         * Đúng phần CHÊNH LỆCH, không phải tổng bill. `customer` denormalized
+         * theo cùng lý do với RecordSale — xem ghi chú ở đó (L9).
+         */
         plan.events.push({
           type: 'SaleAmountIncreased',
           billId: input.billId,
+          addonSeq: input.addonSeq,
           customerId: input.customerId,
           addedAmount: input.addedAmount,
+          customer: input.loyaltyCustomer || null,
           storeId: ctx.storeId,
-          businessDate: ctx.businessDate
+          businessDate: ctx.businessDate,
+          occurredAt: ctx.clock.now(),
+          actorId: ctx.actor.actorId
         });
       }
       return R.ok(plan);

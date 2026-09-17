@@ -149,28 +149,76 @@ trước" mục 2, vì nếu không có L9 thì DÙ sửa xong mục 2 vẫn kh�
 
 ---
 
+### ĐÃ ĐÓNG — `bootstrap/domain-events.js` + `commands/loyalty.js`
+
+`bootstrap/domain-events.js` (mới) chính là module dây nối audit trên gọi
+tên trước — bảng `ROUTES` tĩnh dịch `SaleCompleted`/`SaleAmountIncreased`/
+`OrderVoided` thành `{command, input}` tiếp theo, KHÔNG tự đọc dữ liệu
+(giữ đúng nguyên tắc "denormalized command input" xuyên toàn hệ: field nào
+cần thì event phải tự mang theo, thiếu thì route đó bị bỏ qua thay vì gọi
+command với input rỗng). `commands/loyalty.js` (mới) bọc 3 hàm của
+`loyalty/accrual.js` thành command thật đi qua `commands/pipeline` (idempotent
+theo billId/addonSeq, có audit, có gate quyền) — `AccrueLoyaltyForSale`,
+`AccrueLoyaltyForAddon`, `ReverseLoyaltyForVoidedBill` — và
+`persistence-firebase/atomic-commit.js` đã khai path `loyaltyLedgerEntry` →
+`loyaltyLedger` (canonical path này vốn đã có sẵn từ trước, chỉ thiếu khai
+domainRecord). `bootstrap/runtime.js#command()` sau mỗi mutation thành công
+tự gọi `domainEvents.routeEvents(plan.events)` rồi CHẠY THẬT từng route qua
+lại đúng `command()` (không có đường ghi tắt riêng cho side-effect) — kết
+quả gắn vào `result.value.sideEffects` để không nuốt lỗi im lặng, nhưng
+loyalty lỗi KHÔNG lật ngược giao dịch chính đã commit (đúng tinh thần
+decoupled retry mà legacy vốn định làm, chỉ tự chế kém hơn — xem comment
+đầu `commands/pipeline.js`).
+
+`commands/sales.js` (RecordSale/RecordAddon) đính kèm `bill`/`customer`
+denormalized vào event khi push (caller mang `deps.loyaltyCustomer` nếu đã
+tra khách ở bước L1 — không bắt buộc, thiếu thì `loyalty/accrual.js` tự
+`skip: 'NO_CUSTOMER'` tường minh, không đoán).
+
+**L5's `policy` (REVERSE hay KEEP) CỐ Ý KHÔNG được cho mặc định ở tầng dây
+nối** — `ReverseLoyaltyForVoidedBill.validate()` từ chối nếu thiếu, đúng
+tinh thần `ReviseState.historicalPolicy` (không có default ngầm cho quyết
+định chủ quán chưa chốt). Quyết định thật (mục ⚪ CHƯA QUYẾT dưới đây) VẪN
+CÒN TREO — việc đóng ở đây chỉ là làm cho L2/L4/L5 CHẠY ĐƯỢC khi có đủ dữ
+liệu, không phải chọn hộ policy.
+
+13 test mới ở `tests/unit/loyalty.test.js` (3 describe: `commands/loyalty`,
+`bootstrap/domain-events`, "L9 end-to-end") phủ: sinh domainRecord thật,
+replay idempotent, thiếu customer thì skip không lỗi, thiếu policy thì từ
+chối, routeEvents bỏ qua event thiếu field/event lạ, và pipeline đầy đủ
+`runtime.command('RecordAddon', ...)` → tự động chạy `AccrueLoyaltyForAddon`
+→ domainRecord `loyaltyLedgerEntry` thật xuất hiện trong `sideEffects`.
+
+---
+
 ## TỔNG KẾT PHÂN LOẠI
 
 - 🔴 **BỎ**: không có (domain này không có nhánh nào cần loại bỏ hẳn — mọi nghiệp vụ legacy đều còn giá trị)
 - 🟡 **GIỮ, ĐỔI CÁCH LÀM**: L1, L2(luật số), L3, L6
-- 🟢 **THÊM MỚI**: L2(ledger), L4, L5(cơ chế), L7(chỗ nối), L8, **L9 (điều phối sự kiện — hạ tầng còn thiếu, không phải nghiệp vụ)**
+- 🟢 **THÊM MỚI**: L2(ledger), L4, L5(cơ chế), L7(chỗ nối), L8, **L9 (điều phối sự kiện — hạ tầng còn thiếu, không phải nghiệp vụ — ĐÃ ĐÓNG: `bootstrap/domain-events.js` + `commands/loyalty.js`)**
 - ⚪ **CHƯA QUYẾT**: L5 — `policy` mặc định REVERSE hay KEEP khi huỷ bill có hoàn điểm không; nếu KEEP (giữ như legacy) thì vẫn cần dựng màn hình Quản lý xem/sửa tay ledger (đã có `adjust()`, chưa có UI)
 
 ## VIỆC PHẢI LÀM (thứ tự theo mức chặn đường)
 
-1. **Dựng tầng điều phối sự kiện** (L9) — nơi duy nhất biết "sau khi
-   `RecordSale` thành công thì gọi `accrueForSale`", "sau khi `RecordAddon`
-   thì gọi `accrueForAddon`", "sau khi `ReverseTransaction` phát
-   `OrderVoided` thì gọi `reverseForVoidedBill` (theo policy đã chốt)". Đây
-   là điều kiện tiên quyết cho MỌI thứ còn lại trong Loyalty domain, cũng có
-   thể cần cho các domain khác (Alerts khi thiếu định mức — xem
-   `NET-SALES-V1.md` N10) → cân nhắc dựng CHUNG 1 lần, không riêng cho
-   Loyalty.
+1. ~~**Dựng tầng điều phối sự kiện** (L9)~~ — **XONG**: `bootstrap/domain-events.js`
+   (routes tĩnh, không tự đọc dữ liệu) + `commands/loyalty.js` (bọc
+   `accrual.js` thành command thật qua pipeline) + `bootstrap/runtime.js#command()`
+   tự gọi tiếp sau mỗi mutation thành công. `RecordSale`→`AccrueLoyaltyForSale`,
+   `RecordAddon`→`AccrueLoyaltyForAddon`, `ReverseTransaction`(`OrderVoided`)→
+   `ReverseLoyaltyForVoidedBill` đều đã nối dây, có test end-to-end. Việc dùng
+   CHUNG cho domain khác (Alerts/N10) vẫn để ngỏ — `ROUTES` hiện chỉ khai 3
+   sự kiện Loyalty, thêm route mới không cần sửa cơ chế.
 2. Chủ quán chốt `policy` mặc định cho L5 (REVERSE hay KEEP) — không tự suy
    ra, vì legacy KEEP là quyết định nghiệp vụ có chủ đích, không phải bug.
+   `ReverseLoyaltyForVoidedBill` đã CHẶN việc thiếu quyết định này trôi qua
+   êm — thiếu `policy` tường minh thì từ chối ngay ở validate, không có
+   default ngầm.
 3. Nếu chốt KEEP: lên kế hoạch màn hình Quản lý xem/sửa tay ledger (gọi
    `loyalty/ledger.adjust()`) — đây là màn hình legacy CHƯA TỪNG CÓ dù toast
    nói "Quản lý xử lý tay" suốt bao lâu nay.
-4. Sau khi L9 xong: nối `onCheckoutClick`/`confirmPay` (POS) gọi
-   `runtime.command('RecordSale', ...)` thay vì ghi thẳng RTDB — lúc đó L2
-   mới thật sự chạy được (phụ thuộc N9 của `NET-SALES-V1.md`).
+4. L9 đã xong — còn lại: nối `onCheckoutClick`/`confirmPay` (POS) gọi
+   `runtime.command('RecordSale', ...)` thay vì ghi thẳng RTDB, và khi
+   QUANLY gọi `ReverseTransaction` để xoá bill thì truyền
+   `eventType: 'OrderVoided'` + `eventData: {loyaltyPolicy, loyaltyEntries}`
+   — lúc đó L2/L5 mới thật sự chạy trên dữ liệu sống (phụ thuộc N9 của
+   `NET-SALES-V1.md`).

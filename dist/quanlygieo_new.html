@@ -9950,7 +9950,9 @@ GIEO.define('persistence-firebase/atomic-commit', [
         /* CP11 — commands/catalog.js. */
         menuItem: ['menuItem', function (x) { return { menuItemId: x.menuItemId }; }],
         category: ['category', function (x) { return { categoryId: x.categoryId }; }],
-        promotion: ['promotion', function (x) { return { promotionId: x.promotionId }; }]
+        promotion: ['promotion', function (x) { return { promotionId: x.promotionId }; }],
+        /* L9 — commands/loyalty.js (tích/hoàn điểm gọi qua domain-events dispatch). */
+        loyaltyLedgerEntry: ['loyaltyLedger', function (x) { return { entryId: x.entryId }; }]
       };
       var m = map[r.type];
       if (!m) {
@@ -11985,6 +11987,165 @@ GIEO.define('commands/inventory', [
   };
 });
 
+/* ===== src/layers/commands/loyalty.js ===== */
+/**
+ * Loyalty — bọc `loyalty/accrual.js` thành command thật, đi qua ĐÚNG pipeline
+ * chung (idempotency + quyền + audit) như mọi mutation khác.
+ *
+ * Đóng nửa sau của gap L9 (`NET-LOYALTY-V1.md`): luật tích/hoàn điểm đã viết
+ * xong ở `loyalty/accrual.js` từ trước, nhưng chưa có command nào GỌI nó —
+ * nên nó chưa bao giờ tạo ra domainRecord thật. `bootstrap/domain-events.js`
+ * là tầng điều phối gọi các command này khi `SaleCompleted`/`SaleAmountIncreased`/
+ * `OrderVoided` phát ra từ `commands/sales.js`/`commands/reversal.js`.
+ *
+ * Theo đúng nguyên tắc "denormalized command input" đã dùng xuyên toàn hệ:
+ * command KHÔNG tự tra khách hàng hay sổ cũ — `customer`/`entries` phải do
+ * caller mang tới sẵn. Thiếu khách hàng thì `accrual.js` tự trả `skipped`
+ * tường minh (không đoán, không im lặng bỏ qua).
+ */
+GIEO.define('commands/loyalty', [
+  'shared-kernel/ids',
+  'shared-kernel/result',
+  'commands/pipeline',
+  'loyalty/accrual'
+], function (ids, R, pipeline, accrual) {
+  'use strict';
+
+  function pushEntries(plan, entries) {
+    (entries || []).forEach(function (e) {
+      plan.domainRecords.push({ type: 'loyaltyLedgerEntry', record: e });
+    });
+  }
+
+  /** L2 — tích điểm/tem cho 1 bill đã thanh toán (event SaleCompleted). */
+  var AccrueLoyaltyForSale = pipeline.defineCommand({
+    name: 'AccrueLoyaltyForSale',
+    authority: 'EXECUTE',
+    mutates: true,
+    sources: ['POS'],
+
+    operationId: function (input) {
+      return ids.deterministicId('operation', ['loyalty-accrue-sale', input.bill && input.bill.billId]);
+    },
+
+    validate: function (input) {
+      if (!input || !input.bill) return R.err('VALIDATION', 'AccrueLoyaltyForSale cần bill');
+      if (!ids.isId(input.bill.billId, 'bill')) return R.err('VALIDATION', 'bill thiếu billId hợp lệ');
+      return R.ok(true);
+    },
+
+    execute: function (input) {
+      var plan = pipeline.emptyPlan();
+      var opId = ids.deterministicId('operation', ['loyalty-accrue-sale', input.bill.billId]);
+      var r = accrual.accrueForSale({
+        bill: input.bill,
+        customer: input.customer || null,
+        stampsEarnedToday: input.stampsEarnedToday || 0,
+        operationId: opId
+      });
+      if (R.isErr(r)) return r;
+      pushEntries(plan, r.value.entries);
+      return R.ok(plan);
+    }
+  });
+
+  /** L4 — đóng gap addon không cộng điểm (event SaleAmountIncreased). */
+  var AccrueLoyaltyForAddon = pipeline.defineCommand({
+    name: 'AccrueLoyaltyForAddon',
+    authority: 'EXECUTE',
+    mutates: true,
+    sources: ['POS'],
+
+    operationId: function (input) {
+      return ids.deterministicId('operation', ['loyalty-accrue-addon', input.billId, String(input.addonSeq)]);
+    },
+
+    validate: function (input) {
+      if (!input || !ids.isId(input.billId, 'bill')) return R.err('VALIDATION', 'AccrueLoyaltyForAddon cần billId');
+      if (input.addonSeq === undefined || input.addonSeq === null) {
+        return R.err('VALIDATION', 'AccrueLoyaltyForAddon cần addonSeq');
+      }
+      if (typeof input.addedAmount !== 'number' || input.addedAmount <= 0) {
+        return R.err('VALIDATION', 'addon phải có số tiền tăng thêm dương');
+      }
+      return R.ok(true);
+    },
+
+    execute: function (input) {
+      var plan = pipeline.emptyPlan();
+      var opId = ids.deterministicId('operation', ['loyalty-accrue-addon', input.billId, String(input.addonSeq)]);
+      var r = accrual.accrueForAddon({
+        customer: input.customer || null,
+        operationId: opId,
+        addedAmount: input.addedAmount,
+        billId: input.billId,
+        addonSeq: input.addonSeq,
+        storeId: input.storeId,
+        businessDate: input.businessDate,
+        occurredAt: input.occurredAt,
+        actorId: input.actorId
+      });
+      if (R.isErr(r)) return r;
+      pushEntries(plan, r.value.entries);
+      return R.ok(plan);
+    }
+  });
+
+  /**
+   * L5 — hoàn điểm/tem khi huỷ bill (event OrderVoided).
+   *
+   * `policy` KHÔNG có mặc định ở đây — chủ quán chưa chốt REVERSE hay KEEP
+   * (`NET-LOYALTY-V1.md` ghi ⚪ CHƯA QUYẾT). Bắt buộc caller khai rõ, cùng
+   * nguyên tắc `historicalPolicy` của `ReviseState` (`commands/reversal.js`) —
+   * quyết định hiện ra thành lỗi validate khi thiếu, không rơi vào mặc định
+   * ngầm của `loyalty/accrual.js`.
+   */
+  var ReverseLoyaltyForVoidedBill = pipeline.defineCommand({
+    name: 'ReverseLoyaltyForVoidedBill',
+    authority: 'REVIEW_APPROVE_CORRECT',
+    mutates: true,
+    sources: ['POS', 'QUANLY'],
+
+    operationId: function (input) {
+      return ids.deterministicId('operation', ['loyalty-reverse', input.billId]);
+    },
+
+    validate: function (input) {
+      if (!input || !ids.isId(input.billId, 'bill')) return R.err('VALIDATION', 'ReverseLoyaltyForVoidedBill cần billId');
+      if (input.policy !== 'REVERSE' && input.policy !== 'KEEP') {
+        return R.err('VALIDATION',
+          "ReverseLoyaltyForVoidedBill phải khai policy: REVERSE hoặc KEEP — " +
+          "đây là quyết định chủ quán chưa chốt (NET-LOYALTY-V1.md L5), " +
+          "không được ngầm định ở tầng gọi command");
+      }
+      return R.ok(true);
+    },
+
+    execute: function (input) {
+      var plan = pipeline.emptyPlan();
+      var opId = ids.deterministicId('operation', ['loyalty-reverse', input.billId]);
+      var r = accrual.reverseForVoidedBill({
+        policy: input.policy,
+        billId: input.billId,
+        entries: input.entries || [],
+        operationId: opId,
+        businessDate: input.businessDate,
+        occurredAt: input.occurredAt,
+        actorId: input.actorId
+      });
+      if (R.isErr(r)) return r;
+      pushEntries(plan, r.value.entries);
+      return R.ok(plan);
+    }
+  });
+
+  return {
+    AccrueLoyaltyForSale: AccrueLoyaltyForSale,
+    AccrueLoyaltyForAddon: AccrueLoyaltyForAddon,
+    ReverseLoyaltyForVoidedBill: ReverseLoyaltyForVoidedBill
+  };
+});
+
 /* ===== src/layers/commands/payroll.js ===== */
 /**
  * Lệnh Payroll — điểm nối còn thiếu.
@@ -13143,6 +13304,7 @@ GIEO.define('commands/reversal', [
           referenceId: input.referenceId,
           storeId: ctx.storeId,
           businessDate: ctx.businessDate,
+          occurredAt: ctx.clock.now(),
           reversedBy: ctx.actor.actorId,
           reason: input.reason
         }, input.eventData || {}));
@@ -13608,12 +13770,23 @@ GIEO.define('commands/sales', [
         return { itemId: r.itemId, storeId: bill.storeId };
       });
 
-      /* Loyalty là handler đăng ký riêng, không nhét vào lệnh bán. */
+      /*
+       * Loyalty là handler đăng ký riêng, không nhét vào lệnh bán — nhưng
+       * event vẫn mang sẵn `bill`/`customer` denormalized để
+       * `bootstrap/domain-events.js` (L9) gọi tiếp AccrueLoyaltyForSale mà
+       * không phải tự tra dữ liệu (đúng nguyên tắc "denormalized command
+       * input"). `deps.loyaltyCustomer` là optional: caller đã tra khách ở
+       * bước L1 thì mang theo, không có thì loyalty/accrual.js tự skip
+       * tường minh (customer null), không đoán.
+       */
       if (bill.customerId) {
         plan.events.push({
           type: 'SaleCompleted',
           billId: bill.billId,
           customerId: bill.customerId,
+          bill: finalized,
+          customer: deps.loyaltyCustomer || null,
+          stampsEarnedToday: deps.loyaltyStampsEarnedToday || 0,
           netRevenue: finalized.netRevenue,
           storeId: bill.storeId,
           businessDate: bill.businessDate
@@ -13667,14 +13840,21 @@ GIEO.define('commands/sales', [
       });
 
       if (input.customerId) {
-        /* Đúng phần CHÊNH LỆCH, không phải tổng bill. */
+        /*
+         * Đúng phần CHÊNH LỆCH, không phải tổng bill. `customer` denormalized
+         * theo cùng lý do với RecordSale — xem ghi chú ở đó (L9).
+         */
         plan.events.push({
           type: 'SaleAmountIncreased',
           billId: input.billId,
+          addonSeq: input.addonSeq,
           customerId: input.customerId,
           addedAmount: input.addedAmount,
+          customer: input.loyaltyCustomer || null,
           storeId: ctx.storeId,
-          businessDate: ctx.businessDate
+          businessDate: ctx.businessDate,
+          occurredAt: ctx.clock.now(),
+          actorId: ctx.actor.actorId
         });
       }
       return R.ok(plan);
@@ -15552,6 +15732,102 @@ GIEO.define('bootstrap/cutover', [
   };
 });
 
+/* ===== src/layers/bootstrap/domain-events.js ===== */
+/**
+ * Điều phối sự kiện domain — đóng gap L9 (`NET-LOYALTY-V1.md`).
+ *
+ * `commands/sales.js` (RecordSale, RecordAddon) và `commands/reversal.js`
+ * (ReverseTransaction với `eventType`) đẩy sự kiện vào `plan.events`, nhưng
+ * TRƯỚC module này không có gì đọc lại mảng đó — luật tích/hoàn điểm loyalty
+ * viết xong (`loyalty/accrual.js`) mà không cách nào chạy thật. Đây LÀ tầng
+ * "ai lắng nghe sự kiện nào, gọi command nào" mà audit L9 xác nhận CHƯA TỪNG
+ * TỒN TẠI — `bootstrap/runtime.js` gọi `routeEvents()` sau mỗi command mutate
+ * thành công, rồi tự chạy tiếp các command được route tới qua ĐÚNG cổng
+ * `runtime.command()` (idempotent, có quyền, có audit — không phải ghi tắt).
+ *
+ * CỐ Ý không tự đọc dữ liệu (Firestore, versionRegistry...) — giữ đúng
+ * nguyên tắc "denormalized command input" đã dùng xuyên toàn hệ: field nào
+ * command tiếp theo cần thì phải đã có sẵn trên chính sự kiện. Caller gốc
+ * (RecordSale/RecordAddon/ReverseTransaction) chịu trách nhiệm đính kèm khi
+ * đẩy event; thiếu field không route được thì `toInput` trả null — route đó
+ * bị bỏ qua thay vì gọi command với input rỗng gây lỗi khó hiểu. Field bắt
+ * buộc mà `toInput` KHÔNG tự bịa (như `policy` của ReverseLoyaltyForVoidedBill)
+ * vẫn được route đi để lộ ra thành lỗi validate — không phải bị nuốt im lặng.
+ */
+GIEO.define('bootstrap/domain-events', [], function () {
+  'use strict';
+
+  /**
+   * Mỗi route: {command, toInput(event) => input | null}.
+   *   null  = sự kiện không đủ dữ liệu để dịch, bỏ qua route này hẳn.
+   */
+  var ROUTES = {
+    /* L2 — tích điểm/tem sau khi bill thanh toán xong. */
+    SaleCompleted: {
+      command: 'AccrueLoyaltyForSale',
+      toInput: function (evt) {
+        if (!evt.bill) return null;
+        return {
+          bill: evt.bill,
+          customer: evt.customer || null,
+          stampsEarnedToday: evt.stampsEarnedToday || 0
+        };
+      }
+    },
+    /* L4 — tích điểm cho phần chênh lệch addon. */
+    SaleAmountIncreased: {
+      command: 'AccrueLoyaltyForAddon',
+      toInput: function (evt) {
+        return {
+          billId: evt.billId,
+          addonSeq: evt.addonSeq,
+          addedAmount: evt.addedAmount,
+          customer: evt.customer || null,
+          storeId: evt.storeId,
+          businessDate: evt.businessDate,
+          occurredAt: evt.occurredAt,
+          actorId: evt.actorId
+        };
+      }
+    },
+    /*
+     * L5 — hoàn điểm/tem khi huỷ bill. `referenceId` của ReverseTransaction
+     * chính là billId khi domain huỷ là bán hàng (caller khai eventType
+     * 'OrderVoided' đúng cho tình huống này, không cho tình huống khác).
+     * `policy` KHÔNG có mặc định ở đây (xem `commands/loyalty.js`) — chủ
+     * quán chưa chốt REVERSE hay KEEP.
+     */
+    OrderVoided: {
+      command: 'ReverseLoyaltyForVoidedBill',
+      toInput: function (evt) {
+        return {
+          billId: evt.referenceId,
+          policy: evt.loyaltyPolicy,
+          entries: evt.loyaltyEntries || [],
+          storeId: evt.storeId,
+          businessDate: evt.businessDate,
+          occurredAt: evt.occurredAt,
+          actorId: evt.reversedBy
+        };
+      }
+    }
+  };
+
+  /** Dịch `plan.events` thành danh sách {command, input, sourceEvent} để chạy tiếp. */
+  function routeEvents(events) {
+    return (events || []).reduce(function (out, evt) {
+      var route = evt && ROUTES[evt.type];
+      if (!route) return out;
+      var input = route.toInput(evt);
+      if (input === null) return out;
+      out.push({ command: route.command, input: input, sourceEvent: evt.type });
+      return out;
+    }, []);
+  }
+
+  return { ROUTES: ROUTES, routeEvents: routeEvents };
+});
+
 /* ===== src/layers/bootstrap/firebase-app.js ===== */
 /**
  * Composition root: khởi tạo Firebase và trao handle cho runtime.
@@ -15980,9 +16256,14 @@ GIEO.define('bootstrap/runtime', [
   'commands/business-day',
   'commands/shift',
   'commands/payroll',
+  'commands/loyalty',
   'read-layer/gateway',
-  'reporting/report-queries'
-], function (R, pipeline, sales, inventory, receiving, stockCount, catalog, prep, reversal, approval, businessDay, shift, payroll, reads, reports) {
+  'reporting/report-queries',
+  'bootstrap/domain-events'
+], function (
+  R, pipeline, sales, inventory, receiving, stockCount, catalog, prep, reversal, approval,
+  businessDay, shift, payroll, loyalty, reads, reports, domainEvents
+) {
   'use strict';
 
   var MODE = { READ_ONLY: 'READ_ONLY', SHADOW: 'SHADOW', WRITE: 'WRITE' };
@@ -16018,7 +16299,13 @@ GIEO.define('bootstrap/runtime', [
     CheckOut: shift.CheckOut,
     CloseCashSegment: shift.CloseCashSegment,
     ReviseAttendance: payroll.ReviseAttendance,
-    ClosePayroll: payroll.ClosePayroll
+    ClosePayroll: payroll.ClosePayroll,
+    /* L9 — chỉ được RUNTIME gọi tiếp qua domain-events dispatch, nhưng vẫn
+       đăng ký công khai: idempotency/quyền/audit phải đi qua đúng 1 cổng,
+       không có đường tắt riêng cho command "nội bộ". */
+    AccrueLoyaltyForSale: loyalty.AccrueLoyaltyForSale,
+    AccrueLoyaltyForAddon: loyalty.AccrueLoyaltyForAddon,
+    ReverseLoyaltyForVoidedBill: loyalty.ReverseLoyaltyForVoidedBill
   };
   var QUERIES = {
     GetMenu: reads.getMenu,
@@ -16077,6 +16364,33 @@ GIEO.define('bootstrap/runtime', [
         return fn(ctx, resolved.value);
       });
     }
+    /**
+     * L9 — sau khi command mutate xong, dịch `plan.events` thành các command
+     * tiếp theo (đăng nhập ở `bootstrap/domain-events.js`) và CHẠY THẬT qua
+     * lại đúng `command()` này — không có đường ghi tắt riêng cho side-effect.
+     * Một handler hỏng không được nuốt im lặng (cùng nguyên tắc với
+     * `reversal.js#createEventBus`): kết quả từng side-effect gắn vào
+     * `result.value.sideEffects` để caller/log thấy, nhưng KHÔNG lật ngược
+     * kết quả OK của command gốc — bán hàng/hoàn kho đã xong thật rồi,
+     * loyalty lỗi là việc cần rà tay, không phải lý do rollback giao dịch
+     * chính (đúng tinh thần decoupled retry mà legacy vốn đã làm, chỉ tự chế
+     * kém hơn).
+     */
+    function dispatchDomainEvents(result) {
+      if (R.isErr(result)) return Promise.resolve(result);
+      var plan = result.value && result.value.plan;
+      if (!plan || !plan.events || !plan.events.length) return Promise.resolve(result);
+      var routes = domainEvents.routeEvents(plan.events);
+      if (!routes.length) return Promise.resolve(result);
+      return Promise.all(routes.map(function (route) {
+        return command(route.command, route.input).then(function (out) {
+          return { command: route.command, sourceEvent: route.sourceEvent, result: out };
+        });
+      })).then(function (sideEffects) {
+        result.value.sideEffects = sideEffects;
+        return result;
+      });
+    }
     function command(name, input) {
       var cmd = COMMANDS[name];
       if (!cmd) return Promise.resolve(R.err('NOT_FOUND', 'command chưa đăng ký: ' + name));
@@ -16092,17 +16406,20 @@ GIEO.define('bootstrap/runtime', [
         : R.ok(input || {});
       return Promise.resolve(hydrated).then(function (resolved) {
         if (R.isErr(resolved)) return resolved;
+        var ran;
         if (mode === MODE.SHADOW) {
-          return pipeline.run(cmd, resolved.value, ctx, { operationStore: operationStore });
+          ran = Promise.resolve(pipeline.run(cmd, resolved.value, ctx, { operationStore: operationStore }));
+        } else {
+          if (typeof spec.commit !== 'function') {
+            return R.err('VALIDATION', 'WRITE mode cần atomic commit adapter');
+          }
+          ran = pipeline.runAndCommit(cmd, resolved.value, ctx, {
+            operationStore: operationStore,
+            commit: spec.commit,
+            rollback: spec.rollback
+          });
         }
-        if (typeof spec.commit !== 'function') {
-          return R.err('VALIDATION', 'WRITE mode cần atomic commit adapter');
-        }
-        return pipeline.runAndCommit(cmd, resolved.value, ctx, {
-          operationStore: operationStore,
-          commit: spec.commit,
-          rollback: spec.rollback
-        });
+        return ran.then(dispatchDomainEvents);
       });
     }
     function watch(name, input, listener) {
