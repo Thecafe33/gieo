@@ -12,6 +12,13 @@
 > Tiếp nối phát hiện L9 (tầng điều phối sự kiện chưa có consumer) từ
 > `NET-LOYALTY-V1.md` / `NET-REVERSAL-CORRECTION-V1.md` — domain này cũng phát
 > `ContainerFound` qua `plan.events`, cùng chịu ảnh hưởng của gap đó.
+>
+> **CẬP NHẬT (quyết định chủ quán, sau `NET-PAYROLL-V1.md`)**: câu hỏi "khoản
+> trừ trách nhiệm nhân viên khi mất container" — treo từ
+> `NET-REVERSAL-CORRECTION-V1.md`, đi qua domain này (RM6) rồi mới tới Payroll
+> — đã được xác nhận có thật và thi công thành `hr/liability.js`. Việc tạo/hoàn
+> khoản trừ được gắn TRỰC TIẾP vào `ApproveLostContainer`/`RestoreFoundContainer`
+> (chính 2 command của RM6) chứ KHÔNG đi qua L9 — xem RM6 bên dưới.
 
 ## Sơ đồ luồng (RM1 → RM8)
 
@@ -87,7 +94,7 @@ RM8 Cấu hình KPI (wasteTargetPct / cogsPct / stockoutTargetPct)
 | **Hệ cũ** | `submitFoundLostContainer` (báo mất) có logic nhánh LOST viết sẵn, nhưng KHÔNG BAO GIỜ chạy tới — 3 nguồn audit độc lập xác nhận: grep `approveLostReport` trong `quanlygieo.html` → 0 kết quả; audit Alerts không thấy nút xử lý báo mất; chain kiểm kê cho thấy route duyệt không tồn tại, khiến container "mất" lặp lại vô hạn mỗi kỳ |
 | **Hệ mới** | `commands/inventory.js` → `ReportLostContainer` (194-232) + `RestoreFoundContainer` (242-288); **`commands/approval.js` → `ApproveLostContainer` (48-125) — mắt xích legacy CHƯA TỪNG CÓ** |
 | **Phân loại** | 🟡 **GIỮ, ĐỔI CÁCH LÀM** — đóng gap có bằng chứng chắc chắn nhất toàn audit (§10b.4) |
-| **Ghi chú** | Luồng đủ 3 bước: POS báo mất (`ReportLostContainer`, `EXECUTE`) → tạo `lostReport` trạng thái `PENDING_REVIEW` (Unit CHƯA vào nhánh LOST) → QUANLY duyệt (`ApproveLostContainer`, `REVIEW_APPROVE_CORRECT`, bắt buộc `reason`, fail-closed nếu phiếu không còn `PENDING_REVIEW`) → Unit thật sự vào `markLost()`, ghi ledger `LOST`, phát event `ContainerFound` (dùng chung tên event cho cả 2 hướng LOST/FOUND, phân biệt bằng `direction`) để trừ/hoàn trách nhiệm nhân viên. `RestoreFoundContainer` giữ đúng quyết định nghiệp vụ cũ (§8: Unit "mới nguyên", không suy luận lại phần đã dùng trước khi mất) — không đổi hành vi, chỉ thêm `operationId` xuyên suốt. **Cảnh báo phụ thuộc L9**: cả `ApproveLostContainer` và `RestoreFoundContainer` đều phát `ContainerFound` qua `plan.events` để trừ/hoàn lương — logic ĐÚNG nhưng KHÔNG CHẠY vì tầng điều phối sự kiện chưa có consumer (xem `NET-LOYALTY-V1.md` L9, `NET-REVERSAL-CORRECTION-V1.md`). Domain thứ 3 xác nhận phụ thuộc gap này, sau Loyalty và Reversal. |
+| **Ghi chú** | Luồng đủ 3 bước: POS báo mất (`ReportLostContainer`, `EXECUTE`) → tạo `lostReport` trạng thái `PENDING_REVIEW` (Unit CHƯA vào nhánh LOST) → QUANLY duyệt (`ApproveLostContainer`, `REVIEW_APPROVE_CORRECT`, bắt buộc `reason`, fail-closed nếu phiếu không còn `PENDING_REVIEW`) → Unit thật sự vào `markLost()`, ghi ledger `LOST`. Sự kiện `direction: 'LOST_APPROVED'` trước đây dùng chung `type: 'ContainerFound'` với hướng tìm lại — **đã sửa: đổi tên thành `ContainerLostApproved`** để không trùng `type` với event "tìm lại được" thật (2 tình huống đối lập không nên cùng tên). `RestoreFoundContainer` giữ đúng quyết định nghiệp vụ cũ (§8: Unit "mới nguyên", không suy luận lại phần đã dùng trước khi mất) — không đổi hành vi, chỉ thêm `operationId` xuyên suốt. **CẬP NHẬT (quyết định chủ quán, mục 4 ở `NET-PAYROLL-V1.md`): khoản trừ trách nhiệm nhân viên KHÔNG còn đi qua event/L9 nữa** — trước đây `ApproveLostContainer`/`RestoreFoundContainer` phát event để "trừ/hoàn lương" nhưng không có consumer nào chạy (đúng như cảnh báo L9 dưới đây). Đã sửa tận gốc: `ApproveLostContainer` nay resolve `employee` từ `input.employees` (theo `actorId === report.reportedBy`, pattern denormalized-input) và gọi thẳng `hr/liability.createLiability()` NGAY TRONG PLAN của chính nó (dùng `Unit.costBasis.unitCost` thật; nếu unit legacy-seeded thiếu `costBasis` hoặc không khớp được nhân viên thì `gap: true`, không chặn duyệt — đúng §2.3a). `RestoreFoundContainer` tương tự gọi `hr/liability.reverseLiability()` trực tiếp nếu `input.liability` còn `PENDING`/`WAIVED`. Cả hai đều đẩy `{type:'liability', record}` vào `plan.domainRecords` — đồng bộ, không phụ thuộc L9. **Cảnh báo phụ thuộc L9 (VẪN CÒN, nhưng KHÔNG còn cho liability)**: `ContainerLostApproved`/`ContainerFound` vẫn được phát qua `plan.events` cho các mục đích khác (ví dụ thông báo/alert) và vẫn KHÔNG có consumer — domain thứ 3 xác nhận phụ thuộc gap L9 này, sau Loyalty và Reversal, nhưng phạm vi hẹp hơn trước vì nhánh liability đã tách ra khỏi event, chạy đồng bộ. |
 
 ## RM7 — Báo cáo hao hụt / tồn kho theo NGÀY
 
@@ -116,7 +123,8 @@ RM8 Cấu hình KPI (wasteTargetPct / cogsPct / stockoutTargetPct)
 | **Sales/POS** | RM5 (waste) qua `_submitDrinkWasteImpl` từng dùng chung UI với waste-BTP; N-liên quan trong `NET-SALES-V1.md` "Ca liên quan đã rà" (shortfall PRECONDITION cùng dạng ở `sales.js`, `inventory.js`, `prep.js`) |
 | **BTP** | RM5 nhánh (b) "đổ ly thành phẩm" là hao hụt BTP, không phải raw — chung hàm `_submitDrinkWasteImpl` ở hệ cũ, tách domain rõ ở hệ mới (`domain: 'prep'` vs `'raw'`); RM7 nêu vấn đề chung `btp-report.js` |
 | **Reversal/Correction** | RM1 (Receiving thiếu) là cùng một gap đã nêu ở case #4 trong `NET-REVERSAL-CORRECTION-V1.md`; RM6 dùng đúng pattern `ReviseState`-adjacent nhưng thực ra là command riêng (`ApproveLostContainer`), không đi qua `reversal.js` |
-| **Loyalty / Payroll** | RM6's `ContainerFound` event — cùng chịu ảnh hưởng gap L9 (tầng điều phối sự kiện) đã nêu ở `NET-LOYALTY-V1.md`; xác nhận domain thứ 3 phụ thuộc gap này |
+| **Loyalty / Payroll** | RM6's `ContainerLostApproved`/`ContainerFound` event (phần KHÔNG PHẢI liability) — cùng chịu ảnh hưởng gap L9 (tầng điều phối sự kiện) đã nêu ở `NET-LOYALTY-V1.md`; xác nhận domain thứ 3 phụ thuộc gap này |
+| **Payroll (liability)** | RM6 là ĐIỂM TẠO của khoản trừ trách nhiệm nhân viên (`hr/liability.js`, mới, quyết định chủ quán mục 4 ở `NET-PAYROLL-V1.md`): `ApproveLostContainer` tạo `PENDING`, `RestoreFoundContainer` có thể `REVERSED`. Payroll (`computePayroll`/`ClosePayroll`) là ĐIỂM TIÊU THỤ — trừ vào lương và chuyển `DEDUCTED`. Toàn bộ vòng đời chạy ĐỒNG BỘ trong `plan.domainRecords` của các command RM6, không qua event/L9 — xem RM6 và chi tiết đầy đủ ở `NET-PAYROLL-V1.md` mục Liên kết chéo domain. |
 | **Reporting** | RM7 mở rộng thành vấn đề chung 2 domain (raw + BTP), không phải riêng raw material |
 
 ---
@@ -134,4 +142,4 @@ RM8 Cấu hình KPI (wasteTargetPct / cogsPct / stockoutTargetPct)
 2. Khi có RM1, quyết luôn RM3: sửa giá/lượng nhập sai là nhánh của `ReceiveGoods`-correction hay của `ReviseState`.
 3. RM7: quyết có cần thêm chiều `dateKey` vào `usage-report.js` (theo đúng mẫu `btp-report.js` đã có) để có báo cáo ngày thật cho nguyên liệu thô, hay chỉ cần một UI gọi `GetUsageReport` theo từng ngày.
 4. ~~(ĐÃ ĐÍNH CHÍNH — xem `NET-BTP-V1.md` B5)~~ `btp-report.js` không phải gap riêng, đã đóng đúng ĐỨT CHUỖI #3 ở tầng core. Việc còn lại của RM7 chỉ là thêm `dateKey` cho `usage-report.js` (nguyên liệu thô).
-5. Việc chung đã ghi nhận từ trước, RM6 xác nhận thêm: build tầng điều phối sự kiện (`plan.events` consumer) — ưu tiên cao nhất xuyên toàn bộ NET-series, giờ đã xác nhận cần cho ít nhất 3 domain (Loyalty, Reversal, Raw Material).
+5. Việc chung đã ghi nhận từ trước, RM6 xác nhận thêm: build tầng điều phối sự kiện (`plan.events` consumer) — ưu tiên cao nhất xuyên toàn bộ NET-series, giờ đã xác nhận cần cho ít nhất 3 domain (Loyalty, Reversal, Raw Material). **Cập nhật**: khoản trừ trách nhiệm nhân viên (RM6 → Payroll) KHÔNG còn nằm trong danh sách chờ L9 nữa — đã tách ra chạy đồng bộ trong `hr/liability.js` (xem Liên kết chéo domain). Phần còn lại của `ContainerLostApproved`/`ContainerFound` (không phải liability) vẫn chờ L9 như cũ.
