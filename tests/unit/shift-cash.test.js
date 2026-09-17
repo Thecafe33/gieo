@@ -192,6 +192,138 @@ describe('blockingClose — lý do chặn chốt ngày', function () {
   });
 });
 
+describe('autoCloseStaleShifts — ca treo không chặn chốt ngày vĩnh viễn (NET-PAYROLL-V1 #3)', function () {
+  var S = _sh.S;
+  var EMP = GIEO.require('hr/employee');
+  var HRS = GIEO.require('hr/shift');
+  var VI = GIEO.require('compaction/versioned-input');
+  var STORE2 = _sh.ids.deterministicId('store', ['payroll-stale']);
+
+  function rawShift(checkedInAt) {
+    var reg = VI.createRegistry();
+    var e = assertOk(EMP.createEmployee({ name: 'Trễ ca', storeId: STORE2 }));
+    return assertOk(HRS.checkIn({
+      employee: e, versionRegistry: reg, at: checkedInAt, businessDate: '2026-03-10'
+    }));
+  }
+
+  test('ca quá 16h tự đóng, không còn nằm trong stillOpen', function () {
+    var checkedInAt = new Date(2026, 2, 10, 8).getTime();
+    var nowTs = new Date(2026, 2, 11, 9).getTime();
+    var out = S.autoCloseStaleShifts([rawShift(checkedInAt)], nowTs);
+    assert.strictEqual(out.stillOpen.length, 0);
+    assert.strictEqual(out.closedShifts.length, 1);
+    assert.strictEqual(out.closedShifts[0].status, 'CLOSED');
+    assert.strictEqual(out.closedShifts[0].autoClosed, true);
+  });
+
+  test('ca còn trong ngưỡng vẫn ở stillOpen, tiếp tục chặn chốt ngày', function () {
+    var checkedInAt = new Date(2026, 2, 10, 8).getTime();
+    var nowTs = new Date(2026, 2, 10, 15).getTime();
+    var out = S.autoCloseStaleShifts([rawShift(checkedInAt)], nowTs);
+    assert.strictEqual(out.stillOpen.length, 1);
+    assert.strictEqual(out.closedShifts.length, 0);
+
+    var blockers = S.closeDayBlockers({
+      segments: [closed(counted(seg1(), 500000))],
+      openEmployeeShifts: out.stillOpen
+    });
+    assert.ok(/chưa check-out/.test(blockers[0]));
+  });
+
+  test('ca treo thật sự không còn xuất hiện trong danh sách chặn', function () {
+    var checkedInAt = new Date(2026, 2, 10, 8).getTime();
+    var nowTs = new Date(2026, 2, 11, 9).getTime();
+    var out = S.autoCloseStaleShifts([rawShift(checkedInAt)], nowTs);
+    var blockers = S.closeDayBlockers({
+      segments: [closed(counted(seg1(), 500000))],
+      openEmployeeShifts: out.stillOpen
+    });
+    assert.strictEqual(blockers.length, 0);
+  });
+});
+
+describe('CloseBusinessDay — ca treo tự đóng trước khi tính blockers (NET-PAYROLL-V1 #3)', function () {
+  var S = _sh.S;
+  var PIPE = GIEO.require('commands/pipeline');
+  var BIZ = GIEO.require('commands/business-day');
+  var ACCESS = GIEO.require('store-context/access');
+  var CTXL = GIEO.require('store-context/context');
+  var BD = GIEO.require('store-context/business-day');
+  var CLK = GIEO.require('shared-kernel/clock');
+  var EMP = GIEO.require('hr/employee');
+  var HRS = GIEO.require('hr/shift');
+  var VI = GIEO.require('compaction/versioned-input');
+  var ORG = _sh.ids.deterministicId('org', ['gieo-close-day']);
+  var STORE3 = _sh.ids.deterministicId('store', ['close-day-stale']);
+  var NOW = new Date(2026, 2, 11, 9).getTime();
+
+  function ctxAt(now) {
+    var clock = CLK.createClock({ now: function () { return now; } });
+    var day = assertOk(BD.openDay({
+      storeId: STORE3, dateKey: '2026-03-10', actorId: _sh.A1, at: now - 100000, clock: clock
+    }));
+    var actor = assertOk(ACCESS.createActor({
+      actorId: _sh.A1, role: 'QUANLY_OPERATOR', source: 'QUANLY', stores: [STORE3]
+    }));
+    var context = assertOk(CTXL.createContext({
+      organizationId: ORG, storeId: STORE3, actor: actor, source: 'QUANLY',
+      businessDay: day, clock: clock
+    }));
+    return { day: day, context: context };
+  }
+
+  function closedSegment(operationId) {
+    var seg = assertOk(S.openSegment({
+      storeId: STORE3, businessDate: '2026-03-10', seq: 1, startCash: 0, actorId: _sh.A1, at: NOW - 100000
+    }));
+    seg = assertOk(S.addCount(seg, { countedCash: 0, at: NOW - 50000, actorId: _sh.A1 }));
+    return assertOk(S.closeSegment(seg, { actorId: _sh.A1, at: NOW - 40000, operationId: operationId }));
+  }
+
+  test('ca quên check-out (>16h) tự đóng, ngày vẫn chốt được', function () {
+    var setup = ctxAt(NOW);
+    var reg = VI.createRegistry();
+    var employee = assertOk(EMP.createEmployee({ name: 'Quên check-out', storeId: STORE3 }));
+    var staleShift = assertOk(HRS.checkIn({
+      employee: employee, versionRegistry: reg,
+      at: new Date(2026, 2, 10, 8).getTime(), businessDate: '2026-03-10'
+    }));
+
+    var out = assertOk(PIPE.run(BIZ.CloseBusinessDay, {
+      day: setup.day, segments: [closedSegment('operation_stale_seg')], openEmployeeShifts: [staleShift]
+    }, setup.context, { operationStore: PIPE.createInMemoryOperationStore() }));
+
+    var bdRecord = out.plan.domainRecords.filter(function (r) { return r.type === 'businessDay'; })[0];
+    assert.strictEqual(bdRecord.record.status, 'CLOSED');
+
+    var shiftRecord = out.plan.domainRecords.filter(function (r) { return r.type === 'employeeShift'; })[0];
+    assert.strictEqual(shiftRecord.record.status, 'CLOSED');
+    assert.strictEqual(shiftRecord.record.autoClosed, true);
+
+    var evt = out.plan.events.filter(function (e) { return e.type === 'EmployeeCheckedInStateChanged'; })[0];
+    assert.strictEqual(evt.checkedIn, false);
+    assert.strictEqual(evt.employeeId, employee.employeeId);
+  });
+
+  test('ca còn trong ngưỡng (chưa treo) vẫn chặn chốt ngày như cũ', function () {
+    var setup = ctxAt(NOW);
+    var reg = VI.createRegistry();
+    var employee = assertOk(EMP.createEmployee({ name: 'Đang làm', storeId: STORE3 }));
+    var freshShift = assertOk(HRS.checkIn({
+      employee: employee, versionRegistry: reg,
+      at: NOW - 3600000, businessDate: '2026-03-10'
+    }));
+
+    var out = PIPE.run(BIZ.CloseBusinessDay, {
+      day: setup.day, segments: [closedSegment('operation_fresh_seg')], openEmployeeShifts: [freshShift]
+    }, setup.context, { operationStore: PIPE.createInMemoryOperationStore() });
+
+    assertErr(out, 'PRECONDITION');
+    assert.ok(/chưa check-out/.test(out.error.detail.blockers[0]));
+  });
+});
+
 describe('CloseCashSegment qua pipeline', function () {
   var S = _sh.S;
   var PIPE = GIEO.require('commands/pipeline');

@@ -88,9 +88,16 @@ GIEO.define('commands/business-day', [
     execute: function (input, ctx) {
       /* Không nhận `blockers` dựng sẵn từ UI. Command luôn tự tính từ canonical
          input đã được data source hydrate, nên caller không thể gửi [] để lách. */
+
+      /* Ca THẬT SỰ treo (quá `DEFAULT_MAX_SHIFT_HOURS`, quên check-out) tự
+         đóng TRƯỚC khi tính blockers — trước đây `autoCloseIfStale` không có
+         caller nào, nên 1 ca quên check-out chặn đóng ngày vĩnh viễn cho tới
+         khi sửa tay (VIỆC PHẢI LÀM #3, `NET-PAYROLL-V1.md`). Ca đang làm thật
+         (chưa quá ngưỡng) vẫn tiếp tục chặn như cũ. */
+      var staleResult = shift.autoCloseStaleShifts(input.openEmployeeShifts || [], ctx.clock.now());
       var blockers = shift.closeDayBlockers({
         segments: input.segments || [],
-        openEmployeeShifts: input.openEmployeeShifts || [],
+        openEmployeeShifts: staleResult.stillOpen,
         pendingChecklists: input.pendingChecklists || []
       });
       var operationId = closeOperationId(input);
@@ -103,6 +110,17 @@ GIEO.define('commands/business-day', [
       if (R.isErr(closed)) return closed;
 
       var plan = pipeline.emptyPlan();
+      staleResult.closedShifts.forEach(function (sh) {
+        plan.domainRecords.push({ type: 'employeeShift', record: sh });
+        plan.events.push({
+          type: 'EmployeeCheckedInStateChanged',
+          employeeId: sh.employeeId,
+          actorId: sh.actorId,
+          storeId: sh.storeId,
+          businessDate: sh.businessDate,
+          checkedIn: false
+        });
+      });
       plan.domainRecords.push({ type: 'businessDay', record: closed.value });
       plan.events.push({
         type: 'BusinessDayClosed',

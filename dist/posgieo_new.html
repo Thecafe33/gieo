@@ -11231,9 +11231,16 @@ GIEO.define('commands/business-day', [
     execute: function (input, ctx) {
       /* Không nhận `blockers` dựng sẵn từ UI. Command luôn tự tính từ canonical
          input đã được data source hydrate, nên caller không thể gửi [] để lách. */
+
+      /* Ca THẬT SỰ treo (quá `DEFAULT_MAX_SHIFT_HOURS`, quên check-out) tự
+         đóng TRƯỚC khi tính blockers — trước đây `autoCloseIfStale` không có
+         caller nào, nên 1 ca quên check-out chặn đóng ngày vĩnh viễn cho tới
+         khi sửa tay (VIỆC PHẢI LÀM #3, `NET-PAYROLL-V1.md`). Ca đang làm thật
+         (chưa quá ngưỡng) vẫn tiếp tục chặn như cũ. */
+      var staleResult = shift.autoCloseStaleShifts(input.openEmployeeShifts || [], ctx.clock.now());
       var blockers = shift.closeDayBlockers({
         segments: input.segments || [],
-        openEmployeeShifts: input.openEmployeeShifts || [],
+        openEmployeeShifts: staleResult.stillOpen,
         pendingChecklists: input.pendingChecklists || []
       });
       var operationId = closeOperationId(input);
@@ -11246,6 +11253,17 @@ GIEO.define('commands/business-day', [
       if (R.isErr(closed)) return closed;
 
       var plan = pipeline.emptyPlan();
+      staleResult.closedShifts.forEach(function (sh) {
+        plan.domainRecords.push({ type: 'employeeShift', record: sh });
+        plan.events.push({
+          type: 'EmployeeCheckedInStateChanged',
+          employeeId: sh.employeeId,
+          actorId: sh.actorId,
+          storeId: sh.storeId,
+          businessDate: sh.businessDate,
+          checkedIn: false
+        });
+      });
       plan.domainRecords.push({ type: 'businessDay', record: closed.value });
       plan.events.push({
         type: 'BusinessDayClosed',
@@ -14157,6 +14175,31 @@ GIEO.define('commands/shift', [
   }
 
   /**
+   * Tự đóng những ca THẬT SỰ TREO (quá `DEFAULT_MAX_SHIFT_HOURS`, quên
+   * check-out) TRƯỚC khi tính blockers đóng ngày.
+   *
+   * `hr/shift.js#autoCloseIfStale` có sẵn logic (comment gốc: "Ca tự đóng
+   * phải bị gắn cờ") nhưng trước đây KHÔNG có caller nào gọi tới — nghĩa là
+   * 1 ca quên check-out sẽ chặn đóng ngày VĨNH VIỄN cho tới khi Quản lý tự
+   * sửa tay từng ca bằng `ReviseAttendance` (VIỆC PHẢI LÀM #3,
+   * `NET-PAYROLL-V1.md`). Ca THẬT SỰ đang mở (mới check-in, chưa quá
+   * ngưỡng) vẫn tiếp tục CHẶN như cũ — đúng ý nghĩa "không đóng ngày khi còn
+   * người đang làm việc thật". `needsReview`/`AUTO_CLOSED` đã có sẵn cơ chế
+   * đọc lại ở `ClosePayroll` (không chốt lương khi còn gap chưa xác nhận),
+   * nên không cần thêm loại alert mới cho việc này.
+   */
+  function autoCloseStaleShifts(openShifts, nowTs, opts) {
+    var stillOpen = [];
+    var closedShifts = [];
+    (openShifts || []).forEach(function (sh) {
+      var r = employeeShift.autoCloseIfStale(sh, nowTs, opts);
+      if (R.isOk(r) && r.value.status === STATUS.CLOSED) closedShifts.push(r.value);
+      else stillOpen.push(sh);
+    });
+    return { stillOpen: stillOpen, closedShifts: closedShifts };
+  }
+
+  /**
    * Lý do CHẶN chốt ngày. FEATURE-TREE §2 mục [5] gọi đây là `blockingClose`.
    * Trả danh sách để `store-context/business-day.closeDay` từ chối kèm lý do
    * cụ thể, thay vì chỉ báo "không chốt được".
@@ -14373,6 +14416,7 @@ GIEO.define('commands/shift', [
     closeSegment: closeSegment,
     nextSegment: nextSegment,
     summarizeDay: summarizeDay,
+    autoCloseStaleShifts: autoCloseStaleShifts,
     closeDayBlockers: closeDayBlockers,
     OpenCashSegment: OpenCashSegment,
     CheckIn: CheckIn,
