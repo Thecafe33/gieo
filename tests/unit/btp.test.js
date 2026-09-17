@@ -280,8 +280,17 @@ describe('commands/prep — mẻ tạo Unit FIFO thật', function () {
     assert.strictEqual(assertOk(cook()).plan.events.length, 0);
   });
 
-  test('không đủ nguyên liệu thì CHẶN nấu', function () {
-    assertErr(cook({ deps: { versionRegistry: bReg(), units: [rawUnit(100)] } }), 'PRECONDITION');
+  test('không đủ nguyên liệu VẪN nấu được — chốt chủ quán 2026-09 (SOP cho thay nguyên liệu khi hết)', function () {
+    var out = assertOk(cook({ deps: { versionRegistry: bReg(), units: [rawUnit(100)] } }));
+    var plan = out.plan;
+    var debtUnit = plan.unitChanges.filter(function (u) { return u.debt; })[0];
+    assert.ok(debtUnit, 'không thấy Unit gánh nợ phần thiếu');
+    assert.strictEqual(debtUnit.debt.amount, 900);
+    assert.ok(debtUnit.needsReview);
+
+    var evt = plan.events.filter(function (e) { return e.type === 'IngredientShortfallRecorded'; })[0];
+    assert.ok(evt, 'thiếu event IngredientShortfallRecorded để L9 báo QUANLY');
+    assert.strictEqual(evt.shortfallQty, 900);
   });
 
   test('thiếu batchRef thì từ chối — đó chính là bug #22', function () {

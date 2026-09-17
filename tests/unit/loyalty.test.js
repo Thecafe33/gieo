@@ -405,9 +405,20 @@ describe('commands/loyalty — L9: bọc accrual.js thành command thật', func
     assert.strictEqual(out.plan.domainRecords[0].record.reason, 'EARN_ADDON');
   });
 
-  test('ReverseLoyaltyForVoidedBill THIẾU policy bị từ chối — L5 chưa chốt, không được ngầm định', function () {
+  test('ReverseLoyaltyForVoidedBill THIẾU policy thì mặc định REVERSE — chốt chủ quán 2026-09 (L5)', function () {
+    var original = assertOk(_l.L.createEntry({
+      customerId: cust().customerId, storeId: _l.STORE, currency: 'POINTS', delta: 3000,
+      reason: 'EARN_SALE', referenceId: _l.BILL, operationId: 'op', businessDate: '2026-03-10'
+    }));
+    var out = assertOk(PIPE.run(LOY.ReverseLoyaltyForVoidedBill, {
+      billId: _l.BILL, entries: [original], storeId: _l.STORE, businessDate: '2026-03-10'
+    }, loyCtx('QUANLY', 'QUANLY_ADMIN'), { operationStore: PIPE.createInMemoryOperationStore() }));
+    assert.strictEqual(out.plan.domainRecords[0].record.delta, -3000);
+  });
+
+  test('ReverseLoyaltyForVoidedBill policy lạ (không phải REVERSE/KEEP) vẫn bị từ chối', function () {
     assertErr(run(LOY.ReverseLoyaltyForVoidedBill, {
-      billId: _l.BILL, entries: [], storeId: _l.STORE, businessDate: '2026-03-10'
+      billId: _l.BILL, entries: [], storeId: _l.STORE, businessDate: '2026-03-10', policy: 'TUY_Y'
     }), 'VALIDATION');
   });
 

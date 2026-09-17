@@ -33,6 +33,15 @@
  *    `recipe-cost-btp/cogs.js`), và phát `MissingRecipeDetected` cho mỗi món
  *    thiếu để `bootstrap/domain-events.js` (L9) tạo alert `MISSING_RECIPE`
  *    (đã đăng ký sẵn trong `alerts/alert.js`, tự hết khi khai định mức xong).
+ *
+ * 5. Hết nguyên liệu thật KHÔNG chặn bán (quyết định chủ quán 2026-09: SOP cho
+ *    phép thay thế nguyên liệu khi hết). Trước đây trả `PRECONDITION` khi
+ *    `alloc.shortfalls.length` — bản đầu cố ý chặn CHẶT HƠN legacy (legacy để
+ *    kho âm mà không ai biết). Đã sửa: mỗi shortfall đi qua
+ *    `allocation.handleShortfall` (§3.3, cơ chế NỢ tường minh trên Unit đã có
+ *    sẵn ở fifo-core, chỉ chưa được gọi), Unit gánh nợ được gắn `needsReview`,
+ *    và phát `IngredientShortfallRecorded` để L9 tạo alert `UNIT_NEEDS_REVIEW`
+ *    cho QUANLY — không âm thầm, không chặn nhân viên tại quầy.
  */
 GIEO.define('commands/sales', [
   'shared-kernel/ids',
@@ -263,11 +272,32 @@ GIEO.define('commands/sales', [
       if (R.isErr(allocR)) return allocR;
       var alloc = allocR.value;
 
-      if (alloc.shortfalls.length && !input.allowShortfall) {
-        return R.err('PRECONDITION',
-          'không đủ nguyên liệu cho ' + alloc.shortfalls.length + ' thành phần — ' +
-          'bán tiếp sẽ làm kho âm mà không ai chặn (đúng lỗi legacy)',
-          { shortfalls: alloc.shortfalls });
+      /*
+       * Hết nguyên liệu thật: KHÔNG chặn bán (chốt chủ quán 2026-09) — SOP cho
+       * phép thay thế một số nguyên liệu khi nguyên liệu kia hết, nên vẫn phải
+       * bán tiếp được. Phần thiếu thành NỢ tường minh trên Unit (§3.3
+       * `allocation.handleShortfall`), gắn `needsReview`, KHÔNG âm thầm — khác
+       * legacy để kho tụt âm mà không ai biết.
+       */
+      var shortfallEvents = [];
+      for (var sfi = 0; sfi < alloc.shortfalls.length; sfi++) {
+        var shortfall = alloc.shortfalls[sfi];
+        var sfR = allocation.handleShortfall(ws, shortfall, {
+          at: bill.occurredAt,
+          operationId: ids.deterministicId('operation', ['sale', bill.billId])
+        });
+        if (R.isErr(sfR)) return sfR;
+        if (sfR.value.debtUnit) {
+          shortfallEvents.push({
+            type: 'IngredientShortfallRecorded',
+            unitId: sfR.value.debtUnit.unitId,
+            itemId: shortfall.itemId,
+            shortfallQty: shortfall.shortfallQty,
+            billId: bill.billId,
+            storeId: bill.storeId,
+            businessDate: bill.businessDate
+          });
+        }
       }
 
       /* HAI vế COGS — thứ legacy chưa từng có. */
@@ -373,6 +403,8 @@ GIEO.define('commands/sales', [
         });
       });
 
+      shortfallEvents.forEach(function (evt) { plan.events.push(evt); });
+
       return R.ok(plan);
     }
   });
@@ -437,6 +469,7 @@ GIEO.define('commands/sales', [
           actorId: ctx.actor.actorId
         });
       }
+
       return R.ok(plan);
     }
   });

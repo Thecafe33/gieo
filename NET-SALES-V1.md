@@ -130,7 +130,7 @@ N17 Xem P&L theo kênh (tại quán/mang đi/app) ─┴─► (→ FIFO-CHAIN-T
 | | |
 |---|---|
 | Hệ cũ | `confirmPay(cashGiven, cashChange)` — `posgieo.html:21828`. Ghi trực tiếp `db.ref('orders_gieogieo/{month}/{day}').child(idemKey).set(order)`. `order` là 1 object phẳng ~25 field tự dựng tay (không qua validate tập trung). |
-| Hệ mới | `runtime.command('RecordSale', { bill, deps, allowShortfall })` → `commands/sales.RecordSale` |
+| Hệ mới | `runtime.command('RecordSale', { bill, deps })` → `commands/sales.RecordSale` |
 | Phân loại | 🟡 **GIỮ nghiệp vụ, ĐỔI HẲN CÁCH LÀM** (thay đổi lớn nhất trong toàn NET) |
 | So sánh field | `soldByActorId` 🟢 **THÊM MỚI** (legacy KHÔNG ghi ai bán thật, chỉ gate "có ai đó đang check-in" — đây là field thiếu quan trọng nhất theo `FEATURE-TREE-V1.md §4.7`); `channel.feePct` 🟢 **THÊM MỚI Ở CHỖ ĐỌC** (legacy CÓ ghi `appFeePct` nhưng KHÔNG BAO GIỜ ĐỌC — `plChannelFeeForDay()` hard-code trả 0; core mới trừ thật vào `netRevenue`); `idemKey`/chống double-submit 🟡 **GIỮ, ĐỔI CÁCH LÀM** (legacy tự chế `_checkoutIdemKey` + `_posSubmitBusy` + đọc-trước-khi-ghi; core mới có `operationId` xác định theo `billId` ở tầng `pipeline` — cùng MỤC ĐÍCH, cơ chế idempotency chuẩn hoá thay vì tự chế từng nơi) |
 | Ghi chú | Đây là hàm DÀI NHẤT và QUAN TRỌNG NHẤT cần "mổ" khi vào Pha B/C thật — nó gọi trực tiếp 6 nhánh con (N10-N14 + tích điểm + đổi mã) TRONG CÙNG 1 hàm, không tách side-effect. Core mới đã tách qua `plan.events` (N11 loyalty là **event async, không nhét trong lệnh bán** — xem comment `sales.js` "side-effect là handler đăng ký riêng"). |
@@ -216,7 +216,7 @@ N17 Xem P&L theo kênh (tại quán/mang đi/app) ─┴─► (→ FIFO-CHAIN-T
 | N5 | Promotion | `FIFO-CHAIN-TRACE-CATALOG-PROMOTION-V1.md` §4-7 | core mới đã viết luật (`catalog/promotion.js`), UI chưa nối |
 | N6, N11, N15 | Loyalty | `FIFO-CHAIN-TRACE-LOYALTY-V1.md` | core mới đã viết 3 module (customer/accrual/ledger), **THIẾU handler nối event** — gap chặn đường, không phải lý thuyết |
 | N10 | Raw Material / BTP | `FIFO-CHAIN-TRACE-RAW-MATERIAL-V1.md`, `FIFO-CHAIN-TRACE-BTP-V1.md` | FIFO allocation dùng chung `fifo-core/allocation.js` cho cả 2 domain trong 1 `WorkingSet` — 1 bill có cả nguyên liệu thô lẫn BTP thì dùng CHUNG allocation, không tách 2 lượt (khác legacy: legacy gọi `applyStockTransactionPOS` và `applyPrepConsumptionPOS` RIÊNG, 2 lượt async khác nhau — core mới gộp làm 1 WorkingSet để "các món dùng chung nguyên liệu không đọc số dư cũ của nhau", đúng theo comment `sales.js`) |
-| N4, N9 | Alerts | `FIFO-CHAIN-TRACE-ALERTS-V1.md` | món chưa khai định mức — legacy báo Hộp thư (soft), core mới chặn cứng (`PRECONDITION`) — xem N10 ⚪ CHƯA QUYẾT |
+| N4, N9 | Alerts | `FIFO-CHAIN-TRACE-ALERTS-V1.md` | món chưa khai định mức — legacy báo Hộp thư (soft), core mới cũng KHÔNG chặn cứng (đã sửa theo §2.3a) — xem N10 ✅ ĐÃ SỬA; hết nguyên liệu thật cũng đã chốt KHÔNG chặn, xem mục "Ca liên quan đã rà" |
 | N10, N17 | Reporting | `FIFO-CHAIN-TRACE-REPORTING-V1.md`, `FIFO-CHAIN-TRACE-SALES-COGS-PL-V1.md` | `getCOGS`/`getPnL` đã có 2 vế COGS + channel fee — đây là điểm core mới ĐẦY ĐỦ HƠN legacy nhiều nhất trong toàn domain Sales |
 | N9 (huỷ bill) | Reversal/Correction | `FIFO-CHAIN-TRACE-REVERSAL-CORRECTION-V1.md` | chưa lần theo trong lượt NET này — hệ quả huỷ bill lên FIFO/Loyalty cần 1 NET riêng hoặc phụ lục nối vào đây sau |
 
@@ -229,6 +229,7 @@ N17 Xem P&L theo kênh (tại quán/mang đi/app) ─┴─► (→ FIFO-CHAIN-T
 - 🟢 **THÊM MỚI**: `soldByActorId` (N9), `channel.feePct` được ĐỌC thật (N9, N17), `cogsActual` thật (N10), event-driven loyalty (N11, N15), rule engine khuyến mãi tường minh (N5), loyalty ledger thay field cộng dồn (N11)
 - ⚪ **CHƯA QUYẾT**: đá có ảnh hưởng định mức không (N2), cơ chế voucher/reward "usedCount" (N12), số phận `moLaiThang`/versioning sổ tháng (N16)
 - ✅ **MỚI CHỐT VÀ ĐÃ SỬA (2026-09-17)**: N10 — thiếu định mức KHÔNG chặn bán, theo nguyên tắc "vận hành thật đè core" (`BAN-GIAO-V1.md` §2.3a). `commands/sales.js` đã sửa xong (`gapLines` + `MissingRecipeDetected` → alert `MISSING_RECIPE`), xem chi tiết ở N10.
+- ✅ **MỚI CHỐT VÀ ĐÃ SỬA (2026-09)**: hết nguyên liệu thật KHÔNG chặn bán/nấu/ghi hao hụt (SOP cho thay nguyên liệu khi hết) — `sales.js`/`prep.js`/`inventory.js` đã sửa xong (dùng `allocation.handleShortfall` §3.3, alert `UNIT_NEEDS_REVIEW`/`UNTRACKED_CONSUMPTION`), xem mục "Ca liên quan đã rà".
 - ✅ **RÀ LẠI, KHÔNG CẦN SỬA (2026-09-17)**: N4 — chặn business-day thật ở `RecordSale` đã có sẵn từ trước, qua gate chung `requiresOpenDay` của `commands/pipeline.js` (áp cho mọi command `mutates: true`), không phải code riêng cho `RecordSale`; đã có test ở `tests/unit/store-context-access.test.js:280`. Chỉ là sửa tài liệu cho đúng thực tế code, không đổi code.
 
 ## VIỆC PHẢI LÀM TRƯỚC KHI COI N9 (RecordSale) LÀ "ĐỦ DÙNG THAY confirmPay"
@@ -262,8 +263,9 @@ Thứ tự theo mức chặn đường (chặn cứng trước, tinh chỉnh sau
    khác có thể là điểm chặn MỚI so với hệ cũ, theo đúng nguyên tắc §2.3a~~ —
    **ĐÃ RÀ (2026-09-17)**: grep toàn bộ `src/layers/commands/*.js` (13 chỗ),
    phân loại từng cái:
-   - `sales.js:267`, `inventory.js:69`, `prep.js:79` — 3 ca shortfall-nguyên-liệu
-     đã biết, xem mục "Ca liên quan đã rà" bên dưới, vẫn treo chờ chủ quán.
+   - `sales.js`, `inventory.js`, `prep.js` — 3 ca shortfall-nguyên-liệu đã
+     biết, xem mục "Ca liên quan đã rà" bên dưới — **✅ chủ quán đã chốt và đã
+     sửa xong (2026-09), không còn treo.**
    - `approval.js` (3 chỗ) — chặn duyệt lại phiếu đã xử lý (§27 invariant 8),
      là guard chống ghi đúp/idempotency, không phải chặn do THIẾU METADATA —
      không thuộc phạm vi §2.3a.
@@ -276,23 +278,37 @@ Thứ tự theo mức chặn đường (chặn cứng trước, tinh chỉnh sau
      áp dụng (không có "hệ cũ" để so vì đây là công cụ mới hoàn toàn).
    **Kết luận: không có ca MỚI nào ngoài 3 ca đã biết.** Không cần sửa code.
 
-## Ca liên quan đã rà — KHÁC LOẠI với N10, cần chủ quán trả lời riêng
+## Ca liên quan đã rà — hết nguyên liệu thật — ✅ ĐÃ CHỐT VÀ ĐÃ SỬA (2026-09)
 
-`RecordSale` (sales.js:247) còn 1 chặn cứng khác: **hết nguyên liệu thật**
-(`alloc.shortfalls.length && !input.allowShortfall` → `PRECONDITION`). Comment
-gốc ghi: bán tiếp khi âm kho "không ai chặn (đúng lỗi legacy)" — tức hệ CŨ
-CHƯA TỪNG chặn bán khi hết hàng, và core mới coi đó là lỗi cần sửa, mặc định
-chặn (có cờ `allowShortfall` để tắt).
+`RecordSale` (sales.js) từng có 1 chặn cứng khác ngoài N10: **hết nguyên liệu
+thật** (`alloc.shortfalls.length && !input.allowShortfall` → `PRECONDITION`).
+Đây KHÔNG cùng loại với N10 — N10 chặn vì THIẾU DỮ LIỆU SỔ SÁCH (chưa khai
+định mức, hành chính), còn chặn này là do THIẾU HÀNG THẬT (không còn nguyên
+liệu để pha) — tín hiệu vận hành thật, nên KHÔNG tự suy diễn theo §2.3a, đã
+treo chờ chủ quán quyết định riêng.
 
-**Đây KHÔNG cùng loại với N10.** N10 chặn vì THIẾU DỮ LIỆU SỔ SÁCH (chưa khai
-định mức — hành chính, không liên quan hàng có thật hay không). Chặn này lại
-là do THIẾU HÀNG THẬT (không còn nguyên liệu để pha) — tín hiệu vận hành thật,
-không phải khoảng trống hành chính. Áp nguyên tắc §2.3a máy móc vào đây (mở
-`allowShortfall` mặc định true để không chặn gì) sẽ khôi phục đúng lỗi bán-âm-
-kho mà legacy mắc phải — không chắc đó là điều chủ quán muốn.
+**Chủ quán đã chốt (2026-09)**: *"Hết nguyên liệu thật → vẫn cho bán, do SOP
+có quy định một vài loại được phép thay thế khi nguyên liệu kia hết."* — tức
+KHÔNG chặn, đúng hành vi legacy (bán tiếp, không ai chặn), có chủ đích chứ
+không phải bỏ sót.
 
-→ ⚪ **CẦN CHỦ QUÁN QUYẾT ĐỊNH RIÊNG** (không tự suy diễn theo §2.3a): giữ chặn
-cứng khi hết hàng thật (khác legacy nhưng có chủ đích), hay vẫn cho bán tiếp
-kèm cảnh báo (giữ đúng hành vi legacy, chấp nhận rủi ro âm kho như cũ)? Cùng
-mẫu này lặp lại ở `commands/inventory.js:68` (RecordWaste, cờ `allowUntracked`)
-và `commands/prep.js:79` (RecordPrepProduction, KHÔNG có cờ thoát — luôn chặn).
+**Đã sửa cả 3 ca cùng mẫu** (dùng lại cơ chế NỢ tường minh trên Unit đã có sẵn
+ở `fifo-core/allocation.js#handleShortfall`, §3.3 — trước đây được viết ra
+nhưng chưa từng được tầng command gọi tới):
+
+- `commands/sales.js` (RecordSale) — bỏ chặn `PRECONDITION`, mỗi shortfall đi
+  qua `handleShortfall`, Unit gánh nợ gắn `needsReview`
+  (`REVIEW.NEGATIVE_REMAINDER`, cùng lý do `finish()` dùng khi báo hết hũ còn
+  âm), phát event `IngredientShortfallRecorded` → L9 → alert
+  `UNIT_NEEDS_REVIEW` cho Quản lý.
+- `commands/prep.js` (RecordPrepProduction) — cùng cơ chế; trước đây CHẶT HƠN
+  cả 2 case kia (không có cờ thoát nào).
+- `commands/inventory.js` (RecordWaste) — bỏ chặn `!input.allowUntracked`; cơ
+  chế untrackedPendingDelta (ghi 1 dòng sổ `unitId: null`) vốn đã có sẵn từ
+  trước giờ chạy KHÔNG ĐIỀU KIỆN, kèm phát `UntrackedConsumptionRecorded` →
+  alert `UNTRACKED_CONSUMPTION` (đã có sẵn trong TYPES, chưa từng được raise
+  trước bản sửa này).
+
+Cả 3 cờ thoát cũ (`allowShortfall`, `allowUntracked`) đã bỏ — không còn cần
+thiết vì hành vi mặc định giờ chính là "không chặn". Test cập nhật ở
+`sales-cogs.test.js`, `btp.test.js`, `commands-gap.test.js`, `fifo-core.test.js`.

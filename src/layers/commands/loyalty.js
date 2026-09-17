@@ -104,11 +104,12 @@ GIEO.define('commands/loyalty', [
   /**
    * L5 — hoàn điểm/tem khi huỷ bill (event OrderVoided).
    *
-   * `policy` KHÔNG có mặc định ở đây — chủ quán chưa chốt REVERSE hay KEEP
-   * (`NET-LOYALTY-V1.md` ghi ⚪ CHƯA QUYẾT). Bắt buộc caller khai rõ, cùng
-   * nguyên tắc `historicalPolicy` của `ReviseState` (`commands/reversal.js`) —
-   * quyết định hiện ra thành lỗi validate khi thiếu, không rơi vào mặc định
-   * ngầm của `loyalty/accrual.js`.
+   * `policy` mặc định `REVERSE` (chốt chủ quán 2026-09, `NET-LOYALTY-V1.md`
+   * L5: "Khi hủy phải thu hồi điểm"). Trước đây bắt buộc caller khai rõ vì
+   * chưa chốt REVERSE hay KEEP; giờ đã chốt nên mặc định áp dụng khi caller
+   * không truyền — nhưng vẫn CHO PHÉP truyền `'KEEP'` tường minh cho ca đặc
+   * biệt (không tự ý loại bỏ đường thoát, chỉ đổi mặc định). Giá trị khác
+   * REVERSE/KEEP vẫn là lỗi validate, không âm thầm coi như REVERSE.
    */
   var ReverseLoyaltyForVoidedBill = pipeline.defineCommand({
     name: 'ReverseLoyaltyForVoidedBill',
@@ -122,11 +123,11 @@ GIEO.define('commands/loyalty', [
 
     validate: function (input) {
       if (!input || !ids.isId(input.billId, 'bill')) return R.err('VALIDATION', 'ReverseLoyaltyForVoidedBill cần billId');
-      if (input.policy !== 'REVERSE' && input.policy !== 'KEEP') {
+      var policy = input.policy || 'REVERSE';
+      if (policy !== 'REVERSE' && policy !== 'KEEP') {
         return R.err('VALIDATION',
-          "ReverseLoyaltyForVoidedBill phải khai policy: REVERSE hoặc KEEP — " +
-          "đây là quyết định chủ quán chưa chốt (NET-LOYALTY-V1.md L5), " +
-          "không được ngầm định ở tầng gọi command");
+          "policy phải là 'REVERSE' hoặc 'KEEP' nếu truyền — mặc định 'REVERSE' " +
+          "khi không truyền (NET-LOYALTY-V1.md L5)");
       }
       return R.ok(true);
     },
@@ -135,7 +136,7 @@ GIEO.define('commands/loyalty', [
       var plan = pipeline.emptyPlan();
       var opId = ids.deterministicId('operation', ['loyalty-reverse', input.billId]);
       var r = accrual.reverseForVoidedBill({
-        policy: input.policy,
+        policy: input.policy || 'REVERSE',
         billId: input.billId,
         entries: input.entries || [],
         operationId: opId,

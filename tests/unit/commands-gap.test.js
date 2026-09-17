@@ -98,23 +98,26 @@ describe('RecordWaste — qua FIFO cho CẢ raw lẫn prep (fix §10b.2)', funct
     assert.strictEqual(rec.wasteCost, 200 * 30);
   });
 
-  test('không đủ lô thì CHẶN, không ghi thẳng sổ', function () {
-    var r = run(INV.RecordWaste, {
+  test('không đủ lô KHÔNG chặn ghi — chốt chủ quán 2026-09, phần thiếu vẫn VÀO SỔ qua untrackedPendingDelta', function () {
+    var out = assertOk(run(INV.RecordWaste, {
       itemId: _g.SUA, qty: 500, domain: 'raw', wasteRef: 'w4', reason: 'x',
       units: [gUnit(100, 'd')]
-    });
-    assertErr(r, 'PRECONDITION');
-    assert.ok(/ghi thẳng sổ mà không allocate/.test(r.error.message));
-  });
-
-  test('cho phép phần không truy được lô thì nó vẫn VÀO SỔ qua untrackedPendingDelta', function () {
-    var out = assertOk(run(INV.RecordWaste, {
-      itemId: _g.SUA, qty: 500, domain: 'raw', wasteRef: 'w5', reason: 'x',
-      allowUntracked: true, units: [gUnit(100, 'e')]
     }));
     var untracked = out.plan.ledgerEntries.filter(function (e) { return !e.unitId; });
     assert.strictEqual(untracked.length, 1);
     assert.strictEqual(untracked[0].qtyDelta, -400, 'phần thiếu biến mất khỏi sổ');
+  });
+
+  test('phần không truy được lô phát UntrackedConsumptionRecorded để báo QUANLY, không âm thầm', function () {
+    var out = assertOk(run(INV.RecordWaste, {
+      itemId: _g.SUA, qty: 500, domain: 'raw', wasteRef: 'w5', reason: 'x',
+      units: [gUnit(100, 'e')]
+    }));
+    var evt = out.plan.events.filter(function (e) { return e.type === 'UntrackedConsumptionRecorded'; })[0];
+    assert.ok(evt, 'thiếu event báo QUANLY');
+    assert.strictEqual(evt.itemId, _g.SUA);
+    assert.strictEqual(evt.qty, 400);
+    assert.strictEqual(evt.wasteRef, 'w5');
   });
 
   test('thiếu wasteRef thì từ chối — đó chính là bug #21', function () {

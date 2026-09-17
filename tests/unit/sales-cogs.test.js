@@ -373,10 +373,20 @@ describe('commands/pipeline + RecordSale end-to-end', function () {
     assert.strictEqual(L.sumUntrackedPendingDelta(entries), 0);
   });
 
-  test('KHÔNG đủ nguyên liệu thì CHẶN bán — legacy bán tiếp cho kho âm dần', function () {
-    var r = runSale(null, [mkUnit(30, 50, 100)]).run();
-    assertErr(r, 'PRECONDITION');
-    assert.ok(/kho âm mà không ai chặn/.test(r.error.message));
+  test('KHÔNG đủ nguyên liệu VẪN bán được — chốt chủ quán 2026-09 (SOP cho thay nguyên liệu khi hết)', function () {
+    var out = assertOk(runSale(null, [mkUnit(30, 50, 100)]).run());
+    assert.strictEqual(out.status, 'COMPLETED');
+    var plan = out.plan;
+    var debtUnit = plan.unitChanges.filter(function (u) { return u.debt; })[0];
+    assert.ok(debtUnit, 'không thấy Unit gánh nợ phần thiếu');
+    assert.strictEqual(debtUnit.debt.amount, 150);
+    assert.ok(debtUnit.needsReview, 'Unit gánh nợ phải gắn needsReview cho QUANLY rà');
+    assert.ok(debtUnit.needsReviewReasons.indexOf('NEGATIVE_REMAINDER') !== -1);
+
+    var evt = plan.events.filter(function (e) { return e.type === 'IngredientShortfallRecorded'; })[0];
+    assert.ok(evt, 'thiếu event IngredientShortfallRecorded để L9 báo QUANLY');
+    assert.strictEqual(evt.shortfallQty, 150);
+    assert.strictEqual(evt.unitId, debtUnit.unitId);
   });
 
   test('N10 (§2.3a): món chưa khai định mức KHÔNG chặn bán — legacy chỉ soft-warn', function () {

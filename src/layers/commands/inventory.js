@@ -30,6 +30,14 @@ GIEO.define('commands/inventory', [
    *
    * Invariant ở đây: BẮT BUỘC allocate qua FIFO cho MỌI itemKind — không có
    * nhánh code riêng bỏ qua allocation theo domain.
+   *
+   * Hết lô để gánh hao hụt KHÔNG chặn ghi (quyết định chủ quán 2026-09, cùng
+   * quyết định shortfall của RecordSale/RecordPrepProduction). Trước đây trả
+   * `PRECONDITION` trừ khi `input.allowUntracked` — một điểm chặn MỚI so với
+   * legacy (legacy ghi thẳng sổ không allocate, không chặn ai). Đã sửa: cơ chế
+   * untrackedPendingDelta có sẵn bên dưới giờ chạy KHÔNG ĐIỀU KIỆN, kèm phát
+   * `UntrackedConsumptionRecorded` để L9 tạo alert `UNTRACKED_CONSUMPTION`
+   * cho QUANLY — không âm thầm.
    */
   var RecordWaste = pipeline.defineCommand({
     name: 'RecordWaste',
@@ -65,13 +73,6 @@ GIEO.define('commands/inventory', [
       if (R.isErr(r)) return r;
       var alloc = r.value;
 
-      if (alloc.shortfallQty > 0 && !input.allowUntracked) {
-        return R.err('PRECONDITION',
-          'không đủ lô để gánh ' + input.qty + ' hao hụt (thiếu ' + alloc.shortfallQty + ') — ' +
-          'ghi thẳng sổ mà không allocate chính là lỗi nhánh nguyên liệu thô của legacy',
-          { shortfallQty: alloc.shortfallQty });
-      }
-
       plan.unitChanges = alloc.touchedUnits;
       alloc.allocations.forEach(function (a) {
         plan.ledgerEntries.push({
@@ -85,7 +86,9 @@ GIEO.define('commands/inventory', [
       });
 
       /* Phần không có lô gánh vẫn phải vào sổ, qua đúng cơ chế
-         untrackedPendingDelta (entry không có unitId) — không "biến mất". */
+         untrackedPendingDelta (entry không có unitId) — không "biến mất".
+         KHÔNG chặn ghi (chốt chủ quán 2026-09, cùng quyết định shortfall của
+         RecordSale/RecordPrepProduction) — chỉ báo QUANLY qua alert. */
       if (alloc.shortfallQty > 0) {
         plan.ledgerEntries.push({
           domain: input.domain, type: 'WASTE', itemId: input.itemId, storeId: ctx.storeId,
@@ -94,6 +97,15 @@ GIEO.define('commands/inventory', [
           occurredAt: ctx.clock.now(),
           referenceType: 'waste', referenceId: input.wasteRef,
           reason: input.reason + ' (phần không truy được lô)'
+        });
+        plan.events.push({
+          type: 'UntrackedConsumptionRecorded',
+          itemId: input.itemId,
+          qty: alloc.shortfallQty,
+          wasteRef: input.wasteRef,
+          domain: input.domain,
+          storeId: ctx.storeId,
+          businessDate: ctx.businessDate
         });
       }
 

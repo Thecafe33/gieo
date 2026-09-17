@@ -11,6 +11,14 @@
  * `ingredientBreakdown` luôn có bất kể trigger từ đâu — đóng đứt chuỗi #2 của
  * chain-trace, nơi legacy có 2 code path ghi cùng `type:WASTE` với field khác
  * nhau và đường phổ biến nhất (hết hạn cuối ca) thì thiếu breakdown.
+ *
+ * Hết nguyên liệu thô KHÔNG chặn nấu mẻ (quyết định chủ quán 2026-09, cùng
+ * quyết định với RecordSale — SOP cho phép thay nguyên liệu khi hết). Trước
+ * đây trả `PRECONDITION` ngay khi `alloc.shortfalls.length`, không có cờ
+ * thoát — CHẶT HƠN cả RecordSale/RecordWaste cùng thời điểm đó. Đã sửa: mỗi
+ * shortfall đi qua `allocation.handleShortfall` (§3.3), Unit gánh nợ gắn
+ * `needsReview`, phát `IngredientShortfallRecorded` để L9 tạo alert
+ * `UNIT_NEEDS_REVIEW`.
  */
 GIEO.define('commands/prep', [
   'shared-kernel/ids',
@@ -75,9 +83,32 @@ GIEO.define('commands/prep', [
       if (R.isErr(allocR)) return allocR;
       var alloc = allocR.value;
 
-      if (alloc.shortfalls.length) {
-        return R.err('PRECONDITION',
-          'không đủ nguyên liệu để nấu mẻ này', { shortfalls: alloc.shortfalls });
+      /*
+       * Hết nguyên liệu thật KHÔNG chặn nấu mẻ (chốt chủ quán 2026-09, cùng
+       * quyết định với RecordSale — SOP cho phép thay nguyên liệu khi hết).
+       * Phần thiếu thành NỢ tường minh trên Unit (§3.3 handleShortfall), gắn
+       * needsReview, báo QUANLY qua alert thay vì chặn nhân viên bếp.
+       */
+      var prepBatchId = ids.deterministicId('prepBatch', [input.batchRef]);
+      var shortfallEvents = [];
+      for (var sfi = 0; sfi < alloc.shortfalls.length; sfi++) {
+        var shortfall = alloc.shortfalls[sfi];
+        var sfR = allocation.handleShortfall(ws, shortfall, {
+          at: input.at || ctx.clock.now(),
+          operationId: opId
+        });
+        if (R.isErr(sfR)) return sfR;
+        if (sfR.value.debtUnit) {
+          shortfallEvents.push({
+            type: 'IngredientShortfallRecorded',
+            unitId: sfR.value.debtUnit.unitId,
+            itemId: shortfall.itemId,
+            shortfallQty: shortfall.shortfallQty,
+            prepBatchId: prepBatchId,
+            storeId: ctx.storeId,
+            businessDate: ctx.businessDate
+          });
+        }
       }
 
       /* Yield kỳ vọng để tính variance — lấy version có hiệu lực lúc nấu. */
@@ -92,7 +123,7 @@ GIEO.define('commands/prep', [
       }
 
       var batchR = btpLib.createBatch({
-        prepBatchId: ids.deterministicId('prepBatch', [input.batchRef]),
+        prepBatchId: prepBatchId,
         prepItemId: input.prepItemId,
         storeId: ctx.storeId,
         actualYield: input.actualYield,
@@ -128,9 +159,13 @@ GIEO.define('commands/prep', [
       });
       if (R.isErr(outUnitR)) return outUnitR;
 
-      plan.unitChanges = alloc.plans.reduce(function (acc, p) {
-        return acc.concat(p.touchedUnits);
-      }, []).concat([outUnitR.value]);
+      /* ws.all() sau khi handleShortfall để bắt luôn Unit gánh nợ — touchedUnits
+         của alloc.plans là ảnh chụp TRƯỚC handleShortfall, thiếu cờ needsReview
+         và field debt vừa gắn. */
+      plan.unitChanges = ws.all().filter(function (u) {
+        var before = (input.deps.units || []).filter(function (o) { return o.unitId === u.unitId; })[0];
+        return before && before.remainingQty !== u.remainingQty;
+      }).concat([outUnitR.value]);
 
       alloc.plans.forEach(function (p) {
         p.allocations.forEach(function (a) {
@@ -174,6 +209,7 @@ GIEO.define('commands/prep', [
       }
 
       plan.projectionRecomputes.push({ itemId: input.prepStockItemId, storeId: ctx.storeId });
+      shortfallEvents.forEach(function (evt) { plan.events.push(evt); });
       return R.ok(plan);
     }
   });

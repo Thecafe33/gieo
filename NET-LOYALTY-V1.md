@@ -87,8 +87,8 @@ L9 ĐIỀU PHỐI SỰ KIỆN — nút thắt hiện đang TRỐNG, chặn L2/L4
 |---|---|
 | Hệ cũ | 🔴 **ĐỨT CHUỖI có ghi nhận công khai** (`posgieo.html:18295-18328, 23239-23289`; `quanlygieo.html:10633-10745`) — cả 2 app chỉ hoàn kho, KHÔNG hoàn điểm/tem/voucher. Toast/cảnh báo UI đều nói thẳng "Quản lý xử lý tay" — nhưng **quanlygieo.html không có màn hình nào để xử lý tay cả**, chỉ có 1 dòng ghi `assist_profile` không liên quan. |
 | Hệ mới | `loyalty/accrual.reverseForVoidedBill()` — cờ `policy: 'REVERSE' \| 'KEEP'` TƯỜNG MINH; `commands/reversal.js` đã định nghĩa `EVENTS.OrderVoided` + `createEventBus()` (`.on()`/`.emit()`, handler lỗi trả `MANUAL_REVIEW` chứ không nuốt im lặng) |
-| Phân loại | 🟢 **THÊM MỚI** (cơ chế tường minh) — nhưng **KHÔNG mặc định coi `REVERSE` là đúng** |
-| ⚪ **CẦN CHỦ QUÁN QUYẾT ĐỊNH** | Comment gốc trong `commands/reversal.js` ghi rõ: "xoá bill CỐ Ý không hoàn loyalty (**quyết định nghiệp vụ hợp lệ**, ghi rõ trong comment/toast)". Tức đây KHÔNG chắc là một gap cần đóng — có thể là quyết định ĐÚNG của chủ quán từ trước (huỷ bill không hoàn điểm, tránh khách "ăn gian" bằng cách mua-rồi-huỷ-rồi-mua-lại để nhân điểm). Core mới đã chừa `policy: 'KEEP'` đúng cho tình huống này. **Việc thật sự cần làm không phải "sửa cho hoàn điểm" mà là: (1) chốt `policy` nào là mặc định, (2) nếu chọn `KEEP` như legacy, vẫn cần dựng màn hình QUẢN LÝ xem/sửa tay số dư mà legacy chưa từng có (`loyalty/ledger.adjust()` đã viết sẵn hàm, chỉ thiếu UI) — đây là chỗ legacy thật sự thiếu, không phải chỗ "không hoàn điểm".** |
+| Phân loại | 🟢 **THÊM MỚI** (cơ chế tường minh) |
+| ✅ **CHỦ QUÁN ĐÃ CHỐT (2026-09)** | *"Khi hủy phải thu hồi điểm."* — `policy` mặc định **`REVERSE`**. `commands/loyalty.js#ReverseLoyaltyForVoidedBill` đã sửa: trước đây bắt buộc caller khai rõ REVERSE/KEEP (validate lỗi nếu thiếu); giờ thiếu `policy` thì tự áp `REVERSE` (`loyalty/accrual.js#reverseForVoidedBill` vốn đã có default này sẵn, chỉ chưa tới được vì command chặn ở validate). Vẫn CHO PHÉP truyền `'KEEP'` tường minh cho ca đặc biệt — không bỏ đường thoát, chỉ đổi mặc định. Màn hình Quản lý xem/sửa tay ledger (`loyalty/ledger.adjust()`) vẫn hữu ích cho các ca đặc biệt đó nhưng không còn là điều kiện để đóng gap này. |
 
 ### L6 — Guard chống double-dip (khuyến mãi ↔ điểm/tem)
 
@@ -175,12 +175,11 @@ denormalized vào event khi push (caller mang `deps.loyaltyCustomer` nếu đã
 tra khách ở bước L1 — không bắt buộc, thiếu thì `loyalty/accrual.js` tự
 `skip: 'NO_CUSTOMER'` tường minh, không đoán).
 
-**L5's `policy` (REVERSE hay KEEP) CỐ Ý KHÔNG được cho mặc định ở tầng dây
-nối** — `ReverseLoyaltyForVoidedBill.validate()` từ chối nếu thiếu, đúng
-tinh thần `ReviseState.historicalPolicy` (không có default ngầm cho quyết
-định chủ quán chưa chốt). Quyết định thật (mục ⚪ CHƯA QUYẾT dưới đây) VẪN
-CÒN TREO — việc đóng ở đây chỉ là làm cho L2/L4/L5 CHẠY ĐƯỢC khi có đủ dữ
-liệu, không phải chọn hộ policy.
+**L5's `policy` (REVERSE hay KEEP) — ✅ ĐÃ CHỐT (2026-09): mặc định `REVERSE`.**
+`ReverseLoyaltyForVoidedBill.validate()` trước đây từ chối nếu thiếu `policy`
+(đúng tinh thần `ReviseState.historicalPolicy` — không default ngầm cho quyết
+định chủ quán CHƯA chốt); giờ quyết định đã chốt nên default áp dụng khi
+caller không truyền, vẫn cho truyền `'KEEP'` tường minh cho ca đặc biệt.
 
 13 test mới ở `tests/unit/loyalty.test.js` (3 describe: `commands/loyalty`,
 `bootstrap/domain-events`, "L9 end-to-end") phủ: sinh domainRecord thật,
@@ -196,7 +195,7 @@ chối, routeEvents bỏ qua event thiếu field/event lạ, và pipeline đầy
 - 🔴 **BỎ**: không có (domain này không có nhánh nào cần loại bỏ hẳn — mọi nghiệp vụ legacy đều còn giá trị)
 - 🟡 **GIỮ, ĐỔI CÁCH LÀM**: L1, L2(luật số), L3, L6
 - 🟢 **THÊM MỚI**: L2(ledger), L4, L5(cơ chế), L7(chỗ nối), L8, **L9 (điều phối sự kiện — hạ tầng còn thiếu, không phải nghiệp vụ — ĐÃ ĐÓNG: `bootstrap/domain-events.js` + `commands/loyalty.js`)**
-- ⚪ **CHƯA QUYẾT**: L5 — `policy` mặc định REVERSE hay KEEP khi huỷ bill có hoàn điểm không; nếu KEEP (giữ như legacy) thì vẫn cần dựng màn hình Quản lý xem/sửa tay ledger (đã có `adjust()`, chưa có UI)
+- ✅ **ĐÃ CHỐT VÀ ĐÃ SỬA (2026-09)**: L5 — `policy` mặc định `REVERSE` khi huỷ bill ("Khi hủy phải thu hồi điểm"). Màn hình Quản lý xem/sửa tay ledger (`adjust()` đã có, chưa có UI) vẫn còn hữu ích cho ca `KEEP` đặc biệt nhưng không còn chặn việc đóng L5.
 
 ## VIỆC PHẢI LÀM (thứ tự theo mức chặn đường)
 
@@ -208,14 +207,14 @@ chối, routeEvents bỏ qua event thiếu field/event lạ, và pipeline đầy
    `ReverseLoyaltyForVoidedBill` đều đã nối dây, có test end-to-end. Việc dùng
    CHUNG cho domain khác (Alerts/N10) vẫn để ngỏ — `ROUTES` hiện chỉ khai 3
    sự kiện Loyalty, thêm route mới không cần sửa cơ chế.
-2. Chủ quán chốt `policy` mặc định cho L5 (REVERSE hay KEEP) — không tự suy
-   ra, vì legacy KEEP là quyết định nghiệp vụ có chủ đích, không phải bug.
-   `ReverseLoyaltyForVoidedBill` đã CHẶN việc thiếu quyết định này trôi qua
-   êm — thiếu `policy` tường minh thì từ chối ngay ở validate, không có
-   default ngầm.
-3. Nếu chốt KEEP: lên kế hoạch màn hình Quản lý xem/sửa tay ledger (gọi
-   `loyalty/ledger.adjust()`) — đây là màn hình legacy CHƯA TỪNG CÓ dù toast
-   nói "Quản lý xử lý tay" suốt bao lâu nay.
+2. ~~Chủ quán chốt `policy` mặc định cho L5 (REVERSE hay KEEP).~~ — **ĐÃ XONG
+   (2026-09)**: chốt `REVERSE` ("Khi hủy phải thu hồi điểm"). `commands/
+   loyalty.js#ReverseLoyaltyForVoidedBill` default `REVERSE` khi thiếu
+   `policy`, vẫn nhận `'KEEP'` tường minh cho ca đặc biệt.
+3. (Tuỳ chọn, không chặn) Màn hình Quản lý xem/sửa tay ledger (gọi
+   `loyalty/ledger.adjust()`) cho ca `KEEP` đặc biệt — legacy chưa từng có
+   dù toast nói "Quản lý xử lý tay" suốt bao lâu nay; không còn là điều
+   kiện để đóng L5.
 4. L9 đã xong — còn lại: nối `onCheckoutClick`/`confirmPay` (POS) gọi
    `runtime.command('RecordSale', ...)` thay vì ghi thẳng RTDB, và khi
    QUANLY gọi `ReverseTransaction` để xoá bill thì truyền

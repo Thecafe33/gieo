@@ -38,7 +38,7 @@ B6 QUANLY đọc — KPI, P&L (không đứt ở hệ cũ, giữ nguyên tắc)
 | **Hệ cũ** | `_submitPrepFinishImpl` (`posgieo.html:11129-11292`) ghi `prep_batches{qtyInitial,qtyRemaining,actualCostPerUnit,yieldVariancePct}` + `prep_transactions{type:PRODUCTION}` + `prep_items.currentStock`; nền `refreshPrepYieldStatsPOS` (10816) ghi `prep_items.yieldActualAvg` (giá trị "hiện tại", không versioned) |
 | **Hệ mới** | `commands/prep.js` → `RecordPrepProduction` |
 | **Phân loại** | 🟡 **GIỮ, ĐỔI CÁCH LÀM** |
-| **Ghi chú** | Đã đọc trọn thân hàm. Khác biệt cốt lõi: mẻ BTP giờ tạo ra một `Unit` FIFO thật (`itemKind:'prep'`) qua `unitLib.createUnit()` — không còn kho BTP song song với kho nguyên liệu. Trừ nguyên liệu thô qua `allocation.allocateMany()` — **cùng engine với bán hàng và RecordWaste**, nên có giá vốn thật (`alloc.totalCost`) thay vì định mức. `costBasis.unitCost = batch.costPerUnit` (giá vốn CỦA CHÍNH MẺ NÀY, không phải trung bình động). Yield kỳ vọng lấy qua `btpLib.resolveYieldAt(reg, {at})` — version có hiệu lực TẠI THỜI ĐIỂM NẤU, không phải bản mới nhất (chuẩn bị sẵn cho B2). Vẫn giữ đúng alert lệch yield >10% (`PrepYieldMismatch` event — cũng phụ thuộc gap L9). **Có PRECONDITION `shortfalls.length` chặn nấu khi thiếu nguyên liệu, và KHÁC sales.js/inventory.js ở chỗ KHÔNG CÓ cờ thoát nào (không có `allowShortfall`/`allowUntracked`) — chặt hơn cả 2 case đã treo ở `NET-SALES-V1.md` "Ca liên quan đã rà". Cùng loại ⚪ CHƯA QUYẾT, nhưng mức độ chặn cao hơn — gộp vào cùng một quyết định chủ quán, không tách riêng.** |
+| **Ghi chú** | Đã đọc trọn thân hàm. Khác biệt cốt lõi: mẻ BTP giờ tạo ra một `Unit` FIFO thật (`itemKind:'prep'`) qua `unitLib.createUnit()` — không còn kho BTP song song với kho nguyên liệu. Trừ nguyên liệu thô qua `allocation.allocateMany()` — **cùng engine với bán hàng và RecordWaste**, nên có giá vốn thật (`alloc.totalCost`) thay vì định mức. `costBasis.unitCost = batch.costPerUnit` (giá vốn CỦA CHÍNH MẺ NÀY, không phải trung bình động). Yield kỳ vọng lấy qua `btpLib.resolveYieldAt(reg, {at})` — version có hiệu lực TẠI THỜI ĐIỂM NẤU, không phải bản mới nhất (chuẩn bị sẵn cho B2). Vẫn giữ đúng alert lệch yield >10% (`PrepYieldMismatch` event — cũng phụ thuộc gap L9). **✅ ĐÃ CHỐT VÀ ĐÃ SỬA (2026-09)**: thiếu nguyên liệu KHÔNG còn chặn nấu (chủ quán chốt: SOP cho thay nguyên liệu khi hết, cùng quyết định với `sales.js`/`inventory.js` — xem `NET-SALES-V1.md` "Ca liên quan đã rà"). `RecordPrepProduction` giờ gọi `allocation.handleShortfall` (§3.3) cho mỗi shortfall, Unit gánh nợ gắn `needsReview`, phát `IngredientShortfallRecorded` → alert `UNIT_NEEDS_REVIEW`. |
 
 ## B2 — Sửa yield mẻ đã nấu (COGS/P&L lịch sử bị trôi)
 
@@ -92,7 +92,7 @@ B6 QUANLY đọc — KPI, P&L (không đứt ở hệ cũ, giữ nguyên tắc)
 | Domain | Điểm nối |
 |---|---|
 | **Raw Material** | B1/B3/B4 dùng CHUNG engine FIFO + `RecordWaste` với raw material (`NET-RAW-MATERIAL-V1.md` RM5); B3's kiểm đếm dùng chung `ApproveStockCount`/`physicalReconciliation` (RM4); B5 cùng loại gap "tính đúng nhưng chưa nối UI" như RM7 phần raw — nhưng KHÁC Ở CHỖ BTP đã đăng ký query, raw thì chưa có cấu trúc ngày để đăng ký |
-| **Sales/POS** | B1's PRECONDITION shortfall-không-cờ-thoát là bản CHẶT HƠN của case đã treo ở `NET-SALES-V1.md` "Ca liên quan đã rà" — gộp chung một quyết định chủ quán |
+| **Sales/POS** | B1's shortfall cùng quyết định chủ quán với case ở `NET-SALES-V1.md` "Ca liên quan đã rà" — ✅ đã chốt và sửa chung (2026-09): KHÔNG chặn, dùng `allocation.handleShortfall` |
 | **Reporting** | B5/B6 nối với nguyên tắc "một canonical query, một implementation" (R3) đã thấy xuyên suốt `report-queries.js` |
 | **Loyalty/Reversal/Raw Material/Alerts (L9)** | B1's `PrepYieldMismatch` event từng là phát hiện phụ thuộc gap L9 thứ 4 (sau Loyalty, Reversal, Raw Material RM6) — **ĐÃ ĐÓNG**: `bootstrap/domain-events.js` giờ route thẳng `PrepYieldMismatch` → `RaiseAlert` (loại `PREP_YIELD_MISMATCH`, mới đăng ký), xem `NET-ALERTS-V1.md` "ĐÃ ĐÓNG — commands/alerts.js" |
 
@@ -102,10 +102,10 @@ B6 QUANLY đọc — KPI, P&L (không đứt ở hệ cũ, giữ nguyên tắc)
 
 - 🟢 THÊM MỚI: **B3** (actual-vs-theoretical cho BTP — domain hoàn toàn mới, đóng đúng North Star)
 - 🟡 GIỮ, ĐỔI CÁCH LÀM: **B1, B2, B4, B5, B6** — cả 4 vấn đề "cần thiết kế mới" mà chain-trace nêu (B2 ĐỨT CHUỖI #1, B4 ĐỨT CHUỖI #2, B5 ĐỨT CHUỖI #3, B3 GAP actual-vs-theoretical) đều đã xác nhận ĐÓNG qua đọc trọn code — `recipe-cost-btp/btp.js`'s header tự tổng kết đúng "Bốn vấn đề, đóng cả bốn"
-- ⚪ CHƯA QUYẾT (gộp vào quyết định chung với Sales/Raw Material): B1's PRECONDITION shortfall không có cờ thoát — CHẶT HƠN 2 case tương tự đã treo
+- ✅ ĐÃ CHỐT VÀ ĐÃ SỬA (2026-09, gộp quyết định chung với Sales/Raw Material): B1's shortfall không còn chặn — xem "Ghi chú" B1 và `NET-SALES-V1.md` "Ca liên quan đã rà"
 
 ## VIỆC PHẢI LÀM (tích lũy, không chặn)
 
 1. ~~**Sửa lại RM7 trong `NET-RAW-MATERIAL-V1.md`** — phần kết luận về BTP ("lặp lại có chủ đích mẫu lỗi stockoutTargetPct") là ĐỌC SAI comment của `btp-report.js` khi chưa đọc trọn file đó.~~ — **ĐÃ SỬA (rà lại 2026-09-17)**: RM7 trong `NET-RAW-MATERIAL-V1.md` (dòng 106) đã có đính chính đầy đủ — ghi rõ comment đầu `btp-report.js` chỉ TRÍCH LẠI mô tả gap của hệ cũ để giải thích lý do tồn tại module, không phải hành vi hiện tại, và `GetBTPReport` đã đóng đúng ĐỨT CHUỖI #3 từ trước. Không cần sửa gì thêm.
-2. Khi tổng hợp quyết định chủ quán về PRECONDITION shortfall (đã treo ở Sales + Raw Material), tính thêm B1 (BTP nấu mẻ) — vì đây là bản CHẶT NHẤT trong 3 case (không có cờ thoát nào).
+2. ~~Khi tổng hợp quyết định chủ quán về PRECONDITION shortfall (đã treo ở Sales + Raw Material), tính thêm B1 (BTP nấu mẻ).~~ — **ĐÃ XONG (2026-09)**: chủ quán chốt KHÔNG chặn (SOP cho thay nguyên liệu khi hết); B1 đã sửa cùng `sales.js`/`inventory.js`, dùng `allocation.handleShortfall`.
 3. ~~Tầng điều phối sự kiện — B1's `PrepYieldMismatch` là domain thứ 4 phụ thuộc gap L9.~~ **ĐÃ XONG** — route tới `RaiseAlert` (`PREP_YIELD_MISMATCH`), xem `NET-ALERTS-V1.md`.

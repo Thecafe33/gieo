@@ -464,6 +464,8 @@ describe('fifo-core/allocation — engine DUY NHẤT', function () {
       var out = assertOk(A.handleShortfall(set, plan, { at: 5000, operationId: OP }));
       assert.strictEqual(out.debtUnit.debt.amount, 80);
       assert.strictEqual(out.debtUnit.remainingQty, -80, 'giữ số âm cho tương thích công thức');
+      assert.strictEqual(out.debtUnit.needsReview, true, 'Unit gánh nợ phải gắn cờ cho QUANLY rà');
+      assert.ok(out.debtUnit.needsReviewReasons.indexOf(_f.U.REVIEW.NEGATIVE_REMAINDER) !== -1);
     });
 
     test('không có Unit nào mở để gánh nợ thì báo lỗi, không ghi nợ vào hư không', function () {

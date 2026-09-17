@@ -150,6 +150,11 @@ GIEO.define('fifo-core/allocation', [
    * Legacy để remainingQty tụt xuống âm. Ở đây số âm vẫn được giữ (tương thích
    * công thức toán của `_ueComputeAllocation`) NHƯNG kèm field `debt` để tra
    * được trực tiếp, phục vụ cả FIFO alert lẫn điều kiện compact.
+   *
+   * Chốt với chủ quán (2026-09): hết nguyên liệu thật KHÔNG chặn giao dịch —
+   * SOP cho phép thay thế một số nguyên liệu khi hết. Unit gánh nợ vì vậy
+   * LUÔN được gắn `needsReview` (cùng lý do NEGATIVE_REMAINDER dùng ở
+   * `finish()`) để QUANLY nhìn lại, thay vì chặn nhân viên tại quầy.
    */
   function handleShortfall(workingSet, plan, spec) {
     if (plan.shortfallQty <= 0) return R.ok({ plan: plan, debtUnit: null });
@@ -175,8 +180,14 @@ GIEO.define('fifo-core/allocation', [
     });
     if (R.isErr(debtR)) return debtR;
 
-    workingSet.put(debtR.value);
-    return R.ok({ plan: plan, debtUnit: debtR.value });
+    var reasons = debtR.value.needsReviewReasons.slice();
+    if (reasons.indexOf(unitLib.REVIEW.NEGATIVE_REMAINDER) === -1) {
+      reasons.push(unitLib.REVIEW.NEGATIVE_REMAINDER);
+    }
+    var flagged = Object.assign({}, debtR.value, { needsReview: true, needsReviewReasons: reasons });
+
+    workingSet.put(flagged);
+    return R.ok({ plan: plan, debtUnit: flagged });
   }
 
   /**

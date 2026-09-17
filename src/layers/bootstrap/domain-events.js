@@ -66,8 +66,9 @@ GIEO.define('bootstrap/domain-events', [], function () {
      * L5 — hoàn điểm/tem khi huỷ bill. `referenceId` của ReverseTransaction
      * chính là billId khi domain huỷ là bán hàng (caller khai eventType
      * 'OrderVoided' đúng cho tình huống này, không cho tình huống khác).
-     * `policy` KHÔNG có mặc định ở đây (xem `commands/loyalty.js`) — chủ
-     * quán chưa chốt REVERSE hay KEEP.
+     * `policy` không truyền ở đây khi `evt.loyaltyPolicy` vắng — `commands/
+     * loyalty.js` tự mặc định 'REVERSE' (chốt chủ quán 2026-09, L5: "Khi hủy
+     * phải thu hồi điểm"), route này không cần lặp lại mặc định đó.
      */
     OrderVoided: {
       command: 'ReverseLoyaltyForVoidedBill',
@@ -148,6 +149,50 @@ GIEO.define('bootstrap/domain-events', [], function () {
           businessDate: evt.businessDate,
           subjectKey: evt.menuItemId,
           data: { menuItemId: evt.menuItemId }
+        };
+      }
+    },
+    /* Sales #5 / BTP B1 — hết nguyên liệu thật lúc bán/nấu (commands/sales.js
+       RecordSale, commands/prep.js RecordPrepProduction; §2.3a: KHÔNG chặn,
+       chỉ cảnh báo — quyết định chủ quán 2026-09). UNIT_NEEDS_REVIEW đã có
+       sẵn trong TYPES, cùng lý do NEGATIVE_REMAINDER dùng khi `finish()` báo
+       hết hũ còn âm. subjectKey theo unitId — Unit gánh nợ CHÍNH LÀ chủ thể
+       cần rà, không phải bill/mẻ đã gây ra nó. */
+    IngredientShortfallRecorded: {
+      command: 'RaiseAlert',
+      toInput: function (evt) {
+        if (!evt.unitId) return null;
+        return {
+          type: 'UNIT_NEEDS_REVIEW',
+          storeId: evt.storeId,
+          businessDate: evt.businessDate,
+          subjectKey: evt.unitId,
+          data: {
+            unitId: evt.unitId,
+            reasons: ['NEGATIVE_REMAINDER'],
+            itemId: evt.itemId,
+            shortfallQty: evt.shortfallQty,
+            billId: evt.billId || null,
+            prepBatchId: evt.prepBatchId || null
+          }
+        };
+      }
+    },
+    /* Raw Material — phần hao hụt không truy được lô (commands/inventory.js
+       RecordWaste; §2.3a: KHÔNG chặn ghi, chỉ cảnh báo — cùng quyết định chủ
+       quán 2026-09 với shortfall bán hàng/BTP). UNTRACKED_CONSUMPTION đã có
+       sẵn trong TYPES, chưa từng được raise ở đâu trước bản sửa này.
+       subjectKey theo (wasteRef, itemId) — mỗi lần ghi hao hụt là một sự cố
+       riêng, không gộp cảnh báo của 2 lần ghi khác nhau vào 1 chủ thể. */
+    UntrackedConsumptionRecorded: {
+      command: 'RaiseAlert',
+      toInput: function (evt) {
+        return {
+          type: 'UNTRACKED_CONSUMPTION',
+          storeId: evt.storeId,
+          businessDate: evt.businessDate,
+          subjectKey: evt.wasteRef + ':' + evt.itemId,
+          data: { itemId: evt.itemId, qty: evt.qty, wasteRef: evt.wasteRef, domain: evt.domain }
         };
       }
     }
