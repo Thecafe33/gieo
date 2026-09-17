@@ -106,6 +106,6 @@ B6 QUANLY đọc — KPI, P&L (không đứt ở hệ cũ, giữ nguyên tắc)
 
 ## VIỆC PHẢI LÀM (tích lũy, không chặn)
 
-1. **Sửa lại RM7 trong `NET-RAW-MATERIAL-V1.md`** — phần kết luận về BTP ("lặp lại có chủ đích mẫu lỗi stockoutTargetPct") là ĐỌC SAI comment của `btp-report.js` khi chưa đọc trọn file đó. Cần đính chính: comment đó trích lại mô tả GAP CỦA HỆ CŨ để giải thích lý do tồn tại module, không phải hành vi hiện tại — `GetBTPReport` ĐÃ đăng ký, đóng đúng ĐỨT CHUỖI #3. Việc còn lại (chưa có UI gọi) là tình trạng chung mọi query mới, không phải gap riêng BTP.
+1. ~~**Sửa lại RM7 trong `NET-RAW-MATERIAL-V1.md`** — phần kết luận về BTP ("lặp lại có chủ đích mẫu lỗi stockoutTargetPct") là ĐỌC SAI comment của `btp-report.js` khi chưa đọc trọn file đó.~~ — **ĐÃ SỬA (rà lại 2026-09-17)**: RM7 trong `NET-RAW-MATERIAL-V1.md` (dòng 106) đã có đính chính đầy đủ — ghi rõ comment đầu `btp-report.js` chỉ TRÍCH LẠI mô tả gap của hệ cũ để giải thích lý do tồn tại module, không phải hành vi hiện tại, và `GetBTPReport` đã đóng đúng ĐỨT CHUỖI #3 từ trước. Không cần sửa gì thêm.
 2. Khi tổng hợp quyết định chủ quán về PRECONDITION shortfall (đã treo ở Sales + Raw Material), tính thêm B1 (BTP nấu mẻ) — vì đây là bản CHẶT NHẤT trong 3 case (không có cờ thoát nào).
 3. ~~Tầng điều phối sự kiện — B1's `PrepYieldMismatch` là domain thứ 4 phụ thuộc gap L9.~~ **ĐÃ XONG** — route tới `RaiseAlert` (`PREP_YIELD_MISMATCH`), xem `NET-ALERTS-V1.md`.
