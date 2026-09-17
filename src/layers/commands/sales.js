@@ -131,6 +131,17 @@ GIEO.define('commands/sales', [
      * Đổi tem lấy ly miễn phí (N12, mục 7 ở trên) — cần customerId vì đổi tem
      * là trừ SỔ của khách, không có khách thì không có sổ để trừ.
      */
+    /*
+     * ĐIỂM NỐI cho voucher/mã giảm giá NẾU sau này triển khai lại (hiện KHÔNG
+     * xây — xem mục 7 header): thêm case redemption.type mới ở đây (vd.
+     * 'VOUCHER_CODE'), branch xác thực riêng (không cần customerId như tem
+     * nếu voucher ẩn danh), rồi ở RecordSale.execute() thêm nhánh gọi module
+     * "tiêu thụ" voucher tương ứng — theo ĐÚNG khuôn `redemption` này, không
+     * cần đổi shape. `catalog/promotion.js` cũng đã chừa `extraPromotions`
+     * cho khuyến mãi/voucher dạng giảm giá (khác voucher đổi-lấy-sản-phẩm ở
+     * đây). Không tự suy luận thêm gì ngoài điểm nối — chờ quyết định thiết
+     * kế mới nếu/khi việc đó xảy ra.
+     */
     var redemption = spec.redemption || null;
     if (redemption) {
       if (redemption.type !== 'STAMP_FREE_DRINK') {
@@ -419,6 +430,9 @@ GIEO.define('commands/sales', [
           plan.domainRecords.push({ type: 'loyaltyLedgerEntry', record: e });
         });
       }
+      // ĐIỂM NỐI voucher (nếu sau này xây lại): thêm `else if (bill.redemption.type
+      // === 'VOUCHER_CODE') { ... }` cùng khối trên — cùng thành/bại với bill,
+      // push domainRecords tương ứng module "tiêu thụ" voucher đó.
 
       plan.unitChanges = ws.all().filter(function (u) {
         var before = (deps.units || []).filter(function (o) { return o.unitId === u.unitId; })[0];
