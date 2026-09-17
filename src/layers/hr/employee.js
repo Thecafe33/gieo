@@ -82,8 +82,9 @@ GIEO.define('hr/employee', [
         rate: t.rate,
         otRate: t.otRate === undefined ? t.rate : t.otRate,
         otThreshold: t.otThreshold === undefined ? 8 : t.otThreshold,
-        /* Lương cứng: có mặt nhưng công thức trừ theo lịch làm việc còn để ngỏ,
-           xem README "Điểm còn treo". Không tự quyết thay chủ quán. */
+        /* Lương cứng: chủ quán đã chốt công thức trừ theo lịch làm việc — xem
+           `hr/work-schedule.js` (bắt buộc cho payroll) + `hr/payroll.js`
+           computePayroll(). Comment cũ ở đây ("còn để ngỏ") đã lỗi thời. */
         fixedMonthlySalary: t.fixedMonthlySalary === undefined ? null : t.fixedMonthlySalary
       }
     });
