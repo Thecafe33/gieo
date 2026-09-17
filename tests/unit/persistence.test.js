@@ -353,6 +353,23 @@ describe('atomic-commit — ghi hết hoặc không ghi gì', function () {
     assert.ok(/chưa khai path canonical/.test(r.error.message));
   });
 
+  test('7 loại domainRecord của commands/* (waste/reconcile/liability/payroll/shift/receiving/PO) đều có path canonical', function () {
+    var cases = [
+      { type: 'wasteRecord', record: { wasteRef: 'wr1', itemId: 'item_i1' }, match: /\/wasteRecords\/wr1\.item_i1$/ },
+      { type: 'reconciliationRecord', record: { operationId: 'operation_adjust.ref1.item_i1' }, match: /\/reconciliationRecords\/operation_adjust\.ref1\.item_i1$/ },
+      { type: 'liability', record: { liabilityId: 'liability_lost.lostreport1' }, match: /\/liabilities\/liability_lost\.lostreport1$/ },
+      { type: 'payrollClosing', record: { payrollClosingId: 'snapshot_payroll.store_s1.2026-03' }, match: /\/payrollClosings\/snapshot_payroll\.store_s1\.2026-03$/ },
+      { type: 'employeeShift', record: { shiftId: 'shift_e1.2026-03-10' }, match: /\/employeeShifts\/shift_e1\.2026-03-10$/ },
+      { type: 'receivingRecord', record: { receivingRecordId: 'receipt_r1' }, match: /\/receivingRecords\/receipt_r1$/ },
+      { type: 'purchaseOrder', record: { purchaseOrderId: 'po1' }, match: /\/purchaseOrders\/po1$/ }
+    ];
+    cases.forEach(function (c) {
+      var w = assertOk(AC.planToWrites(plan({ domainRecords: [{ type: c.type, record: c.record }] }), PCTX));
+      assert.ok(w.some(function (x) { return c.match.test(x.path); }),
+        'loại "' + c.type + '" không sinh đúng path canonical — kiểm tra lại mapping trong atomic-commit.js');
+    });
+  });
+
   test('ghi thành công thì operation record nằm TRONG cùng transaction', function () {
     var mem = AC.createInMemoryRunner();
     var c = AC.createCommitter({ transactionRunner: mem.runner });

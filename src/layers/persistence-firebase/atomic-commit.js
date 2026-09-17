@@ -75,7 +75,19 @@ GIEO.define('persistence-firebase/atomic-commit', [
         recipeVersion: ['recipeVersion', function (x) {
           return { recipeId: x.recipeId, versionId: x.versionId };
         }],
-        employee: ['employee', function (x) { return { employeeId: x.employeeId }; }]
+        employee: ['employee', function (x) { return { employeeId: x.employeeId }; }],
+        /* Bổ sung — 7 loại này được commands/* đẩy vào plan.domainRecords từ
+           trước nhưng thiếu khai path, nên commit() thật sẽ TỪ CHỐI ngay ở
+           đây dù execute() vẫn trả plan hợp lệ (chỉ lộ ra khi ghi thật, không
+           lộ ở test gọi execute() trực tiếp). Khai đủ để đường ghi thật không
+           đứt ở persistence boundary. */
+        employeeShift: ['employeeShift', function (x) { return { shiftId: x.shiftId }; }],
+        receivingRecord: ['receivingRecord', function (x) { return { id: x.receivingRecordId }; }],
+        purchaseOrder: ['purchaseOrder', function (x) { return { id: x.purchaseOrderId }; }],
+        wasteRecord: ['wasteRecord', function (x) { return { wasteRef: x.wasteRef, itemId: x.itemId }; }],
+        reconciliationRecord: ['reconciliationRecord', function (x) { return { operationId: x.operationId }; }],
+        liability: ['liability', function (x) { return { liabilityId: x.liabilityId }; }],
+        payrollClosing: ['payrollClosing', function (x) { return { payrollClosingId: x.payrollClosingId }; }]
       };
       var m = map[r.type];
       if (!m) {

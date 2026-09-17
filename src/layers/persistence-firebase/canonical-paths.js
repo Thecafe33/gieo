@@ -59,6 +59,16 @@ GIEO.define('persistence-firebase/canonical-paths', [
     lostReport: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/lostReports/' + a.reportId; } },
     purchaseOrder: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/purchaseOrders/' + a.id; } },
     receivingRecord: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/receivingRecords/' + a.id; } },
+    /* Bản ghi hao hụt — key ghép wasteRef+itemId, đúng cặp làm nên
+       operationId của RecordWaste (commands/inventory.js). */
+    wasteRecord: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/wasteRecords/' + a.wasteRef + '.' + a.itemId; } },
+    /* Bản ghi đối chiếu vật lý — key theo operationId, đã xác định sẵn từ
+       AdjustInventory/ApproveStockCount, không cần key riêng. */
+    reconciliationRecord: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/reconciliationRecords/' + a.operationId; } },
+    /* Khoản trừ trách nhiệm nhân viên khi mất container (hr/liability.js). */
+    liability: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/liabilities/' + a.liabilityId; } },
+    /* Chốt lương tháng (hr/payroll.js closePayroll). */
+    payrollClosing: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/payrollClosings/' + a.payrollClosingId; } },
 
     /* Recipe CÓ tầng version — legacy ghi đè trực tiếp, đây là chỗ sửa. */
     recipeVersion: {
