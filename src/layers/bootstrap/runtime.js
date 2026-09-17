@@ -64,7 +64,11 @@ GIEO.define('bootstrap/runtime', [
     AccrueLoyaltyForSale: loyalty.AccrueLoyaltyForSale,
     AccrueLoyaltyForAddon: loyalty.AccrueLoyaltyForAddon,
     ReverseLoyaltyForVoidedBill: loyalty.ReverseLoyaltyForVoidedBill,
-    RaiseAlert: alerts.RaiseAlert
+    RaiseAlert: alerts.RaiseAlert,
+    /* AL6 — markSeen/resolve gọi được từ UI, không còn phải đọc/ghi trực
+       tiếp qua alerts/alert.js. */
+    MarkAlertSeen: alerts.MarkAlertSeen,
+    ResolveAlert: alerts.ResolveAlert
   };
   var QUERIES = {
     GetMenu: reads.getMenu,

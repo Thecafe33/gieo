@@ -383,6 +383,72 @@ describe('commands/alerts — nối AlertEngine.raise() thành command thật', 
   });
 });
 
+describe('commands/alerts — MarkAlertSeen/ResolveAlert (AL6)', function () {
+  var C = _fa.ALC;
+
+  function raised(type, subjectKey, data) {
+    var out = _fa.PIPE.run(C.RaiseAlert, {
+      type: type, storeId: _fa.STORE, businessDate: '2026-03-10',
+      subjectKey: subjectKey, data: data
+    }, faCtx('POS'), { operationStore: _fa.PIPE.createInMemoryOperationStore() });
+    assertOk(out);
+    return out.value.plan.domainRecords[0].record;
+  }
+
+  describe('MarkAlertSeen', function () {
+    test('POS lẫn QUANLY đều đánh dấu "đã xem" được — không tắt cảnh báo', function () {
+      var alert = raised('LOW_STOCK', 'item_x', { itemId: 'item_x', currentStock: 2, threshold: 10 });
+      var out = _fa.PIPE.run(C.MarkAlertSeen, { alert: alert }, faCtx('POS'),
+        { operationStore: _fa.PIPE.createInMemoryOperationStore() });
+      assertOk(out);
+      var rec = out.value.plan.domainRecords[0].record;
+      assert.strictEqual(rec.status, 'SEEN');
+      assert.strictEqual(rec.seenBy, _fa.NV);
+    });
+
+    test('thiếu alert hợp lệ thì VALIDATION', function () {
+      assertErr(_fa.PIPE.run(C.MarkAlertSeen, {}, faCtx('POS'),
+        { operationStore: _fa.PIPE.createInMemoryOperationStore() }), 'VALIDATION');
+    });
+  });
+
+  describe('ResolveAlert', function () {
+    test('loại MANUAL_WITH_REFERENCE + referenceId hợp lệ → RESOLVED', function () {
+      var alert = raised('STOCK_VARIANCE', 'item_y', { itemId: 'item_y', projected: 100, observed: 90 });
+      var out = _fa.PIPE.run(C.ResolveAlert,
+        { alert: alert, referenceId: 'operation_fix_1' },
+        faCtx('QUANLY', 'QUANLY_OPERATOR', _fa.BOSS),
+        { operationStore: _fa.PIPE.createInMemoryOperationStore() });
+      assertOk(out);
+      var rec = out.value.plan.domainRecords[0].record;
+      assert.strictEqual(rec.status, 'RESOLVED');
+      assert.strictEqual(rec.resolvedReferenceId, 'operation_fix_1');
+    });
+
+    test('nhân viên POS không đóng được cảnh báo (EXECUTE không đủ quyền)', function () {
+      var alert = raised('STOCK_VARIANCE', 'item_z', { itemId: 'item_z', projected: 50, observed: 40 });
+      assertErr(_fa.PIPE.run(C.ResolveAlert, { alert: alert, referenceId: 'operation_fix_2' },
+        faCtx('POS'), { operationStore: _fa.PIPE.createInMemoryOperationStore() }), 'FORBIDDEN');
+    });
+
+    test('thiếu referenceId thì VALIDATION, chưa chạm alert.resolve()', function () {
+      var alert = raised('STOCK_VARIANCE', 'item_w', { itemId: 'item_w', projected: 10, observed: 8 });
+      assertErr(_fa.PIPE.run(C.ResolveAlert, { alert: alert },
+        faCtx('QUANLY', 'QUANLY_OPERATOR', _fa.BOSS),
+        { operationStore: _fa.PIPE.createInMemoryOperationStore() }), 'VALIDATION');
+    });
+
+    test('loại AUTO_VERIFIABLE (LOW_STOCK) không đóng tay được — lỗi lộ ra từ lib, không bị nuốt', function () {
+      var alert = raised('LOW_STOCK', 'item_v', { itemId: 'item_v', currentStock: 1, threshold: 5 });
+      var r = _fa.PIPE.run(C.ResolveAlert, { alert: alert, referenceId: 'operation_fix_3' },
+        faCtx('QUANLY', 'QUANLY_OPERATOR', _fa.BOSS),
+        { operationStore: _fa.PIPE.createInMemoryOperationStore() });
+      assertErr(r, 'PRECONDITION');
+      assert.ok(/tự đóng khi điều kiện thật sự hết/.test(r.error.message));
+    });
+  });
+});
+
 describe('bootstrap/domain-events — routeEvents nối AlertEngine (BTP/Raw Material/Stock Count/Sales)', function () {
   var DE = _fa.DE;
 
