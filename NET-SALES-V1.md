@@ -88,8 +88,8 @@ N17 Xem P&L theo kênh (tại quán/mang đi/app) ─┴─► (→ FIFO-CHAIN-T
 | Hệ cũ | `onCheckoutClick()` — `posgieo.html:20109` |
 | Việc làm | Chặn sớm: ngày đã đóng ca? ca đã mở? checklist đầu ca xong? có ai check-in? → tính `computeAllDiscounts()`, `getCartTotal()`, `getFinalTotal()`, mở popup tặng topping thành viên nếu có `curCustomer` |
 | Hệ mới | Các gate này ĐÃ là command/query riêng: `GetShiftStatus`, business-day state (`store-context/business-day.js`), `RecordSale.validate` tự chặn kỹ thuật lần cuối ở tầng core |
-| Phân loại | 🟡 **GIỮ, ĐỔI CÁCH LÀM** — 4 gate sớm này giữ nguyên Ở UI cho UX (không đợi round-trip mới báo lỗi), NHƯNG **chặn thật sự** phải nằm ở validate của `RecordSale` chứ không tin UI-side gate — đúng comment gốc trong chính hàm này ("Chặn thật sự nằm ở confirmPay — chỗ này chỉ là UX"). Core mới cần đảm bảo `RecordSale.validate`/`execute` tự kiểm tra business-day đang mở, không kế thừa "tin tưởng ngầm" là UI đã chặn. |
-| Ghi chú | 🔴 Điểm cần soát kỹ khi migrate: legacy có **2 lớp chặn** (sớm ở `onCheckoutClick`, thật ở `confirmPay`) — nếu hệ mới chỉ giữ 1 lớp (UI) mà quên lớp core, đây là hổng thật, không phải lý thuyết (comment gốc ghi rõ lý do). |
+| Phân loại | ✅ **ĐÃ ĐÓNG** — 4 gate sớm giữ Ở UI cho UX (không đợi round-trip mới báo lỗi) như audit yêu cầu; phần **chặn thật sự** (business-day đang mở) đã có sẵn Ở TẦNG CORE, không tin UI-side gate — nhưng KHÔNG phải do `RecordSale` tự viết check riêng, mà do `commands/pipeline.js` áp `requiresOpenDay` CHO MỌI command có `mutates: true` (mặc định, không cần khai riêng — xem `defineCommand`): `pipeline.run()` gọi `ctx.assertOperable(command.name)` (→ `store-context/business-day.js#assertOperable`, chặn nếu `day.status !== 'OPEN'`) TRƯỚC `validate`/`execute`. `RecordSale` có `mutates: true`, không override `requiresOpenDay`, nên gate này đã áp dụng, đã test riêng cho đúng command này ở `tests/unit/store-context-access.test.js:280` (`assertErr(preAuth.assertOperable('RecordSale'), 'PRECONDITION')`). Không cần thêm code hay test. |
+| Ghi chú | 3 gate còn lại (ca đã mở/checklist đầu ca/có ai check-in) đúng theo Phân loại ở trên là UI-only theo chính audit gốc ("4 gate sớm này giữ nguyên Ở UI") — không nằm trong yêu cầu "chặn thật ở core" mà audit nêu (audit chỉ nói rõ business-day, trích đúng comment gốc "Chặn thật sự nằm ở confirmPay"), nên không cần nâng lên core. Nếu sau này phát sinh nhu cầu (vd. quy trách nhiệm ca chưa mở mà vẫn bán), đó là quyết định nghiệp vụ mới, ngoài phạm vi đợt audit này. |
 
 ### N5 — Khuyến mãi tự động (đồng giá, mua X tặng Y, mang đi giảm giá)
 
@@ -225,10 +225,11 @@ N17 Xem P&L theo kênh (tại quán/mang đi/app) ─┴─► (→ FIFO-CHAIN-T
 ## TỔNG KẾT PHÂN LOẠI (đếm nhanh cho domain Sales)
 
 - 🔴 **BỎ**: 1 (nhánh "ví cơ bản kết hợp" ở N7 — đã bỏ ngay từ trong chính legacy, không mang qua)
-- 🟡 **GIỮ, ĐỔI CÁCH LÀM**: N1, N3, N4, N6, N7, N8, N9(khung), N10(khung), N11(khung nghiệp vụ), N13, N14, N15(khung)
+- 🟡 **GIỮ, ĐỔI CÁCH LÀM**: N1, N3, N6, N7, N8, N9(khung), N10(khung), N11(khung nghiệp vụ), N13, N14, N15(khung)
 - 🟢 **THÊM MỚI**: `soldByActorId` (N9), `channel.feePct` được ĐỌC thật (N9, N17), `cogsActual` thật (N10), event-driven loyalty (N11, N15), rule engine khuyến mãi tường minh (N5), loyalty ledger thay field cộng dồn (N11)
 - ⚪ **CHƯA QUYẾT**: đá có ảnh hưởng định mức không (N2), cơ chế voucher/reward "usedCount" (N12), số phận `moLaiThang`/versioning sổ tháng (N16)
 - ✅ **MỚI CHỐT VÀ ĐÃ SỬA (2026-09-17)**: N10 — thiếu định mức KHÔNG chặn bán, theo nguyên tắc "vận hành thật đè core" (`BAN-GIAO-V1.md` §2.3a). `commands/sales.js` đã sửa xong (`gapLines` + `MissingRecipeDetected` → alert `MISSING_RECIPE`), xem chi tiết ở N10.
+- ✅ **RÀ LẠI, KHÔNG CẦN SỬA (2026-09-17)**: N4 — chặn business-day thật ở `RecordSale` đã có sẵn từ trước, qua gate chung `requiresOpenDay` của `commands/pipeline.js` (áp cho mọi command `mutates: true`), không phải code riêng cho `RecordSale`; đã có test ở `tests/unit/store-context-access.test.js:280`. Chỉ là sửa tài liệu cho đúng thực tế code, không đổi code.
 
 ## VIỆC PHẢI LÀM TRƯỚC KHI COI N9 (RecordSale) LÀ "ĐỦ DÙNG THAY confirmPay"
 
@@ -244,9 +245,15 @@ Thứ tự theo mức chặn đường (chặn cứng trước, tinh chỉnh sau
    `RecordSale`. Xem N10.
 3. Nối UI `onCheckoutClick`/`checkFreeToppingMemberPromo`/`checkTogoBeforeCheckout`
    sang gọi `catalog/promotion.js` thay vì 2 nhánh if hard-code (N5).
-4. Đảm bảo `RecordSale.validate`/`execute` tự chặn business-day/shift — không
-   thừa hưởng ngầm "UI đã chặn rồi" (N4). Đây là chặn hệ cũ ĐÃ có (không phải
-   điểm chặn mới) nên không vi phạm nguyên tắc ở mục 2.
+4. ~~**Đảm bảo `RecordSale.validate`/`execute` tự chặn business-day** — không
+   thừa hưởng ngầm "UI đã chặn rồi" (N4)~~ — **ĐÃ ĐÓNG (rà lại 2026-09-17)**:
+   không cần code riêng, `commands/pipeline.js` đã áp `requiresOpenDay`
+   (mặc định `true` khi `mutates: true`) cho MỌI command mutate, gồm cả
+   `RecordSale` — `pipeline.run()` tự gọi `ctx.assertOperable('RecordSale')`
+   trước `validate`/`execute`. Đã có test riêng đúng command này ở
+   `tests/unit/store-context-access.test.js:280`. 3 gate sớm còn lại (ca
+   mở/checklist/check-in) đúng ý audit là để lại UI-only, không cần nâng
+   lên core — xem N4.
 5. Quyết định field `ice` có cần lên `BillLine` hay là UI/tem-only (N2).
 6. Đọc `catalog/promotion.js` phần còn lại + `compaction/book-snapshot.js` để
    đóng 2 mục ⚪ CHƯA QUYẾT còn lại (N12, N16) — có thể đóng ngay trong domain
