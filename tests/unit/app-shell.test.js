@@ -28,6 +28,14 @@ function fakeRuntime(mode) {
       calls.push({ kind: 'command', name: name, input: input });
       return Promise.resolve(_app.R.ok({ name: name }));
     },
+    context: function () {
+      return {
+        storeId: 'store_1',
+        actor: { actorId: 'actor_1' },
+        businessDate: '2026-09-17',
+        clock: { now: function () { return 1700000000000; } }
+      };
+    },
     device: {
       printBill: function (payload) {
         prints.push(payload);
@@ -178,7 +186,7 @@ describe('P9 — giỏ hàng POS là trạng thái chọn, không phải nghiệ
     assertErr(pos.changeQty(key, -1), 'NOT_FOUND');
   });
 
-  test('thanh toán gửi đúng các dòng qua RecordSale, không tự tính tiền', function () {
+  test('thanh toán gửi đúng bill qua RecordSale, không tự tính tiền', function () {
     var runtime = fakeRuntime();
     var pos = posWith(runtime);
     pos.addLine({ menuItemId: 'item_1', size: 'M', unitPrice: 30000, qty: 2 });
@@ -186,12 +194,21 @@ describe('P9 — giỏ hàng POS là trạng thái chọn, không phải nghiệ
       assertOk(out);
       var call = runtime.calls[0];
       assert.strictEqual(call.name, 'RecordSale');
-      assert.deepStrictEqual(call.input.lines, [
-        { menuItemId: 'item_1', size: 'M', toppingIds: [], qty: 2 }
-      ]);
-      /* Không có trường tổng tiền nào do POS tự tính lọt vào command. */
-      assert.strictEqual(call.input.total, undefined);
-      assert.strictEqual(call.input.subtotal, undefined);
+      var bill = call.input.bill;
+      assert.strictEqual(bill.storeId, 'store_1');
+      assert.strictEqual(bill.soldByActorId, 'actor_1');
+      assert.strictEqual(bill.businessDate, '2026-09-17');
+      assert.strictEqual(bill.channel.type, 'DINE_IN');
+      assert.deepStrictEqual(bill.payments, [{ method: 'CASH' }]);
+      assert.strictEqual(bill.lines.length, 1);
+      assert.deepStrictEqual({
+        menuItemId: bill.lines[0].menuItemId, size: bill.lines[0].size,
+        qty: bill.lines[0].qty, price: bill.lines[0].price, toppings: bill.lines[0].toppings
+      }, { menuItemId: 'item_1', size: 'M', qty: 2, price: 30000, toppings: [] });
+      /* subtotal/total do buildBill tính từ giá đã snapshot — chỗ duy nhất có
+         hiệu lực, POS không tự nhét thêm trường tổng tiền nào khác. */
+      assert.strictEqual(bill.subtotal, 60000);
+      assert.strictEqual(bill.total, 60000);
     });
   });
 

@@ -22,20 +22,43 @@ GIEO.define('bootstrap/startup', [
   'bootstrap/firebase-read-client',
   'bootstrap/pin-auth',
   'bootstrap/legacy-data-source',
+  'bootstrap/canonical-data-source',
   'bootstrap/legacy-takeover',
   'bootstrap/cutover',
   'bootstrap/runtime',
   'legacy-firebase-adapter/read-port',
   'persistence-firebase/canonical-paths',
+  'persistence-firebase/canonical-read-port',
   'persistence-firebase/firestore-runner',
   'persistence-firebase/atomic-commit'
-], function (R, fbApp, readClientLib, pinAuth, dataSourceLib, takeoverLib, cutoverLib,
-             runtimeLib, readPortLib, paths, runnerLib, commitLib) {
+], function (R, fbApp, readClientLib, pinAuth, legacyDataSourceLib, canonicalDataSourceLib, takeoverLib,
+             cutoverLib, runtimeLib, readPortLib, paths, canonicalReadPortLib, runnerLib, commitLib) {
   'use strict';
 
   function docPath(name, ctx, args) {
     var p = paths.path(name, ctx, args);
     return R.isErr(p) ? null : p.value.path;
+  }
+
+  /**
+   * Ghép 2 dataSource thành 1: `forQuery` vẫn của legacy (đường đọc UI hiện
+   * tại chưa đổi), `forCommand` đi qua canonical TRƯỚC (cấp `deps.units`/
+   * `deps.versionRegistry` thật cho RecordSale — xem `canonical-data-source.js`)
+   * RỒI mới qua legacy (legacy `forCommand` là pass-through vĩnh viễn theo
+   * thiết kế, nên chuỗi này không mất gì, chỉ cộng thêm đúng 1 chỗ nó cố ý
+   * chừa trống).
+   */
+  function composeDataSource(legacy, canonical) {
+    return {
+      forQuery: legacy.forQuery,
+      forCommand: function (name, input) {
+        return Promise.resolve(canonical.forCommand(name, input)).then(function (out) {
+          if (R.isErr(out)) return out;
+          return legacy.forCommand(name, out.value);
+        });
+      },
+      watchQuery: legacy.watchQuery
+    };
   }
 
   /** Đọc một document canonical bằng handle Firestore thô. */
@@ -73,6 +96,7 @@ GIEO.define('bootstrap/startup', [
         var handles = fb.value;
         var readClient = readClientLib.create({ rtdb: handles.rtdb, firestore: handles.firestore });
         var reader = readPortLib.createReader(readClient);
+        var canonicalReader = canonicalReadPortLib.createReader(handles.firestore);
         var writeRunner = runnerLib.create({ firestore: handles.firestore, rtdb: handles.rtdb });
         var committer = commitLib.createCommitter({ transactionRunner: writeRunner.runner });
 
@@ -91,7 +115,10 @@ GIEO.define('bootstrap/startup', [
                nhận cả hai. */
             cutover: cutover,
             context: ctxOf,
-            dataSource: dataSourceLib.create(reader, { storeId: ctx.storeId }),
+            dataSource: composeDataSource(
+              legacyDataSourceLib.create(reader, { storeId: ctx.storeId }),
+              canonicalDataSourceLib.create(canonicalReader, { organizationId: ctx.organizationId })
+            ),
             commit: function (plan, commitCtx) { return committer.commit(plan, commitCtx); },
             device: spec.device
           });

@@ -1,8 +1,9 @@
 /** POS controller: chỉ điều phối UI → runtime, không tính kho/giá/COGS. */
 GIEO.define('app-pos/controller', [
   'shared-kernel/result',
-  'bootstrap/runtime'
-], function (R, bootstrap) {
+  'bootstrap/runtime',
+  'commands/sales'
+], function (R, bootstrap, salesLib) {
   'use strict';
 
   function createController(runtime) {
@@ -57,7 +58,12 @@ GIEO.define('app-pos/controller', [
           size: line.size || null,
           toppingIds: (line.toppingIds || []).slice(),
           unitPrice: line.unitPrice,
-          qty: qty
+          qty: qty,
+          /* Từ GetMenu (menuItem.recipeId) — có thì mang theo để checkout dựng
+             requirements thật; không có thì buildRequirements tự gắn gapLine
+             (N10, §2.3a), không chặn bán. */
+          recipeId: line.recipeId || null,
+          ice: line.ice || null
         });
       }
       return R.ok(snapshot());
@@ -77,20 +83,52 @@ GIEO.define('app-pos/controller', [
     /**
      * Thanh toán. Giỏ chỉ được dọn khi RecordSale thành công — dọn trước rồi
      * command hỏng là cách mất đơn mà người bán không biết đơn đã mất.
+     *
+     * `opts.channel` mặc định tại quán (DINE_IN) — POS chưa có UI chọn kênh,
+     * và tại quán là kênh phổ biến nhất của quán; mang đi/sàn truyền qua
+     * `opts.channel` khi UI đó được xây. `payments`/`discountTotal`/
+     * `redemption`/`customerId` cũng qua `opts`, không phải tự đoán ở đây.
      */
-    function checkout(payment) {
+    function checkout(payment, opts) {
       if (!cart.length) return Promise.resolve(R.err('VALIDATION', 'giỏ hàng trống'));
-      return run('RecordSale', {
-        lines: cart.map(function (l) {
-          return {
-            menuItemId: l.menuItemId, size: l.size,
-            toppingIds: l.toppingIds.slice(), qty: l.qty
-          };
-        }),
-        payment: payment || null
-      }).then(function (out) {
-        if (R.isOk(out)) clearCart();
-        return out;
+      opts = opts || {};
+      /* Không tự chặn ở đây khi chưa có StoreContext (vd. READ_ONLY chưa cấp
+         context) — để `run()`/`command()` tự quyết đúng thứ tự gate đã có
+         (mode trước, context sau), khỏi lệch với `bootstrap/runtime.js`. */
+      var ctx = runtime.context();
+      var input = {};
+      if (ctx) {
+        var billR = salesLib.buildBill({
+          storeId: ctx.storeId,
+          soldByActorId: ctx.actor && ctx.actor.actorId,
+          businessDate: ctx.businessDate,
+          occurredAt: ctx.clock.now(),
+          channel: opts.channel || { type: salesLib.CHANNEL.DINE_IN },
+          customerId: opts.customerId || null,
+          discountTotal: opts.discountTotal || 0,
+          redemption: opts.redemption || null,
+          payments: opts.payments || (payment ? [payment] : []),
+          lines: cart.map(function (l) {
+            return {
+              menuItemId: l.menuItemId, name: l.name, size: l.size,
+              price: l.unitPrice, qty: l.qty,
+              recipeId: l.recipeId, toppings: l.toppingIds.slice(), ice: l.ice
+            };
+          })
+        });
+        if (R.isErr(billR)) return Promise.resolve(billR);
+        input = { bill: billR.value };
+      }
+
+      return run('RecordSale', input).then(function (out) {
+        if (R.isErr(out)) return out;
+        /* `command()` trả {operationId,status,plan,result,...}, KHÔNG phải
+           bill trực tiếp — bill chốt nằm trong plan.domainRecords. Gắn lại
+           thành `.bill` để UI đọc như một kết quả, không phải tự lục plan. */
+        var records = (out.value.plan && out.value.plan.domainRecords) || [];
+        var billRecord = records.filter(function (r) { return r.type === 'bill'; })[0];
+        clearCart();
+        return R.ok(Object.assign({}, out.value, { bill: billRecord ? billRecord.record : null }));
       });
     }
     function navigate(screen) {

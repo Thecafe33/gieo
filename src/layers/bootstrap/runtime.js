@@ -213,6 +213,10 @@ GIEO.define('bootstrap/runtime', [
       query: query,
       watch: watch,
       command: command,
+      /* StoreContext hiện tại — app cần đọc actorId/storeId/businessDate/clock
+         để tự dựng input thuần (vd. `commands/sales.js#buildBill`) TRƯỚC khi
+         gọi command(), không phải tự đoán hay chép lại logic tạo context. */
+      context: context,
       device: spec.device || {},
       currentMode: currentMode,
       registeredCommands: function () { return Object.keys(COMMANDS).sort(); },

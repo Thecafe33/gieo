@@ -9785,6 +9785,22 @@ GIEO.define('persistence-firebase/canonical-paths', [
   }
 
   /**
+   * Path COLLECTION chứa một builder document — bỏ đoạn cuối (id document) của
+   * `path()`. Dùng cho đọc canonical trước ghi (vd. toàn bộ Unit của 1 itemId,
+   * toàn bộ version của 1 subjectId) — nơi cần LIỆT KÊ, không phải trỏ 1 doc.
+   * Sinh từ builder có sẵn thay vì tự khai lại `base()` ở module khác, nên
+   * không có chỗ path collection lệch khỏi path document tương ứng.
+   */
+  function collectionPath(name, ctx, args) {
+    var d = path(name, ctx, args);
+    if (R.isErr(d)) return d;
+    var parts = d.value.path.split('/');
+    if (parts.length < 2) return R.err('VALIDATION', 'path "' + name + '" quá ngắn để bỏ đoạn document');
+    parts.pop();
+    return R.ok({ kind: d.value.kind, path: parts.join('/') });
+  }
+
+  /**
    * Path PROTECTED giữ nguyên tên cũ, KHÔNG nằm dưới namespace orgs/.
    * Tách riêng để không ai vô tình "chuẩn hoá" nó theo mẫu chung.
    */
@@ -9804,9 +9820,107 @@ GIEO.define('persistence-firebase/canonical-paths', [
     RTDB: RTDB,
     FIRESTORE: FIRESTORE,
     path: path,
+    collectionPath: collectionPath,
     protectedPath: protectedPath,
     listNames: listNames
   };
+});
+
+/* ===== src/layers/persistence-firebase/canonical-read-port.js ===== */
+/**
+ * Đọc CANONICAL mới — port cho cái mà `bootstrap/legacy-data-source.js` cố ý
+ * KHÔNG làm: cấp `deps.units`/`deps.versionRegistry` cho command trước khi ghi.
+ *
+ * `legacy-data-source.js#forCommand` là pass-through VĨNH VIỄN theo thiết kế
+ * (đọc comment ở đó) — command đã phải mang canonical input từ controller/
+ * read-layer khi tới đó. Port này là nguồn đọc đứng SAU controller, TRƯỚC
+ * pipeline, cho đúng đoạn "read-layer" của câu đó: query path canonical mới
+ * (`orgs/{org}/stores/{store}/...`), CHỈ ĐỌC, không quyết định nghiệp vụ.
+ *
+ * Vì sao không dùng lại `bootstrap/firebase-read-client.js`: client đó
+ * `firestore.collection(name)` coi `name` là collection TOP-LEVEL — đúng cho
+ * schema legacy (`legacy-firebase-adapter/legacy-paths.js`), sai cho path
+ * canonical lồng 4+ đoạn dưới `orgs/{org}/stores/{store}`. Cần một client biết
+ * đi qua alternating collection/doc như `docRef()` của `firestore-runner.js`,
+ * chỉ khác là dừng ở COLLECTION cuối để `.get()` nhiều document, không phải 1.
+ */
+GIEO.define('persistence-firebase/canonical-read-port', [
+  'shared-kernel/result',
+  'persistence-firebase/canonical-paths'
+], function (R, paths) {
+  'use strict';
+
+  function createReader(firestore) {
+    if (!firestore || typeof firestore.collection !== 'function') {
+      throw new Error('[canonical-read-port] cần Firestore handle');
+    }
+
+    function collectionRef(fullPath) {
+      var parts = fullPath.split('/').filter(Boolean);
+      if (parts.length % 2 !== 1) return null;
+      var ref = firestore.collection(parts[0]);
+      for (var i = 1; i < parts.length; i += 2) {
+        ref = ref.doc(parts[i]).collection(parts[i + 1]);
+      }
+      return ref;
+    }
+
+    function getAll(collPath, whereClauses) {
+      var ref = collectionRef(collPath);
+      if (!ref) {
+        return Promise.resolve(R.err('VALIDATION', 'path collection canonical không hợp lệ: ' + collPath));
+      }
+      (whereClauses || []).forEach(function (w) { ref = ref.where(w.field, w.op, w.value); });
+      return Promise.resolve()
+        .then(function () { return ref.get(); })
+        .then(function (snap) {
+          var out = [];
+          if (snap && typeof snap.forEach === 'function') {
+            snap.forEach(function (doc) { out.push(doc.data()); });
+          }
+          return R.ok(out);
+        })
+        .catch(function (e) {
+          return R.err('RETRYABLE', 'đọc canonical thất bại: ' + (e && e.message ? e.message : e));
+        });
+    }
+
+    /** Toàn bộ Unit hiện có của một itemId — nguồn cho `fifo-core/allocation`. */
+    function loadUnitsForItem(ctx, itemId) {
+      var collP = paths.collectionPath('unit', ctx, { unitId: '_' });
+      if (R.isErr(collP)) return Promise.resolve(collP);
+      return getAll(collP.value.path, [{ field: 'itemId', op: '==', value: itemId }]);
+    }
+
+    /**
+     * Mọi version đã publish của một (kind, subjectId) — nạp thẳng vào
+     * `compaction/versioned-input#createRegistry().hydrate()`.
+     *
+     * `recipe` đọc từ path RIÊNG `recipeVersion` (`recipes/{id}/versions`) vì
+     * đó là path DUY NHẤT `persistence-firebase/atomic-commit.js` đã khai cho
+     * domainRecord loại `recipeVersion` — path `versionedInput` chung chưa có
+     * writer nào dùng cho recipe. Các kind khác (packaging/iceCogs/cost) chưa
+     * có domainRecord type nào khai ở atomic-commit.js — đọc từ `versionedInput`
+     * chung vì đó là path DUY NHẤT đã định nghĩa cho chúng, dù hiện chưa ai ghi
+     * vào (mảng rỗng trả về đúng là "chưa có version nào", không phải lỗi —
+     * `buildRequirements`/`computeCogs` đã có sẵn đường degrade gap/null cho
+     * trường hợp này, xem `commands/sales.js`).
+     */
+    function loadVersions(ctx, kind, subjectId) {
+      if (kind === 'recipe') {
+        var rp = paths.collectionPath('recipeVersion', ctx, { recipeId: subjectId, versionId: '_' });
+        if (R.isErr(rp)) return Promise.resolve(rp);
+        return getAll(rp.value.path);
+      }
+      var vp = paths.collectionPath('versionedInput', ctx, { kind: kind, subjectId: subjectId, versionId: '_' });
+      if (R.isErr(vp)) return Promise.resolve(vp);
+      return getAll(vp.value.path);
+    }
+
+    return { loadUnitsForItem: loadUnitsForItem, loadVersions: loadVersions };
+  }
+
+  return { createReader: createReader };
 });
 
 /* ===== src/layers/persistence-firebase/firestore-runner.js ===== */
@@ -13329,8 +13443,9 @@ GIEO.define('commands/sales', [
   'recipe-cost-btp/recipe',
   'recipe-cost-btp/cogs',
   'fifo-core/allocation',
-  'loyalty/accrual'
-], function (ids, R, pipeline, menuLib, packagingLib, iceLib, recipeLib, cogsLib, allocation, accrualLib) {
+  'loyalty/accrual',
+  'compaction/versioned-input'
+], function (ids, R, pipeline, menuLib, packagingLib, iceLib, recipeLib, cogsLib, allocation, accrualLib, VI) {
   'use strict';
 
   var CHANNEL = {
@@ -13841,10 +13956,20 @@ GIEO.define('commands/sales', [
     }
   });
 
+  /**
+   * `deps.versionRegistry` là một `compaction/versioned-input` registry —
+   * export lối dựng nó để caller ngoài `commands` (bootstrap — xem
+   * `bootstrap/canonical-data-source.js`) không phải tự import `compaction`
+   * (layer-rules.json không cho `bootstrap` import `compaction` trực tiếp;
+   * `commands` thì được, nên khai hộ ở đây thay vì nới luật import-direction).
+   */
+  function createVersionRegistry(opts) { return VI.createRegistry(opts); }
+
   return {
     CHANNEL: CHANNEL,
     buildBill: buildBill,
     buildRequirements: buildRequirements,
+    createVersionRegistry: createVersionRegistry,
     RecordSale: RecordSale,
     RecordAddon: RecordAddon
   };
@@ -15431,6 +15556,141 @@ GIEO.define('reporting/variance-report', ['shared-kernel/result'], function (R) 
   return { STATUS: STATUS, build: build, toAlerts: toAlerts };
 });
 
+/* ===== src/layers/bootstrap/canonical-data-source.js ===== */
+/**
+ * Hydrate `deps.units`/`deps.versionRegistry` cho command TRƯỚC khi tới pipeline.
+ *
+ * Đây LÀ mảnh còn thiếu mà `bootstrap/legacy-data-source.js#forCommand` cố ý
+ * không làm (đọc comment ở đó — pass-through vĩnh viễn, "command đã phải mang
+ * canonical input từ controller/read-layer"). `commands/sales.js RecordSale`,
+ * `commands/inventory.js RecordWaste/ReportLostContainer/RestoreFoundContainer`,
+ * `commands/prep.js`, `commands/receiving.js` đều đợi `deps.units`/
+ * `deps.versionRegistry` do CALLER mang tới — không có gì tự động cấp trước
+ * module này. Phạm vi bản đầu: CHỈ `RecordSale` (quyết định chủ quán
+ * 2026-09-17 — checkout là gap chặn bán, các command còn lại để đợt sau).
+ *
+ * Thuật toán 2 pha, vì registry cần biết Recipe/Packaging/Ice TRƯỚC mới suy ra
+ * được itemId nguyên liệu cần giá (`recipe-cost-btp/cost.js` KINDS.cost) —
+ * đúng đúng thứ tự `commands/sales.js#buildRequirements` đã làm với registry
+ * cho sẵn, ở đây chỉ là tự đọc registry đó từ Firestore thay vì test tự dựng:
+ *
+ *   Pha 1 — đọc version recipe (mỗi dòng)/packaging (mỗi dòng + fallback
+ *           '__default__')/iceCogs ('__default__' toàn quán), dựng registry
+ *           TẠM, gọi `buildRequirements` THẬT (hàm thuần, không side-effect)
+ *           để biết requirements (itemId nguyên liệu).
+ *   Pha 2 — đọc version cost của đúng những itemId đó + đọc Unit đang có của
+ *           đúng những itemId đó, nạp thêm vào CÙNG registry.
+ *
+ * `buildRequirements` được gọi ở đây CHỈ để suy itemId — `RecordSale.execute`
+ * vẫn gọi lại nó (hàm thuần, gọi 2 lần cho kết quả giống hệt, không tốn gì
+ * ngoài 1 lượt tính lại rẻ).
+ *
+ * Không có version/Unit nào cho một itemId thì mảng rỗng, KHÔNG lỗi — đúng
+ * §2.3a: thiếu dữ liệu suy biến thành gap-flag qua đường đã có sẵn trong
+ * `buildRequirements`/`computeCogs` (gapLines/NO_RECIPE, cogsActual=null),
+ * không phải lý do chặn RecordSale ở đây.
+ */
+GIEO.define('bootstrap/canonical-data-source', [
+  'shared-kernel/result',
+  'commands/sales'
+], function (R, salesLib) {
+  'use strict';
+
+  function uniq(list) {
+    var seen = Object.create(null);
+    return list.filter(function (x) {
+      var k = JSON.stringify(x);
+      if (seen[k]) return false;
+      seen[k] = true;
+      return true;
+    });
+  }
+
+  function create(reader, defaults) {
+    defaults = defaults || {};
+    if (!reader) throw new Error('[canonical-data-source] cần canonical reader');
+
+    function loadVersionsFor(ctx, pairs) {
+      return Promise.all(pairs.map(function (p) { return reader.loadVersions(ctx, p.kind, p.subjectId); }))
+        .then(function (results) {
+          var all = [];
+          for (var i = 0; i < results.length; i++) {
+            if (R.isErr(results[i])) return results[i];
+            all = all.concat(results[i].value);
+          }
+          return R.ok(all);
+        });
+    }
+
+    function loadUnitsFor(ctx, itemIds) {
+      return Promise.all(itemIds.map(function (id) { return reader.loadUnitsForItem(ctx, id); }))
+        .then(function (results) {
+          var all = [];
+          for (var i = 0; i < results.length; i++) {
+            if (R.isErr(results[i])) return results[i];
+            all = all.concat(results[i].value);
+          }
+          return R.ok(all);
+        });
+    }
+
+    function hydrateForRecordSale(input) {
+      var bill = input.bill;
+      var ctx = { organizationId: defaults.organizationId, storeId: bill.storeId };
+
+      var phase1Pairs = uniq([].concat(
+        bill.lines.filter(function (l) { return !!l.recipeId; })
+          .map(function (l) { return { kind: 'recipe', subjectId: l.recipeId }; }),
+        bill.lines.map(function (l) { return { kind: 'packaging', subjectId: l.menuItemId }; }),
+        [{ kind: 'packaging', subjectId: '__default__' }, { kind: 'iceCogs', subjectId: '__default__' }]
+      ));
+
+      var registry = salesLib.createVersionRegistry();
+
+      return loadVersionsFor(ctx, phase1Pairs).then(function (v1) {
+        if (R.isErr(v1)) return v1;
+        var h1 = registry.hydrate(v1.value);
+        if (R.isErr(h1)) return h1;
+
+        var reqR = salesLib.buildRequirements(bill, { versionRegistry: registry });
+        if (R.isErr(reqR)) return reqR;
+        var itemIds = uniq(reqR.value.requirements.map(function (r) { return r.itemId; }));
+
+        return Promise.all([
+          loadVersionsFor(ctx, itemIds.map(function (id) { return { kind: 'cost', subjectId: id }; })),
+          loadUnitsFor(ctx, itemIds)
+        ]).then(function (rows) {
+          if (R.isErr(rows[0])) return rows[0];
+          if (R.isErr(rows[1])) return rows[1];
+          var h2 = registry.hydrate(rows[0].value);
+          if (R.isErr(h2)) return h2;
+
+          var mergedDeps = Object.assign(
+            { units: rows[1].value, versionRegistry: registry },
+            input.deps || {}
+          );
+          return R.ok(Object.assign({}, input, { deps: mergedDeps }));
+        });
+      });
+    }
+
+    function forCommand(name, input) {
+      input = input || {};
+      /* Không phải RecordSale, hoặc bill chưa dựng (không phải việc của module
+         này — `RecordSale.validate` sẽ báo lỗi đúng chỗ): đi thẳng, không thêm
+         gì — cùng nguyên tắc pass-through của `legacy-data-source.js`. */
+      if (name !== 'RecordSale' || !input.bill || !input.bill.lines) {
+        return Promise.resolve(R.ok(input));
+      }
+      return hydrateForRecordSale(input);
+    }
+
+    return { forCommand: forCommand };
+  }
+
+  return { create: create };
+});
+
 /* ===== src/layers/bootstrap/cutover.js ===== */
 /**
  * P13 — PRODUCTION CUTOVER (GIEO-SYSTEM-REBUILD-PLAN.md §17).
@@ -16565,6 +16825,10 @@ GIEO.define('bootstrap/runtime', [
       query: query,
       watch: watch,
       command: command,
+      /* StoreContext hiện tại — app cần đọc actorId/storeId/businessDate/clock
+         để tự dựng input thuần (vd. `commands/sales.js#buildBill`) TRƯỚC khi
+         gọi command(), không phải tự đoán hay chép lại logic tạo context. */
+      context: context,
       device: spec.device || {},
       currentMode: currentMode,
       registeredCommands: function () { return Object.keys(COMMANDS).sort(); },
@@ -16873,20 +17137,43 @@ GIEO.define('bootstrap/startup', [
   'bootstrap/firebase-read-client',
   'bootstrap/pin-auth',
   'bootstrap/legacy-data-source',
+  'bootstrap/canonical-data-source',
   'bootstrap/legacy-takeover',
   'bootstrap/cutover',
   'bootstrap/runtime',
   'legacy-firebase-adapter/read-port',
   'persistence-firebase/canonical-paths',
+  'persistence-firebase/canonical-read-port',
   'persistence-firebase/firestore-runner',
   'persistence-firebase/atomic-commit'
-], function (R, fbApp, readClientLib, pinAuth, dataSourceLib, takeoverLib, cutoverLib,
-             runtimeLib, readPortLib, paths, runnerLib, commitLib) {
+], function (R, fbApp, readClientLib, pinAuth, legacyDataSourceLib, canonicalDataSourceLib, takeoverLib,
+             cutoverLib, runtimeLib, readPortLib, paths, canonicalReadPortLib, runnerLib, commitLib) {
   'use strict';
 
   function docPath(name, ctx, args) {
     var p = paths.path(name, ctx, args);
     return R.isErr(p) ? null : p.value.path;
+  }
+
+  /**
+   * Ghép 2 dataSource thành 1: `forQuery` vẫn của legacy (đường đọc UI hiện
+   * tại chưa đổi), `forCommand` đi qua canonical TRƯỚC (cấp `deps.units`/
+   * `deps.versionRegistry` thật cho RecordSale — xem `canonical-data-source.js`)
+   * RỒI mới qua legacy (legacy `forCommand` là pass-through vĩnh viễn theo
+   * thiết kế, nên chuỗi này không mất gì, chỉ cộng thêm đúng 1 chỗ nó cố ý
+   * chừa trống).
+   */
+  function composeDataSource(legacy, canonical) {
+    return {
+      forQuery: legacy.forQuery,
+      forCommand: function (name, input) {
+        return Promise.resolve(canonical.forCommand(name, input)).then(function (out) {
+          if (R.isErr(out)) return out;
+          return legacy.forCommand(name, out.value);
+        });
+      },
+      watchQuery: legacy.watchQuery
+    };
   }
 
   /** Đọc một document canonical bằng handle Firestore thô. */
@@ -16924,6 +17211,7 @@ GIEO.define('bootstrap/startup', [
         var handles = fb.value;
         var readClient = readClientLib.create({ rtdb: handles.rtdb, firestore: handles.firestore });
         var reader = readPortLib.createReader(readClient);
+        var canonicalReader = canonicalReadPortLib.createReader(handles.firestore);
         var writeRunner = runnerLib.create({ firestore: handles.firestore, rtdb: handles.rtdb });
         var committer = commitLib.createCommitter({ transactionRunner: writeRunner.runner });
 
@@ -16942,7 +17230,10 @@ GIEO.define('bootstrap/startup', [
                nhận cả hai. */
             cutover: cutover,
             context: ctxOf,
-            dataSource: dataSourceLib.create(reader, { storeId: ctx.storeId }),
+            dataSource: composeDataSource(
+              legacyDataSourceLib.create(reader, { storeId: ctx.storeId }),
+              canonicalDataSourceLib.create(canonicalReader, { organizationId: ctx.organizationId })
+            ),
             commit: function (plan, commitCtx) { return committer.commit(plan, commitCtx); },
             device: spec.device
           });
@@ -17045,8 +17336,9 @@ GIEO.define('bootstrap/startup', [
 /** POS controller: chỉ điều phối UI → runtime, không tính kho/giá/COGS. */
 GIEO.define('app-pos/controller', [
   'shared-kernel/result',
-  'bootstrap/runtime'
-], function (R, bootstrap) {
+  'bootstrap/runtime',
+  'commands/sales'
+], function (R, bootstrap, salesLib) {
   'use strict';
 
   function createController(runtime) {
@@ -17101,7 +17393,12 @@ GIEO.define('app-pos/controller', [
           size: line.size || null,
           toppingIds: (line.toppingIds || []).slice(),
           unitPrice: line.unitPrice,
-          qty: qty
+          qty: qty,
+          /* Từ GetMenu (menuItem.recipeId) — có thì mang theo để checkout dựng
+             requirements thật; không có thì buildRequirements tự gắn gapLine
+             (N10, §2.3a), không chặn bán. */
+          recipeId: line.recipeId || null,
+          ice: line.ice || null
         });
       }
       return R.ok(snapshot());
@@ -17121,20 +17418,52 @@ GIEO.define('app-pos/controller', [
     /**
      * Thanh toán. Giỏ chỉ được dọn khi RecordSale thành công — dọn trước rồi
      * command hỏng là cách mất đơn mà người bán không biết đơn đã mất.
+     *
+     * `opts.channel` mặc định tại quán (DINE_IN) — POS chưa có UI chọn kênh,
+     * và tại quán là kênh phổ biến nhất của quán; mang đi/sàn truyền qua
+     * `opts.channel` khi UI đó được xây. `payments`/`discountTotal`/
+     * `redemption`/`customerId` cũng qua `opts`, không phải tự đoán ở đây.
      */
-    function checkout(payment) {
+    function checkout(payment, opts) {
       if (!cart.length) return Promise.resolve(R.err('VALIDATION', 'giỏ hàng trống'));
-      return run('RecordSale', {
-        lines: cart.map(function (l) {
-          return {
-            menuItemId: l.menuItemId, size: l.size,
-            toppingIds: l.toppingIds.slice(), qty: l.qty
-          };
-        }),
-        payment: payment || null
-      }).then(function (out) {
-        if (R.isOk(out)) clearCart();
-        return out;
+      opts = opts || {};
+      /* Không tự chặn ở đây khi chưa có StoreContext (vd. READ_ONLY chưa cấp
+         context) — để `run()`/`command()` tự quyết đúng thứ tự gate đã có
+         (mode trước, context sau), khỏi lệch với `bootstrap/runtime.js`. */
+      var ctx = runtime.context();
+      var input = {};
+      if (ctx) {
+        var billR = salesLib.buildBill({
+          storeId: ctx.storeId,
+          soldByActorId: ctx.actor && ctx.actor.actorId,
+          businessDate: ctx.businessDate,
+          occurredAt: ctx.clock.now(),
+          channel: opts.channel || { type: salesLib.CHANNEL.DINE_IN },
+          customerId: opts.customerId || null,
+          discountTotal: opts.discountTotal || 0,
+          redemption: opts.redemption || null,
+          payments: opts.payments || (payment ? [payment] : []),
+          lines: cart.map(function (l) {
+            return {
+              menuItemId: l.menuItemId, name: l.name, size: l.size,
+              price: l.unitPrice, qty: l.qty,
+              recipeId: l.recipeId, toppings: l.toppingIds.slice(), ice: l.ice
+            };
+          })
+        });
+        if (R.isErr(billR)) return Promise.resolve(billR);
+        input = { bill: billR.value };
+      }
+
+      return run('RecordSale', input).then(function (out) {
+        if (R.isErr(out)) return out;
+        /* `command()` trả {operationId,status,plan,result,...}, KHÔNG phải
+           bill trực tiếp — bill chốt nằm trong plan.domainRecords. Gắn lại
+           thành `.bill` để UI đọc như một kết quả, không phải tự lục plan. */
+        var records = (out.value.plan && out.value.plan.domainRecords) || [];
+        var billRecord = records.filter(function (r) { return r.type === 'bill'; })[0];
+        clearCart();
+        return R.ok(Object.assign({}, out.value, { bill: billRecord ? billRecord.record : null }));
       });
     }
     function navigate(screen) {

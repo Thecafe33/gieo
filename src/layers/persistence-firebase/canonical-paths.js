@@ -136,6 +136,22 @@ GIEO.define('persistence-firebase/canonical-paths', [
   }
 
   /**
+   * Path COLLECTION chứa một builder document — bỏ đoạn cuối (id document) của
+   * `path()`. Dùng cho đọc canonical trước ghi (vd. toàn bộ Unit của 1 itemId,
+   * toàn bộ version của 1 subjectId) — nơi cần LIỆT KÊ, không phải trỏ 1 doc.
+   * Sinh từ builder có sẵn thay vì tự khai lại `base()` ở module khác, nên
+   * không có chỗ path collection lệch khỏi path document tương ứng.
+   */
+  function collectionPath(name, ctx, args) {
+    var d = path(name, ctx, args);
+    if (R.isErr(d)) return d;
+    var parts = d.value.path.split('/');
+    if (parts.length < 2) return R.err('VALIDATION', 'path "' + name + '" quá ngắn để bỏ đoạn document');
+    parts.pop();
+    return R.ok({ kind: d.value.kind, path: parts.join('/') });
+  }
+
+  /**
    * Path PROTECTED giữ nguyên tên cũ, KHÔNG nằm dưới namespace orgs/.
    * Tách riêng để không ai vô tình "chuẩn hoá" nó theo mẫu chung.
    */
@@ -155,6 +171,7 @@ GIEO.define('persistence-firebase/canonical-paths', [
     RTDB: RTDB,
     FIRESTORE: FIRESTORE,
     path: path,
+    collectionPath: collectionPath,
     protectedPath: protectedPath,
     listNames: listNames
   };

@@ -77,8 +77,9 @@ GIEO.define('commands/sales', [
   'recipe-cost-btp/recipe',
   'recipe-cost-btp/cogs',
   'fifo-core/allocation',
-  'loyalty/accrual'
-], function (ids, R, pipeline, menuLib, packagingLib, iceLib, recipeLib, cogsLib, allocation, accrualLib) {
+  'loyalty/accrual',
+  'compaction/versioned-input'
+], function (ids, R, pipeline, menuLib, packagingLib, iceLib, recipeLib, cogsLib, allocation, accrualLib, VI) {
   'use strict';
 
   var CHANNEL = {
@@ -589,10 +590,20 @@ GIEO.define('commands/sales', [
     }
   });
 
+  /**
+   * `deps.versionRegistry` là một `compaction/versioned-input` registry —
+   * export lối dựng nó để caller ngoài `commands` (bootstrap — xem
+   * `bootstrap/canonical-data-source.js`) không phải tự import `compaction`
+   * (layer-rules.json không cho `bootstrap` import `compaction` trực tiếp;
+   * `commands` thì được, nên khai hộ ở đây thay vì nới luật import-direction).
+   */
+  function createVersionRegistry(opts) { return VI.createRegistry(opts); }
+
   return {
     CHANNEL: CHANNEL,
     buildBill: buildBill,
     buildRequirements: buildRequirements,
+    createVersionRegistry: createVersionRegistry,
     RecordSale: RecordSale,
     RecordAddon: RecordAddon
   };
