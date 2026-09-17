@@ -98,12 +98,16 @@ describe('hr/shift', function () {
     assert.ok(sh.payTermsRef.versionId);
   });
 
-  test('chưa công bố PayTerms thì KHÔNG cho check-in', function () {
+  test('PR1/§2.3a — chưa công bố PayTerms KHÔNG chặn check-in, chỉ gắn cờ gap', function () {
     var reg = VI.createRegistry();
     var e = assertOk(E.createEmployee({ name: 'Linh', storeId: STORE }));
-    assertErr(S.checkIn({
+    var sh = assertOk(S.checkIn({
       employee: e, versionRegistry: reg, at: D(2026, 3, 10, 8), businessDate: '2026-03-10'
-    }), 'PRECONDITION');
+    }));
+    assert.strictEqual(sh.status, 'OPEN', 'nhân viên phải vào ca được ngay dù thiếu PayTerms');
+    assert.strictEqual(sh.payTermsRef, null);
+    assert.strictEqual(sh.needsReview, true);
+    assert.ok(sh.needsReviewReasons.indexOf('MISSING_PAY_TERMS') !== -1);
   });
 
   test('shiftId xác định — check-in 2 lần cùng ngày không tạo 2 ca', function () {

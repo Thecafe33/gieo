@@ -34,7 +34,9 @@ GIEO.define('hr/shift', [
   var REVIEW = {
     AUTO_CLOSED: 'AUTO_CLOSED',
     REVISED: 'REVISED',
-    NEGATIVE_DURATION: 'NEGATIVE_DURATION'
+    NEGATIVE_DURATION: 'NEGATIVE_DURATION',
+    /* PR1/§2.3a — nhân viên chưa có PayTerms hiệu lực lúc check-in. */
+    MISSING_PAY_TERMS: 'MISSING_PAY_TERMS'
   };
 
   var HOUR = 3600 * 1000;
@@ -47,8 +49,15 @@ GIEO.define('hr/shift', [
 
   /**
    * Check-in. Snapshot PayTerms có hiệu lực TẠI THỜI ĐIỂM check-in.
-   * Thiếu PayTerms thì TỪ CHỐI — không check-in bằng lương mặc định rồi tính sau,
-   * vì "tính sau" nghĩa là tính bằng lương hiện tại, đúng bug đang phải sửa.
+   *
+   * PR1/§2.3a: thiếu PayTerms KHÔNG chặn check-in — legacy chưa từng chặn ca
+   * làm việc vì lý do lương, và check-in gate 23 điểm requireCheckedIn() ở
+   * POS (kho, BTP, bill, checklist, giao ca), nên chặn ở đây là hard-block
+   * MỚI ảnh hưởng trực tiếp vận hành sống mà hệ cũ không có. Ca vẫn mở với
+   * `payTermsRef: null` + cờ `needsReview`/`MISSING_PAY_TERMS` — LƯƠNG của ca
+   * này treo lại (computeWage() bên dưới vẫn từ chối tính khi thiếu
+   * payTermsRef, đúng nguyên tắc không đoán lương), nhưng NHÂN VIÊN vào ca
+   * được ngay.
    */
   function checkIn(spec) {
     var employee = spec && spec.employee;
@@ -66,11 +75,15 @@ GIEO.define('hr/shift', [
     var termsR = employeeLib.resolvePayTermsAt(
       spec.versionRegistry, employee.employeeId, employee.storeId, spec.at
     );
+    var payTermsRef = null;
+    var needsReview = false;
+    var needsReviewReasons = [];
     if (R.isErr(termsR)) {
-      return R.err('PRECONDITION',
-        'chưa có PayTerms hiệu lực cho nhân viên tại thời điểm check-in — phải công bố PayTerms trước. ' +
-        '(Cho check-in rồi tính lương sau đồng nghĩa tính bằng lương hiện tại, đúng lỗi đang phải sửa.)',
-        { employeeId: employee.employeeId, at: spec.at });
+      needsReview = true;
+      needsReviewReasons = [REVIEW.MISSING_PAY_TERMS];
+    } else {
+      /* Snapshot bắt buộc khi có — V5 của FIFO-COMPACTION-CONTRACT-V1.md §1. */
+      payTermsRef = spec.versionRegistry.snapshotRef(termsR.value);
     }
 
     return R.ok({
@@ -82,11 +95,10 @@ GIEO.define('hr/shift', [
       checkedInAt: spec.at,
       checkedOutAt: null,
       status: STATUS.OPEN,
-      /* Snapshot bắt buộc — V5 của FIFO-COMPACTION-CONTRACT-V1.md §1. */
-      payTermsRef: spec.versionRegistry.snapshotRef(termsR.value),
+      payTermsRef: payTermsRef,
       autoClosed: false,
-      needsReview: false,
-      needsReviewReasons: [],
+      needsReview: needsReview,
+      needsReviewReasons: needsReviewReasons,
       revisions: [],
       operationId: spec.operationId || null
     });

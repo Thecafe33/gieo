@@ -269,6 +269,26 @@ describe('hr/payroll — lương giờ KHÔNG bao giờ dùng PayTerms hiện t�
     assert.ok(r.payTermsVersionIds.length > 0);
     assertOk(ctx.reg.getByVersionId(r.payTermsVersionIds[0]));
   });
+
+  test('PR1/§2.3a: ca thiếu payTermsRef (check-in trước khi có PayTerms) không chặn cả kỳ, chỉ ca đó gap', function () {
+    var ctx = setup({ rate: 30000 });
+    var emptyReg = _p.VI.createRegistry();
+    var gapShift = assertOk(_p.S.checkOut(assertOk(_p.S.checkIn({
+      employee: ctx.emp, versionRegistry: emptyReg, at: D(2, 8), businessDate: '2026-03-02'
+    })), D(2, 16)));
+    var okShift = workDay(ctx, 3, 8);
+
+    var r = assertOk(P.computePayroll({
+      registry: ctx.reg, employee: ctx.emp, shifts: [gapShift, okShift], fromTs: FROM, toTs: TO
+    }));
+    assert.strictEqual(r.hourly.amount, 8 * 30000, 'ca gap không được cộng vào tổng bằng số đoán');
+    assert.strictEqual(r.needsReview, true);
+    assert.strictEqual(r.needsReviewDetail[0].businessDate, '2026-03-02');
+    assert.deepStrictEqual(r.needsReviewDetail[0].reasons, ['MISSING_PAY_TERMS']);
+    var gapLine = r.hourly.lines[0];
+    assert.strictEqual(gapLine.businessDate, '2026-03-02');
+    assert.strictEqual(gapLine.amount, null);
+  });
 });
 
 describe('lương cứng — TRỪ THEO LỊCH LÀM VIỆC (đã chốt với chủ quán, fix §6)', function () {

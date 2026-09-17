@@ -70,6 +70,20 @@ GIEO.define('hr/payroll', [
         return R.err('PRECONDITION',
           'ca ngày ' + sh.businessDate + ' chưa check-out — không chốt lương khi còn ca mở');
       }
+      if (!sh.payTermsRef || !sh.payTermsRef.payload) {
+        /* PR1/§2.3a — check-in đã cho phép mở ca dù thiếu PayTerms (không còn
+           hard-block ở đó), nên đến đây có thể gặp ca CLOSED mà vẫn thiếu
+           payTermsRef. Chỉ CA NÀY treo lương (amount: null, không đoán, không
+           cộng vào tổng), không chặn cả kỳ lương của nhân viên — khác liability
+           gap (dòng 155) nhưng cùng nguyên tắc: gap hiển thị, không đoán số. */
+        hourly.needsReview.push({ businessDate: sh.businessDate, reasons: [shiftLib.REVIEW.MISSING_PAY_TERMS] });
+        hourly.lines.push({
+          businessDate: sh.businessDate, hours: null, normalHours: null, otHours: null,
+          amount: null, payTermsVersionId: null, needsReview: true,
+          needsReviewReasons: [shiftLib.REVIEW.MISSING_PAY_TERMS]
+        });
+        continue;
+      }
       var w = shiftLib.computeWage(sh);
       if (R.isErr(w)) return w;
       hourly.hours += w.value.hours;
