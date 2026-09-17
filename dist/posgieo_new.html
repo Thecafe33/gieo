@@ -9493,6 +9493,15 @@ GIEO.define('persistence-firebase/atomic-commit', [
         menuItem: ['menuItem', function (x) { return { menuItemId: x.menuItemId }; }],
         category: ['category', function (x) { return { categoryId: x.categoryId }; }],
         promotion: ['promotion', function (x) { return { promotionId: x.promotionId }; }],
+        /* CP-VersionedInput — commands/versioning.js (Publish* cho recipe/cost/
+           packaging/prepYield/payTerms/config/iceCogs). MỘT map chung cho CẢ 7
+           domain: `compaction/versioned-input.js#publish()` đã trả về đúng
+           {kind, subjectId, versionId} mà path `versionedInput` cần (khai sẵn
+           ở `canonical-paths.js`, trước đây không producer nào dùng tới) —
+           không cần 7 entry riêng theo từng kind. */
+        versionedInput: ['versionedInput', function (x) {
+          return { kind: x.kind, subjectId: x.subjectId, versionId: x.versionId };
+        }],
         /* L9 — commands/loyalty.js (tích/hoàn điểm gọi qua domain-events dispatch). */
         loyaltyLedgerEntry: ['loyaltyLedger', function (x) { return { entryId: x.entryId }; }],
         /* L9 — commands/alerts.js (RaiseAlert gọi qua domain-events dispatch). */
@@ -10084,8 +10093,9 @@ GIEO.define('read-layer/gateway', [
   'fifo-core/projection',
   'traceability/trace',
   'catalog/menu',
+  'recipe-cost-btp/recipe',
   'alerts/alert'
-], function (ids, R, access, merge, projection, traceLib, menuLib, alertLib) {
+], function (ids, R, access, merge, projection, traceLib, menuLib, recipeLib, alertLib) {
   'use strict';
 
   /**
@@ -10105,6 +10115,9 @@ GIEO.define('read-layer/gateway', [
   var Q = {
     GetUnitTrace: registerQuery('GetUnitTrace', { authority: 'EXECUTE' }),
     GetMenu: registerQuery('GetMenu', { authority: 'EXECUTE' }),
+    /* CP1 (NET-CATALOG-PROMOTION-V1.md) — cùng authority với GetMenu: POS
+       cần đọc khả dụng để làm mờ nút, không phải quyền riêng. */
+    GetMenuAvailability: registerQuery('GetMenuAvailability', { authority: 'EXECUTE' }),
     GetInventoryLevel: registerQuery('GetInventoryLevel', { authority: 'EXECUTE' }),
     GetConsumption: registerQuery('GetConsumption', { authority: 'REVIEW_APPROVE_CORRECT' }),
     /* Dữ liệu nhạy cảm mặc định KHÔNG thuộc tầng EXECUTE (quy tắc P3). */
@@ -10200,6 +10213,53 @@ GIEO.define('read-layer/gateway', [
         });
       },
       legacy: spec.legacyMeta ? function () { return R.ok(spec.legacyMeta); } : null,
+      computedAt: ctx.clock.now()
+    });
+  }
+
+  /**
+   * CP1 — Sold-out DẪN XUẤT TỪ FIFO (`catalog/menu.js#computeAvailability`),
+   * chưa có nơi gọi nào trước đây (NET-CATALOG-PROMOTION-V1.md VIỆC PHẢI LÀM
+   * #1) — cùng dạng gap "logic đúng, chưa nối" như CP7/promotion.evaluate().
+   *
+   * CHỈ QUERY ĐỌC, không chặn RecordSale (§2.3a): kết quả dùng để LÀM MỜ nút
+   * ở POS, không phải PRECONDITION mới trên đường bán — legacy vốn không
+   * chặn gì cả (kho âm mà không ai biết), nên "biết trước sẽ âm" đã là một
+   * bước tiến, không phải một chặn mới.
+   *
+   * `size` bắt buộc vì định mức khai riêng theo size (M/L) — khả dụng của
+   * size L có thể khác size M dù cùng 1 món. `versionRegistry` optional:
+   * thiếu thì `recipeComponents` về null, `computeAvailability` tự trả
+   * NO_RECIPE/unknown — đúng nguyên tắc "thiếu metadata thì nói ra được",
+   * không suy đoán bừa.
+   */
+  function getMenuAvailability(ctx, spec) {
+    var g = guard(Q.GetMenuAvailability, ctx, spec);
+    if (R.isErr(g)) return g;
+    if (!spec.menuItem) return R.err('VALIDATION', 'getMenuAvailability cần menuItem');
+    if (!spec.size) return R.err('VALIDATION', 'getMenuAvailability cần size — khả dụng khác nhau theo size');
+
+    return merge.resolve({
+      computeLive: function () {
+        var components = null;
+        if (spec.menuItem.recipeId && spec.versionRegistry) {
+          var rv = recipeLib.resolveRecipeAt(spec.versionRegistry, {
+            recipeId: spec.menuItem.recipeId, storeId: ctx.storeId, at: spec.at || ctx.clock.now()
+          });
+          if (R.isOk(rv)) {
+            /* toRequirements() chuẩn hoá refId → itemId (đúng khuôn mà
+               computeAvailability đòi) — components thô của RecipeVersion
+               mang refId, không phải itemId. */
+            var req = recipeLib.toRequirements(rv.value, { size: spec.size, qty: 1 });
+            if (R.isOk(req)) components = req.value.requirements;
+          }
+        }
+        return R.ok(menuLib.computeAvailability({
+          menuItem: spec.menuItem,
+          recipeComponents: components,
+          stockByItemId: spec.stockByItemId || {}
+        }));
+      },
       computedAt: ctx.clock.now()
     });
   }
@@ -10545,6 +10605,7 @@ GIEO.define('read-layer/gateway', [
     guardRead: guard,
     getUnitTrace: getUnitTrace,
     getMenu: getMenu,
+    getMenuAvailability: getMenuAvailability,
     getInventoryLevel: getInventoryLevel,
     getRevenue: getRevenue,
     getCOGS: getCOGS,
@@ -13458,13 +13519,41 @@ GIEO.define('commands/sales', [
   'catalog/menu',
   'catalog/packaging',
   'catalog/ice',
+  'catalog/promotion',
   'recipe-cost-btp/recipe',
   'recipe-cost-btp/cogs',
   'fifo-core/allocation',
   'loyalty/accrual',
   'compaction/versioned-input'
-], function (ids, R, pipeline, menuLib, packagingLib, iceLib, recipeLib, cogsLib, allocation, accrualLib, VI) {
+], function (ids, R, pipeline, menuLib, packagingLib, iceLib, promotionLib, recipeLib, cogsLib, allocation, accrualLib, VI) {
   'use strict';
+
+  /*
+   * CP7 (NET-CATALOG-PROMOTION-V1.md) — `catalog/promotion.js#evaluate()` đã
+   * viết đúng luật (2 tầng AUTO_EXECUTE/ADVISORY, loại trừ tường minh) từ
+   * trước nhưng chưa command nào từng gọi tới — cùng hình dạng gap với CP3
+   * trước khi RM1 nối `costBasisForNewUnit`.
+   *
+   * CHỈ 4 effect type tự áp thẳng vào `discountTotal` (số tiền thuần, không
+   * đổi HÌNH DẠNG giỏ hàng): PERCENT_OFF/ORDER_DISCOUNT/ITEM_DISCOUNT đã là
+   * số tiền giảm thuần; ITEM_FREE cũng vậy — `computeEffect` trả về giá của
+   * MỘT dòng đã có sẵn trong giỏ làm discountAmount (miễn phí 1 dòng = giảm
+   * đúng giá dòng đó), không thêm dòng mới, nên an toàn gộp vào
+   * `discountTotal` giống `spec.discountTotal` thủ công.
+   *
+   * BUY_X_GET_Y/FREE_TOPPING/ITEM_UPSIZE bị LOẠI khỏi danh sách tự áp vì
+   * chúng đổi HÌNH DẠNG giỏ (thêm dòng quà tặng/topping miễn phí, đổi size) —
+   * việc đó là quyết định của người dựng giỏ (POS controller), không phải
+   * của `buildBill`. Các outcome này vẫn được TRẢ VỀ trên bill qua
+   * `promotionsUnapplied` (không âm thầm bỏ qua theo §2.3a) để caller tự
+   * dựng lại giỏ rồi gọi `buildBill` lần nữa nếu muốn thực sự tặng quà.
+   */
+  var PROMO_AUTO_APPLY_EFFECT = {
+    PERCENT_OFF: true,
+    ORDER_DISCOUNT: true,
+    ITEM_DISCOUNT: true,
+    ITEM_FREE: true
+  };
 
   var CHANNEL = {
     DINE_IN: 'DINE_IN',
@@ -13517,15 +13606,19 @@ GIEO.define('commands/sales', [
      * là trừ SỔ của khách, không có khách thì không có sổ để trừ.
      */
     /*
-     * ĐIỂM NỐI cho voucher/mã giảm giá NẾU sau này triển khai lại (hiện KHÔNG
-     * xây — xem mục 7 header): thêm case redemption.type mới ở đây (vd.
-     * 'VOUCHER_CODE'), branch xác thực riêng (không cần customerId như tem
-     * nếu voucher ẩn danh), rồi ở RecordSale.execute() thêm nhánh gọi module
-     * "tiêu thụ" voucher tương ứng — theo ĐÚNG khuôn `redemption` này, không
-     * cần đổi shape. `catalog/promotion.js` cũng đã chừa `extraPromotions`
-     * cho khuyến mãi/voucher dạng giảm giá (khác voucher đổi-lấy-sản-phẩm ở
-     * đây). Không tự suy luận thêm gì ngoài điểm nối — chờ quyết định thiết
-     * kế mới nếu/khi việc đó xảy ra.
+     * ĐIỂM NỐI cho voucher đổi-lấy-sản-phẩm NẾU sau này triển khai lại (hiện
+     * KHÔNG xây — xem mục 7 header): thêm case redemption.type mới ở đây
+     * (vd. 'VOUCHER_CODE'), branch xác thực riêng (không cần customerId như
+     * tem nếu voucher ẩn danh), rồi ở RecordSale.execute() thêm nhánh gọi
+     * module "tiêu thụ" voucher tương ứng — theo ĐÚNG khuôn `redemption`
+     * này, không cần đổi shape.
+     *
+     * Mã giảm giá/voucher DẠNG GIẢM TIỀN (khác voucher đổi-lấy-sản-phẩm ở
+     * trên) KHÔNG cần điểm nối riêng nữa — CP7 (NET-CATALOG-PROMOTION-V1.md)
+     * đã nối `spec.extraPromotions` xuống thẳng `promotion.evaluate()` dưới
+     * đây, đúng khuôn `Promotion` chung, chịu chung luật loại trừ với khuyến
+     * mãi tự động (không lặp lại gap "2 biến độc lập, không đối chiếu nhau"
+     * của legacy — xem header `catalog/promotion.js`).
      */
     var redemption = spec.redemption || null;
     if (redemption) {
@@ -13539,6 +13632,7 @@ GIEO.define('commands/sales', [
     }
 
     var normalized = [];
+    var promoCartLines = [];
     var subtotal = 0;
     var freeLineCount = 0;
     for (var i = 0; i < lines.length; i++) {
@@ -13574,6 +13668,13 @@ GIEO.define('commands/sales', [
         /* Chỉ để in tem/nhãn (như legacy) — không ảnh hưởng COGS, xem N2. */
         ice: ice
       });
+      /* Giỏ hàng thuần cho promotion.evaluate() — categoryId là optional, do
+         caller cung cấp (buildBill không tự tra catalog, giữ đúng bản chất
+         hàm thuần không I/O). */
+      promoCartLines.push({
+        menuItemId: l.menuItemId, size: l.size, qty: l.qty, price: l.price,
+        categoryId: l.categoryId || null
+      });
     }
 
     if (redemption && freeLineCount !== 1) {
@@ -13581,7 +13682,42 @@ GIEO.define('commands/sales', [
         'đổi tem lấy ly miễn phí cần ĐÚNG 1 dòng isFree — có ' + freeLineCount);
     }
 
-    var discountTotal = spec.discountTotal || 0;
+    /*
+     * CP7 — `spec.promotions`/`spec.extraPromotions` là danh sách Promotion
+     * đã active mà caller tra sẵn cho store (buildBill không tự đọc catalog).
+     * Không truyền gì thì evaluate() trả applied/advisory/suppressed rỗng —
+     * hành vi giống hệt trước khi nối, không có gì lùi (backward-compatible).
+     */
+    var promoEffectTypeById = {};
+    (spec.promotions || []).concat(spec.extraPromotions || []).forEach(function (p) {
+      promoEffectTypeById[p.promotionId] = p.effect && p.effect.type;
+    });
+    var promoResult = promotionLib.evaluate({
+      cart: { lines: promoCartLines },
+      context: {
+        channel: spec.channel.type,
+        dayOfWeek: new Date(spec.occurredAt).getDay(),
+        dateKey: spec.businessDate
+      },
+      promotions: spec.promotions || [],
+      extraPromotions: spec.extraPromotions || []
+    }).value;
+
+    var promoAutoDiscount = 0;
+    var promotionsApplied = [];
+    var promotionsUnapplied = [];
+    promoResult.applied.forEach(function (outcome) {
+      if (PROMO_AUTO_APPLY_EFFECT[promoEffectTypeById[outcome.promotionId]]) {
+        promoAutoDiscount += outcome.effect.discountAmount || 0;
+        promotionsApplied.push(outcome);
+      } else {
+        /* Cần đổi hình dạng giỏ (thêm dòng/đổi size) — không tự làm ở đây,
+           xem header comment PROMO_AUTO_APPLY_EFFECT ở trên. */
+        promotionsUnapplied.push(outcome);
+      }
+    });
+
+    var discountTotal = (spec.discountTotal || 0) + promoAutoDiscount;
     var total = Math.max(0, subtotal - discountTotal);
 
     /* Phí sàn được TRỪ THẬT — đây là đường ống legacy chưa từng nối. */
@@ -13604,7 +13740,13 @@ GIEO.define('commands/sales', [
       lines: normalized,
       subtotal: subtotal,
       discountTotal: discountTotal,
-      promotionsApplied: (spec.promotionsApplied || []).slice(),
+      promotionsApplied: promotionsApplied,
+      /* Không âm thầm bỏ qua (§2.3a): outcome khớp điều kiện nhưng cần đổi
+         hình dạng giỏ (BUY_X_GET_Y/FREE_TOPPING/ITEM_UPSIZE), và outcome chỉ
+         gợi ý (ADVISORY) — cả hai đều phải nói ra được cho nhân viên/QUANLY. */
+      promotionsUnapplied: promotionsUnapplied,
+      promotionsAdvisory: promoResult.advisory,
+      promotionsSuppressed: promoResult.suppressed,
       redemption: redemption,
       total: total,
       channelFee: channelFee,
@@ -14873,6 +15015,296 @@ GIEO.define('commands/takeover', [
     buildEmployees: buildEmployees,
     buildRevenue: buildRevenue,
     buildPlan: buildPlan
+  };
+});
+
+/* ===== src/layers/commands/versioning.js ===== */
+/**
+ * Lệnh ghi cho VersionedInput — CP-VersionedInput (NET-CATALOG-PROMOTION-V1.md
+ * VIỆC PHẢI LÀM #3, header cũ của `commands/catalog.js` gọi đích danh gap này:
+ * "gap RIÊNG cắt ngang cả 7 loại VersionedInput... đây là gap RIÊNG, không
+ * phải chuyện chỉ của catalog").
+ *
+ * `compaction/versioned-input.js#createRegistry().publish()` đã tồn tại và
+ * đúng cho CẢ 7 kind (`recipe`/`cost`/`packaging`/`prepYield`/`payTerms`/
+ * `kpiTarget`/`config`, cộng `iceCogs` thêm sau) — và 6 domain module
+ * (recipe-cost-btp/recipe.js, recipe-cost-btp/cost.js, catalog/packaging.js,
+ * recipe-cost-btp/btp.js, hr/employee.js, finance/config.js) cộng
+ * catalog/ice.js đã có sẵn hàm `publish*(registry, spec)` bọc đúng lời gọi
+ * `registry.publish()` — nhưng KHÔNG command nào từng gọi tới các hàm này qua
+ * pipeline (auth/idempotency/audit/atomic-commit), giống hình dạng gap RM1
+ * trước khi có `commands/receiving.js`. Module này đóng đúng phần thiếu đó,
+ * KHÔNG đổi domain logic.
+ *
+ * `kpiTarget` CỐ Ý không có Publish* ở đây: grep toàn bộ `src/layers` xác
+ * nhận không domain module nào implement `publishKpiTarget()`/reader cho
+ * kpiTarget — nó chỉ tồn tại như một entry chưa dùng trong
+ * `compaction/versioned-input.js KINDS`. Đây là gap SÂU HƠN "thiếu command
+ * wrapper" (domain KPI-target chưa từng được xây) — ngoài phạm vi PR này,
+ * cần một lượt riêng nếu chủ quán xác nhận cần theo dõi KPI target thật.
+ *
+ * Idempotency: dùng `(kind, subjectId, storeId, effectiveFrom)` làm khoá thay
+ * vì đòi thêm 1 field `editRef` như CP11 (Rename/Archive/...). Lý do: bản
+ * thân `registry.publish()` đã BẮT BUỘC 2 lần publish THẬT khác nhau lên
+ * cùng 1 subject phải có `effectiveFrom` khác nhau (registry từ chối
+ * PRECONDITION nếu `effectiveFrom` không tăng nghiêm ngặt so với version mới
+ * nhất) — nên `effectiveFrom` đã tự nhiên đóng đúng vai trò "cái gì làm 2 lần
+ * publish khác nhau thành 2 operationId khác nhau", không cần bịa thêm field.
+ * Double-tap submit CÙNG một effectiveFrom (cùng 1 request gửi lại) vẫn là
+ * no-op qua IDEMPOTENCY stage như mọi command khác.
+ *
+ * `publishedBy` lấy từ `ctx.actor.actorId` (không phải input caller) — cùng
+ * nguyên tắc `actorId`/`closedBy`/`openedBy` ở mọi command khác: người ký là
+ * người đang thao tác qua context, không phải trường tự khai trong input.
+ *
+ * `input.deps.versionRegistry` — cùng pattern `commands/sales.js`/
+ * `commands/receiving.js`: registry là dependency do caller/composition root
+ * tiêm vào, không phải command tự dựng.
+ */
+GIEO.define('commands/versioning', [
+  'shared-kernel/ids',
+  'shared-kernel/result',
+  'commands/pipeline',
+  'recipe-cost-btp/recipe',
+  'recipe-cost-btp/cost',
+  'catalog/packaging',
+  'recipe-cost-btp/btp',
+  'hr/employee',
+  'finance/config',
+  'catalog/ice'
+], function (ids, R, pipeline, recipeLib, costLib, packagingLib, btpLib, employeeLib, configLib, iceLib) {
+  'use strict';
+
+  function pushVersion(plan, version) {
+    plan.domainRecords.push({ type: 'versionedInput', record: version });
+    return plan;
+  }
+
+  function opId(kindTag, subjectId, storeId, effectiveFrom) {
+    return ids.deterministicId('operation', ['publish' + kindTag, subjectId, storeId, String(effectiveFrom)]);
+  }
+
+  function requireRegistry(input) {
+    return input && input.deps && input.deps.versionRegistry;
+  }
+
+  function requireEffectiveFrom(input) {
+    if (typeof input.effectiveFrom !== 'number') {
+      return R.err('VALIDATION', 'cần effectiveFrom (timestamp) — thời điểm hiệu lực là quyết định nghiệp vụ, không có mặc định để rơi vào');
+    }
+    return R.ok(true);
+  }
+
+  var PublishRecipeVersion = pipeline.defineCommand({
+    name: 'PublishRecipeVersion',
+    authority: 'MASTER_CONFIGURE',
+    mutates: true,
+    sources: ['QUANLY'],
+
+    operationId: function (input, ctx) {
+      return opId('recipe', input.recipeId, ctx.storeId, input.effectiveFrom);
+    },
+
+    validate: function (input) {
+      if (!input || !ids.isId(input.recipeId, 'recipe')) return R.err('VALIDATION', 'cần recipeId hợp lệ');
+      var ef = requireEffectiveFrom(input);
+      if (R.isErr(ef)) return ef;
+      if (!requireRegistry(input)) return R.err('VALIDATION', 'thiếu input.deps.versionRegistry');
+      return R.ok(true);
+    },
+
+    execute: function (input, ctx) {
+      var published = recipeLib.publishRecipeVersion(input.deps.versionRegistry, {
+        recipeId: input.recipeId, storeId: ctx.storeId,
+        effectiveFrom: input.effectiveFrom, publishedBy: ctx.actor.actorId,
+        components: input.components
+      });
+      if (R.isErr(published)) return published;
+      return R.ok(pushVersion(pipeline.emptyPlan(), published.value));
+    }
+  });
+
+  var PublishCostBasis = pipeline.defineCommand({
+    name: 'PublishCostBasis',
+    authority: 'MASTER_CONFIGURE',
+    mutates: true,
+    sources: ['QUANLY'],
+
+    operationId: function (input, ctx) {
+      return opId('cost', input.itemId, ctx.storeId, input.effectiveFrom);
+    },
+
+    validate: function (input) {
+      if (!input || !ids.isId(input.itemId, 'item')) return R.err('VALIDATION', 'cần itemId hợp lệ');
+      var ef = requireEffectiveFrom(input);
+      if (R.isErr(ef)) return ef;
+      if (!requireRegistry(input)) return R.err('VALIDATION', 'thiếu input.deps.versionRegistry');
+      return R.ok(true);
+    },
+
+    execute: function (input, ctx) {
+      var published = costLib.publishCostBasis(input.deps.versionRegistry, {
+        itemId: input.itemId, storeId: ctx.storeId,
+        effectiveFrom: input.effectiveFrom, publishedBy: ctx.actor.actorId,
+        unitCost: input.unitCost, currency: input.currency, source: input.source
+      });
+      if (R.isErr(published)) return published;
+      return R.ok(pushVersion(pipeline.emptyPlan(), published.value));
+    }
+  });
+
+  var PublishPackaging = pipeline.defineCommand({
+    name: 'PublishPackaging',
+    authority: 'MASTER_CONFIGURE',
+    mutates: true,
+    sources: ['QUANLY'],
+
+    operationId: function (input, ctx) {
+      return opId('packaging', input.menuItemId || '__default__', ctx.storeId, input.effectiveFrom);
+    },
+
+    validate: function (input) {
+      if (!input) return R.err('VALIDATION', 'PublishPackaging cần input');
+      var ef = requireEffectiveFrom(input);
+      if (R.isErr(ef)) return ef;
+      if (!requireRegistry(input)) return R.err('VALIDATION', 'thiếu input.deps.versionRegistry');
+      return R.ok(true);
+    },
+
+    execute: function (input, ctx) {
+      var published = packagingLib.publishPackaging(input.deps.versionRegistry, {
+        menuItemId: input.menuItemId || null, storeId: ctx.storeId,
+        effectiveFrom: input.effectiveFrom, publishedBy: ctx.actor.actorId,
+        tier: input.tier, packaging: input.packaging
+      });
+      if (R.isErr(published)) return published;
+      return R.ok(pushVersion(pipeline.emptyPlan(), published.value));
+    }
+  });
+
+  var PublishYield = pipeline.defineCommand({
+    name: 'PublishYield',
+    authority: 'MASTER_CONFIGURE',
+    mutates: true,
+    sources: ['QUANLY'],
+
+    operationId: function (input, ctx) {
+      return opId('yield', input.prepItemId, ctx.storeId, input.effectiveFrom);
+    },
+
+    validate: function (input) {
+      if (!input || !ids.isId(input.prepItemId, 'prepItem')) return R.err('VALIDATION', 'cần prepItemId hợp lệ');
+      var ef = requireEffectiveFrom(input);
+      if (R.isErr(ef)) return ef;
+      if (!requireRegistry(input)) return R.err('VALIDATION', 'thiếu input.deps.versionRegistry');
+      return R.ok(true);
+    },
+
+    execute: function (input, ctx) {
+      var published = btpLib.publishYield(input.deps.versionRegistry, {
+        prepItemId: input.prepItemId, storeId: ctx.storeId,
+        effectiveFrom: input.effectiveFrom, publishedBy: ctx.actor.actorId,
+        yieldPerBatch: input.yieldPerBatch, sampleCount: input.sampleCount, source: input.source
+      });
+      if (R.isErr(published)) return published;
+      return R.ok(pushVersion(pipeline.emptyPlan(), published.value));
+    }
+  });
+
+  var PublishPayTerms = pipeline.defineCommand({
+    name: 'PublishPayTerms',
+    authority: 'MASTER_CONFIGURE',
+    mutates: true,
+    sources: ['QUANLY'],
+
+    operationId: function (input, ctx) {
+      return opId('payterms', input.employeeId, ctx.storeId, input.effectiveFrom);
+    },
+
+    validate: function (input) {
+      if (!input || !ids.isId(input.employeeId, 'employee')) return R.err('VALIDATION', 'cần employeeId hợp lệ');
+      var ef = requireEffectiveFrom(input);
+      if (R.isErr(ef)) return ef;
+      if (!requireRegistry(input)) return R.err('VALIDATION', 'thiếu input.deps.versionRegistry');
+      return R.ok(true);
+    },
+
+    execute: function (input, ctx) {
+      var published = employeeLib.publishPayTerms(input.deps.versionRegistry, {
+        employeeId: input.employeeId, storeId: ctx.storeId,
+        effectiveFrom: input.effectiveFrom, publishedBy: ctx.actor.actorId,
+        terms: input.terms
+      });
+      if (R.isErr(published)) return published;
+      return R.ok(pushVersion(pipeline.emptyPlan(), published.value));
+    }
+  });
+
+  var PublishConfig = pipeline.defineCommand({
+    name: 'PublishConfig',
+    authority: 'MASTER_CONFIGURE',
+    mutates: true,
+    sources: ['QUANLY'],
+
+    operationId: function (input, ctx) {
+      return opId('config', input.key, ctx.storeId, input.effectiveFrom);
+    },
+
+    validate: function (input) {
+      if (!input || !input.key) return R.err('VALIDATION', 'cần key cấu hình');
+      var ef = requireEffectiveFrom(input);
+      if (R.isErr(ef)) return ef;
+      if (!requireRegistry(input)) return R.err('VALIDATION', 'thiếu input.deps.versionRegistry');
+      return R.ok(true);
+    },
+
+    execute: function (input, ctx) {
+      var published = configLib.publishConfig(input.deps.versionRegistry, {
+        key: input.key, storeId: ctx.storeId,
+        effectiveFrom: input.effectiveFrom, publishedBy: ctx.actor.actorId,
+        value: input.value
+      });
+      if (R.isErr(published)) return published;
+      return R.ok(pushVersion(pipeline.emptyPlan(), published.value));
+    }
+  });
+
+  var PublishIceCogs = pipeline.defineCommand({
+    name: 'PublishIceCogs',
+    authority: 'MASTER_CONFIGURE',
+    mutates: true,
+    sources: ['QUANLY'],
+
+    operationId: function (input, ctx) {
+      return opId('icecogs', '__default__', ctx.storeId, input.effectiveFrom);
+    },
+
+    validate: function (input) {
+      if (!input) return R.err('VALIDATION', 'PublishIceCogs cần input');
+      var ef = requireEffectiveFrom(input);
+      if (R.isErr(ef)) return ef;
+      if (!requireRegistry(input)) return R.err('VALIDATION', 'thiếu input.deps.versionRegistry');
+      return R.ok(true);
+    },
+
+    execute: function (input, ctx) {
+      var published = iceLib.publishIceCogs(input.deps.versionRegistry, {
+        storeId: ctx.storeId, effectiveFrom: input.effectiveFrom, publishedBy: ctx.actor.actorId,
+        enabled: input.enabled, itemId: input.itemId, qtyPerCup: input.qtyPerCup
+      });
+      if (R.isErr(published)) return published;
+      return R.ok(pushVersion(pipeline.emptyPlan(), published.value));
+    }
+  });
+
+  return {
+    PublishRecipeVersion: PublishRecipeVersion,
+    PublishCostBasis: PublishCostBasis,
+    PublishPackaging: PublishPackaging,
+    PublishYield: PublishYield,
+    PublishPayTerms: PublishPayTerms,
+    PublishConfig: PublishConfig,
+    PublishIceCogs: PublishIceCogs
   };
 });
 
@@ -16238,7 +16670,38 @@ GIEO.define('bootstrap/domain-events', [], function () {
     }, []);
   }
 
-  return { ROUTES: ROUTES, routeEvents: routeEvents };
+  /**
+   * RP3 (NET-REPORTING-V1.md) — bill bị huỷ (OrderVoided) làm cache báo cáo
+   * ngày đó SAI, cùng gap L9 nhưng KHÔNG đi qua `ROUTES`/`routeEvents()`:
+   * `invalidateScope()` sống ở `read-layer/merge-canonical.js`, và
+   * `src/layer-rules.json` cấm layer `commands` import `read-layer` ("read-layer
+   * KHÔNG import commands (đọc không gọi ghi)" ngược lại cũng đúng theo bảng
+   * canImport — commands không có read-layer trong danh sách). `bootstrap` là
+   * layer DUY NHẤT thấy được cả hai, nên hàm này chỉ dịch event → scope thuần
+   * (plain object), còn việc GỌI `invalidateScope()` thật nằm ở
+   * `bootstrap/runtime.js#dispatchDomainEvents`.
+   *
+   * Chỉ `OrderVoided` kích hoạt — đúng khớp gap legacy đã ghi ở RP3
+   * ("khi 1 bill CŨ bị xoá/sửa qua QUANLY... KHÔNG có lời gọi
+   * invalidateSalesCache() nào"). `ReviseState`'s `StateRevised` không kích
+   * hoạt: entityType của nó có thể là BTP yield/giờ công/kiểm kê — những thứ
+   * không nuôi `dailySalesCache`, kích hoạt tràn lan sẽ xoá cache không liên
+   * quan (vi phạm K3 "chỉ ngày bị ảnh hưởng mới bị bỏ").
+   *
+   * Phạm vi luôn đúng 1 ngày (from=to=businessDate của bill bị huỷ) — không
+   * suy rộng ra cả kỳ, giữ đúng tinh thần K3 mà `invalidateScope()` đã sửa so
+   * với legacy (`clearSalesCache()` xoá sạch toàn bộ).
+   */
+  function scopesToInvalidate(events) {
+    return (events || []).reduce(function (out, evt) {
+      if (evt && evt.type === 'OrderVoided' && evt.storeId && evt.businessDate) {
+        out.push({ storeId: evt.storeId, fromDateKey: evt.businessDate, toDateKey: evt.businessDate });
+      }
+      return out;
+    }, []);
+  }
+
+  return { ROUTES: ROUTES, routeEvents: routeEvents, scopesToInvalidate: scopesToInvalidate };
 });
 
 /* ===== src/layers/bootstrap/firebase-app.js ===== */
@@ -16671,12 +17134,14 @@ GIEO.define('bootstrap/runtime', [
   'commands/payroll',
   'commands/loyalty',
   'commands/alerts',
+  'commands/versioning',
   'read-layer/gateway',
+  'read-layer/merge-canonical',
   'reporting/report-queries',
   'bootstrap/domain-events'
 ], function (
   R, pipeline, sales, inventory, receiving, stockCount, catalog, prep, reversal, approval,
-  businessDay, shift, payroll, loyalty, alerts, reads, reports, domainEvents
+  businessDay, shift, payroll, loyalty, alerts, versioning, reads, merge, reports, domainEvents
 ) {
   'use strict';
 
@@ -16724,10 +17189,20 @@ GIEO.define('bootstrap/runtime', [
     /* AL6 — markSeen/resolve gọi được từ UI, không còn phải đọc/ghi trực
        tiếp qua alerts/alert.js. */
     MarkAlertSeen: alerts.MarkAlertSeen,
-    ResolveAlert: alerts.ResolveAlert
+    ResolveAlert: alerts.ResolveAlert,
+    /* CP-VersionedInput — publish qua đúng 1 cổng pipeline (auth/idempotency/
+       audit/atomic-commit), thay vì gọi thẳng registry.publish() từ UI. */
+    PublishRecipeVersion: versioning.PublishRecipeVersion,
+    PublishCostBasis: versioning.PublishCostBasis,
+    PublishPackaging: versioning.PublishPackaging,
+    PublishYield: versioning.PublishYield,
+    PublishPayTerms: versioning.PublishPayTerms,
+    PublishConfig: versioning.PublishConfig,
+    PublishIceCogs: versioning.PublishIceCogs
   };
   var QUERIES = {
     GetMenu: reads.getMenu,
+    GetMenuAvailability: reads.getMenuAvailability,
     GetUnitTrace: reads.getUnitTrace,
     GetInventoryLevel: reads.getInventoryLevel,
     GetRevenue: reads.getRevenue,
@@ -16798,20 +17273,52 @@ GIEO.define('bootstrap/runtime', [
      * chính (đúng tinh thần decoupled retry mà legacy vốn đã làm, chỉ tự chế
      * kém hơn).
      */
+    /**
+     * RP3 (NET-REPORTING-V1.md) — sau routes/command side-effect (L9), dịch
+     * tiếp `plan.events` sang scope cache cần bỏ và GỌI THẲNG
+     * `read-layer/merge-canonical.invalidateScope()`. Đây KHÔNG đi qua
+     * `command()`/`COMMANDS`: invalidate cache không phải mutate qua pipeline
+     * (không auth/idempotency riêng — nó là hệ quả đọc lại của mutation đã
+     * chạy xong), và bản thân `invalidateScope()` là hàm thuần bên
+     * `read-layer`, tầng mà `commands` không được import — chỉ `bootstrap`
+     * mới thấy được cả hai để nối chỗ này (xem comment ở
+     * `domainEvents.scopesToInvalidate`).
+     *
+     * `spec.reportCacheKeys(scope)` là điểm nối CHO ADAPTER thật cung cấp
+     * danh sách key đang cache — hiện KHÔNG adapter nào implement (chưa có
+     * nơi nào ghi `dailySalesCache`, xác nhận qua grep toàn bộ src/layers),
+     * nên mặc định `[]`: `invalidateScope([], scope)` trả `{kept: [], dropped:
+     * []}` — ĐÚNG với thực tế hệ thống hiện tại (chưa có gì để xoá), không
+     * phải giả lập thành công. Khi cache thật được xây, chỉ cần cấp
+     * `reportCacheKeys` — dây nối này không cần sửa lại.
+     */
+    function dispatchCacheInvalidations(result) {
+      var plan = result.value.plan;
+      var scopes = domainEvents.scopesToInvalidate(plan.events);
+      if (!scopes.length) return result;
+      result.value.reportCacheInvalidations = scopes.map(function (scope) {
+        var keys = typeof spec.reportCacheKeys === 'function' ? (spec.reportCacheKeys(scope) || []) : [];
+        var inv = merge.invalidateScope(keys, scope);
+        return { scope: scope, kept: R.isOk(inv) ? inv.value.kept : keys, dropped: R.isOk(inv) ? inv.value.dropped : [] };
+      });
+      return result;
+    }
     function dispatchDomainEvents(result) {
       if (R.isErr(result)) return Promise.resolve(result);
       var plan = result.value && result.value.plan;
       if (!plan || !plan.events || !plan.events.length) return Promise.resolve(result);
       var routes = domainEvents.routeEvents(plan.events);
-      if (!routes.length) return Promise.resolve(result);
-      return Promise.all(routes.map(function (route) {
-        return command(route.command, route.input).then(function (out) {
-          return { command: route.command, sourceEvent: route.sourceEvent, result: out };
-        });
-      })).then(function (sideEffects) {
-        result.value.sideEffects = sideEffects;
-        return result;
-      });
+      var afterCommands = routes.length
+        ? Promise.all(routes.map(function (route) {
+          return command(route.command, route.input).then(function (out) {
+            return { command: route.command, sourceEvent: route.sourceEvent, result: out };
+          });
+        })).then(function (sideEffects) {
+          result.value.sideEffects = sideEffects;
+          return result;
+        })
+        : Promise.resolve(result);
+      return afterCommands.then(dispatchCacheInvalidations);
     }
     function command(name, input) {
       var cmd = COMMANDS[name];

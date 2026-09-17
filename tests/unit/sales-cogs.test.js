@@ -18,6 +18,7 @@ var _s = (function () {
     U: GIEO.require('fifo-core/unit'),
     A: GIEO.require('fifo-core/allocation'),
     SALES: GIEO.require('commands/sales'),
+    PROMO: GIEO.require('catalog/promotion'),
     PIPE: GIEO.require('commands/pipeline'),
     ACCESS: GIEO.require('store-context/access'),
     CTXL: GIEO.require('store-context/context'),
@@ -420,6 +421,130 @@ describe('commands/sales — Bill model', function () {
       assert.strictEqual(b.redemption.type, 'STAMP_FREE_DRINK');
       assert.strictEqual(b.total, 0);
     });
+  });
+});
+
+describe('commands/sales — buildBill promotion wiring (CP7, NET-CATALOG-PROMOTION-V1.md)', function () {
+  var S = _s.SALES;
+  var P = _s.PROMO;
+
+  function bill(over) {
+    return S.buildBill(Object.assign({
+      storeId: _s.STORE, soldByActorId: _s.NV, businessDate: '2026-03-10', occurredAt: T_SALE,
+      channel: { type: 'DINE_IN' },
+      lines: [{ menuItemId: _s.MON, size: 'M', qty: 2, price: 30000, recipeId: _s.RECIPE, name: 'Trà sữa' }]
+    }, over || {}));
+  }
+
+  function promo(over) {
+    return assertOk(P.createPromotion(Object.assign({
+      name: 'KM', storeId: _s.STORE, tier: 'AUTO_EXECUTE', priority: 10,
+      conditions: [], effect: { type: 'PERCENT_OFF', pct: 10 }
+    }, over || {})));
+  }
+
+  test('không truyền promotions/extraPromotions thì hành vi y hệt trước khi nối (backward-compatible)', function () {
+    var withNothing = assertOk(bill());
+    var withEmpty = assertOk(bill({ promotions: [], extraPromotions: [] }));
+    assert.strictEqual(withNothing.discountTotal, 0);
+    assert.strictEqual(withEmpty.discountTotal, 0);
+    assert.strictEqual(withNothing.total, withEmpty.total);
+    assert.deepStrictEqual(withNothing.promotionsApplied, []);
+    assert.deepStrictEqual(withNothing.promotionsUnapplied, []);
+    assert.deepStrictEqual(withNothing.promotionsAdvisory, []);
+    assert.deepStrictEqual(withNothing.promotionsSuppressed, []);
+  });
+
+  test('PERCENT_OFF tự áp thẳng vào discountTotal, cộng dồn với discountTotal thủ công', function () {
+    var b = assertOk(bill({
+      discountTotal: 5000,
+      promotions: [promo({ effect: { type: 'PERCENT_OFF', pct: 10 } })]
+    }));
+    assert.strictEqual(b.subtotal, 60000);
+    assert.strictEqual(b.discountTotal, 5000 + 6000, 'phải cộng dồn với discountTotal thủ công, không thay thế');
+    assert.strictEqual(b.total, 60000 - 11000);
+    assert.strictEqual(b.promotionsApplied.length, 1);
+    assert.strictEqual(b.promotionsUnapplied.length, 0);
+  });
+
+  test('ORDER_DISCOUNT cũng tự áp thẳng vào discountTotal', function () {
+    var b = assertOk(bill({
+      promotions: [promo({ effect: { type: 'ORDER_DISCOUNT', pct: 20 } })]
+    }));
+    assert.strictEqual(b.discountTotal, 12000);
+    assert.strictEqual(b.promotionsApplied[0].effect.discountAmount, 12000);
+  });
+
+  test('ITEM_DISCOUNT tự áp đúng theo dòng menuItemId khớp, không đụng dòng khác', function () {
+    var b = assertOk(bill({
+      promotions: [promo({ effect: { type: 'ITEM_DISCOUNT', menuItemId: _s.MON, pct: 10 } })]
+    }));
+    assert.strictEqual(b.discountTotal, 6000, '2 ly x 30000 x 10%');
+    assert.strictEqual(b.promotionsApplied.length, 1);
+  });
+
+  test('ITEM_FREE tự áp bằng giá 1 dòng khớp — không thêm/bớt dòng nào trong giỏ', function () {
+    var b = assertOk(bill({
+      promotions: [promo({ effect: { type: 'ITEM_FREE', menuItemId: _s.MON } })]
+    }));
+    assert.strictEqual(b.discountTotal, 30000, 'giá dòng khớp (đơn giá, không nhân qty)');
+    assert.strictEqual(b.lines.length, 1, 'ITEM_FREE không được tự thêm/bớt dòng trong giỏ');
+  });
+
+  test('BUY_X_GET_Y/FREE_TOPPING/ITEM_UPSIZE đổi hình dạng giỏ — KHÔNG tự áp, trả về promotionsUnapplied (§2.3a: không âm thầm bỏ qua)', function () {
+    var b = assertOk(bill({
+      promotions: [
+        promo({ name: 'BuyXGetY', priority: 30, effect: { type: 'BUY_X_GET_Y', buyQty: 2, freeQty: 1 } }),
+        promo({ name: 'FreeTopping', priority: 20, effect: { type: 'FREE_TOPPING', toppingId: 'tran-chau' } }),
+        promo({ name: 'Upsize', priority: 10, effect: { type: 'ITEM_UPSIZE', upsizeValue: 5000 } })
+      ]
+    }));
+    assert.strictEqual(b.discountTotal, 0, 'không được âm thầm trừ tiền cho hiệu ứng đổi hình dạng giỏ');
+    assert.strictEqual(b.promotionsApplied.length, 0);
+    assert.strictEqual(b.promotionsUnapplied.length, 3);
+    var names = b.promotionsUnapplied.map(function (o) { return o.name; }).sort();
+    assert.deepStrictEqual(names, ['BuyXGetY', 'FreeTopping', 'Upsize']);
+  });
+
+  test('tầng ADVISORY chỉ hiện qua promotionsAdvisory, KHÔNG đụng discountTotal', function () {
+    var b = assertOk(bill({
+      promotions: [promo({ tier: 'ADVISORY', effect: { type: 'PERCENT_OFF', pct: 50 } })]
+    }));
+    assert.strictEqual(b.discountTotal, 0);
+    assert.strictEqual(b.promotionsApplied.length, 0);
+    assert.strictEqual(b.promotionsAdvisory.length, 1);
+  });
+
+  test('loại trừ cùng nhóm: ưu tiên cao thắng, cái thua hiện qua promotionsSuppressed kèm lý do', function () {
+    var b = assertOk(bill({
+      promotions: [
+        promo({ name: 'Thấp', priority: 1, exclusivityGroup: 'ORDER_LEVEL', effect: { type: 'PERCENT_OFF', pct: 50 } }),
+        promo({ name: 'Cao', priority: 100, exclusivityGroup: 'ORDER_LEVEL', effect: { type: 'PERCENT_OFF', pct: 10 } })
+      ]
+    }));
+    assert.strictEqual(b.promotionsApplied.length, 1);
+    assert.strictEqual(b.promotionsApplied[0].name, 'Cao');
+    assert.strictEqual(b.promotionsSuppressed.length, 1);
+    assert.ok(/loại trừ bởi "Cao"/.test(b.promotionsSuppressed[0].reason));
+    assert.strictEqual(b.discountTotal, 6000, 'chỉ khuyến mãi thắng mới được trừ tiền');
+  });
+
+  test('extraPromotions (mã giảm giá khách) cũng tự áp và chịu CHUNG luật loại trừ với khuyến mãi tự động — không còn "2 biến độc lập" như legacy', function () {
+    var b = assertOk(bill({
+      promotions: [promo({ name: 'Auto', priority: 50, exclusivityGroup: 'ORDER_LEVEL', effect: { type: 'PERCENT_OFF', pct: 10 } })],
+      extraPromotions: [promo({ name: 'MaKH', priority: 10, exclusivityGroup: 'ORDER_LEVEL', effect: { type: 'ORDER_DISCOUNT', pct: 30 } })]
+    }));
+    assert.strictEqual(b.promotionsApplied.length, 1);
+    assert.strictEqual(b.promotionsApplied[0].name, 'Auto', 'ưu tiên cao hơn phải thắng dù ở mảng nào');
+    assert.strictEqual(b.promotionsSuppressed.length, 1);
+    assert.strictEqual(b.promotionsSuppressed[0].name, 'MaKH');
+  });
+
+  test('extraPromotions đứng một mình vẫn tự áp bình thường', function () {
+    var b = assertOk(bill({
+      extraPromotions: [promo({ effect: { type: 'PERCENT_OFF', pct: 15 } })]
+    }));
+    assert.strictEqual(b.discountTotal, 9000);
   });
 });
 

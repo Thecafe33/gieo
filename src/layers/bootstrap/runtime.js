@@ -15,12 +15,14 @@ GIEO.define('bootstrap/runtime', [
   'commands/payroll',
   'commands/loyalty',
   'commands/alerts',
+  'commands/versioning',
   'read-layer/gateway',
+  'read-layer/merge-canonical',
   'reporting/report-queries',
   'bootstrap/domain-events'
 ], function (
   R, pipeline, sales, inventory, receiving, stockCount, catalog, prep, reversal, approval,
-  businessDay, shift, payroll, loyalty, alerts, reads, reports, domainEvents
+  businessDay, shift, payroll, loyalty, alerts, versioning, reads, merge, reports, domainEvents
 ) {
   'use strict';
 
@@ -68,10 +70,20 @@ GIEO.define('bootstrap/runtime', [
     /* AL6 — markSeen/resolve gọi được từ UI, không còn phải đọc/ghi trực
        tiếp qua alerts/alert.js. */
     MarkAlertSeen: alerts.MarkAlertSeen,
-    ResolveAlert: alerts.ResolveAlert
+    ResolveAlert: alerts.ResolveAlert,
+    /* CP-VersionedInput — publish qua đúng 1 cổng pipeline (auth/idempotency/
+       audit/atomic-commit), thay vì gọi thẳng registry.publish() từ UI. */
+    PublishRecipeVersion: versioning.PublishRecipeVersion,
+    PublishCostBasis: versioning.PublishCostBasis,
+    PublishPackaging: versioning.PublishPackaging,
+    PublishYield: versioning.PublishYield,
+    PublishPayTerms: versioning.PublishPayTerms,
+    PublishConfig: versioning.PublishConfig,
+    PublishIceCogs: versioning.PublishIceCogs
   };
   var QUERIES = {
     GetMenu: reads.getMenu,
+    GetMenuAvailability: reads.getMenuAvailability,
     GetUnitTrace: reads.getUnitTrace,
     GetInventoryLevel: reads.getInventoryLevel,
     GetRevenue: reads.getRevenue,
@@ -142,20 +154,52 @@ GIEO.define('bootstrap/runtime', [
      * chính (đúng tinh thần decoupled retry mà legacy vốn đã làm, chỉ tự chế
      * kém hơn).
      */
+    /**
+     * RP3 (NET-REPORTING-V1.md) — sau routes/command side-effect (L9), dịch
+     * tiếp `plan.events` sang scope cache cần bỏ và GỌI THẲNG
+     * `read-layer/merge-canonical.invalidateScope()`. Đây KHÔNG đi qua
+     * `command()`/`COMMANDS`: invalidate cache không phải mutate qua pipeline
+     * (không auth/idempotency riêng — nó là hệ quả đọc lại của mutation đã
+     * chạy xong), và bản thân `invalidateScope()` là hàm thuần bên
+     * `read-layer`, tầng mà `commands` không được import — chỉ `bootstrap`
+     * mới thấy được cả hai để nối chỗ này (xem comment ở
+     * `domainEvents.scopesToInvalidate`).
+     *
+     * `spec.reportCacheKeys(scope)` là điểm nối CHO ADAPTER thật cung cấp
+     * danh sách key đang cache — hiện KHÔNG adapter nào implement (chưa có
+     * nơi nào ghi `dailySalesCache`, xác nhận qua grep toàn bộ src/layers),
+     * nên mặc định `[]`: `invalidateScope([], scope)` trả `{kept: [], dropped:
+     * []}` — ĐÚNG với thực tế hệ thống hiện tại (chưa có gì để xoá), không
+     * phải giả lập thành công. Khi cache thật được xây, chỉ cần cấp
+     * `reportCacheKeys` — dây nối này không cần sửa lại.
+     */
+    function dispatchCacheInvalidations(result) {
+      var plan = result.value.plan;
+      var scopes = domainEvents.scopesToInvalidate(plan.events);
+      if (!scopes.length) return result;
+      result.value.reportCacheInvalidations = scopes.map(function (scope) {
+        var keys = typeof spec.reportCacheKeys === 'function' ? (spec.reportCacheKeys(scope) || []) : [];
+        var inv = merge.invalidateScope(keys, scope);
+        return { scope: scope, kept: R.isOk(inv) ? inv.value.kept : keys, dropped: R.isOk(inv) ? inv.value.dropped : [] };
+      });
+      return result;
+    }
     function dispatchDomainEvents(result) {
       if (R.isErr(result)) return Promise.resolve(result);
       var plan = result.value && result.value.plan;
       if (!plan || !plan.events || !plan.events.length) return Promise.resolve(result);
       var routes = domainEvents.routeEvents(plan.events);
-      if (!routes.length) return Promise.resolve(result);
-      return Promise.all(routes.map(function (route) {
-        return command(route.command, route.input).then(function (out) {
-          return { command: route.command, sourceEvent: route.sourceEvent, result: out };
-        });
-      })).then(function (sideEffects) {
-        result.value.sideEffects = sideEffects;
-        return result;
-      });
+      var afterCommands = routes.length
+        ? Promise.all(routes.map(function (route) {
+          return command(route.command, route.input).then(function (out) {
+            return { command: route.command, sourceEvent: route.sourceEvent, result: out };
+          });
+        })).then(function (sideEffects) {
+          result.value.sideEffects = sideEffects;
+          return result;
+        })
+        : Promise.resolve(result);
+      return afterCommands.then(dispatchCacheInvalidations);
     }
     function command(name, input) {
       var cmd = COMMANDS[name];

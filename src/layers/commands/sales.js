@@ -74,13 +74,41 @@ GIEO.define('commands/sales', [
   'catalog/menu',
   'catalog/packaging',
   'catalog/ice',
+  'catalog/promotion',
   'recipe-cost-btp/recipe',
   'recipe-cost-btp/cogs',
   'fifo-core/allocation',
   'loyalty/accrual',
   'compaction/versioned-input'
-], function (ids, R, pipeline, menuLib, packagingLib, iceLib, recipeLib, cogsLib, allocation, accrualLib, VI) {
+], function (ids, R, pipeline, menuLib, packagingLib, iceLib, promotionLib, recipeLib, cogsLib, allocation, accrualLib, VI) {
   'use strict';
+
+  /*
+   * CP7 (NET-CATALOG-PROMOTION-V1.md) — `catalog/promotion.js#evaluate()` đã
+   * viết đúng luật (2 tầng AUTO_EXECUTE/ADVISORY, loại trừ tường minh) từ
+   * trước nhưng chưa command nào từng gọi tới — cùng hình dạng gap với CP3
+   * trước khi RM1 nối `costBasisForNewUnit`.
+   *
+   * CHỈ 4 effect type tự áp thẳng vào `discountTotal` (số tiền thuần, không
+   * đổi HÌNH DẠNG giỏ hàng): PERCENT_OFF/ORDER_DISCOUNT/ITEM_DISCOUNT đã là
+   * số tiền giảm thuần; ITEM_FREE cũng vậy — `computeEffect` trả về giá của
+   * MỘT dòng đã có sẵn trong giỏ làm discountAmount (miễn phí 1 dòng = giảm
+   * đúng giá dòng đó), không thêm dòng mới, nên an toàn gộp vào
+   * `discountTotal` giống `spec.discountTotal` thủ công.
+   *
+   * BUY_X_GET_Y/FREE_TOPPING/ITEM_UPSIZE bị LOẠI khỏi danh sách tự áp vì
+   * chúng đổi HÌNH DẠNG giỏ (thêm dòng quà tặng/topping miễn phí, đổi size) —
+   * việc đó là quyết định của người dựng giỏ (POS controller), không phải
+   * của `buildBill`. Các outcome này vẫn được TRẢ VỀ trên bill qua
+   * `promotionsUnapplied` (không âm thầm bỏ qua theo §2.3a) để caller tự
+   * dựng lại giỏ rồi gọi `buildBill` lần nữa nếu muốn thực sự tặng quà.
+   */
+  var PROMO_AUTO_APPLY_EFFECT = {
+    PERCENT_OFF: true,
+    ORDER_DISCOUNT: true,
+    ITEM_DISCOUNT: true,
+    ITEM_FREE: true
+  };
 
   var CHANNEL = {
     DINE_IN: 'DINE_IN',
@@ -133,15 +161,19 @@ GIEO.define('commands/sales', [
      * là trừ SỔ của khách, không có khách thì không có sổ để trừ.
      */
     /*
-     * ĐIỂM NỐI cho voucher/mã giảm giá NẾU sau này triển khai lại (hiện KHÔNG
-     * xây — xem mục 7 header): thêm case redemption.type mới ở đây (vd.
-     * 'VOUCHER_CODE'), branch xác thực riêng (không cần customerId như tem
-     * nếu voucher ẩn danh), rồi ở RecordSale.execute() thêm nhánh gọi module
-     * "tiêu thụ" voucher tương ứng — theo ĐÚNG khuôn `redemption` này, không
-     * cần đổi shape. `catalog/promotion.js` cũng đã chừa `extraPromotions`
-     * cho khuyến mãi/voucher dạng giảm giá (khác voucher đổi-lấy-sản-phẩm ở
-     * đây). Không tự suy luận thêm gì ngoài điểm nối — chờ quyết định thiết
-     * kế mới nếu/khi việc đó xảy ra.
+     * ĐIỂM NỐI cho voucher đổi-lấy-sản-phẩm NẾU sau này triển khai lại (hiện
+     * KHÔNG xây — xem mục 7 header): thêm case redemption.type mới ở đây
+     * (vd. 'VOUCHER_CODE'), branch xác thực riêng (không cần customerId như
+     * tem nếu voucher ẩn danh), rồi ở RecordSale.execute() thêm nhánh gọi
+     * module "tiêu thụ" voucher tương ứng — theo ĐÚNG khuôn `redemption`
+     * này, không cần đổi shape.
+     *
+     * Mã giảm giá/voucher DẠNG GIẢM TIỀN (khác voucher đổi-lấy-sản-phẩm ở
+     * trên) KHÔNG cần điểm nối riêng nữa — CP7 (NET-CATALOG-PROMOTION-V1.md)
+     * đã nối `spec.extraPromotions` xuống thẳng `promotion.evaluate()` dưới
+     * đây, đúng khuôn `Promotion` chung, chịu chung luật loại trừ với khuyến
+     * mãi tự động (không lặp lại gap "2 biến độc lập, không đối chiếu nhau"
+     * của legacy — xem header `catalog/promotion.js`).
      */
     var redemption = spec.redemption || null;
     if (redemption) {
@@ -155,6 +187,7 @@ GIEO.define('commands/sales', [
     }
 
     var normalized = [];
+    var promoCartLines = [];
     var subtotal = 0;
     var freeLineCount = 0;
     for (var i = 0; i < lines.length; i++) {
@@ -190,6 +223,13 @@ GIEO.define('commands/sales', [
         /* Chỉ để in tem/nhãn (như legacy) — không ảnh hưởng COGS, xem N2. */
         ice: ice
       });
+      /* Giỏ hàng thuần cho promotion.evaluate() — categoryId là optional, do
+         caller cung cấp (buildBill không tự tra catalog, giữ đúng bản chất
+         hàm thuần không I/O). */
+      promoCartLines.push({
+        menuItemId: l.menuItemId, size: l.size, qty: l.qty, price: l.price,
+        categoryId: l.categoryId || null
+      });
     }
 
     if (redemption && freeLineCount !== 1) {
@@ -197,7 +237,42 @@ GIEO.define('commands/sales', [
         'đổi tem lấy ly miễn phí cần ĐÚNG 1 dòng isFree — có ' + freeLineCount);
     }
 
-    var discountTotal = spec.discountTotal || 0;
+    /*
+     * CP7 — `spec.promotions`/`spec.extraPromotions` là danh sách Promotion
+     * đã active mà caller tra sẵn cho store (buildBill không tự đọc catalog).
+     * Không truyền gì thì evaluate() trả applied/advisory/suppressed rỗng —
+     * hành vi giống hệt trước khi nối, không có gì lùi (backward-compatible).
+     */
+    var promoEffectTypeById = {};
+    (spec.promotions || []).concat(spec.extraPromotions || []).forEach(function (p) {
+      promoEffectTypeById[p.promotionId] = p.effect && p.effect.type;
+    });
+    var promoResult = promotionLib.evaluate({
+      cart: { lines: promoCartLines },
+      context: {
+        channel: spec.channel.type,
+        dayOfWeek: new Date(spec.occurredAt).getDay(),
+        dateKey: spec.businessDate
+      },
+      promotions: spec.promotions || [],
+      extraPromotions: spec.extraPromotions || []
+    }).value;
+
+    var promoAutoDiscount = 0;
+    var promotionsApplied = [];
+    var promotionsUnapplied = [];
+    promoResult.applied.forEach(function (outcome) {
+      if (PROMO_AUTO_APPLY_EFFECT[promoEffectTypeById[outcome.promotionId]]) {
+        promoAutoDiscount += outcome.effect.discountAmount || 0;
+        promotionsApplied.push(outcome);
+      } else {
+        /* Cần đổi hình dạng giỏ (thêm dòng/đổi size) — không tự làm ở đây,
+           xem header comment PROMO_AUTO_APPLY_EFFECT ở trên. */
+        promotionsUnapplied.push(outcome);
+      }
+    });
+
+    var discountTotal = (spec.discountTotal || 0) + promoAutoDiscount;
     var total = Math.max(0, subtotal - discountTotal);
 
     /* Phí sàn được TRỪ THẬT — đây là đường ống legacy chưa từng nối. */
@@ -220,7 +295,13 @@ GIEO.define('commands/sales', [
       lines: normalized,
       subtotal: subtotal,
       discountTotal: discountTotal,
-      promotionsApplied: (spec.promotionsApplied || []).slice(),
+      promotionsApplied: promotionsApplied,
+      /* Không âm thầm bỏ qua (§2.3a): outcome khớp điều kiện nhưng cần đổi
+         hình dạng giỏ (BUY_X_GET_Y/FREE_TOPPING/ITEM_UPSIZE), và outcome chỉ
+         gợi ý (ADVISORY) — cả hai đều phải nói ra được cho nhân viên/QUANLY. */
+      promotionsUnapplied: promotionsUnapplied,
+      promotionsAdvisory: promoResult.advisory,
+      promotionsSuppressed: promoResult.suppressed,
       redemption: redemption,
       total: total,
       channelFee: channelFee,

@@ -24,8 +24,9 @@ GIEO.define('read-layer/gateway', [
   'fifo-core/projection',
   'traceability/trace',
   'catalog/menu',
+  'recipe-cost-btp/recipe',
   'alerts/alert'
-], function (ids, R, access, merge, projection, traceLib, menuLib, alertLib) {
+], function (ids, R, access, merge, projection, traceLib, menuLib, recipeLib, alertLib) {
   'use strict';
 
   /**
@@ -45,6 +46,9 @@ GIEO.define('read-layer/gateway', [
   var Q = {
     GetUnitTrace: registerQuery('GetUnitTrace', { authority: 'EXECUTE' }),
     GetMenu: registerQuery('GetMenu', { authority: 'EXECUTE' }),
+    /* CP1 (NET-CATALOG-PROMOTION-V1.md) — cùng authority với GetMenu: POS
+       cần đọc khả dụng để làm mờ nút, không phải quyền riêng. */
+    GetMenuAvailability: registerQuery('GetMenuAvailability', { authority: 'EXECUTE' }),
     GetInventoryLevel: registerQuery('GetInventoryLevel', { authority: 'EXECUTE' }),
     GetConsumption: registerQuery('GetConsumption', { authority: 'REVIEW_APPROVE_CORRECT' }),
     /* Dữ liệu nhạy cảm mặc định KHÔNG thuộc tầng EXECUTE (quy tắc P3). */
@@ -140,6 +144,53 @@ GIEO.define('read-layer/gateway', [
         });
       },
       legacy: spec.legacyMeta ? function () { return R.ok(spec.legacyMeta); } : null,
+      computedAt: ctx.clock.now()
+    });
+  }
+
+  /**
+   * CP1 — Sold-out DẪN XUẤT TỪ FIFO (`catalog/menu.js#computeAvailability`),
+   * chưa có nơi gọi nào trước đây (NET-CATALOG-PROMOTION-V1.md VIỆC PHẢI LÀM
+   * #1) — cùng dạng gap "logic đúng, chưa nối" như CP7/promotion.evaluate().
+   *
+   * CHỈ QUERY ĐỌC, không chặn RecordSale (§2.3a): kết quả dùng để LÀM MỜ nút
+   * ở POS, không phải PRECONDITION mới trên đường bán — legacy vốn không
+   * chặn gì cả (kho âm mà không ai biết), nên "biết trước sẽ âm" đã là một
+   * bước tiến, không phải một chặn mới.
+   *
+   * `size` bắt buộc vì định mức khai riêng theo size (M/L) — khả dụng của
+   * size L có thể khác size M dù cùng 1 món. `versionRegistry` optional:
+   * thiếu thì `recipeComponents` về null, `computeAvailability` tự trả
+   * NO_RECIPE/unknown — đúng nguyên tắc "thiếu metadata thì nói ra được",
+   * không suy đoán bừa.
+   */
+  function getMenuAvailability(ctx, spec) {
+    var g = guard(Q.GetMenuAvailability, ctx, spec);
+    if (R.isErr(g)) return g;
+    if (!spec.menuItem) return R.err('VALIDATION', 'getMenuAvailability cần menuItem');
+    if (!spec.size) return R.err('VALIDATION', 'getMenuAvailability cần size — khả dụng khác nhau theo size');
+
+    return merge.resolve({
+      computeLive: function () {
+        var components = null;
+        if (spec.menuItem.recipeId && spec.versionRegistry) {
+          var rv = recipeLib.resolveRecipeAt(spec.versionRegistry, {
+            recipeId: spec.menuItem.recipeId, storeId: ctx.storeId, at: spec.at || ctx.clock.now()
+          });
+          if (R.isOk(rv)) {
+            /* toRequirements() chuẩn hoá refId → itemId (đúng khuôn mà
+               computeAvailability đòi) — components thô của RecipeVersion
+               mang refId, không phải itemId. */
+            var req = recipeLib.toRequirements(rv.value, { size: spec.size, qty: 1 });
+            if (R.isOk(req)) components = req.value.requirements;
+          }
+        }
+        return R.ok(menuLib.computeAvailability({
+          menuItem: spec.menuItem,
+          recipeComponents: components,
+          stockByItemId: spec.stockByItemId || {}
+        }));
+      },
       computedAt: ctx.clock.now()
     });
   }
@@ -485,6 +536,7 @@ GIEO.define('read-layer/gateway', [
     guardRead: guard,
     getUnitTrace: getUnitTrace,
     getMenu: getMenu,
+    getMenuAvailability: getMenuAvailability,
     getInventoryLevel: getInventoryLevel,
     getRevenue: getRevenue,
     getCOGS: getCOGS,

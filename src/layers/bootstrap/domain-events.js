@@ -219,5 +219,36 @@ GIEO.define('bootstrap/domain-events', [], function () {
     }, []);
   }
 
-  return { ROUTES: ROUTES, routeEvents: routeEvents };
+  /**
+   * RP3 (NET-REPORTING-V1.md) — bill bị huỷ (OrderVoided) làm cache báo cáo
+   * ngày đó SAI, cùng gap L9 nhưng KHÔNG đi qua `ROUTES`/`routeEvents()`:
+   * `invalidateScope()` sống ở `read-layer/merge-canonical.js`, và
+   * `src/layer-rules.json` cấm layer `commands` import `read-layer` ("read-layer
+   * KHÔNG import commands (đọc không gọi ghi)" ngược lại cũng đúng theo bảng
+   * canImport — commands không có read-layer trong danh sách). `bootstrap` là
+   * layer DUY NHẤT thấy được cả hai, nên hàm này chỉ dịch event → scope thuần
+   * (plain object), còn việc GỌI `invalidateScope()` thật nằm ở
+   * `bootstrap/runtime.js#dispatchDomainEvents`.
+   *
+   * Chỉ `OrderVoided` kích hoạt — đúng khớp gap legacy đã ghi ở RP3
+   * ("khi 1 bill CŨ bị xoá/sửa qua QUANLY... KHÔNG có lời gọi
+   * invalidateSalesCache() nào"). `ReviseState`'s `StateRevised` không kích
+   * hoạt: entityType của nó có thể là BTP yield/giờ công/kiểm kê — những thứ
+   * không nuôi `dailySalesCache`, kích hoạt tràn lan sẽ xoá cache không liên
+   * quan (vi phạm K3 "chỉ ngày bị ảnh hưởng mới bị bỏ").
+   *
+   * Phạm vi luôn đúng 1 ngày (from=to=businessDate của bill bị huỷ) — không
+   * suy rộng ra cả kỳ, giữ đúng tinh thần K3 mà `invalidateScope()` đã sửa so
+   * với legacy (`clearSalesCache()` xoá sạch toàn bộ).
+   */
+  function scopesToInvalidate(events) {
+    return (events || []).reduce(function (out, evt) {
+      if (evt && evt.type === 'OrderVoided' && evt.storeId && evt.businessDate) {
+        out.push({ storeId: evt.storeId, fromDateKey: evt.businessDate, toDateKey: evt.businessDate });
+      }
+      return out;
+    }, []);
+  }
+
+  return { ROUTES: ROUTES, routeEvents: routeEvents, scopesToInvalidate: scopesToInvalidate };
 });

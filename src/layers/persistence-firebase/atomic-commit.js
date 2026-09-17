@@ -92,6 +92,15 @@ GIEO.define('persistence-firebase/atomic-commit', [
         menuItem: ['menuItem', function (x) { return { menuItemId: x.menuItemId }; }],
         category: ['category', function (x) { return { categoryId: x.categoryId }; }],
         promotion: ['promotion', function (x) { return { promotionId: x.promotionId }; }],
+        /* CP-VersionedInput — commands/versioning.js (Publish* cho recipe/cost/
+           packaging/prepYield/payTerms/config/iceCogs). MỘT map chung cho CẢ 7
+           domain: `compaction/versioned-input.js#publish()` đã trả về đúng
+           {kind, subjectId, versionId} mà path `versionedInput` cần (khai sẵn
+           ở `canonical-paths.js`, trước đây không producer nào dùng tới) —
+           không cần 7 entry riêng theo từng kind. */
+        versionedInput: ['versionedInput', function (x) {
+          return { kind: x.kind, subjectId: x.subjectId, versionId: x.versionId };
+        }],
         /* L9 — commands/loyalty.js (tích/hoàn điểm gọi qua domain-events dispatch). */
         loyaltyLedgerEntry: ['loyaltyLedger', function (x) { return { entryId: x.entryId }; }],
         /* L9 — commands/alerts.js (RaiseAlert gọi qua domain-events dispatch). */

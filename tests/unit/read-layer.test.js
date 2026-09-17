@@ -15,13 +15,19 @@ var _r = (function () {
     CTXL: GIEO.require('store-context/context'),
     BD: GIEO.require('store-context/business-day'),
     CLK: GIEO.require('shared-kernel/clock'),
+    M: GIEO.require('catalog/menu'),
+    RCP: GIEO.require('recipe-cost-btp/recipe'),
+    VI: GIEO.require('compaction/versioned-input'),
     STORE: ids.deterministicId('store', ['main']),
     STORE_B: ids.deterministicId('store', ['b']),
     ORG: ids.deterministicId('org', ['gieo']),
     NV: ids.deterministicId('actor', ['nv01']),
     QL: ids.deterministicId('actor', ['ql']),
     BOSS: ids.deterministicId('actor', ['boss']),
-    SUA: ids.deterministicId('item', ['sua'])
+    SUA: ids.deterministicId('item', ['sua']),
+    DA: ids.deterministicId('item', ['da']),
+    MON: ids.deterministicId('item', ['tra-sua']),
+    RECIPE: ids.deterministicId('recipe', ['tra-sua'])
   };
 })();
 
@@ -166,6 +172,105 @@ describe('read-layer — phân quyền đọc (đóng gap 0% của Reporting)', 
   test('query mới chưa khai quyền thì mặc định ĐÓNG', function () {
     var ctx = rCtx('SYSTEM_ADMIN', 'SYSTEM', _r.BOSS);
     assertErr(_r.ACCESS.authorize(ctx.actor, 'GetSomethingNew', _r.STORE), 'FORBIDDEN');
+  });
+});
+
+describe('GetMenuAvailability (CP1, NET-CATALOG-PROMOTION-V1.md) — sold-out dẫn xuất từ FIFO', function () {
+  var G = _r.G;
+  var M = _r.M;
+  var T_AVAIL = new Date(2026, 2, 10, 10).getTime();
+
+  function menuItem(over) {
+    return assertOk(M.createMenuItem(Object.assign({
+      menuItemId: _r.MON, storeId: _r.STORE, name: 'Trà sữa',
+      prices: { M: 30000 }, recipeId: _r.RECIPE
+    }, over || {})));
+  }
+
+  function registryWithRecipe() {
+    var reg = _r.VI.createRegistry();
+    assertOk(_r.RCP.publishRecipeVersion(reg, {
+      recipeId: _r.RECIPE, storeId: _r.STORE, effectiveFrom: new Date(2026, 0, 1).getTime(),
+      publishedBy: _r.BOSS, components: { M: [{ refType: 'item', refId: _r.SUA, qty: 100 }] }
+    }));
+    return reg;
+  }
+
+  test('cùng quyền EXECUTE với GetMenu — POS đọc được để làm mờ nút', function () {
+    var out = assertOk(G.getMenuAvailability(rCtx('POS_OPERATOR', 'POS'), {
+      menuItem: menuItem(), size: 'M', versionRegistry: registryWithRecipe(),
+      stockByItemId: { }
+    }));
+    assert.ok(out.data);
+  });
+
+  test('thiếu menuItem thì VALIDATION', function () {
+    assertErr(G.getMenuAvailability(rCtx('POS_OPERATOR', 'POS'), { size: 'M' }), 'VALIDATION');
+  });
+
+  test('thiếu size thì VALIDATION — khả dụng khác nhau theo size', function () {
+    assertErr(G.getMenuAvailability(rCtx('POS_OPERATOR', 'POS'), { menuItem: menuItem() }), 'VALIDATION');
+  });
+
+  test('món đã ngừng bán → ARCHIVED', function () {
+    var out = assertOk(G.getMenuAvailability(rCtx('POS_OPERATOR', 'POS'), {
+      menuItem: Object.assign({}, menuItem(), { archived: true }), size: 'M'
+    }));
+    assert.strictEqual(out.data.available, false);
+    assert.strictEqual(out.data.reason, 'ARCHIVED');
+  });
+
+  test('chưa khai định mức → NO_RECIPE, unknown (không suy đoán còn/hết)', function () {
+    var out = assertOk(G.getMenuAvailability(rCtx('POS_OPERATOR', 'POS'), {
+      menuItem: menuItem({ recipeId: null }), size: 'M'
+    }));
+    assert.strictEqual(out.data.reason, 'NO_RECIPE');
+    assert.strictEqual(out.data.unknown, true);
+  });
+
+  test('thiếu versionRegistry (dù menuItem có recipeId) → về NO_RECIPE/unknown, KHÔNG đoán mò (§2.3a)', function () {
+    var out = assertOk(G.getMenuAvailability(rCtx('POS_OPERATOR', 'POS'), {
+      menuItem: menuItem(), size: 'M'
+    }));
+    assert.strictEqual(out.data.reason, 'NO_RECIPE');
+    assert.strictEqual(out.data.unknown, true);
+  });
+
+  test('đủ nguyên liệu → available true', function () {
+    var out = assertOk(G.getMenuAvailability(rCtx('POS_OPERATOR', 'POS'), {
+      menuItem: menuItem(), size: 'M', versionRegistry: registryWithRecipe(),
+      stockByItemId: { }
+    }));
+    var withStock = assertOk(G.getMenuAvailability(rCtx('POS_OPERATOR', 'POS'), {
+      menuItem: menuItem(), size: 'M', versionRegistry: registryWithRecipe(), at: T_AVAIL,
+      stockByItemId: (function () { var o = {}; o[_r.SUA] = 1000; return o; })()
+    }));
+    assert.strictEqual(withStock.data.available, true);
+  });
+
+  test('thiếu số liệu tồn của nguyên liệu cần → STOCK_UNKNOWN, không mặc định là còn', function () {
+    var out = assertOk(G.getMenuAvailability(rCtx('POS_OPERATOR', 'POS'), {
+      menuItem: menuItem(), size: 'M', versionRegistry: registryWithRecipe(), at: T_AVAIL,
+      stockByItemId: { }
+    }));
+    assert.strictEqual(out.data.reason, 'STOCK_UNKNOWN');
+    assert.strictEqual(out.data.unknown, true);
+  });
+
+  test('không đủ tồn → OUT_OF_STOCK kèm blockingItems', function () {
+    var out = assertOk(G.getMenuAvailability(rCtx('POS_OPERATOR', 'POS'), {
+      menuItem: menuItem(), size: 'M', versionRegistry: registryWithRecipe(), at: T_AVAIL,
+      stockByItemId: (function () { var o = {}; o[_r.SUA] = 50; return o; })()
+    }));
+    assert.strictEqual(out.data.available, false);
+    assert.strictEqual(out.data.reason, 'OUT_OF_STOCK');
+    assert.strictEqual(out.data.blockingItems[0].itemId, _r.SUA);
+  });
+
+  test('storeId ngoài phạm vi thì FORBIDDEN — cùng cổng guard() với mọi query khác', function () {
+    assertErr(G.getMenuAvailability(rCtx('POS_OPERATOR', 'POS'), {
+      storeId: _r.STORE_B, menuItem: menuItem(), size: 'M'
+    }), 'FORBIDDEN');
   });
 });
 
