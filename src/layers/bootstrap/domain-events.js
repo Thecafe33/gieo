@@ -18,6 +18,13 @@
  * bị bỏ qua thay vì gọi command với input rỗng gây lỗi khó hiểu. Field bắt
  * buộc mà `toInput` KHÔNG tự bịa (như `policy` của ReverseLoyaltyForVoidedBill)
  * vẫn được route đi để lộ ra thành lỗi validate — không phải bị nuốt im lặng.
+ *
+ * Nối tiếp — AlertEngine (`NET-ALERTS-V1.md` "PHÁT HIỆN CHUNG"): domain thứ 5
+ * xác nhận phụ thuộc gap này. `PrepYieldMismatch`/`LostContainerReported`/
+ * `StockCountPartiallyApplied` giờ route tới `RaiseAlert` (`commands/alerts.js`).
+ * `StockCountPartiallyApplied` mang NHIỀU dòng lỗi trong 1 sự kiện — `toInput`
+ * ở đây được phép trả một MẢNG input (1 alert riêng cho từng dòng) thay vì 1
+ * object; `routeEvents` xoè mảng đó ra thành nhiều route độc lập.
  */
 GIEO.define('bootstrap/domain-events', [], function () {
   'use strict';
@@ -75,17 +82,77 @@ GIEO.define('bootstrap/domain-events', [], function () {
           actorId: evt.reversedBy
         };
       }
+    },
+    /* BTP B1 — lệch yield >ngưỡng lúc nấu mẻ (commands/prep.js). */
+    PrepYieldMismatch: {
+      command: 'RaiseAlert',
+      toInput: function (evt) {
+        return {
+          type: 'PREP_YIELD_MISMATCH',
+          storeId: evt.storeId,
+          businessDate: evt.businessDate,
+          subjectKey: evt.prepBatchId,
+          data: {
+            prepBatchId: evt.prepBatchId,
+            prepItemId: evt.prepItemId,
+            variancePct: evt.variancePct
+          }
+        };
+      }
+    },
+    /* Raw Material RM6 — báo mất hũ (commands/inventory.js ReportLostContainer)
+       vào thẳng danh sách chờ duyệt của QUANLY (LOST_CONTAINER_PENDING đã có
+       sẵn trong TYPES, khớp đúng chain-trace gốc "container mất không bao giờ
+       đổi status"). */
+    LostContainerReported: {
+      command: 'RaiseAlert',
+      toInput: function (evt) {
+        if (!evt.lostReportId) return null;
+        return {
+          type: 'LOST_CONTAINER_PENDING',
+          storeId: evt.storeId,
+          businessDate: evt.businessDate,
+          subjectKey: evt.unitId,
+          data: { unitId: evt.unitId, lostReportId: evt.lostReportId }
+        };
+      }
+    },
+    /* Stock Count SC3 — dòng kiểm kê không áp được lúc duyệt (commands/approval.js
+       ApproveStockCount). 1 sự kiện có thể mang NHIỀU dòng lỗi — 1 alert / dòng,
+       subjectKey theo (stockCountId, itemId) để 2 dòng lỗi khác món không trùng id. */
+    StockCountPartiallyApplied: {
+      command: 'RaiseAlert',
+      toInput: function (evt) {
+        return (evt.failedLines || []).map(function (line) {
+          return {
+            type: 'STOCK_COUNT_LINE_FAILED',
+            storeId: evt.storeId,
+            businessDate: evt.businessDate,
+            subjectKey: evt.stockCountId + ':' + line.itemId,
+            data: { stockCountId: evt.stockCountId, itemId: line.itemId, reason: line.reason }
+          };
+        });
+      }
     }
   };
 
-  /** Dịch `plan.events` thành danh sách {command, input, sourceEvent} để chạy tiếp. */
+  /**
+   * Dịch `plan.events` thành danh sách {command, input, sourceEvent} để chạy
+   * tiếp. `toInput` có thể trả 1 object, 1 mảng object (xoè ra nhiều route —
+   * dùng khi 1 sự kiện mang nhiều "chủ thể" cần alert riêng), hoặc null/mảng
+   * rỗng để bỏ qua.
+   */
   function routeEvents(events) {
     return (events || []).reduce(function (out, evt) {
       var route = evt && ROUTES[evt.type];
       if (!route) return out;
       var input = route.toInput(evt);
-      if (input === null) return out;
-      out.push({ command: route.command, input: input, sourceEvent: evt.type });
+      if (input === null || input === undefined) return out;
+      var inputs = Array.isArray(input) ? input : [input];
+      inputs.forEach(function (i) {
+        if (i === null || i === undefined) return;
+        out.push({ command: route.command, input: i, sourceEvent: evt.type });
+      });
       return out;
     }, []);
   }

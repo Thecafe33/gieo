@@ -14,12 +14,13 @@ GIEO.define('bootstrap/runtime', [
   'commands/shift',
   'commands/payroll',
   'commands/loyalty',
+  'commands/alerts',
   'read-layer/gateway',
   'reporting/report-queries',
   'bootstrap/domain-events'
 ], function (
   R, pipeline, sales, inventory, receiving, stockCount, catalog, prep, reversal, approval,
-  businessDay, shift, payroll, loyalty, reads, reports, domainEvents
+  businessDay, shift, payroll, loyalty, alerts, reads, reports, domainEvents
 ) {
   'use strict';
 
@@ -62,7 +63,8 @@ GIEO.define('bootstrap/runtime', [
        không có đường tắt riêng cho command "nội bộ". */
     AccrueLoyaltyForSale: loyalty.AccrueLoyaltyForSale,
     AccrueLoyaltyForAddon: loyalty.AccrueLoyaltyForAddon,
-    ReverseLoyaltyForVoidedBill: loyalty.ReverseLoyaltyForVoidedBill
+    ReverseLoyaltyForVoidedBill: loyalty.ReverseLoyaltyForVoidedBill,
+    RaiseAlert: alerts.RaiseAlert
   };
   var QUERIES = {
     GetMenu: reads.getMenu,

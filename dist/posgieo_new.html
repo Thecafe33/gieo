@@ -7455,6 +7455,22 @@ GIEO.define('alerts/alert', ['shared-kernel/ids', 'shared-kernel/result'], funct
     DAY_NOT_CLOSED: {
       severity: SEVERITY.WARNING, audience: AUDIENCE.BOTH,
       resolution: RESOLUTION.AUTO_VERIFIABLE, required: ['dateKey']
+    },
+    /* L9 nối — mẻ BTP nấu lệch yield >ngưỡng (commands/prep.js). Không tự
+       kiểm chứng được bằng dữ liệu (mẻ đã nấu xong, không "hết điều kiện"
+       theo thời gian) nên cần referenceId trỏ tới hành động đã soát (vd
+       EditPrepYield), giống CASH_VARIANCE/STOCK_VARIANCE. */
+    PREP_YIELD_MISMATCH: {
+      severity: SEVERITY.WARNING, audience: AUDIENCE.QUANLY,
+      resolution: RESOLUTION.MANUAL_WITH_REFERENCE, required: ['prepBatchId', 'prepItemId', 'variancePct']
+    },
+    /* L9 nối — 1 dòng kiểm kê không áp được lúc duyệt (commands/approval.js
+       ApproveStockCount, mảng `failedLines`). Khác STOCK_VARIANCE (đó là
+       lệch SỐ LƯỢNG đã biết cả 2 phía) — đây là LỖI ÁP DỤNG (không tìm
+       thấy lô, ghi sổ hỏng...), nên cần loại riêng để không mất "reason". */
+    STOCK_COUNT_LINE_FAILED: {
+      severity: SEVERITY.WARNING, audience: AUDIENCE.QUANLY,
+      resolution: RESOLUTION.MANUAL_WITH_REFERENCE, required: ['stockCountId', 'itemId', 'reason']
     }
   };
 
@@ -9299,7 +9315,9 @@ GIEO.define('persistence-firebase/atomic-commit', [
         category: ['category', function (x) { return { categoryId: x.categoryId }; }],
         promotion: ['promotion', function (x) { return { promotionId: x.promotionId }; }],
         /* L9 — commands/loyalty.js (tích/hoàn điểm gọi qua domain-events dispatch). */
-        loyaltyLedgerEntry: ['loyaltyLedger', function (x) { return { entryId: x.entryId }; }]
+        loyaltyLedgerEntry: ['loyaltyLedger', function (x) { return { entryId: x.entryId }; }],
+        /* L9 — commands/alerts.js (RaiseAlert gọi qua domain-events dispatch). */
+        alert: ['alert', function (x) { return { alertId: x.alertId }; }]
       };
       var m = map[r.type];
       if (!m) {
@@ -10326,6 +10344,81 @@ GIEO.define('read-layer/merge-canonical', ['shared-kernel/result'], function (R)
   };
 });
 
+/* ===== src/layers/commands/alerts.js ===== */
+/**
+ * Lệnh cảnh báo — bọc `alerts/alert.js#raise()` thành command thật.
+ *
+ * `alerts/alert.js` có logic đúng (severity/audience/required field theo
+ * TỪNG loại, xem header file đó) nhưng chưa từng được command nào gọi — mọi
+ * event đã sẵn trong `plan.events` (`PrepYieldMismatch`, `LostContainerReported`,
+ * `StockCountPartiallyApplied`...) không có consumer nào tạo alert thật.
+ * `bootstrap/domain-events.js` dịch các event đó thành input cho `RaiseAlert`
+ * ở đây, cùng cổng idempotency/quyền/audit với mọi command khác — không có
+ * đường ghi tắt riêng cho "alert nội bộ do hệ thống tự tạo".
+ *
+ * `RaiseAlert` idempotent theo (type, storeId, subjectKey) — TRÙNG với cách
+ * `alert.raise()` xác định `alertId`, nên gọi lại đúng operationId là replay
+ * (không ghi lại), KHÔNG đè mất trạng thái `SEEN`/`RESOLVED` mà người dùng đã
+ * đặt cho alert đó qua các command khác (markSeen/resolve — chưa có command
+ * riêng, nằm ngoài phạm vi lượt nối này).
+ */
+GIEO.define('commands/alerts', [
+  'shared-kernel/ids',
+  'shared-kernel/result',
+  'commands/pipeline',
+  'alerts/alert'
+], function (ids, R, pipeline, alertLib) {
+  'use strict';
+
+  var RaiseAlert = pipeline.defineCommand({
+    name: 'RaiseAlert',
+    /*
+     * Alert được HỆ THỐNG tự tạo, chạy NGAY SAU command gốc qua domain-events
+     * dispatch — CÙNG actor/ctx với command gốc (dispatchDomainEvents không
+     * đổi actor). Command gốc có thể là ReportLostContainer (POS, EXECUTE),
+     * RecordPrepProduction (POS hoặc QUANLY, EXECUTE hoặc REVIEW_APPROVE_CORRECT)
+     * hay ApproveStockCount (QUANLY, REVIEW_APPROVE_CORRECT) — RaiseAlert phải
+     * chấp nhận CẢ HAI, nếu không actor đã đủ quyền chạy command gốc sẽ bị
+     * FORBIDDEN ngay ở bước side-effect, một lỗi khó hiểu vì input hợp lệ.
+     */
+    authority: ['EXECUTE', 'REVIEW_APPROVE_CORRECT'],
+    mutates: true,
+    sources: ['POS', 'QUANLY'],
+
+    operationId: function (input) {
+      return ids.deterministicId('operation',
+        ['raisealert', input.type, input.storeId, input.subjectKey || 'store']);
+    },
+
+    validate: function (input) {
+      if (!input || !input.type) return R.err('VALIDATION', 'RaiseAlert cần type');
+      if (!ids.isId(input.storeId, 'store')) return R.err('VALIDATION', 'RaiseAlert cần storeId hợp lệ');
+      if (!input.businessDate) return R.err('VALIDATION', 'RaiseAlert cần businessDate');
+      return R.ok(true);
+    },
+
+    execute: function (input, ctx) {
+      var plan = pipeline.emptyPlan();
+      var opId = ids.deterministicId('operation',
+        ['raisealert', input.type, input.storeId, input.subjectKey || 'store']);
+      var r = alertLib.raise({
+        type: input.type,
+        storeId: input.storeId,
+        businessDate: input.businessDate,
+        subjectKey: input.subjectKey,
+        data: input.data,
+        at: input.at || ctx.clock.now(),
+        operationId: opId
+      });
+      if (R.isErr(r)) return r;
+      plan.domainRecords.push({ type: 'alert', record: r.value });
+      return R.ok(plan);
+    }
+  });
+
+  return { RaiseAlert: RaiseAlert };
+});
+
 /* ===== src/layers/commands/approval.js ===== */
 /**
  * Lệnh duyệt.
@@ -11231,10 +11324,11 @@ GIEO.define('commands/inventory', [
 
     execute: function (input, ctx) {
       var plan = pipeline.emptyPlan();
+      var lostReportId = ids.deterministicId('operation', ['lostreport', input.unitId]);
       plan.domainRecords.push({
         type: 'lostReport',
         record: {
-          lostReportId: ids.deterministicId('operation', ['lostreport', input.unitId]),
+          lostReportId: lostReportId,
           unitId: input.unitId,
           /* CHỜ DUYỆT — Unit chưa vào nhánh LOST cho tới khi QUANLY duyệt.
              Đây chính là mắt xích legacy thiếu (Bug #12). */
@@ -11247,7 +11341,8 @@ GIEO.define('commands/inventory', [
       });
       plan.events.push({
         type: 'LostContainerReported',
-        unitId: input.unitId, storeId: ctx.storeId, businessDate: ctx.businessDate
+        unitId: input.unitId, lostReportId: lostReportId,
+        storeId: ctx.storeId, businessDate: ctx.businessDate
       });
       return R.ok(plan);
     }
@@ -15100,6 +15195,13 @@ GIEO.define('bootstrap/cutover', [
  * bị bỏ qua thay vì gọi command với input rỗng gây lỗi khó hiểu. Field bắt
  * buộc mà `toInput` KHÔNG tự bịa (như `policy` của ReverseLoyaltyForVoidedBill)
  * vẫn được route đi để lộ ra thành lỗi validate — không phải bị nuốt im lặng.
+ *
+ * Nối tiếp — AlertEngine (`NET-ALERTS-V1.md` "PHÁT HIỆN CHUNG"): domain thứ 5
+ * xác nhận phụ thuộc gap này. `PrepYieldMismatch`/`LostContainerReported`/
+ * `StockCountPartiallyApplied` giờ route tới `RaiseAlert` (`commands/alerts.js`).
+ * `StockCountPartiallyApplied` mang NHIỀU dòng lỗi trong 1 sự kiện — `toInput`
+ * ở đây được phép trả một MẢNG input (1 alert riêng cho từng dòng) thay vì 1
+ * object; `routeEvents` xoè mảng đó ra thành nhiều route độc lập.
  */
 GIEO.define('bootstrap/domain-events', [], function () {
   'use strict';
@@ -15157,17 +15259,77 @@ GIEO.define('bootstrap/domain-events', [], function () {
           actorId: evt.reversedBy
         };
       }
+    },
+    /* BTP B1 — lệch yield >ngưỡng lúc nấu mẻ (commands/prep.js). */
+    PrepYieldMismatch: {
+      command: 'RaiseAlert',
+      toInput: function (evt) {
+        return {
+          type: 'PREP_YIELD_MISMATCH',
+          storeId: evt.storeId,
+          businessDate: evt.businessDate,
+          subjectKey: evt.prepBatchId,
+          data: {
+            prepBatchId: evt.prepBatchId,
+            prepItemId: evt.prepItemId,
+            variancePct: evt.variancePct
+          }
+        };
+      }
+    },
+    /* Raw Material RM6 — báo mất hũ (commands/inventory.js ReportLostContainer)
+       vào thẳng danh sách chờ duyệt của QUANLY (LOST_CONTAINER_PENDING đã có
+       sẵn trong TYPES, khớp đúng chain-trace gốc "container mất không bao giờ
+       đổi status"). */
+    LostContainerReported: {
+      command: 'RaiseAlert',
+      toInput: function (evt) {
+        if (!evt.lostReportId) return null;
+        return {
+          type: 'LOST_CONTAINER_PENDING',
+          storeId: evt.storeId,
+          businessDate: evt.businessDate,
+          subjectKey: evt.unitId,
+          data: { unitId: evt.unitId, lostReportId: evt.lostReportId }
+        };
+      }
+    },
+    /* Stock Count SC3 — dòng kiểm kê không áp được lúc duyệt (commands/approval.js
+       ApproveStockCount). 1 sự kiện có thể mang NHIỀU dòng lỗi — 1 alert / dòng,
+       subjectKey theo (stockCountId, itemId) để 2 dòng lỗi khác món không trùng id. */
+    StockCountPartiallyApplied: {
+      command: 'RaiseAlert',
+      toInput: function (evt) {
+        return (evt.failedLines || []).map(function (line) {
+          return {
+            type: 'STOCK_COUNT_LINE_FAILED',
+            storeId: evt.storeId,
+            businessDate: evt.businessDate,
+            subjectKey: evt.stockCountId + ':' + line.itemId,
+            data: { stockCountId: evt.stockCountId, itemId: line.itemId, reason: line.reason }
+          };
+        });
+      }
     }
   };
 
-  /** Dịch `plan.events` thành danh sách {command, input, sourceEvent} để chạy tiếp. */
+  /**
+   * Dịch `plan.events` thành danh sách {command, input, sourceEvent} để chạy
+   * tiếp. `toInput` có thể trả 1 object, 1 mảng object (xoè ra nhiều route —
+   * dùng khi 1 sự kiện mang nhiều "chủ thể" cần alert riêng), hoặc null/mảng
+   * rỗng để bỏ qua.
+   */
   function routeEvents(events) {
     return (events || []).reduce(function (out, evt) {
       var route = evt && ROUTES[evt.type];
       if (!route) return out;
       var input = route.toInput(evt);
-      if (input === null) return out;
-      out.push({ command: route.command, input: input, sourceEvent: evt.type });
+      if (input === null || input === undefined) return out;
+      var inputs = Array.isArray(input) ? input : [input];
+      inputs.forEach(function (i) {
+        if (i === null || i === undefined) return;
+        out.push({ command: route.command, input: i, sourceEvent: evt.type });
+      });
       return out;
     }, []);
   }
@@ -15604,12 +15766,13 @@ GIEO.define('bootstrap/runtime', [
   'commands/shift',
   'commands/payroll',
   'commands/loyalty',
+  'commands/alerts',
   'read-layer/gateway',
   'reporting/report-queries',
   'bootstrap/domain-events'
 ], function (
   R, pipeline, sales, inventory, receiving, stockCount, catalog, prep, reversal, approval,
-  businessDay, shift, payroll, loyalty, reads, reports, domainEvents
+  businessDay, shift, payroll, loyalty, alerts, reads, reports, domainEvents
 ) {
   'use strict';
 
@@ -15652,7 +15815,8 @@ GIEO.define('bootstrap/runtime', [
        không có đường tắt riêng cho command "nội bộ". */
     AccrueLoyaltyForSale: loyalty.AccrueLoyaltyForSale,
     AccrueLoyaltyForAddon: loyalty.AccrueLoyaltyForAddon,
-    ReverseLoyaltyForVoidedBill: loyalty.ReverseLoyaltyForVoidedBill
+    ReverseLoyaltyForVoidedBill: loyalty.ReverseLoyaltyForVoidedBill,
+    RaiseAlert: alerts.RaiseAlert
   };
   var QUERIES = {
     GetMenu: reads.getMenu,

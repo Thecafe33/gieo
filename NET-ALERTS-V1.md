@@ -108,6 +108,20 @@ Grep toàn bộ `src/layers/commands/` cho `alerts/alert`, `.raise(`, `AlertEngi
 
 **Đây là domain thứ 5 xác nhận phụ thuộc gap L9**, sau Loyalty, Reversal, Raw Material (RM6), BTP (B1).
 
+### ĐÃ ĐÓNG — `commands/alerts.js` + `bootstrap/domain-events.js` ROUTES
+
+Sau khi L9 (tầng điều phối sự kiện — `bootstrap/domain-events.js`) được xây (xem `NET-LOYALTY-V1.md`), phát hiện này được nối tiếp ngay: `commands/alerts.js` bọc `alert.raise()` thành command `RaiseAlert` thật (đăng ký authority/idempotency/audit qua đúng `pipeline.defineCommand` như mọi command khác, không có đường ghi tắt). `bootstrap/domain-events.js` ROUTES thêm 3 route mới:
+
+- `PrepYieldMismatch` (`commands/prep.js`) → `RaiseAlert` loại `PREP_YIELD_MISMATCH` (loại MỚI, đăng ký trong `alerts/alert.js TYPES` — không loại cũ nào khớp đúng ngữ nghĩa "lệch yield của MỘT mẻ cụ thể").
+- `LostContainerReported` (`commands/inventory.js` ReportLostContainer) → `RaiseAlert` loại `LOST_CONTAINER_PENDING` (đã có sẵn trong TYPES, khớp thẳng chain-trace gốc). Event được bổ sung `lostReportId` denormalized (trước đây chỉ có `unitId`) để domain-events không phải tự tính lại id.
+- `StockCountPartiallyApplied` (`commands/approval.js` ApproveStockCount) → `RaiseAlert` loại `STOCK_COUNT_LINE_FAILED` (loại MỚI — một sự kiện có thể mang NHIỀU dòng lỗi, khác `STOCK_VARIANCE` vốn dành cho lệch số lượng đã biết cả 2 phía, ở đây là LỖI ÁP DỤNG như "không tìm thấy lô"). `routeEvents()` được mở rộng để `toInput` có thể trả về MỘT MẢNG input — xoè 1 sự kiện thành nhiều route độc lập (1 alert/dòng lỗi), không gộp mất `reason` của từng dòng.
+
+`RaiseAlert` dùng CHUNG cơ chế idempotent-theo-id với `alert.raise()`: `operationId` dựng từ đúng `(type, storeId, subjectKey)` — cùng cơ sở với `alertId` — nên gọi lại (retry, hoặc điều kiện lặp lại) là REPLAY, không ghi đè mất trạng thái `SEEN`/`RESOLVED` mà QUANLY đã đặt cho alert đó qua đường khác. Authority khai `['EXECUTE', 'REVIEW_APPROVE_CORRECT']` vì side-effect chạy dưới CÙNG actor với command gốc (có thể là `ReportLostContainer` nguồn POS/EXECUTE hoặc `ApproveStockCount` nguồn QUANLY/REVIEW_APPROVE_CORRECT) — không được đòi quyền cao hơn command đã kích hoạt nó.
+
+10 test mới (`tests/unit/finance-alerts.test.js`): `commands/alerts` (tạo domainRecord, validate, lỗi thiếu trường chẩn đoán lộ ra từ `alert.raise()`, idempotent-replay) + `bootstrap/domain-events` (3 route mới, gồm cả case thiếu `lostReportId` bị bỏ qua và case xoè mảng `failedLines`) + 1 test end-to-end qua `bootstrap/runtime` (ReportLostContainer → sideEffect RaiseAlert thật).
+
+Còn lại NGOÀI phạm vi lượt nối này: `markSeen`/`resolve`/`reconcile` (AL6) chưa có command riêng gọi được từ UI — chỉ `raise()` được nối. AL3 (push UI thật) và AL7 (kênh ngoài app) vẫn để ngỏ như đã ghi nhận.
+
 ---
 
 ## Liên kết chéo domain
@@ -124,12 +138,13 @@ Grep toàn bộ `src/layers/commands/` cho `alerts/alert`, `.raise(`, `AlertEngi
 ## TỔNG KẾT PHÂN LOẠI
 
 - 🟢 THÊM MỚI: **AL7** (kênh ngoài app — chỗ nối sẵn)
-- 🟡 GIỮ, ĐỔI CÁCH LÀM: **AL1, AL2, AL4, AL5, AL6** — xác nhận cả 4 vấn đề header `alert.js` tự nhận "đóng cả bốn", cộng AL5 (finance/config.js, domain riêng nhưng cùng nguồn chain-trace)
+- 🟡 GIỮ, ĐỔI CÁCH LÀM: **AL1, AL2, AL4, AL5, AL6** — xác nhận cả 4 vấn đề header `alert.js` tự nhận "đóng cả bốn", cộng AL5 (finance/config.js, domain riêng nhưng cùng nguồn chain-trace) — **AL1 nay ĐÃ ĐÓNG luôn phần "ai gọi `raise()`" qua `commands/alerts.js` + `bootstrap/domain-events.js`**
 - ⚪ CHƯA THỂ XÁC NHẬN: **AL3** (thuộc tầng UI, chưa tới lượt nối)
 - ✅ ĐÃ TỰ ĐỘNG GIẢI QUYẾT: **AL8**
 
 ## VIỆC PHẢI LÀM (tích lũy, không chặn)
 
-1. (Không mới, nhắc lại — ưu tiên cao nhất xuyên NET-series) Xây tầng điều phối sự kiện — AlertEngine là domain thứ 5 xác nhận cần nó, và là domain có NHIỀU HANDLER TỰ NHIÊN NHẤT để bắt đầu (mỗi event đã có sẵn trong `plan.events` của các command khác chỉ cần 1 dòng gọi `alert.raise()`).
+1. ~~Xây tầng điều phối sự kiện — AlertEngine là domain thứ 5 xác nhận cần nó, và là domain có NHIỀU HANDLER TỰ NHIÊN NHẤT để bắt đầu.~~ **ĐÃ XONG** — `commands/alerts.js` (`RaiseAlert`) + 3 route mới trong `bootstrap/domain-events.js` (`PrepYieldMismatch`, `LostContainerReported`, `StockCountPartiallyApplied`). Còn lại: `markSeen`/`resolve` (AL6) chưa có command riêng gọi từ UI được — nằm ngoài phạm vi lượt này, không chặn gì (đọc/ghi trực tiếp qua `alerts/alert.js` vẫn dùng được khi cần).
 2. Khi nối UI (AL3): thiết kế lại StoreHealth/sidebar dot (QUANLY) VÀ FIFO-bell-style badge (POS) từ CÙNG một nguồn `GetAlerts`, không tách 2 đường như hệ cũ.
 3. Không có việc phải làm mới cho AL8 trừ khi chủ quán quyết định dựng lại tính năng "báo hết hàng" như một yêu cầu MỚI.
+4. Còn 2 event khác cũng phụ thuộc gap L9 mà lượt này CHƯA nối vào AlertEngine (nằm ngoài phạm vi "3 route rõ nhất"): `AlertRaised` chính nó (AL7 — kênh ngoài app, cần consumer riêng gửi push/SMS/Zalo, không phải việc của domain-events) và các event khác chưa audit hết (vd `PrepBatchExpiring`/`ContainerExpiring` có thể cần một tiến trình quét định kỳ thay vì chờ event — câu hỏi vận hành, không phải thiếu logic).

@@ -93,7 +93,9 @@ GIEO.define('persistence-firebase/atomic-commit', [
         category: ['category', function (x) { return { categoryId: x.categoryId }; }],
         promotion: ['promotion', function (x) { return { promotionId: x.promotionId }; }],
         /* L9 — commands/loyalty.js (tích/hoàn điểm gọi qua domain-events dispatch). */
-        loyaltyLedgerEntry: ['loyaltyLedger', function (x) { return { entryId: x.entryId }; }]
+        loyaltyLedgerEntry: ['loyaltyLedger', function (x) { return { entryId: x.entryId }; }],
+        /* L9 — commands/alerts.js (RaiseAlert gọi qua domain-events dispatch). */
+        alert: ['alert', function (x) { return { alertId: x.alertId }; }]
       };
       var m = map[r.type];
       if (!m) {

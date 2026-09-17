@@ -115,6 +115,22 @@ GIEO.define('alerts/alert', ['shared-kernel/ids', 'shared-kernel/result'], funct
     DAY_NOT_CLOSED: {
       severity: SEVERITY.WARNING, audience: AUDIENCE.BOTH,
       resolution: RESOLUTION.AUTO_VERIFIABLE, required: ['dateKey']
+    },
+    /* L9 nối — mẻ BTP nấu lệch yield >ngưỡng (commands/prep.js). Không tự
+       kiểm chứng được bằng dữ liệu (mẻ đã nấu xong, không "hết điều kiện"
+       theo thời gian) nên cần referenceId trỏ tới hành động đã soát (vd
+       EditPrepYield), giống CASH_VARIANCE/STOCK_VARIANCE. */
+    PREP_YIELD_MISMATCH: {
+      severity: SEVERITY.WARNING, audience: AUDIENCE.QUANLY,
+      resolution: RESOLUTION.MANUAL_WITH_REFERENCE, required: ['prepBatchId', 'prepItemId', 'variancePct']
+    },
+    /* L9 nối — 1 dòng kiểm kê không áp được lúc duyệt (commands/approval.js
+       ApproveStockCount, mảng `failedLines`). Khác STOCK_VARIANCE (đó là
+       lệch SỐ LƯỢNG đã biết cả 2 phía) — đây là LỖI ÁP DỤNG (không tìm
+       thấy lô, ghi sổ hỏng...), nên cần loại riêng để không mất "reason". */
+    STOCK_COUNT_LINE_FAILED: {
+      severity: SEVERITY.WARNING, audience: AUDIENCE.QUANLY,
+      resolution: RESOLUTION.MANUAL_WITH_REFERENCE, required: ['stockCountId', 'itemId', 'reason']
     }
   };
 

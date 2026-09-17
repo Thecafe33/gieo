@@ -94,7 +94,7 @@ B6 QUANLY đọc — KPI, P&L (không đứt ở hệ cũ, giữ nguyên tắc)
 | **Raw Material** | B1/B3/B4 dùng CHUNG engine FIFO + `RecordWaste` với raw material (`NET-RAW-MATERIAL-V1.md` RM5); B3's kiểm đếm dùng chung `ApproveStockCount`/`physicalReconciliation` (RM4); B5 cùng loại gap "tính đúng nhưng chưa nối UI" như RM7 phần raw — nhưng KHÁC Ở CHỖ BTP đã đăng ký query, raw thì chưa có cấu trúc ngày để đăng ký |
 | **Sales/POS** | B1's PRECONDITION shortfall-không-cờ-thoát là bản CHẶT HƠN của case đã treo ở `NET-SALES-V1.md` "Ca liên quan đã rà" — gộp chung một quyết định chủ quán |
 | **Reporting** | B5/B6 nối với nguyên tắc "một canonical query, một implementation" (R3) đã thấy xuyên suốt `report-queries.js` |
-| **Loyalty/Reversal/Raw Material (L9)** | B1's `PrepYieldMismatch` event là phát hiện phụ thuộc gap L9 thứ 4 (sau Loyalty, Reversal, Raw Material RM6) — event có logic đúng nhưng không consumer nào chạy nó |
+| **Loyalty/Reversal/Raw Material/Alerts (L9)** | B1's `PrepYieldMismatch` event từng là phát hiện phụ thuộc gap L9 thứ 4 (sau Loyalty, Reversal, Raw Material RM6) — **ĐÃ ĐÓNG**: `bootstrap/domain-events.js` giờ route thẳng `PrepYieldMismatch` → `RaiseAlert` (loại `PREP_YIELD_MISMATCH`, mới đăng ký), xem `NET-ALERTS-V1.md` "ĐÃ ĐÓNG — commands/alerts.js" |
 
 ---
 
@@ -108,4 +108,4 @@ B6 QUANLY đọc — KPI, P&L (không đứt ở hệ cũ, giữ nguyên tắc)
 
 1. **Sửa lại RM7 trong `NET-RAW-MATERIAL-V1.md`** — phần kết luận về BTP ("lặp lại có chủ đích mẫu lỗi stockoutTargetPct") là ĐỌC SAI comment của `btp-report.js` khi chưa đọc trọn file đó. Cần đính chính: comment đó trích lại mô tả GAP CỦA HỆ CŨ để giải thích lý do tồn tại module, không phải hành vi hiện tại — `GetBTPReport` ĐÃ đăng ký, đóng đúng ĐỨT CHUỖI #3. Việc còn lại (chưa có UI gọi) là tình trạng chung mọi query mới, không phải gap riêng BTP.
 2. Khi tổng hợp quyết định chủ quán về PRECONDITION shortfall (đã treo ở Sales + Raw Material), tính thêm B1 (BTP nấu mẻ) — vì đây là bản CHẶT NHẤT trong 3 case (không có cờ thoát nào).
-3. (Không mới, nhắc lại) Tầng điều phối sự kiện — B1's `PrepYieldMismatch` là domain thứ 4 phụ thuộc gap L9.
+3. ~~Tầng điều phối sự kiện — B1's `PrepYieldMismatch` là domain thứ 4 phụ thuộc gap L9.~~ **ĐÃ XONG** — route tới `RaiseAlert` (`PREP_YIELD_MISMATCH`), xem `NET-ALERTS-V1.md`.

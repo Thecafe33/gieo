@@ -210,10 +210,11 @@ GIEO.define('commands/inventory', [
 
     execute: function (input, ctx) {
       var plan = pipeline.emptyPlan();
+      var lostReportId = ids.deterministicId('operation', ['lostreport', input.unitId]);
       plan.domainRecords.push({
         type: 'lostReport',
         record: {
-          lostReportId: ids.deterministicId('operation', ['lostreport', input.unitId]),
+          lostReportId: lostReportId,
           unitId: input.unitId,
           /* CHỜ DUYỆT — Unit chưa vào nhánh LOST cho tới khi QUANLY duyệt.
              Đây chính là mắt xích legacy thiếu (Bug #12). */
@@ -226,7 +227,8 @@ GIEO.define('commands/inventory', [
       });
       plan.events.push({
         type: 'LostContainerReported',
-        unitId: input.unitId, storeId: ctx.storeId, businessDate: ctx.businessDate
+        unitId: input.unitId, lostReportId: lostReportId,
+        storeId: ctx.storeId, businessDate: ctx.businessDate
       });
       return R.ok(plan);
     }

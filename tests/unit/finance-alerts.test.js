@@ -12,11 +12,32 @@ var _fa = (function () {
     AL: GIEO.require('alerts/alert'),
     VI: GIEO.require('compaction/versioned-input'),
     CLK: GIEO.require('shared-kernel/clock'),
+    ALC: GIEO.require('commands/alerts'),
+    PIPE: GIEO.require('commands/pipeline'),
+    ACCESS: GIEO.require('store-context/access'),
+    CTXL: GIEO.require('store-context/context'),
+    BD: GIEO.require('store-context/business-day'),
+    DE: GIEO.require('bootstrap/domain-events'),
+    BOOT: GIEO.require('bootstrap/runtime'),
     STORE: ids.deterministicId('store', ['main']),
+    ORG: ids.deterministicId('org', ['main']),
     BOSS: ids.deterministicId('actor', ['boss']),
     NV: ids.deterministicId('actor', ['nv01'])
   };
 })();
+
+function faCtx(source, role, actorId) {
+  var day = assertOk(_fa.BD.openDay({
+    storeId: _fa.STORE, dateKey: '2026-03-10', actorId: _fa.BOSS,
+    at: new Date(2026, 2, 10, 7).getTime(), clock: _fa.CLK.createClock()
+  }));
+  var actor = assertOk(_fa.ACCESS.createActor({
+    actorId: actorId || _fa.NV, role: role || 'POS_OPERATOR', source: source || 'POS', stores: [_fa.STORE]
+  }));
+  return assertOk(_fa.CTXL.createContext({
+    organizationId: _fa.ORG, storeId: _fa.STORE, actor: actor, source: source || 'POS', businessDay: day
+  }));
+}
 
 var FD = function (d) { return new Date(2026, 2, d).getTime(); };
 
@@ -315,5 +336,128 @@ describe('alerts/alert', function () {
     assert.strictEqual(ev.type, 'AlertRaised');
     assert.strictEqual(ev.severity, 'WARNING');
     assert.strictEqual(ev.audience, 'BOTH');
+  });
+});
+
+describe('commands/alerts — nối AlertEngine.raise() thành command thật', function () {
+  var C = _fa.ALC;
+
+  test('RaiseAlert tạo domainRecord kiểu alert', function () {
+    var out = _fa.PIPE.run(C.RaiseAlert, {
+      type: 'LOST_CONTAINER_PENDING', storeId: _fa.STORE, businessDate: '2026-03-10',
+      subjectKey: 'unit_x', data: { unitId: 'unit_x', lostReportId: 'operation_lostreport_x' }
+    }, faCtx('POS'), { operationStore: _fa.PIPE.createInMemoryOperationStore() });
+    assertOk(out);
+    var rec = out.value.plan.domainRecords[0];
+    assert.strictEqual(rec.type, 'alert');
+    assert.strictEqual(rec.record.type, 'LOST_CONTAINER_PENDING');
+    assert.strictEqual(rec.record.status, 'NEW');
+  });
+
+  test('thiếu type/storeId/businessDate thì VALIDATION, không chạm alert.raise()', function () {
+    assertErr(_fa.PIPE.run(C.RaiseAlert, { storeId: _fa.STORE, businessDate: '2026-03-10' },
+      faCtx('POS'), { operationStore: _fa.PIPE.createInMemoryOperationStore() }), 'VALIDATION');
+  });
+
+  test('thiếu trường chẩn đoán bắt buộc của LOẠI thì lỗi lộ ra từ alert.raise(), không bị nuốt', function () {
+    var r = _fa.PIPE.run(C.RaiseAlert, {
+      type: 'PREP_YIELD_MISMATCH', storeId: _fa.STORE, businessDate: '2026-03-10',
+      subjectKey: 'batch_x', data: { prepBatchId: 'batch_x' }
+    }, faCtx('POS'), { operationStore: _fa.PIPE.createInMemoryOperationStore() });
+    assertErr(r, 'VALIDATION');
+    assert.ok(/prepItemId/.test(r.error.message));
+  });
+
+  test('gọi lại cùng input (type,storeId,subjectKey) là replay — không đè mất trạng thái đã xử lý', function () {
+    var store = _fa.PIPE.createInMemoryOperationStore();
+    var input = {
+      type: 'STOCK_COUNT_LINE_FAILED', storeId: _fa.STORE, businessDate: '2026-03-10',
+      subjectKey: 'sc1:item_x', data: { stockCountId: 'sc1', itemId: 'item_x', reason: 'không tìm thấy lô' }
+    };
+    var first = _fa.PIPE.run(C.RaiseAlert, input, faCtx('QUANLY', 'QUANLY_OPERATOR'), { operationStore: store });
+    var second = _fa.PIPE.run(C.RaiseAlert, input, faCtx('QUANLY', 'QUANLY_OPERATOR'), { operationStore: store });
+    assertOk(first);
+    assertOk(second);
+    assert.strictEqual(first.value.replayed, false);
+    assert.strictEqual(second.value.replayed, true);
+  });
+});
+
+describe('bootstrap/domain-events — routeEvents nối AlertEngine (BTP/Raw Material/Stock Count)', function () {
+  var DE = _fa.DE;
+
+  test('PrepYieldMismatch → RaiseAlert PREP_YIELD_MISMATCH', function () {
+    var routes = DE.routeEvents([{
+      type: 'PrepYieldMismatch', prepBatchId: 'batch_1', prepItemId: 'prepitem_1',
+      expectedYield: 10, actualYield: 8, variancePct: -20,
+      storeId: _fa.STORE, businessDate: '2026-03-10'
+    }]);
+    assert.strictEqual(routes.length, 1);
+    assert.strictEqual(routes[0].command, 'RaiseAlert');
+    assert.strictEqual(routes[0].input.type, 'PREP_YIELD_MISMATCH');
+    assert.strictEqual(routes[0].input.subjectKey, 'batch_1');
+    assert.strictEqual(routes[0].input.data.variancePct, -20);
+  });
+
+  test('LostContainerReported thiếu lostReportId → bỏ qua route, không đoán id', function () {
+    var routes = DE.routeEvents([{
+      type: 'LostContainerReported', unitId: 'unit_1', storeId: _fa.STORE, businessDate: '2026-03-10'
+    }]);
+    assert.strictEqual(routes.length, 0);
+  });
+
+  test('LostContainerReported đủ dữ liệu → RaiseAlert LOST_CONTAINER_PENDING', function () {
+    var routes = DE.routeEvents([{
+      type: 'LostContainerReported', unitId: 'unit_1', lostReportId: 'operation_lostreport_1',
+      storeId: _fa.STORE, businessDate: '2026-03-10'
+    }]);
+    assert.strictEqual(routes.length, 1);
+    assert.strictEqual(routes[0].input.type, 'LOST_CONTAINER_PENDING');
+    assert.strictEqual(routes[0].input.data.lostReportId, 'operation_lostreport_1');
+  });
+
+  test('StockCountPartiallyApplied xoè MẢNG failedLines thành nhiều route độc lập', function () {
+    var routes = DE.routeEvents([{
+      type: 'StockCountPartiallyApplied', stockCountId: 'sc1', storeId: _fa.STORE, businessDate: '2026-03-10',
+      failedLines: [
+        { itemId: 'item_a', unitId: 'unit_a', reason: 'không tìm thấy lô' },
+        { itemId: 'item_b', unitId: null, reason: 'lỗi ghi sổ' }
+      ]
+    }]);
+    assert.strictEqual(routes.length, 2);
+    assert.strictEqual(routes[0].input.subjectKey, 'sc1:item_a');
+    assert.strictEqual(routes[1].input.subjectKey, 'sc1:item_b');
+    assert.ok(routes.every(function (r) { return r.command === 'RaiseAlert' && r.input.type === 'STOCK_COUNT_LINE_FAILED'; }));
+  });
+
+  test('StockCountPartiallyApplied không có dòng lỗi nào → không route', function () {
+    var routes = DE.routeEvents([{
+      type: 'StockCountPartiallyApplied', stockCountId: 'sc2', storeId: _fa.STORE, businessDate: '2026-03-10',
+      failedLines: []
+    }]);
+    assert.strictEqual(routes.length, 0);
+  });
+});
+
+describe('L9 end-to-end — báo mất hũ tự tạo alert qua bootstrap/runtime', function () {
+  function shadowRuntime(c) {
+    return _fa.BOOT.createRuntime({ mode: _fa.BOOT.MODE.SHADOW, context: function () { return c; } });
+  }
+
+  test('ReportLostContainer sinh sideEffect RaiseAlert LOST_CONTAINER_PENDING', function () {
+    var c = faCtx('POS');
+    var rt = shadowRuntime(c);
+    return rt.command('ReportLostContainer', {
+      unitId: _fa.ids.deterministicId('unit', ['u-lost-1']), reason: 'không quét được lúc kiểm kho'
+    }).then(function (out) {
+      var ok = assertOk(out);
+      assert.strictEqual(ok.sideEffects.length, 1);
+      assert.strictEqual(ok.sideEffects[0].command, 'RaiseAlert');
+      assert.strictEqual(ok.sideEffects[0].sourceEvent, 'LostContainerReported');
+      var alertResult = assertOk(ok.sideEffects[0].result);
+      var rec = alertResult.plan.domainRecords.filter(function (d) { return d.type === 'alert'; })[0];
+      assert.strictEqual(rec.record.type, 'LOST_CONTAINER_PENDING');
+      assert.strictEqual(rec.record.data.unitId, _fa.ids.deterministicId('unit', ['u-lost-1']));
+    });
   });
 });
