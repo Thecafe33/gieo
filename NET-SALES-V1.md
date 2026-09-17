@@ -258,10 +258,23 @@ Thứ tự theo mức chặn đường (chặn cứng trước, tinh chỉnh sau
 6. Đọc `catalog/promotion.js` phần còn lại + `compaction/book-snapshot.js` để
    đóng 2 mục ⚪ CHƯA QUYẾT còn lại (N12, N16) — có thể đóng ngay trong domain
    Sales hoặc để lại cho lượt NET domain Loyalty/Reporting.
-7. Rà toàn bộ core mới (không chỉ Sales) tìm các `R.err('PRECONDITION', ...)`
-   khác có thể là điểm chặn MỚI so với hệ cũ, theo đúng nguyên tắc §2.3a —
-   `buildRequirements` (N10) chỉ là ca đầu tiên phát hiện được, nhiều khả năng
-   không phải ca duy nhất.
+7. ~~Rà toàn bộ core mới (không chỉ Sales) tìm các `R.err('PRECONDITION', ...)`
+   khác có thể là điểm chặn MỚI so với hệ cũ, theo đúng nguyên tắc §2.3a~~ —
+   **ĐÃ RÀ (2026-09-17)**: grep toàn bộ `src/layers/commands/*.js` (13 chỗ),
+   phân loại từng cái:
+   - `sales.js:267`, `inventory.js:69`, `prep.js:79` — 3 ca shortfall-nguyên-liệu
+     đã biết, xem mục "Ca liên quan đã rà" bên dưới, vẫn treo chờ chủ quán.
+   - `approval.js` (3 chỗ) — chặn duyệt lại phiếu đã xử lý (§27 invariant 8),
+     là guard chống ghi đúp/idempotency, không phải chặn do THIẾU METADATA —
+     không thuộc phạm vi §2.3a.
+   - `shift.js` (5 chỗ) — đoạn ca đã đóng / phải đếm tiền trước khi chốt / phải
+     chốt đoạn trước khi mở đoạn kế. Đã đối chiếu `posgieo.html`/`quanlygieo.html`:
+     legacy CÓ chặn tương đương ("Cần đếm tiền bàn giao trước khi check-out" —
+     `posgieo.html:13991`; luồng giao ca tuần tự) — không phải chặn mới.
+   - `takeover.js` (2 chỗ) — chặn của quy trình TIẾP NHẬN DỮ LIỆU MỘT LẦN (P13
+     cutover), không phải nghiệp vụ bán/vận hành sống hàng ngày — §2.3a không
+     áp dụng (không có "hệ cũ" để so vì đây là công cụ mới hoàn toàn).
+   **Kết luận: không có ca MỚI nào ngoài 3 ca đã biết.** Không cần sửa code.
 
 ## Ca liên quan đã rà — KHÁC LOẠI với N10, cần chủ quán trả lời riêng
 
