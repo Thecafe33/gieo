@@ -88,6 +88,12 @@ GIEO.define('app-pos/controller', [
      * và tại quán là kênh phổ biến nhất của quán; mang đi/sàn truyền qua
      * `opts.channel` khi UI đó được xây. `payments`/`discountTotal`/
      * `redemption`/`customerId` cũng qua `opts`, không phải tự đoán ở đây.
+     *
+     * `opts.promotions`/`opts.extraPromotions` (NET-SALES-V1.md #3) cùng mẫu:
+     * UI tự đọc `readActivePromotions()` trước rồi mang xuống đây, checkout
+     * không tự đi lấy — `catalog/promotion.js#evaluate()` (đã nối ở
+     * `buildBill`, CP7) thay 2 nhánh if hard-code
+     * `checkFreeToppingMemberPromo`/`checkTogoBeforeCheckout` của legacy.
      */
     function checkout(payment, opts) {
       if (!cart.length) return Promise.resolve(R.err('VALIDATION', 'giỏ hàng trống'));
@@ -108,6 +114,8 @@ GIEO.define('app-pos/controller', [
           discountTotal: opts.discountTotal || 0,
           redemption: opts.redemption || null,
           payments: opts.payments || (payment ? [payment] : []),
+          promotions: opts.promotions || [],
+          extraPromotions: opts.extraPromotions || [],
           lines: cart.map(function (l) {
             return {
               menuItemId: l.menuItemId, name: l.name, size: l.size,
@@ -174,6 +182,7 @@ GIEO.define('app-pos/controller', [
       state: snapshot,
       navigate: navigate,
       readMenu: function (input) { return read('GetMenu', input); },
+      readActivePromotions: function (input) { return read('GetActivePromotions', input); },
       watchMenu: watchMenu,
       addLine: addLine,
       changeQty: changeQty,

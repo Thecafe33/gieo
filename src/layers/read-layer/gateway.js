@@ -49,6 +49,12 @@ GIEO.define('read-layer/gateway', [
     /* CP1 (NET-CATALOG-PROMOTION-V1.md) — cùng authority với GetMenu: POS
        cần đọc khả dụng để làm mờ nút, không phải quyền riêng. */
     GetMenuAvailability: registerQuery('GetMenuAvailability', { authority: 'EXECUTE' }),
+    /* NET-SALES-V1.md VIỆC PHẢI LÀM #3 — POS cần đọc khuyến mãi ĐANG BẬT
+       trước khi checkout để nối vào catalog/promotion.js, thay 2 nhánh if
+       hard-code (onCheckoutClick/checkFreeToppingMemberPromo/
+       checkTogoBeforeCheckout của legacy). Cùng authority với GetMenu — đọc
+       khuyến mãi để tính giỏ không phải quyền riêng. */
+    GetActivePromotions: registerQuery('GetActivePromotions', { authority: 'EXECUTE' }),
     GetInventoryLevel: registerQuery('GetInventoryLevel', { authority: 'EXECUTE' }),
     GetConsumption: registerQuery('GetConsumption', { authority: 'REVIEW_APPROVE_CORRECT' }),
     /* Dữ liệu nhạy cảm mặc định KHÔNG thuộc tầng EXECUTE (quy tắc P3). */
@@ -190,6 +196,32 @@ GIEO.define('read-layer/gateway', [
           recipeComponents: components,
           stockByItemId: spec.stockByItemId || {}
         }));
+      },
+      computedAt: ctx.clock.now()
+    });
+  }
+
+  /**
+   * NET-SALES-V1.md VIỆC PHẢI LÀM #3 — khuyến mãi ĐANG BẬT cho POS đọc
+   * TRƯỚC checkout, để `catalog/promotion.js#evaluate()` (đã nối vào
+   * `commands/sales.js#buildBill`, CP7) có `promotions` thật thay vì mảng
+   * rỗng. Không có bản dịch từ legacy (`togoSettings`/`assistConfig.
+   * campaigns` không có `tier`/`priority`/`exclusivityGroup` tường minh —
+   * xem đầu `catalog/promotion.js`), nên khuyến mãi CHỈ tồn tại qua
+   * `CreatePromotion` — caller mang canonical `spec.promotions` đã đọc từ
+   * store, đúng khuôn `getMenuAvailability` ở trên.
+   */
+  function getActivePromotions(ctx, spec) {
+    var g = guard(Q.GetActivePromotions, ctx, spec);
+    if (R.isErr(g)) return g;
+    var storeId = g.value;
+
+    return merge.resolve({
+      computeLive: function () {
+        var list = (spec.promotions || []).filter(function (p) {
+          return p.storeId === storeId && p.active !== false;
+        });
+        return R.ok({ promotions: list });
       },
       computedAt: ctx.clock.now()
     });
@@ -537,6 +569,7 @@ GIEO.define('read-layer/gateway', [
     getUnitTrace: getUnitTrace,
     getMenu: getMenu,
     getMenuAvailability: getMenuAvailability,
+    getActivePromotions: getActivePromotions,
     getInventoryLevel: getInventoryLevel,
     getRevenue: getRevenue,
     getCOGS: getCOGS,

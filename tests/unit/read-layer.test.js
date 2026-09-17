@@ -16,6 +16,7 @@ var _r = (function () {
     BD: GIEO.require('store-context/business-day'),
     CLK: GIEO.require('shared-kernel/clock'),
     M: GIEO.require('catalog/menu'),
+    P: GIEO.require('catalog/promotion'),
     RCP: GIEO.require('recipe-cost-btp/recipe'),
     VI: GIEO.require('compaction/versioned-input'),
     STORE: ids.deterministicId('store', ['main']),
@@ -270,6 +271,51 @@ describe('GetMenuAvailability (CP1, NET-CATALOG-PROMOTION-V1.md) — sold-out d�
   test('storeId ngoài phạm vi thì FORBIDDEN — cùng cổng guard() với mọi query khác', function () {
     assertErr(G.getMenuAvailability(rCtx('POS_OPERATOR', 'POS'), {
       storeId: _r.STORE_B, menuItem: menuItem(), size: 'M'
+    }), 'FORBIDDEN');
+  });
+});
+
+describe('GetActivePromotions (NET-SALES-V1.md #3) — POS đọc khuyến mãi trước checkout', function () {
+  var G = _r.G;
+  var P = _r.P;
+
+  function promo(over) {
+    return assertOk(P.createPromotion(Object.assign({
+      name: 'KM', storeId: _r.STORE, tier: 'AUTO_EXECUTE', priority: 10,
+      conditions: [], effect: { type: 'PERCENT_OFF', pct: 10 }
+    }, over || {})));
+  }
+
+  test('cùng quyền EXECUTE với GetMenu — POS đọc được', function () {
+    var out = assertOk(G.getActivePromotions(rCtx('POS_OPERATOR', 'POS'), {
+      promotions: [promo()]
+    }));
+    assert.strictEqual(out.data.promotions.length, 1);
+  });
+
+  test('không truyền promotions thì trả mảng rỗng, không lỗi (§2.3a — thiếu dữ liệu không chặn)', function () {
+    var out = assertOk(G.getActivePromotions(rCtx('POS_OPERATOR', 'POS'), {}));
+    assert.deepStrictEqual(out.data.promotions, []);
+  });
+
+  test('lọc bỏ khuyến mãi active:false', function () {
+    var out = assertOk(G.getActivePromotions(rCtx('POS_OPERATOR', 'POS'), {
+      promotions: [promo({ active: true }), promo({ active: false })]
+    }));
+    assert.strictEqual(out.data.promotions.length, 1);
+  });
+
+  test('lọc bỏ khuyến mãi của store khác', function () {
+    var out = assertOk(G.getActivePromotions(rCtx('POS_OPERATOR', 'POS'), {
+      promotions: [promo(), promo({ storeId: _r.STORE_B })]
+    }));
+    assert.strictEqual(out.data.promotions.length, 1);
+    assert.strictEqual(out.data.promotions[0].storeId, _r.STORE);
+  });
+
+  test('storeId ngoài phạm vi thì FORBIDDEN — cùng cổng guard() với mọi query khác', function () {
+    assertErr(G.getActivePromotions(rCtx('POS_OPERATOR', 'POS'), {
+      storeId: _r.STORE_B, promotions: [promo()]
     }), 'FORBIDDEN');
   });
 });

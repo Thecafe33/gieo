@@ -92,6 +92,14 @@ describe('P9 POS thin client', function () {
     assert.strictEqual(runtime.calls[0].name, 'GetMenu');
     assert.strictEqual(typeof unsubscribe, 'function');
   });
+
+  test('khuyến mãi POS chỉ đọc qua GetActivePromotions (NET-SALES-V1.md #3)', function () {
+    var runtime = fakeRuntime();
+    return _app.POS.createController(runtime).readActivePromotions({}).then(function (out) {
+      assertOk(out);
+      assert.strictEqual(runtime.calls[0].name, 'GetActivePromotions');
+    });
+  });
 });
 
 describe('P10 QUANLY thin client', function () {
@@ -209,6 +217,34 @@ describe('P9 — giỏ hàng POS là trạng thái chọn, không phải nghiệ
          hiệu lực, POS không tự nhét thêm trường tổng tiền nào khác. */
       assert.strictEqual(bill.subtotal, 60000);
       assert.strictEqual(bill.total, 60000);
+    });
+  });
+
+  test('khuyến mãi qua opts.promotions/extraPromotions được BUILD vào bill (NET-SALES-V1.md #3)', function () {
+    var runtime = fakeRuntime();
+    var pos = posWith(runtime);
+    pos.addLine({ menuItemId: 'item_1', size: 'M', unitPrice: 30000, qty: 2 });
+    var promo = {
+      promotionId: 'promo_1', storeId: 'store_1', name: 'KM', tier: 'AUTO_EXECUTE',
+      priority: 10, exclusivityGroup: null, conditions: [],
+      effect: { type: 'PERCENT_OFF', pct: 10 }, active: true
+    };
+    return pos.checkout({ method: 'CASH' }, { promotions: [promo] }).then(function (out) {
+      assertOk(out);
+      var bill = runtime.calls[0].input.bill;
+      assert.strictEqual(bill.discountTotal, 6000);
+      assert.strictEqual(bill.promotionsApplied.length, 1);
+    });
+  });
+
+  test('không truyền opts.promotions thì hành vi y hệt trước khi nối (backward-compatible)', function () {
+    var runtime = fakeRuntime();
+    var pos = posWith(runtime);
+    pos.addLine({ menuItemId: 'item_1', size: 'M', unitPrice: 30000, qty: 2 });
+    return pos.checkout({ method: 'CASH' }).then(function (out) {
+      assertOk(out);
+      var bill = runtime.calls[0].input.bill;
+      assert.strictEqual(bill.discountTotal, 0);
     });
   });
 

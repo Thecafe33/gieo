@@ -84,6 +84,7 @@ GIEO.define('bootstrap/runtime', [
   var QUERIES = {
     GetMenu: reads.getMenu,
     GetMenuAvailability: reads.getMenuAvailability,
+    GetActivePromotions: reads.getActivePromotions,
     GetUnitTrace: reads.getUnitTrace,
     GetInventoryLevel: reads.getInventoryLevel,
     GetRevenue: reads.getRevenue,

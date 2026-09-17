@@ -100,7 +100,7 @@ N17 Xem P&L theo kênh (tại quán/mang đi/app) ─┴─► (→ FIFO-CHAIN-T
 | Hệ cũ | `computeAllDiscounts()`, `getAppSaleDiscount()`, `checkTogoBeforeCheckout()`, `checkFreeToppingMemberPromo()` — `posgieo.html:8710/7956/8474/8265` |
 | Hệ mới | `catalog/promotion.js` — rule engine tổng quát, `tier` bắt buộc khai (togoSettings-tự-chạy vs assistConfig-chỉ-gợi-ý không còn lẫn lộn), `priority`+`exclusivityGroup` tường minh |
 | Phân loại | 🟢 **THÊM MỚI** (phần rule engine + tier tường minh) trên nền 🟡 **GIỮ nghiệp vụ** (2 loại khuyến mãi mua-X-tặng-Y và đạt-ngưỡng-giảm-% vẫn là 2 loại thật quán đang dùng) |
-| Ghi chú | Xem `FIFO-CHAIN-TRACE-CATALOG-PROMOTION-V1.md`. Đã audit 3 vấn đề (2 tầng lẫn lộn, điều kiện hard-code, chồng khuyến mãi ngầm định — xem header `catalog/promotion.js`) — **core mới đã viết xong phần luật**, còn thiếu: nối UI popup chọn khuyến mãi ở `onCheckoutClick`/`checkFreeToppingMemberPromo` sang gọi engine mới thay vì hard-code 2 nhánh if. |
+| Ghi chú | Xem `FIFO-CHAIN-TRACE-CATALOG-PROMOTION-V1.md`. Đã audit 3 vấn đề (2 tầng lẫn lộn, điều kiện hard-code, chồng khuyến mãi ngầm định — xem header `catalog/promotion.js`) — **core mới đã viết xong phần luật VÀ đã nối** (2026-09-17): `evaluate()` chạy trong `buildBill` (CP7); `app-pos/controller.js` có `readActivePromotions()` (qua query `GetActivePromotions`) và `checkout(payment, {promotions, extraPromotions})` mang kết quả đó xuống `buildBill`. Còn lại là UI popup chọn khuyến mãi thật ở `main.js` (chưa xây màn POS đầy đủ) — thuộc phạm vi UI-port của Pha B/C, không phải gap luật/wiring core. |
 
 ### N6 — Nhập SĐT tích điểm / tra khách quen
 
@@ -255,8 +255,28 @@ Thứ tự theo mức chặn đường (chặn cứng trước, tinh chỉnh sau
    `null, reason: 'NO_RECIPE'`, phát `MissingRecipeDetected` → alert
    `MISSING_RECIPE` cho Quản lý qua L9, không còn trả `PRECONDITION` chặn
    `RecordSale`. Xem N10.
-3. Nối UI `onCheckoutClick`/`checkFreeToppingMemberPromo`/`checkTogoBeforeCheckout`
-   sang gọi `catalog/promotion.js` thay vì 2 nhánh if hard-code (N5).
+3. ~~Nối UI `onCheckoutClick`/`checkFreeToppingMemberPromo`/`checkTogoBeforeCheckout`
+   sang gọi `catalog/promotion.js` thay vì 2 nhánh if hard-code (N5).~~ —
+   **ĐÃ ĐÓNG (2026-09-17)**: `catalog/promotion.js#evaluate()` đã nối vào
+   `buildBill` từ trước (CP7), nhưng `src/apps/pos/controller.js#checkout()`
+   chưa từng truyền `promotions`/`extraPromotions` xuống — nghĩa là wiring đó
+   là dead code từ góc nhìn POS thật. Đóng bằng 2 phần:
+   - `read-layer/gateway.js#getActivePromotions` (query `GetActivePromotions`,
+     cùng authority `EXECUTE` với `GetMenu`) — lọc `spec.promotions` theo
+     `storeId`/`active`, đăng ký ở `bootstrap/runtime.js`. Khuyến mãi CHỈ tồn
+     tại qua `CreatePromotion` (không có bản dịch từ `togoSettings`/
+     `assistConfig.campaigns` — 2 field legacy đó thiếu `tier`/`priority`/
+     `exclusivityGroup` tường minh nên không tự suy diễn được, xem đầu
+     `catalog/promotion.js`), nên query nhận canonical input từ caller, đúng
+     khuôn `getMenuAvailability` (CP1) — không đoán bừa khi chưa có promotion
+     nào được tạo, trả mảng rỗng chứ không lỗi (§2.3a).
+   - `src/apps/pos/controller.js`: thêm `readActivePromotions()` (đọc qua
+     `GetActivePromotions`, cùng mẫu `readMenu()`) và `checkout()` giờ nhận
+     `opts.promotions`/`opts.extraPromotions` — đúng mẫu đã có sẵn cho
+     `payments`/`discountTotal`/`redemption`/`customerId`: UI tự đọc trước
+     rồi mang xuống, `checkout()` không tự đi lấy dữ liệu.
+   Không truyền `opts.promotions` thì `discountTotal` vẫn về 0 y hệt trước
+   khi nối (backward-compatible, có test riêng).
 4. ~~**Đảm bảo `RecordSale.validate`/`execute` tự chặn business-day** — không
    thừa hưởng ngầm "UI đã chặn rồi" (N4)~~ — **ĐÃ ĐÓNG (rà lại 2026-09-17)**:
    không cần code riêng, `commands/pipeline.js` đã áp `requiresOpenDay`
