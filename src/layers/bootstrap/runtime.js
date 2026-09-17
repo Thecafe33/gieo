@@ -6,6 +6,7 @@ GIEO.define('bootstrap/runtime', [
   'commands/inventory',
   'commands/receiving',
   'commands/stock-count',
+  'commands/catalog',
   'commands/prep',
   'commands/reversal',
   'commands/approval',
@@ -14,7 +15,7 @@ GIEO.define('bootstrap/runtime', [
   'commands/payroll',
   'read-layer/gateway',
   'reporting/report-queries'
-], function (R, pipeline, sales, inventory, receiving, stockCount, prep, reversal, approval, businessDay, shift, payroll, reads, reports) {
+], function (R, pipeline, sales, inventory, receiving, stockCount, catalog, prep, reversal, approval, businessDay, shift, payroll, reads, reports) {
   'use strict';
 
   var MODE = { READ_ONLY: 'READ_ONLY', SHADOW: 'SHADOW', WRITE: 'WRITE' };
@@ -28,6 +29,13 @@ GIEO.define('bootstrap/runtime', [
     ReceiveGoods: receiving.ReceiveGoods,
     CorrectReceivingCost: receiving.CorrectReceivingCost,
     SubmitStockCount: stockCount.SubmitStockCount,
+    CreateCategory: catalog.CreateCategory,
+    CreateMenuItem: catalog.CreateMenuItem,
+    RenameMenuItem: catalog.RenameMenuItem,
+    LinkRecipeToMenuItem: catalog.LinkRecipeToMenuItem,
+    ArchiveMenuItem: catalog.ArchiveMenuItem,
+    RestoreMenuItem: catalog.RestoreMenuItem,
+    CreatePromotion: catalog.CreatePromotion,
     RecordPrepProduction: prep.RecordPrepProduction,
     EditPrepYield: prep.EditPrepYield,
     ReverseTransaction: reversal.ReverseTransaction,

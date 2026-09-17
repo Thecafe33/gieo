@@ -119,9 +119,9 @@ CP11 phân quyền sửa Menu: QUANLY only (đã đúng, không đổi)
 | | |
 |---|---|
 | **Hệ cũ** | `posgieo.html:982,987,2311; quanlygieo.html:1439-1441,1593-1595` — sidebar POS ẩn hẳn "Quản lý Menu"/"Khuyến mãi", comment ghi rõ lý do đã chuyển hẳn sang QUANLY. Chain-trace: "KHÔNG ĐỨT, khớp hoàn toàn phân quyền đã định" |
-| **Hệ mới** | Header `catalog/menu.js`: "QUANLY là nơi DUY NHẤT sửa menu (POS chỉ đọc)... Enforce ở tầng command qua `sources:['QUANLY']`, không phải ở đây." |
-| **Phân loại** | ⚪ **CHƯA THỂ XÁC NHẬN — tầng command chưa tồn tại** |
-| **Ghi chú** | Ý định giữ đúng phân quyền cũ, nhưng **không có `commands/catalog.js`** nào wrap `createMenuItem`/`archive`/`linkRecipe`/`createPromotion` thành pipeline command với `sources:['QUANLY']` — grep xác nhận `catalog/menu`/`catalog/promotion` chỉ được import bởi `commands/sales.js` (đọc `snapshotPrice`/`packaging`, phía BÁN HÀNG) và `read-layer/gateway.js` (đọc `catalog/menu` — có thể là 1 query GetMenu), KHÔNG có phía GHI nào. Enforcement "QUANLY only" hiện chỉ là Ý ĐỊNH ghi trong comment, chưa có code nào thật sự chặn. Đây là phần THIẾU giống RM1 (Receiving) — domain logic đúng nhưng chưa có command-write layer. |
+| **Hệ mới** | `commands/catalog.js` → `CreateMenuItem`/`RenameMenuItem`/`LinkRecipeToMenuItem`/`ArchiveMenuItem`/`RestoreMenuItem`/`CreateCategory`/`CreatePromotion` |
+| **Phân loại** | 🟢 **THÊM MỚI** |
+| **Ghi chú** | Đóng bằng cách wrap đúng 6 hàm ghi của `catalog/menu.js` + `createPromotion` của `catalog/promotion.js` thành pipeline command, mỗi command `authority:'MASTER_CONFIGURE'` + `sources:['QUANLY']` — Ý ĐỊNH ghi trong comment của `menu.js` giờ có code THẬT SỰ chặn (test xác nhận `POS_OPERATOR`/`QUANLY_OPERATOR` gọi `CreateMenuItem`/`RenameMenuItem` đều bị `FORBIDDEN`, chỉ `QUANLY_ADMIN`/`SYSTEM_ADMIN` có `MASTER_CONFIGURE` mới qua được). `menuItemId`/`categoryId`/`promotionId` do CALLER cấp trước (không phải command tự sinh) nên double-tap tạo mới là no-op; lệnh SỬA (rename/linkRecipe/archive/restore) cần thêm `editRef` tường minh vì — khác RM3's `correctRef` — idempotency ở đây không thể suy chỉ từ menuItemId (2 lần sửa THẬT trên cùng 1 món phải là 2 operationId khác nhau). **CỐ Ý KHÔNG gộp `catalog/packaging.js` (`publishPackaging`) vào cùng module**: nó ghi qua cơ chế `compaction/versioned-input` registry (append-only theo effectiveFrom) khác hẳn sửa-tại-chỗ của menu/promotion, và CHƯA có domain nào trong `commands/` từng wrap một VersionedInput-publish thành command — đây là gap cắt ngang cả 7 loại versioned input (recipe/cost/packaging/prepYield/payTerms/kpiTarget/config), không phải riêng của catalog, nên để lại thành mục việc-phải-làm riêng thay vì lẫn 2 quyết định kiến trúc vào 1 PR. |
 
 ---
 
@@ -137,13 +137,13 @@ CP11 phân quyền sửa Menu: QUANLY only (đã đúng, không đổi)
 
 ## TỔNG KẾT PHÂN LOẠI
 
-- 🟢 THÊM MỚI: **CP2, CP3 (logic đúng nhưng chưa gọi), CP5 (phần AUTO_EXECUTE thật), CP7**
+- 🟢 THÊM MỚI: **CP2, CP3 (logic đúng nhưng chưa gọi), CP5 (phần AUTO_EXECUTE thật), CP7, CP11**
 - 🟡 GIỮ, ĐỔI CÁCH LÀM: **CP1, CP4, CP5 (phần khái niệm campaign), CP6, CP9, CP10**
 - 🟡 GIỮ NGUYÊN (mẫu đúng, không đổi): **CP8**
-- ⚪ CHƯA THỂ XÁC NHẬN (thiếu tầng command): **CP11**
 
 ## VIỆC PHẢI LÀM (tích lũy, không chặn)
 
 1. **`catalog/promotion.evaluate()` và `catalog/menu.computeAvailability()` chưa có nơi gọi nào** — cùng một dạng gap với event-dispatch (L9) nhưng khác bản chất: đây không phải thiếu consumer cho SỰ KIỆN, mà thiếu ORCHESTRATION gọi 2 hàm THUẦN đúng lúc checkout. Khi nối, `computeAvailability` phải tuân §2.3a — chỉ cảnh báo/làm mờ, không tự động thành PRECONDITION chặn cứng.
-2. **Chưa có `commands/catalog.js`** (CreateMenuItem/ArchiveMenuItem/LinkRecipe/CreatePromotion...) để enforce `sources:['QUANLY']` như comment `menu.js` đã hứa — domain logic đúng, tầng ghi (write-command) chưa tồn tại. Cùng dạng thiếu như Receiving (`NET-RAW-MATERIAL-V1.md` RM1), ưu tiên thấp hơn vì hiện KHÔNG có đường ghi nào khác thay thế nó (không có nguy cơ 2 app cùng ghi thẳng như legacy — chỉ đơn giản là chưa ai gọi được).
-3. Khi kích hoạt discount-code (CP6) trở lại: đảm bảo nó đi qua ĐÚNG `catalog/promotion.evaluate()` (dưới hình dạng `extraPromotions`), không tạo đường tính riêng — nếu không sẽ lặp lại đúng gap CP7 vừa đóng.
+2. ~~Chưa có `commands/catalog.js` (CreateMenuItem/ArchiveMenuItem/LinkRecipe/CreatePromotion...) để enforce `sources:['QUANLY']` như comment `menu.js` đã hứa~~ **ĐÃ XONG** — `commands/catalog.js` (7 command), đăng ký ở `bootstrap/runtime.js`, 2 domainRecord type mới (`menuItem`/`category`/`promotion`) khai path ở `persistence-firebase/canonical-paths.js`+`atomic-commit.js`, 13 test (`tests/unit/catalog-commands.test.js`) xác nhận cả idempotency lẫn chặn quyền POS/QUANLY_OPERATOR.
+3. **MỚI phát hiện khi đóng CP11**: `catalog/packaging.js#publishPackaging()` (và tương tự cho recipe/cost/prepYield/payTerms/kpiTarget/config — cả 7 loại `compaction/versioned-input`) CHƯA có pipeline command nào wrap việc PUBLISH một version mới — mọi domain hiện chỉ ĐỌC qua `resolveAt`/`resolveDaily` trong command, còn ghi version mới chỉ gọi được trực tiếp `registry.publish()` (hiện chỉ thấy trong test). Đây là gap kiến trúc cắt ngang 7 domain, khác bản chất CP11 (sửa 1 bản ghi tại chỗ) nên KHÔNG gộp vào `commands/catalog.js` — để lại thành việc riêng.
+4. Khi kích hoạt discount-code (CP6) trở lại: đảm bảo nó đi qua ĐÚNG `catalog/promotion.evaluate()` (dưới hình dạng `extraPromotions`), không tạo đường tính riêng — nếu không sẽ lặp lại đúng gap CP7 vừa đóng.

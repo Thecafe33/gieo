@@ -86,6 +86,10 @@ GIEO.define('persistence-firebase/canonical-paths', [
       build: function (ctx, a) { return base(ctx) + '/versions/' + a.kind + '/' + a.subjectId + '/' + a.versionId; }
     },
     packagingConfig: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/packagingConfig/' + a.id; } },
+    /* CP11 — commands/catalog.js. */
+    menuItem: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/menuItems/' + a.menuItemId; } },
+    category: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/categories/' + a.categoryId; } },
+    promotion: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/promotions/' + a.promotionId; } },
     manualCostOverride: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/manualCostOverrides/' + a.itemId; } },
 
     /* Bill — live ở RTDB, archive ở Firestore, giữ đúng phân tầng legacy. */

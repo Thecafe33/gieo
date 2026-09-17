@@ -87,7 +87,11 @@ GIEO.define('persistence-firebase/atomic-commit', [
         wasteRecord: ['wasteRecord', function (x) { return { wasteRef: x.wasteRef, itemId: x.itemId }; }],
         reconciliationRecord: ['reconciliationRecord', function (x) { return { operationId: x.operationId }; }],
         liability: ['liability', function (x) { return { liabilityId: x.liabilityId }; }],
-        payrollClosing: ['payrollClosing', function (x) { return { payrollClosingId: x.payrollClosingId }; }]
+        payrollClosing: ['payrollClosing', function (x) { return { payrollClosingId: x.payrollClosingId }; }],
+        /* CP11 — commands/catalog.js. */
+        menuItem: ['menuItem', function (x) { return { menuItemId: x.menuItemId }; }],
+        category: ['category', function (x) { return { categoryId: x.categoryId }; }],
+        promotion: ['promotion', function (x) { return { promotionId: x.promotionId }; }]
       };
       var m = map[r.type];
       if (!m) {
