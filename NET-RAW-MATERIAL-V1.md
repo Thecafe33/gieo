@@ -47,9 +47,9 @@ RM8 Cấu hình KPI (wasteTargetPct / cogsPct / stockoutTargetPct)
 | | |
 |---|---|
 | **Hệ cũ** | `createContainersForReceipt` (`posgieo.html:5460-5543`) — giá lấy đúng theo `itemCostOn(id, date)` đọc `price_history_gieogieo`, không sai |
-| **Hệ mới** | **KHÔNG TỒN TẠI.** Không có `commands/receiving.js`, không có `ReceiveGoods` trong `src/layers/commands/`. `FEATURE-TREE-V1.md` mới chỉ PHÁC THẢO `ReceiveGoods → Unit{sealed}`, chưa phải code. |
-| **Phân loại** | 🔴 **GAP TOÀN PHẦN** — không phải BỎ/GIỮ/THÊM, vì chưa có gì để phân loại. Đây là domain duy nhất trong toàn bộ NET-series thiếu cả command lẫn thiết kế chi tiết. |
-| **Ghi chú** | Đã xác nhận LẶP LẠI 2 lần độc lập: lần đầu khi rà Reversal case #4 (`NET-REVERSAL-CORRECTION-V1.md`), lần này khi rà Raw Material. `unit.createUnit()` (được `SEED-CONTRACT-V1.md §3.1` nhắc tới) đòi `costBasis` bắt buộc — đúng là hàm mà `ReceiveGoods` tương lai sẽ gọi, nhưng bản thân command bọc nó (validate PO/nhà cung cấp, ghi ledger `RECEIVING`, cập nhật `suggestedCostPerUnit`) chưa viết. |
+| **Hệ mới** | `commands/receiving.js` → `ReceiveGoods` (mới viết, quyết định chủ quán mục 2: "thiếu thì thêm vào, hoàn thiện hệ thống hơn") |
+| **Phân loại** | 🟢 **THÊM MỚI** — domain trước đây thiếu cả command lẫn thiết kế, nay đã có |
+| **Ghi chú** | Đối chiếu trọn thân `createContainersForReceipt`, giữ đúng cơ chế cốt lõi (idPrefix xác định → id tem/Unit xác định, chống bug "nhận hàng cộng kho 2 lần khi retry") nhưng sửa 3 điểm mất dữ liệu âm thầm của legacy, cả 3 theo §2.3a: (1) `trackingMode:'none'` — legacy trả `[]` (0 container, không truy vết lô); hệ mới LUÔN tạo 1 Unit cho cả dòng nhận, cải thiện thật chứ không phải parity; (2) `trackingMode:'unit'` thiếu quy cách đóng gói (`packagingUnits`/`countUnitName` không khớp) — legacy log cảnh báo rồi bỏ CẢ DÒNG NHẬP; hệ mới gộp thành 1 Unit + `gap:true` trên `receivingRecord`, hàng vẫn vào kho; (3) phần dư khi `qtyBase` không chia hết quy cách (`Math.floor` không xử lý dư) — legacy làm mất phần dư hoàn toàn; hệ mới tách thành 1 Unit riêng, đánh dấu gap. KHÔNG mang theo trần "60 container" của legacy (chặn tay bảo vệ UI, không phải bất biến nghiệp vụ). Giá vốn gắn lên Unit qua đúng `recipe-cost-btp/cost.js#costBasisForNewUnit()` — ưu tiên giá thực trả trên phiếu (`paidUnitCost`), rơi về CostBasis theo thời điểm nếu phiếu không ghi giá, từ chối (PRECONDITION) nếu không có giá nào cả — không bịa. Có 14 test (`tests/unit/receiving.test.js`), đăng ký trong `bootstrap/runtime.js`. Phạm vi CHƯA làm: validate PO/nhà cung cấp thật (mới nhận `supplierId`/`purchaseOrderRef` như tham chiếu thô, không xác thực tồn tại), cập nhật `suggestedCostPerUnit` — để đó, không phải blocker cho §2.3a. |
 
 ## RM2 — Nhập kho nhanh / điều chỉnh ngoài luồng nhận hàng chính
 
@@ -122,7 +122,7 @@ RM8 Cấu hình KPI (wasteTargetPct / cogsPct / stockoutTargetPct)
 |---|---|
 | **Sales/POS** | RM5 (waste) qua `_submitDrinkWasteImpl` từng dùng chung UI với waste-BTP; N-liên quan trong `NET-SALES-V1.md` "Ca liên quan đã rà" (shortfall PRECONDITION cùng dạng ở `sales.js`, `inventory.js`, `prep.js`) |
 | **BTP** | RM5 nhánh (b) "đổ ly thành phẩm" là hao hụt BTP, không phải raw — chung hàm `_submitDrinkWasteImpl` ở hệ cũ, tách domain rõ ở hệ mới (`domain: 'prep'` vs `'raw'`); RM7 nêu vấn đề chung `btp-report.js` |
-| **Reversal/Correction** | RM1 (Receiving thiếu) là cùng một gap đã nêu ở case #4 trong `NET-REVERSAL-CORRECTION-V1.md`; RM6 dùng đúng pattern `ReviseState`-adjacent nhưng thực ra là command riêng (`ApproveLostContainer`), không đi qua `reversal.js` |
+| **Reversal/Correction** | RM1 (Receiving) trước đây là cùng một gap đã nêu ở case #4 trong `NET-REVERSAL-CORRECTION-V1.md` — nay đã đóng (`ReceiveGoods`), case #4 mở khoá; RM6 dùng đúng pattern `ReviseState`-adjacent nhưng thực ra là command riêng (`ApproveLostContainer`), không đi qua `reversal.js` |
 | **Loyalty / Payroll** | RM6's `ContainerLostApproved`/`ContainerFound` event (phần KHÔNG PHẢI liability) — cùng chịu ảnh hưởng gap L9 (tầng điều phối sự kiện) đã nêu ở `NET-LOYALTY-V1.md`; xác nhận domain thứ 3 phụ thuộc gap này |
 | **Payroll (liability)** | RM6 là ĐIỂM TẠO của khoản trừ trách nhiệm nhân viên (`hr/liability.js`, mới, quyết định chủ quán mục 4 ở `NET-PAYROLL-V1.md`): `ApproveLostContainer` tạo `PENDING`, `RestoreFoundContainer` có thể `REVERSED`. Payroll (`computePayroll`/`ClosePayroll`) là ĐIỂM TIÊU THỤ — trừ vào lương và chuyển `DEDUCTED`. Toàn bộ vòng đời chạy ĐỒNG BỘ trong `plan.domainRecords` của các command RM6, không qua event/L9 — xem RM6 và chi tiết đầy đủ ở `NET-PAYROLL-V1.md` mục Liên kết chéo domain. |
 | **Reporting** | RM7 mở rộng thành vấn đề chung 2 domain (raw + BTP), không phải riêng raw material |
@@ -131,15 +131,15 @@ RM8 Cấu hình KPI (wasteTargetPct / cogsPct / stockoutTargetPct)
 
 ## TỔNG KẾT PHÂN LOẠI
 
-- 🔴 GAP TOÀN PHẦN (không phân loại được vì chưa có đích): **RM1** (Receiving)
-- ⚪ CHƯA QUYẾT / CHƯA XÁC ĐỊNH (treo, quyết sau khi đủ NET): **RM3** (treo theo RM1), **RM7** (báo cáo ngày cho nguyên liệu thô — BTP đã đóng, xem đính chính trong ghi chú RM7 và `NET-BTP-V1.md` B5)
+- 🟢 THÊM MỚI: **RM1** (Receiving) — `commands/receiving.js`/`ReceiveGoods` mới viết, xem chi tiết ở RM1
+- ⚪ CHƯA QUYẾT / CHƯA XÁC ĐỊNH (treo, quyết sau khi đủ NET): **RM3** (RM1 đã xong, RM3 mở khoá — xem việc phải làm #2), **RM7** (báo cáo ngày cho nguyên liệu thô — BTP đã đóng, xem đính chính trong ghi chú RM7 và `NET-BTP-V1.md` B5)
 - 🟡 GIỮ, ĐỔI CÁCH LÀM: **RM2, RM4, RM5, RM6** — xác nhận cả 4 đã sửa đúng gap chain-trace nêu, đọc trọn thân hàm, không suy đoán
 - ✅ ĐÃ TỰ ĐỘNG GIẢI QUYẾT: **RM8** (field chết không được mang sang)
 
 ## VIỆC PHẢI LÀM (tích lũy, không chặn — quyết chung đợt sau)
 
-1. Thiết kế + viết `commands/receiving.js` (`ReceiveGoods`) — domain duy nhất còn thiếu cả command lẫn thiết kế. Ưu tiên cao vì RM3 và case #4 (Reversal) đều treo chờ nó.
-2. Khi có RM1, quyết luôn RM3: sửa giá/lượng nhập sai là nhánh của `ReceiveGoods`-correction hay của `ReviseState`.
+1. ~~Thiết kế + viết `commands/receiving.js` (`ReceiveGoods`)~~ — **XONG**, xem RM1.
+2. RM1 đã xong, giờ quyết RM3: sửa giá/lượng nhập sai là nhánh của `ReceiveGoods`-correction hay của `ReviseState`. (`AdjustInventory` đã đóng phần LƯỢNG qua `physicalReconciliation`; phần GIÁ vẫn chưa có command nào chạm `costBasis` sau khi Unit sealed.)
 3. RM7: quyết có cần thêm chiều `dateKey` vào `usage-report.js` (theo đúng mẫu `btp-report.js` đã có) để có báo cáo ngày thật cho nguyên liệu thô, hay chỉ cần một UI gọi `GetUsageReport` theo từng ngày.
 4. ~~(ĐÃ ĐÍNH CHÍNH — xem `NET-BTP-V1.md` B5)~~ `btp-report.js` không phải gap riêng, đã đóng đúng ĐỨT CHUỖI #3 ở tầng core. Việc còn lại của RM7 chỉ là thêm `dateKey` cho `usage-report.js` (nguyên liệu thô).
 5. Việc chung đã ghi nhận từ trước, RM6 xác nhận thêm: build tầng điều phối sự kiện (`plan.events` consumer) — ưu tiên cao nhất xuyên toàn bộ NET-series, giờ đã xác nhận cần cho ít nhất 3 domain (Loyalty, Reversal, Raw Material). **Cập nhật**: khoản trừ trách nhiệm nhân viên (RM6 → Payroll) KHÔNG còn nằm trong danh sách chờ L9 nữa — đã tách ra chạy đồng bộ trong `hr/liability.js` (xem Liên kết chéo domain). Phần còn lại của `ContainerLostApproved`/`ContainerFound` (không phải liability) vẫn chờ L9 như cũ.

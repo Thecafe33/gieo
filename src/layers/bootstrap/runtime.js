@@ -4,6 +4,7 @@ GIEO.define('bootstrap/runtime', [
   'commands/pipeline',
   'commands/sales',
   'commands/inventory',
+  'commands/receiving',
   'commands/prep',
   'commands/reversal',
   'commands/approval',
@@ -12,7 +13,7 @@ GIEO.define('bootstrap/runtime', [
   'commands/payroll',
   'read-layer/gateway',
   'reporting/report-queries'
-], function (R, pipeline, sales, inventory, prep, reversal, approval, businessDay, shift, payroll, reads, reports) {
+], function (R, pipeline, sales, inventory, receiving, prep, reversal, approval, businessDay, shift, payroll, reads, reports) {
   'use strict';
 
   var MODE = { READ_ONLY: 'READ_ONLY', SHADOW: 'SHADOW', WRITE: 'WRITE' };
@@ -23,6 +24,7 @@ GIEO.define('bootstrap/runtime', [
     AdjustInventory: inventory.AdjustInventory,
     ReportLostContainer: inventory.ReportLostContainer,
     RestoreFoundContainer: inventory.RestoreFoundContainer,
+    ReceiveGoods: receiving.ReceiveGoods,
     RecordPrepProduction: prep.RecordPrepProduction,
     EditPrepYield: prep.EditPrepYield,
     ReverseTransaction: reversal.ReverseTransaction,
