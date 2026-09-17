@@ -34,9 +34,9 @@ SC6 Tần suất kiểm kho tiếp theo
 | | |
 |---|---|
 | **Hệ cũ** | `posgieo.html:11787-11996` — `countMode:'unit'` bắt buộc quét mã (chỉ tính chai nguyên, "đếm mù" không hiện `expectedBase` — thiết kế đúng); `countMode:'qty'` nhập tay số TUYỆT ĐỐI. **AMBIGUOUS**: nguyên liệu có tem thật nhưng `unit≠'cái'` + không khớp `packagingUnits` → rơi nhầm xuống nhánh `'qty'`, MẤT yêu cầu quét bắt buộc cho món đáng lẽ phải quét. |
-| **Hệ mới** | **KHÔNG TÌM THẤY** — grep toàn bộ `src/layers` cho `countMode`/`stock-count`/`stockCountId` chỉ ra 2 file (`atomic-commit.js`, `approval.js`), không có domain module nào dựng logic PHÂN LOẠI countMode hay TẠO phiếu kiểm kê |
-| **Phân loại** | 🔴 **GAP TOÀN PHẦN** — chưa có `hr`/`inventory`-style domain module cho bước "đếm" |
-| **Ghi chú** | Tương tự RM1 (Receiving): bước ĐẦU VÀO của chuỗi kiểm kho — việc PHÂN LOẠI một mặt hàng vào `countMode:'unit'` hay `'qty'` là NGHIỆP VỤ THẬT (quyết định có bắt buộc quét mã hay không), không phải chi tiết UI thuần tuý — nhưng hiện chưa có domain function nào đóng gói quyết định này. Đây là ứng viên cho domain con "stock-count" cần xây, giống cách `commands/takeover.js` dựng riêng cho tiếp nhận. Khi xây, cần đóng đúng AMBIGUOUS: quyết định `countMode` phải dựa trên field TƯỜNG MINH của item (`stockManaged`/`trackingMode`/có `packagingUnits` hay không), không suy từ `unit` field một cách ngầm định như legacy. |
+| **Hệ mới** | `commands/stock-count.js` → `classifyCountMode(item)` |
+| **Phân loại** | 🟢 **THÊM MỚI** |
+| **Ghi chú** | Đóng bằng cách TÁI SỬ DỤNG đúng fix đã áp dụng cho gap gốc-giống-hệt ở RM1 (Receiving): `classifyCountMode(item) = classifyTrackingMode(item)==='unit' ? 'unit' : 'qty'`, gọi thẳng `commands/receiving.js#classifyTrackingMode()` (import cùng tầng `commands/`, tiền lệ đã có ở `business-day.js`→`shift.js`) thay vì viết lại một hàm suy luận thứ hai cho cùng một câu hỏi. Quyết định dựa trên field `trackingMode` TƯỜNG MINH trên item, không suy từ `unit`/`packagingUnits` khớp hay không như legacy — đóng đúng AMBIGUOUS đã nêu: mặt hàng `trackingMode:'unit'` LUÔN bắt buộc quét mã, không còn khả năng rơi nhầm xuống `'qty'` vì thiếu cấu hình đóng gói. |
 
 ## SC1b — Mismatch lúc đếm ("Không tìm thấy" → báo mất)
 
@@ -52,9 +52,9 @@ SC6 Tần suất kiểm kho tiếp theo
 | | |
 |---|---|
 | **Hệ cũ** | `posgieo.html:12802-12878` — `.add()` sinh id ngẫu nhiên (Bug #13 double-tap: gửi 2 lần tạo 2 phiếu) — ghi `stock_counts_gieogieo{items[], status:'pending_review'}` |
-| **Hệ mới** | **KHÔNG TÌM THẤY** — không có command `SubmitStockCount`/tương đương trong `commands/` |
-| **Phân loại** | 🔴 **GAP TOÀN PHẦN** |
-| **Ghi chú** | `commands/approval.js`'s `ApproveStockCount` NHẬN VÀO `input.stockCount` như dữ liệu ĐÃ CÓ SẴN — không có command nào TẠO ra đối tượng đó. Đây là khoảng trống tương tự RM1 (Receiving): phần DUYỆT đã thiết kế kỹ (đóng đúng 4/5 mục "FIX BẮT BUỘC" của chain-trace — xem SC3), nhưng phần TẠO PHIẾU ở đầu vào chưa có domain command. Khi xây `SubmitStockCount`, cần dùng `ids.deterministicId()` theo `(storeId, businessDate, actorId/seq)` để đóng đúng Bug #13 (double-tap không tạo 2 phiếu) — đúng nguyên tắc idempotency đã áp dụng xuyên suốt các domain khác (`shiftId`, `takeoverOperationId`, v.v.). |
+| **Hệ mới** | `commands/stock-count.js` → `SubmitStockCount` |
+| **Phân loại** | 🟢 **THÊM MỚI** |
+| **Ghi chú** | `stockCountId = ids.deterministicId('stockCount', ['submit', input.countRef])` — `countRef` do caller cung cấp (mẫu `wasteRef`/`adjustRef`/`correctRef`/`receiptRef` đã dùng xuyên suốt `commands/inventory.js`/`commands/receiving.js`), đóng đúng Bug #13 (double-tap gửi 2 lần → retry no-op, đã có test xác nhận `replayed:true`). Output `stockCount.lines[]` dựng ĐÚNG hình dạng mà `ApproveStockCount` (SC3) cần: dòng `countMode:'unit'` mang `{itemId, unitId, countedQty, applied}`, dòng `countMode:'qty'` mang `{itemId, unitId:null, countedQty, expectedQty, delta, applied}` với `delta` TÍNH SẴN ở SubmitStockCount (không để ApproveStockCount tự trừ) — đã có test tích hợp nối trực tiếp output của `SubmitStockCount` vào `ApproveStockCount` không cần dịch lại shape. Chỉ TẠO phiếu `PENDING`, hoàn toàn không mutate Unit/ledger — việc đó là của SC3/SC4 (đã đóng từ trước). |
 
 ## SC3 — Duyệt phiếu
 
@@ -107,16 +107,15 @@ SC6 Tần suất kiểm kho tiếp theo
 
 ## TỔNG KẾT PHÂN LOẠI
 
-- 🟢 THÊM MỚI: **SC5** (`detectDrift()` — cơ chế phát hiện lệch chủ động, legacy không có)
+- 🟢 THÊM MỚI: **SC1** (`classifyCountMode` — tái dùng fix của RM1 cho cùng gốc AMBIGUOUS), **SC2** (`SubmitStockCount`), **SC5** (`detectDrift()` — cơ chế phát hiện lệch chủ động, legacy không có)
 - 🟡 GIỮ, ĐỔI CÁCH LÀM: **SC1b, SC3, SC4** — 3/5 "FIX BẮT BUỘC" của chain-trace đã xác nhận đóng qua đọc trọn code (route duyệt mất hũ, idempotency + per-line-failure + status trung thực khi duyệt, một nguồn sự thật duy nhất cho `currentStock`)
-- 🔴 GAP TOÀN PHẦN (đầu vào chưa xây): **SC1** (phân loại countMode), **SC2** (tạo phiếu kiểm kê) — phần DUYỆT đã xây kỹ nhưng phần TẠO PHIẾU ở đầu chuỗi còn thiếu, giống hình dạng gap của RM1 (Receiving)
 - 🔴 GAP kế thừa nguyên trạng từ legacy (không phải regression, không vi phạm §2.3a): **SC6** (không có cấu hình lịch/cảnh báo tần suất kiểm kho)
 
-**So sánh với các domain trước**: đây là domain có nhiều "FIX BẮT BUỘC" của chain-trace được đóng NHẤT (4/5 mục, đọc trọn xác nhận) — nhưng cũng là domain có gap ĐẦU VÀO (SC1/SC2) rõ nhất: toàn bộ công sức thiết kế đã dồn vào phần DUYỆT/ÁP DỤNG (đúng đắn, kỹ lưỡng), còn phần TẠO PHIẾU ở đầu chuỗi hoàn toàn chưa có domain module — khác Payroll (nơi domain logic đủ nhưng thiếu command wrapper), ở đây là thiếu domain logic thật.
+**So sánh với các domain trước**: đây là domain có nhiều "FIX BẮT BUỘC" của chain-trace được đóng NHẤT (4/5 mục, đọc trọn xác nhận) — phần DUYỆT/ÁP DỤNG đã đúng đắn, kỹ lưỡng từ trước; phần TẠO PHIẾU ở đầu chuỗi (SC1/SC2) nay đã đóng bằng `commands/stock-count.js`, tái dùng trực tiếp `classifyTrackingMode()` của RM1 (Receiving) cho SC1 thay vì viết lại một hàm phân loại thứ hai — cùng một câu hỏi ("mặt hàng này có bắt buộc quét mã không") chỉ có một cách trả lời trong toàn hệ thống.
 
 ## VIỆC PHẢI LÀM (tích lũy, không chặn)
 
-1. Xây domain con "kiểm kho — tạo phiếu": `SubmitStockCount` (đóng Bug #13 double-tap bằng deterministic id) + logic phân loại `countMode` tường minh dựa trên field item (`trackingMode`/`packagingUnits`), đóng đúng AMBIGUOUS đã nêu ở SC1.
+1. ~~Xây domain con "kiểm kho — tạo phiếu": `SubmitStockCount` (đóng Bug #13 double-tap bằng deterministic id) + logic phân loại `countMode` tường minh dựa trên field item (`trackingMode`/`packagingUnits`), đóng đúng AMBIGUOUS đã nêu ở SC1.~~ **ĐÃ XONG** — `commands/stock-count.js` (`classifyCountMode` + `SubmitStockCount`), đăng ký ở `bootstrap/runtime.js`, 12 test (`tests/unit/stock-count.test.js`) gồm cả 2 test tích hợp nối thẳng vào `ApproveStockCount`.
 2. Xác nhận lịch/route chạy `detectDrift()` định kỳ (không phải chỉ gọi thủ công) — câu hỏi vận hành, không phải thiếu logic.
 3. (Không mới, nhắc lại) Tầng điều phối sự kiện — SC3's `StockCountPartiallyApplied` là domain thứ 7 phụ thuộc gap L9.
 4. SC6 để lại cho vòng sau — không chặn, không vi phạm §2.3a, kế thừa đúng mức độ ưu tiên thấp của legacy.
