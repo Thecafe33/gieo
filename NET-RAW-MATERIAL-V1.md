@@ -65,9 +65,9 @@ RM8 Cấu hình KPI (wasteTargetPct / cogsPct / stockoutTargetPct)
 | | |
 |---|---|
 | **Hệ cũ** | `fixRecWizApply` (`quanlygieo.html:4119-4218`, Bug #20) — 4 bước ghi KHÔNG ATOMIC; có audit trail đầy đủ; GAP: chỉ sửa được LƯỢNG, không có nhánh sửa GIÁ nhập sai |
-| **Hệ mới** | **CHƯA XÁC ĐỊNH ĐƯỢC** — phụ thuộc trực tiếp vào RM1 (chưa có `ReceiveGoods`). `AdjustInventory` với `unitId`+`actualQty` có thể sửa LƯỢNG (qua `physicalReconciliation`, atomic, đúng 1 bước — tự động đóng vấn đề "4 bước không atomic"), nhưng KHÔNG có trường nào để sửa `costBasis` của một Unit đã sealed — không phải vì bị chặn, mà vì chưa có command nào chạm tới `costBasis` sau khi Unit đã tạo. |
-| **Phân loại** | ⚪ **CHƯA QUYẾT — treo theo RM1** |
-| **Ghi chú** | Không tự ý phân loại BỎ/GIỮ/THÊM vì đích (RM1) chưa tồn tại để so sánh. Khi thiết kế `ReceiveGoods`, cần quyết định: sửa giá nhập sai có phải một nhánh riêng của `ReceiveGoods`-correction, hay một dạng `ReviseState` (`commands/reversal.js`) với `historicalPolicy`? Cả hai đều hợp lý về kiến trúc — để đó, quyết chung một lượt khi làm NET Receiving đầy đủ hoặc khi tổng hợp toàn bộ CHƯA QUYẾT. |
+| **Hệ mới** | LƯỢNG: `commands/inventory.js` → `AdjustInventory` (đã có, xem RM2). GIÁ: `fifo-core/unit.js` → `reviseCostBasis()` + `commands/receiving.js` → `CorrectReceivingCost` (mới viết) |
+| **Phân loại** | 🟢 **THÊM MỚI** (nhánh sửa GIÁ) + 🟡 **GIỮ, ĐỔI CÁCH LÀM** (nhánh sửa LƯỢNG, đã đóng ở RM2) |
+| **Ghi chú** | Quyết định kiến trúc đã chốt: KHÔNG dùng `ReviseState` (`commands/reversal.js`) cho việc này dù nó là mẫu "sửa 1 con số đã chốt sai" tổng quát sẵn có — vì `ReviseState` bắt buộc chọn `historicalPolicy: FREEZE\|RECOMPUTE`, mà `costBasis` của Unit chỉ có ĐÚNG MỘT chính sách hợp lệ theo invariant #14 đã áp dụng khắp `recipe-cost-btp/cost.js` ("CẤM dùng giá hiện tại để tính lại lịch sử"): ĐÓNG BĂNG — ledger đã ghi bằng giá cũ giữ nguyên, sửa chỉ ảnh hưởng phần tiêu thụ từ nay về sau. Cho `ReviseState` chọn RECOMPUTE ở trường này sẽ mở lại đúng gap đã đóng ở nơi khác, nên tách thành command riêng có audit append-only (`unit.costBasisRevisions`, giữ `{before, after, reason, actorId, operationId}` từng lần sửa) thay vì domainRecord rời như `ReviseState`. `CorrectReceivingCost` cần `unitId` + `correctRef` (chống sửa đúp, cùng mẫu `wasteRef`/`adjustRef`), chỉ đổi `costBasis`, không đụng `remainingQty`/`initialQty`. 5 test mới trong `tests/unit/receiving.test.js`, đăng ký trong `bootstrap/runtime.js`. |
 
 ## RM4 — Kiểm kê định kỳ (đếm tồn → duyệt)
 
@@ -131,15 +131,15 @@ RM8 Cấu hình KPI (wasteTargetPct / cogsPct / stockoutTargetPct)
 
 ## TỔNG KẾT PHÂN LOẠI
 
-- 🟢 THÊM MỚI: **RM1** (Receiving) — `commands/receiving.js`/`ReceiveGoods` mới viết, xem chi tiết ở RM1
-- ⚪ CHƯA QUYẾT / CHƯA XÁC ĐỊNH (treo, quyết sau khi đủ NET): **RM3** (RM1 đã xong, RM3 mở khoá — xem việc phải làm #2), **RM7** (báo cáo ngày cho nguyên liệu thô — BTP đã đóng, xem đính chính trong ghi chú RM7 và `NET-BTP-V1.md` B5)
-- 🟡 GIỮ, ĐỔI CÁCH LÀM: **RM2, RM4, RM5, RM6** — xác nhận cả 4 đã sửa đúng gap chain-trace nêu, đọc trọn thân hàm, không suy đoán
+- 🟢 THÊM MỚI: **RM1** (Receiving — `commands/receiving.js`/`ReceiveGoods`), **RM3 nhánh GIÁ** (`unit.reviseCostBasis()` + `CorrectReceivingCost`)
+- ⚪ CHƯA QUYẾT / CHƯA XÁC ĐỊNH (treo, quyết sau khi đủ NET): **RM7** (báo cáo ngày cho nguyên liệu thô — BTP đã đóng, xem đính chính trong ghi chú RM7 và `NET-BTP-V1.md` B5)
+- 🟡 GIỮ, ĐỔI CÁCH LÀM: **RM2, RM3 nhánh LƯỢNG, RM4, RM5, RM6** — xác nhận đã sửa đúng gap chain-trace nêu, đọc trọn thân hàm, không suy đoán
 - ✅ ĐÃ TỰ ĐỘNG GIẢI QUYẾT: **RM8** (field chết không được mang sang)
 
 ## VIỆC PHẢI LÀM (tích lũy, không chặn — quyết chung đợt sau)
 
 1. ~~Thiết kế + viết `commands/receiving.js` (`ReceiveGoods`)~~ — **XONG**, xem RM1.
-2. RM1 đã xong, giờ quyết RM3: sửa giá/lượng nhập sai là nhánh của `ReceiveGoods`-correction hay của `ReviseState`. (`AdjustInventory` đã đóng phần LƯỢNG qua `physicalReconciliation`; phần GIÁ vẫn chưa có command nào chạm `costBasis` sau khi Unit sealed.)
+2. ~~Quyết RM3: sửa giá/lượng nhập sai~~ — **XONG**: LƯỢNG dùng `AdjustInventory` (đã có từ RM2); GIÁ là command riêng `CorrectReceivingCost` chứ không phải nhánh của `ReviseState` — lý do đầy đủ ở RM3.
 3. RM7: quyết có cần thêm chiều `dateKey` vào `usage-report.js` (theo đúng mẫu `btp-report.js` đã có) để có báo cáo ngày thật cho nguyên liệu thô, hay chỉ cần một UI gọi `GetUsageReport` theo từng ngày.
 4. ~~(ĐÃ ĐÍNH CHÍNH — xem `NET-BTP-V1.md` B5)~~ `btp-report.js` không phải gap riêng, đã đóng đúng ĐỨT CHUỖI #3 ở tầng core. Việc còn lại của RM7 chỉ là thêm `dateKey` cho `usage-report.js` (nguyên liệu thô).
 5. Việc chung đã ghi nhận từ trước, RM6 xác nhận thêm: build tầng điều phối sự kiện (`plan.events` consumer) — ưu tiên cao nhất xuyên toàn bộ NET-series, giờ đã xác nhận cần cho ít nhất 3 domain (Loyalty, Reversal, Raw Material). **Cập nhật**: khoản trừ trách nhiệm nhân viên (RM6 → Payroll) KHÔNG còn nằm trong danh sách chờ L9 nữa — đã tách ra chạy đồng bộ trong `hr/liability.js` (xem Liên kết chéo domain). Phần còn lại của `ContainerLostApproved`/`ContainerFound` (không phải liability) vẫn chờ L9 như cũ.

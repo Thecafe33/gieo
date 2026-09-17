@@ -206,6 +206,8 @@ GIEO.define('fifo-core/unit', ['shared-kernel/ids', 'shared-kernel/result'], fun
       foundAt: null, foundBy: null,
 
       physicalReconciliations: [],
+      /* Append-only — RM3 (sửa giá nhập sai). Trống cho tới lần sửa đầu tiên. */
+      costBasisRevisions: [],
 
       /* Mặc định NATIVE + không có seed. Cửa nào gọi thì cửa đó ghi đè bằng
          `extra`, nên mọi Unit đều mang xuất xứ tường minh — không có Unit nào
@@ -384,6 +386,50 @@ GIEO.define('fifo-core/unit', ['shared-kernel/ids', 'shared-kernel/result'], fun
   }
 
   /**
+   * RM3 — sửa giá nhập sai (`NET-RAW-MATERIAL-V1.md` RM3).
+   *
+   * Cố ý KHÔNG có `historicalPolicy` để chọn như `ReviseState`
+   * (`commands/reversal.js`): invariant #14 (`recipe-cost-btp/cost.js` —
+   * "CẤM dùng giá hiện tại để tính lại lịch sử") đã cấm RECOMPUTE cho MỌI
+   * giá vốn ở mọi nơi khác trong hệ thống, nên costBasis của Unit chỉ có
+   * đúng MỘT chính sách hợp lệ: ĐÓNG BĂNG ledger đã ghi bằng giá cũ, sửa chỉ
+   * ảnh hưởng phần TIÊU THỤ TỪ NAY VỀ SAU (và giá trị còn lại cho báo cáo,
+   * vd liability nếu Unit đang LOST). Cho `ReviseState` chọn RECOMPUTE ở đây
+   * sẽ mở lại đúng invariant đã đóng — nên đây là command riêng.
+   *
+   * Audit append-only trong `costBasisRevisions`, không ghi đè.
+   */
+  function reviseCostBasis(unit, spec) {
+    if (unit.status === STATUS.VOIDED) {
+      return R.err('PRECONDITION', 'không sửa giá vốn của Unit đã VOIDED');
+    }
+    if (!spec || typeof spec.unitCost !== 'number' || spec.unitCost < 0) {
+      return R.err('VALIDATION', 'reviseCostBasis cần unitCost là số không âm');
+    }
+    if (!ids.isId(spec.actorId, 'actor')) return R.err('VALIDATION', 'reviseCostBasis cần actorId');
+    if (!spec.operationId) return R.err('VALIDATION', 'reviseCostBasis cần operationId');
+    if (!spec.reason) return R.err('VALIDATION', 'sửa giá nhập sai phải có lý do');
+
+    var before = unit.costBasis || null;
+    var after = {
+      unitCost: spec.unitCost,
+      currency: spec.currency || (before && before.currency) || 'VND',
+      versionId: spec.versionId || null,
+      source: 'CORRECTION'
+    };
+    var revision = {
+      before: before, after: after,
+      at: spec.at, actorId: spec.actorId, reason: spec.reason, operationId: spec.operationId
+    };
+
+    return R.ok(Object.assign({}, unit, {
+      costBasis: after,
+      costBasisRevisions: (unit.costBasisRevisions || []).concat([revision]),
+      operationId: spec.operationId
+    }));
+  }
+
+  /**
    * Trạng thái HIỂN THỊ, gộp cả phần suy diễn.
    * Dùng cho UI/alert; state máy vẫn là `unit.status`.
    */
@@ -431,6 +477,7 @@ GIEO.define('fifo-core/unit', ['shared-kernel/ids', 'shared-kernel/result'], fun
     absorbDebt: absorbDebt,
     markLost: markLost,
     restoreFound: restoreFound,
+    reviseCostBasis: reviseCostBasis,
     effectiveState: effectiveState,
     compactBlockers: compactBlockers
   };

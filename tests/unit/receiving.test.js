@@ -11,6 +11,7 @@ var _r = (function () {
     R: GIEO.require('shared-kernel/result'),
     PIPE: GIEO.require('commands/pipeline'),
     RCV: GIEO.require('commands/receiving'),
+    U: GIEO.require('fifo-core/unit'),
     VI: GIEO.require('compaction/versioned-input'),
     CST: GIEO.require('recipe-cost-btp/cost'),
     ACCESS: GIEO.require('store-context/access'),
@@ -44,6 +45,21 @@ function run(input, ctx, store) {
   return _r.PIPE.run(_r.RCV.ReceiveGoods, input, ctx || rCtx(), {
     operationStore: store || _r.PIPE.createInMemoryOperationStore()
   });
+}
+
+function runCorrect(input, ctx, store) {
+  return _r.PIPE.run(_r.RCV.CorrectReceivingCost, input, ctx || rCtx('QUANLY_ADMIN', 'QUANLY'), {
+    operationStore: store || _r.PIPE.createInMemoryOperationStore()
+  });
+}
+
+function mkReceivedUnit(unitCost, qty, tag) {
+  return assertOk(_r.U.createUnit({
+    unitId: _r.ids.deterministicId('unit', ['recv', tag || 'x1']),
+    itemId: _r.SUA, storeId: _r.STORE, itemKind: 'raw', initialQty: qty,
+    costBasis: { unitCost: unitCost, versionId: null, source: 'RECEIVING' },
+    operationId: 'operation_recv_' + (tag || 'x1')
+  }));
 }
 
 function reg() {
@@ -225,5 +241,59 @@ describe('ReceiveGoods — command đầy đủ', function () {
     assert.strictEqual(out.plan.unitChanges.length, 2);
     assert.strictEqual(out.plan.ledgerEntries.length, 2);
     assert.strictEqual(out.plan.domainRecords[0].record.lines.length, 2);
+  });
+});
+
+describe('CorrectReceivingCost — RM3, sửa giá nhập sai (legacy KHÔNG có nhánh này)', function () {
+  test('sửa giá — costBasis mới, audit append-only giữ giá cũ', function () {
+    var u = mkReceivedUnit(30, 1000, 'c1');
+    var out = assertOk(runCorrect({
+      unitId: u.unitId, correctRef: 'FIX1', unitCost: 35, reason: 'nhập nhầm giá',
+      units: [u]
+    }));
+    var revised = out.plan.unitChanges[0];
+    assert.strictEqual(revised.costBasis.unitCost, 35);
+    assert.strictEqual(revised.costBasis.source, 'CORRECTION');
+    assert.strictEqual(revised.costBasisRevisions.length, 1);
+    assert.strictEqual(revised.costBasisRevisions[0].before.unitCost, 30);
+    assert.strictEqual(revised.costBasisRevisions[0].after.unitCost, 35);
+    assert.strictEqual(revised.costBasisRevisions[0].reason, 'nhập nhầm giá');
+  });
+
+  test('không đổi remainingQty/initialQty — chỉ giá, không phải lượng (đó là việc của AdjustInventory)', function () {
+    var u = mkReceivedUnit(30, 1000, 'c2');
+    var out = assertOk(runCorrect({
+      unitId: u.unitId, correctRef: 'FIX2', unitCost: 40, reason: 'x', units: [u]
+    }));
+    var revised = out.plan.unitChanges[0];
+    assert.strictEqual(revised.initialQty, 1000);
+    assert.strictEqual(revised.remainingQty, 1000);
+  });
+
+  test('sửa lặp lại là no-op', function () {
+    var store = _r.PIPE.createInMemoryOperationStore();
+    var ctx = rCtx('QUANLY_ADMIN', 'QUANLY');
+    var u = mkReceivedUnit(30, 1000, 'c3');
+    var input = { unitId: u.unitId, correctRef: 'FIX3', unitCost: 33, reason: 'x', units: [u] };
+    assertOk(runCorrect(input, ctx, store));
+    assert.strictEqual(assertOk(runCorrect(input, ctx, store)).replayed, true);
+  });
+
+  test('không tìm thấy unit thì NOT_FOUND', function () {
+    assertErr(runCorrect({
+      unitId: _r.ids.deterministicId('unit', ['ghost']), correctRef: 'FIX4', unitCost: 10, reason: 'x', units: []
+    }), 'NOT_FOUND');
+  });
+
+  test('thiếu correctRef thì từ chối — cần id xác định để chống sửa đúp', function () {
+    var u = mkReceivedUnit(30, 1000, 'c5');
+    assertErr(runCorrect({ unitId: u.unitId, unitCost: 10, reason: 'x', units: [u] }), 'VALIDATION');
+  });
+
+  test('unitCost âm thì từ chối', function () {
+    var u = mkReceivedUnit(30, 1000, 'c6');
+    assertErr(runCorrect({
+      unitId: u.unitId, correctRef: 'FIX6', unitCost: -5, reason: 'x', units: [u]
+    }), 'VALIDATION');
   });
 });

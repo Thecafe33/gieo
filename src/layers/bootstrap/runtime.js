@@ -25,6 +25,7 @@ GIEO.define('bootstrap/runtime', [
     ReportLostContainer: inventory.ReportLostContainer,
     RestoreFoundContainer: inventory.RestoreFoundContainer,
     ReceiveGoods: receiving.ReceiveGoods,
+    CorrectReceivingCost: receiving.CorrectReceivingCost,
     RecordPrepProduction: prep.RecordPrepProduction,
     EditPrepYield: prep.EditPrepYield,
     ReverseTransaction: reversal.ReverseTransaction,

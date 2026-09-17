@@ -224,9 +224,58 @@ GIEO.define('commands/receiving', [
     }
   });
 
+  /**
+   * CorrectReceivingCost — RM3, sửa giá nhập sai của MỘT lô đã sealed.
+   *
+   * Quyết định chủ quán mục 2 + `NET-RAW-MATERIAL-V1.md` RM3: sửa LƯỢNG nhập
+   * sai đã có sẵn qua `AdjustInventory` (`commands/inventory.js`, dùng
+   * `physicalReconciliation`, atomic đúng 1 bước — tự đóng bug "4 bước
+   * không atomic" của `fixRecWizApply` legacy). Domain còn thiếu là sửa GIÁ
+   * — legacy hoàn toàn không có nhánh này. Command này bọc
+   * `unit.reviseCostBasis()` — xem lý do KHÔNG có `historicalPolicy` ở đó.
+   */
+  var CorrectReceivingCost = pipeline.defineCommand({
+    name: 'CorrectReceivingCost',
+    authority: 'REVIEW_APPROVE_CORRECT',
+    mutates: true,
+    sources: ['QUANLY'],
+
+    operationId: function (input) {
+      return ids.deterministicId('operation', ['correctcost', input.correctRef, input.unitId]);
+    },
+
+    validate: function (input) {
+      if (!input || !ids.isId(input.unitId, 'unit')) return R.err('VALIDATION', 'cần unitId hợp lệ');
+      if (!input.correctRef) return R.err('VALIDATION', 'cần correctRef để id xác định (chống sửa đúp)');
+      if (typeof input.unitCost !== 'number' || input.unitCost < 0) {
+        return R.err('VALIDATION', 'unitCost phải là số không âm');
+      }
+      if (!input.reason) return R.err('VALIDATION', 'sửa giá nhập sai phải có lý do');
+      return R.ok(true);
+    },
+
+    execute: function (input, ctx) {
+      var unit = (input.units || []).filter(function (u) { return u.unitId === input.unitId; })[0];
+      if (!unit) return R.err('NOT_FOUND', 'không tìm thấy lô ' + input.unitId);
+
+      var opId = ids.deterministicId('operation', ['correctcost', input.correctRef, input.unitId]);
+      var r = unitLib.reviseCostBasis(unit, {
+        unitCost: input.unitCost, currency: input.currency, versionId: input.versionId,
+        at: ctx.clock.now(), actorId: ctx.actor.actorId, reason: input.reason, operationId: opId
+      });
+      if (R.isErr(r)) return r;
+
+      var plan = pipeline.emptyPlan();
+      plan.unitChanges.push(r.value);
+      plan.projectionRecomputes.push({ itemId: unit.itemId, storeId: ctx.storeId });
+      return R.ok(plan);
+    }
+  });
+
   return {
     classifyTrackingMode: classifyTrackingMode,
     splitReceivingLine: splitReceivingLine,
-    ReceiveGoods: ReceiveGoods
+    ReceiveGoods: ReceiveGoods,
+    CorrectReceivingCost: CorrectReceivingCost
   };
 });
