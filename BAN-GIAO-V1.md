@@ -57,20 +57,33 @@ bootstrap/startup  →  bootstrap/legacy-takeover  →  commands/takeover  →  
 ```
 
 Luật (mỗi điều đều có test):
-- Tồn đầu = `unitBase` hiện tại. `costBasis` để **trống**, không bịa.
+- Tồn đầu = `unitBase` hiện tại.
+- **`costBasis` (sửa 2026-09-17, xem `SEED-CONTRACT-V1.md` §3.5):** lấy giá
+  hiệu lực gần nhất (≤ cutoverDate) từ `price_history_gieogieo` của item,
+  `source: 'LEGACY_PRICE_HISTORY'`. Chỉ để trống + `needsReview:
+  SEEDED_WITHOUT_COST` khi item đó không có entry nào trong price history.
+  KHÔNG dùng `inventory_items.costPerUnit` (field phẳng, không mốc thời
+  gian) làm costBasis — đó vẫn là lỗi "quy hết về giá scalar gần nhất".
 - Lô đang mở dở giữ nguyên `openedAt` → FIFO khớp kệ thật.
 - Lô đã hết và lô lượng ≤ 0: **không** mang sang.
-- Mọi lô mang `origin: LEGACY_SEED`, cờ `SEEDED_WITHOUT_COST`.
+- Mọi lô mang `origin: LEGACY_SEED`.
 - **PIN 4 số mang sang nguyên vẹn** — nhân viên đăng nhập như cũ.
 - Không sinh bút toán nhập giả cho tồn đầu.
 - Công thức và điều khoản lương hiệu lực **từ** mốc cutover.
 - Doanh thu đã chốt đóng băng nguyên trạng.
-- `costPerUnit` hệ cũ → `suggestedCostPerUnit`, **không** thành giá vốn lô.
+- `costPerUnit` hệ cũ → `suggestedCostPerUnit`, **không** thành giá vốn lô
+  (vai trò riêng, không thay thế `price_history_gieogieo`).
 - Đọc hụt một nguồn thì **dừng** — không tiếp nhận một phần.
 - Chạy đúng **một lần**, kiểm bằng bản ghi operation trong kho.
 
-**Ranh giới truy vết:** lô seed trả `traceability.complete = false` kèm mốc.
-Trace nói ra ranh giới thay vì hiện một lịch sử cụt trông như đầy đủ.
+**Ranh giới truy vết:** lô seed trả `traceability.complete = false` kèm mốc —
+truy vết ĐẦY ĐỦ chỉ bắt buộc từ mốc cutover trở đi; không có nghĩa vụ dựng lại
+chuỗi FIFO/nguồn gốc của lô đó trước cutover. Trace nói ra ranh giới thay vì
+hiện một lịch sử cụt trông như đầy đủ.
+
+**Việc cần làm — chưa code:** `mapUnit`/`commands/takeover.js` hiện chưa join
+`price_history_gieogieo`; đang rơi vào nhánh `NO_COST_BASIS`/`costBasis: null`
+cho toàn bộ lô (xem §1.7). Cần sửa trước khi coi phần "tiếp nhận" là xong.
 
 ## 1.6 Cutover (P13)
 
@@ -82,10 +95,29 @@ Trace nói ra ranh giới thay vì hiện một lịch sử cụt trông như đ
 - Trạng thái lưu trong kho (`system/cutover`), nên F5 không reset quyền ghi.
 - Runtime lấy quyền ghi **từ** cutover, không hardcode.
 
-## 1.7 Shadow (P12)
+## 1.7 Shadow (P12) — PHẠM VI ĐƯỢC THU HẸP (quyết định 2026-09-17)
 
-`bootstrap/shadow-compare` — ma trận 11 domain × 11 lớp kịch bản. Cổng mặc định ĐÓNG.
-Đã chạy thật một lần trên export production → `SHADOW-FINDINGS-V1.md`.
+`bootstrap/shadow-compare` hiện implement ma trận 11 domain × 11 lớp kịch
+bản, đối chiếu TOÀN BỘ lịch sử hệ cũ so với hệ mới. Chủ quán đã quyết định
+**thu hẹp phạm vi gate**: chỉ cần đối chiếu đúng **SỐ DƯ MỞ ĐẦU** (opening
+balance — tồn theo lô, theo item, và costBasis đã seed) tại đúng mốc
+cutover khớp giữa hệ cũ và hệ mới. Không đòi giải thích lệch của từng bút
+toán lịch sử trước cutover — biên đó đã được chốt ở `SEED-CONTRACT-V1.md`
+("tuyệt đối không truy ngược vào hệ cũ").
+
+Cổng vẫn mặc định ĐÓNG (ô/khoản mục chưa đối chiếu = FAIL), chỉ đổi ĐỐI
+TƯỢNG đối chiếu: từ ma trận 121 ô lịch sử → một bảng khớp số dư mở đầu theo
+item/lô. **`bootstrap/shadow-compare` cần được thiết kế lại theo scope mới
+này** (chưa code) — matrix 11×11 cũ không còn là gate bắt buộc, có thể giữ
+làm công cụ chẩn đoán chất lượng dữ liệu cũ nhưng không chặn cutover.
+
+Lần chạy thật đầu tiên trên export production (theo scope CŨ, 121 ô) →
+`SHADOW-FINDINGS-V1.md`. Các phát hiện dữ liệu ở đó (thiếu costBasis, thiếu
+actorId, lệch Firestore/RTDB...) vẫn có giá trị tham khảo chất lượng dữ liệu,
+nhưng **không còn là điều kiện chặn cổng** theo scope mới — trừ phần liên
+quan trực tiếp đến chính số dư mở đầu (costBasis nay tiếp nhận được qua
+`price_history_gieogieo`, xem §1.5; phần "74,5% consumption không quy được
+về lô" là lịch sử tiêu thụ, ngoài phạm vi số dư mở đầu, không chặn).
 
 ## 1.8 Kết nối Firebase
 
@@ -99,55 +131,57 @@ quyền rỗng (rỗng trông y hệt "không có dữ liệu").
 
 ## 2.1 CHẶN — không có thì không mở được app
 
-### (a) Đăng nhập + StoreContext
-`globalThis.GIEO_CONTEXT` hiện **không ai đặt**. Mở `dist/*.html` lên sẽ báo
-*"chưa có StoreContext để khởi động"*.
+### (a) Đăng nhập + StoreContext — ĐÃ XONG
 
-Cần màn nhập **PIN 4 số** (đã có sẵn trong dữ liệu tiếp nhận) → dựng `actor` →
-`createContext`. Xem `store-context/access.createActor` và `store-context/context`.
+`bootstrap/startup.prepareAuth` đọc nhân viên/PIN; `pinAuth.authenticate` dựng
+`actor`/`context`; runtime chỉ dựng sau khi có context. Màn PIN 4 số đã có
+trong QUANLY thin client (`src/apps/quanly/main.js`). Ghi chú (a) cũ trong bản
+này bị stale — không còn đúng.
 
-Vai trò hợp lệ: `POS_OPERATOR`, `STORE_MANAGER`, `QUANLY_OPERATOR`,
-`QUANLY_ADMIN`, `SYSTEM_ADMIN`.
+### (b) Năm command ca — ĐÃ XONG, đều đăng ký trong `bootstrap/runtime.js`
 
-### (b) Bốn command ca còn thiếu
-Logic **đã có**, chưa bọc thành command và chưa đăng ký trong `bootstrap/runtime`:
-
-| Cần tạo | Logic sẵn ở |
+| Command | Trạng thái |
 |---|---|
-| `OpenBusinessDay` | `store-context/business-day.openDay` |
-| `CloseBusinessDay` | `business-day.closeDay` + `commands/shift.closeDayBlockers` |
-| `OpenCashSegment` | `commands/shift.openSegment` |
-| `CheckIn` / `CheckOut` | `hr/shift.checkIn` / `.checkOut` |
+| `OpenBusinessDay` | Đã đăng ký |
+| `CloseBusinessDay` | Đã đăng ký |
+| `OpenCashSegment` | Đã đăng ký |
+| `CheckIn` / `CheckOut` | Đã đăng ký |
+| `CloseCashSegment` | Đã đăng ký |
 
-Đã đăng ký sẵn: `CloseCashSegment`.
+Runtime hiện có 20 command, 16 query đăng ký (đếm máy tại
+`bootstrap/runtime.js`, không dựa số cũ trong tài liệu này).
 
-## 2.2 UI — quyết định lớn chưa chốt
+## 2.2 UI — ĐÃ CHỐT (2026-09-17), chưa thực hiện
 
-Hai file `src/apps/pos/main.js` và `src/apps/quanly/main.js` là màn hình **tôi tự
-dựng**. Đó là việc bạn không yêu cầu, và nó chỉ phủ được lát mỏng.
+Hai file `src/apps/pos/main.js` và `src/apps/quanly/main.js` là màn hình dựng
+mới hoàn toàn — đi lệch hướng đã bàn từ đầu. **Quyết định của chủ quán: dừng
+hướng này.**
 
-Hướng đúng đã bàn nhưng **chưa làm**: giữ nguyên markup + CSS + luồng màn hình
-của `posgieo.html`/`quanlygieo.html` (~4.500 dòng), chỉ thay phần JS bên dưới
-(~45.000 dòng) bằng lời gọi `runtime.command(...)` / `runtime.query(...)`.
+Hướng đúng, đã chốt: giữ nguyên markup + CSS + luồng màn hình của
+`posgieo.html`/`quanlygieo.html`, chỉ thay JS nghiệp vụ bên dưới bằng lời gọi
+`runtime.command(...)`/`runtime.query(...)` (qua cùng lớp `controller.js` hiện
+có). Ẩn dụ chủ quán dùng: hai file cũ là "cái công ty" (giữ nguyên), các hàm
+JS nghiệp vụ cũ là "nhân viên cũ" (sa thải hết, không giữ lại bất kỳ hàm nào
+"phòng khi cần"). Chi tiết quy trình: `UI-LEGACY-MIGRATION-PLAN-V1.md` §1a.
 
-Độ phủ hiện tại, đo bằng máy:
+`tools/build-html.js` (dựng `dist/*_new.html` từ shell riêng) không còn là
+đường release. `src/apps/*/main.js` không phát triển tiếp — phần đã port có
+thể tham khảo khi viết lại hàm trong file cũ.
 
-```
-COMMAND đăng ký: 15  →  9 có đường gọi trong controller
-QUERY   đăng ký: 16  → 15 có đường gọi
-Hàm controller không có nút nào bấm: 21
-```
+## 2.3 Quyết định của chủ quán
 
-Chưa có UI: mở/chốt ngày, mở két, vào/ra ca, đăng nhập, màn BTP (nấu mẻ, sửa
-yield), `RecordAddon`, `ReviseState`, `CorrectLedgerEntry`, `RestoreFoundContainer`,
-và các nút duyệt/điều chỉnh/hoàn đơn của QUANLY.
-
-## 2.3 Ba quyết định của chủ quán
-
-1. **Cửa sổ rollback bao lâu?** (đề xuất 24h). Quá hạn thì chỉ sửa bằng
-   correction có audit, không quay lui hàng loạt.
-2. **Ghi nhận P0..P12 kèm bằng chứng** vào cổng cutover — cổng từ chối ô tick trần.
-3. **Ngưỡng `targetPct` giá vốn** cho cảnh báo COGS.
+1. ~~**UI: dựng shell mới hay sửa file cũ tại chỗ?**~~ — ĐÃ CHỐT: sửa file cũ
+   tại chỗ (xem §2.2).
+2. ~~**Phạm vi gate P12/shadow-compare?**~~ — ĐÃ CHỐT: chỉ khớp số dư mở đầu
+   tại mốc cutover, không đòi giải thích toàn bộ lịch sử (xem §1.7).
+3. ~~**Nguồn costBasis cho lô seed?**~~ — ĐÃ CHỐT: `price_history_gieogieo`,
+   không để trống, không dùng `costPerUnit` phẳng (xem §1.5, `SEED-CONTRACT-V1.md` §3.5).
+4. **Cửa sổ rollback bao lâu?** (đề xuất 24h, CHƯA CHỐT). Quá hạn thì chỉ sửa
+   bằng correction có audit, không quay lui hàng loạt.
+5. **Ghi nhận P0..P12 kèm bằng chứng** vào cổng cutover (CHƯA CHỐT) — cổng từ
+   chối ô tick trần. P12 tự nó đã thu hẹp phạm vi (mục 2 trên), nhưng cơ chế
+   "bằng chứng cho từng phase" vẫn cần chốt riêng.
+6. **Ngưỡng `targetPct` giá vốn** cho cảnh báo COGS (CHƯA CHỐT).
 
 ## 2.4 Việc phải làm đúng ngày cutover
 

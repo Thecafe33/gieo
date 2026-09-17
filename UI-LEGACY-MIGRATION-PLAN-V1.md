@@ -1,8 +1,9 @@
-# Kế hoạch migrate UI/UX legacy sang core mới — V3
+# Kế hoạch migrate UI/UX legacy sang core mới — V4
 
-Trạng thái: **mapping trước khi sửa code; chưa migrate UI**
-
-Nhánh: `claude/confident-wozniak-i81oc8`
+Trạng thái: Pha A (blocker interface) đã xong. QUANLY đang port, thiên về
+đọc/báo cáo. POS mới scaffold. **Chiến lược UI vừa được SỬA LẠI CHO ĐÚNG kế
+hoạch gốc** (xem §1a) — bản port `src/apps/quanly`, `src/apps/pos` đã đi lệch
+hướng §4 Pha B/C của bản kế hoạch này ngay từ đầu.
 
 Thứ tự: hoàn tất `quanlygieo.html` trước vì đây là app quyền cao, mở/chốt ngày
 và phê duyệt; chỉ sau khi QUANLY qua gate mới làm `posgieo.html`.
@@ -18,6 +19,47 @@ Hai file legacy chỉ là nguồn tham khảo cho presentation:
 Markup/CSS có thể được tái sử dụng để giữ UX quen thuộc, nhưng API, tên hàm và
 luồng JavaScript legacy **không phải contract phải bảo tồn**. UI được sửa để gọi
 controller/API mới thực sự tồn tại.
+
+## 1a. Chiến lược UI — SỬA FILE CŨ TẠI CHỖ, không dựng shell mới
+
+Quyết định của chủ quán (2026-09-17): ẩn dụ đúng là **`posgieo.html` /
+`quanlygieo.html` = cái công ty (nhà cửa, DOM/CSS/layout); các hàm JS nghiệp vụ
+cũ = nhân viên cũ**. Migrate nghĩa là **giữ nguyên cái công ty, sa thải toàn bộ
+nhân viên cũ, tuyển nhân viên mới vào làm việc trong đúng cái nhà đó** — không
+phải xây một trụ sở mới.
+
+Cụ thể:
+
+- **Sửa trực tiếp `posgieo.html` và `quanlygieo.html`** — không dựng
+  `dist/*_new.html` từ một shell HTML mới tự build. `tools/build-html.js` theo
+  hướng "dựng shell riêng" hiện tại bị **dừng làm deliverable cuối**; nó chỉ còn
+  giá trị tham khảo cho phần đã port (nếu có) trong lúc chuyển tiếp.
+- **Xoá sạch toàn bộ hàm nghiệp vụ cũ** ("nhân viên cũ") khỏi hai file: mọi
+  logic tính tồn, FIFO, COGS, ghi Firebase trực tiếp, v.v. Không giữ lại bất
+  kỳ hàm nào trong số này dù chỉ để "phòng khi cần" — không có compatibility
+  shim, không có nhân viên cũ nào được giữ lại bán thời gian.
+- **Giữ nguyên DOM/CSS/layout/modal/navigation** ("cái công ty") — đây là lý do
+  duy nhất hai file legacy còn giá trị tham khảo.
+- **"Nhân viên mới"** = lớp `controller.js` hiện có (`src/apps/quanly/controller.js`,
+  `src/apps/pos/controller.js`) gọi `bootstrap/runtime` — lớp này ĐÚNG kiến
+  trúc và được giữ lại. Việc cần sửa là **thay event binding trong chính
+  `posgieo.html`/`quanlygieo.html`** để gọi các hàm controller này, thay vì
+  gọi hàm nghiệp vụ cũ.
+- `src/apps/quanly/main.js` và `src/apps/pos/main.js` (dựng UI hoàn toàn mới,
+  không dùng DOM cũ) **bị coi là đi sai hướng** kể từ quyết định này. Không
+  phát triển thêm theo hướng đó; phần đã port ở đây (nếu chuẩn xác về mặt
+  controller/API call) có thể dùng làm tài liệu tham khảo khi sửa file cũ,
+  nhưng không phải là con đường release.
+
+Quy trình sửa một file cũ, từng lát dọc:
+1. Xác định một cụm hàm nghiệp vụ cũ (vd: `applyStockTransaction`,
+   `submitItemAdjust`) và event handler gọi nó.
+2. Viết lại thân hàm đó để gọi `runtime.command(...)`/`runtime.query(...)` qua
+   đúng controller, xử lý loading/error/success ngay trong cùng handler.
+3. Xoá code nghiệp vụ cũ trong thân hàm (không comment lại, không giữ dead
+   code) — chỉ giữ phần build DOM/render nếu vẫn đúng dữ liệu mới trả về.
+4. Nếu core chưa có interface tương ứng: đánh dấu `GAP`, disable nút/form đó
+   rõ ràng, KHÔNG giữ hàm cũ chạy tạm.
 
 ```text
 UI đã migrate
@@ -49,6 +91,28 @@ hoạch xóa.
 Khi thiếu interface, đánh dấu `GAP`, mô tả contract cần bổ sung và dừng flow đó.
 Core/interface được bổ sung ở commit riêng, có test riêng, trước khi nối UI.
 
+## 2a. Ranh giới truy xuất nguồn gốc tại cutover (quyết định 2026-09-17)
+
+Hệ mới **không có nghĩa vụ truy vết được lịch sử trước cutover**. Cutover là
+mốc đánh dấu rõ: dữ liệu cũ → số dư mở đầu (opening balance) của hệ mới; từ
+mốc đó trở đi, mọi Unit/giao dịch phải truy vết đầy đủ theo đúng chuẩn FIFO
+core. Trước mốc đó, hệ cũ là gì thì chấp nhận nguyên trạng, không đòi giải
+trình từng bước ledger cũ.
+
+Áp dụng cụ thể cho gap "COGS actual chưa từng tồn tại" (`NO_COST_BASIS`,
+xem `SHADOW-FINDINGS-V1.md` §2.1): legacy có lưu giá vốn, chỉ là ở
+`price_history_gieogieo` (item-level, append-only theo thời gian) chứ không
+gắn trực tiếp trên `stock_containers_gieogieo`. `mapUnit`
+(`src/layers/legacy-firebase-adapter/mappers.js:52-74`) hiện chỉ đọc
+`c.unitCost` trên container — field này không tồn tại — nên luôn rơi vào
+nhánh `NO_COST_BASIS`, mà KHÔNG join sang `price_history_gieogieo`. Cần sửa:
+với mỗi Unit còn tồn tại ĐÚNG TẠI mốc cutover, lấy giá hiệu lực gần nhất
+(≤ cutoverDate) từ `price_history_gieogieo` của item đó làm `costBasis`,
+gắn `source: 'LEGACY_PRICE_HISTORY'` để phân biệt với giá nhận hàng thật
+(`source: 'RECEIVING'`) của các lô nhập sau cutover. Không cần join theo
+đúng lô/đúng ngày nhận của từng container lịch sử — chỉ cần đúng giá tại
+thời điểm mở sổ.
+
 ## 3. Bảng mapping trước khi sửa code
 
 ### 3.1 POS — bán hàng, ca và thiết bị
@@ -61,11 +125,11 @@ Core/interface được bổ sung ở commit riêng, có test riêng, trước k
 | retry in bill | In lại | `runtime.device.printBill` | Chỉ in payload đã ghi; tuyệt đối không gọi lại `RecordSale`. |
 | scan tem/QR | Nhận mã từ thiết bị | `runtime.device.scan` rồi controller/query/command phù hợp | Scanner chỉ trả mã, không quyết định nghiệp vụ. |
 | xem menu/cảnh báo/ca | Các màn đọc | `GetMenu`, `GetAlerts`, `GetShiftStatus` | Render loading/error/empty/ready từ query/watch. |
-| mở ngày | Bắt đầu business day | **GAP: `OpenBusinessDay` chưa đăng ký** | Cần command bọc `business-day.openDay`. Không viết logic trong UI. |
-| chốt ngày | Kết thúc business day | **GAP: `CloseBusinessDay` chưa đăng ký** | Cần command gọi `closeDayBlockers` rồi `business-day.closeDay`. |
-| mở két/cash segment | Mở lượt két | **GAP: `OpenCashSegment` chưa đăng ký** | Bổ sung command quanh `shift.openSegment`. |
-| đóng két | Chốt lượt két | `CloseCashSegment` | Map form đếm tiền sang command hiện có. |
-| check-in/check-out | Chấm công | **GAP: `CheckIn`, `CheckOut` chưa đăng ký** | Bổ sung command quanh `hr/shift.checkIn/checkOut`. |
+| mở ngày | Bắt đầu business day | `OpenBusinessDay` (đã đăng ký) | Chỉ dùng như command quản trị/khôi phục — luồng bình thường là `CheckIn` đầu tiên tự mở ngày, không cần màn cấu hình lịch. |
+| chốt ngày | Kết thúc business day | `CloseBusinessDay` (đã đăng ký) | Cần thêm read model canonical cho blockers (day/segment/shift/checklist) trước khi sửa event binding trong `quanlygieo.html` — UI không tự dựng mảng blockers. |
+| mở két/cash segment | Mở lượt két | `OpenCashSegment` (đã đăng ký) | Map form mở ca sang command hiện có. |
+| đóng két | Chốt lượt két | `CloseCashSegment` (đã đăng ký) | Map form đếm tiền sang command hiện có. |
+| check-in/check-out | Chấm công | `CheckIn`, `CheckOut` (đã đăng ký) | `CheckIn` đầu tiên trong ngày tự mở business day (atomic). Map form chấm công sang command hiện có. |
 
 ### 3.2 POS — inventory/FIFO/BTP
 
@@ -106,40 +170,53 @@ Core/interface được bổ sung ở commit riêng, có test riêng, trước k
 
 ## 4. Trình tự triển khai từng file
 
-### Pha A — đóng GAP interface tối thiểu
+### Pha A — đóng GAP interface tối thiểu — ĐÃ XONG
 
-Mỗi bước một file/commit có test. Ưu tiên blockers của `BAN-GIAO-V1.md` §2.1:
+Ưu tiên blockers của `BAN-GIAO-V1.md` §2.1, đều đã đăng ký trong
+`bootstrap/runtime.js`:
 
-1. `commands/business-day.js`: vòng đời ngày; ngày không được mở bằng cấu hình
-   lịch. `CheckIn` đầu tiên tạo business day trong cùng atomic MutationPlan.
-2. `commands/shift.js`: `OpenCashSegment`, `CheckIn`, `CheckOut`.
-3. `bootstrap/runtime.js`: đăng ký command và authority.
-4. Các inventory interface thiếu được chốt contract **trước** khi làm màn tương
-   ứng: receive, Unit lifecycle, transfer, stock-count submit, unit conversion,
-   transaction history.
+1. ~~`commands/business-day.js`: vòng đời ngày~~ — xong: `OpenBusinessDay`,
+   `CloseBusinessDay`.
+2. ~~`commands/shift.js`: `OpenCashSegment`, `CheckIn`, `CheckOut`~~ — xong,
+   cùng `CloseCashSegment`.
+3. ~~`bootstrap/runtime.js`: đăng ký command và authority~~ — xong, 20 command
+   + 16 query đã đăng ký.
+4. Các inventory interface CÒN THIẾU (chưa chốt contract): receive, Unit
+   lifecycle, transfer, stock-count submit, unit conversion, transaction
+   history (`GetInventoryTransactions`), catalog/recipe/promotion/HR/payroll
+   CRUD. Vẫn phải chốt contract + test **trước** khi sửa event binding cho
+   màn tương ứng trong file cũ.
 
 Không thay core algorithm; chỉ expose use case đúng qua command/query pipeline.
 
-### Pha B — migrate `quanlygieo.html`
+### Pha B — sửa `quanlygieo.html` tại chỗ (xem §1a)
 
-1. Chụp baseline screenshot và layout/component/modal/navigation/form quản lý.
-2. Giữ/reuse presentation; tách bỏ script nghiệp vụ legacy.
-3. Sửa event binding để gọi trực tiếp `app-quanly/controller` bằng action mới.
+1. Chụp baseline screenshot và layout/component/modal/navigation/form quản lý
+   của **chính `quanlygieo.html`** (không phải shell mới).
+2. Với từng cụm hàm nghiệp vụ cũ trong `quanlygieo.html`: viết lại thân hàm để
+   gọi `bootstrap/runtime` (qua cùng logic đã có ở `app-quanly/controller.js`,
+   inline hoặc import), xoá sạch logic nghiệp vụ cũ trong thân hàm đó.
+3. Sửa event binding tại chỗ trỏ vào hàm đã viết lại; DOM/CSS giữ nguyên.
 4. Ưu tiên PIN/role, mở-chốt ngày, inbox/phê duyệt và các flow quyền cao trước;
    flow có `GAP` phải disabled rõ ràng đến khi interface được bổ sung.
-5. Sau mỗi lát dọc, xóa business function legacy tương ứng; không để fallback
-   ghi legacy hay dual writer.
+5. Sau mỗi lát dọc, xoá hẳn hàm nghiệp vụ legacy tương ứng khỏi file — không
+   để fallback ghi legacy, không giữ dead code, không dual writer.
 6. QUANLY qua toàn bộ gate §5 rồi mới mở file POS.
 
-### Pha C — migrate `posgieo.html`
+`src/apps/quanly/main.js` (shell UI dựng riêng) không phát triển tiếp; phần
+UI đã port ở đó dùng để đối chiếu logic khi viết lại hàm trong
+`quanlygieo.html`, không tự nó là deliverable.
 
-Lặp cùng phương pháp: reuse presentation, map event trực tiếp sang controller/API
-mới, xóa logic/read-write legacy theo từng lát dọc đã có test. Không giữ global
-function legacy chỉ để tương thích nếu event có thể bind thẳng vào controller.
+### Pha C — sửa `posgieo.html` tại chỗ
 
-Build cuối cùng phải sinh đúng hai file tự chứa `quanlygieo_new.html` và
-`posgieo_new.html`; hai file `*-new.html` dùng dấu gạch ngang hiện tại chỉ là
-artifact tạm của shell tự dựng và không phải deliverable cuối.
+Lặp cùng phương pháp Pha B trên chính `posgieo.html`: viết lại từng hàm
+nghiệp vụ cũ để gọi runtime, xoá hàm cũ, giữ nguyên DOM/CSS. Không giữ global
+function legacy chỉ để tương thích nếu event có thể bind thẳng vào logic mới.
+
+**Deliverable cuối cùng chính là `posgieo.html` và `quanlygieo.html`** sau khi
+đã thay hết "nhân viên". `tools/build-html.js` và `dist/*_new.html` (dựng
+shell riêng, không sửa file cũ) bị dừng làm đường release — giữ lại tối đa như
+tài liệu tham khảo cho tới khi Pha B/C hoàn tất, sau đó có thể xoá.
 
 ## 5. Gate bắt buộc
 
@@ -168,15 +245,23 @@ artifact tạm của shell tự dựng và không phải deliverable cuối.
 ```bash
 node tools/check-import-direction.js
 node tools/run-tests.js
-node tools/build-html.js
 git diff --check
 ```
+
+`node tools/build-html.js` không còn là bước release (xem §1a, §4 Pha C) —
+chạy nó vẫn giúp kiểm import-direction/test trong lúc chuyển tiếp, nhưng
+`dist/*_new.html` không phải deliverable cần kiểm hay ship.
 
 Ngoài ra phải kiểm screenshot ở viewport WebView/mobile, console errors,
 double-click/idempotency và tìm mọi write datastore còn sót trong UI.
 
 ## 6. Bước tiếp theo
 
-Trước khi sửa UI, review/chốt bảng mapping §3, đặc biệt các `GAP` inventory. Sau
-đó thực hiện đúng một file đầu tiên: command business-day cùng test của nó. Không
-tạo compatibility bridge, shell UI mới hoặc sửa `posgieo.html` trong bước này.
+1. Sửa `mapUnit` (`legacy-firebase-adapter/mappers.js`) join sang
+   `price_history_gieogieo` cho `costBasis` theo §2a — có test riêng trước.
+2. Thiết kế lại gate P12 shadow-compare (xem `BAN-GIAO-V1.md` §1.7 đã cập
+   nhật) theo scope mới: chỉ đối chiếu số dư mở đầu tại mốc cutover.
+3. Bắt đầu Pha B trên chính `quanlygieo.html`: chọn MỘT cụm hàm nghiệp vụ cũ
+   quyền cao nhất (PIN/role hoặc mở-chốt ngày), viết lại gọi runtime, xoá hàm
+   cũ, có test/kiểm chứng trước khi sang cụm tiếp theo. Không tạo compatibility
+   bridge, không tiếp tục dựng `src/apps/*/main.js`.
