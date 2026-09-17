@@ -176,12 +176,41 @@ thể tham khảo khi viết lại hàm trong file cũ.
    tại mốc cutover, không đòi giải thích toàn bộ lịch sử (xem §1.7).
 3. ~~**Nguồn costBasis cho lô seed?**~~ — ĐÃ CHỐT: `price_history_gieogieo`,
    không để trống, không dùng `costPerUnit` phẳng (xem §1.5, `SEED-CONTRACT-V1.md` §3.5).
-4. **Cửa sổ rollback bao lâu?** (đề xuất 24h, CHƯA CHỐT). Quá hạn thì chỉ sửa
+4. ~~**Core mới có được chặn cứng vận hành bán hàng nếu thiếu dữ liệu (định
+   mức, giá vốn...) không?**~~ — ĐÃ CHỐT 2026-09-17: **KHÔNG**, trừ khi hệ cũ
+   ĐÃ chặn đúng chỗ đó. Xem §2.3a.
+5. **Cửa sổ rollback bao lâu?** (đề xuất 24h, CHƯA CHỐT). Quá hạn thì chỉ sửa
    bằng correction có audit, không quay lui hàng loạt.
-5. **Ghi nhận P0..P12 kèm bằng chứng** vào cổng cutover (CHƯA CHỐT) — cổng từ
+6. **Ghi nhận P0..P12 kèm bằng chứng** vào cổng cutover (CHƯA CHỐT) — cổng từ
    chối ô tick trần. P12 tự nó đã thu hẹp phạm vi (mục 2 trên), nhưng cơ chế
    "bằng chứng cho từng phase" vẫn cần chốt riêng.
-6. **Ngưỡng `targetPct` giá vốn** cho cảnh báo COGS (CHƯA CHỐT).
+7. **Ngưỡng `targetPct` giá vốn** cho cảnh báo COGS (CHƯA CHỐT).
+
+## 2.3a Nguyên tắc: vận hành thật đè core (2026-09-17)
+
+> Core FIFO quan trọng, nhưng bán hàng thật cho khách quan trọng hơn — không
+> có khách thì hệ thống vận hành làm gì.
+
+Áp dụng cụ thể:
+
+- **Core mới không được thêm điểm chặn mới** vào luồng bán hàng trực tiếp
+  (tại quầy, đang có khách đứng chờ) mà hệ cũ chưa từng chặn ở đúng chỗ đó.
+  Core "nối vào" luồng vận hành để tính đúng hơn, ghi đủ hơn — không phải
+  thay luồng vận hành bằng một cổng kiểm tra cứng mới.
+- Dữ liệu thiếu (định mức chưa khai, giá vốn chưa có, chưa xác định actor...)
+  xử lý theo đúng cách hệ cũ đã làm: **cho bán tiếp, ghi nhận GAP/cảnh báo**
+  để Quản lý bổ sung sau — KHÔNG trả lỗi chặn đứng thao tác thanh toán.
+- Ngoại lệ: chỗ hệ cũ ĐÃ chặn cứng thật (ví dụ: chưa mở ca, ngày đã đóng ca,
+  giỏ hàng rỗng) thì core giữ nguyên chặn — đây không phải điểm chặn MỚI,
+  chỉ là chuyển từ tự chế sang chuẩn hoá.
+- Ca cụ thể đã phát hiện qua NET domain Sales: `commands/sales.js
+  buildRequirements()` hiện trả lỗi cứng `PRECONDITION` khi
+  `line.recipeId` rỗng ("không được bán với giá vốn ngầm bằng 0") — theo
+  nguyên tắc này, đây là điểm chặn MỚI mà hệ cũ không có (hệ cũ chỉ
+  `console.info` + báo Hộp thư Quản lý, vẫn bán bình thường). **Cần sửa lại**
+  thành cho bán tiếp (`cogsTheoretical`/`cogsActual` = `null` kèm lý do,
+  giống cách COGS đã xử lý thiếu `costBasis`), không chặn giao dịch — xem
+  `NET-SALES-V1.md` N10.
 
 ## 2.4 Việc phải làm đúng ngày cutover
 

@@ -144,7 +144,7 @@ N17 Xem P&L theo kênh (tại quán/mang đi/app) ─┴─► (→ FIFO-CHAIN-T
 | Phân loại | 🟡 **GIỮ nghiệp vụ, ĐỔI CÁCH LÀM** (FIFO theo lượng), cộng 🟢 **THÊM MỚI nghiêm trọng nhất toàn NET**: `cogsActual` |
 | 🔴 Đứt chuỗi lớn nhất (đã audit) | `cogsActual` trong `aggregateOrders()` (quanlygieo.html) **THỰC CHẤT là recipe-theoretical bị đặt tên sai** — Unit/tem legacy KHÔNG lưu giá vốn (`createContainersForReceipt` không có field cost). "COGS actual" theo đúng nghĩa **chưa từng tồn tại** ở hệ cũ. |
 | Core mới đã làm | 2 vế tách biệt bắt buộc: `cogsTheoretical` (định mức × giá lịch sử) và `cogsActual` (tổng thật từ `Unit.costBasis` của đúng lô đã FIFO cấp phát) + `variance`. Cấm field tên `cogsActual` mà nội dung là theoretical (invariant R8, `UNIFIED-READ-LAYER-CONTRACT-V1.md §3`). Thiếu dữ liệu Unit → trả `null` kèm lý do, KHÔNG fallback im lặng. |
-| Ghi chú | Món chưa khai định mức: legacy chỉ `console.info` rồi bán tiếp lặng lẽ (đã tự vá thành báo Hộp thư Quản lý — `reportMissingRecipePOS`) → core mới **chặn cứng hơn**: `buildRequirements` trả lỗi `PRECONDITION` nếu `line.recipeId` rỗng ("không được bán với giá vốn ngầm bằng 0") — đây là chỗ hành vi THẬT SỰ khác legacy (legacy vẫn cho bán, core mới chặn). Cần chủ quán xác nhận có chấp nhận việc "món chưa khai định mức thì không bán được" hay vẫn cần một cờ `allowUnrecipedSale` giống `allowShortfall`. → ⚪ **CHƯA QUYẾT**. |
+| Ghi chú | Món chưa khai định mức: legacy chỉ `console.info` rồi bán tiếp lặng lẽ (đã tự vá thành báo Hộp thư Quản lý — `reportMissingRecipePOS`) → core mới hiện **chặn cứng hơn**: `buildRequirements` trả lỗi `PRECONDITION` nếu `line.recipeId` rỗng. **ĐÃ CHỐT 2026-09-17 (xem `BAN-GIAO-V1.md` §2.3a — nguyên tắc vận hành thật đè core): SAI, phải sửa lại.** Core không được thêm điểm chặn mới mà hệ cũ không có — vận hành bán hàng cho khách đang đứng chờ quan trọng hơn. Cách đúng: cho bán tiếp, `cogsTheoretical`/`cogsActual` trả `null` kèm `reason: 'NO_RECIPE'` (đúng khuôn đã dùng cho thiếu `costBasis`), đồng thời phát cảnh báo GAP cho Quản lý — KHÔNG trả lỗi chặn `RecordSale`. **Việc cần làm — chưa sửa code**: đổi `buildRequirements`/`RecordSale.execute` trong `commands/sales.js` theo hướng này. |
 
 ### N11 — Tích điểm / tích tem
 
@@ -227,7 +227,8 @@ N17 Xem P&L theo kênh (tại quán/mang đi/app) ─┴─► (→ FIFO-CHAIN-T
 - 🔴 **BỎ**: 1 (nhánh "ví cơ bản kết hợp" ở N7 — đã bỏ ngay từ trong chính legacy, không mang qua)
 - 🟡 **GIỮ, ĐỔI CÁCH LÀM**: N1, N3, N4, N6, N7, N8, N9(khung), N10(khung), N11(khung nghiệp vụ), N13, N14, N15(khung)
 - 🟢 **THÊM MỚI**: `soldByActorId` (N9), `channel.feePct` được ĐỌC thật (N9, N17), `cogsActual` thật (N10), event-driven loyalty (N11, N15), rule engine khuyến mãi tường minh (N5), loyalty ledger thay field cộng dồn (N11)
-- ⚪ **CHƯA QUYẾT**: đá có ảnh hưởng định mức không (N2), chặn cứng hay mềm khi thiếu định mức (N10), cơ chế voucher/reward "usedCount" (N12), số phận `moLaiThang`/versioning sổ tháng (N16)
+- ⚪ **CHƯA QUYẾT**: đá có ảnh hưởng định mức không (N2), cơ chế voucher/reward "usedCount" (N12), số phận `moLaiThang`/versioning sổ tháng (N16)
+- ✅ **MỚI CHỐT (2026-09-17)**: N10 — thiếu định mức KHÔNG chặn bán, theo nguyên tắc "vận hành thật đè core" (`BAN-GIAO-V1.md` §2.3a). `commands/sales.js` cần sửa lại theo hướng này (chưa sửa).
 
 ## VIỆC PHẢI LÀM TRƯỚC KHI COI N9 (RecordSale) LÀ "ĐỦ DÙNG THAY confirmPay"
 
@@ -237,14 +238,41 @@ Thứ tự theo mức chặn đường (chặn cứng trước, tinh chỉnh sau
    `loyalty/accrual.js` — hiện KHÔNG có, nếu chuyển sang `RecordSale` ngay bây
    giờ thì tích điểm/tem sẽ CHẾT so với legacy (thoái lui thật, không phải lý
    thuyết).
-2. Xác nhận với chủ quán: món chưa khai định mức có chặn cứng bán không (N10)
-   — ảnh hưởng trực tiếp tới việc nhân viên bán hàng có bị đứng hình giữa giờ
-   cao điểm hay không.
+2. **Sửa `buildRequirements`/`RecordSale` — bỏ chặn cứng khi thiếu định mức**
+   (N10) — theo nguyên tắc "vận hành thật đè core" vừa chốt: cho bán tiếp,
+   trả `cogsTheoretical`/`cogsActual: null, reason: 'NO_RECIPE'`, phát cảnh
+   báo GAP cho Quản lý thay vì trả lỗi `PRECONDITION` chặn `RecordSale`.
 3. Nối UI `onCheckoutClick`/`checkFreeToppingMemberPromo`/`checkTogoBeforeCheckout`
    sang gọi `catalog/promotion.js` thay vì 2 nhánh if hard-code (N5).
 4. Đảm bảo `RecordSale.validate`/`execute` tự chặn business-day/shift — không
-   thừa hưởng ngầm "UI đã chặn rồi" (N4).
+   thừa hưởng ngầm "UI đã chặn rồi" (N4). Đây là chặn hệ cũ ĐÃ có (không phải
+   điểm chặn mới) nên không vi phạm nguyên tắc ở mục 2.
 5. Quyết định field `ice` có cần lên `BillLine` hay là UI/tem-only (N2).
 6. Đọc `catalog/promotion.js` phần còn lại + `compaction/book-snapshot.js` để
    đóng 2 mục ⚪ CHƯA QUYẾT còn lại (N12, N16) — có thể đóng ngay trong domain
    Sales hoặc để lại cho lượt NET domain Loyalty/Reporting.
+7. Rà toàn bộ core mới (không chỉ Sales) tìm các `R.err('PRECONDITION', ...)`
+   khác có thể là điểm chặn MỚI so với hệ cũ, theo đúng nguyên tắc §2.3a —
+   `buildRequirements` (N10) chỉ là ca đầu tiên phát hiện được, nhiều khả năng
+   không phải ca duy nhất.
+
+## Ca liên quan đã rà — KHÁC LOẠI với N10, cần chủ quán trả lời riêng
+
+`RecordSale` (sales.js:247) còn 1 chặn cứng khác: **hết nguyên liệu thật**
+(`alloc.shortfalls.length && !input.allowShortfall` → `PRECONDITION`). Comment
+gốc ghi: bán tiếp khi âm kho "không ai chặn (đúng lỗi legacy)" — tức hệ CŨ
+CHƯA TỪNG chặn bán khi hết hàng, và core mới coi đó là lỗi cần sửa, mặc định
+chặn (có cờ `allowShortfall` để tắt).
+
+**Đây KHÔNG cùng loại với N10.** N10 chặn vì THIẾU DỮ LIỆU SỔ SÁCH (chưa khai
+định mức — hành chính, không liên quan hàng có thật hay không). Chặn này lại
+là do THIẾU HÀNG THẬT (không còn nguyên liệu để pha) — tín hiệu vận hành thật,
+không phải khoảng trống hành chính. Áp nguyên tắc §2.3a máy móc vào đây (mở
+`allowShortfall` mặc định true để không chặn gì) sẽ khôi phục đúng lỗi bán-âm-
+kho mà legacy mắc phải — không chắc đó là điều chủ quán muốn.
+
+→ ⚪ **CẦN CHỦ QUÁN QUYẾT ĐỊNH RIÊNG** (không tự suy diễn theo §2.3a): giữ chặn
+cứng khi hết hàng thật (khác legacy nhưng có chủ đích), hay vẫn cho bán tiếp
+kèm cảnh báo (giữ đúng hành vi legacy, chấp nhận rủi ro âm kho như cũ)? Cùng
+mẫu này lặp lại ở `commands/inventory.js:68` (RecordWaste, cờ `allowUntracked`)
+và `commands/prep.js:79` (RecordPrepProduction, KHÔNG có cờ thoát — luôn chặn).
