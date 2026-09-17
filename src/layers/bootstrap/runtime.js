@@ -66,6 +66,8 @@ GIEO.define('bootstrap/runtime', [
     GetPendingApprovals: reads.getPendingApprovals,
     /* P11 — báo cáo đi qua cùng cổng đọc, không có đường tắt về nguồn thô. */
     GetUsageReport: reports.getUsageReport,
+    /* RM7 — cùng dữ liệu GetUsageReport, gộp theo ngày thay vì cả kỳ. */
+    GetUsageReportDaily: reports.getUsageReportDaily,
     GetLossReport: reports.getLossReport,
     GetInventoryValuation: reports.getInventoryValuation,
     GetVarianceReport: reports.getVarianceReport,

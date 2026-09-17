@@ -112,5 +112,84 @@ GIEO.define('reporting/usage-report', [
     };
   }
 
-  return { COLUMNS: COLUMNS, BUCKET: BUCKET, build: build, lossOnly: lossOnly };
+  var TOTAL_COLS = [
+    'received', 'consumed', 'waste', 'lost', 'found',
+    'adjustment', 'reversal', 'net', 'untrackedQty'
+  ];
+
+  /** Cột cho export CSV theo ngày — cùng hình dạng với `btp-report.js`. */
+  var DAILY_COLUMNS = [
+    { key: 'dateKey', label: 'Ngày' },
+    { key: 'itemId', label: 'Nguyên liệu' },
+    { key: 'received', label: 'Nhận' },
+    { key: 'consumed', label: 'Dùng' },
+    { key: 'waste', label: 'Hao hụt' },
+    { key: 'lost', label: 'Mất' },
+    { key: 'found', label: 'Tìm lại' },
+    { key: 'adjustment', label: 'Điều chỉnh' },
+    { key: 'net', label: 'Ròng' },
+    { key: 'untrackedQty', label: 'Chưa gắn lô' }
+  ];
+
+  /**
+   * RM7 — cùng nguồn/cùng luật với `build()`, chỉ thêm chiều `businessDate` mà
+   * hệ cũ tính đúng (`thLichSuBTP` cho BTP) nhưng nguyên liệu thô chưa từng có.
+   * `businessDate` là trường bắt buộc của mọi ledger entry (`fifo-core/ledger.js`
+   * từ chối entry thiếu nó) nên không cần fallback gap-flag ở đây.
+   *
+   * @param spec.entries     ledger entries trong kỳ (đã lọc theo store/kỳ ở tầng trên)
+   * @param spec.itemNames   {itemId: tên} — chỉ để hiển thị, không ảnh hưởng số
+   */
+  function buildDaily(spec) {
+    if (!spec || !Array.isArray(spec.entries)) {
+      return R.err('VALIDATION', 'usage-report cần mảng entries');
+    }
+    var names = spec.itemNames || {};
+    var byDay = Object.create(null);
+    var unknownTypes = [];
+
+    spec.entries.forEach(function (e) {
+      var col = BUCKET[e.type];
+      if (!col) { unknownTypes.push(e.type); return; }
+      var dateKey = e.businessDate;
+      var day = byDay[dateKey] || (byDay[dateKey] = Object.create(null));
+      var row = day[e.itemId] || (day[e.itemId] = Object.assign(emptyRow(e.itemId), { dateKey: dateKey }));
+      row[col] += Math.abs(e.qtyDelta);
+      row.net += e.qtyDelta;
+      if (!e.unitId) row.untrackedQty += Math.abs(e.qtyDelta);
+      else if (row.unitIds.indexOf(e.unitId) === -1) row.unitIds.push(e.unitId);
+    });
+
+    var dateKeys = Object.keys(byDay).sort();
+    var rows = [];
+    dateKeys.forEach(function (dateKey) {
+      Object.keys(byDay[dateKey]).sort().forEach(function (itemId) {
+        rows.push(Object.assign({ itemName: names[itemId] || null }, byDay[dateKey][itemId]));
+      });
+    });
+
+    /* Tổng theo ngày, gộp mọi mặt hàng — con số đầu tiên chủ quán nhìn vào,
+       chi tiết theo mặt hàng nằm ở `rows` khi cần đào sâu. */
+    var days = dateKeys.map(function (dateKey) {
+      var t = { dateKey: dateKey };
+      TOTAL_COLS.forEach(function (c) { t[c] = 0; });
+      Object.keys(byDay[dateKey]).forEach(function (itemId) {
+        var r = byDay[dateKey][itemId];
+        TOTAL_COLS.forEach(function (c) { t[c] += r[c]; });
+      });
+      return t;
+    });
+
+    return R.ok({
+      rows: rows,
+      days: days,
+      entryCount: spec.entries.length,
+      unknownTypes: unknownTypes.filter(function (v, i, a) { return a.indexOf(v) === i; })
+    });
+  }
+
+  return {
+    COLUMNS: COLUMNS, DAILY_COLUMNS: DAILY_COLUMNS, BUCKET: BUCKET,
+    build: build, lossOnly: lossOnly, buildDaily: buildDaily
+  };
 });

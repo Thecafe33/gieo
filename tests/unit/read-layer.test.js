@@ -481,6 +481,20 @@ describe('P11 — báo cáo là query có quyền, không phải đường tắt
     assert.strictEqual(out.meta.frozen, false);
   });
 
+  test('RM7 — GetUsageReportDaily cùng cổng quyền, gộp theo ngày', function () {
+    function d(type, qtyDelta, businessDate, unitId) {
+      return Object.assign(entry(type, qtyDelta, unitId), { businessDate: businessDate });
+    }
+    assertErr(RQ.getUsageReportDaily(rCtx(), { entries: [] }), 'FORBIDDEN');
+    var out = assertOk(RQ.getUsageReportDaily(boss(), {
+      entries: [d('WASTE', -50, '2026-03-10', U1), d('WASTE', -10, '2026-03-11', U1)]
+    }));
+    assert.strictEqual(out.data.days.length, 2);
+    assert.strictEqual(out.data.days[0].dateKey, '2026-03-10');
+    assert.strictEqual(out.data.days[0].waste, 50);
+    assert.ok(out.meta.computedAt, 'thiếu computedAt');
+  });
+
   test('xuất file KHÔNG có meta gốc thì bị từ chối', function () {
     assertErr(RQ.exportReport(boss(), {
       title: 'Hao hụt', period: '2026-03-10', columns: [{ key: 'itemId', label: 'Mặt hàng' }], rows: []

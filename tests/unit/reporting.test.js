@@ -255,6 +255,10 @@ describe('P11 — usage / waste / lost từ MỘT lần đọc sổ', function (
     return { entryId: type + itemId + qtyDelta, type: type, itemId: itemId, qtyDelta: qtyDelta, unitId: unitId || null };
   }
 
+  function ed(type, itemId, qtyDelta, businessDate, unitId) {
+    return Object.assign(e(type, itemId, qtyDelta, unitId), { businessDate: businessDate });
+  }
+
   test('tách đúng cột, net giữ dấu còn cột hao là độ lớn', function () {
     var r = assertOk(U.build({ entries: [
       e('RECEIVING', SUA, 1000, U1),
@@ -303,5 +307,68 @@ describe('P11 — usage / waste / lost từ MỘT lần đọc sổ', function (
     ] }));
     assert.strictEqual(r.rows.length, 2);
     assert.strictEqual(r.totals.waste, 70);
+  });
+
+  describe('RM7 — buildDaily, cùng luật build() nhưng thêm chiều businessDate', function () {
+    test('mỗi ngày một dòng theo mặt hàng, sắp theo ngày rồi theo itemId', function () {
+      var r = assertOk(U.buildDaily({ entries: [
+        ed('WASTE', SUA, -50, '2026-03-10', U1),
+        ed('WASTE', SUA, -20, '2026-03-11', U1),
+        ed('CONSUMPTION', DUONG, -30, '2026-03-10', U1)
+      ] }));
+      assert.strictEqual(r.rows.length, 3);
+      assert.strictEqual(r.rows[0].dateKey, '2026-03-10');
+      assert.strictEqual(r.rows[0].itemId, DUONG);
+      assert.strictEqual(r.rows[1].dateKey, '2026-03-10');
+      assert.strictEqual(r.rows[1].itemId, SUA);
+      assert.strictEqual(r.rows[1].waste, 50);
+      assert.strictEqual(r.rows[2].dateKey, '2026-03-11');
+      assert.strictEqual(r.rows[2].waste, 20);
+    });
+
+    test('có tổng theo ngày gộp mọi mặt hàng — con số đầu chủ quán nhìn vào', function () {
+      var r = assertOk(U.buildDaily({ entries: [
+        ed('WASTE', SUA, -50, '2026-03-10', U1),
+        ed('WASTE', DUONG, -20, '2026-03-10', U1),
+        ed('WASTE', SUA, -5, '2026-03-11', U1)
+      ] }));
+      assert.strictEqual(r.days.length, 2);
+      assert.strictEqual(r.days[0].dateKey, '2026-03-10');
+      assert.strictEqual(r.days[0].waste, 70);
+      assert.strictEqual(r.days[1].dateKey, '2026-03-11');
+      assert.strictEqual(r.days[1].waste, 5);
+    });
+
+    test('cùng ledger đọc bằng build() (cả kỳ) và buildDaily() (theo ngày) phải khớp tổng', function () {
+      var entries = [
+        ed('RECEIVING', SUA, 1000, '2026-03-10', U1),
+        ed('CONSUMPTION', SUA, -300, '2026-03-10', U1),
+        ed('CONSUMPTION', SUA, -150, '2026-03-11', U1),
+        ed('WASTE', SUA, -20, '2026-03-11', U1)
+      ];
+      var whole = assertOk(U.build({ entries: entries }));
+      var daily = assertOk(U.buildDaily({ entries: entries }));
+      var sumByCol = function (col) {
+        return daily.days.reduce(function (s, d) { return s + d[col]; }, 0);
+      };
+      assert.strictEqual(sumByCol('received'), whole.totals.received);
+      assert.strictEqual(sumByCol('consumed'), whole.totals.consumed);
+      assert.strictEqual(sumByCol('waste'), whole.totals.waste);
+    });
+
+    test('phần chưa gắn lô vẫn tách riêng theo từng ngày, không gộp lẫn hao hụt', function () {
+      var r = assertOk(U.buildDaily({ entries: [
+        ed('CONSUMPTION', SUA, -40, '2026-03-10', null)
+      ] }));
+      assert.strictEqual(r.rows[0].untrackedQty, 40);
+      assert.strictEqual(r.rows[0].waste, 0);
+    });
+
+    test('loại bút toán chưa khai vẫn được báo ra như build()', function () {
+      var r = assertOk(U.buildDaily({ entries: [ed('MOT_LOAI_LA', SUA, -10, '2026-03-10', U1)] }));
+      assert.deepStrictEqual(r.unknownTypes, ['MOT_LOAI_LA']);
+      assert.strictEqual(r.rows.length, 0);
+      assert.strictEqual(r.days.length, 0);
+    });
   });
 });

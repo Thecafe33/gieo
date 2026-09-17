@@ -25,6 +25,9 @@ GIEO.define('reporting/report-queries', [
      cần đọc giá trị tồn kho hay tỉ lệ giá vốn để làm việc của mình. */
   var Q = {
     GetUsageReport: gateway.registerQuery('GetUsageReport', { authority: 'REVIEW_APPROVE_CORRECT' }),
+    /* RM7 — báo cáo hao hụt/tồn kho nguyên liệu thô THEO NGÀY, cùng dữ liệu
+       GetUsageReport, khác chiều gộp. Xem `reporting/usage-report.js#buildDaily`. */
+    GetUsageReportDaily: gateway.registerQuery('GetUsageReportDaily', { authority: 'REVIEW_APPROVE_CORRECT' }),
     GetLossReport: gateway.registerQuery('GetLossReport', { authority: 'REVIEW_APPROVE_CORRECT' }),
     GetInventoryValuation: gateway.registerQuery('GetInventoryValuation', { authority: 'REVIEW_APPROVE_CORRECT' }),
     GetVarianceReport: gateway.registerQuery('GetVarianceReport', { authority: 'REVIEW_APPROVE_CORRECT' }),
@@ -44,6 +47,13 @@ GIEO.define('reporting/report-queries', [
     var g = gateway.guardRead(Q.GetUsageReport, ctx, spec);
     if (R.isErr(g)) return g;
     var r = usage.build({ entries: spec.entries || [], itemNames: spec.itemNames });
+    return R.isErr(r) ? r : wrap(r.value, ctx);
+  }
+
+  function getUsageReportDaily(ctx, spec) {
+    var g = gateway.guardRead(Q.GetUsageReportDaily, ctx, spec);
+    if (R.isErr(g)) return g;
+    var r = usage.buildDaily({ entries: spec.entries || [], itemNames: spec.itemNames });
     return R.isErr(r) ? r : wrap(r.value, ctx);
   }
 
@@ -112,6 +122,7 @@ GIEO.define('reporting/report-queries', [
   return {
     QUERIES: Q,
     getUsageReport: getUsageReport,
+    getUsageReportDaily: getUsageReportDaily,
     getLossReport: getLossReport,
     getInventoryValuation: getInventoryValuation,
     getVarianceReport: getVarianceReport,
