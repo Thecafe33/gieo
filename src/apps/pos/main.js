@@ -23,6 +23,47 @@ GIEO.define('app-pos/main', [
       : { loading: false, error: null, data: out.value.data };
   }
 
+  /** Màn PIN tối thiểu của POS — giống hệt app-quanly/main#showLogin, khác source. */
+  function showLogin(spec) {
+    spec = spec || {};
+    var el = document.getElementById('app');
+    if (!el) return R.err('NOT_FOUND', 'không có #app');
+    if (typeof spec.authenticate !== 'function' || typeof spec.onAuthenticated !== 'function') {
+      return R.err('VALIDATION', 'showLogin cần authenticate và onAuthenticated');
+    }
+    el.innerHTML = '<div class="app-shell"><section class="panel" style="max-width:420px;margin:12vh auto 0">' +
+      '<p class="eyebrow">GIEO POS</p><h2>Đăng nhập bán hàng</h2>' +
+      '<p style="color:var(--muted)">Nhập PIN 4 số của bạn.</p>' +
+      '<form id="pos-pin-form" class="search-row"><input name="pin" type="password" inputmode="numeric" ' +
+      'pattern="[0-9]{4}" maxlength="4" autocomplete="current-password" aria-label="PIN 4 số" required>' +
+      '<button type="submit">Đăng nhập</button></form><div id="pos-pin-result"></div></section></div>';
+    var form = el.querySelector('#pos-pin-form');
+    var result = el.querySelector('#pos-pin-result');
+    form.addEventListener('submit', function (event) {
+      event.preventDefault();
+      var button = form.querySelector('button');
+      button.disabled = true;
+      result.innerHTML = '<div class="result"><span>Đang kiểm tra…</span></div>';
+      var authenticated = spec.authenticate(form.elements.pin.value);
+      if (R.isErr(authenticated)) {
+        button.disabled = false;
+        form.elements.pin.value = '';
+        form.elements.pin.focus();
+        result.innerHTML = '<div class="result error"><strong>Không đăng nhập được</strong><span>' +
+          esc(authenticated.error.message) + '</span></div>';
+        return;
+      }
+      result.innerHTML = '';
+      Promise.resolve(spec.onAuthenticated(authenticated.value)).catch(function (error) {
+        button.disabled = false;
+        result.innerHTML = '<div class="result error"><strong>Không khởi động được</strong><span>' +
+          esc(error && error.message ? error.message : error) + '</span></div>';
+      });
+    });
+    form.elements.pin.focus();
+    return R.ok(true);
+  }
+
   function start() {
     var el = document.getElementById('app');
     if (!el) return R.err('NOT_FOUND', 'không có #app');
@@ -299,5 +340,5 @@ GIEO.define('app-pos/main', [
     return R.ok({ mode: runtime.mode });
   }
 
-  return { start: start };
+  return { showLogin: showLogin, start: start };
 });

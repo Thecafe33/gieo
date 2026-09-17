@@ -30,8 +30,8 @@ const LAYER_ORDER = [
 ];
 
 const APPS = {
-  pos: { out: 'posgieo_new.html', title: 'GIEO — POS', entry: 'app-pos/main', runtimeGlobal: 'GIEO_POS_RUNTIME' },
-  quanly: { out: 'quanlygieo_new.html', title: 'GIEO — Quản lý', entry: 'app-quanly/main', runtimeGlobal: 'GIEO_QUANLY_RUNTIME' }
+  pos: { out: 'posgieo_new.html', title: 'GIEO — POS', entry: 'app-pos/main', runtimeGlobal: 'GIEO_POS_RUNTIME', source: 'POS' },
+  quanly: { out: 'quanlygieo_new.html', title: 'GIEO — Quản lý', entry: 'app-quanly/main', runtimeGlobal: 'GIEO_QUANLY_RUNTIME', source: 'QUANLY' }
 };
 
 function walk(dir, out = []) {
@@ -135,13 +135,17 @@ function buildBundle(appKey) {
     });
   }
 
-${appKey === 'quanly' ? `
+  /* Cả 2 app đều cần PIN trước khi có StoreContext — không có context thì
+     runtime.query()/command() từ chối tất cả (chưa có StoreContext để đọc/ghi).
+     Trước đây chỉ QUANLY đi qua nhánh này, POS gọi thẳng startRuntime() nên
+     GIEO_CONTEXT không bao giờ được set — mọi màn POS vì thế luôn lỗi ngay
+     từ query đầu tiên. */
   var ids = GIEO.require('shared-kernel/ids');
   startup.prepareAuth({
     firebase: { config: cfg.config, account: cfg.account },
     organizationId: ids.deterministicId('org', ['gieo']),
     storeId: cfg.storeId,
-    source: 'QUANLY'
+    source: ${JSON.stringify(APPS[appKey].source)}
   }).then(function (prepared) {
     if (R.isErr(prepared)) return fail(prepared.error.message);
     app.showLogin({
@@ -152,9 +156,6 @@ ${appKey === 'quanly' ? `
       }
     });
   }).catch(function (e) { fail(e && e.message ? e.message : e); });
-` : `
-  startRuntime().catch(function (e) { fail(e && e.message ? e.message : e); });
-`}
 })();
 `;
   return js;

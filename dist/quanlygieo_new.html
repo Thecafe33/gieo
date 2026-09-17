@@ -18562,13 +18562,17 @@ GIEO.define('app-quanly/main', [
     });
   }
 
-
+  /* Cả 2 app đều cần PIN trước khi có StoreContext — không có context thì
+     runtime.query()/command() từ chối tất cả (chưa có StoreContext để đọc/ghi).
+     Trước đây chỉ QUANLY đi qua nhánh này, POS gọi thẳng startRuntime() nên
+     GIEO_CONTEXT không bao giờ được set — mọi màn POS vì thế luôn lỗi ngay
+     từ query đầu tiên. */
   var ids = GIEO.require('shared-kernel/ids');
   startup.prepareAuth({
     firebase: { config: cfg.config, account: cfg.account },
     organizationId: ids.deterministicId('org', ['gieo']),
     storeId: cfg.storeId,
-    source: 'QUANLY'
+    source: "QUANLY"
   }).then(function (prepared) {
     if (R.isErr(prepared)) return fail(prepared.error.message);
     app.showLogin({
@@ -18579,7 +18583,6 @@ GIEO.define('app-quanly/main', [
       }
     });
   }).catch(function (e) { fail(e && e.message ? e.message : e); });
-
 })();
 
 </script>
