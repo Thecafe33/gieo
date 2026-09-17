@@ -13,6 +13,8 @@ var _p = (function () {
     S: GIEO.require('hr/shift'),
     WS: GIEO.require('hr/work-schedule'),
     P: GIEO.require('hr/payroll'),
+    L: GIEO.require('hr/liability'),
+    U: GIEO.require('fifo-core/unit'),
     CLK: GIEO.require('shared-kernel/clock'),
     STORE: ids.deterministicId('store', ['main']),
     BOSS: ids.deterministicId('actor', ['boss'])
@@ -84,6 +86,127 @@ describe('hr/work-schedule', function () {
       scheduleDays: sched(ctx, [2]), shifts: [workDay(ctx, 2, 8), workDay(ctx, 9, 8)]
     }));
     assert.deepStrictEqual(r.unscheduled, ['2026-03-09']);
+  });
+});
+
+describe('hr/liability — khoản trừ trách nhiệm nhân viên (quyết định chủ quán, "FIFO phải truy xuất được")', function () {
+  var L = _p.L;
+  var ids = _p.ids;
+  var SUA = ids.deterministicId('item', ['sua']);
+  var EMP = ids.deterministicId('employee', ['linh']);
+  var QL = ids.deterministicId('actor', ['ql']);
+
+  function costedUnit() {
+    return assertOk(_p.U.createUnit({
+      itemId: SUA, storeId: _p.STORE, itemKind: 'raw', initialQty: 10,
+      costBasis: { unitCost: 30000 }, operationId: ids.deterministicId('operation', ['seed1'])
+    }));
+  }
+
+  function seededUnit() {
+    return assertOk(_p.U.seedUnitFromLegacy({
+      itemId: SUA, storeId: _p.STORE, itemKind: 'raw', initialQty: 5,
+      operationId: ids.deterministicId('operation', ['seed2']), seededAt: '2026-01-01'
+    }));
+  }
+
+  test('số tiền = costBasis.unitCost thật × remainingQty còn lại', function () {
+    var r = assertOk(L.computeLiabilityAmount(costedUnit()));
+    assert.strictEqual(r.amount, 10 * 30000);
+    assert.strictEqual(r.gap, false);
+  });
+
+  test('lô không có costBasis (seed từ hệ cũ) thì KHÔNG đoán — gap=true, amount=null', function () {
+    var r = assertOk(L.computeLiabilityAmount(seededUnit()));
+    assert.strictEqual(r.amount, null);
+    assert.strictEqual(r.gap, true);
+  });
+
+  test('tạo khoản trừ với đủ nhân viên + costBasis thì không gap', function () {
+    var liab = assertOk(L.createLiability({
+      employeeId: EMP, storeId: _p.STORE, actorId: QL,
+      operationId: ids.deterministicId('operation', ['approvelost', 'lr1']),
+      lostReportId: 'lostReport_1', unit: costedUnit(), reason: 'mất hũ'
+    }));
+    assert.strictEqual(liab.amount, 300000);
+    assert.strictEqual(liab.employeeId, EMP);
+    assert.strictEqual(liab.status, L.STATUS.PENDING);
+    assert.strictEqual(liab.gap, false);
+  });
+
+  test('§2.3a: không xác định được nhân viên thì KHÔNG chặn tạo khoản — degrade, gắn cờ gap', function () {
+    var liab = assertOk(L.createLiability({
+      employeeId: null, storeId: _p.STORE, actorId: QL,
+      operationId: ids.deterministicId('operation', ['approvelost', 'lr2']),
+      lostReportId: 'lostReport_2', unit: costedUnit(), reason: 'mất hũ'
+    }));
+    assert.strictEqual(liab.employeeId, null);
+    assert.strictEqual(liab.gap, true);
+    assert.deepStrictEqual(liab.gapReasons, ['NO_EMPLOYEE_MATCH']);
+  });
+
+  test('lô seed (không costBasis) VẪN tạo được khoản — chỉ gắn cờ gap, không chặn', function () {
+    var liab = assertOk(L.createLiability({
+      employeeId: EMP, storeId: _p.STORE, actorId: QL,
+      operationId: ids.deterministicId('operation', ['approvelost', 'lr3']),
+      lostReportId: 'lostReport_3', unit: seededUnit(), reason: 'mất hũ'
+    }));
+    assert.strictEqual(liab.amount, null);
+    assert.strictEqual(liab.gap, true);
+    assert.deepStrictEqual(liab.gapReasons, ['NO_COST_BASIS']);
+  });
+
+  test('miễn trừ rồi thì không miễn trừ lại được (đã đổi trạng thái)', function () {
+    var liab = assertOk(L.createLiability({
+      employeeId: EMP, storeId: _p.STORE, actorId: QL,
+      operationId: ids.deterministicId('operation', ['approvelost', 'lr4']),
+      lostReportId: 'lostReport_4', unit: costedUnit(), reason: 'mất hũ'
+    }));
+    var waived = assertOk(L.waiveLiability(liab, { actorId: QL, reason: 'nhân viên khó khăn' }));
+    assert.strictEqual(waived.status, L.STATUS.WAIVED);
+    assertErr(L.waiveLiability(waived, { actorId: QL, reason: 'x' }), 'PRECONDITION');
+  });
+
+  test('tìm lại container → hoàn khoản trừ (REVERSED)', function () {
+    var liab = assertOk(L.createLiability({
+      employeeId: EMP, storeId: _p.STORE, actorId: QL,
+      operationId: ids.deterministicId('operation', ['approvelost', 'lr5']),
+      lostReportId: 'lostReport_5', unit: costedUnit(), reason: 'mất hũ'
+    }));
+    var reversed = assertOk(L.reverseLiability(liab, {
+      actorId: QL, operationId: ids.deterministicId('operation', ['found', 'u1'])
+    }));
+    assert.strictEqual(reversed.status, L.STATUS.REVERSED);
+  });
+
+  test('trừ vào lương → DEDUCTED, gắn payrollClosingId', function () {
+    var liab = assertOk(L.createLiability({
+      employeeId: EMP, storeId: _p.STORE, actorId: QL,
+      operationId: ids.deterministicId('operation', ['approvelost', 'lr6']),
+      lostReportId: 'lostReport_6', unit: costedUnit(), reason: 'mất hũ'
+    }));
+    var deducted = assertOk(L.markDeducted(liab, {
+      at: 1000, payrollClosingId: ids.deterministicId('snapshot', ['payroll', _p.STORE, '2026-03'])
+    }));
+    assert.strictEqual(deducted.status, L.STATUS.DEDUCTED);
+    assert.ok(deducted.payrollClosingId);
+  });
+
+  test('pendingFor tách phần trừ được (có số tiền) khỏi phần còn gap', function () {
+    var applied = assertOk(L.createLiability({
+      employeeId: EMP, storeId: _p.STORE, actorId: QL,
+      operationId: ids.deterministicId('operation', ['approvelost', 'lr7']),
+      lostReportId: 'lostReport_7', unit: costedUnit(), reason: 'x'
+    }));
+    var gapped = assertOk(L.createLiability({
+      employeeId: EMP, storeId: _p.STORE, actorId: QL,
+      operationId: ids.deterministicId('operation', ['approvelost', 'lr8']),
+      lostReportId: 'lostReport_8', unit: seededUnit(), reason: 'x'
+    }));
+    var p = L.pendingFor([applied, gapped], EMP);
+    assert.strictEqual(p.deduction, 300000);
+    assert.deepStrictEqual(p.appliedLiabilityIds, [applied.liabilityId]);
+    assert.deepStrictEqual(p.gapLiabilityIds, [gapped.liabilityId]);
   });
 });
 
@@ -228,6 +351,104 @@ describe('lương cứng — TRỪ THEO LỊCH LÀM VIỆC (đã chốt với ch
       scheduleDays: days, fromTs: FROM, toTs: TO
     }));
     assert.strictEqual(r.total, 8 * 30000 + 1000000);
+  });
+});
+
+describe('hr/payroll — khoản trừ trách nhiệm nhân viên chảy vào kỳ lương (quyết định chủ quán)', function () {
+  var P = _p.P;
+  var L = _p.L;
+  var ids = _p.ids;
+  var SUA = ids.deterministicId('item', ['sua']);
+  var QL = ids.deterministicId('actor', ['ql']);
+
+  function costedUnit(tag) {
+    return assertOk(_p.U.createUnit({
+      unitId: ids.deterministicId('unit', [tag]),
+      itemId: SUA, storeId: _p.STORE, itemKind: 'raw', initialQty: 4,
+      costBasis: { unitCost: 30000 }, operationId: ids.deterministicId('operation', ['s' + tag])
+    }));
+  }
+
+  function seededUnit(tag) {
+    return assertOk(_p.U.seedUnitFromLegacy({
+      unitId: ids.deterministicId('unit', [tag]),
+      itemId: SUA, storeId: _p.STORE, itemKind: 'raw', initialQty: 4,
+      operationId: ids.deterministicId('operation', ['s' + tag]), seededAt: '2026-01-01'
+    }));
+  }
+
+  function liabilityFor(ctx, tag, unit) {
+    return assertOk(L.createLiability({
+      employeeId: ctx.emp.employeeId, storeId: _p.STORE, actorId: QL,
+      operationId: ids.deterministicId('operation', ['approvelost', tag]),
+      lostReportId: 'lostReport_' + tag, unit: unit, reason: 'mất hũ'
+    }));
+  }
+
+  test('khoản PENDING có số tiền thật thì trừ thẳng vào total', function () {
+    var ctx = setup({ rate: 30000 });
+    var liab = liabilityFor(ctx, 'p1', costedUnit('p1'));
+    var r = assertOk(P.computePayroll({
+      registry: ctx.reg, employee: ctx.emp, shifts: [workDay(ctx, 2, 8)],
+      liabilities: [liab], fromTs: FROM, toTs: TO
+    }));
+    assert.strictEqual(r.liability.deduction, 4 * 30000);
+    assert.strictEqual(r.total, 8 * 30000 - 4 * 30000);
+    assert.deepStrictEqual(r.liability.appliedLiabilityIds, [liab.liabilityId]);
+  });
+
+  test('khoản còn gap (không costBasis) KHÔNG bị đoán số mà trừ — chỉ gắn cờ needsReview', function () {
+    var ctx = setup({ rate: 30000 });
+    var liab = liabilityFor(ctx, 'p2', seededUnit('p2'));
+    var r = assertOk(P.computePayroll({
+      registry: ctx.reg, employee: ctx.emp, shifts: [workDay(ctx, 2, 8)],
+      liabilities: [liab], fromTs: FROM, toTs: TO
+    }));
+    assert.strictEqual(r.liability.deduction, 0);
+    assert.strictEqual(r.needsReview, true);
+    assert.deepStrictEqual(r.liability.gapLiabilityIds, [liab.liabilityId]);
+  });
+
+  test('khoản của nhân viên KHÁC không lẫn vào kỳ lương người này', function () {
+    var ctx = setup({ rate: 30000 });
+    var otherEmployeeId = ids.deterministicId('employee', ['khac']);
+    var liab = assertOk(L.createLiability({
+      employeeId: otherEmployeeId, storeId: _p.STORE, actorId: QL,
+      operationId: ids.deterministicId('operation', ['approvelost', 'p3']),
+      lostReportId: 'lostReport_p3', unit: costedUnit('p3'), reason: 'x'
+    }));
+    var r = assertOk(P.computePayroll({
+      registry: ctx.reg, employee: ctx.emp, shifts: [workDay(ctx, 2, 8)],
+      liabilities: [liab], fromTs: FROM, toTs: TO
+    }));
+    assert.strictEqual(r.liability.deduction, 0);
+  });
+
+  test('khoản đã DEDUCTED hoặc WAIVED không bị trừ lần hai', function () {
+    var ctx = setup({ rate: 30000 });
+    var liab = liabilityFor(ctx, 'p4', costedUnit('p4'));
+    var waived = assertOk(L.waiveLiability(liab, { actorId: QL, reason: 'miễn' }));
+    var r = assertOk(P.computePayroll({
+      registry: ctx.reg, employee: ctx.emp, shifts: [workDay(ctx, 2, 8)],
+      liabilities: [waived], fromTs: FROM, toTs: TO
+    }));
+    assert.strictEqual(r.liability.deduction, 0);
+  });
+
+  test('closePayroll đóng băng liabilityDeduction + appliedLiabilityIds vào từng dòng', function () {
+    var ctx = setup({ rate: 30000 });
+    var liab = liabilityFor(ctx, 'p5', costedUnit('p5'));
+    var r = assertOk(P.computePayroll({
+      registry: ctx.reg, employee: ctx.emp, shifts: [workDay(ctx, 2, 8)],
+      liabilities: [liab], fromTs: FROM, toTs: TO
+    }));
+    var closed = assertOk(P.closePayroll({
+      storeId: _p.STORE, monthKey: '2026-03', results: [r],
+      actorId: QL, operationId: ids.deterministicId('operation', ['payroll', '2026-03-p5'])
+    }));
+    assert.strictEqual(closed.lines[0].liabilityDeduction, 4 * 30000);
+    assert.deepStrictEqual(closed.lines[0].appliedLiabilityIds, [liab.liabilityId]);
+    assert.strictEqual(closed.total, r.total);
   });
 });
 

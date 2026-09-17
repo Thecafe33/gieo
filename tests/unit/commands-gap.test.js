@@ -15,8 +15,14 @@ var _g = (function () {
     INV: GIEO.require('commands/inventory'),
     APR: GIEO.require('commands/approval'),
     REV: GIEO.require('commands/reversal'),
+    PAY: GIEO.require('commands/payroll'),
     U: GIEO.require('fifo-core/unit'),
     L: GIEO.require('fifo-core/ledger'),
+    LIAB: GIEO.require('hr/liability'),
+    EMP: GIEO.require('hr/employee'),
+    SHIFT: GIEO.require('hr/shift'),
+    PAYROLL: GIEO.require('hr/payroll'),
+    VI: GIEO.require('compaction/versioned-input'),
     ACCESS: GIEO.require('store-context/access'),
     CTXL: GIEO.require('store-context/context'),
     BD: GIEO.require('store-context/business-day'),
@@ -213,6 +219,79 @@ describe('ApproveLostContainer — MẮT XÍCH legacy CHƯA TỪNG CÓ (gap xác
        khôi phục phải trả về ĐÚNG trạng thái đó, không phải một trạng thái đoán. */
     assert.strictEqual(found.plan.unitChanges[0].status, 'OPEN');
     assert.strictEqual(found.plan.unitChanges[0].needsReview, true);
+  });
+
+  test('duyệt mất container tạo khoản trừ trách nhiệm nhân viên, khớp qua actorId báo mất', function () {
+    var emp = assertOk(_g.EMP.createEmployee({ name: 'Linh', storeId: _g.STORE, actorId: _g.NV }));
+    var u = gUnit(1000, 'liab1');
+    var rep = report(u.unitId);
+    var out = assertOk(run(APR.ApproveLostContainer, {
+      lostReportId: rep.lostReportId, lostReport: rep, decision: 'APPROVE',
+      reason: 'xác nhận mất', units: [u], employees: [emp]
+    }, qlCtx()));
+    var liab = out.plan.domainRecords[1].record;
+    assert.strictEqual(out.plan.domainRecords.length, 2, 'lostReport + liability, cả hai NGAY trong plan này');
+    assert.strictEqual(liab.employeeId, emp.employeeId);
+    assert.strictEqual(liab.amount, 1000 * 30, 'đúng costBasis.unitCost thật của gUnit');
+    assert.strictEqual(liab.gap, false);
+    assert.strictEqual(liab.status, _g.LIAB.STATUS.PENDING);
+  });
+
+  test('không khớp được nhân viên vẫn duyệt được — §2.3a: khoản trừ chỉ gắn cờ gap, không chặn', function () {
+    var u = gUnit(1000, 'liab2');
+    var rep = report(u.unitId);
+    var out = assertOk(run(APR.ApproveLostContainer, {
+      lostReportId: rep.lostReportId, lostReport: rep, decision: 'APPROVE',
+      reason: 'xác nhận mất', units: [u]
+      /* Không truyền employees — mô phỏng chưa xác định được ai báo mất. */
+    }, qlCtx()));
+    var liab = out.plan.domainRecords[1].record;
+    assert.strictEqual(liab.employeeId, null);
+    assert.strictEqual(liab.gap, true);
+    assert.ok(liab.gapReasons.indexOf('NO_EMPLOYEE_MATCH') !== -1);
+  });
+
+  test('event đổi tên thành ContainerLostApproved — không còn trùng type với sự kiện "tìm lại được"', function () {
+    var u = gUnit(1000, 'liab3');
+    var rep = report(u.unitId);
+    var out = assertOk(run(APR.ApproveLostContainer, {
+      lostReportId: rep.lostReportId, lostReport: rep, decision: 'APPROVE',
+      reason: 'xác nhận mất', units: [u]
+    }, qlCtx()));
+    assert.strictEqual(out.plan.events[0].type, 'ContainerLostApproved');
+  });
+
+  test('RestoreFoundContainer hoàn khoản trừ (REVERSED) khi có input.liability khớp', function () {
+    var emp = assertOk(_g.EMP.createEmployee({ name: 'Linh', storeId: _g.STORE, actorId: _g.NV }));
+    var u = gUnit(1000, 'liab4');
+    var rep = report(u.unitId);
+    var approved = assertOk(run(APR.ApproveLostContainer, {
+      lostReportId: rep.lostReportId, lostReport: rep, decision: 'APPROVE',
+      reason: 'xác nhận mất', units: [u], employees: [emp]
+    }, qlCtx()));
+    var lostUnit = approved.plan.unitChanges[0];
+    var liab = approved.plan.domainRecords[1].record;
+
+    var found = assertOk(run(INV.RestoreFoundContainer, {
+      unitId: u.unitId, units: [lostUnit], liability: liab
+    }, qlCtx()));
+    var reversedLiab = found.plan.domainRecords.filter(function (d) { return d.type === 'liability'; })[0].record;
+    assert.strictEqual(reversedLiab.status, _g.LIAB.STATUS.REVERSED);
+  });
+
+  test('RestoreFoundContainer không có input.liability vẫn chạy bình thường, không lỗi', function () {
+    var u = gUnit(1000, 'liab5');
+    var rep = report(u.unitId);
+    var approved = assertOk(run(APR.ApproveLostContainer, {
+      lostReportId: rep.lostReportId, lostReport: rep, decision: 'APPROVE',
+      reason: 'xác nhận mất', units: [u]
+    }, qlCtx()));
+    var lostUnit = approved.plan.unitChanges[0];
+
+    var found = assertOk(run(INV.RestoreFoundContainer, {
+      unitId: u.unitId, units: [lostUnit]
+    }, qlCtx()));
+    assert.strictEqual(found.plan.domainRecords.filter(function (d) { return d.type === 'liability'; }).length, 0);
   });
 
   test('từ chối duyệt thì Unit KHÔNG bị đánh dấu mất', function () {
@@ -502,5 +581,101 @@ describe('Reversal — 2 pattern thay 10 đường của legacy', function () {
       var net = out.plan.ledgerEntries.reduce(function (s, e) { return s + e.qtyDelta; }, 0);
       assert.strictEqual(net, 450);
     });
+  });
+});
+
+describe('commands/payroll — điểm nối còn thiếu (quyết định chủ quán: "tìm chỗ nối vào hợp lý")', function () {
+  var PAY = _g.PAY;
+  var qlCtx = function () { return gCtx('QUANLY_ADMIN', 'QUANLY', _g.QL); };
+  var D = function (d, h) { return new Date(2026, 2, d, h || 0).getTime(); };
+
+  function payrollSetup() {
+    var reg = _g.VI.createRegistry();
+    var emp = assertOk(_g.EMP.createEmployee({ name: 'Linh', storeId: _g.STORE, actorId: _g.NV }));
+    assertOk(_g.EMP.publishPayTerms(reg, {
+      employeeId: emp.employeeId, storeId: _g.STORE, effectiveFrom: D(1, 0),
+      publishedBy: _g.QL, terms: { rate: 30000, otRate: 45000, otThreshold: 8 }
+    }));
+    return { reg: reg, emp: emp };
+  }
+
+  function closedShift(ctx, day, hours) {
+    var sh = assertOk(_g.SHIFT.checkIn({
+      employee: ctx.emp, versionRegistry: ctx.reg, at: D(day, 8),
+      businessDate: '2026-03-' + (day < 10 ? '0' + day : day)
+    }));
+    return assertOk(_g.SHIFT.checkOut(sh, D(day, 8 + hours)));
+  }
+
+  test('ReviseAttendance nối hr/shift.reviseShift() — 0 importer trước đây, giờ chạy được qua command', function () {
+    var ctx = payrollSetup();
+    var sh = closedShift(ctx, 10, 8);
+    var out = assertOk(run(PAY.ReviseAttendance, {
+      shift: sh, revisionRef: 'fix1', reason: 'quên bấm giờ ra',
+      changes: { checkedOutAt: D(10, 17) }
+    }, qlCtx()));
+    var revised = out.plan.domainRecords[0].record;
+    assert.strictEqual(revised.checkedOutAt, D(10, 17));
+    assert.strictEqual(revised.needsReview, true);
+    assert.strictEqual(revised.revisions.length, 1);
+  });
+
+  test('ReviseAttendance thiếu revisionRef thì từ chối — cần id xác định như wasteRef/adjustRef', function () {
+    var ctx = payrollSetup();
+    var sh = closedShift(ctx, 11, 8);
+    assertErr(run(PAY.ReviseAttendance, {
+      shift: sh, reason: 'x', changes: { checkedOutAt: D(11, 17) }
+    }, qlCtx()), 'VALIDATION');
+  });
+
+  test('sửa lại đúng request là no-op — idempotent qua revisionRef', function () {
+    var store = _g.PIPE.createInMemoryOperationStore();
+    var c = qlCtx();
+    var ctx = payrollSetup();
+    var sh = closedShift(ctx, 12, 8);
+    var input = { shift: sh, revisionRef: 'fix2', reason: 'x', changes: { checkedOutAt: D(12, 17) } };
+    assertOk(run(PAY.ReviseAttendance, input, c, store));
+    assert.strictEqual(assertOk(run(PAY.ReviseAttendance, input, c, store)).replayed, true);
+  });
+
+  test('ClosePayroll nối hr/payroll.closePayroll() — 0 importer trước đây, giờ chạy được qua command', function () {
+    var ctx = payrollSetup();
+    var r = assertOk(_g.PAYROLL.computePayroll({
+      registry: ctx.reg, employee: ctx.emp, shifts: [closedShift(ctx, 13, 8)],
+      fromTs: D(1, 0), toTs: D(31, 23)
+    }));
+    var out = assertOk(run(PAY.ClosePayroll, {
+      storeId: _g.STORE, monthKey: '2026-03', results: [r]
+    }, qlCtx()));
+    var closing = out.plan.domainRecords[0].record;
+    assert.strictEqual(closing.monthKey, '2026-03');
+    assert.strictEqual(closing.total, r.total);
+  });
+
+  test('ClosePayroll chuyển khoản trừ trách nhiệm đã áp sang DEDUCTED, ngay trong cùng mutation', function () {
+    var ctx = payrollSetup();
+    var u = gUnit(1000, 'closepay1');
+    var reportOut = assertOk(run(_g.INV.ReportLostContainer, {
+      unitId: u.unitId, reason: 'không thấy hũ'
+    }));
+    var rep = reportOut.plan.domainRecords[0].record;
+    var approved = assertOk(run(_g.APR.ApproveLostContainer, {
+      lostReportId: rep.lostReportId, lostReport: rep, decision: 'APPROVE',
+      reason: 'xác nhận mất', units: [u], employees: [ctx.emp]
+    }, qlCtx()));
+    var liab = approved.plan.domainRecords[1].record;
+
+    var r = assertOk(_g.PAYROLL.computePayroll({
+      registry: ctx.reg, employee: ctx.emp, shifts: [closedShift(ctx, 14, 8)],
+      liabilities: [liab], fromTs: D(1, 0), toTs: D(31, 23)
+    }));
+    var out = assertOk(run(PAY.ClosePayroll, {
+      storeId: _g.STORE, monthKey: '2026-03', results: [r], liabilities: [liab]
+    }, qlCtx()));
+
+    var liabRecord = out.plan.domainRecords.filter(function (d) { return d.type === 'liability'; })[0].record;
+    assert.strictEqual(liabRecord.status, _g.LIAB.STATUS.DEDUCTED);
+    assert.strictEqual(liabRecord.payrollClosingId, out.plan.domainRecords[0].record.payrollClosingId);
+    assert.strictEqual(out.plan.domainRecords[0].record.total, r.total, 'total đã trừ khoản trách nhiệm');
   });
 });

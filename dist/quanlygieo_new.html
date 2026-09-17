@@ -1700,7 +1700,7 @@ GIEO.define('shared-kernel/ids', [], function () {
     'unit', 'item', 'receipt', 'supplier', 'ledger',
     'bill', 'billLine', 'prepBatch', 'prepItem',
     'recipe', 'recipeVersion', 'costBasis', 'version',
-    'customer', 'shift', 'snapshot', 'alert', 'expense'
+    'customer', 'shift', 'snapshot', 'alert', 'expense', 'liability'
   ];
 
   var SEP = '_';
@@ -6792,8 +6792,9 @@ GIEO.define('hr/employee', [
         rate: t.rate,
         otRate: t.otRate === undefined ? t.rate : t.otRate,
         otThreshold: t.otThreshold === undefined ? 8 : t.otThreshold,
-        /* Lương cứng: có mặt nhưng công thức trừ theo lịch làm việc còn để ngỏ,
-           xem README "Điểm còn treo". Không tự quyết thay chủ quán. */
+        /* Lương cứng: chủ quán đã chốt công thức trừ theo lịch làm việc — xem
+           `hr/work-schedule.js` (bắt buộc cho payroll) + `hr/payroll.js`
+           computePayroll(). Comment cũ ở đây ("còn để ngỏ") đã lỗi thời. */
         fixedMonthlySalary: t.fixedMonthlySalary === undefined ? null : t.fixedMonthlySalary
       }
     });
@@ -6810,6 +6811,202 @@ GIEO.define('hr/employee', [
     isEmployedAt: isEmployedAt,
     publishPayTerms: publishPayTerms,
     resolvePayTermsAt: resolvePayTermsAt
+  };
+});
+
+/* ===== src/layers/hr/liability.js ===== */
+/**
+ * Liability — khoản trừ trách nhiệm nhân viên khi container báo mất được duyệt.
+ *
+ * Chuỗi thật: FIFO-CHAIN-TRACE-RAW-MATERIAL-V1.md (ApproveLostContainer) +
+ * quyết định chủ quán: "Hệ thống cũ chỉ ghi nhận, đến cuối tháng tôi tự tổng
+ * hợp và làm việc với nhân viên, nhưng hệ thống mới cần quy trách nhiệm rõ
+ * ràng, do FIFO phải truy xuất được."
+ *
+ * Legacy: mất container chỉ trừ kho, chủ quán tự nhớ và tự tính tay cuối
+ * tháng — không có bản ghi, không ai tra lại được ai chịu, bao nhiêu, vì sao.
+ * Ở đây khoản trừ là MỘT BẢN GHI THẬT, số tiền lấy từ costBasis.unitCost thật
+ * của đúng lô đã mất (không đoán, không lấy giá gần nhất đắp vào).
+ *
+ * §2.3a: thiếu dữ liệu (không xác định được nhân viên nào, hoặc lô không có
+ * costBasis vì seed từ hệ cũ) KHÔNG được chặn ApproveLostContainer — quyết
+ * định "container đã mất" quan trọng hơn và phải đi qua được. Khoản trừ ở
+ * đây degrade: amount=null/employeeId=null + gap=true, để chủ quán tự xử lý
+ * tay phần đó, thay vì từ chối cả việc duyệt mất container.
+ *
+ * Bản ghi được tạo NGAY TRONG plan của ApproveLostContainer (commands/approval.js),
+ * không đi qua event: L9 (event-dispatch layer) chưa tồn tại, và đây không
+ * phải side-effect tuỳ chọn — nó LÀ nghiệp vụ chính của quyết định duyệt.
+ */
+GIEO.define('hr/liability', [
+  'shared-kernel/ids',
+  'shared-kernel/result'
+], function (ids, R) {
+  'use strict';
+
+  var STATUS = {
+    PENDING: 'PENDING',
+    WAIVED: 'WAIVED',
+    DEDUCTED: 'DEDUCTED',
+    REVERSED: 'REVERSED'
+  };
+
+  var TRANSITIONS = {
+    PENDING: [STATUS.WAIVED, STATUS.DEDUCTED, STATUS.REVERSED],
+    WAIVED: [STATUS.REVERSED],
+    DEDUCTED: [STATUS.REVERSED],
+    REVERSED: []
+  };
+
+  function canTransition(from, to) {
+    return (TRANSITIONS[from] || []).indexOf(to) !== -1;
+  }
+
+  /**
+   * Số tiền = costBasis.unitCost thật × remainingQty còn lại lúc mất (phần
+   * đã tiêu hợp lệ trước đó không tính vào). Lô không có costBasis (seed từ
+   * hệ cũ, §10b.1) thì KHÔNG suy luận — trả gap=true thay vì đoán bằng giá
+   * gần nhất.
+   */
+  function computeLiabilityAmount(unit) {
+    if (!unit) return R.err('VALIDATION', 'computeLiabilityAmount cần unit');
+    if (!unit.costBasis || typeof unit.costBasis.unitCost !== 'number') {
+      return R.ok({ amount: null, currency: null, basis: null, gap: true });
+    }
+    return R.ok({
+      amount: unit.costBasis.unitCost * unit.remainingQty,
+      currency: unit.costBasis.currency || 'VND',
+      basis: 'ACTUAL',
+      gap: false
+    });
+  }
+
+  /**
+   * @param spec.employeeId  có thể null nếu chưa xác định được ai báo mất lô
+   *        này khớp hồ sơ nhân viên nào — degrade, không chặn (§2.3a).
+   * @param spec.actorId     người duyệt (QUANLY) — luôn bắt buộc, khác employeeId.
+   */
+  function createLiability(spec) {
+    if (!spec) return R.err('VALIDATION', 'createLiability cần spec');
+    if (spec.employeeId !== null && spec.employeeId !== undefined && !ids.isId(spec.employeeId, 'employee')) {
+      return R.err('VALIDATION', 'employeeId phải hợp lệ hoặc để trống khi chưa xác định được ai chịu');
+    }
+    if (!ids.isId(spec.storeId, 'store')) return R.err('VALIDATION', 'createLiability cần storeId hợp lệ');
+    if (!ids.isId(spec.actorId, 'actor')) return R.err('VALIDATION', 'createLiability cần actorId (người duyệt)');
+    if (!spec.operationId) return R.err('VALIDATION', 'createLiability cần operationId');
+    if (!spec.lostReportId) return R.err('VALIDATION', 'createLiability cần lostReportId');
+    if (!spec.unit) return R.err('VALIDATION', 'createLiability cần unit');
+
+    var amountR = computeLiabilityAmount(spec.unit);
+    if (R.isErr(amountR)) return amountR;
+
+    var employeeId = spec.employeeId || null;
+    var gapReasons = [];
+    if (amountR.value.gap) gapReasons.push('NO_COST_BASIS');
+    if (!employeeId) gapReasons.push('NO_EMPLOYEE_MATCH');
+
+    return R.ok({
+      liabilityId: spec.liabilityId || ids.deterministicId('liability', ['lost', spec.lostReportId]),
+      employeeId: employeeId,
+      storeId: spec.storeId,
+      unitId: spec.unit.unitId,
+      itemId: spec.unit.itemId,
+      lostReportId: spec.lostReportId,
+      amount: amountR.value.amount,
+      currency: amountR.value.currency,
+      basis: amountR.value.basis,
+      gap: gapReasons.length > 0,
+      gapReasons: gapReasons,
+      status: STATUS.PENDING,
+      reason: spec.reason || null,
+      createdAt: spec.at,
+      approvedBy: spec.actorId,
+      operationId: spec.operationId,
+      waivedAt: null,
+      waivedBy: null,
+      waiveReason: null,
+      deductedAt: null,
+      payrollClosingId: null,
+      reversedAt: null,
+      reversedBy: null,
+      reverseReason: null
+    });
+  }
+
+  /** Chủ quán miễn trừ — bản ghi vẫn còn (không xoá), chỉ không đi vào lương. */
+  function waiveLiability(liability, spec) {
+    if (!canTransition(liability.status, STATUS.WAIVED)) {
+      return R.err('PRECONDITION', 'không miễn trừ được khoản ở trạng thái ' + liability.status);
+    }
+    if (!ids.isId(spec.actorId, 'actor')) return R.err('VALIDATION', 'waiveLiability cần actorId');
+    if (!spec.reason) return R.err('VALIDATION', 'waiveLiability cần lý do');
+    return R.ok(Object.assign({}, liability, {
+      status: STATUS.WAIVED,
+      waivedAt: spec.at,
+      waivedBy: spec.actorId,
+      waiveReason: spec.reason
+    }));
+  }
+
+  /**
+   * Container tìm lại được (RestoreFoundContainer) → hoàn khoản trừ.
+   * PENDING lẫn WAIVED đều hoàn được — dù đã miễn trừ, tìm lại vẫn phải đóng
+   * bản ghi cho khớp, vì không còn gì để miễn trừ nữa.
+   */
+  function reverseLiability(liability, spec) {
+    if (!canTransition(liability.status, STATUS.REVERSED)) {
+      return R.err('PRECONDITION', 'không hoàn được khoản ở trạng thái ' + liability.status);
+    }
+    if (!ids.isId(spec.actorId, 'actor')) return R.err('VALIDATION', 'reverseLiability cần actorId');
+    if (!spec.operationId) return R.err('VALIDATION', 'reverseLiability cần operationId');
+    return R.ok(Object.assign({}, liability, {
+      status: STATUS.REVERSED,
+      reversedAt: spec.at,
+      reversedBy: spec.actorId,
+      reverseReason: spec.reason || 'tìm lại được container đã báo mất',
+      operationId: spec.operationId
+    }));
+  }
+
+  /** Payroll đã trừ khoản này vào kỳ nào — gọi từ ClosePayroll khi áp dụng. */
+  function markDeducted(liability, spec) {
+    if (!canTransition(liability.status, STATUS.DEDUCTED)) {
+      return R.err('PRECONDITION', 'không trừ lương được khoản ở trạng thái ' + liability.status);
+    }
+    if (!spec.payrollClosingId) return R.err('VALIDATION', 'markDeducted cần payrollClosingId');
+    return R.ok(Object.assign({}, liability, {
+      status: STATUS.DEDUCTED,
+      deductedAt: spec.at,
+      payrollClosingId: spec.payrollClosingId
+    }));
+  }
+
+  /**
+   * Khoản PENDING của 1 nhân viên trong kỳ, tách phần có số tiền thật với
+   * phần còn gap (không có costBasis) — computePayroll() chỉ trừ phần thật,
+   * phần gap chỉ hiển thị để chủ quán tự quyết, không đoán số mà trừ.
+   */
+  function pendingFor(liabilities, employeeId) {
+    var mine = (liabilities || []).filter(function (l) {
+      return l.employeeId === employeeId && l.status === STATUS.PENDING;
+    });
+    var applied = mine.filter(function (l) { return typeof l.amount === 'number'; });
+    var gapped = mine.filter(function (l) { return typeof l.amount !== 'number'; });
+    return {
+      deduction: applied.reduce(function (s, l) { return s + l.amount; }, 0),
+      appliedLiabilityIds: applied.map(function (l) { return l.liabilityId; }),
+      gapLiabilityIds: gapped.map(function (l) { return l.liabilityId; })
+    };
+  }
+
+  return {
+    STATUS: STATUS,
+    computeLiabilityAmount: computeLiabilityAmount,
+    createLiability: createLiability,
+    waiveLiability: waiveLiability,
+    reverseLiability: reverseLiability,
+    markDeducted: markDeducted,
+    pendingFor: pendingFor
   };
 });
 
@@ -6836,14 +7033,21 @@ GIEO.define('hr/employee', [
  *
  * 3. Lương cứng không trừ khi nghỉ (§6). Legacy cộng đều mọi ngày, không kiểm
  *    work_schedules. Chủ quán đã chốt: TRỪ THEO LỊCH LÀM VIỆC.
+ *
+ * 4. Khoản trừ trách nhiệm nhân viên (container mất, hr/liability.js) chưa
+ *    từng truy xuất được ở legacy — chủ quán tự tổng hợp tay cuối tháng.
+ *    Quyết định: "hệ thống mới cần quy trách nhiệm rõ ràng, do FIFO phải
+ *    truy xuất được." Ở đây khoản PENDING có số tiền thật (không gap) trừ
+ *    thẳng vào kỳ lương; phần còn gap chỉ hiển thị, không đoán số mà trừ.
  */
 GIEO.define('hr/payroll', [
   'shared-kernel/ids',
   'shared-kernel/result',
   'compaction/versioned-input',
   'hr/shift',
-  'hr/work-schedule'
-], function (ids, R, VI, shiftLib, scheduleLib) {
+  'hr/work-schedule',
+  'hr/liability'
+], function (ids, R, VI, shiftLib, scheduleLib, liabilityLib) {
   'use strict';
 
   /**
@@ -6854,6 +7058,8 @@ GIEO.define('hr/payroll', [
    * @param spec.shifts          ca đã chấm công trong kỳ (mang payTermsRef riêng)
    * @param spec.scheduleDays    lịch đã xếp trong kỳ — BẮT BUỘC nếu có lương cứng
    * @param spec.fromTs, spec.toTs
+   * @param spec.liabilities     khoản trừ trách nhiệm nhân viên (mọi status, mọi
+   *        nhân viên trong kỳ) — hàm tự lọc đúng PENDING của employee này
    */
   function computePayroll(spec) {
     var employee = spec.employee;
@@ -6959,6 +7165,19 @@ GIEO.define('hr/payroll', [
       });
     }
 
+    /* ── Khoản trừ trách nhiệm nhân viên ─────────────────────────────────
+       Chỉ trừ phần có số tiền thật (costBasis đầy đủ). Phần gap thì hiển
+       thị để chủ quán tự xử lý tay — không đoán số mà trừ (§2.3a). */
+    var liability = liabilityLib.pendingFor(spec.liabilities || [], employee.employeeId);
+
+    var needsReviewDetail = hourly.needsReview.slice();
+    if (liability.gapLiabilityIds.length) {
+      needsReviewDetail.push({
+        reason: 'LIABILITY_GAP',
+        liabilityIds: liability.gapLiabilityIds
+      });
+    }
+
     return R.ok({
       employeeId: employee.employeeId,
       storeId: employee.storeId,
@@ -6966,10 +7185,12 @@ GIEO.define('hr/payroll', [
       toTs: spec.toTs,
       hourly: hourly,
       fixed: fixed,
-      total: hourly.amount + fixed.amount,
-      /* Ca tự đóng / đã sửa giờ đều chảy lên đây, không bị rơi mất. */
-      needsReview: hourly.needsReview.length > 0,
-      needsReviewDetail: hourly.needsReview,
+      liability: liability,
+      total: hourly.amount + fixed.amount - liability.deduction,
+      /* Ca tự đóng / đã sửa giờ / khoản trừ còn gap đều chảy lên đây, không
+         bị rơi mất. */
+      needsReview: needsReviewDetail.length > 0,
+      needsReviewDetail: needsReviewDetail,
       /* Version đã dùng — đọc lại kỳ này không phải resolve lại (V4). */
       payTermsVersionIds: hourly.lines.map(function (l) { return l.payTermsVersionId; })
         .concat(fixed.lines.map(function (l) { return l.payTermsVersionId; }))
@@ -7023,6 +7244,11 @@ GIEO.define('hr/payroll', [
           fixedAmount: r.fixed.amount,
           fixedScheduledDays: r.fixed.scheduledDays,
           fixedAbsentDays: r.fixed.absentDays,
+          /* Đóng băng cùng lúc DANH SÁCH liability đã áp — ClosePayroll (command)
+             dùng đúng danh sách này để chuyển từng khoản sang DEDUCTED, không
+             tính lại ai đã bị trừ. */
+          liabilityDeduction: r.liability ? r.liability.deduction : 0,
+          appliedLiabilityIds: r.liability ? r.liability.appliedLiabilityIds : [],
           total: r.total,
           payTermsVersionIds: r.payTermsVersionIds,
           needsReview: r.needsReview
@@ -10675,8 +10901,9 @@ GIEO.define('commands/approval', [
   'shared-kernel/result',
   'commands/pipeline',
   'fifo-core/unit',
-  'fifo-core/reconciliation'
-], function (ids, R, pipeline, unitLib, reconciliation) {
+  'fifo-core/reconciliation',
+  'hr/liability'
+], function (ids, R, pipeline, unitLib, reconciliation, liabilityLib) {
   'use strict';
 
   var COUNT_STATUS = {
@@ -10764,11 +10991,37 @@ GIEO.define('commands/approval', [
         occurredAt: ctx.clock.now(),
         referenceType: 'lostReport', referenceId: input.lostReportId, reason: input.reason
       });
-      /* Trừ trách nhiệm nhân viên là side-effect, đi qua handler đăng ký riêng. */
+
+      /* Quy trách nhiệm nhân viên (quyết định chủ quán) — tạo NGAY trong plan
+         này, không đi qua event: L9 chưa tồn tại và đây không phải side-effect
+         tuỳ chọn. `input.employees` là input denormalized giống `input.units`;
+         khớp qua actorId người báo mất (report.reportedBy). Không khớp được
+         thì vẫn duyệt mất container — khoản trừ chỉ gắn cờ gap (§2.3a),
+         không chặn. */
+      var employee = (input.employees || []).filter(function (e) {
+        return e.actorId === report.reportedBy;
+      })[0];
+      var liabilityR = liabilityLib.createLiability({
+        employeeId: employee ? employee.employeeId : null,
+        storeId: ctx.storeId,
+        actorId: ctx.actor.actorId,
+        operationId: opId,
+        lostReportId: input.lostReportId,
+        unit: unit,
+        reason: input.reason,
+        at: ctx.clock.now()
+      });
+      if (R.isErr(liabilityR)) return liabilityR;
+      plan.domainRecords.push({ type: 'liability', record: liabilityR.value });
+
+      /* Đổi tên khỏi 'ContainerFound' (bug: trùng type với sự kiện "tìm lại
+         được" ngược chiều ở commands/inventory.js RestoreFoundContainer —
+         một consumer L9 tương lai sẽ không phân biệt được 2 hướng nếu dùng
+         chung type). Đây chỉ còn là thông báo phụ; bản ghi thật đã ở trên. */
       plan.events.push({
-        type: 'ContainerFound',
+        type: 'ContainerLostApproved',
         unitId: unit.unitId, storeId: ctx.storeId, businessDate: ctx.businessDate,
-        lostReportId: input.lostReportId, direction: 'LOST_APPROVED'
+        lostReportId: input.lostReportId, liabilityId: liabilityR.value.liabilityId
       });
       plan.projectionRecomputes.push({ itemId: unit.itemId, storeId: ctx.storeId });
       return R.ok(plan);
@@ -11070,8 +11323,9 @@ GIEO.define('commands/inventory', [
   'commands/pipeline',
   'fifo-core/unit',
   'fifo-core/allocation',
-  'fifo-core/reconciliation'
-], function (ids, R, pipeline, unitLib, allocation, reconciliation) {
+  'fifo-core/reconciliation',
+  'hr/liability'
+], function (ids, R, pipeline, unitLib, allocation, reconciliation, liabilityLib) {
   'use strict';
 
   /**
@@ -11331,7 +11585,24 @@ GIEO.define('commands/inventory', [
         referenceType: 'found', referenceId: input.unitId,
         reason: 'tìm lại được container đã báo mất'
       });
-      /* Hoàn khoản trừ trách nhiệm nhân viên là SIDE-EFFECT, đi qua event. */
+
+      /* Hoàn khoản trừ trách nhiệm nhân viên — NGAY trong plan này, cùng lý
+         do như ApproveLostContainer: đây là nghiệp vụ chính của việc tìm lại
+         container, không phải side-effect tuỳ chọn chờ L9. `input.liability`
+         là input denormalized (giống input.units): bản ghi liability hiện
+         tại ứng với lostReportId của unit, nếu có — không phải mọi Unit LOST
+         đều có liability (VD: không xác định được nhân viên từ trước khi
+         tính năng này tồn tại), nên không có thì bỏ qua, không lỗi. */
+      var liability = input.liability;
+      if (liability && (liability.status === liabilityLib.STATUS.PENDING ||
+          liability.status === liabilityLib.STATUS.WAIVED)) {
+        var reversedR = liabilityLib.reverseLiability(liability, {
+          at: ctx.clock.now(), actorId: ctx.actor.actorId, operationId: opId
+        });
+        if (R.isErr(reversedR)) return reversedR;
+        plan.domainRecords.push({ type: 'liability', record: reversedR.value });
+      }
+
       plan.events.push({
         type: 'ContainerFound',
         unitId: unit.unitId, storeId: ctx.storeId, businessDate: ctx.businessDate,
@@ -11347,6 +11618,154 @@ GIEO.define('commands/inventory', [
     AdjustInventory: AdjustInventory,
     ReportLostContainer: ReportLostContainer,
     RestoreFoundContainer: RestoreFoundContainer
+  };
+});
+
+/* ===== src/layers/commands/payroll.js ===== */
+/**
+ * Lệnh Payroll — điểm nối còn thiếu.
+ *
+ * hr/payroll.js (closePayroll) và hr/shift.js (reviseShift) đúng nhưng KHÔNG
+ * có defineCommand() nào gọi tới — 0 importer trong toàn bộ src/layers, nên
+ * không cách nào chạm tới được dù logic đã viết sẵn. Quyết định chủ quán
+ * ("tìm chỗ nối vào hợp lý"): nối theo ĐÚNG pattern commands/shift.js đã
+ * dùng cho CheckIn/CheckOut, không phát minh cơ chế mới.
+ */
+GIEO.define('commands/payroll', [
+  'shared-kernel/ids',
+  'shared-kernel/result',
+  'commands/pipeline',
+  'hr/shift',
+  'hr/payroll',
+  'hr/liability'
+], function (ids, R, pipeline, shiftLib, payrollLib, liabilityLib) {
+  'use strict';
+
+  /**
+   * ReviseAttendance — nối hr/shift.reviseShift() vào command layer.
+   * `revisionRef` là id xác định do caller cấp (cùng vai trò wasteRef/adjustRef
+   * ở commands/inventory.js) — sửa chấm công không có input tự nhiên nào là
+   * duy nhất, nên không có nó thì không dựng được operationId ổn định.
+   */
+  var ReviseAttendance = pipeline.defineCommand({
+    name: 'ReviseAttendance',
+    authority: 'REVIEW_APPROVE_CORRECT',
+    mutates: true,
+    sources: ['QUANLY'],
+
+    operationId: function (input) {
+      return ids.deterministicId('operation', ['reviseattendance', input.shift.shiftId, input.revisionRef]);
+    },
+
+    validate: function (input) {
+      if (!input || !input.shift || !ids.isId(input.shift.shiftId, 'shift')) {
+        return R.err('VALIDATION', 'ReviseAttendance cần shift hợp lệ');
+      }
+      if (!input.revisionRef) return R.err('VALIDATION', 'ReviseAttendance cần revisionRef để id xác định');
+      if (!input.reason) return R.err('VALIDATION', 'sửa chấm công phải có lý do');
+      if (!input.changes || (input.changes.checkedInAt === undefined && input.changes.checkedOutAt === undefined)) {
+        return R.err('VALIDATION', 'ReviseAttendance cần ít nhất 1 thay đổi giờ');
+      }
+      return R.ok(true);
+    },
+
+    execute: function (input, ctx) {
+      var opId = ids.deterministicId('operation', ['reviseattendance', input.shift.shiftId, input.revisionRef]);
+      var revised = shiftLib.reviseShift(input.shift, input.changes, {
+        actorId: ctx.actor.actorId,
+        operationId: opId,
+        reason: input.reason,
+        at: ctx.clock.now(),
+        isCurrentBusinessDate: input.shift.businessDate === ctx.businessDate
+      });
+      if (R.isErr(revised)) return revised;
+
+      var plan = pipeline.emptyPlan();
+      plan.domainRecords.push({ type: 'employeeShift', record: revised.value.shift });
+      revised.value.events.forEach(function (e) { plan.events.push(e); });
+      return R.ok(plan);
+    }
+  });
+
+  /**
+   * ClosePayroll — nối hr/payroll.closePayroll() vào command layer.
+   *
+   * `input.results` = computePayroll() đã chạy sẵn cho từng nhân viên trong
+   * kỳ (đọc-tính rồi mới chốt, giống mọi report khác — closePayroll không tự
+   * tính lại). Khoản trừ trách nhiệm nhân viên (input.liabilities, khớp qua
+   * appliedLiabilityIds đã đóng băng trong từng dòng) được chuyển sang
+   * DEDUCTED NGAY trong cùng mutation này — không đợi L9.
+   */
+  var ClosePayroll = pipeline.defineCommand({
+    name: 'ClosePayroll',
+    authority: 'REVIEW_APPROVE_CORRECT',
+    mutates: true,
+    sources: ['QUANLY'],
+
+    operationId: function (input) {
+      return ids.deterministicId('operation',
+        ['closepayroll', input.storeId, input.monthKey, String(input.revisionNo || 1)]);
+    },
+
+    validate: function (input) {
+      if (!input || !input.monthKey || !/^\d{4}-\d{2}$/.test(input.monthKey)) {
+        return R.err('VALIDATION', 'ClosePayroll cần monthKey dạng YYYY-MM');
+      }
+      if (!ids.isId(input.storeId, 'store')) return R.err('VALIDATION', 'ClosePayroll cần storeId hợp lệ');
+      if (!Array.isArray(input.results) || input.results.length === 0) {
+        return R.err('VALIDATION', 'ClosePayroll cần results (computePayroll đã tính cho từng nhân viên)');
+      }
+      return R.ok(true);
+    },
+
+    execute: function (input, ctx) {
+      var opId = ids.deterministicId('operation',
+        ['closepayroll', input.storeId, input.monthKey, String(input.revisionNo || 1)]);
+
+      var closed = payrollLib.closePayroll({
+        monthKey: input.monthKey,
+        storeId: input.storeId,
+        actorId: ctx.actor.actorId,
+        operationId: opId,
+        at: ctx.clock.now(),
+        results: input.results,
+        acknowledgeReview: input.acknowledgeReview,
+        revisionNo: input.revisionNo,
+        supersedesClosingId: input.supersedesClosingId
+      });
+      if (R.isErr(closed)) return closed;
+
+      var plan = pipeline.emptyPlan();
+      plan.domainRecords.push({ type: 'payrollClosing', record: closed.value });
+
+      /* Khoản trừ đã đóng băng vào lương kỳ này → chuyển DEDUCTED. Dùng đúng
+         appliedLiabilityIds đã đóng băng trong closing.lines — không tính lại
+         "ai bị trừ", vì số đã chốt rồi. */
+      var liabilitiesById = Object.create(null);
+      (input.liabilities || []).forEach(function (l) { liabilitiesById[l.liabilityId] = l; });
+
+      var deductError = null;
+      closed.value.lines.forEach(function (line) {
+        (line.appliedLiabilityIds || []).forEach(function (liabilityId) {
+          if (deductError) return;
+          var liability = liabilitiesById[liabilityId];
+          if (!liability) return;
+          var d = liabilityLib.markDeducted(liability, {
+            at: ctx.clock.now(), payrollClosingId: closed.value.payrollClosingId
+          });
+          if (R.isErr(d)) { deductError = d; return; }
+          plan.domainRecords.push({ type: 'liability', record: d.value });
+        });
+      });
+      if (deductError) return deductError;
+
+      return R.ok(plan);
+    }
+  });
+
+  return {
+    ReviseAttendance: ReviseAttendance,
+    ClosePayroll: ClosePayroll
   };
 });
 
@@ -14660,9 +15079,10 @@ GIEO.define('bootstrap/runtime', [
   'commands/approval',
   'commands/business-day',
   'commands/shift',
+  'commands/payroll',
   'read-layer/gateway',
   'reporting/report-queries'
-], function (R, pipeline, sales, inventory, prep, reversal, approval, businessDay, shift, reads, reports) {
+], function (R, pipeline, sales, inventory, prep, reversal, approval, businessDay, shift, payroll, reads, reports) {
   'use strict';
 
   var MODE = { READ_ONLY: 'READ_ONLY', SHADOW: 'SHADOW', WRITE: 'WRITE' };
@@ -14686,7 +15106,9 @@ GIEO.define('bootstrap/runtime', [
     OpenCashSegment: shift.OpenCashSegment,
     CheckIn: shift.CheckIn,
     CheckOut: shift.CheckOut,
-    CloseCashSegment: shift.CloseCashSegment
+    CloseCashSegment: shift.CloseCashSegment,
+    ReviseAttendance: payroll.ReviseAttendance,
+    ClosePayroll: payroll.ClosePayroll
   };
   var QUERIES = {
     GetMenu: reads.getMenu,

@@ -9,9 +9,10 @@ GIEO.define('bootstrap/runtime', [
   'commands/approval',
   'commands/business-day',
   'commands/shift',
+  'commands/payroll',
   'read-layer/gateway',
   'reporting/report-queries'
-], function (R, pipeline, sales, inventory, prep, reversal, approval, businessDay, shift, reads, reports) {
+], function (R, pipeline, sales, inventory, prep, reversal, approval, businessDay, shift, payroll, reads, reports) {
   'use strict';
 
   var MODE = { READ_ONLY: 'READ_ONLY', SHADOW: 'SHADOW', WRITE: 'WRITE' };
@@ -35,7 +36,9 @@ GIEO.define('bootstrap/runtime', [
     OpenCashSegment: shift.OpenCashSegment,
     CheckIn: shift.CheckIn,
     CheckOut: shift.CheckOut,
-    CloseCashSegment: shift.CloseCashSegment
+    CloseCashSegment: shift.CloseCashSegment,
+    ReviseAttendance: payroll.ReviseAttendance,
+    ClosePayroll: payroll.ClosePayroll
   };
   var QUERIES = {
     GetMenu: reads.getMenu,

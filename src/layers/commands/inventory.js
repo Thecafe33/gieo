@@ -15,8 +15,9 @@ GIEO.define('commands/inventory', [
   'commands/pipeline',
   'fifo-core/unit',
   'fifo-core/allocation',
-  'fifo-core/reconciliation'
-], function (ids, R, pipeline, unitLib, allocation, reconciliation) {
+  'fifo-core/reconciliation',
+  'hr/liability'
+], function (ids, R, pipeline, unitLib, allocation, reconciliation, liabilityLib) {
   'use strict';
 
   /**
@@ -276,7 +277,24 @@ GIEO.define('commands/inventory', [
         referenceType: 'found', referenceId: input.unitId,
         reason: 'tìm lại được container đã báo mất'
       });
-      /* Hoàn khoản trừ trách nhiệm nhân viên là SIDE-EFFECT, đi qua event. */
+
+      /* Hoàn khoản trừ trách nhiệm nhân viên — NGAY trong plan này, cùng lý
+         do như ApproveLostContainer: đây là nghiệp vụ chính của việc tìm lại
+         container, không phải side-effect tuỳ chọn chờ L9. `input.liability`
+         là input denormalized (giống input.units): bản ghi liability hiện
+         tại ứng với lostReportId của unit, nếu có — không phải mọi Unit LOST
+         đều có liability (VD: không xác định được nhân viên từ trước khi
+         tính năng này tồn tại), nên không có thì bỏ qua, không lỗi. */
+      var liability = input.liability;
+      if (liability && (liability.status === liabilityLib.STATUS.PENDING ||
+          liability.status === liabilityLib.STATUS.WAIVED)) {
+        var reversedR = liabilityLib.reverseLiability(liability, {
+          at: ctx.clock.now(), actorId: ctx.actor.actorId, operationId: opId
+        });
+        if (R.isErr(reversedR)) return reversedR;
+        plan.domainRecords.push({ type: 'liability', record: reversedR.value });
+      }
+
       plan.events.push({
         type: 'ContainerFound',
         unitId: unit.unitId, storeId: ctx.storeId, businessDate: ctx.businessDate,

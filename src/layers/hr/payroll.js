@@ -20,14 +20,21 @@
  *
  * 3. Lương cứng không trừ khi nghỉ (§6). Legacy cộng đều mọi ngày, không kiểm
  *    work_schedules. Chủ quán đã chốt: TRỪ THEO LỊCH LÀM VIỆC.
+ *
+ * 4. Khoản trừ trách nhiệm nhân viên (container mất, hr/liability.js) chưa
+ *    từng truy xuất được ở legacy — chủ quán tự tổng hợp tay cuối tháng.
+ *    Quyết định: "hệ thống mới cần quy trách nhiệm rõ ràng, do FIFO phải
+ *    truy xuất được." Ở đây khoản PENDING có số tiền thật (không gap) trừ
+ *    thẳng vào kỳ lương; phần còn gap chỉ hiển thị, không đoán số mà trừ.
  */
 GIEO.define('hr/payroll', [
   'shared-kernel/ids',
   'shared-kernel/result',
   'compaction/versioned-input',
   'hr/shift',
-  'hr/work-schedule'
-], function (ids, R, VI, shiftLib, scheduleLib) {
+  'hr/work-schedule',
+  'hr/liability'
+], function (ids, R, VI, shiftLib, scheduleLib, liabilityLib) {
   'use strict';
 
   /**
@@ -38,6 +45,8 @@ GIEO.define('hr/payroll', [
    * @param spec.shifts          ca đã chấm công trong kỳ (mang payTermsRef riêng)
    * @param spec.scheduleDays    lịch đã xếp trong kỳ — BẮT BUỘC nếu có lương cứng
    * @param spec.fromTs, spec.toTs
+   * @param spec.liabilities     khoản trừ trách nhiệm nhân viên (mọi status, mọi
+   *        nhân viên trong kỳ) — hàm tự lọc đúng PENDING của employee này
    */
   function computePayroll(spec) {
     var employee = spec.employee;
@@ -143,6 +152,19 @@ GIEO.define('hr/payroll', [
       });
     }
 
+    /* ── Khoản trừ trách nhiệm nhân viên ─────────────────────────────────
+       Chỉ trừ phần có số tiền thật (costBasis đầy đủ). Phần gap thì hiển
+       thị để chủ quán tự xử lý tay — không đoán số mà trừ (§2.3a). */
+    var liability = liabilityLib.pendingFor(spec.liabilities || [], employee.employeeId);
+
+    var needsReviewDetail = hourly.needsReview.slice();
+    if (liability.gapLiabilityIds.length) {
+      needsReviewDetail.push({
+        reason: 'LIABILITY_GAP',
+        liabilityIds: liability.gapLiabilityIds
+      });
+    }
+
     return R.ok({
       employeeId: employee.employeeId,
       storeId: employee.storeId,
@@ -150,10 +172,12 @@ GIEO.define('hr/payroll', [
       toTs: spec.toTs,
       hourly: hourly,
       fixed: fixed,
-      total: hourly.amount + fixed.amount,
-      /* Ca tự đóng / đã sửa giờ đều chảy lên đây, không bị rơi mất. */
-      needsReview: hourly.needsReview.length > 0,
-      needsReviewDetail: hourly.needsReview,
+      liability: liability,
+      total: hourly.amount + fixed.amount - liability.deduction,
+      /* Ca tự đóng / đã sửa giờ / khoản trừ còn gap đều chảy lên đây, không
+         bị rơi mất. */
+      needsReview: needsReviewDetail.length > 0,
+      needsReviewDetail: needsReviewDetail,
       /* Version đã dùng — đọc lại kỳ này không phải resolve lại (V4). */
       payTermsVersionIds: hourly.lines.map(function (l) { return l.payTermsVersionId; })
         .concat(fixed.lines.map(function (l) { return l.payTermsVersionId; }))
@@ -207,6 +231,11 @@ GIEO.define('hr/payroll', [
           fixedAmount: r.fixed.amount,
           fixedScheduledDays: r.fixed.scheduledDays,
           fixedAbsentDays: r.fixed.absentDays,
+          /* Đóng băng cùng lúc DANH SÁCH liability đã áp — ClosePayroll (command)
+             dùng đúng danh sách này để chuyển từng khoản sang DEDUCTED, không
+             tính lại ai đã bị trừ. */
+          liabilityDeduction: r.liability ? r.liability.deduction : 0,
+          appliedLiabilityIds: r.liability ? r.liability.appliedLiabilityIds : [],
           total: r.total,
           payTermsVersionIds: r.payTermsVersionIds,
           needsReview: r.needsReview

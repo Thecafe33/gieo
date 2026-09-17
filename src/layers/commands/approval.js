@@ -24,8 +24,9 @@ GIEO.define('commands/approval', [
   'shared-kernel/result',
   'commands/pipeline',
   'fifo-core/unit',
-  'fifo-core/reconciliation'
-], function (ids, R, pipeline, unitLib, reconciliation) {
+  'fifo-core/reconciliation',
+  'hr/liability'
+], function (ids, R, pipeline, unitLib, reconciliation, liabilityLib) {
   'use strict';
 
   var COUNT_STATUS = {
@@ -113,11 +114,37 @@ GIEO.define('commands/approval', [
         occurredAt: ctx.clock.now(),
         referenceType: 'lostReport', referenceId: input.lostReportId, reason: input.reason
       });
-      /* Trừ trách nhiệm nhân viên là side-effect, đi qua handler đăng ký riêng. */
+
+      /* Quy trách nhiệm nhân viên (quyết định chủ quán) — tạo NGAY trong plan
+         này, không đi qua event: L9 chưa tồn tại và đây không phải side-effect
+         tuỳ chọn. `input.employees` là input denormalized giống `input.units`;
+         khớp qua actorId người báo mất (report.reportedBy). Không khớp được
+         thì vẫn duyệt mất container — khoản trừ chỉ gắn cờ gap (§2.3a),
+         không chặn. */
+      var employee = (input.employees || []).filter(function (e) {
+        return e.actorId === report.reportedBy;
+      })[0];
+      var liabilityR = liabilityLib.createLiability({
+        employeeId: employee ? employee.employeeId : null,
+        storeId: ctx.storeId,
+        actorId: ctx.actor.actorId,
+        operationId: opId,
+        lostReportId: input.lostReportId,
+        unit: unit,
+        reason: input.reason,
+        at: ctx.clock.now()
+      });
+      if (R.isErr(liabilityR)) return liabilityR;
+      plan.domainRecords.push({ type: 'liability', record: liabilityR.value });
+
+      /* Đổi tên khỏi 'ContainerFound' (bug: trùng type với sự kiện "tìm lại
+         được" ngược chiều ở commands/inventory.js RestoreFoundContainer —
+         một consumer L9 tương lai sẽ không phân biệt được 2 hướng nếu dùng
+         chung type). Đây chỉ còn là thông báo phụ; bản ghi thật đã ở trên. */
       plan.events.push({
-        type: 'ContainerFound',
+        type: 'ContainerLostApproved',
         unitId: unit.unitId, storeId: ctx.storeId, businessDate: ctx.businessDate,
-        lostReportId: input.lostReportId, direction: 'LOST_APPROVED'
+        lostReportId: input.lostReportId, liabilityId: liabilityR.value.liabilityId
       });
       plan.projectionRecomputes.push({ itemId: unit.itemId, storeId: ctx.storeId });
       return R.ok(plan);

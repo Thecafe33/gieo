@@ -18,7 +18,7 @@ GIEO.define('shared-kernel/ids', [], function () {
     'unit', 'item', 'receipt', 'supplier', 'ledger',
     'bill', 'billLine', 'prepBatch', 'prepItem',
     'recipe', 'recipeVersion', 'costBasis', 'version',
-    'customer', 'shift', 'snapshot', 'alert', 'expense'
+    'customer', 'shift', 'snapshot', 'alert', 'expense', 'liability'
   ];
 
   var SEP = '_';
