@@ -449,6 +449,52 @@ describe('P9/P10 — query cho màn Ca / Cảnh báo / Duyệt', function () {
       assertErr(_r.G.getPendingApprovals(rCtx(), { pending: [] }), 'FORBIDDEN');
     });
   });
+
+  describe('GetPayrollForMonth (PR2b)', function () {
+    var ctx = function () { return rCtx('QUANLY_ADMIN', 'QUANLY', _r.QL); };
+
+    test('chưa chốt thì đọc LIVE, meta.frozen=false', function () {
+      var out = assertOk(_r.G.getPayrollForMonth(ctx(), {
+        liveResults: [{ employeeId: 'employee_a', total: 5000000 }]
+      }));
+      assert.strictEqual(out.meta.frozen, false);
+      assert.deepStrictEqual(out.data, [{ employeeId: 'employee_a', total: 5000000 }]);
+    });
+
+    test('đã chốt thì đọc thẳng snapshot, KHÔNG tính lại — meta.frozen=true', function () {
+      var closing = {
+        monthKey: '2026-03', lines: [{ employeeId: 'employee_a', total: 5000000 }], total: 5000000
+      };
+      var out = assertOk(_r.G.getPayrollForMonth(ctx(), { closing: closing }));
+      assert.strictEqual(out.meta.frozen, true);
+      assert.strictEqual(out.data.total, 5000000);
+    });
+
+    test('có cả chốt lẫn sống thì kèm drift — số sống lệch số đã chốt', function () {
+      var closing = {
+        monthKey: '2026-03',
+        lines: [
+          { employeeId: 'employee_a', total: 5000000 },
+          { employeeId: 'employee_b', total: 4000000 }
+        ]
+      };
+      var out = assertOk(_r.G.getPayrollForMonth(ctx(), {
+        closing: closing,
+        liveResults: [
+          { employeeId: 'employee_a', total: 5200000 },
+          { employeeId: 'employee_b', total: 4000000 }
+        ]
+      }));
+      assert.strictEqual(out.data.drift.clean, false);
+      assert.strictEqual(out.data.drift.drift.length, 1);
+      assert.strictEqual(out.data.drift.drift[0].employeeId, 'employee_a');
+      assert.strictEqual(out.data.drift.drift[0].difference, 200000);
+    });
+
+    test('nhân viên POS không đọc được báo cáo lương', function () {
+      assertErr(_r.G.getPayrollForMonth(rCtx(), { liveResults: [] }), 'FORBIDDEN');
+    });
+  });
 });
 
 describe('P11 — báo cáo là query có quyền, không phải đường tắt về nguồn thô', function () {

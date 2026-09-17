@@ -9843,7 +9843,12 @@ GIEO.define('read-layer/gateway', [
     GetAlerts: registerQuery('GetAlerts', {
       authority: ['EXECUTE', 'REVIEW_APPROVE_CORRECT']
     }),
-    GetPendingApprovals: registerQuery('GetPendingApprovals', { authority: 'REVIEW_APPROVE_CORRECT' })
+    GetPendingApprovals: registerQuery('GetPendingApprovals', { authority: 'REVIEW_APPROVE_CORRECT' }),
+    /* PR2b (NET-PAYROLL-V1.md) — đường ĐỌC lương tháng qua đúng cổng đọc,
+       cùng authority với ClosePayroll. read-layer KHÔNG được import hr
+       (src/layer-rules.json) nên tính trực tiếp trên spec denormalized,
+       giống getShiftStatus bên dưới — không gọi lại hr/payroll.js. */
+    GetPayrollForMonth: registerQuery('GetPayrollForMonth', { authority: 'REVIEW_APPROVE_CORRECT' })
   };
 
   /**
@@ -10113,6 +10118,54 @@ GIEO.define('read-layer/gateway', [
   }
 
   /**
+   * PR2b — đọc lương tháng. `spec.closing` (nếu có) là snapshot PayrollClosing
+   * ĐÃ CHỐT (hr/payroll.js#closePayroll) — đóng vai trò SNAPSHOT của
+   * merge.resolve, đọc thẳng không tính lại. Không có thì đọc LIVE từ
+   * `spec.liveResults` (caller tự tính bằng hr/payroll.js#computePayroll cho
+   * từng nhân viên — "denormalized input" giống ClosePayroll, ở đây không
+   * loop qua toàn bộ nhân viên).
+   *
+   * Có cả hai thì kèm luôn `drift` — số sống đã trôi khỏi số đã chốt hay
+   * chưa (tương đương hr/payroll.js#detectPayrollDrift, tính lại tại chỗ vì
+   * read-layer không được import hr — xem lý do ở Q.GetPayrollForMonth).
+   */
+  function getPayrollForMonth(ctx, spec) {
+    var g = guard(Q.GetPayrollForMonth, ctx, spec);
+    if (R.isErr(g)) return g;
+
+    var result = merge.resolve({
+      snapshot: spec.closing || null,
+      computeLive: function () { return R.ok(spec.liveResults || []); },
+      computedAt: ctx.clock.now()
+    });
+    if (R.isErr(result)) return result;
+
+    if (spec.closing && spec.liveResults) {
+      var byId = Object.create(null);
+      spec.liveResults.forEach(function (r) { byId[r.employeeId] = r; });
+      var drift = [];
+      (spec.closing.lines || []).forEach(function (l) {
+        var live = byId[l.employeeId];
+        if (!live) {
+          drift.push({ employeeId: l.employeeId, reason: 'KHÔNG CÒN DỮ LIỆU SỐNG', frozen: l.total, live: null });
+          return;
+        }
+        if (live.total !== l.total) {
+          drift.push({
+            employeeId: l.employeeId, reason: 'SỐ SỐNG KHÁC SỐ ĐÃ CHỐT',
+            frozen: l.total, live: live.total, difference: live.total - l.total
+          });
+        }
+      });
+      result.value.data = Object.assign({}, result.value.data, {
+        drift: { monthKey: spec.closing.monthKey, clean: drift.length === 0, drift: drift }
+      });
+    }
+
+    return result;
+  }
+
+  /**
    * Cảnh báo theo đối tượng xem. Dùng `alertLib.bucketize` chứ không tự sắp lại
    * thứ tự ưu tiên: hai bản xếp hạng khác nhau giữa POS và QUANLY chính là kiểu
    * lệch mà R3 cấm.
@@ -10217,7 +10270,8 @@ GIEO.define('read-layer/gateway', [
     comparePeriods: comparePeriods,
     getShiftStatus: getShiftStatus,
     getAlerts: getAlerts,
-    getPendingApprovals: getPendingApprovals
+    getPendingApprovals: getPendingApprovals,
+    getPayrollForMonth: getPayrollForMonth
   };
 });
 
@@ -15906,6 +15960,9 @@ GIEO.define('bootstrap/runtime', [
     GetInventoryValuation: reports.getInventoryValuation,
     GetVarianceReport: reports.getVarianceReport,
     GetBTPReport: reports.getBTPReport,
+    /* PR2b (NET-PAYROLL-V1.md) — đường ĐỌC lương tháng, sống ở read-layer
+       (reads), không phải reporting — xem lý do ở read-layer/gateway.js. */
+    GetPayrollForMonth: reads.getPayrollForMonth,
     ExportReport: reports.exportReport
   };
 

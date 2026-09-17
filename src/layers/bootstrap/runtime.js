@@ -85,6 +85,9 @@ GIEO.define('bootstrap/runtime', [
     GetInventoryValuation: reports.getInventoryValuation,
     GetVarianceReport: reports.getVarianceReport,
     GetBTPReport: reports.getBTPReport,
+    /* PR2b (NET-PAYROLL-V1.md) — đường ĐỌC lương tháng, sống ở read-layer
+       (reads), không phải reporting — xem lý do ở read-layer/gateway.js. */
+    GetPayrollForMonth: reads.getPayrollForMonth,
     ExportReport: reports.exportReport
   };
 
