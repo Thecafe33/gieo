@@ -133,6 +133,23 @@ GIEO.define('bootstrap/domain-events', [], function () {
           };
         });
       }
+    },
+    /* Sales N10 — bán món chưa khai định mức (commands/sales.js RecordSale,
+       §2.3a: KHÔNG chặn bán, chỉ cảnh báo). MISSING_RECIPE đã có sẵn trong
+       TYPES (AUTO_VERIFIABLE) — tự hết khi khai định mức xong, không cần
+       consumer resolve tay. subjectKey theo menuItemId, KHÔNG theo billId —
+       nhiều bill cùng bán món này chỉ cần 1 alert đang mở cho món đó. */
+    MissingRecipeDetected: {
+      command: 'RaiseAlert',
+      toInput: function (evt) {
+        return {
+          type: 'MISSING_RECIPE',
+          storeId: evt.storeId,
+          businessDate: evt.businessDate,
+          subjectKey: evt.menuItemId,
+          data: { menuItemId: evt.menuItemId }
+        };
+      }
     }
   };
 

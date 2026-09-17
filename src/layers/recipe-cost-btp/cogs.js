@@ -94,6 +94,13 @@ GIEO.define('recipe-cost-btp/cogs', [
    * @param spec.allocationPlans  kết quả FIFO cấp phát thật
    * @param spec.registry         VersionedInput registry
    * @param spec.storeId, spec.at thời điểm SỰ KIỆN (không phải hiện tại)
+   * @param spec.gapLineCount     số dòng bill KHÔNG có recipeId (N10, §2.3a —
+   *                              bán tiếp được, nhưng `requirements` không hề
+   *                              chứa nguyên liệu của các dòng đó, nên cả hai
+   *                              vế COGS đều KHÔNG PHẢI con số đầy đủ của cả
+   *                              bill dù tính ra "trọn vẹn" theo dữ liệu đang
+   *                              có — phải nói rõ null+reason, không để
+   *                              tưởng nhầm là đủ (cùng luật R8 dưới đây)
    */
   function computeCogs(spec) {
     var theo = costLib.computeTheoreticalCost(spec.registry, {
@@ -107,14 +114,18 @@ GIEO.define('recipe-cost-btp/cogs', [
     if (R.isErr(actualR)) return actualR;
     var actual = actualR.value;
 
-    var cogsActual = actual.complete ? actual.total : null;
+    var hasRecipeGap = !!spec.gapLineCount;
+    var cogsActual = (!hasRecipeGap && actual.complete) ? actual.total : null;
+    var cogsTheoretical = hasRecipeGap ? null : theo.value.total;
 
     return R.ok({
-      cogsTheoretical: theo.value.total,
+      cogsTheoretical: cogsTheoretical,
+      cogsTheoreticalPartial: hasRecipeGap ? theo.value.total : null,
+      cogsTheoreticalReason: hasRecipeGap ? 'NO_RECIPE' : null,
       /* null khi chưa đủ dữ liệu — KHÔNG BAO GIỜ rơi về theoretical (R8). */
       cogsActual: cogsActual,
-      cogsActualPartial: actual.complete ? null : actual.total,
-      cogsActualReason: actual.reason,
+      cogsActualPartial: hasRecipeGap ? actual.total : (actual.complete ? null : actual.total),
+      cogsActualReason: hasRecipeGap ? 'NO_RECIPE' : actual.reason,
       variance: cogsActual === null ? null : cogsActual - theo.value.total,
       variancePct: (cogsActual === null || theo.value.total === 0)
         ? null

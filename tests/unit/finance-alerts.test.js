@@ -383,7 +383,7 @@ describe('commands/alerts — nối AlertEngine.raise() thành command thật', 
   });
 });
 
-describe('bootstrap/domain-events — routeEvents nối AlertEngine (BTP/Raw Material/Stock Count)', function () {
+describe('bootstrap/domain-events — routeEvents nối AlertEngine (BTP/Raw Material/Stock Count/Sales)', function () {
   var DE = _fa.DE;
 
   test('PrepYieldMismatch → RaiseAlert PREP_YIELD_MISMATCH', function () {
@@ -436,6 +436,18 @@ describe('bootstrap/domain-events — routeEvents nối AlertEngine (BTP/Raw Mat
       failedLines: []
     }]);
     assert.strictEqual(routes.length, 0);
+  });
+
+  test('MissingRecipeDetected → RaiseAlert MISSING_RECIPE (N10, §2.3a)', function () {
+    var routes = DE.routeEvents([{
+      type: 'MissingRecipeDetected', menuItemId: 'item_mon_la', billId: 'bill_1',
+      storeId: _fa.STORE, businessDate: '2026-03-10'
+    }]);
+    assert.strictEqual(routes.length, 1);
+    assert.strictEqual(routes[0].command, 'RaiseAlert');
+    assert.strictEqual(routes[0].input.type, 'MISSING_RECIPE');
+    assert.strictEqual(routes[0].input.subjectKey, 'item_mon_la');
+    assert.strictEqual(routes[0].input.data.menuItemId, 'item_mon_la');
   });
 });
 

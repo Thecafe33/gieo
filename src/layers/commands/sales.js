@@ -23,6 +23,16 @@
  *    `loyaltyProcessAfterPay()`, nên khách trả thêm tiền mà không được cộng
  *    thêm điểm. Ở đây addon phát event để handler loyalty xử lý — side-effect
  *    là handler đăng ký riêng, không nhét vào lệnh bán.
+ *
+ * 4. Thiếu định mức KHÔNG chặn bán (N10, `NET-SALES-V1.md`, quyết định chủ
+ *    quán 2026-09-17, §2.3a): legacy chỉ soft-warn qua Hộp thư, không chặn —
+ *    bản đầu của core này từng trả `PRECONDITION` khi thiếu recipeId, một
+ *    điểm chặn MỚI so với hệ cũ. Đã sửa: `buildRequirements` ghi nhận
+ *    `gapLines` thay vì lỗi, `cogsTheoretical`/`cogsActual` của bill về
+ *    `null` kèm `reason: 'NO_RECIPE'` (không âm thầm tính thiếu — xem
+ *    `recipe-cost-btp/cogs.js`), và phát `MissingRecipeDetected` cho mỗi món
+ *    thiếu để `bootstrap/domain-events.js` (L9) tạo alert `MISSING_RECIPE`
+ *    (đã đăng ký sẵn trong `alerts/alert.js`, tự hết khi khai định mức xong).
  */
 GIEO.define('commands/sales', [
   'shared-kernel/ids',
@@ -145,24 +155,33 @@ GIEO.define('commands/sales', [
     var reqs = [];
     var recipeVersionIds = [];
     var packagingVersionIds = [];
+    var gapLines = [];
 
     for (var i = 0; i < bill.lines.length; i++) {
       var line = bill.lines[i];
       if (!line.recipeId) {
-        return R.err('PRECONDITION',
-          'món "' + (line.name || line.menuItemId) + '" chưa khai định mức — ' +
-          'không được bán với giá vốn ngầm bằng 0');
+        /*
+         * §2.3a (quyết định chủ quán 2026-09-17, NET-SALES-V1.md N10): thiếu
+         * định mức KHÔNG được chặn bán — legacy chỉ soft-warn qua Hộp thư,
+         * core không được chặt hơn hệ cũ. Ghi nhận gap, KHÔNG suy đoán
+         * requirements cho món này (không có công thức thì không biết trừ
+         * nguyên liệu gì) — cogsTheoretical/cogsActual của cả bill sẽ về
+         * null kèm reason NO_RECIPE (xem `commands/sales.js RecordSale` +
+         * `recipe-cost-btp/cogs.js`), KHÔNG âm thầm tính thiếu rồi báo như
+         * đã đủ. Bao bì (dưới) vẫn tính bình thường — không phụ thuộc recipe.
+         */
+        gapLines.push({ menuItemId: line.menuItemId, name: line.name || null, billLineId: line.billLineId });
+      } else {
+        var rv = recipeLib.resolveRecipeAt(registry, {
+          recipeId: line.recipeId, storeId: bill.storeId, at: bill.occurredAt
+        });
+        if (R.isErr(rv)) return rv;
+
+        var rr = recipeLib.toRequirements(rv.value, { size: line.size, qty: line.qty });
+        if (R.isErr(rr)) return rr;
+        recipeVersionIds.push(rr.value.recipeVersionId);
+        reqs = reqs.concat(rr.value.requirements);
       }
-
-      var rv = recipeLib.resolveRecipeAt(registry, {
-        recipeId: line.recipeId, storeId: bill.storeId, at: bill.occurredAt
-      });
-      if (R.isErr(rv)) return rv;
-
-      var rr = recipeLib.toRequirements(rv.value, { size: line.size, qty: line.qty });
-      if (R.isErr(rr)) return rr;
-      recipeVersionIds.push(rr.value.recipeVersionId);
-      reqs = reqs.concat(rr.value.requirements);
 
       var pv = packagingLib.resolvePackagingAt(registry, {
         menuItemId: line.menuItemId, storeId: bill.storeId, at: bill.occurredAt
@@ -193,7 +212,8 @@ GIEO.define('commands/sales', [
       }),
       detailedRequirements: reqs,
       recipeVersionIds: recipeVersionIds.filter(function (v, i, a) { return a.indexOf(v) === i; }),
-      packagingVersionIds: packagingVersionIds.filter(function (v, i, a) { return a.indexOf(v) === i; })
+      packagingVersionIds: packagingVersionIds.filter(function (v, i, a) { return a.indexOf(v) === i; }),
+      gapLines: gapLines
     });
   }
 
@@ -256,7 +276,8 @@ GIEO.define('commands/sales', [
         storeId: bill.storeId,
         at: bill.occurredAt,
         requirements: req.requirements,
-        allocationPlans: alloc.plans
+        allocationPlans: alloc.plans,
+        gapLineCount: req.gapLines.length
       });
       if (R.isErr(cogsR)) return cogsR;
 
@@ -331,6 +352,26 @@ GIEO.define('commands/sales', [
           businessDate: bill.businessDate
         });
       }
+
+      /*
+       * Alert (L9) cho từng món thiếu định mức — AUTO_VERIFIABLE
+       * (`alerts/alert.js TYPES.MISSING_RECIPE`), tự hết khi khai định mức
+       * xong, không cần ai đóng tay. Gộp theo menuItemId: 1 bill có thể có
+       * 2 dòng cùng món thiếu định mức, chỉ cần 1 alert cho món đó.
+       */
+      var seenGapItems = Object.create(null);
+      req.gapLines.forEach(function (g) {
+        if (seenGapItems[g.menuItemId]) return;
+        seenGapItems[g.menuItemId] = true;
+        plan.events.push({
+          type: 'MissingRecipeDetected',
+          menuItemId: g.menuItemId,
+          name: g.name,
+          billId: bill.billId,
+          storeId: bill.storeId,
+          businessDate: bill.businessDate
+        });
+      });
 
       return R.ok(plan);
     }

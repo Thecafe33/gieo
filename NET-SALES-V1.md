@@ -144,7 +144,7 @@ N17 Xem P&L theo kênh (tại quán/mang đi/app) ─┴─► (→ FIFO-CHAIN-T
 | Phân loại | 🟡 **GIỮ nghiệp vụ, ĐỔI CÁCH LÀM** (FIFO theo lượng), cộng 🟢 **THÊM MỚI nghiêm trọng nhất toàn NET**: `cogsActual` |
 | 🔴 Đứt chuỗi lớn nhất (đã audit) | `cogsActual` trong `aggregateOrders()` (quanlygieo.html) **THỰC CHẤT là recipe-theoretical bị đặt tên sai** — Unit/tem legacy KHÔNG lưu giá vốn (`createContainersForReceipt` không có field cost). "COGS actual" theo đúng nghĩa **chưa từng tồn tại** ở hệ cũ. |
 | Core mới đã làm | 2 vế tách biệt bắt buộc: `cogsTheoretical` (định mức × giá lịch sử) và `cogsActual` (tổng thật từ `Unit.costBasis` của đúng lô đã FIFO cấp phát) + `variance`. Cấm field tên `cogsActual` mà nội dung là theoretical (invariant R8, `UNIFIED-READ-LAYER-CONTRACT-V1.md §3`). Thiếu dữ liệu Unit → trả `null` kèm lý do, KHÔNG fallback im lặng. |
-| Ghi chú | Món chưa khai định mức: legacy chỉ `console.info` rồi bán tiếp lặng lẽ (đã tự vá thành báo Hộp thư Quản lý — `reportMissingRecipePOS`) → core mới hiện **chặn cứng hơn**: `buildRequirements` trả lỗi `PRECONDITION` nếu `line.recipeId` rỗng. **ĐÃ CHỐT 2026-09-17 (xem `BAN-GIAO-V1.md` §2.3a — nguyên tắc vận hành thật đè core): SAI, phải sửa lại.** Core không được thêm điểm chặn mới mà hệ cũ không có — vận hành bán hàng cho khách đang đứng chờ quan trọng hơn. Cách đúng: cho bán tiếp, `cogsTheoretical`/`cogsActual` trả `null` kèm `reason: 'NO_RECIPE'` (đúng khuôn đã dùng cho thiếu `costBasis`), đồng thời phát cảnh báo GAP cho Quản lý — KHÔNG trả lỗi chặn `RecordSale`. **Việc cần làm — chưa sửa code**: đổi `buildRequirements`/`RecordSale.execute` trong `commands/sales.js` theo hướng này. |
+| Ghi chú | Món chưa khai định mức: legacy chỉ `console.info` rồi bán tiếp lặng lẽ (đã tự vá thành báo Hộp thư Quản lý — `reportMissingRecipePOS`). **ĐÃ SỬA (2026-09-17, theo quyết định §2.3a cùng ngày)**: `buildRequirements` không còn trả `PRECONDITION` khi `line.recipeId` rỗng — ghi nhận vào `gapLines`, KHÔNG suy đoán requirements cho dòng đó (bao bì/tem vẫn tính bình thường, không phụ thuộc recipe). `RecordSale.execute` truyền `gapLineCount` sang `recipe-cost-btp/cogs.computeCogs()`: khi có ≥1 dòng gap, **CẢ HAI vế COGS của cả bill** về `null` kèm `cogsTheoreticalReason`/`cogsActualReason: 'NO_RECIPE'` (không chỉ phần thiếu — vì requirements của dòng gap hoàn toàn vắng mặt nên tổng còn lại KHÔNG PHẢI con số đầy đủ của bill, dù tính "trọn vẹn" theo dữ liệu đang có; số đã tính được vẫn giữ ở `cogsTheoreticalPartial`/`cogsActualPartial`, không mất). Đồng thời phát event `MissingRecipeDetected` (gộp theo `menuItemId`, không phải theo dòng) → `bootstrap/domain-events.js` (L9) → `RaiseAlert` loại `MISSING_RECIPE` (đã có sẵn trong `alerts/alert.js TYPES`, `AUTO_VERIFIABLE` — tự hết khi khai định mức xong). 4 test mới ở `sales-cogs.test.js` + 1 ở `finance-alerts.test.js` (route). |
 
 ### N11 — Tích điểm / tích tem
 
@@ -153,7 +153,7 @@ N17 Xem P&L theo kênh (tại quán/mang đi/app) ─┴─► (→ FIFO-CHAIN-T
 | Hệ cũ | `loyaltyProcessAfterPay(phone, billAmount, itemCount, isWallet, billId)` — `posgieo.html:21628`, gọi `loyaltyAddPoints`/`loyaltyAddStamps` (21515/21558) NGAY TRONG `confirmPay()`, có `await` |
 | Hệ mới | `plan.events.push({ type: 'SaleCompleted', ... })` trong `RecordSale` (chỉ phát khi có `customerId`) → cần **handler riêng** lắng nghe event này rồi gọi `loyalty/accrual.js` |
 | Phân loại | 🟡 **GIỮ nghiệp vụ** (điểm tính trên tổng SAU giảm giá — legacy đúng, giữ nguyên), 🟢 **THÊM MỚI kiến trúc**: tách thành event-driven thay vì gọi thẳng trong lệnh bán |
-| 🔴 GAP CÒN TRỐNG (chưa có code) | Đã `grep` toàn `src/layers/`: **không có handler nào lắng nghe `SaleCompleted`/`SaleAmountIncreased`.** `RecordSale`/`RecordAddon` phát event nhưng chưa ai xử lý — nếu đưa vào chạy thật lúc này, khách thanh toán xong sẽ KHÔNG được cộng điểm (thoái lui so với legacy). Đây là việc phải làm TRƯỚC KHI RecordSale được coi là "đủ dùng thay confirmPay". |
+| ✅ ĐÃ ĐÓNG (qua L9) | **Cập nhật**: `bootstrap/domain-events.js` nay có route `SaleCompleted` → `AccrueLoyaltyForSale` và `SaleAmountIncreased` → `AccrueLoyaltyForAddon` (`commands/loyalty.js`), chạy qua `bootstrap/runtime.js#dispatchDomainEvents()` ngay sau khi `RecordSale`/`RecordAddon` commit — không còn "chưa ai xử lý". Xem `NET-LOYALTY-V1.md` mục L9. Gap này KHÔNG còn chặn việc coi `RecordSale` là "đủ dùng thay `confirmPay`". |
 | Core mới đã có sẵn (chưa nối) | `loyalty/ledger.js` — sửa đúng lỗi nặng nhất của legacy: `total_points`/`stamp_count` không còn là field cộng dồn trực tiếp trên `customers/{phone}` (không thể dựng lại nếu trôi số) mà là **sổ cái dòng ghi**, số dư là kết quả cộng sổ. |
 | Ghi chú addon | `submitAddon` (posgieo.html:22848) KHÔNG gọi `loyaltyProcessAfterPay` — khách trả thêm tiền addon không được cộng điểm (đã audit, `FEATURE-TREE-V1.md §4.16`). `RecordAddon` (sales.js:336) đã phát `SaleAmountIncreased` cho ĐÚNG PHẦN CHÊNH LỆCH — nhưng vẫn treo trên cùng gap "chưa có handler" ở trên. |
 
@@ -228,20 +228,20 @@ N17 Xem P&L theo kênh (tại quán/mang đi/app) ─┴─► (→ FIFO-CHAIN-T
 - 🟡 **GIỮ, ĐỔI CÁCH LÀM**: N1, N3, N4, N6, N7, N8, N9(khung), N10(khung), N11(khung nghiệp vụ), N13, N14, N15(khung)
 - 🟢 **THÊM MỚI**: `soldByActorId` (N9), `channel.feePct` được ĐỌC thật (N9, N17), `cogsActual` thật (N10), event-driven loyalty (N11, N15), rule engine khuyến mãi tường minh (N5), loyalty ledger thay field cộng dồn (N11)
 - ⚪ **CHƯA QUYẾT**: đá có ảnh hưởng định mức không (N2), cơ chế voucher/reward "usedCount" (N12), số phận `moLaiThang`/versioning sổ tháng (N16)
-- ✅ **MỚI CHỐT (2026-09-17)**: N10 — thiếu định mức KHÔNG chặn bán, theo nguyên tắc "vận hành thật đè core" (`BAN-GIAO-V1.md` §2.3a). `commands/sales.js` cần sửa lại theo hướng này (chưa sửa).
+- ✅ **MỚI CHỐT VÀ ĐÃ SỬA (2026-09-17)**: N10 — thiếu định mức KHÔNG chặn bán, theo nguyên tắc "vận hành thật đè core" (`BAN-GIAO-V1.md` §2.3a). `commands/sales.js` đã sửa xong (`gapLines` + `MissingRecipeDetected` → alert `MISSING_RECIPE`), xem chi tiết ở N10.
 
 ## VIỆC PHẢI LÀM TRƯỚC KHI COI N9 (RecordSale) LÀ "ĐỦ DÙNG THAY confirmPay"
 
 Thứ tự theo mức chặn đường (chặn cứng trước, tinh chỉnh sau):
 
-1. **Viết handler lắng nghe `SaleCompleted`/`SaleAmountIncreased`** gọi
-   `loyalty/accrual.js` — hiện KHÔNG có, nếu chuyển sang `RecordSale` ngay bây
-   giờ thì tích điểm/tem sẽ CHẾT so với legacy (thoái lui thật, không phải lý
-   thuyết).
-2. **Sửa `buildRequirements`/`RecordSale` — bỏ chặn cứng khi thiếu định mức**
-   (N10) — theo nguyên tắc "vận hành thật đè core" vừa chốt: cho bán tiếp,
-   trả `cogsTheoretical`/`cogsActual: null, reason: 'NO_RECIPE'`, phát cảnh
-   báo GAP cho Quản lý thay vì trả lỗi `PRECONDITION` chặn `RecordSale`.
+1. ~~**Viết handler lắng nghe `SaleCompleted`/`SaleAmountIncreased`** gọi
+   `loyalty/accrual.js`~~ — **ĐÃ XONG** qua L9 (`bootstrap/domain-events.js` route
+   → `commands/loyalty.js AccrueLoyaltyForSale`/`AccrueLoyaltyForAddon`). Xem N11.
+2. ~~**Sửa `buildRequirements`/`RecordSale` — bỏ chặn cứng khi thiếu định mức**
+   (N10)~~ — **ĐÃ XONG**: cho bán tiếp, `cogsTheoretical`/`cogsActual` về
+   `null, reason: 'NO_RECIPE'`, phát `MissingRecipeDetected` → alert
+   `MISSING_RECIPE` cho Quản lý qua L9, không còn trả `PRECONDITION` chặn
+   `RecordSale`. Xem N10.
 3. Nối UI `onCheckoutClick`/`checkFreeToppingMemberPromo`/`checkTogoBeforeCheckout`
    sang gọi `catalog/promotion.js` thay vì 2 nhánh if hard-code (N5).
 4. Đảm bảo `RecordSale.validate`/`execute` tự chặn business-day/shift — không

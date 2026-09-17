@@ -203,6 +203,26 @@ describe('COGS — HAI con số (đóng gap nghiêm trọng nhất toàn audit)'
     assert.ok(c.basis.costBasisVersionIds.length > 0);
     assert.ok(c.basis.unitIds.length > 0);
   });
+
+  test('N10 (§2.3a): gapLineCount > 0 → cả 2 vế COGS về null kèm reason, KHÔNG âm thầm tính thiếu', function () {
+    var reg = setupRegistry();
+    var units = [mkUnit(30, 1000, 100)];
+    var ws = _s.A.createWorkingSet(units);
+    var reqs = [{ itemId: _s.SUA, qty: 300 }];
+    var alloc = assertOk(_s.A.allocateMany(ws, reqs, { operationId: 'operation_sale1' }));
+    var c = assertOk(COGS.computeCogs({
+      registry: reg, storeId: _s.STORE, at: T_SALE,
+      requirements: reqs, allocationPlans: alloc.plans, gapLineCount: 1
+    }));
+    assert.strictEqual(c.cogsTheoretical, null);
+    assert.strictEqual(c.cogsTheoreticalReason, 'NO_RECIPE');
+    assert.strictEqual(c.cogsTheoreticalPartial, 9000, 'phần đã tính được từ các dòng CÓ định mức vẫn phải báo được');
+    assert.strictEqual(c.cogsActual, null);
+    assert.strictEqual(c.cogsActualReason, 'NO_RECIPE');
+    assert.strictEqual(c.cogsActualPartial, 9000);
+    assert.strictEqual(c.variance, null);
+    assert.strictEqual(COGS.explainVariance(c).status, 'UNKNOWN');
+  });
 });
 
 describe('commands/sales — Bill model', function () {
@@ -359,11 +379,39 @@ describe('commands/pipeline + RecordSale end-to-end', function () {
     assert.ok(/kho âm mà không ai chặn/.test(r.error.message));
   });
 
-  test('món chưa khai định mức thì KHÔNG bán được với giá vốn ngầm bằng 0', function () {
-    var r = runSale({
+  test('N10 (§2.3a): món chưa khai định mức KHÔNG chặn bán — legacy chỉ soft-warn', function () {
+    var out = assertOk(runSale({
       lines: [{ menuItemId: _s.MON, size: 'M', qty: 1, price: 30000, recipeId: null }]
-    }).run();
-    assertErr(r, 'PRECONDITION');
+    }).run());
+    assert.strictEqual(out.status, 'COMPLETED');
+  });
+
+  test('N10: bill chưa khai định mức KHÔNG âm thầm tính thiếu — cogs về null kèm reason', function () {
+    var plan = assertOk(runSale({
+      lines: [{ menuItemId: _s.MON, size: 'M', qty: 1, price: 30000, recipeId: null }]
+    }).run()).plan;
+    var b = plan.domainRecords[0].record;
+    assert.strictEqual(b.cogs.cogsTheoretical, null);
+    assert.strictEqual(b.cogs.cogsTheoreticalReason, 'NO_RECIPE');
+    assert.strictEqual(b.cogs.cogsActual, null);
+    assert.strictEqual(b.cogs.cogsActualReason, 'NO_RECIPE');
+  });
+
+  test('N10: phát MissingRecipeDetected cho L9 tạo alert MISSING_RECIPE, gộp theo menuItemId', function () {
+    var plan = assertOk(runSale({
+      lines: [
+        { menuItemId: _s.MON, size: 'M', qty: 1, price: 30000, recipeId: null },
+        { menuItemId: _s.MON, size: 'M', qty: 1, price: 30000, recipeId: null }
+      ]
+    }).run()).plan;
+    var evts = plan.events.filter(function (e) { return e.type === 'MissingRecipeDetected'; });
+    assert.strictEqual(evts.length, 1, 'cùng 1 món thiếu định mức chỉ cần 1 alert, không phải 1/dòng');
+    assert.strictEqual(evts[0].menuItemId, _s.MON);
+  });
+
+  test('N10: món CÓ định mức thì KHÔNG phát MissingRecipeDetected', function () {
+    var plan = assertOk(runSale().run()).plan;
+    assert.strictEqual(plan.events.filter(function (e) { return e.type === 'MissingRecipeDetected'; }).length, 0);
   });
 
   test('QUANLY KHÔNG gọi được RecordSale (quyền enforce ở Command, không phải UI)', function () {
