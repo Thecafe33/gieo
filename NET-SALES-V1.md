@@ -70,8 +70,10 @@ N17 Xem P&L theo kênh (tại quán/mang đi/app) ─┴─► (→ FIFO-CHAIN-T
 |---|---|
 | Hệ cũ | `renderCartIceBar()` / `setCartIceAll(mode)` / `setBatchItemIce` / `setBatchUnitIce` — `posgieo.html:2603/2589/2673/2684` |
 | Hệ mới | **Không có field tương ứng trong `commands/sales.js` hiện tại** (`buildBill` không nhận `ice`) |
-| Phân loại | ⚪ **CHƯA QUYẾT** — cần xác nhận: đá có ảnh hưởng định mức nguyên liệu (đá viên tính là 1 nguyên liệu trong recipe?) hay chỉ là thông tin hiển thị cho pha chế/tem. Nếu KHÔNG ảnh hưởng công thức/FIFO thì đây là dữ liệu UI-only, không cần lên `Bill` — chỉ cần lên `BillLine` để in tem đúng. Nếu CÓ ảnh hưởng (vd "ít đá" = nhiều topping/trân châu hơn theo 1 số công thức) thì phải là 1 field trong `line` để tính `requirements` đúng. |
-| Ghi chú | Không có mục nào trong 10 file chain-trace đề cập đá ảnh hưởng COGS — tạm coi là UI-only cho tới khi có phản hồi khác. |
+| Phân loại | ✅ **ĐÃ CHỐT VÀ ĐÃ SỬA (2026-09-17)** |
+| Quyết định chủ quán | *"cửa hàng chỉ có 'đá chung' 'đá riêng' 'không đá' không có ít nhiều gì ở đâu cả, nên cứ mặc định cái nào cũng trừ 1 lượng đá theo cài đặt là được, nhưng cũng nên có chỗ bật tắt theo lượng đá cogs nếu cần thiết."* |
+| Đã sửa | `catalog/ice.js` (module mới) — versioned qua `compaction/versioned-input` (kind `iceCogs`, `subjectId: '__default__'` toàn cửa hàng). `enabled`/`itemId`/`qtyPerCup` nằm trong payload đã versioned, nên bật/tắt hay đổi lượng đá KHÔNG làm trôi COGS bill cũ. `commands/sales.js buildBill` nhận `line.ice` (mặc định `'CHUNG'` như legacy `cartIceDefault`, hoặc `bill.iceDefault`) — CHỈ để in tem/nhãn, KHÔNG rẽ nhánh COGS. `buildRequirements` trừ kho theo `catalog/ice.js#toRequirement(resolved, cups)` — ĐỒNG NHẤT theo tổng số ly của bill, bất kể khách chọn đá chung/đá riêng/không đá. Chưa cấu hình thì mặc định TẮT (không đoán mò nguyên liệu/lượng đá của quán). |
+| Test | `tests/unit/sales-cogs.test.js` — `catalog/ice`, N2 mức đá trên dòng, N2 RecordSale integration (trừ đúng theo số ly dù chọn 'không đá'). |
 
 ### N3 — Topping lúc order (trước khi bấm Thanh toán)
 
@@ -163,7 +165,11 @@ N17 Xem P&L theo kênh (tại quán/mang đi/app) ─┴─► (→ FIFO-CHAIN-T
 |---|---|
 | Hệ cũ | `_finalizeStampFreeAfterPay(billId)` (21355), `_finalizeDiscountAfterPay(billId)` (21241) — trừ `usedCount` của voucher/reward, idempotent theo `billId` |
 | Hệ mới | Chưa thấy module riêng tương ứng trong `src/layers/loyalty/` hay `catalog/promotion.js` cho phần "tiêu thụ" voucher (chỉ thấy phần "cấp" điều kiện) |
-| Phân loại | ⚪ **CHƯA QUYẾT / CẦN RÀ THÊM** — cần đọc kỹ `catalog/promotion.js` phần còn lại (chưa đọc hết trong lượt NET này) để xác định đây là 🟡 GIỮ-ĐỔI-CÁCH-LÀM hay còn là 🟢 THÊM MỚI thật (voucher/reward "usedCount" giảm dần là 1 dạng sổ cái riêng, có thể dính đúng lỗi "field cộng dồn" như loyalty). |
+| Phân loại | ✅ **ĐÃ CHỐT VÀ ĐÃ SỬA — CHỈ PHẦN "ĐỔI TEM" (2026-09-17)** |
+| Quyết định chủ quán | *"bạn thấy an toàn thì làm, bước chọn, áp mã, đổi mã có thể dùng ngay sau bước xin sdt tích điểm, trước bước hình thức thanh toán."* |
+| **QUAN TRỌNG — xung đột với quyết định CŨ hơn** | `FEATURE-TREE-V1.md` §4.5 + `GIEO-REBUILD-HANDOFF-V2.md` đã ghi nhận MỘT chỉ đạo trực tiếp KHÁC, TRƯỚC ĐÓ, của chính chủ quán: *"KHÔNG đưa `rewards`/`myGifts`/mã giảm giá nhập tay vào hệ thống mới ... Nếu sau này cần lại, đó là feature MỚI thiết kế từ đầu, không phải migrate dữ liệu `rewards` cũ."* — lý do: tàn dư hệ 1.0, không có UI tạo ở cả 2 app, dữ liệu tới từ nguồn ngoài phạm vi rebuild. Vòng hỏi-đáp dẫn tới câu trả lời "bạn thấy an toàn thì làm" ở trên KHÔNG nhắc lại quyết định cũ này — có khả năng chủ quán trả lời mà không có ngữ cảnh đó trước mắt. **Đã xử lý theo hướng an toàn nhất**: chỉ xây phần "đổi tem" (tem tích luỹ → ly miễn phí), vì đây là phần DUY NHẤT vẫn nằm trong phạm vi đã chốt (`packages/loyalty` giữ "Stamp-free" — chỉ cắt Voucher/Discount code). KHÔNG xây "áp mã giảm giá"/voucher — giữ nguyên quyết định cắt cũ. Nếu chủ quán thực sự muốn mở lại mã giảm giá, cần xác nhận LẠI rõ ràng vì nó đảo ngược một chỉ đạo trực tiếp đã ghi nhận trước đó. |
+| Đã sửa | `loyalty/accrual.js#redeemStamps` (đã có sẵn từ trước, chưa từng được gọi) — trừ 6 tem/cộng 1 `FREE_DRINKS` vào SỔ (không phải field `usedCount` cộng dồn như legacy). `commands/sales.js buildBill` nhận `spec.redemption = { type: 'STAMP_FREE_DRINK' }` (bắt buộc `customerId`, bắt buộc ĐÚNG 1 dòng `isFree`) và `line.isFree` (amount về 0, nhưng qty/price giữ nguyên — ly free vẫn tiêu tốn kho thật, đi qua FIFO/COGS như món thường, đúng `loyalty/accrual.js` §3). `RecordSale.execute()` gọi `redeemStamps` TRỰC TIẾP (không qua event/handler như tích điểm) vì đổi tem là ĐIỀU KIỆN của giá bill, phải cùng thành/bại với chính giao dịch — không đủ tem thì bill không được chốt với dòng miễn phí đó, tránh lặp lại đúng kiểu race mà legacy phải chống bằng Firestore transaction riêng. |
+| Test | `tests/unit/sales-cogs.test.js` — bill model (dòng `isFree`, validate `redemption`), RecordSale integration (đủ tem → chốt + ghi sổ; thiếu tem → từ chối, không âm thầm cho miễn phí). |
 
 ### N13 — In hoá đơn + in tem
 
@@ -195,8 +201,11 @@ N17 Xem P&L theo kênh (tại quán/mang đi/app) ─┴─► (→ FIFO-CHAIN-T
 |---|---|
 | Hệ cũ | `chotSoThang()` (quanlygieo.html:6656), `moLaiThang()` (quanlygieo.html:6689) |
 | 🔴 Đứt chuỗi đã audit | `moLaiThang()` XOÁ snapshot cũ, và log audit của chính thao tác mở-lại-tháng cũng RỖNG — số liệu cũ biến mất hoàn toàn khi mở lại, không có v1/v2. |
-| Hệ mới | Chưa xác định module cụ thể (ngoài phạm vi Sales thuần — thuộc `compaction/book-snapshot.js`, đã thấy tồn tại nhưng chưa đọc trong lượt NET này) |
-| Phân loại | ⚪ **CHƯA QUYẾT — cần đọc `compaction/book-snapshot.js` trong lượt domain "Reporting" hoặc "Reversal/Correction"** để xác nhận có giữ v1 khi retro-correct hay chưa (đã thấy có mention "correction-rebuild giữ v1" trong ghi chú cũ của chain-trace nhưng CHƯA verify lại theo code hiện tại — không khẳng định khi chưa đọc). |
+| Hệ mới | `compaction/book-snapshot.js#createBook()` — `close()` tạo revision 1 (CLOSED), `correct()` (§3.3) tạo revision MỚI tăng dần và đánh dấu bản trước SUPERSEDED, giữ TOÀN BỘ lịch sử — khác hẳn `moLaiThang()` của legacy (xoá snapshot cũ, audit log rỗng). |
+| Phân loại | ✅ **ĐÃ CHỐT VÀ ĐÃ SỬA (2026-09-17)** |
+| Quyết định chủ quán | *"giữ lại thêm 1 tháng, sau tháng nữa thì không cần giữ lại, VD: tháng 8 đã snapshot thì nó vẫn giữ lại trong suốt tháng 9, khi qua tháng 10 -> không cần giữ lại nữa, vì không ai sửa số liệu của 2 tháng trước cả!"* |
+| Đã sửa | `compaction/book-snapshot.js#createBook().retention(period, asOfPeriod)` (§3.4, method mới) — kỳ THÁNG `period` chốt xong thì `retainedThrough = period + 1 tháng`; `purgeEligible = true` khi `asOfPeriod` đã qua ĐỦ 2 tháng kể từ `period` (vd chốt 2026-08 → còn giữ suốt 2026-09 → qua 2026-10 mới `purgeEligible`). CỐ Ý KHÔNG chặn `correct()` khi đã qua cửa sổ giữ — quyết định của chủ quán là chính sách GIỮ/PURGE, không phải yêu cầu chặn sửa muộn; đúng nguyên tắc `compaction/purge.js`: "Tuổi chỉ chọn ứng viên, không cấp quyền xoá" — `retention()` chỉ là GỢI Ý ứng viên purge cho tiến trình nền, KHÔNG tự xoá gì (purge thật vẫn phải qua `compaction/purge.js#check()` với `unresolvedCorrections`/`unresolvedReferences`). |
+| Test | `tests/unit/compaction.test.js` §3.4 — retention qua các mốc tháng, qua năm mới, kỳ chưa chốt bị từ chối, kỳ dạng ngày bị từ chối (khái niệm "giữ thêm 1 tháng" chỉ áp dụng cho kỳ THÁNG), `correct()` vẫn hoạt động dù đã qua cửa sổ giữ mặc định. |
 
 ### N17 — Xem P&L theo kênh (tại quán / mang đi / app)
 
@@ -227,7 +236,7 @@ N17 Xem P&L theo kênh (tại quán/mang đi/app) ─┴─► (→ FIFO-CHAIN-T
 - 🔴 **BỎ**: 1 (nhánh "ví cơ bản kết hợp" ở N7 — đã bỏ ngay từ trong chính legacy, không mang qua)
 - 🟡 **GIỮ, ĐỔI CÁCH LÀM**: N1, N3, N6, N7, N8, N9(khung), N10(khung), N11(khung nghiệp vụ), N13, N14, N15(khung)
 - 🟢 **THÊM MỚI**: `soldByActorId` (N9), `channel.feePct` được ĐỌC thật (N9, N17), `cogsActual` thật (N10), event-driven loyalty (N11, N15), rule engine khuyến mãi tường minh (N5), loyalty ledger thay field cộng dồn (N11)
-- ⚪ **CHƯA QUYẾT**: đá có ảnh hưởng định mức không (N2), cơ chế voucher/reward "usedCount" (N12), số phận `moLaiThang`/versioning sổ tháng (N16)
+- ✅ **MỚI CHỐT VÀ ĐÃ SỬA (2026-09-17)**: N2 (đá trừ kho đồng nhất + chỗ bật tắt), N12 (đổi tem lấy ly miễn phí — mã giảm giá/voucher KHÔNG xây, giữ nguyên quyết định cắt cũ ở `FEATURE-TREE-V1.md` §4.5), N16 (retention sổ tháng — giữ thêm đúng 1 tháng). Chi tiết ở từng mục N2/N12/N16 phía trên.
 - ✅ **MỚI CHỐT VÀ ĐÃ SỬA (2026-09-17)**: N10 — thiếu định mức KHÔNG chặn bán, theo nguyên tắc "vận hành thật đè core" (`BAN-GIAO-V1.md` §2.3a). `commands/sales.js` đã sửa xong (`gapLines` + `MissingRecipeDetected` → alert `MISSING_RECIPE`), xem chi tiết ở N10.
 - ✅ **MỚI CHỐT VÀ ĐÃ SỬA (2026-09)**: hết nguyên liệu thật KHÔNG chặn bán/nấu/ghi hao hụt (SOP cho thay nguyên liệu khi hết) — `sales.js`/`prep.js`/`inventory.js` đã sửa xong (dùng `allocation.handleShortfall` §3.3, alert `UNIT_NEEDS_REVIEW`/`UNTRACKED_CONSUMPTION`), xem mục "Ca liên quan đã rà".
 - ✅ **RÀ LẠI, KHÔNG CẦN SỬA (2026-09-17)**: N4 — chặn business-day thật ở `RecordSale` đã có sẵn từ trước, qua gate chung `requiresOpenDay` của `commands/pipeline.js` (áp cho mọi command `mutates: true`), không phải code riêng cho `RecordSale`; đã có test ở `tests/unit/store-context-access.test.js:280`. Chỉ là sửa tài liệu cho đúng thực tế code, không đổi code.
@@ -255,10 +264,14 @@ Thứ tự theo mức chặn đường (chặn cứng trước, tinh chỉnh sau
    `tests/unit/store-context-access.test.js:280`. 3 gate sớm còn lại (ca
    mở/checklist/check-in) đúng ý audit là để lại UI-only, không cần nâng
    lên core — xem N4.
-5. Quyết định field `ice` có cần lên `BillLine` hay là UI/tem-only (N2).
-6. Đọc `catalog/promotion.js` phần còn lại + `compaction/book-snapshot.js` để
-   đóng 2 mục ⚪ CHƯA QUYẾT còn lại (N12, N16) — có thể đóng ngay trong domain
-   Sales hoặc để lại cho lượt NET domain Loyalty/Reporting.
+5. ~~Quyết định field `ice` có cần lên `BillLine` hay là UI/tem-only (N2).~~ —
+   **ĐÃ ĐÓNG (2026-09-17)**: lên `BillLine` để in tem, KHÔNG rẽ nhánh COGS —
+   xem N2.
+6. ~~Đọc `catalog/promotion.js` phần còn lại + `compaction/book-snapshot.js` để
+   đóng 2 mục ⚪ CHƯA QUYẾT còn lại (N12, N16)~~ — **ĐÃ ĐÓNG (2026-09-17)**:
+   N12 chỉ đóng phần "đổi tem" (mã giảm giá/voucher giữ nguyên quyết định cắt
+   cũ — xem ghi chú xung đột ở N12); N16 đóng bằng
+   `compaction/book-snapshot.js#retention()`. Xem chi tiết ở từng mục.
 7. ~~Rà toàn bộ core mới (không chỉ Sales) tìm các `R.err('PRECONDITION', ...)`
    khác có thể là điểm chặn MỚI so với hệ cũ, theo đúng nguyên tắc §2.3a~~ —
    **ĐÃ RÀ (2026-09-17)**: grep toàn bộ `src/layers/commands/*.js` (13 chỗ),

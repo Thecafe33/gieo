@@ -23,7 +23,12 @@ GIEO.define('compaction/versioned-input', [
 ], function (ids, R, clockLib) {
   'use strict';
 
-  /* Đúng 7 loại ở §1. Thêm loại mới = thêm vào đây, không tự chế cơ chế riêng. */
+  /* 7 loại gốc ở §1, cộng thêm về sau vẫn đi qua CƠ CHẾ NÀY — thêm loại mới =
+     thêm vào đây, không tự chế cơ chế riêng.
+     `iceCogs` (N2, NET-SALES-V1.md, chốt chủ quán 2026-09-17): lượng đá trừ
+     kho mỗi ly. Ảnh hưởng COGS lịch sử y hệt Recipe/Packaging (đổi lượng đá
+     hôm nay không được làm trôi COGS bill cũ) nên phải versioned, không phải
+     1 số cấu hình đọc sống — xem `catalog/ice.js`. */
   var KINDS = {
     recipe: 'recipe',
     cost: 'cost',
@@ -31,7 +36,8 @@ GIEO.define('compaction/versioned-input', [
     prepYield: 'prepYield',
     payTerms: 'payTerms',
     kpiTarget: 'kpiTarget',
-    config: 'config'
+    config: 'config',
+    iceCogs: 'iceCogs'
   };
 
   function isKind(k) { return Object.prototype.hasOwnProperty.call(KINDS, k); }

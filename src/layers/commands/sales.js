@@ -42,6 +42,30 @@
  *    sẵn ở fifo-core, chỉ chưa được gọi), Unit gánh nợ được gắn `needsReview`,
  *    và phát `IngredientShortfallRecorded` để L9 tạo alert `UNIT_NEEDS_REVIEW`
  *    cho QUANLY — không âm thầm, không chặn nhân viên tại quầy.
+ *
+ * 6. Đá (N2, `NET-SALES-V1.md`, quyết định chủ quán 2026-09): "cửa hàng chỉ có
+ *    đá chung/đá riêng/không đá, không có ít/nhiều gì cả, nên cứ mặc định cái
+ *    nào cũng trừ 1 lượng đá theo cài đặt là được, nhưng cũng nên có chỗ bật
+ *    tắt theo lượng đá cogs nếu cần thiết." Mỗi dòng vẫn ghi `ice` (mặc định
+ *    'CHUNG' như legacy `cartIceDefault`) để in tem/nhãn, nhưng COGS trừ
+ *    ĐỒNG NHẤT theo số ly bất kể giá trị đó — xem `catalog/ice.js` (versioned
+ *    qua `compaction/versioned-input`, `enabled` là "chỗ bật tắt" nằm ngay
+ *    trong version nên tắt/bật không làm trôi COGS bill cũ).
+ *
+ * 7. Đổi tem lấy ly miễn phí (N12 phần "đổi tem", `NET-SALES-V1.md`, quyết
+ *    định chủ quán 2026-09-17): legacy `_finalizeStampFreeAfterPay` chưa có
+ *    module "tiêu thụ" tương ứng ở hệ mới — `loyalty/accrual.js#redeemStamps`
+ *    đã viết luật (trừ 6 tem, cộng 1 ly miễn phí, cả hai đều là DÒNG SỔ) từ
+ *    trước nhưng chưa command nào gọi. Ở đây cố ý gọi TRỰC TIẾP trong
+ *    `RecordSale` (không qua event/handler như tích điểm ở mục 3) vì đổi tem
+ *    là ĐIỀU KIỆN của GIÁ bill (dòng nào miễn phí), không phải phần thưởng
+ *    PHÁT SINH SAU khi bán — phải cùng thành/bại với chính giao dịch, nếu
+ *    không đủ tem thì bill không được chốt với dòng miễn phí đó.
+ *    LOẠI BỎ "mã giảm giá"/voucher (`rewards`/`customers.myGifts`) KHÔNG nằm
+ *    trong phạm vi này — chủ quán đã chỉ đạo trực tiếp cắt hẳn phần đó khi
+ *    rebuild (`FEATURE-TREE-V1.md` §4.5, `GIEO-REBUILD-HANDOFF-V2.md`): tàn
+ *    dư hệ 1.0, không có UI tạo ở cả 2 app, dữ liệu tới từ nguồn ngoài phạm
+ *    vi rebuild. Cần lại thì đó là tính năng MỚI thiết kế từ đầu.
  */
 GIEO.define('commands/sales', [
   'shared-kernel/ids',
@@ -49,10 +73,12 @@ GIEO.define('commands/sales', [
   'commands/pipeline',
   'catalog/menu',
   'catalog/packaging',
+  'catalog/ice',
   'recipe-cost-btp/recipe',
   'recipe-cost-btp/cogs',
-  'fifo-core/allocation'
-], function (ids, R, pipeline, menuLib, packagingLib, recipeLib, cogsLib, allocation) {
+  'fifo-core/allocation',
+  'loyalty/accrual'
+], function (ids, R, pipeline, menuLib, packagingLib, iceLib, recipeLib, cogsLib, allocation, accrualLib) {
   'use strict';
 
   var CHANNEL = {
@@ -61,6 +87,11 @@ GIEO.define('commands/sales', [
     /* Sàn giao đồ ăn — có phí phần trăm, và phí đó PHẢI được đọc. */
     APP: 'APP'
   };
+
+  /* Đúng 3 lựa chọn đá của quán — không có "ít/nhiều" (N2, chốt chủ quán
+     2026-09). Giữ trên từng dòng để in tem/nhãn như legacy; KHÔNG rẽ nhánh
+     COGS theo giá trị này — xem `catalog/ice.js`. */
+  var ICE_TYPE = { CHUNG: 'CHUNG', RIENG: 'RIENG', KHONG: 'KHONG' };
 
   function validateChannel(ch) {
     if (!ch || !CHANNEL[ch.type]) return "channel.type phải là DINE_IN | TO_GO | APP";
@@ -96,15 +127,41 @@ GIEO.define('commands/sales', [
     var lines = spec.lines || [];
     if (lines.length === 0) return R.err('VALIDATION', 'bill phải có ít nhất 1 dòng');
 
+    /*
+     * Đổi tem lấy ly miễn phí (N12, mục 7 ở trên) — cần customerId vì đổi tem
+     * là trừ SỔ của khách, không có khách thì không có sổ để trừ.
+     */
+    var redemption = spec.redemption || null;
+    if (redemption) {
+      if (redemption.type !== 'STAMP_FREE_DRINK') {
+        return R.err('VALIDATION', 'redemption.type không hợp lệ: ' + redemption.type);
+      }
+      if (!ids.isId(spec.customerId, 'customer')) {
+        return R.err('VALIDATION',
+          'đổi tem lấy ly miễn phí cần customerId — không có khách thì không có sổ tem để trừ');
+      }
+    }
+
     var normalized = [];
     var subtotal = 0;
+    var freeLineCount = 0;
     for (var i = 0; i < lines.length; i++) {
       var l = lines[i];
       if (!ids.isId(l.menuItemId, 'item')) return R.err('VALIDATION', 'dòng ' + i + ' thiếu menuItemId hợp lệ');
       if (typeof l.price !== 'number') return R.err('VALIDATION', 'dòng ' + i + ' thiếu giá đã snapshot');
       if (typeof l.qty !== 'number' || !(l.qty > 0)) return R.err('VALIDATION', 'dòng ' + i + ' qty phải dương');
+      var ice = l.ice || spec.iceDefault || ICE_TYPE.CHUNG;
+      if (!ICE_TYPE[ice]) return R.err('VALIDATION', 'dòng ' + i + ' ice không hợp lệ: ' + ice);
 
-      var amount = l.price * l.qty;
+      /*
+       * Dòng miễn phí (đổi tem, hoặc BUY_X_GET_Y của khuyến mãi — xem
+       * `catalog/promotion.js`) vẫn tiêu tốn kho thật (accrual.js §3: "ly
+       * free đổi tem vẫn đi qua FIFO/COGS như món thường"), nên qty/price vẫn
+       * ghi bình thường cho requirements/COGS — chỉ amount (doanh thu) về 0.
+       */
+      var isFree = !!l.isFree;
+      if (isFree) freeLineCount++;
+      var amount = isFree ? 0 : l.price * l.qty;
       subtotal += amount;
       normalized.push({
         billLineId: ids.deterministicId('billLine', [spec.billId || 'draft', String(i)]),
@@ -115,9 +172,17 @@ GIEO.define('commands/sales', [
         /* Snapshot, không phải tham chiếu sống. */
         price: l.price,
         amount: amount,
+        isFree: isFree,
         recipeId: l.recipeId || null,
-        toppings: (l.toppings || []).slice()
+        toppings: (l.toppings || []).slice(),
+        /* Chỉ để in tem/nhãn (như legacy) — không ảnh hưởng COGS, xem N2. */
+        ice: ice
       });
+    }
+
+    if (redemption && freeLineCount !== 1) {
+      return R.err('VALIDATION',
+        'đổi tem lấy ly miễn phí cần ĐÚNG 1 dòng isFree — có ' + freeLineCount);
     }
 
     var discountTotal = spec.discountTotal || 0;
@@ -144,6 +209,7 @@ GIEO.define('commands/sales', [
       subtotal: subtotal,
       discountTotal: discountTotal,
       promotionsApplied: (spec.promotionsApplied || []).slice(),
+      redemption: redemption,
       total: total,
       channelFee: channelFee,
       /* Doanh thu thuần sau phí sàn — con số P&L thật sự cần. */
@@ -165,6 +231,7 @@ GIEO.define('commands/sales', [
     var recipeVersionIds = [];
     var packagingVersionIds = [];
     var gapLines = [];
+    var cups = bill.lines.reduce(function (s, l) { return s + l.qty; }, 0);
 
     for (var i = 0; i < bill.lines.length; i++) {
       var line = bill.lines[i];
@@ -201,13 +268,22 @@ GIEO.define('commands/sales', [
         packagingVersionIds.push(pr.value.packagingVersionId);
         reqs = reqs.concat(pr.value.requirements);
 
-        var cups = bill.lines.reduce(function (s, l) { return s + l.qty; }, 0);
         if (i === 0) {
           var bag = packagingLib.baggingRequirements(pv.value, cups);
           if (R.isOk(bag)) reqs = reqs.concat(bag.value.requirements);
         }
       }
     }
+
+    /*
+     * Đá — theo SỐ LY của cả bill, ĐỒNG NHẤT bất kể đá chung/đá riêng/không
+     * đá (N2, chốt chủ quán 2026-09 — xem `catalog/ice.js`). Độc lập với
+     * recipe/packaging: quán chưa cấu hình thì `toRequirement` trả null,
+     * không thêm gì, không lỗi — đúng nguyên tắc "mọi thứ có default".
+     */
+    var iceResolved = iceLib.resolveIceCogsAt(registry, { storeId: bill.storeId, at: bill.occurredAt }).value;
+    var iceReq = iceLib.toRequirement(iceResolved, cups);
+    if (iceReq) reqs.push(iceReq);
 
     /* Gộp cùng itemId để FIFO cấp phát 1 lần cho mỗi nguyên liệu. */
     var merged = Object.create(null);
@@ -319,6 +395,31 @@ GIEO.define('commands/sales', [
       });
 
       plan.domainRecords.push({ type: 'bill', record: finalized });
+
+      /*
+       * Đổi tem lấy ly miễn phí (N12, mục 7) — gọi TRỰC TIẾP ở đây, cùng
+       * thành/bại với chính bill, vì đây là ĐIỀU KIỆN của giá (dòng miễn phí
+       * đã tính amount=0 ở buildBill), không phải phần thưởng phát sinh sau.
+       * Không đủ tem thì bill KHÔNG được chốt — trả lỗi ngay, không âm thầm
+       * chốt bill với dòng miễn phí mà không trừ sổ.
+       */
+      if (bill.redemption && bill.redemption.type === 'STAMP_FREE_DRINK') {
+        var redeemR = accrualLib.redeemStamps({
+          entries: deps.loyaltyEntries || [],
+          customerId: bill.customerId,
+          storeId: bill.storeId,
+          billId: bill.billId,
+          operationId: ids.deterministicId('operation', ['sale', bill.billId]),
+          businessDate: bill.businessDate,
+          occurredAt: bill.occurredAt,
+          actorId: bill.soldByActorId
+        });
+        if (R.isErr(redeemR)) return redeemR;
+        redeemR.value.entries.forEach(function (e) {
+          plan.domainRecords.push({ type: 'loyaltyLedgerEntry', record: e });
+        });
+      }
+
       plan.unitChanges = ws.all().filter(function (u) {
         var before = (deps.units || []).filter(function (o) { return o.unitId === u.unitId; })[0];
         return before && before.remainingQty !== u.remainingQty;

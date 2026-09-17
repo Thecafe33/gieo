@@ -71,6 +71,7 @@ L9 ĐIỀU PHỐI SỰ KIỆN — nút thắt hiện đang TRỐNG, chặn L2/L4
 | Hệ mới | `loyalty/accrual.redeemStamps()` — kiểm số dư từ `ledger.computeBalance()` (sổ, không phải field), trả 2 dòng sổ (`-6 STAMPS`, `+1 FREE_DRINKS`) |
 | Phân loại | 🟡 **GIỮ, ĐỔI CÁCH LÀM** — nguyên tắc "quà tặng vẫn tiêu tốn kho thật" giữ y nguyên, chỉ đổi nơi đọc/ghi số dư |
 | Về chặn cứng (§2.3a) | `redeemStamps` trả `PRECONDITION` khi không đủ tem — **đây KHÔNG phải điểm chặn mới**, legacy cũng chặn y hệt (không đủ tem thì không cho đổi) — không vi phạm nguyên tắc "vận hành thật đè core". |
+| ✅ ĐÃ NỐI (2026-09-17, N12 `NET-SALES-V1.md`) | `redeemStamps` đã viết luật từ trước nhưng KHÔNG có command nào gọi — nay `commands/sales.js RecordSale` gọi TRỰC TIẾP (không qua event/L9 như L2/L4/L5, vì đổi tem là điều kiện của GIÁ bill — dòng nào miễn phí — không phải phần thưởng phát sinh sau khi bán, phải cùng thành/bại với chính giao dịch). `buildBill` nhận `spec.redemption = { type: 'STAMP_FREE_DRINK' }` + `line.isFree`. Xem N12 để biết chi tiết. Mã giảm giá/voucher (phần còn lại của N12 cũ) KHÔNG được xây — giữ nguyên quyết định cắt hẳn Voucher/Discount code đã chốt ở `FEATURE-TREE-V1.md` §4.5. |
 
 ### L4 — Addon tích điểm phần chênh lệch
 

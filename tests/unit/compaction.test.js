@@ -185,6 +185,64 @@ describe('P6 book snapshot — giữ v1, correction tạo v2', function () {
     assert.strictEqual(assertOk(book.getRevision('2026-03', 1)).values.revenue, 100);
     assert.strictEqual(book.history('2026-03').length, 2);
   });
+
+  describe('§3.4 retention (N16, chốt chủ quán 2026-09): giữ thêm đúng 1 tháng rồi thành ứng viên purge', function () {
+    function bookWithAug() {
+      var book = _cp.BS.createBook();
+      assertOk(book.close({ period: '2026-08', values: { revenue: 100 }, closedBy: _cp.ACTOR, closedAt: 1 }));
+      return book;
+    }
+
+    test('cùng tháng chốt: còn giữ, chưa phải ứng viên purge', function () {
+      var r = assertOk(bookWithAug().retention('2026-08', '2026-08'));
+      assert.strictEqual(r.purgeEligible, false);
+      assert.strictEqual(r.retainedThrough, '2026-09');
+    });
+
+    test('tháng 8 chốt, đang ở tháng 9 — VẪN giữ, đúng như "giữ lại trong suốt tháng 9"', function () {
+      var r = assertOk(bookWithAug().retention('2026-08', '2026-09'));
+      assert.strictEqual(r.purgeEligible, false);
+    });
+
+    test('qua tháng 10 — không cần giữ nữa, thành ứng viên purge', function () {
+      var r = assertOk(bookWithAug().retention('2026-08', '2026-10'));
+      assert.strictEqual(r.purgeEligible, true);
+    });
+
+    test('càng về sau càng vẫn eligible (không tự hết hạn ngược)', function () {
+      var r = assertOk(bookWithAug().retention('2026-08', '2027-01'));
+      assert.strictEqual(r.purgeEligible, true);
+    });
+
+    test('qua năm mới vẫn tính đúng — tháng 12 chốt, giữ hết tháng 1 năm sau', function () {
+      var book = _cp.BS.createBook();
+      assertOk(book.close({ period: '2026-12', values: { revenue: 100 }, closedBy: _cp.ACTOR, closedAt: 1 }));
+      var stillHeld = assertOk(book.retention('2026-12', '2027-01'));
+      assert.strictEqual(stillHeld.purgeEligible, false);
+      assert.strictEqual(stillHeld.retainedThrough, '2027-01');
+      var eligible = assertOk(book.retention('2026-12', '2027-02'));
+      assert.strictEqual(eligible.purgeEligible, true);
+    });
+
+    test('kỳ chưa chốt thì không có gì để tính', function () {
+      assertErr(_cp.BS.createBook().retention('2026-08', '2026-10'), 'NOT_FOUND');
+    });
+
+    test('kỳ NGÀY (YYYY-MM-DD) bị từ chối — "giữ thêm 1 tháng" là khái niệm tháng', function () {
+      var book = _cp.BS.createBook();
+      assertOk(book.close({ period: '2026-08-15', values: { revenue: 100 }, closedBy: _cp.ACTOR, closedAt: 1 }));
+      assertErr(book.retention('2026-08-15', '2026-10'), 'VALIDATION');
+    });
+
+    test('correct() không bị retention chặn — retention KHÔNG cấp/thu quyền sửa, chỉ chọn ứng viên purge', function () {
+      var book = bookWithAug();
+      var farLater = assertOk(book.correct({
+        period: '2026-08', values: { revenue: 999 }, actorId: _cp.ACTOR,
+        at: 999999, reason: 'sửa dù đã qua cửa sổ giữ mặc định', scopeAffected: ['2026-08-01']
+      }));
+      assert.strictEqual(farLater.current.values.revenue, 999, 'retention chỉ là gợi ý purge, không phải gate của correct()');
+    });
+  });
 });
 
 describe('P6 purge — system controlled + verified + dependency safe', function () {

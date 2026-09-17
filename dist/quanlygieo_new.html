@@ -4822,7 +4822,25 @@ GIEO.define('compaction/archive', [
 });
 
 /* ===== src/layers/compaction/book-snapshot.js ===== */
-/** Snapshot sổ sách — §3: đóng băng, drift và correction append-only. */
+/**
+ * Snapshot sổ sách — §3: đóng băng, drift và correction append-only.
+ *
+ * §3.4 — GIỮ SỬA (N16, `NET-SALES-V1.md`, chốt chủ quán 2026-09-17):
+ * "giữ lại thêm 1 tháng, sau tháng nữa thì không cần giữ lại, VD: tháng 8 đã
+ * snapshot thì nó vẫn giữ lại trong suốt tháng 9, khi qua tháng 10 → không
+ * cần giữ lại nữa, vì không ai sửa số liệu của 2 tháng trước cả." Đóng đúng
+ * phần "đứt chuỗi" mà legacy `moLaiThang()` mắc: legacy XOÁ hẳn bản chốt cũ
+ * khi mở lại tháng, không giữ vết. Ở đây `correct()` (§3.3) đã append-only
+ * SẴN — bản cũ trở thành `SUPERSEDED`, không bao giờ bị sửa/xoá qua đường đó.
+ * `retention()` dưới đây KHÔNG xoá gì cả — nó chỉ trả lời "kỳ này còn trong
+ * cửa sổ cần giữ để còn sửa hay đã qua, thành ứng viên purge" — đúng tinh
+ * thần `compaction/purge.js`: "Tuổi chỉ chọn ứng viên, không cấp quyền xoá".
+ * Quyết định xoá thật (raw records, không phải bản thân snapshot — snapshot
+ * KHÔNG BAO GIỜ bị purge, xem `purge.js buildPlan` chặn cứng path snapshots/)
+ * vẫn phải qua `purge.check()` với đủ điều kiện khác (unresolvedCorrections,
+ * dependencyRegistry...). Tiến trình nền tự động chạy `retention()` định kỳ
+ * vẫn là quyết định lịch-chạy còn để ngỏ (như `detectDrift`/`reconcile`).
+ */
 GIEO.define('compaction/book-snapshot', [
   'shared-kernel/ids',
   'shared-kernel/result'
@@ -4838,6 +4856,17 @@ GIEO.define('compaction/book-snapshot', [
     return ids.deterministicId('operation', ['compact', 'book', period, String(revisionNo)]);
   }
   function isPeriod(p) { return typeof p === 'string' && /^\d{4}-\d{2}(-\d{2})?$/.test(p); }
+  /* "Giữ thêm 1 tháng" (§3.4) là khái niệm THÁNG — không áp cho kỳ ngày. */
+  function isMonthPeriod(p) { return typeof p === 'string' && /^\d{4}-\d{2}$/.test(p); }
+  function monthIndex(p) {
+    var parts = p.split('-');
+    return Number(parts[0]) * 12 + (Number(parts[1]) - 1);
+  }
+  function monthPeriodFromIndex(idx) {
+    var y = Math.floor(idx / 12);
+    var m = idx % 12 + 1;
+    return y + '-' + (m < 10 ? '0' + m : String(m));
+  }
 
   function normalizeValues(values) {
     var out = Object.create(null);
@@ -4989,6 +5018,29 @@ GIEO.define('compaction/book-snapshot', [
       });
     }
 
+    /**
+     * §3.4 (N16) — kỳ THÁNG đã chốt được giữ để còn sửa đến HẾT tháng liền
+     * sau, qua tháng thứ 2 thì thành ứng viên purge. `asOfPeriod` là tháng
+     * ĐANG XÉT (không phải Date.now() ngầm) để gọi lại được tại bất kỳ thời
+     * điểm nào, đúng nguyên tắc "at" tường minh dùng chung toàn hệ thống.
+     */
+    function retention(period, asOfPeriod) {
+      if (!isMonthPeriod(period)) return R.err('VALIDATION', 'retention chỉ áp dụng cho kỳ THÁNG (YYYY-MM): ' + period);
+      if (!isMonthPeriod(asOfPeriod)) return R.err('VALIDATION', 'retention cần asOfPeriod dạng YYYY-MM: ' + asOfPeriod);
+      var snap = currentOf(period);
+      if (!snap) return R.err('NOT_FOUND', 'kỳ ' + period + ' chưa chốt — chưa có gì để tính giữ/xoá');
+      var monthsElapsed = monthIndex(asOfPeriod) - monthIndex(period);
+      return R.ok({
+        period: period,
+        asOfPeriod: asOfPeriod,
+        snapshotId: snap.snapshotId,
+        /* Tháng cuối cùng còn CHẮC CHẮN phải giữ — chốt tháng 8 thì giữ tới hết tháng 9. */
+        retainedThrough: monthPeriodFromIndex(monthIndex(period) + 1),
+        /* >= 2 tháng trôi qua (VD chốt 08, đang ở 10) = đã qua cửa sổ giữ. */
+        purgeEligible: monthsElapsed >= 2
+      });
+    }
+
     function getRevision(period, revisionNo) {
       var found = revisionsOf(period).filter(function (s) { return s.revisionNo === revisionNo; })[0];
       return found ? R.ok(found) : R.err('NOT_FOUND', 'không có revision ' + revisionNo + ' của kỳ ' + period);
@@ -5006,7 +5058,7 @@ GIEO.define('compaction/book-snapshot', [
 
     return {
       close: close, read: read, detectDrift: detectDrift, correct: correct,
-      getRevision: getRevision, history: history,
+      getRevision: getRevision, history: history, retention: retention,
       current: function (period) { return currentOf(period); }, hydrate: hydrate
     };
   }
@@ -5505,7 +5557,12 @@ GIEO.define('compaction/versioned-input', [
 ], function (ids, R, clockLib) {
   'use strict';
 
-  /* Đúng 7 loại ở §1. Thêm loại mới = thêm vào đây, không tự chế cơ chế riêng. */
+  /* 7 loại gốc ở §1, cộng thêm về sau vẫn đi qua CƠ CHẾ NÀY — thêm loại mới =
+     thêm vào đây, không tự chế cơ chế riêng.
+     `iceCogs` (N2, NET-SALES-V1.md, chốt chủ quán 2026-09-17): lượng đá trừ
+     kho mỗi ly. Ảnh hưởng COGS lịch sử y hệt Recipe/Packaging (đổi lượng đá
+     hôm nay không được làm trôi COGS bill cũ) nên phải versioned, không phải
+     1 số cấu hình đọc sống — xem `catalog/ice.js`. */
   var KINDS = {
     recipe: 'recipe',
     cost: 'cost',
@@ -5513,7 +5570,8 @@ GIEO.define('compaction/versioned-input', [
     prepYield: 'prepYield',
     payTerms: 'payTerms',
     kpiTarget: 'kpiTarget',
-    config: 'config'
+    config: 'config',
+    iceCogs: 'iceCogs'
   };
 
   function isKind(k) { return Object.prototype.hasOwnProperty.call(KINDS, k); }
@@ -5718,6 +5776,105 @@ GIEO.define('compaction/versioned-input', [
     KINDS: KINDS,
     isKind: isKind,
     createRegistry: createRegistry
+  };
+});
+
+/* ===== src/layers/catalog/ice.js ===== */
+/**
+ * Ice COGS — lượng đá trừ kho mỗi ly.
+ *
+ * Quyết định chủ quán 2026-09-17 (N2, NET-SALES-V1.md): "cửa hàng chỉ có đá
+ * chung / đá riêng / không đá, không có ít/nhiều gì cả, nên cứ mặc định cái
+ * nào cũng trừ 1 lượng đá theo cài đặt là được, nhưng cũng nên có chỗ bật tắt
+ * theo lượng đá cogs nếu cần thiết." Nghĩa là:
+ *
+ *   1. KHÔNG phân biệt đá chung/đá riêng/không đá khi trừ kho — cả 3 lựa
+ *      chọn trừ ĐÚNG CÙNG 1 lượng cấu hình. Lựa chọn đá vẫn được ghi trên
+ *      từng dòng bill (xem `commands/sales.js buildBill`) để in tem/nhãn như
+ *      legacy, nhưng đó là dữ liệu hiển thị — không rẽ nhánh COGS.
+ *   2. Có "chỗ bật tắt": `enabled` nằm NGAY TRONG payload đã versioned, nên
+ *      bật/tắt cũng đi qua đúng cơ chế publish — tắt hôm nay không làm trôi
+ *      COGS của bill cũ (giữ đúng bất biến §10 mà Recipe/Packaging đã có).
+ *
+ * Versioned qua VersionedInput dùng chung (không tự chế cơ chế riêng — xem
+ * `compaction/versioned-input.js`), vì đổi lượng đá/nguyên liệu đá ảnh hưởng
+ * COGS lịch sử y hệt đổi công thức: instance #1/#3 của lớp lỗi đã xác nhận 7
+ * lần (GIEO-REBUILD-HANDOFF-V2.md §3) nếu lỡ đọc "cấu hình hiện tại" thay vì
+ * resolve tại thời điểm bán.
+ *
+ * `subjectId` cố định '__default__': đây là cấu hình TOÀN CỬA HÀNG, không
+ * theo từng món — đúng như chủ quán mô tả (không có biến thể theo món/size).
+ */
+GIEO.define('catalog/ice', [
+  'shared-kernel/ids',
+  'shared-kernel/result',
+  'compaction/versioned-input'
+], function (ids, R, VI) {
+  'use strict';
+
+  var SUBJECT = '__default__';
+
+  function publishIceCogs(registry, spec) {
+    if (!spec) return R.err('VALIDATION', 'publishIceCogs cần spec');
+    var enabled = !!spec.enabled;
+    if (enabled) {
+      if (!ids.isId(spec.itemId, 'item')) {
+        return R.err('VALIDATION', 'bật trừ đá COGS thì cần itemId nguyên liệu đá hợp lệ');
+      }
+      if (typeof spec.qtyPerCup !== 'number' || !(spec.qtyPerCup > 0)) {
+        return R.err('VALIDATION', 'bật trừ đá COGS thì cần qtyPerCup dương');
+      }
+    }
+
+    return registry.publish({
+      kind: VI.KINDS.iceCogs,
+      subjectId: SUBJECT,
+      storeId: spec.storeId,
+      effectiveFrom: spec.effectiveFrom,
+      publishedBy: spec.publishedBy,
+      payload: {
+        enabled: enabled,
+        itemId: enabled ? spec.itemId : null,
+        qtyPerCup: enabled ? spec.qtyPerCup : 0
+      }
+    });
+  }
+
+  /**
+   * Chưa ai cấu hình thì mặc định TẮT (`isDefault: true`) — không đoán mò
+   * nguyên liệu đá hay lượng đá của quán, đúng nguyên tắc "mọi thứ CÓ DEFAULT
+   * nhưng không tự bịa dữ liệu nghiệp vụ" của `finance/config.js`.
+   */
+  function resolveIceCogsAt(registry, spec) {
+    var r = registry.resolveAt(VI.KINDS.iceCogs, SUBJECT, spec.storeId, spec.at);
+    if (R.isOk(r)) {
+      return R.ok({
+        enabled: r.value.payload.enabled,
+        itemId: r.value.payload.itemId,
+        qtyPerCup: r.value.payload.qtyPerCup,
+        versionId: r.value.versionId,
+        isDefault: false
+      });
+    }
+    return R.ok({ enabled: false, itemId: null, qtyPerCup: 0, versionId: null, isDefault: true });
+  }
+
+  /**
+   * Yêu cầu vật chất cho `cupQty` ly — ÁP DỤNG ĐỒNG NHẤT bất kể khách chọn đá
+   * chung/đá riêng/không đá (chốt N2 ở trên). Trả `null` khi tắt hoặc
+   * cupQty không dương, để caller biết KHÔNG có gì cần cộng vào requirements
+   * thay vì phải tự suy diễn từ 1 object rỗng.
+   */
+  function toRequirement(resolved, cupQty) {
+    if (!resolved || !resolved.enabled) return null;
+    if (typeof cupQty !== 'number' || cupQty <= 0) return null;
+    return { itemId: resolved.itemId, qty: resolved.qtyPerCup * cupQty, source: 'ice' };
+  }
+
+  return {
+    publishIceCogs: publishIceCogs,
+    resolveIceCogsAt: resolveIceCogsAt,
+    toRequirement: toRequirement
   };
 });
 
@@ -13790,6 +13947,30 @@ GIEO.define('commands/reversal', [
  *    sẵn ở fifo-core, chỉ chưa được gọi), Unit gánh nợ được gắn `needsReview`,
  *    và phát `IngredientShortfallRecorded` để L9 tạo alert `UNIT_NEEDS_REVIEW`
  *    cho QUANLY — không âm thầm, không chặn nhân viên tại quầy.
+ *
+ * 6. Đá (N2, `NET-SALES-V1.md`, quyết định chủ quán 2026-09): "cửa hàng chỉ có
+ *    đá chung/đá riêng/không đá, không có ít/nhiều gì cả, nên cứ mặc định cái
+ *    nào cũng trừ 1 lượng đá theo cài đặt là được, nhưng cũng nên có chỗ bật
+ *    tắt theo lượng đá cogs nếu cần thiết." Mỗi dòng vẫn ghi `ice` (mặc định
+ *    'CHUNG' như legacy `cartIceDefault`) để in tem/nhãn, nhưng COGS trừ
+ *    ĐỒNG NHẤT theo số ly bất kể giá trị đó — xem `catalog/ice.js` (versioned
+ *    qua `compaction/versioned-input`, `enabled` là "chỗ bật tắt" nằm ngay
+ *    trong version nên tắt/bật không làm trôi COGS bill cũ).
+ *
+ * 7. Đổi tem lấy ly miễn phí (N12 phần "đổi tem", `NET-SALES-V1.md`, quyết
+ *    định chủ quán 2026-09-17): legacy `_finalizeStampFreeAfterPay` chưa có
+ *    module "tiêu thụ" tương ứng ở hệ mới — `loyalty/accrual.js#redeemStamps`
+ *    đã viết luật (trừ 6 tem, cộng 1 ly miễn phí, cả hai đều là DÒNG SỔ) từ
+ *    trước nhưng chưa command nào gọi. Ở đây cố ý gọi TRỰC TIẾP trong
+ *    `RecordSale` (không qua event/handler như tích điểm ở mục 3) vì đổi tem
+ *    là ĐIỀU KIỆN của GIÁ bill (dòng nào miễn phí), không phải phần thưởng
+ *    PHÁT SINH SAU khi bán — phải cùng thành/bại với chính giao dịch, nếu
+ *    không đủ tem thì bill không được chốt với dòng miễn phí đó.
+ *    LOẠI BỎ "mã giảm giá"/voucher (`rewards`/`customers.myGifts`) KHÔNG nằm
+ *    trong phạm vi này — chủ quán đã chỉ đạo trực tiếp cắt hẳn phần đó khi
+ *    rebuild (`FEATURE-TREE-V1.md` §4.5, `GIEO-REBUILD-HANDOFF-V2.md`): tàn
+ *    dư hệ 1.0, không có UI tạo ở cả 2 app, dữ liệu tới từ nguồn ngoài phạm
+ *    vi rebuild. Cần lại thì đó là tính năng MỚI thiết kế từ đầu.
  */
 GIEO.define('commands/sales', [
   'shared-kernel/ids',
@@ -13797,10 +13978,12 @@ GIEO.define('commands/sales', [
   'commands/pipeline',
   'catalog/menu',
   'catalog/packaging',
+  'catalog/ice',
   'recipe-cost-btp/recipe',
   'recipe-cost-btp/cogs',
-  'fifo-core/allocation'
-], function (ids, R, pipeline, menuLib, packagingLib, recipeLib, cogsLib, allocation) {
+  'fifo-core/allocation',
+  'loyalty/accrual'
+], function (ids, R, pipeline, menuLib, packagingLib, iceLib, recipeLib, cogsLib, allocation, accrualLib) {
   'use strict';
 
   var CHANNEL = {
@@ -13809,6 +13992,11 @@ GIEO.define('commands/sales', [
     /* Sàn giao đồ ăn — có phí phần trăm, và phí đó PHẢI được đọc. */
     APP: 'APP'
   };
+
+  /* Đúng 3 lựa chọn đá của quán — không có "ít/nhiều" (N2, chốt chủ quán
+     2026-09). Giữ trên từng dòng để in tem/nhãn như legacy; KHÔNG rẽ nhánh
+     COGS theo giá trị này — xem `catalog/ice.js`. */
+  var ICE_TYPE = { CHUNG: 'CHUNG', RIENG: 'RIENG', KHONG: 'KHONG' };
 
   function validateChannel(ch) {
     if (!ch || !CHANNEL[ch.type]) return "channel.type phải là DINE_IN | TO_GO | APP";
@@ -13844,15 +14032,41 @@ GIEO.define('commands/sales', [
     var lines = spec.lines || [];
     if (lines.length === 0) return R.err('VALIDATION', 'bill phải có ít nhất 1 dòng');
 
+    /*
+     * Đổi tem lấy ly miễn phí (N12, mục 7 ở trên) — cần customerId vì đổi tem
+     * là trừ SỔ của khách, không có khách thì không có sổ để trừ.
+     */
+    var redemption = spec.redemption || null;
+    if (redemption) {
+      if (redemption.type !== 'STAMP_FREE_DRINK') {
+        return R.err('VALIDATION', 'redemption.type không hợp lệ: ' + redemption.type);
+      }
+      if (!ids.isId(spec.customerId, 'customer')) {
+        return R.err('VALIDATION',
+          'đổi tem lấy ly miễn phí cần customerId — không có khách thì không có sổ tem để trừ');
+      }
+    }
+
     var normalized = [];
     var subtotal = 0;
+    var freeLineCount = 0;
     for (var i = 0; i < lines.length; i++) {
       var l = lines[i];
       if (!ids.isId(l.menuItemId, 'item')) return R.err('VALIDATION', 'dòng ' + i + ' thiếu menuItemId hợp lệ');
       if (typeof l.price !== 'number') return R.err('VALIDATION', 'dòng ' + i + ' thiếu giá đã snapshot');
       if (typeof l.qty !== 'number' || !(l.qty > 0)) return R.err('VALIDATION', 'dòng ' + i + ' qty phải dương');
+      var ice = l.ice || spec.iceDefault || ICE_TYPE.CHUNG;
+      if (!ICE_TYPE[ice]) return R.err('VALIDATION', 'dòng ' + i + ' ice không hợp lệ: ' + ice);
 
-      var amount = l.price * l.qty;
+      /*
+       * Dòng miễn phí (đổi tem, hoặc BUY_X_GET_Y của khuyến mãi — xem
+       * `catalog/promotion.js`) vẫn tiêu tốn kho thật (accrual.js §3: "ly
+       * free đổi tem vẫn đi qua FIFO/COGS như món thường"), nên qty/price vẫn
+       * ghi bình thường cho requirements/COGS — chỉ amount (doanh thu) về 0.
+       */
+      var isFree = !!l.isFree;
+      if (isFree) freeLineCount++;
+      var amount = isFree ? 0 : l.price * l.qty;
       subtotal += amount;
       normalized.push({
         billLineId: ids.deterministicId('billLine', [spec.billId || 'draft', String(i)]),
@@ -13863,9 +14077,17 @@ GIEO.define('commands/sales', [
         /* Snapshot, không phải tham chiếu sống. */
         price: l.price,
         amount: amount,
+        isFree: isFree,
         recipeId: l.recipeId || null,
-        toppings: (l.toppings || []).slice()
+        toppings: (l.toppings || []).slice(),
+        /* Chỉ để in tem/nhãn (như legacy) — không ảnh hưởng COGS, xem N2. */
+        ice: ice
       });
+    }
+
+    if (redemption && freeLineCount !== 1) {
+      return R.err('VALIDATION',
+        'đổi tem lấy ly miễn phí cần ĐÚNG 1 dòng isFree — có ' + freeLineCount);
     }
 
     var discountTotal = spec.discountTotal || 0;
@@ -13892,6 +14114,7 @@ GIEO.define('commands/sales', [
       subtotal: subtotal,
       discountTotal: discountTotal,
       promotionsApplied: (spec.promotionsApplied || []).slice(),
+      redemption: redemption,
       total: total,
       channelFee: channelFee,
       /* Doanh thu thuần sau phí sàn — con số P&L thật sự cần. */
@@ -13913,6 +14136,7 @@ GIEO.define('commands/sales', [
     var recipeVersionIds = [];
     var packagingVersionIds = [];
     var gapLines = [];
+    var cups = bill.lines.reduce(function (s, l) { return s + l.qty; }, 0);
 
     for (var i = 0; i < bill.lines.length; i++) {
       var line = bill.lines[i];
@@ -13949,13 +14173,22 @@ GIEO.define('commands/sales', [
         packagingVersionIds.push(pr.value.packagingVersionId);
         reqs = reqs.concat(pr.value.requirements);
 
-        var cups = bill.lines.reduce(function (s, l) { return s + l.qty; }, 0);
         if (i === 0) {
           var bag = packagingLib.baggingRequirements(pv.value, cups);
           if (R.isOk(bag)) reqs = reqs.concat(bag.value.requirements);
         }
       }
     }
+
+    /*
+     * Đá — theo SỐ LY của cả bill, ĐỒNG NHẤT bất kể đá chung/đá riêng/không
+     * đá (N2, chốt chủ quán 2026-09 — xem `catalog/ice.js`). Độc lập với
+     * recipe/packaging: quán chưa cấu hình thì `toRequirement` trả null,
+     * không thêm gì, không lỗi — đúng nguyên tắc "mọi thứ có default".
+     */
+    var iceResolved = iceLib.resolveIceCogsAt(registry, { storeId: bill.storeId, at: bill.occurredAt }).value;
+    var iceReq = iceLib.toRequirement(iceResolved, cups);
+    if (iceReq) reqs.push(iceReq);
 
     /* Gộp cùng itemId để FIFO cấp phát 1 lần cho mỗi nguyên liệu. */
     var merged = Object.create(null);
@@ -14067,6 +14300,31 @@ GIEO.define('commands/sales', [
       });
 
       plan.domainRecords.push({ type: 'bill', record: finalized });
+
+      /*
+       * Đổi tem lấy ly miễn phí (N12, mục 7) — gọi TRỰC TIẾP ở đây, cùng
+       * thành/bại với chính bill, vì đây là ĐIỀU KIỆN của giá (dòng miễn phí
+       * đã tính amount=0 ở buildBill), không phải phần thưởng phát sinh sau.
+       * Không đủ tem thì bill KHÔNG được chốt — trả lỗi ngay, không âm thầm
+       * chốt bill với dòng miễn phí mà không trừ sổ.
+       */
+      if (bill.redemption && bill.redemption.type === 'STAMP_FREE_DRINK') {
+        var redeemR = accrualLib.redeemStamps({
+          entries: deps.loyaltyEntries || [],
+          customerId: bill.customerId,
+          storeId: bill.storeId,
+          billId: bill.billId,
+          operationId: ids.deterministicId('operation', ['sale', bill.billId]),
+          businessDate: bill.businessDate,
+          occurredAt: bill.occurredAt,
+          actorId: bill.soldByActorId
+        });
+        if (R.isErr(redeemR)) return redeemR;
+        redeemR.value.entries.forEach(function (e) {
+          plan.domainRecords.push({ type: 'loyaltyLedgerEntry', record: e });
+        });
+      }
+
       plan.unitChanges = ws.all().filter(function (u) {
         var before = (deps.units || []).filter(function (o) { return o.unitId === u.unitId; })[0];
         return before && before.remainingQty !== u.remainingQty;

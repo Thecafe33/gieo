@@ -1,4 +1,22 @@
-/** Snapshot sổ sách — §3: đóng băng, drift và correction append-only. */
+/**
+ * Snapshot sổ sách — §3: đóng băng, drift và correction append-only.
+ *
+ * §3.4 — GIỮ SỬA (N16, `NET-SALES-V1.md`, chốt chủ quán 2026-09-17):
+ * "giữ lại thêm 1 tháng, sau tháng nữa thì không cần giữ lại, VD: tháng 8 đã
+ * snapshot thì nó vẫn giữ lại trong suốt tháng 9, khi qua tháng 10 → không
+ * cần giữ lại nữa, vì không ai sửa số liệu của 2 tháng trước cả." Đóng đúng
+ * phần "đứt chuỗi" mà legacy `moLaiThang()` mắc: legacy XOÁ hẳn bản chốt cũ
+ * khi mở lại tháng, không giữ vết. Ở đây `correct()` (§3.3) đã append-only
+ * SẴN — bản cũ trở thành `SUPERSEDED`, không bao giờ bị sửa/xoá qua đường đó.
+ * `retention()` dưới đây KHÔNG xoá gì cả — nó chỉ trả lời "kỳ này còn trong
+ * cửa sổ cần giữ để còn sửa hay đã qua, thành ứng viên purge" — đúng tinh
+ * thần `compaction/purge.js`: "Tuổi chỉ chọn ứng viên, không cấp quyền xoá".
+ * Quyết định xoá thật (raw records, không phải bản thân snapshot — snapshot
+ * KHÔNG BAO GIỜ bị purge, xem `purge.js buildPlan` chặn cứng path snapshots/)
+ * vẫn phải qua `purge.check()` với đủ điều kiện khác (unresolvedCorrections,
+ * dependencyRegistry...). Tiến trình nền tự động chạy `retention()` định kỳ
+ * vẫn là quyết định lịch-chạy còn để ngỏ (như `detectDrift`/`reconcile`).
+ */
 GIEO.define('compaction/book-snapshot', [
   'shared-kernel/ids',
   'shared-kernel/result'
@@ -14,6 +32,17 @@ GIEO.define('compaction/book-snapshot', [
     return ids.deterministicId('operation', ['compact', 'book', period, String(revisionNo)]);
   }
   function isPeriod(p) { return typeof p === 'string' && /^\d{4}-\d{2}(-\d{2})?$/.test(p); }
+  /* "Giữ thêm 1 tháng" (§3.4) là khái niệm THÁNG — không áp cho kỳ ngày. */
+  function isMonthPeriod(p) { return typeof p === 'string' && /^\d{4}-\d{2}$/.test(p); }
+  function monthIndex(p) {
+    var parts = p.split('-');
+    return Number(parts[0]) * 12 + (Number(parts[1]) - 1);
+  }
+  function monthPeriodFromIndex(idx) {
+    var y = Math.floor(idx / 12);
+    var m = idx % 12 + 1;
+    return y + '-' + (m < 10 ? '0' + m : String(m));
+  }
 
   function normalizeValues(values) {
     var out = Object.create(null);
@@ -165,6 +194,29 @@ GIEO.define('compaction/book-snapshot', [
       });
     }
 
+    /**
+     * §3.4 (N16) — kỳ THÁNG đã chốt được giữ để còn sửa đến HẾT tháng liền
+     * sau, qua tháng thứ 2 thì thành ứng viên purge. `asOfPeriod` là tháng
+     * ĐANG XÉT (không phải Date.now() ngầm) để gọi lại được tại bất kỳ thời
+     * điểm nào, đúng nguyên tắc "at" tường minh dùng chung toàn hệ thống.
+     */
+    function retention(period, asOfPeriod) {
+      if (!isMonthPeriod(period)) return R.err('VALIDATION', 'retention chỉ áp dụng cho kỳ THÁNG (YYYY-MM): ' + period);
+      if (!isMonthPeriod(asOfPeriod)) return R.err('VALIDATION', 'retention cần asOfPeriod dạng YYYY-MM: ' + asOfPeriod);
+      var snap = currentOf(period);
+      if (!snap) return R.err('NOT_FOUND', 'kỳ ' + period + ' chưa chốt — chưa có gì để tính giữ/xoá');
+      var monthsElapsed = monthIndex(asOfPeriod) - monthIndex(period);
+      return R.ok({
+        period: period,
+        asOfPeriod: asOfPeriod,
+        snapshotId: snap.snapshotId,
+        /* Tháng cuối cùng còn CHẮC CHẮN phải giữ — chốt tháng 8 thì giữ tới hết tháng 9. */
+        retainedThrough: monthPeriodFromIndex(monthIndex(period) + 1),
+        /* >= 2 tháng trôi qua (VD chốt 08, đang ở 10) = đã qua cửa sổ giữ. */
+        purgeEligible: monthsElapsed >= 2
+      });
+    }
+
     function getRevision(period, revisionNo) {
       var found = revisionsOf(period).filter(function (s) { return s.revisionNo === revisionNo; })[0];
       return found ? R.ok(found) : R.err('NOT_FOUND', 'không có revision ' + revisionNo + ' của kỳ ' + period);
@@ -182,7 +234,7 @@ GIEO.define('compaction/book-snapshot', [
 
     return {
       close: close, read: read, detectDrift: detectDrift, correct: correct,
-      getRevision: getRevision, history: history,
+      getRevision: getRevision, history: history, retention: retention,
       current: function (period) { return currentOf(period); }, hydrate: hydrate
     };
   }

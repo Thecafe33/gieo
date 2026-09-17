@@ -13,6 +13,8 @@ var _s = (function () {
     RCP: GIEO.require('recipe-cost-btp/recipe'),
     CST: GIEO.require('recipe-cost-btp/cost'),
     COGS: GIEO.require('recipe-cost-btp/cogs'),
+    ICE: GIEO.require('catalog/ice'),
+    LEDGER: GIEO.require('loyalty/ledger'),
     U: GIEO.require('fifo-core/unit'),
     A: GIEO.require('fifo-core/allocation'),
     SALES: GIEO.require('commands/sales'),
@@ -27,6 +29,7 @@ var _s = (function () {
     NV: ids.deterministicId('actor', ['nv01']),
     SUA: ids.deterministicId('item', ['sua']),
     LY: ids.deterministicId('item', ['ly']),
+    DA: ids.deterministicId('item', ['da']),
     MON: ids.deterministicId('item', ['tra-sua']),
     RECIPE: ids.deterministicId('recipe', ['tra-sua'])
   };
@@ -225,6 +228,55 @@ describe('COGS — HAI con số (đóng gap nghiêm trọng nhất toàn audit)'
   });
 });
 
+describe('catalog/ice — N2 (chốt chủ quán 2026-09): trừ đá ĐỒNG NHẤT bất kể đá chung/riêng/không đá', function () {
+  var ICE = _s.ICE;
+
+  test('chưa ai cấu hình thì mặc định TẮT — không đoán mò nguyên liệu/lượng đá', function () {
+    var reg = _s.VI.createRegistry();
+    var r = assertOk(ICE.resolveIceCogsAt(reg, { storeId: _s.STORE, at: T_SALE }));
+    assert.strictEqual(r.enabled, false);
+    assert.strictEqual(r.isDefault, true);
+    assert.strictEqual(ICE.toRequirement(r, 5), null);
+  });
+
+  test('bật mà thiếu itemId/qtyPerCup thì từ chối', function () {
+    var reg = _s.VI.createRegistry();
+    assertErr(ICE.publishIceCogs(reg, {
+      storeId: _s.STORE, effectiveFrom: 1, publishedBy: _s.BOSS, enabled: true
+    }), 'VALIDATION');
+  });
+
+  test('bật đúng cấu hình thì resolve ra itemId/qtyPerCup, toRequirement nhân đúng số ly', function () {
+    var reg = _s.VI.createRegistry();
+    assertOk(ICE.publishIceCogs(reg, {
+      storeId: _s.STORE, effectiveFrom: new Date(2026, 0, 1).getTime(), publishedBy: _s.BOSS,
+      enabled: true, itemId: _s.DA, qtyPerCup: 20
+    }));
+    var r = assertOk(ICE.resolveIceCogsAt(reg, { storeId: _s.STORE, at: T_SALE }));
+    assert.strictEqual(r.enabled, true);
+    assert.strictEqual(r.itemId, _s.DA);
+    var req = ICE.toRequirement(r, 3);
+    assert.strictEqual(req.itemId, _s.DA);
+    assert.strictEqual(req.qty, 60);
+  });
+
+  test('"chỗ bật tắt" đi qua đúng versioning — tắt hôm nay KHÔNG làm trôi COGS bill cũ', function () {
+    var reg = _s.VI.createRegistry();
+    assertOk(ICE.publishIceCogs(reg, {
+      storeId: _s.STORE, effectiveFrom: new Date(2026, 0, 1).getTime(), publishedBy: _s.BOSS,
+      enabled: true, itemId: _s.DA, qtyPerCup: 20
+    }));
+    assertOk(ICE.publishIceCogs(reg, {
+      storeId: _s.STORE, effectiveFrom: new Date(2026, 5, 1).getTime(), publishedBy: _s.BOSS,
+      enabled: false
+    }));
+    var old = assertOk(ICE.resolveIceCogsAt(reg, { storeId: _s.STORE, at: T_SALE }));
+    assert.strictEqual(old.enabled, true, 'bill cũ (trước khi tắt) bị tính lại theo cấu hình mới');
+    var now = assertOk(ICE.resolveIceCogsAt(reg, { storeId: _s.STORE, at: new Date(2026, 6, 1).getTime() }));
+    assert.strictEqual(now.enabled, false);
+  });
+});
+
 describe('commands/sales — Bill model', function () {
   var S = _s.SALES;
 
@@ -287,6 +339,88 @@ describe('commands/sales — Bill model', function () {
   test('bill rỗng bị từ chối', function () {
     assertErr(bill({ lines: [] }), 'VALIDATION');
   });
+
+  describe('N2 — mức đá trên dòng (chốt chủ quán 2026-09: chỉ để in tem, không rẽ nhánh COGS)', function () {
+    test('không truyền ice thì mặc định CHUNG (như legacy cartIceDefault)', function () {
+      var b = assertOk(bill());
+      assert.strictEqual(b.lines[0].ice, 'CHUNG');
+    });
+
+    test('iceDefault ở bill áp cho dòng không tự khai riêng', function () {
+      var b = assertOk(bill({ iceDefault: 'RIENG' }));
+      assert.strictEqual(b.lines[0].ice, 'RIENG');
+    });
+
+    test('từng dòng tự khai ice thì ưu tiên hơn iceDefault của bill', function () {
+      var b = assertOk(bill({
+        iceDefault: 'RIENG',
+        lines: [{ menuItemId: _s.MON, size: 'M', qty: 1, price: 30000, recipeId: _s.RECIPE, ice: 'KHONG' }]
+      }));
+      assert.strictEqual(b.lines[0].ice, 'KHONG');
+    });
+
+    test('ice lạ bị từ chối', function () {
+      var r = bill({
+        lines: [{ menuItemId: _s.MON, size: 'M', qty: 1, price: 30000, recipeId: _s.RECIPE, ice: 'NUA_DA' }]
+      });
+      assertErr(r, 'VALIDATION');
+    });
+  });
+
+  describe('N12 — đổi tem lấy ly miễn phí (chốt chủ quán 2026-09: chỉ "đổi tem", KHÔNG mã giảm giá/voucher — đã cắt hẳn, FEATURE-TREE-V1.md §4.5)', function () {
+    var cust = _s.ids.deterministicId('customer', ['kh1']);
+
+    test('dòng isFree không tính vào doanh thu, nhưng vẫn giữ qty/price cho COGS', function () {
+      var b = assertOk(bill({
+        lines: [
+          { menuItemId: _s.MON, size: 'M', qty: 1, price: 30000, recipeId: _s.RECIPE },
+          { menuItemId: _s.MON, size: 'M', qty: 1, price: 30000, recipeId: _s.RECIPE, isFree: true }
+        ]
+      }));
+      assert.strictEqual(b.lines[1].isFree, true);
+      assert.strictEqual(b.lines[1].amount, 0);
+      assert.strictEqual(b.lines[1].qty, 1, 'ly free vẫn tiêu tốn kho thật — không được về 0');
+      assert.strictEqual(b.subtotal, 30000, 'dòng free không cộng vào doanh thu');
+    });
+
+    test('redemption STAMP_FREE_DRINK cần customerId — không có khách thì không có sổ tem để trừ', function () {
+      var r = bill({ redemption: { type: 'STAMP_FREE_DRINK' } });
+      assertErr(r, 'VALIDATION');
+      assert.ok(/customerId/.test(r.error.message));
+    });
+
+    test('redemption.type lạ bị từ chối', function () {
+      assertErr(bill({ customerId: cust, redemption: { type: 'VOUCHER_CODE' } }), 'VALIDATION');
+    });
+
+    test('redemption cần ĐÚNG 1 dòng isFree — không dòng nào free thì từ chối', function () {
+      var r = bill({ customerId: cust, redemption: { type: 'STAMP_FREE_DRINK' } });
+      assertErr(r, 'VALIDATION');
+      assert.ok(/ĐÚNG 1 dòng isFree/.test(r.error.message));
+    });
+
+    test('redemption cần ĐÚNG 1 dòng isFree — 2 dòng free cùng lúc cũng bị từ chối', function () {
+      var r = bill({
+        customerId: cust,
+        redemption: { type: 'STAMP_FREE_DRINK' },
+        lines: [
+          { menuItemId: _s.MON, size: 'M', qty: 1, price: 30000, recipeId: _s.RECIPE, isFree: true },
+          { menuItemId: _s.MON, size: 'M', qty: 1, price: 30000, recipeId: _s.RECIPE, isFree: true }
+        ]
+      });
+      assertErr(r, 'VALIDATION');
+    });
+
+    test('đúng 1 dòng isFree + customerId thì hợp lệ, bill mang theo redemption', function () {
+      var b = assertOk(bill({
+        customerId: cust,
+        redemption: { type: 'STAMP_FREE_DRINK' },
+        lines: [{ menuItemId: _s.MON, size: 'M', qty: 1, price: 30000, recipeId: _s.RECIPE, isFree: true }]
+      }));
+      assert.strictEqual(b.redemption.type, 'STAMP_FREE_DRINK');
+      assert.strictEqual(b.total, 0);
+    });
+  });
 });
 
 describe('commands/pipeline + RecordSale end-to-end', function () {
@@ -306,7 +440,7 @@ describe('commands/pipeline + RecordSale end-to-end', function () {
     }));
   }
 
-  function runSale(over, units, c) {
+  function runSale(over, units, c, registry, loyaltyEntries) {
     var b = assertOk(S.buildBill(Object.assign({
       billId: _s.ids.deterministicId('bill', ['b1']),
       storeId: _s.STORE, soldByActorId: _s.NV, businessDate: '2026-03-10', occurredAt: T_SALE,
@@ -317,7 +451,10 @@ describe('commands/pipeline + RecordSale end-to-end', function () {
       bill: b,
       run: function (store) {
         return PIPE.run(S.RecordSale, {
-          bill: b, deps: { versionRegistry: setupRegistry(), units: units || [mkUnit(30, 1000, 100)] }
+          bill: b, deps: {
+            versionRegistry: registry || setupRegistry(), units: units || [mkUnit(30, 1000, 100)],
+            loyaltyEntries: loyaltyEntries || []
+          }
         }, c || ctx(), { operationStore: store || PIPE.createInMemoryOperationStore() });
       }
     };
@@ -387,6 +524,96 @@ describe('commands/pipeline + RecordSale end-to-end', function () {
     assert.ok(evt, 'thiếu event IngredientShortfallRecorded để L9 báo QUANLY');
     assert.strictEqual(evt.shortfallQty, 150);
     assert.strictEqual(evt.unitId, debtUnit.unitId);
+  });
+
+  test('N2: đá cấu hình BẬT thì trừ kho theo SỐ LY, đồng nhất bất kể loại đá chọn (chốt chủ quán 2026-09)', function () {
+    var reg = setupRegistry();
+    assertOk(_s.ICE.publishIceCogs(reg, {
+      storeId: _s.STORE, effectiveFrom: new Date(2026, 0, 1).getTime(), publishedBy: _s.BOSS,
+      enabled: true, itemId: _s.DA, qtyPerCup: 20
+    }));
+    assertOk(_s.CST.publishCostBasis(reg, {
+      itemId: _s.DA, storeId: _s.STORE, effectiveFrom: new Date(2026, 0, 1).getTime(),
+      publishedBy: _s.BOSS, unitCost: 1
+    }));
+    var daUnit = assertOk(_s.U.createUnit({
+      unitId: _s.ids.deterministicId('unit', ['da1']),
+      itemId: _s.DA, storeId: _s.STORE, itemKind: 'raw', initialQty: 1000,
+      costBasis: { unitCost: 1, versionId: 'version_da' },
+      operationId: 'operation_recv_da1'
+    }));
+    daUnit = assertOk(_s.U.open(daUnit, { at: 100, actorId: _s.NV, operationId: 'operation_open_da' }));
+    daUnit = Object.assign({}, daUnit, { remainingQty: 1000 });
+
+    var out = assertOk(runSale(
+      { lines: [{ menuItemId: _s.MON, size: 'M', qty: 2, price: 30000, recipeId: _s.RECIPE, ice: 'KHONG' }] },
+      [mkUnit(30, 1000, 100), daUnit],
+      null,
+      reg
+    ).run());
+    assert.strictEqual(out.status, 'COMPLETED');
+    var iceEntry = out.plan.ledgerEntries.filter(function (e) { return e.itemId === _s.DA; })[0];
+    assert.ok(iceEntry, 'thiếu ledger entry trừ đá — chọn "không đá" vẫn phải trừ theo chốt N2 (không phân biệt)');
+    assert.strictEqual(iceEntry.qtyDelta, -40, '2 ly x 20/ly');
+  });
+
+  test('N2: chưa cấu hình đá thì KHÔNG trừ thêm gì (mặc định tắt, không đoán mò)', function () {
+    var out = assertOk(runSale().run());
+    assert.strictEqual(out.plan.ledgerEntries.filter(function (e) { return e.itemId === _s.DA; }).length, 0);
+  });
+
+  describe('N12 — đổi tem lấy ly miễn phí, gọi TRỰC TIẾP trong RecordSale (mục 7): cùng thành/bại với chính bill', function () {
+    var cust = _s.ids.deterministicId('customer', ['kh1']);
+    var LEDGER = _s.LEDGER;
+
+    function stampEntries(balance) {
+      return [assertOk(LEDGER.createEntry({
+        customerId: cust, storeId: _s.STORE, currency: LEDGER.CURRENCY.STAMPS, delta: balance,
+        reason: LEDGER.REASON.EARN_SALE, referenceId: 'bill_prior', operationId: 'operation_prior',
+        businessDate: '2026-03-09'
+      }))];
+    }
+
+    function billWithRedemption(over) {
+      return Object.assign({
+        customerId: cust,
+        redemption: { type: 'STAMP_FREE_DRINK' },
+        lines: [
+          { menuItemId: _s.MON, size: 'M', qty: 1, price: 30000, recipeId: _s.RECIPE },
+          { menuItemId: _s.MON, size: 'M', qty: 1, price: 30000, recipeId: _s.RECIPE, isFree: true }
+        ]
+      }, over || {});
+    }
+
+    test('đủ 6 tem: bill chốt, trừ 6 tem + cộng 1 ly miễn phí vào sổ loyalty', function () {
+      var out = assertOk(runSale(billWithRedemption(), null, null, null, stampEntries(6)).run());
+      assert.strictEqual(out.status, 'COMPLETED');
+      var loyaltyRecords = out.plan.domainRecords.filter(function (r) { return r.type === 'loyaltyLedgerEntry'; });
+      var stampSpend = loyaltyRecords.filter(function (r) { return r.record.currency === 'STAMPS'; })[0];
+      var drinkGain = loyaltyRecords.filter(function (r) { return r.record.currency === 'FREE_DRINKS'; })[0];
+      assert.ok(stampSpend, 'thiếu dòng sổ trừ tem');
+      assert.strictEqual(stampSpend.record.delta, -6);
+      assert.ok(drinkGain, 'thiếu dòng sổ cộng ly miễn phí');
+      assert.strictEqual(drinkGain.record.delta, 1);
+      var bRecord = out.plan.domainRecords.filter(function (r) { return r.type === 'bill'; })[0].record;
+      assert.strictEqual(bRecord.total, 30000, 'dòng free không tính tiền');
+    });
+
+    test('KHÔNG đủ tem: bill KHÔNG được chốt — không âm thầm cho miễn phí mà không trừ sổ', function () {
+      var out = runSale(billWithRedemption(), null, null, null, stampEntries(3)).run();
+      assertErr(out, 'PRECONDITION');
+    });
+
+    test('không mang sổ tem cũ (mặc định []) thì cũng bị từ chối, không đoán mò khách đủ tem', function () {
+      var out = runSale(billWithRedemption()).run();
+      assertErr(out, 'PRECONDITION');
+    });
+
+    test('bill KHÔNG có redemption thì không đụng gì tới sổ loyalty ngoài SaleCompleted (đã có sẵn)', function () {
+      var out = assertOk(runSale({ customerId: cust }).run());
+      var loyaltyRecords = out.plan.domainRecords.filter(function (r) { return r.type === 'loyaltyLedgerEntry'; });
+      assert.strictEqual(loyaltyRecords.length, 0);
+    });
   });
 
   test('N10 (§2.3a): món chưa khai định mức KHÔNG chặn bán — legacy chỉ soft-warn', function () {
