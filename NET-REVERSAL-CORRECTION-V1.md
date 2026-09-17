@@ -26,7 +26,7 @@ dùng 1 nguồn duy nhất. Bảng dưới đối chiếu với code core mới 
 | 1b | Xoá bill (QUANLY) | `quanlygieo.html:10633-10745` | `ReverseTransaction` (CÙNG API với 1a) | 🔴 **BỎ hẳn nhánh cộng thẳng `currentStock`** — đây chính xác là "Bug #17" mà comment `reconciliation.js:98` ghi rõ đã đóng: `qlReverseStockForOrder` không còn tồn tại, mọi hoàn kho đi qua đúng 1 cửa `reverseAllocations()` |
 | 2 | `qlReverseStockForOrder` | quanlygieo.html | (không còn API riêng — nằm trong 1a/1b) | 🔴 **BỎ** — xác nhận lại: grep code mới không còn hàm tương đương độc lập |
 | 3 | Sửa 1 dòng ledger sai | GAP ở legacy — không tồn tại, chỉ có compensating-entry/reclassify-type rải rác | `CorrectLedgerEntry` (mới) | 🟢 **THÊM MỚI** — ghi dòng ĐẢO + dòng ĐÚNG, `referenceId` trỏ về dòng gốc, KHÔNG update tại chỗ (đúng nguyên tắc ledger append-only, tránh lặp lại pattern mutate-tại-chỗ của `ctnDaoHaoHutMa`) |
-| 4 | Receiving correction (sửa giá nhập) | thiếu nhánh sửa giá, không atomic (Bug #20) | *(chưa có đích để ánh xạ)* | 🔴🟢 **KHÔNG XÁC ĐỊNH ĐƯỢC — xem mục cảnh báo bên dưới: chưa có `ReceiveGoods` command trong core mới** |
+| 4 | Receiving correction (sửa giá nhập) | thiếu nhánh sửa giá, không atomic (Bug #20) | `CorrectReceivingCost` (`commands/receiving.js`, RM3) | 🟢 **THÊM MỚI — ĐÃ ĐÓNG (2026-09-17)**: xem mục cảnh báo bên dưới, đã cập nhật — `ReceiveGoods`/`CorrectReceivingCost` đã xây (`NET-RAW-MATERIAL-V1.md` RM1/RM3) |
 | 5 | BTP yield correction | Có, nhưng COGS lịch sử trôi | `ReviseState` | 🟡 **GIỮ nghiệp vụ, ĐỔI CÁCH LÀM** — `historicalPolicy: FREEZE\|RECOMPUTE` bắt buộc khai (đóng đúng gap "COGS lịch sử trôi không ai biết") |
 | 6 | Found-after-Lost | Deduction lương chưa từng tạo — đứt ở gốc (route duyệt Lost không tồn tại) | `ReportLostContainer`+`ApproveLostContainer`(`approval.js`)+`RestoreFoundContainer` | 🟢 **THÊM MỚI route duyệt** (đóng đúng Bug #12 — Unit vào `PENDING_REVIEW` chờ duyệt, không tự động LOST) + 🟡 giữ nguyên quyết định "Unit mới nguyên, không suy luận lại phần đã dùng trước khi mất" (§8, `RestoreFoundContainer` comment) |
 | 7 | Huỷ mẻ đang nấu | Dùng chung engine 1a, có transaction giành lô | `ReverseTransaction` (CÙNG API) | 🟡 **GIỮ, GỘP LÀM 1** — không còn code riêng cho BTP |
@@ -87,25 +87,28 @@ sự kiện là việc phải làm ĐẦU TIÊN**, không phải việc riêng c
 
 ---
 
-## 🔴 PHÁT HIỆN MỚI CỦA LƯỢT NET NÀY — "Receiving correction" (case #4) không có gì để sửa, vì NHẬP HÀNG chưa có command
+## ✅ ĐÃ ĐÓNG (2026-09-17) — "Receiving correction" (case #4) từng không có gì để sửa vì NHẬP HÀNG chưa có command
 
-Case #4 trong chain-trace mô tả lỗi khi SỬA giá nhập hàng đã ghi sai. Khi
-đối chiếu sang core mới: **`src/layers/commands/` không có `ReceiveGoods`
-hay bất kỳ command nào tạo Unit qua đường nhập hàng thật** (chỉ có
-`unit.createUnit()`/`unit.seedUnitFromLegacy()` ở tầng thấp — xem
-`SEED-CONTRACT-V1.md` §3.1 — nhưng không có COMMAND tầng nghiệp vụ nào gọi
-`createUnit()` cho luồng "nhân viên quầy nhập hàng thật, có giá, có nhà cung
-cấp"). `FEATURE-TREE-V1.md` [2a] có vẽ `ReceiveGoods` trong sơ đồ nhưng đây
-mới là THIẾT KẾ, chưa có code.
+Case #4 trong chain-trace mô tả lỗi khi SỬA giá nhập hàng đã ghi sai. Lúc
+lượt NET này viết lần đầu, đối chiếu sang core mới cho thấy
+**`src/layers/commands/` không có `ReceiveGoods` hay bất kỳ command nào tạo
+Unit qua đường nhập hàng thật** (chỉ có `unit.createUnit()`/
+`unit.seedUnitFromLegacy()` ở tầng thấp — xem `SEED-CONTRACT-V1.md` §3.1 —
+nhưng không có COMMAND tầng nghiệp vụ nào gọi `createUnit()` cho luồng
+"nhân viên quầy nhập hàng thật, có giá, có nhà cung cấp"). `FEATURE-TREE-V1.md`
+[2a] có vẽ `ReceiveGoods` trong sơ đồ nhưng lúc đó mới là THIẾT KẾ, chưa có
+code — nên case #4 KHÔNG THỂ phân loại BỎ/GIỮ/THÊM MỚI, thiếu cả đích để
+ánh xạ.
 
-**Hệ quả**: case #4 hiện KHÔNG THỂ phân loại BỎ/GIỮ/THÊM MỚI — không có đích
-để ánh xạ. Đây không phải lỗi của domain Reversal, mà là một domain còn
-thiếu hoàn toàn ở tầng command: **"Nhập hàng" (Receiving)**, đứng trước cả
-Raw Material trong vòng đời 1 lô hàng
-(`ReceiveGoods → Unit{sealed} → OpenContainer → CONSUME → CountStock →
-ReconcileInventory`). Cần thêm 1 lượt NET riêng cho domain này (gộp chung
-với Raw Material hoặc tách riêng — đề xuất gộp, vì đây chính là "đầu vào"
-của cùng 1 vòng đời Unit mà Raw Material mô tả "đầu ra").
+**Đã đóng**: domain Receiving đã được xây trong `commands/receiving.js`
+(`NET-RAW-MATERIAL-V1.md` RM1) — `ReceiveGoods` tạo Unit{sealed} thật từ
+nhập hàng (có giá, có nhà cung cấp), và `CorrectReceivingCost` (RM3, cùng
+file) đóng đúng gap case #4: sửa GIÁ nhập sai của 1 lô đã sealed, qua
+`unit.reviseCostBasis()`, atomic đúng 1 bước qua command pipeline (đóng Bug
+#20 "không atomic" của legacy). Sửa LƯỢNG nhập sai đi qua `AdjustInventory`
+(RM2, đã có từ trước, cũng atomic 1 bước qua `physicalReconciliation`).
+`NET-RAW-MATERIAL-V1.md` §125 đã ghi nhận chéo: "RM1 ... trước đây là cùng
+một gap đã nêu ở case #4 ... nay đã đóng, case #4 mở khoá."
 
 ---
 
@@ -113,8 +116,7 @@ của cùng 1 vòng đời Unit mà Raw Material mô tả "đầu ra").
 
 - 🔴 **BỎ**: case 1b (nhánh cộng thẳng `currentStock`), case 2 (`qlReverseStockForOrder` xoá hẳn)
 - 🟡 **GIỮ, ĐỔI CÁCH LÀM**: case 1a+1b (gộp), case 5, case 7, case 8 (gộp vào #3), case 9
-- 🟢 **THÊM MỚI**: case 3 (`CorrectLedgerEntry`), case 6 (route duyệt Lost), case 10 (loyalty theo phần chênh)
-- ⚪ **CHƯA XÁC ĐỊNH ĐƯỢC** (không phải "chưa quyết" — thiếu cả đích để quyết): case 4 (Receiving correction) — phụ thuộc 1 domain command chưa tồn tại
+- 🟢 **THÊM MỚI**: case 3 (`CorrectLedgerEntry`), case 4 (Receiving correction — `CorrectReceivingCost`, **ĐÃ ĐÓNG 2026-09-17**, xem mục "PHÁT HIỆN MỚI" phía trên), case 6 (route duyệt Lost), case 10 (loyalty theo phần chênh)
 
 ## VIỆC PHẢI LÀM
 
@@ -122,11 +124,16 @@ của cùng 1 vòng đời Unit mà Raw Material mô tả "đầu ra").
    giờ đã xác nhận cần phục vụ ít nhất `OrderVoided`, `ContainerFound`,
    `SaleCompleted`, `SaleAmountIncreased`, có thể cả `BatchCancelled` —
    nên dựng 1 lần, đủ tổng quát cho mọi domain, không vá riêng từng cái.
-2. Thêm 1 lượt NET cho domain **Receiving/Nhập hàng** (đứng trước Raw
-   Material trong vòng đời Unit) — hiện hoàn toàn chưa có command, nên case
-   #4 của Reversal còn treo, và cả Raw Material lẫn Cutover/Seed đều phụ
-   thuộc gián tiếp vào domain này để có Unit thật đưa vào FIFO.
-3. Domain Payroll cần 1 lượt NET riêng để xác nhận "khoản trừ trách nhiệm
-   nhân viên khi mất container" có được mô hình hoá chưa — hiện chỉ biết
-   `ContainerFound` PHẢI hoàn khoản trừ đó (theo đúng comment
-   `RestoreFoundContainer`) nhưng chưa xác nhận phía payroll có gì để hoàn.
+2. ~~Thêm 1 lượt NET cho domain **Receiving/Nhập hàng**~~ — **ĐÃ ĐÓNG
+   (2026-09-17)**: `commands/receiving.js` (`ReceiveGoods` +
+   `CorrectReceivingCost`) đã xây, xem `NET-RAW-MATERIAL-V1.md` RM1/RM3 —
+   case #4 của Reversal đã mở khoá (mục "PHÁT HIỆN MỚI" phía trên).
+3. ~~Domain Payroll cần 1 lượt NET riêng để xác nhận "khoản trừ trách nhiệm
+   nhân viên khi mất container" có được mô hình hoá chưa~~ — **ĐÃ TRẢ LỜI VÀ
+   THI CÔNG** (quyết định chủ quán mục 4: "hệ thống mới cần quy trách nhiệm
+   rõ ràng, do FIFO phải truy xuất được"): domain con mới `hr/liability.js`
+   — state machine `PENDING → {WAIVED, DEDUCTED, REVERSED}` — nối xuyên suốt
+   `ApproveLostContainer → RestoreFoundContainer → computePayroll →
+   ClosePayroll`, xem `NET-PAYROLL-V1.md` mục "Liên kết chéo domain".
+   `RestoreFoundContainer` REVERSE đúng liability khi container tìm lại
+   được, trả lời dứt điểm câu hỏi từng treo ở đây.

@@ -80,7 +80,7 @@ L9 ĐIỀU PHỐI SỰ KIỆN — nút thắt hiện đang TRỐNG, chặn L2/L4
 | Hệ cũ | 🔴 **ĐỨT CHUỖI (đã audit, đã xác nhận lại qua NET-SALES N11/N15)** — `_submitAddonImpl` (`posgieo.html:22848-22919`) gọi lại FIFO/COGS cho phần chênh nhưng KHÔNG hề gọi `loyaltyAddPoints`/`loyaltyAddStamps`. Khách trả thêm tiền, không được cộng thêm điểm. |
 | Hệ mới | `loyalty/accrual.accrueForAddon()` — tích cho ĐÚNG `addedAmount`, `referenceId` gồm cả `addonSeq` nên 2 lần addon khác nhau ra 2 dòng khác nhau, lặp cùng `addonSeq` thì trùng `entryId` (không cộng đúp) |
 | Phân loại | 🟢 **THÊM MỚI** — đóng đúng gap đã audit |
-| 🔴 Vẫn treo | `commands/sales.RecordAddon` (sales.js:336) đã phát event `SaleAmountIncreased` — nhưng KHÔNG có gì gọi `accrueForAddon` cả (xem L9). Logic viết xong, chưa nối dây. |
+| ✅ ĐÃ NỐI | `commands/sales.RecordAddon` (sales.js:336) phát event `SaleAmountIncreased` → `bootstrap/domain-events.js ROUTES` đã khai route sang `AccrueLoyaltyForAddon` (`commands/loyalty.js`, gọi đúng `accrual.accrueForAddon`), đăng ký trong `bootstrap/runtime.js COMMANDS` — dispatch tự động sau mỗi `RecordAddon` thành công. Có test end-to-end: `tests/unit/loyalty.test.js` ("RecordAddon có customer denormalized → tự động chạy AccrueLoyaltyForAddon"). Ghi chú "Vẫn treo" trước đây đã lỗi thời so với `VIỆC PHẢI LÀM` mục 1 bên dưới — sửa lại cho khớp. |
 
 ### L5 — Hoàn điểm/tem khi huỷ bill
 
