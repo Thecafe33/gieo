@@ -145,6 +145,17 @@ Sau khi L9 (tầng điều phối sự kiện — `bootstrap/domain-events.js`) 
 ## VIỆC PHẢI LÀM (tích lũy, không chặn)
 
 1. ~~Xây tầng điều phối sự kiện — AlertEngine là domain thứ 5 xác nhận cần nó, và là domain có NHIỀU HANDLER TỰ NHIÊN NHẤT để bắt đầu.~~ **ĐÃ XONG** — `commands/alerts.js` (`RaiseAlert`) + 3 route mới trong `bootstrap/domain-events.js` (`PrepYieldMismatch`, `LostContainerReported`, `StockCountPartiallyApplied`). ~~Còn lại: `markSeen`/`resolve` (AL6) chưa có command riêng gọi từ UI được.~~ **ĐÃ LÀM**: `commands/alerts.js` nay có `MarkAlertSeen` (wrap `alerts/alert.js#markSeen()`, authority `['EXECUTE','REVIEW_APPROVE_CORRECT']` — cả POS lẫn QUANLY đều đánh dấu "đã xem" được, không tắt cảnh báo) và `ResolveAlert` (wrap `#resolve()`, authority `REVIEW_APPROVE_CORRECT` — mọi loại `MANUAL_WITH_REFERENCE` đều audience QUANLY nên không loại nào cần POS đóng; validate chỉ kiểm tra input tồn tại, logic domain — chặn AUTO_VERIFIABLE, đòi `referenceId` — vẫn ở lib). Cả hai nhận thẳng bản ghi `alert` hiện tại qua input (denormalized input, giống mọi command khác), đăng ký trong `bootstrap/runtime.js COMMANDS`. Tests: `finance-alerts.test.js` ("MarkAlertSeen/ResolveAlert (AL6)").
-2. Khi nối UI (AL3): thiết kế lại StoreHealth/sidebar dot (QUANLY) VÀ FIFO-bell-style badge (POS) từ CÙNG một nguồn `GetAlerts`, không tách 2 đường như hệ cũ.
+2. ~~Khi nối UI (AL3): thiết kế lại StoreHealth/sidebar dot (QUANLY) VÀ
+   FIFO-bell-style badge (POS) từ CÙNG một nguồn `GetAlerts`, không tách 2
+   đường như hệ cũ.~~ — **ĐÃ ĐÓNG (rà lại 2026-09-17)**: cả 2 app đã port UI
+   này (từ đợt xây màn hình POS/QUANLY) và cả hai cùng đọc qua
+   `controller.getAlerts()`/`readAlerts()` → runtime query `GetAlerts` DUY
+   NHẤT, không có đường đọc thô riêng. `src/apps/quanly/main.js`: dot đếm
+   tổng cảnh báo trên sidebar (`.sb-dot`, dòng ~723) + màn `alertsScreen()`
+   liệt kê chi tiết theo bucket DANGER/WARNING. `src/apps/pos/main.js`:
+   `alertBanner()` hiện banner đếm DANGER/WARNING kèm 3 loại cảnh báo đầu —
+   không phải đúng hình icon chuông của legacy (đó là chi tiết CSS/UX, không
+   phải nguồn dữ liệu), nhưng cùng một `GetAlerts` với QUANLY, đúng ý chính
+   của mục này: không tách 2 đường như hệ cũ.
 3. Không có việc phải làm mới cho AL8 trừ khi chủ quán quyết định dựng lại tính năng "báo hết hàng" như một yêu cầu MỚI.
 4. Còn 2 event khác cũng phụ thuộc gap L9 mà lượt này CHƯA nối vào AlertEngine (nằm ngoài phạm vi "3 route rõ nhất"): `AlertRaised` chính nó (AL7 — kênh ngoài app, cần consumer riêng gửi push/SMS/Zalo, không phải việc của domain-events) và các event khác chưa audit hết (vd `PrepBatchExpiring`/`ContainerExpiring` có thể cần một tiến trình quét định kỳ thay vì chờ event — câu hỏi vận hành, không phải thiếu logic).

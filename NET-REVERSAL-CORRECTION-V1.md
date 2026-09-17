@@ -120,10 +120,20 @@ một gap đã nêu ở case #4 ... nay đã đóng, case #4 mở khoá."
 
 ## VIỆC PHẢI LÀM
 
-1. **Dựng tầng điều phối sự kiện** (chung với `NET-LOYALTY-V1.md` mục 1) —
+1. ~~**Dựng tầng điều phối sự kiện** (chung với `NET-LOYALTY-V1.md` mục 1) —
    giờ đã xác nhận cần phục vụ ít nhất `OrderVoided`, `ContainerFound`,
    `SaleCompleted`, `SaleAmountIncreased`, có thể cả `BatchCancelled` —
-   nên dựng 1 lần, đủ tổng quát cho mọi domain, không vá riêng từng cái.
+   nên dựng 1 lần, đủ tổng quát cho mọi domain, không vá riêng từng cái.~~ —
+   **ĐÃ ĐÓNG (rà lại 2026-09-17)**: L9 (`bootstrap/domain-events.js`) đã
+   dựng và route `SaleCompleted`/`SaleAmountIncreased`/`OrderVoided` (cùng 6
+   route alert khác — xem `NET-ALERTS-V1.md`). `ContainerFound` KHÔNG cần
+   route L9 — side-effect chính của nó (`hr/liability.js` reverse) chạy
+   ĐỒNG BỘ trong `RestoreFoundContainer`, không phải side-effect tuỳ chọn
+   deferrable (xem `NET-PAYROLL-V1.md` "Liên kết chéo domain"); event vẫn
+   được đẩy nhưng chỉ còn là thông báo phụ, không có consumer nào đang chờ.
+   `BatchCancelled` có khai trong `commands/reversal.js EVENTS` nhưng CHƯA
+   command nào phát ra (chỗ nối sẵn cho `ReverseTransaction` khi có caller
+   huỷ mẻ BTP thật, không phải gap đang treo).
 2. ~~Thêm 1 lượt NET cho domain **Receiving/Nhập hàng**~~ — **ĐÃ ĐÓNG
    (2026-09-17)**: `commands/receiving.js` (`ReceiveGoods` +
    `CorrectReceivingCost`) đã xây, xem `NET-RAW-MATERIAL-V1.md` RM1/RM3 —
