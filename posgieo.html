@@ -18405,10 +18405,50 @@ async function reverseSalesConsumptionPOS(order, orderId) {
       _ueWarnReverseFailed(orderId, order && order.billCode, failed.length).catch(() => {});
     }
     refreshFifoAlert().catch(() => {}); // xoá đơn có thể vừa "mở lại" phần tem chưa thật sự cạn
+    // [MỚI — Tuần 4 truy xuất] order_stock_traces_gieogieo (xem applySalesConsumptionPOS) đóng
+    // băng allocations tại THỜI ĐIỂM BÁN — hoàn kho ở trên không hề sửa lại field đó, nên nếu
+    // không đánh dấu, Bill ↔ Tem sẽ mãi mãi nói "bill này lấy từ tem X" dù đã hoàn/xoá thật.
+    // Không xoá doc (vẫn còn giá trị lịch sử — "lúc bán từng lấy từ tem nào"), chỉ gắn cờ để
+    // màn tra cứu biết KHÔNG còn hiệu lực với tồn kho hiện tại.
+    fstore.collection('order_stock_traces_gieogieo').doc(orderId).set({
+      reversed: true, reversedAt: new Date().toISOString(), reversePartialFailure: failed.length > 0
+    }, { merge: true }).catch(err => console.warn('[stockTrace] đánh dấu reversed lỗi', orderId, err));
     return { ok: failed.length === 0, failedCount: failed.length };
   } catch (err) {
     console.warn('[Hoàn kho] reverseSalesConsumptionPOS lỗi:', err);
     _ueWarnReverseFailed(orderId, order && order.billCode, null).catch(() => {});
+    return { ok: false, failedCount: null };
+  }
+}
+
+// [BUG FIX — "xoá bill bổ sung trước kết ca lại CỘNG ẢO tồn kho"] applyBackfillConsumptionNoStock
+// Effect() (xem hàm đó) CỐ Ý không đụng currentStock/RT — bill dạng này chưa từng lấy hàng thật
+// ra khỏi kho theo Unit Engine, ledger chỉ ghi để đúng doanh thu/giá vốn NGÀY đó. Trước đây
+// delOrderConfirm() xoá MỌI bill đều gọi thẳng reverseSalesConsumptionPOS() — hàm đó tính lại
+// tiêu hao theo công thức rồi CỘNG THẲNG vào currentStock/RT, coi như "hoàn" một lượng hàng
+// CHƯA TỪNG bị trừ. Mỗi lần xoá một bill bổ sung kiểu này, kho ảo tăng lên đúng bằng công thức
+// của bill đó — sai theo chiều ngược hẳn với lỗi gốc mà tính năng backfill sinh ra để sửa.
+// Sửa: chỉ đánh dấu 'voided' lên đúng những dòng ledger backfillNoStockEffect của bill này
+// (không tạo giao dịch hoàn nào, vì có gì đâu mà hoàn) và gắn cờ reversed lên order_stock_traces.
+async function _voidBackfillConsumptionPOS(orderId) {
+  try {
+    const [stockSnap, prepSnap] = await Promise.all([
+      fstore.collection('stock_transactions_gieogieo').where('referenceId', '==', orderId).get(),
+      fstore.collection('prep_transactions_gieogieo').where('referenceId', '==', orderId).get()
+    ]);
+    const nowISO = new Date().toISOString();
+    const jobs = [];
+    stockSnap.forEach(d => { if (d.data().backfillNoStockEffect) jobs.push(d.ref.update({ voided: true, voidedAt: nowISO, voidedReason: 'Bill bị xoá' })); });
+    prepSnap.forEach(d => { if (d.data().backfillNoStockEffect) jobs.push(d.ref.update({ voided: true, voidedAt: nowISO, voidedReason: 'Bill bị xoá' })); });
+    jobs.push(fstore.collection('order_stock_traces_gieogieo').doc(orderId).set(
+      { reversed: true, reversedAt: nowISO }, { merge: true }));
+    const results = await Promise.allSettled(jobs);
+    const failedCount = results.filter(r => r.status === 'rejected').length;
+    return { ok: failedCount === 0, failedCount };
+  } catch (err) {
+    // KHÔNG đụng currentStock/RT dù lỗi ở đây — bill xoá vẫn an toàn, chỉ là dòng ledger có thể
+    // còn hiện trong báo cáo giá vốn ngày đó dù bill đã mất, đối soát tay nếu cần.
+    console.warn('[Hoàn kho] _voidBackfillConsumptionPOS lỗi (không ảnh hưởng tồn kho):', err);
     return { ok: false, failedCount: null };
   }
 }
@@ -23072,6 +23112,16 @@ async function applyAddonConsumptionPOS(orderBefore, orderAfter, orderId, note) 
     const results = await Promise.allSettled(jobs);
     results.forEach(r => { if (r.status === 'rejected') console.warn('[addon] trừ kho lỗi:', r.reason); });
     refreshFifoAlert().catch(() => {});
+    // [MỚI — Tuần 4 truy xuất] order_stock_traces_gieogieo (ghi bởi applySalesConsumptionPOS lúc
+    // bán) chỉ chụp đúng breakdown TẠI THỜI ĐIỂM BÁN — hàm này tính CHÊNH LỆCH rồi trừ/hoàn thẳng
+    // qua applyStockTransactionPOS/_reverseIngredientConsumptionPOS, không đi qua đường ghi lại
+    // snapshot đó. Không đủ thời gian gộp chính xác allocations mới vào snapshot (phần TĂNG có
+    // allocations riêng, phần GIẢM chia tỷ lệ xấp xỉ từ allocations gốc — xem scaledAlloc ở trên),
+    // nên chỉ đánh dấu RÕ là đã chỉnh sau khi bán để Bill ↔ Tem không hiển thị nhầm thành đầy đủ —
+    // đối soát phần thêm/giảm bằng ledger (referenceId=orderId) khi cần chính xác tuyệt đối.
+    fstore.collection('order_stock_traces_gieogieo').doc(orderId).set({
+      edited: true, editedAt: new Date().toISOString()
+    }, { merge: true }).catch(err => console.warn('[stockTrace] đánh dấu edited lỗi', orderId, err));
   } catch (err) {
     console.warn('[addon] applyAddonConsumptionPOS lỗi (không ảnh hưởng bill):', err);
   }
@@ -23361,8 +23411,14 @@ async function delOrderConfirm() {
   // thực sự làm chậm việc "xoá bill sai gấp" như lo ngại ban đầu — cái chậm lại (nếu có) đúng
   // là lúc hoàn kho đang gặp lỗi mạng, và đó chính xác là lúc NÊN chậm lại để biết kết quả
   // trước khi xoá chứng từ gốc, không phải lúc cần xoá tuột đi.
-  toast('⏳ Đang hoàn kho...');
-  const rv = await reverseSalesConsumptionPOS(o, delId);
+  // [BUG FIX] Bill "Bổ sung TRƯỚC kết ca" (o.backfillMode==='before_close') chưa từng trừ
+  // currentStock/RT — hoàn theo đường thường sẽ cộng ảo một lượng hàng chưa từng bị lấy ra
+  // (xem _voidBackfillConsumptionPOS ngay trên reverseSalesConsumptionPOS()).
+  const isBackfillNoStock = o.backfillMode === 'before_close';
+  toast(isBackfillNoStock ? '⏳ Đang huỷ bill bổ sung (không đụng tồn kho)...' : '⏳ Đang hoàn kho...');
+  const rv = isBackfillNoStock
+    ? await _voidBackfillConsumptionPOS(delId)
+    : await reverseSalesConsumptionPOS(o, delId);
 
   // Xoá trên Realtime Database
   db.ref(rtPath).remove()
@@ -23371,8 +23427,10 @@ async function delOrderConfirm() {
       _ordersInRam.delete(delId);
       orders = orders.filter(x => x.id !== delId);
       toast(rv.ok
-        ? '🗑 Đã xoá đơn — nguyên liệu đã hoàn về quầy (stamp/voucher cần Quản lý xử lý tay)'
-        : '🗑 Đã xoá đơn — nhưng hoàn kho ' + (rv.failedCount ? 'lỗi ' + rv.failedCount + ' dòng' : 'lỗi hoàn toàn') + ', đã báo Quản lý (Hộp thư cảnh báo)');
+        ? (isBackfillNoStock
+          ? '🗑 Đã xoá bill bổ sung — không đụng tồn kho (bill này chưa từng trừ)'
+          : '🗑 Đã xoá đơn — nguyên liệu đã hoàn về quầy (stamp/voucher cần Quản lý xử lý tay)')
+        : '🗑 Đã xoá đơn — nhưng ' + (isBackfillNoStock ? 'đánh dấu huỷ dòng sổ' : 'hoàn kho') + ' ' + (rv.failedCount ? 'lỗi ' + rv.failedCount + ' dòng' : 'lỗi hoàn toàn') + ', đã báo Quản lý (Hộp thư cảnh báo)');
       showScreen('hi');
     })
     .catch(err => {
