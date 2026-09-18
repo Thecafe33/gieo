@@ -1274,7 +1274,6 @@ html.phone-ui .nav-search .ns-kbd{display:none;}
 <body>
 
 <div class="app-shell">
-<div class="app-shell">
   <div class="sidebar-backdrop" id="sidebarBackdrop" onclick="closeSidebar()"></div>
   <div class="sidebar" id="sidebar">
     <div class="sidebar-brand">
@@ -1284,15 +1283,6 @@ html.phone-ui .nav-search .ns-kbd{display:none;}
         <path d="M15 20.5c3.6 0 6.5-2.9 6.5-6.5H15v6.5Z" fill="#C22B49"/>
       </svg>
       <div class="brand disp">GIEO GIEO</div>
-    </div>
-    <!-- Tìm nhanh trong menu: 40+ mục điều hướng, gõ 2-3 chữ nhanh hơn cuộn dò bằng mắt.
-         Trên máy có bàn phím: Ctrl/⌘ + K để nhảy vào ô này, ↑↓ chọn, Enter mở, Esc thoát. -->
-    <div class="nav-search">
-      <span class="ns-ic" id="navSearchIcon"></span>
-      <input id="navSearch" type="search" autocomplete="off" spellcheck="false"
-             placeholder="Tìm chức năng..." aria-label="Tìm chức năng"
-             oninput="onNavSearch(this.value)" onkeydown="onNavSearchKey(event)">
-      <span class="ns-kbd">⌘K</span>
     </div>
     <div id="sidebarNav"></div>
   </div>
@@ -1309,13 +1299,35 @@ html.phone-ui .nav-search .ns-kbd{display:none;}
         </div>
         <div class="topbar-actions">
           <div class="sync"><span class="dot busy" id="syncDot"></span><span id="syncTxt">syncing</span></div>
-          <button id="uiModeBtn" class="hib" onclick="cycleUiMode()" title="Đổi giao diện"></button>
           <button id="reloadBtn" class="hib" onclick="reloadCurrent()" aria-label="Tải lại"></button>
         </div>
       </div>
     </div>
     <div id="errBanner" style="display:none"></div>
-  <div class="wrap"><div class="card" id="gcoreStatus"><div class="muted">Đang tải nhân sự…</div></div></div>
+
+    <!-- TODAY — duy nhất màn được nối core mới ở lát cắt này (UI-LEGACY-MIGRATION-PLAN-V1
+         §4/§6). DOM/id giữ NGUYÊN VĂN theo quanlygieo.html#screen-today để CSS đã clone
+         ở Bước 1 áp đúng, không tạo class mới. Các khối không có nguồn dữ liệu tương
+         đương trong core mới được đánh dấu GAP ngay tại chỗ (renderTodayCore.js JS bên
+         dưới) — không giả lập số liệu. -->
+    <div class="screen active" id="screen-today">
+      <div class="wrap">
+        <div id="todayBook"></div>
+        <div id="todayNudge"></div>
+        <div id="todayHealthBar"></div>
+        <div id="todayHealth" hidden></div>
+        <div class="kgrid" id="todayGrid"></div>
+        <div class="kmini-grid" id="todayMini"></div>
+        <div id="todayBills"></div>
+        <div id="todayKhoFeed"></div>
+        <div class="sec-title">Doanh thu theo khung giờ</div>
+        <div id="todayHourly"></div>
+        <div id="todayThv"></div>
+        <div class="sec-title">Cảnh báo</div>
+        <div id="todayAlerts"></div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -19841,13 +19853,246 @@ GIEO.define('app-quanly/controller', [
       closeEditSheet(true);
       clearError();
       toast('✅ Đã đăng nhập — core mới sẵn sàng (' + session.employee.fullName + ')');
-      var status = document.getElementById('gcoreStatus');
-      if (status) {
-        status.innerHTML = '<div class="card"><b>Đăng nhập:</b> ' + escapeHtmlAttr(session.employee.fullName) +
-          ' (' + escapeHtmlAttr(session.actor.role) + ')<br><span class="muted">Core mới đã sẵn sàng — ' +
-          'chờ port màn tiếp theo.</span></div>';
-      }
+      renderTodayScreen();
       return out;
+    });
+  }
+
+  /* ===== Màn "Hôm nay · Sức khoẻ quán" (screen-today) =====
+     Lát cắt Pha B tiếp theo, 2026-09-18. Chỉ màn này — không đụng screen khác.
+     Mapping legacy renderToday()/computeStoreHealth() → query core mới đã được
+     rà soát kỹ (xem báo cáo mapping cùng phiên làm việc). Những gì core mới
+     KHÔNG có nguồn — vì chưa xây (P&L đầy đủ/hoà vốn/thu hồi vốn/targets) hoặc
+     vì store này CHƯA cutover nên GetAlerts/GetPendingApprovals chưa có đường
+     đọc từ schema cũ (bootstrap/legacy-data-source.js#NOT_WIRED) — được ĐÁNH
+     DẤU GAP tại chỗ, hiện nguyên văn lý do lỗi, TUYỆT ĐỐI không giả lập số. */
+  function reloadCurrent() { renderTodayScreen(); }
+  function openSidebar() {
+    var s = document.getElementById('sidebar'), b = document.getElementById('sidebarBackdrop');
+    if (s) s.classList.add('open');
+    if (b) b.classList.add('open');
+  }
+  function closeSidebar() {
+    var s = document.getElementById('sidebar'), b = document.getElementById('sidebarBackdrop');
+    if (s) s.classList.remove('open');
+    if (b) b.classList.remove('open');
+  }
+  function toggleNav(ev) { if (ev) ev.stopPropagation(); openSidebar(); }
+
+  function setSyncBusy(busy) {
+    var dot = document.getElementById('syncDot');
+    if (dot) dot.classList.toggle('busy', !!busy);
+  }
+
+  function renderRevenueGrid(el, revOut, cogsOut) {
+    if (!el) return;
+    if (R.isErr(revOut)) {
+      el.innerHTML = '<div class="kcard kcard-wide"><div class="klabel">Doanh thu hôm nay</div>' +
+        '<div class="ksub">Không đọc được: ' + escapeHtmlAttr(revOut.error.message) + '</div></div>';
+      return;
+    }
+    var rev = revOut.value;
+    var cogsHtml;
+    if (R.isOk(cogsOut)) {
+      var c = cogsOut.value;
+      cogsHtml = '<div class="kcard"><div class="klabel">Giá vốn (COGS)</div>' +
+        '<div class="kval">' + fmt(c.cogsActual !== null ? c.cogsActual : c.cogsTheoretical) + '</div>' +
+        '<div class="ksub">' + (c.cogsActual !== null ? 'Theo thực tế' : 'Theo định mức — chưa đủ vế thực tế') +
+        (c.missingActual && c.missingActual.length ? ' · ' + c.missingActual.length + ' bill thiếu vế thực' : '') +
+        '</div></div>';
+    } else {
+      cogsHtml = '<div class="kcard"><div class="klabel">Giá vốn (COGS)</div>' +
+        '<div class="ksub">Không đọc được: ' + escapeHtmlAttr(cogsOut.error.message) + '</div></div>';
+    }
+    el.innerHTML =
+      '<div class="kcard kcard-wide">' +
+        '<div class="klabel">Doanh thu hôm nay</div>' +
+        '<div class="kval disp">' + fmt(rev.netRevenue) + '</div>' +
+        '<div class="ksub">Gộp ' + fmt(rev.grossRevenue) + ' · giảm giá ' + fmt(rev.discountTotal) +
+        ' · phí kênh ' + fmt(rev.channelFees) + ' · ' + rev.billCount + ' bill</div>' +
+      '</div>' + cogsHtml +
+      '<div class="kcard" style="grid-column:1 / -1">' +
+        '<div class="ksub">Lãi/lỗ, điểm hoà vốn, mức sức khoẻ 5 màu, thu hồi vốn đầu tư: <b>GAP</b> — ' +
+        'core mới chưa có nguồn chi phí/khấu hao/lương nối vào GetPnL, và chưa xây lại công thức hoà vốn.</div>' +
+      '</div>';
+  }
+
+  function renderMini(el, revOut) {
+    if (!el) return;
+    var billCount = R.isOk(revOut) ? revOut.value.billCount : '—';
+    var gapCard = function (label) {
+      return '<div class="kcard"><div class="klabel">' + label + '</div><div class="kval">—</div>' +
+        '<div class="ksub">GAP — core mới chưa tính</div></div>';
+    };
+    el.innerHTML =
+      '<div class="kcard"><div class="klabel">Số bill</div><div class="kval">' + billCount + '</div>' +
+      '<div class="ksub">Core mới chưa có mục tiêu để so target (GAP)</div></div>' +
+      gapCard('AOV') + gapCard('IPT') + gapCard('DT / giờ công') + gapCard('Vốn trong kho');
+  }
+
+  function renderBillsAndHourly(billsEl, hourlyEl, billsOut) {
+    var bills = R.isOk(billsOut) ? (billsOut.value.bills || []) : null;
+    if (billsEl) {
+      if (bills === null) {
+        billsEl.innerHTML = '<div class="muted">Không đọc được bill hôm nay: ' + escapeHtmlAttr(billsOut.error.message) + '</div>';
+      } else if (!bills.length) {
+        billsEl.innerHTML = '<div class="muted">Chưa có bill nào hôm nay.</div>';
+      } else {
+        var sorted = bills.slice().sort(function (a, b) {
+          return String(b.occurredAt || '').localeCompare(String(a.occurredAt || ''));
+        });
+        billsEl.innerHTML = '<div class="sec-title">Bill gần nhất (' + bills.length + ')</div>' +
+          sorted.slice(0, 25).map(function (b) {
+            var t = b.occurredAt ? new Date(b.occurredAt) : null;
+            var timeTxt = (t && !isNaN(t.getTime())) ? pad(t.getHours()) + ':' + pad(t.getMinutes()) : '—';
+            var name = (b.legacySource && b.legacySource.customerName) || '';
+            var kenh = (b.channel && b.channel.type) || '';
+            return '<div class="health-item gray"><div class="hi-label">' + timeTxt +
+              (name ? ' · ' + escapeHtmlAttr(name) : '') +
+              (kenh ? ' <span style="color:var(--gt);font-weight:500">(' + escapeHtmlAttr(kenh) + ')</span>' : '') +
+              '</div><div class="hi-count">' + fmt(b.total) + '</div></div>';
+          }).join('') +
+          '<div class="muted" style="margin-top:8px">Đây là ảnh chụp lúc tải, chưa tự cập nhật realtime như bản cũ ' +
+          '(GAP — core mới chỉ đọc theo yêu cầu, chưa có kênh đẩy). Bấm nút tải lại ở góc trên để cập nhật.</div>';
+      }
+    }
+    if (hourlyEl) {
+      if (bills === null) {
+        hourlyEl.innerHTML = '<div class="muted">Không đọc được để vẽ biểu đồ giờ.</div>';
+        return;
+      }
+      var byHour = {};
+      bills.forEach(function (b) {
+        var t = b.occurredAt ? new Date(b.occurredAt) : null;
+        if (!t || isNaN(t.getTime())) return;
+        var h = t.getHours();
+        if (!byHour[h]) byHour[h] = { bill: 0, rev: 0 };
+        byHour[h].bill += 1;
+        byHour[h].rev += (b.total || 0);
+      });
+      var hours = Object.keys(byHour).map(Number).sort(function (a, b) { return a - b; });
+      if (!hours.length) {
+        hourlyEl.innerHTML = '<div class="hchart"><div class="hchart-empty">Chưa có bill nào hôm nay.</div></div>';
+        return;
+      }
+      var maxRev = Math.max.apply(null, hours.map(function (h) { return byHour[h].rev; }));
+      var PX = 120;
+      hourlyEl.innerHTML = '<div class="hchart"><div class="hchart-scroll"><div>' +
+        '<div class="hbars" style="height:' + (PX + 20) + 'px;">' +
+        hours.map(function (h) {
+          var v = byHour[h].rev;
+          var hi = maxRev ? Math.round((v / maxRev) * PX) : 0;
+          return '<div class="hbar' + (v === maxRev && maxRev > 0 ? ' peak' : '') + '" title="' +
+            pad(h) + ':00 · ' + byHour[h].bill + ' bill · ' + fmt(v) + '">' +
+            '<div class="hbar-n' + (v ? '' : ' zero') + '">' + (v ? fmtGon(v) : '') + '</div>' +
+            '<div class="hbar-fill' + (v ? '' : ' empty') + '" style="height:' + Math.max(hi, v ? 4 : 2) + 'px"></div></div>';
+        }).join('') +
+        '</div><div class="hchart-base"></div><div class="hbars">' +
+        hours.map(function (h) { return '<div class="hbar"><div class="hbar-h">' + pad(h) + '</div></div>'; }).join('') +
+        '</div></div></div>' +
+        '<div class="hchart-note" style="text-align:left;margin-top:6px;">Giờ công theo khung giờ: GAP — ' +
+        'core mới chưa có nguồn chấm công theo giờ.</div></div>';
+    }
+  }
+
+  function renderHealth(barEl, listEl, alertsOut, pendingOut) {
+    var rows = [];
+    var alertsErr = R.isErr(alertsOut) ? alertsOut.error.message : null;
+    var pendingErr = R.isErr(pendingOut) ? pendingOut.error.message : null;
+    if (R.isOk(alertsOut)) {
+      var a = alertsOut.value;
+      ['DANGER', 'WARNING'].forEach(function (tier) {
+        ((a.buckets && a.buckets[tier]) || []).forEach(function (it) {
+          rows.push({ tier: tier === 'DANGER' ? 'red' : 'yellow', label: it.title || it.type || 'Cảnh báo' });
+        });
+      });
+    }
+    if (R.isOk(pendingOut)) {
+      (pendingOut.value.items || []).forEach(function (it) {
+        rows.push({ tier: 'yellow', label: it.label || it.type || 'Việc chờ duyệt' });
+      });
+    }
+    var red = rows.filter(function (r) { return r.tier === 'red'; });
+    var yellow = rows.filter(function (r) { return r.tier === 'yellow'; });
+    if (barEl) {
+      if (!red.length && !yellow.length && !alertsErr && !pendingErr) {
+        barEl.innerHTML = '<div class="hbar-sum ok" style="cursor:default">' + ic('check', 16, 'var(--ok)') +
+          '<span class="hbs-txt">Không có việc gì cần xử lý ngay</span></div>';
+      } else {
+        var parts = [];
+        if (red.length) parts.push('<b>' + red.length + '</b> việc cần xử lý ngay');
+        if (yellow.length) parts.push('<b>' + yellow.length + '</b> việc nên xem');
+        if (alertsErr || pendingErr) parts.push('có phần chưa đọc được');
+        barEl.innerHTML = '<div class="hbar-sum ' + (red.length ? 'bad' : 'warn') + '" style="cursor:default">' +
+          icDot(red.length ? 'var(--bad)' : 'var(--warn)', 10) +
+          '<span class="hbs-txt">' + parts.join(' · ') + '</span></div>';
+      }
+    }
+    if (listEl) {
+      listEl.hidden = false;
+      var row = function (x) {
+        return '<div class="health-item ' + x.tier + '"><div class="hi-label">' + escapeHtmlAttr(x.label) + '</div></div>';
+      };
+      listEl.innerHTML =
+        (red.length ? '<div class="health-group-title">Cần xử lý ngay (' + red.length + ')</div>' + red.map(row).join('') : '') +
+        (yellow.length ? '<div class="health-group-title">Nên xem (' + yellow.length + ')</div>' + yellow.map(row).join('') : '') +
+        (!red.length && !yellow.length && !alertsErr && !pendingErr
+          ? '<div class="health-all-clear">' + ic('check', 20) + ' Mọi thứ ổn</div>' : '') +
+        (alertsErr ? '<div class="muted" style="margin-top:8px">Cảnh báo: ' + escapeHtmlAttr(alertsErr) + '</div>' : '') +
+        (pendingErr ? '<div class="muted" style="margin-top:4px">Việc chờ duyệt: ' + escapeHtmlAttr(pendingErr) + '</div>' : '') +
+        '<div class="muted" style="margin-top:8px">Core mới CHƯA theo dõi (GAP): container quá hạn/chưa dán tem, ' +
+        'tồn kho âm, đơn đặt hàng chưa nhận đủ, refill không được, băng nhắc chốt sổ tháng.</div>';
+    }
+  }
+
+  function renderTodayGaps(khoFeedEl, thvEl, bookEl, nudgeEl, alertsEl) {
+    if (bookEl) bookEl.innerHTML = '';
+    if (nudgeEl) nudgeEl.innerHTML = '';
+    if (khoFeedEl) khoFeedEl.innerHTML = '';
+    if (thvEl) thvEl.innerHTML = '<div class="kgrid" style="margin-top:12px">' +
+      '<div class="kcard" style="grid-column:1 / -1"><div class="klabel">Thu hồi vốn đầu tư</div>' +
+      '<div class="ksub" style="margin-top:6px">GAP — core mới chưa có phép tính này.</div></div></div>';
+    if (alertsEl) alertsEl.innerHTML = '<div class="muted">So sánh với mục tiêu (AOV/COGS%/lương·ly/IPT/hao hụt): ' +
+      'GAP — core mới chưa có khái niệm "mục tiêu" (targets).</div>';
+  }
+
+  function renderTodayScreen() {
+    var controller = window.GIEO_QUANLY_CONTROLLER;
+    if (!controller) return;
+    var todayKey = dkey(new Date());
+    var gridEl = document.getElementById('todayGrid');
+    var miniEl = document.getElementById('todayMini');
+    var billsEl = document.getElementById('todayBills');
+    var hourlyEl = document.getElementById('todayHourly');
+    var healthBarEl = document.getElementById('todayHealthBar');
+    var healthEl = document.getElementById('todayHealth');
+    var khoFeedEl = document.getElementById('todayKhoFeed');
+    var thvEl = document.getElementById('todayThv');
+    var bookEl = document.getElementById('todayBook');
+    var nudgeEl = document.getElementById('todayNudge');
+    var alertsEl = document.getElementById('todayAlerts');
+
+    setSyncBusy(true);
+    if (gridEl) gridEl.innerHTML = '<div class="kcard kcard-wide"><div class="klabel">Doanh thu</div><div class="ksub">Đang tải…</div></div>';
+
+    Promise.all([
+      controller.getRevenue({ storeId: STORE_ID, businessDate: todayKey }),
+      controller.getCOGS({ storeId: STORE_ID, businessDate: todayKey }),
+      controller.getBillsForRange({ storeId: STORE_ID, from: todayKey, to: todayKey }),
+      controller.getAlerts({ storeId: STORE_ID }),
+      controller.getPendingApprovals({ storeId: STORE_ID })
+    ]).then(function (results) {
+      var revOut = results[0], cogsOut = results[1], billsOut = results[2], alertsOut = results[3], pendingOut = results[4];
+      renderRevenueGrid(gridEl, revOut, cogsOut);
+      renderMini(miniEl, revOut);
+      renderBillsAndHourly(billsEl, hourlyEl, billsOut);
+      renderHealth(healthBarEl, healthEl, alertsOut, pendingOut);
+      renderTodayGaps(khoFeedEl, thvEl, bookEl, nudgeEl, alertsEl);
+      clearError();
+    }).catch(function (err) {
+      showError('Không tải được dữ liệu Hôm nay: ' + (err && err.message ? err.message : err));
+    }).then(function () {
+      setSyncBusy(false);
     });
   }
 
