@@ -19899,6 +19899,16 @@ GIEO.define('app-quanly/controller', [
   }
   function toggleNav(ev) { if (ev) ev.stopPropagation(); openSidebar(); }
 
+  /* [FIX] Các hàm trên được gọi từ thuộc tính onclick="..." trong HTML tĩnh
+     và trong chuỗi innerHTML render động — thuộc tính onclick luôn phân giải
+     tên hàm ở phạm vi global, trong khi các hàm này lại được khai báo cục bộ
+     bên trong IIFE của composition root nên KHÔNG được global thấy, dẫn tới
+     ReferenceError âm thầm và click không có tác dụng. Expose đúng các hàm
+     bị gọi qua onclick/onchange lên window để khắc phục — không đổi logic. */
+  window.closeSidebar = closeSidebar;
+  window.toggleNav = toggleNav;
+  window.reloadCurrent = reloadCurrent;
+
   function setSyncBusy(busy) {
     var dot = document.getElementById('syncDot');
     if (dot) dot.classList.toggle('busy', !!busy);
@@ -20116,13 +20126,83 @@ GIEO.define('app-quanly/controller', [
     });
   }
 
-  /* ===== Điều hướng tối thiểu giữa các màn ĐÃ NỐI core mới =====
-     Chỉ liệt kê 2 màn đã build (today/health) — không tái tạo switchScreen()
-     đầy đủ của legacy (bản đó có nhánh gọi hàng chục hàm chưa port, sẽ vỡ). */
+  /* ===== Điều hướng giữa các màn =====
+     SCREENS = 2 màn ĐÃ NỐI core mới, thật sự bấm được (không tái tạo
+     switchScreen() đầy đủ của legacy — bản đó có nhánh gọi hàng chục hàm
+     chưa port, sẽ vỡ).
+     NAV_SECTIONS_FULL = NGUYÊN VĂN cấu trúc menu đầy đủ của quanlygieo.html
+     (const NAV_SECTIONS, dòng ~8502) — chỉ để HIỂN THỊ cho đủ, không phải
+     nghiệp vụ. Mục nào có key nằm trong SCREENS thì bấm được (switchScreen);
+     mục nào chưa port thì hiện disabled — không throw lỗi, không giả lập
+     điều hướng tới màn chưa tồn tại. "kho:bulkimport" theo đúng phạm vi bị
+     loại trừ vĩnh viễn (không bao giờ xây) vẫn liệt kê ở đây để khớp đúng
+     menu gốc, nhưng vĩnh viễn ở trạng thái disabled. */
   var curScreen = 'today';
   var SCREENS = [
     { key: 'today', label: 'Hôm nay · Sức khoẻ quán', ic: 'stethoscope' },
     { key: 'health', label: 'Sức khoẻ tài chính', ic: 'pulse' }
+  ];
+  var NAV_SECTIONS_FULL = [
+    { items: [{ key: 'today', ic: 'stethoscope', label: 'Hôm nay · Sức khoẻ quán' }] },
+    { group: 'Báo cáo', items: [
+      { key: 'health', ic: 'pulse', label: 'Sức khỏe tài chính' },
+      { key: 'report', ic: 'chart', label: 'Báo cáo kỳ' },
+      { key: 'mix', ic: 'clipboard', label: 'Phân tích bán hàng' },
+      { key: 'customer', ic: 'users', label: 'Khách hàng' }
+    ]},
+    { group: 'Vận hành', items: [
+      { key: 'entry:ops', ic: 'note', label: 'Ghi chú ngày' },
+      { key: 'entry:exp', ic: 'cashout', label: 'Chi phí' },
+      { key: 'entry:cash', ic: 'coins', label: 'Tiền mặt' },
+      { key: 'bills', ic: 'receipt', label: 'Lịch sử bill' }
+    ]},
+    { group: 'Kho', collapsible: true, items: [
+      { key: 'kho:inbox', label: 'Cần xử lý', sub: 'Bắt đầu ở đây' },
+      { key: 'kho:items', label: 'Nguyên liệu', sub: 'Hàng hoá' },
+      { key: 'kho:prep', label: 'Chế biến cấp 1' },
+      { key: 'kho:vessels', label: 'Dụng cụ đựng' },
+      { key: 'kho:packaging', label: 'Bao bì' },
+      { key: 'kho:toppingcogs', label: 'GOGS Topping' },
+      { key: 'kho:po', label: 'Đặt & nhận hàng', sub: 'Hoạt động' },
+      { key: 'kho:stockcount', label: 'Kiểm kê' },
+      { key: 'kho:containers', label: 'Hàng đang mở & tem' },
+      { key: 'kho:refill', label: 'Refill' },
+      { key: 'kho:locstock', label: 'Tồn theo vị trí' },
+      { key: 'kho:history', label: 'Lịch sử kho' },
+      { key: 'kho:location', label: 'Vị trí kho', sub: 'Cài đặt kho' },
+      { key: 'kho:wastereasons', label: 'Lý do hao hụt' },
+      { key: 'kho:checklist', label: 'Checklist ca' },
+      { key: 'kho:bulkimport', label: 'Nhập danh mục từ Excel' }
+    ]},
+    { group: 'Phân tích & dữ liệu', items: [
+      { key: 'kho:lechkho', ic: 'detective', label: 'Lệch kho & định lượng', sub: 'Sau mỗi lần kiểm kê' },
+      { key: 'kho:dubao', ic: 'chart', label: 'Dự báo & số mẻ', sub: 'Trước khi nấu' },
+      { key: 'entry:ngaydacbiet', ic: 'calendar', label: 'Ngày đặc biệt', sub: 'Khai trước ngày lễ' },
+      { key: 'entry:export', ic: 'download', label: 'Trích xuất dữ liệu', sub: 'Gửi Claude phân tích' }
+    ]},
+    { group: 'Nhân sự', items: [
+      { key: 'entry:nv', ic: 'users', label: 'Nhân viên' },
+      { key: 'entry:lich', ic: 'calendar', label: 'Lịch làm việc' },
+      { key: 'entry:chamcong', ic: 'clock', label: 'Chấm công' },
+      { key: 'entry:luong', ic: 'coins', label: 'Lương' },
+      { key: 'entry:nhacnho', ic: 'signature', label: 'Nhắc nhở' }
+    ]},
+    { group: 'Cấu hình', items: [
+      { key: 'entry:asset', ic: 'package', label: 'Tài sản' },
+      { key: 'entry:target', ic: 'settings', label: 'Mục tiêu' },
+      { key: 'sim', ic: 'sliders', label: 'Mô phỏng' },
+      { key: 'entry:dondep', ic: 'trash', label: 'Dọn dữ liệu' }
+    ]},
+    { group: 'Menu & Khuyến mãi', items: [
+      { key: 'mn', ic: 'clipboard', label: 'Quản lý Menu' },
+      { key: 'kho:recipe', ic: 'note', label: 'Định mức món' },
+      { key: 'entry:cogs', ic: 'coins', label: 'GOGS Món' },
+      { key: 'tg', ic: 'coins', label: 'Khuyến mãi' },
+      { key: 'assist', ic: 'robot', label: 'Trợ lý bán hàng' }
+    ]},
+    { group: 'Kiểm toán', items: [
+      { key: 'entry:audit', ic: 'detective', label: 'Kiểm toán' }
+    ]}
   ];
   function switchScreen(s) {
     if (!SCREENS.some(function (x) { return x.key === s; })) return;
@@ -20139,13 +20219,28 @@ GIEO.define('app-quanly/controller', [
     if (s === 'today') renderTodayScreen();
     if (s === 'health') renderHealthScreen();
   }
+  window.switchScreen = switchScreen; /* [FIX] gọi từ onclick trong renderSidebarNav() */
+  function isScreenBuilt(key) { return SCREENS.some(function (x) { return x.key === key; }); }
+  function navItemHtml(it, indent) {
+    var built = isScreenBuilt(it.key);
+    var cls = 'sidebar-item' + (indent ? ' sub' : '') + (built && curScreen === it.key ? ' active' : '');
+    var attrs = built ? ' onclick="switchScreen(\'' + it.key + '\')"' : ' disabled';
+    return '<button class="' + cls + '"' + attrs + '>' +
+      (it.ic ? '<span class="sb-ic">' + ic(it.ic, 18) + '</span>' : '') +
+      '<span>' + escapeHtmlAttr(it.label) + '</span></button>';
+  }
   function renderSidebarNav() {
     var nav = document.getElementById('sidebarNav');
     if (!nav) return;
-    nav.innerHTML = SCREENS.map(function (it) {
-      return '<button class="sidebar-item' + (curScreen === it.key ? ' active' : '') + '" ' +
-        'onclick="switchScreen(\'' + it.key + '\')"><span class="sb-ic">' + ic(it.ic, 18) + '</span>' +
-        '<span>' + escapeHtmlAttr(it.label) + '</span></button>';
+    nav.innerHTML = NAV_SECTIONS_FULL.map(function (sec) {
+      if (sec.collapsible) {
+        return '<div class="sidebar-item sidebar-head"><span class="sb-ic">' + ic('package', 18) + '</span><span>' + escapeHtmlAttr(sec.group) + '</span></div>' +
+          '<div class="sidebar-subtree">' + sec.items.map(function (it) {
+            return (it.sub ? '<div class="sidebar-sub-label">' + escapeHtmlAttr(it.sub) + '</div>' : '') + navItemHtml(it, true);
+          }).join('') + '</div>';
+      }
+      return (sec.group ? '<div class="sidebar-group-label">' + escapeHtmlAttr(sec.group) + '</div>' : '') +
+        sec.items.map(function (it) { return navItemHtml(it, false); }).join('');
     }).join('');
   }
 
@@ -20201,6 +20296,9 @@ GIEO.define('app-quanly/controller', [
     healthCustomEnd = document.getElementById('hcEnd').value;
     renderHealthScreen();
   }
+  window.healthShiftMonth = healthShiftMonth;   /* [FIX] gọi từ onclick trong renderHealthPeriodNav() */
+  window.healthShiftYear = healthShiftYear;     /* [FIX] gọi từ onclick trong renderHealthPeriodNav() */
+  window.healthCustomChanged = healthCustomChanged; /* [FIX] gọi từ onchange trong renderHealthPeriodNav() */
   function renderHealthPeriodNav() {
     var nav = document.getElementById('healthPeriodNav');
     if (!nav) return;
