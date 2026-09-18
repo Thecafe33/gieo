@@ -3774,15 +3774,31 @@ async function _ueRecomputeCurrentStock(itemId, coll) {
   // biết mình đã lỗi thời (so trong transaction Firestore) và bỏ qua, không ghi đè.
   const myStartedAt = Date.now();
   let sealedTotal = 0;
+  // [RACE FIX #2] 3 lượt đọc (sealed Firestore → RT → open Firestore) không cùng snapshot.
+  // Một container chuyển sealed→open ĐÚNG giữa lượt (1) và (2) bị đếm 2 lần: lượt (1) đã cộng
+  // baseQty của nó vào sealedTotal lúc còn 'sealed', rồi lượt (2) đọc RT lại thấy nó đã 'open'
+  // (mới ghi xong) nên cộng thêm unitBase vào openTotal — cùng một hàng hoá vật lý bị tính 2
+  // lần, currentStock ghi dư đúng bằng dung tích container đó (lộ ra ở kỳ kiểm kê kế tiếp
+  // thành "hao hụt" ma). Nhớ lại id+baseQty đã đếm ở (1); nếu id đó XUẤT HIỆN LẠI trong RT ở
+  // (2) — tức đã kịp mở giữa 2 lượt đọc — trừ ngược phần đã cộng nhầm ở sealedTotal, giữ đúng
+  // 1 lần theo số RT mới nhất (unitBase, có thể đã bị bán trừ ngay sau khi mở).
+  const sealedById = {};
   try {
     if (!isPrep) {
       const sealedSnap = await fstore.collection(coll).where('itemId', '==', itemId).where('status', '==', 'sealed').get();
-      sealedSnap.forEach(d => { sealedTotal += Number(d.data().baseQty) || 0; });
+      sealedSnap.forEach(d => {
+        const bq = Number(d.data().baseQty) || 0;
+        sealedById[d.id] = bq;
+        sealedTotal += bq;
+      });
     }
     const rtSnap = await _ueActiveUnitsRef(itemId).once('value');
     const rt = rtSnap.val() || {};
     let openTotal = 0;
-    Object.keys(rt).forEach(k => { openTotal += Number(rt[k].unitBase) || 0; });
+    Object.keys(rt).forEach(k => {
+      if (sealedById[k] !== undefined) sealedTotal -= sealedById[k];
+      openTotal += Number(rt[k].unitBase) || 0;
+    });
     // [BUG "Firestore open nhưng RT fail → mất Unit khi recompute" — FIX] unitEngineOnOpen() có
     // thể fail SAU KHI Firestore đã chuyển status sealed→open (hoặc BTP đã 'active') — hàng vật
     // lý CÓ THẬT, Firestore biết, nhưng RT (nguồn thật cho phần "đang mở") lại không có node
@@ -3954,17 +3970,39 @@ async function unitEngineReverseAllocations(itemId, allocations, coll) {
 // transaction — 2 transaction cùng đọc "chưa tồn tại" thì Firestore CHỈ cho ĐÚNG MỘT cái commit,
 // cái còn lại tự động retry và lần này đọc trúng bản đã 'claiming'/'done' của đối thủ, không tự
 // cho mình credit nữa (đúng cơ chế compare-and-swap, không phải suy đoán).
+// [FIX #2] Ngưỡng takeover claim hoàn kho — claim 'claiming' quá cũ (app crash/bị OS kill
+// đúng giữa lúc giành claim và lúc ghi 'done') coi như của một lượt đã chết, cho lượt sau
+// giành lại thay vì kẹt vĩnh viễn ở ambiguous:true (xem 2 nhánh comment ngay dưới giải thích
+// vì sao trước đây cố ý KHÔNG takeover — hệ quả là mất hẳn, không có đường tự phục hồi).
+// Rộng rãi (2 phút) so với một lượt claim khoẻ mạnh (RTDB transaction + tối đa 3 lần retry
+// trong unitEngineReverseAllocations/_ueRetryAsync, tổng cộng dưới ~2 giây) — cửa sổ vẫn có
+// rủi ro double-credit nếu app A chỉ CHẬM bất thường (>2 phút) chứ chưa chết hẳn, nhưng đó là
+// tình huống cực hiếm hơn hẳn "kẹt vĩnh viễn, mất luôn" mà bản cũ chấp nhận.
+const REVERSAL_CLAIM_STALE_MS = 2 * 60 * 1000;
 async function _ueClaimedReverseAllocations(claimId, itemId, allocations, coll) {
   const totalQty = (allocations || []).reduce((s, a) => s + (Number(a.qty) || 0), 0);
   if (!allocations || !allocations.length) return { appliedQty: 0, totalQty: 0 };
   const claimRef = fstore.collection('reversal_unit_claims_gieogieo').doc(claimId);
-  let iAmClaimer = false, existingData = null;
+  let iAmClaimer = false, existingData = null, tookOver = false;
   try {
     await fstore.runTransaction(async t => {
       const doc = await t.get(claimRef);
-      if (doc.exists) { existingData = doc.data(); return; }
+      if (doc.exists) {
+        const data = doc.data();
+        existingData = data;
+        // Claim 'claiming' còn tươi (hoặc claim cũ không có claimedAt kiểu số — dữ liệu từ
+        // trước khi có ngưỡng này, coi như không rõ tuổi, KHÔNG takeover để giữ hành vi cũ) →
+        // tôn trọng, không giành.
+        if (data.status === 'claiming' && typeof data.claimedAt === 'number'
+            && (Date.now() - data.claimedAt) < REVERSAL_CLAIM_STALE_MS) return;
+        if (data.status === 'claiming' && typeof data.claimedAt !== 'number') return;
+        // Còn lại: status !=='claiming' lạ (không phải 'done') hoặc 'claiming' đã quá cũ —
+        // coi là của một lượt đã chết, giành lại.
+        if (data.status === 'done') return; // đã xong hẳn — không có gì để giành
+        tookOver = true;
+      }
       iAmClaimer = true;
-      t.set(claimRef, { status: 'claiming', itemId, at: new Date().toISOString() });
+      t.set(claimRef, { status: 'claiming', itemId, claimedAt: Date.now(), at: new Date().toISOString() }, { merge: true });
     });
   } catch (err) {
     // [BUG "acquisition-transaction lỗi vẫn fallback như 'chưa hoàn'" — FIX] TRƯỚC ĐÂY trả thẳng
@@ -3990,6 +4028,18 @@ async function _ueClaimedReverseAllocations(claimId, itemId, allocations, coll) 
     // thêm (an toàn hơn: lỡ mất đúng lượng hoàn đó còn dễ phát hiện/sửa qua kiểm kê hơn là cộng
     // đúp âm thầm), chỉ trigger recompute để tự phản ánh đúng RT hiện có.
     return { appliedQty: 0, totalQty, ambiguous: true };
+  }
+  // [FIX #2] Ghi cảnh báo durable khi TAKEOVER một claim cũ — đây là dấu hiệu có lượt trước
+  // đã chết giữa chừng (crash/mất mạng/OS kill app). Không chặn luồng hoàn kho, chỉ để Quản lý
+  // biết mà đối soát nếu ngờ có double-credit (rủi ro rất nhỏ, xem chú thích REVERSAL_CLAIM_STALE_MS).
+  if (tookOver) {
+    fstore.collection('alerts_gieogieo').add({
+      type: 'reversal_claim_takeover', severity: 'warning', status: 'new',
+      claimId, itemId, businessDate: posDateKey(), createdAt: new Date().toISOString(),
+      title: `Claim hoàn kho "${claimId}" kẹt quá ${Math.round(REVERSAL_CLAIM_STALE_MS / 60000)} phút — đã giành lại để hoàn tiếp`,
+      previousClaimedAt: (existingData && existingData.claimedAt) || null,
+      note: 'Lượt trước có thể đã crash/mất mạng giữa lúc hoàn kho. Lượt này đã giành lại claim và tiếp tục hoàn — nếu nghi ngờ RT bị cộng đúp (rất hiếm), đối soát bằng kiểm kê.'
+    }).catch(() => {});
   }
   const r = await unitEngineReverseAllocations(itemId, allocations, coll);
   // [BUG cùng trên — FIX] Thử lại vài lần trước khi chấp nhận ghi 'done' lỗi — thu hẹp tối đa cửa
