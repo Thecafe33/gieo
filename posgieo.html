@@ -5024,6 +5024,23 @@ function tonLichSuCuaMon(itemData) {
 // quét nhiều mã liên tiếp, không hỏi lại PIN mỗi lần quét.
 async function writeAtomicContainerFinish(ref, c, staffEmp, lyDo, daQuet) {
   const nowISO = new Date().toISOString();
+  // [FIX #B — "atomic finish không dọn RT, gây tồn ảo tích luỹ"] Container "cái rời" có thể
+  // đã đi qua bước 'mở' bình thường trước đó (unitEngineOnOpen() đăng ký node RT cho MỌI
+  // container, không phân biệt atomic hay không — xem submitFinishContainer: nhánh atomic
+  // vẫn chạy khi c.status==='open'). unitEngineFinishOpenUnit() (container đo dung tích)
+  // luôn dọn RT khi chốt, nhưng hàm này trước đây chỉ update() Firestore, không đụng RT —
+  // node cũ (unitBase=baseQty, vì "cái rời" không bao giờ bị trừ dần) nằm lại vĩnh viễn.
+  // Lượt _ueRecomputeCurrentStock() kế tiếp cộng thêm đúng unitBase đó vào openTotal dù
+  // Firestore đã 'finished' — currentStock dư 1 đơn vị mỗi lần chốt qua đường này. Atomic
+  // container không có khái niệm nợ FIFO (baseQty luôn =1, không bị trừ dần như chai đo
+  // dung tích) nên luôn remove() thẳng, không cần nhánh finishedDebt như bên kia.
+  try {
+    await _ueActiveUnitsRef(c.itemId).child(ref.id).remove();
+  } catch (err) {
+    console.warn('[UnitEngine] atomic finish: gỡ RT lỗi, thử lại', ref.id, err);
+    try { await _ueActiveUnitsRef(c.itemId).child(ref.id).remove(); }
+    catch (err2) { console.error('[UnitEngine] atomic finish: KHÔNG gỡ được RT node — currentStock có thể dư 1 đơn vị, cần kiểm kê', ref.id, err2); }
+  }
   await ref.update({
     status: 'finished',
     // Đi thẳng từ sealed (chưa từng quét "mở") thì điền luôn mốc mở = mốc báo
@@ -5037,6 +5054,10 @@ async function writeAtomicContainerFinish(ref, c, staffEmp, lyDo, daQuet) {
     wasteBase: 0, wasteBasis: 'don_vi_nguyen',
     needsReview: false
   });
+  // [FIX #B] Suy lại currentStock từ tổng unit (RT đã gỡ node) — nếu container này TỪNG ở
+  // 'open' (có mặt trong RT), currentStock đang dư đúng 1 đơn vị cho tới khi recompute chạy;
+  // gọi ngay ở đây thay vì chờ recompute tiếp theo do một nghiệp vụ khác kích hoạt.
+  await _ueRecomputeCurrentStock(c.itemId, STOCK_CONTAINERS_COLL).catch(() => {});
 }
 
 // [MỚI] Hoàn lại MỘT container "cái" đã bị writeAtomicContainerFinish() chốt 'finished'
@@ -18320,6 +18341,20 @@ async function applySalesConsumptionPOS(order, orderId, businessDate) {
   } catch (err) {
     // Không chặn thanh toán — chỉ log, đúng nguyên tắc "tiêu hao lý thuyết" không phải bước bắt buộc.
     console.warn('[GOGS] applySalesConsumptionPOS lỗi (không ảnh hưởng bill):', err);
+    // [FIX #A — "outer catch nuốt lỗi âm thầm"] Khác với lỗi 1-2 dòng bên trong Promise.allSettled
+    // (đã có _ueWarnGogsConsumptionFailed cảnh báo), lỗi ở TẦNG NGOÀI này (đọc định mức/bao bì/
+    // topping lỗi — thường do mạng chập chờn ngay lúc Firestore đang được gọi) khiến TOÀN BỘ đơn
+    // KHÔNG trừ được kho: không một dòng CONSUMPTION nào được ghi, không referenceId nào trỏ tới
+    // đơn này. Trước đây chỉ console.warn — không dấu vết nào cho Quản lý, phát hiện được đúng
+    // lúc kiểm kê thấy "hao hụt" mà thật ra là bill bị nuốt trong lúc mất mạng. Ghi cảnh báo bền.
+    fstore.collection('alerts_gieogieo').doc(('gogs_outer_fail_' + orderId).replace(/[^\w\-]/g, '_').slice(0, 180)).set({
+      type: 'gogs_consumption_outer_failure', severity: 'danger', status: 'new',
+      businessDate: businessDate || posDateKey(), createdAt: new Date().toISOString(),
+      title: `Đơn ${(order && order.billCode) || orderId} bán xong nhưng KHÔNG trừ được kho`,
+      orderId, billCode: (order && order.billCode) || '',
+      errorMessage: String((err && (err.message || err.code)) || err || ''),
+      note: 'Đọc định mức/bao bì/topping lỗi (mạng chập chờn hoặc Firestore không truy cập được) — không có dòng ledger CONSUMPTION nào cho đơn này. Đối soát thủ công: mở đơn, đọc itemsArray, tính tiêu hao lý thuyết và ghi ADJUSTMENT bù.'
+    }, { merge: true }).catch(() => {});
   }
 }
 
@@ -18400,6 +18435,18 @@ async function applyBackfillConsumptionNoStockEffect(order, orderId, businessDat
   } catch (err) {
     // Không chặn việc tạo bill — chỉ log, giống nguyên tắc của applySalesConsumptionPOS.
     console.warn('[Bổ sung bill] ghi sổ tiêu hao (không đụng tồn) lỗi (không ảnh hưởng bill):', err);
+    // [FIX #A — cùng lỗi outer-catch-nuốt-lỗi, áp dụng cho nhánh backfill] Ở đây hậu quả nhẹ hơn
+    // (không đụng currentStock/RT nên không làm sai tồn kho), nhưng vẫn làm SAI doanh thu/giá vốn
+    // của đúng ngày mà tính năng "Bổ sung bill" sinh ra để sửa — không ghi cảnh báo thì không ai
+    // biết ngày đó vẫn còn thiếu breakdown tiêu hao của bill này.
+    fstore.collection('alerts_gieogieo').doc(('gogs_backfill_outer_fail_' + orderId).replace(/[^\w\-]/g, '_').slice(0, 180)).set({
+      type: 'gogs_backfill_outer_failure', severity: 'warning', status: 'new',
+      businessDate: businessDate || posDateKey(), createdAt: new Date().toISOString(),
+      title: `Bổ sung bill ${(order && order.billCode) || orderId} nhưng KHÔNG ghi được sổ tiêu hao`,
+      orderId, billCode: (order && order.billCode) || '',
+      errorMessage: String((err && (err.message || err.code)) || err || ''),
+      note: 'Không đụng tồn kho/RT (đúng chủ đích của chế độ bổ sung) nhưng thiếu hẳn dòng CONSUMPTION cho bill này — giá vốn/doanh thu ngày đó vẫn thiếu breakdown. Đối soát thủ công nếu cần báo cáo đúng ngày này.'
+    }, { merge: true }).catch(() => {});
   }
 }
 
@@ -18430,19 +18477,42 @@ async function applyBackfillConsumptionNoStockEffect(order, orderId, businessDat
 // quả thật để quyết định thông báo gì, không còn tự ý toast từ bên trong (tránh chồng toast).
 async function reverseSalesConsumptionPOS(order, orderId) {
   try {
-    const [recipes, toppingRecipes, packagingPresets, packagingItemOverrides, baggingRules, pkgRulesPack, baggingTable] = await Promise.all([ensureRecipesLoadedPOS(), ensureToppingRecipesLoadedPOS(), ensurePackagingPresetsLoadedPOS(), ensurePackagingItemOverridesLoadedPOS(), ensurePackagingBaggingRulesLoadedPOS(), ensurePackagingRulesLoadedPOS(), ensurePackagingBaggingTableLoadedPOS()]);
-    const { agg, prepAgg } = computeConsumptionForOrder(order, recipes, toppingRecipes, packagingPresets, packagingItemOverrides, baggingRules, pkgRulesPack.rules, pkgRulesPack.config, baggingTable);
+    // [FIX #C — "hoàn đơn tính lại công thức thay vì đọc ledger gốc"] TRƯỚC ĐÂY hàm này gọi
+    // computeConsumptionForOrder() để TÍNH LẠI tiêu hao theo công thức HIỆN TẠI rồi hoàn theo
+    // số đó — sai ở 3 tình huống có thật, đúng loại bug mà _reversePrepBatchInputsPOS() (hoàn
+    // mẻ BTP) đã tự vá từ trước bằng cách đọc ledger gốc thay vì tính lại (xem chú thích của
+    // hàm đó): (1) Quản lý sửa định mức món GIỮA lúc bán và lúc xoá đơn — hoàn theo số MỚI
+    // trong khi ledger ghi số CŨ, kho dư/hụt đúng phần chênh; (2) lúc bán bị chặn sàn 0 ở
+    // locationStock (quầy pha) nên số trừ THẬT ít hơn định mức — hoàn theo định mức tự sinh
+    // thêm hàng từ không khí; (3) một nguyên liệu bị XOÁ KHỎI công thức sau khi bán — tính lại
+    // sẽ không còn thấy id đó để hoàn, mất dấu vĩnh viễn dù ledger vẫn còn dòng CONSUMPTION.
+    // Giờ đọc thẳng đúng những dòng CONSUMPTION (chưa reversal) mà chính đơn này đã ghi lúc
+    // bán — không cần biết công thức hiện tại là gì nữa.
+    const [stockSnap, prepSnap] = await Promise.all([
+      fstore.collection('stock_transactions_gieogieo').where('referenceId', '==', orderId).get(),
+      fstore.collection('prep_transactions_gieogieo').where('referenceId', '==', orderId).get()
+    ]);
+    const agg = {}, locBackMap = {}, fifoMap = {};
+    stockSnap.forEach(d => {
+      const t = d.data();
+      if (t.reversal === true || t.type !== 'CONSUMPTION' || !(Number(t.qty) < 0)) return;
+      const qty = Math.abs(Number(t.qty) || 0);
+      agg[t.itemId] = (agg[t.itemId] || 0) + qty;
+      if (typeof t.locDeducted === 'number') locBackMap[t.itemId] = (locBackMap[t.itemId] || 0) + t.locDeducted;
+      if (Array.isArray(t.fifoAllocations) && t.fifoAllocations.length) fifoMap[t.itemId] = (fifoMap[t.itemId] || []).concat(t.fifoAllocations);
+    });
+    const prepAgg = {}, prepUnitAllocMap = {};
+    prepSnap.forEach(d => {
+      const t = d.data();
+      if (t.reversal === true || t.type !== 'CONSUMPTION' || !(Number(t.qty) < 0)) return;
+      const qty = Math.abs(Number(t.qty) || 0);
+      prepAgg[t.prepId] = (prepAgg[t.prepId] || 0) + qty;
+      if (Array.isArray(t.unitAllocations) && t.unitAllocations.length) prepUnitAllocMap[t.prepId] = (prepUnitAllocMap[t.prepId] || []).concat(t.unitAllocations);
+    });
     const note = 'Hoàn kho do XOÁ ĐƠN' + (order && order.billCode ? ' — ' + order.billCode : '');
     const ingredientIds = Object.keys(agg);
     const prepIds = Object.keys(prepAgg);
     if (!ingredientIds.length && !prepIds.length) return { ok: true, failedCount: 0 };
-    // [FIX] Đọc lại chính các giao dịch trừ kho của đơn này để biết ĐÃ TRỪ THẬT
-    // bao nhiêu ở quầy pha. Cần thiết vì lúc bán có chặn sàn 0: quầy còn 50ml mà
-    // công thức cần 100ml thì chỉ trừ được 50 — hoàn đủ 100 sẽ tự sinh ra 50ml.
-    // Đơn CŨ (trước bản này) không có locDeducted → map rỗng → rơi về cách cũ,
-    // hoàn theo định mức, giữ nguyên hành vi trước đây chứ không hỏng thêm.
-    const { locMap: locBackMap, fifoMap } = await _loadLocDeductedForOrderPOS(orderId);
-    const prepUnitAllocMap = await _loadPrepUnitAllocationsForOrderPOS(orderId);
     const results = await Promise.allSettled([
       ...ingredientIds.map(ingId => _reverseIngredientConsumptionPOS(ingId, agg[ingId], note, orderId, locBackMap[ingId], fifoMap[ingId])),
       ...prepIds.map(pid => _reversePrepConsumptionPOS(pid, prepAgg[pid], note, orderId, prepUnitAllocMap[pid]))

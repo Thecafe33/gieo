@@ -6515,7 +6515,7 @@ function plPredictedLaborByDate(employees, schedules, startKey, endKey){
 //   laborPredicted — {date: tiền} từ plPredictedLaborByDate()
 //   wasteValue   — giá trị hao hụt & huỷ CỦA ĐÚNG NGÀY ĐÓ
 //   homNayKey    — 'YYYY-MM-DD' của hôm nay (truyền vào để test được ngày khác)
-function computeDayPL({ day, expList, cats, assets, laborActual, laborPredicted, wasteValue, homNayKey }){
+function computeDayPL({ day, expList, cats, assets, laborActual, laborPredicted, wasteValue, wasteValueThieu, homNayKey }){
   const dateKey = (day && day.date) || homNayKey || dkey(new Date());
   const cfg = configForDate(dateKey);
   const dObj = new Date(dateKey+'T00:00:00');
@@ -6539,7 +6539,14 @@ function computeDayPL({ day, expList, cats, assets, laborActual, laborPredicted,
   // HAO HỤT & HUỶ — nguyên liệu hư + bán thành phẩm huỷ + ly đổ, lấy từ ledger.
   // KHÔNG trùng với giá vốn: giá vốn là nguyên liệu đi vào ly ĐÃ BÁN, còn đây là
   // phần mất đi mà không bán được.
+  // [FIX #D] wasteValueThieu=true nghĩa là KHÔNG đọc được ledger (Firestore lỗi), không phải
+  // "đọc được và thật sự bằng 0" — hai chuyện khác hẳn nhau (đúng bài học đã áp dụng cho
+  // untrackedBase ở tonLichSuCuaMon() bên POS: "chưa biết" không được phép biến thành "bằng
+  // không"). haoHut vẫn phải là một số để cộng vào tongChiPhi (0 là lựa chọn ít sai nhất khi
+  // thiếu dữ liệu — không tự bịa ra một số hao hụt), nhưng liệt kê vào dangUocTinh + hạ trần
+  // mucTinCay bên dưới để KHÔNG hiển thị như một con số đã chốt.
   const haoHut = Number(wasteValue) || 0;
+  if (wasteValueThieu) dangUocTinh.push('hao hụt (không đọc được sổ kho lúc này — số đang hiện tạm 0đ)');
 
   // CHI PHÍ trong ngày — phân bổ đúng ngày (khoản có kỳ hạn chia đều theo ngày,
   // xem expenseAllocatedAmount). Chỉ tính khoản ĐÃ DUYỆT, giống hệt filterExpenses:
@@ -6604,7 +6611,7 @@ function computeDayPL({ day, expList, cats, assets, laborActual, laborPredicted,
     coTaiSan,
     lai, laiTruocKhauHao: lai + khauHao,
     bienLaiPct: doanhThu ? lai/doanhThu : 0,
-    dangUocTinh, choSoThat,
+    dangUocTinh, choSoThat, wasteValueThieu: !!wasteValueThieu,
     // Ba mức, theo đúng thứ tự chắc chắn dần:
     //   dang-chay  — ngày chưa xong, hoặc lương còn là số dự đoán
     //   chot-ngay  — ngày đã xong nhưng còn chi phí chờ hoá đơn
@@ -6612,8 +6619,12 @@ function computeDayPL({ day, expList, cats, assets, laborActual, laborPredicted,
     // Giá vốn ước theo target COGS% KHÔNG chặn mức cao nhất: nó không phải thứ chờ
     // hoá đơn, mà là hệ quả của việc chưa khai định mức — vẫn liệt kê ở dangUocTinh
     // để nói rõ, nhưng đợi nó thì không ngày nào lên được mức đủ số thật.
-    mucTinCay: (laNgayDangChay || luongLaDuDoan) ? 'dang-chay'
-             : (choSoThat.length ? 'chot-ngay' : 'chot-thang')
+    // [FIX #D] wasteValueThieu chỉ HẠ TRẦN xuống 'chot-ngay' (không đẩy lên nếu ngày đang
+    // 'dang-chay' — trạng thái đó đã yếu hơn rồi, đè lên là nói dối theo hướng tốt hơn).
+    mucTinCay: (() => {
+      const muc = (laNgayDangChay || luongLaDuDoan) ? 'dang-chay' : (choSoThat.length ? 'chot-ngay' : 'chot-thang');
+      return (wasteValueThieu && muc === 'chot-thang') ? 'chot-ngay' : muc;
+    })()
   };
 }
 
@@ -6651,18 +6662,27 @@ function plSumDays(days){
 // và biểu đồ ở đợt 2, và cho tổng tuần/tháng.
 async function computeDailyPLRange(startDate, endDate){
   const startKey = dkey(startDate), endKey = dkey(endDate);
-  const [salesRes, expAll, assets, cats, employees, schedules, ledger, laborActual] = await Promise.all([
+  const [salesRes, expAll, assets, cats, employees, schedules, ledgerRes, laborActual] = await Promise.all([
     fetchSalesRange(startDate, endDate),
     loadExpensesAll(),
     loadAssetsAll(),
     loadExpenseCategories().catch(()=>[]),
     loadEmployees().catch(()=>[]),
     loadSchedulesForRange(startKey, endKey).catch(()=>[]),
-    computeLedgerRealMetrics(startDate, endDate).catch(()=>null),
+    // [FIX #D — "ledger fail → waste=0 → lãi thổi cao giả tạo"] TRƯỚC ĐÂY .catch(()=>null) rồi
+    // coi im lặng như "không có hao hụt" — Firestore chập chờn vài giây là đủ để cả khối Lãi/lỗ
+    // hiện lãi CAO hơn thực tế đúng bằng hao hụt trong ngày, không có dấu hiệu gì báo con số
+    // đang sai. Giờ phân biệt rõ "đọc được, waste=0 thật" với "đọc lỗi, không biết waste bao
+    // nhiêu" — cờ ok truyền xuống computeDayPL để hạ mức tin cậy thay vì giả vờ đã biết.
+    computeLedgerRealMetrics(startDate, endDate)
+      .then(v => ({ ok: true, data: v }))
+      .catch(err => { console.warn('[P&L] đọc ledger (waste thật) lỗi — hao hụt sẽ hiện 0 và bị đánh dấu thiếu số liệu:', err); return { ok: false, data: null }; }),
     HR_SETTINGS.useActualLaborCost
       ? computeActualLaborCostByDate(startKey, endKey).catch(()=>null)
       : Promise.resolve(null)
   ]);
+  const ledger = ledgerRes.data;
+  const ledgerThieu = !ledgerRes.ok;
   const laborPredicted = plPredictedLaborByDate(employees, schedules, startKey, endKey);
   const wasteByDate = (ledger && ledger.wasteByDate) || {};
   const homNayKey = dkey(new Date());
@@ -6670,6 +6690,7 @@ async function computeDailyPLRange(startDate, endDate){
     day, expList: expAll, cats, assets,
     laborActual, laborPredicted,
     wasteValue: wasteByDate[day.date] || 0,
+    wasteValueThieu: ledgerThieu,
     homNayKey
   }));
   return { days, tong: plSumDays(days), salesRes, assets };
