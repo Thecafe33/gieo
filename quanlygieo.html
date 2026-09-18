@@ -4724,6 +4724,143 @@ function _billTraceRenderResult(){
   `;
 }
 
+// ============================================================
+// [MỚI] "KHO 2.0" — không gian CHỈ ĐỌC để đi theo chuỗi FIFO (tem → phiếu nhận, tem →
+// bill/mẻ, lô BTP → tem → bill), tách khỏi nhóm "Kho" phía trên vốn đang trộn cấu
+// hình + nhập hàng + kiểm kê + sổ sách. Mọi thao tác GHI vẫn ở nhóm Kho / bên POS —
+// ở đây không có nút "Sửa tồn" nào cả. Tái dùng nguyên functions/collection đã có từ
+// Tuần 1-4 (ctnShowDetail, _batchDetailRender, billTraceSearch, computeFifoCoverage
+// Today) — Kho 2.0 chỉ là một lối vào khác, không phải một tầng dữ liệu mới.
+// ============================================================
+let curKho2Sub = 'dash';
+function goKho2(sub){
+  curEntryTab = 'kho2';
+  curKho2Sub = sub || 'dash';
+  switchScreen('entry');
+}
+function renderEntryKho2(){
+  const body = document.getElementById('entryBody');
+  body.innerHTML = `
+    <div class="filter-bar">
+      <button class="ftag ${curKho2Sub==='dash'?'active':''}" onclick="goKho2('dash')">Tổng quan FIFO</button>
+      <button class="ftag ${curKho2Sub==='search'?'active':''}" onclick="goKho2('search')">Tra cứu tem / bill / lô</button>
+    </div>
+    <div id="kho2Body"><div class="muted">Đang tải...</div></div>
+  `;
+  if(curKho2Sub==='search') renderKho2Search();
+  else renderKho2Dashboard();
+}
+
+async function renderKho2Dashboard(){
+  const box = document.getElementById('kho2Body');
+  if(!box) return;
+  showLoading(box);
+  try{
+    await ensureAuth();
+    if(!INVENTORY_ITEMS.length) INVENTORY_ITEMS = await loadInventoryItems();
+    const today = dkey(new Date());
+    const [openList, expiredList, unlabeledList, alertsSnap, coverage, batchesSnap] = await Promise.all([
+      loadContainersFor('open').catch(()=>[]),
+      loadContainersFor('expired').catch(()=>[]),
+      loadContainersFor('unlabeled').catch(()=>[]),
+      fstore.collection('alerts_gieogieo').where('status','==','new').get().catch(()=>null),
+      computeFifoCoverageToday().catch(()=>({trackedQty:0, trackedCovered:0, pct:null})),
+      fstore.collection('prep_batches_gieogieo').where('businessDate','==',today).get().catch(()=>null)
+    ]);
+    // Đếm theo type thay vì đếm nguyên collection — alerts_gieogieo còn chứa nhiều
+    // loại cảnh báo khác (chi phí, checklist...) không liên quan đến FIFO/kho.
+    const KHO_ALERT_TYPES = ['missing_recipe','untracked_unit_consumption','gogs_consumption_failed','allocate_rtdb_error','bill_delete_reverse_failed','po_receive_sync_failed'];
+    let alertTotal = 0, alertsReadErr = !alertsSnap;
+    if(alertsSnap) alertsSnap.forEach(d=>{ if(KHO_ALERT_TYPES.includes(d.data().type)) alertTotal++; });
+    let atomicBatches = 0, batchesReadErr = !batchesSnap;
+    if(batchesSnap) batchesSnap.forEach(d=>{ if((d.data().atomicScannedContainerIds||[]).length) atomicBatches++; });
+    const pctText = coverage.trackedQty>0 ? Math.round(coverage.pct*100)+'%' : '—';
+    const pctColor = coverage.trackedQty<=0 ? 'var(--gt)' : (coverage.pct>=0.9?'var(--ok)':(coverage.pct>=0.7?'var(--warn)':'var(--bad)'));
+
+    const card = (title, value, color, sub, onclick) => `
+      <div class="card" style="cursor:${onclick?'pointer':'default'}" ${onclick?`onclick="${onclick}"`:''}>
+        <div class="small-note">${title}</div>
+        <div style="font-size:26px;font-weight:800;color:${color||'var(--td)'};margin-top:4px">${value}</div>
+        ${sub?`<div class="muted-sm" style="margin-top:2px">${escapeHtmlAttr(sub)}</div>`:''}
+      </div>`;
+
+    box.innerHTML = `
+      <div class="small-note" style="margin-bottom:12px">Chỉ đọc — sửa số liệu vẫn làm ở nhóm Kho phía trên hoặc trên POS. Bấm vào thẻ để nhảy sang đúng danh sách.</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px">
+        ${card('Độ phủ FIFO hôm nay', pctText, pctColor, coverage.trackedQty>0 ? `${fmtNum(coverage.trackedCovered,0)}/${fmtNum(coverage.trackedQty,0)} có gắn tem` : 'Chưa có giao dịch', "goKho2('search')")}
+        ${card('Tem đang mở', openList.length, 'var(--td)', 'Đang dùng dở trong quán', "ctnFilter='open'; goKho('containers')")}
+        ${card('Quá hạn sau mở', expiredList.length, expiredList.length>0?'var(--bad)':'var(--ok)', 'Cần xử lý an toàn thực phẩm', "ctnFilter='expired'; goKho('containers')")}
+        ${card('Tem chưa dán', unlabeledList.length, unlabeledList.length>0?'var(--warn)':'var(--ok)', 'Đã sinh mã, chưa ai dán', "ctnFilter='unlabeled'; goKho('containers')")}
+        ${card('Cảnh báo kho (Hộp thư)', alertsReadErr?'?':alertTotal, alertTotal>0?'var(--bad)':'var(--ok)', 'Thiếu định mức · không tem mở · lỗi trừ kho', "goKho('inbox')")}
+        ${card('Mẻ có quét tem "cái" hôm nay', batchesReadErr?'?':atomicBatches, 'var(--td)', 'atomicScannedContainerIds — xem Hồ sơ lô', "goKho2('search')")}
+      </div>
+      <div class="sec-title" style="margin-top:18px">Tra cứu nhanh</div>
+      <div class="card" style="cursor:pointer" onclick="goKho2('search')">
+        <div style="font-weight:700">Nhập mã tem / mã bill để đi thẳng vào hồ sơ →</div>
+        <div class="small-note" style="margin-top:4px">Tem: nhận hàng → in → mở → từng lần trừ (bill/mẻ/hao) → hết. Bill: đã trừ tem/lô nào.</div>
+      </div>
+    `;
+  }catch(err){
+    console.error('renderKho2Dashboard lỗi', err);
+    box.innerHTML = '<div class="muted">Không đọc được tổng quan: '+(err.code||err.message||err)+'</div>';
+  }
+}
+
+// [MỚI] Tra cứu trung tâm — một ô, nhận mã tem HOẶC mã bill (2 định dạng phổ biến
+// nhân viên gõ tay hằng ngày), thử lần lượt rồi mở đúng hồ sơ. Không tự tính lại gì,
+// chỉ định tuyến sang các hàm đọc đã có (ctnShowDetail/_billTraceRenderResult).
+let kho2SearchQuery = '';
+function renderKho2Search(){
+  const box = document.getElementById('kho2Body');
+  if(!box) return;
+  box.innerHTML = `
+    <div class="small-note" style="margin-bottom:12px">Nhập mã tem hoặc mã bill — hệ thống tự nhận diện và mở đúng hồ sơ. Dán thẳng ID tài liệu (từ dòng sổ kho) cũng được, dùng khi cần đối soát sâu.</div>
+    <div class="field" style="display:flex;gap:8px;align-items:flex-end;margin-bottom:14px">
+      <div style="flex:1"><label>Mã cần tra</label>
+        <input type="text" id="kho2SearchInput" value="${escapeHtmlAttr(kho2SearchQuery)}" placeholder="VD: mã tem trên nhãn, hoặc mã bill B000123"
+          oninput="kho2SearchQuery=this.value" onkeydown="if(event.key==='Enter') kho2SearchGo()">
+      </div>
+      <button class="btn" style="width:auto;padding:0 16px" onclick="kho2SearchGo()">Tra</button>
+    </div>
+    <div id="kho2SearchResult"><div class="empty-hint">Nhập mã để bắt đầu.</div></div>
+  `;
+}
+async function kho2SearchGo(){
+  const q = (kho2SearchQuery||'').trim();
+  if(!q){ toast('⚠️ Nhập mã cần tra'); return; }
+  const box = document.getElementById('kho2SearchResult');
+  if(box) showLoading(box);
+  try{
+    await ensureAuth();
+    // 1) Thử làm mã TEM trước — phổ biến nhất hằng ngày.
+    const ctnSnap = await fstore.collection(CTN_COLL).where('code','==',q).limit(1).get();
+    if(!ctnSnap.empty){
+      ctnShowDetail(ctnSnap.docs[0].id);
+      if(box) box.innerHTML = '<div class="muted">Đã mở hồ sơ tem — xem trong hộp thoại vừa bật lên.</div>';
+      return;
+    }
+    // 2) Thử làm mã BILL.
+    const billSnap = await fstore.collection('order_stock_traces_gieogieo').where('billCode','==',q).limit(1).get();
+    if(!billSnap.empty){
+      _billTraceCode = q; _billTraceResult = billSnap.docs[0].data();
+      if(box){ box.innerHTML = '<div id="billTraceBody"></div>'; _billTraceRenderResult(); }
+      return;
+    }
+    // 3) Không khớp mã hiển thị nào — thử coi q như ID tài liệu THẲNG (dán từ dòng
+    // sổ kho lúc đối soát sâu: referenceId, containerId trong fifoAllocations...).
+    const [byId, batchById] = await Promise.all([
+      fstore.collection(CTN_COLL).doc(q).get().catch(()=>null),
+      fstore.collection('prep_batches_gieogieo').doc(q).get().catch(()=>null)
+    ]);
+    if(byId && byId.exists){ ctnShowDetail(byId.id); if(box) box.innerHTML = '<div class="muted">Đã mở hồ sơ tem.</div>'; return; }
+    if(batchById && batchById.exists){ ctnShowDetail(batchById.id, 'prep_batches_gieogieo'); if(box) box.innerHTML = '<div class="muted">Đã mở hồ sơ lô.</div>'; return; }
+    if(box) box.innerHTML = '<div class="muted">Không tìm thấy — kiểm tra lại mã, hoặc dữ liệu này có từ TRƯỚC khi có tính năng tra cứu (mã tem/bill cũ vẫn tra được bằng sổ kho như trước giờ).</div>';
+  }catch(err){
+    console.error('kho2SearchGo lỗi', err);
+    if(box) box.innerHTML = '<div class="muted">Lỗi tra cứu: '+(err.code||err.message||err)+'</div>';
+  }
+}
+
 // ------------------------------------------------------------
 // [MỚI] HOẠT ĐỘNG KHO HÔM NAY — nhân viên vừa MỞ gói nào, vừa BÁO HẾT gói nào.
 //
@@ -8815,6 +8952,15 @@ const NAV_SECTIONS = [
     {key:'kho:checklist',    label:'Checklist ca',    go:"goKho('checklist')"},
     {key:'kho:bulkimport',   label:'Nhập danh mục từ Excel', go:"goKho('bulkimport')"},
   ]},
+  // [MỚI] "Kho 2.0" — CHỈ ĐỌC, không sửa số liệu gì ở đây (mọi thao tác ghi vẫn ở nhóm
+  // Kho phía trên / bên POS). Tách riêng vì Kho hiện tại trộn cấu hình + vận hành + sổ
+  // sách + truy xuất — FIFO cần một không gian chỉ để "đi theo chuỗi" tem → lô → bill,
+  // không cần form sửa công thức nằm cạnh timeline tem. Tái dùng dữ liệu Tuần 1-4 đã
+  // có (usageEvents, inputTrace, order_stock_traces, atomicScannedContainerIds).
+  { group:'Kho 2.0 · Truy xuất FIFO', items:[
+    {key:'kho2:dash',   ic:'pulse',  label:'Tổng quan FIFO',           go:"goKho2('dash')",   sub:'Chỉ đọc'},
+    {key:'kho2:search', ic:'search', label:'Tra cứu tem / bill / lô',  go:"goKho2('search')"},
+  ]},
   // [GOM MÀN] Bốn mục này TRƯỚC ĐÂY nằm rải: hai cái trong nhánh Kho (vốn đã 16
   // mục), hai cái trong Cấu hình. Nhưng chúng không phải việc kho hằng ngày cũng
   // không phải cấu hình đặt-một-lần — chúng là việc ĐỌC SỐ: đối chiếu, dự báo,
@@ -8875,6 +9021,7 @@ const NAV_GROUP = (()=>{
 function currentNavKey(){
   if(curScreen !== 'entry') return curScreen;
   if(curEntryTab === 'kho') return 'kho:' + curKhoSub;
+  if(curEntryTab === 'kho2') return 'kho2:' + curKho2Sub;
   return 'entry:' + curEntryTab;
 }
 // [FIX] Nhóm Kho KHÔNG THU LẠI ĐƯỢC.
@@ -11709,6 +11856,7 @@ function renderEntry(){
   if(curEntryTab==='cash') renderEntryCash();
   if(curEntryTab==='cogs') renderEntryCogs();
   if(curEntryTab==='kho') renderEntryKho();
+  if(curEntryTab==='kho2') renderEntryKho2();
   if(curEntryTab==='ngaydacbiet') renderEntryNgayDacBiet();
   else if(curEntryTab==='asset') renderEntryAsset();
   if(curEntryTab==='target') renderEntryTarget();
