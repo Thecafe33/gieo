@@ -1,0 +1,623 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>GIEO POS</title>
+<style>
+:root{--gd:#E23A5D;--gm:#C22B49;--gl:#FDE6EA;--bg:#FFFCF0;--gt:#999;--td:#111;--bb:#E7ECFB;--bi:#1D3F91;
+  /* [MỚI-DS] Token cho chuẩn thiết kế mới (kiểu Apple: nút to, bo tròn nhiều, thông tin rõ) —
+     bắt đầu áp ở màn "Nhận hàng tự do", sẽ dùng lại cho các tab khác sau. Màu --gd/--gl/--bg/--td
+     hiện có được TÁI SỬ DỤNG nguyên vẹn (không tạo bảng màu riêng) để không lệch thương hiệu; đây
+     chỉ là các token PHỤ mà bộ màu cũ chưa có tên (nền thẻ phụ, viền mảnh, mức mờ chữ, 3 màu ngữ
+     nghĩa tốt/hư hỏng/xoá). */
+  --ds-card2:#F4EFE4; --ds-line:#E9E2D2; --ds-ink60:rgba(17,17,17,.62); --ds-ink40:rgba(17,17,17,.38);
+  --ds-good:#1E9E5A; --ds-good-soft:#E3F6EC; --ds-warn:#AD7A15; --ds-warn-soft:#FBF0DC;
+  --ds-danger:#D1354A; --ds-danger-soft:#FBE4E8; --ds-shadow:rgba(30,20,10,.10);
+}
+/* [FIX-webview-textsize] Android WebView có cơ chế "font boosting" / text autosizing riêng —
+   tự phóng to cỡ chữ theo cỡ chữ hệ thống + độ hẹp cột, KHÁC với Chrome (Chrome không áp dụng
+   autosizing này khi đã có viewport width=device-width). Đây là lý do bọc trong WebView chữ to
+   hơn, nhiều chỗ bị đẩy xuống 2 dòng dù HTML/CSS giống hệt nhau. Ép text-size-adjust:100% để
+   tắt hẳn cơ chế tự phóng to này, đảm bảo cỡ chữ đúng CHÍNH XÁC theo px khai báo trong CSS,
+   giống nhau tuyệt đối giữa Chrome và WebView.*/
+html{-webkit-text-size-adjust:100%;-moz-text-size-adjust:100%;text-size-adjust:100%;}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;scrollbar-width:none;-webkit-text-size-adjust:100%;text-size-adjust:100%;}
+*::-webkit-scrollbar{display:none;}
+body{font-family:'Google Sans',sans-serif;background:var(--bg);max-width:430px;margin:0 auto;min-height:100vh;overflow-x:hidden;}
+.screen{display:none;min-height:100vh;flex-direction:column;background:var(--bg);}
+.screen.active{display:flex;}
+#sm{background:#fff;}
+.mh{background:#fff;padding:16px 16px 0;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:10;}
+.hbg{width:44px;height:44px;border:none;background:#FFFCF0;border-radius:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:5px;}
+.hbg span{display:block;width:20px;height:2px;background:#333;border-radius:2px;}
+
+/* [FIX-fifo-btn] Trước đây đây chỉ là một chấm tròn 15px vô danh cạnh logo — nhỏ, không có
+   số, nhìn không biết là cái gì. Giờ vẽ thành hẳn một NÚT giống hệt khuôn nút mở sidebar
+   (.hbg: 44x44, bo góc 12px, nền be nhạt) để rõ ràng đây là một nút bấm được, kèm icon
+   chuông + số đếm (dùng chung class huy hiệu .cb đã có sẵn ở nút giỏ hàng .bch, cho đồng bộ
+   kiểu chữ/màu số trong toàn app thay vì bịa thêm một kiểu badge mới). */
+.fifo-alert-btn{display:none;position:absolute;top:0;left:52px;width:44px;height:44px;border:none;
+  background:#FFFCF0;border-radius:12px;cursor:pointer;align-items:center;justify-content:center;
+  z-index:11;animation:fifoPulse 1.6s ease-in-out infinite;}
+@keyframes fifoPulse{0%,100%{box-shadow:0 0 0 0 rgba(231,76,60,.35)}50%{box-shadow:0 0 0 5px rgba(231,76,60,0)}}
+/* [FIX] TRƯỚC ĐÂY bar này rộng full width (100%, max-width 430px) và luôn tự bung to
+   hết cỡ mỗi khi có tem mới cạn, đè lên hàng filter-bar/menu, chặn luôn thao tác bấm
+   món lúc đang bán đông khách. TRƯỚC ĐÂY còn có thêm một trạng thái "thu gọn" vẽ ra
+   một chip chữ dài ("⚠️ N tem…") mà câu chữ tự nó đã đủ dài để vẫn che gần hết hàng
+   filter-bar dù CSS có co theo nội dung — xem renderFifoAlertBar(): giờ trạng thái thu
+   gọn KHÔNG vẽ gì ở đây nữa, dấu hiệu duy nhất là chấm đỏ nhỏ cạnh logo (#fifoAlertDot);
+   bar này chỉ còn xuất hiện ở dạng panel đầy đủ khi bấm vào chấm đó. width:auto để tự co
+   theo đúng nội dung panel, pointer-events:none ở khung ngoài + chỉ bật lại ở panel bên
+   trong, để phần trong suốt quanh panel không chặn tay chạm xuống filter-bar/menu. */
+.fifo-alert-bar{display:none;position:fixed;top:74px;left:50%;transform:translateX(-50%);width:auto;max-width:92vw;
+  z-index:16;box-sizing:border-box;pointer-events:none;}
+.fifo-alert-panel{pointer-events:auto;width:min(92vw,400px);background:#fff;border:1.5px solid #f6b4ac;border-radius:18px;padding:12px 14px;box-shadow:0 10px 28px rgba(0,0,0,.12);max-height:52vh;overflow-y:auto;}
+.fifo-alert-panel-h{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;}
+.fifo-alert-item{padding:10px 0;border-bottom:1px solid #f5e2df;}
+.fifo-alert-item:last-child{border-bottom:none;}
+.mt{font-family:'Google Sans Display',sans-serif;font-size:22px;font-weight:700;color:var(--gd);}
+.bch{background:var(--gd);color:#fff;border:none;border-radius:24px;padding:10px 16px;font-family:'Google Sans',sans-serif;font-size:14px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:8px;position:relative;}
+.cb{background:#e74c3c;color:#fff;border-radius:50%;width:18px;height:18px;font-size:11px;font-weight:700;display:none;align-items:center;justify-content:center;position:absolute;top:-6px;right:-6px;}
+.cb.show{display:flex;}
+.filter-bar{display:flex;gap:8px;padding:12px 12px 8px;overflow-x:auto;scrollbar-width:none;}
+.filter-bar::-webkit-scrollbar{display:none;}
+.ftag{border:none;border-radius:20px;padding:8px 16px;font-family:'Google Sans',sans-serif;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;transition:all .15s;background:#f0f0f0;color:#666;}
+.ftag.active{background:var(--gd);color:#fff;}
+.mg{display:grid;grid-template-columns:repeat(3,1fr);grid-auto-rows:110px;gap:8px;padding:4px 12px 120px;align-content:start;flex:1;overflow-y:auto;scrollbar-width:none;}
+.mg::-webkit-scrollbar{display:none;}
+.mi{border-radius:16px;padding:16px 10px 12px;display:flex;flex-direction:column;cursor:pointer;transition:transform .12s,opacity .12s;height:110px;justify-content:space-between;position:relative;overflow:hidden;}
+/* Cart drawer */
+.cart-drawer{position:fixed;bottom:0;left:50%;transform:translateX(-50%) translateY(100%);width:100%;max-width:430px;background:#fff;border-radius:28px 28px 0 0;box-shadow:0 -8px 32px rgba(0,0,0,.15);z-index:150;transition:transform .3s cubic-bezier(.4,0,.2,1);max-height:75vh;display:flex;flex-direction:column;}
+.cart-drawer.open{transform:translateX(-50%) translateY(0);}
+.cart-overlay{position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:149;display:none;}
+.cart-overlay.show{display:block;}
+.cart-header{padding:20px 20px 12px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;}
+.cart-title{font-size:18px;font-weight:700;color:var(--td);}
+.cart-body{overflow-y:auto;flex:1;padding:0 16px 16px;}
+.cart-row{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid #f0f0f0;}
+.cart-row:last-child{border-bottom:none;}
+.cart-name{flex:1;font-size:14px;font-weight:700;color:var(--td);}
+.cart-size{font-size:11px;color:var(--gt);font-weight:600;background:#f0f0f0;border-radius:6px;padding:2px 6px;}
+.cart-price{font-size:13px;font-weight:700;color:var(--gm);min-width:54px;text-align:right;}
+.cart-qty{display:flex;align-items:center;gap:8px;}
+.cqb{width:28px;height:28px;border-radius:50%;border:none;cursor:pointer;font-size:16px;font-weight:700;display:flex;align-items:center;justify-content:center;}
+.cqb.minus{background:#fee2e2;color:#e74c3c;}
+.cqb.plus{background:var(--gl);color:var(--gm);}
+.cart-qn{font-size:15px;font-weight:700;color:var(--td);min-width:18px;text-align:center;}
+.cart-del{background:none;border:none;cursor:pointer;color:#ccc;padding:4px;}
+.cart-footer{padding:12px 16px 28px;border-top:1px solid #f0f0f0;flex-shrink:0;}
+.mi:active{transform:scale(.96);opacity:.85;}
+.mn{font-size:13px;font-weight:700;color:#fff;line-height:1.3;text-transform:uppercase;}
+.mp{background:rgba(255,255,255,.92);color:var(--gm);border-radius:20px;padding:5px 10px;font-size:13px;font-weight:700;align-self:flex-start;}
+.qb{position:absolute;top:8px;right:8px;background:#e74c3c;color:#fff;border-radius:50%;width:22px;height:22px;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,0.2);}
+.mfooter{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:430px;background:#fff;padding:12px 16px 24px;display:flex;align-items:center;justify-content:space-between;box-shadow:0 -4px 20px rgba(0,0,0,.08);z-index:20;}
+.ftl{font-size:11px;color:var(--gt);font-weight:500;text-transform:uppercase;letter-spacing:.5px;white-space:nowrap;}
+.ftv{font-size:22px;font-weight:700;color:var(--td);white-space:nowrap;}
+.bco{background:var(--gd);color:#fff;border:none;border-radius:30px;padding:14px 28px;font-family:'Google Sans',sans-serif;font-size:16px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:8px;white-space:nowrap;flex-shrink:0;}
+.po{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;display:none;align-items:center;justify-content:center;padding:24px;backdrop-filter:blur(3px);}
+.po.show{display:flex;}
+.sp{background:#f0f0f0;border-radius:28px;padding:28px 20px 24px;width:100%;max-width:380px;animation:pi .22s ease;}
+@keyframes pi{from{transform:scale(.9);opacity:0}to{transform:scale(1);opacity:1}}
+.spn{font-size:22px;font-weight:700;color:var(--gd);text-align:center;text-transform:uppercase;margin-bottom:8px;line-height:1.25;}
+.sps{font-size:12px;font-weight:600;color:var(--gt);text-align:center;text-transform:uppercase;letter-spacing:.8px;margin-bottom:24px;}
+.so{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+.sb{background:#ddeae2;border:none;border-radius:20px;padding:20px 12px 16px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:12px;transition:all .15s;}
+.sb:active{transform:scale(.95);background:var(--gl);}
+.sbl{font-size:16px;font-weight:700;color:var(--gd);}
+.sbp{font-size:18px;font-weight:700;color:var(--gm);}
+.ov{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:200;display:none;}
+.ov.show{display:block;}
+.sdb{position:fixed;top:0;left:0;width:82%;max-width:340px;height:100%;background:var(--bg);z-index:201;transform:translateX(-100%);transition:transform .28s cubic-bezier(.4,0,.2,1);padding:60px 20px 40px;display:flex;flex-direction:column;}
+.sdb.open{transform:translateX(0);}
+.sdc{position:absolute;top:20px;right:20px;width:36px;height:36px;background:#e4e4e4;border:none;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#666;}
+.sda{width:64px;height:64px;border-radius:50%;border:2px solid var(--gm);display:flex;align-items:center;justify-content:center;background:#fff;margin-bottom:12px;}
+.sdlb{font-size:12px;font-weight:600;color:var(--gt);text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px;}
+.sdn{font-size:32px;font-weight:700;color:var(--td);margin-bottom:30px;line-height:1.1;}
+.sdm{display:flex;flex-direction:column;gap:12px;}
+.sdi{background:#fff;border-radius:18px;padding:18px 20px;display:flex;align-items:center;gap:16px;cursor:pointer;transition:transform .12s;}
+.sdi:active{transform:scale(.97);}
+.sdic{width:44px;height:44px;background:var(--gl);border-radius:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.sdit{font-size:17px;font-weight:700;color:var(--td);}
+.sdid{font-size:13px;color:var(--gt);margin-top:2px;}
+.sdar{color:#ccc;font-size:18px;margin-left:auto;}
+#sc{background:var(--bg);}
+.coh{background:var(--bg);padding:16px 16px 0;display:flex;align-items:center;gap:16px;position:sticky;top:0;z-index:10;}
+.bbc{width:44px;height:44px;border-radius:50%;background:#fff;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 6px rgba(0,0,0,.1);flex-shrink:0;}
+.cot{flex:1;font-size:22px;font-weight:700;color:var(--td);text-align:center;letter-spacing:.5px;}
+.cosp{width:44px;flex-shrink:0;}
+.cob{flex:1;overflow-y:auto;padding:20px 16px 40px;display:flex;flex-direction:column;gap:14px;}
+.cotc{background:#fff;border-radius:22px;padding:24px;text-align:center;}
+.cotl{font-size:12px;font-weight:600;color:var(--gt);text-transform:uppercase;letter-spacing:.8px;margin-bottom:10px;}
+.cotn{font-size:52px;font-weight:700;color:var(--td);line-height:1;}
+/* Customer lookup card */
+.cuc{background:#fff;border-radius:22px;padding:18px 20px;display:flex;flex-direction:column;gap:12px;}
+.cuc-row{display:flex;align-items:center;gap:14px;}
+.cuic{width:44px;height:44px;background:var(--bb);border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.cull{font-size:11px;font-weight:600;color:var(--gt);text-transform:uppercase;letter-spacing:.7px;margin-bottom:4px;}
+.cui{width:100%;border:none;outline:none;font-family:'Google Sans',sans-serif;font-size:18px;color:#bbb;background:transparent;}
+.cui:focus{color:var(--td);}
+/* Customer info display */
+.cust-info{background:var(--gl);border-radius:14px;padding:12px 16px;display:none;flex-direction:column;gap:8px;}
+.cust-info.show{display:flex;}
+.cust-name{font-size:16px;font-weight:700;color:var(--gd);}
+.cust-pts{font-size:13px;color:var(--gm);font-weight:600;}
+.cust-note{font-size:12px;color:var(--gt);}
+/* Voucher list */
+.voucher-list{display:flex;flex-direction:column;gap:8px;margin-top:4px;}
+.voucher-item{background:#fff;border-radius:10px;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;border:1.5px solid #e0e0e0;cursor:pointer;transition:all .15s;}
+.voucher-item.selected{border-color:var(--gm);background:var(--gl);}
+.voucher-name{font-size:14px;font-weight:700;color:var(--td);}
+.voucher-btn{font-size:12px;font-weight:600;color:var(--gm);background:var(--gl);border:none;border-radius:8px;padding:4px 10px;cursor:pointer;}
+.voucher-applied{font-size:12px;font-weight:700;color:#e74c3c;}
+.pmr{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+.pmc{background:#fff;border-radius:22px;padding:24px 16px;display:flex;flex-direction:column;align-items:center;gap:14px;cursor:pointer;border:2.5px solid transparent;transition:all .15s;}
+.pmc:active{transform:scale(.97);}
+.pmc.sel{border-color:var(--gm);background:var(--gl);}
+.pmw{width:60px;height:60px;border-radius:16px;display:flex;align-items:center;justify-content:center;}
+.pmw.cash{background:#d4f0da;}
+.pmw.bank{background:var(--bb);}
+.pmn{font-size:16px;font-weight:600;color:var(--td);}
+.bcc{background:#fff;border-radius:22px;border:none;width:100%;padding:22px;font-family:'Google Sans',sans-serif;font-size:16px;font-weight:700;color:var(--td);letter-spacing:.5px;cursor:pointer;}
+.bcc:active{background:#ebebeb;}
+.cap{background:#fff;border-radius:22px;padding:20px;display:none;flex-direction:column;gap:12px;}
+.cap.show{display:flex;}
+.capl{font-size:13px;font-weight:600;color:var(--gt);}
+.cai{width:100%;border:1.5px solid #e0e0e0;border-radius:14px;padding:14px 16px;font-family:'Google Sans',sans-serif;font-size:22px;font-weight:700;color:var(--td);outline:none;}
+.cai:focus{border-color:var(--gm);}
+.cr{display:none;justify-content:space-between;align-items:center;background:#fffbe8;border-radius:12px;padding:12px 16px;}
+.cr.show{display:flex;}
+.crl{font-size:13px;font-weight:600;color:#e8a000;text-transform:uppercase;}
+.crv{font-size:18px;font-weight:700;color:#d4820a;}
+.bconf{background:var(--gd);color:#fff;border:none;border-radius:30px;width:100%;padding:16px;font-family:'Google Sans',sans-serif;font-size:17px;font-weight:700;cursor:pointer;margin-top:4px;}
+.rvh{padding:20px 20px 16px;display:flex;align-items:center;justify-content:space-between;}
+.rvt{font-size:26px;font-weight:700;color:var(--td);letter-spacing:-.5px;}
+.rvhi{display:flex;gap:8px;}
+.bic{width:40px;height:40px;border-radius:50%;border:1px solid #ddd;background:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;}
+.rvtabs{display:flex;background:#e2e2e2;border-radius:28px;margin:0 16px 20px;padding:4px;gap:2px;}
+.tbb{flex:1;border:none;background:transparent;border-radius:24px;padding:10px 0;font-family:'Google Sans',sans-serif;font-size:14px;font-weight:600;color:#888;cursor:pointer;transition:all .2s;}
+.tbb.active{background:var(--gd);color:#fff;}
+.rvc{background:#fff;border-radius:20px;margin:0 16px 20px;padding:20px;}
+.rvcl{font-size:12px;font-weight:600;color:var(--gt);text-transform:uppercase;letter-spacing:.8px;margin-bottom:8px;}
+.rvc-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.rvc-cell{background:#f7faf8;border-radius:14px;padding:14px 16px;}
+.rvc-cell-l{font-size:11px;font-weight:600;color:var(--gt);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;}
+.rvc-cell-v{font-size:26px;font-weight:700;color:var(--gd);line-height:1;}
+.rvc-cell-u{font-size:12px;color:var(--gm);}
+/* Nút đóng to */
+.btn-close-screen{width:40px;height:40px;border-radius:50%;background:var(--gd);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+/* Date picker popup */
+.date-popup{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:200;display:none;align-items:flex-end;justify-content:center;backdrop-filter:blur(2px);}
+.date-popup.show{display:flex;}
+.date-box{background:#fff;border-radius:28px 28px 0 0;padding:28px 20px 36px;width:100%;max-width:430px;}
+.date-box h3{font-size:17px;font-weight:700;color:var(--td);margin-bottom:20px;}
+.date-row{display:flex;gap:12px;margin-bottom:16px;}
+.date-row label{font-size:11px;font-weight:600;color:var(--gt);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:4px;}
+.date-row input[type=date]{width:100%;border:1.5px solid #e0e0e0;border-radius:12px;padding:12px 14px;font-family:"Google Sans",sans-serif;font-size:15px;font-weight:600;color:var(--td);outline:none;}
+.date-row input[type=date]:focus{border-color:var(--gm);}
+.rvcv{font-size:42px;font-weight:700;color:var(--gd);line-height:1;}
+.rvcu{font-size:16px;color:var(--gm);margin-top:4px;display:block;}
+.cs{background:#fff;border-radius:20px;margin:0 16px 20px;padding:20px;}
+.ch{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;}
+.cht{font-size:17px;font-weight:700;color:var(--td);}
+.cfp{background:var(--gl);color:var(--gd);border:none;border-radius:20px;padding:6px 14px;font-family:'Google Sans',sans-serif;font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px;}
+.cdot{width:8px;height:8px;border-radius:50%;background:var(--gm);}
+.cw{height:160px;}
+.rvtb{background:#fff;border-radius:20px;margin:0 16px 24px;padding:20px 24px;display:flex;align-items:center;justify-content:space-between;}
+.rvtbl{font-size:12px;color:var(--gt);font-weight:600;text-transform:uppercase;letter-spacing:.6px;}
+.rvtbn{font-size:22px;font-weight:700;color:var(--td);}
+.bcirc{width:48px;height:48px;border-radius:50%;background:var(--td);border:none;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;}
+.hh{padding:20px 20px 16px;display:flex;align-items:center;justify-content:space-between;}
+.hht{font-size:26px;font-weight:700;color:var(--td);letter-spacing:-.5px;}
+.bcc2{width:36px;height:36px;border-radius:50%;background:#e0e0e0;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#666;}
+.hs{margin:0 16px 20px;background:#fff;border-radius:14px;display:flex;align-items:center;padding:12px 16px;gap:10px;border:1.5px solid transparent;}
+.hs:focus-within{border-color:var(--gm);}
+.hs input{flex:1;border:none;outline:none;font-family:'Google Sans',sans-serif;font-size:15px;color:var(--td);background:transparent;}
+.hs input::placeholder{color:#ccc;}
+.hdg{padding:0 16px 8px;}
+.hdl{font-size:13px;font-weight:700;color:var(--td);padding:10px 0 8px;}
+/* ---------- MÀU THẺ BILL trong tab Lịch sử ----------
+   Màu nền = HÌNH THỨC THANH TOÁN, để liếc qua là biết bill nào cần đối soát:
+     ⬜ trắng  — tiền mặt / bill bình thường (chiếm đa số, để trung tính cho đỡ nhiễu)
+     🩷 hồng   — có chuyển khoản (cần đối soát ngân hàng)
+     💜 tím    — tính riêng (một bill nhiều nhóm thanh toán)
+     💚 xanh lá — đơn app
+   Bill thuộc nhiều loại thì JS chỉ gán MỘT class theo thứ tự ưu tiên
+   (tính riêng > chuyển khoản > app), nên thứ tự khai báo CSS ở đây không
+   ảnh hưởng — xem billClass trong renderH(). */
+.hit{background:#fff;border:1.5px solid #ece7db;border-radius:16px;padding:16px 18px;display:flex;align-items:center;gap:14px;margin-bottom:10px;cursor:pointer;transition:transform .12s;}
+.hit:active{transform:scale(.98);}
+.hii{width:44px;height:44px;background:#f5f2e9;border-radius:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.hin{flex:1;}
+.hitime{font-size:17px;font-weight:700;color:var(--td);}
+.himeta{font-size:13px;color:var(--gt);margin-top:2px;}
+.himeta span{color:var(--gd);font-weight:600;}
+.hip{font-size:16px;font-weight:700;color:var(--td);}
+.him{font-size:12px;color:var(--gt);font-weight:500;margin-top:2px;text-align:right;}
+.dbb{display:flex;align-items:center;justify-content:space-between;padding:16px 16px 12px;position:sticky;top:0;background:var(--bg);z-index:5;}
+.bbt{background:none;border:none;font-family:'Google Sans',sans-serif;font-size:16px;font-weight:600;color:var(--gd);cursor:pointer;display:flex;align-items:center;gap:6px;}
+.dc{background:#fff;border-radius:20px;margin:0 16px 16px;padding:24px;}
+.dsn{font-size:28px;font-weight:700;color:var(--gd);margin-bottom:4px;}
+.dit{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:var(--gt);text-transform:uppercase;letter-spacing:.6px;margin-bottom:20px;}
+.gdot{width:8px;height:8px;border-radius:50%;background:var(--gm);}
+.dis{border-top:1px solid #f0f0f0;}
+.dr{display:flex;align-items:flex-start;padding:16px 0;border-bottom:1px solid #f0f0f0;gap:12px;}
+.drn{width:22px;font-size:15px;font-weight:600;color:var(--td);flex-shrink:0;}
+.dri{flex:1;}
+.drna{font-size:16px;font-weight:700;color:var(--td);}
+.drs{display:inline-block;background:var(--gl);color:var(--gd);border-radius:6px;padding:2px 8px;font-size:12px;font-weight:600;margin-top:4px;}
+.drsu{font-size:13px;color:var(--gt);margin-top:2px;}
+.drp{font-size:16px;font-weight:700;color:var(--td);}
+.dmg{display:grid;grid-template-columns:1fr 1fr 1fr;background:var(--bg);border-radius:14px;margin:0 16px 16px;overflow:hidden;}
+.dmc{padding:14px 12px;display:flex;flex-direction:column;gap:4px;border-right:1px solid #e0e0e0;}
+.dmc:last-child{border-right:none;}
+.dml{font-size:11px;color:var(--gt);font-weight:600;text-transform:uppercase;letter-spacing:.5px;}
+.dmv{font-size:14px;font-weight:700;color:var(--td);}
+.dmv.g{color:var(--gm);}
+.dtc{background:#fff;border-radius:20px;margin:0 16px 80px;padding:24px;}
+.dtl{font-size:11px;color:var(--gt);font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;}
+.dtb{font-size:44px;font-weight:700;color:var(--td);display:block;margin-bottom:4px;}
+.dts{font-size:13px;color:var(--gt);margin-bottom:16px;}
+.dtln{display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid #f0f0f0;}
+.dtll{font-size:12px;color:var(--gt);font-weight:600;text-transform:uppercase;}
+.dtlv{font-size:14px;font-weight:700;color:var(--td);}
+.bdel{position:fixed;bottom:32px;left:32px;width:56px;height:56px;border-radius:50%;background:#e74c3c;border:none;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 16px rgba(231,76,60,.35);z-index:10;}
+/* [FIX-TOAST] Trước đây toast dùng nền var(--gd) — ĐÚNG BẰNG màu hồng đỏ của các
+   nút món trong menu, nên thông báo nổi lên đè trên lưới món là chìm nghỉm, không
+   đọc được chữ gì. Đổi sang nền tối trung tính (#1f2430) + viền sáng + đổ bóng để
+   luôn tách bạch khỏi mọi nền phía sau, dù đang ở màn menu, giỏ hàng hay popup.
+   Đồng thời BỎ white-space:nowrap — thông báo dài (VD lỗi máy in) trước đây bị kéo
+   thành 1 dòng dài tràn ra ngoài cả 2 mép màn hình, chỉ đọc được đoạn ở giữa. Giờ
+   tự xuống dòng, giới hạn bề ngang theo màn hình và căn giữa chữ.
+   z-index nâng lên trên mọi popup (cao nhất trong app là 9999) để toast bật từ
+   trong popup vẫn nhìn thấy. */
+.toast{position:fixed;bottom:100px;left:50%;transform:translateX(-50%) translateY(20px);background:#1f2430;color:#fff;padding:13px 20px;border-radius:16px;font-size:14px;font-weight:600;line-height:1.45;z-index:10000;opacity:0;transition:all .3s;pointer-events:none;white-space:pre-wrap;overflow-wrap:anywhere;text-align:center;max-width:min(420px,calc(100vw - 32px));width:max-content;box-shadow:0 10px 30px rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.14);}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+/* ══════════════════════════════════════════════════════════════════════════
+   [NEW-ASSIST] TRỢ LÝ BÁN HÀNG — thẻ gợi ý
+   Một thẻ = MỘT DÒNG: icon · chữ bên trái · nút bên phải. Không xuống dòng
+   riêng cho nút — nhân viên liếc một cái là thấy cả câu nói lẫn việc phải bấm.
+   ══════════════════════════════════════════════════════════════════════════ */
+.as-wrap{display:flex;flex-direction:column;gap:8px;}
+.as-card{display:flex;align-items:center;gap:10px;border-radius:26px;padding:9px 10px 9px 15px;border:1.5px solid;box-shadow:0 6px 20px rgba(0,0,0,.07);}
+.as-ic{font-size:18px;line-height:1;flex-shrink:0;}
+.as-tx{flex:1;min-width:0;font-size:12.5px;font-weight:600;line-height:1.4;
+  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;}
+.as-card.compact .as-tx{-webkit-line-clamp:2;}
+.as-act{display:flex;align-items:center;gap:6px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end;max-width:52%;}
+.as-card.compact .as-act{max-width:46%;}
+.as-btn{border:none;border-radius:999px;padding:9px 14px;font-family:'Google Sans',sans-serif;
+  font-size:12.5px;font-weight:700;color:#fff;cursor:pointer;white-space:nowrap;}
+.as-chip{background:#fff;border-radius:999px;padding:8px 13px;font-family:'Google Sans',sans-serif;
+  font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap;border:1.5px solid;line-height:1.15;}
+.as-chip small{display:block;font-size:9px;font-weight:600;opacity:.6;}
+.as-x{background:none;border:none;font-size:15px;line-height:1;cursor:pointer;padding:4px;flex-shrink:0;opacity:.45;}
+.as-more{background:rgba(255,255,255,.75);border:1.5px solid;border-radius:999px;padding:7px 11px;
+  font-family:'Google Sans',sans-serif;font-size:12px;font-weight:800;cursor:pointer;white-space:nowrap;flex-shrink:0;}
+
+/* [NEW-ASSIST] Pill nổi KHÔNG được che lưới bấm món.
+   #sm là flex column cao 100vh, .mg là con flex:1 nên co lại đúng bằng phần
+   padding thêm vào — tức khung cuộn của lưới menu KẾT THÚC ngay trên pill,
+   không phải chỉ thêm khoảng trắng ở cuối (thêm khoảng trắng thì cuộn tới đâu
+   pill vẫn đè lên món ở đó). --assist-h do assistRender() cập nhật theo chiều
+   cao thật của pill sau mỗi lần vẽ. */
+/* Chỗ cuộn của màn order là CẢ TRANG chứ không phải riêng lưới (.mg cao theo
+   nội dung, #sm chỉ đặt min-height:100vh) — nên .mg{padding-bottom:120px} là
+   khoảng chừa cho thanh footer ở cuối trang. Pill đứng trên footer thì phải
+   chừa thêm đúng chiều cao của nó, nếu không hàng món cuối cùng vĩnh viễn nằm
+   dưới pill và không bấm được. */
+body.assist-main-on #sm{padding-bottom:var(--assist-h, 0px);}
+
+/* Và vì là phần tử nổi, cuộn giữa chừng thì nó vẫn nằm đè lên vài ô món —
+   đúng như thanh footer vẫn làm từ trước. Cách xử lý: ĐANG CUỘN THÌ TRƯỢT ĐI,
+   dừng cuộn thì trượt về. Nhân viên lướt tìm món hay bấm món ở đáy màn hình
+   đều không bị vướng, mà gợi ý thì không mất. Chỉ áp dụng lúc thu gọn — đang
+   mở rộng ra đọc mà nó tự biến mất thì rất khó chịu. */
+#assistBarMain{transition:transform .22s cubic-bezier(.4,0,.2,1),opacity .18s ease;}
+#assistBarMain.as-away{transform:translateX(-50%) translateY(130%);opacity:0;pointer-events:none;}
+/* Toast cũng neo ở bottom:100px — đúng vùng pill đứng, mà lại bật lên đúng lúc
+   nhân viên vừa thêm món, tức đúng lúc gợi ý mới hiện ra và đang cần đọc. */
+body.assist-main-on .toast{bottom:calc(100px + var(--assist-h, 0px) + 10px);}
+::-webkit-scrollbar{width:0;}
+/* Archive status badge */
+.arc-badge{font-size:11px;color:var(--gm);background:var(--gl);border-radius:8px;padding:2px 8px;font-weight:600;}
+/* To Go Toggle */
+.togo-toggle-wrap{display:flex;align-items:center;gap:8px;background:#f5f5f5;border-radius:20px;padding:5px 10px 5px 8px;cursor:pointer;user-select:none;transition:background .2s;}
+/* [ADD-printer-quickstatus] Nút trạng thái nhanh 2 máy in (Bill + Tem) đặt bên phải logo — bấm
+   vào tự dò & kết nối lại máy nào đang mất kết nối, không cần vào tận màn Máy in. */
+.pqs-btn{display:flex;align-items:center;gap:7px;background:#f5f5f5;border:none;border-radius:20px;padding:7px 11px;cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent;transition:background .2s;}
+.pqs-btn:active{background:#ececec;}
+.pqs-btn.busy{opacity:.6;pointer-events:none;}
+.pqs-dots{display:flex;flex-direction:column;gap:4px;}
+.pqs-dot-row{display:flex;align-items:center;gap:4px;}
+.pqs-dot{width:7px;height:7px;border-radius:50%;background:#ccc;flex-shrink:0;transition:background .2s;}
+.pqs-dot.ok{background:#22c55e;}
+.pqs-dot.bad{background:#e74c3c;}
+.pqs-dot.busy{background:#f59e0b;}
+.pqs-lbl{font-size:8px;font-weight:800;color:#999;letter-spacing:.3px;}
+.togo-toggle-wrap.active{background:#fff3cd;}
+.togo-switch{width:36px;height:20px;background:#ccc;border-radius:10px;position:relative;transition:background .2s;flex-shrink:0;}
+.togo-switch::after{content:'';width:16px;height:16px;background:#fff;border-radius:50%;position:absolute;top:2px;left:2px;transition:left .2s;box-shadow:0 1px 3px rgba(0,0,0,.2);}
+.togo-toggle-wrap.active .togo-switch{background:#f59e0b;}
+.togo-toggle-wrap.active .togo-switch::after{left:18px;}
+.togo-label{font-size:11px;font-weight:700;color:#888;white-space:nowrap;transition:color .2s;}
+.togo-toggle-wrap.active .togo-label{color:#b45309;}
+/* [FIX] CÔNG TẮC PHẢI NHÌN LÀ BIẾT ĐANG BẬT HAY TẮT.
+   Hai lỗi cộng lại làm hai trạng thái trông y hệt nhau:
+     1. Thẻ bọc bị style INLINE `background:#f0f0f0` ghi đè, nên luật
+        `.togo-toggle-wrap.active{background:...}` không bao giờ có tác dụng.
+     2. Chữ "Bật"/"Tắt" bị ghim cứng `color:#888` cho CẢ HAI trạng thái — khác nhau
+        đúng một chữ nhỏ 11px cùng màu xám, đọc lướt không thể phân biệt.
+   Giờ: bật = viền + nền + chữ + cần gạt đều XANH LÁ, tắt = xám nhạt. Xanh lá chứ
+   không dùng màu thương hiệu (hồng đậm) — hồng đọc ra là "cảnh báo", không phải
+   "đang chạy". */
+.togo-toggle-wrap{border:1.5px solid #e3e0d6;}
+.togo-toggle-wrap.active{background:#e9f8ef;border-color:#22c55e;}
+.togo-toggle-wrap.active .togo-switch{background:#22c55e;}
+.togo-status{font-size:11.5px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;color:#8f8f8f;transition:color .2s;}
+.togo-toggle-wrap.active .togo-status{color:#15803d;}
+/* Switch bật/tắt kiểu iOS có núm tròn trượt — dùng cho các toggle dạng checkbox ẩn */
+.ios-switch-track{position:absolute;inset:0;background:#ccc;border-radius:26px;cursor:pointer;transition:background .2s;}
+.ios-switch-track::after{content:'';width:20px;height:20px;background:#fff;border-radius:50%;position:absolute;top:3px;left:3px;transition:left .2s;box-shadow:0 1px 3px rgba(0,0,0,.25);}
+.ios-switch-track.on{background:#22c55e;}   /* xanh lá = đang bật; màu thương hiệu (hồng đậm) đọc ra là cảnh báo */
+.ios-switch-track.on::after{left:21px;}
+/* Đồng giá badge on history */
+/* Bán qua App badge on history */
+.hit.app-order{background:#f0faf4;border:1.5px solid #86efac;}
+.hit.app-order .hii{background:#dcfce7;}
+.hit.app-order .hii svg{stroke:#16a34a;}
+.hit.app-order .hip{color:#15803d;}
+/* Chuyển khoản → HỒNG (trước đây là tím; tím giờ dành cho bill tính riêng). */
+.hit.bank-order{background:var(--gl);border:1.5px solid #f6c6d2;}
+.hit.bank-order .hii{background:#fff;}
+.hit.bank-order .hii svg{stroke:var(--gm);}
+.hit.bank-order .hip{color:var(--gm);}
+/* Tính riêng → TÍM. Loại cần chú ý nhất khi đối soát vì một bill có thể vừa có
+   phần tiền mặt vừa có phần chuyển khoản, nên được ưu tiên màu cao nhất. */
+.hit.split-order{background:#f5f3ff;border:1.5px solid #ddd6fe;}
+.hit.split-order .hii{background:#ede9fe;}
+.hit.split-order .hii svg{stroke:#7c3aed;}
+.hit.split-order .hip{color:#6d28d9;}
+/* Strikethrough original price in bill detail */
+.dg-orig-price{text-decoration:line-through;color:#bbb;font-size:13px;font-weight:500;margin-left:6px;}
+/* To Go admin screen */
+#tg{background:var(--bg);}
+.tg-section{background:#fff;border-radius:20px;margin:0 16px 16px;padding:20px;}
+.tg-section-title{font-size:13px;font-weight:700;color:var(--gt);text-transform:uppercase;letter-spacing:.7px;margin-bottom:16px;display:flex;align-items:center;gap:8px;}
+.tg-input-row{display:flex;gap:10px;margin-bottom:12px;}
+.tg-input-group{flex:1;background:#f5f5f5;border-radius:14px;padding:12px 14px;}
+.tg-input-label{font-size:10px;font-weight:700;color:var(--gt);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;}
+.tg-input-group input{width:100%;border:none;outline:none;font-family:'Google Sans',sans-serif;font-size:18px;font-weight:700;color:var(--td);background:transparent;}
+.tg-save-btn{width:100%;padding:14px;background:var(--gd);color:#fff;border:none;border-radius:14px;font-family:'Google Sans',sans-serif;font-size:15px;font-weight:700;cursor:pointer;margin-top:4px;}
+.tg-toggle-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;}
+.tg-toggle-label{font-size:14px;font-weight:600;color:var(--td);}
+/* To Go gift popup */
+.togo-gift-popup{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:500;display:none;align-items:flex-end;justify-content:center;backdrop-filter:blur(3px);}
+.togo-gift-popup.show{display:flex;}
+.togo-gift-box{background:#fff;border-radius:28px 28px 0 0;padding:24px 20px 36px;width:100%;max-width:430px;max-height:70vh;display:flex;flex-direction:column;}
+/* [FIX-freeTp-centerPopup] Biến thể popup nổi GIỮA màn hình thay vì dán đáy — dùng
+   cho 2 popup chọn topping tặng. Popup dán đáy hợp với thao tác chọn nhanh một
+   phát rồi đóng, còn ở đây nhân viên phải đọc danh sách từng ly rồi bấm vào từng
+   ly, nên đặt giữa tầm mắt dễ thao tác hơn. Để riêng một class thay vì sửa thẳng
+   .togo-gift-box vì popup "Chọn ly tặng miễn phí" cũng dùng chung class đó. */
+.togo-gift-popup.center{align-items:center;padding:16px;}
+.togo-gift-popup.center .togo-gift-box{border-radius:24px;padding:22px 20px 24px;max-height:82vh;}
+.togo-gift-title{font-size:18px;font-weight:700;color:var(--td);margin-bottom:4px;}
+.togo-gift-sub{font-size:12px;font-weight:600;color:var(--gt);margin-bottom:16px;}
+.togo-gift-list{overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:10px;margin-bottom:16px;}
+.togo-gift-item{background:#f5f5f5;border-radius:16px;padding:16px;cursor:pointer;border:2px solid transparent;transition:all .15s;display:flex;align-items:center;gap:12px;}
+/* Món không đủ điều kiện tặng: vẫn hiện (kèm lý do) nhưng mờ và bấm không được —
+   để nhân viên giải thích được cho khách, thay vì món tự dưng biến mất. */
+.togo-gift-item.disabled{opacity:.45;cursor:not-allowed;}
+.togo-gift-item.disabled .togo-gift-size{color:#c0392b;font-weight:700;}
+.togo-gift-item.selected{border-color:var(--gm);background:var(--gl);}
+.togo-gift-name{font-size:15px;font-weight:700;color:var(--td);flex:1;}
+.togo-gift-size{background:var(--gl);color:var(--gd);border-radius:8px;padding:3px 8px;font-size:11px;font-weight:700;}
+.togo-gift-confirm{width:100%;padding:16px;background:var(--gd);color:#fff;border:none;border-radius:16px;font-family:'Google Sans',sans-serif;font-size:16px;font-weight:700;cursor:pointer;}
+/* Cash payment screen */
+#cp{background:var(--bg);}
+.cp-header{background:var(--bg);padding:16px 16px 0;display:flex;align-items:center;gap:16px;position:sticky;top:0;z-index:10;}
+.cp-body{overflow-y:auto;flex:1;padding:20px 16px 40px;display:flex;flex-direction:column;gap:14px;}
+.cp-total-card{background:#fff;border-radius:22px;padding:28px 24px;text-align:center;}
+.cp-total-label{font-size:12px;font-weight:600;color:var(--gt);text-transform:uppercase;letter-spacing:.8px;margin-bottom:8px;}
+.cp-total-amt{font-size:52px;font-weight:700;color:var(--td);line-height:1;}
+.cp-total-unit{font-size:22px;font-weight:700;color:var(--gt);}
+.cp-suggest-card{background:#fff;border-radius:22px;padding:20px;}
+.cp-suggest-label{font-size:12px;font-weight:600;color:var(--gt);text-transform:uppercase;letter-spacing:.7px;margin-bottom:14px;}
+.cp-suggest-grid{display:flex;flex-wrap:wrap;gap:8px;}
+.cp-suggest-btn{background:var(--gl);border:2px solid transparent;border-radius:30px;padding:10px 18px;font-family:'Google Sans',sans-serif;font-size:14px;font-weight:700;color:var(--gd);cursor:pointer;transition:all .15s;white-space:nowrap;}
+.cp-suggest-btn:active{transform:scale(.95);}
+.cp-suggest-btn.active-sug{border-color:var(--gm);background:#d0ead8;}
+.cp-input-card{background:#fff;border-radius:22px;padding:20px;}
+.cp-input-label{font-size:12px;font-weight:600;color:var(--gt);text-transform:uppercase;letter-spacing:.7px;margin-bottom:12px;}
+.cp-input-wrap{position:relative;display:flex;align-items:center;background:#f5f5f5;border-radius:16px;border:2px solid #e8e8e8;transition:border-color .15s;}
+.cp-input-wrap:focus-within{border-color:var(--gm);}
+.cp-input-field{flex:1;border:none;outline:none;background:transparent;font-family:'Google Sans',sans-serif;font-size:26px;font-weight:700;color:var(--td);padding:16px 12px 16px 16px;min-width:0;}
+.cp-input-unit{font-size:18px;font-weight:700;color:var(--gt);padding-right:16px;}
+.cp-denom-card{background:#fff;border-radius:22px;padding:20px;}
+.cp-denom-grid{display:flex;flex-direction:column;gap:8px;}
+.cp-denom-row{display:flex;align-items:center;justify-content:space-between;background:#f5f5f5;border-radius:14px;padding:8px 10px 8px 16px;}
+.cp-denom-label{font-family:'Google Sans',sans-serif;font-size:15px;font-weight:700;color:var(--td);}
+.cp-denom-ctrl{display:flex;align-items:center;gap:10px;}
+.cp-denom-ctrl button{width:34px;height:34px;border-radius:10px;border:none;background:var(--gl);color:var(--gd);font-size:18px;font-weight:700;cursor:pointer;}
+.cp-denom-ctrl button:active{transform:scale(.92);}
+.cp-denom-qty{min-width:22px;text-align:center;font-size:16px;font-weight:700;color:var(--td);}
+/* [FIX-cash-changeCard-contrast] Trước đây nền #fffbe8 gần trùng màu nền app (--bg:#FFFCF0),
+   nhìn dễ lướt qua/nhầm lẫn. Giờ tách hẳn 2 trạng thái, có nền đậm + viền + đổ bóng để nổi bật. */
+.cp-change-card{border-radius:22px;padding:20px 24px;display:flex;justify-content:space-between;align-items:center;border:2.5px solid transparent;transition:background .15s,border-color .15s;}
+.cp-change-card.cp-cc-ok{background:#dcfce7;border-color:#22c55e;box-shadow:0 4px 14px rgba(34,197,94,.18);}
+.cp-change-card.cp-cc-bad{background:#fee2e2;border-color:#ef4444;box-shadow:0 4px 14px rgba(239,68,68,.18);}
+.cp-change-label{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.7px;margin-bottom:4px;}
+.cp-change-card.cp-cc-ok .cp-change-label{color:#15803d;}
+.cp-change-card.cp-cc-bad .cp-change-label{color:#b91c1c;}
+.cp-change-amt{font-size:32px;font-weight:800;}
+.cp-change-card.cp-cc-ok .cp-change-amt{color:#15803d;}
+.cp-change-card.cp-cc-bad .cp-change-amt{color:#dc2626;}
+.cp-confirm-btn{background:var(--gd);color:#fff;border:none;border-radius:30px;width:100%;padding:18px;font-family:'Google Sans',sans-serif;font-size:17px;font-weight:700;cursor:pointer;margin-top:4px;}
+/* Wallet Management */
+.wal-section{background:#fff;border-radius:20px;margin:0 16px 16px;padding:20px;}
+.wal-section-title{font-size:13px;font-weight:700;color:var(--gt);text-transform:uppercase;letter-spacing:.7px;margin-bottom:16px;display:flex;align-items:center;gap:8px;}
+.wal-input-group{background:#f5f5f5;border-radius:14px;padding:12px 14px;margin-bottom:12px;}
+.wal-input-label{font-size:10px;font-weight:700;color:var(--gt);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;}
+.wal-input-group input,.wal-input-group textarea{width:100%;border:none;outline:none;font-family:'Google Sans',sans-serif;font-size:16px;font-weight:600;color:var(--td);background:transparent;resize:none;}
+
+/* ============================================================
+   [MỚI-DS] CHUẨN THIẾT KẾ MỚI (kiểu Apple) — dùng tiền tố ds- để tách khỏi mọi
+   style cũ trong file, không đụng gì tới các màn chưa được thiết kế lại. Bắt
+   đầu ở màn "Nhận hàng tự do" (poReceiveScreen); dùng lại được cho tab khác
+   sau — xem hàm renderPoReceiveForm(). Nguyên tắc: nút/ô bấm to (tối thiểu
+   ~44-56px), bo tròn nhiều, mỗi trạng thái có màu ngữ nghĩa riêng (xanh=tốt,
+   vàng=hư hỏng, đỏ=xoá/sai), MỌI popup nổi GIỮA màn hình (không trượt từ đáy).
+   ============================================================ */
+.ds-sec-h{display:flex;align-items:baseline;justify-content:space-between;margin:0 16px 10px;}
+.ds-sec-h span.t{font-size:12px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;color:var(--ds-ink60);font-family:'Google Sans',sans-serif;}
+.ds-sec-h span.n{font-size:12px;font-weight:700;color:var(--ds-ink40);font-family:'Google Sans',sans-serif;}
+
+.ds-card{background:#fff;border:1px solid var(--ds-line);border-radius:22px;padding:16px;position:relative;
+  margin:0 16px 12px;transition:opacity .18s ease,transform .18s ease;font-family:'Google Sans',sans-serif;}
+.ds-card.wrong{border-color:var(--ds-danger);background:linear-gradient(0deg, var(--ds-danger-soft), var(--ds-danger-soft)), #fff;}
+.ds-card.leaving{opacity:0;transform:scale(.94);}
+.ds-del{position:absolute;top:-9px;right:25px;width:26px;height:26px;border-radius:50%;background:var(--ds-danger);
+  color:#fff;border:3px solid var(--bg);cursor:pointer;display:flex;align-items:center;justify-content:center;
+  font-size:15px;font-weight:800;line-height:1;}
+.ds-del:active{transform:scale(.9);}
+
+.ds-picker-row{display:flex;align-items:center;gap:10px;cursor:pointer;padding:2px 0 12px;border-bottom:1px solid var(--ds-line);margin-bottom:14px;}
+.ds-picker-row .txt{flex:1;min-width:0;}
+.ds-picker-row .name{font-size:17px;font-weight:800;letter-spacing:-.2px;color:var(--td);}
+.ds-picker-row .meta{font-size:12px;color:var(--ds-ink60);font-weight:600;margin-top:2px;}
+.ds-picker-row .chev{color:var(--ds-ink40);font-size:18px;flex-shrink:0;}
+
+.ds-seg{display:flex;gap:6px;background:var(--ds-card2);padding:4px;border-radius:14px;margin-bottom:14px;}
+.ds-seg button{flex:1;border:none;background:none;font-family:'Google Sans',sans-serif;padding:9px 8px;border-radius:11px;
+  font-size:12.5px;font-weight:700;color:var(--ds-ink60);cursor:pointer;white-space:nowrap;}
+.ds-seg button.on{background:#fff;color:var(--td);box-shadow:0 1px 3px var(--ds-shadow);}
+
+.ds-qty-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;}
+.ds-qty-box{background:var(--ds-card2);border-radius:16px;padding:10px 10px 12px;text-align:center;}
+.ds-qty-box .lbl{font-size:11px;font-weight:800;letter-spacing:.3px;text-transform:uppercase;margin-bottom:8px;}
+.ds-qty-box.good .lbl{color:var(--ds-good);}
+.ds-qty-box.dmg .lbl{color:var(--ds-warn);}
+.ds-stepper{display:flex;align-items:center;justify-content:center;gap:6px;}
+.ds-stepbtn{width:34px;height:34px;border-radius:50%;border:none;background:#fff;color:var(--td);
+  font-size:18px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;
+  box-shadow:0 1px 2px var(--ds-shadow);flex-shrink:0;}
+.ds-stepbtn:active{transform:scale(.9);}
+.ds-stepbtn:disabled{opacity:.35;cursor:default;}
+.ds-qtyval{width:56px;border:none;background:none;text-align:center;font-size:19px;font-weight:800;color:var(--td);
+  font-family:ui-monospace,"SF Mono","Roboto Mono",Menlo,Consolas,monospace;}
+.ds-qtyval::-webkit-outer-spin-button,.ds-qtyval::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
+.ds-qtyval:disabled{color:var(--ds-ink40);}
+
+.ds-wrongrow{display:flex;align-items:center;gap:12px;padding:2px 2px 14px;}
+.ds-wrongrow .wt{flex:1;}
+.ds-wrongrow .wt b{font-size:13.5px;font-weight:700;display:block;color:var(--td);}
+.ds-wrongrow .wt span{font-size:11.5px;color:var(--ds-ink60);font-weight:600;}
+.ds-switch{position:relative;width:46px;height:28px;flex-shrink:0;}
+.ds-switch input{opacity:0;width:100%;height:100%;margin:0;cursor:pointer;position:absolute;z-index:1;}
+.ds-switch .track{position:absolute;inset:0;background:var(--ds-line);border-radius:999px;transition:background .15s;}
+.ds-switch .knob{position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:#fff;
+  box-shadow:0 1px 3px rgba(0,0,0,.3);transition:transform .15s;}
+.ds-switch input:checked ~ .track{background:var(--ds-danger);}
+.ds-switch input:checked ~ .knob{transform:translateX(18px);}
+
+.ds-chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;}
+.ds-chip{font-size:11.5px;font-weight:700;padding:5px 10px;border-radius:999px;}
+.ds-chip.good{background:var(--ds-good-soft);color:var(--ds-good);}
+.ds-chip.dmg{background:var(--ds-warn-soft);color:var(--ds-warn);}
+.ds-chip.wrong{background:var(--ds-danger-soft);color:var(--ds-danger);}
+
+.ds-note-input{width:100%;border:1px solid var(--ds-line);background:var(--ds-card2);border-radius:12px;padding:10px 12px;
+  font-family:'Google Sans',sans-serif;font-size:13px;color:var(--td);outline:none;}
+.ds-note-input::placeholder{color:var(--ds-ink40);}
+
+.ds-add-line{width:calc(100% - 32px);margin:0 16px 12px;border:1.6px dashed var(--ds-line);background:var(--ds-card2);
+  border-radius:20px;padding:16px;display:flex;align-items:center;justify-content:center;gap:10px;cursor:pointer;
+  font-family:'Google Sans',sans-serif;font-size:14.5px;font-weight:800;color:var(--gd);}
+.ds-add-line:active{transform:scale(.98);}
+.ds-add-line .plus{width:26px;height:26px;border-radius:50%;background:var(--gd);color:#fff;display:flex;
+  align-items:center;justify-content:center;font-size:16px;font-weight:800;}
+
+.ds-cta{width:100%;border:none;border-radius:18px;padding:17px;font-size:16px;font-weight:800;cursor:pointer;
+  background:var(--gd);color:#fff;font-family:'Google Sans',sans-serif;letter-spacing:.1px;}
+.ds-cta:active{transform:scale(.985);}
+.ds-cta:disabled{background:var(--ds-card2);color:var(--ds-ink40);cursor:default;}
+
+/* [MỚI-DS] Popup CHUẨN — nổi GIỮA màn hình, không trượt từ đáy (đã chốt theo yêu cầu). */
+.ds-sheet-bg{position:fixed;inset:0;background:rgba(10,8,6,.5);z-index:9999;display:none;align-items:center;justify-content:center;padding:20px;}
+.ds-sheet-bg.open{display:flex;}
+.ds-sheet{width:100%;max-width:380px;background:var(--bg);border-radius:26px;max-height:78vh;display:flex;
+  flex-direction:column;box-shadow:0 20px 60px var(--ds-shadow);animation:dsPopIn .16s ease;font-family:'Google Sans',sans-serif;}
+@keyframes dsPopIn{from{opacity:0;transform:scale(.94);}to{opacity:1;transform:scale(1);}}
+.ds-sheet-head{padding:18px 18px 12px;font-size:16px;font-weight:800;text-align:center;border-bottom:1px solid var(--ds-line);color:var(--td);}
+.ds-sheet-search{margin:12px 16px;position:relative;}
+.ds-sheet-search input{width:100%;padding:11px 14px;border-radius:13px;border:1px solid var(--ds-line);background:var(--ds-card2);
+  font-family:'Google Sans',sans-serif;font-size:14px;color:var(--td);outline:none;}
+.ds-sheet-search input::placeholder{color:var(--ds-ink40);}
+.ds-sheet-list{overflow-y:auto;padding:0 8px 18px;}
+.ds-sheet-item{width:100%;text-align:left;border:none;background:none;padding:13px 12px;border-radius:14px;
+  display:flex;align-items:center;justify-content:space-between;gap:10px;cursor:pointer;font-family:'Google Sans',sans-serif;}
+.ds-sheet-item:active{background:var(--ds-card2);}
+.ds-sheet-item .nm{font-size:14.5px;font-weight:700;color:var(--td);}
+.ds-sheet-item .un{font-size:11.5px;font-weight:600;color:var(--ds-ink60);margin-top:2px;}
+.ds-sheet-item .ck{color:var(--gd);font-size:17px;font-weight:800;opacity:0;}
+.ds-sheet-item.sel .ck{opacity:1;}
+.ds-sheet-empty{padding:30px 20px;text-align:center;font-size:13px;color:var(--ds-ink40);font-weight:600;font-family:'Google Sans',sans-serif;}
+
+.ds-bottombar{position:sticky;bottom:0;z-index:5;padding:12px 16px calc(16px + env(safe-area-inset-bottom));
+  background:color-mix(in srgb, var(--bg) 88%, transparent);backdrop-filter:blur(18px) saturate(160%);
+  -webkit-backdrop-filter:blur(18px) saturate(160%);border-top:1px solid var(--ds-line);margin:0 -16px;}
+.ds-bottombar .sum{font-size:12px;font-weight:700;color:var(--ds-ink60);text-align:center;margin-bottom:9px;font-family:'Google Sans',sans-serif;}
+.ds-bottombar .sum b{color:var(--td);font-family:ui-monospace,"SF Mono","Roboto Mono",Menlo,Consolas,monospace;}
+/* ============================================================
+   BỘ CÂN BÁN THÀNH PHẨM (trừ bì theo dụng cụ đựng)
+   Ô ảnh vuông bo tròn lớn trên nền trắng — ảnh dụng cụ chụp nền trắng sẽ hoà
+   liền vào ô, không thấy mép, nên nhân viên nhìn ra cái khay chứ không nhìn ra
+   một tấm ảnh dán trong khung.
+   ============================================================ */
+.wp-ov{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:940;display:flex;align-items:flex-end;justify-content:center;backdrop-filter:blur(3px);}
+.wp-sheet{background:var(--bg);width:100%;max-width:560px;max-height:94vh;border-radius:26px 26px 0 0;display:flex;flex-direction:column;animation:wpUp .22s cubic-bezier(.32,.72,0,1);}
+@keyframes wpUp{from{transform:translateY(26px);opacity:.6}to{transform:translateY(0);opacity:1}}
+.wp-head{display:flex;align-items:center;gap:10px;padding:16px 18px 12px;border-bottom:1px solid #eee;flex-shrink:0;}
+.wp-head h3{font-family:'Google Sans',sans-serif;font-size:16px;font-weight:700;color:var(--td);flex:1;margin:0;line-height:1.3;}
+.wp-x{width:38px;height:38px;border-radius:50%;border:none;background:#f0efe9;color:#666;font-size:17px;cursor:pointer;flex-shrink:0;}
+.wp-body{overflow-y:auto;-webkit-overflow-scrolling:touch;padding:14px 16px 16px;flex:1;}
+.wp-foot{padding:12px 16px calc(14px + env(safe-area-inset-bottom));border-top:1px solid #eee;background:#fff;flex-shrink:0;}
+
+.wp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:10px;}
+.wp-card{background:#fff;border:1.5px solid #EDE9E0;border-radius:22px;padding:9px 8px 10px;cursor:pointer;text-align:center;position:relative;
+  box-shadow:0 2px 10px rgba(0,0,0,.05);transition:border-color .18s ease,transform .14s cubic-bezier(.32,.72,0,1),box-shadow .18s ease;}
+.wp-card:active{transform:scale(.97);}
+.wp-card.on{border:2px solid var(--gd);transform:scale(1.04);box-shadow:0 8px 22px -10px rgba(226,58,93,.5);}
+.wp-card .wp-thumb{width:100%;aspect-ratio:1/1;border-radius:16px;background:#fff;display:flex;align-items:center;justify-content:center;overflow:hidden;margin-bottom:6px;}
+.wp-card .wp-thumb img{width:100%;height:100%;object-fit:contain;}
+.wp-card .wp-nm{font-size:11.5px;font-weight:700;color:var(--td);line-height:1.25;}
+.wp-tick{position:absolute;top:5px;right:5px;width:21px;height:21px;border-radius:50%;background:var(--gd);color:#fff;font-size:12px;font-weight:800;display:flex;align-items:center;justify-content:center;}
+
+/* Thẻ ảnh lớn của dụng cụ đang chọn */
+.wp-hero{background:#fff;border:1.5px solid #EDE9E0;border-radius:30px;padding:16px;margin:12px 0 10px;box-shadow:0 4px 18px rgba(0,0,0,.06);}
+.wp-hero-img{width:100%;height:158px;border-radius:22px;background:#fff;display:flex;align-items:center;justify-content:center;overflow:hidden;}
+.wp-hero-img img{max-width:100%;max-height:100%;object-fit:contain;animation:wpFade .24s ease;}
+@keyframes wpFade{from{opacity:0;transform:translateY(6px) scale(.985)}to{opacity:1;transform:none}}
+.wp-skel{width:70%;height:70%;border-radius:18px;background:linear-gradient(90deg,#f2f0ea 25%,#e8e5dd 37%,#f2f0ea 63%);background-size:400% 100%;animation:wpShim 1.3s infinite linear;}
+@keyframes wpShim{from{background-position:100% 0}to{background-position:-100% 0}}
+.wp-noimg{font-size:38px;font-weight:900;color:#d9d5cb;font-family:'Google Sans',sans-serif;}
+
+/* Chọn phân loại cân (có nắp / không nắp...) */
+.wp-vars{display:flex;gap:7px;flex-wrap:wrap;margin-top:12px;}
+.wp-var{flex:1;min-width:96px;padding:10px 8px;border-radius:14px;border:1.5px solid #EDE9E0;background:#fff;color:#777;
+  font-family:'Google Sans',sans-serif;font-size:12.5px;font-weight:700;cursor:pointer;transition:all .15s ease;}
+.wp-var.on{border-color:var(--gd);background:var(--gl);color:var(--gd);}
+
+.wp-line{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:9px 11px;background:#fff;border:1px solid #eee;border-radius:13px;margin-bottom:6px;}
+.wp-total{display:flex;justify-content:space-between;align-items:baseline;padding:13px 14px;background:var(--gl);border-radius:16px;margin-top:8px;}
+
+@media (prefers-reduced-motion: reduce){
+  .wp-sheet,.wp-hero-img img,.wp-skel{animation:none;}
+  .wp-card,.wp-card.on{transition:none;transform:none;}
+}
+</style>
+</head>
+<body>
+</body>
+</html>
