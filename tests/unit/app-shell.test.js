@@ -444,6 +444,14 @@ describe('P9/P10 — màn Ca, Cảnh báo, Duyệt đều đi qua read-layer', f
     });
   });
 
+  test('QUANLY đọc hàng đang mở (kho:containers) qua GetOpenUnits', function () {
+    var runtime = fakeRuntime();
+    return _app.QL.createController(runtime).getOpenUnits({}).then(function (out) {
+      assertOk(out);
+      assert.strictEqual(runtime.calls[0].name, 'GetOpenUnits');
+    });
+  });
+
   test('QUANLY mở màn MIX và đọc qua GetMix', function () {
     var runtime = fakeRuntime();
     var ql = _app.QL.createController(runtime);

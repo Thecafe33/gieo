@@ -495,6 +495,40 @@ describe('Kho — danh mục cấu hình đơn giản + Báo cáo mix/customer (
     });
   });
 
+  describe('GetOpenUnits (kho:containers — hàng đang mở & tem, legacy renderKhoContainers)', function () {
+    function unit(over) {
+      return Object.assign({
+        unitId: _r.ids.newId('unit'), itemId: _r.SUA, status: 'SEALED',
+        remainingQty: 500, initialQty: 1000, needsReview: false
+      }, over || {});
+    }
+
+    test('sắp theo openedAt/receivedAt, đếm needsReview/LOST', function () {
+      var out = assertOk(G.getOpenUnits(rCtx('POS_OPERATOR', 'POS'), {
+        units: [
+          unit({ unitId: 'u_a', openedAt: 3000 }),
+          unit({ unitId: 'u_b', openedAt: 1000 }),
+          unit({ unitId: 'u_c', status: 'LOST', openedAt: 2000 }),
+          unit({ unitId: 'u_d', needsReview: true, openedAt: 500 })
+        ]
+      }));
+      assert.deepStrictEqual(out.units.map(function (u) { return u.unitId; }), ['u_d', 'u_b', 'u_c', 'u_a']);
+      assert.strictEqual(out.total, 4);
+      assert.strictEqual(out.needsReviewCount, 1);
+      assert.strictEqual(out.lostCount, 1);
+    });
+
+    test('POS_OPERATOR ĐỌC ĐƯỢC — cùng authority EXECUTE với GetInventoryLevel', function () {
+      var out = assertOk(G.getOpenUnits(rCtx('POS_OPERATOR', 'POS'), { units: [] }));
+      assert.deepStrictEqual(out.units, []);
+    });
+
+    test('không có units trong spec thì mảng rỗng, không lỗi', function () {
+      var out = assertOk(G.getOpenUnits(rCtx('QUANLY_ADMIN', 'QUANLY', _r.QL), {}));
+      assert.strictEqual(out.total, 0);
+    });
+  });
+
   describe('GetMix (Báo cáo — phân tích bán hàng theo món, legacy renderMix)', function () {
     function bill(over) {
       return Object.assign({ billId: _r.ids.newId('bill'), businessDate: '2026-03-10' }, over || {});

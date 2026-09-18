@@ -154,13 +154,30 @@ GIEO.define('persistence-firebase/canonical-read-port', [
       return getAll(collP.value.path, where);
     }
 
+    /**
+     * Toàn bộ Unit đang "sống" (SEALED/OPEN/CONSUMING/LOST) của CẢ kho, không
+     * lọc itemId — nguồn cho "Kho → Hàng đang mở & tem" (legacy
+     * renderKhoContainers()). Khác loadUnitsForItem (lọc theo 1 itemId, dùng
+     * cho FIFO allocation) — hàm này chỉ để hiển thị/thao tác thủ công
+     * (tìm lại container đã báo mất qua RestoreFoundContainer), không đưa vào
+     * allocation. RECEIVED/PHYSICALLY_FINISHED/COMPACTABLE/VOIDED bị loại vì
+     * không còn là "đang mở" theo nghĩa cần người quản lý để mắt tới.
+     */
+    function loadOpenUnits(ctx) {
+      var collP = paths.collectionPath('unit', ctx, { unitId: '_' });
+      if (R.isErr(collP)) return Promise.resolve(collP);
+      return getAll(collP.value.path,
+        [{ field: 'status', op: 'in', value: ['SEALED', 'OPEN', 'CONSUMING', 'LOST'] }]);
+    }
+
     return {
       loadUnitsForItem: loadUnitsForItem,
       loadVersions: loadVersions,
       loadEntriesForReference: loadEntriesForReference,
       loadLoyaltyEntriesForReference: loadLoyaltyEntriesForReference,
       listKhoConfig: listKhoConfig,
-      loadRecentLedgerEntries: loadRecentLedgerEntries
+      loadRecentLedgerEntries: loadRecentLedgerEntries,
+      loadOpenUnits: loadOpenUnits
     };
   }
 

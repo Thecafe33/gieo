@@ -85,6 +85,7 @@ GIEO.define('app-quanly/controller', [
          mix/customer, 2026-09-18. */
       getKhoConfigList: function (input) { return read('GetKhoConfigList', input); },
       getKhoHistory: function (input) { return read('GetKhoHistory', input); },
+      getOpenUnits: function (input) { return read('GetOpenUnits', input); },
       getMix: function (input) { return read('GetMix', input); },
       getCustomerReport: function (input) { return read('GetCustomerReport', input); },
       saveStorageLocation: function (input) { return run('SaveStorageLocation', input); },

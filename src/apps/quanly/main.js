@@ -77,6 +77,21 @@ GIEO.define('app-quanly/main', [
     }
   };
   var KHO_CONFIG_ORDER = ['storageLocation', 'wasteReason', 'vessel', 'refillRule', 'checklistItem', 'toppingRecipe'];
+
+  /**
+   * Hệ mới không có field zone/domain trên alert (khác legacy computeStoreHealth()
+   * gắn zone:'kho'). Tự phân loại type nào thuộc "Kho → Cần xử lý" — đối chiếu
+   * TYPES trong alerts/alert.js, loại các type không liên quan kho (CASH_VARIANCE,
+   * COGS_OVER_TARGET, LOYALTY_DRIFT, DRIFT_AFTER_CLOSING, SNAPSHOT_VERIFY_FAILED,
+   * DAY_NOT_CLOSED — vận hành chung, không phải kho).
+   */
+  var KHO_ALERT_TYPES = {
+    FIFO_UNIT_EXHAUSTED: true, CONTAINER_EXPIRING: true, PREP_BATCH_EXPIRING: true,
+    LOW_STOCK: true, STOCKOUT: true, UNIT_NEEDS_REVIEW: true, STOCK_VARIANCE: true,
+    MISSING_RECIPE: true, UNTRACKED_CONSUMPTION: true, LOST_CONTAINER_PENDING: true,
+    PREP_YIELD_MISMATCH: true, STOCK_COUNT_LINE_FAILED: true
+  };
+
   function view() { return { loading: false, error: null, data: null }; }
 
   function applyRead(out) {
@@ -173,12 +188,15 @@ GIEO.define('app-quanly/main', [
        Xem commands/kho-config.js cho lý do các màn này KHÔNG có pipeline
        riêng phức tạp như sales/inventory — chỉ lưu + đọc, đúng chỉ đạo chủ
        quán "đơn giản, không phải core". */
-    var khoUI = { tab: 'storageLocation' };
+    var khoUI = { tab: 'inbox' };
     var khoConfigViews = {}; /* kind -> view(), lazy */
     var khoForm = { editingId: null, values: {}, busy: false, error: null };
     var khoHistoryView = view();
     var khoPOView = view();
     var khoPOForm = { open: false, busy: false, error: null };
+    var khoContainersView = view();
+    var khoContainersFilter = 'ALL';
+    var khoContainersAction = { busy: null, error: null };
     var mixUI = { from: clock.calendarDate(), to: clock.calendarDate() };
     var mixView = view();
     var customerUI = { from: clock.calendarDate(), to: clock.calendarDate() };
@@ -702,12 +720,50 @@ GIEO.define('app-quanly/main', [
 
     /* ---------- Kho — danh mục cấu hình đơn giản + đặt hàng + lịch sử ---------- */
 
-    var KHO_TABS = KHO_CONFIG_ORDER.concat(['purchaseOrder', 'history']);
+    var KHO_TABS = ['inbox'].concat(KHO_CONFIG_ORDER, ['containers', 'purchaseOrder', 'history']);
 
     function khoTabLabel(tab) {
+      if (tab === 'inbox') return 'Cần xử lý';
+      if (tab === 'containers') return 'Hàng đang mở';
       if (tab === 'purchaseOrder') return 'Đặt hàng';
       if (tab === 'history') return 'Lịch sử kho';
       return KHO_CONFIG_SCHEMAS[tab].title;
+    }
+
+    /**
+     * "Kho → Cần xử lý" — thay renderKhoInbox() legacy (zone==='kho' + tier
+     * red/yellow). Lọc alertView theo KHO_ALERT_TYPES, tái dùng alertDetail()
+     * và bố cục bucket DANGER/WARNING/INFO như alertsScreen().
+     */
+    function khoInboxMarkup() {
+      var quickLinks = '<div class="search-row" style="flex-wrap:wrap;margin-top:12px">' +
+        '<button class="btn outline" data-kho-tab="containers">Hàng đang mở</button>' +
+        '<button class="btn outline" data-kho-tab="purchaseOrder">Đặt hàng</button>' +
+        '<button class="btn outline" data-screen="APPROVALS">Duyệt kiểm kê</button>' +
+        '<button class="btn outline" data-kho-tab="history">Lịch sử kho</button></div>';
+      if (alertView.loading) return '<div class="empty"><h3>Đang đọc cảnh báo…</h3></div>' + quickLinks;
+      if (alertView.error) return errorBox('Không đọc được cảnh báo', alertView.error) + quickLinks;
+      var d = alertView.data;
+      var buckets = d && d.buckets ? d.buckets : {};
+      var khoBuckets = ['DANGER', 'WARNING', 'INFO'].reduce(function (acc, sev) {
+        acc[sev] = (buckets[sev] || []).filter(function (a) { return KHO_ALERT_TYPES[a.type]; });
+        return acc;
+      }, {});
+      var total = khoBuckets.DANGER.length + khoBuckets.WARNING.length + khoBuckets.INFO.length;
+      if (!total) return '<div class="empty"><div class="empty-icon">✓</div>' +
+        '<h3>Không có việc cần xử lý ở Kho</h3></div>' + quickLinks;
+      var sections = ['DANGER', 'WARNING', 'INFO'].map(function (severity) {
+        var items = khoBuckets[severity];
+        if (!items.length) return '';
+        var tone = severity === 'DANGER' ? 'danger' : (severity === 'WARNING' ? 'warning' : 'neutral');
+        return '<h3 class="report-sub"><span class="status ' + tone + '">' + severity + '</span> ' +
+          items.length + ' việc</h3><div class="card">' + items.map(function (alert) {
+            return '<article class="litem"><div class="lmain"><div class="ltitle">' + esc(alert.type) +
+              '</div><div class="lsub">' + esc(alertDetail(alert)) + '</div></div><div class="lmeta">' +
+              esc(alert.businessDate || '') + '</div></article>';
+          }).join('') + '</div>';
+      }).join('');
+      return sections + quickLinks;
     }
 
     function khoConfigView(kind) {
@@ -797,6 +853,54 @@ GIEO.define('app-quanly/main', [
       }).join('') + '</div>';
     }
 
+    var KHO_CONTAINER_FILTERS = ['ALL', 'OPEN', 'NEEDS_REVIEW', 'LOST'];
+    var KHO_CONTAINER_FILTER_LABEL = { ALL: 'Tất cả', OPEN: 'Đang mở', NEEDS_REVIEW: 'Cần rà', LOST: 'Báo mất' };
+    var KHO_STATUS_LABEL = {
+      SEALED: 'Còn niêm', OPEN: 'Đang mở', CONSUMING: 'Đang dùng', LOST: 'Báo mất'
+    };
+
+    /**
+     * Kho — hàng đang mở & tem (thay legacy renderKhoContainers()). Unit mới
+     * không có field expiresAt/labelPrinted như legacy (fifo-core/unit.js
+     * không lưu hai field này) — không bịa ra tab "Quá hạn"/"Tem chưa dán",
+     * chỉ hiển thị field THẬT có: status/needsReview/remainingQty. "Tìm lại
+     * được" tái dùng RestoreFoundContainer đã có sẵn (chưa từng có UI gọi).
+     */
+    function khoContainersMarkup() {
+      var filterBar = '<div class="search-row" style="flex-wrap:wrap;margin-bottom:12px">' +
+        KHO_CONTAINER_FILTERS.map(function (f) {
+          return '<button class="btn ' + (khoContainersFilter === f ? 'primary' : 'outline') +
+            '" data-kho-ctn-filter="' + f + '">' + esc(KHO_CONTAINER_FILTER_LABEL[f]) + '</button>';
+        }).join('') + '</div>';
+      if (khoContainersView.loading) return filterBar + '<div class="pc-empty">Đang đọc…</div>';
+      if (khoContainersView.error) return filterBar + errorBox('Không đọc được danh sách hàng đang mở', khoContainersView.error);
+      var all = (khoContainersView.data && khoContainersView.data.units) || [];
+      var units = all.filter(function (u) {
+        if (khoContainersFilter === 'OPEN') return u.status === 'OPEN' || u.status === 'CONSUMING';
+        if (khoContainersFilter === 'NEEDS_REVIEW') return !!u.needsReview;
+        if (khoContainersFilter === 'LOST') return u.status === 'LOST';
+        return true;
+      });
+      var actionMsg = khoContainersAction.error
+        ? errorBox('Không thực hiện được', khoContainersAction.error) : '';
+      if (!units.length) return filterBar + actionMsg + '<div class="empty"><h3>Không có Unit ở nhóm này</h3></div>';
+      var rows = units.map(function (u) {
+        var tone = u.status === 'LOST' ? 'danger' : (u.needsReview ? 'warning' : 'neutral');
+        var action = u.status === 'LOST'
+          ? '<button class="btn primary" data-restore-found="' + esc(u.unitId) + '"' +
+            (khoContainersAction.busy === u.unitId ? ' disabled' : '') + '>' +
+            esc(khoContainersAction.busy === u.unitId ? 'Đang xử lý…' : 'Tìm lại được') + '</button>'
+          : '<button class="btn outline" data-container-trace="' + esc(u.unitId) + '">Truy vết</button>';
+        return '<article class="litem"><div class="lmain"><div class="ltitle">' + esc(u.itemId) +
+          ' <span class="status ' + tone + '">' + esc(KHO_STATUS_LABEL[u.status] || u.status) + '</span>' +
+          (u.needsReview ? ' <span class="status warning">Cần rà</span>' : '') + '</div>' +
+          '<div class="lsub">Còn ' + esc(u.remainingQty) + '/' + esc(u.initialQty) +
+          ' · mở ' + esc(u.openedAt || '—') + ' · nhận ' + esc(u.receivedAt || '—') + '</div></div>' +
+          action + '</article>';
+      }).join('');
+      return filterBar + actionMsg + '<div class="card">' + rows + '</div>';
+    }
+
     function khoHistoryMarkup() {
       if (khoHistoryView.loading) return '<div class="pc-empty">Đang đọc…</div>';
       if (khoHistoryView.error) return errorBox('Không đọc được lịch sử kho', khoHistoryView.error);
@@ -814,7 +918,9 @@ GIEO.define('app-quanly/main', [
       var head = '<section><div class="section-head"><div><p class="eyebrow">Kho</p>' +
         '<h2>Danh mục &amp; đặt hàng</h2></div></div>' + khoTabBar() + '</section>';
       var body;
-      if (khoUI.tab === 'purchaseOrder') body = khoPOFormMarkup() + khoPOListMarkup();
+      if (khoUI.tab === 'inbox') body = khoInboxMarkup();
+      else if (khoUI.tab === 'containers') body = khoContainersMarkup();
+      else if (khoUI.tab === 'purchaseOrder') body = khoPOFormMarkup() + khoPOListMarkup();
       else if (khoUI.tab === 'history') body = khoHistoryMarkup();
       else body = khoConfigFormMarkup(khoUI.tab) + khoConfigListMarkup(khoUI.tab);
       return head + body;
@@ -1001,8 +1107,21 @@ GIEO.define('app-quanly/main', [
     }
 
     /** Điều hướng theo tab hiện tại của màn Kho — mỗi tab tự tải nguồn của nó. */
+    function loadKhoContainers() {
+      khoContainersView = { loading: true, error: null, data: null };
+      render();
+      controller.getOpenUnits({}).then(function (out) {
+        khoContainersView = applyRaw(out);
+        render();
+      });
+    }
+
     function loadKhoForTab(tab) {
-      if (tab === 'purchaseOrder') {
+      if (tab === 'inbox') {
+        if (!alertView.data && !alertView.loading) loadOverview();
+      } else if (tab === 'containers') {
+        if (!khoContainersView.data && !khoContainersView.loading) loadKhoContainers();
+      } else if (tab === 'purchaseOrder') {
         if (!khoPOView.data && !khoPOView.loading) loadKhoPO();
       } else if (tab === 'history') {
         if (!khoHistoryView.data && !khoHistoryView.loading) loadKhoHistory();
@@ -1368,6 +1487,42 @@ GIEO.define('app-quanly/main', [
           khoForm = { editingId: null, values: {}, busy: false, error: null };
           render();
           loadKhoForTab(khoUI.tab);
+        });
+      });
+
+      Array.prototype.forEach.call(el.querySelectorAll('[data-kho-ctn-filter]'), function (button) {
+        button.addEventListener('click', function () {
+          khoContainersFilter = button.getAttribute('data-kho-ctn-filter');
+          render();
+        });
+      });
+
+      Array.prototype.forEach.call(el.querySelectorAll('[data-container-trace]'), function (button) {
+        button.addEventListener('click', function () {
+          var unitId = button.getAttribute('data-container-trace');
+          controller.navigate('TRACE');
+          traceView = { loading: true, error: null, data: null };
+          render();
+          controller.getUnitTrace({ containerCode: unitId }).then(function (out) {
+            traceView = applyRead(out);
+            render();
+          });
+        });
+      });
+
+      Array.prototype.forEach.call(el.querySelectorAll('[data-restore-found]'), function (button) {
+        button.addEventListener('click', function () {
+          var unitId = button.getAttribute('data-restore-found');
+          var unit = ((khoContainersView.data && khoContainersView.data.units) || [])
+            .filter(function (u) { return u.unitId === unitId; })[0];
+          if (!unit) return;
+          khoContainersAction = { busy: unitId, error: null };
+          render();
+          controller.restoreFoundContainer({ unitId: unitId, units: [unit] }).then(function (out) {
+            khoContainersAction = R.isErr(out) ? { busy: null, error: out.error } : { busy: null, error: null };
+            render();
+            if (R.isOk(out)) loadKhoContainers();
+          });
         });
       });
 

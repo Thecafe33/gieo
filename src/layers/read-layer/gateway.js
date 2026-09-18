@@ -85,6 +85,13 @@ GIEO.define('read-layer/gateway', [
        bán không sửa được danh mục, nhưng biết có gì trong danh mục để chọn. */
     GetKhoConfigList: registerQuery('GetKhoConfigList', { authority: ['EXECUTE', 'REVIEW_APPROVE_CORRECT'] }),
     GetKhoHistory: registerQuery('GetKhoHistory', { authority: 'REVIEW_APPROVE_CORRECT' }),
+    /* Kho — hàng đang mở & tem (kho:containers). Any-of EXECUTE/
+       REVIEW_APPROVE_CORRECT, cùng kiểu GetKhoConfigList: người bán cần biết
+       lô nào đang mở (EXECUTE), quản lý cần màn Kho→Hàng đang mở để xử lý
+       (REVIEW_APPROVE_CORRECT) — khai riêng EXECUTE sẽ khoá QUANLY_ADMIN ra
+       khỏi chính màn hình của họ (QUANLY_ADMIN không có EXECUTE, xem
+       store-context/access.js ROLE_AUTHORITIES). */
+    GetOpenUnits: registerQuery('GetOpenUnits', { authority: ['EXECUTE', 'REVIEW_APPROVE_CORRECT'] }),
     /* Ba query dưới đây sinh ra để P9/P10 không còn màn nào tự đọc nguồn thô.
        Trước đó màn Ca/Tổng quan/Duyệt chỉ có chỗ trống hard-code, và chỗ trống
        hard-code chính là nơi người ta sẽ nối thẳng Firebase vào UI. */
@@ -709,6 +716,27 @@ GIEO.define('read-layer/gateway', [
   }
 
   /**
+   * Kho — hàng đang mở & tem (kho:containers, thay legacy
+   * renderKhoContainers()). `spec.units` do canonical-data-source cấp
+   * (SEALED/OPEN/CONSUMING/LOST, toàn kho). Không có field `expiresAt`/
+   * `labelPrinted` trên Unit mới (khác legacy) — không suy diễn/bịa hai field
+   * này ra (§2.3a: thiếu thì null/không có tab đó, không fabricate); chỉ nhóm
+   * theo `status`/`needsReview` là những field THẬT có trên Unit.
+   */
+  function getOpenUnits(ctx, spec) {
+    var g = guard(Q.GetOpenUnits, ctx, spec);
+    if (R.isErr(g)) return g;
+    var units = (spec.units || []).slice().sort(function (a, b) {
+      var at = a.openedAt || a.receivedAt || 0;
+      var bt = b.openedAt || b.receivedAt || 0;
+      return at < bt ? -1 : at > bt ? 1 : 0;
+    });
+    var needsReviewCount = units.filter(function (u) { return u.needsReview; }).length;
+    var lostCount = units.filter(function (u) { return u.status === 'LOST'; }).length;
+    return R.ok({ units: units, total: units.length, needsReviewCount: needsReviewCount, lostCount: lostCount });
+  }
+
+  /**
    * Phân tích bán hàng theo món (Báo cáo — mix, legacy renderMix/
    * computeMixReport). Cố ý KHÔNG replicate tầng COGS/margin của legacy (rule
    * engine bao bì/topping) — quyết định chủ quán 2026-09-18: màn Kho/Báo cáo
@@ -807,6 +835,7 @@ GIEO.define('read-layer/gateway', [
     getPayrollForMonth: getPayrollForMonth,
     getKhoConfigList: getKhoConfigList,
     getKhoHistory: getKhoHistory,
+    getOpenUnits: getOpenUnits,
     getMix: getMix,
     getCustomerReport: getCustomerReport
   };

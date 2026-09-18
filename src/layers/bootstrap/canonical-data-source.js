@@ -217,6 +217,15 @@ GIEO.define('bootstrap/canonical-data-source', [
           return R.ok(Object.assign({}, input, { entries: out.value }));
         });
       }
+      /* Kho — hàng đang mở & tem (kho:containers, 2026-09-18): toàn bộ Unit
+         SEALED/OPEN/CONSUMING/LOST của cả kho, không lọc itemId. */
+      if (name === 'GetOpenUnits' && !input.units) {
+        var ctx5 = { organizationId: defaults.organizationId, storeId: input.storeId };
+        return reader.loadOpenUnits(ctx5).then(function (out) {
+          if (R.isErr(out) || out.value.length === 0) return R.ok(input);
+          return R.ok(Object.assign({}, input, { units: out.value }));
+        });
+      }
       return Promise.resolve(R.ok(input));
     }
 
