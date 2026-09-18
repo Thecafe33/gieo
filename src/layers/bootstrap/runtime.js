@@ -16,13 +16,14 @@ GIEO.define('bootstrap/runtime', [
   'commands/loyalty',
   'commands/alerts',
   'commands/versioning',
+  'commands/kho-config',
   'read-layer/gateway',
   'read-layer/merge-canonical',
   'reporting/report-queries',
   'bootstrap/domain-events'
 ], function (
   R, pipeline, sales, inventory, receiving, stockCount, catalog, prep, reversal, approval,
-  businessDay, shift, payroll, loyalty, alerts, versioning, reads, merge, reports, domainEvents
+  businessDay, shift, payroll, loyalty, alerts, versioning, khoConfig, reads, merge, reports, domainEvents
 ) {
   'use strict';
 
@@ -79,7 +80,16 @@ GIEO.define('bootstrap/runtime', [
     PublishYield: versioning.PublishYield,
     PublishPayTerms: versioning.PublishPayTerms,
     PublishConfig: versioning.PublishConfig,
-    PublishIceCogs: versioning.PublishIceCogs
+    PublishIceCogs: versioning.PublishIceCogs,
+    /* Kho — danh mục cấu hình đơn giản (commands/kho-config.js), 2026-09-18. */
+    SaveStorageLocation: khoConfig.SaveStorageLocation,
+    SaveWasteReason: khoConfig.SaveWasteReason,
+    SaveVessel: khoConfig.SaveVessel,
+    SaveRefillRule: khoConfig.SaveRefillRule,
+    SaveChecklistItem: khoConfig.SaveChecklistItem,
+    SaveToppingRecipe: khoConfig.SaveToppingRecipe,
+    CreatePurchaseOrder: khoConfig.CreatePurchaseOrder,
+    CancelPurchaseOrder: khoConfig.CancelPurchaseOrder
   };
   var QUERIES = {
     GetMenu: reads.getMenu,
@@ -93,6 +103,10 @@ GIEO.define('bootstrap/runtime', [
     GetLedgerEntriesForReference: reads.getLedgerEntriesForReference,
     GetLoyaltyLedgerForReference: reads.getLoyaltyLedgerForReference,
     GetPnL: reads.getPnL,
+    GetMix: reads.getMix,
+    GetCustomerReport: reads.getCustomerReport,
+    GetKhoConfigList: reads.getKhoConfigList,
+    GetKhoHistory: reads.getKhoHistory,
     ComparePeriods: reads.comparePeriods,
     GetShiftStatus: reads.getShiftStatus,
     GetAlerts: reads.getAlerts,

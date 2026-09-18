@@ -149,12 +149,15 @@ GIEO.define('bootstrap/canonical-data-source', [
 
     /**
      * Đọc canonical TRƯỚC khi rơi xuống legacy (đối xứng với forCommand ở
-     * trên) — hai query hiện tại: GetLedgerEntriesForReference (nguồn
-     * `originalAllocations` cho ReverseTransaction khi xoá bill, §3.8) và
+     * trên). Bốn query: GetLedgerEntriesForReference (nguồn
+     * `originalAllocations` cho ReverseTransaction khi xoá bill, §3.8),
      * GetLoyaltyLedgerForReference (nguồn `eventData.loyaltyEntries` cho
-     * CÙNG lệnh đó, NET-LOYALTY-V1.md #4). Bill sinh SAU cutover có dữ liệu
-     * canonical thật ở đây; bill legacy không có gì (mảng rỗng), nên KHÔNG
-     * set `input.entries` — để nguyên input đi tiếp.
+     * CÙNG lệnh đó, NET-LOYALTY-V1.md #4), và GetKhoConfigList/GetKhoHistory
+     * (danh mục/sổ Kho, commands/kho-config.js, 2026-09-18 — collection MỚI,
+     * không có gì ở legacy để rơi xuống, nên legacy-data-source.js không cần
+     * biết 2 tên này). Bill sinh SAU cutover có dữ liệu canonical thật ở đây;
+     * bill legacy không có gì (mảng rỗng), nên KHÔNG set `input.entries` — để
+     * nguyên input đi tiếp.
      *
      * `bootstrap/legacy-data-source.js` KHÔNG có nhánh dịch riêng cho query
      * này (đã kiểm tra: không nằm trong NOT_WIRED, không có branch riêng —
@@ -193,6 +196,23 @@ GIEO.define('bootstrap/canonical-data-source', [
       if (name === 'GetLoyaltyLedgerForReference' && input.billId && !input.entries) {
         var ctx2 = { organizationId: defaults.organizationId, storeId: input.storeId };
         return reader.loadLoyaltyEntriesForReference(ctx2, input.billId).then(function (out) {
+          if (R.isErr(out) || out.value.length === 0) return R.ok(input);
+          return R.ok(Object.assign({}, input, { entries: out.value }));
+        });
+      }
+      /* Kho — danh mục cấu hình đơn giản (commands/kho-config.js, 2026-09-18):
+         liệt kê nguyên collection của input.kind. */
+      if (name === 'GetKhoConfigList' && input.kind && !input.entries) {
+        var ctx3 = { organizationId: defaults.organizationId, storeId: input.storeId };
+        return reader.listKhoConfig(ctx3, input.kind).then(function (out) {
+          if (R.isErr(out) || out.value.length === 0) return R.ok(input);
+          return R.ok(Object.assign({}, input, { entries: out.value }));
+        });
+      }
+      /* Kho — lịch sử kho (kho:history): sổ ledger raw+prep gần đây. */
+      if (name === 'GetKhoHistory' && !input.entries) {
+        var ctx4 = { organizationId: defaults.organizationId, storeId: input.storeId };
+        return reader.loadRecentLedgerEntries(ctx4, input.domain || null).then(function (out) {
           if (R.isErr(out) || out.value.length === 0) return R.ok(input);
           return R.ok(Object.assign({}, input, { entries: out.value }));
         });

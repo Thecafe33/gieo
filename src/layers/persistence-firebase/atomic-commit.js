@@ -96,6 +96,13 @@ GIEO.define('persistence-firebase/atomic-commit', [
         menuItem: ['menuItem', function (x) { return { menuItemId: x.menuItemId }; }],
         category: ['category', function (x) { return { categoryId: x.categoryId }; }],
         promotion: ['promotion', function (x) { return { promotionId: x.promotionId }; }],
+        /* Kho — danh mục cấu hình đơn giản (commands/kho-config.js), 2026-09-18. */
+        vessel: ['vessel', function (x) { return { id: x.id }; }],
+        storageLocation: ['storageLocation', function (x) { return { id: x.id }; }],
+        wasteReason: ['wasteReason', function (x) { return { id: x.id }; }],
+        refillRule: ['refillRule', function (x) { return { id: x.id }; }],
+        checklistItem: ['checklistItem', function (x) { return { id: x.id }; }],
+        toppingRecipe: ['toppingRecipe', function (x) { return { id: x.id }; }],
         /* CP-VersionedInput — commands/versioning.js (Publish* cho recipe/cost/
            packaging/prepYield/payTerms/config/iceCogs). MỘT map chung cho CẢ 7
            domain: `compaction/versioned-input.js#publish()` đã trả về đúng

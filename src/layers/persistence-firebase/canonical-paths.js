@@ -86,6 +86,17 @@ GIEO.define('persistence-firebase/canonical-paths', [
       build: function (ctx, a) { return base(ctx) + '/versions/' + a.kind + '/' + a.subjectId + '/' + a.versionId; }
     },
     packagingConfig: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/packagingConfig/' + a.id; } },
+    /* Kho — danh mục cấu hình ĐƠN GIẢN (chỉ lưu + đọc, không tính toán FIFO/
+       COGS): vị trí kho, lý do hao hụt, dụng cụ đựng, refill, checklist ca,
+       công thức topping. Quyết định 2026-09-18: các màn Kho này KHÔNG cần
+       command riêng biệt hay pipeline nặng — cùng hình dạng CreateCategory
+       (commands/catalog.js), chỉ khác collection. */
+    vessel: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/vessels/' + a.id; } },
+    storageLocation: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/storageLocations/' + a.id; } },
+    wasteReason: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/wasteReasons/' + a.id; } },
+    refillRule: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/refillRules/' + a.id; } },
+    checklistItem: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/checklistItems/' + a.id; } },
+    toppingRecipe: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/toppingRecipes/' + a.id; } },
     /* CP11 — commands/catalog.js. */
     menuItem: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/menuItems/' + a.menuItemId; } },
     category: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/categories/' + a.categoryId; } },

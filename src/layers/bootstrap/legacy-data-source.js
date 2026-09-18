@@ -95,6 +95,22 @@ GIEO.define('bootstrap/legacy-data-source', [
           });
         });
       }
+      /* Báo cáo — Phân tích bán hàng (mix) / Khách hàng (customer). Cùng
+         nguồn bill khoảng ngày với GetBillsForRange (legacy renderMix/
+         renderCustomer đọc CHUNG `fetchOrdersForDate`) — không có pipeline
+         đọc riêng, nên không có chỗ 2 báo cáo lệch số với LỊCH SỬ BILL. */
+      if ((name === 'GetMix' || name === 'GetCustomerReport') && input.from && input.to && !input.bills) {
+        return reader.loadBillsForRange(input).then(function (out) {
+          if (R.isErr(out)) return out;
+          return R.ok({
+            storeId: input.storeId,
+            from: input.from,
+            to: input.to,
+            bills: out.value.bills,
+            legacyMeta: { ambiguous: out.value.ambiguous, days: out.value.days }
+          });
+        });
+      }
       if (NOT_WIRED[name] && !hasCanonicalInput(name, input)) {
         /* Chưa có nguồn legacy cho query này. Trả LỖI, không trả rỗng.
            Rỗng và "chưa đọc được" trông giống nhau trên màn hình nhưng nghĩa

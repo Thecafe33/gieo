@@ -422,4 +422,76 @@ describe('P9/P10 — màn Ca, Cảnh báo, Duyệt đều đi qua read-layer', f
       assert.strictEqual(runtime.calls.length, 0);
     });
   });
+
+  test('QUANLY mở màn KHO và đọc danh mục cấu hình qua GetKhoConfigList', function () {
+    var runtime = fakeRuntime();
+    var ql = _app.QL.createController(runtime);
+    assertOk(ql.navigate('KHO'));
+    assert.strictEqual(ql.state().screen, 'KHO');
+    return ql.getKhoConfigList({ kind: 'storageLocation' }).then(function (out) {
+      assertOk(out);
+      assert.strictEqual(runtime.calls[0].kind, 'query');
+      assert.strictEqual(runtime.calls[0].name, 'GetKhoConfigList');
+      assert.strictEqual(runtime.calls[0].input.kind, 'storageLocation');
+    });
+  });
+
+  test('QUANLY đọc lịch sử kho qua GetKhoHistory', function () {
+    var runtime = fakeRuntime();
+    return _app.QL.createController(runtime).getKhoHistory({}).then(function (out) {
+      assertOk(out);
+      assert.strictEqual(runtime.calls[0].name, 'GetKhoHistory');
+    });
+  });
+
+  test('QUANLY mở màn MIX và đọc qua GetMix', function () {
+    var runtime = fakeRuntime();
+    var ql = _app.QL.createController(runtime);
+    assertOk(ql.navigate('MIX'));
+    return ql.getMix({ from: '2026-09-01', to: '2026-09-17' }).then(function (out) {
+      assertOk(out);
+      assert.strictEqual(runtime.calls[0].name, 'GetMix');
+      assert.strictEqual(runtime.calls[0].input.from, '2026-09-01');
+    });
+  });
+
+  test('QUANLY mở màn CUSTOMER và đọc qua GetCustomerReport', function () {
+    var runtime = fakeRuntime();
+    var ql = _app.QL.createController(runtime);
+    assertOk(ql.navigate('CUSTOMER'));
+    return ql.getCustomerReport({ from: '2026-09-01', to: '2026-09-17' }).then(function (out) {
+      assertOk(out);
+      assert.strictEqual(runtime.calls[0].name, 'GetCustomerReport');
+    });
+  });
+
+  test('save* của Kho đi đúng command tương ứng — không lệch tên giữa 6 loại', function () {
+    var runtime = fakeRuntime();
+    var ql = _app.QL.createController(runtime);
+    return Promise.all([
+      ql.saveStorageLocation({ id: 'item_1', editRef: 'e1', name: 'Kho lạnh' }),
+      ql.saveWasteReason({ id: 'item_2', editRef: 'e1', label: 'Đổ bỏ' }),
+      ql.saveVessel({ id: 'item_3', editRef: 'e1', name: 'Ly' }),
+      ql.saveRefillRule({ id: 'item_4', editRef: 'e1', itemId: 'item_5' }),
+      ql.saveChecklistItem({ id: 'item_6', editRef: 'e1', phase: 'open', label: 'Lau quầy' }),
+      ql.saveToppingRecipe({ id: 'item_7', editRef: 'e1', toppingName: 'Trân châu' })
+    ]).then(function () {
+      assert.deepStrictEqual(runtime.calls.map(function (c) { return c.name; }), [
+        'SaveStorageLocation', 'SaveWasteReason', 'SaveVessel',
+        'SaveRefillRule', 'SaveChecklistItem', 'SaveToppingRecipe'
+      ]);
+      runtime.calls.forEach(function (c) { assert.strictEqual(c.kind, 'command'); });
+    });
+  });
+
+  test('createPurchaseOrder / cancelPurchaseOrder đi đúng command', function () {
+    var runtime = fakeRuntime();
+    var ql = _app.QL.createController(runtime);
+    return ql.createPurchaseOrder({ purchaseOrderId: 'item_po1', supplier: 'A' }).then(function () {
+      return ql.cancelPurchaseOrder({ purchaseOrderId: 'item_po1', purchaseOrder: {} });
+    }).then(function () {
+      assert.deepStrictEqual(runtime.calls.map(function (c) { return c.name; }),
+        ['CreatePurchaseOrder', 'CancelPurchaseOrder']);
+    });
+  });
 });

@@ -2,9 +2,10 @@
 GIEO.define('app-quanly/main', [
   'shared-kernel/result',
   'shared-kernel/clock',
+  'shared-kernel/ids',
   'bootstrap/runtime',
   'app-quanly/controller'
-], function (R, clockLib, bootstrap, controllerLib) {
+], function (R, clockLib, ids, bootstrap, controllerLib) {
   'use strict';
 
   function esc(value) {
@@ -15,12 +16,85 @@ GIEO.define('app-quanly/main', [
 
   function money(n) { return Number(n || 0).toLocaleString('vi-VN') + ' ₫'; }
   var clock = clockLib.createClock();
+
+  /**
+   * Kho — danh mục cấu hình (2026-09-18). Một schema mô tả field cho MỘT
+   * bảng thay vì viết 6 màn riêng — cùng tinh thần `defineConfigUpsert`
+   * (commands/kho-config.js): 6 collection khác nhau nhưng hình dạng UI
+   * giống hệt nhau (list + form sửa/thêm + bật/tắt), nên viết 1 lần.
+   */
+  var KHO_CONFIG_SCHEMAS = {
+    storageLocation: {
+      title: 'Vị trí kho', command: 'saveStorageLocation', titleField: 'name',
+      fields: [
+        { key: 'name', label: 'Tên vị trí', required: true },
+        { key: 'type', label: 'Loại (vd: kho lạnh, quầy)' },
+        { key: 'note', label: 'Ghi chú' }
+      ]
+    },
+    wasteReason: {
+      title: 'Lý do hao hụt', command: 'saveWasteReason', titleField: 'label',
+      fields: [{ key: 'label', label: 'Lý do', required: true }]
+    },
+    vessel: {
+      title: 'Dụng cụ đựng', command: 'saveVessel', titleField: 'name',
+      fields: [
+        { key: 'code', label: 'Mã' },
+        { key: 'name', label: 'Tên', required: true },
+        { key: 'note', label: 'Ghi chú' }
+      ]
+    },
+    refillRule: {
+      title: 'Refill', command: 'saveRefillRule', titleField: 'itemName',
+      fields: [
+        { key: 'itemId', label: 'Mã nguyên liệu (itemId)', required: true },
+        { key: 'itemName', label: 'Tên nguyên liệu' },
+        { key: 'sourceLocationId', label: 'Vị trí nguồn (id)' },
+        { key: 'destLocationId', label: 'Vị trí đích (id)' },
+        { key: 'targetBase', label: 'Định mức', type: 'number' },
+        { key: 'minBase', label: 'Tối thiểu', type: 'number' },
+        { key: 'maxBase', label: 'Tối đa', type: 'number' }
+      ]
+    },
+    checklistItem: {
+      title: 'Checklist kho', command: 'saveChecklistItem', titleField: 'label',
+      fields: [
+        { key: 'phase', label: 'Ca (open/close)', required: true },
+        { key: 'label', label: 'Nội dung', required: true },
+        { key: 'blocking', label: 'Chặn đóng ca nếu chưa xong', type: 'checkbox' },
+        { key: 'order', label: 'Thứ tự', type: 'number' }
+      ]
+    },
+    toppingRecipe: {
+      title: 'Topping COGS', command: 'saveToppingRecipe', titleField: 'toppingName',
+      fields: [
+        { key: 'toppingName', label: 'Tên topping', required: true },
+        { key: 'batchYield', label: 'Sản lượng/mẻ', type: 'number' },
+        { key: 'qtyPerServing', label: 'Định lượng/ly', type: 'number' },
+        { key: 'costPerServing', label: 'Giá vốn/ly', type: 'number' },
+        { key: 'note', label: 'Ghi chú' }
+      ]
+    }
+  };
+  var KHO_CONFIG_ORDER = ['storageLocation', 'wasteReason', 'vessel', 'refillRule', 'checklistItem', 'toppingRecipe'];
   function view() { return { loading: false, error: null, data: null }; }
 
   function applyRead(out) {
     return R.isErr(out)
       ? { loading: false, error: out.error, data: null }
       : { loading: false, error: null, data: out.value.data, meta: out.value.meta };
+  }
+
+  /**
+   * Các query Kho/Báo cáo mới (getKhoConfigList/getKhoHistory/getMix/
+   * getCustomerReport) trả THẲNG `R.ok({...})` — không qua merge-canonical
+   * (không có khái niệm đóng băng/snapshot cho danh mục cấu hình hay báo cáo
+   * gộp trên bill), nên không có `.data`/`.meta` như applyRead đọc.
+   */
+  function applyRaw(out) {
+    return R.isErr(out)
+      ? { loading: false, error: out.error, data: null }
+      : { loading: false, error: null, data: out.value };
   }
 
   /** Màn PIN tối thiểu của QUANLY; sẽ được đặt vào layout legacy khi port UI. */
@@ -94,6 +168,21 @@ GIEO.define('app-quanly/main', [
     var billsUI = { from: clock.calendarDate(), to: clock.calendarDate(), query: '', openId: null };
     var billsDelete = { confirmId: null, busy: null, error: null };
     var billsNotice = null;
+
+    /* Kho — danh mục cấu hình đơn giản + Báo cáo mix/customer (2026-09-18).
+       Xem commands/kho-config.js cho lý do các màn này KHÔNG có pipeline
+       riêng phức tạp như sales/inventory — chỉ lưu + đọc, đúng chỉ đạo chủ
+       quán "đơn giản, không phải core". */
+    var khoUI = { tab: 'storageLocation' };
+    var khoConfigViews = {}; /* kind -> view(), lazy */
+    var khoForm = { editingId: null, values: {}, busy: false, error: null };
+    var khoHistoryView = view();
+    var khoPOView = view();
+    var khoPOForm = { open: false, busy: false, error: null };
+    var mixUI = { from: clock.calendarDate(), to: clock.calendarDate() };
+    var mixView = view();
+    var customerUI = { from: clock.calendarDate(), to: clock.calendarDate() };
+    var customerView = view();
 
     function errorBox(title, error) {
       return '<div class="result error"><strong>' + esc(title) + '</strong><span>' +
@@ -611,6 +700,170 @@ GIEO.define('app-quanly/main', [
         notice + '<div class="pos-clone">' + billListMarkup() + '</div></section>';
     }
 
+    /* ---------- Kho — danh mục cấu hình đơn giản + đặt hàng + lịch sử ---------- */
+
+    var KHO_TABS = KHO_CONFIG_ORDER.concat(['purchaseOrder', 'history']);
+
+    function khoTabLabel(tab) {
+      if (tab === 'purchaseOrder') return 'Đặt hàng';
+      if (tab === 'history') return 'Lịch sử kho';
+      return KHO_CONFIG_SCHEMAS[tab].title;
+    }
+
+    function khoConfigView(kind) {
+      if (!khoConfigViews[kind]) khoConfigViews[kind] = view();
+      return khoConfigViews[kind];
+    }
+
+    function khoTabBar() {
+      return '<div class="search-row" style="flex-wrap:wrap">' + KHO_TABS.map(function (t) {
+        return '<button class="btn ' + (khoUI.tab === t ? 'primary' : 'outline') +
+          '" data-kho-tab="' + t + '">' + esc(khoTabLabel(t)) + '</button>';
+      }).join('') + '</div>';
+    }
+
+    function khoConfigFormMarkup(kind) {
+      var schema = KHO_CONFIG_SCHEMAS[kind];
+      var editing = khoForm.editingId;
+      return '<form id="kho-config-form" class="card" style="padding:16px;margin-top:12px">' +
+        '<h3 class="report-sub">' + (editing ? 'Sửa' : 'Thêm') + ' ' + esc(schema.title) + '</h3>' +
+        (khoForm.error ? errorBox('Không lưu được', khoForm.error) : '') +
+        schema.fields.map(function (f) {
+          var val = khoForm.values[f.key];
+          if (f.type === 'checkbox') {
+            return '<label style="display:block;margin:8px 0"><input type="checkbox" name="' + f.key + '"' +
+              (val ? ' checked' : '') + '> ' + esc(f.label) + '</label>';
+          }
+          return '<label style="display:block;margin:8px 0">' + esc(f.label) + (f.required ? ' *' : '') +
+            '<input name="' + f.key + '" type="' + (f.type === 'number' ? 'number' : 'text') + '" value="' +
+            esc(val === undefined || val === null ? '' : val) + '"' + (f.required ? ' required' : '') +
+            ' style="display:block;width:100%;margin-top:4px"></label>';
+        }).join('') +
+        '<div class="search-row" style="margin-top:12px">' +
+        '<button class="btn primary" type="submit"' + (khoForm.busy ? ' disabled' : '') + '>' +
+        (khoForm.busy ? 'Đang lưu…' : 'Lưu') + '</button>' +
+        (editing ? '<button class="btn outline" type="button" id="kho-form-cancel">Huỷ sửa</button>' : '') +
+        '</div></form>';
+    }
+
+    function khoConfigListMarkup(kind) {
+      var v = khoConfigView(kind);
+      var schema = KHO_CONFIG_SCHEMAS[kind];
+      if (v.loading) return '<div class="pc-empty">Đang đọc…</div>';
+      if (v.error) return errorBox('Không đọc được ' + schema.title, v.error);
+      var entries = (v.data && v.data.entries) || [];
+      if (!entries.length) return '<div class="empty"><h3>Chưa có ' + esc(schema.title.toLowerCase()) + '</h3></div>';
+      return '<div class="card" style="margin-top:12px">' + entries.map(function (e) {
+        var title = e[schema.titleField] || e.id;
+        return '<article class="litem"><div class="lmain"><div class="ltitle">' + esc(title) +
+          (e.active === false ? ' <span class="status neutral">Đã ẩn</span>' : '') + '</div>' +
+          '<div class="lsub">' + esc(e.id) + '</div></div>' +
+          '<button class="btn outline" data-kho-edit="' + esc(e.id) + '" data-kho-kind="' + kind + '">Sửa</button>' +
+          '<button class="btn ' + (e.active === false ? 'outline' : 'danger') + '" data-kho-toggle="' + esc(e.id) +
+          '" data-kho-kind="' + kind + '">' + (e.active === false ? 'Bật lại' : 'Ẩn') + '</button></article>';
+      }).join('') + '</div>';
+    }
+
+    function khoPOFormMarkup() {
+      return '<form id="kho-po-form" class="card" style="padding:16px;margin-top:12px">' +
+        '<h3 class="report-sub">Tạo đơn đặt hàng</h3>' +
+        (khoPOForm.error ? errorBox('Không tạo được đơn', khoPOForm.error) : '') +
+        '<label style="display:block;margin:8px 0">Nhà cung cấp *<input name="supplier" required ' +
+        'style="display:block;width:100%;margin-top:4px"></label>' +
+        '<label style="display:block;margin:8px 0">Danh sách hàng (mỗi dòng một mặt hàng)' +
+        '<textarea name="items" rows="3" style="display:block;width:100%;margin-top:4px"></textarea></label>' +
+        '<label style="display:block;margin:8px 0">Ghi chú<input name="note" ' +
+        'style="display:block;width:100%;margin-top:4px"></label>' +
+        '<button class="btn primary" type="submit"' + (khoPOForm.busy ? ' disabled' : '') + '>' +
+        (khoPOForm.busy ? 'Đang tạo…' : 'Tạo đơn') + '</button></form>';
+    }
+
+    function khoPOListMarkup() {
+      if (khoPOView.loading) return '<div class="pc-empty">Đang đọc…</div>';
+      if (khoPOView.error) return errorBox('Không đọc được đơn đặt hàng', khoPOView.error);
+      var entries = ((khoPOView.data && khoPOView.data.entries) || []).slice().sort(function (a, b) {
+        return String(b.createdAt || '').localeCompare(String(a.createdAt || ''));
+      });
+      if (!entries.length) return '<div class="empty"><h3>Chưa có đơn đặt hàng</h3></div>';
+      var toneOf = { pending: 'warning', cancelled: 'neutral' };
+      return '<div class="card" style="margin-top:12px">' + entries.map(function (po) {
+        var lines = (po.lines || []).map(function (l) { return l.label; }).join(', ');
+        return '<article class="litem"><div class="lmain"><div class="ltitle">' + esc(po.supplier) +
+          ' <span class="status ' + (toneOf[po.status] || 'success') + '">' + esc(po.status) + '</span></div>' +
+          '<div class="lsub">' + esc(lines || po.note || '') + '</div></div>' +
+          (po.status === 'pending'
+            ? '<button class="btn danger" data-po-cancel="' + esc(po.purchaseOrderId) + '">Huỷ đơn</button>' : '') +
+          '</article>';
+      }).join('') + '</div>';
+    }
+
+    function khoHistoryMarkup() {
+      if (khoHistoryView.loading) return '<div class="pc-empty">Đang đọc…</div>';
+      if (khoHistoryView.error) return errorBox('Không đọc được lịch sử kho', khoHistoryView.error);
+      var entries = (khoHistoryView.data && khoHistoryView.data.entries) || [];
+      if (!entries.length) return '<div class="empty"><h3>Chưa có phát sinh</h3></div>';
+      return '<div class="card" style="margin-top:12px">' + entries.map(function (en) {
+        return '<article class="litem"><div class="lmain"><div class="ltitle">' + esc(en.itemId || en.domain || '—') +
+          '</div><div class="lsub">' + esc(en.reason || en.type || '') + '</div></div><div class="lmeta">' +
+          esc(en.qtyDelta !== null && en.qtyDelta !== undefined ? en.qtyDelta : '') + ' · ' +
+          esc(en.occurredAt || '') + '</div></article>';
+      }).join('') + '</div>';
+    }
+
+    function khoScreen() {
+      var head = '<section><div class="section-head"><div><p class="eyebrow">Kho</p>' +
+        '<h2>Danh mục &amp; đặt hàng</h2></div></div>' + khoTabBar() + '</section>';
+      var body;
+      if (khoUI.tab === 'purchaseOrder') body = khoPOFormMarkup() + khoPOListMarkup();
+      else if (khoUI.tab === 'history') body = khoHistoryMarkup();
+      else body = khoConfigFormMarkup(khoUI.tab) + khoConfigListMarkup(khoUI.tab);
+      return head + body;
+    }
+
+    /* ---------- Báo cáo — mix (phân tích bán hàng) / khách hàng ---------- */
+
+    function mixScreen() {
+      var d = mixView.data;
+      var head = '<section><div class="section-head"><div><p class="eyebrow">Báo cáo</p>' +
+        '<h2>Phân tích bán hàng</h2></div></div>' +
+        '<form class="filter-bar" id="mix-range"><input type="date" name="from" value="' + esc(mixUI.from) +
+        '" required><input type="date" name="to" value="' + esc(mixUI.to) + '" required>' +
+        '<button class="btn">Xem</button></form></section>';
+      if (mixView.loading) return head + '<div class="empty"><h3>Đang đọc…</h3></div>';
+      if (mixView.error) return head + errorBox('Không đọc được báo cáo', mixView.error);
+      if (!d) return head + '<div class="empty"><h3>Chọn khoảng ngày</h3></div>';
+      var rows = d.rows.map(function (r) {
+        return '<tr><td>' + esc(r.name) + '</td><td>' + esc(r.qty) + '</td><td>' + money(r.revenue) + '</td></tr>';
+      }).join('');
+      return head + '<div class="metric-grid">' + metric('Số đơn', d.billCount) +
+        metric('Doanh thu', money(d.totalRevenue)) + '</div>' +
+        '<table class="report"><thead><tr><th>Món</th><th>SL</th><th>Doanh thu</th></tr></thead><tbody>' +
+        (rows || '<tr><td colspan="3">Không có dữ liệu</td></tr>') + '</tbody></table>';
+    }
+
+    var CUSTOMER_GROUP_LABEL = { loyal: 'Thân thiết', back: 'Quay lại', new: 'Mới' };
+
+    function customerScreen() {
+      var d = customerView.data;
+      var head = '<section><div class="section-head"><div><p class="eyebrow">Báo cáo</p>' +
+        '<h2>Khách hàng</h2></div></div>' +
+        '<form class="filter-bar" id="customer-range"><input type="date" name="from" value="' +
+        esc(customerUI.from) + '" required><input type="date" name="to" value="' + esc(customerUI.to) +
+        '" required><button class="btn">Xem</button></form></section>';
+      if (customerView.loading) return head + '<div class="empty"><h3>Đang đọc…</h3></div>';
+      if (customerView.error) return head + errorBox('Không đọc được báo cáo', customerView.error);
+      if (!d) return head + '<div class="empty"><h3>Chọn khoảng ngày</h3></div>';
+      var rows = d.rows.map(function (r) {
+        return '<tr><td>' + esc(r.name || 'Không rõ') + '</td><td>' + esc(r.phone || '') + '</td><td>' +
+          esc(r.billCount) + '</td><td>' + money(r.totalSpend) + '</td><td>' + esc(r.visitDays) + '</td><td>' +
+          esc(CUSTOMER_GROUP_LABEL[r.group] || r.group) + '</td></tr>';
+      }).join('');
+      return head + '<div class="metric-grid">' + metric('Số khách', d.customerCount) + '</div>' +
+        '<table class="report"><thead><tr><th>Khách</th><th>SĐT</th><th>Số đơn</th><th>Tổng chi</th>' +
+        '<th>Số ngày ghé</th><th>Nhóm</th></tr></thead><tbody>' +
+        (rows || '<tr><td colspan="6">Không có dữ liệu</td></tr>') + '</tbody></table>';
+    }
+
     function content(screen) {
       if (screen === 'TRACE') return traceScreen();
       if (screen === 'ALERTS') return alertsScreen();
@@ -619,6 +872,9 @@ GIEO.define('app-quanly/main', [
       if (screen === 'REPORTS') return reportsScreen();
       if (screen === 'BTP') return btpScreen();
       if (screen === 'BILLS') return billsScreen();
+      if (screen === 'KHO') return khoScreen();
+      if (screen === 'MIX') return mixScreen();
+      if (screen === 'CUSTOMER') return customerScreen();
       return overviewScreen();
     }
 
@@ -713,6 +969,83 @@ GIEO.define('app-quanly/main', [
       render();
       controller.getBillsForRange({ from: billsUI.from, to: billsUI.to }).then(function (out) {
         billsView = applyRead(out);
+        render();
+      });
+    }
+
+    function loadKhoConfig(kind) {
+      khoConfigViews[kind] = { loading: true, error: null, data: null };
+      render();
+      controller.getKhoConfigList({ kind: kind }).then(function (out) {
+        khoConfigViews[kind] = applyRaw(out);
+        render();
+      });
+    }
+
+    function loadKhoPO() {
+      khoPOView = { loading: true, error: null, data: null };
+      render();
+      controller.getKhoConfigList({ kind: 'purchaseOrder' }).then(function (out) {
+        khoPOView = applyRaw(out);
+        render();
+      });
+    }
+
+    function loadKhoHistory() {
+      khoHistoryView = { loading: true, error: null, data: null };
+      render();
+      controller.getKhoHistory({}).then(function (out) {
+        khoHistoryView = applyRaw(out);
+        render();
+      });
+    }
+
+    /** Điều hướng theo tab hiện tại của màn Kho — mỗi tab tự tải nguồn của nó. */
+    function loadKhoForTab(tab) {
+      if (tab === 'purchaseOrder') {
+        if (!khoPOView.data && !khoPOView.loading) loadKhoPO();
+      } else if (tab === 'history') {
+        if (!khoHistoryView.data && !khoHistoryView.loading) loadKhoHistory();
+      } else {
+        var v = khoConfigView(tab);
+        if (!v.data && !v.loading) loadKhoConfig(tab);
+      }
+    }
+
+    function submitKhoForm(kind) {
+      var schema = KHO_CONFIG_SCHEMAS[kind];
+      var payload = Object.assign({}, khoForm.values, {
+        id: khoForm.editingId || ids.newId('item'),
+        editRef: String(Date.now())
+      });
+      var method = 'save' + kind.charAt(0).toUpperCase() + kind.slice(1);
+      khoForm.busy = true;
+      khoForm.error = null;
+      render();
+      controller[method](payload).then(function (out) {
+        if (R.isErr(out)) {
+          khoForm = { editingId: khoForm.editingId, values: khoForm.values, busy: false, error: out.error };
+          return render();
+        }
+        khoForm = { editingId: null, values: {}, busy: false, error: null };
+        loadKhoConfig(kind);
+      });
+    }
+
+    function loadMix() {
+      mixView = { loading: true, error: null, data: null };
+      render();
+      controller.getMix({ from: mixUI.from, to: mixUI.to }).then(function (out) {
+        mixView = applyRaw(out);
+        render();
+      });
+    }
+
+    function loadCustomerReport() {
+      customerView = { loading: true, error: null, data: null };
+      render();
+      controller.getCustomerReport({ from: customerUI.from, to: customerUI.to }).then(function (out) {
+        customerView = applyRaw(out);
         render();
       });
     }
@@ -852,6 +1185,9 @@ GIEO.define('app-quanly/main', [
           if (screen === 'ALERTS' && !alertView.data && !alertView.loading) loadOverview();
           if (screen === 'BTP' && !btpView.data && !btpView.loading) loadBTP(clock.calendarDate());
           if (screen === 'BILLS' && !billsView.data && !billsView.loading) loadBills(true);
+          if (screen === 'KHO') loadKhoForTab(khoUI.tab);
+          if (screen === 'MIX' && !mixView.data && !mixView.loading) loadMix();
+          if (screen === 'CUSTOMER' && !customerView.data && !customerView.loading) loadCustomerReport();
         });
       });
 
@@ -1025,6 +1361,124 @@ GIEO.define('app-quanly/main', [
           });
         });
       });
+
+      Array.prototype.forEach.call(el.querySelectorAll('[data-kho-tab]'), function (button) {
+        button.addEventListener('click', function () {
+          khoUI.tab = button.getAttribute('data-kho-tab');
+          khoForm = { editingId: null, values: {}, busy: false, error: null };
+          render();
+          loadKhoForTab(khoUI.tab);
+        });
+      });
+
+      var khoConfigForm = el.querySelector('#kho-config-form');
+      if (khoConfigForm) khoConfigForm.addEventListener('submit', function (event) {
+        event.preventDefault();
+        var kind = khoUI.tab;
+        var schema = KHO_CONFIG_SCHEMAS[kind];
+        var values = {};
+        schema.fields.forEach(function (f) {
+          var input = khoConfigForm.elements[f.key];
+          if (!input) return;
+          if (f.type === 'checkbox') values[f.key] = input.checked;
+          else if (f.type === 'number') values[f.key] = input.value === '' ? 0 : Number(input.value);
+          else values[f.key] = input.value;
+        });
+        khoForm.values = values;
+        submitKhoForm(kind);
+      });
+
+      var khoFormCancel = el.querySelector('#kho-form-cancel');
+      if (khoFormCancel) khoFormCancel.addEventListener('click', function () {
+        khoForm = { editingId: null, values: {}, busy: false, error: null };
+        render();
+      });
+
+      Array.prototype.forEach.call(el.querySelectorAll('[data-kho-edit]'), function (button) {
+        button.addEventListener('click', function () {
+          var kind = button.getAttribute('data-kho-kind');
+          var id = button.getAttribute('data-kho-edit');
+          var v = khoConfigView(kind);
+          var entry = ((v.data && v.data.entries) || []).filter(function (e) { return e.id === id; })[0];
+          if (!entry) return;
+          khoForm = { editingId: id, values: Object.assign({}, entry), busy: false, error: null };
+          window.scrollTo(0, 0);
+          render();
+        });
+      });
+
+      /* Ẩn/Bật lại = lưu đúp qua defineConfigUpsert với active đảo ngược
+         (xoá mềm — §2.3a không âm thầm làm mất dữ liệu). */
+      Array.prototype.forEach.call(el.querySelectorAll('[data-kho-toggle]'), function (button) {
+        button.addEventListener('click', function () {
+          var kind = button.getAttribute('data-kho-kind');
+          var id = button.getAttribute('data-kho-toggle');
+          var schema = KHO_CONFIG_SCHEMAS[kind];
+          var v = khoConfigView(kind);
+          var entry = ((v.data && v.data.entries) || []).filter(function (e) { return e.id === id; })[0];
+          if (!entry) return;
+          var values = {};
+          schema.fields.forEach(function (f) { values[f.key] = entry[f.key]; });
+          var payload = Object.assign({}, values, {
+            id: id, editRef: String(Date.now()), active: entry.active === false
+          });
+          var method = 'save' + kind.charAt(0).toUpperCase() + kind.slice(1);
+          controller[method](payload).then(function (out) {
+            if (R.isOk(out)) loadKhoConfig(kind);
+            else { khoForm.error = out.error; render(); }
+          });
+        });
+      });
+
+      var khoPOForm_ = el.querySelector('#kho-po-form');
+      if (khoPOForm_) khoPOForm_.addEventListener('submit', function (event) {
+        event.preventDefault();
+        var supplier = khoPOForm_.elements.supplier.value;
+        var note = khoPOForm_.elements.note.value;
+        var lines = (khoPOForm_.elements.items.value || '').split('\n')
+          .map(function (s) { return s.trim(); }).filter(Boolean)
+          .map(function (label) { return { label: label }; });
+        khoPOForm = { open: true, busy: true, error: null };
+        render();
+        controller.createPurchaseOrder({
+          purchaseOrderId: ids.newId('item'), supplier: supplier, note: note || null, lines: lines
+        }).then(function (out) {
+          khoPOForm = R.isErr(out)
+            ? { open: true, busy: false, error: out.error }
+            : { open: false, busy: false, error: null };
+          if (R.isOk(out)) loadKhoPO();
+          else render();
+        });
+      });
+
+      Array.prototype.forEach.call(el.querySelectorAll('[data-po-cancel]'), function (button) {
+        button.addEventListener('click', function () {
+          var id = button.getAttribute('data-po-cancel');
+          var entries = (khoPOView.data && khoPOView.data.entries) || [];
+          var po = entries.filter(function (e) { return e.purchaseOrderId === id; })[0];
+          if (!po) return;
+          controller.cancelPurchaseOrder({ purchaseOrderId: id, purchaseOrder: po }).then(function (out) {
+            if (R.isOk(out)) loadKhoPO();
+            else { khoPOForm = { open: true, busy: false, error: out.error }; render(); }
+          });
+        });
+      });
+
+      var mixRangeForm = el.querySelector('#mix-range');
+      if (mixRangeForm) mixRangeForm.addEventListener('submit', function (event) {
+        event.preventDefault();
+        mixUI.from = mixRangeForm.elements.from.value;
+        mixUI.to = mixRangeForm.elements.to.value;
+        loadMix();
+      });
+
+      var customerRangeForm = el.querySelector('#customer-range');
+      if (customerRangeForm) customerRangeForm.addEventListener('submit', function (event) {
+        event.preventDefault();
+        customerUI.from = customerRangeForm.elements.from.value;
+        customerUI.to = customerRangeForm.elements.to.value;
+        loadCustomerReport();
+      });
     }
 
     function render() {
@@ -1046,7 +1500,10 @@ GIEO.define('app-quanly/main', [
           '<button data-screen="INVENTORY" class="sidebar-item ' + (state.screen === 'INVENTORY' ? 'active' : '') + '"><span class="sb-ic">▦</span><span>Tồn kho</span></button>' +
           '<button data-screen="BTP" class="sidebar-item ' + (state.screen === 'BTP' ? 'active' : '') + '"><span class="sb-ic">◎</span><span>Bán thành phẩm</span></button>' +
           '<button data-screen="BILLS" class="sidebar-item ' + (state.screen === 'BILLS' ? 'active' : '') + '"><span class="sb-ic">🧾</span><span>Lịch sử bill</span></button>' +
+          '<button data-screen="KHO" class="sidebar-item ' + (state.screen === 'KHO' ? 'active' : '') + '"><span class="sb-ic">📦</span><span>Kho</span></button>' +
           '<button data-screen="REPORTS" class="sidebar-item ' + (state.screen === 'REPORTS' ? 'active' : '') + '"><span class="sb-ic">▥</span><span>Báo cáo</span></button>' +
+          '<button data-screen="MIX" class="sidebar-item ' + (state.screen === 'MIX' ? 'active' : '') + '"><span class="sb-ic">▤</span><span>Phân tích bán hàng</span></button>' +
+          '<button data-screen="CUSTOMER" class="sidebar-item ' + (state.screen === 'CUSTOMER' ? 'active' : '') + '"><span class="sb-ic">☺</span><span>Khách hàng</span></button>' +
         '</aside><div class="main-col"><header class="topbar"><div class="topbar-row">' +
           '<div class="brandrow"><button class="hamburger-btn" id="hamburgerBtn" aria-label="Menu">☰</button>' +
           '<div class="hdr-titles"><div class="brand disp" id="hdrTitle">Quản lý vận hành</div></div></div>' +

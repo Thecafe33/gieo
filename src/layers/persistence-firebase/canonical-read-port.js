@@ -122,11 +122,45 @@ GIEO.define('persistence-firebase/canonical-read-port', [
       return getAll(collP.value.path, [{ field: 'referenceId', op: '==', value: billId }]);
     }
 
+    /**
+     * Liệt kê TOÀN BỘ document của một collection danh mục Kho
+     * (commands/kho-config.js) — nguồn cho GetKhoConfigList. Whitelist
+     * KIND_TO_PATH chặn tên collection lạ lọt vào query thô, cùng nguyên tắc
+     * "domainRecord loại lạ bị từ chối" của atomic-commit.js#planToWrites.
+     */
+    var KIND_TO_PATH = {
+      vessel: 'vessel', storageLocation: 'storageLocation', wasteReason: 'wasteReason',
+      refillRule: 'refillRule', checklistItem: 'checklistItem', toppingRecipe: 'toppingRecipe',
+      purchaseOrder: 'purchaseOrder'
+    };
+    function listKhoConfig(ctx, kind) {
+      var pathName = KIND_TO_PATH[kind];
+      if (!pathName) return Promise.resolve(R.err('VALIDATION', 'GetKhoConfigList: kind không hợp lệ: ' + kind));
+      var collP = paths.collectionPath(pathName, ctx, { id: '_' });
+      if (R.isErr(collP)) return Promise.resolve(collP);
+      return getAll(collP.value.path);
+    }
+
+    /**
+     * Sổ ledger raw+prep gần đây — nguồn cho màn "Lịch sử kho" (kho:history,
+     * đọc-thuần, không tham số reference cụ thể). Không hỗ trợ orderBy/limit ở
+     * tầng Firestore (getAll() chỉ where) — sắp xếp/limit làm ở caller, cùng
+     * cách getBillsForRange (read-layer/gateway.js) đã làm với `bills`.
+     */
+    function loadRecentLedgerEntries(ctx, domain) {
+      var collP = paths.collectionPath('ledger', ctx, { entryId: '_' });
+      if (R.isErr(collP)) return Promise.resolve(collP);
+      var where = domain ? [{ field: 'domain', op: '==', value: domain }] : [];
+      return getAll(collP.value.path, where);
+    }
+
     return {
       loadUnitsForItem: loadUnitsForItem,
       loadVersions: loadVersions,
       loadEntriesForReference: loadEntriesForReference,
-      loadLoyaltyEntriesForReference: loadLoyaltyEntriesForReference
+      loadLoyaltyEntriesForReference: loadLoyaltyEntriesForReference,
+      listKhoConfig: listKhoConfig,
+      loadRecentLedgerEntries: loadRecentLedgerEntries
     };
   }
 

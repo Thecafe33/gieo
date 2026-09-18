@@ -451,6 +451,110 @@ describe('GetLedgerEntriesForReference (nguồn originalAllocations cho ReverseT
   });
 });
 
+describe('Kho — danh mục cấu hình đơn giản + Báo cáo mix/customer (2026-09-18)', function () {
+  var G = _r.G;
+
+  describe('GetKhoConfigList (commands/kho-config.js — "chỗ lưu và app POS đọc")', function () {
+    test('trả nguyên entries do canonical-data-source cấp, không lọc/sắp xếp', function () {
+      var out = assertOk(G.getKhoConfigList(rCtx('QUANLY_ADMIN', 'QUANLY', _r.QL), {
+        kind: 'wasteReason', entries: [{ id: 'item_1', label: 'Đổ bỏ' }]
+      }));
+      assert.strictEqual(out.kind, 'wasteReason');
+      assert.strictEqual(out.entries.length, 1);
+    });
+
+    test('POS operator ĐỌC ĐƯỢC (đúng "app pos đọc" — chủ quán yêu cầu, không phải MASTER_CONFIGURE)', function () {
+      var out = assertOk(G.getKhoConfigList(rCtx('POS_OPERATOR', 'POS'), {
+        kind: 'storageLocation', entries: []
+      }));
+      assert.deepStrictEqual(out.entries, []);
+    });
+
+    test('kind không hợp lệ thì VALIDATION, không âm thầm trả rỗng', function () {
+      assertErr(G.getKhoConfigList(rCtx('QUANLY_ADMIN', 'QUANLY', _r.QL), {
+        kind: 'khongTonTai', entries: []
+      }), 'VALIDATION');
+    });
+  });
+
+  describe('GetKhoHistory (sổ ledger raw+prep gần đây, đọc-thuần)', function () {
+    test('sắp mới nhất trước và cắt theo limit', function () {
+      var out = assertOk(G.getKhoHistory(rCtx('QUANLY_ADMIN', 'QUANLY', _r.QL), {
+        limit: 2,
+        entries: [
+          { entryId: 'e1', occurredAt: 1000 },
+          { entryId: 'e2', occurredAt: 3000 },
+          { entryId: 'e3', occurredAt: 2000 }
+        ]
+      }));
+      assert.deepStrictEqual(out.entries.map(function (e) { return e.entryId; }), ['e2', 'e3']);
+    });
+
+    test('POS operator KHÔNG đọc được (cùng độ nhạy cảm sổ kho với GetLedgerEntriesForReference)', function () {
+      assertErr(G.getKhoHistory(rCtx('POS_OPERATOR', 'POS'), { entries: [] }), 'FORBIDDEN');
+    });
+  });
+
+  describe('GetMix (Báo cáo — phân tích bán hàng theo món, legacy renderMix)', function () {
+    function bill(over) {
+      return Object.assign({ billId: _r.ids.newId('bill'), businessDate: '2026-03-10' }, over || {});
+    }
+
+    test('gộp theo menuItemId, cộng qty/doanh thu, bỏ dòng miễn phí khỏi doanh thu', function () {
+      var out = assertOk(G.getMix(rCtx('QUANLY_ADMIN', 'QUANLY', _r.QL), {
+        from: '2026-03-01', to: '2026-03-10',
+        bills: [
+          bill({ lines: [{ menuItemId: 'item_A', name: 'Trà sữa', qty: 2, amount: 60000 }] }),
+          bill({ lines: [{ menuItemId: 'item_A', name: 'Trà sữa', qty: 1, amount: 30000 }] }),
+          bill({ lines: [{ menuItemId: 'item_B', name: 'Cà phê', qty: 1, isFree: true, amount: 25000 }] })
+        ]
+      }));
+      var a = out.rows.filter(function (r) { return r.menuItemId === 'item_A'; })[0];
+      var b = out.rows.filter(function (r) { return r.menuItemId === 'item_B'; })[0];
+      assert.strictEqual(a.qty, 3);
+      assert.strictEqual(a.revenue, 90000);
+      assert.strictEqual(b.revenue, 0);
+      assert.strictEqual(out.totalRevenue, 90000);
+      assert.strictEqual(out.billCount, 3);
+    });
+
+    test('POS operator KHÔNG đọc được — cùng mức GetBillsForRange (dữ liệu bill chi tiết)', function () {
+      assertErr(G.getMix(rCtx('POS_OPERATOR', 'POS'), { from: '2026-03-01', to: '2026-03-10', bills: [] }), 'FORBIDDEN');
+    });
+  });
+
+  describe('GetCustomerReport (Báo cáo — khách hàng, legacy renderCustomer)', function () {
+    function bill(over) {
+      return Object.assign({ billId: _r.ids.newId('bill'), businessDate: '2026-03-10', total: 50000 }, over || {});
+    }
+
+    test('gộp theo customerId, đếm số ngày ghé riêng biệt, khách vãng lai bị loại', function () {
+      var out = assertOk(G.getCustomerReport(rCtx('QUANLY_ADMIN', 'QUANLY', _r.QL), {
+        from: '2026-03-01', to: '2026-03-10',
+        bills: [
+          bill({ customerId: 'customer_1', businessDate: '2026-03-01', total: 40000,
+            legacySource: { customerName: 'Anh Tuấn', phone: '0900000001' } }),
+          bill({ customerId: 'customer_1', businessDate: '2026-03-05', total: 60000 }),
+          bill({ customerId: null, total: 20000 })
+        ]
+      }));
+      assert.strictEqual(out.customerCount, 1);
+      var c = out.rows[0];
+      assert.strictEqual(c.name, 'Anh Tuấn');
+      assert.strictEqual(c.billCount, 2);
+      assert.strictEqual(c.totalSpend, 100000);
+      assert.strictEqual(c.visitDays, 2);
+      assert.strictEqual(c.group, 'back');
+    });
+
+    test('MASTER_CONFIGURE — STORE_MANAGER (REVIEW_APPROVE_CORRECT) không đọc được', function () {
+      assertErr(G.getCustomerReport(rCtx('STORE_MANAGER', 'POS'), {
+        from: '2026-03-01', to: '2026-03-10', bills: []
+      }), 'FORBIDDEN');
+    });
+  });
+});
+
 describe('read-layer — COGS luôn 2 vế (§3, invariant R8)', function () {
   var G = _r.G;
   var ctx = function () { return rCtx('QUANLY_ADMIN', 'QUANLY', _r.QL); };

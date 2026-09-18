@@ -74,6 +74,17 @@ GIEO.define('read-layer/gateway', [
     GetLoyaltyLedgerForReference: registerQuery('GetLoyaltyLedgerForReference', { authority: 'REVIEW_APPROVE_CORRECT' }),
     GetPnL: registerQuery('GetPnL', { authority: 'MASTER_CONFIGURE' }),
     GetCustomerReport: registerQuery('GetCustomerReport', { authority: 'MASTER_CONFIGURE' }),
+    /* Phân tích bán hàng theo món (Báo cáo — mix) — cùng nguồn bill, cùng
+       authority với GetBillsForRange/GetCOGS (doanh thu, không phải danh
+       tính khách như GetCustomerReport). */
+    GetMix: registerQuery('GetMix', { authority: 'REVIEW_APPROVE_CORRECT' }),
+    /* Kho — danh mục cấu hình đơn giản (commands/kho-config.js) + sổ kho gần
+       đây (kho:history). Đọc để hiển thị danh mục không nhạy hơn xem tồn kho
+       (GetInventoryLevel là EXECUTE) — nhưng SỬA đòi MASTER_CONFIGURE
+       (commands/kho-config.js), nên tách quyền đọc/ghi đúng luật §5: người
+       bán không sửa được danh mục, nhưng biết có gì trong danh mục để chọn. */
+    GetKhoConfigList: registerQuery('GetKhoConfigList', { authority: ['EXECUTE', 'REVIEW_APPROVE_CORRECT'] }),
+    GetKhoHistory: registerQuery('GetKhoHistory', { authority: 'REVIEW_APPROVE_CORRECT' }),
     /* Ba query dưới đây sinh ra để P9/P10 không còn màn nào tự đọc nguồn thô.
        Trước đó màn Ca/Tổng quan/Duyệt chỉ có chỗ trống hard-code, và chỗ trống
        hard-code chính là nơi người ta sẽ nối thẳng Firebase vào UI. */
@@ -661,6 +672,119 @@ GIEO.define('read-layer/gateway', [
     return R.ok({ billId: spec.billId, entries: spec.entries || [] });
   }
 
+  /**
+   * Danh mục cấu hình Kho (commands/kho-config.js) — `spec.entries` do
+   * `bootstrap/canonical-data-source.js#forQuery` cấp sẵn (liệt kê nguyên
+   * collection của `spec.kind`). Không lọc/sắp xếp gì thêm ở đây — màn hình
+   * tự quyết định hiển thị sao (kể cả bản archived, để còn bật lại được).
+   */
+  var KHO_CONFIG_KINDS = {
+    vessel: true, storageLocation: true, wasteReason: true, refillRule: true,
+    checklistItem: true, toppingRecipe: true, purchaseOrder: true
+  };
+  function getKhoConfigList(ctx, spec) {
+    var g = guard(Q.GetKhoConfigList, ctx, spec);
+    if (R.isErr(g)) return g;
+    if (!spec.kind || !KHO_CONFIG_KINDS[spec.kind]) {
+      return R.err('VALIDATION', 'getKhoConfigList: kind không hợp lệ: ' + spec.kind);
+    }
+    return R.ok({ kind: spec.kind, entries: spec.entries || [] });
+  }
+
+  /**
+   * Lịch sử kho (kho:history) — sổ ledger raw+prep gần đây, đọc-thuần không
+   * tham số reference. `spec.entries` do canonical-data-source cấp; sắp xếp
+   * mới nhất trước và cắt theo `spec.limit` ở ĐÂY (không phải Firestore) —
+   * cùng cách getBillsForRange tự sort/không cần orderBy tầng dưới.
+   */
+  function getKhoHistory(ctx, spec) {
+    var g = guard(Q.GetKhoHistory, ctx, spec);
+    if (R.isErr(g)) return g;
+    var limit = spec.limit && spec.limit > 0 ? spec.limit : 50;
+    var entries = (spec.entries || []).slice().sort(function (a, b) {
+      var at = String(a.occurredAt || ''), bt = String(b.occurredAt || '');
+      return at < bt ? 1 : at > bt ? -1 : 0;
+    }).slice(0, limit);
+    return R.ok({ entries: entries });
+  }
+
+  /**
+   * Phân tích bán hàng theo món (Báo cáo — mix, legacy renderMix/
+   * computeMixReport). Cố ý KHÔNG replicate tầng COGS/margin của legacy (rule
+   * engine bao bì/topping) — quyết định chủ quán 2026-09-18: màn Kho/Báo cáo
+   * đợt này là "đơn giản", không phải core. Gộp theo menuItemId trên đúng
+   * `spec.bills` mà GetBillsForRange/GetRevenue/GetCOGS đã dùng — không có
+   * pipeline riêng, không có khả năng lệch số với 2 báo cáo kia.
+   */
+  function getMix(ctx, spec) {
+    var g = guard(Q.GetMix, ctx, spec);
+    if (R.isErr(g)) return g;
+    var bills = spec.bills || [];
+    var byItem = {};
+    var order = [];
+    bills.forEach(function (b) {
+      (b.lines || []).forEach(function (l) {
+        var key = l.menuItemId || l.name || 'unknown';
+        if (!byItem[key]) {
+          byItem[key] = { menuItemId: l.menuItemId || null, name: l.name || '(không tên)', qty: 0, revenue: 0 };
+          order.push(key);
+        }
+        byItem[key].qty += l.qty || 0;
+        byItem[key].revenue += l.isFree ? 0 : (typeof l.amount === 'number' ? l.amount : (l.price || 0) * (l.qty || 0));
+      });
+    });
+    var rows = order.map(function (k) { return byItem[k]; })
+      .sort(function (a, b) { return b.revenue - a.revenue; });
+    return R.ok({
+      from: spec.from, to: spec.to, billCount: bills.length,
+      rows: rows, totalRevenue: rows.reduce(function (s, r) { return s + r.revenue; }, 0)
+    });
+  }
+
+  /**
+   * Khách hàng (Báo cáo — customer, legacy renderCustomer/computeCustomerReport).
+   * Gộp theo `bill.customerId` (đã suy sẵn từ phone qua mapBill/buildBill —
+   * không tự dò field ở đây như legacy resolveCustomer()). Bill không có
+   * customerId (khách vãng lai) bị loại khỏi báo cáo — đúng ý nghĩa "khách
+   * hàng", không lẫn vào để mẫu số sai.
+   */
+  function getCustomerReport(ctx, spec) {
+    var g = guard(Q.GetCustomerReport, ctx, spec);
+    if (R.isErr(g)) return g;
+    var bills = spec.bills || [];
+    var byCustomer = {};
+    var order = [];
+    bills.forEach(function (b) {
+      if (!b.customerId) return;
+      var key = b.customerId;
+      if (!byCustomer[key]) {
+        byCustomer[key] = {
+          customerId: key,
+          name: (b.legacySource && b.legacySource.customerName) || null,
+          phone: (b.legacySource && b.legacySource.phone) || null,
+          billCount: 0, totalSpend: 0, visitDates: {}
+        };
+        order.push(key);
+      }
+      var c = byCustomer[key];
+      c.billCount += 1;
+      c.totalSpend += b.total || 0;
+      if (!c.name && b.legacySource && b.legacySource.customerName) c.name = b.legacySource.customerName;
+      if (!c.phone && b.legacySource && b.legacySource.phone) c.phone = b.legacySource.phone;
+      if (b.businessDate) c.visitDates[b.businessDate] = true;
+    });
+    var rows = order.map(function (k) {
+      var c = byCustomer[k];
+      var visitDays = Object.keys(c.visitDates).length;
+      return {
+        customerId: c.customerId, name: c.name, phone: c.phone,
+        billCount: c.billCount, totalSpend: c.totalSpend, visitDays: visitDays,
+        group: visitDays >= 5 ? 'loyal' : visitDays >= 2 ? 'back' : 'new'
+      };
+    }).sort(function (a, b) { return b.totalSpend - a.totalSpend; });
+    return R.ok({ from: spec.from, to: spec.to, customerCount: rows.length, rows: rows });
+  }
+
   return {
     QUERIES: Q,
     registerQuery: registerQuery,
@@ -680,6 +804,10 @@ GIEO.define('read-layer/gateway', [
     getShiftStatus: getShiftStatus,
     getAlerts: getAlerts,
     getPendingApprovals: getPendingApprovals,
-    getPayrollForMonth: getPayrollForMonth
+    getPayrollForMonth: getPayrollForMonth,
+    getKhoConfigList: getKhoConfigList,
+    getKhoHistory: getKhoHistory,
+    getMix: getMix,
+    getCustomerReport: getCustomerReport
   };
 });

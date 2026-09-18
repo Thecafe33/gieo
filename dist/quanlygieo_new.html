@@ -10247,6 +10247,13 @@ GIEO.define('persistence-firebase/atomic-commit', [
         menuItem: ['menuItem', function (x) { return { menuItemId: x.menuItemId }; }],
         category: ['category', function (x) { return { categoryId: x.categoryId }; }],
         promotion: ['promotion', function (x) { return { promotionId: x.promotionId }; }],
+        /* Kho — danh mục cấu hình đơn giản (commands/kho-config.js), 2026-09-18. */
+        vessel: ['vessel', function (x) { return { id: x.id }; }],
+        storageLocation: ['storageLocation', function (x) { return { id: x.id }; }],
+        wasteReason: ['wasteReason', function (x) { return { id: x.id }; }],
+        refillRule: ['refillRule', function (x) { return { id: x.id }; }],
+        checklistItem: ['checklistItem', function (x) { return { id: x.id }; }],
+        toppingRecipe: ['toppingRecipe', function (x) { return { id: x.id }; }],
         /* CP-VersionedInput — commands/versioning.js (Publish* cho recipe/cost/
            packaging/prepYield/payTerms/config/iceCogs). MỘT map chung cho CẢ 7
            domain: `compaction/versioned-input.js#publish()` đã trả về đúng
@@ -10498,6 +10505,17 @@ GIEO.define('persistence-firebase/canonical-paths', [
       build: function (ctx, a) { return base(ctx) + '/versions/' + a.kind + '/' + a.subjectId + '/' + a.versionId; }
     },
     packagingConfig: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/packagingConfig/' + a.id; } },
+    /* Kho — danh mục cấu hình ĐƠN GIẢN (chỉ lưu + đọc, không tính toán FIFO/
+       COGS): vị trí kho, lý do hao hụt, dụng cụ đựng, refill, checklist ca,
+       công thức topping. Quyết định 2026-09-18: các màn Kho này KHÔNG cần
+       command riêng biệt hay pipeline nặng — cùng hình dạng CreateCategory
+       (commands/catalog.js), chỉ khác collection. */
+    vessel: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/vessels/' + a.id; } },
+    storageLocation: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/storageLocations/' + a.id; } },
+    wasteReason: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/wasteReasons/' + a.id; } },
+    refillRule: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/refillRules/' + a.id; } },
+    checklistItem: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/checklistItems/' + a.id; } },
+    toppingRecipe: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/toppingRecipes/' + a.id; } },
     /* CP11 — commands/catalog.js. */
     menuItem: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/menuItems/' + a.menuItemId; } },
     category: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/categories/' + a.categoryId; } },
@@ -10719,11 +10737,45 @@ GIEO.define('persistence-firebase/canonical-read-port', [
       return getAll(collP.value.path, [{ field: 'referenceId', op: '==', value: billId }]);
     }
 
+    /**
+     * Liệt kê TOÀN BỘ document của một collection danh mục Kho
+     * (commands/kho-config.js) — nguồn cho GetKhoConfigList. Whitelist
+     * KIND_TO_PATH chặn tên collection lạ lọt vào query thô, cùng nguyên tắc
+     * "domainRecord loại lạ bị từ chối" của atomic-commit.js#planToWrites.
+     */
+    var KIND_TO_PATH = {
+      vessel: 'vessel', storageLocation: 'storageLocation', wasteReason: 'wasteReason',
+      refillRule: 'refillRule', checklistItem: 'checklistItem', toppingRecipe: 'toppingRecipe',
+      purchaseOrder: 'purchaseOrder'
+    };
+    function listKhoConfig(ctx, kind) {
+      var pathName = KIND_TO_PATH[kind];
+      if (!pathName) return Promise.resolve(R.err('VALIDATION', 'GetKhoConfigList: kind không hợp lệ: ' + kind));
+      var collP = paths.collectionPath(pathName, ctx, { id: '_' });
+      if (R.isErr(collP)) return Promise.resolve(collP);
+      return getAll(collP.value.path);
+    }
+
+    /**
+     * Sổ ledger raw+prep gần đây — nguồn cho màn "Lịch sử kho" (kho:history,
+     * đọc-thuần, không tham số reference cụ thể). Không hỗ trợ orderBy/limit ở
+     * tầng Firestore (getAll() chỉ where) — sắp xếp/limit làm ở caller, cùng
+     * cách getBillsForRange (read-layer/gateway.js) đã làm với `bills`.
+     */
+    function loadRecentLedgerEntries(ctx, domain) {
+      var collP = paths.collectionPath('ledger', ctx, { entryId: '_' });
+      if (R.isErr(collP)) return Promise.resolve(collP);
+      var where = domain ? [{ field: 'domain', op: '==', value: domain }] : [];
+      return getAll(collP.value.path, where);
+    }
+
     return {
       loadUnitsForItem: loadUnitsForItem,
       loadVersions: loadVersions,
       loadEntriesForReference: loadEntriesForReference,
-      loadLoyaltyEntriesForReference: loadLoyaltyEntriesForReference
+      loadLoyaltyEntriesForReference: loadLoyaltyEntriesForReference,
+      listKhoConfig: listKhoConfig,
+      loadRecentLedgerEntries: loadRecentLedgerEntries
     };
   }
 
@@ -10941,6 +10993,17 @@ GIEO.define('read-layer/gateway', [
     GetLoyaltyLedgerForReference: registerQuery('GetLoyaltyLedgerForReference', { authority: 'REVIEW_APPROVE_CORRECT' }),
     GetPnL: registerQuery('GetPnL', { authority: 'MASTER_CONFIGURE' }),
     GetCustomerReport: registerQuery('GetCustomerReport', { authority: 'MASTER_CONFIGURE' }),
+    /* Phân tích bán hàng theo món (Báo cáo — mix) — cùng nguồn bill, cùng
+       authority với GetBillsForRange/GetCOGS (doanh thu, không phải danh
+       tính khách như GetCustomerReport). */
+    GetMix: registerQuery('GetMix', { authority: 'REVIEW_APPROVE_CORRECT' }),
+    /* Kho — danh mục cấu hình đơn giản (commands/kho-config.js) + sổ kho gần
+       đây (kho:history). Đọc để hiển thị danh mục không nhạy hơn xem tồn kho
+       (GetInventoryLevel là EXECUTE) — nhưng SỬA đòi MASTER_CONFIGURE
+       (commands/kho-config.js), nên tách quyền đọc/ghi đúng luật §5: người
+       bán không sửa được danh mục, nhưng biết có gì trong danh mục để chọn. */
+    GetKhoConfigList: registerQuery('GetKhoConfigList', { authority: ['EXECUTE', 'REVIEW_APPROVE_CORRECT'] }),
+    GetKhoHistory: registerQuery('GetKhoHistory', { authority: 'REVIEW_APPROVE_CORRECT' }),
     /* Ba query dưới đây sinh ra để P9/P10 không còn màn nào tự đọc nguồn thô.
        Trước đó màn Ca/Tổng quan/Duyệt chỉ có chỗ trống hard-code, và chỗ trống
        hard-code chính là nơi người ta sẽ nối thẳng Firebase vào UI. */
@@ -11528,6 +11591,119 @@ GIEO.define('read-layer/gateway', [
     return R.ok({ billId: spec.billId, entries: spec.entries || [] });
   }
 
+  /**
+   * Danh mục cấu hình Kho (commands/kho-config.js) — `spec.entries` do
+   * `bootstrap/canonical-data-source.js#forQuery` cấp sẵn (liệt kê nguyên
+   * collection của `spec.kind`). Không lọc/sắp xếp gì thêm ở đây — màn hình
+   * tự quyết định hiển thị sao (kể cả bản archived, để còn bật lại được).
+   */
+  var KHO_CONFIG_KINDS = {
+    vessel: true, storageLocation: true, wasteReason: true, refillRule: true,
+    checklistItem: true, toppingRecipe: true, purchaseOrder: true
+  };
+  function getKhoConfigList(ctx, spec) {
+    var g = guard(Q.GetKhoConfigList, ctx, spec);
+    if (R.isErr(g)) return g;
+    if (!spec.kind || !KHO_CONFIG_KINDS[spec.kind]) {
+      return R.err('VALIDATION', 'getKhoConfigList: kind không hợp lệ: ' + spec.kind);
+    }
+    return R.ok({ kind: spec.kind, entries: spec.entries || [] });
+  }
+
+  /**
+   * Lịch sử kho (kho:history) — sổ ledger raw+prep gần đây, đọc-thuần không
+   * tham số reference. `spec.entries` do canonical-data-source cấp; sắp xếp
+   * mới nhất trước và cắt theo `spec.limit` ở ĐÂY (không phải Firestore) —
+   * cùng cách getBillsForRange tự sort/không cần orderBy tầng dưới.
+   */
+  function getKhoHistory(ctx, spec) {
+    var g = guard(Q.GetKhoHistory, ctx, spec);
+    if (R.isErr(g)) return g;
+    var limit = spec.limit && spec.limit > 0 ? spec.limit : 50;
+    var entries = (spec.entries || []).slice().sort(function (a, b) {
+      var at = String(a.occurredAt || ''), bt = String(b.occurredAt || '');
+      return at < bt ? 1 : at > bt ? -1 : 0;
+    }).slice(0, limit);
+    return R.ok({ entries: entries });
+  }
+
+  /**
+   * Phân tích bán hàng theo món (Báo cáo — mix, legacy renderMix/
+   * computeMixReport). Cố ý KHÔNG replicate tầng COGS/margin của legacy (rule
+   * engine bao bì/topping) — quyết định chủ quán 2026-09-18: màn Kho/Báo cáo
+   * đợt này là "đơn giản", không phải core. Gộp theo menuItemId trên đúng
+   * `spec.bills` mà GetBillsForRange/GetRevenue/GetCOGS đã dùng — không có
+   * pipeline riêng, không có khả năng lệch số với 2 báo cáo kia.
+   */
+  function getMix(ctx, spec) {
+    var g = guard(Q.GetMix, ctx, spec);
+    if (R.isErr(g)) return g;
+    var bills = spec.bills || [];
+    var byItem = {};
+    var order = [];
+    bills.forEach(function (b) {
+      (b.lines || []).forEach(function (l) {
+        var key = l.menuItemId || l.name || 'unknown';
+        if (!byItem[key]) {
+          byItem[key] = { menuItemId: l.menuItemId || null, name: l.name || '(không tên)', qty: 0, revenue: 0 };
+          order.push(key);
+        }
+        byItem[key].qty += l.qty || 0;
+        byItem[key].revenue += l.isFree ? 0 : (typeof l.amount === 'number' ? l.amount : (l.price || 0) * (l.qty || 0));
+      });
+    });
+    var rows = order.map(function (k) { return byItem[k]; })
+      .sort(function (a, b) { return b.revenue - a.revenue; });
+    return R.ok({
+      from: spec.from, to: spec.to, billCount: bills.length,
+      rows: rows, totalRevenue: rows.reduce(function (s, r) { return s + r.revenue; }, 0)
+    });
+  }
+
+  /**
+   * Khách hàng (Báo cáo — customer, legacy renderCustomer/computeCustomerReport).
+   * Gộp theo `bill.customerId` (đã suy sẵn từ phone qua mapBill/buildBill —
+   * không tự dò field ở đây như legacy resolveCustomer()). Bill không có
+   * customerId (khách vãng lai) bị loại khỏi báo cáo — đúng ý nghĩa "khách
+   * hàng", không lẫn vào để mẫu số sai.
+   */
+  function getCustomerReport(ctx, spec) {
+    var g = guard(Q.GetCustomerReport, ctx, spec);
+    if (R.isErr(g)) return g;
+    var bills = spec.bills || [];
+    var byCustomer = {};
+    var order = [];
+    bills.forEach(function (b) {
+      if (!b.customerId) return;
+      var key = b.customerId;
+      if (!byCustomer[key]) {
+        byCustomer[key] = {
+          customerId: key,
+          name: (b.legacySource && b.legacySource.customerName) || null,
+          phone: (b.legacySource && b.legacySource.phone) || null,
+          billCount: 0, totalSpend: 0, visitDates: {}
+        };
+        order.push(key);
+      }
+      var c = byCustomer[key];
+      c.billCount += 1;
+      c.totalSpend += b.total || 0;
+      if (!c.name && b.legacySource && b.legacySource.customerName) c.name = b.legacySource.customerName;
+      if (!c.phone && b.legacySource && b.legacySource.phone) c.phone = b.legacySource.phone;
+      if (b.businessDate) c.visitDates[b.businessDate] = true;
+    });
+    var rows = order.map(function (k) {
+      var c = byCustomer[k];
+      var visitDays = Object.keys(c.visitDates).length;
+      return {
+        customerId: c.customerId, name: c.name, phone: c.phone,
+        billCount: c.billCount, totalSpend: c.totalSpend, visitDays: visitDays,
+        group: visitDays >= 5 ? 'loyal' : visitDays >= 2 ? 'back' : 'new'
+      };
+    }).sort(function (a, b) { return b.totalSpend - a.totalSpend; });
+    return R.ok({ from: spec.from, to: spec.to, customerCount: rows.length, rows: rows });
+  }
+
   return {
     QUERIES: Q,
     registerQuery: registerQuery,
@@ -11547,7 +11723,11 @@ GIEO.define('read-layer/gateway', [
     getShiftStatus: getShiftStatus,
     getAlerts: getAlerts,
     getPendingApprovals: getPendingApprovals,
-    getPayrollForMonth: getPayrollForMonth
+    getPayrollForMonth: getPayrollForMonth,
+    getKhoConfigList: getKhoConfigList,
+    getKhoHistory: getKhoHistory,
+    getMix: getMix,
+    getCustomerReport: getCustomerReport
   };
 });
 
@@ -12864,6 +13044,226 @@ GIEO.define('commands/inventory', [
     AdjustInventory: AdjustInventory,
     ReportLostContainer: ReportLostContainer,
     RestoreFoundContainer: RestoreFoundContainer
+  };
+});
+
+/* ===== src/layers/commands/kho-config.js ===== */
+/**
+ * Lệnh ghi danh mục CẤU HÌNH Kho — 2026-09-18.
+ *
+ * Quyết định chủ quán (nguyên văn, giữ lại vì đây là lý do module này khác
+ * hẳn commands/receiving.js hay commands/stock-count.js): "mấy cái đó là
+ * tính năng đơn giản, chỉ cần có chỗ lưu và app pos đọc là được, không phải
+ * core đừng bắt có backend quá phiền phức... coi lại hệ thống cũ và thực
+ * hiện". Các màn Kho ở đây (vị trí kho, lý do hao hụt, dụng cụ đựng, refill,
+ * checklist ca, công thức topping, đặt hàng) ở legacy chỉ là
+ * `db.collection(x).doc(y).set(...)` — không FIFO, không COGS, không state
+ * machine. Việc DUY NHẤT module này thêm so với legacy là đi qua đúng MỘT
+ * đường ghi (`commands/pipeline.js`) như mọi command khác — không có đường
+ * ghi tắt riêng cho "cấu hình", đúng nguyên tắc "đường ghi DUY NHẤT của cả
+ * POS lẫn QUANLY" mà pipeline.js đã ghi ở đầu file.
+ *
+ * `defineConfigUpsert` cùng hình dạng CreateCategory (commands/catalog.js):
+ * validate id do caller cấp trước (idempotency), execute chỉ gói input
+ * thành 1 domainRecord. Sửa/xoá dùng LẠI đúng command này — "xoá" là gọi lại
+ * với `active:false` (archive), không xoá cứng: giữ đúng §2.3a (không âm
+ * thầm làm mất dữ liệu) và cùng mẫu ArchiveMenuItem đã có.
+ *
+ * Quyền MASTER_CONFIGURE — cùng mức với catalog (menu/category/promotion):
+ * đây là cấu hình dữ liệu gốc của quán, không phải duyệt một giao dịch đã
+ * phát sinh.
+ */
+GIEO.define('commands/kho-config', [
+  'shared-kernel/ids',
+  'shared-kernel/result',
+  'commands/pipeline'
+], function (ids, R, pipeline) {
+  'use strict';
+
+  function defineConfigUpsert(spec) {
+    return pipeline.defineCommand({
+      name: spec.name,
+      authority: 'MASTER_CONFIGURE',
+      mutates: true,
+      sources: ['QUANLY'],
+
+      /* editRef bắt buộc — 2 lần lưu THẬT khác nhau (sửa lần 1 rồi sửa lần 2)
+         phải ra 2 operationId khác nhau, không coi lần sửa sau là gửi lại
+         lần trước (cùng lý do RenameMenuItem cần editRef). */
+      operationId: function (input) {
+        return ids.deterministicId('operation',
+          [spec.opPrefix, input.id, input.editRef || 'create']);
+      },
+
+      validate: function (input) {
+        if (!input || !ids.isId(input.id, 'item')) {
+          return R.err('VALIDATION', spec.name + ' cần id hợp lệ do caller cấp trước');
+        }
+        if (!input.editRef) {
+          return R.err('VALIDATION', spec.name + ' cần editRef để chống lưu đúp');
+        }
+        return spec.validate ? spec.validate(input) : R.ok(true);
+      },
+
+      execute: function (input, ctx) {
+        var record = Object.assign({}, spec.pick(input), {
+          id: input.id,
+          storeId: ctx.storeId,
+          active: input.active !== false,
+          updatedAt: ctx.clock.now()
+        });
+        var plan = pipeline.emptyPlan();
+        plan.domainRecords.push({ type: spec.recordType, record: record });
+        return R.ok(plan);
+      }
+    });
+  }
+
+  var SaveStorageLocation = defineConfigUpsert({
+    name: 'SaveStorageLocation', opPrefix: 'kholoc', recordType: 'storageLocation',
+    validate: function (input) {
+      if (!input.name) return R.err('VALIDATION', 'SaveStorageLocation cần name');
+      return R.ok(true);
+    },
+    pick: function (input) { return { name: input.name, type: input.type || null, note: input.note || null }; }
+  });
+
+  var SaveWasteReason = defineConfigUpsert({
+    name: 'SaveWasteReason', opPrefix: 'khowaste', recordType: 'wasteReason',
+    validate: function (input) {
+      if (!input.label) return R.err('VALIDATION', 'SaveWasteReason cần label');
+      return R.ok(true);
+    },
+    pick: function (input) { return { label: input.label }; }
+  });
+
+  var SaveVessel = defineConfigUpsert({
+    name: 'SaveVessel', opPrefix: 'khovessel', recordType: 'vessel',
+    validate: function (input) {
+      if (!input.name) return R.err('VALIDATION', 'SaveVessel cần name');
+      return R.ok(true);
+    },
+    pick: function (input) {
+      return { code: input.code || null, name: input.name, note: input.note || null, variants: input.variants || [] };
+    }
+  });
+
+  var SaveRefillRule = defineConfigUpsert({
+    name: 'SaveRefillRule', opPrefix: 'khorefill', recordType: 'refillRule',
+    validate: function (input) {
+      if (!ids.isId(input.itemId, 'item')) return R.err('VALIDATION', 'SaveRefillRule cần itemId hợp lệ');
+      return R.ok(true);
+    },
+    pick: function (input) {
+      return {
+        itemId: input.itemId, itemName: input.itemName || null,
+        sourceLocationId: input.sourceLocationId || null, destLocationId: input.destLocationId || null,
+        targetBase: input.targetBase || 0, minBase: input.minBase || 0, maxBase: input.maxBase || 0
+      };
+    }
+  });
+
+  var SaveChecklistItem = defineConfigUpsert({
+    name: 'SaveChecklistItem', opPrefix: 'khochecklist', recordType: 'checklistItem',
+    validate: function (input) {
+      if (!input.label) return R.err('VALIDATION', 'SaveChecklistItem cần label');
+      if (input.phase !== 'open' && input.phase !== 'close') {
+        return R.err('VALIDATION', 'SaveChecklistItem cần phase là open hoặc close');
+      }
+      return R.ok(true);
+    },
+    pick: function (input) {
+      return {
+        phase: input.phase, label: input.label, blocking: !!input.blocking,
+        order: typeof input.order === 'number' ? input.order : 0
+      };
+    }
+  });
+
+  var SaveToppingRecipe = defineConfigUpsert({
+    name: 'SaveToppingRecipe', opPrefix: 'khotopping', recordType: 'toppingRecipe',
+    validate: function (input) {
+      if (!input.toppingName) return R.err('VALIDATION', 'SaveToppingRecipe cần toppingName');
+      return R.ok(true);
+    },
+    pick: function (input) {
+      return {
+        toppingName: input.toppingName, batchInputs: input.batchInputs || [],
+        batchYield: input.batchYield || 0, qtyPerServing: input.qtyPerServing || 0,
+        costPerServing: input.costPerServing || null, note: input.note || null
+      };
+    }
+  });
+
+  /**
+   * Đặt hàng (kho:po) — legacy `renderKhoPO`. Chỉ tạo/huỷ; "nhận hàng" (điều
+   * chỉnh giá vốn/kho thật) đã có đường riêng qua commands/receiving.js
+   * (ReceiveGoods), không lặp lại ở đây.
+   */
+  var CreatePurchaseOrder = pipeline.defineCommand({
+    name: 'CreatePurchaseOrder',
+    authority: 'MASTER_CONFIGURE',
+    mutates: true,
+    sources: ['QUANLY'],
+    operationId: function (input) {
+      return ids.deterministicId('operation', ['createpo', input.purchaseOrderId]);
+    },
+    validate: function (input) {
+      if (!input || !ids.isId(input.purchaseOrderId, 'item')) {
+        return R.err('VALIDATION', 'CreatePurchaseOrder cần purchaseOrderId hợp lệ do caller cấp trước');
+      }
+      if (!input.supplier) return R.err('VALIDATION', 'CreatePurchaseOrder cần supplier');
+      return R.ok(true);
+    },
+    execute: function (input, ctx) {
+      var plan = pipeline.emptyPlan();
+      plan.domainRecords.push({
+        type: 'purchaseOrder',
+        record: {
+          purchaseOrderId: input.purchaseOrderId, storeId: ctx.storeId,
+          supplier: input.supplier, note: input.note || null,
+          status: 'pending', lines: input.lines || [],
+          createdAt: ctx.clock.now(), createdBy: ctx.actor.actorId
+        }
+      });
+      return R.ok(plan);
+    }
+  });
+
+  var CancelPurchaseOrder = pipeline.defineCommand({
+    name: 'CancelPurchaseOrder',
+    authority: 'MASTER_CONFIGURE',
+    mutates: true,
+    sources: ['QUANLY'],
+    operationId: function (input) {
+      return ids.deterministicId('operation', ['cancelpo', input.purchaseOrderId]);
+    },
+    validate: function (input) {
+      if (!input || !ids.isId(input.purchaseOrderId, 'item')) {
+        return R.err('VALIDATION', 'CancelPurchaseOrder cần purchaseOrderId hợp lệ');
+      }
+      if (!input.purchaseOrder) return R.err('VALIDATION', 'thiếu input.purchaseOrder (denormalized, không tự tra kho)');
+      return R.ok(true);
+    },
+    execute: function (input) {
+      var plan = pipeline.emptyPlan();
+      plan.domainRecords.push({
+        type: 'purchaseOrder',
+        record: Object.assign({}, input.purchaseOrder, { status: 'cancelled' })
+      });
+      return R.ok(plan);
+    }
+  });
+
+  return {
+    SaveStorageLocation: SaveStorageLocation,
+    SaveWasteReason: SaveWasteReason,
+    SaveVessel: SaveVessel,
+    SaveRefillRule: SaveRefillRule,
+    SaveChecklistItem: SaveChecklistItem,
+    SaveToppingRecipe: SaveToppingRecipe,
+    CreatePurchaseOrder: CreatePurchaseOrder,
+    CancelPurchaseOrder: CancelPurchaseOrder
   };
 });
 
@@ -17118,12 +17518,15 @@ GIEO.define('bootstrap/canonical-data-source', [
 
     /**
      * Đọc canonical TRƯỚC khi rơi xuống legacy (đối xứng với forCommand ở
-     * trên) — hai query hiện tại: GetLedgerEntriesForReference (nguồn
-     * `originalAllocations` cho ReverseTransaction khi xoá bill, §3.8) và
+     * trên). Bốn query: GetLedgerEntriesForReference (nguồn
+     * `originalAllocations` cho ReverseTransaction khi xoá bill, §3.8),
      * GetLoyaltyLedgerForReference (nguồn `eventData.loyaltyEntries` cho
-     * CÙNG lệnh đó, NET-LOYALTY-V1.md #4). Bill sinh SAU cutover có dữ liệu
-     * canonical thật ở đây; bill legacy không có gì (mảng rỗng), nên KHÔNG
-     * set `input.entries` — để nguyên input đi tiếp.
+     * CÙNG lệnh đó, NET-LOYALTY-V1.md #4), và GetKhoConfigList/GetKhoHistory
+     * (danh mục/sổ Kho, commands/kho-config.js, 2026-09-18 — collection MỚI,
+     * không có gì ở legacy để rơi xuống, nên legacy-data-source.js không cần
+     * biết 2 tên này). Bill sinh SAU cutover có dữ liệu canonical thật ở đây;
+     * bill legacy không có gì (mảng rỗng), nên KHÔNG set `input.entries` — để
+     * nguyên input đi tiếp.
      *
      * `bootstrap/legacy-data-source.js` KHÔNG có nhánh dịch riêng cho query
      * này (đã kiểm tra: không nằm trong NOT_WIRED, không có branch riêng —
@@ -17162,6 +17565,23 @@ GIEO.define('bootstrap/canonical-data-source', [
       if (name === 'GetLoyaltyLedgerForReference' && input.billId && !input.entries) {
         var ctx2 = { organizationId: defaults.organizationId, storeId: input.storeId };
         return reader.loadLoyaltyEntriesForReference(ctx2, input.billId).then(function (out) {
+          if (R.isErr(out) || out.value.length === 0) return R.ok(input);
+          return R.ok(Object.assign({}, input, { entries: out.value }));
+        });
+      }
+      /* Kho — danh mục cấu hình đơn giản (commands/kho-config.js, 2026-09-18):
+         liệt kê nguyên collection của input.kind. */
+      if (name === 'GetKhoConfigList' && input.kind && !input.entries) {
+        var ctx3 = { organizationId: defaults.organizationId, storeId: input.storeId };
+        return reader.listKhoConfig(ctx3, input.kind).then(function (out) {
+          if (R.isErr(out) || out.value.length === 0) return R.ok(input);
+          return R.ok(Object.assign({}, input, { entries: out.value }));
+        });
+      }
+      /* Kho — lịch sử kho (kho:history): sổ ledger raw+prep gần đây. */
+      if (name === 'GetKhoHistory' && !input.entries) {
+        var ctx4 = { organizationId: defaults.organizationId, storeId: input.storeId };
+        return reader.loadRecentLedgerEntries(ctx4, input.domain || null).then(function (out) {
           if (R.isErr(out) || out.value.length === 0) return R.ok(input);
           return R.ok(Object.assign({}, input, { entries: out.value }));
         });
@@ -17971,6 +18391,22 @@ GIEO.define('bootstrap/legacy-data-source', [
           });
         });
       }
+      /* Báo cáo — Phân tích bán hàng (mix) / Khách hàng (customer). Cùng
+         nguồn bill khoảng ngày với GetBillsForRange (legacy renderMix/
+         renderCustomer đọc CHUNG `fetchOrdersForDate`) — không có pipeline
+         đọc riêng, nên không có chỗ 2 báo cáo lệch số với LỊCH SỬ BILL. */
+      if ((name === 'GetMix' || name === 'GetCustomerReport') && input.from && input.to && !input.bills) {
+        return reader.loadBillsForRange(input).then(function (out) {
+          if (R.isErr(out)) return out;
+          return R.ok({
+            storeId: input.storeId,
+            from: input.from,
+            to: input.to,
+            bills: out.value.bills,
+            legacyMeta: { ambiguous: out.value.ambiguous, days: out.value.days }
+          });
+        });
+      }
       if (NOT_WIRED[name] && !hasCanonicalInput(name, input)) {
         /* Chưa có nguồn legacy cho query này. Trả LỖI, không trả rỗng.
            Rỗng và "chưa đọc được" trông giống nhau trên màn hình nhưng nghĩa
@@ -18157,13 +18593,14 @@ GIEO.define('bootstrap/runtime', [
   'commands/loyalty',
   'commands/alerts',
   'commands/versioning',
+  'commands/kho-config',
   'read-layer/gateway',
   'read-layer/merge-canonical',
   'reporting/report-queries',
   'bootstrap/domain-events'
 ], function (
   R, pipeline, sales, inventory, receiving, stockCount, catalog, prep, reversal, approval,
-  businessDay, shift, payroll, loyalty, alerts, versioning, reads, merge, reports, domainEvents
+  businessDay, shift, payroll, loyalty, alerts, versioning, khoConfig, reads, merge, reports, domainEvents
 ) {
   'use strict';
 
@@ -18220,7 +18657,16 @@ GIEO.define('bootstrap/runtime', [
     PublishYield: versioning.PublishYield,
     PublishPayTerms: versioning.PublishPayTerms,
     PublishConfig: versioning.PublishConfig,
-    PublishIceCogs: versioning.PublishIceCogs
+    PublishIceCogs: versioning.PublishIceCogs,
+    /* Kho — danh mục cấu hình đơn giản (commands/kho-config.js), 2026-09-18. */
+    SaveStorageLocation: khoConfig.SaveStorageLocation,
+    SaveWasteReason: khoConfig.SaveWasteReason,
+    SaveVessel: khoConfig.SaveVessel,
+    SaveRefillRule: khoConfig.SaveRefillRule,
+    SaveChecklistItem: khoConfig.SaveChecklistItem,
+    SaveToppingRecipe: khoConfig.SaveToppingRecipe,
+    CreatePurchaseOrder: khoConfig.CreatePurchaseOrder,
+    CancelPurchaseOrder: khoConfig.CancelPurchaseOrder
   };
   var QUERIES = {
     GetMenu: reads.getMenu,
@@ -18234,6 +18680,10 @@ GIEO.define('bootstrap/runtime', [
     GetLedgerEntriesForReference: reads.getLedgerEntriesForReference,
     GetLoyaltyLedgerForReference: reads.getLoyaltyLedgerForReference,
     GetPnL: reads.getPnL,
+    GetMix: reads.getMix,
+    GetCustomerReport: reads.getCustomerReport,
+    GetKhoConfigList: reads.getKhoConfigList,
+    GetKhoHistory: reads.getKhoHistory,
     ComparePeriods: reads.comparePeriods,
     GetShiftStatus: reads.getShiftStatus,
     GetAlerts: reads.getAlerts,
@@ -18933,7 +19383,10 @@ GIEO.define('app-quanly/controller', [
     var state = { mode: runtime.mode, screen: 'OVERVIEW', lastResult: null, lastError: null };
     function snapshot() { return Object.assign({}, state); }
     function navigate(screen) {
-      if (['OVERVIEW', 'ALERTS', 'TRACE', 'INVENTORY', 'APPROVALS', 'REPORTS', 'BTP', 'BILLS'].indexOf(screen) === -1) {
+      if ([
+        'OVERVIEW', 'ALERTS', 'TRACE', 'INVENTORY', 'APPROVALS', 'REPORTS', 'BTP', 'BILLS',
+        'KHO', 'MIX', 'CUSTOMER'
+      ].indexOf(screen) === -1) {
         return R.err('VALIDATION', 'màn QUANLY không hợp lệ: ' + screen);
       }
       state.screen = screen;
@@ -19000,7 +19453,21 @@ GIEO.define('app-quanly/controller', [
       restoreFoundContainer: function (input) { return run('RestoreFoundContainer', input); },
       reverseOrder: function (input) { return run('ReverseTransaction', input); },
       reviseState: function (input) { return run('ReviseState', input); },
-      correctLedgerEntry: function (input) { return run('CorrectLedgerEntry', input); }
+      correctLedgerEntry: function (input) { return run('CorrectLedgerEntry', input); },
+      /* Kho — danh mục cấu hình đơn giản (commands/kho-config.js) + Báo cáo
+         mix/customer, 2026-09-18. */
+      getKhoConfigList: function (input) { return read('GetKhoConfigList', input); },
+      getKhoHistory: function (input) { return read('GetKhoHistory', input); },
+      getMix: function (input) { return read('GetMix', input); },
+      getCustomerReport: function (input) { return read('GetCustomerReport', input); },
+      saveStorageLocation: function (input) { return run('SaveStorageLocation', input); },
+      saveWasteReason: function (input) { return run('SaveWasteReason', input); },
+      saveVessel: function (input) { return run('SaveVessel', input); },
+      saveRefillRule: function (input) { return run('SaveRefillRule', input); },
+      saveChecklistItem: function (input) { return run('SaveChecklistItem', input); },
+      saveToppingRecipe: function (input) { return run('SaveToppingRecipe', input); },
+      createPurchaseOrder: function (input) { return run('CreatePurchaseOrder', input); },
+      cancelPurchaseOrder: function (input) { return run('CancelPurchaseOrder', input); }
     };
   }
 
@@ -19012,9 +19479,10 @@ GIEO.define('app-quanly/controller', [
 GIEO.define('app-quanly/main', [
   'shared-kernel/result',
   'shared-kernel/clock',
+  'shared-kernel/ids',
   'bootstrap/runtime',
   'app-quanly/controller'
-], function (R, clockLib, bootstrap, controllerLib) {
+], function (R, clockLib, ids, bootstrap, controllerLib) {
   'use strict';
 
   function esc(value) {
@@ -19025,12 +19493,85 @@ GIEO.define('app-quanly/main', [
 
   function money(n) { return Number(n || 0).toLocaleString('vi-VN') + ' ₫'; }
   var clock = clockLib.createClock();
+
+  /**
+   * Kho — danh mục cấu hình (2026-09-18). Một schema mô tả field cho MỘT
+   * bảng thay vì viết 6 màn riêng — cùng tinh thần `defineConfigUpsert`
+   * (commands/kho-config.js): 6 collection khác nhau nhưng hình dạng UI
+   * giống hệt nhau (list + form sửa/thêm + bật/tắt), nên viết 1 lần.
+   */
+  var KHO_CONFIG_SCHEMAS = {
+    storageLocation: {
+      title: 'Vị trí kho', command: 'saveStorageLocation', titleField: 'name',
+      fields: [
+        { key: 'name', label: 'Tên vị trí', required: true },
+        { key: 'type', label: 'Loại (vd: kho lạnh, quầy)' },
+        { key: 'note', label: 'Ghi chú' }
+      ]
+    },
+    wasteReason: {
+      title: 'Lý do hao hụt', command: 'saveWasteReason', titleField: 'label',
+      fields: [{ key: 'label', label: 'Lý do', required: true }]
+    },
+    vessel: {
+      title: 'Dụng cụ đựng', command: 'saveVessel', titleField: 'name',
+      fields: [
+        { key: 'code', label: 'Mã' },
+        { key: 'name', label: 'Tên', required: true },
+        { key: 'note', label: 'Ghi chú' }
+      ]
+    },
+    refillRule: {
+      title: 'Refill', command: 'saveRefillRule', titleField: 'itemName',
+      fields: [
+        { key: 'itemId', label: 'Mã nguyên liệu (itemId)', required: true },
+        { key: 'itemName', label: 'Tên nguyên liệu' },
+        { key: 'sourceLocationId', label: 'Vị trí nguồn (id)' },
+        { key: 'destLocationId', label: 'Vị trí đích (id)' },
+        { key: 'targetBase', label: 'Định mức', type: 'number' },
+        { key: 'minBase', label: 'Tối thiểu', type: 'number' },
+        { key: 'maxBase', label: 'Tối đa', type: 'number' }
+      ]
+    },
+    checklistItem: {
+      title: 'Checklist kho', command: 'saveChecklistItem', titleField: 'label',
+      fields: [
+        { key: 'phase', label: 'Ca (open/close)', required: true },
+        { key: 'label', label: 'Nội dung', required: true },
+        { key: 'blocking', label: 'Chặn đóng ca nếu chưa xong', type: 'checkbox' },
+        { key: 'order', label: 'Thứ tự', type: 'number' }
+      ]
+    },
+    toppingRecipe: {
+      title: 'Topping COGS', command: 'saveToppingRecipe', titleField: 'toppingName',
+      fields: [
+        { key: 'toppingName', label: 'Tên topping', required: true },
+        { key: 'batchYield', label: 'Sản lượng/mẻ', type: 'number' },
+        { key: 'qtyPerServing', label: 'Định lượng/ly', type: 'number' },
+        { key: 'costPerServing', label: 'Giá vốn/ly', type: 'number' },
+        { key: 'note', label: 'Ghi chú' }
+      ]
+    }
+  };
+  var KHO_CONFIG_ORDER = ['storageLocation', 'wasteReason', 'vessel', 'refillRule', 'checklistItem', 'toppingRecipe'];
   function view() { return { loading: false, error: null, data: null }; }
 
   function applyRead(out) {
     return R.isErr(out)
       ? { loading: false, error: out.error, data: null }
       : { loading: false, error: null, data: out.value.data, meta: out.value.meta };
+  }
+
+  /**
+   * Các query Kho/Báo cáo mới (getKhoConfigList/getKhoHistory/getMix/
+   * getCustomerReport) trả THẲNG `R.ok({...})` — không qua merge-canonical
+   * (không có khái niệm đóng băng/snapshot cho danh mục cấu hình hay báo cáo
+   * gộp trên bill), nên không có `.data`/`.meta` như applyRead đọc.
+   */
+  function applyRaw(out) {
+    return R.isErr(out)
+      ? { loading: false, error: out.error, data: null }
+      : { loading: false, error: null, data: out.value };
   }
 
   /** Màn PIN tối thiểu của QUANLY; sẽ được đặt vào layout legacy khi port UI. */
@@ -19104,6 +19645,21 @@ GIEO.define('app-quanly/main', [
     var billsUI = { from: clock.calendarDate(), to: clock.calendarDate(), query: '', openId: null };
     var billsDelete = { confirmId: null, busy: null, error: null };
     var billsNotice = null;
+
+    /* Kho — danh mục cấu hình đơn giản + Báo cáo mix/customer (2026-09-18).
+       Xem commands/kho-config.js cho lý do các màn này KHÔNG có pipeline
+       riêng phức tạp như sales/inventory — chỉ lưu + đọc, đúng chỉ đạo chủ
+       quán "đơn giản, không phải core". */
+    var khoUI = { tab: 'storageLocation' };
+    var khoConfigViews = {}; /* kind -> view(), lazy */
+    var khoForm = { editingId: null, values: {}, busy: false, error: null };
+    var khoHistoryView = view();
+    var khoPOView = view();
+    var khoPOForm = { open: false, busy: false, error: null };
+    var mixUI = { from: clock.calendarDate(), to: clock.calendarDate() };
+    var mixView = view();
+    var customerUI = { from: clock.calendarDate(), to: clock.calendarDate() };
+    var customerView = view();
 
     function errorBox(title, error) {
       return '<div class="result error"><strong>' + esc(title) + '</strong><span>' +
@@ -19621,6 +20177,170 @@ GIEO.define('app-quanly/main', [
         notice + '<div class="pos-clone">' + billListMarkup() + '</div></section>';
     }
 
+    /* ---------- Kho — danh mục cấu hình đơn giản + đặt hàng + lịch sử ---------- */
+
+    var KHO_TABS = KHO_CONFIG_ORDER.concat(['purchaseOrder', 'history']);
+
+    function khoTabLabel(tab) {
+      if (tab === 'purchaseOrder') return 'Đặt hàng';
+      if (tab === 'history') return 'Lịch sử kho';
+      return KHO_CONFIG_SCHEMAS[tab].title;
+    }
+
+    function khoConfigView(kind) {
+      if (!khoConfigViews[kind]) khoConfigViews[kind] = view();
+      return khoConfigViews[kind];
+    }
+
+    function khoTabBar() {
+      return '<div class="search-row" style="flex-wrap:wrap">' + KHO_TABS.map(function (t) {
+        return '<button class="btn ' + (khoUI.tab === t ? 'primary' : 'outline') +
+          '" data-kho-tab="' + t + '">' + esc(khoTabLabel(t)) + '</button>';
+      }).join('') + '</div>';
+    }
+
+    function khoConfigFormMarkup(kind) {
+      var schema = KHO_CONFIG_SCHEMAS[kind];
+      var editing = khoForm.editingId;
+      return '<form id="kho-config-form" class="card" style="padding:16px;margin-top:12px">' +
+        '<h3 class="report-sub">' + (editing ? 'Sửa' : 'Thêm') + ' ' + esc(schema.title) + '</h3>' +
+        (khoForm.error ? errorBox('Không lưu được', khoForm.error) : '') +
+        schema.fields.map(function (f) {
+          var val = khoForm.values[f.key];
+          if (f.type === 'checkbox') {
+            return '<label style="display:block;margin:8px 0"><input type="checkbox" name="' + f.key + '"' +
+              (val ? ' checked' : '') + '> ' + esc(f.label) + '</label>';
+          }
+          return '<label style="display:block;margin:8px 0">' + esc(f.label) + (f.required ? ' *' : '') +
+            '<input name="' + f.key + '" type="' + (f.type === 'number' ? 'number' : 'text') + '" value="' +
+            esc(val === undefined || val === null ? '' : val) + '"' + (f.required ? ' required' : '') +
+            ' style="display:block;width:100%;margin-top:4px"></label>';
+        }).join('') +
+        '<div class="search-row" style="margin-top:12px">' +
+        '<button class="btn primary" type="submit"' + (khoForm.busy ? ' disabled' : '') + '>' +
+        (khoForm.busy ? 'Đang lưu…' : 'Lưu') + '</button>' +
+        (editing ? '<button class="btn outline" type="button" id="kho-form-cancel">Huỷ sửa</button>' : '') +
+        '</div></form>';
+    }
+
+    function khoConfigListMarkup(kind) {
+      var v = khoConfigView(kind);
+      var schema = KHO_CONFIG_SCHEMAS[kind];
+      if (v.loading) return '<div class="pc-empty">Đang đọc…</div>';
+      if (v.error) return errorBox('Không đọc được ' + schema.title, v.error);
+      var entries = (v.data && v.data.entries) || [];
+      if (!entries.length) return '<div class="empty"><h3>Chưa có ' + esc(schema.title.toLowerCase()) + '</h3></div>';
+      return '<div class="card" style="margin-top:12px">' + entries.map(function (e) {
+        var title = e[schema.titleField] || e.id;
+        return '<article class="litem"><div class="lmain"><div class="ltitle">' + esc(title) +
+          (e.active === false ? ' <span class="status neutral">Đã ẩn</span>' : '') + '</div>' +
+          '<div class="lsub">' + esc(e.id) + '</div></div>' +
+          '<button class="btn outline" data-kho-edit="' + esc(e.id) + '" data-kho-kind="' + kind + '">Sửa</button>' +
+          '<button class="btn ' + (e.active === false ? 'outline' : 'danger') + '" data-kho-toggle="' + esc(e.id) +
+          '" data-kho-kind="' + kind + '">' + (e.active === false ? 'Bật lại' : 'Ẩn') + '</button></article>';
+      }).join('') + '</div>';
+    }
+
+    function khoPOFormMarkup() {
+      return '<form id="kho-po-form" class="card" style="padding:16px;margin-top:12px">' +
+        '<h3 class="report-sub">Tạo đơn đặt hàng</h3>' +
+        (khoPOForm.error ? errorBox('Không tạo được đơn', khoPOForm.error) : '') +
+        '<label style="display:block;margin:8px 0">Nhà cung cấp *<input name="supplier" required ' +
+        'style="display:block;width:100%;margin-top:4px"></label>' +
+        '<label style="display:block;margin:8px 0">Danh sách hàng (mỗi dòng một mặt hàng)' +
+        '<textarea name="items" rows="3" style="display:block;width:100%;margin-top:4px"></textarea></label>' +
+        '<label style="display:block;margin:8px 0">Ghi chú<input name="note" ' +
+        'style="display:block;width:100%;margin-top:4px"></label>' +
+        '<button class="btn primary" type="submit"' + (khoPOForm.busy ? ' disabled' : '') + '>' +
+        (khoPOForm.busy ? 'Đang tạo…' : 'Tạo đơn') + '</button></form>';
+    }
+
+    function khoPOListMarkup() {
+      if (khoPOView.loading) return '<div class="pc-empty">Đang đọc…</div>';
+      if (khoPOView.error) return errorBox('Không đọc được đơn đặt hàng', khoPOView.error);
+      var entries = ((khoPOView.data && khoPOView.data.entries) || []).slice().sort(function (a, b) {
+        return String(b.createdAt || '').localeCompare(String(a.createdAt || ''));
+      });
+      if (!entries.length) return '<div class="empty"><h3>Chưa có đơn đặt hàng</h3></div>';
+      var toneOf = { pending: 'warning', cancelled: 'neutral' };
+      return '<div class="card" style="margin-top:12px">' + entries.map(function (po) {
+        var lines = (po.lines || []).map(function (l) { return l.label; }).join(', ');
+        return '<article class="litem"><div class="lmain"><div class="ltitle">' + esc(po.supplier) +
+          ' <span class="status ' + (toneOf[po.status] || 'success') + '">' + esc(po.status) + '</span></div>' +
+          '<div class="lsub">' + esc(lines || po.note || '') + '</div></div>' +
+          (po.status === 'pending'
+            ? '<button class="btn danger" data-po-cancel="' + esc(po.purchaseOrderId) + '">Huỷ đơn</button>' : '') +
+          '</article>';
+      }).join('') + '</div>';
+    }
+
+    function khoHistoryMarkup() {
+      if (khoHistoryView.loading) return '<div class="pc-empty">Đang đọc…</div>';
+      if (khoHistoryView.error) return errorBox('Không đọc được lịch sử kho', khoHistoryView.error);
+      var entries = (khoHistoryView.data && khoHistoryView.data.entries) || [];
+      if (!entries.length) return '<div class="empty"><h3>Chưa có phát sinh</h3></div>';
+      return '<div class="card" style="margin-top:12px">' + entries.map(function (en) {
+        return '<article class="litem"><div class="lmain"><div class="ltitle">' + esc(en.itemId || en.domain || '—') +
+          '</div><div class="lsub">' + esc(en.reason || en.type || '') + '</div></div><div class="lmeta">' +
+          esc(en.qtyDelta !== null && en.qtyDelta !== undefined ? en.qtyDelta : '') + ' · ' +
+          esc(en.occurredAt || '') + '</div></article>';
+      }).join('') + '</div>';
+    }
+
+    function khoScreen() {
+      var head = '<section><div class="section-head"><div><p class="eyebrow">Kho</p>' +
+        '<h2>Danh mục &amp; đặt hàng</h2></div></div>' + khoTabBar() + '</section>';
+      var body;
+      if (khoUI.tab === 'purchaseOrder') body = khoPOFormMarkup() + khoPOListMarkup();
+      else if (khoUI.tab === 'history') body = khoHistoryMarkup();
+      else body = khoConfigFormMarkup(khoUI.tab) + khoConfigListMarkup(khoUI.tab);
+      return head + body;
+    }
+
+    /* ---------- Báo cáo — mix (phân tích bán hàng) / khách hàng ---------- */
+
+    function mixScreen() {
+      var d = mixView.data;
+      var head = '<section><div class="section-head"><div><p class="eyebrow">Báo cáo</p>' +
+        '<h2>Phân tích bán hàng</h2></div></div>' +
+        '<form class="filter-bar" id="mix-range"><input type="date" name="from" value="' + esc(mixUI.from) +
+        '" required><input type="date" name="to" value="' + esc(mixUI.to) + '" required>' +
+        '<button class="btn">Xem</button></form></section>';
+      if (mixView.loading) return head + '<div class="empty"><h3>Đang đọc…</h3></div>';
+      if (mixView.error) return head + errorBox('Không đọc được báo cáo', mixView.error);
+      if (!d) return head + '<div class="empty"><h3>Chọn khoảng ngày</h3></div>';
+      var rows = d.rows.map(function (r) {
+        return '<tr><td>' + esc(r.name) + '</td><td>' + esc(r.qty) + '</td><td>' + money(r.revenue) + '</td></tr>';
+      }).join('');
+      return head + '<div class="metric-grid">' + metric('Số đơn', d.billCount) +
+        metric('Doanh thu', money(d.totalRevenue)) + '</div>' +
+        '<table class="report"><thead><tr><th>Món</th><th>SL</th><th>Doanh thu</th></tr></thead><tbody>' +
+        (rows || '<tr><td colspan="3">Không có dữ liệu</td></tr>') + '</tbody></table>';
+    }
+
+    var CUSTOMER_GROUP_LABEL = { loyal: 'Thân thiết', back: 'Quay lại', new: 'Mới' };
+
+    function customerScreen() {
+      var d = customerView.data;
+      var head = '<section><div class="section-head"><div><p class="eyebrow">Báo cáo</p>' +
+        '<h2>Khách hàng</h2></div></div>' +
+        '<form class="filter-bar" id="customer-range"><input type="date" name="from" value="' +
+        esc(customerUI.from) + '" required><input type="date" name="to" value="' + esc(customerUI.to) +
+        '" required><button class="btn">Xem</button></form></section>';
+      if (customerView.loading) return head + '<div class="empty"><h3>Đang đọc…</h3></div>';
+      if (customerView.error) return head + errorBox('Không đọc được báo cáo', customerView.error);
+      if (!d) return head + '<div class="empty"><h3>Chọn khoảng ngày</h3></div>';
+      var rows = d.rows.map(function (r) {
+        return '<tr><td>' + esc(r.name || 'Không rõ') + '</td><td>' + esc(r.phone || '') + '</td><td>' +
+          esc(r.billCount) + '</td><td>' + money(r.totalSpend) + '</td><td>' + esc(r.visitDays) + '</td><td>' +
+          esc(CUSTOMER_GROUP_LABEL[r.group] || r.group) + '</td></tr>';
+      }).join('');
+      return head + '<div class="metric-grid">' + metric('Số khách', d.customerCount) + '</div>' +
+        '<table class="report"><thead><tr><th>Khách</th><th>SĐT</th><th>Số đơn</th><th>Tổng chi</th>' +
+        '<th>Số ngày ghé</th><th>Nhóm</th></tr></thead><tbody>' +
+        (rows || '<tr><td colspan="6">Không có dữ liệu</td></tr>') + '</tbody></table>';
+    }
+
     function content(screen) {
       if (screen === 'TRACE') return traceScreen();
       if (screen === 'ALERTS') return alertsScreen();
@@ -19629,6 +20349,9 @@ GIEO.define('app-quanly/main', [
       if (screen === 'REPORTS') return reportsScreen();
       if (screen === 'BTP') return btpScreen();
       if (screen === 'BILLS') return billsScreen();
+      if (screen === 'KHO') return khoScreen();
+      if (screen === 'MIX') return mixScreen();
+      if (screen === 'CUSTOMER') return customerScreen();
       return overviewScreen();
     }
 
@@ -19723,6 +20446,83 @@ GIEO.define('app-quanly/main', [
       render();
       controller.getBillsForRange({ from: billsUI.from, to: billsUI.to }).then(function (out) {
         billsView = applyRead(out);
+        render();
+      });
+    }
+
+    function loadKhoConfig(kind) {
+      khoConfigViews[kind] = { loading: true, error: null, data: null };
+      render();
+      controller.getKhoConfigList({ kind: kind }).then(function (out) {
+        khoConfigViews[kind] = applyRaw(out);
+        render();
+      });
+    }
+
+    function loadKhoPO() {
+      khoPOView = { loading: true, error: null, data: null };
+      render();
+      controller.getKhoConfigList({ kind: 'purchaseOrder' }).then(function (out) {
+        khoPOView = applyRaw(out);
+        render();
+      });
+    }
+
+    function loadKhoHistory() {
+      khoHistoryView = { loading: true, error: null, data: null };
+      render();
+      controller.getKhoHistory({}).then(function (out) {
+        khoHistoryView = applyRaw(out);
+        render();
+      });
+    }
+
+    /** Điều hướng theo tab hiện tại của màn Kho — mỗi tab tự tải nguồn của nó. */
+    function loadKhoForTab(tab) {
+      if (tab === 'purchaseOrder') {
+        if (!khoPOView.data && !khoPOView.loading) loadKhoPO();
+      } else if (tab === 'history') {
+        if (!khoHistoryView.data && !khoHistoryView.loading) loadKhoHistory();
+      } else {
+        var v = khoConfigView(tab);
+        if (!v.data && !v.loading) loadKhoConfig(tab);
+      }
+    }
+
+    function submitKhoForm(kind) {
+      var schema = KHO_CONFIG_SCHEMAS[kind];
+      var payload = Object.assign({}, khoForm.values, {
+        id: khoForm.editingId || ids.newId('item'),
+        editRef: String(Date.now())
+      });
+      var method = 'save' + kind.charAt(0).toUpperCase() + kind.slice(1);
+      khoForm.busy = true;
+      khoForm.error = null;
+      render();
+      controller[method](payload).then(function (out) {
+        if (R.isErr(out)) {
+          khoForm = { editingId: khoForm.editingId, values: khoForm.values, busy: false, error: out.error };
+          return render();
+        }
+        khoForm = { editingId: null, values: {}, busy: false, error: null };
+        loadKhoConfig(kind);
+      });
+    }
+
+    function loadMix() {
+      mixView = { loading: true, error: null, data: null };
+      render();
+      controller.getMix({ from: mixUI.from, to: mixUI.to }).then(function (out) {
+        mixView = applyRaw(out);
+        render();
+      });
+    }
+
+    function loadCustomerReport() {
+      customerView = { loading: true, error: null, data: null };
+      render();
+      controller.getCustomerReport({ from: customerUI.from, to: customerUI.to }).then(function (out) {
+        customerView = applyRaw(out);
         render();
       });
     }
@@ -19862,6 +20662,9 @@ GIEO.define('app-quanly/main', [
           if (screen === 'ALERTS' && !alertView.data && !alertView.loading) loadOverview();
           if (screen === 'BTP' && !btpView.data && !btpView.loading) loadBTP(clock.calendarDate());
           if (screen === 'BILLS' && !billsView.data && !billsView.loading) loadBills(true);
+          if (screen === 'KHO') loadKhoForTab(khoUI.tab);
+          if (screen === 'MIX' && !mixView.data && !mixView.loading) loadMix();
+          if (screen === 'CUSTOMER' && !customerView.data && !customerView.loading) loadCustomerReport();
         });
       });
 
@@ -20035,6 +20838,124 @@ GIEO.define('app-quanly/main', [
           });
         });
       });
+
+      Array.prototype.forEach.call(el.querySelectorAll('[data-kho-tab]'), function (button) {
+        button.addEventListener('click', function () {
+          khoUI.tab = button.getAttribute('data-kho-tab');
+          khoForm = { editingId: null, values: {}, busy: false, error: null };
+          render();
+          loadKhoForTab(khoUI.tab);
+        });
+      });
+
+      var khoConfigForm = el.querySelector('#kho-config-form');
+      if (khoConfigForm) khoConfigForm.addEventListener('submit', function (event) {
+        event.preventDefault();
+        var kind = khoUI.tab;
+        var schema = KHO_CONFIG_SCHEMAS[kind];
+        var values = {};
+        schema.fields.forEach(function (f) {
+          var input = khoConfigForm.elements[f.key];
+          if (!input) return;
+          if (f.type === 'checkbox') values[f.key] = input.checked;
+          else if (f.type === 'number') values[f.key] = input.value === '' ? 0 : Number(input.value);
+          else values[f.key] = input.value;
+        });
+        khoForm.values = values;
+        submitKhoForm(kind);
+      });
+
+      var khoFormCancel = el.querySelector('#kho-form-cancel');
+      if (khoFormCancel) khoFormCancel.addEventListener('click', function () {
+        khoForm = { editingId: null, values: {}, busy: false, error: null };
+        render();
+      });
+
+      Array.prototype.forEach.call(el.querySelectorAll('[data-kho-edit]'), function (button) {
+        button.addEventListener('click', function () {
+          var kind = button.getAttribute('data-kho-kind');
+          var id = button.getAttribute('data-kho-edit');
+          var v = khoConfigView(kind);
+          var entry = ((v.data && v.data.entries) || []).filter(function (e) { return e.id === id; })[0];
+          if (!entry) return;
+          khoForm = { editingId: id, values: Object.assign({}, entry), busy: false, error: null };
+          window.scrollTo(0, 0);
+          render();
+        });
+      });
+
+      /* Ẩn/Bật lại = lưu đúp qua defineConfigUpsert với active đảo ngược
+         (xoá mềm — §2.3a không âm thầm làm mất dữ liệu). */
+      Array.prototype.forEach.call(el.querySelectorAll('[data-kho-toggle]'), function (button) {
+        button.addEventListener('click', function () {
+          var kind = button.getAttribute('data-kho-kind');
+          var id = button.getAttribute('data-kho-toggle');
+          var schema = KHO_CONFIG_SCHEMAS[kind];
+          var v = khoConfigView(kind);
+          var entry = ((v.data && v.data.entries) || []).filter(function (e) { return e.id === id; })[0];
+          if (!entry) return;
+          var values = {};
+          schema.fields.forEach(function (f) { values[f.key] = entry[f.key]; });
+          var payload = Object.assign({}, values, {
+            id: id, editRef: String(Date.now()), active: entry.active === false
+          });
+          var method = 'save' + kind.charAt(0).toUpperCase() + kind.slice(1);
+          controller[method](payload).then(function (out) {
+            if (R.isOk(out)) loadKhoConfig(kind);
+            else { khoForm.error = out.error; render(); }
+          });
+        });
+      });
+
+      var khoPOForm_ = el.querySelector('#kho-po-form');
+      if (khoPOForm_) khoPOForm_.addEventListener('submit', function (event) {
+        event.preventDefault();
+        var supplier = khoPOForm_.elements.supplier.value;
+        var note = khoPOForm_.elements.note.value;
+        var lines = (khoPOForm_.elements.items.value || '').split('\n')
+          .map(function (s) { return s.trim(); }).filter(Boolean)
+          .map(function (label) { return { label: label }; });
+        khoPOForm = { open: true, busy: true, error: null };
+        render();
+        controller.createPurchaseOrder({
+          purchaseOrderId: ids.newId('item'), supplier: supplier, note: note || null, lines: lines
+        }).then(function (out) {
+          khoPOForm = R.isErr(out)
+            ? { open: true, busy: false, error: out.error }
+            : { open: false, busy: false, error: null };
+          if (R.isOk(out)) loadKhoPO();
+          else render();
+        });
+      });
+
+      Array.prototype.forEach.call(el.querySelectorAll('[data-po-cancel]'), function (button) {
+        button.addEventListener('click', function () {
+          var id = button.getAttribute('data-po-cancel');
+          var entries = (khoPOView.data && khoPOView.data.entries) || [];
+          var po = entries.filter(function (e) { return e.purchaseOrderId === id; })[0];
+          if (!po) return;
+          controller.cancelPurchaseOrder({ purchaseOrderId: id, purchaseOrder: po }).then(function (out) {
+            if (R.isOk(out)) loadKhoPO();
+            else { khoPOForm = { open: true, busy: false, error: out.error }; render(); }
+          });
+        });
+      });
+
+      var mixRangeForm = el.querySelector('#mix-range');
+      if (mixRangeForm) mixRangeForm.addEventListener('submit', function (event) {
+        event.preventDefault();
+        mixUI.from = mixRangeForm.elements.from.value;
+        mixUI.to = mixRangeForm.elements.to.value;
+        loadMix();
+      });
+
+      var customerRangeForm = el.querySelector('#customer-range');
+      if (customerRangeForm) customerRangeForm.addEventListener('submit', function (event) {
+        event.preventDefault();
+        customerUI.from = customerRangeForm.elements.from.value;
+        customerUI.to = customerRangeForm.elements.to.value;
+        loadCustomerReport();
+      });
     }
 
     function render() {
@@ -20056,7 +20977,10 @@ GIEO.define('app-quanly/main', [
           '<button data-screen="INVENTORY" class="sidebar-item ' + (state.screen === 'INVENTORY' ? 'active' : '') + '"><span class="sb-ic">▦</span><span>Tồn kho</span></button>' +
           '<button data-screen="BTP" class="sidebar-item ' + (state.screen === 'BTP' ? 'active' : '') + '"><span class="sb-ic">◎</span><span>Bán thành phẩm</span></button>' +
           '<button data-screen="BILLS" class="sidebar-item ' + (state.screen === 'BILLS' ? 'active' : '') + '"><span class="sb-ic">🧾</span><span>Lịch sử bill</span></button>' +
+          '<button data-screen="KHO" class="sidebar-item ' + (state.screen === 'KHO' ? 'active' : '') + '"><span class="sb-ic">📦</span><span>Kho</span></button>' +
           '<button data-screen="REPORTS" class="sidebar-item ' + (state.screen === 'REPORTS' ? 'active' : '') + '"><span class="sb-ic">▥</span><span>Báo cáo</span></button>' +
+          '<button data-screen="MIX" class="sidebar-item ' + (state.screen === 'MIX' ? 'active' : '') + '"><span class="sb-ic">▤</span><span>Phân tích bán hàng</span></button>' +
+          '<button data-screen="CUSTOMER" class="sidebar-item ' + (state.screen === 'CUSTOMER' ? 'active' : '') + '"><span class="sb-ic">☺</span><span>Khách hàng</span></button>' +
         '</aside><div class="main-col"><header class="topbar"><div class="topbar-row">' +
           '<div class="brandrow"><button class="hamburger-btn" id="hamburgerBtn" aria-label="Menu">☰</button>' +
           '<div class="hdr-titles"><div class="brand disp" id="hdrTitle">Quản lý vận hành</div></div></div>' +

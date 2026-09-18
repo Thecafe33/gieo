@@ -10,7 +10,10 @@ GIEO.define('app-quanly/controller', [
     var state = { mode: runtime.mode, screen: 'OVERVIEW', lastResult: null, lastError: null };
     function snapshot() { return Object.assign({}, state); }
     function navigate(screen) {
-      if (['OVERVIEW', 'ALERTS', 'TRACE', 'INVENTORY', 'APPROVALS', 'REPORTS', 'BTP', 'BILLS'].indexOf(screen) === -1) {
+      if ([
+        'OVERVIEW', 'ALERTS', 'TRACE', 'INVENTORY', 'APPROVALS', 'REPORTS', 'BTP', 'BILLS',
+        'KHO', 'MIX', 'CUSTOMER'
+      ].indexOf(screen) === -1) {
         return R.err('VALIDATION', 'màn QUANLY không hợp lệ: ' + screen);
       }
       state.screen = screen;
@@ -77,7 +80,21 @@ GIEO.define('app-quanly/controller', [
       restoreFoundContainer: function (input) { return run('RestoreFoundContainer', input); },
       reverseOrder: function (input) { return run('ReverseTransaction', input); },
       reviseState: function (input) { return run('ReviseState', input); },
-      correctLedgerEntry: function (input) { return run('CorrectLedgerEntry', input); }
+      correctLedgerEntry: function (input) { return run('CorrectLedgerEntry', input); },
+      /* Kho — danh mục cấu hình đơn giản (commands/kho-config.js) + Báo cáo
+         mix/customer, 2026-09-18. */
+      getKhoConfigList: function (input) { return read('GetKhoConfigList', input); },
+      getKhoHistory: function (input) { return read('GetKhoHistory', input); },
+      getMix: function (input) { return read('GetMix', input); },
+      getCustomerReport: function (input) { return read('GetCustomerReport', input); },
+      saveStorageLocation: function (input) { return run('SaveStorageLocation', input); },
+      saveWasteReason: function (input) { return run('SaveWasteReason', input); },
+      saveVessel: function (input) { return run('SaveVessel', input); },
+      saveRefillRule: function (input) { return run('SaveRefillRule', input); },
+      saveChecklistItem: function (input) { return run('SaveChecklistItem', input); },
+      saveToppingRecipe: function (input) { return run('SaveToppingRecipe', input); },
+      createPurchaseOrder: function (input) { return run('CreatePurchaseOrder', input); },
+      cancelPurchaseOrder: function (input) { return run('CancelPurchaseOrder', input); }
     };
   }
 

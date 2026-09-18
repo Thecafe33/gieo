@@ -9594,6 +9594,13 @@ GIEO.define('persistence-firebase/atomic-commit', [
         menuItem: ['menuItem', function (x) { return { menuItemId: x.menuItemId }; }],
         category: ['category', function (x) { return { categoryId: x.categoryId }; }],
         promotion: ['promotion', function (x) { return { promotionId: x.promotionId }; }],
+        /* Kho — danh mục cấu hình đơn giản (commands/kho-config.js), 2026-09-18. */
+        vessel: ['vessel', function (x) { return { id: x.id }; }],
+        storageLocation: ['storageLocation', function (x) { return { id: x.id }; }],
+        wasteReason: ['wasteReason', function (x) { return { id: x.id }; }],
+        refillRule: ['refillRule', function (x) { return { id: x.id }; }],
+        checklistItem: ['checklistItem', function (x) { return { id: x.id }; }],
+        toppingRecipe: ['toppingRecipe', function (x) { return { id: x.id }; }],
         /* CP-VersionedInput — commands/versioning.js (Publish* cho recipe/cost/
            packaging/prepYield/payTerms/config/iceCogs). MỘT map chung cho CẢ 7
            domain: `compaction/versioned-input.js#publish()` đã trả về đúng
@@ -9845,6 +9852,17 @@ GIEO.define('persistence-firebase/canonical-paths', [
       build: function (ctx, a) { return base(ctx) + '/versions/' + a.kind + '/' + a.subjectId + '/' + a.versionId; }
     },
     packagingConfig: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/packagingConfig/' + a.id; } },
+    /* Kho — danh mục cấu hình ĐƠN GIẢN (chỉ lưu + đọc, không tính toán FIFO/
+       COGS): vị trí kho, lý do hao hụt, dụng cụ đựng, refill, checklist ca,
+       công thức topping. Quyết định 2026-09-18: các màn Kho này KHÔNG cần
+       command riêng biệt hay pipeline nặng — cùng hình dạng CreateCategory
+       (commands/catalog.js), chỉ khác collection. */
+    vessel: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/vessels/' + a.id; } },
+    storageLocation: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/storageLocations/' + a.id; } },
+    wasteReason: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/wasteReasons/' + a.id; } },
+    refillRule: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/refillRules/' + a.id; } },
+    checklistItem: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/checklistItems/' + a.id; } },
+    toppingRecipe: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/toppingRecipes/' + a.id; } },
     /* CP11 — commands/catalog.js. */
     menuItem: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/menuItems/' + a.menuItemId; } },
     category: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/categories/' + a.categoryId; } },
@@ -10066,11 +10084,45 @@ GIEO.define('persistence-firebase/canonical-read-port', [
       return getAll(collP.value.path, [{ field: 'referenceId', op: '==', value: billId }]);
     }
 
+    /**
+     * Liệt kê TOÀN BỘ document của một collection danh mục Kho
+     * (commands/kho-config.js) — nguồn cho GetKhoConfigList. Whitelist
+     * KIND_TO_PATH chặn tên collection lạ lọt vào query thô, cùng nguyên tắc
+     * "domainRecord loại lạ bị từ chối" của atomic-commit.js#planToWrites.
+     */
+    var KIND_TO_PATH = {
+      vessel: 'vessel', storageLocation: 'storageLocation', wasteReason: 'wasteReason',
+      refillRule: 'refillRule', checklistItem: 'checklistItem', toppingRecipe: 'toppingRecipe',
+      purchaseOrder: 'purchaseOrder'
+    };
+    function listKhoConfig(ctx, kind) {
+      var pathName = KIND_TO_PATH[kind];
+      if (!pathName) return Promise.resolve(R.err('VALIDATION', 'GetKhoConfigList: kind không hợp lệ: ' + kind));
+      var collP = paths.collectionPath(pathName, ctx, { id: '_' });
+      if (R.isErr(collP)) return Promise.resolve(collP);
+      return getAll(collP.value.path);
+    }
+
+    /**
+     * Sổ ledger raw+prep gần đây — nguồn cho màn "Lịch sử kho" (kho:history,
+     * đọc-thuần, không tham số reference cụ thể). Không hỗ trợ orderBy/limit ở
+     * tầng Firestore (getAll() chỉ where) — sắp xếp/limit làm ở caller, cùng
+     * cách getBillsForRange (read-layer/gateway.js) đã làm với `bills`.
+     */
+    function loadRecentLedgerEntries(ctx, domain) {
+      var collP = paths.collectionPath('ledger', ctx, { entryId: '_' });
+      if (R.isErr(collP)) return Promise.resolve(collP);
+      var where = domain ? [{ field: 'domain', op: '==', value: domain }] : [];
+      return getAll(collP.value.path, where);
+    }
+
     return {
       loadUnitsForItem: loadUnitsForItem,
       loadVersions: loadVersions,
       loadEntriesForReference: loadEntriesForReference,
-      loadLoyaltyEntriesForReference: loadLoyaltyEntriesForReference
+      loadLoyaltyEntriesForReference: loadLoyaltyEntriesForReference,
+      listKhoConfig: listKhoConfig,
+      loadRecentLedgerEntries: loadRecentLedgerEntries
     };
   }
 
@@ -10288,6 +10340,17 @@ GIEO.define('read-layer/gateway', [
     GetLoyaltyLedgerForReference: registerQuery('GetLoyaltyLedgerForReference', { authority: 'REVIEW_APPROVE_CORRECT' }),
     GetPnL: registerQuery('GetPnL', { authority: 'MASTER_CONFIGURE' }),
     GetCustomerReport: registerQuery('GetCustomerReport', { authority: 'MASTER_CONFIGURE' }),
+    /* Phân tích bán hàng theo món (Báo cáo — mix) — cùng nguồn bill, cùng
+       authority với GetBillsForRange/GetCOGS (doanh thu, không phải danh
+       tính khách như GetCustomerReport). */
+    GetMix: registerQuery('GetMix', { authority: 'REVIEW_APPROVE_CORRECT' }),
+    /* Kho — danh mục cấu hình đơn giản (commands/kho-config.js) + sổ kho gần
+       đây (kho:history). Đọc để hiển thị danh mục không nhạy hơn xem tồn kho
+       (GetInventoryLevel là EXECUTE) — nhưng SỬA đòi MASTER_CONFIGURE
+       (commands/kho-config.js), nên tách quyền đọc/ghi đúng luật §5: người
+       bán không sửa được danh mục, nhưng biết có gì trong danh mục để chọn. */
+    GetKhoConfigList: registerQuery('GetKhoConfigList', { authority: ['EXECUTE', 'REVIEW_APPROVE_CORRECT'] }),
+    GetKhoHistory: registerQuery('GetKhoHistory', { authority: 'REVIEW_APPROVE_CORRECT' }),
     /* Ba query dưới đây sinh ra để P9/P10 không còn màn nào tự đọc nguồn thô.
        Trước đó màn Ca/Tổng quan/Duyệt chỉ có chỗ trống hard-code, và chỗ trống
        hard-code chính là nơi người ta sẽ nối thẳng Firebase vào UI. */
@@ -10875,6 +10938,119 @@ GIEO.define('read-layer/gateway', [
     return R.ok({ billId: spec.billId, entries: spec.entries || [] });
   }
 
+  /**
+   * Danh mục cấu hình Kho (commands/kho-config.js) — `spec.entries` do
+   * `bootstrap/canonical-data-source.js#forQuery` cấp sẵn (liệt kê nguyên
+   * collection của `spec.kind`). Không lọc/sắp xếp gì thêm ở đây — màn hình
+   * tự quyết định hiển thị sao (kể cả bản archived, để còn bật lại được).
+   */
+  var KHO_CONFIG_KINDS = {
+    vessel: true, storageLocation: true, wasteReason: true, refillRule: true,
+    checklistItem: true, toppingRecipe: true, purchaseOrder: true
+  };
+  function getKhoConfigList(ctx, spec) {
+    var g = guard(Q.GetKhoConfigList, ctx, spec);
+    if (R.isErr(g)) return g;
+    if (!spec.kind || !KHO_CONFIG_KINDS[spec.kind]) {
+      return R.err('VALIDATION', 'getKhoConfigList: kind không hợp lệ: ' + spec.kind);
+    }
+    return R.ok({ kind: spec.kind, entries: spec.entries || [] });
+  }
+
+  /**
+   * Lịch sử kho (kho:history) — sổ ledger raw+prep gần đây, đọc-thuần không
+   * tham số reference. `spec.entries` do canonical-data-source cấp; sắp xếp
+   * mới nhất trước và cắt theo `spec.limit` ở ĐÂY (không phải Firestore) —
+   * cùng cách getBillsForRange tự sort/không cần orderBy tầng dưới.
+   */
+  function getKhoHistory(ctx, spec) {
+    var g = guard(Q.GetKhoHistory, ctx, spec);
+    if (R.isErr(g)) return g;
+    var limit = spec.limit && spec.limit > 0 ? spec.limit : 50;
+    var entries = (spec.entries || []).slice().sort(function (a, b) {
+      var at = String(a.occurredAt || ''), bt = String(b.occurredAt || '');
+      return at < bt ? 1 : at > bt ? -1 : 0;
+    }).slice(0, limit);
+    return R.ok({ entries: entries });
+  }
+
+  /**
+   * Phân tích bán hàng theo món (Báo cáo — mix, legacy renderMix/
+   * computeMixReport). Cố ý KHÔNG replicate tầng COGS/margin của legacy (rule
+   * engine bao bì/topping) — quyết định chủ quán 2026-09-18: màn Kho/Báo cáo
+   * đợt này là "đơn giản", không phải core. Gộp theo menuItemId trên đúng
+   * `spec.bills` mà GetBillsForRange/GetRevenue/GetCOGS đã dùng — không có
+   * pipeline riêng, không có khả năng lệch số với 2 báo cáo kia.
+   */
+  function getMix(ctx, spec) {
+    var g = guard(Q.GetMix, ctx, spec);
+    if (R.isErr(g)) return g;
+    var bills = spec.bills || [];
+    var byItem = {};
+    var order = [];
+    bills.forEach(function (b) {
+      (b.lines || []).forEach(function (l) {
+        var key = l.menuItemId || l.name || 'unknown';
+        if (!byItem[key]) {
+          byItem[key] = { menuItemId: l.menuItemId || null, name: l.name || '(không tên)', qty: 0, revenue: 0 };
+          order.push(key);
+        }
+        byItem[key].qty += l.qty || 0;
+        byItem[key].revenue += l.isFree ? 0 : (typeof l.amount === 'number' ? l.amount : (l.price || 0) * (l.qty || 0));
+      });
+    });
+    var rows = order.map(function (k) { return byItem[k]; })
+      .sort(function (a, b) { return b.revenue - a.revenue; });
+    return R.ok({
+      from: spec.from, to: spec.to, billCount: bills.length,
+      rows: rows, totalRevenue: rows.reduce(function (s, r) { return s + r.revenue; }, 0)
+    });
+  }
+
+  /**
+   * Khách hàng (Báo cáo — customer, legacy renderCustomer/computeCustomerReport).
+   * Gộp theo `bill.customerId` (đã suy sẵn từ phone qua mapBill/buildBill —
+   * không tự dò field ở đây như legacy resolveCustomer()). Bill không có
+   * customerId (khách vãng lai) bị loại khỏi báo cáo — đúng ý nghĩa "khách
+   * hàng", không lẫn vào để mẫu số sai.
+   */
+  function getCustomerReport(ctx, spec) {
+    var g = guard(Q.GetCustomerReport, ctx, spec);
+    if (R.isErr(g)) return g;
+    var bills = spec.bills || [];
+    var byCustomer = {};
+    var order = [];
+    bills.forEach(function (b) {
+      if (!b.customerId) return;
+      var key = b.customerId;
+      if (!byCustomer[key]) {
+        byCustomer[key] = {
+          customerId: key,
+          name: (b.legacySource && b.legacySource.customerName) || null,
+          phone: (b.legacySource && b.legacySource.phone) || null,
+          billCount: 0, totalSpend: 0, visitDates: {}
+        };
+        order.push(key);
+      }
+      var c = byCustomer[key];
+      c.billCount += 1;
+      c.totalSpend += b.total || 0;
+      if (!c.name && b.legacySource && b.legacySource.customerName) c.name = b.legacySource.customerName;
+      if (!c.phone && b.legacySource && b.legacySource.phone) c.phone = b.legacySource.phone;
+      if (b.businessDate) c.visitDates[b.businessDate] = true;
+    });
+    var rows = order.map(function (k) {
+      var c = byCustomer[k];
+      var visitDays = Object.keys(c.visitDates).length;
+      return {
+        customerId: c.customerId, name: c.name, phone: c.phone,
+        billCount: c.billCount, totalSpend: c.totalSpend, visitDays: visitDays,
+        group: visitDays >= 5 ? 'loyal' : visitDays >= 2 ? 'back' : 'new'
+      };
+    }).sort(function (a, b) { return b.totalSpend - a.totalSpend; });
+    return R.ok({ from: spec.from, to: spec.to, customerCount: rows.length, rows: rows });
+  }
+
   return {
     QUERIES: Q,
     registerQuery: registerQuery,
@@ -10894,7 +11070,11 @@ GIEO.define('read-layer/gateway', [
     getShiftStatus: getShiftStatus,
     getAlerts: getAlerts,
     getPendingApprovals: getPendingApprovals,
-    getPayrollForMonth: getPayrollForMonth
+    getPayrollForMonth: getPayrollForMonth,
+    getKhoConfigList: getKhoConfigList,
+    getKhoHistory: getKhoHistory,
+    getMix: getMix,
+    getCustomerReport: getCustomerReport
   };
 });
 
@@ -12211,6 +12391,226 @@ GIEO.define('commands/inventory', [
     AdjustInventory: AdjustInventory,
     ReportLostContainer: ReportLostContainer,
     RestoreFoundContainer: RestoreFoundContainer
+  };
+});
+
+/* ===== src/layers/commands/kho-config.js ===== */
+/**
+ * Lệnh ghi danh mục CẤU HÌNH Kho — 2026-09-18.
+ *
+ * Quyết định chủ quán (nguyên văn, giữ lại vì đây là lý do module này khác
+ * hẳn commands/receiving.js hay commands/stock-count.js): "mấy cái đó là
+ * tính năng đơn giản, chỉ cần có chỗ lưu và app pos đọc là được, không phải
+ * core đừng bắt có backend quá phiền phức... coi lại hệ thống cũ và thực
+ * hiện". Các màn Kho ở đây (vị trí kho, lý do hao hụt, dụng cụ đựng, refill,
+ * checklist ca, công thức topping, đặt hàng) ở legacy chỉ là
+ * `db.collection(x).doc(y).set(...)` — không FIFO, không COGS, không state
+ * machine. Việc DUY NHẤT module này thêm so với legacy là đi qua đúng MỘT
+ * đường ghi (`commands/pipeline.js`) như mọi command khác — không có đường
+ * ghi tắt riêng cho "cấu hình", đúng nguyên tắc "đường ghi DUY NHẤT của cả
+ * POS lẫn QUANLY" mà pipeline.js đã ghi ở đầu file.
+ *
+ * `defineConfigUpsert` cùng hình dạng CreateCategory (commands/catalog.js):
+ * validate id do caller cấp trước (idempotency), execute chỉ gói input
+ * thành 1 domainRecord. Sửa/xoá dùng LẠI đúng command này — "xoá" là gọi lại
+ * với `active:false` (archive), không xoá cứng: giữ đúng §2.3a (không âm
+ * thầm làm mất dữ liệu) và cùng mẫu ArchiveMenuItem đã có.
+ *
+ * Quyền MASTER_CONFIGURE — cùng mức với catalog (menu/category/promotion):
+ * đây là cấu hình dữ liệu gốc của quán, không phải duyệt một giao dịch đã
+ * phát sinh.
+ */
+GIEO.define('commands/kho-config', [
+  'shared-kernel/ids',
+  'shared-kernel/result',
+  'commands/pipeline'
+], function (ids, R, pipeline) {
+  'use strict';
+
+  function defineConfigUpsert(spec) {
+    return pipeline.defineCommand({
+      name: spec.name,
+      authority: 'MASTER_CONFIGURE',
+      mutates: true,
+      sources: ['QUANLY'],
+
+      /* editRef bắt buộc — 2 lần lưu THẬT khác nhau (sửa lần 1 rồi sửa lần 2)
+         phải ra 2 operationId khác nhau, không coi lần sửa sau là gửi lại
+         lần trước (cùng lý do RenameMenuItem cần editRef). */
+      operationId: function (input) {
+        return ids.deterministicId('operation',
+          [spec.opPrefix, input.id, input.editRef || 'create']);
+      },
+
+      validate: function (input) {
+        if (!input || !ids.isId(input.id, 'item')) {
+          return R.err('VALIDATION', spec.name + ' cần id hợp lệ do caller cấp trước');
+        }
+        if (!input.editRef) {
+          return R.err('VALIDATION', spec.name + ' cần editRef để chống lưu đúp');
+        }
+        return spec.validate ? spec.validate(input) : R.ok(true);
+      },
+
+      execute: function (input, ctx) {
+        var record = Object.assign({}, spec.pick(input), {
+          id: input.id,
+          storeId: ctx.storeId,
+          active: input.active !== false,
+          updatedAt: ctx.clock.now()
+        });
+        var plan = pipeline.emptyPlan();
+        plan.domainRecords.push({ type: spec.recordType, record: record });
+        return R.ok(plan);
+      }
+    });
+  }
+
+  var SaveStorageLocation = defineConfigUpsert({
+    name: 'SaveStorageLocation', opPrefix: 'kholoc', recordType: 'storageLocation',
+    validate: function (input) {
+      if (!input.name) return R.err('VALIDATION', 'SaveStorageLocation cần name');
+      return R.ok(true);
+    },
+    pick: function (input) { return { name: input.name, type: input.type || null, note: input.note || null }; }
+  });
+
+  var SaveWasteReason = defineConfigUpsert({
+    name: 'SaveWasteReason', opPrefix: 'khowaste', recordType: 'wasteReason',
+    validate: function (input) {
+      if (!input.label) return R.err('VALIDATION', 'SaveWasteReason cần label');
+      return R.ok(true);
+    },
+    pick: function (input) { return { label: input.label }; }
+  });
+
+  var SaveVessel = defineConfigUpsert({
+    name: 'SaveVessel', opPrefix: 'khovessel', recordType: 'vessel',
+    validate: function (input) {
+      if (!input.name) return R.err('VALIDATION', 'SaveVessel cần name');
+      return R.ok(true);
+    },
+    pick: function (input) {
+      return { code: input.code || null, name: input.name, note: input.note || null, variants: input.variants || [] };
+    }
+  });
+
+  var SaveRefillRule = defineConfigUpsert({
+    name: 'SaveRefillRule', opPrefix: 'khorefill', recordType: 'refillRule',
+    validate: function (input) {
+      if (!ids.isId(input.itemId, 'item')) return R.err('VALIDATION', 'SaveRefillRule cần itemId hợp lệ');
+      return R.ok(true);
+    },
+    pick: function (input) {
+      return {
+        itemId: input.itemId, itemName: input.itemName || null,
+        sourceLocationId: input.sourceLocationId || null, destLocationId: input.destLocationId || null,
+        targetBase: input.targetBase || 0, minBase: input.minBase || 0, maxBase: input.maxBase || 0
+      };
+    }
+  });
+
+  var SaveChecklistItem = defineConfigUpsert({
+    name: 'SaveChecklistItem', opPrefix: 'khochecklist', recordType: 'checklistItem',
+    validate: function (input) {
+      if (!input.label) return R.err('VALIDATION', 'SaveChecklistItem cần label');
+      if (input.phase !== 'open' && input.phase !== 'close') {
+        return R.err('VALIDATION', 'SaveChecklistItem cần phase là open hoặc close');
+      }
+      return R.ok(true);
+    },
+    pick: function (input) {
+      return {
+        phase: input.phase, label: input.label, blocking: !!input.blocking,
+        order: typeof input.order === 'number' ? input.order : 0
+      };
+    }
+  });
+
+  var SaveToppingRecipe = defineConfigUpsert({
+    name: 'SaveToppingRecipe', opPrefix: 'khotopping', recordType: 'toppingRecipe',
+    validate: function (input) {
+      if (!input.toppingName) return R.err('VALIDATION', 'SaveToppingRecipe cần toppingName');
+      return R.ok(true);
+    },
+    pick: function (input) {
+      return {
+        toppingName: input.toppingName, batchInputs: input.batchInputs || [],
+        batchYield: input.batchYield || 0, qtyPerServing: input.qtyPerServing || 0,
+        costPerServing: input.costPerServing || null, note: input.note || null
+      };
+    }
+  });
+
+  /**
+   * Đặt hàng (kho:po) — legacy `renderKhoPO`. Chỉ tạo/huỷ; "nhận hàng" (điều
+   * chỉnh giá vốn/kho thật) đã có đường riêng qua commands/receiving.js
+   * (ReceiveGoods), không lặp lại ở đây.
+   */
+  var CreatePurchaseOrder = pipeline.defineCommand({
+    name: 'CreatePurchaseOrder',
+    authority: 'MASTER_CONFIGURE',
+    mutates: true,
+    sources: ['QUANLY'],
+    operationId: function (input) {
+      return ids.deterministicId('operation', ['createpo', input.purchaseOrderId]);
+    },
+    validate: function (input) {
+      if (!input || !ids.isId(input.purchaseOrderId, 'item')) {
+        return R.err('VALIDATION', 'CreatePurchaseOrder cần purchaseOrderId hợp lệ do caller cấp trước');
+      }
+      if (!input.supplier) return R.err('VALIDATION', 'CreatePurchaseOrder cần supplier');
+      return R.ok(true);
+    },
+    execute: function (input, ctx) {
+      var plan = pipeline.emptyPlan();
+      plan.domainRecords.push({
+        type: 'purchaseOrder',
+        record: {
+          purchaseOrderId: input.purchaseOrderId, storeId: ctx.storeId,
+          supplier: input.supplier, note: input.note || null,
+          status: 'pending', lines: input.lines || [],
+          createdAt: ctx.clock.now(), createdBy: ctx.actor.actorId
+        }
+      });
+      return R.ok(plan);
+    }
+  });
+
+  var CancelPurchaseOrder = pipeline.defineCommand({
+    name: 'CancelPurchaseOrder',
+    authority: 'MASTER_CONFIGURE',
+    mutates: true,
+    sources: ['QUANLY'],
+    operationId: function (input) {
+      return ids.deterministicId('operation', ['cancelpo', input.purchaseOrderId]);
+    },
+    validate: function (input) {
+      if (!input || !ids.isId(input.purchaseOrderId, 'item')) {
+        return R.err('VALIDATION', 'CancelPurchaseOrder cần purchaseOrderId hợp lệ');
+      }
+      if (!input.purchaseOrder) return R.err('VALIDATION', 'thiếu input.purchaseOrder (denormalized, không tự tra kho)');
+      return R.ok(true);
+    },
+    execute: function (input) {
+      var plan = pipeline.emptyPlan();
+      plan.domainRecords.push({
+        type: 'purchaseOrder',
+        record: Object.assign({}, input.purchaseOrder, { status: 'cancelled' })
+      });
+      return R.ok(plan);
+    }
+  });
+
+  return {
+    SaveStorageLocation: SaveStorageLocation,
+    SaveWasteReason: SaveWasteReason,
+    SaveVessel: SaveVessel,
+    SaveRefillRule: SaveRefillRule,
+    SaveChecklistItem: SaveChecklistItem,
+    SaveToppingRecipe: SaveToppingRecipe,
+    CreatePurchaseOrder: CreatePurchaseOrder,
+    CancelPurchaseOrder: CancelPurchaseOrder
   };
 });
 
@@ -16465,12 +16865,15 @@ GIEO.define('bootstrap/canonical-data-source', [
 
     /**
      * Đọc canonical TRƯỚC khi rơi xuống legacy (đối xứng với forCommand ở
-     * trên) — hai query hiện tại: GetLedgerEntriesForReference (nguồn
-     * `originalAllocations` cho ReverseTransaction khi xoá bill, §3.8) và
+     * trên). Bốn query: GetLedgerEntriesForReference (nguồn
+     * `originalAllocations` cho ReverseTransaction khi xoá bill, §3.8),
      * GetLoyaltyLedgerForReference (nguồn `eventData.loyaltyEntries` cho
-     * CÙNG lệnh đó, NET-LOYALTY-V1.md #4). Bill sinh SAU cutover có dữ liệu
-     * canonical thật ở đây; bill legacy không có gì (mảng rỗng), nên KHÔNG
-     * set `input.entries` — để nguyên input đi tiếp.
+     * CÙNG lệnh đó, NET-LOYALTY-V1.md #4), và GetKhoConfigList/GetKhoHistory
+     * (danh mục/sổ Kho, commands/kho-config.js, 2026-09-18 — collection MỚI,
+     * không có gì ở legacy để rơi xuống, nên legacy-data-source.js không cần
+     * biết 2 tên này). Bill sinh SAU cutover có dữ liệu canonical thật ở đây;
+     * bill legacy không có gì (mảng rỗng), nên KHÔNG set `input.entries` — để
+     * nguyên input đi tiếp.
      *
      * `bootstrap/legacy-data-source.js` KHÔNG có nhánh dịch riêng cho query
      * này (đã kiểm tra: không nằm trong NOT_WIRED, không có branch riêng —
@@ -16509,6 +16912,23 @@ GIEO.define('bootstrap/canonical-data-source', [
       if (name === 'GetLoyaltyLedgerForReference' && input.billId && !input.entries) {
         var ctx2 = { organizationId: defaults.organizationId, storeId: input.storeId };
         return reader.loadLoyaltyEntriesForReference(ctx2, input.billId).then(function (out) {
+          if (R.isErr(out) || out.value.length === 0) return R.ok(input);
+          return R.ok(Object.assign({}, input, { entries: out.value }));
+        });
+      }
+      /* Kho — danh mục cấu hình đơn giản (commands/kho-config.js, 2026-09-18):
+         liệt kê nguyên collection của input.kind. */
+      if (name === 'GetKhoConfigList' && input.kind && !input.entries) {
+        var ctx3 = { organizationId: defaults.organizationId, storeId: input.storeId };
+        return reader.listKhoConfig(ctx3, input.kind).then(function (out) {
+          if (R.isErr(out) || out.value.length === 0) return R.ok(input);
+          return R.ok(Object.assign({}, input, { entries: out.value }));
+        });
+      }
+      /* Kho — lịch sử kho (kho:history): sổ ledger raw+prep gần đây. */
+      if (name === 'GetKhoHistory' && !input.entries) {
+        var ctx4 = { organizationId: defaults.organizationId, storeId: input.storeId };
+        return reader.loadRecentLedgerEntries(ctx4, input.domain || null).then(function (out) {
           if (R.isErr(out) || out.value.length === 0) return R.ok(input);
           return R.ok(Object.assign({}, input, { entries: out.value }));
         });
@@ -17318,6 +17738,22 @@ GIEO.define('bootstrap/legacy-data-source', [
           });
         });
       }
+      /* Báo cáo — Phân tích bán hàng (mix) / Khách hàng (customer). Cùng
+         nguồn bill khoảng ngày với GetBillsForRange (legacy renderMix/
+         renderCustomer đọc CHUNG `fetchOrdersForDate`) — không có pipeline
+         đọc riêng, nên không có chỗ 2 báo cáo lệch số với LỊCH SỬ BILL. */
+      if ((name === 'GetMix' || name === 'GetCustomerReport') && input.from && input.to && !input.bills) {
+        return reader.loadBillsForRange(input).then(function (out) {
+          if (R.isErr(out)) return out;
+          return R.ok({
+            storeId: input.storeId,
+            from: input.from,
+            to: input.to,
+            bills: out.value.bills,
+            legacyMeta: { ambiguous: out.value.ambiguous, days: out.value.days }
+          });
+        });
+      }
       if (NOT_WIRED[name] && !hasCanonicalInput(name, input)) {
         /* Chưa có nguồn legacy cho query này. Trả LỖI, không trả rỗng.
            Rỗng và "chưa đọc được" trông giống nhau trên màn hình nhưng nghĩa
@@ -17504,13 +17940,14 @@ GIEO.define('bootstrap/runtime', [
   'commands/loyalty',
   'commands/alerts',
   'commands/versioning',
+  'commands/kho-config',
   'read-layer/gateway',
   'read-layer/merge-canonical',
   'reporting/report-queries',
   'bootstrap/domain-events'
 ], function (
   R, pipeline, sales, inventory, receiving, stockCount, catalog, prep, reversal, approval,
-  businessDay, shift, payroll, loyalty, alerts, versioning, reads, merge, reports, domainEvents
+  businessDay, shift, payroll, loyalty, alerts, versioning, khoConfig, reads, merge, reports, domainEvents
 ) {
   'use strict';
 
@@ -17567,7 +18004,16 @@ GIEO.define('bootstrap/runtime', [
     PublishYield: versioning.PublishYield,
     PublishPayTerms: versioning.PublishPayTerms,
     PublishConfig: versioning.PublishConfig,
-    PublishIceCogs: versioning.PublishIceCogs
+    PublishIceCogs: versioning.PublishIceCogs,
+    /* Kho — danh mục cấu hình đơn giản (commands/kho-config.js), 2026-09-18. */
+    SaveStorageLocation: khoConfig.SaveStorageLocation,
+    SaveWasteReason: khoConfig.SaveWasteReason,
+    SaveVessel: khoConfig.SaveVessel,
+    SaveRefillRule: khoConfig.SaveRefillRule,
+    SaveChecklistItem: khoConfig.SaveChecklistItem,
+    SaveToppingRecipe: khoConfig.SaveToppingRecipe,
+    CreatePurchaseOrder: khoConfig.CreatePurchaseOrder,
+    CancelPurchaseOrder: khoConfig.CancelPurchaseOrder
   };
   var QUERIES = {
     GetMenu: reads.getMenu,
@@ -17581,6 +18027,10 @@ GIEO.define('bootstrap/runtime', [
     GetLedgerEntriesForReference: reads.getLedgerEntriesForReference,
     GetLoyaltyLedgerForReference: reads.getLoyaltyLedgerForReference,
     GetPnL: reads.getPnL,
+    GetMix: reads.getMix,
+    GetCustomerReport: reads.getCustomerReport,
+    GetKhoConfigList: reads.getKhoConfigList,
+    GetKhoHistory: reads.getKhoHistory,
     ComparePeriods: reads.comparePeriods,
     GetShiftStatus: reads.getShiftStatus,
     GetAlerts: reads.getAlerts,
