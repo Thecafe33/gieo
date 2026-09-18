@@ -1374,6 +1374,7 @@ html.phone-ui .nav-search .ns-kbd{display:none;}
         <div class="kmini-grid" id="todayMini"></div>
         <div id="todayBills"></div>
         <div id="todayKhoFeed"></div>
+        <div id="todayPrepFeed"></div>
         <div class="sec-title">Doanh thu &amp; giờ công theo khung giờ</div>
         <div id="todayHourly"></div>
         <div id="todayThv"></div>
@@ -4493,7 +4494,37 @@ async function ctnShowDetail(containerId, coll){
     const doc = await fstore.collection(coll).doc(containerId).get();
     if(!doc.exists){ box.innerHTML = '<div class="muted">Không tìm thấy — có thể đã bị xoá.</div>'; return; }
     const c = { id: doc.id, ...doc.data() };
-    if(isBatch){ _batchDetailRender(box, c); return; }
+    if(isBatch){
+      // [MỚI] Hao hụt của lô BTP không nằm trên chính document lô — "Huỷ lô" (cân, có thể gộp
+      // nhiều lô trong 1 lần cân) ghi vào MỘT dòng prep_transactions_gieogieo dùng chung, kèm
+      // mảng `batches` liệt kê từng lô + phần qty của lô đó. Đọc theo prepId (KHÔNG theo
+      // batchId — field đó không tồn tại trên chính dòng WASTE) rồi lọc client-side đúng lô
+      // này trong mảng batches. Firestore không hỗ trợ query "phần tử mảng khớp 1 field" nên
+      // đây là cách duy nhất, chấp nhận đọc hơi rộng (theo prepId) rồi lọc tại chỗ.
+      let wasteInfo = null;
+      try{
+        const wasteSnap = await fstore.collection('prep_transactions_gieogieo')
+          .where('prepId','==', c.prepId).where('type','==','WASTE').get();
+        wasteSnap.forEach(d=>{
+          if(wasteInfo) return; // đã tìm thấy đúng lô này rồi
+          const t = d.data();
+          const line = Array.isArray(t.batches) ? t.batches.find(x=>x.batchId===containerId) : null;
+          if(line){
+            const tongQtyTx = (t.batches||[]).reduce((s,x)=>s+(Number(x.qty)||0),0);
+            wasteInfo = {
+              at: t.createdAt, staff: t.staff, reason: t.reason, note: t.note,
+              qty: Number(line.qty)||0,
+              // Phí hao hụt của ĐÚNG lô này = chia theo tỷ trọng qty trong tổng lần huỷ đó
+              // (1 lần huỷ có thể gộp nhiều lô — totalCost ghi cho cả lần, không tách sẵn).
+              cost: tongQtyTx>0 ? (Number(t.totalCost)||0) * (Number(line.qty)||0)/tongQtyTx : (Number(t.totalCost)||0),
+              gopChung: (t.batches||[]).length > 1
+            };
+          }
+        });
+      }catch(err){ console.warn('[Chi tiết lô] đọc dòng hao hụt lỗi', err); }
+      _batchDetailRender(box, c, wasteInfo);
+      return;
+    }
     let recv = null;
     if(c.receiveRefId){
       try{
@@ -4507,10 +4538,22 @@ async function ctnShowDetail(containerId, coll){
     box.innerHTML = '<div class="muted">Không đọc được: '+(err.code||err.message||err)+'</div>';
   }
 }
-// [MỚI — Tuần 4 truy xuất] Chi tiết một LÔ BÁN THÀNH PHẨM: đọc inputTrace (ghi bởi
-// startPrepBatch() bên posgieo.html ngay lúc tạo lô) — chính là mắt xích "nguyên liệu
-// → lô" mà trước đây phải dò lại qua stock_transactions.referenceId==batchId mới ra.
-function _batchDetailRender(box, b){
+// [MỚI — Tuần 4 truy xuất, mở rộng theo yêu cầu "hồ sơ BTP đầy đủ"] Chi tiết một LÔ BÁN
+// THÀNH PHẨM: thời gian chế biến, tình trạng sử dụng, mã lô, FIFO (bill/mẻ nào đã dùng —
+// từ usageEvents), nguyên liệu đầu vào (từ inputTrace), và nếu có hao hụt/huỷ thì hiện rõ
+// bao nhiêu, lý do, phí, người nấu/người hoàn thành/người huỷ. `wasteInfo` (tuỳ chọn) do
+// ctnShowDetail() tự tra thêm từ prep_transactions_gieogieo (xem chú thích ở đó) vì hao hụt
+// dạng "Huỷ lô" không nằm trên chính document lô.
+const PREP_BATCH_STATUS_LABEL = {
+  cooking: 'Đang chế biến', active: 'Đang dùng', used_up: 'Đã bán hết',
+  expired: 'Hết hạn / bỏ cuối ngày', discarded: 'Đã huỷ', cancelled: 'Đã huỷ mẻ (trước khi hoàn thành)'
+};
+function _fmtDuration(ms){
+  if(!(ms>0)) return '';
+  const h = Math.floor(ms/3600000), m = Math.round((ms%3600000)/60000);
+  return h>0 ? `${h} giờ ${m} phút` : `${m} phút`;
+}
+function _batchDetailRender(box, b, wasteInfo){
   const dt = iso => {
     const d = iso ? new Date(iso) : null;
     return (d && !isNaN(d)) ? `${fmtDateVN(d)} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}` : '';
@@ -4518,11 +4561,31 @@ function _batchDetailRender(box, b){
   const refLabelOf = t => ({ order:'Bill', prep_batch:'Mẻ chế biến', drink_waste:'Đổ ly' }[t] || t || '');
   const events = [];
   if(b.startedAt) events.push({ at: b.startedAt, label: 'Bắt đầu chế biến', detail: b.staff?('bởi '+b.staff):'' });
+  if(b.finishedAt) events.push({ at: b.finishedAt, label: 'Hoàn thành — cân được '+fmtNum(b.qtyInitial,2)+' '+(b.unit||''), detail: b.finishedBy?('bởi '+b.finishedBy):'' });
   (b.usageEvents||[]).forEach(e=>{
     events.push({ at: e.at, label: 'Trừ '+fmtNum(e.qty,2)+' '+(b.unit||''), detail: [refLabelOf(e.refType), e.refId, e.note].filter(Boolean).join(' · ') });
   });
-  if(b.finishedAt) events.push({ at: b.finishedAt, label: 'Hoàn thành mẻ', detail: 'Cân được '+fmtNum(b.qtyInitial,2)+' '+(b.unit||'') });
+  if(b.usedUpAt) events.push({ at: b.usedUpAt, label: 'Bán hết (xác nhận cuối ngày)', detail: '' });
+  if(b.expiredAt) events.push({ at: b.expiredAt, label: 'Hết hạn / bỏ cuối ngày', detail: b.expiredReason||'' });
+  if(b.discardedAt) events.push({ at: b.discardedAt, label: 'Huỷ lô', detail: [b.discardReason, wasteInfo && wasteInfo.staff ? 'bởi '+wasteInfo.staff : ''].filter(Boolean).join(' · ') });
+  if(b.cancelledAt) events.push({ at: b.cancelledAt, label: 'Huỷ mẻ (trước khi hoàn thành)', detail: [b.cancelReason, b.cancelledBy?('bởi '+b.cancelledBy):''].filter(Boolean).join(' · ') });
   events.sort((a,b2)=> String(a.at||'').localeCompare(String(b2.at||'')));
+
+  // Đã hết chưa, và hết lúc nào — 3 nguồn theo đúng đường đã xảy ra, ưu tiên mốc CHẮC CHẮN
+  // nhất trước. used_up/expired/discarded/cancelled đều có timestamp riêng đã ghi sẵn; chỉ
+  // khi bán hết TỰ NHIÊN qua FIFO (không ai bấm gì) mới KHÔNG có mốc nào — Unit Engine chỉ
+  // trừ unitBase/qtyRemaining, không tự đánh dấu "hết" hay ghi giờ. Trường hợp đó ước lượng
+  // bằng thời điểm usageEvent CUỐI CÙNG, ghi RÕ là ước lượng chứ không giả vờ là mốc thật.
+  const daHet = ['used_up','expired','discarded','cancelled'].includes(b.status) || Number(b.qtyRemaining) <= 0;
+  let hetLucNao = null, hetUocLuong = false;
+  if(b.usedUpAt) hetLucNao = b.usedUpAt;
+  else if(b.expiredAt) hetLucNao = b.expiredAt;
+  else if(b.discardedAt) hetLucNao = b.discardedAt;
+  else if(b.cancelledAt) hetLucNao = b.cancelledAt;
+  else if(daHet && (b.usageEvents||[]).length){
+    hetLucNao = b.usageEvents.reduce((m,e)=> String(e.at||'')>String(m||'') ? e.at : m, null);
+    hetUocLuong = true;
+  }
 
   const inputEntries = Object.entries(b.inputTrace||{});
   const inputRows = inputEntries.map(([itemId,d])=>`
@@ -4537,13 +4600,64 @@ function _batchDetailRender(box, b){
         : ((d.allocations||[]).length>1 ? `<span class="muted-sm">${d.allocations.length} tem</span>` : '')}</div>
     </div>`).join('');
 
+  // FIFO — mọi bill/mẻ đã dùng lô này, gộp theo refId (1 bill có thể trừ nhiều lượt nếu sửa đơn).
+  const usageByRef = {};
+  (b.usageEvents||[]).forEach(e=>{
+    const key = (e.refType||'khác') + '|' + (e.refId||'—');
+    const g = usageByRef[key] || (usageByRef[key] = { refType: e.refType, refId: e.refId, qty: 0, at: e.at });
+    g.qty += Number(e.qty)||0;
+    if(String(e.at||'') > String(g.at||'')) g.at = e.at;
+  });
+  const usageRows = Object.values(usageByRef).sort((a,b2)=>String(b2.at||'').localeCompare(String(a.at||'')));
+
+  const trangThai = PREP_BATCH_STATUS_LABEL[b.status] || b.status || '—';
+  const pctConLai = (Number(b.qtyInitial)>0) ? Math.round(Math.max(0,Number(b.qtyRemaining)||0)/Number(b.qtyInitial)*100) : null;
+  const thoiGianCheBien = b.startedAt ? _fmtDuration((b.finishedAt ? new Date(b.finishedAt) : new Date()) - new Date(b.startedAt)) : '';
+
+  // Hao hụt — chỉ 'discarded' (huỷ lô, có wasteInfo tra thêm) có số tiền/lý do đáng tin; các
+  // trạng thái "hết" khác (used_up/expired qua đếm cuối ngày) hao hụt được ghi ở TẦNG NGUYÊN
+  // LIỆU (prepId), không tách được về đúng lô — nói thẳng giới hạn này thay vì bịa số 0đ.
+  let haoHutHtml = '';
+  if(b.status === 'discarded'){
+    haoHutHtml = wasteInfo
+      ? `<div class="sec-title" style="margin-top:14px">Hao hụt</div>
+         <div class="row"><span class="rl">Số lượng huỷ</span><span class="rv">${fmtNum(wasteInfo.qty,2)} ${escapeHtmlAttr(b.unit||'')}</span></div>
+         <div class="row"><span class="rl">Phí hao hụt</span><span class="rv"><b style="color:var(--bad)">${fmt(wasteInfo.cost)}</b></span></div>
+         <div class="row"><span class="rl">Lý do</span><span class="rv">${escapeHtmlAttr(wasteInfo.reason || b.discardReason || wasteInfo.note || '(không ghi)')}</span></div>
+         <div class="row"><span class="rl">Người báo huỷ</span><span class="rv">${escapeHtmlAttr(wasteInfo.staff||'—')}</span></div>
+         ${wasteInfo.gopChung ? '<div class="small-note" style="margin-top:2px">Lần huỷ này gộp chung với (các) lô khác — phí hao hụt trên đã chia theo tỷ trọng số lượng của riêng lô này.</div>' : ''}`
+      : `<div class="sec-title" style="margin-top:14px">Hao hụt</div>
+         <div class="row"><span class="rl">Lý do</span><span class="rv">${escapeHtmlAttr(b.discardReason||'(không ghi)')}</span></div>
+         <div class="small-note" style="margin-top:2px;color:var(--warn)">Không tra được dòng sổ hao hụt gốc (có thể đã bị xoá) — không có số tiền để hiện.</div>`;
+  } else if(b.status === 'expired' || (b.status === 'used_up' && b.usedUpAt)){
+    haoHutHtml = `<div class="sec-title" style="margin-top:14px">Hao hụt</div>
+      <div class="small-note">${b.status==='expired' ? escapeHtmlAttr(b.expiredReason||'Hết hạn/bỏ cuối ngày') : 'Xác nhận bán hết lúc đếm cuối ngày'} — sổ hao hụt của loại này ghi theo NGUYÊN LIỆU (${escapeHtmlAttr(b.prepName||'')}) tổng cả ngày, không tách được số tiền riêng cho đúng lô này. Xem "Hao hụt & huỷ" ở màn Hôm nay để biết tổng.</div>`;
+  } else if(b.status === 'cancelled'){
+    haoHutHtml = `<div class="sec-title" style="margin-top:14px">Huỷ mẻ</div>
+      <div class="small-note">Huỷ TRƯỚC khi hoàn thành chế biến — nguyên liệu đã trừ được hoàn lại kho, không tính là hao hụt.</div>`;
+  }
+
   box.innerHTML = `
-    <div class="row"><span class="rl">Lô</span><span class="rv"><b>${escapeHtmlAttr(b.prepName||b.prepCode||'')}</b></span></div>
-    <div class="row"><span class="rl">Trạng thái</span><span class="rv">${escapeHtmlAttr(b.status||'')}</span></div>
-    <div class="row"><span class="rl">Còn lại</span><span class="rv">${fmtNum(b.qtyRemaining,2)} ${escapeHtmlAttr(b.unit||'')}</span></div>
+    <div class="row"><span class="rl">Mã số lô</span><span class="rv"><b>${escapeHtmlAttr(b.batchCode || '(chưa cấp — chưa hoàn thành cân)')}</b></span></div>
+    <div class="row"><span class="rl">Thành phẩm</span><span class="rv">${escapeHtmlAttr(b.prepName||b.prepCode||'')}</span></div>
+    <div class="row"><span class="rl">Tình trạng sử dụng</span><span class="rv"><b>${escapeHtmlAttr(trangThai)}</b></span></div>
+    <div class="row"><span class="rl">Còn lại</span><span class="rv">${fmtNum(b.qtyRemaining,2)} / ${fmtNum(b.qtyInitial,2)} ${escapeHtmlAttr(b.unit||'')}${pctConLai!=null?` (${pctConLai}%)`:''}</span></div>
+    ${Number(b.unitBase)<0 ? `<div class="row"><span class="rl">Nợ FIFO</span><span class="rv"><b style="color:var(--bad)">${fmtNum(Math.abs(b.unitBase),2)} ${escapeHtmlAttr(b.unit||'')}</b></span></div>` : ''}
+    <div class="row"><span class="rl">Thời gian chế biến</span><span class="rv">${thoiGianCheBien || '—'}${!b.finishedAt && b.startedAt ? ' (đang chạy)' : ''}</span></div>
+    <div class="row"><span class="rl">Người nấu / chế biến</span><span class="rv">${escapeHtmlAttr(b.staff||'—')}</span></div>
+    ${b.finishedBy ? `<div class="row"><span class="rl">Người hoàn thành (cân xong)</span><span class="rv">${escapeHtmlAttr(b.finishedBy)}</span></div>` : ''}
+    ${daHet ? `<div class="row"><span class="rl">Thời gian hết</span><span class="rv">${hetLucNao ? dt(hetLucNao) + (hetUocLuong?' <span class="muted-sm">(ước lượng — lấy mốc trừ hàng cuối cùng, hệ thống không tự ghi giờ hết khi bán hết tự nhiên)</span>':'') : 'Chưa rõ (hết trước khi có dữ liệu, hoặc đứt gãy dữ liệu)'}</span></div>` : ''}
+    ${haoHutHtml}
+    <div class="sec-title" style="margin-top:14px">Đã dùng cho bill / mẻ nào (FIFO)</div>
+    ${usageRows.length ? usageRows.map(u=>`
+      <div class="litem">
+        <div class="li-l"><div>${escapeHtmlAttr(refLabelOf(u.refType))} · ${escapeHtmlAttr(u.refId||'—')}</div>
+          <div class="muted-sm">${dt(u.at)}</div></div>
+        <div class="li-r">${fmtNum(u.qty,2)} ${escapeHtmlAttr(b.unit||'')}</div>
+      </div>`).join('') : '<div class="muted">Chưa dùng cho bill/mẻ nào (hoặc tạo trước khi có tính năng ghi usageEvents).</div>'}
     <div class="sec-title" style="margin-top:14px">Nguyên liệu đầu vào — lấy từ tem nào</div>
     ${inputRows || '<div class="muted">Lô này chưa có dữ liệu nối nguyên liệu → tem (tạo trước khi có tính năng này, hoặc công thức không dùng nguyên liệu có tem).</div>'}
-    <div class="sec-title" style="margin-top:14px">Dòng thời gian</div>
+    <div class="sec-title" style="margin-top:14px">Dòng thời gian đầy đủ</div>
     ${events.length ? events.map(e=>`
       <div class="row" style="align-items:flex-start">
         <span class="rl" style="flex:1;min-width:0"><b>${escapeHtmlAttr(e.label)}</b>${e.detail?`<div class="small-note" style="margin-top:2px">${escapeHtmlAttr(e.detail)}</div>`:''}</span>
@@ -4744,10 +4858,12 @@ function renderEntryKho2(){
     <div class="filter-bar">
       <button class="ftag ${curKho2Sub==='dash'?'active':''}" onclick="goKho2('dash')">Tổng quan FIFO</button>
       <button class="ftag ${curKho2Sub==='search'?'active':''}" onclick="goKho2('search')">Tra cứu tem / bill / lô</button>
+      <button class="ftag ${curKho2Sub==='prep'?'active':''}" onclick="goKho2('prep')">Bán thành phẩm (BTP)</button>
     </div>
     <div id="kho2Body"><div class="muted">Đang tải...</div></div>
   `;
   if(curKho2Sub==='search') renderKho2Search();
+  else if(curKho2Sub==='prep') renderKho2Prep();
   else renderKho2Dashboard();
 }
 
@@ -4861,6 +4977,55 @@ async function kho2SearchGo(){
   }
 }
 
+// [MỚI] Danh sách LÔ BÁN THÀNH PHẨM — trước đây không có màn nào liệt kê lô BTP để
+// truy xuất (chỉ có lịch sử ledger dạng dòng sổ, không phải theo lô). Mặc định hiện lô
+// của HÔM NAY + mọi lô ĐANG DÙNG (cooking/active) dù tạo từ ngày trước, vì đó là 2 nhóm
+// hay cần tra nhất — "hôm nay nấu/bán những lô nào" và "còn lô nào đang mở dở".
+let kho2PrepFilter = 'today'; // today | active | all-recent
+async function renderKho2Prep(){
+  const box = document.getElementById('kho2Body');
+  if(!box) return;
+  showLoading(box);
+  try{
+    await ensureAuth();
+    const today = dkey(new Date());
+    const [todaySnap, activeSnap] = await Promise.all([
+      fstore.collection('prep_batches_gieogieo').where('businessDate','==',today).get(),
+      fstore.collection('prep_batches_gieogieo').where('status','in',['cooking','active']).get()
+    ]);
+    const byId = {};
+    todaySnap.forEach(d=>byId[d.id] = {id:d.id, ...d.data()});
+    activeSnap.forEach(d=>{ if(!byId[d.id]) byId[d.id] = {id:d.id, ...d.data()}; });
+    let list = Object.values(byId);
+    if(kho2PrepFilter === 'active') list = list.filter(b=>['cooking','active'].includes(b.status));
+    list.sort((a,b)=>String(b.startedAt||'').localeCompare(String(a.startedAt||'')));
+
+    const nav = `<div class="filter-bar">
+      <button class="ftag ${kho2PrepFilter==='today'?'active':''}" onclick="kho2PrepFilter='today'; renderKho2Prep();">Hôm nay + đang dùng</button>
+      <button class="ftag ${kho2PrepFilter==='active'?'active':''}" onclick="kho2PrepFilter='active'; renderKho2Prep();">Chỉ đang dùng</button>
+    </div>`;
+
+    if(!list.length){ box.innerHTML = nav + '<div class="empty-hint">Không có lô nào trong nhóm này.</div>'; return; }
+
+    const dt = iso => { const d = iso?new Date(iso):null; return (d && !isNaN(d)) ? `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}` : ''; };
+    box.innerHTML = nav + list.map(b=>{
+      const trangThai = PREP_BATCH_STATUS_LABEL[b.status] || b.status || '—';
+      const mauTier = b.status==='active' ? 'green' : (b.status==='cooking' ? 'blue' : (b.status==='cancelled' ? 'amber' : 'red'));
+      const pct = (Number(b.qtyInitial)>0) ? Math.round(Math.max(0,Number(b.qtyRemaining)||0)/Number(b.qtyInitial)*100) : null;
+      return `<div class="litem" onclick="ctnShowDetail('${b.id}','prep_batches_gieogieo')" style="cursor:pointer">
+        <div class="li-l">
+          <div>${escapeHtmlAttr(b.prepName||b.prepCode||'')} <span class="muted-sm" style="letter-spacing:.4px">${escapeHtmlAttr(b.batchCode||'chưa cấp mã')}</span></div>
+          <div class="muted-sm">Bắt đầu ${dt(b.startedAt)}${b.staff?(' · '+escapeHtmlAttr(b.staff)):''}${pct!=null?(' · còn '+pct+'%'):''}</div>
+        </div>
+        <div class="li-r"><span class="tier tier-${mauTier}">${escapeHtmlAttr(trangThai)}</span></div>
+      </div>`;
+    }).join('');
+  }catch(err){
+    console.error('renderKho2Prep lỗi', err);
+    box.innerHTML = '<div class="muted">Không đọc được danh sách BTP: '+(err.code||err.message||err)+'</div>';
+  }
+}
+
 // ------------------------------------------------------------
 // [MỚI] HOẠT ĐỘNG KHO HÔM NAY — nhân viên vừa MỞ gói nào, vừa BÁO HẾT gói nào.
 //
@@ -4934,6 +5099,75 @@ function khoFeedHTML(list){
       }).join('')}
       ${list.length > hien.length ? `<div class="small-note">…và ${list.length-hien.length} lượt nữa hôm nay.</div>` : ''}
       <button class="btn outline sm" style="width:auto;padding:0 12px;margin-top:8px" onclick="goContainers('open')">Xem hàng đang mở</button>
+    </div>`;
+}
+
+// [MỚI] HOẠT ĐỘNG BTP HÔM NAY — tương đương computeKhoFeedToday()/khoFeedHTML() nhưng cho
+// lô bán thành phẩm (prep_batches_gieogieo): bắt đầu chế biến, hoàn thành, bán hết, huỷ.
+// 4 mốc thời gian khác trường (startedAt/finishedAt/usedUpAt/expiredAt/discardedAt/
+// cancelledAt) nên đọc riêng từng query rồi gộp — Firestore không lọc "field A HOẶC field B
+// >= X" trong 1 query.
+async function computePrepFeedToday(){
+  const dau = new Date(); dau.setHours(0,0,0,0);
+  const moc = dau.toISOString();
+  const c = fstore.collection('prep_batches_gieogieo');
+  const q = (field) => c.where(field,'>=',moc).get().catch(err=>{ console.warn('[BTP] không đọc được mốc '+field+':', err); return null; });
+  const [startSnap, finishSnap, usedSnap, expSnap, discSnap, cancelSnap] = await Promise.all([
+    q('startedAt'), q('finishedAt'), q('usedUpAt'), q('expiredAt'), q('discardedAt'), q('cancelledAt')
+  ]);
+  const ra = [];
+  const push = (snap, loai, atField) => { if(snap) snap.forEach(d=>{ const x = {id:d.id, ...d.data()}; ra.push({ loai, at: x[atField], b: x }); }); };
+  push(startSnap, 'start', 'startedAt');
+  push(finishSnap, 'finish', 'finishedAt');
+  push(usedSnap, 'used', 'usedUpAt');
+  push(expSnap, 'expired', 'expiredAt');
+  push(discSnap, 'discarded', 'discardedAt');
+  push(cancelSnap, 'cancelled', 'cancelledAt');
+  ra.sort((a,b)=> String(b.at||'').localeCompare(String(a.at||'')));
+  return ra;
+}
+
+let _prepFeedMo = false;
+function togglePrepFeed(){ _prepFeedMo = !_prepFeedMo; _prepFeedRedraw(); }
+let _prepFeedCache = null;
+function _prepFeedRedraw(){
+  const el = document.getElementById('todayPrepFeed');
+  if(el) el.innerHTML = prepFeedHTML(_prepFeedCache);
+}
+function prepFeedHTML(list){
+  _prepFeedCache = list;
+  if(!list || !list.length) return '';
+  const gio = iso => { const d = iso?new Date(iso):null; return (d && !isNaN(d)) ? `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}` : ''; };
+  const hien = list.slice(0, 8);
+  const dauMuc = `<button class="sec-fold" aria-expanded="${_prepFeedMo}" onclick="togglePrepFeed()">
+      <span class="sf-t">Hoạt động BTP hôm nay</span>
+      <span class="sf-c">${list.length} lượt</span>
+      <span class="sf-ch">${ic('chevronDown',15)}</span>
+    </button>`;
+  if(!_prepFeedMo) return dauMuc;
+  const NHAN = { start:['Bắt đầu chế biến','var(--bi)'], finish:['Hoàn thành','var(--ok)'], used:['Bán hết','var(--gd)'], expired:['Hết hạn/bỏ','var(--bad)'], discarded:['Huỷ lô','var(--bad)'], cancelled:['Huỷ mẻ','var(--warn)'] };
+  return dauMuc + `
+    <div class="card">
+      ${hien.map(e=>{
+        const [nhan, mau] = NHAN[e.loai] || [e.loai, 'var(--gt)'];
+        const b = e.b;
+        const phu = e.loai==='start' ? (b.staff?('bởi '+escapeHtmlAttr(b.staff)):'')
+          : e.loai==='finish' ? `Cân được ${fmtNum(b.qtyInitial,2)} ${escapeHtmlAttr(b.unit||'')}${b.finishedBy?(' · bởi '+escapeHtmlAttr(b.finishedBy)):''}`
+          : e.loai==='discarded' ? (b.discardReason?escapeHtmlAttr(b.discardReason):'')
+          : e.loai==='cancelled' ? [b.cancelReason, b.cancelledBy?('bởi '+b.cancelledBy):''].filter(Boolean).map(escapeHtmlAttr).join(' · ')
+          : e.loai==='expired' ? (b.expiredReason?escapeHtmlAttr(b.expiredReason):'')
+          : '';
+        return `<div class="row" style="align-items:flex-start;cursor:pointer" onclick="ctnShowDetail('${b.id}','prep_batches_gieogieo')">
+          <span class="rl" style="flex:1;min-width:0">
+            <b style="color:${mau}">${nhan}</b> · ${escapeHtmlAttr(b.prepName||b.prepCode||'')}
+            <span class="muted-sm" style="letter-spacing:.4px">${escapeHtmlAttr(b.batchCode||'')}</span>
+            <div class="small-note" style="margin-top:2px">${phu}</div>
+          </span>
+          <span class="rv">${gio(e.at)}</span>
+        </div>`;
+      }).join('')}
+      ${list.length > hien.length ? `<div class="small-note">…và ${list.length-hien.length} lượt nữa hôm nay.</div>` : ''}
+      <button class="btn outline sm" style="width:auto;padding:0 12px;margin-top:8px" onclick="goKho2('prep')">Xem tất cả BTP</button>
     </div>`;
 }
 
@@ -9071,6 +9305,7 @@ const NAV_SECTIONS = [
   { group:'Kho 2.0 · Truy xuất FIFO', items:[
     {key:'kho2:dash',   ic:'pulse',  label:'Tổng quan FIFO',           go:"goKho2('dash')",   sub:'Chỉ đọc'},
     {key:'kho2:search', ic:'search', label:'Tra cứu tem / bill / lô',  go:"goKho2('search')"},
+    {key:'kho2:prep',   ic:'note',   label:'Bán thành phẩm (BTP)',     go:"goKho2('prep')"},
   ]},
   // [GOM MÀN] Bốn mục này TRƯỚC ĐÂY nằm rải: hai cái trong nhánh Kho (vốn đã 16
   // mục), hai cái trong Cấu hình. Nhưng chúng không phải việc kho hằng ngày cũng
@@ -10452,6 +10687,16 @@ async function renderToday(){
       if(el && curScreen === 'today') el.innerHTML = khoFeedHTML(list);
     })
     .catch(err => console.warn('[Kho] không đọc được hoạt động hôm nay (bỏ qua):', err));
+
+  // HOẠT ĐỘNG BTP HÔM NAY — cùng lý do với feed kho nguyên liệu ở trên, nhưng cho lô bán
+  // thành phẩm: bắt đầu nấu, hoàn thành, bán hết, huỷ — những mốc trước đây không có nơi
+  // nào hiện ngoài phải mở từng lô trong Kho 2.0 ▸ Bán thành phẩm mới thấy.
+  computePrepFeedToday()
+    .then(list => {
+      const el = document.getElementById('todayPrepFeed');
+      if(el && curScreen === 'today') el.innerHTML = prepFeedHTML(list);
+    })
+    .catch(err => console.warn('[BTP] không đọc được hoạt động hôm nay (bỏ qua):', err));
 
   // VỐN TRONG KHO — nạp nền: phải đọc 30 ngày ledger nên chậm hơn phần trên.
   computeInventoryHealth()
