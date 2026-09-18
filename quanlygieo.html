@@ -4399,10 +4399,12 @@ async function renderKhoContainers(){
     ['open',      'Đang mở'],
     ['unlabeled', 'Tem chưa dán'],
     ['legacy',    'Tồn lịch sử'],
-    ['fixreceipt','Sửa phiếu nhận']
+    ['fixreceipt','Sửa phiếu nhận'],
+    ['trace',     'Bill ↔ Tem']
   ];
   if(ctnFilter === 'legacy'){ await renderKhoLegacyStock(box, tabs); return; }
   if(ctnFilter === 'fixreceipt'){ await renderKhoFixReceipt(box, tabs); return; }
+  if(ctnFilter === 'trace'){ await renderKhoBillTrace(box, tabs); return; }
   let list = [];
   try{
     await ensureAuth();
@@ -4462,11 +4464,206 @@ async function renderKhoContainers(){
           <div>${phu}</div>
           ${c.finishScanned===false && ctnFilter==='review' && !necLast ? `<div class="muted-sm">Chọn tay, không quét mã${c.finishReason?' · '+escapeHtmlAttr(ctnReasonLabel(c.finishReason)):''}</div>` : ''}
         </div>
-        <div class="li-r">${nhan}${ctnFilter==='review'
+        <div class="li-r">${nhan}
+          <button class="iconbtn" onclick="ctnShowDetail('${c.id}')" title="Chi tiết — dòng thời gian của tem này">${ic('clock')}</button>
+          ${ctnFilter==='review'
           ? `<button class="btn outline sm" style="width:auto;padding:0 10px;margin-left:8px" onclick="ctnMarkReviewed('${c.id}')">Đã xem</button>`
           : ''}</div>
       </div>`;
     }).join('') + `</div>`;
+}
+
+// ============================================================
+// [MỚI — Tuần 3 truy xuất] "Chi tiết tem" — dòng thời gian của MỘT tem, gộp từ các
+// field đã có sẵn (receivedAt/labelEvents/openedAt/notEmptyChecks/finishedAt) và field
+// MỚI usageEvents (ghi bởi unitEngineAllocateConsumption() bên POS mỗi lần tem này bị
+// trừ — xem posgieo.html). Không tính lại gì cả, chỉ đọc và xếp theo thời gian.
+// ============================================================
+async function ctnShowDetail(containerId){
+  openEditSheet('Chi tiết tem', '<div id="ctnDetailBody"></div>', ()=>{});
+  const box = document.getElementById('ctnDetailBody');
+  showLoading(box);
+  try{
+    await ensureAuth();
+    const doc = await fstore.collection(CTN_COLL).doc(containerId).get();
+    if(!doc.exists){ box.innerHTML = '<div class="muted">Không tìm thấy tem này — có thể đã bị xoá.</div>'; return; }
+    const c = { id: doc.id, ...doc.data() };
+    let recv = null;
+    if(c.receiveRefId){
+      try{
+        const r = await fstore.collection('receiving_records_gieogieo').doc(c.receiveRefId).get();
+        if(r.exists) recv = { id: r.id, ...r.data() };
+      }catch(err){ console.warn('[Chi tiết tem] đọc phiếu nhận gốc lỗi', err); }
+    }
+    _ctnDetailRender(box, c, recv);
+  }catch(err){
+    console.error('ctnShowDetail lỗi', err);
+    box.innerHTML = '<div class="muted">Không đọc được: '+(err.code||err.message||err)+'</div>';
+  }
+}
+function _ctnDetailRender(box, c, recv){
+  const dt = iso => {
+    const d = iso ? new Date(iso) : null;
+    return (d && !isNaN(d)) ? `${fmtDateVN(d)} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}` : '';
+  };
+  const events = [];
+  events.push({ at: c.receivedAt, label: 'Nhận hàng — sinh tem', detail: (c.receivedBy?('bởi '+c.receivedBy):'') });
+  (c.labelEvents||[]).forEach(e=>{
+    if(e.type==='CREATED') return; // trùng ý với dòng "Nhận hàng" ở trên, không lặp lại
+    events.push({ at: e.timestamp, label: e.type==='REPRINT' ? 'Cấp lại tem (báo mất tem cũ)' : ('Sự kiện tem: '+e.type), detail: e.reason||'' });
+  });
+  if(c.openedAt) events.push({ at: c.openedAt, label: 'Mở tem', detail: c.openedBy?('bởi '+c.openedBy):'' });
+  (c.usageEvents||[]).forEach(e=>{
+    const refLabel = { order:'Bill', prep_batch:'Mẻ chế biến', drink_waste:'Đổ ly' }[e.refType] || e.refType || '';
+    events.push({
+      at: e.at, label: 'Trừ '+fmtNum(e.qty,2)+' '+(c.unit||''),
+      detail: [refLabel, e.refId, e.note].filter(Boolean).join(' · ')
+    });
+  });
+  (c.notEmptyChecks||[]).forEach(e=>{
+    events.push({ at: e.at, label: 'Báo "chưa hết" (hệ thống tính nhầm)', detail: 'Cân lại còn '+fmtNum(e.newUnitBase,2)+' '+(c.unit||'')+(e.by?(' · '+e.by):'') });
+  });
+  if(c.finishedAt) events.push({
+    at: c.finishedAt, label: 'Báo hết',
+    detail: (c.finishedBy?('bởi '+c.finishedBy):'') + (Number(c.wasteBase)>0 ? (' · còn thừa '+fmtNum(c.wasteBase,0)+' '+(c.unit||'')) : '')
+  });
+  events.sort((a,b)=> String(a.at||'').localeCompare(String(b.at||'')));
+
+  const noUsageWarning = !(c.usageEvents||[]).length && c.status !== 'sealed'
+    ? `<div class="small-note" style="margin-top:10px;color:var(--warn)">Tem này chưa có nhật ký "trừ" nào dù đã ${c.status==='finished'?'báo hết':'mở'} — hoặc được tạo/tiêu thụ TRƯỚC khi có tính năng ghi nhật ký, hoặc đã bị trừ qua một đường không đi qua Unit Engine (kiểm tra lại đối chiếu bằng kiểm kê).</div>`
+    : '';
+
+  box.innerHTML = `
+    <div class="row"><span class="rl">Mã tem</span><span class="rv"><b>${escapeHtmlAttr(c.code||'')}</b></span></div>
+    <div class="row"><span class="rl">Nguyên liệu</span><span class="rv">${escapeHtmlAttr(c.itemName||'')}</span></div>
+    <div class="row"><span class="rl">Dung tích khai báo</span><span class="rv">${fmtNum(c.baseQty,2)} ${escapeHtmlAttr(c.unit||'')}</span></div>
+    <div class="row"><span class="rl">Còn lại</span><span class="rv"><b style="color:${Number(c.unitBase)<0?'var(--bad)':'var(--td)'}">${fmtNum(c.unitBase,2)} ${escapeHtmlAttr(c.unit||'')}</b></span></div>
+    <div class="row"><span class="rl">Trạng thái</span><span class="rv">${escapeHtmlAttr(c.status||'')}</span></div>
+    ${recv ? `<div class="row"><span class="rl">Phiếu nhận</span><span class="rv">${escapeHtmlAttr(recv.supplier||'(không rõ NCC)')}${recv.poId?' · PO '+escapeHtmlAttr(recv.poId):''}</span></div>`
+      : (c.receiveRefId ? `<div class="small-note" style="margin-top:6px">Không đọc được phiếu nhận gốc (id: ${escapeHtmlAttr(c.receiveRefId)}) — có thể phiếu đã bị xoá.</div>` : '<div class="small-note" style="margin-top:6px">Tem không có phiếu nhận gốc — nhập trước khi bật liên kết này.</div>')}
+    <div class="sec-title" style="margin-top:14px">Dòng thời gian</div>
+    ${events.length ? events.map(e=>`
+      <div class="row" style="align-items:flex-start">
+        <span class="rl" style="flex:1;min-width:0"><b>${escapeHtmlAttr(e.label)}</b>${e.detail?`<div class="small-note" style="margin-top:2px">${escapeHtmlAttr(e.detail)}</div>`:''}</span>
+        <span class="rv" style="white-space:nowrap;font-weight:400">${dt(e.at)}</span>
+      </div>`).join('') : '<div class="muted">Chưa có sự kiện nào.</div>'}
+    ${noUsageWarning}
+  `;
+}
+
+// ============================================================
+// [MỚI — Tuần 3 truy xuất] "Bill ↔ Tem" — tra order_stock_traces_gieogieo (ghi bởi
+// applySalesConsumptionPOS() ngay lúc bán, xem posgieo.html) theo mã bill, không tính
+// lại/dò ngược qua nhiều dòng ledger.
+// ============================================================
+let _billTraceCode = '';
+let _billTraceResult = null;
+async function renderKhoBillTrace(box, tabs){
+  const nav = `<div class="filter-bar">${tabs.map(([k,l])=>
+      `<button class="ftag ${ctnFilter===k?'active':''}" onclick="ctnFilter='${k}'; renderKhoContainers();">${l}</button>`).join('')}</div>`;
+  box.innerHTML = nav + `
+    <div class="card" id="fifoCoverageCard" style="margin-bottom:14px"><div class="small-note">Đang tính độ phủ FIFO hôm nay…</div></div>
+    <div class="small-note" style="margin-bottom:12px">Tra "bill này đã trừ từ tem/lô nào" — đọc thẳng dữ liệu ghi ngay lúc bán, không phải suy luận lại từ tồn kho hiện tại.</div>
+    <div class="field" style="display:flex;gap:8px;align-items:flex-end;margin-bottom:14px">
+      <div style="flex:1"><label>Mã bill</label>
+        <input type="text" id="billTraceInput" value="${escapeHtmlAttr(_billTraceCode)}" placeholder="VD: B000123"
+          oninput="_billTraceCode=this.value" onkeydown="if(event.key==='Enter') billTraceSearch()"></div>
+      <button class="btn" style="width:auto;padding:0 16px" onclick="billTraceSearch()">Tìm</button>
+    </div>
+    <div id="billTraceBody">${_billTraceResult ? '' : '<div class="empty-hint">Nhập mã bill để tra.</div>'}</div>
+  `;
+  if(_billTraceResult) _billTraceRenderResult();
+  renderFifoCoverageCard();
+}
+
+// [MỚI] "Độ phủ FIFO hôm nay" — % sản lượng CONSUMPTION/WASTE của nguyên liệu ĐÃ bật tem
+// (unit/batch) mà thật sự phân bổ được vào tem đang mở (fifoAllocations không rỗng), so với
+// phần "bán ra nhưng không tem nào đang mở" (untracked — xem _ueMaybeWarnUntrackedConsumption
+// bên POS). Nguyên liệu trackingMode 'none' cố ý không dán tem nên không tính vào mẫu số — đó
+// không phải một khoảng hở, là lựa chọn. Chỉ để LỘ RA quy mô vùng "mất dấu tem" mỗi ngày, không
+// phải một cảnh báo chặn thao tác nào.
+async function computeFifoCoverageToday(){
+  const day = dkey(new Date());
+  const snap = await fstore.collection('stock_transactions_gieogieo').where('businessDate','==',day).get();
+  const itemsById = {}; INVENTORY_ITEMS.forEach(it=>itemsById[it.id]=it);
+  let trackedQty = 0, trackedCovered = 0;
+  snap.forEach(d=>{
+    const t = d.data();
+    const ty = String(t.type||'').toUpperCase();
+    if(ty!=='CONSUMPTION' && ty!=='WASTE') return;
+    const it = itemsById[t.itemId];
+    if(!it || itemTrackingMode(it)==='none') return; // cố ý không dán tem — không tính
+    const qty = Math.abs(Number(t.qty)||0);
+    trackedQty += qty;
+    if((t.fifoAllocations||[]).length) trackedCovered += qty;
+  });
+  return { trackedQty, trackedCovered, pct: trackedQty>0 ? trackedCovered/trackedQty : null };
+}
+async function renderFifoCoverageCard(){
+  const el = document.getElementById('fifoCoverageCard');
+  if(!el) return;
+  try{
+    if(!INVENTORY_ITEMS.length) INVENTORY_ITEMS = await loadInventoryItems();
+    const { trackedQty, trackedCovered, pct } = await computeFifoCoverageToday();
+    const el2 = document.getElementById('fifoCoverageCard'); // màn có thể đã chuyển tab lúc đang đọc
+    if(!el2) return;
+    if(trackedQty <= 0){
+      el2.innerHTML = `<div class="small-note">Hôm nay chưa có giao dịch nào trên nguyên liệu có dán tem để tính độ phủ.</div>`;
+      return;
+    }
+    const percent = Math.round(pct*100);
+    el2.innerHTML = `
+      <div class="row"><span class="rl">Độ phủ FIFO hôm nay (nguyên liệu có tem)</span>
+        <span class="rv"><b style="color:${percent>=90?'var(--ok)':(percent>=70?'var(--warn)':'var(--bad)')}">${percent}%</b></span></div>
+      <div class="small-note" style="margin-top:4px">${fmtNum(trackedCovered,0)} / ${fmtNum(trackedQty,0)} phân bổ được vào đúng tem đang mở · phần còn lại rơi vào "bán ra nhưng không tem nào đang mở" (xem cảnh báo untracked_unit_consumption ở Hộp thư).</div>
+    `;
+  }catch(err){
+    console.warn('renderFifoCoverageCard lỗi', err);
+    if(el) el.innerHTML = `<div class="small-note">Không tính được độ phủ FIFO: ${escapeHtmlAttr(String(err.code||err.message||err))}</div>`;
+  }
+}
+async function billTraceSearch(){
+  const code = (_billTraceCode||'').trim();
+  if(!code){ toast('⚠️ Nhập mã bill'); return; }
+  const body = document.getElementById('billTraceBody');
+  if(body) showLoading(body);
+  try{
+    await ensureAuth();
+    const snap = await fstore.collection('order_stock_traces_gieogieo').where('billCode','==',code).limit(1).get();
+    if(snap.empty){
+      _billTraceResult = null;
+      if(body) body.innerHTML = '<div class="muted">Không tìm thấy — bill có thể đã bán TRƯỚC khi có tính năng này, hoặc chưa trừ được nguyên liệu/BTP nào (món chưa khai định mức, xem cảnh báo "missing_recipe" ở Hộp thư).</div>';
+      return;
+    }
+    _billTraceResult = snap.docs[0].data();
+    _billTraceRenderResult();
+  }catch(err){
+    console.error('billTraceSearch lỗi', err);
+    if(body) body.innerHTML = '<div class="muted">Lỗi tra cứu: '+(err.code||err.message||err)+'</div>';
+  }
+}
+function _billTraceRenderResult(){
+  const body = document.getElementById('billTraceBody');
+  if(!body || !_billTraceResult) return;
+  const r = _billTraceResult;
+  const line = (id, d, kind) => `
+    <div class="litem">
+      <div class="li-l">
+        <div>${escapeHtmlAttr(kind)} · ${escapeHtmlAttr(id)}</div>
+        <div>${fmtNum(d.qty,2)} ${d.untracked ? '<span class="tier tier-amber" style="margin-left:4px">Không gắn tem/lô</span>' : ''}</div>
+        ${(d.allocations||[]).length ? `<div class="small-note" style="margin-top:4px">${d.allocations.map(a=>escapeHtmlAttr(a.code||a.containerId)+' ('+fmtNum(a.qty,2)+')').join(', ')}</div>` : ''}
+      </div>
+      <div class="li-r">${(d.allocations||[]).length===1
+        ? `<button class="btn outline sm" style="width:auto;padding:0 10px" onclick="ctnShowDetail('${d.allocations[0].containerId}')">Xem tem</button>`
+        : ((d.allocations||[]).length>1 ? `<span class="muted-sm">${d.allocations.length} tem</span>` : '')}</div>
+    </div>`;
+  const ingRows = Object.entries(r.ingredients||{}).map(([id,d])=>line(id,d,'Nguyên liệu')).join('');
+  const prepRows = Object.entries(r.preps||{}).map(([id,d])=>line(id,d,'BTP')).join('');
+  body.innerHTML = `
+    <div class="row"><span class="rl">Bill</span><span class="rv"><b>${escapeHtmlAttr(r.billCode||r.orderId||'')}</b></span></div>
+    <div class="row"><span class="rl">Ngày</span><span class="rv">${escapeHtmlAttr(r.businessDate||'')}</span></div>
+    ${ingRows || prepRows ? (ingRows+prepRows) : '<div class="muted">Bill này không trừ nguyên liệu/BTP nào (có thể món chưa khai định mức).</div>'}
+  `;
 }
 
 // ------------------------------------------------------------
