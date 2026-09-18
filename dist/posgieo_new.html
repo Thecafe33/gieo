@@ -3338,7 +3338,7 @@ GIEO.define('recipe-cost-btp/btp', [
 ], function (ids, R, VI) {
   'use strict';
 
-  var BATCH_STATUS = { PLANNED: 'PLANNED', PRODUCED: 'PRODUCED', CANCELLED: 'CANCELLED' };
+  var BATCH_STATUS = { PLANNED: 'PLANNED', STARTED: 'STARTED', PRODUCED: 'PRODUCED', CANCELLED: 'CANCELLED' };
 
   /**
    * Công bố yield của một loại BTP.
@@ -3416,6 +3416,127 @@ GIEO.define('recipe-cost-btp/btp', [
       operationId: spec.operationId,
       yieldEdits: []
     });
+  }
+
+  /**
+   * StartPrepBatch — nguyên liệu đã bị trừ, mẻ đang nấu, CHƯA có sản phẩm.
+   *
+   * Đóng gap `commands/prep` §15.7/15.3: `RecordPrepProduction` một bước trừ
+   * nguyên liệu VÀ tạo Unit BTP trong cùng lệnh, nên không biểu diễn được "đang
+   * nấu" hay "huỷ mẻ" — muốn huỷ phải bịa một giao dịch ngược tự chế. Ở đây
+   * `allocationSnapshot` được lưu NGUYÊN VẸN trên chính bản ghi mẻ, để
+   * `cancelBatch` hoàn tác đúng lô đã trừ (không chạy lại FIFO đoán lại — cùng
+   * nguyên tắc với `fifo-core/reconciliation.reverseAllocations`).
+   */
+  function startBatch(spec) {
+    if (!ids.isId(spec.prepItemId, 'prepItem')) return R.err('VALIDATION', 'cần prepItemId hợp lệ');
+    if (!ids.isId(spec.storeId, 'store')) return R.err('VALIDATION', 'cần storeId hợp lệ');
+    if (typeof spec.batchRatio !== 'number' || !(spec.batchRatio > 0)) {
+      return R.err('VALIDATION', 'batchRatio phải dương');
+    }
+    if (typeof spec.rawCost !== 'number' || spec.rawCost < 0) {
+      return R.err('VALIDATION', 'rawCost phải là số không âm — mẻ không có giá vốn thì BTP không có cost basis');
+    }
+    if (!Array.isArray(spec.allocationSnapshot) || spec.allocationSnapshot.length === 0) {
+      return R.err('VALIDATION',
+        'startBatch cần allocationSnapshot — không có nó thì cancelBatch không hoàn tác được đúng lô đã trừ');
+    }
+    if (!spec.operationId) return R.err('VALIDATION', 'mẻ cần operationId');
+    if (!ids.isId(spec.actorId, 'actor')) return R.err('VALIDATION', 'mẻ cần actorId');
+
+    return R.ok({
+      prepBatchId: spec.prepBatchId || ids.newId('prepBatch'),
+      prepItemId: spec.prepItemId,
+      storeId: spec.storeId,
+      status: BATCH_STATUS.STARTED,
+      batchRatio: spec.batchRatio,
+      quoteId: spec.quoteId || null,
+      recipeVersionId: spec.recipeVersionId || null,
+      /* Giá vốn nguyên liệu đã bị trừ THẬT, chốt tại lúc bắt đầu nấu — không
+         đổi khi hoàn thành, vì hoàn thành không đụng lại vào allocation. */
+      rawCost: spec.rawCost,
+      costComplete: !!spec.costComplete,
+      allocationSnapshot: spec.allocationSnapshot,
+      /* Evidence quét mã nguyên liệu — chỉ lưu lại, KHÔNG phải căn cứ trừ kho;
+         căn cứ trừ kho luôn là allocationSnapshot ở trên (§15.3 mục 4). */
+      scanEvidence: spec.scanEvidence || [],
+      initialYield: null,
+      actualYield: null,
+      expectedYield: typeof spec.expectedYield === 'number' ? spec.expectedYield : null,
+      yieldVariancePct: null,
+      yieldVersionId: spec.yieldVersionId || null,
+      costPerUnit: null,
+      recipeId: spec.recipeId || null,
+      startedAt: spec.at,
+      startedBy: spec.actorId,
+      producedAt: null,
+      producedBy: null,
+      cancelledAt: null,
+      cancelledBy: null,
+      cancelReason: null,
+      businessDate: spec.businessDate,
+      expiresAt: spec.expiresAt || null,
+      operationId: spec.operationId,
+      yieldEdits: []
+    });
+  }
+
+  /**
+   * CompletePrepBatch — mẻ đã nấu xong, chốt yield thật.
+   *
+   * KHÔNG đụng lại nguyên liệu: `rawCost` đã chốt từ lúc `startBatch`. Đây
+   * chính là điểm khác biệt với `RecordPrepProduction` một bước — completion
+   * chỉ ghi nhận SẢN PHẨM, không phải một lần trừ kho thứ hai.
+   */
+  function completeBatch(batch, spec) {
+    if (!batch || batch.status !== BATCH_STATUS.STARTED) {
+      return R.err('PRECONDITION',
+        'chỉ hoàn thành được mẻ đang ở trạng thái STARTED, hiện: ' + (batch ? batch.status : 'không có mẻ'));
+    }
+    if (typeof spec.actualYield !== 'number' || !(spec.actualYield > 0)) {
+      return R.err('VALIDATION', 'actualYield phải dương');
+    }
+    if (!ids.isId(spec.actorId, 'actor')) return R.err('VALIDATION', 'hoàn thành mẻ cần actorId');
+    if (!spec.operationId) return R.err('VALIDATION', 'hoàn thành mẻ cần operationId');
+
+    var expected = batch.expectedYield;
+    return R.ok(Object.assign({}, batch, {
+      status: BATCH_STATUS.PRODUCED,
+      initialYield: spec.actualYield,
+      actualYield: spec.actualYield,
+      yieldVariancePct: (expected && expected > 0)
+        ? ((spec.actualYield - expected) / expected) * 100
+        : null,
+      costPerUnit: batch.rawCost / spec.actualYield,
+      producedAt: spec.at,
+      producedBy: spec.actorId,
+      operationId: spec.operationId
+    }));
+  }
+
+  /**
+   * CancelPrepBatch — huỷ mẻ đang nấu, hoàn nguyên liệu về đúng lô đã trừ.
+   *
+   * Chỉ đổi TRẠNG THÁI của bản ghi mẻ; việc hoàn tác Unit/ledger là việc của
+   * `fifo-core/reconciliation.reverseAllocations` ở tầng command (đúng
+   * `allocationSnapshot` đã lưu từ `startBatch`, không chạy lại FIFO).
+   */
+  function cancelBatch(batch, spec) {
+    if (!batch || batch.status !== BATCH_STATUS.STARTED) {
+      return R.err('PRECONDITION',
+        'chỉ huỷ được mẻ đang ở trạng thái STARTED, hiện: ' + (batch ? batch.status : 'không có mẻ'));
+    }
+    if (!spec.reason) return R.err('VALIDATION', 'huỷ mẻ phải có lý do');
+    if (!ids.isId(spec.actorId, 'actor')) return R.err('VALIDATION', 'huỷ mẻ cần actorId');
+    if (!spec.operationId) return R.err('VALIDATION', 'huỷ mẻ cần operationId');
+
+    return R.ok(Object.assign({}, batch, {
+      status: BATCH_STATUS.CANCELLED,
+      cancelledAt: spec.at,
+      cancelledBy: spec.actorId,
+      cancelReason: String(spec.reason),
+      operationId: spec.operationId
+    }));
   }
 
   /**
@@ -3552,6 +3673,9 @@ GIEO.define('recipe-cost-btp/btp', [
     publishYield: publishYield,
     resolveYieldAt: resolveYieldAt,
     createBatch: createBatch,
+    startBatch: startBatch,
+    completeBatch: completeBatch,
+    cancelBatch: cancelBatch,
     editYield: editYield,
     computeTheoretical: computeTheoretical,
     computeVariance: computeVariance,
@@ -9442,8 +9566,10 @@ GIEO.define('read-layer/gateway', [
   'fifo-core/projection',
   'traceability/trace',
   'catalog/menu',
-  'alerts/alert'
-], function (ids, R, access, merge, projection, traceLib, menuLib, alertLib) {
+  'alerts/alert',
+  'recipe-cost-btp/recipe',
+  'recipe-cost-btp/btp'
+], function (ids, R, access, merge, projection, traceLib, menuLib, alertLib, recipeLib, btpLib) {
   'use strict';
 
   /**
@@ -9483,7 +9609,12 @@ GIEO.define('read-layer/gateway', [
     GetAlerts: registerQuery('GetAlerts', {
       authority: ['EXECUTE', 'REVIEW_APPROVE_CORRECT']
     }),
-    GetPendingApprovals: registerQuery('GetPendingApprovals', { authority: 'REVIEW_APPROVE_CORRECT' })
+    GetPendingApprovals: registerQuery('GetPendingApprovals', { authority: 'REVIEW_APPROVE_CORRECT' }),
+    /* Đóng gap POS_GieoGieo_Moi_THEO_DOI.md §15.7: tab Kho POS chờ 2 cổng đọc
+       này từ lúc khởi tạo. Cả hai EXECUTE — nhân viên bán cần chúng để làm
+       việc, không phải quyền quản trị. */
+    GetPOSInventoryWorkspace: registerQuery('GetPOSInventoryWorkspace', { authority: 'EXECUTE' }),
+    GetPrepBatchQuote: registerQuery('GetPrepBatchQuote', { authority: 'EXECUTE' })
   };
 
   /**
@@ -9844,6 +9975,125 @@ GIEO.define('read-layer/gateway', [
     });
   }
 
+  var WORKSPACE_LIST_FIELDS = [
+    'catalog', 'purchaseOrders', 'stockCountTasks', 'refillTasks', 'prepItems',
+    'prepBatches', 'openUnits', 'pendingLabels', 'labelLossCandidates',
+    'wasteReasons', 'vessels', 'prepQuotes'
+  ];
+
+  /**
+   * GetPOSInventoryWorkspace — MỘT snapshot cho toàn bộ 8 màn Kho POS.
+   *
+   * Đóng gap `POS_GieoGieo_Moi_THEO_DOI.md` §15.2/§15.7: HTML gọi
+   * `watch('GetPOSInventoryWorkspace', { audience: 'POS' })` ngay lúc khởi
+   * động nhưng runtime chưa từng đăng ký query này, nên tab Kho không có
+   * đường nào để nhận dữ liệu ngoài đọc thẳng collection cũ (đúng thứ R1 cấm).
+   *
+   * Nguồn dữ liệu thật (catalog/task/vessel...) do QUANLY cấu hình rồi tầng
+   * data-source lắp vào `spec`; gateway chỉ khoá contract: `source` PHẢI là
+   * `QUANLY_CANONICAL` — snapshot khai nguồn khác bị từ chối thẳng, không
+   * lặng lẽ hiển thị dữ liệu không rõ gốc.
+   */
+  function getPOSInventoryWorkspace(ctx, spec) {
+    var g = guard(Q.GetPOSInventoryWorkspace, ctx, spec);
+    if (R.isErr(g)) return g;
+    if (spec.source !== 'QUANLY_CANONICAL') {
+      return R.err('VALIDATION',
+        "GetPOSInventoryWorkspace chỉ chấp nhận snapshot source='QUANLY_CANONICAL', nhận: " + spec.source);
+    }
+
+    return merge.resolve({
+      computeLive: function () {
+        var out = {
+          revision: spec.revision || null,
+          observedAt: spec.observedAt || ctx.clock.now(),
+          source: spec.source
+        };
+        WORKSPACE_LIST_FIELDS.forEach(function (field) {
+          out[field] = Array.isArray(spec[field]) ? spec[field] : [];
+        });
+        return R.ok(out);
+      },
+      computedAt: ctx.clock.now()
+    });
+  }
+
+  /**
+   * GetPrepBatchQuote — định mức mẻ resolve theo version, KHÔNG cho POS tự nhân.
+   *
+   * Đóng gap §15.3: `StartPrepBatch` từ chối nấu khi chưa có `quoteId` hiệu lực
+   * — cổng này là nơi DUY NHẤT tính ra định mức đó. `quoteId` xác định theo
+   * đúng bộ (recipeVersionId, yieldVersionId, batchRatio) nên POS gửi lại đúng
+   * quote đã thấy thì `StartPrepBatch` xác nhận được nó chưa bị đổi.
+   *
+   * `scanRequirements`/`eligibleUnitCodes` đến từ cấu hình bên ngoài
+   * (`spec.unitTrackedItemIds`, `spec.eligibleUnitCodes` — QUANLY khai nguyên
+   * liệu nào đếm theo "cái"), vì đây là dữ liệu catalog/vận hành, không phải
+   * điều fifo-core tự suy ra từ recipe.
+   */
+  function getPrepBatchQuote(ctx, spec) {
+    var g = guard(Q.GetPrepBatchQuote, ctx, spec);
+    if (R.isErr(g)) return g;
+    if (!ids.isId(spec.prepItemId, 'prepItem')) return R.err('VALIDATION', 'cần prepItemId hợp lệ');
+    if (!ids.isId(spec.recipeId, 'recipe')) return R.err('VALIDATION', 'cần recipeId hợp lệ');
+    if (typeof spec.batchRatio !== 'number' || !(spec.batchRatio > 0)) {
+      return R.err('VALIDATION', 'batchRatio phải dương');
+    }
+    if (!spec.registry) return R.err('VALIDATION', 'GetPrepBatchQuote cần versionRegistry');
+
+    return merge.resolve({
+      computeLive: function () {
+        var at = spec.at || ctx.clock.now();
+
+        var rv = recipeLib.resolveRecipeAt(spec.registry, {
+          recipeId: spec.recipeId, storeId: ctx.storeId, at: at
+        });
+        if (R.isErr(rv)) return rv;
+        var rr = recipeLib.toRequirements(rv.value, { size: 'BATCH', qty: spec.batchRatio });
+        if (R.isErr(rr)) return rr;
+
+        var expectedYield = null;
+        var yieldVersionId = null;
+        var yv = btpLib.resolveYieldAt(spec.registry, {
+          prepItemId: spec.prepItemId, storeId: ctx.storeId, at: at
+        });
+        if (R.isOk(yv)) {
+          expectedYield = yv.value.payload.yieldPerBatch * spec.batchRatio;
+          yieldVersionId = yv.value.versionId;
+        }
+
+        var unitTracked = spec.unitTrackedItemIds || [];
+        var eligible = spec.eligibleUnitCodes || {};
+        var scanRequirements = rr.value.requirements
+          .filter(function (r) { return unitTracked.indexOf(r.itemId) !== -1; })
+          .map(function (r) {
+            return {
+              itemId: r.itemId,
+              qty: r.qty,
+              eligibleUnitCodes: Object.prototype.hasOwnProperty.call(eligible, r.itemId)
+                ? eligible[r.itemId] : null
+            };
+          });
+
+        return R.ok({
+          quoteId: ids.deterministicId('version', [
+            'prepquote', spec.prepItemId, rr.value.recipeVersionId,
+            yieldVersionId || 'no-yield', String(spec.batchRatio)
+          ]),
+          prepItemId: spec.prepItemId,
+          recipeId: spec.recipeId,
+          recipeVersionId: rr.value.recipeVersionId,
+          yieldVersionId: yieldVersionId,
+          batchRatio: spec.batchRatio,
+          requirements: rr.value.requirements,
+          expectedYield: expectedYield,
+          scanRequirements: scanRequirements
+        });
+      },
+      computedAt: ctx.clock.now()
+    });
+  }
+
   return {
     QUERIES: Q,
     registerQuery: registerQuery,
@@ -9857,7 +10107,9 @@ GIEO.define('read-layer/gateway', [
     comparePeriods: comparePeriods,
     getShiftStatus: getShiftStatus,
     getAlerts: getAlerts,
-    getPendingApprovals: getPendingApprovals
+    getPendingApprovals: getPendingApprovals,
+    getPOSInventoryWorkspace: getPOSInventoryWorkspace,
+    getPrepBatchQuote: getPrepBatchQuote
   };
 });
 
@@ -11038,9 +11290,10 @@ GIEO.define('commands/prep', [
   'commands/pipeline',
   'fifo-core/unit',
   'fifo-core/allocation',
+  'fifo-core/reconciliation',
   'recipe-cost-btp/btp',
   'recipe-cost-btp/recipe'
-], function (ids, R, pipeline, unitLib, allocation, btpLib, recipeLib) {
+], function (ids, R, pipeline, unitLib, allocation, reconciliation, btpLib, recipeLib) {
   'use strict';
 
   /**
@@ -11199,6 +11452,288 @@ GIEO.define('commands/prep', [
   });
 
   /**
+   * StartPrepBatch — nấu mẻ HAI GIAI ĐOẠN, bước 1: khoá nguyên liệu.
+   *
+   * Đóng gap §15.7/15.3 của `POS_GieoGieo_Moi_THEO_DOI.md`: `RecordPrepProduction`
+   * là một bước, nên không có cách biểu diễn an toàn "mẻ đang nấu" hay "huỷ mẻ
+   * trước khi ra thành phẩm" — muốn giả lập phải tự chế giao dịch ngược, sai
+   * đúng thời điểm trừ nguyên liệu. Ở đây trừ nguyên liệu và tạo Unit BTP là
+   * HAI operationId khác nhau, mỗi cái idempotent riêng.
+   *
+   * `quoteId` bắt buộc: không nấu khi chưa có `GetPrepBatchQuote` hiệu lực —
+   * POS không được tự nhân recipe (§15.3).
+   */
+  var StartPrepBatch = pipeline.defineCommand({
+    name: 'StartPrepBatch',
+    authority: ['EXECUTE', 'REVIEW_APPROVE_CORRECT'],
+    mutates: true,
+    sources: ['POS', 'QUANLY'],
+
+    operationId: function (input) {
+      return ids.deterministicId('operation', ['prepstart', input.batchRef]);
+    },
+
+    validate: function (input) {
+      if (!input || !input.batchRef) {
+        return R.err('VALIDATION', 'StartPrepBatch cần batchRef để id xác định (bug #22)');
+      }
+      if (!ids.isId(input.prepItemId, 'prepItem')) return R.err('VALIDATION', 'cần prepItemId hợp lệ');
+      if (typeof input.batchRatio !== 'number' || !(input.batchRatio > 0)) {
+        return R.err('VALIDATION', 'batchRatio phải dương');
+      }
+      if (!input.quoteId) {
+        return R.err('VALIDATION', 'StartPrepBatch cần quoteId — không nấu khi chưa có GetPrepBatchQuote hiệu lực');
+      }
+      if (!input.deps || !input.deps.versionRegistry) {
+        return R.err('VALIDATION', 'StartPrepBatch cần versionRegistry');
+      }
+      return R.ok(true);
+    },
+
+    execute: function (input, ctx) {
+      var plan = pipeline.emptyPlan();
+      var opId = ids.deterministicId('operation', ['prepstart', input.batchRef]);
+      var reg = input.deps.versionRegistry;
+      var at = input.at || ctx.clock.now();
+
+      var rv = recipeLib.resolveRecipeAt(reg, { recipeId: input.recipeId, storeId: ctx.storeId, at: at });
+      if (R.isErr(rv)) return rv;
+      var rr = recipeLib.toRequirements(rv.value, { size: 'BATCH', qty: input.batchRatio });
+      if (R.isErr(rr)) return rr;
+
+      /* Trừ nguyên liệu thô qua CÙNG engine với bán hàng và RecordPrepProduction. */
+      var ws = allocation.createWorkingSet(input.deps.units || []);
+      var allocR = allocation.allocateMany(ws, rr.value.requirements, { operationId: opId });
+      if (R.isErr(allocR)) return allocR;
+      var alloc = allocR.value;
+
+      if (alloc.shortfalls.length) {
+        return R.err('PRECONDITION',
+          'không đủ nguyên liệu để bắt đầu mẻ này', { shortfalls: alloc.shortfalls });
+      }
+
+      var expected = null;
+      var yieldVersionId = null;
+      var yv = btpLib.resolveYieldAt(reg, { prepItemId: input.prepItemId, storeId: ctx.storeId, at: at });
+      if (R.isOk(yv)) {
+        expected = yv.value.payload.yieldPerBatch * input.batchRatio;
+        yieldVersionId = yv.value.versionId;
+      }
+
+      /* Snapshot NGUYÊN VẸN của phân bổ — CancelPrepBatch hoàn tác đúng theo
+         đây, không chạy lại FIFO để đoán hồi đó đã trừ ở đâu. */
+      var allocationSnapshot = [];
+      alloc.plans.forEach(function (p) {
+        p.allocations.forEach(function (a) { allocationSnapshot.push(a); });
+      });
+
+      var batchR = btpLib.startBatch({
+        prepBatchId: ids.deterministicId('prepBatch', [input.batchRef]),
+        prepItemId: input.prepItemId,
+        storeId: ctx.storeId,
+        batchRatio: input.batchRatio,
+        quoteId: input.quoteId,
+        recipeId: input.recipeId,
+        recipeVersionId: rr.value.recipeVersionId,
+        rawCost: alloc.totalCost,
+        costComplete: alloc.costComplete,
+        allocationSnapshot: allocationSnapshot,
+        scanEvidence: input.scanEvidence || [],
+        expectedYield: expected,
+        yieldVersionId: yieldVersionId,
+        at: at,
+        actorId: ctx.actor.actorId,
+        businessDate: ctx.businessDate,
+        expiresAt: input.expiresAt,
+        operationId: opId
+      });
+      if (R.isErr(batchR)) return batchR;
+      var batch = batchR.value;
+
+      plan.unitChanges = alloc.plans.reduce(function (acc, p) {
+        return acc.concat(p.touchedUnits);
+      }, []);
+
+      alloc.plans.forEach(function (p) {
+        p.allocations.forEach(function (a) {
+          plan.ledgerEntries.push({
+            domain: 'raw', type: 'CONSUMPTION', itemId: a.itemId, storeId: ctx.storeId,
+            unitId: a.unitId, qtyDelta: -a.qty, unitCost: a.unitCost,
+            costBasisVersionId: a.costBasisVersionId,
+            businessDate: ctx.businessDate, actorId: ctx.actor.actorId,
+            occurredAt: at,
+            referenceType: 'prepBatch', referenceId: batch.prepBatchId
+          });
+          plan.traceChanges.push({
+            prepBatchId: batch.prepBatchId, unitId: a.unitId, itemId: a.itemId,
+            qty: a.qty, unitBaseBefore: a.unitBaseBefore, unitBaseAfter: a.unitBaseAfter,
+            recipeVersionIds: [rr.value.recipeVersionId]
+          });
+        });
+      });
+
+      plan.domainRecords.push({ type: 'prepBatch', record: batch });
+      plan.projectionRecomputes = rr.value.requirements.map(function (r) {
+        return { itemId: r.itemId, storeId: ctx.storeId };
+      });
+      return R.ok(plan);
+    }
+  });
+
+  /**
+   * CompletePrepBatch — bước 2: chốt yield thật, tạo Unit BTP.
+   *
+   * KHÔNG trừ lại nguyên liệu — đã trừ ở `StartPrepBatch`. `input.batch` phải
+   * là bản ghi mẻ đang STARTED do tầng gọi (adapter/data-source) đọc lên; core
+   * không tự tra cứu Firebase.
+   */
+  var CompletePrepBatch = pipeline.defineCommand({
+    name: 'CompletePrepBatch',
+    authority: ['EXECUTE', 'REVIEW_APPROVE_CORRECT'],
+    mutates: true,
+    sources: ['POS', 'QUANLY'],
+
+    operationId: function (input) {
+      return ids.deterministicId('operation', ['prepcomplete', input.prepBatchId]);
+    },
+
+    validate: function (input) {
+      if (!input || !ids.isId(input.prepBatchId, 'prepBatch')) return R.err('VALIDATION', 'cần prepBatchId hợp lệ');
+      if (!input.batch) return R.err('NOT_FOUND', 'không tìm thấy mẻ đang nấu');
+      if (typeof input.actualYield !== 'number' || !(input.actualYield > 0)) {
+        return R.err('VALIDATION', 'actualYield phải dương');
+      }
+      if (!ids.isId(input.prepStockItemId, 'item')) {
+        return R.err('VALIDATION', 'cần prepStockItemId — BTP là một mặt hàng kho như mọi mặt hàng khác');
+      }
+      return R.ok(true);
+    },
+
+    execute: function (input, ctx) {
+      var plan = pipeline.emptyPlan();
+      var opId = ids.deterministicId('operation', ['prepcomplete', input.prepBatchId]);
+      var at = input.at || ctx.clock.now();
+
+      var batchR = btpLib.completeBatch(input.batch, {
+        actualYield: input.actualYield, at: at, actorId: ctx.actor.actorId, operationId: opId
+      });
+      if (R.isErr(batchR)) return batchR;
+      var batch = batchR.value;
+
+      /* Sản phẩm của mẻ là một Unit FIFO thật, itemKind='prep' — giống hệt
+         đường một bước, chỉ khác rawCost đến từ batch đã chốt lúc bắt đầu. */
+      var outUnitR = unitLib.createUnit({
+        unitId: ids.deterministicId('unit', ['prep', input.prepBatchId]),
+        itemId: input.prepStockItemId,
+        storeId: ctx.storeId,
+        itemKind: 'prep',
+        initialQty: input.actualYield,
+        costBasis: {
+          unitCost: batch.costPerUnit,
+          versionId: batch.yieldVersionId,
+          source: 'BTP_PRODUCTION'
+        },
+        receiptId: batch.prepBatchId,
+        receivedAt: at,
+        receivedBy: ctx.actor.actorId,
+        operationId: opId
+      });
+      if (R.isErr(outUnitR)) return outUnitR;
+
+      plan.unitChanges = [outUnitR.value];
+      plan.ledgerEntries.push({
+        domain: 'prep', type: 'RECEIVING', itemId: input.prepStockItemId, storeId: ctx.storeId,
+        unitId: outUnitR.value.unitId, qtyDelta: input.actualYield,
+        unitCost: batch.costPerUnit,
+        businessDate: ctx.businessDate, actorId: ctx.actor.actorId,
+        occurredAt: at,
+        referenceType: 'prepBatch', referenceId: batch.prepBatchId
+      });
+      plan.domainRecords.push({ type: 'prepBatch', record: batch });
+
+      if (batch.yieldVariancePct !== null && Math.abs(batch.yieldVariancePct) > (input.yieldAlertPct || 10)) {
+        plan.events.push({
+          type: 'PrepYieldMismatch',
+          prepBatchId: batch.prepBatchId, prepItemId: batch.prepItemId,
+          expectedYield: batch.expectedYield, actualYield: input.actualYield,
+          variancePct: batch.yieldVariancePct,
+          storeId: ctx.storeId, businessDate: ctx.businessDate
+        });
+      }
+
+      plan.projectionRecomputes.push({ itemId: input.prepStockItemId, storeId: ctx.storeId });
+      return R.ok(plan);
+    }
+  });
+
+  /**
+   * CancelPrepBatch — huỷ mẻ đang nấu, hoàn ĐÚNG lô nguyên liệu đã trừ.
+   *
+   * Dùng `fifo-core/reconciliation.reverseAllocations` với chính
+   * `allocationSnapshot` đã ghi ở `StartPrepBatch` — bù trừ theo phân bổ gốc,
+   * KHÔNG chạy lại FIFO để đoán lại đã trừ Unit nào (cùng nguyên tắc với
+   * `commands/reversal.ReverseTransaction`).
+   */
+  var CancelPrepBatch = pipeline.defineCommand({
+    name: 'CancelPrepBatch',
+    authority: ['EXECUTE', 'REVIEW_APPROVE_CORRECT'],
+    mutates: true,
+    sources: ['POS', 'QUANLY'],
+
+    operationId: function (input) {
+      return ids.deterministicId('operation', ['prepcancel', input.prepBatchId]);
+    },
+
+    validate: function (input) {
+      if (!input || !ids.isId(input.prepBatchId, 'prepBatch')) return R.err('VALIDATION', 'cần prepBatchId hợp lệ');
+      if (!input.batch) return R.err('NOT_FOUND', 'không tìm thấy mẻ đang nấu');
+      if (!input.reason) return R.err('VALIDATION', 'huỷ mẻ phải có lý do');
+      return R.ok(true);
+    },
+
+    execute: function (input, ctx) {
+      var plan = pipeline.emptyPlan();
+      var opId = ids.deterministicId('operation', ['prepcancel', input.prepBatchId]);
+
+      var batchR = btpLib.cancelBatch(input.batch, {
+        reason: input.reason, at: ctx.clock.now(), actorId: ctx.actor.actorId, operationId: opId
+      });
+      if (R.isErr(batchR)) return batchR;
+      var batch = batchR.value;
+
+      var ws = allocation.createWorkingSet(input.units || []);
+      var revR = reconciliation.reverseAllocations(ws, {
+        referenceId: input.prepBatchId, domain: 'raw', operationId: opId,
+        originalAllocations: input.batch.allocationSnapshot || []
+      });
+      if (R.isErr(revR)) return revR;
+      var rev = revR.value;
+
+      plan.unitChanges = rev.touchedUnits;
+      rev.reversals.forEach(function (r) {
+        plan.ledgerEntries.push({
+          domain: 'raw', type: 'REVERSAL', itemId: r.itemId, storeId: ctx.storeId,
+          unitId: r.unitId, qtyDelta: r.qty, unitCost: r.unitCost,
+          costBasisVersionId: r.costBasisVersionId,
+          businessDate: ctx.businessDate, actorId: ctx.actor.actorId,
+          occurredAt: ctx.clock.now(),
+          referenceType: 'prepBatch', referenceId: input.prepBatchId, reason: input.reason
+        });
+      });
+
+      plan.domainRecords.push({ type: 'prepBatch', record: batch });
+      plan.events.push({
+        type: 'BatchCancelled', prepBatchId: input.prepBatchId,
+        storeId: ctx.storeId, businessDate: ctx.businessDate, reason: input.reason
+      });
+      plan.projectionRecomputes = rev.reversals.map(function (r) {
+        return { itemId: r.itemId, storeId: ctx.storeId };
+      });
+      return R.ok(plan);
+    }
+  });
+
+  /**
    * EditPrepYield — sửa yield mẻ đã nấu.
    *
    * Điểm khác legacy: sửa yield KHÔNG đẩy sang một trung bình động
@@ -11252,6 +11787,9 @@ GIEO.define('commands/prep', [
 
   return {
     RecordPrepProduction: RecordPrepProduction,
+    StartPrepBatch: StartPrepBatch,
+    CompletePrepBatch: CompletePrepBatch,
+    CancelPrepBatch: CancelPrepBatch,
     EditPrepYield: EditPrepYield
   };
 });
@@ -14021,6 +14559,9 @@ GIEO.define('bootstrap/runtime', [
     ReportLostContainer: inventory.ReportLostContainer,
     RestoreFoundContainer: inventory.RestoreFoundContainer,
     RecordPrepProduction: prep.RecordPrepProduction,
+    StartPrepBatch: prep.StartPrepBatch,
+    CompletePrepBatch: prep.CompletePrepBatch,
+    CancelPrepBatch: prep.CancelPrepBatch,
     EditPrepYield: prep.EditPrepYield,
     ReverseTransaction: reversal.ReverseTransaction,
     ReviseState: reversal.ReviseState,
@@ -14046,6 +14587,8 @@ GIEO.define('bootstrap/runtime', [
     GetShiftStatus: reads.getShiftStatus,
     GetAlerts: reads.getAlerts,
     GetPendingApprovals: reads.getPendingApprovals,
+    GetPOSInventoryWorkspace: reads.getPOSInventoryWorkspace,
+    GetPrepBatchQuote: reads.getPrepBatchQuote,
     /* P11 — báo cáo đi qua cùng cổng đọc, không có đường tắt về nguồn thô. */
     GetUsageReport: reports.getUsageReport,
     GetLossReport: reports.getLossReport,

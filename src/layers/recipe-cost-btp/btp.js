@@ -27,7 +27,7 @@ GIEO.define('recipe-cost-btp/btp', [
 ], function (ids, R, VI) {
   'use strict';
 
-  var BATCH_STATUS = { PLANNED: 'PLANNED', PRODUCED: 'PRODUCED', CANCELLED: 'CANCELLED' };
+  var BATCH_STATUS = { PLANNED: 'PLANNED', STARTED: 'STARTED', PRODUCED: 'PRODUCED', CANCELLED: 'CANCELLED' };
 
   /**
    * Công bố yield của một loại BTP.
@@ -105,6 +105,127 @@ GIEO.define('recipe-cost-btp/btp', [
       operationId: spec.operationId,
       yieldEdits: []
     });
+  }
+
+  /**
+   * StartPrepBatch — nguyên liệu đã bị trừ, mẻ đang nấu, CHƯA có sản phẩm.
+   *
+   * Đóng gap `commands/prep` §15.7/15.3: `RecordPrepProduction` một bước trừ
+   * nguyên liệu VÀ tạo Unit BTP trong cùng lệnh, nên không biểu diễn được "đang
+   * nấu" hay "huỷ mẻ" — muốn huỷ phải bịa một giao dịch ngược tự chế. Ở đây
+   * `allocationSnapshot` được lưu NGUYÊN VẸN trên chính bản ghi mẻ, để
+   * `cancelBatch` hoàn tác đúng lô đã trừ (không chạy lại FIFO đoán lại — cùng
+   * nguyên tắc với `fifo-core/reconciliation.reverseAllocations`).
+   */
+  function startBatch(spec) {
+    if (!ids.isId(spec.prepItemId, 'prepItem')) return R.err('VALIDATION', 'cần prepItemId hợp lệ');
+    if (!ids.isId(spec.storeId, 'store')) return R.err('VALIDATION', 'cần storeId hợp lệ');
+    if (typeof spec.batchRatio !== 'number' || !(spec.batchRatio > 0)) {
+      return R.err('VALIDATION', 'batchRatio phải dương');
+    }
+    if (typeof spec.rawCost !== 'number' || spec.rawCost < 0) {
+      return R.err('VALIDATION', 'rawCost phải là số không âm — mẻ không có giá vốn thì BTP không có cost basis');
+    }
+    if (!Array.isArray(spec.allocationSnapshot) || spec.allocationSnapshot.length === 0) {
+      return R.err('VALIDATION',
+        'startBatch cần allocationSnapshot — không có nó thì cancelBatch không hoàn tác được đúng lô đã trừ');
+    }
+    if (!spec.operationId) return R.err('VALIDATION', 'mẻ cần operationId');
+    if (!ids.isId(spec.actorId, 'actor')) return R.err('VALIDATION', 'mẻ cần actorId');
+
+    return R.ok({
+      prepBatchId: spec.prepBatchId || ids.newId('prepBatch'),
+      prepItemId: spec.prepItemId,
+      storeId: spec.storeId,
+      status: BATCH_STATUS.STARTED,
+      batchRatio: spec.batchRatio,
+      quoteId: spec.quoteId || null,
+      recipeVersionId: spec.recipeVersionId || null,
+      /* Giá vốn nguyên liệu đã bị trừ THẬT, chốt tại lúc bắt đầu nấu — không
+         đổi khi hoàn thành, vì hoàn thành không đụng lại vào allocation. */
+      rawCost: spec.rawCost,
+      costComplete: !!spec.costComplete,
+      allocationSnapshot: spec.allocationSnapshot,
+      /* Evidence quét mã nguyên liệu — chỉ lưu lại, KHÔNG phải căn cứ trừ kho;
+         căn cứ trừ kho luôn là allocationSnapshot ở trên (§15.3 mục 4). */
+      scanEvidence: spec.scanEvidence || [],
+      initialYield: null,
+      actualYield: null,
+      expectedYield: typeof spec.expectedYield === 'number' ? spec.expectedYield : null,
+      yieldVariancePct: null,
+      yieldVersionId: spec.yieldVersionId || null,
+      costPerUnit: null,
+      recipeId: spec.recipeId || null,
+      startedAt: spec.at,
+      startedBy: spec.actorId,
+      producedAt: null,
+      producedBy: null,
+      cancelledAt: null,
+      cancelledBy: null,
+      cancelReason: null,
+      businessDate: spec.businessDate,
+      expiresAt: spec.expiresAt || null,
+      operationId: spec.operationId,
+      yieldEdits: []
+    });
+  }
+
+  /**
+   * CompletePrepBatch — mẻ đã nấu xong, chốt yield thật.
+   *
+   * KHÔNG đụng lại nguyên liệu: `rawCost` đã chốt từ lúc `startBatch`. Đây
+   * chính là điểm khác biệt với `RecordPrepProduction` một bước — completion
+   * chỉ ghi nhận SẢN PHẨM, không phải một lần trừ kho thứ hai.
+   */
+  function completeBatch(batch, spec) {
+    if (!batch || batch.status !== BATCH_STATUS.STARTED) {
+      return R.err('PRECONDITION',
+        'chỉ hoàn thành được mẻ đang ở trạng thái STARTED, hiện: ' + (batch ? batch.status : 'không có mẻ'));
+    }
+    if (typeof spec.actualYield !== 'number' || !(spec.actualYield > 0)) {
+      return R.err('VALIDATION', 'actualYield phải dương');
+    }
+    if (!ids.isId(spec.actorId, 'actor')) return R.err('VALIDATION', 'hoàn thành mẻ cần actorId');
+    if (!spec.operationId) return R.err('VALIDATION', 'hoàn thành mẻ cần operationId');
+
+    var expected = batch.expectedYield;
+    return R.ok(Object.assign({}, batch, {
+      status: BATCH_STATUS.PRODUCED,
+      initialYield: spec.actualYield,
+      actualYield: spec.actualYield,
+      yieldVariancePct: (expected && expected > 0)
+        ? ((spec.actualYield - expected) / expected) * 100
+        : null,
+      costPerUnit: batch.rawCost / spec.actualYield,
+      producedAt: spec.at,
+      producedBy: spec.actorId,
+      operationId: spec.operationId
+    }));
+  }
+
+  /**
+   * CancelPrepBatch — huỷ mẻ đang nấu, hoàn nguyên liệu về đúng lô đã trừ.
+   *
+   * Chỉ đổi TRẠNG THÁI của bản ghi mẻ; việc hoàn tác Unit/ledger là việc của
+   * `fifo-core/reconciliation.reverseAllocations` ở tầng command (đúng
+   * `allocationSnapshot` đã lưu từ `startBatch`, không chạy lại FIFO).
+   */
+  function cancelBatch(batch, spec) {
+    if (!batch || batch.status !== BATCH_STATUS.STARTED) {
+      return R.err('PRECONDITION',
+        'chỉ huỷ được mẻ đang ở trạng thái STARTED, hiện: ' + (batch ? batch.status : 'không có mẻ'));
+    }
+    if (!spec.reason) return R.err('VALIDATION', 'huỷ mẻ phải có lý do');
+    if (!ids.isId(spec.actorId, 'actor')) return R.err('VALIDATION', 'huỷ mẻ cần actorId');
+    if (!spec.operationId) return R.err('VALIDATION', 'huỷ mẻ cần operationId');
+
+    return R.ok(Object.assign({}, batch, {
+      status: BATCH_STATUS.CANCELLED,
+      cancelledAt: spec.at,
+      cancelledBy: spec.actorId,
+      cancelReason: String(spec.reason),
+      operationId: spec.operationId
+    }));
   }
 
   /**
@@ -241,6 +362,9 @@ GIEO.define('recipe-cost-btp/btp', [
     publishYield: publishYield,
     resolveYieldAt: resolveYieldAt,
     createBatch: createBatch,
+    startBatch: startBatch,
+    completeBatch: completeBatch,
+    cancelBatch: cancelBatch,
     editYield: editYield,
     computeTheoretical: computeTheoretical,
     computeVariance: computeVariance,

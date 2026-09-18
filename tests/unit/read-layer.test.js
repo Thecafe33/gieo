@@ -169,6 +169,30 @@ describe('read-layer — phân quyền đọc (đóng gap 0% của Reporting)', 
   });
 });
 
+describe('read-layer/gateway — GetPOSInventoryWorkspace (đóng gap §15.2/§15.7 tab Kho POS)', function () {
+  var G = _r.G;
+
+  test('POS operator đọc được workspace canonical đủ 12 danh sách', function () {
+    var out = assertOk(G.getPOSInventoryWorkspace(rCtx('POS_OPERATOR', 'POS'), {
+      source: 'QUANLY_CANONICAL', revision: 7, catalog: [{ itemId: 'x' }]
+    })).data;
+    assert.strictEqual(out.source, 'QUANLY_CANONICAL');
+    assert.strictEqual(out.revision, 7);
+    assert.strictEqual(out.catalog.length, 1);
+    ['purchaseOrders', 'stockCountTasks', 'refillTasks', 'prepItems', 'prepBatches',
+      'openUnits', 'pendingLabels', 'labelLossCandidates', 'wasteReasons', 'vessels', 'prepQuotes'
+    ].forEach(function (field) {
+      assert.deepStrictEqual(out[field], [], field + ' phải mặc định là mảng rỗng, không phải undefined');
+    });
+  });
+
+  test('snapshot khai nguồn khác QUANLY_CANONICAL bị TỪ CHỐI, không hiển thị mập mờ', function () {
+    assertErr(G.getPOSInventoryWorkspace(rCtx('POS_OPERATOR', 'POS'), {
+      source: 'LEGACY_DIRECT_READ'
+    }), 'VALIDATION');
+  });
+});
+
 describe('read-layer — doanh thu MỘT implementation (R3)', function () {
   var G = _r.G;
 

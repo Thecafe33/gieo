@@ -23,6 +23,9 @@ GIEO.define('bootstrap/runtime', [
     ReportLostContainer: inventory.ReportLostContainer,
     RestoreFoundContainer: inventory.RestoreFoundContainer,
     RecordPrepProduction: prep.RecordPrepProduction,
+    StartPrepBatch: prep.StartPrepBatch,
+    CompletePrepBatch: prep.CompletePrepBatch,
+    CancelPrepBatch: prep.CancelPrepBatch,
     EditPrepYield: prep.EditPrepYield,
     ReverseTransaction: reversal.ReverseTransaction,
     ReviseState: reversal.ReviseState,
@@ -48,6 +51,8 @@ GIEO.define('bootstrap/runtime', [
     GetShiftStatus: reads.getShiftStatus,
     GetAlerts: reads.getAlerts,
     GetPendingApprovals: reads.getPendingApprovals,
+    GetPOSInventoryWorkspace: reads.getPOSInventoryWorkspace,
+    GetPrepBatchQuote: reads.getPrepBatchQuote,
     /* P11 — báo cáo đi qua cùng cổng đọc, không có đường tắt về nguồn thô. */
     GetUsageReport: reports.getUsageReport,
     GetLossReport: reports.getLossReport,

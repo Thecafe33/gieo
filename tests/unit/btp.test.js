@@ -314,6 +314,161 @@ describe('commands/prep — mẻ tạo Unit FIFO thật', function () {
   });
 });
 
+describe('commands/prep — StartPrepBatch / CompletePrepBatch / CancelPrepBatch (2 giai đoạn)', function () {
+  var PREP = _b.PREP;
+
+  function quoteId(reg, at) {
+    var G = GIEO.require('read-layer/gateway');
+    var CTXL = _b.CTXL;
+    var ACCESS = _b.ACCESS;
+    var actor = assertOk(ACCESS.createActor({
+      actorId: _b.NV, role: 'POS_OPERATOR', source: 'POS', stores: [_b.STORE]
+    }));
+    var day = assertOk(_b.BD.openDay({
+      storeId: _b.STORE, dateKey: '2026-03-10', actorId: _b.BOSS,
+      at: new Date(2026, 2, 10, 7).getTime(), clock: _b.CLK.createClock()
+    }));
+    var ctx = assertOk(CTXL.createContext({
+      organizationId: _b.ORG, storeId: _b.STORE, actor: actor, source: 'POS', businessDay: day
+    }));
+    var q = assertOk(G.getPrepBatchQuote(ctx, {
+      prepItemId: _b.PREP_ITEM, recipeId: _b.RECIPE, batchRatio: 1, at: at, registry: reg
+    })).data;
+    return q.quoteId;
+  }
+
+  function start(over) {
+    var reg = bReg();
+    return _b.PIPE.run(PREP.StartPrepBatch, Object.assign({
+      batchRef: 'startbatch-1', prepItemId: _b.PREP_ITEM, recipeId: _b.RECIPE,
+      batchRatio: 1, quoteId: quoteId(reg, T_COOK), at: T_COOK,
+      deps: { versionRegistry: reg, units: [rawUnit(5000)] }
+    }, over || {}), bCtx(), { operationStore: _b.PIPE.createInMemoryOperationStore() });
+  }
+
+  test('GetPrepBatchQuote trả định mức resolve theo version, không cho POS tự nhân', function () {
+    var G = GIEO.require('read-layer/gateway');
+    var reg = bReg();
+    var ctx = bCtx();
+    var q = assertOk(G.getPrepBatchQuote(ctx, {
+      prepItemId: _b.PREP_ITEM, recipeId: _b.RECIPE, batchRatio: 2, at: T_COOK, registry: reg
+    })).data;
+    assert.strictEqual(q.requirements[0].qty, 2000, 'batchRatio 2 phải nhân đúng 1 lần, ở quote, không phải ở POS');
+    assert.strictEqual(q.expectedYield, 20);
+    assert.ok(q.quoteId);
+  });
+
+  test('StartPrepBatch trừ nguyên liệu ngay, CHƯA tạo Unit BTP', function () {
+    var out = assertOk(start());
+    var plan = out.plan;
+    assert.strictEqual(plan.unitChanges.filter(function (u) { return u.itemKind === 'prep'; }).length, 0,
+      'StartPrepBatch không được tạo sản phẩm — đó là việc của CompletePrepBatch');
+    var consumed = plan.ledgerEntries.filter(function (e) { return e.type === 'CONSUMPTION'; });
+    assert.strictEqual(consumed.length, 1);
+    assert.strictEqual(consumed[0].qtyDelta, -1000);
+    var rec = plan.domainRecords[0].record;
+    assert.strictEqual(rec.status, 'STARTED');
+    assert.strictEqual(rec.allocationSnapshot.length, 1);
+  });
+
+  test('StartPrepBatch từ chối khi thiếu quoteId — không nấu khi chưa có quote hiệu lực', function () {
+    var reg = bReg();
+    var r = _b.PIPE.run(PREP.StartPrepBatch, {
+      batchRef: 'noquote', prepItemId: _b.PREP_ITEM, recipeId: _b.RECIPE, batchRatio: 1,
+      deps: { versionRegistry: reg, units: [rawUnit(5000)] }
+    }, bCtx(), { operationStore: _b.PIPE.createInMemoryOperationStore() });
+    assertErr(r, 'VALIDATION');
+  });
+
+  test('StartPrepBatch không đủ nguyên liệu thì CHẶN', function () {
+    assertErr(start({ deps: { versionRegistry: bReg(), units: [rawUnit(100)] } }), 'PRECONDITION');
+  });
+
+  test('CompletePrepBatch tạo Unit BTP từ batch đã STARTED, không trừ nguyên liệu lần 2', function () {
+    var started = assertOk(start()).plan.domainRecords[0].record;
+    var out = assertOk(_b.PIPE.run(PREP.CompletePrepBatch, {
+      prepBatchId: started.prepBatchId, prepStockItemId: _b.TRAN_CHAU,
+      actualYield: 10, at: T_COOK + 1000, batch: started
+    }, bCtx(), { operationStore: _b.PIPE.createInMemoryOperationStore() }));
+
+    var plan = out.plan;
+    assert.strictEqual(plan.ledgerEntries.filter(function (e) { return e.type === 'CONSUMPTION'; }).length, 0,
+      'CompletePrepBatch không được trừ nguyên liệu lần 2');
+    var produced = plan.unitChanges.filter(function (u) { return u.itemKind === 'prep'; })[0];
+    assert.strictEqual(produced.initialQty, 10);
+    /* 1000 sữa × 30đ = 30000 đã chốt lúc Start; yield 10 → 3000đ/đơn vị. */
+    assert.strictEqual(produced.costBasis.unitCost, 3000);
+    assert.strictEqual(plan.domainRecords[0].record.status, 'PRODUCED');
+  });
+
+  test('CompletePrepBatch từ chối khi batch chưa ở trạng thái STARTED', function () {
+    var started = assertOk(start()).plan.domainRecords[0].record;
+    var produced = Object.assign({}, started, { status: 'PRODUCED' });
+    var r = _b.PIPE.run(PREP.CompletePrepBatch, {
+      prepBatchId: produced.prepBatchId, prepStockItemId: _b.TRAN_CHAU,
+      actualYield: 10, batch: produced
+    }, bCtx(), { operationStore: _b.PIPE.createInMemoryOperationStore() });
+    assertErr(r, 'PRECONDITION');
+  });
+
+  test('CancelPrepBatch hoàn ĐÚNG lô nguyên liệu đã trừ, không chạy lại FIFO', function () {
+    var startCtx = bCtx();
+    var raw = rawUnit(5000);
+    var startOut = assertOk(_b.PIPE.run(PREP.StartPrepBatch, {
+      batchRef: 'cancelbatch-1', prepItemId: _b.PREP_ITEM, recipeId: _b.RECIPE,
+      batchRatio: 1, quoteId: quoteId(bReg(), T_COOK), at: T_COOK,
+      deps: { versionRegistry: bReg(), units: [raw] }
+    }, startCtx, { operationStore: _b.PIPE.createInMemoryOperationStore() }));
+    var started = startOut.plan.domainRecords[0].record;
+    var touchedAfterStart = startOut.plan.unitChanges[0];
+    assert.strictEqual(touchedAfterStart.remainingQty, 4000);
+
+    var out = assertOk(_b.PIPE.run(PREP.CancelPrepBatch, {
+      prepBatchId: started.prepBatchId, reason: 'nhầm định mức', batch: started,
+      units: [touchedAfterStart]
+    }, bCtx(), { operationStore: _b.PIPE.createInMemoryOperationStore() }));
+
+    var plan = out.plan;
+    var restored = plan.unitChanges.filter(function (u) { return u.unitId === raw.unitId; })[0];
+    assert.strictEqual(restored.remainingQty, 5000, 'huỷ mẻ phải trả đúng lượng đã trừ về lại Unit gốc');
+    var reversal = plan.ledgerEntries.filter(function (e) { return e.type === 'REVERSAL'; })[0];
+    assert.strictEqual(reversal.qtyDelta, 1000);
+    assert.strictEqual(plan.domainRecords[0].record.status, 'CANCELLED');
+    assert.ok(plan.events.filter(function (e) { return e.type === 'BatchCancelled'; }).length === 1);
+  });
+
+  test('CancelPrepBatch phải có lý do', function () {
+    var started = assertOk(start()).plan.domainRecords[0].record;
+    var r = _b.PIPE.run(PREP.CancelPrepBatch, {
+      prepBatchId: started.prepBatchId, batch: started, units: []
+    }, bCtx(), { operationStore: _b.PIPE.createInMemoryOperationStore() });
+    assertErr(r, 'VALIDATION');
+  });
+
+  test('CancelPrepBatch từ chối khi batch không còn ở trạng thái STARTED', function () {
+    var started = assertOk(start()).plan.domainRecords[0].record;
+    var cancelled = Object.assign({}, started, { status: 'CANCELLED' });
+    var r = _b.PIPE.run(PREP.CancelPrepBatch, {
+      prepBatchId: cancelled.prepBatchId, reason: 'x', batch: cancelled, units: []
+    }, bCtx(), { operationStore: _b.PIPE.createInMemoryOperationStore() });
+    assertErr(r, 'PRECONDITION');
+  });
+
+  test('bắt đầu lặp cùng batchRef là no-op — không trừ nguyên liệu lần 2', function () {
+    var reg = bReg();
+    var store = _b.PIPE.createInMemoryOperationStore();
+    var ctx = bCtx();
+    var input = {
+      batchRef: 'startbatch-idem', prepItemId: _b.PREP_ITEM, recipeId: _b.RECIPE,
+      batchRatio: 1, quoteId: quoteId(reg, T_COOK), at: T_COOK,
+      deps: { versionRegistry: reg, units: [rawUnit(5000)] }
+    };
+    assertOk(_b.PIPE.run(PREP.StartPrepBatch, input, ctx, { operationStore: store }));
+    var again = assertOk(_b.PIPE.run(PREP.StartPrepBatch, input, ctx, { operationStore: store }));
+    assert.strictEqual(again.replayed, true);
+  });
+});
+
 describe('waste BTP dùng CHUNG đường với raw (fix đứt chuỗi #2)', function () {
   test('waste BTP luôn có ingredientBreakdown, bất kể trigger từ đâu', function () {
     var prepUnit = assertOk(_b.U.createUnit({

@@ -24,8 +24,10 @@ GIEO.define('read-layer/gateway', [
   'fifo-core/projection',
   'traceability/trace',
   'catalog/menu',
-  'alerts/alert'
-], function (ids, R, access, merge, projection, traceLib, menuLib, alertLib) {
+  'alerts/alert',
+  'recipe-cost-btp/recipe',
+  'recipe-cost-btp/btp'
+], function (ids, R, access, merge, projection, traceLib, menuLib, alertLib, recipeLib, btpLib) {
   'use strict';
 
   /**
@@ -65,7 +67,12 @@ GIEO.define('read-layer/gateway', [
     GetAlerts: registerQuery('GetAlerts', {
       authority: ['EXECUTE', 'REVIEW_APPROVE_CORRECT']
     }),
-    GetPendingApprovals: registerQuery('GetPendingApprovals', { authority: 'REVIEW_APPROVE_CORRECT' })
+    GetPendingApprovals: registerQuery('GetPendingApprovals', { authority: 'REVIEW_APPROVE_CORRECT' }),
+    /* Đóng gap POS_GieoGieo_Moi_THEO_DOI.md §15.7: tab Kho POS chờ 2 cổng đọc
+       này từ lúc khởi tạo. Cả hai EXECUTE — nhân viên bán cần chúng để làm
+       việc, không phải quyền quản trị. */
+    GetPOSInventoryWorkspace: registerQuery('GetPOSInventoryWorkspace', { authority: 'EXECUTE' }),
+    GetPrepBatchQuote: registerQuery('GetPrepBatchQuote', { authority: 'EXECUTE' })
   };
 
   /**
@@ -426,6 +433,125 @@ GIEO.define('read-layer/gateway', [
     });
   }
 
+  var WORKSPACE_LIST_FIELDS = [
+    'catalog', 'purchaseOrders', 'stockCountTasks', 'refillTasks', 'prepItems',
+    'prepBatches', 'openUnits', 'pendingLabels', 'labelLossCandidates',
+    'wasteReasons', 'vessels', 'prepQuotes'
+  ];
+
+  /**
+   * GetPOSInventoryWorkspace — MỘT snapshot cho toàn bộ 8 màn Kho POS.
+   *
+   * Đóng gap `POS_GieoGieo_Moi_THEO_DOI.md` §15.2/§15.7: HTML gọi
+   * `watch('GetPOSInventoryWorkspace', { audience: 'POS' })` ngay lúc khởi
+   * động nhưng runtime chưa từng đăng ký query này, nên tab Kho không có
+   * đường nào để nhận dữ liệu ngoài đọc thẳng collection cũ (đúng thứ R1 cấm).
+   *
+   * Nguồn dữ liệu thật (catalog/task/vessel...) do QUANLY cấu hình rồi tầng
+   * data-source lắp vào `spec`; gateway chỉ khoá contract: `source` PHẢI là
+   * `QUANLY_CANONICAL` — snapshot khai nguồn khác bị từ chối thẳng, không
+   * lặng lẽ hiển thị dữ liệu không rõ gốc.
+   */
+  function getPOSInventoryWorkspace(ctx, spec) {
+    var g = guard(Q.GetPOSInventoryWorkspace, ctx, spec);
+    if (R.isErr(g)) return g;
+    if (spec.source !== 'QUANLY_CANONICAL') {
+      return R.err('VALIDATION',
+        "GetPOSInventoryWorkspace chỉ chấp nhận snapshot source='QUANLY_CANONICAL', nhận: " + spec.source);
+    }
+
+    return merge.resolve({
+      computeLive: function () {
+        var out = {
+          revision: spec.revision || null,
+          observedAt: spec.observedAt || ctx.clock.now(),
+          source: spec.source
+        };
+        WORKSPACE_LIST_FIELDS.forEach(function (field) {
+          out[field] = Array.isArray(spec[field]) ? spec[field] : [];
+        });
+        return R.ok(out);
+      },
+      computedAt: ctx.clock.now()
+    });
+  }
+
+  /**
+   * GetPrepBatchQuote — định mức mẻ resolve theo version, KHÔNG cho POS tự nhân.
+   *
+   * Đóng gap §15.3: `StartPrepBatch` từ chối nấu khi chưa có `quoteId` hiệu lực
+   * — cổng này là nơi DUY NHẤT tính ra định mức đó. `quoteId` xác định theo
+   * đúng bộ (recipeVersionId, yieldVersionId, batchRatio) nên POS gửi lại đúng
+   * quote đã thấy thì `StartPrepBatch` xác nhận được nó chưa bị đổi.
+   *
+   * `scanRequirements`/`eligibleUnitCodes` đến từ cấu hình bên ngoài
+   * (`spec.unitTrackedItemIds`, `spec.eligibleUnitCodes` — QUANLY khai nguyên
+   * liệu nào đếm theo "cái"), vì đây là dữ liệu catalog/vận hành, không phải
+   * điều fifo-core tự suy ra từ recipe.
+   */
+  function getPrepBatchQuote(ctx, spec) {
+    var g = guard(Q.GetPrepBatchQuote, ctx, spec);
+    if (R.isErr(g)) return g;
+    if (!ids.isId(spec.prepItemId, 'prepItem')) return R.err('VALIDATION', 'cần prepItemId hợp lệ');
+    if (!ids.isId(spec.recipeId, 'recipe')) return R.err('VALIDATION', 'cần recipeId hợp lệ');
+    if (typeof spec.batchRatio !== 'number' || !(spec.batchRatio > 0)) {
+      return R.err('VALIDATION', 'batchRatio phải dương');
+    }
+    if (!spec.registry) return R.err('VALIDATION', 'GetPrepBatchQuote cần versionRegistry');
+
+    return merge.resolve({
+      computeLive: function () {
+        var at = spec.at || ctx.clock.now();
+
+        var rv = recipeLib.resolveRecipeAt(spec.registry, {
+          recipeId: spec.recipeId, storeId: ctx.storeId, at: at
+        });
+        if (R.isErr(rv)) return rv;
+        var rr = recipeLib.toRequirements(rv.value, { size: 'BATCH', qty: spec.batchRatio });
+        if (R.isErr(rr)) return rr;
+
+        var expectedYield = null;
+        var yieldVersionId = null;
+        var yv = btpLib.resolveYieldAt(spec.registry, {
+          prepItemId: spec.prepItemId, storeId: ctx.storeId, at: at
+        });
+        if (R.isOk(yv)) {
+          expectedYield = yv.value.payload.yieldPerBatch * spec.batchRatio;
+          yieldVersionId = yv.value.versionId;
+        }
+
+        var unitTracked = spec.unitTrackedItemIds || [];
+        var eligible = spec.eligibleUnitCodes || {};
+        var scanRequirements = rr.value.requirements
+          .filter(function (r) { return unitTracked.indexOf(r.itemId) !== -1; })
+          .map(function (r) {
+            return {
+              itemId: r.itemId,
+              qty: r.qty,
+              eligibleUnitCodes: Object.prototype.hasOwnProperty.call(eligible, r.itemId)
+                ? eligible[r.itemId] : null
+            };
+          });
+
+        return R.ok({
+          quoteId: ids.deterministicId('version', [
+            'prepquote', spec.prepItemId, rr.value.recipeVersionId,
+            yieldVersionId || 'no-yield', String(spec.batchRatio)
+          ]),
+          prepItemId: spec.prepItemId,
+          recipeId: spec.recipeId,
+          recipeVersionId: rr.value.recipeVersionId,
+          yieldVersionId: yieldVersionId,
+          batchRatio: spec.batchRatio,
+          requirements: rr.value.requirements,
+          expectedYield: expectedYield,
+          scanRequirements: scanRequirements
+        });
+      },
+      computedAt: ctx.clock.now()
+    });
+  }
+
   return {
     QUERIES: Q,
     registerQuery: registerQuery,
@@ -439,6 +565,8 @@ GIEO.define('read-layer/gateway', [
     comparePeriods: comparePeriods,
     getShiftStatus: getShiftStatus,
     getAlerts: getAlerts,
-    getPendingApprovals: getPendingApprovals
+    getPendingApprovals: getPendingApprovals,
+    getPOSInventoryWorkspace: getPOSInventoryWorkspace,
+    getPrepBatchQuote: getPrepBatchQuote
   };
 });
