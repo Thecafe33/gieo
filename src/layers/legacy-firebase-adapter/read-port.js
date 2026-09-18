@@ -109,12 +109,22 @@ GIEO.define('legacy-firebase-adapter/read-port', [
       });
     }
 
+    /* [FIX] Key tháng trên RTDB/Firestore archive KHÔNG phải số — legacy dùng
+       tên viết tắt tiếng Anh (quanlygieo.html: const MONTH_KEYS = ['jan',...,
+       'dec']; qlLoadBillsOfDate: `orders_gieogieo/${MONTH_KEYS[d.getMonth()]}/
+       ${pad(d.getDate())}`, archive doc id `${month}_${day}_${year}` cùng key
+       đó). Trước bản sửa này loadBills() dùng số tháng/ngày thuần (`9/18`) nên
+       luôn trúng node rỗng — không đọc được bill thật nào, không liên quan gì
+       tới FIFO/giá vốn, chỉ là sai định dạng path khi đọc ngược schema cũ. */
+    var MONTH_KEYS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
     function loadBills(spec) {
       spec = spec || {};
       var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(spec.businessDate || '');
       if (!m) return Promise.resolve(R.err('VALIDATION', 'loadBills cần businessDate YYYY-MM-DD'));
-      var archiveKey = m[2] + '_' + m[3] + '_' + m[1];
-      return rtdb('orders', Number(m[2]) + '/' + Number(m[3])).then(function (live) {
+      var monthKey = MONTH_KEYS[Number(m[2]) - 1];
+      var dayKey = m[3];
+      var archiveKey = monthKey + '_' + dayKey + '_' + m[1];
+      return rtdb('orders', monthKey + '/' + dayKey).then(function (live) {
         if (R.isOk(live) && live.value && Object.keys(live.value).length) {
           return R.ok({ source: 'LEGACY_LIVE', orders: live.value });
         }
