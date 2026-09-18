@@ -36,6 +36,7 @@ GIEO.define('bootstrap/runtime', [
     OpenBusinessDay: businessDay.OpenBusinessDay,
     CloseBusinessDay: businessDay.CloseBusinessDay,
     OpenCashSegment: shift.OpenCashSegment,
+    RecordCashCount: shift.RecordCashCount,
     CheckIn: shift.CheckIn,
     CheckOut: shift.CheckOut,
     CloseCashSegment: shift.CloseCashSegment

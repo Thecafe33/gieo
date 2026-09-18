@@ -333,4 +333,51 @@ describe('command mở két và chấm công', function () {
     assert.strictEqual(result.plan.domainRecords[1].type, 'employeeShift');
     assert.strictEqual(result.plan.events[0].type, 'BusinessDayOpened');
   });
+
+  test('runtime đăng ký RecordCashCount — đối soát giữa ca không chốt đoạn', function () {
+    var names = BOOT.createRuntime({ mode: BOOT.MODE.READ_ONLY }).registeredCommands();
+    assert.ok(names.indexOf('RecordCashCount') !== -1);
+  });
+
+  test('RecordCashCount thêm 1 lần đếm, đoạn ca vẫn OPEN — đây chính là "đối soát giữa ca"', function () {
+    var opened = assertOk(runCommand(S.OpenCashSegment, {
+      storeId: _sh.STORE, businessDate: '2026-03-10', seq: 1, startCash: 500000
+    })).plan.domainRecords[0].record;
+
+    var out = assertOk(runCommand(S.RecordCashCount, { segment: opened, countedCash: 500000 }));
+    var segment = out.plan.domainRecords[0].record;
+    assert.strictEqual(segment.status, 'OPEN', 'đối soát giữa ca không được tự chốt đoạn');
+    assert.strictEqual(segment.counts.length, 1);
+    assert.strictEqual(segment.counts[0].countedCash, 500000);
+  });
+
+  test('RecordCashCount lặp cùng segment (chưa cập nhật state) là no-op, không cộng đúp lần đếm', function () {
+    var store = PIPE.createInMemoryOperationStore();
+    var ctx = commandCtx();
+    var opened = assertOk(runCommand(S.OpenCashSegment, {
+      storeId: _sh.STORE, businessDate: '2026-03-10', seq: 1, startCash: 500000
+    }, ctx, store)).plan.domainRecords[0].record;
+
+    assertOk(runCommand(S.RecordCashCount, { segment: opened, countedCash: 500000 }, ctx, store));
+    var again = assertOk(runCommand(S.RecordCashCount, { segment: opened, countedCash: 500000 }, ctx, store));
+    assert.strictEqual(again.replayed, true);
+  });
+
+  test('RecordCashCount rồi CloseCashSegment — đúng luồng "Kết ca" của tab Ca làm việc', function () {
+    var opened = assertOk(runCommand(S.OpenCashSegment, {
+      storeId: _sh.STORE, businessDate: '2026-03-10', seq: 1, startCash: 500000
+    })).plan.domainRecords[0].record;
+    var withSale = assertOk(S.recordCashMovement(opened, { amount: 1800000, direction: 'IN' }));
+
+    var counted = assertOk(runCommand(S.RecordCashCount, {
+      segment: withSale, countedCash: 2250000
+    })).plan.domainRecords[0].record;
+
+    var out = assertOk(runCommand(S.CloseCashSegment, { segment: counted }));
+    var closedSeg = out.plan.domainRecords[0].record;
+    assert.strictEqual(closedSeg.status, 'CLOSED');
+    assert.strictEqual(closedSeg.expectedEndCash, 2300000);
+    assert.strictEqual(closedSeg.variance, -50000);
+    assert.strictEqual(out.plan.events[0].type, 'CashVarianceDetected');
+  });
 });

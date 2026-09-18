@@ -329,12 +329,41 @@ GIEO.define('read-layer/gateway', [
           /* Không có ngày mở = không được bán. Nói thẳng ra, đừng để UI tự đoán. */
           operable: !!(day && day.status === 'OPEN'),
           openSegment: openSegment ? {
-            seq: openSegment.seq, openedAt: openSegment.openedAt, openedBy: openSegment.openedBy
+            segmentId: openSegment.segmentId,
+            seq: openSegment.seq,
+            startCash: openSegment.startCash,
+            startCashSource: openSegment.startCashSource,
+            cashSales: openSegment.cashSales,
+            cashOut: openSegment.cashOut,
+            /* Xem trước "lẽ ra phải có" — KHÔNG phải số đã chốt. Công thức thật
+               vẫn chỉ nằm ở CHÍNH XÁC một chỗ: commands/shift.closeSegment. */
+            expectedEndCashPreview: openSegment.startCash + openSegment.cashSales - openSegment.cashOut,
+            counts: openSegment.counts,
+            openedAt: openSegment.openedAt,
+            openedBy: openSegment.openedBy
           } : null,
           closedSegmentCount: segments.filter(function (s) { return s.status === 'CLOSED'; }).length,
+          /* Đoạn vừa chốt gần nhất — màn Ca làm việc cần hiện variance sau khi
+             kết ca, không phải chỉ số đếm đoạn đã đóng. */
+          lastClosedSegment: (function () {
+            var closed = segments.filter(function (s) { return s.status === 'CLOSED'; });
+            if (!closed.length) return null;
+            var last = closed.reduce(function (a, b) { return a.seq > b.seq ? a : b; });
+            return {
+              seq: last.seq, expectedEndCash: last.expectedEndCash,
+              actualEndCash: last.actualEndCash, variance: last.variance,
+              closedAt: last.closedAt, closedBy: last.closedBy
+            };
+          })(),
           employeesOnShift: onShift.map(function (s) {
             return { shiftId: s.shiftId, employeeId: s.employeeId, checkedInAt: s.checkedInAt };
-          })
+          }),
+          /* Danh sách nhân viên có thể check-in — dữ liệu cấu hình HR, KHÔNG
+             phải fifo-core tự tính (read-layer không được import tầng hr). Data
+             source cấp vào, giống cách `vessels`/`wasteReasons` được cấp cho
+             GetPOSInventoryWorkspace ở trên; rỗng thì UI nói rõ chưa có danh
+             sách, không suy ra ai được phép check-in. */
+          roster: Array.isArray(spec.roster) ? spec.roster : []
         });
       },
       computedAt: ctx.clock.now()

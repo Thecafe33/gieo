@@ -243,6 +243,42 @@ GIEO.define('commands/shift', [
     }
   });
 
+  /**
+   * RecordCashCount — một lần đếm tiền quỹ, KHÔNG chốt đoạn ca.
+   *
+   * Đóng gap tab "Ca làm việc" POS: legacy có "Đối soát giữa ca" tách biệt với
+   * "Kết ca" — đếm được nhiều lần trong ca để phát hiện lệch sớm mà không bắt
+   * buộc giao ca ngay. `CloseCashSegment` (dưới) không tự đếm; nó đọc
+   * `segment.counts[cuối]` đã có sẵn nên UI phải đi qua đúng lệnh này trước.
+   */
+  var RecordCashCount = pipeline.defineCommand({
+    name: 'RecordCashCount',
+    authority: ['EXECUTE', 'REVIEW_APPROVE_CORRECT'],
+    mutates: true,
+    sources: ['POS', 'QUANLY'],
+    operationId: function (input) {
+      return ids.deterministicId('operation', [
+        'cashcount', input.segment.storeId, input.segment.businessDate,
+        String(input.segment.seq), String(input.segment.counts.length + 1)
+      ]);
+    },
+    validate: function (input) {
+      if (!input || !input.segment) return R.err('VALIDATION', 'cần segment');
+      return R.ok(true);
+    },
+    execute: function (input, ctx) {
+      var r = addCount(input.segment, {
+        countedCash: input.countedCash, at: ctx.clock.now(),
+        actorId: ctx.actor.actorId, note: input.note
+      });
+      if (R.isErr(r)) return r;
+
+      var plan = pipeline.emptyPlan();
+      plan.domainRecords.push({ type: 'cashSegment', record: r.value });
+      return R.ok(plan);
+    }
+  });
+
   var OpenCashSegment = pipeline.defineCommand({
     name: 'OpenCashSegment',
     authority: 'EXECUTE',
@@ -397,6 +433,7 @@ GIEO.define('commands/shift', [
     summarizeDay: summarizeDay,
     closeDayBlockers: closeDayBlockers,
     OpenCashSegment: OpenCashSegment,
+    RecordCashCount: RecordCashCount,
     CheckIn: CheckIn,
     CheckOut: CheckOut,
     CloseCashSegment: CloseCashSegment

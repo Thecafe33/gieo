@@ -400,6 +400,51 @@ describe('P9/P10 — query cho màn Ca / Cảnh báo / Duyệt', function () {
       assert.strictEqual(out.data.closedSegmentCount, 1);
       assert.strictEqual(out.data.employeesOnShift.length, 1);
     });
+
+    test('đoạn đang mở trả đủ chi tiết cho màn Ca làm việc đối soát', function () {
+      var out = assertOk(_r.G.getShiftStatus(rCtx(), {
+        businessDay: { businessDate: '2026-03-10', status: 'OPEN' },
+        segments: [{
+          segmentId: 'shift_seg_1', seq: 1, status: 'OPEN', startCash: 500000,
+          startCashSource: 'OPENING_FLOAT', cashSales: 1800000, cashOut: 0,
+          counts: [], openedAt: 900, openedBy: _r.NV
+        }]
+      }));
+      assert.strictEqual(out.data.openSegment.startCash, 500000);
+      assert.strictEqual(out.data.openSegment.expectedEndCashPreview, 2300000,
+        'xem trước lẽ ra phải có = startCash + cashSales - cashOut');
+      assert.deepStrictEqual(out.data.openSegment.counts, []);
+    });
+
+    test('đoạn vừa chốt gần nhất hiện variance — không chỉ đếm số đoạn đã đóng', function () {
+      var out = assertOk(_r.G.getShiftStatus(rCtx(), {
+        businessDay: { businessDate: '2026-03-10', status: 'OPEN' },
+        segments: [
+          { seq: 1, status: 'CLOSED', expectedEndCash: 2300000, actualEndCash: 2250000, variance: -50000, closedAt: 5000, closedBy: _r.NV },
+          { seq: 2, status: 'CLOSED', expectedEndCash: 1000000, actualEndCash: 1000000, variance: 0, closedAt: 9000, closedBy: _r.NV }
+        ]
+      }));
+      assert.strictEqual(out.data.lastClosedSegment.seq, 2, 'phải là đoạn seq LỚN NHẤT, không phải đoạn đầu tiên');
+      assert.strictEqual(out.data.lastClosedSegment.variance, 0);
+    });
+
+    test('chưa có đoạn nào chốt thì lastClosedSegment là null, không phải 0/rỗng mập mờ', function () {
+      var out = assertOk(_r.G.getShiftStatus(rCtx(), { businessDay: null, segments: [] }));
+      assert.strictEqual(out.data.lastClosedSegment, null);
+    });
+
+    test('roster mặc định rỗng khi data source chưa cấp — không suy ra ai được check-in', function () {
+      var out = assertOk(_r.G.getShiftStatus(rCtx(), { businessDay: null, segments: [] }));
+      assert.deepStrictEqual(out.data.roster, []);
+    });
+
+    test('roster đi qua nguyên vẹn khi data source cấp — HR config, không phải fifo-core tự tính', function () {
+      var out = assertOk(_r.G.getShiftStatus(rCtx(), {
+        businessDay: null, segments: [], roster: [{ employeeId: _r.NV, fullName: 'An' }]
+      }));
+      assert.strictEqual(out.data.roster.length, 1);
+      assert.strictEqual(out.data.roster[0].fullName, 'An');
+    });
   });
 
   describe('GetAlerts', function () {
