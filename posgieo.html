@@ -266,7 +266,11 @@ body{font-family:'Google Sans',sans-serif;background:var(--bg);max-width:430px;m
    (.hbg: 44x44, bo góc 12px, nền be nhạt) để rõ ràng đây là một nút bấm được, kèm icon
    chuông + số đếm (dùng chung class huy hiệu .cb đã có sẵn ở nút giỏ hàng .bch, cho đồng bộ
    kiểu chữ/màu số trong toàn app thay vì bịa thêm một kiểu badge mới). */
-.fifo-alert-btn{display:none;position:absolute;top:0;left:52px;width:44px;height:44px;border:none;
+/* [FIX-align] top:0 trước đây đo từ mép TRÊN CÙNG của .mh (khung positioning cha), trong khi
+   .mh có padding-top:16px nên nút mở sidebar (.hbg, nằm trong luồng flex bình thường) thực tế
+   nằm THẤP HƠN 16px so với mép đó. Kết quả: nút chuông này luôn cao hơn nút sidebar 16px dù
+   cùng khuôn 44x44. Đổi top:0 → top:16px để khớp đúng padding-top của .mh, hai nút thẳng hàng. */
+.fifo-alert-btn{display:none;position:absolute;top:16px;left:52px;width:44px;height:44px;border:none;
   background:#FFFCF0;border-radius:12px;cursor:pointer;align-items:center;justify-content:center;
   z-index:11;animation:fifoPulse 1.6s ease-in-out infinite;}
 @keyframes fifoPulse{0%,100%{box-shadow:0 0 0 0 rgba(231,76,60,.35)}50%{box-shadow:0 0 0 5px rgba(231,76,60,0)}}
@@ -4494,19 +4498,26 @@ function renderFifoAlertBar() {
   }
   if (!n || !_fifoAlertExpanded) { bar.style.display = 'none'; bar.innerHTML = ''; return; }
   bar.style.display = 'block';
+  // [FIX-UI] TRƯỚC ĐÂY câu giải thích "Theo tính toán, tem này vừa dùng hết..." lặp lại
+  // NGUYÊN VĂN cho từng tem — với 2-3 tem thì chiếm gần hết chiều cao panel, đẩy nút
+  // "Quét mã xác nhận" ở cuối xuống dưới, dễ bị khuất/phải cuộn mới thấy. Giờ chỉ nói MỘT
+  // LẦN, rút gọn, ngay dưới tiêu đề — từng dòng tem bên dưới chỉ còn tên + mã + nút riêng.
+  // "Thu gọn" cũng đổi sang nền trắng viền rõ (trước là xám nhạt trên nền trắng, khó thấy).
+  // Nút "Quét mã xác nhận" đổi từ hồng (var(--gd), trùng tông với lưới menu) sang xanh
+  // dương (var(--bi)) để tách bạch hẳn khỏi các nút món trong menu.
   bar.innerHTML = `
     <div class="fifo-alert-panel">
       <div class="fifo-alert-panel-h">
         <div style="font-size:13px;font-weight:800;color:#b91c1c;">Cần xác nhận đã hết (${n})</div>
-        <button onclick="toggleFifoAlertBar()" style="background:#f3f3f3;border:none;border-radius:10px;padding:5px 10px;font-size:11.5px;font-weight:700;color:#666;cursor:pointer;">Thu gọn</button>
+        <button onclick="toggleFifoAlertBar()" style="background:#fff;border:1.5px solid #ccc;border-radius:10px;padding:5px 10px;font-size:11.5px;font-weight:800;color:#333;cursor:pointer;">Thu gọn</button>
       </div>
+      <div style="font-size:12px;color:#a16207;margin:2px 0 8px;line-height:1.5;">Các tem dưới đây đã dùng hết theo tính toán — quét mã để xác nhận, hoặc bấm "Chưa hết" nếu cân/đong lại vẫn còn hàng.</div>
       ${FIFO_PENDING_CONFIRM.map(c => `
         <div class="fifo-alert-item">
           <div style="font-size:13.5px;font-weight:700;color:var(--td);">${escHtmlPos(c.itemName || '')} <span style="font-size:11px;color:#999;font-weight:600;letter-spacing:.4px;">${escHtmlPos(c.code || '')}</span></div>
-          <div style="font-size:12px;color:#a16207;margin-top:2px;line-height:1.5;">Theo tính toán, tem này vừa dùng hết — đúng chứ? Quét mã trên tem để xác nhận, hoặc nếu cân/đong lại vẫn còn hàng thì bấm "Chưa hết" bên dưới.</div>
-          <button onclick="fifoNotEmptyPrompt('${c.id}')" style="width:100%;margin-top:8px;padding:10px;background:#fff;color:#a16207;border:1.5px solid #f6d29a;border-radius:12px;font-family:'Google Sans',sans-serif;font-size:12.5px;font-weight:700;cursor:pointer;">Chưa hết — cân lại</button>
+          <button onclick="fifoNotEmptyPrompt('${c.id}')" style="width:100%;margin-top:6px;padding:9px;background:#fff;color:#a16207;border:1.5px solid #f6d29a;border-radius:12px;font-family:'Google Sans',sans-serif;font-size:12.5px;font-weight:700;cursor:pointer;">Chưa hết — cân lại</button>
         </div>`).join('')}
-      <button onclick="fifoAlertScanNow()" style="width:100%;margin-top:8px;padding:12px;background:var(--gd);color:#fff;border:none;border-radius:13px;font-family:'Google Sans',sans-serif;font-size:13.5px;font-weight:700;cursor:pointer;">Quét mã xác nhận</button>
+      <button onclick="fifoAlertScanNow()" style="width:100%;margin-top:8px;padding:12px;background:var(--bi);color:#fff;border:none;border-radius:13px;font-family:'Google Sans',sans-serif;font-size:13.5px;font-weight:700;cursor:pointer;">Quét mã xác nhận</button>
     </div>`;
 }
 
