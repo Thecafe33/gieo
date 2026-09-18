@@ -10358,6 +10358,7 @@ GIEO.define('read-layer/gateway', [
       computeLive: function () {
         var bills = spec.bills || [];
         var byChannel = {};
+        var byPaymentMethod = {};
         var gross = 0, fees = 0, net = 0, discounts = 0;
 
         bills.forEach(function (b) {
@@ -10371,6 +10372,16 @@ GIEO.define('read-layer/gateway', [
           byChannel[k].fees += b.channelFee || 0;
           byChannel[k].net += b.netRevenue;
           byChannel[k].billCount += 1;
+
+          /* Tách theo hình thức thanh toán — bill trả nhiều phần (tính riêng)
+             thì từng phần cộng đúng vào hình thức của nó, KHÔNG gộp cả bill
+             vào một hình thức. `payment.method` dùng chung enum CASH|BANK với
+             `commands/finance.RecordExpense`. Không khai method thì vào
+             UNKNOWN — nói rõ thay vì đoán là tiền mặt. */
+          (b.payments || []).forEach(function (p) {
+            var m = p.method || 'UNKNOWN';
+            byPaymentMethod[m] = (byPaymentMethod[m] || 0) + (p.amount || 0);
+          });
         });
 
         return R.ok({
@@ -10380,7 +10391,8 @@ GIEO.define('read-layer/gateway', [
           channelFees: fees,
           netRevenue: net,
           /* Tách theo kênh — dữ liệu legacy đã có nhưng P&L chỉ 1 số tổng. */
-          byChannel: byChannel
+          byChannel: byChannel,
+          byPaymentMethod: byPaymentMethod
         });
       },
       computedAt: ctx.clock.now()

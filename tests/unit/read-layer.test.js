@@ -227,6 +227,30 @@ describe('read-layer — doanh thu MỘT implementation (R3)', function () {
     var mgr = assertOk(G.getRevenue(rCtx('STORE_MANAGER', 'POS'), { bills: bills }));
     assert.deepStrictEqual(ql.data, mgr.data);
   });
+
+  test('tách theo hình thức thanh toán — bill tính riêng cộng đúng từng phần', function () {
+    var out = assertOk(G.getRevenue(rCtx('QUANLY_ADMIN', 'QUANLY', _r.QL), {
+      bills: [
+        bill({ payments: [{ method: 'CASH', amount: 100000 }] }),
+        bill({ payments: [{ method: 'CASH', amount: 40000 }, { method: 'BANK', amount: 60000 }] })
+      ]
+    }));
+    assert.strictEqual(out.data.byPaymentMethod.CASH, 140000);
+    assert.strictEqual(out.data.byPaymentMethod.BANK, 60000);
+  });
+
+  test('payment thiếu method thì vào UNKNOWN — không đoán là tiền mặt', function () {
+    var out = assertOk(G.getRevenue(rCtx('QUANLY_ADMIN', 'QUANLY', _r.QL), {
+      bills: [bill({ payments: [{ amount: 50000 }] })]
+    }));
+    assert.strictEqual(out.data.byPaymentMethod.UNKNOWN, 50000);
+    assert.strictEqual(out.data.byPaymentMethod.CASH, undefined);
+  });
+
+  test('bill không có payments thì byPaymentMethod rỗng, không lỗi', function () {
+    var out = assertOk(G.getRevenue(rCtx('QUANLY_ADMIN', 'QUANLY', _r.QL), { bills: [bill()] }));
+    assert.deepStrictEqual(out.data.byPaymentMethod, {});
+  });
 });
 
 describe('read-layer — COGS luôn 2 vế (§3, invariant R8)', function () {
