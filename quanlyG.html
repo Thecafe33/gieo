@@ -1327,6 +1327,22 @@ html.phone-ui .nav-search .ns-kbd{display:none;}
         <div id="todayAlerts"></div>
       </div>
     </div>
+
+    <!-- HEALTH — lát cắt Pha B tiếp theo, 2026-09-18. DOM/id giữ nguyên văn theo
+         quanlygieo.html#screen-health, không tạo class CSS mới. -->
+    <div class="screen" id="screen-health">
+      <div class="wrap">
+        <div class="seg" id="healthSeg">
+          <button data-p="today" class="active">Hôm nay</button>
+          <button data-p="week">7 ngày</button>
+          <button data-p="month">Tháng</button>
+          <button data-p="year">Năm</button>
+          <button data-p="custom">Tuỳ chọn</button>
+        </div>
+        <div id="healthPeriodNav" style="margin-bottom:14px"></div>
+        <div id="healthBody"></div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -19853,7 +19869,8 @@ GIEO.define('app-quanly/controller', [
       closeEditSheet(true);
       clearError();
       toast('✅ Đã đăng nhập — core mới sẵn sàng (' + session.employee.fullName + ')');
-      renderTodayScreen();
+      renderSidebarNav();
+      switchScreen('today');
       return out;
     });
   }
@@ -19866,7 +19883,10 @@ GIEO.define('app-quanly/controller', [
      vì store này CHƯA cutover nên GetAlerts/GetPendingApprovals chưa có đường
      đọc từ schema cũ (bootstrap/legacy-data-source.js#NOT_WIRED) — được ĐÁNH
      DẤU GAP tại chỗ, hiện nguyên văn lý do lỗi, TUYỆT ĐỐI không giả lập số. */
-  function reloadCurrent() { renderTodayScreen(); }
+  function reloadCurrent() {
+    if (typeof curScreen !== 'undefined' && curScreen === 'health') { renderHealthScreen(); return; }
+    renderTodayScreen();
+  }
   function openSidebar() {
     var s = document.getElementById('sidebar'), b = document.getElementById('sidebarBackdrop');
     if (s) s.classList.add('open');
@@ -20095,6 +20115,213 @@ GIEO.define('app-quanly/controller', [
       setSyncBusy(false);
     });
   }
+
+  /* ===== Điều hướng tối thiểu giữa các màn ĐÃ NỐI core mới =====
+     Chỉ liệt kê 2 màn đã build (today/health) — không tái tạo switchScreen()
+     đầy đủ của legacy (bản đó có nhánh gọi hàng chục hàm chưa port, sẽ vỡ). */
+  var curScreen = 'today';
+  var SCREENS = [
+    { key: 'today', label: 'Hôm nay · Sức khoẻ quán', ic: 'stethoscope' },
+    { key: 'health', label: 'Sức khoẻ tài chính', ic: 'pulse' }
+  ];
+  function switchScreen(s) {
+    if (!SCREENS.some(function (x) { return x.key === s; })) return;
+    curScreen = s;
+    document.querySelectorAll('.screen').forEach(function (el) { el.classList.remove('active'); });
+    var el = document.getElementById('screen-' + s);
+    if (el) el.classList.add('active');
+    var found = SCREENS.filter(function (x) { return x.key === s; })[0];
+    var t = document.getElementById('hdrTitle');
+    if (t && found) t.textContent = found.label;
+    renderSidebarNav();
+    closeSidebar();
+    window.scrollTo(0, 0);
+    if (s === 'today') renderTodayScreen();
+    if (s === 'health') renderHealthScreen();
+  }
+  function renderSidebarNav() {
+    var nav = document.getElementById('sidebarNav');
+    if (!nav) return;
+    nav.innerHTML = SCREENS.map(function (it) {
+      return '<button class="sidebar-item' + (curScreen === it.key ? ' active' : '') + '" ' +
+        'onclick="switchScreen(\'' + it.key + '\')"><span class="sb-ic">' + ic(it.ic, 18) + '</span>' +
+        '<span>' + escapeHtmlAttr(it.label) + '</span></button>';
+    }).join('');
+  }
+
+  /* ===== Màn "Sức khoẻ tài chính" (screen-health) =====
+     Điều hướng kỳ (periodRange/healthShiftMonth/healthShiftYear/renderHealthPeriodNav)
+     port NGUYÊN VĂN theo quanlygieo.html — đây là tính toán ngày thuần UI, không phải
+     nghiệp vụ FIFO/giá vốn, nên được phép tái dùng (khác với việc port lại công thức
+     P&L/hoà vốn/thu hồi vốn — những cái đó vẫn là GAP, xem renderHealthGapNotes). */
+  var curHealthPeriod = 'today';
+  var healthMonthAnchor = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+  var healthYearAnchor = new Date().getFullYear();
+  var healthCustomStart = dkey(new Date());
+  var healthCustomEnd = dkey(new Date());
+  var VN_MONTHS = ['Tháng 1', 'Tháng 2', 'Tháng 3', 'Tháng 4', 'Tháng 5', 'Tháng 6',
+    'Tháng 7', 'Tháng 8', 'Tháng 9', 'Tháng 10', 'Tháng 11', 'Tháng 12'];
+
+  function periodRangeHealth(p) {
+    var today = new Date(); today.setHours(0, 0, 0, 0);
+    if (p === 'today') return { start: today, end: today };
+    if (p === 'week') { var s = new Date(today); s.setDate(s.getDate() - 6); return { start: s, end: today }; }
+    if (p === 'month') {
+      var start = new Date(healthMonthAnchor.getFullYear(), healthMonthAnchor.getMonth(), 1);
+      var end = new Date(healthMonthAnchor.getFullYear(), healthMonthAnchor.getMonth() + 1, 0);
+      if (end > today) end = today;
+      return { start: start, end: end };
+    }
+    if (p === 'year') {
+      var ys = new Date(healthYearAnchor, 0, 1);
+      var ye = new Date(healthYearAnchor, 11, 31);
+      if (ye > today) ye = today;
+      return { start: ys, end: ye };
+    }
+    var cs = new Date(healthCustomStart + 'T00:00:00');
+    var ce = new Date(healthCustomEnd + 'T00:00:00');
+    if (ce < cs) ce = cs;
+    return { start: cs, end: ce };
+  }
+  function healthShiftMonth(dir) {
+    healthMonthAnchor = new Date(healthMonthAnchor.getFullYear(), healthMonthAnchor.getMonth() + dir, 1);
+    var now = new Date();
+    if (healthMonthAnchor.getFullYear() > now.getFullYear() ||
+      (healthMonthAnchor.getFullYear() === now.getFullYear() && healthMonthAnchor.getMonth() > now.getMonth())) {
+      healthMonthAnchor = new Date(now.getFullYear(), now.getMonth(), 1);
+    }
+    renderHealthScreen();
+  }
+  function healthShiftYear(dir) {
+    healthYearAnchor = Math.min(healthYearAnchor + dir, new Date().getFullYear());
+    renderHealthScreen();
+  }
+  function healthCustomChanged() {
+    healthCustomStart = document.getElementById('hcStart').value;
+    healthCustomEnd = document.getElementById('hcEnd').value;
+    renderHealthScreen();
+  }
+  function renderHealthPeriodNav() {
+    var nav = document.getElementById('healthPeriodNav');
+    if (!nav) return;
+    var today = new Date();
+    if (curHealthPeriod === 'month') {
+      var isCurMonth = healthMonthAnchor.getFullYear() === today.getFullYear() && healthMonthAnchor.getMonth() === today.getMonth();
+      nav.innerHTML = '<div class="weeknav"><button onclick="healthShiftMonth(-1)">‹</button>' +
+        '<div class="wk-label">' + VN_MONTHS[healthMonthAnchor.getMonth()] + '/' + healthMonthAnchor.getFullYear() + '</div>' +
+        '<button onclick="healthShiftMonth(1)"' + (isCurMonth ? ' disabled style="opacity:.3"' : '') + '>›</button></div>';
+    } else if (curHealthPeriod === 'year') {
+      var isCurYear = healthYearAnchor === today.getFullYear();
+      nav.innerHTML = '<div class="weeknav"><button onclick="healthShiftYear(-1)">‹</button>' +
+        '<div class="wk-label">Năm ' + healthYearAnchor + '</div>' +
+        '<button onclick="healthShiftYear(1)"' + (isCurYear ? ' disabled style="opacity:.3"' : '') + '>›</button></div>' +
+        '<div class="small-note" style="margin-top:6px">Xem cả năm phải đọc bill từng ngày — lần đầu có thể chậm.</div>';
+    } else if (curHealthPeriod === 'custom') {
+      nav.innerHTML = '<div class="grid2">' +
+        '<div class="field" style="margin-bottom:0"><label>Từ ngày</label>' +
+        '<input type="date" id="hcStart" value="' + healthCustomStart + '" onchange="healthCustomChanged()"></div>' +
+        '<div class="field" style="margin-bottom:0"><label>Đến ngày</label>' +
+        '<input type="date" id="hcEnd" value="' + healthCustomEnd + '" onchange="healthCustomChanged()"></div></div>';
+    } else {
+      nav.innerHTML = '';
+    }
+  }
+
+  /* Cộng lại các field ĐÃ ĐƯỢC CORE TÍNH SẴN trên từng bill (bill.total/netRevenue/
+     channelFee/discountTotal/cogs.*) theo đúng công thức của GetRevenue/GetCOGS
+     (src/layers/read-layer/gateway.js) — KHÔNG tính lại giá vốn/doanh thu, chỉ gộp
+     số đã có, giống cách #todayHourly gộp bill theo giờ ở màn Hôm nay. */
+  function aggregateBillsToRevenueCogs(bills) {
+    var gross = 0, fees = 0, net = 0, discounts = 0, cogsTheoretical = 0, cogsActual = 0;
+    var missingActual = [];
+    bills.forEach(function (b) {
+      gross += b.total || 0;
+      fees += b.channelFee || 0;
+      net += (b.netRevenue != null ? b.netRevenue : 0);
+      discounts += b.discountTotal || 0;
+      var c = b.cogs;
+      if (!c) { missingActual.push(b.billId); return; }
+      cogsTheoretical += c.cogsTheoretical || 0;
+      if (c.cogsActual === null || c.cogsActual === undefined) missingActual.push(b.billId);
+      else cogsActual += c.cogsActual;
+    });
+    var actualComplete = missingActual.length === 0 && bills.length > 0;
+    return {
+      billCount: bills.length, grossRevenue: gross, discountTotal: discounts,
+      channelFees: fees, netRevenue: net, cogsTheoretical: cogsTheoretical,
+      cogsActual: actualComplete ? cogsActual : null, missingActual: missingActual
+    };
+  }
+
+  function renderHealthBody(el, billsOut, rangeLabel) {
+    if (!el) return;
+    if (R.isErr(billsOut)) {
+      el.innerHTML = '<div class="muted">Không đọc được bill cho kỳ này: ' + escapeHtmlAttr(billsOut.error.message) + '</div>';
+      return;
+    }
+    var agg = aggregateBillsToRevenueCogs(billsOut.value.bills || []);
+    el.innerHTML =
+      '<div class="kgrid">' +
+        '<div class="kcard kcard-wide">' +
+          '<div class="klabel">Doanh thu ' + escapeHtmlAttr(rangeLabel) + '</div>' +
+          '<div class="kval disp">' + fmt(agg.netRevenue) + '</div>' +
+          '<div class="ksub">Gộp ' + fmt(agg.grossRevenue) + ' · giảm giá ' + fmt(agg.discountTotal) +
+          ' · phí kênh ' + fmt(agg.channelFees) + ' · ' + agg.billCount + ' bill</div>' +
+        '</div>' +
+        '<div class="kcard"><div class="klabel">Giá vốn (COGS)</div>' +
+        '<div class="kval">' + fmt(agg.cogsActual !== null ? agg.cogsActual : agg.cogsTheoretical) + '</div>' +
+        '<div class="ksub">' + (agg.cogsActual !== null ? 'Theo thực tế' : 'Theo định mức — thiếu vế thực tế') +
+        (agg.missingActual.length ? ' · ' + agg.missingActual.length + ' bill thiếu' : '') + '</div></div>' +
+        '<div class="kcard" style="grid-column:1 / -1">' +
+        '<div class="klabel">Lợi nhuận gộp (ước tính từ doanh thu − COGS)</div>' +
+        '<div class="kval">' + fmt(agg.netRevenue - (agg.cogsActual !== null ? agg.cogsActual : agg.cogsTheoretical)) + '</div>' +
+        '<div class="ksub">Đây KHÔNG phải lãi/lỗ cuối cùng — chưa trừ chi phí vận hành, lương, khấu hao (xem GAP bên dưới).</div>' +
+        '</div>' +
+      '</div>' +
+      renderHealthGapNotes();
+  }
+
+  function renderHealthGapNotes() {
+    return '<div class="card" style="margin-top:14px">' +
+      '<div class="card-h">Chưa nối được ở lát cắt này (GAP — core mới chưa có nguồn/công thức)</div>' +
+      '<div class="muted" style="line-height:1.7">' +
+      '• Lãi/lỗ đầy đủ (chi phí cố định/biến đổi, lương thật/dự đoán, khấu hao)<br>' +
+      '• Điểm hoà vốn &amp; mức sức khoẻ 5 màu<br>' +
+      '• Thu hồi vốn đầu tư luỹ kế<br>' +
+      '• Vốn tồn trong kho, DOH, hàng tồn kho lâu ngày, BTP hết hạn<br>' +
+      '• GOGS/hao hụt/chênh lệch tiền THẬT đọc thẳng từ ledger (stock/prep transactions, daily closings)<br>' +
+      '• Giờ công thật từ chấm công (đang chạy/quên check-out)<br>' +
+      'Tất cả các mục trên đều KHÔNG có query tương đương trong core mới (đã rà soát ' +
+      'src/layers) — không giả lập số, để trống chờ lát cắt sau.</div></div>';
+  }
+
+  function renderHealthScreen() {
+    var controller = window.GIEO_QUANLY_CONTROLLER;
+    if (!controller) return;
+    renderHealthPeriodNav();
+    var range = periodRangeHealth(curHealthPeriod);
+    var fromKey = dkey(range.start), toKey = dkey(range.end);
+    var rangeLabel = (curHealthPeriod === 'today') ? 'hôm nay' : (fromKey === toKey ? fromKey : fromKey + ' → ' + toKey);
+    var bodyEl = document.getElementById('healthBody');
+    if (bodyEl) bodyEl.innerHTML = '<div class="muted">Đang tải…</div>';
+    setSyncBusy(true);
+    controller.getBillsForRange({ storeId: STORE_ID, from: fromKey, to: toKey })
+      .then(function (billsOut) {
+        renderHealthBody(bodyEl, billsOut, rangeLabel);
+        clearError();
+      })
+      .catch(function (err) {
+        showError('Không tải được Sức khoẻ tài chính: ' + (err && err.message ? err.message : err));
+      })
+      .then(function () { setSyncBusy(false); });
+  }
+
+  document.getElementById('healthSeg').addEventListener('click', function (e) {
+    var b = e.target.closest('button'); if (!b) return;
+    curHealthPeriod = b.dataset.p;
+    document.querySelectorAll('#healthSeg button').forEach(function (x) { x.classList.toggle('active', x === b); });
+    renderHealthScreen();
+  });
 
   function renderLoginSheet(prepared) {
     var bodyHtml =
