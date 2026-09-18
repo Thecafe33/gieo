@@ -20226,10 +20226,70 @@ GIEO.define('app-quanly/controller', [
      loại trừ vĩnh viễn (không bao giờ xây) vẫn liệt kê ở đây để khớp đúng
      menu gốc, nhưng vĩnh viễn ở trạng thái disabled. */
   var curScreen = 'today';
+  /* [LÁT CẮT round "giao diện rỗng"] SCREENS giờ liệt kê MỌI màn cấp cao thật
+     sự có #screen-<key> trong DOM (kể cả entry — mega-screen chứa hết các
+     sub-tab entry:*/kho:*). Các mục con entry:*/kho:* KHÔNG có #screen riêng
+     — chúng là tab bên trong #screen-entry, xem ENTRY_TABS/KHO_TABS/goEntry/
+     goKho bên dưới. Chưa màn nào nối core thật ngoài today/health — tất cả
+     còn lại chỉ render "chưa nối dữ liệu". */
   var SCREENS = [
     { key: 'today', label: 'Hôm nay · Sức khoẻ quán', ic: 'stethoscope' },
-    { key: 'health', label: 'Sức khoẻ tài chính', ic: 'pulse' }
+    { key: 'health', label: 'Sức khoẻ tài chính', ic: 'pulse' },
+    { key: 'report', label: 'Báo cáo kỳ', ic: 'chart' },
+    { key: 'mix', label: 'Phân tích bán hàng', ic: 'clipboard' },
+    { key: 'customer', label: 'Khách hàng', ic: 'users' },
+    { key: 'bills', label: 'Lịch sử bill', ic: 'receipt' },
+    { key: 'inbox', label: 'Hộp thư cảnh báo', ic: 'stethoscope' },
+    { key: 'assist', label: 'Trợ lý bán hàng', ic: 'robot' },
+    { key: 'mn', label: 'Quản lý Menu', ic: 'clipboard' },
+    { key: 'tg', label: 'Khuyến mãi', ic: 'coins' },
+    { key: 'sim', label: 'Mô phỏng', ic: 'sliders' },
+    { key: 'entry', label: 'Nhập liệu', ic: 'note' }
   ];
+  /* Các tab bên trong #screen-entry khi curEntryTab !== 'kho'. 'kho' tự nó là
+     một tab đặc biệt: khi active thì bung thêm KHO_TABS (curKhoSub). */
+  var ENTRY_TABS = [
+    { key: 'ops', label: 'Ghi chú ngày' },
+    { key: 'exp', label: 'Chi phí' },
+    { key: 'cash', label: 'Tiền mặt' },
+    { key: 'ngaydacbiet', label: 'Ngày đặc biệt' },
+    { key: 'export', label: 'Trích xuất dữ liệu' },
+    { key: 'nv', label: 'Nhân viên' },
+    { key: 'lich', label: 'Lịch làm việc' },
+    { key: 'chamcong', label: 'Chấm công' },
+    { key: 'luong', label: 'Lương' },
+    { key: 'nhacnho', label: 'Nhắc nhở' },
+    { key: 'asset', label: 'Tài sản' },
+    { key: 'target', label: 'Mục tiêu' },
+    { key: 'dondep', label: 'Dọn dữ liệu' },
+    { key: 'cogs', label: 'GOGS Món' },
+    { key: 'audit', label: 'Kiểm toán' }
+  ];
+  /* Sub-tab của nhánh Kho (curEntryTab === 'kho'). 'bulkimport' KHÔNG có mặt
+     ở đây — theo đúng comment gốc, mục này bị loại trừ vĩnh viễn, mãi mãi ở
+     trạng thái disabled trong sidebar. */
+  var KHO_TABS = [
+    { key: 'inbox', label: 'Cần xử lý' },
+    { key: 'items', label: 'Nguyên liệu' },
+    { key: 'prep', label: 'Chế biến cấp 1' },
+    { key: 'vessels', label: 'Dụng cụ đựng' },
+    { key: 'packaging', label: 'Bao bì' },
+    { key: 'toppingcogs', label: 'GOGS Topping' },
+    { key: 'po', label: 'Đặt & nhận hàng' },
+    { key: 'stockcount', label: 'Kiểm kê' },
+    { key: 'containers', label: 'Hàng đang mở & tem' },
+    { key: 'refill', label: 'Refill' },
+    { key: 'locstock', label: 'Tồn theo vị trí' },
+    { key: 'history', label: 'Lịch sử kho' },
+    { key: 'location', label: 'Vị trí kho' },
+    { key: 'wastereasons', label: 'Lý do hao hụt' },
+    { key: 'checklist', label: 'Checklist ca' },
+    { key: 'lechkho', label: 'Lệch kho & định lượng' },
+    { key: 'dubao', label: 'Dự báo & số mẻ' },
+    { key: 'recipe', label: 'Định mức món' }
+  ];
+  var curEntryTab = 'ops';
+  var curKhoSub = 'inbox';
   var NAV_SECTIONS_FULL = [
     { items: [{ key: 'today', ic: 'stethoscope', label: 'Hôm nay · Sức khoẻ quán' }] },
     { group: 'Báo cáo', items: [
@@ -20292,27 +20352,96 @@ GIEO.define('app-quanly/controller', [
       { key: 'entry:audit', ic: 'detective', label: 'Kiểm toán' }
     ]}
   ];
+  /* NAV_LABEL: nhãn tiêu đề header theo đúng MỤC CON đang mở (giống legacy
+     currentNavKey()/NAV_LABEL) — dựng thẳng từ NAV_SECTIONS_FULL nên khỏi
+     phải duy trì hai danh sách song song. */
+  var NAV_LABEL = (function () {
+    var m = { inbox: 'Hộp thư cảnh báo' };
+    NAV_SECTIONS_FULL.forEach(function (sec) { sec.items.forEach(function (it) { m[it.key] = it.label; }); });
+    return m;
+  })();
+  function currentNavKey() {
+    if (curScreen !== 'entry') return curScreen;
+    if (curEntryTab === 'kho') return 'kho:' + curKhoSub;
+    return 'entry:' + curEntryTab;
+  }
+  var REPORT_SCREENS = [
+    { s: 'today', label: 'Hôm nay' }, { s: 'health', label: 'Tài chính' },
+    { s: 'report', label: 'Theo kỳ' }, { s: 'mix', label: 'Bán hàng' },
+    { s: 'customer', label: 'Khách hàng' }
+  ];
+  function renderReportSubNav() {
+    var html = '<div class="report-subnav">' + REPORT_SCREENS.map(function (r) {
+      return '<button class="' + (curScreen === r.s ? 'active' : '') + '" onclick="switchScreen(\'' + r.s + '\')">' + escapeHtmlAttr(r.label) + '</button>';
+    }).join('') + '</div>';
+    ['reportSubNavToday', 'reportSubNavHealth', 'reportSubNavReport', 'reportSubNavMix', 'reportSubNavCustomer'].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.innerHTML = html;
+    });
+  }
+  function goEntry(tab) { curEntryTab = tab; switchScreen('entry'); }
+  function goKho(sub) { curEntryTab = 'kho'; curKhoSub = sub || 'inbox'; switchScreen('entry'); }
+  window.goEntry = goEntry; /* [FIX] gọi từ onclick trong renderSidebarNav()/renderEntryScreen() */
+  window.goKho = goKho;     /* [FIX] gọi từ onclick trong renderSidebarNav()/renderEntryScreen() */
+  function emptyHintFor(label) {
+    return '<div class="empty-hint">' + escapeHtmlAttr(label || '') +
+      ' — chưa nối dữ liệu. Core mới chưa có command/query cho màn này (xem UI-LEGACY-MIGRATION-PLAN-V1.md §3.3, đợi lát cắt sau).</div>';
+  }
+  function renderEntryScreen() {
+    var bar = document.getElementById('entryTabBar');
+    if (bar) {
+      bar.innerHTML = '<div class="report-subnav">' + ENTRY_TABS.map(function (t) {
+        return '<button class="' + (curEntryTab === t.key ? 'active' : '') + '" onclick="goEntry(\'' + t.key + '\')">' + escapeHtmlAttr(t.label) + '</button>';
+      }).join('') + '<button class="' + (curEntryTab === 'kho' ? 'active' : '') + '" onclick="goKho(curKhoSub)">Kho</button></div>';
+    }
+    var khoBar = document.getElementById('entryKhoSubBar');
+    if (khoBar) {
+      khoBar.innerHTML = curEntryTab !== 'kho' ? '' :
+        '<div class="report-subnav">' + KHO_TABS.map(function (t) {
+          return '<button class="' + (curKhoSub === t.key ? 'active' : '') + '" onclick="goKho(\'' + t.key + '\')">' + escapeHtmlAttr(t.label) + '</button>';
+        }).join('') + '</div>';
+    }
+    var body = document.getElementById('entryTabBody');
+    if (body) {
+      var label = curEntryTab === 'kho'
+        ? (KHO_TABS.filter(function (t) { return t.key === curKhoSub; })[0] || {}).label
+        : (ENTRY_TABS.filter(function (t) { return t.key === curEntryTab; })[0] || {}).label;
+      body.innerHTML = emptyHintFor(label);
+    }
+  }
   function switchScreen(s) {
     if (!SCREENS.some(function (x) { return x.key === s; })) return;
     curScreen = s;
     document.querySelectorAll('.screen').forEach(function (el) { el.classList.remove('active'); });
     var el = document.getElementById('screen-' + s);
     if (el) el.classList.add('active');
+    var navKey = currentNavKey();
     var found = SCREENS.filter(function (x) { return x.key === s; })[0];
     var t = document.getElementById('hdrTitle');
-    if (t && found) t.textContent = found.label;
+    if (t) t.textContent = NAV_LABEL[navKey] || (found && found.label) || '';
     renderSidebarNav();
+    renderReportSubNav();
     closeSidebar();
     window.scrollTo(0, 0);
     if (s === 'today') renderTodayScreen();
     if (s === 'health') renderHealthScreen();
+    if (s === 'entry') renderEntryScreen();
   }
   window.switchScreen = switchScreen; /* [FIX] gọi từ onclick trong renderSidebarNav() */
-  function isScreenBuilt(key) { return SCREENS.some(function (x) { return x.key === key; }); }
+  function isScreenBuilt(key) {
+    if (key.indexOf('entry:') === 0) return ENTRY_TABS.some(function (t) { return 'entry:' + t.key === key; });
+    if (key.indexOf('kho:') === 0) return KHO_TABS.some(function (t) { return 'kho:' + t.key === key; });
+    return SCREENS.some(function (x) { return x.key === key; });
+  }
+  function navClickFor(key) {
+    if (key.indexOf('entry:') === 0) return "goEntry('" + key.slice(6) + "')";
+    if (key.indexOf('kho:') === 0) return "goKho('" + key.slice(4) + "')";
+    return "switchScreen('" + key + "')";
+  }
   function navItemHtml(it, indent) {
     var built = isScreenBuilt(it.key);
-    var cls = 'sidebar-item' + (indent ? ' sub' : '') + (built && curScreen === it.key ? ' active' : '');
-    var attrs = built ? ' onclick="switchScreen(\'' + it.key + '\')"' : ' disabled';
+    var cls = 'sidebar-item' + (indent ? ' sub' : '') + (built && currentNavKey() === it.key ? ' active' : '');
+    var attrs = built ? ' onclick="' + navClickFor(it.key) + '"' : ' disabled';
     return '<button class="' + cls + '"' + attrs + '>' +
       (it.ic ? '<span class="sb-ic">' + ic(it.ic, 18) + '</span>' : '') +
       '<span>' + escapeHtmlAttr(it.label) + '</span></button>';
