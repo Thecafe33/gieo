@@ -6711,8 +6711,10 @@ function plRecalcNotes(expList, start, end){
 
 // Một dòng trong bảng tách chi phí. `dau` là '+' hoặc '−' để đọc được ngay là
 // khoản này cộng vào hay trừ đi, không phải suy từ màu.
-function plRowHTML(nhan, dau, so, ghiChu){
-  return `<div class="row"><span class="rl">${nhan}${ghiChu?`<div class="small-note" style="margin-top:1px">${ghiChu}</div>`:''}</span>
+function plRowHTML(nhan, dau, so, ghiChu, onclick){
+  const clickable = onclick ? ` onclick="${onclick}" style="cursor:pointer"` : '';
+  const chev = onclick ? ' <span style="color:var(--gd);font-weight:700;font-size:11px;">›</span>' : '';
+  return `<div class="row"${clickable}><span class="rl">${nhan}${chev}${ghiChu?`<div class="small-note" style="margin-top:1px">${ghiChu}</div>`:''}</span>
     <span class="rv" style="color:${dau==='−'?'var(--bad)':'var(--td)'}">${dau} ${fmt(so)}</span></div>`;
 }
 
@@ -6723,6 +6725,81 @@ function plToggleChiTiet(){
   const dangAn = box.hasAttribute('hidden');
   if(dangAn) box.removeAttribute('hidden'); else box.setAttribute('hidden','');
   if(btn) btn.innerHTML = (dangAn ? 'Thu gọn ' + ic('chevronUp',14) : 'Xem tách từng dòng ' + ic('chevronDown',14));
+}
+
+// [MỚI] Chi tiết "Hao hụt & huỷ" của đúng 1 ngày — bấm từ dòng trong thẻ Lãi/lỗ. Đọc
+// thẳng 2 collection nguồn (stock_transactions_gieogieo cho nguyên liệu thô,
+// prep_transactions_gieogieo cho bán thành phẩm) và gộp lại theo wasteEventId để một
+// lần "Đổ ly" (sinh nhiều dòng ledger, mỗi nguyên liệu/BTP một dòng) không bị đếm
+// thành nhiều sự kiện rời rạc — cùng cách computeLedgerRealMetrics() đang gộp để tính
+// ra con số pl.haoHut, nên tổng ở đây LUÔN khớp với số trên thẻ.
+async function openWasteDetailSheet(dateKey){
+  openEditSheet('Hao hụt & huỷ · ' + fmtDateVN(new Date(dateKey+'T12:00:00')), '<div id="wasteDetailBody"></div>', ()=>{});
+  const box = document.getElementById('wasteDetailBody');
+  showLoading(box);
+  try{
+    await ensureAuth();
+    if(!INVENTORY_ITEMS.length) INVENTORY_ITEMS = await loadInventoryItems();
+    await ensurePriceHistory();
+    const [txSnap, prepSnap] = await Promise.all([
+      fstore.collection('stock_transactions_gieogieo').where('businessDate','==',dateKey).where('type','==','WASTE').get(),
+      fstore.collection('prep_transactions_gieogieo').where('businessDate','==',dateKey).where('type','==','WASTE').get()
+    ]);
+    const events = {};
+    const pushTo = (key, e) => { (events[key] = events[key] || []).push(e); };
+    txSnap.forEach(d => { const t = {id:d.id, ...d.data()}; pushTo(t.wasteEventId ? 'evt_'+t.wasteEventId : 'tx_'+t.id, {src:'item', t}); });
+    prepSnap.forEach(d => { const t = {id:d.id, ...d.data()}; pushTo(t.wasteEventId ? 'evt_'+t.wasteEventId : 'prep_'+t.id, {src:'prep', t}); });
+
+    const valueOf = x => x.src==='item'
+      ? Math.abs(Number(x.t.qty)||0) * itemCostOn(x.t.itemId, x.t.businessDate)
+      : Math.abs(Number(x.t.totalCost)||0);
+    const nameOf = x => x.src==='item'
+      ? ((INVENTORY_ITEMS.find(i=>i.id===x.t.itemId)||{}).name || x.t.itemId)
+      : (x.t.prepName || x.t.prepId);
+    const gio = iso => { try{ return new Date(iso).toLocaleTimeString('vi-VN',{hour:'2-digit',minute:'2-digit'}); }catch(e){ return ''; } };
+
+    const groups = Object.values(events).map(list => {
+      const at = list.reduce((m,x)=> String(x.t.createdAt||'') > m ? x.t.createdAt : m, '');
+      const total = list.reduce((s,x)=>s+valueOf(x), 0);
+      return { list, at, total };
+    }).sort((a,b) => String(b.at).localeCompare(String(a.at)));
+
+    if(!groups.length){
+      box.innerHTML = '<div class="muted">Không tìm thấy dòng hao hụt nào cho ngày này (số trên thẻ Lãi/lỗ có thể đến từ dữ liệu đã bị xoá, hoặc lệch múi giờ businessDate — rất hiếm).</div>';
+      return;
+    }
+
+    const tong = groups.reduce((s,g)=>s+g.total, 0);
+    const cardHtml = g => {
+      const first = g.list[0].t;
+      if(first.wasteKind === 'drink'){
+        const chiTiet = g.list.map(x=>`${escapeHtmlAttr(nameOf(x))} ${fmtNum(Math.abs(x.t.qty),2)} ${escapeHtmlAttr(x.t.unit||'')}`).join(', ');
+        return `<div class="litem"><div class="li-l">
+          <div><b>Đổ ly</b> · ${fmtNum(first.drinkQty,0)} × ${escapeHtmlAttr(first.drinkName||'')}${first.drinkSize?` (${escapeHtmlAttr(first.drinkSize)})`:''}</div>
+          ${(first.reason||first.note) ? `<div class="small-note" style="margin-top:2px">${escapeHtmlAttr(first.reason||first.note)}</div>` : ''}
+          <div class="muted-sm" style="margin-top:2px">Trừ: ${chiTiet}</div>
+          <div class="muted-sm">${gio(first.createdAt)} · ${escapeHtmlAttr(first.staff||'—')}</div>
+        </div><div class="li-r">${fmt(g.total)}</div></div>`;
+      }
+      return g.list.map(x => {
+        const t = x.t;
+        const badge = t.fromPrepCount ? '<span class="tier tier-blue" style="margin-left:4px">Cuối ngày</span>' : '';
+        return `<div class="litem"><div class="li-l">
+          <div>${escapeHtmlAttr(nameOf(x))}${badge} · ${fmtNum(Math.abs(t.qty),2)} ${escapeHtmlAttr(t.unit||'')}</div>
+          <div class="small-note" style="margin-top:2px">${escapeHtmlAttr(t.reason||t.note||'(không ghi lý do)')}</div>
+          <div class="muted-sm">${gio(t.createdAt)} · ${escapeHtmlAttr(t.staff||'—')}</div>
+        </div><div class="li-r">${fmt(valueOf(x))}</div></div>`;
+      }).join('');
+    };
+
+    box.innerHTML = `
+      <div class="row" style="margin-bottom:10px"><span class="rl">Tổng hao hụt & huỷ</span><span class="rv"><b style="color:var(--bad)">${fmt(tong)}</b></span></div>
+      ${groups.map(cardHtml).join('')}
+    `;
+  }catch(err){
+    console.error('openWasteDetailSheet lỗi', err);
+    box.innerHTML = '<div class="muted">Không tải được: '+escapeHtmlAttr(String(err.code||err.message||err))+'</div>';
+  }
 }
 
 
@@ -7329,7 +7406,8 @@ function plLaiCardHTML(pl, be){
         ${ghiChuPL}
         ${plRowHTML('Doanh thu', '+', pl.doanhThu)}
         ${plRowHTML('Giá vốn hàng bán', '−', pl.giaVon, pl.giaVonTopping>0 ? `gồm topping bán ${fmt(pl.giaVonTopping)}` : '')}
-        ${plRowHTML('Hao hụt & huỷ', '−', pl.haoHut, 'nguyên liệu hư + bán thành phẩm huỷ + ly đổ')}
+        ${plRowHTML('Hao hụt & huỷ', '−', pl.haoHut, 'nguyên liệu hư + bán thành phẩm huỷ + ly đổ',
+          pl.haoHut > 0 ? `openWasteDetailSheet('${pl.date}')` : '')}
         ${plRowHTML('Chi phí biến đổi', '−', pl.bienPhiKhac, 'khoản đã duyệt, danh mục gắn nhãn Biến đổi')}
         ${pl.phiKenh>0 ? plRowHTML('Phí sàn', '−', pl.phiKenh) : ''}
         ${plRowHTML('Lương', '−', pl.luong, pl.luongNguon)}
