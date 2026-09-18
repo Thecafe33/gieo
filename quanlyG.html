@@ -10316,7 +10316,10 @@ GIEO.define('legacy-firebase-adapter/read-port', [
       }).then(function (rows) {
         if (R.isErr(rows)) return rows;
         var bills = [], ambiguous = [];
-        Object.keys(rows.value.orders).forEach(function (id) {
+        var rawIds = Object.keys(rows.value.orders);
+        var mapErrors = [];
+        var sampleRaw = rawIds.length ? rows.value.orders[rawIds[0]] : null;
+        rawIds.forEach(function (id) {
           var mapped = mappers.mapBill({
             order: rows.value.orders[id], billId: id,
             storeId: spec.storeId, businessDate: spec.businessDate
@@ -10324,9 +10327,22 @@ GIEO.define('legacy-firebase-adapter/read-port', [
           if (R.isOk(mapped)) {
             bills.push(mapped.value.bill);
             ambiguous = ambiguous.concat(mapped.value.ambiguous || []);
+          } else {
+            mapErrors.push({ id: id, error: mapped.error.kind + ': ' + mapped.error.message });
           }
         });
-        return R.ok({ bills: bills, ambiguous: ambiguous, source: rows.value.source, debug: rows.value.debug });
+        var debug2 = Object.assign({}, rows.value.debug, {
+          rawOrderCount: rawIds.length,
+          mappedBillCount: bills.length,
+          mapErrorsSample: mapErrors.slice(0, 3),
+          specStoreId: spec.storeId,
+          specBusinessDate: spec.businessDate,
+          sampleRawOrder: sampleRaw ? {
+            total: sampleRaw.total, date: sampleRaw.date, time: sampleRaw.time,
+            itemsArrayLen: (sampleRaw.itemsArray || []).length
+          } : null
+        });
+        return R.ok({ bills: bills, ambiguous: ambiguous, source: rows.value.source, debug: debug2 });
       });
     }
 
