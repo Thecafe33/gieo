@@ -81,6 +81,20 @@ GIEO.define('bootstrap/legacy-data-source', [
           });
         });
       }
+      /* LỊCH SỬ BILL (clone qlLoadBills) — khác GetRevenue/GetCOGS ở chỗ đọc theo
+         KHOẢNG ngày [from, to], không phải một businessDate. */
+      if (name === 'GetBillsForRange' && input.from && input.to && !input.bills) {
+        return reader.loadBillsForRange(input).then(function (out) {
+          if (R.isErr(out)) return out;
+          return R.ok({
+            storeId: input.storeId,
+            from: input.from,
+            to: input.to,
+            bills: out.value.bills,
+            legacyMeta: { ambiguous: out.value.ambiguous, days: out.value.days }
+          });
+        });
+      }
       if (NOT_WIRED[name] && !hasCanonicalInput(name, input)) {
         /* Chưa có nguồn legacy cho query này. Trả LỖI, không trả rỗng.
            Rỗng và "chưa đọc được" trông giống nhau trên màn hình nhưng nghĩa

@@ -139,6 +139,74 @@ GIEO.define('legacy-firebase-adapter/read-port', [
       });
     }
 
+    /* Trần độ dài kỳ — giữ đúng mức legacy (quanlygieo.html#QL_BILL_MAX_DAYS) để
+       không đổi hành vi người dùng đã quen: một khoảng quá dài đọc N ngày song
+       song, tốn quota, không phải giới hạn kỹ thuật cứng. */
+    var BILLS_RANGE_MAX_DAYS = 62;
+
+    function pad2(n) { return n < 10 ? '0' + n : String(n); }
+
+    function billsRangeDays(fromKey, toKey) {
+      var from = new Date(String(fromKey || '') + 'T00:00:00');
+      var to = new Date(String(toKey || '') + 'T00:00:00');
+      if (isNaN(from.getTime()) || isNaN(to.getTime())) {
+        return R.err('VALIDATION', 'loadBillsForRange: khoảng ngày không hợp lệ');
+      }
+      var soNgay = Math.round((to.getTime() - from.getTime()) / 86400000) + 1;
+      if (soNgay < 1) return R.err('VALIDATION', 'loadBillsForRange: ngày kết thúc phải sau ngày bắt đầu');
+      if (soNgay > BILLS_RANGE_MAX_DAYS) {
+        return R.err('VALIDATION',
+          'loadBillsForRange: kỳ dài ' + soNgay + ' ngày — vượt mức ' + BILLS_RANGE_MAX_DAYS + ' ngày');
+      }
+      var days = [];
+      for (var i = 0; i < soNgay; i++) {
+        var d = new Date(from.getTime());
+        d.setDate(d.getDate() + i);
+        days.push(d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()));
+      }
+      return R.ok(days);
+    }
+
+    /**
+     * Bill trên KHOẢNG ngày — dùng cho LỊCH SỬ BILL (clone qlLoadBills). Đọc song
+     * song từng ngày qua loadBills() ở trên; một ngày lỗi (RETRYABLE) KHÔNG được
+     * làm hỏng cả khoảng — legacy (qlLoadBillsOfDate) cũng chỉ console.warn rồi bỏ
+     * qua ngày đó. Khác legacy ở chỗ: lỗi ở đây không bị nuốt câm lặng (invariant #11)
+     * mà nổi lên thành một mục `ambiguous` NGÀY nào đọc hỏng, để tầng trên tự quyết
+     * định có cảnh báo người dùng hay không (§2.3a — không chặn, nhưng không giấu).
+     */
+    function loadBillsForRange(spec) {
+      spec = spec || {};
+      var days = billsRangeDays(spec.from, spec.to);
+      if (R.isErr(days)) return Promise.resolve(days);
+      return Promise.all(days.value.map(function (businessDate) {
+        return loadBills({ storeId: spec.storeId, businessDate: businessDate }).then(function (out) {
+          if (R.isOk(out)) return out.value;
+          return {
+            bills: [], source: 'READ_FAILED',
+            ambiguous: [{
+              code: 'RANGE_DAY_READ_FAILED',
+              detail: businessDate + ': ' + out.error.kind + ' — ' + out.error.message
+            }]
+          };
+        });
+      })).then(function (rows) {
+        var bills = [], ambiguous = [];
+        rows.forEach(function (row) {
+          bills = bills.concat(row.bills);
+          ambiguous = ambiguous.concat(row.ambiguous || []);
+        });
+        /* Mới nhất trước — cùng thứ tự hiển thị legacy (qlLoadBills: sort theo
+           createdAt desc). occurredAt = o.createdAt, giữ nguyên kiểu dữ liệu gốc. */
+        bills.sort(function (a, b) {
+          var at = String(a.occurredAt || ''), bt = String(b.occurredAt || '');
+          if (at !== bt) return at < bt ? 1 : -1;
+          return String(b.billId).localeCompare(String(a.billId));
+        });
+        return R.ok({ bills: bills, ambiguous: ambiguous, days: days.value.length });
+      });
+    }
+
     function loadMenu(spec) {
       spec = spec || {};
       var source = spec.legacyMenuSource === 'menu' ? 'menu' : 'menuTogo';
@@ -210,6 +278,7 @@ GIEO.define('legacy-firebase-adapter/read-port', [
       loadLedger: loadLedger,
       loadUnitTrace: loadUnitTrace,
       loadBills: loadBills,
+      loadBillsForRange: loadBillsForRange,
       loadMenu: loadMenu,
       loadEmployees: loadEmployees,
       watchMenu: watchMenu

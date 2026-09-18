@@ -57,6 +57,10 @@ GIEO.define('persistence-firebase/atomic-commit', [
     (plan.domainRecords || []).forEach(function (r) {
       var map = {
         bill: ['billLive', function (x) { return { businessDate: x.businessDate, billId: x.billId }; }],
+        /* RecordAddon (commands/sales.js) — con của billLive, xem canonical-paths.js. */
+        billAddon: ['billAddon', function (x) {
+          return { businessDate: x.businessDate, billId: x.billId, addonSeq: x.addonSeq };
+        }],
         billArchive: ['billArchive', function (x) { return { archiveKey: x.archiveKey }; }],
         archiveRegistry: ['archiveRegistry', function (x) { return { businessDate: x.businessDate }; }],
         prepBatch: ['prepBatch', function (x) { return { prepBatchId: x.prepBatchId }; }],

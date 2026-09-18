@@ -10,7 +10,7 @@ GIEO.define('app-quanly/controller', [
     var state = { mode: runtime.mode, screen: 'OVERVIEW', lastResult: null, lastError: null };
     function snapshot() { return Object.assign({}, state); }
     function navigate(screen) {
-      if (['OVERVIEW', 'ALERTS', 'TRACE', 'INVENTORY', 'APPROVALS', 'REPORTS', 'BTP'].indexOf(screen) === -1) {
+      if (['OVERVIEW', 'ALERTS', 'TRACE', 'INVENTORY', 'APPROVALS', 'REPORTS', 'BTP', 'BILLS'].indexOf(screen) === -1) {
         return R.err('VALIDATION', 'màn QUANLY không hợp lệ: ' + screen);
       }
       state.screen = screen;
@@ -38,6 +38,9 @@ GIEO.define('app-quanly/controller', [
       getInventoryLevel: function (input) { return read('GetInventoryLevel', input); },
       getRevenue: function (input) { return read('GetRevenue', input); },
       getCOGS: function (input) { return read('GetCOGS', input); },
+      getBillsForRange: function (input) { return read('GetBillsForRange', input); },
+      getLedgerEntriesForReference: function (input) { return read('GetLedgerEntriesForReference', input); },
+      getLoyaltyLedgerForReference: function (input) { return read('GetLoyaltyLedgerForReference', input); },
       getPnL: function (input) { return read('GetPnL', input); },
       comparePeriods: function (input) { return read('ComparePeriods', input); },
       getAlerts: function (input) { return read('GetAlerts', Object.assign({ audience: 'QUANLY' }, input || {})); },

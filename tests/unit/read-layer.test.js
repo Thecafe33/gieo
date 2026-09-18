@@ -356,6 +356,101 @@ describe('read-layer — doanh thu MỘT implementation (R3)', function () {
   });
 });
 
+describe('GetBillsForRange (LỊCH SỬ BILL, port từ qlLoadBills) — nhóm theo ngày, MỘT implementation (R3)', function () {
+  var G = _r.G;
+
+  function bill(over) {
+    return Object.assign({
+      billId: _r.ids.newId('bill'), total: 100000, businessDate: '2026-03-10', occurredAt: 1000
+    }, over || {});
+  }
+
+  test('sắp mới nhất trước theo occurredAt — cùng thứ tự hiển thị legacy', function () {
+    var out = assertOk(G.getBillsForRange(rCtx('QUANLY_ADMIN', 'QUANLY', _r.QL), {
+      bills: [
+        bill({ billId: 'b1', occurredAt: 1000 }),
+        bill({ billId: 'b2', occurredAt: 3000 }),
+        bill({ billId: 'b3', occurredAt: 2000 })
+      ]
+    }));
+    assert.deepStrictEqual(out.data.bills.map(function (b) { return b.billId; }), ['b2', 'b3', 'b1']);
+  });
+
+  test('nhóm theo businessDate, cộng tổng từng ngày và cả kỳ', function () {
+    var out = assertOk(G.getBillsForRange(rCtx('QUANLY_ADMIN', 'QUANLY', _r.QL), {
+      bills: [
+        bill({ businessDate: '2026-03-10', total: 50000 }),
+        bill({ businessDate: '2026-03-10', total: 30000 }),
+        bill({ businessDate: '2026-03-11', total: 20000 })
+      ]
+    }));
+    assert.strictEqual(out.data.byDate['2026-03-10'].billCount, 2);
+    assert.strictEqual(out.data.byDate['2026-03-10'].total, 80000);
+    assert.strictEqual(out.data.byDate['2026-03-11'].billCount, 1);
+    assert.strictEqual(out.data.totalRevenue, 100000);
+    assert.strictEqual(out.data.billCount, 3);
+  });
+
+  test('POS và QUANLY gọi CÙNG một hàm nên không thể lệch', function () {
+    var bills = [bill()];
+    var ql = assertOk(G.getBillsForRange(rCtx('QUANLY_ADMIN', 'QUANLY', _r.QL), { bills: bills }));
+    var mgr = assertOk(G.getBillsForRange(rCtx('STORE_MANAGER', 'POS'), { bills: bills }));
+    assert.deepStrictEqual(ql.data, mgr.data);
+  });
+
+  test('POS operator KHÔNG đọc được — cùng độ nhạy cảm với GetRevenue/GetCOGS (SĐT khách + doanh thu từng đơn)', function () {
+    assertErr(G.getBillsForRange(rCtx('POS_OPERATOR', 'POS'), { bills: [] }), 'FORBIDDEN');
+  });
+
+  test('storeId bắt buộc (quy tắc P5)', function () {
+    assertErr(G.getBillsForRange(rCtx('QUANLY_ADMIN', 'QUANLY', _r.QL), {
+      storeId: 'khong-phai-id', bills: []
+    }), 'VALIDATION');
+  });
+});
+
+describe('GetLedgerEntriesForReference (nguồn originalAllocations cho ReverseTransaction, xoá bill §3.8)', function () {
+  var G = _r.G;
+
+  test('entries do canonical-data-source cấp sẵn → coverage traceable', function () {
+    var out = assertOk(G.getLedgerEntriesForReference(rCtx('QUANLY_ADMIN', 'QUANLY', _r.QL), {
+      referenceId: 'bill-moi', domain: 'raw',
+      entries: [{ entryId: 'e1', unitId: 'u1', itemId: 'i1', qtyDelta: -5 }]
+    }));
+    assert.strictEqual(out.coverage, 'traceable');
+    assert.strictEqual(out.entries.length, 1);
+  });
+
+  test('không có entries nào (bill legacy, không truy được) → coverage untracked, KHÔNG lỗi', function () {
+    var out = assertOk(G.getLedgerEntriesForReference(rCtx('QUANLY_ADMIN', 'QUANLY', _r.QL), {
+      referenceId: 'bill-cu-truoc-cutover', domain: 'raw'
+    }));
+    assert.strictEqual(out.coverage, 'untracked');
+    assert.deepStrictEqual(out.entries, []);
+  });
+
+  test('thiếu referenceId hoặc domain thì VALIDATION', function () {
+    assertErr(G.getLedgerEntriesForReference(rCtx('QUANLY_ADMIN', 'QUANLY', _r.QL), {
+      domain: 'raw'
+    }), 'VALIDATION');
+    assertErr(G.getLedgerEntriesForReference(rCtx('QUANLY_ADMIN', 'QUANLY', _r.QL), {
+      referenceId: 'bill1'
+    }), 'VALIDATION');
+  });
+
+  test('POS operator KHÔNG đọc được — cùng độ nhạy cảm với GetBillsForRange (dữ liệu xoá bill)', function () {
+    assertErr(G.getLedgerEntriesForReference(rCtx('POS_OPERATOR', 'POS'), {
+      referenceId: 'bill1', domain: 'raw'
+    }), 'FORBIDDEN');
+  });
+
+  test('storeId bắt buộc (quy tắc P5)', function () {
+    assertErr(G.getLedgerEntriesForReference(rCtx('QUANLY_ADMIN', 'QUANLY', _r.QL), {
+      storeId: 'khong-phai-id', referenceId: 'bill1', domain: 'raw'
+    }), 'VALIDATION');
+  });
+});
+
 describe('read-layer — COGS luôn 2 vế (§3, invariant R8)', function () {
   var G = _r.G;
   var ctx = function () { return rCtx('QUANLY_ADMIN', 'QUANLY', _r.QL); };

@@ -88,7 +88,46 @@ GIEO.define('persistence-firebase/canonical-read-port', [
       return getAll(vp.value.path);
     }
 
-    return { loadUnitsForItem: loadUnitsForItem, loadVersions: loadVersions };
+    /**
+     * Ledger entries của một referenceId (vd. billId) — nguồn cho
+     * `originalAllocations` của ReverseTransaction (fifo-core/reconciliation
+     * §3.8). CHỈ có ý nghĩa cho bill/thao tác đã ghi qua canonical (RecordSale
+     * trở đi) — bill nguồn legacy không có gì ở đây, mảng rỗng KHÔNG phải lỗi
+     * và KHÔNG có bước dịch nào khác để rơi xuống (xem comment `forQuery` của
+     * `bootstrap/canonical-data-source.js` — namespace unitId 'legacy' vs
+     * 'seed' không bao giờ trùng, nên đọc được giao dịch thô cũng không suy ra
+     * được Unit thật nào).
+     */
+    function loadEntriesForReference(ctx, referenceId, domain) {
+      var collP = paths.collectionPath('ledger', ctx, { entryId: '_' });
+      if (R.isErr(collP)) return Promise.resolve(collP);
+      var where = [{ field: 'referenceId', op: '==', value: referenceId }];
+      if (domain) where.push({ field: 'domain', op: '==', value: domain });
+      return getAll(collP.value.path, where);
+    }
+
+    /**
+     * Dòng sổ loyalty (`loyalty/ledger.js#createEntry`) của một billId — nguồn
+     * `eventData.loyaltyEntries` cho ReverseTransaction khi xoá bill, để
+     * `commands/loyalty.js#ReverseLoyaltyForVoidedBill` (route qua sự kiện
+     * OrderVoided, `bootstrap/domain-events.js`) lọc đúng dòng EARN_SALE/
+     * EARN_ADDON của bill đó mà hoàn (`loyalty/accrual.js#reverseForVoidedBill`
+     * tự lọc theo `referenceId===billId`, ở đây chỉ cần nạp ĐỦ tập, không cần
+     * lọc trước). Chỉ có ý nghĩa cho bill ghi qua canonical (AccrueLoyaltyForSale
+     * chưa từng chạy cho bill legacy) — mảng rỗng cho bill legacy KHÔNG phải lỗi.
+     */
+    function loadLoyaltyEntriesForReference(ctx, billId) {
+      var collP = paths.collectionPath('loyaltyLedger', ctx, { entryId: '_' });
+      if (R.isErr(collP)) return Promise.resolve(collP);
+      return getAll(collP.value.path, [{ field: 'referenceId', op: '==', value: billId }]);
+    }
+
+    return {
+      loadUnitsForItem: loadUnitsForItem,
+      loadVersions: loadVersions,
+      loadEntriesForReference: loadEntriesForReference,
+      loadLoyaltyEntriesForReference: loadLoyaltyEntriesForReference
+    };
   }
 
   return { createReader: createReader };

@@ -41,22 +41,33 @@ GIEO.define('bootstrap/startup', [
   }
 
   /**
-   * Ghép 2 dataSource thành 1: `forQuery` vẫn của legacy (đường đọc UI hiện
-   * tại chưa đổi), `forCommand` đi qua canonical TRƯỚC (cấp `deps.units`/
-   * `deps.versionRegistry` thật cho RecordSale — xem `canonical-data-source.js`)
-   * RỒI mới qua legacy (legacy `forCommand` là pass-through vĩnh viễn theo
-   * thiết kế, nên chuỗi này không mất gì, chỉ cộng thêm đúng 1 chỗ nó cố ý
-   * chừa trống).
+   * Ghép 2 dataSource thành 1: cả `forQuery` lẫn `forCommand` đi qua canonical
+   * TRƯỚC (cấp `deps.units`/`deps.versionRegistry` thật cho RecordSale, hoặc
+   * `entries` ledger thật cho GetLedgerEntriesForReference — xem
+   * `canonical-data-source.js`) RỒI mới qua legacy. An toàn vì cả hai hàm
+   * canonical đều pass-through (R.ok(input) không đổi gì) với MỌI tên nó chưa
+   * biết, nên chuỗi này không đổi hành vi của bất kỳ query/command nào khác —
+   * chỉ cộng thêm đúng những chỗ nó cố ý chừa trống.
+   *
+   * Với forQuery, legacy KHÔNG còn là pass-through thuần (nó có NOT_WIRED và
+   * các case dịch riêng) — nhưng từng case dịch riêng (GetRevenue/GetCOGS/
+   * GetBillsForRange/GetLedgerEntriesForReference) đều tự kiểm tra
+   * "đã có input canonical chưa" (`!input.bills`/`!input.entries`) trước khi
+   * dịch, nên nếu canonical vừa cấp xong thì legacy thấy đã có sẵn và đi
+   * thẳng — không dịch chồng, không ghi đè.
    */
   function composeDataSource(legacy, canonical) {
-    return {
-      forQuery: legacy.forQuery,
-      forCommand: function (name, input) {
-        return Promise.resolve(canonical.forCommand(name, input)).then(function (out) {
+    function chain(canonicalFn, legacyFn) {
+      return function (name, input) {
+        return Promise.resolve(canonicalFn(name, input)).then(function (out) {
           if (R.isErr(out)) return out;
-          return legacy.forCommand(name, out.value);
+          return legacyFn(name, out.value);
         });
-      },
+      };
+    }
+    return {
+      forQuery: chain(canonical.forQuery, legacy.forQuery),
+      forCommand: chain(canonical.forCommand, legacy.forCommand),
       watchQuery: legacy.watchQuery
     };
   }

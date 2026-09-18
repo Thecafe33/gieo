@@ -200,6 +200,22 @@ describe('mappers — KHÔNG đoán, nói rõ cái gì không biết', function 
       }));
       assert.strictEqual(p.entry.domain, 'prep');
     });
+
+    test('referenceId suy từ t.referenceId — field thật applyStockTransactionPOS ghi, không phải t.refId', function () {
+      var e = assertOk(MAP.mapLedgerEntry({
+        tx: { id: 't6', type: 'consumption', itemId: 'sua', qtyDelta: -100, referenceId: 'order-abc' },
+        storeId: _pf.STORE, domain: 'raw'
+      }));
+      assert.strictEqual(e.entry.referenceId, 'order-abc',
+        'legacy ghi field referenceId thật — không được suy nhầm ra null');
+
+      var e2 = assertOk(MAP.mapLedgerEntry({
+        tx: { id: 't7', type: 'consumption', itemId: 'sua', qtyDelta: -100, refId: 'order-abc' },
+        storeId: _pf.STORE, domain: 'raw'
+      }));
+      assert.strictEqual(e2.entry.referenceId, null,
+        'tx legacy không có field referenceId thật — không được suy nhầm từ refId (field không tồn tại trên schema thật)');
+    });
   });
 
   describe('mapRecipe — version giả, đánh dấu rõ là suy ra', function () {
@@ -261,6 +277,54 @@ describe('mappers — KHÔNG đoán, nói rõ cái gì không biết', function 
       }));
       assert.strictEqual(r.bill.channel.type, 'TO_GO');
     });
+
+    test('customerId suy từ o.phone — field thật trên order legacy, không phải o.customerPhone', function () {
+      var r = assertOk(MAP.mapBill({
+        order: order({ phone: '0900000000' }), billId: 'B5', storeId: _pf.STORE
+      }));
+      assert.ok(r.bill.customerId, 'có phone thì phải suy ra được customerId');
+      var r2 = assertOk(MAP.mapBill({
+        order: order({ customerPhone: '0900000000' }), billId: 'B6', storeId: _pf.STORE
+      }));
+      assert.strictEqual(r2.bill.customerId, null,
+        'order legacy không có field customerPhone thật — không được suy nhầm ra customerId');
+    });
+
+    test('legacySource mang đủ dữ liệu chỉ-legacy cho màn LỊCH SỬ BILL (bill/addon/split/thanh toán)', function () {
+      var r = assertOk(MAP.mapBill({
+        order: order({
+          billCode: 'BILL-001', customerName: 'Chị Lan', phone: '0900000000',
+          method: 'TIỀN MẶT', cashGiven: 100000, cashChange: 0,
+          bankOrderId: null, voucherUsed: 'TEM10', isShip: true,
+          splitGroups: [{ method: 'TIỀN MẶT', total: 50000 }],
+          addons: [{ seq: 1, itemName: 'Trân châu', at: 2000 }],
+          time: '14:32', date: '17/09/2026'
+        }), billId: 'B7', storeId: _pf.STORE
+      }));
+      var ls = r.bill.legacySource;
+      assert.strictEqual(ls.billId, 'B7');
+      assert.strictEqual(ls.billCode, 'BILL-001');
+      assert.strictEqual(ls.customerName, 'Chị Lan');
+      assert.strictEqual(ls.phone, '0900000000');
+      assert.strictEqual(ls.method, 'TIỀN MẶT');
+      assert.strictEqual(ls.cashGiven, 100000);
+      assert.strictEqual(ls.cashChange, 0);
+      assert.strictEqual(ls.voucherUsed, 'TEM10');
+      assert.strictEqual(ls.isShip, true);
+      assert.strictEqual(ls.splitGroups.length, 1);
+      assert.strictEqual(ls.addons.length, 1);
+      assert.strictEqual(ls.time, '14:32');
+      assert.strictEqual(ls.date, '17/09/2026');
+    });
+
+    test('legacySource: thiếu hết field phụ thì trả null, không throw', function () {
+      var r = assertOk(MAP.mapBill({ order: order(), billId: 'B8', storeId: _pf.STORE }));
+      var ls = r.bill.legacySource;
+      assert.strictEqual(ls.billCode, null);
+      assert.strictEqual(ls.splitGroups, null);
+      assert.strictEqual(ls.addons, null);
+      assert.strictEqual(ls.isShip, false);
+    });
   });
 });
 
@@ -274,7 +338,7 @@ describe('canonical-paths', function () {
         prepBatchId: 'pb1', countId: 'c1', reportId: 'r1', id: 'x', recipeId: 'rc1',
         versionId: 'v1', kind: 'cost', subjectId: 's1', businessDate: '2026-03-10',
         billId: 'b1', dateKey: '2026-03-10', seq: '1', period: '2026-03', shiftId: 'sh1',
-        customerId: 'cu1', alertId: 'a1'
+        customerId: 'cu1', alertId: 'a1', addonSeq: '1'
       });
       assert.strictEqual(_pf.R.isOk(r), true, name + ' không dựng được');
       assert.ok(r.value.path.indexOf(_pf.STORE) !== -1, name + ' thiếu storeId');
@@ -368,6 +432,19 @@ describe('atomic-commit — ghi hết hoặc không ghi gì', function () {
       assert.ok(w.some(function (x) { return c.match.test(x.path); }),
         'loại "' + c.type + '" không sinh đúng path canonical — kiểm tra lại mapping trong atomic-commit.js');
     });
+  });
+
+  test('billAddon (RecordAddon) có path canonical, nằm ĐÚNG dưới node billLive của chính bill đó', function () {
+    var w = assertOk(AC.planToWrites(plan({
+      domainRecords: [{
+        type: 'billAddon',
+        record: { billId: 'bill_b1', businessDate: '2026-03-10', addonSeq: '2', addedAmount: 25000 }
+      }]
+    }), PCTX));
+    assert.ok(w.some(function (x) {
+      return x.kind === 'RTDB' && /\/bills\/live\/2026-03-10\/bill_b1\/addons\/2$/.test(x.path);
+    }), 'billAddon phải ghi vào con của bills/live/{date}/{billId} — một lần đọc bill lấy được cả addons, ' +
+      'giữ đúng tinh thần o.addons của legacy');
   });
 
   test('ghi thành công thì operation record nằm TRONG cùng transaction', function () {

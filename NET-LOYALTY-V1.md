@@ -90,6 +90,7 @@ L9 ĐIỀU PHỐI SỰ KIỆN — nút thắt hiện đang TRỐNG, chặn L2/L4
 | Hệ mới | `loyalty/accrual.reverseForVoidedBill()` — cờ `policy: 'REVERSE' \| 'KEEP'` TƯỜNG MINH; `commands/reversal.js` đã định nghĩa `EVENTS.OrderVoided` + `createEventBus()` (`.on()`/`.emit()`, handler lỗi trả `MANUAL_REVIEW` chứ không nuốt im lặng) |
 | Phân loại | 🟢 **THÊM MỚI** (cơ chế tường minh) |
 | ✅ **CHỦ QUÁN ĐÃ CHỐT (2026-09)** | *"Khi hủy phải thu hồi điểm."* — `policy` mặc định **`REVERSE`**. `commands/loyalty.js#ReverseLoyaltyForVoidedBill` đã sửa: trước đây bắt buộc caller khai rõ REVERSE/KEEP (validate lỗi nếu thiếu); giờ thiếu `policy` thì tự áp `REVERSE` (`loyalty/accrual.js#reverseForVoidedBill` vốn đã có default này sẵn, chỉ chưa tới được vì command chặn ở validate). Vẫn CHO PHÉP truyền `'KEEP'` tường minh cho ca đặc biệt — không bỏ đường thoát, chỉ đổi mặc định. Màn hình Quản lý xem/sửa tay ledger (`loyalty/ledger.adjust()`) vẫn hữu ích cho các ca đặc biệt đó nhưng không còn là điều kiện để đóng gap này. |
+| ✅ **ĐÃ NỐI (2026-09-18, mục 4 VIỆC PHẢI LÀM)** | Màn LỊCH SỬ BILL của QUANLY (`src/apps/quanly/main.js#doDeleteBill`) xoá bill ghi qua canonical thì kèm `eventType: 'OrderVoided'` + `eventData: {loyaltyEntries}` vào lệnh `ReverseTransaction` (domain `raw`) — `bootstrap/domain-events.js` route sang `ReverseLoyaltyForVoidedBill` THẬT, không còn chỉ hoàn kho. `loyaltyEntries` đọc qua query mới `GetLoyaltyLedgerForReference`. Bill legacy không kèm sự kiện (không có gì để hoàn — xem mục 4). |
 
 ### L6 — Guard chống double-dip (khuyến mãi ↔ điểm/tem)
 
@@ -216,9 +217,27 @@ chối, routeEvents bỏ qua event thiếu field/event lạ, và pipeline đầy
    `loyalty/ledger.adjust()`) cho ca `KEEP` đặc biệt — legacy chưa từng có
    dù toast nói "Quản lý xử lý tay" suốt bao lâu nay; không còn là điều
    kiện để đóng L5.
-4. L9 đã xong — còn lại: nối `onCheckoutClick`/`confirmPay` (POS) gọi
+4. ~~L9 đã xong — còn lại: nối `onCheckoutClick`/`confirmPay` (POS) gọi
    `runtime.command('RecordSale', ...)` thay vì ghi thẳng RTDB, và khi
    QUANLY gọi `ReverseTransaction` để xoá bill thì truyền
    `eventType: 'OrderVoided'` + `eventData: {loyaltyPolicy, loyaltyEntries}`
    — lúc đó L2/L5 mới thật sự chạy trên dữ liệu sống (phụ thuộc N9 của
-   `NET-SALES-V1.md`).
+   `NET-SALES-V1.md`).~~ — **ĐÃ XONG (2026-09-18)**. Vế POS (`RecordSale`
+   thay ghi thẳng RTDB) đóng từ trước (N9, `NET-SALES-V1.md`). Vế QUANLY
+   xoá bill (LỊCH SỬ BILL, §65-68) đóng nốt: `doDeleteBill`
+   (`src/apps/quanly/main.js`) chỉ kèm `eventType: 'OrderVoided'` +
+   `eventData: {loyaltyEntries}` cho bill ghi qua canonical (không có
+   `legacySource`) — bill legacy không kèm, vì `referenceId` hoàn kho của nó
+   là orderId thô (khác định dạng `billId` canonical mà route
+   `OrderVoided`→`ReverseLoyaltyForVoidedBill` cần, xem
+   `bootstrap/domain-events.js#ROUTES.OrderVoided`) và `AccrueLoyaltyForSale`
+   chưa từng chạy cho bill đó — không có gì để hoàn. `loyaltyEntries` đọc qua
+   query mới `GetLoyaltyLedgerForReference` (`read-layer/gateway.js`,
+   `persistence-firebase/canonical-read-port.js#loadLoyaltyEntriesForReference`,
+   hydrate ở `bootstrap/canonical-data-source.js#forQuery`) — cùng cơ chế với
+   `GetLedgerEntriesForReference` đã có cho phần hoàn kho. `policy` không
+   truyền — mặc định `REVERSE` đã chốt ở mục 2. Có test end-to-end
+   (`tests/unit/startup.test.js` — seed `loyaltyLedger` + `ledger`, gọi
+   `ReverseTransaction` với `eventType`/`eventData`, xác nhận
+   `result.sideEffects` chứa `ReverseLoyaltyForVoidedBill` với dòng
+   `loyaltyLedgerEntry` hoàn đúng `-delta`).

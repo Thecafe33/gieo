@@ -11,6 +11,9 @@ var _su = (function () {
     PIN: GIEO.require('bootstrap/pin-auth'),
     RUNNER: GIEO.require('persistence-firebase/firestore-runner'),
     CUT: GIEO.require('bootstrap/cutover'),
+    CDS: GIEO.require('bootstrap/canonical-data-source'),
+    CRP: GIEO.require('persistence-firebase/canonical-read-port'),
+    RT: GIEO.require('bootstrap/runtime'),
     ACCESS: GIEO.require('store-context/access'),
     CTXL: GIEO.require('store-context/context'),
     BD: GIEO.require('store-context/business-day'),
@@ -78,19 +81,31 @@ function fakeFirebase(seedDocs) {
       __path: pathOf(parts)
     };
   }
-  function makeCol(parts) {
+  /* wheres tích luỹ qua các lần .where() chained — CHỈ hỗ trợ '==' (đủ cho mọi
+     nơi gọi thật hiện tại, xem canonical-read-port.js#getAll). Trước bản này
+     where() là no-op passthrough (không filter gì) — không test nào ở file
+     này từng dựa vào việc đó, nên nâng lên filter thật không đổi hành vi cũ. */
+  function makeCol(parts, wheres) {
+    wheres = wheres || [];
     return {
       doc: function (d) { return makeDoc(parts.concat([d])); },
-      where: function () { return this; }, orderBy: function () { return this; },
+      where: function (field, op, value) {
+        return makeCol(parts, wheres.concat([{ field: field, op: op, value: value }]));
+      },
+      orderBy: function () { return this; },
       limit: function () { return this; },
-      /* Trả về đúng các document nằm trực tiếp dưới collection này, để read port
-         thật chạy được mà không cần mạng. */
+      /* Trả về đúng các document nằm trực tiếp dưới collection này (đã lọc theo
+         wheres), để read port thật chạy được mà không cần mạng. */
       get: function () {
         var prefix = pathOf(parts) + '/';
         var rows = Object.keys(docs)
           .filter(function (k) { return k.indexOf(prefix) === 0 && k.slice(prefix.length).indexOf('/') === -1; })
           .map(function (k) {
             return { id: k.slice(prefix.length), data: function () { return docs[k]; } };
+          })
+          .filter(function (row) {
+            var d = row.data();
+            return wheres.every(function (w) { return d[w.field] === w.value; });
           });
         return Promise.resolve({ forEach: function (fn) { rows.forEach(fn); } });
       }
@@ -378,6 +393,348 @@ describe('startup — tiếp nhận CHẠY THẬT tại mốc cutover', function
     return boot(fb).then(function (out) {
       assertErr(out, 'PRECONDITION');
       assert.strictEqual(fb.batchCount(), 0);
+    });
+  });
+});
+
+describe('canonical-read-port — loadEntriesForReference (nguồn originalAllocations cho ReverseTransaction)', function () {
+  var cctx = { organizationId: _su.ORG, storeId: _su.STORE };
+  var ledgerBase = 'orgs/' + _su.ORG + '/stores/' + _su.STORE + '/ledger/';
+
+  test('đọc đúng entries khớp CẢ referenceId lẫn domain, bỏ qua bill khác/domain khác', function () {
+    var fb = fakeFirebase();
+    fb.docs[ledgerBase + 'e1'] = { entryId: 'e1', referenceId: 'bill1', domain: 'raw', unitId: 'u1', qtyDelta: -5 };
+    fb.docs[ledgerBase + 'e2'] = { entryId: 'e2', referenceId: 'bill1', domain: 'prep', qtyDelta: -1 };
+    fb.docs[ledgerBase + 'e3'] = { entryId: 'e3', referenceId: 'bill-khac', domain: 'raw', qtyDelta: -9 };
+    var reader = _su.CRP.createReader(fb.sdk.firestore());
+    return reader.loadEntriesForReference(cctx, 'bill1', 'raw').then(function (out) {
+      var entries = assertOk(out);
+      assert.strictEqual(entries.length, 1);
+      assert.strictEqual(entries[0].entryId, 'e1');
+    });
+  });
+
+  test('không có entry nào khớp thì trả mảng rỗng, không phải lỗi', function () {
+    var fb = fakeFirebase();
+    var reader = _su.CRP.createReader(fb.sdk.firestore());
+    return reader.loadEntriesForReference(cctx, 'bill-khong-ton-tai', 'raw').then(function (out) {
+      assert.deepStrictEqual(assertOk(out), []);
+    });
+  });
+});
+
+describe('canonical-read-port — loadLoyaltyEntriesForReference (nguồn eventData.loyaltyEntries cho ReverseTransaction, NET-LOYALTY-V1.md #4)', function () {
+  var cctx = { organizationId: _su.ORG, storeId: _su.STORE };
+  var loyaltyBase = 'orgs/' + _su.ORG + '/stores/' + _su.STORE + '/loyaltyLedger/';
+
+  test('đọc đúng entries khớp billId, bỏ qua bill khác', function () {
+    var fb = fakeFirebase();
+    fb.docs[loyaltyBase + 'l1'] = { entryId: 'l1', referenceId: 'bill1', customerId: 'c1', delta: 10 };
+    fb.docs[loyaltyBase + 'l2'] = { entryId: 'l2', referenceId: 'bill-khac', customerId: 'c1', delta: 5 };
+    var reader = _su.CRP.createReader(fb.sdk.firestore());
+    return reader.loadLoyaltyEntriesForReference(cctx, 'bill1').then(function (out) {
+      var entries = assertOk(out);
+      assert.strictEqual(entries.length, 1);
+      assert.strictEqual(entries[0].entryId, 'l1');
+    });
+  });
+
+  test('không có entry nào thì trả mảng rỗng, không phải lỗi', function () {
+    var fb = fakeFirebase();
+    var reader = _su.CRP.createReader(fb.sdk.firestore());
+    return reader.loadLoyaltyEntriesForReference(cctx, 'bill-khong-ton-tai').then(function (out) {
+      assert.deepStrictEqual(assertOk(out), []);
+    });
+  });
+});
+
+describe('canonical-data-source — forQuery GetLoyaltyLedgerForReference (NET-LOYALTY-V1.md #4)', function () {
+  var loyaltyBase = 'orgs/' + _su.ORG + '/stores/' + _su.STORE + '/loyaltyLedger/';
+
+  function ds(fb) {
+    var reader = _su.CRP.createReader(fb.sdk.firestore());
+    return _su.CDS.create(reader, { organizationId: _su.ORG });
+  }
+
+  test('có entry loyalty canonical thì cấp entries, giữ nguyên field khác của input', function () {
+    var fb = fakeFirebase();
+    fb.docs[loyaltyBase + 'l1'] = { entryId: 'l1', referenceId: 'bill1', customerId: 'c1', delta: 10 };
+    return ds(fb).forQuery('GetLoyaltyLedgerForReference', {
+      billId: 'bill1', storeId: _su.STORE, foo: 'giữ nguyên'
+    }).then(function (out) {
+      var v = assertOk(out);
+      assert.strictEqual(v.entries.length, 1);
+      assert.strictEqual(v.foo, 'giữ nguyên');
+    });
+  });
+
+  test('không có entry nào (bill legacy, hoặc chưa từng tích điểm) thì đi qua NGUYÊN VẸN', function () {
+    var fb = fakeFirebase();
+    return ds(fb).forQuery('GetLoyaltyLedgerForReference', {
+      billId: 'bill-legacy-xxx', storeId: _su.STORE
+    }).then(function (out) {
+      assert.strictEqual(assertOk(out).entries, undefined);
+    });
+  });
+
+  test('input đã có entries sẵn (gọi lại) thì KHÔNG ghi đè', function () {
+    var fb = fakeFirebase();
+    fb.docs[loyaltyBase + 'l1'] = { entryId: 'l1', referenceId: 'bill1', customerId: 'c1', delta: 10 };
+    return ds(fb).forQuery('GetLoyaltyLedgerForReference', {
+      billId: 'bill1', storeId: _su.STORE, entries: ['đã-có']
+    }).then(function (out) {
+      assert.deepStrictEqual(assertOk(out).entries, ['đã-có']);
+    });
+  });
+
+  test('tên query khác, hoặc thiếu billId, thì pass-through nguyên input', function () {
+    var fb = fakeFirebase();
+    return ds(fb).forQuery('GetBillsForRange', { from: 'x' }).then(function (out) {
+      assert.deepStrictEqual(assertOk(out), { from: 'x' });
+    });
+  });
+});
+
+describe('canonical-data-source — forQuery GetLedgerEntriesForReference (LỊCH SỬ BILL, xoá bill)', function () {
+  var ledgerBase = 'orgs/' + _su.ORG + '/stores/' + _su.STORE + '/ledger/';
+
+  function ds(fb) {
+    var reader = _su.CRP.createReader(fb.sdk.firestore());
+    return _su.CDS.create(reader, { organizationId: _su.ORG });
+  }
+
+  test('có entry canonical thì cấp entries + entriesSource, giữ nguyên field khác của input', function () {
+    var fb = fakeFirebase();
+    fb.docs[ledgerBase + 'e1'] = { entryId: 'e1', referenceId: 'bill1', domain: 'raw', unitId: 'u1', qtyDelta: -5 };
+    return ds(fb).forQuery('GetLedgerEntriesForReference', {
+      referenceId: 'bill1', domain: 'raw', storeId: _su.STORE, foo: 'giữ nguyên'
+    }).then(function (out) {
+      var v = assertOk(out);
+      assert.strictEqual(v.entries.length, 1);
+      assert.strictEqual(v.entriesSource, 'CANONICAL');
+      assert.strictEqual(v.foo, 'giữ nguyên');
+    });
+  });
+
+  test('không có entry nào (bill legacy) thì đi qua NGUYÊN VẸN — không set entries, để tầng sau tự biết untracked', function () {
+    var fb = fakeFirebase();
+    return ds(fb).forQuery('GetLedgerEntriesForReference', {
+      referenceId: 'bill-legacy-xxx', domain: 'raw', storeId: _su.STORE
+    }).then(function (out) {
+      var v = assertOk(out);
+      assert.strictEqual(v.entries, undefined);
+    });
+  });
+
+  test('input đã có entries sẵn (gọi lại) thì KHÔNG ghi đè', function () {
+    var fb = fakeFirebase();
+    fb.docs[ledgerBase + 'e1'] = { entryId: 'e1', referenceId: 'bill1', domain: 'raw', qtyDelta: -5 };
+    return ds(fb).forQuery('GetLedgerEntriesForReference', {
+      referenceId: 'bill1', domain: 'raw', storeId: _su.STORE, entries: ['đã-có']
+    }).then(function (out) {
+      var v = assertOk(out);
+      assert.deepStrictEqual(v.entries, ['đã-có']);
+    });
+  });
+
+  test('tên query khác, hoặc thiếu referenceId/domain, thì pass-through nguyên input', function () {
+    var fb = fakeFirebase();
+    return ds(fb).forQuery('GetBillsForRange', { from: 'x' }).then(function (out) {
+      assert.deepStrictEqual(assertOk(out), { from: 'x' });
+    });
+  });
+});
+
+describe('startup — composeDataSource nối canonical forQuery vào GetLedgerEntriesForReference đầu-cuối', function () {
+  test('bill ghi qua canonical → coverage traceable; bill legacy (trống) → untracked, không lỗi', function () {
+    var ledgerBase = 'orgs/' + _su.ORG + '/stores/' + _su.STORE + '/ledger/';
+    var fb = fakeFirebase();
+    fb.docs[ledgerBase + 'e1'] = {
+      entryId: 'e1', referenceId: 'bill-moi', domain: 'raw', itemId: 'i1', unitId: 'u1',
+      qtyDelta: -5, unitCost: 100
+    };
+    return _su.S.start({
+      firebase: FB_CFG, sdk: fb.sdk, context: ctx(),
+      cutoverDate: '2026-09-20', today: '2026-09-19', actorId: _su.BOSS
+    }).then(function (out) {
+      var runtime = assertOk(out).runtime;
+      return Promise.all([
+        runtime.query('GetLedgerEntriesForReference', { referenceId: 'bill-moi', domain: 'raw', storeId: _su.STORE }),
+        runtime.query('GetLedgerEntriesForReference', { referenceId: 'bill-cu-truoc-cutover', domain: 'raw', storeId: _su.STORE })
+      ]);
+    }).then(function (results) {
+      var traced = assertOk(results[0]);
+      assert.strictEqual(traced.coverage, 'traceable');
+      assert.strictEqual(traced.entries.length, 1);
+
+      var untracked = assertOk(results[1]);
+      assert.strictEqual(untracked.coverage, 'untracked');
+      assert.deepStrictEqual(untracked.entries, []);
+    });
+  });
+});
+
+describe('canonical-data-source — forCommand ReverseTransaction nạp input.units (LỊCH SỬ BILL, xoá bill)', function () {
+  var unitBase = 'orgs/' + _su.ORG + '/stores/' + _su.STORE + '/units/';
+
+  function ds(fb) {
+    var reader = _su.CRP.createReader(fb.sdk.firestore());
+    return _su.CDS.create(reader, { organizationId: _su.ORG });
+  }
+
+  test('originalAllocations rỗng (bill legacy, coverage untracked) thì KHÔNG đọc Unit nào, đi thẳng', function () {
+    var fb = fakeFirebase();
+    return ds(fb).forCommand('ReverseTransaction', {
+      referenceId: 'order-cu', domain: 'raw', storeId: _su.STORE, reason: 'xoá bill', originalAllocations: []
+    }).then(function (out) {
+      var v = assertOk(out);
+      assert.strictEqual(v.units, undefined);
+    });
+  });
+
+  test('originalAllocations có itemId thì nạp đúng Unit hiện có của các itemId đó vào input.units', function () {
+    var fb = fakeFirebase();
+    fb.docs[unitBase + 'u1'] = { unitId: 'u1', itemId: 'sua', remainingQty: 3, status: 'OPEN' };
+    fb.docs[unitBase + 'u2'] = { unitId: 'u2', itemId: 'duong', remainingQty: 0, status: 'COMPACTABLE' };
+    fb.docs[unitBase + 'u3'] = { unitId: 'u3', itemId: 'khac-khong-lien-quan', remainingQty: 9, status: 'OPEN' };
+    return ds(fb).forCommand('ReverseTransaction', {
+      referenceId: 'bill-moi', domain: 'raw', storeId: _su.STORE, reason: 'xoá bill',
+      originalAllocations: [{ unitId: 'u1', itemId: 'sua', qty: 5 }, { unitId: 'u2', itemId: 'duong', qty: 1 }]
+    }).then(function (out) {
+      var v = assertOk(out);
+      var ids = v.units.map(function (u) { return u.unitId; }).sort();
+      assert.deepStrictEqual(ids, ['u1', 'u2']);
+    });
+  });
+
+  test('input.units đã có sẵn (gọi lại) thì KHÔNG ghi đè, đi thẳng', function () {
+    var fb = fakeFirebase();
+    return ds(fb).forCommand('ReverseTransaction', {
+      referenceId: 'bill-moi', domain: 'raw', storeId: _su.STORE, reason: 'xoá bill',
+      originalAllocations: [{ unitId: 'u1', itemId: 'sua', qty: 5 }], units: ['đã-có']
+    }).then(function (out) {
+      assert.deepStrictEqual(assertOk(out).units, ['đã-có']);
+    });
+  });
+
+  test('command khác không bị đụng vào', function () {
+    var fb = fakeFirebase();
+    return ds(fb).forCommand('AdjustInventory', { itemId: 'sua' }).then(function (out) {
+      assert.deepStrictEqual(assertOk(out), { itemId: 'sua' });
+    });
+  });
+});
+
+describe('runtime — xoá bill đầu-cuối qua GetLedgerEntriesForReference + ReverseTransaction (§3.8)', function () {
+  /* SHADOW (không cần commit adapter) đủ để chạy pipeline thật — chỉ dùng
+     canonical-data-source làm dataSource vì cả hai query/command này không có
+     nhánh riêng ở legacy-data-source.js (xem comment ở canonical-data-source.js). */
+  function shadowRuntime(fb) {
+    var reader = _su.CRP.createReader(fb.sdk.firestore());
+    var c = ctx();
+    return _su.RT.createRuntime({
+      mode: _su.RT.MODE.SHADOW,
+      context: function () { return c; },
+      dataSource: _su.CDS.create(reader, { organizationId: _su.ORG })
+    });
+  }
+
+  test('bill ghi qua canonical: đọc ledger, nạp Unit, hoàn tác thật — cộng lại đúng remainingQty', function () {
+    var ledgerBase = 'orgs/' + _su.ORG + '/stores/' + _su.STORE + '/ledger/';
+    var unitBase = 'orgs/' + _su.ORG + '/stores/' + _su.STORE + '/units/';
+    var fb = fakeFirebase();
+    fb.docs[ledgerBase + 'e1'] = {
+      entryId: 'e1', referenceId: 'bill-moi', domain: 'raw', itemId: 'sua', unitId: 'u1',
+      qtyDelta: -5, unitCost: 100
+    };
+    fb.docs[unitBase + 'u1'] = { unitId: 'u1', itemId: 'sua', remainingQty: 10, status: 'OPEN' };
+    var runtime = shadowRuntime(fb);
+    return runtime.query('GetLedgerEntriesForReference', {
+      referenceId: 'bill-moi', domain: 'raw', storeId: _su.STORE
+    }).then(function (entriesOut) {
+      var entries = assertOk(entriesOut).entries;
+      var allocations = entries.map(function (e) {
+        return { unitId: e.unitId, itemId: e.itemId, qty: Math.abs(e.qtyDelta), unitCost: e.unitCost };
+      });
+      return runtime.command('ReverseTransaction', {
+        referenceId: 'bill-moi', domain: 'raw', storeId: _su.STORE,
+        reason: 'xoá bill test', originalAllocations: allocations
+      });
+    }).then(function (commandOut) {
+      var v = assertOk(commandOut);
+      assert.strictEqual(v.plan.unitChanges.length, 1);
+      assert.strictEqual(v.plan.unitChanges[0].remainingQty, 15);
+      assert.strictEqual((v.plan.domainRecords || []).some(function (r) { return r.type === 'manualReviewTask'; }), false);
+    });
+  });
+
+  test('NET-LOYALTY-V1.md #4: xoá bill canonical kèm eventType OrderVoided → L5 hoàn điểm thật qua domain-events sideEffects', function () {
+    var billId = _su.ids.deterministicId('bill', ['t1']);
+    var customerId = _su.ids.deterministicId('customer', ['0900000000']);
+    var ledgerBase = 'orgs/' + _su.ORG + '/stores/' + _su.STORE + '/ledger/';
+    var unitBase = 'orgs/' + _su.ORG + '/stores/' + _su.STORE + '/units/';
+    var loyaltyBase = 'orgs/' + _su.ORG + '/stores/' + _su.STORE + '/loyaltyLedger/';
+    var fb = fakeFirebase();
+    fb.docs[ledgerBase + 'e1'] = {
+      entryId: 'e1', referenceId: billId, domain: 'raw', itemId: 'sua', unitId: 'u1',
+      qtyDelta: -5, unitCost: 100
+    };
+    fb.docs[unitBase + 'u1'] = { unitId: 'u1', itemId: 'sua', remainingQty: 10, status: 'OPEN' };
+    fb.docs[loyaltyBase + 'l1'] = {
+      entryId: 'l1', customerId: customerId, storeId: _su.STORE, currency: 'POINTS', delta: 10,
+      reason: 'EARN_SALE', referenceType: 'bill', referenceId: billId, operationId: 'op-earn-1',
+      businessDate: '2026-09-20', occurredAt: 1, actorId: null, note: null
+    };
+    var runtime = shadowRuntime(fb);
+    return Promise.all([
+      runtime.query('GetLedgerEntriesForReference', { referenceId: billId, domain: 'raw', storeId: _su.STORE }),
+      runtime.query('GetLoyaltyLedgerForReference', { billId: billId, storeId: _su.STORE })
+    ]).then(function (results) {
+      var stockEntries = assertOk(results[0]).entries;
+      var loyaltyEntries = assertOk(results[1]).entries;
+      var allocations = stockEntries.map(function (e) {
+        return { unitId: e.unitId, itemId: e.itemId, qty: Math.abs(e.qtyDelta), unitCost: e.unitCost };
+      });
+      return runtime.command('ReverseTransaction', {
+        referenceId: billId, domain: 'raw', storeId: _su.STORE,
+        reason: 'xoá bill test', originalAllocations: allocations,
+        eventType: 'OrderVoided', eventData: { loyaltyEntries: loyaltyEntries }
+      });
+    }).then(function (commandOut) {
+      var v = assertOk(commandOut);
+      assert.strictEqual(v.plan.unitChanges[0].remainingQty, 15);
+      var loyaltySideEffect = (v.sideEffects || []).filter(function (se) {
+        return se.command === 'ReverseLoyaltyForVoidedBill';
+      })[0];
+      assert.ok(loyaltySideEffect, 'phải có sideEffect ReverseLoyaltyForVoidedBill');
+      var loyaltyResult = assertOk(loyaltySideEffect.result);
+      var loyaltyRecords = loyaltyResult.plan.domainRecords.filter(function (r) {
+        return r.type === 'loyaltyLedgerEntry';
+      });
+      assert.strictEqual(loyaltyRecords.length, 1);
+      assert.strictEqual(loyaltyRecords[0].record.delta, -10);
+      assert.strictEqual(loyaltyRecords[0].record.customerId, customerId);
+    });
+  });
+
+  test('bill legacy (không có ledger canonical): coverage untracked → ReverseTransaction không lỗi, đẩy manualReviewTask', function () {
+    var fb = fakeFirebase();
+    var runtime = shadowRuntime(fb);
+    return runtime.query('GetLedgerEntriesForReference', {
+      referenceId: 'order-legacy-abc', domain: 'raw', storeId: _su.STORE
+    }).then(function (entriesOut) {
+      var entries = assertOk(entriesOut).entries;
+      assert.deepStrictEqual(entries, []);
+      return runtime.command('ReverseTransaction', {
+        referenceId: 'order-legacy-abc', domain: 'raw', storeId: _su.STORE,
+        reason: 'xoá bill test', originalAllocations: entries
+      });
+    }).then(function (commandOut) {
+      var v = assertOk(commandOut);
+      assert.strictEqual(v.plan.unitChanges.length, 0);
+      var review = (v.plan.domainRecords || []).filter(function (r) { return r.type === 'manualReviewTask'; });
+      assert.strictEqual(review.length, 1);
+      assert.strictEqual(review[0].record.reason, 'AMBIGUOUS_LEGACY');
     });
   });
 });

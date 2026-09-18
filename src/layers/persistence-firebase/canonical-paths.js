@@ -94,6 +94,11 @@ GIEO.define('persistence-firebase/canonical-paths', [
 
     /* Bill — live ở RTDB, archive ở Firestore, giữ đúng phân tầng legacy. */
     billLive: { kind: RTDB, build: function (ctx, a) { return base(ctx) + '/bills/live/' + a.businessDate + '/' + a.billId; } },
+    /* Con của billLive, KHÔNG phải node riêng — một lần đọc `bills/live/{date}/{billId}`
+       trả về cả bill lẫn addons của nó, đúng tinh thần "đơn + bổ sung nằm cùng
+       một bill" của legacy (o.addons). archive.js đọc nguyên subtree RTDB này khi
+       chuyển sang billArchive, nên addons đi theo tự động, không cần khai riêng. */
+    billAddon: { kind: RTDB, build: function (ctx, a) { return base(ctx) + '/bills/live/' + a.businessDate + '/' + a.billId + '/addons/' + a.addonSeq; } },
     billArchive: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/billArchives/' + a.archiveKey; } },
     archiveRegistry: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/archiveRegistry/' + a.businessDate; } },
     billCounter: { kind: RTDB, build: function (ctx, a) { return base(ctx) + '/counters/bill/' + a.businessDate; } },

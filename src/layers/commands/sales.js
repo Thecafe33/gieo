@@ -641,6 +641,7 @@ GIEO.define('commands/sales', [
         type: 'billAddon',
         record: {
           billId: input.billId,
+          businessDate: ctx.businessDate,
           addonSeq: input.addonSeq,
           addedAmount: input.addedAmount,
           addedByActorId: ctx.actor.actorId,

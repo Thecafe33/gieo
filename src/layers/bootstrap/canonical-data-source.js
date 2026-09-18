@@ -115,8 +115,29 @@ GIEO.define('bootstrap/canonical-data-source', [
       });
     }
 
+    /**
+     * `commands/reversal.js#ReverseTransaction` đọc thẳng `input.units` (không
+     * qua `deps` như RecordSale) để dựng workingSet rồi cộng ngược đúng những
+     * Unit mà `originalAllocations` trỏ tới. Không nạp trước thì mọi lần xoá
+     * bill — kể cả bill traceable thật sự — đều NOT_FOUND vì workingSet rỗng.
+     * `originalAllocations` rỗng (bill legacy, coverage 'untracked') thì không
+     * có itemId nào để tra — bỏ qua, để `reconciliation.reverseAllocations`
+     * tự đi đúng nhánh rỗng của nó.
+     */
+    function hydrateForReverseTransaction(input) {
+      var origs = input.originalAllocations || [];
+      var itemIds = uniq(origs.map(function (a) { return a.itemId; }).filter(Boolean));
+      if (!itemIds.length) return Promise.resolve(R.ok(input));
+      var ctx = { organizationId: defaults.organizationId, storeId: input.storeId };
+      return loadUnitsFor(ctx, itemIds).then(function (out) {
+        if (R.isErr(out)) return out;
+        return R.ok(Object.assign({}, input, { units: (input.units || []).concat(out.value) }));
+      });
+    }
+
     function forCommand(name, input) {
       input = input || {};
+      if (name === 'ReverseTransaction' && !input.units) return hydrateForReverseTransaction(input);
       /* Không phải RecordSale, hoặc bill chưa dựng (không phải việc của module
          này — `RecordSale.validate` sẽ báo lỗi đúng chỗ): đi thẳng, không thêm
          gì — cùng nguyên tắc pass-through của `legacy-data-source.js`. */
@@ -126,7 +147,60 @@ GIEO.define('bootstrap/canonical-data-source', [
       return hydrateForRecordSale(input);
     }
 
-    return { forCommand: forCommand };
+    /**
+     * Đọc canonical TRƯỚC khi rơi xuống legacy (đối xứng với forCommand ở
+     * trên) — hai query hiện tại: GetLedgerEntriesForReference (nguồn
+     * `originalAllocations` cho ReverseTransaction khi xoá bill, §3.8) và
+     * GetLoyaltyLedgerForReference (nguồn `eventData.loyaltyEntries` cho
+     * CÙNG lệnh đó, NET-LOYALTY-V1.md #4). Bill sinh SAU cutover có dữ liệu
+     * canonical thật ở đây; bill legacy không có gì (mảng rỗng), nên KHÔNG
+     * set `input.entries` — để nguyên input đi tiếp.
+     *
+     * `bootstrap/legacy-data-source.js` KHÔNG có nhánh dịch riêng cho query
+     * này (đã kiểm tra: không nằm trong NOT_WIRED, không có branch riêng —
+     * cố ý, không phải thiếu sót). Lý do: `mapLedgerEntry`/`mapUnit`
+     * (legacy-firebase-adapter/mappers.js) suy `unitId` cho giao dịch legacy
+     * qua namespace `'legacy'`, còn `commands/takeover.js#buildUnits` seed
+     * Unit THẬT vào workingSet qua namespace `'seed'` — hai id KHÔNG BAO GIỜ
+     * trùng nhau. Có đọc được `stock_transactions_gieogieo`/
+     * `prep_transactions_gieogieo` (referenceId=orderId) thì cũng không suy
+     * ra được Unit thật nào để hoàn tác chính xác — `takeover` chỉ chụp snapshot
+     * tổng tại mốc cutover, không mang theo lịch sử per-unit trước cutover.
+     * Mảng rỗng ở đây là đường ĐÚNG cho bill legacy: rơi thẳng xuống nhánh
+     * `originalAllocations.length === 0` có sẵn của
+     * `fifo-core/reconciliation.js#reverseAllocations` (coverage 'untracked',
+     * cờ needsManualReview, không đụng workingSet) — không phải gap cần vá.
+     *
+     * Lỗi đọc (RETRYABLE) cũng xử lý NHƯ rỗng — không chặn cả câu hỏi vì một
+     * lần đọc canonical trục trặc: coi như 'untracked', vẫn cho người dùng rà
+     * tay qua manualReviewTask, còn hơn màn xoá bill không dùng được khi
+     * Firestore canonical chập chờn. Đây là "để trống cho tầng sau", không
+     * phải "coi lỗi là rỗng hợp lệ" — không có field nào bị GHI ĐÈ thành
+     * 0/rỗng trông như dữ liệu thật.
+     */
+    function forQuery(name, input) {
+      input = input || {};
+      if (name === 'GetLedgerEntriesForReference' && input.referenceId && input.domain && !input.entries) {
+        var ctx = { organizationId: defaults.organizationId, storeId: input.storeId };
+        return reader.loadEntriesForReference(ctx, input.referenceId, input.domain).then(function (out) {
+          if (R.isErr(out) || out.value.length === 0) return R.ok(input);
+          return R.ok(Object.assign({}, input, { entries: out.value, entriesSource: 'CANONICAL' }));
+        });
+      }
+      /* NET-LOYALTY-V1.md #4 — nguồn eventData.loyaltyEntries cho
+         ReverseTransaction lúc xoá bill; bill legacy trả rỗng (đúng, vì
+         AccrueLoyaltyForSale chưa từng chạy cho bill đó). */
+      if (name === 'GetLoyaltyLedgerForReference' && input.billId && !input.entries) {
+        var ctx2 = { organizationId: defaults.organizationId, storeId: input.storeId };
+        return reader.loadLoyaltyEntriesForReference(ctx2, input.billId).then(function (out) {
+          if (R.isErr(out) || out.value.length === 0) return R.ok(input);
+          return R.ok(Object.assign({}, input, { entries: out.value }));
+        });
+      }
+      return Promise.resolve(R.ok(input));
+    }
+
+    return { forCommand: forCommand, forQuery: forQuery };
   }
 
   return { create: create };

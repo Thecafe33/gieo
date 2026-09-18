@@ -60,6 +60,18 @@ GIEO.define('read-layer/gateway', [
     /* Dữ liệu nhạy cảm mặc định KHÔNG thuộc tầng EXECUTE (quy tắc P3). */
     GetRevenue: registerQuery('GetRevenue', { authority: 'REVIEW_APPROVE_CORRECT' }),
     GetCOGS: registerQuery('GetCOGS', { authority: 'REVIEW_APPROVE_CORRECT' }),
+    /* LỊCH SỬ BILL (port từ quanlygieo.html#qlLoadBills) — cùng authority với
+       GetRevenue/GetCOGS: liệt kê bill tức là thấy doanh thu + SĐT khách từng
+       đơn, nhạy cảm hơn GetMenu/GetShiftStatus. */
+    GetBillsForRange: registerQuery('GetBillsForRange', { authority: 'REVIEW_APPROVE_CORRECT' }),
+    /* Nguồn originalAllocations cho ReverseTransaction khi xoá bill — cùng
+       authority với GetBillsForRange (xem hàm bên dưới). */
+    GetLedgerEntriesForReference: registerQuery('GetLedgerEntriesForReference', { authority: 'REVIEW_APPROVE_CORRECT' }),
+    /* NET-LOYALTY-V1.md VIỆC PHẢI LÀM #4 — nguồn eventData.loyaltyEntries cho
+       ReverseTransaction khi xoá bill (để L5 chạy thật qua sự kiện OrderVoided).
+       Cùng authority với GetBillsForRange/GetLedgerEntriesForReference — cùng
+       màn hình, cùng mức nhạy cảm (doanh thu + khách hàng). */
+    GetLoyaltyLedgerForReference: registerQuery('GetLoyaltyLedgerForReference', { authority: 'REVIEW_APPROVE_CORRECT' }),
     GetPnL: registerQuery('GetPnL', { authority: 'MASTER_CONFIGURE' }),
     GetCustomerReport: registerQuery('GetCustomerReport', { authority: 'MASTER_CONFIGURE' }),
     /* Ba query dưới đây sinh ra để P9/P10 không còn màn nào tự đọc nguồn thô.
@@ -562,6 +574,93 @@ GIEO.define('read-layer/gateway', [
     });
   }
 
+  /**
+   * LỊCH SỬ BILL — MỘT implementation nhóm-theo-ngày cho danh sách bill trong
+   * khoảng [from, to] (R3: POS lẫn QUANLY gọi chung, không tự dựng lại).
+   *
+   * Không tự lọc theo chuỗi tìm kiếm (số điện thoại/mã bill/mã CK — xem
+   * qlRenderBillList) ở đây: đó là thao tác hiển thị thuần trên dữ liệu ĐÃ
+   * được cấp quyền đọc, không phải một truy vấn cần xin quyền lại mỗi phím
+   * gõ. Tầng UI (main.js) tự lọc trên mảng `bills` trả về.
+   */
+  function getBillsForRange(ctx, spec) {
+    var g = guard(Q.GetBillsForRange, ctx, spec);
+    if (R.isErr(g)) return g;
+
+    return merge.resolve({
+      snapshot: spec.snapshot,
+      cache: spec.cache,
+      computeLive: function () {
+        var bills = (spec.bills || []).slice().sort(function (a, b) {
+          var at = String(a.occurredAt || ''), bt = String(b.occurredAt || '');
+          if (at !== bt) return at < bt ? 1 : -1;
+          return String(b.billId).localeCompare(String(a.billId));
+        });
+        var byDate = {};
+        var totalRevenue = 0;
+        bills.forEach(function (b) {
+          var k = b.businessDate || 'UNKNOWN';
+          if (!byDate[k]) byDate[k] = { businessDate: k, billCount: 0, total: 0 };
+          byDate[k].billCount += 1;
+          byDate[k].total += b.total || 0;
+          totalRevenue += b.total || 0;
+        });
+        return R.ok({
+          bills: bills,
+          billCount: bills.length,
+          totalRevenue: totalRevenue,
+          byDate: byDate
+        });
+      },
+      computedAt: ctx.clock.now()
+    });
+  }
+
+  /**
+   * Ledger entries của một referenceId (billId) — nguồn `originalAllocations`
+   * cho ReverseTransaction lúc xoá bill (LỊCH SỬ BILL §3.8). `spec.entries` do
+   * `bootstrap/canonical-data-source.js#forQuery` cấp SẴN trước khi tới đây —
+   * chỉ bill ghi qua canonical (RecordSale trở đi) mới có; bill nguồn legacy
+   * KHÔNG có gì (mảng rỗng). Đây KHÔNG phải giới hạn tạm — `mapUnit`/
+   * `mapLedgerEntry` (legacy-firebase-adapter/mappers.js) dùng namespace
+   * `'legacy'` cho unitId, còn `commands/takeover.js` seed Unit thật vào
+   * workingSet bằng namespace `'seed'` — hai id KHÔNG BAO GIỜ trùng nhau, nên
+   * dù có đọc được giao dịch tiêu hao gốc của bill legacy cũng không suy ra
+   * được unit THẬT nào trong workingSet hiện tại để hoàn ngược chính xác.
+   * `coverage:'untracked'` ở đây là tín hiệu trung thực cho UI — không phải
+   * lỗi — khớp đúng đường `originalAllocations` rỗng mà
+   * `fifo-core/reconciliation.js#reverseAllocations` đã có sẵn (coverage
+   * 'untracked' → cờ needsManualReview, không đụng vào tồn kho).
+   */
+  function getLedgerEntriesForReference(ctx, spec) {
+    var g = guard(Q.GetLedgerEntriesForReference, ctx, spec);
+    if (R.isErr(g)) return g;
+    if (!spec.referenceId) return R.err('VALIDATION', 'getLedgerEntriesForReference cần referenceId');
+    if (!spec.domain) return R.err('VALIDATION', 'getLedgerEntriesForReference cần domain (raw|prep)');
+    var entries = spec.entries || [];
+    return R.ok({
+      referenceId: spec.referenceId,
+      domain: spec.domain,
+      entries: entries,
+      coverage: entries.length ? 'traceable' : 'untracked'
+    });
+  }
+
+  /**
+   * Dòng sổ loyalty (`loyalty/ledger.js`) của một billId — nguồn
+   * `eventData.loyaltyEntries` cho ReverseTransaction khi xoá bill
+   * (NET-LOYALTY-V1.md VIỆC PHẢI LÀM #4). `spec.entries` do
+   * `bootstrap/canonical-data-source.js#forQuery` cấp sẵn, cùng cơ chế với
+   * `getLedgerEntriesForReference` ở trên — bill legacy không có gì (mảng
+   * rỗng, KHÔNG phải lỗi: AccrueLoyaltyForSale chưa từng chạy cho bill đó).
+   */
+  function getLoyaltyLedgerForReference(ctx, spec) {
+    var g = guard(Q.GetLoyaltyLedgerForReference, ctx, spec);
+    if (R.isErr(g)) return g;
+    if (!spec.billId) return R.err('VALIDATION', 'getLoyaltyLedgerForReference cần billId');
+    return R.ok({ billId: spec.billId, entries: spec.entries || [] });
+  }
+
   return {
     QUERIES: Q,
     registerQuery: registerQuery,
@@ -573,6 +672,9 @@ GIEO.define('read-layer/gateway', [
     getInventoryLevel: getInventoryLevel,
     getRevenue: getRevenue,
     getCOGS: getCOGS,
+    getBillsForRange: getBillsForRange,
+    getLedgerEntriesForReference: getLedgerEntriesForReference,
+    getLoyaltyLedgerForReference: getLoyaltyLedgerForReference,
     getPnL: getPnL,
     comparePeriods: comparePeriods,
     getShiftStatus: getShiftStatus,

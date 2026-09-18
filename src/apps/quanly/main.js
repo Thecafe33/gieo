@@ -89,6 +89,12 @@ GIEO.define('app-quanly/main', [
     var approvalAction = { busy: null, error: null, done: null };
     var lastPeriod = null;
 
+    /* LỊCH SỬ BILL (port từ quanlygieo.html#renderBills — xem khối bên dưới). */
+    var billsView = view();
+    var billsUI = { from: clock.calendarDate(), to: clock.calendarDate(), query: '', openId: null };
+    var billsDelete = { confirmId: null, busy: null, error: null };
+    var billsNotice = null;
+
     function errorBox(title, error) {
       return '<div class="result error"><strong>' + esc(title) + '</strong><span>' +
         esc(error.message) + '</span></div>';
@@ -446,6 +452,165 @@ GIEO.define('app-quanly/main', [
         esc(selectedDate) + '" required><button class="btn">Đọc sổ BTP</button></form>' + body + exported + '</section>';
     }
 
+    /* ---------- Lịch sử bill ----------
+     * Port từ quanlygieo.html#renderBills (LỊCH SỬ ĐƠN — xem comment gốc ở đó):
+     * nhân viên vẫn cộng tay được doanh thu ngày qua tab Lịch sử của POS, nên
+     * quyền xem/tìm/xoá bill chuyển hẳn về Quản lý. Giữ đúng bố cục gốc (nhóm
+     * theo ngày, badge SHIP/APP/BỔ SUNG, thẻ hoá đơn) qua các class `.pos-clone`
+     * đã có sẵn trong CSS của chính quanlygieo.html. Xoá bill KHÔNG còn tự chạy
+     * lại engine định mức để hoàn kho (qlReverseStockForOrder) — hoàn qua
+     * ReverseTransaction theo đúng phân bổ gốc đọc từ ledger (§3.8); bill trước
+     * cutover không truy được Unit thật (xem canonical-data-source.js) nên hoàn
+     * thành việc-chờ-rà-tay (manualReviewTask), không phải lỗi.
+     */
+
+    function billBadges(bill) {
+      var ls = bill.legacySource || {};
+      var channelType = bill.channel && bill.channel.type;
+      var isSplit = ls.method === 'TÍNH RIÊNG' || !!(ls.splitGroups && ls.splitGroups.length);
+      var isBank = (ls.method || '').indexOf('CHUYỂN KHOẢN') !== -1 ||
+        !!(ls.splitGroups && ls.splitGroups.some(function (g) { return g && g.method === 'CHUYỂN KHOẢN'; }));
+      return {
+        isShip: !!ls.isShip,
+        isApp: channelType === 'APP',
+        hasAddons: !!(ls.addons && ls.addons.length),
+        isSplit: isSplit,
+        isBank: isBank,
+        cls: isSplit ? ' split-order' : (isBank ? ' bank-order' : (channelType === 'APP' ? ' app-order' : ''))
+      };
+    }
+
+    function billQtyTotal(bill) {
+      return (bill.lines || []).reduce(function (a, l) { return a + (Number(l.qty) || 0); }, 0);
+    }
+
+    function billMatchesQuery(bill, q) {
+      if (!q) return true;
+      var ls = bill.legacySource || {};
+      return String(bill.total || '').indexOf(q) !== -1 ||
+        (!!ls.phone && ls.phone.indexOf(q) !== -1) ||
+        (!!ls.billCode && String(ls.billCode).toLowerCase().indexOf(q) !== -1) ||
+        (!!ls.bankOrderId && String(ls.bankOrderId).toLowerCase().indexOf(q) !== -1);
+    }
+
+    function billListItem(bill) {
+      var ls = bill.legacySource || {};
+      var b = billBadges(bill);
+      var shipBadge = b.isShip ? '<span class="status warning">SHIP</span> ' : '';
+      var appBadge = b.isApp ? '<span class="status success">APP</span> ' : '';
+      var addonBadge = b.hasAddons ? '<span class="status neutral">BỔ SUNG</span> ' : '';
+      var bankCodes = b.isSplit && ls.splitGroups
+        ? ls.splitGroups.filter(function (g) { return g && g.method === 'CHUYỂN KHOẢN' && g.bankOrderId; })
+          .map(function (g) { return g.bankOrderId; })
+        : (b.isBank && ls.bankOrderId ? [ls.bankOrderId] : []);
+      return '<button class="hit' + b.cls + '" data-bill-open="' + esc(bill.billId) + '">' +
+        '<div class="hii"></div><div class="hin"><div class="hitime">' + esc(ls.time || '') + ' ' +
+        shipBadge + appBadge + addonBadge + '</div><div class="himeta">' +
+        (bankCodes.length ? '🏦 ' + esc(bankCodes.join(', ')) + ' · ' : '') +
+        (ls.billCode ? esc(ls.billCode) + ' · ' : '') +
+        esc(ls.phone || 'Khách vãng lai') + '</div></div>' +
+        '<div style="text-align:right;flex-shrink:0;min-width:110px;"><div class="hip">' +
+        money(bill.total) + '</div><div class="him">' + esc(ls.method || '') + '</div></div></button>';
+    }
+
+    function billListMarkup() {
+      if (billsView.loading) return '<div class="pc-empty">Đang đọc bill…</div>';
+      if (billsView.error) return errorBox('Không đọc được bill', billsView.error);
+      var all = (billsView.data && billsView.data.bills) || [];
+      var q = (billsUI.query || '').trim().toLowerCase();
+      var filtered = all.filter(function (bill) { return billMatchesQuery(bill, q); });
+      if (!filtered.length) return '<div class="pc-empty">Không có đơn hàng</div>';
+      var total = filtered.reduce(function (a, bill) { return a + (Number(bill.total) || 0); }, 0);
+      var grp = {};
+      filtered.forEach(function (bill) {
+        var k = bill.businessDate || 'Chưa rõ ngày';
+        (grp[k] || (grp[k] = [])).push(bill);
+      });
+      return '<div class="pc-sum"><span>' + filtered.length + ' đơn</span><b>' + money(total) + '</b></div>' +
+        Object.keys(grp).sort().reverse().map(function (d) {
+          return '<div class="hdg"><div class="hdl">' + esc(d) + '</div>' +
+            grp[d].map(billListItem).join('') + '</div>';
+        }).join('');
+    }
+
+    function billDetailMarkup(bill) {
+      var ls = bill.legacySource || {};
+      var qty = billQtyTotal(bill);
+      var lines = (bill.lines || []).map(function (l, i) {
+        return '<article class="litem"><div class="lmain"><div class="ltitle">' + (i + 1) + '. ' +
+          esc(l.name || '') + (l.qty > 1 ? ' ×' + esc(l.qty) : '') + '</div><div class="lsub">' +
+          esc(l.size || '') + (l.isFree ? ' · Miễn phí' : '') + '</div></div><div class="lmeta">' +
+          money((l.price || 0) * (l.qty || 1)) + '</div></article>';
+      }).join('');
+
+      var addons = (ls.addons && ls.addons.length)
+        ? '<h3 class="report-sub">Đã bổ sung sau khi bấm bill</h3><div class="card">' +
+          ls.addons.map(function (ad) {
+            return '<article class="litem"><div class="lmain"><div class="ltitle">Ly ' + esc(ad.seq) + '/' +
+              esc(ad.totalCups) + ' · ' + esc(ad.itemName || '') + '</div><div class="lsub">' +
+              esc(ad.staff || '') + ' · ' + esc(ad.method || '') + '</div></div><div class="lmeta">' +
+              money(ad.amount) + '</div></article>';
+          }).join('') + '</div>'
+        : '';
+
+      var payment = (ls.method === 'TÍNH RIÊNG' && ls.splitGroups && ls.splitGroups.length)
+        ? '<div class="metric-grid">' + ls.splitGroups.map(function (g) {
+          return metric(g.method || '—', money(g.total));
+        }).join('') + '</div>'
+        : '<div class="metric-grid">' +
+          metric('Khách đưa', money(ls.cashGiven !== null && ls.cashGiven !== undefined ? ls.cashGiven : bill.total)) +
+          metric('Tiền thừa', money(ls.cashChange || 0)) + '</div>';
+
+      var delBlock;
+      if (billsDelete.confirmId === bill.billId) {
+        delBlock = '<div class="result error"><strong>Xoá bill này?</strong>' +
+          '<span>Nguyên liệu sẽ được hoàn về kho đúng theo sổ đã ghi lúc bán. ' +
+          'Điểm/tem/voucher đã cộng cho khách KHÔNG tự thu hồi. Thao tác không hoàn tác được.</span>' +
+          '<span>' + esc(qty) + ' món · ' + money(bill.total) + '</span></div>' +
+          '<div class="search-row"><button class="btn outline" id="bills-del-cancel"' +
+          (billsDelete.busy ? ' disabled' : '') + '>Huỷ</button>' +
+          '<button class="btn danger" id="bills-del-go"' + (billsDelete.busy ? ' disabled' : '') + '>' +
+          (billsDelete.busy ? 'Đang xoá…' : 'Xoá bill') + '</button></div>';
+      } else {
+        delBlock = (billsDelete.error ? errorBox('Không xoá được bill', billsDelete.error) : '') +
+          '<button class="btn danger" id="bills-del-ask" data-bill-id="' + esc(bill.billId) + '">Xoá bill</button>' +
+          '<p style="color:var(--muted);font-size:12px;margin-top:6px">' +
+          'Xoá đơn sẽ hoàn nguyên liệu về kho đúng bằng số đã trừ lúc bán. ' +
+          'Điểm/tem/voucher đã cộng cho khách thì không tự thu hồi.</p>';
+      }
+
+      return '<section id="screen-bill-detail-port"><div class="section-head">' +
+        '<button class="btn outline" id="bills-back">← Danh sách</button><div><p class="eyebrow">' +
+        esc(bill.businessDate || '') + (ls.time ? ' · ' + esc(ls.time) : '') + '</p><h2>' +
+        esc(ls.billCode || bill.billId) + '</h2></div></div>' +
+        '<div class="metric-grid">' + metric('Khách', ls.phone || 'Khách vãng lai') +
+        metric('Thanh toán', ls.method || '—') +
+        metric('Kênh', (bill.channel && bill.channel.type) || '—') + '</div>' +
+        '<h3 class="report-sub">Món (' + esc(qty) + ')</h3><div class="card">' +
+        (lines || '<div class="pc-empty">Không có dòng món</div>') + '</div>' + addons +
+        '<h3 class="report-sub">Thanh toán</h3>' + payment +
+        '<div class="metric-grid">' + metric('Tổng bill', money(bill.total)) + '</div>' + delBlock + '</section>';
+    }
+
+    function billsScreen() {
+      if (billsUI.openId) {
+        var all = (billsView.data && billsView.data.bills) || [];
+        var bill = all.filter(function (b) { return b.billId === billsUI.openId; })[0];
+        if (!bill) return '<section><div class="pc-empty">Bill không còn tồn tại (có thể vừa bị xoá).</div>' +
+          '<button class="btn outline" id="bills-back">← Danh sách</button></section>';
+        return billDetailMarkup(bill);
+      }
+      var notice = billsNotice ? '<div class="result"><span>' + esc(billsNotice) + '</span></div>' : '';
+      return '<section id="screen-bills-port"><div class="section-head"><div><p class="eyebrow">Lịch sử đơn</p>' +
+        '<h2>Lịch sử bill</h2></div>' + frozenTag(billsView) + '</div>' +
+        '<form class="filter-bar" id="bills-range"><input type="date" name="from" value="' +
+        esc(billsUI.from) + '" required><input type="date" name="to" value="' + esc(billsUI.to) +
+        '" required><button class="btn">Xem</button></form>' +
+        '<form class="search-row" id="bills-search"><input type="text" name="q" value="' +
+        esc(billsUI.query) + '" placeholder="Tìm theo số tiền, SĐT, mã bill..."><button class="btn">Tìm</button></form>' +
+        notice + '<div class="pos-clone">' + billListMarkup() + '</div></section>';
+    }
+
     function content(screen) {
       if (screen === 'TRACE') return traceScreen();
       if (screen === 'ALERTS') return alertsScreen();
@@ -453,6 +618,7 @@ GIEO.define('app-quanly/main', [
       if (screen === 'APPROVALS') return approvalsScreen();
       if (screen === 'REPORTS') return reportsScreen();
       if (screen === 'BTP') return btpScreen();
+      if (screen === 'BILLS') return billsScreen();
       return overviewScreen();
     }
 
@@ -541,6 +707,107 @@ GIEO.define('app-quanly/main', [
       });
     }
 
+    function loadBills(clearNotice) {
+      billsView = { loading: true, error: null, data: null };
+      if (clearNotice) billsNotice = null;
+      render();
+      controller.getBillsForRange({ from: billsUI.from, to: billsUI.to }).then(function (out) {
+        billsView = applyRead(out);
+        render();
+      });
+    }
+
+    /**
+     * Hoàn kho theo phân bổ GỐC đọc từ ledger (§3.8), không chạy lại định mức —
+     * cùng nguyên tắc `qlReverseStockForOrder` legacy nhưng qua ReverseTransaction.
+     * Luôn thử CẢ HAI sổ raw/prep, độc lập nhau (một sổ lỗi không chặn sổ kia) —
+     * đúng tinh thần Promise.allSettled của bản gốc. Bill không truy được phân bổ
+     * gốc (referenceId rỗng ở ledger canonical — bill trước cutover) không lỗi:
+     * ReverseTransaction tự đẩy việc-chờ-rà-tay (manualReviewTask), UI chỉ cần
+     * nói thật điều đó ra, không giả vờ đã hoàn xong.
+     */
+    /**
+     * NET-LOYALTY-V1.md #4 — bill ghi qua canonical (không có legacySource)
+     * kèm sự kiện OrderVoided vào ĐÚNG lượt hoàn domain 'raw' (referenceId ở
+     * đó khớp bill.billId — xem comment domain-events.js#ROUTES.OrderVoided),
+     * để L5 (`ReverseLoyaltyForVoidedBill`) chạy thật qua domain-events thay
+     * vì chỉ hoàn kho mà bỏ quên điểm/tem. Bill legacy KHÔNG kèm: referenceId
+     * hoàn kho của nó là orderId thô (khác định dạng billId canonical) và
+     * AccrueLoyaltyForSale chưa từng chạy cho bill đó — không có gì để hoàn.
+     */
+    function doDeleteBill(bill) {
+      billsDelete = { confirmId: bill.billId, busy: bill.billId, error: null };
+      render();
+      var isNative = !bill.legacySource;
+      var refId = (bill.legacySource && bill.legacySource.billId) || bill.billId;
+      var label = (bill.legacySource && bill.legacySource.billCode) || bill.billId;
+      var domains = ['raw', 'prep'];
+      var failed = [];
+      var manualReview = [];
+      var loyaltyReversed = false;
+
+      var loyaltyEntries = Promise.resolve([]);
+      if (isNative) {
+        loyaltyEntries = controller.getLoyaltyLedgerForReference({
+          billId: bill.billId, storeId: bill.storeId
+        }).then(function (out) { return R.isOk(out) ? (out.value.entries || []) : []; });
+      }
+
+      var chain = loyaltyEntries.then(function (entries) {
+        var afterFirst = Promise.resolve();
+        domains.forEach(function (domain) {
+          afterFirst = afterFirst.then(function () {
+            return controller.getLedgerEntriesForReference({
+              referenceId: refId, domain: domain, storeId: bill.storeId
+            }).then(function (out) {
+              if (R.isErr(out)) { failed.push(domain + ': ' + out.error.message); return; }
+              var allocations = (out.value.entries || []).map(function (e) {
+                return {
+                  unitId: e.unitId, itemId: e.itemId, qty: Math.abs(e.qtyDelta || 0),
+                  unitCost: e.unitCost, costBasisVersionId: e.costBasisVersionId
+                };
+              }).filter(function (a) { return a.unitId && a.itemId; });
+              var revInput = {
+                referenceId: refId, domain: domain, storeId: bill.storeId,
+                reason: 'Xoá bill — Quản lý (' + label + ')', originalAllocations: allocations
+              };
+              if (isNative && domain === 'raw') {
+                revInput.eventType = 'OrderVoided';
+                revInput.eventData = { loyaltyEntries: entries };
+              }
+              return controller.reverseOrder(revInput).then(function (revOut) {
+                if (R.isErr(revOut)) { failed.push(domain + ': ' + revOut.error.message); return; }
+                var records = (revOut.value.plan && revOut.value.plan.domainRecords) || [];
+                if (records.some(function (r) { return r.type === 'manualReviewTask'; })) manualReview.push(domain);
+                (revOut.value.sideEffects || []).forEach(function (se) {
+                  if (se.command === 'ReverseLoyaltyForVoidedBill' && R.isOk(se.result)) {
+                    var loyaltyRecords = (se.result.value.plan && se.result.value.plan.domainRecords) || [];
+                    if (loyaltyRecords.length) loyaltyReversed = true;
+                  }
+                });
+              });
+            });
+          });
+        });
+        return afterFirst;
+      });
+
+      chain.then(function () {
+        if (failed.length) {
+          billsDelete = { confirmId: null, busy: null, error: { message: failed.join(' · ') } };
+          return render();
+        }
+        billsDelete = { confirmId: null, busy: null, error: null };
+        billsUI.openId = null;
+        var base = manualReview.length
+          ? '🗑 Đã xoá bill · sổ ' + manualReview.join(', ') +
+            ' không truy được phân bổ gốc (bill trước cutover) — đã đưa vào việc chờ rà tay'
+          : '🗑 Đã xoá bill · đã hoàn kho theo đúng sổ ghi lúc bán';
+        billsNotice = base + (loyaltyReversed ? ' · đã hoàn điểm/tem khách hàng' : '');
+        loadBills(false);
+      });
+    }
+
     function loadPnLForDate(businessDate) {
       var revenue = controller.getRevenue({ businessDate: businessDate });
       var cogs = controller.getCOGS({ businessDate: businessDate });
@@ -584,6 +851,7 @@ GIEO.define('app-quanly/main', [
           if (screen === 'OVERVIEW' && !alertView.data && !alertView.loading) loadOverview();
           if (screen === 'ALERTS' && !alertView.data && !alertView.loading) loadOverview();
           if (screen === 'BTP' && !btpView.data && !btpView.loading) loadBTP(clock.calendarDate());
+          if (screen === 'BILLS' && !billsView.data && !billsView.loading) loadBills(true);
         });
       });
 
@@ -632,6 +900,56 @@ GIEO.define('app-quanly/main', [
       if (btpForm) btpForm.addEventListener('submit', function (event) {
         event.preventDefault();
         loadBTP(btpForm.elements.date.value);
+      });
+
+      var billsRangeForm = el.querySelector('#bills-range');
+      if (billsRangeForm) billsRangeForm.addEventListener('submit', function (event) {
+        event.preventDefault();
+        billsUI.from = billsRangeForm.elements.from.value;
+        billsUI.to = billsRangeForm.elements.to.value;
+        loadBills(true);
+      });
+
+      var billsSearchForm = el.querySelector('#bills-search');
+      if (billsSearchForm) billsSearchForm.addEventListener('submit', function (event) {
+        event.preventDefault();
+        billsUI.query = billsSearchForm.elements.q.value;
+        render();
+      });
+
+      var billsBack = el.querySelector('#bills-back');
+      if (billsBack) billsBack.addEventListener('click', function () {
+        billsUI.openId = null;
+        billsDelete = { confirmId: null, busy: null, error: null };
+        render();
+      });
+
+      Array.prototype.forEach.call(el.querySelectorAll('[data-bill-open]'), function (button) {
+        button.addEventListener('click', function () {
+          billsUI.openId = button.getAttribute('data-bill-open');
+          billsDelete = { confirmId: null, busy: null, error: null };
+          window.scrollTo(0, 0);
+          render();
+        });
+      });
+
+      var billsDelAsk = el.querySelector('#bills-del-ask');
+      if (billsDelAsk) billsDelAsk.addEventListener('click', function () {
+        billsDelete = { confirmId: billsDelAsk.getAttribute('data-bill-id'), busy: null, error: null };
+        render();
+      });
+
+      var billsDelCancel = el.querySelector('#bills-del-cancel');
+      if (billsDelCancel) billsDelCancel.addEventListener('click', function () {
+        billsDelete = { confirmId: null, busy: null, error: null };
+        render();
+      });
+
+      var billsDelGo = el.querySelector('#bills-del-go');
+      if (billsDelGo) billsDelGo.addEventListener('click', function () {
+        var all = (billsView.data && billsView.data.bills) || [];
+        var bill = all.filter(function (b) { return b.billId === billsDelete.confirmId; })[0];
+        if (bill) doDeleteBill(bill);
       });
 
       var compareForm = el.querySelector('#compare-periods');
@@ -727,6 +1045,7 @@ GIEO.define('app-quanly/main', [
           '<button data-screen="TRACE" class="sidebar-item ' + (state.screen === 'TRACE' ? 'active' : '') + '"><span class="sb-ic">⌕</span><span>Truy vết FIFO</span></button>' +
           '<button data-screen="INVENTORY" class="sidebar-item ' + (state.screen === 'INVENTORY' ? 'active' : '') + '"><span class="sb-ic">▦</span><span>Tồn kho</span></button>' +
           '<button data-screen="BTP" class="sidebar-item ' + (state.screen === 'BTP' ? 'active' : '') + '"><span class="sb-ic">◎</span><span>Bán thành phẩm</span></button>' +
+          '<button data-screen="BILLS" class="sidebar-item ' + (state.screen === 'BILLS' ? 'active' : '') + '"><span class="sb-ic">🧾</span><span>Lịch sử bill</span></button>' +
           '<button data-screen="REPORTS" class="sidebar-item ' + (state.screen === 'REPORTS' ? 'active' : '') + '"><span class="sb-ic">▥</span><span>Báo cáo</span></button>' +
         '</aside><div class="main-col"><header class="topbar"><div class="topbar-row">' +
           '<div class="brandrow"><button class="hamburger-btn" id="hamburgerBtn" aria-label="Menu">☰</button>' +

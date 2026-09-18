@@ -9667,8 +9667,14 @@ GIEO.define('legacy-firebase-adapter/mappers', [
         businessDate: t.dateKey || null,
         actorId: t.staffEmployeeId || t.actorId || null,
         occurredAt: t.createdAt || null,
+        /* Bug: field thật ghi bởi applyStockTransactionPOS/applyStockTransferPOS
+           (xem posgieo.html) là `referenceId`, không phải `refId` — trước bản sửa
+           này referenceId LUÔN null cho mọi entry legacy, kể cả những dòng
+           CONSUMPTION có gắn orderId. `refType` thì legacy chưa từng ghi field nào
+           tương ứng (không có write-site nào set nó) — giữ null là đúng thực tế,
+           không phải bug. */
         referenceType: t.refType || null,
-        referenceId: t.refId || null,
+        referenceId: t.referenceId || null,
         reason: t.reason || null
       },
       ambiguous: ambiguous
@@ -9753,8 +9759,11 @@ GIEO.define('legacy-firebase-adapter/mappers', [
         businessDate: spec.businessDate || null,
         occurredAt: o.createdAt || null,
         soldByActorId: o.soldBy || o.staffEmployeeId || null,
-        customerId: o.customerPhone
-          ? ids.deterministicId('customer', [o.customerPhone]) : null,
+        /* Bug: field thật trên order legacy là `phone`, không phải `customerPhone`
+           (xem posgieo.html — nơi order được ghi). Trước bản sửa này customerId
+           LUÔN null cho mọi bill legacy. */
+        customerId: o.phone
+          ? ids.deterministicId('customer', [o.phone]) : null,
         channel: {
           type: channelType,
           appName: o.appName || null,
@@ -9770,7 +9779,26 @@ GIEO.define('legacy-firebase-adapter/mappers', [
         netRevenue: total === null ? null : total - channelFee,
         /* Không tự tính netRevenue nếu thiếu total — thà để null còn hơn số sai. */
         status: 'COMPLETED',
-        legacySource: { billId: spec.billId }
+        /* billId là field canonical bắt buộc; phần còn lại là dữ liệu chỉ legacy mới
+           có (không thuộc hợp đồng Bill xuyên nguồn) — gom ở đây để màn LỊCH SỬ BILL
+           dựng lại đúng giao diện hoá đơn cũ (qlBillDetailHTML) mà không phải thêm
+           field lạ vào top-level Bill. */
+        legacySource: {
+          billId: spec.billId,
+          billCode: o.billCode || null,
+          customerName: o.customerName || null,
+          phone: o.phone || null,
+          method: o.method || null,
+          cashGiven: typeof o.cashGiven === 'number' ? o.cashGiven : null,
+          cashChange: typeof o.cashChange === 'number' ? o.cashChange : null,
+          bankOrderId: o.bankOrderId || null,
+          voucherUsed: o.voucherUsed || null,
+          isShip: !!o.isShip,
+          splitGroups: o.splitGroups || null,
+          addons: o.addons || null,
+          time: o.time || null,
+          date: o.date || null
+        }
       },
       ambiguous: ambiguous
     });
@@ -9971,6 +9999,74 @@ GIEO.define('legacy-firebase-adapter/read-port', [
       });
     }
 
+    /* Trần độ dài kỳ — giữ đúng mức legacy (quanlygieo.html#QL_BILL_MAX_DAYS) để
+       không đổi hành vi người dùng đã quen: một khoảng quá dài đọc N ngày song
+       song, tốn quota, không phải giới hạn kỹ thuật cứng. */
+    var BILLS_RANGE_MAX_DAYS = 62;
+
+    function pad2(n) { return n < 10 ? '0' + n : String(n); }
+
+    function billsRangeDays(fromKey, toKey) {
+      var from = new Date(String(fromKey || '') + 'T00:00:00');
+      var to = new Date(String(toKey || '') + 'T00:00:00');
+      if (isNaN(from.getTime()) || isNaN(to.getTime())) {
+        return R.err('VALIDATION', 'loadBillsForRange: khoảng ngày không hợp lệ');
+      }
+      var soNgay = Math.round((to.getTime() - from.getTime()) / 86400000) + 1;
+      if (soNgay < 1) return R.err('VALIDATION', 'loadBillsForRange: ngày kết thúc phải sau ngày bắt đầu');
+      if (soNgay > BILLS_RANGE_MAX_DAYS) {
+        return R.err('VALIDATION',
+          'loadBillsForRange: kỳ dài ' + soNgay + ' ngày — vượt mức ' + BILLS_RANGE_MAX_DAYS + ' ngày');
+      }
+      var days = [];
+      for (var i = 0; i < soNgay; i++) {
+        var d = new Date(from.getTime());
+        d.setDate(d.getDate() + i);
+        days.push(d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()));
+      }
+      return R.ok(days);
+    }
+
+    /**
+     * Bill trên KHOẢNG ngày — dùng cho LỊCH SỬ BILL (clone qlLoadBills). Đọc song
+     * song từng ngày qua loadBills() ở trên; một ngày lỗi (RETRYABLE) KHÔNG được
+     * làm hỏng cả khoảng — legacy (qlLoadBillsOfDate) cũng chỉ console.warn rồi bỏ
+     * qua ngày đó. Khác legacy ở chỗ: lỗi ở đây không bị nuốt câm lặng (invariant #11)
+     * mà nổi lên thành một mục `ambiguous` NGÀY nào đọc hỏng, để tầng trên tự quyết
+     * định có cảnh báo người dùng hay không (§2.3a — không chặn, nhưng không giấu).
+     */
+    function loadBillsForRange(spec) {
+      spec = spec || {};
+      var days = billsRangeDays(spec.from, spec.to);
+      if (R.isErr(days)) return Promise.resolve(days);
+      return Promise.all(days.value.map(function (businessDate) {
+        return loadBills({ storeId: spec.storeId, businessDate: businessDate }).then(function (out) {
+          if (R.isOk(out)) return out.value;
+          return {
+            bills: [], source: 'READ_FAILED',
+            ambiguous: [{
+              code: 'RANGE_DAY_READ_FAILED',
+              detail: businessDate + ': ' + out.error.kind + ' — ' + out.error.message
+            }]
+          };
+        });
+      })).then(function (rows) {
+        var bills = [], ambiguous = [];
+        rows.forEach(function (row) {
+          bills = bills.concat(row.bills);
+          ambiguous = ambiguous.concat(row.ambiguous || []);
+        });
+        /* Mới nhất trước — cùng thứ tự hiển thị legacy (qlLoadBills: sort theo
+           createdAt desc). occurredAt = o.createdAt, giữ nguyên kiểu dữ liệu gốc. */
+        bills.sort(function (a, b) {
+          var at = String(a.occurredAt || ''), bt = String(b.occurredAt || '');
+          if (at !== bt) return at < bt ? 1 : -1;
+          return String(b.billId).localeCompare(String(a.billId));
+        });
+        return R.ok({ bills: bills, ambiguous: ambiguous, days: days.value.length });
+      });
+    }
+
     function loadMenu(spec) {
       spec = spec || {};
       var source = spec.legacyMenuSource === 'menu' ? 'menu' : 'menuTogo';
@@ -10042,6 +10138,7 @@ GIEO.define('legacy-firebase-adapter/read-port', [
       loadLedger: loadLedger,
       loadUnitTrace: loadUnitTrace,
       loadBills: loadBills,
+      loadBillsForRange: loadBillsForRange,
       loadMenu: loadMenu,
       loadEmployees: loadEmployees,
       watchMenu: watchMenu
@@ -10111,6 +10208,10 @@ GIEO.define('persistence-firebase/atomic-commit', [
     (plan.domainRecords || []).forEach(function (r) {
       var map = {
         bill: ['billLive', function (x) { return { businessDate: x.businessDate, billId: x.billId }; }],
+        /* RecordAddon (commands/sales.js) — con của billLive, xem canonical-paths.js. */
+        billAddon: ['billAddon', function (x) {
+          return { businessDate: x.businessDate, billId: x.billId, addonSeq: x.addonSeq };
+        }],
         billArchive: ['billArchive', function (x) { return { archiveKey: x.archiveKey }; }],
         archiveRegistry: ['archiveRegistry', function (x) { return { businessDate: x.businessDate }; }],
         prepBatch: ['prepBatch', function (x) { return { prepBatchId: x.prepBatchId }; }],
@@ -10405,6 +10506,11 @@ GIEO.define('persistence-firebase/canonical-paths', [
 
     /* Bill — live ở RTDB, archive ở Firestore, giữ đúng phân tầng legacy. */
     billLive: { kind: RTDB, build: function (ctx, a) { return base(ctx) + '/bills/live/' + a.businessDate + '/' + a.billId; } },
+    /* Con của billLive, KHÔNG phải node riêng — một lần đọc `bills/live/{date}/{billId}`
+       trả về cả bill lẫn addons của nó, đúng tinh thần "đơn + bổ sung nằm cùng
+       một bill" của legacy (o.addons). archive.js đọc nguyên subtree RTDB này khi
+       chuyển sang billArchive, nên addons đi theo tự động, không cần khai riêng. */
+    billAddon: { kind: RTDB, build: function (ctx, a) { return base(ctx) + '/bills/live/' + a.businessDate + '/' + a.billId + '/addons/' + a.addonSeq; } },
     billArchive: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/billArchives/' + a.archiveKey; } },
     archiveRegistry: { kind: FIRESTORE, build: function (ctx, a) { return base(ctx) + '/archiveRegistry/' + a.businessDate; } },
     billCounter: { kind: RTDB, build: function (ctx, a) { return base(ctx) + '/counters/bill/' + a.businessDate; } },
@@ -10579,7 +10685,46 @@ GIEO.define('persistence-firebase/canonical-read-port', [
       return getAll(vp.value.path);
     }
 
-    return { loadUnitsForItem: loadUnitsForItem, loadVersions: loadVersions };
+    /**
+     * Ledger entries của một referenceId (vd. billId) — nguồn cho
+     * `originalAllocations` của ReverseTransaction (fifo-core/reconciliation
+     * §3.8). CHỈ có ý nghĩa cho bill/thao tác đã ghi qua canonical (RecordSale
+     * trở đi) — bill nguồn legacy không có gì ở đây, mảng rỗng KHÔNG phải lỗi
+     * và KHÔNG có bước dịch nào khác để rơi xuống (xem comment `forQuery` của
+     * `bootstrap/canonical-data-source.js` — namespace unitId 'legacy' vs
+     * 'seed' không bao giờ trùng, nên đọc được giao dịch thô cũng không suy ra
+     * được Unit thật nào).
+     */
+    function loadEntriesForReference(ctx, referenceId, domain) {
+      var collP = paths.collectionPath('ledger', ctx, { entryId: '_' });
+      if (R.isErr(collP)) return Promise.resolve(collP);
+      var where = [{ field: 'referenceId', op: '==', value: referenceId }];
+      if (domain) where.push({ field: 'domain', op: '==', value: domain });
+      return getAll(collP.value.path, where);
+    }
+
+    /**
+     * Dòng sổ loyalty (`loyalty/ledger.js#createEntry`) của một billId — nguồn
+     * `eventData.loyaltyEntries` cho ReverseTransaction khi xoá bill, để
+     * `commands/loyalty.js#ReverseLoyaltyForVoidedBill` (route qua sự kiện
+     * OrderVoided, `bootstrap/domain-events.js`) lọc đúng dòng EARN_SALE/
+     * EARN_ADDON của bill đó mà hoàn (`loyalty/accrual.js#reverseForVoidedBill`
+     * tự lọc theo `referenceId===billId`, ở đây chỉ cần nạp ĐỦ tập, không cần
+     * lọc trước). Chỉ có ý nghĩa cho bill ghi qua canonical (AccrueLoyaltyForSale
+     * chưa từng chạy cho bill legacy) — mảng rỗng cho bill legacy KHÔNG phải lỗi.
+     */
+    function loadLoyaltyEntriesForReference(ctx, billId) {
+      var collP = paths.collectionPath('loyaltyLedger', ctx, { entryId: '_' });
+      if (R.isErr(collP)) return Promise.resolve(collP);
+      return getAll(collP.value.path, [{ field: 'referenceId', op: '==', value: billId }]);
+    }
+
+    return {
+      loadUnitsForItem: loadUnitsForItem,
+      loadVersions: loadVersions,
+      loadEntriesForReference: loadEntriesForReference,
+      loadLoyaltyEntriesForReference: loadLoyaltyEntriesForReference
+    };
   }
 
   return { createReader: createReader };
@@ -10782,6 +10927,18 @@ GIEO.define('read-layer/gateway', [
     /* Dữ liệu nhạy cảm mặc định KHÔNG thuộc tầng EXECUTE (quy tắc P3). */
     GetRevenue: registerQuery('GetRevenue', { authority: 'REVIEW_APPROVE_CORRECT' }),
     GetCOGS: registerQuery('GetCOGS', { authority: 'REVIEW_APPROVE_CORRECT' }),
+    /* LỊCH SỬ BILL (port từ quanlygieo.html#qlLoadBills) — cùng authority với
+       GetRevenue/GetCOGS: liệt kê bill tức là thấy doanh thu + SĐT khách từng
+       đơn, nhạy cảm hơn GetMenu/GetShiftStatus. */
+    GetBillsForRange: registerQuery('GetBillsForRange', { authority: 'REVIEW_APPROVE_CORRECT' }),
+    /* Nguồn originalAllocations cho ReverseTransaction khi xoá bill — cùng
+       authority với GetBillsForRange (xem hàm bên dưới). */
+    GetLedgerEntriesForReference: registerQuery('GetLedgerEntriesForReference', { authority: 'REVIEW_APPROVE_CORRECT' }),
+    /* NET-LOYALTY-V1.md VIỆC PHẢI LÀM #4 — nguồn eventData.loyaltyEntries cho
+       ReverseTransaction khi xoá bill (để L5 chạy thật qua sự kiện OrderVoided).
+       Cùng authority với GetBillsForRange/GetLedgerEntriesForReference — cùng
+       màn hình, cùng mức nhạy cảm (doanh thu + khách hàng). */
+    GetLoyaltyLedgerForReference: registerQuery('GetLoyaltyLedgerForReference', { authority: 'REVIEW_APPROVE_CORRECT' }),
     GetPnL: registerQuery('GetPnL', { authority: 'MASTER_CONFIGURE' }),
     GetCustomerReport: registerQuery('GetCustomerReport', { authority: 'MASTER_CONFIGURE' }),
     /* Ba query dưới đây sinh ra để P9/P10 không còn màn nào tự đọc nguồn thô.
@@ -11284,6 +11441,93 @@ GIEO.define('read-layer/gateway', [
     });
   }
 
+  /**
+   * LỊCH SỬ BILL — MỘT implementation nhóm-theo-ngày cho danh sách bill trong
+   * khoảng [from, to] (R3: POS lẫn QUANLY gọi chung, không tự dựng lại).
+   *
+   * Không tự lọc theo chuỗi tìm kiếm (số điện thoại/mã bill/mã CK — xem
+   * qlRenderBillList) ở đây: đó là thao tác hiển thị thuần trên dữ liệu ĐÃ
+   * được cấp quyền đọc, không phải một truy vấn cần xin quyền lại mỗi phím
+   * gõ. Tầng UI (main.js) tự lọc trên mảng `bills` trả về.
+   */
+  function getBillsForRange(ctx, spec) {
+    var g = guard(Q.GetBillsForRange, ctx, spec);
+    if (R.isErr(g)) return g;
+
+    return merge.resolve({
+      snapshot: spec.snapshot,
+      cache: spec.cache,
+      computeLive: function () {
+        var bills = (spec.bills || []).slice().sort(function (a, b) {
+          var at = String(a.occurredAt || ''), bt = String(b.occurredAt || '');
+          if (at !== bt) return at < bt ? 1 : -1;
+          return String(b.billId).localeCompare(String(a.billId));
+        });
+        var byDate = {};
+        var totalRevenue = 0;
+        bills.forEach(function (b) {
+          var k = b.businessDate || 'UNKNOWN';
+          if (!byDate[k]) byDate[k] = { businessDate: k, billCount: 0, total: 0 };
+          byDate[k].billCount += 1;
+          byDate[k].total += b.total || 0;
+          totalRevenue += b.total || 0;
+        });
+        return R.ok({
+          bills: bills,
+          billCount: bills.length,
+          totalRevenue: totalRevenue,
+          byDate: byDate
+        });
+      },
+      computedAt: ctx.clock.now()
+    });
+  }
+
+  /**
+   * Ledger entries của một referenceId (billId) — nguồn `originalAllocations`
+   * cho ReverseTransaction lúc xoá bill (LỊCH SỬ BILL §3.8). `spec.entries` do
+   * `bootstrap/canonical-data-source.js#forQuery` cấp SẴN trước khi tới đây —
+   * chỉ bill ghi qua canonical (RecordSale trở đi) mới có; bill nguồn legacy
+   * KHÔNG có gì (mảng rỗng). Đây KHÔNG phải giới hạn tạm — `mapUnit`/
+   * `mapLedgerEntry` (legacy-firebase-adapter/mappers.js) dùng namespace
+   * `'legacy'` cho unitId, còn `commands/takeover.js` seed Unit thật vào
+   * workingSet bằng namespace `'seed'` — hai id KHÔNG BAO GIỜ trùng nhau, nên
+   * dù có đọc được giao dịch tiêu hao gốc của bill legacy cũng không suy ra
+   * được unit THẬT nào trong workingSet hiện tại để hoàn ngược chính xác.
+   * `coverage:'untracked'` ở đây là tín hiệu trung thực cho UI — không phải
+   * lỗi — khớp đúng đường `originalAllocations` rỗng mà
+   * `fifo-core/reconciliation.js#reverseAllocations` đã có sẵn (coverage
+   * 'untracked' → cờ needsManualReview, không đụng vào tồn kho).
+   */
+  function getLedgerEntriesForReference(ctx, spec) {
+    var g = guard(Q.GetLedgerEntriesForReference, ctx, spec);
+    if (R.isErr(g)) return g;
+    if (!spec.referenceId) return R.err('VALIDATION', 'getLedgerEntriesForReference cần referenceId');
+    if (!spec.domain) return R.err('VALIDATION', 'getLedgerEntriesForReference cần domain (raw|prep)');
+    var entries = spec.entries || [];
+    return R.ok({
+      referenceId: spec.referenceId,
+      domain: spec.domain,
+      entries: entries,
+      coverage: entries.length ? 'traceable' : 'untracked'
+    });
+  }
+
+  /**
+   * Dòng sổ loyalty (`loyalty/ledger.js`) của một billId — nguồn
+   * `eventData.loyaltyEntries` cho ReverseTransaction khi xoá bill
+   * (NET-LOYALTY-V1.md VIỆC PHẢI LÀM #4). `spec.entries` do
+   * `bootstrap/canonical-data-source.js#forQuery` cấp sẵn, cùng cơ chế với
+   * `getLedgerEntriesForReference` ở trên — bill legacy không có gì (mảng
+   * rỗng, KHÔNG phải lỗi: AccrueLoyaltyForSale chưa từng chạy cho bill đó).
+   */
+  function getLoyaltyLedgerForReference(ctx, spec) {
+    var g = guard(Q.GetLoyaltyLedgerForReference, ctx, spec);
+    if (R.isErr(g)) return g;
+    if (!spec.billId) return R.err('VALIDATION', 'getLoyaltyLedgerForReference cần billId');
+    return R.ok({ billId: spec.billId, entries: spec.entries || [] });
+  }
+
   return {
     QUERIES: Q,
     registerQuery: registerQuery,
@@ -11295,6 +11539,9 @@ GIEO.define('read-layer/gateway', [
     getInventoryLevel: getInventoryLevel,
     getRevenue: getRevenue,
     getCOGS: getCOGS,
+    getBillsForRange: getBillsForRange,
+    getLedgerEntriesForReference: getLedgerEntriesForReference,
+    getLoyaltyLedgerForReference: getLoyaltyLedgerForReference,
     getPnL: getPnL,
     comparePeriods: comparePeriods,
     getShiftStatus: getShiftStatus,
@@ -14772,6 +15019,7 @@ GIEO.define('commands/sales', [
         type: 'billAddon',
         record: {
           billId: input.billId,
+          businessDate: ctx.businessDate,
           addonSeq: input.addonSeq,
           addedAmount: input.addedAmount,
           addedByActorId: ctx.actor.actorId,
@@ -16836,8 +17084,29 @@ GIEO.define('bootstrap/canonical-data-source', [
       });
     }
 
+    /**
+     * `commands/reversal.js#ReverseTransaction` đọc thẳng `input.units` (không
+     * qua `deps` như RecordSale) để dựng workingSet rồi cộng ngược đúng những
+     * Unit mà `originalAllocations` trỏ tới. Không nạp trước thì mọi lần xoá
+     * bill — kể cả bill traceable thật sự — đều NOT_FOUND vì workingSet rỗng.
+     * `originalAllocations` rỗng (bill legacy, coverage 'untracked') thì không
+     * có itemId nào để tra — bỏ qua, để `reconciliation.reverseAllocations`
+     * tự đi đúng nhánh rỗng của nó.
+     */
+    function hydrateForReverseTransaction(input) {
+      var origs = input.originalAllocations || [];
+      var itemIds = uniq(origs.map(function (a) { return a.itemId; }).filter(Boolean));
+      if (!itemIds.length) return Promise.resolve(R.ok(input));
+      var ctx = { organizationId: defaults.organizationId, storeId: input.storeId };
+      return loadUnitsFor(ctx, itemIds).then(function (out) {
+        if (R.isErr(out)) return out;
+        return R.ok(Object.assign({}, input, { units: (input.units || []).concat(out.value) }));
+      });
+    }
+
     function forCommand(name, input) {
       input = input || {};
+      if (name === 'ReverseTransaction' && !input.units) return hydrateForReverseTransaction(input);
       /* Không phải RecordSale, hoặc bill chưa dựng (không phải việc của module
          này — `RecordSale.validate` sẽ báo lỗi đúng chỗ): đi thẳng, không thêm
          gì — cùng nguyên tắc pass-through của `legacy-data-source.js`. */
@@ -16847,7 +17116,60 @@ GIEO.define('bootstrap/canonical-data-source', [
       return hydrateForRecordSale(input);
     }
 
-    return { forCommand: forCommand };
+    /**
+     * Đọc canonical TRƯỚC khi rơi xuống legacy (đối xứng với forCommand ở
+     * trên) — hai query hiện tại: GetLedgerEntriesForReference (nguồn
+     * `originalAllocations` cho ReverseTransaction khi xoá bill, §3.8) và
+     * GetLoyaltyLedgerForReference (nguồn `eventData.loyaltyEntries` cho
+     * CÙNG lệnh đó, NET-LOYALTY-V1.md #4). Bill sinh SAU cutover có dữ liệu
+     * canonical thật ở đây; bill legacy không có gì (mảng rỗng), nên KHÔNG
+     * set `input.entries` — để nguyên input đi tiếp.
+     *
+     * `bootstrap/legacy-data-source.js` KHÔNG có nhánh dịch riêng cho query
+     * này (đã kiểm tra: không nằm trong NOT_WIRED, không có branch riêng —
+     * cố ý, không phải thiếu sót). Lý do: `mapLedgerEntry`/`mapUnit`
+     * (legacy-firebase-adapter/mappers.js) suy `unitId` cho giao dịch legacy
+     * qua namespace `'legacy'`, còn `commands/takeover.js#buildUnits` seed
+     * Unit THẬT vào workingSet qua namespace `'seed'` — hai id KHÔNG BAO GIỜ
+     * trùng nhau. Có đọc được `stock_transactions_gieogieo`/
+     * `prep_transactions_gieogieo` (referenceId=orderId) thì cũng không suy
+     * ra được Unit thật nào để hoàn tác chính xác — `takeover` chỉ chụp snapshot
+     * tổng tại mốc cutover, không mang theo lịch sử per-unit trước cutover.
+     * Mảng rỗng ở đây là đường ĐÚNG cho bill legacy: rơi thẳng xuống nhánh
+     * `originalAllocations.length === 0` có sẵn của
+     * `fifo-core/reconciliation.js#reverseAllocations` (coverage 'untracked',
+     * cờ needsManualReview, không đụng workingSet) — không phải gap cần vá.
+     *
+     * Lỗi đọc (RETRYABLE) cũng xử lý NHƯ rỗng — không chặn cả câu hỏi vì một
+     * lần đọc canonical trục trặc: coi như 'untracked', vẫn cho người dùng rà
+     * tay qua manualReviewTask, còn hơn màn xoá bill không dùng được khi
+     * Firestore canonical chập chờn. Đây là "để trống cho tầng sau", không
+     * phải "coi lỗi là rỗng hợp lệ" — không có field nào bị GHI ĐÈ thành
+     * 0/rỗng trông như dữ liệu thật.
+     */
+    function forQuery(name, input) {
+      input = input || {};
+      if (name === 'GetLedgerEntriesForReference' && input.referenceId && input.domain && !input.entries) {
+        var ctx = { organizationId: defaults.organizationId, storeId: input.storeId };
+        return reader.loadEntriesForReference(ctx, input.referenceId, input.domain).then(function (out) {
+          if (R.isErr(out) || out.value.length === 0) return R.ok(input);
+          return R.ok(Object.assign({}, input, { entries: out.value, entriesSource: 'CANONICAL' }));
+        });
+      }
+      /* NET-LOYALTY-V1.md #4 — nguồn eventData.loyaltyEntries cho
+         ReverseTransaction lúc xoá bill; bill legacy trả rỗng (đúng, vì
+         AccrueLoyaltyForSale chưa từng chạy cho bill đó). */
+      if (name === 'GetLoyaltyLedgerForReference' && input.billId && !input.entries) {
+        var ctx2 = { organizationId: defaults.organizationId, storeId: input.storeId };
+        return reader.loadLoyaltyEntriesForReference(ctx2, input.billId).then(function (out) {
+          if (R.isErr(out) || out.value.length === 0) return R.ok(input);
+          return R.ok(Object.assign({}, input, { entries: out.value }));
+        });
+      }
+      return Promise.resolve(R.ok(input));
+    }
+
+    return { forCommand: forCommand, forQuery: forQuery };
   }
 
   return { create: create };
@@ -17635,6 +17957,20 @@ GIEO.define('bootstrap/legacy-data-source', [
           });
         });
       }
+      /* LỊCH SỬ BILL (clone qlLoadBills) — khác GetRevenue/GetCOGS ở chỗ đọc theo
+         KHOẢNG ngày [from, to], không phải một businessDate. */
+      if (name === 'GetBillsForRange' && input.from && input.to && !input.bills) {
+        return reader.loadBillsForRange(input).then(function (out) {
+          if (R.isErr(out)) return out;
+          return R.ok({
+            storeId: input.storeId,
+            from: input.from,
+            to: input.to,
+            bills: out.value.bills,
+            legacyMeta: { ambiguous: out.value.ambiguous, days: out.value.days }
+          });
+        });
+      }
       if (NOT_WIRED[name] && !hasCanonicalInput(name, input)) {
         /* Chưa có nguồn legacy cho query này. Trả LỖI, không trả rỗng.
            Rỗng và "chưa đọc được" trông giống nhau trên màn hình nhưng nghĩa
@@ -17894,6 +18230,9 @@ GIEO.define('bootstrap/runtime', [
     GetInventoryLevel: reads.getInventoryLevel,
     GetRevenue: reads.getRevenue,
     GetCOGS: reads.getCOGS,
+    GetBillsForRange: reads.getBillsForRange,
+    GetLedgerEntriesForReference: reads.getLedgerEntriesForReference,
+    GetLoyaltyLedgerForReference: reads.getLoyaltyLedgerForReference,
     GetPnL: reads.getPnL,
     ComparePeriods: reads.comparePeriods,
     GetShiftStatus: reads.getShiftStatus,
@@ -18394,22 +18733,33 @@ GIEO.define('bootstrap/startup', [
   }
 
   /**
-   * Ghép 2 dataSource thành 1: `forQuery` vẫn của legacy (đường đọc UI hiện
-   * tại chưa đổi), `forCommand` đi qua canonical TRƯỚC (cấp `deps.units`/
-   * `deps.versionRegistry` thật cho RecordSale — xem `canonical-data-source.js`)
-   * RỒI mới qua legacy (legacy `forCommand` là pass-through vĩnh viễn theo
-   * thiết kế, nên chuỗi này không mất gì, chỉ cộng thêm đúng 1 chỗ nó cố ý
-   * chừa trống).
+   * Ghép 2 dataSource thành 1: cả `forQuery` lẫn `forCommand` đi qua canonical
+   * TRƯỚC (cấp `deps.units`/`deps.versionRegistry` thật cho RecordSale, hoặc
+   * `entries` ledger thật cho GetLedgerEntriesForReference — xem
+   * `canonical-data-source.js`) RỒI mới qua legacy. An toàn vì cả hai hàm
+   * canonical đều pass-through (R.ok(input) không đổi gì) với MỌI tên nó chưa
+   * biết, nên chuỗi này không đổi hành vi của bất kỳ query/command nào khác —
+   * chỉ cộng thêm đúng những chỗ nó cố ý chừa trống.
+   *
+   * Với forQuery, legacy KHÔNG còn là pass-through thuần (nó có NOT_WIRED và
+   * các case dịch riêng) — nhưng từng case dịch riêng (GetRevenue/GetCOGS/
+   * GetBillsForRange/GetLedgerEntriesForReference) đều tự kiểm tra
+   * "đã có input canonical chưa" (`!input.bills`/`!input.entries`) trước khi
+   * dịch, nên nếu canonical vừa cấp xong thì legacy thấy đã có sẵn và đi
+   * thẳng — không dịch chồng, không ghi đè.
    */
   function composeDataSource(legacy, canonical) {
-    return {
-      forQuery: legacy.forQuery,
-      forCommand: function (name, input) {
-        return Promise.resolve(canonical.forCommand(name, input)).then(function (out) {
+    function chain(canonicalFn, legacyFn) {
+      return function (name, input) {
+        return Promise.resolve(canonicalFn(name, input)).then(function (out) {
           if (R.isErr(out)) return out;
-          return legacy.forCommand(name, out.value);
+          return legacyFn(name, out.value);
         });
-      },
+      };
+    }
+    return {
+      forQuery: chain(canonical.forQuery, legacy.forQuery),
+      forCommand: chain(canonical.forCommand, legacy.forCommand),
       watchQuery: legacy.watchQuery
     };
   }
@@ -18583,7 +18933,7 @@ GIEO.define('app-quanly/controller', [
     var state = { mode: runtime.mode, screen: 'OVERVIEW', lastResult: null, lastError: null };
     function snapshot() { return Object.assign({}, state); }
     function navigate(screen) {
-      if (['OVERVIEW', 'ALERTS', 'TRACE', 'INVENTORY', 'APPROVALS', 'REPORTS', 'BTP'].indexOf(screen) === -1) {
+      if (['OVERVIEW', 'ALERTS', 'TRACE', 'INVENTORY', 'APPROVALS', 'REPORTS', 'BTP', 'BILLS'].indexOf(screen) === -1) {
         return R.err('VALIDATION', 'màn QUANLY không hợp lệ: ' + screen);
       }
       state.screen = screen;
@@ -18611,6 +18961,9 @@ GIEO.define('app-quanly/controller', [
       getInventoryLevel: function (input) { return read('GetInventoryLevel', input); },
       getRevenue: function (input) { return read('GetRevenue', input); },
       getCOGS: function (input) { return read('GetCOGS', input); },
+      getBillsForRange: function (input) { return read('GetBillsForRange', input); },
+      getLedgerEntriesForReference: function (input) { return read('GetLedgerEntriesForReference', input); },
+      getLoyaltyLedgerForReference: function (input) { return read('GetLoyaltyLedgerForReference', input); },
       getPnL: function (input) { return read('GetPnL', input); },
       comparePeriods: function (input) { return read('ComparePeriods', input); },
       getAlerts: function (input) { return read('GetAlerts', Object.assign({ audience: 'QUANLY' }, input || {})); },
@@ -18745,6 +19098,12 @@ GIEO.define('app-quanly/main', [
     var btpExportView = { busy: false, error: null, file: null };
     var approvalAction = { busy: null, error: null, done: null };
     var lastPeriod = null;
+
+    /* LỊCH SỬ BILL (port từ quanlygieo.html#renderBills — xem khối bên dưới). */
+    var billsView = view();
+    var billsUI = { from: clock.calendarDate(), to: clock.calendarDate(), query: '', openId: null };
+    var billsDelete = { confirmId: null, busy: null, error: null };
+    var billsNotice = null;
 
     function errorBox(title, error) {
       return '<div class="result error"><strong>' + esc(title) + '</strong><span>' +
@@ -19103,6 +19462,165 @@ GIEO.define('app-quanly/main', [
         esc(selectedDate) + '" required><button class="btn">Đọc sổ BTP</button></form>' + body + exported + '</section>';
     }
 
+    /* ---------- Lịch sử bill ----------
+     * Port từ quanlygieo.html#renderBills (LỊCH SỬ ĐƠN — xem comment gốc ở đó):
+     * nhân viên vẫn cộng tay được doanh thu ngày qua tab Lịch sử của POS, nên
+     * quyền xem/tìm/xoá bill chuyển hẳn về Quản lý. Giữ đúng bố cục gốc (nhóm
+     * theo ngày, badge SHIP/APP/BỔ SUNG, thẻ hoá đơn) qua các class `.pos-clone`
+     * đã có sẵn trong CSS của chính quanlygieo.html. Xoá bill KHÔNG còn tự chạy
+     * lại engine định mức để hoàn kho (qlReverseStockForOrder) — hoàn qua
+     * ReverseTransaction theo đúng phân bổ gốc đọc từ ledger (§3.8); bill trước
+     * cutover không truy được Unit thật (xem canonical-data-source.js) nên hoàn
+     * thành việc-chờ-rà-tay (manualReviewTask), không phải lỗi.
+     */
+
+    function billBadges(bill) {
+      var ls = bill.legacySource || {};
+      var channelType = bill.channel && bill.channel.type;
+      var isSplit = ls.method === 'TÍNH RIÊNG' || !!(ls.splitGroups && ls.splitGroups.length);
+      var isBank = (ls.method || '').indexOf('CHUYỂN KHOẢN') !== -1 ||
+        !!(ls.splitGroups && ls.splitGroups.some(function (g) { return g && g.method === 'CHUYỂN KHOẢN'; }));
+      return {
+        isShip: !!ls.isShip,
+        isApp: channelType === 'APP',
+        hasAddons: !!(ls.addons && ls.addons.length),
+        isSplit: isSplit,
+        isBank: isBank,
+        cls: isSplit ? ' split-order' : (isBank ? ' bank-order' : (channelType === 'APP' ? ' app-order' : ''))
+      };
+    }
+
+    function billQtyTotal(bill) {
+      return (bill.lines || []).reduce(function (a, l) { return a + (Number(l.qty) || 0); }, 0);
+    }
+
+    function billMatchesQuery(bill, q) {
+      if (!q) return true;
+      var ls = bill.legacySource || {};
+      return String(bill.total || '').indexOf(q) !== -1 ||
+        (!!ls.phone && ls.phone.indexOf(q) !== -1) ||
+        (!!ls.billCode && String(ls.billCode).toLowerCase().indexOf(q) !== -1) ||
+        (!!ls.bankOrderId && String(ls.bankOrderId).toLowerCase().indexOf(q) !== -1);
+    }
+
+    function billListItem(bill) {
+      var ls = bill.legacySource || {};
+      var b = billBadges(bill);
+      var shipBadge = b.isShip ? '<span class="status warning">SHIP</span> ' : '';
+      var appBadge = b.isApp ? '<span class="status success">APP</span> ' : '';
+      var addonBadge = b.hasAddons ? '<span class="status neutral">BỔ SUNG</span> ' : '';
+      var bankCodes = b.isSplit && ls.splitGroups
+        ? ls.splitGroups.filter(function (g) { return g && g.method === 'CHUYỂN KHOẢN' && g.bankOrderId; })
+          .map(function (g) { return g.bankOrderId; })
+        : (b.isBank && ls.bankOrderId ? [ls.bankOrderId] : []);
+      return '<button class="hit' + b.cls + '" data-bill-open="' + esc(bill.billId) + '">' +
+        '<div class="hii"></div><div class="hin"><div class="hitime">' + esc(ls.time || '') + ' ' +
+        shipBadge + appBadge + addonBadge + '</div><div class="himeta">' +
+        (bankCodes.length ? '🏦 ' + esc(bankCodes.join(', ')) + ' · ' : '') +
+        (ls.billCode ? esc(ls.billCode) + ' · ' : '') +
+        esc(ls.phone || 'Khách vãng lai') + '</div></div>' +
+        '<div style="text-align:right;flex-shrink:0;min-width:110px;"><div class="hip">' +
+        money(bill.total) + '</div><div class="him">' + esc(ls.method || '') + '</div></div></button>';
+    }
+
+    function billListMarkup() {
+      if (billsView.loading) return '<div class="pc-empty">Đang đọc bill…</div>';
+      if (billsView.error) return errorBox('Không đọc được bill', billsView.error);
+      var all = (billsView.data && billsView.data.bills) || [];
+      var q = (billsUI.query || '').trim().toLowerCase();
+      var filtered = all.filter(function (bill) { return billMatchesQuery(bill, q); });
+      if (!filtered.length) return '<div class="pc-empty">Không có đơn hàng</div>';
+      var total = filtered.reduce(function (a, bill) { return a + (Number(bill.total) || 0); }, 0);
+      var grp = {};
+      filtered.forEach(function (bill) {
+        var k = bill.businessDate || 'Chưa rõ ngày';
+        (grp[k] || (grp[k] = [])).push(bill);
+      });
+      return '<div class="pc-sum"><span>' + filtered.length + ' đơn</span><b>' + money(total) + '</b></div>' +
+        Object.keys(grp).sort().reverse().map(function (d) {
+          return '<div class="hdg"><div class="hdl">' + esc(d) + '</div>' +
+            grp[d].map(billListItem).join('') + '</div>';
+        }).join('');
+    }
+
+    function billDetailMarkup(bill) {
+      var ls = bill.legacySource || {};
+      var qty = billQtyTotal(bill);
+      var lines = (bill.lines || []).map(function (l, i) {
+        return '<article class="litem"><div class="lmain"><div class="ltitle">' + (i + 1) + '. ' +
+          esc(l.name || '') + (l.qty > 1 ? ' ×' + esc(l.qty) : '') + '</div><div class="lsub">' +
+          esc(l.size || '') + (l.isFree ? ' · Miễn phí' : '') + '</div></div><div class="lmeta">' +
+          money((l.price || 0) * (l.qty || 1)) + '</div></article>';
+      }).join('');
+
+      var addons = (ls.addons && ls.addons.length)
+        ? '<h3 class="report-sub">Đã bổ sung sau khi bấm bill</h3><div class="card">' +
+          ls.addons.map(function (ad) {
+            return '<article class="litem"><div class="lmain"><div class="ltitle">Ly ' + esc(ad.seq) + '/' +
+              esc(ad.totalCups) + ' · ' + esc(ad.itemName || '') + '</div><div class="lsub">' +
+              esc(ad.staff || '') + ' · ' + esc(ad.method || '') + '</div></div><div class="lmeta">' +
+              money(ad.amount) + '</div></article>';
+          }).join('') + '</div>'
+        : '';
+
+      var payment = (ls.method === 'TÍNH RIÊNG' && ls.splitGroups && ls.splitGroups.length)
+        ? '<div class="metric-grid">' + ls.splitGroups.map(function (g) {
+          return metric(g.method || '—', money(g.total));
+        }).join('') + '</div>'
+        : '<div class="metric-grid">' +
+          metric('Khách đưa', money(ls.cashGiven !== null && ls.cashGiven !== undefined ? ls.cashGiven : bill.total)) +
+          metric('Tiền thừa', money(ls.cashChange || 0)) + '</div>';
+
+      var delBlock;
+      if (billsDelete.confirmId === bill.billId) {
+        delBlock = '<div class="result error"><strong>Xoá bill này?</strong>' +
+          '<span>Nguyên liệu sẽ được hoàn về kho đúng theo sổ đã ghi lúc bán. ' +
+          'Điểm/tem/voucher đã cộng cho khách KHÔNG tự thu hồi. Thao tác không hoàn tác được.</span>' +
+          '<span>' + esc(qty) + ' món · ' + money(bill.total) + '</span></div>' +
+          '<div class="search-row"><button class="btn outline" id="bills-del-cancel"' +
+          (billsDelete.busy ? ' disabled' : '') + '>Huỷ</button>' +
+          '<button class="btn danger" id="bills-del-go"' + (billsDelete.busy ? ' disabled' : '') + '>' +
+          (billsDelete.busy ? 'Đang xoá…' : 'Xoá bill') + '</button></div>';
+      } else {
+        delBlock = (billsDelete.error ? errorBox('Không xoá được bill', billsDelete.error) : '') +
+          '<button class="btn danger" id="bills-del-ask" data-bill-id="' + esc(bill.billId) + '">Xoá bill</button>' +
+          '<p style="color:var(--muted);font-size:12px;margin-top:6px">' +
+          'Xoá đơn sẽ hoàn nguyên liệu về kho đúng bằng số đã trừ lúc bán. ' +
+          'Điểm/tem/voucher đã cộng cho khách thì không tự thu hồi.</p>';
+      }
+
+      return '<section id="screen-bill-detail-port"><div class="section-head">' +
+        '<button class="btn outline" id="bills-back">← Danh sách</button><div><p class="eyebrow">' +
+        esc(bill.businessDate || '') + (ls.time ? ' · ' + esc(ls.time) : '') + '</p><h2>' +
+        esc(ls.billCode || bill.billId) + '</h2></div></div>' +
+        '<div class="metric-grid">' + metric('Khách', ls.phone || 'Khách vãng lai') +
+        metric('Thanh toán', ls.method || '—') +
+        metric('Kênh', (bill.channel && bill.channel.type) || '—') + '</div>' +
+        '<h3 class="report-sub">Món (' + esc(qty) + ')</h3><div class="card">' +
+        (lines || '<div class="pc-empty">Không có dòng món</div>') + '</div>' + addons +
+        '<h3 class="report-sub">Thanh toán</h3>' + payment +
+        '<div class="metric-grid">' + metric('Tổng bill', money(bill.total)) + '</div>' + delBlock + '</section>';
+    }
+
+    function billsScreen() {
+      if (billsUI.openId) {
+        var all = (billsView.data && billsView.data.bills) || [];
+        var bill = all.filter(function (b) { return b.billId === billsUI.openId; })[0];
+        if (!bill) return '<section><div class="pc-empty">Bill không còn tồn tại (có thể vừa bị xoá).</div>' +
+          '<button class="btn outline" id="bills-back">← Danh sách</button></section>';
+        return billDetailMarkup(bill);
+      }
+      var notice = billsNotice ? '<div class="result"><span>' + esc(billsNotice) + '</span></div>' : '';
+      return '<section id="screen-bills-port"><div class="section-head"><div><p class="eyebrow">Lịch sử đơn</p>' +
+        '<h2>Lịch sử bill</h2></div>' + frozenTag(billsView) + '</div>' +
+        '<form class="filter-bar" id="bills-range"><input type="date" name="from" value="' +
+        esc(billsUI.from) + '" required><input type="date" name="to" value="' + esc(billsUI.to) +
+        '" required><button class="btn">Xem</button></form>' +
+        '<form class="search-row" id="bills-search"><input type="text" name="q" value="' +
+        esc(billsUI.query) + '" placeholder="Tìm theo số tiền, SĐT, mã bill..."><button class="btn">Tìm</button></form>' +
+        notice + '<div class="pos-clone">' + billListMarkup() + '</div></section>';
+    }
+
     function content(screen) {
       if (screen === 'TRACE') return traceScreen();
       if (screen === 'ALERTS') return alertsScreen();
@@ -19110,6 +19628,7 @@ GIEO.define('app-quanly/main', [
       if (screen === 'APPROVALS') return approvalsScreen();
       if (screen === 'REPORTS') return reportsScreen();
       if (screen === 'BTP') return btpScreen();
+      if (screen === 'BILLS') return billsScreen();
       return overviewScreen();
     }
 
@@ -19198,6 +19717,107 @@ GIEO.define('app-quanly/main', [
       });
     }
 
+    function loadBills(clearNotice) {
+      billsView = { loading: true, error: null, data: null };
+      if (clearNotice) billsNotice = null;
+      render();
+      controller.getBillsForRange({ from: billsUI.from, to: billsUI.to }).then(function (out) {
+        billsView = applyRead(out);
+        render();
+      });
+    }
+
+    /**
+     * Hoàn kho theo phân bổ GỐC đọc từ ledger (§3.8), không chạy lại định mức —
+     * cùng nguyên tắc `qlReverseStockForOrder` legacy nhưng qua ReverseTransaction.
+     * Luôn thử CẢ HAI sổ raw/prep, độc lập nhau (một sổ lỗi không chặn sổ kia) —
+     * đúng tinh thần Promise.allSettled của bản gốc. Bill không truy được phân bổ
+     * gốc (referenceId rỗng ở ledger canonical — bill trước cutover) không lỗi:
+     * ReverseTransaction tự đẩy việc-chờ-rà-tay (manualReviewTask), UI chỉ cần
+     * nói thật điều đó ra, không giả vờ đã hoàn xong.
+     */
+    /**
+     * NET-LOYALTY-V1.md #4 — bill ghi qua canonical (không có legacySource)
+     * kèm sự kiện OrderVoided vào ĐÚNG lượt hoàn domain 'raw' (referenceId ở
+     * đó khớp bill.billId — xem comment domain-events.js#ROUTES.OrderVoided),
+     * để L5 (`ReverseLoyaltyForVoidedBill`) chạy thật qua domain-events thay
+     * vì chỉ hoàn kho mà bỏ quên điểm/tem. Bill legacy KHÔNG kèm: referenceId
+     * hoàn kho của nó là orderId thô (khác định dạng billId canonical) và
+     * AccrueLoyaltyForSale chưa từng chạy cho bill đó — không có gì để hoàn.
+     */
+    function doDeleteBill(bill) {
+      billsDelete = { confirmId: bill.billId, busy: bill.billId, error: null };
+      render();
+      var isNative = !bill.legacySource;
+      var refId = (bill.legacySource && bill.legacySource.billId) || bill.billId;
+      var label = (bill.legacySource && bill.legacySource.billCode) || bill.billId;
+      var domains = ['raw', 'prep'];
+      var failed = [];
+      var manualReview = [];
+      var loyaltyReversed = false;
+
+      var loyaltyEntries = Promise.resolve([]);
+      if (isNative) {
+        loyaltyEntries = controller.getLoyaltyLedgerForReference({
+          billId: bill.billId, storeId: bill.storeId
+        }).then(function (out) { return R.isOk(out) ? (out.value.entries || []) : []; });
+      }
+
+      var chain = loyaltyEntries.then(function (entries) {
+        var afterFirst = Promise.resolve();
+        domains.forEach(function (domain) {
+          afterFirst = afterFirst.then(function () {
+            return controller.getLedgerEntriesForReference({
+              referenceId: refId, domain: domain, storeId: bill.storeId
+            }).then(function (out) {
+              if (R.isErr(out)) { failed.push(domain + ': ' + out.error.message); return; }
+              var allocations = (out.value.entries || []).map(function (e) {
+                return {
+                  unitId: e.unitId, itemId: e.itemId, qty: Math.abs(e.qtyDelta || 0),
+                  unitCost: e.unitCost, costBasisVersionId: e.costBasisVersionId
+                };
+              }).filter(function (a) { return a.unitId && a.itemId; });
+              var revInput = {
+                referenceId: refId, domain: domain, storeId: bill.storeId,
+                reason: 'Xoá bill — Quản lý (' + label + ')', originalAllocations: allocations
+              };
+              if (isNative && domain === 'raw') {
+                revInput.eventType = 'OrderVoided';
+                revInput.eventData = { loyaltyEntries: entries };
+              }
+              return controller.reverseOrder(revInput).then(function (revOut) {
+                if (R.isErr(revOut)) { failed.push(domain + ': ' + revOut.error.message); return; }
+                var records = (revOut.value.plan && revOut.value.plan.domainRecords) || [];
+                if (records.some(function (r) { return r.type === 'manualReviewTask'; })) manualReview.push(domain);
+                (revOut.value.sideEffects || []).forEach(function (se) {
+                  if (se.command === 'ReverseLoyaltyForVoidedBill' && R.isOk(se.result)) {
+                    var loyaltyRecords = (se.result.value.plan && se.result.value.plan.domainRecords) || [];
+                    if (loyaltyRecords.length) loyaltyReversed = true;
+                  }
+                });
+              });
+            });
+          });
+        });
+        return afterFirst;
+      });
+
+      chain.then(function () {
+        if (failed.length) {
+          billsDelete = { confirmId: null, busy: null, error: { message: failed.join(' · ') } };
+          return render();
+        }
+        billsDelete = { confirmId: null, busy: null, error: null };
+        billsUI.openId = null;
+        var base = manualReview.length
+          ? '🗑 Đã xoá bill · sổ ' + manualReview.join(', ') +
+            ' không truy được phân bổ gốc (bill trước cutover) — đã đưa vào việc chờ rà tay'
+          : '🗑 Đã xoá bill · đã hoàn kho theo đúng sổ ghi lúc bán';
+        billsNotice = base + (loyaltyReversed ? ' · đã hoàn điểm/tem khách hàng' : '');
+        loadBills(false);
+      });
+    }
+
     function loadPnLForDate(businessDate) {
       var revenue = controller.getRevenue({ businessDate: businessDate });
       var cogs = controller.getCOGS({ businessDate: businessDate });
@@ -19241,6 +19861,7 @@ GIEO.define('app-quanly/main', [
           if (screen === 'OVERVIEW' && !alertView.data && !alertView.loading) loadOverview();
           if (screen === 'ALERTS' && !alertView.data && !alertView.loading) loadOverview();
           if (screen === 'BTP' && !btpView.data && !btpView.loading) loadBTP(clock.calendarDate());
+          if (screen === 'BILLS' && !billsView.data && !billsView.loading) loadBills(true);
         });
       });
 
@@ -19289,6 +19910,56 @@ GIEO.define('app-quanly/main', [
       if (btpForm) btpForm.addEventListener('submit', function (event) {
         event.preventDefault();
         loadBTP(btpForm.elements.date.value);
+      });
+
+      var billsRangeForm = el.querySelector('#bills-range');
+      if (billsRangeForm) billsRangeForm.addEventListener('submit', function (event) {
+        event.preventDefault();
+        billsUI.from = billsRangeForm.elements.from.value;
+        billsUI.to = billsRangeForm.elements.to.value;
+        loadBills(true);
+      });
+
+      var billsSearchForm = el.querySelector('#bills-search');
+      if (billsSearchForm) billsSearchForm.addEventListener('submit', function (event) {
+        event.preventDefault();
+        billsUI.query = billsSearchForm.elements.q.value;
+        render();
+      });
+
+      var billsBack = el.querySelector('#bills-back');
+      if (billsBack) billsBack.addEventListener('click', function () {
+        billsUI.openId = null;
+        billsDelete = { confirmId: null, busy: null, error: null };
+        render();
+      });
+
+      Array.prototype.forEach.call(el.querySelectorAll('[data-bill-open]'), function (button) {
+        button.addEventListener('click', function () {
+          billsUI.openId = button.getAttribute('data-bill-open');
+          billsDelete = { confirmId: null, busy: null, error: null };
+          window.scrollTo(0, 0);
+          render();
+        });
+      });
+
+      var billsDelAsk = el.querySelector('#bills-del-ask');
+      if (billsDelAsk) billsDelAsk.addEventListener('click', function () {
+        billsDelete = { confirmId: billsDelAsk.getAttribute('data-bill-id'), busy: null, error: null };
+        render();
+      });
+
+      var billsDelCancel = el.querySelector('#bills-del-cancel');
+      if (billsDelCancel) billsDelCancel.addEventListener('click', function () {
+        billsDelete = { confirmId: null, busy: null, error: null };
+        render();
+      });
+
+      var billsDelGo = el.querySelector('#bills-del-go');
+      if (billsDelGo) billsDelGo.addEventListener('click', function () {
+        var all = (billsView.data && billsView.data.bills) || [];
+        var bill = all.filter(function (b) { return b.billId === billsDelete.confirmId; })[0];
+        if (bill) doDeleteBill(bill);
       });
 
       var compareForm = el.querySelector('#compare-periods');
@@ -19384,6 +20055,7 @@ GIEO.define('app-quanly/main', [
           '<button data-screen="TRACE" class="sidebar-item ' + (state.screen === 'TRACE' ? 'active' : '') + '"><span class="sb-ic">⌕</span><span>Truy vết FIFO</span></button>' +
           '<button data-screen="INVENTORY" class="sidebar-item ' + (state.screen === 'INVENTORY' ? 'active' : '') + '"><span class="sb-ic">▦</span><span>Tồn kho</span></button>' +
           '<button data-screen="BTP" class="sidebar-item ' + (state.screen === 'BTP' ? 'active' : '') + '"><span class="sb-ic">◎</span><span>Bán thành phẩm</span></button>' +
+          '<button data-screen="BILLS" class="sidebar-item ' + (state.screen === 'BILLS' ? 'active' : '') + '"><span class="sb-ic">🧾</span><span>Lịch sử bill</span></button>' +
           '<button data-screen="REPORTS" class="sidebar-item ' + (state.screen === 'REPORTS' ? 'active' : '') + '"><span class="sb-ic">▥</span><span>Báo cáo</span></button>' +
         '</aside><div class="main-col"><header class="topbar"><div class="topbar-row">' +
           '<div class="brandrow"><button class="hamburger-btn" id="hamburgerBtn" aria-label="Menu">☰</button>' +

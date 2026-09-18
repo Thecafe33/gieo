@@ -131,6 +131,38 @@ describe('P10 QUANLY thin client', function () {
     });
   });
 
+  test('LỊCH SỬ BILL: đọc danh sách chỉ gọi GetBillsForRange', function () {
+    var runtime = fakeRuntime();
+    return _app.QL.createController(runtime).getBillsForRange({ from: '2026-09-01', to: '2026-09-17' })
+      .then(function (out) {
+        assertOk(out);
+        assert.strictEqual(runtime.calls[0].name, 'GetBillsForRange');
+        assert.deepStrictEqual(runtime.calls[0].input, { from: '2026-09-01', to: '2026-09-17' });
+      });
+  });
+
+  test('LỊCH SỬ BILL: nguồn originalAllocations cho xoá bill chỉ gọi GetLedgerEntriesForReference', function () {
+    var runtime = fakeRuntime();
+    return _app.QL.createController(runtime)
+      .getLedgerEntriesForReference({ referenceId: 'order_1', domain: 'raw', storeId: 'store_1' })
+      .then(function (out) {
+        assertOk(out);
+        assert.strictEqual(runtime.calls[0].name, 'GetLedgerEntriesForReference');
+        assert.deepStrictEqual(runtime.calls[0].input, { referenceId: 'order_1', domain: 'raw', storeId: 'store_1' });
+      });
+  });
+
+  test('LỊCH SỬ BILL: nguồn eventData.loyaltyEntries cho xoá bill (NET-LOYALTY-V1.md #4) chỉ gọi GetLoyaltyLedgerForReference', function () {
+    var runtime = fakeRuntime();
+    return _app.QL.createController(runtime)
+      .getLoyaltyLedgerForReference({ billId: 'bill_1', storeId: 'store_1' })
+      .then(function (out) {
+        assertOk(out);
+        assert.strictEqual(runtime.calls[0].name, 'GetLoyaltyLedgerForReference');
+        assert.deepStrictEqual(runtime.calls[0].input, { billId: 'bill_1', storeId: 'store_1' });
+      });
+  });
+
   test('found/revise/correction đều đi qua command catalog mới', function () {
     var runtime = fakeRuntime();
     var ql = _app.QL.createController(runtime);
@@ -319,6 +351,19 @@ describe('P9/P10 — màn Ca, Cảnh báo, Duyệt đều đi qua read-layer', f
       assert.strictEqual(runtime.calls[0].kind, 'query');
       assert.strictEqual(runtime.calls[0].name, 'GetBTPReport');
       assert.strictEqual(runtime.calls[0].input.businessDate, '2026-09-16');
+    });
+  });
+
+  test('QUANLY mở màn LỊCH SỬ BILL và đọc qua GetBillsForRange của runtime', function () {
+    var runtime = fakeRuntime();
+    var ql = _app.QL.createController(runtime);
+    assertOk(ql.navigate('BILLS'));
+    assert.strictEqual(ql.state().screen, 'BILLS');
+    return ql.getBillsForRange({ from: '2026-09-01', to: '2026-09-17' }).then(function (out) {
+      assertOk(out);
+      assert.strictEqual(runtime.calls[0].kind, 'query');
+      assert.strictEqual(runtime.calls[0].name, 'GetBillsForRange');
+      assert.strictEqual(runtime.calls[0].input.from, '2026-09-01');
     });
   });
 

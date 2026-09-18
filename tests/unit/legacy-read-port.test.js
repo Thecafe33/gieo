@@ -100,6 +100,75 @@ describe('legacy read port — CHỈ ĐỌC', function () {
     });
   });
 
+  test('loadBillsForRange đọc nhiều ngày song song, sắp mới nhất trước', function () {
+    var client = legacyClient({
+      rtdb: {
+        'orders_gieogieo/3/10': { b1: { total: 10000, createdAt: 1, itemsArray: [] } },
+        'orders_gieogieo/3/11': { b2: { total: 20000, createdAt: 2, itemsArray: [] } }
+      }
+    });
+    return _lr.PORT.createReader(client).loadBillsForRange({
+      from: '2026-03-10', to: '2026-03-11', storeId: _lr.STORE
+    }).then(function (out) {
+      var value = assertOk(out);
+      assert.strictEqual(value.days, 2);
+      assert.strictEqual(value.bills.length, 2);
+      assert.strictEqual(value.bills[0].total, 20000, 'createdAt mới hơn phải đứng trước');
+      assert.strictEqual(value.bills[1].total, 10000);
+    });
+  });
+
+  test('loadBillsForRange: ngày kết thúc trước ngày bắt đầu → VALIDATION, không âm thầm trả rỗng', function () {
+    return _lr.PORT.createReader(legacyClient({})).loadBillsForRange({
+      from: '2026-03-11', to: '2026-03-10', storeId: _lr.STORE
+    }).then(function (out) { assertErr(out, 'VALIDATION'); });
+  });
+
+  test('loadBillsForRange: kỳ quá 62 ngày → VALIDATION (giữ trần như legacy QL_BILL_MAX_DAYS)', function () {
+    return _lr.PORT.createReader(legacyClient({})).loadBillsForRange({
+      from: '2026-01-01', to: '2026-12-31', storeId: _lr.STORE
+    }).then(function (out) { assertErr(out, 'VALIDATION'); });
+  });
+
+  test('loadBillsForRange: một ngày đọc lỗi không làm hỏng cả khoảng, nổi lên thành ambiguous (invariant #11)', function () {
+    var client = legacyClient({
+      rtdb: { 'orders_gieogieo/3/10': { b1: { total: 10000, createdAt: 1, itemsArray: [] } } }
+    });
+    var realRtdbGet = client.rtdbGet;
+    var realFirestoreGet = client.firestoreGet;
+    /* Ngày 11 hỏng CẢ HAI nguồn (RTDB lẫn Firestore archive) — mô phỏng lỗi hạ
+       tầng thật, khác với "không seed gì" (vốn hợp lệ trả mảng rỗng). */
+    client.rtdbGet = function (path) {
+      if (path === 'orders_gieogieo/3/11') throw new Error('RTDB sập');
+      return realRtdbGet(path);
+    };
+    client.firestoreGet = function (collection, id) {
+      if (collection === 'orders_gieogieo_archive' && id === '03_11_2026') throw new Error('Firestore sập');
+      return realFirestoreGet(collection, id);
+    };
+    return _lr.PORT.createReader(client).loadBillsForRange({
+      from: '2026-03-10', to: '2026-03-11', storeId: _lr.STORE
+    }).then(function (out) {
+      var value = assertOk(out);
+      assert.strictEqual(value.bills.length, 1, 'ngày 10 vẫn đọc được bình thường');
+      assert.strictEqual(value.bills[0].total, 10000);
+      assert.ok(value.ambiguous.some(function (a) { return a.code === 'RANGE_DAY_READ_FAILED'; }),
+        'ngày 11 lỗi phải nổi lên thành ambiguous, không bị nuốt câm lặng');
+    });
+  });
+
+  test('data source hydrate GetBillsForRange theo khoảng ngày', function () {
+    var client = legacyClient({
+      rtdb: { 'orders_gieogieo/3/10': { b1: { total: 10000, createdAt: 1, itemsArray: [] } } }
+    });
+    var ds = _lr.DS.create(_lr.PORT.createReader(client), { storeId: _lr.STORE });
+    return ds.forQuery('GetBillsForRange', { from: '2026-03-10', to: '2026-03-10' }).then(function (out) {
+      var value = assertOk(out);
+      assert.strictEqual(value.bills.length, 1);
+      assert.strictEqual(value.from, '2026-03-10');
+    });
+  });
+
   test('data source hydrate GetRevenue; command canonical đi thẳng không chạm legacy', function () {
     var client = legacyClient({ rtdb: { 'orders_gieogieo/3/10': {} }, docs: {
       'orders_gieogieo_archive/03_10_2026': { orders: {} }

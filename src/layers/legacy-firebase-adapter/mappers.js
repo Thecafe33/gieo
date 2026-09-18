@@ -175,8 +175,14 @@ GIEO.define('legacy-firebase-adapter/mappers', [
         businessDate: t.dateKey || null,
         actorId: t.staffEmployeeId || t.actorId || null,
         occurredAt: t.createdAt || null,
+        /* Bug: field thật ghi bởi applyStockTransactionPOS/applyStockTransferPOS
+           (xem posgieo.html) là `referenceId`, không phải `refId` — trước bản sửa
+           này referenceId LUÔN null cho mọi entry legacy, kể cả những dòng
+           CONSUMPTION có gắn orderId. `refType` thì legacy chưa từng ghi field nào
+           tương ứng (không có write-site nào set nó) — giữ null là đúng thực tế,
+           không phải bug. */
         referenceType: t.refType || null,
-        referenceId: t.refId || null,
+        referenceId: t.referenceId || null,
         reason: t.reason || null
       },
       ambiguous: ambiguous
@@ -261,8 +267,11 @@ GIEO.define('legacy-firebase-adapter/mappers', [
         businessDate: spec.businessDate || null,
         occurredAt: o.createdAt || null,
         soldByActorId: o.soldBy || o.staffEmployeeId || null,
-        customerId: o.customerPhone
-          ? ids.deterministicId('customer', [o.customerPhone]) : null,
+        /* Bug: field thật trên order legacy là `phone`, không phải `customerPhone`
+           (xem posgieo.html — nơi order được ghi). Trước bản sửa này customerId
+           LUÔN null cho mọi bill legacy. */
+        customerId: o.phone
+          ? ids.deterministicId('customer', [o.phone]) : null,
         channel: {
           type: channelType,
           appName: o.appName || null,
@@ -278,7 +287,26 @@ GIEO.define('legacy-firebase-adapter/mappers', [
         netRevenue: total === null ? null : total - channelFee,
         /* Không tự tính netRevenue nếu thiếu total — thà để null còn hơn số sai. */
         status: 'COMPLETED',
-        legacySource: { billId: spec.billId }
+        /* billId là field canonical bắt buộc; phần còn lại là dữ liệu chỉ legacy mới
+           có (không thuộc hợp đồng Bill xuyên nguồn) — gom ở đây để màn LỊCH SỬ BILL
+           dựng lại đúng giao diện hoá đơn cũ (qlBillDetailHTML) mà không phải thêm
+           field lạ vào top-level Bill. */
+        legacySource: {
+          billId: spec.billId,
+          billCode: o.billCode || null,
+          customerName: o.customerName || null,
+          phone: o.phone || null,
+          method: o.method || null,
+          cashGiven: typeof o.cashGiven === 'number' ? o.cashGiven : null,
+          cashChange: typeof o.cashChange === 'number' ? o.cashChange : null,
+          bankOrderId: o.bankOrderId || null,
+          voucherUsed: o.voucherUsed || null,
+          isShip: !!o.isShip,
+          splitGroups: o.splitGroups || null,
+          addons: o.addons || null,
+          time: o.time || null,
+          date: o.date || null
+        }
       },
       ambiguous: ambiguous
     });
