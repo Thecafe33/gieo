@@ -10736,7 +10736,18 @@ async function _startPrepBatchImpl(preResolvedStaff, atomicScanDone, atomicScann
         // đúng danh sách này để hoàn tem về 'sealed', không thì tem coi như dùng hết
         // vĩnh viễn dù mẻ chưa từng thực sự được nấu.
         atomicScannedContainerIds: Array.isArray(atomicScannedContainerIds) ? atomicScannedContainerIds : [],
-        businessDate: posDateKey(), source: 'pos'
+        businessDate: posDateKey(), source: 'pos',
+        // [MỚI — Tuần 4 truy xuất] Nối "nguyên liệu → lô BTP": allocations đã tính sẵn trong
+        // perInputAllocations lúc trừ nguyên liệu ở trên (đúng tem/không tem nào), gắn thẳng vào
+        // chính lô ngay lúc sinh ra — không phải dò lại qua stock_transactions.referenceId==
+        // batchId mỗi lần cần tra. Đây là mắt xích còn thiếu duy nhất trong chuỗi truy xuất đầy
+        // đủ "tem nguyên liệu → lô BTP → bill" (2 đoạn còn lại — lô BTP→bill và tem→bill — đã có
+        // từ unitAllocations/fifoAllocations + order_stock_traces_gieogieo, xem Tuần 2).
+        inputTrace: Object.fromEntries(inputs.map(r => {
+          const rec = perInputAllocations[r.itemId] || { qty: Math.abs((Number(r.qty) || 0) * ratio), allocations: [] };
+          const itName = (KHO_ITEMS_CACHE.find(x => x.id === r.itemId) || {}).name || '';
+          return [r.itemId, { itemName: itName, qty: rec.qty, allocations: rec.allocations, untracked: !rec.allocations.length }];
+        }))
       });
     } catch (setErr) {
       // [BUG "trừ kho thành công nhưng không có mẻ" — FIX] TRƯỚC ĐÂY: lỗi ở đúng bước này rơi
@@ -18324,6 +18335,18 @@ async function applyBackfillConsumptionNoStockEffect(order, orderId, businessDat
       }));
     });
     if (jobs.length) await Promise.allSettled(jobs);
+    // [MỚI — Tuần 4 truy xuất] Đường này CỐ Ý không phân bổ FIFO (xem chú thích đầu hàm) nên
+    // tra Bill ↔ Tem sẽ không thấy gì nếu không ghi rõ — dễ hiểu lầm thành "bill lỗi, không trừ
+    // được kho" giống món chưa khai định mức. Ghi tường minh untrackedReason để phân biệt: đây
+    // là MỘT QUYẾT ĐỊNH NGHIỆP VỤ có chủ đích (đã kiểm kê bắt đúng), không phải một khoảng hở.
+    fstore.collection('order_stock_traces_gieogieo').doc(orderId).set({
+      orderId, billCode: (order && order.billCode) || '', businessDate: businessDate || posDateKey(),
+      createdAt: nowISO, backfillNoStockEffect: true,
+      ingredients: Object.fromEntries(Object.keys(agg).filter(id => Math.abs(agg[id]) > 0)
+        .map(id => [id, { qty: Math.abs(agg[id]), allocations: [], untracked: true, untrackedReason: 'backfill_before_close' }])),
+      preps: Object.fromEntries(Object.keys(prepAgg).filter(id => Math.abs(prepAgg[id]) > 0)
+        .map(id => [id, { qty: Math.abs(prepAgg[id]), allocations: [], untracked: true, untrackedReason: 'backfill_before_close' }]))
+    }, { merge: true }).catch(err => console.warn('[stockTrace] ghi tổng hợp bill→tem (backfill) lỗi', orderId, err));
   } catch (err) {
     // Không chặn việc tạo bill — chỉ log, giống nguyên tắc của applySalesConsumptionPOS.
     console.warn('[Bổ sung bill] ghi sổ tiêu hao (không đụng tồn) lỗi (không ảnh hưởng bill):', err);

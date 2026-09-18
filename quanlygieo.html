@@ -4479,15 +4479,21 @@ async function renderKhoContainers(){
 // MỚI usageEvents (ghi bởi unitEngineAllocateConsumption() bên POS mỗi lần tem này bị
 // trừ — xem posgieo.html). Không tính lại gì cả, chỉ đọc và xếp theo thời gian.
 // ============================================================
-async function ctnShowDetail(containerId){
-  openEditSheet('Chi tiết tem', '<div id="ctnDetailBody"></div>', ()=>{});
+// `coll` (tuỳ chọn) — mặc định CTN_COLL (tem nguyên liệu thô); truyền
+// 'prep_batches_gieogieo' để xem lô BÁN THÀNH PHẨM (dùng chung sheet, khác phần
+// render vì 2 loại tài liệu có field khác nhau hẳn — xem _batchDetailRender).
+async function ctnShowDetail(containerId, coll){
+  coll = coll || CTN_COLL;
+  const isBatch = coll === 'prep_batches_gieogieo';
+  openEditSheet(isBatch ? 'Chi tiết lô bán thành phẩm' : 'Chi tiết tem', '<div id="ctnDetailBody"></div>', ()=>{});
   const box = document.getElementById('ctnDetailBody');
   showLoading(box);
   try{
     await ensureAuth();
-    const doc = await fstore.collection(CTN_COLL).doc(containerId).get();
-    if(!doc.exists){ box.innerHTML = '<div class="muted">Không tìm thấy tem này — có thể đã bị xoá.</div>'; return; }
+    const doc = await fstore.collection(coll).doc(containerId).get();
+    if(!doc.exists){ box.innerHTML = '<div class="muted">Không tìm thấy — có thể đã bị xoá.</div>'; return; }
     const c = { id: doc.id, ...doc.data() };
+    if(isBatch){ _batchDetailRender(box, c); return; }
     let recv = null;
     if(c.receiveRefId){
       try{
@@ -4500,6 +4506,50 @@ async function ctnShowDetail(containerId){
     console.error('ctnShowDetail lỗi', err);
     box.innerHTML = '<div class="muted">Không đọc được: '+(err.code||err.message||err)+'</div>';
   }
+}
+// [MỚI — Tuần 4 truy xuất] Chi tiết một LÔ BÁN THÀNH PHẨM: đọc inputTrace (ghi bởi
+// startPrepBatch() bên posgieo.html ngay lúc tạo lô) — chính là mắt xích "nguyên liệu
+// → lô" mà trước đây phải dò lại qua stock_transactions.referenceId==batchId mới ra.
+function _batchDetailRender(box, b){
+  const dt = iso => {
+    const d = iso ? new Date(iso) : null;
+    return (d && !isNaN(d)) ? `${fmtDateVN(d)} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}` : '';
+  };
+  const refLabelOf = t => ({ order:'Bill', prep_batch:'Mẻ chế biến', drink_waste:'Đổ ly' }[t] || t || '');
+  const events = [];
+  if(b.startedAt) events.push({ at: b.startedAt, label: 'Bắt đầu chế biến', detail: b.staff?('bởi '+b.staff):'' });
+  (b.usageEvents||[]).forEach(e=>{
+    events.push({ at: e.at, label: 'Trừ '+fmtNum(e.qty,2)+' '+(b.unit||''), detail: [refLabelOf(e.refType), e.refId, e.note].filter(Boolean).join(' · ') });
+  });
+  if(b.finishedAt) events.push({ at: b.finishedAt, label: 'Hoàn thành mẻ', detail: 'Cân được '+fmtNum(b.qtyInitial,2)+' '+(b.unit||'') });
+  events.sort((a,b2)=> String(a.at||'').localeCompare(String(b2.at||'')));
+
+  const inputEntries = Object.entries(b.inputTrace||{});
+  const inputRows = inputEntries.map(([itemId,d])=>`
+    <div class="litem">
+      <div class="li-l">
+        <div>${escapeHtmlAttr(d.itemName || itemId)}</div>
+        <div>${fmtNum(d.qty,2)} ${d.untracked ? '<span class="tier tier-amber" style="margin-left:4px">Không gắn tem</span>' : ''}</div>
+        ${(d.allocations||[]).length ? `<div class="small-note" style="margin-top:4px">${d.allocations.map(a=>escapeHtmlAttr(a.code||a.containerId)+' ('+fmtNum(a.qty,2)+')').join(', ')}</div>` : ''}
+      </div>
+      <div class="li-r">${(d.allocations||[]).length===1
+        ? `<button class="btn outline sm" style="width:auto;padding:0 10px" onclick="ctnShowDetail('${d.allocations[0].containerId}')">Xem tem</button>`
+        : ((d.allocations||[]).length>1 ? `<span class="muted-sm">${d.allocations.length} tem</span>` : '')}</div>
+    </div>`).join('');
+
+  box.innerHTML = `
+    <div class="row"><span class="rl">Lô</span><span class="rv"><b>${escapeHtmlAttr(b.prepName||b.prepCode||'')}</b></span></div>
+    <div class="row"><span class="rl">Trạng thái</span><span class="rv">${escapeHtmlAttr(b.status||'')}</span></div>
+    <div class="row"><span class="rl">Còn lại</span><span class="rv">${fmtNum(b.qtyRemaining,2)} ${escapeHtmlAttr(b.unit||'')}</span></div>
+    <div class="sec-title" style="margin-top:14px">Nguyên liệu đầu vào — lấy từ tem nào</div>
+    ${inputRows || '<div class="muted">Lô này chưa có dữ liệu nối nguyên liệu → tem (tạo trước khi có tính năng này, hoặc công thức không dùng nguyên liệu có tem).</div>'}
+    <div class="sec-title" style="margin-top:14px">Dòng thời gian</div>
+    ${events.length ? events.map(e=>`
+      <div class="row" style="align-items:flex-start">
+        <span class="rl" style="flex:1;min-width:0"><b>${escapeHtmlAttr(e.label)}</b>${e.detail?`<div class="small-note" style="margin-top:2px">${escapeHtmlAttr(e.detail)}</div>`:''}</span>
+        <span class="rv" style="white-space:nowrap;font-weight:400">${dt(e.at)}</span>
+      </div>`).join('') : '<div class="muted">Chưa có sự kiện nào.</div>'}
+  `;
 }
 function _ctnDetailRender(box, c, recv){
   const dt = iso => {
@@ -4646,22 +4696,28 @@ function _billTraceRenderResult(){
   const body = document.getElementById('billTraceBody');
   if(!body || !_billTraceResult) return;
   const r = _billTraceResult;
-  const line = (id, d, kind) => `
+  const untrackedBadge = d => {
+    if(!d.untracked) return '';
+    if(d.untrackedReason === 'backfill_before_close') return '<span class="tier tier-blue" style="margin-left:4px">Bổ sung trước kết ca — không qua FIFO (chủ đích)</span>';
+    return '<span class="tier tier-amber" style="margin-left:4px">Không gắn tem/lô</span>';
+  };
+  const line = (id, d, kind, coll) => `
     <div class="litem">
       <div class="li-l">
         <div>${escapeHtmlAttr(kind)} · ${escapeHtmlAttr(id)}</div>
-        <div>${fmtNum(d.qty,2)} ${d.untracked ? '<span class="tier tier-amber" style="margin-left:4px">Không gắn tem/lô</span>' : ''}</div>
+        <div>${fmtNum(d.qty,2)} ${untrackedBadge(d)}</div>
         ${(d.allocations||[]).length ? `<div class="small-note" style="margin-top:4px">${d.allocations.map(a=>escapeHtmlAttr(a.code||a.containerId)+' ('+fmtNum(a.qty,2)+')').join(', ')}</div>` : ''}
       </div>
       <div class="li-r">${(d.allocations||[]).length===1
-        ? `<button class="btn outline sm" style="width:auto;padding:0 10px" onclick="ctnShowDetail('${d.allocations[0].containerId}')">Xem tem</button>`
-        : ((d.allocations||[]).length>1 ? `<span class="muted-sm">${d.allocations.length} tem</span>` : '')}</div>
+        ? `<button class="btn outline sm" style="width:auto;padding:0 10px" onclick="ctnShowDetail('${d.allocations[0].containerId}'${coll?`,'${coll}'`:''})">${coll?'Xem lô':'Xem tem'}</button>`
+        : ((d.allocations||[]).length>1 ? `<span class="muted-sm">${d.allocations.length} ${coll?'lô':'tem'}</span>` : '')}</div>
     </div>`;
   const ingRows = Object.entries(r.ingredients||{}).map(([id,d])=>line(id,d,'Nguyên liệu')).join('');
-  const prepRows = Object.entries(r.preps||{}).map(([id,d])=>line(id,d,'BTP')).join('');
+  const prepRows = Object.entries(r.preps||{}).map(([id,d])=>line(id,d,'BTP','prep_batches_gieogieo')).join('');
   body.innerHTML = `
     <div class="row"><span class="rl">Bill</span><span class="rv"><b>${escapeHtmlAttr(r.billCode||r.orderId||'')}</b></span></div>
     <div class="row"><span class="rl">Ngày</span><span class="rv">${escapeHtmlAttr(r.businessDate||'')}</span></div>
+    ${r.backfillNoStockEffect ? '<div class="small-note" style="margin:6px 0">Bill này được bổ sung TRƯỚC kết ca — cố ý không đụng tồn kho/FIFO vì kiểm kê hôm đó đã bắt đúng số thật.</div>' : ''}
     ${ingRows || prepRows ? (ingRows+prepRows) : '<div class="muted">Bill này không trừ nguyên liệu/BTP nào (có thể món chưa khai định mức).</div>'}
   `;
 }
