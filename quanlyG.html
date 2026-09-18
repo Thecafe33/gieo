@@ -20113,10 +20113,13 @@ GIEO.define('app-quanly/controller', [
         '<div class="ksub">Không đọc được: ' + escapeHtmlAttr(revOut.error.message) + '</div></div>';
       return;
     }
-    var rev = revOut.value;
+    /* [FIX] read-layer/merge-canonical.js#wrap bọc kết quả thật trong
+       `.value.data` (cùng `.value.meta`) — đọc thẳng `.value` (thiếu tầng
+       `.data`) luôn ra undefined, hiện 0đ dù dữ liệu đọc/map đúng 100%. */
+    var rev = revOut.value.data;
     var cogsHtml;
     if (R.isOk(cogsOut)) {
-      var c = cogsOut.value;
+      var c = cogsOut.value.data;
       cogsHtml = '<div class="kcard"><div class="klabel">Giá vốn (COGS)</div>' +
         '<div class="kval">' + fmt(c.cogsActual !== null ? c.cogsActual : c.cogsTheoretical) + '</div>' +
         '<div class="ksub">' + (c.cogsActual !== null ? 'Theo thực tế' : 'Theo định mức — chưa đủ vế thực tế') +
@@ -20141,7 +20144,7 @@ GIEO.define('app-quanly/controller', [
 
   function renderMini(el, revOut) {
     if (!el) return;
-    var billCount = R.isOk(revOut) ? revOut.value.billCount : '—';
+    var billCount = R.isOk(revOut) ? revOut.value.data.billCount : '—';
     var gapCard = function (label) {
       return '<div class="kcard"><div class="klabel">' + label + '</div><div class="kval">—</div>' +
         '<div class="ksub">GAP — core mới chưa tính</div></div>';
@@ -20153,7 +20156,7 @@ GIEO.define('app-quanly/controller', [
   }
 
   function renderBillsAndHourly(billsEl, hourlyEl, billsOut) {
-    var bills = R.isOk(billsOut) ? (billsOut.value.bills || []) : null;
+    var bills = R.isOk(billsOut) ? (billsOut.value.data.bills || []) : null;
     if (billsEl) {
       if (bills === null) {
         billsEl.innerHTML = '<div class="muted">Không đọc được bill hôm nay: ' + escapeHtmlAttr(billsOut.error.message) + '</div>';
@@ -20222,7 +20225,7 @@ GIEO.define('app-quanly/controller', [
     var alertsErr = R.isErr(alertsOut) ? alertsOut.error.message : null;
     var pendingErr = R.isErr(pendingOut) ? pendingOut.error.message : null;
     if (R.isOk(alertsOut)) {
-      var a = alertsOut.value;
+      var a = alertsOut.value.data;
       ['DANGER', 'WARNING'].forEach(function (tier) {
         ((a.buckets && a.buckets[tier]) || []).forEach(function (it) {
           rows.push({ tier: tier === 'DANGER' ? 'red' : 'yellow', label: it.title || it.type || 'Cảnh báo' });
@@ -20230,7 +20233,7 @@ GIEO.define('app-quanly/controller', [
       });
     }
     if (R.isOk(pendingOut)) {
-      (pendingOut.value.items || []).forEach(function (it) {
+      (pendingOut.value.data.items || []).forEach(function (it) {
         rows.push({ tier: 'yellow', label: it.label || it.type || 'Việc chờ duyệt' });
       });
     }
@@ -20678,7 +20681,9 @@ GIEO.define('app-quanly/controller', [
       el.innerHTML = '<div class="muted">Không đọc được bill cho kỳ này: ' + escapeHtmlAttr(billsOut.error.message) + '</div>';
       return;
     }
-    var agg = aggregateBillsToRevenueCogs(billsOut.value.bills || []);
+    /* [FIX] cùng bug unwrap `.value.data` như renderRevenueGrid/renderBillsAndHourly
+       — merge-canonical.js#wrap bọc data/meta, đọc thẳng .value luôn ra undefined. */
+    var agg = aggregateBillsToRevenueCogs(billsOut.value.data.bills || []);
     /* [DEBUG TẠM] xem ghi chú ở legacy-firebase-adapter/read-port.js#loadBillsForRange
        — getBillsForRange không chuyển tiếp legacyMeta nên đọc qua window thay vì
        billsOut.value.legacyMeta (luôn undefined). */
