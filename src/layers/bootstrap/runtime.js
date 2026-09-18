@@ -108,6 +108,7 @@ GIEO.define('bootstrap/runtime', [
     GetKhoConfigList: reads.getKhoConfigList,
     GetKhoHistory: reads.getKhoHistory,
     GetOpenUnits: reads.getOpenUnits,
+    GetPackagingConfig: reads.getPackagingConfig,
     ComparePeriods: reads.comparePeriods,
     GetShiftStatus: reads.getShiftStatus,
     GetAlerts: reads.getAlerts,

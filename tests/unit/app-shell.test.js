@@ -452,6 +452,25 @@ describe('P9/P10 — màn Ca, Cảnh báo, Duyệt đều đi qua read-layer', f
     });
   });
 
+  test('QUANLY đọc bao bì mặc định (kho:packaging) qua GetPackagingConfig', function () {
+    var runtime = fakeRuntime();
+    return _app.QL.createController(runtime).getPackagingConfig({}).then(function (out) {
+      assertOk(out);
+      assert.strictEqual(runtime.calls[0].name, 'GetPackagingConfig');
+    });
+  });
+
+  test('QUANLY công bố bao bì mặc định qua PublishPackaging (command, không phải query)', function () {
+    var runtime = fakeRuntime();
+    return _app.QL.createController(runtime)
+      .publishPackaging({ effectiveFrom: Date.now(), tier: 'preset', packaging: { items: [] } })
+      .then(function (out) {
+        assertOk(out);
+        assert.strictEqual(runtime.calls[0].kind, 'command');
+        assert.strictEqual(runtime.calls[0].name, 'PublishPackaging');
+      });
+  });
+
   test('QUANLY mở màn MIX và đọc qua GetMix', function () {
     var runtime = fakeRuntime();
     var ql = _app.QL.createController(runtime);

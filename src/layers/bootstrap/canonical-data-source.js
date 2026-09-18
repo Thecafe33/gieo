@@ -135,9 +135,45 @@ GIEO.define('bootstrap/canonical-data-source', [
       });
     }
 
+    /**
+     * `commands/versioning.js#PublishPackaging` đọc `input.deps.versionRegistry`
+     * — registry đó PHẢI được hydrate lịch sử packaging của ĐÚNG subject
+     * TRƯỚC khi publish, không thì `compaction/versioned-input.js#publish()`
+     * không có "last" để so effectiveFrom: luật thứ tự (V1 — hiệu lực chỉ
+     * tiến về phía trước) bị bỏ qua ÂM THẦM, và effectiveTo của bản trước
+     * không được đóng đúng.
+     *
+     * Đợt này (Kho→Bao bì, 2026-09-18) CHỈ hỗ trợ bản MẶC ĐỊNH toàn quán
+     * (`subjectId === '__default__'`, tức `input.menuItemId` để trống) — override
+     * theo món cần liệt kê TOÀN BỘ subjectId dưới 1 kind, mà
+     * `canonical-paths.js#versionedInput` path theo (kind, subjectId) CỤ THỂ
+     * (`.../versions/{kind}/{subjectId}/...`), không có path liệt kê mọi
+     * subjectId của 1 kind — cần một khả năng đọc MỚI (collectionGroup hoặc
+     * index riêng), ngoài phạm vi đợt này. Có `menuItemId` thì TỪ CHỐI ở đây,
+     * không âm thầm publish với registry hydrate sai subject.
+     */
+    function hydrateForPublishPackaging(input) {
+      if (input.menuItemId) {
+        return Promise.resolve(R.err('VALIDATION',
+          'PublishPackaging: bao bì riêng theo menuItemId chưa hỗ trợ ở màn Kho đợt này — chỉ bản mặc định (để trống menuItemId)'));
+      }
+      var ctx = { organizationId: defaults.organizationId, storeId: input.storeId };
+      return reader.loadVersions(ctx, 'packaging', '__default__').then(function (out) {
+        if (R.isErr(out)) return out;
+        var registry = salesLib.createVersionRegistry();
+        var h = registry.hydrate(out.value);
+        if (R.isErr(h)) return h;
+        var mergedDeps = Object.assign({ versionRegistry: registry }, input.deps || {});
+        return R.ok(Object.assign({}, input, { deps: mergedDeps }));
+      });
+    }
+
     function forCommand(name, input) {
       input = input || {};
       if (name === 'ReverseTransaction' && !input.units) return hydrateForReverseTransaction(input);
+      if (name === 'PublishPackaging' && !(input.deps && input.deps.versionRegistry)) {
+        return hydrateForPublishPackaging(input);
+      }
       /* Không phải RecordSale, hoặc bill chưa dựng (không phải việc của module
          này — `RecordSale.validate` sẽ báo lỗi đúng chỗ): đi thẳng, không thêm
          gì — cùng nguyên tắc pass-through của `legacy-data-source.js`. */
@@ -224,6 +260,16 @@ GIEO.define('bootstrap/canonical-data-source', [
         return reader.loadOpenUnits(ctx5).then(function (out) {
           if (R.isErr(out) || out.value.length === 0) return R.ok(input);
           return R.ok(Object.assign({}, input, { units: out.value }));
+        });
+      }
+      /* Kho — Bao bì (kho:packaging, 2026-09-18): toàn bộ lịch sử version
+         packaging của subjectId mặc định `'__default__'` — cùng lý do "chỉ
+         mặc định" đã ghi ở forCommand#hydrateForPublishPackaging. */
+      if (name === 'GetPackagingConfig' && !input.versions) {
+        var ctx6 = { organizationId: defaults.organizationId, storeId: input.storeId };
+        return reader.loadVersions(ctx6, 'packaging', '__default__').then(function (out) {
+          if (R.isErr(out) || out.value.length === 0) return R.ok(input);
+          return R.ok(Object.assign({}, input, { versions: out.value }));
         });
       }
       return Promise.resolve(R.ok(input));

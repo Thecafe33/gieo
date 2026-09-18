@@ -625,6 +625,111 @@ describe('canonical-data-source — forCommand ReverseTransaction nạp input.un
   });
 });
 
+describe('canonical-data-source — forQuery GetPackagingConfig (kho:packaging)', function () {
+  var pkgBase = 'orgs/' + _su.ORG + '/stores/' + _su.STORE + '/versions/packaging/__default__/';
+
+  function ds(fb) {
+    var reader = _su.CRP.createReader(fb.sdk.firestore());
+    return _su.CDS.create(reader, { organizationId: _su.ORG });
+  }
+
+  test('có version packaging __default__ thì cấp versions, giữ nguyên field khác của input', function () {
+    var fb = fakeFirebase();
+    fb.docs[pkgBase + 'v1'] = {
+      kind: 'packaging', subjectId: '__default__', storeId: _su.STORE, versionId: 'v1',
+      effectiveFrom: 1000, effectiveTo: null, payload: { tier: 'preset', items: [] }
+    };
+    return ds(fb).forQuery('GetPackagingConfig', { storeId: _su.STORE, foo: 'giữ nguyên' }).then(function (out) {
+      var v = assertOk(out);
+      assert.strictEqual(v.versions.length, 1);
+      assert.strictEqual(v.foo, 'giữ nguyên');
+    });
+  });
+
+  test('chưa từng publish thì đi qua NGUYÊN VẸN — không set versions', function () {
+    var fb = fakeFirebase();
+    return ds(fb).forQuery('GetPackagingConfig', { storeId: _su.STORE }).then(function (out) {
+      assert.strictEqual(assertOk(out).versions, undefined);
+    });
+  });
+
+  test('input đã có versions sẵn (gọi lại) thì KHÔNG ghi đè', function () {
+    var fb = fakeFirebase();
+    fb.docs[pkgBase + 'v1'] = { versionId: 'v1', effectiveFrom: 1000, payload: {} };
+    return ds(fb).forQuery('GetPackagingConfig', { storeId: _su.STORE, versions: ['đã-có'] }).then(function (out) {
+      assert.deepStrictEqual(assertOk(out).versions, ['đã-có']);
+    });
+  });
+
+  test('tên query khác thì pass-through nguyên input', function () {
+    var fb = fakeFirebase();
+    return ds(fb).forQuery('GetBillsForRange', { from: 'x' }).then(function (out) {
+      assert.deepStrictEqual(assertOk(out), { from: 'x' });
+    });
+  });
+});
+
+describe('canonical-data-source — forCommand PublishPackaging hydrate versionRegistry (kho:packaging)', function () {
+  var pkgBase = 'orgs/' + _su.ORG + '/stores/' + _su.STORE + '/versions/packaging/__default__/';
+
+  function ds(fb) {
+    var reader = _su.CRP.createReader(fb.sdk.firestore());
+    return _su.CDS.create(reader, { organizationId: _su.ORG });
+  }
+
+  test('hydrate registry với lịch sử packaging __default__ đã có, publish version mới thành công', function () {
+    var fb = fakeFirebase();
+    fb.docs[pkgBase + 'v1'] = {
+      kind: 'packaging', subjectId: '__default__', storeId: _su.STORE, versionId: 'v1',
+      effectiveFrom: 1000, effectiveTo: null, payload: { tier: 'preset', items: [] },
+      publishedAt: 1000, publishedBy: _su.BOSS
+    };
+    return ds(fb).forCommand('PublishPackaging', {
+      storeId: _su.STORE, effectiveFrom: 5000
+    }).then(function (out) {
+      var v = assertOk(out);
+      assert.ok(v.deps && v.deps.versionRegistry, 'phải có versionRegistry');
+      var listed = v.deps.versionRegistry.listVersions('packaging', '__default__', _su.STORE);
+      assert.strictEqual(listed.length, 1);
+      assert.strictEqual(listed[0].versionId, 'v1');
+    });
+  });
+
+  test('chưa từng publish thì registry hydrate rỗng, không lỗi', function () {
+    var fb = fakeFirebase();
+    return ds(fb).forCommand('PublishPackaging', { storeId: _su.STORE, effectiveFrom: 5000 }).then(function (out) {
+      var v = assertOk(out);
+      assert.deepStrictEqual(v.deps.versionRegistry.listVersions('packaging', '__default__', _su.STORE), []);
+    });
+  });
+
+  test('có menuItemId (override theo món) thì TỪ CHỐI — chưa hỗ trợ ở màn Kho đợt này', function () {
+    var fb = fakeFirebase();
+    return ds(fb).forCommand('PublishPackaging', {
+      storeId: _su.STORE, effectiveFrom: 5000, menuItemId: 'item_x'
+    }).then(function (out) {
+      assertErr(out, 'VALIDATION');
+    });
+  });
+
+  test('input.deps.versionRegistry đã có sẵn (gọi lại) thì KHÔNG hydrate lại', function () {
+    var fb = fakeFirebase();
+    var marker = { alreadyHydrated: true };
+    return ds(fb).forCommand('PublishPackaging', {
+      storeId: _su.STORE, effectiveFrom: 5000, deps: { versionRegistry: marker }
+    }).then(function (out) {
+      assert.strictEqual(assertOk(out).deps.versionRegistry, marker);
+    });
+  });
+
+  test('command khác không bị đụng vào', function () {
+    var fb = fakeFirebase();
+    return ds(fb).forCommand('AdjustInventory', { itemId: 'sua' }).then(function (out) {
+      assert.deepStrictEqual(assertOk(out), { itemId: 'sua' });
+    });
+  });
+});
+
 describe('runtime — xoá bill đầu-cuối qua GetLedgerEntriesForReference + ReverseTransaction (§3.8)', function () {
   /* SHADOW (không cần commit adapter) đủ để chạy pipeline thật — chỉ dùng
      canonical-data-source làm dataSource vì cả hai query/command này không có

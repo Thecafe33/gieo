@@ -197,6 +197,8 @@ GIEO.define('app-quanly/main', [
     var khoContainersView = view();
     var khoContainersFilter = 'ALL';
     var khoContainersAction = { busy: null, error: null };
+    var khoPackagingView = view();
+    var khoPackagingForm = { busy: false, error: null };
     var mixUI = { from: clock.calendarDate(), to: clock.calendarDate() };
     var mixView = view();
     var customerUI = { from: clock.calendarDate(), to: clock.calendarDate() };
@@ -720,11 +722,12 @@ GIEO.define('app-quanly/main', [
 
     /* ---------- Kho — danh mục cấu hình đơn giản + đặt hàng + lịch sử ---------- */
 
-    var KHO_TABS = ['inbox'].concat(KHO_CONFIG_ORDER, ['containers', 'purchaseOrder', 'history']);
+    var KHO_TABS = ['inbox'].concat(KHO_CONFIG_ORDER, ['containers', 'packaging', 'purchaseOrder', 'history']);
 
     function khoTabLabel(tab) {
       if (tab === 'inbox') return 'Cần xử lý';
       if (tab === 'containers') return 'Hàng đang mở';
+      if (tab === 'packaging') return 'Bao bì';
       if (tab === 'purchaseOrder') return 'Đặt hàng';
       if (tab === 'history') return 'Lịch sử kho';
       return KHO_CONFIG_SCHEMAS[tab].title;
@@ -901,6 +904,56 @@ GIEO.define('app-quanly/main', [
       return filterBar + actionMsg + '<div class="card">' + rows + '</div>';
     }
 
+    /**
+     * Kho — Bao bì (thay legacy renderKhoPackaging()/PACKAGING_PRESETS). Đợt
+     * này CHỈ bản MẶC ĐỊNH toàn quán (subjectId '__default__', áp cho mọi
+     * món chưa khai riêng) — bao bì riêng theo món (packaging_item_overrides
+     * cũ) và túi/khay theo bill (rules/bagging) CHƯA xây ở màn này, xem
+     * comment `bootstrap/canonical-data-source.js#hydrateForPublishPackaging`
+     * cho lý do (liệt kê mọi subjectId của 1 kind đòi khả năng đọc mới, chưa
+     * có). Danh sách nhập tay theo dòng "itemId,số lượng,ghi chú" — cùng lối
+     * nhập tay itemId đã dùng ở refillRule (KHO_CONFIG_SCHEMAS), vì màn quản
+     * lý danh mục nguyên liệu (item #4, "Nguyên liệu") chưa xây.
+     */
+    function khoPackagingMarkup() {
+      var scopeNote = '<div class="result"><strong>Phạm vi đợt này</strong><span>Chỉ bao bì MẶC ĐỊNH ' +
+        'áp cho mọi món chưa khai riêng — bao bì riêng theo món, túi/khay theo bill chưa có ở màn này.</span></div>';
+      if (khoPackagingView.loading) return scopeNote + '<div class="pc-empty">Đang đọc…</div>';
+      if (khoPackagingView.error) return scopeNote + errorBox('Không đọc được bao bì', khoPackagingView.error);
+      var d = khoPackagingView.data;
+      var current = d && d.current;
+      var currentBlock = current
+        ? '<div class="card" style="padding:16px;margin:12px 0"><h3 class="report-sub">Đang áp dụng từ ' +
+          esc(new Date(current.effectiveFrom).toLocaleString('vi-VN')) + '</h3>' +
+          '<table class="report"><thead><tr><th>Mã nguyên liệu</th><th>SL</th><th>Ghi chú</th></tr></thead><tbody>' +
+          (current.payload.items || []).map(function (it) {
+            return '<tr><td>' + esc(it.itemId) + '</td><td>' + esc(it.qty) + '</td><td>' + esc(it.note || '') + '</td></tr>';
+          }).join('') + '</tbody></table></div>'
+        : '<div class="empty"><h3>Chưa khai bao bì mặc định</h3></div>';
+      var history = (d && d.history) || [];
+      var historyBlock = history.length > 1
+        ? '<h3 class="report-sub">Lịch sử</h3><div class="card">' +
+          history.slice().reverse().slice(1).map(function (v) {
+            return '<article class="litem"><div class="lmain"><div class="ltitle">' +
+              esc(new Date(v.effectiveFrom).toLocaleString('vi-VN')) + '</div><div class="lsub">' +
+              esc((v.payload.items || []).map(function (it) { return it.itemId + ' x' + it.qty; }).join(', ')) +
+              '</div></div></article>';
+          }).join('') + '</div>'
+        : '';
+      return scopeNote + currentBlock + khoPackagingFormMarkup() + historyBlock;
+    }
+
+    function khoPackagingFormMarkup() {
+      return '<form id="kho-packaging-form" class="card" style="padding:16px;margin-top:12px">' +
+        '<h3 class="report-sub">Khai bao bì mặc định mới</h3>' +
+        (khoPackagingForm.error ? errorBox('Không lưu được', khoPackagingForm.error) : '') +
+        '<label style="display:block;margin:8px 0">Danh sách (mỗi dòng: mã nguyên liệu,số lượng,ghi chú)' +
+        '<textarea name="items" rows="4" placeholder="item_xxx,1,Ly nhựa size M" required ' +
+        'style="display:block;width:100%;margin-top:4px"></textarea></label>' +
+        '<button class="btn primary" type="submit"' + (khoPackagingForm.busy ? ' disabled' : '') + '>' +
+        (khoPackagingForm.busy ? 'Đang lưu…' : 'Áp dụng từ bây giờ') + '</button></form>';
+    }
+
     function khoHistoryMarkup() {
       if (khoHistoryView.loading) return '<div class="pc-empty">Đang đọc…</div>';
       if (khoHistoryView.error) return errorBox('Không đọc được lịch sử kho', khoHistoryView.error);
@@ -920,6 +973,7 @@ GIEO.define('app-quanly/main', [
       var body;
       if (khoUI.tab === 'inbox') body = khoInboxMarkup();
       else if (khoUI.tab === 'containers') body = khoContainersMarkup();
+      else if (khoUI.tab === 'packaging') body = khoPackagingMarkup();
       else if (khoUI.tab === 'purchaseOrder') body = khoPOFormMarkup() + khoPOListMarkup();
       else if (khoUI.tab === 'history') body = khoHistoryMarkup();
       else body = khoConfigFormMarkup(khoUI.tab) + khoConfigListMarkup(khoUI.tab);
@@ -1116,11 +1170,22 @@ GIEO.define('app-quanly/main', [
       });
     }
 
+    function loadKhoPackaging() {
+      khoPackagingView = { loading: true, error: null, data: null };
+      render();
+      controller.getPackagingConfig({}).then(function (out) {
+        khoPackagingView = applyRaw(out);
+        render();
+      });
+    }
+
     function loadKhoForTab(tab) {
       if (tab === 'inbox') {
         if (!alertView.data && !alertView.loading) loadOverview();
       } else if (tab === 'containers') {
         if (!khoContainersView.data && !khoContainersView.loading) loadKhoContainers();
+      } else if (tab === 'packaging') {
+        if (!khoPackagingView.data && !khoPackagingView.loading) loadKhoPackaging();
       } else if (tab === 'purchaseOrder') {
         if (!khoPOView.data && !khoPOView.loading) loadKhoPO();
       } else if (tab === 'history') {
@@ -1616,6 +1681,26 @@ GIEO.define('app-quanly/main', [
             if (R.isOk(out)) loadKhoPO();
             else { khoPOForm = { open: true, busy: false, error: out.error }; render(); }
           });
+        });
+      });
+
+      var khoPackagingForm_ = el.querySelector('#kho-packaging-form');
+      if (khoPackagingForm_) khoPackagingForm_.addEventListener('submit', function (event) {
+        event.preventDefault();
+        var lines = (khoPackagingForm_.elements.items.value || '').split('\n')
+          .map(function (s) { return s.trim(); }).filter(Boolean);
+        var items = lines.map(function (line) {
+          var parts = line.split(',').map(function (s) { return s.trim(); });
+          return { itemId: parts[0], qty: Number(parts[1]), note: parts[2] || null };
+        });
+        khoPackagingForm = { busy: true, error: null };
+        render();
+        controller.publishPackaging({
+          effectiveFrom: clock.now(), tier: 'preset', packaging: { items: items }
+        }).then(function (out) {
+          khoPackagingForm = R.isErr(out) ? { busy: false, error: out.error } : { busy: false, error: null };
+          if (R.isOk(out)) loadKhoPackaging();
+          else render();
         });
       });
 

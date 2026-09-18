@@ -92,6 +92,11 @@ GIEO.define('read-layer/gateway', [
        khỏi chính màn hình của họ (QUANLY_ADMIN không có EXECUTE, xem
        store-context/access.js ROLE_AUTHORITIES). */
     GetOpenUnits: registerQuery('GetOpenUnits', { authority: ['EXECUTE', 'REVIEW_APPROVE_CORRECT'] }),
+    /* Kho — Bao bì (kho:packaging), bản mặc định toàn quán. Cùng any-of với
+       GetKhoConfigList/GetOpenUnits — SỬA (PublishPackaging) đòi
+       MASTER_CONFIGURE riêng, đọc thì rộng hơn để người bán cũng biết đang
+       áp bao bì gì. */
+    GetPackagingConfig: registerQuery('GetPackagingConfig', { authority: ['EXECUTE', 'REVIEW_APPROVE_CORRECT'] }),
     /* Ba query dưới đây sinh ra để P9/P10 không còn màn nào tự đọc nguồn thô.
        Trước đó màn Ca/Tổng quan/Duyệt chỉ có chỗ trống hard-code, và chỗ trống
        hard-code chính là nơi người ta sẽ nối thẳng Firebase vào UI. */
@@ -737,6 +742,28 @@ GIEO.define('read-layer/gateway', [
   }
 
   /**
+   * Kho — Bao bì (kho:packaging, thay legacy renderKhoPackaging()/
+   * PACKAGING_PRESETS). `spec.versions` do canonical-data-source cấp: TOÀN
+   * BỘ lịch sử version `packaging` của subjectId mặc định `'__default__'`
+   * (xem comment forQuery ở canonical-data-source.js cho lý do CHỈ mặc
+   * định, chưa liệt kê override theo món). "current" = version có
+   * effectiveFrom lớn nhất mà đã <= giờ hệ thống — publish() đã tự đóng
+   * effectiveTo của bản trước lúc publish bản sau (compaction/
+   * versioned-input.js), nên không cần so effectiveTo ở đây.
+   */
+  function getPackagingConfig(ctx, spec) {
+    var g = guard(Q.GetPackagingConfig, ctx, spec);
+    if (R.isErr(g)) return g;
+    var now = ctx.clock.now();
+    var versions = (spec.versions || []).slice().sort(function (a, b) { return a.effectiveFrom - b.effectiveFrom; });
+    var current = null;
+    for (var i = versions.length - 1; i >= 0; i--) {
+      if (versions[i].effectiveFrom <= now) { current = versions[i]; break; }
+    }
+    return R.ok({ current: current, history: versions });
+  }
+
+  /**
    * Phân tích bán hàng theo món (Báo cáo — mix, legacy renderMix/
    * computeMixReport). Cố ý KHÔNG replicate tầng COGS/margin của legacy (rule
    * engine bao bì/topping) — quyết định chủ quán 2026-09-18: màn Kho/Báo cáo
@@ -836,6 +863,7 @@ GIEO.define('read-layer/gateway', [
     getKhoConfigList: getKhoConfigList,
     getKhoHistory: getKhoHistory,
     getOpenUnits: getOpenUnits,
+    getPackagingConfig: getPackagingConfig,
     getMix: getMix,
     getCustomerReport: getCustomerReport
   };

@@ -10375,6 +10375,11 @@ GIEO.define('read-layer/gateway', [
        khỏi chính màn hình của họ (QUANLY_ADMIN không có EXECUTE, xem
        store-context/access.js ROLE_AUTHORITIES). */
     GetOpenUnits: registerQuery('GetOpenUnits', { authority: ['EXECUTE', 'REVIEW_APPROVE_CORRECT'] }),
+    /* Kho — Bao bì (kho:packaging), bản mặc định toàn quán. Cùng any-of với
+       GetKhoConfigList/GetOpenUnits — SỬA (PublishPackaging) đòi
+       MASTER_CONFIGURE riêng, đọc thì rộng hơn để người bán cũng biết đang
+       áp bao bì gì. */
+    GetPackagingConfig: registerQuery('GetPackagingConfig', { authority: ['EXECUTE', 'REVIEW_APPROVE_CORRECT'] }),
     /* Ba query dưới đây sinh ra để P9/P10 không còn màn nào tự đọc nguồn thô.
        Trước đó màn Ca/Tổng quan/Duyệt chỉ có chỗ trống hard-code, và chỗ trống
        hard-code chính là nơi người ta sẽ nối thẳng Firebase vào UI. */
@@ -11020,6 +11025,28 @@ GIEO.define('read-layer/gateway', [
   }
 
   /**
+   * Kho — Bao bì (kho:packaging, thay legacy renderKhoPackaging()/
+   * PACKAGING_PRESETS). `spec.versions` do canonical-data-source cấp: TOÀN
+   * BỘ lịch sử version `packaging` của subjectId mặc định `'__default__'`
+   * (xem comment forQuery ở canonical-data-source.js cho lý do CHỈ mặc
+   * định, chưa liệt kê override theo món). "current" = version có
+   * effectiveFrom lớn nhất mà đã <= giờ hệ thống — publish() đã tự đóng
+   * effectiveTo của bản trước lúc publish bản sau (compaction/
+   * versioned-input.js), nên không cần so effectiveTo ở đây.
+   */
+  function getPackagingConfig(ctx, spec) {
+    var g = guard(Q.GetPackagingConfig, ctx, spec);
+    if (R.isErr(g)) return g;
+    var now = ctx.clock.now();
+    var versions = (spec.versions || []).slice().sort(function (a, b) { return a.effectiveFrom - b.effectiveFrom; });
+    var current = null;
+    for (var i = versions.length - 1; i >= 0; i--) {
+      if (versions[i].effectiveFrom <= now) { current = versions[i]; break; }
+    }
+    return R.ok({ current: current, history: versions });
+  }
+
+  /**
    * Phân tích bán hàng theo món (Báo cáo — mix, legacy renderMix/
    * computeMixReport). Cố ý KHÔNG replicate tầng COGS/margin của legacy (rule
    * engine bao bì/topping) — quyết định chủ quán 2026-09-18: màn Kho/Báo cáo
@@ -11119,6 +11146,7 @@ GIEO.define('read-layer/gateway', [
     getKhoConfigList: getKhoConfigList,
     getKhoHistory: getKhoHistory,
     getOpenUnits: getOpenUnits,
+    getPackagingConfig: getPackagingConfig,
     getMix: getMix,
     getCustomerReport: getCustomerReport
   };
@@ -16897,9 +16925,45 @@ GIEO.define('bootstrap/canonical-data-source', [
       });
     }
 
+    /**
+     * `commands/versioning.js#PublishPackaging` đọc `input.deps.versionRegistry`
+     * — registry đó PHẢI được hydrate lịch sử packaging của ĐÚNG subject
+     * TRƯỚC khi publish, không thì `compaction/versioned-input.js#publish()`
+     * không có "last" để so effectiveFrom: luật thứ tự (V1 — hiệu lực chỉ
+     * tiến về phía trước) bị bỏ qua ÂM THẦM, và effectiveTo của bản trước
+     * không được đóng đúng.
+     *
+     * Đợt này (Kho→Bao bì, 2026-09-18) CHỈ hỗ trợ bản MẶC ĐỊNH toàn quán
+     * (`subjectId === '__default__'`, tức `input.menuItemId` để trống) — override
+     * theo món cần liệt kê TOÀN BỘ subjectId dưới 1 kind, mà
+     * `canonical-paths.js#versionedInput` path theo (kind, subjectId) CỤ THỂ
+     * (`.../versions/{kind}/{subjectId}/...`), không có path liệt kê mọi
+     * subjectId của 1 kind — cần một khả năng đọc MỚI (collectionGroup hoặc
+     * index riêng), ngoài phạm vi đợt này. Có `menuItemId` thì TỪ CHỐI ở đây,
+     * không âm thầm publish với registry hydrate sai subject.
+     */
+    function hydrateForPublishPackaging(input) {
+      if (input.menuItemId) {
+        return Promise.resolve(R.err('VALIDATION',
+          'PublishPackaging: bao bì riêng theo menuItemId chưa hỗ trợ ở màn Kho đợt này — chỉ bản mặc định (để trống menuItemId)'));
+      }
+      var ctx = { organizationId: defaults.organizationId, storeId: input.storeId };
+      return reader.loadVersions(ctx, 'packaging', '__default__').then(function (out) {
+        if (R.isErr(out)) return out;
+        var registry = salesLib.createVersionRegistry();
+        var h = registry.hydrate(out.value);
+        if (R.isErr(h)) return h;
+        var mergedDeps = Object.assign({ versionRegistry: registry }, input.deps || {});
+        return R.ok(Object.assign({}, input, { deps: mergedDeps }));
+      });
+    }
+
     function forCommand(name, input) {
       input = input || {};
       if (name === 'ReverseTransaction' && !input.units) return hydrateForReverseTransaction(input);
+      if (name === 'PublishPackaging' && !(input.deps && input.deps.versionRegistry)) {
+        return hydrateForPublishPackaging(input);
+      }
       /* Không phải RecordSale, hoặc bill chưa dựng (không phải việc của module
          này — `RecordSale.validate` sẽ báo lỗi đúng chỗ): đi thẳng, không thêm
          gì — cùng nguyên tắc pass-through của `legacy-data-source.js`. */
@@ -16986,6 +17050,16 @@ GIEO.define('bootstrap/canonical-data-source', [
         return reader.loadOpenUnits(ctx5).then(function (out) {
           if (R.isErr(out) || out.value.length === 0) return R.ok(input);
           return R.ok(Object.assign({}, input, { units: out.value }));
+        });
+      }
+      /* Kho — Bao bì (kho:packaging, 2026-09-18): toàn bộ lịch sử version
+         packaging của subjectId mặc định `'__default__'` — cùng lý do "chỉ
+         mặc định" đã ghi ở forCommand#hydrateForPublishPackaging. */
+      if (name === 'GetPackagingConfig' && !input.versions) {
+        var ctx6 = { organizationId: defaults.organizationId, storeId: input.storeId };
+        return reader.loadVersions(ctx6, 'packaging', '__default__').then(function (out) {
+          if (R.isErr(out) || out.value.length === 0) return R.ok(input);
+          return R.ok(Object.assign({}, input, { versions: out.value }));
         });
       }
       return Promise.resolve(R.ok(input));
@@ -18087,6 +18161,7 @@ GIEO.define('bootstrap/runtime', [
     GetKhoConfigList: reads.getKhoConfigList,
     GetKhoHistory: reads.getKhoHistory,
     GetOpenUnits: reads.getOpenUnits,
+    GetPackagingConfig: reads.getPackagingConfig,
     ComparePeriods: reads.comparePeriods,
     GetShiftStatus: reads.getShiftStatus,
     GetAlerts: reads.getAlerts,

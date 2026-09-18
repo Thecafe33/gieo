@@ -86,6 +86,8 @@ GIEO.define('app-quanly/controller', [
       getKhoConfigList: function (input) { return read('GetKhoConfigList', input); },
       getKhoHistory: function (input) { return read('GetKhoHistory', input); },
       getOpenUnits: function (input) { return read('GetOpenUnits', input); },
+      getPackagingConfig: function (input) { return read('GetPackagingConfig', input); },
+      publishPackaging: function (input) { return run('PublishPackaging', input); },
       getMix: function (input) { return read('GetMix', input); },
       getCustomerReport: function (input) { return read('GetCustomerReport', input); },
       saveStorageLocation: function (input) { return run('SaveStorageLocation', input); },

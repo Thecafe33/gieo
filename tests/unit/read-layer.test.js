@@ -529,6 +529,41 @@ describe('Kho — danh mục cấu hình đơn giản + Báo cáo mix/customer (
     });
   });
 
+  describe('GetPackagingConfig (kho:packaging — Bao bì mặc định, legacy renderKhoPackaging)', function () {
+    function version(over) {
+      return Object.assign({
+        kind: 'packaging', subjectId: '__default__', storeId: _r.STORE,
+        versionId: _r.ids.newId('version'), effectiveTo: null,
+        payload: { tier: 'preset', items: [{ itemId: _r.SUA, qty: 1, note: null }], rules: null, bagging: null },
+        publishedAt: Date.now(), publishedBy: _r.QL, supersedesVersionId: null
+      }, over || {});
+    }
+
+    test('chọn version có effectiveFrom lớn nhất mà đã <= giờ hệ thống làm current', function () {
+      var now = Date.now();
+      var out = assertOk(G.getPackagingConfig(rCtx('QUANLY_ADMIN', 'QUANLY', _r.QL), {
+        versions: [
+          version({ versionId: 'v_old', effectiveFrom: now - 20000 }),
+          version({ versionId: 'v_now', effectiveFrom: now - 5000 }),
+          version({ versionId: 'v_future', effectiveFrom: now + 60000 })
+        ]
+      }));
+      assert.strictEqual(out.current.versionId, 'v_now');
+      assert.strictEqual(out.history.length, 3);
+    });
+
+    test('không có version nào thì current null, không lỗi', function () {
+      var out = assertOk(G.getPackagingConfig(rCtx('QUANLY_ADMIN', 'QUANLY', _r.QL), {}));
+      assert.strictEqual(out.current, null);
+      assert.deepStrictEqual(out.history, []);
+    });
+
+    test('POS_OPERATOR đọc được — any-of EXECUTE/REVIEW_APPROVE_CORRECT cùng GetKhoConfigList', function () {
+      var out = assertOk(G.getPackagingConfig(rCtx('POS_OPERATOR', 'POS'), { versions: [] }));
+      assert.strictEqual(out.current, null);
+    });
+  });
+
   describe('GetMix (Báo cáo — phân tích bán hàng theo món, legacy renderMix)', function () {
     function bill(over) {
       return Object.assign({ billId: _r.ids.newId('bill'), businessDate: '2026-03-10' }, over || {});
