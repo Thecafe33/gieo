@@ -6127,8 +6127,16 @@ function computeKPIs({perDaySales, opsSum, expList, assets, actualLaborByDate, l
   const grossProfit = revenue - cogs;
   const grossMarginPct = revenue ? grossProfit/revenue : 0;
   const laborPct = revenue ? laborCost/revenue : 0;
-  const laborPerCup = items ? laborCost/items : 0;
-  const laborPerBill = bills ? laborCost/bills : 0;
+  // [FIX "Labor/Cup im lặng = 0đ khi chưa bán được ly nào" — cùng bài học "chưa biết khác
+  // với bằng không" đã áp dụng cho untrackedBase/ledgerWasteValue] laborCost hầu như KHÔNG
+  // BAO GIỜ bằng 0 (lương cứng/lịch làm việc vẫn cộng dồn dù chưa bán được gì — vd sáng sớm
+  // mới mở quán, hoặc một ngày đóng cửa hoàn toàn). TRƯỚC ĐÂY items/bills=0 rơi thẳng về 0đ,
+  // rồi statusLowerBetter(0, target) luôn đọc là "Đạt" (0 <= target) — hiện badge XANH "Labor/
+  // Cup 0đ, trong ngưỡng target" đúng vào lúc dữ liệu không nói lên được gì, dễ hiểu nhầm
+  // thành "đang tốt". Trả null khi chưa có mẫu số — nơi gọi phải tự hiển thị "chưa có dữ
+  // liệu" thay vì badge đạt/không đạt.
+  const laborPerCup = items > 0 ? laborCost/items : null;
+  const laborPerBill = bills > 0 ? laborCost/bills : null;
 
   const primeCost = cogs + laborCost;
   const primeCostPct = revenue ? primeCost/revenue : 0;
@@ -8938,8 +8946,12 @@ function generateAlerts(kpi, cfg){
   const cogsSt = statusLowerBetter(kpi.cogsPct*100, t.cogsPct, 0.06);
   alerts.push({level:cogsSt.level, text:`COGS ${fmtPct(kpi.cogsPct)}` + (cogsSt.level==='green' ? `, tốt hơn/đúng benchmark ${t.cogsPct}%.` : `, cao hơn benchmark ${t.cogsPct}%.`)});
 
-  const lcSt = statusLowerBetter(kpi.laborPerCup, t.laborCupTarget, 0.1);
-  alerts.push({level:lcSt.level, text:`Labor/Cup ${fmt(kpi.laborPerCup)}` + (lcSt.level==='green' ? `, trong ngưỡng target ${fmt(t.laborCupTarget)}.` : `, cao hơn target ${fmt(t.laborCupTarget)} — kiểm tra volume/staffing.`)});
+  // [FIX] kpi.laborPerCup === null nghĩa là chưa bán được ly nào (không phải "Labor/Cup = 0đ,
+  // đạt target") — bỏ qua cảnh báo này hẳn thay vì hiện badge xanh sai sự thật.
+  if(kpi.laborPerCup != null){
+    const lcSt = statusLowerBetter(kpi.laborPerCup, t.laborCupTarget, 0.1);
+    alerts.push({level:lcSt.level, text:`Labor/Cup ${fmt(kpi.laborPerCup)}` + (lcSt.level==='green' ? `, trong ngưỡng target ${fmt(t.laborCupTarget)}.` : `, cao hơn target ${fmt(t.laborCupTarget)} — kiểm tra volume/staffing.`)});
+  }
 
   const ipTSt = statusHigherBetter(kpi.ipt, t.ipt, 0.08);
   alerts.push({level:ipTSt.level, text:`IPT ${fmtNum(kpi.ipt,2)} món/bill` + (ipTSt.level==='green' ? ` — đạt target ${t.ipt}.` : ` — thấp hơn target ${t.ipt}, cân nhắc đẩy upsell/combo.`)});
@@ -11724,7 +11736,10 @@ async function renderHealth(){
   const mIpt = achievement(kpi.ipt,t.ipt,'higher'), sIpt = statusHigherBetter(kpi.ipt,t.ipt,0.08);
   const mRev = achievement(kpi.revenue,dailyTarget,'higher'), sRev = statusHigherBetter(kpi.revenue,dailyTarget,0.1);
   const mCogs = achievement(kpi.cogsPct*100,t.cogsPct,'lower'), sCogs = statusLowerBetter(kpi.cogsPct*100,t.cogsPct,0.06);
-  const mLC = achievement(kpi.laborPerCup,t.laborCupTarget,'lower'), sLC = statusLowerBetter(kpi.laborPerCup,t.laborCupTarget,0.1);
+  // [FIX] kpi.laborPerCup null (chưa bán được ly nào trong kỳ) — achievement()/statusLowerBetter()
+  // coi null như 0, ra "200% mục tiêu"/"Đạt" giả — không tính khi chưa có mẫu số.
+  const mLC = kpi.laborPerCup!=null ? achievement(kpi.laborPerCup,t.laborCupTarget,'lower') : null;
+  const sLC = kpi.laborPerCup!=null ? statusLowerBetter(kpi.laborPerCup,t.laborCupTarget,0.1) : {level:'blue',label:'—'};
   const mWaste = achievement(kpi.wastePct*100,t.wasteTargetPct,'lower'), sWaste = statusLowerBetter(kpi.wastePct*100,t.wasteTargetPct,0.34);
   const mRemake = achievement(kpi.remakePct*100,t.remakeTargetPct,'lower'), sRemake = statusLowerBetter(kpi.remakePct*100,t.remakeTargetPct,0.5);
 
@@ -11760,8 +11775,8 @@ async function renderHealth(){
       <div class="card-h"><h3>${ic('helmet')} Labor</h3></div>
       ${rowInfoHTML('Labor cost (phân bổ)', fmt(kpi.laborCost))}
       ${rowInfoHTML('Labor %', fmtPct(kpi.laborPct))}
-      ${metricRowHTML('Labor / Cup', fmt(kpi.laborPerCup), mLC, sLC)}
-      ${rowInfoHTML('Labor / Bill', fmt(kpi.laborPerBill))}
+      ${metricRowHTML('Labor / Cup', kpi.laborPerCup!=null ? fmt(kpi.laborPerCup) : '—', mLC, sLC)}
+      ${rowInfoHTML('Labor / Bill', kpi.laborPerBill!=null ? fmt(kpi.laborPerBill) : '—')}
       ${rowInfoHTML('Giờ công THẬT (từ chấm công)', `${fmtNum(actualHours.hours,1)}h${actualHours.inProgress ? ` · ${actualHours.inProgress} ca đang chạy (tạm tính)` : ''}${actualHours.openShifts ? ` · ${ic('alert',13)} ${actualHours.openShifts} ca bỏ quên chưa check-out (không tính được)` : ''}`)}
       ${rowInfoHTML('Doanh thu / giờ công', actualHours.hours > 0 ? fmt(kpi.revenue/actualHours.hours) : '— (chưa có chấm công trong kỳ)')}
       ${rowInfoHTML('Ly / giờ công', actualHours.hours > 0 ? `${fmtNum(kpi.items/actualHours.hours,1)} ly` : '—')}
@@ -11887,7 +11902,8 @@ async function renderReport(){
     ['IPT', fmtNum(kpi.ipt,2), fmtNum(prevKpi.ipt,2), pctChip(achievement(kpi.ipt,t.ipt,'higher'), statusHigherBetter(kpi.ipt,t.ipt,0.08))],
     ['COGS %', fmtPct(kpi.cogsPct), fmtPct(prevKpi.cogsPct), pctChip(achievement(kpi.cogsPct*100,t.cogsPct,'lower'), statusLowerBetter(kpi.cogsPct*100,t.cogsPct,0.06))],
     ['Labor %', fmtPct(kpi.laborPct), fmtPct(prevKpi.laborPct), '—'],
-    ['Labor/Cup', fmt(kpi.laborPerCup), fmt(prevKpi.laborPerCup), pctChip(achievement(kpi.laborPerCup,t.laborCupTarget,'lower'), statusLowerBetter(kpi.laborPerCup,t.laborCupTarget,0.1))],
+    ['Labor/Cup', kpi.laborPerCup!=null?fmt(kpi.laborPerCup):'—', prevKpi.laborPerCup!=null?fmt(prevKpi.laborPerCup):'—',
+      kpi.laborPerCup!=null ? pctChip(achievement(kpi.laborPerCup,t.laborCupTarget,'lower'), statusLowerBetter(kpi.laborPerCup,t.laborCupTarget,0.1)) : '—'],
     ['Waste', fmt(kpi.wasteAmount), fmt(prevKpi.wasteAmount), pctChip(achievement(kpi.wastePct*100,t.wasteTargetPct,'lower'), statusLowerBetter(kpi.wastePct*100,t.wasteTargetPct,0.34))],
     ['Đổ ly / pha hỏng', kpi.remakeCups+' ly', prevKpi.remakeCups+' ly', '—'],
     ['Contribution', fmt(kpi.contribution), fmt(prevKpi.contribution), '—'],
