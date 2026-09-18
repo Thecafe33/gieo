@@ -10454,11 +10454,15 @@ function renderPrepBatchForm() {
       <div style="font-size:11.5px;color:#999;margin-top:8px;">1 mẻ ra ${Number(p.batchYield || 0).toLocaleString('vi-VN')} ${p.unit || ''} · HSD ${prepExpiryLabel({ shelfLifeType: p.shelfLifeType, shelfLifeHours: p.shelfLifeHours, expiresAt: null })}${Number(p.prepTimeMinutes) > 0 ? ` · nấu ~${p.prepTimeMinutes} phút` : ''}</div>
 
       <div class="wal-input-label" style="margin:12px 0 6px;">Nấu bao nhiêu mẻ?</div>
+      <!-- [FIX-UI] Ký hiệu phân số (¼ ½ ¾ 1½) trước đây dễ đọc nhầm/lẫn với nhau lúc đang
+           bận tay pha chế — đổi hẳn sang số thập phân (0,25/0,5/0,75/1,5), viết theo đúng
+           dấu phẩy thập phân tiếng Việt như mọi số khác trong app (xem toLocaleString('vi-VN')
+           ở dòng ngay trên) để nhân viên đọc quen mắt, không phải suy ra phân số là bao nhiêu. -->
       <div style="display:flex;gap:6px;flex-wrap:wrap;">
-        ${ratioBtn('¼ mẻ', 0.25)}${ratioBtn('½ mẻ', 0.5)}${ratioBtn('¾ mẻ', 0.75)}${ratioBtn('1 mẻ', 1)}
+        ${ratioBtn('0,25 mẻ', 0.25)}${ratioBtn('0,5 mẻ', 0.5)}${ratioBtn('0,75 mẻ', 0.75)}${ratioBtn('1 mẻ', 1)}
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">
-        ${ratioBtn('1½ mẻ', 1.5)}${ratioBtn('2 mẻ', 2)}${ratioBtn('3 mẻ', 3)}${ratioBtn('4 mẻ', 4)}
+        ${ratioBtn('1,5 mẻ', 1.5)}${ratioBtn('2 mẻ', 2)}${ratioBtn('3 mẻ', 3)}${ratioBtn('4 mẻ', 4)}
       </div>
       <div style="display:flex;gap:10px;margin-top:8px;">
         <div style="flex:1;">
@@ -10746,7 +10750,7 @@ async function _startPrepBatchImpl(preResolvedStaff, atomicScanDone, atomicScann
         itemId: r.itemId, type: 'CONSUMPTION',
         // KHÔNG làm tròn — cân tiểu ly cân được số lẻ, làm tròn sẽ lệch công thức
         qty: -qty,
-        note: `Nấu ${p.code || ''} ${p.name || ''} (${ratio} mẻ)`,
+        note: `Nấu ${p.code || ''} ${p.name || ''} (${Number(ratio).toLocaleString('vi-VN')} mẻ)`,
         staff: staffEmp.fullName, staffEmployeeId: staffEmp.id, referenceId: batchRef.id,
         deriveFromUnits: allocations.length > 0,
         ...(allocations.length ? { meta: { fifoAllocations: allocations } } : {})
@@ -10999,7 +11003,7 @@ function openPrepFinishForm(batchId) {
   box.innerHTML = `
     <div class="wal-section" style="margin:0 0 14px;">
       <div class="wal-section-title">Hoàn thành: ${b.prepName || ''}</div>
-      <div style="font-size:12.5px;color:#999;margin-bottom:10px;">Bắt đầu lúc ${fmtDateTimeShort(b.startedAt)} · ${b.batchRatio} mẻ</div>
+      <div style="font-size:12.5px;color:#999;margin-bottom:10px;">Bắt đầu lúc ${fmtDateTimeShort(b.startedAt)} · ${Number(b.batchRatio).toLocaleString('vi-VN')} mẻ</div>
       <div class="wal-input-label" style="margin:0 0 6px;">Thực tế thu được (cân/đong)</div>
       ${prepCanWeighPOS(b.prepId)
         ? weighBtnWide('openPrepFinishWeigh()', 'Cân cả khay vừa nấu', 'Đặt nguyên khay/nồi lên cân — máy tự trừ bì') + '<div style="height:9px;"></div>'
@@ -11115,7 +11119,7 @@ function openPrepCancelForm(batchId) {
   box.innerHTML = `
     <div class="wal-section" style="margin:0 0 14px;border:1.5px solid #fca5a5;background:#fef2f2;">
       <div class="wal-section-title" style="color:#b91c1c;">Huỷ mẻ: ${b.prepName || ''}</div>
-      <div style="font-size:12.5px;color:#a16207;margin-bottom:10px;">Bắt đầu ${fmtDateTimeShort(b.startedAt)} · ${ratio} mẻ</div>
+      <div style="font-size:12.5px;color:#a16207;margin-bottom:10px;">Bắt đầu ${fmtDateTimeShort(b.startedAt)} · ${Number(ratio).toLocaleString('vi-VN')} mẻ</div>
       <div style="font-size:12.5px;color:#b91c1c;font-weight:700;margin-bottom:6px;">Nguyên liệu sẽ được hoàn về kho</div>
       ${rows || '<div style="font-size:12.5px;color:#bbb;padding:6px 0;">Lô này không trừ nguyên liệu nào.</div>'}
       <div style="font-size:11px;color:#999;margin-top:8px;">Số hoàn thật lấy đúng theo bản ghi trừ kho lúc bắt đầu, không tính lại từ công thức.</div>
