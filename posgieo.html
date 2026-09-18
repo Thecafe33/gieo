@@ -3625,7 +3625,11 @@ function missingUnitsWarning(unitBase, capacity) {
 // unit, qty}) để mọi chỗ gọi/lưu meta.fifoAllocations không phải đổi gì thêm.
 // `coll` = collection Firestore để đồng bộ bản sao unitBase — STOCK_CONTAINERS_COLL cho
 // nguyên liệu (mặc định), 'prep_batches_gieogieo' cho BTP (itemId truyền vào lúc đó là prepId).
-async function unitEngineAllocateConsumption(itemId, qtyUsed, coll) {
+// `ref` (tuỳ chọn) = {type, id, note} — nơi gọi truyền vào để ghi một dòng sự kiện NGAY TRÊN
+// chính document tem/lô bị trừ (mảng `usageEvents`), phục vụ màn "Chi tiết tem" xem timeline
+// sau này mà không phải dò ngược qua nhiều dòng ledger theo referenceId. Không truyền thì vẫn
+// hoạt động y hệt trước giờ (event chỉ thiếu `ref`, không mất tính năng gì).
+async function unitEngineAllocateConsumption(itemId, qtyUsed, coll, ref) {
   coll = coll || STOCK_CONTAINERS_COLL;
   const used = Math.abs(Number(qtyUsed) || 0);
   if (!itemId || !used) return [];
@@ -3666,9 +3670,22 @@ async function unitEngineAllocateConsumption(itemId, qtyUsed, coll) {
   }
   // Đồng bộ bản sao Firestore (không chặn/await luồng bán hàng vì lỗi ở đây — RT mới là
   // nguồn thật của phần đang mở, Firestore chỉ là bản sao để màn báo cáo tĩnh đọc nhanh).
+  const nowISO = new Date().toISOString();
   finalAllocations.forEach(a => {
+    // [MỚI] usageEvents — nhật ký NGẮN ngay trên tem/lô, ghi mỗi lần bị trừ (bill nào/mẻ nào,
+    // trừ bao nhiêu, lúc nào). Chỉ cần THÊM (arrayUnion), không đọc lại doc trước — không tăng
+    // round-trip, best-effort giống hệt cách cập nhật unitBase ngay dưới đây. Mảng có thể dài
+    // dần theo thời gian sống của tem — chấp nhận được vì tem/lô có vòng đời hữu hạn (mở tới
+    // hết), không phải mãi mãi như 1 nguyên liệu.
+    const event = { type: 'consumed', qty: a.qty, at: nowISO };
+    if (ref && ref.type) event.refType = ref.type;
+    if (ref && ref.id) event.refId = ref.id;
+    if (ref && ref.note) event.note = ref.note;
     fstore.collection(coll).doc(a.unitId)
-      .update({ unitBase: firebase.firestore.FieldValue.increment(-a.qty) })
+      .update({
+        unitBase: firebase.firestore.FieldValue.increment(-a.qty),
+        usageEvents: firebase.firestore.FieldValue.arrayUnion(event)
+      })
       .catch(err => console.warn('[UnitEngine] đồng bộ unitBase Firestore lỗi (không ảnh hưởng RT)', a.unitId, err));
     if (coll === 'prep_batches_gieogieo') _ueSyncQtyRemainingClamped(a.unitId, finalUpdates[a.unitId]);
   });
@@ -9043,11 +9060,25 @@ async function _submitDrinkWasteImpl() {
     drinkItemId: m.id, drinkName: m.name, drinkSize: khoTxState.drinkSize,
     drinkQty: qty, reason
   };
+  // [FIX "đổ ly — nguyên liệu thô không phân bổ FIFO"] _wastePrepQtyPOS() (nhánh BTP ngay dưới)
+  // đã phân bổ vào đúng lô đang mở trước khi ghi WASTE từ lâu (xem chú thích của hàm đó), nhưng
+  // nhánh nguyên liệu thô ở đây lại ghi thẳng applyStockTransactionPOS() KHÔNG gọi
+  // unitEngineAllocateConsumption() trước — currentStock vẫn trừ đúng (không chặn thao tác)
+  // nhưng tem/lô đang mở không hề bị đụng tới: lượt Unit Engine kế tiếp coi như tem đó còn
+  // nguyên, và không có allocation nào để sau này truy xuất "ly đổ này lấy từ tem nào". Giờ
+  // phân bổ FIFO trước, cùng cơ chế applySalesConsumptionPOS/startPrepBatch đang dùng.
   const results = await Promise.allSettled([
-    ...ingredientIds.map(id => applyStockTransactionPOS({
-      itemId: id, type: 'WASTE', qty: -Math.abs(agg[id]),
-      note, staff: staffEmp.fullName, staffEmployeeId: staffEmp.id, meta
-    })),
+    ...ingredientIds.map(async id => {
+      const qtyUsed = Math.abs(agg[id]);
+      const allocations = await unitEngineAllocateConsumption(id, qtyUsed, undefined, { type: 'drink_waste', id: wasteEventId, note })
+        .catch(err => { console.warn('[FIFO] phân bổ lỗi (đổ ly)', id, err); return []; });
+      return applyStockTransactionPOS({
+        itemId: id, type: 'WASTE', qty: -qtyUsed,
+        note, staff: staffEmp.fullName, staffEmployeeId: staffEmp.id,
+        deriveFromUnits: allocations.length > 0,
+        meta: allocations.length ? { ...meta, fifoAllocations: allocations } : meta
+      });
+    }),
     ...prepIds.map(id => _wastePrepQtyPOS(id, prepAgg[id], note, staffEmp, meta))
   ]);
   const failed = results.filter(r => r.status === 'rejected');
@@ -10626,7 +10657,7 @@ async function _startPrepBatchImpl(preResolvedStaff, atomicScanDone, atomicScann
     const perInputAllocations = {};
     const results = await Promise.allSettled(inputs.map(async r => {
       const qty = Math.abs((Number(r.qty) || 0) * ratio);
-      const allocations = await unitEngineAllocateConsumption(r.itemId, qty)
+      const allocations = await unitEngineAllocateConsumption(r.itemId, qty, undefined, { type: 'prep_batch', id: batchRef.id })
         .catch(err => { console.warn('[FIFO] phân bổ lỗi', r.itemId, err); return []; });
       perInputAllocations[r.itemId] = { allocations, qty };
       return applyStockTransactionPOS({
@@ -18007,7 +18038,7 @@ async function applyPrepConsumptionPOS(prepId, qty, note, referenceId, businessD
   // transaction (unitAllocations) — cùng cơ chế với nguyên liệu thô, cho phép hoàn NGƯỢC
   // đúng lô lúc xoá đơn (bản cũ chỉ hoàn currentStock aggregate, không hoàn đúng lô — xem
   // _reversePrepConsumptionPOS).
-  const unitAllocations = await unitEngineAllocateConsumption(prepId, Math.abs(qty), 'prep_batches_gieogieo')
+  const unitAllocations = await unitEngineAllocateConsumption(prepId, Math.abs(qty), 'prep_batches_gieogieo', referenceId ? { type: 'order', id: referenceId, note } : undefined)
     .catch(err => { console.warn('[UnitEngine] phân bổ lô BTP lỗi', prepId, err); return []; });
   try {
     await fstore.runTransaction(async (t) => {
@@ -18028,6 +18059,10 @@ async function applyPrepConsumptionPOS(prepId, qty, note, referenceId, businessD
         ...(unitAllocations.length ? { unitAllocations } : {})
       });
     });
+    // [MỚI] Trả allocations ra ngoài — applySalesConsumptionPOS() dùng để ghép stockTrace
+    // (đường truy xuất bill → tem/lô), không đổi hành vi cũ (trước đây không ai đọc giá trị
+    // trả về của hàm này).
+    return { unitAllocations };
   } catch (err) {
     // [BUG "RT trừ nhưng ledger fail — mất tồn" — FIX] Trước đây transaction ghi sổ này không
     // có try/catch: lỗi thì lô đã bị unitEngineAllocateConsumption() trừ ở RT rồi mà không ai
@@ -18100,6 +18135,14 @@ async function applySalesConsumptionPOS(order, orderId, businessDate) {
     const ingredientIds = Object.keys(agg);
     const prepIds = Object.keys(prepAgg);
     if (!ingredientIds.length && !prepIds.length) return;
+    // [MỚI — đóng vòng truy xuất "bill → tem"] fifoAllocations/unitAllocations trước giờ chỉ
+    // nằm trên từng dòng ledger CONSUMPTION, phục vụ đúng một việc: hoàn ngược lúc xoá đơn. Muốn
+    // hỏi "bill này lấy từ tem/lô nào" phải dò lại đúng những dòng ledger đó qua referenceId —
+    // dữ liệu có sẵn nhưng không có nơi nào gom lại theo bill. Gom ngay tại đây (đã tính
+    // allocations trong tay, không cần suy lại) rồi ghi tổng hợp vào 1 doc riêng theo orderId,
+    // best-effort — lỗi ở bước ghi bổ sung này KHÔNG được làm hỏng việc trừ kho/ghi ledger đã
+    // chạy đúng ở trên.
+    const ingredientAllocations = {};
     const results = await Promise.allSettled([
       // [MỚI] Phân bổ FIFO vào đúng tem đang mở TRƯỚC khi ghi sổ, rồi đính kèm breakdown
       // vào transaction (meta.fifoAllocations) để lúc xoá đơn hoàn NGƯỢC được chính xác.
@@ -18133,8 +18176,9 @@ async function applySalesConsumptionPOS(order, orderId, businessDate) {
         try { txDoc = await fstore.collection('stock_transactions_gieogieo').doc(txId).get(); }
         catch (checkErr) { throw new Error('Không xác định được trạng thái ledger — không chạy FIFO: ' + (checkErr.message || checkErr)); }
         if (txDoc.exists) return { alreadyApplied: true };
-        const allocations = await unitEngineAllocateConsumption(ingId, qty)
+        const allocations = await unitEngineAllocateConsumption(ingId, qty, undefined, { type: 'order', id: orderId, note: note })
           .catch(err => { console.warn('[FIFO] phân bổ lỗi', ingId, err); return []; });
+        ingredientAllocations[ingId] = { qty, allocations };
         try {
           return await applyStockTransactionPOS({
             itemId: ingId, type: 'CONSUMPTION', qty: -qty,
@@ -18179,6 +18223,25 @@ async function applySalesConsumptionPOS(order, orderId, businessDate) {
       }
     });
     if (failedLines.length) _ueWarnGogsConsumptionFailed(orderId, order, failedLines).catch(() => {});
+    // [MỚI — đóng vòng truy xuất "bill → tem"] Ghi tổng hợp allocations của bill này vào 1 doc
+    // riêng, đọc thẳng ra "bill lấy từ tem/lô nào" mà không cần dò lại nhiều dòng ledger theo
+    // referenceId. Dòng nào chưa phân bổ được (allocations rỗng — chưa dán tem, hoặc dòng lỗi ở
+    // trên) đánh dấu untracked:true, KHÔNG bỏ trắng — để Quản lý thấy rõ đây là khoảng hở, không
+    // phải bill không tiêu hao gì. Best-effort, không throw ra ngoài (đã có sẵn dữ liệu ledger để
+    // đối chiếu nếu thiếu doc này).
+    fstore.collection('order_stock_traces_gieogieo').doc(orderId).set({
+      orderId, billCode: (order && order.billCode) || '', businessDate: businessDate || posDateKey(),
+      createdAt: new Date().toISOString(),
+      ingredients: Object.fromEntries(ingredientIds.map(id => {
+        const a = ingredientAllocations[id] || { qty: Math.abs(agg[id]), allocations: [] };
+        return [id, { qty: a.qty, allocations: a.allocations, untracked: !a.allocations.length }];
+      })),
+      preps: Object.fromEntries(prepIds.map((id, i) => {
+        const r = results[ingredientIds.length + i];
+        const unitAllocations = (r && r.status === 'fulfilled' && r.value && r.value.unitAllocations) || [];
+        return [id, { qty: Math.abs(prepAgg[id]), allocations: unitAllocations, untracked: !unitAllocations.length }];
+      }))
+    }, { merge: true }).catch(err => console.warn('[stockTrace] ghi tổng hợp bill→tem lỗi (không ảnh hưởng bill)', orderId, err));
     // Cập nhật ngay pill "cần xác nhận đã hết" nếu lượt bán này vừa làm cạn tem nào —
     // không chặn/làm chậm luồng thanh toán, lỗi thì bỏ qua im lặng (đã có refresh định kỳ).
     refreshFifoAlert().catch(() => {});
@@ -19147,6 +19210,16 @@ async function _submitPoReceiveImpl() {
     } catch (err) {
       console.error('[tem kho] sinh mã sau nhận hàng lỗi', err);
       toast('⚠️ Đã nhận hàng nhưng sinh tem lỗi — vào Kho ▸ Tem chờ dán để sinh lại');
+    }
+    // [MỚI — đóng vòng "phiếu nhận ↔ tem"] Tem đã có receiveRefId trỏ NGƯỢC về phiếu nhận, nhưng
+    // chiều XUÔI (từ phiếu nhận xem được đã sinh những tem nào) trước giờ không có — phải quét
+    // toàn bộ container theo receiveRefId mới ra được danh sách. Lưu thẳng containerIds lên chính
+    // phiếu nhận, arrayUnion để bấm "Ghi nhận" lại (idemKey cố định, xem BUG#31/33 ở trên) chỉ
+    // cộng thêm tem của phần vừa sinh mới, không ghi đè danh sách cũ. Best-effort — tem là việc
+    // phụ, lỗi ở đây không được lùi phiếu nhận đã ghi xong.
+    if (containers.length) {
+      recordRef.update({ containerIds: firebase.firestore.FieldValue.arrayUnion(...containers.map(c => c.id)) })
+        .catch(err => console.warn('[tem kho] ghi containerIds lên phiếu nhận lỗi', err));
     }
 
     if (poSyncFailed) {

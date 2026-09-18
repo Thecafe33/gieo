@@ -4640,9 +4640,27 @@ async function applyStockTransaction({itemId, type, qty, note, staff, businessDa
   await fstore.runTransaction(async (t)=>{
     const itemDoc = await t.get(itemRef);
     if(!itemDoc.exists) throw new Error('Nguyên liệu không tồn tại (có thể vừa bị xoá)');
-    const current = Number(itemDoc.data().currentStock)||0;
+    const itemData = itemDoc.data();
+    const current = Number(itemData.currentStock)||0;
     const next = current + Number(qty);
-    t.update(itemRef, {currentStock: next, updatedAt: new Date().toISOString()});
+    const updates = {currentStock: next, updatedAt: new Date().toISOString()};
+    // [FIX "chỉnh tồn nguyên liệu có tem bị Unit Engine ghi đè lùi lại"] Với món đã bật
+    // trackingMode 'unit'/'batch', currentStock KHÔNG phải một con số độc lập — bên POS,
+    // mỗi lần bán/mở tem/báo hết đều gọi _ueRecomputeCurrentStock() SUY LẠI currentStock từ
+    // untrackedBase + untrackedPendingDelta + tổng tem sealed + tổng tem đang mở, bỏ qua
+    // hoàn toàn giá trị đang có. Trước đây applyStockTransaction() chỉ sửa currentStock ở
+    // đây — ghi ĐÚNG lúc bấm, nhưng biến mất ngay ở lượt Unit Engine kế tiếp vì phần chênh
+    // này chưa từng được cộng vào công thức trên. Giờ với món có tem, MỌI thay đổi qua hàm
+    // này (ADJUSTMENT của "Chỉnh tồn kho", RECEIVING của "Nhập kho nhanh" — chỗ không sinh
+    // tem — biến động do kiểm kê duyệt...) đều cộng dồn thêm vào untrackedPendingDelta,
+    // đúng cơ chế "khoản không quy về unit nào" mà POS đã dùng cho CONSUMPTION/WASTE không
+    // có tem mở (xem applyStockTransactionPOS). Nhờ vậy _ueRecomputeCurrentStock() thấy lại
+    // đúng phần đã chỉnh thay vì âm thầm xoá nó.
+    const trackingMode = itemData.trackingMode;
+    if(trackingMode === 'unit' || trackingMode === 'batch'){
+      updates.untrackedPendingDelta = firebase.firestore.FieldValue.increment(Number(qty));
+    }
+    t.update(itemRef, updates);
     const txData = {
       itemId, type, qty:Number(qty), resultingStock: next, note: note||'', staff: staff||'',
       createdAt: new Date().toISOString(),
@@ -18722,6 +18740,18 @@ async function submitStockIn(){
   const factor = Number(document.getElementById('siUnit').value)||1;
   const unitLabel = document.getElementById('siUnit').selectedOptions[0]?.textContent || it.unit;
   if(enteredQty<=0){ toast('⚠️ Số lượng nhập phải lớn hơn 0'); return; }
+  // [FIX "nhập kho nhanh không sinh tem — hàng vô hình với FIFO"] Món đã bật trackingMode
+  // 'unit'/'batch' PHẢI có tem đại diện cho mọi lô hàng — chỉ app POS (màn "Nhận hàng theo
+  // PO") mới gọi createContainersForReceipt() sinh tem; quanlygieo.html không có hàm tương
+  // đương. Nhập qua đường này trước đây chỉ cộng thẳng currentStock: số cộng vào không nằm
+  // trong bất kỳ tem nào, nên lượt Unit Engine kế tiếp bên POS (_ueRecomputeCurrentStock)
+  // suy currentStock lại từ tổng các tem và kéo tồn tụt về mức cũ — hàng "biến mất" khỏi sổ
+  // dù dòng RECEIVING vẫn còn, đồng thời không có tem nào để truy vết lô hàng đó về sau.
+  // Chặn hẳn ở đây, hướng qua đúng luồng sinh tem bên POS thay vì âm thầm mất dữ liệu.
+  if(it && (it.trackingMode==='unit' || it.trackingMode==='batch')){
+    toast('⚠️ "'+it.name+'" đã bật dán tem — vào app POS ▸ Kho ▸ Nhận hàng để nhập (sinh tem đúng lô), không dùng "Nhập kho nhanh" ở đây kẻo hàng mất dấu tem');
+    return;
+  }
   const baseQty = enteredQty*factor;
   const userNote = document.getElementById('siNote').value;
   const autoNote = `Nhập ${fmtNum(enteredQty,2)} ${unitLabel} = ${fmtNum(baseQty,2)} ${it.unit}` + (userNote? ` · ${userNote}` : '');
