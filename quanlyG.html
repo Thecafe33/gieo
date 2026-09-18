@@ -10395,6 +10395,13 @@ GIEO.define('legacy-firebase-adapter/read-port', [
           if (at !== bt) return at < bt ? 1 : -1;
           return String(b.billId).localeCompare(String(a.billId));
         });
+        /* [DEBUG TẠM] read-layer/gateway.js#getBillsForRange dựng lại object
+           trả về từ đầu (bills/byDate/totalRevenue), KHÔNG chuyển tiếp
+           legacyMeta — nên debugDays gắn ở đây không bao giờ tới được UI qua
+           đường value bình thường. Ghi tạm ra window để renderHealthBody đọc
+           thẳng, không phải sửa lại read-layer chỉ để debug. Xoá dòng này khi
+           xong điều tra. */
+        if (typeof window !== 'undefined') window.__GIEO_LAST_BILLS_DEBUG = debugDays;
         return R.ok({ bills: bills, ambiguous: ambiguous, days: days.value.length, debugDays: debugDays });
       });
     }
@@ -20656,7 +20663,10 @@ GIEO.define('app-quanly/controller', [
       return;
     }
     var agg = aggregateBillsToRevenueCogs(billsOut.value.bills || []);
-    var debugDays = (billsOut.value.legacyMeta && billsOut.value.legacyMeta.debugDays) || [];
+    /* [DEBUG TẠM] xem ghi chú ở legacy-firebase-adapter/read-port.js#loadBillsForRange
+       — getBillsForRange không chuyển tiếp legacyMeta nên đọc qua window thay vì
+       billsOut.value.legacyMeta (luôn undefined). */
+    var debugDays = (typeof window !== 'undefined' && window.__GIEO_LAST_BILLS_DEBUG) || [];
     var debugHtml = debugDays.length ? (
       '<div class="card" style="margin-top:14px;border-color:var(--bad, #c00)">' +
       '<div class="card-h">🔧 DEBUG TẠM — xoá sau khi tìm ra vì sao 0đ (2026-09-18)</div>' +
