@@ -447,6 +447,34 @@ describe('P9/P10 — query cho màn Ca / Cảnh báo / Duyệt', function () {
     });
   });
 
+  describe('GetExpenses', function () {
+    test('POS operator đọc được — không phải đặc quyền quản trị', function () {
+      assertOk(_r.G.getExpenses(rCtx('POS_OPERATOR', 'POS'), { expenses: [] }));
+    });
+
+    test('tổng cộng dồn TRỪ khoản đã bị từ chối', function () {
+      var out = assertOk(_r.G.getExpenses(rCtx(), {
+        expenses: [
+          { expenseId: 'expense_1', amount: 40000, status: 'PENDING_APPROVAL' },
+          { expenseId: 'expense_2', amount: 200000, status: 'ACTUAL' },
+          { expenseId: 'expense_3', amount: 99999, status: 'REJECTED' }
+        ]
+      }));
+      assert.strictEqual(out.data.total, 240000);
+      assert.strictEqual(out.data.expenses.length, 3, 'vẫn liệt kê đủ, kể cả khoản bị từ chối — chỉ loại khỏi tổng');
+    });
+
+    test('categories mặc định rỗng, đi qua nguyên vẹn khi QUANLY cấp — không tự bịa danh mục', function () {
+      var empty = assertOk(_r.G.getExpenses(rCtx(), { expenses: [] }));
+      assert.deepStrictEqual(empty.data.categories, []);
+
+      var withCats = assertOk(_r.G.getExpenses(rCtx(), {
+        expenses: [], categories: [{ id: 'ice', label: 'Mua đá' }]
+      }));
+      assert.strictEqual(withCats.data.categories[0].label, 'Mua đá');
+    });
+  });
+
   describe('GetAlerts', function () {
     var lowStock = function () {
       return alertOf('LOW_STOCK', { itemId: _r.SUA, currentStock: 2, threshold: 10 });

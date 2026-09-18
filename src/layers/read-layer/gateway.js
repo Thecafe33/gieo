@@ -72,7 +72,10 @@ GIEO.define('read-layer/gateway', [
        này từ lúc khởi tạo. Cả hai EXECUTE — nhân viên bán cần chúng để làm
        việc, không phải quyền quản trị. */
     GetPOSInventoryWorkspace: registerQuery('GetPOSInventoryWorkspace', { authority: 'EXECUTE' }),
-    GetPrepBatchQuote: registerQuery('GetPrepBatchQuote', { authority: 'EXECUTE' })
+    GetPrepBatchQuote: registerQuery('GetPrepBatchQuote', { authority: 'EXECUTE' }),
+    /* Chi phí ghi tại quầy là việc EXECUTE — nhân viên cần xem lại khoản mình
+       vừa ghi trong ca, không phải đặc quyền quản trị. */
+    GetExpenses: registerQuery('GetExpenses', { authority: ['EXECUTE', 'REVIEW_APPROVE_CORRECT'] })
   };
 
   /**
@@ -581,6 +584,35 @@ GIEO.define('read-layer/gateway', [
     });
   }
 
+  /**
+   * GetExpenses — chi phí đã ghi trong kỳ đang xem, kèm danh mục do QUANLY cấu
+   * hình (`spec.categories`, giống cách `roster`/`vessels` được cấp ở các query
+   * khác — read-layer không tự bịa danh mục chi phí).
+   *
+   * KHÔNG tính expected/variance ở đây: đó là việc của `CloseCashSegment`, đọc
+   * qua `GetShiftStatus`. Trộn hai số vào một query sẽ tái lập đúng kiểu lỗi
+   * "2 pipeline độc lập" mà R3 cấm.
+   */
+  function getExpenses(ctx, spec) {
+    var g = guard(Q.GetExpenses, ctx, spec);
+    if (R.isErr(g)) return g;
+
+    return merge.resolve({
+      computeLive: function () {
+        var expenses = spec.expenses || [];
+        var total = expenses.reduce(function (s, e) {
+          return e.status === 'REJECTED' ? s : s + e.amount;
+        }, 0);
+        return R.ok({
+          expenses: expenses,
+          total: total,
+          categories: Array.isArray(spec.categories) ? spec.categories : []
+        });
+      },
+      computedAt: ctx.clock.now()
+    });
+  }
+
   return {
     QUERIES: Q,
     registerQuery: registerQuery,
@@ -596,6 +628,7 @@ GIEO.define('read-layer/gateway', [
     getAlerts: getAlerts,
     getPendingApprovals: getPendingApprovals,
     getPOSInventoryWorkspace: getPOSInventoryWorkspace,
-    getPrepBatchQuote: getPrepBatchQuote
+    getPrepBatchQuote: getPrepBatchQuote,
+    getExpenses: getExpenses
   };
 });

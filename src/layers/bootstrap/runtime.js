@@ -9,9 +9,10 @@ GIEO.define('bootstrap/runtime', [
   'commands/approval',
   'commands/business-day',
   'commands/shift',
+  'commands/finance',
   'read-layer/gateway',
   'reporting/report-queries'
-], function (R, pipeline, sales, inventory, prep, reversal, approval, businessDay, shift, reads, reports) {
+], function (R, pipeline, sales, inventory, prep, reversal, approval, businessDay, shift, finance, reads, reports) {
   'use strict';
 
   var MODE = { READ_ONLY: 'READ_ONLY', SHADOW: 'SHADOW', WRITE: 'WRITE' };
@@ -39,7 +40,8 @@ GIEO.define('bootstrap/runtime', [
     RecordCashCount: shift.RecordCashCount,
     CheckIn: shift.CheckIn,
     CheckOut: shift.CheckOut,
-    CloseCashSegment: shift.CloseCashSegment
+    CloseCashSegment: shift.CloseCashSegment,
+    RecordExpense: finance.RecordExpense
   };
   var QUERIES = {
     GetMenu: reads.getMenu,
@@ -54,6 +56,7 @@ GIEO.define('bootstrap/runtime', [
     GetPendingApprovals: reads.getPendingApprovals,
     GetPOSInventoryWorkspace: reads.getPOSInventoryWorkspace,
     GetPrepBatchQuote: reads.getPrepBatchQuote,
+    GetExpenses: reads.getExpenses,
     /* P11 — báo cáo đi qua cùng cổng đọc, không có đường tắt về nguồn thô. */
     GetUsageReport: reports.getUsageReport,
     GetLossReport: reports.getLossReport,
