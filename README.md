@@ -1,5 +1,20 @@
 # GIEO — hệ thống mới
 
+> # ⚠️⚠️⚠️ SAI MỤC ĐÍCH — KHÔNG LÀM THEO PHẦN "Lệnh"/"Đóng gói" DƯỚI ĐÂY ⚠️⚠️⚠️
+> Phần **"Lệnh"** (`node tools/build-html.js`) và **"Stack — đã chốt → Đóng gói"**
+> ở dưới mô tả hướng **dựng `dist/*_new.html` từ `src/apps/*/main.js`
+> bằng bundler nối file**. Hướng này **ĐÃ BỊ HUỶ** theo quyết định chủ quán
+> 2026-09-17 (xem [`UI-LEGACY-MIGRATION-PLAN-V1.md`](UI-LEGACY-MIGRATION-PLAN-V1.md)
+> §1a và [`BAN-GIAO-V1.md`](BAN-GIAO-V1.md) §mục đã chốt).
+>
+> **Đường đi ĐÚNG hiện tại:** sửa trực tiếp `posG.html` / `quanlyG.html`
+> tại chỗ (giữ nguyên DOM/CSS/layout/nav/modal — "cái công ty"), chỉ thay
+> phần lõi đọc/ghi dữ liệu ("nhân viên") bằng core FIFO mới trong
+> `src/layers/...` qua `bootstrap/runtime`. **KHÔNG** dựng shell UI mới,
+> **KHÔNG** dùng `tools/build-html.js`/`dist/*_new.html` làm deliverable.
+> `src/apps/quanly/main.js` và `src/apps/pos/main.js` chỉ còn giá trị tham
+> khảo logic, không phải nơi phát triển UI tiếp.
+
 Thay thế `posgieo.html` / `quanlygieo.html`, lấy **FIFO làm gốc** (traceability backbone của toàn hệ thống, không phải một feature của kho).
 
 > **Hệ thống cũ vẫn đang chạy production.** Mọi thứ trong repo này chạy READ-ONLY cho tới khi cutover (Phase 13). 2 file HTML cũ chỉ dùng để tra cứu nghiệp vụ thật, **không** phải kiến trúc chuẩn để copy.
@@ -23,7 +38,7 @@ Cặp contract bắt buộc trước khi viết Ledger/Unit persistence:
 ```bash
 node tools/run-tests.js                # chạy test  (thêm tham số để lọc theo tên)
 node tools/check-import-direction.js   # kiểm tra ranh giới layer — exit 1 nếu vi phạm
-node tools/build-html.js               # sinh dist/posgieo-new.html + dist/quanlygieo-new.html
+node tools/build-html.js               # ⚠️ SAI MỤC ĐÍCH — KHÔNG DÙNG (xem cảnh báo đầu file). Không sinh deliverable, chỉ còn giá trị tham khảo tạm.
 ```
 
 Không cần cài gì. Không npm, không pnpm, không TypeScript, không bundler, không Vitest.
