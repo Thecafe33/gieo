@@ -10283,13 +10283,35 @@ GIEO.define('legacy-firebase-adapter/read-port', [
       var monthKey = MONTH_KEYS[Number(m[2]) - 1];
       var dayKey = m[3];
       var archiveKey = monthKey + '_' + dayKey + '_' + m[1];
+      var rtdbPath = 'orders_gieogieo/' + monthKey + '/' + dayKey;
+      /* [DEBUG TẠM — 2026-09-18] Đang điều tra vì sao bill hôm nay ra 0đ trong khi
+         quanlygieo.html (legacy) đọc đúng số thật cùng path/tài khoản. `debug` chỉ
+         mang thông tin CHẨN ĐOÁN (path, số bản ghi live/archive đọc được, lỗi nếu
+         có) để hiện lên UI cho chủ quán xem trên điện thoại — không có devtools.
+         Xoá field này sau khi tìm ra nguyên nhân. */
       return rtdb('orders', monthKey + '/' + dayKey).then(function (live) {
-        if (R.isOk(live) && live.value && Object.keys(live.value).length) {
-          return R.ok({ source: 'LEGACY_LIVE', orders: live.value });
+        var liveCount = (R.isOk(live) && live.value) ? Object.keys(live.value).length : 0;
+        var liveErr = R.isErr(live) ? (live.error.kind + ': ' + live.error.message) : null;
+        if (liveCount) {
+          return R.ok({
+            source: 'LEGACY_LIVE', orders: live.value,
+            debug: { path: rtdbPath, liveCount: liveCount, liveErr: liveErr }
+          });
         }
         return firestoreDoc('ordersArchive', archiveKey).then(function (archived) {
-          if (R.isErr(archived)) return archived;
-          return R.ok({ source: 'LEGACY_ARCHIVE', orders: (archived.value && archived.value.orders) || {} });
+          if (R.isErr(archived)) {
+            return R.err(archived.error.kind, archived.error.message +
+              ' [debug: ' + rtdbPath + ' liveCount=0 liveErr=' + liveErr + ']');
+          }
+          var archiveOrders = (archived.value && archived.value.orders) || {};
+          return R.ok({
+            source: 'LEGACY_ARCHIVE', orders: archiveOrders,
+            debug: {
+              path: rtdbPath, liveCount: 0, liveErr: liveErr,
+              archiveDocId: archiveKey, archiveFound: !!archived.value,
+              archiveCount: Object.keys(archiveOrders).length
+            }
+          });
         });
       }).then(function (rows) {
         if (R.isErr(rows)) return rows;
@@ -10304,7 +10326,7 @@ GIEO.define('legacy-firebase-adapter/read-port', [
             ambiguous = ambiguous.concat(mapped.value.ambiguous || []);
           }
         });
-        return R.ok({ bills: bills, ambiguous: ambiguous, source: rows.value.source });
+        return R.ok({ bills: bills, ambiguous: ambiguous, source: rows.value.source, debug: rows.value.debug });
       });
     }
 
@@ -10360,10 +10382,11 @@ GIEO.define('legacy-firebase-adapter/read-port', [
           };
         });
       })).then(function (rows) {
-        var bills = [], ambiguous = [];
+        var bills = [], ambiguous = [], debugDays = [];
         rows.forEach(function (row) {
           bills = bills.concat(row.bills);
           ambiguous = ambiguous.concat(row.ambiguous || []);
+          if (row.debug) debugDays.push(row.debug);
         });
         /* Mới nhất trước — cùng thứ tự hiển thị legacy (qlLoadBills: sort theo
            createdAt desc). occurredAt = o.createdAt, giữ nguyên kiểu dữ liệu gốc. */
@@ -10372,7 +10395,7 @@ GIEO.define('legacy-firebase-adapter/read-port', [
           if (at !== bt) return at < bt ? 1 : -1;
           return String(b.billId).localeCompare(String(a.billId));
         });
-        return R.ok({ bills: bills, ambiguous: ambiguous, days: days.value.length });
+        return R.ok({ bills: bills, ambiguous: ambiguous, days: days.value.length, debugDays: debugDays });
       });
     }
 
@@ -18825,7 +18848,8 @@ GIEO.define('bootstrap/legacy-data-source', [
             from: input.from,
             to: input.to,
             bills: out.value.bills,
-            legacyMeta: { ambiguous: out.value.ambiguous, days: out.value.days }
+            /* [DEBUG TẠM] debugDays: xem ghi chú ở legacy-firebase-adapter/read-port.js#loadBills */
+            legacyMeta: { ambiguous: out.value.ambiguous, days: out.value.days, debugDays: out.value.debugDays }
           });
         });
       }
@@ -20575,7 +20599,16 @@ GIEO.define('app-quanly/controller', [
       return;
     }
     var agg = aggregateBillsToRevenueCogs(billsOut.value.bills || []);
+    var debugDays = (billsOut.value.legacyMeta && billsOut.value.legacyMeta.debugDays) || [];
+    var debugHtml = debugDays.length ? (
+      '<div class="card" style="margin-top:14px;border-color:var(--bad, #c00)">' +
+      '<div class="card-h">🔧 DEBUG TẠM — xoá sau khi tìm ra vì sao 0đ (2026-09-18)</div>' +
+      '<div class="muted" style="line-height:1.7;font-family:monospace;font-size:12px;white-space:pre-wrap">' +
+      debugDays.map(function (d) { return escapeHtmlAttr(JSON.stringify(d)); }).join('\n') +
+      '</div></div>'
+    ) : '';
     el.innerHTML =
+      debugHtml +
       '<div class="kgrid">' +
         '<div class="kcard kcard-wide">' +
           '<div class="klabel">Doanh thu ' + escapeHtmlAttr(rangeLabel) + '</div>' +
