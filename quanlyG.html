@@ -19033,7 +19033,51 @@ GIEO.define('bootstrap/pin-auth', [
     return R.ok({ employee: employee, actor: actor.value, context: context.value });
   }
 
-  return { authenticate: authenticate };
+  /**
+   * [TẠM — 2026-09-18, theo yêu cầu chủ quán] Bỏ bước nhập PIN cho QUANLY: tự
+   * chọn nhân viên ĐANG HOẠT ĐỘNG đầu tiên có đủ quyền REVIEW_APPROVE_CORRECT,
+   * dựng actor/context y hệt `authenticate()` — chỉ khác ở chỗ không so khớp
+   * PIN người gõ. Vẫn đi qua đúng access.createActor/hasAuthority/createContext,
+   * không bỏ qua mô hình quyền — chỉ bỏ bước NGƯỜI DÙNG TỰ XÁC NHẬN DANH TÍNH.
+   * Dùng cho máy chỉ chủ quán một mình thao tác; không hợp cho máy dùng chung.
+   */
+  function authenticateFirst(spec) {
+    spec = spec || {};
+    if (!ids.isId(spec.organizationId, 'org')) return R.err('VALIDATION', 'cần organizationId hợp lệ');
+    if (!ids.isId(spec.storeId, 'store')) return R.err('VALIDATION', 'cần storeId hợp lệ');
+    if (!access.SOURCE[spec.source] || spec.source === access.SOURCE.SYSTEM) {
+      return R.err('VALIDATION', 'đăng nhập chỉ dành cho POS hoặc QUANLY');
+    }
+
+    var candidates = (spec.employees || []).filter(function (employee) {
+      if (!employee || employee.active === false) return false;
+      if (!ids.isId(employee.employeeId, 'employee') || !ids.isId(employee.actorId, 'actor')) return false;
+      if (employee.storeId !== spec.storeId || !employee.role) return false;
+      var actor = access.createActor({
+        actorId: employee.actorId, role: employee.role, source: spec.source,
+        stores: [spec.storeId], allStoresRead: !!employee.allStoresRead
+      });
+      if (R.isErr(actor)) return false;
+      if (spec.source === access.SOURCE.QUANLY &&
+          !access.hasAuthority(actor.value, access.AUTHORITY.REVIEW_APPROVE_CORRECT)) return false;
+      employee.__actor = actor.value;
+      return true;
+    });
+    if (!candidates.length) {
+      return R.err('FORBIDDEN', 'không có nhân viên nào đang hoạt động đủ quyền để tự đăng nhập');
+    }
+    var employee = candidates[0];
+    var context = contextLib.createContext({
+      organizationId: spec.organizationId, storeId: spec.storeId,
+      actor: employee.__actor, source: spec.source,
+      businessDay: spec.businessDay || null, clock: spec.clock,
+      deviceId: spec.deviceId, appInstanceId: spec.appInstanceId
+    });
+    if (R.isErr(context)) return context;
+    return R.ok({ employee: employee, actor: employee.__actor, context: context.value });
+  }
+
+  return { authenticate: authenticate, authenticateFirst: authenticateFirst };
 });
 
 /* ===== src/layers/bootstrap/runtime.js ===== */
@@ -19786,6 +19830,19 @@ GIEO.define('bootstrap/startup', [
             authenticate: function (pin) {
               return pinAuth.authenticate({
                 pin: pin,
+                employees: employees.value,
+                organizationId: spec.organizationId,
+                storeId: spec.storeId,
+                source: spec.source,
+                businessDay: spec.businessDay || null,
+                clock: spec.clock,
+                deviceId: spec.deviceId,
+                appInstanceId: spec.appInstanceId
+              });
+            },
+            /* [TẠM] bỏ nhập PIN — xem ghi chú ở bootstrap/pin-auth.js#authenticateFirst */
+            authenticateFirst: function () {
+              return pinAuth.authenticateFirst({
                 employees: employees.value,
                 organizationId: spec.organizationId,
                 storeId: spec.storeId,
@@ -20709,6 +20766,9 @@ GIEO.define('app-quanly/controller', [
   document.getElementById('hamburgerBtn').innerHTML = ic('menu', 20);
   document.getElementById('reloadBtn').innerHTML = ic('refresh', 18);
 
+  /* [TẠM — 2026-09-18, theo yêu cầu chủ quán] Bỏ màn nhập PIN: tự đăng nhập
+     bằng nhân viên đủ quyền QUANLY đầu tiên tìm được (renderLoginSheet vẫn
+     giữ nguyên bên trên, phòng khi cần bật lại PIN — chỉ không gọi nó nữa). */
   startup.prepareAuth({
     firebase: { config: firebaseConfig, account: firebaseAccount },
     organizationId: ORG_ID,
@@ -20716,7 +20776,11 @@ GIEO.define('app-quanly/controller', [
     source: 'QUANLY'
   }).then(function (prepared) {
     if (R.isErr(prepared)) { showError('Không đọc được danh sách nhân viên: ' + prepared.error.message); return; }
-    renderLoginSheet(prepared.value);
+    var authed = prepared.value.authenticateFirst();
+    if (R.isErr(authed)) { showError('Không tự đăng nhập được: ' + authed.error.message); return; }
+    startRuntime(authed.value).catch(function (err) {
+      showError('Không khởi động được core mới: ' + (err && err.message ? err.message : err));
+    });
   }).catch(function (e) { showError('Lỗi khởi tạo: ' + (e && e.message ? e.message : e)); });
 })();
 
