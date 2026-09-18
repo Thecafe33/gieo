@@ -20525,7 +20525,29 @@ function clResultShiftDay(delta){
   clResultDate = (k > hnay) ? hnay : k;   // không cho xem tương lai
   renderKhoChecklist();
 }
-function renderClChecklistResult(dayKey, opening, defs, closing){
+function renderClChecklistResult(dayKey, opening, defs, closing, refillLines){
+  const gioPhut = iso => { try{ return new Date(iso).toLocaleTimeString('vi-VN',{hour:'2-digit',minute:'2-digit'}); }catch(e){ return ''; } };
+  // [MỚI] Tóm tắt ca — trước đây Quản lý không có chỗ nào thấy MỘT LẦN "ca hôm nay mở
+  // lúc mấy giờ, ai mở, đóng lúc mấy giờ, ai đóng, refill được bao nhiêu" — phải tự suy
+  // từ nhiều màn khác nhau (đối chiếu tiền mặt cho giờ mở, không có gì cho giờ đóng, Lịch
+  // sử kho lọc tay cho refill). opening/closing đã có sẵn staff+giờ từ lâu (_writeShiftOpen/
+  // _submitDailyCloseImpl bên POS), chỉ là chưa ai hiển thị gộp lại.
+  const rl = refillLines || [];
+  const tongRefillLuot = rl.length;
+  const refillTheoMon = {};
+  rl.forEach(t=>{
+    const k = t.itemId;
+    refillTheoMon[k] = (refillTheoMon[k]||0) + (Number(t.qty)||0);
+  });
+  const tomTat = `
+    <div class="row"><span class="rl">Mở ca</span><span class="rv">${opening ? `${gioPhut(opening.createdAt)} · ${escapeHtmlAttr(opening.staff||'—')}` : '<span class="muted-sm">Chưa mở ca ngày này</span>'}</span></div>
+    <div class="row"><span class="rl">Đóng ca</span><span class="rv">${(closing && closing.status==='closed') ? `${gioPhut(closing.closedAt)} · ${escapeHtmlAttr(closing.closedByName||'—')}${closing.closeDurationMin!=null?` · kết ca ${closing.closeDurationMin} phút`:''}` : '<span class="muted-sm">Chưa đóng ca</span>'}</span></div>
+    <div class="row"><span class="rl">Refill trong ca</span><span class="rv">${tongRefillLuot ? `${tongRefillLuot} lượt · ${Object.keys(refillTheoMon).length} nguyên liệu` : '<span class="muted-sm">Không có lượt nào</span>'}</span></div>
+    ${tongRefillLuot ? `<div class="small-note" style="margin:4px 0 8px">${rl.map(t=>{
+      const nm = (INVENTORY_ITEMS.find(x=>x.id===t.itemId)||{}).name || t.itemId;
+      return `${escapeHtmlAttr(nm)} +${fmtNum(t.qty,1)}${t.staff?` (${escapeHtmlAttr(t.staff)})`:''}`;
+    }).join(' · ')}</div>` : ''}
+  `;
   const done = [...((opening && opening.checklistDone) || []), ...((closing && closing.closeChecklistDone) || [])];
   const over = [...((opening && opening.checklistOverrides) || []), ...((closing && closing.closeChecklistOverrides) || [])];
   const doneMap = {}; done.forEach(x=>{ doneMap[x.id] = x; });
@@ -20564,6 +20586,7 @@ function renderClChecklistResult(dayKey, opening, defs, closing){
         <div class="wk-label">${dayKey}${dayKey===dkey(new Date())?' (hôm nay)':''}</div>
         <button onclick="clResultShiftDay(1)">›</button>
       </div>
+      ${tomTat}
       ${!list.length ? '<div class="muted">Chưa cấu hình mục đầu ca nào.</div>' : `
         <div class="small-note" style="margin-bottom:8px">
           ${soXong} xong${soBoQua?` · ${soBoQua} bỏ qua`:''}${chuaLam?` · ${chuaLam} chưa làm`:''}
@@ -20579,11 +20602,19 @@ async function renderKhoChecklist(){
   showLoading(box);
   const dayKey = clResultDate || dkey(new Date());
   let opening = null;
+  let refillLines = [];
   try{
     await ensureAuth();
     var closing = null;
-    [SHIFT_CHECKLISTS, opening, closing] = await Promise.all([
-      loadShiftChecklists(), loadDailyOpening(dayKey), loadDailyClosing(dayKey)]);
+    let refillSnap = null;
+    [SHIFT_CHECKLISTS, opening, closing, refillSnap] = await Promise.all([
+      loadShiftChecklists(), loadDailyOpening(dayKey), loadDailyClosing(dayKey),
+      // [MỚI] Refill trong ngày — Quản lý trước đây không có cách nào biết ca đó đã refill
+      // gì, bao nhiêu, ngoài phải lục Kho ▸ Lịch sử kho lọc thủ công theo type TRANSFER.
+      fstore.collection('stock_transactions_gieogieo').where('businessDate','==',dayKey).where('type','==','TRANSFER').get()
+        .catch(err=>{ console.warn('[Checklist ca] không đọc được refill trong ngày:', err); return null; })
+    ]);
+    if(refillSnap) refillLines = refillSnap.docs.map(d=>({id:d.id, ...d.data()}));
   }
   catch(err){ console.error('loadShiftChecklists failed', err); box.innerHTML='<div class="muted">Không tải được checklist.</div>'; showError('Không đọc được checklist: '+(err.code||err.message||err)); return; }
 
@@ -20641,7 +20672,7 @@ async function renderKhoChecklist(){
       <button class="btn" onclick="submitChecklistItem()">+ Thêm mục</button>
     </div>
     <div class="sec-title" style="margin-top:14px">Kết quả thực hiện</div>
-    ${renderClChecklistResult(dayKey, opening, SHIFT_CHECKLISTS, closing)}
+    ${renderClChecklistResult(dayKey, opening, SHIFT_CHECKLISTS, closing, refillLines)}
     <div class="sec-title" style="margin-top:16px">${ic('sun',15)} Quy trình ĐẦU CA</div>
     <div class="small-note" style="margin:-4px 0 8px">Các bước POS luôn chạy sẵn (không sửa được), rồi tới mục bạn tự khai.</div>
     ${renderBuiltinSteps('open')}
