@@ -21856,11 +21856,17 @@ function _histRender(){
       }).join('')}`;
   }).join('') : '<div class="muted" style="margin-top:12px">Không có giao dịch nào ở nhóm này.</div>';
 
+  // [FIX — dễ hiểu nhầm thành "tồn kho tính sai"] Nói thẳng ngay trong cảnh báo: số
+  // "Tồn hiện tại" ở thẻ trên KHÔNG hề sai — nó cộng dồn MỌI giao dịch từ trước tới
+  // nay (kể cả những dòng bị cắt khỏi danh sách rút gọn này). Chỉ DANH SÁCH bên dưới
+  // đang thiếu, không phải tồn kho. Không nói rõ điều này, ai thấy tổng ngày hôm nay
+  // +8 mà "Tồn hiện tại" lại -17 sẽ tưởng nhầm là bug tính sai tồn kho.
   const canhBao = c.partial ? `
     <div class="card" style="margin-bottom:10px;padding:12px 14px">
       <div style="font-size:12.5px;font-weight:700;color:var(--warn)">Đang xem bản rút gọn</div>
-      <div class="small-note" style="margin-top:4px">Firestore chưa có chỉ mục cho truy vấn này nên chỉ quét được 1.500 giao dịch gần nhất của TẤT CẢ nguyên liệu rồi lọc ra món này — món ít biến động có thể trông như không có lịch sử.
-      ${c.indexUrl ? `<br><a href="${escapeHtmlAttr(c.indexUrl)}" target="_blank" rel="noopener">Bấm đây để Firestore tạo chỉ mục</a> (một lần, vài phút), sau đó mở lại màn này.` : ''}</div>
+      <div class="small-note" style="margin-top:4px">Firestore chưa có chỉ mục cho truy vấn này nên chỉ quét được 1.500 giao dịch gần nhất của TẤT CẢ nguyên liệu rồi lọc ra món này — món ít biến động có thể trông như không có lịch sử, hoặc chỉ thấy vài ngày gần nhất trong khi món đã có từ lâu.
+      <b>Số "Tồn hiện tại" ở thẻ trên vẫn ĐÚNG và ĐẦY ĐỦ</b> (cộng dồn mọi giao dịch từ trước tới nay, không bị cắt) — nếu cộng riêng các dòng đang hiện bên dưới mà ra số khác hẳn, đó là vì danh sách đang thiếu những dòng CŨ HƠN đã bị cắt khỏi 1.500 giao dịch quét được, không phải tồn kho bị tính sai.
+      ${c.indexUrl ? `<br><a href="${escapeHtmlAttr(c.indexUrl)}" target="_blank" rel="noopener">Bấm đây để Firestore tạo chỉ mục</a> (một lần, vài phút), sau đó mở lại màn này để xem đủ.` : ''}</div>
     </div>` : '';
 
   box.innerHTML = `
