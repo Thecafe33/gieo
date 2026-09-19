@@ -2787,14 +2787,86 @@ function _memoCost(key, fn){
   return v;
 }
 
+// ============================================================================
+// [MỚI] LỊCH SỬ CÔNG THỨC BÁN THÀNH PHẨM — prep_recipe_history_gieogieo
+// ----------------------------------------------------------------------------
+// Cùng bệnh, cùng thuốc với recipe_history_gieogieo (định mức món) ở trên, nhưng
+// cho công thức MẺ CHẾ BIẾN (batchInputs + batchYield của prep_items_gieogieo):
+// sửa công thức một mẻ (đổi định lượng nguyên liệu, đổi khối lượng thu được khai
+// báo) trước đây ghi đè thẳng — giá vốn của MỌI lô đã nấu trước đó tự tính lại
+// theo công thức mới mỗi khi đọc báo cáo. Giờ mỗi lần Lưu mà công thức thực sự đổi,
+// bản CŨ được chép lại kèm effectiveFrom = hôm nay, y hệt nguyên lý recipeSizeRowsOn.
+// ============================================================================
+const PREP_RECIPE_HIST_COLL = 'prep_recipe_history_gieogieo';
+let PREP_RECIPE_HISTORY = null;   // { prepId: [ {effectiveFrom, oldBatchInputs, oldBatchYield, newBatchInputs, newBatchYield} ] }
+let _prepRecipeHistLoadedAt = 0;
+async function ensurePrepRecipeHistory(force){
+  if(!force && PREP_RECIPE_HISTORY && Date.now() - _prepRecipeHistLoadedAt < 300000) return PREP_RECIPE_HISTORY;
+  const idx = {};
+  try{
+    const snap = await fstore.collection(PREP_RECIPE_HIST_COLL).get();
+    snap.forEach(d=>{
+      const r = { id: d.id, ...d.data() };
+      if(!r.prepId || !r.effectiveFrom) return;
+      (idx[r.prepId] = idx[r.prepId] || []).push(r);
+    });
+    Object.values(idx).forEach(list => list.sort((a,b)=>
+      String(a.effectiveFrom).localeCompare(String(b.effectiveFrom)) ||
+      String(a.createdAt||'').localeCompare(String(b.createdAt||''))));
+    PREP_RECIPE_HISTORY = idx;
+    _prepRecipeHistLoadedAt = Date.now();
+  }catch(err){
+    console.warn('[BTP] không đọc được lịch sử công thức mẻ (tạm dùng công thức hiện tại):', err);
+    PREP_RECIPE_HISTORY = PREP_RECIPE_HISTORY || {};
+  }
+  _costMemo = {};
+  return PREP_RECIPE_HISTORY;
+}
+// Công thức (batchInputs + batchYield) của prepId có hiệu lực vào đúng ngày dateKey.
+// dateKey rỗng = "bây giờ" → đọc thẳng PREP_ITEMS hiện tại, giữ nguyên hành vi cũ.
+function prepRecipeOn(prepId, dateKey){
+  const p = PREP_ITEMS.find(x=>x.id===prepId);
+  if(!dateKey) return p ? { batchInputs: p.batchInputs||[], batchYield: Number(p.batchYield)||0 } : { batchInputs:[], batchYield:0 };
+  const list = PREP_RECIPE_HISTORY && PREP_RECIPE_HISTORY[prepId];
+  if(!list || !list.length) return p ? { batchInputs: p.batchInputs||[], batchYield: Number(p.batchYield)||0 } : { batchInputs:[], batchYield:0 };
+  let chon = null;
+  for(const h of list){ if(String(h.effectiveFrom) <= dateKey) chon = h; else break; }
+  if(chon) return { batchInputs: chon.newBatchInputs||[], batchYield: Number(chon.newBatchYield)||0 };
+  return { batchInputs: list[0].oldBatchInputs||[], batchYield: Number(list[0].oldBatchYield)||0 };
+}
+async function recordPrepRecipeChange(prepId, oldRec, newRec){
+  if(!oldRec) return false;
+  const oldKey = JSON.stringify({i:oldRec.batchInputs, y:oldRec.batchYield});
+  const newKey = JSON.stringify({i:newRec.batchInputs, y:newRec.batchYield});
+  if(oldKey === newKey) return false;
+  await fstore.collection(PREP_RECIPE_HIST_COLL).add({
+    prepId, oldBatchInputs: oldRec.batchInputs, oldBatchYield: oldRec.batchYield,
+    newBatchInputs: newRec.batchInputs, newBatchYield: newRec.batchYield,
+    effectiveFrom: dkey(new Date()),
+    by: 'management', createdAt: new Date().toISOString()
+  });
+  await ensurePrepRecipeHistory(true);
+  logAudit('prep_recipe_change','prep_item',prepId,{effectiveFrom: dkey(new Date())});
+  return true;
+}
+function prepRecipeHistoryFor(prepId){
+  const list = (PREP_RECIPE_HISTORY && PREP_RECIPE_HISTORY[prepId]) || [];
+  return list.slice().reverse();
+}
+
 function prepCostOn(prepId, dateKey){
   const p = PREP_ITEMS.find(x=>x.id===prepId);
   if(!p) return 0;
   if(!dateKey) return Number(p.costPerUnit)||0;
   return _memoCost('prep|'+prepId+'|'+dateKey, ()=>{
-    const inputs = p.batchInputs || [];
+    // [FIX] Trước đây luôn đọc p.batchInputs/prepEffectiveYield(p) (công thức HIỆN
+    // TẠI) dù dateKey là một ngày quá khứ — sửa công thức mẻ hôm nay từng đổi luôn
+    // giá vốn của mọi lô đã nấu trước đó. Giờ tra đúng công thức đã có hiệu lực vào
+    // NGÀY LÔ ĐÓ PHÁT SINH (prepRecipeOn).
+    const rec = prepRecipeOn(prepId, dateKey);
+    const inputs = rec.batchInputs || [];
     if(!inputs.length) return Number(p.costPerUnit)||0;   // chưa khai công thức: chỉ còn số đang lưu
-    const y = prepEffectiveYield(p);
+    const y = rec.batchYield;
     if(!(y > 0)) return Number(p.costPerUnit)||0;
     const tong = inputs.reduce((s,r)=> s + (Number(r.qty)||0) * itemCostOn(r.itemId, dateKey), 0);
     return tong / y;
@@ -3134,9 +3206,10 @@ function writeCachedDay(dateKey, dayAgg){
 }
 
 async function fetchSalesRange(startDate, endDate){
-  // Lịch sử giá + lịch sử định mức phải có TRƯỚC khi tính bất kỳ ngày nào — thiếu
-  // thì mọi ngày rơi về giá/định mức hiện tại, đúng cái bệnh đang chữa.
-  await Promise.all([ensurePriceHistory(), ensureRecipeHistory()]);
+  // Lịch sử giá + lịch sử định mức món + lịch sử công thức mẻ phải có TRƯỚC khi
+  // tính bất kỳ ngày nào — thiếu thì mọi ngày rơi về giá/định mức/công thức hiện
+  // tại, đúng cái bệnh đang chữa.
+  await Promise.all([ensurePriceHistory(), ensureRecipeHistory(), ensurePrepRecipeHistory()]);
   const days = [];
   let d = new Date(startDate);
   while(d <= endDate){ days.push(new Date(d)); d.setDate(d.getDate()+1); }
@@ -4949,7 +5022,7 @@ async function _fillLechDinhLuongLo(b){
     return;
   }
   try{
-    await Promise.all([ loadRecipes().catch(()=>{}), loadToppingRecipes().catch(()=>{}), ensureRecipeHistory().catch(()=>{}) ]);
+    await Promise.all([ loadRecipes().catch(()=>{}), loadToppingRecipes().catch(()=>{}), ensureRecipeHistory().catch(()=>{}), ensurePrepRecipeHistory().catch(()=>{}) ]);
     const kq = await computeLechDinhLuongLo(b);
     const donVi = escapeHtmlAttr(b.unit||'');
     const khongDoc = kq.chiTiet.filter(x=>x.khongDoc).length;
@@ -9861,9 +9934,10 @@ function mixLineCogs(it, dateKey){
 }
 
 async function computeMixReport(start, end){
-  // Biên lãi từng món phải đọc giá nguyên liệu + định mức CỦA NGÀY BÁN, nếu không
-  // thì mở lại báo cáo tháng trước sau một lần đổi giá/định mức là biên món đổi theo.
-  await Promise.all([ensurePriceHistory(), ensureRecipeHistory()]);
+  // Biên lãi từng món phải đọc giá nguyên liệu + định mức + công thức mẻ CỦA NGÀY
+  // BÁN, nếu không thì mở lại báo cáo tháng trước sau một lần đổi giá/định mức là
+  // biên món đổi theo.
+  await Promise.all([ensurePriceHistory(), ensureRecipeHistory(), ensurePrepRecipeHistory()]);
   const days = [];
   let d = new Date(start);
   while(d <= end){ days.push(new Date(d)); d.setDate(d.getDate()+1); }
@@ -11285,7 +11359,8 @@ async function nlChayPhanTich(){
   try{
     await ensureAuth();
     await Promise.all([ loadRecipes().catch(()=>{}), loadToppingRecipes().catch(()=>{}),
-      loadPrepItems().then(l=>{PREP_ITEMS=l;}).catch(()=>{}), ensureRecipeHistory().catch(()=>{}) ]);
+      loadPrepItems().then(l=>{PREP_ITEMS=l;}).catch(()=>{}), ensureRecipeHistory().catch(()=>{}),
+      ensurePrepRecipeHistory().catch(()=>{}) ]);
     const snap = await fstore.collection('prep_batches_gieogieo')
       .where('businessDate','>=',nlFrom).where('businessDate','<=',nlTo).get();
     const closed = snap.docs.map(d=>({id:d.id,...d.data()}))
@@ -15260,6 +15335,9 @@ const EXPORT_CONFIG_COLLS = [
   // nhưng cho CÔNG THỨC thay vì GIÁ: thiếu nó thì báo cáo cũ dựng lại từ file sẽ tính
   // theo định mức hiện tại thay vì định mức có hiệu lực đúng ngày bill phát sinh.
   'recipe_history_gieogieo',
+  // [BTP] Lịch sử công thức mẻ chế biến — cùng lý do, cho batchInputs/batchYield của
+  // prep_items_gieogieo thay vì định mức món.
+  'prep_recipe_history_gieogieo',
   // [TIÊU HAO] Ba nguồn mới. special_days + recipe_suggestions nhỏ, lấy trọn.
   // recipe_suggestions phải nằm trong file: nó là TẦNG "đề xuất", tách khỏi tầng
   // "dữ liệu gốc" (recipes_gieogieo) — Claude cần thấy cả hai mới biết cái nào đã
@@ -17486,7 +17564,8 @@ async function renderKhoPrep(){
     await ensureAuth();
     // Nạp song song: danh sách dụng cụ chỉ để vẽ lưới chọn, hỏng thì vẫn phải sửa
     // được công thức nên KHÔNG cho nó chặn cả màn.
-    const [_p, _v] = await Promise.all([loadPrepItems(), loadVessels().catch(err=>{ console.warn('loadVessels lỗi', err); return []; })]);
+    const [_p, _v] = await Promise.all([loadPrepItems(), loadVessels().catch(err=>{ console.warn('loadVessels lỗi', err); return []; }),
+      ensurePrepRecipeHistory().catch(()=>{})]);
     PREP_ITEMS = _p; VESSELS = _v;
   }
   catch(err){ console.error('loadPrepItems failed', err); box.innerHTML='<div class="muted">Không tải được danh sách chế biến.</div>'; return; }
@@ -17550,6 +17629,8 @@ async function renderKhoPrep(){
       <div class="unit-explainer">Chọn những thứ bán thành phẩm này thực sự nằm trong — VD thạch trà: <b>khay nhựa lớn</b> lúc đổ ra và <b>khay inox</b> lúc fill ra quầy.<br>Ở POS, nhân viên bấm ảnh cái khay đang cân rồi đặt nguyên cả khay lên cân; hệ thống tự trừ bì và cộng nhiều lần cân lại thành số thật. Khai ở <b>Kho → Dụng cụ đựng</b>.</div>
       <div id="prepVesselBox"></div>
 
+      ${editingPrepId ? prepRecipeHistoryBlockHTML(editingPrepId) : ''}
+
       <button class="btn" style="margin-top:10px" onclick="submitPrepItem()">${editingPrepId?ic('save',15)+' Lưu thay đổi':'Thêm thành phẩm'}</button>
       <button class="btn outline" style="margin-top:8px" onclick="prepResetForm()">Huỷ</button>
     </div>` : `<button class="btn" onclick="prepStartNew()">+ Thêm thành phẩm chế biến</button>`;
@@ -17573,6 +17654,22 @@ async function renderKhoPrep(){
       </div>`).join('') : '<div class="muted">Chưa có thành phẩm chế biến nào</div>'}
   `;
   if(prepDraft){ renderPrepEditor(); renderPrepVesselPicker(); }
+}
+// [MỚI] Khối "Lịch sử công thức" trong ô sửa BTP — cho chủ quán thấy công thức mẻ
+// đã đổi mấy lần, từ ngày nào, để yên tâm sửa hôm nay không đổi giá vốn lô đã nấu.
+function _prepRecipeSummary(inputs, yieldVal){
+  const soNl = (inputs||[]).length;
+  return soNl ? `${soNl} nguyên liệu · thu ${fmtNum(yieldVal,1)}` : '(chưa khai)';
+}
+function prepRecipeHistoryBlockHTML(prepId){
+  const list = prepRecipeHistoryFor(prepId);
+  if(!list.length){
+    return `<div class="small-note" style="margin:10px 0">Chưa có lần sửa công thức nào được ghi lại — công thức hiện tại đang áp dụng cho MỌI lô đã nấu. Lần sửa tới sẽ tạo mốc đầu tiên: lô nấu từ hôm đó trở đi tính theo công thức mới, lô cũ vẫn giữ nguyên giá vốn theo công thức hiện tại.</div>`;
+  }
+  return `<div class="sec-title" style="margin-top:14px">Lịch sử công thức</div>
+    ${list.map(r=>`<div class="row" style="align-items:flex-start"><span class="rl">Từ ${fmtDateVN(new Date(r.effectiveFrom+'T00:00:00'))}</span>
+      <span class="rv" style="font-weight:500;text-align:right">${escapeHtmlAttr(_prepRecipeSummary(r.oldBatchInputs,r.oldBatchYield))} → ${escapeHtmlAttr(_prepRecipeSummary(r.newBatchInputs,r.newBatchYield))}</span></div>`).join('')}
+    <div class="small-note">Mốc cũ không bao giờ bị xoá hay sửa — lô đã nấu TRƯỚC mỗi mốc vẫn tính giá vốn theo đúng công thức của mốc trước đó.</div>`;
 }
 async function submitPrepItem(){
   if(!prepDraft.name.trim()){ toast('⚠️ Nhập tên thành phẩm'); return; }
@@ -17623,7 +17720,16 @@ async function submitPrepItem(){
                    ? (prepDraft.vesselIds||[]).filter(id=>VESSELS.some(v=>v.id===id)).slice(0, PREP_MAX_VESSELS)
                    : [] };
   try{
-    if(editingPrepId){ await updatePrepItem(editingPrepId, data); logAudit('update','prep_item',editingPrepId,data); toast('✅ Đã lưu'); }
+    if(editingPrepId){
+      // [FIX — "BTP cũng cần lịch sử áp dụng"] Chép công thức CŨ trước khi ghi đè —
+      // xem recordPrepRecipeChange/prepRecipeOn. Chỉ ghi khi batchInputs/batchYield
+      // thực sự đổi (đổi các field khác như hạn dùng, dụng cụ... không tạo mốc mới).
+      if(_pOld) await recordPrepRecipeChange(editingPrepId,
+        { batchInputs: _pOld.batchInputs||[], batchYield: Number(_pOld.batchYield)||0 },
+        { batchInputs: data.batchInputs, batchYield: data.batchYield }
+      ).catch(err=>console.warn('[BTP] ghi lịch sử công thức mẻ lỗi (công thức mới vẫn được lưu):', err));
+      await updatePrepItem(editingPrepId, data); logAudit('update','prep_item',editingPrepId,data); toast('✅ Đã lưu');
+    }
     else { const ref = await addPrepItem(data); logAudit('create','prep_item',ref.id,data); toast('✅ Đã thêm thành phẩm'); }
     editingPrepId=null; prepDraft=null; renderKhoPrep();
   }catch(err){ console.error(err); showError('Lưu thất bại: '+(err.code||err.message||err)); }
