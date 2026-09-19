@@ -2684,6 +2684,85 @@ async function recordItemPriceChange({itemId, itemName, unit, newPrice, oldPrice
   return true;
 }
 
+// ============================================================================
+// [MỚI] LỊCH SỬ ĐỊNH MỨC MÓN — recipe_history_gieogieo
+// ----------------------------------------------------------------------------
+// BỆNH ĐÃ CHỮA: recipes_gieogieo/{menuRefKey} trước đây chỉ có MỘT bản `sizes`
+// "hiện tại" — sửa định mức là GHI ĐÈ thẳng. Đổi định mức hôm nay để áp dụng từ
+// hôm nay trở đi thì mọi báo cáo COGS/giá vốn của NHỮNG NGÀY ĐÃ BÁN TRƯỚC ĐÓ cũng
+// tự tính lại theo công thức mới — bill bán tuần trước theo công thức cũ, báo cáo
+// tuần trước lại đổi giá vốn theo công thức vừa sửa hôm nay.
+//
+// CÁCH CHỮA: giống hệt lịch sử giá nguyên liệu (PRICE_COLL) — mỗi lần Lưu định mức
+// mà nội dung thực sự đổi, chép bản CŨ vào đây kèm mốc effectiveFrom = hôm nay (bản
+// mới có hiệu lực TỪ hôm nay). Mọi phép tính hỏi "ngày X thì món này định mức ra
+// sao" thay vì luôn đọc thẳng recipes_gieogieo (chỉ có nghĩa là "định mức HIỆN TẠI").
+//
+// Doc shape: menuRefKey, oldSizes (định mức TRƯỚC lần sửa này), newSizes (định mức
+// SAU lần sửa — cũng chính là recipes_gieogieo.sizes tại thời điểm ghi), effectiveFrom
+// ('YYYY-MM-DD', áp dụng TỪ ngày này), by, createdAt. Không bao giờ sửa/xoá mốc cũ.
+//
+// BA QUY TẮC TRA ĐỊNH MỨC (recipeSizeRowsOn) — giống hệt itemCostOn():
+//   1. Có mốc ≤ ngày cần tra → lấy `newSizes` của mốc GẦN NHẤT trước đó.
+//   2. Ngày cần tra NẰM TRƯỚC mốc đầu tiên → lấy `oldSizes` của mốc đầu tiên.
+//   3. Chưa có mốc nào (món chưa từng sửa từ khi có tính năng này) → lấy thẳng
+//      recipes_gieogieo hiện tại — đúng hành vi cũ, không vỡ dữ liệu chưa có lịch sử.
+// ============================================================================
+const RECIPE_HIST_COLL = 'recipe_history_gieogieo';
+let RECIPE_HISTORY = null;     // { menuRefKey: [ {effectiveFrom, oldSizes, newSizes, ...} ] } — TĂNG dần theo ngày
+let _recipeHistLoadedAt = 0;
+async function ensureRecipeHistory(force){
+  if(!force && RECIPE_HISTORY && Date.now() - _recipeHistLoadedAt < 300000) return RECIPE_HISTORY;
+  const idx = {};
+  try{
+    const snap = await fstore.collection(RECIPE_HIST_COLL).get();
+    snap.forEach(d=>{
+      const r = { id: d.id, ...d.data() };
+      if(!r.menuRefKey || !r.effectiveFrom) return;
+      (idx[r.menuRefKey] = idx[r.menuRefKey] || []).push(r);
+    });
+    Object.values(idx).forEach(list => list.sort((a,b)=>
+      String(a.effectiveFrom).localeCompare(String(b.effectiveFrom)) ||
+      String(a.createdAt||'').localeCompare(String(b.createdAt||''))));
+    RECIPE_HISTORY = idx;
+    _recipeHistLoadedAt = Date.now();
+  }catch(err){
+    console.warn('[Định mức] không đọc được lịch sử định mức (tạm dùng định mức hiện tại):', err);
+    RECIPE_HISTORY = RECIPE_HISTORY || {};
+  }
+  _costMemo = {};
+  return RECIPE_HISTORY;
+}
+// Các dòng định mức (1 size) của menuRefKey tại đúng ngày dateKey. dateKey rỗng =
+// "bây giờ" → đọc thẳng RECIPES hiện tại, giữ nguyên hành vi cũ cho màn cấu hình.
+function recipeSizeRowsOn(menuRefKey, size, dateKey){
+  if(!dateKey){ const r = RECIPES[menuRefKey]; return r && r.sizes && r.sizes[size]; }
+  const list = RECIPE_HISTORY && RECIPE_HISTORY[menuRefKey];
+  if(!list || !list.length){ const r = RECIPES[menuRefKey]; return r && r.sizes && r.sizes[size]; }
+  let chon = null;
+  for(const h of list){ if(String(h.effectiveFrom) <= dateKey) chon = h; else break; }
+  const sizesObj = chon ? chon.newSizes : list[0].oldSizes;
+  return sizesObj && sizesObj[size];
+}
+// Ghi một MỐC ĐỊNH MỨC MỚI nếu nội dung thực sự đổi. oldSizes=null (món chưa từng
+// có định mức trước đó) thì không ghi gì — không có "định mức cũ" nào để giữ lại.
+async function recordRecipeChange(menuRefKey, oldSizes, newSizes){
+  if(!oldSizes) return false;
+  if(JSON.stringify(oldSizes) === JSON.stringify(newSizes)) return false;
+  await fstore.collection(RECIPE_HIST_COLL).add({
+    menuRefKey, oldSizes, newSizes,
+    effectiveFrom: dkey(new Date()),
+    by: 'management', createdAt: new Date().toISOString()
+  });
+  await ensureRecipeHistory(true);
+  logAudit('recipe_change','recipe',menuRefKey,{effectiveFrom: dkey(new Date())});
+  return true;
+}
+function recipeHistoryFor(menuRefKey){
+  const list = (RECIPE_HISTORY && RECIPE_HISTORY[menuRefKey]) || [];
+  return list.slice().reverse();
+}
+
 // ----------------------------------------------------------------------------
 // GIÁ VỐN DẪN XUẤT THEO NGÀY — bán thành phẩm, topping, bao bì
 //
@@ -2692,8 +2771,10 @@ async function recordItemPriceChange({itemId, itemName, unit, newPrice, oldPrice
 // lại đúng công thức đó bằng giá nguyên liệu CỦA NGÀY ĐÓ là ra con số của ngày đó.
 // Thêm một bảng lịch sử nữa cho chúng chỉ tạo ra nguồn sự thật thứ hai để lệch.
 //
-// Giới hạn phải nói thẳng: nếu CÔNG THỨC (định mức, yield) bị sửa thì quá khứ vẫn
-// đổi theo — đây là lịch sử GIÁ, không phải lịch sử CÔNG THỨC.
+// Giới hạn còn lại: nếu YIELD của một mẻ chế biến/topping (không phải định mức
+// MÓN — cái đó đã có lịch sử riêng ở recipe_history_gieogieo phía trên) bị sửa thì
+// quá khứ vẫn đổi theo — đây là lịch sử GIÁ + lịch sử ĐỊNH MỨC MÓN, chưa phải lịch
+// sử công thức mẻ/topping.
 //
 // Memo: một ngày bán 200 bill × vài dòng, mỗi dòng lại tra topping/bao bì — không
 // nhớ thì cùng một phép tính chạy lại hàng nghìn lần.
@@ -2741,8 +2822,11 @@ function toppingCostOn(toppingId, dateKey){
 // dateKey = ngày phát sinh của bill. Truyền vào thì mọi giá đều lấy theo mốc có
 // hiệu lực NGÀY ĐÓ; bỏ trống thì dùng giá hiện tại (các màn cấu hình đang xem menu).
 function computeUnitCogsFromRecipe(itemId, size, dateKey){
-  const recipe = RECIPES['togo:'+itemId];
-  const rows = recipe && recipe.sizes && recipe.sizes[size];
+  // [FIX] Trước đây luôn đọc RECIPES (định mức HIỆN TẠI) dù dateKey là một ngày quá
+  // khứ — sửa định mức hôm nay từng đổi luôn giá vốn của mọi bill đã bán trước đó.
+  // Giờ tra đúng bản định mức đã có hiệu lực vào NGÀY BILL PHÁT SINH (recipeSizeRowsOn,
+  // dùng chung nguyên lý với itemCostOn/prepCostOn/toppingCostOn).
+  const rows = recipeSizeRowsOn('togo:'+itemId, size, dateKey);
   if(!rows || !rows.length) return null; // chưa khai định mức cho đúng size này — không tính được
   let cost = 0;
   for(const row of rows){
@@ -2784,7 +2868,7 @@ function _qtyOfTargetInToppingBatch(toppingId, servingsCount, targetType, target
   });
   return out;
 }
-function computeTargetQtyForOrderLine(it, targetType, targetId){
+function computeTargetQtyForOrderLine(it, targetType, targetId, dateKey){
   const qty = Number(it && it.qty)||0;
   if(!qty) return 0;
   let out = 0;
@@ -2795,8 +2879,9 @@ function computeTargetQtyForOrderLine(it, targetType, targetId){
     const servings = Math.max(1, Number(t.qty)||1) * qty;
     out += _qtyOfTargetInToppingBatch(tId, servings, targetType, targetId);
   });
-  const recipe = RECIPES['togo:'+it.itemId];
-  const rows = recipe && recipe.sizes && recipe.sizes[it.size];
+  // [FIX] Tra đúng định mức có hiệu lực NGÀY BILL PHÁT SINH (dateKey), không phải
+  // định mức hiện tại — sửa định mức không được làm sai lệch định lượng của bill cũ.
+  const rows = recipeSizeRowsOn('togo:'+it.itemId, it.size, dateKey);
   if(!rows) return out;
   rows.forEach(row=>{
     const amount = (Number(row.qty)||0) * qty;
@@ -2812,7 +2897,15 @@ function computeTargetQtyForOrderLine(it, targetType, targetId){
   return out;
 }
 function computeTargetQtyForOrder(order, targetType, targetId){
-  return ((order && order.itemsArray)||[]).reduce((s,it)=> s + computeTargetQtyForOrderLine(it, targetType, targetId), 0);
+  // order (đọc thẳng từ RTDB) không có field businessDate — chỉ có `date` dạng
+  // "DD/MM/YYYY" do POS ghi lúc tạo bill — quy đổi sang dateKey để tra đúng định
+  // mức có hiệu lực ngày đó (recipeSizeRowsOn).
+  let dateKey = null;
+  if(order && typeof order.date === 'string'){
+    const p = order.date.split('/');
+    if(p.length===3) dateKey = `${p[2]}-${p[1].padStart(2,'0')}-${p[0].padStart(2,'0')}`;
+  }
+  return ((order && order.itemsArray)||[]).reduce((s,it)=> s + computeTargetQtyForOrderLine(it, targetType, targetId, dateKey), 0);
 }
 // Đọc lại 1 bill từ RTDB dựa vào usageEvent đã ghi trên tem/lô — path RTDB cần
 // tháng/ngày. Ưu tiên `businessDate` (ghi từ Giai đoạn "bổ sung bill thiếu"): mốc `at`
@@ -3041,9 +3134,9 @@ function writeCachedDay(dateKey, dayAgg){
 }
 
 async function fetchSalesRange(startDate, endDate){
-  // Lịch sử giá phải có TRƯỚC khi tính bất kỳ ngày nào — thiếu nó thì mọi ngày rơi
-  // về giá hiện tại, đúng cái bệnh đang chữa.
-  await ensurePriceHistory();
+  // Lịch sử giá + lịch sử định mức phải có TRƯỚC khi tính bất kỳ ngày nào — thiếu
+  // thì mọi ngày rơi về giá/định mức hiện tại, đúng cái bệnh đang chữa.
+  await Promise.all([ensurePriceHistory(), ensureRecipeHistory()]);
   const days = [];
   let d = new Date(startDate);
   while(d <= endDate){ days.push(new Date(d)); d.setDate(d.getDate()+1); }
@@ -4856,7 +4949,7 @@ async function _fillLechDinhLuongLo(b){
     return;
   }
   try{
-    await Promise.all([ loadRecipes().catch(()=>{}), loadToppingRecipes().catch(()=>{}) ]);
+    await Promise.all([ loadRecipes().catch(()=>{}), loadToppingRecipes().catch(()=>{}), ensureRecipeHistory().catch(()=>{}) ]);
     const kq = await computeLechDinhLuongLo(b);
     const donVi = escapeHtmlAttr(b.unit||'');
     const khongDoc = kq.chiTiet.filter(x=>x.khongDoc).length;
@@ -5756,8 +5849,19 @@ async function loadRecipes(){
   RECIPES = map;
   return map;
 }
-function saveRecipe(menuRefKey, sizesData){
-  return fstore.collection('recipes_gieogieo').doc(menuRefKey).set({sizes: sizesData, updatedAt: new Date().toISOString()});
+// [FIX — "định mức chưa có lịch sử áp dụng"] Trước khi ghi đè, chép định mức CŨ vào
+// recipe_history_gieogieo với mốc hiệu lực = hôm nay, để bill đã bán trước hôm nay vẫn
+// tính giá vốn theo định mức cũ (xem recipeSizeRowsOn/computeUnitCogsFromRecipe) — chỉ
+// bill từ hôm nay trở đi mới dùng định mức mới. Đọc lại doc hiện tại NGAY TRƯỚC KHI GHI
+// (không dùng RECIPES cache) để không lỡ chép nhầm bản cũ nếu vừa có người khác sửa.
+async function saveRecipe(menuRefKey, sizesData){
+  const ref = fstore.collection('recipes_gieogieo').doc(menuRefKey);
+  const doc = await ref.get();
+  const oldSizes = doc.exists ? (doc.data().sizes || null) : null;
+  await recordRecipeChange(menuRefKey, oldSizes, sizesData).catch(err=>{
+    console.warn('[Định mức] ghi lịch sử định mức lỗi (định mức mới vẫn được lưu):', err);
+  });
+  return ref.set({sizes: sizesData, updatedAt: new Date().toISOString()});
 }
 function deleteRecipe(menuRefKey){
   return fstore.collection('recipes_gieogieo').doc(menuRefKey).delete();
@@ -9757,9 +9861,9 @@ function mixLineCogs(it, dateKey){
 }
 
 async function computeMixReport(start, end){
-  // Biên lãi từng món phải đọc giá nguyên liệu CỦA NGÀY BÁN, nếu không thì mở lại
-  // báo cáo tháng trước sau một lần đổi giá là biên món đổi theo.
-  await ensurePriceHistory();
+  // Biên lãi từng món phải đọc giá nguyên liệu + định mức CỦA NGÀY BÁN, nếu không
+  // thì mở lại báo cáo tháng trước sau một lần đổi giá/định mức là biên món đổi theo.
+  await Promise.all([ensurePriceHistory(), ensureRecipeHistory()]);
   const days = [];
   let d = new Date(start);
   while(d <= end){ days.push(new Date(d)); d.setDate(d.getDate()+1); }
@@ -11181,7 +11285,7 @@ async function nlChayPhanTich(){
   try{
     await ensureAuth();
     await Promise.all([ loadRecipes().catch(()=>{}), loadToppingRecipes().catch(()=>{}),
-      loadPrepItems().then(l=>{PREP_ITEMS=l;}).catch(()=>{}) ]);
+      loadPrepItems().then(l=>{PREP_ITEMS=l;}).catch(()=>{}), ensureRecipeHistory().catch(()=>{}) ]);
     const snap = await fstore.collection('prep_batches_gieogieo')
       .where('businessDate','>=',nlFrom).where('businessDate','<=',nlTo).get();
     const closed = snap.docs.map(d=>({id:d.id,...d.data()}))
@@ -15152,6 +15256,10 @@ const EXPORT_CONFIG_COLLS = [
   // mọi báo cáo cũ dựng lại từ file sẽ tính bằng giá hiện tại, đúng cái bệnh mà
   // bảng này sinh ra để chữa.
   'price_history_gieogieo',
+  // [ĐỊNH MỨC] Lịch sử định mức món — cùng lý do với price_history_gieogieo ở trên,
+  // nhưng cho CÔNG THỨC thay vì GIÁ: thiếu nó thì báo cáo cũ dựng lại từ file sẽ tính
+  // theo định mức hiện tại thay vì định mức có hiệu lực đúng ngày bill phát sinh.
+  'recipe_history_gieogieo',
   // [TIÊU HAO] Ba nguồn mới. special_days + recipe_suggestions nhỏ, lấy trọn.
   // recipe_suggestions phải nằm trong file: nó là TẦNG "đề xuất", tách khỏi tầng
   // "dữ liệu gốc" (recipes_gieogieo) — Claude cần thấy cả hai mới biết cái nào đã
@@ -21647,6 +21755,7 @@ async function renderKhoRecipe(){
   try{
     menu = await loadPosMenu('togo');
     await loadRecipes();
+    await ensureRecipeHistory(); // cần cho khối "Lịch sử định mức" trong ô sửa
     PREP_ITEMS = await loadPrepItems(); // cần cho dropdown chọn thành phần loại "Chế biến cấp 1"
     await loadMenuForManager(); // cần TOPPINGS (RTDB) cho dropdown chọn thành phần loại "Topping"
     TOPPING_RECIPES = await loadToppingRecipes(); // cần costPerServing để tính giá vốn topping đính kèm
@@ -21765,7 +21874,25 @@ function renderRecipeEditorBox(){
         </div>`;
       }).join('')}
       <button class="btn outline sm" onclick="recipeAddRow('${size}')">+ Thêm thành phần</button>
-    </div>`).join('') + `<button class="btn" onclick="submitRecipe()">${ic('save',15)} Lưu định mức</button>`;
+    </div>`).join('')
+    + recipeHistoryBlockHTML(recipeEditorKey)
+    + `<button class="btn" onclick="submitRecipe()">${ic('save',15)} Lưu định mức</button>`;
+}
+// [MỚI] Khối "Lịch sử định mức" trong ô sửa — cho chủ quán thấy rõ định mức đã đổi
+// mấy lần, từ ngày nào, để yên tâm rằng sửa hôm nay KHÔNG làm đổi giá vốn của bill
+// đã bán trước đó (xem recordRecipeChange/recipeSizeRowsOn).
+function _recipeSizesSummary(sizes){
+  return sizes && Object.keys(sizes).length ? Object.entries(sizes).map(([sz,rows])=>`${sz}: ${(rows||[]).length} thành phần`).join(' · ') : '(chưa khai)';
+}
+function recipeHistoryBlockHTML(menuRefKey){
+  const list = recipeHistoryFor(menuRefKey);
+  if(!list.length){
+    return `<div class="small-note" style="margin:10px 0">Chưa có lần sửa nào được ghi lại — định mức hiện tại đang áp dụng cho MỌI ngày đã bán. Lần sửa tới sẽ tạo mốc đầu tiên: bill từ hôm đó trở đi tính theo định mức mới, bill trước đó vẫn giữ nguyên giá vốn theo định mức hiện tại.</div>`;
+  }
+  return `<div class="sec-title" style="margin-top:14px">Lịch sử định mức</div>
+    ${list.map(r=>`<div class="row" style="align-items:flex-start"><span class="rl">Từ ${fmtDateVN(new Date(r.effectiveFrom+'T00:00:00'))}</span>
+      <span class="rv" style="font-weight:500;text-align:right">${escapeHtmlAttr(_recipeSizesSummary(r.oldSizes))} → ${escapeHtmlAttr(_recipeSizesSummary(r.newSizes))}</span></div>`).join('')}
+    <div class="small-note">Mốc cũ không bao giờ bị xoá hay sửa — bill bán TRƯỚC mỗi mốc vẫn tính giá vốn theo đúng định mức của mốc trước đó.</div>`;
 }
 async function submitRecipe(){
   try{
