@@ -10721,6 +10721,32 @@ async function computeStoreHealth(){
     if(ov.length) push('yellow', `Có món không refill được (${dateKey})`, ov.length, `curEntryTab='cash'; switchScreen('entry')`);
   });
 
+  // ---- [MỚI] Đếm giao ca (refill mustCount) chưa làm ----
+  // Số đếm THẬT là thứ duy nhất khiến checklist "refill_below_min" đáng tin (xem
+  // setLocationStockFromCountPOS ở posgieo.html — số đếm giờ chảy ngược lại
+  // locationStock). Bỏ sót bước đếm thì mọi tự kiểm refill quay lại tin vào
+  // locationStock có thể đã lệch từ lâu mà không ai biết — đúng lỗ hổng "trước có
+  // báo, giờ im re" chủ quán phát hiện ra. Phải nổi lên đây, không đợi phát hiện
+  // qua việc tự dò dữ liệu.
+  try{
+    const [ruleSnap2, openToday, closeYest] = await Promise.all([
+      fstore.collection('refill_rules_gieogieo').where('active','==',true).get(),
+      loadDailyOpening(today),
+      loadDailyClosing(yest)
+    ]);
+    const rules2 = ruleSnap2.docs.map(d=>d.data());
+    const needOpen = rules2.some(r=>r.mustCount && (r.countTiming==='open'||r.countTiming==='both'));
+    const needClose = rules2.some(r=>r.mustCount && (r.countTiming==='close'||r.countTiming==='both'));
+    const [openCountDoc, closeCountDoc] = await Promise.all([
+      (needOpen && openToday) ? fstore.collection('handover_counts_gieogieo').doc(`${today}_open`).get() : Promise.resolve(null),
+      (needClose && closeYest && closeYest.status==='closed') ? fstore.collection('handover_counts_gieogieo').doc(`${yest}_close`).get() : Promise.resolve(null)
+    ]);
+    if(needOpen && openToday && openCountDoc && !openCountDoc.exists)
+      push('yellow', 'Chưa đếm giao ca ĐẦU CA hôm nay (refill) — số tồn quầy đang hiện có thể đã lệch', '—', `goKho('refill')`);
+    if(needClose && closeYest && closeYest.status==='closed' && closeCountDoc && !closeCountDoc.exists)
+      push('yellow', `Ngày ${yest} đã đóng ca nhưng chưa đếm giao ca CUỐI CA (refill)`, '—', `goKho('refill')`);
+  }catch(err){ console.warn('storeHealth: đếm giao ca refill lỗi', err); }
+
   // ---- [MỚI] Hao hụt & huỷ hôm nay ----
   // Trước đây phải TỰ mở "Hao hụt & huỷ" (từ thẻ Lãi/lỗ) hoặc "Hôm nay · Vận hành"
   // mới biết hôm nay có lượt nào bị huỷ — dễ bỏ sót đúng lượt cần xem lại nhất (hết
@@ -20620,8 +20646,12 @@ async function confirmCancelPO(id){
 // cần refill cuối ngày và tạo TRANSFER (xem poReceiveScreen-style flow ở posgieo.html:
 // refillScreen). Ở đây chỉ CRUD rule + xem nhanh tồn hiện tại theo location đích.
 // ------------------------------------------------------------
+// [FIX — "refill hết báo mà không ai biết"] mustCount mặc định BẬT (trước là false):
+// checklist đầu/cuối ca chỉ đáng tin khi có số đếm THẬT đứng sau nó — không đếm thì
+// hệ thống chỉ còn locationStock (tồn theo vị trí), vốn là số cộng/trừ chạy dài,
+// không có gì đối chiếu và dễ trôi lệch âm thầm theo thời gian.
 let refillDraft = { itemId: null, sourceLocationId: null, destLocationId: null, targetQty: 0, minQty: 0, maxQty: 0, unitFactor: 1,
-  refillTiming: 'open', mustCount: false, countTiming: 'both', blockingClose: false,
+  refillTiming: 'open', mustCount: true, countTiming: 'both', blockingClose: false,
   varianceCheck: false, varianceTolerance: 0 };
 let REFILL_RULES = [];             // cache rule đã load, để hàm sửa cấu hình đọc lại
 let refillConfigEditId = null;     // id rule đang mở form "⚙ Cấu hình" (null = không mở cái nào)
@@ -20956,6 +20986,7 @@ async function renderKhoRefill(){
         <div style="margin-top:2px">${notConfigured
           ? `<span class="tier tier-amber">${ic('alert',12)} Chưa cấu hình timing/đếm — đang dùng mặc định (Đầu ca, không đếm, không chặn)</span>`
           : `<span class="muted">${refillConfigLabel(r)}</span>`}</div>
+        ${(!notConfigured && r.active!==false && !r.mustCount) ? `<div class="small-note" style="color:var(--warn);margin-top:2px">${ic('alert',12)} Không bắt đếm giao ca — "Hiện tại ở ${r.destLocationName}" ở trên chỉ là số cộng/trừ chạy dài, không có gì đối chiếu và có thể đã lệch. Bấm ⚙ để bật đếm.</div>` : ''}
       </div>
       <div class="li-r">
         <button class="iconbtn" onclick="refillConfigEdit('${r.id}')" title="Cấu hình timing/đếm/chặn">${ic('settings')}</button>
@@ -21045,7 +21076,7 @@ async function submitRefillRule(){
     });
     toast('✅ Đã tạo Refill Rule');
     refillDraft = { itemId: null, sourceLocationId: null, destLocationId: null, targetQty: 0, minQty: 0, maxQty: 0, unitFactor: 1,
-      refillTiming: 'open', mustCount: false, countTiming: 'both', blockingClose: false,
+      refillTiming: 'open', mustCount: true, countTiming: 'both', blockingClose: false,
   varianceCheck: false, varianceTolerance: 0 };
     INVENTORY_ITEMS = await loadInventoryItems();
     renderKhoRefill();

@@ -13481,6 +13481,45 @@ async function applyStockTransactionPOS({ itemId, type, qty, note, staff, staffE
 }
 
 // ============================================================
+// [MỚI] ĐỒNG BỘ locationStock TỪ SỐ ĐẾM GIAO CA THẬT (handover_counts_gieogieo)
+//
+// GỐC RỄ ĐÃ VÁ: locationStock (tồn theo vị trí) chỉ được cộng/trừ qua TRANSFER/
+// CONSUMPTION/WASTE — KHÔNG có đường nào đưa nó về đúng số THẬT dù nhân viên đã
+// đếm mù đầu ca/cuối ca (mustCount) rất cẩn thận. Số đếm thật chỉ nằm trong
+// handover_counts_gieogieo, không hề chảy ngược lại locationStock. Hậu quả: một khi
+// locationStock đã trôi lệch (dù đã đếm bù bằng tay ở màn giao ca), MỌI phép tự kiểm
+// dựa trên nó — checklist "refill_below_min" (đầu ca lẫn cuối ca) và chặn đóng ca
+// thiếu refill (computeBlockingRefillItemsPOS) — vẫn đọc trúng con số cũ đã lệch,
+// im lặng báo "đủ hàng" dù có đếm thật hay không. Đây đúng là lý do "trước có báo,
+// giờ không thấy báo gì nữa" dù không ai đổi gì trong quy trình.
+//
+// CÁCH VÁ: ngay sau khi lưu xong đếm giao ca (mở ca ở _finalizeHandoverOpen, đóng ca
+// ở _submitHandoverCloseImpl), ghi THẲNG số đếm được vào locationStock tại đúng vị
+// trí — best-effort, không chặn luồng chính nếu lỗi (đếm giao ca đã lưu thành công
+// là việc quan trọng nhất, đồng bộ lại là bước dọn dẹp theo sau).
+// ============================================================
+async function setLocationStockFromCountPOS(itemId, locationId, qty, staffName) {
+  if (!itemId || !locationId || !Number.isFinite(Number(qty))) return;
+  const itemRef = fstore.collection('inventory_items_gieogieo').doc(itemId);
+  const txRef = fstore.collection('stock_transactions_gieogieo').doc();
+  await fstore.runTransaction(async (t) => {
+    const doc = await t.get(itemRef);
+    if (!doc.exists) return;
+    const data = doc.data();
+    const prev = Number((data.locationStock || {})[locationId]) || 0;
+    t.update(itemRef, { [`locationStock.${locationId}`]: Number(qty), updatedAt: new Date().toISOString() });
+    t.set(txRef, {
+      itemId, type: 'LOC_SET', qty: Number(qty) - prev,
+      prevLocStock: prev, resultingLocStock: Number(qty),
+      resultingStock: Number(data.currentStock) || 0,
+      locationId, note: 'Tự động đặt lại theo số đếm giao ca',
+      staff: staffName || '', createdAt: new Date().toISOString(),
+      businessDate: posDateKey(), status: 'posted', source: 'pos'
+    });
+  });
+}
+
+// ============================================================
 // [NEW] GIAI ĐOẠN 7 — Refill Engine (Transfer giữa các vị trí kho)
 // (POS_Management_Integration_Workflow.md, mục 2.5 + "Giai đoạn 7")
 //
@@ -15595,6 +15634,14 @@ async function _submitHandoverCloseImpl() {
     }, { merge: true });
     shiftState.closing = shiftState.closing || {};
     shiftState.closing.handoverCloseLines = lines;
+    // [FIX — "refill hết báo mà không ai biết"] Cùng lý do với đầu ca: số đếm cuối ca
+    // THẬT phải chảy ngược lại locationStock ngay, để checklist đóng ngày/gợi ý refill
+    // sáng mai không còn dựa vào số cũ đã trôi. Best-effort, không chặn luồng kết ca.
+    Promise.allSettled(lines.map(l => setLocationStockFromCountPOS(l.itemId, l.locationId, l.countedQty, staffEmp.fullName)))
+      .then(results => {
+        const failed = results.filter(r => r.status === 'rejected');
+        if (failed.length) console.warn('[Đếm giao ca] đồng bộ locationStock lỗi', failed.map(f => f.reason));
+      });
     toast('✅ Đã ghi nhận đếm giao ca');
     await _continueAfterHandoverClose();
   } catch (err) {
@@ -15823,6 +15870,18 @@ async function _finalizeHandoverOpen() {
       countedAt: now
     });
     if (alertJobs.length) await Promise.allSettled(alertJobs);
+    // [FIX — "refill hết báo mà không ai biết"] Số đếm THẬT vừa xác nhận phải chảy
+    // ngược lại locationStock ngay — đóng vòng lặp trôi dần khiến checklist refill và
+    // chặn đóng ca tự tin nhầm vào số cũ (xem setLocationStockFromCountPOS). Best-effort:
+    // đếm giao ca đã lưu thành công rồi, lỗi ở bước đồng bộ này không được làm hỏng cả
+    // luồng mở ca.
+    Promise.allSettled(_handoverOpenState.map(l =>
+      setLocationStockFromCountPOS(l.itemId, l.locationId, l.counted2 !== null ? l.counted2 : l.counted1,
+        _handoverOpenStaff ? _handoverOpenStaff.fullName : '')
+    )).then(results => {
+      const failed = results.filter(r => r.status === 'rejected');
+      if (failed.length) console.warn('[Đếm giao ca] đồng bộ locationStock lỗi', failed.map(f => f.reason));
+    });
     // 🆕 GĐ4 kế hoạch V3 — PHẦN 3.2b: ghi audit trỏ đúng bản ghi đếm giao ca vừa lưu.
     logAutoChecklistResolved('count_handover', `${shiftState.businessDate}_open`, _handoverOpenStaff);
     toast(alertJobs.length ? `✅ Đã ghi nhận — ${alertJobs.length} món chênh lệch đã báo Quản lý` : '✅ Đã ghi nhận đếm giao ca');
