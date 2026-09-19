@@ -3688,6 +3688,15 @@ async function unitEngineAllocateConsumption(itemId, qtyUsed, coll, ref) {
     if (ref && ref.type) event.refType = ref.type;
     if (ref && ref.id) event.refId = ref.id;
     if (ref && ref.note) event.note = ref.note;
+    // [FIX — "bổ sung bill thiếu sau đóng ngày gán sai lô"] businessDate của chính bill (không
+    // phải `at`, luôn là giờ THẬT của lượt bổ sung) — để nơi tra cứu sau này (vd Chi tiết lô bên
+    // Quản lý) mở lại ĐÚNG bill theo ngày phát sinh, không lệch ngày khi bill được bổ sung muộn.
+    if (ref && ref.businessDate) event.businessDate = ref.businessDate;
+    // Bill bổ sung SAU KHI đã đóng ngày ("có trừ tồn kho hiện tại") buộc phải trừ vào lô ĐANG MỞ
+    // LÚC BỔ SUNG — không có cách nào biết lô nào thật sự đang mở vào đúng ngày bán gốc (RT chỉ
+    // giữ trạng thái HIỆN TẠI, không phải ảnh chụp lịch sử). Đánh dấu rõ để mọi nơi hiển thị
+    // usageEvents này KHÔNG được trình bày như một dấu vết FIFO đáng tin cho đúng ngày bán gốc.
+    if (ref && ref.backfillAfterClose) event.backfillAfterClose = true;
     fstore.collection(coll).doc(a.unitId)
       .update({
         unitBase: firebase.firestore.FieldValue.increment(-a.qty),
@@ -18116,7 +18125,7 @@ function computeConsumptionForOrder(order, recipes, toppingRecipes, packagingPre
 // Trừ tồn bán thành phẩm + ghi ledger riêng (xem ghi chú ở phần "Nấu chế biến"
 // về lý do tách collection). Cho phép tồn âm — giống nguyên liệu thô: chặn ở đây
 // sẽ chặn cả việc thanh toán, mà bán hàng không bao giờ được chặn vì lý do kho.
-async function applyPrepConsumptionPOS(prepId, qty, note, referenceId, businessDate, txId) {
+async function applyPrepConsumptionPOS(prepId, qty, note, referenceId, businessDate, txId, isBackfillAfterClose) {
   const prepRef = fstore.collection('prep_items_gieogieo').doc(prepId);
   // [BUG "duplicate bill sau timeout có thể trừ kho BTP đúp" — FIX] txId cố định (khi caller
   // truyền, vd orderId+prepId từ applySalesConsumptionPOS) khiến việc gọi lại hàm này cho ĐÚNG
@@ -18145,7 +18154,7 @@ async function applyPrepConsumptionPOS(prepId, qty, note, referenceId, businessD
   // transaction (unitAllocations) — cùng cơ chế với nguyên liệu thô, cho phép hoàn NGƯỢC
   // đúng lô lúc xoá đơn (bản cũ chỉ hoàn currentStock aggregate, không hoàn đúng lô — xem
   // _reversePrepConsumptionPOS).
-  const unitAllocations = await unitEngineAllocateConsumption(prepId, Math.abs(qty), 'prep_batches_gieogieo', referenceId ? { type: 'order', id: referenceId, note } : undefined)
+  const unitAllocations = await unitEngineAllocateConsumption(prepId, Math.abs(qty), 'prep_batches_gieogieo', referenceId ? { type: 'order', id: referenceId, note, businessDate, backfillAfterClose: isBackfillAfterClose } : undefined)
     .catch(err => { console.warn('[UnitEngine] phân bổ lô BTP lỗi', prepId, err); return []; });
   try {
     await fstore.runTransaction(async (t) => {
@@ -18163,7 +18172,8 @@ async function applyPrepConsumptionPOS(prepId, qty, note, referenceId, businessD
         type: 'CONSUMPTION', qty: -Math.abs(qty), resultingStock: next,
         note: note || '', referenceId: referenceId || null,
         createdAt: new Date().toISOString(), businessDate: businessDate || posDateKey(), source: 'pos',
-        ...(unitAllocations.length ? { unitAllocations } : {})
+        ...(unitAllocations.length ? { unitAllocations } : {}),
+        ...(isBackfillAfterClose ? { backfillAfterClose: true } : {})
       });
     });
     // [MỚI] Trả allocations ra ngoài — applySalesConsumptionPOS() dùng để ghép stockTrace
@@ -18238,7 +18248,16 @@ async function applySalesConsumptionPOS(order, orderId, businessDate) {
       // định mức được, báo chỉ làm nhiễu giữa lúc đang bán.
       reportMissingRecipePOS(skipped);
     }
-    const note = 'Tự động trừ theo GOGS' + (order && order.billCode ? ' — ' + order.billCode : '');
+    // [FIX — "bổ sung bill thiếu sau đóng ngày gán sai lô"] Bill bổ sung ở chế độ "CÓ trừ tồn
+    // kho hiện tại" (backfillMode:'after_close') vẫn PHẢI trừ currentStock thật (hàng đó đã ra
+    // khỏi kho, chỉ là quên ghi sổ) — nhưng vì trừ vào lô ĐANG MỞ HÔM NAY chứ không phải lô thật
+    // sự đang mở vào đúng ngày bán, dấu vết "bill này lấy từ tem/lô nào" không đáng tin cho ngày
+    // bán gốc. Trước đây không có gì đánh dấu — usageEvents/ledger nhìn y hệt một lượt bán sống
+    // bình thường, dễ đọc nhầm là lô thật. Gắn cờ + ghi rõ trong note ngay từ đây, xuyên suốt mọi
+    // nơi đọc lại (Chi tiết lô/tem, Lệch định lượng theo lô bên Quản lý).
+    const isBackfillAfterClose = order && order.backfillMode === 'after_close';
+    const note = (isBackfillAfterClose ? '[Bổ sung sau đóng ngày — lô ghi dưới đây là lô ĐANG MỞ LÚC BỔ SUNG, không phải lô thật của ngày bán] ' : '')
+      + 'Tự động trừ theo GOGS' + (order && order.billCode ? ' — ' + order.billCode : '');
     const ingredientIds = Object.keys(agg);
     const prepIds = Object.keys(prepAgg);
     if (!ingredientIds.length && !prepIds.length) return;
@@ -18283,7 +18302,7 @@ async function applySalesConsumptionPOS(order, orderId, businessDate) {
         try { txDoc = await fstore.collection('stock_transactions_gieogieo').doc(txId).get(); }
         catch (checkErr) { throw new Error('Không xác định được trạng thái ledger — không chạy FIFO: ' + (checkErr.message || checkErr)); }
         if (txDoc.exists) return { alreadyApplied: true };
-        const allocations = await unitEngineAllocateConsumption(ingId, qty, undefined, { type: 'order', id: orderId, note: note })
+        const allocations = await unitEngineAllocateConsumption(ingId, qty, undefined, { type: 'order', id: orderId, note: note, businessDate, backfillAfterClose: isBackfillAfterClose })
           .catch(err => { console.warn('[FIFO] phân bổ lỗi', ingId, err); return []; });
         ingredientAllocations[ingId] = { qty, allocations };
         try {
@@ -18292,7 +18311,10 @@ async function applySalesConsumptionPOS(order, orderId, businessDate) {
             note, staff: '', referenceId: orderId,
             deriveFromUnits: allocations.length > 0,
             businessDate, txId,
-            ...(allocations.length ? { meta: { fifoAllocations: allocations } } : {})
+            ...((allocations.length || isBackfillAfterClose) ? { meta: {
+              ...(allocations.length ? { fifoAllocations: allocations } : {}),
+              ...(isBackfillAfterClose ? { backfillAfterClose: true } : {})
+            } } : {})
           });
         } catch (err) {
           if (allocations.length) {
@@ -18314,7 +18336,7 @@ async function applySalesConsumptionPOS(order, orderId, businessDate) {
       // [FIX duplicate bill] txId theo (orderId+prepId) — cùng lý do với nhánh nguyên liệu ở
       // trên, để applyPrepConsumptionPOS() an toàn nếu applySalesConsumptionPOS() bị gọi lại
       // trên CÙNG orderId (bill trùng key sau timeout — xem confirmPay()/finalizeSplitPay()).
-      ...prepIds.map(pid => applyPrepConsumptionPOS(pid, prepAgg[pid], note, orderId, businessDate, orderId + '_prep_' + pid))
+      ...prepIds.map(pid => applyPrepConsumptionPOS(pid, prepAgg[pid], note, orderId, businessDate, orderId + '_prep_' + pid, isBackfillAfterClose))
     ]);
     const allIds = [...ingredientIds, ...prepIds];
     // [BUG "GOGS lỗi không có cơ chế theo dõi durable" — FIX] TRƯỚC ĐÂY chỉ console.warn rồi

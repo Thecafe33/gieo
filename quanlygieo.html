@@ -2815,12 +2815,23 @@ function computeTargetQtyForOrder(order, targetType, targetId){
   return ((order && order.itemsArray)||[]).reduce((s,it)=> s + computeTargetQtyForOrderLine(it, targetType, targetId), 0);
 }
 // Đọc lại 1 bill từ RTDB dựa vào usageEvent đã ghi trên tem/lô — path RTDB cần
-// tháng/ngày, không có sẵn trên event, nên suy từ chính mốc `at` của event.
+// tháng/ngày. Ưu tiên `businessDate` (ghi từ Giai đoạn "bổ sung bill thiếu"): mốc `at`
+// luôn là giờ THẬT lúc trừ kho, nên với bill bổ sung sau đóng ngày, `at` rơi vào ngày
+// bổ sung chứ KHÔNG PHẢI ngày bán gốc — suy path từ `at` trong trường hợp đó sẽ tìm
+// nhầm node và luôn ra "không đọc được". `businessDate` (khi có) luôn đúng ngày bill
+// thật sự nằm ở RTDB, dùng được cho cả bill sống bình thường lẫn bill bổ sung.
 async function _fetchOrderForUsageEvent(e){
   if(!e || e.refType!=='order' || !e.refId) return null;
-  const d = e.at ? new Date(e.at) : null;
-  if(!d || isNaN(d)) return null;
-  const path = `orders_gieogieo/${MONTH_KEYS[d.getMonth()]}/${pad(d.getDate())}/${e.refId}`;
+  let month, day;
+  if(e.businessDate && /^\d{4}-\d{2}-\d{2}$/.test(e.businessDate)){
+    const [, m, d2] = e.businessDate.split('-');
+    month = MONTH_KEYS[Number(m)-1]; day = d2;
+  }else{
+    const d = e.at ? new Date(e.at) : null;
+    if(!d || isNaN(d)) return null;
+    month = MONTH_KEYS[d.getMonth()]; day = pad(d.getDate());
+  }
+  const path = `orders_gieogieo/${month}/${day}/${e.refId}`;
   try{
     const snap = await db.ref(path).once('value');
     return snap.exists() ? snap.val() : null;
@@ -2840,7 +2851,14 @@ async function _fetchOrderForUsageEvent(e){
 // chỉ xảy ra ở đúng 1 bill ranh giới cuối/đầu lô, không đáng kể so với cỡ lô.
 // ============================================================
 async function computeLechDinhLuongLo(batch){
-  const events = (batch.usageEvents||[]).filter(e=>e.refType==='order' && e.refId);
+  const allEvents = (batch.usageEvents||[]).filter(e=>e.refType==='order' && e.refId);
+  // [FIX — "bổ sung bill thiếu sau đóng ngày gán sai lô"] Bill bổ sung ở chế độ "có trừ tồn kho
+  // hiện tại" luôn bị trừ vào lô ĐANG MỞ LÚC BỔ SUNG (xem cờ backfillAfterClose ghi ở posgieo.html
+  // unitEngineAllocateConsumption), KHÔNG PHẢI lô thật của ngày bán — so "lý thuyết" của bill đó
+  // với "thực tế" đã trừ trên CHÍNH LÔ NÀY là vô nghĩa (lô này có khi còn chưa tồn tại vào ngày
+  // bill đó phát sinh). Tách hẳn ra khỏi phép so sánh, báo riêng để không làm sai lệch số.
+  const events = allEvents.filter(e=>!e.backfillAfterClose);
+  const backfillEvents = allEvents.filter(e=>e.backfillAfterClose);
   const thucTe = events.reduce((s,e)=>s+(Number(e.qty)||0), 0);
   let lyThuyet = 0;
   const chiTiet = [];
@@ -2853,7 +2871,8 @@ async function computeLechDinhLuongLo(batch){
     lyThuyet += lt;
     chiTiet.push({ refId:e.refId, billCode: order.billCode||'', at:e.at, thucTe:Number(e.qty)||0, lyThuyet: lt });
   }
-  return { thucTe, lyThuyet, chenhLech: thucTe - lyThuyet, chiTiet };
+  const backfillQty = backfillEvents.reduce((s,e)=>s+(Number(e.qty)||0), 0);
+  return { thucTe, lyThuyet, chenhLech: thucTe - lyThuyet, chiTiet, backfillCount: backfillEvents.length, backfillQty };
 }
 
 // Giờ của một bill, lấy từ o.time do POS ghi dạng "HH:MM". Trả null nếu bill không
@@ -4762,9 +4781,10 @@ function _batchDetailRender(box, b, wasteInfo){
   const usageByRef = {};
   (b.usageEvents||[]).forEach(e=>{
     const key = (e.refType||'khác') + '|' + (e.refId||'—');
-    const g = usageByRef[key] || (usageByRef[key] = { refType: e.refType, refId: e.refId, qty: 0, at: e.at });
+    const g = usageByRef[key] || (usageByRef[key] = { refType: e.refType, refId: e.refId, qty: 0, at: e.at, backfillAfterClose: false });
     g.qty += Number(e.qty)||0;
     if(String(e.at||'') > String(g.at||'')) g.at = e.at;
+    if(e.backfillAfterClose) g.backfillAfterClose = true;
   });
   const usageRows = Object.values(usageByRef).sort((a,b2)=>String(b2.at||'').localeCompare(String(a.at||'')));
 
@@ -4809,7 +4829,7 @@ function _batchDetailRender(box, b, wasteInfo){
     <div class="sec-title" style="margin-top:14px">Đã dùng cho bill / mẻ nào (FIFO)</div>
     ${usageRows.length ? usageRows.map(u=>`
       <div class="litem">
-        <div class="li-l"><div>${escapeHtmlAttr(refLabelOf(u.refType))} · ${escapeHtmlAttr(u.refId||'—')}</div>
+        <div class="li-l"><div>${escapeHtmlAttr(refLabelOf(u.refType))} · ${escapeHtmlAttr(u.refId||'—')}${u.backfillAfterClose ? ' <span class="tier tier-amber" title="Bill bổ sung sau khi đã đóng ngày — lô ghi ở đây là lô đang mở lúc bổ sung, không phải lô thật của ngày bán">⚠️ Bổ sung sau đóng ngày</span>' : ''}</div>
           <div class="muted-sm">${dt(u.at)}</div></div>
         <div class="li-r">${fmtNum(u.qty,2)} ${escapeHtmlAttr(b.unit||'')}</div>
       </div>`).join('') : '<div class="muted">Chưa dùng cho bill/mẻ nào (hoặc tạo trước khi có tính năng ghi usageEvents).</div>'}
@@ -4850,7 +4870,8 @@ async function _fillLechDinhLuongLo(b){
         ? 'Dương: lô hao NHANH hơn công thức dự tính — rót dư định lượng, cân sai lúc nấu, hoặc lô hết sớm mà chưa ai ghi hao hụt.'
         : (kq.chenhLech<-0.005 ? 'Âm: lô còn dư so với lý thuyết — thường do phần "Huỷ lô" đã tách hao hụt riêng ở trên, hoặc công thức đang khai nhiều hơn thực tế rót.' : 'Khớp với công thức — không có gì bất thường.')}
         ${!dangChot ? ' Lô CHƯA đóng (còn đang dùng) — số này còn thay đổi tới khi lô kết thúc.' : ''}
-        ${khongDoc ? ` ${khongDoc} bill không đọc lại được (có thể đã bị xoá) — số Lý thuyết trên có thể thấp hơn thực.` : ''}</div>`;
+        ${khongDoc ? ` ${khongDoc} bill không đọc lại được (có thể đã bị xoá) — số Lý thuyết trên có thể thấp hơn thực.` : ''}</div>
+      ${kq.backfillCount ? `<div class="ls-warn" style="margin-top:8px">⚠️ ${kq.backfillCount} bill (tổng ${fmtNum(kq.backfillQty,2)} ${donVi}) là <b>bill bổ sung sau khi đã đóng ngày</b> — bill đó bị trừ vào lô đang mở LÚC BỔ SUNG, không phải lô thật của ngày bán, nên đã <b>loại khỏi</b> phép so lý thuyết/thực tế ở trên để không làm sai số liệu.</div>` : ''}`;
   }catch(err){
     console.error('[Lệch định lượng] tính lỗi', err);
     box.innerHTML = '<div class="muted">Không tính được: '+(err.code||err.message||err)+'</div>';
