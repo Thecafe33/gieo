@@ -5087,7 +5087,8 @@ async function _reverseAtomicContainerFinish(containerId, batchId, staffEmp, not
   try {
     const doc = await ref.get();
     if (!doc.exists) return false;
-    if (doc.data().status !== 'finished') return false;
+    const c = doc.data();
+    if (c.status !== 'finished') return false;
     await ref.update({
       status: 'sealed',
       revertedFinish: {
@@ -5095,6 +5096,11 @@ async function _reverseAtomicContainerFinish(containerId, batchId, staffEmp, not
         by: (staffEmp && staffEmp.fullName) || '', reason: note || ''
       }
     });
+    // [FIX cùng đợt "KIT bột sữa/Sữa gạo âm ảo"] Đối xứng với writeAtomicContainerFinish() ở
+    // chiều thuận — tem vừa quay lại 'sealed' phải suy lại currentStock NGAY, không chờ một
+    // nghiệp vụ khác của item này kích hoạt recompute (_reverseIngredientConsumptionPOS gọi
+    // TRƯỚC hàm này trong luồng Huỷ mẻ nên không tự làm thay được — xem chú thích ở đó).
+    await _ueRecomputeCurrentStock(c.itemId, STOCK_CONTAINERS_COLL).catch(() => {});
     return true;
   } catch (err) {
     console.warn('[Huỷ mẻ] hoàn tem đã quét lỗi', containerId, err);
@@ -10742,17 +10748,34 @@ async function _startPrepBatchImpl(preResolvedStaff, atomicScanDone, atomicScann
     const perInputAllocations = {};
     const results = await Promise.allSettled(inputs.map(async r => {
       const qty = Math.abs((Number(r.qty) || 0) * ratio);
-      const allocations = await unitEngineAllocateConsumption(r.itemId, qty, undefined, { type: 'prep_batch', id: batchRef.id })
-        .catch(err => { console.warn('[FIFO] phân bổ lỗi', r.itemId, err); return []; });
-      perInputAllocations[r.itemId] = { allocations, qty };
+      // [FIX "KIT bột sữa/Sữa gạo âm dù kho thật còn hàng" — nguyên liệu "cái rời" (isAtomicUnitItem)
+      // đã bị BẮT BUỘC quét mã ở cổng startPrepBatchGate TRƯỚC khi vào tới đây — writeAtomicContainerFinish()
+      // đã chốt đúng tem đó 'finished' và recompute currentStock đúng NGAY LÚC QUÉT rồi (khớp thực tế).
+      // Trước đây bước này vẫn cứ gọi unitEngineAllocateConsumption() cho MỌI input như thường — nhưng
+      // hàm đó chỉ tìm tem "đang mở" trong RTDB, mà nguyên liệu quét-chốt-nguyên-cái không bao giờ đi qua
+      // RTDB (không có khái niệm "mở dần") nên luôn trả về [] → deriveFromUnits=false → applyStockTransactionPOS
+      // tưởng nhầm khoản này "không có tem nào đại diện" rồi CỘNG DỒN THÊM vào untrackedPendingDelta, dù
+      // tem thật đã bị trừ đúng 1 lần rồi qua đường quét. Mỗi lần nấu là một khoản nợ ảo -1 cộng dồn vĩnh
+      // viễn (không tự hồi phục), kéo currentStock ngày càng âm sâu so với số tem 'sealed' thật sự còn lại
+      // — đúng nguyên nhân "-17 cái" dù quầy vẫn còn 8 gói. Bỏ qua unitEngineAllocateConsumption (không có
+      // gì để phân bổ) và báo deriveFromUnits=true thẳng cho các input này để formula tự suy lại đúng theo
+      // tem sealed, không cộng thêm nợ ảo — đồng thời tránh luôn cảnh báo giả "không có tem nào đang mở".
+      const item = KHO_ITEMS_CACHE.find(x => x.id === r.itemId);
+      const alreadyAtomicScanned = !!atomicScanDone && isAtomicUnitItem(item);
+      const allocations = alreadyAtomicScanned
+        ? []
+        : await unitEngineAllocateConsumption(r.itemId, qty, undefined, { type: 'prep_batch', id: batchRef.id })
+          .catch(err => { console.warn('[FIFO] phân bổ lỗi', r.itemId, err); return []; });
+      perInputAllocations[r.itemId] = { allocations, qty, alreadyAtomicScanned };
       return applyStockTransactionPOS({
         itemId: r.itemId, type: 'CONSUMPTION',
         // KHÔNG làm tròn — cân tiểu ly cân được số lẻ, làm tròn sẽ lệch công thức
         qty: -qty,
         note: `Nấu ${p.code || ''} ${p.name || ''} (${Number(ratio).toLocaleString('vi-VN')} mẻ)`,
         staff: staffEmp.fullName, staffEmployeeId: staffEmp.id, referenceId: batchRef.id,
-        deriveFromUnits: allocations.length > 0,
-        ...(allocations.length ? { meta: { fifoAllocations: allocations } } : {})
+        deriveFromUnits: alreadyAtomicScanned || allocations.length > 0,
+        ...(allocations.length ? { meta: { fifoAllocations: allocations } } : {}),
+        ...(alreadyAtomicScanned ? { meta: { atomicScanned: true } } : {})
       });
     }));
     const failed = results.filter(r => r.status === 'rejected');
@@ -10831,7 +10854,7 @@ async function _startPrepBatchImpl(preResolvedStaff, atomicScanDone, atomicScann
         inputTrace: Object.fromEntries(inputs.map(r => {
           const rec = perInputAllocations[r.itemId] || { qty: Math.abs((Number(r.qty) || 0) * ratio), allocations: [] };
           const itName = (KHO_ITEMS_CACHE.find(x => x.id === r.itemId) || {}).name || '';
-          return [r.itemId, { itemName: itName, qty: rec.qty, allocations: rec.allocations, untracked: !rec.allocations.length }];
+          return [r.itemId, { itemName: itName, qty: rec.qty, allocations: rec.allocations, untracked: !rec.allocations.length && !rec.alreadyAtomicScanned }];
         }))
       });
     } catch (setErr) {
@@ -11077,7 +11100,12 @@ async function _loadBatchConsumptionTxPOS(batchId) {
       itemId: tx.itemId,
       qty: Math.abs(q),
       locDeducted: (typeof tx.locDeducted === 'number') ? tx.locDeducted : undefined,
-      fifoAllocations: Array.isArray(tx.fifoAllocations) ? tx.fifoAllocations : null
+      fifoAllocations: Array.isArray(tx.fifoAllocations) ? tx.fifoAllocations : null,
+      // [FIX cùng đợt với "KIT bột sữa/Sữa gạo âm ảo"] Đánh dấu khoản trừ này đã có tem
+      // quét-chốt đại diện (xem _startPrepBatchImpl) — khi hoàn (Huỷ mẻ), _reverseAtomicContainerFinish
+      // ở BƯỚC 3.5 tự lo phần tem quay lại 'sealed' + recompute rồi, _reverseIngredientConsumptionPOS
+      // KHÔNG được cộng thêm vào untrackedPendingDelta nữa kẻo hoàn đúp theo chiều ngược lại.
+      atomicScanned: tx.atomicScanned === true
     });
   });
   return out;
@@ -11089,7 +11117,7 @@ async function _reversePrepBatchInputsPOS(batchId, note) {
   const txs = await _loadBatchConsumptionTxPOS(batchId);
   if (!txs.length) return { ok: 0, failed: 0 };
   const results = await Promise.allSettled(txs.map(t =>
-    _reverseIngredientConsumptionPOS(t.itemId, t.qty, note, batchId, t.locDeducted, t.fifoAllocations)
+    _reverseIngredientConsumptionPOS(t.itemId, t.qty, note, batchId, t.locDeducted, t.fifoAllocations, t.atomicScanned)
   ));
   const failed = results.filter(r => r.status === 'rejected');
   if (failed.length) console.warn('[Huỷ mẻ] hoàn nguyên liệu lỗi:', failed.map(f => f.reason));
@@ -11204,7 +11232,7 @@ async function _submitPrepCancelImpl() {
   let ok = 0, failed = 0;
   if (txs.length) {
     const results = await Promise.allSettled(txs.map(t =>
-      _reverseIngredientConsumptionPOS(t.itemId, t.qty, note, b.id, t.locDeducted, t.fifoAllocations)
+      _reverseIngredientConsumptionPOS(t.itemId, t.qty, note, b.id, t.locDeducted, t.fifoAllocations, t.atomicScanned)
     ));
     failed = results.filter(r => r.status === 'rejected').length;
     ok = results.length - failed;
@@ -18730,7 +18758,7 @@ async function _loadPrepUnitAllocationsForOrderPOS(orderId) {
   return map;
 }
 
-async function _reverseIngredientConsumptionPOS(itemId, consumedQty, note, referenceId, locBack, fifoAllocations) {
+async function _reverseIngredientConsumptionPOS(itemId, consumedQty, note, referenceId, locBack, fifoAllocations, atomicScanned) {
   const back = Math.abs(Number(consumedQty) || 0);
   if (!back) return;
   // [BUG#3 FIX] Hoàn NGƯỢC đúng phần đã phân bổ FIFO cho (các) tem lúc trừ — đọc thẳng từ
@@ -18754,6 +18782,14 @@ async function _reverseIngredientConsumptionPOS(itemId, consumedQty, note, refer
       unitsTouched = r.ambiguous || r.appliedQty >= r.totalQty - 1e-6;
     } catch (err) { console.warn('[FIFO] hoàn phân bổ lỗi:', err); }
   }
+  // [FIX cùng đợt "KIT bột sữa/Sữa gạo âm ảo"] atomicScanned=true → khoản trừ gốc KHÔNG hề đi
+  // qua RTDB (fifoAllocations rỗng là bình thường, không phải "không có tem nào"). Tem thật SẼ
+  // được _reverseAtomicContainerFinish() trả về 'sealed' + tự recompute riêng — nhưng bước đó
+  // (BƯỚC 3.5) chạy SAU hàm này (BƯỚC 3), nên KHÔNG dùng unitsTouched=true ở đây (sẽ recompute
+  // sớm, lúc tem vẫn còn 'finished', hụt mất đúng phần chưa kịp trả). Chỉ cần chặn cộng đúp
+  // untrackedPendingDelta — nếu cộng, mỗi lần Huỷ mẻ sẽ bơm dư +1 nợ ảo THEO CHIỀU NGƯỢC, kéo
+  // currentStock cao hơn thực tế dần theo thời gian (cùng lớp lỗi vừa vá, chỉ khác dấu).
+  const skipUntrackedCredit = unitsTouched || atomicScanned;
   // Số trả lại QUẦY: ưu tiên số đã trừ thật; không có thì dùng số theo định mức.
   const backToLoc = (typeof locBack === 'number') ? Math.max(0, locBack) : back;
   const itemRef = fstore.collection('inventory_items_gieogieo').doc(itemId);
@@ -18787,7 +18823,7 @@ async function _reverseIngredientConsumptionPOS(itemId, consumedQty, note, refer
     }
     // [BUG "untracked reversal bị recompute xoá" — FIX] Hoàn thẳng currentStock vì không còn
     // tem nào để hoàn vào — cộng dồn vào untrackedPendingDelta để recompute biết khoản này.
-    if (!unitsTouched) updates.untrackedPendingDelta = firebase.firestore.FieldValue.increment(back);
+    if (!skipUntrackedCredit) updates.untrackedPendingDelta = firebase.firestore.FieldValue.increment(back);
     t.update(itemRef, updates);
     t.set(txRef, {
       itemId, type: 'CONSUMPTION', qty: back, resultingStock: next,
@@ -18795,8 +18831,9 @@ async function _reverseIngredientConsumptionPOS(itemId, consumedQty, note, refer
       createdAt: new Date().toISOString(), businessDate: posDateKey(), status: 'posted', source: 'pos',
       // [Chốt semantics] Đánh dấu rõ hoàn này có thật sự vào đúng tem/lô hay chỉ cộng thẳng
       // currentStock (không có tem nào nhận) — 'full' vs 'untracked', không để trông giống
-      // một lượt hoàn bình thường đã xong xuôi hoàn toàn khi thực ra là ngoại lệ.
-      reversalCoverage: unitsTouched ? 'full' : 'untracked',
+      // một lượt hoàn bình thường đã xong xuôi hoàn toàn khi thực ra là ngoại lệ. atomicScanned
+      // xem như 'full' (tem thật sẽ được BƯỚC 3.5 hoàn riêng), dù chưa recompute ngay tại đây.
+      reversalCoverage: skipUntrackedCredit ? 'full' : 'untracked',
       ...(referenceId ? { referenceId } : {})
     });
   });
