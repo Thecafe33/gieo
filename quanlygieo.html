@@ -1404,6 +1404,23 @@ html.phone-ui .nav-search .ns-kbd{display:none;}
       </div>
     </div>
 
+    <!-- SỨC KHOẺ NL_BTP -->
+    <div class="screen" id="screen-nlbtp">
+      <div class="wrap">
+        <div id="nlbtpSummary"></div>
+        <div class="sec-title" style="margin-top:14px">Lệch định lượng theo lô (BTP)</div>
+        <div class="card">
+          <div class="grid2">
+            <div class="field"><label>Từ ngày</label><input type="date" id="nlFrom"></div>
+            <div class="field" style="margin-bottom:0"><label>Đến ngày</label><input type="date" id="nlTo"></div>
+          </div>
+          <div class="small-note" style="margin-top:8px">So "Lý thuyết cần" (tính lại từ công thức, kể cả topping đính kèm) với "Thực tế đã trừ" (Unit Engine đã ghi cho đúng từng lô) — chỉ tính được cho lô ĐÃ ĐÓNG (bán hết/hết hạn/huỷ) trong khoảng ngày chọn.</div>
+          <button class="btn" style="margin-top:10px" onclick="nlChayPhanTich()">Chạy phân tích</button>
+        </div>
+        <div id="nlbtpBody"></div>
+      </div>
+    </div>
+
     <!-- HEALTH -->
     <div class="screen" id="screen-health">
       <div class="wrap">
@@ -2719,6 +2736,101 @@ function computeUnitCogsFromRecipe(itemId, size, dateKey){
   }
   return cost;
 }
+
+// ============================================================
+// [MỚI] LƯỢNG (không phải tiền) của ĐÚNG 1 nguyên liệu/BTP mà một dòng bán cần theo
+// công thức — song song với computeUnitCogsFromRecipe() (ra tiền) nhưng ra SỐ LƯỢNG,
+// để so "Lý thuyết cần" với "Thực tế đã trừ" của TỪNG LÔ BTP (xem computeLechDinhLuongLo).
+// Nổ topping đính kèm công thức (refType 'topping') VÀ topping bán thêm/tặng thêm ở giỏ
+// hàng ra tới tận nguyên liệu/BTP gốc, đúng logic applySalesConsumptionPOS() bên POS.
+// KHÔNG tính bao bì (không dùng để đo lệch định lượng pha chế).
+// ============================================================
+function _qtyOfTargetInToppingBatch(toppingId, servingsCount, targetType, targetId){
+  const rec = TOPPING_RECIPES[toppingId];
+  const y = rec && Number(rec.batchYield);
+  if(!rec || !(y>0) || !rec.batchInputs || !rec.batchInputs.length) return 0;
+  const servingFactor = rec.yieldMode==='weight' ? (Number(rec.qtyPerServing)||0)/y : 1/y;
+  let out = 0;
+  rec.batchInputs.forEach(r=>{
+    const amount = (Number(r.qty)||0) * servingFactor * servingsCount;
+    if(amount<=0) return;
+    if(targetType==='prep' && r.refType==='prep' && r.prepId===targetId) out += amount;
+    else if(targetType==='item' && r.refType!=='prep' && r.itemId===targetId) out += amount;
+  });
+  return out;
+}
+function computeTargetQtyForOrderLine(it, targetType, targetId){
+  const qty = Number(it && it.qty)||0;
+  if(!qty) return 0;
+  let out = 0;
+  // Topping bán thêm/tặng thêm ở giỏ hàng — độc lập với định mức món.
+  (it.toppings||[]).forEach(t=>{
+    const tId = t && (t.id || t._freeTpId);
+    if(!tId) return;
+    const servings = Math.max(1, Number(t.qty)||1) * qty;
+    out += _qtyOfTargetInToppingBatch(tId, servings, targetType, targetId);
+  });
+  const recipe = RECIPES['togo:'+it.itemId];
+  const rows = recipe && recipe.sizes && recipe.sizes[it.size];
+  if(!rows) return out;
+  rows.forEach(row=>{
+    const amount = (Number(row.qty)||0) * qty;
+    if(amount<=0) return;
+    if(row.refType==='prep'){
+      if(targetType==='prep' && row.prepId===targetId) out += amount;
+    } else if(row.refType==='topping'){
+      out += _qtyOfTargetInToppingBatch(row.toppingId, amount, targetType, targetId);
+    } else if(targetType==='item' && row.itemId===targetId){
+      out += amount;
+    }
+  });
+  return out;
+}
+function computeTargetQtyForOrder(order, targetType, targetId){
+  return ((order && order.itemsArray)||[]).reduce((s,it)=> s + computeTargetQtyForOrderLine(it, targetType, targetId), 0);
+}
+// Đọc lại 1 bill từ RTDB dựa vào usageEvent đã ghi trên tem/lô — path RTDB cần
+// tháng/ngày, không có sẵn trên event, nên suy từ chính mốc `at` của event.
+async function _fetchOrderForUsageEvent(e){
+  if(!e || e.refType!=='order' || !e.refId) return null;
+  const d = e.at ? new Date(e.at) : null;
+  if(!d || isNaN(d)) return null;
+  const path = `orders_gieogieo/${MONTH_KEYS[d.getMonth()]}/${pad(d.getDate())}/${e.refId}`;
+  try{
+    const snap = await db.ref(path).once('value');
+    return snap.exists() ? snap.val() : null;
+  }catch(err){ console.warn('[Lệch định lượng] không đọc được bill', e.refId, err); return null; }
+}
+
+// ============================================================
+// [MỚI] LỆCH ĐỊNH LƯỢNG THEO LÔ — so "Lý thuyết cần" (tính LẠI từ công thức × đúng
+// những ly đã bán khớp usageEvents của lô này) với "Thực tế đã trừ" (tổng usageEvents.qty
+// ghi ngay trên lô — con số CHÍNH XÁC do Unit Engine đã phân bổ CHO ĐÚNG LÔ NÀY lúc bán,
+// không phải suy luận). Chênh lệch dương = lô hao nhanh hơn công thức dự tính (rót dư,
+// cân sai lúc nấu, hoặc lô hết sớm mà không ai ghi hao hụt); âm = lô còn dư so với lý
+// thuyết (thường vì lô đóng bằng "Huỷ lô" — phần huỷ đã tách ra hao hụt riêng, xem
+// _batchDetailRender).
+// HẠN CHẾ: nếu đúng 1 bill phải lấy từ 2 lô cùng lúc (lô cũ vừa cạn, phải bù thêm lô
+// mới) thì "Lý thuyết" của bill đó bị tính đủ 100% cho MỖI lô liên quan — sai lệch nhỏ,
+// chỉ xảy ra ở đúng 1 bill ranh giới cuối/đầu lô, không đáng kể so với cỡ lô.
+// ============================================================
+async function computeLechDinhLuongLo(batch){
+  const events = (batch.usageEvents||[]).filter(e=>e.refType==='order' && e.refId);
+  const thucTe = events.reduce((s,e)=>s+(Number(e.qty)||0), 0);
+  let lyThuyet = 0;
+  const chiTiet = [];
+  const cache = {};
+  for(const e of events){
+    let order = cache[e.refId];
+    if(order === undefined){ order = await _fetchOrderForUsageEvent(e); cache[e.refId] = order; }
+    if(!order){ chiTiet.push({ refId:e.refId, at:e.at, thucTe:Number(e.qty)||0, lyThuyet:null, khongDoc:true }); continue; }
+    const lt = computeTargetQtyForOrder(order, 'prep', batch.prepId);
+    lyThuyet += lt;
+    chiTiet.push({ refId:e.refId, billCode: order.billCode||'', at:e.at, thucTe:Number(e.qty)||0, lyThuyet: lt });
+  }
+  return { thucTe, lyThuyet, chenhLech: thucTe - lyThuyet, chiTiet };
+}
+
 // Giờ của một bill, lấy từ o.time do POS ghi dạng "HH:MM". Trả null nếu bill không
 // có giờ (dữ liệu cũ) — không đoán bừa, thà bỏ ra khỏi biểu đồ còn hơn dồn hết vào 0h.
 function orderHour(o){
@@ -4676,6 +4788,8 @@ function _batchDetailRender(box, b, wasteInfo){
           <div class="muted-sm">${dt(u.at)}</div></div>
         <div class="li-r">${fmtNum(u.qty,2)} ${escapeHtmlAttr(b.unit||'')}</div>
       </div>`).join('') : '<div class="muted">Chưa dùng cho bill/mẻ nào (hoặc tạo trước khi có tính năng ghi usageEvents).</div>'}
+    <div class="sec-title" style="margin-top:14px">Lệch định lượng — lý thuyết vs thực tế</div>
+    <div id="lechDinhLuongBox"><div class="muted">Đang tính từ ${usageRows.length} bill đã dùng lô này...</div></div>
     <div class="sec-title" style="margin-top:14px">Nguyên liệu đầu vào — lấy từ tem nào</div>
     ${inputRows || '<div class="muted">Lô này chưa có dữ liệu nối nguyên liệu → tem (tạo trước khi có tính năng này, hoặc công thức không dùng nguyên liệu có tem).</div>'}
     <div class="sec-title" style="margin-top:14px">Dòng thời gian đầy đủ</div>
@@ -4685,6 +4799,37 @@ function _batchDetailRender(box, b, wasteInfo){
         <span class="rv" style="white-space:nowrap;font-weight:400">${dt(e.at)}</span>
       </div>`).join('') : '<div class="muted">Chưa có sự kiện nào.</div>'}
   `;
+  _fillLechDinhLuongLo(b);
+}
+// Tách khỏi luồng dựng HTML chính (đồng bộ) vì phải đọc lại TỪNG bill đã dùng lô này
+// từ RTDB — không chặn phần còn lại của Chi tiết lô hiện ra ngay.
+async function _fillLechDinhLuongLo(b){
+  const box = document.getElementById('lechDinhLuongBox');
+  if(!box) return;
+  if(!(b.usageEvents||[]).some(e=>e.refType==='order')){
+    box.innerHTML = '<div class="empty-hint">Lô này chưa bị trừ cho bill nào — chưa có gì để đối chiếu.</div>';
+    return;
+  }
+  try{
+    await Promise.all([ loadRecipes().catch(()=>{}), loadToppingRecipes().catch(()=>{}) ]);
+    const kq = await computeLechDinhLuongLo(b);
+    const donVi = escapeHtmlAttr(b.unit||'');
+    const khongDoc = kq.chiTiet.filter(x=>x.khongDoc).length;
+    const tienLech = kq.chenhLech * prepCostOn(b.prepId, (b.businessDate||b.finishedAt||'').slice(0,10) || null);
+    const dangChot = ['used_up','discarded','expired'].includes(b.status);
+    box.innerHTML = `
+      <div class="row"><span class="rl">Lý thuyết cần (theo công thức, kể cả topping đính kèm)</span><span class="rv">${fmtNum(kq.lyThuyet,2)} ${donVi}</span></div>
+      <div class="row"><span class="rl">Thực tế đã trừ (đúng số Unit Engine đã lấy từ lô này)</span><span class="rv">${fmtNum(kq.thucTe,2)} ${donVi}</span></div>
+      <div class="row"><span class="rl"><b>Chênh lệch</b></span><span class="rv"><b style="color:${Math.abs(kq.chenhLech) < 0.005 ? 'var(--ok)' : (kq.chenhLech>0?'var(--bad)':'var(--warn)')}">${kq.chenhLech>0?'+':''}${fmtNum(kq.chenhLech,2)} ${donVi}${Number.isFinite(tienLech) && Math.abs(tienLech)>=1 ? ' ('+(tienLech>0?'+':'')+fmt(tienLech)+')' : ''}</b></span></div>
+      <div class="small-note" style="margin-top:2px">${kq.chenhLech>0.005
+        ? 'Dương: lô hao NHANH hơn công thức dự tính — rót dư định lượng, cân sai lúc nấu, hoặc lô hết sớm mà chưa ai ghi hao hụt.'
+        : (kq.chenhLech<-0.005 ? 'Âm: lô còn dư so với lý thuyết — thường do phần "Huỷ lô" đã tách hao hụt riêng ở trên, hoặc công thức đang khai nhiều hơn thực tế rót.' : 'Khớp với công thức — không có gì bất thường.')}
+        ${!dangChot ? ' Lô CHƯA đóng (còn đang dùng) — số này còn thay đổi tới khi lô kết thúc.' : ''}
+        ${khongDoc ? ` ${khongDoc} bill không đọc lại được (có thể đã bị xoá) — số Lý thuyết trên có thể thấp hơn thực.` : ''}</div>`;
+  }catch(err){
+    console.error('[Lệch định lượng] tính lỗi', err);
+    box.innerHTML = '<div class="muted">Không tính được: '+(err.code||err.message||err)+'</div>';
+  }
 }
 function _ctnDetailRender(box, c, recv){
   const dt = iso => {
@@ -9285,6 +9430,11 @@ const NAV_SECTIONS = [
     // trước đây nằm rải rác trong nhánh Kho/Vận hành của sidebar, phải nhớ tên
     // mục mới mò ra. Chủ quán chỉ cần nhớ 2 màn "Hôm nay" là đủ xem mỗi ngày.
     {key:'todayops', ic:'clipboard',   label:'Hôm nay · Vận hành',      go:"switchScreen('todayops')"},
+    // [MỚI] Màn thứ ba: SỨC KHOẺ NGUYÊN LIỆU & BÁN THÀNH PHẨM — nối hao hụt, chi phí,
+    // COGS và LỆCH ĐỊNH LƯỢNG THEO TỪNG LÔ (mới, xem computeLechDinhLuongLo) vào một
+    // chỗ. Khác 2 màn "Hôm nay": đây là màn ĐỌC LẠI theo kỳ (thường cuối tháng), không
+    // phải xem hằng ngày, nên tách riêng thay vì nhét vào Vận hành.
+    {key:'nlbtp', ic:'detective',    label:'Sức khoẻ NL_BTP',        go:"switchScreen('nlbtp')"},
   ]},
   { group:'Báo cáo', items:[
     {key:'health', ic:'pulse',    label:'Sức khỏe tài chính', go:"switchScreen('health')"},
@@ -10165,6 +10315,7 @@ function switchScreen(s){
   if(s==='inbox') renderAlertInbox();
   if(s==='today') renderToday();
   if(s==='todayops') renderTodayOps();
+  if(s==='nlbtp') renderNlBtp();
   if(s==='health') renderHealth();
   if(s==='report') renderReport();
   if(s==='mix') renderMix();
@@ -10929,6 +11080,110 @@ async function renderTodayOps(){
       boxes.bills.innerHTML = '<div class="muted">Không đọc được bill: '+(err.code||err.message||err)+'</div>';
     }
   })();
+}
+
+// ============================================================
+// [MỚI] MÀN "SỨC KHOẺ NL_BTP" — nối hao hụt, chi phí/COGS và LỆCH ĐỊNH LƯỢNG THEO
+// TỪNG LÔ BTP (mới — xem computeLechDinhLuongLo) vào một chỗ để đọc lại theo kỳ
+// (thường cuối tháng), khác 2 màn "Hôm nay" vốn để xem hằng ngày. Phần lệch định
+// lượng chạy THEO YÊU CẦU (nút bấm) vì phải đọc lại từng bill đã dùng mỗi lô — tự
+// động chạy mỗi lần vào màn sẽ tốn đọc RTDB không cần thiết.
+// ============================================================
+let nlFrom = null, nlTo = null;
+let nlKetQua = null;
+let _nlBusy = false;
+
+async function renderNlBtp(){
+  const homNay = dkey(new Date());
+  if(!nlFrom) nlFrom = dkey(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
+  if(!nlTo) nlTo = homNay;
+  document.getElementById('nlFrom').value = nlFrom;
+  document.getElementById('nlTo').value = nlTo;
+  const sum = document.getElementById('nlbtpSummary');
+  sum.innerHTML = '<div class="kgrid"><div class="kcard" style="grid-column:1 / -1"><div class="muted">Đang tính hao hụt & COGS...</div></div></div>';
+  try{
+    await ensureAuth();
+    const from = new Date(nlFrom+'T12:00:00'), to = new Date(nlTo+'T12:00:00');
+    const [waste, sales] = await Promise.all([
+      computeLedgerRealMetrics(from, to).catch(err=>{ console.warn('[Sức khoẻ NL_BTP] hao hụt lỗi', err); return null; }),
+      fetchSalesRange(from, to).catch(err=>{ console.warn('[Sức khoẻ NL_BTP] doanh số lỗi', err); return null; })
+    ]);
+    const revenue = sales ? sales.perDay.reduce((s,d)=>s+(Number(d.revenue)||0),0) : 0;
+    const cogsActual = sales ? sales.perDay.reduce((s,d)=>s+(Number(d.cogsActual)||0),0) : 0;
+    const cogsPct = revenue>0 ? cogsActual/revenue : null;
+    sum.innerHTML = `<div class="kgrid">
+      ${miniCardHTML('Hao hụt tổng kỳ', waste ? fmt(waste.wasteValue) : '—', waste ? `${waste.wasteCount} lượt · trong đó BTP ${fmt(waste.prepWasteValue)}` : 'Không đọc được')}
+      ${miniCardHTML('COGS thực tế', cogsPct!=null ? fmtPct(cogsPct) : '—', cogsPct!=null ? `${fmt(cogsActual)} / ${fmt(revenue)} doanh thu` : 'Không đọc được')}
+      ${miniCardHTML('Đổ ly thành phẩm', waste ? waste.drinkWasteCups+' ly' : '—', waste ? fmt(waste.drinkWasteValue) : '')}
+      ${miniCardHTML('Chênh kiểm đếm BTP', waste ? fmt(waste.prepAdjValue) : '—', waste ? `${waste.prepAdjCount} lượt — sai số ghi chép, không phải hao hụt` : '')}
+    </div>`;
+  }catch(err){
+    console.error('[Sức khoẻ NL_BTP] renderNlBtp lỗi', err);
+    sum.innerHTML = '<div class="muted">Không tính được: '+(err.code||err.message||err)+'</div>';
+  }
+  if(nlKetQua) nlVeBang();
+}
+
+async function nlChayPhanTich(){
+  if(_nlBusy){ toast('⏳ Đang chạy...'); return; }
+  nlFrom = document.getElementById('nlFrom').value;
+  nlTo   = document.getElementById('nlTo').value;
+  if(!nlFrom || !nlTo || nlFrom > nlTo){ toast('⚠️ Chọn khoảng ngày hợp lệ'); return; }
+  _nlBusy = true;
+  const body = document.getElementById('nlbtpBody');
+  body.innerHTML = '<div class="card"><div class="muted">Đang đọc danh sách lô BTP đã đóng...</div></div>';
+  try{
+    await ensureAuth();
+    await Promise.all([ loadRecipes().catch(()=>{}), loadToppingRecipes().catch(()=>{}),
+      loadPrepItems().then(l=>{PREP_ITEMS=l;}).catch(()=>{}) ]);
+    const snap = await fstore.collection('prep_batches_gieogieo')
+      .where('businessDate','>=',nlFrom).where('businessDate','<=',nlTo).get();
+    const closed = snap.docs.map(d=>({id:d.id,...d.data()}))
+      .filter(b=>['used_up','discarded','expired'].includes(b.status) && b.prepId);
+    if(!closed.length){ nlKetQua = []; body.innerHTML = '<div class="card"><div class="muted">Không có lô nào đã đóng trong khoảng ngày này.</div></div>'; return; }
+    const rows = [];
+    for(let i=0;i<closed.length;i++){
+      const b = closed[i];
+      body.innerHTML = `<div class="card"><div class="muted">Đang đối chiếu lô ${i+1}/${closed.length} (${escapeHtmlAttr(b.prepName||b.prepCode||'')})...</div></div>`;
+      try{
+        const kq = await computeLechDinhLuongLo(b);
+        const gia = prepCostOn(b.prepId, b.businessDate||null);
+        rows.push({ batch:b, ...kq, tienLech: kq.chenhLech * gia });
+      }catch(err){ console.warn('[Sức khoẻ NL_BTP] lô lỗi', b.id, err); }
+    }
+    rows.sort((a,b)=>Math.abs(b.tienLech)-Math.abs(a.tienLech));
+    nlKetQua = rows;
+    nlVeBang();
+  }catch(err){
+    console.error('nlChayPhanTich lỗi', err);
+    body.innerHTML = '<div class="card"><div class="muted">Không phân tích được: '+(err.code||err.message||err)+'</div></div>';
+  }finally{ _nlBusy = false; }
+}
+
+function nlVeBang(){
+  const body = document.getElementById('nlbtpBody');
+  if(!body) return;
+  const rows = nlKetQua || [];
+  if(!rows.length){ body.innerHTML = '<div class="card"><div class="muted">Chưa chạy phân tích, hoặc không có lô nào đã đóng trong khoảng ngày đã chọn.</div></div>'; return; }
+  const tongTienLech = rows.reduce((s,r)=>s+r.tienLech,0);
+  const tongLechTuyetDoi = rows.reduce((s,r)=>s+Math.abs(r.tienLech),0);
+  body.innerHTML = `
+    <div class="kgrid" style="margin:12px 0">
+      ${miniCardHTML('Số lô đã đối chiếu', rows.length, '')}
+      ${miniCardHTML('Tổng lệch (ròng)', (tongTienLech>0?'+':'')+fmt(tongTienLech), tongTienLech>0 ? 'Hao nhanh hơn công thức, tính ròng cả kỳ' : 'Còn dư so với công thức, tính ròng cả kỳ')}
+      ${miniCardHTML('Tổng lệch (tuyệt đối)', fmt(tongLechTuyetDoi), 'Cỡ vấn đề thật — cộng cả hai chiều, không triệt tiêu nhau')}
+    </div>
+    ${rows.map(r=>{
+      const b = r.batch;
+      const dangKe = Math.abs(r.tienLech) >= 20000; // [ngưỡng] dưới mức này không đáng bận tâm mỗi tháng
+      return `<div class="litem" onclick="ctnShowDetail('${b.id}','prep_batches_gieogieo')" style="cursor:pointer">
+        <div class="li-l">
+          <div>${escapeHtmlAttr(b.prepName||b.prepCode||'')} <span class="muted-sm">${escapeHtmlAttr(b.batchCode||'')}</span></div>
+          <div class="muted-sm">${escapeHtmlAttr(b.businessDate||'')} · Lý thuyết ${fmtNum(r.lyThuyet,1)} / Thực tế ${fmtNum(r.thucTe,1)} ${escapeHtmlAttr(b.unit||'')}</div>
+        </div>
+        <div class="li-r"><span class="tier ${dangKe ? (r.tienLech>0?'tier-red':'tier-amber') : 'tier-green'}">${r.tienLech>0?'+':''}${fmt(r.tienLech)}</span></div>
+      </div>`;
+    }).join('')}`;
 }
 
 // ============================================================
