@@ -2854,6 +2854,15 @@ function prepRecipeHistoryFor(prepId){
   return list.slice().reverse();
 }
 
+// Giá vốn/đơn vị của MỘT bản công thức mẻ (batchInputs+yield) tại ngày dateKey — tách
+// riêng khỏi prepCostOn() để dùng lại được cho cả lô THẬT (đọc qua PREP_ITEMS/lịch sử)
+// lẫn một bản công thức CỤ THỂ đang so sánh (vd 2 đầu của một mốc lịch sử, xem
+// prepRecipeHistoryBlockHTML) mà không cần tồn tại trong PREP_ITEMS.
+function _costOfPrepInputs(inputs, yieldVal, dateKey){
+  if(!inputs || !inputs.length || !(Number(yieldVal)>0)) return null;
+  const tong = inputs.reduce((s,r)=> s + (Number(r.qty)||0) * itemCostOn(r.itemId, dateKey), 0);
+  return tong / Number(yieldVal);
+}
 function prepCostOn(prepId, dateKey){
   const p = PREP_ITEMS.find(x=>x.id===prepId);
   if(!p) return 0;
@@ -2864,12 +2873,8 @@ function prepCostOn(prepId, dateKey){
     // giá vốn của mọi lô đã nấu trước đó. Giờ tra đúng công thức đã có hiệu lực vào
     // NGÀY LÔ ĐÓ PHÁT SINH (prepRecipeOn).
     const rec = prepRecipeOn(prepId, dateKey);
-    const inputs = rec.batchInputs || [];
-    if(!inputs.length) return Number(p.costPerUnit)||0;   // chưa khai công thức: chỉ còn số đang lưu
-    const y = rec.batchYield;
-    if(!(y > 0)) return Number(p.costPerUnit)||0;
-    const tong = inputs.reduce((s,r)=> s + (Number(r.qty)||0) * itemCostOn(r.itemId, dateKey), 0);
-    return tong / y;
+    const c = _costOfPrepInputs(rec.batchInputs, rec.batchYield, dateKey);
+    return c != null ? c : Number(p.costPerUnit)||0;   // chưa khai công thức: chỉ còn số đang lưu
   });
 }
 
@@ -2891,15 +2896,12 @@ function toppingCostOn(toppingId, dateKey){
   });
 }
 
-// dateKey = ngày phát sinh của bill. Truyền vào thì mọi giá đều lấy theo mốc có
-// hiệu lực NGÀY ĐÓ; bỏ trống thì dùng giá hiện tại (các màn cấu hình đang xem menu).
-function computeUnitCogsFromRecipe(itemId, size, dateKey){
-  // [FIX] Trước đây luôn đọc RECIPES (định mức HIỆN TẠI) dù dateKey là một ngày quá
-  // khứ — sửa định mức hôm nay từng đổi luôn giá vốn của mọi bill đã bán trước đó.
-  // Giờ tra đúng bản định mức đã có hiệu lực vào NGÀY BILL PHÁT SINH (recipeSizeRowsOn,
-  // dùng chung nguyên lý với itemCostOn/prepCostOn/toppingCostOn).
-  const rows = recipeSizeRowsOn('togo:'+itemId, size, dateKey);
-  if(!rows || !rows.length) return null; // chưa khai định mức cho đúng size này — không tính được
+// Giá vốn của MỘT DÃY dòng định mức (rows) tại ngày dateKey — tách riêng khỏi
+// computeUnitCogsFromRecipe() để dùng lại được cho một bản định mức CỤ THỂ đang so
+// sánh (vd 2 đầu của một mốc lịch sử, xem recipeHistoryBlockHTML) mà không cần tồn
+// tại trong RECIPES/lịch sử.
+function _costOfRecipeRows(rows, dateKey){
+  if(!rows || !rows.length) return null;
   let cost = 0;
   for(const row of rows){
     const qty = Number(row.qty)||0;
@@ -2916,6 +2918,16 @@ function computeUnitCogsFromRecipe(itemId, size, dateKey){
     }
   }
   return cost;
+}
+// dateKey = ngày phát sinh của bill. Truyền vào thì mọi giá đều lấy theo mốc có
+// hiệu lực NGÀY ĐÓ; bỏ trống thì dùng giá hiện tại (các màn cấu hình đang xem menu).
+function computeUnitCogsFromRecipe(itemId, size, dateKey){
+  // [FIX] Trước đây luôn đọc RECIPES (định mức HIỆN TẠI) dù dateKey là một ngày quá
+  // khứ — sửa định mức hôm nay từng đổi luôn giá vốn của mọi bill đã bán trước đó.
+  // Giờ tra đúng bản định mức đã có hiệu lực vào NGÀY BILL PHÁT SINH (recipeSizeRowsOn,
+  // dùng chung nguyên lý với itemCostOn/prepCostOn/toppingCostOn).
+  const rows = recipeSizeRowsOn('togo:'+itemId, size, dateKey);
+  return _costOfRecipeRows(rows, dateKey); // null nếu chưa khai định mức cho đúng size này
 }
 
 // ============================================================
@@ -17657,18 +17669,36 @@ async function renderKhoPrep(){
 }
 // [MỚI] Khối "Lịch sử công thức" trong ô sửa BTP — cho chủ quán thấy công thức mẻ
 // đã đổi mấy lần, từ ngày nào, để yên tâm sửa hôm nay không đổi giá vốn lô đã nấu.
-function _prepRecipeSummary(inputs, yieldVal){
-  const soNl = (inputs||[]).length;
-  return soNl ? `${soNl} nguyên liệu · thu ${fmtNum(yieldVal,1)}` : '(chưa khai)';
-}
+// [MỚI — theo yêu cầu] So giá vốn/đơn vị TRƯỚC/SAU một lần đổi công thức mẻ. Cùng
+// nguyên lý với _recipeSizeCostRow(): đổi định lượng, thêm/bớt nguyên liệu, đổi
+// hẳn nguyên liệu, hay đổi khối lượng thu được khai báo — tất cả đều lộ ra qua
+// CÙNG một phép tính giá vốn/đơn vị, không cần phân biệt từng loại thay đổi. Tính
+// bằng giá nguyên liệu ĐÚNG NGÀY đổi (effectiveFrom) cho cả 2 vế để cách ly khỏi
+// biến động giá nguyên liệu về sau.
 function prepRecipeHistoryBlockHTML(prepId){
   const list = prepRecipeHistoryFor(prepId);
+  const p = PREP_ITEMS.find(x=>x.id===prepId);
+  const donVi = escapeHtmlAttr((p&&p.unit)||'');
   if(!list.length){
     return `<div class="small-note" style="margin:10px 0">Chưa có lần sửa công thức nào được ghi lại — công thức hiện tại đang áp dụng cho MỌI lô đã nấu. Lần sửa tới sẽ tạo mốc đầu tiên: lô nấu từ hôm đó trở đi tính theo công thức mới, lô cũ vẫn giữ nguyên giá vốn theo công thức hiện tại.</div>`;
   }
   return `<div class="sec-title" style="margin-top:14px">Lịch sử công thức</div>
-    ${list.map(r=>`<div class="row" style="align-items:flex-start"><span class="rl">Từ ${fmtDateVN(new Date(r.effectiveFrom+'T00:00:00'))}</span>
-      <span class="rv" style="font-weight:500;text-align:right">${escapeHtmlAttr(_prepRecipeSummary(r.oldBatchInputs,r.oldBatchYield))} → ${escapeHtmlAttr(_prepRecipeSummary(r.newBatchInputs,r.newBatchYield))}</span></div>`).join('')}
+    ${list.map(r=>{
+      const oldCost = _costOfPrepInputs(r.oldBatchInputs, r.oldBatchYield, r.effectiveFrom);
+      const newCost = _costOfPrepInputs(r.newBatchInputs, r.newBatchYield, r.effectiveFrom);
+      let dong;
+      if(oldCost==null || newCost==null){
+        dong = `${oldCost==null?'(chưa khai)':fmtUnitPrice(oldCost)} → ${newCost==null?'(chưa khai)':fmtUnitPrice(newCost)}/${donVi}`;
+      } else {
+        const delta = newCost - oldCost;
+        const doiNhieu = Math.abs(delta) >= 0.5;
+        const mau = !doiNhieu ? 'var(--gm)' : (delta>0 ? 'var(--bad)' : 'var(--ok)');
+        const pct = oldCost>0 ? (delta/oldCost*100) : null;
+        dong = `<span style="color:${mau}">${fmtUnitPrice(oldCost)} → ${fmtUnitPrice(newCost)}/${donVi}${doiNhieu ? ` (${delta>0?'+':''}${fmtUnitPrice(delta)}${pct!=null?`, ${delta>0?'+':''}${fmtNum(pct,1)}%`:''})` : ' (không đổi)'}</span>`;
+      }
+      return `<div class="row" style="align-items:flex-start"><span class="rl">Từ ${fmtDateVN(new Date(r.effectiveFrom+'T00:00:00'))}</span>
+        <span class="rv" style="font-weight:600;text-align:right">${dong}</span></div>`;
+    }).join('')}
     <div class="small-note">Mốc cũ không bao giờ bị xoá hay sửa — lô đã nấu TRƯỚC mỗi mốc vẫn tính giá vốn theo đúng công thức của mốc trước đó.</div>`;
 }
 async function submitPrepItem(){
@@ -21987,8 +22017,26 @@ function renderRecipeEditorBox(){
 // [MỚI] Khối "Lịch sử định mức" trong ô sửa — cho chủ quán thấy rõ định mức đã đổi
 // mấy lần, từ ngày nào, để yên tâm rằng sửa hôm nay KHÔNG làm đổi giá vốn của bill
 // đã bán trước đó (xem recordRecipeChange/recipeSizeRowsOn).
-function _recipeSizesSummary(sizes){
-  return sizes && Object.keys(sizes).length ? Object.entries(sizes).map(([sz,rows])=>`${sz}: ${(rows||[]).length} thành phần`).join(' · ') : '(chưa khai)';
+// [MỚI — theo yêu cầu] So giá vốn TRƯỚC/SAU một lần đổi định mức, cho 1 size. Cả 3
+// kiểu đổi định mức chủ quán nêu — đổi định lượng (15g→13g), thêm/bớt nguyên liệu,
+// đổi hẳn sang nguyên liệu khác — đều tự lộ ra ở đây vì đều đi qua CÙNG một phép
+// tính giá vốn, không cần phân biệt từng loại. Tính bằng giá nguyên liệu ĐÚNG NGÀY
+// đổi (dateKey=effectiveFrom) cho cả hai vế, để chênh lệch đo được là do ĐỊNH MỨC
+// đổi, không lẫn với việc giá nguyên liệu trồi sụt ở những ngày sau đó.
+function _recipeSizeCostRow(label, oldRows, newRows, dateKey){
+  const oldCost = _costOfRecipeRows(oldRows, dateKey);
+  const newCost = _costOfRecipeRows(newRows, dateKey);
+  if(oldCost==null && newCost==null) return '';
+  if(oldCost==null || newCost==null){
+    return `<div class="row" style="align-items:flex-start"><span class="rl">${escapeHtmlAttr(label)}</span>
+      <span class="rv" style="font-weight:500">${oldCost==null?'(chưa khai)':fmt(oldCost)} → ${newCost==null?'(chưa khai)':fmt(newCost)}</span></div>`;
+  }
+  const delta = newCost - oldCost;
+  const doiNhieu = Math.abs(delta) >= 1;
+  const mau = !doiNhieu ? 'var(--gm)' : (delta>0 ? 'var(--bad)' : 'var(--ok)');
+  const pct = oldCost>0 ? (delta/oldCost*100) : null;
+  return `<div class="row" style="align-items:flex-start"><span class="rl">${escapeHtmlAttr(label)}</span>
+    <span class="rv" style="font-weight:600;color:${mau};text-align:right">${fmt(oldCost)} → ${fmt(newCost)}${doiNhieu ? `<br><span style="font-size:12px">(${delta>0?'+':''}${fmt(delta)}${pct!=null?`, ${delta>0?'+':''}${fmtNum(pct,1)}%`:''})</span>` : ' (không đổi)'}</span></div>`;
 }
 function recipeHistoryBlockHTML(menuRefKey){
   const list = recipeHistoryFor(menuRefKey);
@@ -21996,8 +22044,13 @@ function recipeHistoryBlockHTML(menuRefKey){
     return `<div class="small-note" style="margin:10px 0">Chưa có lần sửa nào được ghi lại — định mức hiện tại đang áp dụng cho MỌI ngày đã bán. Lần sửa tới sẽ tạo mốc đầu tiên: bill từ hôm đó trở đi tính theo định mức mới, bill trước đó vẫn giữ nguyên giá vốn theo định mức hiện tại.</div>`;
   }
   return `<div class="sec-title" style="margin-top:14px">Lịch sử định mức</div>
-    ${list.map(r=>`<div class="row" style="align-items:flex-start"><span class="rl">Từ ${fmtDateVN(new Date(r.effectiveFrom+'T00:00:00'))}</span>
-      <span class="rv" style="font-weight:500;text-align:right">${escapeHtmlAttr(_recipeSizesSummary(r.oldSizes))} → ${escapeHtmlAttr(_recipeSizesSummary(r.newSizes))}</span></div>`).join('')}
+    ${list.map(r=>{
+      const sizes = Array.from(new Set([...Object.keys(r.oldSizes||{}), ...Object.keys(r.newSizes||{})]));
+      return `<div style="margin-bottom:10px;padding-bottom:8px;border-bottom:1px dashed var(--line-2)">
+        <div class="small-note" style="margin-bottom:2px">Từ ${fmtDateVN(new Date(r.effectiveFrom+'T00:00:00'))} — giá vốn/ly, tính theo giá nguyên liệu đúng ngày này:</div>
+        ${sizes.map(sz=>_recipeSizeCostRow('Size '+sz, (r.oldSizes||{})[sz], (r.newSizes||{})[sz], r.effectiveFrom)).join('')}
+      </div>`;
+    }).join('')}
     <div class="small-note">Mốc cũ không bao giờ bị xoá hay sửa — bill bán TRƯỚC mỗi mốc vẫn tính giá vốn theo đúng định mức của mốc trước đó.</div>`;
 }
 async function submitRecipe(){
