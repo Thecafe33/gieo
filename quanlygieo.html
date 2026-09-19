@@ -2165,6 +2165,15 @@ function pad(n){ return String(n).padStart(2,'0'); }
 function dkey(d){ return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; }
 function daysInMonth(d){ return new Date(d.getFullYear(), d.getMonth()+1, 0).getDate(); }
 function fmtDateVN(d){ return `${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()}`; }
+// [FIX — lệch giờ 7 tiếng] Giờ "HH:MM" của một mốc ISO, dùng GIỜ ĐỊA PHƯƠNG của máy
+// đang xem (getHours/getMinutes) — KHÔNG được cắt chuỗi ISO thô (.slice(11,16)),
+// vì createdAt lưu bằng new Date().toISOString() luôn là giờ UTC. VN là UTC+7 nên
+// cắt chuỗi thô cho ra giờ THẤP HƠN giờ thật 7 tiếng (đo được: điều chỉnh lúc 20:20
+// thật lại hiện 13:20). new Date(iso) rồi đọc giờ local mới ra đúng giờ thật.
+function fmtTimeVN(iso){
+  const d = iso ? new Date(iso) : null;
+  return (d && !isNaN(d)) ? `${pad(d.getHours())}:${pad(d.getMinutes())}` : '--:--';
+}
 
 // ------------------------------------------------------------
 // % ĐẠT MỤC TIÊU
@@ -15965,7 +15974,7 @@ async function renderAuditReprints(){
           ${ic('alert',13)} Bill bị in lại từ 3 lượt trở lên: ${nghiNgo.map(([k,n])=>`<b>${escapeHtmlAttr(k)}</b> (${n})`).join(', ')}. Xem camera khung giờ tương ứng.
         </div>` : '')
       + ds.slice(0,120).map(r=>`<div class="row">
-          <span class="rl">${(r.at||'').replace('T',' ').slice(11,16)} · ${nhan[r.kind]||escapeHtmlAttr(String(r.kind||''))} ${pham[r.scope]||escapeHtmlAttr(String(r.scope||''))}
+          <span class="rl">${fmtTimeVN(r.at)} · ${nhan[r.kind]||escapeHtmlAttr(String(r.kind||''))} ${pham[r.scope]||escapeHtmlAttr(String(r.scope||''))}
             ${r.detail?`<div class="small-note" style="margin-top:2px">${escapeHtmlAttr(String(r.detail))}</div>`:''}</span>
           <span class="rv small-note"><span style="display:flex;flex-direction:column;align-items:flex-end;gap:1px">
             <span>${escapeHtmlAttr(r.billCode || (r.orderId||'').slice(0,8) || '')}${r.minutesSinceBill!=null?` · sau ${r.minutesSinceBill}'`:''}</span>
@@ -21756,7 +21765,7 @@ function _histRender(){
         const q = Number(t.qty)||0;
         // Dòng đã gộp là tổng của CẢ NGÀY — in giờ của lượt bán cuối cùng vào đó thì
         // trông như một giao dịch đơn lẻ lúc 15:33, sai hẳn ý nghĩa.
-        const gio = t._grouped ? 'cả ngày' : String(t.createdAt||'').slice(11,16);
+        const gio = t._grouped ? 'cả ngày' : fmtTimeVN(t.createdAt);
         const con = t.resultingStock==null ? '' :
           `<div class="small-note">còn lại ${fmtNum(t.resultingStock,1)} ${unit}</div>`;
         const meta = [
