@@ -17239,16 +17239,18 @@ function renderKhoItems(){
       // quy đổi ngược ra đúng đơn vị đã chọn để đếm (cu, đã tính sẵn ở trên). Vẫn kèm số
       // gốc theo đơn vị pha chế trong ngoặc, nhỏ hơn, cho ai cần số chính xác để đối chiếu
       // công thức — không giấu hẳn thông tin cũ, chỉ đổi thứ tự ưu tiên hiển thị.
-      const stockInCu = managed
-        ? (!cu.isBase
-            ? fmtNum(it.currentStock/cu.baseQty,2)+' '+escapeHtmlAttr(cu.name)
-              +` <span class="muted" style="font-weight:400;font-size:11px">(${fmtNum(it.currentStock,1)} ${escapeHtmlAttr(it.unit||'')})</span>`
-            : fmtNum(it.currentStock,1)+' '+escapeHtmlAttr(it.unit||''))
-        : '—';
+      // [FIX "layout văng tùm lum"] .li-r có white-space:nowrap (để dãy nút không tự
+      // gãy chữ) và CSS đó DI TRUYỀN xuống mọi span con — nhét cả "120,00 Hộp (120.000
+      // g)" vào một span nowrap duy nhất cạnh 4 nút tròn làm cả dòng dài hơn bề ngang
+      // thẻ, đẩy nút tràn ra ngoài. Giờ tách số theo đơn vị pha chế xuống DÒNG RIÊNG
+      // (khối flex-column của chính nó) thay vì nhét chung một span — mỗi dòng ngắn,
+      // tự chứa, không còn ép cả cụm phải nằm một hàng.
+      const stockMain = managed ? fmtNum(!cu.isBase ? it.currentStock/cu.baseQty : it.currentStock,!cu.isBase?2:1)+' '+escapeHtmlAttr(!cu.isBase?cu.name:(it.unit||'')) : '—';
+      const stockSub = (managed && !cu.isBase) ? `<div class="muted" style="font-weight:400;font-size:11px;text-align:right">(${fmtNum(it.currentStock,1)} ${escapeHtmlAttr(it.unit||'')})</div>` : '';
       return `<div class="litem">
         <div class="li-l"><div>${it.name} ${neg?'<span class="tier tier-red" style="margin-left:4px">Tồn ÂM</span>':(low?'<span class="tier tier-amber" style="margin-left:4px">Sắp hết</span>':'')}${noCount?'<span class="tier tier-blue" style="margin-left:4px">NV không kiểm kê</span>':''}${(it.vesselIds||[]).length?'<span class="tier tier-green" style="margin-left:4px">⚖️ Cân được</span>':''}${tmTag}</div>
         <div>Ngưỡng ${fmtNum(it.minStock,0)} ${it.unit}${it.costPerUnit?(' · ~'+fmt(it.costPerUnit)+'/'+it.unit):''}${pkgSummary}${countLine}</div></div>
-        <div class="li-r"><span style="${neg?'color:var(--bad);font-weight:800':(managed?'':'color:var(--ink-4)')}">${stockInCu}</span>
+        <div class="li-r"><div style="display:flex;flex-direction:column;align-items:flex-end"><span style="${neg?'color:var(--bad);font-weight:800':(managed?'':'color:var(--ink-4)')}">${stockMain}</span>${stockSub}</div>
           <button class="btn ${neg?'':'outline'} sm" style="width:auto;padding:0 10px;margin-left:6px" onclick="startAdjustItem('${it.id}')">Sửa tồn</button>
           <button class="iconbtn" onclick="openItemHistory('${it.id}')" title="Lịch sử biến động tồn kho">${ic('clock')}</button>
           <button class="iconbtn" onclick="startEditItem('${it.id}')" title="Sửa thông tin nguyên liệu">${ic('pencil')}</button>
