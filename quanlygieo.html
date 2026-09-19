@@ -823,6 +823,31 @@ html.tab-ui .field input[type=checkbox],html.tab-ui .field input[type=radio]{
   background:var(--gl);border-radius:var(--r-md);padding:14px 16px;margin:2px 0 16px;
 }
 
+/* ---------- [MỚI] TỒN THEO VỊ TRÍ — thẻ đối chiếu riêng, to & rõ hơn hẳn khối
+   dùng chung .pkg-row (vốn cho form quy cách/định mức, không phải chỗ đếm-đặt-số
+   quan trọng mỗi lần lệch kho). Viền trái đổi màu theo mức độ để lướt mắt là
+   thấy ngay dòng nào đang có vấn đề, không phải đọc từng số. ---------- */
+.ls-card{
+  background:var(--card);border:1.5px solid var(--line);border-left:5px solid var(--line);
+  border-radius:18px;padding:18px;margin-bottom:14px;box-shadow:var(--sh-1);
+}
+.ls-card.ls-lech{border-left-color:var(--warn);}
+.ls-card.ls-neg{border-left-color:var(--bad);}
+.ls-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:14px;flex-wrap:wrap;}
+.ls-name{font-size:17px;font-weight:800;color:var(--td);}
+.ls-total-tag{font-size:12.5px;font-weight:700;color:var(--gm);background:var(--gl);padding:5px 12px;border-radius:999px;white-space:nowrap;}
+.ls-current{display:flex;align-items:center;justify-content:space-between;gap:10px;padding-bottom:14px;margin-bottom:14px;border-bottom:1px dashed var(--line-2);}
+.ls-current-label{font-size:14px;color:var(--ink-2);}
+.ls-current-val{font-size:22px;font-weight:800;font-variant-numeric:tabular-nums;color:var(--td);white-space:nowrap;}
+.ls-current-val.ls-neg-val{color:var(--bad);}
+.ls-input-row{display:flex;gap:10px;align-items:stretch;margin-bottom:10px;}
+.ls-input-row input{flex:1;min-width:0;height:54px;font-size:21px;font-weight:800;
+  border:1.5px solid var(--line);border-radius:14px;padding:0 16px;font-variant-numeric:tabular-nums;}
+.ls-input-row input:focus{border-color:var(--gd);outline:none;box-shadow:0 0 0 3px var(--gl);}
+.ls-input-row .unit-tag{height:54px;padding:0 16px;font-size:15px;border-radius:14px;}
+.ls-preview{font-size:14.5px;font-weight:650;color:var(--gm);}
+.ls-warn{margin-top:12px;font-size:13.5px;line-height:1.65;color:#92400e;background:var(--warn-bg);border-radius:12px;padding:12px 14px;}
+
 /* ==========================================================================
    11. DÒNG DANH SÁCH
    ========================================================================== */
@@ -20368,23 +20393,25 @@ async function renderKhoLocStock(){
     const tong = Number(it.currentStock)||0;
     const lech = tongVT - tong;
     const nhap = locStockDraft[it.id];
+    const coNeg = coSo && cur<0;
+    const cardCls = coNeg ? 'ls-neg' : (Math.abs(lech)>0.005 ? 'ls-lech' : '');
     return `
-      <div class="pkg-row">
-        <div class="pkg-row-h">
-          <span class="pkg-row-n">${escapeHtmlAttr(it.name)}</span>
-          <span class="muted-sm">tổng kho ${fmtNum(tong,1)} ${it.unit||''}</span>
+      <div class="ls-card ${cardCls}">
+        <div class="ls-head">
+          <span class="ls-name">${escapeHtmlAttr(it.name)}</span>
+          <span class="ls-total-tag">tổng kho ${fmtNum(tong,1)} ${escapeHtmlAttr(it.unit||'')}</span>
         </div>
-        <div class="row" style="border:none;padding:2px 0">
-          <span class="rl">Hệ thống ghi tại ${escapeHtmlAttr(loc.name)}</span>
-          <span class="rv" style="${coSo && cur<0?'color:var(--bad)':''}">${coSo?fmtNum(cur,1):'<span class="muted-sm">chưa có số</span>'} ${it.unit||''}</span>
+        <div class="ls-current">
+          <span class="ls-current-label">Hệ thống ghi tại ${escapeHtmlAttr(loc.name)}</span>
+          <span class="ls-current-val ${coNeg?'ls-neg-val':''}">${coSo?fmtNum(cur,1):'<span class="muted-sm">chưa có số</span>'} ${coSo?escapeHtmlAttr(it.unit||''):''}</span>
         </div>
-        <div class="pkg-eq" style="margin-top:6px">
+        <div class="ls-input-row">
           <input type="number" inputmode="decimal" step="0.01" placeholder="Đếm được..." value="${nhap==null?'':nhap}"
             oninput="locStockDraft['${it.id}']=(this.value===''?null:(Number(this.value)||0)); locStockRefreshFoot('${it.id}')">
-          <span class="unit-tag">${it.unit||''}</span>
+          <span class="unit-tag">${escapeHtmlAttr(it.unit||'')}</span>
         </div>
-        <div class="pkg-out" id="lsFoot-${it.id}">${locStockFootText(it)}</div>
-        ${Math.abs(lech)>0.005 ? `<div class="small-note" style="color:var(--warn);margin-top:4px">Tổng các vị trí đang là ${fmtNum(tongVT,1)} trong khi tổng kho ghi ${fmtNum(tong,1)} — lệch ${lech>0?'+':''}${fmtNum(lech,1)} ${it.unit||''}.</div>` : ''}
+        <div class="ls-preview" id="lsFoot-${it.id}">${locStockFootText(it)}</div>
+        ${Math.abs(lech)>0.005 ? `<div class="ls-warn">⚠️ Tổng các vị trí đang là <b>${fmtNum(tongVT,1)}</b> trong khi tổng kho ghi <b>${fmtNum(tong,1)}</b> — lệch ${lech>0?'+':''}${fmtNum(lech,1)} ${escapeHtmlAttr(it.unit||'')}. Đếm đúng vị trí này rồi lưu để chia lại cho khớp.</div>` : ''}
       </div>`;
   };
 

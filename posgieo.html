@@ -13574,8 +13574,15 @@ async function openRefillScreen() {
 let refillShowOk = false;
 // Tồn ở kho nguồn — hiện ngay trên thẻ để nhân viên biết có đủ mà lấy không.
 // null nghĩa là vị trí đó CHƯA TỪNG được đặt số, khác hẳn với "đang có 0".
+// [FIX] Số âm ở đây không phải "kho có -55 cái" — nó là dấu hiệu locationStock (tồn
+// tách theo vị trí) đang SAI, thường vì trước đó có lượt Chuyển vượt quá số hệ thống
+// đang ghi ở nguồn (xem sourceWentNegative ở applyStockTransferPOS). Hiện nguyên số âm
+// trần trụi khiến nhân viên/chủ quán tưởng đây là lỗi phần mềm ("kho âm???"), trong khi
+// đây là việc CẦN Quản lý đếm lại và đặt số ở Tồn theo vị trí. Nói thẳng ra thay vì để
+// một con số âm khó hiểu.
 function refillSrcTextPOS(x){
   if(x.curAtSrc === null) return `${x.r.sourceLocationName}: chưa đặt tồn`;
+  if(x.curAtSrc < 0) return `⚠️ ${x.r.sourceLocationName}: số liệu đang SAI (ghi ${x.curAtSrc.toLocaleString('vi-VN')} ${x.r.unit}) — báo Quản lý đếm & đặt lại ở Tồn theo vị trí`;
   return `${x.r.sourceLocationName}: còn ${x.curAtSrc.toLocaleString('vi-VN')} ${x.r.unit}`;
 }
 function refillSrcColorPOS(x){
