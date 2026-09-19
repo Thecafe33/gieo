@@ -11667,6 +11667,10 @@ function bfChiTiet(o){
   if(Number(o.cashGiven) > 0 && Number(o.cashChange) > 0)
     phu.push(kv('Khách đưa / thối', `${fmt(o.cashGiven)} / ${fmt(o.cashChange)}`));
   if(o.bankOrderId) phu.push(kv('Mã CK', escapeHtmlAttr(o.bankOrderId)));
+  // [MỚI] Quy trách nhiệm ngay trên bảng tin bill hôm nay — không phải đợi mở
+  // Lịch sử bill mới thấy CK nào do nhân viên tự bấm xác nhận.
+  if(o.bankConfirmMethod === 'manual_staff')
+    phu.push(kv('Xác nhận CK', `<span style="color:#92400e">⚠️ Thủ công bởi ${escapeHtmlAttr(o.bankConfirmedBy||'(không rõ)')}</span>`));
   return `<div class="bfeed-body">
     ${mon.length ? mon.map(bfDongMon).join('') : `<div class="small-note">${escapeHtmlAttr(o.items || 'Không có chi tiết món')}</div>`}
     <div style="border-top:1px solid var(--line);margin-top:6px;padding-top:6px">${phu.join('') || '<div class="small-note">Không có thông tin thêm.</div>'}</div>
@@ -11858,6 +11862,12 @@ function qlRenderBillList(){
       const shipBadge   = isShipOrder ? '<span style="background:#f59e0b;color:#78350f;font-size:10px;font-weight:700;border-radius:6px;padding:2px 6px;margin-left:4px;">🚚 SHIP</span>' : '';
       const appBadge    = isAppOrder  ? '<span style="background:#16a34a;color:#fff;font-size:10px;font-weight:700;border-radius:6px;padding:2px 6px;margin-left:4px;">📱 APP</span>' : '';
       const addonBadge  = (o.addons && o.addons.length) ? '<span style="background:#1d4ed8;color:#fff;font-size:10px;font-weight:700;border-radius:6px;padding:2px 6px;margin-left:4px;">➕ BỔ SUNG</span>' : '';
+      // [MỚI] Quy trách nhiệm rõ ràng: CK do NHÂN VIÊN tự bấm xác nhận (không phải hệ
+      // thống tự nhận qua bank_confirmations) — thấy ngay ở danh sách, không phải mở
+      // từng bill mới biết. Xem posgieo.html: openManualBankConfirm()/confirmPay().
+      const isManualBank = o.bankConfirmMethod === 'manual_staff'
+        || !!(o.splitGroups && o.splitGroups.some(g => g && g.bankConfirmMethod === 'manual_staff'));
+      const manualBankBadge = isManualBank ? '<span style="background:#fef3c7;color:#92400e;font-size:10px;font-weight:700;border-radius:6px;padding:2px 6px;margin-left:4px;">⚠️ CK THỦ CÔNG</span>' : '';
       const iconStroke  = isSplitOrder ? '#7c3aed' : (isBankOrder ? 'var(--gm)' : (isAppOrder ? '#16a34a' : '#8a8474'));
       const priceHtml   = `<div class="hip">${(Number(o.total)||0).toLocaleString('vi-VN')}<sup>đ</sup></div>`;
       const billCodeHtml = o.billCode ? `<span style="color:var(--gm);font-weight:700;">${escapeHtmlAttr(o.billCode)}</span> · ` : '';
@@ -11871,13 +11881,27 @@ function qlRenderBillList(){
       }
       return `<button class="hit${billClass}" onclick="qlOpenBill('${o.id}')">
         <div class="hii"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="${iconStroke}" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="12" y2="17"/></svg></div>
-        <div class="hin"><div class="hitime">${escapeHtmlAttr(o.time||'')}${shipBadge}${appBadge}${addonBadge}</div><div class="himeta">${bankCodeHtml}${billCodeHtml}${escapeHtmlAttr(o.phone||'Khách vãng lai')}</div></div>
+        <div class="hin"><div class="hitime">${escapeHtmlAttr(o.time||'')}${shipBadge}${appBadge}${addonBadge}${manualBankBadge}</div><div class="himeta">${bankCodeHtml}${billCodeHtml}${escapeHtmlAttr(o.phone||'Khách vãng lai')}</div></div>
         <div style="text-align:right;flex-shrink:0;min-width:110px;">${priceHtml}<div class="him">${escapeHtmlAttr(o.method||'')}</div></div>
       </button>`;
     }).join('')}</div>`).join('');
 }
 
 function qlOpenBill(id){ qlBillOpenId = id; qlRenderBillBody(); window.scrollTo(0,0); }
+
+// [MỚI] Tag "xác nhận thủ công" trong Chi tiết bill — chỉ hiện khi CÓ người tự bấm
+// (bankConfirmMethod:'manual_staff'); hệ thống tự nhận (mặc định/'auto', hoặc bill
+// cũ trước khi có tính năng này) thì không hiện gì thêm. Cùng cơ chế với posgieo.html.
+function _bankConfirmBadgeHTML(obj, compact){
+  if(!obj || obj.bankConfirmMethod !== 'manual_staff') return '';
+  const who = escapeHtmlAttr(obj.bankConfirmedBy || '(không rõ)');
+  return compact
+    ? ` · <span style="font-size:10.5px;font-weight:800;background:#fef3c7;color:#92400e;border-radius:6px;padding:2px 7px;">⚠️ NV tự xác nhận: ${who}</span>`
+    : `<div style="background:#fef3c7;border:1.5px solid #fde68a;border-radius:12px;padding:8px 14px;margin-bottom:20px;display:inline-flex;align-items:center;gap:8px;">
+        <span style="font-size:16px;">⚠️</span>
+        <span style="font-size:13px;font-weight:700;color:#92400e;">Xác nhận THỦ CÔNG bởi ${who} — không phải hệ thống tự nhận, cần đối chiếu lại nếu nghi ngờ chưa đúng SOP</span>
+      </div>`;
+}
 
 const QL_ICE = { chung:'Đá chung', rieng:'Đá riêng', khong:'Không đá' };
 
@@ -11907,7 +11931,7 @@ function qlBillDetailHTML(id){
             <div style="width:32px;height:32px;background:${iconBg};border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:16px;">${isCashGrp ? '💵' : '🏦'}</div>
             <div>
               <div style="font-size:13px;font-weight:700;color:${iconColor};text-transform:uppercase;letter-spacing:.5px;">${escapeHtmlAttr(grp.method)}</div>
-              <div style="font-size:11px;color:var(--gt);">${(grp.items||[]).length} món · ${vnd(grp.total)}đ${grp.bankOrderId ? ` · Mã CK: <b style="color:#6d28d9;">${escapeHtmlAttr(grp.bankOrderId)}</b>` : ''}</div>
+              <div style="font-size:11px;color:var(--gt);">${(grp.items||[]).length} món · ${vnd(grp.total)}đ${grp.bankOrderId ? ` · Mã CK: <b style="color:#6d28d9;">${escapeHtmlAttr(grp.bankOrderId)}</b>` : ''}${_bankConfirmBadgeHTML(grp, true)}</div>
             </div>
           </div>
           ${(grp.items||[]).map((it, ii) => `
@@ -12009,6 +12033,7 @@ function qlBillDetailHTML(id){
         <span style="font-size:16px;">🏦</span>
         <span style="font-size:13px;font-weight:700;color:#6d28d9;">Mã CK: ${escapeHtmlAttr(o.bankOrderId)}</span>
       </div>` : ''}
+      ${_bankConfirmBadgeHTML(o)}
       ${o.isToGo ? `<div style="background:#fef3c7;border-radius:12px;padding:8px 14px;margin-bottom:20px;display:inline-flex;align-items:center;gap:8px;">
         <span style="font-size:16px;font-weight:700;">🛵</span>
         <span style="font-size:13px;font-weight:700;color:#92400e;">ĐƠN MANG VỀ (TO GO)</span>

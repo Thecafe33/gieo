@@ -20614,9 +20614,13 @@ function openVietQRPopup() {
   if (total <= 0) { toast('Tổng tiền bằng 0!'); return; }
 
   _vietqrMode = 'main';
-  // [CHANGED] Logic ghi bill giờ đặt trong callback, gọi từ confirmBankTransfer()
+  _vietqrResetManualBox();
+  // [CHANGED] Logic ghi bill giờ đặt trong callback, gọi từ submitManualBankConfirm()
   // hoặc từ listener khi Firebase báo đã nhận CK — dùng chung 1 chỗ, không lặp code.
-  _vietqrOnConfirm = () => { curPay = 'bank'; confirmPay(null, null); };
+  // [MỚI] data = null/{amount...} khi HỆ THỐNG tự nhận (bank_confirmations), hoặc
+  // {manualConfirm:true, staffId, staffName} khi NHÂN VIÊN tự bấm xác nhận — quy rõ
+  // trách nhiệm, gắn thẳng vào order để hiện trong chi tiết bill (xem confirmPay()).
+  _vietqrOnConfirm = (data) => { curPay = 'bank'; _bankConfirmMeta = _bankConfirmMetaFromCallbackData(data); confirmPay(null, null); };
 
   _vietqrOrderId = genBankOrderId();
   const addInfo = encodeURIComponent('TTHD ' + _vietqrOrderId);
@@ -20667,17 +20671,66 @@ function closeVietQRPopup() {
     syncDisplay('split', { splitMode: true, splitItems: spItems, splitSelected: [...spSelected] });
   }
   _vietqrOnConfirm = null;
+  _vietqrResetManualBox();
 }
 
-function confirmBankTransfer() {
+// [MỚI] Chuẩn hoá metadata "ai/cách nào đã xác nhận CK" từ dữ liệu callback, dùng
+// chung cho cả bán thường (confirmPay) và Tính riêng (markSpSelectedPaid) — một nơi
+// quyết định, tránh 2 chỗ tự suy luận khác nhau rồi lệch nhau.
+function _bankConfirmMetaFromCallbackData(data) {
+  if (data && data.manualConfirm) {
+    return { bankConfirmMethod: 'manual_staff', bankConfirmedBy: data.staffName || '', bankConfirmedById: data.staffId || '' };
+  }
+  return { bankConfirmMethod: 'auto' };
+}
+let _bankConfirmMeta = null; // đọc 1 lần trong confirmPay() rồi tự xoá — xem _vietqrOnConfirm ở trên
+
+// [MỚI] Badge "xác nhận thủ công" trong Chi tiết bill — chỉ hiện khi CÓ người tự
+// bấm (bankConfirmMethod:'manual_staff'); hệ thống tự nhận (mặc định/'auto') thì
+// không hiện gì thêm, giữ nguyên giao diện cũ đúng yêu cầu.
+function _bankConfirmBadgeHTML(obj, compact) {
+  if (!obj || obj.bankConfirmMethod !== 'manual_staff') return '';
+  const who = escHtmlPos(obj.bankConfirmedBy || '(không rõ)');
+  return compact
+    ? ` · <span style="font-size:10.5px;font-weight:800;background:#fef3c7;color:#92400e;border-radius:6px;padding:2px 7px;">⚠️ NV tự xác nhận: ${who}</span>`
+    : `<div style="background:#fef3c7;border:1.5px solid #fde68a;border-radius:12px;padding:8px 14px;margin-bottom:20px;display:inline-flex;align-items:center;gap:8px;">
+        <span style="font-size:16px;">⚠️</span>
+        <span style="font-size:13px;font-weight:700;color:#92400e;">Xác nhận THỦ CÔNG bởi ${who} — không phải hệ thống tự nhận</span>
+      </div>`;
+}
+
+// Bấm "ĐÃ CHUYỂN KHOẢN XONG": KHÔNG xác nhận ngay — trước đây bấm phát là xong, không
+// ai biết có đúng nhân viên đã kiểm tra tài khoản hay chưa. Giờ bắt buộc thêm 1 bước
+// PIN để quy trách nhiệm rõ ràng (đúng SOP: chỉ bấm khi đã thực sự thấy tiền vào).
+function openManualBankConfirm() {
+  const btn = document.getElementById('vietqrManualBtn');
+  const box = document.getElementById('vietqrManualConfirmBox');
+  if (!box) return;
+  if (btn) btn.style.display = 'none';
+  box.style.display = 'block';
+  document.getElementById('vqrManualPinWrap').innerHTML = renderPinInput('vqrManualPin', 'Mã nhân viên xác nhận đã nhận tiền (PIN 4 số)');
+}
+function cancelManualBankConfirm() {
+  _vietqrResetManualBox();
+}
+function _vietqrResetManualBox() {
+  const btn = document.getElementById('vietqrManualBtn');
+  const box = document.getElementById('vietqrManualConfirmBox');
+  if (btn) btn.style.display = '';
+  if (box) { box.style.display = 'none'; document.getElementById('vqrManualPinWrap').innerHTML = ''; }
+}
+async function submitManualBankConfirm() {
+  const staffEmp = await resolveStaffPinAndCheckin('vqrManualPin');
+  if (!staffEmp) return;
   // Nhân viên bấm thủ công khi hệ thống chưa tự nhận — chạy đúng callback của
-  // ngữ cảnh hiện tại (ghi bill thường, hoặc đánh dấu đã trả cho nhóm Tính riêng).
+  // ngữ cảnh hiện tại (ghi bill thường, hoặc đánh dấu đã trả cho nhóm Tính riêng),
+  // kèm rõ AI vừa tự xác nhận để quy trách nhiệm nếu tiền thực ra chưa vào.
   document.getElementById('vietqr-popup').style.display = 'none';
   stopBankListener(_bankListenerOrderId);
-  toast('✅ Xác nhận chuyển khoản — đang xử lý...');
+  toast('✅ Đã xác nhận thủ công — đang xử lý...');
   const cb = _vietqrOnConfirm;
   _vietqrOnConfirm = null;
-  if (typeof cb === 'function') cb(null);
+  if (typeof cb === 'function') cb({ manualConfirm: true, staffId: staffEmp.id, staffName: staffEmp.fullName });
 }
 
 // ============================================================
@@ -22156,6 +22209,11 @@ async function confirmPay(cashGiven, cashChange) {
   // [CHANGED] Đã gỡ ví: trước đây method có thể là "VÍ CƠ BẢN + TIỀN MẶT/CHUYỂN
   // KHOẢN" khi khách trả một phần bằng ví. Giờ chỉ còn 2 phương thức gốc.
   const splitMethod = (curPay === 'cash' ? 'TIỀN MẶT' : 'CHUYỂN KHOẢN');
+  // [MỚI] "Ai/cách nào xác nhận CK" — đọc 1 lần rồi xoá ngay, tránh lỡ dính vào
+  // lượt bán tiếp theo nếu vì lý do gì đó không được set lại. Chỉ có ý nghĩa với
+  // bill CHUYỂN KHOẢN — bill tiền mặt không đụng tới field này.
+  const bankConfirmMeta = curPay === 'bank' ? (_bankConfirmMeta || { bankConfirmMethod: 'auto' }) : null;
+  _bankConfirmMeta = null;
 
   const order = {
     // [MỚI] Bổ sung bill thiếu: giờ hiển thị trên bill là giờ NHẬP THẬT (realNow) dù ngày đã lùi
@@ -22170,6 +22228,7 @@ async function confirmPay(cashGiven, cashChange) {
     foodItems: foodTotal > 0 ? foodItems.map(c => ({ name: c.name, qty: c.qty, price: c.price })) : null,
     foodMethod: foodTotal > 0 ? splitMethod : null,
     method: splitMethod,
+    ...(bankConfirmMeta || {}),
     phone: document.getElementById('cuph').value || '',
     customerName: (curCustomer && curCustomer.name) || '',
     voucherUsed: _giftVoucherKey
@@ -22821,6 +22880,11 @@ function renderH(f = '') {
       // [NEW-addon] Bill đã được thêm topping sau khi bấm — hiện ngay ở danh sách để
       // không phải mở từng đơn mới biết đơn nào đã bị chỉnh.
       const addonBadge  = (o.addons && o.addons.length) ? '<span style="background:#1d4ed8;color:#fff;font-size:10px;font-weight:700;border-radius:6px;padding:2px 6px;margin-left:4px;">➕ BỔ SUNG</span>' : '';
+      // [MỚI] Nhận diện CK được xác nhận THỦ CÔNG (bill thường hoặc bất kỳ nhóm nào
+      // trong Tính riêng) — cần thấy ngay ở danh sách, không phải mở từng bill mới biết.
+      const isManualBank = o.bankConfirmMethod === 'manual_staff'
+        || !!(o.splitGroups && o.splitGroups.some(g => g && g.bankConfirmMethod === 'manual_staff'));
+      const manualBankBadge = isManualBank ? '<span style="background:#fef3c7;color:#92400e;font-size:10px;font-weight:700;border-radius:6px;padding:2px 6px;margin-left:4px;">⚠️ CK THỦ CÔNG</span>' : '';
       const iconStroke  = isSplitOrder ? '#7c3aed' : (isBankOrder ? 'var(--gm)' : (isAppOrder ? '#16a34a' : '#8a8474'));
       const priceHtml   = `<div class="hip">${o.total.toLocaleString('vi-VN')}<sup>đ</sup></div>`;
       const billCodeHtml = o.billCode ? `<span style="color:var(--gm);font-weight:700;">${o.billCode}</span> · ` : '';
@@ -22839,7 +22903,7 @@ function renderH(f = '') {
       }
       return `<div class="hit${billClass}" onclick="showDet('${o.id}')">
         <div class="hii"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="${iconStroke}" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="12" y2="17"/></svg></div>
-        <div class="hin"><div class="hitime">${o.time}${shipBadge}${appBadge}${addonBadge}</div><div class="himeta">${bankCodeHtml}${billCodeHtml}${o.phone||'Khách vãng lai'}</div></div>
+        <div class="hin"><div class="hitime">${o.time}${shipBadge}${appBadge}${addonBadge}${manualBankBadge}</div><div class="himeta">${bankCodeHtml}${billCodeHtml}${o.phone||'Khách vãng lai'}</div></div>
         <div style="text-align:right;flex-shrink:0;min-width:110px;">${priceHtml}<div class="him">${o.method}</div></div>
       </div>`;
     }).join('')}</div>`).join('');
@@ -23367,6 +23431,7 @@ function showDet(id) {
         <span style="font-size:16px;">🏦</span>
         <span style="font-size:13px;font-weight:700;color:#6d28d9;">Mã CK: ${o.bankOrderId}</span>
       </div>` : ''}
+      ${_bankConfirmBadgeHTML(o)}
       ${o.isToGo ? `<div style="background:#fef3c7;border-radius:12px;padding:8px 14px;margin-bottom:20px;display:inline-flex;align-items:center;gap:8px;">
         <span style="font-size:16px;font-weight:700;">🛵</span>
         <span style="font-size:13px;font-weight:700;color:#92400e;">ĐƠN MANG VỀ (TO GO)</span>
@@ -23385,7 +23450,7 @@ function showDet(id) {
                 <div style="width:32px;height:32px;background:${iconBg};border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:16px;">${isCashGrp ? '💵' : '🏦'}</div>
                 <div>
                   <div style="font-size:13px;font-weight:700;color:${iconColor};text-transform:uppercase;letter-spacing:.5px;">${grp.method}</div>
-                  <div style="font-size:11px;color:var(--gt);">${grp.items.length} món · ${grp.total.toLocaleString('vi-VN')}đ${grp.bankOrderId ? ` · Mã CK: <b style="color:#6d28d9;">${grp.bankOrderId}</b>` : ''}</div>
+                  <div style="font-size:11px;color:var(--gt);">${grp.items.length} món · ${grp.total.toLocaleString('vi-VN')}đ${grp.bankOrderId ? ` · Mã CK: <b style="color:#6d28d9;">${grp.bankOrderId}</b>` : ''}${_bankConfirmBadgeHTML(grp, true)}</div>
                 </div>
               </div>
               ${grp.items.map((it, ii) => `
@@ -24590,13 +24655,15 @@ function openSpBankQR(subTotal) {
   if (subTotal <= 0) { toast('Số tiền không hợp lệ!'); return; }
 
   _vietqrMode = 'split';
+  _vietqrResetManualBox();
 
   const orderId = genBankOrderId();
   _vietqrOrderId = orderId;
   // [CHANGED] Dùng closure giữ đúng orderId của LẦN NÀY — an toàn hơn đọc lại
   // _vietqrOrderId global lúc callback chạy (dù thực tế không có race vì popup
   // chặn tuần tự, nhưng closure rõ ràng và chắc chắn hơn).
-  _vietqrOnConfirm = () => { markSpSelectedPaid('CHUYỂN KHOẢN', null, null, orderId); };
+  // [MỚI] Kèm metadata "ai/cách nào xác nhận" — cùng lý do với luồng bán thường.
+  _vietqrOnConfirm = (data) => { markSpSelectedPaid('CHUYỂN KHOẢN', null, null, orderId, _bankConfirmMetaFromCallbackData(data)); };
 
   const addInfo = encodeURIComponent('TTHD ' + orderId);
   const accountName = encodeURIComponent(CAKE_ACCOUNT_NAME);
@@ -24676,7 +24743,7 @@ function confirmSpBank() {
   closeSpBankPopup();
 }
 
-function markSpSelectedPaid(method, cashGiven, cashChange, bankOrderId) {
+function markSpSelectedPaid(method, cashGiven, cashChange, bankOrderId, bankConfirmMeta) {
   const subTotal = [...spSelected].reduce((a, i) => a + spItems[i].price, 0);
   const groupItems = [...spSelected].map(i => ({ name: spItems[i].name, size: spItems[i].size, price: spItems[i].price }));
   spSelected.forEach(i => { spItems[i].paid = true; spItems[i].method = method; });
@@ -24686,6 +24753,9 @@ function markSpSelectedPaid(method, cashGiven, cashChange, bankOrderId) {
   // [NEW] Lưu mã CK riêng của nhóm này — mỗi nhóm chuyển khoản trong 1 bill Tính
   // riêng có 1 mã QR/mã đơn khác nhau (xem openSpBankQR), cần lưu để đối soát.
   if (method === 'CHUYỂN KHOẢN' && bankOrderId) { grp.bankOrderId = bankOrderId; }
+  // [MỚI] "Ai/cách nào xác nhận CK" của riêng nhóm này — quy trách nhiệm nếu nhân
+  // viên tự bấm xác nhận mà không đúng SOP (xem _bankConfirmMetaFromCallbackData).
+  if (method === 'CHUYỂN KHOẢN' && bankConfirmMeta) Object.assign(grp, bankConfirmMeta);
   spGroups.push(grp);
   spPaidAmt += subTotal;
   spSelected = new Set();
@@ -26716,7 +26786,17 @@ assistLoadLocalCache();
     </div>
 
     <!-- Confirm button -->
-    <button class="bconf" onclick="confirmBankTransfer()" style="background:var(--gd);">ĐÃ CHUYỂN KHOẢN XONG</button>
+    <button class="bconf" id="vietqrManualBtn" onclick="openManualBankConfirm()" style="background:var(--gd);">ĐÃ CHUYỂN KHOẢN XONG</button>
+    <!-- [MỚI] Xác nhận thủ công PHẢI quy trách nhiệm — hệ thống tự nhận CK (bank_confirmations)
+         thì không đụng tới khối này. Bấm tay là NHÂN VIÊN TỰ KHAI đã thấy tiền vào, cần bắt buộc
+         PIN + ghi lại rõ ràng, vì đây đúng là chỗ có thể bị lạm dụng nếu không theo SOP (bấm xác
+         nhận mà chưa thực sự kiểm tra tài khoản) — xem openManualBankConfirm()/submitManualBankConfirm(). -->
+    <div id="vietqrManualConfirmBox" style="display:none;margin-top:10px;">
+      <div style="font-size:12px;color:#c0392b;font-weight:700;background:#fdf2f2;border:1.5px solid #f3c3c8;border-radius:12px;padding:10px 12px;margin-bottom:8px;line-height:1.5;">⚠️ Xác nhận THỦ CÔNG — chỉ bấm khi bạn đã tự kiểm tra và chắc chắn tiền đã vào tài khoản (đúng SOP). Thao tác này được ghi lại kèm tên người xác nhận, hiện rõ trong chi tiết bill.</div>
+      <div id="vqrManualPinWrap"></div>
+      <button class="bconf" onclick="submitManualBankConfirm()" style="background:#c0392b;margin-top:4px;">Xác nhận đã nhận tiền</button>
+      <button onclick="cancelManualBankConfirm()" style="width:100%;margin-top:8px;padding:10px;background:none;border:none;color:#999;font-family:'Google Sans',sans-serif;font-size:13px;font-weight:600;cursor:pointer;">Huỷ, quay lại chờ tự động</button>
+    </div>
   </div>
 </div>
 
