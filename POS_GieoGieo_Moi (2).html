@@ -1,0 +1,1384 @@
+<!doctype html>
+<!-- Mọi thay đổi trong file này phải được ghi cùng lượt vào POS_GieoGieo_Moi_THEO_DOI.md. -->
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Gieo Gieo — POS</title>
+  <!-- Dùng lại đúng Firebase project + SDK compat của POS cũ. Dữ liệu nghiệp vụ
+       mới chỉ đi qua namespace canonical của FIFO core; không ghi node bill cũ. -->
+  <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
+  <style>
+    :root { --bg:#fffaf2; --card:#fff; --ink:#292523; --muted:#8c847d; --line:#eee5dc; --brand:#217a52; --brand-deep:#12633e; --brand-soft:#e8f5ee; --danger:#c73e51; }
+    * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+    html { -webkit-text-size-adjust:100%; text-size-adjust:100%; }
+    body { margin:0; background:#f5f0ea; color:var(--ink); font:14px/1.35 system-ui,-apple-system,"Segoe UI",sans-serif; }
+    button { font:inherit; cursor:pointer; }
+    .app { width:min(100%,430px); min-height:100dvh; margin:auto; padding-bottom:95px; background:var(--bg); box-shadow:0 0 45px rgba(54,36,20,.08); }
+    .header { position:sticky; top:0; z-index:10; display:flex; align-items:center; justify-content:space-between; min-height:72px; padding:12px 16px 8px; background:rgba(255,250,242,.94); backdrop-filter:blur(16px); }
+    .header-actions { display:flex; gap:8px; }
+    .icon-btn { display:grid; place-items:center; width:44px; height:44px; border:0; border-radius:14px; background:#fff; color:var(--ink); font-size:21px; box-shadow:0 1px 8px rgba(43,31,21,.06); }
+    .brand { position:absolute; left:50%; transform:translateX(-50%); color:var(--brand-deep); font-size:24px; font-weight:900; letter-spacing:-1.1px; }
+    .status { display:flex; align-items:center; gap:6px; padding:7px 10px; border-radius:999px; background:#fff; color:var(--muted); font-size:10px; font-weight:850; letter-spacing:.25px; }
+    .status i { width:7px; height:7px; border-radius:50%; background:#f0a12f; }.status.live i { background:#24a56e; }
+    .alert-btn { position:relative; }.alert-badge { position:absolute; top:-5px; right:-5px; display:grid; place-items:center; min-width:18px; height:18px; border:2px solid var(--bg); border-radius:50%; padding:0 4px; background:var(--danger); color:#fff; font-size:10px; font-weight:900; }
+    .alert-panel { position:fixed; top:68px; left:50%; z-index:25; display:none; width:min(calc(100% - 24px),406px); transform:translateX(-50%); border:1px solid #f1d8ca; border-radius:19px; background:#fff; box-shadow:0 15px 35px rgba(44,26,17,.16); }.alert-panel.show { display:block; }.alert-panel header { display:flex; align-items:center; justify-content:space-between; padding:14px 15px 10px; }.alert-panel h2 { margin:0; font-size:15px; }.alert-panel small { color:var(--muted); font-weight:700; }.alert-item { display:flex; gap:10px; padding:11px 15px; border-top:1px solid var(--line); }.alert-icon { display:grid; place-items:center; width:30px; height:30px; flex:0 0 auto; border-radius:10px; background:#fff1e8; color:#c85f1d; font-size:15px; }.alert-item strong,.alert-item span { display:block; }.alert-item strong { font-size:12px; }.alert-item span { margin-top:2px; color:var(--muted); font-size:11px; }
+    /* Sidebar: copy theo hệ drawer trái của posgieo cũ. Trên màn 430px nó rộng 340px,
+       vì vậy còn phần màn order ở bên phải thay vì che kín toàn bộ. */
+    .sidebar-overlay { position:fixed; inset:0; z-index:200; display:none; background:rgba(0,0,0,.35); }.sidebar-overlay.show { display:block; }
+    .sidebar { position:fixed; top:0; left:0; z-index:201; display:flex; width:82%; max-width:340px; height:100%; transform:translateX(-100%); flex-direction:column; overflow:auto; padding:60px 20px 40px; background:#FFFCF0; transition:transform .28s cubic-bezier(.4,0,.2,1); }.sidebar.show { transform:translateX(0); }
+    .sidebar-actions { position:absolute; top:16px; right:16px; display:flex; align-items:center; gap:8px; }.sidebar-close { display:grid; place-items:center; width:36px; height:36px; border:0; border-radius:50%; background:#e4e4e4; color:#666; font-size:21px; }
+    .sidebar-update { display:flex; align-items:center; gap:6px; border:0; border-radius:12px; padding:8px 10px; background:#FDE6EA; color:#E23A5D; }.sidebar-update strong { display:block; font-size:12px; font-weight:700; white-space:nowrap; }.sidebar-update small { display:none; }.sidebar-update b { font-size:17px; font-weight:700; line-height:1; }
+    .sidebar-menu { display:flex; flex-direction:column; gap:12px; padding-top:24px; }.sidebar-item { display:flex; align-items:center; gap:16px; width:100%; border:0; border-radius:18px; padding:18px 20px; background:#fff; color:#111; text-align:left; transition:transform .12s; }.sidebar-item:active { transform:scale(.97); }.sidebar-icon { display:grid; place-items:center; width:44px; height:44px; flex:0 0 auto; border-radius:12px; background:#FDE6EA; color:#C22B49; font-size:20px; }.sidebar-item strong,.sidebar-item small { display:block; }.sidebar-item strong { font-size:17px; font-weight:700; }.sidebar-item small { margin-top:2px; color:#999; font-size:13px; line-height:1.25; }.sidebar-arrow { margin-left:auto; color:#ccc; font-size:18px; font-style:normal; }
+    .notice { display:none; margin:0 12px 10px; border:1px solid #f3cdc9; border-radius:14px; padding:10px 12px; background:#fff5f3; color:#9b3d32; font-size:12px; font-weight:700; }
+    .categories { display:flex; gap:8px; overflow:auto; padding:4px 12px 12px; scrollbar-width:none; }.categories::-webkit-scrollbar { display:none; }
+    .category { flex:0 0 auto; border:0; border-radius:999px; padding:9px 15px; background:#eee8e2; color:#6f6862; font-size:13px; font-weight:800; white-space:nowrap; }.category.active { background:var(--brand); color:white; }
+    .menu { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; padding:0 12px 18px; }
+    .product { position:relative; display:flex; min-height:110px; flex-direction:column; justify-content:space-between; overflow:hidden; border:0; border-radius:17px; padding:13px 10px 11px; color:#fff; text-align:left; box-shadow:inset 0 -48px 60px rgba(37,25,15,.13); transition:transform .12s ease; }.product:active { transform:scale(.96); }
+    .product-name { font-size:13px; font-weight:900; line-height:1.25; text-transform:uppercase; }.product-price { align-self:flex-start; border-radius:999px; padding:5px 9px; background:rgba(255,255,255,.94); color:var(--brand-deep); font-size:13px; font-weight:900; }.product-count { position:absolute; top:8px; right:8px; display:grid; place-items:center; min-width:22px; height:22px; border:2px solid white; border-radius:50%; padding:0 5px; background:var(--danger); font-size:11px; font-weight:900; }
+    .empty { grid-column:1/-1; padding:70px 16px; color:var(--muted); text-align:center; }.empty strong { display:block; margin-bottom:6px; color:var(--ink); }
+    .footer { position:fixed; bottom:0; left:50%; z-index:20; display:flex; width:min(100%,430px); transform:translateX(-50%); align-items:center; justify-content:space-between; gap:12px; padding:12px 16px calc(14px + env(safe-area-inset-bottom)); border-top:1px solid var(--line); background:rgba(255,255,255,.96); box-shadow:0 -8px 24px rgba(55,37,20,.08); backdrop-filter:blur(16px); }
+    .total { min-width:0; border:0; background:transparent; padding:4px 0; color:var(--ink); text-align:left; }.total span { display:block; color:var(--muted); font-size:10px; font-weight:800; letter-spacing:.45px; }.total strong { display:block; margin-top:2px; font-size:22px; font-weight:900; letter-spacing:-.5px; }
+    .pay { display:flex; align-items:center; gap:9px; border:0; border-radius:999px; padding:14px 19px; background:var(--brand); color:#fff; font-size:15px; font-weight:900; white-space:nowrap; }.pay:disabled { opacity:.42; }
+    .overlay { position:fixed; inset:0; z-index:30; display:none; background:rgba(35,28,23,.38); backdrop-filter:blur(2px); }.overlay.show { display:block; }
+    .sheet { position:fixed; bottom:0; left:50%; z-index:31; display:flex; width:min(100%,430px); max-height:calc(100dvh - 66px); transform:translate(-50%,105%); flex-direction:column; border-radius:28px 28px 0 0; background:#fff; box-shadow:0 -16px 40px rgba(44,26,17,.18); transition:transform .23s cubic-bezier(.22,.75,.3,1); }.sheet.show { transform:translate(-50%,0); }
+    .sheet.modal { top:50%; bottom:auto; width:min(calc(100% - 40px),380px); max-height:80dvh; transform:translate(-50%,-50%); border-radius:26px; box-shadow:0 18px 48px rgba(44,26,17,.22); opacity:0; transition:none; }.sheet.modal.show { transform:translate(-50%,-50%); opacity:1; }
+    .handle { width:36px; height:4px; margin:9px auto 2px; border-radius:999px; background:#ded8d2; }.sheet-head { display:flex; align-items:center; justify-content:space-between; padding:10px 18px 12px; }.sheet-title { font-size:18px; font-weight:900; }.close { display:grid; place-items:center; width:34px; height:34px; border:0; border-radius:50%; background:#f1ede8; color:#766e66; font-size:17px; }
+    .sheet-label { padding:0 18px 14px; color:var(--muted); font-size:12px; font-weight:800; letter-spacing:.4px; }.sizes { display:grid; grid-template-columns:repeat(2,1fr); gap:10px; padding:0 18px 22px; }.size { min-height:93px; border:2px solid var(--line); border-radius:18px; background:white; color:var(--ink); font-size:20px; font-weight:900; }.size small { display:block; margin-top:7px; color:var(--brand-deep); font-size:13px; }
+    .cart { overflow:auto; padding:0 16px 12px; }.line { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:10px; padding:13px 0; border-bottom:1px solid var(--line); }.line-name { font-size:14px; font-weight:900; }.line-size { display:inline-block; margin-left:6px; border-radius:6px; padding:2px 6px; background:#f2ede8; color:var(--muted); font-size:10px; font-style:normal; font-weight:800; }.line-sub { margin-top:4px; color:var(--brand-deep); font-size:13px; font-weight:800; }.qty { display:flex; align-items:center; gap:8px; }.qty button { display:grid; place-items:center; width:30px; height:30px; border:0; border-radius:50%; font-size:18px; font-weight:800; }.minus { background:#ffeaeb; color:#be3049; }.plus { background:#e7f6ec; color:#23704a; }.qty strong { min-width:16px; text-align:center; }
+    .sheet-foot { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:auto; padding:14px 18px calc(15px + env(safe-area-inset-bottom)); border-top:1px solid var(--line); }.sheet-foot span { display:block; color:var(--muted); font-size:11px; font-weight:800; }.sheet-foot strong { font-size:21px; }.next { border:0; border-radius:16px; padding:14px 16px; background:var(--brand); color:#fff; font-size:14px; font-weight:900; }.next:disabled { opacity:.45; }
+    .checkout-screen,.cash-screen,.printer-screen,.history-screen { display:none; width:min(100%,430px); min-height:100dvh; margin:auto; padding:16px 16px 30px; background:var(--bg); }.checkout-screen.show,.cash-screen.show,.printer-screen.show,.history-screen.show { display:block; }.screen-top { display:flex; align-items:center; justify-content:space-between; padding:0 0 15px; }.screen-title { font-size:20px; font-weight:900; }.screen-close { display:grid; place-items:center; width:42px; height:42px; border:0; border-radius:50%; background:var(--brand); color:#fff; font-size:23px; }
+    /* Lịch sử đơn: mô phỏng trực tiếp UI posgieo cũ; dữ liệu chỉ nhận từ FIFO core. */
+    .history-screen { padding:0 0 32px; background:#FFFCF0; }.history-head { display:flex; align-items:center; justify-content:space-between; padding:20px 20px 16px; }.history-head strong { color:#111; font-size:26px; font-weight:700; letter-spacing:-.5px; }.history-close { display:grid; place-items:center; width:40px; height:40px; border:0; border-radius:50%; background:#E23A5D; color:#fff; font-size:22px; }.history-search { display:flex; align-items:center; gap:10px; margin:0 16px 20px; border:1.5px solid transparent; border-radius:14px; padding:12px 16px; background:#fff; }.history-search:focus-within { border-color:#C22B49; }.history-search input { min-width:0; flex:1; border:0; outline:0; color:#111; background:transparent; font:15px system-ui,-apple-system,"Segoe UI",sans-serif; }.history-search input::placeholder { color:#ccc; }.history-group { padding:0 16px 8px; }.history-date { padding:10px 0 8px; color:#111; font-size:13px; font-weight:700; }.history-item { display:flex; align-items:center; gap:14px; width:100%; margin-bottom:10px; border:1.5px solid #ece7db; border-radius:16px; padding:16px 18px; background:#fff; color:#111; text-align:left; transition:transform .12s; }.history-item:active { transform:scale(.98); }.history-icon { display:grid; place-items:center; width:44px; height:44px; flex:0 0 auto; border-radius:12px; background:#f5f2e9; }.history-info { min-width:0; flex:1; }.history-time { color:#111; font-size:17px; font-weight:700; }.history-meta { overflow:hidden; margin-top:2px; color:#999; font-size:13px; text-overflow:ellipsis; white-space:nowrap; }.history-total { color:#111; font-size:16px; font-weight:700; }.history-method { margin-top:2px; color:#999; font-size:12px; font-weight:500; text-align:right; }.history-item.app-order { border-color:#86efac; background:#f0faf4; }.history-item.app-order .history-icon { background:#dcfce7; }.history-item.app-order .history-total { color:#15803d; }.history-item.bank-order { border-color:#f6c6d2; background:#FDE6EA; }.history-item.bank-order .history-icon { background:#fff; }.history-item.bank-order .history-total { color:#C22B49; }.history-item.split-order { border-color:#ddd6fe; background:#f5f3ff; }.history-item.split-order .history-icon { background:#ede9fe; }.history-item.split-order .history-total { color:#6d28d9; }.history-empty { padding:40px 26px; color:#bbb; text-align:center; line-height:1.6; }.history-detail { display:none; position:fixed; inset:0; z-index:70; overflow:auto; padding:16px 16px 32px; background:#FFFCF0; }.history-detail.show { display:block; }.history-detail-head { position:sticky; top:0; z-index:1; display:flex; align-items:center; justify-content:space-between; padding:0 0 12px; background:#FFFCF0; }.history-detail-back { border:0; padding:8px 0; background:none; color:#E23A5D; font-size:16px; font-weight:700; }.history-detail-card { margin-bottom:12px; border-radius:20px; padding:22px 20px; background:#fff; }.history-detail-brand { color:#E23A5D; font-size:30px; font-weight:900; letter-spacing:-1px; }.history-detail-row { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; padding:14px 0; border-top:1px solid #f0f0f0; }.history-detail-item { flex:1; color:#111; font-size:16px; font-weight:700; }.history-detail-sub { display:inline-flex; margin-top:5px; border-radius:8px; padding:3px 10px; background:#FDE6EA; color:#E23A5D; font-size:12px; font-weight:700; }.history-reprint { width:100%; border:0; border-radius:14px; padding:14px; background:#E23A5D; color:#fff; font-size:15px; font-weight:800; }.history-reprint:disabled { opacity:.45; }
+    /* Màn Máy in giữ thẻ/toggle của posgieo cũ. Phần này độc lập với menu và FIFO. */
+    .printer-screen { padding:16px 0 38px; background:#FFFCF0; }.printer-head { position:sticky; top:0; z-index:3; display:flex; align-items:center; justify-content:space-between; padding:0 16px 16px; background:#FFFCF0; }.printer-head strong { color:#111; font-size:20px; }.printer-back { display:grid; place-items:center; width:40px; height:40px; border:0; border-radius:50%; background:#E23A5D; color:#fff; font-size:22px; }.printer-tabs { display:flex; gap:2px; margin:0 16px 20px; border-radius:28px; padding:4px; background:#e2e2e2; }.printer-tab { flex:1; border:0; border-radius:24px; padding:10px 0; background:transparent; color:#888; font-size:14px; font-weight:650; }.printer-tab.active { background:#E23A5D; color:#fff; }.printer-section { margin:0 16px 16px; border-radius:20px; padding:20px; background:#fff; }.printer-section-title { margin:0 16px 6px; padding:10px 4px; color:#999; font-size:11px; font-weight:800; letter-spacing:.7px; }.printer-row { display:flex; align-items:center; justify-content:space-between; gap:12px; }.printer-status-dot { width:11px; height:11px; flex:0 0 auto; border-radius:50%; background:#ccc; }.printer-name { color:#111; font-size:14px; font-weight:700; }.printer-muted { margin-top:2px; color:#999; font-size:12px; line-height:1.5; }.printer-action { width:100%; border:0; border-radius:14px; padding:13px; background:#E23A5D; color:#fff; font-size:14px; font-weight:750; }.printer-action.secondary { background:#eee; color:#111; }.printer-action.outline { border:1.5px solid #E23A5D; background:#fff; color:#E23A5D; }.printer-action + .printer-action { margin-top:8px; }.printer-field { width:100%; border:1.5px solid #e0e0e0; border-radius:14px; padding:10px 12px; outline:0; color:#111; background:#fff; font:700 15px system-ui,-apple-system,"Segoe UI",sans-serif; }.printer-field:focus { border-color:#C22B49; }.printer-label { display:block; margin:0 0 4px; color:#999; font-size:11px; }.printer-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin:12px 0; }.printer-switch { position:relative; display:inline-block; width:44px; height:26px; flex:0 0 auto; }.printer-switch input { width:0; height:0; opacity:0; }.printer-switch-track { position:absolute; inset:0; border-radius:26px; background:#ccc; transition:background .2s; }.printer-switch-track::after { position:absolute; top:3px; left:3px; width:20px; height:20px; border-radius:50%; background:#fff; box-shadow:0 1px 3px rgba(0,0,0,.25); content:""; transition:left .2s; }.printer-switch-track.on { background:#22c55e; }.printer-switch-track.on::after { left:21px; }.printer-warning { margin-bottom:14px; border-radius:12px; padding:10px 14px; background:#fffbe8; color:#b45309; font-size:12px; line-height:1.6; }.printer-diag { display:none; margin-top:10px; border-radius:12px; padding:12px; background:#f7f7f5; color:#111; font:11.5px/1.7 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; white-space:pre-wrap; word-break:break-word; }
+    .checkout-total { border-radius:22px; padding:23px; background:#fff; text-align:center; }.checkout-total span,.cash-label { display:block; color:var(--muted); font-size:11px; font-weight:850; letter-spacing:.6px; }.checkout-total strong { display:block; margin-top:5px; color:var(--brand-deep); font-size:34px; font-weight:900; letter-spacing:-1px; }
+    .member-card,.checkout-cart,.checkout-option,.checkout-full,.cash-card { margin-top:12px; border-radius:20px; background:#fff; }.member-card { padding:14px; }.member-row { display:flex; align-items:center; gap:11px; }.member-icon { display:grid; place-items:center; width:42px; height:42px; border-radius:50%; background:#eaf3ff; color:#1c5f9e; font-size:20px; }.member-info { flex:1; min-width:0; }.member-info label { display:block; color:var(--muted); font-size:10px; font-weight:850; letter-spacing:.5px; }.member-info input { width:100%; border:0; outline:0; padding:4px 0 0; color:var(--ink); background:transparent; font-size:17px; font-weight:750; }.member-find { border:0; border-radius:12px; padding:9px 14px; background:var(--brand); color:#fff; font-size:13px; font-weight:800; }.checkout-cart { width:100%; border:0; color:var(--ink); text-align:left; }
+    .member-find:disabled { opacity:.5; }.member-result { margin-top:12px; border-top:1px solid var(--line); padding:12px 2px 0; }.member-result-head { display:flex; align-items:center; justify-content:space-between; gap:10px; }.member-result-name { color:var(--ink); font-size:15px; font-weight:900; }.member-result-phone { margin-top:2px; color:var(--muted); font-size:11px; font-weight:700; }.member-result-state { border-radius:999px; padding:5px 8px; background:var(--brand-soft); color:var(--brand-deep); font-size:10px; font-weight:900; }.member-metrics { display:flex; flex-wrap:wrap; gap:7px; margin-top:10px; }.member-metric { border-radius:10px; padding:7px 9px; background:#f7f4ef; color:#665f59; font-size:11px; font-weight:800; }.member-note { margin-top:9px; border-radius:10px; padding:8px 10px; background:#fff8dc; color:#8a6814; font-size:11px; font-weight:700; }.member-result.loading,.member-result.missing,.member-result.error { color:var(--muted); font-size:12px; font-weight:750; }.member-result.error { color:var(--danger); }
+    .checkout-cart { padding:13px 14px; }.cart-caption { display:flex; align-items:center; justify-content:space-between; margin-bottom:7px; }.cart-caption span { color:var(--muted); font-size:10px; font-weight:850; letter-spacing:.5px; }.cart-caption b { border-radius:7px; padding:3px 7px; background:var(--brand-soft); color:var(--brand-deep); font-size:10px; }.mini-row { display:flex; align-items:center; justify-content:space-between; gap:9px; padding:5px 0; border-top:1px solid #f4f0ec; font-size:12px; }.mini-row em { color:var(--muted); font-style:normal; }.mini-row strong { white-space:nowrap; }
+    .payment-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:12px; }.checkout-option { min-height:130px; border:2px solid transparent; padding:16px 10px; color:var(--ink); text-align:center; }.checkout-option.selected { border-color:var(--brand); background:#f5fcf8; }.payment-icon { display:grid; place-items:center; width:56px; height:56px; margin:0 auto 11px; border-radius:16px; font-size:27px; }.cash-icon { background:#e6f6ec; }.bank-icon { background:#eaf3ff; }.checkout-option b { display:block; font-size:15px; }.checkout-full { display:flex; align-items:center; gap:14px; width:100%; border:0; padding:16px; color:#aa5b0e; text-align:left; }.split-icon { display:grid; place-items:center; width:56px; height:56px; flex:0 0 auto; border-radius:16px; background:#fff2df; font-size:26px; }.checkout-full strong,.checkout-full span { display:block; }.checkout-full strong { font-size:16px; }.checkout-full span { margin-top:3px; color:var(--muted); font-size:12px; }.checkout-full i { margin-left:auto; color:#b8b2ac; font-size:22px; font-style:normal; }.bank-area { display:none; margin-top:12px; border:1.5px solid #c9dff5; border-radius:18px; padding:14px; background:#f6fbff; color:#235a8d; font-size:12px; font-weight:700; }.bank-area.show { display:block; }
+    .cash-total { border-radius:22px; padding:24px; background:#fff; text-align:center; }.cash-total strong { font-size:34px; color:var(--brand-deep); letter-spacing:-1px; }.cash-total small { font-size:19px; color:var(--brand-deep); }.cash-card { padding:16px; }.cash-card h2 { margin:0 0 12px; color:var(--muted); font-size:11px; letter-spacing:.5px; }.suggestions { display:flex; flex-wrap:wrap; gap:8px; }.suggestions button { border:2px solid transparent; border-radius:999px; padding:9px 13px; background:var(--brand-soft); color:var(--brand-deep); font-size:13px; font-weight:850; }.suggestions button.active { border-color:var(--brand); background:#fff; }.cash-input { display:flex; align-items:center; border:2px solid #e8e0d8; border-radius:16px; padding:0 14px; }.cash-input:focus-within { border-color:var(--brand); }.cash-input input { min-width:0; flex:1; border:0; outline:0; padding:15px 0; color:var(--ink); background:transparent; font-size:25px; font-weight:900; }.cash-input b { color:var(--muted); font-size:16px; }.change-card { display:flex; align-items:center; justify-content:space-between; border:2px solid #a9dfbe; border-radius:19px; padding:16px; background:#eaf9ef; color:var(--brand-deep); }.change-card.short { border-color:#f1b5b4; background:#fff0ef; color:#b63736; }.change-card strong { display:block; margin-top:3px; font-size:24px; }.confirm-cash { width:100%; margin-top:14px; border:0; border-radius:18px; padding:17px; background:var(--brand); color:#fff; font-size:16px; font-weight:900; }.cash-feedback { display:none; margin-top:12px; border-radius:14px; padding:11px 13px; background:#fff5df; color:#956317; font-size:12px; font-weight:750; }
+    .split-screen { display:none; width:min(100%,430px); min-height:100dvh; margin:auto; padding:16px 16px 138px; background:var(--bg); }.split-screen.show { display:block; }.split-stats { display:grid; grid-template-columns:1fr 1fr; gap:10px; }.split-stat { border-radius:17px; padding:14px; background:#fff; text-align:center; }.split-stat span { display:block; color:var(--muted); font-size:10px; font-weight:850; letter-spacing:.45px; }.split-stat strong { display:block; margin-top:4px; font-size:19px; }.split-list { margin-top:13px; }.split-row { display:flex; align-items:center; gap:13px; width:100%; margin-bottom:10px; border:0; border-radius:18px; padding:15px 16px; background:#fff; color:var(--ink); text-align:left; }.split-row.paid { opacity:.42; }.split-row .split-name { flex:1; min-width:0; font-size:15px; font-weight:850; }.split-row .split-name small { display:block; margin-top:3px; color:var(--muted); font-size:11px; font-weight:650; }.split-check { display:grid; place-items:center; width:27px; height:27px; flex:0 0 auto; border:2px solid #ded7d0; border-radius:50%; color:white; font-size:15px; }.split-row.selected .split-check { border-color:var(--brand); background:var(--brand); }.split-row.paid .split-check { border-color:#7ec89a; background:#eaf9ef; color:var(--brand); }.split-price { font-size:14px; font-weight:900; white-space:nowrap; }.split-bottom { position:fixed; bottom:0; left:50%; z-index:22; display:flex; width:min(100%,430px); transform:translateX(-50%); flex-wrap:wrap; gap:9px; padding:12px 16px calc(14px + env(safe-area-inset-bottom)); border-top:1px solid var(--line); background:rgba(255,255,255,.97); box-shadow:0 -8px 24px rgba(55,37,20,.08); }.split-selected { flex:1 0 100%; }.split-selected span { display:block; color:var(--muted); font-size:10px; font-weight:850; }.split-selected strong { display:block; margin-top:1px; font-size:21px; }.split-pay { flex:1; border:0; border-radius:15px; padding:14px 9px; color:white; font-size:13px; font-weight:900; }.split-cash { background:var(--brand); }.split-bank { background:#246ca5; }.split-done { width:100%; border:0; border-radius:15px; padding:14px; background:var(--brand); color:white; font-size:14px; font-weight:900; }
+
+    /* KHO — giữ ngôn ngữ hình ảnh của posgieo cũ, nhưng chỉ nhận/gửi contract FIFO canonical. */
+    .inventory-screen { display:none; width:min(100%,430px); min-height:100dvh; margin:auto; padding:0 0 42px; background:#FFFCF0; color:#111; }.inventory-screen.show { display:block; }
+    .inv-head { position:sticky; top:0; z-index:8; display:grid; grid-template-columns:44px 1fr 44px; align-items:center; gap:8px; padding:14px 16px 10px; background:rgba(255,252,240,.96); backdrop-filter:blur(14px); }.inv-head button { display:grid; place-items:center; width:40px; height:40px; border:0; border-radius:50%; background:#E23A5D; color:#fff; font-size:22px; }.inv-head div { min-width:0; text-align:center; }.inv-head strong { display:block; overflow:hidden; font-size:20px; font-weight:800; text-overflow:ellipsis; white-space:nowrap; }.inv-head small { display:block; margin-top:1px; color:#999; font-size:10px; font-weight:750; letter-spacing:.4px; }
+    .inv-sync { display:flex; align-items:center; gap:9px; margin:0 16px 14px; border-radius:14px; padding:10px 12px; background:#fff1d6; color:#8a6513; font-size:11.5px; font-weight:750; }.inv-sync::before { width:9px; height:9px; flex:0 0 auto; border-radius:50%; background:#e5a72d; content:""; }.inv-sync.live { background:#eaf8ef; color:#187045; }.inv-sync.live::before { background:#28a96b; box-shadow:0 0 0 4px rgba(40,169,107,.12); }.inv-sync.gap { background:#fff0ee; color:#a53a3a; }.inv-sync.gap::before { background:#dc4b4b; }
+    .inv-notice { margin:0 16px 14px; border:1px solid #f1cbd3; border-radius:14px; padding:11px 13px; background:#fff5f7; color:#9d2943; font-size:12px; font-weight:700; line-height:1.5; }.inv-notice.ok { border-color:#bfe5cd; background:#effaf3; color:#176b40; }
+    .inv-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; padding:2px 16px 20px; }.inv-tile { position:relative; display:flex; min-height:146px; flex-direction:column; justify-content:space-between; overflow:hidden; border:1.5px solid #eee8dc; border-radius:23px; padding:20px 17px 17px; background:#fff; color:#111; text-align:left; box-shadow:0 5px 16px rgba(71,48,30,.045); transition:transform .12s; }.inv-tile:active { transform:scale(.97); }.inv-tile.primary { border-color:#E23A5D; background:#E23A5D; color:#fff; }.inv-tile-icon { display:grid; place-items:center; width:48px; height:48px; border-radius:15px; background:#FDE6EA; color:#C22B49; font-size:23px; }.inv-tile.primary .inv-tile-icon { background:rgba(255,255,255,.2); color:#fff; }.inv-tile strong { display:block; margin-top:18px; font-size:17px; line-height:1.15; }.inv-tile small { display:block; margin-top:4px; color:#999; font-size:11px; font-weight:650; }.inv-tile.primary small { color:rgba(255,255,255,.8); }.inv-badge { position:absolute; top:14px; right:14px; display:grid; place-items:center; min-width:25px; height:25px; border-radius:999px; padding:0 7px; background:#C22B49; color:#fff; font-size:11px; font-weight:900; }.inv-tile.primary .inv-badge { background:#fff; color:#C22B49; }
+    .inv-body { padding:0 16px 34px; }.inv-section-title { margin:18px 3px 8px; color:#999; font-size:11px; font-weight:850; letter-spacing:.65px; text-transform:uppercase; }.inv-card { margin-bottom:12px; border:1.5px solid #eee8dc; border-radius:20px; padding:17px; background:#fff; }.inv-card.compact { padding:13px 15px; }.inv-card-title { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }.inv-card-title strong { font-size:15px; }.inv-card-title small,.inv-muted { color:#999; font-size:11.5px; line-height:1.5; }.inv-pill { flex:0 0 auto; border-radius:999px; padding:5px 8px; background:#FDE6EA; color:#C22B49; font-size:10px; font-weight:850; }.inv-pill.green { background:#e6f7ed; color:#177447; }.inv-pill.amber { background:#fff1d8; color:#9b6811; }.inv-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:11px 0; border-top:1px solid #f1ede6; }.inv-row:first-child { border-top:0; }.inv-row-main { min-width:0; flex:1; }.inv-row-main strong,.inv-row-main span { display:block; }.inv-row-main span { margin-top:3px; color:#999; font-size:11.5px; }.inv-empty { border:1.5px dashed #ddd4c7; border-radius:18px; padding:30px 18px; color:#999; text-align:center; line-height:1.6; }.inv-empty strong { display:block; margin-bottom:4px; color:#555; }
+    .inv-label { display:block; margin:13px 0 6px; color:#777; font-size:10.5px; font-weight:850; letter-spacing:.45px; }.inv-field { width:100%; border:1.5px solid #e5ded3; border-radius:14px; outline:0; padding:12px 13px; background:#fff; color:#111; font:700 15px system-ui,-apple-system,"Segoe UI",sans-serif; }.inv-field:focus { border-color:#E23A5D; }.inv-field[readonly] { background:#f6f3ee; color:#777; }.inv-fields { display:grid; grid-template-columns:1fr 1fr; gap:10px; }.inv-action { width:100%; margin-top:12px; border:0; border-radius:15px; padding:14px 12px; background:#E23A5D; color:#fff; font-size:14px; font-weight:850; }.inv-action:disabled { opacity:.42; }.inv-action.secondary { background:#eeeae3; color:#333; }.inv-action.outline { border:1.5px solid #E23A5D; background:#fff; color:#C22B49; }.inv-action.danger { background:#bd354a; }.inv-actions { display:flex; gap:8px; margin-top:12px; }.inv-actions .inv-action { margin-top:0; }.inv-mini-action { flex:0 0 auto; border:0; border-radius:11px; padding:9px 11px; background:#FDE6EA; color:#C22B49; font-size:11.5px; font-weight:800; }.inv-mini-action.green { background:#e7f7ed; color:#166c40; }
+    .inv-ratios { display:flex; gap:7px; overflow:auto; padding:2px 0 4px; scrollbar-width:none; }.inv-ratio { flex:0 0 auto; border:1.5px solid #e4ded5; border-radius:999px; padding:9px 13px; background:#fff; color:#555; font-size:13px; font-weight:800; }.inv-ratio.active { border-color:#E23A5D; background:#FDE6EA; color:#C22B49; }.inv-scan-chip { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:8px; border-radius:12px; padding:9px 11px; background:#f6f3ee; color:#555; font-size:12px; }.inv-scan-chip.done { background:#e9f8ef; color:#176b40; }.inv-measure { margin-top:8px; border-radius:12px; padding:10px 11px; background:#f6f3ee; color:#555; font-size:11.5px; }.inv-measure b { color:#111; }
+    .inv-modal-layer { position:fixed; inset:0; z-index:350; display:none; align-items:center; justify-content:center; padding:20px; background:rgba(32,26,22,.45); backdrop-filter:blur(2px); }.inv-modal-layer.show { display:flex; }.inv-modal { width:min(100%,390px); max-height:86dvh; overflow:auto; border-radius:24px; padding:18px; background:#FFFCF0; box-shadow:0 20px 60px rgba(0,0,0,.23); }.inv-modal-head { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:10px; }.inv-modal-head strong { font-size:18px; }.inv-modal-close { display:grid; place-items:center; width:35px; height:35px; border:0; border-radius:50%; background:#e8e4dc; color:#666; font-size:20px; }.inv-vessels { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }.inv-vessel { border:1.5px solid #e5ded3; border-radius:14px; padding:12px 8px; background:#fff; color:#555; text-align:center; }.inv-vessel.active { border-color:#E23A5D; background:#FDE6EA; color:#C22B49; }.inv-vessel strong,.inv-vessel small { display:block; }.inv-vessel small { margin-top:3px; font-size:10px; }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <header class="header">
+      <div class="header-actions">
+        <button class="icon-btn" id="openSidebar" aria-label="Mở menu">☰</button>
+        <button class="icon-btn alert-btn" id="openAlerts" aria-label="Thông báo quan trọng"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg><span class="alert-badge" id="alertCount">2</span></button>
+      </div>
+      <strong class="brand">GIEO GIEO</strong>
+      <span class="status" id="status"><i></i><b id="statusText">MENU MẪU</b></span>
+    </header>
+    <aside class="alert-panel" id="alertPanel" aria-live="polite"></aside>
+    <div class="sidebar-overlay" id="sidebarOverlay"></div>
+    <aside class="sidebar" id="sidebar" aria-label="Menu POS" aria-hidden="true">
+      <div class="sidebar-actions"><button type="button" class="sidebar-update" id="checkUpdate"><b>↻</b><span><strong>Cập nhật</strong><small>Kiểm tra phiên bản POS</small></span></button><button type="button" class="sidebar-close" id="closeSidebar" aria-label="Đóng menu">×</button></div>
+      <nav class="sidebar-menu" id="sidebarMenu"></nav>
+    </aside>
+    <div class="notice" id="notice"></div>
+    <nav class="categories" id="categories"></nav>
+    <section class="menu" id="menu"></section>
+  </main>
+
+  <main class="checkout-screen" id="checkoutScreen"></main>
+  <main class="cash-screen" id="cashScreen"></main>
+  <main class="split-screen" id="splitScreen"></main>
+  <main class="printer-screen" id="printerScreen"></main>
+  <main class="history-screen" id="historyScreen"></main>
+  <main class="inventory-screen" id="inventoryScreen"></main>
+
+  <footer class="footer">
+    <button class="total" id="openCart"><span id="cartLabel">TẠM TÍNH · GIỎ HÀNG</span><strong id="total">0đ</strong></button>
+    <button class="pay" id="pay" disabled>THANH TOÁN <b>→</b></button>
+  </footer>
+
+  <div class="overlay" id="overlay"></div>
+  <section class="sheet" id="sheet" aria-live="polite"></section>
+  <div class="inv-modal-layer" id="inventoryModalLayer" aria-hidden="true"><section class="inv-modal" id="inventoryModal" role="dialog" aria-modal="true"></section></div>
+
+  <script>
+    /*
+      FILE POS DUY NHẤT — không Vite, React, import hay file JavaScript đi kèm.
+
+      Khi core FIFO mới đã được đặt vào chính file này, chỉ cần truyền một runtime
+      có watch('GetMenu', {}, listener). UI không gọi Firebase trực tiếp cho bán
+      hàng/tồn kho và cũng không tự tính FIFO/COGS. Riêng cấu hình Máy in cũ giữ
+      node độc lập của nó để không làm thay đổi các cổng APK đã chạy thực tế.
+    */
+    const DEMO_MENU = [
+      { name:'Sữa gạo', items:[
+        { id:'gao-nguyen-ban', name:'Sữa gạo nguyên bản', prices:{ M:25000, L:30000 } },
+        { id:'gao-la-dua', name:'Sữa gạo lá dứa', prices:{ M:29000, L:35000 } },
+        { id:'gao-matcha', name:'Sữa gạo matcha', prices:{ M:35000, L:42000 } }
+      ]},
+      { name:'Trà', items:[
+        { id:'laitac-matong', name:'Lài tắc mật ong', prices:{ L:15000 } },
+        { id:'olong-sua', name:'Ô long sữa', prices:{ M:25000, L:30000 } },
+        { id:'tra-dao', name:'Trà đào', prices:{ M:25000, L:30000 } }
+      ]},
+      { name:'Đặc biệt', items:[
+        { id:'sua-gao-phu-nam', name:'Sữa gạo Phù Nam', prices:{ M:32000, L:39000 } },
+        { id:'choco', name:'Choco latte', prices:{ M:30000, L:36000 } },
+        { id:'matcha', name:'Matcha latte', prices:{ M:30000, L:36000 } }
+      ]}
+    ];
+    const COLORS = ['#429a70','#57a6a0','#5685bf','#d58b45','#c56f84','#7770bb','#37948d'];
+    const state = { menu: DEMO_MENU, category:'all', cart:[], sheet:null, selected:null, payment:null, cashGiven:0, checkoutMessage:'', split:null, customerPhone:'', customer:null, loyaltyCustomer:null, customerLookup:'idle', customerLookupPhone:'', customerError:'' };
+    const $ = id => document.getElementById(id);
+    const money = value => Number(value || 0).toLocaleString('vi-VN') + 'đ';
+    const menuPrice = value => Math.round(Number(value || 0) / 1000) + 'K';
+    const esc = value => String(value == null ? '' : value).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+    const subtotal = () => state.cart.reduce((sum, line) => sum + line.price * line.qty, 0);
+    const findItem = id => state.menu.flatMap(group => group.items).find(item => item.id === id);
+    const cartQty = id => state.cart.filter(line => line.id === id).reduce((n, line) => n + line.qty, 0);
+    function report(message) { $('notice').textContent = message; $('notice').style.display = message ? 'block' : 'none'; }
+    function visibleGroups() { return state.category === 'all' ? state.menu : state.menu.filter(group => group.name === state.category); }
+    function renderCategories() {
+      $('categories').innerHTML = '<button class="category ' + (state.category === 'all' ? 'active' : '') + '" data-category="all">TẤT CẢ</button>' + state.menu.map(group =>
+        '<button class="category ' + (state.category === group.name ? 'active' : '') + '" data-category="' + esc(group.name) + '">' + esc(group.name) + '</button>').join('');
+      document.querySelectorAll('[data-category]').forEach(button => button.onclick = () => { state.category = button.dataset.category; render(); });
+    }
+    function renderMenu() {
+      let index = 0;
+      const cards = visibleGroups().flatMap(group => group.items).map(item => {
+        const low = Math.min(...Object.values(item.prices)); const quantity = cartQty(item.id); const color = COLORS[index++ % COLORS.length];
+        return '<button class="product" style="background:' + color + '" data-product="' + esc(item.id) + '">' +
+          (quantity ? '<span class="product-count">' + quantity + '</span>' : '') +
+          '<span class="product-name">' + esc(item.name) + '</span><span class="product-price">' + menuPrice(low) + '</span></button>';
+      }).join('');
+      $('menu').innerHTML = cards || '<div class="empty"><strong>Menu đang trống</strong>Hãy tạo món ở QUANLY trước.</div>';
+      document.querySelectorAll('[data-product]').forEach(button => button.onclick = () => choose(findItem(button.dataset.product)));
+    }
+    function renderFooter() {
+      const qty = state.cart.reduce((n, line) => n + line.qty, 0); const has = qty > 0;
+      $('cartLabel').textContent = 'TẠM TÍNH · GIỎ HÀNG' + (qty ? ' (' + qty + ')' : ''); $('total').textContent = money(subtotal()); $('pay').disabled = !has;
+    }
+    function render() { renderCategories(); renderMenu(); renderFooter(); }
+    function choose(item) { const sizes = Object.keys(item.prices); sizes.length === 1 ? add(item, sizes[0]) : openSize(item); }
+    function add(item, size) {
+      const price = Number(item.prices[size]); const current = state.cart.find(line => line.id === item.id && line.size === size);
+      if (current) current.qty++; else state.cart.push({ id:item.id, name:item.name, size, price, qty:1 });
+      closeSheet(); render();
+    }
+    const IMPORTANT_ALERTS = [
+      { icon:'!', title:'Cảnh báo tồn kho', text:'Sữa gạo nguyên bản đang thấp hơn mức tối thiểu.' },
+      { icon:'•', title:'Cần xử lý', text:'Có một tem hàng cần được xác nhận đã hết.' }
+    ];
+    const SIDEBAR_TABS = [
+      { id:'revenue', icon:'▥', title:'Doanh thu', detail:'Báo cáo tổng quan', message:'Doanh thu: sẽ nối read model báo cáo từ FIFO core.' },
+      { id:'history', icon:'◷', title:'Lịch sử', detail:'Giao dịch gần đây', message:'Lịch sử: sẽ nối danh sách bill canonical.' },
+      { id:'inventory', icon:'◇', title:'Kho', detail:'Tồn kho nguyên liệu', message:'Kho: sẽ dùng read model tồn kho từ FIFO core.' },
+      { id:'expense', icon:'₫', title:'Chi phí', detail:'Mua đá / Ship / Vật tư / Phát sinh', message:'Chi phí: màn ghi nhận đang chờ hợp đồng nghiệp vụ mới.' },
+      { id:'shift', icon:'◴', title:'Ca làm việc', detail:'Mở ca / Kết ca / Đối soát', message:'Ca làm việc: sẽ được dựng theo flow ca mới.' },
+      { id:'backfill', icon:'✓', title:'Bổ sung bill thiếu', detail:'Tạo bill lùi ngày cho ca đã kết', message:'Bổ sung bill thiếu: thao tác ngoại lệ cần mã quản lý, sẽ nối sau.' },
+      { id:'printer', icon:'⎙', title:'Máy in', detail:'Kết nối, cấu hình, in thử' }
+    ];
+    function openSidebar() {
+      $('alertPanel').classList.remove('show'); $('sidebarOverlay').classList.add('show'); $('sidebar').classList.add('show');
+      $('sidebar').setAttribute('aria-hidden', 'false'); $('openSidebar').setAttribute('aria-expanded', 'true');
+    }
+    function closeSidebar() {
+      $('sidebarOverlay').classList.remove('show'); $('sidebar').classList.remove('show');
+      $('sidebar').setAttribute('aria-hidden', 'true'); $('openSidebar').setAttribute('aria-expanded', 'false');
+    }
+    function renderSidebar() {
+      $('sidebarMenu').innerHTML = SIDEBAR_TABS.map(tab =>
+        '<button type="button" class="sidebar-item" data-sidebar-tab="' + tab.id + '"><span class="sidebar-icon">' + tab.icon + '</span><span><strong>' + tab.title + '</strong><small>' + tab.detail + '</small></span><i class="sidebar-arrow">›</i></button>'
+      ).join('');
+      $('sidebarMenu').querySelectorAll('[data-sidebar-tab]').forEach(button => button.onclick = () => {
+        const tab = SIDEBAR_TABS.find(item => item.id === button.dataset.sidebarTab); closeSidebar();
+        if (tab.id === 'history' && typeof window.openLegacyHistoryScreen === 'function') { window.openLegacyHistoryScreen(); return; }
+        if (tab.id === 'inventory' && typeof window.openInventoryScreen === 'function') { window.openInventoryScreen(); return; }
+        if (tab.id === 'printer' && typeof window.openLegacyPrinterScreen === 'function') { window.openLegacyPrinterScreen(); return; }
+        report(tab.message);
+      });
+    }
+    function renderAlerts() {
+      $('alertCount').textContent = IMPORTANT_ALERTS.length;
+      $('alertPanel').innerHTML = '<header><div><h2>Thông báo quan trọng</h2><small>Ưu tiên cần xử lý</small></div><button class="close" id="closeAlerts">×</button></header>' + IMPORTANT_ALERTS.map(alert => '<article class="alert-item"><div class="alert-icon">' + alert.icon + '</div><div><strong>' + esc(alert.title) + '</strong><span>' + esc(alert.text) + '</span></div></article>').join('');
+      $('closeAlerts').onclick = () => $('alertPanel').classList.remove('show');
+    }
+    function openSheet(html, type) {
+      const isModal = type === 'modal';
+      $('overlay').classList.toggle('show', isModal);
+      $('sheet').className = 'sheet ' + (isModal ? 'modal' : 'drawer') + ' show';
+      $('sheet').innerHTML = html;
+    }
+    function closeSheet() {
+      const wasModal = $('sheet').classList.contains('modal');
+      state.sheet = null; state.selected = null; $('overlay').classList.remove('show');
+      /* Size modal biến mất tại chỗ: không được rơi về transform của drawer rồi
+         trượt xuống đáy màn hình khi vừa bấm đóng. */
+      $('sheet').className = wasModal ? 'sheet modal' : 'sheet';
+    }
+    function openSize(item) {
+      state.sheet = 'size'; state.selected = item;
+      openSheet('<div class="handle"></div><header class="sheet-head"><strong class="sheet-title">' + esc(item.name) + '</strong><button class="close">×</button></header><div class="sheet-label">CHỌN KÍCH CỠ</div><div class="sizes">' +
+        Object.entries(item.prices).map(([size, price]) => '<button class="size" data-size="' + esc(size) + '">' + esc(size) + '<small>' + menuPrice(price) + '</small></button>').join('') + '</div>', 'modal');
+      $('sheet').querySelector('.close').onclick = closeSheet; $('sheet').querySelectorAll('[data-size]').forEach(button => button.onclick = () => add(item, button.dataset.size));
+    }
+    function openCart() {
+      state.sheet = 'cart';
+      const rows = state.cart.length ? state.cart.map(line => '<div class="line"><div><div class="line-name">' + esc(line.name) + '<em class="line-size">' + esc(line.size) + '</em></div><div class="line-sub">' + money(line.price * line.qty) + '</div></div><div class="qty"><button class="minus" data-change="-1" data-key="' + esc(line.id + '|' + line.size) + '">−</button><strong>' + line.qty + '</strong><button class="plus" data-change="1" data-key="' + esc(line.id + '|' + line.size) + '">+</button></div></div>').join('') : '<div class="cart"><div class="empty"><strong>Giỏ hàng đang trống</strong>Chọn món để bắt đầu đơn mới.</div></div>';
+      openSheet('<div class="handle"></div><header class="sheet-head"><strong class="sheet-title">Giỏ hàng</strong><button class="close">×</button></header><div class="cart">' + rows + '</div><footer class="sheet-foot"><div><span>TẠM TÍNH</span><strong>' + money(subtotal()) + '</strong></div><button class="next" ' + (state.cart.length ? '' : 'disabled') + '>Tiếp tục thanh toán</button></footer>', 'drawer');
+      $('sheet').querySelector('.close').onclick = closeSheet;
+      $('sheet').querySelectorAll('[data-change]').forEach(button => button.onclick = () => change(button.dataset.key, Number(button.dataset.change)));
+      $('sheet').querySelector('.next').onclick = openCheckout;
+    }
+    function change(key, delta) { const [id, size] = key.split('|'); const line = state.cart.find(item => item.id === id && item.size === size); line.qty += delta; if (line.qty <= 0) state.cart = state.cart.filter(item => item !== line); render(); openCart(); }
+    function checkoutLines() {
+      return state.cart.map(line => '<div class="mini-row"><div><b>' + line.qty + '× ' + esc(line.name) + '</b><em> · ' + esc(line.size) + '</em></div><strong>' + money(line.price * line.qty) + '</strong></div>').join('');
+    }
+    function openCheckout() {
+      if (!state.cart.length) return;
+      closeSheet(); state.payment = null; state.checkoutMessage = '';
+      document.querySelector('.app').style.display = 'none'; document.querySelector('.footer').style.display = 'none';
+      renderCheckout(); $('checkoutScreen').classList.add('show');
+    }
+    function backToOrder() {
+      $('checkoutScreen').classList.remove('show'); $('cashScreen').classList.remove('show'); $('splitScreen').classList.remove('show');
+      $('printerScreen').classList.remove('show'); $('historyScreen').classList.remove('show'); $('inventoryScreen').classList.remove('show');
+      document.querySelector('.app').style.display = ''; document.querySelector('.footer').style.display = 'flex'; render();
+    }
+    function normaliseCustomerPhone(value) {
+      let phone = String(value || '').replace(/[^0-9]/g, '');
+      if (/^84\d{9}$/.test(phone)) phone = '0' + phone.slice(2);
+      return phone;
+    }
+    function renderCustomerResult() {
+      if (state.customerLookup === 'loading') return '<div class="member-result loading">Đang tìm thông tin thành viên…</div>';
+      if (state.customerLookup === 'missing') return '<div class="member-result missing">Không tìm thấy thành viên với SĐT <b>' + esc(state.customerPhone) + '</b>.</div>';
+      if (state.customerLookup === 'error') return '<div class="member-result error">Không đọc được thông tin khách hàng: ' + esc(state.customerError) + '</div>';
+      if (!state.customer || !state.loyaltyCustomer) return '';
+      const customer = state.customer, loyalty = state.loyaltyCustomer;
+      const gifts = Object.values(customer.myGifts || {}).filter(gift => gift && gift.used !== true).length;
+      const metrics = [];
+      if (Number(loyalty.total_points || 0) > 0) metrics.push('🏆 ' + Number(loyalty.total_points).toLocaleString('vi-VN') + ' Point');
+      if (Number(loyalty.stamp_count || 0) > 0) metrics.push('☕ ' + Number(loyalty.stamp_count) + '/6 Stamp');
+      if (Number(loyalty.free_drink_available || 0) > 0) metrics.push('🎁 ' + Number(loyalty.free_drink_available) + ' ly miễn phí');
+      if (gifts > 0) metrics.push('🎟 ' + gifts + ' voucher');
+      return '<div class="member-result"><div class="member-result-head"><div><div class="member-result-name">' + esc(customer.name) + '</div><div class="member-result-phone">' + esc(customer.phone) + '</div></div><span class="member-result-state">THÀNH VIÊN</span></div>' +
+        (metrics.length ? '<div class="member-metrics">' + metrics.map(metric => '<span class="member-metric">' + esc(metric) + '</span>').join('') + '</div>' : '<div class="member-metrics"><span class="member-metric">Chưa có điểm hoặc stamp</span></div>') +
+        (customer.note ? '<div class="member-note">📝 ' + esc(customer.note) + '</div>' : '') + '</div>';
+    }
+    async function lookupSharedCustomer() {
+      const phone = normaliseCustomerPhone(state.customerPhone);
+      state.customerPhone = phone;
+      if (!phone) return;
+      state.customerLookup = 'loading'; state.customerLookupPhone = phone; state.customerError = ''; renderCheckout();
+      try {
+        if (!window.GIEO_FIFO_FIREBASE || typeof window.GIEO_FIFO_FIREBASE.getSharedCustomer !== 'function') throw new Error('Firebase khách hàng chưa sẵn sàng');
+        const data = await window.GIEO_FIFO_FIREBASE.getSharedCustomer(phone);
+        if (state.customerLookupPhone !== phone) return;
+        if (!data) {
+          state.customer = null; state.loyaltyCustomer = null; state.customerLookup = 'missing'; renderCheckout(); return;
+        }
+        state.loyaltyCustomer = data;
+        state.customer = { phone, name:data.nickname || data.name || 'Khách hàng', note:data.note || '', myGifts:data.myGifts || {} };
+        state.customerLookup = 'found'; renderCheckout();
+      } catch (error) {
+        if (state.customerLookupPhone !== phone) return;
+        state.customer = null; state.loyaltyCustomer = null; state.customerLookup = 'error'; state.customerError = error && error.message || String(error); renderCheckout();
+      }
+    }
+    function onCustomerPhoneInput(value) {
+      const phone = normaliseCustomerPhone(value);
+      state.customerPhone = phone;
+      const input = $('customerPhone'); if (input && input.value !== phone) input.value = phone;
+      if (state.customerLookupPhone && state.customerLookupPhone !== phone) {
+        state.customer = null; state.loyaltyCustomer = null; state.customerLookup = 'idle'; state.customerLookupPhone = ''; state.customerError = '';
+        const oldResult = document.querySelector('#checkoutScreen .member-result'); if (oldResult) oldResult.remove();
+      }
+      if (phone.length === 10) lookupSharedCustomer();
+      else if (phone.length < 6 && state.customerLookup !== 'idle') { state.customer = null; state.loyaltyCustomer = null; state.customerLookup = 'idle'; renderCheckout(); }
+    }
+    function renderCheckout() {
+      const isBank = state.payment === 'bank';
+      $('checkoutScreen').innerHTML = '<header class="screen-top"><strong class="screen-title">THANH TOÁN</strong><button class="screen-close" id="backOrder">×</button></header>' +
+        '<section class="checkout-total"><span>TỔNG HÓA ĐƠN</span><strong>' + money(subtotal()) + '</strong></section>' +
+        '<section class="member-card"><div class="member-row"><div class="member-icon">♙</div><div class="member-info"><label>KHÁCH HÀNG / TÍCH ĐIỂM</label><input id="customerPhone" inputmode="tel" autocomplete="off" placeholder="Nhập SĐT..." value="' + esc(state.customerPhone) + '"></div><button class="member-find" id="findCustomer" ' + (state.customerLookup === 'loading' ? 'disabled' : '') + '>' + (state.customerLookup === 'loading' ? 'Đang tìm' : 'Tìm') + '</button></div>' + renderCustomerResult() + '</section>' +
+        '<button class="checkout-cart" id="editCart"><div class="cart-caption"><span>GIỎ HÀNG</span><b>Chạm để sửa</b></div>' + checkoutLines() + '</button>' +
+        '<section class="payment-grid"><button class="checkout-option" id="chooseCash"><div class="payment-icon cash-icon">₫</div><b>Tiền mặt</b></button><button class="checkout-option ' + (isBank ? 'selected' : '') + '" id="chooseBank"><div class="payment-icon bank-icon">⌂</div><b>Chuyển khoản</b></button></section>' +
+        '<button class="checkout-full" id="splitBill"><div class="split-icon">⊞</div><div><strong>Tính riêng</strong><span>Tách bill cho từng khách</span></div><i>›</i></button>' +
+        '<section class="bank-area ' + (isBank ? 'show' : '') + '"><b>Chờ khách chuyển khoản</b><br>QR và trạng thái thanh toán sẽ do core thanh toán cấp trong bước nối tiếp.</section>' +
+        (state.checkoutMessage ? '<div class="cash-feedback" style="display:block">' + esc(state.checkoutMessage) + '</div>' : '');
+      $('backOrder').onclick = backToOrder;
+      $('editCart').onclick = () => { backToOrder(); setTimeout(openCart, 0); };
+      $('customerPhone').oninput = event => onCustomerPhoneInput(event.target.value);
+      $('customerPhone').onkeydown = event => { if (event.key === 'Enter') { event.preventDefault(); lookupSharedCustomer(); } };
+      $('findCustomer').onclick = lookupSharedCustomer;
+      $('chooseCash').onclick = openCash;
+      $('chooseBank').onclick = () => { state.payment = 'bank'; renderCheckout(); };
+      $('splitBill').onclick = openSplit;
+    }
+    function cashSuggestions(total) {
+      const raw = [total, 20000, 50000, 100000, 200000, 500000].map(value => Math.max(value, Math.ceil(total / Math.max(10000, value)) * Math.max(10000, value)));
+      return [...new Set(raw)].sort((a, b) => a - b).slice(0, 6);
+    }
+    function openCash() {
+      state.payment = 'cash'; state.cashGiven = subtotal(); $('checkoutScreen').classList.remove('show'); renderCash(); $('cashScreen').classList.add('show');
+    }
+    function renderCash() {
+      const total = subtotal(), given = Number(state.cashGiven || 0), diff = given - total, enough = diff >= 0;
+      $('cashScreen').innerHTML = '<header class="screen-top"><strong class="screen-title">TIỀN MẶT</strong><button class="screen-close" id="backCheckout">×</button></header>' +
+        '<section class="cash-total"><span class="cash-label">TỔNG HÓA ĐƠN</span><strong>' + money(total) + '</strong></section>' +
+        '<section class="cash-card"><h2>KHÁCH ĐƯA (GỢI Ý)</h2><div class="suggestions">' + cashSuggestions(total).map(value => '<button class="' + (given === value ? 'active' : '') + '" data-given="' + value + '">' + money(value) + '</button>').join('') + '</div></section>' +
+        '<section class="cash-card"><h2>NHẬP SỐ TIỀN KHÁCH ĐƯA</h2><div class="cash-input"><input id="cashGiven" inputmode="numeric" value="' + (given ? given.toLocaleString('vi-VN') : '') + '"><b>đ</b></div></section>' +
+        '<section class="cash-card"><div class="change-card ' + (enough ? '' : 'short') + '"><div><span class="cash-label">' + (enough ? 'TIỀN THỪA' : 'CÒN THIẾU') + '</span><strong>' + money(Math.abs(diff)) + '</strong></div><b style="font-size:28px">' + (enough ? '✓' : '!') + '</b></div></section>' +
+        '<button class="confirm-cash" id="confirmCash">XÁC NHẬN THANH TOÁN</button><div class="cash-feedback" id="cashFeedback"></div>';
+      $('backCheckout').onclick = () => { $('cashScreen').classList.remove('show'); renderCheckout(); $('checkoutScreen').classList.add('show'); };
+      $('cashScreen').querySelectorAll('[data-given]').forEach(button => button.onclick = () => { state.cashGiven = Number(button.dataset.given); renderCash(); });
+      $('cashGiven').oninput = event => { const number = Number(event.target.value.replace(/\D/g, '')) || 0; state.cashGiven = number; renderCash(); };
+      $('confirmCash').onclick = () => { $('cashFeedback').textContent = 'Nút này sẽ gọi RecordSale của FIFO core khi hợp đồng payment được nối.'; $('cashFeedback').style.display = 'block'; };
+    }
+    function splitSelectedTotal() { return [...state.split.selected].reduce((sum, index) => sum + state.split.items[index].price, 0); }
+    function splitPaidTotal() { return state.split.groups.reduce((sum, group) => sum + group.total, 0); }
+    function openSplit() {
+      const units = [];
+      state.cart.forEach(line => { for (let i = 0; i < line.qty; i++) units.push({ name:line.name, size:line.size, price:line.price, paid:false }); });
+      state.split = { items:units, selected:new Set(), groups:[] };
+      $('checkoutScreen').classList.remove('show'); renderSplit(); $('splitScreen').classList.add('show');
+    }
+    function renderSplit() {
+      const split = state.split, paid = splitPaidTotal(), remaining = Math.max(0, subtotal() - paid), chosen = splitSelectedTotal();
+      $('splitScreen').innerHTML = '<header class="screen-top"><strong class="screen-title">TÍNH RIÊNG</strong><button class="screen-close" id="backFromSplit">×</button></header>' +
+        '<section class="split-stats"><article class="split-stat"><span>ĐÃ TÍNH</span><strong>' + money(paid) + '</strong></article><article class="split-stat"><span>CÒN LẠI</span><strong>' + money(remaining) + '</strong></article></section>' +
+        '<section class="split-list">' + split.items.map((item, index) => '<button type="button" class="split-row ' + (item.paid ? 'paid' : '') + (split.selected.has(index) ? ' selected' : '') + '" data-split-item="' + index + '"><div class="split-name">' + esc(item.name) + '<small>Size ' + esc(item.size) + (item.paid ? ' · Đã thanh toán' : '') + '</small></div><strong class="split-price">' + money(item.price) + '</strong><i class="split-check">' + (item.paid ? '✓' : (split.selected.has(index) ? '✓' : '')) + '</i></button>').join('') + '</section>' +
+        '<footer class="split-bottom"><div class="split-selected"><span>ĐANG CHỌN · ' + split.selected.size + ' MÓN</span><strong>' + money(chosen) + '</strong></div><button class="split-pay split-cash" id="splitCash" ' + (chosen ? '' : 'disabled') + '>TIỀN MẶT</button><button class="split-pay split-bank" id="splitBank" ' + (chosen ? '' : 'disabled') + '>CHUYỂN KHOẢN</button>' +
+        (remaining === 0 && split.items.length ? '<button class="split-done" id="finishSplit">Hoàn tất tính riêng</button>' : '') + '</footer>';
+      $('backFromSplit').onclick = () => { $('splitScreen').classList.remove('show'); renderCheckout(); $('checkoutScreen').classList.add('show'); };
+      // Delegation keeps the whole row tappable, including its nested name/price/check elements.
+      // It also survives each render of the split screen in older Android WebViews.
+      $('splitScreen').onclick = event => {
+        let row = event.target;
+        while (row && row !== $('splitScreen') && row.getAttribute('data-split-item') === null) row = row.parentElement;
+        if (!row || row === $('splitScreen')) return;
+        event.preventDefault();
+        const index = Number(row.getAttribute('data-split-item'));
+        if (split.items[index].paid) return;
+        split.selected.has(index) ? split.selected.delete(index) : split.selected.add(index);
+        renderSplit();
+      };
+      $('splitCash').onclick = openSplitCash;
+      $('splitBank').onclick = startSplitBank;
+      const finish = $('finishSplit'); if (finish) finish.onclick = () => { $('splitScreen').classList.remove('show'); state.checkoutMessage = 'Các nhóm đã được thu đủ. Bước xác nhận Bill canonical sẽ chạy sau khi graft payment flow cũ.'; renderCheckout(); $('checkoutScreen').classList.add('show'); };
+    }
+    function markSplitPaid(method, cashGiven, cashChange, bankOrderId) {
+      const split = state.split, selected = [...split.selected], total = splitSelectedTotal();
+      if (!selected.length) return;
+      selected.forEach(index => { split.items[index].paid = true; split.items[index].method = method; });
+      split.groups.push({ method, total, itemIndexes:selected, cashGiven:cashGiven || null, cashChange:cashChange || null, bankOrderId:bankOrderId || null });
+      split.selected = new Set(); closeSheet(); renderSplit();
+    }
+    function openSplitCash() {
+      const total = splitSelectedTotal(), suggestions = cashSuggestions(total);
+      let given = total;
+      openSheet('<div class="handle"></div><header class="sheet-head"><strong class="sheet-title">Tiền mặt · ' + money(total) + '</strong><button class="close">×</button></header><div class="sheet-label">KHÁCH ĐƯA</div><div class="sizes">' + suggestions.map(value => '<button class="size" data-split-given="' + value + '">' + money(value) + '</button>').join('') + '</div><div style="padding:0 18px 22px"><button class="confirm-cash" id="confirmSplitCash">Xác nhận tiền mặt</button></div>', 'modal');
+      $('sheet').querySelector('.close').onclick = closeSheet;
+      $('sheet').querySelectorAll('[data-split-given]').forEach(button => button.onclick = () => { given = Number(button.dataset.splitGiven); $('sheet').querySelectorAll('[data-split-given]').forEach(b => b.style.outline = ''); button.style.outline = '3px solid var(--brand)'; });
+      $('confirmSplitCash').onclick = () => markSplitPaid('TIỀN MẶT', given, Math.max(0, given - total));
+    }
+    function startSplitBank() {
+      const total = splitSelectedTotal();
+      /* Hàm này chỉ bọc đúng callback của flow QR/webhook cũ. Khi graft code cũ
+         vào file, adapter nhận amount + callback này và không đổi node/endpoint. */
+      if (window.GIEO_LEGACY_PAYMENT && typeof window.GIEO_LEGACY_PAYMENT.openSplitTransfer === 'function') {
+        window.GIEO_LEGACY_PAYMENT.openSplitTransfer({ amount:total, onConfirmed: data => markSplitPaid('CHUYỂN KHOẢN', null, null, data && data.orderId) });
+        return;
+      }
+      report('Luồng QR/webhook cũ đang được graft vào file; không tự thay bằng một phương thức chuyển khoản khác.');
+    }
+    $('overlay').onclick = closeSheet; $('openCart').onclick = () => state.cart.length && openCart(); $('pay').onclick = openCheckout;
+    $('openAlerts').onclick = () => $('alertPanel').classList.toggle('show');
+    $('openSidebar').onclick = openSidebar; $('closeSidebar').onclick = closeSidebar; $('sidebarOverlay').onclick = closeSidebar;
+    $('checkUpdate').onclick = () => { closeSidebar(); report('Bạn đang dùng bản POS HTML mới nhất trong phiên làm việc này.'); };
+    renderAlerts(); renderSidebar(); render();
+
+    /* Điểm nối FIFO core, sẽ thay DEMO_MENU bằng read model canonical khi có runtime mới. */
+    if (window.GIEO_POS_RUNTIME && typeof window.GIEO_POS_RUNTIME.watch === 'function') {
+      window.GIEO_POS_RUNTIME.watch('GetMenu', {}, result => {
+        if (result && result.ok && result.value && Array.isArray(result.value.data)) { state.menu = result.value.data.map(group => ({ name:group.category.name, items:group.items.map(item => ({ id:item.menuItemId, name:item.name, prices:item.prices })) })); $('status').classList.add('live'); $('statusText').textContent = 'ĐANG BÁN'; report(''); render(); }
+      });
+    }
+  </script>
+
+  <script>
+    /*
+      KHO POS — UI legacy, dữ liệu canonical FIFO.
+
+      Đây là thin client: màn hình không đọc collection kho cũ, không tự tính tồn,
+      FIFO hoặc COGS và không dùng AdjustInventory để thay cho nghiệp vụ còn thiếu.
+      QUANLY/Core phải phát một read model GetPOSInventoryWorkspace; mọi mutation
+      đi qua runtime.command. Contract chưa đăng ký sẽ dừng rõ ràng (fail closed).
+    */
+    (() => {
+      'use strict';
+      const WORKSPACE_QUERY = 'GetPOSInventoryWorkspace';
+      const PREP_QUOTE_QUERY = 'GetPrepBatchQuote';
+      const CONTRACTS = Object.freeze({
+        receive:'ReceiveGoods', count:'CountStock', refill:'TransferStock', waste:'RecordWaste',
+        prepStart:'StartPrepBatch', prepFinish:'CompletePrepBatch', prepCancel:'CancelPrepBatch', prepEdit:'EditPrepYield',
+        open:'OpenContainer', finishOpen:'MarkOutOfStock', labelApplied:'ConfirmLabelApplied', labelReissue:'ReissueUnitLabel', lost:'ReportLostContainer'
+      });
+      const TILES = Object.freeze([
+        { id:'receive', icon:'↓', title:'Nhận hàng', detail:'Nhập theo phiếu QUANLY', primary:true },
+        { id:'count', icon:'≡', title:'Kiểm kê', detail:'Kiểm đếm mù theo lô' },
+        { id:'refill', icon:'↻', title:'Refill', detail:'Chuyển nguồn sang quầy' },
+        { id:'waste', icon:'⌁', title:'Hao hụt trong ngày', detail:'Raw và BTP cùng FIFO' },
+        { id:'prep', icon:'♨', title:'Nấu chế biến', detail:'Mẻ BTP · cân · COGS' },
+        { id:'open', icon:'◒', title:'Hàng đang mở', detail:'Mở / báo hết theo Unit' },
+        { id:'labels', icon:'▱', title:'Tem kho', detail:'In tem đúng Unit' },
+        { id:'lost', icon:'!', title:'Báo mất tem', detail:'Tạo phiếu chờ duyệt' }
+      ]);
+      const state = {
+        open:false, view:'home', workspace:null, sync:'idle', syncText:'Đang chờ FIFO runtime…', notice:'', noticeKind:'', busy:false,
+        unsubscribe:null, connectedRuntime:null, form:{}, measurements:{}, prepItemId:'', prepRatio:1, prepQuote:null, prepQuoteStatus:'idle', prepScans:[], selectedBatchId:null
+      };
+      const $inv = id => document.getElementById(id);
+      const root = () => $inv('inventoryScreen');
+      const escInv = value => String(value == null ? '' : value).replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[char]));
+      const list = name => state.workspace && Array.isArray(state.workspace[name]) ? state.workspace[name] : [];
+      const valueAt = (object, keys, fallback) => { for (const key of keys) if (object && object[key] != null) return object[key]; return fallback; };
+      const itemId = item => String(valueAt(item, ['itemId','prepStockItemId','id'], ''));
+      const prepId = item => String(valueAt(item, ['prepItemId','id'], ''));
+      const itemName = item => String(valueAt(item, ['name','itemName','title','code'], itemId(item) || 'Chưa đặt tên'));
+      const itemUnit = item => String(valueAt(item, ['unit','stockUnit','countUnitName','yieldUnit'], 'đơn vị'));
+      const formatQty = (value, unit) => Number(value || 0).toLocaleString('vi-VN', { maximumFractionDigits:3 }) + (unit ? ' ' + unit : '');
+      const formatCost = value => Number(value || 0).toLocaleString('vi-VN', { maximumFractionDigits:2 }) + 'đ';
+      const clientRef = prefix => 'pos_' + prefix + '_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+      const commandError = result => result && result.error ? (result.error.message || result.error.code || String(result.error)) : 'Core không trả kết quả hợp lệ.';
+
+      function scannerAvailable() {
+        try {
+          return !!(window.AndroidScanner && typeof window.AndroidScanner.scan === 'function' && typeof window.AndroidScanner.getScannerVersion === 'function' && Number(window.AndroidScanner.getScannerVersion()) >= 1);
+        } catch (error) { return false; }
+      }
+      const scanPending = Object.create(null);
+      let scanSeq = 0;
+      window.__androidScanResult = result => {
+        try {
+          const pending = result && scanPending[result.id];
+          if (!pending) return;
+          delete scanPending[result.id]; clearTimeout(pending.timer);
+          pending.resolve({ ok:!!result.ok, code:result.code || '', format:result.format || '', error:result.error || '' });
+        } catch (error) { console.warn('[inventory-scan]', error); }
+      };
+      function scanCode() {
+        if (!scannerAvailable()) return Promise.resolve({ ok:false, code:'', format:'', error:'no-scanner' });
+        const id = 'sc' + (++scanSeq) + '_' + Date.now();
+        return new Promise(resolve => {
+          const timer = setTimeout(() => { delete scanPending[id]; resolve({ ok:false, code:'', format:'', error:'timeout' }); }, 90000);
+          scanPending[id] = { resolve, timer };
+          try { window.AndroidScanner.scan(id); }
+          catch (error) { delete scanPending[id]; clearTimeout(timer); resolve({ ok:false, code:'', format:'', error:error.message || 'Không gọi được máy quét' }); }
+        });
+      }
+      function scanErrorText(error) {
+        if (error === 'no-scanner') return 'Máy này không có cầu nối AndroidScanner — hãy nhập mã bằng tay.';
+        if (error === 'cancelled') return 'Đã huỷ quét.';
+        if (error === 'timeout') return 'Máy quét không phản hồi — thử lại hoặc nhập mã bằng tay.';
+        if (error === 'busy') return 'Đang có một lượt quét khác.';
+        return error || 'Không quét được.';
+      }
+      window.GIEO_POS_SCANNER = Object.freeze({ available:scannerAvailable, scan:scanCode, errorText:scanErrorText });
+
+      function normaliseWorkspace(source) {
+        let data = source;
+        if (data && Object.prototype.hasOwnProperty.call(data, 'value')) data = data.value;
+        if (data && data.data && !Array.isArray(data.data)) data = data.data;
+        if (!data || typeof data !== 'object') throw new Error('GetPOSInventoryWorkspace không trả object.');
+        if (data.source !== 'QUANLY_CANONICAL') throw new Error('Từ chối workspace thiếu nguồn QUANLY_CANONICAL.');
+        return {
+          revision:data.revision || data.version || '—', observedAt:data.observedAt || data.updatedAt || null, source:'QUANLY_CANONICAL',
+          catalog:Array.isArray(data.catalog) ? data.catalog : [], purchaseOrders:Array.isArray(data.purchaseOrders) ? data.purchaseOrders : [],
+          stockCountTasks:Array.isArray(data.stockCountTasks) ? data.stockCountTasks : [], refillTasks:Array.isArray(data.refillTasks) ? data.refillTasks : [],
+          prepItems:Array.isArray(data.prepItems) ? data.prepItems : [], prepBatches:Array.isArray(data.prepBatches) ? data.prepBatches : [],
+          openUnits:Array.isArray(data.openUnits) ? data.openUnits : [], pendingLabels:Array.isArray(data.pendingLabels) ? data.pendingLabels : [],
+          labelLossCandidates:Array.isArray(data.labelLossCandidates) ? data.labelLossCandidates : [], wasteReasons:Array.isArray(data.wasteReasons) ? data.wasteReasons : [],
+          vessels:Array.isArray(data.vessels) ? data.vessels : [], prepQuotes:Array.isArray(data.prepQuotes) ? data.prepQuotes : []
+        };
+      }
+      function acceptWorkspace(result) {
+        if (result && result.ok === false) {
+          state.sync = 'gap'; state.syncText = commandError(result); state.workspace = null; renderInventory(); return;
+        }
+        try {
+          state.workspace = normaliseWorkspace(result); state.sync = 'live';
+          state.syncText = 'Đang nghe QUANLY · revision ' + state.workspace.revision + (state.workspace.observedAt ? ' · ' + new Date(state.workspace.observedAt).toLocaleTimeString('vi-VN', { hour:'2-digit', minute:'2-digit' }) : '');
+          if (state.view === 'prep' && !state.prepItemId && state.workspace.prepItems[0]) state.prepItemId = prepId(state.workspace.prepItems[0]);
+        } catch (error) { state.sync = 'gap'; state.syncText = error.message; state.workspace = null; }
+        renderInventory();
+      }
+      function connectWorkspace(force) {
+        const runtime = window.GIEO_POS_RUNTIME;
+        if (!force && state.connectedRuntime === runtime && state.unsubscribe) return;
+        if (typeof state.unsubscribe === 'function') { try { state.unsubscribe(); } catch (error) {} }
+        state.unsubscribe = null; state.connectedRuntime = runtime || null;
+        if (!runtime || typeof runtime.watch !== 'function') {
+          state.sync = 'gap'; state.syncText = 'GAP: chưa có GIEO_POS_RUNTIME để nghe ' + WORKSPACE_QUERY + '.'; renderInventory(); return;
+        }
+        state.sync = 'loading'; state.syncText = 'Đang nối read model Kho từ QUANLY…'; renderInventory();
+        try {
+          state.unsubscribe = runtime.watch(WORKSPACE_QUERY, { audience:'POS' }, acceptWorkspace) || function () {};
+        } catch (error) { state.sync = 'gap'; state.syncText = 'Không gắn được listener Kho: ' + error.message; renderInventory(); }
+      }
+      function pushWorkspace(snapshot) { acceptWorkspace({ ok:true, value:snapshot }); }
+
+      function showNotice(message, kind) { state.notice = message || ''; state.noticeKind = kind || ''; renderInventory(); }
+      function syncMarkup() { return '<div class="inv-sync ' + state.sync + '">' + escInv(state.syncText) + '</div>' + (state.notice ? '<div class="inv-notice ' + escInv(state.noticeKind) + '">' + escInv(state.notice) + '</div>' : ''); }
+      function header(title, detail) {
+        const home = state.view === 'home';
+        return '<header class="inv-head"><button type="button" data-inv-action="' + (home ? 'close' : 'back') + '" aria-label="' + (home ? 'Đóng' : 'Quay lại') + '">' + (home ? '×' : '‹') + '</button><div><strong>' + escInv(title) + '</strong><small>' + escInv(detail || 'FIFO CORE · QUANLY LIVE') + '</small></div>' + (home ? '<span></span>' : '<button type="button" data-inv-action="close" aria-label="Đóng">×</button>') + '</header>';
+      }
+      function empty(title, detail) { return '<div class="inv-empty"><strong>' + escInv(title) + '</strong>' + escInv(detail) + '</div>'; }
+      function options(items, selected, includeBlank) {
+        return (includeBlank ? '<option value="">— Chọn —</option>' : '') + items.map(item => '<option value="' + escInv(itemId(item)) + '" ' + (String(selected || '') === itemId(item) ? 'selected' : '') + '>' + escInv(itemName(item)) + ' · ' + escInv(itemUnit(item)) + '</option>').join('');
+      }
+      function tileCount(tileId) {
+        if (!state.workspace) return 0;
+        if (tileId === 'receive') return list('purchaseOrders').filter(row => !['DONE','CANCELLED'].includes(String(row.status))).length;
+        if (tileId === 'count') return list('stockCountTasks').filter(row => row.status !== 'DONE').length;
+        if (tileId === 'refill') return list('refillTasks').filter(row => !['DONE','CANCELLED'].includes(String(row.status))).length;
+        if (tileId === 'prep') return list('prepBatches').filter(row => ['STARTED','COOKING','IN_PROGRESS'].includes(String(row.status))).length;
+        if (tileId === 'open') return list('openUnits').length;
+        if (tileId === 'labels') return list('pendingLabels').length;
+        if (tileId === 'lost') return list('labelLossCandidates').length;
+        return 0;
+      }
+      function renderHome() {
+        return header('KHO NGUYÊN LIỆU') + syncMarkup() + '<section class="inv-grid">' + TILES.map(tile => {
+          const count = tileCount(tile.id);
+          return '<button type="button" class="inv-tile ' + (tile.primary ? 'primary' : '') + '" data-inv-view="' + tile.id + '">' + (count ? '<span class="inv-badge">' + count + '</span>' : '') + '<span class="inv-tile-icon">' + tile.icon + '</span><span><strong>' + escInv(tile.title) + '</strong><small>' + escInv(tile.detail) + '</small></span></button>';
+        }).join('') + '</section>';
+      }
+
+      function renderReceive() {
+        const orders = list('purchaseOrders'), catalog = list('catalog');
+        return header('NHẬN HÀNG', 'PHIẾU QUANLY → UNIT FIFO') + syncMarkup() + '<div class="inv-body">' +
+          '<div class="inv-section-title">Phiếu đang chờ</div>' + (orders.length ? orders.map(order => '<article class="inv-card compact"><div class="inv-card-title"><div><strong>' + escInv(valueAt(order, ['code','purchaseOrderCode','purchaseOrderId'], 'Phiếu nhập')) + '</strong><div class="inv-muted">' + escInv(valueAt(order, ['supplierName','supplier'], 'Không ghi nhà cung cấp')) + '</div></div><span class="inv-pill amber">' + escInv(order.status || 'PENDING') + '</span></div></article>').join('') : empty('Chưa có phiếu nhập', 'POS chỉ hiển thị phiếu do QUANLY phát qua read model canonical.')) +
+          '<div class="inv-section-title">Ghi nhận một dòng hàng</div><form class="inv-card" id="invReceiveForm"><label class="inv-label">PHIẾU NHẬP</label><select class="inv-field" name="purchaseOrderId"><option value="">Nhập ngoài phiếu / chưa gắn phiếu</option>' + orders.map(order => '<option value="' + escInv(valueAt(order, ['purchaseOrderId','id'], '')) + '">' + escInv(valueAt(order, ['code','purchaseOrderCode','purchaseOrderId'], 'Phiếu')) + '</option>').join('') + '</select><label class="inv-label">MẶT HÀNG CANONICAL</label><select class="inv-field" name="itemId" required>' + options(catalog, '', true) + '</select><div class="inv-fields"><label><span class="inv-label">SỐ NHẬN</span><input class="inv-field" name="receivedQty" type="number" min="0" step="any" inputmode="decimal" required></label><label><span class="inv-label">HỎNG / TRẢ</span><input class="inv-field" name="damagedQty" type="number" min="0" step="any" inputmode="decimal" value="0"></label></div><div class="inv-fields"><label><span class="inv-label">MÃ LÔ NCC</span><input class="inv-field" name="supplierLotCode" autocomplete="off"></label><label><span class="inv-label">HẠN DÙNG</span><input class="inv-field" name="expiresAt" type="date"></label></div><label class="inv-label">GIÁ VỐN / ĐƠN VỊ TRÊN CHỨNG TỪ</label><input class="inv-field" name="unitCost" type="number" min="0" step="any" inputmode="decimal"><label class="inv-label">GHI CHÚ</label><input class="inv-field" name="note" autocomplete="off"><button class="inv-action" type="submit" ' + (state.busy ? 'disabled' : '') + '>XÁC NHẬN NHẬN HÀNG</button></form></div>';
+      }
+      function renderCount() {
+        const tasks = list('stockCountTasks'), catalog = list('catalog');
+        return header('KIỂM KÊ', 'BLIND COUNT · KHÔNG HIỆN TỒN KỲ VỌNG') + syncMarkup() + '<div class="inv-body"><div class="inv-card"><div class="inv-card-title"><div><strong>Phiếu kiểm kê mù</strong><div class="inv-muted">Số hệ thống được cố ý ẩn. Core sẽ đối chiếu sau khi gửi.</div></div><span class="inv-pill">FIFO</span></div><form id="invCountForm"><label class="inv-label">CA / NHIỆM VỤ</label><select class="inv-field" name="stockCountTaskId"><option value="">Kiểm kê phát sinh</option>' + tasks.map(task => '<option value="' + escInv(valueAt(task, ['stockCountTaskId','id'], '')) + '">' + escInv(valueAt(task, ['name','code','stockCountTaskId'], 'Nhiệm vụ')) + '</option>').join('') + '</select><label class="inv-label">MẶT HÀNG</label><select class="inv-field" name="itemId" required>' + options(catalog, '', true) + '</select><div class="inv-fields"><label><span class="inv-label">SỐ ĐẾM / CÂN</span><input class="inv-field" name="countedQty" type="number" min="0" step="any" inputmode="decimal" required></label><label><span class="inv-label">MÃ UNIT / TEM</span><input class="inv-field" id="invCountCode" name="unitCode" autocomplete="off"></label></div><button class="inv-action outline" type="button" data-inv-action="scan-count">▣ QUÉT MÃ UNIT</button><label class="inv-label">GHI CHÚ THỰC ĐẾM</label><input class="inv-field" name="note" autocomplete="off"><button class="inv-action" type="submit" ' + (state.busy ? 'disabled' : '') + '>GỬI KẾT QUẢ KIỂM KÊ</button></form></div></div>';
+      }
+      function renderRefill() {
+        const tasks = list('refillTasks');
+        return header('REFILL', 'NHIỆM VỤ QUANLY · CHUYỂN KHO CANONICAL') + syncMarkup() + '<div class="inv-body"><div class="inv-section-title">Danh sách cần xử lý</div>' + (tasks.length ? tasks.map((task, index) => '<article class="inv-card"><div class="inv-card-title"><div><strong>' + escInv(valueAt(task, ['name','itemName'], 'Refill')) + '</strong><div class="inv-muted">' + escInv(valueAt(task, ['sourceName'], 'Kho nguồn')) + ' → ' + escInv(valueAt(task, ['destinationName'], 'Quầy')) + '</div></div><span class="inv-pill ' + (task.priority === 'HIGH' ? '' : 'amber') + '">' + escInv(task.priority || task.status || 'PENDING') + '</span></div><div class="inv-row"><div class="inv-row-main"><strong>Mức do core đề xuất</strong><span>' + escInv(task.instruction || (task.suggestedTransferQty != null ? formatQty(task.suggestedTransferQty, task.unit) : 'Chờ snapshot tính lượng chuyển')) + '</span></div></div><button type="button" class="inv-action" data-inv-action="run-refill" data-index="' + index + '" ' + (state.busy ? 'disabled' : '') + '>XÁC NHẬN REFILL</button></article>').join('') : empty('Không có nhiệm vụ Refill', 'Danh sách này cập nhật trực tiếp khi QUANLY/Core phát revision mới.')) + '</div>';
+      }
+      function measurementMarkup(target) {
+        const rows = state.measurements[target] || [];
+        if (!rows.length) return '<div class="inv-muted" style="margin-top:8px">Chưa có lần cân trừ bì.</div>';
+        return rows.map((row, index) => '<div class="inv-measure"><b>Lần ' + (index + 1) + ':</b> ' + formatQty(row.gross, row.unit) + ' − ' + formatQty(row.tareGrams, 'g') + ' = <b>' + formatQty(row.net, row.unit) + '</b> · ' + escInv(row.vesselName) + '</div>').join('');
+      }
+      function renderWaste() {
+        const raw = list('catalog').map(item => Object.assign({ domain:'raw' }, item));
+        const prep = list('prepItems').map(item => Object.assign({}, item, { domain:'prep', itemId:valueAt(item, ['prepStockItemId','stockItemId'], '') }));
+        const items = raw.concat(prep), reasons = list('wasteReasons');
+        return header('HAO HỤT TRONG NGÀY', 'RAW + BTP ĐI CHUNG FIFO ALLOCATION') + syncMarkup() + '<div class="inv-body"><form class="inv-card" id="invWasteForm"><label class="inv-label">NGUYÊN LIỆU / BTP</label><select class="inv-field" name="itemId" required><option value="">— Chọn —</option>' + items.map(item => '<option value="' + escInv(itemId(item)) + '" data-domain="' + escInv(item.domain) + '" ' + (String(state.form.itemId || '') === itemId(item) ? 'selected' : '') + '>' + escInv(itemName(item)) + ' · ' + (item.domain === 'prep' ? 'BTP' : 'Nguyên liệu') + '</option>').join('') + '</select><label class="inv-label">SỐ LƯỢNG HAO HỤT</label><input class="inv-field" name="qty" type="number" min="0" step="any" inputmode="decimal" value="' + escInv(state.form.qty || '') + '" required><button class="inv-action outline" type="button" data-inv-action="weigh-waste">⚖ CÂN TRỪ BÌ (g / kg)</button>' + measurementMarkup('waste') + '<label class="inv-label">LÝ DO</label>' + (reasons.length ? '<select class="inv-field" name="reason" required><option value="">— Chọn lý do —</option>' + reasons.map(reason => { const code = valueAt(reason, ['code','reason','name'], reason); return '<option value="' + escInv(code) + '" ' + (String(state.form.reason || '') === String(code) ? 'selected' : '') + '>' + escInv(valueAt(reason, ['name','label','reason'], reason)) + '</option>'; }).join('') + '</select>' : '<input class="inv-field" name="reason" autocomplete="off" value="' + escInv(state.form.reason || '') + '" required>') + '<button class="inv-action danger" type="submit" ' + (state.busy ? 'disabled' : '') + '>GHI NHẬN HAO HỤT</button></form></div>';
+      }
+
+      function activePrepBatches() { return list('prepBatches').filter(batch => !['CANCELLED','COMPLETED','FINISHED'].includes(String(batch.status))); }
+      function quoteForSelection() {
+        if (state.prepQuote && String(state.prepQuote.prepItemId) === String(state.prepItemId) && Number(state.prepQuote.batchRatio || state.prepQuote.ratio) === Number(state.prepRatio)) return state.prepQuote;
+        const item = list('prepItems').find(row => prepId(row) === String(state.prepItemId));
+        if (item && item.quotesByRatio && item.quotesByRatio[String(state.prepRatio)]) return item.quotesByRatio[String(state.prepRatio)];
+        return list('prepQuotes').find(quote => String(quote.prepItemId) === String(state.prepItemId) && Number(quote.batchRatio || quote.ratio) === Number(state.prepRatio)) || null;
+      }
+      function prepRequirementRows(quote) {
+        const requirements = quote && Array.isArray(quote.requirements) ? quote.requirements : [];
+        if (!requirements.length) return empty('Chưa có định mức đã resolve', 'POS không tự nhân công thức. GetPrepBatchQuote phải trả lượng nguyên liệu theo đúng version có hiệu lực.');
+        return '<div class="inv-card compact">' + requirements.map(req => '<div class="inv-row"><div class="inv-row-main"><strong>' + escInv(valueAt(req, ['itemName','name','itemId'], 'Nguyên liệu')) + '</strong><span>' + escInv(req.note || 'Theo recipe version ' + (quote.recipeVersionId || 'canonical')) + '</span></div><b>' + escInv(formatQty(valueAt(req, ['requiredQty','qty'], 0), req.unit || '')) + '</b></div>').join('') + '</div>';
+      }
+      function prepScanRows(quote) {
+        const requirements = quote && Array.isArray(quote.scanRequirements) ? quote.scanRequirements : [];
+        if (!requirements.length) return '<div class="inv-muted">Mẻ này không có nguyên liệu dạng “cái” bắt buộc quét.</div>';
+        return requirements.map((req, index) => {
+          const required = Number(valueAt(req, ['requiredCount','count'], 1));
+          const scanned = state.prepScans.filter(scan => String(scan.requirementId) === String(valueAt(req, ['requirementId','itemId'], index))).length;
+          return '<div class="inv-scan-chip ' + (scanned >= required ? 'done' : '') + '"><span><b>' + escInv(valueAt(req, ['itemName','name','itemId'], 'Unit')) + '</b><br><small>' + scanned + '/' + required + ' mã hợp lệ</small></span><button type="button" class="inv-mini-action" data-inv-action="scan-prep" data-index="' + index + '" ' + (scanned >= required ? 'disabled' : '') + '>QUÉT</button></div>';
+        }).join('');
+      }
+      function prepScansComplete(quote) {
+        const requirements = quote && Array.isArray(quote.scanRequirements) ? quote.scanRequirements : [];
+        return requirements.every((req, index) => state.prepScans.filter(scan => String(scan.requirementId) === String(valueAt(req, ['requirementId','itemId'], index))).length >= Number(valueAt(req, ['requiredCount','count'], 1)));
+      }
+      function renderPrep() {
+        const items = list('prepItems'), batches = activePrepBatches(), quote = quoteForSelection();
+        const ratios = [1,1.5,2,2.5,3,3.5,4];
+        return header('NẤU CHẾ BIẾN', 'BTP · FIFO · ACTUAL COGS') + syncMarkup() + '<div class="inv-body">' +
+          '<div class="inv-section-title">Mẻ đang nấu</div>' + (batches.length ? batches.map((batch, index) => '<article class="inv-card"><div class="inv-card-title"><div><strong>' + escInv(valueAt(batch, ['prepItemName','name','prepItemId'], 'Mẻ BTP')) + '</strong><div class="inv-muted">' + escInv(valueAt(batch, ['batchCode','prepBatchId'], '')) + ' · bắt đầu ' + escInv(valueAt(batch, ['startedAtDisplay','startedAt'], '—')) + '</div></div><span class="inv-pill green">' + escInv(batch.status || 'COOKING') + '</span></div><div class="inv-actions"><button type="button" class="inv-action" data-inv-action="prep-finish" data-index="' + index + '">HOÀN THÀNH</button><button type="button" class="inv-action outline" data-inv-action="prep-cancel" data-index="' + index + '">HỦY MẺ</button></div></article>').join('') : empty('Không có mẻ đang nấu', 'Mẻ chỉ xuất hiện sau khi StartPrepBatch được core commit thành công.')) +
+          '<div class="inv-section-title">Bắt đầu mẻ mới</div><section class="inv-card"><label class="inv-label">BÁN THÀNH PHẨM</label><select class="inv-field" id="invPrepItem"><option value="">— Chọn BTP —</option>' + items.map(item => '<option value="' + escInv(prepId(item)) + '" ' + (prepId(item) === String(state.prepItemId) ? 'selected' : '') + '>' + escInv(itemName(item)) + ' · ' + escInv(itemUnit(item)) + '</option>').join('') + '</select><label class="inv-label">SỐ MẺ</label><div class="inv-ratios">' + ratios.map(ratio => '<button type="button" class="inv-ratio ' + (Number(state.prepRatio) === ratio ? 'active' : '') + '" data-inv-action="prep-ratio" data-ratio="' + ratio + '">' + ratio + ' mẻ</button>').join('') + '</div>' +
+          (state.prepQuoteStatus === 'loading' ? '<div class="inv-muted" style="margin-top:12px">Đang xin định mức đã resolve từ core…</div>' : quote ? '<div class="inv-section-title">Nguyên liệu để nấu</div>' + prepRequirementRows(quote) + '<div class="inv-section-title">Mã nguyên liệu bắt buộc</div>' + prepScanRows(quote) + '<button type="button" class="inv-action" data-inv-action="prep-start" ' + (!prepScansComplete(quote) || state.busy ? 'disabled' : '') + '>BẮT ĐẦU NẤU MẺ</button>' : '<button type="button" class="inv-action outline" data-inv-action="prep-quote" ' + (!state.prepItemId ? 'disabled' : '') + '>TẢI ĐỊNH MỨC MẺ TỪ CORE</button><div class="inv-muted" style="margin-top:9px">Không có quote thì POS không tự tính nguyên liệu.</div>') + '</section>' +
+          '<div class="inv-section-title">Mẻ đã hoàn thành gần đây</div>' + (list('prepBatches').filter(batch => ['COMPLETED','FINISHED'].includes(String(batch.status))).slice(0, 5).map(batch => '<article class="inv-card compact"><div class="inv-card-title"><div><strong>' + escInv(valueAt(batch, ['prepItemName','name','prepItemId'], 'BTP')) + '</strong><div class="inv-muted">Yield thực: ' + escInv(formatQty(batch.actualYield, batch.yieldUnit || '')) + ' · ' + escInv(valueAt(batch, ['prepBatchId','batchCode'], '')) + '</div>' + (batch.rawCost != null || batch.costPerUnit != null ? '<div class="inv-muted" style="color:#8a6513">COGS core: ' + (batch.rawCost != null ? formatCost(batch.rawCost) + '/mẻ' : '') + (batch.rawCost != null && batch.costPerUnit != null ? ' · ' : '') + (batch.costPerUnit != null ? formatCost(batch.costPerUnit) + '/' + escInv(batch.yieldUnit || 'đơn vị') : '') + '</div>' : '') + '</div><button type="button" class="inv-mini-action" data-inv-action="prep-edit-finished" data-id="' + escInv(valueAt(batch, ['prepBatchId','id'], '')) + '">SỬA</button></div></article>').join('') || empty('Chưa có mẻ hoàn thành', 'COGS của BTP chỉ hiện sau khi core chốt yield thực.')) + '</div>';
+      }
+      function renderOpenUnits() {
+        const units = list('openUnits');
+        return header('HÀNG ĐANG MỞ', 'TRẠNG THÁI THEO UNIT CANONICAL') + syncMarkup() + '<div class="inv-body"><div class="inv-actions"><button type="button" class="inv-action" data-inv-action="scan-open">▣ QUÉT ĐỂ MỞ</button><button type="button" class="inv-action outline" data-inv-action="scan-finish-open">QUÉT BÁO HẾT</button></div><div class="inv-section-title">Đang sử dụng</div>' + (units.length ? units.map(unit => '<article class="inv-card compact"><div class="inv-card-title"><div><strong>' + escInv(valueAt(unit, ['itemName','name','itemId'], 'Unit')) + '</strong><div class="inv-muted">' + escInv(valueAt(unit, ['labelCode','unitCode','unitId'], '')) + ' · mở ' + escInv(valueAt(unit, ['openedAtDisplay','openedAt'], '—')) + '</div></div><span class="inv-pill green">' + escInv(formatQty(valueAt(unit, ['remainingQty','qty'], 0), unit.unit)) + '</span></div></article>').join('') : empty('Chưa có hàng đang mở', 'Danh sách được chiếu từ trạng thái Unit của FIFO core.')) + '</div>';
+      }
+      function renderLabels() {
+        const labels = list('pendingLabels');
+        return header('TEM KHO', 'IN THEO DANH TÍNH UNIT') + syncMarkup() + '<div class="inv-body"><div class="inv-section-title">Tem chờ in / xác nhận</div>' + (labels.length ? labels.map((label, index) => '<article class="inv-card"><div class="inv-card-title"><div><strong>' + escInv(valueAt(label, ['itemName','name'], 'Tem kho')) + '</strong><div class="inv-muted">' + escInv(valueAt(label, ['labelCode','unitId','labelId'], '')) + '</div></div><span class="inv-pill amber">' + escInv(label.status || 'PENDING') + '</span></div><button type="button" class="inv-action" data-inv-action="print-label" data-index="' + index + '">🖨 IN TEM</button></article>').join('') : empty('Không có tem đang chờ', 'Tạo Unit và nghiệp vụ in tem là hai bước tách biệt; lỗi máy in không được rollback Unit.')) + '<button type="button" class="inv-action outline" data-inv-action="scan-reissue">QUÉT UNIT ĐỂ XIN IN LẠI</button></div>';
+      }
+      function renderLost() {
+        const candidates = list('labelLossCandidates');
+        return header('BÁO MẤT TEM', 'TẠO PHIẾU PENDING_REVIEW') + syncMarkup() + '<div class="inv-body"><form class="inv-card" id="invLostForm"><label class="inv-label">UNIT / MÃ TEM</label><select class="inv-field" name="unitId"><option value="">— Quét hoặc chọn —</option>' + candidates.map(unit => '<option value="' + escInv(valueAt(unit, ['unitId','id'], '')) + '">' + escInv(valueAt(unit, ['itemName','name'], 'Unit')) + ' · ' + escInv(valueAt(unit, ['labelCode','unitCode','unitId'], '')) + '</option>').join('') + '</select><input class="inv-field" style="margin-top:8px" id="invLostCode" name="unitCode" autocomplete="off" placeholder="Hoặc nhập mã tem"><button class="inv-action outline" type="button" data-inv-action="scan-lost">▣ QUÉT MÃ TEM</button><label class="inv-label">LÝ DO / DIỄN GIẢI</label><input class="inv-field" name="reason" autocomplete="off" required><div class="inv-muted" style="margin-top:10px">Báo mất không tự xóa Unit. QUANLY phải duyệt phiếu trước khi trạng thái kho thay đổi.</div><button class="inv-action danger" type="submit" ' + (state.busy ? 'disabled' : '') + '>GỬI PHIẾU BÁO MẤT</button></form></div>';
+      }
+      function selectedBatch() { return list('prepBatches').find(batch => String(valueAt(batch, ['prepBatchId','id'], '')) === String(state.selectedBatchId)); }
+      function renderPrepFinish() {
+        const batch = selectedBatch(), unit = String(valueAt(batch, ['yieldUnit','unit'], 'g')).toLowerCase();
+        const canWeigh = unit === 'g' || unit === 'kg';
+        return header('HOÀN THÀNH CHẾ BIẾN', 'NHẬP YIELD THỰC · KHÔNG GỢI Ý YIELD') + syncMarkup() + '<div class="inv-body"><section class="inv-card"><div class="inv-card-title"><div><strong>' + escInv(valueAt(batch, ['prepItemName','name','prepItemId'], 'Mẻ BTP')) + '</strong><div class="inv-muted">' + escInv(valueAt(batch, ['prepBatchId','batchCode'], '')) + '</div></div><span class="inv-pill green">COOKING</span></div><form id="invPrepFinishForm"><label class="inv-label">THÀNH PHẨM THỰC THU (' + escInv(unit) + ')</label><input class="inv-field" name="actualYield" type="number" min="0" step="any" inputmode="decimal" value="' + escInv(state.form.actualYield || '') + '" required>' + (canWeigh ? '<button class="inv-action outline" type="button" data-inv-action="weigh-prep" data-unit="' + escInv(unit) + '">⚖ CÂN TRỪ BÌ</button>' + measurementMarkup('prepYield') : '<div class="inv-notice" style="margin:10px 0 0">Cân trừ bì chỉ áp dụng cho g/kg. Không tự đổi ml/l vì chưa có mật độ.</div>') + '<label class="inv-label">GHI CHÚ HOÀN THÀNH</label><input class="inv-field" name="note" autocomplete="off" value="' + escInv(state.form.note || '') + '"><button class="inv-action" type="submit" ' + (state.busy ? 'disabled' : '') + '>XÁC NHẬN THÀNH PHẨM</button></form></section></div>';
+      }
+      function renderPrepCancel() {
+        const batch = selectedBatch();
+        return header('HỦY MẺ CHẾ BIẾN', 'CORE ĐẢO ĐÚNG ALLOCATION GỐC') + syncMarkup() + '<div class="inv-body"><form class="inv-card" id="invPrepCancelForm"><strong>' + escInv(valueAt(batch, ['prepItemName','name','prepItemId'], 'Mẻ BTP')) + '</strong><div class="inv-muted">' + escInv(valueAt(batch, ['prepBatchId','batchCode'], '')) + '</div><label class="inv-label">LÝ DO HỦY BẮT BUỘC</label><input class="inv-field" name="reason" autocomplete="off" required><div class="inv-muted" style="margin-top:10px">POS không tự dựng lại công thức hiện tại để hoàn nguyên. CancelPrepBatch phải dùng allocation snapshot đã khóa khi bắt đầu.</div><button class="inv-action danger" type="submit" ' + (state.busy ? 'disabled' : '') + '>XÁC NHẬN HỦY MẺ</button></form></div>';
+      }
+      function renderPrepEdit() {
+        const batch = selectedBatch();
+        return header('SỬA THÀNH PHẨM THỰC THU', 'YÊU CẦU QUYỀN QUẢN LÝ + LÝ DO') + syncMarkup() + '<div class="inv-body"><form class="inv-card" id="invPrepEditForm"><strong>' + escInv(valueAt(batch, ['prepItemName','name','prepItemId'], 'Mẻ BTP')) + '</strong><div class="inv-muted">Yield đang ghi nhận: ' + escInv(formatQty(batch && batch.actualYield, batch && batch.yieldUnit)) + '</div><label class="inv-label">YIELD MỚI</label><input class="inv-field" name="newYield" type="number" min="0" step="any" inputmode="decimal" required><label class="inv-label">LÝ DO SỬA</label><input class="inv-field" name="reason" autocomplete="off" required><label class="inv-label">MÃ QUẢN LÝ</label><input class="inv-field" name="managerPin" type="password" inputmode="numeric" autocomplete="off" required><button class="inv-action" type="submit" ' + (state.busy ? 'disabled' : '') + '>GỬI YÊU CẦU SỬA YIELD</button></form></div>';
+      }
+      function renderInventory() {
+        if (!root()) return;
+        const views = {
+          home:renderHome, receive:renderReceive, count:renderCount, refill:renderRefill, waste:renderWaste,
+          prep:renderPrep, open:renderOpenUnits, labels:renderLabels, lost:renderLost,
+          'prep-finish':renderPrepFinish, 'prep-cancel':renderPrepCancel, 'prep-edit':renderPrepEdit
+        };
+        root().innerHTML = (views[state.view] || renderHome)();
+        bindInventoryView();
+      }
+      function setView(view) {
+        state.view = view; state.notice = ''; state.noticeKind = ''; state.form = {};
+        if (view !== 'waste') state.measurements.waste = [];
+        if (view !== 'prep-finish') state.measurements.prepYield = [];
+        renderInventory();
+        if (view === 'prep' && state.prepItemId && !quoteForSelection()) requestPrepQuote();
+      }
+      function registered(runtime, type, name) {
+        const method = type === 'command' ? 'registeredCommands' : 'registeredQueries';
+        if (typeof runtime[method] !== 'function') return true;
+        try { return runtime[method]().includes(name); } catch (error) { return true; }
+      }
+      async function runCore(name, payload, successMessage, afterSuccess) {
+        if (state.busy) return false;
+        const runtime = window.GIEO_POS_RUNTIME;
+        if (!runtime || typeof runtime.command !== 'function') { showNotice('GAP: chưa có FIFO runtime.command để chạy ' + name + '.'); return false; }
+        if (!registered(runtime, 'command', name)) { showNotice('GAP CONTRACT: FIFO core hiện chưa đăng ký ' + name + '. POS đã dừng, không ghi Firebase trực tiếp và không thay bằng AdjustInventory.'); return false; }
+        state.busy = true; state.notice = ''; renderInventory();
+        try {
+          const result = await runtime.command(name, payload || {});
+          if (!result || result.ok !== true) { state.busy = false; showNotice(name + ' không thành công: ' + commandError(result)); return false; }
+          state.busy = false; state.notice = successMessage || (name + ' đã được core chấp nhận.'); state.noticeKind = 'ok';
+          if (typeof afterSuccess === 'function') afterSuccess(result.value);
+          renderInventory(); return true;
+        } catch (error) { state.busy = false; showNotice(name + ' lỗi: ' + error.message); return false; }
+      }
+      async function requestPrepQuote() {
+        if (!state.prepItemId) return;
+        const cached = quoteForSelection();
+        if (cached) { state.prepQuote = cached; state.prepQuoteStatus = 'ready'; renderInventory(); return; }
+        const runtime = window.GIEO_POS_RUNTIME;
+        if (!runtime || typeof runtime.query !== 'function' || !registered(runtime, 'query', PREP_QUOTE_QUERY)) {
+          state.prepQuote = null; state.prepQuoteStatus = 'gap';
+          showNotice('GAP CONTRACT: cần ' + PREP_QUOTE_QUERY + ' để core resolve recipe/yield version. POS không tự nhân định mức.'); return;
+        }
+        state.prepQuoteStatus = 'loading'; state.notice = ''; renderInventory();
+        try {
+          const result = await runtime.query(PREP_QUOTE_QUERY, { prepItemId:state.prepItemId, batchRatio:Number(state.prepRatio) });
+          if (!result || result.ok !== true) { state.prepQuoteStatus = 'gap'; showNotice(PREP_QUOTE_QUERY + ' lỗi: ' + commandError(result)); return; }
+          let quote = result.value && result.value.data != null ? result.value.data : result.value;
+          state.prepQuote = quote; state.prepQuoteStatus = 'ready'; state.prepScans = []; renderInventory();
+        } catch (error) { state.prepQuoteStatus = 'gap'; showNotice(PREP_QUOTE_QUERY + ' lỗi: ' + error.message); }
+      }
+      function closeInventoryModal() {
+        const layer = $inv('inventoryModalLayer'); layer.classList.remove('show'); layer.setAttribute('aria-hidden', 'true'); $inv('inventoryModal').innerHTML = '';
+      }
+      function openManualCode(title, message, callback) {
+        const layer = $inv('inventoryModalLayer'), modal = $inv('inventoryModal');
+        modal.innerHTML = '<header class="inv-modal-head"><strong>' + escInv(title) + '</strong><button type="button" class="inv-modal-close" id="invModalClose">×</button></header>' + (message ? '<div class="inv-notice" style="margin:0 0 12px">' + escInv(message) + '</div>' : '') + '<label class="inv-label">MÃ TRÊN TEM</label><input class="inv-field" id="invManualCode" autocomplete="off" inputmode="text" autofocus><button type="button" class="inv-action" id="invManualConfirm">XÁC NHẬN MÃ</button>';
+        layer.classList.add('show'); layer.setAttribute('aria-hidden', 'false');
+        $inv('invModalClose').onclick = closeInventoryModal;
+        $inv('invManualConfirm').onclick = () => { const code = $inv('invManualCode').value.trim(); if (!code) return; closeInventoryModal(); callback(code, 'MANUAL'); };
+        $inv('invManualCode').onkeydown = event => { if (event.key === 'Enter') { event.preventDefault(); $inv('invManualConfirm').click(); } };
+        setTimeout(() => { const input = $inv('invManualCode'); if (input) input.focus(); }, 30);
+      }
+      async function requestCode(title, callback) {
+        const result = await scanCode();
+        if (result.ok) { callback(result.code, 'ANDROID_SCANNER', result.format); return; }
+        if (result.error === 'cancelled') { showNotice(scanErrorText(result.error)); return; }
+        openManualCode(title, scanErrorText(result.error), callback);
+      }
+      function rememberForm(formId) {
+        const form = $inv(formId); if (!form) return;
+        const data = new FormData(form); data.forEach((value, key) => { state.form[key] = value; });
+      }
+      function vesselId(vessel) { return String(valueAt(vessel, ['vesselId','id'], '')); }
+      function vesselTare(vessel) { return Number(valueAt(vessel, ['tareGrams','tareG','weightG'], NaN)); }
+      function openWeigh(target, unit) {
+        unit = String(unit || 'g').toLowerCase();
+        if (unit !== 'g' && unit !== 'kg') { showNotice('Cân trừ bì chỉ hỗ trợ g/kg; không tự suy ra ml/l khi thiếu mật độ.'); return; }
+        const vessels = list('vessels').filter(vessel => Number.isFinite(vesselTare(vessel)) && vesselTare(vessel) >= 0);
+        if (!vessels.length) { showNotice('QUANLY chưa phát cấu hình dụng cụ cân/tare trong workspace.'); return; }
+        const layer = $inv('inventoryModalLayer'), modal = $inv('inventoryModal'); let selected = vesselId(vessels[0]);
+        const paint = () => {
+          modal.innerHTML = '<header class="inv-modal-head"><strong>CÂN TRỪ BÌ</strong><button type="button" class="inv-modal-close" id="invModalClose">×</button></header><div class="inv-muted">Chọn dụng cụ đã cân bì từ QUANLY. Khối lượng tổng nhập bằng <b>' + escInv(unit) + '</b>.</div><label class="inv-label">DỤNG CỤ</label><div class="inv-vessels">' + vessels.map(vessel => '<button type="button" class="inv-vessel ' + (vesselId(vessel) === selected ? 'active' : '') + '" data-vessel="' + escInv(vesselId(vessel)) + '"><strong>' + escInv(valueAt(vessel, ['name','label'], vesselId(vessel))) + '</strong><small>Bì ' + escInv(formatQty(vesselTare(vessel), 'g')) + '</small></button>').join('') + '</div><label class="inv-label">KHỐI LƯỢNG TỔNG (' + escInv(unit) + ')</label><input class="inv-field" id="invGrossWeight" type="number" min="0" step="any" inputmode="decimal"><button type="button" class="inv-action" id="invAddMeasure">THÊM LẦN CÂN</button>';
+          $inv('invModalClose').onclick = closeInventoryModal;
+          modal.querySelectorAll('[data-vessel]').forEach(button => button.onclick = () => { selected = button.dataset.vessel; paint(); });
+          $inv('invAddMeasure').onclick = () => {
+            const vessel = vessels.find(row => vesselId(row) === selected), gross = Number($inv('invGrossWeight').value), factor = unit === 'kg' ? 1000 : 1;
+            const grossGrams = gross * factor, tareGrams = vesselTare(vessel), netGrams = grossGrams - tareGrams;
+            if (!(gross > 0) || !(netGrams > 0)) { $inv('invGrossWeight').focus(); return; }
+            const evidence = { method:'TARE_SCALE', vesselId:selected, vesselName:valueAt(vessel, ['name','label'], selected), gross, unit, grossGrams, tareGrams, net:netGrams / factor, netGrams, capturedAt:new Date().toISOString() };
+            (state.measurements[target] || (state.measurements[target] = [])).push(evidence);
+            const totalNet = state.measurements[target].reduce((sum, row) => sum + Number(row.net), 0);
+            if (target === 'prepYield') state.form.actualYield = Number(totalNet.toFixed(6));
+            if (target === 'waste') state.form.qty = Number(totalNet.toFixed(6));
+            closeInventoryModal(); renderInventory();
+          };
+        };
+        layer.classList.add('show'); layer.setAttribute('aria-hidden', 'false'); paint();
+      }
+      function findUnitIdByCode(code) {
+        const rows = list('openUnits').concat(list('labelLossCandidates'));
+        const found = rows.find(unit => [unit.unitId, unit.unitCode, unit.labelCode, unit.code].filter(Boolean).some(value => String(value) === String(code)));
+        return found ? valueAt(found, ['unitId','id'], '') : '';
+      }
+      function scanPrepRequirement(index) {
+        const quote = quoteForSelection(), requirements = quote && Array.isArray(quote.scanRequirements) ? quote.scanRequirements : [], req = requirements[index];
+        if (!req) return;
+        requestCode('MÃ NGUYÊN LIỆU', (code, method, format) => {
+          if (state.prepScans.some(scan => scan.code === code)) { showNotice('Mã này đã được quét trong mẻ hiện tại.'); return; }
+          const allowed = Array.isArray(req.eligibleUnitCodes) ? req.eligibleUnitCodes : Array.isArray(req.allowedUnitCodes) ? req.allowedUnitCodes : null;
+          if (allowed && !allowed.map(String).includes(String(code))) { showNotice('Mã không thuộc tập Unit hợp lệ mà core cấp cho nguyên liệu này.'); return; }
+          state.prepScans.push({ requirementId:valueAt(req, ['requirementId','itemId'], index), itemId:req.itemId || null, code, method, format:format || '', scannedAt:new Date().toISOString() }); renderInventory();
+        });
+      }
+      function prepBatchByActiveIndex(index) { return activePrepBatches()[index] || null; }
+
+      async function printStockLabel(index) {
+        const label = list('pendingLabels')[index]; if (!label) return;
+        const printer = window.GIEO_LEGACY_PRINTER;
+        if (!printer || typeof printer.printLabel !== 'function') { showNotice('Máy in tem chưa sẵn sàng. Unit vẫn được giữ nguyên.'); return; }
+        const payload = label.printPayload || label.lines || [], lines = Array.isArray(payload) ? payload : payload.lines;
+        if (!Array.isArray(lines) || !lines.length) { showNotice('Read model chưa cấp printPayload cho tem này.'); return; }
+        try {
+          const sent = await Promise.resolve(printer.printLabel(lines, Number(label.copies || 1)));
+          if (sent === false) { showNotice('APK báo không gửi được tem. Unit không bị rollback.'); return; }
+          await runCore(CONTRACTS.labelApplied, { labelId:valueAt(label, ['labelId','id'], ''), unitId:label.unitId, printedAt:new Date().toISOString(), clientRef:clientRef('label') }, 'Đã in và xác nhận tem với core.');
+        } catch (error) { showNotice('Không in được tem: ' + error.message + '. Unit không bị rollback.'); }
+      }
+
+      function bindInventoryView() {
+        const host = root(); if (!host) return;
+        host.querySelectorAll('[data-inv-view]').forEach(button => button.onclick = () => setView(button.dataset.invView));
+        host.querySelectorAll('[data-inv-action]').forEach(button => button.onclick = async event => {
+          const action = event.currentTarget.dataset.invAction;
+          if (action === 'close') { closeInventoryScreen(); return; }
+          if (action === 'back') { setView(['prep-finish','prep-cancel','prep-edit'].includes(state.view) ? 'prep' : 'home'); return; }
+          if (action === 'scan-count') { requestCode('MÃ UNIT KIỂM KÊ', code => { const input = $inv('invCountCode'); if (input) input.value = code; }); return; }
+          if (action === 'run-refill') { const task = list('refillTasks')[Number(event.currentTarget.dataset.index)]; if (task) runCore(CONTRACTS.refill, { refillTaskId:valueAt(task, ['refillTaskId','id'], ''), quoteRevision:state.workspace && state.workspace.revision, clientRef:clientRef('refill') }, 'Đã gửi Refill; chờ workspace QUANLY cập nhật.'); return; }
+          if (action === 'weigh-waste') { rememberForm('invWasteForm'); openWeigh('waste', valueAt(list('catalog').find(row => itemId(row) === state.form.itemId) || list('prepItems').find(row => String(valueAt(row, ['prepStockItemId','stockItemId'], '')) === String(state.form.itemId)), ['unit','yieldUnit'], 'g')); return; }
+          if (action === 'prep-ratio') { state.prepRatio = Number(event.currentTarget.dataset.ratio); state.prepQuote = null; state.prepQuoteStatus = 'idle'; state.prepScans = []; renderInventory(); requestPrepQuote(); return; }
+          if (action === 'prep-quote') { requestPrepQuote(); return; }
+          if (action === 'scan-prep') { scanPrepRequirement(Number(event.currentTarget.dataset.index)); return; }
+          if (action === 'prep-start') { const quote = quoteForSelection(); if (!quote || !prepScansComplete(quote)) return; runCore(CONTRACTS.prepStart, { prepItemId:state.prepItemId, batchRatio:Number(state.prepRatio), quoteId:valueAt(quote, ['quoteId','id'], null), recipeVersionId:quote.recipeVersionId || null, yieldVersionId:quote.yieldVersionId || null, scanEvidence:state.prepScans.slice(), batchRef:clientRef('prep'), workspaceRevision:state.workspace && state.workspace.revision }, 'Đã bắt đầu mẻ; nguyên liệu phải được core khóa/trừ theo allocation của mẻ.', () => { state.prepScans = []; state.prepQuote = null; }); return; }
+          if (action === 'prep-finish' || action === 'prep-cancel') { const batch = prepBatchByActiveIndex(Number(event.currentTarget.dataset.index)); if (!batch) return; state.selectedBatchId = valueAt(batch, ['prepBatchId','id'], ''); if (action === 'prep-finish') state.measurements.prepYield = []; setView(action === 'prep-finish' ? 'prep-finish' : 'prep-cancel'); return; }
+          if (action === 'prep-edit-finished') { state.selectedBatchId = event.currentTarget.dataset.id; setView('prep-edit'); return; }
+          if (action === 'weigh-prep') { rememberForm('invPrepFinishForm'); openWeigh('prepYield', event.currentTarget.dataset.unit); return; }
+          if (action === 'scan-open' || action === 'scan-finish-open') { const command = action === 'scan-open' ? CONTRACTS.open : CONTRACTS.finishOpen; requestCode(action === 'scan-open' ? 'MÃ TEM CẦN MỞ' : 'MÃ TEM ĐÃ HẾT', code => runCore(command, { unitCode:code, unitId:findUnitIdByCode(code) || null, scannedAt:new Date().toISOString(), clientRef:clientRef('unit') }, action === 'scan-open' ? 'Đã gửi mở Unit.' : 'Đã gửi báo hết Unit.')); return; }
+          if (action === 'print-label') { printStockLabel(Number(event.currentTarget.dataset.index)); return; }
+          if (action === 'scan-reissue') { requestCode('UNIT CẦN IN LẠI TEM', code => runCore(CONTRACTS.labelReissue, { unitCode:code, unitId:findUnitIdByCode(code) || null, reason:'POS_REQUESTED_REPRINT', clientRef:clientRef('reissue') }, 'Đã tạo yêu cầu in lại đúng danh tính Unit.')); return; }
+          if (action === 'scan-lost') { requestCode('MÃ TEM BỊ MẤT', code => { const input = $inv('invLostCode'); if (input) input.value = code; }); }
+        });
+        const prepSelect = $inv('invPrepItem'); if (prepSelect) prepSelect.onchange = event => { state.prepItemId = event.target.value; state.prepQuote = null; state.prepQuoteStatus = 'idle'; state.prepScans = []; renderInventory(); if (state.prepItemId) requestPrepQuote(); };
+        const receive = $inv('invReceiveForm'); if (receive) receive.onsubmit = event => { event.preventDefault(); const data = Object.fromEntries(new FormData(receive)); runCore(CONTRACTS.receive, { receiptRef:clientRef('receipt'), purchaseOrderId:data.purchaseOrderId || null, lines:[{ itemId:data.itemId, receivedQty:Number(data.receivedQty), damagedQty:Number(data.damagedQty || 0), supplierLotCode:data.supplierLotCode || null, expiresAt:data.expiresAt || null, unitCost:data.unitCost === '' ? null : Number(data.unitCost) }], note:data.note || '', workspaceRevision:state.workspace && state.workspace.revision }, 'Đã gửi nhận hàng; Unit/cost basis phải do core tạo.'); };
+        const count = $inv('invCountForm'); if (count) count.onsubmit = event => { event.preventDefault(); const data = Object.fromEntries(new FormData(count)); runCore(CONTRACTS.count, { countRef:clientRef('count'), stockCountTaskId:data.stockCountTaskId || null, observations:[{ itemId:data.itemId, unitCode:data.unitCode || null, countedQty:Number(data.countedQty), note:data.note || '' }], workspaceRevision:state.workspace && state.workspace.revision }, 'Đã gửi số thực đếm; core sẽ đối chiếu mà POS không dùng số cache.'); };
+        const waste = $inv('invWasteForm'); if (waste) waste.onsubmit = event => { event.preventDefault(); const data = Object.fromEntries(new FormData(waste)), select = waste.elements.itemId, selected = select.options[select.selectedIndex], domain = selected && selected.dataset.domain; runCore(CONTRACTS.waste, { wasteRef:clientRef('waste'), itemId:data.itemId, qty:Number(data.qty), domain, reason:data.reason, measurementEvidence:(state.measurements.waste || []).slice() }, 'Đã ghi hao hụt qua FIFO allocation.', () => { state.measurements.waste = []; state.form = {}; }); };
+        const lost = $inv('invLostForm'); if (lost) lost.onsubmit = event => { event.preventDefault(); const data = Object.fromEntries(new FormData(lost)), resolved = data.unitId || findUnitIdByCode(data.unitCode); if (!resolved) { showNotice('Không resolve được mã tem thành unitId canonical từ workspace; chưa gửi báo mất.'); return; } runCore(CONTRACTS.lost, { unitId:resolved, reason:data.reason }, 'Đã tạo phiếu báo mất PENDING_REVIEW.'); };
+        const finish = $inv('invPrepFinishForm'); if (finish) finish.onsubmit = event => { event.preventDefault(); const data = Object.fromEntries(new FormData(finish)), batch = selectedBatch(); runCore(CONTRACTS.prepFinish, { prepBatchId:state.selectedBatchId, actualYield:Number(data.actualYield), yieldUnit:valueAt(batch, ['yieldUnit','unit'], null), measurementEvidence:(state.measurements.prepYield || []).slice(), note:data.note || '', completionRef:clientRef('prepfinish') }, 'Đã hoàn thành mẻ; core sẽ tạo Unit BTP và tính cost/unit từ allocation gốc.', () => { state.measurements.prepYield = []; state.form = {}; state.view = 'prep'; }); };
+        const cancel = $inv('invPrepCancelForm'); if (cancel) cancel.onsubmit = event => { event.preventDefault(); const data = Object.fromEntries(new FormData(cancel)); runCore(CONTRACTS.prepCancel, { prepBatchId:state.selectedBatchId, reason:data.reason, cancelRef:clientRef('prepcancel') }, 'Đã hủy mẻ theo allocation snapshot ban đầu.', () => { state.view = 'prep'; }); };
+        const edit = $inv('invPrepEditForm'); if (edit) edit.onsubmit = event => { event.preventDefault(); const data = Object.fromEntries(new FormData(edit)), batch = selectedBatch(); runCore(CONTRACTS.prepEdit, { prepBatchId:state.selectedBatchId, prepStockItemId:batch && batch.prepStockItemId, prepUnitId:batch && batch.prepUnitId, newYield:Number(data.newYield), reason:data.reason, managerPin:data.managerPin, editRef:clientRef('yieldedit') }, 'Đã gửi sửa yield; quyền quản lý và COGS được core kiểm tra.', () => { state.view = 'prep'; }); };
+      }
+      function openInventoryScreen() {
+        closeSheet(); ['checkoutScreen','cashScreen','splitScreen','printerScreen','historyScreen'].forEach(id => { const node = $inv(id); if (node) node.classList.remove('show'); });
+        document.querySelector('.app').style.display = 'none'; document.querySelector('.footer').style.display = 'none';
+        state.open = true; state.view = 'home'; root().classList.add('show'); renderInventory(); connectWorkspace();
+      }
+      function closeInventoryScreen() { closeInventoryModal(); state.open = false; root().classList.remove('show'); backToOrder(); }
+      window.openInventoryScreen = openInventoryScreen;
+      window.GIEO_POS_INVENTORY = Object.freeze({
+        query:WORKSPACE_QUERY, commands:CONTRACTS, scanner:window.GIEO_POS_SCANNER,
+        pushSnapshot:pushWorkspace, reconnect:() => connectWorkspace(true), open:openInventoryScreen,
+        snapshot:() => ({ view:state.view, sync:state.sync, workspaceRevision:state.workspace && state.workspace.revision, busy:state.busy })
+      });
+      $inv('inventoryModalLayer').onclick = event => { if (event.target === $inv('inventoryModalLayer')) closeInventoryModal(); };
+      window.addEventListener('gieo:runtime-ready', () => connectWorkspace(true));
+      renderInventory(); connectWorkspace();
+    })();
+  </script>
+
+  <script>
+    /*
+      FIREBASE TRANSPORT CHO FIFO CORE MỚI
+
+      - Project/config/SDK vẫn là của POS cũ.
+      - RecordSale dựng MutationPlan; lớp này chỉ chuyển plan đó thành write.
+      - Firestore là nguồn canonical, RTDB là live/hot projection.
+      - bank_confirmations giữ nguyên để webhook bên ngoài tiếp tục hoạt động.
+      - Không có bất kỳ đường ghi nào tới node bill/archive cũ.
+    */
+    (() => {
+      'use strict';
+      const FIREBASE_CONFIG = Object.freeze({
+        apiKey:'AIzaSyCNh1-16gYZ0P30Fkd-2tB-O89PXkPX9Lc',
+        authDomain:'the-cafe-33.firebaseapp.com',
+        databaseURL:'https://the-cafe-33-default-rtdb.asia-southeast1.firebasedatabase.app',
+        projectId:'the-cafe-33',
+        storageBucket:'the-cafe-33.appspot.com',
+        messagingSenderId:'...',
+        appId:'...'
+      });
+      const FIREBASE_ACCOUNT = Object.freeze({ email:'cafe33@xolifa.com', password:'xolifaangiang' });
+      const DEFAULT_CONTEXT = Object.freeze({ organizationId:'org_gieo', storeId:'store_main' });
+      const APP_NAME = 'gieo-fifo-core';
+      const RTDB = 'RTDB';
+      const FIRESTORE = 'FIRESTORE';
+      const REQUIRED_BILL_FIELDS = [
+        'billId','storeId','businessDate','occurredAt','soldByActorId','channel',
+        'lines','subtotal','discountTotal','promotionsApplied','total','channelFee',
+        'netRevenue','payments','status','recipeVersionIds','packagingVersionIds','cogs'
+      ];
+      let app = null, rtdb = null, firestore = null, auth = null, authError = null;
+      let authReady = Promise.resolve(null);
+
+      function contextOf(override) {
+        return Object.assign({}, DEFAULT_CONTEXT, window.GIEO_FIFO_CONTEXT || {}, override || {});
+      }
+      function base(context) {
+        const ctx = contextOf(context);
+        if (!/^org_/.test(ctx.organizationId) || !/^store_/.test(ctx.storeId)) {
+          throw new Error('FIFO Firebase cần organizationId/storeId canonical');
+        }
+        return 'orgs/' + ctx.organizationId + '/stores/' + ctx.storeId;
+      }
+      const builders = Object.freeze({
+        unit:(ctx, args) => base(ctx) + '/units/' + args.unitId,
+        unitLive:(ctx, args) => base(ctx) + '/units/live/' + args.itemId + '/' + args.unitId,
+        ledger:(ctx, args) => base(ctx) + '/ledger/' + args.entryId,
+        operation:(ctx, args) => base(ctx) + '/operations/' + args.operationId,
+        billLive:(ctx, args) => base(ctx) + '/bills/live/' + args.businessDate + '/' + args.billId,
+        billCounter:(ctx, args) => base(ctx) + '/counters/bill/' + args.businessDate,
+        auditLog:(ctx, args) => base(ctx) + '/auditLogs/' + args.id,
+        traceDependency:(ctx, args) => base(ctx) + '/traceDependencies/' + args.id
+      });
+      const kinds = Object.freeze({
+        unit:FIRESTORE, unitLive:RTDB, ledger:FIRESTORE, operation:FIRESTORE,
+        billLive:RTDB, billCounter:RTDB, auditLog:FIRESTORE, traceDependency:FIRESTORE
+      });
+      function path(name, args, context) {
+        if (!builders[name]) throw new Error('Path FIFO chưa khai: ' + name);
+        const value = builders[name](contextOf(context), args || {});
+        if (/_gieogieo(?:\/|$)/.test(value)) {
+          throw new Error('Từ chối path lưu trữ legacy');
+        }
+        return Object.freeze({ kind:kinds[name], path:value });
+      }
+      function protectedPath(name, args) {
+        if (name !== 'bankConfirmation' || !args || !args.bankOrderId) throw new Error('Protected path không hợp lệ');
+        return Object.freeze({ kind:RTDB, path:'bank_confirmations/' + args.bankOrderId, isProtected:true });
+      }
+      function assertBill(record) {
+        const missing = REQUIRED_BILL_FIELDS.filter(field => !Object.prototype.hasOwnProperty.call(record || {}, field));
+        if (missing.length) throw new Error('Bill RecordSale thiếu field FIFO: ' + missing.join(', '));
+        if (!/^bill_/.test(record.billId) || !/^store_/.test(record.storeId)) throw new Error('Bill dùng ID không canonical');
+        if (!Array.isArray(record.lines) || !Array.isArray(record.payments)) throw new Error('Bill FIFO cần lines/payments dạng mảng');
+        if (record.status !== 'COMPLETED') throw new Error('Chỉ ghi bill RecordSale đã COMPLETED');
+      }
+      function addWrite(writes, name, args, data, op, context) {
+        const target = path(name, args, context);
+        writes.push({ kind:target.kind, path:target.path, op:op || 'set', data:data });
+      }
+      function planToWrites(plan, context) {
+        if (!plan || !/^operation_/.test(plan.operationId || '')) throw new Error('MutationPlan thiếu operationId canonical');
+        const writes = [];
+        (plan.unitChanges || []).forEach(unit => {
+          if (!/^unit_/.test(unit.unitId || '') || !/^item_/.test(unit.itemId || '')) throw new Error('Unit change dùng ID không canonical');
+          addWrite(writes, 'unit', { unitId:unit.unitId }, unit, 'set', context);
+          if (unit.status === 'OPEN' || unit.status === 'CONSUMING') {
+            addWrite(writes, 'unitLive', { itemId:unit.itemId, unitId:unit.unitId }, {
+              unitBase:unit.remainingQty, status:unit.status, openedAt:unit.openedAt
+            }, 'set', context);
+          } else addWrite(writes, 'unitLive', { itemId:unit.itemId, unitId:unit.unitId }, null, 'remove', context);
+        });
+        (plan.ledgerEntries || []).forEach(entry => {
+          const required = ['entryId','operationId','domain','type','itemId','storeId','unitId','qtyDelta','untrackedPendingDelta','businessDate','actorId'];
+          const missing = required.filter(field => !Object.prototype.hasOwnProperty.call(entry || {}, field));
+          if (missing.length || !/^ledger_/.test(entry.entryId || '')) throw new Error('Ledger entry không đúng schema FIFO: ' + missing.join(', '));
+          addWrite(writes, 'ledger', { entryId:entry.entryId }, entry, 'set', context);
+        });
+        (plan.domainRecords || []).forEach(domain => {
+          if (!domain || domain.type !== 'bill') throw new Error('POS Firebase chỉ nhận domainRecord bill từ RecordSale');
+          assertBill(domain.record);
+          addWrite(writes, 'billLive', {
+            businessDate:domain.record.businessDate, billId:domain.record.billId
+          }, domain.record, 'set', context);
+        });
+        (plan.traceChanges || []).forEach((trace, index) => addWrite(
+          writes, 'traceDependency', { id:plan.operationId + '.' + index }, trace, 'set', context
+        ));
+        if (plan.audit) addWrite(writes, 'auditLog', { id:plan.operationId }, plan.audit, 'set', context);
+        return writes;
+      }
+      function documentRef(fullPath) {
+        const parts = fullPath.split('/').filter(Boolean);
+        if (parts.length % 2) throw new Error('Firestore path không trỏ tới document: ' + fullPath);
+        let ref = firestore.collection(parts[0]).doc(parts[1]);
+        for (let index = 2; index < parts.length; index += 2) ref = ref.collection(parts[index]).doc(parts[index + 1]);
+        return ref;
+      }
+      async function commitMutationPlan(plan, context) {
+        if (!firestore || !rtdb) throw new Error('Firebase FIFO chưa sẵn sàng');
+        const ctx = contextOf(context), writes = planToWrites(plan, ctx);
+        addWrite(writes, 'operation', { operationId:plan.operationId }, {
+          operationId:plan.operationId, status:'COMPLETED',
+          command:plan.audit && plan.audit.command || null,
+          actorId:plan.audit && plan.audit.actorId || null,
+          storeId:ctx.storeId,
+          businessDate:plan.audit && plan.audit.businessDate || (plan.domainRecords[0] && plan.domainRecords[0].record.businessDate) || null,
+          completedAt:Date.now(), writeCount:writes.length
+        }, 'set', ctx);
+        const canonicalPrefix = base(ctx) + '/';
+        writes.forEach(write => { if (write.path.indexOf(canonicalPrefix) !== 0) throw new Error('Từ chối ghi ngoài namespace FIFO'); });
+        const firestoreWrites = writes.filter(write => write.kind === FIRESTORE);
+        if (firestoreWrites.length > 500) throw new Error('MutationPlan vượt giới hạn 500 Firestore writes');
+        const batch = firestore.batch();
+        firestoreWrites.forEach(write => write.op === 'remove'
+          ? batch.delete(documentRef(write.path))
+          : batch.set(documentRef(write.path), write.data));
+        if (firestoreWrites.length) await batch.commit();
+        const projectionFailures = [];
+        await Promise.all(writes.filter(write => write.kind === RTDB).map(async write => {
+          try {
+            const ref = rtdb.ref(write.path);
+            if (write.op === 'remove') await ref.remove(); else await ref.set(write.data);
+          } catch (error) { projectionFailures.push({ path:write.path, message:error && error.message || String(error) }); }
+        }));
+        return { operationId:plan.operationId, writeCount:writes.length, projectionFailures };
+      }
+      function watchBills(businessDate, listener, onError, context) {
+        const target = path('billLive', { businessDate, billId:'_' }, context).path.replace(/\/_$/, '');
+        const ref = rtdb.ref(target);
+        const handler = snapshot => {
+          const rows = snapshot && snapshot.val() || {};
+          listener(Object.keys(rows).map(billId => Object.assign({ billId }, rows[billId] || {})));
+        };
+        ref.on('value', handler, onError);
+        return () => ref.off('value', handler);
+      }
+      function watchBankConfirmation(bankOrderId, listener, onError) {
+        const ref = rtdb.ref(protectedPath('bankConfirmation', { bankOrderId }).path);
+        const handler = snapshot => listener(snapshot && snapshot.val() || null);
+        ref.on('value', handler, onError);
+        return () => ref.off('value', handler);
+      }
+      function removeBankConfirmation(bankOrderId) {
+        return rtdb.ref(protectedPath('bankConfirmation', { bankOrderId }).path).remove();
+      }
+      async function getSharedCustomer(phoneValue) {
+        let phone = String(phoneValue || '').replace(/[^0-9]/g, '');
+        if (/^84\d{9}$/.test(phone)) phone = '0' + phone.slice(2);
+        if (!phone) return null;
+        const user = await authReady;
+        if (!user) throw authError || new Error('Firebase chưa xác thực để đọc khách hàng');
+        /* Giữ NGUYÊN nguồn dùng chung của chuỗi: Firestore customers/{phone}.
+           Đây là read-only compatibility port, không phải dữ liệu FIFO. */
+        const snapshot = await firestore.collection('customers').doc(phone).get();
+        return snapshot && snapshot.exists ? Object.assign({ id:phone }, snapshot.data()) : null;
+      }
+      function todayInVietnam() {
+        const parts = new Intl.DateTimeFormat('en-CA', { timeZone:'Asia/Ho_Chi_Minh', year:'numeric', month:'2-digit', day:'2-digit' }).formatToParts(new Date());
+        const values = {};
+        parts.forEach(part => { values[part.type] = part.value; });
+        return values.year + '-' + values.month + '-' + values.day;
+      }
+      function init() {
+        if (!window.firebase || typeof window.firebase.initializeApp !== 'function' || typeof window.firebase.database !== 'function' || typeof window.firebase.firestore !== 'function' || typeof window.firebase.auth !== 'function') {
+          throw new Error('Thiếu Firebase App/RTDB/Firestore/Auth SDK 10.13.2');
+        }
+        app = window.firebase.apps.find(candidate => candidate.name === APP_NAME) || window.firebase.initializeApp(FIREBASE_CONFIG, APP_NAME);
+        rtdb = window.firebase.database(app);
+        firestore = window.firebase.firestore(app);
+        auth = window.firebase.auth(app);
+        authReady = new Promise((resolve, reject) => {
+          auth.onAuthStateChanged(user => { if (user) resolve(user); }, reject);
+          auth.signInWithEmailAndPassword(FIREBASE_ACCOUNT.email, FIREBASE_ACCOUNT.password).catch(reject);
+        }).catch(error => { authError = error; console.warn('[Firebase Auth] đăng nhập thất bại', error); return null; });
+      }
+      try { init(); }
+      catch (error) { console.error('[FIFO Firebase] khởi tạo thất bại', error); }
+      window.GIEO_FIREBASE_CONFIG = FIREBASE_CONFIG;
+      window.GIEO_FIFO_FIREBASE = Object.freeze({
+        context:DEFAULT_CONTEXT,
+        path, protectedPath, planToWrites, commitMutationPlan, watchBills,
+        watchTodayBills:(listener, onError) => watchBills(todayInVietnam(), listener, onError),
+        watchBankConfirmation, removeBankConfirmation, todayInVietnam,
+        getSharedCustomer,
+        whenAuthenticated:() => authReady,
+        printerDatabase:() => rtdb,
+        ready:() => !!(rtdb && firestore)
+      });
+      window.dispatchEvent(new CustomEvent('gieo:fifo-firebase-ready', { detail:{ context:DEFAULT_CONTEXT } }));
+    })();
+  </script>
+
+  <script>
+    /*
+      LEGACY PRINTER STACK — được graft nguyên theo giao thức APK cũ.
+      Phạm vi cố ý chỉ là: cấu hình in, bridge Android, in thử và API in độc lập.
+      Không đọc/ghi menu, tồn kho, đơn hàng hoặc FIFO.
+    */
+    (() => {
+      const PRINTER_LAYOUT_FB_PATH = 'printer_layout_gieogieo';
+      const PRINTER_LAYOUT_CACHE = 'pos_printer_layout_cache';
+      const LEGACY_PRINTER_FIREBASE_CONFIG = window.GIEO_FIREBASE_CONFIG;
+      const printerNotice = message => { if (typeof report === 'function') report(message); else console.info(message); };
+      const byId = id => document.getElementById(id);
+      let cloudDb = null, temCloudEnabled, temPollTimer = null, temConnectInFlight = null, temWatchdog = null, temDiagOpen = false, temKeepAliveSig = null;
+
+      function initPrinterCloud() {
+        try {
+          if (!window.firebase || typeof window.firebase.database !== 'function') return null;
+          if (window.GIEO_FIFO_FIREBASE && window.GIEO_FIFO_FIREBASE.ready()) return window.GIEO_FIFO_FIREBASE.printerDatabase();
+          const name = 'gieo-legacy-printer';
+          const app = window.firebase.apps.find(item => item.name === name) || window.firebase.initializeApp(LEGACY_PRINTER_FIREBASE_CONFIG, name);
+          return window.firebase.database(app);
+        } catch (error) { console.warn('[printer] không mở được cấu hình cloud', error); return null; }
+      }
+      function loadLayout() {
+        const defaults = { paperWidth:58, showLogo:true, feedLinesAfter:3, fontSizeTitle:28, fontSizeBody:16, copies:1, footerText:'', footerBold:false, billPrinterMac:null, temPrinterMac:null, temInvert:true, temEnabled:true, temEngine:'tspl', temDpi:203, temGapMm:2, temOffsetMm:1.5 };
+        try { const saved = localStorage.getItem(PRINTER_LAYOUT_CACHE); return saved ? Object.assign(defaults, JSON.parse(saved)) : defaults; }
+        catch (error) { return defaults; }
+      }
+      function persistLayout() { try { localStorage.setItem(PRINTER_LAYOUT_CACHE, JSON.stringify(BillPrinter.layout)); } catch (error) {} }
+      function syncLayoutFromCloud() {
+        if (!cloudDb) return;
+        cloudDb.ref(PRINTER_LAYOUT_FB_PATH).on('value', snapshot => {
+          const remote = snapshot.val(); if (!remote) return;
+          BillPrinter.layout = Object.assign({}, BillPrinter.layout, remote);
+          if (typeof remote.temEnabled === 'boolean') temCloudEnabled = remote.temEnabled;
+          persistLayout(); refreshPrinterScreen();
+        }, error => console.warn('[printer] lỗi đồng bộ cấu hình', error));
+      }
+      function saveLayout(partial) {
+        BillPrinter.layout = Object.assign({}, BillPrinter.layout, partial); persistLayout();
+        if (cloudDb) cloudDb.ref(PRINTER_LAYOUT_FB_PATH).update(partial).catch(error => { console.warn('[printer] lưu cloud lỗi', error); printerNotice('⚠ Lưu cấu hình online thất bại, máy này vẫn đã lưu tạm.'); });
+        refreshPrinterScreen();
+      }
+      function footerLines() {
+        return String(BillPrinter.layout.footerText || '').split('\n').map(line => line.trim()).filter(Boolean)
+          .map(text => ({ text, size:13, align:'center', bold:!!BillPrinter.layout.footerBold }));
+      }
+      function drawReceiptCanvas(lines, width) {
+        const w = width || 384, measure = document.createElement('canvas'), m = measure.getContext('2d'), pad = 18, max = w - pad * 2;
+        const rows = [];
+        lines.forEach(line => {
+          if (line.type === 'divider') { rows.push({ divider:true, dashed:line.style === 'dashed', h:12 }); return; }
+          const size = Number(line.size || 15), words = String(line.text || '').split(' '); m.font = (line.bold ? '700 ' : '400 ') + size + 'px Arial';
+          let current = ''; words.forEach(word => { const next = current ? current + ' ' + word : word; if (m.measureText(next).width > max && current) { rows.push({ text:current, size, bold:!!line.bold, align:line.align || 'left', h:size + 6 }); current = word; } else current = next; });
+          if (current || !words.length) rows.push({ text:current, size, bold:!!line.bold, align:line.align || 'left', h:size + 6 });
+        });
+        const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = Math.max(120, rows.reduce((sum, row) => sum + row.h, 0) + 26);
+        const ctx = canvas.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height); ctx.fillStyle = '#000'; let y = 16;
+        rows.forEach(row => { if (row.divider) { ctx.strokeStyle = '#000'; ctx.setLineDash(row.dashed ? [4, 4] : []); ctx.beginPath(); ctx.moveTo(pad, y + 5); ctx.lineTo(w - pad, y + 5); ctx.stroke(); ctx.setLineDash([]); y += row.h; return; } ctx.font = (row.bold ? '700 ' : '400 ') + row.size + 'px Arial'; ctx.textAlign = row.align; const x = row.align === 'center' ? w / 2 : row.align === 'right' ? w - pad : pad; ctx.fillText(row.text, x, y + row.size); y += row.h; });
+        return canvas;
+      }
+      function rasterBytes(canvas) {
+        const ctx = canvas.getContext('2d'), image = ctx.getImageData(0, 0, canvas.width, canvas.height).data, bytesPerRow = Math.ceil(canvas.width / 8), bytes = new Uint8Array(bytesPerRow * canvas.height);
+        for (let y = 0; y < canvas.height; y++) for (let x = 0; x < canvas.width; x++) { const i = (y * canvas.width + x) * 4, gray = image[i] * .3 + image[i + 1] * .59 + image[i + 2] * .11; if (image[i + 3] > 128 && gray < 160) bytes[y * bytesPerRow + (x >> 3)] |= 0x80 >> (x & 7); }
+        return { bytesPerRow, height:canvas.height, bytes };
+      }
+      function concatBytes(parts) { const size = parts.reduce((sum, part) => sum + part.length, 0), all = new Uint8Array(size); let at = 0; parts.forEach(part => { all.set(part, at); at += part.length; }); return all; }
+      function textBytes(text) { const bytes = new Uint8Array(text.length); for (let i = 0; i < text.length; i++) bytes[i] = text.charCodeAt(i) & 0xff; return bytes; }
+      function toBase64(bytes) { let binary = ''; for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]); return btoa(binary); }
+
+      class WebSerialBillEngine {
+        constructor() { this.port = null; this.writer = null; this.connected = false; this.baudRate = 9600; this.paperWidthPx = 384; }
+        static get BAUDS() { return [9600, 19200, 38400, 57600, 115200]; }
+        async connect() { if (!('serial' in navigator)) throw new Error('Web Serial không khả dụng — trong APK hãy dùng Bluetooth'); this.port = await navigator.serial.requestPort(); return this.openWithBauds(); }
+        async reconnect() { if (!('serial' in navigator)) return false; const ports = await navigator.serial.getPorts(); if (!ports.length) return false; this.port = ports[0]; try { await this.openWithBauds(); return true; } catch (error) { return false; } }
+        async openWithBauds() { let last; for (const baudRate of WebSerialBillEngine.BAUDS) try { await this.port.open({ baudRate }); this.baudRate = baudRate; this.writer = this.port.writable.getWriter(); this.connected = true; return { baudRate }; } catch (error) { last = error; try { await this.port.close(); } catch (ignored) {} } throw last || new Error('Không mở được cổng máy in'); }
+        async disconnect() { try { if (this.writer) { await this.writer.close(); this.writer.releaseLock(); } if (this.port) await this.port.close(); } catch (error) {} this.writer = null; this.port = null; this.connected = false; }
+        async send(bytes) { if (!this.writer) throw new Error('Máy in chưa kết nối'); await this.writer.write(bytes); }
+        async init() { await this.send(new Uint8Array([0x1b, 0x40])); }
+        async feed(lines) { for (let i = 0; i < (lines || 1); i++) await this.send(new Uint8Array([0x0a])); }
+        async openDrawer() { await this.send(new Uint8Array([0x1b, 0x70, 0x00, 0x19, 0xfa])); }
+        async printCanvas(canvas) { const raster = rasterBytes(canvas), band = 200; for (let y = 0; y < raster.height; y += band) { const h = Math.min(band, raster.height - y), data = raster.bytes.slice(y * raster.bytesPerRow, (y + h) * raster.bytesPerRow); await this.send(new Uint8Array([0x1d,0x76,0x30,0x00,raster.bytesPerRow & 255,(raster.bytesPerRow >> 8) & 255,h & 255,(h >> 8) & 255])); await this.send(data); } }
+      }
+      class AndroidBillEngine {
+        constructor() { this.connected = false; this.baudRate = null; this.paperWidthPx = 384; }
+        async connect(mac) { if (!window.AndroidPrinter) throw new Error('Chức năng này chỉ chạy trong APK Android'); window.AndroidPrinter.connectBillPrinterBluetooth(mac); return new Promise((resolve, reject) => { let tries = 0; const timer = setInterval(() => { tries++; let ok = false; try { ok = window.AndroidPrinter.isBillPrinterAvailable(); } catch (error) {} if (ok || tries >= 10) { clearInterval(timer); this.connected = ok; if (ok) { saveLayout({ billPrinterMac:mac }); resolve({ baudRate:null }); } else reject(new Error('Không kết nối được — kiểm tra máy in và Bluetooth đã ghép nối')); } }, 500); }); }
+        async disconnect() { try { window.AndroidPrinter && window.AndroidPrinter.disconnectBillPrinter(); } catch (error) {} this.connected = false; }
+        send(bytes) { if (!window.AndroidPrinter || typeof window.AndroidPrinter.printBillRawBytes !== 'function') throw new Error('APK thiếu cổng printBillRawBytes'); window.AndroidPrinter.printBillRawBytes(toBase64(bytes)); }
+        async init() { this.send(new Uint8Array([0x1b, 0x40])); }
+        async feed(lines) { this.send(new Uint8Array(Array(Math.max(1, lines || 1)).fill(0x0a))); }
+        async openDrawer() { this.send(new Uint8Array([0x1b, 0x70, 0x00, 0x19, 0xfa])); }
+        async printCanvas(canvas) { const raster = rasterBytes(canvas), band = 200; for (let y = 0; y < raster.height; y += band) { const h = Math.min(band, raster.height - y), data = raster.bytes.slice(y * raster.bytesPerRow, (y + h) * raster.bytesPerRow); this.send(new Uint8Array([0x1d,0x76,0x30,0x00,raster.bytesPerRow & 255,(raster.bytesPerRow >> 8) & 255,h & 255,(h >> 8) & 255])); this.send(data); } }
+      }
+      const BillPrinter = {
+        engine:null, connected:false, baudRate:null, autoPrintEnabled:localStorage.getItem('pos_auto_print') !== 'false', layout:loadLayout(),
+        async connectSerial() { this.engine = new WebSerialBillEngine(); const result = await this.engine.connect(); this.connected = true; this.baudRate = result.baudRate; refreshPrinterScreen(); return result; },
+        async reconnectSerial() { this.engine = new WebSerialBillEngine(); const ok = await this.engine.reconnect(); this.connected = ok; this.baudRate = ok ? this.engine.baudRate : null; refreshPrinterScreen(); return ok; },
+        async connectBluetooth(mac) { this.engine = new AndroidBillEngine(); const result = await this.engine.connect(mac); this.connected = true; this.baudRate = result.baudRate; refreshPrinterScreen(); return true; },
+        async reconnectBluetooth() { if (!window.AndroidPrinter || !this.layout.billPrinterMac) return false; try { await this.connectBluetooth(this.layout.billPrinterMac); return true; } catch (error) { return false; } },
+        async disconnect() { if (this.engine) await this.engine.disconnect(); this.connected = false; this.baudRate = null; refreshPrinterScreen(); },
+        setAuto(value) { this.autoPrintEnabled = !!value; localStorage.setItem('pos_auto_print', this.autoPrintEnabled ? 'true' : 'false'); refreshPrinterScreen(); },
+        async printCanvas(lines) { if (!this.connected || !this.engine) throw new Error('Máy in chưa kết nối'); const canvas = drawReceiptCanvas(lines, this.engine.paperWidthPx); await this.engine.init(); await this.engine.printCanvas(canvas); await this.engine.feed(this.layout.feedLinesAfter); },
+        async test() { return this.printCanvas([{ text:'IN THỬ MÁY IN', size:26, align:'center', bold:true }, { type:'divider', style:'dashed' }, { text:'Xprinter WNN58E — ' + (this.baudRate ? this.baudRate + ' baud' : 'Bluetooth (app)'), size:15, align:'center' }, { text:new Date().toLocaleString('vi-VN'), size:13, align:'center' }, { type:'divider' }, { text:'Chào Gieo Gieo — tiếng Việt có dấu: ăâêôơưđ', size:15, align:'center' }, ...footerLines()]); },
+        async openDrawer() { if (this.connected && this.engine) await this.engine.openDrawer(); }
+      };
+
+      const TEM_W_MM = 40, TEM_H_MM = 30;
+      const temLocal = key => { try { return localStorage.getItem(key); } catch (error) { return null; } };
+      const temLocalSet = (key, value) => { try { localStorage.setItem(key, String(value)); } catch (error) {} };
+      const temBridgeReady = () => !!(window.AndroidPrinter && typeof window.AndroidPrinter.printRawBytes === 'function');
+      const temFn = name => { try { return !!(window.AndroidPrinter && typeof window.AndroidPrinter[name] === 'function'); } catch (error) { return false; } };
+      const temV2Fns = ['getTemStatus', 'setTemKeepAlive', 'resetTemCounters'];
+      const temStatus = () => { try { return temFn('getTemStatus') ? JSON.parse(window.AndroidPrinter.getTemStatus() || 'null') : null; } catch (error) { return null; } };
+      function temBridgeVersion() { try { const bridge = window.AndroidPrinter; let raw = bridge && (typeof bridge.getBridgeVersion === 'function' ? bridge.getBridgeVersion() : typeof bridge.getVersion === 'function' ? bridge.getVersion() : bridge.bridgeVersion); const value = parseFloat(String(raw || '').replace(/[^0-9.]/g, '')); return Number.isFinite(value) ? value : 0; } catch (error) { return 0; } }
+      function temReady() { try { return temBridgeReady() && window.AndroidPrinter.isAvailable(); } catch (error) { return false; } }
+      function temSavedIp() { return temLocal('pos_tem_last_ip'); }
+      function saveTemIp(ip) { if (ip) temLocalSet('pos_tem_last_ip', ip); }
+      function temDpi() { return Number(BillPrinter.layout.temDpi || temLocal('pos_tem_dpi') || 203); }
+      function temCanvas(lines) {
+        const dpi = temDpi(), width = Math.round(TEM_W_MM / 25.4 * dpi), height = Math.round(TEM_H_MM / 25.4 * dpi), canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height; const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, width, height); ctx.fillStyle = '#000'; const pad = Math.max(8, Math.round(width * .045)); let y = Math.max(20, Math.round(width * .1));
+        lines.forEach(line => { const size = Math.max(10, Math.round((line.size || 15) * (dpi / 203))); ctx.font = (line.bold ? '700 ' : '400 ') + size + 'px Arial'; ctx.textAlign = line.align || 'left'; const x = line.align === 'center' ? width / 2 : line.align === 'right' ? width - pad : pad; if (line.divider) { ctx.setLineDash([4,4]); ctx.beginPath(); ctx.moveTo(pad,y); ctx.lineTo(width-pad,y); ctx.stroke(); ctx.setLineDash([]); y += size; } else { ctx.fillText(line.text, x, y); y += size + Math.max(5, Math.round(size * .25)); } });
+        return canvas;
+      }
+      function labelBytes(canvas, copies) {
+        const raster = rasterBytes(canvas), invert = TemPrinter.invert, body = raster.bytes.slice(); if (invert) for (let i = 0; i < body.length; i++) body[i] = body[i] ^ 255;
+        if (TemPrinter.engine === 'escpos') { const header = new Uint8Array([0x1b,0x40,0x1d,0x76,0x30,0,raster.bytesPerRow & 255,(raster.bytesPerRow >> 8) & 255,raster.height & 255,(raster.height >> 8) & 255]); return concatBytes([header, body, new Uint8Array([10,10])]); }
+        const head = textBytes('SIZE ' + TEM_W_MM + ' mm,' + TEM_H_MM + ' mm\r\nGAP ' + TemPrinter.gap + ' mm,0 mm\r\nSET TEAR ON\r\nOFFSET ' + TemPrinter.offset + ' mm\r\nDIRECTION 0\r\nREFERENCE 0,0\r\nCLS\r\nBITMAP 0,0,' + raster.bytesPerRow + ',' + raster.height + ',0,');
+        return concatBytes([head, body, textBytes('\r\nPRINT 1,' + Math.max(1, copies || 1) + '\r\n')]);
+      }
+      function sendTem(bytes) { if (!temBridgeReady()) throw new Error('APK thiếu cổng printRawBytes cho máy in tem'); const result = window.AndroidPrinter.printRawBytes(toBase64(bytes)); return result === undefined ? true : !!result; }
+      const TemPrinter = {
+        get enabled() { return typeof temCloudEnabled === 'boolean' ? temCloudEnabled : temLocal('pos_tem_print_enabled') !== 'false'; },
+        setEnabled(value) { temCloudEnabled = !!value; temLocalSet('pos_tem_print_enabled', value ? 'true' : 'false'); saveLayout({ temEnabled:!!value }); },
+        get engine() { return BillPrinter.layout.temEngine || temLocal('pos_tem_engine') || 'tspl'; }, setEngine(value) { temLocalSet('pos_tem_engine', value); saveLayout({ temEngine:value }); },
+        get dpi() { return temDpi(); }, setDpi(value) { temLocalSet('pos_tem_dpi', value); saveLayout({ temDpi:Number(value) || 203 }); },
+        get gap() { const value = Number(BillPrinter.layout.temGapMm); return Number.isFinite(value) ? Math.max(0, value) : Number(temLocal('pos_tem_gap_mm') || 2); }, setGap(value) { const next = Math.max(0, Number(value) || 0); temLocalSet('pos_tem_gap_mm', next); saveLayout({ temGapMm:next }); },
+        get offset() { const value = Number(BillPrinter.layout.temOffsetMm); return Number.isFinite(value) ? value : Number(temLocal('pos_tem_offset_mm') || 1.5); }, setOffset(value) { const next = Number(value) || 0; temLocalSet('pos_tem_offset_mm', next); saveLayout({ temOffsetMm:next }); },
+        get invert() { return BillPrinter.layout.temInvert !== false; }, setInvert(value) { saveLayout({ temInvert:!!value }); }, get mac() { return BillPrinter.layout.temPrinterMac || null; }, setMac(value) { saveLayout({ temPrinterMac:value }); },
+        printLabel(lines, copies) { return sendTem(labelBytes(temCanvas(lines), copies)); },
+        printTest() { return this.printLabel([{ text:'GIEO GIEO', size:19, align:'center', bold:true }, { text:'TEM IN THỬ · 2/6', size:11, align:'center' }, { divider:true }, { text:'Lục trà Macchiato (M)', size:17, bold:true }, { text:'+ Thạch dừa', size:12 }, { text:'+ Trân châu', size:12 }, { divider:true }, { text:'38.000đ', size:18, align:'right', bold:true }, { text:new Date().toLocaleString('vi-VN'), size:10, align:'right' }]); }
+      };
+      function syncTemKeepAlive() { if (!temBridgeReady() || !temFn('setTemKeepAlive')) return; const signature = TemPrinter.engine === 'escpos' ? 'off' : 'tspl'; if (signature === temKeepAliveSig) return; try { window.AndroidPrinter.setTemKeepAlive(signature === 'off' ? '' : btoa('\r\n'), signature === 'off' ? 0 : 20000); temKeepAliveSig = signature; } catch (error) {} }
+      function waitForTem(max, interval) { return new Promise(resolve => { let tries = 0; const timer = setInterval(() => { tries++; if (temReady() || tries >= max) { clearInterval(timer); resolve(temReady()); } }, interval); }); }
+      async function connectTemIp(ip) { if (!temBridgeReady() || !ip || !temFn('connectPrinter')) return false; try { window.AndroidPrinter.connectPrinter(ip); const ok = await waitForTem(6, 200); if (ok) { saveTemIp(ip); syncTemKeepAlive(); } return ok; } catch (error) { return false; } }
+      function ensureTemConnected() { if (!temBridgeReady()) return Promise.resolve(false); if (temReady()) { syncTemKeepAlive(); return Promise.resolve(true); } if (temConnectInFlight) return temConnectInFlight; temConnectInFlight = (async () => { if (await connectTemIp(temSavedIp())) return true; discoverTem(false); return waitForTem(10, 400); })().catch(() => false).then(ok => { if (ok) syncTemKeepAlive(); temConnectInFlight = null; return ok; }); return temConnectInFlight; }
+      function discoverTem(manual) {
+        if (!temBridgeReady() || !temFn('startLanDiscovery')) { if (manual) printerNotice('⚠ APK không có cổng tự dò máy in tem.'); return; }
+        const status = byId('tem-app-connect-status'); if (status) { status.textContent = 'Đang dò máy in...'; status.style.color = '#999'; }
+        try { window.AndroidPrinter.startLanDiscovery(); } catch (error) { if (status) { status.textContent = '❌ Lỗi dò: ' + error.message; status.style.color = '#c62828'; } return; }
+        setTimeout(() => { let list = []; try { list = JSON.parse(window.AndroidPrinter.getLanDiscoveryResults() || '[]'); } catch (error) {} handleTemDiscovery(list, manual); }, 2200);
+      }
+      function handleTemDiscovery(list, manual) {
+        const status = byId('tem-app-connect-status'), wrap = byId('tem-printer-pick-wrap'), select = byId('tem-printer-pick-select'), known = TemPrinter.mac;
+        const match = known && list.find(device => device.mac && device.mac.toUpperCase() === known.toUpperCase());
+        if (match) { if (wrap) wrap.style.display = 'none'; connectTemIp(match.ip); return; }
+        if (list.length === 1) { if (list[0].mac) TemPrinter.setMac(list[0].mac); if (wrap) wrap.style.display = 'none'; connectTemIp(list[0].ip); return; }
+        if (list.length && select && wrap) { select.innerHTML = list.map(device => '<option value="' + device.ip + '|' + (device.mac || '') + '">' + device.ip + (device.mac ? ' (' + device.mac + ')' : '') + '</option>').join(''); wrap.style.display = ''; if (status) { status.textContent = 'Tìm thấy máy in — chọn bên dưới để kết nối'; status.style.color = '#999'; } return; }
+        if (status) { status.textContent = manual ? '❌ Không tìm thấy máy in trong mạng' : 'Chưa kết nối'; status.style.color = manual ? '#c62828' : '#999'; }
+      }
+      function refreshTemConnection() {
+        const status = byId('tem-app-connect-status'), section = byId('tem-app-connect-section'); if (!section) return;
+        section.style.display = temBridgeReady() ? '' : 'none'; if (!temBridgeReady() || !status) return;
+        const ok = temReady(), version = temBridgeVersion(), added = temV2Fns.filter(temFn).length, suffix = added === temV2Fns.length ? ' · app v' + (version || 2) + ' (đủ tính năng)' : added ? ' · app v' + (version || '?') + ' — thiếu bridge' : ' · app cũ (v1)';
+        const detail = temStatus(); status.textContent = (ok ? '✅ Đã kết nối' : 'Chưa kết nối') + suffix + (!ok && detail && detail.lastError ? ' — ' + detail.lastError : ''); status.style.color = ok ? '#2e7d32' : added ? '#c62828' : '#999';
+      }
+      function startTemWatchdog() {
+        if (temWatchdog || !temBridgeReady() || (!temFn('setTemKeepAlive') && !temFn('getTemStatus'))) return;
+        temWatchdog = setInterval(() => { if (TemPrinter.enabled && !document.hidden && !temReady()) ensureTemConnected().then(refreshPrinterScreen); }, 30000);
+        document.addEventListener('visibilitychange', () => { if (!document.hidden && TemPrinter.enabled) ensureTemConnected().then(refreshPrinterScreen); });
+      }
+      function bindScannerTest() {
+        const button = byId('scanTest'); if (!button) return; button.onclick = async () => {
+          const out = byId('scanTestOut'), api = window.GIEO_POS_SCANNER;
+          if (!api || typeof api.scan !== 'function') { out.textContent = 'Bộ điều phối máy quét chưa sẵn sàng.'; return; }
+          out.textContent = 'Đang mở máy quét...';
+          const result = await api.scan();
+          out.textContent = result.ok ? 'Quét được: ' + result.code + ' (' + (result.format || '—') + ')' : api.errorText(result.error);
+        };
+      }
+      function printerTemplate() {
+        return '<header class="printer-head"><button type="button" class="printer-back" id="printerBack">×</button><strong>MÁY IN</strong><span style="width:40px"></span></header>' +
+          '<div class="printer-tabs"><button type="button" class="printer-tab active" data-printer-tab="bill">🧾 Máy in Bill</button><button type="button" class="printer-tab" data-printer-tab="tem">🏷 Máy in Tem</button></div>' +
+          '<section id="printer-tab-bill"><div class="printer-section"><div class="printer-row" style="justify-content:flex-start"><span class="printer-status-dot" id="billDot"></span><div><div class="printer-name">Xprinter WNN58E</div><div class="printer-muted" id="billStatus">Chưa kết nối</div></div></div><div style="display:flex;gap:10px;margin-top:14px"><button type="button" class="printer-action" id="billConnect">🔌 Kết nối máy in</button><button type="button" class="printer-action secondary" id="billDisconnect" style="display:none">Ngắt kết nối</button></div><div class="printer-muted" style="margin-top:10px">Trong APK, chọn máy in Bluetooth đã ghép nối. Ngoài APK có thể dùng Web Serial.</div><div id="billBtSection" style="display:none;margin-top:14px;padding-top:14px;border-top:1px solid #eee"><button type="button" class="printer-action secondary" id="billBtScan">🔍 Tìm máy in đã ghép nối</button><select id="billBtSelect" class="printer-field" style="display:none;margin-top:10px"></select><button type="button" class="printer-action" id="billBtConnect" style="display:none">🔌 Kết nối máy đã chọn</button></div></div>' +
+          '<div class="printer-section printer-row"><div><div class="printer-name">Tự động in khi thanh toán</div><div class="printer-muted">Tự in bill ngay sau khi lưu đơn thành công</div><div class="printer-muted" id="billAutoText" style="font-weight:700"></div></div><label class="printer-switch"><input type="checkbox" id="billAuto"><span class="printer-switch-track" id="billAutoTrack"></span></label></div>' +
+          '<div class="printer-section-title">CẤU HÌNH TRANG IN</div><div class="printer-section"><label class="printer-row"><span class="printer-name" style="font-size:13px;font-weight:500">In tên quán / logo trên bill</span><input type="checkbox" id="layoutLogo" style="width:20px;height:20px"></label><div class="printer-grid"><label><span class="printer-label">Số bản in mỗi bill</span><input class="printer-field" id="layoutCopies" type="number" min="1" max="5"></label><label><span class="printer-label">Số dòng chừa cuối</span><input class="printer-field" id="layoutFeed" type="number" min="0" max="10"></label><label><span class="printer-label">Cỡ chữ tiêu đề</span><input class="printer-field" id="layoutTitle" type="number" min="16" max="40"></label><label><span class="printer-label">Cỡ chữ nội dung</span><input class="printer-field" id="layoutBody" type="number" min="10" max="24"></label></div><button type="button" class="printer-action" id="layoutSave">💾 Lưu cấu hình</button><button type="button" class="printer-action secondary" id="billTest">🖨 In thử</button></div>' +
+          '<div class="printer-section-title">NỘI DUNG THÊM CUỐI BILL</div><div class="printer-section"><div class="printer-muted" style="margin:0 0 10px">Khuyến mãi, thông báo, thông tin liên hệ — mỗi dòng sẽ in ra một dòng riêng, phía dưới lời cảm ơn.</div><textarea class="printer-field" id="layoutFooter" rows="4" placeholder="VD: Giảm 10% hoá đơn từ 100k"></textarea><label class="printer-row" style="margin:12px 0"><span class="printer-name" style="font-size:13px;font-weight:500">In đậm nội dung này</span><input type="checkbox" id="layoutFooterBold" style="width:20px;height:20px"></label><button type="button" class="printer-action" id="layoutSaveFooter">💾 Lưu cấu hình</button></div></section>' +
+          '<section id="printer-tab-tem" style="display:none"><div class="printer-section printer-row"><div><div class="printer-name">Bật in tem</div><div class="printer-muted">Tự in tem cho mỗi món ngay sau khi lưu đơn thành công</div><div class="printer-muted" id="temEnabledText" style="font-weight:700"></div></div><label class="printer-switch"><input type="checkbox" id="temEnabled"><span class="printer-switch-track" id="temEnabledTrack"></span></label></div><div class="printer-section" id="tem-app-connect-section" style="display:none"><div class="printer-name">📶 Kết nối máy in tem qua LAN</div><div class="printer-muted" style="margin:6px 0 10px">APK tự dò máy in trong cùng WiFi, nhớ MAC và IP để tự kết nối lại.</div><div class="printer-muted" id="tem-app-connect-status" style="font-weight:700;margin-bottom:10px">Chưa kết nối</div><button type="button" class="printer-action secondary" id="temDiscover">🔍 Quét lại máy in</button><div id="tem-printer-pick-wrap" style="display:none;margin-top:10px"><select class="printer-field" id="tem-printer-pick-select"></select><button type="button" class="printer-action" id="temPickConnect" style="margin-top:10px">🔌 Kết nối máy đã chọn</button></div><button type="button" class="printer-action secondary" id="temDiagToggle" style="margin-top:10px">🔧 Chẩn đoán cầu nối máy in</button><div class="printer-diag" id="temDiag"></div></div><div class="printer-section-title">CẤU HÌNH KHỚP MÁY IN TEM THẬT</div><div class="printer-section"><div class="printer-warning">Tem bị bé, in đè hoặc lệch: thử TSPL trước, sau đó kiểm tra DPI, gap và offset. Các thông số này giữ nguyên kiểu cấu hình của POS cũ.</div><label><span class="printer-label">Ngôn ngữ lệnh máy in</span><select class="printer-field" id="temEngine"><option value="tspl">TSPL — máy in tem có mắt đọc gap</option><option value="escpos">ESC/POS — giống máy in bill</option></select></label><label class="printer-row" style="margin:14px 0"><span><span class="printer-name" style="font-size:13px">Đảo màu tem</span><span class="printer-muted">Bật nếu tem ra nền đen, chữ trắng</span></span><label class="printer-switch"><input type="checkbox" id="temInvert"><span class="printer-switch-track" id="temInvertTrack"></span></label></label><div class="printer-grid"><label><span class="printer-label">Độ phân giải (DPI)</span><select class="printer-field" id="temDpi"><option value="203">203 dpi (phổ biến)</option><option value="300">300 dpi</option></select></label><label><span class="printer-label">Khoảng gap (mm)</span><input class="printer-field" id="temGap" type="number" min="0" max="10" step=".5"></label></div><label><span class="printer-label">Offset dọc (mm) — số âm đẩy nội dung lên</span><input class="printer-field" id="temOffset" type="number" min="-20" max="20" step=".5"></label><button type="button" class="printer-action" id="temTest" style="margin-top:14px">🖨 In thử tem</button><div style="height:1px;background:#eee;margin:16px 0"></div><div class="printer-name" style="font-size:13px">Máy quét mã tem</div><div class="printer-muted" style="margin-bottom:10px">Chỉ chạy trong APK có cầu nối AndroidScanner.</div><button type="button" class="printer-action outline" id="scanTest">Quét thử mã</button><div class="printer-muted" id="scanTestOut" style="word-break:break-all"></div></div></section>';
+      }
+      function renderDiag() {
+        const out = byId('temDiag'); if (!out || !temDiagOpen) return; const bridge = window.AndroidPrinter;
+        if (!bridge) { out.textContent = 'Không có window.AndroidPrinter — đang chạy ngoài APK.'; return; }
+        const methods = []; let current = bridge; while (current && current !== Object.prototype) { Object.getOwnPropertyNames(current).forEach(name => { if (typeof bridge[name] === 'function' && !methods.includes(name)) methods.push(name); }); current = Object.getPrototypeOf(current); }
+        out.textContent = 'AndroidPrinter: CÓ\nPhiên bản: ' + (temBridgeVersion() || 'không báo') + '\nCó: ' + methods.sort().join(', ') + '\nTrạng thái tem: ' + JSON.stringify(temStatus());
+      }
+      function refreshPrinterScreen() {
+        if (!byId('printerScreen') || !byId('printerScreen').classList.contains('show')) return;
+        const layout = BillPrinter.layout, connected = BillPrinter.connected, hasBridge = !!window.AndroidPrinter;
+        const billDot = byId('billDot'), billStatus = byId('billStatus'), disconnect = byId('billDisconnect'), connect = byId('billConnect'), btSection = byId('billBtSection');
+        if (billDot) billDot.style.background = connected ? '#22c55e' : '#ccc';
+        if (billStatus) billStatus.textContent = connected ? (BillPrinter.baudRate ? 'Đã kết nối · ' + BillPrinter.baudRate + ' baud' : 'Đã kết nối (Bluetooth)') : 'Chưa kết nối';
+        if (disconnect) disconnect.style.display = connected ? '' : 'none'; if (connect) connect.style.display = connected || hasBridge ? 'none' : ''; if (btSection) btSection.style.display = hasBridge && !connected ? '' : 'none';
+        const fill = (id, value, prop) => { const input = byId(id); if (input) input[prop || 'value'] = value; }; fill('layoutCopies', layout.copies); fill('layoutFeed', layout.feedLinesAfter); fill('layoutTitle', layout.fontSizeTitle); fill('layoutBody', layout.fontSizeBody); fill('layoutLogo', layout.showLogo, 'checked'); fill('layoutFooter', layout.footerText || ''); fill('layoutFooterBold', !!layout.footerBold, 'checked');
+        const auto = byId('billAuto'), autoTrack = byId('billAutoTrack'), autoText = byId('billAutoText'); if (auto) auto.checked = BillPrinter.autoPrintEnabled; if (autoTrack) autoTrack.classList.toggle('on', BillPrinter.autoPrintEnabled); if (autoText) { autoText.textContent = BillPrinter.autoPrintEnabled ? 'Đang BẬT ✅' : 'Đang TẮT'; autoText.style.color = BillPrinter.autoPrintEnabled ? '#15803d' : '#999'; }
+        const temEnabled = byId('temEnabled'), temTrack = byId('temEnabledTrack'), temText = byId('temEnabledText'); if (temEnabled) temEnabled.checked = TemPrinter.enabled; if (temTrack) temTrack.classList.toggle('on', TemPrinter.enabled); if (temText) { temText.textContent = TemPrinter.enabled ? 'Đang BẬT ✅' : 'Đang TẮT'; temText.style.color = TemPrinter.enabled ? '#15803d' : '#999'; }
+        fill('temEngine', TemPrinter.engine); fill('temDpi', String(TemPrinter.dpi)); fill('temGap', TemPrinter.gap); fill('temOffset', TemPrinter.offset); const invert = byId('temInvert'), invertTrack = byId('temInvertTrack'); if (invert) invert.checked = TemPrinter.invert; if (invertTrack) invertTrack.classList.toggle('on', TemPrinter.invert); refreshTemConnection(); renderDiag();
+      }
+      function saveLayoutFromScreen() {
+        const number = (id, fallback, min, max) => Math.min(max, Math.max(min, parseInt(byId(id).value, 10) || fallback));
+        saveLayout({ copies:number('layoutCopies', 1, 1, 5), feedLinesAfter:number('layoutFeed', 3, 0, 10), fontSizeTitle:number('layoutTitle', 28, 16, 40), fontSizeBody:number('layoutBody', 16, 10, 24), showLogo:byId('layoutLogo').checked, footerText:String(byId('layoutFooter').value || '').slice(0, 500), footerBold:byId('layoutFooterBold').checked }); printerNotice('✅ Đã lưu cấu hình in');
+      }
+      function bindPrinterScreen() {
+        byId('printerBack').onclick = () => { byId('printerScreen').classList.remove('show'); backToOrder(); };
+        document.querySelectorAll('[data-printer-tab]').forEach(button => button.onclick = () => { document.querySelectorAll('[data-printer-tab]').forEach(other => other.classList.toggle('active', other === button)); byId('printer-tab-bill').style.display = button.dataset.printerTab === 'bill' ? '' : 'none'; byId('printer-tab-tem').style.display = button.dataset.printerTab === 'tem' ? '' : 'none'; if (button.dataset.printerTab === 'tem') { refreshTemConnection(); if (TemPrinter.enabled) { ensureTemConnected(); startTemWatchdog(); } } });
+        byId('billConnect').onclick = async () => { try { const r = await BillPrinter.connectSerial(); printerNotice('✅ Đã kết nối máy in (' + r.baudRate + ' baud)'); } catch (error) { printerNotice('❌ Không kết nối được: ' + error.message); } };
+        byId('billDisconnect').onclick = async () => { await BillPrinter.disconnect(); printerNotice('Đã ngắt kết nối máy in'); };
+        byId('billBtScan').onclick = () => { let list = []; try { list = JSON.parse(window.AndroidPrinter.listBluetoothPrinters() || '[]'); } catch (error) { printerNotice('❌ Lỗi lấy danh sách máy in: ' + error.message); return; } const select = byId('billBtSelect'), button = byId('billBtConnect'); if (!list.length) { printerNotice('⚠ Chưa ghép nối máy in Bluetooth nào.'); return; } select.innerHTML = list.map(device => '<option value="' + device.mac + '">' + device.name + ' (' + device.mac + ')</option>').join(''); select.style.display = ''; button.style.display = ''; };
+        byId('billBtConnect').onclick = async () => { try { await BillPrinter.connectBluetooth(byId('billBtSelect').value); printerNotice('✅ Đã kết nối máy in qua Bluetooth'); } catch (error) { printerNotice('❌ Không kết nối được: ' + error.message); } };
+        byId('billAuto').onchange = event => BillPrinter.setAuto(event.target.checked); byId('layoutSave').onclick = saveLayoutFromScreen; byId('layoutSaveFooter').onclick = saveLayoutFromScreen;
+        byId('billTest').onclick = async () => { try { await BillPrinter.test(); printerNotice('✅ Đã gửi lệnh in thử'); } catch (error) { printerNotice('❌ Lỗi in thử: ' + error.message); } };
+        byId('temEnabled').onchange = event => { TemPrinter.setEnabled(event.target.checked); if (event.target.checked) { ensureTemConnected(); startTemWatchdog(); } printerNotice(event.target.checked ? '✅ Đã bật in tem — đã lưu' : '🔕 Đã tắt in tem — đã lưu'); };
+        byId('temEngine').onchange = event => { TemPrinter.setEngine(event.target.value); temKeepAliveSig = null; syncTemKeepAlive(); printerNotice('✅ Đã lưu ngôn ngữ lệnh: ' + (event.target.value === 'tspl' ? 'TSPL' : 'ESC/POS')); };
+        byId('temDpi').onchange = event => { TemPrinter.setDpi(event.target.value); printerNotice('✅ Đã lưu DPI'); }; byId('temGap').onchange = event => { TemPrinter.setGap(event.target.value); printerNotice('✅ Đã lưu khoảng gap'); }; byId('temOffset').onchange = event => { TemPrinter.setOffset(event.target.value); printerNotice('✅ Đã lưu offset dọc'); }; byId('temInvert').onchange = event => { TemPrinter.setInvert(event.target.checked); refreshPrinterScreen(); printerNotice('✅ Đã lưu đảo màu tem'); };
+        byId('temDiscover').onclick = () => discoverTem(true); byId('temPickConnect').onclick = () => { const [ip, mac] = byId('tem-printer-pick-select').value.split('|'); if (mac) TemPrinter.setMac(mac); connectTemIp(ip).then(ok => { refreshPrinterScreen(); printerNotice(ok ? '✅ Đã kết nối máy in tem' : '❌ Không kết nối được máy in tem'); }); }; byId('temDiagToggle').onclick = () => { temDiagOpen = !temDiagOpen; byId('temDiag').style.display = temDiagOpen ? 'block' : 'none'; renderDiag(); };
+        byId('temTest').onclick = async () => { if (!TemPrinter.enabled) { printerNotice('⚠ Hãy bật in tem trước khi in thử'); return; } if (!(await ensureTemConnected())) { printerNotice('⚠ Không nối được máy in tem — kiểm tra WiFi/máy in.'); return; } try { const ok = TemPrinter.printTest(); printerNotice(ok ? '✅ Đã gửi lệnh in tem' : '❌ APK báo chưa gửi được tem'); } catch (error) { printerNotice('❌ Lỗi gửi tem: ' + error.message); } };
+        bindScannerTest(); refreshPrinterScreen();
+      }
+      window.openLegacyPrinterScreen = () => { closeSheet(); byId('checkoutScreen').classList.remove('show'); byId('cashScreen').classList.remove('show'); byId('splitScreen').classList.remove('show'); document.querySelector('.app').style.display = 'none'; document.querySelector('.footer').style.display = 'none'; byId('printerScreen').innerHTML = printerTemplate(); byId('printerScreen').classList.add('show'); bindPrinterScreen(); if (window.AndroidPrinter) { BillPrinter.reconnectBluetooth(); if (TemPrinter.enabled) { ensureTemConnected(); startTemWatchdog(); } } else BillPrinter.reconnectSerial(); };
+      window.GIEO_LEGACY_PRINTER = Object.freeze({ bill:BillPrinter, tem:TemPrinter, printBillCanvas:lines => BillPrinter.printCanvas(lines), printLabel:(lines, copies) => TemPrinter.printLabel(lines, copies) });
+      cloudDb = initPrinterCloud();
+      if (window.GIEO_FIFO_FIREBASE && typeof window.GIEO_FIFO_FIREBASE.whenAuthenticated === 'function') {
+        window.GIEO_FIFO_FIREBASE.whenAuthenticated().then(user => { if (user) syncLayoutFromCloud(); });
+      } else syncLayoutFromCloud();
+    })();
+  </script>
+
+  <script>
+    /* HISTORY UI LEGACY — chỉ nhận read model bill từ FIFO core, không có Firebase/legacy storage. */
+    (() => {
+      const HIDDEN_AFTER_MINUTES = 60;
+      const historyState = { bills:[], query:'', activeId:null };
+      const $history = id => document.getElementById(id);
+      const historyNotice = message => { if (typeof report === 'function') report(message); else console.info(message); };
+      const escapeHistory = value => String(value == null ? '' : value).replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[char]));
+      const formatMoney = value => Number(value || 0).toLocaleString('vi-VN') + 'đ';
+      const cleanCode = value => String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      const digits = value => String(value || '').replace(/\D/g, '');
+      function displayDate(value, createdAt) {
+        if (value && /^\d{2}\/\d{2}\/\d{4}$/.test(value)) return value;
+        const date = value ? new Date(value) : new Date(createdAt || Date.now());
+        if (Number.isNaN(date.getTime())) return '—';
+        return String(date.getDate()).padStart(2, '0') + '/' + String(date.getMonth() + 1).padStart(2, '0') + '/' + date.getFullYear();
+      }
+      function displayTime(value, createdAt) {
+        if (value && /^\d{1,2}:\d{2}/.test(value)) return value.slice(0, 5);
+        const date = new Date(createdAt || Date.now());
+        return Number.isNaN(date.getTime()) ? '—' : String(date.getHours()).padStart(2, '0') + ':' + String(date.getMinutes()).padStart(2, '0');
+      }
+      function normaliseBill(source) {
+        const items = Array.isArray(source.itemsArray) ? source.itemsArray : Array.isArray(source.items) ? source.items : Array.isArray(source.lines) ? source.lines : [];
+        const createdAt = source.createdAt || source.paidAt || source.timestamp || source.occurredAt || new Date().toISOString();
+        const payments = Array.isArray(source.payments) ? source.payments : [];
+        const method = source.method || source.paymentMethod || source.payment && source.payment.method || (payments.length > 1 ? 'TÍNH RIÊNG' : payments[0] && (payments[0].method || payments[0].type)) || '—';
+        const splitGroups = Array.isArray(source.splitGroups) ? source.splitGroups : payments.length > 1 ? payments : [];
+        const bankPayment = payments.find(payment => payment && String(payment.method || payment.type || '').includes('CHUYỂN KHOẢN'));
+        return {
+          id:String(source.id || source.billId || source.orderId || ('history_' + Date.now() + '_' + Math.random().toString(36).slice(2))), billCode:source.billCode || source.code || '', date:displayDate(source.date || source.businessDate, createdAt), time:displayTime(source.time, createdAt), createdAt,
+          total:Number(source.total != null ? source.total : source.amount != null ? source.amount : 0), method, phone:source.phone || source.customerPhone || '', customerName:source.customerName || '', items,
+          isShip:source.isShip === true || source.channel && source.channel.type === 'TO_GO', isAppSale:source.isAppSale === true || source.channel && source.channel.type === 'APP', bankOrderId:source.bankOrderId || source.paymentReference || bankPayment && (bankPayment.bankOrderId || bankPayment.referenceId) || '', splitGroups, cashGiven:source.cashGiven, cashChange:source.cashChange, raw:source
+        };
+      }
+      function isFresh(bill) { const stamp = new Date(bill.createdAt).getTime(); return Number.isFinite(stamp) && Date.now() - stamp < HIDDEN_AFTER_MINUTES * 60000 && Date.now() >= stamp; }
+      function matchesBill(bill, query) {
+        const text = String(query || '').trim().toLowerCase(); if (text.length < 3) return false;
+        const code = cleanCode(text), phone = digits(text);
+        if (isFresh(bill)) return String(bill.total).includes(text) || String(bill.phone).includes(text) || String(bill.billCode).toLowerCase().includes(text) || bill.id.toLowerCase().includes(text);
+        return (code.length >= 4 && cleanCode(bill.billCode) === code) || (phone.length >= 9 && digits(bill.phone) === phone) || (text.length >= 15 && bill.id.toLowerCase() === text);
+      }
+      function billKind(bill) {
+        const split = bill.method === 'TÍNH RIÊNG' || bill.splitGroups.length > 0;
+        const bank = String(bill.method).includes('CHUYỂN KHOẢN') || bill.splitGroups.some(group => group && group.method === 'CHUYỂN KHOẢN');
+        return split ? 'split-order' : bank ? 'bank-order' : bill.isAppSale ? 'app-order' : '';
+      }
+      function billBankCodes(bill) {
+        if (bill.splitGroups.length) return bill.splitGroups.filter(group => group && group.method === 'CHUYỂN KHOẢN' && group.bankOrderId).map(group => group.bankOrderId).join(', ');
+        return bill.bankOrderId || '';
+      }
+      function renderHistoryList() {
+        const host = $history('historyList'); if (!host) return;
+        const query = historyState.query, hasQuery = query.trim().length >= 3;
+        const bills = historyState.bills.filter(bill => hasQuery ? matchesBill(bill, query) : isFresh(bill));
+        if (!bills.length) { host.innerHTML = '<div class="history-empty">' + (hasQuery ? 'Không tìm thấy đơn nào khớp.<br><span style="font-size:12.5px">Đơn cũ hơn ' + HIDDEN_AFTER_MINUTES + ' phút cần tìm bằng đúng mã bill hoặc đủ SĐT.</span>' : 'Chưa có đơn nào trong ' + HIDDEN_AFTER_MINUTES + ' phút gần đây.<br><span style="font-size:12.5px">Bill sẽ xuất hiện khi FIFO core trả read model.</span>') + '</div>'; return; }
+        const groups = bills.reduce((all, bill) => { (all[bill.date] || (all[bill.date] = [])).push(bill); return all; }, {});
+        host.innerHTML = Object.entries(groups).map(([date, group]) => '<section class="history-group"><div class="history-date">' + escapeHistory(date) + '</div>' + group.map(bill => {
+          const kind = billKind(bill), split = kind === 'split-order', bank = kind === 'bank-order' || split, bankCode = billBankCodes(bill), badges = (bill.isShip ? '<span style="background:#f59e0b;color:#78350f;font-size:10px;font-weight:700;border-radius:6px;padding:2px 6px;margin-left:4px">🚚 SHIP</span>' : '') + (bill.isAppSale ? '<span style="background:#16a34a;color:#fff;font-size:10px;font-weight:700;border-radius:6px;padding:2px 6px;margin-left:4px">📱 APP</span>' : '');
+          const bankMeta = bankCode ? '<span style="color:' + (split ? '#7c3aed' : '#C22B49') + ';font-weight:700">🏦 ' + escapeHistory(bankCode) + '</span> · ' : '';
+          return '<button type="button" class="history-item ' + kind + '" data-history-id="' + escapeHistory(bill.id) + '"><span class="history-icon">📄</span><span class="history-info"><span class="history-time">' + escapeHistory(bill.time) + badges + '</span><span class="history-meta">' + bankMeta + (bill.billCode ? '<span style="color:#E23A5D;font-weight:700">' + escapeHistory(bill.billCode) + '</span> · ' : '') + escapeHistory(bill.phone || bill.customerName || 'Khách vãng lai') + '</span></span><span style="text-align:right;flex:0 0 auto"><span class="history-total">' + formatMoney(bill.total) + '</span><span class="history-method">' + escapeHistory(bill.method) + '</span></span></button>';
+        }).join('') + '</section>').join('');
+        host.querySelectorAll('[data-history-id]').forEach(button => button.onclick = () => openHistoryDetail(button.dataset.historyId));
+      }
+      function itemPrice(item) { return Number(item.lineTotal != null ? item.lineTotal : item.total != null ? item.total : (Number(item.price || 0) + (item.toppings || []).reduce((sum, topping) => sum + Number(topping.price || 0) * Number(topping.qty || 1), 0)) * Number(item.qty || item.quantity || 1)); }
+      function openHistoryDetail(id) {
+        const bill = historyState.bills.find(item => item.id === id); if (!bill) return; historyState.activeId = id;
+        const detail = $history('historyDetail'), quantity = bill.items.reduce((sum, item) => sum + Number(item.qty || item.quantity || 1), 0), groups = bill.splitGroups;
+        const body = groups.length ? groups.map(group => '<section class="history-detail-card" style="border:2px solid ' + (group.method === 'TIỀN MẶT' ? '#C22B49' : '#7c3aed') + '"><div style="font-size:13px;font-weight:800;color:' + (group.method === 'TIỀN MẶT' ? '#C22B49' : '#6d28d9') + '">' + escapeHistory(group.method || '—') + '</div><div class="history-detail-sub" style="background:#f7f7f7;color:#666">' + Number(group.items && group.items.length || 0) + ' món · ' + formatMoney(group.total) + (group.bankOrderId ? ' · ' + escapeHistory(group.bankOrderId) : '') + '</div></section>').join('') : '<section class="history-detail-card"><div style="font-size:11px;font-weight:800;color:#999;letter-spacing:.6px">CHI TIẾT MÓN</div>' + bill.items.map((item, index) => '<div class="history-detail-row"><span style="min-width:20px;font-size:17px;font-weight:700">' + (index + 1) + '</span><span class="history-detail-item">' + escapeHistory(item.name || item.title || 'Món') + (Number(item.qty || item.quantity || 1) > 1 ? ' <span style="font-size:13px;color:#E23A5D">×' + Number(item.qty || item.quantity || 1) + '</span>' : '') + '<span class="history-detail-sub">' + escapeHistory(item.size || '—') + ' · ' + formatMoney(item.price) + '</span></span><strong>' + formatMoney(itemPrice(item)) + '</strong></div>').join('') + '</section>';
+        detail.innerHTML = '<header class="history-detail-head"><button type="button" class="history-detail-back" id="historyDetailBack">‹ Lịch sử đơn</button><span></span></header><section class="history-detail-card"><div class="history-detail-brand">Gieo Gieo</div><div style="display:flex;align-items:center;gap:6px;margin:4px 0 16px"><i style="width:8px;height:8px;border-radius:50%;background:#C22B49"></i><span style="font-size:12px;font-weight:800;color:#999;letter-spacing:.7px">HÓA ĐƠN ĐIỆN TỬ</span></div>' + (bill.billCode ? '<div style="color:#E23A5D;font-size:14px;font-weight:800;margin-bottom:12px">' + escapeHistory(bill.billCode) + '</div>' : '') + (billBankCodes(bill) ? '<div class="history-detail-sub" style="background:#f5f3ff;color:#6d28d9">🏦 Mã CK: ' + escapeHistory(billBankCodes(bill)) + '</div>' : '') + '</section>' + body + '<section class="history-detail-card"><div style="font-size:11px;font-weight:800;color:#999;letter-spacing:.6px">THÔNG TIN THANH TOÁN</div><div class="history-detail-row"><span>Thời gian</span><strong>' + escapeHistory(bill.time + ' · ' + bill.date) + '</strong></div><div class="history-detail-row"><span>Khách</span><strong>' + escapeHistory(bill.phone || bill.customerName || 'Khách vãng lai') + '</strong></div><div class="history-detail-row"><span>Phương thức</span><strong style="color:#C22B49">' + escapeHistory(bill.method) + '</strong></div></section><section class="history-detail-card"><div style="font-size:11px;font-weight:800;color:#999;letter-spacing:.6px">TỔNG BILL</div><div style="margin-top:6px;color:#111;font-size:44px;font-weight:800;letter-spacing:-1px">' + formatMoney(bill.total) + '</div><div style="margin-top:5px;color:#999">Số lượng: ' + quantity + ' món</div></section><button type="button" class="history-reprint" id="historyReprint">🖨 In lại hóa đơn</button>';
+        detail.classList.add('show'); byDetailButtons(bill);
+      }
+      function byDetailButtons(bill) {
+        $history('historyDetailBack').onclick = () => $history('historyDetail').classList.remove('show');
+        const reprint = $history('historyReprint'); reprint.disabled = !(window.GIEO_LEGACY_PRINTER && window.GIEO_LEGACY_PRINTER.printBillCanvas);
+        reprint.onclick = async () => { if (reprint.disabled) { historyNotice('⚠ Máy in chưa sẵn sàng.'); return; } try { await window.GIEO_LEGACY_PRINTER.printBillCanvas([{ text:'GIEO GIEO', size:26, align:'center', bold:true }, { text:bill.billCode || 'HÓA ĐƠN', size:14, align:'center' }, { type:'divider', style:'dashed' }, ...bill.items.map(item => ({ text:(item.name || item.title || 'Món') + ' ×' + Number(item.qty || item.quantity || 1) + '  ' + formatMoney(itemPrice(item)), size:14 })), { type:'divider' }, { text:'TỔNG: ' + formatMoney(bill.total), size:22, align:'right', bold:true }, { text:bill.method, size:13, align:'right' }]); historyNotice('✅ Đã gửi lệnh in lại'); } catch (error) { historyNotice('❌ Không in được: ' + error.message); } };
+      }
+      function renderHistoryScreen() {
+        $history('historyScreen').innerHTML = '<header class="history-head"><strong>LỊCH SỬ ĐƠN</strong><button type="button" class="history-close" id="historyClose">×</button></header><label class="history-search"><span style="font-size:18px;color:#bbb">⌕</span><input type="search" id="historySearch" autocomplete="off" placeholder="Tìm đơn theo mã bill / SĐT..."></label><section id="historyList"></section><aside class="history-detail" id="historyDetail"></aside>';
+        $history('historyClose').onclick = () => { $history('historyScreen').classList.remove('show'); backToOrder(); };
+        $history('historySearch').oninput = event => { historyState.query = event.target.value; renderHistoryList(); };
+        renderHistoryList();
+      }
+      function replaceBills(records) { historyState.bills = (Array.isArray(records) ? records : []).map(normaliseBill).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)); if ($history('historyScreen').classList.contains('show')) renderHistoryScreen(); }
+      function appendBill(record) { const bill = normaliseBill(record); const old = historyState.bills.findIndex(item => item.id === bill.id); if (old >= 0) historyState.bills.splice(old, 1); historyState.bills.unshift(bill); if ($history('historyScreen').classList.contains('show')) renderHistoryScreen(); }
+      window.openLegacyHistoryScreen = () => { closeSheet(); $history('checkoutScreen').classList.remove('show'); $history('cashScreen').classList.remove('show'); $history('splitScreen').classList.remove('show'); $history('printerScreen').classList.remove('show'); document.querySelector('.app').style.display = 'none'; document.querySelector('.footer').style.display = 'none'; renderHistoryScreen(); $history('historyScreen').classList.add('show'); };
+      window.GIEO_POS_HISTORY = Object.freeze({ replaceBills, appendBill, clear:() => replaceBills([]) });
+      window.addEventListener('gieo:history-updated', event => replaceBills(event.detail));
+      window.addEventListener('gieo:history-bill', event => appendBill(event.detail));
+      if (window.GIEO_FIFO_FIREBASE && window.GIEO_FIFO_FIREBASE.ready()) {
+        window.GIEO_FIFO_FIREBASE.whenAuthenticated().then(user => {
+          if (user) window.GIEO_FIFO_FIREBASE.watchTodayBills(replaceBills, error => historyNotice('⚠ Không đọc được lịch sử FIFO: ' + (error && error.message || error)));
+        });
+      }
+    })();
+  </script>
+</body>
+</html>
