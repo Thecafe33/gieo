@@ -16697,7 +16697,16 @@ async function _submitPrepCountImpl() {
           staff: staffEmp.fullName, staffEmployeeId: staffEmp.id,
           createdAt: now, businessDate: shiftState.businessDate, source: 'pos'
         };
-        t.update(prepRef, { currentStock: tonSauDem, updatedAt: now });
+        // [FIX "Nước đường vẫn âm sau khi kiểm kê xong" — nợ ảo untrackedPendingDelta không tự
+        // hết] Dòng dưới ghi currentStock=tonSauDem ĐÚNG số đếm thật — nhưng ngay sau khối này,
+        // vì rtAllOk, _ueRecomputeCurrentStock() sẽ CHẠY LẠI và tính currentStock = untrackedPendingDelta
+        // (CŨ, có thể đang âm rất sâu do dồn từ những lần bán không có lô nào để phân bổ — xem
+        // applyPrepConsumptionPOS) + RT (vừa đồng bộ = tonSauDem) — nếu untrackedPendingDelta
+        // không về lại 0 ở đây, số đếm thật vừa ghi bị đè lùi xuống âm ngay sau khi vừa chốt xong,
+        // y hệt việc kiểm kê chưa từng xảy ra. Kiểm kê nghĩa là đối chiếu THỰC TẾ — mọi khoản
+        // lệch chưa giải thích được (dù là untrackedPendingDelta hay bất kỳ gì) coi như đã được
+        // giải quyết bởi con số đếm tay này, không phải cộng dồn tiếp sang ngày sau.
+        t.update(prepRef, { currentStock: tonSauDem, untrackedPendingDelta: 0, updatedAt: now });
         if (discardedQty > 0) {
           t.set(wasteRef, {
             ...chung,
