@@ -1384,6 +1384,26 @@ html.phone-ui .nav-search .ns-kbd{display:none;}
       </div>
     </div>
 
+    <!-- TODAY · VẬN HÀNH -->
+    <div class="screen" id="screen-todayops">
+      <div class="wrap">
+        <!-- [MỚI] 6 khối = 6 mục dùng hằng ngày, mỗi khối đọc/lỗi độc lập
+             (renderTodayOps) để một collection hỏng không kéo trắng cả màn. -->
+        <div class="sec-title" style="margin-top:0">Checklist ca hôm nay</div>
+        <div id="opsChecklist"></div>
+        <div class="sec-title">Tiền mặt hôm nay</div>
+        <div class="card" id="opsCash"></div>
+        <div class="sec-title">Nguyên liệu sắp hết</div>
+        <div class="card" id="opsItems"></div>
+        <div class="sec-title">Bán thành phẩm (BTP)</div>
+        <div class="card" id="opsPrep"></div>
+        <div class="sec-title">Nguyên liệu đang sử dụng</div>
+        <div class="card" id="opsContainers"></div>
+        <div class="sec-title">Lịch sử bill hôm nay</div>
+        <div class="card" id="opsBills"></div>
+      </div>
+    </div>
+
     <!-- HEALTH -->
     <div class="screen" id="screen-health">
       <div class="wrap">
@@ -9258,7 +9278,14 @@ let reportWeekOffset = 0;
 const NAV_SECTIONS = [
   // [GỘP MÀN] "Sức khoẻ quán" và "Hôm nay" nay là MỘT màn: mở ra thấy luôn việc cần
   // xử lý và tình trạng của ngày, không phải nhảy qua nhảy lại hai chỗ.
-  { items:[ {key:'today', ic:'stethoscope', label:'Hôm nay · Sức khoẻ quán', go:"switchScreen('today')"} ]},
+  { items:[
+    {key:'today',    ic:'stethoscope', label:'Hôm nay · Sức khoẻ quán', go:"switchScreen('today')"},
+    // [MỚI] Màn thứ hai đi cùng "Sức khoẻ quán": gộp 6 mục vận hành hằng ngày
+    // (nguyên liệu, tiền mặt, checklist ca, BTP, hàng đang mở, lịch sử bill) —
+    // trước đây nằm rải rác trong nhánh Kho/Vận hành của sidebar, phải nhớ tên
+    // mục mới mò ra. Chủ quán chỉ cần nhớ 2 màn "Hôm nay" là đủ xem mỗi ngày.
+    {key:'todayops', ic:'clipboard',   label:'Hôm nay · Vận hành',      go:"switchScreen('todayops')"},
+  ]},
   { group:'Báo cáo', items:[
     {key:'health', ic:'pulse',    label:'Sức khỏe tài chính', go:"switchScreen('health')"},
     {key:'report', ic:'chart',    label:'Báo cáo kỳ',         go:"switchScreen('report')"},
@@ -10137,6 +10164,7 @@ function switchScreen(s){
   if(s==='assist') renderAssist().catch(err=>{ console.error(err); showError('Không mở được Trợ lý bán hàng: '+(err.message||err)); });
   if(s==='inbox') renderAlertInbox();
   if(s==='today') renderToday();
+  if(s==='todayops') renderTodayOps();
   if(s==='health') renderHealth();
   if(s==='report') renderReport();
   if(s==='mix') renderMix();
@@ -10746,6 +10774,161 @@ async function renderToday(){
   }finally{
     setSync(false);
   }
+}
+
+// ============================================================
+// [MỚI] MÀN "HÔM NAY · VẬN HÀNH" — gộp 6 mục nhân viên/chủ quán cần xem MỖI
+// NGÀY (checklist ca, tiền mặt, nguyên liệu sắp hết, BTP, hàng đang mở & tem,
+// lịch sử bill) vào một màn, thay vì phải mò trong 47 mục sidebar. Đi cùng
+// màn "Hôm nay · Sức khoẻ quán" (chỉ số tài chính/hoà vốn) — 2 màn là đủ xem
+// mỗi ngày. Mỗi khối tự đọc, tự lỗi riêng — một collection hỏng không kéo
+// trắng cả màn, và không đụng tới listener bill realtime (cái đó chỉ chạy
+// khi đang đứng ở màn "Hôm nay · Sức khoẻ quán", xem attachBillFeed).
+// ============================================================
+async function renderTodayOps(){
+  const dayKey = dkey(new Date());
+  const boxes = {
+    checklist:  document.getElementById('opsChecklist'),
+    cash:       document.getElementById('opsCash'),
+    items:      document.getElementById('opsItems'),
+    prep:       document.getElementById('opsPrep'),
+    containers: document.getElementById('opsContainers'),
+    bills:      document.getElementById('opsBills'),
+  };
+  Object.values(boxes).forEach(b=>{ if(b) b.innerHTML = '<div class="muted">Đang tải...</div>'; });
+
+  // CHECKLIST CA — tái dùng đúng khối "Kết quả thực hiện" của Kho ▸ Checklist ca
+  // (đã có sẵn tóm tắt mở ca/đóng ca/refill từ trước).
+  (async () => {
+    try{
+      const [defs, opening, closing, refillSnap] = await Promise.all([
+        loadShiftChecklists(), loadDailyOpening(dayKey), loadDailyClosing(dayKey),
+        fstore.collection('stock_transactions_gieogieo').where('businessDate','==',dayKey).where('type','==','TRANSFER').get()
+          .catch(err=>{ console.warn('[Vận hành] không đọc được refill:', err); return null; })
+      ]);
+      const refillLines = refillSnap ? refillSnap.docs.map(d=>({id:d.id, ...d.data()})) : [];
+      if(boxes.checklist) boxes.checklist.innerHTML = renderClChecklistResult(dayKey, opening, defs, closing, refillLines);
+    }catch(err){
+      console.warn('[Vận hành] checklist lỗi:', err);
+      if(boxes.checklist) boxes.checklist.innerHTML = '<div class="muted">Không đọc được checklist: '+(err.code||err.message||err)+'</div>';
+    }
+  })();
+
+  // TIỀN MẶT — tái dùng computeCashBreakdownForDate (đã dùng cho báo cáo đóng ngày).
+  (async () => {
+    try{
+      const cb = await computeCashBreakdownForDate(dayKey);
+      const lech = cb.closing ? (Number(cb.closing.actualCash)||0) - cb.expected : null;
+      boxes.cash.innerHTML = `
+        <div class="litem"><div class="li-l"><div>Tiền đầu ca</div></div><div class="li-r">${fmt(cb.openingCash)}</div></div>
+        <div class="litem"><div class="li-l"><div>Thu tiền mặt (${cb.cashOrders.length} bill)</div></div><div class="li-r">${fmt(cb.cashSales)}</div></div>
+        <div class="litem"><div class="li-l"><div>Chi tiền mặt (${cb.cashExpenses.length} khoản)</div></div><div class="li-r">−${fmt(cb.cashExpenseTotal)}</div></div>
+        <div class="litem"><div class="li-l"><div><b>Tồn quỹ dự kiến</b></div></div><div class="li-r"><b>${fmt(cb.expected)}</b></div></div>
+        ${cb.closing
+          ? `<div class="litem"><div class="li-l"><div>${lech===0?'Khớp quỹ':'Lệch quỹ'}</div></div><div class="li-r" style="color:${lech===0?'var(--ok)':'#c0392b'}">${lech>0?'+':''}${fmt(lech)}</div></div>`
+          : `<div class="muted-sm" style="padding:6px 2px">Chưa đóng ca — chưa đối chiếu.</div>`}
+        <button class="btn outline sm" style="margin-top:8px" onclick="curEntryTab='cash'; switchScreen('entry')">Xem chi tiết ${ic('chevronDown',13)}</button>`;
+    }catch(err){
+      console.warn('[Vận hành] tiền mặt lỗi:', err);
+      boxes.cash.innerHTML = '<div class="muted">Không đọc được tiền mặt: '+(err.code||err.message||err)+'</div>';
+    }
+  })();
+
+  // NGUYÊN LIỆU — mượn đúng phép lọc "sắp hết" đang dùng ở thanh nhắc màn Hôm nay.
+  (async () => {
+    try{
+      const items = await loadInventoryItems();
+      const low = items.filter(it=> itemStockManaged(it) && Number(it.minStock)>0 && Number(it.currentStock) < Number(it.minStock));
+      if(!low.length){ boxes.items.innerHTML = '<div class="empty-hint">Không có nguyên liệu nào dưới định mức.</div>'; return; }
+      boxes.items.innerHTML = low.slice(0,10).map(it=>`
+        <div class="litem" onclick="goKho('items','low')" style="cursor:pointer">
+          <div class="li-l"><div>${escapeHtmlAttr(it.name||'')}</div>
+            <div class="muted-sm">Còn ${fmtNum(it.currentStock,1)} ${escapeHtmlAttr(it.unit||'')} · định mức ${fmtNum(it.minStock,1)}</div></div>
+          <div class="li-r"><span class="tier tier-red">Sắp hết</span></div>
+        </div>`).join('')
+        + (low.length>10 ? `<div class="muted-sm" style="padding:6px 2px">…và ${low.length-10} nguyên liệu khác</div>` : '')
+        + `<button class="btn outline sm" style="margin-top:8px" onclick="goKho('items')">Xem toàn bộ kho ${ic('chevronDown',13)}</button>`;
+    }catch(err){
+      console.warn('[Vận hành] nguyên liệu lỗi:', err);
+      boxes.items.innerHTML = '<div class="muted">Không đọc được kho: '+(err.code||err.message||err)+'</div>';
+    }
+  })();
+
+  // BTP — bản rút gọn của Kho 2.0 ▸ Bán thành phẩm: hôm nay + đang dùng.
+  (async () => {
+    try{
+      const [todaySnap, activeSnap] = await Promise.all([
+        fstore.collection('prep_batches_gieogieo').where('businessDate','==',dayKey).get(),
+        fstore.collection('prep_batches_gieogieo').where('status','in',['cooking','active']).get()
+      ]);
+      const byId = {};
+      todaySnap.forEach(d=>byId[d.id] = {id:d.id, ...d.data()});
+      activeSnap.forEach(d=>{ if(!byId[d.id]) byId[d.id] = {id:d.id, ...d.data()}; });
+      const list = Object.values(byId).sort((a,b)=>String(b.startedAt||'').localeCompare(String(a.startedAt||'')));
+      if(!list.length){ boxes.prep.innerHTML = '<div class="empty-hint">Chưa có lô BTP nào hôm nay.</div>'; return; }
+      const dt = iso => { const d = iso?new Date(iso):null; return (d && !isNaN(d)) ? `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}` : ''; };
+      boxes.prep.innerHTML = list.slice(0,8).map(b=>{
+        const trangThai = PREP_BATCH_STATUS_LABEL[b.status] || b.status || '—';
+        const mauTier = b.status==='active' ? 'green' : (b.status==='cooking' ? 'blue' : (b.status==='cancelled' ? 'amber' : 'red'));
+        const pct = (Number(b.qtyInitial)>0) ? Math.round(Math.max(0,Number(b.qtyRemaining)||0)/Number(b.qtyInitial)*100) : null;
+        return `<div class="litem" onclick="ctnShowDetail('${b.id}','prep_batches_gieogieo')" style="cursor:pointer">
+          <div class="li-l"><div>${escapeHtmlAttr(b.prepName||b.prepCode||'')}</div>
+            <div class="muted-sm">Bắt đầu ${dt(b.startedAt)}${b.staff?(' · '+escapeHtmlAttr(b.staff)):''}${pct!=null?(' · còn '+pct+'%'):''}</div></div>
+          <div class="li-r"><span class="tier tier-${mauTier}">${escapeHtmlAttr(trangThai)}</span></div>
+        </div>`;
+      }).join('') + `<button class="btn outline sm" style="margin-top:8px" onclick="goKho2('prep')">Xem Kho 2.0 ▸ BTP ${ic('chevronDown',13)}</button>`;
+    }catch(err){
+      console.warn('[Vận hành] BTP lỗi:', err);
+      boxes.prep.innerHTML = '<div class="muted">Không đọc được BTP: '+(err.code||err.message||err)+'</div>';
+    }
+  })();
+
+  // NGUYÊN LIỆU ĐANG SỬ DỤNG — chai/gói đang mở, đúng danh sách Kho ▸ Hàng đang mở & tem (filter open).
+  (async () => {
+    try{
+      const list = await loadContainersFor('open');
+      if(!list.length){ boxes.containers.innerHTML = '<div class="empty-hint">Không có chai/gói nào đang mở.</div>'; return; }
+      const now = new Date();
+      boxes.containers.innerHTML = list.slice(0,10).map(c=>{
+        const het = c.expiresAt && new Date(c.expiresAt) <= now;
+        return `<div class="litem" onclick="goContainers('open')" style="cursor:pointer">
+          <div class="li-l"><div>${escapeHtmlAttr(c.itemName||'')} <span class="muted-sm">${escapeHtmlAttr(c.code||'')}</span></div>
+            <div class="muted-sm">${c.openedBy?('Mở bởi '+escapeHtmlAttr(c.openedBy)):''}${c.expiresAt?(' · HSD '+new Date(c.expiresAt).toLocaleDateString('vi-VN')):''}</div></div>
+          <div class="li-r">${het?'<span class="tier tier-red">Quá hạn</span>':''}</div>
+        </div>`;
+      }).join('')
+        + (list.length>10 ? `<div class="muted-sm" style="padding:6px 2px">…và ${list.length-10} chai/gói khác</div>` : '')
+        + `<button class="btn outline sm" style="margin-top:8px" onclick="goContainers('open')">Xem toàn bộ ${ic('chevronDown',13)}</button>`;
+    }catch(err){
+      console.warn('[Vận hành] hàng đang mở lỗi:', err);
+      boxes.containers.innerHTML = '<div class="muted">Không đọc được danh sách: '+(err.code||err.message||err)+'</div>';
+    }
+  })();
+
+  // LỊCH SỬ BILL — đọc MỘT LẦN (once, không gắn listener realtime — listener đó chỉ
+  // dành cho màn "Hôm nay · Sức khoẻ quán", xem attachBillFeed), cùng path RTDB.
+  (async () => {
+    try{
+      const snap = await db.ref(bfPathHomNay()).limitToLast(BF_MAX).once('value');
+      const raw = []; snap.forEach(ch=>{ raw.push({key:ch.key, o:ch.val()}); });
+      raw.reverse();
+      if(!raw.length){ boxes.bills.innerHTML = '<div class="empty-hint">Chưa có bill nào hôm nay.</div>'; return; }
+      const tong = raw.reduce((s,{o})=>s+(Number(o.total)||0),0);
+      boxes.bills.innerHTML = `<div class="muted-sm" style="padding:2px 2px 8px">${raw.length} bill · tổng ${fmt(tong)}</div>`
+        + raw.slice(0,6).map(({o})=>{
+          const tomTat = (o.itemsArray || []).map(c => `${Number(c.qty)||1}× ${c.name||''}`).join(', ') || (o.items || '');
+          return `<div class="litem" onclick="goBills()" style="cursor:pointer">
+            <div class="li-l"><div>${escapeHtmlAttr(o.time||'')}</div>
+              <div class="muted-sm">${escapeHtmlAttr(tomTat)}</div></div>
+            <div class="li-r">${fmt(o.total)}</div>
+          </div>`;
+        }).join('')
+        + `<button class="btn outline sm" style="margin-top:8px" onclick="goBills()">Xem tất cả ${ic('chevronDown',13)}</button>`;
+    }catch(err){
+      console.warn('[Vận hành] lịch sử bill lỗi:', err);
+      boxes.bills.innerHTML = '<div class="muted">Không đọc được bill: '+(err.code||err.message||err)+'</div>';
+    }
+  })();
 }
 
 // ============================================================
