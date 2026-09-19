@@ -10721,6 +10721,25 @@ async function computeStoreHealth(){
     if(ov.length) push('yellow', `Có món không refill được (${dateKey})`, ov.length, `curEntryTab='cash'; switchScreen('entry')`);
   });
 
+  // ---- [MỚI] Hao hụt & huỷ hôm nay ----
+  // Trước đây phải TỰ mở "Hao hụt & huỷ" (từ thẻ Lãi/lỗ) hoặc "Hôm nay · Vận hành"
+  // mới biết hôm nay có lượt nào bị huỷ — dễ bỏ sót đúng lượt cần xem lại nhất (hết
+  // hạn, báo hết khi hàng còn nhiều...). BẤT KỲ lượt WASTE nào trong ngày (nguyên
+  // liệu thô hay bán thành phẩm) đều nổi lên đây, bấm vào mở thẳng chi tiết.
+  try{
+    const [wasteItemSnap, wastePrepSnap] = await Promise.all([
+      fstore.collection('stock_transactions_gieogieo').where('businessDate','==',today).where('type','==','WASTE').get(),
+      fstore.collection('prep_transactions_gieogieo').where('businessDate','==',today).where('type','==','WASTE').get()
+    ]);
+    const nHaoHut = wasteItemSnap.size + wastePrepSnap.size;
+    if(nHaoHut){
+      let tongHaoHut = 0;
+      wasteItemSnap.forEach(d=>{ const t=d.data(); tongHaoHut += Math.abs(Number(t.qty)||0) * itemCostOn(t.itemId, t.businessDate); });
+      wastePrepSnap.forEach(d=>{ const t=d.data(); tongHaoHut += Math.abs(Number(t.totalCost)||0); });
+      push('yellow', `Có hao hụt/huỷ hôm nay (${nHaoHut} lượt · ~${fmt(tongHaoHut)})`, nHaoHut, `openWasteDetailSheet('${today}')`);
+    }
+  }catch(err){ console.warn('storeHealth: hao hụt hôm nay lỗi', err); push('yellow','Hao hụt hôm nay — không kiểm tra được','!',`openWasteDetailSheet('${today}')`,true); }
+
   return out;
 }
 
@@ -11253,23 +11272,41 @@ async function renderTodayOps(){
   // BTP — bản rút gọn của Kho 2.0 ▸ Bán thành phẩm: hôm nay + đang dùng.
   (async () => {
     try{
-      const [todaySnap, activeSnap] = await Promise.all([
+      const [todaySnap, activeSnap, wastePrepSnap] = await Promise.all([
         fstore.collection('prep_batches_gieogieo').where('businessDate','==',dayKey).get(),
-        fstore.collection('prep_batches_gieogieo').where('status','in',['cooking','active']).get()
+        fstore.collection('prep_batches_gieogieo').where('status','in',['cooking','active']).get(),
+        // [FIX — "báo huỷ không ghi rõ đã huỷ bao nhiêu"] Lô 'expired'/'discarded' bị
+        // zero hết qtyRemaining/unitBase ngay khi đóng sổ (xem submitPrepCount ở
+        // posgieo.html) — số lượng ĐÃ HUỶ chỉ còn sống trong dòng sổ WASTE này, không
+        // còn trên chính document lô. Đọc 1 lần cho cả ngày, gộp theo prepId (đúng mức
+        // chi tiết mà "Hao hụt & huỷ" đang có — sổ này không tách theo từng lô).
+        fstore.collection('prep_transactions_gieogieo').where('businessDate','==',dayKey).where('type','==','WASTE').get()
+          .catch(err=>{ console.warn('[Vận hành] không đọc được hao hụt BTP:', err); return null; })
       ]);
       const byId = {};
       todaySnap.forEach(d=>byId[d.id] = {id:d.id, ...d.data()});
       activeSnap.forEach(d=>{ if(!byId[d.id]) byId[d.id] = {id:d.id, ...d.data()}; });
+      const wasteByPrepId = {};
+      if(wastePrepSnap) wastePrepSnap.forEach(d=>{
+        const t = d.data(); if(!t.prepId) return;
+        wasteByPrepId[t.prepId] = (wasteByPrepId[t.prepId]||0) + Math.abs(Number(t.qty)||0);
+      });
       const list = Object.values(byId).sort((a,b)=>String(b.startedAt||'').localeCompare(String(a.startedAt||'')));
       if(!list.length){ boxes.prep.innerHTML = '<div class="empty-hint">Chưa có lô BTP nào hôm nay.</div>'; return; }
       const dt = iso => { const d = iso?new Date(iso):null; return (d && !isNaN(d)) ? `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}` : ''; };
       boxes.prep.innerHTML = list.slice(0,8).map(b=>{
         const trangThai = PREP_BATCH_STATUS_LABEL[b.status] || b.status || '—';
         const mauTier = b.status==='active' ? 'green' : (b.status==='cooking' ? 'blue' : (b.status==='cancelled' ? 'amber' : 'red'));
+        const isWasteStatus = b.status==='expired' || b.status==='discarded';
+        const wasteQty = wasteByPrepId[b.prepId];
         const pct = (Number(b.qtyInitial)>0) ? Math.round(Math.max(0,Number(b.qtyRemaining)||0)/Number(b.qtyInitial)*100) : null;
+        // Huỷ/hết hạn thì "còn X%" vô nghĩa (đã zero hết) — hiện đã huỷ bao nhiêu thay vào.
+        const metaTail = isWasteStatus
+          ? (wasteQty!=null ? ` · đã huỷ ${fmtNum(wasteQty,1)} ${escapeHtmlAttr(b.unit||'')}` : ' · chưa rõ số lượng đã huỷ')
+          : (pct!=null ? ` · còn ${pct}%` : '');
         return `<div class="litem" onclick="ctnShowDetail('${b.id}','prep_batches_gieogieo')" style="cursor:pointer">
           <div class="li-l"><div>${escapeHtmlAttr(b.prepName||b.prepCode||'')}</div>
-            <div class="muted-sm">Bắt đầu ${dt(b.startedAt)}${b.staff?(' · '+escapeHtmlAttr(b.staff)):''}${pct!=null?(' · còn '+pct+'%'):''}</div></div>
+            <div class="muted-sm">Bắt đầu ${dt(b.startedAt)}${b.staff?(' · '+escapeHtmlAttr(b.staff)):''}${metaTail}</div></div>
           <div class="li-r"><span class="tier tier-${mauTier}">${escapeHtmlAttr(trangThai)}</span></div>
         </div>`;
       }).join('') + `<button class="btn outline sm" style="margin-top:8px" onclick="goKho2('prep')">Xem Kho 2.0 ▸ BTP ${ic('chevronDown',13)}</button>`;
