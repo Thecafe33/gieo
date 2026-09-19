@@ -17232,10 +17232,23 @@ function renderKhoItems(){
       // được in đậm ở pkgSummary — chỉ viết thêm khi không có nhãn nào cả.
       const countLine = (managed && !cu.isBase && !tmTag)
         ? ` · đếm theo ${escapeHtmlAttr(cu.name)}` : '';
+      // [FIX "120000g nhìn không biết còn bao nhiêu"] Số tồn hiển thị PHẢI theo đơn vị
+      // KIỂM KÊ (cái nhân viên đếm tay — hộp/thùng/chai...), không phải đơn vị PHA CHẾ
+      // (g/ml) dùng để tính định mức. 10 thùng sữa (1 thùng=12 hộp=1000g/hộp) hiện
+      // "120.000g" thì chủ quán không hình dung nổi còn bao nhiêu hộp/thùng thật — phải
+      // quy đổi ngược ra đúng đơn vị đã chọn để đếm (cu, đã tính sẵn ở trên). Vẫn kèm số
+      // gốc theo đơn vị pha chế trong ngoặc, nhỏ hơn, cho ai cần số chính xác để đối chiếu
+      // công thức — không giấu hẳn thông tin cũ, chỉ đổi thứ tự ưu tiên hiển thị.
+      const stockInCu = managed
+        ? (!cu.isBase
+            ? fmtNum(it.currentStock/cu.baseQty,2)+' '+escapeHtmlAttr(cu.name)
+              +` <span class="muted" style="font-weight:400;font-size:11px">(${fmtNum(it.currentStock,1)} ${escapeHtmlAttr(it.unit||'')})</span>`
+            : fmtNum(it.currentStock,1)+' '+escapeHtmlAttr(it.unit||''))
+        : '—';
       return `<div class="litem">
         <div class="li-l"><div>${it.name} ${neg?'<span class="tier tier-red" style="margin-left:4px">Tồn ÂM</span>':(low?'<span class="tier tier-amber" style="margin-left:4px">Sắp hết</span>':'')}${noCount?'<span class="tier tier-blue" style="margin-left:4px">NV không kiểm kê</span>':''}${(it.vesselIds||[]).length?'<span class="tier tier-green" style="margin-left:4px">⚖️ Cân được</span>':''}${tmTag}</div>
         <div>Ngưỡng ${fmtNum(it.minStock,0)} ${it.unit}${it.costPerUnit?(' · ~'+fmt(it.costPerUnit)+'/'+it.unit):''}${pkgSummary}${countLine}</div></div>
-        <div class="li-r"><span style="${neg?'color:var(--bad);font-weight:800':(managed?'':'color:var(--ink-4)')}">${managed ? fmtNum(it.currentStock,1)+' '+escapeHtmlAttr(it.unit||'') : '—'}</span>
+        <div class="li-r"><span style="${neg?'color:var(--bad);font-weight:800':(managed?'':'color:var(--ink-4)')}">${stockInCu}</span>
           <button class="btn ${neg?'':'outline'} sm" style="width:auto;padding:0 10px;margin-left:6px" onclick="startAdjustItem('${it.id}')">Sửa tồn</button>
           <button class="iconbtn" onclick="openItemHistory('${it.id}')" title="Lịch sử biến động tồn kho">${ic('clock')}</button>
           <button class="iconbtn" onclick="startEditItem('${it.id}')" title="Sửa thông tin nguyên liệu">${ic('pencil')}</button>
