@@ -1864,8 +1864,18 @@ html.phone-ui .nav-search .ns-kbd{display:none;}
 // FIREBASE — dùng chung project với posgieotest.html (the-cafe-33)
 //
 // NGUYÊN TẮC PHÂN TÁCH DỮ LIỆU:
-//  - RTDB: CHỈ ĐỌC dữ liệu do POS ghi (orders_gieogieo, menu_gieogieo,
-//    menu_togo_gieogieo). App này KHÔNG BAO GIỜ ghi vào RTDB.
+//  - RTDB: mặc định CHỈ ĐỌC dữ liệu do POS ghi (orders_gieogieo, menu_gieogieo,
+//    menu_togo_gieogieo, active_units_gieogieo — node "đang mở" của Unit
+//    Engine). App này KHÔNG tự ý ghi tràn lan vào RTDB để tránh phình node
+//    vốn được thiết kế cho luồng bán hàng real-time của POS.
+//  - NGOẠI LỆ DUY NHẤT: sửa lỗi thao tác của nhân viên trên đúng 1 tem/lô cụ
+//    thể (vd "Điều chỉnh" lô BTP báo hết nhầm — xem submitPrepVarianceAdjust).
+//    Quản lý là người có quyền cao nhất trong hệ thống nên PHẢI sửa được tận
+//    gốc, không chỉ vá phần Firestore rồi để RTDB (nguồn thật của "đang mở")
+//    lệch cho tới lần kiểm kê cuối ngày kế tiếp mới tự đồng bộ lại. Dùng
+//    ĐÚNG helper `_ueActiveUnitsRef()` + đúng schema dữ liệu (code/itemName/
+//    unit/capacity/openedAt/unitBase) mà Unit Engine bên POS đang dùng, để
+//    hai app luôn nói cùng một ngôn ngữ dữ liệu.
 //  - Firestore: TOÀN BỘ dữ liệu app Quản lý tự ghi (target/labor/finance,
 //    COGS, vận hành ngày, chi phí, tài sản, cache doanh số) — để tránh
 //    phình node RTDB vốn được thiết kế cho luồng bán hàng real-time của POS.
@@ -1881,6 +1891,12 @@ firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 const fstore = firebase.firestore();
 const auth = firebase.auth();
+
+// [MỚI] Cùng path RTDB mà Unit Engine bên POS dùng cho "tem/lô đang mở"
+// (posgieo.html: _ueActiveUnitsRef). Chỉ dùng cho đúng 1 việc: sửa lại RT của
+// MỘT tem/lô cụ thể khi Quản lý điều chỉnh tay (xem submitPrepVarianceAdjust) —
+// không dùng để tự chạy Unit Engine đầy đủ (allocate/recompute) ở app này.
+function _ueActiveUnitsRef(itemId){ return db.ref('active_units_gieogieo/' + itemId); }
 
 // [TỐC ĐỘ] Bật bộ nhớ đệm ngoại tuyến của Firestore (IndexedDB). PHẢI gọi ngay
 // sau firebase.firestore(), trước bất kỳ lượt đọc/ghi nào.
@@ -11163,13 +11179,33 @@ async function submitPrepVarianceAdjust(alertId, batchId, isOnlyBatch){
     await batchRef.update({
       qtyRemaining: qty, unitBase: qty, status: 'active',
       usedUpAt: null, expiredAt: null, expiredReason: null,
-      _ueRtStale: true,
       correctedAt: nowISO, correctedBy: 'management', correctedFromStatus: b.status,
       correctedNote: 'Điều chỉnh từ cảnh báo lệch đếm BTP — nhân viên báo hết nhầm, khôi phục theo số Quản lý nhập'
     });
 
+    // [MỚI] Ghi lại đúng node RTDB của lô này — đây mới là nguồn THẬT mà Unit Engine
+    // bên POS dùng để biết "bán/nấu tiếp thì lấy từ lô nào" theo thời gian thực. Node
+    // này đã bị XOÁ lúc lô báo hết (xem posgieo.html: nhánh discard của
+    // _submitPrepCountImpl gọi `.remove()`) — không ghi lại thì lô tuy đúng số ở
+    // Firestore nhưng "vô hình" với FIFO cho tới tận lần kiểm kê cuối ngày kế tiếp mới
+    // tự đồng bộ lại. Dùng ĐÚNG path + schema với _ueActiveUnitsRef() bên POS.
+    let rtOk = false;
+    try{
+      await _ueActiveUnitsRef(b.prepId).child(batchId).set({
+        code: b.batchCode || '', itemName: b.prepName || '', unit: b.unit || '',
+        capacity: Number(b.qtyInitial) || qty, openedAt: Date.now(), unitBase: qty
+      });
+      rtOk = true;
+    }catch(rtErr){
+      console.warn('[Điều chỉnh] ghi RTDB lỗi — Firestore đã đúng số, đánh dấu _ueRtStale để không bị ăn nhầm:', rtErr);
+    }
+    // RT ghi được thì tin RT (mới, khớp Firestore) — RT lỗi thì đánh dấu stale để lần suy
+    // tồn tiếp theo bên POS biết bỏ qua RT (thiếu node) và tin số Firestore vừa sửa.
+    await batchRef.update({ _ueRtStale: !rtOk });
+
     // Lô này vừa đóng góp lại đúng bằng ấy vào currentStock (trước đó đang đóng góp 0 vì bị
-    // đánh dấu hết) — cộng thẳng, không suy lại toàn bộ từ RTDB vì app này không đọc/ghi RTDB.
+    // đánh dấu hết) — cộng thẳng vào Firestore, KHÔNG suy lại toàn bộ từ RTDB (app này
+    // không chạy engine recompute đầy đủ như POS, chỉ ghi đúng 1 node vừa sửa ở trên).
     const prepRef = fstore.collection('prep_items_gieogieo').doc(b.prepId);
     await fstore.runTransaction(async t=>{
       const doc = await t.get(prepRef);
@@ -11207,8 +11243,10 @@ async function submitPrepVarianceAdjust(alertId, batchId, isOnlyBatch){
       resolutionNote: `Đã khôi phục lô ${b.batchCode||batchId} về ${fmtNum(qty,2)} ${b.unit||''}`
         + (daoHaoHut ? ` · đã đảo ${fmtNum(daoHaoHut,2)} ${b.unit||''} hao hụt ghi nhầm về điều chỉnh` : '')
     });
-    logAudit('adjust','prep_batch',batchId,{ tuHetNham:true, qtyKhoiPhuc:qty, daoHaoHut });
-    toast('✅ Đã điều chỉnh lô — tồn kho đã cộng lại '+fmtNum(qty,2)+' '+(b.unit||''));
+    logAudit('adjust','prep_batch',batchId,{ tuHetNham:true, qtyKhoiPhuc:qty, daoHaoHut, rtOk });
+    toast(rtOk
+      ? '✅ Đã điều chỉnh lô — tồn kho đã cộng lại '+fmtNum(qty,2)+' '+(b.unit||'')+', lô đã đồng bộ lại real-time'
+      : '⚠️ Đã điều chỉnh lô nhưng đồng bộ real-time lỗi — số liệu vẫn đúng, tự sửa lại ở lần kiểm kê cuối ngày tới');
     closeEditSheet();
     renderAlertInbox();
   }catch(err){
