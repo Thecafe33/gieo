@@ -5436,13 +5436,19 @@ async function renderKho2Prep(){
 // Đọc theo mốc thời gian nên chỉ cần chỉ mục mặc định của Firestore; bản ghi chưa
 // mở/chưa báo hết có openedAt/finishedAt = null nên tự nằm ngoài phép so sánh.
 // ------------------------------------------------------------
-async function computeKhoFeedToday(){
-  const dau = new Date(); dau.setHours(0,0,0,0);
-  const moc = dau.toISOString();
+// [SỬA] Nhận thêm `date` để đọc đúng 1 ngày bất kỳ, không chỉ hôm nay — nút "mở
+// rộng" giờ cho lật xem hôm qua/hôm kia... ngay tại chỗ thay vì nhảy sang màn
+// Kho 2.0 (nơi không có cách lọc theo ngày, chỉ có tồn hiện tại). Chặn trên
+// bằng mốc đầu ngày HÔM SAU thay vì để hở, nếu không ngày hôm qua sẽ đọc luôn
+// cả các lượt của hôm nay (cùng nằm sau mốc `openedAt >= đầu ngày hôm qua`).
+async function computeKhoFeedForDate(date){
+  const dau = new Date(date); dau.setHours(0,0,0,0);
+  const cuoi = new Date(dau); cuoi.setDate(cuoi.getDate()+1);
+  const mocDau = dau.toISOString(), mocCuoi = cuoi.toISOString();
   const c = fstore.collection(CTN_COLL);
   const [moSnap, hetSnap] = await Promise.all([
-    c.where('openedAt','>=',moc).get().catch(err=>{ console.warn('[Kho] không đọc được hàng vừa mở:', err); return null; }),
-    c.where('finishedAt','>=',moc).get().catch(err=>{ console.warn('[Kho] không đọc được hàng vừa báo hết:', err); return null; })
+    c.where('openedAt','>=',mocDau).where('openedAt','<',mocCuoi).get().catch(err=>{ console.warn('[Kho] không đọc được hàng vừa mở:', err); return null; }),
+    c.where('finishedAt','>=',mocDau).where('finishedAt','<',mocCuoi).get().catch(err=>{ console.warn('[Kho] không đọc được hàng vừa báo hết:', err); return null; })
   ]);
   const ra = [];
   if(moSnap) moSnap.forEach(d=>{ const x = d.data();
@@ -5459,25 +5465,65 @@ async function computeKhoFeedToday(){
 // một khoảng màn hình cố định ở màn xem hằng ngày. Số lượt vẫn hiện trên tiêu đề
 // nên vẫn biết hôm nay kho có động tĩnh gì mà không cần mở.
 let _khoFeedMo = false;
+// Ngày đang xem trong feed — mặc định hôm nay, đổi khi bấm ‹ ›. Luôn 00:00 để so
+// sánh bằng getTime() với "hôm nay" cho gọn (khỏi lệch giờ/phút/giây).
+let _khoFeedDate = (()=>{ const d = new Date(); d.setHours(0,0,0,0); return d; })();
+let _khoFeedLoading = false;
 function toggleKhoFeed(){ _khoFeedMo = !_khoFeedMo; _khoFeedRedraw(); }
 let _khoFeedCache = null;
 function _khoFeedRedraw(){
   const el = document.getElementById('todayKhoFeed');
   if(el) el.innerHTML = khoFeedHTML(_khoFeedCache);
 }
+// Nhãn ngày kiểu người: "hôm nay/hôm qua/hôm kia" cho gần, còn lại ghi hẳn ngày
+// tháng — tránh phải nhẩm "3 ngày trước là thứ mấy".
+function feedDateLabel(d){
+  const hom = new Date(); hom.setHours(0,0,0,0);
+  const soNgay = Math.round((hom - d) / 86400000);
+  if(soNgay===0) return 'Hôm nay';
+  if(soNgay===1) return 'Hôm qua';
+  if(soNgay===2) return 'Hôm kia';
+  return fmtDateVN(d);
+}
+function khoFeedGoDate(delta){
+  const hom = new Date(); hom.setHours(0,0,0,0);
+  const nd = new Date(_khoFeedDate); nd.setDate(nd.getDate()+delta);
+  if(nd > hom) return; // không xem được ngày tương lai
+  _khoFeedDate = nd;
+  _khoFeedLoading = true;
+  _khoFeedRedraw();
+  computeKhoFeedForDate(_khoFeedDate)
+    .then(list => { _khoFeedLoading = false; khoFeedHTML(list); _khoFeedRedraw(); })
+    .catch(err => { console.warn('[Kho] không đọc được hoạt động ngày đã chọn:', err); _khoFeedLoading = false; khoFeedHTML([]); _khoFeedRedraw(); });
+}
 
 function khoFeedHTML(list){
   _khoFeedCache = list;
-  if(!list || !list.length) return '';
+  const homNay = (()=>{ const h = new Date(); h.setHours(0,0,0,0); return h; })();
+  const laHomNay = _khoFeedDate.getTime() === homNay.getTime();
+  const soLuot = list ? list.length : 0;
+  // Gập & đang ở hôm nay & không có gì thì không hiện — giữ đúng hành vi cũ (không
+  // chiếm chỗ những ngày kho im ắng). Đứng ở ngày khác hôm nay thì vẫn hiện tiêu đề
+  // để còn nút lật ngày, kể cả ngày đó trống — không thì bấm ‹ xong tưởng bị lỗi.
+  if(!_khoFeedMo && laHomNay && !soLuot) return '';
   const gio = iso => { const d = iso?new Date(iso):null; return (d && !isNaN(d)) ? `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}` : ''; };
-  const hien = list.slice(0, 8);
+  const hien = (list||[]).slice(0, 8);
   const dauMuc = `<button class="sec-fold" aria-expanded="${_khoFeedMo}" onclick="toggleKhoFeed()">
-      <span class="sf-t">Hoạt động kho hôm nay</span>
-      <span class="sf-c">${list.length} lượt</span>
+      <span class="sf-t">Hoạt động kho${laHomNay?' hôm nay':''}</span>
+      <span class="sf-c">${soLuot} lượt</span>
       <span class="sf-ch">${ic('chevronDown',15)}</span>
     </button>`;
   if(!_khoFeedMo) return dauMuc;
-  return dauMuc + `
+  // Lật ngày dùng lại đúng .weeknav đã dùng ở Báo cáo kỳ — cùng một kiểu nút ‹ › cho
+  // quen tay, khỏi phải học thêm một cách điều hướng ngày khác trong cùng một app.
+  const dieuHuong = `<div class="weeknav" style="margin:8px 0">
+      <button onclick="khoFeedGoDate(-1)">‹</button>
+      <div class="wk-label">${feedDateLabel(_khoFeedDate)}</div>
+      <button onclick="khoFeedGoDate(1)" ${laHomNay?'disabled style="opacity:.3"':''}>›</button>
+    </div>`;
+  if(_khoFeedLoading) return dauMuc + dieuHuong + `<div class="card"><div class="muted">Đang tải...</div></div>`;
+  if(!soLuot) return dauMuc + dieuHuong + `<div class="card"><div class="empty-hint">Không có hoạt động nào ${feedDateLabel(_khoFeedDate).toLowerCase()}.</div></div>`;
+  return dauMuc + dieuHuong + `
     <div class="card">
       ${hien.map(e=>{
         const la = e.loai==='mo';
@@ -5496,21 +5542,25 @@ function khoFeedHTML(list){
           <span class="rv">${gio(e.at)}</span>
         </div>`;
       }).join('')}
-      ${list.length > hien.length ? `<div class="small-note">…và ${list.length-hien.length} lượt nữa hôm nay.</div>` : ''}
-      <button class="btn outline sm" style="width:auto;padding:0 12px;margin-top:8px" onclick="goContainers('open')">Xem hàng đang mở</button>
+      ${soLuot > hien.length ? `<div class="small-note">…và ${soLuot-hien.length} lượt nữa ${feedDateLabel(_khoFeedDate).toLowerCase()}.</div>` : ''}
+      ${laHomNay ? `<button class="btn outline sm" style="width:auto;padding:0 12px;margin-top:8px" onclick="goContainers('open')">Xem hàng đang mở</button>` : ''}
     </div>`;
 }
 
-// [MỚI] HOẠT ĐỘNG BTP HÔM NAY — tương đương computeKhoFeedToday()/khoFeedHTML() nhưng cho
+// [MỚI] HOẠT ĐỘNG BTP HÔM NAY — tương đương computeKhoFeedForDate()/khoFeedHTML() nhưng cho
 // lô bán thành phẩm (prep_batches_gieogieo): bắt đầu chế biến, hoàn thành, bán hết, huỷ.
 // 4 mốc thời gian khác trường (startedAt/finishedAt/usedUpAt/expiredAt/discardedAt/
 // cancelledAt) nên đọc riêng từng query rồi gộp — Firestore không lọc "field A HOẶC field B
 // >= X" trong 1 query.
-async function computePrepFeedToday(){
-  const dau = new Date(); dau.setHours(0,0,0,0);
-  const moc = dau.toISOString();
+// [SỬA] Nhận thêm `date`, cùng lý do với computeKhoFeedForDate ở trên — chặn cả
+// hai đầu (>= đầu ngày, < đầu ngày hôm sau) để mỗi ngày chỉ lấy đúng lượt của
+// chính nó, dù xét trên 6 mốc thời gian khác nhau.
+async function computePrepFeedForDate(date){
+  const dau = new Date(date); dau.setHours(0,0,0,0);
+  const cuoi = new Date(dau); cuoi.setDate(cuoi.getDate()+1);
+  const mocDau = dau.toISOString(), mocCuoi = cuoi.toISOString();
   const c = fstore.collection('prep_batches_gieogieo');
-  const q = (field) => c.where(field,'>=',moc).get().catch(err=>{ console.warn('[BTP] không đọc được mốc '+field+':', err); return null; });
+  const q = (field) => c.where(field,'>=',mocDau).where(field,'<',mocCuoi).get().catch(err=>{ console.warn('[BTP] không đọc được mốc '+field+':', err); return null; });
   const [startSnap, finishSnap, usedSnap, expSnap, discSnap, cancelSnap] = await Promise.all([
     q('startedAt'), q('finishedAt'), q('usedUpAt'), q('expiredAt'), q('discardedAt'), q('cancelledAt')
   ]);
@@ -5527,25 +5577,48 @@ async function computePrepFeedToday(){
 }
 
 let _prepFeedMo = false;
+let _prepFeedDate = (()=>{ const d = new Date(); d.setHours(0,0,0,0); return d; })();
+let _prepFeedLoading = false;
 function togglePrepFeed(){ _prepFeedMo = !_prepFeedMo; _prepFeedRedraw(); }
 let _prepFeedCache = null;
 function _prepFeedRedraw(){
   const el = document.getElementById('todayPrepFeed');
   if(el) el.innerHTML = prepFeedHTML(_prepFeedCache);
 }
+function prepFeedGoDate(delta){
+  const hom = new Date(); hom.setHours(0,0,0,0);
+  const nd = new Date(_prepFeedDate); nd.setDate(nd.getDate()+delta);
+  if(nd > hom) return;
+  _prepFeedDate = nd;
+  _prepFeedLoading = true;
+  _prepFeedRedraw();
+  computePrepFeedForDate(_prepFeedDate)
+    .then(list => { _prepFeedLoading = false; prepFeedHTML(list); _prepFeedRedraw(); })
+    .catch(err => { console.warn('[BTP] không đọc được hoạt động ngày đã chọn:', err); _prepFeedLoading = false; prepFeedHTML([]); _prepFeedRedraw(); });
+}
 function prepFeedHTML(list){
   _prepFeedCache = list;
-  if(!list || !list.length) return '';
+  const homNay = (()=>{ const h = new Date(); h.setHours(0,0,0,0); return h; })();
+  const laHomNay = _prepFeedDate.getTime() === homNay.getTime();
+  const soLuot = list ? list.length : 0;
+  if(!_prepFeedMo && laHomNay && !soLuot) return '';
   const gio = iso => { const d = iso?new Date(iso):null; return (d && !isNaN(d)) ? `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}` : ''; };
-  const hien = list.slice(0, 8);
+  const hien = (list||[]).slice(0, 8);
   const dauMuc = `<button class="sec-fold" aria-expanded="${_prepFeedMo}" onclick="togglePrepFeed()">
-      <span class="sf-t">Hoạt động BTP hôm nay</span>
-      <span class="sf-c">${list.length} lượt</span>
+      <span class="sf-t">Hoạt động BTP${laHomNay?' hôm nay':''}</span>
+      <span class="sf-c">${soLuot} lượt</span>
       <span class="sf-ch">${ic('chevronDown',15)}</span>
     </button>`;
   if(!_prepFeedMo) return dauMuc;
+  const dieuHuong = `<div class="weeknav" style="margin:8px 0">
+      <button onclick="prepFeedGoDate(-1)">‹</button>
+      <div class="wk-label">${feedDateLabel(_prepFeedDate)}</div>
+      <button onclick="prepFeedGoDate(1)" ${laHomNay?'disabled style="opacity:.3"':''}>›</button>
+    </div>`;
+  if(_prepFeedLoading) return dauMuc + dieuHuong + `<div class="card"><div class="muted">Đang tải...</div></div>`;
   const NHAN = { start:['Bắt đầu chế biến','var(--bi)'], finish:['Hoàn thành','var(--ok)'], used:['Bán hết','var(--gd)'], expired:['Hết hạn/bỏ','var(--bad)'], discarded:['Huỷ lô','var(--bad)'], cancelled:['Huỷ mẻ','var(--warn)'] };
-  return dauMuc + `
+  if(!soLuot) return dauMuc + dieuHuong + `<div class="card"><div class="empty-hint">Không có hoạt động BTP nào ${feedDateLabel(_prepFeedDate).toLowerCase()}.</div></div>`;
+  return dauMuc + dieuHuong + `
     <div class="card">
       ${hien.map(e=>{
         const [nhan, mau] = NHAN[e.loai] || [e.loai, 'var(--gt)'];
@@ -5565,8 +5638,8 @@ function prepFeedHTML(list){
           <span class="rv">${gio(e.at)}</span>
         </div>`;
       }).join('')}
-      ${list.length > hien.length ? `<div class="small-note">…và ${list.length-hien.length} lượt nữa hôm nay.</div>` : ''}
-      <button class="btn outline sm" style="width:auto;padding:0 12px;margin-top:8px" onclick="goKho2('prep')">Xem tất cả BTP</button>
+      ${soLuot > hien.length ? `<div class="small-note">…và ${soLuot-hien.length} lượt nữa ${feedDateLabel(_prepFeedDate).toLowerCase()}.</div>` : ''}
+      ${laHomNay ? `<button class="btn outline sm" style="width:auto;padding:0 12px;margin-top:8px" onclick="goKho2('prep')">Xem tất cả BTP</button>` : ''}
     </div>`;
 }
 
@@ -11183,7 +11256,7 @@ async function renderToday(){
 
   // HOẠT ĐỘNG KHO HÔM NAY — nạp nền. Không có lượt nào thì không hiện gì cả, thay vì
   // để lại một thẻ rỗng chiếm chỗ.
-  computeKhoFeedToday()
+  computeKhoFeedForDate(_khoFeedDate)
     .then(list => {
       const el = document.getElementById('todayKhoFeed');
       if(el && curScreen === 'today') el.innerHTML = khoFeedHTML(list);
@@ -11193,7 +11266,7 @@ async function renderToday(){
   // HOẠT ĐỘNG BTP HÔM NAY — cùng lý do với feed kho nguyên liệu ở trên, nhưng cho lô bán
   // thành phẩm: bắt đầu nấu, hoàn thành, bán hết, huỷ — những mốc trước đây không có nơi
   // nào hiện ngoài phải mở từng lô trong Kho 2.0 ▸ Bán thành phẩm mới thấy.
-  computePrepFeedToday()
+  computePrepFeedForDate(_prepFeedDate)
     .then(list => {
       const el = document.getElementById('todayPrepFeed');
       if(el && curScreen === 'today') el.innerHTML = prepFeedHTML(list);
