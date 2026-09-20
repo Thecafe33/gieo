@@ -1491,6 +1491,14 @@ html.phone-ui .nav-search .ns-kbd{display:none;}
       </div>
     </div>
 
+    <!-- 🆕 TỔNG KẾT THÁNG -->
+    <div class="screen" id="screen-thangket">
+      <div class="wrap">
+        <div id="reportSubNavThangket"></div>
+        <div id="thangKetBody"></div>
+      </div>
+    </div>
+
     <!-- ENTRY -->
     <div class="screen" id="screen-entry">
       <div class="wrap">
@@ -9864,6 +9872,10 @@ const NAV_SECTIONS = [
     {key:'report', ic:'chart',    label:'Báo cáo kỳ',         go:"switchScreen('report')"},
     {key:'mix',    ic:'clipboard', label:'Phân tích bán hàng', go:"switchScreen('mix')"},
     {key:'customer', ic:'users',   label:'Khách hàng',          go:"switchScreen('customer')"},
+    // [MỚI] Tổng kết tháng — gộp lại những gì "đa phần đã có hàm sẵn" (lãi/lỗ,
+    // bán hàng, kho, chấm công) thành MỘT màn xem theo tháng, để đánh giá + trả
+    // lương cuối tháng không phải nhảy qua 5-6 tab rồi tự cộng bằng tay.
+    {key:'thangket', ic:'calendar', label:'Tổng kết tháng', go:"switchScreen('thangket')"},
   ]},
   { group:'Vận hành', items:[
     {key:'entry:ops',  ic:'note',    label:'Ghi chú ngày',  go:"goEntry('ops')"},
@@ -10696,10 +10708,10 @@ function khOpenDetail(id){
   `);
 }
 
-const REPORT_SCREENS = [ {s:'today',label:'Hôm nay'}, {s:'health',label:'Tài chính'}, {s:'report',label:'Theo kỳ'}, {s:'mix',label:'Bán hàng'}, {s:'customer',label:'Khách hàng'} ];
+const REPORT_SCREENS = [ {s:'today',label:'Hôm nay'}, {s:'health',label:'Tài chính'}, {s:'report',label:'Theo kỳ'}, {s:'mix',label:'Bán hàng'}, {s:'customer',label:'Khách hàng'}, {s:'thangket',label:'Tổng kết tháng'} ];
 function renderReportSubNav(){
   const html = `<div class="report-subnav">${REPORT_SCREENS.map(r=>`<button class="${curScreen===r.s?'active':''}" onclick="switchScreen('${r.s}')">${r.label}</button>`).join('')}</div>`;
-  ['reportSubNavToday','reportSubNavHealth','reportSubNavReport','reportSubNavMix','reportSubNavCustomer'].forEach(id=>{
+  ['reportSubNavToday','reportSubNavHealth','reportSubNavReport','reportSubNavMix','reportSubNavCustomer','reportSubNavThangket'].forEach(id=>{
     const el = document.getElementById(id);
     if(el) el.innerHTML = html;
   });
@@ -10744,6 +10756,7 @@ function switchScreen(s){
   if(s==='report') renderReport();
   if(s==='mix') renderMix();
   if(s==='customer') renderCustomer();
+  if(s==='thangket') renderThangKet();
   if(s==='entry') renderEntry();
   if(s==='sim') runSim();
 }
@@ -15590,6 +15603,351 @@ async function renderEntryLuong(){
 async function submitLaborToggle(checked){
   try{ await saveHrSettings({useActualLaborCost:checked}); HR_SETTINGS.useActualLaborCost = checked; toast('✅ Đã lưu'); renderEntryLuong(); }
   catch(err){ toast('❌ ' + (err.message||err)); }
+}
+
+// ============================================================
+// 🆕 TỔNG KẾT THÁNG
+// ------------------------------------------------------------
+// Chủ quán cuối tháng cần đối chiếu + trả lương + đánh giá nhân viên — trước đây
+// phải nhảy qua Sức khỏe tài chính (lãi/lỗ), Phân tích bán hàng (món chạy/ế),
+// Kho (nhập hàng, tồn đọng), Lương (giờ công) rồi TỰ CỘNG bằng tay. Màn này không
+// tính lại gì mới — chỉ gọi đúng những hàm đã có (computeDayPL/plSumDays,
+// computeMixReport, computeActualLaborBreakdownByEmployee, computeLedgerRealMetrics)
+// cho TRỌN 1 THÁNG rồi xếp lại một chỗ, cộng thêm 2 phần chưa ai tính sẵn: nhập
+// hàng theo nguyên liệu và tồn kho không động trong tháng.
+// ============================================================
+let thangKetMonth = (()=>{ const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; })();
+let thangKetData = null;      // kết quả lần quét gần nhất — thưởng/phạt sửa xong chỉ vẽ lại từ đây, không quét mạng lại
+let thangKetAdjust = {};      // employeeId -> {thuong:[{amount,reason}], phat:[{amount,reason}], finalPay, _docId}
+
+// Nguyên liệu KHÔNG có bất kỳ dòng sổ nào (bán/nấu/hao hụt/nhập/điều chỉnh) suốt cả
+// tháng — dấu hiệu hàng chết hoặc quên kiểm đếm. Đọc CHUNG 1 lượt stock_transactions
+// của tháng cho cả việc này lẫn "nhập hàng tháng này" bên dưới, đỡ quét sổ 2 lần.
+async function computeThangKetKhoExtra(startKey, endKey, items){
+  await ensurePriceHistory();
+  const snap = await fstore.collection('stock_transactions_gieogieo')
+    .where('businessDate','>=',startKey).where('businessDate','<=',endKey).get();
+  const nhapTheoItem = {};      // itemId -> {qty, value}
+  const dongTheoItem = new Set(); // itemId có ít nhất 1 dòng sổ trong tháng
+  const wasteByStaffName = {};  // tên nhân viên -> giá trị hao hụt NGUYÊN LIỆU THÔ ghi tên họ
+  snap.forEach(doc=>{
+    const t = doc.data();
+    if(!t.itemId) return;
+    dongTheoItem.add(t.itemId);
+    const cost = itemCostOn(t.itemId, t.businessDate);
+    if(t.type === 'RECEIVING'){
+      const qty = Number(t.qty)||0;
+      const cur = nhapTheoItem[t.itemId] || {qty:0, value:0};
+      cur.qty += qty; cur.value += qty*cost;
+      nhapTheoItem[t.itemId] = cur;
+    } else if(t.type === 'WASTE' && t.staff){
+      wasteByStaffName[t.staff] = (wasteByStaffName[t.staff]||0) + Math.abs(Number(t.qty)||0)*cost;
+    }
+  });
+  const itemById = {}; (items||[]).forEach(it=>{ itemById[it.id]=it; });
+  const nhapList = Object.entries(nhapTheoItem).map(([itemId,v])=>({
+    itemId, ten:(itemById[itemId]||{}).name || itemId, donVi:(itemById[itemId]||{}).unit || '',
+    qty:v.qty, value:v.value
+  })).sort((a,b)=>b.value-a.value);
+  const tongNhap = nhapList.reduce((s,x)=>s+x.value,0);
+  // Chỉ tính hàng ĐANG quản lý tồn và còn tồn > 0 — hàng đã hết sạch thì "không động"
+  // là bình thường (bán hết), không phải hàng chết.
+  const tonLau = (items||[])
+    .filter(it => itemStockManaged(it) && Number(it.currentStock) > 0 && !dongTheoItem.has(it.id))
+    .map(it => ({ itemId:it.id, ten:it.name, donVi:it.unit, ton:Number(it.currentStock)||0,
+      giaTri: (Number(it.currentStock)||0) * itemCostOn(it.id, endKey) }))
+    .sort((a,b)=>b.giaTri-a.giaTri);
+  return { nhapList, tongNhap, tonLau, wasteByStaffName };
+}
+
+// Số NGÀY thực sự có mặt (giờ công > 0) của mỗi nhân viên trong tháng — khác với
+// computeActualLaborBreakdownByEmployee() chỉ cộng ra tổng giờ/tổng tiền, không
+// đếm số ngày. Đọc riêng vì đây là câu hỏi khác: "đi bao nhiêu buổi" chứ không
+// phải "làm bao nhiêu giờ".
+async function computeThangKetSoNgayCong(startKey, endKey){
+  const snap = await fstore.collection('employee_shifts_gieogieo')
+    .where('businessDate','>=',startKey).where('businessDate','<=',endKey).get();
+  const byEmp = {}; // employeeId -> Set(businessDate)
+  const now = Date.now();
+  snap.forEach(d=>{
+    const s = d.data();
+    if(!s.employeeId || shiftWorkedHours(s, now) <= 0) return;
+    (byEmp[s.employeeId] = byEmp[s.employeeId] || new Set()).add(s.businessDate);
+  });
+  const out = {};
+  Object.entries(byEmp).forEach(([id,set])=>{ out[id] = set.size; });
+  return out;
+}
+
+// ---------- Thưởng/phạt + lương thực nhận — chủ quán tự khai, lưu theo tháng ----------
+function thangKetAdjDocId(employeeId, monthKey){ return employeeId + '_' + monthKey; }
+async function thangKetLoadAdjustments(monthKey, emps){
+  thangKetAdjust = {};
+  const ids = (emps||[]).filter(e=>e.active!==false).map(e=>e.id);
+  ids.forEach(id=>{ thangKetAdjust[id] = { thuong:[], phat:[], finalPay:null, _docId: thangKetAdjDocId(id, monthKey) }; });
+  if(!ids.length) return;
+  // Firestore 'in' giới hạn 10 phần tử/lần — chia lô nếu quán có hơn 10 nhân viên.
+  const chunks = [];
+  for(let i=0;i<ids.length;i+=10) chunks.push(ids.slice(i,i+10));
+  try{
+    const snaps = await Promise.all(chunks.map(c =>
+      fstore.collection('payroll_month_adjustments_gieogieo')
+        .where('employeeId','in',c).where('monthKey','==',monthKey).get()
+    ));
+    snaps.forEach(snap => snap.forEach(d=>{
+      const v = d.data();
+      thangKetAdjust[v.employeeId] = { thuong: v.thuong||[], phat: v.phat||[], finalPay: v.finalPay!=null?v.finalPay:null, _docId: d.id };
+    }));
+  }catch(err){ console.warn('[Tổng kết tháng] không đọc được thưởng/phạt đã lưu:', err); }
+}
+function thangKetAddRow(empId, loai){
+  const a = thangKetAdjust[empId]; if(!a) return;
+  a[loai].push({amount:0, reason:''});
+  thangKetRedraw();
+}
+function thangKetRemoveRow(empId, loai, idx){
+  const a = thangKetAdjust[empId]; if(!a) return;
+  a[loai].splice(idx,1);
+  thangKetRedraw();
+}
+// Số tiền đổi thì phải vẽ lại (ảnh hưởng "lương đề xuất"); lý do gõ tay thì không
+// vẽ lại — vẽ lại giữa lúc đang gõ sẽ làm mất con trỏ trong ô input.
+function thangKetRowAmount(empId, loai, idx, val){
+  const a = thangKetAdjust[empId]; if(!a) return;
+  a[loai][idx].amount = Number(val)||0;
+  thangKetRedraw();
+}
+function thangKetRowReason(empId, loai, idx, val){
+  const a = thangKetAdjust[empId]; if(!a) return;
+  a[loai][idx].reason = val;
+}
+function thangKetFinalPayChange(empId, val){
+  const a = thangKetAdjust[empId]; if(!a) return;
+  a.finalPay = (val===''||val==null) ? null : (Number(val)||0);
+}
+function thangKetDeXuat(empId){
+  const b = (thangKetData && thangKetData.empBreakdown && thangKetData.empBreakdown[empId]) || {amount:0};
+  const a = thangKetAdjust[empId] || {thuong:[], phat:[]};
+  const tongThuong = a.thuong.reduce((s,r)=>s+(Number(r.amount)||0),0);
+  const tongPhat = a.phat.reduce((s,r)=>s+(Number(r.amount)||0),0);
+  return { luongChamCong: b.amount||0, tongThuong, tongPhat, deXuat: (b.amount||0) + tongThuong - tongPhat };
+}
+async function thangKetSaveAdjust(empId){
+  const a = thangKetAdjust[empId]; if(!a) return;
+  try{
+    await fstore.collection('payroll_month_adjustments_gieogieo').doc(a._docId).set({
+      employeeId: empId, monthKey: thangKetMonth,
+      thuong: a.thuong, phat: a.phat, finalPay: a.finalPay,
+      updatedAt: new Date().toISOString()
+    }, {merge:true});
+    toast('✅ Đã lưu lương tháng '+thangKetMonth);
+  }catch(err){ toast('❌ '+(err.message||err)); }
+}
+
+function thangKetAdjustRowsHTML(empId, loai, nhan, mauSac){
+  const a = thangKetAdjust[empId] || {thuong:[], phat:[]};
+  const rows = a[loai] || [];
+  return `<div class="small-note" style="margin-top:10px;font-weight:700;color:var(--td)">${nhan}</div>
+    ${rows.map((r,idx)=>`
+      <div style="display:flex;gap:6px;align-items:center;margin-top:6px">
+        <input type="number" value="${r.amount}" placeholder="Số tiền" style="width:120px;flex-shrink:0"
+          onchange="thangKetRowAmount('${empId}','${loai}',${idx},this.value)">
+        <input type="text" value="${escapeHtmlAttr(r.reason)}" placeholder="Lý do" style="flex:1;min-width:0"
+          oninput="thangKetRowReason('${empId}','${loai}',${idx},this.value)">
+        <button class="iconbtn" style="flex-shrink:0;width:34px;height:34px" onclick="thangKetRemoveRow('${empId}','${loai}',${idx})">${ic('x',14)}</button>
+      </div>`).join('')}
+    <button class="btn outline sm" style="width:auto;padding:0 12px;margin-top:6px;color:${mauSac}" onclick="thangKetAddRow('${empId}','${loai}')">+ Thêm dòng ${nhan.toLowerCase()}</button>`;
+}
+
+function thangKetEmployeeCardHTML(e, tongGioTeam){
+  const b = (thangKetData.empBreakdown||{})[e.id] || {hours:0, otHours:0, amount:0};
+  const soNgay = (thangKetData.soNgayCongByEmp||{})[e.id] || 0;
+  const isHourly = e.payType==='hourly_full' || e.payType==='hourly_part';
+  const haoHutTen = (thangKetData.khoExtra && thangKetData.khoExtra.wasteByStaffName[e.fullName]) || 0;
+  const pctGio = (isHourly && tongGioTeam>0) ? (b.hours/tongGioTeam*100) : null;
+  const a = thangKetAdjust[e.id] || {thuong:[], phat:[], finalPay:null};
+  const dx = thangKetDeXuat(e.id);
+  return `<div class="card">
+    <div class="card-h"><h3>${escapeHtmlAttr(e.fullName)}</h3><span class="tier tier-blue">${payTypeLabel(e)}</span></div>
+    ${isHourly ? `
+    <div class="row"><span class="rl">Giờ công</span><span class="rv">${fmtNum(b.hours,1)}h${b.otHours>0?` <span class="small-note">(${fmtNum(b.otHours,1)}h OT)</span>`:''}</span></div>
+    <div class="row"><span class="rl">Số ngày làm</span><span class="rv">${soNgay} ngày</span></div>
+    ${pctGio!=null ? `<div class="row"><span class="rl">% giờ / tổng giờ công cả team</span><span class="rv"><b>${fmtNum(pctGio,1)}%</b></span></div>` : ''}
+    ` : `<div class="row"><span class="rl">Số ngày làm (có chấm công)</span><span class="rv">${soNgay} ngày</span></div>`}
+    <div class="row"><span class="rl">Hao hụt nguyên liệu ghi tên</span><span class="rv" style="${haoHutTen>0?'color:var(--bad)':''}">${fmt(haoHutTen)}</span></div>
+    <div class="row"><span class="rl">Lương tính từ chấm công</span><span class="rv"><b>${fmt(dx.luongChamCong)}</b></span></div>
+    ${thangKetAdjustRowsHTML(e.id, 'thuong', 'Thưởng', 'var(--ok)')}
+    ${thangKetAdjustRowsHTML(e.id, 'phat', 'Trừ lương', 'var(--bad)')}
+    <div class="row" style="border-top:1.5px solid var(--line);margin-top:10px;padding-top:8px">
+      <span class="rl"><b>Lương đề xuất</b> <span class="small-note">chấm công ${dx.tongThuong>0?'+ thưởng':''}${dx.tongPhat>0?' − trừ lương':''}</span></span>
+      <span class="rv"><b>${fmt(dx.deXuat)}</b></span>
+    </div>
+    <div class="field" style="margin-top:8px"><label>Lương thực nhận (để trống = lấy đề xuất, chủ quán có thể làm tròn)</label>
+      <input type="number" value="${a.finalPay!=null?a.finalPay:''}" placeholder="Đề xuất ${fmt(dx.deXuat)}"
+        onchange="thangKetFinalPayChange('${e.id}', this.value)">
+    </div>
+    <button class="btn sm" style="width:auto;padding:0 16px;margin-top:8px" onclick="thangKetSaveAdjust('${e.id}')">Lưu lương tháng này</button>
+  </div>`;
+}
+
+function thangKetCanhBaoHtml(){
+  const d = thangKetData;
+  if(!d || d.end.getTime() >= d.monthEnd.getTime()) return '';
+  const soNgayDaQua = Math.round((d.end - d.start)/86400000)+1;
+  const soNgayCaThang = d.monthEnd.getDate();
+  return `<div class="alert amber"><span class="ic">${ic('alert',15)}</span><div>Tháng ${d.m}/${d.y} đang chạy — mới có <b>${soNgayDaQua}/${soNgayCaThang}</b> ngày. Số liệu dưới đây sẽ còn thay đổi tới hết tháng.</div></div>`;
+}
+
+function thangKetMonthPickerHTML(){
+  return `<div class="card">
+    <div class="field" style="margin-bottom:0"><label>Chọn tháng cần tổng kết</label>
+      <div style="display:flex;gap:6px">
+        <input type="month" id="thangKetMonthInput" value="${thangKetMonth}">
+        <button class="btn" style="width:auto;padding:0 16px" onclick="thangKetMonth=document.getElementById('thangKetMonthInput').value; renderThangKet();">Quét tháng</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+async function renderThangKet(){
+  renderReportSubNav();
+  const body = document.getElementById('thangKetBody');
+  if(!body) return;
+  const [y,m] = thangKetMonth.split('-').map(Number);
+  const start = new Date(y, m-1, 1);
+  const monthEnd = new Date(y, m, 0);
+  const today = new Date(); today.setHours(0,0,0,0);
+
+  if(start > today){
+    body.innerHTML = thangKetMonthPickerHTML() + `<div class="empty-hint">Tháng ${m}/${y} chưa tới — chưa có dữ liệu để quét.</div>`;
+    return;
+  }
+  const end = monthEnd > today ? today : monthEnd;
+  const startKey = dkey(start), endKey = dkey(end);
+
+  body.innerHTML = thangKetMonthPickerHTML() + '<div class="muted">Đang quét dữ liệu tháng — tuỳ số ngày, có thể mất vài giây...</div>';
+
+  try{
+    await ensureAuth();
+    // Cần đủ cấu hình mới tính được giá vốn/lãi gộp — giống hệt điều kiện renderMix().
+    await Promise.all([
+      loadInventoryItems().then(x=>{INVENTORY_ITEMS=x;}),
+      loadPrepItems().then(x=>{PREP_ITEMS=x;}),
+      loadRecipes(), loadToppingRecipes(), loadPackagingPresets(),
+      loadPackagingItemOverrides(), loadPackagingRules(), loadPackagingRulesConfig()
+    ]);
+    const [salesRes, expAll, assets, ledgerReal, actualLaborByDate, expCats, emps, scheds,
+           empBreakdown, soNgayCongByEmp, mix, khoExtra, bookClosings] = await Promise.all([
+      fetchSalesRange(start, end),
+      loadExpensesAll(),
+      loadAssetsAll(),
+      computeLedgerRealMetrics(start, end),
+      HR_SETTINGS.useActualLaborCost ? computeActualLaborCostByDate(startKey, endKey) : Promise.resolve(null),
+      loadExpenseCategories().catch(()=>[]),
+      loadEmployees().catch(()=>[]),
+      loadSchedulesForRange(startKey, endKey).catch(()=>[]),
+      computeActualLaborBreakdownByEmployee(startKey, endKey).catch(err=>{ console.warn('[Tổng kết tháng] lương lỗi', err); return {}; }),
+      computeThangKetSoNgayCong(startKey, endKey).catch(err=>{ console.warn('[Tổng kết tháng] ngày công lỗi', err); return {}; }),
+      computeMixReport(start, end).catch(err=>{ console.warn('[Tổng kết tháng] bán hàng lỗi', err); return null; }),
+      computeThangKetKhoExtra(startKey, endKey, INVENTORY_ITEMS).catch(err=>{ console.warn('[Tổng kết tháng] kho lỗi', err); return null; }),
+      loadBookClosings().catch(()=>({}))
+    ]);
+
+    const plLaborDuDoan = plPredictedLaborByDate(emps, scheds, startKey, endKey);
+    const plWasteByDate = (ledgerReal && ledgerReal.wasteByDate) || {};
+    const plHomNayKey = dkey(new Date());
+    const plDays = salesRes.perDay.map(day => computeDayPL({
+      day, expList: expAll, cats: expCats, assets,
+      laborActual: actualLaborByDate, laborPredicted: plLaborDuDoan,
+      wasteValue: plWasteByDate[day.date] || 0, homNayKey: plHomNayKey
+    }));
+    const plTong = plSumDays(plDays);
+    // Dùng monthEnd THẬT (không phải end đã cắt tới hôm nay) — chỉ chốt sổ được
+    // khi tháng đã đi hết, xem cùng ngưỡng với renderHealth().
+    const plMonthKey = plKyLaThangDaXong(start, monthEnd);
+    const plBook = plMonthKey
+      ? { monthKey: plMonthKey, nhan: monthLabelVN(plMonthKey), daXong:true, chot: bookClosings[plMonthKey]||null }
+      : null;
+
+    await thangKetLoadAdjustments(thangKetMonth, emps);
+
+    thangKetData = { y, m, start, end, monthEnd, startKey, endKey,
+      emps: (emps||[]).filter(e=>e.active!==false), empBreakdown, soNgayCongByEmp,
+      mix, khoExtra, plTong, plDays, plBook, expAll };
+
+    thangKetRedraw();
+  }catch(err){
+    console.error('renderThangKet failed', err);
+    body.innerHTML = thangKetMonthPickerHTML() + '<div class="muted">Không quét được: '+(err.code||err.message||err)+'</div>';
+  }
+}
+
+function thangKetRedraw(){
+  const body = document.getElementById('thangKetBody');
+  const d = thangKetData;
+  if(!body || !d) return;
+
+  const head = thangKetMonthPickerHTML() + thangKetCanhBaoHtml();
+
+  // ---- Tài chính: tái dùng NGUYÊN plHealthHTML() — cùng khối "Lãi/lỗ kỳ này" đang
+  // hiện ở Sức khỏe tài chính, không dựng lại UI riêng cho cùng bộ số. ----
+  const taiChinh = plHealthHTML(d.plTong, d.plDays, d.plDays.length, plRecalcNotes(d.expAll, d.start, d.end), d.plBook);
+
+  // ---- Bán hàng: món chạy nhất / ế nhất, dùng thẳng computeMixReport() ----
+  let banHang = '';
+  if(d.mix && d.mix.soBill){
+    const tongLy = d.mix.mon.reduce((s,x)=>s+x.ly,0) || 1;
+    const conBan = d.mix.mon.filter(x=>x.ly>0);
+    const banChay = conBan.slice(0,10);
+    const banCham = conBan.slice(-10).reverse().filter(x=>!banChay.includes(x));
+    banHang = `
+      <div class="sec-title">Bán hàng tháng ${d.m}/${d.y}</div>
+      <div class="card">
+        <div class="row"><span class="rl">Số ly bán ra</span><span class="rv"><b>${d.mix.soLy}</b> ly <span class="small-note">· ${d.mix.soBill} bill</span></span></div>
+        <div class="row"><span class="rl">Doanh thu (từ bill)</span><span class="rv">${fmt(d.mix.doanhThu)}</span></div>
+      </div>
+      <div class="sec-title">Bán chạy nhất</div>
+      <div class="card">${banChay.map(mn=>`<div class="row"><span class="rl">${escapeHtmlAttr(mn.ten)}</span><span class="rv">${mn.ly} ly <span class="small-note">${fmtNum(mn.ly/tongLy*100,1)}%</span></span></div>`).join('')}</div>
+      ${banCham.length ? `<div class="sec-title">Bán chậm nhất (còn bán được)</div>
+      <div class="card">${banCham.map(mn=>`<div class="row"><span class="rl">${escapeHtmlAttr(mn.ten)}</span><span class="rv">${mn.ly} ly</span></div>`).join('')}</div>` : ''}
+      ${d.mix.chuaBan.length ? `<div class="sec-title">Không bán được ly nào tháng này</div>
+      <div class="card"><div class="small-note" style="line-height:2">${d.mix.chuaBan.map(ten=>`<span class="tier tier-amber" style="margin-right:6px">${escapeHtmlAttr(ten)}</span>`).join('')}</div></div>` : ''}
+    `;
+  } else {
+    banHang = `<div class="sec-title">Bán hàng tháng ${d.m}/${d.y}</div><div class="card"><div class="empty-hint">Không có bill nào trong tháng này.</div></div>`;
+  }
+
+  // ---- Kho: nhập hàng + tồn kho lâu ----
+  let kho = '';
+  if(d.khoExtra){
+    kho = `
+      <div class="sec-title">Nhập hàng tháng ${d.m}/${d.y}</div>
+      <div class="card">
+        <div class="row"><span class="rl"><b>Tổng tiền đã nhập</b></span><span class="rv"><b>${fmt(d.khoExtra.tongNhap)}</b></span></div>
+      </div>
+      ${d.khoExtra.nhapList.length ? `<div class="card" style="padding:6px 0"><div style="overflow-x:auto"><table class="kt" style="min-width:420px">
+        <thead><tr><th>Nguyên liệu</th><th style="text-align:right">Số lượng</th><th style="text-align:right">Giá trị</th></tr></thead>
+        <tbody>${d.khoExtra.nhapList.map(x=>`<tr><td>${escapeHtmlAttr(x.ten)}</td><td style="text-align:right">${fmtNum(x.qty,1)} ${escapeHtmlAttr(x.donVi)}</td><td style="text-align:right">${fmt(x.value)}</td></tr>`).join('')}</tbody>
+      </table></div></div>` : `<div class="card"><div class="empty-hint">Không có lượt nhập hàng nào trong tháng.</div></div>`}
+      <div class="sec-title">Nguyên liệu tồn kho lâu <span class="small-note">— còn tồn nhưng cả tháng không có dòng sổ nào</span></div>
+      <div class="card">${d.khoExtra.tonLau.length
+        ? d.khoExtra.tonLau.slice(0,20).map(x=>`<div class="row"><span class="rl">${escapeHtmlAttr(x.ten)}</span><span class="rv">${fmtNum(x.ton,1)} ${escapeHtmlAttr(x.donVi)} <span class="small-note">≈ ${fmt(x.giaTri)}</span></span></div>`).join('')
+        : '<div class="empty-hint">Không có — mọi nguyên liệu đều có động tĩnh trong tháng.</div>'}
+      </div>
+    `;
+  }
+
+  // ---- Nhân sự: mỗi người 1 thẻ, cộng thêm khối thưởng/phạt + lương thực nhận ----
+  const tongGioTeam = d.emps.reduce((s,e)=>{
+    const b = (d.empBreakdown||{})[e.id];
+    return s + ((b && (e.payType==='hourly_full'||e.payType==='hourly_part')) ? b.hours : 0);
+  }, 0);
+  const nhanSu = `
+    <div class="sec-title">Nhân sự tháng ${d.m}/${d.y}</div>
+    ${d.emps.length ? d.emps.map(e=>thangKetEmployeeCardHTML(e, tongGioTeam)).join('') : '<div class="card"><div class="empty-hint">Chưa có nhân viên đang hoạt động.</div></div>'}
+  `;
+
+  body.innerHTML = head + taiChinh + banHang + kho + nhanSu;
 }
 
 // ------------------------------------------------------------
