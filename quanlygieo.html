@@ -5437,11 +5437,10 @@ async function renderKho2Prep(){
 // Đọc theo mốc thời gian nên chỉ cần chỉ mục mặc định của Firestore; bản ghi chưa
 // mở/chưa báo hết có openedAt/finishedAt = null nên tự nằm ngoài phép so sánh.
 // ------------------------------------------------------------
-// [SỬA] Nhận thêm `date` để đọc đúng 1 ngày bất kỳ, không chỉ hôm nay — nút "mở
-// rộng" giờ cho lật xem hôm qua/hôm kia... ngay tại chỗ thay vì nhảy sang màn
-// Kho 2.0 (nơi không có cách lọc theo ngày, chỉ có tồn hiện tại). Chặn trên
-// bằng mốc đầu ngày HÔM SAU thay vì để hở, nếu không ngày hôm qua sẽ đọc luôn
-// cả các lượt của hôm nay (cùng nằm sau mốc `openedAt >= đầu ngày hôm qua`).
+// [SỬA] Nhận thêm `date` để đọc đúng 1 ngày bất kỳ, không chỉ hôm nay — dùng cho
+// cả bản xem lướt (hôm nay) lẫn popup "Mở rộng" bên dưới (xem hôm qua/hôm kia...).
+// Chặn trên bằng mốc đầu ngày HÔM SAU thay vì để hở, nếu không ngày hôm qua sẽ đọc
+// luôn cả các lượt của hôm nay (cùng nằm sau mốc `openedAt >= đầu ngày hôm qua`).
 async function computeKhoFeedForDate(date){
   const dau = new Date(date); dau.setHours(0,0,0,0);
   const cuoi = new Date(dau); cuoi.setDate(cuoi.getDate()+1);
@@ -5462,22 +5461,56 @@ async function computeKhoFeedForDate(date){
   return ra;
 }
 
-// [SỬA — theo phản hồi] Bản trước xổ tối đa 8 dòng NGAY TRONG THẺ rồi lật ngày
-// tại chỗ — nhưng hôm nào kho động (nhập hàng loạt, mở/báo hết nhiều) dễ có cả
-// trăm lượt, xổ giữa trang thì thẻ dài vô tận, đẩy hết phần còn lại của màn Hôm
-// nay xuống dưới. Giờ thẻ ngoài chỉ còn 1 dòng tóm tắt "X lượt hôm nay", bấm vào
-// mở POPUP (dùng lại openEditSheet như hộp "Hao hụt & huỷ" ở thẻ Lãi/lỗ) — trong
-// đó mới liệt kê ĐẦY ĐỦ, không giới hạn 8, và có ‹ › + nút "Hôm nay" để lật ngày.
-let _khoFeedCache = null;   // danh sách của HÔM NAY, nạp sẵn lúc renderToday() — dùng để hiện số ở thẻ tóm tắt và mở popup lần đầu không phải chờ tải lại.
+// Gập lại theo mặc định: đây là thứ mỗi vài ngày mới cần đọc, không đáng chiếm
+// một khoảng màn hình cố định ở màn xem hằng ngày. Số lượt vẫn hiện trên tiêu đề
+// nên vẫn biết hôm nay kho có động tĩnh gì mà không cần mở.
+let _khoFeedMo = false;
+function toggleKhoFeed(){ _khoFeedMo = !_khoFeedMo; _khoFeedRedraw(); }
+let _khoFeedCache = null;
+function _khoFeedRedraw(){
+  const el = document.getElementById('todayKhoFeed');
+  if(el) el.innerHTML = khoFeedHTML(_khoFeedCache);
+}
 function khoFeedHTML(list){
   _khoFeedCache = list;
-  const soLuot = list ? list.length : 0;
-  if(!soLuot) return ''; // im ắng thì không chiếm chỗ, giữ đúng tinh thần bản cũ.
-  return `<button class="sec-fold" onclick="openKhoFeedSheet()">
+  if(!list || !list.length) return '';
+  const gio = iso => { const d = iso?new Date(iso):null; return (d && !isNaN(d)) ? `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}` : ''; };
+  const hien = list.slice(0, 8);
+  const dauMuc = `<button class="sec-fold" aria-expanded="${_khoFeedMo}" onclick="toggleKhoFeed()">
       <span class="sf-t">Hoạt động kho hôm nay</span>
-      <span class="sf-c">${soLuot} lượt</span>
-      <span class="sf-ch">${ic('chevronRight',15)}</span>
+      <span class="sf-c">${list.length} lượt</span>
+      <span class="sf-ch">${ic('chevronDown',15)}</span>
     </button>`;
+  if(!_khoFeedMo) return dauMuc;
+  return dauMuc + `
+    <div class="card">
+      ${hien.map(e=>{
+        const la = e.loai==='mo';
+        const mau = la ? 'var(--bi)' : 'var(--gd)';
+        const nhan = la ? 'Vừa mở' : 'Báo hết';
+        const phu = la
+          ? `${e.ai ? 'bởi '+escapeHtmlAttr(e.ai) : ''}${e.hsd ? ' · hạn sau mở '+fmtDateVN(new Date(e.hsd)) : ''}`
+          : `${e.ai ? 'bởi '+escapeHtmlAttr(e.ai) : ''}${e.quet ? ' · đã quét mã' : ' · chọn tay'+(e.lyDo?' ('+escapeHtmlAttr(ctnReasonLabel(e.lyDo))+')':'')}${e.thua>0 ? ` · còn thừa ${fmtNum(e.thua,0)} ${escapeHtmlAttr(e.donVi)}` : ''}`;
+        return `<div class="row" style="align-items:flex-start">
+          <span class="rl" style="flex:1;min-width:0">
+            <b style="color:${mau}">${nhan}</b> · ${escapeHtmlAttr(e.ten)}
+            <span class="muted-sm" style="letter-spacing:.4px">${escapeHtmlAttr(e.ma)}</span>
+            ${e.xemLai ? '<span class="tier tier-amber" style="margin-left:4px">còn nhiều — cần xem</span>' : ''}
+            <div class="small-note" style="margin-top:2px">${phu}</div>
+          </span>
+          <span class="rv">${gio(e.at)}</span>
+        </div>`;
+      }).join('')}
+      ${list.length > hien.length ? `<div class="small-note">…và ${list.length-hien.length} lượt nữa hôm nay.</div>` : ''}
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+        <button class="btn outline sm" style="width:auto;padding:0 12px" onclick="goContainers('open')">Xem hàng đang mở</button>
+        <!-- [MỚI] Nút mở rộng riêng — 8 dòng trên chỉ là xem lướt; ngày kho động (nhập
+             hàng loạt, mở/báo hết nhiều) có thể cả trăm lượt, không nhét vừa ngay trong
+             thẻ. Bấm vào mở POPUP (openKhoFeedSheet, tái dùng openEditSheet như hộp "Hao
+             hụt & huỷ") liệt kê ĐẦY ĐỦ, không giới hạn 8, kèm lật xem hôm qua/hôm kia. -->
+        <button class="btn outline sm" style="width:auto;padding:0 12px" onclick="openKhoFeedSheet()">Mở rộng ${ic('chevronRight',13)}</button>
+      </div>
+    </div>`;
 }
 
 // Nhãn ngày kiểu người: "hôm nay/hôm qua/hôm kia" cho gần, còn lại ghi hẳn ngày
@@ -5595,21 +5628,54 @@ async function computePrepFeedForDate(date){
   return ra;
 }
 
-// [SỬA — cùng lý do với Kho ở trên] Thẻ ngoài chỉ tóm tắt số lượt, bấm mở popup mới
-// liệt kê đầy đủ + lật ngày.
+let _prepFeedMo = false;
+function togglePrepFeed(){ _prepFeedMo = !_prepFeedMo; _prepFeedRedraw(); }
 let _prepFeedCache = null;
+function _prepFeedRedraw(){
+  const el = document.getElementById('todayPrepFeed');
+  if(el) el.innerHTML = prepFeedHTML(_prepFeedCache);
+}
+const PREP_FEED_NHAN = { start:['Bắt đầu chế biến','var(--bi)'], finish:['Hoàn thành','var(--ok)'], used:['Bán hết','var(--gd)'], expired:['Hết hạn/bỏ','var(--bad)'], discarded:['Huỷ lô','var(--bad)'], cancelled:['Huỷ mẻ','var(--warn)'] };
 function prepFeedHTML(list){
   _prepFeedCache = list;
-  const soLuot = list ? list.length : 0;
-  if(!soLuot) return '';
-  return `<button class="sec-fold" onclick="openPrepFeedSheet()">
+  if(!list || !list.length) return '';
+  const gio = iso => { const d = iso?new Date(iso):null; return (d && !isNaN(d)) ? `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}` : ''; };
+  const hien = list.slice(0, 8);
+  const dauMuc = `<button class="sec-fold" aria-expanded="${_prepFeedMo}" onclick="togglePrepFeed()">
       <span class="sf-t">Hoạt động BTP hôm nay</span>
-      <span class="sf-c">${soLuot} lượt</span>
-      <span class="sf-ch">${ic('chevronRight',15)}</span>
+      <span class="sf-c">${list.length} lượt</span>
+      <span class="sf-ch">${ic('chevronDown',15)}</span>
     </button>`;
+  if(!_prepFeedMo) return dauMuc;
+  return dauMuc + `
+    <div class="card">
+      ${hien.map(e=>{
+        const [nhan, mau] = PREP_FEED_NHAN[e.loai] || [e.loai, 'var(--gt)'];
+        const b = e.b;
+        const phu = e.loai==='start' ? (b.staff?('bởi '+escapeHtmlAttr(b.staff)):'')
+          : e.loai==='finish' ? `Cân được ${fmtNum(b.qtyInitial,2)} ${escapeHtmlAttr(b.unit||'')}${b.finishedBy?(' · bởi '+escapeHtmlAttr(b.finishedBy)):''}`
+          : e.loai==='discarded' ? (b.discardReason?escapeHtmlAttr(b.discardReason):'')
+          : e.loai==='cancelled' ? [b.cancelReason, b.cancelledBy?('bởi '+b.cancelledBy):''].filter(Boolean).map(escapeHtmlAttr).join(' · ')
+          : e.loai==='expired' ? (b.expiredReason?escapeHtmlAttr(b.expiredReason):'')
+          : '';
+        return `<div class="row" style="align-items:flex-start;cursor:pointer" onclick="ctnShowDetail('${b.id}','prep_batches_gieogieo')">
+          <span class="rl" style="flex:1;min-width:0">
+            <b style="color:${mau}">${nhan}</b> · ${escapeHtmlAttr(b.prepName||b.prepCode||'')}
+            <span class="muted-sm" style="letter-spacing:.4px">${escapeHtmlAttr(b.batchCode||'')}</span>
+            <div class="small-note" style="margin-top:2px">${phu}</div>
+          </span>
+          <span class="rv">${gio(e.at)}</span>
+        </div>`;
+      }).join('')}
+      ${list.length > hien.length ? `<div class="small-note">…và ${list.length-hien.length} lượt nữa hôm nay.</div>` : ''}
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+        <button class="btn outline sm" style="width:auto;padding:0 12px" onclick="goKho2('prep')">Xem tất cả BTP</button>
+        <!-- [MỚI] Cùng lý do với nút "Mở rộng" ở Hoạt động kho — popup liệt kê đầy đủ,
+             không giới hạn 8, kèm lật xem hôm qua/hôm kia. -->
+        <button class="btn outline sm" style="width:auto;padding:0 12px" onclick="openPrepFeedSheet()">Mở rộng ${ic('chevronRight',13)}</button>
+      </div>
+    </div>`;
 }
-
-const PREP_FEED_NHAN = { start:['Bắt đầu chế biến','var(--bi)'], finish:['Hoàn thành','var(--ok)'], used:['Bán hết','var(--gd)'], expired:['Hết hạn/bỏ','var(--bad)'], discarded:['Huỷ lô','var(--bad)'], cancelled:['Huỷ mẻ','var(--warn)'] };
 
 let _prepFeedSheetDate = null;
 let _prepFeedSheetList = null;
