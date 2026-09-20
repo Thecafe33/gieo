@@ -10665,6 +10665,10 @@ async function prepStartGateScan(itemId) {
     return;
   }
   reqRow.scannedIds.push(c.id);
+  // [MỚI — FIX "KIT bột sữa/Sữa gạo quét rồi mà Chi tiết lô không thấy tem"] Giữ lại
+  // luôn mã + đơn vị của tem vừa quét, không chỉ mỗi id — xem lý do đầy đủ ở
+  // confirmPrepStartAfterScan().
+  (reqRow.scannedContainers = reqRow.scannedContainers || []).push({ id: c.id, code: c.code || '', unit: c.unit || '' });
   toast('✅ Đã quét ' + c.code);
   refreshFifoAlert().catch(() => {});
   renderPrepStartScanGate();
@@ -10680,8 +10684,21 @@ async function confirmPrepStartAfterScan() {
   // những tem đó về 'sealed', thay vì để chúng kẹt vĩnh viễn ở 'finished' dù mẻ
   // chưa từng thực sự nấu (xem _reverseAtomicContainerFinish).
   const scannedContainerIds = st.requirements.reduce((acc, r) => acc.concat(r.scannedIds), []);
+  // [MỚI — FIX "KIT bột sữa/Sữa gạo quét rồi mà Chi tiết lô không thấy tem"] Trước đây
+  // scannedContainerIds bị GỘP PHẲNG mất luôn liên kết itemId -> tem nào, nên
+  // _startPrepBatchImpl không có gì để ghi vào inputTrace[itemId].allocations ngoài
+  // mảng rỗng — Chi tiết lô hiện "KIT..." mà không có "Xem tem" lẫn nhãn "Không gắn
+  // tem" (vì untracked cũng bị tính sai thành false). Giữ NGUYÊN scannedContainerIds
+  // phẳng cho đúng mục đích cũ của nó (hoàn tem lúc "Huỷ mẻ"), chỉ THÊM map theo
+  // itemId để nối đúng tem vào đúng nguyên liệu trong inputTrace.
+  const atomicAllocationsByItem = {};
+  st.requirements.forEach(r => {
+    atomicAllocationsByItem[r.itemId] = (r.scannedContainers || []).map(c => ({
+      containerId: c.id, code: c.code, itemName: r.name || '', unit: c.unit || '', qty: 1
+    }));
+  });
   prepStartScanState = null;
-  await startPrepBatch(staffEmp, true, scannedContainerIds);
+  await startPrepBatch(staffEmp, true, scannedContainerIds, atomicAllocationsByItem);
 }
 
 // [FIX] TRƯỚC ĐÂY huỷ ở bước quét (trước khi bấm "Bắt đầu chế biến thật", nên
@@ -10718,13 +10735,13 @@ async function cancelPrepStartGate() {
 // preResolvedStaff — khi gọi tiếp sau bước quét mã bắt buộc (xem
 // startPrepBatchGate/confirmPrepStartAfterScan), danh tính đã xác thực PIN một
 // lần ở đầu bước quét rồi, không hỏi lại PIN lần 2 vì màn quét không còn ô PIN.
-async function startPrepBatch(preResolvedStaff, atomicScanDone, atomicScannedContainerIds) {
+async function startPrepBatch(preResolvedStaff, atomicScanDone, atomicScannedContainerIds, atomicAllocationsByItem) {
   if (_posSubmitBusy) { toast('⏳ Đang xử lý, vui lòng đợi giây lát...'); return; }
   _posSubmitBusy = true;
   const restoreBtn = setBtnBusy('prepStartBtn', '⏳ Đang trừ kho nguyên liệu...');
-  try { await _startPrepBatchImpl(preResolvedStaff, atomicScanDone, atomicScannedContainerIds); } finally { _posSubmitBusy = false; restoreBtn(); }
+  try { await _startPrepBatchImpl(preResolvedStaff, atomicScanDone, atomicScannedContainerIds, atomicAllocationsByItem); } finally { _posSubmitBusy = false; restoreBtn(); }
 }
-async function _startPrepBatchImpl(preResolvedStaff, atomicScanDone, atomicScannedContainerIds) {
+async function _startPrepBatchImpl(preResolvedStaff, atomicScanDone, atomicScannedContainerIds, atomicAllocationsByItem) {
   const p = PREP_ITEMS_CACHE_POS.find(x => x.id === prepBatchState.prepId);
   if (!p) { toast('⚠️ Chưa chọn thành phẩm'); return; }
   if (!(prepBatchState.ratio > 0)) { toast('⚠️ Tỷ lệ mẻ phải lớn hơn 0'); return; }
@@ -10762,8 +10779,15 @@ async function _startPrepBatchImpl(preResolvedStaff, atomicScanDone, atomicScann
       // tem sealed, không cộng thêm nợ ảo — đồng thời tránh luôn cảnh báo giả "không có tem nào đang mở".
       const item = KHO_ITEMS_CACHE.find(x => x.id === r.itemId);
       const alreadyAtomicScanned = !!atomicScanDone && isAtomicUnitItem(item);
+      // [FIX "Chi tiết lô không thấy tem của KIT bột sữa/Sữa gạo dù đã quét bắt buộc"]
+      // TRƯỚC ĐÂY luôn là [] — đúng cho việc TRỪ KHO (tem đã chốt 'finished' ngay lúc
+      // quét ở cổng, không cần allocate lại), nhưng lại làm inputTrace của lô không có
+      // gì để hiện: allocations rỗng VÀ untracked=false (vì alreadyAtomicScanned=true)
+      // nên màn Chi tiết lô không hiện "Xem tem" mà cũng không hiện "Không gắn tem".
+      // Giờ lấy đúng tem đã quét cho ITEM NÀY từ atomicAllocationsByItem (gói ở
+      // confirmPrepStartAfterScan) để nối vào inputTrace — không đổi gì ở việc trừ kho.
       const allocations = alreadyAtomicScanned
-        ? []
+        ? ((atomicAllocationsByItem && atomicAllocationsByItem[r.itemId]) || [])
         : await unitEngineAllocateConsumption(r.itemId, qty, undefined, { type: 'prep_batch', id: batchRef.id })
           .catch(err => { console.warn('[FIFO] phân bổ lỗi', r.itemId, err); return []; });
       perInputAllocations[r.itemId] = { allocations, qty, alreadyAtomicScanned };
@@ -10805,6 +10829,14 @@ async function _startPrepBatchImpl(preResolvedStaff, atomicScanDone, atomicScann
       await Promise.allSettled(trulyMissingIds.map(async itemId => {
         const rec = perInputAllocations[itemId];
         if (!rec || !rec.allocations.length) return;
+        // [FIX] rec.allocations của nguyên liệu atomic-scanned giờ KHÔNG còn rỗng nữa
+        // (đã nối tem vào để hiện đúng ở Chi tiết lô — xem allocations ở trên), nhưng
+        // đó là tem "cái rời" chưa từng đi qua RTDB. unitEngineReverseAllocations() chỉ
+        // biết hoàn vào RTDB — gọi nhầm cho loại này sẽ CỘNG QUA tem đang mở KHÁC (ăn
+        // nhầm currentStock của tem không liên quan) thay vì không làm gì. Loại đã có
+        // cơ chế hoàn riêng, đúng (huỷ mẻ → _reverseAtomicContainerFinish qua
+        // atomicScannedContainerIds), nên bỏ qua ở đây.
+        if (rec.alreadyAtomicScanned) return;
         try {
           const rv = await unitEngineReverseAllocations(itemId, rec.allocations);
           if (rv.appliedQty >= rv.totalQty - 1e-6) await _ueRecomputeCurrentStock(itemId, STOCK_CONTAINERS_COLL).catch(() => {});
