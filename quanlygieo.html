@@ -2008,6 +2008,7 @@ const ICON_PATHS = {
   clock:       '<circle cx="12" cy="12" r="9"/><path d="M12 6.8V12l3.4 2.2"/>',
   chevronUp:   '<path d="M6 14.5l6-6 6 6"/>',
   chevronDown: '<path d="M6 9.5l6 6 6-6"/>',
+  chevronRight:'<path d="M9.5 6l6 6-6 6"/>',
   arrowUp:     '<path d="M12 20V4.5M6 10.5L12 4.5l6 6"/>',
   arrowDown:   '<path d="M12 4v15.5M6 13.5l6 6 6-6"/>',
   dots:        '<circle cx="5.5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="18.5" cy="12" r="1.6"/>'
@@ -5461,22 +5462,27 @@ async function computeKhoFeedForDate(date){
   return ra;
 }
 
-// Gập lại theo mặc định: đây là thứ mỗi vài ngày mới cần đọc, không đáng chiếm
-// một khoảng màn hình cố định ở màn xem hằng ngày. Số lượt vẫn hiện trên tiêu đề
-// nên vẫn biết hôm nay kho có động tĩnh gì mà không cần mở.
-let _khoFeedMo = false;
-// Ngày đang xem trong feed — mặc định hôm nay, đổi khi bấm ‹ ›. Luôn 00:00 để so
-// sánh bằng getTime() với "hôm nay" cho gọn (khỏi lệch giờ/phút/giây).
-let _khoFeedDate = (()=>{ const d = new Date(); d.setHours(0,0,0,0); return d; })();
-let _khoFeedLoading = false;
-function toggleKhoFeed(){ _khoFeedMo = !_khoFeedMo; _khoFeedRedraw(); }
-let _khoFeedCache = null;
-function _khoFeedRedraw(){
-  const el = document.getElementById('todayKhoFeed');
-  if(el) el.innerHTML = khoFeedHTML(_khoFeedCache);
+// [SỬA — theo phản hồi] Bản trước xổ tối đa 8 dòng NGAY TRONG THẺ rồi lật ngày
+// tại chỗ — nhưng hôm nào kho động (nhập hàng loạt, mở/báo hết nhiều) dễ có cả
+// trăm lượt, xổ giữa trang thì thẻ dài vô tận, đẩy hết phần còn lại của màn Hôm
+// nay xuống dưới. Giờ thẻ ngoài chỉ còn 1 dòng tóm tắt "X lượt hôm nay", bấm vào
+// mở POPUP (dùng lại openEditSheet như hộp "Hao hụt & huỷ" ở thẻ Lãi/lỗ) — trong
+// đó mới liệt kê ĐẦY ĐỦ, không giới hạn 8, và có ‹ › + nút "Hôm nay" để lật ngày.
+let _khoFeedCache = null;   // danh sách của HÔM NAY, nạp sẵn lúc renderToday() — dùng để hiện số ở thẻ tóm tắt và mở popup lần đầu không phải chờ tải lại.
+function khoFeedHTML(list){
+  _khoFeedCache = list;
+  const soLuot = list ? list.length : 0;
+  if(!soLuot) return ''; // im ắng thì không chiếm chỗ, giữ đúng tinh thần bản cũ.
+  return `<button class="sec-fold" onclick="openKhoFeedSheet()">
+      <span class="sf-t">Hoạt động kho hôm nay</span>
+      <span class="sf-c">${soLuot} lượt</span>
+      <span class="sf-ch">${ic('chevronRight',15)}</span>
+    </button>`;
 }
+
 // Nhãn ngày kiểu người: "hôm nay/hôm qua/hôm kia" cho gần, còn lại ghi hẳn ngày
-// tháng — tránh phải nhẩm "3 ngày trước là thứ mấy".
+// tháng — tránh phải nhẩm "3 ngày trước là thứ mấy". Dùng chung cho cả popup Kho
+// và popup BTP bên dưới.
 function feedDateLabel(d){
   const hom = new Date(); hom.setHours(0,0,0,0);
   const soNgay = Math.round((hom - d) / 86400000);
@@ -5485,66 +5491,79 @@ function feedDateLabel(d){
   if(soNgay===2) return 'Hôm kia';
   return fmtDateVN(d);
 }
-function khoFeedGoDate(delta){
-  const hom = new Date(); hom.setHours(0,0,0,0);
-  const nd = new Date(_khoFeedDate); nd.setDate(nd.getDate()+delta);
-  if(nd > hom) return; // không xem được ngày tương lai
-  _khoFeedDate = nd;
-  _khoFeedLoading = true;
-  _khoFeedRedraw();
-  computeKhoFeedForDate(_khoFeedDate)
-    .then(list => { _khoFeedLoading = false; khoFeedHTML(list); _khoFeedRedraw(); })
-    .catch(err => { console.warn('[Kho] không đọc được hoạt động ngày đã chọn:', err); _khoFeedLoading = false; khoFeedHTML([]); _khoFeedRedraw(); });
-}
 
-function khoFeedHTML(list){
-  _khoFeedCache = list;
-  const homNay = (()=>{ const h = new Date(); h.setHours(0,0,0,0); return h; })();
-  const laHomNay = _khoFeedDate.getTime() === homNay.getTime();
-  const soLuot = list ? list.length : 0;
-  // Gập & đang ở hôm nay & không có gì thì không hiện — giữ đúng hành vi cũ (không
-  // chiếm chỗ những ngày kho im ắng). Đứng ở ngày khác hôm nay thì vẫn hiện tiêu đề
-  // để còn nút lật ngày, kể cả ngày đó trống — không thì bấm ‹ xong tưởng bị lỗi.
-  if(!_khoFeedMo && laHomNay && !soLuot) return '';
+let _khoFeedSheetDate = null;
+let _khoFeedSheetList = null;
+let _khoFeedSheetLoading = false;
+function openKhoFeedSheet(){
+  const homNay = new Date(); homNay.setHours(0,0,0,0);
+  _khoFeedSheetDate = homNay;
+  _khoFeedSheetList = _khoFeedCache || []; // đã có sẵn từ renderToday(), mở lên xem ngay không cần chờ mạng.
+  _khoFeedSheetLoading = false;
+  openEditSheet('Hoạt động kho', '<div id="khoFeedSheetBody"></div>', ()=>{});
+  _khoFeedSheetRedraw();
+}
+function _khoFeedSheetRedraw(){
+  const el = document.getElementById('khoFeedSheetBody');
+  if(el) el.innerHTML = khoFeedSheetBodyHTML();
+}
+function khoFeedSheetGoDate(delta){
+  const hom = new Date(); hom.setHours(0,0,0,0);
+  const nd = new Date(_khoFeedSheetDate); nd.setDate(nd.getDate()+delta);
+  if(nd > hom) return; // không xem được ngày tương lai
+  _khoFeedSheetGoTo(nd);
+}
+function khoFeedSheetGoToday(){
+  const hom = new Date(); hom.setHours(0,0,0,0);
+  _khoFeedSheetGoTo(hom);
+}
+function _khoFeedSheetGoTo(date){
+  _khoFeedSheetDate = date;
+  _khoFeedSheetLoading = true;
+  _khoFeedSheetRedraw();
+  computeKhoFeedForDate(date)
+    .then(list => { if(_khoFeedSheetDate.getTime()!==date.getTime()) return; // đã lật sang ngày khác trong lúc chờ mạng
+      _khoFeedSheetLoading = false; _khoFeedSheetList = list; _khoFeedSheetRedraw(); })
+    .catch(err => { console.warn('[Kho] không đọc được hoạt động ngày đã chọn:', err);
+      _khoFeedSheetLoading = false; _khoFeedSheetList = []; _khoFeedSheetRedraw(); });
+}
+function khoFeedSheetBodyHTML(){
+  const homNay = new Date(); homNay.setHours(0,0,0,0);
+  const laHomNay = _khoFeedSheetDate.getTime() === homNay.getTime();
+  const list = _khoFeedSheetList || [];
+  const soLuot = list.length;
   const gio = iso => { const d = iso?new Date(iso):null; return (d && !isNaN(d)) ? `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}` : ''; };
-  const hien = (list||[]).slice(0, 8);
-  const dauMuc = `<button class="sec-fold" aria-expanded="${_khoFeedMo}" onclick="toggleKhoFeed()">
-      <span class="sf-t">Hoạt động kho${laHomNay?' hôm nay':''}</span>
-      <span class="sf-c">${soLuot} lượt</span>
-      <span class="sf-ch">${ic('chevronDown',15)}</span>
-    </button>`;
-  if(!_khoFeedMo) return dauMuc;
   // Lật ngày dùng lại đúng .weeknav đã dùng ở Báo cáo kỳ — cùng một kiểu nút ‹ › cho
   // quen tay, khỏi phải học thêm một cách điều hướng ngày khác trong cùng một app.
-  const dieuHuong = `<div class="weeknav" style="margin:8px 0">
-      <button onclick="khoFeedGoDate(-1)">‹</button>
-      <div class="wk-label">${feedDateLabel(_khoFeedDate)}</div>
-      <button onclick="khoFeedGoDate(1)" ${laHomNay?'disabled style="opacity:.3"':''}>›</button>
-    </div>`;
-  if(_khoFeedLoading) return dauMuc + dieuHuong + `<div class="card"><div class="muted">Đang tải...</div></div>`;
-  if(!soLuot) return dauMuc + dieuHuong + `<div class="card"><div class="empty-hint">Không có hoạt động nào ${feedDateLabel(_khoFeedDate).toLowerCase()}.</div></div>`;
-  return dauMuc + dieuHuong + `
-    <div class="card">
-      ${hien.map(e=>{
-        const la = e.loai==='mo';
-        const mau = la ? 'var(--bi)' : 'var(--gd)';
-        const nhan = la ? 'Vừa mở' : 'Báo hết';
-        const phu = la
-          ? `${e.ai ? 'bởi '+escapeHtmlAttr(e.ai) : ''}${e.hsd ? ' · hạn sau mở '+fmtDateVN(new Date(e.hsd)) : ''}`
-          : `${e.ai ? 'bởi '+escapeHtmlAttr(e.ai) : ''}${e.quet ? ' · đã quét mã' : ' · chọn tay'+(e.lyDo?' ('+escapeHtmlAttr(ctnReasonLabel(e.lyDo))+')':'')}${e.thua>0 ? ` · còn thừa ${fmtNum(e.thua,0)} ${escapeHtmlAttr(e.donVi)}` : ''}`;
-        return `<div class="row" style="align-items:flex-start">
-          <span class="rl" style="flex:1;min-width:0">
-            <b style="color:${mau}">${nhan}</b> · ${escapeHtmlAttr(e.ten)}
-            <span class="muted-sm" style="letter-spacing:.4px">${escapeHtmlAttr(e.ma)}</span>
-            ${e.xemLai ? '<span class="tier tier-amber" style="margin-left:4px">còn nhiều — cần xem</span>' : ''}
-            <div class="small-note" style="margin-top:2px">${phu}</div>
-          </span>
-          <span class="rv">${gio(e.at)}</span>
-        </div>`;
-      }).join('')}
-      ${soLuot > hien.length ? `<div class="small-note">…và ${soLuot-hien.length} lượt nữa ${feedDateLabel(_khoFeedDate).toLowerCase()}.</div>` : ''}
-      ${laHomNay ? `<button class="btn outline sm" style="width:auto;padding:0 12px;margin-top:8px" onclick="goContainers('open')">Xem hàng đang mở</button>` : ''}
-    </div>`;
+  // Nút "Hôm nay" chỉ hiện khi đã lật đi xa — để về nhanh mà khỏi bấm › nhiều lần.
+  const dieuHuong = `<div class="weeknav" style="margin-bottom:10px">
+      <button onclick="khoFeedSheetGoDate(-1)">‹</button>
+      <div class="wk-label">${feedDateLabel(_khoFeedSheetDate)}</div>
+      <button onclick="khoFeedSheetGoDate(1)" ${laHomNay?'disabled style="opacity:.3"':''}>›</button>
+    </div>`
+    + (laHomNay ? '' : `<button class="btn outline sm" style="width:auto;padding:0 12px;margin-bottom:10px" onclick="khoFeedSheetGoToday()">Về hôm nay</button>`);
+  if(_khoFeedSheetLoading) return dieuHuong + `<div class="muted">Đang tải...</div>`;
+  if(!soLuot) return dieuHuong + `<div class="empty-hint">Không có hoạt động nào ${feedDateLabel(_khoFeedSheetDate).toLowerCase()}.</div>`;
+  return dieuHuong + `
+    <div class="small-note" style="margin-bottom:6px">${soLuot} lượt</div>
+    ${list.map(e=>{
+      const la = e.loai==='mo';
+      const mau = la ? 'var(--bi)' : 'var(--gd)';
+      const nhan = la ? 'Vừa mở' : 'Báo hết';
+      const phu = la
+        ? `${e.ai ? 'bởi '+escapeHtmlAttr(e.ai) : ''}${e.hsd ? ' · hạn sau mở '+fmtDateVN(new Date(e.hsd)) : ''}`
+        : `${e.ai ? 'bởi '+escapeHtmlAttr(e.ai) : ''}${e.quet ? ' · đã quét mã' : ' · chọn tay'+(e.lyDo?' ('+escapeHtmlAttr(ctnReasonLabel(e.lyDo))+')':'')}${e.thua>0 ? ` · còn thừa ${fmtNum(e.thua,0)} ${escapeHtmlAttr(e.donVi)}` : ''}`;
+      return `<div class="row" style="align-items:flex-start">
+        <span class="rl" style="flex:1;min-width:0">
+          <b style="color:${mau}">${nhan}</b> · ${escapeHtmlAttr(e.ten)}
+          <span class="muted-sm" style="letter-spacing:.4px">${escapeHtmlAttr(e.ma)}</span>
+          ${e.xemLai ? '<span class="tier tier-amber" style="margin-left:4px">còn nhiều — cần xem</span>' : ''}
+          <div class="small-note" style="margin-top:2px">${phu}</div>
+        </span>
+        <span class="rv">${gio(e.at)}</span>
+      </div>`;
+    }).join('')}
+    ${laHomNay ? `<button class="btn outline sm" style="width:auto;padding:0 12px;margin-top:8px" onclick="closeEditSheet();goContainers('open')">Xem hàng đang mở</button>` : ''}`;
 }
 
 // [MỚI] HOẠT ĐỘNG BTP HÔM NAY — tương đương computeKhoFeedForDate()/khoFeedHTML() nhưng cho
@@ -5576,71 +5595,92 @@ async function computePrepFeedForDate(date){
   return ra;
 }
 
-let _prepFeedMo = false;
-let _prepFeedDate = (()=>{ const d = new Date(); d.setHours(0,0,0,0); return d; })();
-let _prepFeedLoading = false;
-function togglePrepFeed(){ _prepFeedMo = !_prepFeedMo; _prepFeedRedraw(); }
+// [SỬA — cùng lý do với Kho ở trên] Thẻ ngoài chỉ tóm tắt số lượt, bấm mở popup mới
+// liệt kê đầy đủ + lật ngày.
 let _prepFeedCache = null;
-function _prepFeedRedraw(){
-  const el = document.getElementById('todayPrepFeed');
-  if(el) el.innerHTML = prepFeedHTML(_prepFeedCache);
-}
-function prepFeedGoDate(delta){
-  const hom = new Date(); hom.setHours(0,0,0,0);
-  const nd = new Date(_prepFeedDate); nd.setDate(nd.getDate()+delta);
-  if(nd > hom) return;
-  _prepFeedDate = nd;
-  _prepFeedLoading = true;
-  _prepFeedRedraw();
-  computePrepFeedForDate(_prepFeedDate)
-    .then(list => { _prepFeedLoading = false; prepFeedHTML(list); _prepFeedRedraw(); })
-    .catch(err => { console.warn('[BTP] không đọc được hoạt động ngày đã chọn:', err); _prepFeedLoading = false; prepFeedHTML([]); _prepFeedRedraw(); });
-}
 function prepFeedHTML(list){
   _prepFeedCache = list;
-  const homNay = (()=>{ const h = new Date(); h.setHours(0,0,0,0); return h; })();
-  const laHomNay = _prepFeedDate.getTime() === homNay.getTime();
   const soLuot = list ? list.length : 0;
-  if(!_prepFeedMo && laHomNay && !soLuot) return '';
-  const gio = iso => { const d = iso?new Date(iso):null; return (d && !isNaN(d)) ? `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}` : ''; };
-  const hien = (list||[]).slice(0, 8);
-  const dauMuc = `<button class="sec-fold" aria-expanded="${_prepFeedMo}" onclick="togglePrepFeed()">
-      <span class="sf-t">Hoạt động BTP${laHomNay?' hôm nay':''}</span>
+  if(!soLuot) return '';
+  return `<button class="sec-fold" onclick="openPrepFeedSheet()">
+      <span class="sf-t">Hoạt động BTP hôm nay</span>
       <span class="sf-c">${soLuot} lượt</span>
-      <span class="sf-ch">${ic('chevronDown',15)}</span>
+      <span class="sf-ch">${ic('chevronRight',15)}</span>
     </button>`;
-  if(!_prepFeedMo) return dauMuc;
-  const dieuHuong = `<div class="weeknav" style="margin:8px 0">
-      <button onclick="prepFeedGoDate(-1)">‹</button>
-      <div class="wk-label">${feedDateLabel(_prepFeedDate)}</div>
-      <button onclick="prepFeedGoDate(1)" ${laHomNay?'disabled style="opacity:.3"':''}>›</button>
-    </div>`;
-  if(_prepFeedLoading) return dauMuc + dieuHuong + `<div class="card"><div class="muted">Đang tải...</div></div>`;
-  const NHAN = { start:['Bắt đầu chế biến','var(--bi)'], finish:['Hoàn thành','var(--ok)'], used:['Bán hết','var(--gd)'], expired:['Hết hạn/bỏ','var(--bad)'], discarded:['Huỷ lô','var(--bad)'], cancelled:['Huỷ mẻ','var(--warn)'] };
-  if(!soLuot) return dauMuc + dieuHuong + `<div class="card"><div class="empty-hint">Không có hoạt động BTP nào ${feedDateLabel(_prepFeedDate).toLowerCase()}.</div></div>`;
-  return dauMuc + dieuHuong + `
-    <div class="card">
-      ${hien.map(e=>{
-        const [nhan, mau] = NHAN[e.loai] || [e.loai, 'var(--gt)'];
-        const b = e.b;
-        const phu = e.loai==='start' ? (b.staff?('bởi '+escapeHtmlAttr(b.staff)):'')
-          : e.loai==='finish' ? `Cân được ${fmtNum(b.qtyInitial,2)} ${escapeHtmlAttr(b.unit||'')}${b.finishedBy?(' · bởi '+escapeHtmlAttr(b.finishedBy)):''}`
-          : e.loai==='discarded' ? (b.discardReason?escapeHtmlAttr(b.discardReason):'')
-          : e.loai==='cancelled' ? [b.cancelReason, b.cancelledBy?('bởi '+b.cancelledBy):''].filter(Boolean).map(escapeHtmlAttr).join(' · ')
-          : e.loai==='expired' ? (b.expiredReason?escapeHtmlAttr(b.expiredReason):'')
-          : '';
-        return `<div class="row" style="align-items:flex-start;cursor:pointer" onclick="ctnShowDetail('${b.id}','prep_batches_gieogieo')">
-          <span class="rl" style="flex:1;min-width:0">
-            <b style="color:${mau}">${nhan}</b> · ${escapeHtmlAttr(b.prepName||b.prepCode||'')}
-            <span class="muted-sm" style="letter-spacing:.4px">${escapeHtmlAttr(b.batchCode||'')}</span>
-            <div class="small-note" style="margin-top:2px">${phu}</div>
-          </span>
-          <span class="rv">${gio(e.at)}</span>
-        </div>`;
-      }).join('')}
-      ${soLuot > hien.length ? `<div class="small-note">…và ${soLuot-hien.length} lượt nữa ${feedDateLabel(_prepFeedDate).toLowerCase()}.</div>` : ''}
-      ${laHomNay ? `<button class="btn outline sm" style="width:auto;padding:0 12px;margin-top:8px" onclick="goKho2('prep')">Xem tất cả BTP</button>` : ''}
-    </div>`;
+}
+
+const PREP_FEED_NHAN = { start:['Bắt đầu chế biến','var(--bi)'], finish:['Hoàn thành','var(--ok)'], used:['Bán hết','var(--gd)'], expired:['Hết hạn/bỏ','var(--bad)'], discarded:['Huỷ lô','var(--bad)'], cancelled:['Huỷ mẻ','var(--warn)'] };
+
+let _prepFeedSheetDate = null;
+let _prepFeedSheetList = null;
+let _prepFeedSheetLoading = false;
+function openPrepFeedSheet(){
+  const homNay = new Date(); homNay.setHours(0,0,0,0);
+  _prepFeedSheetDate = homNay;
+  _prepFeedSheetList = _prepFeedCache || [];
+  _prepFeedSheetLoading = false;
+  openEditSheet('Hoạt động BTP', '<div id="prepFeedSheetBody"></div>', ()=>{});
+  _prepFeedSheetRedraw();
+}
+function _prepFeedSheetRedraw(){
+  const el = document.getElementById('prepFeedSheetBody');
+  if(el) el.innerHTML = prepFeedSheetBodyHTML();
+}
+function prepFeedSheetGoDate(delta){
+  const hom = new Date(); hom.setHours(0,0,0,0);
+  const nd = new Date(_prepFeedSheetDate); nd.setDate(nd.getDate()+delta);
+  if(nd > hom) return;
+  _prepFeedSheetGoTo(nd);
+}
+function prepFeedSheetGoToday(){
+  const hom = new Date(); hom.setHours(0,0,0,0);
+  _prepFeedSheetGoTo(hom);
+}
+function _prepFeedSheetGoTo(date){
+  _prepFeedSheetDate = date;
+  _prepFeedSheetLoading = true;
+  _prepFeedSheetRedraw();
+  computePrepFeedForDate(date)
+    .then(list => { if(_prepFeedSheetDate.getTime()!==date.getTime()) return;
+      _prepFeedSheetLoading = false; _prepFeedSheetList = list; _prepFeedSheetRedraw(); })
+    .catch(err => { console.warn('[BTP] không đọc được hoạt động ngày đã chọn:', err);
+      _prepFeedSheetLoading = false; _prepFeedSheetList = []; _prepFeedSheetRedraw(); });
+}
+function prepFeedSheetBodyHTML(){
+  const homNay = new Date(); homNay.setHours(0,0,0,0);
+  const laHomNay = _prepFeedSheetDate.getTime() === homNay.getTime();
+  const list = _prepFeedSheetList || [];
+  const soLuot = list.length;
+  const gio = iso => { const d = iso?new Date(iso):null; return (d && !isNaN(d)) ? `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}` : ''; };
+  const dieuHuong = `<div class="weeknav" style="margin-bottom:10px">
+      <button onclick="prepFeedSheetGoDate(-1)">‹</button>
+      <div class="wk-label">${feedDateLabel(_prepFeedSheetDate)}</div>
+      <button onclick="prepFeedSheetGoDate(1)" ${laHomNay?'disabled style="opacity:.3"':''}>›</button>
+    </div>`
+    + (laHomNay ? '' : `<button class="btn outline sm" style="width:auto;padding:0 12px;margin-bottom:10px" onclick="prepFeedSheetGoToday()">Về hôm nay</button>`);
+  if(_prepFeedSheetLoading) return dieuHuong + `<div class="muted">Đang tải...</div>`;
+  if(!soLuot) return dieuHuong + `<div class="empty-hint">Không có hoạt động BTP nào ${feedDateLabel(_prepFeedSheetDate).toLowerCase()}.</div>`;
+  return dieuHuong + `
+    <div class="small-note" style="margin-bottom:6px">${soLuot} lượt</div>
+    ${list.map(e=>{
+      const [nhan, mau] = PREP_FEED_NHAN[e.loai] || [e.loai, 'var(--gt)'];
+      const b = e.b;
+      const phu = e.loai==='start' ? (b.staff?('bởi '+escapeHtmlAttr(b.staff)):'')
+        : e.loai==='finish' ? `Cân được ${fmtNum(b.qtyInitial,2)} ${escapeHtmlAttr(b.unit||'')}${b.finishedBy?(' · bởi '+escapeHtmlAttr(b.finishedBy)):''}`
+        : e.loai==='discarded' ? (b.discardReason?escapeHtmlAttr(b.discardReason):'')
+        : e.loai==='cancelled' ? [b.cancelReason, b.cancelledBy?('bởi '+b.cancelledBy):''].filter(Boolean).map(escapeHtmlAttr).join(' · ')
+        : e.loai==='expired' ? (b.expiredReason?escapeHtmlAttr(b.expiredReason):'')
+        : '';
+      return `<div class="row" style="align-items:flex-start;cursor:pointer" onclick="closeEditSheet();ctnShowDetail('${b.id}','prep_batches_gieogieo')">
+        <span class="rl" style="flex:1;min-width:0">
+          <b style="color:${mau}">${nhan}</b> · ${escapeHtmlAttr(b.prepName||b.prepCode||'')}
+          <span class="muted-sm" style="letter-spacing:.4px">${escapeHtmlAttr(b.batchCode||'')}</span>
+          <div class="small-note" style="margin-top:2px">${phu}</div>
+        </span>
+        <span class="rv">${gio(e.at)}</span>
+      </div>`;
+    }).join('')}
+    ${laHomNay ? `<button class="btn outline sm" style="width:auto;padding:0 12px;margin-top:8px" onclick="closeEditSheet();goKho2('prep')">Xem tất cả BTP</button>` : ''}`;
 }
 
 // ============================================================
@@ -11187,7 +11227,11 @@ async function renderToday(){
     // đây là rò rỉ lợi nhuận cần bắt NGAY trong ngày, nên đưa lên đầu "Hôm nay".
     // Cùng ngưỡng cảnh báo đang dùng ở statusStripe (statusLowerBetter, warnPct 0.34)
     // để không có hai chuẩn "vượt target" khác nhau cho cùng một con số.
-    {label:'Hao hụt', val: fmt(kpi.wasteAmount), st: statusLowerBetter(kpi.wastePct*100, t.wasteTargetPct, 0.34), sub:`${fmtPct(kpi.wastePct)} DT · MT ≤${t.wasteTargetPct}%`},
+    // [SỬA — theo phản hồi] Bấm vào mở lại đúng hộp "Hao hụt & huỷ" đang có sẵn ở thẻ
+    // Lãi/lỗ (openWasteDetailSheet, xem gạch từng dòng theo nguyên liệu/BTP/lý do) —
+    // không xây một màn chi tiết riêng thứ hai cho cùng một con số.
+    {label:'Hao hụt', val: fmt(kpi.wasteAmount), st: statusLowerBetter(kpi.wastePct*100, t.wasteTargetPct, 0.34), sub:`${fmtPct(kpi.wastePct)} DT · MT ≤${t.wasteTargetPct}%`,
+      onclick: plHomNay.haoHut > 0 ? `openWasteDetailSheet('${plHomNay.date}')` : ''},
     {label:'Số bill', val: kpi.bills, st: statusHigherBetter(kpi.bills, t.billsPerDay, 0.1), sub:`MT ${t.billsPerDay}`},
     {label:'AOV', val: fmtGon(kpi.aov), st: statusAOV(kpi.aov, t.aov), sub:`MT ${fmtGon(t.aov)}`},
     {label:'IPT', val: fmtNum(kpi.ipt,2), st: statusHigherBetter(kpi.ipt, t.ipt, 0.08), sub:`MT ${fmtNum(t.ipt,2)} món/bill`},
@@ -11207,7 +11251,7 @@ async function renderToday(){
   // Hai ô cuối (doanh thu/giờ công và vốn trong kho) cần thêm một lượt đọc dữ liệu
   // nên để chỗ trống có nhãn sẵn, điền sau — giữ đúng khung lưới, không nhảy chỗ.
   document.getElementById('todayMini').innerHTML =
-    miniCards.map(c=>miniCardHTML(c.label, c.val, c.sub, c.st)).join('')
+    miniCards.map(c=>miniCardHTML(c.label, c.val, c.sub, c.st, c.onclick)).join('')
     // display:contents — ô bọc chỉ để thay nội dung sau, không được tự thành một ô
     // của lưới (nếu không thẻ mini sẽ nằm lồng bên trong, lệch hẳn hàng).
     + `<div id="miniSPLH" style="display:contents">${miniCardHTML('DT / giờ công', '…', 'Đang đọc chấm công')}</div>`
@@ -11256,7 +11300,7 @@ async function renderToday(){
 
   // HOẠT ĐỘNG KHO HÔM NAY — nạp nền. Không có lượt nào thì không hiện gì cả, thay vì
   // để lại một thẻ rỗng chiếm chỗ.
-  computeKhoFeedForDate(_khoFeedDate)
+  computeKhoFeedForDate(today)
     .then(list => {
       const el = document.getElementById('todayKhoFeed');
       if(el && curScreen === 'today') el.innerHTML = khoFeedHTML(list);
@@ -11266,7 +11310,7 @@ async function renderToday(){
   // HOẠT ĐỘNG BTP HÔM NAY — cùng lý do với feed kho nguyên liệu ở trên, nhưng cho lô bán
   // thành phẩm: bắt đầu nấu, hoàn thành, bán hết, huỷ — những mốc trước đây không có nơi
   // nào hiện ngoài phải mở từng lô trong Kho 2.0 ▸ Bán thành phẩm mới thấy.
-  computePrepFeedForDate(_prepFeedDate)
+  computePrepFeedForDate(today)
     .then(list => {
       const el = document.getElementById('todayPrepFeed');
       if(el && curScreen === 'today') el.innerHTML = prepFeedHTML(list);
@@ -12399,9 +12443,12 @@ async function qlDoDeleteBill(id){
 }
 
 // Thẻ chỉ số MINI — dùng ở màn Hôm nay. st là object trạng thái của statusXxx().
-function miniCardHTML(label, val, sub, st){
+function miniCardHTML(label, val, sub, st, onclick){
   const lop = !st ? '' : (st.level === 'red' ? ' st-bad' : st.level === 'amber' ? ' st-warn' : st.level === 'green' ? ' st-ok' : '');
-  return `<div class="kmini${lop}">
+  // `onclick` tuỳ chọn — dùng cho thẻ mini nào có sẵn màn chi tiết để mở thẳng
+  // (ví dụ "Hao hụt" mở lại đúng hộp "Hao hụt & huỷ" đang có ở thẻ Lãi/lỗ), thay vì
+  // phải cuộn xuống tìm dòng tương ứng ở thẻ khác.
+  return `<div class="kmini${lop}"${onclick?` onclick="${onclick}" style="cursor:pointer"`:''}>
       <div class="kmlabel">${label}</div>
       <div class="kmval">${val}</div>
       ${sub ? `<div class="kmsub">${sub}</div>` : ''}
