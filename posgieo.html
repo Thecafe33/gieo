@@ -16542,30 +16542,6 @@ async function _submitPrepCountImpl() {
   for (const l of _prepCountState) {
     const counted = Number(l.counted) || 0;
     const variance = counted - l.sysQty;   // âm = hụt so với hệ thống
-    // [NEW] Gửi CẢNH BÁO cho Quản lý khi lệch vượt ngưỡng.
-    //
-    // Trước đây chênh lệch chỉ được ghi âm thầm vào ledger (type WASTE) và trường
-    // varianceQty — không có cảnh báo nào nổi lên, nên Quản lý KHÔNG BAO GIỜ biết
-    // nhân viên vừa ghi đè tồn kho bằng một con số sai. Đây là lỗ hổng nghiêm trọng
-    // vì màn này ghi đè THẲNG currentStock, khác kiểm kê thường (có luồng duyệt).
-    // Bỏ qua khi "Bỏ hết" — đó là hành động CÓ CHỦ ĐÍCH đã ghi rõ lý do, không phải
-    // nghi vấn đếm sai; và bỏ qua khi hệ thống vốn đã 0 (không có gì để so).
-    if (!l.discardAll && l.sysQty > 0 && handoverIsOverThreshold(variance, l.sysQty)) {
-      const variancePct = Math.round((variance / l.sysQty) * 1000) / 10;
-      jobs.push(fstore.collection('alerts_gieogieo').add({
-        type: 'prep_count_variance',
-        // Hụt (âm) nguy hiểm hơn dư: có thể là thất thoát thật hoặc gõ nhầm làm mất
-        // hàng khỏi sổ sách. Dư thì thường chỉ là đếm/nhập sai.
-        severity: variance < 0 ? 'danger' : 'warning',
-        businessDate: shiftState.businessDate, createdAt: now,
-        title: `Lệch đếm bán thành phẩm — ${l.prepName || ''}`,
-        prepId: l.prepId, itemName: l.prepName || '', unit: l.unit || '',
-        systemQty: l.sysQty, countedQty: counted, varianceQty: variance, variancePct,
-        staff: staffEmp.fullName, staffEmployeeId: staffEmp.id,
-        status: 'new'
-      }));
-    }
-
     // Đóng/điều chỉnh từng lô. Lô 'cooking' KHÔNG đụng tới — nó chưa thành hàng,
     // để nguyên cho nhân viên hoàn thành, tránh mất dấu mẻ đang nấu dở.
     //
@@ -16584,6 +16560,12 @@ async function _submitPrepCountImpl() {
     let discardedQty = 0;
     let discardReason = '';
     let conLaiThucTe = 0;   // tổng qtyRemaining của các lô SAU thao tác này
+    // [MỚI] Đúng những lô BỊ ĐÁNH DẤU HẾT trong lượt này (used_up/expired) — gắn vào cảnh
+    // báo lệch đếm bên dưới, để Quản lý biết ĐÍCH DANH lô nào chứ không phải chỉ tên
+    // nguyên liệu. Trước đây alert không lưu batchId nào — muốn điều chỉnh lại phải đoán
+    // qua mốc thời gian trùng khớp (usedUpAt/expiredAt == alert.createdAt), dễ sai nếu
+    // trùng giây với một lượt khác. Giờ ghi thẳng, khỏi phải đoán.
+    const affectedBatches = [];
     const activeBatches = l.activeBatches;
     // [BUG "Kiểm kê BTP cuối ca bypass unitBase/RT" — FIX] Trước đây chỉ ghi qtyRemaining/status
     // trên Firestore, không đụng unitBase (bản sao) lẫn RT (nguồn thật phần đang mở) — kiểm kê
@@ -16600,6 +16582,7 @@ async function _submitPrepCountImpl() {
           qtyRemaining: 0, unitBase: 0, status: 'expired', expiredAt: now,
           expiredReason: l.discardAll ? 'Nhân viên bỏ hết cuối ngày' : 'Quá hạn sử dụng'
         }));
+        affectedBatches.push({ id: b.id, code: b.batchCode || '', qtyBefore: round2(Math.max(0, Number(b.qtyRemaining) || 0)) });
         // [BUG "kiểm kê BTP: RT lỗi vẫn để Firestore đi trước" — FIX] Thử lại vài lần (mạng
         // chập chờn qua khỏi) trước khi chấp nhận là lỗi thật — RT sai sau kiểm kê là một quả
         // bom hẹn giờ: BẤT KỲ recompute nào sau đó (kể cả từ một nghiệp vụ hoàn toàn khác của
@@ -16620,6 +16603,7 @@ async function _submitPrepCountImpl() {
         ...(wLo.length ? { countWeighMethod: 'vessel', countWeighings: wLo, countWeighedAt: now } : {}),
         ...(take <= 0 ? { status: 'used_up', usedUpAt: now } : {})
       }));
+      if (take <= 0) affectedBatches.push({ id: b.id, code: b.batchCode || '', qtyBefore: round2(Math.max(0, Number(b.qtyRemaining) || 0)) });
       // Đếm cuối ca là số THẬT vừa xác nhận — ghi ĐÈ thẳng vào RT (không phải cộng/trừ delta),
       // tạo node nếu vì lý do gì đó chưa từng có (vd onOpen lúc nấu mẻ từng lỗi). Thử lại vài
       // lần trước khi chấp nhận lỗi — cùng lý do ở trên.
@@ -16641,6 +16625,35 @@ async function _submitPrepCountImpl() {
     // đỡ, sáng hôm sau hệ thống tưởng còn hàng và tính sai lượng cần nấu.
     const tonSauDem = conLaiThucTe;
     const lechVoiSoDem = round2(counted - tonSauDem);
+
+    // [NEW] Gửi CẢNH BÁO cho Quản lý khi lệch vượt ngưỡng.
+    //
+    // Trước đây chênh lệch chỉ được ghi âm thầm vào ledger (type WASTE) và trường
+    // varianceQty — không có cảnh báo nào nổi lên, nên Quản lý KHÔNG BAO GIỜ biết
+    // nhân viên vừa ghi đè tồn kho bằng một con số sai. Đây là lỗ hổng nghiêm trọng
+    // vì màn này ghi đè THẲNG currentStock, khác kiểm kê thường (có luồng duyệt).
+    // Bỏ qua khi "Bỏ hết" — đó là hành động CÓ CHỦ ĐÍCH đã ghi rõ lý do, không phải
+    // nghi vấn đếm sai; và bỏ qua khi hệ thống vốn đã 0 (không có gì để so).
+    // [SỬA] Chuyển xuống đây (sau vòng lặp lô) để đính kèm được affectedBatches —
+    // trước đây tạo TRƯỚC vòng lặp nên alert không biết lô nào vừa bị đánh dấu hết.
+    if (!l.discardAll && l.sysQty > 0 && handoverIsOverThreshold(variance, l.sysQty)) {
+      const variancePct = Math.round((variance / l.sysQty) * 1000) / 10;
+      jobs.push(fstore.collection('alerts_gieogieo').add({
+        type: 'prep_count_variance',
+        // Hụt (âm) nguy hiểm hơn dư: có thể là thất thoát thật hoặc gõ nhầm làm mất
+        // hàng khỏi sổ sách. Dư thì thường chỉ là đếm/nhập sai.
+        severity: variance < 0 ? 'danger' : 'warning',
+        businessDate: shiftState.businessDate, createdAt: now,
+        title: `Lệch đếm bán thành phẩm — ${l.prepName || ''}`,
+        prepId: l.prepId, itemName: l.prepName || '', unit: l.unit || '',
+        systemQty: l.sysQty, countedQty: counted, varianceQty: variance, variancePct,
+        staff: staffEmp.fullName, staffEmployeeId: staffEmp.id,
+        // [MỚI] Đích danh lô nào vừa bị đánh dấu hết trong lượt này (rỗng nếu không có
+        // lô nào bị đóng — vd cả dòng chỉ giảm qtyRemaining chứ chưa về 0).
+        affectedBatches,
+        status: 'new'
+      }));
+    }
 
     lines.push({
       prepId: l.prepId, prepName: l.prepName, unit: l.unit,

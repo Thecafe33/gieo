@@ -543,7 +543,19 @@ html.tab-ui .kmini .kmval{font-size:21px;}
 }
 .alert-card .ac-title{font-size:15px;font-weight:700;color:var(--bad);margin-bottom:8px;}
 .alert-card .ac-row{font-size:14px;color:var(--td);padding:3px 0;}
-.alert-card .ac-infer{font-size:13.5px;color:var(--gm);background:var(--gl);border-radius:var(--r-xs);padding:9px 11px;margin:9px 0;line-height:1.55;}
+/* [SỬA] ac-infer trước là <div> luôn xổ hết chữ — vài dòng giải thích đã đủ dài để
+   che khuất mất mấy dòng ac-row phía trên, đọc lướt cả màn Hộp thư cảnh báo rất mỏi.
+   Đổi sang <details>/<summary>: gập lại mặc định, cần đọc mới bấm mở — vẫn cùng một
+   nội dung, không mất thông tin nào. */
+.alert-card details.ac-infer{margin:9px 0;}
+.alert-card details.ac-infer summary{
+  font-size:12.5px;font-weight:700;color:var(--gt);cursor:pointer;list-style:none;
+  padding:4px 2px;user-select:none;display:flex;align-items:center;gap:4px;
+}
+.alert-card details.ac-infer summary::-webkit-details-marker{display:none;}
+.alert-card details.ac-infer summary::after{content:'▸';font-weight:400;}
+.alert-card details.ac-infer[open] summary::after{content:'▾';}
+.alert-card .ac-infer-body{font-size:13.5px;color:var(--gm);background:var(--gl);border-radius:var(--r-xs);padding:9px 11px;margin-top:4px;line-height:1.55;}
 .alert-card .ac-actions{display:flex;gap:9px;margin-top:11px;flex-wrap:wrap;}
 .alert-card .ac-actions button{
   flex:1;min-width:120px;min-height:46px;border-radius:var(--r-xs);
@@ -11091,14 +11103,23 @@ async function openPrepVarianceAdjustSheet(alertId){
     const aDoc = await fstore.collection('alerts_gieogieo').doc(alertId).get();
     if(!aDoc.exists){ box.innerHTML = '<div class="muted">Không tìm thấy cảnh báo này (có thể đã bị xoá).</div>'; return; }
     const a = {id:aDoc.id, ...aDoc.data()};
-    if(!a.prepId || !a.createdAt){ box.innerHTML = '<div class="muted">Cảnh báo này thiếu dữ liệu để đối chiếu lô.</div>'; return; }
-    const [usedUpSnap, expiredSnap] = await Promise.all([
-      fstore.collection('prep_batches_gieogieo').where('prepId','==',a.prepId).where('usedUpAt','==',a.createdAt).get(),
-      fstore.collection('prep_batches_gieogieo').where('prepId','==',a.prepId).where('expiredAt','==',a.createdAt).get()
-    ]);
-    const batches = [];
-    usedUpSnap.forEach(d=>batches.push({id:d.id, ...d.data()}));
-    expiredSnap.forEach(d=>{ if(!batches.some(b=>b.id===d.id)) batches.push({id:d.id, ...d.data()}); });
+    if(!a.prepId){ box.innerHTML = '<div class="muted">Cảnh báo này thiếu dữ liệu để đối chiếu lô.</div>'; return; }
+    let batches = [];
+    if(Array.isArray(a.affectedBatches) && a.affectedBatches.length){
+      // [MỚI] Cảnh báo từ giờ tự ghi thẳng lô nào bị đánh dấu hết — đọc đích danh,
+      // không cần đoán qua mốc thời gian nữa.
+      const docs = await Promise.all(a.affectedBatches.map(ab => fstore.collection('prep_batches_gieogieo').doc(ab.id).get()));
+      docs.forEach(d => { if(d.exists) batches.push({id:d.id, ...d.data()}); });
+    } else if(a.createdAt){
+      // Cảnh báo CŨ, tạo trước khi có affectedBatches — dò lại bằng cách khớp mốc thời
+      // gian (usedUpAt/expiredAt của lô == createdAt của cảnh báo, vì cùng ghi 1 lượt).
+      const [usedUpSnap, expiredSnap] = await Promise.all([
+        fstore.collection('prep_batches_gieogieo').where('prepId','==',a.prepId).where('usedUpAt','==',a.createdAt).get(),
+        fstore.collection('prep_batches_gieogieo').where('prepId','==',a.prepId).where('expiredAt','==',a.createdAt).get()
+      ]);
+      usedUpSnap.forEach(d=>batches.push({id:d.id, ...d.data()}));
+      expiredSnap.forEach(d=>{ if(!batches.some(b=>b.id===d.id)) batches.push({id:d.id, ...d.data()}); });
+    }
     box.innerHTML = prepAdjBodyHTML(a, batches);
   }catch(err){
     console.error('openPrepVarianceAdjustSheet lỗi', err);
@@ -11229,7 +11250,7 @@ async function renderAlertInbox(){
         <div class="ac-title">${a.title || 'Chưa trừ kho được'} ${isNew?'':'<span class="tier tier-green" style="margin-left:4px">Đã xử lý</span>'}</div>
         <div class="ac-row">Ngày: ${a.businessDate || '—'}${a.size?` · size ${escapeHtmlAttr(a.size)}`:''}</div>
         <div class="ac-row" style="color:#c0392b;font-weight:700">Đã bán ${Number(a.hitCount)||1} lượt mà KHÔNG trừ kho</div>
-        <div class="ac-infer">${inferText}</div>
+        <details class="ac-infer"><summary>Vì sao có cảnh báo này?</summary><div class="ac-infer-body">${inferText}</div></details>
         ${isNew ? `<div class="ac-actions">
           <button onclick="${actionGo}">${actionLabel}</button>
           <button onclick="markAlertStatus('${a.id}','resolved')">Đã xử lý</button>
@@ -11245,9 +11266,9 @@ async function renderAlertInbox(){
         <div class="ac-row">Ngày: ${a.businessDate || '—'} · ${escapeHtmlAttr(a.prepCode||'')} ${escapeHtmlAttr(a.prepName||'')}</div>
         <div class="ac-row">Bạn khai <b>${fmtNum(a.declaredYield,1)} ${a.unit||''}</b>/mẻ · nhân viên cân thật <b>${fmtNum(a.actualYield,1)} ${a.unit||''}</b>/mẻ (${a.sampleCount} lô)</div>
         <div class="ac-row" style="color:#c0392b;font-weight:700">Lệch ${a.variancePct>0?'+':''}${fmtNum(a.variancePct,1)}%</div>
-        <div class="ac-infer">${cao
+        <details class="ac-infer"><summary>Vì sao có cảnh báo này?</summary><div class="ac-infer-body">${cao
           ? 'Mẻ ra NHIỀU hơn số khai, nghĩa là giá vốn mỗi đơn vị thật ra RẺ hơn — trước đây COGS bị tính cao hơn thực tế. Hệ thống đã tự chuyển sang tính theo số cân thật.'
-          : 'Mẻ ra ÍT hơn số khai, nghĩa là giá vốn mỗi đơn vị thật ra ĐẮT hơn — trước đây COGS bị tính thấp hơn thực tế. Hệ thống đã tự chuyển sang tính theo số cân thật.'} Vào Kho → Chế biến cấp 1 sửa lại số khai cho khớp, vì số khai vẫn dùng để gợi ý cần nấu mấy mẻ mỗi ngày.</div>
+          : 'Mẻ ra ÍT hơn số khai, nghĩa là giá vốn mỗi đơn vị thật ra ĐẮT hơn — trước đây COGS bị tính thấp hơn thực tế. Hệ thống đã tự chuyển sang tính theo số cân thật.'} Vào Kho → Chế biến cấp 1 sửa lại số khai cho khớp, vì số khai vẫn dùng để gợi ý cần nấu mấy mẻ mỗi ngày.</div></details>
         ${isNew ? `<div class="ac-actions">
           <button onclick="goKho('prep')">Sửa công thức mẻ</button>
           <button onclick="markAlertStatus('${a.id}','resolved')">Đã xử lý</button>
@@ -11267,9 +11288,9 @@ async function renderAlertInbox(){
         <div class="ac-row">Vốn đầu đoạn ${fmt(a.startCash)} · bán ${fmt(a.cashSales)} · chi ${fmt(a.cashExpenses)}</div>
         <div class="ac-row">Phải có <b>${fmt(a.expectedCash)}</b> · đếm được <b>${fmt(a.countedCash)}</b></div>
         <div class="ac-row" style="color:#c0392b;font-weight:700">Chênh lệch: ${vTxt} (dung sai ${fmt(a.tolerance)})</div>
-        <div class="ac-infer">${thieu
+        <details class="ac-infer"><summary>Vì sao có cảnh báo này?</summary><div class="ac-infer-body">${thieu
           ? 'Két thiếu tiền ở đoạn ca này. Hai người đã đếm khớp nhau nên không phải đếm nhầm — nhiều khả năng là quên ghi một khoản chi tiền mặt, thối tiền sai, hoặc bill ghi nhầm sang chuyển khoản. Xem lại chi phí và bill trong khung giờ của đoạn.'
-          : 'Két thừa tiền ở đoạn ca này. Thường do một khoản chi đã ghi trên app nhưng thực tế chưa chi, hoặc bill chuyển khoản bị ghi thành tiền mặt.'}${a.countMode==='joint'?' <b>Lưu ý: hai người đếm chung, không độc lập</b> — số này yếu hơn bình thường.':''}${a.recountForced?' Đã đếm lại một lần theo quy định, số trên là lần đếm sau.':''}</div>
+          : 'Két thừa tiền ở đoạn ca này. Thường do một khoản chi đã ghi trên app nhưng thực tế chưa chi, hoặc bill chuyển khoản bị ghi thành tiền mặt.'}${a.countMode==='joint'?' <b>Lưu ý: hai người đếm chung, không độc lập</b> — số này yếu hơn bình thường.':''}${a.recountForced?' Đã đếm lại một lần theo quy định, số trên là lần đếm sau.':''}</div></details>
         ${isNew ? `<div class="ac-actions">
           <button onclick="cashViewDate='${a.businessDate}'; goEntry('cash')">Xem đoạn ca</button>
           <button onclick="markAlertStatus('${a.id}','resolved')">Đã xử lý</button>
@@ -11287,10 +11308,11 @@ async function renderAlertInbox(){
         <div class="ac-title">${a.title || 'Lệch đếm bán thành phẩm'} ${isNew?'':'<span class="tier tier-green" style="margin-left:4px">Đã xử lý</span>'}</div>
         <div class="ac-row">Ngày: ${a.businessDate || '—'}${a.staff?` · ${escapeHtmlAttr(a.staff)}`:''}</div>
         <div class="ac-row">Hệ thống ghi: <b>${fmtNum(a.systemQty,1)} ${a.unit||''}</b> · Nhân viên đếm: <b>${fmtNum(a.countedQty,1)} ${a.unit||''}</b></div>
+        ${(a.affectedBatches||[]).length ? `<div class="ac-row">Lô bị đánh dấu hết: ${a.affectedBatches.map(b=>`<span class="tier tier-amber" style="margin-right:4px">${escapeHtmlAttr(b.code||b.id)}</span>`).join('')}</div>` : ''}
         <div class="ac-row" style="color:#c0392b;font-weight:700">Chênh lệch: ${varTxt} ${a.unit||''}${a.variancePct!=null?` (${a.variancePct}%)`:''}</div>
-        <div class="ac-infer">Số nhân viên đếm cuối ca đã GHI ĐÈ thẳng tồn kho bán thành phẩm (không qua bước duyệt như kiểm kê thường), nên tồn kho hiện tại đang theo số này. ${hut
+        <details class="ac-infer"><summary>Vì sao có cảnh báo này?</summary><div class="ac-infer-body">Số nhân viên đếm cuối ca đã GHI ĐÈ thẳng tồn kho bán thành phẩm (không qua bước duyệt như kiểm kê thường), nên tồn kho hiện tại đang theo số này. ${hut
           ? 'Hụt so với hệ thống — có thể do thất thoát thật, đổ bỏ mà quên ghi, định mức món khai thiếu (bán ra trừ ít hơn thực dùng), hoặc gõ nhầm đơn vị/dấu phẩy.'
-          : 'Dư so với hệ thống — có thể do nấu thêm mà quên ghi mẻ, định mức khai thừa, hoặc gõ nhầm số.'} Nếu là gõ nhầm, vào Kho → Bán thành phẩm chỉnh lại tồn cho đúng thực tế.</div>
+          : 'Dư so với hệ thống — có thể do nấu thêm mà quên ghi mẻ, định mức khai thừa, hoặc gõ nhầm số.'} Nếu là gõ nhầm, vào Kho → Bán thành phẩm chỉnh lại tồn cho đúng thực tế.</div></details>
         ${isNew ? `<div class="ac-actions">
           <button onclick="markAlertStatus('${a.id}','seen')">Đã xem</button>
           ${hut ? `<button onclick="openPrepVarianceAdjustSheet('${a.id}')">Điều chỉnh</button>` : ''}
@@ -11304,7 +11326,7 @@ async function renderAlertInbox(){
       <div class="ac-row">Ca tối ghi: <b>${fmtNum(a.closeQty,1)} ${a.unit||''}</b> ${a.closeStaff?`(${escapeHtmlAttr(a.closeStaff)})`:''}</div>
       <div class="ac-row">Ca sáng đếm lần 1: <b>${fmtNum(a.openQty1,1)}</b> · lần 2: <b>${fmtNum(a.openQty2,1)}</b> ${a.openStaff?`(${escapeHtmlAttr(a.openStaff)})`:''}</div>
       <div class="ac-row" style="color:#c0392b;font-weight:700">Chênh lệch: ${varTxt} ${a.unit||''}${a.variancePct!=null?` (${a.variancePct}%)`:''}</div>
-      <div class="ac-infer">${alertInferenceText(a)}</div>
+      <details class="ac-infer"><summary>Vì sao có cảnh báo này?</summary><div class="ac-infer-body">${alertInferenceText(a)}</div></details>
       ${isNew ? `<div class="ac-actions">
         <button onclick="markAlertStatus('${a.id}','seen')">Đã xem</button>
         <button onclick="markAlertStatus('${a.id}','resolved')">Đã xử lý</button>
