@@ -5773,11 +5773,19 @@ function prepFeedSheetBodyHTML(){
         : e.loai==='cancelled' ? [b.cancelReason, b.cancelledBy?('bởi '+b.cancelledBy):''].filter(Boolean).map(escapeHtmlAttr).join(' · ')
         : e.loai==='expired' ? (b.expiredReason?escapeHtmlAttr(b.expiredReason):'')
         : '';
+      // [MỚI] "Bán hết"/"Hết hạn/bỏ" là 2 trạng thái có thể bị báo NHẦM (nhân viên báo hết
+      // dù thực tế còn) — thêm thẳng nút Điều chỉnh ngay tại dòng, khỏi phải qua cảnh báo
+      // (cảnh báo chỉ sinh khi lệch VƯỢT NGƯỠNG, không phải lô nào báo hết cũng có). Bấm
+      // đúng dòng đang nhìn thấy mã lô nên không lo lẫn sang lô khác báo cùng lúc.
+      const dieuChinhBtn = (e.loai==='used' || e.loai==='expired')
+        ? `<button class="btn outline sm" style="width:auto;padding:0 10px;min-height:30px;margin-top:6px" onclick="event.stopPropagation();openBatchAdjustSheet('${b.id}')">Điều chỉnh</button>`
+        : '';
       return `<div class="row" style="align-items:flex-start;cursor:pointer" onclick="closeEditSheet();ctnShowDetail('${b.id}','prep_batches_gieogieo')">
         <span class="rl" style="flex:1;min-width:0">
           <b style="color:${mau}">${nhan}</b> · ${escapeHtmlAttr(b.prepName||b.prepCode||'')}
           <span class="muted-sm" style="letter-spacing:.4px">${escapeHtmlAttr(b.batchCode||'')}</span>
           <div class="small-note" style="margin-top:2px">${phu}</div>
+          ${dieuChinhBtn}
         </span>
         <span class="rv">${gio(e.at)}</span>
       </div>`;
@@ -11159,98 +11167,179 @@ function prepAdjBodyHTML(a, batches){
         <div class="field" style="margin-top:8px"><label>Số lượng thực tế còn lại (${escapeHtmlAttr(b.unit||'')})</label>
           <input type="number" step="0.01" min="0" id="prepAdjQty_${b.id}" placeholder="VD: ${fmtNum(a.systemQty,2)}">
         </div>
-        <button class="btn sm" style="width:auto;padding:0 16px;margin-top:8px" onclick="submitPrepVarianceAdjust('${a.id}','${b.id}',${batches.length===1})">Lưu điều chỉnh</button>
+        <button class="btn sm" style="width:auto;padding:0 16px;margin-top:8px" onclick="submitPrepVarianceAdjust('${a.id}','${b.id}')">Lưu điều chỉnh</button>
       </div>`).join('')}
     `}
   `;
 }
-async function submitPrepVarianceAdjust(alertId, batchId, isOnlyBatch){
+// [SỬA] Lõi khôi phục lô — tách ra dùng chung cho CẢ HAI lối vào:
+//   1. Từ cảnh báo "Lệch đếm bán thành phẩm" (submitPrepVarianceAdjust)
+//   2. Từ ngay dòng "Bán hết"/"Hết hạn/bỏ" trong popup "Hoạt động BTP" ở màn
+//      Hôm nay (submitBatchAdjustDirect) — thêm theo yêu cầu: cảnh báo vừa mới
+//      có mã lô gần đây, còn lô cũ hơn (hoặc đang xem trực tiếp trong feed)
+//      vẫn cần sửa được mà không phải đoán qua cảnh báo nào.
+// Cả hai lối vào đều chỉ cần TRUYỀN ĐÚNG batchId — không còn phải đoán "lô nào
+// bị hết cùng lúc" từ bên ngoài: hàm này tự tra bằng CHÍNH mốc usedUpAt/expiredAt
+// của lô đang sửa (đọc TRƯỚC khi xoá 2 trường đó), nên đúng bằng cách cảnh báo
+// vẫn dùng, chỉ khác nguồn gốc mốc thời gian.
+async function prepBatchRestoreCore(batchId, qty){
+  const batchRef = fstore.collection('prep_batches_gieogieo').doc(batchId);
+  const batchDoc = await batchRef.get();
+  if(!batchDoc.exists) throw new Error('Lô không còn tồn tại');
+  const b = batchDoc.data();
+  const markedAt = b.usedUpAt || b.expiredAt || null;
+
+  // Có lô nào KHÁC của cùng nguyên liệu cũng bị đánh dấu hết đúng cùng khoảnh khắc
+  // này không — quyết định có đảo được dòng hao hụt hay không (đọc TRƯỚC khi sửa,
+  // vì sau khi sửa chính lô này sẽ không còn usedUpAt/expiredAt để tự khớp mình nữa).
+  let siblingCount = 0;
+  if(markedAt){
+    const [usedUpSnap, expiredSnap] = await Promise.all([
+      fstore.collection('prep_batches_gieogieo').where('prepId','==',b.prepId).where('usedUpAt','==',markedAt).get(),
+      fstore.collection('prep_batches_gieogieo').where('prepId','==',b.prepId).where('expiredAt','==',markedAt).get()
+    ]);
+    const ids = new Set();
+    usedUpSnap.forEach(d=>{ if(d.id!==batchId) ids.add(d.id); });
+    expiredSnap.forEach(d=>{ if(d.id!==batchId) ids.add(d.id); });
+    siblingCount = ids.size;
+  }
+
+  const nowISO = new Date().toISOString();
+  await batchRef.update({
+    qtyRemaining: qty, unitBase: qty, status: 'active',
+    usedUpAt: null, expiredAt: null, expiredReason: null,
+    correctedAt: nowISO, correctedBy: 'management', correctedFromStatus: b.status,
+    correctedNote: 'Điều chỉnh — nhân viên báo hết nhầm, khôi phục theo số Quản lý nhập'
+  });
+
+  // [MỚI] Ghi lại đúng node RTDB của lô này — đây mới là nguồn THẬT mà Unit Engine
+  // bên POS dùng để biết "bán/nấu tiếp thì lấy từ lô nào" theo thời gian thực. Node
+  // này đã bị XOÁ lúc lô báo hết (xem posgieo.html: nhánh discard của
+  // _submitPrepCountImpl gọi `.remove()`) — không ghi lại thì lô tuy đúng số ở
+  // Firestore nhưng "vô hình" với FIFO cho tới tận lần kiểm kê cuối ngày kế tiếp mới
+  // tự đồng bộ lại. Dùng ĐÚNG path + schema với _ueActiveUnitsRef() bên POS.
+  let rtOk = false;
+  try{
+    await _ueActiveUnitsRef(b.prepId).child(batchId).set({
+      code: b.batchCode || '', itemName: b.prepName || '', unit: b.unit || '',
+      capacity: Number(b.qtyInitial) || qty, openedAt: Date.now(), unitBase: qty
+    });
+    rtOk = true;
+  }catch(rtErr){
+    console.warn('[Điều chỉnh] ghi RTDB lỗi — Firestore đã đúng số, đánh dấu _ueRtStale để không bị ăn nhầm:', rtErr);
+  }
+  // RT ghi được thì tin RT (mới, khớp Firestore) — RT lỗi thì đánh dấu stale để lần suy
+  // tồn tiếp theo bên POS biết bỏ qua RT (thiếu node) và tin số Firestore vừa sửa.
+  await batchRef.update({ _ueRtStale: !rtOk });
+
+  // Lô này vừa đóng góp lại đúng bằng ấy vào currentStock (trước đó đang đóng góp 0 vì bị
+  // đánh dấu hết) — cộng thẳng vào Firestore, KHÔNG suy lại toàn bộ từ RTDB (app này
+  // không chạy engine recompute đầy đủ như POS, chỉ ghi đúng 1 node vừa sửa ở trên).
+  const prepRef = fstore.collection('prep_items_gieogieo').doc(b.prepId);
+  await fstore.runTransaction(async t=>{
+    const doc = await t.get(prepRef);
+    if(!doc.exists) return;
+    const cur = Number(doc.data().currentStock)||0;
+    t.update(prepRef, { currentStock: Math.round((cur+qty)*100)/100, updatedAt: nowISO });
+  });
+
+  // Chỉ đảo lại đúng dòng hao hụt của lượt đếm gốc khi ĐÂY LÀ LÔ DUY NHẤT bị đánh dấu hết
+  // đúng khoảnh khắc đó — có từ 2 lô trở lên thì không tách được phần nào của dòng waste
+  // (ghi gộp theo nguyên liệu) thuộc đúng lô đang sửa, nên bỏ qua thay vì đoán.
+  let daoHaoHut = 0;
+  if(markedAt && siblingCount===0){
+    const businessDate = dkey(new Date(markedAt));
+    const txSnap = await fstore.collection('prep_transactions_gieogieo')
+      .where('prepId','==',b.prepId).where('businessDate','==',businessDate).where('type','==','WASTE').get();
+    const dong = txSnap.docs.filter(d => d.data().createdAt===markedAt && d.data().fromPrepCount && !d.data().reclassifiedFrom);
+    if(dong.length){
+      const wbatch = fstore.batch();
+      dong.forEach(d => { daoHaoHut += Math.abs(Number(d.data().qty)||0); wbatch.update(d.ref, {
+        type: 'ADJUSTMENT',
+        reclassifiedFrom: 'WASTE', reclassifiedAt: nowISO, reclassifiedBy: 'management',
+        reclassifyReason: 'Báo hết nhầm — lô thực tế vẫn còn, đã điều chỉnh lại đúng tồn',
+        note: 'ĐIỀU CHỈNH (đảo từ hao hụt ghi nhầm do báo hết sai) · ' + (d.data().note||'')
+      }); });
+      await wbatch.commit();
+    }
+  }
+
+  return { b, qty, rtOk, daoHaoHut };
+}
+function _prepAdjustToast(rtOk, qty, unit, daoHaoHut){
+  return rtOk
+    ? '✅ Đã điều chỉnh lô — tồn kho đã cộng lại '+fmtNum(qty,2)+' '+(unit||'')+(daoHaoHut?', đã đảo lại hao hụt ghi nhầm':'')+', lô đã đồng bộ lại real-time'
+    : '⚠️ Đã điều chỉnh lô nhưng đồng bộ real-time lỗi — số liệu vẫn đúng, tự sửa lại ở lần kiểm kê cuối ngày tới';
+}
+async function submitPrepVarianceAdjust(alertId, batchId){
   const input = document.getElementById('prepAdjQty_'+batchId);
   const qty = Number(input && input.value);
   if(!(qty > 0)){ toast('⚠️ Nhập số lượng thực tế còn lại lớn hơn 0'); return; }
   if(!confirm(`Khôi phục lô này về "Đang dùng" với ${fmtNum(qty,2)} còn lại — tồn kho nguyên liệu sẽ cộng thêm đúng số này. Tiếp tục?`)) return;
   try{
     await ensureAuth();
-    const batchRef = fstore.collection('prep_batches_gieogieo').doc(batchId);
-    const batchDoc = await batchRef.get();
-    if(!batchDoc.exists){ toast('⚠️ Lô không còn tồn tại'); return; }
-    const b = batchDoc.data();
-    const nowISO = new Date().toISOString();
-    await batchRef.update({
-      qtyRemaining: qty, unitBase: qty, status: 'active',
-      usedUpAt: null, expiredAt: null, expiredReason: null,
-      correctedAt: nowISO, correctedBy: 'management', correctedFromStatus: b.status,
-      correctedNote: 'Điều chỉnh từ cảnh báo lệch đếm BTP — nhân viên báo hết nhầm, khôi phục theo số Quản lý nhập'
-    });
-
-    // [MỚI] Ghi lại đúng node RTDB của lô này — đây mới là nguồn THẬT mà Unit Engine
-    // bên POS dùng để biết "bán/nấu tiếp thì lấy từ lô nào" theo thời gian thực. Node
-    // này đã bị XOÁ lúc lô báo hết (xem posgieo.html: nhánh discard của
-    // _submitPrepCountImpl gọi `.remove()`) — không ghi lại thì lô tuy đúng số ở
-    // Firestore nhưng "vô hình" với FIFO cho tới tận lần kiểm kê cuối ngày kế tiếp mới
-    // tự đồng bộ lại. Dùng ĐÚNG path + schema với _ueActiveUnitsRef() bên POS.
-    let rtOk = false;
-    try{
-      await _ueActiveUnitsRef(b.prepId).child(batchId).set({
-        code: b.batchCode || '', itemName: b.prepName || '', unit: b.unit || '',
-        capacity: Number(b.qtyInitial) || qty, openedAt: Date.now(), unitBase: qty
-      });
-      rtOk = true;
-    }catch(rtErr){
-      console.warn('[Điều chỉnh] ghi RTDB lỗi — Firestore đã đúng số, đánh dấu _ueRtStale để không bị ăn nhầm:', rtErr);
-    }
-    // RT ghi được thì tin RT (mới, khớp Firestore) — RT lỗi thì đánh dấu stale để lần suy
-    // tồn tiếp theo bên POS biết bỏ qua RT (thiếu node) và tin số Firestore vừa sửa.
-    await batchRef.update({ _ueRtStale: !rtOk });
-
-    // Lô này vừa đóng góp lại đúng bằng ấy vào currentStock (trước đó đang đóng góp 0 vì bị
-    // đánh dấu hết) — cộng thẳng vào Firestore, KHÔNG suy lại toàn bộ từ RTDB (app này
-    // không chạy engine recompute đầy đủ như POS, chỉ ghi đúng 1 node vừa sửa ở trên).
-    const prepRef = fstore.collection('prep_items_gieogieo').doc(b.prepId);
-    await fstore.runTransaction(async t=>{
-      const doc = await t.get(prepRef);
-      if(!doc.exists) return;
-      const cur = Number(doc.data().currentStock)||0;
-      t.update(prepRef, { currentStock: Math.round((cur+qty)*100)/100, updatedAt: nowISO });
-    });
-
-    // Chỉ đảo lại đúng dòng hao hụt của lượt đếm gốc khi ĐÂY LÀ LÔ DUY NHẤT bị đánh dấu hết
-    // trong lượt đó — có từ 2 lô trở lên thì không tách được phần nào của dòng waste (ghi
-    // gộp theo nguyên liệu) thuộc đúng lô đang sửa, nên bỏ qua thay vì đoán.
-    let daoHaoHut = 0;
-    if(isOnlyBatch){
-      const aDoc = await fstore.collection('alerts_gieogieo').doc(alertId).get();
-      const a = aDoc.exists ? aDoc.data() : null;
-      if(a && a.businessDate){
-        const txSnap = await fstore.collection('prep_transactions_gieogieo')
-          .where('prepId','==',a.prepId).where('businessDate','==',a.businessDate).where('type','==','WASTE').get();
-        const dong = txSnap.docs.filter(d => d.data().createdAt===a.createdAt && d.data().fromPrepCount && !d.data().reclassifiedFrom);
-        if(dong.length){
-          const wbatch = fstore.batch();
-          dong.forEach(d => { daoHaoHut += Math.abs(Number(d.data().qty)||0); wbatch.update(d.ref, {
-            type: 'ADJUSTMENT',
-            reclassifiedFrom: 'WASTE', reclassifiedAt: nowISO, reclassifiedBy: 'management',
-            reclassifyReason: 'Báo hết nhầm — lô thực tế vẫn còn, đã điều chỉnh lại đúng tồn',
-            note: 'ĐIỀU CHỈNH (đảo từ hao hụt ghi nhầm do báo hết sai) · ' + (d.data().note||'')
-          }); });
-          await wbatch.commit();
-        }
-      }
-    }
-
+    const { b, rtOk, daoHaoHut } = await prepBatchRestoreCore(batchId, qty);
     await fstore.collection('alerts_gieogieo').doc(alertId).update({
-      status: 'resolved', resolvedAt: nowISO,
+      status: 'resolved', resolvedAt: new Date().toISOString(),
       resolutionNote: `Đã khôi phục lô ${b.batchCode||batchId} về ${fmtNum(qty,2)} ${b.unit||''}`
         + (daoHaoHut ? ` · đã đảo ${fmtNum(daoHaoHut,2)} ${b.unit||''} hao hụt ghi nhầm về điều chỉnh` : '')
     });
-    logAudit('adjust','prep_batch',batchId,{ tuHetNham:true, qtyKhoiPhuc:qty, daoHaoHut, rtOk });
-    toast(rtOk
-      ? '✅ Đã điều chỉnh lô — tồn kho đã cộng lại '+fmtNum(qty,2)+' '+(b.unit||'')+', lô đã đồng bộ lại real-time'
-      : '⚠️ Đã điều chỉnh lô nhưng đồng bộ real-time lỗi — số liệu vẫn đúng, tự sửa lại ở lần kiểm kê cuối ngày tới');
+    logAudit('adjust','prep_batch',batchId,{ tuHetNham:true, qtyKhoiPhuc:qty, daoHaoHut, rtOk, nguon:'canh_bao' });
+    toast(_prepAdjustToast(rtOk, qty, b.unit, daoHaoHut));
     closeEditSheet();
     renderAlertInbox();
   }catch(err){
     console.error('submitPrepVarianceAdjust lỗi', err);
+    showError('Không điều chỉnh được: '+(err.code||err.message||err));
+  }
+}
+
+// [MỚI] Lối vào THỨ HAI — điều chỉnh thẳng từ dòng "Bán hết"/"Hết hạn/bỏ" trong popup
+// "Hoạt động BTP" ở màn Hôm nay. Lý do cần thêm: cảnh báo lệch đếm chỉ sinh ra khi số
+// lệch VƯỢT NGƯỠNG (xem handoverIsOverThreshold ở posgieo.html) — lô báo hết nhầm với
+// mức lệch nhỏ, hoặc lô hết hạn bình thường mà chủ quán muốn cứu lại, sẽ KHÔNG có cảnh
+// báo nào để bấm "Điều chỉnh" từ đó. Ở đây người dùng đang nhìn thẳng vào đúng mã lô nên
+// khỏi cần đoán — bấm là chắc chắn đúng lô, không lẫn với lô nào khác báo cùng lúc.
+async function openBatchAdjustSheet(batchId){
+  openEditSheet('Điều chỉnh lô báo hết nhầm', '<div id="batchAdjBody"></div>', ()=>{});
+  const box = document.getElementById('batchAdjBody');
+  showLoading(box);
+  try{
+    await ensureAuth();
+    const doc = await fstore.collection('prep_batches_gieogieo').doc(batchId).get();
+    if(!doc.exists){ box.innerHTML = '<div class="muted">Không tìm thấy lô này (có thể đã bị xoá).</div>'; return; }
+    box.innerHTML = batchAdjBodyHTML({id:doc.id, ...doc.data()});
+  }catch(err){
+    console.error('openBatchAdjustSheet lỗi', err);
+    box.innerHTML = '<div class="muted">Không tải được: '+(err.code||err.message||err)+'</div>';
+  }
+}
+function batchAdjBodyHTML(b){
+  const dt = iso => { const d = iso?new Date(iso):null; return (d && !isNaN(d)) ? fmtDateVN(d)+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0') : '—'; };
+  return `
+    <div class="row"><span class="rl">Nguyên liệu</span><span class="rv">${escapeHtmlAttr(b.prepName||b.prepCode||'')}</span></div>
+    <div class="row"><span class="rl">Mã lô</span><span class="rv"><b>${escapeHtmlAttr(b.batchCode||'chưa cấp mã')}</b></span></div>
+    <div class="row"><span class="rl">Trạng thái hiện tại</span><span class="rv"><span class="tier tier-red">${PREP_BATCH_STATUS_LABEL[b.status]||b.status}</span></span></div>
+    <div class="small-note" style="margin-top:4px">Cân được ${fmtNum(b.qtyInitial,2)} ${escapeHtmlAttr(b.unit||'')} lúc nấu · bắt đầu ${dt(b.startedAt)}${b.expiredReason?' · lý do: '+escapeHtmlAttr(b.expiredReason):''}</div>
+    <div class="field" style="margin-top:10px"><label>Số lượng thực tế còn lại (${escapeHtmlAttr(b.unit||'')})</label>
+      <input type="number" step="0.01" min="0" id="batchAdjQty_${b.id}" placeholder="VD: ${fmtNum(b.qtyInitial,2)}">
+    </div>
+    <button class="btn sm" style="width:auto;padding:0 16px;margin-top:10px" onclick="submitBatchAdjustDirect('${b.id}')">Lưu điều chỉnh</button>
+  `;
+}
+async function submitBatchAdjustDirect(batchId){
+  const input = document.getElementById('batchAdjQty_'+batchId);
+  const qty = Number(input && input.value);
+  if(!(qty > 0)){ toast('⚠️ Nhập số lượng thực tế còn lại lớn hơn 0'); return; }
+  if(!confirm(`Khôi phục lô này về "Đang dùng" với ${fmtNum(qty,2)} còn lại — tồn kho nguyên liệu sẽ cộng thêm đúng số này. Tiếp tục?`)) return;
+  try{
+    await ensureAuth();
+    const { b, rtOk, daoHaoHut } = await prepBatchRestoreCore(batchId, qty);
+    logAudit('adjust','prep_batch',batchId,{ tuHetNham:true, qtyKhoiPhuc:qty, daoHaoHut, rtOk, nguon:'feed_hom_nay' });
+    toast(_prepAdjustToast(rtOk, qty, b.unit, daoHaoHut));
+    closeEditSheet();
+  }catch(err){
+    console.error('submitBatchAdjustDirect lỗi', err);
     showError('Không điều chỉnh được: '+(err.code||err.message||err));
   }
 }
