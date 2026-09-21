@@ -10318,15 +10318,24 @@ async function openPrepBatchScreen() {
 
 // Nạp lô 'cooking' + 'active'. Không lấy lô đã dùng hết/bỏ — màn này chỉ phục vụ
 // việc đang làm, lịch sử đầy đủ để bên Management xem.
+//
+// [FIX "Bấm chế biến nhưng không hiện ô Đang chế biến"] Lỗi đọc lại danh sách này
+// (permission-denied, mất mạng, index thiếu...) TRƯỚC ĐÂY chỉ console.warn rồi âm
+// thầm coi như "không có lô nào đang nấu" — y hệt giao diện lúc thật sự trống,
+// nhân viên không có cách nào phân biệt "chưa nấu gì" với "vừa trừ kho xong nhưng
+// không đọc lại được để hiện thẻ". Giữ lại lỗi để renderPrepBatchForm() báo rõ.
+let _prepBatchesLoadError = null;
 async function loadPrepBatchesPOS() {
   try {
     const snap = await fstore.collection('prep_batches_gieogieo')
       .where('status', 'in', ['cooking', 'active']).get();
     PREP_BATCHES_CACHE_POS = snap.docs.map(d => ({ id: d.id, ...d.data() }))
       .sort((a, b) => String(a.finishedAt || a.startedAt || '').localeCompare(String(b.finishedAt || b.startedAt || '')));
+    _prepBatchesLoadError = null;
   } catch (err) {
     console.warn('loadPrepBatchesPOS lỗi:', err);
     PREP_BATCHES_CACHE_POS = [];
+    _prepBatchesLoadError = err.code || err.message || 'Lỗi không rõ';
   }
 }
 
@@ -10394,6 +10403,12 @@ function renderPrepBatchForm() {
   const ratioBtn = (label, val) => `<button onclick="prepBatchSetRatio(${val})" style="flex:1;min-width:64px;min-height:44px;padding:11px 6px;border-radius:12px;border:1.5px solid ${Math.abs(r-val)<0.001?'var(--gd)':'#e6e1d2'};background:${Math.abs(r-val)<0.001?'#FDE6EA':'#fff'};color:${Math.abs(r-val)<0.001?'var(--gd)':'#888'};font-family:'Google Sans',sans-serif;font-weight:700;font-size:13.5px;cursor:pointer;">${label}</button>`;
 
   box.innerHTML = `
+    ${_prepBatchesLoadError ? `
+    <div class="wal-section" style="margin:0 0 14px;border:1.5px solid #fca5a5;background:#fee2e2;">
+      <div class="wal-section-title" style="color:#b91c1c;">⚠️ Không tải được danh sách lô đang chế biến</div>
+      <div style="font-size:12px;color:#991b1b;line-height:1.6;">Lỗi: ${escHtmlPos(_prepBatchesLoadError)}<br>Nếu vừa bấm "Bắt đầu chế biến" mà không thấy thẻ hiện ra ở dưới: nguyên liệu <b>có thể đã bị trừ kho rồi</b>, chỉ là màn này không đọc lại được để hiện thẻ. Đừng bấm chế biến lại — thử bấm nút tải lại ở góc trên hoặc thoát vào lại màn này trước.</div>
+      <button onclick="loadPrepBatchesPOS().then(renderPrepBatchForm)" style="width:100%;margin-top:8px;padding:11px;background:#fff;color:#b91c1c;border:1.5px solid #fca5a5;border-radius:12px;font-weight:700;font-size:13px;cursor:pointer;">Tải lại</button>
+    </div>` : ''}
     ${cooking.length ? `
     <div class="wal-section" style="margin:0 0 14px;border:1.5px solid #fcd34d;background:#fffbeb;">
       <div class="wal-section-title" style="color:#92400e;">🔥 Đang chế biến (${cooking.length})</div>
