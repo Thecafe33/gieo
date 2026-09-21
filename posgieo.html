@@ -19105,9 +19105,15 @@ function poReceiveAddFreeLine() {
     items: KHO_ITEMS_CACHE,
     excludeIds: usedIds,
     onPick(it) {
+      // [FIX "nhập 1 lon thành 1g"] Mặc định đơn vị lớn nhất đã khai (Lon/Thùng/Chai...),
+      // không phải đơn vị pha chế (g/ml) — cùng lý do và cùng cách chọn với màn Kiểm kê
+      // (xem openStockCountScreen: "Mặc định chọn đơn vị LỚN NHẤT đã khai"). Nhân viên
+      // nhập hàng thực tế luôn đếm theo kiện (đơn vị pha chế chỉ dùng để TRỪ kho lúc pha),
+      // để mặc định là g/ml thì gõ "1" tưởng là 1 lon lại thành 1g, sai lệch cả nghìn lần.
+      const biggest = getBiggestPackagingUnitPOS(it);
       poReceiveState.lines.push({
         itemId: it.id, name: it.name, unit: it.unit, packagingUnits: it.packagingUnits || [],
-        qtyExpectedBase: null, goodQty: 0, damagedQty: 0, unitFactor: 1, wrongProduct: false, note: ''
+        qtyExpectedBase: null, goodQty: 0, damagedQty: 0, unitFactor: biggest ? biggest.baseQty : 1, wrongProduct: false, note: ''
       });
       renderPoReceiveForm();
     }
@@ -19153,7 +19159,9 @@ function poReceiveLineChangeItem(idx, itemId) {
     return;
   }
   const l = poReceiveState.lines[idx];
-  l.itemId = it.id; l.name = it.name; l.unit = it.unit; l.packagingUnits = it.packagingUnits || []; l.unitFactor = 1;
+  const biggest = getBiggestPackagingUnitPOS(it);
+  l.itemId = it.id; l.name = it.name; l.unit = it.unit; l.packagingUnits = it.packagingUnits || [];
+  l.unitFactor = biggest ? biggest.baseQty : 1; // [FIX] cùng lý do với poReceiveAddFreeLine()
   renderPoReceiveForm();
 }
 // unitFactor/wrongProduct đổi cả hình dạng thẻ (bộ đếm bật/tắt, viền đỏ) nên render lại
