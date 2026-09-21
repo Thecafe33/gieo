@@ -4398,7 +4398,11 @@ function fixRecWizTiepTuc(){
   if(!c) return;
   if(!c.hopLe){ toast('⚠️ Nhập số đúng theo đơn hàng thật'); return; }
   if(Math.abs(c.thua) < 1e-9){ toast('⚠️ Số mới trùng số cũ, không có gì để sửa'); return; }
-  if(c.thua < 0){ toast('⚠️ Màn này chỉ sửa phiếu ghi THỪA. Nhận thiếu thì ghi một phiếu nhận bổ sung để giá vốn vào đúng lô.'); return; }
+  // [SỬA] Chỉ chặn khi dòng này CÓ TEM — màn này không sinh được tem mới, nên nhận thêm cho
+  // món có tem phải qua đúng luồng POS ▸ Nhận hàng (sinh tem đàng hoàng). Món KHÔNG dán tem
+  // (vd bị ghi nhầm đơn vị pha chế thay vì đơn vị đóng gói) thì tăng hay giảm cũng chỉ là sửa
+  // một con số trong sổ — không có tem nào để huỷ/sinh, cho sửa cả hai chiều luôn.
+  if(c.thua < 0 && c.tem.length){ toast('⚠️ Món này có tem — màn này không sinh được tem mới. Nhận thêm thì ghi phiếu nhận bổ sung ở app POS ▸ Kho ▸ Nhận hàng để có tem đúng lô.'); return; }
   if(!String(FIXREC_WIZ.lyDo||'').trim()){ toast('⚠️ Phải ghi lý do — phiếu nhận sẽ lưu lại lý do này'); return; }
   fixRecWizGo(3);
 }
@@ -4479,7 +4483,11 @@ function fixRecWizRenderTomTat(){
   if(!el) return;
   if(!c || !c.hopLe || Math.abs(c.thua) < 1e-9){ el.innerHTML = ''; return; }
   if(c.thua < 0){
-    el.innerHTML = `<div class="small-note" style="color:var(--bad);margin-top:8px">Số mới LỚN HƠN số đang ghi. Màn này chỉ sửa phiếu ghi thừa — nhận thiếu thì ghi một phiếu nhận bổ sung để giá vốn vào đúng lô.</div>`;
+    if(c.tem.length){
+      el.innerHTML = `<div class="small-note" style="color:var(--bad);margin-top:8px">Số mới LỚN HƠN số đang ghi, và món này CÓ TEM. Màn này không sinh được tem mới cho phần nhận thêm — ghi phiếu nhận bổ sung ở app POS ▸ Kho ▸ Nhận hàng để giá vốn vào đúng lô, có tem đầy đủ.</div>`;
+      return;
+    }
+    el.innerHTML = `<div class="small-note" style="margin-top:8px;line-height:1.7">Món này không dán tem — sẽ <b>cộng thêm ${fmtNum(-c.thua,0)} ${escapeHtmlAttr(c.l.unit||'')}</b> vào tồn kho, không có tem nào cần huỷ/sinh.</div>`;
     return;
   }
   el.innerHTML = `<div class="small-note" style="margin-top:8px;line-height:1.7">
@@ -4495,7 +4503,7 @@ function fixRecWizB3(body){
   const hang = (nhan, cu, moi) => `<div class="row"><span class="rl">${nhan}</span><span class="rv">${cu} → <b>${moi}</b></span></div>`;
   const poLine = w.rec.poId ? hang('Đơn đặt hàng — đã nhận', `${fmtNum(c.daGhiBase,0)} ${dvBase}`, `${fmtNum(c.baseDung,0)} ${dvBase}`) : '';
   body.innerHTML = `
-    <div class="small-note" style="margin-bottom:10px">Soát lại lần cuối. Bấm xác nhận là <b>huỷ tem vĩnh viễn</b> và ghi vào sổ kho.</div>
+    <div class="small-note" style="margin-bottom:10px">Soát lại lần cuối. ${c.huy.length ? 'Bấm xác nhận là <b>huỷ tem vĩnh viễn</b> và ghi vào sổ kho.' : 'Bấm xác nhận là ghi vào sổ kho.'}</div>
     <div class="card" style="margin:0 0 12px;padding:14px">
       <div style="font-size:16px;font-weight:700;color:var(--td);margin-bottom:8px">${escapeHtmlAttr(c.l.name||'')}: ${fmtNum(c.daGhi,2)} → ${fmtNum(c.soDung,2)} ${escapeHtmlAttr(c.donVi)}</div>
       ${hang('Tồn kho', `${fmtNum(c.tonHienTai,0)} ${dvBase}`, `${fmtNum(c.tonHienTai-c.thua,0)} ${dvBase}`)}
@@ -4522,7 +4530,10 @@ async function fixRecWizApply(){
   const w = FIXREC_WIZ;
   if(!w || w.dangLuu) return;
   const c = fixRecWizTinh();
-  if(!c || !c.hopLe || !(c.thua > 0)){ toast('⚠️ Dữ liệu không hợp lệ'); return; }
+  // [SỬA] Cho phép cả thua<0 (tăng) khi KHÔNG có tem — cùng điều kiện với
+  // fixRecWizTiepTuc()/fixRecWizRenderTomTat(). Chặn tem>0 phòng trường hợp bấm thẳng
+  // vào Xác nhận qua đường khác (ít khả năng nhưng rẻ để chặn lại lần nữa cho chắc).
+  if(!c || !c.hopLe || Math.abs(c.thua) < 1e-9 || (c.thua < 0 && c.tem.length)){ toast('⚠️ Dữ liệu không hợp lệ'); return; }
   const lyDoNguoiDung = String(w.lyDo||'').trim();
   if(!lyDoNguoiDung){ toast('⚠️ Phải ghi lý do'); fixRecWizGo(2); return; }
   w.dangLuu = true;
@@ -4534,7 +4545,7 @@ async function fixRecWizApply(){
   try{
     await ensureAuth();
     const nowISO = new Date().toISOString();
-    const lyDo = `Sửa phiếu nhận ghi thừa: ${fmtNum(c.daGhi,2)} → ${fmtNum(c.soDung,2)} ${c.donVi} · ${lyDoNguoiDung}`;
+    const lyDo = `Sửa phiếu nhận ghi ${thua>0?'thừa':'thiếu'}: ${fmtNum(c.daGhi,2)} → ${fmtNum(c.soDung,2)} ${c.donVi} · ${lyDoNguoiDung}`;
 
     // 1) Huỷ tem thừa (hoặc hạ dung tích nếu là tem theo lô).
     if(huy.length){
@@ -4607,7 +4618,9 @@ async function fixRecWizApply(){
     }
 
     logAudit('adjust','receiving_record',recId,{itemId:l.itemId, tu:daGhiBase, den:baseDung, lyDo:lyDoNguoiDung, temHuy:huy.length, soDongLedger:dongLedger.length});
-    toast(`✅ Đã sửa · trừ ${fmtNum(thua,0)} ${l.unit||''} khỏi tồn${huy.length?` · huỷ ${huy.length} tem`:''}`);
+    toast(thua>0
+      ? `✅ Đã sửa · trừ ${fmtNum(thua,0)} ${l.unit||''} khỏi tồn${huy.length?` · huỷ ${huy.length} tem`:''}`
+      : `✅ Đã sửa · cộng thêm ${fmtNum(-thua,0)} ${l.unit||''} vào tồn`);
     closeFixRecWizard();
     renderKhoContainers();
   }catch(err){
