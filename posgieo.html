@@ -14658,6 +14658,103 @@ function renderShiftDashboard() {
 //   · Luôn có nút "Bỏ qua — ghi lý do" + PIN: chặn cứng lúc đông khách gây thiệt
 //     hại thật, nên để lại vết cho Quản lý thay vì khoá tuyệt đối.
 // ============================================================
+// ============================================================
+// [MỚI] Khoá thời gian tối thiểu + nhật ký bắt đầu/hoàn thành cho MỌI mục
+// checklist có đặt minDurationSec (mục tự khai của Quản lý lẫn bước "Kiểm tra
+// Refill" cuối ca) — ghi vào checklist_activity_logs_gieogieo.
+//
+// Vì sao cần: trước đây "Kiểm tra Refill"/checklist tự khai chỉ cần tick/bấm
+// Xong là qua ngay, kể cả khi nhân viên KHÔNG thật sự đi đếm/kiểm tra hàng —
+// đúng lỗ hổng khiến số liệu lý thuyết (bill trừ đúng size ly) và tồn thực tế
+// lệch nhau mà không ai biết vì sao. Khoá tối thiểu N giây kèm đếm ngược buộc
+// nhân viên phải đứng ở màn đó đủ lâu mới bấm Xong được.
+//
+// KHÔNG khoá nút "Bỏ qua": bỏ qua đã tự có giá đắt hơn rồi (phải gõ lý do +
+// PIN, Quản lý xem lại được) — khoá luôn cả bỏ qua thì mất nốt lối thoát duy
+// nhất, biến một cảnh báo thành bẫy kẹt ca giữa giờ đông khách.
+//
+// Doc ID = `${businessDate}_${phase}_${stepKey}` (không dùng add() tự sinh id)
+// để ghi "bắt đầu" là idempotent — nhân viên refresh trang giữa chừng không bị
+// tính lại từ đầu (mất hết thời gian đã đứng chờ) và không tạo log trùng.
+// ============================================================
+function _clLogId(phase, stepKey) { return `${shiftState.businessDate}_${phase}_${stepKey}`; }
+
+// Cache trong phiên: khỏi phải đọc lại Firestore mỗi giây lúc màn đang đếm ngược.
+let _clLocalStarts = {};
+
+async function clEnsureStarted(phase, stepKey, stepLabel, minRequiredSec) {
+  minRequiredSec = Math.max(0, Number(minRequiredSec) || 0);
+  const cacheKey = phase + ':' + stepKey;
+  if (_clLocalStarts[cacheKey]) return _clLocalStarts[cacheKey];
+  if (!minRequiredSec) {
+    // Không khoá thời gian thì khỏi ghi log làm gì — log này chỉ có ý nghĩa đối
+    // chiếu khi CÓ ngưỡng thời gian để so.
+    _clLocalStarts[cacheKey] = { startedAt: new Date().toISOString(), minRequiredSec: 0 };
+    return _clLocalStarts[cacheKey];
+  }
+  const id = _clLogId(phase, stepKey);
+  try {
+    const ref = fstore.collection('checklist_activity_logs_gieogieo').doc(id);
+    const doc = await ref.get();
+    if (doc.exists && !doc.data().completedAt) {
+      // Đã bắt đầu từ trước (refresh trang giữa chừng) — giữ nguyên mốc cũ, không
+      // reset đồng hồ đếm ngược cho nhân viên "câu giờ" bằng cách bấm F5.
+      _clLocalStarts[cacheKey] = { startedAt: doc.data().startedAt, minRequiredSec };
+      return _clLocalStarts[cacheKey];
+    }
+    const startedAt = new Date().toISOString();
+    await ref.set({
+      businessDate: shiftState.businessDate, phase, stepKey, stepLabel,
+      startedAt, completedAt: null, durationSec: null,
+      minRequiredSec, metMinimum: null
+    });
+    _clLocalStarts[cacheKey] = { startedAt, minRequiredSec };
+  } catch (err) {
+    console.warn('clEnsureStarted lỗi (không chặn luồng chính, chỉ mất khoá thời gian):', err);
+    _clLocalStarts[cacheKey] = { startedAt: new Date().toISOString(), minRequiredSec: 0 };
+  }
+  return _clLocalStarts[cacheKey];
+}
+
+function clRemainingSec(phase, stepKey) {
+  const s = _clLocalStarts[phase + ':' + stepKey];
+  if (!s || !s.minRequiredSec) return 0;
+  const elapsed = (Date.now() - Date.parse(s.startedAt)) / 1000;
+  return Math.max(0, Math.ceil(s.minRequiredSec - elapsed));
+}
+
+async function clLogComplete(phase, stepKey, staffEmp) {
+  const s = _clLocalStarts[phase + ':' + stepKey];
+  if (!s || !s.minRequiredSec) return; // không đặt ngưỡng thì không có log để hoàn thành
+  const id = _clLogId(phase, stepKey);
+  try {
+    const durationSec = Math.max(0, Math.round((Date.now() - Date.parse(s.startedAt)) / 1000));
+    await fstore.collection('checklist_activity_logs_gieogieo').doc(id).set({
+      completedAt: new Date().toISOString(), durationSec,
+      metMinimum: durationSec >= s.minRequiredSec,
+      staff: staffEmp ? staffEmp.fullName : '', staffEmployeeId: staffEmp ? staffEmp.id : ''
+    }, { merge: true });
+  } catch (err) {
+    console.warn('clLogComplete lỗi (không chặn luồng chính, chỉ mất bằng chứng đã hoàn thành):', err);
+  }
+}
+
+// 1 hẹn giờ dùng chung cho mọi màn checklist (chỉ 1 màn hiển thị tại 1 thời điểm) —
+// tick lại đúng 1 giây/lần để cập nhật số đếm ngược, không chồng nhiều interval.
+let _clCountdownTimer = null;
+function clClearCountdownTimer() {
+  if (_clCountdownTimer) { clearTimeout(_clCountdownTimer); _clCountdownTimer = null; }
+}
+function clArmCountdownRerender(renderFn) {
+  if (_clCountdownTimer) return;
+  _clCountdownTimer = setTimeout(() => { _clCountdownTimer = null; renderFn(); }, 1000);
+}
+
+// Nút "Xong"/"Tiếp tục" bị khoá — dùng chung cho mọi màn có khoá thời gian.
+function clLockedButtonHTML(remain) {
+  return `<button disabled style="padding:7px 12px;border-radius:10px;border:none;background:#ddd;color:#888;font-size:11.5px;font-weight:700;white-space:nowrap;cursor:not-allowed;">Còn ${remain}s</button>`;
+}
+
 let _openChecklistState = { items: [], loaded: false, staff: null };
 
 // Thứ trong tuần theo quy ước Management: 2..7 = T2..T7, 8 = CN
@@ -14695,7 +14792,8 @@ async function computeOpeningChecklistPOS() {
   if (kinds.has('count_handover')) ctx.handoverPending = await computeHandoverOpenLinesPOS();
 
   return defs.map(d => {
-    const item = { id: d.id, label: d.label || '', blocking: !!d.blocking, autoCheck: d.autoCheck || null, done: false, detail: '', plan: null };
+    const item = { id: d.id, label: d.label || '', blocking: !!d.blocking, autoCheck: d.autoCheck || null, done: false, detail: '', plan: null,
+      minDurationSec: Math.max(0, Number(d.minDurationSec) || 0) };
     if (!d.autoCheck) return item;                       // tick tay
     if (d.autoCheck === 'prep_ready') {
       const plan = ctx.prep || [];
@@ -14814,6 +14912,7 @@ function requireOpeningChecklistDone() {
 // màn vốn trống, không có gì để giữ).
 async function renderOpeningChecklist(silent) {
   const box = document.getElementById('shiftBody');
+  clClearCountdownTimer();
   if (!silent) box.innerHTML = '<div style="text-align:center;padding:40px;color:#bbb">Đang tính việc đầu ca...</div>';
   // Resume safety (GĐ3 kế hoạch V3): nếu nhân viên lỡ thoát app giữa lúc đang
   // đếm giao ca đầu ca, bấm lại "Việc đầu ca" vẫn bắt hoàn thành đếm trước —
@@ -14847,6 +14946,13 @@ async function renderOpeningChecklist(silent) {
 
   _openChecklistState = { items, loaded: true, doneIds, overrideIds };
   const pendingBlocking = items.filter(it => it.blocking && !it.done && !doneIds.has(it.id) && !overrideIds.has(it.id));
+
+  // Khoá thời gian chỉ có nghĩa cho mục TICK TAY (đang chờ bấm Xong) — mục auto tự
+  // chuyển ✅ khi việc thật xong, không có nút Xong nào để khoá. Ghi "bắt đầu" ngay
+  // khi màn hiện ra, trước khi vẽ nút, để nút vẽ ra đã đúng trạng thái khoá/mở.
+  const lockablePending = items.filter(it => !it.autoCheck && it.minDurationSec > 0
+    && !it.done && !doneIds.has(it.id) && !overrideIds.has(it.id));
+  await Promise.all(lockablePending.map(it => clEnsureStarted('open', it.id, it.label, it.minDurationSec)));
 
   // [FIX] Hiện rõ TRẠNG THÁI CA ngay đầu màn checklist. Trước đây không có: sau khi
   // bấm "Xác nhận mở ca" ở form tiền quỹ, app tự nhảy sang đếm giao ca rồi vào thẳng
@@ -14890,8 +14996,11 @@ async function renderOpeningChecklist(silent) {
               ${it.detail ? `<div style="font-size:11.5px;color:#999;margin-top:2px;">${skipped ? 'Đã bỏ qua có ghi lý do' : it.detail}</div>` : ''}
               ${it.plan && it.plan.length ? renderPrepPlanRows(it.plan) : ''}
               ${(!ticked && !skipped && it.autoCheck) ? `<div style="font-size:10.5px;color:#bbb;margin-top:3px;font-style:italic;">Tự động chuyển ✅ khi ${it.autoCheck === 'refill_below_min' ? 'refill' : it.autoCheck === 'stockcount_due' ? 'kiểm kê' : it.autoCheck === 'count_handover' ? 'đếm giao ca' : 'việc này'} xong</div>` : ''}
+              ${(!ticked && !skipped && !it.autoCheck && it.minDurationSec > 0 && clRemainingSec('open', it.id) > 0) ? `<div style="font-size:10.5px;color:#b45309;margin-top:3px;">⏱️ Cần đứng làm tối thiểu ${it.minDurationSec}s mới bấm Xong được</div>` : ''}
             </div>
-            ${!ticked && !skipped ? renderChecklistItemActionBtn(it) : ''}
+            ${!ticked && !skipped ? ((!it.autoCheck && it.minDurationSec > 0 && clRemainingSec('open', it.id) > 0)
+              ? `<div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0;">${clLockedButtonHTML(clRemainingSec('open', it.id))}<button onclick="skipChecklistItem('${it.id}')" style="padding:7px 10px;border-radius:10px;border:1px solid #ddd;background:#fff;color:#888;font-size:11.5px;font-weight:700;cursor:pointer;white-space:nowrap;">Bỏ qua</button></div>`
+              : renderChecklistItemActionBtn(it)) : ''}
           </div>
         </div>`;
       }).join('')}
@@ -14905,6 +15014,7 @@ async function renderOpeningChecklist(silent) {
     <button onclick="finishOpeningChecklist()" style="width:100%;padding:15px;background:var(--gd);color:#fff;border:none;border-radius:14px;font-weight:800;font-size:15px;cursor:pointer;margin-bottom:10px;">✅ Xong — Bắt đầu bán hàng</button>` : ''}
     <button onclick="renderShiftDashboard()" style="width:100%;padding:13px;background:none;border:1px solid #ddd;color:var(--gt);border-radius:14px;font-weight:600;font-size:13px;cursor:pointer;">← Quay lại</button>
   `;
+  if (lockablePending.some(it => clRemainingSec('open', it.id) > 0)) clArmCountdownRerender(() => renderOpeningChecklist(true));
 }
 
 // [FIX] Kết thúc checklist đầu ca — đưa thẳng ra màn bán hàng kèm xác nhận rõ ràng,
@@ -15021,6 +15131,12 @@ async function logAutoChecklistResolved(autoCheckKind, resolvedRef, staffEmp) {
 async function tickChecklistItem(itemId) {
   const it = _openChecklistState.items.find(x => x.id === itemId);
   if (!it) return;
+  // Chốt chặn phía client: nút đáng lẽ đã bị khoá/disabled rồi, đây là lớp phòng thủ
+  // thứ 2 phòng trường hợp render cũ còn kẹt trên màn (vd tab nền chưa kịp vẽ lại).
+  if (!it.autoCheck && it.minDurationSec > 0 && clRemainingSec('open', itemId) > 0) {
+    toast(`⏳ Cần đứng làm tối thiểu ${it.minDurationSec}s cho mục này`);
+    return;
+  }
   const staffEmp = await resolveStaffPinAndCheckin('openChecklistStaff');
   if (!staffEmp) return;   // hàm này đã tự toast lỗi cụ thể (thiếu/sai PIN, chưa check-in)
   try {
@@ -15030,6 +15146,7 @@ async function tickChecklistItem(itemId) {
         staff: staffEmp.fullName, staffEmployeeId: staffEmp.id
       })
     }, { merge: true });
+    await clLogComplete('open', itemId, staffEmp);
     await refreshOpeningChecklistGate();
     renderOpeningChecklist(true);   // giữ màn, không nháy trắng
   } catch (err) { toast('❌ Lỗi: ' + (err.code || err.message || err)); }
@@ -16111,16 +16228,26 @@ async function computeRefillChecklistPOS() {
       list.push({
         itemId: item.id, itemName: item.name, destLocationName: rule.destLocationName,
         unrefilled, packLabel: packUnit.label, timesOver: Math.floor(unrefilled / packUnit.baseQty),
-        isUncertain
+        isUncertain, minDurationSec: Math.max(0, Number(rule.minDurationSec) || 0)
       });
     }
   }
   return list;
 }
 let _refillChecklistState = [];
-function renderRefillChecklistScreen(list) {
+let _refillCountdownInterval = null;
+function _refillClearCountdown() { if (_refillCountdownInterval) { clearInterval(_refillCountdownInterval); _refillCountdownInterval = null; } }
+
+// [MỚI] Khoá thời gian tối thiểu cho MÀN NÀY — lấy số LỚN NHẤT trong các rule đang
+// hiện (VD ly PP 500 đặt 60s, ly PP 700 đặt 90s thì cả màn khoá 90s). Đúng ca dùng:
+// trước đây chỉ cần tick checkbox là qua ngay, kể cả khi không thật sự đi đếm/kiểm
+// tra — không có gì buộc nhân viên phải đứng lại đủ lâu để làm thật.
+async function renderRefillChecklistScreen(list) {
   _refillChecklistState = list;
+  _refillClearCountdown();
   const box = document.getElementById('shiftBody');
+  const requiredSec = list.reduce((m, r) => Math.max(m, Number(r.minDurationSec) || 0), 0);
+  await clEnsureStarted('close', 'refillcheck', 'Kiểm tra Refill', requiredSec);
   box.innerHTML = `
     <div class="wal-section" style="margin:0 0 14px;">
       <div class="wal-section-title">⚠️ Kiểm tra Refill trước khi kết ca</div>
@@ -16138,21 +16265,37 @@ function renderRefillChecklistScreen(list) {
         </div>`).join('')}
       <button onclick="showScreen('khoScreen'); openRefillScreen();" style="width:100%;padding:13px;background:#fff;color:var(--gd);border:1.5px solid var(--gd);border-radius:14px;font-weight:700;font-size:13.5px;cursor:pointer;margin-top:6px;">🔁 Mở màn Refill ngay</button>
     </div>
+    <div id="refillCountdownNote" style="font-size:11.5px;color:#b45309;margin-bottom:8px;line-height:1.5;"></div>
     <button id="refillChecklistContinueBtn" onclick="continueAfterRefillChecklist()" disabled style="width:100%;padding:14px;background:#ddd;color:#fff;border:none;border-radius:14px;font-weight:700;font-size:15px;cursor:not-allowed;">Tiếp tục kết ca</button>
   `;
+  refillChecklistUpdateContinueState();
+  if (requiredSec > 0 && clRemainingSec('close', 'refillcheck') > 0) {
+    _refillCountdownInterval = setInterval(() => {
+      refillChecklistUpdateContinueState();
+      if (clRemainingSec('close', 'refillcheck') <= 0) _refillClearCountdown();
+    }, 1000);
+  }
 }
 function refillChecklistUpdateContinueState() {
   const btn = document.getElementById('refillChecklistContinueBtn');
   if (!btn) return;
   const allChecked = _refillChecklistState.every((_, idx) => document.getElementById('refillOk' + idx)?.checked);
-  btn.disabled = !allChecked;
-  btn.style.background = allChecked ? 'var(--gd)' : '#ddd';
-  btn.style.cursor = allChecked ? 'pointer' : 'not-allowed';
+  const remain = clRemainingSec('close', 'refillcheck');
+  const note = document.getElementById('refillCountdownNote');
+  if (note) note.innerHTML = remain > 0 ? `⏱️ Cần thêm ${remain}s nữa mới bấm tiếp tục được — dùng thời gian này để thật sự kiểm tra/refill, không chỉ tick cho qua.` : '';
+  const ok = allChecked && remain <= 0;
+  btn.disabled = !ok;
+  btn.textContent = remain > 0 ? `Còn ${remain}s…` : 'Tiếp tục kết ca';
+  btn.style.background = ok ? 'var(--gd)' : '#ddd';
+  btn.style.cursor = ok ? 'pointer' : 'not-allowed';
 }
 async function continueAfterRefillChecklist() {
   if (_posSubmitBusy) { toast('⏳ Đang xử lý, vui lòng đợi giây lát...'); return; }
+  if (clRemainingSec('close', 'refillcheck') > 0) { toast('⏳ Chưa đủ thời gian tối thiểu ở màn này'); return; }
   _posSubmitBusy = true;
+  _refillClearCountdown();
   try {
+    await clLogComplete('close', 'refillcheck', null);
     // Ghi log việc nhân viên đã CHỦ ĐỘNG xác nhận bỏ qua refill lúc kết ca — không xoá
     // nghĩa vụ refill, chỉ để Management xem lại được: hệ thống ĐÃ cảnh báo, và ai là
     // người xác nhận bỏ qua cho nguyên liệu nào, tránh tình huống đổ lỗi ngược sau này.
@@ -17485,7 +17628,8 @@ async function computeClosingChecklistPOS() {
   if (kinds.has('refill_below_min')) ctx.refillLow = await countRefillBelowMinPOS();
 
   return defs.map(d => {
-    const item = { id: d.id, label: d.label || '', blocking: !!d.blocking, autoCheck: d.autoCheck || null, done: false, detail: '', plan: null };
+    const item = { id: d.id, label: d.label || '', blocking: !!d.blocking, autoCheck: d.autoCheck || null, done: false, detail: '', plan: null,
+      minDurationSec: Math.max(0, Number(d.minDurationSec) || 0) };
     if (!d.autoCheck) return item;
     if (d.autoCheck === 'prep_ready') {
       const plan = ctx.prep || [];
@@ -17511,6 +17655,7 @@ async function computeClosingChecklistPOS() {
 
 async function renderDailyClosingChecklist() {
   const box = document.getElementById('shiftBody');
+  clClearCountdownTimer();
   showLoading(box);
   const [cl, cfgList, closeDoc] = await Promise.all([
     computeDailyClosingChecklistPOS(shiftState.businessDate),
@@ -17521,6 +17666,9 @@ async function renderDailyClosingChecklist() {
   const doneIds = new Set(((cd.closeChecklistDone) || []).map(x => x.id));
   const overIds = new Set(((cd.closeChecklistOverrides) || []).map(x => x.id));
   _closeChecklistState = { items: cfgList, doneIds, overIds };
+  const lockablePendingClose = cfgList.filter(it => !it.autoCheck && it.minDurationSec > 0
+    && !doneIds.has(it.id) && !overIds.has(it.id));
+  await Promise.all(lockablePendingClose.map(it => clEnsureStarted('close', it.id, it.label, it.minDurationSec)));
   const item = (ok, label, detail) => `
     <div style="display:flex;gap:8px;align-items:flex-start;padding:8px 0;border-bottom:1px solid #f0f0f0;">
       <span style="font-size:16px;flex-shrink:0;">${ok === null ? '❔' : ok ? '✅' : '⚠️'}</span>
@@ -17559,9 +17707,12 @@ async function renderDailyClosingChecklist() {
               ${it.detail ? `<div style="font-size:11.5px;color:#999;margin-top:2px;">${skipped ? 'Đã bỏ qua có ghi lý do' : it.detail}</div>` : ''}
               ${(!ticked && !skipped && it.plan && it.plan.length) ? renderPrepPlanRows(it.plan) : ''}
               ${(!ticked && !skipped && it.autoCheck) ? `<div style="font-size:10.5px;color:#bbb;margin-top:3px;font-style:italic;">Tự động chuyển ✅ khi làm xong việc này</div>` : ''}
+              ${(!ticked && !skipped && !it.autoCheck && it.minDurationSec > 0 && clRemainingSec('close', it.id) > 0) ? `<div style="font-size:10.5px;color:#b45309;margin-top:3px;">⏱️ Cần đứng làm tối thiểu ${it.minDurationSec}s mới bấm Xong được</div>` : ''}
             </div>
             ${!ticked && !skipped ? `<div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0;">
-              ${it.autoCheck ? '' : `<button onclick="tickCloseChecklistItem('${it.id}')" style="padding:7px 12px;border-radius:10px;border:none;background:var(--gd);color:#fff;font-size:11.5px;font-weight:700;cursor:pointer;white-space:nowrap;">Xong</button>`}
+              ${it.autoCheck ? '' : ((it.minDurationSec > 0 && clRemainingSec('close', it.id) > 0)
+                ? clLockedButtonHTML(clRemainingSec('close', it.id))
+                : `<button onclick="tickCloseChecklistItem('${it.id}')" style="padding:7px 12px;border-radius:10px;border:none;background:var(--gd);color:#fff;font-size:11.5px;font-weight:700;cursor:pointer;white-space:nowrap;">Xong</button>`)}
               <button onclick="skipCloseChecklistItem('${it.id}')" style="padding:7px 10px;border-radius:10px;border:1px solid #ddd;background:#fff;color:#888;font-size:11.5px;font-weight:700;cursor:pointer;white-space:nowrap;">Bỏ qua</button>
             </div>` : ''}
           </div>
@@ -17582,6 +17733,7 @@ async function renderDailyClosingChecklist() {
     </div>
     <button onclick="submitDailyClose()" style="width:100%;padding:14px;background:var(--gd);color:#fff;border:none;border-radius:14px;font-weight:700;font-size:15px;cursor:pointer;">Xác nhận đóng ngày</button>
   `;
+  if (lockablePendingClose.some(it => clRemainingSec('close', it.id) > 0)) clArmCountdownRerender(() => renderDailyClosingChecklist());
 }
 let _closeChecklistState = { items: [], doneIds: new Set(), overIds: new Set() };
 
@@ -17595,6 +17747,10 @@ function pendingBlockingCloseItems() {
 async function tickCloseChecklistItem(itemId) {
   const it = (_closeChecklistState.items || []).find(x => x.id === itemId);
   if (!it) return;
+  if (!it.autoCheck && it.minDurationSec > 0 && clRemainingSec('close', itemId) > 0) {
+    toast(`⏳ Cần đứng làm tối thiểu ${it.minDurationSec}s cho mục này`);
+    return;
+  }
   const staffEmp = await resolveStaffPinWorkedToday('closeChecklistStaff');
   if (!staffEmp) return;
   try {
@@ -17604,6 +17760,7 @@ async function tickCloseChecklistItem(itemId) {
         staff: staffEmp.fullName, staffEmployeeId: staffEmp.id
       })
     }, { merge: true });
+    await clLogComplete('close', itemId, staffEmp);
     renderDailyClosingChecklist();
   } catch (err) { toast('❌ Lỗi: ' + (err.code || err.message || err)); }
 }

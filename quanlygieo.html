@@ -6040,6 +6040,7 @@ function updateRefillRuleConfig(id, data){
     blockingClose: !!data.blockingClose,
     varianceCheck: !!data.varianceCheck,
     varianceTolerance: Number(data.varianceTolerance) || 0,
+    minDurationSec: Math.max(0, Number(data.minDurationSec) || 0),
     updatedAt: new Date().toISOString()
   });
 }
@@ -17316,7 +17317,10 @@ async function renderKhoInbox(){
     ['Kiểm kê',         'stockcount', 'clipboard'],
     ['Hàng đang mở & tem', 'containers', 'package'],
     ['Lịch sử kho',     'history',    'clock']
-  ].map(([l,k,i])=>`<div class="health-item gray" onclick="goKho('${k}')"><div class="hi-label">${ic(i)} ${l}</div><div class="hi-count">›</div></div>`).join('');
+  ].map(([l,k,i])=>`<div class="health-item gray" onclick="goKho('${k}')"><div class="hi-label">${ic(i)} ${l}</div><div class="hi-count">›</div></div>`).join('')
+  // [MỚI] Lối vào riêng cho log thời gian checklist — mở thẳng popup, không phải
+  // 1 tab Kho, nên tách khỏi .map(goKho) ở trên.
+  + `<div class="health-item gray" onclick="openChecklistLogSheet()"><div class="hi-label">${ic('clock')} Nhật ký thời gian checklist (log 7 ngày)</div><div class="hi-count">›</div></div>`;
 
   box.innerHTML = `
     ${(!red.length && !yellow.length)
@@ -21397,6 +21401,7 @@ function refillConfigLabel(r){
   if(r.mustCount) parts.push(`Đếm: ${REFILL_TIMING_LABEL[r.countTiming]||'Cả hai đầu'}`);
   if(r.blockingClose) parts.push(ic('lock',12)+' Chặn đóng ngày');
   if(r.varianceCheck) parts.push(ic('detective',12)+' Đối chiếu với bill');
+  if(Number(r.minDurationSec)>0) parts.push(ic('clock',12)+` Tối thiểu ${r.minDurationSec}s ở "Kiểm tra Refill"`);
   return parts.join(' · ');
 }
 
@@ -21763,6 +21768,10 @@ async function renderKhoRefill(){
         </label>
         ${refillConfigDraft.blockingClose ? '<div class="small-note" style="color:#c0392b;margin-bottom:10px">Nhân viên vẫn có đường thoát "Không refill được — ghi lý do" + PIN nếu kho tổng cũng hết hàng.</div>' : ''}
         ` : ''}
+        <div class="field"><label>Thời gian tối thiểu ở bước "Kiểm tra Refill" cuối ca (giây)</label>
+          <input type="number" min="0" step="5" value="${refillConfigDraft.minDurationSec||0}" oninput="refillConfigDraft.minDurationSec=Math.max(0,Number(this.value)||0)">
+          <div class="hint">Nút "Tiếp tục kết ca" sẽ khoá kèm đếm ngược cho tới khi đủ số giây này — chống bấm tick cho qua mà không thật sự đi kiểm tra/đếm lại nguyên liệu này. 0 = không khoá. Nhiều rule cùng hiện trong 1 lần "Kiểm tra Refill" thì lấy số LỚN NHẤT trong các rule đó.</div>
+        </div>
         <div class="grid2">
           <button class="btn outline" onclick="refillConfigEditId=null; refillConfigDraft=null; renderKhoRefill()">Huỷ</button>
           <button class="btn" onclick="submitRefillConfig('${r.id}')">Lưu cấu hình</button>
@@ -21825,6 +21834,7 @@ function refillConfigEdit(id){
     blockingClose: !!r.blockingClose,
     varianceCheck: !!r.varianceCheck,
     varianceTolerance: Number(r.varianceTolerance) || 0,
+    minDurationSec: Number(r.minDurationSec) || 0,
     itemId: r.itemId || null      // chỉ để hiện đúng đơn vị ở ô dung sai
   };
   renderKhoRefill();
@@ -22071,21 +22081,28 @@ let clDraftPhase = 'open';
 // nhìn thấy TOÀN BỘ quy trình mà nhân viên thực sự đi qua, biết mục mình tự khai
 // nằm chen vào chỗ nào. Trước đây màn này chỉ hiện mục tự khai nên quy trình
 // thật bị khuất một nửa.
+// [FIX — quét lại theo đúng code POS] Thứ tự dưới đây từng bị chép tay lệch với
+// luồng thật (_writeShiftOpen → _continueAfterHandoverOpenGate cho thấy "Nhập tiền"
+// chạy TRƯỚC "Đếm giao ca", không phải ngược lại) và còn giữ một bước đã bị BỎ hẳn
+// ("Đối soát chuyển khoản" — xem [BỎ-KIỂM-KÊ-CHUYỂN-KHOẢN] bên posgieo.html: giờ hệ
+// thống tự chốt số CK, không còn ai gõ tay/đối soát bước này nữa). Đã đối chiếu lại
+// từng bước với đúng hàm nối tiếp nhau bên POS (_writeShiftOpen/resumeClosePipelinePOS/
+// proceedAfterCashPass/_continueAfterCashPass/_continueAfterHandoverClose/
+// _continueAfterPrepCount) để khớp 100% thứ tự thật nhân viên đi qua.
 const POS_BUILTIN_STEPS = {
   open: [
     ['Check-in ca', 'Nhân viên nhập PIN, bắt đầu tính giờ công'],
-    ['Đếm giao ca đầu ca', 'Chỉ với nguyên liệu bật "phải đếm tay". Đếm mù, lệch quá ngưỡng thì đếm lại'],
-    ['Nhập tiền đầu ca', 'Đối chiếu với tiền giữ lại tối qua'],
+    ['Nhập tiền đầu ca', 'Đếm quỹ, đối chiếu với tiền giữ lại tối qua — lệch quá dung sai phải ghi lý do mới mở được'],
+    ['Đếm giao ca đầu ca', 'Chỉ với nguyên liệu bật "phải đếm tay" — chạy NGAY sau khi mở ca, trước mọi việc đầu ca khác'],
   ],
   close: [
-    ['Đối soát tiền mặt', 'Đếm két, so với doanh thu tiền mặt — BẮT BUỘC khớp'],
-    ['Kiểm tra Refill', 'Nguyên liệu bán hết 1 đơn vị đóng gói mà chưa refill, hoặc vừa có hao hụt'],
-    ['Chặn thiếu đồ bắt buộc', 'Món đặt "chặn đóng ngày" mà dưới mức tối thiểu — phải refill hoặc ghi lý do'],
-    ['Đếm giao ca cuối ca', 'Chỉ với nguyên liệu bật "phải đếm tay"'],
-    ['Đếm bán thành phẩm', 'Đếm lượng còn lại để tính hao hụt'],
-    ['Đối soát chuyển khoản', 'So với doanh thu chuyển khoản'],
-    ['Bàn giao tiền', 'Người nhận nhập PIN xác nhận'],
-    ['Xác nhận đóng ngày', 'Bảng tổng kết + việc cuối ca bạn khai bên dưới'],
+    ['Đối soát tiền mặt', 'Đếm két MÙ (không cho xem số hệ thống) — BẮT BUỘC khớp mới qua bước sau'],
+    ['Chặn thiếu đồ bắt buộc', 'Món đặt "chặn đóng ngày" mà dưới mức tối thiểu — phải refill hoặc ghi lý do + PIN'],
+    ['Kiểm tra Refill', 'Nguyên liệu đã bán ra ≥1 đơn vị đóng gói mà chưa refill, hoặc vừa có hao hụt — không chặn cứng nhưng phải tick từng dòng'],
+    ['Đếm giao ca cuối ca', 'Chỉ với nguyên liệu bật "phải đếm tay" — chỉ hiện 1 lần/ngày'],
+    ['Đếm bán thành phẩm', 'Đếm lượng còn lại — ghi đè thẳng tồn kho BTP, không qua duyệt'],
+    ['Bàn giao tiền', 'Nhập số giữ lại + người nhận PIN xác nhận'],
+    ['Xác nhận đóng ngày', 'Checklist tham khảo + việc cuối ca bạn khai bên dưới, tick "không còn bill dở dang", ký PIN lại đúng người kết ca'],
   ]
 };
 function renderBuiltinSteps(phase){
@@ -22216,12 +22233,13 @@ async function renderKhoChecklist(){
         <div class="litem">
           <div class="li-l">
             <div>${escapeHtmlAttr(c.label||'')} ${c.blocking?'<span class="tier tier-red" style="margin-left:4px">Bắt buộc</span>':''} ${chipOnOff(c.active!==false)}</div>
-            <div>${c.autoCheck ? ic('robot',13)+' '+(CHECKLIST_AUTO_KINDS.find(a=>a.k===c.autoCheck)||{}).label : ic('signature',13)+' Tick tay'} · ${clDaysLabel(c.activeDays)}</div>
+            <div>${c.autoCheck ? ic('robot',13)+' '+(CHECKLIST_AUTO_KINDS.find(a=>a.k===c.autoCheck)||{}).label : ic('signature',13)+' Tick tay'} · ${clDaysLabel(c.activeDays)}${Number(c.minDurationSec)>0 ? ` · <span style="color:var(--warn)">${ic('clock',12)} tối thiểu ${c.minDurationSec}s</span>` : ''}</div>
           </div>
           <div class="li-r">
             <button class="iconbtn" onclick="clMove('${c.id}',-1)" ${idx===0?'disabled':''}>${ic('arrowUp')}</button>
             <button class="iconbtn" onclick="clMove('${c.id}',1)" ${idx===list.length-1?'disabled':''}>${ic('arrowDown')}</button>
             ${renderMoreMenuBtn('cl_'+c.id, `
+              <button onclick="clSetMinDuration('${c.id}',${Number(c.minDurationSec)||0})">${ic('clock',15)} ${Number(c.minDurationSec)>0?'Sửa thời gian tối thiểu':'Đặt thời gian tối thiểu'}</button>
               <button onclick="clToggleBlocking('${c.id}',${!c.blocking})">${c.blocking?ic('unlock',15)+' Bỏ bắt buộc':ic('lock',15)+' Đặt bắt buộc'}</button>
               <button onclick="clToggleActive('${c.id}',${c.active===false})">${c.active===false?ic('play',15)+' Bật lại':ic('pause',15)+' Tắt'}</button>
               <button class="danger" onclick="clDelete('${c.id}')">${ic('trash',15)} Xoá</button>
@@ -22254,11 +22272,23 @@ async function renderKhoChecklist(){
             <input type="checkbox" class="cl-day" value="${d.v}" checked> ${d.l}</label>`).join('')}
         </div>
       </div>
+      <div class="field"><label>Thời gian tối thiểu để hoàn thành (giây)</label>
+        <input type="number" id="clMinDuration" min="0" step="5" value="0" placeholder="0 = không khoá thời gian">
+        <div class="hint">Nút "Xong" sẽ bị khoá kèm đếm ngược cho tới khi đủ số giây này kể từ lúc màn hiện ra — chống bấm cho qua mà không thật sự làm. "Bỏ qua" (ghi lý do + PIN) vẫn bấm được ngay, không bị khoá theo thời gian này.</div>
+      </div>
       <label style="display:flex;align-items:center;gap:8px;margin:8px 0;font-size:13px">
         <input type="checkbox" id="clBlocking"> <b>Bắt buộc</b> — chưa xong thì không cho tạo bill
       </label>
       <div class="small-note" style="color:#c0392b;margin-bottom:10px">Cân nhắc kỹ trước khi bật "Bắt buộc": chặn bán lúc đông khách gây thiệt hại thật. Nhân viên vẫn bỏ qua được nhưng phải nhập lý do + PIN, và Quản lý xem lại được.</div>
       <button class="btn" onclick="submitChecklistItem()">+ Thêm mục</button>
+    </div>
+    <div class="sec-title" style="margin-top:14px">Nhật ký thời gian thực hiện</div>
+    <div class="litem" style="cursor:pointer" onclick="openChecklistLogSheet()">
+      <div class="li-l">
+        <div>${ic('clock',14)} Xem log thời gian bắt đầu/hoàn thành từng mục</div>
+        <div class="muted-sm">Ghi lại đúng lúc nhân viên bắt đầu và hoàn thành mỗi mục có đặt thời gian tối thiểu — tự xoá sau 7 ngày.</div>
+      </div>
+      <div class="li-r">›</div>
     </div>
     <div class="sec-title" style="margin-top:14px">Kết quả thực hiện</div>
     ${renderClChecklistResult(dayKey, opening, SHIFT_CHECKLISTS, closing, refillLines)}
@@ -22287,6 +22317,7 @@ async function submitChecklistItem(){
   if(!days.length){ toast('⚠️ Chọn ít nhất 1 thứ áp dụng'); return; }
   const phase = document.getElementById('clPhase').value;
   const autoCheck = document.getElementById('clAuto').value || null;
+  const minDurationSec = Math.max(0, Number(document.getElementById('clMinDuration').value) || 0);
   // order = cuối danh sách CÙNG PHA — mỗi pha đánh số riêng nên thêm mục đầu ca
   // không làm xáo trộn thứ tự cuối ca.
   const sameP = SHIFT_CHECKLISTS.filter(c=>c.phase===phase);
@@ -22294,10 +22325,26 @@ async function submitChecklistItem(){
   try{
     await addShiftChecklist({ phase, label, type: autoCheck?'auto':'manual', autoCheck,
                               blocking: document.getElementById('clBlocking').checked,
-                              activeDays: days, order });
-    logAudit('create','shift_checklist','',{phase,label});
+                              activeDays: days, order, minDurationSec });
+    logAudit('create','shift_checklist','',{phase,label,minDurationSec});
     toast('✅ Đã thêm'); renderKhoChecklist();
   }catch(err){ console.error(err); showError('Thêm thất bại: '+(err.code||err.message||err)); }
+}
+
+// [MỚI] Đặt/sửa thời gian tối thiểu cho MỘT mục đã có sẵn — dùng prompt() cho gọn,
+// đúng cách quanlygieo.html vẫn dùng cho các ô sửa nhanh 1 con số (xem chotTonLichSu
+// cũ, fixRecWiz...). Chỉ 1 field, không đáng làm cả 1 sheet riêng.
+async function clSetMinDuration(id, cur){
+  const nhap = prompt('Thời gian tối thiểu để hoàn thành mục này (giây). 0 = không khoá thời gian.', String(cur||0));
+  if(nhap === null) return;
+  const sec = Math.max(0, Math.round(Number(nhap)) || 0);
+  if(!isFinite(sec)){ toast('⚠️ Nhập một số không âm'); return; }
+  try{
+    await updateShiftChecklist(id, {minDurationSec: sec});
+    logAudit('update','shift_checklist',id,{minDurationSec: sec});
+    toast(sec>0 ? `✅ Đã đặt tối thiểu ${sec}s` : '✅ Đã bỏ khoá thời gian');
+    renderKhoChecklist();
+  }catch(err){ showError('Lỗi: '+(err.code||err.message||err)); }
 }
 
 async function clToggleActive(id, active){
@@ -22329,6 +22376,87 @@ async function clMove(id, dir){
     ]);
     renderKhoChecklist();
   }catch(err){ showError('Lỗi: '+(err.code||err.message||err)); }
+}
+
+// ============================================================
+// [MỚI] Nhật ký thời gian thực hiện checklist — checklist_activity_logs_gieogieo.
+// POS ghi 1 dòng mỗi mục có đặt "thời gian tối thiểu" (mục tự khai HOẶC bước
+// "Kiểm tra Refill" cuối ca): lúc BẮT ĐẦU màn hiện ra, lúc HOÀN THÀNH thật (bấm
+// Xong/Tiếp tục), và có đủ thời gian tối thiểu hay không — bằng chứng nhân viên
+// có thật sự đứng đó làm hay chỉ bấm cho qua. Doc ID cố định = ngày_pha_mục nên
+// ghi idempotent, không sợ trùng khi nhân viên refresh trang giữa chừng.
+//
+// Tự dọn sau 7 NGÀY — đây là log thao tác ngắn hạn để đối chiếu tuần này với
+// tuần trước, không phải sổ sách cần giữ vĩnh viễn như audit_logs_gieogieo. Dọn
+// kiểu "lazy": mỗi lần mở màn xem log thì tiện tay xoá luôn phần quá hạn, không
+// cần cron/cloud function riêng cho một việc dọn dẹp nhỏ thế này.
+// ============================================================
+const CL_LOG_KEEP_DAYS = 7;
+async function cleanupOldChecklistLogs(){
+  const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - CL_LOG_KEEP_DAYS);
+  const cutoffKey = dkey(cutoff);
+  try{
+    const snap = await fstore.collection('checklist_activity_logs_gieogieo').where('businessDate','<',cutoffKey).get();
+    if(snap.empty) return;
+    const batch = fstore.batch();
+    snap.docs.forEach(d=>batch.delete(d.ref));
+    await batch.commit();
+  }catch(err){ console.warn('[Nhật ký checklist] dọn log cũ lỗi (bỏ qua):', err); }
+}
+
+let clLogDate = null; // null = hôm nay
+function clLogShiftDay(delta){
+  const cur = clLogDate ? new Date(clLogDate) : new Date();
+  cur.setDate(cur.getDate() + delta);
+  const hnay = dkey(new Date());
+  const k = dkey(cur);
+  clLogDate = (k > hnay) ? hnay : k;
+  clLogRenderBody();
+}
+function openChecklistLogSheet(){
+  clLogDate = null;
+  openEditSheet('Nhật ký thời gian checklist', '<div id="clLogBody"></div>', ()=>{});
+  cleanupOldChecklistLogs();
+  clLogRenderBody();
+}
+async function clLogRenderBody(){
+  const box = document.getElementById('clLogBody');
+  if(!box) return;
+  showLoading(box);
+  const dayKey = clLogDate || dkey(new Date());
+  let rows = [];
+  try{
+    await ensureAuth();
+    const snap = await fstore.collection('checklist_activity_logs_gieogieo').where('businessDate','==',dayKey).get();
+    rows = snap.docs.map(d=>({id:d.id, ...d.data()}))
+      .sort((a,b)=> String(a.startedAt||'').localeCompare(String(b.startedAt||'')));
+  }catch(err){
+    box.innerHTML = '<div class="muted">Không đọc được log. '+(err.code||err.message||err)+'</div>';
+    return;
+  }
+  const gio = iso => { try{ return new Date(iso).toLocaleTimeString('vi-VN',{hour:'2-digit',minute:'2-digit',second:'2-digit'}); }catch(e){ return ''; } };
+  box.innerHTML = `
+    <div class="small-note" style="margin-bottom:10px">Ghi lại lúc nhân viên bắt đầu và hoàn thành mỗi mục checklist có đặt thời gian tối thiểu. Log tự xoá sau ${CL_LOG_KEEP_DAYS} ngày.</div>
+    <div class="weeknav" style="margin-bottom:10px">
+      <button onclick="clLogShiftDay(-1)">‹</button>
+      <div class="wk-label">${dayKey}${dayKey===dkey(new Date())?' (hôm nay)':''}</div>
+      <button onclick="clLogShiftDay(1)">›</button>
+    </div>
+    ${!rows.length ? '<div class="empty-hint">Không có mục nào bị khoá thời gian trong ngày này.</div>' : rows.map(r=>{
+      const xong = r.completedAt != null;
+      const dat = r.metMinimum;
+      const tag = !xong ? '<span class="tier tier-amber">Đang làm dở</span>'
+        : dat ? '<span class="tier tier-green">Đủ thời gian</span>'
+        : '<span class="tier tier-red">Chưa đủ thời gian</span>';
+      return `<div class="litem">
+        <div class="li-l">
+          <div>${escapeHtmlAttr(r.stepLabel||r.stepKey||'')} <span class="muted-sm">· ${r.phase==='close'?'cuối ca':'đầu ca'}</span></div>
+          <div class="muted-sm">Bắt đầu ${gio(r.startedAt)}${xong?` · Hoàn thành ${gio(r.completedAt)} · mất ${r.durationSec}s (yêu cầu ${r.minRequiredSec}s)`:' · chưa hoàn thành'}${r.staff?' · '+escapeHtmlAttr(r.staff):''}</div>
+        </div>
+        <div class="li-r">${tag}</div>
+      </div>`;
+    }).join('')}
+  `;
 }
 
 // ------------------------------------------------------------
