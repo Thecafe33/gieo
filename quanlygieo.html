@@ -6843,7 +6843,11 @@ const PO_STATUS_LABEL = {
   pending:   {label:'Chờ nhận hàng',   color:'amber'},
   partial:   {label:'Đã nhận 1 phần',  color:'blue'},
   received:  {label:'Đã nhận đủ',      color:'green'},
-  cancelled: {label:'Đã huỷ',          color:'red'}
+  cancelled: {label:'Đã huỷ',          color:'red'},
+  // [MỚI] Khác "Huỷ": đơn này ĐÃ có hàng về (một phần), chỉ là phần thiếu sẽ KHÔNG về
+  // nữa từ đúng nhà cung cấp này (mua bù chỗ khác qua "Nhập hàng tự do", hoặc chấp nhận
+  // thiếu luôn) — xem closePurchaseOrderNoMore().
+  closed:    {label:'Đã đóng (thiếu)', color:'gray'}
 };
 async function loadPurchaseOrders(){
   const snap = await fstore.collection('purchase_orders_gieogieo').orderBy('createdAt','desc').limit(50).get();
@@ -10912,7 +10916,13 @@ async function computeStoreHealth(){
 
   if(itemsRes.status==='fulfilled'){
     const items = itemsRes.value;
-    const neg = items.filter(it=>Number(it.currentStock)<0);
+    // [FIX] Thiếu itemStockManaged(it) ở đây trong khi màn đích (renderKhoItems, isNeg)
+    // và audit gốc (auditInventoryConsistency, dòng 'Tồn kho âm') ĐỀU có — cảnh báo đếm cả
+    // nguyên liệu KHÔNG quản lý tồn kho (stockManaged:false) mà tình cờ đang âm (thường là
+    // dữ liệu cũ từ trước khi tắt quản lý), nhưng bấm vào thì màn đích lọc bỏ đúng những
+    // món đó nên hiện "không có gì" — cảnh báo cứ đỏ mãi mà không có gì để sửa. Khớp lại
+    // đúng 1 điều kiện lọc dùng chung với renderKhoItems().
+    const neg = items.filter(it=>itemStockManaged(it) && Number(it.currentStock)<0);
     if(neg.length) push('red', 'Nguyên liệu có tồn kho ÂM', neg.length, `goKho('items','negative')`, false, 'kho');
     // 🟡 dưới ngưỡng cảnh báo — nên xem, chưa phải cháy nhà
     const low = items.filter(it=>itemStockManaged(it) && Number(it.minStock)>0 && Number(it.currentStock)<Number(it.minStock) && Number(it.currentStock)>=0);
@@ -21380,6 +21390,7 @@ async function renderKhoPO(){
       </div>
       <div class="li-r">
         ${['partial','received'].includes(po.status) ? `<button class="btn outline sm" onclick="poMoSuaPhieuNhan('${po.id}')">${ic('note',14)} Sửa số đã nhận</button>` : ''}
+        ${po.status==='partial' ? `<button class="btn outline sm" onclick="confirmClosePONoMore('${po.id}')">${ic('check',14)} Đóng đơn (thiếu)</button>` : ''}
         ${activeStatuses.includes(po.status) ? `<button class="iconbtn" onclick="confirmCancelPO('${po.id}')">${ic('x',15)}</button>` : ''}
       </div>
     </div>`;
@@ -21461,6 +21472,23 @@ async function confirmCancelPO(id){
   if(!confirm('Huỷ đơn đặt hàng này? POS sẽ không còn thấy đơn này để nhận hàng.')) return;
   try{ await cancelPurchaseOrder(id); logAudit('cancel','purchase_order',id,{}); toast('🗑 Đã huỷ đơn đặt hàng'); renderKhoPO(); }
   catch(err){ console.error(err); showError('Huỷ đơn thất bại: '+(err.code||err.message||err)); }
+}
+
+// [MỚI] "Đóng đơn (thiếu)" — khác hẳn Huỷ. Đơn ĐÃ nhận một phần (status='partial') và
+// chủ quán biết chắc phần THIẾU sẽ không về nữa từ đúng nhà cung cấp này (mua bù ở chỗ
+// khác qua "Nhập hàng tự do" — ghi vào sổ kho như một giao dịch RIÊNG, không đụng gì tới
+// PO — hoặc đơn giản là chấp nhận thiếu luôn). Không đụng receivedGoodBase/tồn kho —
+// KHÔNG được tăng số "đã nhận" lên cho khớp, vì hàng bù đã cộng tồn kho một lần rồi qua
+// đường Nhập hàng tự do; tăng thêm ở đây là cộng tồn hai lần cho cùng một lượng hàng.
+// Chỉ đổi status để đơn thôi nằm trong "Đơn đặt hàng chưa nhận đủ" mãi mãi dù đã xử lý
+// xong theo cách khác — đúng thứ chủ quán báo: đã tra ra là đã bù, mà cảnh báo cứ còn.
+async function confirmClosePONoMore(id){
+  if(!confirm('Đóng đơn này dù còn thiếu hàng?\n\nDùng khi phần thiếu sẽ KHÔNG về nữa từ nhà cung cấp này (đã mua bù chỗ khác qua "Nhập hàng tự do", hoặc chấp nhận thiếu). Đóng đơn KHÔNG đụng gì tới tồn kho — chỉ để đơn thôi hiện ở mục "chưa nhận đủ".')) return;
+  try{
+    await fstore.collection('purchase_orders_gieogieo').doc(id).update({ status:'closed', closedAt:new Date().toISOString() });
+    logAudit('close_no_more','purchase_order',id,{});
+    toast('✅ Đã đóng đơn'); renderKhoPO();
+  }catch(err){ console.error(err); showError('Đóng đơn thất bại: '+(err.code||err.message||err)); }
 }
 
 // ------------------------------------------------------------
