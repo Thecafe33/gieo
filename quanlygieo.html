@@ -8118,13 +8118,22 @@ async function renderBookAlerts(targetId){
 // dài hạn (thuê, lương tháng) đã được chia đều theo ngày từ đợt 1 nên không gây
 // nhảy vọt. Đổi lại được thứ quan trọng hơn nhiều: hai con số không bao giờ đá nhau.
 // ============================================================================
+// [FIX] Hao hụt bị gộp vào bienPhi (chia cho doanh thu HÔM NAY) làm biên đóng góp
+// sụp về gần 0 những lúc mới bán được vài chục nghìn mà đã có một khoản hao hụt cố
+// định (một chai sữa hỏng không hề tỷ lệ với số ly đã bán) — kết quả hoà vốn vọt lên
+// hàng chục triệu dù hao hụt thật chỉ vài chục nghìn (xem lịch sử BUG-hoavon-haohut,
+// vụ "hao hụt 36k → hoà vốn 66,5tr" ngày mới mở bán). Khác với giá vốn/biến phí khác/
+// phí kênh — vốn thật sự tỷ lệ theo TỪNG LY bán ra — hao hụt là một khoản LỖ TUYỆT ĐỐI
+// đã xảy ra rồi, không co giãn theo doanh thu còn lại trong ngày. Đúng chỗ của nó là
+// cộng thẳng vào chi phí cố định cần đắp, giống hệt cách khấu hao đã được xử lý.
 function plBreakEven(pl, bienDuPhong){
   if(!pl) return null;
   const dt = Number(pl.doanhThu) || 0;
-  const bienPhi = (pl.giaVon||0) + (pl.haoHut||0) + (pl.bienPhiKhac||0) + (pl.phiKenh||0);
-  // Khấu hao nằm TRONG chi phí cố định — máy móc mòn dần là chi phí thật, doanh thu
-  // phải đắp được cả nó thì mới gọi là hoà vốn.
-  const coDinh = (pl.luong||0) + (pl.chiPhiCoDinh||0) + (pl.khauHao||0);
+  const bienPhi = (pl.giaVon||0) + (pl.bienPhiKhac||0) + (pl.phiKenh||0);
+  // Khấu hao VÀ hao hụt nằm TRONG chi phí cố định — cả hai là chi phí thật đã/sẽ
+  // phát sinh không phụ thuộc vào việc bán thêm được bao nhiêu ly, doanh thu phải
+  // đắp được cả hai thì mới gọi là hoà vốn.
+  const coDinh = (pl.luong||0) + (pl.chiPhiCoDinh||0) + (pl.khauHao||0) + (pl.haoHut||0);
   // Chưa bán được đồng nào thì không đo được biên của hôm nay — mượn biên tham chiếu
   // (30 ngày gần nhất) và nói rõ là ước tính, chứ không chia cho 0.
   const uocTinh = !(dt > 0);
@@ -8218,7 +8227,7 @@ function plLaiCardHTML(pl, be){
         ${be && be.hoaVon != null
           ? `Hoà vốn hôm nay <b>${fmt(be.hoaVon)}</b>${be.uocTinh ? ' <b style="color:var(--warn)">(ước tính)</b>' : ''} · bán <b>${fmt(pl.doanhThu)}</b> → ${be.dat ? `<b style="color:var(--ok)">trên ngưỡng ${fmt(pl.doanhThu-be.hoaVon)}</b>` : `<b style="color:var(--bad)">còn thiếu ${fmt(be.conThieu)}</b>`}`
           : (be && be.khongTheHoaVon
-              ? `<b style="color:var(--bad)">Không có điểm hoà vốn</b> — giá vốn và hao hụt đang ngốn hết ${fmtPct(be.tyLeBienPhi)} doanh thu, bán thêm một ly là lỗ thêm.`
+              ? `<b style="color:var(--bad)">Không có điểm hoà vốn</b> — giá vốn (và biến phí khác) đang ngốn hết ${fmtPct(be.tyLeBienPhi)} doanh thu, bán thêm một ly là lỗ thêm.`
               : 'Chưa tính được điểm hoà vốn')}
       </div>
       <button id="todayPLToggle" onclick="plToggleChiTiet()" style="margin-top:10px;background:none;border:none;padding:6px 0;color:var(--gd);font-weight:700;font-size:12.5px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;align-self:flex-start">Xem tách từng dòng${soGhiChuPL ? ` · ${soGhiChuPL} lưu ý` : ''} ${ic('chevronDown',14)}</button>
@@ -8226,7 +8235,7 @@ function plLaiCardHTML(pl, be){
         ${ghiChuPL}
         ${plRowHTML('Doanh thu', '+', pl.doanhThu)}
         ${plRowHTML('Giá vốn hàng bán', '−', pl.giaVon, pl.giaVonTopping>0 ? `gồm topping bán ${fmt(pl.giaVonTopping)}` : '')}
-        ${plRowHTML('Hao hụt & huỷ', '−', pl.haoHut, 'nguyên liệu hư + bán thành phẩm huỷ + ly đổ',
+        ${plRowHTML('Hao hụt & huỷ', '−', pl.haoHut, 'nguyên liệu hư + bán thành phẩm huỷ + ly đổ · <b>đã nằm trong ngưỡng hoà vốn</b>',
           pl.haoHut > 0 ? `openWasteDetailSheet('${pl.date}')` : '')}
         ${plRowHTML('Chi phí biến đổi', '−', pl.bienPhiKhac, 'khoản đã duyệt, danh mục gắn nhãn Biến đổi')}
         ${pl.phiKenh>0 ? plRowHTML('Phí sàn', '−', pl.phiKenh) : ''}
@@ -8241,8 +8250,8 @@ function plLaiCardHTML(pl, be){
           <span class="rv" style="color:${mau};font-size:17px"><b>${laLai?'':'−'}${fmt(Math.abs(pl.lai))}</b></span>
         </div>
         ${be && be.hoaVon != null ? `<div class="unit-explainer" style="margin-top:10px">
-          <b>Hoà vốn hôm nay = ${fmt(be.hoaVon)}</b> — lấy (lương + chi phí cố định + khấu hao) ${fmt(be.coDinh)} chia cho biên đóng góp ${fmtPct(be.bienDongGop)}.<br>
-          Khấu hao <b>đã cộng thẳng vào</b>, nên bán trên ngưỡng là lãi thật, không phải "lãi nhưng chưa trừ khấu hao".<br>
+          <b>Hoà vốn hôm nay = ${fmt(be.hoaVon)}</b> — lấy (lương + chi phí cố định + khấu hao + hao hụt) ${fmt(be.coDinh)} chia cho biên đóng góp ${fmtPct(be.bienDongGop)}.<br>
+          Khấu hao và hao hụt <b>đã cộng thẳng vào</b>, nên bán trên ngưỡng là lãi thật, không phải "lãi nhưng chưa trừ khấu hao/hao hụt". Hao hụt là khoản lỗ tuyệt đối đã xảy ra rồi, không tỷ lệ theo doanh thu còn bán được trong ngày nên không tính vào biên đóng góp — y hệt khấu hao.<br>
           Kiểm lại: (${fmt(pl.doanhThu)} − ${fmt(be.hoaVon)}) × ${fmtPct(be.bienDongGop)} = <b>${pl.lai>=0?'':'−'}${fmt(Math.abs(pl.lai))}</b>.
         </div>` : ''}
         <div class="unit-explainer" style="margin-top:10px">
