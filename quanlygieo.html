@@ -4608,11 +4608,9 @@ async function renderKhoContainers(){
     ['expired',   'Quá hạn sau mở'],
     ['open',      'Đang mở'],
     ['unlabeled', 'Tem chưa dán'],
-    ['allitems',  'Tem NL trong kho'],
     ['fixreceipt','Sửa phiếu nhận'],
     ['trace',     'Bill ↔ Tem']
   ];
-  if(ctnFilter === 'allitems'){ await renderKhoAllItems(box, tabs); return; }
   if(ctnFilter === 'fixreceipt'){ await renderKhoFixReceipt(box, tabs); return; }
   if(ctnFilter === 'trace'){ await renderKhoBillTrace(box, tabs); return; }
   let list = [];
@@ -4689,22 +4687,25 @@ async function renderKhoContainers(){
 // phần "có vấn đề cần xử lý". Bấm vào 1 tem mở đúng popup ctnShowDetail() đã có sẵn —
 // không làm lại UI chi tiết, chỉ đưa lối vào cho nhanh.
 // ============================================================
-async function renderKhoAllItems(box, tabs){
-  const nav = `<div class="filter-bar">${tabs.map(([k,l])=>
-      `<button class="ftag ${ctnFilter===k?'active':''}" onclick="ctnFilter='${k}'; renderKhoContainers();">${l}</button>`).join('')}</div>`;
+// Sống ở Kho 2.0 (chỉ đọc, truy xuất) chứ không phải Kho thường — xem renderEntryKho2()/
+// goKho2() và mục sidebar 'kho2:items'. Trước đây từng đặt nhầm vào renderKhoContainers()
+// (tab "Hàng đang mở & tem" của Kho thường), khiến không tìm thấy đúng chỗ đã yêu cầu.
+async function renderKho2Items(){
+  const box = document.getElementById('kho2Body');
+  if(!box) return;
   const subTabs = [
     ['sealed',   'Chưa mở',    'blue'],
     ['open',     'Đang mở',    'green'],
     ['finished', 'Đã báo hết', 'red']
   ];
-  const subNav = `<div class="filter-bar" style="margin-top:8px">${subTabs.map(([k,l])=>
+  const subNav = `<div class="filter-bar" style="margin-top:0">${subTabs.map(([k,l])=>
       `<button class="ftag ${ctnAllSub===k?'active':''}" onclick="ctnAllSub='${k}'; renderKhoAllItemsBody(true);">${l}</button>`).join('')}</div>`;
   const toolbar = `<div class="field" style="display:flex;gap:8px;align-items:flex-end;margin:10px 0">
       <div style="flex:1"><input type="text" placeholder="Tìm theo tên nguyên liệu hoặc mã tem..." value="${escapeHtmlAttr(ctnAllQuery)}"
         oninput="ctnAllQuery=this.value; renderKhoAllItemsBody(false);"></div>
       <button class="btn outline sm" style="width:auto;padding:0 12px" onclick="renderKhoAllItemsBody(true);">Làm mới</button>
     </div>`;
-  box.innerHTML = nav + subNav + toolbar + `<div id="ctnAllBody"></div>`;
+  box.innerHTML = subNav + toolbar + `<div id="ctnAllBody"></div>`;
   await renderKhoAllItemsBody(CTN_ALL_CACHE[ctnAllSub] === null);
 }
 
@@ -5190,11 +5191,13 @@ function renderEntryKho2(){
       <button class="ftag ${curKho2Sub==='dash'?'active':''}" onclick="goKho2('dash')">Tổng quan FIFO</button>
       <button class="ftag ${curKho2Sub==='search'?'active':''}" onclick="goKho2('search')">Tra cứu tem / bill / lô</button>
       <button class="ftag ${curKho2Sub==='prep'?'active':''}" onclick="goKho2('prep')">Bán thành phẩm (BTP)</button>
+      <button class="ftag ${curKho2Sub==='items'?'active':''}" onclick="goKho2('items')">Tem NL trong kho</button>
     </div>
     <div id="kho2Body"><div class="muted">Đang tải...</div></div>
   `;
   if(curKho2Sub==='search') renderKho2Search();
   else if(curKho2Sub==='prep') renderKho2Prep();
+  else if(curKho2Sub==='items') renderKho2Items();
   else renderKho2Dashboard();
 }
 
@@ -9851,6 +9854,7 @@ const NAV_SECTIONS = [
     {key:'kho2:dash',   ic:'pulse',  label:'Tổng quan FIFO',           go:"goKho2('dash')",   sub:'Chỉ đọc'},
     {key:'kho2:search', ic:'search', label:'Tra cứu tem / bill / lô',  go:"goKho2('search')"},
     {key:'kho2:prep',   ic:'note',   label:'Bán thành phẩm (BTP)',     go:"goKho2('prep')"},
+    {key:'kho2:items',  ic:'package',label:'Tem NL trong kho',         go:"goKho2('items')",  sub:'Chưa mở/Đang mở/Đã báo hết'},
   ]},
   // [GOM MÀN] Bốn mục này TRƯỚC ĐÂY nằm rải: hai cái trong nhánh Kho (vốn đã 16
   // mục), hai cái trong Cấu hình. Nhưng chúng không phải việc kho hằng ngày cũng
