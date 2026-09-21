@@ -637,6 +637,14 @@ html.tab-ui .kmini .kmval{font-size:21px;}
 }
 .report-subnav{display:flex;gap:9px;margin-bottom:18px;overflow-x:auto;padding:2px 0 4px;}
 
+/* [MỚI — bảng màu riêng cho tính năng mới/đã fix từ đây trở đi]: vàng + xanh #0062AD +
+   nền kem, KHÔNG đụng var(--gd) — đó là màu thương hiệu dùng khắp app, đổi thẳng biến đó
+   sẽ nhuộm lại toàn bộ nút/tab đang có, ngoài phạm vi được yêu cầu. Dùng thêm class .nf
+   (New Feature) cạnh .ftag/.litem khi muốn theo bảng màu này, không thay .ftag mặc định. */
+.ftag.nf{background:#FFF8E7;color:#0062AD;border:1.5px solid #0062AD;}
+.ftag.nf.active{background:#FFD34D;color:#0062AD;border-color:#0062AD;box-shadow:none;}
+.nf-bg{background:#FFF8E7;border-radius:var(--r-md,12px);}
+
 /* ---------- Điều hướng tuần ---------- */
 .weeknav{
   display:flex;align-items:center;justify-content:space-between;gap:12px;
@@ -4698,8 +4706,12 @@ async function renderKho2Items(){
     ['open',     'Đang mở',    'green'],
     ['finished', 'Đã báo hết', 'red']
   ];
+  // .nf (bảng màu mới — vàng/xanh #0062AD/kem) thay cho .ftag mặc định (đỏ hồng), CHỈ ở màn
+  // này. [FIX] onclick trước đây chỉ gọi renderKhoAllItemsBody() — không vẽ lại subNav nên
+  // nút "active" không bao giờ nhảy theo, cứ đứng yên ở "Chưa mở" dù đã bấm sang tab khác.
+  // Giờ gọi lại switchCtnAllSub() để cả subNav lẫn kết quả cùng vẽ lại đồng bộ.
   const subNav = `<div class="filter-bar" style="margin-top:0">${subTabs.map(([k,l])=>
-      `<button class="ftag ${ctnAllSub===k?'active':''}" onclick="ctnAllSub='${k}'; renderKhoAllItemsBody(true);">${l}</button>`).join('')}</div>`;
+      `<button class="ftag nf ${ctnAllSub===k?'active':''}" onclick="switchCtnAllSub('${k}')">${l}</button>`).join('')}</div>`;
   const toolbar = `<div class="field" style="display:flex;gap:8px;align-items:flex-end;margin:10px 0">
       <div style="flex:1"><input type="text" placeholder="Tìm theo tên nguyên liệu hoặc mã tem..." value="${escapeHtmlAttr(ctnAllQuery)}"
         oninput="ctnAllQuery=this.value; renderKhoAllItemsBody(false);"></div>
@@ -4707,6 +4719,10 @@ async function renderKho2Items(){
     </div>`;
   box.innerHTML = subNav + toolbar + `<div id="ctnAllBody"></div>`;
   await renderKhoAllItemsBody(CTN_ALL_CACHE[ctnAllSub] === null);
+}
+function switchCtnAllSub(sub){
+  ctnAllSub = sub;
+  renderKho2Items();
 }
 
 async function renderKhoAllItemsBody(reload){
@@ -4719,16 +4735,21 @@ async function renderKhoAllItemsBody(reload){
       const c = fstore.collection(CTN_COLL);
       let docs;
       if(ctnAllSub === 'finished'){
+        // [FIX] where('status','==',...) + orderBy('finishedAt',...) trên 2 field khác
+        // nhau đòi Firestore phải có composite index riêng — project này chưa có, nên
+        // luôn văng 'failed-precondition'. Đảo lại: orderBy MỘT MÌNH trên finishedAt (có
+        // sẵn single-field index tự động, không cần tạo gì thêm) rồi lọc status ở client.
         // Không đọc cả collection: quán chạy lâu là hàng nghìn bản ghi 'finished' cũ —
         // chỉ cần phần gần đây để xem "hiện đang" thế nào.
-        docs = (await c.where('status','==','finished').orderBy('finishedAt','desc').limit(200).get()).docs;
+        docs = (await c.orderBy('finishedAt','desc').limit(200).get()).docs
+          .filter(d => d.data().status === 'finished');
       } else {
         docs = (await c.where('status','==',ctnAllSub).get()).docs;
       }
       CTN_ALL_CACHE[ctnAllSub] = docs.map(d=>({id:d.id, ...d.data()}));
     }catch(err){
       console.error('renderKhoAllItemsBody lỗi', err);
-      body.innerHTML = '<div class="muted">Không đọc được danh sách. '+(err.code||err.message||'')+'</div>';
+      body.innerHTML = '<div class="muted">Không đọc được danh sách. '+(err.code||'')+'<div class="small-note" style="margin-top:6px">'+(err.message||'')+'</div></div>';
       return;
     }
   }
@@ -4751,8 +4772,12 @@ async function renderKhoAllItemsBody(reload){
 
   const p2 = n => String(n).padStart(2,'0');
   const dt = iso => { const d = iso?new Date(iso):null; return (d && !isNaN(d)) ? `${p2(d.getDate())}/${p2(d.getMonth()+1)} ${p2(d.getHours())}:${p2(d.getMinutes())}` : ''; };
-  const tagMap = { sealed: ['blue','Chưa mở'], open: ['green','Đang mở'], finished: ['red','Đã báo hết'] };
-  const [tagColor, tagLabel] = tagMap[ctnAllSub] || ['blue',''];
+  // Tag riêng theo bảng màu mới: Chưa mở = xanh #0062AD, Đang mở = vàng, Đã báo hết vẫn
+  // giữ tier-red — đây là trạng thái CẦN CHÚ Ý (tem đã dùng hết/không còn đại diện hàng),
+  // ý nghĩa cảnh báo khác hẳn 2 trạng thái kia nên không gộp chung 2 màu mới.
+  const tagHtml = ctnAllSub==='sealed' ? `<span class="tier" style="background:#e6f0fa;color:#0062AD">Chưa mở</span>`
+    : ctnAllSub==='open' ? `<span class="tier" style="background:#FFD34D;color:#7a5200">Đang mở</span>`
+    : `<span class="tier tier-red">Đã báo hết</span>`;
 
   body.innerHTML = (ghiChu ? `<div class="small-note" style="margin-bottom:10px">${ghiChu}</div>` : '')
     + `<div>` + list.map(c=>{
@@ -4761,12 +4786,12 @@ async function renderKhoAllItemsBody(reload){
         : ctnAllSub==='open'
         ? `Mở ${dt(c.openedAt)} bởi ${escapeHtmlAttr(c.openedBy||'—')} · còn ${fmtNum(c.unitBase,2)} ${escapeHtmlAttr(c.unit||'')}`
         : `Báo hết ${dt(c.finishedAt)} bởi ${escapeHtmlAttr(c.finishedBy||'—')}`;
-      return `<div class="litem" style="cursor:pointer" onclick="ctnShowDetail('${c.id}')">
+      return `<div class="litem nf-bg" style="cursor:pointer" onclick="ctnShowDetail('${c.id}')">
         <div class="li-l">
           <div>${escapeHtmlAttr(c.itemName||'')} <span class="muted-sm" style="letter-spacing:.4px">${escapeHtmlAttr(c.code||'')}</span></div>
           <div class="muted-sm">${phu}</div>
         </div>
-        <div class="li-r"><span class="tier tier-${tagColor}">${tagLabel}</span></div>
+        <div class="li-r">${tagHtml}</div>
       </div>`;
     }).join('') + `</div>`;
 }
