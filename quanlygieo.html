@@ -4358,9 +4358,25 @@ function fixRecWizTinh(){
   const theoLo = !!(tem.length && tem[0].trackingMode === 'batch');
   const heSo = theoLo ? 1 : fixRecHeSo(it, tem);
   const theoDonVi = !theoLo && heSo>1 && tem.length;
+
+  // [MỚI] Dòng KHÔNG CÓ TEM nào (kể cả món có bật dán tem nhưng lần nhận lỗi này sinh ra
+  // 0 tem — đúng kịch bản "nhập 1g thay vì 1 lon": createContainersForReceipt() làm tròn
+  // xuống 0 tem vì 1g chưa đủ 1 lon) — không có phép tính huỷ/giữ tem nào phải lo, nên cho
+  // chọn LẠI đơn vị nhập tự do (quy cách đã khai, hoặc đơn vị pha chế) thay vì bắt gõ thẳng
+  // ra gam. KHÔNG áp dụng khi tem.length>0: phép tính huỷ tem bên dưới đang ngầm định soDung
+  // là SỐ TEM (hoặc số base khi 1 tem=1 base), đổi đơn vị tự do ở đó sẽ tính sai số tem cần huỷ.
+  const coTheChonDonVi = tem.length === 0;
+  const cUnit = it ? itemCountUnit(it) : {name:l.unit||'', baseQty:1, isBase:true};
+  const freeUnitOpts = coTheChonDonVi
+    ? (cUnit.isBase ? [{label: l.unit||'', baseQty:1}] : [{label: cUnit.name, baseQty: cUnit.baseQty}, {label: l.unit||'', baseQty:1}])
+    : [];
+  const donViFactor = coTheChonDonVi ? (Number(w.donViFactor) || freeUnitOpts[0].baseQty || 1) : 1;
+
   const daGhiBase = Number(l.qtyGoodBase)||0;
-  const donVi = theoDonVi ? (tem[0].countUnitName || 'đơn vị') : (l.unit||'');
-  const daGhi = theoDonVi ? daGhiBase/heSo : daGhiBase;
+  const factor = theoDonVi ? heSo : donViFactor;
+  const donVi = theoDonVi ? (tem[0].countUnitName || 'đơn vị')
+    : (coTheChonDonVi ? ((freeUnitOpts.find(o=>o.baseQty===donViFactor)||{}).label || l.unit || '') : (l.unit||''));
+  const daGhi = daGhiBase/factor;
 
   const song   = tem.filter(c=>c.status==='sealed'||c.status==='open');
   const daDung = tem.filter(c=>c.status==='open'||c.status==='finished');
@@ -4373,7 +4389,7 @@ function fixRecWizTinh(){
   const raw = String(w.soDung).trim();
   const soDung = raw==='' ? null : Number(raw);
   const hopLe = soDung!==null && isFinite(soDung) && soDung>=0;
-  const baseDung = hopLe ? (theoDonVi ? soDung*heSo : soDung) : null;
+  const baseDung = hopLe ? soDung*factor : null;
   const thua = hopLe ? daGhiBase - baseDung : null;
 
   let huy = [], giu = song.slice(), canHuy = 0, thieuTem = 0;
@@ -4384,14 +4400,21 @@ function fixRecWizTinh(){
     giu = song.filter(c=>!huy.some(h=>h.id===c.id));
   }
   const tonHienTai = Number(it && it.currentStock) || 0;
-  return { l, it, tem, theoLo, heSo, theoDonVi, daGhiBase, daGhi, donVi, song, daDung, nguyen,
+  // [MỚI] Có phải "sửa tăng" là AN TOÀN không: chỉ khi món này CHƯA TỪNG cần dán tem
+  // (trackingMode 'none') — món có bật dán tem (dù dòng này đang lỡ 0 tem) mà tăng số
+  // ở đây sẽ tạo ra tồn "ma": Firestore đúng số nhưng không có tem/container nào đại
+  // diện, Unit Engine bên POS sẽ không biết lấy hàng đó từ đâu khi bán/nấu. Trường hợp
+  // đó phải nhận lại qua đúng POS ▸ Nhận hàng để sinh tem thật.
+  const coDanTem = !!(it && (it.trackingMode==='unit' || it.trackingMode==='batch'));
+  return { l, it, tem, theoLo, heSo, theoDonVi, coTheChonDonVi, freeUnitOpts, donViFactor, coDanTem, factor,
+           daGhiBase, daGhi, donVi, song, daDung, nguyen,
            soDung, hopLe, baseDung, thua, huy, giu, canHuy, thieuTem, tonHienTai };
 }
 
 function fixRecWizSet(f, v){ if(FIXREC_WIZ){ FIXREC_WIZ[f] = v; if(f==='soDung') fixRecWizRenderTomTat(); } }
 function fixRecWizGo(step){ if(!FIXREC_WIZ) return; FIXREC_WIZ.step = step; fixRecWizRender(); }
 
-function fixRecWizChonDong(i){ if(!FIXREC_WIZ) return; FIXREC_WIZ.lineIdx = i; FIXREC_WIZ.step = 2; fixRecWizRender(); }
+function fixRecWizChonDong(i){ if(!FIXREC_WIZ) return; FIXREC_WIZ.lineIdx = i; FIXREC_WIZ.step = 2; FIXREC_WIZ.donViFactor = null; fixRecWizRender(); }
 
 function fixRecWizTiepTuc(){
   const c = fixRecWizTinh();
@@ -4402,7 +4425,7 @@ function fixRecWizTiepTuc(){
   // món có tem phải qua đúng luồng POS ▸ Nhận hàng (sinh tem đàng hoàng). Món KHÔNG dán tem
   // (vd bị ghi nhầm đơn vị pha chế thay vì đơn vị đóng gói) thì tăng hay giảm cũng chỉ là sửa
   // một con số trong sổ — không có tem nào để huỷ/sinh, cho sửa cả hai chiều luôn.
-  if(c.thua < 0 && c.tem.length){ toast('⚠️ Món này có tem — màn này không sinh được tem mới. Nhận thêm thì ghi phiếu nhận bổ sung ở app POS ▸ Kho ▸ Nhận hàng để có tem đúng lô.'); return; }
+  if(c.thua < 0 && c.coDanTem){ toast('⚠️ Món này có bật dán tem — màn này không sinh được tem mới. Nhận thêm thì ghi phiếu nhận bổ sung ở app POS ▸ Kho ▸ Nhận hàng để có tem đúng lô.'); return; }
   if(!String(FIXREC_WIZ.lyDo||'').trim()){ toast('⚠️ Phải ghi lý do — phiếu nhận sẽ lưu lại lý do này'); return; }
   fixRecWizGo(3);
 }
@@ -4449,16 +4472,33 @@ function fixRecWizB1(body){
     }).join('') || '<div class="empty-hint">Phiếu này không có dòng nào nhận hàng lành.</div>'}`;
 }
 
+function fixRecWizSetUnit(factor){
+  if(!FIXREC_WIZ) return;
+  FIXREC_WIZ.donViFactor = Number(factor)||1;
+  // Đổi đơn vị thì số đã gõ (nếu có) đang tính theo đơn vị CŨ — giữ nguyên số dễ đọc nhầm
+  // thành số mới đúng, nên xoá để nhập lại cho chắc thay vì âm thầm quy đổi hộ.
+  FIXREC_WIZ.soDung = '';
+  fixRecWizB2(document.getElementById('fixrec-body'));
+}
 function fixRecWizB2(body){
   const w = FIXREC_WIZ, c = fixRecWizTinh();
   if(!c){ body.innerHTML = '<div class="muted">Không đọc được dòng này.</div>'; return; }
+  // [MỚI] Chỉ hiện khi dòng này không có tem nào (xem giải thích ở fixRecWizTinh) — cho
+  // chọn quy cách đóng gói đã khai (VD "Lon") thay vì bắt gõ thẳng ra đơn vị pha chế, cùng
+  // lý do và cùng cách làm với bản vá "nhập hàng tự do" bên POS.
+  const unitPicker = (c.coTheChonDonVi && c.freeUnitOpts.length>1) ? `
+    <div class="field"><label>Đơn vị nhập</label>
+      <div class="seg">${c.freeUnitOpts.map(o=>`<button type="button" class="${o.baseQty===c.donViFactor?'active':''}" onclick="fixRecWizSetUnit(${o.baseQty})">${escapeHtmlAttr(o.label)}${o.baseQty>1?` (=${fmtNum(o.baseQty,0)} ${escapeHtmlAttr(c.l.unit||'')})`:''}</button>`).join('')}</div>
+    </div>` : '';
   body.innerHTML = `
     <div class="card" style="margin:0 0 12px;padding:14px">
       <div style="font-size:16px;font-weight:700;color:var(--td)">${escapeHtmlAttr(c.l.name||'')}</div>
-      <div class="muted-sm" style="margin-top:4px">Hệ thống đang ghi <b>${fmtNum(c.daGhi,2)} ${escapeHtmlAttr(c.donVi)}</b>${c.theoDonVi?` (= ${fmtNum(c.daGhiBase,0)} ${escapeHtmlAttr(c.l.unit||'')})`:''}</div>
-      ${c.tem.length?`<div class="muted-sm">${c.song.length} tem còn sống${c.daDung.length?` · <b style="color:var(--warn)">${c.daDung.length} đã mở/đã dùng</b>`:''}</div>`:'<div class="muted-sm">Món này không dán tem</div>'}
+      <div class="muted-sm" style="margin-top:4px">Hệ thống đang ghi <b>${fmtNum(c.daGhi,2)} ${escapeHtmlAttr(c.donVi)}</b>${c.factor>1?` (= ${fmtNum(c.daGhiBase,0)} ${escapeHtmlAttr(c.l.unit||'')})`:''}</div>
+      ${c.tem.length?`<div class="muted-sm">${c.song.length} tem còn sống${c.daDung.length?` · <b style="color:var(--warn)">${c.daDung.length} đã mở/đã dùng</b>`:''}</div>`
+        : (c.coDanTem ? '<div class="muted-sm">Món có bật dán tem, nhưng lần nhận này đang có 0 tem</div>' : '<div class="muted-sm">Món này không dán tem</div>')}
       ${fixRecLichSuSua(w.rec, c.l.itemId)}
     </div>
+    ${unitPicker}
     <div class="field"><label>Số ĐÚNG theo đơn hàng thật (${escapeHtmlAttr(c.donVi)})</label>
       <input type="number" step="0.01" min="0" id="fixrecQty" value="${escapeHtmlAttr(String(w.soDung))}"
              oninput="fixRecWizSet('soDung', this.value)" placeholder="VD: 3"></div>
@@ -4483,8 +4523,8 @@ function fixRecWizRenderTomTat(){
   if(!el) return;
   if(!c || !c.hopLe || Math.abs(c.thua) < 1e-9){ el.innerHTML = ''; return; }
   if(c.thua < 0){
-    if(c.tem.length){
-      el.innerHTML = `<div class="small-note" style="color:var(--bad);margin-top:8px">Số mới LỚN HƠN số đang ghi, và món này CÓ TEM. Màn này không sinh được tem mới cho phần nhận thêm — ghi phiếu nhận bổ sung ở app POS ▸ Kho ▸ Nhận hàng để giá vốn vào đúng lô, có tem đầy đủ.</div>`;
+    if(c.coDanTem){
+      el.innerHTML = `<div class="small-note" style="color:var(--bad);margin-top:8px">Số mới LỚN HƠN số đang ghi, và món này có bật dán tem${c.tem.length?'':' (lần nhận này lỗi nên đang có 0 tem)'}. Màn này không sinh được tem mới cho phần nhận thêm — ghi phiếu nhận bổ sung ở app POS ▸ Kho ▸ Nhận hàng để giá vốn vào đúng lô, có tem đầy đủ.</div>`;
       return;
     }
     el.innerHTML = `<div class="small-note" style="margin-top:8px;line-height:1.7">Món này không dán tem — sẽ <b>cộng thêm ${fmtNum(-c.thua,0)} ${escapeHtmlAttr(c.l.unit||'')}</b> vào tồn kho, không có tem nào cần huỷ/sinh.</div>`;
@@ -4533,7 +4573,7 @@ async function fixRecWizApply(){
   // [SỬA] Cho phép cả thua<0 (tăng) khi KHÔNG có tem — cùng điều kiện với
   // fixRecWizTiepTuc()/fixRecWizRenderTomTat(). Chặn tem>0 phòng trường hợp bấm thẳng
   // vào Xác nhận qua đường khác (ít khả năng nhưng rẻ để chặn lại lần nữa cho chắc).
-  if(!c || !c.hopLe || Math.abs(c.thua) < 1e-9 || (c.thua < 0 && c.tem.length)){ toast('⚠️ Dữ liệu không hợp lệ'); return; }
+  if(!c || !c.hopLe || Math.abs(c.thua) < 1e-9 || (c.thua < 0 && c.coDanTem)){ toast('⚠️ Dữ liệu không hợp lệ'); return; }
   const lyDoNguoiDung = String(w.lyDo||'').trim();
   if(!lyDoNguoiDung){ toast('⚠️ Phải ghi lý do'); fixRecWizGo(2); return; }
   w.dangLuu = true;
