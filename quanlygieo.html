@@ -5069,7 +5069,59 @@ function _ctnDetailRender(box, c, recv){
         <span class="rv" style="white-space:nowrap;font-weight:400">${dt(e.at)}</span>
       </div>`).join('') : '<div class="muted">Chưa có sự kiện nào.</div>'}
     ${noUsageWarning}
+    ${(c.status==='finished' && c.wasteBasis==='don_vi_nguyen' && !c.revertedFinish) ? `
+    <div class="small-note" style="margin-top:14px;padding:10px;border:1px solid var(--warn);border-radius:10px;color:var(--warn)">
+      Tem "cái rời" này bị đánh dấu <b>đã dùng hết</b> lúc quét ở cổng bắt buộc trước khi nấu — quét ở đây coi như gói đã bị MỞ RA DÙNG.
+      Nếu thực tế nhân viên CHƯA MỞ gói này (quét lỡ, hoặc bấm "Bắt đầu chế biến" sau đó bị lỗi không tạo được lô nấu) thì tồn kho đang bị trừ OAN — bấm "Khôi phục" bên dưới để trả tem này về "chưa mở", cộng lại đúng số lượng vào tồn kho.
+      <b>Chỉ bấm nếu chắc chắn gói CHƯA bị mở</b> — nếu nguyên liệu đã thực sự được dùng để nấu, đừng khôi phục ở đây; thay vào đó ghi nhận sản lượng bán thành phẩm ra được qua "Điều chỉnh tồn BTP".
+    </div>
+    <button class="btn outline" style="width:100%;margin-top:8px;color:var(--warn);border-color:var(--warn)" onclick="ctnRestoreAtomicSealed('${c.id}')">Khôi phục về "Chưa mở"</button>
+    ` : ''}
+    ${c.revertedFinish ? `<div class="small-note" style="margin-top:10px;color:var(--ok)">Đã khôi phục về "sealed" lúc ${dt(c.revertedFinish.at)} bởi ${escapeHtmlAttr(c.revertedFinish.by||'—')}${c.revertedFinish.reason?' · lý do: '+escapeHtmlAttr(c.revertedFinish.reason):''}</div>` : ''}
   `;
+}
+
+// [MỚI] Khôi phục MỘT tem "cái rời" (đơn vị nguyên) bị writeAtomicContainerFinish() bên
+// POS chốt 'finished' oan — dùng khi: nhân viên quét mã ở cổng bắt buộc trước khi nấu
+// (startPrepBatchGate/prepStartGateScan bên posgieo.html), nhưng bước "Bắt đầu chế biến"
+// sau đó KHÔNG tạo được lô (lỗi mạng/quyền Firestore...) nên không có "Đang chế biến" nào
+// để mà Huỷ mẻ (đường hoàn tem vốn có sẵn ở đó). Tem bị kẹt vĩnh viễn ở 'finished' dù gói
+// chưa từng thực sự bị mở ra dùng, kho nguyên liệu bị trừ oan.
+//
+// Đối xứng với _reverseAtomicContainerFinish() bên POS, nhưng nguyên liệu "cái rời" không
+// bao giờ đi qua RTDB (xem writeAtomicContainerFinish) nên khỏi cần đụng Unit Engine/RTDB gì
+// cả — chỉ cần trả status về 'sealed' và cộng lại đúng baseQty vào tồn kho. Dùng
+// applyStockTransaction() (không sửa thẳng currentStock) để món có tem vẫn cộng đúng vào
+// untrackedPendingDelta, không bị Unit Engine ghi đè mất ở lượt recompute kế tiếp.
+async function ctnRestoreAtomicSealed(containerId){
+  try{
+    await ensureAuth();
+    const ref = fstore.collection(CTN_COLL).doc(containerId);
+    const doc = await ref.get();
+    if(!doc.exists){ toast('⚠️ Không tìm thấy tem này'); return; }
+    const c = doc.data();
+    if(c.status !== 'finished' || c.wasteBasis !== 'don_vi_nguyen'){
+      toast('⚠️ Tem này không ở đúng trạng thái để khôi phục kiểu này'); return;
+    }
+    if(!confirm(`Khôi phục tem ${c.code||''} (${c.itemName||''}) về "chưa mở" — cộng lại ${fmtNum(c.baseQty,2)} ${c.unit||''} vào tồn kho?\n\nCHỈ làm việc này nếu chắc chắn gói CHƯA bị mở ra dùng thật.`)) return;
+    await ref.update({
+      status: 'sealed',
+      revertedFinish: { at: new Date().toISOString(), by: 'management', reason: 'Bắt đầu chế biến lỗi, không tạo được lô nấu — quét ở cổng bị kẹt oan' }
+    });
+    await applyStockTransaction({
+      itemId: c.itemId, type: 'ADJUSTMENT', qty: Number(c.baseQty) || 0,
+      note: `Khôi phục tem ${c.code||''} bị chốt "cái rời" oan (lô chế biến không tạo được) — quản lý xác nhận gói chưa mở`,
+      staff: '', source: 'management', referenceId: containerId
+    });
+    logAudit('adjust','stock_container',containerId,{restoreAtomicSealed: Number(c.baseQty)||0});
+    toast('✅ Đã khôi phục tem về "chưa mở"');
+    const box = document.getElementById('ctnDetailBody');
+    if(box){ const fresh = await ref.get(); _ctnDetailRender(box, {id:containerId, ...fresh.data()}, null); }
+    if(typeof renderKhoAllItemsBody === 'function' && document.getElementById('ctnAllBody')) renderKhoAllItemsBody(true);
+  }catch(err){
+    console.error('ctnRestoreAtomicSealed lỗi', err);
+    showError('Không khôi phục được: '+(err.code||err.message||err));
+  }
 }
 
 // ============================================================
