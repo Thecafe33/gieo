@@ -4162,7 +4162,10 @@ async function renderKhoLegacyStock(box, tabs){
 
   box.innerHTML = nav +
     `<div class="small-note" style="margin-bottom:12px">${giaiThich}</div>` +
-    (chuaChot ? `<div class="small-note" style="color:var(--warn);margin-bottom:12px"><b>${chuaChot} món chưa chốt mốc.</b> Chốt càng sớm càng đúng — để lâu thì hàng vào ra vài lượt, con số lịch sử không dựng lại được nữa.</div>` : '') +
+    (chuaChot ? `<div class="small-note" style="color:var(--warn);margin-bottom:12px">
+        <b>${chuaChot} món chưa chốt mốc.</b> Đây là việc làm MỘT LẦN cho mỗi món, không tự phát sinh lại — vẫn hiện mỗi lần mở tab này chỉ vì chưa ai bấm Chốt mốc cho ${chuaChot} món đó. Chốt càng sớm càng đúng — để lâu thì hàng vào ra vài lượt, con số lịch sử không dựng lại được nữa.
+        <br><button class="btn outline sm" style="width:auto;padding:0 12px;margin-top:8px" onclick="chotTatCaTonLichSu()">Chốt tất cả ${chuaChot} món theo đề xuất</button>
+      </div>` : '') +
     (!rows.length ? '<div class="empty-hint">Chưa có nguyên liệu nào bật dán tem.</div>' :
       rows.map((r,i)=>{
         const dv = escapeHtmlAttr(r.it.unit||'');
@@ -4725,6 +4728,35 @@ async function chotTonLichSu(idx){
     console.error('chotTonLichSu lỗi', err);
     showError('Không chốt được: '+(err.code||err.message||err));
   }
+}
+
+// [MỚI] Chốt hàng loạt — dành cho lúc mới bật tính năng này, tồn đọng hàng chục món chưa
+// chốt (mỗi món vẫn phải bấm riêng nếu chỉ có nút "Chốt mốc" từng dòng). Áp đúng công thức
+// đề xuất (Sổ − tem đang giữ) cho MỌI món đang chưa chốt cùng lúc — không hỏi lại từng món
+// bằng prompt() như chotTonLichSu(), vì hỏi 34 lần không nhanh hơn bấm 34 lần. Món nào đề
+// xuất sai (hiếm, thường do tem bị gán nhầm itemId) vẫn "Chốt lại" riêng được sau như thường.
+async function chotTatCaTonLichSu(){
+  const rows = LEGACY_ROWS_CACHE.filter(r=>r.moc===null);
+  if(!rows.length){ toast('ℹ️ Không còn món nào chưa chốt'); return; }
+  const am = rows.filter(r=>r.deXuat<0);
+  if(!confirm(`Chốt mốc tồn lịch sử cho ${rows.length} món theo đúng công thức "Sổ − tem đang giữ" (số đề xuất đang hiện ở từng dòng)?`
+    + (am.length ? `\n\n${am.length} món có đề xuất ÂM (tem đang giữ nhiều hơn sổ, thường do gán nhầm tem) — sẽ chốt về 0 thay vì số âm, tự soát lại riêng các món này sau.` : '')
+    + `\n\nMón nào chốt sai vẫn "Chốt lại" riêng được, không mất gì nếu sửa lại sau.`)) return;
+  let ok=0, fail=0;
+  for(const r of rows){
+    const moc = Math.max(0, Math.round(r.deXuat*100)/100);
+    try{
+      await updateInventoryItemMeta(r.it.id, {
+        untrackedBase: moc, untrackedBaseAt: new Date().toISOString(),
+        untrackedBaseBy: 'management',
+        untrackedBaseNote: `Chốt hàng loạt · sổ ${fmtNum(r.ton,2)} − tem ${fmtNum(r.tem,2)} ${r.it.unit||''}`
+      });
+      logAudit('update','inventory_item',r.it.id,{untrackedBase: moc, truoc: null, hangLoat:true});
+      ok++;
+    }catch(err){ console.warn('[chốt hàng loạt] lỗi', r.it.id, err); fail++; }
+  }
+  toast(fail ? `⚠️ Đã chốt ${ok}/${rows.length} món, ${fail} món lỗi — thử lại riêng món đó` : `✅ Đã chốt mốc cho ${ok} món`);
+  renderKhoContainers();
 }
 
 // Xoá tồn lịch sử khỏi sổ bằng ĐIỀU CHỈNH — không phải hao hụt. Không có hàng nào bị đổ đi;
