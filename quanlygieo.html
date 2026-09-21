@@ -4003,6 +4003,12 @@ function addInventoryItem(data){
 const CTN_COLL = 'stock_containers_gieogieo';
 let ctnFilter = 'review';      // review | expired | unlabeled | open | all
 let CONTAINERS_CACHE = [];
+// [MỚI] Tab "Tem NL trong kho" — toàn bộ tem nguyên liệu, lọc theo trạng thái vật lý thật
+// của chai/gói (không phải theo "có vấn đề hay không" như các tab review/expired/unlabeled
+// ở trên). ctnAllSub: sealed (chưa mở) | open (đang mở) | finished (đã báo hết).
+let ctnAllSub = 'sealed';
+let ctnAllQuery = '';
+let CTN_ALL_CACHE = { sealed: null, open: null, finished: null };
 
 function goContainers(filter){
   ctnFilter = filter || 'review';
@@ -4602,9 +4608,11 @@ async function renderKhoContainers(){
     ['expired',   'Quá hạn sau mở'],
     ['open',      'Đang mở'],
     ['unlabeled', 'Tem chưa dán'],
+    ['allitems',  'Tem NL trong kho'],
     ['fixreceipt','Sửa phiếu nhận'],
     ['trace',     'Bill ↔ Tem']
   ];
+  if(ctnFilter === 'allitems'){ await renderKhoAllItems(box, tabs); return; }
   if(ctnFilter === 'fixreceipt'){ await renderKhoFixReceipt(box, tabs); return; }
   if(ctnFilter === 'trace'){ await renderKhoBillTrace(box, tabs); return; }
   let list = [];
@@ -4671,6 +4679,93 @@ async function renderKhoContainers(){
           ${ctnFilter==='review'
           ? `<button class="btn outline sm" style="width:auto;padding:0 10px;margin-left:8px" onclick="ctnMarkReviewed('${c.id}')">Đã xem</button>`
           : ''}</div>
+      </div>`;
+    }).join('') + `</div>`;
+}
+
+// ============================================================
+// [MỚI] "Tem NL trong kho" — xem TOÀN BỘ tem nguyên liệu theo trạng thái vật lý thật
+// (chưa mở/đang mở/đã báo hết), khác với review/expired/unlabeled ở trên vốn chỉ lọc ra
+// phần "có vấn đề cần xử lý". Bấm vào 1 tem mở đúng popup ctnShowDetail() đã có sẵn —
+// không làm lại UI chi tiết, chỉ đưa lối vào cho nhanh.
+// ============================================================
+async function renderKhoAllItems(box, tabs){
+  const nav = `<div class="filter-bar">${tabs.map(([k,l])=>
+      `<button class="ftag ${ctnFilter===k?'active':''}" onclick="ctnFilter='${k}'; renderKhoContainers();">${l}</button>`).join('')}</div>`;
+  const subTabs = [
+    ['sealed',   'Chưa mở',    'blue'],
+    ['open',     'Đang mở',    'green'],
+    ['finished', 'Đã báo hết', 'red']
+  ];
+  const subNav = `<div class="filter-bar" style="margin-top:8px">${subTabs.map(([k,l])=>
+      `<button class="ftag ${ctnAllSub===k?'active':''}" onclick="ctnAllSub='${k}'; renderKhoAllItemsBody(true);">${l}</button>`).join('')}</div>`;
+  const toolbar = `<div class="field" style="display:flex;gap:8px;align-items:flex-end;margin:10px 0">
+      <div style="flex:1"><input type="text" placeholder="Tìm theo tên nguyên liệu hoặc mã tem..." value="${escapeHtmlAttr(ctnAllQuery)}"
+        oninput="ctnAllQuery=this.value; renderKhoAllItemsBody(false);"></div>
+      <button class="btn outline sm" style="width:auto;padding:0 12px" onclick="renderKhoAllItemsBody(true);">Làm mới</button>
+    </div>`;
+  box.innerHTML = nav + subNav + toolbar + `<div id="ctnAllBody"></div>`;
+  await renderKhoAllItemsBody(CTN_ALL_CACHE[ctnAllSub] === null);
+}
+
+async function renderKhoAllItemsBody(reload){
+  const body = document.getElementById('ctnAllBody');
+  if(!body) return;
+  if(reload){
+    showLoading(body);
+    try{
+      await ensureAuth();
+      const c = fstore.collection(CTN_COLL);
+      let docs;
+      if(ctnAllSub === 'finished'){
+        // Không đọc cả collection: quán chạy lâu là hàng nghìn bản ghi 'finished' cũ —
+        // chỉ cần phần gần đây để xem "hiện đang" thế nào.
+        docs = (await c.where('status','==','finished').orderBy('finishedAt','desc').limit(200).get()).docs;
+      } else {
+        docs = (await c.where('status','==',ctnAllSub).get()).docs;
+      }
+      CTN_ALL_CACHE[ctnAllSub] = docs.map(d=>({id:d.id, ...d.data()}));
+    }catch(err){
+      console.error('renderKhoAllItemsBody lỗi', err);
+      body.innerHTML = '<div class="muted">Không đọc được danh sách. '+(err.code||err.message||'')+'</div>';
+      return;
+    }
+  }
+  let list = CTN_ALL_CACHE[ctnAllSub] || [];
+  const q = ctnAllQuery.trim().toLowerCase();
+  if(q) list = list.filter(c => String(c.itemName||'').toLowerCase().includes(q) || String(c.code||'').toLowerCase().includes(q));
+
+  const sortKey = c => ctnAllSub==='finished' ? c.finishedAt : (ctnAllSub==='open' ? c.openedAt : c.receivedAt);
+  list = list.slice().sort((a,b)=> String(sortKey(b)||'').localeCompare(String(sortKey(a)||'')));
+
+  const ghiChu = ctnAllSub==='finished'
+    ? 'Chỉ hiện 200 lô báo hết gần nhất — bấm "Làm mới" để tải lại đúng 200 lô mới nhất.'
+    : '';
+
+  if(!list.length){
+    body.innerHTML = `<div class="empty-hint">${q ? 'Không tìm thấy tem nào khớp.' : 'Không có tem nào ở nhóm này.'}</div>`
+      + (ghiChu ? `<div class="small-note" style="margin-top:10px">${ghiChu}</div>` : '');
+    return;
+  }
+
+  const p2 = n => String(n).padStart(2,'0');
+  const dt = iso => { const d = iso?new Date(iso):null; return (d && !isNaN(d)) ? `${p2(d.getDate())}/${p2(d.getMonth()+1)} ${p2(d.getHours())}:${p2(d.getMinutes())}` : ''; };
+  const tagMap = { sealed: ['blue','Chưa mở'], open: ['green','Đang mở'], finished: ['red','Đã báo hết'] };
+  const [tagColor, tagLabel] = tagMap[ctnAllSub] || ['blue',''];
+
+  body.innerHTML = (ghiChu ? `<div class="small-note" style="margin-bottom:10px">${ghiChu}</div>` : '')
+    + `<div>` + list.map(c=>{
+      const phu = ctnAllSub==='sealed'
+        ? `Nhận ${dt(c.receivedAt)} bởi ${escapeHtmlAttr(c.receivedBy||'—')}`
+        : ctnAllSub==='open'
+        ? `Mở ${dt(c.openedAt)} bởi ${escapeHtmlAttr(c.openedBy||'—')} · còn ${fmtNum(c.unitBase,2)} ${escapeHtmlAttr(c.unit||'')}`
+        : `Báo hết ${dt(c.finishedAt)} bởi ${escapeHtmlAttr(c.finishedBy||'—')}`;
+      return `<div class="litem" style="cursor:pointer" onclick="ctnShowDetail('${c.id}')">
+        <div class="li-l">
+          <div>${escapeHtmlAttr(c.itemName||'')} <span class="muted-sm" style="letter-spacing:.4px">${escapeHtmlAttr(c.code||'')}</span></div>
+          <div class="muted-sm">${phu}</div>
+        </div>
+        <div class="li-r"><span class="tier tier-${tagColor}">${tagLabel}</span></div>
       </div>`;
     }).join('') + `</div>`;
 }
