@@ -18451,7 +18451,11 @@ function newPrepDraft(){
   return { code:'CB'+String(next).padStart(2,'0'), name:'', unit:'g', wastePct:0, batchYield:0, batchInputs:[],
            shelfLifeType:'endOfDay', shelfLifeHours:0, prepTimeMinutes:0, dailyTarget:0,
            // [MỚI] Dụng cụ đựng để nhân viên cân cả vật đựng, hệ thống tự trừ bì.
-           vesselIds:[] };
+           vesselIds:[],
+           // [MỚI] Cách chế biến — hướng dẫn từng bước, POS hiện lại ngay dưới ô "Nguyên
+           // liệu cần cân" và ở nút "Xem công thức" khi lô đang nấu (xem openPrepRecipeView
+           // ở posgieo.html) — BTP nhiều bước không cần nhân viên nhớ hết hoặc hỏi lại.
+           instructions:'' };
 }
 function prepResetForm(){ editingPrepId=null; prepDraft=null; renderKhoPrep(); }
 function prepStartNew(){ editingPrepId=null; prepDraft=newPrepDraft(); renderKhoPrep(); }
@@ -18466,7 +18470,9 @@ function prepStartEdit(id){
                 shelfLifeType:p.shelfLifeType||'endOfDay', shelfLifeHours:Number(p.shelfLifeHours)||0,
                 prepTimeMinutes:Number(p.prepTimeMinutes)||0, dailyTarget:Number(p.dailyTarget)||0,
                 // BTP khai trước khi có tính năng cân trừ bì chưa có field này.
-                vesselIds:(p.vesselIds||[]).slice(0) };
+                vesselIds:(p.vesselIds||[]).slice(0),
+                // BTP khai trước khi có tính năng này thì chưa có cách chế biến — để trống.
+                instructions:p.instructions||'' };
   renderKhoPrep();
 }
 function prepAddInput(){
@@ -18682,6 +18688,13 @@ async function renderKhoPrep(){
       <div id="prepEditorBox"></div>
       <button type="button" class="btn outline sm" style="margin-top:6px" onclick="prepAddInput()">+ Thêm nguyên liệu</button>
 
+      <div class="sec-title">Cách chế biến</div>
+      <div class="field">
+        <label>Hướng dẫn từng bước (tuỳ chọn)</label>
+        <textarea rows="5" oninput="prepFieldChange('instructions',this.value)" placeholder="VD: 1. Đun sôi 2L nước. 2. Cho trà vào, ủ 15 phút. 3. Lọc bã, để nguội...">${escapeHtmlAttr(prepDraft.instructions||'')}</textarea>
+      </div>
+      <div class="unit-explainer">POS hiện lại đúng nội dung này ngay dưới ô "Nguyên liệu cần cân" lúc chọn nấu, và ở nút "Xem công thức" khi lô đang chế biến — BTP nhiều bước khỏi phải nhớ hết hoặc hỏi lại giữa chừng.</div>
+
       <div class="sec-title">Sản lượng &amp; giá thành</div>
       <div class="row"><span class="rl">Tổng đầu vào</span><span class="rv" id="prepTotalQty">—</span></div>
       <div class="row"><span class="rl">Tổng chi phí nguyên liệu</span><span class="rv" id="prepTotalCost">—</span></div>
@@ -18833,7 +18846,9 @@ async function submitPrepItem(){
                  // đang mở mà lưu lại id chết thì POS hiện ô trống không bấm được.
                  vesselIds: vesselUnitSupported(prepDraft.unit)
                    ? (prepDraft.vesselIds||[]).filter(id=>VESSELS.some(v=>v.id===id)).slice(0, PREP_MAX_VESSELS)
-                   : [] };
+                   : [],
+                 // [MỚI] Cách chế biến — xem ghi chú ở newPrepDraft().
+                 instructions: (prepDraft.instructions||'').trim() };
   try{
     if(editingPrepId){
       // [FIX — "BTP cũng cần lịch sử áp dụng"] Chép công thức CŨ trước khi ghi đè —
