@@ -16640,149 +16640,150 @@ async function computePrepCountLinesPOS() {
 // Lý do bỏ: kể cả khi chỉ dùng để "gợi ý", con số chia ra vẫn là số ĐOÁN chứ không
 // phải số cân thật của từng lô — nhân viên vội thì bấm xác nhận luôn, và tồn từng
 // lô đi vào hệ thống bằng một phép đoán. Từ nay BTP nào đang có từ 2 lô trở lên thì
-// BẮT BUỘC cân riêng từng lô theo tem (xem renderPrepCountLinePerBatch); không còn
+// BẮT BUỘC cân riêng từng lô theo tem (xem renderPrepCountCard); không còn
 // bất kỳ đường nào nhập một số tổng gộp cho nhiều lô.
 
 let _prepCountState = [];
+// [THIẾT KẾ LẠI] Chỉ số BTP (dòng trong _prepCountState) đang hiện trên màn — màn
+// giờ hiện TỪNG BTP một dạng thẻ, lướt qua bằng nút back + "Tiếp tục", thay vì cuộn
+// một danh sách dài mọi loại cùng lúc. Đây là bước nhân viên bị kẹt lâu nhất trong
+// cả luồng kết ca.
+let _prepCountCardIdx = 0;
 
-// [FIX] Mỗi dòng giờ có thêm:
-//   perBatch    — true nếu có ≥2 lô active (bắt đếm/nhập riêng từng lô theo tem)
-//   batchQty    — Map<batchId, số nhân viên nhập/hệ thống gợi ý cho ĐÚNG lô đó>
-//   batchDone   — Map<batchId, true> nếu bấm "Hết lô này / Không thấy tem"
-// counted (tổng thật sẽ lưu) LUÔN LUÔN = tổng các batchQty đã nhập, không còn là
-// một số tổng nhập tay rồi bị thuật toán cũ "đoán" chia ngược — cách cũ chính là
-// nguyên nhân lô mới nấu bị đánh nhầm thành "đã dùng hết".
-// [FIX 2026-09] Dòng ≥2 lô KHÔNG còn ô "Tổng cân nhanh" và KHÔNG còn nút cân tổng:
-// muốn có số thì phải cân/gõ từng lô, hoặc bấm "Hết" cho lô đã dùng hết.
+// [FIX] Mỗi dòng có:
+//   batchQty    — Map<batchId, số CÂN THẬT của đúng lô đó (chỉ đến từ bộ cân)>
+//   batchDone   — Map<batchId, true> nếu bấm "Báo hết / không thấy tem"
+// counted (tổng thật sẽ lưu) LUÔN LUÔN = tổng các batchQty đã nhập — không còn cách
+// nào nhập một số tổng rồi chia ngược cho nhiều lô (số đoán từng gây lô mới nấu bị
+// đánh nhầm thành "đã dùng hết").
+// [SỬA] Bỏ hẳn nhánh "1 lô dùng UI gọn khác" — giờ MỌI dòng đều perBatch:true, xử
+// lý đồng nhất 1 lô hay nhiều lô như nhau (đơn giản hơn, và khớp đúng thiết kế mới:
+// mỗi lô luôn là 1 khối "Mã lô + 2 nút", 1 lô thì khối đó chỉ lặp đúng 1 lần).
 function renderPrepCountScreen(lines) {
   _prepCountState = lines.map(l => {
-    const single = l.activeBatches.length <= 1;
     const batchQty = {}, batchDone = {}, batchWeighings = {};
     l.activeBatches.forEach(b => { batchQty[b.id] = null; batchDone[b.id] = false; batchWeighings[b.id] = []; });
-    // weighings — bảng kê cân của dòng 1 lô; batchWeighings — của từng lô.
-    return { ...l, perBatch: !single, batchQty, batchDone, batchWeighings, weighings: [], discardAll: false };
+    return { ...l, perBatch: true, batchQty, batchDone, batchWeighings, weighings: [], discardAll: false, counted: null };
   });
-  const box = document.getElementById('shiftBody');
-  box.innerHTML = `
-    <div class="wal-section" style="margin:0 0 14px;">
-      <div class="wal-section-title">Đếm bán thành phẩm cuối ngày</div>
-      <div style="font-size:12px;color:#999;margin-bottom:10px;line-height:1.5;">Cân/đong số <b>thực tế còn lại</b> của từng loại. Số này là tồn đầu ngày mai để tính cần nấu bao nhiêu — đếm sai là mai nấu thiếu hoặc thừa.</div>
-      ${_prepCountState.some(l => prepCanWeighPOS(l.prepId)) ? '' : prepWeighHintHTML((_prepCountState[0] || {}).prepId)}
-      ${_prepCountState.map((l, i) => l.perBatch ? renderPrepCountLinePerBatch(l, i) : renderPrepCountLineSingle(l, i)).join('')}
-      ${renderPinInput('prepCountStaff')}
-    </div>
-    <button onclick="submitPrepCount()" style="width:100%;padding:14px;background:var(--gd);color:#fff;border:none;border-radius:14px;font-weight:700;font-size:15px;cursor:pointer;">Xác nhận &amp; tiếp tục kết ca</button>
-  `;
+  // Loại hết hạn: tự động đánh dấu "Đã báo hết" cho mọi lô ngay từ đầu — nhân viên
+  // vẫn bấm lại "Cân trừ bì" được cho từng lô nếu hũ đó thực ra còn dùng tốt (không
+  // tự ý khoá cứng, chỉ đặt sẵn giá trị mặc định an toàn hơn).
+  _prepCountState.forEach(l => { if (l.hasExpired) _prepCountApplyDiscardAll(l, true); });
+  _prepCountCardIdx = 0;
   preloadVesselImagesPOS(_prepCountState.map(l => l.prepId));
-  // Loại hết hạn: gợi ý sẵn "Bỏ hết" nhưng vẫn để nhân viên tự xác nhận — hệ thống
-  // không tự ý bỏ, vì có thể hũ đó vẫn dùng được và chủ quán muốn giữ.
-  _prepCountState.forEach((l, i) => { if (l.hasExpired) prepCountToggleDiscard(i); });
+  renderPrepCountCard();
 }
 
-// Dòng CHỈ CÓ 1 LÔ active — không cần tách, giữ UI gọn như trước (nhập 1 số =
-// đúng luôn số của lô duy nhất đó).
-function renderPrepCountLineSingle(l, i) {
-  return `
-        <div style="padding:10px 0;border-bottom:1px solid #f0f0f0;">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-            <div>
-              <div style="font-size:13.5px;font-weight:700;color:var(--td);">${l.prepName || ''}</div>
-              <div style="font-size:11px;color:#999;">${l.activeBatches.length} lô${l.hasCooking ? ' · ⚠️ còn lô đang nấu chưa hoàn thành' : ''}</div>
-              <div style="font-size:11.5px;color:#666;margin-top:2px;">Hệ thống đang ghi: <b>${fmtPrepQty(l.sysQty)} ${l.unit || ''}</b></div>
-            </div>
-            ${l.hasExpired ? '<span style="background:#fee2e2;color:#c0392b;font-size:10.5px;font-weight:800;border-radius:6px;padding:3px 7px;white-space:nowrap;">HẾT HẠN</span>' : ''}
-          </div>
-          ${prepCanWeighPOS(l.prepId) ? weighBtnWide(`prepCountWeigh(${i})`, 'Cân cả khay còn lại', 'Đặt nguyên khay lên cân — máy tự trừ bì') + '<div style="height:8px;"></div>' : ''}
-          <div style="display:flex;gap:8px;align-items:center;">
-            ${prepCanWeighPOS(l.prepId) ? '<span style="font-size:11.5px;color:#aaa;font-weight:600;flex-shrink:0;">hoặc</span>' : ''}
-            <div class="wal-input-group" style="flex:1;margin-bottom:0;">
-              <input id="pcQty${i}" type="number" inputmode="decimal" step="0.01" placeholder="${prepCanWeighPOS(l.prepId) ? 'Gõ tay' : 'Còn lại...'}" oninput="prepCountSetQty(${i},this.value,true)">
-            </div>
-            <span style="font-size:12.5px;font-weight:700;color:var(--gd);white-space:nowrap;">${l.unit || ''}</span>
-            <button id="pcDiscard${i}" onclick="prepCountToggleDiscard(${i})" style="padding:10px 12px;border-radius:11px;border:1.5px solid #e6e1d2;background:#fff;color:#888;font-family:'Google Sans',sans-serif;font-weight:700;font-size:12px;cursor:pointer;white-space:nowrap;">Bỏ hết</button>
-          </div>
-          <div id="pcWeigh${i}"></div>
-          <div id="pcWarn${i}" style="display:none;margin-top:6px;background:#fee2e2;border:1px solid #fca5a5;border-radius:10px;padding:7px 10px;font-size:11.5px;color:#c0392b;font-weight:700;"></div>
-        </div>`;
-}
-
-// [FIX] Dòng có ≥2 LÔ active — hiện RIÊNG từng lô kèm MÃ LÔ (đúng số trên tem) để
-// nhân viên cân/đong và gõ ĐÚNG lô đó.
-// [FIX 2026-09] KHÔNG còn ô "Tổng cân nhanh" / nút cân tổng ở dòng này: cân gộp
-// nhiều lô rồi để hệ thống chia ra là số ĐOÁN, mà số đoán đó ghi đè thẳng tồn từng
-// lô. Còn đúng hai cách nhập cho mỗi lô: cân riêng lô đó, hoặc bấm "Hết / ko thấy
-// tem". Nút "Bỏ hết" giữ lại vì đó là thao tác ĐỔ BỎ có chủ đích (đánh dấu hết cho
-// từng lô một), không phải một phép cân gộp.
-function renderPrepCountLinePerBatch(l, i) {
-  const batchRows = l.activeBatches.map((b, bi) => `
-          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 10px;background:#faf8f2;border-radius:10px;margin-top:6px;flex-wrap:wrap;row-gap:7px;">
-            <div style="flex:1 1 130px;min-width:0;">
-              <div style="font-size:12.5px;font-weight:700;color:var(--td);">${b.batchCode || '(chưa có mã)'}</div>
-              <div style="font-size:10.5px;color:#999;">Nấu ${fmtDateTimeShort(b.finishedAt)} · hệ thống ghi ${fmtPrepQty(b.qtyRemaining)} ${l.unit || ''}</div>
-            </div>
-            <input id="pcBatch${i}_${bi}" type="number" inputmode="decimal" step="0.01" placeholder="Còn lại..." style="width:84px;padding:8px;border:1.5px solid #e6e1d2;border-radius:9px;font-family:'Google Sans',sans-serif;font-size:13px;text-align:right;" oninput="prepCountSetBatchQty(${i},'${b.id}',this.value,true)">
-            ${prepCanWeighPOS(l.prepId) ? weighBtnHTML(`prepCountWeighBatch(${i},'${b.id}',${bi})`, 36) : ''}
-            <button id="pcBatchDone${i}_${bi}" onclick="prepCountToggleBatchDone(${i},'${b.id}')" style="padding:8px 10px;border-radius:9px;border:1.5px solid #e6e1d2;background:#fff;color:#888;font-family:'Google Sans',sans-serif;font-weight:700;font-size:11px;cursor:pointer;white-space:nowrap;">Hết / ko thấy tem</button>
-          </div>`).join('');
-  return `
-        <div style="padding:10px 0;border-bottom:1px solid #f0f0f0;">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-            <div>
-              <div style="font-size:13.5px;font-weight:700;color:var(--td);">${l.prepName || ''}</div>
-              <div style="font-size:11px;color:#999;">${l.activeBatches.length} lô đang mở${l.hasCooking ? ' · ⚠️ còn lô đang nấu chưa hoàn thành' : ''} — cân/soát ĐÚNG TEM từng lô bên dưới</div>
-              <div style="font-size:11.5px;color:#666;margin-top:2px;">Hệ thống đang ghi tổng: <b>${fmtPrepQty(l.sysQty)} ${l.unit || ''}</b></div>
-            </div>
-            ${l.hasExpired ? '<span style="background:#fee2e2;color:#c0392b;font-size:10.5px;font-weight:800;border-radius:6px;padding:3px 7px;white-space:nowrap;">HẾT HẠN</span>' : ''}
-          </div>
-          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-            <div style="flex:1;font-size:11.5px;color:#c0392b;font-weight:700;line-height:1.45;">Loại này đang có ${l.activeBatches.length} lô — BẮT BUỘC cân riêng từng lô theo tem. Không có ô nhập tổng chung.</div>
-            <button id="pcDiscard${i}" onclick="prepCountToggleDiscard(${i})" style="padding:10px 10px;border-radius:11px;border:1.5px solid #e6e1d2;background:#fff;color:#888;font-family:'Google Sans',sans-serif;font-weight:700;font-size:12px;cursor:pointer;white-space:nowrap;">Bỏ hết</button>
-          </div>
-          <div style="font-size:10.5px;color:#aaa;margin-top:4px;">Bê từng khay/hũ theo đúng mã lô lên cân — hoặc bấm "Hết / ko thấy tem" cho lô đã dùng hết. Cân gộp nhiều lô rồi chia ra là số đoán, không dùng nữa.</div>
-          ${batchRows}
-          <div id="pcBatchSum${i}" style="font-size:11.5px;color:#666;margin-top:6px;"></div>
-          <div id="pcWarn${i}" style="display:none;margin-top:6px;background:#fee2e2;border:1px solid #fca5a5;border-radius:10px;padding:7px 10px;font-size:11.5px;color:#c0392b;font-weight:700;"></div>
-        </div>`;
-}
-
-// [MỚI] goTay = nhân viên tự gõ. Sửa tay sau khi cân thì bảng kê không còn khớp
-// với số sắp lưu — bỏ đi chứ không lưu kèm một bảng kê cộng ra số khác.
-function prepCountSetQty(i, val, goTay) {
-  const l = _prepCountState[i];
-  l.counted = (val === '' || val === null) ? null : (Number(val) || 0);
-  if (goTay && l.weighings.length) {
-    const cu = l.weighings.reduce((s, w) => s + (Number(w.net) || 0), 0);
-    if (Math.abs(cu - (l.counted || 0)) > 0.005) {
-      l.weighings = [];
-      const el = document.getElementById('pcWeigh' + i);
-      if (el) el.innerHTML = '';
-    }
-  }
-  if (l.counted !== null && l.discardAll) prepCountToggleDiscard(i);
-  prepCountRefreshWarn(i);
-}
-
-// ---- Bộ cân ở bước đếm cuối ca ----
-// Dòng CHỈ CÓ 1 LÔ: cân xong là ra thẳng số của lô duy nhất đó.
-function prepCountWeigh(i) {
-  const l = _prepCountState[i];
-  if (!l) return;
-  openWeighPad({
-    prepId: l.prepId, unit: l.unit,
-    title: 'Cân ' + (l.prepName || '') + ' còn lại',
-    onDone: (total, lines) => {
-      l.weighings = lines;
-      const inp = document.getElementById('pcQty' + i);
-      if (inp) { inp.value = total; inp.disabled = false; }
-      const el = document.getElementById('pcWeigh' + i);
-      if (el) el.innerHTML = weighSummaryHTML(lines, l.unit, `prepCountWeigh(${i})`);
-      prepCountSetQty(i, total);
-    }
+// Đổi trạng thái TOÀN BỘ lô của 1 dòng cùng lúc — không đụng DOM, chỉ đổi dữ liệu.
+// Dùng cho cả lúc khởi tạo (loại hết hạn tự động) lẫn nút "Bỏ hết cả N lô" trên thẻ.
+function _prepCountApplyDiscardAll(l, on) {
+  l.discardAll = on;
+  l.activeBatches.forEach(b => {
+    l.batchDone[b.id] = on;
+    l.batchQty[b.id] = on ? 0 : null;
+    l.batchWeighings[b.id] = [];
   });
+  _prepCountRefreshLineCounted(l);
+}
+// counted = null nghĩa là "chưa xử lý đủ mọi lô" — dùng để khoá nút Tiếp tục/Xác
+// nhận, và là điều kiện DUY NHẤT _submitPrepCountImpl() dựa vào (xem "missing" ở đó).
+function _prepCountRefreshLineCounted(l) {
+  const allEntered = l.activeBatches.every(b => l.batchQty[b.id] !== null);
+  l.counted = allEntered ? round2(l.activeBatches.reduce((s, b) => s + (Number(l.batchQty[b.id]) || 0), 0)) : null;
 }
 
-// Dòng NHIỀU LÔ: cân riêng cho ĐÚNG một lô. Nhân viên bê đúng khay của lô đó lên
-// cân — vẫn giữ nguyên nguyên tắc nhập theo tem, bộ cân chỉ thay việc nhẩm trừ bì.
+// ============================================================================
+// [THIẾT KẾ LẠI] Đúng nguyên tắc "cân mù": KHÔNG hiện số hệ thống đang ghi cho
+// nhân viên (tránh gõ/canh theo cho khớp) — giờ còn CHẮC hơn nữa vì đã bỏ hẳn ô gõ
+// tay, số chỉ có thể đến từ cân thật. Mỗi lô chỉ còn đúng 2 lối: "Cân trừ bì" (mở
+// bộ cân — KHÔNG có đường gõ tay nào khác) hoặc "Báo hết / không thấy tem".
+// ============================================================================
+function renderPrepCountCard() {
+  const box = document.getElementById('shiftBody');
+  if (!box) return;
+  const idx = _prepCountCardIdx;
+  const l = _prepCountState[idx];
+  const total = _prepCountState.length;
+  const isLast = idx === total - 1;
+  const allDone = !!l && l.counted !== null;
+
+  const dots = _prepCountState.map((x, i) => {
+    if (i === idx) return `<div style="height:7px;border-radius:999px;background:#E23A5D;width:28px;flex-shrink:0;transition:all .2s ease;"></div>`;
+    if (i < idx) return `<div style="height:7px;border-radius:999px;background:#d8cfae;width:7px;flex-shrink:0;"></div>`;
+    return `<div style="height:7px;border-radius:999px;background:#EFE9D8;width:7px;flex-shrink:0;"></div>`;
+  }).join('');
+
+  box.innerHTML = `
+    <div style="font-size:19px;font-weight:900;color:var(--td);letter-spacing:-.2px;padding:0 2px 12px;">Đếm bán thành phẩm</div>
+    ${!l ? `<div class="wal-section"><div class="muted" style="text-align:center;padding:30px 0;">Không còn loại nào cần đếm.</div></div>` : `
+    <div class="wal-section" style="margin:0 0 12px;">
+      ${!prepCanWeighPOS(l.prepId) ? prepWeighHintHTML(l.prepId) : ''}
+      <div style="font-size:24px;font-weight:900;color:var(--td);line-height:1.15;letter-spacing:-.3px;">${l.prepName || ''}</div>
+      <div style="font-size:14px;font-weight:700;color:${l.hasExpired ? '#c0392b' : 'var(--gd)'};margin-top:5px;">Đang có ${l.activeBatches.length} lô${l.hasExpired ? ' · Hết hạn' : ''}${l.hasCooking ? ' · còn lô đang nấu chưa xong' : ''}</div>
+      ${l.activeBatches.length > 1 ? `<button onclick="prepCountToggleDiscardAll(${idx})" style="margin-top:8px;background:none;border:none;padding:0;color:#aaa;font-family:'Google Sans',sans-serif;font-size:12px;font-weight:700;text-decoration:underline;cursor:pointer;">${l.discardAll ? 'Huỷ — không bỏ hết nữa' : `Bỏ hết cả ${l.activeBatches.length} lô →`}</button>` : ''}
+
+      <div style="margin-top:18px;display:flex;flex-direction:column;gap:12px;">
+        ${l.activeBatches.map((b, bi) => {
+          const done = l.batchDone[b.id];
+          const qty = l.batchQty[b.id];
+          const state = done ? 'het' : (qty !== null && qty > 0) ? 'can' : null;
+          const stateLabel = state === 'het' ? 'Đã báo hết' : state === 'can' ? 'Đã cân xong' : 'Chưa cân';
+          const stateBg = state === 'het' ? '#c2703c' : state === 'can' ? '#16a34a' : '#E23A5D';
+          const canLabel = state === 'can' ? 'Cân lại' : 'Cân trừ bì';
+          return `
+          <div style="padding:14px;background:#FAF8F2;border:1.5px solid #F0EAD9;border-radius:18px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:${state === 'can' ? '10px' : '12px'};">
+              <div style="min-width:0;display:flex;align-items:baseline;gap:7px;">
+                <span style="font-size:11.5px;font-weight:800;color:#aaa;text-transform:uppercase;letter-spacing:.5px;flex-shrink:0;">Mã lô:</span>
+                <span style="font-size:17px;font-weight:800;color:var(--td);letter-spacing:.3px;font-family:ui-monospace,Menlo,monospace;">${b.batchCode || '(chưa có mã)'}</span>
+              </div>
+              <div style="flex-shrink:0;font-size:12px;font-weight:800;color:#fff;padding:5px 10px;border-radius:999px;white-space:nowrap;background:${stateBg};">${stateLabel}</div>
+            </div>
+            ${state === 'can' ? `
+            <div style="text-align:center;background:#fff;border:1.5px solid #F0EAD9;border-radius:14px;padding:12px 10px;margin-bottom:12px;">
+              <span style="font-size:30px;font-weight:900;color:var(--td);letter-spacing:-.3px;">${fmtPrepQty(qty)}</span>
+              <span style="font-size:14px;font-weight:700;color:#999;margin-left:4px;">${l.unit || ''}</span>
+              <div style="font-size:11px;font-weight:700;color:#aaa;margin-top:2px;">Vừa cân được — bấm "Cân lại" nếu cân nhầm</div>
+            </div>` : ''}
+            <div style="display:flex;gap:8px;">
+              ${prepCanWeighPOS(l.prepId)
+                ? `<button onclick="prepCountWeighBatch(${idx},'${b.id}',${bi})" style="flex:1;padding:14px 8px;border-radius:999px;background:${state === 'can' ? '#fff' : '#1f1f1f'};color:${state === 'can' ? '#1f1f1f' : '#fff'};border:1.5px solid #1f1f1f;font-family:'Google Sans',sans-serif;font-size:14.5px;font-weight:800;cursor:pointer;">${canLabel}</button>`
+                : `<div style="flex:1;padding:14px 8px;border-radius:999px;background:#f1eee4;color:#bbb;font-family:'Google Sans',sans-serif;font-size:12.5px;font-weight:700;text-align:center;">Chưa gắn dụng cụ cân</div>`}
+              <button onclick="prepCountToggleBatchDone(${idx},'${b.id}')" style="flex:1;padding:14px 8px;border-radius:999px;background:${state === 'het' ? '#c2703c' : '#f1eee4'};color:${state === 'het' ? '#fff' : '#8a5a5a'};border:none;font-family:'Google Sans',sans-serif;font-size:13px;font-weight:800;cursor:pointer;">Báo hết / không thấy tem</button>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`}
+
+    <div class="wal-section" style="margin:0 0 14px;">${renderPinInput('prepCountStaff')}</div>
+
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+      <button onclick="prepCountGoBack()" style="width:44px;height:44px;border-radius:50%;background:#fff;border:1.5px solid #EFE9D8;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${idx > 0 ? '#333' : '#ccc'}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"></path></svg>
+      </button>
+      <div style="flex:1;background:#fff;border:1.5px solid #EFE9D8;border-radius:999px;padding:10px 14px;display:flex;align-items:center;gap:7px;">
+        ${dots}
+        <span style="margin-left:auto;font-size:11.5px;font-weight:800;color:#a89a7e;flex-shrink:0;">${idx + 1}/${total || 1}</span>
+      </div>
+    </div>
+
+    <button onclick="prepCountGoNext()" ${allDone ? '' : 'disabled'} style="width:100%;padding:16px;background:${allDone ? 'var(--gd)' : '#f1eee4'};color:${allDone ? '#fff' : '#bbb'};border:none;border-radius:18px;font-weight:800;font-size:16px;cursor:${allDone ? 'pointer' : 'not-allowed'};">${!allDone ? 'Cân hoặc báo hết đủ các lô để tiếp tục' : (isLast ? 'Xác nhận & tiếp tục kết ca' : 'Tiếp tục')}</button>
+  `;
+}
+
+function prepCountGoBack() {
+  if (_prepCountCardIdx > 0) { _prepCountCardIdx--; renderPrepCountCard(); }
+}
+async function prepCountGoNext() {
+  const l = _prepCountState[_prepCountCardIdx];
+  if (!l || l.counted === null) { toast('⚠️ Cân hoặc báo hết đủ các lô trước khi tiếp tục'); return; }
+  if (_prepCountCardIdx < _prepCountState.length - 1) { _prepCountCardIdx++; renderPrepCountCard(); }
+  else await submitPrepCount();
+}
+
+// Cân riêng cho ĐÚNG một lô — nhân viên bê đúng khay/hũ của lô đó lên cân, đúng
+// nguyên tắc nhập theo tem. Không có đường gõ tay nào khác ngoài bộ cân này.
 function prepCountWeighBatch(i, batchId, bi) {
   const l = _prepCountState[i];
   if (!l) return;
@@ -16792,117 +16793,32 @@ function prepCountWeighBatch(i, batchId, bi) {
     title: 'Cân lô ' + (b.batchCode || '') + ' · ' + (l.prepName || ''),
     onDone: (total, lines) => {
       l.batchWeighings[batchId] = lines;
-      const inp = document.getElementById(`pcBatch${i}_${bi}`);
-      if (inp) { inp.value = total; inp.disabled = false; }
-      // Lô đang đánh dấu "Hết" mà cân ra số > 0 thì phải bỏ dấu đó, kẻo số vừa cân
-      // bị ghi đè về 0 lúc lưu.
-      if (l.batchDone[batchId] && total > 0) prepCountToggleBatchDone(i, batchId);
-      prepCountSetBatchQty(i, batchId, total);
+      l.batchDone[batchId] = false;
+      l.batchQty[batchId] = total;
+      _prepCountRefreshLineCounted(l);
+      renderPrepCountCard();
     }
   });
 }
 
-// [FIX 2026-09] ĐÃ BỎ prepCountWeighSmart() + prepCountSetSmartTotal() — hai đường
-// duy nhất cho phép nhập/cân MỘT SỐ TỔNG cho nhiều lô cùng lúc. Với BTP đang có ≥2
-// lô, số của mỗi lô giờ chỉ đến từ chính lô đó: cân riêng (prepCountWeighBatch), gõ
-// tay đúng dòng lô (prepCountSetBatchQty), hoặc bấm "Hết / ko thấy tem".
-
-function prepCountSetBatchQty(i, batchId, val, goTay) {
-  const l = _prepCountState[i];
-  l.batchQty[batchId] = (val === '' || val === null) ? null : (Number(val) || 0);
-  if (goTay && (l.batchWeighings[batchId] || []).length) {
-    const cu = l.batchWeighings[batchId].reduce((s, w) => s + (Number(w.net) || 0), 0);
-    if (Math.abs(cu - (l.batchQty[batchId] || 0)) > 0.005) l.batchWeighings[batchId] = [];
-  }
-  if (l.batchQty[batchId] !== null && l.batchQty[batchId] > 0) l.batchDone[batchId] = false;
-  prepCountRefreshBatchSum(i);
-}
-
 function prepCountToggleBatchDone(i, batchId) {
   const l = _prepCountState[i];
-  const bi = l.activeBatches.findIndex(b => b.id === batchId);
-  l.batchDone[batchId] = !l.batchDone[batchId];
+  if (!l) return;
+  const willDone = !l.batchDone[batchId];
+  l.batchDone[batchId] = willDone;
   l.batchWeighings[batchId] = [];   // đánh dấu hết/bỏ dấu đều làm số cân cũ vô nghĩa
-  const btn = document.getElementById(`pcBatchDone${i}_${bi}`);
-  const inp = document.getElementById(`pcBatch${i}_${bi}`);
-  if (l.batchDone[batchId]) {
-    l.batchQty[batchId] = 0;
-    if (inp) { inp.value = 0; inp.disabled = true; }
-    if (btn) { btn.style.background = '#c0392b'; btn.style.color = '#fff'; btn.style.borderColor = '#c0392b'; btn.textContent = '✓ Đã hết'; }
-  } else {
-    l.batchQty[batchId] = null;
-    if (inp) { inp.value = ''; inp.disabled = false; }
-    if (btn) { btn.style.background = '#fff'; btn.style.color = '#888'; btn.style.borderColor = '#e6e1d2'; btn.textContent = 'Hết / ko thấy tem'; }
-  }
-  prepCountRefreshBatchSum(i);
+  l.batchQty[batchId] = willDone ? 0 : null;
+  // Bỏ tick riêng 1 lô thì "bỏ hết cả N lô" không còn đúng cho toàn dòng nữa.
+  if (!willDone) l.discardAll = false;
+  _prepCountRefreshLineCounted(l);
+  renderPrepCountCard();
 }
 
-// Hiện tổng đã nhập theo từng lô + so sánh với hệ thống, ngay dưới danh sách lô —
-// để nhân viên tự thấy có nhập thiếu lô nào không trước khi bấm xác nhận.
-function prepCountRefreshBatchSum(i) {
+function prepCountToggleDiscardAll(i) {
   const l = _prepCountState[i];
-  const el = document.getElementById('pcBatchSum' + i);
-  if (!el || !l) return;
-  const allEntered = l.activeBatches.every(b => l.batchQty[b.id] !== null);
-  const sum = l.activeBatches.reduce((s, b) => s + (Number(l.batchQty[b.id]) || 0), 0);
-  el.textContent = allEntered
-    ? `Tổng đã nhập: ${fmtPrepQty(sum)} ${l.unit || ''}`
-    : `Tổng đã nhập: ${fmtPrepQty(sum)} ${l.unit || ''} — còn ${l.activeBatches.filter(b => l.batchQty[b.id] === null).length} lô chưa nhập`;
-  if (allEntered) {
-    l.counted = sum;
-    prepCountRefreshWarn(i);
-  } else {
-    l.counted = null;
-    const warnEl = document.getElementById('pcWarn' + i);
-    if (warnEl) warnEl.style.display = 'none';
-  }
-}
-
-// [NEW] Cảnh báo NGAY LÚC GÕ khi số đếm lệch nhiều so với số hệ thống.
-//
-// Vì sao cần: số gõ ở đây GHI ĐÈ THẲNG tồn kho bán thành phẩm (currentStock) và
-// đóng/điều chỉnh từng lô. Trước đây màn này KHÔNG hiện số hệ thống và KHÔNG cảnh
-// báo gì — gõ nhầm 100g trong khi thực còn 1800g là kho lập tức sai 1700g, không
-// ai biết. Giờ hiện rõ mức lệch để nhân viên tự phát hiện gõ nhầm dấu phẩy/đơn vị.
-// CỐ Ý KHÔNG CHẶN: đúng nguyên tắc chung của app (cảnh báo, không khoá) — lệch
-// thật vẫn phải ghi được, và Quản lý sẽ nhận cảnh báo riêng để rà lại.
-function prepCountRefreshWarn(i) {
-  const l = _prepCountState[i];
-  const el = document.getElementById('pcWarn' + i);
-  if (!el || !l) return;
-  if (l.counted === null || l.discardAll) { el.style.display = 'none'; return; }
-  const diff = l.counted - l.sysQty;
-  if (!handoverIsOverThreshold(diff, l.sysQty)) { el.style.display = 'none'; return; }
-  const pct = l.sysQty !== 0 ? Math.round(Math.abs(diff) / Math.abs(l.sysQty) * 100) : null;
-  el.style.display = 'block';
-  el.textContent = `⚠️ Lệch ${diff > 0 ? '+' : ''}${fmtPrepQty(diff)} ${l.unit || ''} so với hệ thống (${fmtPrepQty(l.sysQty)})${pct !== null ? ` — ${pct}%` : ''}. Kiểm tra lại số cân/đơn vị. Vẫn lưu được, nhưng Quản lý sẽ nhận cảnh báo.`;
-}
-
-function prepCountToggleDiscard(i) {
-  const l = _prepCountState[i];
-  l.discardAll = !l.discardAll;
-  const btn = document.getElementById('pcDiscard' + i);
-  if (!btn) return;
-  if (l.perBatch) {
-    // Bỏ hết TOÀN BỘ các lô của dòng này — đánh dấu "Hết" cho từng lô một để vẫn
-    // đi qua đúng luồng cập nhật per-batch (không cần input tổng riêng).
-    l.activeBatches.forEach(b => {
-      if (l.discardAll) { if (!l.batchDone[b.id]) prepCountToggleBatchDone(i, b.id); }
-      else { if (l.batchDone[b.id]) prepCountToggleBatchDone(i, b.id); }
-    });
-  } else {
-    const inp = document.getElementById('pcQty' + i);
-    if (!inp) return;
-    if (l.discardAll) { l.counted = 0; inp.value = 0; inp.disabled = true; }
-    else { inp.disabled = false; }
-  }
-  if (l.discardAll) {
-    btn.style.background = '#c0392b'; btn.style.color = '#fff'; btn.style.borderColor = '#c0392b';
-    btn.textContent = '✓ Bỏ hết';
-  } else {
-    btn.style.background = '#fff'; btn.style.color = '#888'; btn.style.borderColor = '#e6e1d2';
-    btn.textContent = 'Bỏ hết';
-  }
+  if (!l) return;
+  _prepCountApplyDiscardAll(l, !l.discardAll);
+  renderPrepCountCard();
 }
 
 async function submitPrepCount() {
@@ -16911,9 +16827,9 @@ async function submitPrepCount() {
   try { await _submitPrepCountImpl(); } finally { _posSubmitBusy = false; }
 }
 async function _submitPrepCountImpl() {
-  // [FIX] Với dòng nhiều lô (perBatch), "đã đếm xong" nghĩa là ĐỦ TỪNG LÔ đã nhập
-  // (được prepCountRefreshBatchSum gán vào l.counted khi allEntered), không phải
-  // chỉ cần có 1 số tổng nào đó — tránh thiếu sót 1 lô mà vẫn lọt qua được.
+  // [FIX] "đã đếm xong" nghĩa là ĐỦ TỪNG LÔ đã cân/báo hết (được
+  // _prepCountRefreshLineCounted gán vào l.counted khi allEntered), không phải chỉ
+  // cần có 1 số tổng nào đó — tránh thiếu sót 1 lô mà vẫn lọt qua được.
   const missing = _prepCountState.filter(l => l.counted === null);
   if (missing.length) { toast(`⚠️ Còn ${missing.length} loại chưa đếm đủ (kiểm tra đã nhập hết từng lô chưa)`); return; }
   const staffEmp = await resolveStaffPinWorkedToday('prepCountStaff');
