@@ -644,6 +644,8 @@ html.tab-ui .kmini .kmval{font-size:21px;}
 .ftag.nf{background:#FFF8E7;color:#0062AD;border:1.5px solid #0062AD;}
 .ftag.nf.active{background:#FFD34D;color:#0062AD;border-color:#0062AD;box-shadow:none;}
 .nf-bg{background:#FFF8E7;border-radius:var(--r-md,12px);}
+.tier-nf{background:#FFF8E7;color:#0062AD;border:1px solid #0062AD;}
+.btn.nf{background:#FFF8E7;color:#0062AD;border:1.5px solid #0062AD;}
 
 /* ---------- Điều hướng tuần ---------- */
 .weeknav{
@@ -4110,6 +4112,9 @@ let FIXREC_CACHE = [], FIXREC_CTN = [], fixRecOpenId = null, fixRecPoId = null;
 // Vào thẳng phiếu nhận của một đơn đặt hàng, không bắt mò trong danh sách. Đơn nào cũng
 // biết phiếu nhận của mình (receiving_records lưu poId), nên chỗ tự nhiên để bấm "sửa số
 // đã nhận" là ngay trên đơn đó ở tab Đặt hàng — không phải trong màn hàng đang mở.
+// [MỚI — tích hợp] "Sửa phiếu nhận" giờ nằm ngay trong màn "Đặt & nhận hàng" (renderKhoPO),
+// không còn là tab riêng của "Hàng đang mở & tem" — bấm nút này chỉ cần lọc đúng phiếu của
+// đơn này rồi vẽ lại CÙNG màn đang đứng, khỏi phải goKho('containers') sang màn khác nữa.
 async function poMoSuaPhieuNhan(poId){
   try{
     await ensureAuth();
@@ -4118,57 +4123,21 @@ async function poMoSuaPhieuNhan(poId){
       .sort((a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
     if(!recs.length){ toast('ℹ️ Đơn này chưa có phiếu nhận nào để sửa'); return; }
     fixRecPoId = poId;
-    ctnFilter = 'fixreceipt';
-    goKho('containers');
-    // Một phiếu thì mở thẳng quy trình sửa; nhiều phiếu thì để danh sách cho chọn.
-    if(recs.length === 1){
-      FIXREC_CACHE = recs;
-      setTimeout(()=>openFixRecWizard(recs[0].id), 0);
-    }
+    FIXREC_CACHE = recs;
+    // Một phiếu thì mở thẳng quy trình sửa; nhiều phiếu thì vẽ lại màn với danh sách đã
+    // lọc theo đúng đơn này để chọn.
+    if(recs.length === 1) openFixRecWizard(recs[0].id);
+    else renderKhoPO();
   }catch(err){
     console.error('poMoSuaPhieuNhan lỗi', err);
     showError('Không mở được phiếu nhận: '+(err.code||err.message||err));
   }
 }
 
-async function renderKhoFixReceipt(box, tabs){
-  const nav = `<div class="filter-bar">${tabs.map(([k,l])=>
-      `<button class="ftag ${ctnFilter===k?'active':''}" onclick="ctnFilter='${k}'; renderKhoContainers();">${l}</button>`).join('')}</div>`;
-  try{
-    await ensureAuth();
-    INVENTORY_ITEMS = await loadInventoryItems();
-    FIXREC_CACHE = fixRecPoId
-      ? (await fstore.collection('receiving_records_gieogieo').where('poId','==',fixRecPoId).get())
-          .docs.map(d=>({id:d.id, ...d.data()}))
-          .sort((a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||'')))
-      : await loadReceivingRecords(20);
-  }catch(err){
-    console.error('renderKhoFixReceipt lỗi', err);
-    box.innerHTML = nav + '<div class="muted">Không đọc được phiếu nhận. '+(err.code||err.message||'')+'</div>';
-    return;
-  }
-
-  const p2 = n => String(n).padStart(2,'0');
-  const dt = iso => { const d = iso?new Date(iso):null; return (d && !isNaN(d)) ? `${p2(d.getDate())}/${p2(d.getMonth()+1)} ${p2(d.getHours())}:${p2(d.getMinutes())}` : ''; };
-
-  const than = FIXREC_CACHE.map(r=>{
-    const dongs = (r.lines||[]).filter(l=>Number(l.qtyGoodBase)>0);
-    const sua = (r.corrections||[]).length;
-    return `<div class="litem" style="cursor:pointer" onclick="openFixRecWizard('${r.id}')">
-        <div class="li-l">
-          <div>${dt(r.createdAt)} · ${escapeHtmlAttr(r.supplier||'không ghi nhà cung cấp')}</div>
-          <div class="muted-sm">${escapeHtmlAttr(r.staff||'—')} · ${dongs.map(l=>escapeHtmlAttr(l.name||'')).slice(0,3).join(', ')}${dongs.length>3?` +${dongs.length-3}`:''}</div>
-          ${sua?`<div class="small-note" style="color:var(--warn)">Đã sửa ${sua} lần — mở ra xem nhật ký</div>`:''}
-        </div>
-        <div class="li-r"><span class="tier tier-blue">Sửa ›</span></div>
-      </div>`;
-  }).join('');
-
-  box.innerHTML = nav +
-    (fixRecPoId ? `<div class="small-note" style="margin-bottom:10px">Đang xem phiếu nhận của <b>một đơn đặt hàng</b>. <a href="#" onclick="fixRecPoId=null;renderKhoContainers();return false;">Xem tất cả phiếu nhận</a></div>` : '') +
-    `<div class="small-note" style="margin-bottom:12px">Gõ nhầm số lượng lúc nhận hàng (30 hộp thay vì 3) thì phải sửa ở <b>bốn chỗ cùng lúc</b>: tồn kho, dòng nhập trong sổ, đám tem đã sinh, và số "đã nhận" trên đơn đặt hàng. Bấm vào một phiếu để mở quy trình sửa 3 bước — làm đủ cả bốn trong một lần, và ghi lại nhật ký sửa ngay trên phiếu.</div>` +
-    (FIXREC_CACHE.length ? than : '<div class="empty-hint">Chưa có phiếu nhận hàng nào.</div>');
-}
+// [BỎ — 2026-09] renderKhoFixReceipt() (tab "Sửa phiếu nhận" riêng trong "Hàng đang mở &
+// tem") đã bị xoá theo yêu cầu tích hợp — tính năng này giờ nằm trong renderKhoPO() (Kho ▸
+// Đặt & nhận hàng), ngay dưới danh sách đơn đặt hàng. poMoSuaPhieuNhan() cũng đã cập nhật
+// để gọi renderKhoPO() thay vì goKho('containers').
 
 // Nhật ký sửa nằm ngay trên phiếu. Phiếu KHÔNG được im lặng mang con số mới: sau này soát
 // lại phải đọc được "hôm đó ghi 30, sửa còn 3, ai sửa, vì sao".
@@ -4553,7 +4522,7 @@ async function fixRecWizApply(){
       ? `✅ Đã sửa · trừ ${fmtNum(thua,0)} ${l.unit||''} khỏi tồn${huy.length?` · huỷ ${huy.length} tem`:''}`
       : `✅ Đã sửa · cộng thêm ${fmtNum(-thua,0)} ${l.unit||''} vào tồn`);
     closeFixRecWizard();
-    renderKhoContainers();
+    renderKhoPO();
   }catch(err){
     console.error('fixRecWizApply lỗi', err);
     if(FIXREC_WIZ) FIXREC_WIZ.dangLuu = false;
@@ -4616,10 +4585,8 @@ async function renderKhoContainers(){
     ['expired',   'Quá hạn sau mở'],
     ['open',      'Đang mở'],
     ['unlabeled', 'Tem chưa dán'],
-    ['fixreceipt','Sửa phiếu nhận'],
     ['trace',     'Bill ↔ Tem']
   ];
-  if(ctnFilter === 'fixreceipt'){ await renderKhoFixReceipt(box, tabs); return; }
   if(ctnFilter === 'trace'){ await renderKhoBillTrace(box, tabs); return; }
   let list = [];
   try{
@@ -6847,7 +6814,7 @@ const PO_STATUS_LABEL = {
   // [MỚI] Khác "Huỷ": đơn này ĐÃ có hàng về (một phần), chỉ là phần thiếu sẽ KHÔNG về
   // nữa từ đúng nhà cung cấp này (mua bù chỗ khác qua "Nhập hàng tự do", hoặc chấp nhận
   // thiếu luôn) — xem closePurchaseOrderNoMore().
-  closed:    {label:'Đã đóng (thiếu)', color:'gray'}
+  closed:    {label:'Đã đóng (thiếu)', color:'nf'}
 };
 async function loadPurchaseOrders(){
   const snap = await fstore.collection('purchase_orders_gieogieo').orderBy('createdAt','desc').limit(50).get();
@@ -9933,7 +9900,6 @@ const NAV_SECTIONS = [
     {key:'kho:location',     label:'Vị trí kho',      go:"goKho('location')",     sub:'Cài đặt kho'},
     {key:'kho:wastereasons', label:'Lý do hao hụt',   go:"goKho('wastereasons')"},
     {key:'kho:checklist',    label:'Checklist ca',    go:"goKho('checklist')"},
-    {key:'kho:bulkimport',   label:'Nhập danh mục từ Excel', go:"goKho('bulkimport')"},
   ]},
   // [MỚI] "Kho 2.0" — CHỈ ĐỌC, không sửa số liệu gì ở đây (mọi thao tác ghi vẫn ở nhóm
   // Kho phía trên / bên POS). Tách riêng vì Kho hiện tại trộn cấu hình + vận hành + sổ
@@ -17363,7 +17329,6 @@ async function renderEntryKho(){
   else if(curKhoSub==='location') renderKhoLocation();
   else if(curKhoSub==='recipe') renderKhoRecipe();
   else if(curKhoSub==='po') renderKhoPO();
-  else if(curKhoSub==='bulkimport') renderKhoBulkImport();
   else if(curKhoSub==='refill') renderKhoRefill();
   else if(curKhoSub==='locstock') renderKhoLocStock();
   else if(curKhoSub==='stockcount') renderKhoStockCount();
@@ -20798,268 +20763,12 @@ async function renderKhoHistPrep(){
   `;
 }
 
-// ============================================================
-// [NEW] NHẬP HÀNG LOẠT — dán trực tiếp từ file Excel COGS chủ quán đang quen dùng
-//
-// Nguyên tắc thiết kế quan trọng nhất: KHỚP ĐÚNG THỨ TỰ CỘT trong file gốc của
-// chủ quán, để họ bôi đen 1 vùng trong Excel rồi Ctrl+C → dán thẳng, KHÔNG phải
-// tự sắp xếp lại cột nào. Excel/Sheets copy ra dạng TSV (cách nhau bằng Tab) —
-// dán vào textarea rồi tách theo Tab là đọc đúng.
-//
-// Sheet Nguyen_lieu có đúng 1 bảng, khớp 1-1: dán cả bảng vào 1 ô.
-// Sheet Che_bien_cap1 có HAI bảng RIÊNG BIỆT ở 2 vùng khác nhau của cùng 1
-// sheet (bảng tổng hợp ở trên, bảng chi tiết nguyên liệu từng mẻ ở dưới) — nên
-// cần 2 ô dán riêng, ghép lại bằng cột chung "Mã CB".
-// ============================================================
-let bulkImportMode = 'nl'; // 'nl' | 'cb'
-let bulkImportPreview = null; // kết quả parse gần nhất, chờ xác nhận
-
-function bulkImportSetMode(m){ bulkImportMode = m; bulkImportPreview = null; renderKhoBulkImport(); }
-
-// Tách 1 khối text đã dán thành mảng các dòng ô (mỗi dòng là mảng cột).
-// Chấp nhận cả Tab (dán từ Excel/Sheets) lẫn dấu phẩy (phòng khi dán từ CSV).
-function parsePastedGrid(raw){
-  return (raw||'').split(/\r?\n/).map(line=>line.split(/\t|,(?=(?:[^"]*"[^"]*")*[^"]*$)/).map(c=>c.trim()))
-    .filter(row=>row.some(c=>c!==''));
-}
-// [SỬA — phát hiện qua test bằng chính file COGS thật] Bản đầu coi MỌI dấu chấm
-// là ngăn cách nghìn kiểu VN (rồi xoá đi), nên "0.0833" (hao hụt, số thập phân
-// bé hơn 1) bị đọc nhầm thành 833 — sai gấp 10.000 lần khi nhân %. Giờ phân
-// biệt 2 trường hợp: "1.000" (số nguyên lớn, chấm ngăn nghìn — nhóm cuối luôn
-// đúng 3 chữ số VÀ phần đầu không phải "0") thì mới xoá chấm; còn lại (kể cả
-// "0.0833") giữ nguyên chấm là dấu thập phân.
-function parseVNNumber(s){
-  if(s===undefined||s===null||s==='') return NaN;
-  let raw = String(s).trim();
-  if(raw.includes(',') && raw.includes('.')){
-    // Cả 2 dấu: chuẩn VN đầy đủ — chấm ngăn nghìn, phẩy thập phân. VD "1.234,5"
-    raw = raw.replace(/\./g,'').replace(',', '.');
-  } else if(raw.includes(',')){
-    // Chỉ có phẩy — coi là thập phân kiểu VN. VD "8,33" -> "8.33"
-    raw = raw.replace(',', '.');
-  } else if(raw.includes('.')){
-    const parts = raw.split('.');
-    const last = parts[parts.length-1];
-    // Chấm ngăn nghìn CHỈ KHI nhóm cuối đúng 3 chữ số và phần đầu không phải
-    // "0" (số bắt đầu bằng 0 gần như chắc chắn là phân số thập phân bé hơn 1,
-    // không ai viết "0 nghìn 833" — đúng trường hợp "0.0833" cần giữ nguyên).
-    if(last.length===3 && parts[0]!=='0' && parts.every(p=>/^\d+$/.test(p))){
-      raw = parts.join('');
-    }
-    // Ngược lại (VD "0.0833", "5.43") giữ nguyên — chấm là dấu thập phân.
-  }
-  const n = Number(raw);
-  if(!isNaN(n)) return n;
-  return Number(String(s).replace(/[^\d.-]/g,'')); // fallback cuối: bỏ mọi ký tự lạ
-}
-
-// ---------- Nguyên liệu: đúng 7 cột của sheet Nguyen_lieu ----------
-// Mã NL | Tên nguyên liệu | Quy cách đóng gói | Giá nhập (đ/gói) | Khối lượng/dung tích mỗi gói | Đơn vị | Đơn giá/đơn vị (đ, bỏ qua — tự tính lại)
-function parseNLPaste(raw){
-  const rows = parsePastedGrid(raw);
-  const out = [];
-  rows.forEach((c, i)=>{
-    const [maNL, ten, quyCachRaw, giaNhap, khoiLuong, donVi] = c;
-    if(!ten) return; // dòng trống/thiếu tên -> bỏ qua, không tính là lỗi (khả năng cao là header)
-    const gia = parseVNNumber(giaNhap), kl = parseVNNumber(khoiLuong);
-    // Header thật của sheet có "Giá nhập (đ/gói)" ở đúng vị trí này -> không parse
-    // ra số -> tự động bị lọc bởi điều kiện isNaN bên dưới, không cần dò chữ "Mã NL".
-    if(isNaN(gia) || isNaN(kl) || kl<=0){
-      out.push({line:i+1, ten, ok:false, error:'Thiếu giá hoặc khối lượng mỗi gói hợp lệ'});
-      return;
-    }
-    // Quy cách đóng gói ghi dạng "Gói 1.000g" / "Chai 3kg" trong file gốc — lấy
-    // phần CHỮ đứng trước số đầu tiên làm tên quy cách (VD "Gói", "Chai", "Lô").
-    const m = String(quyCachRaw||'').match(/^([^\d]*)/);
-    const tenQuyCach = (m && m[1].trim()) || 'Gói';
-    out.push({
-      line:i+1, ok:true, ten, donVi: (donVi||'').trim() || 'g',
-      tenQuyCach, khoiLuong: kl, giaNhap: gia,
-      costPerUnit: gia/kl
-    });
-  });
-  return out;
-}
-
-// ---------- Chế biến cấp 1: 2 bảng ghép theo Mã CB ----------
-// Bảng 1 (tổng hợp): Mã CB | Tên | Đơn vị | Hao hụt dự kiến (PHÂN SỐ vd 0.0833, KHÔNG phải %)
-//                    | Tổng đầu vào (bỏ qua) | Gợi ý thu được (bỏ qua) | Thực tế thu được | Đơn giá (bỏ qua, tự tính lại)
-// Bảng 2 (nguyên liệu): Mã CB | Tên thành phẩm (bỏ qua) | Mã NL (bỏ qua) | Tên NL | Đơn vị (bỏ qua) | Đơn giá (bỏ qua) | Số lượng | Thành tiền (bỏ qua)
-function parseCBPaste(rawSummary, rawIngredients, existingItemsByName){
-  const summaryRows = parsePastedGrid(rawSummary);
-  const ingRows = parsePastedGrid(rawIngredients);
-  const groups = {}; // maCB -> {code,name,unit,wastePct,batchYield,inputs:[{name,qty}]}
-  summaryRows.forEach(c=>{
-    const [maCB, ten, donVi, haoHutRaw, , , thucTeRaw] = c;
-    if(!maCB || !ten) return; // lọc dòng tiêu đề/trống
-    const thucTe = parseVNNumber(thucTeRaw);
-    if(isNaN(thucTe)) return; // header hoặc dòng chưa có số liệu thật
-    const haoHut = parseVNNumber(haoHutRaw);
-    groups[maCB] = {
-      code:maCB, name:ten.trim(), unit:(donVi||'').trim()||'ml',
-      // File gốc lưu hao hụt dạng PHÂN SỐ (0.0833 = 8,33%) — nhân 100 để khớp
-      // ô "Hao hụt dự kiến (%)" trong form của app (nhập trực tiếp theo %).
-      wastePct: isNaN(haoHut) ? 0 : haoHut*100,
-      batchYield: thucTe, inputs:[]
-    };
-  });
-  const skippedIngredients = [];
-  ingRows.forEach((c,i)=>{
-    const [maCB, , , tenNL, , , soLuongRaw] = c;
-    if(!maCB || !tenNL || tenNL.startsWith('→')) return; // bỏ dòng tổng "→ TỔNG CHI PHÍ..."
-    const g = groups[maCB];
-    if(!g) return; // Mã CB không có trong bảng tổng hợp -> bỏ qua (không tạo mồ côi)
-    const qty = parseVNNumber(soLuongRaw);
-    if(isNaN(qty) || qty<=0) return;
-    const item = existingItemsByName[tenNL.trim().toLowerCase()];
-    if(!item){ skippedIngredients.push({line:i+1, maCB, tenNL}); return; }
-    g.inputs.push({itemId:item.id, name:item.name, qty});
-  });
-  const out = Object.values(groups).map(g=>{
-    if(!g.inputs.length) return {...g, ok:false, error:'Không khớp được nguyên liệu nào (kiểm tra đã Nhập hàng loạt Nguyên liệu trước chưa, và tên NL có khớp không)'};
-    return {...g, ok:true};
-  });
-  return {rows: out, skippedIngredients};
-}
-
-async function renderKhoBulkImport(){
-  const box = document.getElementById('khoBody');
-  box.innerHTML = `
-    <div class="small-note" style="margin-bottom:12px">Dán trực tiếp từ file Excel COGS — bôi đen đúng vùng bảng trong Sheet rồi Ctrl+C, dán vào ô bên dưới. Không cần sắp xếp lại cột.</div>
-    <div class="seg" id="bulkImportModeSeg" style="margin-bottom:12px">
-      <button data-m="nl" class="${bulkImportMode==='nl'?'active':''}">Nguyên liệu</button>
-      <button data-m="cb" class="${bulkImportMode==='cb'?'active':''}">Chế biến cấp 1</button>
-    </div>
-    <div id="bulkImportBody"></div>
-  `;
-  document.getElementById('bulkImportModeSeg').onclick = (e)=>{
-    const b = e.target.closest('button'); if(!b) return;
-    bulkImportSetMode(b.dataset.m);
-  };
-  if(bulkImportMode==='nl') renderBulkImportNL();
-  else renderBulkImportCB();
-}
-
-function renderBulkImportNL(){
-  const box = document.getElementById('bulkImportBody');
-  box.innerHTML = `
-    <div class="card">
-      <div class="field">
-        <label>Dán từ sheet "Nguyen_lieu" <span class="small-note">— vùng có cột: Mã NL, Tên nguyên liệu, Quy cách đóng gói, Giá nhập, Khối lượng/gói, Đơn vị (cột "Đơn giá/đơn vị" cuối cùng không cần, hệ thống tự tính lại)</span></label>
-        <textarea id="bulkNLInput" rows="8" placeholder="Dán bảng từ Excel vào đây..."></textarea>
-      </div>
-      <button class="btn outline" onclick="bulkPreviewNL()">Xem trước</button>
-    </div>
-    <div id="bulkNLPreview"></div>
-  `;
-}
-function bulkPreviewNL(){
-  const raw = document.getElementById('bulkNLInput').value;
-  const existingNames = new Set(INVENTORY_ITEMS.map(x=>x.name.trim().toLowerCase()));
-  bulkImportPreview = parseNLPaste(raw).map(r=>{
-    if(!r.ok) return r;
-    if(existingNames.has(r.ten.trim().toLowerCase())) return {...r, ok:false, error:'Đã có nguyên liệu trùng tên trong hệ thống — bỏ qua để tránh tạo trùng'};
-    return r;
-  });
-  renderBulkNLPreview();
-}
-function renderBulkNLPreview(){
-  const box = document.getElementById('bulkNLPreview');
-  const rows = bulkImportPreview||[];
-  const okRows = rows.filter(r=>r.ok);
-  box.innerHTML = `
-    <div class="sec-title">Kết quả đọc (${rows.length} dòng — ${okRows.length} hợp lệ)</div>
-    <div class="card">
-      ${rows.map(r=>`
-        <div class="row">
-          <span class="rl">${r.ok ? ic('check',14,'var(--ok)') : ic('alert',14,'var(--warn)')} ${escapeHtmlAttr(r.ten||'(dòng '+r.line+')')}</span>
-          <span class="rv" style="color:${r.ok?'var(--ok)':'var(--bad)'}">${r.ok ? `1 ${escapeHtmlAttr(r.tenQuyCach)} = ${fmtNum(r.khoiLuong,0)} ${escapeHtmlAttr(r.donVi)} · ${fmtUnitPrice(r.costPerUnit)}/${escapeHtmlAttr(r.donVi)}` : r.error}</span>
-        </div>`).join('') || '<div class="muted">Chưa có dữ liệu — dán bảng rồi bấm Xem trước.</div>'}
-    </div>
-    ${okRows.length ? `<button class="btn" onclick="bulkConfirmNL()">Xác nhận nhập ${okRows.length} nguyên liệu</button>` : ''}
-  `;
-}
-async function bulkConfirmNL(){
-  const okRows = (bulkImportPreview||[]).filter(r=>r.ok);
-  if(!okRows.length) return;
-  try{
-    const results = await Promise.allSettled(okRows.map(r=>addInventoryItem({
-      name: r.ten, unit: r.donVi, currentStock: 0, minStock: 0,
-      costPerUnit: r.costPerUnit,
-      packagingUnits: [{name: r.tenQuyCach, baseQty: r.khoiLuong}]
-    })));
-    const failed = results.filter(x=>x.status==='rejected').length;
-    toast(failed ? `⚠️ Nhập xong, ${failed}/${okRows.length} dòng lỗi` : `✅ Đã nhập ${okRows.length} nguyên liệu`);
-    bulkImportPreview = null;
-    INVENTORY_ITEMS = await loadInventoryItems();
-    renderKhoBulkImport();
-  }catch(err){ console.error(err); showError('Nhập hàng loạt thất bại: '+(err.code||err.message||err)); }
-}
-
-function renderBulkImportCB(){
-  const box = document.getElementById('bulkImportBody');
-  box.innerHTML = `
-    <div class="unit-explainer">Cần Nhập hàng loạt Nguyên liệu (hoặc đã có sẵn) TRƯỚC — công thức mẻ khớp nguyên liệu theo đúng tên, tên không khớp sẽ bị bỏ qua.</div>
-    <div class="card">
-      <div class="field">
-        <label>Bảng tổng hợp <span class="small-note">— cột: Mã CB, Tên, Đơn vị, Hao hụt dự kiến, Tổng đầu vào (bỏ qua), Gợi ý thu được (bỏ qua), Thực tế thu được, Đơn giá (bỏ qua)</span></label>
-        <textarea id="bulkCBSummary" rows="6" placeholder="Dán bảng tổng hợp từ Excel vào đây..."></textarea>
-      </div>
-      <div class="field">
-        <label>Bảng nguyên liệu đầu vào <span class="small-note">— cột: Mã CB, Tên thành phẩm (bỏ qua), Mã NL (bỏ qua), Tên NL, Đơn vị (bỏ qua), Đơn giá (bỏ qua), Số lượng, Thành tiền (bỏ qua)</span></label>
-        <textarea id="bulkCBIngredients" rows="8" placeholder="Dán bảng chi tiết nguyên liệu từ Excel vào đây..."></textarea>
-      </div>
-      <button class="btn outline" onclick="bulkPreviewCB()">Xem trước</button>
-    </div>
-    <div id="bulkCBPreview"></div>
-  `;
-}
-function bulkPreviewCB(){
-  const existingItemsByName = {};
-  INVENTORY_ITEMS.forEach(it=>{ existingItemsByName[it.name.trim().toLowerCase()] = it; });
-  const rawSummary = document.getElementById('bulkCBSummary').value;
-  const rawIngredients = document.getElementById('bulkCBIngredients').value;
-  const { rows, skippedIngredients } = parseCBPaste(rawSummary, rawIngredients, existingItemsByName);
-  bulkImportPreview = rows;
-  bulkImportPreview._skippedIngredients = skippedIngredients;
-  renderBulkCBPreview();
-}
-function renderBulkCBPreview(){
-  const box = document.getElementById('bulkCBPreview');
-  const rows = bulkImportPreview||[];
-  const okRows = rows.filter(r=>r.ok);
-  const skipped = (bulkImportPreview && bulkImportPreview._skippedIngredients) || [];
-  box.innerHTML = `
-    <div class="sec-title">Kết quả đọc (${rows.length} thành phẩm — ${okRows.length} hợp lệ)</div>
-    <div class="card">
-      ${rows.map(r=>{
-        const cost = r.ok ? r.inputs.reduce((s,x)=>s + x.qty*((INVENTORY_ITEMS.find(it=>it.id===x.itemId)||{}).costPerUnit||0), 0) : 0;
-        const perUnit = r.ok && r.batchYield>0 ? cost/r.batchYield : 0;
-        return `<div class="row">
-          <span class="rl">${r.ok?ic('check',14,'var(--ok)'):ic('alert',14,'var(--warn)')} ${escapeHtmlAttr(r.code)} · ${escapeHtmlAttr(r.name)}</span>
-          <span class="rv" style="color:${r.ok?'var(--ok)':'var(--bad)'}">${r.ok ? `${r.inputs.length} NL · ${fmtUnitPrice(perUnit)}/${escapeHtmlAttr(r.unit)}` : r.error}</span>
-        </div>`;
-      }).join('') || '<div class="muted">Chưa có dữ liệu — dán 2 bảng rồi bấm Xem trước.</div>'}
-    </div>
-    ${skipped.length ? `<div class="alert amber"><span class="ic">${ic('alert',18)}</span><div>${skipped.length} dòng nguyên liệu không khớp được tên trong hệ thống — bị bỏ qua: ${skipped.slice(0,8).map(s=>escapeHtmlAttr(s.tenNL)).join(', ')}${skipped.length>8?'...':''}</div></div>` : ''}
-    ${okRows.length ? `<button class="btn" onclick="bulkConfirmCB()">Xác nhận nhập ${okRows.length} thành phẩm chế biến</button>` : ''}
-  `;
-}
-async function bulkConfirmCB(){
-  const okRows = (bulkImportPreview||[]).filter(r=>r.ok);
-  if(!okRows.length) return;
-  try{
-    const results = await Promise.allSettled(okRows.map(r=>{
-      const batchInputs = r.inputs.map(x=>({itemId:x.itemId, qty:x.qty}));
-      const { costPerUnit } = computePrepCost(batchInputs, r.batchYield);
-      return addPrepItem({ code:r.code, name:r.name, unit:r.unit, wastePct:r.wastePct, batchYield:r.batchYield, batchInputs, costPerUnit });
-    }));
-    const failed = results.filter(x=>x.status==='rejected').length;
-    toast(failed ? `⚠️ Nhập xong, ${failed}/${okRows.length} dòng lỗi` : `✅ Đã nhập ${okRows.length} thành phẩm chế biến`);
-    bulkImportPreview = null;
-    renderKhoBulkImport();
-  }catch(err){ console.error(err); showError('Nhập hàng loạt thất bại: '+(err.code||err.message||err)); }
-}
+// [BỎ — 2026-09] Tính năng "Nhập danh mục từ Excel" (bulk import Nguyên liệu +
+// Chế biến cấp 1 dán từ Sheet COGS) đã bị xoá theo yêu cầu — dùng nhập tay/POS
+// cho mọi trường hợp từ giờ. Đã xoá cùng lúc: bulkImportMode/bulkImportPreview,
+// bulkImportSetMode, parsePastedGrid, parseVNNumber, parseNLPaste, parseCBPaste,
+// renderKhoBulkImport, renderBulkImportNL/CB, bulkPreviewNL/CB, renderBulkNLPreview/
+// renderBulkCBPreview, bulkConfirmNL/CB — không còn nơi nào gọi tới các hàm này.
 
 // ---------- Vị trí kho (storage_locations_gieogieo) — mục 2.4 ----------
 // Giai đoạn 2: chỉ CRUD danh mục location. Giai đoạn 7: đã dùng cho Transfer/Refill
@@ -21346,7 +21055,18 @@ async function renderKhoPO(){
   }
   showLoading(box);
   let pos = [];
-  try{ pos = await loadPurchaseOrders(); }
+  try{
+    pos = await loadPurchaseOrders();
+    INVENTORY_ITEMS = await loadInventoryItems();
+    // [MỚI — tích hợp] "Sửa phiếu nhận" từng là 1 tab riêng trong "Hàng đang mở & tem"
+    // (renderKhoContainers), tách khỏi chỗ chủ quán thực sự nghĩ tới nó — vừa xem đơn/
+    // phiếu nhận ở đây thì tiện sửa luôn, không phải nhảy sang tab khác. Gộp về đúng 1 chỗ.
+    FIXREC_CACHE = fixRecPoId
+      ? (await fstore.collection('receiving_records_gieogieo').where('poId','==',fixRecPoId).get())
+          .docs.map(d=>({id:d.id, ...d.data()}))
+          .sort((a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||'')))
+      : await loadReceivingRecords(20);
+  }
   catch(err){ console.error('loadPurchaseOrders failed', err); box.innerHTML = '<div class="muted">Không tải được đơn đặt hàng.</div>'; showError('Không đọc được PO: '+(err.code||err.message||err)); return; }
 
   const draftHtml = `
@@ -21390,17 +21110,36 @@ async function renderKhoPO(){
       </div>
       <div class="li-r">
         ${['partial','received'].includes(po.status) ? `<button class="btn outline sm" onclick="poMoSuaPhieuNhan('${po.id}')">${ic('note',14)} Sửa số đã nhận</button>` : ''}
-        ${po.status==='partial' ? `<button class="btn outline sm" onclick="confirmClosePONoMore('${po.id}')">${ic('check',14)} Đóng đơn (thiếu)</button>` : ''}
+        ${po.status==='partial' ? `<button class="btn nf sm" onclick="confirmClosePONoMore('${po.id}')">${ic('check',14)} Đóng đơn (thiếu)</button>` : ''}
         ${activeStatuses.includes(po.status) ? `<button class="iconbtn" onclick="confirmCancelPO('${po.id}')">${ic('x',15)}</button>` : ''}
       </div>
     </div>`;
   }).join('') : '<div class="muted">Chưa có đơn đặt hàng nào.</div>';
+
+  const p2 = n => String(n).padStart(2,'0');
+  const dtFix = iso => { const d = iso?new Date(iso):null; return (d && !isNaN(d)) ? `${p2(d.getDate())}/${p2(d.getMonth()+1)} ${p2(d.getHours())}:${p2(d.getMinutes())}` : ''; };
+  const fixRecHtml = FIXREC_CACHE.map(r=>{
+    const dongs = (r.lines||[]).filter(l=>Number(l.qtyGoodBase)>0);
+    const sua = (r.corrections||[]).length;
+    return `<div class="litem nf-bg" style="cursor:pointer" onclick="openFixRecWizard('${r.id}')">
+        <div class="li-l">
+          <div>${dtFix(r.createdAt)} · ${escapeHtmlAttr(r.supplier||'không ghi nhà cung cấp')}</div>
+          <div class="muted-sm">${escapeHtmlAttr(r.staff||'—')} · ${dongs.map(l=>escapeHtmlAttr(l.name||'')).slice(0,3).join(', ')}${dongs.length>3?` +${dongs.length-3}`:''}</div>
+          ${sua?`<div class="small-note" style="color:var(--warn)">Đã sửa ${sua} lần — mở ra xem nhật ký</div>`:''}
+        </div>
+        <div class="li-r"><span class="ftag nf" style="padding:6px 12px;min-height:0">Sửa ›</span></div>
+      </div>`;
+  }).join('');
 
   box.innerHTML = `
     <div class="sec-title">Tạo đơn đặt hàng mới</div>
     ${draftHtml}
     <div class="sec-title" style="margin-top:14px">Đơn đặt hàng gần đây</div>
     ${listHtml}
+    <div class="sec-title" style="margin-top:18px">Sửa phiếu nhận</div>
+    <div class="small-note nf-bg" style="margin-bottom:12px;padding:10px;border-radius:10px">Gõ nhầm số lượng lúc nhận hàng (30 hộp thay vì 3) thì phải sửa ở <b>bốn chỗ cùng lúc</b>: tồn kho, dòng nhập trong sổ, đám tem đã sinh, và số "đã nhận" trên đơn đặt hàng. Bấm vào một phiếu để mở quy trình sửa 3 bước — làm đủ cả bốn trong một lần, và ghi lại nhật ký sửa ngay trên phiếu.</div>
+    ${fixRecPoId ? `<div class="small-note" style="margin-bottom:10px">Đang lọc theo <b>một đơn đặt hàng</b>. <a href="#" onclick="fixRecPoId=null;renderKhoPO();return false;">Xem tất cả phiếu nhận</a></div>` : ''}
+    ${FIXREC_CACHE.length ? fixRecHtml : '<div class="empty-hint">Chưa có phiếu nhận hàng nào.</div>'}
     <div class="sec-title" style="margin-top:18px">Nhập kho nhanh — không theo đơn</div>
     <div class="small-note" style="margin-bottom:8px">Dùng khi mua lẻ ngoài kế hoạch, hoặc chữa lại một lần nhận hàng ghi sót. Nhận hàng bình thường thì nhân viên làm bên POS theo đơn ở trên — đi đường đó mới có đối chiếu thiếu/thừa và sinh tem.</div>
     <div id="stockinBox"></div>
