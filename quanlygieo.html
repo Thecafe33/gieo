@@ -5457,43 +5457,77 @@ async function kho2SearchGo(){
 // truy xuất (chỉ có lịch sử ledger dạng dòng sổ, không phải theo lô). Mặc định hiện lô
 // của HÔM NAY + mọi lô ĐANG DÙNG (cooking/active) dù tạo từ ngày trước, vì đó là 2 nhóm
 // hay cần tra nhất — "hôm nay nấu/bán những lô nào" và "còn lô nào đang mở dở".
-let kho2PrepFilter = 'today'; // today | active | all-recent
+let kho2PrepFilter = 'today'; // today | active | expired
+// [MỚI] Tab "Hết hạn / báo hết" — trước đây 2 tab (today/active) chỉ query businessDate
+// hôm nay ∪ status cooking/active, nên lô đã bị đóng (expired/used_up) từ NGÀY TRƯỚC rơi
+// mất khỏi mọi bộ lọc, không cách nào tìm lại được kể cả khi chủ quán biết chắc lô đó
+// hết hạn NHẦM do cấu hình shelfLifeHours sai (vd 1h thay vì 4h) — không thấy thì không
+// gia hạn được. Query riêng, không orderBy kèm where('in',...) để khỏi cần composite
+// index, giới hạn 150 bản ghi rồi tự sắp theo mốc đóng lô mới nhất ở client.
+async function loadExpiredPrepBatches(){
+  const snap = await fstore.collection('prep_batches_gieogieo').where('status','in',['expired','used_up']).limit(150).get();
+  const list = snap.docs.map(d=>({id:d.id, ...d.data()}));
+  list.sort((a,b)=>String(b.expiredAt||b.usedUpAt||'').localeCompare(String(a.expiredAt||a.usedUpAt||'')));
+  return list;
+}
 async function renderKho2Prep(){
   const box = document.getElementById('kho2Body');
   if(!box) return;
   showLoading(box);
   try{
     await ensureAuth();
-    const today = dkey(new Date());
-    const [todaySnap, activeSnap] = await Promise.all([
-      fstore.collection('prep_batches_gieogieo').where('businessDate','==',today).get(),
-      fstore.collection('prep_batches_gieogieo').where('status','in',['cooking','active']).get()
-    ]);
-    const byId = {};
-    todaySnap.forEach(d=>byId[d.id] = {id:d.id, ...d.data()});
-    activeSnap.forEach(d=>{ if(!byId[d.id]) byId[d.id] = {id:d.id, ...d.data()}; });
-    let list = Object.values(byId);
-    if(kho2PrepFilter === 'active') list = list.filter(b=>['cooking','active'].includes(b.status));
-    list.sort((a,b)=>String(b.startedAt||'').localeCompare(String(a.startedAt||'')));
+    let list, gioiHan = false;
+    if(kho2PrepFilter === 'expired'){
+      list = await loadExpiredPrepBatches();
+      if(list.length > 60){ list = list.slice(0,60); gioiHan = true; }
+    } else {
+      const today = dkey(new Date());
+      const [todaySnap, activeSnap] = await Promise.all([
+        fstore.collection('prep_batches_gieogieo').where('businessDate','==',today).get(),
+        fstore.collection('prep_batches_gieogieo').where('status','in',['cooking','active']).get()
+      ]);
+      const byId = {};
+      todaySnap.forEach(d=>byId[d.id] = {id:d.id, ...d.data()});
+      activeSnap.forEach(d=>{ if(!byId[d.id]) byId[d.id] = {id:d.id, ...d.data()}; });
+      list = Object.values(byId);
+      if(kho2PrepFilter === 'active') list = list.filter(b=>['cooking','active'].includes(b.status));
+      list.sort((a,b)=>String(b.startedAt||'').localeCompare(String(a.startedAt||'')));
+    }
 
     const nav = `<div class="filter-bar">
       <button class="ftag ${kho2PrepFilter==='today'?'active':''}" onclick="kho2PrepFilter='today'; renderKho2Prep();">Hôm nay + đang dùng</button>
       <button class="ftag ${kho2PrepFilter==='active'?'active':''}" onclick="kho2PrepFilter='active'; renderKho2Prep();">Chỉ đang dùng</button>
+      <button class="ftag ${kho2PrepFilter==='expired'?'active':''}" onclick="kho2PrepFilter='expired'; renderKho2Prep();">Hết hạn / báo hết</button>
     </div>`;
 
     if(!list.length){ box.innerHTML = nav + '<div class="empty-hint">Không có lô nào trong nhóm này.</div>'; return; }
 
     const dt = iso => { const d = iso?new Date(iso):null; return (d && !isNaN(d)) ? `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}` : ''; };
-    box.innerHTML = nav + list.map(b=>{
+    const now = Date.now();
+    box.innerHTML = nav
+      + (gioiHan ? `<div class="small-note" style="margin:2px 4px 8px">Chỉ hiện 60 lô đóng gần nhất — quá nhiều để liệt kê hết.</div>` : '')
+      + list.map(b=>{
       const trangThai = PREP_BATCH_STATUS_LABEL[b.status] || b.status || '—';
-      const mauTier = b.status==='active' ? 'green' : (b.status==='cooking' ? 'blue' : (b.status==='cancelled' ? 'amber' : 'red'));
+      // [MỚI] Lô CÒN status 'active' nhưng expiresAt đã QUA — chưa bị POS đóng thật (chỉ
+      // đóng lúc "Đếm bán thành phẩm cuối ca" chạy), nhưng đã hết hạn theo đồng hồ. Đây
+      // chính là dấu hiệu "cấu hình HSD sai" chủ quán cần thấy TRƯỚC khi bị POS tự đóng.
+      const quaHanMaConDang = b.status==='active' && b.expiresAt && new Date(b.expiresAt).getTime() <= now;
+      const mauTier = quaHanMaConDang ? 'amber' : (b.status==='active' ? 'green' : (b.status==='cooking' ? 'blue' : (b.status==='cancelled' ? 'amber' : 'red')));
+      const nhanTier = quaHanMaConDang ? 'Quá hạn — vẫn đang dùng' : trangThai;
       const pct = (Number(b.qtyInitial)>0) ? Math.round(Math.max(0,Number(b.qtyRemaining)||0)/Number(b.qtyInitial)*100) : null;
+      // [MỚI] "Gia hạn" ngay tại dòng cho lô ĐÃ hết hạn (status='expired', do POS tự đóng
+      // và zero tồn) hoặc ĐANG quá hạn nhưng chưa bị đóng — cả hai đều là hệ quả của cấu
+      // hình shelfLifeHours sai, chủ quán cần sửa lại HSD (và khôi phục tồn nếu đã bị zero).
+      const giaHanBtn = (b.status==='expired' || quaHanMaConDang)
+        ? `<button class="btn outline sm" style="width:auto;padding:0 10px;min-height:30px;margin-top:6px" onclick="event.stopPropagation();openPrepExtendExpirySheet('${b.id}')">Gia hạn</button>`
+        : '';
       return `<div class="litem" onclick="ctnShowDetail('${b.id}','prep_batches_gieogieo')" style="cursor:pointer">
         <div class="li-l">
           <div>${escapeHtmlAttr(b.prepName||b.prepCode||'')} <span class="muted-sm" style="letter-spacing:.4px">${escapeHtmlAttr(b.batchCode||'chưa cấp mã')}</span></div>
           <div class="muted-sm">Bắt đầu ${dt(b.startedAt)}${b.staff?(' · '+escapeHtmlAttr(b.staff)):''}${pct!=null?(' · còn '+pct+'%'):''}</div>
+          ${giaHanBtn}
         </div>
-        <div class="li-r"><span class="tier tier-${mauTier}">${escapeHtmlAttr(trangThai)}</span></div>
+        <div class="li-r"><span class="tier tier-${mauTier}">${escapeHtmlAttr(nhanTier)}</span></div>
       </div>`;
     }).join('');
   }catch(err){
@@ -11394,6 +11428,108 @@ function _prepAdjustToast(rtOk, qty, unit, daoHaoHut){
   return rtOk
     ? '✅ Đã điều chỉnh lô — tồn kho đã cộng lại '+fmtNum(qty,2)+' '+(unit||'')+(daoHaoHut?', đã đảo lại hao hụt ghi nhầm':'')+', lô đã đồng bộ lại real-time'
     : '⚠️ Đã điều chỉnh lô nhưng đồng bộ real-time lỗi — số liệu vẫn đúng, tự sửa lại ở lần kiểm kê cuối ngày tới';
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// [MỚI] GIA HẠN LÔ HẾT HẠN NHẦM — cấu hình "Hạn dùng theo giờ" của thành phẩm sai
+// (vd khai 1 giờ thay vì 4 giờ) khiến lô bị POS tự đóng hết hạn (status='expired',
+// zero tồn) hoặc đang treo status='active' nhưng expiresAt đã qua từ lâu, trong khi
+// hàng thực tế vẫn còn dùng được. Trước đây "Kho 2.0 ▸ Bán thành phẩm" chỉ liệt kê
+// lô hôm nay/đang dùng — lô đã hết hạn từ ngày trước rơi mất khỏi mọi bộ lọc, không
+// còn cách nào gia hạn (xem loadExpiredPrepBatches ở renderKho2Prep).
+//
+// 2 trường hợp khác hẳn nhau, phải xử lý riêng:
+//   status==='expired' (đã bị POS đóng, qtyRemaining=0) → cần CẢ hai: khôi phục tồn
+//     (như prepBatchRestoreCore) VÀ đẩy HSD mới — không đẩy HSD thì lô vừa khôi phục
+//     lại hết hạn ngay ở lượt đếm cuối ca kế tiếp.
+//   status==='active' nhưng expiresAt đã qua (chưa bị đóng) → chỉ cần đẩy HSD, tồn
+//     kho không đổi (đã đang đóng góp đúng số hiện tại).
+// ══════════════════════════════════════════════════════════════════════════
+async function openPrepExtendExpirySheet(batchId){
+  openEditSheet('Gia hạn lô', '<div id="prepExtendBody"></div>', ()=>{});
+  const box = document.getElementById('prepExtendBody');
+  showLoading(box);
+  try{
+    await ensureAuth();
+    const doc = await fstore.collection('prep_batches_gieogieo').doc(batchId).get();
+    if(!doc.exists){ box.innerHTML = '<div class="muted">Không tìm thấy lô này (có thể đã bị xoá).</div>'; return; }
+    const b = {id:doc.id, ...doc.data()};
+    // Kho 2.0 ▸ BTP không tự nạp PREP_ITEMS (chỉ "Chế biến cấp 1" nạp) — nạp bù nếu
+    // chưa có, cần cho gợi ý HSD mới + cảnh báo cấu hình bên dưới.
+    if(!(PREP_ITEMS||[]).length) PREP_ITEMS = await loadPrepItems().catch(()=>[]);
+    const p = (PREP_ITEMS||[]).find(x=>x.id===b.prepId);
+    box.innerHTML = prepExtendBodyHTML(b, p);
+  }catch(err){
+    console.error('openPrepExtendExpirySheet lỗi', err);
+    box.innerHTML = '<div class="muted">Không tải được: '+(err.code||err.message||err)+'</div>';
+  }
+}
+function _dtLocalVal(isoOrDate){
+  const d = isoOrDate ? new Date(isoOrDate) : new Date();
+  const p = x=>String(x).padStart(2,'0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+function prepExtendBodyHTML(b, p){
+  const dt = iso => { const d = iso?new Date(iso):null; return (d && !isNaN(d)) ? fmtDateVN(d)+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0') : '—'; };
+  const canKhoiPhuc = Number(b.qtyRemaining)||0; // status='expired' đã zero → 0; 'active' quá hạn → vẫn còn số thật
+  const daBiDong = b.status === 'expired';
+  // Gợi ý HSD mới: bây giờ + đúng số giờ đang khai ở "Chế biến cấp 1" — sửa cấu hình
+  // TRƯỚC rồi mới gia hạn thì gợi ý này đã đúng luôn, khỏi phải tự cộng giờ tay.
+  const goiY = (p && p.shelfLifeType==='hours' && Number(p.shelfLifeHours)>0)
+    ? new Date(Date.now() + Number(p.shelfLifeHours)*3600000) : null;
+  return `
+    <div class="row"><span class="rl">Nguyên liệu</span><span class="rv">${escapeHtmlAttr(b.prepName||b.prepCode||'')}</span></div>
+    <div class="row"><span class="rl">Mã lô</span><span class="rv"><b>${escapeHtmlAttr(b.batchCode||'chưa cấp mã')}</b></span></div>
+    <div class="row"><span class="rl">Trạng thái hiện tại</span><span class="rv"><span class="tier tier-red">${PREP_BATCH_STATUS_LABEL[b.status]||b.status}</span></span></div>
+    <div class="row"><span class="rl">HSD hiện tại</span><span class="rv">${dt(b.expiresAt)}</span></div>
+    ${daBiDong ? `<div class="alert amber" style="margin-top:8px"><span class="ic">${ic('alert',15)}</span><div>Lô này đã bị hệ thống tự đóng hết hạn (tồn đã về 0). Gia hạn ở đây sẽ vừa <b>khôi phục tồn</b> vừa <b>đẩy HSD mới</b> — nếu chỉ đẩy HSD mà không nhập số còn lại, lô vẫn ở trạng thái hết hạn với tồn 0.</div></div>` : ''}
+    ${p && p.shelfLifeType!=='hours' ? `<div class="small-note" style="margin-top:6px">Thành phẩm này hiện KHÔNG khai "Hạn theo giờ" ở Chế biến cấp 1 (đang là "${p.shelfLifeType==='endOfDay'?'Cuối ca':'Không hạn'}") — nếu đây đúng là nguyên nhân hết hạn nhầm, nên sửa lại cấu hình đó trước để không lặp lại ở lô sau.</div>` : ''}
+    <div class="field" style="margin-top:10px"><label>HSD mới</label>
+      <input type="datetime-local" id="prepExtendAt_${b.id}" value="${_dtLocalVal(goiY || Date.now())}">
+    </div>
+    ${daBiDong ? `<div class="field" style="margin-top:8px"><label>Số lượng thực tế còn lại (${escapeHtmlAttr(b.unit||'')})</label>
+      <input type="number" step="0.01" min="0.01" id="prepExtendQty_${b.id}" placeholder="VD: ${fmtNum(b.qtyInitial,2)}">
+    </div>` : `<div class="small-note" style="margin-top:6px">Lô này chưa bị đóng — tồn kho hiện tại (${fmtNum(canKhoiPhuc,2)} ${escapeHtmlAttr(b.unit||'')}) giữ nguyên, chỉ đổi HSD.</div>`}
+    <button class="btn sm" style="width:auto;padding:0 16px;margin-top:10px" onclick="submitPrepExtendExpiry('${b.id}')">Lưu gia hạn</button>
+  `;
+}
+async function submitPrepExtendExpiry(batchId){
+  const atInput = document.getElementById('prepExtendAt_'+batchId);
+  const atVal = atInput && atInput.value;
+  if(!atVal){ toast('⚠️ Chọn HSD mới'); return; }
+  const newExpiresAt = new Date(atVal);
+  if(isNaN(newExpiresAt)){ toast('⚠️ HSD mới không hợp lệ'); return; }
+  if(newExpiresAt.getTime() <= Date.now()){ if(!confirm('HSD mới bạn chọn không nằm ở tương lai — lô sẽ tiếp tục bị coi là hết hạn ngay. Vẫn lưu?')) return; }
+  const qtyInput = document.getElementById('prepExtendQty_'+batchId);
+  const restoreQty = qtyInput ? Number(qtyInput.value) : null;
+  if(qtyInput && !(restoreQty > 0)){ toast('⚠️ Nhập số lượng thực tế còn lại lớn hơn 0'); return; }
+  if(!confirm(`Gia hạn lô này tới ${fmtDateVN(newExpiresAt)} ${String(newExpiresAt.getHours()).padStart(2,'0')}:${String(newExpiresAt.getMinutes()).padStart(2,'0')}${restoreQty?` và khôi phục ${fmtNum(restoreQty,2)} còn lại`:''}. Tiếp tục?`)) return;
+  try{
+    await ensureAuth();
+    const { b, rtOk, daoHaoHut } = await prepBatchExtendExpiryCore(batchId, newExpiresAt.toISOString(), restoreQty);
+    logAudit('adjust','prep_batch',batchId,{ giaHanHSD:true, hsdMoi:newExpiresAt.toISOString(), qtyKhoiPhuc:restoreQty||0, daoHaoHut, rtOk });
+    toast(restoreQty
+      ? _prepAdjustToast(rtOk, restoreQty, b.unit, daoHaoHut) + ' · đã đẩy HSD mới'
+      : '✅ Đã gia hạn HSD lô này');
+    closeEditSheet();
+    renderKho2Prep();
+  }catch(err){
+    console.error('submitPrepExtendExpiry lỗi', err);
+    showError('Không gia hạn được: '+(err.code||err.message||err));
+  }
+}
+// Lõi gia hạn — khôi phục (nếu lô đã bị đóng, tái dùng đúng prepBatchRestoreCore() rồi
+// đẩy thêm HSD mới, vì hàm đó vốn không đụng expiresAt) hoặc chỉ đổi HSD (lô còn active).
+async function prepBatchExtendExpiryCore(batchId, newExpiresAtISO, restoreQty){
+  const batchRef = fstore.collection('prep_batches_gieogieo').doc(batchId);
+  if(restoreQty > 0){
+    const result = await prepBatchRestoreCore(batchId, restoreQty);
+    await batchRef.update({ expiresAt: newExpiresAtISO });
+    return result;
+  }
+  await batchRef.update({ expiresAt: newExpiresAtISO });
+  const doc = await batchRef.get();
+  return { b: doc.data(), rtOk: true, daoHaoHut: 0 };
 }
 async function submitPrepVarianceAdjust(alertId, batchId){
   const input = document.getElementById('prepAdjQty_'+batchId);
