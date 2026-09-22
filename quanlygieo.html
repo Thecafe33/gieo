@@ -1175,8 +1175,22 @@ html.tab-ui .muted{font-size:15px;}
 html.tab-ui .kgrid{grid-template-columns:repeat(auto-fit,minmax(232px,1fr));gap:16px;}
 html.tab-ui .kcard{padding:20px 20px 18px;border-radius:var(--r-xl);}
 html.tab-ui .kcard .kval{font-size:27px;}
-html.tab-ui .kcard.kcard-wide{grid-column:span 2;}
-html.tab-ui .kcard.kcard-wide .kval{font-size:38px;}
+/* [MỚI] Thẻ Doanh thu (kcard-wide) chiếm TRỌN chiều ngang màn Hôm nay ở chế độ
+   tablet thay vì chỉ 2 cột trong lưới — đúng thẻ "hero" đầu trang, xứng đáng
+   nổi bật nhất trên màn hình rộng. */
+html.tab-ui .kcard.kcard-wide{grid-column:1 / -1;padding:28px 32px 26px;}
+html.tab-ui .kcard.kcard-wide .kval{font-size:56px;}
+html.tab-ui .kcard.kcard-wide .meter-bar{height:10px;}
+html.tab-ui .kcard.kcard-plai{grid-column:1 / -1;padding:26px 30px 24px;}
+
+/* [MỚI] Badge "Ca hiện tại" + check-in/out nhân viên — góc trên phải màn Hôm nay,
+   bảng màu mới (vàng/xanh #0062AD/nền kem) vì đây là tính năng mới thêm. */
+.shift-badge{cursor:pointer;text-align:right;padding:6px 12px;border-radius:12px;
+  background:#FFF8E7;border:1.5px solid #0062AD;color:#0062AD;font-size:12px;line-height:1.5;}
+.shift-badge-line1{font-weight:700;}
+.shift-badge-line2{color:#0062AD;opacity:.8;}
+.shift-badge-closed{font-weight:700;}
+html.tab-ui .shift-badge{font-size:13.5px;padding:9px 16px;}
 
 /* ---------- 16.5 Biểu mẫu: nhiều cột, nút không kéo dài vô nghĩa ---------- */
 html.tab-ui .grid2{grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:16px;}
@@ -1376,6 +1390,7 @@ html.phone-ui .nav-search .ns-kbd{display:none;}
           </div>
         </div>
         <div class="topbar-actions">
+          <div id="todayShiftInfo"></div>
           <div class="sync"><span class="dot busy" id="syncDot"></span><span id="syncTxt">syncing</span></div>
           <button id="uiModeBtn" class="hib" onclick="cycleUiMode()" title="Đổi giao diện"></button>
           <button id="reloadBtn" class="hib" onclick="reloadCurrent()" aria-label="Tải lại"></button>
@@ -10738,6 +10753,7 @@ function switchScreen(s){
   // Bảng tin bill chỉ nghe khi đang đứng ở màn Hôm nay — sang màn khác thì gỡ,
   // không giữ một listener realtime chạy nền suốt phiên.
   if(s === 'today') attachBillFeed(); else detachBillFeed();
+  if(s !== 'today'){ const si = document.getElementById('todayShiftInfo'); if(si) si.innerHTML = ''; }
   if(s === 'bills') renderBills().catch(err=>{ console.error(err); showError('Không mở được Lịch sử bill: '+(err.message||err)); });
   if(s==='assist') renderAssist().catch(err=>{ console.error(err); showError('Không mở được Trợ lý bán hàng: '+(err.message||err)); });
   if(s==='inbox') renderAlertInbox();
@@ -11459,6 +11475,78 @@ function todayQuickAccessHTML(){
     </div>`;
 }
 
+// ============================================================
+// [MỚI] Badge "Ca hiện tại" — góc trên phải màn Hôm nay (rõ nhất ở chế độ tablet).
+// Hiện: nhãn ca theo khung giờ (CHỈ để đọc nhanh, không phải lịch làm việc thật —
+// xem entry:lich cho lịch thật), số nhân viên đang check-in/đã check-out, hoặc
+// "Đã đóng quán hôm nay" nếu daily_closings hôm nay đã status='closed'. Bấm vào
+// mở popup xem đầy đủ giờ vào/ra từng người (openTodayShiftDetail).
+// ============================================================
+const SHIFT_PERIOD_BANDS = [
+  [5, 10,  'Ca sáng'],
+  [10, 13, 'Ca sáng & trưa'],
+  [13, 17, 'Ca trưa & chiều'],
+  [17, 21, 'Ca chiều & tối'],
+  [21, 24, 'Ca tối'],
+];
+function currentShiftPeriodLabel(d){
+  const h = (d||new Date()).getHours();
+  const band = SHIFT_PERIOD_BANDS.find(([a,b])=> h>=a && h<b);
+  return band ? band[2] : 'Ngoài giờ mở cửa';
+}
+
+let _todayShiftDetailCache = [];
+async function renderTodayShiftInfo(){
+  const box = document.getElementById('todayShiftInfo');
+  if(!box) return;
+  const dayKey = dkey(new Date());
+  let closing = null, shifts = [];
+  try{
+    await ensureAuth();
+    const [closingDoc, shiftSnap] = await Promise.all([
+      fstore.collection('daily_closings_gieogieo').doc(dayKey).get(),
+      fstore.collection('employee_shifts_gieogieo').where('businessDate','==',dayKey).get()
+    ]);
+    closing = closingDoc.exists ? closingDoc.data() : null;
+    shifts = shiftSnap.docs.map(d=>({id:d.id, ...d.data()}));
+  }catch(err){
+    console.warn('[Ca hiện tại] không đọc được:', err);
+    box.innerHTML = '';
+    return;
+  }
+  if(curScreen !== 'today') return; // đã chuyển màn trong lúc đang đọc — đừng vẽ nhầm chỗ
+  _todayShiftDetailCache = shifts;
+
+  if(closing && closing.status === 'closed'){
+    box.innerHTML = `<div class="shift-badge shift-badge-closed" onclick="openTodayShiftDetail()">${ic('lock',13)} Đã đóng quán hôm nay</div>`;
+    return;
+  }
+
+  const dangLam = shifts.filter(s=>!s.checkedOutAt);
+  const daXong = shifts.filter(s=>s.checkedOutAt);
+  const dong2 = !shifts.length ? 'Chưa ai check-in'
+    : (dangLam.length ? `${dangLam.length} đang làm` : 'Không ai đang check-in') + (daXong.length ? ` · ${daXong.length} đã check-out` : '');
+
+  box.innerHTML = `<div class="shift-badge" onclick="openTodayShiftDetail()">
+      <div class="shift-badge-line1">Ca hiện tại: ${currentShiftPeriodLabel()}</div>
+      <div class="shift-badge-line2">${dong2}</div>
+    </div>`;
+}
+
+function openTodayShiftDetail(){
+  const gio = iso => { try{ return new Date(iso).toLocaleTimeString('vi-VN',{hour:'2-digit',minute:'2-digit'}); }catch(e){ return ''; } };
+  const shifts = _todayShiftDetailCache.slice().sort((a,b)=>String(a.checkedInAt||'').localeCompare(String(b.checkedInAt||'')));
+  const body = !shifts.length ? '<div class="empty-hint">Chưa có ai check-in hôm nay.</div>' : shifts.map(s=>`
+    <div class="litem">
+      <div class="li-l">
+        <div>${escapeHtmlAttr(s.employeeName||'—')}</div>
+        <div class="muted-sm">Vào ${gio(s.checkedInAt)}${s.checkedOutAt ? ` · Ra ${gio(s.checkedOutAt)}` : ''}</div>
+      </div>
+      <div class="li-r">${s.checkedOutAt ? '<span class="tier tier-blue">Đã ra</span>' : '<span class="tier tier-green">Đang làm</span>'}</div>
+    </div>`).join('');
+  openEditSheet('Ca hôm nay', body, ()=>{});
+}
+
 async function renderToday(){
   setSync(true);
   document.getElementById('todayQuickAccess').innerHTML = todayQuickAccessHTML();
@@ -11566,12 +11654,16 @@ async function renderToday(){
   // mục tiêu — nhìn màu là biết tình trạng trước cả khi đọc con số.
   const theDoanhThu = `
     <div class="kcard kcard-wide lv-${mucSK}">
-      <div class="klabel">Doanh thu</div>
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+        <div class="klabel">Doanh thu</div>
+        <span class="tier" style="background:rgba(255,255,255,.22);color:#fff;flex-shrink:0">Thời gian thực</span>
+      </div>
       <div class="kval disp">${fmt(kpi.revenue)}</div>
       <div class="ksub"><b>${PL_LV_TEXT[mucSK]}</b></div>
       ${plMeterHTML(kpi.revenue, plBE ? plBE.hoaVon : null, dailyTarget)}
     </div>`;
   document.getElementById('todayGrid').innerHTML = theDoanhThu + plLaiCardHTML(plHomNay, plBE);
+  renderTodayShiftInfo();
   // Hai ô cuối (doanh thu/giờ công và vốn trong kho) cần thêm một lượt đọc dữ liệu
   // nên để chỗ trống có nhãn sẵn, điền sau — giữ đúng khung lưới, không nhảy chỗ.
   document.getElementById('todayMini').innerHTML =
