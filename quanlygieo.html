@@ -11224,24 +11224,75 @@ async function openPrepVarianceAdjustSheet(alertId){
 function prepAdjBodyHTML(a, batches){
   const nhieuLo = batches.length > 1;
   const dt = iso => { const d = iso?new Date(iso):null; return (d && !isNaN(d)) ? fmtDateVN(d)+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0') : '—'; };
+  // [MỚI] Lô ĐÃ bị đóng (used_up/expired) → khôi phục (submitPrepVarianceAdjust, cộng
+  // nguyên tồn vì hiện đang đóng góp 0). Lô VẪN 'active'/'cooking' → chỉ SỬA SỐ trực
+  // tiếp (submitPrepVarianceAdjustSetQty, cộng/trừ đúng phần chênh lệch) — đây là
+  // trường hợp cảnh báo "dư" (nhân viên đếm nhiều hơn hệ thống, gõ nhầm số), lô không
+  // hề bị đóng nên không có gì để "khôi phục" cả, chỉ cần sửa lại đúng số.
+  const dangDong = b => ['used_up','expired'].includes(b.status);
   return `
     <div class="row"><span class="rl">Nguyên liệu</span><span class="rv">${escapeHtmlAttr(a.itemName||'')}</span></div>
     <div class="row"><span class="rl">Ngày đếm</span><span class="rv">${a.businessDate||'—'}${a.staff?' · '+escapeHtmlAttr(a.staff):''}</span></div>
     <div class="row"><span class="rl">Hệ thống ghi / NV đếm</span><span class="rv">${fmtNum(a.systemQty,1)} / ${fmtNum(a.countedQty,1)} ${a.unit||''}</span></div>
-    ${!batches.length ? `<div class="empty-hint" style="margin-top:10px">Không tìm thấy lô nào bị đánh dấu hết đúng vào lúc ghi nhận cảnh báo này — có thể lô đã bị sửa lại trước đó, hoặc dữ liệu quá cũ để đối chiếu chính xác.</div>` : `
-    <div class="small-note" style="margin-top:10px">${batches.length} lô khớp đúng thời điểm ghi nhận cảnh báo. Nhập số thực tế còn lại của lô cần khôi phục rồi bấm Lưu.</div>
-    ${nhieuLo ? `<div class="alert amber" style="margin-top:8px"><span class="ic">${ic('alert',15)}</span><div>Nhiều lô cùng bị đánh dấu hết trong lượt đếm này — sổ "Hao hụt &amp; huỷ" ghi GỘP theo nguyên liệu, không tách riêng từng lô, nên điều chỉnh dưới đây <b>chỉ trả lại đúng tồn cho lô</b>, KHÔNG tự sửa lại số hao hụt đã ghi. Kiểm tra lại "Hao hụt &amp; huỷ" ngày ${a.businessDate} nếu cần.</div></div>` : ''}
+    ${!batches.length ? `<div class="empty-hint" style="margin-top:10px">Không tìm thấy đúng lô đã bị sửa trong lượt đếm này — có thể lô đã bị sửa lại trước đó, hoặc dữ liệu quá cũ để đối chiếu chính xác. Vào Kho → Bán thành phẩm để sửa tay.</div>` : `
+    <div class="small-note" style="margin-top:10px">${batches.length} lô đã bị sửa số trong lượt đếm này. Nhập số thực tế còn lại của lô cần điều chỉnh rồi bấm Lưu.</div>
+    ${nhieuLo ? `<div class="alert amber" style="margin-top:8px"><span class="ic">${ic('alert',15)}</span><div>Nhiều lô cùng bị sửa trong lượt đếm này — sổ "Hao hụt &amp; huỷ" ghi GỘP theo nguyên liệu, không tách riêng từng lô, nên điều chỉnh dưới đây <b>chỉ trả lại đúng tồn cho lô</b>, KHÔNG tự sửa lại số hao hụt đã ghi. Kiểm tra lại "Hao hụt &amp; huỷ" ngày ${a.businessDate} nếu cần.</div></div>` : ''}
     ${batches.map(b=>`
       <div class="card" style="margin-top:10px">
         <div class="row"><span class="rl">${escapeHtmlAttr(b.batchCode||'chưa cấp mã')}</span><span class="rv"><span class="tier tier-red">${PREP_BATCH_STATUS_LABEL[b.status]||b.status}</span></span></div>
-        <div class="small-note">Cân được ${fmtNum(b.qtyInitial,2)} ${escapeHtmlAttr(b.unit||'')} lúc nấu · bắt đầu ${dt(b.startedAt)}</div>
+        <div class="small-note">Cân được ${fmtNum(b.qtyInitial,2)} ${escapeHtmlAttr(b.unit||'')} lúc nấu · bắt đầu ${dt(b.startedAt)}${!dangDong(b) ? ' · hiện đang ghi còn '+fmtNum(b.qtyRemaining,2)+' '+escapeHtmlAttr(b.unit||'') : ''}</div>
         <div class="field" style="margin-top:8px"><label>Số lượng thực tế còn lại (${escapeHtmlAttr(b.unit||'')})</label>
           <input type="number" step="0.01" min="0" id="prepAdjQty_${b.id}" placeholder="VD: ${fmtNum(a.systemQty,2)}">
         </div>
-        <button class="btn sm" style="width:auto;padding:0 16px;margin-top:8px" onclick="submitPrepVarianceAdjust('${a.id}','${b.id}')">Lưu điều chỉnh</button>
+        <button class="btn sm" style="width:auto;padding:0 16px;margin-top:8px" onclick="${dangDong(b) ? `submitPrepVarianceAdjust('${a.id}','${b.id}')` : `submitPrepVarianceAdjustSetQty('${a.id}','${b.id}')`}">Lưu điều chỉnh</button>
       </div>`).join('')}
     `}
   `;
+}
+// [MỚI] Sửa TRỰC TIẾP số lượng còn lại của một lô ĐANG 'active'/'cooking' (chưa từng
+// bị đóng) — dùng cho chiều "dư" của cảnh báo lệch đếm BTP: nhân viên đếm cuối ca gõ
+// nhầm số CAO hơn hệ thống, hệ thống ghi đè thẳng qtyRemaining của lô mà không qua bước
+// duyệt nào (xem _submitPrepCountImpl bên posgieo.html). Khác hẳn prepBatchRestoreCore()
+// bên dưới (dành cho lô ĐÃ bị đánh dấu 'hết' rồi mở lại): lô active vẫn đang đóng góp
+// đúng qtyRemaining HIỆN TẠI vào currentStock rồi, nên chỉ được cộng/trừ đúng PHẦN
+// CHÊNH LỆCH (delta) — cộng nguyên qty như bên kia sẽ ra tồn kho tăng gấp đôi.
+async function prepBatchSetQtyCore(batchId, qty){
+  const batchRef = fstore.collection('prep_batches_gieogieo').doc(batchId);
+  const batchDoc = await batchRef.get();
+  if(!batchDoc.exists) throw new Error('Lô không còn tồn tại');
+  const b = batchDoc.data();
+  const before = Number(b.qtyRemaining) || 0;
+  const delta = Math.round((qty - before)*100)/100;
+  const nowISO = new Date().toISOString();
+  await batchRef.update({
+    qtyRemaining: qty, unitBase: qty,
+    correctedAt: nowISO, correctedBy: 'management', correctedFromQty: before,
+    correctedNote: 'Điều chỉnh — nhân viên đếm cuối ca ghi nhầm số, sửa lại theo số Quản lý nhập'
+  });
+  // Đồng bộ RTDB (Unit Engine) — GHI ĐÈ thẳng unitBase mới, cùng cách _submitPrepCountImpl()
+  // bên POS đã ghi lúc đếm cuối ca (không phải cộng/trừ delta ở đây, RT lưu số tuyệt đối).
+  let rtOk = false;
+  try{
+    await _ueActiveUnitsRef(b.prepId).child(batchId).transaction(cur => ({
+      code: (cur && cur.code) || b.batchCode || '', itemName: (cur && cur.itemName) || b.prepName || '',
+      unit: (cur && cur.unit) || b.unit || '', capacity: (cur && cur.capacity) || Number(b.qtyInitial) || qty,
+      openedAt: (cur && cur.openedAt) || Date.now(), unitBase: qty
+    }));
+    rtOk = true;
+  }catch(rtErr){
+    console.warn('[Điều chỉnh] ghi RTDB lỗi — Firestore đã đúng số, đánh dấu _ueRtStale để không bị ăn nhầm:', rtErr);
+  }
+  await batchRef.update({ _ueRtStale: !rtOk });
+
+  const prepRef = fstore.collection('prep_items_gieogieo').doc(b.prepId);
+  await fstore.runTransaction(async t=>{
+    const doc = await t.get(prepRef);
+    if(!doc.exists) return;
+    const cur = Number(doc.data().currentStock)||0;
+    t.update(prepRef, { currentStock: Math.round((cur+delta)*100)/100, updatedAt: nowISO });
+  });
+
+  return { b, qty, delta, rtOk };
 }
 // [SỬA] Lõi khôi phục lô — tách ra dùng chung cho CẢ HAI lối vào:
 //   1. Từ cảnh báo "Lệch đếm bán thành phẩm" (submitPrepVarianceAdjust)
@@ -11253,6 +11304,8 @@ function prepAdjBodyHTML(a, batches){
 // bị hết cùng lúc" từ bên ngoài: hàm này tự tra bằng CHÍNH mốc usedUpAt/expiredAt
 // của lô đang sửa (đọc TRƯỚC khi xoá 2 trường đó), nên đúng bằng cách cảnh báo
 // vẫn dùng, chỉ khác nguồn gốc mốc thời gian.
+// CHỈ dùng cho lô ĐÃ bị đóng (used_up/expired) — lô còn 'active' dùng
+// prepBatchSetQtyCore() ở trên, KHÔNG dùng hàm này (sẽ cộng đúp tồn kho).
 async function prepBatchRestoreCore(batchId, qty){
   const batchRef = fstore.collection('prep_batches_gieogieo').doc(batchId);
   const batchDoc = await batchRef.get();
@@ -11361,6 +11414,32 @@ async function submitPrepVarianceAdjust(alertId, batchId){
     renderAlertInbox();
   }catch(err){
     console.error('submitPrepVarianceAdjust lỗi', err);
+    showError('Không điều chỉnh được: '+(err.code||err.message||err));
+  }
+}
+// [MỚI] Sửa số cho lô VẪN ĐANG 'active'/'cooking' (chiều "dư" của cảnh báo lệch đếm —
+// xem prepAdjBodyHTML). Dùng prepBatchSetQtyCore() thay vì prepBatchRestoreCore() vì lô
+// này chưa từng bị đóng, không có gì để "khôi phục".
+async function submitPrepVarianceAdjustSetQty(alertId, batchId){
+  const input = document.getElementById('prepAdjQty_'+batchId);
+  const qty = Number(input && input.value);
+  if(!(qty >= 0)){ toast('⚠️ Nhập số lượng thực tế còn lại'); return; }
+  if(!confirm(`Sửa lại lô này còn ${fmtNum(qty,2)} — tồn kho nguyên liệu sẽ điều chỉnh theo đúng phần chênh lệch. Tiếp tục?`)) return;
+  try{
+    await ensureAuth();
+    const { b, delta, rtOk } = await prepBatchSetQtyCore(batchId, qty);
+    await fstore.collection('alerts_gieogieo').doc(alertId).update({
+      status: 'resolved', resolvedAt: new Date().toISOString(),
+      resolutionNote: `Đã sửa lô ${b.batchCode||batchId} còn ${fmtNum(qty,2)} ${b.unit||''} (${delta>=0?'+':''}${fmtNum(delta,2)} ${b.unit||''})`
+    });
+    logAudit('adjust','prep_batch',batchId,{ demSaiNham:true, qtyMoi:qty, delta, rtOk, nguon:'canh_bao_du' });
+    toast(rtOk
+      ? `✅ Đã sửa lô — tồn kho điều chỉnh ${delta>=0?'+':''}${fmtNum(delta,2)} ${b.unit||''}, lô đã đồng bộ lại real-time`
+      : '⚠️ Đã sửa lô nhưng đồng bộ real-time lỗi — số liệu vẫn đúng, tự sửa lại ở lần kiểm kê cuối ngày tới');
+    closeEditSheet();
+    renderAlertInbox();
+  }catch(err){
+    console.error('submitPrepVarianceAdjustSetQty lỗi', err);
     showError('Không điều chỉnh được: '+(err.code||err.message||err));
   }
 }
@@ -11506,14 +11585,14 @@ async function renderAlertInbox(){
         <div class="ac-title">${a.title || 'Lệch đếm bán thành phẩm'} ${isNew?'':'<span class="tier tier-green" style="margin-left:4px">Đã xử lý</span>'}</div>
         <div class="ac-row">Ngày: ${a.businessDate || '—'}${a.staff?` · ${escapeHtmlAttr(a.staff)}`:''}</div>
         <div class="ac-row">Hệ thống ghi: <b>${fmtNum(a.systemQty,1)} ${a.unit||''}</b> · Nhân viên đếm: <b>${fmtNum(a.countedQty,1)} ${a.unit||''}</b></div>
-        ${(a.affectedBatches||[]).length ? `<div class="ac-row">Lô bị đánh dấu hết: ${a.affectedBatches.map(b=>`<span class="tier tier-amber" style="margin-right:4px">${escapeHtmlAttr(b.code||b.id)}</span>`).join('')}</div>` : ''}
+        ${(a.affectedBatches||[]).length ? `<div class="ac-row">Lô bị sửa lúc đếm: ${a.affectedBatches.map(b=>`<span class="tier tier-amber" style="margin-right:4px">${escapeHtmlAttr(b.code||b.id)}</span>`).join('')}</div>` : ''}
         <div class="ac-row" style="color:#c0392b;font-weight:700">Chênh lệch: ${varTxt} ${a.unit||''}${a.variancePct!=null?` (${a.variancePct}%)`:''}</div>
         <details class="ac-infer"><summary>Vì sao có cảnh báo này?</summary><div class="ac-infer-body">Số nhân viên đếm cuối ca đã GHI ĐÈ thẳng tồn kho bán thành phẩm (không qua bước duyệt như kiểm kê thường), nên tồn kho hiện tại đang theo số này. ${hut
           ? 'Hụt so với hệ thống — có thể do thất thoát thật, đổ bỏ mà quên ghi, định mức món khai thiếu (bán ra trừ ít hơn thực dùng), hoặc gõ nhầm đơn vị/dấu phẩy.'
-          : 'Dư so với hệ thống — có thể do nấu thêm mà quên ghi mẻ, định mức khai thừa, hoặc gõ nhầm số.'} Nếu là gõ nhầm, vào Kho → Bán thành phẩm chỉnh lại tồn cho đúng thực tế.</div></details>
+          : 'Dư so với hệ thống — có thể do nấu thêm mà quên ghi mẻ, định mức khai thừa, hoặc gõ nhầm số.'} Bấm "Điều chỉnh" bên dưới để sửa ngay, hoặc vào Kho → Bán thành phẩm chỉnh tay.</div></details>
         ${isNew ? `<div class="ac-actions">
           <button onclick="markAlertStatus('${a.id}','seen')">Đã xem</button>
-          ${hut ? `<button onclick="openPrepVarianceAdjustSheet('${a.id}')">Điều chỉnh</button>` : ''}
+          <button onclick="openPrepVarianceAdjustSheet('${a.id}')">Điều chỉnh</button>
           <button onclick="markAlertStatus('${a.id}','resolved')">Đã xử lý</button>
         </div>` : ''}
       </div>`;

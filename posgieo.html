@@ -16987,7 +16987,17 @@ async function _submitPrepCountImpl() {
         ...(wLo.length ? { countWeighMethod: 'vessel', countWeighings: wLo, countWeighedAt: now } : {}),
         ...(take <= 0 ? { status: 'used_up', usedUpAt: now } : {})
       }));
-      if (take <= 0) affectedBatches.push({ id: b.id, code: b.batchCode || '', qtyBefore: round2(Math.max(0, Number(b.qtyRemaining) || 0)) });
+      // [MỚI] Luôn ghi lại lô này vào affectedBatches — kể cả khi KHÔNG bị đóng (take>0).
+      // Trước đây chỉ ghi khi take<=0 (lô bị đóng hẳn), vì lúc đó Quản lý chỉ cần biết để
+      // RESTORE. Giờ cảnh báo lệch đếm cần điều chỉnh được CẢ CHIỀU DƯ (nhân viên đếm
+      // nhiều hơn hệ thống, gõ nhầm số — lô vẫn 'active', KHÔNG bị đóng) nên phải biết
+      // đích danh lô nào vừa bị sửa qtyRemaining, sửa thành bao nhiêu — không có field
+      // này thì Quản lý không có cách nào tự động điều chỉnh lại, phải tự mò vào Kho sửa tay.
+      affectedBatches.push({
+        id: b.id, code: b.batchCode || '',
+        qtyBefore: round2(Math.max(0, Number(b.qtyRemaining) || 0)),
+        qtyAfter: take, closed: take <= 0
+      });
       // Đếm cuối ca là số THẬT vừa xác nhận — ghi ĐÈ thẳng vào RT (không phải cộng/trừ delta),
       // tạo node nếu vì lý do gì đó chưa từng có (vd onOpen lúc nấu mẻ từng lỗi). Thử lại vài
       // lần trước khi chấp nhận lỗi — cùng lý do ở trên.
