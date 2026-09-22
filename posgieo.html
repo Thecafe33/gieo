@@ -10313,6 +10313,23 @@ async function openPrepBatchScreen() {
   preloadVesselImagesPOS(PREP_ITEMS_CACHE_POS.map(x => x.id));
   const first = PREP_ITEMS_CACHE_POS[0];
   prepBatchState = { prepId: first.id, ratio: 1, actualYield: Number(first.batchYield) || 0 };
+
+  // [MỚI] Có tiến trình quét mã dở dang được lưu tạm (xem prepStartGateScan) — khôi
+  // phục đúng thành phẩm/tỷ lệ mẻ đang quét dở và mở thẳng màn quét, thay vì màn
+  // chọn công thức mặc định khiến tưởng như mọi thứ đã mất.
+  const savedScan = loadPrepStartScanState();
+  const savedP = savedScan && PREP_ITEMS_CACHE_POS.find(x => x.id === savedScan.prepId);
+  if (savedScan && savedP) {
+    prepBatchState = { prepId: savedP.id, ratio: savedScan.ratio, actualYield: round2((Number(savedP.batchYield) || 0) * savedScan.ratio) };
+    prepStartScanState = savedScan;
+    toast('↩️ Đã khôi phục tiến trình quét mã dở dang');
+    renderPrepStartScanGate();
+    return;
+  } else if (savedScan) {
+    // Công thức đã bị xoá/tắt trong lúc bỏ dở — bỏ luôn bản lưu tạm, không có gì để khôi phục.
+    clearPrepStartScanState();
+  }
+
   renderPrepBatchForm();
 }
 
@@ -10581,6 +10598,37 @@ function startPrepCountdownTicker() {
 // cho nấu tiếp, luôn hiện "đã quét x/N, còn thiếu y" để nhân viên biết chắc còn
 // thiếu bao nhiêu chứ không phải đoán.
 // ============================================================================
+//
+// [SỬA — bán hàng ưu tiên chen ngang lúc đang quét] TRƯỚC ĐÂY prepStartGateScan()
+// ghi 'finished' lên Firestore NGAY MỖI LẦN quét — nên nếu nhân viên thoát ra bán
+// hàng (ưu tiên số 1) giữa chừng rồi quay lại, các tem ĐÃ quét đã bị chốt hết thật
+// trên hệ thống, còn prepBatchState/prepStartScanState (chỉ là biến JS) lại bị
+// openPrepBatchScreen() reset về công thức đầu danh sách mỗi lần vào lại màn —
+// nhân viên bị bắt quét lại từ đầu, mà 2/3 mã cũ giờ báo "đã hết" không quét lại
+// được nữa → kẹt cứng.
+// CÁCH SỬA (đúng như yêu cầu chủ quán): (1) chỉ NHỚ TẠM mã đã quét, lưu cả vào
+// localStorage để sống sót qua việc thoát/vào lại màn hay tắt mở app — KHÔNG ghi
+// 'finished' lên Firestore lúc quét; (2) quét ĐỦ số lượng thì TỰ ĐỘNG chuyển sang
+// chế biến luôn (xem prepStartGateScan cuối hàm), đúng lúc đó mới thật sự báo "đã
+// mở & hết" lên hệ thống (xem confirmPrepStartAfterScan) — không cần thêm thao tác
+// bấm nút nào, cũng không có tem nào bị chốt hết trước khi mẻ thật sự bắt đầu nấu.
+const PREP_START_SCAN_LS_KEY = 'gieo_prepStartScanState_v1';
+function savePrepStartScanState() {
+  try {
+    if (prepStartScanState) localStorage.setItem(PREP_START_SCAN_LS_KEY, JSON.stringify(prepStartScanState));
+    else localStorage.removeItem(PREP_START_SCAN_LS_KEY);
+  } catch (e) { /* localStorage không dùng được thì thôi, không chặn luồng chính */ }
+}
+function loadPrepStartScanState() {
+  try {
+    const raw = localStorage.getItem(PREP_START_SCAN_LS_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) { return null; }
+}
+function clearPrepStartScanState() {
+  prepStartScanState = null;
+  try { localStorage.removeItem(PREP_START_SCAN_LS_KEY); } catch (e) {}
+}
 let prepStartScanState = null;
 
 // Số CÁI cần quét cho ĐÚNG tỷ lệ mẻ sắp nấu. Làm tròn LÊN vì tem là vật thể vật
@@ -10613,6 +10661,7 @@ async function startPrepBatchGate() {
     prepId: p.id, ratio: prepBatchState.ratio, staffEmp,
     requirements: requirements.map(r => ({ ...r, scannedIds: [] }))
   };
+  savePrepStartScanState();
   renderPrepStartScanGate();
 }
 
@@ -10672,20 +10721,27 @@ async function prepStartGateScan(itemId) {
   if (reqRow.scannedIds.includes(c.id) || st.requirements.some(rr => rr.scannedIds.includes(c.id))) {
     toast('⚠️ Mã ' + c.code + ' vừa được quét rồi, không tính thêm lần nữa'); return;
   }
-  try {
-    await writeAtomicContainerFinish(fstore.collection(STOCK_CONTAINERS_COLL).doc(c.id), c, st.staffEmp, 'scanned', true);
-  } catch (err) {
-    console.error('prepStartGateScan: ghi nhận container lỗi', err);
-    toast('❌ Không lưu được mã vừa quét: ' + (err.message || err));
-    return;
-  }
+  // [SỬA — xem ghi chú đầu file ở khai báo prepStartScanState] KHÔNG ghi 'finished'
+  // lên Firestore ngay lúc quét nữa — chỉ nhớ tạm mã đã quét (và lưu localStorage) để
+  // tem vẫn còn nguyên 'sealed' nếu lỡ thoát ra bán hàng ưu tiên rồi quay lại quét
+  // tiếp. Hệ thống chỉ thật sự báo "đã mở & hết" khi quét đủ và tự động chuyển sang
+  // chế biến ngay bên dưới (xem confirmPrepStartAfterScan).
   reqRow.scannedIds.push(c.id);
   // [MỚI — FIX "KIT bột sữa/Sữa gạo quét rồi mà Chi tiết lô không thấy tem"] Giữ lại
   // luôn mã + đơn vị của tem vừa quét, không chỉ mỗi id — xem lý do đầy đủ ở
   // confirmPrepStartAfterScan().
   (reqRow.scannedContainers = reqRow.scannedContainers || []).push({ id: c.id, code: c.code || '', unit: c.unit || '' });
+  savePrepStartScanState();
   toast('✅ Đã quét ' + c.code);
-  refreshFifoAlert().catch(() => {});
+  const allDone = st.requirements.every(x => x.scannedIds.length >= x.required);
+  if (allDone) {
+    // [MỚI] Quét đủ là TỰ ĐỘNG chuyển sang chế biến luôn — không bắt bấm thêm nút nào
+    // nữa (nhân viên quên bấm "Bắt đầu chế biến" sau khi quét đủ chính là vòng lặp lỗi
+    // ban đầu: quét đủ rồi bỏ dở, quay lại bị bắt quét lại).
+    toast('🔥 Đã quét đủ — tự động bắt đầu chế biến...');
+    await confirmPrepStartAfterScan();
+    return;
+  }
   renderPrepStartScanGate();
 }
 
@@ -10712,32 +10768,71 @@ async function confirmPrepStartAfterScan() {
       containerId: c.id, code: c.code, itemName: r.name || '', unit: c.unit || '', qty: 1
     }));
   });
-  prepStartScanState = null;
+
+  // [MỚI] Giờ mới THẬT SỰ báo "đã mở & hết" lên hệ thống cho từng tem đã quét — trước
+  // đó (prepStartGateScan) chỉ nhớ tạm, không ghi gì lên Firestore. Đọc lại trạng thái
+  // mới nhất trước khi chốt, phòng trường hợp hiếm: tem bị đổi trạng thái ở nơi khác
+  // trong lúc đang bỏ dở (ví dụ bị báo mất/huỷ phiếu nhận).
+  const allScanned = [];
+  st.requirements.forEach(r => (r.scannedContainers || []).forEach(c => allScanned.push({ ...c, reqRow: r })));
+  for (const sc of allScanned) {
+    let cData;
+    try {
+      const cDoc = await fstore.collection(STOCK_CONTAINERS_COLL).doc(sc.id).get();
+      if (!cDoc.exists) { toast('❌ Mã ' + sc.code + ' không còn tồn tại — bấm huỷ và quét lại'); renderPrepStartScanGate(); return; }
+      cData = { id: cDoc.id, ...cDoc.data() };
+      if (cData.status !== 'sealed') {
+        // [FIX] Bấm lại sau khi lượt trước lỡ đứt mạng giữa chừng (một số mã đã kịp
+        // ghi 'finished', số khác thì chưa) — mã NÀY đã do chính người này chốt xong ở
+        // lượt trước rồi thì coi là ổn, bỏ qua chứ không báo lỗi/bắt huỷ lại từ đầu.
+        const daXongTuTruoc = cData.status === 'finished' && cData.finishScanned && cData.finishedByEmployeeId === staffEmp.id;
+        if (!daXongTuTruoc) {
+          toast('⚠️ Mã ' + sc.code + ' đã đổi trạng thái (' + (cData.status || '?') + ') trong lúc chờ — bấm huỷ, quét lại từ đầu');
+          renderPrepStartScanGate();
+          return;
+        }
+      } else {
+        await writeAtomicContainerFinish(fstore.collection(STOCK_CONTAINERS_COLL).doc(sc.id), cData, staffEmp, 'scanned', true);
+      }
+    } catch (err) {
+      console.error('confirmPrepStartAfterScan: ghi nhận container lỗi', err);
+      toast('❌ Không lưu được mã ' + sc.code + ': ' + (err.message || err) + ' — bấm lại "Bắt đầu chế biến" để thử tiếp');
+      renderPrepStartScanGate();
+      return;
+    }
+  }
+  refreshFifoAlert().catch(() => {});
+
+  clearPrepStartScanState();
   await startPrepBatch(staffEmp, true, scannedContainerIds, atomicAllocationsByItem);
 }
 
-// [FIX] TRƯỚC ĐÂY huỷ ở bước quét (trước khi bấm "Bắt đầu chế biến thật", nên
-// CHƯA có lô nào được tạo — không giống "Huỷ mẻ" của lô đã cooking, ở đây không có
-// batchId nào để sau này còn đường hoàn lại) chỉ CẢNH BÁO rằng tem đã quét sẽ kẹt
-// vĩnh viễn ở 'finished', không tự hoàn. Giờ tự hoàn lại luôn các tem đã quét về
-// 'sealed' ngay khi xác nhận huỷ — dùng lại đúng _reverseAtomicContainerFinish() của
-// luồng "Huỷ mẻ", vì đằng nào cũng chưa có lô/giao dịch trừ kho thật nào được tạo,
-// nên không có gì để hoàn ngoài đúng các tem này.
+// [SỬA] TRƯỚC ĐÂY mỗi lần quét ghi 'finished' ngay lập tức, nên huỷ ở bước này phải tự
+// hoàn lại từng tem đã quét về 'sealed'. Giờ prepStartGateScan() chỉ NHỚ TẠM mã đã quét
+// (xem ghi chú ở khai báo prepStartScanState) — tem vẫn nguyên 'sealed' suốt, nên huỷ chỉ
+// cần xoá tiến trình tạm là xong, không có gì để hoàn cả.
+// Vẫn dò hoàn phòng hờ trường hợp hiếm: bấm "Bắt đầu chế biến" bị đứt mạng giữa chừng
+// (một số mã đã kịp ghi 'finished' ở confirmPrepStartAfterScan) rồi mới bấm Huỷ.
 async function cancelPrepStartGate() {
   const st = prepStartScanState;
   const scannedIds = st ? st.requirements.reduce((acc, r) => acc.concat(r.scannedIds), []) : [];
-  if (scannedIds.length && !confirm('Đã quét ' + scannedIds.length + ' mã — huỷ sẽ tự hoàn các mã này về trạng thái chưa dùng. Vẫn huỷ và quay lại?')) return;
-  prepStartScanState = null;
+  if (scannedIds.length && !confirm('Đã quét ' + scannedIds.length + ' mã — huỷ sẽ bỏ tiến trình quét này. Vẫn huỷ và quay lại?')) return;
+  clearPrepStartScanState();
   if (scannedIds.length) {
     const staffEmp = st.staffEmp;
     const results = await Promise.allSettled(
       scannedIds.map(cid => _reverseAtomicContainerFinish(cid, '', staffEmp, 'Huỷ ở bước quét trước khi bắt đầu chế biến'))
     );
-    const ok = results.filter(r => r.status === 'fulfilled' && r.value).length;
-    refreshFifoAlert().catch(() => {});
-    toast(ok === scannedIds.length
-      ? `✅ Đã huỷ và hoàn lại ${ok} mã vừa quét`
-      : `⚠️ Đã huỷ nhưng chỉ hoàn lại được ${ok}/${scannedIds.length} mã — kiểm tra tay các mã còn lại`);
+    const reverted = results.filter(r => r.status === 'fulfilled' && r.value).length;
+    if (reverted) {
+      // Có ít nhất 1 mã thật sự bị 'finished' (do đứt mạng giữa chừng lúc xác nhận) và
+      // vừa được hoàn lại — báo rõ, còn lại (đa số) chỉ đang 'sealed' nên không có gì để
+      // hoàn, _reverseAtomicContainerFinish() tự bỏ qua (xem điều kiện status!=='finished').
+      refreshFifoAlert().catch(() => {});
+      toast(`✅ Đã huỷ, hoàn lại ${reverted} mã lỡ bị chốt hết do đứt giữa chừng`);
+    } else {
+      toast('✅ Đã huỷ tiến trình quét');
+    }
   }
   renderPrepBatchForm();
 }
