@@ -541,6 +541,12 @@ html.tab-ui .kmini .kmval{font-size:21px;}
   background:var(--card);border:1px solid var(--bad-line);
   border-radius:var(--r-md);padding:15px 16px;margin-bottom:11px;box-shadow:var(--sh-1);
 }
+/* [SỬA] Trước đây thẻ "đã xử lý" chỉ hạ opacity xuống .62 trên NỀN ĐỎ y hệt thẻ mới
+   — nhìn thoáng qua vẫn là một thẻ đỏ mờ đi chứ không giống "việc đã xong", phải đọc
+   chữ mới biết. Đổi hẳn màu nền/viền sang trung tính, bỏ opacity — nhất quán với
+   tier-green "Đã xử lý" đã có sẵn trên tiêu đề thẻ. */
+.alert-card.resolved{background:var(--fill);border-color:var(--line);}
+.alert-card.resolved .ac-title{color:var(--gt);}
 .alert-card .ac-title{font-size:15px;font-weight:700;color:var(--bad);margin-bottom:8px;}
 .alert-card .ac-row{font-size:14px;color:var(--td);padding:3px 0;}
 /* [SỬA] ac-infer trước là <div> luôn xổ hết chữ — vài dòng giải thích đã đủ dài để
@@ -1252,6 +1258,20 @@ html.tab-ui .health-item.gray{background:var(--fill);border:1.5px solid var(--li
 html.tab-ui .health-item.red .hi-label{color:var(--bad);}
 html.tab-ui .health-item.yellow .hi-label{color:var(--warn);}
 html.tab-ui .health-item .hi-label{font-size:15.5px;font-weight:700;}
+/* [MỚI] Thẻ cảnh báo chi tiết (Hộp thư cảnh báo, mở từ "Sức khoẻ quán") — cùng
+   ngôn ngữ thiết kế: bo tròn hẳn, tô nguyên nền theo trạng thái, nút hành động
+   to hơn cho ngón tay bấm thoải mái trên màn rộng. */
+html.tab-ui .alert-card{
+  border-radius:var(--r-xl);padding:20px 22px;box-shadow:none;
+  border:1.5px solid var(--bad-line);background:var(--bad-bg);
+}
+html.tab-ui .alert-card.resolved{background:var(--fill);border-color:var(--line);}
+html.tab-ui .alert-card .ac-title{font-size:16px;}
+html.tab-ui .alert-card .ac-row{font-size:14.5px;}
+html.tab-ui .alert-card .ac-infer-body{background:#fff;border-radius:var(--r-md);}
+html.tab-ui .alert-card .ac-actions button{
+  min-height:50px;border-radius:var(--r-lg);background:#fff;font-size:14.5px;
+}
 html.tab-ui .health-item.red .hi-count{color:var(--bad);opacity:.8;}
 html.tab-ui .health-item.yellow .hi-count{color:var(--warn);opacity:.8;}
 html.tab-ui .health-group-title{margin:22px 4px 10px;font-size:12.5px;}
@@ -11397,7 +11417,7 @@ async function renderAlertInbox(){
         : 'Món này chưa có định mức nên mỗi ly bán ra không trừ nguyên liệu nào — tồn kho trên hệ thống đang cao hơn thực tế, và giá vốn (COGS) đang bị tính thấp hơn thật. Vào Kho → Định mức khai công thức cho món này; số đã bán trước đó cần chỉnh lại bằng một lần kiểm kê.';
       const actionGo = isTopping ? "goKho('toppingcogs')" : "goKho('recipe')";
       const actionLabel = isTopping ? 'Khai GOGS Topping' : 'Khai định mức';
-      return `<div class="alert-card" style="${isNew?'':'opacity:.62;border-color:var(--line)'}">
+      return `<div class="alert-card ${isNew?'':'resolved'}">
         <div class="ac-title">${a.title || 'Chưa trừ kho được'} ${isNew?'':'<span class="tier tier-green" style="margin-left:4px">Đã xử lý</span>'}</div>
         <div class="ac-row">Ngày: ${a.businessDate || '—'}${a.size?` · size ${escapeHtmlAttr(a.size)}`:''}</div>
         <div class="ac-row" style="color:#c0392b;font-weight:700">Đã bán ${Number(a.hitCount)||1} lượt mà KHÔNG trừ kho</div>
@@ -11412,7 +11432,7 @@ async function renderAlertInbox(){
     // Để riêng vì cách xử lý khác hẳn: không đi tìm nguyên liệu, mà sửa lại con số.
     if(a.type==='prep_yield_mismatch'){
       const cao = Number(a.variancePct) > 0;
-      return `<div class="alert-card" style="${isNew?'':'opacity:.62;border-color:var(--line)'}">
+      return `<div class="alert-card ${isNew?'':'resolved'}">
         <div class="ac-title">${a.title || 'Yield khai lệch thực tế'} ${isNew?'':'<span class="tier tier-green" style="margin-left:4px">Đã xử lý</span>'}</div>
         <div class="ac-row">Ngày: ${a.businessDate || '—'} · ${escapeHtmlAttr(a.prepCode||'')} ${escapeHtmlAttr(a.prepName||'')}</div>
         <div class="ac-row">Bạn khai <b>${fmtNum(a.declaredYield,1)} ${a.unit||''}</b>/mẻ · nhân viên cân thật <b>${fmtNum(a.actualYield,1)} ${a.unit||''}</b>/mẻ (${a.sampleCount} lô)</div>
@@ -11432,7 +11452,7 @@ async function renderAlertInbox(){
     if(a.type==='handover_cash_variance'){
       const thieu = Number(a.variance) < 0;
       const vTxt = `${a.variance>0?'+':''}${fmt(a.variance)}`;
-      return `<div class="alert-card" style="${isNew?'':'opacity:.62;border-color:var(--line)'}">
+      return `<div class="alert-card ${isNew?'':'resolved'}">
         <div class="ac-title">${a.title || 'Lệch tiền giao ca'} — đoạn ${a.seq||'?'} ${isNew?'':'<span class="tier tier-green" style="margin-left:4px">Đã xử lý</span>'}</div>
         <div class="ac-row">Ngày: ${a.businessDate || '—'} · bàn giao lúc ${a.agreedAt ? new Date(a.agreedAt).toLocaleTimeString('vi-VN',{hour:'2-digit',minute:'2-digit'}) : '—'}</div>
         <div class="ac-row">Giao: <b>${escapeHtmlAttr(a.outgoingName||'—')}</b> → Nhận: <b>${escapeHtmlAttr(a.incomingName||'—')}</b></div>
@@ -11455,7 +11475,7 @@ async function renderAlertInbox(){
     // GHI ĐÈ THẲNG tồn kho, không qua bước duyệt như kiểm kê thường.
     if(a.type==='prep_count_variance'){
       const hut = Number(a.varianceQty) < 0;
-      return `<div class="alert-card" style="${isNew?'':'opacity:.62;border-color:var(--line)'}">
+      return `<div class="alert-card ${isNew?'':'resolved'}">
         <div class="ac-title">${a.title || 'Lệch đếm bán thành phẩm'} ${isNew?'':'<span class="tier tier-green" style="margin-left:4px">Đã xử lý</span>'}</div>
         <div class="ac-row">Ngày: ${a.businessDate || '—'}${a.staff?` · ${escapeHtmlAttr(a.staff)}`:''}</div>
         <div class="ac-row">Hệ thống ghi: <b>${fmtNum(a.systemQty,1)} ${a.unit||''}</b> · Nhân viên đếm: <b>${fmtNum(a.countedQty,1)} ${a.unit||''}</b></div>
@@ -11471,7 +11491,7 @@ async function renderAlertInbox(){
         </div>` : ''}
       </div>`;
     }
-    return `<div class="alert-card" style="${isNew?'':'opacity:.62;border-color:var(--line)'}">
+    return `<div class="alert-card ${isNew?'':'resolved'}">
       <div class="ac-title">${a.title || 'Cảnh báo'} ${isNew?'':'<span class="tier tier-green" style="margin-left:4px">Đã xử lý</span>'}</div>
       <div class="ac-row">Ngày: ${a.businessDate || '—'}</div>
       <div class="ac-row">Ca tối ghi: <b>${fmtNum(a.closeQty,1)} ${a.unit||''}</b> ${a.closeStaff?`(${escapeHtmlAttr(a.closeStaff)})`:''}</div>
