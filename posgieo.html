@@ -721,6 +721,29 @@ body.assist-main-on .toast{bottom:calc(100px + var(--assist-h, 0px) + 10px);}
   background:#fff;color:#9a3412;font-family:'Google Sans',sans-serif;font-size:13px;font-weight:700;cursor:pointer;
   display:flex;align-items:center;justify-content:center;gap:6px;}
 
+/* ---------- [MỚI] Kết ca — thiết kế lại kiểu thẻ, dùng chung cho mọi bước (chuẩn
+   theo màn "Đếm bán thành phẩm" — xem renderPrepCountCard). Bo tròn nhiều, khối phụ
+   màu kem FAF8F2 thay khung viền màu rời rạc, nút pill bo hết cỡ. ---------- */
+.kc-title{font-size:20px;font-weight:900;color:var(--td);letter-spacing:-.2px;padding:0 2px 12px;}
+.kc-card{background:#fff;border-radius:26px;padding:26px 24px 24px;box-shadow:0 1px 3px rgba(0,0,0,.05);margin-bottom:14px;}
+.kc-sub{padding:14px;background:#FAF8F2;border:1.5px solid #F0EAD9;border-radius:18px;}
+.kc-pill{font-size:12px;font-weight:800;color:#fff;padding:5px 10px;border-radius:999px;white-space:nowrap;flex-shrink:0;}
+.kc-btn{width:100%;padding:16px;border:none;border-radius:18px;font-weight:800;font-size:16px;font-family:'Google Sans',sans-serif;cursor:pointer;}
+.kc-signer{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 14px;background:#f0faf4;border:1.5px solid #86efac;border-radius:999px;}
+.kc-signer button{padding:10px 14px;border-radius:999px;border:1.5px solid #86efac;background:#fff;color:#15803d;font-family:'Google Sans',sans-serif;font-size:12.5px;font-weight:800;cursor:pointer;}
+.kc-nav{display:flex;align-items:center;gap:10px;margin-bottom:10px;}
+.kc-nav-back{width:44px;height:44px;border-radius:50%;background:#fff;border:1.5px solid #EFE9D8;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer;}
+.kc-nav-pill{flex:1;background:#fff;border:1.5px solid #EFE9D8;border-radius:999px;padding:10px 14px;display:flex;align-items:center;gap:7px;}
+.kc-nav-pill .lbl{margin-left:auto;font-size:11.5px;font-weight:800;color:#a89a7e;flex-shrink:0;}
+/* Checkbox tròn thay vì vuông mặc định của trình duyệt — appearance:none rồi tự vẽ. */
+.kc-chk{appearance:none;-webkit-appearance:none;width:22px;height:22px;border-radius:50%;border:2px solid #ddd;background:#fff;cursor:pointer;position:relative;flex-shrink:0;}
+.kc-chk:checked{background:#16a34a;border-color:#16a34a;}
+.kc-chk:checked::after{content:'';position:absolute;left:6px;top:2px;width:6px;height:10px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg);}
+/* Đối soát tiền mặt (bước 1) — nút +/- mệnh giá tròn thay vì vuông, chỉ áp riêng
+   màn này (không đụng .cp-denom-row dùng chung ở nhiều màn khác). */
+#shiftCloseGrid .cp-denom-ctrl button{border-radius:50%;}
+#shiftCloseGrid .cp-denom-row{background:#FAF8F2;}
+
 /* ============================================================
    [MỚI-DS] CHUẨN THIẾT KẾ MỚI (kiểu Apple) — dùng tiền tố ds- để tách khỏi mọi
    style cũ trong file, không đụng gì tới các màn chưa được thiết kế lại. Bắt
@@ -14800,7 +14823,7 @@ function closeSessionBannerPOS() {
   if (!_closeSession) return '';
   const m = closeSessionElapsedMinPOS();
   return `
-    <div style="display:flex;align-items:center;gap:8px;background:#f0faf4;border:1.5px solid #86efac;border-radius:12px;padding:9px 13px;margin:0 0 12px;">
+    <div style="display:flex;align-items:center;gap:8px;background:#f0faf4;border:1.5px solid #86efac;border-radius:999px;padding:9px 15px;margin:0 0 14px;">
       <span style="font-size:15px;">🔒</span>
       <div style="min-width:0;flex:1;">
         <div style="font-size:11px;color:#15803d;font-weight:600;">Đang kết ca</div>
@@ -14810,6 +14833,40 @@ function closeSessionBannerPOS() {
         <div style="font-size:15px;font-weight:800;color:#15803d;line-height:1.1;"><span id="closeElapsedMin">${m}</span> phút</div>
       </div>` : ''}
     </div>`;
+}
+
+// ============================================================================
+// [THIẾT KẾ LẠI] Thanh tiến trình 7 BƯỚC KẾT CA — dùng chung ở đáy MỌI màn trong
+// pipeline kết ca (Đối soát tiền mặt, Chặn thiếu đồ, Refill, Đếm giao ca, Đếm BTP,
+// Bàn giao, Xác nhận đóng ngày), thay cho việc mỗi màn tự vẽ tiêu đề "Bước X/7"
+// khác kiểu nhau. Nút back ở đây KHÔNG sửa lại bước trước (dữ liệu các bước trước
+// đã ghi xuống Firestore — xem thiết kế "chỉ xem lại, sửa qua màn riêng" đang chờ
+// build) mà chỉ THOÁT về dashboard kết ca; quay lại "Kết ca" sau đó tự resume đúng
+// bước đang dở nhờ resumeClosePipelinePOS() đã có sẵn — không mất gì đã làm.
+// ============================================================================
+const CLOSE_STEP_TOTAL = 7;
+function closeStepNavHTML(stepIdx) {
+  const dots = Array.from({ length: CLOSE_STEP_TOTAL }, (_, i) => {
+    const n = i + 1;
+    if (n === stepIdx) return `<div style="height:7px;border-radius:999px;background:#E23A5D;width:28px;flex-shrink:0;"></div>`;
+    if (n < stepIdx) return `<div style="height:7px;border-radius:999px;background:#d8cfae;width:7px;flex-shrink:0;"></div>`;
+    return `<div style="height:7px;border-radius:999px;background:#EFE9D8;width:7px;flex-shrink:0;"></div>`;
+  }).join('');
+  return `
+    <div class="kc-nav">
+      <button onclick="closeStepNavBack()" class="kc-nav-back">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#333" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"></path></svg>
+      </button>
+      <div class="kc-nav-pill">
+        ${dots}
+        <span class="lbl">Bước ${stepIdx}/${CLOSE_STEP_TOTAL}</span>
+      </div>
+    </div>`;
+}
+function closeStepNavBack() {
+  if (confirm('Thoát khỏi bước này? Những gì đã lưu vẫn giữ nguyên — quay lại "Kết ca" sẽ tiếp tục đúng chỗ này.')) {
+    renderShiftDashboard();
+  }
 }
 // Đồng hồ chỉ cập nhật ĐÚNG con số phút trong banner, không vẽ lại màn — nhân
 // viên đang gõ dở số tiền/số lượng ở bước nào cũng không bị mất.
@@ -15685,22 +15742,23 @@ async function renderShiftCloseReview() {
 function renderShiftCloseCountForm(canGhiChu) {
   const box = document.getElementById('shiftBody');
   _shiftCloseDenoms = cfEmptyDenoms();
-  box.innerHTML = closeSessionBannerPOS() + `
-    <div class="wal-section" style="margin:0 0 14px;">
-      <div class="wal-section-title">Đếm toàn bộ tiền mặt thực tế</div>
+  box.innerHTML = `
+    <div class="kc-title">Đối soát tiền mặt</div>
+    ${closeSessionBannerPOS()}
+    <div class="kc-card">
+      <div style="font-size:14px;font-weight:700;color:#999;margin-bottom:16px;">Đếm toàn bộ tiền mặt thực tế còn trong két</div>
       <div id="shiftCloseGrid" style="display:flex;flex-direction:column;gap:6px;"></div>
       <div style="text-align:right;font-weight:700;font-size:16px;color:var(--gd);margin-top:10px;" id="shiftCloseTotal">0đ</div>
     </div>
     ${canGhiChu ? `
-    <div class="wal-section" style="margin:0 0 14px;">
-      <div class="wal-section-title">Lý do lệch <span style="color:var(--gd)">*</span></div>
-      <div style="font-size:12px;color:#999;line-height:1.5;margin:-2px 0 8px;">Lần đếm cuối. Ghi rõ chuyện đã xảy ra trong ca (thối nhầm, khách trả thiếu, quên ghi khoản chi…) — Quản lý đọc dòng này để biết vì sao lệch.</div>
-      <textarea id="shiftCloseNote" rows="3" placeholder="VD: Thối nhầm cho khách 20.000đ lúc trưa, đã báo ca trưởng" style="width:100%;box-sizing:border-box;padding:12px;border:1.5px solid #e5e5e5;border-radius:14px;font-size:14px;font-family:inherit;line-height:1.5;resize:vertical;outline:none;" oninput="this.style.borderColor='#e5e5e5'"></textarea>
+    <div class="kc-card">
+      <div style="font-size:14px;font-weight:700;color:#999;margin-bottom:8px;">Lý do lệch (bắt buộc)</div>
+      <div style="font-size:12px;color:#999;line-height:1.5;margin-bottom:8px;">Lần đếm cuối — ghi rõ chuyện đã xảy ra để Quản lý biết vì sao lệch.</div>
+      <textarea id="shiftCloseNote" rows="3" placeholder="VD: Thối nhầm cho khách 20.000đ lúc trưa, đã báo ca trưởng" style="width:100%;box-sizing:border-box;padding:14px;border:1.5px solid #F0EAD9;background:#FAF8F2;border-radius:18px;font-size:14px;font-family:inherit;line-height:1.5;resize:vertical;outline:none;" oninput="this.style.borderColor='#F0EAD9'"></textarea>
     </div>` : ''}
-    <div class="wal-section" style="margin:0 0 14px;">
-      ${renderPinInput('shiftCloseStaff')}
-    </div>
-    <button onclick="submitShiftClose()" style="width:100%;padding:14px;background:var(--gd);color:#fff;border:none;border-radius:14px;font-weight:700;font-size:15px;cursor:pointer;">Xác nhận kết ca</button>
+    <div class="kc-card">${renderPinInput('shiftCloseStaff')}</div>
+    ${closeStepNavHTML(1)}
+    <button onclick="submitShiftClose()" class="kc-btn" style="background:var(--gd);color:#fff;margin-bottom:22px;">Xác nhận kết ca</button>
   `;
   cfRenderDenomGrid('shiftCloseGrid', _shiftCloseDenoms, 'shiftChangeCloseDenom');
 }
@@ -15965,28 +16023,44 @@ async function computeHandoverCloseLinesPOS() {
 let _handoverCloseState = [];
 function renderHandoverCloseScreen(lines) {
   _handoverCloseState = lines.map(l => ({ ...l, counted: null, weighings: [] }));
+  renderHandoverCloseCard();
+}
+function renderHandoverCloseCard() {
   const box = document.getElementById('shiftBody');
   box.innerHTML = `
-    <div class="wal-section" style="margin:0 0 14px;">
-      <div class="wal-section-title">Đếm giao ca — cuối ca</div>
-      <div style="font-size:12px;color:#999;margin-bottom:10px;line-height:1.5;">Đếm THỰC TẾ còn lại ở quầy cho từng món dưới đây. Ca sáng mai sẽ đếm lại độc lập để đối chiếu — đếm đúng số thật, không áng chừng.</div>
+    <div class="kc-title">Đếm giao ca cuối ca</div>
+    <div class="kc-card">
+      <div style="font-size:14px;font-weight:700;color:#999;">Đếm/cân THỰC TẾ còn lại ở quầy — ca mai đếm lại độc lập để đối chiếu.</div>
       ${_handoverCloseState.some(l => handoverCanWeighPOS(l)) ? '' : handoverWeighHintHTML()}
-      ${_handoverCloseState.map((l, i) => `
-        <div style="padding:10px 0;border-bottom:1px solid #f0f0f0;">
-          <div style="font-size:13.5px;font-weight:700;color:var(--td);margin-bottom:6px;">${l.itemName} <span style="font-weight:400;color:#999;font-size:11.5px;">· ${l.locationName}</span></div>
-          ${handoverCanWeighPOS(l) ? weighBtnWide(`handoverCloseWeigh(${i})`, 'Cân trừ bì', 'Đặt nguyên khay/hũ lên cân — máy tự trừ bì') + '<div style="height:8px;"></div>' : ''}
-          <div style="display:flex;gap:8px;align-items:center;">
-            ${handoverCanWeighPOS(l) ? '<span style="font-size:11.5px;color:#aaa;font-weight:600;flex-shrink:0;">hoặc</span>' : ''}
-            <div class="wal-input-group" style="flex:1;margin-bottom:0;">
-              <input id="hcQty${i}" type="number" inputmode="decimal" step="0.01" placeholder="${handoverCanWeighPOS(l) ? 'Gõ tay' : 'Đếm được...'}" style="height:48px;font-size:16px;" oninput="handoverCloseSetQty(${i},this.value,true)">
-            </div>
-            <span style="font-size:12.5px;font-weight:700;color:var(--gd);white-space:nowrap;">${l.unit || ''}</span>
+      <div style="margin-top:18px;display:flex;flex-direction:column;gap:12px;">
+      ${_handoverCloseState.map((l, i) => {
+        const canWeigh = handoverCanWeighPOS(l);
+        const done = l.counted !== null;
+        return `
+        <div class="kc-sub">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:12px;">
+            <span style="font-size:17px;font-weight:800;color:var(--td);">${l.itemName} <span style="font-weight:400;color:#999;font-size:11.5px;">· ${l.locationName}</span></span>
+            <div class="kc-pill" style="background:${done ? '#16a34a' : '#E23A5D'};">${done ? (canWeigh ? 'Đã cân xong' : 'Đã đếm') : (canWeigh ? 'Chưa cân' : 'Chưa đếm')}</div>
           </div>
-          <div id="hcWeigh${i}"></div>
-        </div>`).join('')}
+          ${canWeigh ? `
+            <button class="btn-reset" onclick="handoverCloseWeigh(${i})" style="width:100%;display:flex;align-items:center;justify-content:center;gap:7px;padding:14px 8px;border-radius:999px;background:${done ? '#fff' : '#1f1f1f'};color:${done ? '#1f1f1f' : '#fff'};border:1.5px solid #1f1f1f;font-family:'Google Sans',sans-serif;font-size:14.5px;font-weight:800;cursor:pointer;">${done ? 'Cân lại' : 'Cân trừ bì'}</button>
+            ${done ? `<div style="text-align:center;background:#fff;border:1.5px solid #F0EAD9;border-radius:14px;padding:12px 10px;margin-top:10px;">
+              <span style="font-size:30px;font-weight:900;color:var(--td);letter-spacing:-.3px;">${fmtPrepQty(l.counted)}</span>
+              <span style="font-size:14px;font-weight:700;color:#999;margin-left:4px;">${l.unit || ''}</span>
+            </div>` : ''}
+          ` : `
+            <div style="display:flex;gap:8px;align-items:center;">
+              <div style="flex:1;background:#fff;border:1.5px solid #F0EAD9;border-radius:999px;padding:12px 16px;"><input id="hcQty${i}" type="number" inputmode="decimal" step="0.01" placeholder="Đếm được..." style="width:100%;border:none;outline:none;background:transparent;font-family:inherit;font-size:16px;font-weight:700;color:#111;" oninput="handoverCloseSetQty(${i},this.value,true)"></div>
+              <span style="font-size:13px;font-weight:800;color:#E23A5D;flex-shrink:0;">${l.unit || ''}</span>
+            </div>
+          `}
+        </div>`;
+      }).join('')}
+      </div>
       ${renderPinInput('handoverCloseStaff')}
     </div>
-    <button onclick="submitHandoverClose()" style="width:100%;padding:14px;background:var(--gd);color:#fff;border:none;border-radius:14px;font-weight:700;font-size:15px;cursor:pointer;">Xác nhận &amp; tiếp tục kết ca</button>
+    ${closeStepNavHTML(4)}
+    <button onclick="submitHandoverClose()" class="kc-btn" style="background:var(--gd);color:#fff;margin-bottom:22px;">Xác nhận &amp; tiếp tục kết ca</button>
   `;
 }
 // goTay = nhân viên tự gõ đè lên số vừa cân. Bảng kê cân không còn khớp số sắp
@@ -16014,11 +16088,8 @@ function handoverCloseWeigh(i) {
     title: 'Cân ' + (l.itemName || '') + ' còn lại',
     onDone: (total, lines) => {
       l.weighings = lines;
-      const inp = document.getElementById('hcQty' + i);
-      if (inp) inp.value = total;
-      const el = document.getElementById('hcWeigh' + i);
-      if (el) el.innerHTML = weighSummaryHTML(lines, l.unit, `handoverCloseWeigh(${i})`);
       handoverCloseSetQty(i, total);
+      renderHandoverCloseCard();
     }
   });
 }
@@ -16363,18 +16434,26 @@ function renderBlockingRefillScreen(list) {
   _blockingRefillState = list;
   const box = document.getElementById('shiftBody');
   box.innerHTML = `
-    <div style="background:#fee2e2;border:1.5px solid #fca5a5;border-radius:16px;padding:14px 16px;margin-bottom:14px;">
-      <div style="font-size:14px;font-weight:800;color:#c0392b;margin-bottom:4px;">🚫 CHƯA THỂ ĐÓNG NGÀY</div>
-      <div style="font-size:12.5px;color:#c0392b;line-height:1.6;">${list.length} món dưới đây BẮT BUỘC phải refill trước khi đóng ngày — để sáng mai mở cửa là bán được ngay.</div>
+    <div class="kc-title">Chặn thiếu đồ bắt buộc</div>
+    <div class="kc-card">
+      <div style="font-size:24px;font-weight:900;color:var(--td);line-height:1.15;letter-spacing:-.3px;">Chưa thể đóng ngày</div>
+      <div style="font-size:14.5px;font-weight:700;color:#c0392b;margin-top:6px;">${list.length} món dưới đây bắt buộc phải refill trước</div>
+      <div style="margin-top:18px;display:flex;flex-direction:column;gap:12px;">
+        ${list.map(x => `
+        <div class="kc-sub">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+            <span style="font-size:17px;font-weight:800;color:var(--td);">${x.itemName}</span>
+            <div class="kc-pill" style="background:#c0392b;">Thiếu hàng</div>
+          </div>
+          <div style="font-size:13px;font-weight:700;color:#c0392b;margin-top:8px;">${x.destLocationName}: ${x.curAtDest.toLocaleString('vi-VN')} / tối thiểu ${x.min.toLocaleString('vi-VN')} ${x.unit}</div>
+        </div>`).join('')}
+      </div>
     </div>
-    ${list.map(x => `
-      <div style="border:2px solid #e74c3c;background:#fdf2f2;border-radius:14px;padding:12px 14px;margin-bottom:10px;">
-        <div style="font-weight:700;font-size:14.5px;color:var(--td);">${x.itemName}</div>
-        <div style="font-size:12.5px;color:#c0392b;margin-top:2px;font-weight:700;">${x.destLocationName}: ${x.curAtDest.toLocaleString('vi-VN')} / tối thiểu ${x.min.toLocaleString('vi-VN')} ${x.unit}</div>
-      </div>`).join('')}
-    <button onclick="showScreen('khoScreen'); openRefillScreen();" style="width:100%;padding:14px;background:var(--gd);color:#fff;border:none;border-radius:14px;font-weight:700;font-size:15px;cursor:pointer;margin-bottom:10px;">🔁 Refill ngay</button>
-    <button onclick="refreshBlockingRefillScreen()" style="width:100%;padding:12px;background:#fff;color:var(--gd);border:1.5px solid var(--gd);border-radius:14px;font-weight:700;font-size:13.5px;cursor:pointer;margin-bottom:10px;">Đã refill xong — kiểm tra lại</button>
-    <button onclick="renderRefillOverrideForm()" style="width:100%;padding:12px;background:none;border:1px solid #ddd;color:var(--gt);border-radius:14px;font-weight:600;font-size:13px;cursor:pointer;">Không refill được — ghi lý do</button>
+    <button onclick="showScreen('khoScreen'); openRefillScreen();" class="kc-btn" style="border-radius:999px;background:#1f1f1f;color:#fff;margin-bottom:10px;">Refill ngay</button>
+    <button onclick="refreshBlockingRefillScreen()" class="kc-btn" style="border-radius:999px;background:#fff;color:var(--td);border:1.5px solid #1f1f1f;padding:14px;margin-bottom:14px;">Đã refill xong — kiểm tra lại</button>
+    <button onclick="renderRefillOverrideForm()" style="width:100%;padding:0;background:none;border:none;color:#aaa;font-weight:700;font-size:12.5px;text-decoration:underline;cursor:pointer;margin-bottom:16px;">Không refill được — ghi lý do</button>
+    ${closeStepNavHTML(2)}
+    <div style="height:22px;"></div>
   `;
 }
 async function refreshBlockingRefillScreen() {
@@ -16490,24 +16569,30 @@ async function renderRefillChecklistScreen(list) {
   const requiredSec = list.reduce((m, r) => Math.max(m, Number(r.minDurationSec) || 0), 0);
   await clEnsureStarted('close', 'refillcheck', 'Kiểm tra Refill', requiredSec);
   box.innerHTML = `
-    <div class="wal-section" style="margin:0 0 14px;">
-      <div class="wal-section-title">⚠️ Kiểm tra Refill trước khi kết ca</div>
-      <div style="font-size:12px;color:#999;margin-bottom:10px;line-height:1.6;">Danh sách dưới đây gồm 2 loại: (1) nguyên liệu đã bán ra đủ ít nhất 1 lần đóng gói theo công thức nhưng CHƯA thấy ghi nhận Refill, và (2) nguyên liệu vừa có <b>hao hụt</b> nên số liệu tự động không còn đáng tin, cần tự kiểm tra thực tế (đánh dấu ❓). Nếu đã lấy hàng mới ra quầy rồi mà quên bấm Refill, hãy bấm nút bên dưới để ghi lại — chuẩn xác nhất và sẽ tự xoá cảnh báo.</div>
+    <div class="kc-title">Kiểm tra Refill</div>
+    <div class="kc-card">
+      <div style="font-size:14px;font-weight:700;color:#999;">Món đã bán hết 1 lần đóng gói mà chưa Refill, hoặc vừa có hao hụt nên cần tự kiểm tra lại.</div>
+      <div style="margin-top:16px;display:flex;flex-direction:column;gap:12px;">
       ${list.map((r, idx) => `
-        <div style="background:#fff;border:1.5px solid ${r.isUncertain ? '#f3dfa8' : '#f5c2c2'};border-radius:14px;padding:12px 14px;margin-bottom:10px;">
-          <div style="font-weight:700;font-size:13.5px;color:var(--td);margin-bottom:6px;">${r.isUncertain ? '❓ ' : ''}${r.itemName}</div>
-          ${r.isUncertain
-            ? `<div style="font-size:12.5px;color:var(--td);margin-bottom:10px;">Vừa có <b>hao hụt</b> được ghi nhận cho nguyên liệu này tại ${r.destLocationName} — số "đã bán theo công thức" KHÔNG còn đáng tin (vì hao hụt chỉ là số ước lượng). Cần <b>tự kiểm tra thực tế</b> còn đủ pha tiếp không, thay vì tin vào số liệu.</div>`
-            : `<div style="font-size:12.5px;color:var(--td);margin-bottom:10px;">Đã bán ra tương đương <b>${r.timesOver} ${r.packLabel}</b> tại ${r.destLocationName} — chưa thấy Refill.</div>`}
-          <label style="display:flex;align-items:center;gap:10px;font-size:12.5px;color:#999;cursor:pointer;">
-            <input type="checkbox" id="refillOk${idx}" style="width:22px;height:22px;flex-shrink:0;" onchange="refillChecklistUpdateContinueState()">
-            ${r.isUncertain ? 'Tôi đã kiểm tra thực tế — xác nhận tình trạng ổn, sẽ refill khi cần' : 'Tôi xác nhận đã kiểm tra — sẽ refill ngay sau khi kết ca'}
+        <div class="kc-sub">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px;">
+            <span style="font-size:16px;font-weight:800;color:var(--td);">${r.itemName}</span>
+            <div class="kc-pill" style="background:${r.isUncertain ? '#c2703c' : '#E23A5D'};">${r.isUncertain ? 'Cần kiểm tra' : 'Chưa refill'}</div>
+          </div>
+          <div style="font-size:12.5px;color:#999;margin-bottom:10px;">${r.isUncertain
+            ? `Vừa có hao hụt tại ${r.destLocationName} — số liệu không còn đáng tin, cần tự kiểm tra thực tế.`
+            : `Đã bán tương đương ${r.timesOver} ${r.packLabel} tại ${r.destLocationName}.`}</div>
+          <label style="display:flex;align-items:center;gap:10px;font-size:12.5px;color:#999;font-weight:700;cursor:pointer;">
+            <input type="checkbox" class="kc-chk" id="refillOk${idx}" onchange="refillChecklistUpdateContinueState()">
+            ${r.isUncertain ? 'Đã kiểm tra thực tế — ổn, sẽ refill khi cần' : 'Đã kiểm tra — sẽ refill ngay sau kết ca'}
           </label>
         </div>`).join('')}
-      <button onclick="showScreen('khoScreen'); openRefillScreen();" style="width:100%;padding:13px;background:#fff;color:var(--gd);border:1.5px solid var(--gd);border-radius:14px;font-weight:700;font-size:13.5px;cursor:pointer;margin-top:6px;">🔁 Mở màn Refill ngay</button>
+      </div>
+      <button onclick="showScreen('khoScreen'); openRefillScreen();" class="kc-btn" style="border-radius:999px;background:#fff;color:var(--td);border:1.5px solid #1f1f1f;padding:13px;font-size:13.5px;margin-top:14px;">Mở màn Refill ngay</button>
     </div>
+    ${closeStepNavHTML(3)}
     <div id="refillCountdownNote" style="font-size:11.5px;color:#b45309;margin-bottom:8px;line-height:1.5;"></div>
-    <button id="refillChecklistContinueBtn" onclick="continueAfterRefillChecklist()" disabled style="width:100%;padding:14px;background:#ddd;color:#fff;border:none;border-radius:14px;font-weight:700;font-size:15px;cursor:not-allowed;">Tiếp tục kết ca</button>
+    <button id="refillChecklistContinueBtn" onclick="continueAfterRefillChecklist()" disabled class="kc-btn" style="background:#f1eee4;color:#bbb;margin-bottom:22px;cursor:not-allowed;">Tiếp tục kết ca</button>
   `;
   refillChecklistUpdateContinueState();
   if (requiredSec > 0 && clRemainingSec('close', 'refillcheck') > 0) {
@@ -16706,17 +16791,13 @@ function renderPrepCountCard() {
   const total = _prepCountState.length;
   const isLast = idx === total - 1;
   const allDone = !!l && l.counted !== null;
-
-  const dots = _prepCountState.map((x, i) => {
-    if (i === idx) return `<div style="height:7px;border-radius:999px;background:#E23A5D;width:28px;flex-shrink:0;transition:all .2s ease;"></div>`;
-    if (i < idx) return `<div style="height:7px;border-radius:999px;background:#d8cfae;width:7px;flex-shrink:0;"></div>`;
-    return `<div style="height:7px;border-radius:999px;background:#EFE9D8;width:7px;flex-shrink:0;"></div>`;
-  }).join('');
+  const hasPrev = idx > 0;
 
   box.innerHTML = `
-    <div style="font-size:19px;font-weight:900;color:var(--td);letter-spacing:-.2px;padding:0 2px 12px;">Đếm bán thành phẩm</div>
-    ${!l ? `<div class="wal-section"><div class="muted" style="text-align:center;padding:30px 0;">Không còn loại nào cần đếm.</div></div>` : `
-    <div class="wal-section" style="margin:0 0 12px;">
+    <div class="kc-title">Đếm bán thành phẩm</div>
+    ${!l ? `<div class="kc-card"><div class="muted" style="text-align:center;padding:30px 0;">Không còn loại nào cần đếm.</div></div>` : `
+    <div class="kc-card" style="margin:0 0 12px;">
+      ${hasPrev ? `<button onclick="prepCountGoBack()" style="background:none;border:none;padding:0;margin-bottom:10px;color:#a89a7e;font-family:'Google Sans',sans-serif;font-size:12px;font-weight:700;cursor:pointer;">&lsaquo; Xem lại BTP trước</button>` : ''}
       ${!prepCanWeighPOS(l.prepId) ? prepWeighHintHTML(l.prepId) : ''}
       <div style="font-size:24px;font-weight:900;color:var(--td);line-height:1.15;letter-spacing:-.3px;">${l.prepName || ''}</div>
       <div style="font-size:14px;font-weight:700;color:${l.hasExpired ? '#c0392b' : 'var(--gd)'};margin-top:5px;">Đang có ${l.activeBatches.length} lô${l.hasExpired ? ' · Hết hạn' : ''}${l.hasCooking ? ' · còn lô đang nấu chưa xong' : ''}</div>
@@ -16756,19 +16837,11 @@ function renderPrepCountCard() {
       </div>
     </div>`}
 
-    <div class="wal-section" style="margin:0 0 14px;">${renderPinInput('prepCountStaff')}</div>
+    <div class="kc-card" style="margin:0 0 14px;">${renderPinInput('prepCountStaff')}</div>
 
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
-      <button onclick="prepCountGoBack()" style="width:44px;height:44px;border-radius:50%;background:#fff;border:1.5px solid #EFE9D8;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer;">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${idx > 0 ? '#333' : '#ccc'}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"></path></svg>
-      </button>
-      <div style="flex:1;background:#fff;border:1.5px solid #EFE9D8;border-radius:999px;padding:10px 14px;display:flex;align-items:center;gap:7px;">
-        ${dots}
-        <span style="margin-left:auto;font-size:11.5px;font-weight:800;color:#a89a7e;flex-shrink:0;">${idx + 1}/${total || 1}</span>
-      </div>
-    </div>
+    ${closeStepNavHTML(5)}
 
-    <button onclick="prepCountGoNext()" ${allDone ? '' : 'disabled'} style="width:100%;padding:16px;background:${allDone ? 'var(--gd)' : '#f1eee4'};color:${allDone ? '#fff' : '#bbb'};border:none;border-radius:18px;font-weight:800;font-size:16px;cursor:${allDone ? 'pointer' : 'not-allowed'};">${!allDone ? 'Cân hoặc báo hết đủ các lô để tiếp tục' : (isLast ? 'Xác nhận & tiếp tục kết ca' : 'Tiếp tục')}</button>
+    <button onclick="prepCountGoNext()" ${allDone ? '' : 'disabled'} class="kc-btn" style="background:${allDone ? 'var(--gd)' : '#f1eee4'};color:${allDone ? '#fff' : '#bbb'};cursor:${allDone ? 'pointer' : 'not-allowed'};margin-bottom:22px;">${!allDone ? 'Cân hoặc báo hết đủ các lô để tiếp tục' : (isLast ? 'Xác nhận & tiếp tục kết ca' : 'Tiếp tục')}</button>
   `;
 }
 
@@ -17158,21 +17231,18 @@ async function renderShiftHandoverForm() {
   const actualCash = shiftState.closing.finalActualCash || 0;
   const toHandOver = Math.max(0, actualCash - retainDefault);
   box.innerHTML = `
-    <div class="wal-section" style="margin:0 0 14px;">
-      <div class="wal-section-title">Tiền giữ lại / bàn giao</div>
-      <div style="font-size:13px;color:var(--td);">Tiền giữ lại (đầu ca ngày mai): <b>${retainDefault.toLocaleString('vi-VN')}đ</b></div>
-      <div style="font-size:13px;color:var(--td);margin-top:4px;">Tiền cần bàn giao: <b style="color:var(--gd);">${toHandOver.toLocaleString('vi-VN')}đ</b></div>
-      <div style="font-size:11px;color:#999;margin-top:6px;">Có thể sửa số tiền giữ lại nếu cần (vd không đủ tiền lẻ đúng mức mặc định).</div>
-      <div class="wal-input-label" style="margin:10px 0 6px;">Tiền giữ lại thực tế</div>
-      <div class="wal-input-group" style="margin-bottom:0;">
-        <input id="shiftRetainAmt" type="number" value="${retainDefault}" oninput="shiftUpdateHandoverPreview(${actualCash})">
+    <div class="kc-title">Bàn giao tiền</div>
+    <div class="kc-card">
+      <div style="font-size:14px;color:var(--td);font-weight:700;">Tiền giữ lại (đầu ca ngày mai): <span>${retainDefault.toLocaleString('vi-VN')}đ</span></div>
+      <div style="font-size:14px;color:var(--td);font-weight:700;margin-top:4px;">Tiền cần bàn giao: <b id="shiftHandoverAmt" style="color:#E23A5D;">${toHandOver.toLocaleString('vi-VN')}đ</b></div>
+      <div class="kc-sub" style="margin-top:16px;">
+        <div style="font-size:11.5px;font-weight:800;color:#aaa;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">Tiền giữ lại thực tế</div>
+        <input id="shiftRetainAmt" type="number" value="${retainDefault}" oninput="shiftUpdateHandoverPreview(${actualCash})" style="width:100%;border:none;outline:none;background:transparent;font-family:inherit;font-size:18px;font-weight:800;color:var(--td);">
       </div>
-    </div>
-    <div class="wal-section" style="margin:0 0 14px;">
-      <div style="font-size:13px;color:var(--td);">Tiền bàn giao: <b id="shiftHandoverAmt" style="color:var(--gd);">${toHandOver.toLocaleString('vi-VN')}đ</b></div>
       ${renderPinInput('shiftRecipient', 'Người nhận bàn giao (bắt buộc mã PIN — kể cả chủ quán, để không ai tự "ghi tên mình" mà không có PIN xác thực)')}
     </div>
-    <button onclick="submitShiftHandover(${actualCash})" style="width:100%;padding:14px;background:var(--gd);color:#fff;border:none;border-radius:14px;font-weight:700;font-size:15px;cursor:pointer;">Xác nhận đã bàn giao</button>
+    ${closeStepNavHTML(6)}
+    <button onclick="submitShiftHandover(${actualCash})" class="kc-btn" style="background:var(--gd);color:#fff;margin-bottom:22px;">Xác nhận đã bàn giao</button>
   `;
 }
 function shiftUpdateHandoverPreview(actualCash) {
@@ -17843,11 +17913,10 @@ async function renderDailyClosingChecklist() {
       <div style="font-size:11.5px;color:#999;">${detail}</div></div>
     </div>`;
   box.innerHTML = closeSessionBannerPOS() + `
-    <div class="wal-section" style="margin:0 0 14px;">
-      <div class="wal-section-title">Checklist đóng ngày</div>
-      <div style="font-size:11.5px;color:#999;margin-bottom:8px;">Các mục dưới đây chỉ để tham khảo — không chặn việc đóng ngày (trừ Tiền mặt/Bàn giao đã bắt buộc xong ở bước trước).</div>
+    <div class="kc-card">
+      <div style="font-size:14px;font-weight:700;color:#999;margin-bottom:14px;">Checklist tham khảo</div>
       <label style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #f0f0f0;">
-        <input type="checkbox" id="dcNoMoreBills"> <span style="font-size:13.5px;">Xác nhận không còn bill nào đang xử lý dở dang</span>
+        <input type="checkbox" class="kc-chk" id="dcNoMoreBills"> <span style="font-size:13.5px;">Xác nhận không còn bill nào đang xử lý dở dang</span>
       </label>
       ${item(true, 'Tiền mặt đã đối soát', 'PASS')}
       ${item(true, 'Chuyển khoản đã đối soát', 'PASS hoặc không có doanh thu chuyển khoản')}
@@ -17858,9 +17927,8 @@ async function renderDailyClosingChecklist() {
       ${item(cl.expenseCount != null ? true : null, 'Chi phí phát sinh', cl.expenseCount != null ? `${cl.expenseCount} khoản đã ghi hôm nay` : 'Không tải được')}
     </div>
     ${cfgList.length ? `
-    <div class="wal-section" style="margin:0 0 14px;">
-      <div class="wal-section-title">Việc cuối ca</div>
-      <div style="font-size:11.5px;color:#999;margin-bottom:8px;">Do Quản lý cấu hình. Mục <b>BẮT BUỘC</b> phải xong mới đóng được ngày.</div>
+    <div class="kc-card">
+      <div style="font-size:14px;font-weight:700;color:#999;margin-bottom:14px;">Việc cuối ca (do Quản lý cấu hình)</div>
       ${cfgList.map(it => {
         const ticked = doneIds.has(it.id) || (it.autoCheck && it.done);
         const skipped = overIds.has(it.id);
@@ -17893,12 +17961,13 @@ async function renderDailyClosingChecklist() {
       }).join('')}
       ${renderPinInput('closeChecklistStaff')}
     </div>` : ''}
-    <div class="wal-section" style="margin:0 0 14px;border:1.5px solid var(--gd);">
-      <div class="wal-section-title">Ký xác nhận đóng ngày</div>
-      <div style="font-size:11.5px;color:#999;line-height:1.5;">Nhập lại mã PIN của <b style="color:var(--td);">${_closeSession ? _closeSession.fullName : 'người kết ca'}</b> — chữ ký chốt sổ cuối cùng, cũng để chắc chắn máy vẫn đang trong tay đúng người.</div>
+    <div class="kc-card" style="border:1.5px solid #E23A5D;">
+      <div style="font-size:14px;font-weight:700;color:#999;margin-bottom:6px;">Ký xác nhận đóng ngày</div>
+      <div style="font-size:12px;color:#999;line-height:1.5;">Nhập lại mã PIN của <b style="color:var(--td);">${_closeSession ? _closeSession.fullName : 'người kết ca'}</b> — chữ ký chốt sổ cuối cùng.</div>
       ${renderPinInput('closeFinalStaff', 'Mã PIN xác nhận (bắt buộc nhập lại)')}
     </div>
-    <button onclick="submitDailyClose()" style="width:100%;padding:14px;background:var(--gd);color:#fff;border:none;border-radius:14px;font-weight:700;font-size:15px;cursor:pointer;">Xác nhận đóng ngày</button>
+    ${closeStepNavHTML(7)}
+    <button onclick="submitDailyClose()" class="kc-btn" style="background:#E23A5D;color:#fff;margin-bottom:22px;">Xác nhận đóng ngày</button>
   `;
   if (lockablePendingClose.some(it => clRemainingSec('close', it.id) > 0)) clArmCountdownRerender(() => renderDailyClosingChecklist());
 }
