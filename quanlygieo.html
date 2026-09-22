@@ -375,6 +375,10 @@ html.tab-ui .kmini .kmval{font-size:21px;}
 /* ---------- Tiêu đề mục GẬP ĐƯỢC ----------
    Dùng cho những khối "xem thì hay, không xem cũng chẳng sao" (hoạt động kho).
    Mặc định gập lại để màn Hôm nay không dài ra vì thứ mỗi tuần mới cần đọc. */
+/* [MỚI] "Hoạt động kho hôm nay" + "Hoạt động BTP hôm nay" — ở tablet xếp 2 cột
+   song song thay vì nối tiếp nhau theo chiều dọc (mỗi cột tự cao theo nội dung
+   của nó, không kéo giãn theo cột kia). Điện thoại giữ nguyên xếp dọc. */
+html.tab-ui .feed2col{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start;}
 .sec-fold{display:flex;align-items:center;gap:8px;width:100%;background:none;border:none;
   padding:14px 2px 6px;font-family:inherit;cursor:pointer;text-align:left;}
 .sec-fold .sf-t{font-size:12.5px;font-weight:800;color:var(--gt);text-transform:uppercase;letter-spacing:.06em;}
@@ -395,7 +399,11 @@ html.tab-ui .kmini .kmval{font-size:21px;}
   background:none;border:none;font-family:inherit;text-align:left;}
 .bfeed-time{font-size:12px;font-weight:800;color:var(--gm);font-variant-numeric:tabular-nums;flex-shrink:0;}
 .bfeed-main{flex:1;min-width:0;}
-.bfeed-items{font-size:13px;font-weight:650;color:var(--td);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+/* [FIX] display:block bắt buộc phải có — .bfeed-items vốn là <span> (display:inline
+   mặc định), mà overflow/text-overflow KHÔNG có tác dụng trên phần tử inline. Thiếu
+   dòng này, bill nhiều món tên dài tràn thẳng ra ngoài, đè lên số tiền bên phải thay
+   vì bị cắt "...". */
+.bfeed-items{display:block;font-size:13px;font-weight:650;color:var(--td);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .bfeed-meta{font-size:10.5px;color:var(--gt);margin-top:2px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
 .bfeed-total{font-size:14.5px;font-weight:800;color:var(--td);flex-shrink:0;font-variant-numeric:tabular-nums;}
 .bfeed-tag{font-size:9.5px;font-weight:800;border-radius:999px;padding:1px 7px;white-space:nowrap;}
@@ -1502,8 +1510,10 @@ html.phone-ui .nav-search .ns-kbd{display:none;}
         <div class="kgrid" id="todayGrid"></div>
         <div class="kmini-grid" id="todayMini"></div>
         <div id="todayBills"></div>
-        <div id="todayKhoFeed"></div>
-        <div id="todayPrepFeed"></div>
+        <div class="feed2col">
+          <div id="todayKhoFeed"></div>
+          <div id="todayPrepFeed"></div>
+        </div>
         <div class="sec-title">Doanh thu &amp; giờ công theo khung giờ</div>
         <div id="todayHourly"></div>
         <div id="todayThv"></div>
@@ -5535,12 +5545,18 @@ function khoFeedHTML(list){
   if(!list || !list.length) return '';
   const gio = iso => { const d = iso?new Date(iso):null; return (d && !isNaN(d)) ? `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}` : ''; };
   const hien = list.slice(0, 8);
-  const dauMuc = `<button class="sec-fold" aria-expanded="${_khoFeedMo}" onclick="toggleKhoFeed()">
+  // [MỚI] Ở tablet, đủ chỗ để hiện sẵn 2 khối "Hoạt động" song song — khỏi bắt bấm
+  // mới xem, xem thẳng nút gập/mở luôn. Điện thoại giữ nguyên hành vi gập lại cũ.
+  const laTablet = document.documentElement.classList.contains('tab-ui');
+  const mo = laTablet || _khoFeedMo;
+  const dauMuc = laTablet
+    ? `<div class="sec-title" style="display:flex;align-items:center;gap:8px;margin-top:0">Hoạt động kho hôm nay<span style="font-size:11px;font-weight:800;color:var(--gm);background:var(--gl);border-radius:999px;padding:2px 8px;flex-shrink:0">${list.length} lượt</span></div>`
+    : `<button class="sec-fold" aria-expanded="${_khoFeedMo}" onclick="toggleKhoFeed()">
       <span class="sf-t">Hoạt động kho hôm nay</span>
       <span class="sf-c">${list.length} lượt</span>
       <span class="sf-ch">${ic('chevronDown',15)}</span>
     </button>`;
-  if(!_khoFeedMo) return dauMuc;
+  if(!mo) return dauMuc;
   return dauMuc + `
     <div class="card">
       ${hien.map(e=>{
@@ -5700,12 +5716,16 @@ function prepFeedHTML(list){
   if(!list || !list.length) return '';
   const gio = iso => { const d = iso?new Date(iso):null; return (d && !isNaN(d)) ? `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}` : ''; };
   const hien = list.slice(0, 8);
-  const dauMuc = `<button class="sec-fold" aria-expanded="${_prepFeedMo}" onclick="togglePrepFeed()">
+  const laTablet = document.documentElement.classList.contains('tab-ui');
+  const mo = laTablet || _prepFeedMo;
+  const dauMuc = laTablet
+    ? `<div class="sec-title" style="display:flex;align-items:center;gap:8px;margin-top:0">Hoạt động BTP hôm nay<span style="font-size:11px;font-weight:800;color:var(--gm);background:var(--gl);border-radius:999px;padding:2px 8px;flex-shrink:0">${list.length} lượt</span></div>`
+    : `<button class="sec-fold" aria-expanded="${_prepFeedMo}" onclick="togglePrepFeed()">
       <span class="sf-t">Hoạt động BTP hôm nay</span>
       <span class="sf-c">${list.length} lượt</span>
       <span class="sf-ch">${ic('chevronDown',15)}</span>
     </button>`;
-  if(!_prepFeedMo) return dauMuc;
+  if(!mo) return dauMuc;
   return dauMuc + `
     <div class="card">
       ${hien.map(e=>{
@@ -12386,8 +12406,7 @@ function renderBillFeed(){
       </button>
       ${mo ? bfChiTiet(o) : ''}
     </div>`;
-  }).join('') + `</div>`
-  + `<button class="btn outline sm" style="width:auto;padding:0 14px;margin-top:9px" onclick="goBills()">Mở lịch sử bill đầy đủ</button>`;
+  }).join('') + `</div>`;
 }
 
 
