@@ -4743,6 +4743,7 @@ function renderFifoAlertBar() {
 async function openStockUseScreen() {
   showScreen('stockUseScreen');
   _stockUseFilter = '';   // mở lại màn là danh sách đầy đủ, không dính bộ lọc lần trước
+  _stockUseExpanded = false;
   const box = document.getElementById('stockUseBody');
   showLoading(box);
   await loadOpenContainers();
@@ -4758,39 +4759,54 @@ function stockExpiryLabel(c) {
   return { text: 'Còn ' + Math.round(gio / 24) + ' ngày', color: '#999' };
 }
 
-// Lọc theo tên — chỉ hiện khi danh sách dài. Quán khui vài chục loại thì cuộn
-// tay tìm một dòng là chậm hơn gõ hai chữ.
+// Lọc theo tên — chỉ hiện khi đã mở rộng và danh sách dài. Quán khui vài chục loại
+// thì cuộn tay tìm một dòng là chậm hơn gõ hai chữ.
 let _stockUseFilter = '';
 const STOCK_USE_FILTER_TU = 8;
+// Mặc định chỉ hiện vài mã mở gần nhất: thứ nhân viên vừa khui là thứ hay cần báo hết
+// nhất. Muốn xem đủ thì bấm mở rộng.
+let _stockUseExpanded = false;
+const STOCK_USE_PREVIEW = 3;
 
 function stockUseSetFilter(v) { _stockUseFilter = v; renderStockUseRows(); }
+function stockUseToggleExpand() { _stockUseExpanded = !_stockUseExpanded; if (!_stockUseExpanded) _stockUseFilter = ''; renderStockUseList(); }
+
+const SU_QR_SVG = '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 8V5.5a2 2 0 0 1 2-2H8M16 3.5h2.5a2 2 0 0 1 2 2V8M20.5 16v2.5a2 2 0 0 1-2 2H16M8 20.5H5.5a2 2 0 0 1-2-2V16"/><rect x="7" y="7" width="4" height="4" rx=".8" stroke-width="1.6"/><rect x="13" y="7" width="4" height="4" rx=".8" stroke-width="1.6"/><rect x="7" y="13" width="4" height="4" rx=".8" stroke-width="1.6"/><g fill="currentColor" stroke="none"><rect x="13" y="13" width="1.8" height="1.8" rx=".3"/><rect x="15.2" y="15.2" width="1.8" height="1.8" rx=".3"/><rect x="15.2" y="13" width="1.8" height="1.8" rx=".3"/></g></svg>';
 
 // Vẽ RIÊNG phần danh sách, để lọc không làm mất con trỏ trong ô tìm.
 function renderStockUseRows() {
   const box = document.getElementById('stockUseRows');
   if (!box) return;
   const tu = _stockUseFilter.trim().toLowerCase();
-  const list = tu
-    ? STOCK_OPEN_LIST.filter(c => ((c.itemName || '') + ' ' + (c.code || '')).toLowerCase().includes(tu))
-    : STOCK_OPEN_LIST;
+  // Mới mở gần nhất lên đầu. Chỉ sắp bản sao; STOCK_OPEN_LIST giữ thứ tự cũ cho chỗ khác dùng.
+  const moiNhat = STOCK_OPEN_LIST.slice().sort((a, b) => String(b.openedAt || '').localeCompare(String(a.openedAt || '')));
+  let list = tu
+    ? moiNhat.filter(c => ((c.itemName || '') + ' ' + (c.code || '')).toLowerCase().includes(tu))
+    : moiNhat;
+  if (!_stockUseExpanded) list = list.slice(0, STOCK_USE_PREVIEW);
   if (!list.length) {
-    box.innerHTML = `<div style="text-align:center;padding:24px;color:#bbb;font-size:13px;">${
+    box.innerHTML = `<div style="text-align:center;padding:24px;color:#bbb;font-size:14px;">${
       tu ? 'Không có mục nào khớp "' + wpEsc(_stockUseFilter) + '"' : 'Chưa có thứ gì đang mở.'}</div>`;
     return;
   }
-  box.innerHTML = list.map(c => {
+  const p2 = n => String(n).padStart(2, '0');
+  box.innerHTML = list.map((c, i) => {
     const ex = stockExpiryLabel(c);
     const moNgay = c.openedAt ? new Date(c.openedAt) : null;
-    const p2 = n => String(n).padStart(2, '0');
-    const moStr = moNgay && !isNaN(moNgay) ? `${p2(moNgay.getDate())}/${p2(moNgay.getMonth() + 1)}` : '';
+    const moStr = moNgay && !isNaN(moNgay) ? `${p2(moNgay.getHours())}:${p2(moNgay.getMinutes())} · ${p2(moNgay.getDate())}/${p2(moNgay.getMonth() + 1)}` : '';
+    const exBg = ex.color === '#c0392b' ? '#FDECEA' : ex.color === '#e67e22' ? '#FEF3E6' : '#F2F2F4';
+    const exFg = ex.color === '#999' ? '#6B6B70' : ex.color;
     return `
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid #f0f0f0;">
-          <div style="min-width:0;">
-            <div style="font-weight:700;font-size:14px;color:var(--td);">${c.itemName || ''}</div>
-            <div style="font-size:11.5px;color:#999;letter-spacing:.4px;">${c.code || ''}${moStr ? ' · mở ' + moStr : ''}${c.openedBy ? ' · ' + c.openedBy : ''}</div>
-            ${ex.text ? `<div style="font-size:11.5px;font-weight:700;color:${ex.color};">${ex.text}</div>` : ''}
+        <div style="display:flex;align-items:center;gap:12px;padding:16px 0;${i ? 'border-top:1px solid #F0EDE6;' : ''}">
+          <div style="min-width:0;flex:1;">
+            <div style="font-weight:800;font-size:18px;line-height:1.25;color:var(--td);">${escHtmlPos(c.itemName || '')}</div>
+            <div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:7px;">
+              <span style="font-size:16px;font-weight:800;letter-spacing:.8px;color:var(--td);background:#F2F2F4;border-radius:8px;padding:3px 9px;font-variant-numeric:tabular-nums;">${escHtmlPos(c.code || '')}</span>
+              ${ex.text ? `<span style="font-size:12.5px;font-weight:800;color:${exFg};background:${exBg};border-radius:8px;padding:5px 9px;">${ex.text}</span>` : ''}
+            </div>
+            <div style="font-size:12.5px;color:#9A9AA0;margin-top:7px;">${moStr ? 'Mở ' + moStr : ''}${c.openedBy ? ' · ' + escHtmlPos(c.openedBy) : ''}</div>
           </div>
-          <button onclick="startFinishContainer('${c.id}')" style="flex-shrink:0;height:44px;padding:0 16px;background:#fff;color:var(--gd);border:1.5px solid var(--gd);border-radius:12px;font-family:'Google Sans',sans-serif;font-size:13px;font-weight:700;cursor:pointer;">Đã hết</button>
+          <button onclick="startFinishContainer('${c.id}')" style="flex-shrink:0;height:56px;padding:0 16px;background:#FFF0F2;color:var(--gd);border:none;border-radius:16px;font-family:'Google Sans',sans-serif;font-size:14.5px;font-weight:800;line-height:1.2;cursor:pointer;">Báo<br>đã hết</button>
         </div>`;
   }).join('');
 }
@@ -4800,31 +4816,36 @@ function renderStockUseList() {
   if (!box) return;
   const list = STOCK_OPEN_LIST;
   const coQuet = typeof posScanAvailable === 'function' && posScanAvailable();
-  const dai = list.length >= STOCK_USE_FILTER_TU;
+  const coAn = list.length > STOCK_USE_PREVIEW;
+  const timDuoc = _stockUseExpanded && list.length >= STOCK_USE_FILTER_TU;
+  const nutQuet = (onclick, label, sub, chinh) => `
+        <button onclick="${onclick}" style="flex:1;min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:14px;padding:18px 16px 16px;
+          background:${chinh ? 'var(--gd)' : '#fff'};color:${chinh ? '#fff' : 'var(--td)'};border:${chinh ? 'none' : '1.5px solid #EDE8DD'};border-radius:22px;
+          box-shadow:${chinh ? '0 10px 22px -10px var(--gd)' : '0 3px 12px rgba(35,28,26,.05)'};font-family:'Google Sans',sans-serif;text-align:left;cursor:pointer;">
+          <span style="width:48px;height:48px;border-radius:15px;display:flex;align-items:center;justify-content:center;background:${chinh ? 'rgba(255,255,255,.2)' : 'var(--gl)'};color:${chinh ? '#fff' : 'var(--gd)'};">${SU_QR_SVG}</span>
+          <span><span style="display:block;font-size:19px;font-weight:800;line-height:1.2;">${label}</span>
+          <span style="display:block;font-size:12.5px;font-weight:600;margin-top:3px;opacity:${chinh ? '.85' : '.55'};">${sub}</span></span>
+        </button>`;
 
-  // [FIX] HAI nút quét đặt NGAY ĐẦU MÀN, cạnh nhau.
-  // Trước đây "Quét mã báo hết" nằm ở khối cuối cùng, DƯỚI cả danh sách đang mở.
-  // Quán khui vài chục loại là nó rơi xuống tận đáy: nhân viên không bao giờ cuộn
-  // tới, nên không hề biết có chức năng đó. Hai việc này ngang hàng nhau (khui ra
-  // / báo hết) nên phải nằm cùng chỗ, và phải thấy được ngay khi mở màn.
+  // Hai nút quét đặt ngay đầu màn, cạnh nhau: mở và báo hết là hai việc ngang hàng,
+  // và phải thấy được ngay khi mở màn (nút báo hết từng nằm dưới đáy danh sách, không ai thấy).
   box.innerHTML = `
-    <div class="wal-section" style="margin:0 0 14px;">
-      <div class="wal-section-title">Quét mã trên tem</div>
-      <div style="display:flex;gap:9px;">
-        <button onclick="scanToOpenContainer()" style="flex:1;padding:15px 8px;background:var(--gd);color:#fff;border:none;border-radius:14px;font-family:'Google Sans',sans-serif;font-size:14.5px;font-weight:700;cursor:pointer;"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-4px;margin-right:7px;"><path d="M3.2 8.4A2.2 2.2 0 0 1 5.4 6.2h1.9l1.3-2h6.8l1.3 2h1.9a2.2 2.2 0 0 1 2.2 2.2v8.4a2.2 2.2 0 0 1-2.2 2.2H5.4a2.2 2.2 0 0 1-2.2-2.2z"/><circle cx="12" cy="12.6" r="3.4"/></svg>Khui ra</button>
-        <button onclick="scanToFinishContainer()" style="flex:1;padding:15px 8px;background:#fff;color:var(--gd);border:1.5px solid var(--gd);border-radius:14px;font-family:'Google Sans',sans-serif;font-size:14.5px;font-weight:700;cursor:pointer;"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-4px;margin-right:7px;"><path d="M3.2 8.4A2.2 2.2 0 0 1 5.4 6.2h1.9l1.3-2h6.8l1.3 2h1.9a2.2 2.2 0 0 1 2.2 2.2v8.4a2.2 2.2 0 0 1-2.2 2.2H5.4a2.2 2.2 0 0 1-2.2-2.2z"/><circle cx="12" cy="12.6" r="3.4"/></svg>Báo hết</button>
-      </div>
-      <div style="font-size:11.5px;color:#999;line-height:1.6;margin-top:10px;">
-        Khui chai, gói hay hộp nào thì quét mã trên tem của chính thứ đó — hệ thống ghi lại
-        ngày mở, người mở và hạn dùng. Dùng hết cũng quét, nhanh hơn và không sợ bấm nhầm.
-      </div>
-      ${coQuet ? '' : '<div style="font-size:11.5px;color:#c0392b;margin-top:8px;line-height:1.5;">Máy này chưa quét được — cần mở bằng app của quán bản mới.</div>'}
+    <div style="display:flex;gap:10px;margin:0 0 14px;">
+      ${nutQuet('scanToOpenContainer()', 'Quét mở', 'Khui mã mới', true)}
+      ${nutQuet('scanToFinishContainer()', 'Báo hết', 'Quét mã đã dùng hết', false)}
     </div>
+    ${coQuet ? '' : '<div style="font-size:12.5px;color:#c0392b;margin:-4px 4px 14px;line-height:1.5;">Máy này chưa quét được — cần mở bằng app của quán bản mới.</div>'}
 
-    <div class="wal-section" style="margin:0;">
-      <div class="wal-section-title">Đang mở (${list.length})</div>
-      ${dai ? `
-      <div class="wal-input-group" style="margin-bottom:10px;">
+    <div class="wal-section" style="margin:0;padding:18px 18px 10px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px;">
+        <div style="font-size:17px;font-weight:800;color:var(--td);">Đang mở <span style="display:inline-block;min-width:26px;text-align:center;font-size:13px;font-weight:800;color:var(--gd);background:var(--gl);border-radius:999px;padding:3px 8px;margin-left:4px;vertical-align:2px;">${list.length}</span></div>
+        ${coAn ? `<button onclick="stockUseToggleExpand()" style="display:flex;align-items:center;gap:5px;height:40px;padding:0 14px;background:#F6F4EF;color:var(--td);border:none;border-radius:999px;font-family:'Google Sans',sans-serif;font-size:14px;font-weight:800;cursor:pointer;">
+          ${_stockUseExpanded ? 'Thu gọn' : 'Xem tất cả'}
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="${_stockUseExpanded ? 'transform:rotate(180deg);' : ''}"><path d="M6 9l6 6 6-6"/></svg>
+        </button>` : ''}
+      </div>
+      ${timDuoc ? `
+      <div class="wal-input-group" style="margin:12px 0 4px;">
         <input id="stockUseSearch" type="text" placeholder="Tìm theo tên hoặc mã..." value="${wpEsc(_stockUseFilter)}" oninput="stockUseSetFilter(this.value)">
       </div>` : ''}
       <div id="stockUseRows"></div>
@@ -4849,7 +4870,7 @@ async function scanToOpenContainer() {
   // ca này, vì hệ thống đã trừ tạm khỏi tồn kho khi Quản lý duyệt báo mất. Chỉ đường
   // "Quét mã hàng tìm lại được" ở Kiểm kê mới đúng cách phục hồi (cộng lại tồn kho).
   if (c.status === 'lost')     { toast('⚠️ ' + c.code + ' đang ở trạng thái "báo mất" — dùng nút "Quét mã hàng tìm lại được" ở Kiểm kê để phục hồi'); return; }
-  if (c.status === 'open')     { toast('ℹ️ ' + c.code + ' đang mở rồi — muốn báo hết thì bấm "Đã hết"'); return; }
+  if (c.status === 'open')     { toast('ℹ️ ' + c.code + ' đang mở rồi — muốn báo hết thì bấm "Báo hết"'); return; }
   if (c.status === 'finished') { toast('ℹ️ ' + c.code + ' đã báo hết trước đó'); return; }
   // Đơn vị nguyên (cái rời, vd một gói bột) — mở lên là dùng hết luôn, không có
   // giai đoạn "đang mở, dùng dở" nào để theo dõi riêng. Quét "mở" cho loại này
@@ -5240,10 +5261,16 @@ async function openConfirmFinishSheet(c, daQuet) {
   const canLyDo = !daQuet && cungLoai > 1;
   openStockScanSheet(`
     <div class="wal-section" style="margin:0 0 14px;">
-      <div class="wal-section-title">Xác nhận đã hết</div>
-      <div style="font-size:20px;font-weight:700;color:var(--td);margin:6px 0 2px;">${c.itemName || ''}</div>
-      <div style="font-size:13px;color:#999;letter-spacing:.5px;">${c.code || ''} · ${fmtPrepQty(c.baseQty)} ${c.unit || ''}</div>
-      ${daQuet ? '<div style="font-size:12px;color:#16a34a;font-weight:700;margin-top:8px;">Đã quét mã trên tem</div>' : ''}
+      <div style="font-size:22px;font-weight:800;color:var(--td);line-height:1.25;">Báo hết mã này?</div>
+      <div style="margin-top:14px;padding:14px 16px;background:#F7F5F0;border-radius:16px;">
+        <div style="font-size:18px;font-weight:800;color:var(--td);line-height:1.25;">${escHtmlPos(c.itemName || '')}</div>
+        <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:8px;">
+          <span style="font-size:17px;font-weight:800;letter-spacing:.8px;color:var(--td);background:#fff;border-radius:8px;padding:4px 10px;">${escHtmlPos(c.code || '')}</span>
+          <span style="font-size:13px;color:#8A8A90;">${fmtPrepQty(c.baseQty)} ${escHtmlPos(c.unit || '')}</span>
+          ${daQuet ? '<span style="font-size:12.5px;color:#16a34a;font-weight:800;">Đã quét mã trên tem</span>' : ''}
+        </div>
+      </div>
+      <div style="font-size:13px;color:#8A8A90;line-height:1.55;margin-top:10px;">Kiểm tra đúng tên và mã trên tem. Báo hết xong, mã này rời khỏi danh sách đang mở và không dùng lại được.</div>
     </div>
     ${remaining>0.005?`<div class="wal-section" style="border:1.5px solid #0062AD;background:#EAF3FA;margin:0 0 14px">
       <b style="color:#0062AD">Mã ${escHtmlPos(c.code||'')} còn ${fmtPrepQty(remaining)} ${escHtmlPos(c.unit||'')}</b>
