@@ -1567,6 +1567,31 @@ html.phone-ui .nav-search .ns-kbd{display:none;}
 #originalPackPanel .original-pack-actions{display:grid;grid-template-columns:minmax(0,1fr);gap:10px;margin-top:12px}
 #originalPackPanel .original-pack-actions .btn{display:flex;width:100%;min-width:0;margin:0;box-sizing:border-box}
 @media (hover:hover) and (pointer:fine){#originalPackPanel .btn:not(.outline):hover{background:#00518f}}
+
+/* ==========================================================================
+   iPadOS — menu kiểu Cài đặt (icon trong ô màu bo góc, mục đang chọn tô kín
+   màu nhấn) và thanh segmented bo tròn hẳn ở đầu các màn Kho.
+   ========================================================================== */
+.sidebar-item .sb-ic.tile{width:30px;height:30px;border-radius:8px;color:#fff;background:var(--tile,#8E8E93);}
+.sidebar-item .sb-ic.tile svg{width:18px;height:18px;}
+.sidebar-item.active{background:var(--gd);color:#fff;font-weight:650;}
+.sidebar-item.active .sb-ic{color:#fff;}
+.sidebar-item.active .sb-ic.tile{background:rgba(255,255,255,.22);box-shadow:inset 0 0 0 1px rgba(255,255,255,.18);}
+html.tab-ui .sidebar-item.active::before{display:none;}
+html.tab-ui .sidebar-item{border-radius:12px;gap:12px;}
+html.tab-ui:not(.nav-off) .sidebar{background:#F2F2F7;border-right:1px solid rgba(60,60,67,.12);}
+.sidebar-group-label{text-transform:none;letter-spacing:0;font-size:15px;font-weight:700;color:var(--td);padding:20px 12px 6px;}
+@media (hover:hover) and (pointer:fine){ .sidebar-item.active:hover{background:var(--gm);} }
+
+/* Segmented control bo tròn hẳn (viên thuốc), kiểu iPadOS mới */
+.k2-nav{display:flex;width:fit-content;flex-wrap:nowrap;gap:2px;padding:4px;border-radius:999px;background:rgba(118,118,128,.12);max-width:100%;overflow-x:auto;scrollbar-width:none;}
+.k2-nav::-webkit-scrollbar{display:none;}
+.k2-nav button{min-height:42px;padding:0 20px;border:none;border-radius:999px;background:transparent;color:var(--td);font-size:15px;font-weight:600;white-space:nowrap;display:inline-flex;align-items:center;gap:6px;}
+.k2-nav button.active{background:#fff;color:var(--td);box-shadow:0 3px 8px rgba(0,0,0,.12),0 1px 1px rgba(0,0,0,.04);}
+.k2-nav + .k2-nav{margin-top:0;}
+.k2-seg{margin:0 0 6px;}
+.k2-seg .k2-n{font-size:12.5px;font-weight:700;border-radius:999px;padding:1px 7px;background:rgba(118,118,128,.16);color:var(--ink-2);font-variant-numeric:tabular-nums;}
+.k2-seg .k2-n.bad{background:var(--bad);color:#fff;} .k2-seg .k2-n.warn{background:var(--warn);color:#fff;}
 </style>
 </head>
 <body>
@@ -4905,9 +4930,8 @@ async function renderKho2Items(force){
   const tabBtn = t => {
     const n = k2TemCount(t.k);
     const pill = n==null ? '' : `<span class="k2-n ${t.tone && n>0 ? t.tone : ''}">${n}</span>`;
-    return `<button class="k2-tab ${ctnAllSub===t.k?'active':''}" onclick="switchCtnAllSub('${t.k}')">${t.l}${pill}</button>`;
+    return `<button class="${ctnAllSub===t.k?'active':''}" onclick="switchCtnAllSub('${t.k}')">${t.l}${pill}</button>`;
   };
-  const grp = (g,label) => `<div class="k2-tabs"><span class="k2-tabs-l">${label}</span>${K2_TEM_TABS.filter(t=>t.g===g).map(tabBtn).join('')}</div>`;
   box.innerHTML = `
     <div class="k2-top">
       <div class="k2-title">Tem nguyên liệu</div>
@@ -4915,8 +4939,7 @@ async function renderKho2Items(force){
         oninput="ctnAllQuery=this.value; renderKhoAllItemsBody();">
       <button class="btn outline k2-refresh" onclick="renderKho2Items(true)">Làm mới</button>
     </div>
-    ${grp('xuly','Cần xử lý')}
-    ${grp('tt','Trạng thái')}
+    <div class="k2-nav k2-seg">${K2_TEM_TABS.map(tabBtn).join('')}</div>
     <div id="ctnAllBody"></div>`;
   renderKhoAllItemsBody();
 }
@@ -5715,8 +5738,8 @@ async function renderKho2Prep(){
   if(!box) return;
   const tabs = [['today','Hôm nay + đang dùng'],['active','Chỉ đang dùng'],['expired','Hết hạn / báo hết'],['stats','Tỷ lệ bỏ & lô huỷ']];
   const nav = `<div class="k2-top"><div class="k2-title">Lô bán thành phẩm</div></div>
-    <div class="k2-tabs">${tabs.map(([k,l])=>
-      `<button class="k2-tab ${kho2PrepFilter===k?'active':''}" onclick="kho2PrepFilter='${k}'; renderKho2Prep();">${l}</button>`).join('')}</div>
+    <div class="k2-nav k2-seg">${tabs.map(([k,l])=>
+      `<button class="${kho2PrepFilter===k?'active':''}" onclick="kho2PrepFilter='${k}'; renderKho2Prep();">${l}</button>`).join('')}</div>
     <div style="height:12px"></div>`;
   showLoading(box);
   if(kho2PrepFilter === 'stats') return renderKho2PrepStats(box, nav);
@@ -10501,6 +10524,14 @@ function onNavSearchKey(ev){
   }
 }
 
+// Màu ô icon kiểu Cài đặt iPadOS — theo loại icon để cùng loại việc cùng màu.
+const SB_TILE = {
+  stethoscope:'#FF2D55', clipboard:'#FF9500', detective:'#5856D6', pulse:'#FF3B30', chart:'#34C759',
+  users:'#007AFF', calendar:'#FF3B30', note:'#AF52DE', cashout:'#34C759', coins:'#30B0C7',
+  receipt:'#5856D6', check:'#34C759', download:'#007AFF', inbox:'#30B0C7', flame:'#FF9500',
+  search:'#8E8E93', clock:'#8E8E93', package:'#A2845E', sliders:'#30B0C7', alert:'#FFCC00',
+  settings:'#8E8E93', trash:'#8E8E93', robot:'#AF52DE', signature:'#FF9500'
+};
 function renderSidebarNav(){
   const nav = document.getElementById('sidebarNav');
   if(!nav) return;
@@ -10512,7 +10543,7 @@ function renderSidebarNav(){
 
   const itemHtml = (it, indent)=>`
     <button class="sidebar-item${indent?' sub':''} ${cur===it.key?'active':''}" onclick="${it.go}">
-      ${it.ic ? `<span class="sb-ic">${ic(it.ic,18)}</span>` : ''}<span>${it.label}</span>
+      ${it.ic ? `<span class="sb-ic tile" style="--tile:${SB_TILE[it.ic]||'#8E8E93'}">${ic(it.ic,18)}</span>` : ''}<span>${it.label}</span>
       ${it.key==='today' && STORE_HEALTH_ISSUE_COUNT>0 ? '<span class="sb-dot"></span>' : ''}
     </button>`;
 
@@ -18505,8 +18536,8 @@ async function renderEntryKho(){
   // triệu chứng "màn hình đơ"). Lỗi này ảnh hưởng MỌI mục con của Kho, không
   // riêng đường vào từ Sức khoẻ quán.
   const tabOwner = KHO_TAB_OWNER[curKhoSub];
-  const tabBar = tabOwner ? `<div class="filter-bar kho-tabs">${KHO_TAB_GROUPS[tabOwner].map(([k,l])=>
-      `<button class="ftag ${curKhoSub===k?'active':''}" onclick="goKho('${k}')">${l}</button>`).join('')}</div>` : '';
+  const tabBar = tabOwner ? `<div class="k2-nav k2-seg" style="margin-bottom:16px">${KHO_TAB_GROUPS[tabOwner].map(([k,l])=>
+      `<button class="${curKhoSub===k?'active':''}" onclick="goKho('${k}')">${l}</button>`).join('')}</div>` : '';
   body.innerHTML = khoSubNavHtml('kho:' + (tabOwner || curKhoSub)) + tabBar + '<div id="khoBody"><div class="muted">Đang tải...</div></div>';
   if(curKhoSub==='items') renderKhoItems();
   else if(curKhoSub==='prep') renderKhoPrep();
