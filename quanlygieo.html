@@ -2411,8 +2411,15 @@ async function loadPosMenu(kind){
 // [FIX] Chia nhỏ theo lô 450 doc: batch của Firestore giới hạn CỨNG 500 thao tác/
 // lần commit. Cache ghi mỗi ngày 1 doc, nên quán chạy quá ~1,5 năm là vượt 500 →
 // commit ném lỗi và KHÔNG xoá được gì cả, đúng lúc dữ liệu cũ cần dọn nhất.
-async function clearSalesCache(){
-  const snap = await fstore.collection('daily_sales_cache_gieogieo').get();
+// [GIẢM-ĐỌC] fromKey/toKey (tuỳ chọn): chỉ xoá các ngày trong khoảng đó thay vì cả bộ
+// đệm. Xoá cả bộ đệm nghĩa là lần mở màn sau phải tải lại bill + ghi lại MỌI ngày (Thu
+// hồi vốn trải tới 730 ngày), nên chỗ nào biết chắc chỉ một khoảng ngày bị ảnh hưởng thì
+// truyền khoảng vào. Không truyền gì = xoá hết như cũ.
+async function clearSalesCache(fromKey, toKey){
+  let q = fstore.collection('daily_sales_cache_gieogieo');
+  if(fromKey) q = q.where(firebase.firestore.FieldPath.documentId(), '>=', fromKey);
+  if(toKey)   q = q.where(firebase.firestore.FieldPath.documentId(), '<=', toKey);
+  const snap = await q.get();
   const docs = snap.docs;
   const CHUNK = 450;
   for(let i=0; i<docs.length; i+=CHUNK){
@@ -2434,11 +2441,11 @@ async function clearSalesCache(){
 // KHÔNG BAO GIỜ để lỗi ở đây làm hỏng thao tác lưu của người dùng: cấu hình đã ghi
 // thành công rồi, dọn cache chỉ là bước phụ — thất bại thì chỉ cảnh báo console,
 // người dùng vẫn còn nút "Xoá cache" thủ công để chạy lại.
-async function invalidateSalesCache(reason){
+async function invalidateSalesCache(reason, fromKey){
   // Đổi giá/định mức → mọi giá vốn dẫn xuất đã nhớ đều hết hạn.
   _costMemo = {};
   try{
-    const n = await clearSalesCache();
+    const n = await clearSalesCache(fromKey);
     if(n) console.info(`[cache] Đã xoá ${n} ngày cache do đổi cấu hình: ${reason||''}`);
   }catch(err){
     console.warn('[cache] Xoá cache tự động thất bại (không ảnh hưởng dữ liệu vừa lưu) —', reason, err);
@@ -3751,7 +3758,7 @@ const EXP_CATEGORIES_SEED = ['Tiền thuê nhà','Tiền điện','Tiền nướ
 // (filterExpenses) sau khi Management duyệt — cùng tinh thần "Approval rules" của Giai
 // đoạn 8, giống pattern Approve/reject đã dùng cho Kiểm kê (Giai đoạn 6).
 function addExpense(data){
-  return fstore.collection('expenses_gieogieo').add({
+  return _expWriteDone(fstore.collection('expenses_gieogieo').add({
     ...data,
     // [đợt 3] Mặc định là SỐ THẬT — chỉ khoản nào chủ quán chủ động đánh dấu mới là
     // dự đoán. Mặc định ngược lại sẽ làm mọi khoản chi phí bình thường bị coi là
@@ -3762,18 +3769,35 @@ function addExpense(data){
     staff: data.staff || '', paymentMethodId: data.paymentMethodId || null,
     paymentMethodLabel: data.paymentMethodLabel || null, baseType: data.baseType || null,
     createdAt:new Date().toISOString()
-  });
+  }));
 }
-function deleteExpense(id){ return fstore.collection('expenses_gieogieo').doc(id).delete(); }
+function deleteExpense(id){ return _expWriteDone(fstore.collection('expenses_gieogieo').doc(id).delete()); }
+// Trả về cùng dạng một phần tử của loadExpensesAll() ({id, ...data}), hoặc null.
+async function loadExpenseById(id){
+  if(!id) return null;
+  const d = await fstore.collection('expenses_gieogieo').doc(String(id)).get();
+  return d.exists ? { id: d.id, ...d.data() } : null;
+}
+// [GIẢM-ĐỌC] Màn Hôm nay gọi hàm này 3 lần song song (lãi/lỗ hôm nay + Thu hồi vốn +
+// Hoà vốn), Báo cáo/Tháng kết cũng gọi lặp — dùng chung 1 lượt đọc trong 20 giây, cùng
+// cách với bộ đệm nguyên liệu (MEMO_TTL). Mọi chỗ ghi chi phí trong app này đều gọi
+// memoDropExpenses() trước VÀ sau khi ghi; bấm "Tải lại" cũng xoá (memoDropAll).
+let _expMemo = null, _expMemoAt = 0;
+function memoDropExpenses(){ _expMemo = null; }
+function _expWriteDone(p){ memoDropExpenses(); return Promise.resolve(p).then(r=>{ memoDropExpenses(); return r; }); }
 async function loadExpensesAll(){
-  const snap = await fstore.collection('expenses_gieogieo').get();
-  return snap.docs.map(d=>({id:d.id, ...d.data()}));
+  if(_expMemo && Date.now() - _expMemoAt < MEMO_TTL) return (await _expMemo).map(e=>({...e}));
+  const p = fstore.collection('expenses_gieogieo').get()
+    .then(snap => snap.docs.map(d=>({id:d.id, ...d.data()})));
+  _expMemo = p; _expMemoAt = Date.now();
+  p.catch(()=>{ if(_expMemo === p) _expMemo = null; });   // lỗi thì lần sau đọc lại, không nhớ lỗi
+  return (await p).map(e=>({...e}));
 }
 function approveExpense(id){
-  return fstore.collection('expenses_gieogieo').doc(id).update({status:'approved', reviewedAt:new Date().toISOString()});
+  return _expWriteDone(fstore.collection('expenses_gieogieo').doc(id).update({status:'approved', reviewedAt:new Date().toISOString()}));
 }
 function rejectExpense(id, note){
-  return fstore.collection('expenses_gieogieo').doc(id).update({status:'rejected', reviewedAt:new Date().toISOString(), reviewNote: note||''});
+  return _expWriteDone(fstore.collection('expenses_gieogieo').doc(id).update({status:'rejected', reviewedAt:new Date().toISOString(), reviewNote: note||''}));
 }
 function daysBetweenInclusive(a,b){ return Math.round((b-a)/86400000)+1; }
 function expenseAllocatedAmount(e, rangeStart, rangeEnd){
@@ -3825,17 +3849,17 @@ function expenseIsUnpaid(e){
   return !e.paidDate;
 }
 function markExpensePaid(id, paidDate){
-  return fstore.collection('expenses_gieogieo').doc(id).update({ paidDate });
+  return _expWriteDone(fstore.collection('expenses_gieogieo').doc(id).update({ paidDate }));
 }
 
 // Thay số dự đoán bằng số thật khi hoá đơn về. Giữ lại số cũ (estimatedAmount) và
 // mốc thời gian (actualAt) để màn hình giải thích được vì sao lãi của tháng đã xem
 // lại đổi — sửa đè mà không để dấu vết là cách nhanh nhất làm chủ quán mất tin.
 function setExpenseActual(id, amount, oldAmount){
-  return fstore.collection('expenses_gieogieo').doc(id).update({
+  return _expWriteDone(fstore.collection('expenses_gieogieo').doc(id).update({
     amount: Number(amount)||0, amountKind: 'actual',
     estimatedAmount: Number(oldAmount)||0, actualAt: new Date().toISOString()
-  });
+  }));
 }
 
 function filterExpenses(list, startDate, endDate){
@@ -4071,7 +4095,10 @@ const MEMO_TTL = 20000;
 const _memo = { items:null, itemsAt:0, preps:null, prepsAt:0 };
 function memoDropItems(){ _memo.items = null; }
 function memoDropPreps(){ _memo.preps = null; }
-function memoDropAll(){ memoDropItems(); memoDropPreps(); }
+function memoDropAll(){
+  memoDropItems(); memoDropPreps();
+  try{ memoDropExpenses(); _stockRangeInflight.clear(); }catch(e){}   // khai báo nằm phía dưới file
+}
 
 async function loadInventoryItems(){
   if(_memo.items && Date.now() - _memo.itemsAt < MEMO_TTL) return _memo.items;
@@ -6134,10 +6161,23 @@ function deleteShiftChecklist(id){
   return fstore.collection('shift_checklists_gieogieo').doc(id).delete();
 }
 async function loadPrepBatches(limitN){
-  const snap = await fstore.collection('prep_batches_gieogieo').get();
-  return snap.docs.map(d=>({id:d.id, ...d.data()}))
+  const n = limitN||80;
+  const sapXep = list => list
     .sort((a,b)=>String(b.startedAt||'').localeCompare(String(a.startedAt||'')))
-    .slice(0, limitN||80);
+    .slice(0, n);
+  // [GIẢM-ĐỌC] Trước đây đọc TOÀN BỘ lô (collection lớn dần mãi) rồi mới cắt lấy n lô
+  // mới nhất. Giờ để Firestore trả đúng n lô mới nhất theo startedAt. Lô nào thiếu
+  // startedAt thì orderBy không trả về — bản cũ xếp chúng cuối danh sách, nên chúng chỉ
+  // lọt vào kết quả khi tổng số lô có startedAt ÍT HƠN n: đúng trường hợp đó thì lui về
+  // đọc cả collection như cũ, để kết quả y hệt.
+  // Chỉ áp cho danh sách ngắn (màn Lịch sử lô, 80 lô, mở thường xuyên). Hai chỗ lấy 400/500
+  // lô hiếm khi chạy và lúc quán còn ít lô thì truy vấn thêm lại tốn hơn — giữ như cũ.
+  if(n <= 100){
+    const snap = await fstore.collection('prep_batches_gieogieo').orderBy('startedAt','desc').limit(n).get();
+    if(snap.size >= n) return sapXep(snap.docs.map(d=>({id:d.id, ...d.data()})));
+  }
+  const all = await fstore.collection('prep_batches_gieogieo').get();
+  return sapXep(all.docs.map(d=>({id:d.id, ...d.data()})));
 }
 
 // ------------------------------------------------------------
@@ -7697,7 +7737,10 @@ async function computeDailyPLRange(startDate, endDate){
     // hiện lãi CAO hơn thực tế đúng bằng hao hụt trong ngày, không có dấu hiệu gì báo con số
     // đang sai. Giờ phân biệt rõ "đọc được, waste=0 thật" với "đọc lỗi, không biết waste bao
     // nhiêu" — cờ ok truyền xuống computeDayPL để hạ mức tin cậy thay vì giả vờ đã biết.
-    computeLedgerRealMetrics(startDate, endDate)
+    // [GIẢM-ĐỌC] Khối này chỉ dùng wasteByDate — đọc riêng dòng WASTE thay vì cả sổ
+    // (dòng CONSUMPTION của từng bill chiếm gần hết sổ mà ở đây bị bỏ đi). Cùng công thức
+    // với computeLedgerRealMetrics nên con số không đổi.
+    computeWasteByDateRange(startDate, endDate)
       .then(v => ({ ok: true, data: v }))
       .catch(err => { console.warn('[P&L] đọc ledger (waste thật) lỗi — hao hụt sẽ hiện 0 và bị đánh dấu thiếu số liệu:', err); return { ok: false, data: null }; }),
     HR_SETTINGS.useActualLaborCost
@@ -13285,7 +13328,9 @@ async function qlDoDeleteBill(id){
     qlBills = qlBills.filter(x => x.id !== id);
     qlBillOpenId = null;
     memoDropAll();
-    clearSalesCache().catch(() => {});   // doanh thu ngày đó vừa đổi, bỏ bộ đệm
+    // Doanh thu ngày đó vừa đổi, bỏ bộ đệm — chỉ đúng ngày của bill, các ngày khác không đổi.
+    const _ngayBill = /^\d{4}$/.test(String(yyyy||'')) ? `${yyyy}-${String(mm).padStart(2,'0')}-${String(dd).padStart(2,'0')}` : null;
+    (_ngayBill ? clearSalesCache(_ngayBill, _ngayBill) : clearSalesCache()).catch(() => {});
 
     const ov = document.getElementById('qlDelBillOverlay'); if(ov) ov.remove();
     toast(kq.daHoanTruocDo
@@ -13392,11 +13437,87 @@ function renderHealthPeriodNav(){
 // nếu costPerUnit thay đổi giữa kỳ thì số liệu kỳ cũ sẽ tính theo giá MỚI NHẤT, không
 // phải giá tại thời điểm phát sinh — ghi rõ trong UI, không che giấu).
 // ------------------------------------------------------------
+// ------------------------------------------------------------
+// [GIẢM-ĐỌC] HAO HỤT THEO NGÀY — chỉ đọc dòng type='WASTE'.
+// Thu hồi vốn (tới 730 ngày) và Hòa vốn (30 ngày) chỉ cần wasteByDate, nhưng trước đây
+// đọc TOÀN BỘ sổ kho của cả khoảng (mỗi bill sinh 1 dòng CONSUMPTION cho mỗi nguyên liệu),
+// tức hàng chục đến hàng trăm nghìn lượt đọc mỗi lần mở màn Hôm nay.
+// Cách tính giữ NGUYÊN như computeLedgerRealMetrics: nguyên liệu thô = |qty| × giá đúng
+// ngày; bán thành phẩm = |totalCost| đã lưu sẵn.
+// Truy vấn type + khoảng businessDate cần composite index; chưa có index thì lui về truy
+// vấn từng ngày (businessDate == ngày và type == 'WASTE' — hai điều kiện bằng, không cần
+// index riêng, giống computeDailyClosingChecklist đang dùng).
+// ------------------------------------------------------------
+const _wasteIndexMissing = {};   // coll -> true khi đã biết chưa có composite index
+async function _ledgerWasteRows(coll, startKey, endKey){
+  if(!_wasteIndexMissing[coll]){
+    try{
+      const snap = await fstore.collection(coll).where('type','==','WASTE')
+        .where('businessDate','>=',startKey).where('businessDate','<=',endKey).get();
+      return snap.docs.map(d=>d.data());
+    }catch(err){
+      if(!_histIsMissingIndex(err)) throw err;
+      _wasteIndexMissing[coll] = true;
+      console.warn(`[hao hụt] ${coll} chưa có composite index (type + businessDate) — tạm đọc từng ngày. Tạo index tại:`, _histIndexUrl(err) || err.message);
+    }
+  }
+  const keys = [];
+  const d = new Date(startKey + 'T00:00:00'), end = new Date(endKey + 'T00:00:00');
+  while(d <= end){ keys.push(dkey(d)); d.setDate(d.getDate()+1); }
+  const rows = [];
+  const CHUNK = 20;   // không bắn cả trăm truy vấn cùng lúc
+  for(let i=0; i<keys.length; i+=CHUNK){
+    const snaps = await Promise.all(keys.slice(i, i+CHUNK).map(k =>
+      fstore.collection(coll).where('businessDate','==',k).where('type','==','WASTE').get()));
+    snaps.forEach(snap => snap.forEach(doc => rows.push(doc.data())));
+  }
+  return rows;
+}
+async function computeWasteByDateRange(startDate, endDate){
+  const startKey = dkey(startDate), endKey = dkey(endDate);
+  await ensurePriceHistory();
+  const [stockRows, prepRows] = await Promise.all([
+    _ledgerWasteRows('stock_transactions_gieogieo', startKey, endKey),
+    _ledgerWasteRows('prep_transactions_gieogieo', startKey, endKey)
+  ]);
+  const wasteByDate = {};
+  const ghiNhan = (t, val) => {
+    const ngay = t && t.businessDate;
+    if(!ngay || !val) return;
+    wasteByDate[ngay] = (wasteByDate[ngay]||0) + val;
+  };
+  stockRows.forEach(t => {
+    if(t.type !== 'WASTE') return;
+    ghiNhan(t, Math.abs(Number(t.qty)||0) * itemCostOn(t.itemId, t.businessDate));
+  });
+  prepRows.forEach(t => {
+    if(t.type !== 'WASTE') return;
+    ghiNhan(t, Math.abs(Number(t.totalCost)||0));
+  });
+  return { wasteByDate };
+}
+
+// [GIẢM-ĐỌC] Tổng kết tháng gọi computeLedgerRealMetrics và computeThangKetKhoExtra CÙNG
+// LÚC trên cùng một khoảng ngày — trước đây đọc sổ kho cả tháng 2 lần. Dùng chung đúng
+// một lượt đọc khi hai lời gọi trùng khoảng và cách nhau không quá 10 giây (snapshot chỉ
+// đọc, không bị sửa), nên số liệu y như đọc riêng.
+const _stockRangeInflight = new Map();   // 'start|end' -> {p, at}
+function _stockTxRangeSnap(startKey, endKey){
+  const key = startKey + '|' + endKey;
+  const cu = _stockRangeInflight.get(key);
+  if(cu && Date.now() - cu.at < 10000) return cu.p;
+  const p = fstore.collection('stock_transactions_gieogieo')
+    .where('businessDate','>=',startKey).where('businessDate','<=',endKey).get();
+  const muc = { p, at: Date.now() };
+  _stockRangeInflight.set(key, muc);
+  p.catch(()=>{}).then(()=>setTimeout(()=>{ if(_stockRangeInflight.get(key) === muc) _stockRangeInflight.delete(key); }, 10000));
+  return p;
+}
 async function computeLedgerRealMetrics(startDate, endDate){
   const startKey = dkey(startDate), endKey = dkey(endDate);
   await ensurePriceHistory();
   const [txSnap, items, prepTxSnap] = await Promise.all([
-    fstore.collection('stock_transactions_gieogieo').where('businessDate','>=',startKey).where('businessDate','<=',endKey).get(),
+    _stockTxRangeSnap(startKey, endKey),
     loadInventoryItems(),
     // [SỬA — rà soát] TRƯỚC ĐÂY chỉ đọc stock_transactions_gieogieo, nên hao hụt BÁN
     // THÀNH PHẨM (huỷ cốt/topping đã nấu — ghi ở ledger RIÊNG prep_transactions_gieogieo,
@@ -13541,6 +13662,131 @@ const KHO_CUA_SO_NGAY = 30;      // cửa sổ đo tiêu hao & xét ngủ đông
 const KHO_DOH_CAO = 21;          // trên ngưỡng này là đang ôm hàng
 const KHO_DOH_VUA = 14;          // trong khoảng 14–21 thì nên để ý
 
+// ------------------------------------------------------------
+// [GIẢM-ĐỌC] TỔNG HỢP TIÊU HAO THEO NGÀY — ledger_day_summaries_gieogieo/stock_{ngày}
+//
+// Vốn trong kho cần tiêu hao 30 ngày (dòng CONSUMPTION), mà sổ có khoảng 1 dòng cho mỗi
+// nguyên liệu của mỗi bill — đọc lại cả 30 ngày mỗi lần mở màn Hôm nay là hàng chục
+// nghìn lượt. Ngày ĐÃ QUA gần như không đổi, nên tính 1 lần rồi lưu gọn:
+//   { v, date, builtAt, maxCreatedAt, rowCount, hasCons, cons: [{i: itemId, q: tổng |qty| CONSUMPTION}] }
+// Giá KHÔNG lưu — vẫn nhân itemCostOn(itemId, ngày) lúc đọc, nên đổi/lùi mốc giá không
+// làm bản tổng hợp sai.
+//
+// Chỉ tổng hợp ngày đã quá CACHE_BUFFER_DAYS (cùng mốc "đã chốt sổ" của bộ đệm doanh
+// thu, isCacheable) — mấy ngày gần nhất và hôm nay vẫn đọc sổ gốc, nên dòng máy POS ghi
+// lúc mất mạng rồi mới đồng bộ trong vòng vài ngày vẫn được tính đủ.
+//
+// Phát hiện ngày cũ bị ghi thêm (bổ sung bill sau đóng ngày...): sổ kho chỉ THÊM dòng,
+// không sửa/xoá, mọi chỗ ghi đều đặt createdAt = lúc ghi (ISO). Mỗi lần dùng bản tổng hợp
+// của ngày D, hỏi Firestore có dòng nào của D với createdAt MỚI HƠN dòng mới nhất đã gộp
+// (maxCreatedAt) không — limit 1, tốn 1 lượt đọc. Có → tính lại ngày đó từ sổ gốc.
+//
+// Truy vấn kiểm tra cần composite index (businessDate + createdAt). Chưa có index, hoặc
+// không đọc/ghi được collection tổng hợp → lui về đọc sổ gốc như trước, con số không đổi.
+// ------------------------------------------------------------
+const LEDGER_SUM_COLL = 'ledger_day_summaries_gieogieo';
+const LEDGER_SUM_V = 1;
+let _ledgerSumOff = false;   // true khi biết chắc không dùng được (thiếu index / thiếu quyền)
+function _dayShift(k, n){ const d = new Date(k+'T00:00:00'); d.setDate(d.getDate()+n); return dkey(d); }
+function _ledgerSumFromRows(dateKey, rows){
+  const cons = {};
+  let hasCons = false;
+  rows.forEach(t=>{
+    if(t.type !== 'CONSUMPTION') return;
+    hasCons = true;
+    if(!t.itemId) return;   // bản cũ: dòng không có itemId góp 0đ và không vào daDung
+    cons[t.itemId] = (cons[t.itemId]||0) + Math.abs(Number(t.qty)||0);
+  });
+  const maxCreatedAt = rows.reduce((m,t)=> (typeof t.createdAt === 'string' && t.createdAt > m) ? t.createdAt : m, '');
+  return { v: LEDGER_SUM_V, date: dateKey, hasCons, maxCreatedAt, rowCount: rows.length,
+           cons: Object.entries(cons).map(([i,q])=>({i, q})) };
+}
+async function _ledgerSumFresh(sum){
+  const snap = await fstore.collection('stock_transactions_gieogieo')
+    .where('businessDate','==',sum.date).where('createdAt','>',sum.maxCreatedAt || '').limit(1).get();
+  return snap.empty;
+}
+async function ledgerConsumptionStats(startKey, endKey){
+  const homNay = dkey(new Date());
+  let tieuHao = 0;
+  const ngayCoBan = new Set(), daDung = new Set();
+  const congRow = t => {       // y hệt vòng lặp cũ của computeInventoryHealth
+    if(t.type !== 'CONSUMPTION') return;
+    tieuHao += Math.abs(Number(t.qty)||0) * itemCostOn(t.itemId, t.businessDate);
+    if(t.businessDate) ngayCoBan.add(t.businessDate);
+    if(t.itemId) daDung.add(t.itemId);
+  };
+  const congSum = sum => {
+    if(sum.hasCons) ngayCoBan.add(sum.date);
+    sum.cons.forEach(x=>{ tieuHao += x.q * itemCostOn(x.i, sum.date); daDung.add(x.i); });
+  };
+  const docGoc = async (a, b) => (await fstore.collection('stock_transactions_gieogieo')
+    .where('businessDate','>=',a).where('businessDate','<=',b).get()).docs.map(d=>d.data());
+
+  // Ngày được dùng tổng hợp: đã quá CACHE_BUFFER_DAYS. Phần sau đó (vài ngày gần nhất +
+  // hôm nay) luôn đọc sổ gốc.
+  const moc = new Date(homNay+'T00:00:00'); moc.setDate(moc.getDate() - CACHE_BUFFER_DAYS - 1);
+  const ngayChotCuoi = dkey(moc);   // ngày mới nhất isCacheable()
+  const pastEnd = endKey < ngayChotCuoi ? endKey : ngayChotCuoi;
+  if(_ledgerSumOff || pastEnd < startKey){
+    (await docGoc(startKey, endKey)).forEach(congRow);
+    return { tieuHao, ngayCoBan, daDung };
+  }
+
+  // 1) Bản tổng hợp sẵn có + kiểm tra còn mới
+  const tongHop = {};   // ngày -> sum dùng được
+  try{
+    const snap = await fstore.collection(LEDGER_SUM_COLL)
+      .where(firebase.firestore.FieldPath.documentId(), '>=', 'stock_'+startKey)
+      .where(firebase.firestore.FieldPath.documentId(), '<=', 'stock_'+pastEnd).get();
+    const ung = snap.docs.map(d=>d.data()).filter(x => x && x.v === LEDGER_SUM_V && x.date && typeof x.maxCreatedAt === 'string' && Array.isArray(x.cons));
+    // Chưa có bản nào để kiểm thì vẫn thử 1 truy vấn kiểm tra (1 lượt đọc) — biết sớm là
+    // thiếu index để khỏi dựng rồi ghi tổng hợp mà không bao giờ dùng được.
+    if(!ung.length) await _ledgerSumFresh({ date: startKey, maxCreatedAt: '9999' });
+    const kq = await Promise.all(ung.map(x => _ledgerSumFresh(x).then(ok=>({x, ok}))));
+    kq.forEach(({x, ok}) => { if(ok) tongHop[x.date] = x; });
+  }catch(err){
+    _ledgerSumOff = true;
+    console.warn('[Vốn trong kho] chưa dùng được bản tổng hợp theo ngày — đọc sổ gốc như cũ.'
+      + (_histIsMissingIndex(err) ? ' Cần tạo composite index stock_transactions (businessDate + createdAt): ' + (_histIndexUrl(err) || err.message) : ''), err);
+    (await docGoc(startKey, endKey)).forEach(congRow);
+    return { tieuHao, ngayCoBan, daDung };
+  }
+
+  // 2) Ngày còn thiếu: đọc sổ gốc theo từng đoạn liền nhau, cộng vào, rồi lưu tổng hợp.
+  const thieu = [];
+  const d = new Date(startKey+'T00:00:00'), dEnd = new Date(pastEnd+'T00:00:00');
+  while(d <= dEnd){ const k = dkey(d); if(!tongHop[k]) thieu.push(k); d.setDate(d.getDate()+1); }
+  const doan = [];
+  thieu.forEach(k=>{
+    const last = doan[doan.length-1];
+    if(last && last.b === _dayShift(k, -1)) last.b = k; else doan.push({a:k, b:k});
+  });
+  const builtAt = new Date().toISOString();
+  for(const {a, b} of doan){
+    const rows = await docGoc(a, b);
+    rows.forEach(congRow);
+    const theoNgay = {}, ngayHopLe = new Set();
+    for(let k = a; k <= b; k = _dayShift(k, 1)) ngayHopLe.add(k);
+    rows.forEach(t=>{ if(t.businessDate) (theoNgay[t.businessDate] = theoNgay[t.businessDate] || []).push(t); });
+    // Có dòng mang businessDate không đúng dạng ngày (vd thiếu số 0) mà vẫn lọt vào khoảng
+    // → không lưu tổng hợp cho đoạn này, lần sau đọc sổ gốc tiếp để không sót dòng đó.
+    if(Object.keys(theoNgay).some(k => !ngayHopLe.has(k))) continue;
+    for(let k = a; k <= b; k = _dayShift(k, 1)){
+      const sum = { ..._ledgerSumFromRows(k, theoNgay[k] || []), builtAt };
+      fstore.collection(LEDGER_SUM_COLL).doc('stock_'+k).set(sum)
+        .catch(err => console.warn('[Vốn trong kho] không lưu được tổng hợp ngày', k, err));
+    }
+  }
+  Object.values(tongHop).forEach(congSum);
+
+  // 3) Phần sau ngày chốt cuối (vài ngày gần nhất + hôm nay) — sổ gốc
+  if(endKey > pastEnd){
+    (await docGoc(_dayShift(pastEnd, 1), endKey)).forEach(congRow);
+  }
+  return { tieuHao, ngayCoBan, daDung };
+}
+
 // Nhớ 5 phút: khối này đọc 30 ngày ledger + toàn bộ danh mục, mà chủ quán hay
 // nhảy qua lại Hôm nay ↔ Tài chính. Không nhớ thì mỗi lần chuyển màn là một lượt
 // đọc nặng, trong khi số liệu kho gần như không đổi trong vài phút.
@@ -13552,10 +13798,12 @@ async function computeInventoryHealth(soNgay){
   const endKey = dkey(now);
   const startKey = dkey(new Date(Date.now() - (nNgay-1)*86400000));
   await ensurePriceHistory();
-  const [items, preps, txSnap, batchSnap] = await Promise.all([
+  const [items, preps, consStats, batchSnap] = await Promise.all([
     loadInventoryItems(),
     loadPrepItems().catch(err=>{ console.warn('[Kho] không đọc được bán thành phẩm:', err); return []; }),
-    fstore.collection('stock_transactions_gieogieo').where('businessDate','>=',startKey).where('businessDate','<=',endKey).get(),
+    // [GIẢM-ĐỌC] Tiêu hao 30 ngày — ngày đã qua đọc từ bản tổng hợp theo ngày (xem
+    // ledgerConsumptionStats), chỉ hôm nay và ngày chưa có tổng hợp mới đọc sổ gốc.
+    ledgerConsumptionStats(startKey, endKey),
     // Quán chưa bật tính năng lô thì collection này chưa tồn tại — không được để nó
     // làm hỏng cả khối, chỉ mất dòng "BTP quá hạn".
     fstore.collection('prep_batches_gieogieo').where('status','==','active').get()
@@ -13580,15 +13828,7 @@ async function computeInventoryHealth(soNgay){
   // Tiêu hao định giá theo giá CỦA NGÀY tiêu hao; còn tồn kho ở trên định giá theo
   // giá HIỆN TẠI — đúng bản chất: tồn là tiền đang nằm đó bây giờ, tiêu hao là tiền
   // đã tiêu lúc đó.
-  let tieuHao = 0;
-  const ngayCoBan = new Set(), daDung = new Set();
-  txSnap.forEach(doc=>{
-    const t = doc.data();
-    if(t.type !== 'CONSUMPTION') return;
-    tieuHao += Math.abs(Number(t.qty)||0) * itemCostOn(t.itemId, t.businessDate);
-    if(t.businessDate) ngayCoBan.add(t.businessDate);
-    if(t.itemId) daDung.add(t.itemId);
-  });
+  const { tieuHao, ngayCoBan, daDung } = consStats;
   const soNgayCoBan = ngayCoBan.size;
   const tieuHaoNgay = soNgayCoBan ? tieuHao / soNgayCoBan : 0;
   const vonXoayVong = vonNL + vonBaoBi;                    // phần được đo bằng DOH
@@ -14322,7 +14562,7 @@ async function submitExpense(){
 // hoá đơn đang cầm trên tay.
 async function openExpenseActual(id){
   let e = null;
-  try{ const all = await loadExpensesAll(); e = all.find(x=>x.id===id); }
+  try{ e = await loadExpenseById(id); }   // [GIẢM-ĐỌC] đọc đúng 1 doc, không kéo cả collection
   catch(err){ showError('Không đọc được khoản chi phí: '+(err.code||err.message||err)); return; }
   if(!e){ toast('⚠️ Không tìm thấy khoản này'); return; }
   const ky = e.periodType==='period' ? `${e.startDate} → ${e.endDate}` : (e.date||'');
@@ -14346,7 +14586,7 @@ async function submitExpenseActual(id, oldAmount){
   if(amount <= 0){ toast('⚠️ Số tiền phải lớn hơn 0'); return; }
   try{
     await setExpenseActual(id, amount, oldAmount);
-    if(paid) await fstore.collection('expenses_gieogieo').doc(id).update({paidDate: paid});
+    if(paid) await _expWriteDone(fstore.collection('expenses_gieogieo').doc(id).update({paidDate: paid}));
     logAudit('update','expense',id,{amountKind:'actual', from:oldAmount, to:amount});
     closeEditSheet(true);
     const chenh = amount - oldAmount;
@@ -14359,7 +14599,7 @@ async function submitExpenseActual(id, oldAmount){
 // khoản trả trễ mấy hôm mà ghi hôm nay thì dòng tiền của cả hai ngày đều sai.
 async function openExpensePaid(id){
   let e = null;
-  try{ const all = await loadExpensesAll(); e = all.find(x=>x.id===id); }
+  try{ e = await loadExpenseById(id); }   // [GIẢM-ĐỌC] đọc đúng 1 doc, không kéo cả collection
   catch(err){ showError('Không đọc được khoản chi phí: '+(err.code||err.message||err)); return; }
   if(!e){ toast('⚠️ Không tìm thấy khoản này'); return; }
   const ky = e.periodType==='period' ? `${e.startDate} → ${e.endDate}` : (e.date||'');
@@ -16467,8 +16707,7 @@ function thangKetTrachNhiemNL(txs, items, costOf){
 // của tháng cho cả việc này lẫn "nhập hàng tháng này" bên dưới, đỡ quét sổ 2 lần.
 async function computeThangKetKhoExtra(startKey, endKey, items){
   await ensurePriceHistory();
-  const snap = await fstore.collection('stock_transactions_gieogieo')
-    .where('businessDate','>=',startKey).where('businessDate','<=',endKey).get();
+  const snap = await _stockTxRangeSnap(startKey, endKey);
   const nhapTheoItem = {};      // itemId -> {qty, value}
   const dongTheoItem = new Set(); // itemId có ít nhất 1 dòng sổ trong tháng
   const allTransactions=[];
@@ -22000,7 +22239,9 @@ async function submitPurchaseOrder(){
       // Giá đổi → giá vốn bán thành phẩm dùng nguyên liệu đó cũng đổi, và các ngày
       // đã cache phải được tính lại theo ĐÚNG mốc giá (ngày cũ vẫn ra số cũ).
       await Promise.all(doiGia.map(l=>recalcPrepCostsUsingItem(l.itemId).catch(()=>0)));
-      await invalidateSalesCache('cập nhật giá theo đơn đặt hàng');
+      // Mốc giá mới chỉ có hiệu lực TỪ ngayApDung (itemCostOn tra giá đúng ngày) — ngày
+      // trước đó vẫn ra đúng số cũ, chỉ cần tính lại từ ngayApDung trở đi.
+      await invalidateSalesCache('cập nhật giá theo đơn đặt hàng', ngayApDung);
       toast(`✅ Đã tạo mốc giá mới cho ${daGhi} nguyên liệu, áp dụng từ ${ngayApDung}`);
     }
     if(loi) showError(`${loi} nguyên liệu chưa cập nhật được giá — đơn hàng vẫn đã tạo. Vào Kho → Nguyên liệu sửa giá tay cho những món đó.`);
