@@ -14968,7 +14968,12 @@ function _resetPinAttempts(fieldId) {
 // "một mình trong ca" bên dưới không bao giờ đúng và nhân viên sẽ phải gõ PIN ở
 // từng bước. Phiên kết ca ký hộ đúng các ô của pipeline (danh tính đã xác thực
 // bằng PIN lúc mở phiên và sẽ được ký lại ở bước cuối). Các ô khác không đụng tới.
+// Ô PIN luôn phải gõ, không bao giờ tự điền người đang trong ca. Check-in/Check-out là
+// chính việc xác nhận ai vào/ra ca: tự điền người đang một mình trong ca thì người mới
+// tới phải bấm "Đổi người" mới check-in được, còn bấm Check-out thì dễ check-out nhầm.
+const PIN_FIELDS_ALWAYS_ASK = new Set(['checkin']);
 function currentSignerPOS(fieldId) {
+  if (fieldId && PIN_FIELDS_ALWAYS_ASK.has(fieldId)) return null;
   if (_closeSession && fieldId && CLOSE_PIPELINE_PIN_FIELDS.has(fieldId)) {
     return closeSessionEmployeePOS();
   }
@@ -16016,27 +16021,62 @@ function _employeeShiftsOf(employeeId) {
 function isEmployeeCheckedInToday(employeeId) {
   return _employeeShiftsOf(employeeId).some(s => !s.checkedOutAt);
 }
+// ---------- Kiểu dùng chung cho màn Ca làm việc ----------
+// Đồng bộ với các màn đã làm lại (Nấu chế biến, Quét mở/hết): tiêu đề đậm to, nút bo tròn
+// cao 56px chữ 16px, icon vẽ bằng SVG thay cho emoji.
+const CA_ICONS = {
+  login:  '<path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4"/><path d="M10 17l5-5-5-5"/><path d="M15 12H3"/>',
+  door:   '<path d="M4 21h16"/><path d="M6 21V4a1 1 0 011-1h10a1 1 0 011 1v17"/><circle cx="14.5" cy="12" r="1" fill="currentColor"/>',
+  key:    '<circle cx="8" cy="15" r="4"/><path d="M10.8 12.2L20 3"/><path d="M17 6l3 3"/><path d="M15 8l2 2"/>',
+  clock:  '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  check:  '<path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 14l2 2 4-4"/>',
+  list:   '<path d="M8 6h13M8 12h13M8 18h13"/><circle cx="3.5" cy="6" r="1" fill="currentColor"/><circle cx="3.5" cy="12" r="1" fill="currentColor"/><circle cx="3.5" cy="18" r="1" fill="currentColor"/>',
+  swap:   '<path d="M7 4L3 8l4 4"/><path d="M3 8h14"/><path d="M17 20l4-4-4-4"/><path d="M21 16H7"/>',
+  lock:   '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/>',
+  alert:  '<circle cx="12" cy="12" r="9"/><path d="M12 7v6"/><circle cx="12" cy="16.5" r="1" fill="currentColor"/>'
+};
+function caIcon(name, size) {
+  return `<svg width="${size || 20}" height="${size || 20}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;">${CA_ICONS[name] || ''}</svg>`;
+}
+function caTitle(text, extra) {
+  return `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;">
+      <div style="font-size:19px;font-weight:800;color:var(--td);">${text}</div>${extra || ''}</div>`;
+}
+// kind: 'primary' (nền màu chính), 'plain' (nền trắng viền xám), 'danger' (nền đỏ nhạt)
+function caBtn(onclick, icon, label, kind, extraStyle) {
+  const st = kind === 'primary' ? 'background:var(--gd);color:#fff;border:none;box-shadow:0 4px 12px rgba(226,58,93,.3);'
+    : kind === 'danger' ? 'background:#fee2e2;color:#b91c1c;border:2px solid #fca5a5;'
+    : 'background:#fff;color:var(--td);border:2px solid #e6e1d2;';
+  return `<button onclick="${onclick}" style="width:100%;min-height:56px;display:flex;align-items:center;justify-content:center;gap:9px;padding:0 16px;border-radius:99px;${st}font-family:'Google Sans',sans-serif;font-size:16px;font-weight:800;cursor:pointer;${extraStyle || ''}">${icon ? caIcon(icon) : ''}${label}</button>`;
+}
+function caInitials(name) {
+  const w = String(name || '').trim().split(/\s+/).filter(Boolean);
+  return w.length ? w[w.length - 1][0].toUpperCase() : '?';
+}
+
 async function renderCheckinBlock() {
   const box = document.getElementById('checkinBlock');
   showLoading(box);
   await loadEmployeeShiftsTodayCache();
   const checkedInList = _employeeShiftsTodayCache.filter(s => !s.checkedOutAt);
+  const hm = iso => new Date(iso).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
   box.innerHTML = `
-    <div class="wal-section" style="margin:0 0 14px;">
-      <div class="wal-section-title">Check-in / Check-out hôm nay</div>
+    <div class="wal-section" style="margin:0 0 14px;padding:18px;">
+      ${caTitle('Check-in / Check-out', `<span style="font-size:13px;font-weight:800;color:var(--gd);background:var(--gl);border-radius:999px;padding:4px 10px;">${checkedInList.length} đang trong ca</span>`)}
       ${checkedInList.length ? `
-        <div style="margin:8px 0;">
-          ${checkedInList.map(s => `
-            <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #f0ede2;">
-              <span style="font-size:13.5px;font-weight:600;color:var(--td);">${s.employeeName}</span>
-              <span style="font-size:11.5px;color:#999;">Vào lúc ${new Date(s.checkedInAt).toLocaleTimeString('vi-VN', {hour:'2-digit',minute:'2-digit'})}</span>
+        <div style="margin-bottom:12px;">
+          ${checkedInList.map((s, i) => `
+            <div style="display:flex;align-items:center;gap:12px;padding:10px 0;${i ? 'border-top:1px solid #F0EDE6;' : ''}">
+              <span style="width:40px;height:40px;border-radius:50%;background:#F6F4EF;color:var(--td);display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:800;flex-shrink:0;">${escHtmlPos(caInitials(s.employeeName))}</span>
+              <span style="flex:1;min-width:0;font-size:16px;font-weight:800;color:var(--td);">${escHtmlPos(s.employeeName || '')}</span>
+              <span style="font-size:13px;color:#8A8A90;white-space:nowrap;">Vào ${hm(s.checkedInAt)}</span>
             </div>`).join('')}
         </div>
-      ` : `<div style="font-size:12.5px;color:#bbb;margin:6px 0 10px;">Chưa có ai check-in.</div>`}
+      ` : `<div style="font-size:14px;color:#9A9AA0;margin:0 0 12px;">Chưa có ai check-in.</div>`}
       ${renderPinInput('checkin', 'Mã PIN nhân viên')}
-      <div style="display:flex;gap:8px;margin-top:8px;">
-        <button onclick="doCheckIn()" style="flex:1;padding:14px;background:var(--gd);color:#fff;border:none;border-radius:14px;font-weight:700;font-size:14px;cursor:pointer;">✅ Check-in</button>
-        <button onclick="doCheckOut()" style="flex:1;padding:14px;background:#fff;color:var(--gd);border:1.5px solid var(--gd);border-radius:14px;font-weight:700;font-size:14px;cursor:pointer;">🚪 Check-out</button>
+      <div style="display:flex;gap:10px;margin-top:12px;">
+        ${caBtn('doCheckIn()', 'login', 'Check-in', 'primary', 'flex:1;')}
+        ${caBtn('doCheckOut()', 'door', 'Check-out', 'plain', 'flex:1;')}
       </div>
     </div>
   `;
@@ -16633,7 +16673,7 @@ function renderShiftDashboard() {
   if (closing && closing.status === 'closed') {
     box.innerHTML = renderStaleShiftWarning() + `
       <div style="text-align:center;padding:20px 10px;">
-        <div style="font-size:32px;margin-bottom:8px;">🔒</div>
+        <div style="display:flex;justify-content:center;margin-bottom:10px;"><span style="width:56px;height:56px;border-radius:18px;background:#F6F4EF;color:var(--td);display:flex;align-items:center;justify-content:center;">${caIcon('lock', 26)}</span></div>
         <div style="font-weight:700;font-size:15px;color:var(--td);margin-bottom:6px;">Đã đóng ngày hôm nay</div>
         <div style="font-size:12.5px;color:#999;">Đóng lúc ${new Date(closing.closedAt).toLocaleTimeString('vi-VN')}</div>
         ${closing.closeDurationMin != null ? `<div style="font-size:12.5px;color:#999;margin-top:3px;">Kết ca mất <b style="color:var(--td);">${closing.closeDurationMin} phút</b></div>` : ''}
@@ -16663,17 +16703,27 @@ function renderShiftDashboard() {
   if (closing && cashStepDone(closing.status)) { proceedAfterCashPass(); return; }
   box.innerHTML = renderStaleShiftWarning() + renderSegmentBlockPOS() + `
     ${closing && closing.reopeningAfterSaleAt && !closing.cashPassedAt ? '<div class="kc-sub" style="margin-bottom:14px;color:#a32946;font-weight:700;">Có bill mới · Cần đối soát lại trước khi đóng ngày.</div>' : ''}
-    <div class="wal-section" style="margin:0 0 14px;">
-      <div class="wal-section-title">Trạng thái ca</div>
-      <div style="font-size:13.5px;color:var(--td);">Đã mở ca lúc ${new Date(opening.createdAt).toLocaleTimeString('vi-VN')}</div>
-      <div style="font-size:12px;color:#999;margin-top:2px;">Tiền quỹ đầu ca: ${Number(opening.openingCash).toLocaleString('vi-VN')}đ</div>
-      ${closing && closing.attempts && closing.attempts.length ? `<div style="font-size:11.5px;color:#c0392b;margin-top:6px;">Đã thử đối soát tiền mặt ${closing.attempts.length} lần, chưa khớp.</div>` : ''}
+    <div class="wal-section" style="margin:0 0 16px;padding:18px;">
+      ${caTitle('Trạng thái ca', `<span style="display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:800;color:#15803d;background:#dcfce7;border-radius:999px;padding:5px 11px;"><span style="width:8px;height:8px;border-radius:50%;background:#16a34a;"></span>Đang mở ca</span>`)}
+      <div style="display:flex;justify-content:space-between;align-items:baseline;padding:6px 0;">
+        <span style="font-size:14.5px;color:#8A8A90;">Mở ca lúc</span>
+        <span style="font-size:17px;font-weight:800;color:var(--td);">${new Date(opening.createdAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;padding:6px 0;">
+        <span style="font-size:14.5px;color:#8A8A90;">Tiền quỹ đầu ca</span>
+        <span style="font-size:17px;font-weight:800;color:var(--td);">${Number(opening.openingCash).toLocaleString('vi-VN')}đ</span>
+      </div>
+      ${closing && closing.attempts && closing.attempts.length ? `<div style="font-size:13px;font-weight:700;color:#c0392b;margin-top:8px;">Đã thử đối soát tiền mặt ${closing.attempts.length} lần, chưa khớp.</div>` : ''}
     </div>
-    <button onclick="renderOpeningChecklist()" style="width:100%;padding:14px;background:${_openChecklistBlocking ? '#fee2e2' : '#fff'};color:${_openChecklistBlocking ? '#c0392b' : 'var(--gd)'};border:1.5px solid ${_openChecklistBlocking ? '#fca5a5' : 'var(--gd)'};border-radius:14px;font-weight:700;font-size:14px;cursor:pointer;margin-bottom:10px;">${_openChecklistBlocking ? '🚫 Việc đầu ca — CHƯA XONG, chưa bán được' : '📋 Việc đầu ca'}</button>
-    <button onclick="renderShiftCloseReview()" style="width:100%;padding:14px;background:#fff;color:var(--gd);border:1.5px solid var(--gd);border-radius:14px;font-weight:700;font-size:14px;cursor:pointer;margin-bottom:10px;">📋 Rà soát thu/chi trong ngày</button>
-    <button onclick="openHandoverPOS('manual')" style="width:100%;padding:14px;background:#fff;color:var(--gd);border:1.5px solid var(--gd);border-radius:14px;font-weight:700;font-size:14px;cursor:pointer;margin-bottom:10px;">🤝 Giao ca — đếm tiền bàn giao</button>
-    <button onclick="beginCloseShiftPOS()" style="width:100%;padding:14px;background:var(--gd);color:#fff;border:none;border-radius:14px;font-weight:700;font-size:15px;cursor:pointer;">🔒 Kết ca — Đối soát tiền mặt</button>
-    <div style="font-size:11px;color:#bbb;text-align:center;margin-top:7px;">Phải check-out hết mọi người mới kết ca được.</div>
+    <div style="display:flex;flex-direction:column;gap:10px;">
+      ${_openChecklistBlocking
+        ? caBtn('renderOpeningChecklist()', 'alert', 'Việc đầu ca chưa xong, chưa bán được', 'danger')
+        : caBtn('renderOpeningChecklist()', 'check', 'Việc đầu ca', 'plain')}
+      ${caBtn('renderShiftCloseReview()', 'list', 'Rà soát thu/chi trong ngày', 'plain')}
+      ${caBtn("openHandoverPOS('manual')", 'swap', 'Giao ca, đếm tiền bàn giao', 'plain')}
+      ${caBtn('beginCloseShiftPOS()', 'lock', 'Kết ca, đối soát tiền mặt', 'primary', 'margin-top:4px;')}
+    </div>
+    <div style="font-size:13px;color:#9A9AA0;text-align:center;margin-top:10px;">Phải check-out hết mọi người mới kết ca được.</div>
   `;
 }
 
@@ -19753,11 +19803,16 @@ function renderSegmentBlockPOS() {
   if (!seg) return '';
   const nguoiKhac = _employeeShiftsTodayCache.filter(s => !s.checkedOutAt && s.employeeId !== seg.custodianId);
   return `
-    <div class="wal-section" style="margin:0 0 14px;">
-      <div class="wal-section-title">Người giữ két</div>
-      <div style="font-size:14px;font-weight:700;color:var(--td);">${seg.custodianName || '—'}</div>
-      <div style="font-size:12px;color:#999;margin-top:3px;">Đoạn ${seg.seq}${seg.seq > 1 ? ` · nhận ${(Number(seg.startCash) || 0).toLocaleString('vi-VN')}đ lúc ${new Date(seg.startAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}` : ' · từ lúc mở ca'}</div>
-      ${nguoiKhac.length ? `<div style="font-size:11.5px;color:#999;margin-top:4px;">Cùng ca: ${nguoiKhac.map(s => s.employeeName).join(', ')}</div>` : ''}
+    <div class="wal-section" style="margin:0 0 14px;padding:18px;">
+      ${caTitle('Người giữ két')}
+      <div style="display:flex;align-items:center;gap:12px;">
+        <span style="width:48px;height:48px;border-radius:15px;background:var(--gl);color:var(--gd);display:flex;align-items:center;justify-content:center;flex-shrink:0;">${caIcon('key', 24)}</span>
+        <div style="min-width:0;">
+          <div style="font-size:19px;font-weight:800;color:var(--td);line-height:1.25;">${escHtmlPos(seg.custodianName || '—')}</div>
+          <div style="font-size:13px;color:#8A8A90;margin-top:3px;">Đoạn ${seg.seq}${seg.seq > 1 ? ` · nhận ${(Number(seg.startCash) || 0).toLocaleString('vi-VN')}đ lúc ${new Date(seg.startAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}` : ' · từ lúc mở ca'}</div>
+        </div>
+      </div>
+      ${nguoiKhac.length ? `<div style="font-size:13px;color:#8A8A90;margin-top:12px;padding-top:12px;border-top:1px solid #F0EDE6;">Cùng ca: <b style="color:var(--td);">${nguoiKhac.map(s => escHtmlPos(s.employeeName)).join(', ')}</b></div>` : ''}
     </div>`;
 }
 
