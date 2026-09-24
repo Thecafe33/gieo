@@ -1605,6 +1605,16 @@ html.tab-ui:not(.nav-off) .sidebar{background:#F2F2F7;border-right:1px solid rgb
 .k2-empty{border-radius:28px;border-style:solid;border-color:transparent;box-shadow:0 12px 32px rgba(0,0,0,.05);}
 .nl-actions,.k2-act{border-top-color:rgba(60,60,67,.1);}
 .k2-card:active{transform:scale(.99);}
+.nl-grid.btp{grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:14px;}
+.btp .nl-card{padding:16px 18px 12px;gap:8px;border-radius:24px;}
+.btp .nl-name{font-size:16px;}
+.btp .btp-code{display:block;font-size:12px;font-weight:700;color:var(--gt);letter-spacing:.04em;margin-bottom:2px;}
+.btp .nl-stock b{font-size:18px;}
+.btp .nl-stock span{font-size:12px;}
+.btp .nl-meta{font-size:13px;}
+.btp .nl-actions{padding-top:8px;}
+.btp .nl-actions .btn.sm{min-height:40px;}
+.btp .nl-actions .iconbtn{width:40px;height:40px;}
 </style>
 </head>
 <body>
@@ -19680,6 +19690,37 @@ function prepShelfLabel(p){
   if(t==='endOfDay') return 'HSD: cuối ca';
   return 'Không hạn';
 }
+// [BTP-UI] Danh sách Bán thành phẩm dùng cùng kiểu thẻ với tab Nguyên liệu, bản gọn hơn (.btp).
+function btpGridHtml(){
+  if(!PREP_ITEMS.length) return '<div class="muted">Chưa có thành phẩm chế biến nào</div>';
+  return `<div class="nl-grid btp">${PREP_ITEMS.map(p=>{
+    const u = escapeHtmlAttr(p.unit||'');
+    const tags = [
+      `<span class="tier tier-blue">${prepShelfLabel(p)}</span>`,
+      Number(p.prepTimeMinutes)>0 ? `<span class="tier tier-blue">Nấu ~${p.prepTimeMinutes} phút</span>` : '',
+      (p.vesselIds||[]).length ? `<span class="tier tier-green">Cân bằng ${p.vesselIds.length} dụng cụ</span>`
+        : (VESSELS.length && vesselUnitSupported(p.unit) ? '<span class="tier tier-amber">Chưa gắn dụng cụ cân</span>' : '')
+    ].filter(Boolean).join('');
+    const meta = [
+      `1 mẻ ra ${fmtNum(p.batchYield,0)} ${u}`,
+      `${fmtUnitPrice(p.costPerUnit)}/${u}`,
+      Number(p.dailyTarget)>0 ? `Cần/ngày ${fmtNum(p.dailyTarget,0)} ${u}` : ''
+    ].filter(Boolean).join(' · ');
+    return `<div class="nl-card">
+      <div class="nl-head">
+        <div class="nl-name">${p.code?`<span class="btp-code">${escapeHtmlAttr(p.code)}</span>`:''}${escapeHtmlAttr(p.name||'')}</div>
+        <div class="nl-stock"><b>${fmtNum(p.currentStock,1)} ${u}</b><span>đang tồn</span></div>
+      </div>
+      <div class="nl-tags">${tags}</div>
+      <div class="nl-meta">${meta}</div>
+      <div class="nl-actions">
+        <button class="btn outline sm" onclick="prepStartEdit('${p.id}')">${ic('pencil',15)} Sửa</button>
+        <button class="iconbtn nl-sp" onclick="openPrepHistory('${p.id}')" title="Lịch sử biến động tồn">${ic('clock')}</button>
+        <button class="iconbtn" onclick="doDeletePrepItem('${p.id}')" title="Xoá bán thành phẩm">${ic('x')}</button>
+      </div>
+    </div>`;
+  }).join('')}</div>`;
+}
 async function renderKhoPrep(){
   const box = document.getElementById('khoBody');
   showLoading(box);
@@ -19763,25 +19804,16 @@ async function renderKhoPrep(){
 
       <button class="btn" style="margin-top:10px" onclick="submitPrepItem()">${editingPrepId?ic('save',15)+' Lưu thay đổi':'Thêm thành phẩm'}</button>
       <button class="btn outline" style="margin-top:8px" onclick="prepResetForm()">Huỷ</button>
-    </div>` : `<button class="btn" onclick="prepStartNew()">+ Thêm thành phẩm chế biến</button>`;
+    </div>` : `
+    <div class="nl-top">
+      <div class="nl-title">Bán thành phẩm <span class="nl-pill">${PREP_ITEMS.length}</span></div>
+      <button class="btn nl-add" onclick="prepStartNew()">+ Bán thành phẩm mới</button>
+    </div>`;
 
   box.innerHTML = `
     ${formHtml}
-    <div class="sec-title">Danh sách thành phẩm (${PREP_ITEMS.length})</div>
-    ${PREP_ITEMS.length ? PREP_ITEMS.map(p=>`
-      <div class="litem">
-        <div class="li-l">
-          <div>${escapeHtmlAttr(p.code||'')} · ${escapeHtmlAttr(p.name||'')}</div>
-          <div>Tồn <b>${fmtNum(p.currentStock,1)} ${escapeHtmlAttr(p.unit||'')}</b> · 1 mẻ ra ${fmtNum(p.batchYield,0)} ${escapeHtmlAttr(p.unit||'')} · ${fmtUnitPrice(p.costPerUnit)}/${escapeHtmlAttr(p.unit||'')}</div>
-          <div>${prepShelfLabel(p)}${Number(p.prepTimeMinutes)>0 ? ' · Nấu ~'+p.prepTimeMinutes+' phút' : ''}${Number(p.dailyTarget)>0 ? ' · Cần/ngày '+fmtNum(p.dailyTarget,0)+' '+escapeHtmlAttr(p.unit||'') : ''}${(p.vesselIds||[]).length ? ' · ⚖️ Cân bằng '+p.vesselIds.length+' dụng cụ'
-             : (VESSELS.length && vesselUnitSupported(p.unit) ? ' · <span style="color:var(--warn);font-weight:600">chưa gắn dụng cụ cân</span>' : '')}</div>
-        </div>
-        <div class="li-r">
-          <button class="iconbtn" onclick="openPrepHistory('${p.id}')" title="Lịch sử biến động tồn">${ic('clock')}</button>
-          <button class="iconbtn" onclick="prepStartEdit('${p.id}')">${ic('pencil')}</button>
-          <button class="iconbtn" onclick="doDeletePrepItem('${p.id}')">${ic('x')}</button>
-        </div>
-      </div>`).join('') : '<div class="muted">Chưa có thành phẩm chế biến nào</div>'}
+    ${prepDraft ? `<div class="sec-title">Danh sách thành phẩm (${PREP_ITEMS.length})</div>` : ''}
+    ${btpGridHtml()}
   `;
   if(prepDraft){ renderPrepEditor(); renderPrepVesselPicker(); }
 }
