@@ -715,19 +715,21 @@ body.assist-main-on .toast{bottom:calc(100px + var(--assist-h, 0px) + 10px);}
 
 /* ---------- [MỚI] Chế biến — thẻ "Lô đang còn" kiểu hiện đại (dùng bảng màu ds-),
    thay cho hàng dài lộ hết mọi lô cũ trước khi tới được ô chọn thành phẩm cần nấu. */
-.pbt-card{background:#fff;border:1px solid var(--ds-line);border-radius:16px;padding:12px 14px;margin-bottom:8px;cursor:pointer;}
+.pbt-card{background:#fff;border:1.5px solid var(--ds-line);border-radius:22px;padding:16px;margin-top:12px;cursor:pointer;box-shadow:0 2px 10px rgba(35,28,26,.05);}
 .pbt-card-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;}
-.pbt-code{font-size:13.5px;font-weight:800;color:var(--td);}
-.pbt-name{font-size:12px;font-weight:600;color:var(--ds-ink60);margin-top:1px;}
-.pbt-meta{font-size:11px;color:var(--ds-ink40);margin-top:6px;line-height:1.65;}
+.pbt-code{display:inline-block;font-size:14px;font-weight:800;letter-spacing:.6px;color:var(--td);background:#F2F2F4;border-radius:8px;padding:3px 9px;margin-top:7px;}
+.pbt-name{font-size:20px;font-weight:800;color:var(--td);line-height:1.25;}
+.pbt-meta{font-size:13px;color:var(--ds-ink40);margin-top:8px;line-height:1.6;}
 .pbt-meta b{color:var(--ds-ink60);font-weight:700;}
-.pbt-qty{font-size:14.5px;font-weight:800;color:var(--gd);white-space:nowrap;}
-.pbt-actions{display:flex;gap:6px;margin-top:10px;}
-.pbt-btn{display:flex;align-items:center;justify-content:center;gap:5px;flex:1;padding:9px 8px;min-height:38px;
-  border-radius:11px;border:1.5px solid var(--ds-line);background:var(--ds-card2);color:var(--ds-ink60);
-  font-family:'Google Sans',sans-serif;font-size:12px;font-weight:700;cursor:pointer;}
-.pbt-btn.pbt-edit{border-color:#f3c9c9;background:#fef2f2;color:#b91c1c;}
-.pbt-btn.pbt-print{border-color:#f6c9d4;background:#fdecf0;color:var(--gd);}
+.pbt-qty{font-size:18px;font-weight:800;color:var(--gd);white-space:nowrap;}
+.pbt-actions{display:flex;gap:10px;margin-top:14px;}
+/* Cùng cỡ với nút Huỷ mẻ/Hoàn thành của thẻ "Đang chế biến": bo tròn hẳn, cao 56px, chữ 16px. */
+.pbt-btn{display:flex;align-items:center;justify-content:center;gap:7px;flex:1;padding:0 12px;min-height:56px;
+  border-radius:99px;border:2px solid #e6e1d2;background:#fff;color:var(--td);
+  font-family:'Google Sans',sans-serif;font-size:16px;font-weight:800;cursor:pointer;}
+.pbt-btn svg{width:18px;height:18px;}
+.pbt-btn.pbt-edit{border-color:#e6e1d2;background:#fff;color:var(--td);}
+.pbt-btn.pbt-print{flex:1.6;border:none;background:var(--gd);color:#fff;box-shadow:0 4px 12px rgba(226,58,93,.3);}
 .pbt-expand{width:100%;margin-top:2px;padding:12px;min-height:44px;border-radius:14px;border:1.5px dashed var(--ds-line);
   background:var(--ds-card2);color:var(--ds-ink60);font-family:'Google Sans',sans-serif;font-size:12.5px;font-weight:700;
   cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;}
@@ -1483,7 +1485,7 @@ body.assist-main-on .toast{bottom:calc(100px + var(--assist-h, 0px) + 10px);}
 <div id="prepBatchScreen" class="screen">
   <div class="hh">
     <span class="hht">NẤU CHẾ BIẾN</span>
-    <button class="btn-close-screen" onclick="showScreen('khoScreen')">
+    <button class="btn-close-screen" id="prepHeadBtn" onclick="prepHeadBtnClick()" aria-label="Đóng">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
     </button>
   </div>
@@ -10833,6 +10835,25 @@ let PREP_BATCHES_CACHE_POS = [];   // lô đang 'cooking' hoặc 'active'
 // chọn thành phẩm cần nấu. Bấm "Xem thêm" mới bung hết. Reset về false mỗi lần mở
 // lại màn (openPrepBatchScreen) — không cần nhớ qua phiên khác.
 let _prepActiveListExpanded = false;
+const PREP_ACTIVE_PREVIEW = 2;   // số lô gần nhất hiện khi chưa bấm "Xem tất cả"
+// Nút góc trên màn Nấu chế biến. Ở danh sách chính là X về tab Kho; ở mọi trang con
+// (tem, sửa, in, công thức, hoàn thành, huỷ, cân...) đổi thành ← về lại danh sách chính,
+// để bấm nhầm không văng ra tận tab Kho. `fn` là đúng thao tác "quay lại" của trang đó.
+let _prepBackFn = null;
+function prepSetBack(fn) {
+  _prepBackFn = fn || null;
+  const btn = document.getElementById('prepHeadBtn');
+  if (!btn) return;
+  btn.setAttribute('aria-label', fn ? 'Quay lại' : 'Đóng');
+  btn.innerHTML = fn
+    ? '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>'
+    : '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>';
+}
+function prepHeadBtnClick() {
+  const fn = _prepBackFn;
+  if (fn) fn(); else showScreen('khoScreen');
+}
+
 function togglePrepActiveList() { _prepActiveListExpanded = !_prepActiveListExpanded; renderPrepBatchForm(); }
 // Thời gian chế biến thật (từ lúc bắt đầu tới lúc hoàn thành) — hiển thị ở "Lô đang
 // còn" để nhân viên biết mẻ đó nấu mất bao lâu, không chỉ mỗi mốc giờ hoàn thành.
@@ -10897,6 +10918,7 @@ async function openPrepBatchScreen() {
   showScreen('prepBatchScreen');
   _prepActiveListExpanded = false;
   const box = document.getElementById('prepBatchBody');
+  prepSetBack(null);
   showLoading(box);
   try {
     const [prepSnap, itemSnap] = await Promise.all([
@@ -11023,6 +11045,7 @@ function prepUnitInfoPOS(b) {
 
 function renderPrepBatchForm() {
   const box = document.getElementById('prepBatchBody');
+  prepSetBack(null);
   const p = PREP_ITEMS_CACHE_POS.find(x => x.id === prepBatchState.prepId);
   if (!p) { box.innerHTML = '<div style="text-align:center;padding:40px;color:#bbb">Chọn thành phẩm</div>'; return; }
   const nameOf = id => (KHO_ITEMS_CACHE.find(x => x.id === id) || {}).name || '(nguyên liệu đã xoá)';
@@ -11097,15 +11120,20 @@ function renderPrepBatchForm() {
 
     ${active.length ? `
     <div class="wal-section" style="margin:0 0 14px;">
-      <div class="wal-section-title">Lô đang còn (${active.length})</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+        <div style="font-size:20px;font-weight:800;color:var(--td);">Lô đang còn <span style="display:inline-block;min-width:28px;text-align:center;font-size:14px;font-weight:800;color:var(--gd);background:var(--gl);border-radius:999px;padding:3px 9px;margin-left:4px;vertical-align:3px;">${active.length}</span></div>
+        ${active.length > PREP_ACTIVE_PREVIEW ? `<button onclick="togglePrepActiveList()" style="flex-shrink:0;display:flex;align-items:center;gap:5px;height:42px;padding:0 15px;background:#F6F4EF;color:var(--td);border:none;border-radius:999px;font-family:'Google Sans',sans-serif;font-size:14.5px;font-weight:800;cursor:pointer;">
+          ${_prepActiveListExpanded ? 'Thu gọn' : 'Xem tất cả'}
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="${_prepActiveListExpanded ? 'transform:rotate(180deg);' : ''}"><path d="M6 9l6 6 6-6"/></svg>
+        </button>` : ''}
+      </div>
       ${(() => {
         // [MỚI] Nấu nhiều BTP dồn lại có thể tới 40-50 lô còn hạn — liệt kê hết là một
         // danh sách dài ngoằn phải cuộn qua trước khi tới được ô chọn thành phẩm cần
         // nấu bên dưới. Mặc định chỉ hiện 5 lô hoàn thành GẦN NHẤT, bấm "Xem thêm" mới
         // bung hết — luôn sắp theo đúng thời gian chế biến (finishedAt), mới nhất trước.
         const sorted = active.slice().sort((x, y) => String(y.finishedAt || '').localeCompare(String(x.finishedAt || '')));
-        const shown = _prepActiveListExpanded ? sorted : sorted.slice(0, 5);
-        const con = sorted.length - shown.length;
+        const shown = _prepActiveListExpanded ? sorted : sorted.slice(0, PREP_ACTIVE_PREVIEW);
         return `
         ${shown.map(b => {
           const nvNgan = (b.finishedBy || '').trim();
@@ -11114,8 +11142,8 @@ function renderPrepBatchForm() {
         <div class="pbt-card" onclick="showPrepLabelCard('${b.id}')">
           <div class="pbt-card-top">
             <div style="min-width:0;">
-              <div class="pbt-code">${b.batchCode || ''}</div>
-              <div class="pbt-name">${b.prepName || ''}</div>
+              <div class="pbt-name">${escHtmlPos(b.prepName || '')}</div>
+              ${b.batchCode ? `<div class="pbt-code">${escHtmlPos(b.batchCode)}</div>` : ''}
               <div class="pbt-meta">
                 ${cookDur ? `Nấu <b>${cookDur}</b> · ` : ''}${fmtDateTimeShort(b.finishedAt)}<br>
                 HSD <b>${prepExpiryLabel(b)}</b>${nvNgan ? ` · Người nấu <b>${escHtmlPos(nvNgan)}</b>` : ''}
@@ -11136,15 +11164,7 @@ function renderPrepBatchForm() {
           </div>
         </div>`;
         }).join('')}
-        ${con > 0 ? `
-        <button class="pbt-expand" onclick="togglePrepActiveList()">
-          Xem thêm ${con} lô
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
-        </button>` : (_prepActiveListExpanded && sorted.length > 5 ? `
-        <button class="pbt-expand open" onclick="togglePrepActiveList()">
-          Thu gọn
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
-        </button>` : '')}`;
+`;
       })()}
       <div style="font-size:11px;color:#bbb;margin-top:8px;">Bấm vào lô để xem lại nội dung tem; bấm Sửa để sửa định lượng thu được nếu ghi sai lúc Hoàn thành (cần mã quản lý); bấm In tem để in lại khi bị bong/mờ hoặc khi chia lô sang hũ khác.</div>
     </div>` : ''}
@@ -11444,6 +11464,7 @@ async function prepReconRecoverOrphan(itemId) {
 }
 function renderPrepReconPreflight() {
   const st=prepReconGate,box=document.getElementById('prepBatchBody');if(!st||!box)return;
+  prepSetBack(() => { prepReconGate = null; renderPrepBatchForm(); });
   box.innerHTML=`<div class="wal-section" style="--gd:#0062AD;--gl:#EAF3FA;border:1.5px solid #0062AD;background:#EAF3FA">
     <div class="wal-section-title" style="color:#0062AD">Cân trước khi lấy NL</div>
     <div style="font-size:12px;color:#345">Chỉ các mã có nguy cơ thiếu hoặc còn ≤10% bao. Cân hoặc đếm xong mới bắt đầu mẻ.</div>
@@ -11838,6 +11859,7 @@ async function openPrepReconForm(batchId,itemId) {
     const multiCode=row.units.filter(u=>u.id!=='__aggregate').length>1;
     const palette='#0062AD';
     const box=document.getElementById('prepBatchBody');
+    prepSetBack(openPrepBatchScreen);
     box.innerHTML=`<div class="kc-title">Đối chiếu nguyên liệu</div>
     <div class="kc-card" style="margin:0 0 12px">
       <div style="font-size:24px;font-weight:900;color:#1f1f1f">${escHtmlPos(it.name||'Nguyên liệu')}</div>
@@ -12206,6 +12228,7 @@ async function startPrepBatchGate() {
 
 function renderPrepStartScanGate() {
   const box = document.getElementById('prepBatchBody');
+  prepSetBack(cancelPrepStartGate);
   const st = prepStartScanState;
   if (!st || !box) { renderPrepBatchForm(); return; }
   const p = PREP_ITEMS_CACHE_POS.find(x => x.id === st.prepId);
@@ -12774,6 +12797,7 @@ function openPrepFinishForm(batchId) {
   const suggest = round2((Number(p && p.batchYield) || 0) * (Number(b.batchRatio) || 1));
   _prepFinishSuggest = suggest;   // giữ trong biến, chỉ hiện SAU khi nhân viên đã gõ số
   const box = document.getElementById('prepBatchBody');
+  prepSetBack(openPrepBatchScreen);
   box.innerHTML = `
     <div class="wal-section" style="margin:0 0 14px;">
       <div class="wal-section-title">Hoàn thành: ${b.prepName || ''}</div>
@@ -12835,6 +12859,7 @@ function openPrepRecipeView(batchId) {
   const nameOf = id => (KHO_ITEMS_CACHE.find(x => x.id === id) || {}).name || '(nguyên liệu đã xoá)';
   const unitOf = id => (KHO_ITEMS_CACHE.find(x => x.id === id) || {}).unit || '';
   const box = document.getElementById('prepBatchBody');
+  prepSetBack(renderPrepBatchForm);
   box.innerHTML = `
     <div class="wal-section" style="margin:0 0 14px;border:1.5px solid #fcd34d;background:#fffbeb;">
       <div class="wal-section-title" style="color:#92400e;">${b.prepName || ''}</div>
@@ -12940,6 +12965,7 @@ function openPrepCancelForm(batchId) {
      </div>`).join('');
   const chip = txt => `<button onclick="prepCancelPickReason('${txt}')" style="padding:8px 12px;border-radius:11px;border:1.5px solid #e6e1d2;background:#fff;color:#666;font-family:'Google Sans',sans-serif;font-size:12.5px;font-weight:600;cursor:pointer;">${txt}</button>`;
   const box = document.getElementById('prepBatchBody');
+  prepSetBack(openPrepBatchScreen);
   box.innerHTML = `
     <div class="wal-section" style="margin:0 0 14px;border:1.5px solid #fca5a5;background:#fef2f2;">
       <div class="wal-section-title" style="color:#b91c1c;">Huỷ mẻ: ${b.prepName || ''}</div>
@@ -13275,6 +13301,7 @@ function openPrepYieldEditForm(batchId) {
   if (!b) { toast('⚠️ Không tìm thấy lô'); return; }
   _yieldEditingBatchId = batchId;
   const box = document.getElementById('prepBatchBody');
+  prepSetBack(openPrepBatchScreen);
   box.innerHTML = `
     <div class="wal-section" style="margin:0 0 14px;border:1.5px solid #fca5a5;background:#fef2f2;">
       <div class="wal-section-title" style="color:#b91c1c;">Sửa định lượng thu được</div>
@@ -13472,40 +13499,62 @@ async function _applyPrepYieldEdit(batchId, newQty, reason) {
 // mỗi lô quá chậm) nhưng CỐ Ý GIỮ NGUYÊN phần chép tay bên dưới làm đường lui —
 // máy in tem hỏng/hết giấy giữa ca thì bếp vẫn chạy tiếp được, không phải chờ.
 // ============================================================
-function showPrepLabelCard(batchId) {
+// Số tem sẽ in ở màn tem lô (chia lô ra nhiều hũ thì mỗi hũ một tem).
+let _prepLabelCopies = 1;
+function prepLabelSetCopies(batchId, n) { _prepLabelCopies = n; showPrepLabelCard(batchId, true); }
+
+function showPrepLabelCard(batchId, keepCopies) {
   const b = PREP_BATCHES_CACHE_POS.find(x => x.id === batchId);
   if (!b) { toast('⚠️ Không tìm thấy lô'); return; }
+  if (!keepCopies) _prepLabelCopies = 1;
   const box = document.getElementById('prepBatchBody');
+  prepSetBack(openPrepBatchScreen);
+  const n = _prepLabelCopies;
+  const row = (label, val, style) => `
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:6px 0;">
+        <span style="font-size:15px;color:#8A8A90;font-weight:600;">${label}</span>
+        <span style="font-size:17px;font-weight:800;color:var(--td);text-align:right;${style || ''}">${val}</span>
+      </div>`;
+  const soTem = k => `<button onclick="prepLabelSetCopies('${b.id}', ${k})" style="width:56px;height:56px;border-radius:50%;border:2px solid ${n === k ? 'var(--gd)' : '#e6e1d2'};background:${n === k ? 'var(--gl)' : '#fff'};color:${n === k ? 'var(--gd)' : 'var(--td)'};font-family:'Google Sans',sans-serif;font-size:19px;font-weight:800;cursor:pointer;">${k}</button>`;
+  // Nội dung đặt giữa màn: khối cao tối đa đúng vùng cuộn, căn giữa theo chiều dọc,
+  // bề ngang giới hạn để trên máy tính bảng không bị kéo dãn hết màn.
   box.innerHTML = `
-    <div style="text-align:center;padding:6px 0 14px;">
-      <div style="font-size:13px;font-weight:700;color:#16a34a;">✅ Đã nấu xong — dán tem cho lô này</div>
+    <div style="min-height:calc(100dvh - 130px);display:flex;flex-direction:column;justify-content:center;">
+    <div style="width:100%;max-width:420px;margin:0 auto;">
+      <div style="display:flex;justify-content:center;margin-bottom:14px;">
+        <span style="display:inline-flex;align-items:center;gap:7px;padding:8px 14px;border-radius:99px;background:#dcfce7;color:#15803d;font-size:14.5px;font-weight:800;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+          Đã nấu xong, dán tem cho lô này
+        </span>
+      </div>
+
+      <div style="background:#fff;border:3px solid var(--td);border-radius:22px;padding:22px 20px;box-shadow:0 6px 20px rgba(35,28,26,.08);">
+        <div style="font-size:32px;font-weight:900;color:var(--td);letter-spacing:.5px;line-height:1.15;word-break:break-all;">${escHtmlPos(b.batchCode || '')}</div>
+        <div style="font-size:21px;font-weight:800;color:var(--td);margin-top:6px;">${escHtmlPos(b.prepName || '')}</div>
+        <div style="height:1.5px;background:#e6e1d2;margin:16px 0 10px;"></div>
+        ${row('Nấu lúc', fmtDateTimeShort(b.finishedAt))}
+        ${row('Nhân viên', escHtmlPos(b.finishedBy || ''))}
+        ${row('HSD', prepExpiryLabel(b), 'color:#c0392b;font-size:19px;')}
+        ${row('Số lượng', fmtPrepQty(b.qtyInitial) + ' ' + escHtmlPos(b.unit || ''))}
+      </div>
+      <div style="font-size:12.5px;color:#9A9AA0;text-align:center;margin-top:8px;">Máy in lỗi thì chép tay đúng nội dung tem ở trên.</div>
+
+      <div style="margin-top:22px;text-align:center;">
+        <div style="font-size:15px;font-weight:800;color:var(--td);">Số tem cần in</div>
+        <div style="font-size:12.5px;color:#9A9AA0;margin-top:2px;">Chia lô ra nhiều hũ thì mỗi hũ một tem</div>
+        <div style="display:flex;justify-content:center;gap:14px;margin-top:12px;">${soTem(1)}${soTem(2)}${soTem(3)}</div>
+      </div>
+
+      <div style="display:flex;gap:10px;margin-top:22px;">
+        <button onclick="openPrepBatchScreen()" style="flex:1;min-height:56px;background:#fff;color:var(--td);border:2px solid #e6e1d2;border-radius:99px;font-family:'Google Sans',sans-serif;font-weight:800;font-size:16px;cursor:pointer;">Đã dán xong</button>
+        <button onclick="printPrepBatchLabelNow('${b.id}'${n > 1 ? ', ' + n : ''})" style="flex:1.6;min-height:56px;display:flex;align-items:center;justify-content:center;gap:8px;background:var(--gd);color:#fff;border:none;border-radius:99px;font-family:'Google Sans',sans-serif;font-weight:800;font-size:16px;cursor:pointer;box-shadow:0 4px 12px rgba(226,58,93,.3);">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+          In ${n} tem
+        </button>
+      </div>
+      <div style="font-size:12.5px;color:#9A9AA0;margin-top:10px;text-align:center;">Xem lại tem này bất cứ lúc nào ở mục "Lô đang còn".</div>
     </div>
-    <button onclick="printPrepBatchLabelNow('${b.id}')" style="width:100%;padding:15px;background:var(--gd);color:#fff;border:none;border-radius:14px;font-weight:700;font-size:15px;cursor:pointer;margin-bottom:8px;">🖨 In tem cho lô này</button>
-    <div style="display:flex;gap:8px;margin-bottom:14px;">
-      <button onclick="printPrepBatchLabelNow('${b.id}', 2)" style="flex:1;padding:11px;background:#fff;color:var(--gd);border:1.5px solid var(--gd);border-radius:12px;font-weight:700;font-size:12.5px;cursor:pointer;">In 2 tem</button>
-      <button onclick="printPrepBatchLabelNow('${b.id}', 3)" style="flex:1;padding:11px;background:#fff;color:var(--gd);border:1.5px solid var(--gd);border-radius:12px;font-weight:700;font-size:12.5px;cursor:pointer;">In 3 tem</button>
     </div>
-    <div style="font-size:11.5px;color:#999;margin-bottom:10px;text-align:center;">Chia lô ra nhiều hũ thì in thêm tem, mỗi hũ một tem.</div>
-    <div style="font-size:11.5px;font-weight:700;color:#888;margin-bottom:6px;">Nội dung tem — nếu máy in lỗi thì chép tay theo đây:</div>
-    <div style="background:#fff;border:3px solid var(--td);border-radius:18px;padding:20px 18px;margin-bottom:14px;">
-      <div style="font-size:30px;font-weight:900;color:var(--td);letter-spacing:.5px;line-height:1.15;word-break:break-all;">${b.batchCode || ''}</div>
-      <div style="font-size:19px;font-weight:700;color:var(--td);margin-top:8px;">${b.prepName || ''}</div>
-      <div style="height:1.5px;background:#e6e1d2;margin:14px 0;"></div>
-      <div style="display:flex;justify-content:space-between;font-size:17px;font-weight:700;color:var(--td);padding:4px 0;">
-        <span style="color:#888;font-weight:600;">Nấu lúc</span><span>${fmtDateTimeShort(b.finishedAt)}</span>
-      </div>
-      <div style="display:flex;justify-content:space-between;font-size:15px;font-weight:700;color:var(--td);padding:4px 0;">
-        <span style="color:#888;font-weight:600;">Nhân viên</span><span>${b.finishedBy || ''}</span>
-      </div>
-      <div style="display:flex;justify-content:space-between;font-size:17px;font-weight:800;color:#c0392b;padding:4px 0;">
-        <span style="color:#888;font-weight:600;">HSD</span><span>${prepExpiryLabel(b)}</span>
-      </div>
-      <div style="display:flex;justify-content:space-between;font-size:15px;font-weight:700;color:var(--td);padding:4px 0;">
-        <span style="color:#888;font-weight:600;">Số lượng</span><span>${fmtPrepQty(b.qtyInitial)} ${b.unit || ''}</span>
-      </div>
-    </div>
-    <button onclick="openPrepBatchScreen()" style="width:100%;padding:14px;background:#fff;color:var(--gd);border:1.5px solid var(--gd);border-radius:14px;font-weight:700;font-size:15px;cursor:pointer;">Đã dán tem xong</button>
-    <div style="font-size:11.5px;color:#999;margin-top:8px;text-align:center;">Dán lên hũ/nồi. Xem lại được ở mục "Lô đang còn".</div>
   `;
 }
 
