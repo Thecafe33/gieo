@@ -10352,6 +10352,7 @@ const NAV_SECTIONS = [
     {key:'entry:exp',  ic:'cashout', label:'Chi phí',       go:"goEntry('exp')"},
     {key:'entry:cash', ic:'coins',   label:'Tiền mặt',      go:"goEntry('cash')"},
     {key:'bills',      ic:'receipt', label:'Lịch sử bill',  go:"goBills()"},
+    {key:'kho:checklist', ic:'check', label:'Checklist ca',  go:"goKho('checklist')"},
   ]},
   // Kho — gập/mở. Chia theo NHỊP công việc chứ không theo loại dữ liệu:
   //   Cần xử lý  → việc đang chờ ngay hôm nay (màn mặc định khi vào Kho)
@@ -10362,22 +10363,20 @@ const NAV_SECTIONS = [
   // lần (Lý do hao hụt, Checklist ca) chung với việc hằng ngày (Refill, Kiểm kê),
   // và để "Nhập hàng loạt" — vốn là nhập DANH MỤC từ Excel — trong nhóm "Nhập
   // hàng", ai đọc cũng tưởng là đưa hàng vào kho.
+  // [SẮP LẠI] Kho chỉ còn việc HÀNG HOÁ. Bao bì, GOGS Topping sang nhóm Menu (thuộc
+  // tính của món); Checklist ca sang Vận hành (việc của ca, không phải của kho).
+  // Refill, Tồn theo vị trí, Vị trí kho gộp thành một mục có 3 tab (KHO_TAB_GROUPS).
   { group:'Kho', collapsible:true, items:[
-    {key:'kho:inbox',        label:'Cần xử lý',       go:"goKho('inbox')",        sub:'Bắt đầu ở đây'},
-    {key:'kho:items',        label:'Nguyên liệu',     go:"goKho('items')",        sub:'Hàng hoá'},
-    {key:'kho:prep',         label:'Chế biến cấp 1',  go:"goKho('prep')"},
-    {key:'kho:vessels',      label:'Dụng cụ đựng',    go:"goKho('vessels')"},
-    {key:'kho:packaging',    label:'Bao bì',          go:"goKho('packaging')"},
-    {key:'kho:toppingcogs',  label:'GOGS Topping',    go:"goKho('toppingcogs')"},
-    {key:'kho:po',           label:'Đặt & nhận hàng', go:"goKho('po')",           sub:'Hoạt động'},
+    {key:'kho:inbox',        label:'Cần xử lý',       go:"goKho('inbox')",        sub:'Việc hằng ngày'},
+    {key:'kho:po',           label:'Đặt & nhận hàng', go:"goKho('po')"},
     {key:'kho:stockcount',   label:'Kiểm kê',         go:"goKho('stockcount')"},
     {key:'kho:containers',   label:'Hàng đang mở & tem', go:"goKho('containers')"},
-    {key:'kho:refill',       label:'Refill',          go:"goKho('refill')"},
-    {key:'kho:locstock',     label:'Tồn theo vị trí', go:"goKho('locstock')"},
-    {key:'kho:history',      label:'Lịch sử kho',     go:"goKho('history')"},
-    {key:'kho:location',     label:'Vị trí kho',      go:"goKho('location')",     sub:'Cài đặt kho'},
+    {key:'kho:refill',       label:'Refill & vị trí', go:"goKho('refill')"},
+    {key:'kho:history',      label:'Sổ kho',          go:"goKho('history')"},
+    {key:'kho:items',        label:'Nguyên liệu',     go:"goKho('items')",        sub:'Danh mục'},
+    {key:'kho:prep',         label:'Chế biến cấp 1',  go:"goKho('prep')"},
+    {key:'kho:vessels',      label:'Dụng cụ đựng',    go:"goKho('vessels')"},
     {key:'kho:wastereasons', label:'Lý do hao hụt',   go:"goKho('wastereasons')"},
-    {key:'kho:checklist',    label:'Checklist ca',    go:"goKho('checklist')"},
   ]},
   // [MỚI] "Kho 2.0" — CHỈ ĐỌC, không sửa số liệu gì ở đây (mọi thao tác ghi vẫn ở nhóm
   // Kho phía trên / bên POS). Tách riêng vì Kho hiện tại trộn cấu hình + vận hành + sổ
@@ -10422,6 +10421,8 @@ const NAV_SECTIONS = [
     {key:'mn',           ic:'clipboard', label:'Quản lý Menu', go:"switchScreen('mn')"},
     {key:'kho:recipe',   ic:'note',      label:'Định mức món', go:"goKho('recipe')"},
     {key:'entry:cogs',   ic:'coins',     label:'GOGS Món',     go:"goEntry('cogs')"},
+    {key:'kho:toppingcogs', ic:'coins',  label:'GOGS Topping', go:"goKho('toppingcogs')"},
+    {key:'kho:packaging',   ic:'package',label:'Bao bì',       go:"goKho('packaging')"},
     {key:'tg',           ic:'coins',     label:'Khuyến mãi',   go:"switchScreen('tg')"},
     {key:'assist',       ic:'robot',     label:'Trợ lý bán hàng', go:"switchScreen('assist')"},
   ]},
@@ -10449,7 +10450,7 @@ const NAV_GROUP = (()=>{
 
 function currentNavKey(){
   if(curScreen !== 'entry') return curScreen;
-  if(curEntryTab === 'kho') return 'kho:' + curKhoSub;
+  if(curEntryTab === 'kho') return 'kho:' + (KHO_TAB_OWNER[curKhoSub] || curKhoSub);
   if(curEntryTab === 'kho2') return 'kho2:' + curKho2Sub;
   return 'entry:' + curEntryTab;
 }
@@ -10463,9 +10464,17 @@ let khoNavOpen = false;
 // Tập mục con thực sự nằm trong nhánh Kho của sidebar — lấy thẳng từ NAV_SECTIONS
 // để khỏi phải nhớ đồng bộ hai danh sách. "Định mức món" và "GOGS Món" render bằng
 // bộ máy Kho nhưng đứng ở nhóm Menu, nên không được tính là đang ở trong Kho.
+// Mục sidebar gộp nhiều màn thành tab: mục cha → [màn, tên tab].
+const KHO_TAB_GROUPS = {
+  refill: [['refill','Quy tắc refill'],['locstock','Tồn theo vị trí'],['location','Vị trí kho']],
+};
+const KHO_TAB_OWNER = {};
+Object.entries(KHO_TAB_GROUPS).forEach(([owner,tabs])=>tabs.forEach(([k])=>{ KHO_TAB_OWNER[k]=owner; }));
 const KHO_SIDEBAR_SUBS = (()=>{
   const sec = NAV_SECTIONS.find(x=>x.collapsible) || {items:[]};
-  return new Set(sec.items.filter(i=>i.key.startsWith('kho:')).map(i=>i.key.slice(4)));
+  const set = new Set(sec.items.filter(i=>i.key.startsWith('kho:')).map(i=>i.key.slice(4)));
+  Object.keys(KHO_TAB_OWNER).forEach(k=>{ if(set.has(KHO_TAB_OWNER[k])) set.add(k); });
+  return set;
 })();
 function toggleKhoNav(ev){
   if(ev) ev.stopPropagation();
@@ -18511,7 +18520,10 @@ async function renderEntryKho(){
   // getElementById trả null → ném lỗi giữa chừng → màn đứng im mờ mờ (đúng
   // triệu chứng "màn hình đơ"). Lỗi này ảnh hưởng MỌI mục con của Kho, không
   // riêng đường vào từ Sức khoẻ quán.
-  body.innerHTML = '<div id="khoBody"><div class="muted">Đang tải...</div></div>';
+  const tabOwner = KHO_TAB_OWNER[curKhoSub];
+  const tabBar = tabOwner ? `<div class="filter-bar kho-tabs">${KHO_TAB_GROUPS[tabOwner].map(([k,l])=>
+      `<button class="ftag ${curKhoSub===k?'active':''}" onclick="goKho('${k}')">${l}</button>`).join('')}</div>` : '';
+  body.innerHTML = tabBar + '<div id="khoBody"><div class="muted">Đang tải...</div></div>';
   if(curKhoSub==='inbox') renderKhoInbox();
   else if(curKhoSub==='items') renderKhoItems();
   else if(curKhoSub==='prep') renderKhoPrep();
@@ -18573,7 +18585,7 @@ async function renderKhoInbox(){
     ['Đặt & nhận hàng', 'po',         'download'],
     ['Kiểm kê',         'stockcount', 'clipboard'],
     ['Hàng đang mở & tem', 'containers', 'package'],
-    ['Lịch sử kho',     'history',    'clock']
+    ['Sổ kho',          'history',    'clock']
   ].map(([l,k,i])=>`<div class="health-item gray" onclick="goKho('${k}')"><div class="hi-label">${ic(i)} ${l}</div><div class="hi-count">›</div></div>`).join('')
   // [MỚI] Lối vào riêng cho log thời gian checklist — mở thẳng popup, không phải
   // 1 tab Kho, nên tách khỏi .map(goKho) ở trên.
