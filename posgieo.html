@@ -11370,16 +11370,22 @@ async function prepReconBeforeGate(p, ratio) {
   if(!prepReconGate.ready) { renderPrepReconPreflight(); return false; }
   return true;
 }
-// [NL-RECON] Lượt bắt đầu mẻ có thể đứt mạng sau khi giành khóa nhưng trước
-// khi ghi mẻ. Chỉ thu hồi khóa cũ >=10 phút khi không còn mẻ cooking tương ứng.
+// [NL-RECON] Thu hồi khóa không còn chủ: mẻ đã xong/huỷ hoặc NL đã chốt cân thì thu
+// hồi ngay; mẻ chưa hề được ghi (bắt đầu dở, đứt mạng) thì chỉ thu hồi khi khóa >=10 phút.
 async function prepReconRecoverOrphan(itemId) {
   const lockRef=fstore.collection(PREP_RECON_LOCK_COLL).doc(itemId);
   const [fsLock,rtLock]=await Promise.all([lockRef.get(),_ueActiveUnitsRef(itemId).child('__prepLock').once('value')]);
   const owners=[fsLock.exists?fsLock.data():null,rtLock.val()].filter(Boolean);
   for(const owner of owners) {
-    if(!owner.batchId || Date.now()-new Date(owner.at||0).getTime()<600000)continue;
+    if(!owner.batchId)continue;
     const batch=await fstore.collection('prep_batches_gieogieo').doc(owner.batchId).get();
-    if(!batch.exists || batch.data().status!=='cooking')
+    const old=Date.now()-new Date(owner.at||0).getTime()>=600000;
+    // Mẻ chưa ghi xong (đang bắt đầu dở trên máy khác): chờ đủ 10 phút mới thu hồi.
+    if(!batch.exists){ if(old)await prepReconRelease(owner.batchId,[itemId]); continue; }
+    // Mẻ đã hoàn thành/huỷ, hoặc NL này của mẻ đã chốt cân xong: khóa không còn giữ
+    // gì nữa, thu hồi ngay chứ không bắt đợi.
+    const b=batch.data(),row=(b.reconcileInputs||{})[itemId];
+    if(b.status!=='cooking' || !row || row.status==='done')
       await prepReconRelease(owner.batchId,[itemId]);
   }
 }
@@ -11482,8 +11488,15 @@ async function prepReconRelease(batchId, itemIds) {
   for(const id of itemIds){
     const ref=fstore.collection(PREP_RECON_LOCK_COLL).doc(id);
     await fstore.runTransaction(async t=>{const d=await t.get(ref);if(d.exists&&d.data().batchId===batchId)t.delete(ref);});
+    // [FIX "NL đã cân xong vẫn báo đang chờ cân ở mẻ khác"] RTDB gọi hàm transaction
+    // lần đầu với dữ liệu trong cache máy, thường là null khi node chưa được nghe. Trước
+    // đây gặp null là `return` (undefined) → Firebase HUỶ transaction, không bao giờ hỏi
+    // server → __prepLock nằm lại vĩnh viễn dù khóa Firestore đã xóa, và lần giành khóa
+    // sau của NL đó luôn báo "đang chờ cân ở mẻ khác". Trả null để Firebase so với server
+    // rồi gọi lại với dữ liệu thật; chỉ bỏ qua khi đã thấy dữ liệu thật mà khóa không phải của mẻ này.
     await _ueActiveUnitsRef(id).transaction(cur=>{
-      if(!cur||!cur.__prepLock||cur.__prepLock.batchId!==batchId)return;
+      if(!cur)return null;
+      if(!cur.__prepLock||cur.__prepLock.batchId!==batchId)return;
       delete cur.__prepLock;
       return Object.keys(cur).length?cur:null;
     });
