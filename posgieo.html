@@ -11332,6 +11332,20 @@ async function prepReconSetUnit(itemId, unitId, qty, opId, expected, checkpoint)
       err.code='PREP_RECON_STALE';throw err;
     }
     const amount=Number(live.unitBase)||0;
+    const lockBatch=map.__prepLock?.batchId;
+    if(!lockBatch){
+      const err=new Error('Khóa mẻ đã mất trước khi ghi mã '+(live.code||unitId)+'. Mở lại mẻ để kiểm tra, chưa ghi đè tồn.');
+      err.code='PREP_RECON_STALE';throw err;
+    }
+    if(checkpoint?.batchId&&checkpoint.batchId!==lockBatch){
+      const err=new Error('Mã '+(live.code||unitId)+' đang khóa cho mẻ khác. Chưa ghi tồn.');
+      err.code='PREP_RECON_STALE';throw err;
+    }
+    const fsLock=await fstore.collection(PREP_RECON_LOCK_COLL).doc(itemId).get();
+    if(!fsLock.exists||fsLock.data().batchId!==lockBatch){
+      const err=new Error('Khóa mẻ trong sổ không khớp khóa tồn của mã '+(live.code||unitId)+'. Chưa ghi tồn.');
+      err.code='PREP_RECON_STALE';throw err;
+    }
     if(live.lastPrepReconOp===opId){
       if(Math.abs(amount-qty)>0.015){
         const err=new Error(`Mã ${live.code||unitId} đã ghi lượt chốt này với ${fmtPrepQty(amount)}. Báo Quản lý kiểm tra trước khi sửa.`);
@@ -11344,25 +11358,46 @@ async function prepReconSetUnit(itemId, unitId, qty, opId, expected, checkpoint)
       const err=new Error(`Mã ${live.code||unitId}: mốc trước ${fmtPrepQty(expected)}, tồn hiện ${fmtPrepQty(amount)}. Nạp mốc mới và cân lại.`);
       err.code='PREP_RECON_STALE';throw err;
     }
-    let before=null;
+    let before=null,abortReason='';
     const result=await parent.transaction(cur=>{
-      before=null;
-      const unit=cur&&cur[unitId];
-      if(!unit || unit.lastPrepReconOp===opId
-          || Math.abs((Number(unit.unitBase)||0)-expected)>0.015)return;
+      before=null;abortReason='';
+      // Firebase có thể gọi callback lần đầu với null dù parent.once() vừa đọc
+      // thấy mã trên server. Trả về đề xuất từ snapshot vừa đọc để server phát
+      // hiện xung đột và gọi lại callback với trạng thái thật; return undefined
+      // tại đây sẽ HỦY ngay giao dịch và để mẻ kẹt ở status processing.
+      const source=cur==null?map:cur;
+      if(!source.__prepLock||source.__prepLock.batchId!==lockBatch){abortReason='lock';return;}
+      const unit=source[unitId];
+      if(!unit){abortReason='missing';return;}
+      if(unit.lastPrepReconOp===opId){
+        if(Math.abs((Number(unit.unitBase)||0)-qty)>0.015){abortReason='op_conflict';return;}
+        before=Number(unit.lastPrepReconBefore)||0;
+        return source; // lượt trước đã ghi: tiếp tục đồng bộ/ghi sổ, không trừ hai lần
+      }
+      if(Math.abs((Number(unit.unitBase)||0)-expected)>0.015){abortReason='amount';return;}
       before=Number(unit.unitBase)||0;
-      return {...cur,[unitId]:{...unit,unitBase:qty,lastPrepReconOp:opId,lastPrepReconBefore:before,
+      return {...source,[unitId]:{...unit,unitBase:qty,lastPrepReconOp:opId,lastPrepReconBefore:before,
         ...(checkpoint?{lastPrepCheckpoint:checkpoint}:{})}};
     });
     if(result.committed){
-      await syncCopy(checkpoint);
+      const committed=result.snapshot?.val()||(await parent.once('value')).val()||{};
+      const saved=committed[unitId];
+      if(!saved||saved.lastPrepReconOp!==opId||Math.abs((Number(saved.unitBase)||0)-qty)>0.015){
+        const err=new Error('Giao dịch mã '+(live.code||unitId)+' không xác nhận được số đã lưu; chưa ghi sổ. Mở lại mẻ để kiểm tra.');
+        err.code='PREP_RECON_STALE';throw err;
+      }
+      await syncCopy(saved.lastPrepCheckpoint||checkpoint);
       return {before,already:false};
+    }
+    if(abortReason==='lock'||abortReason==='op_conflict'){
+      const err=new Error('Khóa hoặc lượt chốt mã '+(live.code||unitId)+' đã đổi trên máy khác; tải lại mẻ trước khi lưu.');
+      err.code='PREP_RECON_STALE';throw err;
     }
     // Transaction bị hủy không đồng nghĩa tồn đã đổi. Đọc lại node cha và
     // thử tiếp; nếu thực sự đổi, lượt kế sẽ báo đúng số đang có.
     if(i<3)await new Promise(resolve=>setTimeout(resolve,120*(i+1)));
   }
-  const err=new Error(`Không chốt được giao dịch mã ${unitId} dù mốc tồn vẫn khớp. Chưa trừ mã; bấm thử lưu lại số đã cân.`);
+  const err=new Error(`Chưa chốt được mã ${unitId} sau khi kiểm tra mốc. Số cân đã được giữ trong mẻ; bấm thử lưu lại.`);
   err.code='PREP_RECON_RETRY';throw err;
 }
 async function prepReconBaseline(row) {
@@ -11518,6 +11553,13 @@ async function openPrepReconForm(batchId,itemId) {
     }
     if(!prepReconForm||prepReconForm.batchId!==batchId||prepReconForm.itemId!==itemId)
       prepReconForm={batchId,itemId,values:{},note:row.note||'',varianceKind:row.varianceKind||''};
+    if(row.status==='processing'&&row.submitted?.length){
+      prepReconForm.note=row.note||'';
+      prepReconForm.varianceKind=row.varianceKind||'';
+      for(const u of row.submitted)prepReconForm.values[u.id]={qty:u.after,
+        lines:u.weighings||[],manual:!!u.manual,verifiedUnitId:u.verifiedUnitId||u.id,
+        finished:!!u.finished};
+    }
     const it=KHO_ITEMS_CACHE.find(x=>x.id===itemId)||{};
     const countable=prepReconIsCountable(it);
     const finishedUnits=new Map();
@@ -11660,17 +11702,10 @@ async function prepReconRefreshStale(batchId,itemId) {
 async function prepReconRetryUncommitted(batchId,itemId) {
   if(_posSubmitBusy)return;
   try{
-    const ledger=fstore.collection('stock_transactions_gieogieo');
-    const [batch,variance,usage]=await Promise.all([
-      fstore.collection('prep_batches_gieogieo').doc(batchId).get(),
-      ledger.doc('prep_variance_'+batchId+'_'+itemId).get(),
-      ledger.doc('prep_after_'+batchId+'_'+itemId).get()
-    ]);
+    const batch=await fstore.collection('prep_batches_gieogieo').doc(batchId).get();
     const row=batch.data()&&batch.data().reconcileInputs&&batch.data().reconcileInputs[itemId];
     if(!row||row.status!=='processing'||!row.submitted?.length)
       throw new Error('Lượt chốt đã thay đổi — mở lại mẻ đang nấu');
-    if(variance.exists||usage.exists)
-      throw new Error('Mẻ đã có dòng ghi sổ — báo Quản lý kiểm tra trước khi thử lại');
     const live=await prepReconReadUnits(itemId);
     for(const u of row.submitted.filter(x=>x.finished)){
       const d=await fstore.collection(STOCK_CONTAINERS_COLL).doc(u.id).get();
@@ -11679,9 +11714,11 @@ async function prepReconRetryUncommitted(batchId,itemId) {
     }
     if(row.submitted.filter(u=>!u.finished).some(u=>{
       const current=live.find(x=>x.id===u.id);
-      return !current||current.lastPrepReconOp==='prep_after_'+batchId+'_'+itemId+'_'+u.id
-        || Math.abs(current.unitBase-(u.bookBaseline??u.baseline))>0.015;
-    }))throw new Error('Mốc mã đã đổi hoặc đã ghi một phần — mở lại mẻ để kiểm tra');
+      const op='prep_after_'+batchId+'_'+itemId+'_'+u.id;
+      return !current||(current.lastPrepReconOp===op
+        ? Math.abs(current.unitBase-u.after)>0.015
+        : Math.abs(current.unitBase-(u.bookBaseline??u.baseline))>0.015);
+    }))throw new Error('Mốc mã đã đổi so với số cân đã lưu — mở lại mẻ để kiểm tra');
     if(!prepReconForm||prepReconForm.batchId!==batchId||prepReconForm.itemId!==itemId)
       prepReconForm={batchId,itemId,values:{},note:row.note||'',varianceKind:row.varianceKind||''};
     await prepReconPostSave();
