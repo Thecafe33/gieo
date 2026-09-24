@@ -8861,7 +8861,10 @@ function thGomLedger(txs){
     const loai = thChuanType(tx.type);
     out[itemId] = out[itemId] || {};
     const o = out[itemId][date] = out[itemId][date] || { CONSUMPTION:0, WASTE:0, RECEIVING:0, ADJUSTMENT:0, TRANSFER:0, LOC_SET:0, KHAC:0, soDong:0 };
-    o[loai] += Math.abs(Number(tx.qty)||0);
+    // Hoàn khi xoá bill trừ ngược vào CONSUMPTION (xem txConsumedQty).
+    const dung = txConsumedQty({ ...tx, type: loai });
+    if(dung !== null) o.CONSUMPTION += dung;
+    else o[loai] += Math.abs(Number(tx.qty)||0);
     o.soDong++;
   });
   return out;
@@ -9535,7 +9538,7 @@ function thLichSuBTP(prepTxs){
     out[id] = out[id] || {};
     const o = out[id][d] = out[id][d] || { dung:0, huy:0, nau:0 };
     const q = Math.abs(Number(t.qty)||0);
-    if(loai === 'CONSUMPTION') o.dung += q;
+    if(loai === 'CONSUMPTION') o.dung += (t.reversal === true ? -q : q);
     else if(loai === 'WASTE') o.huy += q;
     else if(loai === 'PRODUCTION') o.nau += q;
   });
@@ -12448,7 +12451,7 @@ async function renderNlBtp(){
       ${miniCardHTML('Hao hụt tổng kỳ', waste ? fmt(waste.wasteValue) : '—', waste ? `${waste.wasteCount} lượt · trong đó BTP ${fmt(waste.prepWasteValue)}` : 'Không đọc được')}
       ${miniCardHTML('COGS thực tế', cogsPct!=null ? fmtPct(cogsPct) : '—', cogsPct!=null ? `${fmt(cogsActual)} / ${fmt(revenue)} doanh thu` : 'Không đọc được')}
       ${miniCardHTML('Đổ ly thành phẩm', waste ? waste.drinkWasteCups+' ly' : '—', waste ? fmt(waste.drinkWasteValue) : '')}
-      ${miniCardHTML('Chênh kiểm đếm BTP', waste ? fmt(waste.prepAdjValue) : '—', waste ? `${waste.prepAdjCount} lượt — sai số ghi chép, không phải hao hụt` : '')}
+      ${miniCardHTML('Chênh kiểm đếm BTP · lệch ròng', waste ? ((waste.prepAdjSurplusValue - waste.prepAdjShortValue) < 0 ? '−' : '') + fmt(Math.abs(waste.prepAdjSurplusValue - waste.prepAdjShortValue)) : '—', waste ? `${waste.prepAdjCount} lượt · thiếu ${fmt(waste.prepAdjShortValue)} · dư ${fmt(waste.prepAdjSurplusValue)}` : '')}
     </div>`;
   }catch(err){
     console.error('[Sức khoẻ NL_BTP] renderNlBtp lỗi', err);
@@ -13513,6 +13516,20 @@ function _stockTxRangeSnap(startKey, endKey){
   p.catch(()=>{}).then(()=>setTimeout(()=>{ if(_stockRangeInflight.get(key) === muc) _stockRangeInflight.delete(key); }, 10000));
   return p;
 }
+
+// Lượng TIÊU HAO của một dòng sổ (dương = đã dùng), hoặc null nếu dòng không phải
+// tiêu hao. Dòng hoàn kho khi xoá bill là TRẢ LẠI phần đã bán nên mang dấu âm:
+//   · POS ghi CONSUMPTION, qty dương, reversal:true
+//   · Quản lý ghi ADJUSTMENT, qty dương, reversal:true
+// Trước đây cả hai bị cộng trị tuyệt đối: bill xoá bị tính tiêu hao 2 lần, còn bản
+// của Quản lý lại chui vào "Điều chỉnh kiểm kho" dù không ai đếm sai.
+function txConsumedQty(t){
+  if(!t) return null;
+  const q = Math.abs(Number(t.qty)||0);
+  if(t.type === 'CONSUMPTION') return t.reversal === true ? -q : q;
+  if(t.type === 'ADJUSTMENT' && t.reversal === true) return -q;
+  return null;
+}
 async function computeLedgerRealMetrics(startDate, endDate){
   const startKey = dkey(startDate), endKey = dkey(endDate);
   await ensurePriceHistory();
@@ -13550,22 +13567,40 @@ async function computeLedgerRealMetrics(startDate, endDate){
     e.value += val;
     drinkEvents.set(t.wasteEventId, e);
   };
+  // Chênh lệch kiểm kê tách THIẾU (qty âm) và DƯ (qty dương). Cộng trị tuyệt đối thì
+  // thiếu 2kg và dư 2kg trông y hệt nhau. Làm nhầm món (bán A nhưng pha B) cho ra A dư,
+  // B thiếu gần bằng nhau, nên "lệch ròng" (dư − thiếu) tự triệt tiêu; mất hàng thật
+  // thì lệch ròng âm.
+  let adjShortValue=0, adjSurplusValue=0;
   txSnap.forEach(doc=>{
     const t = doc.data();
     const cost = costOf(t.itemId, t.businessDate);
     const val = Math.abs(Number(t.qty)||0) * cost;
+    const dung = txConsumedQty(t);
     if(t.type==='WASTE'){ wasteValue += val; wasteCount++; ghiNhanDoLy(t, val); ghiNhanHaoHutNgay(t, val); }
-    else if(t.type==='CONSUMPTION'){ consumptionValue += val; consumptionCount++; }
-    else if(t.type==='ADJUSTMENT'){ adjustmentValue += val; adjustmentCount++; }
+    else if(dung !== null){
+      // Dòng hoàn khi xoá bill trừ ngược lại, không đếm thành một lượt tiêu hao mới.
+      consumptionValue += dung * cost;
+      if(dung >= 0) consumptionCount++;
+    }
+    else if(t.type==='ADJUSTMENT'){
+      adjustmentValue += val; adjustmentCount++;
+      if(Number(t.qty) < 0) adjShortValue += val; else adjSurplusValue += val;
+    }
   });
   let prepWasteValue=0, prepWasteCount=0, prepAdjValue=0, prepAdjCount=0, prepWasteMissingCost=0;
+  let prepAdjShortValue=0, prepAdjSurplusValue=0;
   prepTxSnap.forEach(doc=>{
     const t = doc.data();
     if(t.type==='ADJUSTMENT'){
-      // Chênh lệch kiểm đếm bán thành phẩm — SAI SỐ GHI CHÉP, không phải hao hụt.
-      // Để riêng khỏi waste (gộp vào sẽ thổi phồng chỉ tiêu và làm mất ý nghĩa
-      // của nó), nhưng vẫn phải đếm được vì đây là thước đo độ tin cậy của số liệu.
-      prepAdjValue += Math.abs(Number(t.totalCost)||0); prepAdjCount++; return;
+      // Hoàn BTP khi Quản lý xoá bill: trả lại phần đã bán, không phải chênh lệch đếm.
+      if(t.reversal === true) return;
+      // Chênh lệch kiểm đếm bán thành phẩm, để riêng khỏi waste. Làm nhầm món cũng
+      // rơi vào đây (BTP này thiếu, BTP kia dư), nên tách thiếu/dư để xem lệch ròng.
+      const tcAdj = Math.abs(Number(t.totalCost)||0);
+      prepAdjValue += tcAdj; prepAdjCount++;
+      if(Number(t.qty) < 0) prepAdjShortValue += tcAdj; else prepAdjSurplusValue += tcAdj;
+      return;
     }
     if(t.type!=='WASTE') return;
     // prep_transactions đã LƯU SẴN totalCost lúc huỷ (tính theo costPerUnit của bán thành
@@ -13588,7 +13623,10 @@ async function computeLedgerRealMetrics(startDate, endDate){
     wasteByDate,
     wasteRawValue: wasteValue, wasteRawCount: wasteCount,
     prepWasteValue, prepWasteCount, prepWasteMissingCost,
-    prepAdjValue, prepAdjCount,
+    prepAdjValue, prepAdjCount, prepAdjShortValue, prepAdjSurplusValue,
+    adjShortValue: adjShortValue + prepAdjShortValue,
+    adjSurplusValue: adjSurplusValue + prepAdjSurplusValue,
+    adjNetValue: (adjSurplusValue + prepAdjSurplusValue) - (adjShortValue + prepAdjShortValue),
     drinkWasteCups: [...drinkEvents.values()].reduce((s,e)=>s+e.cups, 0),
     drinkWasteEvents: drinkEvents.size,
     drinkWasteValue: [...drinkEvents.values()].reduce((s,e)=>s+e.value, 0),
@@ -13685,17 +13723,18 @@ const KHO_DOH_VUA = 14;          // trong khoảng 14–21 thì nên để ý
 // không đọc/ghi được collection tổng hợp → lui về đọc sổ gốc như trước, con số không đổi.
 // ------------------------------------------------------------
 const LEDGER_SUM_COLL = 'ledger_day_summaries_gieogieo';
-const LEDGER_SUM_V = 1;
+const LEDGER_SUM_V = 2;   // v2: dòng hoàn khi xoá bill trừ ngược (txConsumedQty)
 let _ledgerSumOff = false;   // true khi biết chắc không dùng được (thiếu index / thiếu quyền)
 function _dayShift(k, n){ const d = new Date(k+'T00:00:00'); d.setDate(d.getDate()+n); return dkey(d); }
 function _ledgerSumFromRows(dateKey, rows){
   const cons = {};
   let hasCons = false;
   rows.forEach(t=>{
-    if(t.type !== 'CONSUMPTION') return;
-    hasCons = true;
+    const dung = txConsumedQty(t);
+    if(dung === null) return;
+    if(t.type === 'CONSUMPTION') hasCons = true;
     if(!t.itemId) return;   // bản cũ: dòng không có itemId góp 0đ và không vào daDung
-    cons[t.itemId] = (cons[t.itemId]||0) + Math.abs(Number(t.qty)||0);
+    cons[t.itemId] = (cons[t.itemId]||0) + dung;
   });
   const maxCreatedAt = rows.reduce((m,t)=> (typeof t.createdAt === 'string' && t.createdAt > m) ? t.createdAt : m, '');
   return { v: LEDGER_SUM_V, date: dateKey, hasCons, maxCreatedAt, rowCount: rows.length,
@@ -13710,10 +13749,11 @@ async function ledgerConsumptionStats(startKey, endKey){
   const homNay = dkey(new Date());
   let tieuHao = 0;
   const ngayCoBan = new Set(), daDung = new Set();
-  const congRow = t => {       // y hệt vòng lặp cũ của computeInventoryHealth
-    if(t.type !== 'CONSUMPTION') return;
-    tieuHao += Math.abs(Number(t.qty)||0) * itemCostOn(t.itemId, t.businessDate);
-    if(t.businessDate) ngayCoBan.add(t.businessDate);
+  const congRow = t => {       // cùng quy tắc với _ledgerSumFromRows để 2 đường ra cùng số
+    const dung = txConsumedQty(t);
+    if(dung === null) return;
+    tieuHao += dung * itemCostOn(t.itemId, t.businessDate);
+    if(t.type === 'CONSUMPTION' && t.businessDate) ngayCoBan.add(t.businessDate);
     if(t.itemId) daDung.add(t.itemId);
   };
   const congSum = sum => {
@@ -14069,6 +14109,9 @@ async function renderHealth(){
       ${ledgerReal.prepWasteMissingCost ? `<div class="small-note" style="color:var(--warn);margin:-2px 0 8px">${ic('alert',13,'var(--warn)')} ${ledgerReal.prepWasteMissingCost} giao dịch huỷ bán thành phẩm KHÔNG có giá trị tiền (ghi bởi bản POS cũ) — đang được tính là 0đ, nên Waste thật đang thấp hơn thực tế.</div>` : ''}
       ${ledgerReal.prepAdjCount ? rowInfoHTML('— chênh lệch đếm bán thành phẩm (không tính waste)', `${fmt(ledgerReal.prepAdjValue)} · ${ledgerReal.prepAdjCount} giao dịch`) : ''}
       ${rowInfoHTML('Điều chỉnh kiểm kho (ADJUSTMENT)', `${fmt(ledgerReal.adjustmentValue)} · ${ledgerReal.adjustmentCount} giao dịch`)}
+      ${ledgerReal.adjustmentCount ? rowInfoHTML('— kiểm kê thiếu / dư', `thiếu ${fmt(ledgerReal.adjShortValue)} · dư ${fmt(ledgerReal.adjSurplusValue)}`) : ''}
+      ${ledgerReal.adjustmentCount ? rowInfoHTML('— lệch ròng (dư − thiếu)', `<span style="color:${ledgerReal.adjNetValue < 0 ? 'var(--bad)' : 'inherit'}">${ledgerReal.adjNetValue < 0 ? '−' : ''}${fmt(Math.abs(ledgerReal.adjNetValue))}</span>`) : ''}
+      ${ledgerReal.adjustmentCount ? `<div class="small-note" style="margin:-2px 0 8px">Làm nhầm món (bán món này, pha món kia) cho ra món này dư, món kia thiếu gần bằng nhau nên lệch ròng tự triệt tiêu. Lệch ròng âm là hàng mất thật mà chưa ai khai hao hụt.</div>` : ''}
       ${rowInfoHTML('Cash Variance', `${cashVariance.daysWithVariance}/${cashVariance.totalDays} ngày lệch · tổng ${fmt(cashVariance.totalAbsVariance)} · ${cashVariance.daysClosed} ngày đã đóng`)}
     </div>
 
@@ -16677,6 +16720,7 @@ function thangKetTrachNhiemNL(txs, items, costOf){
       value:amountQty*costOf(t.itemId,t.businessDate),employeeId,employeeName,
       role:r.role||(employeeId?'người ghi nhận':'chưa xác minh PIN'),
       reason:r.reason||t.reason||t.note||'',needsReview:!!t.needsReview,
+      reviewedAt:t.reviewedAt||'',expectedQty:Number(t.expectedQty)||0,
       varianceKind:t.varianceKind||'',codeIntervals,
       varianceAllocations:Array.isArray(t.varianceAllocations)?t.varianceAllocations:[],
       unitAllocations:Array.isArray(t.unitAllocations)?t.unitAllocations:
@@ -16884,6 +16928,7 @@ function thangKetResponsibilityHTML(){
       <div class="row"><span class="rl">Hao hụt NL đã ghi sổ</span><span class="rv" style="color:var(--bad)">${fmt(sum('prepWaste')+sum('reportedWaste'))}</span></div>
       <div class="row"><span class="rl">Thiếu tồn cần giải trình</span><span class="rv">${fmt(sum('shortage'))}</span></div>
       <div class="row"><span class="rl">Dùng vượt định mức · đã vào giá vốn</span><span class="rv">${fmt(sum('extraUse'))}</span></div>
+      ${all.some(e=>e.needsReview)?`<div class="row"><span class="rl" style="color:var(--warn)">Chờ quản lý duyệt</span><span class="rv" style="color:var(--warn)">${all.filter(e=>e.needsReview).length} lượt</span></div>`:''}
       <div class="small-note" style="margin-top:8px">Theo PIN người cân chốt hoặc ghi nhận. Mỗi lượt có mã lô, hai mốc cân và lý do nếu POS đã ghi. Thiếu tồn chưa xác minh được tách khỏi hao hụt đã ghi; các số này không tự trừ lương.</div>
     </div>
     ${groups.map((g,i)=>`<button class="card" onclick="thangKetOpenResponsibilitySheet(${i})" style="width:100%;text-align:left;border:1px solid #AACDE4;cursor:pointer;font:inherit;color:inherit">
@@ -16891,6 +16936,30 @@ function thangKetResponsibilityHTML(){
       <div class="small-note">${g.events.length} lượt · hao hụt ${fmt(g.prepWaste+g.reportedWaste)} · thiếu tồn ${fmt(g.shortage)} · dùng thêm ${fmt(g.extraUse)}${g.otherCount?' · lệch mã/định mức '+g.otherCount+' lượt':''}</div>
     </button>`).join('')||'<div class="card"><div class="empty-hint">Tháng này chưa có sự kiện đối chiếu NL hoặc hao hụt gắn nhân viên.</div></div>'}
     ${all.length?'<div class="small-note">Chạm vào một nhân viên để xem từng mã và mốc cân.</div>':''}`;
+}
+
+// Quản lý đã xem nguyên nhân của một lượt cần xác minh (dùng thêm quá ngưỡng, thiếu tồn
+// "tôi chịu trách nhiệm"...) và chấp nhận. Chỉ tắt cờ, không đổi số lượng hay tiền.
+async function thangKetDuyetSuKien(txId, index, btn){
+  if(!txId) return;
+  if(btn){ btn.disabled = true; btn.textContent = 'Đang lưu...'; }
+  try{
+    const at = new Date().toISOString();
+    await fstore.collection('stock_transactions_gieogieo').doc(txId)
+      .update({ needsReview:false, reviewedAt:at, reviewedBy:'management' });
+    (thangKetData?.khoExtra?.responsibility?.events||[]).forEach(e=>{
+      if(e.id===txId){ e.needsReview = false; e.reviewedAt = at; }
+    });
+    if(typeof logAudit==='function') logAudit('review','stock_transaction',txId,{});
+    toast('✅ Đã duyệt');
+    thangKetOpenResponsibilitySheet(index);
+    const box = document.getElementById('thangKetResponsibilityBox');
+    if(box) box.innerHTML = thangKetResponsibilityHTML();
+  }catch(err){
+    console.error('thangKetDuyetSuKien lỗi', err);
+    if(btn){ btn.disabled = false; btn.textContent = 'Duyệt'; }
+    showError('Không duyệt được: '+(err.code||err.message||err));
+  }
 }
 
 function thangKetOpenResponsibilitySheet(index){
@@ -16914,7 +16983,12 @@ function thangKetOpenResponsibilitySheet(index){
       ${e.fromCheckpoint||e.toCheckpoint?`<div class="small-note">Mốc trước: ${checkpoint(e.fromCheckpoint)} → mốc sau: ${checkpoint(e.toCheckpoint)}</div>`:''}
       <div class="small-note" style="margin-top:8px"><b>Người ký:</b> ${escapeHtmlAttr(e.employeeName)} · ${escapeHtmlAttr(e.role)}</div>
       <div class="small-note"><b>Lý do:</b> ${escapeHtmlAttr(e.reason||'Chưa ghi')}</div>
-      ${e.needsReview?'<div class="small-note" style="color:var(--warn)">Cần quản lý xác minh nguyên nhân</div>':''}
+      ${e.category==='extraUse'&&e.expectedQty>0?`<div class="small-note">Dùng thêm ${fmtNum(e.qty/e.expectedQty*100,1)}% so với định lượng mẻ</div>`:''}
+      ${e.needsReview&&e.id?`<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px">
+        <span class="small-note" style="color:var(--warn)">Cần quản lý xác minh nguyên nhân</span>
+        <button class="btn sm" style="width:auto;padding:0 14px" onclick="thangKetDuyetSuKien('${escapeHtmlAttr(e.id)}',${index},this)">Duyệt</button></div>`
+        :e.needsReview?'<div class="small-note" style="color:var(--warn)">Cần quản lý xác minh nguyên nhân</div>'
+        :e.reviewedAt?`<div class="small-note">Đã duyệt ${escapeHtmlAttr(qlFmtDT(e.reviewedAt))}</div>`:''}
     </div>`;
   }).join('');
   openEditSheet('Đối chiếu NL · '+g.employeeName,
@@ -17075,7 +17149,7 @@ function thangKetRedraw(){
   }, 0);
   const nhanSu = `
     <div class="sec-title">Nhân sự tháng ${d.m}/${d.y}</div>
-    ${d.khoExtra?thangKetResponsibilityHTML():'<div class="card"><div class="muted">Không đọc được sổ NL tháng này.</div></div>'}
+    <div id="thangKetResponsibilityBox">${d.khoExtra?thangKetResponsibilityHTML():'<div class="card"><div class="muted">Không đọc được sổ NL tháng này.</div></div>'}</div>
     ${d.emps.length ? d.emps.map(e=>thangKetEmployeeCardHTML(e, tongGioTeam)).join('') : '<div class="card"><div class="empty-hint">Chưa có nhân viên đang hoạt động.</div></div>'}
   `;
 

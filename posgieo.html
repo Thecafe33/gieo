@@ -9388,6 +9388,11 @@ function renderDrinkWasteForm() {
       <div class="wal-input-group" style="margin-bottom:0;">
         <input id="dwQty" type="number" min="1" step="1" value="${khoTxState.drinkQty || 1}" oninput="khoTxState.drinkQty=Number(this.value)||1; drinkWasteUpdatePreview()">
       </div>
+      ${_drinkWasteToppingPickerHtml()}
+      <label style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:13px;color:var(--td);cursor:pointer;">
+        <input type="checkbox" ${khoTxState.drinkNoCup ? 'checked' : ''} onchange="khoTxState.drinkNoCup=this.checked; drinkWasteUpdatePreview()" style="width:18px;height:18px;">
+        Chưa rót vào ly (không trừ ly, nắp, ống hút)
+      </label>
       <div id="dwPreview" style="font-size:12px;color:#999;margin-top:8px;line-height:1.6;"></div>
     </div>
     <div class="wal-section" style="margin:0 0 14px;">
@@ -9412,16 +9417,60 @@ function renderDrinkWasteForm() {
 // Xem trước: CỐ Ý chỉ hiện số món quy đổi + thiệt hại tiền, KHÔNG hiện định lượng
 // từng nguyên liệu và không hiện tồn kho — giữ đúng nguyên tắc không để lộ công
 // thức/tồn kho ở POS (mục 4.5), giống cách nhánh huỷ bán thành phẩm đang làm.
+// Topping thêm cho MỖI ly bị đổ (topping đính kèm sẵn trong định mức món thì tự trừ).
+function _drinkWasteToppingPickerHtml() {
+  if (!TOPPINGS.length) return '';
+  const chon = khoTxState.drinkToppings || {};
+  return `<div class="wal-input-label" style="margin:10px 0 6px;">Topping thêm (mỗi ly)</div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;">
+      ${TOPPINGS.map(t => {
+        const q = Number(chon[t.id]) || 0;
+        return `<button onclick="_drinkWasteToggleTopping('${t.id}')" style="padding:7px 11px;border-radius:99px;border:1.5px solid ${q ? 'var(--gd)' : '#e6e1d2'};background:${q ? 'var(--gd)' : '#fff'};color:${q ? '#fff' : 'var(--td)'};font-size:13px;font-weight:600;cursor:pointer;">${escHtmlPos(t.name)}${q > 1 ? ' ×' + q : ''}</button>`;
+      }).join('')}
+    </div>`;
+}
+function _drinkWasteToggleTopping(id) {
+  const chon = khoTxState.drinkToppings = khoTxState.drinkToppings || {};
+  if (chon[id]) delete chon[id]; else chon[id] = 1;
+  renderKhoTxForm();
+}
+
+// Quy 1 lần đổ ly ra nguyên liệu bằng ĐÚNG công thức của luồng bán hàng
+// (applySalesConsumptionPOS): định mức món + topping (cả topping đính kèm định mức lẫn
+// topping chọn thêm) + bao bì của ly. Trước đây chỉ truyền recipes, nên topping đính
+// kèm và ly/nắp/ống hút không bị trừ; phần đó tới kiểm kê mới lòi ra thành "thiếu"
+// không rõ nguyên nhân. Túi/khay đựng cả đơn thì không trừ: ly đổ tại quầy không đóng túi.
+async function _drinkWasteConsumption(m, size, qty) {
+  const [recipes, toppingRecipes, packagingPresets, packagingItemOverrides, pkgRulesPack] = await Promise.all([
+    ensureRecipesLoadedPOS(), ensureToppingRecipesLoadedPOS(), ensurePackagingPresetsLoadedPOS(),
+    ensurePackagingItemOverridesLoadedPOS(), ensurePackagingRulesLoadedPOS()]);
+  const chon = khoTxState.drinkToppings || {};
+  const toppings = Object.keys(chon).map(id => {
+    const t = TOPPINGS.find(x => x.id === id);
+    return t ? { id: t.id, name: t.name, qty: Number(chon[id]) || 1 } : null;
+  }).filter(Boolean);
+  const noCup = !!khoTxState.drinkNoCup;
+  const fake = { itemsArray: [{ itemId: m.id, name: m.name || '', size, qty, toppings }] };
+  const r = noCup
+    ? computeConsumptionForOrder(fake, recipes, toppingRecipes, {}, {}, null, [], {}, null)
+    : computeConsumptionForOrder(fake, recipes, toppingRecipes, packagingPresets, packagingItemOverrides, null, pkgRulesPack.rules, pkgRulesPack.config, null);
+  // Không rót vào ly thì "chưa khai bao bì" không phải lỗi.
+  const skipped = noCup ? r.skipped.filter(x => !/Bao bì/.test(x.reason || '')) : r.skipped;
+  // Chặn khi CHÍNH món chưa có định mức; topping/bao bì thiếu khai chỉ là trừ chưa đủ.
+  const missingRecipe = r.skipped.some(x => /^chưa có định mức|^chưa khai định mức cho size/.test(x.reason || ''));
+  return { agg: r.agg, prepAgg: r.prepAgg, skipped, missingRecipe, toppings, noCup };
+}
+
 async function drinkWasteUpdatePreview() {
   const el = document.getElementById('dwPreview');
   if (!el) return;
   const qty = Number(khoTxState.drinkQty) || 1;
   try {
-    const recipes = await ensureRecipesLoadedPOS();
-    const fake = { itemsArray: [{ itemId: khoTxState.drinkId, name: '', size: khoTxState.drinkSize, qty }] };
-    const { agg, prepAgg, skipped } = computeConsumptionForOrder(fake, recipes);
+    const m = _drinkWasteMenu().find(x => x.id === khoTxState.drinkId);
+    if (!m) { el.textContent = ''; return; }
+    const { agg, prepAgg, skipped, missingRecipe } = await _drinkWasteConsumption(m, khoTxState.drinkSize, qty);
     const n = Object.keys(agg).length + Object.keys(prepAgg).length;
-    if (skipped.length || !n) {
+    if (missingRecipe || !n) {
       el.innerHTML = '<span style="color:#c0392b;">⚠️ Món/size này chưa khai định mức — ghi nhận sẽ KHÔNG trừ được nguyên liệu nào. Báo Quản lý khai định mức trước.</span>';
       return;
     }
@@ -9430,7 +9479,8 @@ async function drinkWasteUpdatePreview() {
     let cost = 0;
     Object.keys(agg).forEach(id => { cost += agg[id] * costOf(id); });
     Object.keys(prepAgg).forEach(id => { cost += prepAgg[id] * prepCostOf(id); });
-    el.textContent = `Sẽ trừ ${n} loại nguyên liệu · Thiệt hại ước tính: ${Math.round(cost).toLocaleString('vi-VN')}đ`;
+    el.textContent = `Sẽ trừ ${n} loại nguyên liệu · Thiệt hại ước tính: ${Math.round(cost).toLocaleString('vi-VN')}đ`
+      + (skipped.length ? ` · ${skipped.length} phần chưa khai định mức, chưa trừ được` : '');
   } catch (err) {
     el.textContent = '';
   }
@@ -9461,19 +9511,18 @@ async function _submitDrinkWasteImpl() {
   const staffEmp = await resolveStaffPinAndCheckin('dwStaff');
   if (!staffEmp) return;
 
-  const recipes = await ensureRecipesLoadedPOS();
-  const fake = { itemsArray: [{ itemId: m.id, name: m.name, size: khoTxState.drinkSize, qty }] };
-  const { agg, prepAgg, skipped } = computeConsumptionForOrder(fake, recipes);
+  const { agg, prepAgg, skipped, missingRecipe, toppings, noCup } = await _drinkWasteConsumption(m, khoTxState.drinkSize, qty);
   const ingredientIds = Object.keys(agg);
   const prepIds = Object.keys(prepAgg);
-  if (!ingredientIds.length && !prepIds.length) {
+  if (missingRecipe || (!ingredientIds.length && !prepIds.length)) {
     // Chặn hẳn: ghi 1 bản ghi hao hụt không trừ được gì chỉ tạo cảm giác "đã ghi
     // rồi" trong khi kho vẫn sai — tệ hơn là báo lỗi để Quản lý khai định mức.
     toast('❌ Món/size này chưa khai định mức — chưa ghi được, báo Quản lý');
     return;
   }
 
-  const note = `Đổ ly thành phẩm: ${qty} × ${m.name} (${khoTxState.drinkSize}) · Lý do: ${reason}`;
+  const tpNote = toppings.length ? ' + ' + toppings.map(t => t.name + (t.qty > 1 ? ' ×' + t.qty : '')).join(', ') : '';
+  const note = `Đổ ly thành phẩm: ${qty} × ${m.name} (${khoTxState.drinkSize})${tpNote}${noCup ? ' · chưa rót vào ly' : ''} · Lý do: ${reason}`;
   // [MỚI] Một lần đổ ly sinh ra NHIỀU dòng ledger (mỗi nguyên liệu / bán thành
   // phẩm một dòng). Gắn cùng một wasteEventId để app Quản lý gom lại đúng "1 lần
   // đổ N ly", thay vì đếm số dòng ledger (ra con số vô nghĩa) hoặc bóc chuỗi note.
@@ -9483,7 +9532,8 @@ async function _submitDrinkWasteImpl() {
   const meta = {
     wasteKind: 'drink', wasteEventId,
     drinkItemId: m.id, drinkName: m.name, drinkSize: khoTxState.drinkSize,
-    drinkQty: qty, reason
+    drinkQty: qty, reason,
+    drinkToppings: toppings.map(t => ({ id: t.id, name: t.name, qty: t.qty })), drinkNoCup: noCup
   };
   // [FIX "đổ ly — nguyên liệu thô không phân bổ FIFO"] _wastePrepQtyPOS() (nhánh BTP ngay dưới)
   // đã phân bổ vào đúng lô đang mở trước khi ghi WASTE từ lâu (xem chú thích của hàm đó), nhưng
@@ -9514,6 +9564,7 @@ async function _submitDrinkWasteImpl() {
     toast(`✅ Đã ghi hao hụt ${qty} ly ${m.name} (${khoTxState.drinkSize})`);
   }
   if (skipped.length) console.info('[Đổ ly] Bỏ qua:', skipped);
+  khoTxState.drinkToppings = {}; khoTxState.drinkNoCup = false;
   showScreen('khoScreen');
   loadKhoScreen();
 }
@@ -11771,6 +11822,16 @@ async function prepReconWeigh(unitId) {
 // [NL-RECON] Mỗi tem là một khoảng giữa hai mốc cân. Phân định mức theo FIFO
 // của lượng THỰC giảm; mọi phần vượt định mức gắn đúng tem phát sinh và PIN
 // người chốt mẻ. Nguyên nhân do nhân viên chọn, không tự suy là tem cũ hỏng.
+// "Mẻ dùng thêm" đưa cả phần dư vào giá vốn của mẻ, không ghi hao hụt. Dùng thêm
+// quá ngưỡng này so với định lượng thì gắn cờ để Quản lý duyệt trong quanlygieo
+// (Tháng kết → Đối chiếu NL). POS không chặn, không đòi thêm mã.
+const PREP_EXTRA_REVIEW_RATIO = 0.05;
+function prepReconExtraNeedsReview(kind, observed, expected) {
+  if (kind !== 'extra_usage') return false;
+  const exp = Number(expected) || 0, extra = (Number(observed) || 0) - exp;
+  if (extra <= 0.015) return false;
+  return exp <= 0 || extra > exp * PREP_EXTRA_REVIEW_RATIO;
+}
 function prepReconClassifyUsage(submitted, expected, kind='') {
   let plannedLeft=Number(expected)||0,recipeLeft=Number(expected)||0;
   const lotBreakdown=submitted.map(u=>{
@@ -11903,7 +11964,8 @@ async function prepReconPostSave() {
       staff:row.weighedBy||b.staff,staffEmployeeId:row.weighedById||b.staffEmployeeId,referenceId:st.batchId,
       txId:'prep_after_'+st.batchId+'_'+st.itemId,deriveFromUnits:submitted[0].id!=='__aggregate',
       meta:{prepRecon:true,weighings:submitted,fifoAllocations:allocations,expectedQty:row.expected,
-        uncertainVariance:variance,varianceKind:row.varianceKind||'',needsReview:row.varianceKind==='uncertain',
+        uncertainVariance:variance,varianceKind:row.varianceKind||'',
+        needsReview:row.varianceKind==='uncertain'||prepReconExtraNeedsReview(row.varianceKind,observed,row.expected),
         codeIntervals,shortfall,responsibility}});
     const trace={itemName:(KHO_ITEMS_CACHE.find(x=>x.id===st.itemId)||{}).name||'',qty:actual,
       allocations,untracked:!allocations.length,reconciled:true,expectedQty:row.expected,
