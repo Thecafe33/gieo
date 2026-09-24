@@ -8242,7 +8242,10 @@ auth.onAuthStateChanged(user => {
     refreshOpeningChecklistGate(); // [GĐ5] tính cổng checklist đầu ca
     // Làm mới định kỳ: mục 'auto' (nấu xong BTP, kiểm kho) chuyển ✅ do việc làm ở
     // MÀN KHÁC, nên cổng phải tự cập nhật chứ không đợi nhân viên vào tab Ca làm việc.
-    setInterval(() => refreshOpeningChecklistGate(), 60 * 1000);
+    // [GIẢM-ĐỌC] Chỉ kiểm lại định kỳ khi cổng CÒN ĐANG CHẶN. Cổng đã mở (việc đầu ca
+    // xong) và đã mở ca thì ngừng hẳn tới ngày mới — trước đây vòng này chạy mỗi phút
+    // suốt cả ngày, mỗi lần đọc lại cả kho, dù việc đầu ca đã xong từ sáng.
+    setInterval(() => _openingGateTick(), 60 * 1000);
     loadEmployeesCachePOS(); // nạp danh sách nhân viên (PIN) — mục 2.1
     loadEmployeeShiftsTodayCache(); // [NEW] nạp check-in hôm nay — cần cho chốt chặn bán hàng
     loadRefillRulesCachePOS(); // nạp Refill Rules — để cảnh báo "chưa refill" tính được ngay lúc bán hàng
@@ -16612,6 +16615,15 @@ async function countRefillBelowMinPOS() {
 
 // ---- Cờ chặn bán, cùng cơ chế với _isShiftOpenedToday ----
 let _openChecklistBlocking = false;   // true = còn mục bắt buộc chưa xong
+let _openGateClearedDay = null;       // ngày cổng đã mở hẳn (đã mở ca + việc đầu ca xong)
+// Nhịp định kỳ của cổng. Bỏ qua khi app đang ẩn, và khi hôm nay cổng đã mở hẳn.
+// Nếu có luồng nào bật lại _openChecklistBlocking=true (vd vào lại màn kiểm kê đầu ca),
+// điều kiện thứ hai tự hết hiệu lực và nhịp này chạy lại như cũ.
+function _openingGateTick() {
+  if (document.hidden) return;
+  if (_openGateClearedDay === posDateKey() && !_openChecklistBlocking) return;
+  refreshOpeningChecklistGate();
+}
 async function refreshOpeningChecklistGate() {
   try {
     const opening = await fstore.collection('daily_openings_gieogieo').doc(posDateKey()).get();
@@ -16620,6 +16632,9 @@ async function refreshOpeningChecklistGate() {
     const [items, shiftCountLines] = await Promise.all([computeOpeningChecklistPOS(), computeShiftInventoryCountLinesPOS('open')]);
     _openChecklistBlocking = items.some(it =>
       it.blocking && !it.done && !doneIds.has(it.id) && !overrideIds.has(it.id)) || shiftCountLines.length > 0;
+    // Chỉ chốt "đã mở hẳn" khi tính THÀNH CÔNG (nhánh lỗi bên dưới cũng đặt false nhưng
+    // không được chốt) và đã mở ca — trước khi mở ca thì còn kiểm tiếp như cũ.
+    _openGateClearedDay = (!_openChecklistBlocking && _isShiftOpenedToday) ? posDateKey() : null;
   } catch (err) {
     // Lỗi mạng → KHÔNG chặn. Chặn cả quán không bán được vì rớt mạng tệ hơn nhiều
     // so với sót một mục checklist (cùng triết lý với _watchShiftOpenedStatus).
@@ -18713,7 +18728,9 @@ function shiftInventoryCountIntegerPOS(unit){
 async function computeShiftInventoryCountLinesPOS(phase){
   const day=shiftState.businessDate || posDateKey();
   const [snap, savedSnap] = await Promise.all([
-    fstore.collection('inventory_items_gieogieo').get(),
+    // [GIẢM-ĐỌC] Chỉ lấy món cần kiểm kê ở ca này thay vì cả kho — bộ lọc bên dưới vốn
+    // cũng chỉ giữ đúng các món này, nên kết quả không đổi.
+    fstore.collection('inventory_items_gieogieo').where('shiftCountTiming','in',[phase,'both']).get(),
     fstore.collection(phase==='open'?'daily_openings_gieogieo':'daily_closings_gieogieo').doc(day).get()
   ]);
   const saved=savedSnap.exists ? savedSnap.data() : {};
