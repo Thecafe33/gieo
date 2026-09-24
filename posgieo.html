@@ -11014,7 +11014,7 @@ function renderPrepBatchForm() {
     </div>` : ''}
     ${cooking.length ? `
     <div class="wal-section" style="margin:0 0 14px;border:1.5px solid #fcd34d;background:#fffbeb;">
-      <div class="wal-section-title" style="color:#92400e;">🔥 Đang chế biến (${cooking.length})</div>
+      <div class="wal-section-title" style="color:#92400e;font-size:15px;">🔥 Đang chế biến (${cooking.length})</div>
       ${cooking.map(b => {
         // [MỚI] Công thức mẻ này có dùng nguyên liệu "cái" (đơn vị nguyên, cần
         // dán tem) không — nếu có, nhắc quét ngay tại đây thay vì bắt nhân viên
@@ -11025,29 +11025,33 @@ function renderPrepBatchForm() {
         // mới còn cần banner nhắc quét ở đây.
         const atomicInputs = b.atomicScanDone ? [] : atomicUnitInputsForPrep(b.prepId);
         const reconPending = Object.entries(b.reconcileInputs || {}).filter(([,v])=>v.status!=='done');
+        const pendingNames = reconPending.map(([itemId]) => (KHO_ITEMS_CACHE.find(x=>x.id===itemId)||{}).name||itemId);
         return `
-        <div style="padding:8px 0;border-bottom:1px solid #fde68a;">
-          <div style="display:flex;justify-content:space-between;align-items:center;">
-            <div>
-              <div style="font-size:13.5px;font-weight:700;color:#92400e;">${b.prepName || ''}</div>
-              <div style="font-size:11.5px;color:#a16207;">Bắt đầu ${fmtDateTimeShort(b.startedAt)} · <span class="prep-countdown" data-ready="${b.expectedReadyAt || ''}">—</span></div>
+        <div style="background:#fff;border:1.5px solid #fde68a;border-radius:22px;padding:16px;margin-top:12px;box-shadow:0 2px 10px rgba(146,64,14,.06);">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
+            <div style="min-width:0;">
+              <div style="font-size:21px;font-weight:800;color:#78350f;line-height:1.25;">${escHtmlPos(b.prepName || '')}</div>
+              <div style="font-size:13px;color:#a16207;margin-top:4px;">Bắt đầu ${fmtDateTimeShort(b.startedAt)}</div>
             </div>
-            <div style="display:flex;gap:6px;flex-shrink:0;">
-              <button onclick="openPrepCancelForm('${b.id}')" style="padding:12px 14px;min-height:46px;background:#fff;color:#b91c1c;border:1.5px solid #fca5a5;border-radius:12px;font-weight:700;font-size:13.5px;cursor:pointer;white-space:nowrap;">Huỷ mẻ</button>
-              <button onclick="openPrepFinishForm('${b.id}')" ${reconPending.length?'disabled':''} style="padding:12px 16px;min-height:46px;background:${reconPending.length?'#d9e0e8':'#f59e0b'};color:#fff;border:none;border-radius:12px;font-weight:700;font-size:13.5px;cursor:pointer;white-space:nowrap;">Hoàn thành</button>
-            </div>
+            <span class="prep-countdown" data-ready="${b.expectedReadyAt || ''}" data-pending="${reconPending.length}" style="flex-shrink:0;padding:7px 12px;border-radius:99px;background:#fef3c7;color:#92400e;font-size:13.5px;font-weight:800;white-space:nowrap;">—</span>
           </div>
-          <!-- [MỚI] BTP nhiều bước — nhân viên cần mở lại xem đúng NL cần + cách làm giữa
-               chừng lúc đang nấu, không phải nhớ hết hoặc quay lại "Chế biến cấp 1" (màn
-               Quản lý, POS không vào được). -->
-          <button onclick="openPrepRecipeView('${b.id}')" class="pbt-recipe-btn">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="13" y2="16"/></svg>
+          ${reconPending.length?`<div id="prepRecon_${b.id}" style="margin-top:14px;padding:14px;background:#EAF3FA;border-radius:18px;">
+            <div style="font-size:14px;font-weight:800;color:#0062AD;margin-bottom:10px;">⚖️ Cân lại NL đã lấy · còn ${reconPending.length}</div>
+            ${reconPending.map(([itemId,row],i)=>{
+              const act=row.status==='processing'?'Tiếp tục chốt':prepReconIsCountable(KHO_ITEMS_CACHE.find(x=>x.id===itemId))?'Đếm còn lại':'Cân còn lại';
+              return `<button onclick="openPrepReconForm('${b.id}','${itemId}')" style="width:100%;min-height:64px;padding:12px 12px 12px 18px;margin-top:${i?8:0}px;background:#fff;border:2px solid #0062AD;border-radius:18px;display:flex;align-items:center;justify-content:space-between;gap:10px;cursor:pointer;font-family:'Google Sans',sans-serif;">
+                <span style="font-size:19px;font-weight:800;color:#0b2540;text-align:left;">${escHtmlPos(pendingNames[i])}</span>
+                <span style="flex-shrink:0;padding:10px 14px;border-radius:99px;background:#0062AD;color:#fff;font-size:14px;font-weight:800;">${act} →</span>
+              </button>`;}).join('')}
+          </div>`:''}
+          <button onclick="openPrepRecipeView('${b.id}')" class="pbt-recipe-btn" style="margin-top:12px;min-height:50px;border-radius:99px;font-size:15px;">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="13" y2="16"/></svg>
             Xem công thức &amp; cách chế biến
           </button>
-          ${reconPending.length?`<div style="padding:11px;margin-top:8px;background:#EAF3FA;border:1.5px solid #0062AD;border-radius:12px">
-            <b style="color:#0062AD">Đối chiếu NL sau khi lấy (${reconPending.length} còn chờ)</b>
-            ${reconPending.map(([itemId,row])=>`<button onclick="openPrepReconForm('${b.id}','${itemId}')" style="width:100%;padding:12px;margin-top:7px;background:#fff;border:1px solid #0062AD;border-radius:10px;color:#0062AD;text-align:left;font-weight:700">${escHtmlPos((KHO_ITEMS_CACHE.find(x=>x.id===itemId)||{}).name||itemId)} · ${row.status==='processing'?'Tiếp tục chốt':prepReconIsCountable(KHO_ITEMS_CACHE.find(x=>x.id===itemId))?'Đếm còn lại':'Cân còn lại'} →</button>`).join('')}
-          </div>`:''}
+          <div style="display:flex;gap:10px;margin-top:12px;">
+            <button onclick="openPrepCancelForm('${b.id}')" style="flex:1;min-height:56px;background:#fff;color:#b91c1c;border:2px solid #fca5a5;border-radius:99px;font-family:'Google Sans',sans-serif;font-weight:800;font-size:16px;cursor:pointer;">Huỷ mẻ</button>
+            <button onclick="${reconPending.length?`prepFinishBlocked('${b.id}')`:`openPrepFinishForm('${b.id}')`}" style="flex:1.6;min-height:56px;background:#16a34a;color:#fff;opacity:${reconPending.length?'.45':'1'};border:none;border-radius:99px;font-family:'Google Sans',sans-serif;font-weight:800;font-size:16px;cursor:pointer;box-shadow:${reconPending.length?'none':'0 4px 12px rgba(22,163,74,.35)'};">Hoàn thành</button>
+          </div>
           ${atomicInputs.length ? `
           <div style="margin-top:8px;padding:8px 10px;background:#fff7ed;border:1.5px solid #fdba74;border-radius:10px;">
             <div style="font-size:11.5px;font-weight:700;color:#9a3412;margin-bottom:4px;">📦 Mẻ này dùng nguyên liệu cần báo tem — quét mã gói vừa mở</div>
@@ -11161,9 +11165,9 @@ function renderPrepBatchForm() {
         const ton = it ? (Number(it.currentStock) || 0) : null;
         const thieu = (ton !== null) && exact > ton;
         return `
-        <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid #f0f0f0;font-size:13px;">
-          <span style="color:var(--td);">${nameOf(row.itemId)}${thieu ? `<span style="display:block;font-size:11px;color:#c0392b;font-weight:700;">Kho chỉ còn ${fmtPrepQty(ton)} ${unitOf(row.itemId)}</span>` : ''}</span>
-          <span style="font-weight:700;color:${thieu ? '#c0392b' : 'var(--gd)'};white-space:nowrap;">${fmtPrepQty(exact)} ${unitOf(row.itemId)}</span>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px 14px;margin-top:8px;background:${thieu ? '#fef2f2' : '#FFFCF0'};border:1.5px solid ${thieu ? '#fca5a5' : '#f0ead9'};border-radius:16px;">
+          <span style="min-width:0;font-size:17px;font-weight:800;color:var(--td);line-height:1.3;">${nameOf(row.itemId)}${thieu ? `<span style="display:block;font-size:12.5px;color:#c0392b;font-weight:700;margin-top:2px;">Kho chỉ còn ${fmtPrepQty(ton)} ${unitOf(row.itemId)}</span>` : ''}</span>
+          <span style="flex-shrink:0;padding:8px 14px;border-radius:99px;background:${thieu ? '#c0392b' : 'var(--gd)'};color:#fff;font-size:16px;font-weight:800;white-space:nowrap;">${fmtPrepQty(exact)} ${unitOf(row.itemId)}</span>
         </div>`;
       }).join('') || '<div style="font-size:12.5px;color:#bbb;padding:8px 0;">Công thức mẻ chưa khai nguyên liệu nào.</div>'}
       ${(() => {
@@ -11200,6 +11204,21 @@ function fmtPrepQty(n) {
   return Number.isInteger(r2) ? r2.toLocaleString('vi-VN') : r2.toLocaleString('vi-VN', { minimumFractionDigits: 1, maximumFractionDigits: 2 });
 }
 
+// Bấm Hoàn thành khi còn NL chưa cân lại: không mở form, báo rõ cần cân gì và
+// làm ô "Cân lại NL" của đúng mẻ đó nháy lên để nhân viên thấy ngay chỗ cần bấm.
+function prepFinishBlocked(batchId) {
+  const b = PREP_BATCHES_CACHE_POS.find(x => x.id === batchId);
+  if (!b) return;
+  const names = Object.entries(b.reconcileInputs || {}).filter(([, v]) => v.status !== 'done')
+    .map(([id]) => (KHO_ITEMS_CACHE.find(x => x.id === id) || {}).name || id);
+  toast('⚠️ Cần cân ' + names.join(', ') + ' trước khi Hoàn thành');
+  const box = document.getElementById('prepRecon_' + batchId);
+  if (box) {
+    box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    box.animate([{ boxShadow: '0 0 0 0 rgba(0,98,173,.6)' }, { boxShadow: '0 0 0 10px rgba(0,98,173,0)' }], { duration: 700, iterations: 3 });
+  }
+}
+
 // Đồng hồ đếm ngược cho lô đang nấu. Dùng 1 interval CHUNG cho mọi lô (không mỗi
 // lô một timer) và tự dọn khi rời màn — tránh rò rỉ timer khi vào/ra màn nhiều lần.
 let _prepCountdownTimer = null;
@@ -11212,7 +11231,10 @@ function startPrepCountdownTicker() {
       const ready = el.getAttribute('data-ready');
       if (!ready) { el.textContent = 'đang nấu'; return; }
       const ms = new Date(ready) - new Date();
-      if (ms <= 0) { el.textContent = '✅ đã đủ giờ — bấm Hoàn thành'; el.style.color = '#16a34a'; return; }
+      if (ms <= 0) {
+        el.textContent = Number(el.getAttribute('data-pending')) > 0 ? 'Đủ giờ · cân NL' : 'Đủ giờ';
+        el.style.color = '#15803d'; el.style.background = '#dcfce7'; return;
+      }
       const m = Math.floor(ms / 60000), sec = Math.floor((ms % 60000) / 1000);
       el.textContent = `còn ${m}:${String(sec).padStart(2, '0')}`;
     });
