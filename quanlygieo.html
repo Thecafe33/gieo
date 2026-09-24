@@ -5165,6 +5165,9 @@ function _ctnDetailRender(box, c, recv){
   (c.notEmptyChecks||[]).forEach(e=>{
     events.push({ at: e.at, label: 'Báo "chưa hết" (hệ thống tính nhầm)', detail: 'Cân lại còn '+fmtNum(e.newUnitBase,2)+' '+(c.unit||'')+(e.by?(' · '+e.by):'') });
   });
+  (c.managerAdjusts||[]).forEach(e=>{
+    events.push({ at: e.at, label: 'Quản lý sửa tồn', detail: fmtNum(e.before,2)+' → '+fmtNum(e.after,2)+' '+(c.unit||'')+(e.note?(' · '+e.note):'') });
+  });
   if(c.finishedAt) events.push({
     at: c.finishedAt, label: 'Báo hết',
     detail: (c.finishedBy?('bởi '+c.finishedBy):'') + (Number(c.wasteBase)>0 ? (' · còn thừa '+fmtNum(c.wasteBase,0)+' '+(c.unit||'')) : '')
@@ -5180,6 +5183,7 @@ function _ctnDetailRender(box, c, recv){
     <div class="row"><span class="rl">Nguyên liệu</span><span class="rv">${escapeHtmlAttr(c.itemName||'')}</span></div>
     <div class="row"><span class="rl">Dung tích khai báo</span><span class="rv">${fmtNum(c.baseQty,2)} ${escapeHtmlAttr(c.unit||'')}</span></div>
     <div class="row"><span class="rl">Còn lại</span><span class="rv"><b style="color:${Number(c.unitBase)<0?'var(--bad)':'var(--td)'}">${fmtNum(c.unitBase,2)} ${escapeHtmlAttr(c.unit||'')}</b></span></div>
+    ${c.status==='open' ? `<button class="btn" style="width:100%;margin:10px 0 6px" onclick="ctnStartAdjust('${c.id}')">Sửa tồn mã này</button>` : ''}
     <div class="row"><span class="rl">Trạng thái</span><span class="rv">${escapeHtmlAttr(c.status||'')}</span></div>
     ${recv ? `<div class="row"><span class="rl">Phiếu nhận</span><span class="rv">${escapeHtmlAttr(recv.supplier||'(không rõ NCC)')}${recv.poId?' · PO '+escapeHtmlAttr(recv.poId):''}</span></div>`
       : (c.receiveRefId ? `<div class="small-note" style="margin-top:6px">Không đọc được phiếu nhận gốc (id: ${escapeHtmlAttr(c.receiveRefId)}) — có thể phiếu đã bị xoá.</div>` : '<div class="small-note" style="margin-top:6px">Tem không có phiếu nhận gốc — nhập trước khi bật liên kết này.</div>')}
@@ -5200,6 +5204,167 @@ function _ctnDetailRender(box, c, recv){
     ` : ''}
     ${c.revertedFinish ? `<div class="small-note" style="margin-top:10px;color:var(--ok)">Đã khôi phục về "sealed" lúc ${dt(c.revertedFinish.at)} bởi ${escapeHtmlAttr(c.revertedFinish.by||'—')}${c.revertedFinish.reason?' · lý do: '+escapeHtmlAttr(c.revertedFinish.reason):''}</div>` : ''}
   `;
+}
+
+// [MỚI] Sửa tồn MỘT mã đang mở, ngay trong "Chi tiết tem". Trước đây chỉ sửa được tồn
+// TỔNG của nguyên liệu (Kho → Nguyên liệu → Sửa tồn), không chọn được mã nào lệch. Với món
+// có tem, tồn tổng lại được POS suy ra từ unitBase của từng mã trong RTDB
+// (_ueRecomputeCurrentStock), nên sửa đúng chỗ là sửa unitBase của chính mã đó:
+//   1. RTDB active_units: ghi unitBase mới, chỉ khi số trên máy chủ vẫn đúng số Quản lý
+//      đang nhìn (có bill trừ xen giữa thì dừng, bắt mở lại), và không có mẻ đang khóa cân.
+//   2. Firestore (1 transaction): currentStock ± chênh lệch, 1 dòng ADJUSTMENT trong sổ kho
+//      (id cố định theo lượt sửa → bấm lại không ghi đúp), bản sao unitBase trên tem.
+// KHÔNG cộng vào untrackedPendingDelta như applyStockTransaction(): phần chênh đã nằm trong
+// unitBase của mã, cộng thêm ở đó là tính hai lần ở lượt recompute kế tiếp.
+const CTN_ADJ_REASONS = [
+  ['can_lai',  'Cân lại thực tế'],
+  ['tru_sai',  'Hệ thống trừ sai'],
+  ['khac',     'Khác']
+];
+let _ctnAdjust = null;   // { c, live, opId, reason }
+
+async function ctnStartAdjust(containerId){
+  const box = document.getElementById('ctnDetailBody');
+  if(!box) return;
+  showLoading(box);
+  try{
+    await ensureAuth();
+    const doc = await fstore.collection(CTN_COLL).doc(containerId).get();
+    if(!doc.exists) throw new Error('Không tìm thấy tem này — có thể đã bị xoá.');
+    const c = { id: doc.id, ...doc.data() };
+    if(c.status !== 'open') throw new Error('Chỉ sửa được tồn của mã đang mở.');
+    const rt = (await _ueActiveUnitsRef(c.itemId).once('value')).val() || {};
+    if(rt.__prepLock) throw new Error('Nguyên liệu này đang chờ cân ở một mẻ chế biến bên POS. Chốt số cân ở mẻ đó trước rồi sửa tồn.');
+    const u = rt[c.id];
+    if(!u) throw new Error('Mã này không còn trong danh sách đang mở của hệ thống trừ kho. Bấm Làm mới rồi thử lại.');
+    _ctnAdjust = { c, live: Number(u.unitBase) || 0, opId: 'mgradj_' + c.id + '_' + Date.now(), reason: 'can_lai' };
+    _ctnAdjustRender(box);
+  }catch(err){
+    box.innerHTML = `<div class="muted">${escapeHtmlAttr(err.message || String(err))}</div>
+      <button class="btn outline" style="width:100%;margin-top:12px" onclick="ctnShowDetail('${containerId}')">Quay lại</button>`;
+  }
+}
+
+function _ctnAdjustRender(box){
+  const a = _ctnAdjust, c = a.c, u = escapeHtmlAttr(c.unit || '');
+  box.innerHTML = `
+    <div style="font-size:20px;font-weight:800;color:var(--td);line-height:1.25">${escapeHtmlAttr(c.itemName || '')}</div>
+    <div style="display:flex;gap:8px;align-items:center;margin:8px 0 14px">
+      <span style="font-size:16px;font-weight:800;letter-spacing:.8px;background:#fff;border:1px solid #E6E1D6;border-radius:8px;padding:4px 10px">${escapeHtmlAttr(c.code || '')}</span>
+      <span class="muted-sm">Dung tích ${fmtNum(c.baseQty,2)} ${u}</span>
+    </div>
+    <div class="row"><span class="rl">Hệ thống đang ghi</span><span class="rv"><b>${fmtNum(a.live,2)} ${u}</b></span></div>
+    <div class="field" style="margin-top:14px">
+      <label>Tồn thực tế còn lại (${u})</label>
+      <input type="number" inputmode="decimal" min="0" step="any" id="ctnAdjQty" placeholder="VD: ${fmtNum(Math.max(0,a.live),0)}" oninput="_ctnAdjustDiff()"
+        style="font-size:22px;font-weight:800;height:56px">
+    </div>
+    <div id="ctnAdjDiff" style="min-height:22px;margin:-6px 0 12px;font-weight:700"></div>
+    <div class="field">
+      <label>Lý do</label>
+      <div class="filter-bar" style="margin:0">${CTN_ADJ_REASONS.map(([k,l])=>
+        `<button class="ftag ${a.reason===k?'active':''}" onclick="_ctnAdjust.reason='${k}'; _ctnAdjustRender(document.getElementById('ctnDetailBody'))">${l}</button>`).join('')}</div>
+    </div>
+    <div class="field">
+      <label>Ghi chú${a.reason==='khac' ? ' (bắt buộc)' : ''}</label>
+      <input type="text" id="ctnAdjNote" placeholder="VD: cân lại lúc kiểm kho chiều" value="${escapeHtmlAttr(a.note || '')}" oninput="_ctnAdjust.note=this.value">
+    </div>
+    <button class="btn" id="ctnAdjSave" style="width:100%" onclick="ctnSubmitAdjust()">Lưu tồn mới</button>
+    <button class="btn outline" style="width:100%;margin-top:8px" onclick="_ctnAdjust=null; ctnShowDetail('${c.id}')">Quay lại</button>
+    <div class="small-note" style="margin-top:10px">Chênh lệch được ghi vào sổ kho là "Điều chỉnh" của mã ${escapeHtmlAttr(c.code || '')}. Phần thiếu hiện trong báo cáo thành thất thoát.</div>`;
+  if(a.qtyStr != null){ const i = document.getElementById('ctnAdjQty'); i.value = a.qtyStr; _ctnAdjustDiff(); }
+}
+
+function _ctnAdjustDiff(){
+  const a = _ctnAdjust; if(!a) return;
+  const inp = document.getElementById('ctnAdjQty'), out = document.getElementById('ctnAdjDiff');
+  a.qtyStr = inp.value;
+  const v = Number(inp.value);
+  if(inp.value.trim() === '' || !Number.isFinite(v)){ out.innerHTML = ''; return; }
+  const d = Math.round((v - a.live)*100)/100, u = escapeHtmlAttr(a.c.unit || '');
+  out.innerHTML = Math.abs(d) < 0.005 ? `<span class="muted-sm">Không đổi</span>`
+    : d < 0 ? `<span style="color:var(--bad)">Thiếu ${fmtNum(-d,2)} ${u} so với hệ thống</span>`
+    : `<span style="color:var(--ok)">Dư ${fmtNum(d,2)} ${u} so với hệ thống</span>`;
+}
+
+async function ctnSubmitAdjust(){
+  const a = _ctnAdjust; if(!a) return;
+  const raw = (document.getElementById('ctnAdjQty').value || '').trim();
+  const qty = Math.round(Number(raw)*100)/100;
+  if(raw === '' || !Number.isFinite(qty) || qty < 0){ toast('⚠️ Nhập số tồn thực tế (từ 0 trở lên)'); return; }
+  const cap = Number(a.c.baseQty) || 0;
+  if(cap > 0 && qty > cap * 1.05){ toast('⚠️ Số mới lớn hơn dung tích của mã ('+fmtNum(cap,2)+' '+(a.c.unit||'')+')'); return; }
+  if(Math.abs(qty - a.live) < 0.005){ toast('ℹ️ Số mới giống số hệ thống, không cần sửa'); return; }
+  const note = (a.note || '').trim();
+  if(a.reason === 'khac' && !note){ toast('⚠️ Ghi rõ lý do vào ô Ghi chú'); return; }
+  const lyDo = (CTN_ADJ_REASONS.find(r => r[0] === a.reason) || [,''])[1] + (note ? ' · ' + note : '');
+  const btn = document.getElementById('ctnAdjSave');
+  if(btn){ btn.disabled = true; btn.textContent = 'Đang lưu…'; }
+  try{
+    await ensureAuth();
+    const r = await ctnAdjustCore(a.c, qty, a.live, a.opId, lyDo);
+    logAudit('adjust','stock_container',a.c.id,{ unitBaseFrom: r.before, unitBaseTo: qty, reason: a.reason });
+    toast('✅ Đã sửa tồn ' + (a.c.code||'') + ': ' + fmtNum(r.before,2) + ' → ' + fmtNum(qty,2) + ' ' + (a.c.unit||''));
+    _ctnAdjust = null;
+    ctnShowDetail(a.c.id);
+    if(document.getElementById('ctnAllBody')) renderKhoAllItemsBody(true);
+  }catch(err){
+    console.error('ctnSubmitAdjust lỗi', err);
+    showError(err.message || String(err));
+    if(btn){ btn.disabled = false; btn.textContent = 'Lưu tồn mới'; }
+  }
+}
+
+async function ctnAdjustCore(c, qty, expected, opId, note){
+  const parent = _ueActiveUnitsRef(c.itemId);
+  // Đọc node cha từ máy chủ trước: transaction RTDB có thể được gọi lần đầu với cache rỗng.
+  const map = (await parent.once('value')).val() || {};
+  let before = null, abort = '';
+  const res = await parent.transaction(cur => {
+    before = null; abort = '';
+    const src = cur == null ? map : cur;
+    if(src.__prepLock){ abort = 'lock'; return; }
+    const u = src[c.id];
+    if(!u){ abort = 'missing'; return; }
+    if(u.lastMgrAdjustOp === opId){ before = Number(u.lastMgrAdjustBefore) || 0; return src; }  // lượt trước đã ghi RTDB
+    if(Math.abs((Number(u.unitBase) || 0) - expected) > 0.015){ abort = 'amount'; return; }
+    before = Number(u.unitBase) || 0;
+    return { ...src, [c.id]: { ...u, unitBase: qty, lastMgrAdjustOp: opId, lastMgrAdjustBefore: before } };
+  });
+  if(!res.committed){
+    if(abort === 'lock') throw new Error('Nguyên liệu vừa bị khóa cho một mẻ chế biến. Chốt số cân bên POS rồi sửa lại.');
+    if(abort === 'missing') throw new Error('Mã này vừa được báo hết hoặc không còn mở. Chưa sửa gì.');
+    if(abort === 'amount') throw new Error('Tồn của mã vừa đổi (có bill mới trừ kho). Chưa sửa gì. Bấm Quay lại rồi mở Sửa tồn lại để xem số mới.');
+    throw new Error('Chưa ghi được tồn mới. Bấm Lưu lại.');
+  }
+  const delta = Math.round((qty - before)*100)/100;
+  const nowISO = new Date().toISOString();
+  memoDropItems();
+  const itemRef = fstore.collection('inventory_items_gieogieo').doc(c.itemId);
+  const txRef = fstore.collection('stock_transactions_gieogieo').doc(opId);
+  const ctnRef = fstore.collection(CTN_COLL).doc(c.id);
+  try{
+    await fstore.runTransaction(async t => {
+      const done = await t.get(txRef);
+      if(done.exists) return;
+      const it = await t.get(itemRef);
+      if(!it.exists) throw new Error('Nguyên liệu không tồn tại (có thể vừa bị xoá)');
+      const next = Math.round(((Number(it.data().currentStock) || 0) + delta)*100)/100;
+      t.update(itemRef, { currentStock: next, updatedAt: nowISO });
+      t.set(txRef, {
+        itemId: c.itemId, type: 'ADJUSTMENT', qty: delta, resultingStock: next,
+        note: `Sửa tồn mã ${c.code||''}: ${fmtNum(before,2)} → ${fmtNum(qty,2)} ${c.unit||''}` + (note ? ' · ' + note : ''),
+        staff: 'Quản lý', createdAt: nowISO, businessDate: dkey(new Date()),
+        status: 'posted', source: 'management', referenceId: c.id
+      });
+      t.update(ctnRef, { unitBase: qty,
+        managerAdjusts: firebase.firestore.FieldValue.arrayUnion({ at: nowISO, before, after: qty, note: note || '', op: opId }) });
+    });
+  }catch(err){
+    // RTDB đã giữ số mới; lượt Lưu lại dùng cùng opId nên không trừ hai lần.
+    throw new Error('Đã ghi tồn mới cho mã nhưng chưa ghi được sổ kho: ' + (err.message || err) + '. Bấm Lưu lại để hoàn tất.');
+  }
+  return { before, delta };
 }
 
 // [MỚI] Khôi phục MỘT tem "cái rời" (đơn vị nguyên) bị writeAtomicContainerFinish() bên
@@ -5372,7 +5537,7 @@ function _billTraceRenderResult(){
 // [MỚI] "KHO 2.0" — không gian CHỈ ĐỌC để đi theo chuỗi FIFO (tem → phiếu nhận, tem →
 // bill/mẻ, lô BTP → tem → bill), tách khỏi nhóm "Kho" phía trên vốn đang trộn cấu
 // hình + nhập hàng + kiểm kê + sổ sách. Mọi thao tác GHI vẫn ở nhóm Kho / bên POS —
-// ở đây không có nút "Sửa tồn" nào cả. Tái dùng nguyên functions/collection đã có từ
+// ngoại lệ duy nhất là "Sửa tồn mã này" trong Chi tiết tem đang mở (ctnStartAdjust). Tái dùng nguyên functions/collection đã có từ
 // Tuần 1-4 (ctnShowDetail, _batchDetailRender, billTraceSearch, computeFifoCoverage
 // Today) — Kho 2.0 chỉ là một lối vào khác, không phải một tầng dữ liệu mới.
 // ============================================================
