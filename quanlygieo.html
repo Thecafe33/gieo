@@ -953,7 +953,16 @@ html.tab-ui .field input[type=checkbox],html.tab-ui .field input[type=radio]{
 .k2-stat span{display:block;font-size:12.5px;color:var(--gt);margin-top:2px;}
 .k2-stat.click{cursor:pointer;}
 .k2-stat.bad b{color:var(--bad);} .k2-stat.warn b{color:var(--warn);} .k2-stat.ok b{color:var(--ok);}
-@media (max-width:600px){.k2-tabs-l{width:100%;}.k2-nav button{min-height:46px;padding:0 16px;font-size:15px;}}
+@media (max-width:600px){.k2-tabs-l{width:100%;}.k2-nav button{min-height:46px;padding:0 16px;font-size:15px;}.k2-stats{grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;}.k2-stat{padding:12px;}.k2-stat b{font-size:22px;}.k2-stat span{display:none;}}
+.k2-list{display:flex;flex-direction:column;gap:10px;}
+.k2-row{display:flex;align-items:center;gap:12px;width:100%;min-height:60px;padding:0 18px;border-radius:18px;border:1.5px solid var(--line);background:var(--card);color:var(--td);font-size:16px;font-weight:700;text-align:left;cursor:pointer;font-family:inherit;}
+.k2-row.red{border-color:var(--bad-line);} .k2-row.yellow{border-color:var(--warn-line);}
+.k2-dot{width:10px;height:10px;border-radius:50%;background:var(--gt);flex-shrink:0;}
+.k2-row.red .k2-dot{background:var(--bad);} .k2-row.yellow .k2-dot{background:var(--warn);}
+.k2-row-l{flex:1;min-width:0;}
+.k2-row-n{font-size:18px;font-weight:800;font-variant-numeric:tabular-nums;}
+.k2-row.red .k2-row-n{color:var(--bad);} .k2-row.yellow .k2-row-n{color:var(--warn);}
+.k2-row svg{color:var(--gt);flex-shrink:0;}
 .k2-sec{font-size:18px;font-weight:800;color:var(--td);margin:20px 2px 10px;display:flex;align-items:center;gap:8px;}
 
 html.tab-ui .edit-sheet.nl-sheet{width:min(1080px,94vw);max-height:92vh;}
@@ -5554,15 +5563,14 @@ function _billTraceRenderResult(){
 let curKho2Sub = 'dash';
 function goKho2(sub){
   curEntryTab = 'kho2';
+  khoNavOpen = true;
   curKho2Sub = sub || 'dash';
   switchScreen('entry');
 }
-const K2_NAV = [['dash','Tổng quan','pulse'],['items','Tem NL','package'],['prep','Bán thành phẩm','note'],['search','Tra cứu','search']];
 function renderEntryKho2(){
   const body = document.getElementById('entryBody');
   body.innerHTML = `
-    <div class="k2-nav">${K2_NAV.map(([k,l,i])=>
-      `<button class="${curKho2Sub===k?'active':''}" onclick="goKho2('${k}')">${ic(i,18)}${l}</button>`).join('')}</div>
+    ${khoSubNavHtml('kho2:' + curKho2Sub)}
     <div id="kho2Body"><div class="muted">Đang tải...</div></div>
   `;
   if(curKho2Sub==='search') renderKho2Search();
@@ -5571,6 +5579,9 @@ function renderEntryKho2(){
   else renderKho2Dashboard();
 }
 
+// [GỘP] Tổng quan = "Cần xử lý" cũ của Kho + Tổng quan FIFO của Kho 2.0. Việc kho lấy
+// từ computeStoreHealth() (zone 'kho') như màn Cần xử lý cũ; các việc về tem đã có ô số
+// riêng ở trên nên không lặp lại trong danh sách.
 async function renderKho2Dashboard(){
   const box = document.getElementById('kho2Body');
   if(!box) return;
@@ -5579,19 +5590,16 @@ async function renderKho2Dashboard(){
     await ensureAuth();
     if(!INVENTORY_ITEMS.length) INVENTORY_ITEMS = await loadInventoryItems();
     const today = dkey(new Date());
-    const [, , , alertsSnap, coverage, batchesSnap] = await Promise.all([
+    const [, , , health, coverage, batchesSnap] = await Promise.all([
       k2TemLoad('review', true).catch(()=>[]),
       k2TemLoad('unlabeled', true).catch(()=>[]),
       k2TemLoad('open', true).catch(()=>[]),
-      fstore.collection('alerts_gieogieo').where('status','==','new').get().catch(()=>null),
+      computeStoreHealth().catch(err=>{ console.warn('Tổng quan kho: computeStoreHealth lỗi', err); return null; }),
       computeFifoCoverageToday().catch(()=>({trackedQty:0, trackedCovered:0, pct:null})),
       fstore.collection('prep_batches_gieogieo').where('businessDate','==',today).get().catch(()=>null)
     ]);
-    // Đếm theo type thay vì đếm nguyên collection — alerts_gieogieo còn chứa nhiều
-    // loại cảnh báo khác (chi phí, checklist...) không liên quan đến FIFO/kho.
-    const KHO_ALERT_TYPES = ['missing_recipe','untracked_unit_consumption','gogs_consumption_failed','allocate_rtdb_error','bill_delete_reverse_failed','po_receive_sync_failed'];
-    let alertTotal = 0, alertsReadErr = !alertsSnap;
-    if(alertsSnap) alertsSnap.forEach(d=>{ if(KHO_ALERT_TYPES.includes(d.data().type)) alertTotal++; });
+    const viec = (health||[]).filter(x=>x.zone==='kho' && !/goContainers/.test(x.onclick||''))
+      .sort((a,b)=>(a.tier==='red'?0:1)-(b.tier==='red'?0:1));
     let batchesToday = 0, atomicBatches = 0, batchesReadErr = !batchesSnap;
     if(batchesSnap) batchesSnap.forEach(d=>{ batchesToday++; if((d.data().atomicScannedContainerIds||[]).length) atomicBatches++; });
     const n = k => k2TemCount(k) || 0;
@@ -5602,20 +5610,29 @@ async function renderKho2Dashboard(){
         <small>${title}</small><b>${value}</b>${sub?`<span>${escapeHtmlAttr(sub)}</span>`:''}
       </div>`;
     const goTem = k => `ctnAllSub='${k}'; goKho2('items')`;
+    const row = x => `<button class="k2-row ${x.tier}" onclick="${x.onclick}">
+        <span class="k2-dot"></span><span class="k2-row-l">${x.label}</span>
+        <span class="k2-row-n">${x.count}</span>${ic('chevronRight',18)}</button>`;
+    const viecHtml = health == null
+      ? `<div class="k2-empty">Không kiểm tra được việc kho. Bấm nút tải lại ở góc trên.</div>`
+      : viec.length ? `<div class="k2-list">${viec.map(row).join('')}</div>`
+      : `<div class="k2-empty">Không có việc kho nào đang chờ.</div>`;
     box.innerHTML = `
-      <div class="k2-sec" style="margin-top:0">Cần xử lý</div>
+      <div class="k2-sec" style="margin-top:0">Tem cần xử lý</div>
       <div class="k2-stats">
-        ${stat('Tem cần xem lại', n('review'), n('review')?'bad':'ok', 'Báo hết khi còn nhiều', goTem('review'))}
+        ${stat('Cần xem lại', n('review'), n('review')?'bad':'ok', 'Báo hết khi còn nhiều', goTem('review'))}
         ${stat('Quá hạn sau mở', n('expired'), n('expired')?'bad':'ok', 'Bỏ ngay', goTem('expired'))}
         ${stat('Tem chưa dán', n('unlabeled'), n('unlabeled')?'warn':'ok', 'Đã sinh mã, chưa dán', goTem('unlabeled'))}
-        ${stat('Cảnh báo kho', alertsReadErr?'?':alertTotal, alertTotal?'bad':'ok', 'Thiếu định mức, lỗi trừ kho', "goKho('inbox')")}
       </div>
+      <div class="k2-sec">Việc kho khác${viec.length?` <span class="nl-pill">${viec.length}</span>`:''}</div>
+      ${viecHtml}
       <div class="k2-sec">Hôm nay</div>
       <div class="k2-stats">
         ${stat('Tem đang mở', n('open'), '', 'Đang dùng dở', goTem('open'))}
         ${stat('Độ phủ FIFO', pctText, pctTone, coverage.trackedQty>0 ? `${fmtNum(coverage.trackedCovered,0)}/${fmtNum(coverage.trackedQty,0)} có tem` : 'Chưa có giao dịch', '')}
         ${stat('Lô BTP hôm nay', batchesReadErr?'?':batchesToday, '', batchesReadErr?'':`${atomicBatches} lô có quét tem`, "kho2PrepFilter='today'; goKho2('prep')")}
       </div>
+      <div style="margin-top:16px"><button class="btn outline k2-refresh" onclick="openChecklistLogSheet()">${ic('clock',18)} Nhật ký thời gian checklist</button></div>
     `;
   }catch(err){
     console.error('renderKho2Dashboard lỗi', err);
@@ -10321,30 +10338,27 @@ const NAV_SECTIONS = [
   // lần (Lý do hao hụt, Checklist ca) chung với việc hằng ngày (Refill, Kiểm kê),
   // và để "Nhập hàng loạt" — vốn là nhập DANH MỤC từ Excel — trong nhóm "Nhập
   // hàng", ai đọc cũng tưởng là đưa hàng vào kho.
-  // [SẮP LẠI] Kho chỉ còn việc HÀNG HOÁ. Bao bì, GOGS Topping sang nhóm Menu (thuộc
-  // tính của món); Checklist ca sang Vận hành (việc của ca, không phải của kho).
-  // Refill, Tồn theo vị trí, Vị trí kho gộp thành một mục có 3 tab (KHO_TAB_GROUPS).
-  { group:'Kho', collapsible:true, items:[
-    {key:'kho:inbox',        label:'Cần xử lý',       go:"goKho('inbox')",        sub:'Việc hằng ngày'},
-    {key:'kho:po',           label:'Đặt & nhận hàng', go:"goKho('po')"},
-    {key:'kho:stockcount',   label:'Kiểm kê',         go:"goKho('stockcount')"},
-    {key:'kho:refill',       label:'Refill & vị trí', go:"goKho('refill')"},
-    {key:'kho:history',      label:'Sổ kho',          go:"goKho('history')"},
-    {key:'kho:items',        label:'Nguyên liệu',     go:"goKho('items')",        sub:'Danh mục'},
-    {key:'kho:prep',         label:'Chế biến cấp 1',  go:"goKho('prep')"},
-    {key:'kho:vessels',      label:'Dụng cụ đựng',    go:"goKho('vessels')"},
-    {key:'kho:wastereasons', label:'Lý do hao hụt',   go:"goKho('wastereasons')"},
+  // [GỘP] Kho và Kho 2.0 giờ là MỘT khối "Kho" (3 nhóm liền nhau). Màn cũ (renderKho*) và màn Kho 2.0
+  // (renderKho2*) vẫn là hai bộ máy vẽ riêng, chỉ lối vào là chung. Mỗi nhóm con
+  // (sub) cũng là thanh tab trên đầu màn — xem khoSubNavHtml().
+  // Không gập: các mục Kho dùng hằng ngày nên phải bấm được ngay (Elio, 24/09).
+  { group:'Kho · Hằng ngày', kho:true, items:[
+    {key:'kho2:dash',        ic:'pulse',     label:'Tổng quan',       go:"goKho2('dash')"},
+    {key:'kho:po',           ic:'download',  label:'Đặt & nhận hàng', go:"goKho('po')"},
+    {key:'kho:stockcount',   ic:'clipboard', label:'Kiểm kê',         go:"goKho('stockcount')"},
+    {key:'kho:refill',       ic:'inbox',     label:'Refill & vị trí', go:"goKho('refill')"},
   ]},
-  // [MỚI] "Kho 2.0" — CHỈ ĐỌC, không sửa số liệu gì ở đây (mọi thao tác ghi vẫn ở nhóm
-  // Kho phía trên / bên POS). Tách riêng vì Kho hiện tại trộn cấu hình + vận hành + sổ
-  // sách + truy xuất — FIFO cần một không gian chỉ để "đi theo chuỗi" tem → lô → bill,
-  // không cần form sửa công thức nằm cạnh timeline tem. Tái dùng dữ liệu Tuần 1-4 đã
-  // có (usageEvents, inputTrace, order_stock_traces, atomicScannedContainerIds).
-  { group:'Kho 2.0', items:[
-    {key:'kho2:dash',   ic:'pulse',  label:'Tổng quan',          go:"goKho2('dash')"},
-    {key:'kho2:items',  ic:'package',label:'Tem NL',             go:"goKho2('items')"},
-    {key:'kho2:prep',   ic:'note',   label:'Bán thành phẩm',     go:"goKho2('prep')"},
-    {key:'kho2:search', ic:'search', label:'Tra cứu tem / bill / lô', go:"goKho2('search')"},
+  { group:'Kho · Tem, lô & sổ', kho:true, items:[
+    {key:'kho2:items',       ic:'receipt',   label:'Tem NL',          go:"goKho2('items')"},
+    {key:'kho2:prep',        ic:'flame',     label:'Lô BTP',          go:"goKho2('prep')"},
+    {key:'kho2:search',      ic:'search',    label:'Tra cứu',         go:"goKho2('search')"},
+    {key:'kho:history',      ic:'clock',     label:'Sổ kho',          go:"goKho('history')"},
+  ]},
+  { group:'Kho · Danh mục', kho:true, items:[
+    {key:'kho:items',        ic:'package',   label:'Nguyên liệu',     go:"goKho('items')"},
+    {key:'kho:prep',         ic:'note',      label:'Bán thành phẩm',  go:"goKho('prep')"},
+    {key:'kho:vessels',      ic:'sliders',   label:'Dụng cụ đựng',    go:"goKho('vessels')"},
+    {key:'kho:wastereasons', ic:'alert',     label:'Lý do hao hụt',   go:"goKho('wastereasons')"},
   ]},
   // [GOM MÀN] Bốn mục này TRƯỚC ĐÂY nằm rải: hai cái trong nhánh Kho (vốn đã 16
   // mục), hai cái trong Cấu hình. Nhưng chúng không phải việc kho hằng ngày cũng
@@ -10428,11 +10442,20 @@ const KHO_TAB_GROUPS = {
 const KHO_TAB_OWNER = {};
 Object.entries(KHO_TAB_GROUPS).forEach(([owner,tabs])=>tabs.forEach(([k])=>{ KHO_TAB_OWNER[k]=owner; }));
 const KHO_SIDEBAR_SUBS = (()=>{
-  const sec = NAV_SECTIONS.find(x=>x.collapsible) || {items:[]};
+  const sec = {items: NAV_SECTIONS.filter(x=>x.kho).flatMap(x=>x.items)};
   const set = new Set(sec.items.filter(i=>i.key.startsWith('kho:')).map(i=>i.key.slice(4)));
   Object.keys(KHO_TAB_OWNER).forEach(k=>{ if(set.has(KHO_TAB_OWNER[k])) set.add(k); });
   return set;
 })();
+// Mọi key (kho: lẫn kho2:) nằm trong nhánh Kho — để biết đang đứng trong Kho.
+const KHO_NAV_KEYS = new Set(NAV_SECTIONS.filter(x=>x.kho).flatMap(x=>x.items).map(i=>i.key));
+// Thanh tab trên đầu màn: các mục cùng nhóm con với mục đang đứng. Trên điện thoại
+// sidebar bị ẩn, nên đây là đường chuyển qua lại giữa các màn Kho liền kề.
+function khoSubNavHtml(curKey){
+  const g = (NAV_SECTIONS.find(x=>x.kho && x.items.some(it=>it.key===curKey))||{}).items;
+  if(!g) return '';
+  return `<div class="k2-nav">${g.map(it=>`<button class="${it.key===curKey?'active':''}" onclick="${it.go}">${it.label}</button>`).join('')}</div>`;
+}
 function toggleKhoNav(ev){
   if(ev) ev.stopPropagation();
   khoNavOpen = !khoNavOpen;
@@ -10482,7 +10505,7 @@ function renderSidebarNav(){
   const nav = document.getElementById('sidebarNav');
   if(!nav) return;
   const cur = currentNavKey();
-  const inKho = cur.startsWith('kho:') && KHO_SIDEBAR_SUBS.has(cur.slice(4));
+  const inKho = KHO_NAV_KEYS.has(cur);
   const q = noAccent(navQuery);
   const khoExpanded = q ? true : khoNavOpen;   // đang tìm kiếm thì luôn mở để thấy kết quả
   const match = it => !q || noAccent(it.label).includes(q);
@@ -11785,7 +11808,7 @@ function prepExtendBodyHTML(b, p){
     <div class="row"><span class="rl">Trạng thái hiện tại</span><span class="rv"><span class="tier tier-red">${PREP_BATCH_STATUS_LABEL[b.status]||b.status}</span></span></div>
     <div class="row"><span class="rl">HSD hiện tại</span><span class="rv">${dt(b.expiresAt)}</span></div>
     ${daBiDong ? `<div class="alert amber" style="margin-top:8px"><span class="ic">${ic('alert',15)}</span><div>Lô này đã bị hệ thống tự đóng hết hạn (tồn đã về 0). Gia hạn ở đây sẽ vừa <b>khôi phục tồn</b> vừa <b>đẩy HSD mới</b> — nếu chỉ đẩy HSD mà không nhập số còn lại, lô vẫn ở trạng thái hết hạn với tồn 0.</div></div>` : ''}
-    ${p && p.shelfLifeType!=='hours' ? `<div class="small-note" style="margin-top:6px">Thành phẩm này hiện KHÔNG khai "Hạn theo giờ" ở Chế biến cấp 1 (đang là "${p.shelfLifeType==='endOfDay'?'Cuối ca':'Không hạn'}") — nếu đây đúng là nguyên nhân hết hạn nhầm, nên sửa lại cấu hình đó trước để không lặp lại ở lô sau.</div>` : ''}
+    ${p && p.shelfLifeType!=='hours' ? `<div class="small-note" style="margin-top:6px">Thành phẩm này hiện KHÔNG khai "Hạn theo giờ" ở Bán thành phẩm (đang là "${p.shelfLifeType==='endOfDay'?'Cuối ca':'Không hạn'}") — nếu đây đúng là nguyên nhân hết hạn nhầm, nên sửa lại cấu hình đó trước để không lặp lại ở lô sau.</div>` : ''}
     <div class="field" style="margin-top:10px"><label>HSD mới</label>
       <input type="datetime-local" id="prepExtendAt_${b.id}" value="${_dtLocalVal(goiY || Date.now())}">
     </div>
@@ -12014,7 +12037,7 @@ async function renderAlertInbox(){
         <div class="ac-row" style="color:#c0392b;font-weight:700">Lệch ${a.variancePct>0?'+':''}${fmtNum(a.variancePct,1)}%</div>
         <details class="ac-infer"><summary>Vì sao có cảnh báo này?</summary><div class="ac-infer-body">${cao
           ? 'Mẻ ra NHIỀU hơn số khai, nghĩa là giá vốn mỗi đơn vị thật ra RẺ hơn — trước đây COGS bị tính cao hơn thực tế. Hệ thống đã tự chuyển sang tính theo số cân thật.'
-          : 'Mẻ ra ÍT hơn số khai, nghĩa là giá vốn mỗi đơn vị thật ra ĐẮT hơn — trước đây COGS bị tính thấp hơn thực tế. Hệ thống đã tự chuyển sang tính theo số cân thật.'} Vào Kho → Chế biến cấp 1 sửa lại số khai cho khớp, vì số khai vẫn dùng để gợi ý cần nấu mấy mẻ mỗi ngày.</div></details>
+          : 'Mẻ ra ÍT hơn số khai, nghĩa là giá vốn mỗi đơn vị thật ra ĐẮT hơn — trước đây COGS bị tính thấp hơn thực tế. Hệ thống đã tự chuyển sang tính theo số cân thật.'} Vào Kho → Danh mục → Bán thành phẩm sửa lại số khai cho khớp, vì số khai vẫn dùng để gợi ý cần nấu mấy mẻ mỗi ngày.</div></details>
         ${isNew ? `<div class="ac-actions">
           <button onclick="goKho('prep')">Sửa công thức mẻ</button>
           <button onclick="markAlertStatus('${a.id}','resolved')">Đã xử lý</button>
@@ -12103,7 +12126,7 @@ function todayQuickAccessHTML(){
     { ic:'package',  label:'Nguyên liệu',        go:"goKho('items')",                          c:'#0062AD' },
     { ic:'cashout',  label:'Tiền mặt',            go:"curEntryTab='cash'; switchScreen('entry')", c:'#B8860B' },
     { ic:'clipboard',label:'Checklist ca',        go:"goKho('checklist')",                      c:'#0E7C7B' },
-    { ic:'note',     label:'Bán thành phẩm',      go:"goKho2('prep')",                          c:'#5B57C2' },
+    { ic:'note',     label:'Lô BTP',              go:"goKho2('prep')",                          c:'#5B57C2' },
     { ic:'clock',    label:'Hàng đang mở & tem',  go:"goContainers('open')",                    c:'#C9922A' },
     { ic:'receipt',  label:'Lịch sử bill',        go:"goBills()",                               c:'#2B7A9E' },
   ];
@@ -12560,7 +12583,7 @@ async function renderTodayOps(){
             <div class="muted-sm">Bắt đầu ${dt(b.startedAt)}${b.staff?(' · '+escapeHtmlAttr(b.staff)):''}${metaTail}</div></div>
           <div class="li-r"><span class="tier tier-${mauTier}">${escapeHtmlAttr(trangThai)}</span></div>
         </div>`;
-      }).join('') + `<button class="btn outline sm" style="margin-top:8px" onclick="goKho2('prep')">Xem Kho 2.0 ▸ BTP ${ic('chevronDown',13)}</button>`;
+      }).join('') + `<button class="btn outline sm" style="margin-top:8px" onclick="goKho2('prep')">Xem Kho ▸ Lô BTP ${ic('chevronDown',13)}</button>`;
     }catch(err){
       console.warn('[Vận hành] BTP lỗi:', err);
       boxes.prep.innerHTML = '<div class="muted">Không đọc được BTP: '+(err.code||err.message||err)+'</div>';
@@ -18434,7 +18457,7 @@ async function confirmClearCache(){
 // MÓN chứ không phải của kho. "Nhập kho nhanh" gộp vào màn Đặt & nhận hàng, ba tab
 // lịch sử gộp thành một tab đổi nguồn bằng chip.
 // ============================================================
-let curKhoSub = 'inbox'; // inbox | items | prep | packaging | toppingcogs | po | stockcount
+let curKhoSub = 'items'; // inbox | items | prep | packaging | toppingcogs | po | stockcount
                          // | containers | refill | locstock | history | location
                          // | wastereasons | checklist | bulkimport | recipe (đứng ở nhóm Menu)
 
@@ -18452,6 +18475,7 @@ let khoItemsFilter = null;
 function goKho(sub, filter){
   // Hai màn đã chuyển sang Kho 2.0 — link cũ (bookmark, nudge) vẫn tới đúng chỗ.
   if(sub === 'containers'){ goContainers(ctnFilter); return; }
+  if(!sub || sub === 'inbox'){ goKho2('dash'); return; }
   if(sub === 'prepbatches'){ kho2PrepFilter = 'stats'; goKho2('prep'); return; }
   curEntryTab = 'kho';
   curKhoSub = sub || 'inbox';
@@ -18483,9 +18507,8 @@ async function renderEntryKho(){
   const tabOwner = KHO_TAB_OWNER[curKhoSub];
   const tabBar = tabOwner ? `<div class="filter-bar kho-tabs">${KHO_TAB_GROUPS[tabOwner].map(([k,l])=>
       `<button class="ftag ${curKhoSub===k?'active':''}" onclick="goKho('${k}')">${l}</button>`).join('')}</div>` : '';
-  body.innerHTML = tabBar + '<div id="khoBody"><div class="muted">Đang tải...</div></div>';
-  if(curKhoSub==='inbox') renderKhoInbox();
-  else if(curKhoSub==='items') renderKhoItems();
+  body.innerHTML = khoSubNavHtml('kho:' + (tabOwner || curKhoSub)) + tabBar + '<div id="khoBody"><div class="muted">Đang tải...</div></div>';
+  if(curKhoSub==='items') renderKhoItems();
   else if(curKhoSub==='prep') renderKhoPrep();
   else if(curKhoSub==='vessels') renderKhoVessels();
   else if(curKhoSub==='toppingcogs') renderKhoToppingCogs();
@@ -18506,7 +18529,7 @@ async function renderEntryKho(){
   else if(curKhoSub==='stockin') { curKhoSub='po'; renderKhoPO(); }
   else if(curKhoSub==='prephistory') { khoHistSrc='prep'; curKhoSub='history'; renderKhoHistory(); }
   else if(curKhoSub==='history') renderKhoHistory();
-  else renderKhoInbox();
+  else renderKhoItems();
 }
 
 // ------------------------------------------------------------
@@ -18519,47 +18542,6 @@ async function renderEntryKho(){
 // Dùng LẠI computeStoreHealth() chứ không tự đếm lần nữa: hai chỗ đếm song song
 // là hai chỗ lệch nhau. Ở đây chỉ lọc ra phần zone==='kho'.
 // ------------------------------------------------------------
-async function renderKhoInbox(){
-  const box = document.getElementById('khoBody');
-  if(!box) return;
-  showLoading(box);
-  let list = [];
-  try{ list = await computeStoreHealth(); }
-  catch(err){
-    console.error('renderKhoInbox lỗi', err);
-    box.innerHTML = '<div class="muted">Không kiểm tra được. Bấm nút tải lại ở góc trên để thử lại.</div>';
-    return;
-  }
-  const viec = list.filter(x=>x.zone==='kho');
-  const red = viec.filter(x=>x.tier==='red');
-  const yellow = viec.filter(x=>x.tier==='yellow');
-  const row = x=>`<div class="health-item ${x.tier}" onclick="${x.onclick}">
-      <div class="hi-label">${x.label}</div>
-      <div class="hi-count">${x.count} ›</div>
-    </div>`;
-  // Lối tắt tới việc hằng ngày — để màn này vẫn là điểm xuất phát ngay cả những
-  // hôm kho sạch việc, chứ không phải một trang trống rồi lại phải mở sidebar.
-  const tat = [
-    ['Đặt & nhận hàng', 'po',         'download'],
-    ['Kiểm kê',         'stockcount', 'clipboard'],
-    ['Tem NL (Kho 2.0)', 'containers', 'package'],
-    ['Sổ kho',          'history',    'clock']
-  ].map(([l,k,i])=>`<div class="health-item gray" onclick="goKho('${k}')"><div class="hi-label">${ic(i)} ${l}</div><div class="hi-count">›</div></div>`).join('')
-  // [MỚI] Lối vào riêng cho log thời gian checklist — mở thẳng popup, không phải
-  // 1 tab Kho, nên tách khỏi .map(goKho) ở trên.
-  + `<div class="health-item gray" onclick="openChecklistLogSheet()"><div class="hi-label">${ic('clock')} Nhật ký thời gian checklist (log 7 ngày)</div><div class="hi-count">›</div></div>`;
-
-  box.innerHTML = `
-    ${(!red.length && !yellow.length)
-      ? `<div class="health-all-clear">${ic('check',20)} Kho đang ổn<div style="font-size:12px;font-weight:500;color:var(--gt);margin-top:6px;">Không có việc kho nào cần xử lý.</div></div>`
-      : ''}
-    ${red.length ? `<div class="health-group-title">${icDot('var(--bad)')} Cần xử lý ngay (${red.length})</div>${red.map(row).join('')}` : ''}
-    ${yellow.length ? `<div class="health-group-title">${icDot('var(--warn)')} Nên xem (${yellow.length})</div>${yellow.map(row).join('')}` : ''}
-    <div class="health-group-title">Việc hằng ngày</div>
-    ${tat}
-  `;
-}
-
 // ---------- Form Nguyên liệu (thêm mới / sửa), có quy cách đóng gói ----------
 let editingItemId = null;      // id nguyên liệu đang sửa
 // Form THÊM MỚI trước đây nằm thẳng đầu tab: một khối dài gần hai màn hình (đơn vị
@@ -19304,7 +19286,7 @@ async function recalcPrepCostsUsingItem(itemId){
   if(!jobs.length) return 0;
   const res = await Promise.allSettled(jobs);
   const failed = res.filter(r => r.status==='rejected').length;
-  if(failed) showError(`Đã lưu nguyên liệu nhưng ${failed} bán thành phẩm chưa cập nhật được giá — mở lại mục "Chế biến cấp 1" và bấm Lưu để tính lại.`);
+  if(failed) showError(`Đã lưu nguyên liệu nhưng ${failed} bán thành phẩm chưa cập nhật được giá — mở lại mục "Bán thành phẩm" và bấm Lưu để tính lại.`);
   return jobs.length - failed;
 }
 
@@ -20485,10 +20467,10 @@ async function renderKhoVessels(){
       <div style="font-size:13.5px;line-height:1.65;color:var(--warn);">
         Đã khai <b>${VESSELS.length} dụng cụ</b> nhưng <b>chưa gắn cho món nào</b>.
         Thư viện này chỉ là danh mục — phải mở từng món và chọn dụng cụ nó đang đựng thì nút ⚖️ bên POS mới hiện ra:
-        bán thành phẩm gắn ở <b>Chế biến cấp 1</b>, còn nguyên liệu dùng ngay (trân châu, thạch dừa đóng gói sẵn) gắn ở <b>Nguyên liệu</b> — mục "Cân cuối ca".
+        bán thành phẩm gắn ở <b>Bán thành phẩm</b>, còn nguyên liệu dùng ngay (trân châu, thạch dừa đóng gói sẵn) gắn ở <b>Nguyên liệu</b> — mục "Cân cuối ca".
         ${_saiDonVi ? `<br><br>Lưu ý: <b>${_saiDonVi}</b> bán thành phẩm đang tính bằng đơn vị không cân trừ bì được (ml, cái, miếng…) — đổi đơn vị sang <b>g</b> trước thì mới gắn được.` : ''}
       </div>
-      <button class="btn" style="margin-top:12px" onclick="goKho('prep')">Sang Chế biến cấp 1 để gắn →</button>
+      <button class="btn" style="margin-top:12px" onclick="goKho('prep')">Sang Bán thành phẩm để gắn →</button>
       <button class="btn outline" style="margin-top:8px" onclick="goKho('items')">Sang Nguyên liệu để gắn →</button>
     </div>` : '';
 
@@ -20534,7 +20516,7 @@ async function renderKhoVessels(){
           <button class="iconbtn" onclick="doDeleteVessel('${v.id}')">${ic('x')}</button>
         </div>
       </div>`;
-    }).join('') : `<div class="empty-hint">Chưa có dụng cụ nào.<br>Khai khay nhựa lớn, khay inox, ca 2L… kèm trọng lượng bì, rồi vào <b>Chế biến cấp 1</b> gắn cho từng bán thành phẩm. Nhân viên sẽ cân được cả vật đựng và hệ thống tự trừ bì.</div>`}
+    }).join('') : `<div class="empty-hint">Chưa có dụng cụ nào.<br>Khai khay nhựa lớn, khay inox, ca 2L… kèm trọng lượng bì, rồi vào <b>Bán thành phẩm</b> gắn cho từng bán thành phẩm. Nhân viên sẽ cân được cả vật đựng và hệ thống tự trừ bì.</div>`}
   `;
   if(vesselDraft){ renderVesselMainImage(); renderVesselVariants(); }
   renderOriginalPackPanel();
@@ -20822,7 +20804,7 @@ async function renderToppingCogsEditor(){
         <div class="field"><label>Nguồn</label>
           <select onchange="toppingCogsInputSourceChange(${idx},this.value)">
             <option value="item" ${r.refType!=='prep'?'selected':''}>Nguyên liệu thô</option>
-            <option value="prep" ${r.refType==='prep'?'selected':''}>Chế biến cấp 1</option>
+            <option value="prep" ${r.refType==='prep'?'selected':''}>Bán thành phẩm</option>
           </select>
         </div>
         <div class="field">
@@ -21363,7 +21345,7 @@ function renderPkgRulesSection(menu){
         ${TOPPINGS.length ? TOPPINGS.map(t=>`<label style="display:flex;align-items:center;gap:8px;font-size:12.5px;padding:3px 0;cursor:pointer">
           <input type="checkbox" ${pkgCfgDraft.triggerToppingIds.includes(t.id)?'checked':''} onchange="pkgCfgToggle('triggerToppingIds','${t.id}')" style="width:18px;height:18px">
           ${escapeHtmlAttr(t.name||t.id)} <span class="small-note" style="margin:0">(topping)</span></label>`).join('') : '<div class="muted">Chưa có topping nào — thêm ở tab Menu → Toppings.</div>'}
-        ${PREP_ITEMS.length ? '' : '<div class="muted">Chưa có CB1 nào — thêm ở tab Kho → Chế biến cấp 1.</div>'}
+        ${PREP_ITEMS.length ? '' : '<div class="muted">Chưa có CB1 nào — thêm ở Kho → Danh mục → Bán thành phẩm.</div>'}
         ${PREP_ITEMS.map(p=>`<label style="display:flex;align-items:center;gap:8px;font-size:12.5px;padding:3px 0;cursor:pointer">
           <input type="checkbox" ${pkgCfgDraft.triggerPrepIds.includes(p.id)?'checked':''} onchange="pkgCfgToggle('triggerPrepIds','${p.id}')" style="width:18px;height:18px">
           ${escapeHtmlAttr(p.name||p.code||p.id)} <span class="small-note" style="margin:0">(CB1)</span></label>`).join('')}
@@ -23935,7 +23917,7 @@ function _histRender(){
 // thì dùng nút đồng hồ trên từng dòng ở tab Nguyên liệu / Chế biến — nhanh hơn
 // nhiều so với dò trong danh sách chung này.
 // ------------------------------------------------------------
-let khoHistSrc = 'items';   // items | prep  (Lô chế biến đã sang Kho 2.0 › BTP)
+let khoHistSrc = 'items';   // items | prep  (Lô chế biến đã sang Kho › Bán thành phẩm)
 const KHO_HIST_SRC = [
   { k:'items',   label:'Kho nguyên liệu' },
   { k:'prep',    label:'Bán thành phẩm'  }
@@ -24043,7 +24025,7 @@ async function renderKhoRecipe(){
     menu = await loadPosMenu('togo');
     await loadRecipes();
     await ensureRecipeHistory(); // cần cho khối "Lịch sử định mức" trong ô sửa
-    PREP_ITEMS = await loadPrepItems(); // cần cho dropdown chọn thành phần loại "Chế biến cấp 1"
+    PREP_ITEMS = await loadPrepItems(); // cần cho dropdown chọn thành phần loại "Bán thành phẩm"
     await loadMenuForManager(); // cần TOPPINGS (RTDB) cho dropdown chọn thành phần loại "Topping"
     TOPPING_RECIPES = await loadToppingRecipes(); // cần costPerServing để tính giá vốn topping đính kèm
   }catch(err){
@@ -24106,7 +24088,7 @@ function recipeRowChange(size, idx, field, val){
 function recipeRowSetType(size, idx, type){
   const qty = recipeEditorDraft[size][idx].qty || 0;
   if(type==='prep'){
-    if(!PREP_ITEMS.length){ toast('⚠️ Chưa có thành phẩm chế biến nào — thêm ở mục "Chế biến cấp 1"'); renderRecipeEditorBox(); return; }
+    if(!PREP_ITEMS.length){ toast('⚠️ Chưa có thành phẩm chế biến nào — thêm ở mục "Bán thành phẩm"'); renderRecipeEditorBox(); return; }
     recipeEditorDraft[size][idx] = {refType:'prep', prepId: PREP_ITEMS[0].id, qty};
   } else if(type==='topping'){
     if(!TOPPINGS.length){ toast('⚠️ Chưa có topping nào — thêm ở tab Menu → Toppings'); renderRecipeEditorBox(); return; }
@@ -24135,7 +24117,7 @@ function renderRecipeEditorBox(){
           <div class="field"><label>Loại</label>
             <select onchange="recipeRowSetType('${size}',${idx},this.value)">
               <option value="item" ${t==='item'?'selected':''}>Nguyên liệu thô</option>
-              <option value="prep" ${t==='prep'?'selected':''}>Chế biến cấp 1 (CB)</option>
+              <option value="prep" ${t==='prep'?'selected':''}>Bán thành phẩm (BTP)</option>
               <option value="topping" ${t==='topping'?'selected':''}>Topping (đính kèm sẵn trong món)</option>
             </select>
           </div>
