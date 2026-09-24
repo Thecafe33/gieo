@@ -1579,7 +1579,7 @@ html.phone-ui .nav-search .ns-kbd{display:none;}
 .sidebar-item.active .sb-ic.tile{background:rgba(255,255,255,.22);box-shadow:inset 0 0 0 1px rgba(255,255,255,.18);}
 html.tab-ui .sidebar-item.active::before{display:none;}
 html.tab-ui .sidebar-item{border-radius:12px;gap:12px;}
-html.tab-ui:not(.nav-off) .sidebar{background:#F2F2F7;border-right:1px solid rgba(60,60,67,.12);}
+html.tab-ui:not(.nav-off) .sidebar{background:var(--bg);border-right:1px solid rgba(60,60,67,.12);}
 .sidebar-group-label{text-transform:none;letter-spacing:0;font-size:15px;font-weight:700;color:var(--td);padding:20px 12px 6px;}
 @media (hover:hover) and (pointer:fine){ .sidebar-item.active:hover{background:var(--gm);} }
 
@@ -1675,6 +1675,27 @@ html.tab-ui:not(.nav-off) .sidebar{background:#F2F2F7;border-right:1px solid rgb
 .nl-grid.wr .nlf-sw b{font-size:16px;}
 .nl-grid.wr .iconbtn{width:40px;height:40px;flex-shrink:0;}
 .wr-off .nlf-sw b{color:var(--gt);}
+.nl-grid.po{grid-template-columns:repeat(auto-fill,minmax(min(300px,100%),1fr));}
+.po .nl-actions{flex-wrap:wrap;}
+.sidebar{background:var(--bg);}
+.nav-search input{background:rgba(118,118,128,.12);}
+.rf-nums{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px 16px;margin-top:12px;}
+.rf-nums .field{margin-bottom:0;}
+.rf-cfgrows{margin-top:14px;}
+.rf-cfgrows .kx-trow span{min-width:0;}
+.rf-cfgrows .kx-trow .kx-mini{flex-shrink:0;margin:0;}
+.rf-cfgrows small.rf-hint,.rf-cfgrows .nlf-sw small{display:block;font-size:12.5px;color:var(--gt);line-height:1.4;margin-top:2px;}
+.rf-cfgrows .nlf-sw{border-top:1px solid rgba(60,60,67,.1);padding:10px 0;}
+.rf-num{width:90px;min-height:42px;display:inline-block;border:1.5px solid var(--line);border-radius:12px;padding:0 12px;font-size:15px;background:var(--card);}
+.rf-cfgrows .kx-trow > span:last-child small{font-size:13px;color:var(--gt);margin-left:4px;}
+.nl-card.rf-editing{grid-column:1 / -1;}
+.rf-cfg{border-top:1px solid rgba(60,60,67,.1);padding-top:6px;}
+.ls-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(360px,100%),1fr));gap:18px;}
+.ls-card{border:none;border-radius:28px;padding:22px 24px;margin-bottom:0;box-shadow:0 2px 6px rgba(0,0,0,.03),0 12px 32px rgba(0,0,0,.06);}
+.ls-card.ls-lech{box-shadow:inset 0 0 0 1.5px var(--warn-line),0 12px 32px rgba(0,0,0,.06);}
+.ls-card.ls-neg{box-shadow:inset 0 0 0 1.5px var(--bad-line),0 12px 32px rgba(0,0,0,.06);}
+.nlf-sw.ls-all{flex:0 0 auto;gap:12px;padding:0;border:none;}
+@media (max-width:600px){.rf-nums{grid-template-columns:1fr 1fr;}}
 </style>
 </head>
 <body>
@@ -2651,7 +2672,7 @@ async function clearSalesCache(fromKey, toKey){
   return docs.length;
 }
 // [NEW] invalidateSalesCache — gọi SAU MỖI lần lưu cấu hình có ảnh hưởng giá vốn
-// (định mức, GOGS topping, bao bì các tầng, COGS nhập tay, giá vốn nguyên liệu).
+// (định mức, COGS topping, bao bì các tầng, COGS nhập tay, giá vốn nguyên liệu).
 //
 // Vì sao cần: fetchSalesRange() cache kết quả đã tính của những ngày cũ hơn
 // CACHE_BUFFER_DAYS. Cache đó chứa cogsActual TÍNH THEO CẤU HÌNH TẠI THỜI ĐIỂM ĐÓ
@@ -2942,7 +2963,7 @@ async function runDataIntegrityCheck(){
     const rec = doc.data();
     Object.entries(rec.sizes||{}).forEach(([size, rows])=>{
       (rows||[]).forEach(row=>{
-        if(row.itemId && !itemIds.has(row.itemId)) issues.push({type:'Định mức (GOGS)', detail:`${doc.id} (size ${size}) tham chiếu nguyên liệu đã xoá (id: ${row.itemId})`});
+        if(row.itemId && !itemIds.has(row.itemId)) issues.push({type:'Định mức (COGS)', detail:`${doc.id} (size ${size}) tham chiếu nguyên liệu đã xoá (id: ${row.itemId})`});
       });
     });
   });
@@ -2983,7 +3004,7 @@ async function runDataIntegrityCheck(){
 // [MỚI] LỊCH SỬ GIÁ NGUYÊN LIỆU — price_history_gieogieo
 // ----------------------------------------------------------------------------
 // BỆNH ĐÃ CHỮA: trước đây mỗi nguyên liệu chỉ có MỘT con số costPerUnit "hiện tại".
-// Mọi báo cáo — GOGS, waste, tiêu hao — đều nhân số lượng với con số đó. Nên hôm nay
+// Mọi báo cáo — COGS, waste, tiêu hao — đều nhân số lượng với con số đó. Nên hôm nay
 // nhà cung cấp tăng giá, sửa lại giá trong app, thì báo cáo THÁNG TRƯỚC cũng đổi
 // theo: lãi/lỗ, COGS%, biên món của một tháng đã đóng sổ tự nhiên khác đi. Số liệu
 // quá khứ mà biết tự đổi thì không dùng để ra quyết định được nữa.
@@ -3313,7 +3334,7 @@ function _costOfRecipeRows(rows, dateKey){
     } else if(row.refType==='topping'){
       // [NEW] Topping ĐÍNH KÈM SẴN trong món (vd trà sữa mặc định có trân châu) —
       // khác với topping BÁN THÊM ở giỏ hàng: đây là 1 THÀNH PHẦN CỐ ĐỊNH của công
-      // thức, dùng đúng costPerServing đã khai ở GOGS Topping. qty = số phần topping
+      // thức, dùng đúng costPerServing đã khai ở COGS Topping. qty = số phần topping
       // có sẵn trong đúng size này (thường 1, có thể nhiều hơn với size lớn).
       cost += qty * toppingCostOn(row.toppingId, dateKey);
     } else {
@@ -3524,7 +3545,7 @@ function aggregateOrders(orders, dateKey){
       const entry = cogsMap[it.itemId];
       const manualCogs = (entry && it.size && entry[it.size]!=null && entry[it.size]!=='') ? Number(entry[it.size]) : null;
       const unitCogs = recipeCogs!=null ? recipeCogs : manualCogs;
-      // [NEW-GOGS — SỬA theo yêu cầu] Topping TẶNG kèm và topping BÁN có margin
+      // [NEW-COGS — SỬA theo yêu cầu] Topping TẶNG kèm và topping BÁN có margin
       // hoàn toàn khác nhau, KHÔNG được gộp chung 1 sổ:
       //  - TẶNG kèm (khuyến mãi Free Topping): coi là chi phí phát sinh của CHÍNH
       //    món đó → cộng thẳng vào giá vốn món (freeCost), vì khách không trả tiền
@@ -4293,7 +4314,7 @@ const STOCK_UNITS = ['g','ml','cái','kg','l','miếng'];
 const STOCK_TX_TYPES = {
   RECEIVING:   {label:'Nhập kho',        color:'green'},
   TRANSFER:    {label:'Chuyển kho',      color:'blue'},
-  CONSUMPTION: {label:'Bán ra (GOGS)',   color:'blue'},
+  CONSUMPTION: {label:'Bán ra (COGS)',   color:'blue'},
   WASTE:       {label:'Hao hụt',         color:'red'},
   ADJUSTMENT:  {label:'Điều chỉnh KK',   color:'amber'},
   // Đặt lại tồn THEO VỊ TRÍ — không đổi tổng tồn kho, chỉ chia lại số tổng ra các
@@ -6794,14 +6815,14 @@ function deletePrepItem(id){
 }
 
 // ------------------------------------------------------------
-// [NEW] TOPPING — GOGS — topping_recipes_gieogieo
+// [NEW] TOPPING — COGS — topping_recipes_gieogieo
 //
 // Trước đây TOPPING (toppings_gieogieo, lưu ở Realtime Database — chỉ có
 // name/price/priceTogo) hoàn toàn KHÔNG có giá vốn: mỗi lần bán/tặng 1 topping,
-// giá vốn nguyên liệu của nó KHÔNG hề bị cộng vào GOGS. Với topping trả phí thì
+// giá vốn nguyên liệu của nó KHÔNG hề bị cộng vào COGS. Với topping trả phí thì
 // còn được ước tính (thô) qua đường revenueUncosted × %COGS benchmark, nhưng
 // với chương trình "Free Topping cho Thành viên" (giá = 0), doanh thu topping =
-// 0 → phần ước tính cũng = 0 → GOGS bị tính THIẾU âm thầm đúng bằng giá vốn của
+// 0 → phần ước tính cũng = 0 → COGS bị tính THIẾU âm thầm đúng bằng giá vốn của
 // mọi lần tặng topping.
 //
 // Đây là tầng thứ 4 của mô hình kho, dùng CHUNG cơ chế "mẻ" với Chế biến cấp 1
@@ -6809,7 +6830,7 @@ function deletePrepItem(id){
 // cân được bao nhiêu GRAM/ML), nhưng tách collection riêng vì:
 //   - khoá theo toppingId (khớp trực tiếp với topping bên Menu/POS), không phải
 //     một "thành phẩm" độc lập có thể dùng làm nguyên liệu cho món khác;
-//   - mỗi topping chỉ cần ĐÚNG 1 bản ghi cấu hình GOGS (set theo doc id = toppingId),
+//   - mỗi topping chỉ cần ĐÚNG 1 bản ghi cấu hình COGS (set theo doc id = toppingId),
 //     không có danh sách nhiều bản ghi như Chế biến cấp 1.
 //
 // Khác với Chế biến cấp 1 (batchInputs chỉ được lấy từ nguyên liệu thô),
@@ -6827,7 +6848,7 @@ function deletePrepItem(id){
 //   qtyPerServing — CHỈ dùng khi yieldMode='weight': mỗi phần topping dùng bao nhiêu gram/ml
 //   costPerBatchUnit — tự tính = tổng chi phí đầu vào ÷ batchYield (giá vốn/phần hoặc giá vốn/gram)
 //   costPerServing   — tự tính = giá vốn cho ĐÚNG 1 LẦN topping được thêm vào 1 ly,
-//                       dùng cộng vào GOGS bất kể lần đó là BÁN hay TẶNG miễn phí.
+//                       dùng cộng vào COGS bất kể lần đó là BÁN hay TẶNG miễn phí.
 // ------------------------------------------------------------
 let TOPPING_RECIPES = {}; // key = toppingId (khớp id trong toppings_gieogieo)
 async function loadToppingRecipes(){
@@ -6865,8 +6886,8 @@ function deleteToppingRecipe(toppingId){
 // Giá vốn topping của 1 DÒNG món (chưa nhân số ly `qty`), TÁCH RIÊNG theo TẶNG/BÁN
 // vì margin 2 loại khác nhau, không được gộp:
 //  - freeCost         — giá vốn topping TẶNG kèm (khuyến mãi) — cộng vào giá vốn món.
-//  - paidRealCost     — giá vốn topping BÁN đã có công thức GOGS — tính vào sổ Topping riêng.
-//  - paidUncostedRevenue — doanh thu topping BÁN nhưng CHƯA khai GOGS — rơi về ước
+//  - paidRealCost     — giá vốn topping BÁN đã có công thức COGS — tính vào sổ Topping riêng.
+//  - paidUncostedRevenue — doanh thu topping BÁN nhưng CHƯA khai COGS — rơi về ước
 //    tính %COGS benchmark, cũng thuộc sổ Topping riêng (không lẫn vào món).
 // tId khớp topping ưu tiên lấy t.id (topping trả phí, POS đã vá thêm field này),
 // nếu không có thì lấy t._freeTpId (topping TẶNG — POS đã lưu sẵn field này).
@@ -6882,8 +6903,8 @@ function computeToppingsCogsForLine(toppings, dateKey){
     const donGia = (rec && tId) ? toppingCostOn(tId, dateKey) : 0;
     const realCost = donGia > 0 ? donGia * q : 0;
     if(isFree){
-      // Topping tặng chưa khai GOGS: tạm coi giá vốn = 0 (không có doanh thu để ước
-      // tính thay, và không nên tự suy diễn giá trị) — sẽ hiện cảnh báo "Chưa khai GOGS"
+      // Topping tặng chưa khai COGS: tạm coi giá vốn = 0 (không có doanh thu để ước
+      // tính thay, và không nên tự suy diễn giá trị) — sẽ hiện cảnh báo "Chưa khai COGS"
       // ở màn danh sách để chủ quán biết cần bổ sung.
       freeCost += realCost;
     } else if(realCost > 0){
@@ -6903,7 +6924,7 @@ function computeToppingsCogsForLine(toppings, dateKey){
 // tay lại đúng bộ bao bì cho từng size, rất mất thời gian và dễ chọn sai/thiếu
 // giữa hàng chục món. Tầng này tách bao bì ra thành 1 "bộ định lượng cố định
 // theo SIZE" (doc id = size, vd 'M'/'L'), khai 1 LẦN DUY NHẤT, rồi được tự động
-// cộng vào GOGS + tự động trừ kho cho MỌI món có đúng size đó — không cần link
+// cộng vào COGS + tự động trừ kho cho MỌI món có đúng size đó — không cần link
 // tay từng món, chỉ cần khớp đúng nhãn size.
 //
 // Vì đây là tiêu hao 1-1 (bán 1 ly size M dùng đúng 1 bộ bao bì M, không phải
@@ -6994,7 +7015,7 @@ function deletePackagingItemOverride(menuRefKey){
 // Danh sách {itemId,qty} bao bì áp dụng cho 1 DÒNG món cụ thể — ưu tiên override
 // theo món+size+topping nếu có khai, rơi về mặc định theo size nếu không.
 // [QUAN TRỌNG] Logic này PHẢI khớp Y HỆT bản sao bên posgieo.html (nơi thật sự
-// trừ kho) — nếu sửa 1 bên mà quên bên kia, GOGS báo cáo và tồn kho thật sẽ lệch
+// trừ kho) — nếu sửa 1 bên mà quên bên kia, COGS báo cáo và tồn kho thật sẽ lệch
 // nhau, y hệt bài học đã ghi ở _pkgSizeKeyPOS/_findRecipeSizeKeyPOS.
 function resolvePackagingItemsForLine(itemId, size, hasTopping){
   const sizeKey = pkgSizeKey(size);
@@ -7163,7 +7184,7 @@ function pkgCtxFromLine(it){
 function packagingCostForCupLine(it, dateKey){
   return computePackagingItemsCost(resolvePackagingForCup(pkgCtxFromLine(it)), dateKey);
 }
-// [NEW] Giá vốn bao bì của 1 ly cho màn CẤU HÌNH GOGS (tab Định mức/COGS).
+// [NEW] Giá vốn bao bì của 1 ly cho màn CẤU HÌNH COGS (tab Định mức/COGS).
 //
 // Khác packagingCostForCupLine ở chỗ: lúc cấu hình menu ta CHƯA BIẾT khách sẽ gọi
 // topping gì hay đá chung/riêng, nên phải chọn một BỐI CẢNH CHUẨN để hiển thị —
@@ -7474,7 +7495,7 @@ function computeKPIs({perDaySales, opsSum, expList, assets, actualLaborByDate, l
     itemCogs += dayCogsActual + dayUncosted * (cfg.targets.cogsPct/100);
     cogsActualTotal += dayCogsActual;
     // Topping bán: ngày cũ (cache trước khi có tính năng này) không có 2 field mới —
-    // fallback về đúng hành vi CŨ (coi toàn bộ doanh thu topping là "chưa có GOGS thật",
+    // fallback về đúng hành vi CŨ (coi toàn bộ doanh thu topping là "chưa có COGS thật",
     // ước tính theo %COGS benchmark) thay vì âm thầm coi giá vốn topping = 0.
     const dayToppingCogsActual = day.toppingCogsActual!=null ? day.toppingCogsActual : 0;
     const dayToppingUncosted = day.toppingRevenueUncosted!=null ? day.toppingRevenueUncosted : (day.toppingRevenue||0);
@@ -9317,7 +9338,7 @@ function _thLui1Ngay(k){
 }
 
 // Độ phủ định mức — POS ghi cảnh báo 'missing_recipe' mỗi khi bán một món mà
-// KHÔNG trừ được kho (chưa khai định mức / thiếu GOGS topping), kèm hitCount.
+// KHÔNG trừ được kho (chưa khai định mức / thiếu COGS topping), kèm hitCount.
 // Không có con số này thì mọi kết luận về "lệch 6%" đều treo lơ lửng: 30% số ly
 // không được trừ kho đã đủ ăn hết phần chênh đó.
 function thDoPhu(alerts, soLyBanRa, tuKey, denKey){
@@ -9482,7 +9503,7 @@ async function thApDungDeXuat(sg){
   if(sg.scope === 'topping'){
     await loadToppingRecipes();
     const rec = TOPPING_RECIPES[sg.targetKey];
-    if(!rec) throw new Error('Không còn cấu hình GOGS của topping này');
+    if(!rec) throw new Error('Không còn cấu hình COGS của topping này');
     const inputs = JSON.parse(JSON.stringify(rec.batchInputs||[]));
     if(!inputs[sg.idx] || inputs[sg.idx].itemId !== sg.itemId) throw new Error('Công thức mẻ topping đã đổi — không tìm thấy đúng dòng');
     const cu = Number(inputs[sg.idx].qty)||0;
@@ -10492,13 +10513,13 @@ const NAV_SECTIONS = [
   // [BÊ TỪ POS] Hai màn này trước nằm trong app POS — chuyển sang đây vì sửa giá
   // và cấu hình khuyến mãi là việc của chủ quán, không phải của nhân viên bán hàng.
   // [SỬA] "Định mức" mở ra là DANH SÁCH MÓN TRONG MENU để khai công thức, và
-  // "GOGS Món" là giá vốn của món — cả hai là thuộc tính của MÓN, không phải của
+  // "COGS Món" là giá vốn của món — cả hai là thuộc tính của MÓN, không phải của
   // kho. Để trong nhóm Kho thì sửa món phải nhảy qua nhảy lại hai nhóm.
   { group:'Menu & Khuyến mãi', items:[
     {key:'mn',           ic:'clipboard', label:'Quản lý Menu', go:"switchScreen('mn')"},
     {key:'kho:recipe',   ic:'note',      label:'Định mức món', go:"goKho('recipe')"},
-    {key:'entry:cogs',   ic:'coins',     label:'GOGS Món',     go:"goEntry('cogs')"},
-    {key:'kho:toppingcogs', ic:'coins',  label:'GOGS Topping', go:"goKho('toppingcogs')"},
+    {key:'entry:cogs',   ic:'coins',     label:'COGS Món',     go:"goEntry('cogs')"},
+    {key:'kho:toppingcogs', ic:'coins',  label:'COGS Topping', go:"goKho('toppingcogs')"},
     {key:'kho:packaging',   ic:'package',label:'Bao bì',       go:"goKho('packaging')"},
     {key:'tg',           ic:'coins',     label:'Khuyến mãi',   go:"switchScreen('tg')"},
     {key:'assist',       ic:'robot',     label:'Trợ lý bán hàng', go:"switchScreen('assist')"},
@@ -10539,7 +10560,7 @@ function currentNavKey(){
 // gập/mở lúc nào là quyền của người dùng, kể cả khi đang đứng trong Kho.
 let khoNavOpen = false;
 // Tập mục con thực sự nằm trong nhánh Kho của sidebar — lấy thẳng từ NAV_SECTIONS
-// để khỏi phải nhớ đồng bộ hai danh sách. "Định mức món" và "GOGS Món" render bằng
+// để khỏi phải nhớ đồng bộ hai danh sách. "Định mức món" và "COGS Món" render bằng
 // bộ máy Kho nhưng đứng ở nhóm Menu, nên không được tính là đang ở trong Kho.
 // Mục sidebar gộp nhiều màn thành tab: mục cha → [màn, tên tab].
 const KHO_TAB_GROUPS = {
@@ -10701,7 +10722,7 @@ function mixRange(){
 }
 
 // Giá vốn 1 dòng ly = định mức món + topping khách gọi thêm + bao bì thật của dòng đó.
-// Dùng lại đúng 3 hàm mà màn Định mức/GOGS đang dùng, để con số không lệch giữa 2 màn.
+// Dùng lại đúng 3 hàm mà màn Định mức/COGS đang dùng, để con số không lệch giữa 2 màn.
 function mixLineCogs(it, dateKey){
   const rec = computeUnitCogsFromRecipe(it.itemId, it.size, dateKey);
   const tp = computeToppingsCogsForLine(it.toppings, dateKey);
@@ -11405,7 +11426,7 @@ async function computeStoreHealth(){
     if(missing.length){
       // Bán ra mà không trừ kho — càng để lâu, tồn kho càng lệch xa thực tế.
       const luot = missing.reduce((s,a)=>s+(Number(a.hitCount)||1),0);
-      push('red', `Bán ra chưa trừ được kho — món/topping thiếu định mức/GOGS (${luot} lượt bán)`, missing.length, `switchScreen('inbox')`);
+      push('red', `Bán ra chưa trừ được kho — món/topping thiếu định mức/COGS (${luot} lượt bán)`, missing.length, `switchScreen('inbox')`);
     }
     const khac = docs.length - nGiaoCa - nTienGiaoCa - nPrepCount - nYield - missing.length;
     if(khac>0) push('yellow', 'Cảnh báo khác chưa xem', khac, `switchScreen('inbox')`);
@@ -12120,15 +12141,15 @@ async function renderAlertInbox(){
     // openQty...) — vẽ riêng, nếu dùng chung khuôn dưới sẽ hiện toàn "undefined".
     if(a.type==='missing_recipe'){
       // [SỬA] Lý do có thể là món CHƯA khai định mức (như cũ) HOẶC topping CHƯA
-      // khai GOGS/thiếu id (mới, từ khi topping cũng được trừ kho) — 2 lý do này
-      // cần khai ở 2 nơi khác nhau (Định mức vs GOGS Topping), nên đọc `a.reason`
+      // khai COGS/thiếu id (mới, từ khi topping cũng được trừ kho) — 2 lý do này
+      // cần khai ở 2 nơi khác nhau (Định mức vs COGS Topping), nên đọc `a.reason`
       // để hiện đúng lời khuyên và bấm đúng nút, tránh chỉ luôn trỏ về Định mức.
       const isTopping = String(a.reason||'').includes('topping');
       const inferText = isTopping
-        ? 'Topping này chưa khai GOGS (hoặc bill quá cũ chưa có id topping) nên không trừ được nguyên liệu/CB — tồn kho trên hệ thống đang cao hơn thực tế. Vào Kho → GOGS Topping khai công thức mẻ cho topping này; số đã bán trước đó cần chỉnh lại bằng một lần kiểm kê.'
+        ? 'Topping này chưa khai COGS (hoặc bill quá cũ chưa có id topping) nên không trừ được nguyên liệu/CB — tồn kho trên hệ thống đang cao hơn thực tế. Vào Kho → COGS Topping khai công thức mẻ cho topping này; số đã bán trước đó cần chỉnh lại bằng một lần kiểm kê.'
         : 'Món này chưa có định mức nên mỗi ly bán ra không trừ nguyên liệu nào — tồn kho trên hệ thống đang cao hơn thực tế, và giá vốn (COGS) đang bị tính thấp hơn thật. Vào Kho → Định mức khai công thức cho món này; số đã bán trước đó cần chỉnh lại bằng một lần kiểm kê.';
       const actionGo = isTopping ? "goKho('toppingcogs')" : "goKho('recipe')";
-      const actionLabel = isTopping ? 'Khai GOGS Topping' : 'Khai định mức';
+      const actionLabel = isTopping ? 'Khai COGS Topping' : 'Khai định mức';
       return `<div class="alert-card ${isNew?'':'resolved'}">
         <div class="ac-title">${a.title || 'Chưa trừ kho được'} ${isNew?'':'<span class="tier tier-green" style="margin-left:4px">Đã xử lý</span>'}</div>
         <div class="ac-row">Ngày: ${a.businessDate || '—'}${a.size?` · size ${escapeHtmlAttr(a.size)}`:''}</div>
@@ -13767,7 +13788,7 @@ function renderHealthPeriodNav(){
 }
 
 // ------------------------------------------------------------
-// LEDGER REAL METRICS — Giai đoạn 12 ("Kết nối toàn bộ dữ liệu vào Management": GOGS
+// LEDGER REAL METRICS — Giai đoạn 12 ("Kết nối toàn bộ dữ liệu vào Management": COGS
 // thật, Waste thật, Inventory Variance thật, Cash Variance — thay vì chỉ số nhập tay).
 // Đọc trực tiếp stock_transactions_gieogieo/daily_closings_gieogieo theo khoảng ngày,
 // định giá bằng costPerUnit HIỆN TẠI của nguyên liệu (giới hạn: không có lịch sử giá,
@@ -14437,7 +14458,7 @@ async function renderHealth(){
     <div class="card">
       <div class="card-h"><h3>${ic('link')} Số liệu thật từ Ledger</h3></div>
       <div class="small-note" style="margin-bottom:8px">Đọc trực tiếp stock_transactions_gieogieo (nguyên liệu thô) + prep_transactions_gieogieo (bán thành phẩm) + daily_closings_gieogieo. Nguyên liệu thô định giá theo <b>mốc giá có hiệu lực đúng ngày giao dịch</b> (Kho → Nguyên liệu → Lịch sử giá), không phải giá hôm nay; bán thành phẩm dùng totalCost đã lưu tại thời điểm huỷ.</div>
-      ${rowInfoHTML('GOGS — tiêu hao theo bán hàng (CONSUMPTION)', `${fmt(ledgerReal.consumptionValue)} · ${ledgerReal.consumptionCount} giao dịch`)}
+      ${rowInfoHTML('COGS — tiêu hao theo bán hàng (CONSUMPTION)', `${fmt(ledgerReal.consumptionValue)} · ${ledgerReal.consumptionCount} giao dịch`)}
       ${rowInfoHTML('Waste thật (từ ledger)', `${fmt(ledgerReal.wasteValue)} · ${ledgerReal.wasteCount} giao dịch`)}
       ${ledgerReal.prepWasteCount ? rowInfoHTML('— trong đó huỷ bán thành phẩm', `${fmt(ledgerReal.prepWasteValue)} · ${ledgerReal.prepWasteCount} giao dịch`) : ''}
       ${ledgerReal.prepWasteMissingCost ? `<div class="small-note" style="color:var(--warn);margin:-2px 0 8px">${ic('alert',13,'var(--warn)')} ${ledgerReal.prepWasteMissingCost} giao dịch huỷ bán thành phẩm KHÔNG có giá trị tiền (ghi bởi bản POS cũ) — đang được tính là 0đ, nên Waste thật đang thấp hơn thực tế.</div>` : ''}
@@ -18375,7 +18396,7 @@ async function renderEntryCogs(){
       2. Chưa khai định mức cho size đó → dùng số bạn <b>nhập tay</b> bên dưới (nếu có).<br>
       3. Không có cả 2 → tạm ước tính theo % benchmark ở tab Mục tiêu.<br><br>
       Vì vậy giờ đây bạn <b>không cần nhập tay cho những món đã có định mức đầy đủ</b> — chỉ cần nhập cho món nào chưa tiện mô tả bằng công thức nguyên liệu (VD món mua sẵn, không tự pha chế).<br><br>
-      <b>Topping tính RIÊNG</b>, không nằm trong Định mức món: khai giá vốn topping ở tab Kho → <b>GOGS Topping</b>. Khi đơn có topping (kể cả topping <b>TẶNG miễn phí</b>), giá vốn topping sẽ tự cộng thêm vào COGS của dòng món đó.<br><br>
+      <b>Topping tính RIÊNG</b>, không nằm trong Định mức món: khai giá vốn topping ở tab Kho → <b>COGS Topping</b>. Khi đơn có topping (kể cả topping <b>TẶNG miễn phí</b>), giá vốn topping sẽ tự cộng thêm vào COGS của dòng món đó.<br><br>
       <b>BAO BÌ đã được cộng sẵn</b> vào các con số bên dưới (ly, nắp, ống hút, muỗng... theo tab Kho → <b>Bao bì</b>), tính ở mức chuẩn <b>không topping + đá chung</b>. Đơn có topping hoặc đá riêng sẽ tốn bao bì hơn (thêm muỗng, ống hút to, hũ) nên COGS thực tế của những đơn đó cao hơn số hiển thị ở đây một chút. <b>Túi/khay không tính vào món</b> vì phụ thuộc số ly của cả bill.
     </div>
     <div id="cogsList"><div class="muted">Đang tải menu từ POS...</div></div>
@@ -18406,7 +18427,7 @@ async function renderEntryCogs(){
     return;
   }
   // [NEW] Nhóm theo phân loại (m.type — đúng nhóm hiển thị ở tab Menu, vd "Trà sữa",
-  // "Cà phê"...) để tính %GOGS trung bình theo TỪNG phân loại — mỗi nhóm margin khác
+  // "Cà phê"...) để tính %COGS trung bình theo TỪNG phân loại — mỗi nhóm margin khác
   // nhau, gộp chung vào 1 con số trung bình toàn menu sẽ không phản ánh đúng nhóm nào
   // đang lời/lỗ. Group key đánh số (groupIdx) thay vì dùng thẳng tên loại làm id phần
   // tử DOM, vì tên loại có thể chứa dấu/khoảng trắng không hợp lệ trong id.
@@ -18419,7 +18440,7 @@ async function renderEntryCogs(){
   const groupKeys = Object.keys(groups);
   document.getElementById('cogsList').innerHTML = `
     <div class="card">
-      <div class="row"><span class="rl">%GOGS trung bình — TOÀN BỘ menu</span><span class="rv" id="cogsAvgOverall" style="font-weight:700">—</span></div>
+      <div class="row"><span class="rl">%COGS trung bình — TOÀN BỘ menu</span><span class="rv" id="cogsAvgOverall" style="font-weight:700">—</span></div>
       <div class="row"><span class="rl">Bao bì đang tính theo</span><span class="rv" style="font-weight:700;color:${pkgRulesActive()?'var(--ok)':'var(--warn)'}">${pkgRulesActive()
         ? 'Quy tắc theo vật tư ('+PACKAGING_RULES.length+' dòng)'
         : 'Mô hình BỘ cũ theo size'}</span></div>
@@ -18440,7 +18461,7 @@ async function renderEntryCogs(){
               const recipeCogs = computeUnitCogsFromRecipe(m.id, s.label);
               // [SỬA BUG] Trước đây màn này CHỈ hiện giá vốn từ định mức pha chế, bỏ sót
               // hoàn toàn phần BAO BÌ — trong khi báo cáo doanh thu/lợi nhuận (aggregateOrders)
-              // vẫn cộng bao bì vào giá vốn món. Hệ quả: %GOGS xem ở đây luôn THẤP HƠN thực tế,
+              // vẫn cộng bao bì vào giá vốn món. Hệ quả: %COGS xem ở đây luôn THẤP HƠN thực tế,
               // chủ quán định giá theo con số này là lỗ mà không biết. Giờ cộng đủ cả 2 phần.
               const packCost = packagingCostForMenuSize(m.id, s.label);
               const auto = recipeCogs!=null ? recipeCogs + packCost : null;
@@ -18455,16 +18476,16 @@ async function renderEntryCogs(){
                   <label>COGS size ${s.label} <span style="color:var(--gt);font-weight:400">(giá bán ${fmt(s.price)})</span></label>
                   <div style="padding:11px 14px;background:var(--gl);border-radius:12px;font-weight:700;color:var(--gm);font-size:13.5px;">${fmt(auto)} <span style="font-weight:400;font-size:11px;">(định mức + bao bì)</span></div>
                   ${packNote}
-                  <div class="small-note">%GOGS: <b id="pct_${rowId}">—</b></div>
+                  <div class="small-note">%COGS: <b id="pct_${rowId}">—</b></div>
                 </div>`;
               }
               // Chưa khai định mức → nhập tay. Ô nhập là giá vốn PHA CHẾ, bao bì cộng thêm
-              // tự động (data-extra) để %GOGS khớp đúng cách báo cáo tính.
+              // tự động (data-extra) để %COGS khớp đúng cách báo cáo tính.
               return `<div class="field cogs-size-block" style="margin-bottom:0" data-group="${gi}" data-price="${s.price}" data-auto="" data-extra="${packCost}">
                 <label>COGS size ${s.label} <span style="color:var(--gt);font-weight:400">(giá bán ${fmt(s.price)})</span></label>
                 <input type="number" data-item="${m.id}" data-size="${s.label}" class="cogsInput" value="${saved[s.label]!=null ? saved[s.label] : ''}" placeholder="Chưa có định mức — nhập tay" oninput="refreshCogsAverages()">
-                ${packCost>0 ? `<div class="small-note">Nhập giá vốn PHA CHẾ thôi — bao bì ${fmt(packCost)} đã tự cộng thêm khi tính %GOGS</div>` : packNote}
-                <div class="small-note">%GOGS: <b id="pct_${rowId}">—</b></div>
+                ${packCost>0 ? `<div class="small-note">Nhập giá vốn PHA CHẾ thôi — bao bì ${fmt(packCost)} đã tự cộng thêm khi tính %COGS</div>` : packNote}
+                <div class="small-note">%COGS: <b id="pct_${rowId}">—</b></div>
               </div>`;
             }).join('')}
           </div>
@@ -18476,7 +18497,7 @@ async function renderEntryCogs(){
   `;
   refreshCogsAverages();
 }
-// [NEW] Tính lại %GOGS của TỪNG dòng + trung bình theo phân loại + trung bình toàn
+// [NEW] Tính lại %COGS của TỪNG dòng + trung bình theo phân loại + trung bình toàn
 // menu — chạy lại mỗi khi mở màn hoặc người dùng gõ tay 1 ô COGS thủ công. Chỉ đọc
 // thẳng từ DOM (giá đã in sẵn, COGS auto in sẵn, COGS tay lấy từ input hiện tại) —
 // không cần gọi lại Firestore, nên gõ tới đâu cập nhật % tới đó, không giật lag.
@@ -18491,7 +18512,7 @@ function refreshCogsAverages(){
     else {
       const inp = b.querySelector('.cogsInput'); const v = inp && inp.value;
       // Ô nhập tay chứa giá vốn PHA CHẾ; cộng thêm bao bì (data-extra) cho khớp
-      // đúng cách aggregateOrders tính, nếu không %GOGS ở đây sẽ thấp hơn thực tế.
+      // đúng cách aggregateOrders tính, nếu không %COGS ở đây sẽ thấp hơn thực tế.
       cogsVal = (v!=null && v!=='') ? Number(v) + (Number(b.dataset.extra)||0) : null;
     }
     const pctEl = b.querySelector('[id^="pct_"]');
@@ -18563,11 +18584,11 @@ async function confirmClearCache(){
 //
 // Giờ chia theo NHỊP CÔNG VIỆC (danh sách thật nằm ở NAV_SECTIONS):
 //   Bắt đầu ở đây → Cần xử lý           (việc đang chờ hôm nay — màn mặc định)
-//   Hàng hoá      → Nguyên liệu, Chế biến, Bao bì, GOGS Topping   (sửa thỉnh thoảng)
+//   Hàng hoá      → Nguyên liệu, Chế biến, Bao bì, COGS Topping   (sửa thỉnh thoảng)
 //   Hoạt động     → Đặt & nhận hàng, Kiểm kê, Chai & tem, Refill,
 //                   Tồn theo vị trí, Lịch sử kho                  (lặp lại + tra cứu)
 //   Cài đặt kho   → Vị trí, Lý do hao hụt, Checklist ca, Nhập Excel (đặt rồi quên)
-// "Định mức món" và "GOGS Món" đã chuyển sang nhóm Menu — chúng là thuộc tính của
+// "Định mức món" và "COGS Món" đã chuyển sang nhóm Menu — chúng là thuộc tính của
 // MÓN chứ không phải của kho. "Nhập kho nhanh" gộp vào màn Đặt & nhận hàng, ba tab
 // lịch sử gộp thành một tab đổi nguồn bằng chip.
 // ============================================================
@@ -18891,7 +18912,7 @@ function renderItemPkgBox(){
 //      [đơn vị pha chế + TẤT CẢ quy cách đã khai]. Hệ thống tự quy đổi về đơn vị
 //      pha chế trước khi lưu — Firestore vẫn lưu đúng schema cũ (currentStock,
 //      minStock, costPerUnit đều theo đơn vị pha chế), KHÔNG đổi cấu trúc dữ liệu,
-//      chỉ đổi cách NHẬP. Nhờ vậy mọi báo cáo/định mức/GOGS cũ chạy nguyên như cũ.
+//      chỉ đổi cách NHẬP. Nhờ vậy mọi báo cáo/định mức/COGS cũ chạy nguyên như cũ.
 // ============================================================
 // itemUnitOptions — danh sách đơn vị hợp lệ của nguyên liệu ĐANG SOẠN, lấy từ
 // draft (không phải từ bản ghi đã lưu) để quy cách vừa gõ xong là dùng được ngay.
@@ -19411,7 +19432,7 @@ async function submitInventoryItem(){
   const packagingUnits = rows.map((r,idx)=>({name:r.name.trim(), baseQty: pkgRowBaseQty(itemFormDraft.packagingUnits, itemFormDraft.packagingUnits.indexOf(r))}));
   // Quy đổi về đơn vị pha chế trước khi lưu. Firestore vẫn lưu currentStock/
   // minStock/costPerUnit theo đơn vị pha chế y như cũ — chỉ đổi cách NHẬP, không
-  // đổi schema, nên định mức/GOGS/báo cáo cũ không phải sửa gì.
+  // đổi schema, nên định mức/COGS/báo cáo cũ không phải sửa gì.
   const f = id => Number(document.getElementById(id)?.value) || 1; // hệ số quy đổi của dropdown
   const v = id => Number(document.getElementById(id)?.value) || 0;
   const minStock = v('invMin') * f('invMinUnit');
@@ -20810,7 +20831,7 @@ function renderOriginalPackPanel(){
 }
 
 // ============================================================
-// [NEW] GOGS TOPPING — cấu hình giá vốn cho từng topping (toppings_gieogieo)
+// [NEW] COGS TOPPING — cấu hình giá vốn cho từng topping (toppings_gieogieo)
 // Danh mục TÊN/GIÁ BÁN topping vẫn quản lý ở tab Menu → Toppings như cũ — màn
 // này CHỈ khai công thức mẻ để tự tính GIÁ VỐN, y hệt tinh thần Chế biến cấp 1,
 // nhưng cho phép chọn nguồn đầu vào là Nguyên liệu thô HOẶC Chế biến cấp 1.
@@ -20833,14 +20854,14 @@ function toppingCogsStartEdit(toppingId){
     note: rec.note || ''
   } : newToppingCogsDraft();
   openEditSheet(
-    'GOGS: ' + (TOPPINGS.find(x=>x.id===toppingId)||{}).name,
+    'COGS: ' + (TOPPINGS.find(x=>x.id===toppingId)||{}).name,
     toppingCogsFormHtml(),
     // Đóng popup bằng ✕/bấm nền mờ = huỷ: xoá nháp và vẽ lại danh sách cho khớp.
     ()=>{ toppingCogsEditingId=null; toppingCogsDraft=null; renderKhoToppingCogs(); }
   );
   renderToppingCogsEditor();
 }
-// [SỬA — theo phản hồi] Trước đây form sửa GOGS được vẽ Ở ĐẦU TRANG, nên bấm
+// [SỬA — theo phản hồi] Trước đây form sửa COGS được vẽ Ở ĐẦU TRANG, nên bấm
 // sửa một topping nằm giữa/cuối danh sách là phải vuốt ngược lên tận trên mới
 // thấy form, sửa xong lại vuốt xuống tìm lại chỗ cũ. Giờ dùng đúng popup dùng
 // chung (openEditSheet) như các màn khác: mở ngay tại chỗ đang đứng, đóng lại
@@ -20886,13 +20907,13 @@ function toppingCogsFormHtml(){
         <div class="row"><span class="rl">Giá vốn/${d.yieldMode==='weight'?escapeHtmlAttr(d.yieldUnit):'phần'}</span><span class="rv" id="tpcCostPerBatchUnit">—</span></div>
       </div>
       <div class="unit-explainer" style="margin-top:10px">Giá vốn mỗi lần thêm topping: <b id="tpcCostPerServing">—</b><br>
-        Đây là con số được cộng thẳng vào GOGS mỗi khi topping này được TẶNG KÈM miễn phí. Nếu topping này được BÁN (khách trả tiền), giá vốn sẽ tính vào nhóm "COGS Topping" riêng, không cộng vào giá vốn món.</div>
+        Đây là con số được cộng thẳng vào COGS mỗi khi topping này được TẶNG KÈM miễn phí. Nếu topping này được BÁN (khách trả tiền), giá vốn sẽ tính vào nhóm "COGS Topping" riêng, không cộng vào giá vốn món.</div>
 
       <div class="field" style="margin-top:10px"><label>Ghi chú <span class="small-note" style="font-weight:400">(để dễ thao tác — vd cách đong, lưu ý khi nấu, nguồn hàng...)</span></label>
         <textarea rows="3" oninput="toppingCogsFieldChange('note',this.value)" placeholder="VD: 1 phần = 1 muỗng múc chuẩn ở quầy, xem hình dán trên nắp hũ...">${escapeHtmlAttr(d.note||'')}</textarea>
       </div>
 
-      <button class="btn" style="margin-top:10px" onclick="submitToppingCogs()">${ic('save',15)} Lưu GOGS topping</button>
+      <button class="btn" style="margin-top:10px" onclick="submitToppingCogs()">${ic('save',15)} Lưu COGS topping</button>
       <button class="btn outline" style="margin-top:8px" onclick="toppingCogsCancelEdit()">Huỷ</button>`;
 }
 // Vẽ lại thân popup tại chỗ (đổi cách quy đổi sản lượng thì cả cụm ô nhập đổi theo).
@@ -21004,18 +21025,18 @@ async function submitToppingCogs(){
   };
   try{
     await saveToppingRecipe(toppingCogsEditingId, data);
-    await invalidateSalesCache('GOGS topping');
+    await invalidateSalesCache('COGS topping');
     logAudit('update','topping_recipe',toppingCogsEditingId,data);
     TOPPING_RECIPES = await loadToppingRecipes();
-    toast('✅ Đã lưu GOGS topping');
+    toast('✅ Đã lưu COGS topping');
     toppingCogsEditingId=null; toppingCogsDraft=null;
     closeEditSheet(true);        // im lặng: chính nhánh này đã lo việc vẽ lại danh sách
     renderKhoToppingCogs();
   }catch(err){ console.error(err); showError('Lưu thất bại: '+(err.code||err.message||err)); }
 }
 async function doDeleteToppingCogsRecipe(toppingId){
-  if(!confirm('Xoá cấu hình GOGS của topping này? Từ giờ topping này sẽ tạm không tính được giá vốn thật (rơi về ước tính %COGS benchmark) cho tới khi khai lại.')) return;
-  try{ await deleteToppingRecipe(toppingId); logAudit('delete','topping_recipe',toppingId,{}); TOPPING_RECIPES = await loadToppingRecipes(); await invalidateSalesCache('xoá GOGS topping'); toast('🗑 Đã xoá'); renderKhoToppingCogs(); }
+  if(!confirm('Xoá cấu hình COGS của topping này? Từ giờ topping này sẽ tạm không tính được giá vốn thật (rơi về ước tính %COGS benchmark) cho tới khi khai lại.')) return;
+  try{ await deleteToppingRecipe(toppingId); logAudit('delete','topping_recipe',toppingId,{}); TOPPING_RECIPES = await loadToppingRecipes(); await invalidateSalesCache('xoá COGS topping'); toast('🗑 Đã xoá'); renderKhoToppingCogs(); }
   catch(err){ console.error(err); showError('Xoá thất bại: '+(err.code||err.message||err)); }
 }
 async function renderKhoToppingCogs(){
@@ -21028,8 +21049,8 @@ async function renderKhoToppingCogs(){
     TOPPING_RECIPES = await loadToppingRecipes();
   }catch(err){
     console.error('renderKhoToppingCogs load failed', err);
-    box.innerHTML = '<div class="muted">Không tải được dữ liệu GOGS topping.</div>';
-    showError('Không đọc được GOGS topping: '+(err.code||err.message||err));
+    box.innerHTML = '<div class="muted">Không tải được dữ liệu COGS topping.</div>';
+    showError('Không đọc được COGS topping: '+(err.code||err.message||err));
     return;
   }
   if(!TOPPINGS.length){
@@ -21044,7 +21065,7 @@ async function renderKhoToppingCogs(){
   const avgToppingPct = toppingPcts.length ? toppingPcts.reduce((a,c)=>a+c,0)/toppingPcts.length : null;
   box.innerHTML = `
     <div class="card">
-      <div class="row"><span class="rl">%GOGS trung bình — toàn bộ topping (đã khai, theo giá To Go)</span><span class="rv" style="font-weight:700">${avgToppingPct!=null ? fmtNum(avgToppingPct,1)+'%' : '—'}</span></div>
+      <div class="row"><span class="rl">%COGS trung bình — toàn bộ topping (đã khai, theo giá To Go)</span><span class="rv" style="font-weight:700">${avgToppingPct!=null ? fmtNum(avgToppingPct,1)+'%' : '—'}</span></div>
     </div>
     <div class="sec-title">Danh sách topping (${TOPPINGS.length})</div>
     ${TOPPINGS.map(t=>{
@@ -21052,8 +21073,8 @@ async function renderKhoToppingCogs(){
       const priceTogo = Number(t.priceTogo)||0;
       const pct = (rec && Number(rec.costPerServing)>0 && priceTogo>0) ? Number(rec.costPerServing)/priceTogo*100 : null;
       const statusHtml = rec && Number(rec.costPerServing)>0
-        ? `Giá vốn/lần thêm: <b>${fmtUnitPrice(rec.costPerServing)}</b>${pct!=null ? ` · %GOGS (To Go): <b>${fmtNum(pct,1)}%</b>` : ''}`
-        : `<span style="color:#c0392b">${ic('alert',13)} Chưa khai GOGS — đang ước tính theo %COGS benchmark</span>`;
+        ? `Giá vốn/lần thêm: <b>${fmtUnitPrice(rec.costPerServing)}</b>${pct!=null ? ` · %COGS (To Go): <b>${fmtNum(pct,1)}%</b>` : ''}`
+        : `<span style="color:#c0392b">${ic('alert',13)} Chưa khai COGS — đang ước tính theo %COGS benchmark</span>`;
       const noteHtml = rec && rec.note ? `<div style="color:var(--gt);font-style:italic">${ic('note',12)} ${escapeHtmlAttr(rec.note)}</div>` : '';
       return `
       <div class="litem">
@@ -21074,7 +21095,7 @@ async function renderKhoToppingCogs(){
 
 // ============================================================
 // [NEW] TAB "BAO BÌ" — bộ định lượng cố định theo SIZE (packaging_presets_gieogieo)
-// Khai 1 lần cho mỗi size (M, L...) — tự động áp dụng GOGS + trừ kho cho MỌI món
+// Khai 1 lần cho mỗi size (M, L...) — tự động áp dụng COGS + trừ kho cho MỌI món
 // bán ra đúng size đó, không cần chọn tay bao bì trong từng Định mức món nữa.
 // ============================================================
 let packagingEditingSize = null; // nhãn size (label gốc) đang cấu hình, null = chưa mở form
@@ -21152,7 +21173,7 @@ async function submitPackaging(){
   }catch(err){ console.error(err); showError('Lưu thất bại: '+(err.code||err.message||err)); }
 }
 async function doDeletePackagingPreset(sizeLabel){
-  if(!confirm(`Xoá bộ bao bì size ${sizeLabel}? Từ giờ mọi món size này sẽ tạm không cộng GOGS bao bì và KHÔNG trừ kho bao bì cho tới khi khai lại.`)) return;
+  if(!confirm(`Xoá bộ bao bì size ${sizeLabel}? Từ giờ mọi món size này sẽ tạm không cộng COGS bao bì và KHÔNG trừ kho bao bì cho tới khi khai lại.`)) return;
   try{ await deletePackagingPreset(pkgSizeKey(sizeLabel)); logAudit('delete','packaging_preset',pkgSizeKey(sizeLabel),{}); PACKAGING_PRESETS = await loadPackagingPresets(); await invalidateSalesCache('xoá bao bì theo size'); toast('🗑 Đã xoá'); renderKhoPackaging(); }
   catch(err){ console.error(err); showError('Xoá thất bại: '+(err.code||err.message||err)); }
 }
@@ -21803,7 +21824,7 @@ async function renderKhoPackaging(){
     // [FIX] TOPPINGS nằm ở RTDB và CHỈ được nạp bởi loadMenuForManager() — trước
     // đây màn này không gọi nên danh sách topping luôn rỗng ("Chưa có topping"),
     // trong khi CB1 vẫn hiện vì PREP_ITEMS được nạp sẵn lúc khởi động app. Các màn
-    // GOGS Topping và Định mức đã gọi hàm này từ trước, chỉ màn Bao bì bị sót.
+    // COGS Topping và Định mức đã gọi hàm này từ trước, chỉ màn Bao bì bị sót.
     await loadMenuForManager();
     if(!INVENTORY_ITEMS.length) INVENTORY_ITEMS = await loadInventoryItems();
     // PREP_ITEMS cũng cần cho danh sách kích hoạt CB1 — nạp phòng khi khởi động lỗi.
@@ -21837,7 +21858,7 @@ async function renderKhoPackaging(){
       <div id="pkgEditorBox"></div>
       <button type="button" class="btn outline sm" style="margin-top:6px" onclick="packagingAddItem()">+ Thêm thành phần</button>
       <div class="row" style="margin-top:10px"><span class="rl">Tổng giá vốn bao bì/lần bán</span><span class="rv" id="pkgTotalCost" style="font-weight:700">—</span></div>
-      <div class="unit-explainer" style="margin-top:8px">Con số này sẽ tự động cộng vào GOGS của <b>MỌI món</b> có size "${escapeHtmlAttr(packagingEditingSize)}" — kể cả món chưa khai định mức pha chế — và kho sẽ tự trừ đúng từng nguyên liệu này mỗi khi bán ra size đó. Món nào đã khai bao bì riêng (bên dưới) thì dùng bộ riêng đó thay vì mặc định này.</div>
+      <div class="unit-explainer" style="margin-top:8px">Con số này sẽ tự động cộng vào COGS của <b>MỌI món</b> có size "${escapeHtmlAttr(packagingEditingSize)}" — kể cả món chưa khai định mức pha chế — và kho sẽ tự trừ đúng từng nguyên liệu này mỗi khi bán ra size đó. Món nào đã khai bao bì riêng (bên dưới) thì dùng bộ riêng đó thay vì mặc định này.</div>
       <button class="btn" style="margin-top:10px" onclick="submitPackaging()">${ic('save',15)} Lưu bộ bao bì</button>
       <button class="btn outline" style="margin-top:8px" onclick="packagingCancelEdit()">Huỷ</button>
     </div>` : '';
@@ -21856,7 +21877,7 @@ async function renderKhoPackaging(){
       const rec = PACKAGING_PRESETS[pkgSizeKey(label)];
       const statusHtml = rec && rec.items && rec.items.length
         ? `Giá vốn bao bì/lần bán: <b>${fmtUnitPrice(computePackagingItemsCost(rec.items))}</b> · ${rec.items.length} thành phần`
-        : `<span style="color:#c0392b">${ic('alert',13)} Chưa khai bộ bao bì — GOGS/kho size này đang thiếu phần bao bì</span>`;
+        : `<span style="color:#c0392b">${ic('alert',13)} Chưa khai bộ bao bì — COGS/kho size này đang thiếu phần bao bì</span>`;
       return `
       <div class="litem">
         <div class="li-l">
@@ -22257,33 +22278,44 @@ async function renderKhoLocation(){
     return;
   }
   const editingLoc = editingLocId ? STORAGE_LOCATIONS.find(x=>x.id===editingLocId) : null;
+  const formOpen = locFormOpen || editingLoc;
   box.innerHTML = `
-    <div class="small-note" style="margin-bottom:12px">Vị trí lưu trữ (Kho tổng, Kệ, Tủ mát...) dùng để tách tồn kho theo từng nơi và ghi nhận Transfer/Refill giữa các vị trí (xem tab "Refill"). Tạo/sửa danh mục ở đây không tự ảnh hưởng tồn kho hiện tại.</div>
-    <div class="card">
-      <div class="field"><label>Tên vị trí</label><input type="text" id="locName" placeholder="VD: Kệ quầy pha chế" value="${editingLoc? editingLoc.name : ''}"></div>
-      <div class="field"><label>Loại</label>
-        <select id="locType">
-          ${LOCATION_TYPE_SUGGESTIONS.map(t=>`<option ${editingLoc && editingLoc.type===t?'selected':''}>${t}</option>`).join('')}
-        </select>
-      </div>
-      <div class="field"><label>Ghi chú (tuỳ chọn)</label><input type="text" id="locNote" placeholder="VD: Gần cửa sau" value="${editingLoc? (editingLoc.note||'') : ''}"></div>
-      <button class="btn" onclick="submitStorageLocation()">${editingLoc? ic('save',15)+' Lưu thay đổi' : '+ Thêm vị trí'}</button>
-      ${editingLoc? `<button class="btn outline" style="margin-top:8px" onclick="resetLocationForm()">Huỷ sửa</button>` : ''}
-    </div>
-    <div class="sec-title">Danh mục vị trí (${STORAGE_LOCATIONS.length})</div>
-    ${STORAGE_LOCATIONS.length ? STORAGE_LOCATIONS.map(loc=>`
-      <div class="litem">
-        <div class="li-l"><div>${loc.name} ${chipOnOff(loc.active!==false)}</div>
-        <div>${loc.type||'Khác'}${loc.note?(' · '+loc.note):''}</div></div>
-        <div class="li-r">
-          <button class="iconbtn" onclick="startEditLocation('${loc.id}')">${ic('pencil')}</button>
-          <button class="iconbtn" onclick="toggleStorageLocation('${loc.id}', ${loc.active===false}).then(renderKhoLocation)">${loc.active===false?ic('play'):ic('pause')}</button>
-          <button class="iconbtn" onclick="removeStorageLocation('${loc.id}')">${ic('x')}</button>
+    ${formOpen ? `<div class="kx-card" style="margin-bottom:18px;max-width:980px">
+      <div class="kx-h">${editingLoc ? 'Sửa vị trí' : 'Vị trí mới'}</div>
+      <div class="nlf-grid">
+        <div class="field"><label>Tên vị trí</label><input type="text" id="locName" placeholder="VD: Kệ quầy pha chế" value="${editingLoc? escapeHtmlAttr(editingLoc.name) : ''}"></div>
+        <div class="field"><label>Loại</label>
+          <select id="locType">
+            ${LOCATION_TYPE_SUGGESTIONS.map(t=>`<option ${editingLoc && editingLoc.type===t?'selected':''}>${t}</option>`).join('')}
+          </select>
         </div>
-      </div>`).join('') : '<div class="muted">Chưa có vị trí kho nào — mặc định coi như 1 kho gộp chung.</div>'}
+        <div class="field"><label>Ghi chú (tuỳ chọn)</label><input type="text" id="locNote" placeholder="VD: Gần cửa sau" value="${editingLoc? escapeHtmlAttr(editingLoc.note||'') : ''}"></div>
+      </div>
+      <div class="kx-btns"><button class="btn" onclick="submitStorageLocation()">${editingLoc? ic('save',15)+' Lưu thay đổi' : '+ Thêm vị trí'}</button>
+        <button class="btn outline" onclick="resetLocationForm()">Huỷ</button></div>
+    </div>` : `<div class="nl-top">
+      <div class="nl-title">Vị trí kho <span class="nl-pill">${STORAGE_LOCATIONS.length}</span></div>
+      <button class="btn nl-add" onclick="locFormOpen=true; renderKhoLocation()">+ Vị trí mới</button>
+    </div>
+    <div class="po-hint">Kho tổng, kệ, tủ mát... dùng để tách tồn và chuyển giữa các nơi. Sửa danh mục không đổi tồn.</div>`}
+    ${STORAGE_LOCATIONS.length ? `<div class="nl-grid btp">${STORAGE_LOCATIONS.map(loc=>`
+      <div class="nl-card${loc.active===false?' wr-off':''}">
+        <div class="nl-head">
+          <div class="nl-name">${escapeHtmlAttr(loc.name||'')}</div>
+          <div class="nl-stock"><span class="tier tier-${loc.active===false?'amber':'green'}">${loc.active===false?'Ngưng dùng':'Đang dùng'}</span></div>
+        </div>
+        <div class="nl-meta">${escapeHtmlAttr(loc.type||'Khác')}${loc.note?(' · '+escapeHtmlAttr(loc.note)):''}</div>
+        <div class="nl-actions">
+          <button class="btn outline sm" onclick="startEditLocation('${loc.id}')">${ic('pencil',15)} Sửa</button>
+          <button class="iconbtn nl-sp" onclick="toggleStorageLocation('${loc.id}', ${loc.active===false}).then(renderKhoLocation)" title="${loc.active===false?'Dùng lại':'Ngưng dùng'}">${loc.active===false?ic('play'):ic('pause')}</button>
+          <button class="iconbtn" onclick="removeStorageLocation('${loc.id}')" title="Xoá vị trí">${ic('x')}</button>
+        </div>
+      </div>`).join('')}</div>` : '<div class="k2-empty">Chưa có vị trí kho nào, đang coi như một kho chung.</div>'}
   `;
 }
-function resetLocationForm(){ editingLocId = null; renderKhoLocation(); }
+// [VT-UI] Form thêm vị trí chỉ mở khi bấm nút.
+let locFormOpen = false;
+function resetLocationForm(){ editingLocId = null; locFormOpen = false; renderKhoLocation(); }
 function startEditLocation(id){ editingLocId = id; renderKhoLocation(); }
 async function submitStorageLocation(){
   const name = document.getElementById('locName').value.trim();
@@ -22299,6 +22331,7 @@ async function submitStorageLocation(){
       toast('✅ Đã thêm vị trí');
     }
     editingLocId = null;
+    locFormOpen = false;
     renderKhoLocation();
   }catch(err){ console.error(err); showError('Lưu vị trí thất bại: '+(err.code||err.message||err)); }
 }
@@ -22859,34 +22892,26 @@ async function renderKhoLocStock(){
           <span class="unit-tag">${escapeHtmlAttr(it.unit||'')}</span>
         </div>
         <div class="ls-preview" id="lsFoot-${it.id}">${locStockFootText(it)}</div>
-        ${Math.abs(lech)>0.005 ? `<div class="ls-warn">⚠️ Tổng các vị trí đang là <b>${fmtNum(tongVT,1)}</b> trong khi tổng kho ghi <b>${fmtNum(tong,1)}</b> — lệch ${lech>0?'+':''}${fmtNum(lech,1)} ${escapeHtmlAttr(it.unit||'')}. Đếm đúng vị trí này rồi lưu để chia lại cho khớp.</div>` : ''}
+        ${Math.abs(lech)>0.005 ? `<div class="ls-warn">Tổng các vị trí ${fmtNum(tongVT,1)}, tổng kho ${fmtNum(tong,1)}: lệch ${lech>0?'+':''}${fmtNum(lech,1)} ${escapeHtmlAttr(it.unit||'')}. Đếm vị trí này rồi lưu để khớp lại.</div>` : ''}
       </div>`;
   };
 
   body.innerHTML = `
-    <div class="card">
-      <div class="field" style="margin-bottom:8px"><label>Đặt tồn cho vị trí</label>
-        <select onchange="locStockLocId=this.value; locStockDraft={}; renderKhoLocStock();">
-          ${locs.map(l=>`<option value="${l.id}" ${l.id===locStockLocId?'selected':''}>${escapeHtmlAttr(l.name)}${l.type?' · '+escapeHtmlAttr(l.type):''}</option>`).join('')}
-        </select>
-      </div>
-      <div class="small-note">Đếm thật rồi gõ số. Màn này <b>chỉ chia lại</b> số tổng ra các vị trí — không làm thay đổi tổng tồn kho. Muốn sửa tổng thì dùng Kiểm kê.</div>
+    <div class="k2-nav k2-seg" style="margin-bottom:14px">${locs.map(l=>
+      `<button class="${l.id===locStockLocId?'active':''}" onclick="locStockLocId='${l.id}'; locStockDraft={}; renderKhoLocStock();">${escapeHtmlAttr(l.name)}</button>`).join('')}</div>
+    <div class="nl-top">
+      <div class="nl-title">Tồn tại ${escapeHtmlAttr(loc.name)} <span class="nl-pill">${list.length}</span></div>
+      <label class="nlf-sw ls-all"><span><b>Hiện tất cả nguyên liệu</b></span>
+        <input type="checkbox" ${locStockShowAll?'checked':''} onchange="locStockShowAll=this.checked; renderKhoLocStock()"></label>
     </div>
-
-    ${!coRule ? `<div class="empty-hint">Chưa có Refill Rule nào chạm tới <b>${escapeHtmlAttr(loc.name)}</b>. Tồn theo vị trí chỉ được hệ thống tự cập nhật cho nguyên liệu có rule — đặt số cho món khác sẽ tạo ra con số không ai cập nhật tiếp.</div>` : ''}
-
-    <div class="sec-title">Nguyên liệu ${locStockShowAll?'(tất cả)':'có Refill Rule tại vị trí này'}</div>
-    ${list.length ? list.map(row).join('') : '<div class="empty-hint">Không có nguyên liệu nào.</div>'}
-
-    <label style="display:flex;align-items:center;gap:8px;margin:10px 2px;font-size:13px">
-      <input type="checkbox" ${locStockShowAll?'checked':''} onchange="locStockShowAll=this.checked; renderKhoLocStock()">
-      Hiện tất cả nguyên liệu (kể cả món chưa có Refill Rule)
-    </label>
-
-    <div class="card">
+    <div class="po-hint">Đếm thật rồi gõ số. Màn này chỉ chia lại tổng ra các vị trí, không đổi tổng tồn. Sửa tổng thì dùng Kiểm kê.</div>
+    ${!coRule ? `<div class="k2-empty" style="margin-bottom:14px">Chưa có refill rule nào ở ${escapeHtmlAttr(loc.name)}. Số đặt cho món không có rule sẽ không ai cập nhật tiếp.</div>` : ''}
+    ${list.length ? `<div class="ls-grid">${list.map(row).join('')}</div>` : '<div class="k2-empty">Không có nguyên liệu nào.</div>'}
+    <div class="kx-card" style="margin-top:18px;max-width:720px">
+      <div class="kx-h">Lưu số đã đếm</div>
       <div class="field"><label>Người đếm</label><input type="text" id="lsStaff" placeholder="Tên người đếm"></div>
+      <div class="kx-note">Chỉ lưu những món có nhập số, mỗi món ghi một dòng vào sổ kho.</div>
       <button class="btn" onclick="submitLocStock()">Lưu tồn theo vị trí</button>
-      <div class="small-note" style="margin-top:8px">Chỉ lưu những dòng có nhập số. Mỗi dòng ghi 1 vết vào lịch sử kho để sau này truy được ai đặt, lúc nào.</div>
     </div>
   `;
 }
@@ -22976,165 +23001,110 @@ async function renderKhoRefill(){
   const it = INVENTORY_ITEMS.find(x=>x.id===refillDraft.itemId);
   const unitOpts = it ? [{label:it.unit, baseQty:1}, ...(it.packagingUnits||[]).map(p=>({label:p.name, baseQty:p.baseQty}))] : [];
 
-  const draftHtml = `
-    <div class="card">
-      <div class="field"><label>Nguyên liệu</label>
-        <select onchange="refillDraft.itemId=this.value; refillDraft.unitFactor=1; renderKhoRefill()">
-          ${INVENTORY_ITEMS.map(x=>`<option value="${x.id}" ${x.id===refillDraft.itemId?'selected':''}>${x.name}</option>`).join('')}
-        </select>
-      </div>
-      <div class="grid2">
+  const draftHtml = refillFormOpen ? `
+    <div class="kx-card" style="margin-bottom:18px;max-width:980px">
+      <div class="kx-h">Refill rule mới</div>
+      <div class="nlf-grid">
+        <div class="field"><label>Nguyên liệu</label>
+          <select onchange="refillDraft.itemId=this.value; refillDraft.unitFactor=1; renderKhoRefill()">
+            ${INVENTORY_ITEMS.map(x=>`<option value="${x.id}" ${x.id===refillDraft.itemId?'selected':''}>${escapeHtmlAttr(x.name)}</option>`).join('')}
+          </select>
+        </div>
         <div class="field"><label>Từ vị trí (nguồn)</label>
           <select onchange="refillDraft.sourceLocationId=this.value">
-            ${locations.map(l=>`<option value="${l.id}" ${l.id===refillDraft.sourceLocationId?'selected':''}>${l.name}</option>`).join('')}
+            ${locations.map(l=>`<option value="${l.id}" ${l.id===refillDraft.sourceLocationId?'selected':''}>${escapeHtmlAttr(l.name)}</option>`).join('')}
           </select>
         </div>
         <div class="field"><label>Đến vị trí (đích)</label>
           <select onchange="refillDraft.destLocationId=this.value">
-            ${locations.map(l=>`<option value="${l.id}" ${l.id===refillDraft.destLocationId?'selected':''}>${l.name}</option>`).join('')}
+            ${locations.map(l=>`<option value="${l.id}" ${l.id===refillDraft.destLocationId?'selected':''}>${escapeHtmlAttr(l.name)}</option>`).join('')}
           </select>
         </div>
       </div>
-      <div class="field"><label>Đơn vị nhập Target/Min/Max</label>
-        <select onchange="refillDraft.unitFactor=Number(this.value)||1">
-          ${unitOpts.map(o=>`<option value="${o.baseQty}">${o.label}</option>`).join('')}
-        </select>
-      </div>
-      <div class="grid2">
+      <div class="rf-nums">
+        <div class="field"><label>Đơn vị</label>
+          <select onchange="refillDraft.unitFactor=Number(this.value)||1">
+            ${unitOpts.map(o=>`<option value="${o.baseQty}" ${Number(refillDraft.unitFactor||1)===Number(o.baseQty)?'selected':''}>${escapeHtmlAttr(o.label)}</option>`).join('')}
+          </select>
+        </div>
         <div class="field"><label>Target</label><input type="number" step="0.01" value="${refillDraft.targetQty}" oninput="refillDraft.targetQty=Number(this.value)||0"></div>
-        <div class="field"><label>Minimum</label><input type="number" step="0.01" value="${refillDraft.minQty}" oninput="refillDraft.minQty=Number(this.value)||0"></div>
+        <div class="field"><label>Min</label><input type="number" step="0.01" value="${refillDraft.minQty}" oninput="refillDraft.minQty=Number(this.value)||0"></div>
+        <div class="field"><label>Max</label><input type="number" step="0.01" value="${refillDraft.maxQty}" oninput="refillDraft.maxQty=Number(this.value)||0"></div>
       </div>
-      <div class="field"><label>Maximum</label><input type="number" step="0.01" value="${refillDraft.maxQty}" oninput="refillDraft.maxQty=Number(this.value)||0"></div>
+      ${refillCfgFieldsHtml('refillDraft', refillDraft, false)}
+      <div class="kx-btns"><button class="btn" onclick="submitRefillRule()">+ Thêm refill rule</button>
+        <button class="btn outline" onclick="refillFormOpen=false; renderKhoRefill()">Huỷ</button></div>
+    </div>` : '';
 
-      <div class="field"><label>Bắt buộc refill lúc nào?</label>
-        <div class="seg">
-          <button class="${refillDraft.refillTiming==='close'?'active':''}" onclick="refillDraft.refillTiming='close'; renderKhoRefill()">Cuối ca</button>
-          <button class="${refillDraft.refillTiming==='open'?'active':''}" onclick="refillDraft.refillTiming='open'; refillDraft.blockingClose=false; renderKhoRefill()">Đầu ca</button>
-          <button class="${refillDraft.refillTiming==='both'?'active':''}" onclick="refillDraft.refillTiming='both'; renderKhoRefill()">Cả hai</button>
-        </div>
-        <div class="hint">${REFILL_TIMING_HINT[refillDraft.refillTiming]||''}</div>
-      </div>
-
-      <label style="display:flex;align-items:center;gap:8px;margin:8px 0 4px;font-size:13px">
-        <input type="checkbox" ${refillDraft.mustCount?'checked':''} onchange="refillDraft.mustCount=this.checked; renderKhoRefill()">
-        <b>Phải đếm tay khi giao ca</b>
-      </label>
-      ${refillDraft.mustCount ? `
-      <div class="field"><label>Đếm lúc nào</label>
-        <div class="seg">
-          <button class="${refillDraft.countTiming==='close'?'active':''}" onclick="refillDraft.countTiming='close'; renderKhoRefill()">Cuối ca</button>
-          <button class="${refillDraft.countTiming==='open'?'active':''}" onclick="refillDraft.countTiming='open'; renderKhoRefill()">Đầu ca</button>
-          <button class="${refillDraft.countTiming==='both'?'active':''}" onclick="refillDraft.countTiming='both'; renderKhoRefill()">Cả hai</button>
-        </div>
-      </div>` : ''}
-
-
-      ${refillCoTheDoiChieu(refillDraft) ? `
-      <label style="display:flex;align-items:center;gap:8px;margin:8px 0 4px;font-size:13px">
-        <input type="checkbox" ${refillDraft.varianceCheck?'checked':''} onchange="refillDraft.varianceCheck=this.checked; renderKhoRefill()">
-        <b>Đối chiếu số đã dùng với số bán ra theo bill</b>
-      </label>
-      ${refillDraft.varianceCheck ? `
-        <div class="small-note" style="margin:-2px 0 8px;line-height:1.55">Cuối ngày lấy <b>đếm đầu ca + refill trong ngày − đếm cuối ca</b> ra số đã dùng THẬT, rồi so với số bill lẽ ra phải dùng (theo <b>Kho → Bao bì</b>). Dùng nhiều hơn bill = có ly ra khỏi quầy mà không có bill. Xem ở <b>Kiểm toán → Đối chiếu bao bì với bill</b>.</div>
-        <div class="field"><label>Bỏ qua nếu lệch trong khoảng (${(INVENTORY_ITEMS.find(x=>x.id===refillDraft.itemId)||{}).unit || 'cái'})</label>
-          <input type="number" step="1" min="0" value="${refillDraft.varianceTolerance||0}" oninput="refillDraft.varianceTolerance=Number(this.value)||0">
-          <div class="hint">Rơi vỡ, đếm nhầm một hai cái là chuyện thường. Để 0 thì lệch một cái cũng bị nêu tên — nhiều cảnh báo quá thì không ai đọc nữa.</div>
-        </div>` : ''}
-      ` : ''}
-      ${(refillDraft.refillTiming==='close'||refillDraft.refillTiming==='both') ? `
-      <label style="display:flex;align-items:center;gap:8px;margin:8px 0;font-size:13px">
-        <input type="checkbox" ${refillDraft.blockingClose?'checked':''} onchange="refillDraft.blockingClose=this.checked; renderKhoRefill()">
-        <b>Chặn đóng ngày nếu dưới mức tối thiểu</b>
-      </label>
-      ${refillDraft.blockingClose ? '<div class="small-note" style="color:#c0392b;margin-bottom:10px">Nhân viên vẫn có đường thoát "Không refill được — ghi lý do" + PIN nếu kho tổng cũng hết hàng.</div>' : ''}
-      ` : ''}
-
-      <button class="btn" onclick="submitRefillRule()">+ Thêm Refill Rule</button>
-    </div>
-  `;
-
-  const listHtml = rules.length ? rules.map(r=>{
+  const listHtml = rules.length ? `<div class="nl-grid btp po">${rules.map(r=>{
     const item = INVENTORY_ITEMS.find(x=>x.id===r.itemId);
     const curAtDest = (item && item.locationStock && item.locationStock[r.destLocationId]) || 0;
     const below = curAtDest < r.minBase;
-    const notConfigured = typeof r.refillTiming === 'undefined'; // rule cũ chưa từng đụng tới GĐ1 v3
+    const notConfigured = typeof r.refillTiming === 'undefined'; // rule cũ chưa từng cấu hình timing
     const isEditing = refillConfigEditId === r.id;
-    return `<div class="litem" style="flex-wrap:wrap">
-      <div class="li-l">
-        <div>${r.itemName} ${r.active===false?'<span class="tier tier-amber" style="margin-left:4px">Ngưng dùng</span>':''}</div>
-        <div>${r.sourceLocationName} → ${r.destLocationName} · Target ${fmtNum(r.targetBase,1)} ${r.unit} (Min ${fmtNum(r.minBase,1)} / Max ${fmtNum(r.maxBase,1)})</div>
-        <div style="${below?'color:#c0392b;font-weight:700;':''}">Hiện tại ở ${r.destLocationName}: ${fmtNum(curAtDest,1)} ${r.unit}${below?' — DƯỚI MỨC TỐI THIỂU':''}</div>
-        ${renderRefillRuleWarnBox(r)}
-        <div style="margin-top:2px">${notConfigured
-          ? `<span class="tier tier-amber">${ic('alert',12)} Chưa cấu hình timing/đếm — đang dùng mặc định (Đầu ca, không đếm, không chặn)</span>`
-          : `<span class="muted">${refillConfigLabel(r)}</span>`}</div>
-        ${(!notConfigured && r.active!==false && !r.mustCount) ? `<div class="small-note" style="color:var(--warn);margin-top:2px">${ic('alert',12)} Không bắt đếm giao ca — "Hiện tại ở ${r.destLocationName}" ở trên chỉ là số cộng/trừ chạy dài, không có gì đối chiếu và có thể đã lệch. Bấm ⚙ để bật đếm.</div>` : ''}
+    const off = r.active===false;
+    const tags = [
+      below ? '<span class="tier tier-red">Dưới mức tối thiểu</span>' : '',
+      off ? '<span class="tier tier-amber">Ngưng dùng</span>' : '',
+      notConfigured ? '<span class="tier tier-amber">Chưa cấu hình, đang dùng mặc định</span>' : '',
+      (!notConfigured && !off && !r.mustCount) ? '<span class="tier tier-amber">Không bắt đếm giao ca</span>' : ''
+    ].filter(Boolean).join('');
+    return `<div class="nl-card${below&&!off?' nl-neg':''}${isEditing?' rf-editing':''}">
+      <div class="nl-head">
+        <div class="nl-name">${escapeHtmlAttr(r.itemName||'')}</div>
+        <div class="nl-stock"><b class="${below?'hist-neg':''}">${fmtNum(curAtDest,1)} ${escapeHtmlAttr(r.unit||'')}</b><span>đang ở ${escapeHtmlAttr(r.destLocationName||'')}</span></div>
       </div>
-      <div class="li-r">
-        <button class="iconbtn" onclick="refillConfigEdit('${r.id}')" title="Cấu hình timing/đếm/chặn">${ic('settings')}</button>
-        <button class="iconbtn" onclick="toggleRefillRule('${r.id}', ${r.active===false}).then(renderKhoRefill)">${r.active===false?ic('play'):ic('pause')}</button>
-        <button class="iconbtn" onclick="deleteRefillRule('${r.id}').then(renderKhoRefill)">${ic('x')}</button>
+      ${tags ? `<div class="nl-tags">${tags}</div>` : ''}
+      <div class="kx-rows">
+        <div class="kx-kv"><span>${escapeHtmlAttr(r.sourceLocationName||'')} → ${escapeHtmlAttr(r.destLocationName||'')}</span><b>Target ${fmtNum(r.targetBase,1)}</b></div>
+        <div class="kx-kv"><span>Min / Max</span><b>${fmtNum(r.minBase,1)} / ${fmtNum(r.maxBase,1)} ${escapeHtmlAttr(r.unit||'')}</b></div>
       </div>
-      ${isEditing ? `
-      <div class="card" style="width:100%;margin:10px 0 0;background:var(--bg)">
-        <div class="field"><label>Bắt buộc refill lúc nào?</label>
-          <div class="seg">
-            <button class="${refillConfigDraft.refillTiming==='close'?'active':''}" onclick="refillConfigDraft.refillTiming='close'; renderKhoRefill()">Cuối ca</button>
-            <button class="${refillConfigDraft.refillTiming==='open'?'active':''}" onclick="refillConfigDraft.refillTiming='open'; refillConfigDraft.blockingClose=false; renderKhoRefill()">Đầu ca</button>
-            <button class="${refillConfigDraft.refillTiming==='both'?'active':''}" onclick="refillConfigDraft.refillTiming='both'; renderKhoRefill()">Cả hai</button>
-          </div>
-          <div class="hint">${REFILL_TIMING_HINT[refillConfigDraft.refillTiming]||''}</div>
-        </div>
-        <label style="display:flex;align-items:center;gap:8px;margin:8px 0 4px;font-size:13px">
-          <input type="checkbox" ${refillConfigDraft.mustCount?'checked':''} onchange="refillConfigDraft.mustCount=this.checked; renderKhoRefill()">
-          <b>Phải đếm tay khi giao ca</b>
-        </label>
-        ${refillConfigDraft.mustCount ? `
-        <div class="field"><label>Đếm lúc nào</label>
-          <div class="seg">
-            <button class="${refillConfigDraft.countTiming==='close'?'active':''}" onclick="refillConfigDraft.countTiming='close'; renderKhoRefill()">Cuối ca</button>
-            <button class="${refillConfigDraft.countTiming==='open'?'active':''}" onclick="refillConfigDraft.countTiming='open'; renderKhoRefill()">Đầu ca</button>
-            <button class="${refillConfigDraft.countTiming==='both'?'active':''}" onclick="refillConfigDraft.countTiming='both'; renderKhoRefill()">Cả hai</button>
-          </div>
-        </div>` : ''}
-      ${refillCoTheDoiChieu(refillConfigDraft) ? `
-      <label style="display:flex;align-items:center;gap:8px;margin:8px 0 4px;font-size:13px">
-        <input type="checkbox" ${refillConfigDraft.varianceCheck?'checked':''} onchange="refillConfigDraft.varianceCheck=this.checked; renderKhoRefill()">
-        <b>Đối chiếu số đã dùng với số bán ra theo bill</b>
-      </label>
-      ${refillConfigDraft.varianceCheck ? `
-        <div class="small-note" style="margin:-2px 0 8px;line-height:1.55">Cuối ngày lấy <b>đếm đầu ca + refill trong ngày − đếm cuối ca</b> ra số đã dùng THẬT, rồi so với số bill lẽ ra phải dùng (theo <b>Kho → Bao bì</b>). Dùng nhiều hơn bill = có ly ra khỏi quầy mà không có bill. Xem ở <b>Kiểm toán → Đối chiếu bao bì với bill</b>.</div>
-        <div class="field"><label>Bỏ qua nếu lệch trong khoảng (${(INVENTORY_ITEMS.find(x=>x.id===refillConfigDraft.itemId)||{}).unit || 'cái'})</label>
-          <input type="number" step="1" min="0" value="${refillConfigDraft.varianceTolerance||0}" oninput="refillConfigDraft.varianceTolerance=Number(this.value)||0">
-          <div class="hint">Rơi vỡ, đếm nhầm một hai cái là chuyện thường. Để 0 thì lệch một cái cũng bị nêu tên — nhiều cảnh báo quá thì không ai đọc nữa.</div>
-        </div>` : ''}
-      ` : ''}
-        ${(refillConfigDraft.refillTiming==='close'||refillConfigDraft.refillTiming==='both') ? `
-        <label style="display:flex;align-items:center;gap:8px;margin:8px 0;font-size:13px">
-          <input type="checkbox" ${refillConfigDraft.blockingClose?'checked':''} onchange="refillConfigDraft.blockingClose=this.checked; renderKhoRefill()">
-          <b>Chặn đóng ngày nếu dưới mức tối thiểu</b>
-        </label>
-        ${refillConfigDraft.blockingClose ? '<div class="small-note" style="color:#c0392b;margin-bottom:10px">Nhân viên vẫn có đường thoát "Không refill được — ghi lý do" + PIN nếu kho tổng cũng hết hàng.</div>' : ''}
-        ` : ''}
-        <div class="field"><label>Thời gian tối thiểu ở bước "Kiểm tra Refill" cuối ca (giây)</label>
-          <input type="number" min="0" step="5" value="${refillConfigDraft.minDurationSec||0}" oninput="refillConfigDraft.minDurationSec=Math.max(0,Number(this.value)||0)">
-          <div class="hint">Nút "Tiếp tục kết ca" sẽ khoá kèm đếm ngược cho tới khi đủ số giây này — chống bấm tick cho qua mà không thật sự đi kiểm tra/đếm lại nguyên liệu này. 0 = không khoá. Nhiều rule cùng hiện trong 1 lần "Kiểm tra Refill" thì lấy số LỚN NHẤT trong các rule đó.</div>
-        </div>
-        <div class="grid2">
-          <button class="btn outline" onclick="refillConfigEditId=null; refillConfigDraft=null; renderKhoRefill()">Huỷ</button>
-          <button class="btn" onclick="submitRefillConfig('${r.id}')">Lưu cấu hình</button>
-        </div>
-      </div>` : ''}
+      ${notConfigured ? '' : `<div class="nl-meta">${refillConfigLabel(r)}</div>`}
+      ${renderRefillRuleWarnBox(r)}
+      ${isEditing ? `<div class="rf-cfg">
+        ${refillCfgFieldsHtml('refillConfigDraft', refillConfigDraft, true)}
+        <div class="kx-btns"><button class="btn" onclick="submitRefillConfig('${r.id}')">Lưu cấu hình</button>
+          <button class="btn outline" onclick="refillConfigEditId=null; refillConfigDraft=null; renderKhoRefill()">Huỷ</button></div>
+      </div>` : `<div class="nl-actions">
+        <button class="btn outline sm" onclick="refillConfigEdit('${r.id}')">${ic('settings',15)} Cấu hình</button>
+        <button class="iconbtn nl-sp" onclick="toggleRefillRule('${r.id}', ${off}).then(renderKhoRefill)" title="${off?'Dùng lại':'Tạm ngưng'}">${off?ic('play'):ic('pause')}</button>
+        <button class="iconbtn" onclick="if(confirm('Xoá refill rule này?')) deleteRefillRule('${r.id}').then(renderKhoRefill)" title="Xoá rule">${ic('x')}</button>
+      </div>`}
     </div>`;
-  }).join('') : '<div class="muted">Chưa có Refill Rule nào.</div>';
+  }).join('')}</div>` : '<div class="k2-empty">Chưa có refill rule nào.</div>';
 
   box.innerHTML = `
-    <div class="small-note" style="margin-bottom:12px">Refill Rule định nghĩa: khi tồn ở vị trí ĐÍCH xuống dưới mức, POS (màn "Refill") sẽ gợi ý chuyển thêm từ vị trí NGUỒN để đạt Target. Tồn "Hiện tại" dưới đây tính từ <code>locationStock</code> — chỉ phản ánh phần đã Transfer qua hệ thống này, KHÔNG phải kiểm kê đầy đủ theo vị trí.</div>
-    <div class="sec-title">Tạo Refill Rule mới</div>
+    ${refillFormOpen ? '' : `<div class="nl-top">
+      <div class="nl-title">Refill rules <span class="nl-pill">${rules.length}</span></div>
+      <button class="btn nl-add" onclick="refillFormOpen=true; renderKhoRefill()">+ Refill rule mới</button>
+    </div>
+    <div class="po-hint">Khi tồn ở vị trí đích dưới Min, POS gợi ý chuyển từ nguồn cho đủ Target. Số "đang ở" chỉ tính phần đã chuyển qua hệ thống.</div>`}
     ${draftHtml}
-    <div class="sec-title" style="margin-top:14px">Refill Rules hiện có</div>
     ${listHtml}
   `;
+}
+// [RF-UI] Form thêm refill rule chỉ mở khi bấm nút, để danh sách rule nằm ngay đầu màn.
+let refillFormOpen = false;
+// Các ô cấu hình giờ refill / đếm / đối chiếu / chặn dùng chung cho form thêm mới
+// (refillDraft) và form sửa cấu hình (refillConfigDraft). `v` là tên biến toàn cục
+// để gắn vào handler, `d` là chính object đó.
+function refillCfgFieldsHtml(v, d, withDuration){
+  const seg = (field, extra) => `<div class="k2-nav kx-mini">${[['close','Cuối ca'],['open','Đầu ca'],['both','Cả hai']].map(([k,l])=>
+    `<button class="${d[field]===k?'active':''}" onclick="${v}.${field}='${k}';${k==='open'&&extra?` ${v}.blockingClose=false;`:''} renderKhoRefill()">${l}</button>`).join('')}</div>`;
+  const sw = (field, title, sub) => `<label class="nlf-sw"><span><b>${title}</b>${sub?`<small>${sub}</small>`:''}</span>
+    <input type="checkbox" ${d[field]?'checked':''} onchange="${v}.${field}=this.checked; renderKhoRefill()"></label>`;
+  const unit = (INVENTORY_ITEMS.find(x=>x.id===d.itemId)||{}).unit || 'cái';
+  return `<div class="rf-cfgrows">
+    <div class="kx-trow"><span><b>Bắt buộc refill lúc</b><small class="rf-hint">${REFILL_TIMING_HINT[d.refillTiming]||''}</small></span>${seg('refillTiming', true)}</div>
+    ${sw('mustCount','Phải đếm tay khi giao ca','')}
+    ${d.mustCount ? `<div class="kx-trow"><span><b>Đếm lúc</b></span>${seg('countTiming', false)}</div>` : ''}
+    ${refillCoTheDoiChieu(d) ? sw('varianceCheck','Đối chiếu số đã dùng với bill','Đếm đầu ca + refill − đếm cuối ca, so với số bill lẽ ra dùng. Xem ở Kiểm toán.') : ''}
+    ${refillCoTheDoiChieu(d) && d.varianceCheck ? `<div class="kx-trow"><span><b>Bỏ qua nếu lệch trong khoảng</b></span>
+      <input class="rf-num" type="number" step="1" min="0" value="${d.varianceTolerance||0}" oninput="${v}.varianceTolerance=Number(this.value)||0"> <small>${escapeHtmlAttr(unit)}</small></div>` : ''}
+    ${(d.refillTiming==='close'||d.refillTiming==='both') ? sw('blockingClose','Chặn đóng ngày nếu dưới mức tối thiểu', d.blockingClose?'Nhân viên vẫn thoát được bằng "Không refill được", ghi lý do và PIN.':'') : ''}
+    ${withDuration ? `<div class="kx-trow"><span><b>Giữ tối thiểu ở bước Kiểm tra Refill</b><small class="rf-hint">Khoá nút Tiếp tục kết ca cho đủ số giây. 0 là không khoá.</small></span>
+      <span><input class="rf-num" type="number" min="0" step="5" value="${d.minDurationSec||0}" oninput="${v}.minDurationSec=Math.max(0,Number(this.value)||0)"> <small>giây</small></span></div>` : ''}
+  </div>`;
 }
 async function submitRefillRule(){
   const it = INVENTORY_ITEMS.find(x=>x.id===refillDraft.itemId);
@@ -23161,6 +23131,7 @@ async function submitRefillRule(){
       varianceCheck: refillDraft.varianceCheck, varianceTolerance: refillDraft.varianceTolerance
     });
     toast('✅ Đã tạo Refill Rule');
+    refillFormOpen = false;
     refillDraft = { itemId: null, sourceLocationId: null, destLocationId: null, targetQty: 0, minQty: 0, maxQty: 0, unitFactor: 1,
       refillTiming: 'open', mustCount: true, countTiming: 'both', blockingClose: false,
   varianceCheck: false, varianceTolerance: 0 };
@@ -24237,7 +24208,7 @@ function openRecipeEditor(menuRefKey, sizeLabels){
 //   - refType 'prep'    → bán thành phẩm CB       (field `prepId`)
 //   - refType 'topping' → topping ĐÍNH KÈM SẴN trong món (field `toppingId`) — vd trà
 //     sữa mặc định có 1 phần trân châu, KHÁC với topping khách BÁN THÊM ở giỏ hàng
-//     (topping bán thêm tính GOGS riêng ở nhóm Topping, không nằm trong định mức món).
+//     (topping bán thêm tính COGS riêng ở nhóm Topping, không nằm trong định mức món).
 // Dòng CŨ không có refType thì mặc định là 'item' (xem recipeRowType) — dữ liệu
 // định mức đã khai từ trước chạy nguyên, không phải migrate.
 function recipeRowType(row){ return (row.refType==='prep' || row.refType==='topping') ? row.refType : 'item'; }
@@ -24307,7 +24278,7 @@ function renderRecipeEditorBox(){
               <input type="number" inputmode="decimal" value="${row.qty}" step="${t==='topping'?'1':'0.01'}" oninput="recipeRowChange('${size}',${idx},'qty',this.value)">
               <span class="unit-tag">${t==='prep' ? escapeHtmlAttr(prepUnitOf(row.prepId)) : t==='topping' ? 'phần' : escapeHtmlAttr(unitOf(row.itemId))}</span>
             </div>
-            ${t==='topping' ? `<div class="small-note">Dùng đúng giá vốn/phần đã khai ở tab <b>GOGS Topping</b>${toppingCostMissing ? ` — <span style="color:#c0392b">${ic('alert',12)} topping này CHƯA khai GOGS, đang tính 0đ, cần bổ sung</span>` : ''}.</div>` : ''}
+            ${t==='topping' ? `<div class="small-note">Dùng đúng giá vốn/phần đã khai ở tab <b>COGS Topping</b>${toppingCostMissing ? ` — <span style="color:#c0392b">${ic('alert',12)} topping này CHƯA khai COGS, đang tính 0đ, cần bổ sung</span>` : ''}.</div>` : ''}
           </div>
         </div>`;
       }).join('')}

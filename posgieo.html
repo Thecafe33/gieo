@@ -1610,7 +1610,7 @@ body.assist-main-on .toast{bottom:calc(100px + var(--assist-h, 0px) + 10px);}
          mà không cần ai duyệt.
      Giữ nguyên id `khoTxScreen`/`khoTxBody` và toàn bộ logic submit bên dưới thay vì tạo
      màn mới trùng lặp — chỉ thu hẹp phạm vi, không viết lại từ đầu.
-     TRANSFER: có màn riêng (refillScreen — Giai đoạn 7). CONSUMPTION: tự sinh theo GOGS
+     TRANSFER: có màn riêng (refillScreen — Giai đoạn 7). CONSUMPTION: tự sinh theo COGS
      khi bán hàng (Giai đoạn 4), không phải nhân viên tự tạo tay. -->
 <div id="khoTxScreen" class="screen">
   <div class="hh">
@@ -2529,10 +2529,10 @@ let _posSubmitBusy = false;
 // TRONG lúc promise còn chạy — nếu confirmPay()/finalizeSplitPay() reject (mất ACK dù server đã
 // commit thật, hoặc lỗi mạng thật), khoá được nhả ngay (finally) và bấm "Xác nhận" lại gọi hàm
 // từ đầu: getNextBillCode() sinh mã MỚI, push(order) tạo đơn MỚI — nhân đôi doanh thu/tiền mặt/
-// GOGS. `_checkoutIdemKey` sinh MỘT LẦN khi vào màn thanh toán (onCheckoutClick), giữ nguyên qua
+// COGS. `_checkoutIdemKey` sinh MỘT LẦN khi vào màn thanh toán (onCheckoutClick), giữ nguyên qua
 // mọi lần bấm lại của CÙNG một lượt thanh toán — dùng làm key CỐ ĐỊNH của bill (thay cho
 // .push() ngẫu nhiên) để bấm lại chỉ là no-op an toàn trên phần bill đã ghi, chỉ chạy tiếp phần
-// GOGS/in tem/tích điểm còn thiếu. Chỉ bị xoá khi cartClear() (bắt đầu đơn thật sự MỚI) hoặc sau
+// COGS/in tem/tích điểm còn thiếu. Chỉ bị xoá khi cartClear() (bắt đầu đơn thật sự MỚI) hoặc sau
 // khi 1 bill đã hoàn tất trọn vẹn.
 let _checkoutIdemKey = null;
 
@@ -2540,7 +2540,7 @@ let _checkoutIdemKey = null;
 // ở trên chỉ tồn tại trong biến JS: app này có Service Worker tự động reload khi có bản mới, nên
 // việc mất idemKey giữa lúc đang chờ ACK của confirmPay()/finalizeSplitPay() không phải tình huống
 // giả định — nó thực sự xảy ra được. Mất idemKey đúng lúc đó thì bấm lại sẽ sinh mã MỚI, tạo bill
-// TRÙNG (nhân đôi doanh thu/GOGS) dù bill đầu đã ghi thành công, mất ACK. Lưu cặp (idemKey, chữ ký
+// TRÙNG (nhân đôi doanh thu/COGS) dù bill đầu đã ghi thành công, mất ACK. Lưu cặp (idemKey, chữ ký
 // giỏ hàng lúc khoá đơn) xuống localStorage để trang tải lại vẫn đọc lại được — nhưng CHỈ dùng lại
 // idemKey cũ khi giỏ hàng hiện tại (nhân viên gõ lại) khớp đúng chữ ký đã lưu, để tránh nhầm 1 đơn
 // HOÀN TOÀN MỚI, KHÁC, vào đúng ô bill của đơn cũ (sẽ bị coi là "trùng" và mất luôn tiền đơn mới).
@@ -5818,7 +5818,7 @@ const STOCK_CONTAINERS_COLL = 'stock_containers_gieogieo';
 // quanlygieo.html. Cùng nếp stock_counts_gieogieo: POS tạo pending_review, Quản lý duyệt.
 const STOCK_LOST_REPORTS_COLL = 'stock_lost_reports_gieogieo';
 // [MỚI] Báo mất TEM (Reprint Label) — KHÁC HẲN báo mất HÀNG ở trên. Cái này chỉ đổi định
-// danh (mã tem) của một container ĐÃ tồn tại, không đụng tồn kho/GOGS/waste gì cả — xem
+// danh (mã tem) của một container ĐÃ tồn tại, không đụng tồn kho/COGS/waste gì cả — xem
 // khối "BÁO MẤT TEM" phía dưới để hiểu rõ ranh giới.
 const MISSING_LABEL_REPORTS_COLL = 'stock_label_reports_gieogieo';
 
@@ -7683,7 +7683,7 @@ async function loadCloseDayOrdersPOS(businessDate) {
 
 async function closeOrderUsagePOS(order) {
   // Trace của bill là dữ liệu tiêu hao đã ghi lúc bán, gồm cả topping và bao bì.
-  // Bill chưa có trace (ghi best-effort) được tính lại bằng chính hàm GOGS bán hàng.
+  // Bill chưa có trace (ghi best-effort) được tính lại bằng chính hàm COGS bán hàng.
   const trace = await fstore.collection('order_stock_traces_gieogieo').doc(order.id).get();
   if (trace.exists && trace.data().ingredients && trace.data().preps) {
     const t = trace.data();
@@ -14408,7 +14408,7 @@ async function submitFoundLostContainer(id) {
 // NGUYÊN TẮC CỐT LÕI — đọc kỹ trước khi sửa bất cứ dòng nào trong khối này:
 //   Mất/hỏng TEM ≠ mất NGUYÊN LIỆU. Màn này chỉ đổi ĐỊNH DANH (code) của container đã
 //   tồn tại — tuyệt đối KHÔNG được gọi createContainersForReceipt (không sinh container
-//   mới), KHÔNG được gọi applyStockTransactionPOS (không đụng currentStock/GOGS/WASTE),
+//   mới), KHÔNG được gọi applyStockTransactionPOS (không đụng currentStock/COGS/WASTE),
 //   KHÔNG đổi trường `status` (sealed/open/finished/lost/voided) của container. Ví dụ:
 //   tồn 12 hộp, mất 2 tem → tồn VẪN 12 hộp, chỉ 2 container đổi từ mã cũ sang mã mới.
 //
@@ -15448,7 +15448,7 @@ async function applyStockTransactionPOS({ itemId, type, qty, note, staff, staffE
     if (staffEmployeeId) txData.staffEmployeeId = staffEmployeeId;
     if (locationId && !atSource) txData.locationId = locationId;
     if (atSource) txData.atSourceLocation = true; // đánh dấu hao hụt xảy ra ở kho tổng
-    // referenceId — Giai đoạn 4: gắn về orderId (billCode) khi tx là CONSUMPTION tự sinh theo GOGS,
+    // referenceId — Giai đoạn 4: gắn về orderId (billCode) khi tx là CONSUMPTION tự sinh theo COGS,
     // đúng field tuỳ chọn đã có sẵn trong schema mục 20 (Management dùng cùng field này).
     if (referenceId) txData.referenceId = referenceId;
     // Lưu kèm để lúc hoàn kho (xoá đơn) biết chính xác phải trả lại bao nhiêu
@@ -20347,23 +20347,23 @@ async function autoCheckOutAllOnClose(checkedOutAt, businessDate) {
 }
 
 // ============================================================
-// [NEW] GIAI ĐOẠN 4 — Sales → GOGS → Consumption
+// [NEW] GIAI ĐOẠN 4 — Sales → COGS → Consumption
 // (POS_Management_Integration_Workflow.md, mục "Giai đoạn 4")
 //
 // Mỗi khi 1 đơn hàng được tạo thành công (đã push vào orders_gieogieo), tự động
 // đối chiếu từng dòng hàng (đã có sẵn field `itemId`, xem mục 1.2.1) với công thức
-// GOGS trong recipes_gieogieo (doc id = `togo:<itemId>`, đúng namespace menu_togo_gieogieo
+// COGS trong recipes_gieogieo (doc id = `togo:<itemId>`, đúng namespace menu_togo_gieogieo
 // — Gieo Gieo chỉ bán mang đi) rồi ghi CONSUMPTION vào stock_transactions_gieogieo qua
 // applyStockTransactionPOS(), CÙNG ledger/CÙNG nguyên tắc với RECEIVING/WASTE/ADJUSTMENT
 // (Giai đoạn 3) — tuyệt đối không sửa currentStock trực tiếp (mục 2.1).
 //
 // Nguyên tắc quan trọng:
-// - GOGS là cấu hình CỦA MANAGEMENT (mục 2.2) — hàm này chỉ ĐỌC recipes_gieogieo,
+// - COGS là cấu hình CỦA MANAGEMENT (mục 2.2) — hàm này chỉ ĐỌC recipes_gieogieo,
 //   không cho phép sửa/tạo công thức từ POS.
 // - KHÔNG CHẶN luồng thanh toán: đây là tiêu hao LÝ THUYẾT, không phải bước bắt buộc
 //   để hoàn tất bill. Mọi lỗi (thiếu recipe, thiếu size, nguyên liệu bị xoá...) chỉ
 //   console.warn/console.info, không toast, không throw ra ngoài — nhân viên bán hàng
-//   không bị ảnh hưởng nếu GOGS cấu hình thiếu/sai.
+//   không bị ảnh hưởng nếu COGS cấu hình thiếu/sai.
 // - Đã verify các trường hợp nêu ở mục 1.2.1 trước khi bật:
 //     · Món nhiều size (M/L)  → khớp theo `it.size`, không phân biệt hoa/thường.
 //     · Món free/tặng/upsize (isFree, _vKey gắn lên item đã có sẵn itemId) → VẪN được
@@ -20372,9 +20372,9 @@ async function autoCheckOutAllOnClose(checkedOutAt, businessDate) {
 //       `itemId` nên tự động bị bỏ qua, không tính nhầm là 1 sản phẩm.
 //     · Món trong food_gieogieo (isFood:true) → không có recipe khớp namespace
 //       `togo:<id>` (đó là id của menu_togo_gieogieo, khác namespace) → tự động bỏ qua,
-//       không lỗi. Muốn bật GOGS cho food thì Management cần khai thêm recipe riêng.
+//       không lỗi. Muốn bật COGS cho food thì Management cần khai thêm recipe riêng.
 //     · Topping bán thêm (c.toppings — có {name,price,id/_freeTpId}) → ĐÃ được nổ
-//       ra thành nguyên liệu/CB thật theo GOGS Topping (topping_recipes_gieogieo)
+//       ra thành nguyên liệu/CB thật theo COGS Topping (topping_recipes_gieogieo)
 //       và trừ kho, kể cả khi TẶNG miễn phí (xem computeConsumptionForOrder).
 //       Topping của bill CŨ (tạo trước khi có field `id`) không tra được công
 //       thức → bị bỏ qua có kiểm soát (báo sang Quản lý qua missing_recipe), không
@@ -20396,9 +20396,9 @@ async function ensureRecipesLoadedPOS() {
   return map;
 }
 
-// [NEW — vá lỗ hổng "topping không trừ kho"] Cache GOGS Topping (topping_recipes_gieogieo),
+// [NEW — vá lỗ hổng "topping không trừ kho"] Cache COGS Topping (topping_recipes_gieogieo),
 // y hệt cơ chế cache Định mức món ở trên — dùng để NỔ 1 lần topping ra thành đúng
-// nguyên liệu thô/CB thật (theo batchInputs đã khai ở tab GOGS Topping) rồi trừ kho,
+// nguyên liệu thô/CB thật (theo batchInputs đã khai ở tab COGS Topping) rồi trừ kho,
 // thay vì chỉ dừng ở việc tính TIỀN như trước đây.
 let TOPPING_RECIPES_CACHE_POS = null;
 let TOPPING_RECIPES_CACHE_POS_AT = 0;
@@ -20433,7 +20433,7 @@ async function ensurePackagingPresetsLoadedPOS() {
 // topping). Doc id = menuRefKey ("togo:<itemId>"), CÙNG namespace RECIPES_CACHE_POS
 // ở trên. Xem ghi chú đầy đủ ở resolvePackagingItemsForLinePOS() bên dưới — logic
 // PHẢI khớp Y HỆT resolvePackagingItemsForLine() bên quanlygieo.html, nếu không
-// GOGS báo cáo và tồn kho thật sẽ lệch nhau.
+// COGS báo cáo và tồn kho thật sẽ lệch nhau.
 let PACKAGING_ITEM_OVERRIDES_CACHE_POS = null;
 let PACKAGING_ITEM_OVERRIDES_CACHE_POS_AT = 0;
 async function ensurePackagingItemOverridesLoadedPOS() {
@@ -20480,7 +20480,7 @@ function computeBaggingPlanPOS(cups, trayThreshold) {
 // packaging_rules_config_gieogieo. THAY THẾ mô hình "khai theo BỘ" cũ.
 // TOÀN BỘ logic dưới đây PHẢI khớp Y HỆT bản bên quanlygieo.html
 // (resolvePackagingForCup / pkgRuleMatches / pkgRuleSpecificity / pkgRuleQty /
-// lineHasToppingTrigger) — lệch 1 bên là GOGS báo cáo và tồn kho thật lệch nhau.
+// lineHasToppingTrigger) — lệch 1 bên là COGS báo cáo và tồn kho thật lệch nhau.
 const PKG_GROUPS_POS = ['ly', 'nap', 'muong', 'onghut', 'hu', 'da'];
 const PKG_GROUP_MODE_POS = { ly:'exclusive', nap:'exclusive', muong:'exclusive', onghut:'exclusive', hu:'additive', da:'exclusive' };
 const PKG_RULES_CONFIG_DEFAULTS_POS = { triggerToppingIds:[], triggerPrepIds:[], jarToppingIds:[] };
@@ -20617,7 +20617,7 @@ function _findRecipeSizeKeyPOS(sizesObj, cartSize) {
 // 3 loại: nguyên liệu thô (`itemId`), bán thành phẩm (`prepId`, refType 'prep'),
 // hoặc TOPPING đính kèm sẵn (`toppingId`, refType 'topping').
 //
-// [SỬA — vá lỗ hổng nghiêm trọng] TRƯỚC ĐÂY: khi thêm tính năng GOGS Topping,
+// [SỬA — vá lỗ hổng nghiêm trọng] TRƯỚC ĐÂY: khi thêm tính năng COGS Topping,
 // mới chỉ tính ra được CHI PHÍ (tiền) của topping cho báo cáo, còn TỒN KHO VẬT LÝ
 // (nguyên liệu thô/CB dùng để làm topping) hoàn toàn KHÔNG bị trừ — dù topping đó
 // TẶNG, BÁN THÊM ở giỏ hàng, hay ĐÍNH KÈM SẴN trong định mức món. Hậu quả: tồn
@@ -20625,7 +20625,7 @@ function _findRecipeSizeKeyPOS(sizesObj, cartSize) {
 // viên bị quy trách nhiệm hao hụt/mất hàng oan.
 // Giờ mỗi lần 1 topping xuất hiện trong bill (dù cách nào), hàm này NỔ nó ra
 // thành đúng nguyên liệu/CB thật (theo batchInputs + batchYield/yieldMode đã
-// khai ở GOGS Topping — CÙNG công thức đang dùng để tính costPerServing, đảm
+// khai ở COGS Topping — CÙNG công thức đang dùng để tính costPerServing, đảm
 // bảo tiền và kho luôn khớp nhau, không phải 2 con số tính riêng 2 nơi) rồi
 // cộng dồn vào agg/prepAgg y như nguyên liệu của món chính.
 //
@@ -20636,7 +20636,7 @@ function _findRecipeSizeKeyPOS(sizesObj, cartSize) {
 function computeConsumptionForOrder(order, recipes, toppingRecipes, packagingPresets, packagingItemOverrides, baggingRules, pkgRules, pkgRulesConfig, baggingTable) {
   const agg = {};      // { ingredientItemId: tổng qty tiêu hao }
   const prepAgg = {};  // { prepId: tổng qty tiêu hao }
-  const skipped = [];  // log các dòng không khớp GOGS — không chặn, chỉ để dò khi verify
+  const skipped = [];  // log các dòng không khớp COGS — không chặn, chỉ để dò khi verify
   const tRec = toppingRecipes || {};
   const pkgPresets = packagingPresets || {};
   const pkgOverrides = packagingItemOverrides || {};
@@ -20657,14 +20657,14 @@ function computeConsumptionForOrder(order, recipes, toppingRecipes, packagingPre
 
   // Nổ 1 topping (theo servingsCount lần được thêm vào bill) ra thành nguyên
   // liệu/CB thật, dùng ĐÚNG công thức mẻ (batchInputs/batchYield/yieldMode) đã
-  // khai ở GOGS Topping — y hệt cách computeToppingCost() bên Quản lý tính tiền,
+  // khai ở COGS Topping — y hệt cách computeToppingCost() bên Quản lý tính tiền,
   // chỉ khác là ở đây cộng dồn SỐ LƯỢNG nguyên liệu thay vì cộng dồn CHI PHÍ.
   function applyToppingConsumption(toppingId, servingsCount, labelForSkip) {
     if (!(servingsCount > 0)) return;
     const rec = tRec[toppingId];
     const y = rec && Number(rec.batchYield);
     if (!rec || !(y > 0) || !rec.batchInputs || !rec.batchInputs.length) {
-      skipped.push({ name: labelForSkip, reason: 'topping chưa khai GOGS (hoặc chưa đủ dữ liệu mẻ) — CHƯA trừ kho được' });
+      skipped.push({ name: labelForSkip, reason: 'topping chưa khai COGS (hoặc chưa đủ dữ liệu mẻ) — CHƯA trừ kho được' });
       return;
     }
     // servingFactor = phần mẻ tiêu tốn cho ĐÚNG 1 lần thêm topping:
@@ -20894,7 +20894,7 @@ async function applyPrepConsumptionPOS(prepId, qty, note, referenceId, businessD
 }
 
 // Báo sang app Quản lý những dòng bán ra mà KHÔNG trừ được kho (thiếu định mức
-// món, hoặc thiếu GOGS topping — xem các `reason` trong computeConsumptionForOrder).
+// món, hoặc thiếu COGS topping — xem các `reason` trong computeConsumptionForOrder).
 // Gộp theo TÊN + NGÀY: doc id cố định nên bán 200 ly cùng món/topping chỉ tạo 1
 // bản ghi, đếm số lần thay vì đẻ ra 200 cảnh báo làm ngập hộp thư.
 async function reportMissingRecipePOS(skipped) {
@@ -20924,7 +20924,7 @@ async function applySalesConsumptionPOS(order, orderId, businessDate) {
     const [recipes, toppingRecipes, packagingPresets, packagingItemOverrides, baggingRules, pkgRulesPack, baggingTable] = await Promise.all([ensureRecipesLoadedPOS(), ensureToppingRecipesLoadedPOS(), ensurePackagingPresetsLoadedPOS(), ensurePackagingItemOverridesLoadedPOS(), ensurePackagingBaggingRulesLoadedPOS(), ensurePackagingRulesLoadedPOS(), ensurePackagingBaggingTableLoadedPOS()]);
     const { agg, prepAgg, skipped } = computeConsumptionForOrder(order, recipes, toppingRecipes, packagingPresets, packagingItemOverrides, baggingRules, pkgRulesPack.rules, pkgRulesPack.config, baggingTable);
     if (skipped.length) {
-      console.info('[GOGS] Bỏ qua trừ kho tự động cho:', skipped);
+      console.info('[COGS] Bỏ qua trừ kho tự động cho:', skipped);
       // [FIX] Trước đây CHỈ có dòng console.info trên — không ai thấy. Món chưa
       // khai định mức vẫn bán bình thường nhưng kho không trừ gam nào, tồn kho
       // trên hệ thống luôn "đẹp" cho tới kỳ kiểm kê mới lòi ra lệch lớn, và lúc
@@ -20942,7 +20942,7 @@ async function applySalesConsumptionPOS(order, orderId, businessDate) {
     // nơi đọc lại (Chi tiết lô/tem, Lệch định lượng theo lô bên Quản lý).
     const isBackfillAfterClose = order && order.backfillMode === 'after_close';
     const note = (isBackfillAfterClose ? '[Bổ sung sau đóng ngày — lô ghi dưới đây là lô ĐANG MỞ LÚC BỔ SUNG, không phải lô thật của ngày bán] ' : '')
-      + 'Tự động trừ theo GOGS' + (order && order.billCode ? ' — ' + order.billCode : '');
+      + 'Tự động trừ theo COGS' + (order && order.billCode ? ' — ' + order.billCode : '');
     const ingredientIds = Object.keys(agg);
     const prepIds = Object.keys(prepAgg);
     if (!ingredientIds.length && !prepIds.length) return;
@@ -20982,7 +20982,7 @@ async function applySalesConsumptionPOS(order, orderId, businessDate) {
         // chỉ lỗi mạng. Chạy tiếp FIFO trong tình huống đó có thể trừ đúp RT trong khi bước ghi
         // sổ bên dưới tự nhận ra đã có rồi và no-op. FAIL-CLOSED: không xác minh được thì dừng
         // hẳn, không trừ gì — dòng này sẽ hiện 'rejected' và được cảnh báo qua
-        // _ueWarnGogsConsumptionFailed() như mọi lỗi GOGS khác, không lặng lẽ trừ đúp.
+        // _ueWarnGogsConsumptionFailed() như mọi lỗi COGS khác, không lặng lẽ trừ đúp.
         let txDoc;
         try { txDoc = await fstore.collection('stock_transactions_gieogieo').doc(txId).get(); }
         catch (checkErr) { throw new Error('Không xác định được trạng thái ledger — không chạy FIFO: ' + (checkErr.message || checkErr)); }
@@ -21024,7 +21024,7 @@ async function applySalesConsumptionPOS(order, orderId, businessDate) {
       ...prepIds.map(pid => applyPrepConsumptionPOS(pid, prepAgg[pid], note, orderId, businessDate, orderId + '_prep_' + pid, isBackfillAfterClose))
     ]);
     const allIds = [...ingredientIds, ...prepIds];
-    // [BUG "GOGS lỗi không có cơ chế theo dõi durable" — FIX] TRƯỚC ĐÂY chỉ console.warn rồi
+    // [BUG "COGS lỗi không có cơ chế theo dõi durable" — FIX] TRƯỚC ĐÂY chỉ console.warn rồi
     // thôi — nhân viên/Quản lý không có cách nào biết bill nào từng bị thiếu 1 dòng trừ kho để
     // tự bù, kho thiếu âm thầm mãi. Chưa xây hàng đợi retry tự động đầy đủ (pending/processing/
     // completed/failed như đề xuất) — phạm vi round này chỉ đóng phần "hoàn toàn im lặng": ghi
@@ -21032,7 +21032,7 @@ async function applySalesConsumptionPOS(order, orderId, businessDate) {
     const failedLines = [];
     results.forEach((r, i) => {
       if (r.status === 'rejected') {
-        console.warn('[GOGS] Trừ kho thất bại —', allIds[i], r.reason);
+        console.warn('[COGS] Trừ kho thất bại —', allIds[i], r.reason);
         failedLines.push({ id: allIds[i], isPrep: i >= ingredientIds.length, reason: String((r.reason && r.reason.message) || r.reason || '') });
       }
     });
@@ -21072,7 +21072,7 @@ async function applySalesConsumptionPOS(order, orderId, businessDate) {
     }
   } catch (err) {
     // Không chặn thanh toán — chỉ log, đúng nguyên tắc "tiêu hao lý thuyết" không phải bước bắt buộc.
-    console.warn('[GOGS] applySalesConsumptionPOS lỗi (không ảnh hưởng bill):', err);
+    console.warn('[COGS] applySalesConsumptionPOS lỗi (không ảnh hưởng bill):', err);
     // [FIX #A — "outer catch nuốt lỗi âm thầm"] Khác với lỗi 1-2 dòng bên trong Promise.allSettled
     // (đã có _ueWarnGogsConsumptionFailed cảnh báo), lỗi ở TẦNG NGOÀI này (đọc định mức/bao bì/
     // topping lỗi — thường do mạng chập chờn ngay lúc Firestore đang được gọi) khiến TOÀN BỘ đơn
@@ -21090,7 +21090,7 @@ async function applySalesConsumptionPOS(order, orderId, businessDate) {
   }
 }
 
-// [BUG "GOGS lỗi không có cơ chế theo dõi durable" — FIX] "Không chặn bill vì lỗi kho" là đúng
+// [BUG "COGS lỗi không có cơ chế theo dõi durable" — FIX] "Không chặn bill vì lỗi kho" là đúng
 // chủ đích, nhưng trước đây "không chặn" đồng nghĩa "chỉ console.warn rồi biến mất" — bill vẫn
 // thành công, không ai biết dòng trừ kho nào đã lỡ hụt để tự bù tay, kho thiếu âm thầm mãi.
 // Doc id CỐ ĐỊNH theo orderId (gộp mọi dòng lỗi của CÙNG 1 bill vào 1 cảnh báo, merge nếu có
@@ -24409,7 +24409,7 @@ function consumeFreeToGoDrink(phone) {
 //  1) Idempotent theo billId (doc `stamp_free_redemptions_gieogieo/{billId}`, cùng transaction với
 //     việc trừ customer) — phòng khi hàm bị gọi lại (vd. đợt retry side-effect của BUG#17).
 //  2) Retry vài lần qua _ueRetryAsync trước khi bỏ cuộc, thay vì thử đúng 1 lần rồi thôi.
-//  3) Chỉ khi retry vẫn lỗi mới ghi 1 cảnh báo DURABLE (alerts_gieogieo, cùng mẫu với GOGS ở
+//  3) Chỉ khi retry vẫn lỗi mới ghi 1 cảnh báo DURABLE (alerts_gieogieo, cùng mẫu với COGS ở
 //     _ueWarnGogsConsumptionFailed) để Quản lý tự đối soát tay — không còn "mất trong im lặng".
 // `_stampFreePhone` (RAM) chỉ bị xoá SAU khi biết chắc kết quả (thành công hoặc đã ghi cảnh báo).
 async function _finalizeStampFreeAfterPay(billId) {
@@ -24487,7 +24487,7 @@ function loyaltyTodayStr() {
 // bấm lại trong vòng _CHECKOUT_SIDE_EFFECTS_STALE_MS thì claim vẫn 'processing' nên khối
 // side-effect bị BỎ QUA hoàn toàn — loyalty vẫn không chạy, lại thêm một lượt hoảng loạn ở quầy.
 //
-// Nên chọn đúng khuôn mẫu đã dùng cho _finalizeStampFreeAfterPay/GOGS:
+// Nên chọn đúng khuôn mẫu đã dùng cho _finalizeStampFreeAfterPay/COGS:
 //   1) retry vài lần (_ueRetryAsync) thay vì thử đúng một lần rồi thôi;
 //   2) thất bại hẳn thì GHI NỢ BỀN VỮNG: hàng đợi localStorage (sống sót cả khi Firestore đang
 //      chết — đây mới là tình huống thật) + doc `loyalty_pending_retry_gieogieo` + cảnh báo
@@ -24991,7 +24991,7 @@ async function confirmPay(cashGiven, cashChange) {
     // [FIX duplicate bill] Dùng KEY CỐ ĐỊNH (idemKey) thay cho .push() ngẫu nhiên — kiểm tra
     // trước xem bill này ĐÃ được ghi ở lượt bấm trước hay chưa (server đã commit thật, client chỉ
     // mất ACK). Nếu đã có: KHÔNG ghi lại (billCode/billSeq cũ giữ nguyên, không sinh mã mới đè
-    // lên), chỉ chạy tiếp phần theo sau (GOGS/in/tích điểm) — phần đó CHƯA CHẮC đã chạy ở lượt
+    // lên), chỉ chạy tiếp phần theo sau (COGS/in/tích điểm) — phần đó CHƯA CHẮC đã chạy ở lượt
     // trước vì .then() nội bộ chưa từng fire trên máy này nếu mất ACK ngay sau khi ghi.
     const existingSnap = await billRef.once('value');
     const isNewBill = !existingSnap.exists();
@@ -25005,7 +25005,7 @@ async function confirmPay(cashGiven, cashChange) {
     }
     // KHÔNG thêm thủ công vào orders[] — RT listener child_added tự xử lý (có guard duplicate).
 
-    // Giai đoạn 4 — tự động trừ kho theo GOGS (recipes_gieogieo), không chặn luồng thanh toán.
+    // Giai đoạn 4 — tự động trừ kho theo COGS (recipes_gieogieo), không chặn luồng thanh toán.
     // [MỚI] Bổ sung bill thiếu: "trước kết ca" ghi sổ đúng ngày nhưng KHÔNG đụng tồn kho hiện
     // tại; mọi trường hợp khác (bán thật, hoặc "sau kết ca") đều trừ tồn hiện tại như cũ, chỉ
     // khác chỗ businessDate trên ledger có thể bị lùi về ngày đã chọn.
@@ -25641,7 +25641,7 @@ function filterH() { renderH(document.getElementById('hsi').value); }
 // đúng hơn — AOV là chi tiêu trung bình mỗi LƯỢT KHÁCH, khách quay lại thêm topping vẫn
 // là một lượt. Nhờ topping nằm trong `itemsArray[i].toppings` như mọi topping khác nên
 // toàn bộ hạ tầng phía sau tự chạy đúng, không phải sửa: doanh thu topping, margin nhóm
-// topping, trừ kho theo GOGS, và hoàn kho khi xoá đơn (reverseSalesConsumptionPOS tính
+// topping, trừ kho theo COGS, và hoàn kho khi xoá đơn (reverseSalesConsumptionPOS tính
 // lại từ chính itemsArray).
 //
 // Ràng buộc vận hành (theo yêu cầu):
@@ -26382,7 +26382,7 @@ function delOrderCancel() {
 // [MỚI] BỔ SUNG BILL THIẾU SAU KẾT CA
 // Nhân viên/Quản lý báo phát hiện thiếu 1 bill sau khi ngày đã kết ca (thanh toán bình thường đã
 // bị khoá cứng — xem _isDayClosedToday). Luồng này mở lại đúng màn gọi món/thanh toán bình
-// thường (để tính tiêu hao đúng công thức GOGS, không phải nhập tay từng nguyên liệu), nhưng:
+// thường (để tính tiêu hao đúng công thức COGS, không phải nhập tay từng nguyên liệu), nhưng:
 //   - Cần mã 8833 để vào (không phải PIN nhân viên — đây là thao tác ngoại lệ hiếm khi dùng).
 //   - Bill được ghi LÙI NGÀY về đúng ngày kinh doanh GẦN NHẤT đã kết ca (không chọn ngày tuỳ ý —
 //     quyết định nghiệp vụ đã chốt: chỉ dùng cho tình huống "vừa kết ca xong, phát hiện thiếu").
@@ -27183,12 +27183,12 @@ function setCartToppingQty(toppingId, qty) {
   } else if (idx >= 0) {
     line.toppings[idx].qty = q;
     line.toppings[idx].price = toppingPrice; // đồng bộ lại giá phòng khi vừa đổi mang đi/tại chỗ
-    line.toppings[idx].id = t.id; // [NEW-GOGS] BTP cũ tạo trước khi có field này sẽ được vá lại id khi sửa số lượng
+    line.toppings[idx].id = t.id; // [NEW-COGS] BTP cũ tạo trước khi có field này sẽ được vá lại id khi sửa số lượng
   } else {
-    // [NEW-GOGS] Lưu kèm id topping (không chỉ name/price) — bên Quản lý dùng id này
-    // để tra công thức GOGS topping (topping_recipes_gieogieo) và cộng đúng giá vốn
+    // [NEW-COGS] Lưu kèm id topping (không chỉ name/price) — bên Quản lý dùng id này
+    // để tra công thức COGS topping (topping_recipes_gieogieo) và cộng đúng giá vốn
     // nguyên liệu vào COGS, kể cả khi topping được TẶNG (price=0) như chương trình
-    // Free Topping cho thành viên — trước đây tặng topping không hề bị tính GOGS.
+    // Free Topping cho thành viên — trước đây tặng topping không hề bị tính COGS.
     line.toppings.push({ id: t.id, name: t.name, price: toppingPrice, qty: q });
   }
   openToppingPicker(_tpPickerKey);
@@ -27564,7 +27564,7 @@ async function finalizeSplitPay() {
     // doanh thu trong ngày bị cộng gấp đôi cho tới khi F5.
     // confirmPay() đã ghi rõ nguyên tắc này trong comment của nó — Tính riêng bị sót.
 
-    // Giai đoạn 4 — tự động trừ kho theo GOGS (recipes_gieogieo), không chặn luồng thanh toán.
+    // Giai đoạn 4 — tự động trừ kho theo COGS (recipes_gieogieo), không chặn luồng thanh toán.
     // [MỚI] Cùng nhánh backfill với confirmPay() — xem chú thích ở đó.
     // Gọi lại KHÔNG ĐIỀU KIỆN (không gate theo sideEffectsDone bên dưới) vì tự idempotent qua txId.
     if (_backfillMode && _backfillMode.skipConsumption) {
