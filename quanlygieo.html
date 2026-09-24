@@ -1615,6 +1615,25 @@ html.tab-ui:not(.nav-off) .sidebar{background:#F2F2F7;border-right:1px solid rgb
 .btp .nl-actions{padding-top:8px;}
 .btp .nl-actions .btn.sm{min-height:40px;}
 .btp .nl-actions .iconbtn{width:40px;height:40px;}
+.nl-grid.po{grid-template-columns:repeat(auto-fill,minmax(min(400px,100%),1fr));}
+.po .nl-actions .btn.sm{white-space:nowrap;}
+.po .nl-name{font-size:17px;}
+.po .nl-stock .tier{margin:0 !important;}
+.po .nl-stock span:not(.tier){margin-top:4px;}
+.po-lines{display:flex;flex-direction:column;gap:8px;}
+.po-line{padding:10px 12px;border-radius:14px;background:rgba(118,118,128,.07);}
+.po-line-n{font-size:14.5px;font-weight:700;color:var(--td);display:flex;flex-wrap:wrap;align-items:center;gap:6px;}
+.po-line-n .tier{margin:0 !important;}
+.po-line-q{font-size:13px;color:var(--gt);margin-top:2px;font-variant-numeric:tabular-nums;}
+.po-fix{font-size:12.5px;color:var(--warn);line-height:1.45;}
+.po-hint{font-size:14px;color:var(--gt);margin:-6px 0 14px;}
+.po-quick{max-width:640px;}
+.po-dl{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1.4fr) minmax(0,1fr) 44px;gap:12px;align-items:start;padding:14px 16px 4px;margin-bottom:10px;border-radius:20px;background:rgba(118,118,128,.07);}
+.po-dl .field{margin-bottom:10px;}
+.po-dl .hint{font-size:12px;}
+.po-dl-x{margin-top:26px;width:44px;height:44px;}
+@media (max-width:760px){.po-dl{grid-template-columns:1fr 44px;}.po-dl .field{grid-column:1;}.po-dl-x{grid-column:2;grid-row:1;}}
+.po-quick .card{border:none;border-radius:28px;padding:22px 24px;box-shadow:0 2px 6px rgba(0,0,0,.03),0 12px 32px rgba(0,0,0,.06);}
 </style>
 </head>
 <body>
@@ -22413,11 +22432,7 @@ function poUnitOptsFor(itemId, cur){
 function poDraftLinesHtml(){
   if(!poDraftLines.length) return '<div class="empty-hint" style="margin-bottom:10px">Chưa có dòng nào. Bấm "+ Thêm nguyên liệu" bên dưới.</div>';
   return poDraftLines.map((l,idx)=>`
-    <div class="pkg-row">
-      <div class="pkg-row-h">
-        <span class="pkg-row-n">Dòng ${idx+1}</span>
-        <button class="iconbtn" onclick="poRemoveDraftLine(${idx})" aria-label="Xoá dòng ${idx+1}">${ic('x')}</button>
-      </div>
+    <div class="po-dl">
       <div class="field"><label>Nguyên liệu</label>
         <select onchange="poDraftLineChange(${idx},'itemId',this.value)">
           ${INVENTORY_ITEMS.map(x=>`<option value="${x.id}" ${x.id===l.itemId?'selected':''}>${escapeHtmlAttr(x.name)}</option>`).join('')}
@@ -22429,13 +22444,11 @@ function poDraftLinesHtml(){
           <select onchange="poDraftLineChange(${idx},'unitFactor',this.value)">${poUnitOptsFor(l.itemId, l.unitFactor)}</select>
         </div>
       </div>
-      <div class="field" style="margin-bottom:0"><label>Giá lần này (tuỳ chọn)</label>
-        <div class="pkg-eq">
-          <input type="number" inputmode="decimal" step="0.01" placeholder="${fmtNum(poGiaHienTai(l),0)}" value="${l.priceOrder == null ? '' : l.priceOrder}" oninput="poDraftLineChange(${idx},'priceOrder',this.value)">
-          <span class="unit-tag">đ/${escapeHtmlAttr(poUnitLabelFor(INVENTORY_ITEMS.find(x=>x.id===l.itemId), Number(l.unitFactor)||1))}</span>
-        </div>
+      <div class="field"><label>Giá lần này (đ/${escapeHtmlAttr(poUnitLabelFor(INVENTORY_ITEMS.find(x=>x.id===l.itemId), Number(l.unitFactor)||1))})</label>
+        <input type="number" inputmode="decimal" step="0.01" placeholder="${fmtNum(poGiaHienTai(l),0)}" value="${l.priceOrder == null ? '' : l.priceOrder}" oninput="poDraftLineChange(${idx},'priceOrder',this.value)">
         <div class="hint" id="poPriceNote${idx}"></div>
       </div>
+      <button class="iconbtn po-dl-x" onclick="poRemoveDraftLine(${idx})" aria-label="Xoá dòng ${idx+1}">${ic('x')}</button>
     </div>`).join('');
 }
 async function renderKhoPO(){
@@ -22460,82 +22473,105 @@ async function renderKhoPO(){
   }
   catch(err){ console.error('loadPurchaseOrders failed', err); box.innerHTML = '<div class="muted">Không tải được đơn đặt hàng.</div>'; showError('Không đọc được PO: '+(err.code||err.message||err)); return; }
 
-  const draftHtml = `
-    <div class="card">
-      <div class="field"><label>Nhà cung cấp (tuỳ chọn)</label><input type="text" id="poSupplier" placeholder="VD: Đại lý sữa ABC" value="${escapeHtmlAttr(poDraftMeta.supplier)}" oninput="poMetaChange('supplier',this.value)"></div>
-      <div class="unit-explainer">Mỗi dòng có ô <b>"Giá lần này"</b> — chỉ điền khi nhà cung cấp báo giá KHÁC giá đang lưu. Để trống thì hệ thống dùng tiếp giá hiện tại, không phải nhập lại mỗi lần đặt hàng.<br>Giá mới <b>không ghi đè</b> giá cũ: nó tạo một mốc giá mới bắt đầu từ ngày bên dưới, nên báo cáo của những ngày trước đó vẫn giữ nguyên giá cũ.</div>
-      <div id="poDraftLines">${poDraftLinesHtml()}</div>
-      <button class="btn outline sm" onclick="poAddDraftLine()" style="margin-bottom:10px">+ Thêm nguyên liệu</button>
+  const tabs = [['po','Đơn đặt hàng'],['rec','Phiếu nhận'],['quick','Nhập nhanh']];
+  if(fixRecPoId) poTab = 'rec';
+  const activeStatuses = ['pending','partial'];
+  const nActive = pos.filter(po=>activeStatuses.includes(po.status)).length;
+  const tabBar = `<div class="k2-nav k2-seg" style="margin-bottom:16px">${tabs.map(([k,l])=>
+    `<button class="${poTab===k?'active':''}" onclick="poTab='${k}'; if('${k}'!=='rec') fixRecPoId=null; renderKhoPO();">${l}${k==='po'&&nActive?` <span class="k2-n warn">${nActive}</span>`:''}</button>`).join('')}</div>`;
+
+  let body = '';
+  if(poTab === 'po'){
+    // Đơn còn chờ lên trước, trong mỗi nhóm giữ thứ tự mới nhất trước như loadPurchaseOrders trả về.
+    const sorted = pos.filter(po=>activeStatuses.includes(po.status)).concat(pos.filter(po=>!activeStatuses.includes(po.status)));
+    body = `
+      <div class="nl-top">
+        <div class="nl-title">Đơn đặt hàng <span class="nl-pill">${pos.length}</span></div>
+        <button class="btn nl-add" onclick="poOpenDraft()">+ Đơn đặt hàng mới</button>
+      </div>
+      ${sorted.length ? `<div class="nl-grid btp po">${sorted.map(poCardHtml).join('')}</div>` : '<div class="k2-empty">Chưa có đơn đặt hàng nào.</div>'}`;
+  } else if(poTab === 'rec'){
+    const p2 = n => String(n).padStart(2,'0');
+    const dtFix = iso => { const d = iso?new Date(iso):null; return (d && !isNaN(d)) ? `${p2(d.getDate())}/${p2(d.getMonth()+1)} ${p2(d.getHours())}:${p2(d.getMinutes())}` : ''; };
+    body = `
+      <div class="nl-top">
+        <div class="nl-title">Phiếu nhận hàng <span class="nl-pill">${FIXREC_CACHE.length}</span></div>
+        ${fixRecPoId ? `<button class="btn outline nl-add" onclick="fixRecPoId=null; renderKhoPO();">Xem tất cả phiếu</button>` : ''}
+      </div>
+      <div class="po-hint">Gõ nhầm số lúc nhận hàng? Mở phiếu để sửa tồn, sổ, tem và đơn trong một lần.${fixRecPoId?' Đang lọc theo một đơn.':''}</div>
+      ${FIXREC_CACHE.length ? `<div class="nl-grid btp po">${FIXREC_CACHE.map(r=>{
+        const dongs = (r.lines||[]).filter(l=>Number(l.qtyGoodBase)>0);
+        const sua = (r.corrections||[]).length;
+        return `<div class="nl-card">
+          <div class="nl-head">
+            <div class="nl-name">${escapeHtmlAttr(r.supplier||'Không ghi nhà cung cấp')}</div>
+            <div class="nl-stock"><b>${dtFix(r.createdAt)}</b><span>${escapeHtmlAttr(r.staff||'—')}</span></div>
+          </div>
+          <div class="nl-meta">${dongs.map(l=>escapeHtmlAttr(l.name||'')).slice(0,4).join(', ')}${dongs.length>4?` +${dongs.length-4}`:''}</div>
+          ${sua?`<div class="nl-tags"><span class="tier tier-amber">Đã sửa ${sua} lần</span></div>`:''}
+          <div class="nl-actions">
+            <button class="btn outline sm" onclick="openFixRecWizard('${r.id}')">${ic('pencil',15)} Sửa phiếu</button>
+          </div>
+        </div>`;
+      }).join('')}</div>` : '<div class="k2-empty">Chưa có phiếu nhận hàng nào.</div>'}`;
+  } else {
+    body = `
+      <div class="nl-top"><div class="nl-title">Nhập nhanh không theo đơn</div></div>
+      <div class="po-hint">Cho hàng mua lẻ. Hàng dán tem phải nhận bên POS để sinh tem.</div>
+      <div class="po-quick"><div id="stockinBox"></div></div>`;
+  }
+  box.innerHTML = tabBar + body;
+  if(poTab === 'quick') renderKhoStockin();
+}
+// [PO-UI] Tab đang xem trong Đặt & nhận hàng: 'po' | 'rec' | 'quick'.
+let poTab = 'po';
+function poCardHtml(po){
+  const st = PO_STATUS_LABEL[po.status] || {label:po.status, color:'blue'};
+  const lines = (po.lines||[]).map(l=>{
+    const flag = l.wrongProduct ? '<span class="tier tier-red">Sai sản phẩm</span>'
+      : (l.receivedGoodBase < l.qtyExpectedBase && ['partial','received','closed'].includes(po.status) ? '<span class="tier tier-red">Thiếu</span>'
+      : (l.receivedGoodBase > l.qtyExpectedBase ? '<span class="tier tier-blue">Thừa</span>' : ''));
+    const dmg = l.receivedDamagedBase>0 ? `<span class="tier tier-amber">Hư ${poQtyText(l, l.receivedDamagedBase)}</span>` : '';
+    const gia = l.unitPriceOrder != null ? ` · ${fmtUnitPrice(l.unitPriceOrder)}/${escapeHtmlAttr(l.orderUnitName||l.unit||'')}` : '';
+    return `<div class="po-line">
+      <div class="po-line-n">${escapeHtmlAttr(l.name||'')}${l.priceChanged?' <span class="tier tier-amber">Đổi giá</span>':''}${flag}${dmg}</div>
+      <div class="po-line-q">Đặt ${poQtyText(l, l.qtyExpectedBase)} · nhận ${poQtyText(l, l.receivedGoodBase)}${gia}</div>
+    </div>`;
+  }).join('');
+  const d = po.createdAt ? new Date(po.createdAt) : null;
+  const ngay = d && !isNaN(d) ? fmtDateVN(d) : '';
+  const btns = [
+    ['partial','received'].includes(po.status) ? `<button class="btn outline sm" onclick="poMoSuaPhieuNhan('${po.id}')">${ic('pencil',15)} Sửa số đã nhận</button>` : '',
+    po.status==='partial' ? `<button class="btn outline sm" onclick="confirmClosePONoMore('${po.id}')">${ic('check',15)} Đóng đơn</button>` : '',
+    ['pending','partial'].includes(po.status) ? `<button class="iconbtn nl-sp" onclick="confirmCancelPO('${po.id}')" title="Huỷ đơn">${ic('x')}</button>` : ''
+  ].filter(Boolean).join('');
+  return `<div class="nl-card">
+    <div class="nl-head">
+      <div class="nl-name">${escapeHtmlAttr(po.supplier || 'Không ghi nhà cung cấp')}</div>
+      <div class="nl-stock"><span class="tier tier-${st.color}">${st.label}</span><span>${ngay}</span></div>
+    </div>
+    <div class="po-lines">${lines}</div>
+    ${po.note ? `<div class="nl-meta">${escapeHtmlAttr(po.note)}</div>` : ''}
+    ${(po.corrections||[]).map(x=>`<div class="po-fix">${ic('alert',13)} Sửa ${escapeHtmlAttr(x.name||'')}: <b>${fmtNum(x.fromBase,0)} → ${fmtNum(x.toBase,0)}</b> · ${escapeHtmlAttr(x.by||'—')} · ${escapeHtmlAttr(x.reason||'—')}${x.voidedCodes&&x.voidedCodes.length?` · huỷ ${x.voidedCodes.length} tem`:''}</div>`).join('')}
+    ${btns ? `<div class="nl-actions">${btns}</div>` : ''}
+  </div>`;
+}
+// [PO-UI] Form tạo đơn mở trong popup giữa màn thay vì nằm cố định đầu trang.
+function poOpenDraft(){
+  openEditSheet('Đơn đặt hàng mới', `
+    <div class="field"><label>Nhà cung cấp (tuỳ chọn)</label><input type="text" id="poSupplier" placeholder="VD: Đại lý sữa ABC" value="${escapeHtmlAttr(poDraftMeta.supplier)}" oninput="poMetaChange('supplier',this.value)"></div>
+    <div class="po-hint">Chỉ điền "Giá lần này" khi giá khác giá đang lưu. Giá mới áp dụng từ ngày chọn, ngày trước giữ giá cũ.</div>
+    <div id="poDraftLines">${poDraftLinesHtml()}</div>
+    <button class="btn outline sm" onclick="poAddDraftLine()" style="margin-bottom:14px">+ Thêm nguyên liệu</button>
+    <div class="grid2">
       <div class="field"><label>Giá mới áp dụng từ ngày</label>
         <input type="date" id="poPriceFrom" value="${escapeHtmlAttr(poDraftMeta.priceFrom||dkey(new Date()))}" max="${dkey(new Date())}" onchange="poMetaChange('priceFrom',this.value)">
-        <div class="hint">Mặc định hôm nay. Lùi lại nếu giá này thực ra đã áp dụng từ lần nhập trước.</div>
       </div>
-      <div class="field"><label>Ghi chú</label><input type="text" id="poNote" placeholder="Ghi chú cho đơn đặt hàng" value="${escapeHtmlAttr(poDraftMeta.note)}" oninput="poMetaChange('note',this.value)"></div>
-      <button class="btn" onclick="submitPurchaseOrder()">${ic('note',15)} Tạo đơn đặt hàng</button>
+      <div class="field"><label>Ghi chú</label><input type="text" id="poNote" placeholder="Ghi chú cho đơn" value="${escapeHtmlAttr(poDraftMeta.note)}" oninput="poMetaChange('note',this.value)"></div>
     </div>
-  `;
-
-  const activeStatuses = ['pending','partial'];
-  const listHtml = pos.length ? pos.map(po=>{
-    const st = PO_STATUS_LABEL[po.status] || {label:po.status, color:'blue'};
-    const lines = (po.lines||[]).map(l=>{
-      const flag = l.wrongProduct ? ' · <span style="color:#c0392b">sai sản phẩm</span>'
-        : (l.receivedGoodBase < l.qtyExpectedBase ? ' · <span style="color:#c0392b">thiếu</span>'
-        : (l.receivedGoodBase > l.qtyExpectedBase ? ' · <span style="color:#2980b9">thừa</span>' : ''));
-      const dmg = l.receivedDamagedBase>0 ? ` · hư hỏng ${poQtyText(l, l.receivedDamagedBase)}` : '';
-      const gia = l.unitPriceOrder != null
-        ? ` · ${fmtUnitPrice(l.unitPriceOrder)}/${escapeHtmlAttr(l.orderUnitName||l.unit||'')}${l.priceChanged?' <span class="tier tier-amber">đổi giá</span>':''}`
-        : '';
-      return `${l.name}: đặt ${poQtyText(l, l.qtyExpectedBase)} — đã nhận ${poQtyText(l, l.receivedGoodBase)}${dmg}${flag}${gia}`;
-    }).join('<br>');
-    return `<div class="litem" style="align-items:flex-start">
-      <div class="li-l">
-        <div>${po.supplier || '(không ghi nhà cung cấp)'} <span class="tier tier-${st.color}" style="margin-left:4px">${st.label}</span></div>
-        <div style="margin-top:4px">${lines}</div>
-        <div class="small-note" style="margin-top:4px">${(po.createdAt||'').replace('T',' ').slice(0,16)}${po.note?(' · '+po.note):''}</div>
-        ${(po.corrections||[]).map(x=>`<div class="small-note" style="color:var(--warn);margin-top:4px">
-          ${ic('alert',12)} Đã sửa số đã nhận ${String(x.at||'').replace('T',' ').slice(0,16)} bởi ${escapeHtmlAttr(x.by||'—')} ·
-          ${escapeHtmlAttr(x.name||'')}: <b>${fmtNum(x.fromBase,0)} → ${fmtNum(x.toBase,0)}</b> · lý do: ${escapeHtmlAttr(x.reason||'—')}
-          ${x.voidedCodes&&x.voidedCodes.length?`<br>Huỷ ${x.voidedCodes.length} tem: ${escapeHtmlAttr(x.voidedCodes.slice(0,10).join(', '))}${x.voidedCodes.length>10?'…':''}`:''}
-        </div>`).join('')}
-      </div>
-      <div class="li-r">
-        ${['partial','received'].includes(po.status) ? `<button class="btn outline sm" onclick="poMoSuaPhieuNhan('${po.id}')">${ic('note',14)} Sửa số đã nhận</button>` : ''}
-        ${po.status==='partial' ? `<button class="btn nf sm" onclick="confirmClosePONoMore('${po.id}')">${ic('check',14)} Đóng đơn (thiếu)</button>` : ''}
-        ${activeStatuses.includes(po.status) ? `<button class="iconbtn" onclick="confirmCancelPO('${po.id}')">${ic('x',15)}</button>` : ''}
-      </div>
-    </div>`;
-  }).join('') : '<div class="muted">Chưa có đơn đặt hàng nào.</div>';
-
-  const p2 = n => String(n).padStart(2,'0');
-  const dtFix = iso => { const d = iso?new Date(iso):null; return (d && !isNaN(d)) ? `${p2(d.getDate())}/${p2(d.getMonth()+1)} ${p2(d.getHours())}:${p2(d.getMinutes())}` : ''; };
-  const fixRecHtml = FIXREC_CACHE.map(r=>{
-    const dongs = (r.lines||[]).filter(l=>Number(l.qtyGoodBase)>0);
-    const sua = (r.corrections||[]).length;
-    return `<div class="litem nf-bg" style="cursor:pointer" onclick="openFixRecWizard('${r.id}')">
-        <div class="li-l">
-          <div>${dtFix(r.createdAt)} · ${escapeHtmlAttr(r.supplier||'không ghi nhà cung cấp')}</div>
-          <div class="muted-sm">${escapeHtmlAttr(r.staff||'—')} · ${dongs.map(l=>escapeHtmlAttr(l.name||'')).slice(0,3).join(', ')}${dongs.length>3?` +${dongs.length-3}`:''}</div>
-          ${sua?`<div class="small-note" style="color:var(--warn)">Đã sửa ${sua} lần — mở ra xem nhật ký</div>`:''}
-        </div>
-        <div class="li-r"><span class="ftag nf" style="padding:6px 12px;min-height:0">Sửa ›</span></div>
-      </div>`;
-  }).join('');
-
-  box.innerHTML = `
-    <div class="sec-title">Tạo đơn đặt hàng mới</div>
-    ${draftHtml}
-    <div class="sec-title" style="margin-top:14px">Đơn đặt hàng gần đây</div>
-    ${listHtml}
-    <div class="sec-title" style="margin-top:18px">Sửa phiếu nhận</div>
-    <div class="small-note nf-bg" style="margin-bottom:12px;padding:10px;border-radius:10px">Gõ nhầm số lượng lúc nhận hàng (30 hộp thay vì 3) thì phải sửa ở <b>bốn chỗ cùng lúc</b>: tồn kho, dòng nhập trong sổ, đám tem đã sinh, và số "đã nhận" trên đơn đặt hàng. Bấm vào một phiếu để mở quy trình sửa 3 bước — làm đủ cả bốn trong một lần, và ghi lại nhật ký sửa ngay trên phiếu.</div>
-    ${fixRecPoId ? `<div class="small-note" style="margin-bottom:10px">Đang lọc theo <b>một đơn đặt hàng</b>. <a href="#" onclick="fixRecPoId=null;renderKhoPO();return false;">Xem tất cả phiếu nhận</a></div>` : ''}
-    ${FIXREC_CACHE.length ? fixRecHtml : '<div class="empty-hint">Chưa có phiếu nhận hàng nào.</div>'}
-    <div class="sec-title" style="margin-top:18px">Nhập kho nhanh — không theo đơn</div>
-    <div class="small-note" style="margin-bottom:8px">Dùng khi mua lẻ ngoài kế hoạch, hoặc chữa lại một lần nhận hàng ghi sót. Nhận hàng bình thường thì nhân viên làm bên POS theo đơn ở trên — đi đường đó mới có đối chiếu thiếu/thừa và sinh tem.</div>
-    <div id="stockinBox"></div>
-  `;
-  renderKhoStockin();
+    <button class="btn" onclick="submitPurchaseOrder()">${ic('note',15)} Tạo đơn đặt hàng</button>`);
+  document.querySelector('#editSheetWrap .edit-sheet')?.classList.add('nl-sheet');
+  poDraftLines.forEach((_,i)=>poRefreshPriceNote(i));
 }
 async function submitPurchaseOrder(){
   // Đọc từ state, không từ DOM — ô có thể vừa bị vẽ lại vì lý do khác.
@@ -22597,6 +22633,8 @@ async function submitPurchaseOrder(){
 
     poDraftLines = [];
     poDraftMeta = { supplier:'', note:'', priceFrom: dkey(new Date()) };
+    closeEditSheet(true);
+    poTab = 'po';
     renderKhoPO();
   }catch(err){ console.error(err); showError('Tạo đơn đặt hàng thất bại: '+(err.code||err.message||err)); }
 }
