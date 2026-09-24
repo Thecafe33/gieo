@@ -1082,6 +1082,7 @@ body.assist-main-on .toast{bottom:calc(100px + var(--assist-h, 0px) + 10px);}
   </div>
   <div class="cob">
     <div class="cotc"><div class="cotl">TỔNG HOÁ ĐƠN</div><div class="cotn" id="cotn">0đ</div></div>
+    <div id="scIceSummary" style="display:none;margin-bottom:12px;"></div>
 
     <!-- [NEW-ASSIST] Thanh gợi ý ở màn thanh toán — cập nhật lại ngay sau khi
          tra SĐT (lúc đó mới có hồ sơ thói quen của khách để đối chiếu) -->
@@ -2775,6 +2776,127 @@ function mergePlainCartLines() {
     if (seen[sig]) { cart[seen[sig]].qty += c.qty; delete cart[k]; }
     else seen[sig] = k;
   });
+}
+
+// ============================================================
+// HỎI ĐÁ BẮT BUỘC trước màn thanh toán — quy chuẩn cho mọi nhân viên, mới hay cũ.
+// Mọi đơn có ly nước đều phải qua bước này, kể cả khi đã chọn đá trong giỏ: giỏ luôn
+// mặc định "Đá chung", nên quên hỏi khách thì không ai biết (và số túi trừ kho theo
+// đá chung/riêng cũng sai). Không nút nào chọn sẵn; chọn 1 nút = áp cho cả đơn.
+// ============================================================
+let _iceAskNext = null;
+let _iceAskPerCup = null; // [{key, idx, label, mode|null}] khi đang chọn từng ly
+function _iceDrinkLines() { return Object.entries(cart).filter(([, c]) => c && c.itemId && !c.isFood && Number(c.qty) > 0); }
+function askIceBeforePay(next) {
+  if (!_iceDrinkLines().length) { next(); return; }
+  _iceAskNext = next;
+  _iceAskPerCup = null;
+  renderIceAsk();
+  const pop = document.getElementById('ice-ask');
+  if (pop) pop.style.display = 'flex';
+}
+function closeIceAsk() {
+  const pop = document.getElementById('ice-ask');
+  if (pop) pop.style.display = 'none';
+  _iceAskPerCup = null;
+}
+function _iceAskDone() {
+  const next = _iceAskNext;
+  _iceAskNext = null;
+  closeIceAsk();
+  if (next) next();
+  renderScIceSummary();
+}
+function iceAskPickAll(mode) {
+  if (!ICE_LABELS[mode]) return;
+  setCartIceAll(mode);
+  _iceAskDone();
+}
+function iceAskOpenPerCup() {
+  _iceAskPerCup = [];
+  _iceDrinkLines().forEach(([k, c]) => {
+    for (let i = 0; i < Number(c.qty); i++) {
+      _iceAskPerCup.push({ key: k, idx: i, qty: Number(c.qty),
+        label: `${c.name}${c.size && c.size !== '-' ? ' (' + c.size + ')' : ''}`, mode: null });
+    }
+  });
+  renderIceAsk();
+}
+function iceAskSetCup(n, mode) {
+  if (!_iceAskPerCup || !_iceAskPerCup[n] || !ICE_LABELS[mode]) return;
+  _iceAskPerCup[n].mode = mode;
+  renderIceAsk();
+}
+function iceAskConfirmPerCup() {
+  const cups = _iceAskPerCup || [];
+  if (!cups.length || cups.some(u => !u.mode)) return;
+  const byKey = {};
+  cups.forEach(u => { (byKey[u.key] = byKey[u.key] || []).push(u.mode); });
+  Object.entries(byKey).forEach(([k, modes]) => {
+    if (!cart[k]) return;
+    if (modes.every(m => m === modes[0])) { cart[k].ice = modes[0]; return; }
+    const unitKeys = splitCartEntryToUnits(k);
+    unitKeys.forEach((uk, i) => { if (cart[uk] && modes[i]) cart[uk].ice = modes[i]; });
+  });
+  mergePlainCartLines();
+  _afterIceChange();
+  _iceAskDone();
+}
+function renderIceAsk() {
+  const body = document.getElementById('ice-ask-body');
+  if (!body) return;
+  const cupCount = _iceDrinkLines().reduce((n, [, c]) => n + Number(c.qty), 0);
+  if (!_iceAskPerCup) {
+    // 3 nút tròn nằm ngang, mỗi mức đá một màu nhạt riêng (cùng bộ màu với nhãn đá trong giỏ).
+    const tint = { chung: '#EEF6FF', rieng: '#E0F2FE', khong: '#FEE2E2' };
+    const ring = { chung: '#BFD9F2', rieng: '#7CC4EC', khong: '#F5A3A3' };
+    const big = mode => `<button onclick="iceAskPickAll('${mode}')" style="flex:1;min-width:0;background:none;border:none;padding:0;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:10px;font-family:'Google Sans',sans-serif;">
+        <span style="width:92px;height:92px;max-width:100%;aspect-ratio:1;border-radius:50%;background:${tint[mode]};border:2.5px solid ${ring[mode]};display:flex;align-items:center;justify-content:center;font-size:${mode === 'rieng' ? 28 : 40}px;letter-spacing:-4px;white-space:nowrap;box-shadow:0 4px 12px rgba(0,0,0,.06);">${mode === 'rieng' ? '🧊🧊' : ICE_ICONS[mode]}</span>
+        <span style="font-size:15px;font-weight:700;color:var(--td);">${ICE_LABELS[mode]}</span>
+      </button>`;
+    body.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+        <span style="font-size:18px;font-weight:700;color:var(--td);">🧊 Khách muốn đá thế nào?</span>
+        <button onclick="closeIceAsk()" style="background:#e0e0e0;border:none;border-radius:50%;width:34px;height:34px;cursor:pointer;color:#666;font-size:16px;display:flex;align-items:center;justify-content:center;">✕</button>
+      </div>
+      <div style="font-size:13px;font-weight:600;color:var(--gt);margin-bottom:18px;">${cupCount} ly nước · hỏi khách rồi chọn</div>
+      <div style="display:flex;gap:12px;justify-content:space-between;margin:6px 0 22px;">${big('chung')}${big('rieng')}${big('khong')}</div>
+      <button onclick="iceAskOpenPerCup()" style="background:none;border:none;color:var(--gd);font-family:'Google Sans',sans-serif;font-size:14px;font-weight:700;padding:10px;cursor:pointer;">Mỗi ly khác nhau? Chọn từng ly ›</button>`;
+    return;
+  }
+  const cups = _iceAskPerCup;
+  const left = cups.filter(u => !u.mode).length;
+  const opts = (u, n) => ['chung', 'rieng', 'khong'].map(mode => {
+    const active = u.mode === mode;
+    return `<button onclick="iceAskSetCup(${n},'${mode}')" style="flex:1;min-height:52px;padding:8px 4px;border-radius:16px;border:2px solid ${active ? 'var(--gd)' : '#ece6d6'};background:${active ? 'var(--gd)' : '#FFFCF0'};color:${active ? '#fff' : 'var(--td)'};font-family:'Google Sans',sans-serif;font-size:14.5px;font-weight:700;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;box-shadow:${active ? '0 3px 10px rgba(226,58,93,.28)' : 'none'};"><span style="font-size:17px;line-height:1;padding:3px 6px;border-radius:99px;background:${active ? '#fff' : 'transparent'};">${mode === 'rieng' ? '🧊🧊' : ICE_ICONS[mode]}</span>${ICE_LABELS[mode]}</button>`;
+  }).join('');
+  body.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+      <button onclick="_iceAskPerCup=null;renderIceAsk()" style="background:none;border:none;font-size:18px;font-weight:700;color:var(--td);cursor:pointer;padding:0;">‹ Chọn đá từng ly</button>
+      <button onclick="closeIceAsk()" style="background:#e0e0e0;border:none;border-radius:50%;width:34px;height:34px;cursor:pointer;color:#666;font-size:16px;display:flex;align-items:center;justify-content:center;">✕</button>
+    </div>
+    <div style="font-size:13px;font-weight:600;color:var(--gt);margin-bottom:14px;">Ly nào cũng phải chọn</div>
+    <div style="overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:10px;margin-bottom:16px;">
+      ${cups.map((u, n) => `<div style="background:#fff;border-radius:16px;padding:12px 14px;border:1.5px solid ${u.mode ? '#fff' : '#fbbf24'};">
+        <div style="font-size:14px;font-weight:700;color:var(--td);margin-bottom:8px;">${u.label}${u.qty > 1 ? ` <span style="color:var(--gt);font-weight:600;">· ly ${u.idx + 1}/${u.qty}</span>` : ''}</div>
+        <div style="display:flex;gap:8px;">${opts(u, n)}</div></div>`).join('')}
+    </div>
+    ${left ? `<div style="font-size:12.5px;font-weight:700;color:#b45309;margin-bottom:8px;text-align:center;">Còn ${left} ly chưa chọn</div>` : ''}
+    <button onclick="iceAskConfirmPerCup()" ${left ? 'disabled' : ''} style="width:100%;padding:16px;background:${left ? '#ddd' : 'var(--gd)'};color:#fff;border:none;border-radius:18px;font-family:'Google Sans',sans-serif;font-size:16px;font-weight:700;cursor:${left ? 'default' : 'pointer'};flex-shrink:0;">Xác nhận</button>`;
+}
+// Dòng tóm tắt đá ở màn thanh toán — để thu ngân đọc lại cho khách. Bấm Sửa = hỏi lại.
+function renderScIceSummary() {
+  const el = document.getElementById('scIceSummary');
+  if (!el) return;
+  const lines = _iceDrinkLines();
+  if (!lines.length) { el.style.display = 'none'; return; }
+  const dem = { chung: 0, rieng: 0, khong: 0 };
+  lines.forEach(([, c]) => { dem[iceMode(c)] = (dem[iceMode(c)] || 0) + Number(c.qty); });
+  const txt = ['chung', 'rieng', 'khong'].filter(m => dem[m]).map(m => `${dem[m]} ${ICE_LABELS[m].toLowerCase()}`).join(' · ');
+  el.style.display = 'flex';
+  el.style.cssText += ';align-items:center;justify-content:space-between;gap:10px;background:#fff;border:1.5px solid var(--gd);border-radius:14px;padding:12px 14px;';
+  el.innerHTML = `<span style="font-size:14px;font-weight:700;color:var(--td);">🧊 ${txt}</span>
+    <button onclick="askIceBeforePay(() => {})" style="background:none;border:none;color:var(--gd);font-family:'Google Sans',sans-serif;font-size:14px;font-weight:700;cursor:pointer;flex-shrink:0;">Sửa</button>`;
 }
 
 // Cập nhật lại mọi nơi hiển thị sau khi đổi lượng đá
@@ -22744,7 +22866,7 @@ async function onCheckoutClick() {
   // [MỚI] Bỏ qua khi đang "Bổ sung bill thiếu" — mã 8833 đã tự là một lớp xác thực riêng, và
   // ca hôm đó đã kết ca nên không ai còn "đang check-in" để đòi hỏi nữa.
   if (!_backfillMode && !(await requireSomeoneCheckedInAsync())) return;
-  checkTogoBeforeCheckout(() => {
+  checkTogoBeforeCheckout(() => askIceBeforePay(() => {
     closeCartDrawer();
     // Compute đồng giá discount on top
     const allDisc = computeAllDiscounts();
@@ -22774,7 +22896,7 @@ async function onCheckoutClick() {
     // thuộc chương trình, bấm Thanh toán lại thì popup hiện lại cho đúng những ly mới
     // (checkFreeToppingMemberPromo tự lọc bỏ ly đã có freeTpApplied).
     if (curCustomer) checkFreeToppingMemberPromo();
-  });
+  }));
 }
 
 // ============================================================
@@ -29045,6 +29167,11 @@ assistLoadLocalCache();
     <div style="overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:10px;margin-bottom:20px;" id="ice-batch-list"></div>
     <button onclick="closeIceBatchPicker()" style="width:100%;padding:16px;background:var(--gd);color:#fff;border:none;border-radius:18px;font-family:'Google Sans',sans-serif;font-size:16px;font-weight:700;cursor:pointer;flex-shrink:0;">Hoàn tất chọn</button>
   </div>
+</div>
+
+<!-- HỎI ĐÁ BẮT BUỘC trước màn thanh toán (xem askIceBeforePay) -->
+<div id="ice-ask" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:411;display:none;align-items:flex-end;justify-content:center;">
+  <div id="ice-ask-body" style="background:#FFFCF0;border-radius:28px 28px 0 0;padding:24px 20px 36px;width:100%;max-width:430px;max-height:86vh;display:flex;flex-direction:column;animation:pi .2s ease;"></div>
 </div>
 
 <!-- VIETQR BANK POPUP -->
