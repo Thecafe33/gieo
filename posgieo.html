@@ -4775,6 +4775,18 @@ function stockUseToggleExpand() { _stockUseExpanded = !_stockUseExpanded; if (!_
 
 const SU_QR_SVG = '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 8V5.5a2 2 0 0 1 2-2H8M16 3.5h2.5a2 2 0 0 1 2 2V8M20.5 16v2.5a2 2 0 0 1-2 2H16M8 20.5H5.5a2 2 0 0 1-2-2V16"/><rect x="7" y="7" width="4" height="4" rx=".8" stroke-width="1.6"/><rect x="13" y="7" width="4" height="4" rx=".8" stroke-width="1.6"/><rect x="7" y="13" width="4" height="4" rx=".8" stroke-width="1.6"/><g fill="currentColor" stroke="none"><rect x="13" y="13" width="1.8" height="1.8" rx=".3"/><rect x="15.2" y="15.2" width="1.8" height="1.8" rx=".3"/><rect x="15.2" y="13" width="1.8" height="1.8" rx=".3"/></g></svg>';
 
+// Ô nút quét lớn (icon QR + tên + dòng phụ) dùng chung cho Quét mở/hết và Kiểm kê.
+function scanTileBtn(onclick, label, sub, chinh) {
+  return `
+        <button onclick="${onclick}" style="flex:1;min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:14px;padding:18px 16px 16px;
+          background:${chinh ? 'var(--gd)' : '#fff'};color:${chinh ? '#fff' : 'var(--td)'};border:${chinh ? 'none' : '1.5px solid #EDE8DD'};border-radius:22px;
+          box-shadow:${chinh ? '0 10px 22px -10px var(--gd)' : '0 3px 12px rgba(35,28,26,.05)'};font-family:'Google Sans',sans-serif;text-align:left;cursor:pointer;">
+          <span style="width:48px;height:48px;border-radius:15px;display:flex;align-items:center;justify-content:center;background:${chinh ? 'rgba(255,255,255,.2)' : 'var(--gl)'};color:${chinh ? '#fff' : 'var(--gd)'};">${SU_QR_SVG}</span>
+          <span><span style="display:block;font-size:19px;font-weight:800;line-height:1.2;">${label}</span>
+          <span style="display:block;font-size:12.5px;font-weight:600;margin-top:3px;opacity:${chinh ? '.85' : '.55'};">${sub}</span></span>
+        </button>`;
+}
+
 // Vẽ RIÊNG phần danh sách, để lọc không làm mất con trỏ trong ô tìm.
 function renderStockUseRows() {
   const box = document.getElementById('stockUseRows');
@@ -4820,14 +4832,7 @@ function renderStockUseList() {
   const coQuet = typeof posScanAvailable === 'function' && posScanAvailable();
   const coAn = list.length > STOCK_USE_PREVIEW;
   const timDuoc = _stockUseExpanded && list.length >= STOCK_USE_FILTER_TU;
-  const nutQuet = (onclick, label, sub, chinh) => `
-        <button onclick="${onclick}" style="flex:1;min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:14px;padding:18px 16px 16px;
-          background:${chinh ? 'var(--gd)' : '#fff'};color:${chinh ? '#fff' : 'var(--td)'};border:${chinh ? 'none' : '1.5px solid #EDE8DD'};border-radius:22px;
-          box-shadow:${chinh ? '0 10px 22px -10px var(--gd)' : '0 3px 12px rgba(35,28,26,.05)'};font-family:'Google Sans',sans-serif;text-align:left;cursor:pointer;">
-          <span style="width:48px;height:48px;border-radius:15px;display:flex;align-items:center;justify-content:center;background:${chinh ? 'rgba(255,255,255,.2)' : 'var(--gl)'};color:${chinh ? '#fff' : 'var(--gd)'};">${SU_QR_SVG}</span>
-          <span><span style="display:block;font-size:19px;font-weight:800;line-height:1.2;">${label}</span>
-          <span style="display:block;font-size:12.5px;font-weight:600;margin-top:3px;opacity:${chinh ? '.85' : '.55'};">${sub}</span></span>
-        </button>`;
+  const nutQuet = scanTileBtn;
 
   // Hai nút quét đặt ngay đầu màn, cạnh nhau: mở và báo hết là hai việc ngang hàng,
   // và phải thấy được ngay khi mở màn (nút báo hết từng nằm dưới đáy danh sách, không ai thấy).
@@ -13804,6 +13809,7 @@ async function openStockCountScreen() {
   stockCountState.reportedLostSet = new Set();
   stockCountState.inMismatchReview = false;
   stockCountState.staffEmp = null;
+  _scLogExpanded = false;
   const box = document.getElementById('stockCountBody');
   showLoading(box);
   try {
@@ -14007,79 +14013,100 @@ function stockCountUnitChange(idx, factor) {
   l.countedBase = l.countedInput === null ? null : l.countedInput * l.unitFactor;
 }
 
+// Kiểm kê giao diện mới: 2 ô quét lớn ở đầu màn (giống Quét mở/hết), danh sách mã đã
+// quét thu gọn còn vài mã mới nhất, nút mở rộng nằm ngay tiêu đề.
+let _scLogExpanded = false;
+const SC_LOG_PREVIEW = 3;
+function stockCountToggleLog() { _scLogExpanded = !_scLogExpanded; renderStockCountForm(); }
+
+function scPill(text, fg, bg) {
+  return `<span style="display:inline-block;font-size:13px;font-weight:800;color:${fg || 'var(--gd)'};background:${bg || 'var(--gl)'};border-radius:999px;padding:4px 10px;white-space:nowrap;">${text}</span>`;
+}
+function scCardTitle(text, pill, right) {
+  return `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px;">
+      <div style="font-size:19px;font-weight:800;color:var(--td);">${text}${pill ? ' <span style="vertical-align:2px;margin-left:2px;">' + pill + '</span>' : ''}</div>${right || ''}</div>`;
+}
+
 function renderStockCountForm() {
   const box = document.getElementById('stockCountBody');
   const unitItems = stockCountState.items.filter(l => l.countMode === 'unit');
   const qtyItems  = stockCountState.items.filter(l => l.countMode === 'qty');
   const coQuet = typeof posScanAvailable === 'function' && posScanAvailable();
   const daXongUnit = unitItems.filter(l => l.touched).length;
+  const log = stockCountState.scannedLog;
+  const logShow = _scLogExpanded ? log : log.slice(0, SC_LOG_PREVIEW);
+  const chip = (label, n) => `<span style="font-size:14px;font-weight:700;color:#6B6B70;background:#F2F2F4;border-radius:8px;padding:4px 9px;">${label} <b style="color:var(--td);font-size:15px;">${n}</b></span>`;
 
   box.innerHTML = `
     ${unitItems.length ? `
-    <div class="wal-section" style="margin:0 0 14px;">
-      <div class="wal-section-title">Quét mã tem — bắt buộc cho món có tem</div>
-      <div style="font-size:11.5px;color:#999;margin-bottom:10px;line-height:1.6;">
-        Cầm từng chai/gói/hộp có dán tem, quét lần lượt — hệ thống tự cộng đúng nguyên liệu, không cần chọn dòng trước. Quét bao nhiêu tính bấy nhiêu, không bắt gõ số.
-      </div>
-      <button onclick="stockCountScan()" style="width:100%;padding:15px 8px;background:var(--gd);color:#fff;border:none;border-radius:14px;font-family:'Google Sans',sans-serif;font-size:14.5px;font-weight:700;cursor:pointer;"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-4px;margin-right:7px;"><path d="M3.2 8.4A2.2 2.2 0 0 1 5.4 6.2h1.9l1.3-2h6.8l1.3 2h1.9a2.2 2.2 0 0 1 2.2 2.2v8.4a2.2 2.2 0 0 1-2.2 2.2H5.4a2.2 2.2 0 0 1-2.2-2.2z"/><circle cx="12" cy="12.6" r="3.4"/></svg>Quét mã</button>
-      ${coQuet ? '' : '<div style="font-size:11.5px;color:#c0392b;margin-top:8px;line-height:1.5;">Máy này chưa quét được — cần mở bằng app của quán bản mới.</div>'}
+    <button onclick="stockCountScan()" style="width:100%;display:flex;align-items:center;gap:16px;padding:18px 18px;margin:0 0 10px;background:var(--gd);color:#fff;border:none;border-radius:22px;
+      box-shadow:0 10px 22px -10px var(--gd);font-family:'Google Sans',sans-serif;text-align:left;cursor:pointer;">
+      <span style="flex-shrink:0;width:56px;height:56px;border-radius:17px;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.2);">${SU_QR_SVG.replace(/width="26" height="26"/, 'width="30" height="30"')}</span>
+      <span><span style="display:block;font-size:21px;font-weight:800;line-height:1.2;">Quét mã kiểm kê</span>
+      <span style="display:block;font-size:13px;font-weight:600;margin-top:3px;opacity:.85;">Quét từng chai, gói, hộp có tem</span></span>
+    </button>` : ''}
+    <div style="display:flex;justify-content:flex-end;margin:0 0 14px;">
+      <button onclick="stockCountScanFound()" style="display:flex;align-items:center;gap:7px;height:44px;padding:0 16px;background:#fff;color:var(--td);border:2px solid #e6e1d2;border-radius:999px;font-family:'Google Sans',sans-serif;font-size:14px;font-weight:800;cursor:pointer;">
+        <span style="color:var(--gd);display:flex;">${SU_QR_SVG.replace(/width="26" height="26"/, 'width="18" height="18"')}</span>Tìm lại hàng báo mất</button>
     </div>
+    ${coQuet ? '' : '<div style="font-size:12.5px;color:#c0392b;margin:-4px 4px 14px;line-height:1.5;">Máy này chưa quét được — cần mở bằng app của quán bản mới.</div>'}
 
-    <div class="wal-section" style="margin:0 0 14px;">
-      <div class="wal-section-title">Theo món (${daXongUnit}/${unitItems.length})</div>
-      ${unitItems.map(l => {
+    ${unitItems.length ? `
+    <div class="wal-section" style="margin:0 0 14px;padding:18px 18px 8px;">
+      ${scCardTitle('Món có tem', scPill(daXongUnit + '/' + unitItems.length + ' đã quét'))}
+      ${unitItems.map((l, i) => {
         const idx = stockCountState.items.indexOf(l);
         const trong = l.countedSealed === 0 && l.countedOpen === 0;
         return `
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid #f0f0f0;">
-          <div style="min-width:0;">
-            <div style="font-weight:700;font-size:13.5px;color:var(--td);">${l.name}${!l.touched ? ' <span style="color:#bbb;font-weight:600;font-size:11px;">· chưa quét</span>' : ''}</div>
-            <div style="font-size:11.5px;color:#999;">Chưa mở: <b>${l.countedSealed}</b> ${l.countUnitName} · Đang mở: <b>${l.countedOpen}</b> ${l.countUnitName}</div>
+        <div style="display:flex;align-items:center;gap:12px;padding:14px 0;${i ? 'border-top:1px solid #F0EDE6;' : ''}">
+          <div style="min-width:0;flex:1;">
+            <div style="font-weight:800;font-size:18px;line-height:1.25;color:var(--td);">${escHtmlPos(l.name || '')}</div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:7px;">
+              ${l.touched || !trong
+                ? chip('Chưa mở', l.countedSealed) + chip('Đang mở', l.countedOpen)
+                : scPill('Chưa quét', '#B45309', '#FEF3E6')}
+            </div>
           </div>
           ${trong ? `
-          <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:#999;flex-shrink:0;white-space:nowrap;">
-            <input type="checkbox" ${l.markedEmpty ? 'checked' : ''} onchange="stockCountMarkEmpty(${idx})"> Không còn tem
-          </label>` : ''}
+          <button onclick="stockCountMarkEmpty(${idx})" style="flex-shrink:0;display:flex;align-items:center;gap:6px;height:44px;padding:0 14px;border-radius:999px;font-family:'Google Sans',sans-serif;font-size:14px;font-weight:800;cursor:pointer;
+            ${l.markedEmpty ? 'background:#E8F7EE;color:#15803d;border:2px solid #86efac;' : 'background:#fff;color:#6B6B70;border:2px solid #e6e1d2;'}">
+            ${l.markedEmpty ? caIcon('check', 16) : ''}Không còn tem</button>` : ''}
         </div>`;
       }).join('')}
     </div>
 
-    ${stockCountState.scannedLog.length ? `
-    <div class="wal-section" style="margin:0 0 14px;">
-      <div class="wal-section-title">Mã đã quét lượt này (${stockCountState.scannedLog.length})</div>
-      <div style="max-height:240px;overflow-y:auto;">
-        ${stockCountState.scannedLog.map(e => `
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid #f5f5f5;">
-          <div style="min-width:0;">
-            <div style="font-size:12.5px;font-weight:700;color:var(--td);">${e.itemName}</div>
-            <div style="font-size:11px;color:#999;letter-spacing:.3px;">${e.code} · ${e.status === 'sealed' ? 'chưa mở' : 'đang mở'} · ${e.timeStr}</div>
+    ${log.length ? `
+    <div class="wal-section" style="margin:0 0 14px;padding:18px 18px 8px;">
+      ${scCardTitle('Đã quét', scPill(log.length), log.length > SC_LOG_PREVIEW ? `<button onclick="stockCountToggleLog()" style="display:flex;align-items:center;gap:5px;height:40px;padding:0 14px;background:#F6F4EF;color:var(--td);border:none;border-radius:999px;font-family:'Google Sans',sans-serif;font-size:14px;font-weight:800;cursor:pointer;">
+          ${_scLogExpanded ? 'Thu gọn' : 'Xem tất cả'}
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="${_scLogExpanded ? 'transform:rotate(180deg);' : ''}"><path d="M6 9l6 6 6-6"/></svg>
+        </button>` : '')}
+      ${logShow.map((e, i) => `
+        <div style="display:flex;align-items:center;gap:12px;padding:14px 0;${i ? 'border-top:1px solid #F0EDE6;' : ''}">
+          <div style="min-width:0;flex:1;">
+            <div style="font-weight:800;font-size:16.5px;line-height:1.25;color:var(--td);">${escHtmlPos(e.itemName || '')}</div>
+            <div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:6px;">
+              <span style="font-size:15px;font-weight:800;letter-spacing:.8px;color:var(--td);background:#F2F2F4;border-radius:8px;padding:3px 9px;font-variant-numeric:tabular-nums;">${escHtmlPos(e.code)}</span>
+              <span style="font-size:13px;color:#9A9AA0;font-weight:600;">${e.status === 'sealed' ? 'chưa mở' : 'đang mở'} · ${e.timeStr}</span>
+            </div>
           </div>
-          <button onclick="stockCountUndoScan('${e.code}')" style="flex-shrink:0;padding:6px 10px;background:none;border:1px solid #ddd;color:#999;border-radius:9px;font-size:11.5px;font-weight:700;cursor:pointer;">Bỏ</button>
+          <button onclick="stockCountUndoScan('${e.code}')" style="flex-shrink:0;height:44px;padding:0 16px;background:#F6F4EF;color:#6B6B70;border:none;border-radius:999px;font-family:'Google Sans',sans-serif;font-size:14px;font-weight:800;cursor:pointer;">Bỏ</button>
         </div>`).join('')}
-      </div>
     </div>` : ''}
     ` : ''}
 
-    <div class="wal-section" style="margin:0 0 14px;">
-      <div class="wal-section-title">Quét mã hàng tìm lại được</div>
-      <div style="font-size:11.5px;color:#999;margin-bottom:10px;line-height:1.6;">
-        Mã nào trước đây đã báo mất mà giờ tìm lại được thì quét ở đây — hệ thống tự cộng lại đúng số đã trừ khi báo mất, không dùng nút "Quét mã" phía trên cho việc này.
-      </div>
-      <button onclick="stockCountScanFound()" style="width:100%;padding:13px 8px;background:#fff;color:var(--gd);border:1.5px solid var(--gd);border-radius:14px;font-family:'Google Sans',sans-serif;font-size:13.5px;font-weight:700;cursor:pointer;">🔎 Quét mã hàng tìm lại được</button>
-    </div>
-
     ${qtyItems.length ? `
-    <div class="wal-section" style="margin:0 0 14px;">
-      <div class="wal-section-title">Đếm tay — không có tem</div>
-      <div style="font-size:11.5px;color:#999;margin-bottom:10px;line-height:1.6;">Đếm thật số lượng đang có, không xem số hệ thống. Dòng nào chưa đếm thì để trống.</div>
-      ${qtyItems.map(l => {
+    <div class="wal-section" style="margin:0 0 14px;padding:18px 18px 8px;">
+      ${scCardTitle('Đếm tay', scPill(qtyItems.length))}
+      <div style="font-size:13px;color:#9A9AA0;line-height:1.5;margin-bottom:4px;">Món không có tem. Đếm thật số đang có, chưa đếm thì để trống.</div>
+      ${qtyItems.map((l, i) => {
         const idx = stockCountState.items.indexOf(l);
         return `
-        <div style="padding:10px 0;border-bottom:1px solid #f0f0f0;">
-          <div style="font-weight:700;font-size:13.5px;color:var(--td);margin-bottom:6px;">${l.name}</div>
+        <div style="padding:14px 0;${i ? 'border-top:1px solid #F0EDE6;' : ''}">
+          <div style="font-weight:800;font-size:18px;line-height:1.25;color:var(--td);margin-bottom:10px;">${escHtmlPos(l.name || '')}</div>
           <div style="display:flex;gap:8px;align-items:stretch;">
-            <input type="number" step="0.01" inputmode="decimal" placeholder="Đếm..." oninput="stockCountLineChange(${idx}, this.value)" style="flex:1.1;min-width:0;text-align:right;border:1px solid #e6e1d2;border-radius:10px;padding:10px;font-size:15px;font-weight:700;">
-            <select onchange="stockCountUnitChange(${idx}, this.value)" style="flex:1;min-width:0;border:1px solid #e6e1d2;border-radius:10px;padding:10px 8px;font-size:13.5px;font-weight:600;background:#fff;color:var(--td);font-family:'Google Sans',sans-serif;">
+            <input type="number" step="0.01" inputmode="decimal" placeholder="Số đếm" value="${l.countedInput === null || l.countedInput === undefined ? '' : l.countedInput}" oninput="stockCountLineChange(${idx}, this.value)" style="flex:1.1;min-width:0;height:56px;box-sizing:border-box;text-align:right;border:2px solid #e6e1d2;border-radius:16px;padding:0 14px;font-size:19px;font-weight:800;color:var(--td);font-family:'Google Sans',sans-serif;">
+            <select onchange="stockCountUnitChange(${idx}, this.value)" style="flex:1;min-width:0;height:56px;box-sizing:border-box;border:2px solid #e6e1d2;border-radius:16px;padding:0 12px;font-size:16px;font-weight:800;background:#fff;color:var(--td);font-family:'Google Sans',sans-serif;">
               ${l.unitOptions.map(o => `<option value="${o.baseQty}" ${o.baseQty === l.unitFactor ? 'selected' : ''}>${o.label}</option>`).join('')}
             </select>
           </div>
@@ -14090,7 +14117,7 @@ function renderStockCountForm() {
     <div class="wal-section" style="margin:0 0 14px;">
       ${renderPinInput('scStaff')}
     </div>
-    <button onclick="stockCountReviewAndSubmit()" style="width:100%;padding:14px;background:var(--gd);color:#fff;border:none;border-radius:14px;font-weight:700;font-size:15px;cursor:pointer;">Gửi kiểm kê (chờ Quản lý duyệt)</button>
+    ${caBtn('stockCountReviewAndSubmit()', 'check', 'Gửi kiểm kê cho Quản lý duyệt', 'primary')}
   `;
 }
 
@@ -14127,23 +14154,22 @@ function renderStockCountMismatchScreen() {
     return;
   }
   box.innerHTML = `
-    <div class="wal-section" style="margin:0 0 14px;">
-      <div class="wal-section-title">Kiểm tra lại (${list.length})</div>
-      <div style="font-size:11.5px;color:#999;margin-bottom:10px;line-height:1.6;">
-        Những mã này hệ thống ghi là còn tồn nhưng chưa quét được trong lượt này. Tìm và quét lại — nếu tìm khắp không thấy thì báo "Không tìm thấy".
-      </div>
-      ${list.map(m => `
-      <div style="padding:12px 0;border-bottom:1px solid #f0f0f0;">
-        <div style="font-size:13.5px;font-weight:700;color:var(--td);margin-bottom:8px;">Kiểm tra lại <b>${m.itemName}</b> đang không khớp, tìm và quét mã</div>
+    <div class="wal-section" style="margin:0 0 14px;padding:18px 18px 8px;">
+      ${scCardTitle('Kiểm tra lại', scPill(list.length, '#B45309', '#FEF3E6'))}
+      <div style="font-size:13px;color:#9A9AA0;line-height:1.5;margin-bottom:4px;">Hệ thống ghi là còn nhưng chưa quét được. Tìm và quét lại, tìm khắp không thấy thì báo Không tìm thấy.</div>
+      ${list.map((m, i) => `
+      <div style="padding:16px 0;${i ? 'border-top:1px solid #F0EDE6;' : ''}">
+        <div style="font-weight:800;font-size:18px;line-height:1.25;color:var(--td);margin-bottom:12px;">${escHtmlPos(m.itemName || '')}</div>
         <div style="display:flex;gap:8px;">
-          <button onclick="stockCountScan()" style="flex:1;padding:11px 8px;background:var(--gd);color:#fff;border:none;border-radius:11px;font-weight:700;font-size:13px;cursor:pointer;">🔍 Quét mã</button>
-          <button onclick="stockCountReportLost('${m.code}')" style="flex:1;padding:11px 8px;background:#fff;color:#b91c1c;border:1.5px solid #fca5a5;border-radius:11px;font-weight:700;font-size:13px;cursor:pointer;">Không tìm thấy</button>
+          <button onclick="stockCountScan()" style="flex:1;min-width:0;height:56px;display:flex;align-items:center;justify-content:center;gap:8px;background:var(--gd);color:#fff;border:none;border-radius:999px;box-shadow:0 4px 12px rgba(226,58,93,.3);font-family:'Google Sans',sans-serif;font-size:16px;font-weight:800;cursor:pointer;">${SU_QR_SVG.replace(/width="26" height="26"/, 'width="22" height="22"')}Quét mã</button>
+          <button onclick="stockCountReportLost('${m.code}')" style="flex:1;min-width:0;height:56px;background:#fee2e2;color:#b91c1c;border:2px solid #fca5a5;border-radius:999px;font-family:'Google Sans',sans-serif;font-size:16px;font-weight:800;cursor:pointer;">Không tìm thấy</button>
         </div>
       </div>`).join('')}
     </div>
-    <button onclick="stockCountBackFromMismatch()" style="width:100%;padding:13px;background:none;border:1px solid #ddd;color:#888;border-radius:14px;font-weight:700;font-size:14px;cursor:pointer;">Quay lại, chưa gửi</button>
+    ${caBtn('stockCountBackFromMismatch()', 'back', 'Quay lại, chưa gửi', 'plain')}
   `;
 }
+
 
 function stockCountBackFromMismatch() {
   stockCountState.inMismatchReview = false;
@@ -14222,16 +14248,21 @@ async function stockCountScanFound() {
 function openConfirmFoundLostSheet(c) {
   const box = document.getElementById('stockCountBody');
   box.innerHTML = `
-    <div class="wal-section" style="margin:0 0 14px;">
-      <div class="wal-section-title">Tìm lại hàng báo mất</div>
-      <div style="font-size:20px;font-weight:700;color:var(--td);margin:6px 0 2px;">${c.itemName || ''}</div>
-      <div style="font-size:13px;color:#999;letter-spacing:.5px;">${c.code || ''}</div>
-      <div style="font-size:12px;color:#16a34a;font-weight:700;margin-top:8px;">Tìm lại được — sẽ cộng lại đúng ${fmtPrepQty(c.baseQty)} ${c.unit || ''} vào tồn kho.</div>
-    </div>
-    <div class="wal-section" style="margin:0 0 14px;">${renderPinInput('foundLostStaff')}</div>
-    <button onclick="submitFoundLostContainer('${c.id}')" style="width:100%;padding:15px;background:var(--gd);color:#fff;border:none;border-radius:14px;font-family:'Google Sans',sans-serif;font-size:15px;font-weight:700;cursor:pointer;">Xác nhận tìm lại được</button>
-    <button onclick="renderStockCountForm()" style="width:100%;margin-top:8px;padding:13px;background:none;border:1px solid #ddd;color:#888;border-radius:14px;font-family:'Google Sans',sans-serif;font-size:14px;font-weight:700;cursor:pointer;">Huỷ</button>`;
+    <div style="min-height:calc(100dvh - 130px);display:flex;flex-direction:column;justify-content:center;gap:14px;">
+      <div class="wal-section" style="margin:0;padding:22px 18px;text-align:center;">
+        <div style="font-size:14px;font-weight:800;color:#9A9AA0;">Tìm lại hàng báo mất</div>
+        <div style="font-size:24px;font-weight:800;color:var(--td);margin:10px 0 10px;line-height:1.25;">${escHtmlPos(c.itemName || '')}</div>
+        <span style="font-size:18px;font-weight:800;letter-spacing:.8px;color:var(--td);background:#F2F2F4;border-radius:10px;padding:5px 12px;">${escHtmlPos(c.code || '')}</span>
+        <div style="font-size:14px;color:#15803d;font-weight:800;margin-top:16px;background:#E8F7EE;border-radius:12px;padding:10px 12px;">Sẽ cộng lại ${fmtPrepQty(c.baseQty)} ${escHtmlPos(c.unit || '')} vào tồn kho</div>
+      </div>
+      <div class="wal-section" style="margin:0;">${renderPinInput('foundLostStaff')}</div>
+      <div style="display:flex;gap:10px;">
+        ${caBtn('renderStockCountForm()', '', 'Huỷ', 'plain', 'flex:1;')}
+        ${caBtn(`submitFoundLostContainer('${c.id}')`, 'check', 'Tìm lại được', 'primary', 'flex:1.6;')}
+      </div>
+    </div>`;
 }
+
 
 async function submitFoundLostContainer(id) {
   if (_posSubmitBusy) { toast('⏳ Đang xử lý...'); return; }
