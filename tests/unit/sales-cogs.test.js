@@ -1,0 +1,880 @@
+/**
+ * [3] Sales → COGS → P&L.
+ * Chuỗi thật: FIFO-CHAIN-TRACE-SALES-COGS-PL-V1.md.
+ * Gap nghiêm trọng nhất toàn audit: "COGS actual" chưa từng tồn tại (§3).
+ */
+
+var _s = (function () {
+  var ids = GIEO.require('shared-kernel/ids');
+  return {
+    ids: ids,
+    R: GIEO.require('shared-kernel/result'),
+    VI: GIEO.require('compaction/versioned-input'),
+    RCP: GIEO.require('recipe-cost-btp/recipe'),
+    CST: GIEO.require('recipe-cost-btp/cost'),
+    COGS: GIEO.require('recipe-cost-btp/cogs'),
+    ICE: GIEO.require('catalog/ice'),
+    LEDGER: GIEO.require('loyalty/ledger'),
+    U: GIEO.require('fifo-core/unit'),
+    A: GIEO.require('fifo-core/allocation'),
+    SALES: GIEO.require('commands/sales'),
+    PROMO: GIEO.require('catalog/promotion'),
+    PIPE: GIEO.require('commands/pipeline'),
+    ACCESS: GIEO.require('store-context/access'),
+    CTXL: GIEO.require('store-context/context'),
+    BD: GIEO.require('store-context/business-day'),
+    CLK: GIEO.require('shared-kernel/clock'),
+    STORE: ids.deterministicId('store', ['main']),
+    ORG: ids.deterministicId('org', ['gieo']),
+    BOSS: ids.deterministicId('actor', ['boss']),
+    NV: ids.deterministicId('actor', ['nv01']),
+    SUA: ids.deterministicId('item', ['sua']),
+    LY: ids.deterministicId('item', ['ly']),
+    DA: ids.deterministicId('item', ['da']),
+    MON: ids.deterministicId('item', ['tra-sua']),
+    RECIPE: ids.deterministicId('recipe', ['tra-sua'])
+  };
+})();
+
+var T_SALE = new Date(2026, 2, 10, 10).getTime();
+
+function setupRegistry() {
+  var reg = _s.VI.createRegistry();
+  assertOk(_s.RCP.publishRecipeVersion(reg, {
+    recipeId: _s.RECIPE, storeId: _s.STORE, effectiveFrom: new Date(2026, 0, 1).getTime(),
+    publishedBy: _s.BOSS, components: { M: [{ refType: 'item', refId: _s.SUA, qty: 100 }] }
+  }));
+  assertOk(_s.CST.publishCostBasis(reg, {
+    itemId: _s.SUA, storeId: _s.STORE, effectiveFrom: new Date(2026, 0, 1).getTime(),
+    publishedBy: _s.BOSS, unitCost: 30
+  }));
+  return reg;
+}
+
+function mkUnit(unitCost, qty, openedAt, tag) {
+  var u = assertOk(_s.U.createUnit({
+    unitId: _s.ids.deterministicId('unit', [tag || 'u1']),
+    itemId: _s.SUA, storeId: _s.STORE, itemKind: 'raw', initialQty: qty,
+    costBasis: { unitCost: unitCost, versionId: 'version_c' + unitCost },
+    operationId: 'operation_recv_' + (tag || 'u1')
+  }));
+  u = assertOk(_s.U.open(u, { at: openedAt, actorId: _s.NV, operationId: 'operation_open' }));
+  return Object.assign({}, u, { remainingQty: qty });
+}
+
+describe('recipe-cost-btp/recipe — versioned (instance #1, vi phạm rõ nhất)', function () {
+  var RCP = _s.RCP;
+
+  test('đổi công thức KHÔNG làm trôi COGS của bill cũ', function () {
+    var reg = _s.VI.createRegistry();
+    assertOk(RCP.publishRecipeVersion(reg, {
+      recipeId: _s.RECIPE, storeId: _s.STORE, effectiveFrom: new Date(2026, 0, 1).getTime(),
+      publishedBy: _s.BOSS, components: { M: [{ refType: 'item', refId: _s.SUA, qty: 100 }] }
+    }));
+    assertOk(RCP.publishRecipeVersion(reg, {
+      recipeId: _s.RECIPE, storeId: _s.STORE, effectiveFrom: new Date(2026, 5, 1).getTime(),
+      publishedBy: _s.BOSS, components: { M: [{ refType: 'item', refId: _s.SUA, qty: 250 }] }
+    }));
+    var old = assertOk(RCP.resolveRecipeAt(reg, { recipeId: _s.RECIPE, storeId: _s.STORE, at: T_SALE }));
+    assert.strictEqual(old.payload.components.M[0].qty, 100, 'bill cũ bị tính theo công thức mới');
+  });
+
+  test('định mức không khai size thì báo lỗi, KHÔNG suy ra từ size khác', function () {
+    var reg = setupRegistry();
+    var v = assertOk(RCP.resolveRecipeAt(reg, { recipeId: _s.RECIPE, storeId: _s.STORE, at: T_SALE }));
+    assertErr(RCP.toRequirements(v, { size: 'L', qty: 1 }), 'NOT_FOUND');
+  });
+
+  test('yêu cầu vật chất nhân đúng số lượng, mang theo recipeVersionId', function () {
+    var reg = setupRegistry();
+    var v = assertOk(RCP.resolveRecipeAt(reg, { recipeId: _s.RECIPE, storeId: _s.STORE, at: T_SALE }));
+    var out = assertOk(RCP.toRequirements(v, { size: 'M', qty: 3 }));
+    assert.strictEqual(out.requirements[0].qty, 300);
+    assert.strictEqual(out.recipeVersionId, v.versionId);
+  });
+
+  test('món chưa khai định mức nói ra được, không im lặng trả 0', function () {
+    assertErr(RCP.requireRecipe({ name: 'Món lạ', recipeId: null }), 'PRECONDITION');
+  });
+
+  test('định mức rỗng bị từ chối', function () {
+    assertErr(RCP.publishRecipeVersion(_s.VI.createRegistry(), {
+      recipeId: _s.RECIPE, storeId: _s.STORE, effectiveFrom: 1, publishedBy: _s.BOSS,
+      components: { M: [] }
+    }), 'VALIDATION');
+  });
+});
+
+describe('recipe-cost-btp/cost', function () {
+  var CST = _s.CST;
+
+  test('giá vốn Unit ưu tiên giá THỰC TRẢ trên phiếu nhập', function () {
+    var reg = setupRegistry();
+    var cb = assertOk(CST.costBasisForNewUnit(reg, {
+      itemId: _s.SUA, storeId: _s.STORE, at: T_SALE, paidUnitCost: 45
+    }));
+    assert.strictEqual(cb.unitCost, 45);
+    assert.strictEqual(cb.source, 'RECEIVING');
+  });
+
+  test('không có giá trên phiếu thì rơi về CostBasis tại thời điểm nhận', function () {
+    var cb = assertOk(CST.costBasisForNewUnit(setupRegistry(), {
+      itemId: _s.SUA, storeId: _s.STORE, at: T_SALE
+    }));
+    assert.strictEqual(cb.unitCost, 30);
+    assert.strictEqual(cb.source, 'COST_BASIS');
+  });
+
+  test('không có giá nào thì TỪ CHỐI tạo Unit — không có costBasis thì cogsActual vô nghĩa', function () {
+    assertErr(CST.costBasisForNewUnit(_s.VI.createRegistry(), {
+      itemId: _s.SUA, storeId: _s.STORE, at: T_SALE
+    }), 'PRECONDITION');
+  });
+
+  test('thiếu giá 1 thành phần thì TỪ CHỐI cả cụm, không coi phần thiếu là 0', function () {
+    var reg = setupRegistry();
+    var r = CST.computeTheoreticalCost(reg, {
+      storeId: _s.STORE, at: T_SALE,
+      requirements: [{ itemId: _s.SUA, qty: 100 }, { itemId: _s.LY, qty: 1 }]
+    });
+    assertErr(r, 'NOT_FOUND');
+    assert.ok(/không được coi phần thiếu bằng 0/.test(r.error.message));
+  });
+});
+
+describe('COGS — HAI con số (đóng gap nghiêm trọng nhất toàn audit)', function () {
+  var COGS = _s.COGS;
+
+  function runCogs(units, qty) {
+    var reg = setupRegistry();
+    var ws = _s.A.createWorkingSet(units);
+    var reqs = [{ itemId: _s.SUA, qty: qty }];
+    var alloc = assertOk(_s.A.allocateMany(ws, reqs, { operationId: 'operation_sale1' }));
+    return assertOk(COGS.computeCogs({
+      registry: reg, storeId: _s.STORE, at: T_SALE,
+      requirements: reqs, allocationPlans: alloc.plans
+    }));
+  }
+
+  test('giá lô khớp giá khai → variance = 0', function () {
+    var c = runCogs([mkUnit(30, 1000, 100)], 300);
+    assert.strictEqual(c.cogsTheoretical, 9000);
+    assert.strictEqual(c.cogsActual, 9000);
+    assert.strictEqual(c.variance, 0);
+  });
+
+  test('NCC tăng giá đột xuất → phát hiện được, thứ legacy KHÔNG thể', function () {
+    /* Lô nhập thật 50đ/đv trong khi giá đang khai là 30đ/đv. */
+    var c = runCogs([mkUnit(50, 1000, 100)], 300);
+    assert.strictEqual(c.cogsTheoretical, 9000);
+    assert.strictEqual(c.cogsActual, 15000);
+    assert.strictEqual(c.variance, 6000);
+    assert.ok(Math.abs(c.variancePct - 66.67) < 0.1);
+    assert.strictEqual(COGS.explainVariance(c).status, 'OVER');
+  });
+
+  test('trộn nhiều lô giá khác nhau → actual là tổng THẬT theo từng lô', function () {
+    var re = mkUnit(30, 100, 100, 'cu');
+    var dat = mkUnit(50, 500, 200, 'moi');
+    var c = runCogs([re, dat], 300);
+    assert.strictEqual(c.cogsActual, 100 * 30 + 200 * 50);
+    assert.strictEqual(c.cogsTheoretical, 300 * 30);
+  });
+
+  test('cogsActual = null khi không có lô nào — KHÔNG fallback sang theoretical (R8)', function () {
+    var c = runCogs([], 300);
+    assert.strictEqual(c.cogsTheoretical, 9000);
+    assert.strictEqual(c.cogsActual, null, 'theoretical bị gán vào cogsActual — đúng lỗi legacy');
+    assert.strictEqual(c.variance, null);
+    assert.strictEqual(c.cogsActualReason, 'NO_ALLOCATION');
+  });
+
+  test('thiếu hàng giữa chừng → actual KHÔNG đầy đủ, nói rõ thay vì bù bằng giá lý thuyết', function () {
+    var c = runCogs([mkUnit(30, 100, 100)], 300);
+    assert.strictEqual(c.cogsActual, null);
+    assert.strictEqual(c.cogsActualReason, 'SHORTFALL');
+    assert.strictEqual(c.cogsActualPartial, 3000, 'phần đã cấp phát vẫn phải báo được');
+    assert.strictEqual(COGS.explainVariance(c).status, 'UNKNOWN');
+  });
+
+  test('variance trong ngưỡng thì báo OK', function () {
+    var c = runCogs([mkUnit(31, 1000, 100)], 300);
+    assert.strictEqual(COGS.explainVariance(c, 5).status, 'OK');
+  });
+
+  test('kết quả mang theo versionId và unitId để truy vết ngược', function () {
+    var c = runCogs([mkUnit(30, 1000, 100)], 300);
+    assert.ok(c.basis.costBasisVersionIds.length > 0);
+    assert.ok(c.basis.unitIds.length > 0);
+  });
+
+  test('N10 (§2.3a): gapLineCount > 0 → cả 2 vế COGS về null kèm reason, KHÔNG âm thầm tính thiếu', function () {
+    var reg = setupRegistry();
+    var units = [mkUnit(30, 1000, 100)];
+    var ws = _s.A.createWorkingSet(units);
+    var reqs = [{ itemId: _s.SUA, qty: 300 }];
+    var alloc = assertOk(_s.A.allocateMany(ws, reqs, { operationId: 'operation_sale1' }));
+    var c = assertOk(COGS.computeCogs({
+      registry: reg, storeId: _s.STORE, at: T_SALE,
+      requirements: reqs, allocationPlans: alloc.plans, gapLineCount: 1
+    }));
+    assert.strictEqual(c.cogsTheoretical, null);
+    assert.strictEqual(c.cogsTheoreticalReason, 'NO_RECIPE');
+    assert.strictEqual(c.cogsTheoreticalPartial, 9000, 'phần đã tính được từ các dòng CÓ định mức vẫn phải báo được');
+    assert.strictEqual(c.cogsActual, null);
+    assert.strictEqual(c.cogsActualReason, 'NO_RECIPE');
+    assert.strictEqual(c.cogsActualPartial, 9000);
+    assert.strictEqual(c.variance, null);
+    assert.strictEqual(COGS.explainVariance(c).status, 'UNKNOWN');
+  });
+});
+
+describe('catalog/ice — N2 (chốt chủ quán 2026-09): trừ đá ĐỒNG NHẤT bất kể đá chung/riêng/không đá', function () {
+  var ICE = _s.ICE;
+
+  test('chưa ai cấu hình thì mặc định TẮT — không đoán mò nguyên liệu/lượng đá', function () {
+    var reg = _s.VI.createRegistry();
+    var r = assertOk(ICE.resolveIceCogsAt(reg, { storeId: _s.STORE, at: T_SALE }));
+    assert.strictEqual(r.enabled, false);
+    assert.strictEqual(r.isDefault, true);
+    assert.strictEqual(ICE.toRequirement(r, 5), null);
+  });
+
+  test('bật mà thiếu itemId/qtyPerCup thì từ chối', function () {
+    var reg = _s.VI.createRegistry();
+    assertErr(ICE.publishIceCogs(reg, {
+      storeId: _s.STORE, effectiveFrom: 1, publishedBy: _s.BOSS, enabled: true
+    }), 'VALIDATION');
+  });
+
+  test('bật đúng cấu hình thì resolve ra itemId/qtyPerCup, toRequirement nhân đúng số ly', function () {
+    var reg = _s.VI.createRegistry();
+    assertOk(ICE.publishIceCogs(reg, {
+      storeId: _s.STORE, effectiveFrom: new Date(2026, 0, 1).getTime(), publishedBy: _s.BOSS,
+      enabled: true, itemId: _s.DA, qtyPerCup: 20
+    }));
+    var r = assertOk(ICE.resolveIceCogsAt(reg, { storeId: _s.STORE, at: T_SALE }));
+    assert.strictEqual(r.enabled, true);
+    assert.strictEqual(r.itemId, _s.DA);
+    var req = ICE.toRequirement(r, 3);
+    assert.strictEqual(req.itemId, _s.DA);
+    assert.strictEqual(req.qty, 60);
+  });
+
+  test('"chỗ bật tắt" đi qua đúng versioning — tắt hôm nay KHÔNG làm trôi COGS bill cũ', function () {
+    var reg = _s.VI.createRegistry();
+    assertOk(ICE.publishIceCogs(reg, {
+      storeId: _s.STORE, effectiveFrom: new Date(2026, 0, 1).getTime(), publishedBy: _s.BOSS,
+      enabled: true, itemId: _s.DA, qtyPerCup: 20
+    }));
+    assertOk(ICE.publishIceCogs(reg, {
+      storeId: _s.STORE, effectiveFrom: new Date(2026, 5, 1).getTime(), publishedBy: _s.BOSS,
+      enabled: false
+    }));
+    var old = assertOk(ICE.resolveIceCogsAt(reg, { storeId: _s.STORE, at: T_SALE }));
+    assert.strictEqual(old.enabled, true, 'bill cũ (trước khi tắt) bị tính lại theo cấu hình mới');
+    var now = assertOk(ICE.resolveIceCogsAt(reg, { storeId: _s.STORE, at: new Date(2026, 6, 1).getTime() }));
+    assert.strictEqual(now.enabled, false);
+  });
+});
+
+describe('commands/sales — Bill model', function () {
+  var S = _s.SALES;
+
+  function bill(over) {
+    return S.buildBill(Object.assign({
+      storeId: _s.STORE, soldByActorId: _s.NV, businessDate: '2026-03-10', occurredAt: T_SALE,
+      channel: { type: 'DINE_IN' },
+      lines: [{ menuItemId: _s.MON, size: 'M', qty: 2, price: 30000, recipeId: _s.RECIPE, name: 'Trà sữa' }]
+    }, over || {}));
+  }
+
+  test('soldByActorId BẮT BUỘC — ngoại lệ duy nhất của hệ thống cũ (§4.7)', function () {
+    var r = S.buildBill({
+      storeId: _s.STORE, businessDate: '2026-03-10', occurredAt: T_SALE,
+      channel: { type: 'DINE_IN' }, lines: [{ menuItemId: _s.MON, size: 'M', qty: 1, price: 30000 }]
+    });
+    assertErr(r, 'VALIDATION');
+    assert.ok(/soldByActorId/.test(r.error.message));
+  });
+
+  test('giá trên dòng là SNAPSHOT, tổng tính từ đó', function () {
+    var b = assertOk(bill());
+    assert.strictEqual(b.subtotal, 60000);
+    assert.strictEqual(b.lines[0].price, 30000);
+  });
+
+  describe('channel là first-class, phí sàn được ĐỌC THẬT (fix §5)', function () {
+    test('bán tại quán không có phí', function () {
+      var b = assertOk(bill());
+      assert.strictEqual(b.channelFee, 0);
+      assert.strictEqual(b.netRevenue, 60000);
+    });
+
+    test('bán qua sàn TRỪ phí thật khỏi doanh thu thuần', function () {
+      var b = assertOk(bill({ channel: { type: 'APP', appName: 'ShopeeFood', feePct: 25 } }));
+      assert.strictEqual(b.channelFee, 15000);
+      assert.strictEqual(b.netRevenue, 45000, 'phí sàn lại bị bỏ qua như legacy (hard-code 0)');
+    });
+
+    test('bán qua sàn mà thiếu feePct thì TỪ CHỐI', function () {
+      var r = bill({ channel: { type: 'APP', appName: 'ShopeeFood' } });
+      assertErr(r, 'VALIDATION');
+      assert.ok(/ghi rồi không bao giờ đọc/.test(r.error.message));
+    });
+
+    test('bán qua sàn phải ghi tên sàn', function () {
+      assertErr(bill({ channel: { type: 'APP', feePct: 25 } }), 'VALIDATION');
+    });
+
+    test('channel lạ bị từ chối', function () {
+      assertErr(bill({ channel: { type: 'TELEPATHY' } }), 'VALIDATION');
+    });
+  });
+
+  test('giảm giá trừ vào tổng, không âm', function () {
+    var b = assertOk(bill({ discountTotal: 100000 }));
+    assert.strictEqual(b.total, 0);
+  });
+
+  test('bill rỗng bị từ chối', function () {
+    assertErr(bill({ lines: [] }), 'VALIDATION');
+  });
+
+  describe('N2 — mức đá trên dòng (chốt chủ quán 2026-09: chỉ để in tem, không rẽ nhánh COGS)', function () {
+    test('không truyền ice thì mặc định CHUNG (như legacy cartIceDefault)', function () {
+      var b = assertOk(bill());
+      assert.strictEqual(b.lines[0].ice, 'CHUNG');
+    });
+
+    test('iceDefault ở bill áp cho dòng không tự khai riêng', function () {
+      var b = assertOk(bill({ iceDefault: 'RIENG' }));
+      assert.strictEqual(b.lines[0].ice, 'RIENG');
+    });
+
+    test('từng dòng tự khai ice thì ưu tiên hơn iceDefault của bill', function () {
+      var b = assertOk(bill({
+        iceDefault: 'RIENG',
+        lines: [{ menuItemId: _s.MON, size: 'M', qty: 1, price: 30000, recipeId: _s.RECIPE, ice: 'KHONG' }]
+      }));
+      assert.strictEqual(b.lines[0].ice, 'KHONG');
+    });
+
+    test('ice lạ bị từ chối', function () {
+      var r = bill({
+        lines: [{ menuItemId: _s.MON, size: 'M', qty: 1, price: 30000, recipeId: _s.RECIPE, ice: 'NUA_DA' }]
+      });
+      assertErr(r, 'VALIDATION');
+    });
+  });
+
+  describe('N12 — đổi tem lấy ly miễn phí (chốt chủ quán 2026-09: chỉ "đổi tem", KHÔNG mã giảm giá/voucher — đã cắt hẳn, FEATURE-TREE-V1.md §4.5)', function () {
+    var cust = _s.ids.deterministicId('customer', ['kh1']);
+
+    test('dòng isFree không tính vào doanh thu, nhưng vẫn giữ qty/price cho COGS', function () {
+      var b = assertOk(bill({
+        lines: [
+          { menuItemId: _s.MON, size: 'M', qty: 1, price: 30000, recipeId: _s.RECIPE },
+          { menuItemId: _s.MON, size: 'M', qty: 1, price: 30000, recipeId: _s.RECIPE, isFree: true }
+        ]
+      }));
+      assert.strictEqual(b.lines[1].isFree, true);
+      assert.strictEqual(b.lines[1].amount, 0);
+      assert.strictEqual(b.lines[1].qty, 1, 'ly free vẫn tiêu tốn kho thật — không được về 0');
+      assert.strictEqual(b.subtotal, 30000, 'dòng free không cộng vào doanh thu');
+    });
+
+    test('redemption STAMP_FREE_DRINK cần customerId — không có khách thì không có sổ tem để trừ', function () {
+      var r = bill({ redemption: { type: 'STAMP_FREE_DRINK' } });
+      assertErr(r, 'VALIDATION');
+      assert.ok(/customerId/.test(r.error.message));
+    });
+
+    test('redemption.type lạ bị từ chối', function () {
+      assertErr(bill({ customerId: cust, redemption: { type: 'VOUCHER_CODE' } }), 'VALIDATION');
+    });
+
+    test('redemption cần ĐÚNG 1 dòng isFree — không dòng nào free thì từ chối', function () {
+      var r = bill({ customerId: cust, redemption: { type: 'STAMP_FREE_DRINK' } });
+      assertErr(r, 'VALIDATION');
+      assert.ok(/ĐÚNG 1 dòng isFree/.test(r.error.message));
+    });
+
+    test('redemption cần ĐÚNG 1 dòng isFree — 2 dòng free cùng lúc cũng bị từ chối', function () {
+      var r = bill({
+        customerId: cust,
+        redemption: { type: 'STAMP_FREE_DRINK' },
+        lines: [
+          { menuItemId: _s.MON, size: 'M', qty: 1, price: 30000, recipeId: _s.RECIPE, isFree: true },
+          { menuItemId: _s.MON, size: 'M', qty: 1, price: 30000, recipeId: _s.RECIPE, isFree: true }
+        ]
+      });
+      assertErr(r, 'VALIDATION');
+    });
+
+    test('đúng 1 dòng isFree + customerId thì hợp lệ, bill mang theo redemption', function () {
+      var b = assertOk(bill({
+        customerId: cust,
+        redemption: { type: 'STAMP_FREE_DRINK' },
+        lines: [{ menuItemId: _s.MON, size: 'M', qty: 1, price: 30000, recipeId: _s.RECIPE, isFree: true }]
+      }));
+      assert.strictEqual(b.redemption.type, 'STAMP_FREE_DRINK');
+      assert.strictEqual(b.total, 0);
+    });
+  });
+});
+
+describe('commands/sales — buildBill promotion wiring (CP7, NET-CATALOG-PROMOTION-V1.md)', function () {
+  var S = _s.SALES;
+  var P = _s.PROMO;
+
+  function bill(over) {
+    return S.buildBill(Object.assign({
+      storeId: _s.STORE, soldByActorId: _s.NV, businessDate: '2026-03-10', occurredAt: T_SALE,
+      channel: { type: 'DINE_IN' },
+      lines: [{ menuItemId: _s.MON, size: 'M', qty: 2, price: 30000, recipeId: _s.RECIPE, name: 'Trà sữa' }]
+    }, over || {}));
+  }
+
+  function promo(over) {
+    return assertOk(P.createPromotion(Object.assign({
+      name: 'KM', storeId: _s.STORE, tier: 'AUTO_EXECUTE', priority: 10,
+      conditions: [], effect: { type: 'PERCENT_OFF', pct: 10 }
+    }, over || {})));
+  }
+
+  test('không truyền promotions/extraPromotions thì hành vi y hệt trước khi nối (backward-compatible)', function () {
+    var withNothing = assertOk(bill());
+    var withEmpty = assertOk(bill({ promotions: [], extraPromotions: [] }));
+    assert.strictEqual(withNothing.discountTotal, 0);
+    assert.strictEqual(withEmpty.discountTotal, 0);
+    assert.strictEqual(withNothing.total, withEmpty.total);
+    assert.deepStrictEqual(withNothing.promotionsApplied, []);
+    assert.deepStrictEqual(withNothing.promotionsUnapplied, []);
+    assert.deepStrictEqual(withNothing.promotionsAdvisory, []);
+    assert.deepStrictEqual(withNothing.promotionsSuppressed, []);
+  });
+
+  test('PERCENT_OFF tự áp thẳng vào discountTotal, cộng dồn với discountTotal thủ công', function () {
+    var b = assertOk(bill({
+      discountTotal: 5000,
+      promotions: [promo({ effect: { type: 'PERCENT_OFF', pct: 10 } })]
+    }));
+    assert.strictEqual(b.subtotal, 60000);
+    assert.strictEqual(b.discountTotal, 5000 + 6000, 'phải cộng dồn với discountTotal thủ công, không thay thế');
+    assert.strictEqual(b.total, 60000 - 11000);
+    assert.strictEqual(b.promotionsApplied.length, 1);
+    assert.strictEqual(b.promotionsUnapplied.length, 0);
+  });
+
+  test('ORDER_DISCOUNT cũng tự áp thẳng vào discountTotal', function () {
+    var b = assertOk(bill({
+      promotions: [promo({ effect: { type: 'ORDER_DISCOUNT', pct: 20 } })]
+    }));
+    assert.strictEqual(b.discountTotal, 12000);
+    assert.strictEqual(b.promotionsApplied[0].effect.discountAmount, 12000);
+  });
+
+  test('ITEM_DISCOUNT tự áp đúng theo dòng menuItemId khớp, không đụng dòng khác', function () {
+    var b = assertOk(bill({
+      promotions: [promo({ effect: { type: 'ITEM_DISCOUNT', menuItemId: _s.MON, pct: 10 } })]
+    }));
+    assert.strictEqual(b.discountTotal, 6000, '2 ly x 30000 x 10%');
+    assert.strictEqual(b.promotionsApplied.length, 1);
+  });
+
+  test('ITEM_FREE tự áp bằng giá 1 dòng khớp — không thêm/bớt dòng nào trong giỏ', function () {
+    var b = assertOk(bill({
+      promotions: [promo({ effect: { type: 'ITEM_FREE', menuItemId: _s.MON } })]
+    }));
+    assert.strictEqual(b.discountTotal, 30000, 'giá dòng khớp (đơn giá, không nhân qty)');
+    assert.strictEqual(b.lines.length, 1, 'ITEM_FREE không được tự thêm/bớt dòng trong giỏ');
+  });
+
+  test('BUY_X_GET_Y/FREE_TOPPING/ITEM_UPSIZE đổi hình dạng giỏ — KHÔNG tự áp, trả về promotionsUnapplied (§2.3a: không âm thầm bỏ qua)', function () {
+    var b = assertOk(bill({
+      promotions: [
+        promo({ name: 'BuyXGetY', priority: 30, effect: { type: 'BUY_X_GET_Y', buyQty: 2, freeQty: 1 } }),
+        promo({ name: 'FreeTopping', priority: 20, effect: { type: 'FREE_TOPPING', toppingId: 'tran-chau' } }),
+        promo({ name: 'Upsize', priority: 10, effect: { type: 'ITEM_UPSIZE', upsizeValue: 5000 } })
+      ]
+    }));
+    assert.strictEqual(b.discountTotal, 0, 'không được âm thầm trừ tiền cho hiệu ứng đổi hình dạng giỏ');
+    assert.strictEqual(b.promotionsApplied.length, 0);
+    assert.strictEqual(b.promotionsUnapplied.length, 3);
+    var names = b.promotionsUnapplied.map(function (o) { return o.name; }).sort();
+    assert.deepStrictEqual(names, ['BuyXGetY', 'FreeTopping', 'Upsize']);
+  });
+
+  test('tầng ADVISORY chỉ hiện qua promotionsAdvisory, KHÔNG đụng discountTotal', function () {
+    var b = assertOk(bill({
+      promotions: [promo({ tier: 'ADVISORY', effect: { type: 'PERCENT_OFF', pct: 50 } })]
+    }));
+    assert.strictEqual(b.discountTotal, 0);
+    assert.strictEqual(b.promotionsApplied.length, 0);
+    assert.strictEqual(b.promotionsAdvisory.length, 1);
+  });
+
+  test('loại trừ cùng nhóm: ưu tiên cao thắng, cái thua hiện qua promotionsSuppressed kèm lý do', function () {
+    var b = assertOk(bill({
+      promotions: [
+        promo({ name: 'Thấp', priority: 1, exclusivityGroup: 'ORDER_LEVEL', effect: { type: 'PERCENT_OFF', pct: 50 } }),
+        promo({ name: 'Cao', priority: 100, exclusivityGroup: 'ORDER_LEVEL', effect: { type: 'PERCENT_OFF', pct: 10 } })
+      ]
+    }));
+    assert.strictEqual(b.promotionsApplied.length, 1);
+    assert.strictEqual(b.promotionsApplied[0].name, 'Cao');
+    assert.strictEqual(b.promotionsSuppressed.length, 1);
+    assert.ok(/loại trừ bởi "Cao"/.test(b.promotionsSuppressed[0].reason));
+    assert.strictEqual(b.discountTotal, 6000, 'chỉ khuyến mãi thắng mới được trừ tiền');
+  });
+
+  test('extraPromotions (mã giảm giá khách) cũng tự áp và chịu CHUNG luật loại trừ với khuyến mãi tự động — không còn "2 biến độc lập" như legacy', function () {
+    var b = assertOk(bill({
+      promotions: [promo({ name: 'Auto', priority: 50, exclusivityGroup: 'ORDER_LEVEL', effect: { type: 'PERCENT_OFF', pct: 10 } })],
+      extraPromotions: [promo({ name: 'MaKH', priority: 10, exclusivityGroup: 'ORDER_LEVEL', effect: { type: 'ORDER_DISCOUNT', pct: 30 } })]
+    }));
+    assert.strictEqual(b.promotionsApplied.length, 1);
+    assert.strictEqual(b.promotionsApplied[0].name, 'Auto', 'ưu tiên cao hơn phải thắng dù ở mảng nào');
+    assert.strictEqual(b.promotionsSuppressed.length, 1);
+    assert.strictEqual(b.promotionsSuppressed[0].name, 'MaKH');
+  });
+
+  test('extraPromotions đứng một mình vẫn tự áp bình thường', function () {
+    var b = assertOk(bill({
+      extraPromotions: [promo({ effect: { type: 'PERCENT_OFF', pct: 15 } })]
+    }));
+    assert.strictEqual(b.discountTotal, 9000);
+  });
+});
+
+describe('commands/pipeline + RecordSale end-to-end', function () {
+  var PIPE = _s.PIPE;
+  var S = _s.SALES;
+
+  function ctx(source, actorId) {
+    var day = assertOk(_s.BD.openDay({
+      storeId: _s.STORE, dateKey: '2026-03-10', actorId: _s.BOSS,
+      at: new Date(2026, 2, 10, 7).getTime(), clock: _s.CLK.createClock()
+    }));
+    var actor = assertOk(_s.ACCESS.createActor({
+      actorId: actorId || _s.NV, role: 'POS_OPERATOR', source: source || 'POS', stores: [_s.STORE]
+    }));
+    return assertOk(_s.CTXL.createContext({
+      organizationId: _s.ORG, storeId: _s.STORE, actor: actor, source: source || 'POS', businessDay: day
+    }));
+  }
+
+  function runSale(over, units, c, registry, loyaltyEntries) {
+    var b = assertOk(S.buildBill(Object.assign({
+      billId: _s.ids.deterministicId('bill', ['b1']),
+      storeId: _s.STORE, soldByActorId: _s.NV, businessDate: '2026-03-10', occurredAt: T_SALE,
+      channel: { type: 'DINE_IN' },
+      lines: [{ menuItemId: _s.MON, size: 'M', qty: 2, price: 30000, recipeId: _s.RECIPE }]
+    }, over || {})));
+    return {
+      bill: b,
+      run: function (store) {
+        return PIPE.run(S.RecordSale, {
+          bill: b, deps: {
+            versionRegistry: registry || setupRegistry(), units: units || [mkUnit(30, 1000, 100)],
+            loyaltyEntries: loyaltyEntries || []
+          }
+        }, c || ctx(), { operationStore: store || PIPE.createInMemoryOperationStore() });
+      }
+    };
+  }
+
+  test('bán hàng đi trọn pipeline, sinh MutationPlan đầy đủ', function () {
+    var out = assertOk(runSale().run());
+    assert.strictEqual(out.status, 'COMPLETED');
+    var plan = out.plan;
+    assert.strictEqual(plan.domainRecords[0].type, 'bill');
+    assert.ok(plan.ledgerEntries.length > 0);
+    assert.ok(plan.traceChanges.length > 0);
+    assert.ok(plan.projectionRecomputes.length > 0);
+  });
+
+  test('bill hoàn tất mang CẢ HAI vế COGS', function () {
+    var plan = assertOk(runSale().run()).plan;
+    var b = plan.domainRecords[0].record;
+    assert.strictEqual(b.cogs.cogsTheoretical, 200 * 30);
+    assert.strictEqual(b.cogs.cogsActual, 200 * 30);
+    assert.ok(b.recipeVersionIds.length > 0, 'bill không ghi lại recipeVersion đã dùng');
+  });
+
+  test('IDEMPOTENCY: bấm thanh toán 2 lần KHÔNG trừ kho 2 lần', function () {
+    var store = PIPE.createInMemoryOperationStore();
+    var c = ctx();
+    var s = runSale(null, null, c);
+    var first = assertOk(s.run(store));
+    var second = assertOk(s.run(store));
+    assert.strictEqual(first.replayed, false);
+    assert.strictEqual(second.replayed, true, 'lần 2 chạy lại thật — kho bị trừ đúp');
+    assert.strictEqual(first.operationId, second.operationId);
+  });
+
+  test('operationId xác định theo billId, không ngẫu nhiên', function () {
+    var a = S.RecordSale.operationId({ bill: { billId: 'bill_x' } });
+    var b = S.RecordSale.operationId({ bill: { billId: 'bill_x' } });
+    assert.strictEqual(a, b);
+  });
+
+  test('trace ghi đủ lineage Bill → Unit → UnitBase trước/sau', function () {
+    var t = assertOk(runSale().run()).plan.traceChanges[0];
+    ['billId', 'unitId', 'itemId', 'qty', 'unitBaseBefore', 'unitBaseAfter', 'costBasisVersionId']
+      .forEach(function (k) { assert.ok(t[k] !== undefined, 'trace thiếu ' + k); });
+  });
+
+  test('ledger entry sinh ra tự tuân thủ quy tắc §5 (có unitId → delta = 0)', function () {
+    var L = GIEO.require('fifo-core/ledger');
+    var entries = assertOk(runSale().run()).plan.ledgerEntries.map(function (e) {
+      return assertOk(L.createEntry(Object.assign({ operationId: 'operation_x' }, e)));
+    });
+    assertOk(L.auditEntries(entries));
+    assert.strictEqual(L.sumUntrackedPendingDelta(entries), 0);
+  });
+
+  test('KHÔNG đủ nguyên liệu VẪN bán được — chốt chủ quán 2026-09 (SOP cho thay nguyên liệu khi hết)', function () {
+    var out = assertOk(runSale(null, [mkUnit(30, 50, 100)]).run());
+    assert.strictEqual(out.status, 'COMPLETED');
+    var plan = out.plan;
+    var debtUnit = plan.unitChanges.filter(function (u) { return u.debt; })[0];
+    assert.ok(debtUnit, 'không thấy Unit gánh nợ phần thiếu');
+    assert.strictEqual(debtUnit.debt.amount, 150);
+    assert.ok(debtUnit.needsReview, 'Unit gánh nợ phải gắn needsReview cho QUANLY rà');
+    assert.ok(debtUnit.needsReviewReasons.indexOf('NEGATIVE_REMAINDER') !== -1);
+
+    var evt = plan.events.filter(function (e) { return e.type === 'IngredientShortfallRecorded'; })[0];
+    assert.ok(evt, 'thiếu event IngredientShortfallRecorded để L9 báo QUANLY');
+    assert.strictEqual(evt.shortfallQty, 150);
+    assert.strictEqual(evt.unitId, debtUnit.unitId);
+  });
+
+  test('N2: đá cấu hình BẬT thì trừ kho theo SỐ LY, đồng nhất bất kể loại đá chọn (chốt chủ quán 2026-09)', function () {
+    var reg = setupRegistry();
+    assertOk(_s.ICE.publishIceCogs(reg, {
+      storeId: _s.STORE, effectiveFrom: new Date(2026, 0, 1).getTime(), publishedBy: _s.BOSS,
+      enabled: true, itemId: _s.DA, qtyPerCup: 20
+    }));
+    assertOk(_s.CST.publishCostBasis(reg, {
+      itemId: _s.DA, storeId: _s.STORE, effectiveFrom: new Date(2026, 0, 1).getTime(),
+      publishedBy: _s.BOSS, unitCost: 1
+    }));
+    var daUnit = assertOk(_s.U.createUnit({
+      unitId: _s.ids.deterministicId('unit', ['da1']),
+      itemId: _s.DA, storeId: _s.STORE, itemKind: 'raw', initialQty: 1000,
+      costBasis: { unitCost: 1, versionId: 'version_da' },
+      operationId: 'operation_recv_da1'
+    }));
+    daUnit = assertOk(_s.U.open(daUnit, { at: 100, actorId: _s.NV, operationId: 'operation_open_da' }));
+    daUnit = Object.assign({}, daUnit, { remainingQty: 1000 });
+
+    var out = assertOk(runSale(
+      { lines: [{ menuItemId: _s.MON, size: 'M', qty: 2, price: 30000, recipeId: _s.RECIPE, ice: 'KHONG' }] },
+      [mkUnit(30, 1000, 100), daUnit],
+      null,
+      reg
+    ).run());
+    assert.strictEqual(out.status, 'COMPLETED');
+    var iceEntry = out.plan.ledgerEntries.filter(function (e) { return e.itemId === _s.DA; })[0];
+    assert.ok(iceEntry, 'thiếu ledger entry trừ đá — chọn "không đá" vẫn phải trừ theo chốt N2 (không phân biệt)');
+    assert.strictEqual(iceEntry.qtyDelta, -40, '2 ly x 20/ly');
+  });
+
+  test('N2: chưa cấu hình đá thì KHÔNG trừ thêm gì (mặc định tắt, không đoán mò)', function () {
+    var out = assertOk(runSale().run());
+    assert.strictEqual(out.plan.ledgerEntries.filter(function (e) { return e.itemId === _s.DA; }).length, 0);
+  });
+
+  describe('N12 — đổi tem lấy ly miễn phí, gọi TRỰC TIẾP trong RecordSale (mục 7): cùng thành/bại với chính bill', function () {
+    var cust = _s.ids.deterministicId('customer', ['kh1']);
+    var LEDGER = _s.LEDGER;
+
+    function stampEntries(balance) {
+      return [assertOk(LEDGER.createEntry({
+        customerId: cust, storeId: _s.STORE, currency: LEDGER.CURRENCY.STAMPS, delta: balance,
+        reason: LEDGER.REASON.EARN_SALE, referenceId: 'bill_prior', operationId: 'operation_prior',
+        businessDate: '2026-03-09'
+      }))];
+    }
+
+    function billWithRedemption(over) {
+      return Object.assign({
+        customerId: cust,
+        redemption: { type: 'STAMP_FREE_DRINK' },
+        lines: [
+          { menuItemId: _s.MON, size: 'M', qty: 1, price: 30000, recipeId: _s.RECIPE },
+          { menuItemId: _s.MON, size: 'M', qty: 1, price: 30000, recipeId: _s.RECIPE, isFree: true }
+        ]
+      }, over || {});
+    }
+
+    test('đủ 6 tem: bill chốt, trừ 6 tem + cộng 1 ly miễn phí vào sổ loyalty', function () {
+      var out = assertOk(runSale(billWithRedemption(), null, null, null, stampEntries(6)).run());
+      assert.strictEqual(out.status, 'COMPLETED');
+      var loyaltyRecords = out.plan.domainRecords.filter(function (r) { return r.type === 'loyaltyLedgerEntry'; });
+      var stampSpend = loyaltyRecords.filter(function (r) { return r.record.currency === 'STAMPS'; })[0];
+      var drinkGain = loyaltyRecords.filter(function (r) { return r.record.currency === 'FREE_DRINKS'; })[0];
+      assert.ok(stampSpend, 'thiếu dòng sổ trừ tem');
+      assert.strictEqual(stampSpend.record.delta, -6);
+      assert.ok(drinkGain, 'thiếu dòng sổ cộng ly miễn phí');
+      assert.strictEqual(drinkGain.record.delta, 1);
+      var bRecord = out.plan.domainRecords.filter(function (r) { return r.type === 'bill'; })[0].record;
+      assert.strictEqual(bRecord.total, 30000, 'dòng free không tính tiền');
+    });
+
+    test('KHÔNG đủ tem: bill KHÔNG được chốt — không âm thầm cho miễn phí mà không trừ sổ', function () {
+      var out = runSale(billWithRedemption(), null, null, null, stampEntries(3)).run();
+      assertErr(out, 'PRECONDITION');
+    });
+
+    test('không mang sổ tem cũ (mặc định []) thì cũng bị từ chối, không đoán mò khách đủ tem', function () {
+      var out = runSale(billWithRedemption()).run();
+      assertErr(out, 'PRECONDITION');
+    });
+
+    test('bill KHÔNG có redemption thì không đụng gì tới sổ loyalty ngoài SaleCompleted (đã có sẵn)', function () {
+      var out = assertOk(runSale({ customerId: cust }).run());
+      var loyaltyRecords = out.plan.domainRecords.filter(function (r) { return r.type === 'loyaltyLedgerEntry'; });
+      assert.strictEqual(loyaltyRecords.length, 0);
+    });
+  });
+
+  test('N10 (§2.3a): món chưa khai định mức KHÔNG chặn bán — legacy chỉ soft-warn', function () {
+    var out = assertOk(runSale({
+      lines: [{ menuItemId: _s.MON, size: 'M', qty: 1, price: 30000, recipeId: null }]
+    }).run());
+    assert.strictEqual(out.status, 'COMPLETED');
+  });
+
+  test('N10: bill chưa khai định mức KHÔNG âm thầm tính thiếu — cogs về null kèm reason', function () {
+    var plan = assertOk(runSale({
+      lines: [{ menuItemId: _s.MON, size: 'M', qty: 1, price: 30000, recipeId: null }]
+    }).run()).plan;
+    var b = plan.domainRecords[0].record;
+    assert.strictEqual(b.cogs.cogsTheoretical, null);
+    assert.strictEqual(b.cogs.cogsTheoreticalReason, 'NO_RECIPE');
+    assert.strictEqual(b.cogs.cogsActual, null);
+    assert.strictEqual(b.cogs.cogsActualReason, 'NO_RECIPE');
+  });
+
+  test('N10: phát MissingRecipeDetected cho L9 tạo alert MISSING_RECIPE, gộp theo menuItemId', function () {
+    var plan = assertOk(runSale({
+      lines: [
+        { menuItemId: _s.MON, size: 'M', qty: 1, price: 30000, recipeId: null },
+        { menuItemId: _s.MON, size: 'M', qty: 1, price: 30000, recipeId: null }
+      ]
+    }).run()).plan;
+    var evts = plan.events.filter(function (e) { return e.type === 'MissingRecipeDetected'; });
+    assert.strictEqual(evts.length, 1, 'cùng 1 món thiếu định mức chỉ cần 1 alert, không phải 1/dòng');
+    assert.strictEqual(evts[0].menuItemId, _s.MON);
+  });
+
+  test('N10: món CÓ định mức thì KHÔNG phát MissingRecipeDetected', function () {
+    var plan = assertOk(runSale().run()).plan;
+    assert.strictEqual(plan.events.filter(function (e) { return e.type === 'MissingRecipeDetected'; }).length, 0);
+  });
+
+  test('QUANLY KHÔNG gọi được RecordSale (quyền enforce ở Command, không phải UI)', function () {
+    var qlActor = assertOk(_s.ACCESS.createActor({
+      actorId: _s.NV, role: 'STORE_MANAGER', source: 'QUANLY', stores: [_s.STORE]
+    }));
+    var day = assertOk(_s.BD.openDay({
+      storeId: _s.STORE, dateKey: '2026-03-10', actorId: _s.BOSS,
+      at: new Date(2026, 2, 10, 7).getTime(), clock: _s.CLK.createClock()
+    }));
+    var qlCtx = assertOk(_s.CTXL.createContext({
+      organizationId: _s.ORG, storeId: _s.STORE, actor: qlActor, source: 'QUANLY', businessDay: day
+    }));
+    assertErr(runSale(null, null, qlCtx).run(), 'FORBIDDEN');
+  });
+
+  test('ngày làm việc ĐÃ CHỐT thì khoá bán', function () {
+    var day = assertOk(_s.BD.openDay({
+      storeId: _s.STORE, dateKey: '2026-03-10', actorId: _s.BOSS,
+      at: new Date(2026, 2, 10, 7).getTime(), clock: _s.CLK.createClock()
+    }));
+    var closed = assertOk(_s.BD.closeDay(day, {
+      actorId: _s.BOSS, operationId: _s.ids.deterministicId('operation', ['close', 'x']),
+      at: new Date(2026, 2, 10, 23).getTime()
+    }));
+    var actor = assertOk(_s.ACCESS.createActor({
+      actorId: _s.NV, role: 'POS_OPERATOR', source: 'POS', stores: [_s.STORE]
+    }));
+    var c = assertOk(_s.CTXL.createContext({
+      organizationId: _s.ORG, storeId: _s.STORE, actor: actor, source: 'POS', businessDay: closed
+    }));
+    assertErr(runSale(null, null, c).run(), 'PRECONDITION');
+  });
+
+  test('bán hộ người khác bị chặn', function () {
+    var c = ctx('POS', _s.ids.deterministicId('actor', ['nv02']));
+    assertErr(runSale(null, null, c).run(), 'FORBIDDEN');
+  });
+
+  test('audit tự gắn đủ trường, command không phải tự nhớ', function () {
+    var a = assertOk(runSale().run()).plan.audit;
+    ['operationId', 'actorId', 'source', 'storeId', 'businessDate', 'command'].forEach(function (k) {
+      assert.ok(a[k], 'audit thiếu ' + k);
+    });
+    assert.strictEqual(a.command, 'RecordSale');
+  });
+
+  test('có khách hàng thì phát event cho loyalty (handler riêng, không nhét vào lệnh bán)', function () {
+    var cust = _s.ids.deterministicId('customer', ['kh1']);
+    var plan = assertOk(runSale({ customerId: cust }).run()).plan;
+    assert.strictEqual(plan.events[0].type, 'SaleCompleted');
+    assert.strictEqual(plan.events[0].customerId, cust);
+  });
+
+  test('command không khai operationId thì KHÔNG định nghĩa được', function () {
+    assert.throws(function () {
+      PIPE.defineCommand({ name: 'T_Bad', authority: 'EXECUTE', mutates: true, execute: function () {} });
+    }, /phải khai hàm operationId/);
+  });
+});
+
+describe('RecordAddon — đóng gap "addon không cộng điểm" (§1, §4.16)', function () {
+  var PIPE = _s.PIPE;
+  var S = _s.SALES;
+
+  function addonCtx() {
+    var day = assertOk(_s.BD.openDay({
+      storeId: _s.STORE, dateKey: '2026-03-10', actorId: _s.BOSS,
+      at: new Date(2026, 2, 10, 7).getTime(), clock: _s.CLK.createClock()
+    }));
+    var actor = assertOk(_s.ACCESS.createActor({
+      actorId: _s.NV, role: 'POS_OPERATOR', source: 'POS', stores: [_s.STORE]
+    }));
+    return assertOk(_s.CTXL.createContext({
+      organizationId: _s.ORG, storeId: _s.STORE, actor: actor, source: 'POS', businessDay: day
+    }));
+  }
+
+  test('addon có khách thì PHÁT event cho đúng phần chênh lệch', function () {
+    var cust = _s.ids.deterministicId('customer', ['kh1']);
+    var out = assertOk(PIPE.run(S.RecordAddon, {
+      billId: _s.ids.deterministicId('bill', ['b1']), addonSeq: 1,
+      addedAmount: 15000, customerId: cust
+    }, addonCtx(), { operationStore: PIPE.createInMemoryOperationStore() }));
+    var ev = out.plan.events[0];
+    assert.strictEqual(ev.type, 'SaleAmountIncreased');
+    assert.strictEqual(ev.addedAmount, 15000, 'phải là phần chênh lệch, không phải tổng bill');
+  });
+
+  test('thiếu addonSeq thì từ chối — đó chính là bug #23 (thiếu txId cố định)', function () {
+    var r = PIPE.run(S.RecordAddon, {
+      billId: _s.ids.deterministicId('bill', ['b1']), addedAmount: 15000
+    }, addonCtx(), { operationStore: PIPE.createInMemoryOperationStore() });
+    assertErr(r, 'VALIDATION');
+  });
+
+  test('addon lặp cùng seq là no-op', function () {
+    var store = PIPE.createInMemoryOperationStore();
+    var c = addonCtx();
+    var input = { billId: _s.ids.deterministicId('bill', ['b1']), addonSeq: 2, addedAmount: 5000 };
+    assertOk(PIPE.run(S.RecordAddon, input, c, { operationStore: store }));
+    assert.strictEqual(assertOk(PIPE.run(S.RecordAddon, input, c, { operationStore: store })).replayed, true);
+  });
+});

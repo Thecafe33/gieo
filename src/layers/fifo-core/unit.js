@@ -1,0 +1,484 @@
+/**
+ * Unit — PHYSICAL TRUTH của hệ thống.
+ *
+ * Contract: FIFO-CORE-ARCHITECTURE-V2.md §1 (data model), §2 (lifecycle), §4 (debt).
+ *
+ * Invariant #3: `currentStock` là PROJECTION, Unit mới là sự thật vật chất.
+ * Không ai được sửa Unit ngoài fifo-core.
+ *
+ * Bốn quyết định khác legacy, mỗi cái đóng một lớp bug cụ thể:
+ *
+ * 1. `costBasis` gắn thẳng trên Unit lúc nhận hàng. Legacy KHÔNG lưu giá trên
+ *    container nên phải tính lại qua PRICE_HISTORY mỗi lần cần — gốc của vi phạm
+ *    invariant #14 lan sang cả BTP lẫn recipe. Quan trọng hơn: không có giá trên
+ *    Unit thì "COGS actual" KHÔNG THỂ tồn tại, và đúng là nó chưa từng tồn tại
+ *    (§10b.1 — `cogsActual` của legacy thực chất là theoretical bị đặt tên sai).
+ *
+ * 2. `initialQty` bất biến, tách khỏi `remainingQty`. Legacy dùng baseQty/unitBase
+ *    nhưng không có ràng buộc nào chặn ghi nhầm vào baseQty.
+ *
+ * 3. `debt` là field tường minh, không phải remainingQty âm ẩn (§4). Tra được
+ *    "unit nào đang nợ" mà không phải kiểm tra dấu.
+ *
+ * 4. `systemExhaustedAt` được LƯU. Legacy chỉ suy diễn tạm thời mỗi lần load nên
+ *    không trả lời được "hệ thống phát hiện hết lúc nào" trong lịch sử.
+ */
+GIEO.define('fifo-core/unit', ['shared-kernel/ids', 'shared-kernel/result'], function (ids, R) {
+  'use strict';
+
+  /* Trạng thái được LƯU. SYSTEM_EXHAUSTED cố ý không có ở đây — nó là suy diễn,
+     không phải hành động (§3.6), nên chỉ ghi systemExhaustedAt. */
+  var STATUS = {
+    RECEIVED: 'RECEIVED',
+    SEALED: 'SEALED',
+    OPEN: 'OPEN',
+    CONSUMING: 'CONSUMING',
+    PHYSICALLY_FINISHED: 'PHYSICALLY_FINISHED',
+    COMPACTABLE: 'COMPACTABLE',
+    LOST: 'LOST',
+    VOIDED: 'VOIDED'
+  };
+
+  var TRANSITIONS = {
+    RECEIVED: ['SEALED', 'VOIDED'],
+    SEALED: ['OPEN', 'LOST', 'VOIDED'],
+    OPEN: ['CONSUMING', 'PHYSICALLY_FINISHED', 'LOST', 'VOIDED'],
+    CONSUMING: ['PHYSICALLY_FINISHED', 'LOST', 'VOIDED'],
+    PHYSICALLY_FINISHED: ['COMPACTABLE', 'VOIDED'],
+    /* LOST quay về được: RestoreFoundContainer (§8). */
+    LOST: ['SEALED', 'OPEN', 'CONSUMING', 'VOIDED'],
+    COMPACTABLE: [],
+    VOIDED: []
+  };
+
+  var ITEM_KIND = { raw: 'raw', prep: 'prep' };
+
+  var REVIEW = {
+    FINISHED_WITH_REMAINDER: 'FINISHED_WITH_REMAINDER',
+    NEGATIVE_REMAINDER: 'NEGATIVE_REMAINDER',
+    RESTORED_FROM_LOST: 'RESTORED_FROM_LOST',
+    PHYSICAL_RECONCILED: 'PHYSICAL_RECONCILED',
+    /* Unit tiếp nhận từ hệ cũ: có lượng, KHÔNG có giá vốn. */
+    SEEDED_WITHOUT_COST: 'SEEDED_WITHOUT_COST'
+  };
+
+  /**
+   * Xuất xứ của Unit. Đây là ranh giới truy vết của cả hệ thống:
+   *
+   *   NATIVE      — sinh ra trong hệ mới. Truy được toàn bộ vòng đời.
+   *   LEGACY_SEED — tiếp nhận tại mốc cutover. Truy được TỪ mốc đó TRỞ ĐI,
+   *                 và KHÔNG truy ngược trước đó. Không phải vì dữ liệu mất,
+   *                 mà vì đó là quyết định đã chốt: không bám vào quá khứ.
+   */
+  var ORIGIN = { NATIVE: 'NATIVE', LEGACY_SEED: 'LEGACY_SEED' };
+
+  function isStatus(s) { return Object.prototype.hasOwnProperty.call(STATUS, s); }
+
+  function canTransition(from, to) {
+    return isStatus(from) && isStatus(to) && TRANSITIONS[from].indexOf(to) !== -1;
+  }
+
+  function addReview(unit, reason) {
+    var reasons = unit.needsReviewReasons.slice();
+    if (reasons.indexOf(reason) === -1) reasons.push(reason);
+    return { needsReview: true, needsReviewReasons: reasons };
+  }
+
+  /**
+   * Tạo Unit lúc nhận hàng.
+   * `costBasis` BẮT BUỘC — không có đường nào tạo Unit mà thiếu giá vốn, vì
+   * thiếu nó là tái lập đúng gap §10b.1.
+   */
+  function createUnit(spec) {
+    if (!spec) return R.err('VALIDATION', 'createUnit cần spec');
+    if (!ids.isId(spec.itemId, 'item')) return R.err('VALIDATION', 'createUnit cần itemId hợp lệ');
+    if (!ids.isId(spec.storeId, 'store')) return R.err('VALIDATION', 'createUnit cần storeId hợp lệ');
+    if (!ITEM_KIND[spec.itemKind]) return R.err('VALIDATION', "itemKind phải là 'raw' hoặc 'prep'");
+    if (typeof spec.initialQty !== 'number' || !(spec.initialQty > 0)) {
+      return R.err('VALIDATION', 'initialQty phải là số dương');
+    }
+    if (!spec.costBasis || typeof spec.costBasis.unitCost !== 'number') {
+      return R.err('VALIDATION',
+        'createUnit cần costBasis.unitCost — Unit không có giá vốn thì COGS actual không thể tồn tại (§10b.1)');
+    }
+    if (!spec.operationId) return R.err('VALIDATION', 'createUnit cần operationId (invariant #7)');
+
+    return R.ok(buildUnit(spec, {
+      origin: ORIGIN.NATIVE,
+      costBasis: {
+        unitCost: spec.costBasis.unitCost,
+        currency: spec.costBasis.currency || 'VND',
+        versionId: spec.costBasis.versionId || null,
+        source: spec.costBasis.source || 'RECEIVING'
+      },
+      needsReview: false,
+      needsReviewReasons: []
+    }));
+  }
+
+  /**
+   * Tiếp nhận Unit từ hệ cũ tại mốc cutover.
+   *
+   * CỬA RIÊNG, cố ý không phải một tham số của `createUnit`: nếu nới `createUnit`
+   * cho phép thiếu giá vốn thì đường nhận hàng bình thường cũng nới theo, và gap
+   * §10b.1 quay lại qua chính cái cửa vừa mở. Ở đây giá vốn trống là hợp lệ và
+   * được khai ra; ở đường kia nó vẫn là lỗi.
+   *
+   * `initialQty` = `unitBase` hiện tại của hệ cũ, KHÔNG phải dung tích gốc: từ
+   * mốc này trở đi lô coi như bắt đầu với đúng lượng đang thực có.
+   *
+   * @param spec.seededAt      mốc tiếp nhận (businessDate cutover)
+   * @param spec.legacyRef     mã/lô bên hệ cũ, để đối chiếu bằng mắt khi cần
+   */
+  function seedUnitFromLegacy(spec) {
+    if (!spec) return R.err('VALIDATION', 'seedUnitFromLegacy cần spec');
+    if (!ids.isId(spec.itemId, 'item')) return R.err('VALIDATION', 'seed cần itemId hợp lệ');
+    if (!ids.isId(spec.storeId, 'store')) return R.err('VALIDATION', 'seed cần storeId hợp lệ');
+    if (!ITEM_KIND[spec.itemKind]) return R.err('VALIDATION', "itemKind phải là 'raw' hoặc 'prep'");
+    if (typeof spec.initialQty !== 'number' || !isFinite(spec.initialQty)) {
+      return R.err('VALIDATION', 'seed cần initialQty là số hữu hạn');
+    }
+    if (spec.initialQty <= 0) {
+      /* Lô đã hết hoặc đang âm ở hệ cũ thì KHÔNG mang sang. Mang một lô rỗng
+         sang chỉ tạo ra rác trong FIFO mới, và mang lô âm sang là nhập khẩu
+         luôn cái nợ không ai giải thích được. */
+      return R.err('PRECONDITION',
+        'lô có lượng <= 0 ở hệ cũ thì không tiếp nhận (' + spec.initialQty + ') — ' +
+        'phần chênh này thuộc về hệ cũ, không mang sang',
+        { legacyRef: spec.legacyRef || null });
+    }
+    if (!spec.operationId) return R.err('VALIDATION', 'seed cần operationId (invariant #7)');
+    if (!spec.seededAt) return R.err('VALIDATION', 'seed cần seededAt — mốc tiếp nhận là ranh giới truy vết');
+
+    /* Hũ đang mở dở trên kệ phải được tiếp nhận ở trạng thái ĐANG MỞ, giữ
+       nguyên `openedAt` cũ.
+       FIFO sắp thứ tự theo `openedAt` (§3.1). Seed một hũ đang mở thành SEALED
+       sẽ đẩy nó xuống cuối hàng đợi, và nhân viên sẽ được bảo mở hũ mới trong
+       khi hũ cũ còn dở trên kệ — sai ngay ca đầu tiên, đúng ở chỗ FIFO được
+       lấy làm gốc. */
+    var opened = typeof spec.openedAt === 'number' || typeof spec.openedAt === 'string';
+    if (opened && !spec.openedAt) {
+      return R.err('VALIDATION', 'lô tiếp nhận ở trạng thái đang mở thì cần openedAt');
+    }
+
+    return R.ok(buildUnit(spec, {
+      origin: ORIGIN.LEGACY_SEED,
+      /* Trống, và NÓI RA là trống. Không lấy giá gần nhất đắp vào. */
+      costBasis: null,
+      status: opened ? STATUS.OPEN : STATUS.SEALED,
+      openedAt: opened ? spec.openedAt : null,
+      /* Người mở thuộc về hệ cũ — không mang sang, và không bịa. */
+      openedBy: null,
+      seededAt: spec.seededAt,
+      legacyRef: spec.legacyRef || null,
+      needsReview: true,
+      needsReviewReasons: [REVIEW.SEEDED_WITHOUT_COST]
+    }));
+  }
+
+  function buildUnit(spec, extra) {
+    return Object.assign({
+      unitId: spec.unitId || ids.newId('unit'),
+      itemId: spec.itemId,
+      storeId: spec.storeId,
+      itemKind: spec.itemKind,
+
+      receiptId: spec.receiptId || null,
+      supplierId: spec.supplierId || null,
+      receivedAt: spec.receivedAt || null,
+      receivedBy: spec.receivedBy || null,
+
+      /* BẤT BIẾN sau khi set. */
+      initialQty: spec.initialQty,
+      remainingQty: spec.initialQty,
+
+      status: spec.status === STATUS.RECEIVED ? STATUS.RECEIVED : STATUS.SEALED,
+      openedAt: null,
+      openedBy: null,
+      systemExhaustedAt: null,
+      finishedAt: null,
+      finishedBy: null,
+      finishReason: null,
+      wasteQty: 0,
+
+      debt: null,
+      lostAt: null, lostBy: null, lostReportId: null,
+      foundAt: null, foundBy: null,
+
+      physicalReconciliations: [],
+      /* Append-only — RM3 (sửa giá nhập sai). Trống cho tới lần sửa đầu tiên. */
+      costBasisRevisions: [],
+
+      /* Mặc định NATIVE + không có seed. Cửa nào gọi thì cửa đó ghi đè bằng
+         `extra`, nên mọi Unit đều mang xuất xứ tường minh — không có Unit nào
+         "không rõ từ đâu". */
+      origin: ORIGIN.NATIVE,
+      seededAt: null,
+      legacyRef: null,
+
+      operationId: spec.operationId
+    }, extra);
+  }
+
+  /**
+   * Mở Unit. `openedAt` là khoá sắp xếp FIFO (§3.1) — đã chốt với chủ quán giữ
+   * `openedAt` chứ không đổi sang `receivedAt`, vì đó là hành vi production đã
+   * chạy nhiều năm và đổi sẽ làm lệch kết quả FIFO trên dữ liệu đang tồn.
+   */
+  function open(unit, spec) {
+    if (!canTransition(unit.status, STATUS.OPEN)) {
+      return R.err('PRECONDITION', 'không mở được Unit ở trạng thái ' + unit.status);
+    }
+    if (typeof spec.at !== 'number') return R.err('VALIDATION', 'open cần thời điểm "at"');
+    if (!ids.isId(spec.actorId, 'actor')) return R.err('VALIDATION', 'open cần actorId');
+    if (!spec.operationId) return R.err('VALIDATION', 'open cần operationId');
+
+    return R.ok(Object.assign({}, unit, {
+      status: STATUS.OPEN,
+      openedAt: spec.at,
+      openedBy: spec.actorId,
+      operationId: spec.operationId
+    }));
+  }
+
+  /** OPEN -> CONSUMING: đã có allocation đầu tiên. Legacy gộp 2 state này. */
+  function markConsuming(unit) {
+    if (unit.status === STATUS.CONSUMING) return R.ok(unit);
+    if (!canTransition(unit.status, STATUS.CONSUMING)) {
+      return R.err('PRECONDITION', 'không chuyển sang CONSUMING từ ' + unit.status);
+    }
+    return R.ok(Object.assign({}, unit, { status: STATUS.CONSUMING }));
+  }
+
+  /**
+   * §3.6 — hệ thống phát hiện hết: CHỈ ghi `systemExhaustedAt`, KHÔNG đổi status.
+   * Đây là suy diễn, không phải hành động của người. Ghi lại để có audit trail
+   * mà vẫn giữ đúng nguyên tắc.
+   */
+  function markSystemExhausted(unit, at) {
+    if (unit.status !== STATUS.OPEN && unit.status !== STATUS.CONSUMING) return R.ok(unit);
+    if (unit.remainingQty > 0) return R.ok(unit);
+    if (unit.systemExhaustedAt !== null) return R.ok(unit);
+    return R.ok(Object.assign({}, unit, { systemExhaustedAt: at }));
+  }
+
+  /**
+   * Nhân viên báo hết hũ (§3.5).
+   *
+   * Giữ nguyên 2 quyết định đúng của legacy:
+   *   - `waste = max(0, remainingQty)` — còn dư thì đó là hao hụt
+   *   - remainingQty < 0 là NỢ, KHÔNG phải hao hụt, nên không tạo WASTE
+   *   - không đọc `systemExhaustedAt` để quyết định cho phép: nhân viên được báo
+   *     hết bất kỳ lúc nào miễn status hợp lệ (§2)
+   *
+   * Mới: cờ `needsReview` khi báo hết lúc còn nhiều.
+   * Ngưỡng do QUANLY cấu hình (xác nhận trực tiếp với chủ quán), truyền vào qua
+   * `spec.finishReviewRatio`. fifo-core cố ý KHÔNG tự đọc config — nó là domain
+   * thuần, không được import compaction; tầng command resolve config rồi truyền
+   * xuống. Không truyền thì không gắn cờ, chứ không tự bịa ngưỡng mặc định.
+   */
+  function finish(unit, spec) {
+    if (!canTransition(unit.status, STATUS.PHYSICALLY_FINISHED)) {
+      return R.err('PRECONDITION', 'không báo hết được Unit ở trạng thái ' + unit.status);
+    }
+    if (typeof spec.at !== 'number') return R.err('VALIDATION', 'finish cần thời điểm "at"');
+    if (!ids.isId(spec.actorId, 'actor')) return R.err('VALIDATION', 'finish cần actorId');
+    if (!spec.operationId) return R.err('VALIDATION', 'finish cần operationId');
+
+    var remaining = unit.remainingQty;
+    var waste = Math.max(0, remaining);
+    var patch = {
+      status: STATUS.PHYSICALLY_FINISHED,
+      finishedAt: spec.at,
+      finishedBy: spec.actorId,
+      finishReason: spec.reason || null,
+      wasteQty: waste,
+      remainingQty: 0,
+      operationId: spec.operationId
+    };
+
+    var review = null;
+    if (remaining < 0) {
+      /* Nợ, không phải hao hụt — vẫn cần người nhìn lại. */
+      review = addReview(unit, REVIEW.NEGATIVE_REMAINDER);
+    } else if (typeof spec.finishReviewRatio === 'number' && unit.initialQty > 0) {
+      if (remaining / unit.initialQty > spec.finishReviewRatio) {
+        review = addReview(unit, REVIEW.FINISHED_WITH_REMAINDER);
+      }
+    }
+    if (review) Object.assign(patch, review);
+
+    return R.ok({
+      unit: Object.assign({}, unit, patch),
+      wasteQty: waste,
+      /* Nợ được báo riêng để tầng trên cảnh báo, KHÔNG biến thành WASTE. */
+      debtQty: remaining < 0 ? -remaining : 0,
+      flaggedForReview: !!review
+    });
+  }
+
+  /** §4 — nợ là field tường minh, không phải số âm ẩn. */
+  function recordDebt(unit, spec) {
+    if (typeof spec.amount !== 'number' || !(spec.amount > 0)) {
+      return R.err('VALIDATION', 'debt.amount phải dương — nợ luôn ghi bằng số dương');
+    }
+    return R.ok(Object.assign({}, unit, {
+      debt: {
+        amount: spec.amount,
+        incurredAt: spec.at,
+        incurredByOperationId: spec.operationId,
+        absorbedByUnitId: null,
+        absorbedAt: null
+      }
+    }));
+  }
+
+  function absorbDebt(unit, spec) {
+    if (!unit.debt) return R.err('PRECONDITION', 'Unit không có nợ để hấp thụ');
+    if (unit.debt.absorbedByUnitId) return R.err('PRECONDITION', 'nợ đã được hấp thụ rồi');
+    if (!ids.isId(spec.byUnitId, 'unit')) return R.err('VALIDATION', 'absorbDebt cần byUnitId hợp lệ');
+    return R.ok(Object.assign({}, unit, {
+      debt: Object.assign({}, unit.debt, {
+        absorbedByUnitId: spec.byUnitId,
+        absorbedAt: spec.at
+      })
+    }));
+  }
+
+  function markLost(unit, spec) {
+    if (!canTransition(unit.status, STATUS.LOST)) {
+      return R.err('PRECONDITION', 'không đánh dấu mất được Unit ở trạng thái ' + unit.status);
+    }
+    if (!ids.isId(spec.actorId, 'actor')) return R.err('VALIDATION', 'markLost cần actorId');
+    if (!spec.operationId) return R.err('VALIDATION', 'markLost cần operationId');
+    return R.ok(Object.assign({}, unit, {
+      status: STATUS.LOST,
+      lostAt: spec.at,
+      lostBy: spec.actorId,
+      lostReportId: spec.lostReportId || null,
+      /* Nhớ trạng thái trước khi mất để khôi phục đúng chỗ. */
+      statusBeforeLost: unit.status,
+      operationId: spec.operationId
+    }));
+  }
+
+  /**
+   * §8 — khôi phục container tìm lại được.
+   * Giữ nguyên quyết định nghiệp vụ của legacy: unit "mới nguyên", KHÔNG suy
+   * luận lại phần đã dùng trước khi mất. Nhưng gắn cờ cần rà, vì quãng thời
+   * gian nó biến mất là quãng không ai biết chuyện gì đã xảy ra.
+   */
+  function restoreFound(unit, spec) {
+    if (unit.status !== STATUS.LOST) return R.err('PRECONDITION', 'Unit không ở trạng thái LOST');
+    if (!ids.isId(spec.actorId, 'actor')) return R.err('VALIDATION', 'restoreFound cần actorId');
+    if (!spec.operationId) return R.err('VALIDATION', 'restoreFound cần operationId');
+
+    var back = unit.statusBeforeLost || STATUS.SEALED;
+    if (!canTransition(STATUS.LOST, back)) back = STATUS.SEALED;
+    var review = addReview(unit, REVIEW.RESTORED_FROM_LOST);
+
+    return R.ok(Object.assign({}, unit, {
+      status: back,
+      foundAt: spec.at,
+      foundBy: spec.actorId,
+      operationId: spec.operationId
+    }, review));
+  }
+
+  /**
+   * RM3 — sửa giá nhập sai (`NET-RAW-MATERIAL-V1.md` RM3).
+   *
+   * Cố ý KHÔNG có `historicalPolicy` để chọn như `ReviseState`
+   * (`commands/reversal.js`): invariant #14 (`recipe-cost-btp/cost.js` —
+   * "CẤM dùng giá hiện tại để tính lại lịch sử") đã cấm RECOMPUTE cho MỌI
+   * giá vốn ở mọi nơi khác trong hệ thống, nên costBasis của Unit chỉ có
+   * đúng MỘT chính sách hợp lệ: ĐÓNG BĂNG ledger đã ghi bằng giá cũ, sửa chỉ
+   * ảnh hưởng phần TIÊU THỤ TỪ NAY VỀ SAU (và giá trị còn lại cho báo cáo,
+   * vd liability nếu Unit đang LOST). Cho `ReviseState` chọn RECOMPUTE ở đây
+   * sẽ mở lại đúng invariant đã đóng — nên đây là command riêng.
+   *
+   * Audit append-only trong `costBasisRevisions`, không ghi đè.
+   */
+  function reviseCostBasis(unit, spec) {
+    if (unit.status === STATUS.VOIDED) {
+      return R.err('PRECONDITION', 'không sửa giá vốn của Unit đã VOIDED');
+    }
+    if (!spec || typeof spec.unitCost !== 'number' || spec.unitCost < 0) {
+      return R.err('VALIDATION', 'reviseCostBasis cần unitCost là số không âm');
+    }
+    if (!ids.isId(spec.actorId, 'actor')) return R.err('VALIDATION', 'reviseCostBasis cần actorId');
+    if (!spec.operationId) return R.err('VALIDATION', 'reviseCostBasis cần operationId');
+    if (!spec.reason) return R.err('VALIDATION', 'sửa giá nhập sai phải có lý do');
+
+    var before = unit.costBasis || null;
+    var after = {
+      unitCost: spec.unitCost,
+      currency: spec.currency || (before && before.currency) || 'VND',
+      versionId: spec.versionId || null,
+      source: 'CORRECTION'
+    };
+    var revision = {
+      before: before, after: after,
+      at: spec.at, actorId: spec.actorId, reason: spec.reason, operationId: spec.operationId
+    };
+
+    return R.ok(Object.assign({}, unit, {
+      costBasis: after,
+      costBasisRevisions: (unit.costBasisRevisions || []).concat([revision]),
+      operationId: spec.operationId
+    }));
+  }
+
+  /**
+   * Trạng thái HIỂN THỊ, gộp cả phần suy diễn.
+   * Dùng cho UI/alert; state máy vẫn là `unit.status`.
+   */
+  function effectiveState(unit) {
+    if (unit.debt && !unit.debt.absorbedByUnitId) return 'DEBT';
+    if ((unit.status === STATUS.OPEN || unit.status === STATUS.CONSUMING) && unit.remainingQty <= 0) {
+      return 'SYSTEM_EXHAUSTED';
+    }
+    return unit.status;
+  }
+
+  /**
+   * Điều kiện CẦN để compact (FIFO-COMPACTION-CONTRACT-V1.md §2.2).
+   * Trả về danh sách lý do CHẶN thay vì true/false, để chỗ gọi nói được vì sao.
+   */
+  function compactBlockers(unit) {
+    var blockers = [];
+    if (unit.status !== STATUS.PHYSICALLY_FINISHED && unit.status !== STATUS.VOIDED) {
+      blockers.push('chưa kết thúc vòng đời (đang ' + unit.status + ')');
+    }
+    if (unit.debt && !unit.debt.absorbedByUnitId) {
+      blockers.push('còn nợ ' + unit.debt.amount + ' chưa được hấp thụ');
+    }
+    if (unit.needsReview) {
+      blockers.push('còn cờ cần rà: ' + unit.needsReviewReasons.join(', '));
+    }
+    return blockers;
+  }
+
+  return {
+    STATUS: STATUS,
+    ORIGIN: ORIGIN,
+    TRANSITIONS: TRANSITIONS,
+    ITEM_KIND: ITEM_KIND,
+    REVIEW: REVIEW,
+    isStatus: isStatus,
+    canTransition: canTransition,
+    createUnit: createUnit,
+    seedUnitFromLegacy: seedUnitFromLegacy,
+    open: open,
+    markConsuming: markConsuming,
+    markSystemExhausted: markSystemExhausted,
+    finish: finish,
+    recordDebt: recordDebt,
+    absorbDebt: absorbDebt,
+    markLost: markLost,
+    restoreFound: restoreFound,
+    reviseCostBasis: reviseCostBasis,
+    effectiveState: effectiveState,
+    compactBlockers: compactBlockers
+  };
+});

@@ -1,0 +1,149 @@
+# NET — CATALOG / MENU / PROMOTION — V1
+
+> Nguồn: `FIFO-CHAIN-TRACE-CATALOG-PROMOTION-V1.md` đối chiếu với
+> `src/layers/catalog/menu.js`, `src/layers/catalog/promotion.js`,
+> `src/layers/catalog/packaging.js`, `src/layers/commands/sales.js`,
+> `src/layers/read-layer/gateway.js`.
+>
+> Đánh số CP1-CP11 theo ĐÚNG thứ tự 11 mục [1]-[11] của chain-trace gốc để dễ
+> đối chiếu ngược. Áp dụng §2.3a cho mọi khả năng chặn checkout mới.
+
+## Sơ đồ luồng (CP1 → CP11)
+
+```
+CP1 Cấu trúc Menu item ──► CP9 liên kết Recipe (con trỏ tường minh)
+CP2 Category (entity thật)         │
+CP3 Sold-out (dẫn xuất từ FIFO) ◄──┘
+CP4 togoSettings auto-promo ──► CP7 chồng khuyến mãi (ưu tiên tường minh)
+CP5 campaign advisory-only ──►      │
+CP6 giảm giá thủ công (5 kiểu) ─────┘
+CP8 giá snapshot vào bill (mẫu ĐÚNG, giữ nguyên)
+CP10 xoá/đổi tên món (soft-delete, hết mồ côi)
+CP11 phân quyền sửa Menu: QUANLY only (đã đúng, không đổi)
+```
+
+---
+
+## CP1 — Cấu trúc Menu item
+
+| | |
+|---|---|
+| **Hệ cũ** | `posgieo.html:8717-8726, 23773-23798` — field tối giản: name, type (free text), color, priceM, priceL. Không có ảnh, sold-out, recipeId, topping riêng theo món. Chain-trace tự ghi: "KHÔNG ĐỨT — đơn giản có chủ đích" |
+| **Hệ mới** | `catalog/menu.js` → `createMenuItem()` |
+| **Phân loại** | 🟡 **GIỮ, ĐỔI CÁCH LÀM** |
+| **Ghi chú** | Không phải sửa lỗi — cấu trúc mở rộng để đóng CP3/CP9/CP10 (thêm `recipeId` con trỏ tường minh, `archived`/`archivedAt` thay vì `.remove()` cứng, `categoryId` trỏ vào entity thật thay vì free-text `type`). `prices` giữ đúng khái niệm theo size (M/L) như hệ cũ. `recipeId: null` là trạng thái NÓI RA ĐƯỢC ("chưa khai định mức"), khác hẳn hệ cũ chỉ im lặng không tìm thấy key — liên kết trực tiếp với N10 đã chốt ở `NET-SALES-V1.md` (§2.3a: thiếu recipe không được chặn bán, chỉ gắn GAP). |
+
+## CP2 — Category
+
+| | |
+|---|---|
+| **Hệ cũ** | `posgieo.html:19335, 8032` — GAP: category chỉ là `[...new Set(menu.map(m=>m.type))]` tính lại mỗi lần render, không có thứ tự lưu trữ, không phải entity riêng |
+| **Hệ mới** | `catalog/menu.js` → `createCategory()` + `sortCategories()` |
+| **Phân loại** | 🟢 **THÊM MỚI** |
+| **Ghi chú** | `displayOrder` là field BẮT BUỘC khi tạo category (`validate` từ chối nếu thiếu) — "thứ tự phải được LƯU, không suy ra lúc render". Đóng đúng gap: menu không còn đổi thứ tự ngẫu nhiên giữa các lần tải. |
+
+## CP3 — Sold-out / hết món
+
+| | |
+|---|---|
+| **Hệ cũ** | Kiểm tra toàn bộ 2 file — 🔴 ĐỨT CHUỖI NẶNG NHẤT trong domain này: không có field/flag hết hàng nào; `renderMenu()` render mọi món luôn bấm được; trừ kho chỉ chạy SAU khi xác nhận bán, không kiểm tra tồn trước; nhân viên bán được vô hạn 1 món dù nguyên liệu = 0 |
+| **Hệ mới** | `catalog/menu.js` → `computeAvailability()`, gọi qua `read-layer/gateway.js#getMenuAvailability` (query `GetMenuAvailability`) |
+| **Phân loại** | 🟢 **THÊM MỚI** — **ĐÃ NỐI** (VIỆC PHẢI LÀM #1) |
+| **Ghi chú** | Thiết kế đúng: khả dụng TÍNH từ tồn kho thật (tham số truyền vào, hàm thuần — `catalog` không import `fifo-core`), không phải cờ tay nên không có chuyện quên bật/tắt; món chưa khai định mức trả `unknown: true` thay vì đoán còn hàng (không bịa số khi thiếu dữ liệu). **ĐÃ NỐI**: `read-layer/gateway.js` đăng ký query `GetMenuAvailability` (cùng `authority: 'EXECUTE'` với `GetMenu` — POS cần đọc để làm mờ nút, không phải quyền riêng), tự resolve `RecipeVersion` tại thời điểm qua `recipe-cost-btp/recipe.js#resolveRecipeAt` + `toRequirements` (chuẩn hoá `refId`→`itemId` đúng khuôn `computeAvailability` đòi — bug thật đã bắt được và sửa qua test khi viết `tests/unit/read-layer.test.js`) rồi gọi `computeAvailability()`. Tuân đúng §2.3a: đây CHỈ LÀ QUERY ĐỌC, không có nơi nào trong `commands/sales.js#RecordSale` gọi tới hay chặn dựa trên kết quả này — kết quả dùng để làm mờ nút ở UI POS (chưa xây UI, nhưng đường ống đọc đã sẵn), không phải PRECONDITION chặn cứng. `versionRegistry` optional: thiếu thì `components` về `null`, `computeAvailability` tự trả `NO_RECIPE`/`unknown` — không suy đoán bừa. |
+
+## CP4 — togoSettings auto-promotion tại quầy
+
+| | |
+|---|---|
+| **Hệ cũ** | `checkTogoBeforeCheckout()` (`posgieo.html:8474-8511`) — chỉ 2 dạng cố định (mua X tặng Y theo bội số; đạt ngưỡng số ly → giảm %), tham số cấu hình được nhưng LOGIC ĐIỀU KIỆN hard-code trong hàm — chủ quán không tự tạo dạng thứ 3 được. Chain-trace: "KHÔNG ĐỨT cho 2 dạng có sẵn, chỉ không tổng quát hoá được" |
+| **Hệ mới** | `catalog/promotion.js` → `EFFECT.BUY_X_GET_Y` + `EFFECT.PERCENT_OFF`, đánh giá qua `CONDITION` engine tổng quát (`evalCondition()`) thay vì if hard-code |
+| **Phân loại** | 🟡 **GIỮ, ĐỔI CÁCH LÀM** |
+| **Ghi chú** | 2 dạng cũ được giữ nguyên nghĩa nghiệp vụ (`computeEffect()` case `BUY_X_GET_Y`/`PERCENT_OFF` tính đúng công thức cũ: `sets = floor(totalQty/buyQty)`, `amt = subtotal * pct/100` có `maxAmount` cap) nhưng điều kiện giờ là DỮ LIỆU (`CONDITION` enum: QTY_TOTAL/QTY_SIZE/QTY_ITEM/QTY_CATEGORY/AMOUNT/CHANNEL/DAY_OF_WEEK/DATE_RANGE) — chủ quán tự tạo dạng thứ 3+ được mà không cần sửa code, đóng đúng giới hạn chain-trace nêu. |
+
+## CP5 — Bộ máy campaign linh hoạt hơn (advisory-only)
+
+| | |
+|---|---|
+| **Hệ cũ** | `assistConfig.campaigns` (`quanlygieo.html:22442-22485`) cho phép cấu hình điều kiện phong phú NHƯNG `assistProviderCampaigns()` (`posgieo.html:25497-25561`) CHỈ đẩy gợi ý hiển thị, KHÔNG BAO GIỜ tự trừ tiền/thêm quà — 🔴 ĐỨT CHUỖI QUAN TRỌNG: chủ quán dễ hiểu lầm "chiến dịch" sẽ tự chạy |
+| **Hệ mới** | `catalog/promotion.js` → `TIER.AUTO_EXECUTE` / `TIER.ADVISORY`, field `tier` BẮT BUỘC không có mặc định |
+| **Phân loại** | 🟡 **GIỮ, ĐỔI CÁCH LÀM** (khái niệm "campaign điều kiện phong phú" giữ) + 🟢 **THÊM MỚI** (khả năng campaign THẬT SỰ tự thực thi — legacy chưa từng có) |
+| **Ghi chú** | `createPromotion()` từ chối tạo nếu thiếu `tier` hợp lệ, thông báo thẳng lý do: "lẫn 2 tầng này chính là điểm mơ hồ của hệ thống cũ" — không cho phép lặp lại sự mơ hồ bằng cách bắt buộc khai rõ ngay lúc tạo, không phải chỉ ghi chú UI như legacy (`quanlygieo.html:22353`). `evaluate()` tách `applied` (AUTO_EXECUTE, tự trừ) khỏi `advisory` (chỉ hiện cho nhân viên) — không lẫn 2 danh sách. |
+
+## CP6 — Giảm giá thủ công (Đồng giá đã xoá; Discount code 5 kiểu còn sống nhưng ẩn UI)
+
+| | |
+|---|---|
+| **Hệ cũ** | Đồng giá (DG): đã XOÁ HẲN code — đúng `DEAD-FEATURE-PRUNING-V1.md`. Discount code (`posgieo.html:20744-20823, 26439-26443`): 5 kiểu (`item_free/item_upsize/item/percent/order`) code CÒN SỐNG ĐẦY ĐỦ, chỉ ô nhập bị ẩn `display:none` |
+| **Hệ mới** | `catalog/promotion.js` → `EFFECT` enum (`ITEM_FREE, ITEM_UPSIZE, ITEM_DISCOUNT, ORDER_DISCOUNT, PERCENT_OFF, BUY_X_GET_Y, FREE_TOPPING`) |
+| **Phân loại** | 🟡 **GIỮ — chỗ nối sẵn, chưa bắt buộc bật lại** |
+| **Ghi chú** | Đúng như "LUỒNG CHUẨN" #7 chain-trace ghi: giữ nguyên thiết kế nghiệp vụ 5 loại, KHÔNG cần thiết kế lại. `computeEffect()` implement đủ cả `ITEM_DISCOUNT`/`ITEM_FREE`/`ITEM_UPSIZE`/`ORDER_DISCOUNT` cộng thêm `FREE_TOPPING` (đóng gap "free topping" đã thấy ở `NET-SALES-V1.md`). Bật/tắt UI là quyết định vận hành của chủ quán, không phải quyết định kiến trúc — không cần quyết ngay. |
+
+## CP7 — Chồng khuyến mãi
+
+| | |
+|---|---|
+| **Hệ cũ** | `posgieo.html:8491-8507, 20762-20763, 8710-8711` — togoSettings loại trừ nhau theo THỨ TỰ CODE (không field priority); discount-code tự chặn với chính nó và voucher khách nhưng KHÔNG đối chiếu với togoSettings auto-discount (2 biến độc lập). Vô hại hiện tại (discount-code đang ẩn UI) nhưng là lỗ hổng thật nếu bật lại |
+| **Hệ mới** | `catalog/promotion.js` → `evaluate()`, field `priority` + `exclusivityGroup` |
+| **Phân loại** | 🟢 **THÊM MỚI** |
+| **Ghi chú** | MỘT bộ kiểm tra loại trừ DUY NHẤT cho MỌI loại khuyến mãi — `voucher`/`discountCode` của khách truyền vào `extraPromotions` dưới CÙNG hình dạng `Promotion` để chịu chung luật, không còn 2 biến độc lập không đối chiếu nhau như legacy. Sắp theo `priority` giảm dần, tie-break theo `promotionId` để KẾT QUẢ TẤT ĐỊNH (không phụ thuộc thứ tự mảng đầu vào như legacy phụ thuộc thứ tự code). `suppressed[]` nói rõ cái nào bị loại và vì sao — không im lặng bỏ qua. Đóng đúng cả 2 vấn đề legacy: thiếu priority tường minh VÀ thiếu đối chiếu chéo giữa các loại khuyến mãi khác nhau. |
+
+## CP8 — Giá tại thời điểm bán (snapshot)
+
+| | |
+|---|---|
+| **Hệ cũ** | `posgieo.html:20028-20032, 21858, 21870-21907` — giá snapshot vào cart NGAY lúc thêm món, sao y nguyên vào order đã lưu; báo cáo đọc thẳng `o.itemsArray[].price`, không join lại giá menu hiện tại. Chain-trace: "ĐÂY LÀ PHẦN LÀM ĐÚNG... KHÔNG ĐỨT... mẫu ĐÚNG cần giữ" |
+| **Hệ mới** | `catalog/menu.js` → `snapshotPrice()` |
+| **Phân loại** | 🟡 **GIỮ NGUYÊN** (không đổi cách làm, chỉ đóng gói thành hàm tường minh) |
+| **Ghi chú** | `commands/sales.js` dùng đúng mẫu này (comment dòng 61: "Mỗi dòng mang GIÁ ĐÃ SNAPSHOT — mẫu ĐÚNG"). Đây là domain DUY NHẤT trong toàn NET-series mà chain-trace tự nhận là mẫu tham chiếu để giải thích TẠI SAO Recipe/Payroll/KPI-target/Packaging cần sửa theo hướng versioned — không cần thay đổi gì thêm ở đây. |
+
+## CP9 — Liên kết Recipe
+
+| | |
+|---|---|
+| **Hệ cũ** | `posgieo.html:17680, 17910-17912` — GAP kiến trúc: không có field liên kết tường minh, chỉ khớp key ngầm `'togo:' + menuItemId`. Không có thao tác "đổi món sang trỏ recipe khác" vì không có con trỏ để đổi |
+| **Hệ mới** | `catalog/menu.js` → `recipeId` (field) + `linkRecipe()` |
+| **Phân loại** | 🟡 **GIỮ, ĐỔI CÁCH LÀM** |
+| **Ghi chú** | Con trỏ tường minh thay khớp-key-ngầm — đây là "điểm khác biệt quan trọng nhất của domain này" theo chính header file `menu.js`. `linkRecipe()` là thao tác độc lập mà legacy không có. Đóng trực tiếp CP10 (mồ côi dữ liệu) từ GỐC THIẾT KẾ, không cần cơ chế dọn dẹp bù đắp — vì đổi tên không còn cần xoá-tạo-lại nữa (xem CP10). |
+
+## CP10 — Xoá/đổi tên món (rủi ro mồ côi dữ liệu)
+
+| | |
+|---|---|
+| **Hệ cũ** | `posgieo.html:23800-23810` — xoá món là `.remove()` cứng, không soft-delete, không cascade. 🔴 ĐỨT CHUỖI: xoá-rồi-tạo-lại (cách duy nhất "đổi tên" nếu không sửa tại chỗ) sinh Firebase key MỚI → recipe cũ mồ côi vĩnh viễn; tham chiếu itemId trong togoSettings giftMenu/freeTopping và campaign conditions cũng không được dọn tự động |
+| **Hệ mới** | `catalog/menu.js` → `rename()` (sửa field, không xoá-tạo-lại) + `archive()`/`restore()` (soft-delete) |
+| **Phân loại** | 🟡 **GIỮ, ĐỔI CÁCH LÀM** |
+| **Ghi chú** | `rename()` chỉ sửa `name`, không tạo item mới → vấn đề mồ côi "biến mất từ gốc thiết kế", đúng như "LUỒNG CHUẨN" #1 chain-trace yêu cầu. `archive()` thay `.remove()` cứng: mọi tham chiếu (khuyến mãi, quà tặng, điều kiện campaign) vẫn resolve được thay vì trỏ vào hư không — comment file tự xác nhận đóng đúng gap §4.1 (2 app cùng ghi thẳng RTDB) bằng việc archive không xoá dữ liệu tham chiếu. |
+
+## CP11 — Migration UI Menu/Promotion POS→QUANLY
+
+| | |
+|---|---|
+| **Hệ cũ** | `posgieo.html:982,987,2311; quanlygieo.html:1439-1441,1593-1595` — sidebar POS ẩn hẳn "Quản lý Menu"/"Khuyến mãi", comment ghi rõ lý do đã chuyển hẳn sang QUANLY. Chain-trace: "KHÔNG ĐỨT, khớp hoàn toàn phân quyền đã định" |
+| **Hệ mới** | `commands/catalog.js` → `CreateMenuItem`/`RenameMenuItem`/`LinkRecipeToMenuItem`/`ArchiveMenuItem`/`RestoreMenuItem`/`CreateCategory`/`CreatePromotion` |
+| **Phân loại** | 🟢 **THÊM MỚI** |
+| **Ghi chú** | Đóng bằng cách wrap đúng 6 hàm ghi của `catalog/menu.js` + `createPromotion` của `catalog/promotion.js` thành pipeline command, mỗi command `authority:'MASTER_CONFIGURE'` + `sources:['QUANLY']` — Ý ĐỊNH ghi trong comment của `menu.js` giờ có code THẬT SỰ chặn (test xác nhận `POS_OPERATOR`/`QUANLY_OPERATOR` gọi `CreateMenuItem`/`RenameMenuItem` đều bị `FORBIDDEN`, chỉ `QUANLY_ADMIN`/`SYSTEM_ADMIN` có `MASTER_CONFIGURE` mới qua được). `menuItemId`/`categoryId`/`promotionId` do CALLER cấp trước (không phải command tự sinh) nên double-tap tạo mới là no-op; lệnh SỬA (rename/linkRecipe/archive/restore) cần thêm `editRef` tường minh vì — khác RM3's `correctRef` — idempotency ở đây không thể suy chỉ từ menuItemId (2 lần sửa THẬT trên cùng 1 món phải là 2 operationId khác nhau). **CỐ Ý KHÔNG gộp `catalog/packaging.js` (`publishPackaging`) vào cùng module**: nó ghi qua cơ chế `compaction/versioned-input` registry (append-only theo effectiveFrom) khác hẳn sửa-tại-chỗ của menu/promotion, và CHƯA có domain nào trong `commands/` từng wrap một VersionedInput-publish thành command — đây là gap cắt ngang cả 7 loại versioned input (recipe/cost/packaging/prepYield/payTerms/kpiTarget/config), không phải riêng của catalog, nên để lại thành mục việc-phải-làm riêng thay vì lẫn 2 quyết định kiến trúc vào 1 PR. |
+
+---
+
+## Liên kết chéo domain
+
+| Domain | Điểm nối |
+|---|---|
+| **Sales/POS** | CP1/CP8/CP9 dùng trực tiếp trong `commands/sales.js` (`snapshotPrice`, `packaging`); CP3's `recipeId: null` liên kết thẳng N10 đã chốt ở `NET-SALES-V1.md` (§2.3a); CP4-CP7 **ĐÃ NỐI**: `buildBill()` gọi thẳng `catalog/promotion.evaluate()`, tự áp 4/7 effect type không đổi hình dạng giỏ (`PERCENT_OFF`/`ORDER_DISCOUNT`/`ITEM_DISCOUNT`/`ITEM_FREE`) thẳng vào `discountTotal`, 3 effect còn lại (`BUY_X_GET_Y`/`FREE_TOPPING`/`ITEM_UPSIZE`, đổi hình dạng giỏ) trả về `promotionsUnapplied` cho caller tự dựng lại giỏ — không âm thầm bỏ qua (§2.3a) |
+| **Raw Material** | CP9 (con trỏ Recipe) tương tác trực tiếp với recipe versioning đã xác nhận ở BTP (`resolveRecipeAt`) — cùng `compaction/versioned-input` |
+| **BTP** | `catalog/packaging.js` cũng dùng `VersionedInput` — "instance #3 của lớp lỗi đã xác nhận 7 lần" (cùng họ với BTP yield, Recipe, Payroll) |
+
+---
+
+## TỔNG KẾT PHÂN LOẠI
+
+- 🟢 THÊM MỚI: **CP2, CP3 (logic đúng nhưng chưa gọi), CP5 (phần AUTO_EXECUTE thật), CP7, CP11**
+- 🟡 GIỮ, ĐỔI CÁCH LÀM: **CP1, CP4, CP5 (phần khái niệm campaign), CP6, CP9, CP10**
+- 🟡 GIỮ NGUYÊN (mẫu đúng, không đổi): **CP8**
+
+## VIỆC PHẢI LÀM (tích lũy, không chặn)
+
+1. ~~`catalog/promotion.evaluate()` và `catalog/menu.computeAvailability()` chưa có nơi gọi nào~~ **ĐÃ XONG** — `promotion.evaluate()` nối vào `commands/sales.js#buildBill()` (xem CP7 và liên kết chéo Sales/POS ở trên); `computeAvailability()` nối thành query `GetMenuAvailability` ở `read-layer/gateway.js` (xem CP3 ở trên). Cả hai tuân đúng §2.3a: không hàm nào thêm PRECONDITION mới chặn `RecordSale` — kết quả chỉ để tính `discountTotal`/làm mờ nút UI. 12 test mới (`tests/unit/sales-cogs.test.js` describe `buildBill promotion wiring`, `tests/unit/read-layer.test.js` describe `GetMenuAvailability`) xác nhận cả tự-áp/không-tự-áp/advisory/suppressed lẫn ARCHIVED/NO_RECIPE/STOCK_UNKNOWN/OUT_OF_STOCK — viết test còn bắt được 1 bug thật (gateway truyền thẳng component thô `refId` thay vì chuẩn hoá qua `toRequirements()` thành `itemId`, khiến mọi nguyên liệu luôn báo `STOCK_UNKNOWN`), đã sửa.
+2. ~~Chưa có `commands/catalog.js` (CreateMenuItem/ArchiveMenuItem/LinkRecipe/CreatePromotion...) để enforce `sources:['QUANLY']` như comment `menu.js` đã hứa~~ **ĐÃ XONG** — `commands/catalog.js` (7 command), đăng ký ở `bootstrap/runtime.js`, 2 domainRecord type mới (`menuItem`/`category`/`promotion`) khai path ở `persistence-firebase/canonical-paths.js`+`atomic-commit.js`, 13 test (`tests/unit/catalog-commands.test.js`) xác nhận cả idempotency lẫn chặn quyền POS/QUANLY_OPERATOR.
+3. ~~**MỚI phát hiện khi đóng CP11**: `catalog/packaging.js#publishPackaging()` (và tương tự cho recipe/cost/prepYield/payTerms/kpiTarget/config — cả 7 loại `compaction/versioned-input`) CHƯA có pipeline command nào wrap việc PUBLISH một version mới~~ **ĐÃ XONG** — `commands/versioning.js` (7 command: `PublishRecipeVersion`/`PublishCostBasis`/`PublishPackaging`/`PublishYield`/`PublishPayTerms`/`PublishConfig`/`PublishIceCogs`), đăng ký ở `bootstrap/runtime.js`, idempotency key `(kind, subjectId, storeId, effectiveFrom)` đúng nguồn `ctx.storeId` (không tin `input.storeId` từ caller — sửa 1 bug thật lúc viết test: `operationId` ban đầu đọc nhầm `input.storeId` luôn `undefined`), `atomic-commit.js` đã có sẵn map `versionedInput` entry (VIỆC PHẢI LÀM cũ của NET-REPORTING-V1.md, đóng chung một lượt). 21 test (`tests/unit/versioning-commands.test.js`) xác nhận cả 7 command: publish hợp lệ, double-tap idempotent, POS bị chặn, `PRECONDITION` khi `effectiveFrom` lùi, và các validation riêng từng domain (ví dụ `PublishIceCogs` bắt buộc `itemId`/`qtyPerCup` khi `enabled`).
+4. ~~Khi kích hoạt discount-code (CP6) trở lại: đảm bảo nó đi qua ĐÚNG `catalog/promotion.evaluate()` (dưới hình dạng `extraPromotions`), không tạo đường tính riêng~~ **ĐÃ XONG** — `spec.extraPromotions` của `buildBill()` đi thẳng vào `promotionLib.evaluate({ promotions, extraPromotions, ... })` cùng lời gọi với `spec.promotions`, chịu chung MỘT bộ kiểm tra loại trừ (CP7) — không tồn tại đường tính riêng cho mã giảm giá của khách. Test `extraPromotions (mã giảm giá khách) cũng tự áp và chịu CHUNG luật loại trừ với khuyến mãi tự động` (`tests/unit/sales-cogs.test.js`) xác nhận trực tiếp: mã giảm giá cùng `exclusivityGroup` với khuyến mãi tự động bị loại đúng theo `priority`, y hệt cách 2 khuyến mãi tự động loại nhau.
