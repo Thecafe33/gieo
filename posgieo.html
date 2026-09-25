@@ -11436,6 +11436,34 @@ let prepReconGate = null, prepReconForm = null;
 function prepReconIsCountable(item) {
   return ['cái','miếng'].includes(String(item&&item.unit||'').trim().toLowerCase());
 }
+// Đếm NL "cái" không bắt quét: nhân viên chỉ nhập số cái CÒN NGUYÊN và số cái
+// ĐANG DÙNG DỞ (đếm nguyên, không ước 0,5/0,75). Phần lẻ của cái dùng dở lấy theo
+// sổ/định mức (ref = số dự kiến còn lại của mã): 24,5 dự kiến + đếm 24 nguyên, 1 dở
+// = 24,5. Sổ không có phần lẻ mà vẫn có cái dở (hoặc dở hơn 1 cái) thì mỗi cái dở
+// ngoài phần lẻ đó tính 0,5 — lệch sẽ hiện ra ở bước giải trình như bình thường.
+function prepCountPartsToQty(whole,partial,ref) {
+  const w=Number(whole),pc=Number(partial);
+  if(!Number.isInteger(w)||w<0||!Number.isInteger(pc)||pc<0)return NaN;
+  if(!pc)return w;
+  const r=Math.max(0,Number(ref)||0),f=round2(r-Math.floor(r+0.005));
+  const first=f>0.005&&f<0.995?f:0.5;
+  return round2(w+first+(pc-1)*0.5);
+}
+function prepCountInputsHtml(idPrefix,v,onEvent,handler) {
+  const st='width:100%;min-width:0;box-sizing:border-box;padding:11px;border:1.5px solid #0062AD55;border-radius:12px';
+  return `<div style="display:flex;gap:6px;flex:1;min-width:0">
+    <label style="flex:1;min-width:0;font-size:11px;color:#0062AD;font-weight:700">Còn nguyên
+      <input id="${idPrefix}_w" type="number" min="0" step="1" inputmode="numeric" value="${Number.isInteger(v?.whole)?v.whole:''}" placeholder="0" ${onEvent}="${handler}" style="${st}"></label>
+    <label style="flex:1;min-width:0;font-size:11px;color:#0062AD;font-weight:700">Đang dùng dở
+      <input id="${idPrefix}_p" type="number" min="0" step="1" inputmode="numeric" value="${Number.isInteger(v?.partial)?v.partial:''}" placeholder="0" ${onEvent}="${handler}" style="${st}"></label>
+  </div>`;
+}
+function prepCountReadInputs(idPrefix) {
+  const w=document.getElementById(idPrefix+'_w'),pc=document.getElementById(idPrefix+'_p');
+  const wv=w?w.value:'',pv=pc?pc.value:'';
+  if(wv===''&&pv==='')return null;
+  return {whole:wv===''?0:Number(wv),partial:pv===''?0:Number(pv)};
+}
 // Chỉ chặn số lẻ với NL bắt quét mã (isAtomicUnitItem: 1 tem = 1 cái, kiểm soát
 // tồn theo từng cái). NL đơn vị "cái" nhưng kiểm kê theo hộp/thùng (1 tem gộp nhiều
 // cái) vẫn được nấu mẻ lẻ — tồn trừ theo số thập phân như NL cân.
@@ -11539,11 +11567,12 @@ function renderPrepReconPreflight() {
     ${st.targets.map((x,i)=>`<div style="padding:12px 0;border-bottom:1px solid #0062AD44;display:flex;align-items:center;gap:10px">
       <div style="flex:1"><b>${escHtmlPos(x.itemName)}</b><div style="font-size:12px">${escHtmlPos(x.code)} · sổ ${fmtPrepQty(x.unitBase)} ${escHtmlPos(x.unit)} · cần ${fmtPrepQty(x.expected)}</div>
       ${Number.isFinite(st.values[i]?.qty)?`<b style="color:#0062AD">Đã ghi: ${fmtPrepQty(st.values[i].qty)} ${escHtmlPos(x.unit)}</b>`:''}
+      ${prepReconIsCountable(KHO_ITEMS_CACHE.find(it=>it.id===x.itemId))?`<b id="prepReconPre${i}_q" style="display:block;color:#0062AD;font-size:12px">${Number.isFinite(st.values[i]?.qty)?'= '+fmtPrepQty(st.values[i].qty)+' '+escHtmlPos(x.unit):''}</b>`:''}
       ${Number.isFinite(st.values[i]?.qty)&&Math.abs(st.values[i].qty-x.unitBase)>0.015?`<div style="font-size:12px;color:#0062AD">Lệch mốc ${fmtPrepQty(round2(st.values[i].qty-x.unitBase))} ${escHtmlPos(x.unit)} · người bắt đầu mẻ chịu trách nhiệm giải trình</div>
         <input placeholder="Lý do chênh lệch" value="${escHtmlPos(st.values[i].reason||'')}" oninput="prepReconPreReason(${i},this.value)" style="width:100%;box-sizing:border-box;padding:9px;margin-top:6px;border:1px solid #0062AD;border-radius:10px">`:''}
       ${x.multiOpen?`<div style="font-size:12px;color:#0062AD">${st.values[i]?.verifiedUnitId===x.id?'Đã quét đúng tem':'Quét đúng tem '+escHtmlPos(x.code)+' trước khi cân/đếm'}</div>`:''}</div>
       ${prepReconIsCountable(KHO_ITEMS_CACHE.find(it=>it.id===x.itemId))
-        ? `${x.multiOpen?`<button onclick="prepReconPreScan(${i})" style="padding:10px;background:#fff;color:#0062AD;border:1px solid #0062AD;border-radius:10px">Quét tem</button>`:''}<input type="number" min="0" step="1" inputmode="numeric" value="${st.values[i]?.qty??''}" placeholder="Đếm" oninput="prepReconPreCount(${i},this.value)" style="width:90px;padding:10px;border:1px solid #0062AD;border-radius:10px">`
+        ? `${x.multiOpen?`<button onclick="prepReconPreScan(${i})" style="padding:10px;background:#fff;color:#0062AD;border:1px solid #0062AD;border-radius:10px">Quét tem</button>`:''}${prepCountInputsHtml('prepReconPre'+i,st.values[i],'oninput','prepReconPreCount('+i+')')}`
         : `<button onclick="prepReconPreWeigh(${i})" style="padding:10px;background:#0062AD;color:#fff;border:0;border-radius:10px">Cân</button>`}
     </div>`).join('')}</div>
     <button id="prepReconPreContinue" onclick="prepReconPreflightDone()" ${prepReconGateReady(st)?'':'disabled'} style="width:100%;padding:14px;border:0;border-radius:12px;background:#0062AD;color:#fff">Tiếp tục</button>
@@ -11588,11 +11617,14 @@ async function prepReconPreWeigh(i) {
     reconcileMode:true,allowZero:true,onDone:(qty,lines)=>{prepReconGate.values[i]={qty,lines,
       reason:prepReconGate.values[i]?.reason||'',verifiedUnitId:x.multiOpen?x.id:''};renderPrepReconPreflight();}});
 }
-function prepReconPreCount(i,value) {
+function prepReconPreCount(i) {
   if(!prepReconGate)return;
-  if(value!==''&&Number.isInteger(Number(value))&&Number(value)>=0)
-    prepReconGate.values[i]={...(prepReconGate.values[i]||{}),qty:Number(value),manual:true};
-  else prepReconGate.values[i]={...(prepReconGate.values[i]||{}),qty:NaN};
+  const x=prepReconGate.targets[i],c=prepCountReadInputs('prepReconPre'+i);
+  const qty=c?prepCountPartsToQty(c.whole,c.partial,x&&x.unitBase):NaN;
+  prepReconGate.values[i]={...(prepReconGate.values[i]||{}),qty,manual:true,
+    whole:c?c.whole:undefined,partial:c?c.partial:undefined};
+  const hint=document.getElementById('prepReconPre'+i+'_q');
+  if(hint)hint.textContent=Number.isFinite(qty)?'= '+fmtPrepQty(qty)+' '+(x&&x.unit||''):'';
   const btn=document.getElementById('prepReconPreContinue');
   if(btn)btn.disabled=!prepReconGateReady(prepReconGate);
 }
@@ -11902,6 +11934,12 @@ async function openPrepReconForm(batchId,itemId) {
           finishedUnits.set(u.id,data);
       }));
     prepReconForm.finishedUnits=finishedUnits;
+    // Số dự kiến còn lại của từng mã sau mẻ (trừ định mức lần lượt theo thứ tự
+    // mã) — làm mốc suy phần lẻ khi nhân viên đếm "cái đang dùng dở".
+    prepReconForm.countRefs={};
+    {let left=Number(row.expected)||0;
+      for(const u of row.units){const base=Number(u.baseline)||0,take=Math.min(Math.max(0,left),Math.max(0,base));
+        prepReconForm.countRefs[u.id]=round2(base-take);left-=take;}}
     const staleUnits=row.units.filter(u=>{
       if(u.id==='__aggregate')return false;
       const current=live.find(x=>x.id===u.id);
@@ -11941,7 +11979,7 @@ async function openPrepReconForm(batchId,itemId) {
           </div>
           ${done?`<div style="text-align:center;background:#fff;border:1.5px solid #F0EAD9;border-radius:14px;padding:12px;margin-top:12px"><b style="font-size:30px;color:#1f1f1f">${fmtPrepQty(v?.qty??0)}</b> <span style="color:#999">${escHtmlPos(row.unit)}</span></div>`:''}
           ${!finished&&row.status==='pending'?`<div style="display:flex;gap:8px;margin-top:12px">
-            ${countable?`<input type="number" min="0" step="1" inputmode="numeric" placeholder="Số còn lại" value="${Number.isFinite(v?.qty)?v.qty:''}" onchange="prepReconCount('${u.id}',this.value)" style="width:50%;min-width:0;padding:13px;border:1.5px solid #F0EAD9;border-radius:99px">`
+            ${countable?prepCountInputsHtml('prepReconCnt_'+u.id,v,'onchange',"prepReconCount('"+u.id+"')")
               :`<button onclick="prepReconWeigh('${u.id}')" style="flex:1;padding:14px 8px;border-radius:99px;background:${done?'#fff':'#1f1f1f'};color:${done?'#1f1f1f':'#fff'};border:1.5px solid #1f1f1f;font-weight:800">${done?'Cân lại':'Cân trừ bì'}</button>`}
             ${multiCode&&countable?`<button onclick="prepReconVerifyCode('${u.id}')" style="flex:1;border-radius:99px;border:1.5px solid ${palette};background:#fff;color:${palette};font-weight:800">Quét tem</button>`:''}
           </div>`:''}
@@ -12070,10 +12108,12 @@ async function prepReconVerifyCode(unitId) {
     await openPrepReconForm(st.batchId,st.itemId);
   } catch(err){toast('❌ '+(err.message||err));}
 }
-function prepReconCount(unitId,value) {
+function prepReconCount(unitId) {
   const st=prepReconForm;if(!st)return;
-  const qty=value!==''&&Number.isInteger(Number(value))&&Number(value)>=0?Number(value):NaN;
-  st.values[unitId]={...(st.values[unitId]||{}),qty,manual:true,lines:[]};
+  const c=prepCountReadInputs('prepReconCnt_'+unitId);
+  const qty=c?prepCountPartsToQty(c.whole,c.partial,st.countRefs&&st.countRefs[unitId]):NaN;
+  st.values[unitId]={...(st.values[unitId]||{}),qty,manual:true,lines:[],
+    whole:c?c.whole:undefined,partial:c?c.partial:undefined};
   openPrepReconForm(st.batchId,st.itemId);
 }
 async function prepReconWeigh(unitId) {
@@ -12169,8 +12209,9 @@ async function prepReconPostSave() {
           && row.units.some(u=>!finished.has(u.id)&&st.values[u.id].verifiedUnitId!==u.id))
         throw new Error('Có nhiều mã cùng mở — quét đúng tem từng mã trước khi cân/đếm');
       if(prepReconIsCountable(KHO_ITEMS_CACHE.find(x=>x.id===st.itemId))
-          && row.units.some(u=>!Number.isInteger(st.values[u.id].qty)))
-        throw new Error('Nguyên liệu đếm được phải nhập số nguyên');
+          && row.units.some(u=>{const v=st.values[u.id];
+            return v.whole!==undefined&&!(Number.isInteger(v.whole)&&Number.isInteger(v.partial));}))
+        throw new Error('Số cái còn nguyên và đang dùng dở phải là số nguyên');
       const countable=prepReconIsCountable(KHO_ITEMS_CACHE.find(x=>x.id===st.itemId));
       if(!countable && row.units.some(u=>!finished.has(u.id)
           && (st.values[u.id].manual||!st.values[u.id].lines?.length)))
