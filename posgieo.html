@@ -11436,14 +11436,16 @@ let prepReconGate = null, prepReconForm = null;
 function prepReconIsCountable(item) {
   return ['cái','miếng'].includes(String(item&&item.unit||'').trim().toLowerCase());
 }
+// Chỉ chặn số lẻ với NL bắt quét mã (isAtomicUnitItem: 1 tem = 1 cái, kiểm soát
+// tồn theo từng cái). NL đơn vị "cái" nhưng kiểm kê theo hộp/thùng (1 tem gộp nhiều
+// cái) vẫn được nấu mẻ lẻ — tồn trừ theo số thập phân như NL cân.
 function prepCountQuantityError(p,ratio) {
   const total=new Map();
   (p.batchInputs||[]).filter(r=>r.itemId&&Number(r.qty)>0).forEach(r=>
     total.set(r.itemId,(total.get(r.itemId)||0)+Number(r.qty)*ratio));
   for(const [id,qty] of total){
     const item=KHO_ITEMS_CACHE.find(x=>x.id===id);
-    if(item&&item.stockManaged!==false&&prepReconIsCountable(item)
-        && !Number.isInteger(round2(qty)))
+    if(isAtomicUnitItem(item) && !Number.isInteger(round2(qty)))
       return 'Định mức '+item.name+' × tỷ lệ mẻ ra '+round2(qty)+' cái lẻ — chỉnh tỷ lệ hoặc công thức';
   }
   return '';
