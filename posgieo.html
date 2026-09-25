@@ -11279,7 +11279,8 @@ function renderPrepBatchForm() {
         // khi thiếu; giờ chọn được 4 mẻ thì rất dễ vượt tồn — mà kho vẫn trừ tuốt
         // xuống âm, không ai hay cho tới lúc kiểm kê.
         const it = KHO_ITEMS_CACHE.find(x => x.id === row.itemId);
-        const ton = it ? (Number(it.currentStock) || 0) : null;
+        // NL không quản lý tồn (nước lọc, đá lấy từ máy) không có tồn kho → không báo thiếu.
+        const ton = it && it.stockManaged !== false ? (Number(it.currentStock) || 0) : null;
         const thieu = (ton !== null) && exact > ton;
         return `
         <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px 14px;margin-top:8px;background:${thieu ? '#fef2f2' : '#FFFCF0'};border:1.5px solid ${thieu ? '#fca5a5' : '#f0ead9'};border-radius:16px;">
@@ -11290,7 +11291,7 @@ function renderPrepBatchForm() {
       ${(() => {
         const thieuList = (p.batchInputs || []).filter(row => {
           const it = KHO_ITEMS_CACHE.find(x => x.id === row.itemId);
-          return it && (Number(row.qty) || 0) * r > (Number(it.currentStock) || 0);
+          return it && it.stockManaged !== false && (Number(row.qty) || 0) * r > (Number(it.currentStock) || 0);
         });
         return thieuList.length
           ? `<div style="margin-top:10px;padding:10px 12px;background:#fdf2f2;border:1.5px solid #f5c2c2;border-radius:10px;font-size:12px;color:#c0392b;font-weight:700;">Kho không đủ cho ${fmtPrepQty(r)} mẻ (${thieuList.length} nguyên liệu thiếu). Vẫn nấu được nhưng tồn kho sẽ âm — nên giảm số mẻ hoặc nhập hàng trước.</div>`
