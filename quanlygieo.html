@@ -5079,8 +5079,10 @@ function renderKhoAllItemsBody(){
       tag = c.labelPrinted===false ? `<span class="tier tier-amber">Chưa dán</span>` : `<span class="tier tier-blue">Chưa mở</span>`;
       if(tab.k === 'unlabeled') tone = 'warn';
     } else if(tab.k === 'finished'){
-      meta = `Báo hết ${dt(c.finishedAt)} · ${e(c.finishedBy||'—')}`;
-      tag = `<span class="tier tier-red">Đã báo hết</span>`;
+      const huy = c.finishReason === 'discarded';
+      meta = `${huy?'Hủy':'Báo hết'} ${dt(c.finishedAt)} · ${e(c.finishedBy||'—')}`;
+      tag = `<span class="tier tier-red">Đã báo hết${huy?' · Hủy':''}</span>`;
+      if(huy) sub = `Hủy ${fmtNum(c.wasteBase,2)} ${donVi} · Lý do: ${e(c.discardReason||'—')}${c.discardNote?' · '+e(c.discardNote):''}`;
     } else {
       const ex = ctnExpiryText(c);
       meta = `Mở ${dt(c.openedAt)}${c.openedBy?' · '+e(c.openedBy):''} · còn <b>${fmtNum(c.unitBase,2)} ${donVi}</b>`;
@@ -5355,12 +5357,14 @@ function _ctnDetailRender(box, c, recv){
     events.push({ at: e.at, label: 'Quản lý sửa tồn', detail: fmtNum(e.before,2)+' → '+fmtNum(e.after,2)+' '+(c.unit||'')+(e.note?(' · '+e.note):'') });
   });
   if(c.finishedAt) events.push({
-    at: c.finishedAt, label: 'Báo hết',
-    detail: (c.finishedBy?('bởi '+c.finishedBy):'') + (Number(c.wasteBase)>0 ? (' · còn thừa '+fmtNum(c.wasteBase,0)+' '+(c.unit||'')) : '')
+    at: c.finishedAt, label: c.finishReason==='discarded'?'Hủy · đã báo hết':'Báo hết',
+    detail: c.finishReason==='discarded'
+      ? [c.finishedBy&&('bởi '+c.finishedBy), 'hủy '+fmtNum(c.wasteBase,2)+' '+(c.unit||''), c.discardReason, c.discardNote].filter(Boolean).join(' · ')
+      : (c.finishedBy?('bởi '+c.finishedBy):'') + (Number(c.wasteBase)>0 ? (' · còn thừa '+fmtNum(c.wasteBase,0)+' '+(c.unit||'')) : '')
   });
   events.sort((a,b)=> String(a.at||'').localeCompare(String(b.at||'')));
 
-  const noUsageWarning = !(c.usageEvents||[]).length && c.status !== 'sealed'
+  const noUsageWarning = !(c.usageEvents||[]).length && c.status !== 'sealed' && c.finishReason !== 'discarded'
     ? `<div class="small-note" style="margin-top:10px;color:var(--warn)">Tem này chưa có nhật ký "trừ" nào dù đã ${c.status==='finished'?'báo hết':'mở'} — hoặc được tạo/tiêu thụ TRƯỚC khi có tính năng ghi nhật ký, hoặc đã bị trừ qua một đường không đi qua Unit Engine (kiểm tra lại đối chiếu bằng kiểm kê).</div>`
     : '';
 
@@ -5368,9 +5372,9 @@ function _ctnDetailRender(box, c, recv){
     <div class="row"><span class="rl">Mã tem</span><span class="rv"><b>${escapeHtmlAttr(c.code||'')}</b></span></div>
     <div class="row"><span class="rl">Nguyên liệu</span><span class="rv">${escapeHtmlAttr(c.itemName||'')}</span></div>
     <div class="row"><span class="rl">Dung tích khai báo</span><span class="rv">${fmtNum(c.baseQty,2)} ${escapeHtmlAttr(c.unit||'')}</span></div>
-    <div class="row"><span class="rl">Còn lại</span><span class="rv"><b style="color:${Number(c.unitBase)<0?'var(--bad)':'var(--td)'}">${fmtNum(c.unitBase,2)} ${escapeHtmlAttr(c.unit||'')}</b></span></div>
+    <div class="row"><span class="rl">${c.finishReason==='discarded'?'Lượng đã hủy':'Còn lại'}</span><span class="rv"><b style="color:${Number(c.unitBase)<0?'var(--bad)':'var(--td)'}">${fmtNum(c.finishReason==='discarded'?c.wasteBase:c.unitBase,2)} ${escapeHtmlAttr(c.unit||'')}</b></span></div>
     ${c.status==='open' ? `<button class="btn" style="width:100%;margin:10px 0 6px" onclick="ctnStartAdjust('${c.id}')">Sửa tồn mã này</button>` : ''}
-    <div class="row"><span class="rl">Trạng thái</span><span class="rv">${escapeHtmlAttr(c.status||'')}</span></div>
+    <div class="row"><span class="rl">Trạng thái</span><span class="rv">${c.finishReason==='discarded'?'Đã báo hết · Hủy':escapeHtmlAttr(c.status||'')}</span></div>
     ${recv ? `<div class="row"><span class="rl">Phiếu nhận</span><span class="rv">${escapeHtmlAttr(recv.supplier||'(không rõ NCC)')}${recv.poId?' · PO '+escapeHtmlAttr(recv.poId):''}</span></div>`
       : (c.receiveRefId ? `<div class="small-note" style="margin-top:6px">Không đọc được phiếu nhận gốc (id: ${escapeHtmlAttr(c.receiveRefId)}) — có thể phiếu đã bị xoá.</div>` : '<div class="small-note" style="margin-top:6px">Tem không có phiếu nhận gốc — nhập trước khi bật liên kết này.</div>')}
     <div class="sec-title" style="margin-top:14px">Dòng thời gian</div>

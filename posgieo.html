@@ -3845,7 +3845,10 @@ async function unitEngineAllocateConsumption(itemId, qtyUsed, coll, ref) {
       // khóa và trừ FIFO, kể cả khi Firestore/RT chạy ở hai hệ thống khác nhau.
       if(coll===STOCK_CONTAINERS_COLL && current.__prepLock
           && current.__prepLock.batchId!==(ref&&ref.id)){prepLocked=true;return;}
-      const units = Object.keys(current).filter(id=>id!=='__prepLock').map(id => ({ id, ...current[id] }));
+      // Tem đang báo hủy giữ một mốc RT tạm để retry an toàn. Nó không còn được
+      // bán tiếp hoặc nhận nợ FIFO trong lúc giao dịch WASTE hoàn tất.
+      const units = Object.keys(current).filter(id=>id!=='__prepLock' && !current[id]?.discardPending)
+        .map(id => ({ id, ...current[id] }));
       meta = {};
       units.forEach(u => { meta[u.id] = { code: u.code || '', itemName: u.itemName || '', unit: u.unit || '' }; });
       const { allocations, updates } = _ueComputeAllocation(units, used);
@@ -4011,7 +4014,7 @@ async function _ueRecomputeCurrentStock(itemId, coll) {
     let openTotal = 0;
     Object.keys(rt).filter(k=>k!=='__prepLock').forEach(k => {
       if (sealedById[k] !== undefined) sealedTotal -= sealedById[k];
-      openTotal += Number(rt[k].unitBase) || 0;
+      if (!rt[k]?.discardPending) openTotal += Number(rt[k].unitBase) || 0;
     });
     // [BUG "Firestore open nhưng RT fail → mất Unit khi recompute" — FIX] unitEngineOnOpen() có
     // thể fail SAU KHI Firestore đã chuyển status sealed→open (hoặc BTP đã 'active') — hàng vật
@@ -4128,7 +4131,7 @@ async function unitEngineReverseAllocations(itemId, allocations, coll) {
         const uid = a.containerId || a.unitId;
         const qty = Number(a.qty) || 0;
         if (!qty) continue;
-        if (map[uid]) {
+        if (map[uid] && !map[uid].discardPending) {
           map[uid].unitBase = (Number(map[uid].unitBase) || 0) + qty;
           netByUnit[uid] = (netByUnit[uid] || 0) + qty;
           finalByUnit[uid] = map[uid].unitBase;
@@ -4138,7 +4141,7 @@ async function unitEngineReverseAllocations(itemId, allocations, coll) {
         // Tem gốc không còn trong RT (đã báo hết/đóng) — hoàn vào tem đang mở CŨ NHẤT hiện
         // tại theo đúng thứ tự FIFO, không FIFO lại từ đầu, không suy luận lại (quyết định
         // của chủ quán khi bàn thiết kế).
-        const stillOpen = Object.keys(map).filter(id=>id!=='__prepLock')
+        const stillOpen = Object.keys(map).filter(id=>id!=='__prepLock' && !map[id]?.discardPending)
           .sort((x, y) => (map[x].openedAt || 0) - (map[y].openedAt || 0));
         if (!stillOpen.length) {
           // KHÔNG cộng vào appliedQty — phần này không nằm trong unit nào cả, caller phải tự
@@ -4878,7 +4881,8 @@ async function scanToOpenContainer() {
   // "Quét mã hàng tìm lại được" ở Kiểm kê mới đúng cách phục hồi (cộng lại tồn kho).
   if (c.status === 'lost')     { toast('⚠️ ' + c.code + ' đang ở trạng thái "báo mất" — dùng nút "Quét mã hàng tìm lại được" ở Kiểm kê để phục hồi'); return; }
   if (c.status === 'open')     { toast('ℹ️ ' + c.code + ' đang mở rồi — muốn báo hết thì bấm "Báo hết"'); return; }
-  if (c.status === 'finished') { toast('ℹ️ ' + c.code + ' đã báo hết trước đó'); return; }
+  if (c.status === 'discard_pending') { toast('⏳ Mã ' + c.code + ' đang báo hủy — vào Hao hụt nguyên liệu, quét lại để hoàn tất'); return; }
+  if (c.status === 'finished') { toast(c.finishReason === 'discarded' ? 'ℹ️ Mã ' + c.code + ' đã báo hủy, không báo hết lần nữa' : 'ℹ️ ' + c.code + ' đã báo hết trước đó'); return; }
   // Đơn vị nguyên (cái rời, vd một gói bột) — mở lên là dùng hết luôn, không có
   // giai đoạn "đang mở, dùng dở" nào để theo dõi riêng. Quét "mở" cho loại này
   // thì coi luôn là báo hết, khỏi bắt quét thêm lần hai.
@@ -5260,7 +5264,8 @@ async function scanToFinishContainer() {
   // Đơn vị nguyên (cái rời) bỏ qua yêu cầu "phải mở trước" — quét báo hết thẳng
   // từ nguyên seal cũng được, vì với loại này mở và dùng hết là một hành động.
   if (c.status === 'sealed' && !isAtomicUnitContainer(c)) { toast('ℹ️ ' + c.code + ' còn nguyên seal — mở trước đã'); return; }
-  if (c.status === 'finished') { toast('ℹ️ ' + c.code + ' đã báo hết trước đó'); return; }
+  if (c.status === 'discard_pending') { toast('⏳ Mã ' + c.code + ' đang báo hủy — vào Hao hụt nguyên liệu, quét lại để hoàn tất'); return; }
+  if (c.status === 'finished') { toast(c.finishReason === 'discarded' ? 'ℹ️ Mã ' + c.code + ' đã báo hủy, không báo hết lần nữa' : 'ℹ️ ' + c.code + ' đã báo hết trước đó'); return; }
   // Quét được = cầm đúng chai trên tay, không cần hỏi lý do.
   openConfirmFinishSheet(c, true);
 }
@@ -5289,7 +5294,8 @@ async function scanToFinishContainerForItem(expectedItemId) {
   if (c.status === 'voided')   { toast('⛔ ' + c.code + ' đã bị huỷ (phiếu nhận ghi thừa) — bóc tem này bỏ đi, đừng dùng'); return; }
   if (c.status === 'lost')     { toast('⚠️ ' + c.code + ' đang ở trạng thái "báo mất" — dùng nút "Quét mã hàng tìm lại được" ở Kiểm kê để phục hồi'); return; }
   if (c.status === 'sealed' && !isAtomicUnitContainer(c)) { toast('ℹ️ ' + c.code + ' còn nguyên seal — mở trước đã'); return; }
-  if (c.status === 'finished') { toast('ℹ️ ' + c.code + ' đã báo hết trước đó'); return; }
+  if (c.status === 'discard_pending') { toast('⏳ Mã ' + c.code + ' đang báo hủy — vào Hao hụt nguyên liệu, quét lại để hoàn tất'); return; }
+  if (c.status === 'finished') { toast(c.finishReason === 'discarded' ? 'ℹ️ Mã ' + c.code + ' đã báo hủy, không báo hết lần nữa' : 'ℹ️ ' + c.code + ' đã báo hết trước đó'); return; }
   // Gọi từ màn Chế biến (#prepBatchScreen) — openConfirmFinishSheet() vẽ vào sheet nổi
   // dùng chung (#stockScanSheetOverlay), không phải #stockUseBody nữa, nên KHÔNG cần
   // chuyển sang màn Kho mới thấy được sheet. TRƯỚC ĐÂY có gọi showScreen('stockUseScreen')
@@ -9562,7 +9568,7 @@ async function openWasteScreen() {
   }
   renderKhoTxForm();
 }
-function wasteSetTarget(t) { khoTxState.target = t; renderKhoTxForm(); }
+function wasteSetTarget(t) { khoTxState.target = t; if (t !== 'item') khoTxState.scannedContainer = null; renderKhoTxForm(); }
 
 // ============================================================
 // [NEW] ĐỔ LY THÀNH PHẨM — hao hụt 1 món trong menu
@@ -9868,7 +9874,6 @@ function renderKhoTxForm() {
   `;
   if (khoTxState.target === 'drink') drinkWasteUpdatePreview();
   else if (khoTxState.target === 'prep') prepWasteUpdatePreview();
-  else khoTxUpdateUnitOptions();
 }
 
 // Form huỷ bán thành phẩm.
@@ -10147,168 +10152,162 @@ function pwReasonSelectChange() {
   wrap.style.display = sel.value === '__other__' ? 'block' : 'none';
 }
 
+
+// Hao hụt nguyên liệu chỉ ghi theo tem đã quét, không nhập số tổng.
 function renderItemWasteForm() {
-  const typeCfg = KHO_TX_TYPES.find(t => t.value === khoTxState.type);
-  const items = KHO_ITEMS_CACHE;
-  return `
-    <div class="wal-section" style="margin:0 0 14px;">
-      <div class="wal-section-title">Nguyên liệu</div>
-      <div class="wal-input-group" style="padding:4px 14px;">
-        <select id="ktxItem" onchange="khoTxUpdateUnitOptions()" style="width:100%;border:none;outline:none;font-family:'Google Sans',sans-serif;font-size:15px;font-weight:600;color:var(--td);background:transparent;padding:10px 0;">
-          ${items.map(it => `<option value="${it.id}">${it.name}</option>`).join('')}
-        </select>
-      </div>
-      <div class="wal-input-label" style="margin:10px 0 6px;">${typeCfg.qtyLabel}</div>
-      <div style="display:flex;gap:10px;">
-        <div class="wal-input-group" style="flex:1;margin-bottom:0;">
-          <input id="ktxQty" type="number" step="0.01" placeholder="0" oninput="khoTxUpdatePreview()">
-        </div>
-        <div class="wal-input-group" style="flex:1;margin-bottom:0;">
-          <select id="ktxUnit" onchange="khoTxUpdatePreview()" style="width:100%;border:none;outline:none;font-family:'Google Sans',sans-serif;font-size:15px;font-weight:600;color:var(--td);background:transparent;"></select>
-        </div>
-      </div>
-      <div id="ktxPreview" style="font-size:11.5px;color:#999;margin-top:6px;padding:0 4px;"></div>
-      <!-- [NEW] Chọn VỊ TRÍ hàng hỏng. Trước đây mọi hao hụt đều mặc định trừ ở
-           quầy pha, nhưng thực tế hàng thô hỏng có thể nằm ở kho tổng (hết hạn,
-           mốc, chuột cắn) hoặc ở quầy (làm đổ lúc pha) — trừ nhầm chỗ làm tồn theo
-           vị trí sai, kéo theo gợi ý refill sai. Selector chỉ hiện khi nguyên liệu
-           có Refill Rule (mới biết được tên 2 vị trí). -->
-      <div id="ktxLocWrap" style="display:none;">
-        <div class="wal-input-label" style="margin:10px 0 6px;">Hàng hỏng đang ở đâu?</div>
-        <div class="wal-input-group" style="padding:4px 14px;margin-bottom:0;">
-          <select id="ktxLoc" style="width:100%;border:none;outline:none;font-family:'Google Sans',sans-serif;font-size:15px;font-weight:600;color:var(--td);background:transparent;padding:10px 0;"></select>
-        </div>
-      </div>
-      ${khoTxState.type === 'WASTE' ? `
-      <div class="wal-input-label" style="margin:10px 0 6px;">Lý do hao hụt</div>
-      ${WASTE_REASONS_CACHE.length ? `
-      <div class="wal-input-group" style="padding:4px 14px;margin-bottom:8px;">
-        <select id="ktxReasonSelect" onchange="khoTxReasonSelectChange()" style="width:100%;border:none;outline:none;font-family:'Google Sans',sans-serif;font-size:15px;font-weight:600;color:var(--td);background:transparent;padding:10px 0;">
-          ${WASTE_REASONS_CACHE.map(r => `<option value="${r.id}">${r.label}</option>`).join('')}
-          <option value="__other__">Khác (tự nhập)...</option>
-        </select>
-      </div>
-      <div class="wal-input-group" id="ktxReasonOtherWrap" style="margin-bottom:0;display:none;">
-        <input id="ktxReason" type="text" placeholder="Nhập lý do khác...">
-      </div>` : `
-      <div class="wal-input-group" style="margin-bottom:0;">
-        <input id="ktxReason" type="text" placeholder="VD: Pha sai, đổ, làm vỡ, hết hạn...">
-      </div>`}` : ''}
-      <div class="wal-input-label" style="margin:10px 0 6px;">Ghi chú ${khoTxState.type==='WASTE'?'thêm ':''}(tuỳ chọn)</div>
-      <div class="wal-input-group" style="margin-bottom:0;">
-        <input id="ktxNote" type="text" placeholder="Ghi chú thêm nếu cần">
-      </div>
-      ${renderPinInput('ktxStaff')}
-    </div>
-    <button onclick="submitKhoTx()" style="width:100%;padding:14px;background:var(--gd);color:#fff;border:none;border-radius:14px;font-weight:700;font-size:15px;cursor:pointer;">Xác nhận</button>
-  `;
+  const c=khoTxState.scannedContainer, pending=c?.status==='discard_pending';
+  const rule=c&&getPrimaryRefillRulePOS(c.itemId);
+  const source=c?.status==='sealed'||c?.discardPending?.originalStatus==='sealed';
+  return `<div class="wal-section" style="margin-bottom:14px">
+    <div class="wal-section-title">Hủy nguyên liệu theo mã tem</div>
+    <div style="font-size:12.5px;color:#777;margin:10px 0;line-height:1.5">Quét tem trên bao/chai cần hủy. Hệ thống ghi phần còn lại của đúng mã này là hao hụt.</div>
+    <button onclick="scanIngredientForWaste()" style="width:100%;padding:16px;background:#fff;border:2px solid var(--gd);border-radius:14px;color:var(--gd);font-weight:800">Quét mã nguyên liệu${c?' khác':''}</button>
+  </div>
+  ${c?`<div class="wal-section">
+    <div style="font-size:17px;font-weight:800">${escHtmlPos(c.itemName||'')}</div>
+    <div style="margin:7px 0 12px;font-weight:700">Mã ${escHtmlPos(c.code||'')} · ${Number.isFinite(Number(c.wastePreview))?fmtPrepQty(c.wastePreview):'Đang đối chiếu'} ${escHtmlPos(c.unit||'')} trên mã</div>
+    ${pending?`<div style="font-size:12px;color:#a65b00;margin-bottom:12px">Lần báo hủy trước đang chờ hoàn tất. Lý do: ${escHtmlPos(c.discardPending?.reason||'—')}. Xác nhận để tiếp tục cùng giao dịch.</div>`:`
+      <div class="wal-input-label">Lý do hủy (bắt buộc)</div>
+      ${WASTE_REASONS_CACHE.length?`<div class="wal-input-group"><select id="ktxReasonSelect" onchange="khoTxReasonSelectChange()" style="width:100%;border:none;background:transparent;padding:8px 0">
+        <option value="">Chọn lý do...</option>
+        ${WASTE_REASONS_CACHE.map(r=>`<option value="${escHtmlPos(r.id)}">${escHtmlPos(r.label)}</option>`).join('')}
+        <option value="__other__">Khác (ghi rõ)</option>
+      </select></div><div id="ktxReasonOtherWrap" class="wal-input-group" style="display:none"><input id="ktxReason" placeholder="Ghi rõ lý do hủy"></div>`:
+      `<div class="wal-input-group"><input id="ktxReason" placeholder="VD: Hết hạn, đổ vỡ, hư hỏng"></div>`}
+      <div class="wal-input-label">Ghi chú thêm (nếu cần)</div>
+      <div class="wal-input-group"><input id="ktxNote" placeholder="Chi tiết thêm"></div>
+      ${rule?`<div class="wal-input-label">Hàng hủy đang ở đâu?</div><div class="wal-input-group">
+        <select id="ktxLoc" style="width:100%;border:none;background:transparent;padding:8px 0">
+          <option value="source" ${source?'selected':''}>${escHtmlPos(rule.sourceLocationName||'Kho tổng')}</option>
+          <option value="dest" ${source?'':'selected'}>${escHtmlPos(rule.destLocationName||'Quầy pha')}</option>
+        </select></div>`:''}
+    `}
+    ${renderPinInput('ktxStaff')}
+    <label style="display:flex;gap:10px;align-items:flex-start;margin:14px 0;font-size:12.5px;line-height:1.5">
+      <input id="ktxDiscardAck" type="checkbox" style="width:19px;height:19px;flex-shrink:0">
+      <span>Tôi xác nhận hủy đúng mã <b>${escHtmlPos(c.code||'')}</b>. Mã sẽ chuyển thành “Đã báo hết · Hủy” và không được báo hết lần nữa.</span>
+    </label>
+    <button onclick="submitKhoTx()" style="width:100%;padding:15px;background:var(--gd);color:#fff;border:none;border-radius:14px;font-weight:800;font-size:15px">${pending?'Hoàn tất báo hủy':'Xác nhận báo hủy'}</button>
+  </div>`:''}`;
 }
 function khoTxReasonSelectChange() {
-  const sel = document.getElementById('ktxReasonSelect');
-  const wrap = document.getElementById('ktxReasonOtherWrap');
-  if (!sel || !wrap) return;
-  wrap.style.display = sel.value === '__other__' ? 'block' : 'none';
+  const sel=document.getElementById('ktxReasonSelect'), wrap=document.getElementById('ktxReasonOtherWrap');
+  if(sel&&wrap)wrap.style.display=sel.value==='__other__'?'block':'none';
 }
-function khoTxUpdateUnitOptions() {
-  const it = KHO_ITEMS_CACHE.find(x => x.id === document.getElementById('ktxItem').value);
-  const unitSel = document.getElementById('ktxUnit');
-  if (!it || !unitSel) return;
-  const opts = [{ label: it.unit, baseQty: 1 }, ...(it.packagingUnits || []).map(p => ({ label: p.name, baseQty: p.baseQty }))];
-  unitSel.innerHTML = opts.map(o => `<option value="${o.baseQty}">${o.label}${o.baseQty > 1 ? ` (=${Number(o.baseQty).toLocaleString('vi-VN')} ${it.unit})` : ''}</option>`).join('');
-  khoTxUpdateLocOptions(it);
-  khoTxUpdatePreview();
-}
-
-// [NEW] Đổ đầy selector vị trí theo Refill Rule của nguyên liệu đang chọn.
-// Mặc định KHO TỔNG: nhánh này dành cho hàng thô hỏng (hết hạn/mốc/vỡ khi cất),
-// phần lớn nằm ở kho — còn làm đổ lúc pha thì đã có nhánh "Đổ ly thành phẩm" riêng.
-function khoTxUpdateLocOptions(it) {
-  const wrap = document.getElementById('ktxLocWrap');
-  const sel = document.getElementById('ktxLoc');
-  if (!wrap || !sel) return;
-  const rule = it ? getPrimaryRefillRulePOS(it.id) : null;
-  if (!rule) { wrap.style.display = 'none'; sel.innerHTML = ''; return; }
-  sel.innerHTML = `<option value="source">${rule.sourceLocationName || 'Kho tổng'}</option>`
-                + `<option value="dest">${rule.destLocationName || 'Quầy pha'}</option>`;
-  wrap.style.display = 'block';
-}
-function khoTxUpdatePreview() {
-  const it = KHO_ITEMS_CACHE.find(x => x.id === document.getElementById('ktxItem')?.value);
-  const unitSel = document.getElementById('ktxUnit');
-  const qtyInput = document.getElementById('ktxQty');
-  const preview = document.getElementById('ktxPreview');
-  if (!it || !unitSel || !qtyInput || !preview) return;
-  const factor = Number(unitSel.value) || 1;
-  const enteredQty = Number(qtyInput.value) || 0;
-  const baseQty = enteredQty * factor;
-  // [SỬA — mục 4.5] BỎ phần "tồn sau giao dịch" khỏi preview. Trước đây dòng này
-  // hiện `currentStock + qty`, tức là để lộ thẳng số tồn hệ thống cho nhân viên —
-  // mâu thuẫn trực tiếp với yêu cầu không hiển thị tồn kho ở POS (và làm hỏng ý
-  // nghĩa kiểm kê mù: chỉ cần mở màn Hao hụt là tra được số hệ thống). Giờ chỉ
-  // quy đổi đơn vị nhập sang đơn vị cơ bản — thông tin nhân viên CẦN để nhập
-  // đúng, nhưng không suy ra được tồn kho.
-  preview.textContent = enteredQty ? `= ${Math.abs(baseQty).toLocaleString('vi-VN')} ${it.unit}` : '';
+async function scanIngredientForWaste() {
+  const r=await posScan();
+  if(!r.ok){if(r.error!=='cancelled')toast('⚠️ '+posScanErrorText(r.error));return;}
+  const c=await findContainerByCode(r.code);
+  if(chanMaTrung(c))return;
+  if(!c){toast('❌ Không tìm thấy mã '+r.code);return;}
+  if(c.status==='finished'){
+    toast(c.finishReason==='discarded'?'ℹ️ Mã '+c.code+' đã báo hủy, không ghi hao hụt lần nữa':'⛔ Mã '+c.code+' đã báo hết, không thể hủy lại');return;
+  }
+  if(!['sealed','open','discard_pending'].includes(c.status)){toast('⛔ Mã '+c.code+' không thể báo hủy (trạng thái '+c.status+')');return;}
+  try{
+    c.wastePreview=c.status==='open'?await finishContainerRemaining(c.id,c):
+      c.status==='discard_pending'?(c.discardPending?.wasteBase??NaN):Number(c.baseQty);
+  }catch(err){toast('⚠️ Không đọc được lượng còn trên mã — quét lại');return;}
+  if(c.status!=='discard_pending'&&!(Number(c.wastePreview)>0)){
+    toast('⚠️ Mã không còn lượng dương để hủy — vào Quét mở/hết để báo hết');return;
+  }
+  khoTxState.scannedContainer=c;renderKhoTxForm();
 }
 async function submitKhoTx() {
-  if (_posSubmitBusy) { toast('⏳ Đang xử lý, vui lòng đợi giây lát...'); return; }
-  _posSubmitBusy = true;
-  try { await _submitKhoTxImpl(); } finally { _posSubmitBusy = false; }
+  if(_posSubmitBusy){toast('⏳ Đang xử lý, vui lòng đợi...');return;}
+  _posSubmitBusy=true;
+  try{await _submitKhoTxImpl();}
+  catch(err){console.error('Báo hủy mã nguyên liệu lỗi',err);toast('❌ Chưa hoàn tất báo hủy: '+(err.message||err));}
+  finally{_posSubmitBusy=false;}
 }
 async function _submitKhoTxImpl() {
-  const itemId = document.getElementById('ktxItem').value;
-  const it = KHO_ITEMS_CACHE.find(x => x.id === itemId);
-  if (!it) { toast('⚠️ Chọn nguyên liệu'); return; }
-  const enteredQty = Number(document.getElementById('ktxQty').value) || 0;
-  const factor = Number(document.getElementById('ktxUnit').value) || 1;
-  const unitLabel = document.getElementById('ktxUnit').selectedOptions[0]?.textContent || it.unit;
-  const typeCfg = KHO_TX_TYPES.find(t => t.value === khoTxState.type);
-  if (enteredQty === 0) { toast('⚠️ Nhập số lượng'); return; }
-  if (typeCfg.sign !== 0 && enteredQty < 0) { toast('⚠️ Nhập số dương, hệ thống tự trừ kho'); return; }
-  const staffEmp = await resolveStaffPinAndCheckin('ktxStaff');
-  if (!staffEmp) return; // resolveStaffPinField đã tự toast lỗi cụ thể (thiếu PIN/sai/bị khoá)
-  const staff = staffEmp.fullName;
-  const baseQty = enteredQty * factor;
-  const signedQty = typeCfg.sign === 0 ? baseQty : Math.abs(baseQty) * typeCfg.sign;
-  const userNote = (document.getElementById('ktxNote')?.value || '').trim();
-  let reason = '';
-  if (khoTxState.type === 'WASTE') {
-    const reasonSel = document.getElementById('ktxReasonSelect');
-    if (reasonSel && reasonSel.value !== '__other__') {
-      reason = reasonSel.selectedOptions[0]?.textContent || '';
-    } else {
-      reason = (document.getElementById('ktxReason')?.value || '').trim();
-    }
+  const scanned=khoTxState.scannedContainer;
+  if(!scanned?.id){toast('⚠️ Phải quét mã nguyên liệu cần hủy');return;}
+  if(!document.getElementById('ktxDiscardAck')?.checked){toast('⚠️ Xác nhận đúng mã trước khi báo hủy');return;}
+  let reason='';
+  if(scanned.status!=='discard_pending'){
+    const sel=document.getElementById('ktxReasonSelect');
+    reason=sel&&sel.value!=='__other__'?(sel.value?sel.selectedOptions[0]?.textContent||'':''):
+      (document.getElementById('ktxReason')?.value||'').trim();
+    if(!reason){toast('⚠️ Ghi rõ lý do hủy');return;}
   }
-  // [NEW] Vị trí hàng hỏng — 'source' = kho tổng, 'dest' = quầy pha (mặc định của
-  // applyStockTransactionPOS khi không truyền gì). Chọn kho tổng thì dùng cờ
-  // '__SOURCE__' để trừ đúng kho tổng VÀ không làm nhiễu bộ đếm refill của quầy
-  // (hàng hỏng trong kho không nói lên gì về việc quầy còn đủ pha hay không).
-  const locSel = document.getElementById('ktxLoc');
-  const atSource = !!(locSel && locSel.value === 'source');
-  const locName = locSel && locSel.selectedOptions[0] ? locSel.selectedOptions[0].textContent : '';
-
-  const autoNote = `${typeCfg.label} ${Number(enteredQty).toLocaleString('vi-VN')} ${unitLabel} = ${Math.abs(baseQty).toLocaleString('vi-VN')} ${it.unit}` +
-    (locName ? ` · Tại: ${locName}` : '') +
-    (reason ? ` · Lý do: ${reason}` : '') + (userNote ? ` · ${userNote}` : '');
-  try {
-    const result = await applyStockTransactionPOS({ itemId, type: khoTxState.type, qty: signedQty, note: autoNote, staff, staffEmployeeId: staffEmp.id, locationId: atSource ? '__SOURCE__' : undefined });
-    toast('✅ Đã ghi giao dịch kho');
-    // [NEW] Nếu hao hụt này làm hệ thống chuyển sang chế độ "nghi ngờ" cho nguyên liệu có
-    // theo dõi Refill — báo ngay để nhân viên biết: từ giờ đến khi Refill thật, hệ thống
-    // sẽ không tự tính "đã bán bao nhiêu" nữa mà cần tự kiểm tra thực tế ở quầy.
-    if (result && result.uncertainAlert) {
-      const a = result.uncertainAlert;
-      setTimeout(() => toast(`❓ ${a.itemName}: vừa ghi hao hụt — kiểm tra còn đủ pha tiếp không? Hệ thống sẽ nhắc lại lúc kết ca cho tới khi Refill.`), 1800);
+  const staffEmp=await resolveStaffPinAndCheckin('ktxStaff');
+  if(!staffEmp)return;
+  const ref=fstore.collection(STOCK_CONTAINERS_COLL).doc(scanned.id);
+  await prepReconAssertFree(scanned.itemId);
+  // Claim trạng thái nguyên tử. Retry giữ nguyên lý do, người và vị trí của lần đầu.
+  const c=await fstore.runTransaction(async t=>{
+    const snap=await t.get(ref);
+    if(!snap.exists||snap.data().code!==scanned.code)throw new Error('Mã tem đã đổi — quét lại');
+    const old=snap.data();
+    if(old.status==='finished')throw new Error(old.finishReason==='discarded'?'Mã đã báo hủy, không tính hai lần':'Mã đã báo hết');
+    if(old.status==='discard_pending'){
+      if(!old.discardPending?.reason)throw new Error('Báo hủy đang dở thiếu dữ liệu — báo Quản lý');
+      return old;
     }
-    KHO_ITEMS_CACHE = [];
-    showScreen('khoScreen');
-    loadKhoScreen();
-  } catch (err) {
-    console.error('submitKhoTx failed', err);
-    toast('❌ Lỗi: ' + (err.code || err.message || err));
-  }
+    if(old.status!=='sealed'&&old.status!=='open')throw new Error('Mã đã đổi trạng thái — quét lại');
+    const item=await t.get(fstore.collection('inventory_items_gieogieo').doc(old.itemId));
+    if(!item.exists||item.data().stockManaged===false)throw new Error('Nguyên liệu này không quản lý tồn bằng mã');
+    const pending={originalStatus:old.status,at:new Date().toISOString(),
+      businessDate:posDateKey(),reason,
+      note:(document.getElementById('ktxNote')?.value||'').trim(),
+      staff:staffEmp.fullName,staffEmployeeId:staffEmp.id,
+      atSource:document.getElementById('ktxLoc')?.value==='source'};
+    t.update(ref,{status:'discard_pending',discardPending:pending});
+    return {...old,status:'discard_pending',discardPending:pending};
+  });
+  const pending=c.discardPending;
+  let qty;
+  if(pending.originalStatus==='open'){
+    // Mốc RT ghi discardBase để mất ACK rồi quét lại vẫn dùng đúng lượng cũ.
+    // Allocator bỏ qua mốc này nên không bán tiếp hoặc dồn nợ vào tem đã hủy.
+    const rtRef=_ueActiveUnitsRef(c.itemId).child(scanned.id);
+    const result=await _ueRetryAsync(()=>rtRef.transaction(cur=>{
+      if(!cur)return;
+      if(cur.discardPending)return cur;
+      const live=Number(cur.unitBase);
+      if(!Number.isFinite(live)||live<=0)return;
+      return {...cur,unitBase:0,discardPending:true,discardBase:live};
+    }));
+    const live=result.snapshot?.val();
+    if(!result.committed||!live?.discardPending||!(Number(live.discardBase)>0))
+      throw new Error('Mã đang mở không còn số dương trong RT — chưa ghi WASTE, báo Quản lý kiểm tra');
+    qty=Number(live.discardBase);
+  }else if(pending.originalStatus==='sealed')qty=Number(c.baseQty);
+  else throw new Error('Trạng thái mã trước khi hủy không hợp lệ');
+  if(!(qty>0))throw new Error('Mã không có lượng còn lại để hủy');
+  await ref.update({'discardPending.wasteBase':qty});
+  const note=`Hủy ${c.code||''} — ${fmtPrepQty(qty)} ${c.unit||''} · Lý do: ${pending.reason}`+
+    (pending.note?' · '+pending.note:'');
+  await applyStockTransactionPOS({
+    itemId:c.itemId,type:'WASTE',qty:-qty,note,
+    staff:pending.staff,staffEmployeeId:pending.staffEmployeeId,
+    locationId:pending.atSource?'__SOURCE__':undefined,
+    referenceId:scanned.id,deriveFromUnits:true,txId:'waste_unit_'+scanned.id,
+    businessDate:pending.businessDate,
+    meta:{wasteKind:'ingredient_unit',containerId:scanned.id,containerCode:c.code,
+      discardReason:pending.reason,discardNote:pending.note||''}
+  });
+  await fstore.runTransaction(async t=>{
+    const snap=await t.get(ref);
+    if(!snap.exists||snap.data().status!=='discard_pending')
+      throw new Error('Trạng thái mã đã đổi khi chốt hủy — báo Quản lý');
+    t.update(ref,{status:'finished',finishedAt:pending.at,finishedBy:pending.staff,
+      finishedByEmployeeId:pending.staffEmployeeId,finishReason:'discarded',
+      finishScanned:true,discardReason:pending.reason,discardNote:pending.note||'',
+      unitBase:qty,wasteBase:qty,wasteBasis:'scanned_discard',
+      needsReview:false,needsReviewReasons:[],
+      discardPending:firebase.firestore.FieldValue.delete()});
+  });
+  if(pending.originalStatus==='open')
+    await _ueActiveUnitsRef(c.itemId).child(scanned.id).remove()
+      .catch(err=>console.warn('Đã chốt hủy, dọn mốc RT lỗi (mốc không cộng tồn)',err));
+  await _ueRecomputeCurrentStock(c.itemId,STOCK_CONTAINERS_COLL)
+    .catch(err=>console.warn('Đã chốt hủy, đồng bộ tồn lỗi',err));
+  toast('✅ Đã báo hủy mã '+c.code+' · '+fmtPrepQty(qty)+' '+(c.unit||''));
+  khoTxState.scannedContainer=null;renderKhoTxForm();
+  refreshFifoAlert().catch(()=>{});_refreshStockUseListIfActive();
 }
-
 
 // ============================================================================
 // [MỚI] BỘ CÂN BÁN THÀNH PHẨM — cân cả vật đựng, hệ thống tự trừ bì
@@ -11461,7 +11460,7 @@ function prepReconRows(p, ratio) {
 }
 async function prepReconReadUnits(itemId) {
   const snap = await _ueActiveUnitsRef(itemId).once('value');
-  return Object.entries(snap.val() || {}).filter(([id,v]) => id!=='__prepLock' && !v.finishedDebt)
+  return Object.entries(snap.val() || {}).filter(([id,v]) => id!=='__prepLock' && !v.finishedDebt && !v.discardPending)
     .map(([id,v]) => ({ id, code:v.code||id, unitBase:Number(v.unitBase)||0,
       capacity:Number(v.capacity)||0, openedAt:Number(v.openedAt)||0,
       lastPrepReconOp:v.lastPrepReconOp||'',lastPrepCheckpoint:v.lastPrepCheckpoint||null }))
