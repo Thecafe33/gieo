@@ -3941,7 +3941,7 @@ async function _ueMaybeWarnUntrackedConsumption(itemId, qty, coll) {
       businessDate: day, createdAt: new Date().toISOString(),
       title: `"${name || itemId}" bán ra nhưng KHÔNG có tem/lô nào đang mở để trừ`,
       itemId, itemName: name, trackingMode: mode,
-      note: coll === 'prep_batches_gieogieo' ? 'currentStock đã bị trừ nhưng không lô nào ghi nhận — kiểm tra có lô cần quét mở không' : 'Tồn theo mã KHÔNG bị trừ (khoản này ghi vào Sổ lệch tem) — kiểm tra có tem cần quét mở/quét dùng không',
+      note: coll === 'prep_batches_gieogieo' ? 'Không lô nào đang mở để trừ — khoản bán vào "âm chờ đối chiếu", đối chiếu ở cân BTP cuối ca' : 'Tồn theo mã KHÔNG bị trừ (khoản này ghi vào Sổ lệch tem) — kiểm tra có tem cần quét mở/quét dùng không',
       hitCount: firebase.firestore.FieldValue.increment(1)
     }, { merge: true });
   } catch (err) { console.warn('[UnitEngine] ghi cảnh báo untracked_unit_consumption lỗi', itemId, err); }
@@ -4065,7 +4065,9 @@ async function _ueRecomputeCurrentStock(itemId, coll) {
       const vals = Object.values(ubById);
       const posTotal = vals.reduce((a, v) => a + Math.max(0, v), 0);
       const negTotal = vals.reduce((a, v) => a + Math.min(0, v), 0);
-      const delta = Number((doc.exists && doc.data().untrackedPendingDelta)) || 0;
+      // Chỉ lấy phần ÂM của delta: delta dương chỉ sinh ra khi hoàn một khoản bán không có lô
+      // SAU khi cân cuối ca đã đóng khoản âm đó — không được dùng nó che khoản âm của ngày sau.
+      const delta = Math.min(0, Number((doc.exists && doc.data().untrackedPendingDelta)) || 0);
       const pendingShortage = round2(Math.max(0, -(negTotal + delta)));
       t.update(itemRef, { currentStock: round2(posTotal), pendingShortage, updatedAt: new Date().toISOString(), _ueLastRecomputeStart: myStartedAt });
     });
@@ -19316,21 +19318,22 @@ async function prepShortageCollect() {
       const rt = (await _ueActiveUnitsRef(d.id).once('value')).val() || {};
       Object.keys(rt).forEach(k => { if (k !== '__prepLock') neg += Math.min(0, Number(rt[k] && rt[k].unitBase) || 0); });
     } catch (err) { neg = -(Number(p.pendingShortage) || 0); }
-    const S = round2(Math.max(0, -(neg + (Number(p.untrackedPendingDelta) || 0))));
+    const S = round2(Math.max(0, -(neg + Math.min(0, Number(p.untrackedPendingDelta) || 0))));
     if (S > 0.005) shortage[d.id] = S;
   }));
   return shortage;
 }
 
-// BTP có khoản âm nhưng không lô nào để cân (bán trước khi nấu, cả ngày không nấu) — màn cân
-// không có dòng nào cho nó; khoản âm đã được chụp ở prepShortageCollect thì đóng lại luôn.
-async function prepShortageCloseUncounted(shortage, countedIds) {
+// Đóng khoản âm đã chụp sau khi cân: về 0 untrackedPendingDelta (kể cả BTP không có lô nào để
+// cân — bán trước khi nấu, cả ngày không nấu) và gỡ mọi node RT còn âm (lô cân rồi đã được ghi
+// đè bằng số cân ≥ 0; node âm còn sót là lô không còn 'active' nên màn cân không thấy).
+async function prepShortageClearAll(shortage) {
   const now = new Date().toISOString();
-  await Promise.allSettled(Object.keys(shortage).filter(id => !countedIds.has(id)).map(async id => {
+  await Promise.allSettled(Object.keys(shortage || {}).map(async id => {
     await fstore.collection('prep_items_gieogieo').doc(id).update({ untrackedPendingDelta: 0, updatedAt: now });
     const rt = (await _ueActiveUnitsRef(id).once('value')).val() || {};
     await Promise.all(Object.keys(rt).filter(k => k !== '__prepLock' && Number(rt[k] && rt[k].unitBase) < 0)
-      .map(k => _ueActiveUnitsRef(id).child(k).update({ unitBase: 0 })));
+      .map(k => _ueActiveUnitsRef(id).child(k).remove()));
     await _ueRecomputeCurrentStock(id, 'prep_batches_gieogieo');
   }));
 }
@@ -19416,6 +19419,14 @@ async function prepShortageAskIfNeeded() {
   catch (err) { console.warn('[BTP âm] không đọc được phiếu kết ca — bỏ qua bước hỏi bù', err); return false; }
   if (cl.prepShortageAnswered) return false;
   try {
+    // Không có BTP nào để cân (không lô nào đang mở) → bước cân bị bỏ qua, khoản âm chưa được
+    // chụp/đóng (vd bán trước khi nấu, cả ngày không nấu). Chụp và đóng ngay tại đây.
+    if (!cl.prepShortage) {
+      const sh = await prepShortageCollect();
+      await prepShortageClearAll(sh);
+      cl.prepShortage = sh;
+      await fstore.collection('daily_closings_gieogieo').doc(day).set({ prepShortage: sh }, { merge: true });
+    }
     const [pSnap, nSnap, lotSnap, anSnap] = await Promise.all([
       fstore.collection('prep_items_gieogieo').get(),
       fstore.collection('inventory_items_gieogieo').get(),
@@ -19427,10 +19438,12 @@ async function prepShortageAskIfNeeded() {
     nSnap.docs.forEach(d => { nls[d.id] = { id: d.id, ...d.data() }; });
     lotSnap.docs.forEach(d => { const b = d.data();
       if (b.prepId && b.finishedAt) (lotsByPrep[b.prepId] = lotsByPrep[b.prepId] || []).push({ id: d.id, ...b }); });
+    // Cộng ròng: bán không tem (âm) trừ đi phần hoàn ngoài tem (dương, vd xoá bill) cùng ngày.
     anSnap.docs.forEach(d => { const a = d.data();
-      if (a.status !== 'open' || !['no_open_tem', 'atomic_unscanned'].includes(a.kind) || !(Number(a.qty) < 0)) return;
+      if (a.status !== 'open' || !['no_open_tem', 'atomic_unscanned', 'reversal_outside_tem'].includes(a.kind)) return;
       const g = nlShort[a.itemId] || (nlShort[a.itemId] = { qty: 0, ids: [] });
-      g.qty = round2(g.qty - Number(a.qty)); g.ids.push(d.id); });
+      g.qty = round2(g.qty - (Number(a.qty) || 0)); g.ids.push(d.id); });
+    Object.keys(nlShort).forEach(k => { if (!(nlShort[k].qty > 0.005)) delete nlShort[k]; });
     (cl.prepCountLines || []).forEach(l => { prepVar[l.prepId] = round2((Number(l.countedQty) || 0) - (Number(l.systemQty) || 0)); });
     (cl.shiftInventoryCloseLines || []).forEach(l => { nlVar[l.itemId] = round2((Number(l.countedQty) || 0) - (Number(l.expectedQty) || 0)); });
     const rows = prepShortageBuild({ shortage: cl.prepShortage || {}, preps, nls, lotsByPrep, nlShort, prepVar, nlVar });
@@ -19505,7 +19518,12 @@ async function prepShortageSubmitAnswers(auto) {
       const status = r.status === 'explained' ? 'explained' : (subs.length ? 'substitution_pending' : 'unexplained');
       const id = (st.day + (r.sourceKind === 'item' ? '_nl_' : '_') + r.prepId).replace(/[^\w\-]/g, '_');
       // NL dùng thẳng được xác nhận đã dùng để bù → trừ vào tem đang mở (FIFO) như một lượt dùng thật.
+      // Bấm lại / cân lại rồi trả lời lại: KHÔNG ghi đè mục Quản lý đã xử lý, KHÔNG trừ tem lần 2.
+      const existing = await fstore.collection(PREP_SHORTAGE_RECON_COLL).doc(id).get();
+      if (existing.exists && ['substitution_confirmed', 'dismissed'].includes(existing.data().status)) continue;
       for (const sub of subs.filter(x => x.kind === 'item')) {
+        const substTxId = 'subst_' + id + '_' + sub.id;
+        if ((await fstore.collection('stock_transactions_gieogieo').doc(substTxId).get()).exists) continue;
         const ref = { type: 'substitution', id, note: 'Dùng bù cho ' + r.prepName };
         const allocations = await unitEngineAllocateConsumption(sub.id, sub.expectedQty, undefined, ref)
           .catch(err => { console.warn('[BTP âm] trừ tem NL dùng bù lỗi', sub.id, err); return []; });
@@ -19513,7 +19531,7 @@ async function prepShortageSubmitAnswers(auto) {
           itemId: sub.id, type: 'CONSUMPTION', qty: -sub.expectedQty,
           note: 'Dùng bù cho ' + r.prepName + ' (nhân viên xác nhận cuối ca)',
           staff: staffEmp.fullName, staffEmployeeId: staffEmp.id, referenceId: id,
-          deriveFromUnits: allocations.length > 0, businessDate: st.day, txId: 'subst_' + id + '_' + sub.id,
+          deriveFromUnits: allocations.length > 0, businessDate: st.day, txId: substTxId,
           meta: { substitutionFor: r.prepId, substitutionReconId: id, ...(allocations.length ? { fifoAllocations: allocations } : {}) }
         }).catch(err => console.warn('[BTP âm] ghi sổ NL dùng bù lỗi', sub.id, err));
       }
@@ -20008,8 +20026,8 @@ async function _submitPrepCountImpl() {
     if (shortageSnap) {
       // Lưu khoản âm vừa chụp — đối chiếu (và hỏi nhân viên) chạy sau kiểm kê NL cuối ca,
       // khi đã có số cuối cùng của cả BTP lẫn NL (prepShortageAskIfNeeded).
-      try { await prepShortageCloseUncounted(shortageSnap, new Set(lines.map(x => x.prepId))); }
-      catch (err) { console.warn('[BTP âm] đóng khoản âm BTP không có lô lỗi', err); }
+      try { await prepShortageClearAll(shortageSnap); }
+      catch (err) { console.warn('[BTP âm] đóng khoản âm sau khi cân lỗi', err); }
     }
     const previouslyValid = (shiftState.closing && shiftState.closing.prepCountLines) || [];
     const refreshedIds = new Set(lines.map(l => l.prepId));
@@ -22292,6 +22310,7 @@ async function _reverseIngredientConsumptionPOS(itemId, consumedQty, note, refer
   // phải await xong bước hoàn vào tem TRƯỚC mới biết tổng mới; lỗi ở bước này thì rơi về
   // cộng/trừ currentStock trực tiếp như cũ (transaction bên dưới), không chặn hoàn kho.
   let unitsTouched = false;
+  let appliedQty = 0; // phần đã hoàn được vào tem — phần còn lại mới là "hoàn ngoài tem"
   if (fifoAllocations && fifoAllocations.length) {
     try {
       // [BUG "hoàn Unit trước, ghi ledger sau → retry hoàn đôi" — FIX] claimId cố định theo
@@ -22304,6 +22323,7 @@ async function _reverseIngredientConsumptionPOS(itemId, consumedQty, note, refer
       // như đã chạm unit — coi là ĐÃ hoàn (không ghi Sổ lệch), rồi để _ueRecomputeCurrentStock()
       // bên dưới tự phản ánh đúng RT thật.
       unitsTouched = r.ambiguous || r.appliedQty >= r.totalQty - 1e-6;
+      appliedQty = Number(r.appliedQty) || 0;
     } catch (err) { console.warn('[FIFO] hoàn phân bổ lỗi:', err); }
   }
   // [FIX cùng đợt "KIT bột sữa/Sữa gạo âm ảo"] atomicScanned=true → khoản trừ gốc KHÔNG hề đi
@@ -22368,7 +22388,7 @@ async function _reverseIngredientConsumptionPOS(itemId, consumedQty, note, refer
   });
   if (revOutside) {
     await logStockAnomalyPOS('rev_' + txRef.id, {
-      itemId, itemName: revOutside.itemName, unit: revOutside.unit, qty: back,
+      itemId, itemName: revOutside.itemName, unit: revOutside.unit, qty: round2(Math.max(0, back - appliedQty)),
       kind: 'reversal_outside_tem', txType: 'CONSUMPTION', note, referenceId
     });
   }
@@ -22387,6 +22407,7 @@ async function _reversePrepConsumptionPOS(prepId, consumedQty, note, referenceId
   // này — giờ currentStock phải SUY RA từ tổng lô nên phải await xong mới biết tổng mới;
   // lỗi thì rơi về cộng/trừ trực tiếp như cũ (transaction bên dưới).
   let unitsTouched = false;
+  let appliedQty = 0;
   if (unitAllocations && unitAllocations.length) {
     try {
       // [BUG "hoàn Unit trước, ghi ledger sau → retry hoàn đôi" — FIX] claimId cố định theo
@@ -22395,6 +22416,7 @@ async function _reversePrepConsumptionPOS(prepId, consumedQty, note, referenceId
       // ambiguous:true → coi như đã hoàn để tránh cộng đúp untrackedPendingDelta (xem chú thích
       // ở _reverseIngredientConsumptionPOS).
       unitsTouched = r.ambiguous || r.appliedQty >= r.totalQty - 1e-6;
+      appliedQty = Number(r.appliedQty) || 0;
     } catch (err) { console.warn('[UnitEngine] hoàn lô BTP lỗi:', err); }
   }
   const prepRef = fstore.collection('prep_items_gieogieo').doc(prepId);
@@ -22411,7 +22433,8 @@ async function _reversePrepConsumptionPOS(prepId, consumedQty, note, referenceId
     // không đổi; recompute bên dưới chốt lại cả hai.
     const next = unitsTouched ? (Number(d.currentStock) || 0) + back : (Number(d.currentStock) || 0);
     const updates = { currentStock: next, updatedAt: new Date().toISOString() };
-    if (!unitsTouched) updates.untrackedPendingDelta = firebase.firestore.FieldValue.increment(back);
+    // Chỉ phần CHƯA hoàn được vào lô (hoàn một phần thì phần đã vào lô không tính lại).
+    if (!unitsTouched) updates.untrackedPendingDelta = firebase.firestore.FieldValue.increment(round2(Math.max(0, back - appliedQty)));
     t.update(prepRef, updates);
     t.set(txRef, {
       prepId, prepCode: d.code || '', prepName: d.name || '', unit: d.unit || '',

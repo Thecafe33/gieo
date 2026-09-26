@@ -6549,7 +6549,6 @@ async function logStockAnomaly(docId, a){
   }catch(err){ console.warn('[Sổ lệch] ghi lỗi', a && a.itemId, err); }
 }
 async function recomputeTemStock(itemId){
-  const myStartedAt = Date.now();
   const sealedById = {};
   let sealedTotal = 0;
   const sealedSnap = await fstore.collection(CTN_COLL).where('itemId','==',itemId).where('status','==','sealed').get();
@@ -6574,11 +6573,58 @@ async function recomputeTemStock(itemId){
   await fstore.runTransaction(async t=>{
     const doc = await t.get(itemRef);
     if(!doc.exists) return;
-    const lastStart = Number(doc.data()._ueLastRecomputeStart)||0;
-    if(myStartedAt < lastStart) return;
-    t.update(itemRef, { currentStock: total, updatedAt: new Date().toISOString(), _ueLastRecomputeStart: myStartedAt });
+    // _ueLastRecomputeStart là mốc chống ghi đè theo đồng hồ của các máy POS. Máy Quản lý lệch
+    // giờ thì so với mốc đó là sai (chậm → bị bỏ qua im lặng; nhanh → ghi mốc tương lai làm POS
+    // bỏ qua mọi lượt tính lại sau). Thao tác Quản lý là chủ động: luôn ghi, KHÔNG đụng mốc.
+    t.update(itemRef, { currentStock: total, updatedAt: new Date().toISOString() });
   });
   return total;
+}
+// Bản sao công thức BTP của _ueRecomputeCurrentStock bên POS: tồn = tổng phần DƯƠNG của các
+// lô, phần âm + phần âm của untrackedPendingDelta = pendingShortage (âm chờ đối chiếu cuối ca).
+async function recomputePrepStock(prepId){
+  const rt = (await _ueActiveUnitsRef(prepId).once('value')).val() || {};
+  const ub = {};
+  Object.keys(rt).filter(k=>k!=='__prepLock').forEach(k=>{ if(!(rt[k]&&rt[k].discardPending)) ub[k] = Number(rt[k]&&rt[k].unitBase)||0; });
+  try{
+    const act = await fstore.collection('prep_batches_gieogieo').where('prepId','==',prepId).where('status','==','active').get();
+    act.forEach(d=>{ const b = d.data(); if(!rt[d.id] || b._ueRtStale) ub[d.id] = Number(b.unitBase)||0; });
+  }catch(err){ console.warn('[BTP] quét lô active lệch RT lỗi', prepId, err); }
+  const vals = Object.values(ub);
+  const pos = vals.reduce((a,v)=>a+Math.max(0,v),0), neg = vals.reduce((a,v)=>a+Math.min(0,v),0);
+  const ref = fstore.collection('prep_items_gieogieo').doc(prepId);
+  memoDropPreps();
+  await fstore.runTransaction(async t=>{
+    const doc = await t.get(ref);
+    if(!doc.exists) return;
+    const delta = Math.min(0, Number(doc.data().untrackedPendingDelta)||0);   // mốc giờ: xem recomputeTemStock
+    t.update(ref, { currentStock: Math.round(pos*100)/100, pendingShortage: Math.round(Math.max(0, -(neg+delta))*100)/100,
+      updatedAt: new Date().toISOString() });
+  });
+}
+// Hoàn lại vào ĐÚNG tem/lô đang mở (RT) theo allocations đã lưu lúc trừ. Tem/lô đã đóng thì
+// không hoàn được — trả về phần đã hoàn để nơi gọi xử lý phần còn lại.
+async function reverseIntoUnits(itemId, allocations, coll){
+  let applied = 0;
+  for(const a of (allocations||[])){
+    const id = a.containerId || a.unitId, q = Number(a.qty)||0;
+    if(!id || !(q>0)) continue;
+    try{
+      // cur===null ở lượt chạy đầu có thể chỉ là cache trống — trả null để máy chủ chạy lại với số thật.
+      const res = await _ueActiveUnitsRef(itemId).child(id).transaction(cur=>{
+        if(cur===null) return null;
+        cur.unitBase = Math.round(((Number(cur.unitBase)||0) + q)*100)/100;
+        return cur;
+      });
+      if(res.committed && res.snapshot.exists()){
+        applied += q;
+        const ubMoi = Number(res.snapshot.val().unitBase)||0;
+        fstore.collection(coll).doc(id).update(coll==='prep_batches_gieogieo'
+          ? { unitBase: ubMoi, qtyRemaining: Math.max(0, ubMoi) } : { unitBase: ubMoi }).catch(()=>{});
+      }
+    }catch(err){ console.warn('[Hoàn kho] hoàn vào tem/lô lỗi', id, err); }
+  }
+  return Math.round(applied*100)/100;
 }
 async function loadStockTransactions(limitN=50){
   const snap = await fstore.collection('stock_transactions_gieogieo').orderBy('createdAt','desc').limit(limitN).get();
@@ -12715,13 +12761,17 @@ async function prepBatchSetQtyCore(batchId, qty){
   }
   await batchRef.update({ _ueRtStale: !rtOk });
 
-  const prepRef = fstore.collection('prep_items_gieogieo').doc(b.prepId);
-  await fstore.runTransaction(async t=>{
-    const doc = await t.get(prepRef);
-    if(!doc.exists) return;
-    const cur = Number(doc.data().currentStock)||0;
-    t.update(prepRef, { currentStock: Math.round((cur+delta)*100)/100, updatedAt: nowISO });
-  });
+  // RT đã đúng số → chốt tồn theo tổng lô; RT lỗi thì cộng tay (lô đã đánh dấu _ueRtStale).
+  if(rtOk) await recomputePrepStock(b.prepId);
+  else{
+    const prepRef = fstore.collection('prep_items_gieogieo').doc(b.prepId);
+    await fstore.runTransaction(async t=>{
+      const doc = await t.get(prepRef);
+      if(!doc.exists) return;
+      const cur = Number(doc.data().currentStock)||0;
+      t.update(prepRef, { currentStock: Math.round((cur+delta)*100)/100, updatedAt: nowISO });
+    });
+  }
 
   return { b, qty, delta, rtOk };
 }
@@ -12790,13 +12840,16 @@ async function prepBatchRestoreCore(batchId, qty){
   // Lô này vừa đóng góp lại đúng bằng ấy vào currentStock (trước đó đang đóng góp 0 vì bị
   // đánh dấu hết) — cộng thẳng vào Firestore, KHÔNG suy lại toàn bộ từ RTDB (app này
   // không chạy engine recompute đầy đủ như POS, chỉ ghi đúng 1 node vừa sửa ở trên).
-  const prepRef = fstore.collection('prep_items_gieogieo').doc(b.prepId);
-  await fstore.runTransaction(async t=>{
-    const doc = await t.get(prepRef);
-    if(!doc.exists) return;
-    const cur = Number(doc.data().currentStock)||0;
-    t.update(prepRef, { currentStock: Math.round((cur+qty)*100)/100, updatedAt: nowISO });
-  });
+  if(rtOk) await recomputePrepStock(b.prepId);
+  else{
+    const prepRef = fstore.collection('prep_items_gieogieo').doc(b.prepId);
+    await fstore.runTransaction(async t=>{
+      const doc = await t.get(prepRef);
+      if(!doc.exists) return;
+      const cur = Number(doc.data().currentStock)||0;
+      t.update(prepRef, { currentStock: Math.round((cur+qty)*100)/100, updatedAt: nowISO });
+    });
+  }
 
   // Chỉ đảo lại đúng dòng hao hụt của lượt đếm gốc khi ĐÂY LÀ LÔ DUY NHẤT bị đánh dấu hết
   // đúng khoảnh khắc đó — có từ 2 lô trở lên thì không tách được phần nào của dòng waste
@@ -14561,57 +14614,88 @@ async function qlReverseStockForOrder(orderId, billCode){
   }
 
   const goc = txs.filter(t => t.reversal !== true && t.type === 'CONSUMPTION' && Number(t.qty) < 0);
-  const gom = {};
-  goc.forEach(t => { gom[t.itemId] = (gom[t.itemId] || 0) + Math.abs(Number(t.qty) || 0); });
+  const gom = {}, allocOf = {};
+  goc.forEach(t => {
+    gom[t.itemId] = (gom[t.itemId] || 0) + Math.abs(Number(t.qty) || 0);
+    if(Array.isArray(t.fifoAllocations)) allocOf[t.itemId] = (allocOf[t.itemId] || []).concat(t.fifoAllocations);
+  });
+  const items = await loadInventoryItems().catch(()=>INVENTORY_ITEMS||[]);
 
-  // Không dùng applyStockTransaction() ở đây: nó không nhận cờ `reversal`, mà
-  // gắn cờ bằng một lượt truy vấn sau đó thì có cửa sổ đua — hai lần xoá gần nhau
-  // sẽ thấy nhau chưa gắn cờ và cộng dồn hai lần. Ghi thẳng trong một transaction
-  // để cờ và số tồn luôn đi cùng nhau.
-  const r1 = await Promise.allSettled(Object.keys(gom).map(itemId =>
-    fstore.runTransaction(async t => {
+  // [UNIT ENGINE] Món có tem: hoàn vào ĐÚNG tem đã bị trừ lúc bán (fifoAllocations), tồn chốt
+  // lại theo tổng mã. Trước đây cộng thẳng currentStock — lượt tính lại kế tiếp bên POS xoá
+  // mất khoản hoàn, tem vẫn nằm ở số đã trừ. Phần không hoàn được vào tem nào → Sổ lệch.
+  // Món không tem: cộng thẳng như cũ.
+  // Không dùng applyStockTransaction() ở đây: nó không nhận cờ `reversal`, mà gắn cờ bằng một
+  // lượt truy vấn sau đó thì có cửa sổ đua — hai lần xoá gần nhau sẽ thấy nhau chưa gắn cờ và
+  // cộng dồn hai lần. Ghi thẳng trong một transaction để cờ và số tồn luôn đi cùng nhau.
+  const r1 = await Promise.allSettled(Object.keys(gom).map(async itemId => {
+    const it = items.find(x=>x.id===itemId);
+    const tem = isTemTrackedItem(it);
+    const applied = tem ? await reverseIntoUnits(itemId, allocOf[itemId], CTN_COLL) : 0;
+    const outside = Math.round((gom[itemId] - applied)*100)/100;
+    let txId = null;
+    await fstore.runTransaction(async t => {
       const ref = fstore.collection('inventory_items_gieogieo').doc(itemId);
       const doc = await t.get(ref);
       if(!doc.exists) throw new Error('Nguyên liệu không còn tồn tại');
-      const next = (Number(doc.data().currentStock) || 0) + gom[itemId];
+      const cur = Number(doc.data().currentStock) || 0;
+      const next = tem ? cur : cur + gom[itemId];
       t.update(ref, { currentStock: next, updatedAt: new Date().toISOString() });
-      t.set(fstore.collection('stock_transactions_gieogieo').doc(), {
+      const txRef = fstore.collection('stock_transactions_gieogieo').doc();
+      txId = txRef.id;
+      t.set(txRef, {
         itemId, type: 'ADJUSTMENT', qty: gom[itemId], resultingStock: next,
         note, staff: 'Quản lý', referenceId: orderId, reversal: true, reversalOf: orderId,
+        ...(tem ? { reversalCoverage: outside > 0.005 ? 'partial' : 'full', ...(outside > 0.005 ? { outsideTem: true } : {}) } : {}),
         createdAt: new Date().toISOString(), businessDate: dkey(new Date()),
         status: 'posted', source: 'management'
       });
-    })
-  ));
+    });
+    if(tem){
+      if(outside > 0.005) await logStockAnomaly('rev_'+txId, { itemId, itemName: (it&&it.name)||'', unit: (it&&it.unit)||'',
+        qty: outside, kind: 'reversal_outside_tem', txType: 'ADJUSTMENT', note, referenceId: orderId, staff: 'Quản lý' });
+      await recomputeTemStock(itemId);
+    }
+  }));
   memoDropItems();   // tồn kho vừa đổi
   r1.forEach(r => { if(r.status === 'fulfilled') ketQua.nguyenLieu++; else { ketQua.loi++; console.warn('[Hoàn kho] nguyên liệu lỗi:', r.reason); } });
 
-  // Bán thành phẩm — sổ riêng, cùng nguyên tắc.
+  // Bán thành phẩm — sổ riêng, cùng nguyên tắc: hoàn vào đúng lô (unitAllocations); phần
+  // không hoàn được vào lô nào giảm "âm chờ đối chiếu" (untrackedPendingDelta); tồn chốt lại
+  // theo tổng lô.
   let ptxs = [];
   try{
     const snap = await fstore.collection('prep_transactions_gieogieo').where('referenceId','==',orderId).get();
     ptxs = snap.docs.map(d => d.data());
   }catch(err){ console.warn('[Hoàn kho] không đọc được sổ bán thành phẩm:', err); }
-  const gomPrep = {};
+  const gomPrep = {}, allocPrep = {};
   ptxs.filter(t => t.reversal !== true && t.type === 'CONSUMPTION' && Number(t.qty) < 0)
-      .forEach(t => { gomPrep[t.prepId] = (gomPrep[t.prepId] || 0) + Math.abs(Number(t.qty) || 0); });
+      .forEach(t => {
+        gomPrep[t.prepId] = (gomPrep[t.prepId] || 0) + Math.abs(Number(t.qty) || 0);
+        if(Array.isArray(t.unitAllocations)) allocPrep[t.prepId] = (allocPrep[t.prepId] || []).concat(t.unitAllocations);
+      });
 
-  const r2 = await Promise.allSettled(Object.keys(gomPrep).map(prepId =>
-    fstore.runTransaction(async t => {
+  const r2 = await Promise.allSettled(Object.keys(gomPrep).map(async prepId => {
+    const applied = await reverseIntoUnits(prepId, allocPrep[prepId], 'prep_batches_gieogieo');
+    const outside = Math.round((gomPrep[prepId] - applied)*100)/100;
+    await fstore.runTransaction(async t => {
       const ref = fstore.collection('prep_items_gieogieo').doc(prepId);
       const doc = await t.get(ref);
       if(!doc.exists) throw new Error('Bán thành phẩm không còn tồn tại');
       const d = doc.data();
-      const next = (Number(d.currentStock) || 0) + gomPrep[prepId];
-      t.update(ref, { currentStock: next, updatedAt: new Date().toISOString() });
+      const next = Number(d.currentStock) || 0;
+      t.update(ref, { updatedAt: new Date().toISOString(),
+        ...(outside > 0.005 ? { untrackedPendingDelta: firebase.firestore.FieldValue.increment(outside) } : {}) });
       t.set(fstore.collection('prep_transactions_gieogieo').doc(), {
         prepId, prepCode: d.code || '', prepName: d.name || '', unit: d.unit || '',
         type: 'ADJUSTMENT', qty: gomPrep[prepId], resultingStock: next,
         note, referenceId: orderId, reversal: true, reversalOf: orderId,
+        reversalCoverage: outside > 0.005 ? 'partial' : 'full',
         createdAt: new Date().toISOString(), businessDate: dkey(new Date()), source: 'management'
       });
-    })
-  ));
+    });
+    await recomputePrepStock(prepId);
+  }));
   r2.forEach(r => { if(r.status === 'fulfilled') ketQua.banThanhPham++; else { ketQua.loi++; console.warn('[Hoàn kho] BTP lỗi:', r.reason); } });
 
   return ketQua;
@@ -23176,6 +23260,7 @@ async function submitPrepAdjust(){
         .sort((a,b)=>String(a.finishedAt||'').localeCompare(String(b.finishedAt||'')));
 
       const jobs = [];
+      const touched = [];   // lô vừa đổi số — phải ghi cả RT (nguồn thật của lô đang mở)
       let remain = Math.abs(diff);
 
       if(diff < 0){
@@ -23189,9 +23274,10 @@ async function submitPrepAdjust(){
           const left = Math.round((cur - take)*100)/100;
           remain -= take;
           jobs.push(fstore.collection('prep_batches_gieogieo').doc(b.id).update({
-            qtyRemaining: left,
+            qtyRemaining: left, unitBase: left,
             ...(left<=0 ? {status:'used_up', usedUpAt:now} : {status:'active'})
           }));
+          touched.push({ b, qty: left });
         }
       } else {
         // Tăng tồn: cộng bù vào lô CŨ NHẤT trước, giới hạn ở sản lượng gốc
@@ -23206,12 +23292,22 @@ async function submitPrepAdjust(){
           const next = Math.round((cur + add)*100)/100;
           remain -= add;
           jobs.push(fstore.collection('prep_batches_gieogieo').doc(b.id).update({
-            qtyRemaining: next, status: 'active'
+            qtyRemaining: next, unitBase: next, status: 'active'
           }));
+          touched.push({ b, qty: next });
         }
       }
 
       await Promise.all(jobs);
+      // [UNIT ENGINE] Trước đây chỉ sửa qtyRemaining — RT giữ số cũ, lượt tính lại kế tiếp bên
+      // POS ghi đè tồn về số cũ. Ghi RT đúng số mới (lô về 0 thì gỡ khỏi RT) rồi chốt theo lô.
+      await Promise.all(touched.map(({b, qty}) => qty > 0
+        ? _ueActiveUnitsRef(p.id).child(b.id).transaction(cur => ({
+            code: (cur && cur.code) || b.batchCode || '', itemName: (cur && cur.itemName) || b.prepName || '',
+            unit: (cur && cur.unit) || b.unit || '', capacity: (cur && cur.capacity) || Number(b.qtyInitial) || qty,
+            openedAt: (cur && cur.openedAt) || Date.now(), unitBase: qty }))
+        : _ueActiveUnitsRef(p.id).child(b.id).remove()));
+      await recomputePrepStock(p.id);
       if(remain > 0.0001){
         toast(diff < 0
           ? `⚠️ Đã chỉnh tồn, nhưng còn ${fmtNum(remain,1)} ${p.unit||''} hao hụt không trừ hết được vào lô nào (tổng các lô không đủ) — kiểm tra lại dữ liệu lô.`
