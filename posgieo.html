@@ -4473,6 +4473,7 @@ async function refreshFifoAlert() {
   // không còn chiếm hết bề ngang) là đủ để nhân viên biết có việc cần xử lý; panel to
   // với nút xác nhận chỉ nên hiện khi họ CHỦ ĐỘNG bấm vào lúc rảnh tay.
   renderFifoAlertBar();
+  prepSugRefreshThrottled();   // gợi ý mẻ dùng chung nút chuông — tối đa 10 phút/lần ở đường này
 }
 
 function toggleFifoAlertBar() {
@@ -4715,12 +4716,14 @@ function renderFifoAlertBar() {
   const bar = document.getElementById('fifoAlertBar');
   if (!dot || !bar) return;
   const n = FIFO_PENDING_CONFIRM.length;
-  dot.style.display = n ? 'flex' : 'none';
+  const cook = (typeof _prepSug !== 'undefined' && _prepSug.list) || [];
+  const tong = n + cook.length;
+  dot.style.display = tong ? 'flex' : 'none';
   if (badge) {
-    badge.textContent = n > 9 ? '9+' : String(n);
-    badge.classList.toggle('show', n > 0);
+    badge.textContent = tong > 9 ? '9+' : String(tong);
+    badge.classList.toggle('show', tong > 0);
   }
-  if (!n || !_fifoAlertExpanded) { bar.style.display = 'none'; bar.innerHTML = ''; return; }
+  if (!tong || !_fifoAlertExpanded) { bar.style.display = 'none'; bar.innerHTML = ''; return; }
   bar.style.display = 'block';
   // [FIX-UI] TRƯỚC ĐÂY câu giải thích "Theo tính toán, tem này vừa dùng hết..." lặp lại
   // NGUYÊN VĂN cho từng tem — với 2-3 tem thì chiếm gần hết chiều cao panel, đẩy nút
@@ -4729,11 +4732,11 @@ function renderFifoAlertBar() {
   // "Thu gọn" cũng đổi sang nền trắng viền rõ (trước là xám nhạt trên nền trắng, khó thấy).
   // Nút "Quét mã xác nhận" đổi từ hồng (var(--gd), trùng tông với lưới menu) sang xanh
   // dương (var(--bi)) để tách bạch hẳn khỏi các nút món trong menu.
-  bar.innerHTML = `
-    <div class="fifo-alert-panel">
+  const thuGon = `<button onclick="toggleFifoAlertBar()" style="background:#fff;border:1.5px solid #ccc;border-radius:10px;padding:5px 10px;font-size:11.5px;font-weight:800;color:#333;cursor:pointer;">Thu gọn</button>`;
+  const fifoHtml = !n ? '' : `
       <div class="fifo-alert-panel-h">
         <div style="font-size:13px;font-weight:800;color:#b91c1c;">Cần xác nhận đã hết (${n})</div>
-        <button onclick="toggleFifoAlertBar()" style="background:#fff;border:1.5px solid #ccc;border-radius:10px;padding:5px 10px;font-size:11.5px;font-weight:800;color:#333;cursor:pointer;">Thu gọn</button>
+        ${thuGon}
       </div>
       <div style="font-size:12px;color:#a16207;margin:2px 0 8px;line-height:1.5;">Các tem dưới đây đã dùng hết theo tính toán — quét mã để xác nhận, hoặc bấm "Chưa hết" nếu cân/đong lại vẫn còn hàng.</div>
       ${FIFO_PENDING_CONFIRM.map(c => `
@@ -4741,7 +4744,21 @@ function renderFifoAlertBar() {
           <div style="font-size:13.5px;font-weight:700;color:var(--td);">${escHtmlPos(c.itemName || '')} <span style="font-size:11px;color:#999;font-weight:600;letter-spacing:.4px;">${escHtmlPos(c.code || '')}</span></div>
           <button onclick="fifoNotEmptyPrompt('${c.id}')" style="width:100%;margin-top:6px;padding:9px;background:#fff;color:#a16207;border:1.5px solid #f6d29a;border-radius:12px;font-family:'Google Sans',sans-serif;font-size:12.5px;font-weight:700;cursor:pointer;">Chưa hết — cân lại</button>
         </div>`).join('')}
-      <button onclick="fifoAlertScanNow()" style="width:100%;margin-top:8px;padding:12px;background:var(--bi);color:#fff;border:none;border-radius:13px;font-family:'Google Sans',sans-serif;font-size:13.5px;font-weight:700;cursor:pointer;">Quét mã xác nhận</button>
+      <button onclick="fifoAlertScanNow()" style="width:100%;margin-top:8px;padding:12px;background:var(--bi);color:#fff;border:none;border-radius:13px;font-family:'Google Sans',sans-serif;font-size:13.5px;font-weight:700;cursor:pointer;">Quét mã xác nhận</button>`;
+  // Gợi ý nấu (xem prepSugRefresh) — cùng nút chuông, chỉ hiện khi nhân viên tự bấm mở.
+  const cookHtml = !cook.length ? '' : `
+      <div class="fifo-alert-panel-h" style="${n ? 'margin-top:14px;' : ''}">
+        <div style="font-size:13px;font-weight:800;color:#92400e;">Nên nấu (${cook.length})</div>
+        ${n ? '' : thuGon}
+      </div>
+      ${cook.map(x => { const t = prepSugLineText(x); return `
+        <button onclick="prepSugGo('${x.prepId}',${x.ratio})" class="fifo-alert-item" style="width:100%;text-align:left;background:#fffbeb;border:1.5px solid #fcd34d;border-radius:12px;padding:10px 12px;margin-top:6px;cursor:pointer;font-family:'Google Sans',sans-serif;">
+          <div style="font-size:13.5px;font-weight:800;color:#78350f;">${escHtmlPos(t.title)}</div>
+          <div style="font-size:12px;color:#92400e;margin-top:2px;">${escHtmlPos(t.why)}</div>
+        </button>`; }).join('')}
+      <div style="font-size:11px;color:#a16207;margin-top:4px;">Bấm để mở Chế biến với số mẻ gợi ý — chỉ là gợi ý.</div>`;
+  bar.innerHTML = `
+    <div class="fifo-alert-panel">${fifoHtml}${cookHtml}
     </div>`;
 }
 
@@ -10983,6 +11000,309 @@ async function genPrepBatchCode(prepItem, businessDate) {
   return capMaKhoDuyNhat('prep_batches_gieogieo', 'batchCode');
 }
 
+// ── GỢI Ý MẺ NẤU THEO NHỊP BÁN (dùng chung POS + quanlygieo — 2 file độc lập nên chép
+// y hệt, sửa 1 bên nhớ sửa bên kia). Hàm thuần, không đọc/ghi gì.
+//   · Bản tổng hợp ngày (ledger_day_summaries_gieogieo/prep_{ngày}):
+//       { h:[24] tổng lượng BTP dùng theo giờ, prep:[{p, c:dùng, w:đổ, pr:nấu, sp:đổ vì hỏng}] }
+//   · Nhịp bán trong ngày: rem[phút] = tỷ lệ lượng dùng CÒN LẠI sau phút đó (trung bình
+//     các ngày) — dùng chung mọi BTP (dữ liệu cho thấy các BTP gần như cùng nhịp).
+//   · Lượng/ngày: trung vị các ngày có bán; trong ngày trộn dần với nhịp thật hôm nay.
+//   · Hàng hết hạn cuối ngày: sáng nấu đủ tới 17h, chiều nấu bù khi sắp hết.
+//     Hàng để nhiều ngày: nấu khi sắp hết, không nấu nhiều hơn lượng bán kịp trong hạn.
+//   · Tự ngừng gợi ý khi phần còn lại của ngày < 8% (không cài giờ).
+const PREP_SUG = { s:0.10, morningUntilMin:17*60, stopShare:0.08, bufMin:30, bufMinMulti:120, step:0.25, minDays:7, maxRatio:10 };
+function prepSugProfile(sums){
+  const acc = new Array(1441).fill(0); let n = 0;
+  (sums||[]).forEach(s=>{
+    const h = (s && s.h) || []; const T = h.reduce((a,b)=>a+Math.max(0,Number(b)||0),0);
+    if(!(T > 0)) return; n++;
+    // phần còn lại sau phút m: giờ sau nguyên vẹn + phần chưa qua của giờ hiện tại
+    const after = new Array(25).fill(0);
+    for(let H=23; H>=0; H--) after[H] = after[H+1] + Math.max(0,Number(h[H])||0);
+    for(let m=0; m<=1440; m++){
+      const H = Math.min(23, Math.floor(m/60)), f = m>=1440 ? 1 : (m%60)/60;
+      acc[m] += (after[H+1] + Math.max(0,Number(h[H])||0)*(1-f)) / T;
+    }
+  });
+  return n ? { rem: acc.map(x=>x/n), days: n } : null;
+}
+function prepSugDemand(sums, prepId){
+  const v = [];
+  (sums||[]).forEach(s=>{
+    const T = ((s && s.h) || []).reduce((a,b)=>a+Math.max(0,Number(b)||0),0);
+    if(!(T > 0)) return;           // ngày quán không bán gì → bỏ, không kéo trung vị xuống 0
+    const r = (s.prep||[]).find(x=>x.p===prepId);
+    v.push(Math.max(0, Number(r && r.c) || 0));
+  });
+  if(!v.length) return { d:0, n:0 };
+  v.sort((a,b)=>a-b);
+  const mid = Math.floor(v.length/2);
+  return { d: v.length%2 ? v[mid] : (v[mid-1]+v[mid])/2, n: v.length };
+}
+// Số mẻ hợp lệ theo NL đếm được: A (quét mã, 1 tem = 1 cái) và B (đơn vị "cái", công
+// thức dùng số NGUYÊN) phải ra số cái nguyên; C (công thức đã lẻ sẵn) không ràng buộc.
+function prepSugRatioOk(prep, r, khoItems, isAtomic){
+  const per = {};
+  (prep.batchInputs||[]).forEach(x=>{ if(x.itemId && Number(x.qty)>0) per[x.itemId]=(per[x.itemId]||0)+Number(x.qty); });
+  for(const [id, q] of Object.entries(per)){
+    const it = (khoItems||[]).find(i=>i.id===id);
+    if(!it || it.stockManaged===false) continue;
+    const u = String(it.unit||'').trim().toLowerCase();
+    if(u!=='cái' && u!=='miếng') continue;
+    const r2 = x => Math.round(x*100)/100;
+    const need = isAtomic(it) || Number.isInteger(r2(q));
+    if(need && !Number.isInteger(r2(q*r))) return false;
+  }
+  return true;
+}
+function prepSugPickRatio(prep, raw, dir, khoItems, isAtomic){
+  const st = PREP_SUG.step, max = PREP_SUG.maxRatio;
+  if(dir === 'up'){
+    for(let k=Math.max(1, Math.ceil(raw/st - 1e-9)); k*st<=max; k++) if(prepSugRatioOk(prep, k*st, khoItems, isAtomic)) return k*st;
+    return null;
+  }
+  for(let k=Math.floor(raw/st + 1e-9); k>=1; k--) if(prepSugRatioOk(prep, k*st, khoItems, isAtomic)) return k*st;
+  return null;
+}
+// o: { prep, rem, dest, nDays, nowMin, used, stock, pending, cookedToday, leadMin, khoItems, isAtomic }
+function prepSugEvaluate(o){
+  const P = PREP_SUG, prep = o.prep, Y = Number(prep.batchYield)||0;
+  if(!(Y > 0) || !o.rem || o.nDays < P.minDays || !(o.dest > 0)) return null;
+  const rem = o.rem, at = m => rem[Math.max(0, Math.min(1440, Math.round(m)))];
+  const now = o.nowMin, L = o.leadMin;
+  if(at(now + L) < P.stopShare) return null;                        // cuối ngày: thôi gợi ý
+  const done = 1 - at(now);
+  const pace = done > 0.1 ? (o.used||0)/done : o.dest;
+  const w = Math.min(1, done/0.5);
+  const Dt = w*pace + (1-w)*o.dest;                                 // lượng cả ngày ước theo nhịp hôm nay
+  const avail = Math.max(0, o.stock||0) + Math.max(0, o.pending||0);
+  const eod = prep.shelfLifeType === 'endOfDay';
+  // Cần đủ tới lúc mẻ mới kịp xong + đệm. Hàng hết hạn cuối ngày đệm ngắn (nấu sớm là
+  // dễ đổ); hàng để nhiều ngày đệm dài (dư không mất gì, thiếu mới mất khách).
+  const soon = Dt*(at(now) - at(now + L + (eod ? P.bufMin : P.bufMinMulti)));
+  if(avail >= soon) return null;
+  const coverLead = Math.max(0, avail - Dt*(at(now) - at(now + L)));  // phần tồn còn lại sau thời gian nấu
+  let need, kind, capped = false, ratio;
+  if(eod){
+    if(!o.cookedToday){ kind = 'morning';
+      need = Dt*(at(now) - at(Math.max(P.morningUntilMin, now + L + P.bufMin)))*(1+P.s) - avail;
+    } else { kind = 'topup'; need = Dt*at(now + L)*(1+P.s) - coverLead; }
+    ratio = prepSugPickRatio(prep, Math.max(0.01, need)/Y, 'up', o.khoItems, o.isAtomic);
+  } else {
+    kind = 'restock';
+    const shelfDays = prep.shelfLifeType === 'hours' ? Math.max(0.5, (Number(prep.shelfLifeHours)||0)/24) : 7;
+    need = Dt*(at(now + L) + 1)*(1+P.s) - coverLead;                 // hết hôm nay + thêm 1 ngày
+    const capRatio = (o.dest*shelfDays)/Y;                           // không hơn lượng bán kịp trong hạn
+    ratio = prepSugPickRatio(prep, Math.max(0.01, need)/Y, 'up', o.khoItems, o.isAtomic);
+    if(ratio != null && ratio > capRatio){ const dn = prepSugPickRatio(prep, capRatio, 'down', o.khoItems, o.isAtomic); if(dn != null){ ratio = dn; capped = true; } }
+  }
+  if(ratio == null) return null;
+  let runout = null;                                                 // giờ dự kiến hết
+  for(let m=now; m<=1440; m+=5){ if(Dt*(at(now)-at(m)) > avail){ runout = m; break; } }
+  return { ratio, qty: ratio*Y, kind, capped, runoutMin: runout, dayEst: Dt, avail };
+}
+
+// ── Lịch sử cho gợi ý mẻ: bản tổng hợp ngày (dùng CHUNG collection với loại stock_
+// bên quanlygieo). Chỉ ngày đã quá 3 ngày (bill không còn sửa/huỷ). Mỗi máy đọc tối đa
+// 14 bản mỗi ngày, rồi lưu trong máy; ngày nào chưa có bản thì máy cần trước tự dựng 1
+// lần từ sổ BTP và lưu lại cho các máy sau. RT KHÔNG dùng để lưu lịch sử.
+const PREP_DAY_SUM_COLL = 'ledger_day_summaries_gieogieo';
+const PREP_DAY_SUM_V = 1;
+const PREP_SUG_BUFFER_DAYS = 3;
+const PREP_SUG_HIST_DAYS = 14;
+const PREP_SPOIL_RE = /chua|hôi|hỏng|mốc|thiu|ôi|nhớt/i;
+function prepDaySumFromRows(dateKey, rows) {
+  const h = new Array(24).fill(0), per = {};
+  let maxCreatedAt = '';
+  (rows || []).forEach(t => {
+    if (typeof t.createdAt === 'string' && t.createdAt > maxCreatedAt) maxCreatedAt = t.createdAt;
+    if (!t.prepId) return;
+    const x = per[t.prepId] || (per[t.prepId] = { p: t.prepId, c: 0, w: 0, pr: 0, sp: 0 });
+    const q = Number(t.qty) || 0, note = String(t.reason || t.note || '');
+    if (t.type === 'CONSUMPTION') {
+      x.c += -q;
+      const d = new Date(t.createdAt); if (!isNaN(d)) h[d.getHours()] += -q;
+    } else if (t.type === 'ADJUSTMENT' && /XOÁ ĐƠN/.test(note)) x.c -= q;
+    else if (t.type === 'WASTE' && q < 0) { x.w += -q; if (PREP_SPOIL_RE.test(note)) x.sp += -q; }
+    else if (t.type === 'PRODUCTION' && q > 0) x.pr += q;
+  });
+  const r1 = v => Math.round(v * 10) / 10;
+  return { v: PREP_DAY_SUM_V, kind: 'prep', date: dateKey, maxCreatedAt, rowCount: (rows || []).length,
+    h: h.map(r1), prep: Object.values(per).map(x => ({ p: x.p, c: r1(x.c), w: r1(x.w), pr: r1(x.pr), sp: r1(x.sp) })) };
+}
+function _prepSugShift(k, n) { const d = new Date(k + 'T00:00:00'); d.setDate(d.getDate() + n); return posDateKey(d); }
+const _prepSug = { histDay: '', sums: [], hist: null, usedDay: '', used: {}, usedReady: false, list: [], busy: false, lastAt: 0, again: false,
+  rt: {}, rtAt: 0, touched: new Set(), full: true };   // rt: prepId -> {stock, cooked} đọc từ RT
+async function prepSugLoadHistory() {
+  const today = posDateKey();
+  if (_prepSug.histDay === today && _prepSug.hist) return;
+  try {
+    const c = JSON.parse(localStorage.getItem('prepSugHist_v1') || 'null');
+    if (c && c.day === today && Array.isArray(c.sums)) { _prepSug.sums = c.sums; _prepSug.hist = prepSugProfile(c.sums); _prepSug.histDay = today; return; }
+  } catch (e) {}
+  const end = _prepSugShift(today, -(PREP_SUG_BUFFER_DAYS + 1)), start = _prepSugShift(end, -(PREP_SUG_HIST_DAYS - 1));
+  const FP = firebase.firestore.FieldPath.documentId();
+  const snap = await fstore.collection(PREP_DAY_SUM_COLL).where(FP, '>=', 'prep_' + start).where(FP, '<=', 'prep_' + end).get();
+  const have = {};
+  snap.forEach(d => { const x = d.data(); if (x && x.v === PREP_DAY_SUM_V && x.date) have[x.date] = x; });
+  const segs = [];
+  for (let k = start; k <= end; k = _prepSugShift(k, 1)) {
+    if (have[k]) continue;
+    const last = segs[segs.length - 1];
+    if (last && last.b === _prepSugShift(k, -1)) last.b = k; else segs.push({ a: k, b: k });
+  }
+  const builtAt = new Date().toISOString();
+  for (const { a, b } of segs) {
+    const rows = (await fstore.collection('prep_transactions_gieogieo').where('businessDate', '>=', a).where('businessDate', '<=', b).get()).docs.map(d => d.data());
+    const byDay = {};
+    rows.forEach(t => { if (t.businessDate) (byDay[t.businessDate] = byDay[t.businessDate] || []).push(t); });
+    for (let k = a; k <= b; k = _prepSugShift(k, 1)) {
+      const sum = { ...prepDaySumFromRows(k, byDay[k] || []), builtAt };
+      have[k] = sum;
+      fstore.collection(PREP_DAY_SUM_COLL).doc('prep_' + k).set(sum).catch(err => console.warn('[Gợi ý mẻ] không lưu được tổng hợp ngày', k, err));
+    }
+  }
+  const sums = Object.values(have).sort((x, y) => String(x.date).localeCompare(String(y.date)));
+  _prepSug.sums = sums; _prepSug.hist = prepSugProfile(sums); _prepSug.histDay = today;
+  try { localStorage.setItem('prepSugHist_v1', JSON.stringify({ day: today, sums })); } catch (e) {}
+}
+// Lượng BTP đã dùng HÔM NAY — tính từ bill hôm nay POS đang giữ sẵn (không đọc thêm),
+// sau đó cộng dồn theo từng lượt bán.
+async function _prepSugInitUsed() {
+  const today = posDateKey(), display = posDateKeyToDisplay(today);
+  const [recipes, toppingRecipes, packagingPresets, packagingItemOverrides, baggingRules, pkgRulesPack, baggingTable] = await Promise.all([ensureRecipesLoadedPOS(), ensureToppingRecipesLoadedPOS(), ensurePackagingPresetsLoadedPOS(), ensurePackagingItemOverridesLoadedPOS(), ensurePackagingBaggingRulesLoadedPOS(), ensurePackagingRulesLoadedPOS(), ensurePackagingBaggingTableLoadedPOS()]);
+  const used = {};
+  (orders || []).filter(o => o && o.date === display && !o.backfilled).forEach(o => {
+    try {
+      const { prepAgg } = computeConsumptionForOrder(o, recipes, toppingRecipes, packagingPresets, packagingItemOverrides, baggingRules, pkgRulesPack.rules, pkgRulesPack.config, baggingTable);
+      Object.entries(prepAgg || {}).forEach(([id, q]) => { used[id] = (used[id] || 0) + Math.abs(Number(q) || 0); });
+    } catch (e) {}
+  });
+  _prepSug.used = used; _prepSug.usedDay = today; _prepSug.usedReady = true;
+}
+function prepSugOnUsage(prepAgg) {
+  try {
+    if (_prepSug.usedReady && _prepSug.usedDay === posDateKey())
+      Object.entries(prepAgg || {}).forEach(([id, q]) => { _prepSug.used[id] = (_prepSug.used[id] || 0) + Math.abs(Number(q) || 0); });
+    Object.keys(prepAgg || {}).forEach(id => _prepSug.touched.add(id));
+    if (Object.keys(prepAgg || {}).length) prepSugRefresh(false);
+  } catch (e) { console.warn('[Gợi ý mẻ] ghi lượt dùng lỗi', e); }
+}
+// Thời gian nấu thực tế (bắt đầu → xong) — học từ các lô đang còn mỗi lần nạp màn Chế biến.
+function _prepSugLearnLead(batches) {
+  try {
+    const m = JSON.parse(localStorage.getItem('prepSugLead_v1') || '{}');
+    const by = {};
+    (batches || []).forEach(b => {
+      const a = Date.parse(b.startedAt || ''), f = Date.parse(b.finishedAt || '');
+      if (a && f && f > a) (by[b.prepId] = by[b.prepId] || []).push((f - a) / 60000);
+    });
+    Object.entries(by).forEach(([id, v]) => { v.sort((x, y) => x - y); m[id] = Math.round(Math.min(120, Math.max(10, v[Math.floor(v.length / 2)]))); });
+    localStorage.setItem('prepSugLead_v1', JSON.stringify(m));
+  } catch (e) {}
+}
+function _prepSugLead(prep) {
+  try { const m = JSON.parse(localStorage.getItem('prepSugLead_v1') || '{}'); if (m[prep.id]) return m[prep.id]; } catch (e) {}
+  return Math.max(30, (Number(prep.prepTimeMinutes) || 0) + 20);
+}
+// Tính lại danh sách "Nên nấu". Gọi sau lượt bán có BTP, khi mở màn Chế biến, khi bắt đầu/
+// xong mẻ. KHÔNG hẹn giờ quét. Chạy nền, lỗi thì bỏ qua — không bao giờ chặn bán hàng.
+// full=false (sau lượt bán): chỉ đọc lại RT của đúng BTP vừa bị trừ; các BTP khác dùng số
+// đã đọc trước (tồn của chúng không đổi vì không bán). full (mặc định): đọc lại tất cả.
+function prepSugRefresh(full) {
+  if (full !== false) _prepSug.full = true;
+  if (_prepSug.busy) { _prepSug.again = true; return; }
+  _prepSug.busy = true;
+  setTimeout(() => { _prepSugRefreshImpl().catch(err => console.warn('[Gợi ý mẻ] lỗi', err))
+    .finally(() => { _prepSug.busy = false; if (_prepSug.again) { _prepSug.again = false; prepSugRefresh(false); } }); }, 1500);
+}
+async function _prepSugRefreshImpl() {
+  if (!fstore || !db) return;
+  await prepSugLoadHistory();
+  if (!_prepSug.hist) { _prepSug.list = []; renderFifoAlertBar(); return; }
+  if (!_prepSug.usedReady || _prepSug.usedDay !== posDateKey()) await _prepSugInitUsed();
+  if (!PREP_ITEMS_CACHE_POS.length) {
+    const ps = await fstore.collection('prep_items_gieogieo').get();
+    PREP_ITEMS_CACHE_POS = ps.docs.map(d => ({ id: d.id, ...d.data() })).filter(p => p.active !== false)
+      .sort((a, b) => String(a.code || '').localeCompare(String(b.code || ''), 'vi'));
+  }
+  if (typeof ensureKhoItemsPOS === 'function') await ensureKhoItemsPOS().catch(() => {});
+  const now = new Date(), nowMin = now.getHours() * 60 + now.getMinutes();
+  const dayStart = new Date(now); dayStart.setHours(0, 0, 0, 0);
+  const found = [];
+  const full = _prepSug.full || Date.now() - _prepSug.rtAt > 10 * 60000 || new Date(_prepSug.rtAt).getDate() !== now.getDate();
+  const touched = _prepSug.touched; _prepSug.touched = new Set(); _prepSug.full = false;
+  if (full) _prepSug.rtAt = Date.now();
+  for (const prep of PREP_ITEMS_CACHE_POS) {
+    const dm = prepSugDemand(_prepSug.sums, prep.id);
+    if (dm.n < PREP_SUG.minDays || !(dm.d > 0)) continue;
+    if (full || touched.has(prep.id) || !_prepSug.rt[prep.id]) {
+      const snap = await _ueActiveUnitsRef(prep.id).once('value');   // RT: đúng vai trò "lô đang còn"
+      let st = 0, ck = false;
+      Object.entries(snap.val() || {}).forEach(([id, u]) => {
+        if (id === '__prepLock' || !u || u.finishedDebt || u.discardPending) return;
+        st += Math.max(0, Number(u.unitBase) || 0);
+        if (Number(u.openedAt) >= dayStart.getTime()) ck = true;
+      });
+      _prepSug.rt[prep.id] = { stock: st, cooked: ck };
+    }
+    const { stock, cooked } = _prepSug.rt[prep.id];
+    const base = { prep, rem: _prepSug.hist.rem, dest: dm.d, nDays: dm.n, nowMin, used: _prepSug.used[prep.id] || 0,
+      stock, pending: 0, cookedToday: cooked, leadMin: _prepSugLead(prep), khoItems: KHO_ITEMS_CACHE, isAtomic: isAtomicUnitItem };
+    if (prepSugEvaluate(base)) found.push(base);
+  }
+  // Có món cần nấu mới hỏi Firestore mẻ đang nấu (thường 0–2 lô) — tránh gợi ý trùng mẻ
+  // mà máy khác vừa bắt đầu.
+  if (found.length) {
+    const cs = await fstore.collection('prep_batches_gieogieo').where('status', '==', 'cooking').get();
+    const pend = {};
+    cs.forEach(d => { const b = d.data(), p = PREP_ITEMS_CACHE_POS.find(x => x.id === b.prepId);
+      const q = Number(b.qtyInitial) || (Number(b.ratio) || 1) * (Number(p && p.batchYield) || 0);
+      pend[b.prepId] = (pend[b.prepId] || 0) + q; if (p) found.find(f => f.prep.id === b.prepId && (f.cookedToday = true)); });
+    found.forEach(f => { f.pending = pend[f.prep.id] || 0; });
+  }
+  _prepSug.list = found.map(f => ({ o: f, r: prepSugEvaluate(f) })).filter(x => x.r)
+    .map(({ o, r }) => ({ prepId: o.prep.id, name: o.prep.name || '', unit: o.prep.unit || '', ...r, stock: o.stock }))
+    .sort((a, b) => (a.runoutMin ?? 9999) - (b.runoutMin ?? 9999));
+  _prepSug.lastAt = Date.now();
+  renderFifoAlertBar();
+  const box = document.getElementById('prepSugCard');
+  if (box) box.outerHTML = prepSugCardHTML();
+}
+function prepSugRefreshThrottled() {
+  if (Date.now() - _prepSug.lastAt > 10 * 60000) prepSugRefresh();
+}
+function _prepSugTime(m) { return m == null ? '' : String(Math.floor(m / 60)).padStart(2, '0') + 'h' + String(m % 60).padStart(2, '0'); }
+function prepSugLineText(x) {
+  const soMe = fmtPrepQty(x.ratio) + ' mẻ', luong = fmtPrepQty(Math.round(x.qty)) + ' ' + x.unit;
+  const con = 'còn ~' + fmtPrepQty(Math.round(x.stock)) + ' ' + x.unit;
+  const why = x.kind === 'morning' ? 'nấu đầu ngày, đủ bán tới khoảng 17h — chiều sẽ nhắc nấu bù nếu bán chạy'
+    : x.kind === 'topup' ? con + (x.runoutMin != null ? ', dự kiến hết lúc ' + _prepSugTime(x.runoutMin) : '')
+    : con + (x.runoutMin != null ? ', dự kiến hết lúc ' + _prepSugTime(x.runoutMin) : '') + (x.capped ? ' · giới hạn theo lượng bán kịp trong hạn dùng' : '');
+  return { title: x.name + ' — nấu ' + soMe + ' (~' + luong + ')', why };
+}
+function prepSugGo(prepId, ratio) {
+  _fifoAlertExpanded = false; renderFifoAlertBar();
+  window._prepSugPreselect = { prepId, ratio };
+  openPrepBatchScreen();
+}
+function prepSugCardHTML() {
+  const list = _prepSug.list || [];
+  if (!list.length) return '<div id="prepSugCard"></div>';
+  return `<div id="prepSugCard" class="wal-section" style="margin:0 0 14px;border:1.5px solid #f59e0b;background:#fffbeb;">
+    <div class="wal-section-title" style="color:#92400e;">🔔 Nên nấu</div>
+    ${list.map(x => { const t = prepSugLineText(x); return `<button onclick="prepSugPick('${x.prepId}',${x.ratio})" style="width:100%;text-align:left;padding:11px 12px;margin-top:6px;background:#fff;border:1.5px solid #fcd34d;border-radius:12px;font-family:'Google Sans',sans-serif;cursor:pointer;">
+      <div style="font-size:14.5px;font-weight:800;color:#78350f;">${escHtmlPos(t.title)}</div>
+      <div style="font-size:12px;color:#92400e;margin-top:2px;">${escHtmlPos(t.why)}</div></button>`; }).join('')}
+    <div style="font-size:11px;color:#a16207;margin-top:6px;">Chỉ là gợi ý — vẫn chọn số mẻ khác được.</div>
+  </div>`;
+}
+function prepSugPick(prepId, ratio) {
+  if (!PREP_ITEMS_CACHE_POS.find(x => x.id === prepId)) return;
+  prepBatchState.prepId = prepId;
+  prepBatchSetRatio(ratio);
+}
+
 async function openPrepBatchScreen() {
   showScreen('prepBatchScreen');
   _prepActiveListExpanded = false;
@@ -11021,6 +11341,11 @@ async function openPrepBatchScreen() {
   preloadVesselImagesPOS(PREP_ITEMS_CACHE_POS.map(x => x.id));
   const first = PREP_ITEMS_CACHE_POS[0];
   prepBatchState = { prepId: first.id, ratio: 1, actualYield: Number(first.batchYield) || 0 };
+  _prepSugLearnLead(PREP_BATCHES_CACHE_POS);
+  const pre = window._prepSugPreselect; window._prepSugPreselect = null;
+  const preP = pre && PREP_ITEMS_CACHE_POS.find(x => x.id === pre.prepId);
+  if (preP) prepBatchState = { prepId: preP.id, ratio: pre.ratio, actualYield: round2((Number(preP.batchYield) || 0) * pre.ratio) };
+  prepSugRefresh();
 
   // [MỚI] Có tiến trình quét mã dở dang được lưu tạm (xem prepStartGateScan) — khôi
   // phục đúng thành phẩm/tỷ lệ mẻ đang quét dở và mở thẳng màn quét, thay vì màn
@@ -11129,6 +11454,7 @@ function renderPrepBatchForm() {
   const ratioBtn = (label, val) => `<button onclick="prepBatchSetRatio(${val})" style="flex:1;min-width:64px;min-height:44px;padding:11px 6px;border-radius:12px;border:1.5px solid ${Math.abs(r-val)<0.001?'var(--gd)':'#e6e1d2'};background:${Math.abs(r-val)<0.001?'#FDE6EA':'#fff'};color:${Math.abs(r-val)<0.001?'var(--gd)':'#888'};font-family:'Google Sans',sans-serif;font-weight:700;font-size:13.5px;cursor:pointer;">${label}</button>`;
 
   box.innerHTML = `
+    ${prepSugCardHTML()}
     ${_prepBatchesLoadError ? `
     <div class="wal-section" style="margin:0 0 14px;border:1.5px solid #fca5a5;background:#fee2e2;">
       <div class="wal-section-title" style="color:#b91c1c;">⚠️ Không tải được danh sách lô đang chế biến</div>
@@ -11504,17 +11830,23 @@ function prepCountReadInputs(idPrefix) {
   if(wv===''&&pv==='')return null;
   return {whole:wv===''?0:Number(wv),partial:pv===''?0:Number(pv)};
 }
-// Chỉ chặn số lẻ với NL bắt quét mã (isAtomicUnitItem: 1 tem = 1 cái, kiểm soát
-// tồn theo từng cái). NL đơn vị "cái" nhưng kiểm kê theo hộp/thùng (1 tem gộp nhiều
-// cái) vẫn được nấu mẻ lẻ — tồn trừ theo số thập phân như NL cân.
+// Chặn nấu khi số mẻ làm NL đếm được ra số cái LẺ:
+//   A. NL bắt quét mã (isAtomicUnitItem: 1 tem = 1 cái, kiểm kê theo cái) — luôn chặn.
+//   B. NL đơn vị "cái/miếng" (kiểm kê theo hộp/thùng) mà CÔNG THỨC dùng số cái NGUYÊN
+//      (vd 3 túi trà/mẻ) — cũng chặn: không có nửa túi trà.
+//   C. Công thức đã lẻ sẵn (vd bột rau câu 0,25 cái/mẻ) — không chặn, nấu mẻ lẻ bình thường.
+// Gợi ý mẻ (prepSugRatioOk) dùng đúng quy tắc này để không bao giờ gợi ý số mẻ bị chặn.
 function prepCountQuantityError(p,ratio) {
-  const total=new Map();
+  const per=new Map();
   (p.batchInputs||[]).filter(r=>r.itemId&&Number(r.qty)>0).forEach(r=>
-    total.set(r.itemId,(total.get(r.itemId)||0)+Number(r.qty)*ratio));
-  for(const [id,qty] of total){
+    per.set(r.itemId,(per.get(r.itemId)||0)+Number(r.qty)));
+  for(const [id,perBatch] of per){
     const item=KHO_ITEMS_CACHE.find(x=>x.id===id);
-    if(isAtomicUnitItem(item) && !Number.isInteger(round2(qty)))
-      return 'Định mức '+item.name+' × tỷ lệ mẻ ra '+round2(qty)+' cái lẻ — chỉnh tỷ lệ hoặc công thức';
+    if(!item||item.stockManaged===false||!prepReconIsCountable(item))continue;
+    const qty=round2(perBatch*ratio);
+    if(!(isAtomicUnitItem(item)||Number.isInteger(round2(perBatch))))continue;   // loại C
+    if(!Number.isInteger(qty))
+      return 'Định mức '+item.name+' × tỷ lệ mẻ ra '+qty+' cái lẻ — chọn số mẻ khác để ra số cái nguyên';
   }
   return '';
 }
@@ -12861,6 +13193,7 @@ async function _startPrepBatchImpl(preResolvedStaff, atomicScanDone, atomicScann
 
     toast(mins > 0 ? `🔥 Bắt đầu chế biến — dự kiến ${mins} phút` : '🔥 Đã bắt đầu chế biến');
     refreshFifoAlert().catch(() => {}); // mẻ này có thể vừa làm cạn tem nguyên liệu nào đó
+    prepSugRefresh();                    // mẻ vừa bắt đầu → bỏ gợi ý trùng
     await loadPrepBatchesPOS();
     renderPrepBatchForm();
   } catch (err) {
@@ -13495,6 +13828,7 @@ async function _submitPrepFinishImpl() {
     refreshPrepYieldStatsPOS(b.prepId).catch(err => console.warn('[Yield] cập nhật giá vốn lỗi:', err));
     // Đồng bộ lại nền cho chắc (lô do máy khác tạo...) — KHÔNG await, không chặn UI.
     loadPrepBatchesPOS().catch(err => console.warn('loadPrepBatchesPOS (nền) lỗi:', err));
+    prepSugRefresh();   // mẻ vừa xong → tồn BTP đổi, tính lại gợi ý
   } catch (err) {
     console.error('submitPrepFinish failed', err);
     toast('❌ Lỗi: ' + (err.code || err.message || err));
@@ -21259,6 +21593,7 @@ async function applySalesConsumptionPOS(order, orderId, businessDate) {
       ...prepIds.map(pid => applyPrepConsumptionPOS(pid, prepAgg[pid], note, orderId, businessDate, orderId + '_prep_' + pid, isBackfillAfterClose))
     ]);
     const allIds = [...ingredientIds, ...prepIds];
+    if (!isBackfillAfterClose && !(order && order.backfilled) && prepIds.length) prepSugOnUsage(prepAgg);
     // [BUG "GOGS lỗi không có cơ chế theo dõi durable" — FIX] TRƯỚC ĐÂY chỉ console.warn rồi
     // thôi — nhân viên/Quản lý không có cách nào biết bill nào từng bị thiếu 1 dòng trừ kho để
     // tự bù, kho thiếu âm thầm mãi. Chưa xây hàng đợi retry tự động đầy đủ (pending/processing/

@@ -10299,10 +10299,259 @@ let _dbBusy = false;
 
 function dbNgayMai(){ const d = new Date(); d.setDate(d.getDate()+1); return dkey(d); }
 
+// ── GỢI Ý MẺ NẤU THEO NHỊP BÁN (dùng chung POS + quanlygieo — 2 file độc lập nên chép
+// y hệt, sửa 1 bên nhớ sửa bên kia). Hàm thuần, không đọc/ghi gì.
+//   · Bản tổng hợp ngày (ledger_day_summaries_gieogieo/prep_{ngày}):
+//       { h:[24] tổng lượng BTP dùng theo giờ, prep:[{p, c:dùng, w:đổ, pr:nấu, sp:đổ vì hỏng}] }
+//   · Nhịp bán trong ngày: rem[phút] = tỷ lệ lượng dùng CÒN LẠI sau phút đó (trung bình
+//     các ngày) — dùng chung mọi BTP (dữ liệu cho thấy các BTP gần như cùng nhịp).
+//   · Lượng/ngày: trung vị các ngày có bán; trong ngày trộn dần với nhịp thật hôm nay.
+//   · Hàng hết hạn cuối ngày: sáng nấu đủ tới 17h, chiều nấu bù khi sắp hết.
+//     Hàng để nhiều ngày: nấu khi sắp hết, không nấu nhiều hơn lượng bán kịp trong hạn.
+//   · Tự ngừng gợi ý khi phần còn lại của ngày < 8% (không cài giờ).
+const PREP_SUG = { s:0.10, morningUntilMin:17*60, stopShare:0.08, bufMin:30, bufMinMulti:120, step:0.25, minDays:7, maxRatio:10 };
+function prepSugProfile(sums){
+  const acc = new Array(1441).fill(0); let n = 0;
+  (sums||[]).forEach(s=>{
+    const h = (s && s.h) || []; const T = h.reduce((a,b)=>a+Math.max(0,Number(b)||0),0);
+    if(!(T > 0)) return; n++;
+    // phần còn lại sau phút m: giờ sau nguyên vẹn + phần chưa qua của giờ hiện tại
+    const after = new Array(25).fill(0);
+    for(let H=23; H>=0; H--) after[H] = after[H+1] + Math.max(0,Number(h[H])||0);
+    for(let m=0; m<=1440; m++){
+      const H = Math.min(23, Math.floor(m/60)), f = m>=1440 ? 1 : (m%60)/60;
+      acc[m] += (after[H+1] + Math.max(0,Number(h[H])||0)*(1-f)) / T;
+    }
+  });
+  return n ? { rem: acc.map(x=>x/n), days: n } : null;
+}
+function prepSugDemand(sums, prepId){
+  const v = [];
+  (sums||[]).forEach(s=>{
+    const T = ((s && s.h) || []).reduce((a,b)=>a+Math.max(0,Number(b)||0),0);
+    if(!(T > 0)) return;           // ngày quán không bán gì → bỏ, không kéo trung vị xuống 0
+    const r = (s.prep||[]).find(x=>x.p===prepId);
+    v.push(Math.max(0, Number(r && r.c) || 0));
+  });
+  if(!v.length) return { d:0, n:0 };
+  v.sort((a,b)=>a-b);
+  const mid = Math.floor(v.length/2);
+  return { d: v.length%2 ? v[mid] : (v[mid-1]+v[mid])/2, n: v.length };
+}
+// Số mẻ hợp lệ theo NL đếm được: A (quét mã, 1 tem = 1 cái) và B (đơn vị "cái", công
+// thức dùng số NGUYÊN) phải ra số cái nguyên; C (công thức đã lẻ sẵn) không ràng buộc.
+function prepSugRatioOk(prep, r, khoItems, isAtomic){
+  const per = {};
+  (prep.batchInputs||[]).forEach(x=>{ if(x.itemId && Number(x.qty)>0) per[x.itemId]=(per[x.itemId]||0)+Number(x.qty); });
+  for(const [id, q] of Object.entries(per)){
+    const it = (khoItems||[]).find(i=>i.id===id);
+    if(!it || it.stockManaged===false) continue;
+    const u = String(it.unit||'').trim().toLowerCase();
+    if(u!=='cái' && u!=='miếng') continue;
+    const r2 = x => Math.round(x*100)/100;
+    const need = isAtomic(it) || Number.isInteger(r2(q));
+    if(need && !Number.isInteger(r2(q*r))) return false;
+  }
+  return true;
+}
+function prepSugPickRatio(prep, raw, dir, khoItems, isAtomic){
+  const st = PREP_SUG.step, max = PREP_SUG.maxRatio;
+  if(dir === 'up'){
+    for(let k=Math.max(1, Math.ceil(raw/st - 1e-9)); k*st<=max; k++) if(prepSugRatioOk(prep, k*st, khoItems, isAtomic)) return k*st;
+    return null;
+  }
+  for(let k=Math.floor(raw/st + 1e-9); k>=1; k--) if(prepSugRatioOk(prep, k*st, khoItems, isAtomic)) return k*st;
+  return null;
+}
+// o: { prep, rem, dest, nDays, nowMin, used, stock, pending, cookedToday, leadMin, khoItems, isAtomic }
+function prepSugEvaluate(o){
+  const P = PREP_SUG, prep = o.prep, Y = Number(prep.batchYield)||0;
+  if(!(Y > 0) || !o.rem || o.nDays < P.minDays || !(o.dest > 0)) return null;
+  const rem = o.rem, at = m => rem[Math.max(0, Math.min(1440, Math.round(m)))];
+  const now = o.nowMin, L = o.leadMin;
+  if(at(now + L) < P.stopShare) return null;                        // cuối ngày: thôi gợi ý
+  const done = 1 - at(now);
+  const pace = done > 0.1 ? (o.used||0)/done : o.dest;
+  const w = Math.min(1, done/0.5);
+  const Dt = w*pace + (1-w)*o.dest;                                 // lượng cả ngày ước theo nhịp hôm nay
+  const avail = Math.max(0, o.stock||0) + Math.max(0, o.pending||0);
+  const eod = prep.shelfLifeType === 'endOfDay';
+  // Cần đủ tới lúc mẻ mới kịp xong + đệm. Hàng hết hạn cuối ngày đệm ngắn (nấu sớm là
+  // dễ đổ); hàng để nhiều ngày đệm dài (dư không mất gì, thiếu mới mất khách).
+  const soon = Dt*(at(now) - at(now + L + (eod ? P.bufMin : P.bufMinMulti)));
+  if(avail >= soon) return null;
+  const coverLead = Math.max(0, avail - Dt*(at(now) - at(now + L)));  // phần tồn còn lại sau thời gian nấu
+  let need, kind, capped = false, ratio;
+  if(eod){
+    if(!o.cookedToday){ kind = 'morning';
+      need = Dt*(at(now) - at(Math.max(P.morningUntilMin, now + L + P.bufMin)))*(1+P.s) - avail;
+    } else { kind = 'topup'; need = Dt*at(now + L)*(1+P.s) - coverLead; }
+    ratio = prepSugPickRatio(prep, Math.max(0.01, need)/Y, 'up', o.khoItems, o.isAtomic);
+  } else {
+    kind = 'restock';
+    const shelfDays = prep.shelfLifeType === 'hours' ? Math.max(0.5, (Number(prep.shelfLifeHours)||0)/24) : 7;
+    need = Dt*(at(now + L) + 1)*(1+P.s) - coverLead;                 // hết hôm nay + thêm 1 ngày
+    const capRatio = (o.dest*shelfDays)/Y;                           // không hơn lượng bán kịp trong hạn
+    ratio = prepSugPickRatio(prep, Math.max(0.01, need)/Y, 'up', o.khoItems, o.isAtomic);
+    if(ratio != null && ratio > capRatio){ const dn = prepSugPickRatio(prep, capRatio, 'down', o.khoItems, o.isAtomic); if(dn != null){ ratio = dn; capped = true; } }
+  }
+  if(ratio == null) return null;
+  let runout = null;                                                 // giờ dự kiến hết
+  for(let m=now; m<=1440; m+=5){ if(Dt*(at(now)-at(m)) > avail){ runout = m; break; } }
+  return { ratio, qty: ratio*Y, kind, capped, runoutMin: runout, dayEst: Dt, avail };
+}
+
+// ── Bản tổng hợp BTP theo ngày: ledger_day_summaries_gieogieo/prep_{ngày} — cùng collection
+// và cùng quy tắc với loại stock_ (chỉ ngày đã quá CACHE_BUFFER_DAYS, kiểm tra ngày cũ bị
+// ghi thêm bằng maxCreatedAt). POS dựng cùng định dạng (prepDaySumFromRows bên posgieo).
+const PREP_DAY_SUM_V = 1;
+const PREP_SPOIL_RE = /chua|hôi|hỏng|mốc|thiu|ôi|nhớt/i;
+let _prepSumCheckOff = false;
+function prepDaySumFromRows(dateKey, rows){
+  const h = new Array(24).fill(0), per = {};
+  let maxCreatedAt = '';
+  (rows||[]).forEach(t=>{
+    if(typeof t.createdAt === 'string' && t.createdAt > maxCreatedAt) maxCreatedAt = t.createdAt;
+    if(!t.prepId) return;
+    const x = per[t.prepId] || (per[t.prepId] = { p:t.prepId, c:0, w:0, pr:0, sp:0 });
+    const q = Number(t.qty)||0, note = String(t.reason||t.note||'');
+    if(t.type === 'CONSUMPTION'){ x.c += -q; const d = new Date(t.createdAt); if(!isNaN(d)) h[d.getHours()] += -q; }
+    else if(t.type === 'ADJUSTMENT' && /XOÁ ĐƠN/.test(note)) x.c -= q;
+    else if(t.type === 'WASTE' && q < 0){ x.w += -q; if(PREP_SPOIL_RE.test(note)) x.sp += -q; }
+    else if(t.type === 'PRODUCTION' && q > 0) x.pr += q;
+  });
+  const r1 = v => Math.round(v*10)/10;
+  return { v:PREP_DAY_SUM_V, kind:'prep', date:dateKey, maxCreatedAt, rowCount:(rows||[]).length,
+    h:h.map(r1), prep:Object.values(per).map(x=>({p:x.p, c:r1(x.c), w:r1(x.w), pr:r1(x.pr), sp:r1(x.sp)})) };
+}
+async function prepDaySummaries(startKey, endKey){
+  const FP = firebase.firestore.FieldPath.documentId();
+  const snap = await fstore.collection(LEDGER_SUM_COLL).where(FP,'>=','prep_'+startKey).where(FP,'<=','prep_'+endKey).get();
+  const have = {};
+  snap.forEach(d=>{ const x = d.data(); if(x && x.v === PREP_DAY_SUM_V && x.date) have[x.date] = x; });
+  // Ngày cũ bị ghi thêm (bổ sung bill...) → dựng lại. Thiếu index thì bỏ qua bước kiểm.
+  if(!_prepSumCheckOff){
+    try{
+      const kq = await Promise.all(Object.values(have).map(x =>
+        fstore.collection('prep_transactions_gieogieo').where('businessDate','==',x.date)
+          .where('createdAt','>',x.maxCreatedAt||'').limit(1).get().then(sn=>({x, ok:sn.empty}))));
+      kq.forEach(({x, ok}) => { if(!ok) delete have[x.date]; });
+    }catch(err){
+      _prepSumCheckOff = true;
+      console.warn('[Gợi ý mẻ] bỏ qua kiểm tra ngày cũ bị ghi thêm.' + (_histIsMissingIndex(err) ? ' Cần composite index prep_transactions (businessDate + createdAt): ' + (_histIndexUrl(err)||err.message) : ''), err);
+    }
+  }
+  const segs = [];
+  for(let k = startKey; k <= endKey; k = _dayShift(k, 1)){
+    if(have[k]) continue;
+    const last = segs[segs.length-1];
+    if(last && last.b === _dayShift(k, -1)) last.b = k; else segs.push({a:k, b:k});
+  }
+  const builtAt = new Date().toISOString();
+  for(const {a, b} of segs){
+    const rows = (await fstore.collection('prep_transactions_gieogieo').where('businessDate','>=',a).where('businessDate','<=',b).get()).docs.map(d=>d.data());
+    const byDay = {};
+    rows.forEach(t=>{ if(t.businessDate) (byDay[t.businessDate] = byDay[t.businessDate] || []).push(t); });
+    for(let k = a; k <= b; k = _dayShift(k, 1)){
+      const sum = { ...prepDaySumFromRows(k, byDay[k] || []), builtAt };
+      have[k] = sum;
+      fstore.collection(LEDGER_SUM_COLL).doc('prep_'+k).set(sum).catch(err=>console.warn('[Gợi ý mẻ] không lưu được tổng hợp ngày', k, err));
+    }
+  }
+  return Object.values(have).sort((x,y)=>String(x.date).localeCompare(String(y.date)));
+}
+// Cùng điều kiện isAtomicUnitItem bên POS (1 tem = 1 cái, kiểm kê theo cái).
+function qlIsAtomicUnitItem(it){
+  if(!it || it.stockManaged === false || it.trackingMode !== 'unit') return false;
+  if(String(it.unit||'').trim().toLowerCase() !== 'cái') return false;
+  const pk = (it.packagingUnits||[]).find(p=>p.name === it.countUnitName);
+  const baseQty = pk && Number(pk.baseQty) > 0 ? Number(pk.baseQty) : 1;
+  return !(baseQty > 1);
+}
+function _psTime(m){ return m==null ? '' : String(Math.floor(m/60)).padStart(2,'0')+'h'+String(Math.round(m%60)).padStart(2,'0'); }
+async function renderPrepSugPanel(){
+  const box = document.getElementById('psBody');
+  if(!box) return;
+  box.innerHTML = '<div class="card"><div class="muted">Đang đọc bản tổng hợp 14 ngày và lô đang còn...</div></div>';
+  try{
+    await ensureAuth();
+    const today = dkey(new Date());
+    const end = _dayShift(today, -(CACHE_BUFFER_DAYS+1)), start = _dayShift(end, -13);
+    const [sums, preps, items, batchSnap, openSnap] = await Promise.all([
+      prepDaySummaries(start, end), loadPrepItems(),
+      (INVENTORY_ITEMS.length ? Promise.resolve(INVENTORY_ITEMS) : loadInventoryItems()),
+      fstore.collection('prep_batches_gieogieo').where('status','in',['active','cooking']).get(),
+      fstore.collection('daily_openings_gieogieo').where('businessDate','>=',start).where('businessDate','<=',end).get().catch(()=>null)
+    ]);
+    const prof = prepSugProfile(sums);
+    const opens = []; if(openSnap) openSnap.forEach(d=>{ const t = new Date(d.data().createdAt); if(!isNaN(t)) opens.push(t.getHours()*60+t.getMinutes()); });
+    opens.sort((a,b)=>a-b);
+    const moMin = opens.length ? opens[Math.floor(opens.length/2)] : 8*60;
+    const lots = batchSnap.docs.map(d=>d.data());
+    const lead = {}; lots.forEach(b=>{ const a = Date.parse(b.startedAt||''), f = Date.parse(b.finishedAt||''); if(a && f > a) (lead[b.prepId] = lead[b.prepId] || []).push((f-a)/60000); });
+    const leadOf = p => { const v = (lead[p.id]||[]).sort((a,b)=>a-b); return v.length ? Math.min(120, Math.max(10, v[Math.floor(v.length/2)])) : Math.max(30, (Number(p.prepTimeMinutes)||0)+20); };
+    const rows = (preps||[]).filter(p=>p.active!==false).map(p=>{
+      const dm = prepSugDemand(sums, p.id);
+      const tot = { c:0, w:0, pr:0, sp:0 };
+      sums.forEach(s=>{ const r = (s.prep||[]).find(x=>x.p===p.id); if(r){ tot.c += r.c||0; tot.w += r.w||0; tot.pr += r.pr||0; tot.sp += r.sp||0; } });
+      const eod = p.shelfLifeType === 'endOfDay';
+      const stockNow = lots.filter(b=>b.prepId===p.id && b.status==='active').reduce((n,b)=>n+Math.max(0,Number(b.qtyRemaining)||0),0);
+      let plan = null;
+      if(prof && dm.n >= PREP_SUG.minDays && dm.d > 0){
+        // Kế hoạch SÁNG MAI lúc mở ca: hàng cuối ngày bắt đầu từ 0; hàng để nhiều ngày trừ
+        // phần dự kiến bán nốt hôm nay khỏi tồn hiện tại.
+        const nowM = new Date().getHours()*60 + new Date().getMinutes();
+        const conHomNay = dm.d * prof.rem[Math.max(0, Math.min(1440, nowM))];
+        const stockSang = eod ? 0 : Math.max(0, stockNow - conHomNay);
+        plan = prepSugEvaluate({ prep:p, rem:prof.rem, dest:dm.d, nDays:dm.n, nowMin:moMin, used:0,
+          stock:stockSang, pending:0, cookedToday:false, leadMin:leadOf(p), khoItems:items, isAtomic:qlIsAtomicUnitItem });
+      }
+      const canhBao = [];
+      const shelfDays = p.shelfLifeType === 'hours' ? (Number(p.shelfLifeHours)||0)/24 : (p.shelfLifeType === 'endOfDay' ? 0 : 7);
+      if(!eod && shelfDays > 0 && dm.d > 0 && Number(p.batchYield) > dm.d*shelfDays)
+        canhBao.push(`1 mẻ (${fmtNum(p.batchYield,0)} ${p.unit||''}) nhiều hơn lượng bán kịp trong hạn (~${fmtNum(dm.d*shelfDays,0)}) — gợi ý đã giới hạn cỡ mẻ.`);
+      if(tot.sp > 0) canhBao.push(`${fmtNum(tot.sp,0)} ${p.unit||''} bị đổ vì hỏng/chua/hôi trong 14 ngày — xem lại hạn dùng đang khai${p.shelfLifeType==='hours'?' ('+p.shelfLifeHours+'h)':''}.`);
+      if(eod && tot.pr > 0 && tot.c > tot.pr*1.1) canhBao.push(`Lượng bán ghi nhận (${fmtNum(tot.c,0)}) vượt lượng nấu (${fmtNum(tot.pr,0)}) — kiểm tra định lượng mỗi phần hoặc mẻ nấu chưa ghi vào hệ thống.`);
+      return { p, dm, tot, plan, canhBao, stockNow, eod };
+    });
+    const ok = rows.filter(r=>r.plan);
+    box.innerHTML = `
+      <div class="card">
+        <div class="card-h"><h3>Kế hoạch nấu sáng mai</h3><span class="small-note">mở ca ~${_psTime(moMin)}</span></div>
+        ${!prof ? '<div class="muted">Chưa có bản tổng hợp ngày nào — cần ít nhất 7 ngày bán.</div>'
+          : ok.length ? ok.map(r=>`<div class="row"><span class="rl"><b>${escapeHtmlAttr(r.p.name)}</b>
+              <div class="small-note">${r.plan.kind==='morning'?'đủ bán tới khoảng 17h, chiều POS nhắc nấu bù nếu bán chạy':'tồn dự kiến sáng mai ~'+fmtNum(r.plan.avail,0)+' '+escapeHtmlAttr(r.p.unit||'')+(r.plan.capped?' · giới hạn theo hạn dùng':'')}</div></span>
+              <span class="rv"><b>${fmtNum(r.plan.ratio,2)} mẻ</b> <span class="small-note">~${fmtNum(r.plan.qty,0)} ${escapeHtmlAttr(r.p.unit||'')}</span></span></div>`).join('')
+          : '<div class="muted">Sáng mai chưa cần nấu thêm BTP nào (tồn còn đủ).</div>'}
+        <div class="small-note" style="margin-top:8px">Trong ngày, POS tự tính lại theo nhịp bán thật và báo ở nút chuông khi món nào sắp hết. Cuối ngày (còn dưới ${Math.round(PREP_SUG.stopShare*100)}% lượng bán của ngày) thì không gợi ý nấu nữa.</div>
+      </div>
+      <div class="sec-title">14 ngày đã chốt (${start} → ${end})</div>
+      <div class="card" style="padding:6px 0"><div style="overflow-x:auto"><table class="kt" style="min-width:520px">
+        <thead><tr><th>BTP</th><th style="text-align:right">Dùng/ngày</th><th style="text-align:right">Nấu</th><th style="text-align:right">Dùng</th><th style="text-align:right">Đổ</th><th style="text-align:right">% đổ</th></tr></thead>
+        <tbody>${rows.map(r=>`<tr><td>${escapeHtmlAttr(r.p.name)}${r.eod?' <span class="tier tier-amber">cuối ngày</span>':''}</td>
+          <td style="text-align:right">${fmtNum(r.dm.d,0)}</td><td style="text-align:right">${fmtNum(r.tot.pr,0)}</td>
+          <td style="text-align:right">${fmtNum(r.tot.c,0)}</td><td style="text-align:right">${fmtNum(r.tot.w,0)}</td>
+          <td style="text-align:right;color:${r.tot.pr>0&&r.tot.w/r.tot.pr>0.2?'var(--bad)':'inherit'}">${r.tot.pr>0?fmtNum(r.tot.w/r.tot.pr*100,0)+'%':'—'}</td></tr>`).join('')}</tbody>
+      </table></div></div>
+      ${rows.some(r=>r.canhBao.length) ? `<div class="sec-title">Cấu hình cần xem lại</div><div class="card">
+        ${rows.filter(r=>r.canhBao.length).map(r=>`<div style="padding:6px 0;border-bottom:1px solid var(--line)"><b>${escapeHtmlAttr(r.p.name)}</b>${r.canhBao.map(c=>`<div class="small-note" style="color:var(--warn)">• ${escapeHtmlAttr(c)}</div>`).join('')}</div>`).join('')}
+      </div>` : ''}`;
+  }catch(err){
+    console.error('renderPrepSugPanel lỗi', err);
+    box.innerHTML = '<div class="card"><div class="muted">Không tính được gợi ý: '+escapeHtmlAttr(String(err.code||err.message||err))+'</div></div>';
+  }
+}
 async function renderKhoDuBao(){
   const box = document.getElementById('khoBody');
   if(!dbNgay) dbNgay = dbNgayMai();
   box.innerHTML = `
+    <div class="unit-explainer" style="margin-bottom:12px">
+      Gợi ý mẻ theo <b>nhịp bán trong ngày</b> của chính cửa hàng (14 ngày gần nhất), không dự báo theo thứ.
+      Hàng hết hạn cuối ngày: sáng nấu đủ tới ~17h, chiều nấu bù khi sắp hết. Hàng để nhiều ngày: nấu khi sắp hết, không nấu nhiều hơn lượng bán kịp trong hạn.
+      NL đếm theo cái (kit, túi lọc) luôn được làm tròn để ra số cái nguyên.
+    </div>
+    <div id="psBody"></div>
+    <details style="margin-top:14px"><summary class="small-note" style="cursor:pointer">Dự báo theo thứ trong tuần (cách cũ)</summary>
     <div class="card">
       <div class="field" style="margin-bottom:8px"><label>Lên kế hoạch cho ngày</label>
         <input type="date" id="dbNgay" value="${dbNgay}"></div>
@@ -10315,6 +10564,7 @@ async function renderKhoDuBao(){
       Chưa đủ ${DB_MIN_NGAY} ngày dữ liệu thì <b>không dự báo</b> — sẽ nói thẳng là chưa đủ chứ không đưa một con số nghe như chắc chắn.
     </div>
     <div id="dbBody"></div>
+    </details>
     <div class="card" style="margin-top:14px">
       <div class="card-h"><h3>Xuất dữ liệu phân tích mẻ</h3></div>
       <div class="small-note" style="margin-bottom:8px">Tải 1 file JSON gồm: danh mục BTP, mọi lượt dùng/huỷ BTP (kèm giờ), các lô đã nấu, giờ mở ca/kết ca — dùng để phân tích và chỉnh công thức gợi ý mẻ. Tối đa 62 ngày một lần.</div>
@@ -10325,6 +10575,7 @@ async function renderKhoDuBao(){
       <button class="btn outline" style="margin-top:8px" onclick="dbXuatDuLieuMe(this)">${ic('download',15)} Xuất dữ liệu</button>
     </div>`;
   if(dbKetQua) dbVeBang();
+  renderPrepSugPanel();
 }
 
 // Xuất dữ liệu thô để phân tích công thức gợi ý mẻ (theo nhịp bán trong ngày).
