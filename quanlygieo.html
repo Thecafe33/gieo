@@ -3766,6 +3766,21 @@ async function fetchSalesRange(startDate, endDate){
     return {date:key, ...dayAgg};
   });
 
+  // [BTP — BÙ LOẠI KHÁC] Bill ghi món A nhưng thực tế dùng BTP B bù (Quản lý đã xác nhận ở
+  // Kho ▸ Đối chiếu BTP âm) → giá vốn ngày đó cộng thêm chênh (giá B − giá A). Cộng SAU cache
+  // ngày để xác nhận muộn vẫn phản ánh vào ngày cũ.
+  try{
+    const subSnap = await fstore.collection('prep_shortage_recons_gieogieo')
+      .where('businessDate','>=',startKey).where('businessDate','<=',endKey).get();
+    const byDay = {};
+    subSnap.forEach(d=>{ const r = d.data();
+      if(r.status==='substitution_confirmed' && Number(r.cogsDelta)) byDay[r.businessDate] = (byDay[r.businessDate]||0) + Number(r.cogsDelta); });
+    perDay.forEach(pd=>{ if(byDay[pd.date]){
+      pd.substitutionCogsDelta = byDay[pd.date];
+      pd.cogsActual = (Number(pd.cogsActual)||0) + byDay[pd.date];
+    }});
+  }catch(err){ console.warn('[BTP bù] không đọc được điều chỉnh giá vốn', err); }
+
   const totals = perDay.reduce((a,c)=>({
     revenue:a.revenue+c.revenue, bills:a.bills+c.bills, items:a.items+c.items,
     toppingBills:a.toppingBills+c.toppingBills, toppingRevenue:a.toppingRevenue+c.toppingRevenue
@@ -9932,6 +9947,163 @@ async function soLechCutover(){
   renderKhoSoLech();
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+// [BTP — ÂM CHỜ ĐỐI CHIẾU] Bán vượt lô BTP không trừ vào lô mới; POS đối chiếu ở bước cân
+// BTP cuối ca (prepShortageAnalyze bên posgieo.html) và ghi prep_shortage_recons_gieogieo.
+// Màn này: (1) cấu hình BTP nào được phép bù bằng BTP nào (prep_items.substitutes),
+// (2) xác nhận/bác đề xuất "đã bù", hoặc tự chọn loại đã bù cho khoản chưa giải thích.
+// Chỉ khi Quản lý xác nhận mới tính lại giá vốn (cogsDelta → fetchSalesRange).
+// ══════════════════════════════════════════════════════════════════════════
+const BTP_AM_STATUS = {
+  explained:              ['Đã khớp', 'tier-green'],
+  substitution_pending:   ['Chờ xác nhận bù', 'tier-amber'],
+  substitution_confirmed: ['Đã xác nhận bù', 'tier-blue'],
+  unexplained:            ['Chưa giải thích', 'tier-red'],
+  dismissed:              ['Đã xem — không phải bù', 'tier-blue']
+};
+let btpAmFrom = null, btpAmTo = null;
+async function renderKhoBtpAm(){
+  const box = document.getElementById('khoBody');
+  const homNay = dkey(new Date());
+  if(!btpAmFrom) btpAmFrom = _thLuiNgay(homNay, 7);
+  if(!btpAmTo) btpAmTo = homNay;
+  box.innerHTML = '<div class="muted">Đang tải...</div>';
+  let preps = [], rows = [];
+  try{
+    preps = PREP_ITEMS = await loadPrepItems();
+    const snap = await fstore.collection('prep_shortage_recons_gieogieo')
+      .where('businessDate','>=',btpAmFrom).where('businessDate','<=',btpAmTo).get();
+    rows = snap.docs.map(d=>({id:d.id, ...d.data()})).sort((a,b)=>String(b.businessDate).localeCompare(String(a.businessDate)));
+  }catch(err){ box.innerHTML = '<div class="card"><div class="muted">Không tải được: '+escapeHtmlAttr(err.code||err.message||String(err))+'</div></div>'; return; }
+  const ten = id => (preps.find(p=>p.id===id)||{}).name || id;
+  const optPreps = (except) => preps.filter(p=>p.id!==except && p.active!==false)
+    .map(p=>`<option value="${p.id}">${escapeHtmlAttr(p.name||'')}</option>`).join('');
+  box.innerHTML = `
+    <div class="unit-explainer" style="margin-bottom:12px">
+      Bán vượt lô BTP thì phần vượt thành <b>khoản âm</b>, không trừ vào lô mới nấu. Ở bước <b>cân BTP cuối ca</b>, hệ thống đối chiếu:
+      lô nấu hôm nay thiếu so với định lượng chuẩn đúng cỡ khoản âm (±5% định lượng chuẩn của mẻ) → đã lấy từ nồi mới, <b>khớp</b>.
+      Còn dư ra thì tìm BTP <b>được phép bù</b> nào hụt đúng cỡ đó → <b>chờ bạn xác nhận</b>. Xác nhận xong mới tính lại giá vốn.
+    </div>
+    <div class="card">
+      <div class="grid2">
+        <div class="field"><label>Từ ngày</label><input type="date" id="baFrom" value="${btpAmFrom}"></div>
+        <div class="field" style="margin-bottom:0"><label>Đến ngày</label><input type="date" id="baTo" value="${btpAmTo}"></div>
+      </div>
+      <button class="btn" style="margin-top:10px" onclick="btpAmFrom=document.getElementById('baFrom').value;btpAmTo=document.getElementById('baTo').value;renderKhoBtpAm()">${ic('search',15)} Xem</button>
+    </div>
+    <div class="card">
+      <div style="font-weight:700;margin-bottom:8px">Kết quả đối chiếu</div>
+      ${rows.length ? rows.map(r=>{
+        const st = BTP_AM_STATUS[r.status] || [r.status,'tier-blue'];
+        const lots = (r.lots||[]).map(l=>`${escapeHtmlAttr(l.code||'lô')}: chuẩn ${fmtNum(l.expected,0)} · cân ${fmtNum(l.actual,0)}`).join(' · ');
+        const sub = r.substitution;
+        return `<div class="kx-line${r.status==='unexplained'?' bad':''}" style="margin-bottom:6px;flex-direction:column;align-items:stretch">
+          <div style="display:flex;justify-content:space-between;gap:8px">
+            <div><b>${escapeHtmlAttr(r.prepName||'')}</b> <span class="tier ${st[1]}">${st[0]}</span>
+              <div class="kx-sub">${escapeHtmlAttr(r.businessDate||'')} · âm ${fmtNum(r.shortageQty,1)} ${escapeHtmlAttr(r.unit||'')} · lô mới thiếu ${fmtNum(r.newLotShortfall,1)} (biên ±${fmtNum(r.tolerance,1)}) · còn lại ${fmtNum(r.remainder,1)}</div>
+              ${lots?`<div class="kx-sub">${lots}</div>`:''}
+              ${sub?`<div class="kx-sub">Bù bằng <b>${escapeHtmlAttr(sub.prepName||'')}</b>: cần ~${fmtNum(sub.expectedQty,1)} ${escapeHtmlAttr(sub.unit||'')}, cân cuối ca hụt ${fmtNum(sub.observedShortQty,1)}${r.cogsDelta!=null?` · giá vốn điều chỉnh ${r.cogsDelta>0?'+':''}${fmt(r.cogsDelta)}`:''}</div>`:''}
+            </div>
+          </div>
+          ${r.status==='substitution_pending' ? `<div style="display:flex;gap:8px;margin-top:8px">
+              <button class="btn sm" onclick="btpAmConfirm('${r.id}')">Xác nhận đã bù</button>
+              <button class="btn outline sm" onclick="btpAmDismiss('${r.id}')">Không phải bù</button></div>` : ''}
+          ${r.status==='unexplained' ? `<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;align-items:center">
+              <select id="baSub_${r.id}" style="flex:1;min-width:140px"><option value="">— Đã bù bằng loại nào? —</option>${optPreps(r.prepId)}</select>
+              <input type="number" step="0.1" id="baQty_${r.id}" placeholder="Lượng bù (${escapeHtmlAttr(r.unit||'')})" style="width:130px">
+              <button class="btn sm" onclick="btpAmManual('${r.id}')">Ghi nhận bù</button>
+              <button class="btn outline sm" onclick="btpAmDismiss('${r.id}')">Đã xem</button></div>` : ''}
+        </div>`;
+      }).join('') : '<div class="muted">Không có khoản âm nào trong khoảng này.</div>'}
+    </div>
+    <div class="card">
+      <div style="font-weight:700;margin-bottom:6px">Được phép bù bằng</div>
+      <div class="small-note" style="margin-bottom:8px">Khi hết một BTP, nhân viên được dùng BTP nào thay. Tỉ lệ = lượng BTP thay cho 1 đơn vị BTP gốc (cùng một phần topping). Để 1 nếu định lượng như nhau.</div>
+      ${preps.filter(p=>p.active!==false).map(p=>`<div class="kx-line" style="margin-bottom:6px;flex-direction:column;align-items:stretch">
+        <div><b>${escapeHtmlAttr(p.name||'')}</b>
+          ${(p.substitutes||[]).map((x,i)=>`<span class="tier tier-blue" style="margin-left:4px">${escapeHtmlAttr(ten(x.prepId))} ×${fmtNum(Number(x.ratio)||1,2)}
+            <a href="javascript:void 0" onclick="btpAmSubRemove('${p.id}',${i})" style="margin-left:4px">✕</a></span>`).join('')}</div>
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <select id="baAdd_${p.id}" style="flex:1"><option value="">+ Thêm loại được bù…</option>${optPreps(p.id)}</select>
+          <input type="number" step="0.01" id="baRatio_${p.id}" value="1" style="width:80px">
+          <button class="btn outline sm" onclick="btpAmSubAdd('${p.id}')">Thêm</button>
+        </div></div>`).join('')}
+    </div>`;
+}
+async function btpAmSubAdd(prepId){
+  const sel = document.getElementById('baAdd_'+prepId), ratio = Number(document.getElementById('baRatio_'+prepId).value)||1;
+  if(!sel || !sel.value){ toast('⚠️ Chọn loại được bù'); return; }
+  const p = PREP_ITEMS.find(x=>x.id===prepId); if(!p) return;
+  const list = (p.substitutes||[]).filter(x=>x.prepId!==sel.value).concat([{prepId: sel.value, ratio}]);
+  try{ await ensureAuth(); await fstore.collection('prep_items_gieogieo').doc(prepId).update({substitutes:list, updatedAt:new Date().toISOString()}); memoDropPreps(); toast('✅ Đã lưu'); renderKhoBtpAm(); }
+  catch(err){ showError('Lưu lỗi: '+(err.code||err.message||err)); }
+}
+async function btpAmSubRemove(prepId, i){
+  const p = PREP_ITEMS.find(x=>x.id===prepId); if(!p) return;
+  const list = (p.substitutes||[]).filter((_,k)=>k!==i);
+  try{ await ensureAuth(); await fstore.collection('prep_items_gieogieo').doc(prepId).update({substitutes:list, updatedAt:new Date().toISOString()}); memoDropPreps(); renderKhoBtpAm(); }
+  catch(err){ showError('Lưu lỗi: '+(err.code||err.message||err)); }
+}
+// Xác nhận bù: giá vốn ngày đó += lượng B × giá B − lượng A × giá A; phần hụt của B ở lần cân
+// cuối ca được gắn substitutionQty để không bị tính là hao hụt nữa.
+async function _btpAmApplySubstitution(r, sub){
+  const now = new Date().toISOString();
+  const costA = Number(r.costPerUnit)||0, costB = Number(sub.costPerUnit)||0;
+  const cogsDelta = Math.round((Number(sub.expectedQty)||0)*costB - (Number(r.remainder)||0)*costA);
+  let adjRef = null;
+  if(sub.countAdjTxId) adjRef = fstore.collection('prep_transactions_gieogieo').doc(sub.countAdjTxId);
+  else{
+    const q = await fstore.collection('prep_transactions_gieogieo').where('prepId','==',sub.prepId)
+      .where('businessDate','==',r.businessDate).get();
+    const hit = q.docs.find(d=>d.data().type==='ADJUSTMENT' && d.data().fromPrepCount && Number(d.data().qty)<0);
+    if(hit) adjRef = hit.ref;
+  }
+  if(adjRef){
+    const a = await adjRef.get();
+    if(a.exists && Number(a.data().qty) < 0){
+      const subQty = Math.min(Math.abs(Number(a.data().qty)), Number(sub.expectedQty)||0);
+      await adjRef.update({ substitutionQty: subQty, substitutionReconId: r.id, substitutionFor: r.prepId });
+    }
+  }
+  await fstore.collection('prep_shortage_recons_gieogieo').doc(r.id).update({
+    status:'substitution_confirmed', substitution: sub, cogsDelta, confirmedAt: now, confirmedBy:'management'
+  });
+  logAudit('confirm','prep_shortage_recon',r.id,{substitute: sub.prepId, qty: sub.expectedQty, cogsDelta});
+  toast('✅ Đã xác nhận bù — giá vốn ngày '+r.businessDate+' '+(cogsDelta>0?'+':'')+fmt(cogsDelta));
+}
+async function btpAmConfirm(id){
+  try{
+    await ensureAuth();
+    const doc = await fstore.collection('prep_shortage_recons_gieogieo').doc(id).get();
+    const r = {id, ...doc.data()};
+    if(r.status!=='substitution_pending' || !r.substitution){ toast('⚠️ Mục này không còn chờ xác nhận'); return renderKhoBtpAm(); }
+    if(!confirm(`Xác nhận ${r.prepName} đã được bù bằng ${r.substitution.prepName} (~${fmtNum(r.substitution.expectedQty,1)} ${r.substitution.unit||''})?\nGiá vốn ngày ${r.businessDate} sẽ được tính lại.`)) return;
+    await _btpAmApplySubstitution(r, r.substitution);
+  }catch(err){ showError('Xác nhận lỗi: '+(err.code||err.message||err)); }
+  renderKhoBtpAm();
+}
+async function btpAmManual(id){
+  const subId = document.getElementById('baSub_'+id)?.value;
+  const qty = Number(document.getElementById('baQty_'+id)?.value)||0;
+  if(!subId || !(qty>0)){ toast('⚠️ Chọn loại đã bù và nhập lượng'); return; }
+  try{
+    await ensureAuth();
+    const doc = await fstore.collection('prep_shortage_recons_gieogieo').doc(id).get();
+    const r = {id, ...doc.data()};
+    const b = PREP_ITEMS.find(x=>x.id===subId) || {};
+    const sub = { prepId: subId, prepName: b.name||'', unit: b.unit||'', ratio: (Number(r.remainder)>0? qty/Number(r.remainder):1),
+      expectedQty: qty, observedShortQty: null, costPerUnit: Number(b.costPerUnit)||0, manual: true };
+    if(!confirm(`Ghi nhận ${r.prepName} đã được bù bằng ${fmtNum(qty,1)} ${sub.unit} ${sub.prepName}?\nGiá vốn ngày ${r.businessDate} sẽ được tính lại.`)) return;
+    await _btpAmApplySubstitution(r, sub);
+  }catch(err){ showError('Ghi nhận lỗi: '+(err.code||err.message||err)); }
+  renderKhoBtpAm();
+}
+async function btpAmDismiss(id){
+  try{ await ensureAuth(); await fstore.collection('prep_shortage_recons_gieogieo').doc(id).update({status:'dismissed', dismissedAt:new Date().toISOString()}); }
+  catch(err){ showError('Lỗi: '+(err.code||err.message||err)); }
+  renderKhoBtpAm();
+}
+
 async function renderKhoLech(){
   const box = document.getElementById('khoBody');
   const homNay = dkey(new Date());
@@ -11183,6 +11355,7 @@ const NAV_SECTIONS = [
     {key:'kho2:search',      ic:'search',    label:'Tra cứu',         go:"goKho2('search')"},
     {key:'kho:history',      ic:'clock',     label:'Sổ kho',          go:"goKho('history')"},
     {key:'kho:solech',       ic:'alert',     label:'Sổ lệch tem',     go:"goKho('solech')"},
+    {key:'kho:btpam',        ic:'flame',     label:'Đối chiếu BTP âm', go:"goKho('btpam')"},
   ]},
   { group:'Kho · Danh mục', kho:true, items:[
     {key:'kho:items',        ic:'package',   label:'Nguyên liệu',     go:"goKho('items')"},
@@ -14691,7 +14864,12 @@ async function computeLedgerRealMetrics(startDate, endDate){
       if(t.reversal === true) return;
       // Chênh lệch kiểm đếm bán thành phẩm, để riêng khỏi waste. Làm nhầm món cũng
       // rơi vào đây (BTP này thiếu, BTP kia dư), nên tách thiếu/dư để xem lệch ròng.
-      const tcAdj = Math.abs(Number(t.totalCost)||0);
+      let tcAdj = Math.abs(Number(t.totalCost)||0);
+      // Phần hụt đã được Quản lý xác nhận là dùng để BÙ cho BTP khác (đã bán, đã vào giá vốn
+      // qua fetchSalesRange) — không tính là lệch/hao hụt nữa.
+      if(Number(t.substitutionQty) > 0 && Number(t.qty) < 0)
+        tcAdj = Math.max(0, tcAdj - Number(t.substitutionQty) * (Number(t.costPerUnit)||0));
+      if(!tcAdj) return;
       prepAdjValue += tcAdj; prepAdjCount++;
       if(Number(t.qty) < 0) prepAdjShortValue += tcAdj; else prepAdjSurplusValue += tcAdj;
       return;
@@ -19506,6 +19684,7 @@ async function renderEntryKho(){
   else if(curKhoSub==='stockcount') renderKhoStockCount();
   else if(curKhoSub==='lechkho') renderKhoLech();
   else if(curKhoSub==='solech') renderKhoSoLech();
+  else if(curKhoSub==='btpam') renderKhoBtpAm();
   else if(curKhoSub==='dubao') renderKhoDuBao();
   else if(curKhoSub==='wastereasons') renderKhoWasteReasons();
   else if(curKhoSub==='checklist') renderKhoChecklist();
