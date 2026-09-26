@@ -11160,7 +11160,7 @@ function renderPrepBatchForm() {
             ${reconPending.map(([itemId,row],i)=>{
               const act=row.status==='processing'?'Tiếp tục chốt':prepReconIsCountable(KHO_ITEMS_CACHE.find(x=>x.id===itemId))?'Đếm còn lại':'Cân còn lại';
               return `<button onclick="openPrepReconForm('${b.id}','${itemId}')" style="width:100%;min-height:64px;padding:12px 12px 12px 18px;margin-top:${i?8:0}px;background:#fff;border:2px solid #0062AD;border-radius:18px;display:flex;align-items:center;justify-content:space-between;gap:10px;cursor:pointer;font-family:'Google Sans',sans-serif;">
-                <span style="font-size:19px;font-weight:800;color:#0b2540;text-align:left;">${escHtmlPos(pendingNames[i])}</span>
+                <span style="font-size:19px;font-weight:800;color:#0b2540;text-align:left;">${escHtmlPos(pendingNames[i])}${prepReconLowHint(row)}</span>
                 <span style="flex-shrink:0;padding:10px 14px;border-radius:99px;background:#0062AD;color:#fff;font-size:14px;font-weight:800;">${act} →</span>
               </button>`;}).join('')}
           </div>`:''}
@@ -11495,7 +11495,45 @@ async function prepReconReadUnits(itemId) {
     .map(([id,v]) => ({ id, code:v.code||id, unitBase:Number(v.unitBase)||0,
       capacity:Number(v.capacity)||0, openedAt:Number(v.openedAt)||0,
       lastPrepReconOp:v.lastPrepReconOp||'',lastPrepCheckpoint:v.lastPrepCheckpoint||null }))
-    .sort((a,b) => a.openedAt-b.openedAt);
+    .sort((a,b) => (prepReconIsLow(b)?1:0)-(prepReconIsLow(a)?1:0) || a.openedAt-b.openedAt);
+}
+// Mã còn <=10% dung tích = "sắp hết": xếp lên đầu để định mức trừ vào mã này trước,
+// đúng thứ tự nhân viên được nhắc lấy (vét mã sắp hết trước rồi mới sang mã khác),
+// kể cả khi mã đó mở sau. Mã sắp hết KHÔNG bắt cân trước nữa — hết giữa mẻ thì báo
+// hết ngay ở màn cân sau khi lấy (prepReconFinishUnit).
+function prepReconLowHint(row) {
+  if(!row||row.status!=='pending')return '';
+  const units=(row.units||[]).filter(u=>u.id!=='__aggregate');
+  const low=units.filter(prepReconIsLow);
+  if(!low.length)return '';
+  const others=units.filter(u=>!low.includes(u));
+  return `<span style="display:block;margin-top:4px;font-size:12.5px;font-weight:700;color:#b45309;line-height:1.4">⚠️ Dùng hết ${low.map(u=>'mã '+escHtmlPos(u.code)+' (sổ còn ~'+fmtPrepQty(u.baseline)+')').join(', ')} trước${others.length?', rồi mới lấy sang '+others.map(u=>'mã '+escHtmlPos(u.code)).join(', '):''}. Hết thì bấm "Đã dùng hết" ở màn cân.</span>`;
+}
+function prepReconIsLow(u) {
+  const cap=Number(u&&u.capacity)||0,base=Number(u&&(u.unitBase??u.baseline))||0;
+  return cap>0&&base<=cap*0.1;
+}
+// Chỉ bắt cân trước khi TỔNG sổ các mã đang mở không đủ cho mẻ (nguy cơ thiếu thật).
+// Khi đó cân mọi mã sẽ bị lấy tới, theo đúng thứ tự trừ.
+function prepReconRiskUnits(units,expected) {
+  const total=units.reduce((n,u)=>n+Math.max(0,u.unitBase),0);
+  if(total>=expected-0.005)return [];
+  const out=[];let left=expected;
+  for(const u of units){if(left<=0)break;out.push({unit:u,need:left});left-=Math.max(0,u.unitBase);}
+  return out;
+}
+// Hao hụt đáy bao: báo hết mã trong mẻ mà tổng dùng vượt định mức một chút (phần
+// dính đáy bao/chai) thì tự ghi hao hụt, không bắt giải trình. Ngưỡng = 2% dung
+// tích các mã đã báo hết trong mẻ. Chỉ áp dụng khi mẻ dùng VƯỢT, không mã nào hụt.
+const PREP_RESIDUE_RATIO = 0.02;
+function prepReconResidueAuto(units,finishedIds,comparison,expected) {
+  const fin=units.filter(u=>finishedIds.has(u.id));
+  if(!fin.length||!comparison)return null;
+  const diff=round2(comparison.observed-expected);
+  const limit=round2(fin.reduce((n,u)=>n+(Number(u.capacity)||0)*PREP_RESIDUE_RATIO,0));
+  if(!(diff>0.015)||diff>limit+0.005)return null;
+  if(comparison.lotBreakdown.some(u=>u.delta< -0.015))return null;
+  return {kind:'waste',note:'Hao hụt đáy bao (tự ghi, ≤'+Math.round(PREP_RESIDUE_RATIO*100)+'% dung tích) · '+fin.map(u=>u.code).join(', ')};
 }
 async function prepReconCheckpointAtStart(u) {
   if(u.lastPrepCheckpoint)return u.lastPrepCheckpoint;
@@ -11518,16 +11556,10 @@ async function prepReconBeforeGate(p, ratio) {
       if(r.item.trackingMode==='unit' || r.item.trackingMode==='batch') {
         const units=await prepReconReadUnits(r.itemId);
         if(!units.length) throw new Error('Mở mã '+r.item.name+' trong Kho trước khi bắt đầu nấu');
-        let left=r.expected;
-        for(const u of units) {
-          if(left<=0) break;
-          const need=left;
-          if(u.unitBase<need || (u.capacity>0 && u.unitBase<=u.capacity*0.1))
-            targets.push({itemId:r.itemId,itemName:r.item.name,unit:r.item.unit,...u,
-              expected:need,multiOpen:units.length>1,
-              fromCheckpoint:await prepReconCheckpointAtStart(u)});
-          left-=Math.max(0,u.unitBase);
-        }
+        for(const {unit:u,need} of prepReconRiskUnits(units,r.expected))
+          targets.push({itemId:r.itemId,itemName:r.item.name,unit:r.item.unit,...u,
+            expected:need,multiOpen:units.length>1,
+            fromCheckpoint:await prepReconCheckpointAtStart(u)});
       } else {
         const doc=await fstore.collection('inventory_items_gieogieo').doc(r.itemId).get();
         const book=Number(doc.data().currentStock)||0;
@@ -11568,7 +11600,7 @@ function renderPrepReconPreflight() {
   const pinTyped=pinEl&&pinEl.type!=='hidden'?pinEl.value:'';
   box.innerHTML=`<div class="wal-section" style="--gd:#0062AD;--gl:#EAF3FA;border:1.5px solid #0062AD;background:#EAF3FA">
     <div class="wal-section-title" style="color:#0062AD">Cân trước khi lấy NL</div>
-    <div style="font-size:12px;color:#345">Chỉ các mã có nguy cơ thiếu hoặc còn ≤10% bao. Cân hoặc đếm xong mới bắt đầu mẻ.</div>
+    <div style="font-size:12px;color:#345">Tổng các mã đang mở có nguy cơ không đủ cho mẻ. Cân hoặc đếm xong mới bắt đầu mẻ.</div>
     ${st.targets.map((x,i)=>`<div style="padding:12px 0;border-bottom:1px solid #0062AD44;display:flex;align-items:center;gap:10px">
       <div style="flex:1"><b>${escHtmlPos(x.itemName)}</b><div style="font-size:12px">${escHtmlPos(x.code)} · sổ ${fmtPrepQty(x.unitBase)} ${escHtmlPos(x.unit)} · cần ${fmtPrepQty(x.expected)}</div>
       ${Number.isFinite(st.values[i]?.qty)?`<b style="color:#0062AD">Đã ghi: ${fmtPrepQty(st.values[i].qty)} ${escHtmlPos(x.unit)}</b>`:''}
@@ -11809,14 +11841,9 @@ async function prepReconCheckNewRisk(rows, gate) {
   const pre=gate&&gate.targets||[];
   for(const r of rows) {
     if(r.item.trackingMode==='unit'||r.item.trackingMode==='batch') {
-      let left=r.expected;
-      for(const u of await prepReconReadUnits(r.itemId)) {
-        if(left<=0)break;
-        const risky=u.unitBase<left || (u.capacity>0&&u.unitBase<=u.capacity*0.1);
-        if(risky&&!pre.some(x=>x.itemId===r.itemId&&x.id===u.id))
+      for(const {unit:u} of prepReconRiskUnits(await prepReconReadUnits(r.itemId),r.expected))
+        if(!pre.some(x=>x.itemId===r.itemId&&x.id===u.id))
           throw new Error('Tồn '+r.item.name+' vừa thay đổi — cân trước lại rồi bắt đầu mẻ');
-        left-=Math.max(0,u.unitBase);
-      }
     }else{
       const doc=await fstore.collection('inventory_items_gieogieo').doc(r.itemId).get();
       if((Number(doc.data().currentStock)||0)<r.expected
@@ -11969,7 +11996,8 @@ async function openPrepReconForm(batchId,itemId) {
       id:u.id,code:u.code,baseline:u.baseline,after:prepReconForm.values[u.id].qty,
       startCheckpoint:u.startCheckpoint,preVerified:u.preVerified
     })),row.expected,prepReconForm.varianceKind):null;
-    const changedLots=compared?.lotBreakdown.filter(u=>Math.abs(u.delta)>0.015)||[];
+    const residue=compared?prepReconResidueAuto(row.units,finishedUnits,compared,row.expected):null;
+    const changedLots=residue?[]:(compared?.lotBreakdown.filter(u=>Math.abs(u.delta)>0.015)||[]);
     const multiCode=row.units.filter(u=>u.id!=='__aggregate').length>1;
     const palette='#0062AD';
     const box=document.getElementById('prepBatchBody');
@@ -11990,7 +12018,9 @@ async function openPrepReconForm(batchId,itemId) {
             ${countable?prepCountInputsHtml('prepReconCnt_'+u.id,v,'onchange',"prepReconCount('"+u.id+"')")
               :`<button onclick="prepReconWeigh('${u.id}')" style="flex:1;padding:14px 8px;border-radius:99px;background:${done?'#fff':'#1f1f1f'};color:${done?'#1f1f1f':'#fff'};border:1.5px solid #1f1f1f;font-weight:800">${done?'Cân lại':'Cân trừ bì'}</button>`}
             ${multiCode&&countable?`<button onclick="prepReconVerifyCode('${u.id}')" style="flex:1;border-radius:99px;border:1.5px solid ${palette};background:#fff;color:${palette};font-weight:800">Quét tem</button>`:''}
-          </div>`:''}
+          </div>
+          ${u.id!=='__aggregate'?`${prepReconIsLow(u)?`<div style="margin-top:10px;font-size:12.5px;font-weight:700;color:#b45309">Mã sắp hết — nếu đã dùng hết, bấm nút dưới và quét tem mã này để báo hết.</div>`:''}
+          <button onclick="prepReconFinishUnit('${u.id}')" style="width:100%;margin-top:8px;padding:12px;border-radius:99px;border:1.5px solid ${prepReconIsLow(u)?'#b45309':'#ad7542'};background:${prepReconIsLow(u)?'#fff7ed':'#fff'};color:#8a4b16;font-weight:800">Đã dùng hết · quét tem báo hết</button>`:''}`:''}
         </div>`;
       }).join('')}
       ${row.units[0].id!=='__aggregate'&&row.status==='pending'?`<button onclick="prepReconOpenNext('${batchId}','${itemId}')" style="width:100%;padding:13px;margin-top:14px;background:#fff;border:1.5px solid ${palette};border-radius:99px;color:${palette};font-weight:800">Quét mở mã mới</button>`:''}
@@ -12008,6 +12038,7 @@ async function openPrepReconForm(batchId,itemId) {
         </select>
         <input placeholder="Ghi ngắn lý do" value="${escHtmlPos(prepReconForm.note||'')}" oninput="prepReconForm.note=this.value" style="width:100%;box-sizing:border-box;margin-top:9px;padding:10px;border:1px solid ${palette};border-radius:10px">
       </div>`:''}
+      ${residue&&row.status==='pending'?`<div style="margin-top:14px;padding:12px;background:#fff7ed;border-radius:14px;color:#8a4b16;font-size:13px">Đã giảm ${fmtPrepQty(observed)} ${escHtmlPos(row.unit)} · vượt định mức ${fmtPrepQty(diff)} ${escHtmlPos(row.unit)} — trong ngưỡng đáy bao, hệ thống tự ghi hao hụt, không cần giải trình.</div>`:''}
       ${staleUnits.length?`<div style="margin-top:12px;color:#004b86">Mốc mã đã đổi. <button onclick="prepReconRefreshStale('${batchId}','${itemId}')" style="border:0;background:none;color:${palette};font-weight:800">Nạp mốc và cân lại</button></div>`:''}
       ${processingUncommitted?`<div style="margin-top:12px;color:#004b86">Lượt chốt trước đang dở. <button onclick="prepReconRetryUncommitted('${batchId}','${itemId}')" style="border:0;background:none;color:${palette};font-weight:800">Thử lưu lại</button></div>`:''}
     </div>
@@ -12113,6 +12144,34 @@ async function prepReconVerifyCode(unitId) {
     if(!await prepReconScanExact(st.itemId,unitId,unit.code))return;
     if(prepReconForm!==st)return;
     st.values[unitId]={...(st.values[unitId]||{}),verifiedUnitId:unitId};
+    await openPrepReconForm(st.batchId,st.itemId);
+  } catch(err){toast('❌ '+(err.message||err));}
+}
+// Báo hết một mã ngay trong màn cân sau khi lấy: bắt quét đúng tem đang mở (cầm
+// đúng bao/chai rỗng), rồi đóng mã với dấu mẻ đang nấu — số sổ còn lại của mã được
+// tính là đã lấy cho mẻ, chênh lệch đi qua bước đối chiếu (đáy bao tự ghi).
+async function prepReconFinishUnit(unitId) {
+  const st=prepReconForm;if(!st||_posSubmitBusy)return;
+  try {
+    const batchRef=fstore.collection('prep_batches_gieogieo').doc(st.batchId);
+    const doc=await batchRef.get(),row=doc.data()?.reconcileInputs?.[st.itemId];
+    if(!row||row.status!=='pending')throw new Error('Mẻ đã đổi trạng thái — mở lại màn đối chiếu');
+    const unit=row.units.find(u=>u.id===unitId);
+    if(!unit||unit.id==='__aggregate')throw new Error('Mã này không còn trong mẻ');
+    if(st.finishedUnits?.has(unitId))throw new Error('Mã đã báo hết rồi');
+    const staffEmp=await resolveStaffPinAndCheckin('prepReconStaff');
+    if(!staffEmp)return;
+    toast('📷 Quét tem '+unit.code+' để báo hết');
+    if(!await prepReconScanExact(st.itemId,unitId,unit.code))return;
+    if(prepReconForm!==st)return;
+    const ref=fstore.collection(STOCK_CONTAINERS_COLL).doc(unitId);
+    const cDoc=await ref.get();
+    if(!cDoc.exists||cDoc.data().status!=='open')throw new Error('Mã '+unit.code+' không còn đang mở');
+    _posSubmitBusy=true;
+    try{ await unitEngineFinishOpenUnit(unitId,{id:unitId,...cDoc.data()},staffEmp,'prep_reconcile',true,ref,st.batchId,true); }
+    finally{ _posSubmitBusy=false; }
+    st.values[unitId]={qty:0,lines:[],finished:true,verifiedUnitId:unitId};
+    toast('✅ Đã báo hết '+unit.code);
     await openPrepReconForm(st.batchId,st.itemId);
   } catch(err){toast('❌ '+(err.message||err));}
 }
@@ -12238,7 +12297,10 @@ async function prepReconPostSave() {
         err.code='PREP_RECON_STALE';throw err;
       }
       if(submitted.some(u=>u.after>u.baseline+0.015))throw new Error('Số còn lại lớn hơn mốc trước. Kiểm tra mã, bì hoặc lượt nhập thêm.');
-      const comparison=prepReconClassifyUsage(submitted,row.expected,st.varianceKind);
+      let comparison=prepReconClassifyUsage(submitted,row.expected,st.varianceKind);
+      const residue=prepReconResidueAuto(row.units,finished,comparison,row.expected);
+      if(residue){st.varianceKind=residue.kind;st.note=residue.note;
+        comparison=prepReconClassifyUsage(submitted,row.expected,st.varianceKind);}
       if(comparison.lotBreakdown.some(u=>Math.abs(u.delta)>0.015)&&!(st.note||'').trim())
         throw new Error('Một hoặc nhiều mã lệch định mức — ghi lý do trước khi chốt');
       const diff=round2(comparison.observed-row.expected);
