@@ -18063,6 +18063,7 @@ async function computeHandoverCloseLinesPOS() {
 let _handoverCloseState = [];
 function renderHandoverCloseScreen(lines) {
   _handoverCloseState = lines.map(l => ({ ...l, counted: null, weighings: [] }));
+  kcStepReset('kcHc');
   renderHandoverCloseCard();
 }
 function renderHandoverCloseCard() {
@@ -18073,7 +18074,7 @@ function renderHandoverCloseCard() {
     <div class="kc-card">
       <div style="font-size:14px;font-weight:700;color:#999;">Đếm/cân THỰC TẾ còn lại ở quầy — ca mai đếm lại độc lập để đối chiếu.</div>
       ${_handoverCloseState.some(l => handoverCanWeighPOS(l)) ? '' : handoverWeighHintHTML()}
-      <div style="margin-top:18px;display:flex;flex-direction:column;gap:12px;">
+      <div id="kcHcList" style="margin-top:18px;display:flex;flex-direction:column;gap:12px;">
       ${_handoverCloseState.map((l, i) => {
         const canWeigh = handoverCanWeighPOS(l);
         const done = l.counted !== null;
@@ -18091,18 +18092,20 @@ function renderHandoverCloseCard() {
             </div>` : ''}
           ` : `
             <div style="display:flex;gap:8px;align-items:center;">
-              <div style="flex:1;background:#fff;border:1.5px solid #F0EAD9;border-radius:999px;padding:12px 16px;"><input id="hcQty${i}" type="number" inputmode="decimal" step="0.01" placeholder="Đếm được..." style="width:100%;border:none;outline:none;background:transparent;font-family:inherit;font-size:16px;font-weight:700;color:#111;" oninput="handoverCloseSetQty(${i},this.value,true)"></div>
+              <div style="flex:1;background:#fff;border:1.5px solid #F0EAD9;border-radius:999px;padding:12px 16px;"><input id="hcQty${i}" type="number" value="${l.counted === null ? '' : l.counted}" inputmode="decimal" step="0.01" placeholder="Đếm được..." style="width:100%;border:none;outline:none;background:transparent;font-family:inherit;font-size:16px;font-weight:700;color:#111;" oninput="handoverCloseSetQty(${i},this.value,true)"></div>
               <span style="font-size:13px;font-weight:800;color:#E23A5D;flex-shrink:0;">${l.unit || ''}</span>
             </div>
           `}
         </div>`;
       }).join('')}
       </div>
-      ${renderPinInput('handoverCloseStaff')}
+      <div id="kcHcNav"></div>
+      <div class="kcHc-final">${renderPinInput('handoverCloseStaff')}</div>
     </div>
     ${closeStepNavHTML(4)}
-    <button onclick="submitHandoverClose()" class="kc-btn" style="background:var(--gd);color:#fff;margin-bottom:22px;">Xác nhận &amp; tiếp tục kết ca</button>
+    <button onclick="submitHandoverClose()" class="kc-btn kcHc-final" style="background:var(--gd);color:#fff;margin-bottom:22px;">Xác nhận &amp; tiếp tục kết ca</button>
   `;
+  kcStepApply('kcHc', _handoverCloseState.length, i => _handoverCloseState[i] && _handoverCloseState[i].counted !== null);
 }
 // goTay = nhân viên tự gõ đè lên số vừa cân. Bảng kê cân không còn khớp số sắp
 // lưu thì bỏ đi, chứ không lưu kèm một bảng kê cộng ra số khác — cùng cách xử lý
@@ -18111,6 +18114,7 @@ function handoverCloseSetQty(i, val, goTay) {
   const l = _handoverCloseState[i];
   if (!l) return;
   l.counted = (val === '' || val === null) ? null : (Number(val) || 0);
+  kcStepRefresh('kcHc');
   if (goTay && (l.weighings || []).length) {
     const cu = l.weighings.reduce((s, w) => s + (Number(w.net) || 0), 0);
     if (Math.abs(cu - (l.counted || 0)) > 0.005) {
@@ -18250,6 +18254,7 @@ async function renderHandoverOpenScreen(lines) {
       counted1: null, counted2: null, weighings1: [], weighings2: []
     };
   });
+  kcStepReset('kcHo1');
   _renderHandoverOpenStage1();
 }
 function _renderHandoverOpenStage1() {
@@ -18258,7 +18263,7 @@ function _renderHandoverOpenStage1() {
     <div class="kc-title">Đếm giao ca đầu ca</div>
     <div class="kc-card">
       <div style="font-size:14px;font-weight:700;color:#999;">Đếm thực tế hàng còn ở quầy</div>
-      <div style="margin-top:16px;display:flex;flex-direction:column;gap:12px;">
+      <div id="kcHo1List" style="margin-top:16px;display:flex;flex-direction:column;gap:12px;">
       ${_handoverOpenState.map((l, i) => `
         <div class="kc-sub">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:12px;">
@@ -18270,13 +18275,15 @@ function _renderHandoverOpenStage1() {
           <div id="hoWeigh1_${i}"></div>
         </div>`).join('')}
       </div>
+      <div id="kcHo1Nav"></div>
     </div>
-    <div class="kc-card">
+    <div class="kc-card kcHo1-final">
       ${renderPinInput('handoverOpenStaff')}
     </div>
     ${openStepNavHTML(2, "renderOpeningReviewPOS('cash','_renderHandoverOpenStage1()')")}
-    <button onclick="submitHandoverOpenStage1()" class="kc-btn" style="background:var(--gd);color:#fff;margin-bottom:22px;">Xác nhận đếm</button>
+    <button onclick="submitHandoverOpenStage1()" class="kc-btn kcHo1-final" style="background:var(--gd);color:#fff;margin-bottom:22px;">Xác nhận đếm</button>
   `;
+  kcStepApply('kcHo1', _handoverOpenState.length, i => _handoverOpenState[i] && _handoverOpenState[i].counted1 !== null);
   _handoverOpenState.forEach((l, i) => {
     if (l.weighings1.length) document.getElementById(`hoWeigh1_${i}`).innerHTML = weighSummaryHTML(l.weighings1, l.unit, `handoverOpenWeigh(${i},1)`);
   });
@@ -18294,6 +18301,7 @@ function handoverOpenSetQty(i, vong, val, goTay) {
   const kCount = vong === 2 ? 'counted2' : 'counted1';
   const kWeigh = vong === 2 ? 'weighings2' : 'weighings1';
   l[kCount] = so;
+  kcStepRefresh(vong === 2 ? 'kcHo2' : 'kcHo1');
   if (goTay && (l[kWeigh] || []).length) {
     const cu = l[kWeigh].reduce((s, w) => s + (Number(w.net) || 0), 0);
     if (Math.abs(cu - (so || 0)) > 0.005) {
@@ -18339,13 +18347,15 @@ async function _submitHandoverOpenStage1Impl() {
   await _finalizeHandoverOpen();
 }
 function _renderHandoverOpenStage2(needRecount) {
-  _handoverOpenRecountIndexes = needRecount.map(l => _handoverOpenState.indexOf(l));
+  const nextIdx = needRecount.map(l => _handoverOpenState.indexOf(l));
+  if (String(nextIdx) !== String(_handoverOpenRecountIndexes || '')) kcStepReset('kcHo2');
+  _handoverOpenRecountIndexes = nextIdx;
   const box = document.getElementById('shiftBody');
   box.innerHTML = `
     <div class="kc-title">Đếm lại giao ca</div>
     <div class="kc-card">
       <div style="font-size:14px;font-weight:700;color:#999;margin-bottom:16px;">${needRecount.length} món cần đếm lại để xác nhận</div>
-      <div style="display:flex;flex-direction:column;gap:12px;">
+      <div id="kcHo2List" style="display:flex;flex-direction:column;gap:12px;">
       ${_handoverOpenRecountIndexes.map(idx => {
         const l = _handoverOpenState[idx];
         return `
@@ -18357,10 +18367,13 @@ function _renderHandoverOpenStage2(needRecount) {
         </div>`;
       }).join('')}
       </div>
+      <div id="kcHo2Nav"></div>
     </div>
     ${openStepNavHTML(2, '_renderHandoverOpenStage1()')}
-    <button onclick="submitHandoverOpenStage2()" class="kc-btn" style="background:var(--gd);color:#fff;margin-bottom:22px;">Xác nhận &amp; tiếp tục</button>
+    <button onclick="submitHandoverOpenStage2()" class="kc-btn kcHo2-final" style="background:var(--gd);color:#fff;margin-bottom:22px;">Xác nhận &amp; tiếp tục</button>
   `;
+  kcStepApply('kcHo2', _handoverOpenRecountIndexes.length, j => {
+    const l = _handoverOpenState[_handoverOpenRecountIndexes[j]]; return !!l && l.counted2 !== null; });
   _handoverOpenRecountIndexes.forEach(idx => {
     const l = _handoverOpenState[idx];
     if (l.weighings2.length) document.getElementById(`hoWeigh2_${idx}`).innerHTML = weighSummaryHTML(l.weighings2, l.unit, `handoverOpenWeigh(${idx},2)`);
@@ -19310,6 +19323,46 @@ async function _submitPrepCountImpl() {
 // locationStock, không ghi TRANSFER/ADJUSTMENT và không tự tạo phiếu nhập.
 // ══════════════════════════════════════════════════════════════════════════
 const SHIFT_INVENTORY_COUNTS_COLL = 'shift_inventory_counts_gieogieo';
+
+// ── ĐẾM TỪNG MÓN MỘT ──────────────────────────────────────────────────────
+// Dùng chung cho các màn đếm dạng danh sách (kiểm kê đầu/cuối ca, đếm giao ca).
+// Danh sách vẫn vẽ đủ như cũ (giữ nguyên id ô nhập/hàm lưu), nhưng chỉ HIỆN món
+// đang đếm; món này chưa có số thì không sang được món sau. PIN + nút xác nhận chỉ
+// hiện ở món cuối — nhân viên mới không thể lướt qua mà quên một món.
+// Chỉ dùng ở màn hậu trường (mở/kết ca), không đụng luồng bán hàng.
+const _kcStep = {};   // key -> {idx, total, isDone}
+function kcStepReset(key){ delete _kcStep[key]; }
+function kcStepApply(key, total, isDone){
+  const st = _kcStep[key] || (_kcStep[key] = { idx: 0 });
+  st.total = total; st.isDone = isDone;
+  st.idx = Math.max(0, Math.min(st.idx, total - 1));
+  const list = document.getElementById(key + 'List');
+  if (!list || total <= 1) { kcStepRefresh(key); return; }
+  [...list.children].forEach((el, i) => { el.style.display = i === st.idx ? '' : 'none'; });
+  kcStepRefresh(key);
+}
+function kcStepRefresh(key){
+  const st = _kcStep[key]; if (!st) return;
+  const nav = document.getElementById(key + 'Nav');
+  const single = st.total <= 1;
+  const last = st.idx >= st.total - 1;
+  const done = !!st.isDone(st.idx);
+  document.querySelectorAll('.' + key + '-final').forEach(el => { el.style.display = (single || last) ? '' : 'none'; });
+  if (!nav) return;
+  if (single) { nav.innerHTML = ''; return; }
+  const soXong = Array.from({ length: st.total }, (_, i) => !!st.isDone(i)).filter(Boolean).length;
+  nav.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin:14px 0 4px;">
+      <button onclick="kcStepGo('${key}',-1)" ${st.idx > 0 ? '' : 'disabled'} style="padding:12px 14px;border-radius:999px;border:1.5px solid #ddd;background:#fff;color:${st.idx > 0 ? 'var(--td)' : '#ccc'};font-weight:800;font-family:inherit;">‹ Món trước</button>
+      <span style="font-size:13px;font-weight:800;color:#888;">Món ${st.idx + 1}/${st.total} · xong ${soXong}</span>
+      ${last ? '<span style="width:88px"></span>' : `<button onclick="kcStepGo('${key}',1)" ${done ? '' : 'disabled'} style="padding:12px 16px;border-radius:999px;border:0;background:${done ? 'var(--gd)' : '#f1eee4'};color:${done ? '#fff' : '#bbb'};font-weight:800;font-family:inherit;">Món tiếp ›</button>`}
+    </div>`;
+}
+function kcStepGo(key, d){
+  const st = _kcStep[key]; if (!st) return;
+  if (d > 0 && !st.isDone(st.idx)) { toast('⚠️ Đếm hoặc cân món này trước khi sang món tiếp theo'); return; }
+  st.idx = Math.max(0, Math.min(st.total - 1, st.idx + d));
+  kcStepApply(key, st.total, st.isDone);
+}
 let _shiftInventoryCountStatePOS = { phase:'', lines:[] };
 function shiftInventoryCountIntegerPOS(unit){
   return /^(cái|chiếc|ly|phần|quả|trái|hộp|gói|chai|lon|túi|bịch|cây|pcs)$/i.test(String(unit||'').trim());
@@ -19334,11 +19387,16 @@ async function computeShiftInventoryCountLinesPOS(phase){
 }
 async function renderShiftInventoryCountPOS(phase,lines){
   _shiftInventoryCountStatePOS={phase,lines:lines.map(l=>({...l,counted:null,weighings:[]}))};
+  kcStepReset('kcInv');
   try{
     await Promise.all([ensureKhoItemsPOS(),ensurePrepVesselsPOS(),ensureOriginalPacksPOS()]);
     preloadVesselImagesForItemsPOS(lines.map(l=>l.itemId));
   }catch(err){ console.warn('[Kiểm kê ca] Không nạp được dụng cụ, vẫn đếm tay được:',err); }
   renderShiftInventoryCountCardPOS();
+}
+function shiftInventoryCountLineDonePOS(l){
+  return !!l && Number.isFinite(l.counted) && l.counted>=0 &&
+    !(shiftInventoryCountIntegerPOS(l.unit)&&!Number.isInteger(l.counted));
 }
 function renderShiftInventoryCountCardPOS(){
   const {phase,lines}=_shiftInventoryCountStatePOS;
@@ -19347,18 +19405,20 @@ function renderShiftInventoryCountCardPOS(){
   box.innerHTML=`<div class="kc-title" style="color:#0062AD">Kiểm kê ${isOpen?'đầu':'cuối'} ca</div>
     <div class="kc-card" style="border:1.5px solid #0062AD">
       <div style="font-size:13px;color:#555;margin-bottom:13px">Đếm lượng thực tế còn lại. Số này giúp chuẩn bị hàng cho ngày mai; không tự tạo Refill hoặc nhập hàng.</div>
-      ${lines.map((l,i)=>{
+      <div id="kcInvList">${lines.map((l,i)=>{
         const weighed=itemCanWeighPOS(l.itemId);
         return `<div class="kc-sub" style="margin-bottom:11px">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px"><b>${escHtmlPos(l.itemName)}</b><span style="font-size:11px;color:${l.counted===null?'#0062AD':'#15803d'}">${l.counted===null?'Chưa đếm':'Đã đếm'}</span></div>
           <div style="display:flex;align-items:center;gap:8px"><input type="number" id="shiftInvQty${i}" min="0" step="${shiftInventoryCountIntegerPOS(l.unit)?'1':'0.01'}" inputmode="decimal" value="${l.counted===null?'':l.counted}" placeholder="Số thực tế còn lại" oninput="shiftInventoryCountSetQtyPOS(${i},this.value,true)" style="width:100%;padding:12px;border:1px solid #b9d6eb;border-radius:10px;font:700 16px 'Google Sans',sans-serif;box-sizing:border-box"><span style="color:#0062AD;font-weight:700">${escHtmlPos(l.unit)}</span></div>
           ${weighed?`<button onclick="shiftInventoryCountWeighPOS(${i})" style="width:100%;margin-top:8px;padding:11px;background:#fff;border:1px solid #0062AD;border-radius:10px;color:#0062AD;font-weight:700">Cân trừ bì</button>`:''}
         </div>`;
-      }).join('')}
-      ${renderPinInput(isOpen?'shiftInventoryOpenStaff':'shiftInventoryCloseStaff')}
+      }).join('')}</div>
+      <div id="kcInvNav"></div>
+      <div class="kcInv-final">${renderPinInput(isOpen?'shiftInventoryOpenStaff':'shiftInventoryCloseStaff')}</div>
     </div>
     ${isOpen?openStepNavHTML(3,'shiftInventoryOpenBackPOS()'):closeStepNavHTML(6)}
-    <button onclick="submitShiftInventoryCountPOS()" class="kc-btn" style="background:#0062AD;color:#fff;margin-bottom:22px">Xác nhận kiểm kê</button>`;
+    <button onclick="submitShiftInventoryCountPOS()" class="kc-btn kcInv-final" style="background:#0062AD;color:#fff;margin-bottom:22px">Xác nhận kiểm kê</button>`;
+  kcStepApply('kcInv', lines.length, i => shiftInventoryCountLineDonePOS(_shiftInventoryCountStatePOS.lines[i]));
 }
 function shiftInventoryCountSetQtyPOS(i,value,manual){
   const l=_shiftInventoryCountStatePOS.lines[i];
@@ -19366,6 +19426,7 @@ function shiftInventoryCountSetQtyPOS(i,value,manual){
   l.counted=value===''?null:Number(value);
   l.countedAt=l.counted===null?null:new Date().toISOString();
   if(manual)l.weighings=[];
+  kcStepRefresh('kcInv');
 }
 function shiftInventoryCountWeighPOS(i){
   const l=_shiftInventoryCountStatePOS.lines[i];
