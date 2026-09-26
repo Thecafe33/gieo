@@ -5705,7 +5705,8 @@ async function ctnRestoreAtomicSealed(containerId){
     await applyStockTransaction({
       itemId: c.itemId, type: 'ADJUSTMENT', qty: Number(c.baseQty) || 0,
       note: `Khôi phục tem ${c.code||''} bị chốt "cái rời" oan (lô chế biến không tạo được) — quản lý xác nhận gói chưa mở`,
-      staff: '', source: 'management', referenceId: containerId
+      staff: '', source: 'management', referenceId: containerId,
+      anomalyKind: null   // tem đã về 'sealed' → tồn tự đúng theo mã, không phải khoản lệch
     });
     logAudit('adjust','stock_container',containerId,{restoreAtomicSealed: Number(c.baseQty)||0});
     toast('✅ Đã khôi phục tem về "chưa mở"');
@@ -6462,7 +6463,7 @@ function deleteInventoryItem(id){
 //   source        — 'management' | 'pos', biết bản ghi tạo từ app nào
 //   referenceId   — tuỳ chọn, tham chiếu tới PO/đơn hàng/lần kiểm kho liên quan
 //   locationId    — tuỳ chọn, chỉ có khi giao dịch gắn với 1 vị trí kho cụ thể (TRANSFER)
-async function applyStockTransaction({itemId, type, qty, note, staff, businessDate, source, referenceId, locationId, txId}){
+async function applyStockTransaction({itemId, type, qty, note, staff, businessDate, source, referenceId, locationId, txId, anomalyKind}){
   // [NL-RECON] Các thao tác Kho trong Quản lý cũng không được chen vào số cân
   // dở của một mẻ POS. Từ chối rõ ràng để người vận hành chốt mẻ trước.
   const rtLock=await _ueActiveUnitsRef(itemId).child('__prepLock').once('value');
@@ -6475,7 +6476,9 @@ async function applyStockTransaction({itemId, type, qty, note, staff, businessDa
   const itemRef = fstore.collection('inventory_items_gieogieo').doc(itemId);
   const txRef = txId ? fstore.collection('stock_transactions_gieogieo').doc(txId)
     : fstore.collection('stock_transactions_gieogieo').doc();
+  let temTracked = false, temMeta = null, txDocId = null;
   await fstore.runTransaction(async (t)=>{
+    temTracked = false; temMeta = null; txDocId = null;
     // [NL-RECON] Đọc khóa trong cùng transaction để lần cập nhật tồn và
     // lần giành khóa cạnh tranh nhau phải được Firestore chạy lại.
     const activeLock=await t.get(fstore.collection('prep_ingredient_locks_gieogieo').doc(itemId));
@@ -6500,9 +6503,14 @@ async function applyStockTransaction({itemId, type, qty, note, staff, businessDa
     // đúng cơ chế "khoản không quy về unit nào" mà POS đã dùng cho CONSUMPTION/WASTE không
     // có tem mở (xem applyStockTransactionPOS). Nhờ vậy _ueRecomputeCurrentStock() thấy lại
     // đúng phần đã chỉnh thay vì âm thầm xoá nó.
-    const trackingMode = itemData.trackingMode;
-    if(trackingMode === 'unit' || trackingMode === 'batch'){
-      updates.untrackedPendingDelta = firebase.firestore.FieldValue.increment(Number(qty));
+    // [TEM = SỰ THẬT — thay cho cơ chế untrackedPendingDelta ở trên] Món có tem: tồn CHỈ là
+    // tổng các mã (xem recomputeTemStock / _ueRecomputeCurrentStock bên POS). Khoản thay đổi
+    // qua hàm này không gắn vào mã nào nên KHÔNG đổi tồn — chỉ ghi sổ + Sổ lệch (anomalyKind),
+    // rồi chốt lại tồn theo mã sau transaction.
+    temTracked = isTemTrackedItem(itemData);
+    if(temTracked){
+      updates.currentStock = current;
+      temMeta = { itemName: itemData.name||'', unit: itemData.unit||'' };
     }
     t.update(itemRef, updates);
     const txData = {
@@ -6513,8 +6521,72 @@ async function applyStockTransaction({itemId, type, qty, note, staff, businessDa
     };
     if(referenceId) txData.referenceId = referenceId;
     if(locationId) txData.locationId = locationId;
+    if(temTracked){ txData.outsideTem = true; txData.resultingStock = current; }
     t.set(txRef, txData);
+    txDocId = txRef.id;
   });
+  if(temTracked && txDocId){
+    if(anomalyKind !== null) await logStockAnomaly('tx_'+txDocId, {
+      itemId, itemName: temMeta.itemName, unit: temMeta.unit, qty: Number(qty),
+      kind: anomalyKind || 'manual_adjust', txType: type, note, referenceId, staff, businessDate
+    });
+    await recomputeTemStock(itemId);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// [TEM = SỰ THẬT] Tồn của nguyên liệu có in tem = Σ tem chưa mở + Σ phần còn của tem đang
+// mở (RT active_units_gieogieo). Bản sao đúng công thức NL của _ueRecomputeCurrentStock bên
+// posgieo.html (kể cả phần bù tem 'open' ở Firestore mà RT thiếu / _ueRtStale). Mọi khoản
+// trừ/chỉnh không gắn được vào mã nào → Sổ lệch (stock_anomalies_gieogieo), KHÔNG vào tồn.
+// ══════════════════════════════════════════════════════════════════════════
+const STOCK_ANOMALY_COLL = 'stock_anomalies_gieogieo';
+function isTemTrackedItem(it){
+  return !!it && it.stockManaged !== false && (it.trackingMode === 'unit' || it.trackingMode === 'batch');
+}
+async function logStockAnomaly(docId, a){
+  try{
+    const ref = docId ? fstore.collection(STOCK_ANOMALY_COLL).doc(docId) : fstore.collection(STOCK_ANOMALY_COLL).doc();
+    await ref.set({
+      itemId: a.itemId, itemName: a.itemName||'', unit: a.unit||'',
+      qty: Number(a.qty)||0, kind: a.kind, txType: a.txType||'',
+      note: a.note||'', referenceId: a.referenceId||'', staff: a.staff||'',
+      businessDate: a.businessDate || dkey(new Date()), createdAt: new Date().toISOString(),
+      source: 'management', status: 'open'
+    }, {merge:true});
+  }catch(err){ console.warn('[Sổ lệch] ghi lỗi', a && a.itemId, err); }
+}
+async function recomputeTemStock(itemId){
+  const myStartedAt = Date.now();
+  const sealedById = {};
+  let sealedTotal = 0;
+  const sealedSnap = await fstore.collection(CTN_COLL).where('itemId','==',itemId).where('status','==','sealed').get();
+  sealedSnap.forEach(d=>{ const bq = Number(d.data().baseQty)||0; sealedById[d.id] = bq; sealedTotal += bq; });
+  const rt = (await _ueActiveUnitsRef(itemId).once('value')).val() || {};
+  let openTotal = 0;
+  Object.keys(rt).filter(k=>k!=='__prepLock').forEach(k=>{
+    if(sealedById[k] !== undefined) sealedTotal -= sealedById[k];
+    if(!(rt[k]&&rt[k].discardPending)) openTotal += Number(rt[k]&&rt[k].unitBase)||0;
+  });
+  try{
+    const openSnap = await fstore.collection(CTN_COLL).where('itemId','==',itemId).where('status','==','open').get();
+    openSnap.forEach(d=>{
+      const data = d.data();
+      if(!rt[d.id]){ openTotal += Number(data.unitBase)||0; return; }
+      if(data._ueRtStale) openTotal += (Number(data.unitBase)||0) - (Number(rt[d.id].unitBase)||0);
+    });
+  }catch(err){ console.warn('[Tem] quét tem mở lệch RT lỗi', itemId, err); }
+  const total = sealedTotal + openTotal;
+  const itemRef = fstore.collection('inventory_items_gieogieo').doc(itemId);
+  memoDropItems();
+  await fstore.runTransaction(async t=>{
+    const doc = await t.get(itemRef);
+    if(!doc.exists) return;
+    const lastStart = Number(doc.data()._ueLastRecomputeStart)||0;
+    if(myStartedAt < lastStart) return;
+    t.update(itemRef, { currentStock: total, updatedAt: new Date().toISOString(), _ueLastRecomputeStart: myStartedAt });
+  });
+  return total;
 }
 async function loadStockTransactions(limitN=50){
   const snap = await fstore.collection('stock_transactions_gieogieo').orderBy('createdAt','desc').limit(limitN).get();
@@ -6544,19 +6616,71 @@ async function approveStockCount(countId, reviewerNote){
   if(!doc.exists) throw new Error('Không tìm thấy lần kiểm kho này');
   const data = doc.data();
   const items = data.items || [];
-  const jobs = items
-    .filter(it => Number(it.varianceBase) !== 0)
+  // [TEM = SỰ THẬT] Dòng đếm theo mã (countMode 'unit'): tồn đã là tổng mã, KHÔNG ghi
+  // ADJUSTMENT theo số chênh nữa (trước đây cộng vào nợ ảo untrackedPendingDelta trong khi
+  // mã vẫn 'sealed' — đếm lần sau lại "khớp", khoản lệch nằm ẩn mãi). Mã không tìm thấy lúc
+  // kiểm kê đã được nhân viên báo mất → duyệt kiểm kê = duyệt luôn các phiếu báo mất đó:
+  // chuyển mã sang 'lost', tồn tự giảm đúng bằng mã đó.
+  const unitRows = items.filter(it => it.countMode === 'unit');
+  const lostJobs = unitRows.map(it => approvePendingLostReportsForItem(it.itemId, countId));
+  const jobs = [...lostJobs, ...items
+    .filter(it => it.countMode !== 'unit' && Number(it.varianceBase) !== 0)
     .map(it => applyStockTransaction({
       itemId: it.itemId, type: 'ADJUSTMENT', qty: Number(it.varianceBase),
       note: `Điều chỉnh sau kiểm kho (đếm ${fmtNum(it.countedBase,2)} ${it.unit}, hệ thống ${fmtNum(it.expectedBase,2)} ${it.unit})`,
       staff: data.countedBy || '', source: 'management', referenceId: countId,
-      txId:'stock_count_'+countId+'_'+it.itemId
-    }));
+      txId:'stock_count_'+countId+'_'+it.itemId, anomalyKind: 'stock_count'
+    }))];
   const results = await Promise.allSettled(jobs);
   const failed = results.filter(r=>r.status==='rejected');
   if(failed.length)throw new Error('Còn '+failed.length+' NL chưa điều chỉnh được (có thể đang chờ cân mẻ). Kiểm tra rồi duyệt lại; các dòng đã ghi sẽ không bị cộng/trừ lần hai.');
   await ref.update({status:'approved', reviewedAt:new Date().toISOString(), reviewNote: reviewerNote||''});
   return {failedCount: failed.length};
+}
+// Duyệt các phiếu báo mất đang chờ của MỘT nguyên liệu (nhân viên bấm "Không tìm thấy" ở
+// màn Kiểm tra lại của kiểm kê POS). Mã → 'lost' (giữ lostFromStatus để POS "Tìm lại hàng
+// báo mất" phục hồi đúng), gỡ khỏi RT nếu đang mở, ghi Sổ lệch 'lost', rồi tính lại tồn.
+async function approvePendingLostReportsForItem(itemId, countId){
+  const snap = await fstore.collection('stock_lost_reports_gieogieo')
+    .where('itemId','==',itemId).where('status','==','pending_review').get();
+  const nowISO = new Date().toISOString();
+  for(const rep of snap.docs){
+    const r = rep.data();
+    const cRef = fstore.collection(CTN_COLL).doc(r.containerId);
+    let lostQty = 0, meta = null;
+    await fstore.runTransaction(async t=>{
+      lostQty = 0; meta = null;
+      const cDoc = await t.get(cRef);
+      const repDoc = await t.get(rep.ref);
+      if(!repDoc.exists || repDoc.data().status !== 'pending_review') return;
+      if(!cDoc.exists || !['sealed','open'].includes(cDoc.data().status)){
+        t.update(rep.ref, {status:'rejected', reviewedAt:nowISO, reviewNote:'Mã không còn ở trạng thái chưa mở/đang mở'});
+        return;
+      }
+      const c = cDoc.data();
+      meta = { status: c.status, code: c.code||'', itemName: c.itemName||'', unit: c.unit||'' };
+      lostQty = c.status === 'sealed' ? (Number(c.baseQty)||0) : (Number(c.unitBase)||0);
+      t.update(cRef, {status:'lost', lostFromStatus:c.status, lostAt:nowISO, lostBy:'management',
+        lostReportId: rep.id, lostCountId: countId||''});
+      t.update(rep.ref, {status:'approved', reviewedAt:nowISO, approvedVia:'stock_count', countId: countId||''});
+    });
+    if(!meta) continue;
+    if(meta.status === 'open'){
+      try{
+        const live = (await _ueActiveUnitsRef(itemId).child(r.containerId).once('value')).val();
+        if(live) lostQty = Number(live.unitBase)||0;
+        await _ueActiveUnitsRef(itemId).child(r.containerId).remove();
+      }catch(err){ console.warn('[báo mất] gỡ RT lỗi', r.containerId, err); }
+    }
+    await fstore.collection('stock_transactions_gieogieo').doc('lost_'+rep.id).set({
+      itemId, type:'WASTE', qty:-lostQty, reason:'lost_item', containerId:r.containerId,
+      note:`Mất mã ${meta.code} (không tìm thấy khi kiểm kê)`, staff: r.reportedBy||'',
+      referenceId: rep.id, createdAt: nowISO, businessDate: dkey(new Date()), status:'posted', source:'management'
+    }).catch(err=>console.warn('[báo mất] ghi sổ lỗi', err));
+    await logStockAnomaly('lost_'+rep.id, {itemId, itemName: meta.itemName, unit: meta.unit, qty: -lostQty,
+      kind:'lost', txType:'WASTE', note:`Mất mã ${meta.code} — không tìm thấy khi kiểm kê`, referenceId: rep.id, staff: r.reportedBy||''});
+  }
+  await recomputeTemStock(itemId);
 }
 function rejectStockCount(countId, reviewerNote){
   return fstore.collection('stock_counts_gieogieo').doc(countId).update({
@@ -9717,6 +9841,121 @@ function thToggleRow(itemId){
   thVeBang();
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+// [TEM = SỰ THẬT] SỔ LỆCH TEM — mọi khoản trừ/cộng của nguyên liệu có tem mà KHÔNG gắn
+// được vào mã nào. Tồn kho không bị kéo theo (tồn = tổng mã); ở đây là chỗ đọc "đường nào
+// đang trừ ngoài tem" — cột nào âm bất thường là chỉ thẳng tới bug/quy trình cần sửa.
+// ══════════════════════════════════════════════════════════════════════════
+const SOLECH_KIND = {
+  atomic_unscanned:     ['Món cả cái bị trừ mà không quét mã', 'Công thức ly/topping dùng thẳng KIT, hoặc trừ ngoài cổng quét khi nấu'],
+  no_open_tem:          ['Trừ khi chưa có tem đang mở', 'Nhân viên chưa quét mở tem mới'],
+  waste_no_tem:         ['Hao hụt không gắn tem', 'Đổ/huỷ lúc không có tem đang mở'],
+  reversal_outside_tem: ['Hoàn kho ngoài tem', 'Xoá/sửa bill mà không trả được vào tem'],
+  manual_adjust:        ['Chỉnh tay', 'Quản lý chỉnh ngoài tem'],
+  stock_count:          ['Chênh kiểm kê (đếm tay)', 'Dòng kiểm kê không đếm theo mã'],
+  lost:                 ['Mất mã khi kiểm kê', 'Mã không tìm thấy, đã duyệt báo mất'],
+  cutover:              ['Chốt sổ theo tem', 'Chênh giữa số cũ và tổng mã lúc chốt']
+};
+let soLechFrom = null, soLechTo = null;
+async function renderKhoSoLech(){
+  const box = document.getElementById('khoBody');
+  const homNay = dkey(new Date());
+  if(!soLechFrom) soLechFrom = homNay >= '2026-10-01' ? '2026-10-01' : _thLuiNgay(homNay, 7);
+  if(!soLechTo) soLechTo = homNay;
+  box.innerHTML = `
+    <div class="unit-explainer" style="margin-bottom:12px">
+      <b>Tồn của nguyên liệu có tem = tổng các mã còn lại</b> (chưa mở + phần còn của mã đang mở) — khớp với số quét được khi kiểm kê.<br>
+      Khoản nào hệ thống trừ/cộng mà <b>không gắn được vào mã nào</b> thì <b>không</b> đổi tồn, mà ghi vào đây kèm nguồn. Nguồn nào âm nhiều bất thường là chỗ đang có lỗi cần sửa.
+    </div>
+    <div class="card">
+      <div class="grid2">
+        <div class="field"><label>Từ ngày</label><input type="date" id="slFrom" value="${soLechFrom}"></div>
+        <div class="field" style="margin-bottom:0"><label>Đến ngày</label><input type="date" id="slTo" value="${soLechTo}"></div>
+      </div>
+      <button class="btn" style="margin-top:10px" onclick="soLechFrom=document.getElementById('slFrom').value;soLechTo=document.getElementById('slTo').value;renderKhoSoLech()">${ic('search',15)} Xem</button>
+    </div>
+    <div class="card">
+      <div style="font-weight:700;margin-bottom:6px">Chốt tồn theo mã</div>
+      <div class="small-note">Tính lại tồn của MỌI nguyên liệu có tem = tổng mã hiện có. Chênh với số cũ (nợ ảo tích từ trước) được ghi 1 dòng "Chốt sổ theo tem" để tra lại. Chạy một lần khi bắt đầu dùng cách tính mới (vd sáng 01/10); chạy lại cũng an toàn.</div>
+      <button class="btn outline" id="slCutoverBtn" style="margin-top:10px" onclick="soLechCutover()">Chốt tồn theo mã ngay</button>
+    </div>
+    <div id="slBody"><div class="muted">Đang tải...</div></div>`;
+  const out = document.getElementById('slBody');
+  try{
+    const snap = await fstore.collection(STOCK_ANOMALY_COLL)
+      .where('businessDate','>=',soLechFrom).where('businessDate','<=',soLechTo).get();
+    const rows = snap.docs.map(d=>({id:d.id, ...d.data()})).sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)));
+    if(!rows.length){ out.innerHTML = '<div class="card"><div class="muted">Không có khoản lệch nào trong khoảng này — mọi thay đổi tồn đều đi qua mã.</div></div>'; return; }
+    const byItem = {};
+    rows.forEach(r=>{
+      const g = byItem[r.itemId] || (byItem[r.itemId] = {name:r.itemName||r.itemId, unit:r.unit||'', total:0, kinds:{}, n:0});
+      g.total += Number(r.qty)||0; g.n++;
+      g.kinds[r.kind] = (g.kinds[r.kind]||0) + (Number(r.qty)||0);
+    });
+    const items = Object.values(byItem).sort((a,b)=>a.total-b.total);
+    const kindLabel = k => (SOLECH_KIND[k]||[k])[0];
+    out.innerHTML = `
+      <div class="card">
+        <div style="font-weight:700;margin-bottom:8px">Theo nguyên liệu</div>
+        ${items.map(g=>`<div class="kx-line${g.total<0?' bad':''}" style="margin-bottom:6px">
+          <div class="kx-l"><b>${escapeHtmlAttr(g.name)}</b>
+            ${Object.entries(g.kinds).map(([k,q])=>`<div class="kx-sub">${escapeHtmlAttr(kindLabel(k))}: <b>${q>0?'+':''}${fmtNum(q,2)} ${escapeHtmlAttr(g.unit)}</b></div>`).join('')}
+          </div>
+          <div class="kx-r"><b>${g.total>0?'+':''}${fmtNum(g.total,2)} ${escapeHtmlAttr(g.unit)}</b><span>${g.n} lần</span></div>
+        </div>`).join('')}
+      </div>
+      <div class="card">
+        <div style="font-weight:700;margin-bottom:8px">Chi tiết (mới nhất trước)</div>
+        ${rows.slice(0,300).map(r=>`<div class="kx-line" style="margin-bottom:6px">
+          <div class="kx-l"><b>${escapeHtmlAttr(r.itemName||'')}</b> <span class="tier tier-amber">${escapeHtmlAttr(kindLabel(r.kind))}</span>
+            <div class="kx-sub">${escapeHtmlAttr(r.note||'')}</div>
+            <div class="kx-sub">${escapeHtmlAttr(r.businessDate||'')} · ${escapeHtmlAttr(String(r.createdAt||'').slice(11,16))}${r.staff?' · '+escapeHtmlAttr(r.staff):''}${r.referenceId?' · '+escapeHtmlAttr(r.referenceId):''}</div>
+          </div>
+          <div class="kx-r"><b>${Number(r.qty)>0?'+':''}${fmtNum(Number(r.qty)||0,2)} ${escapeHtmlAttr(r.unit||'')}</b></div>
+        </div>`).join('')}
+      </div>`;
+  }catch(err){
+    console.error('renderKhoSoLech', err);
+    out.innerHTML = '<div class="card"><div class="muted">Không đọc được Sổ lệch: '+escapeHtmlAttr(err.code||err.message||String(err))+'</div></div>';
+  }
+}
+async function soLechCutover(){
+  if(!confirm('Tính lại tồn của mọi nguyên liệu có tem = tổng mã hiện có?\n\nChênh với số cũ sẽ được ghi vào Sổ lệch để tra lại.')) return;
+  const btn = document.getElementById('slCutoverBtn');
+  if(btn){ btn.disabled = true; btn.textContent = 'Đang chốt...'; }
+  try{
+    await ensureAuth();
+    const items = (await loadInventoryItems()).filter(isTemTrackedItem);
+    const day = dkey(new Date());
+    let changed = 0, failed = 0;
+    for(const it of items){
+      try{
+        const doc = await fstore.collection('inventory_items_gieogieo').doc(it.id).get();
+        const d = doc.exists ? doc.data() : {};
+        const before = Number(d.currentStock)||0;
+        const after = await recomputeTemStock(it.id);
+        const diff = Math.round((before - after)*100)/100;
+        if(Math.abs(diff) > 1e-6){
+          changed++;
+          await logStockAnomaly('cutover_'+day+'_'+it.id, {
+            itemId: it.id, itemName: it.name||'', unit: it.unit||'', qty: diff, kind:'cutover', txType:'ADJUSTMENT',
+            note: `Chốt tồn theo mã: số cũ ${fmtNum(before,2)} → tổng mã ${fmtNum(after,2)} ${it.unit||''}`
+              + ` (nợ ảo cũ ${fmtNum(Number(d.untrackedPendingDelta)||0,2)}, tồn lịch sử ${fmtNum(Number(d.untrackedBase)||0,2)})`,
+            businessDate: day
+          });
+        }
+        await fstore.collection('inventory_items_gieogieo').doc(it.id).update({
+          temCutoverAt: new Date().toISOString(),
+          temCutoverSnapshot: { currentStock: before, untrackedPendingDelta: Number(d.untrackedPendingDelta)||0, untrackedBase: Number(d.untrackedBase)||0, temTotal: after }
+        });
+      }catch(err){ failed++; console.warn('[Chốt tồn theo mã] lỗi', it.id, err); }
+    }
+    memoDropItems();
+    toast(`✅ Đã chốt ${items.length} nguyên liệu có tem — ${changed} món đổi số` + (failed?` · ${failed} món lỗi, bấm lại`:'') );
+  }catch(err){ showError('Chốt tồn theo mã lỗi: '+(err.code||err.message||err)); }
+  renderKhoSoLech();
+}
+
 async function renderKhoLech(){
   const box = document.getElementById('khoBody');
   const homNay = dkey(new Date());
@@ -10967,6 +11206,7 @@ const NAV_SECTIONS = [
     {key:'kho2:prep',        ic:'flame',     label:'Lô BTP',          go:"goKho2('prep')"},
     {key:'kho2:search',      ic:'search',    label:'Tra cứu',         go:"goKho2('search')"},
     {key:'kho:history',      ic:'clock',     label:'Sổ kho',          go:"goKho('history')"},
+    {key:'kho:solech',       ic:'alert',     label:'Sổ lệch tem',     go:"goKho('solech')"},
   ]},
   { group:'Kho · Danh mục', kho:true, items:[
     {key:'kho:items',        ic:'package',   label:'Nguyên liệu',     go:"goKho('items')"},
@@ -19289,6 +19529,7 @@ async function renderEntryKho(){
   else if(curKhoSub==='locstock') renderKhoLocStock();
   else if(curKhoSub==='stockcount') renderKhoStockCount();
   else if(curKhoSub==='lechkho') renderKhoLech();
+  else if(curKhoSub==='solech') renderKhoSoLech();
   else if(curKhoSub==='dubao') renderKhoDuBao();
   else if(curKhoSub==='wastereasons') renderKhoWasteReasons();
   else if(curKhoSub==='checklist') renderKhoChecklist();
@@ -19347,6 +19588,12 @@ let itemAdjustDraft = null;   // {newQty, reason}
 function startAdjustItem(id){
   const it = INVENTORY_ITEMS.find(x=>x.id===id);
   if(!it) return;
+  // [TEM = SỰ THẬT] Món có tem: tồn = tổng mã, không có "con số tổng" để sửa tay. Sửa theo
+  // từng mã (Chi tiết tem ▸ Sửa tồn mã này / Huỷ mã / Báo mất) hoặc qua kiểm kê quét mã.
+  if(isTemTrackedItem(it)){
+    toast('ℹ️ "'+(it.name||'')+'" quản lý bằng tem — tồn = tổng các mã. Sửa theo từng mã (Chi tiết tem) hoặc kiểm kê quét mã.');
+    return;
+  }
   editingItemId = null; addingItem = false;   // không mở hai sheet chồng nhau
   adjustingItemId = id;
   itemAdjustDraft = { newQty: Number(it.currentStock)||0, reason: '' };
@@ -24014,7 +24261,7 @@ function scPendingCardHtml(c, threshold, pkgThreshold){
       return `<div class="kx-line${doNguyen?' bad':''}">
         <div class="kx-l"><b>${escapeHtmlAttr(it.name||'')}</b> <span class="tier tier-green">Theo ${dv}</span>
           <div class="kx-sub${moChui?' warn':''}">${moChui?'Có hàng mở mà không quét mã · ':''}Đang mở ${it.countedOpenUnits} / ${it.expectedOpenUnits}${lechMo?` (${lechMo>0?'+':''}${lechMo})`:''}</div>
-          ${doNguyen?`<div class="kx-sub bad">Duyệt sẽ chỉnh tồn ${lechNguyen>0?'+':''}${fmtNum(it.varianceBase,0)} ${escapeHtmlAttr(it.unit||'')}</div>`:''}
+          ${doNguyen?`<div class="kx-sub bad">Tồn tính theo mã — duyệt = xác nhận các mã nhân viên báo "Không tìm thấy" là mất</div>`:''}
         </div>
         <div class="kx-r"><b>${it.countedSealedUnits} / ${it.expectedSealedUnits} ${dv}</b>${lechNguyen?`<span>${lechNguyen>0?'+':''}${lechNguyen} nguyên</span>`:'<span>khớp</span>'}</div>
       </div>`;
