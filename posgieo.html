@@ -19287,23 +19287,43 @@ async function computePrepCountLinesPOS() {
 //   1. Lô nấu hôm nay cân ra THIẾU so với định lượng chuẩn (batchYield × tỷ lệ mẻ) đúng cỡ
 //      khoản âm (±5% định lượng chuẩn) → đã lấy từ nồi mới bán trước khi cân. Hợp lệ.
 //   2. Phần còn lại vượt biên → tìm trong các BTP "được phép bù" (cấu hình ở quanlygieo,
-//      prep_items.substitutes = [{prepId, ratio}]) BTP nào cân cuối ca HỤT đúng cỡ
+//      substitutes = [{kind:'prep'|'item', id, ratio}]) BTP nào cân cuối ca HỤT đúng cỡ
 //      phần còn lại × ratio → đề xuất "đã bù bằng loại khác", chờ Quản lý xác nhận (lúc
-//      đó mới tính lại giá vốn).
+//      đó mới tính lại giá vốn). NL dùng thẳng làm topping KHÔNG cân cuối ca nên không tự
+//      đo được — chỉ ghi gợi ý "có thể đã bù bằng", Quản lý tự nhập lượng.
 //   3. Không khớp gì → "chưa giải thích", báo Quản lý.
+//   Chiều ngược lại: NL dùng thẳng bị bán lúc không có tem mở (Sổ lệch trong ngày) mà NL đó
+//   được phép bù bằng BTP X, và X cân cuối ca hụt đúng cỡ → cũng đề xuất "đã bù".
 // Kết quả ghi prep_shortage_recons_gieogieo/{ngày}_{prepId}.
 // ══════════════════════════════════════════════════════════════════════════
 const PREP_SHORTAGE_RECON_COLL = 'prep_shortage_recons_gieogieo';
 const PREP_SHORTAGE_TOL_PCT = 5;
+// Cấu hình cũ chỉ có {prepId, ratio} (BTP bù BTP) — đọc như kind 'prep'.
+function prepSubNorm(x) {
+  return { kind: x.kind === 'item' ? 'item' : 'prep', id: x.id || x.prepId, ratio: Number(x.ratio) > 0 ? Number(x.ratio) : 1 };
+}
 
 // Chụp khoản âm của MỌI BTP TRƯỚC khi bước cân ghi đè RT/lô (cân xong là âm về 0).
 async function prepShortageCollect(businessDate) {
-  const [itemsSnap, lotsSnap] = await Promise.all([
+  const [itemsSnap, lotsSnap, nlSnap, anSnap] = await Promise.all([
     fstore.collection('prep_items_gieogieo').get(),
-    fstore.collection('prep_batches_gieogieo').where('businessDate', '==', businessDate).get()
+    fstore.collection('prep_batches_gieogieo').where('businessDate', '==', businessDate).get(),
+    fstore.collection('inventory_items_gieogieo').get(),
+    fstore.collection(STOCK_ANOMALY_COLL).where('businessDate', '==', businessDate).get()
   ]);
   const items = {};
   itemsSnap.docs.forEach(d => { items[d.id] = { id: d.id, ...d.data() }; });
+  const nlItems = {};
+  nlSnap.docs.forEach(d => { nlItems[d.id] = { id: d.id, ...d.data() }; });
+  // NL bị trừ lúc không có tem mở hôm nay (chưa được giải thích) — nguồn của chiều "NL hết,
+  // bù bằng BTP".
+  const nlShort = {};
+  anSnap.docs.forEach(d => {
+    const a = d.data();
+    if (a.status !== 'open' || !['no_open_tem', 'atomic_unscanned'].includes(a.kind) || !(Number(a.qty) < 0)) return;
+    const g = nlShort[a.itemId] || (nlShort[a.itemId] = { qty: 0, ids: [] });
+    g.qty = round2(g.qty - Number(a.qty)); g.ids.push(d.id);
+  });
   const lotsByPrep = {};
   lotsSnap.docs.forEach(d => {
     const b = d.data();
@@ -19321,12 +19341,14 @@ async function prepShortageCollect(businessDate) {
     const S = round2(Math.max(0, -(neg + delta)));
     if (S > 0.005) shortage[p.id] = S;
   }));
-  return { items, lotsByPrep, shortage };
+  return { items, lotsByPrep, shortage, nlItems, nlShort };
 }
 
 // Phân tích sau khi đã có số cân cuối ca. countLines: [{prepId, countedQty, systemQty}]
 function prepShortageAnalyze(snapshot, countLines) {
   const { items, lotsByPrep, shortage } = snapshot;
+  const nlItems = snapshot.nlItems || {}, nlShort = snapshot.nlShort || {};
+  const usedShort = {}; // phần hụt của BTP bù đã được gán cho một nguồn — không gán hai lần
   const varianceOf = {};
   (countLines || []).forEach(l => { varianceOf[l.prepId] = round2((Number(l.countedQty) || 0) - (Number(l.systemQty) || 0)); });
   const tolPct = PREP_SHORTAGE_TOL_PCT / 100;
@@ -19349,33 +19371,59 @@ function prepShortageAnalyze(snapshot, countLines) {
     const R = round2(S - explained);
     if (R <= tol) status = 'explained';
     else {
-      let best = null;
-      (p.substitutes || []).forEach(sub => {
-        const b = items[sub.prepId];
-        if (!b || varianceOf[sub.prepId] === undefined) return;
-        const ratio = Number(sub.ratio) > 0 ? Number(sub.ratio) : 1;
-        const need = round2(R * ratio);
-        const short = round2(Math.max(0, -varianceOf[sub.prepId]));
-        const tolB = round2(tolPct * (Number(b.batchYield) > 0 ? Number(b.batchYield) : need));
-        const diff = Math.abs(short - need);
-        if (short > 0 && diff <= tolB && (!best || diff < best.diff)) best = { sub, b, ratio, need, short, diff };
-      });
+      const best = prepSubBestMatch((p.substitutes || []).map(prepSubNorm), R, items, varianceOf, usedShort);
       if (best) {
         status = 'substitution_pending';
-        substitution = {
-          prepId: best.b.id, prepName: best.b.name || '', unit: best.b.unit || '', ratio: best.ratio,
-          expectedQty: best.need, observedShortQty: best.short, costPerUnit: Number(best.b.costPerUnit) || 0
-        };
+        substitution = best;
+        usedShort[best.id] = round2((usedShort[best.id] || 0) + best.expectedQty);
       }
     }
+    // NL dùng thẳng được phép bù: không cân được → chỉ gợi ý tên cho Quản lý chọn.
+    const possibleItemSubs = (p.substitutes || []).map(prepSubNorm).filter(x => x.kind === 'item' && nlItems[x.id])
+      .map(x => ({ kind: 'item', id: x.id, name: nlItems[x.id].name || '', unit: nlItems[x.id].unit || '', ratio: x.ratio }));
     out.push({
-      prepId, prepName: p.name || '', unit: p.unit || '', costPerUnit: Number(p.costPerUnit) || 0,
+      sourceKind: 'prep', prepId, prepName: p.name || '', unit: p.unit || '', costPerUnit: Number(p.costPerUnit) || 0,
       shortageQty: S, lots, newLotShortfall: F, tolerance: tol,
       explainedByNewLot: explained, remainder: R, status, substitution,
+      ...(status === 'unexplained' && possibleItemSubs.length ? { possibleItemSubs } : {}),
       countedVariance: varianceOf[prepId] !== undefined ? varianceOf[prepId] : null
     });
   });
+  // Chiều ngược: NL dùng thẳng bán lúc không có tem mở, được phép bù bằng BTP đang hụt.
+  Object.keys(nlShort).forEach(itemId => {
+    const it = nlItems[itemId];
+    const subs = ((it && it.substitutes) || []).map(prepSubNorm).filter(x => x.kind === 'prep');
+    if (!subs.length) return; // không có cấu hình bù — khoản này đã nằm ở Sổ lệch tem
+    const Q = nlShort[itemId].qty;
+    const best = prepSubBestMatch(subs, Q, items, varianceOf, usedShort);
+    if (!best) return;
+    usedShort[best.id] = round2((usedShort[best.id] || 0) + best.expectedQty);
+    out.push({
+      sourceKind: 'item', prepId: itemId, prepName: it.name || '', unit: it.unit || '', costPerUnit: Number(it.costPerUnit) || 0,
+      shortageQty: Q, lots: [], newLotShortfall: 0, tolerance: 0, explainedByNewLot: 0, remainder: Q,
+      status: 'substitution_pending', substitution: best, anomalyIds: nlShort[itemId].ids, countedVariance: null
+    });
+  });
   return out;
+}
+// Tìm BTP (kind 'prep') trong danh sách được phép bù có phần hụt cân cuối ca (chưa gán cho
+// nguồn khác) khớp lượng cần = qty × ratio, trong biên ±5% định lượng chuẩn mẻ của BTP đó.
+function prepSubBestMatch(subs, qty, items, varianceOf, usedShort) {
+  const tolPct = PREP_SHORTAGE_TOL_PCT / 100;
+  let best = null;
+  subs.filter(x => x.kind === 'prep').forEach(sub => {
+    const b = items[sub.id];
+    if (!b || varianceOf[sub.id] === undefined) return;
+    const need = round2(qty * sub.ratio);
+    const short = round2(Math.max(0, -varianceOf[sub.id]) - (usedShort[sub.id] || 0));
+    const tolB = round2(tolPct * (Number(b.batchYield) > 0 ? Number(b.batchYield) : need));
+    const diff = Math.abs(short - need);
+    if (short > 0 && diff <= tolB && (!best || diff < best.diff)) best = { sub, b, need, short, diff };
+  });
+  return best && {
+    kind: 'prep', id: best.b.id, prepId: best.b.id, prepName: best.b.name || '', unit: best.b.unit || '', ratio: best.sub.ratio,
+    expectedQty: best.need, observedShortQty: best.short, costPerUnit: Number(best.b.costPerUnit) || 0
+  };
 }
 
 // Ghi kết quả + báo Quản lý + dọn khoản âm của BTP không có trong màn cân (không còn lô nào).
@@ -19383,7 +19431,7 @@ async function prepShortageRecord(results, snapshot, countedIds, adjIdByPrep, bu
   const now = new Date().toISOString();
   await Promise.allSettled(results.map(async r => {
     if (r.substitution && adjIdByPrep[r.substitution.prepId]) r.substitution.countAdjTxId = adjIdByPrep[r.substitution.prepId];
-    const id = (businessDate + '_' + r.prepId).replace(/[^\w\-]/g, '_');
+    const id = (businessDate + (r.sourceKind === 'item' ? '_nl_' : '_') + r.prepId).replace(/[^\w\-]/g, '_');
     await fstore.collection(PREP_SHORTAGE_RECON_COLL).doc(id).set({
       ...r, businessDate, createdAt: now, staff: staffEmp.fullName, staffEmployeeId: staffEmp.id
     });
@@ -19392,14 +19440,16 @@ async function prepShortageRecord(results, snapshot, countedIds, adjIdByPrep, bu
         type: 'prep_shortage_recon', severity: r.status === 'unexplained' ? 'danger' : 'warning', status: 'new',
         businessDate, createdAt: now, prepId: r.prepId, itemName: r.prepName, reconId: id,
         title: r.status === 'substitution_pending'
-          ? `${r.prepName}: âm ${fmtPrepQty(r.remainder)} ${r.unit} — có vẻ đã bù bằng ${r.substitution.prepName}, cần xác nhận`
+          ? (r.sourceKind === 'item'
+            ? `${r.prepName}: bán ${fmtPrepQty(r.remainder)} ${r.unit} lúc không có tem mở — có vẻ đã bù bằng ${r.substitution.prepName}, cần xác nhận`
+            : `${r.prepName}: âm ${fmtPrepQty(r.remainder)} ${r.unit} — có vẻ đã bù bằng ${r.substitution.prepName}, cần xác nhận`)
           : `${r.prepName}: âm ${fmtPrepQty(r.remainder)} ${r.unit} chưa giải thích được`
       }, { merge: true });
     }
   }));
   // BTP có khoản âm nhưng không lô nào để cân (bán trước khi nấu, cả ngày không nấu) — màn
   // cân không có dòng nào cho nó; khoản âm đã được phân tích ở trên thì đóng lại luôn.
-  await Promise.allSettled(Object.keys(snapshot.shortage).filter(id => !countedIds.has(id)).map(async id => {
+  await Promise.allSettled(Object.keys(snapshot.shortage).filter(id => !countedIds.has(id) && snapshot.items[id]).map(async id => {
     await fstore.collection('prep_items_gieogieo').doc(id).update({ untrackedPendingDelta: 0, updatedAt: now });
     const rt = (await _ueActiveUnitsRef(id).once('value')).val() || {};
     await Promise.all(Object.keys(rt).filter(k => k !== '__prepLock' && Number(rt[k] && rt[k].unitBase) < 0)
@@ -19872,7 +19922,7 @@ async function _submitPrepCountImpl() {
     const results = await Promise.allSettled(jobs);
     const failed = results.filter(r => r.status === 'rejected');
     if (failed.length) console.warn('[GĐ3] Một số cập nhật lô thất bại:', failed.map(f => f.reason));
-    if (shortageSnap && Object.keys(shortageSnap.shortage).length) {
+    if (shortageSnap && (Object.keys(shortageSnap.shortage).length || Object.keys(shortageSnap.nlShort).length)) {
       try {
         const analysis = prepShortageAnalyze(shortageSnap, lines);
         await prepShortageRecord(analysis, shortageSnap, new Set(lines.map(x => x.prepId)), adjIdByPrep, shiftState.businessDate, staffEmp);
