@@ -4557,24 +4557,9 @@ const CTN_BASIS_LABEL = {
 function ctnBasisLabel(k){ return CTN_BASIS_LABEL[k] || k || ''; }
 
 // ============================================================
-// [BỎ — 2026-09] "Tồn lịch sử trước khi dán tem" (untrackedBase/chốt mốc) và bảng "Hao hụt
-// ghi sai loại" từng nằm ở đây (renderKhoLegacyStock, docTemConSongTheoMon, docHaoHutMa,
-// chotTonLichSu, chotTatCaTonLichSu, xoaTonLichSu, ctnDaoHaoHutMa) đã bị XOÁ hẳn. Lý do: cả
-// cụm này được viết ra để vá một bug của công thức "báo hết" ĐỜI CŨ — currentStock trừ chai
-// nguyên (xem lịch sử BUG-kho-can.md, vụ "15.020g sữa tươi") — nhưng "báo hết" đã được viết
-// lại hoàn toàn thành Unit Engine v2 từ lâu (xem unitEngineFinishOpenUnit(): tính hao hụt
-// THẲNG từ unitBase của chính con tem, không còn suy qua currentStock/tồn lịch sử nào cả).
-// tonLichSuCuaMon() (posgieo.html) — hàm mà mọi comment cũ nói là "đọc mốc trước khi tính hao
-// hụt" — bị kiểm tra lại và xác nhận KHÔNG CÓ NƠI NÀO GỌI TỚI, kể cả trước khi xoá. Field
-// `untrackedBase` chỉ còn được đọc ở _ueRecomputeCurrentStock() (posgieo.html) và ở đó
-// `Number(x)||0` coi "chưa chốt" với "đã chốt về 0" là MỘT — đúng cái phân biệt "chưa biết ≠
-// bằng không" mà cụm tính năng này sinh ra để giữ, lại không hề được tôn trọng ở nơi duy nhất
-// còn dùng nó. Giữ nguyên bản = giữ một màn hình ngày nào cũng nhắc chốt việc không ảnh hưởng
-// gì tới báo cáo hiện tại — chỉ gây hoang mang, không tự sửa được lỗi thật nếu có.
-// Field untrackedBase* trên inventory_items KHÔNG bị xoá (dữ liệu cũ ai đã chốt vẫn giữ
-// nguyên, _ueRecomputeCurrentStock() vẫn đọc đúng như trước) — chỉ bỏ MÀN HÌNH và các hàm ghi
-// mới; nguyên liệu tạo mới từ giờ không tự set field này nữa (không cần: mặc định "chưa có" đã
-// tính là 0, y hệt hành vi hiện tại).
+// [BỎ] "Tồn lịch sử trước khi dán tem" (untrackedBase) đã bị gỡ hẳn: tồn của nguyên liệu có
+// tem giờ CHỈ là tổng các mã (xem recomputeTemStock / _ueRecomputeCurrentStock bên POS).
+// Field untrackedBase* cũ trên inventory_items không còn được đọc vào tồn.
 // ============================================================
 
 // [FIX] SỬA PHIẾU NHẬN HÀNG GHI THỪA
@@ -5522,8 +5507,8 @@ function _ctnDetailRender(box, c, recv){
 //      đang nhìn (có bill trừ xen giữa thì dừng, bắt mở lại), và không có mẻ đang khóa cân.
 //   2. Firestore (1 transaction): currentStock ± chênh lệch, 1 dòng ADJUSTMENT trong sổ kho
 //      (id cố định theo lượt sửa → bấm lại không ghi đúp), bản sao unitBase trên tem.
-// KHÔNG cộng vào untrackedPendingDelta như applyStockTransaction(): phần chênh đã nằm trong
-// unitBase của mã, cộng thêm ở đó là tính hai lần ở lượt recompute kế tiếp.
+// Không đi qua applyStockTransaction(): phần chênh đã nằm trong unitBase của mã, không phải
+// khoản lệch ngoài tem.
 const CTN_ADJ_REASONS = [
   ['can_lai',  'Cân lại thực tế'],
   ['tru_sai',  'Hệ thống trừ sai'],
@@ -5684,9 +5669,8 @@ async function ctnAdjustCore(c, qty, expected, opId, note){
 //
 // Đối xứng với _reverseAtomicContainerFinish() bên POS, nhưng nguyên liệu "cái rời" không
 // bao giờ đi qua RTDB (xem writeAtomicContainerFinish) nên khỏi cần đụng Unit Engine/RTDB gì
-// cả — chỉ cần trả status về 'sealed' và cộng lại đúng baseQty vào tồn kho. Dùng
-// applyStockTransaction() (không sửa thẳng currentStock) để món có tem vẫn cộng đúng vào
-// untrackedPendingDelta, không bị Unit Engine ghi đè mất ở lượt recompute kế tiếp.
+// cả — chỉ cần trả status về 'sealed'; applyStockTransaction() (anomalyKind:null) ghi dòng sổ
+// rồi tính lại tồn theo mã, tem vừa về 'sealed' được cộng lại đúng baseQty.
 async function ctnRestoreAtomicSealed(containerId){
   try{
     await ensureAuth();
@@ -6491,19 +6475,7 @@ async function applyStockTransaction({itemId, type, qty, note, staff, businessDa
     const current = Number(itemData.currentStock)||0;
     const next = current + Number(qty);
     const updates = {currentStock: next, updatedAt: new Date().toISOString()};
-    // [FIX "chỉnh tồn nguyên liệu có tem bị Unit Engine ghi đè lùi lại"] Với món đã bật
-    // trackingMode 'unit'/'batch', currentStock KHÔNG phải một con số độc lập — bên POS,
-    // mỗi lần bán/mở tem/báo hết đều gọi _ueRecomputeCurrentStock() SUY LẠI currentStock từ
-    // untrackedBase + untrackedPendingDelta + tổng tem sealed + tổng tem đang mở, bỏ qua
-    // hoàn toàn giá trị đang có. Trước đây applyStockTransaction() chỉ sửa currentStock ở
-    // đây — ghi ĐÚNG lúc bấm, nhưng biến mất ngay ở lượt Unit Engine kế tiếp vì phần chênh
-    // này chưa từng được cộng vào công thức trên. Giờ với món có tem, MỌI thay đổi qua hàm
-    // này (ADJUSTMENT của "Chỉnh tồn kho", RECEIVING của "Nhập kho nhanh" — chỗ không sinh
-    // tem — biến động do kiểm kê duyệt...) đều cộng dồn thêm vào untrackedPendingDelta,
-    // đúng cơ chế "khoản không quy về unit nào" mà POS đã dùng cho CONSUMPTION/WASTE không
-    // có tem mở (xem applyStockTransactionPOS). Nhờ vậy _ueRecomputeCurrentStock() thấy lại
-    // đúng phần đã chỉnh thay vì âm thầm xoá nó.
-    // [TEM = SỰ THẬT — thay cho cơ chế untrackedPendingDelta ở trên] Món có tem: tồn CHỈ là
+    // [TEM = SỰ THẬT] Món có tem: tồn CHỈ là
     // tổng các mã (xem recomputeTemStock / _ueRecomputeCurrentStock bên POS). Khoản thay đổi
     // qua hàm này không gắn vào mã nào nên KHÔNG đổi tồn — chỉ ghi sổ + Sổ lệch (anomalyKind),
     // rồi chốt lại tồn theo mã sau transaction.
@@ -8162,8 +8134,7 @@ function computeDayPL({ day, expList, cats, assets, laborActual, laborPredicted,
   // phần mất đi mà không bán được.
   // [FIX #D] wasteValueThieu=true nghĩa là KHÔNG đọc được ledger (Firestore lỗi), không phải
   // "đọc được và thật sự bằng 0" — hai chuyện khác hẳn nhau (đúng bài học đã áp dụng cho
-  // untrackedBase ở tonLichSuCuaMon() bên POS: "chưa biết" không được phép biến thành "bằng
-  // không"). haoHut vẫn phải là một số để cộng vào tongChiPhi (0 là lựa chọn ít sai nhất khi
+  // các chỗ khác: "chưa biết" không được phép biến thành "bằng không"). haoHut vẫn phải là một số để cộng vào tongChiPhi (0 là lựa chọn ít sai nhất khi
   // thiếu dữ liệu — không tự bịa ra một số hao hụt), nhưng liệt kê vào dangUocTinh + hạ trần
   // mucTinCay bên dưới để KHÔNG hiển thị như một con số đã chốt.
   const haoHut = Number(wasteValue) || 0;

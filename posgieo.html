@@ -4050,35 +4050,12 @@ async function _ueRecomputeCurrentStock(itemId, coll) {
       const doc = await t.get(itemRef);
       const lastStart = (doc.exists && Number(doc.data()._ueLastRecomputeStart)) || 0;
       if (myStartedAt < lastStart) return; // đã có lượt đọc RT MỚI HƠN ghi rồi — bỏ qua, không đè
-      // [BUG "bỏ quên untrackedBase" — FIX] untrackedBase (chỉ có ở nguyên liệu, xem
-      // tonLichSuCuaMon()/khối chú thích "TỒN LỊCH SỬ TRƯỚC KHI DÁN TEM") là phần tồn CÓ THẬT
-      // nhưng KHÔNG có tem nào đại diện (hàng từ trước ngày bật dán tem) — một hằng số lệch sổ
-      // hợp lệ, chỉ đổi khi Quản lý tự tay điều chỉnh/duyệt kiểm kê, KHÔNG BAO GIỜ tự trừ dần.
-      // Trước đây recompute chỉ tính sealed+RT, bỏ hẳn untrackedBase ra khỏi công thức — mỗi
-      // lần Unit Engine chạy (bán/báo hết/mở/hoàn/kiểm kê...) sẽ ghi đè currentStock THIẾU
-      // đúng phần lịch sử đó, coi như xoá sổ vĩnh viễn. Công thức ĐÚNG phải là:
-      //   currentStock = untrackedBase + Σ sealed + Σ open unitBase
-      // [TEM = SỰ THẬT] Nguyên liệu: tồn = CHỈ tổng các mã (sealed + đang mở). Bỏ hẳn
-      // untrackedBase (tồn lịch sử trước khi dán tem — đã ngừng dùng) và untrackedPendingDelta
-      // (nợ ảo của các khoản trừ ngoài tem) khỏi công thức — những khoản đó giờ nằm ở Sổ lệch
-      // (STOCK_ANOMALY_COLL), không còn kéo lệch con số tồn so với số mã quét được thực tế.
-      // BTP giữ nguyên công thức cũ (không có tem sealed, lô mở ngay khi nấu xong).
-      const untrackedBase = 0;
-      // [BUG "untracked reversal/allocation bị recompute xoá" — FIX] Nhiều chỗ trong hệ thống
-      // (hoàn kho khi không còn unit nào để hoàn vào, bán khi không có tem nào đang mở, nhập
-      // kho tay không sinh tem...) BẮT BUỘC phải cộng/trừ thẳng currentStock vì không có unit
-      // nào để quy về — đây là NGOẠI LỆ CÓ CHỦ Ý (không chặn vận hành), nhưng khác hẳn
-      // untrackedBase (hằng số lịch sử một lần), những khoản này PHÁT SINH LIÊN TỤC theo thời
-      // gian. Trước đây chúng chỉ tồn tại thoáng qua trong currentStock rồi biến mất ngay khi
-      // recompute chạy (công thức chỉ biết untrackedBase + sealed + RT, không biết khoản này
-      // từng tồn tại). Giờ mọi nơi làm vậy đều CỘNG DỒN vào untrackedPendingDelta (xem
-      // _ueBumpUntrackedPendingDelta) — recompute phải cộng luôn khoản này vào công thức thay
-      // vì âm thầm bỏ qua.
-      // untrackedPendingDelta áp dụng cho CẢ nguyên liệu lẫn BTP (khác untrackedBase — chỉ
-      // nguyên liệu mới có khái niệm "tồn lịch sử trước khi dán tem"; BTP vẫn có thể phát sinh
-      // khoản chưa quy về lô nào, vd hoàn kho khi lô gốc đã hết mà không còn lô nào để hoàn vào).
+      // [TEM = SỰ THẬT] Nguyên liệu: tồn = CHỈ tổng các mã (sealed + đang mở). Khoản nào
+      // không gắn được vào mã thì nằm ở Sổ lệch (STOCK_ANOMALY_COLL), không vào tồn.
+      // BTP: cộng thêm untrackedPendingDelta — khoản chưa quy về lô nào (vd hoàn kho khi lô
+      // gốc đã hết, không còn lô nào để hoàn vào), vì BTP không có tem sealed làm chuẩn.
       const untrackedPendingDelta = isPrep ? (Number((doc.exists && doc.data().untrackedPendingDelta)) || 0) : 0;
-      const total = untrackedBase + untrackedPendingDelta + sealedTotal + openTotal;
+      const total = untrackedPendingDelta + sealedTotal + openTotal;
       t.update(itemRef, { currentStock: total, updatedAt: new Date().toISOString(), _ueLastRecomputeStart: myStartedAt });
     });
   } catch (err) { console.warn('[UnitEngine] suy currentStock từ tổng unit lỗi', itemId, err); }
@@ -5400,36 +5377,6 @@ async function openConfirmFinishSheet(c, daQuet) {
 // là mất tích hợp pháp. Không chặn (chặn thì nhân viên sẽ không báo gì cả, còn tệ hơn), nhưng
 // phải để lại vết có tên người.
 const FINISH_REVIEW_RATIO = 0.25;
-
-// ------------------------------------------------------------
-// TỒN LỊCH SỬ TRƯỚC KHI DÁN TEM (untrackedBase)
-//
-// Vì sao field này phải tồn tại. Container/tem chỉ được sinh ra lúc NHẬN HÀNG
-// (createContainersForReceipt). Món nào đã có tồn trong sổ TỪ TRƯỚC ngày bật dán tem thì
-// phần tồn đó không có một con tem nào đại diện, mà vẫn nằm nguyên trong currentStock. Nói
-// cách khác, với món vừa chuyển sang quản lý bằng mã:
-//
-//     currentStock = tồn lịch sử (không có tem)  +  tồn được tem đại diện
-//
-// Sữa tươi là ví dụ đúng chuẩn: currentStock 40.020 g, trong khi đếm tay tại quán ra 25 hộp
-// = 25.000 g. 15.020 g chênh ra KHÔNG phải sữa đang nằm trong kho, cũng không phải sữa bị đổ
-// đi — đó là số dư của giai đoạn trước migration, phần hàng đã dùng hết mà sổ chưa trừ.
-//
-// Trước bản vá này hàm "báo hết" tính phần thừa bằng (currentStock − chai nguyên), tức là
-// mặc định tồn lịch sử = 0. Toàn bộ 15.020 g bị dồn vào một hộp 1.000 g và ghi thành WASTE.
-// Sai ở chỗ PHÂN LOẠI, không phải ở chỗ con số to: hạ trần xuống 1.000 g cũng chỉ đổi một
-// con số hao hụt ma to thành một con số hao hụt ma nhỏ.
-//
-// Trả về null (KHÔNG phải 0) khi chưa ai chốt mốc — "chưa biết" và "biết là bằng không" là
-// hai chuyện khác nhau, và chính việc đánh đồng chúng đã sinh ra bug này. Quản lý chốt mốc
-// ở Kho → Chai & tem kho → Tồn lịch sử.
-// ------------------------------------------------------------
-function tonLichSuCuaMon(itemData) {
-  const v = itemData ? itemData.untrackedBase : null;
-  if (v === null || v === undefined || v === '') return null;
-  const n = Number(v);
-  return isFinite(n) ? n : null;
-}
 
 // [MỚI] Ghi nhận MỘT container "đơn vị nguyên" (cái rời) đã dùng hết — tách
 // riêng khỏi submitFinishContainer() để dùng chung được cho cả sheet xác nhận
@@ -13560,7 +13507,7 @@ async function _loadBatchConsumptionTxPOS(batchId) {
       // [FIX cùng đợt với "KIT bột sữa/Sữa gạo âm ảo"] Đánh dấu khoản trừ này đã có tem
       // quét-chốt đại diện (xem _startPrepBatchImpl) — khi hoàn (Huỷ mẻ), _reverseAtomicContainerFinish
       // ở BƯỚC 3.5 tự lo phần tem quay lại 'sealed' + recompute rồi, _reverseIngredientConsumptionPOS
-      // KHÔNG được cộng thêm vào untrackedPendingDelta nữa kẻo hoàn đúp theo chiều ngược lại.
+      // không ghi Sổ lệch và không recompute sớm cho khoản này.
       atomicScanned: tx.atomicScanned === true
     });
   });
@@ -15997,18 +15944,6 @@ async function applyStockTransactionPOS({ itemId, type, qty, note, staff, staffE
           }
         }
       }
-    }
-    // [BUG "untracked consumption bị recompute xoá" — FIX] CONSUMPTION/WASTE không có unit nào
-    // để phân bổ (deriveFromUnits=false — item chưa dán tem, hoặc RT đang lỗi) vẫn trừ thẳng
-    // currentStock ở trên (đúng nguyên tắc không chặn bán hàng), nhưng khoản trừ đó KHÔNG nằm
-    // trong bất kỳ unit nào — nếu không ghi lại, lần _ueRecomputeCurrentStock() kế tiếp (dù do
-    // một nghiệp vụ khác của CÙNG món kích hoạt) sẽ tính lại từ untrackedBase+sealed+RT, hoàn
-    // toàn không biết khoản trừ này từng xảy ra, và "hồi sinh" đúng số lượng đã bán. Cộng dồn
-    // vào untrackedPendingDelta để công thức recompute biết mà cộng vào.
-    // [TEM = SỰ THẬT] Chỉ món KHÔNG in tem mới còn dùng cách trừ thẳng này; món có tem thì
-    // khoản ngoài tem đi vào Sổ lệch (xem outsideTem ở trên), không cộng nợ ảo nữa.
-    if (!temNL && !deriveFromUnits && (type === 'CONSUMPTION' || type === 'WASTE')) {
-      updates.untrackedPendingDelta = firebase.firestore.FieldValue.increment(Number(qty));
     }
     t.update(itemRef, updates);
     const txData = {
@@ -22056,8 +21991,8 @@ async function _reverseIngredientConsumptionPOS(itemId, consumedQty, note, refer
       // Chỉ tin suy từ unit khi ÁP DỤNG ĐỦ 100% — thiếu 1 phần (transaction lỗi, hoặc không
       // còn tem nào để hoàn vào) mà vẫn suy từ unit sẽ làm đúng phần thiếu đó biến mất (xem
       // chú thích unitEngineReverseAllocations). ambiguous:true (claim còn 'claiming') cũng coi
-      // như đã chạm unit — coi là ĐÃ hoàn để không cộng thêm untrackedPendingDelta (tránh hoàn
-      // đúp), rồi để _ueRecomputeCurrentStock() bên dưới tự phản ánh đúng RT thật.
+      // như đã chạm unit — coi là ĐÃ hoàn (không ghi Sổ lệch), rồi để _ueRecomputeCurrentStock()
+      // bên dưới tự phản ánh đúng RT thật.
       unitsTouched = r.ambiguous || r.appliedQty >= r.totalQty - 1e-6;
     } catch (err) { console.warn('[FIFO] hoàn phân bổ lỗi:', err); }
   }
@@ -22065,10 +22000,9 @@ async function _reverseIngredientConsumptionPOS(itemId, consumedQty, note, refer
   // qua RTDB (fifoAllocations rỗng là bình thường, không phải "không có tem nào"). Tem thật SẼ
   // được _reverseAtomicContainerFinish() trả về 'sealed' + tự recompute riêng — nhưng bước đó
   // (BƯỚC 3.5) chạy SAU hàm này (BƯỚC 3), nên KHÔNG dùng unitsTouched=true ở đây (sẽ recompute
-  // sớm, lúc tem vẫn còn 'finished', hụt mất đúng phần chưa kịp trả). Chỉ cần chặn cộng đúp
-  // untrackedPendingDelta — nếu cộng, mỗi lần Huỷ mẻ sẽ bơm dư +1 nợ ảo THEO CHIỀU NGƯỢC, kéo
-  // currentStock cao hơn thực tế dần theo thời gian (cùng lớp lỗi vừa vá, chỉ khác dấu).
-  const skipUntrackedCredit = unitsTouched || atomicScanned;
+  // sớm, lúc tem vẫn còn 'finished', hụt mất đúng phần chưa kịp trả). Chỉ cần coi khoản này
+  // đã có tem lo (không ghi Sổ lệch "hoàn ngoài tem").
+  const coveredByTem = unitsTouched || atomicScanned;
   // Số trả lại QUẦY: ưu tiên số đã trừ thật; không có thì dùng số theo định mức.
   const backToLoc = (typeof locBack === 'number') ? Math.max(0, locBack) : back;
   const itemRef = fstore.collection('inventory_items_gieogieo').doc(itemId);
@@ -22094,7 +22028,7 @@ async function _reverseIngredientConsumptionPOS(itemId, consumedQty, note, refer
     // cộng thẳng tồn (khoản trừ gốc ngoài tem cũng đã không trừ vào tồn) — ghi Sổ lệch.
     const temNL = isTemTrackedNL(itemData);
     revTemNL = temNL;
-    if (temNL && !skipUntrackedCredit) revOutside = { itemName: itemData.name || '', unit: itemData.unit || '' };
+    if (temNL && !coveredByTem) revOutside = { itemName: itemData.name || '', unit: itemData.unit || '' };
     const next = temNL ? (Number(itemData.currentStock) || 0) : (Number(itemData.currentStock) || 0) + back;
     const updates = { currentStock: next, updatedAt: new Date().toISOString() };
     if (rule) {
@@ -22108,9 +22042,6 @@ async function _reverseIngredientConsumptionPOS(itemId, consumedQty, note, refer
       const prevLoc = Number((itemData.locationStock || {})[rule.destLocationId]) || 0;
       updates[`locationStock.${rule.destLocationId}`] = prevLoc + backToLoc;
     }
-    // [BUG "untracked reversal bị recompute xoá" — FIX] Hoàn thẳng currentStock vì không còn
-    // tem nào để hoàn vào — cộng dồn vào untrackedPendingDelta để recompute biết khoản này.
-    if (!skipUntrackedCredit && !temNL) updates.untrackedPendingDelta = firebase.firestore.FieldValue.increment(back);
     t.update(itemRef, updates);
     t.set(txRef, {
       itemId, type: 'CONSUMPTION', qty: back, resultingStock: next,
@@ -22120,7 +22051,7 @@ async function _reverseIngredientConsumptionPOS(itemId, consumedQty, note, refer
       // currentStock (không có tem nào nhận) — 'full' vs 'untracked', không để trông giống
       // một lượt hoàn bình thường đã xong xuôi hoàn toàn khi thực ra là ngoại lệ. atomicScanned
       // xem như 'full' (tem thật sẽ được BƯỚC 3.5 hoàn riêng), dù chưa recompute ngay tại đây.
-      reversalCoverage: skipUntrackedCredit ? 'full' : 'untracked',
+      reversalCoverage: coveredByTem ? 'full' : 'untracked',
       ...(revOutside ? { outsideTem: true } : {}),
       ...(referenceId ? { referenceId } : {})
     });
