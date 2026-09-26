@@ -11606,6 +11606,8 @@ async function computeStoreHealth(){
     // POS tự báo khi nhân viên bị chặn ở đối chiếu NL lúc nấu mà không tự sửa được.
     const nPrepBlocked = docs.filter(a=>a.type==='pos_prep_blocked').length;
     if(nPrepBlocked) push('red', 'Đối chiếu NL khi nấu cần Quản lý xử lý', nPrepBlocked, `switchScreen('inbox')`);
+    const nAutoReport = docs.filter(a=>a.type==='pos_auto_report').length;
+    if(nAutoReport) push('red', 'POS tự báo lỗi cần Quản lý kiểm tra', nAutoReport, `switchScreen('inbox')`);
     if(nGiaoCa) push('red', 'Chênh lệch đếm giao ca NGUYÊN LIỆU chưa xem', nGiaoCa, `switchScreen('inbox')`);
     // Đếm BTP cuối ca GHI ĐÈ THẲNG tồn kho (không qua duyệt như kiểm kê thường),
     // nên lệch ở đây phải nổi lên mức đỏ chứ không gộp vào "cảnh báo khác".
@@ -12380,6 +12382,15 @@ async function renderAlertInbox(){
     // [GIAO CA] Lệch TIỀN khi bàn giao giữa ngày — khác hẳn lệch đếm nguyên liệu
     // bên dưới (không có closeQty/openQty), phải vẽ riêng nếu không ra toàn "—".
     // Đây là loại duy nhất chỉ đích danh được hai người ở hai đầu bàn giao.
+    if(a.type==='pos_auto_report'){
+      return `<div class="alert-card ${isNew?'':'resolved'}">
+        <div class="ac-title">${escapeHtmlAttr(a.title || 'POS cần Quản lý kiểm tra')} ${isNew?'':'<span class="tier tier-green" style="margin-left:4px">Đã xử lý</span>'}</div>
+        <div class="ac-row">Ngày: ${a.businessDate || '—'}${a.itemName?` · <b>${escapeHtmlAttr(a.itemName)}</b>`:''}${a.prepName?` · <b>${escapeHtmlAttr(a.prepName)}</b>`:''}${a.ref?` · ${escapeHtmlAttr(a.ref)}`:''} · ${a.createdAt?new Date(a.createdAt).toLocaleTimeString('vi-VN',{hour:'2-digit',minute:'2-digit'}):''}</div>
+        <div class="ac-row" style="color:#c0392b;font-weight:700">${escapeHtmlAttr(a.message||'')}</div>
+        <details class="ac-infer"><summary>Vì sao có cảnh báo này?</summary><div class="ac-infer-body">POS gặp lỗi mà nhân viên không tự sửa được (đồng bộ tồn, ghi sổ, mã tem trùng...). Thay vì bắt nhân viên nhớ báo, POS tự gửi cảnh báo này. Kiểm tra lại mã/lô/nguyên liệu liên quan trong Kho, rồi bấm Đã xử lý.</div></details>
+        ${isNew ? `<div class="ac-actions"><button onclick="markAlertStatus('${a.id}','resolved')">Đã xử lý</button></div>` : ''}
+      </div>`;
+    }
     if(a.type==='pos_prep_blocked'){
       return `<div class="alert-card ${isNew?'':'resolved'}">
         <div class="ac-title">${escapeHtmlAttr(a.title || 'Đối chiếu NL khi nấu cần xử lý')} ${isNew?'':'<span class="tier tier-green" style="margin-left:4px">Đã xử lý</span>'}</div>

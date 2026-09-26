@@ -3733,7 +3733,7 @@ async function findContainerByCode(code) {
 // Nhóm 2 dòng lặp ở cả hai màn quét (mở chai / báo hết) vào một chỗ.
 function chanMaTrung(c) {
   if (!c || !c._trungMa) return false;
-  toast('⛔ Mã ' + c.code + ' đang trùng trên ' + c.soChai + ' phần — chọn tay đúng thứ đang cầm, và báo Quản lý cấp lại mã');
+  toastAutoReport('⛔ Mã ' + c.code + ' đang trùng trên ' + c.soChai + ' phần — chọn tay đúng thứ đang cầm', 'Mã tem bị trùng — cần cấp lại mã', { ref: c.code || '', itemName: c.itemName || '' });
   return true;
 }
 
@@ -4322,7 +4322,7 @@ async function unitEngineOnOpen(containerId, c, coll) {
     // thống sẽ "mù" với nó ở lượt trừ kho kế tiếp. Báo NGAY cho nhân viên biết để xử lý tay
     // (báo Quản lý ghi nhận thủ công), không để lỗi trôi âm thầm trong console.
     console.error('[UnitEngine] onOpen lỗi RTDB sau 3 lần thử', itemId, err);
-    toast('⚠️ Mở ' + (c.code || 'tem này') + ' xong nhưng lỗi đồng bộ — báo Quản lý kiểm tra, hàng vẫn dùng được nhưng có thể không trừ đúng kho lượt tới');
+    toastAutoReport('⚠️ Mở ' + (c.code || 'tem này') + ' xong nhưng lỗi đồng bộ — hàng vẫn dùng được', 'Mở mã: lỗi đồng bộ tồn', { ref: c.code || '', itemName: c.itemName || '' });
     return;
   }
   if (absorbedIds.length) {
@@ -4435,7 +4435,7 @@ async function unitEngineFinishOpenUnit(id, c, staffEmp, lyDo, daQuet, ref, prep
       });
     } catch (err) {
       console.error('[UnitEngine] báo hết: ghi hao hụt lỗi', err);
-      toast('⚠️ Đã chốt nhưng ghi hao hụt lỗi — báo Quản lý');
+      toastAutoReport('⚠️ Đã chốt ' + (c.code || '') + ' nhưng ghi hao hụt lỗi', 'Báo hết: ghi hao hụt lỗi', { ref: c.code || '', itemName: c.itemName || '' });
     }
   } else if (isDebt) {
     // Nợ FIFO = tem này đã cạn TỪ TRƯỚC khi được quét báo hết (dùng vượt dung tích khai báo
@@ -9699,7 +9699,7 @@ async function drinkWasteUpdatePreview() {
     const { agg, prepAgg, skipped, missingRecipe } = await _drinkWasteConsumption(m, khoTxState.drinkSize, qty);
     const n = Object.keys(agg).length + Object.keys(prepAgg).length;
     if (missingRecipe || !n) {
-      el.innerHTML = '<span style="color:#c0392b;">⚠️ Món/size này chưa khai định mức — ghi nhận sẽ KHÔNG trừ được nguyên liệu nào. Báo Quản lý khai định mức trước.</span>';
+      el.innerHTML = '<span style="color:#c0392b;">⚠️ Món/size này chưa khai định mức — ghi nhận sẽ KHÔNG trừ được nguyên liệu nào. Bấm Ghi để hệ thống tự báo Quản lý khai định mức.</span>';
       return;
     }
     const costOf = id => Number((KHO_ITEMS_CACHE.find(x => x.id === id) || {}).costPerUnit) || 0;
@@ -9745,7 +9745,7 @@ async function _submitDrinkWasteImpl() {
   if (missingRecipe || (!ingredientIds.length && !prepIds.length)) {
     // Chặn hẳn: ghi 1 bản ghi hao hụt không trừ được gì chỉ tạo cảm giác "đã ghi
     // rồi" trong khi kho vẫn sai — tệ hơn là báo lỗi để Quản lý khai định mức.
-    toast('❌ Món/size này chưa khai định mức — chưa ghi được, báo Quản lý');
+    toastAutoReport('❌ Món/size này chưa khai định mức — chưa ghi được', 'Đổ ly: món chưa khai định mức', { ref: String(khoTxState.drinkId || '') + '_' + String(khoTxState.drinkSize || '') });
     return;
   }
 
@@ -9787,7 +9787,7 @@ async function _submitDrinkWasteImpl() {
   const failed = results.filter(r => r.status === 'rejected');
   if (failed.length) {
     console.warn('[Đổ ly] Một số nguyên liệu trừ thất bại:', failed.map(f => f.reason));
-    toast(`⚠️ Đã ghi nhưng ${failed.length}/${results.length} nguyên liệu trừ lỗi — báo Quản lý`);
+    toastAutoReport(`⚠️ Đã ghi nhưng ${failed.length}/${results.length} nguyên liệu trừ lỗi`, 'Đổ ly: trừ nguyên liệu lỗi', { ref: String(Date.now()) });
   } else {
     toast(`✅ Đã ghi hao hụt ${qty} ly ${m.name} (${khoTxState.drinkSize})`);
   }
@@ -10217,7 +10217,10 @@ async function submitKhoTx() {
   if(_posSubmitBusy){toast('⏳ Đang xử lý, vui lòng đợi...');return;}
   _posSubmitBusy=true;
   try{await _submitKhoTxImpl();}
-  catch(err){console.error('Báo hủy mã nguyên liệu lỗi',err);toast('❌ Chưa hoàn tất báo hủy: '+(err.message||err));}
+  catch(err){console.error('Báo hủy mã nguyên liệu lỗi',err);
+    const code=(khoTxState.scannedContainer&&khoTxState.scannedContainer.code)||'';
+    if(err&&err.autoReport)toastAutoReport('❌ Chưa hoàn tất báo hủy '+code+': '+err.message,'Báo hủy mã NL bị chặn',{ref:code});
+    else toast('❌ Chưa hoàn tất báo hủy: '+(err.message||err));}
   finally{_posSubmitBusy=false;}
 }
 async function _submitKhoTxImpl() {
@@ -10242,7 +10245,7 @@ async function _submitKhoTxImpl() {
     const old=snap.data();
     if(old.status==='finished')throw new Error(old.finishReason==='discarded'?'Mã đã báo hủy, không tính hai lần':'Mã đã báo hết');
     if(old.status==='discard_pending'){
-      if(!old.discardPending?.reason)throw new Error('Báo hủy đang dở thiếu dữ liệu — báo Quản lý');
+      if(!old.discardPending?.reason)throw posMgrError('Báo hủy đang dở thiếu dữ liệu');
       return old;
     }
     if(old.status!=='sealed'&&old.status!=='open')throw new Error('Mã đã đổi trạng thái — quét lại');
@@ -10271,7 +10274,7 @@ async function _submitKhoTxImpl() {
     }));
     const live=result.snapshot?.val();
     if(!result.committed||!live?.discardPending||!(Number(live.discardBase)>0))
-      throw new Error('Mã đang mở không còn số dương trong RT — chưa ghi WASTE, báo Quản lý kiểm tra');
+      throw posMgrError('Mã đang mở không còn số dương trong RT — chưa ghi hao hụt');
     qty=Number(live.discardBase);
   }else if(pending.originalStatus==='sealed')qty=Number(c.baseQty);
   else throw new Error('Trạng thái mã trước khi hủy không hợp lệ');
@@ -10291,7 +10294,7 @@ async function _submitKhoTxImpl() {
   await fstore.runTransaction(async t=>{
     const snap=await t.get(ref);
     if(!snap.exists||snap.data().status!=='discard_pending')
-      throw new Error('Trạng thái mã đã đổi khi chốt hủy — báo Quản lý');
+      throw posMgrError('Trạng thái mã đã đổi khi chốt hủy');
     t.update(ref,{status:'finished',finishedAt:pending.at,finishedBy:pending.staff,
       finishedByEmployeeId:pending.staffEmployeeId,finishReason:'discarded',
       finishScanned:true,discardReason:pending.reason,discardNote:pending.note||'',
@@ -11787,8 +11790,7 @@ async function prepReconSetUnit(itemId, unitId, qty, opId, expected, checkpoint)
     }
     if(live.lastPrepReconOp===opId){
       if(Math.abs(amount-qty)>0.015){
-        const err=new Error(`Mã ${live.code||unitId} đã ghi lượt chốt này với ${fmtPrepQty(amount)}. Báo Quản lý kiểm tra trước khi sửa.`);
-        err.code='PREP_RECON_STALE';throw err;
+        throw prepFlowError(`Mã ${live.code||unitId} đã ghi lượt chốt này với ${fmtPrepQty(amount)}, khác số vừa cân`,'manager');
       }
       await syncCopy(live.lastPrepCheckpoint||checkpoint);
       return {before:Number(live.lastPrepReconBefore)||0,already:true};
@@ -12851,7 +12853,9 @@ async function _startPrepBatchImpl(preResolvedStaff, atomicScanDone, atomicScann
       } catch (e) { console.warn('startPrepBatch: cuộn ngược sau lỗi tạo lô cũng lỗi', e); }
       toast(backOk >= inputs.length
         ? `❌ Tạo lô thất bại — đã hoàn lại toàn bộ ${backOk} nguyên liệu, chưa tạo lô`
-        : `❌ Tạo lô thất bại — chỉ hoàn được ${backOk}/${inputs.length} nguyên liệu, báo Quản lý kiểm tra`);
+        : `❌ Tạo lô thất bại — chỉ hoàn được ${backOk}/${inputs.length} nguyên liệu (đã tự báo Quản lý)`);
+      if (backOk < inputs.length) posAutoReportManager('Tạo lô BTP thất bại, hoàn kho chưa đủ',
+        `${p.name || ''}: hoàn được ${backOk}/${inputs.length} nguyên liệu`, { ref: batchRef.id, prepName: p.name || '' }).catch(() => {});
       return;
     }
 
@@ -12861,7 +12865,8 @@ async function _startPrepBatchImpl(preResolvedStaff, atomicScanDone, atomicScann
     renderPrepBatchForm();
   } catch (err) {
     console.error('startPrepBatch failed', err);
-    toast('❌ Lỗi: ' + (err.code || err.message || err));
+    if (err && err.kind === 'manager') toastAutoReport('❌ Chưa bắt đầu được mẻ ' + (p.name || '') + ': ' + err.message, 'Bắt đầu mẻ bị chặn', { ref: batchRef.id, prepName: p.name || '' });
+    else toast('❌ Lỗi: ' + (err.code || err.message || err));
   } finally {
     if(reconLockHeld && !batchCreated){
       await prepReconRelease(batchRef.id,reconRows.map(r=>r.itemId)).catch(err=>console.warn('Không giải phóng được khóa NL sau lỗi bắt đầu',err));
@@ -13312,7 +13317,7 @@ async function _submitPrepCancelImpl() {
     ? (atomicFailed ? ` — ${atomicFailed}/${atomicIds.length} tem đã quét CHƯA hoàn lại được, kiểm tra tay` : `, ${atomicOk} tem đã quét cũng được hoàn lại`)
     : '';
   if (failed) {
-    toast(`⚠️ Đã huỷ mẻ nhưng ${failed}/${ok + failed} nguyên liệu hoàn kho lỗi — báo Quản lý kiểm tra${atomicMsg}`);
+    toastAutoReport(`⚠️ Đã huỷ mẻ nhưng ${failed}/${ok + failed} nguyên liệu hoàn kho lỗi${atomicMsg}`, 'Huỷ mẻ: hoàn kho lỗi', { ref: String(Date.now()) });
   } else if (ok) {
     toast(`✅ Đã huỷ mẻ và hoàn ${ok} nguyên liệu về kho${atomicMsg}`);
   } else {
@@ -13954,7 +13959,7 @@ async function _submitPrepWasteImpl() {
       const rtFailed = rtResults.filter(r => r.status === 'rejected');
       if (rtFailed.length) {
         console.warn('[UnitEngine] đồng bộ RT lúc huỷ lô BTP lỗi', rtFailed.map(r => r.reason));
-        toast('⚠️ Đã ghi huỷ nhưng đồng bộ realtime lỗi (' + rtFailed.length + ' lô) — báo Quản lý kiểm tra lại số RT của lô này');
+        toastAutoReport('⚠️ Đã ghi huỷ nhưng đồng bộ realtime lỗi (' + rtFailed.length + ' lô)', 'Huỷ lô BTP: lỗi đồng bộ realtime', { ref: String(Date.now()) });
       } else {
         // [BUG "Firestore/RT commit tách rời" — FIX] Trước đây recompute chạy VÔ ĐIỀU KIỆN dù
         // RT vừa lỗi — đọc RT lúc đó vẫn là số CŨ (chưa trừ), ghi đè currentStock về số cũ,
@@ -14509,7 +14514,7 @@ async function submitFoundLostContainer(id) {
         }));
       } catch (err) {
         console.error('[UnitEngine] đăng ký lại RT cho tem tìm lại lỗi sau 3 lần thử', id, err);
-        toast('⚠️ Tìm lại được nhưng lỗi đồng bộ realtime — báo Quản lý kiểm tra tem ' + (c.code || ''));
+        toastAutoReport('⚠️ Tìm lại được ' + (c.code || '') + ' nhưng lỗi đồng bộ realtime', 'Tìm lại tem: lỗi đồng bộ', { ref: c.code || '' });
       }
     }
     await ref.update({
@@ -19347,7 +19352,8 @@ async function _submitPrepCountImpl() {
     shiftState.closing.prepCountLines = completeLines;
     shiftState.closing.prepCountAt = now;
     shiftState.closing.prepCountRecountIds = [];
-    toast(failed.length ? '⚠️ Đã lưu nhưng vài lô cập nhật lỗi — báo Quản lý' : '✅ Đã ghi nhận tồn bán thành phẩm');
+    if (failed.length) toastAutoReport('⚠️ Đã lưu nhưng ' + failed.length + ' lô BTP cập nhật lỗi', 'Đếm BTP cuối ca: cập nhật lô lỗi', { ref: shiftState.businessDate || '' });
+    else toast('✅ Đã ghi nhận tồn bán thành phẩm');
     await _continueAfterPrepCount();
   } catch (err) {
     console.error('submitPrepCount failed', err);
@@ -20410,7 +20416,7 @@ async function submitDailyClose() {
 async function _submitDailyCloseImpl() {
   try {
     if (await recheckCloseAfterSalesPOS()) {
-      toast('⚠️ Có bill mới sau lúc đối soát — cần kết ca lại');
+      toast('⚠️ Có bill mới sau lúc đối soát — đã chuyển tới bước cần làm lại');
       resumeClosePipelinePOS();
       return;
     }
@@ -20423,7 +20429,7 @@ async function _submitDailyCloseImpl() {
       !shiftState.closing.cashPassedAt ||
       (shiftState.closing.handoverCloseRecountIds || []).length ||
       (shiftState.closing.prepCountRecountIds || []).length) {
-    toast('⚠️ Có bước kết ca chưa hoàn tất — quay lại bước cần làm');
+    toast('⚠️ Có bước kết ca chưa hoàn tất — đã chuyển tới bước đó');
     if (shiftState.closing && shiftState.closing.status === 'closed') renderShiftDashboard();
     else resumeClosePipelinePOS();
     return;
@@ -20434,7 +20440,7 @@ async function _submitDailyCloseImpl() {
   // trên cùng máy). Đây là cửa cuối cùng trước khi status thành 'closed' và chặn bán hàng
   // hẳn — không được để lọt. Xem hasNewCashOrdersSinceCashCount() để hiểu đầy đủ lỗ hổng.
   if (hasNewCashOrdersSinceCashCount(shiftState.closing)) {
-    toast('⚠️ Có bill tiền mặt mới sau đối soát — phải đếm lại tiền trước khi đóng ngày');
+    toast('⚠️ Có bill tiền mặt mới sau đối soát — đã mở bước đếm lại tiền');
     renderCashRecountRequiredPOS();
     return;
   }
@@ -20571,7 +20577,7 @@ async function autoCheckOutAllOnClose(checkedOutAt, businessDate) {
     toast(`🕒 Đã tự check-out ${dangMo.length} nhân viên còn mở ca ngày ${ngay}`);
   } catch (err) {
     console.warn('autoCheckOutAllOnClose lỗi (ngày ĐÃ đóng xong):', err);
-    toast('⚠️ Đã đóng ngày, nhưng chưa tự check-out được — nhờ Quản lý chốt hộ ở tab Chấm công');
+    toastAutoReport('⚠️ Đã đóng ngày, nhưng chưa tự check-out được', 'Đóng ngày: chưa tự check-out được nhân viên', { ref: shiftState.businessDate || '' });
   }
 }
 
@@ -26737,7 +26743,7 @@ function recordBackfillCashPOS(order, orderId, mode) {
   const upd = { postCloseBills: { [orderId]: entry } };
   if (timing === 'after_close' && cash > 0) upd.postCloseCashPending = true;
   fstore.collection('daily_closings_gieogieo').doc(mode.businessDate).set(upd, { merge: true })
-    .catch(err => { console.error('[Bổ sung bill] ghi hồ sơ tiền mặt lỗi', err); toast('⚠️ Chưa ghi được khoản tiền bổ sung vào ngày ' + posDateKeyToDisplay(mode.businessDate) + ' — báo Quản lý'); });
+    .catch(err => { console.error('[Bổ sung bill] ghi hồ sơ tiền mặt lỗi', err); toastAutoReport('⚠️ Chưa ghi được khoản tiền bổ sung vào ngày ' + posDateKeyToDisplay(mode.businessDate) + ' (bill ' + (order.billCode || '') + ')', 'Bổ sung bill: chưa ghi được hồ sơ tiền', { ref: orderId }); });
   if (timing === 'after_close' && cash > 0)
     setTimeout(() => toast('💵 Nộp ' + cash.toLocaleString('vi-VN') + 'đ tiền mặt này CHUNG với tiền bàn giao ngày ' + posDateKeyToDisplay(mode.businessDate) + ' — không để lại két'), 2500);
 }
@@ -26772,6 +26778,30 @@ function cancelBackfillMode() {
 // Viền trái đổi màu theo loại thông báo để nhìn phát biết ngay là báo lỗi hay báo
 // thành công, không phải đọc chữ mới hiểu.
 let _toastTimer = null;
+// ── TỰ BÁO QUẢN LÝ ─────────────────────────────────────────────────────────
+// Thay cho các thông báo "báo Quản lý kiểm tra": nhân viên mới không biết báo gì,
+// báo cho ai, và hay quên. POS tự ghi cảnh báo 'pos_auto_report' vào Hộp thư
+// quanlygieo (kèm nội dung lỗi) và nói rõ với nhân viên là ĐÃ báo. Chạy nền, không
+// chờ, không chặn thao tác — gửi lỗi (mất mạng) thì mới nhắc nhân viên tự báo.
+function posAutoReportManager(title, detail, extra) {
+  const day = (typeof posDateKey === 'function') ? posDateKey() : '';
+  const ref = String((extra && extra.ref) || '');
+  let h = 0; for (const ch of String(title)) h = (h * 31 + ch.charCodeAt(0)) | 0;   // tiêu đề có dấu → băm cho khỏi trùng
+  const docId = ('pos_auto_' + day + '_' + (h >>> 0).toString(36) + '_' + ref).replace(/[^\w\-]/g, '_').slice(0, 180);
+  return fstore.collection('alerts_gieogieo').doc(docId).set({
+    type: 'pos_auto_report', severity: 'warning', status: 'new', title: title || 'POS cần Quản lý kiểm tra',
+    message: String(detail || ''), businessDate: day, createdAt: new Date().toISOString(),
+    ...(extra || {})
+  }, { merge: true });
+}
+function toastAutoReport(msg, title, extra) {
+  toast(msg + ' — hệ thống đã tự báo Quản lý');
+  try {
+    posAutoReportManager(title || msg, msg, extra)
+      .catch(err => { console.warn('[Tự báo QL] lỗi', err); toast(msg + ' — chưa gửi được cảnh báo, hãy báo Quản lý'); });
+  } catch (err) { console.warn('[Tự báo QL] lỗi', err); }
+}
+function posMgrError(msg) { const e = new Error(msg); e.autoReport = true; return e; }
 function posConfirm(message, opts) {
   const o = opts || {};
   return new Promise(resolve => {
