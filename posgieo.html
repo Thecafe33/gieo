@@ -11562,6 +11562,10 @@ async function prepReconRecoverOrphan(itemId) {
 function renderPrepReconPreflight() {
   const st=prepReconGate,box=document.getElementById('prepBatchBody');if(!st||!box)return;
   prepSetBack(() => { prepReconGate = null; renderPrepBatchForm(); });
+  // Màn này thay thế form mẻ (nơi có ô PIN) — phải vẽ lại ô PIN ở đây, không thì
+  // bấm Tiếp tục sẽ không xác thực được người bắt đầu mẻ. Giữ PIN đã gõ qua lượt vẽ lại.
+  const pinEl=document.getElementById('prepBatchStaffPin');
+  const pinTyped=pinEl&&pinEl.type!=='hidden'?pinEl.value:'';
   box.innerHTML=`<div class="wal-section" style="--gd:#0062AD;--gl:#EAF3FA;border:1.5px solid #0062AD;background:#EAF3FA">
     <div class="wal-section-title" style="color:#0062AD">Cân trước khi lấy NL</div>
     <div style="font-size:12px;color:#345">Chỉ các mã có nguy cơ thiếu hoặc còn ≤10% bao. Cân hoặc đếm xong mới bắt đầu mẻ.</div>
@@ -11576,8 +11580,11 @@ function renderPrepReconPreflight() {
         ? `${x.multiOpen?`<button onclick="prepReconPreScan(${i})" style="padding:10px;background:#fff;color:#0062AD;border:1px solid #0062AD;border-radius:10px">Quét tem</button>`:''}${prepCountInputsHtml('prepReconPre'+i,st.values[i],'oninput','prepReconPreCount('+i+')')}`
         : `<button onclick="prepReconPreWeigh(${i})" style="padding:10px;background:#0062AD;color:#fff;border:0;border-radius:10px">Cân</button>`}
     </div>`).join('')}</div>
+    <div class="wal-section" style="margin:12px 0">${renderPinInput('prepBatchStaff')}</div>
     <button id="prepReconPreContinue" onclick="prepReconPreflightDone()" ${prepReconGateReady(st)?'':'disabled'} style="width:100%;padding:14px;border:0;border-radius:12px;background:#0062AD;color:#fff">Tiếp tục</button>
     <button onclick="prepReconGate=null;renderPrepBatchForm()" style="width:100%;padding:12px;border:0;background:none;color:#0062AD">Quay lại</button>`;
+  const pinNew=document.getElementById('prepBatchStaffPin');
+  if(pinTyped&&pinNew&&pinNew.type!=='hidden'){pinNew.value=pinTyped;if(typeof onPinFieldInput==='function')onPinFieldInput('prepBatchStaff');}
 }
 function prepReconGateReady(st) {
   return !!st&&st.targets.every((x,i)=>Number.isFinite(st.values[i]?.qty)
