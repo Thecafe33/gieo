@@ -8254,6 +8254,85 @@ function plToggleChiTiet(){
 // lần "Đổ ly" (sinh nhiều dòng ledger, mỗi nguyên liệu/BTP một dòng) không bị đếm
 // thành nhiều sự kiện rời rạc — cùng cách computeLedgerRealMetrics() đang gộp để tính
 // ra con số pl.haoHut, nên tổng ở đây LUÔN khớp với số trên thẻ.
+// ------------------------------------------------------------
+// QUY TRÁCH NHIỆM HAO HỤT. Dòng WASTE mặc định thuộc về người báo (PIN ký lúc báo).
+// Người báo không phải lúc nào cũng là người gây ra: ca sáng thấy NL cần bảo quản
+// lạnh bị ca tối để quên ngoài → ca sáng báo hao hụt, nhưng người chịu là ca tối.
+// Quản lý chọn lại người chịu: ghi `responsibility` lên chính dòng sổ (Tổng kết
+// tháng đọc field này trước staffEmployeeId), giữ nguyên người báo và lịch sử đổi.
+// ------------------------------------------------------------
+let WASTE_DETAIL_STATE = null;
+let _wasteEmpCache = null;
+function wasteRespHTML(t, gi, xi){
+  const r = t.responsibility || {};
+  const assigned = r.status === 'assigned_by_manager';
+  return `<div id="wa_${gi}_${xi}" style="margin-top:4px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+    ${assigned
+      ? `<span class="tier tier-amber">Chịu trách nhiệm: ${escapeHtmlAttr(r.employeeName||'—')}</span>${r.note?`<span class="small-note">${escapeHtmlAttr(r.note)}</span>`:''}`
+      : `<span class="small-note">Chịu trách nhiệm: người báo</span>`}
+    <button class="btn outline sm" style="width:auto;padding:0 10px;min-height:28px" onclick="wasteAssignOpen(${gi},${xi})">Quy trách nhiệm</button>
+  </div>`;
+}
+async function wasteAssignOpen(gi, xi){
+  const box = document.getElementById(`wa_${gi}_${xi}`);
+  const g = WASTE_DETAIL_STATE && WASTE_DETAIL_STATE.groups[gi];
+  if(!box || !g) return;
+  try{ if(!_wasteEmpCache) _wasteEmpCache = await loadEmployees(); }
+  catch(err){ showError('Không tải được danh sách nhân viên: '+(err.code||err.message||err)); return; }
+  const t = xi<0 ? g.list[0].t : g.list[xi].t;
+  const cur = (t.responsibility && t.responsibility.status==='assigned_by_manager' && t.responsibility.employeeId) || '';
+  const emps = _wasteEmpCache.filter(e=>e.active!==false || e.id===cur);
+  box.innerHTML = `<div style="width:100%;padding:8px;border:1px solid var(--line);border-radius:10px;margin-top:4px">
+    <div class="small-note" style="margin-bottom:6px">Người báo: <b>${escapeHtmlAttr(t.staff||'—')}</b>. Chọn người thực sự chịu trách nhiệm:</div>
+    <select id="waEmp_${gi}_${xi}" style="width:100%;margin-bottom:6px">
+      <option value="">— Mặc định (người báo/người ký) —</option>
+      ${emps.map(e=>`<option value="${e.id}" ${e.id===cur?'selected':''}>${escapeHtmlAttr(e.fullName||e.id)}</option>`).join('')}
+    </select>
+    <input id="waNote_${gi}_${xi}" placeholder="Lý do (vd: ca tối để quên sữa ngoài tủ lạnh)" value="${escapeHtmlAttr((t.responsibility&&t.responsibility.note)||'')}" style="width:100%;box-sizing:border-box;margin-bottom:6px">
+    <div style="display:flex;gap:6px">
+      <button class="btn sm" style="width:auto;padding:0 14px" onclick="wasteAssignSave(${gi},${xi},this)">Lưu</button>
+      <button class="btn outline sm" style="width:auto;padding:0 14px" onclick="openWasteDetailSheet('${WASTE_DETAIL_STATE.dateKey}')">Huỷ</button>
+    </div></div>`;
+}
+async function wasteAssignSave(gi, xi, btn){
+  const st = WASTE_DETAIL_STATE, g = st && st.groups[gi];
+  if(!g) return;
+  const empId = (document.getElementById(`waEmp_${gi}_${xi}`)||{}).value || '';
+  const note = ((document.getElementById(`waNote_${gi}_${xi}`)||{}).value || '').trim();
+  const emp = empId ? (_wasteEmpCache||[]).find(e=>e.id===empId) : null;
+  if(empId && !emp){ toast('⚠️ Không tìm thấy nhân viên'); return; }
+  if(emp && note.length < 3){ toast('⚠️ Ghi lý do quy trách nhiệm'); return; }
+  const targets = xi<0 ? g.list : [g.list[xi]];
+  if(btn){ btn.disabled = true; btn.textContent = 'Đang lưu...'; }
+  try{
+    await ensureAuth();
+    const at = new Date().toISOString();
+    await Promise.all(targets.map(x=>{
+      const t = x.t;
+      const coll = x.src==='item' ? 'stock_transactions_gieogieo' : 'prep_transactions_gieogieo';
+      const prev = t.responsibility || null;
+      const hist = { at, from: prev ? (prev.employeeName||prev.employeeId||'') : (t.staff||''), to: emp ? emp.fullName : (t.staff||''), note, by:'management' };
+      const responsibility = emp
+        ? { employeeId: emp.id, employeeName: emp.fullName||'', role: 'quy trách nhiệm bởi quản lý',
+            status: 'assigned_by_manager', note, reason: note, assignedAt: at, assignedBy: 'management',
+            reportedById: t.staffEmployeeId||'', reportedByName: t.staff||'' }
+        : (t.responsibilityOriginal || firebase.firestore.FieldValue.delete());
+      // Dòng đã có người chịu từ luồng khác (vd đối chiếu mẻ nấu) thì giữ bản gốc
+      // để "trả về" khôi phục đúng, không xoá mất.
+      const extra = (emp && prev && prev.status!=='assigned_by_manager' && !t.responsibilityOriginal)
+        ? { responsibilityOriginal: prev } : {};
+      return fstore.collection(coll).doc(t.id).update({ responsibility, ...extra,
+        responsibilityHistory: firebase.firestore.FieldValue.arrayUnion(hist) });
+    }));
+    if(typeof logAudit==='function') logAudit('update','waste_responsibility',targets.map(x=>x.t.id).join(','),{employeeId:empId, note});
+    toast(emp ? '✅ Đã quy trách nhiệm cho '+emp.fullName : '✅ Đã trả về người báo');
+    openWasteDetailSheet(st.dateKey);
+  }catch(err){
+    console.error('wasteAssignSave lỗi', err);
+    if(btn){ btn.disabled = false; btn.textContent = 'Lưu'; }
+    showError('Không lưu được: '+(err.code||err.message||err));
+  }
+}
 async function openWasteDetailSheet(dateKey){
   openEditSheet('Hao hụt & huỷ · ' + fmtDateVN(new Date(dateKey+'T12:00:00')), '<div id="wasteDetailBody"></div>', ()=>{});
   const box = document.getElementById('wasteDetailBody');
@@ -8291,7 +8370,8 @@ async function openWasteDetailSheet(dateKey){
     }
 
     const tong = groups.reduce((s,g)=>s+g.total, 0);
-    const cardHtml = g => {
+    WASTE_DETAIL_STATE = { dateKey, groups };
+    const cardHtml = (g, gi) => {
       const first = g.list[0].t;
       if(first.wasteKind === 'drink'){
         const chiTiet = g.list.map(x=>`${escapeHtmlAttr(nameOf(x))} ${fmtNum(Math.abs(x.t.qty),2)} ${escapeHtmlAttr(x.t.unit||'')}`).join(', ');
@@ -8300,15 +8380,17 @@ async function openWasteDetailSheet(dateKey){
           ${(first.reason||first.note) ? `<div class="small-note" style="margin-top:2px">${escapeHtmlAttr(first.reason||first.note)}</div>` : ''}
           <div class="muted-sm" style="margin-top:2px">Trừ: ${chiTiet}</div>
           <div class="muted-sm">${gio(first.createdAt)} · ${escapeHtmlAttr(first.staff||'—')}</div>
+          ${wasteRespHTML(first, gi, -1)}
         </div><div class="li-r">${fmt(g.total)}</div></div>`;
       }
-      return g.list.map(x => {
+      return g.list.map((x, xi) => {
         const t = x.t;
         const badge = t.fromPrepCount ? '<span class="tier tier-blue" style="margin-left:4px">Cuối ngày</span>' : '';
         return `<div class="litem"><div class="li-l">
           <div>${escapeHtmlAttr(nameOf(x))}${badge} · ${fmtNum(Math.abs(t.qty),2)} ${escapeHtmlAttr(t.unit||'')}</div>
           <div class="small-note" style="margin-top:2px">${escapeHtmlAttr(t.reason||t.note||'(không ghi lý do)')}</div>
           <div class="muted-sm">${gio(t.createdAt)} · ${escapeHtmlAttr(t.staff||'—')}</div>
+          ${wasteRespHTML(t, gi, xi)}
         </div><div class="li-r">${fmt(valueOf(x))}</div></div>`;
       }).join('');
     };
@@ -8316,6 +8398,7 @@ async function openWasteDetailSheet(dateKey){
     box.innerHTML = `
       <div class="row" style="margin-bottom:10px"><span class="rl">Tổng hao hụt & huỷ</span><span class="rv"><b style="color:var(--bad)">${fmt(tong)}</b></span></div>
       ${groups.map(cardHtml).join('')}
+      <div class="small-note" style="margin-top:10px">Mặc định hao hụt tính cho người báo. Nếu người gây ra là người khác (vd ca trước để quên NL cần bảo quản lạnh), bấm <b>Quy trách nhiệm</b> để chuyển sang đúng người — Tổng kết tháng tính theo người chịu trách nhiệm.</div>
     `;
   }catch(err){
     console.error('openWasteDetailSheet lỗi', err);
@@ -17158,7 +17241,7 @@ let thangKetAdjust = {};      // employeeId -> {thuong:[{amount,reason}], phat:[
 // thiếu tồn lúc cân, và dùng vượt định mức là ba loại KHÁC NHAU: phần dùng
 // thêm đã nằm trong giá vốn, không được tính thêm lần nữa vào hao hụt P&L.
 // Chỉ nối nhân viên bằng PIN/id; bản ghi cũ chỉ có tên nằm ở nhóm chưa xác định.
-function thangKetTrachNhiemNL(txs, items, costOf){
+function thangKetTrachNhiemNL(txs, items, costOf, prepWasteTxs){
   const itemById=Object.fromEntries((items||[]).map(x=>[x.id,x]));
   const events=[];
   for(const t of txs||[]){
@@ -17190,7 +17273,7 @@ function thangKetTrachNhiemNL(txs, items, costOf){
       itemName:it.name||t.itemId,unit:it.unit||'',category,qty:amountQty,
       value:amountQty*costOf(t.itemId,t.businessDate),employeeId,employeeName,
       role:r.role||(employeeId?'người ghi nhận':'chưa xác minh PIN'),
-      reason:r.reason||t.reason||t.note||'',needsReview:!!t.needsReview,
+      reason:r.reason||t.reason||t.note||'',reportedByName:r.reportedByName||'',needsReview:!!t.needsReview,
       reviewedAt:t.reviewedAt||'',expectedQty:Number(t.expectedQty)||0,
       varianceKind:t.varianceKind||'',codeIntervals,
       varianceAllocations:Array.isArray(t.varianceAllocations)?t.varianceAllocations:[],
@@ -17198,6 +17281,22 @@ function thangKetTrachNhiemNL(txs, items, costOf){
         Array.isArray(t.fifoAllocations)?t.fifoAllocations:[],
       fromCheckpoint:t.fromCheckpoint||null,toCheckpoint:t.toCheckpoint||null,
       containerCode:t.containerCode||'',resolutionStatus:r.status||t.resolutionStatus||''});
+  }
+  // Hao hụt BÁN THÀNH PHẨM (prep_transactions) — giá trị đã lưu sẵn ở totalCost.
+  for(const t of prepWasteTxs||[]){
+    if(String(t.type||'').toUpperCase()!=='WASTE')continue;
+    const r=t.responsibility||{};
+    const employeeId=r.employeeId||t.staffEmployeeId||'';
+    events.push({id:'',date:t.businessDate||String(t.createdAt||'').slice(0,10),at:t.createdAt||'',
+      referenceId:t.referenceId||t.batchId||'',itemId:t.prepId||'',itemName:t.prepName||t.prepId||'BTP',
+      unit:t.unit||'',category:'reportedWaste',qty:Math.abs(Number(t.qty)||0),
+      value:Math.abs(Number(t.totalCost)||0),employeeId,
+      employeeName:r.employeeName||t.staff||'Chưa rõ người ghi nhận',
+      role:r.role||(employeeId?'người ghi nhận':'chưa xác minh PIN'),
+      reason:r.reason||t.reason||t.note||'',reportedByName:r.reportedByName||'',
+      needsReview:false,reviewedAt:'',expectedQty:0,varianceKind:'',codeIntervals:[],
+      varianceAllocations:[],unitAllocations:[],fromCheckpoint:null,toCheckpoint:null,
+      containerCode:'',resolutionStatus:r.status||''});
   }
   events.sort((a,b)=>String(b.at).localeCompare(String(a.at)));
   const byEmployee={};
@@ -17252,8 +17351,10 @@ async function computeThangKetKhoExtra(startKey, endKey, items){
     .map(it => ({ itemId:it.id, ten:it.name, donVi:it.unit, ton:Number(it.currentStock)||0,
       giaTri: (Number(it.currentStock)||0) * itemCostOn(it.id, endKey) }))
     .sort((a,b)=>b.giaTri-a.giaTri);
+  const prepWasteTxs = await _ledgerWasteRows('prep_transactions_gieogieo', startKey, endKey)
+    .catch(err=>{ console.warn('[Tổng kết tháng] hao hụt BTP lỗi', err); return []; });
   return { nhapList, tongNhap, tonLau,
-    responsibility:thangKetTrachNhiemNL(allTransactions,items,itemCostOn) };
+    responsibility:thangKetTrachNhiemNL(allTransactions,items,itemCostOn,prepWasteTxs) };
 }
 
 // Số NGÀY thực sự có mặt (giờ công > 0) của mỗi nhân viên trong tháng — khác với
@@ -17539,6 +17640,7 @@ function thangKetOpenResponsibilitySheet(index){
       ${intervals||allocations?`<div style="margin-top:8px">${intervals||allocations}</div>`:''}
       ${e.fromCheckpoint||e.toCheckpoint?`<div class="small-note">Mốc trước: ${checkpoint(e.fromCheckpoint)} → mốc sau: ${checkpoint(e.toCheckpoint)}</div>`:''}
       <div class="small-note" style="margin-top:8px"><b>Người ký:</b> ${escapeHtmlAttr(e.employeeName)} · ${escapeHtmlAttr(e.role)}</div>
+      ${e.reportedByName?`<div class="small-note"><b>Người báo:</b> ${escapeHtmlAttr(e.reportedByName)}</div>`:''}
       <div class="small-note"><b>Lý do:</b> ${escapeHtmlAttr(e.reason||'Chưa ghi')}</div>
       ${e.category==='extraUse'&&e.expectedQty>0?`<div class="small-note">Dùng thêm ${fmtNum(e.qty/e.expectedQty*100,1)}% so với định lượng mẻ</div>`:''}
       ${e.needsReview&&e.id?`<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px">
