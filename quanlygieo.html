@@ -2846,7 +2846,125 @@ async function computeCashBreakdownForDate(businessDate){
   const expected = openingCash + cashSales - cashExpenseTotal;
   const bankOrders = orders.filter(o=>orderBankAmount(o)>0);
   const expectedBank = bankOrders.reduce((s,o)=>s+orderBankAmount(o),0);
-  return {opening, closing, openingCash, cashOrders, cashSales, cashExpenses, cashExpenseTotal, expected, bankOrders, expectedBank, handover};
+  const postClose = computePostCloseBills(closing, orders, expected);
+  return {opening, closing, openingCash, cashOrders, cashSales, cashExpenses, cashExpenseTotal, expected, bankOrders, expectedBank, handover, postClose};
+}
+
+// ------------------------------------------------------------
+// BILL BỔ SUNG SAU KẾT CA — luồng tiền. POS ghi daily_closings.postCloseBills
+// {orderId: {billCode, cash, bank, timing, at, staff}} khi dùng "Bổ sung bill thiếu":
+//   timing 'after_close'   : bán SAU kết ca → khoản NỘP BỔ SUNG của chính ngày đó,
+//                            nộp chung với tiền bàn giao ngày đó trong một lượt
+//                            (tiền mỗi ngày tách riêng, không dồn sang ca sau).
+//   timing 'in_close_count': bill QUÊN nhập, tiền đã nằm trong két lúc đếm → chỉ
+//                            giải thích phần lệch thừa lúc kết ca.
+// Bill bổ sung từ trước khi có tính năng (không có trong map) hiện "chưa phân loại".
+// Số thực đếm/lệch/bàn giao lúc kết ca GIỮ NGUYÊN — không trộn tiền bán sau vào.
+// ------------------------------------------------------------
+let CASH_PC_STATE = null;
+function computePostCloseBills(closing, orders, expected){
+  const map = (closing && closing.postCloseBills) || {};
+  const codes = new Set(orders.map(o=>o.billCode).filter(Boolean));
+  const list = Object.entries(map).map(([id,e])=>({id, ...e}))
+    .filter(e=>!e.billCode || codes.has(e.billCode));      // bill đã bị xoá thì bỏ
+  orders.filter(o=>o.backfilled && !list.some(e=>e.billCode && e.billCode===o.billCode)).forEach(o=>{
+    const cash = orderCashAmount(o), bank = orderBankAmount(o);
+    if(!(cash>0) && !(bank>0)) return;
+    list.push({id:'legacy_'+String(o.billCode||o.createdAt||Math.random()).replace(/[^\w\-]/g,'_'),
+      billCode:o.billCode||'', cash, bank, timing:o.backfillCashTiming||null,
+      at:o.backfilledAt||o.createdAt||'', staff:o.staff||'', unsaved:true});
+  });
+  list.sort((a,b)=>String(a.at||'').localeCompare(String(b.at||'')));
+  const sum = (f, k) => list.filter(f).reduce((n,e)=>n+(Number(e[k])||0),0);
+  const afterCash = sum(e=>e.timing==='after_close','cash');
+  const afterBank = sum(e=>e.timing==='after_close','bank');
+  const inCash = sum(e=>e.timing==='in_close_count','cash');
+  const unclassifiedCash = sum(e=>!e.timing,'cash');
+  return { list, afterCash, afterBank, inCash, unclassifiedCash,
+    expectedAtClose: expected - afterCash - unclassifiedCash };
+}
+function postCloseCashHTML(detail){
+  const pc = detail.postClose, closing = detail.closing;
+  if(!pc || !pc.list.length) return '';
+  const date = detail.opening && detail.opening.businessDate || cashViewDate;
+  const handedOver = closing && ['handed_over','closed'].includes(closing.status);
+  const daBanGiao = handedOver ? (Number(closing.handedOverAmount)||0) : null;
+  const tongPhaiNhan = (daBanGiao||0) + pc.afterCash;
+  const rc = closing && closing.postCloseReceipt;
+  const rcValid = rc && Number(rc.expectedExtra) === pc.afterCash && !pc.unclassifiedCash;
+  CASH_PC_STATE = { date, list: pc.list, daBanGiao: daBanGiao||0, afterCash: pc.afterCash };
+  const nhan = t => t==='after_close' ? '<span class="tier tier-amber">Bán sau kết ca · nộp bổ sung</span>'
+    : t==='in_close_count' ? '<span class="tier tier-blue">Đã trong két lúc kết ca</span>'
+    : '<span class="tier tier-red">Chưa phân loại</span>';
+  return `
+    <div class="sec-title">Bill bổ sung sau kết ca (${pc.list.length})</div>
+    <div class="card">
+      ${pc.list.map((e,i)=>`<div style="padding:8px 0;border-bottom:1px solid var(--line)">
+        <div class="row" style="border:0;padding:0"><span class="rl">${e.at?new Date(e.at).toLocaleString('vi-VN'):''}${e.billCode?(' · '+escapeHtmlAttr(e.billCode)):''}${e.staff?(' · '+escapeHtmlAttr(e.staff)):''}</span>
+          <span class="rv">${e.cash>0?fmt(e.cash)+' TM':''}${e.cash>0&&e.bank>0?' · ':''}${e.bank>0?fmt(e.bank)+' CK':''}</span></div>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:4px">${nhan(e.timing)}
+          ${e.timing!=='after_close'?`<button class="btn outline sm" style="width:auto;padding:0 10px" onclick="setPostCloseTiming(${i},'after_close')">Đổi: bán sau kết ca</button>`:''}
+          ${e.timing!=='in_close_count'?`<button class="btn outline sm" style="width:auto;padding:0 10px" onclick="setPostCloseTiming(${i},'in_close_count')">Đổi: đã trong két</button>`:''}</div>
+      </div>`).join('')}
+      ${pc.unclassifiedCash ? `<div class="small-note" style="margin-top:8px;color:var(--bad)">Có ${fmt(pc.unclassifiedCash)} tiền mặt từ bill chưa phân loại — chọn loại cho từng bill trước khi xác nhận nhận tiền.</div>` : ''}
+      ${pc.inCash ? `<div class="row"><span class="rl">Tiền bill quên nhập (đã trong két lúc đếm)</span><span class="rv">${fmt(pc.inCash)}</span></div>` : ''}
+      ${pc.afterBank ? `<div class="row"><span class="rl">Chuyển khoản từ bill bán sau kết ca</span><span class="rv">${fmt(pc.afterBank)} <span class="small-note">đối chiếu sao kê</span></span></div>` : ''}
+      ${pc.afterCash ? `
+        <div class="divider"></div>
+        ${daBanGiao!=null ? `<div class="row"><span class="rl">Đã bàn giao lúc kết ca</span><span class="rv">${fmt(daBanGiao)}</span></div>` : `<div class="small-note">Ngày này chưa ghi bàn giao lúc kết ca.</div>`}
+        <div class="row"><span class="rl">+ Nộp bổ sung từ bill bán sau kết ca</span><span class="rv">${fmt(pc.afterCash)}</span></div>
+        <div class="row"><span class="rl"><b>Tổng tiền phải nhận của ngày</b></span><span class="rv"><b>${fmt(tongPhaiNhan)}</b></span></div>
+        ${rcValid ? `
+          <div class="row"><span class="rl">Quản lý đã nhận</span><span class="rv">${fmt(rc.received)}</span></div>
+          <div class="row"><span class="rl">Lệch khi nhận</span><span class="rv" style="color:${Number(rc.variance)===0?'var(--ok)':'var(--bad)'}">${rc.variance>0?'+':''}${fmt(rc.variance)}</span></div>
+          <div class="small-note">Xác nhận lúc ${rc.at?new Date(rc.at).toLocaleString('vi-VN'):''}${rc.note?(' · '+escapeHtmlAttr(rc.note)):''}</div>`
+        : `
+          ${rc ? `<div class="small-note" style="color:var(--warn)">Có thay đổi bill bổ sung sau lần xác nhận trước (${fmt(rc.received)}) — xác nhận lại tổng tiền nhận.</div>` : ''}
+          <div class="field" style="margin-top:8px"><label>Tổng tiền thực nhận của ngày (tiền bàn giao + nộp bổ sung, nhận trong 1 lượt)</label>
+            <input type="number" id="pcReceivedInput" placeholder="${tongPhaiNhan}"></div>
+          <div class="field"><label>Ghi chú (không bắt buộc)</label><input type="text" id="pcReceivedNote"></div>
+          <button class="btn sm" style="width:auto;padding:0 16px" ${pc.unclassifiedCash?'disabled':''} onclick="confirmPostCloseReceipt()">Xác nhận đã nhận đủ</button>`}
+      ` : ''}
+    </div>`;
+}
+async function setPostCloseTiming(idx, timing){
+  const st = CASH_PC_STATE; if(!st) return;
+  const e = st.list[idx]; if(!e) return;
+  try{
+    await ensureAuth();
+    const entry = { billCode:e.billCode||'', cash:Number(e.cash)||0, bank:Number(e.bank)||0, timing,
+      at:e.at||'', staff:e.staff||'', reclassifiedAt:new Date().toISOString(), reclassifiedBy:'management' };
+    const ref = fstore.collection('daily_closings_gieogieo').doc(st.date);
+    await ref.set({ postCloseBills: { [e.id]: entry } }, { merge:true });
+    const after = st.list.map((x,i)=>i===idx?{...x,timing}:x);
+    const afterCash = after.filter(x=>x.timing==='after_close').reduce((n,x)=>n+(Number(x.cash)||0),0);
+    const doc = await ref.get(), rc = doc.data() && doc.data().postCloseReceipt;
+    await ref.set({ postCloseCashPending: afterCash>0 && !(rc && Number(rc.expectedExtra)===afterCash) }, { merge:true });
+    logAudit('update','post_close_bill_timing',st.date,{bill:e.billCode, timing});
+    toast('✅ Đã đổi loại bill');
+    renderEntryCash();
+  }catch(err){ console.error(err); showError('Không lưu được: '+(err.code||err.message||err)); }
+}
+async function confirmPostCloseReceipt(){
+  const st = CASH_PC_STATE; if(!st) return;
+  const raw = (document.getElementById('pcReceivedInput')||{}).value;
+  if(raw==='' || raw==null || !(Number(raw)>=0)){ toast('⚠️ Nhập tổng tiền thực nhận'); return; }
+  const received = Number(raw);
+  const expectedTotal = st.daBanGiao + st.afterCash;
+  const variance = received - expectedTotal;
+  if(variance!==0 && !confirm(`Nhận ${fmt(received)}, phải nhận ${fmt(expectedTotal)} → lệch ${variance>0?'+':''}${fmt(variance)}. Vẫn xác nhận?`)) return;
+  try{
+    await ensureAuth();
+    await fstore.collection('daily_closings_gieogieo').doc(st.date).set({
+      postCloseReceipt: { received, expectedTotal, handedOverAtClose: st.daBanGiao, expectedExtra: st.afterCash,
+        variance, note: ((document.getElementById('pcReceivedNote')||{}).value||'').trim(),
+        at: new Date().toISOString(), by: 'management' },
+      postCloseCashPending: false
+    }, { merge:true });
+    logAudit('update','post_close_cash_receipt',st.date,{received, expectedTotal, variance});
+    toast('✅ Đã xác nhận nhận tiền ngày '+st.date);
+    renderEntryCash();
+  }catch(err){ console.error(err); showError('Không lưu được: '+(err.code||err.message||err)); }
 }
 
 // ------------------------------------------------------------
@@ -11374,6 +11492,9 @@ async function computeStoreHealth(){
   const staleP = loadStaleClosingDays(30).catch(err=>{ console.warn('storeHealth: ngày treo lỗi', err); return []; });
   const poP    = loadPurchaseOrders().catch(err=>{ console.warn('storeHealth: PO lỗi', err); return []; });
 
+  // Tiền nộp bổ sung từ bill bán sau kết ca: báo tới khi Quản lý xác nhận đã nhận.
+  const postCloseP = fstore.collection('daily_closings_gieogieo').where('postCloseCashPending','==',true).get()
+    .catch(err=>{ console.warn('storeHealth: tiền bổ sung sau kết ca lỗi', err); return null; });
   const [alertsRes, scRes, expRes, closingRes, itemsRes, overrideRes, openingRes] = await Promise.allSettled([
     fstore.collection('alerts_gieogieo').where('status','==','new').get(),
     loadStockCountsForReview(),
@@ -11449,6 +11570,14 @@ async function computeStoreHealth(){
   {
     const stale = await staleP;
     if(stale.length) push('red', `Ngày chưa đóng sổ (nhân viên đang thấy cảnh báo trên POS)`, stale.length, `goEntry('cash')`);
+  }
+  {
+    const snap = await postCloseP;
+    if(snap && snap.size){
+      const dates = snap.docs.map(d=>d.id).sort();
+      push('red', 'Tiền nộp bổ sung từ bill bán sau kết ca chưa xác nhận ('+dates.join(', ')+')', snap.size,
+        `cashViewDate='${dates[0]}'; goEntry('cash')`);
+    }
   }
 
   if(expRes.status==='fulfilled'){
@@ -15292,7 +15421,8 @@ function cashAttemptsCardHTML(closing){
 }
 
 function renderCashDetail(detail, checklist){
-  const { opening, closing, openingCash, cashOrders, cashSales, cashExpenses, cashExpenseTotal, expected, bankOrders, expectedBank, handover } = detail;
+  const { opening, closing, openingCash, cashOrders, cashSales, cashExpenses, cashExpenseTotal, expected, bankOrders, expectedBank, handover, postClose } = detail;
+  const pcAfter = postClose ? postClose.afterCash + postClose.unclassifiedCash : 0;
   const el = document.getElementById('cashDetail');
   if(!opening){
     el.innerHTML = '<div class="card"><div class="muted">Chưa mở ca ngày này ở POS.</div></div>';
@@ -15318,13 +15448,16 @@ function renderCashDetail(detail, checklist){
       <div class="row"><span class="rl">Cash Sales (${cashOrders.length} bill)</span><span class="rv">${fmt(cashSales)}</span></div>
       <div class="row"><span class="rl">Cash Expenses (${cashExpenses.length} khoản)</span><span class="rv">-${fmt(cashExpenseTotal)}</span></div>
       <div class="row"><span class="rl">Cash Refunds</span><span class="rv">0 <span class="small-note">(chưa có luồng hoàn tiền)</span></span></div>
-      <div class="row"><span class="rl"><b>Expected Cash</b></span><span class="rv"><b>${fmt(expected)}</b></span></div>
+      ${pcAfter ? `<div class="row"><span class="rl">− Bill bán sau kết ca <span class="small-note">(nộp bổ sung, không nằm trong két lúc đếm)</span></span><span class="rv">-${fmt(pcAfter)}</span></div>` : ''}
+      <div class="row"><span class="rl"><b>Expected Cash${pcAfter?' lúc kết ca':''}</b></span><span class="rv"><b>${fmt(expected - pcAfter)}</b></span></div>
       ${actual!=null ? `<div class="row"><span class="rl">Actual Cash (thực đếm)</span><span class="rv">${fmt(actual)}</span></div>
-      <div class="row"><span class="rl">Variance</span><span class="rv" style="color:${variance===0?'var(--ok)':'var(--bad)'}">${variance>0?'+':''}${fmt(variance)}</span></div>` : ''}
+      <div class="row"><span class="rl">Variance${postClose&&postClose.inCash?' lúc kết ca':''}</span><span class="rv" style="color:${variance===0?'var(--ok)':'var(--bad)'}">${variance>0?'+':''}${fmt(variance)}</span></div>
+      ${postClose&&postClose.inCash ? `<div class="row"><span class="rl">Lệch sau khi tính bill quên nhập (${fmt(postClose.inCash)})</span><span class="rv" style="color:${(variance-postClose.inCash)===0?'var(--ok)':'var(--bad)'}">${(variance-postClose.inCash)>0?'+':''}${fmt(variance-postClose.inCash)}</span></div>` : ''}` : ''}
       ${opening.staff ? `<div class="row"><span class="rl">Nhân viên mở ca</span><span class="rv">${opening.staff}</span></div>` : ''}
       ${closing && closing.attempts ? `<div class="row"><span class="rl">Số lần thử đối soát tiền mặt</span><span class="rv">${closing.attempts.length}${closing.attempts.length>1?' '+ic('alert',13,'var(--warn)'):''}</span></div>` : ''}
     </div>
     ${cashAttemptsCardHTML(closing)}
+    ${postCloseCashHTML(detail)}
     ${expectedBank>0 ? `
     <div class="card">
       <div class="row"><span class="rl"><b>Expected Chuyển khoản</b></span><span class="rv"><b>${fmt(expectedBank)}</b></span></div>
@@ -17222,6 +17355,91 @@ function thangKetAdjustRowsHTML(empId, loai, nhan, mauSac){
     <button class="btn outline sm" style="width:auto;padding:0 12px;margin-top:6px;color:${mauSac}" onclick="thangKetAddRow('${empId}','${loai}')">+ Thêm dòng ${nhan.toLowerCase()}</button>`;
 }
 
+// ------------------------------------------------------------
+// LỆCH TIỀN MẶT THEO NHÂN VIÊN (Tổng kết tháng). Nguồn: từng đoạn ca đã chốt
+// (shift_segments_gieogieo) — mỗi đoạn có đúng một người giữ két (custodian), lệch
+// của đoạn là lệch của người đó (giao ca giữa ngày hoặc kết ca). Ngày cũ chưa có đoạn
+// ca thì lấy lệch kết ca (daily_closings.finalVariance) gán cho người đếm lần cuối.
+// Lệch kết ca được trừ phần tiền của bill QUÊN nhập đã nằm trong két (postCloseBills
+// 'in_close_count') — lệch đó đã có lời giải thích, không tính cho nhân viên.
+// Lệch THỪA và lệch THIẾU cộng RIÊNG, không bù trừ cho nhau.
+// ------------------------------------------------------------
+async function computeThangKetCashVariance(startKey, endKey){
+  const [segSnap, closeSnap] = await Promise.all([
+    fstore.collection('shift_segments_gieogieo').where('businessDate','>=',startKey).where('businessDate','<=',endKey).get(),
+    fstore.collection('daily_closings_gieogieo').where('businessDate','>=',startKey).where('businessDate','<=',endKey).get()
+  ]);
+  const closings = {};
+  closeSnap.forEach(d=>{ const c = d.data(); closings[c.businessDate||d.id] = c; });
+  const inCashOf = date => Object.values((closings[date]||{}).postCloseBills||{})
+    .filter(e=>e.timing==='in_close_count').reduce((n,e)=>n+(Number(e.cash)||0),0);
+  const byEmp = {}, datesWithSeg = new Set();
+  const add = (id, name, date, v, kind, withinTolerance) => {
+    v = Math.round(Number(v)||0);
+    if(!v) return;
+    const key = id || ('name:'+(name||'?'));
+    const g = byEmp[key] || (byEmp[key] = { employeeId:id||'', name:name||'(không rõ)', plus:0, minus:0, plusCount:0, minusCount:0, events:[] });
+    if(v>0){ g.plus += v; g.plusCount++; } else { g.minus += -v; g.minusCount++; }
+    g.events.push({ date, v, kind, withinTolerance: !!withinTolerance });
+  };
+  segSnap.forEach(d=>{
+    const seg = d.data();
+    if(seg.status!=='closed' || seg.variance==null) return;
+    datesWithSeg.add(seg.businessDate);
+    let v = Number(seg.variance)||0;
+    if(seg.endType==='close') v -= inCashOf(seg.businessDate);
+    add(seg.custodianId, seg.custodianName, seg.businessDate, v, seg.endType==='close'?'Kết ca':'Giao ca đoạn '+seg.seq, seg.withinTolerance);
+  });
+  Object.entries(closings).forEach(([date,c])=>{
+    if(datesWithSeg.has(date) || c.finalVariance==null) return;
+    const last = (c.attempts||[]).slice(-1)[0] || {};
+    add(last.staffEmployeeId, last.staff || c.closingStaff, date, (Number(c.finalVariance)||0) - inCashOf(date), 'Kết ca', c.status!=='cash_variance_recorded');
+  });
+  Object.values(byEmp).forEach(g=>g.events.sort((a,b)=>a.date.localeCompare(b.date)));
+  return byEmp;
+}
+function thangKetCashVarOf(e){
+  const all = (thangKetData && thangKetData.cashVar) || {};
+  return all[e.id] || Object.values(all).find(g=>!g.employeeId && g.name===e.fullName) || null;
+}
+function thangKetCashVarHTML(e){
+  const g = thangKetCashVarOf(e);
+  if(!thangKetData || !thangKetData.cashVar) return `<div class="row"><span class="rl">Lệch tiền mặt</span><span class="rv small-note">không đọc được</span></div>`;
+  const minus = g ? g.minus : 0, plus = g ? g.plus : 0;
+  return `
+    <div class="row"><span class="rl">Đếm tiền lệch THIẾU (âm)</span><span class="rv" style="${minus?'color:var(--bad)':''}">${minus?'−':''}${fmt(minus)}${g&&g.minusCount?` <span class="small-note">(${g.minusCount} lần)</span>`:''}</span></div>
+    <div class="row"><span class="rl">Đếm tiền lệch THỪA (dương)</span><span class="rv" style="${plus?'color:var(--warn)':''}">${plus?'+':''}${fmt(plus)}${g&&g.plusCount?` <span class="small-note">(${g.plusCount} lần)</span>`:''}</span></div>
+    ${g && g.events.length ? `<details style="margin:4px 0 6px"><summary class="small-note" style="cursor:pointer">Xem ${g.events.length} lần lệch</summary>
+      ${g.events.map(ev=>`<div class="row"><span class="rl">${ev.date} · ${escapeHtmlAttr(ev.kind)}${ev.withinTolerance?' <span class="small-note">(trong dung sai)</span>':''}</span><span class="rv" style="color:${ev.v<0?'var(--bad)':'var(--warn)'}">${ev.v>0?'+':''}${fmt(ev.v)}</span></div>`).join('')}
+    </details>` : ''}
+    ${minus ? `<button class="btn outline sm" style="width:auto;padding:0 12px;color:var(--bad)" onclick="thangKetAddCashShortToPhat('${e.id}')">+ Đưa ${fmt(minus)} lệch thiếu vào Trừ lương</button>` : ''}`;
+}
+function thangKetAddCashShortToPhat(empId){
+  const e = (thangKetData && thangKetData.emps || []).find(x=>x.id===empId);
+  const g = e && thangKetCashVarOf(e);
+  const a = thangKetAdjust[empId];
+  if(!g || !g.minus || !a) return;
+  const reason = `Lệch thiếu tiền mặt tháng ${thangKetData.m}/${thangKetData.y} (${g.minusCount} lần)`;
+  if(a.phat.some(r=>r.reason===reason)){ toast('ℹ️ Đã có dòng trừ lương này'); return; }
+  a.phat.push({ amount: g.minus, reason });
+  thangKetRedraw();
+  toast('Đã thêm vào Trừ lương — bấm "Lưu lương tháng này" để lưu');
+}
+function thangKetCashVarSummaryHTML(){
+  const d = thangKetData;
+  if(!d || !d.cashVar) return '';
+  const groups = Object.values(d.cashVar);
+  const tongThieu = groups.reduce((n,g)=>n+g.minus,0), tongThua = groups.reduce((n,g)=>n+g.plus,0);
+  const ngoai = groups.filter(g=>!d.emps.some(e=>e.id===g.employeeId || (!g.employeeId && g.name===e.fullName)));
+  return `<div class="card">
+    <div class="card-h"><h3>Lệch tiền mặt theo nhân viên</h3></div>
+    <div class="row"><span class="rl">Tổng lệch THIẾU</span><span class="rv" style="color:var(--bad)">${tongThieu?'−':''}${fmt(tongThieu)}</span></div>
+    <div class="row"><span class="rl">Tổng lệch THỪA</span><span class="rv" style="color:var(--warn)">${tongThua?'+':''}${fmt(tongThua)}</span></div>
+    ${ngoai.map(g=>`<div class="row"><span class="rl">${escapeHtmlAttr(g.name)} <span class="small-note">(không khớp nhân viên đang hoạt động)</span></span><span class="rv">−${fmt(g.minus)} · +${fmt(g.plus)}</span></div>`).join('')}
+    <div class="small-note" style="margin-top:6px">Tính theo người giữ két của từng đoạn ca (giao ca/kết ca). Thiếu và thừa cộng riêng, không bù trừ. Lệch do bill quên nhập đã nằm trong két được loại ra.</div>
+  </div>`;
+}
+
 function thangKetEmployeeCardHTML(e, tongGioTeam){
   const b = (thangKetData.empBreakdown||{})[e.id] || {hours:0, otHours:0, amount:0};
   const soNgay = (thangKetData.soNgayCongByEmp||{})[e.id] || 0;
@@ -17242,6 +17460,7 @@ function thangKetEmployeeCardHTML(e, tongGioTeam){
     <div class="row"><span class="rl">Thiếu tồn cần giải trình</span><span class="rv">${fmt(trachNhiem?.shortage||0)}</span></div>
     <div class="row"><span class="rl">Dùng vượt định mức · đã vào giá vốn</span><span class="rv">${fmt(trachNhiem?.extraUse||0)}</span></div>
     ${trachNhiem?.events.length?`<button class="btn outline sm" style="width:auto;color:#0062AD;border-color:#0062AD" onclick="thangKetOpenResponsibilitySheet(${trachNhiemIndex})">Xem ${trachNhiem.events.length} lượt theo mã</button>`:''}
+    ${thangKetCashVarHTML(e)}
     <div class="row"><span class="rl">Lương tính từ chấm công</span><span class="rv"><b>${fmt(dx.luongChamCong)}</b></span></div>
     ${thangKetAdjustRowsHTML(e.id, 'thuong', 'Thưởng', 'var(--ok)')}
     ${thangKetAdjustRowsHTML(e.id, 'phat', 'Trừ lương', 'var(--bad)')}
@@ -17380,7 +17599,7 @@ async function renderThangKet(){
       loadPackagingItemOverrides(), loadPackagingRules(), loadPackagingRulesConfig()
     ]);
     const [salesRes, expAll, assets, ledgerReal, actualLaborByDate, expCats, emps, scheds,
-           empBreakdown, soNgayCongByEmp, mix, khoExtra, bookClosings] = await Promise.all([
+           empBreakdown, soNgayCongByEmp, mix, khoExtra, bookClosings, cashVar] = await Promise.all([
       fetchSalesRange(start, end),
       loadExpensesAll(),
       loadAssetsAll(),
@@ -17393,7 +17612,8 @@ async function renderThangKet(){
       computeThangKetSoNgayCong(startKey, endKey).catch(err=>{ console.warn('[Tổng kết tháng] ngày công lỗi', err); return {}; }),
       computeMixReport(start, end).catch(err=>{ console.warn('[Tổng kết tháng] bán hàng lỗi', err); return null; }),
       computeThangKetKhoExtra(startKey, endKey, INVENTORY_ITEMS).catch(err=>{ console.warn('[Tổng kết tháng] kho lỗi', err); return null; }),
-      loadBookClosings().catch(()=>({}))
+      loadBookClosings().catch(()=>({})),
+      computeThangKetCashVariance(startKey, endKey).catch(err=>{ console.warn('[Tổng kết tháng] lệch tiền lỗi', err); return null; })
     ]);
 
     const plLaborDuDoan = plPredictedLaborByDate(emps, scheds, startKey, endKey);
@@ -17416,7 +17636,7 @@ async function renderThangKet(){
 
     thangKetData = { y, m, start, end, monthEnd, startKey, endKey,
       emps: (emps||[]).filter(e=>e.active!==false), empBreakdown, soNgayCongByEmp,
-      mix, khoExtra, plTong, plDays, plBook, expAll };
+      mix, khoExtra, plTong, plDays, plBook, expAll, cashVar };
 
     thangKetRedraw();
   }catch(err){
@@ -17488,6 +17708,7 @@ function thangKetRedraw(){
   const nhanSu = `
     <div class="sec-title">Nhân sự tháng ${d.m}/${d.y}</div>
     <div id="thangKetResponsibilityBox">${d.khoExtra?thangKetResponsibilityHTML():'<div class="card"><div class="muted">Không đọc được sổ NL tháng này.</div></div>'}</div>
+    ${thangKetCashVarSummaryHTML()}
     ${d.emps.length ? d.emps.map(e=>thangKetEmployeeCardHTML(e, tongGioTeam)).join('') : '<div class="card"><div class="empty-hint">Chưa có nhân viên đang hoạt động.</div></div>'}
   `;
 

@@ -25074,6 +25074,7 @@ async function confirmPay(cashGiven, cashChange) {
     ...(_backfillMode ? {
       backfilled: true,
       backfillMode: _backfillMode.skipConsumption ? 'before_close' : 'after_close',
+      backfillCashTiming: _backfillMode.cashTiming || 'after_close',
       backfilledAt: realNow.toISOString()
     } : {}),
     isToGo: isToGo,
@@ -25125,6 +25126,7 @@ async function confirmPay(cashGiven, cashChange) {
     // billRef.key — gọi lại hàm này trên 1 bill ĐÃ tồn tại (nhánh existingSnap ở trên) vẫn an
     // toàn, tự nhận ra đã trừ kho rồi, không trừ đúp. Gọi lại KHÔNG ĐIỀU KIỆN (không gate theo
     // sideEffectsDone bên dưới) vì bản thân nó đã tự idempotent qua txId.
+    if (_backfillMode) recordBackfillCashPOS(order, billRef.key, _backfillMode);
     if (_backfillMode && _backfillMode.skipConsumption) {
       applyBackfillConsumptionNoStockEffect(order, billRef.key, _backfillMode.businessDate);
     } else {
@@ -26560,16 +26562,67 @@ function backfillModeCancel() {
   document.getElementById('backfill-mode-popup').style.display = 'none';
   _backfillPendingDate = null;
 }
-function startBackfillBill(mode) {
+async function startBackfillBill(mode) {
   if (!_backfillPendingDate) return;
-  _backfillMode = { businessDate: _backfillPendingDate, skipConsumption: mode === 'before' };
-  _backfillPendingDate = null;
+  const date = _backfillPendingDate;
   document.getElementById('backfill-mode-popup').style.display = 'none';
+  const cashTiming = await askBackfillCashTimingPOS(date);
+  if (!cashTiming) { _backfillPendingDate = null; return; }
+  _backfillMode = { businessDate: date, skipConsumption: mode === 'before', cashTiming };
+  _backfillPendingDate = null;
   cartClear();
   showScreen('sm');
   renderBackfillBanner();
   toast('🧾 Đang bổ sung bill cho ngày ' + posDateKeyToDisplay(_backfillMode.businessDate) + ' — ' +
     (_backfillMode.skipConsumption ? 'KHÔNG trừ tồn kho hiện tại' : 'CÓ trừ tồn kho hiện tại'));
+}
+// Tiền của bill bổ sung nằm ở đâu — quyết định cách đối soát tiền mặt của ngày đó:
+//   'in_close_count': bill bị QUÊN nhập, tiền đã nằm trong két lúc đếm kết ca → chỉ
+//                     giải thích khoản lệch thừa lúc kết ca, không phải nộp thêm.
+//   'after_close'   : bán SAU kết ca (vd khách VIP) → khoản NỘP BỔ SUNG của chính ngày
+//                     đó, nộp chung với tiền bàn giao ngày hôm đó. Tiền mỗi ngày tách
+//                     riêng: KHÔNG để lại két, KHÔNG cộng vào tiền giữ lại cho ca sau.
+function askBackfillCashTimingPOS(date) {
+  return new Promise(resolve => {
+    const cu = document.getElementById('backfill-cash-overlay');
+    if (cu) cu.remove();
+    const ov = document.createElement('div');
+    ov.id = 'backfill-cash-overlay';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:2001;display:flex;align-items:center;justify-content:center;padding:24px;backdrop-filter:blur(4px);';
+    const done = v => { ov.remove(); resolve(v); };
+    const btn = (id, title, sub, main) => `<button id="${id}" style="width:100%;text-align:left;padding:14px 16px;margin-bottom:10px;background:#fff;border:1.5px solid ${main ? 'var(--gd)' : '#e0e0e0'};border-radius:14px;cursor:pointer;">
+        <div style="font-weight:700;font-size:14.5px;color:${main ? 'var(--gd)' : 'var(--td)'};margin-bottom:3px;">${title}</div>
+        <div style="font-size:12px;color:#888;line-height:1.4;">${sub}</div></button>`;
+    const d = posDateKeyToDisplay(date);
+    ov.innerHTML = `<div style="background:#fff;border-radius:24px;padding:26px 22px;width:100%;max-width:380px;box-shadow:0 20px 60px rgba(0,0,0,.25);">
+      <div style="text-align:center;margin-bottom:16px;">
+        <div style="font-size:17px;font-weight:800;color:#111;margin-bottom:4px;">Tiền của bill bổ sung ngày ${d}</div>
+        <div style="font-size:12.5px;color:#999;font-weight:500;">Áp dụng cho các bill bổ sung trong lượt này.</div>
+      </div>
+      ${btn('bfCashAfter', 'Bán SAU kết ca — nộp bổ sung', 'Khách đến sau khi đã kết ca. Tiền mặt phải nộp chung với tiền bàn giao của ngày ' + d + ', KHÔNG để lại két cho ca sau.', true)}
+      ${btn('bfCashIn', 'Tiền đã nằm trong két lúc kết ca', 'Bill bị quên nhập trước khi kết ca, tiền đã được đếm cùng két. Bill này chỉ giải thích khoản lệch thừa lúc kết ca.', false)}
+      <button id="bfCashCancel" style="width:100%;padding:12px;background:none;border:1px solid #ddd;color:var(--gt);border-radius:14px;font-weight:600;font-size:13px;cursor:pointer;">Huỷ</button>
+    </div>`;
+    document.body.appendChild(ov);
+    ov.querySelector('#bfCashAfter').onclick = () => done('after_close');
+    ov.querySelector('#bfCashIn').onclick = () => done('in_close_count');
+    ov.querySelector('#bfCashCancel').onclick = () => done(null);
+  });
+}
+// Ghi bill bổ sung vào hồ sơ đóng ngày của CHÍNH ngày đó để Quản lý (tab Tiền mặt)
+// thấy khoản nộp bổ sung / khoản giải thích lệch. Không chặn luồng thanh toán.
+function recordBackfillCashPOS(order, orderId, mode) {
+  const cash = orderCashAmountPOS(order), bank = orderBankAmountPOS(order);
+  if (!(cash > 0) && !(bank > 0)) return;
+  const timing = mode.cashTiming || 'after_close';
+  const entry = { billCode: order.billCode || '', cash, bank, timing, at: order.createdAt || new Date().toISOString(),
+    staff: order.staff || '', total: Number(order.total) || 0 };
+  const upd = { postCloseBills: { [orderId]: entry } };
+  if (timing === 'after_close' && cash > 0) upd.postCloseCashPending = true;
+  fstore.collection('daily_closings_gieogieo').doc(mode.businessDate).set(upd, { merge: true })
+    .catch(err => { console.error('[Bổ sung bill] ghi hồ sơ tiền mặt lỗi', err); toast('⚠️ Chưa ghi được khoản tiền bổ sung vào ngày ' + posDateKeyToDisplay(mode.businessDate) + ' — báo Quản lý'); });
+  if (timing === 'after_close' && cash > 0)
+    setTimeout(() => toast('💵 Nộp ' + cash.toLocaleString('vi-VN') + 'đ tiền mặt này CHUNG với tiền bàn giao ngày ' + posDateKeyToDisplay(mode.businessDate) + ' — không để lại két'), 2500);
 }
 function renderBackfillBanner() {
   const el = document.getElementById('backfillBanner');
@@ -26577,7 +26630,8 @@ function renderBackfillBanner() {
   if (!_backfillMode) { el.style.display = 'none'; return; }
   document.getElementById('backfillBannerText').textContent =
     '🧾 ĐANG BỔ SUNG BILL cho ngày ' + posDateKeyToDisplay(_backfillMode.businessDate) +
-    ' — ' + (_backfillMode.skipConsumption ? 'không trừ tồn kho' : 'có trừ tồn kho hiện tại');
+    ' — ' + (_backfillMode.skipConsumption ? 'không trừ tồn kho' : 'có trừ tồn kho hiện tại') +
+    ' · ' + (_backfillMode.cashTiming === 'in_close_count' ? 'tiền đã trong két lúc kết ca' : 'tiền mặt nộp bổ sung cho ngày này');
   el.style.display = 'block';
 }
 // Không tự thoát chế độ sau mỗi bill — có thể còn nhiều hơn 1 bill thiếu cho cùng ngày đó.
@@ -27644,6 +27698,7 @@ async function finalizeSplitPay() {
     ...(_backfillMode ? {
       backfilled: true,
       backfillMode: _backfillMode.skipConsumption ? 'before_close' : 'after_close',
+      backfillCashTiming: _backfillMode.cashTiming || 'after_close',
       backfilledAt: realNow.toISOString()
     } : {}),
     isToGo: isToGo,
@@ -27679,6 +27734,7 @@ async function finalizeSplitPay() {
     // Giai đoạn 4 — tự động trừ kho theo GOGS (recipes_gieogieo), không chặn luồng thanh toán.
     // [MỚI] Cùng nhánh backfill với confirmPay() — xem chú thích ở đó.
     // Gọi lại KHÔNG ĐIỀU KIỆN (không gate theo sideEffectsDone bên dưới) vì tự idempotent qua txId.
+    if (_backfillMode) recordBackfillCashPOS(order, billRef.key, _backfillMode);
     if (_backfillMode && _backfillMode.skipConsumption) {
       applyBackfillConsumptionNoStockEffect(order, billRef.key, _backfillMode.businessDate);
     } else {
