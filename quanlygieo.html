@@ -4966,6 +4966,10 @@ async function fixRecWizApply(){
       });
     });
 
+    // [TEM = SỰ THẬT] Tem vừa huỷ/sửa dung tích → chốt tồn theo tổng mã.
+    const itFix = INVENTORY_ITEMS.find(x=>x.id===l.itemId);
+    if(isTemTrackedItem(itFix)) await recomputeTemStock(l.itemId).catch(err=>console.warn('[Tem] chốt tồn theo mã lỗi', err));
+
     // 3) Cập nhật phiếu nhận VÀ ghi nhật ký sửa. `corrections` là mảng CHỈ THÊM, không bao
     //    giờ ghi đè: phiếu mang con số mới nhưng vẫn kể lại được đầy đủ từng lần sửa.
     const buoc = {
@@ -5657,6 +5661,7 @@ async function ctnAdjustCore(c, qty, expected, opId, note){
     // RTDB đã giữ số mới; lượt Lưu lại dùng cùng opId nên không trừ hai lần.
     throw new Error('Đã ghi tồn mới cho mã nhưng chưa ghi được sổ kho: ' + (err.message || err) + '. Bấm Lưu lại để hoàn tất.');
   }
+  await recomputeTemStock(c.itemId).catch(err => console.warn('[Tem] chốt tồn theo mã lỗi', err));
   return { before, delta };
 }
 
@@ -20328,6 +20333,16 @@ async function submitInventoryItem(){
   const ngayApDung = (document.getElementById('invCostFrom')?.value) || dkey(new Date());
   if(ngayApDung > dkey(new Date())){ toast('⚠️ Ngày áp dụng giá không được ở tương lai'); return; }
   const doiGia = !!itemCu && Math.abs(giaCu - costPerUnit) > 1e-9;
+
+  // [TEM = SỰ THẬT] Món có tem: tồn = tổng mã. Hàng chưa có tem sẽ KHÔNG được tính — báo
+  // trước thay vì để tồn tụt về 0 ở lượt tính lại kế tiếp mà không ai hiểu vì sao.
+  const batTem = trackingMode === 'unit' || trackingMode === 'batch';
+  if(batTem && !editingItemId && (v('invStart') * f('invStartUnit')) > 0){
+    toast('⚠️ Món có tem thì tồn = tổng mã — để tồn đầu = 0, rồi nhập số hàng đang có qua POS ▸ Kho ▸ Nhận hàng để sinh tem');
+    return;
+  }
+  if(batTem && itemCu && !isTemTrackedItem(itemCu) && (Number(itemCu.currentStock)||0) > 0
+     && !confirm(`Bật tem cho "${name}"?\n\nTừ giờ tồn = tổng các mã. Số đang ghi ${fmtNum(itemCu.currentStock,2)} ${itemCu.unit||''} CHƯA có mã nào nên sẽ không được tính — cần nhập số hàng đang có qua POS ▸ Kho ▸ Nhận hàng để in tem.`)) return;
 
   let savedItemId = null; // id nguyên liệu vừa lưu — để lan giá sang bán thành phẩm
   let idMoiTao = null;    // id nguyên liệu VỪA TẠO — để ghi mốc giá gốc đúng món

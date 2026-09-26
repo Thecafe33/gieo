@@ -5134,6 +5134,9 @@ async function submitOpenContainer(id, isOverride) {
       return;
     }
     await unitEngineOnOpen(id, c).catch(err => console.warn('[UnitEngine] onOpen lỗi (không chặn mở tem)', err));
+    // [TEM = SỰ THẬT] Chốt tồn theo mã ngay khi mở (hấp thụ nợ FIFO cũng đổi số ở đây).
+    await _ueRecomputeCurrentStock(c.itemId, STOCK_CONTAINERS_COLL).catch(() => {});
+    fifoOlderSealedHint(id, c).catch(() => {});
     if(activePrepBatch) await prepReconAttachOpenUnit(activePrepBatch,c.itemId,id)
       .catch(err=>toast('⚠️ Đã mở mã nhưng chưa ghi được vào mẻ — mở màn đối chiếu để thử lại: '+(err.message||err)));
     const reconOpening=prepReconOpeningContext;
@@ -5897,6 +5900,19 @@ function isAtomicUnitContainer(c) {
 // chưa mở). Thay vào đó ghi 1 dòng vào SỔ LỆCH (stock_anomalies_gieogieo) kèm nguồn, để
 // Quản lý thấy ngay đường nào đang trừ ngoài tem (bug, sai công thức, quên quét mở...).
 const STOCK_ANOMALY_COLL = 'stock_anomalies_gieogieo';
+// [FIFO] Nhắc (không chặn) khi vừa mở/dùng một mã mà cùng nguyên liệu còn mã CHƯA MỞ nhận
+// về sớm hơn — hàng cũ nằm lại kho lâu là nguồn hết hạn/hư hỏng hay gặp nhất.
+async function fifoOlderSealedHint(id, c) {
+  if (!c || !c.itemId) return;
+  const snap = await fstore.collection(STOCK_CONTAINERS_COLL)
+    .where('itemId', '==', c.itemId).where('status', '==', 'sealed').get();
+  const mine = String(c.receivedAt || c.createdAt || '');
+  if (!mine) return;
+  const older = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+    .filter(x => x.id !== id && String(x.receivedAt || '') && String(x.receivedAt) < mine.slice(0, 10))
+    .sort((a, b) => String(a.receivedAt).localeCompare(String(b.receivedAt)));
+  if (older.length) toast('ℹ️ Còn ' + older.length + ' mã ' + (c.itemName || '') + ' nhập sớm hơn (vd ' + (older[0].code || '') + ') — lần sau mở mã cũ trước');
+}
 function isTemTrackedNL(it) {
   return !!it && it.stockManaged !== false && (it.trackingMode === 'unit' || it.trackingMode === 'batch');
 }
@@ -14886,6 +14902,8 @@ async function submitFoundLostContainer(id) {
       itemId: c.itemId, type: 'ADJUSTMENT', qty: Number(c.baseQty) || 0,
       note: 'Tìm lại hàng báo mất — mã ' + (c.code || ''), staff: staffEmp.fullName, staffEmployeeId: staffEmp.id,
       referenceId: id,
+      // Mã đã về sealed/open (và RT nếu đang mở) ở trên — tồn chốt lại theo tem.
+      deriveFromUnits: true,
       // reason: phân loại nhỏ hơn type — báo cáo cuối kỳ bên Quản lý tách riêng "Tìm lại
       // được" khỏi Điều chỉnh chung (xem computeLedgerRealMetrics bên quanlygieo.html).
       meta: { reason: 'lost_item_found' }
@@ -15867,7 +15885,10 @@ async function applyStockTransactionPOS({ itemId, type, qty, note, staff, staffE
     // đang mở, món "cả cái" bị trừ ngoài cổng quét...) → KHÔNG trừ vào tồn (tồn = tổng mã),
     // ghi Sổ lệch sau transaction. Trừ tồn quầy/locationStock vẫn chạy như cũ.
     const temNL = isTemTrackedNL(itemData);
-    const outsideTem = temNL && !deriveFromUnits && (type === 'CONSUMPTION' || type === 'WASTE');
+    // ADJUSTMENT không gắn mã cũng tính là ngoài tem: trước đây nó đổi currentStock rồi bị
+    // recompute xoá mất ngay — âm thầm, không vết. Nơi nào thay đổi đã nằm trong tem (mở,
+    // báo hết, cân lại mã, tìm lại mã...) phải truyền deriveFromUnits:true.
+    const outsideTem = temNL && !deriveFromUnits && type !== 'RECEIVING';
     const next = outsideTem ? current : current + Number(qty);
     const updates = { currentStock: next, updatedAt: new Date().toISOString() };
     let refillAlert = null;
@@ -15979,7 +16000,8 @@ async function applyStockTransactionPOS({ itemId, type, qty, note, staff, staffE
   if (result && result.outsideTem && !result.alreadyApplied && !atSource) {
     await logStockAnomalyPOS('tx_' + result.txDocId, {
       itemId, itemName: result.itemName, unit: result.unit, qty: Number(qty), txType: type,
-      kind: result.atomic ? 'atomic_unscanned' : (type === 'WASTE' ? 'waste_no_tem' : 'no_open_tem'),
+      kind: type === 'ADJUSTMENT' ? 'manual_adjust'
+        : result.atomic ? 'atomic_unscanned' : (type === 'WASTE' ? 'waste_no_tem' : 'no_open_tem'),
       note, referenceId, staff, businessDate
     });
   }
@@ -22758,6 +22780,13 @@ async function _submitPoReceiveImpl() {
     } catch (err) {
       console.error('[tem kho] sinh mã sau nhận hàng lỗi', err);
       toast('⚠️ Đã nhận hàng nhưng sinh tem lỗi — vào Kho ▸ Tem chờ dán để sinh lại');
+    }
+    // [TEM = SỰ THẬT] RECEIVING cộng tạm currentStock trước khi có tem — sinh tem xong thì
+    // chốt lại theo tổng mã (tem sinh thiếu thì tồn thiếu đúng phần đó, bấm Ghi nhận lại để
+    // sinh nốt — idPrefix cố định nên không sinh trùng).
+    for (const l of succeeded) {
+      const it = KHO_ITEMS_CACHE.find(x => x.id === l.itemId);
+      if (isTemTrackedNL(it)) await _ueRecomputeCurrentStock(l.itemId, STOCK_CONTAINERS_COLL).catch(() => {});
     }
     // [MỚI — đóng vòng "phiếu nhận ↔ tem"] Tem đã có receiveRefId trỏ NGƯỢC về phiếu nhận, nhưng
     // chiều XUÔI (từ phiếu nhận xem được đã sinh những tem nào) trước giờ không có — phải quét
