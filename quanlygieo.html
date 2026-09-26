@@ -11603,6 +11603,9 @@ async function computeStoreHealth(){
     // Lệch TIỀN khi bàn giao đứng trên cùng: đây là loại chỉ đích danh được ca nào
     // gây ra, và để lâu thì không ai còn nhớ nổi hôm đó có chuyện gì.
     if(nTienGiaoCa) push('red', 'Lệch TIỀN khi bàn giao ca chưa xem', nTienGiaoCa, `switchScreen('inbox')`);
+    // POS tự báo khi nhân viên bị chặn ở đối chiếu NL lúc nấu mà không tự sửa được.
+    const nPrepBlocked = docs.filter(a=>a.type==='pos_prep_blocked').length;
+    if(nPrepBlocked) push('red', 'Đối chiếu NL khi nấu cần Quản lý xử lý', nPrepBlocked, `switchScreen('inbox')`);
     if(nGiaoCa) push('red', 'Chênh lệch đếm giao ca NGUYÊN LIỆU chưa xem', nGiaoCa, `switchScreen('inbox')`);
     // Đếm BTP cuối ca GHI ĐÈ THẲNG tồn kho (không qua duyệt như kiểm kê thường),
     // nên lệch ở đây phải nổi lên mức đỏ chứ không gộp vào "cảnh báo khác".
@@ -12377,6 +12380,17 @@ async function renderAlertInbox(){
     // [GIAO CA] Lệch TIỀN khi bàn giao giữa ngày — khác hẳn lệch đếm nguyên liệu
     // bên dưới (không có closeQty/openQty), phải vẽ riêng nếu không ra toàn "—".
     // Đây là loại duy nhất chỉ đích danh được hai người ở hai đầu bàn giao.
+    if(a.type==='pos_prep_blocked'){
+      return `<div class="alert-card ${isNew?'':'resolved'}">
+        <div class="ac-title">${escapeHtmlAttr(a.title || 'Đối chiếu NL khi nấu cần xử lý')} ${isNew?'':'<span class="tier tier-green" style="margin-left:4px">Đã xử lý</span>'}</div>
+        <div class="ac-row">Ngày: ${a.businessDate || '—'}${a.itemName?` · NL <b>${escapeHtmlAttr(a.itemName)}</b>`:''}${a.batchId?` · mẻ ${escapeHtmlAttr(a.batchId)}`:''}</div>
+        <div class="ac-row" style="color:#c0392b;font-weight:700">${escapeHtmlAttr(a.message||'')}</div>
+        <details class="ac-infer"><summary>Vì sao có cảnh báo này?</summary><div class="ac-infer-body">Nhân viên bị chặn ở bước cân/đếm NL của mẻ nấu vì hệ thống không tự sửa được mà không có nguy cơ trừ kho hai lần. POS đã tự gửi cảnh báo này thay cho nhân viên. Kiểm tra mẻ và tem của NL trong Kho, sau đó bấm Đã xử lý.</div></details>
+        ${isNew ? `<div class="ac-actions">
+          <button onclick="markAlertStatus('${a.id}','resolved')">Đã xử lý</button>
+        </div>` : ''}
+      </div>`;
+    }
     if(a.type==='handover_cash_variance'){
       const thieu = Number(a.variance) < 0;
       const vTxt = `${a.variance>0?'+':''}${fmt(a.variance)}`;

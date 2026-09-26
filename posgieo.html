@@ -11434,6 +11434,42 @@ function computeAtomicRequirementsForPrep(p, ratio) {
 // ══════════════════════════════════════════════════════════════════════════
 const PREP_RECON_LOCK_COLL = 'prep_ingredient_locks_gieogieo';
 let prepReconGate = null, prepReconForm = null;
+// Lỗi ở luồng đối chiếu NL chia 2 loại để nhân viên KHÔNG phải tự xử lý:
+//   'reload' : mẻ vừa đổi ở máy khác/mất mạng → hệ thống TỰ tải lại màn hình.
+//   'manager': tình huống nhân viên không tự sửa được (tránh trừ hai lần...) → hệ
+//              thống TỰ gửi cảnh báo cho Quản lý (alerts_gieogieo), nhân viên chỉ
+//              cần biết là đã báo. Không đụng luồng bán hàng.
+function prepFlowError(msg, kind) { const e = new Error(msg); e.kind = kind; return e; }
+async function prepFlowToastError(err, prefix) {
+  const msg = (prefix || '') + (err && err.message || err);
+  const st = prepReconForm;
+  if (err && err.kind === 'reload') {
+    toast('🔄 Mẻ vừa được cập nhật — đã tự tải lại màn hình');
+    try {
+      if (st && st.batchId && st.itemId) { prepReconForm = null; await openPrepReconForm(st.batchId, st.itemId); }
+      else if (typeof openPrepBatchScreen === 'function') openPrepBatchScreen();
+    } catch (e) { console.warn('[NL-RECON] tự tải lại lỗi', e); }
+    return;
+  }
+  if (err && err.kind === 'manager') {
+    const it = st && KHO_ITEMS_CACHE.find(x => x.id === st.itemId);
+    const docId = ('pos_prep_blocked_' + ((st && st.batchId) || 'x') + '_' + ((st && st.itemId) || 'x')).replace(/[^\w\-]/g, '_').slice(0, 180);
+    try {
+      await fstore.collection('alerts_gieogieo').doc(docId).set({
+        type: 'pos_prep_blocked', severity: 'warning', status: 'new',
+        title: 'Đối chiếu NL khi nấu cần Quản lý xử lý',
+        message: String(err.message || err), batchId: (st && st.batchId) || '', itemId: (st && st.itemId) || '',
+        itemName: (it && it.name) || '', businessDate: posDateKey(), createdAt: new Date().toISOString()
+      }, { merge: true });
+      toast('⚠️ ' + msg + ' — hệ thống ĐÃ TỰ BÁO Quản lý, bạn không cần làm gì thêm');
+    } catch (e) {
+      console.warn('[NL-RECON] gửi cảnh báo Quản lý lỗi', e);
+      toast('⚠️ ' + msg + ' — chưa gửi được cảnh báo, hãy báo Quản lý');
+    }
+    return;
+  }
+  toast('❌ ' + msg);
+}
 function prepReconIsCountable(item) {
   return ['cái','miếng'].includes(String(item&&item.unit||'').trim().toLowerCase());
 }
@@ -11897,7 +11933,7 @@ async function prepReconOpenNext(batchId,itemId) {
   if(!st||st.batchId!==batchId||st.itemId!==itemId)return;
   const batchRef=fstore.collection('prep_batches_gieogieo').doc(batchId);
   const doc=await batchRef.get(),row=doc.data()&&doc.data().reconcileInputs&&doc.data().reconcileInputs[itemId];
-  if(!row||row.status!=='pending'){toast('⚠️ NL đã được chốt; tải lại mẻ');return;}
+  if(!row||row.status!=='pending'){prepFlowToastError(prepFlowError('NL đã được chốt','reload'));return;}
   const live=await prepReconReadUnits(itemId);
   if(live.some(u=>!row.units.some(x=>x.id===u.id))){toast('⚠️ Ghi mốc mã vừa mở trước khi quét tiếp');return;}
   const exhausted=row.units.find(u=>u.id!=='__aggregate'&&st.values[u.id]
@@ -11916,13 +11952,13 @@ async function prepReconOpenNext(batchId,itemId) {
     await fstore.runTransaction(async t=>{
       const fresh=await t.get(batchRef),r=fresh.data()&&fresh.data().reconcileInputs&&fresh.data().reconcileInputs[itemId];
       if(!r||r.status!=='pending'||!r.units.some(u=>u.id===exhausted.id))
-        throw new Error('Mẻ đã đổi trạng thái — tải lại trước khi mở mã');
+        throw prepFlowError('Mẻ đã đổi trạng thái — tải lại trước khi mở mã','reload');
       t.update(batchRef,{['reconcileInputs.'+itemId+'.transitionCounts']:{...(r.transitionCounts||{}),
         [exhausted.id]:{after:0,code:exhausted.code,at:new Date().toISOString(),
           manual:!!st.values[exhausted.id].manual,reason:(st.note||'').trim(),
           weighings:st.values[exhausted.id].lines||[]}}});
     });
-  }catch(err){toast('❌ Không ghi được mốc mã cũ: '+(err.message||err));return;}
+  }catch(err){prepFlowToastError(err,'Không ghi được mốc mã cũ: ');return;}
   prepReconOpeningContext={batchId,itemId,exhaustedId:exhausted.id};
   openStockScanSheet(`<div class="wal-section" style="--gd:#0062AD;--gl:#EAF3FA;border:1.5px solid #0062AD;background:#EAF3FA">
     <div class="wal-section-title" style="color:#0062AD">Mở mã tiếp theo · ${escHtmlPos(c.itemName||'')}</div>
@@ -12065,7 +12101,7 @@ async function prepReconRefreshStale(batchId,itemId) {
       const [d,varianceDoc,usageDoc]=await Promise.all([t.get(ref),t.get(varianceRef),t.get(usageRef)]);
       const b=d.data(),r=b&&b.reconcileInputs&&b.reconcileInputs[itemId];
       if(!r||b.status!=='cooking'||!['pending','processing'].includes(r.status))
-        throw new Error('Mẻ đã đổi trạng thái — tải lại mẻ đang nấu');
+        throw prepFlowError('Mẻ đã đổi trạng thái — tải lại mẻ đang nấu','reload');
       const finished=new Set();
       for(const u of r.units.filter(x=>x.id!=='__aggregate'&&!byId.has(x.id))){
         const old=await t.get(fstore.collection(STOCK_CONTAINERS_COLL).doc(u.id));
@@ -12073,17 +12109,17 @@ async function prepReconRefreshStale(batchId,itemId) {
           finished.add(u.id);
       }
       if(varianceDoc.exists||usageDoc.exists)
-        throw new Error('Một phần đối chiếu đã ghi sổ. Không nạp mốc tự động để tránh trừ hai lần; báo Quản lý kiểm tra mẻ này.');
+        throw prepFlowError('Một phần đối chiếu đã ghi sổ. Không nạp mốc tự động để tránh trừ hai lần; báo Quản lý kiểm tra mẻ này.','manager');
       if(live.some(u=>!r.units.some(x=>x.id===u.id)))
         throw new Error('Có mã mới đang mở — ghi mốc trước của mã mới rồi mới cân lại');
       if(r.units.some(u=>!byId.has(u.id)&&!finished.has(u.id)))
-        throw new Error('Có mã cũ không còn mở — kiểm tra tem và báo Quản lý trước khi sửa mốc');
+        throw prepFlowError('Có mã cũ không còn mở — kiểm tra tem và báo Quản lý trước khi sửa mốc','manager');
       if(r.units.some(u=>byId.has(u.id)&&byId.get(u.id).lastPrepReconOp==='prep_after_'+batchId+'_'+itemId+'_'+u.id))
-        throw new Error('Một mã đã được chốt trên RT. Không nạp mốc tự động để tránh trừ hai lần; báo Quản lý kiểm tra.');
+        throw prepFlowError('Một mã đã được chốt trên RT. Không nạp mốc tự động để tránh trừ hai lần; báo Quản lý kiểm tra.','manager');
       if(r.status==='processing' && (r.submitted||[]).some(u=>u.id!=='__aggregate'&&byId.has(u.id)
           && Math.abs(byId.get(u.id).unitBase-u.after)<=0.015
           && Math.abs(u.baseline-u.after)>0.015))
-        throw new Error('Tồn hiện trùng số đã cân của lượt chốt dở. Có thể RT đã lưu trước khi lỗi; báo Quản lý kiểm tra, không cân lại để tránh trừ hai lần.');
+        throw prepFlowError('Tồn hiện trùng số đã cân của lượt chốt dở. Có thể RT đã lưu trước khi lỗi; báo Quản lý kiểm tra, không cân lại để tránh trừ hai lần.','manager');
       const changes=r.units.filter(u=>byId.has(u.id)&&Math.abs(byId.get(u.id).unitBase-(u.bookBaseline??u.baseline))>0.015)
         .map(u=>({id:u.id,code:u.code,before:u.baseline,now:byId.get(u.id).unitBase}));
       if(!changes.length&&r.status!=='processing')return;
@@ -12105,7 +12141,7 @@ async function prepReconRefreshStale(batchId,itemId) {
       prepReconForm.values={};
     toast(rebased?'✅ Đã hủy lượt chốt dở / nạp mốc tồn — cân lại rồi chốt':'Mốc đã khớp — kiểm tra số còn lại rồi chốt');
     await openPrepReconForm(batchId,itemId);
-  }catch(err){toast('❌ '+(err.message||err));}
+  }catch(err){prepFlowToastError(err);}
   finally{_posSubmitBusy=false;}
 }
 async function prepReconRetryUncommitted(batchId,itemId) {
@@ -12114,12 +12150,12 @@ async function prepReconRetryUncommitted(batchId,itemId) {
     const batch=await fstore.collection('prep_batches_gieogieo').doc(batchId).get();
     const row=batch.data()&&batch.data().reconcileInputs&&batch.data().reconcileInputs[itemId];
     if(!row||row.status!=='processing'||!row.submitted?.length)
-      throw new Error('Lượt chốt đã thay đổi — mở lại mẻ đang nấu');
+      throw prepFlowError('Lượt chốt đã thay đổi — mở lại mẻ đang nấu','reload');
     const live=await prepReconReadUnits(itemId);
     for(const u of row.submitted.filter(x=>x.finished)){
       const d=await fstore.collection(STOCK_CONTAINERS_COLL).doc(u.id).get();
       if(!d.exists||d.data().status!=='finished'||d.data().prepReconPendingBatchId!==batchId)
-        throw new Error('Mã đã báo hết đổi trạng thái — báo Quản lý kiểm tra');
+        throw prepFlowError('Mã đã báo hết đổi trạng thái — báo Quản lý kiểm tra','manager');
     }
     if(row.submitted.filter(u=>!u.finished).some(u=>{
       const current=live.find(x=>x.id===u.id);
@@ -12127,25 +12163,25 @@ async function prepReconRetryUncommitted(batchId,itemId) {
       return !current||(current.lastPrepReconOp===op
         ? Math.abs(current.unitBase-u.after)>0.015
         : Math.abs(current.unitBase-(u.bookBaseline??u.baseline))>0.015);
-    }))throw new Error('Mốc mã đã đổi so với số cân đã lưu — mở lại mẻ để kiểm tra');
+    }))throw prepFlowError('Mốc mã đã đổi so với số cân đã lưu — mở lại mẻ để kiểm tra','reload');
     if(!prepReconForm||prepReconForm.batchId!==batchId||prepReconForm.itemId!==itemId)
       prepReconForm={batchId,itemId,values:{},note:row.note||'',varianceKind:row.varianceKind||''};
     await prepReconPostSave();
-  }catch(err){toast('❌ '+(err.message||err));}
+  }catch(err){prepFlowToastError(err);}
 }
 async function prepReconVerifyCode(unitId) {
   const st=prepReconForm;if(!st)return;
   try {
     const doc=await fstore.collection('prep_batches_gieogieo').doc(st.batchId).get();
     const row=doc.data()?.reconcileInputs?.[st.itemId];
-    if(!row||row.status!=='pending')throw new Error('Mẻ đã đổi trạng thái — mở lại màn đối chiếu');
+    if(!row||row.status!=='pending')throw prepFlowError('Mẻ đã đổi trạng thái — mở lại màn đối chiếu','reload');
     const unit=row.units.find(u=>u.id===unitId);
     if(!unit)throw new Error('Mã này không còn trong mẻ');
     if(!await prepReconScanExact(st.itemId,unitId,unit.code))return;
     if(prepReconForm!==st)return;
     st.values[unitId]={...(st.values[unitId]||{}),verifiedUnitId:unitId};
     await openPrepReconForm(st.batchId,st.itemId);
-  } catch(err){toast('❌ '+(err.message||err));}
+  } catch(err){prepFlowToastError(err);}
 }
 // Báo hết một mã ngay trong màn cân sau khi lấy: bắt quét đúng tem đang mở (cầm
 // đúng bao/chai rỗng), rồi đóng mã với dấu mẻ đang nấu — số sổ còn lại của mã được
@@ -12155,7 +12191,7 @@ async function prepReconFinishUnit(unitId) {
   try {
     const batchRef=fstore.collection('prep_batches_gieogieo').doc(st.batchId);
     const doc=await batchRef.get(),row=doc.data()?.reconcileInputs?.[st.itemId];
-    if(!row||row.status!=='pending')throw new Error('Mẻ đã đổi trạng thái — mở lại màn đối chiếu');
+    if(!row||row.status!=='pending')throw prepFlowError('Mẻ đã đổi trạng thái — mở lại màn đối chiếu','reload');
     const unit=row.units.find(u=>u.id===unitId);
     if(!unit||unit.id==='__aggregate')throw new Error('Mã này không còn trong mẻ');
     if(st.finishedUnits?.has(unitId))throw new Error('Mã đã báo hết rồi');
@@ -12173,7 +12209,7 @@ async function prepReconFinishUnit(unitId) {
     st.values[unitId]={qty:0,lines:[],finished:true,verifiedUnitId:unitId};
     toast('✅ Đã báo hết '+unit.code);
     await openPrepReconForm(st.batchId,st.itemId);
-  } catch(err){toast('❌ '+(err.message||err));}
+  } catch(err){prepFlowToastError(err);}
 }
 function prepReconCount(unitId) {
   const st=prepReconForm;if(!st)return;
@@ -12188,7 +12224,7 @@ async function prepReconWeigh(unitId) {
   try {
     const doc=await fstore.collection('prep_batches_gieogieo').doc(st.batchId).get();
     const row=doc.data()?.reconcileInputs?.[st.itemId];
-    if(!row||row.status!=='pending')throw new Error('Mẻ đã đổi trạng thái — mở lại màn đối chiếu');
+    if(!row||row.status!=='pending')throw prepFlowError('Mẻ đã đổi trạng thái — mở lại màn đối chiếu','reload');
     const unit=row.units.find(u=>u.id===unitId);
     if(!unit)throw new Error('Mã này không còn trong mẻ');
     if(st.finishedUnits?.has(unitId))throw new Error('Mã đã báo hết, không cân lại mã này');
@@ -12202,7 +12238,7 @@ async function prepReconWeigh(unitId) {
         st.values[unitId]={qty,lines,verifiedUnitId:multiCode?unitId:''};
         openPrepReconForm(st.batchId,st.itemId);
       }});
-  } catch(err){toast('❌ '+(err.message||err));}
+  } catch(err){prepFlowToastError(err);}
 }
 // [NL-RECON] Mỗi tem là một khoảng giữa hai mốc cân. Phân định mức theo FIFO
 // của lượng THỰC giảm; mọi phần vượt định mức gắn đúng tem phát sinh và PIN
@@ -12267,7 +12303,7 @@ async function prepReconPostSave() {
           finished.set(u.id,data);
       }
       if(row.units.some(u=>u.id!=='__aggregate'&&!live.some(x=>x.id===u.id)&&!finished.has(u.id)))
-        throw new Error('Một mã đã mất khỏi danh sách đang mở — kiểm tra tem trước khi chốt');
+        throw prepFlowError('Một mã đã mất khỏi danh sách đang mở — kiểm tra tem trước khi chốt','manager');
       for(const u of row.units)if(finished.has(u.id))
         st.values[u.id]={qty:0,lines:[],finished:true,verifiedUnitId:u.id};
       if(row.units.some(u=>!st.values[u.id]||!Number.isFinite(st.values[u.id].qty)||st.values[u.id].qty<0))
@@ -12318,7 +12354,7 @@ async function prepReconPostSave() {
         batchId:st.batchId,employeeId:staffEmp.id,employeeName:staffEmp.fullName}}));
       await fstore.runTransaction(async t=>{
         const d=await t.get(ref),r=d.data().reconcileInputs[st.itemId];
-        if(r.status!=='pending')throw new Error('NL đã bắt đầu chốt trên máy khác — mở lại mẻ để tiếp tục');
+        if(r.status!=='pending')throw prepFlowError('NL đã bắt đầu chốt trên máy khác — mở lại mẻ để tiếp tục','reload');
         t.update(ref,{['reconcileInputs.'+st.itemId+'.status']:'processing',
           ['reconcileInputs.'+st.itemId+'.submitted']:submitted,
           ['reconcileInputs.'+st.itemId+'.note']:(st.note||'').trim(),
@@ -12377,8 +12413,11 @@ async function prepReconPostSave() {
     refreshFifoAlert().catch(()=>{});
     openPrepBatchScreen();
   }catch(err){
-    toast('❌ '+(err.message||err));
-    if(['PREP_RECON_STALE','PREP_RECON_RETRY'].includes(err.code)) await openPrepReconForm(st.batchId,st.itemId);
+    if(err.kind){prepFlowToastError(err);}
+    else{
+      toast('❌ '+(err.message||err));
+      if(['PREP_RECON_STALE','PREP_RECON_RETRY'].includes(err.code)) await openPrepReconForm(st.batchId,st.itemId);
+    }
   }
   finally{_posSubmitBusy=false;}
 }
