@@ -10314,8 +10314,60 @@ async function renderKhoDuBao(){
       Hàng <b>bỏ cuối ca</b>: thiếu dưới ¼ mẻ thì không nấu thêm cả mẻ — thiếu nhẹ vẫn hơn đổ đi một mẻ. Hàng <b>để được sang mai</b> thì làm tròn lên, dư không mất gì.<br>
       Chưa đủ ${DB_MIN_NGAY} ngày dữ liệu thì <b>không dự báo</b> — sẽ nói thẳng là chưa đủ chứ không đưa một con số nghe như chắc chắn.
     </div>
-    <div id="dbBody"></div>`;
+    <div id="dbBody"></div>
+    <div class="card" style="margin-top:14px">
+      <div class="card-h"><h3>Xuất dữ liệu phân tích mẻ</h3></div>
+      <div class="small-note" style="margin-bottom:8px">Tải 1 file JSON gồm: danh mục BTP, mọi lượt dùng/huỷ BTP (kèm giờ), các lô đã nấu, giờ mở ca/kết ca — dùng để phân tích và chỉnh công thức gợi ý mẻ. Tối đa 62 ngày một lần.</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <input type="date" id="dbExpFrom" value="${dbLui(dkey(new Date()), 42)}" style="flex:1;min-width:130px">
+        <input type="date" id="dbExpTo" value="${dkey(new Date())}" style="flex:1;min-width:130px">
+      </div>
+      <button class="btn outline" style="margin-top:8px" onclick="dbXuatDuLieuMe(this)">${ic('download',15)} Xuất dữ liệu</button>
+    </div>`;
   if(dbKetQua) dbVeBang();
+}
+
+// Xuất dữ liệu thô để phân tích công thức gợi ý mẻ (theo nhịp bán trong ngày).
+// Chỉ ĐỌC, không ghi gì. Giữ nguyên các trường thời gian (createdAt/startedAt...)
+// vì phân tích dựa vào lượng dùng theo từng giờ trong ngày.
+async function dbXuatDuLieuMe(btn){
+  const from = (document.getElementById('dbExpFrom')||{}).value, to = (document.getElementById('dbExpTo')||{}).value;
+  if(!from || !to || from > to){ toast('⚠️ Chọn khoảng ngày hợp lệ'); return; }
+  const soNgay = Math.round((new Date(to+'T12:00:00') - new Date(from+'T12:00:00'))/86400000) + 1;
+  if(soNgay > 62){ toast('⚠️ Tối đa 62 ngày một lần'); return; }
+  if(btn){ btn.disabled = true; btn.textContent = 'Đang đọc dữ liệu...'; }
+  try{
+    await ensureAuth();
+    const range = coll => fstore.collection(coll).where('businessDate','>=',from).where('businessDate','<=',to).get()
+      .then(snap => snap.docs.map(d=>({id:d.id, ...d.data()})));
+    const [preps, txs, batches, openings, closings] = await Promise.all([
+      loadPrepItems(), range('prep_transactions_gieogieo'), range('prep_batches_gieogieo'),
+      range('daily_openings_gieogieo').catch(()=>[]), range('daily_closings_gieogieo').catch(()=>[])
+    ]);
+    const pick = (o, keys) => { const r = {}; keys.forEach(k => { if(o[k] !== undefined) r[k] = o[k]; }); return r; };
+    const data = {
+      meta: { app:'gieo', kind:'prep_batch_analysis', from, to, exportedAt: new Date().toISOString(),
+        projectId: (firebase.app().options||{}).projectId || '', counts:{ preps:preps.length, txs:txs.length, batches:batches.length } },
+      prepItems: preps.map(p => pick(p, ['id','code','name','unit','batchYield','shelfLifeType','shelfLifeHours',
+        'currentStock','costPerUnit','prepTimeMinutes','active','category','yieldActual','declaredYield'])),
+      prepTransactions: txs.map(t => pick(t, ['id','prepId','prepName','type','qty','unit','createdAt','businessDate',
+        'source','referenceId','reason','note','totalCost','wasteKind','fromPrepCount','backfillAfterClose','unitAllocations'])),
+      prepBatches: batches.map(b => pick(b, ['id','prepId','prepName','unit','batchCode','status','ratio','qtyInitial',
+        'qtyRemaining','unitBase','actualYield','businessDate','startedAt','expectedReadyAt','finishedAt','expiresAt',
+        'shelfLifeType','shelfLifeHours','expiredAt','expiredReason','usedUpAt','cancelledAt','staff','finishedBy'])),
+      dailyOpenings: openings.map(o => pick(o, ['id','businessDate','createdAt','staff'])),
+      dailyClosings: closings.map(c => pick(c, ['id','businessDate','status','cashPassedAt','handoverAt','closedAt',
+        'prepCountAt','prepCountLines','reopeningAfterSaleAt']))
+    };
+    const text = JSON.stringify(data);
+    downloadJsonFile(text, `gieo-du-lieu-me-nau_${from}_${to}.json`);
+    toast(`✅ Đã xuất ${txs.length} lượt BTP, ${batches.length} lô (${_expSizeLabel(text)})`);
+  }catch(err){
+    console.error('dbXuatDuLieuMe lỗi', err);
+    showError('Không xuất được: '+(err.code||err.message||err));
+  }finally{
+    if(btn){ btn.disabled = false; btn.innerHTML = ic('download',15)+' Xuất dữ liệu'; }
+  }
 }
 
 async function dbChay(){
