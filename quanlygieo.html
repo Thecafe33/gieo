@@ -901,6 +901,8 @@ html.tab-ui .field input[type=checkbox],html.tab-ui .field input[type=radio]{
 .nl-add{width:auto !important;min-height:48px;padding:0 22px;border-radius:999px;font-size:15px;font-weight:800;}
 .nl-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px;align-items:stretch;}
 .nl-card{background:var(--card);border:1.5px solid var(--line);border-radius:20px;padding:18px 18px 14px;display:flex;flex-direction:column;gap:10px;box-shadow:var(--sh-1);}
+.nl-card.nl-click{cursor:pointer;}
+.nl-card.nl-click:active{transform:scale(.995);}
 .nl-card.nl-neg{border-color:var(--bad-line);}
 .nl-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;}
 .nl-name{font-size:18px;font-weight:800;color:var(--td);line-height:1.3;min-width:0;}
@@ -5243,10 +5245,10 @@ function renderKhoAllItemsBody(){
 // `coll` (tuỳ chọn) — mặc định CTN_COLL (tem nguyên liệu thô); truyền
 // 'prep_batches_gieogieo' để xem lô BÁN THÀNH PHẨM (dùng chung sheet, khác phần
 // render vì 2 loại tài liệu có field khác nhau hẳn — xem _batchDetailRender).
-async function ctnShowDetail(containerId, coll){
+async function ctnShowDetail(containerId, coll, onBack){
   coll = coll || CTN_COLL;
   const isBatch = coll === 'prep_batches_gieogieo';
-  openEditSheet(isBatch ? 'Chi tiết lô bán thành phẩm' : 'Chi tiết tem', '<div id="ctnDetailBody"></div>', ()=>{});
+  openEditSheet(isBatch ? 'Chi tiết lô bán thành phẩm' : 'Chi tiết tem', '<div id="ctnDetailBody"></div>', onBack || (()=>{}));
   const box = document.getElementById('ctnDetailBody');
   showLoading(box);
   try{
@@ -20448,6 +20450,85 @@ function nlSearchChange(v){
   const el = document.getElementById('nlList');
   if(el) el.innerHTML = nlItemsGridHtml(INVENTORY_ITEMS, null, null);
 }
+// [MỚI] Bấm card nguyên liệu → xem các MÃ của riêng nguyên liệu đó: đang mở (số còn lấy từ RT —
+// nguồn thật của phần đang mở), chưa mở, báo hết gần đây, mất/huỷ. Cùng dữ liệu với Kho ▸ Tem NL
+// nhưng gom theo một nguyên liệu. Bấm một mã → Chi tiết tem; đóng chi tiết thì quay lại đây.
+const NL_CTN_RECENT_DAYS = 14;
+function nlCtnOpenDetail(containerId, itemId){ ctnShowDetail(containerId, null, ()=>openItemContainers(itemId)); }
+async function openItemContainers(itemId){
+  const it = INVENTORY_ITEMS.find(x=>x.id===itemId) || {};
+  openEditSheet('Mã của ' + (it.name||'nguyên liệu'), '<div id="nlCtnBody"></div>', null);
+  const box = document.getElementById('nlCtnBody');
+  showLoading(box);
+  if(!isTemTrackedItem(it)){
+    box.innerHTML = `<div class="muted">Món này ${itemStockManaged(it)?'chưa bật in tem':'không quản kho'} — không có mã nào. Tồn đang tính theo sổ.</div>`;
+    return;
+  }
+  let list = [], rt = {};
+  try{
+    await ensureAuth();
+    const [snap, rtSnap] = await Promise.all([
+      fstore.collection(CTN_COLL).where('itemId','==',itemId).get(),
+      _ueActiveUnitsRef(itemId).once('value')
+    ]);
+    list = snap.docs.map(d=>({id:d.id, ...d.data()}));
+    rt = rtSnap.val() || {};
+  }catch(err){
+    box.innerHTML = '<div class="muted">Không tải được mã: '+escapeHtmlAttr(err.code||err.message||String(err))+'</div>';
+    return;
+  }
+  const e = escapeHtmlAttr, dv = e(it.unit||'');
+  const p2 = n => String(n).padStart(2,'0');
+  const dt = iso => { const d = iso?new Date(iso):null; return (d && !isNaN(d)) ? `${p2(d.getDate())}/${p2(d.getMonth()+1)} ${p2(d.getHours())}:${p2(d.getMinutes())}` : '—'; };
+  const since = new Date(Date.now() - NL_CTN_RECENT_DAYS*86400000).toISOString();
+  // Số còn của mã đang mở: RT là nguồn thật; không có trong RT thì dùng bản sao Firestore.
+  const conLai = c => (rt[c.id] && typeof rt[c.id].unitBase === 'number') ? rt[c.id].unitBase : (Number(c.unitBase)||0);
+  const open = list.filter(c=>c.status==='open').sort((a,b)=>String(a.openedAt||'').localeCompare(String(b.openedAt||'')));
+  const sealed = list.filter(c=>c.status==='sealed').sort((a,b)=>String(a.receivedAt||'').localeCompare(String(b.receivedAt||'')));
+  const pending = list.filter(c=>c.status==='discard_pending');
+  const finished = list.filter(c=>c.status==='finished' && String(c.finishedAt||'') >= since)
+    .sort((a,b)=>String(b.finishedAt||'').localeCompare(String(a.finishedAt||'')));
+  const gone = list.filter(c=>(c.status==='lost' || c.status==='voided') && String(c.lostAt||c.voidedAt||'') >= since);
+  const tongMo = open.reduce((a,c)=>a+conLai(c),0);
+  const tongNguyen = sealed.reduce((a,c)=>a+(Number(c.baseQty)||0),0);
+
+  const row = (c, tag, meta, sub) => `<div class="k2-card" style="margin-bottom:8px" onclick="nlCtnOpenDetail('${c.id}','${itemId}')">
+      <div class="k2-head"><div class="k2-name"><div class="k2-code" style="font-size:14px">${e(c.code||'')}</div></div>${tag}</div>
+      <div class="k2-meta">${meta}</div>${sub?`<div class="k2-sub">${sub}</div>`:''}</div>`;
+  const section = (title, arr, render, empty) => `<div style="font-weight:800;margin:14px 0 8px">${title} <span class="muted" style="font-weight:600">(${arr.length})</span></div>`
+    + (arr.length ? arr.map(render).join('') : `<div class="muted" style="margin-bottom:6px">${empty}</div>`);
+
+  box.innerHTML = `
+    <div class="row"><span class="rl">Tồn theo mã</span><span class="rv"><b>${fmtNum(tongNguyen + tongMo, 2)} ${dv}</b></span></div>
+    <div class="small-note">${sealed.length} mã chưa mở (${fmtNum(tongNguyen,2)} ${dv}) + ${open.length} mã đang mở (còn ${fmtNum(tongMo,2)} ${dv})</div>
+    ${section('Đang mở', open, c=>{
+      const cl = conLai(c), ex = ctnExpiryText(c);
+      const tag = cl < 0 ? '<span class="tier tier-red">Đã cạn · nợ</span>'
+        : (ex.text && ex.cls.includes('tier') ? `<span class="${ex.cls}">${ex.text}</span>` : '<span class="tier tier-green">Đang mở</span>');
+      return row(c, tag, `Còn <b>${fmtNum(cl,2)} ${dv}</b>${Number(c.baseQty)>0?` / ${fmtNum(c.baseQty,2)}`:''} · mở ${dt(c.openedAt)}${c.openedBy?' · '+e(c.openedBy):''}`,
+        ex.text && !ex.cls.includes('tier') ? ex.text : '');
+    }, 'Không có mã nào đang mở.')}
+    ${pending.length ? section('Đang chờ huỷ', pending, c=>row(c, '<span class="tier tier-amber">Chờ huỷ</span>', `Mã ${e(c.code||'')}`, ''), '') : ''}
+    ${section('Chưa mở', sealed, c=>row(c,
+      c.labelPrinted===false ? '<span class="tier tier-amber">Chưa dán tem</span>' : '<span class="tier tier-blue">Chưa mở</span>',
+      `${fmtNum(c.baseQty,2)} ${dv} · nhận ${dt(c.receivedAt)}${c.receivedBy?' · '+e(c.receivedBy):''}`, ''), 'Không còn mã nào chưa mở.')}
+    ${section(`Báo hết ${NL_CTN_RECENT_DAYS} ngày gần đây`, finished, c=>{
+      const huy = c.finishReason === 'discarded';
+      const bits = [];
+      if(Number(c.wasteBase) > 0) bits.push(`${huy?'Huỷ':'Còn thừa'} ${fmtNum(c.wasteBase,2)} ${dv}`);
+      if(c.finishScanned===false) bits.push('Chọn tay'+(c.finishReason?' ('+e(ctnReasonLabel(c.finishReason))+')':''));
+      if(c.needsReview) bits.push('Cần xem lại');
+      return row(c, `<span class="tier tier-red">${huy?'Đã huỷ':'Đã báo hết'}</span>`,
+        `${dt(c.finishedAt)}${c.finishedBy?' · '+e(c.finishedBy):''}`, bits.join(' · '));
+    }, 'Chưa có mã nào báo hết trong thời gian này.')}
+    ${gone.length ? section(`Mất / huỷ phiếu ${NL_CTN_RECENT_DAYS} ngày gần đây`, gone, c=>row(c,
+      `<span class="tier tier-red">${c.status==='lost'?'Mất':'Huỷ (phiếu nhận thừa)'}</span>`,
+      `${dt(c.lostAt||c.voidedAt)}${c.lostBy||c.voidedBy?' · '+e(c.lostBy||c.voidedBy):''}`, e(c.voidReason||'')), '') : ''}
+    <div style="display:flex;gap:8px;margin-top:14px">
+      <button class="btn outline sm" onclick="openItemHistory('${itemId}')">${ic('clock',15)} Lịch sử tồn</button>
+    </div>`;
+}
+
 function nlItemsGridHtml(list, isLow, isNeg){
   isLow = isLow || (it => itemStockManaged(it) && Number(it.minStock)>0 && Number(it.currentStock) < Number(it.minStock) && Number(it.currentStock)>=0);
   isNeg = isNeg || (it => itemStockManaged(it) && Number(it.currentStock) < 0);
@@ -20481,14 +20562,14 @@ function nlItemsGridHtml(list, isLow, isNeg){
       it.costPerUnit ? `~${fmt(it.costPerUnit)}/${escapeHtmlAttr(it.unit||'')}` : '',
       (it.packagingUnits||[]).map(p=>`1 ${escapeHtmlAttr(p.name)} = ${fmtNum(p.baseQty,0)} ${escapeHtmlAttr(it.unit||'')}`).join(', ')
     ].filter(Boolean).join(' · ');
-    return `<div class="nl-card${neg?' nl-neg':''}">
+    return `<div class="nl-card nl-click${neg?' nl-neg':''}" onclick="openItemContainers('${it.id}')">
       <div class="nl-head">
         <div class="nl-name">${escapeHtmlAttr(it.name||'')}</div>
         <div class="nl-stock"><b>${stockMain}</b>${stockSub?`<span>${stockSub}</span>`:''}</div>
       </div>
       ${tags ? `<div class="nl-tags">${tags}</div>` : ''}
       ${meta ? `<div class="nl-meta">${meta}</div>` : ''}
-      <div class="nl-actions">
+      <div class="nl-actions" onclick="event.stopPropagation()">
         <button class="btn ${neg?'':'outline'} sm" onclick="startAdjustItem('${it.id}')">Sửa tồn</button>
         <button class="btn outline sm" onclick="startEditItem('${it.id}')">${ic('pencil',15)} Sửa</button>
         <button class="iconbtn nl-sp" onclick="openItemHistory('${it.id}')" title="Lịch sử biến động tồn kho">${ic('clock')}</button>
