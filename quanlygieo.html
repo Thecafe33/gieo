@@ -10000,9 +10000,8 @@ async function renderKhoBtpAm(){
     <div class="unit-explainer" style="margin-bottom:12px">
       Bán vượt lô BTP thì phần vượt thành <b>khoản âm</b>, không trừ vào lô mới nấu. Ở bước <b>cân BTP cuối ca</b>, hệ thống đối chiếu:
       lô nấu hôm nay thiếu so với định lượng chuẩn đúng cỡ khoản âm (±5% định lượng chuẩn của mẻ) → đã lấy từ nồi mới, <b>khớp</b>.
-      Còn dư ra thì tìm BTP <b>được phép bù</b> nào hụt đúng cỡ đó → <b>chờ bạn xác nhận</b>. Xác nhận xong mới tính lại giá vốn.<br>
-      <b>Nguyên liệu dùng thẳng</b> (topping không qua nấu) không được cân cuối ca: bù BẰNG nguyên liệu thì hệ thống chỉ gợi ý, bạn tự nhập lượng;
-      còn nguyên liệu hết (bán lúc không có tem mở) mà bù bằng BTP thì hệ thống tự đối chiếu được qua phần hụt của BTP.
+      Phần còn lại: sau khi cân BTP + kiểm kê NL cuối ca, loại nào <b>được phép bù</b> mà bị <b>hụt</b> sẽ được đưa ra để <b>nhân viên xác nhận</b> đã dùng bù hay không → <b>chờ bạn xác nhận</b>. Xác nhận xong mới tính lại giá vốn.<br>
+      Nguyên liệu dùng thẳng làm topping muốn được đối chiếu thì phải bật <b>kiểm kê cuối ca</b> cho nó (Kho ▸ Kiểm kê) — không đếm thì không biết có hụt hay không.
     </div>
     <div class="card">
       <div class="grid2">
@@ -10016,7 +10015,9 @@ async function renderKhoBtpAm(){
       ${rows.length ? rows.map(r=>{
         const st = BTP_AM_STATUS[r.status] || [r.status,'tier-blue'];
         const lots = (r.lots||[]).map(l=>`${escapeHtmlAttr(l.code||'lô')}: chuẩn ${fmtNum(l.expected,0)} · cân ${fmtNum(l.actual,0)}`).join(' · ');
-        const sub = r.substitution;
+        const subsList = r.substitutions || (r.substitution ? [r.substitution] : []);
+        const nvTraLoi = r.staffAnswer==='none' ? `<div class="kx-sub">Nhân viên (${escapeHtmlAttr(r.staff||'')}) trả lời: <b>không dùng loại nào để bù</b></div>`
+          : (Array.isArray(r.staffAnswer) && r.staffAnswer.length ? `<div class="kx-sub">Nhân viên (${escapeHtmlAttr(r.staff||'')}) xác nhận đã dùng để bù</div>` : '');
         const moTa = r.sourceKind==='item'
           ? `bán ${fmtNum(r.shortageQty,1)} ${escapeHtmlAttr(r.unit||'')} lúc không có tem mở`
           : `âm ${fmtNum(r.shortageQty,1)} ${escapeHtmlAttr(r.unit||'')} · lô mới thiếu ${fmtNum(r.newLotShortfall,1)} (biên ±${fmtNum(r.tolerance,1)}) · còn lại ${fmtNum(r.remainder,1)}`;
@@ -10024,8 +10025,10 @@ async function renderKhoBtpAm(){
           <div><b>${escapeHtmlAttr(r.prepName||'')}</b>${r.sourceKind==='item'?' <span class="tier tier-amber">NL dùng thẳng</span>':''} <span class="tier ${st[1]}">${st[0]}</span>
             <div class="kx-sub">${escapeHtmlAttr(r.businessDate||'')} · ${moTa}</div>
             ${lots?`<div class="kx-sub">${lots}</div>`:''}
-            ${sub?`<div class="kx-sub">Bù bằng <b>${escapeHtmlAttr(sub.prepName||'')}</b>: ~${fmtNum(sub.expectedQty,1)} ${escapeHtmlAttr(sub.unit||'')}${sub.observedShortQty!=null?`, cân cuối ca hụt ${fmtNum(sub.observedShortQty,1)}`:''}${r.cogsDelta!=null?` · giá vốn điều chỉnh ${r.cogsDelta>0?'+':''}${fmt(r.cogsDelta)}`:''}</div>`:''}
-            ${(r.possibleItemSubs||[]).length && r.status==='unexplained'?`<div class="kx-sub">Có thể đã bù bằng: ${r.possibleItemSubs.map(x=>`<b>${escapeHtmlAttr(x.name)}</b>`).join(', ')} (nguyên liệu, không cân được — nhập tay bên dưới)</div>`:''}
+            ${nvTraLoi}
+            ${subsList.map(sub=>`<div class="kx-sub">Bù bằng <b>${escapeHtmlAttr(sub.prepName||'')}</b>${sub.kind==='item'?' (NL)':''}: ${fmtNum(sub.expectedQty,1)} ${escapeHtmlAttr(sub.unit||'')}${sub.observedShortQty!=null?` · cuối ca hụt ${fmtNum(sub.observedShortQty,1)}`:''}</div>`).join('')}
+            ${Number(r.uncoveredQty)>0.005 && subsList.length?`<div class="kx-sub">Còn ${fmtNum(r.uncoveredQty,1)} ${escapeHtmlAttr(r.unit||'')} chưa giải thích</div>`:''}
+            ${r.cogsDelta!=null?`<div class="kx-sub">Giá vốn điều chỉnh ${r.cogsDelta>0?'+':''}${fmt(r.cogsDelta)}</div>`:''}
           </div>
           ${r.status==='substitution_pending' ? `<div style="display:flex;gap:8px;margin-top:8px">
               <button class="btn sm" onclick="btpAmConfirm('${r.id}')">Xác nhận đã bù</button>
@@ -10033,6 +10036,7 @@ async function renderKhoBtpAm(){
           ${r.status==='unexplained' ? `<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;align-items:center">
               <select id="baSub_${r.id}" style="flex:1;min-width:140px"><option value="">— Đã bù bằng loại nào? —</option>${optAll(r.sourceKind==='item'?'item':'prep', r.prepId)}</select>
               <input type="number" step="0.1" id="baQty_${r.id}" placeholder="Lượng đã dùng bù" style="width:140px">
+              <div class="small-note" style="width:100%">Chọn nguyên liệu ở đây chỉ tính lại giá vốn, không trừ tem (nhân viên không xác nhận lúc kết ca).</div>
               <button class="btn sm" onclick="btpAmManual('${r.id}')">Ghi nhận bù</button>
               <button class="btn outline sm" onclick="btpAmDismiss('${r.id}')">Đã xem</button></div>` : ''}
         </div>`;
@@ -10074,25 +10078,23 @@ async function btpAmSubRemove(kind, ownerId, i){
 // Xác nhận bù: giá vốn ngày đó += lượng loại thay × giá − lượng gốc × giá gốc. Loại thay là
 // BTP → phần hụt của nó ở lần cân cuối ca được gắn substitutionQty để không tính hao hụt nữa.
 // Nguồn là NL dùng thẳng → các dòng Sổ lệch của NL đó trong ngày được đánh dấu đã giải thích.
-async function _btpAmApplySubstitution(r, sub){
+async function _btpAmApplySubstitution(r, subs){
   const now = new Date().toISOString();
-  const costA = Number(r.costPerUnit)||0, costB = Number(sub.costPerUnit)||0;
-  const cogsDelta = Math.round((Number(sub.expectedQty)||0)*costB - (Number(r.remainder)||0)*costA);
-  if((sub.kind||'prep')==='prep'){
-    let adjRef = null;
-    if(sub.countAdjTxId) adjRef = fstore.collection('prep_transactions_gieogieo').doc(sub.countAdjTxId);
-    else{
-      const q = await fstore.collection('prep_transactions_gieogieo').where('prepId','==',sub.prepId)
-        .where('businessDate','==',r.businessDate).get();
-      const hit = q.docs.find(d=>d.data().type==='ADJUSTMENT' && d.data().fromPrepCount && Number(d.data().qty)<0);
-      if(hit) adjRef = hit.ref;
-    }
-    if(adjRef){
-      const a = await adjRef.get();
-      if(a.exists && Number(a.data().qty) < 0){
-        const subQty = Math.min(Math.abs(Number(a.data().qty)), Number(sub.expectedQty)||0);
-        await adjRef.update({ substitutionQty: subQty, substitutionReconId: r.id, substitutionFor: r.prepId });
-      }
+  const costA = Number(r.costPerUnit)||0;
+  let covered = 0, costB = 0;
+  subs.forEach(x=>{ costB += (Number(x.expectedQty)||0)*(Number(x.costPerUnit)||0);
+    covered += Number(x.coversQty)>0 ? Number(x.coversQty) : (Number(x.expectedQty)||0)/(Number(x.ratio)||1); });
+  covered = Math.min(covered, Number(r.remainder)||0);
+  const cogsDelta = Math.round(costB - covered*costA);
+  // BTP dùng để bù: phần hụt ở lần cân cuối ca không còn là hao hụt. (NL dùng để bù đã được POS
+  // trừ vào tem ngay khi nhân viên xác nhận lúc kết ca.)
+  for(const sub of subs.filter(x=>(x.kind||'prep')==='prep')){
+    const q = await fstore.collection('prep_transactions_gieogieo').where('prepId','==',sub.id||sub.prepId)
+      .where('businessDate','==',r.businessDate).get();
+    const hit = q.docs.find(d=>d.data().type==='ADJUSTMENT' && d.data().fromPrepCount && Number(d.data().qty)<0);
+    if(hit){
+      const subQty = Math.min(Math.abs(Number(hit.data().qty)), (Number(hit.data().substitutionQty)||0) + (Number(sub.expectedQty)||0));
+      await hit.ref.update({ substitutionQty: subQty, substitutionReconId: r.id, substitutionFor: r.prepId });
     }
   }
   if(r.sourceKind==='item'){
@@ -10105,9 +10107,9 @@ async function _btpAmApplySubstitution(r, sub){
       .update({status:'explained_substitution', reconId: r.id}).catch(()=>{})));
   }
   await fstore.collection('prep_shortage_recons_gieogieo').doc(r.id).update({
-    status:'substitution_confirmed', substitution: sub, cogsDelta, confirmedAt: now, confirmedBy:'management'
+    status:'substitution_confirmed', substitutions: subs, cogsDelta, confirmedAt: now, confirmedBy:'management'
   });
-  logAudit('confirm','prep_shortage_recon',r.id,{substituteKind: sub.kind||'prep', substitute: sub.id||sub.prepId, qty: sub.expectedQty, cogsDelta});
+  logAudit('confirm','prep_shortage_recon',r.id,{substitutes: subs.map(x=>(x.kind||'prep')+':'+(x.id||x.prepId)), cogsDelta});
   toast('✅ Đã xác nhận bù — giá vốn ngày '+r.businessDate+' '+(cogsDelta>0?'+':'')+fmt(cogsDelta));
 }
 async function btpAmConfirm(id){
@@ -10115,9 +10117,10 @@ async function btpAmConfirm(id){
     await ensureAuth();
     const doc = await fstore.collection('prep_shortage_recons_gieogieo').doc(id).get();
     const r = {id, ...doc.data()};
-    if(r.status!=='substitution_pending' || !r.substitution){ toast('⚠️ Mục này không còn chờ xác nhận'); return renderKhoBtpAm(); }
-    if(!confirm(`Xác nhận ${r.prepName} đã được bù bằng ${r.substitution.prepName} (~${fmtNum(r.substitution.expectedQty,1)} ${r.substitution.unit||''})?\nGiá vốn ngày ${r.businessDate} sẽ được tính lại.`)) return;
-    await _btpAmApplySubstitution(r, r.substitution);
+    const subs = r.substitutions || (r.substitution ? [r.substitution] : []);
+    if(r.status!=='substitution_pending' || !subs.length){ toast('⚠️ Mục này không còn chờ xác nhận'); return renderKhoBtpAm(); }
+    if(!confirm(`Xác nhận ${r.prepName} đã được bù bằng ${subs.map(x=>x.prepName+' '+fmtNum(x.expectedQty,1)+' '+(x.unit||'')).join(', ')}?\nGiá vốn ngày ${r.businessDate} sẽ được tính lại.`)) return;
+    await _btpAmApplySubstitution(r, subs);
   }catch(err){ showError('Xác nhận lỗi: '+(err.code||err.message||err)); }
   renderKhoBtpAm();
 }
@@ -10133,10 +10136,10 @@ async function btpAmManual(id){
     const b = _btpOwner(kind, subId) || {};
     const cost = kind==='item' ? (itemCostOn(subId, r.businessDate) || Number(b.costPerUnit)||0) : (Number(b.costPerUnit)||0);
     const sub = { kind, id: subId, prepId: subId, prepName: b.name||'', unit: b.unit||'',
-      ratio: (Number(r.remainder)>0? qty/Number(r.remainder):1),
+      ratio: (Number(r.remainder)>0? qty/Number(r.remainder):1), coversQty: Number(r.remainder)||0,
       expectedQty: qty, observedShortQty: null, costPerUnit: cost, manual: true };
     if(!confirm(`Ghi nhận ${r.prepName} đã được bù bằng ${fmtNum(qty,1)} ${sub.unit} ${sub.prepName}?\nGiá vốn ngày ${r.businessDate} sẽ được tính lại.`)) return;
-    await _btpAmApplySubstitution(r, sub);
+    await _btpAmApplySubstitution(r, [sub]);
   }catch(err){ showError('Ghi nhận lỗi: '+(err.code||err.message||err)); }
   renderKhoBtpAm();
 }
