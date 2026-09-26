@@ -12388,7 +12388,7 @@ function prepReconFormHTML(c){
     </div>
     <div class="kc-card" style="margin:0 0 12px">${renderPinInput('prepReconStaff')}</div>
     ${hint?`<div style="text-align:center;font-size:12.5px;font-weight:700;color:#999;margin:0 0 8px">${hint}</div>`:''}
-    <button onclick="prepReconPostSave()" ${blocked?'disabled':''} style="width:100%;padding:17px;background:${blocked?'#e5e7eb':'#16a34a'};color:${blocked?'#9ca3af':'#fff'};border:0;border-radius:16px;font:800 16.5px 'Google Sans',sans-serif;box-shadow:${blocked?'none':'0 6px 16px -6px rgba(22,163,74,.6)'};cursor:${blocked?'not-allowed':'pointer'}">${row.status==='processing'?'Tiếp tục lưu số đã cân':'✓ Chốt đối chiếu & mở khóa NL'}</button>
+    <button id="prepReconSaveBtn" onclick="prepReconPostSave()" ${blocked?'disabled':''} style="width:100%;min-height:64px;padding:20px;background:${blocked?'#e5e7eb':'#16a34a'};color:${blocked?'#9ca3af':'#fff'};border:0;border-radius:99px;font:800 18px 'Google Sans',sans-serif;box-shadow:${blocked?'none':'0 6px 16px -6px rgba(22,163,74,.6)'};cursor:${blocked?'not-allowed':'pointer'}">${row.status==='processing'?'Tiếp tục lưu số đã cân':'✓ Chốt đối chiếu & mở khóa NL'}</button>
     <button onclick="openPrepBatchScreen()" style="width:100%;padding:13px;background:none;border:0;color:#999;font:700 13px 'Google Sans',sans-serif">‹ Quay lại mẻ đang nấu</button>`;
 }
 async function openPrepReconForm(batchId,itemId) {
@@ -12667,6 +12667,9 @@ async function prepReconPostSave() {
   if(_posSubmitBusy)return;
   const st=prepReconForm;if(!st)return;
   _posSubmitBusy=true;
+  // Khoá nút ngay khi bấm + hiện đang xử lý — lượt chốt ghi nhiều bước (RT, sổ kho), bấm
+  // lần 2 lúc đang chờ mạng là dễ gây nhầm. Màn được vẽ lại sau khi xong/lỗi.
+  const restoreBtn=setBtnBusy('prepReconSaveBtn','⏳ Đang chốt đối chiếu…');
   try{
     const ref=fstore.collection('prep_batches_gieogieo').doc(st.batchId);
     let doc=await ref.get(),b=doc.data(),row=b&&b.reconcileInputs&&b.reconcileInputs[st.itemId];
@@ -12800,7 +12803,7 @@ async function prepReconPostSave() {
       if(['PREP_RECON_STALE','PREP_RECON_RETRY'].includes(err.code)) await openPrepReconForm(st.batchId,st.itemId);
     }
   }
-  finally{_posSubmitBusy=false;}
+  finally{_posSubmitBusy=false;restoreBtn();}
 }
 
 // Bấm "Bắt đầu chế biến" đi qua đây trước — công thức không có nguyên liệu
