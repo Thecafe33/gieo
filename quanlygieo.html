@@ -4981,6 +4981,19 @@ async function fixRecWizApply(){
       });
     });
 
+    // Hàng theo LÔ mà lô đó đang MỞ: RT (nguồn thật của phần đang mở) vẫn giữ số cũ — trừ
+    // đúng phần ghi thừa vào lô trong RT, không thì tồn tính lại theo tem không giảm gì.
+    if(theoLo && tem.length && tem[0].status==='open' && thua){
+      try{
+        await _ueActiveUnitsRef(l.itemId).child(tem[0].id).transaction(cur=>{
+          if(cur===null) return null;
+          cur.unitBase = Math.round(((Number(cur.unitBase)||0) - thua)*100)/100;
+          cur.capacity = baseDung;
+          return cur;
+        });
+        await fstore.collection(CTN_COLL).doc(tem[0].id).update({ unitBase: firebase.firestore.FieldValue.increment(-thua) });
+      }catch(err){ console.warn('[sửa phiếu nhận] trừ lô đang mở trong RT lỗi', err); }
+    }
     // [TEM = SỰ THẬT] Tem vừa huỷ/sửa dung tích → chốt tồn theo tổng mã.
     const itFix = INVENTORY_ITEMS.find(x=>x.id===l.itemId);
     if(isTemTrackedItem(itFix)) await recomputeTemStock(l.itemId).catch(err=>console.warn('[Tem] chốt tồn theo mã lỗi', err));
@@ -6660,7 +6673,7 @@ async function approveStockCount(countId, reviewerNote){
   // kiểm kê đã được nhân viên báo mất → duyệt kiểm kê = duyệt luôn các phiếu báo mất đó:
   // chuyển mã sang 'lost', tồn tự giảm đúng bằng mã đó.
   const unitRows = items.filter(it => it.countMode === 'unit');
-  const lostJobs = unitRows.map(it => approvePendingLostReportsForItem(it.itemId, countId));
+  const lostJobs = unitRows.map(it => approvePendingLostReportsForItem(it.itemId, countId, data.lostReportCodes));
   const jobs = [...lostJobs, ...items
     .filter(it => it.countMode !== 'unit' && Number(it.varianceBase) !== 0)
     .map(it => applyStockTransaction({
@@ -6678,11 +6691,14 @@ async function approveStockCount(countId, reviewerNote){
 // Duyệt các phiếu báo mất đang chờ của MỘT nguyên liệu (nhân viên bấm "Không tìm thấy" ở
 // màn Kiểm tra lại của kiểm kê POS). Mã → 'lost' (giữ lostFromStatus để POS "Tìm lại hàng
 // báo mất" phục hồi đúng), gỡ khỏi RT nếu đang mở, ghi Sổ lệch 'lost', rồi tính lại tồn.
-async function approvePendingLostReportsForItem(itemId, countId){
+async function approvePendingLostReportsForItem(itemId, countId, codes){
   const snap = await fstore.collection('stock_lost_reports_gieogieo')
     .where('itemId','==',itemId).where('status','==','pending_review').get();
   const nowISO = new Date().toISOString();
-  for(const rep of snap.docs){
+  // Phiếu kiểm kê mới ghi đúng danh sách mã báo mất của lượt đó; phiếu cũ (chưa có danh sách)
+  // thì duyệt mọi phiếu báo mất đang chờ của món như trước.
+  const docs = Array.isArray(codes) ? snap.docs.filter(d=>codes.includes(d.data().code)) : snap.docs;
+  for(const rep of docs){
     const r = rep.data();
     const cRef = fstore.collection(CTN_COLL).doc(r.containerId);
     let lostQty = 0, meta = null;
@@ -6720,8 +6736,18 @@ async function approvePendingLostReportsForItem(itemId, countId){
   }
   await recomputeTemStock(itemId);
 }
-function rejectStockCount(countId, reviewerNote){
-  return fstore.collection('stock_counts_gieogieo').doc(countId).update({
+async function rejectStockCount(countId, reviewerNote){
+  const ref = fstore.collection('stock_counts_gieogieo').doc(countId);
+  const doc = await ref.get();
+  const codes = doc.exists ? doc.data().lostReportCodes : null;
+  // Từ chối phiếu kiểm kê → từ chối luôn các phiếu báo mất của đúng lượt đó (mã giữ nguyên
+  // trạng thái). Không thì chúng nằm chờ và bị duyệt nhầm theo phiếu kiểm kê kế tiếp.
+  if(Array.isArray(codes) && codes.length){
+    const snap = await fstore.collection('stock_lost_reports_gieogieo').where('status','==','pending_review').get();
+    await Promise.all(snap.docs.filter(d=>codes.includes(d.data().code))
+      .map(d=>d.ref.update({status:'rejected', reviewedAt:new Date().toISOString(), reviewNote:'Phiếu kiểm kê bị từ chối'})));
+  }
+  return ref.update({
     status:'rejected', reviewedAt:new Date().toISOString(), reviewNote: reviewerNote||''
   });
 }

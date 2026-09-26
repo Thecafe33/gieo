@@ -4446,6 +4446,10 @@ async function unitEngineFinishOpenUnit(id, c, staffEmp, lyDo, daQuet, ref, prep
   } else {
     toast('✅ Đã chốt ' + (c.code || ''));
   }
+  // Chỉ nhánh ghi WASTE thành công mới tự tính lại tồn (deriveFromUnits). Các nhánh còn lại
+  // (không thừa, nợ, đang nấu, ghi hao hụt lỗi) vẫn vừa đổi RT/trạng thái tem — chốt lại
+  // theo tổng mã ngay, không để tồn cũ nằm chờ tới lượt bán sau.
+  await _ueRecomputeCurrentStock(itemId, STOCK_CONTAINERS_COLL).catch(() => {});
   refreshFifoAlert().catch(() => {});
   if(!silent){closeStockScanSheet();_refreshStockUseListIfActive();}
 }
@@ -5424,6 +5428,7 @@ async function writeAtomicContainerFinish(ref, c, staffEmp, lyDo, daQuet) {
   }
   await ref.update({
     status: 'finished',
+    finishedFromStatus: c.status === 'open' ? 'open' : 'sealed',   // hoàn (Huỷ mẻ) trả về đúng trạng thái này
     // Đi thẳng từ sealed (chưa từng quét "mở") thì điền luôn mốc mở = mốc báo
     // hết, cùng người — để lịch sử vẫn có đủ openedAt/openedBy như container
     // thường, không bỏ trống gây khó hiểu khi xem lại sau này.
@@ -5460,8 +5465,17 @@ async function _reverseAtomicContainerFinish(containerId, batchId, staffEmp, not
     if (!doc.exists) return false;
     const c = doc.data();
     if (c.status !== 'finished') return false;
+    const backTo = c.finishedFromStatus === 'open' ? 'open' : 'sealed';
+    if (backTo === 'open') {
+      // Đang mở trước khi chốt → đăng ký lại vào RT (nguồn thật của phần đang mở), không thì tồn thiếu.
+      await _ueRetryAsync(() => _ueActiveUnitsRef(c.itemId).child(containerId).set({
+        code: c.code || '', itemName: c.itemName || '', unit: c.unit || '',
+        unitBase: Number(c.baseQty) || 1, capacity: Number(c.baseQty) || 1,
+        openedAt: c.openedAt ? new Date(c.openedAt).getTime() : Date.now()
+      }));
+    }
     await ref.update({
-      status: 'sealed',
+      status: backTo,
       revertedFinish: {
         batchId: batchId || '', at: new Date().toISOString(),
         by: (staffEmp && staffEmp.fullName) || '', reason: note || ''
@@ -12892,6 +12906,7 @@ async function prepStartGateScan(itemId) {
   if (c.status === 'voided') { toast('⛔ ' + c.code + ' đã bị huỷ (phiếu nhận ghi thừa) — bóc tem này bỏ đi, đừng dùng'); return; }
   if (c.status === 'lost') { toast('⚠️ ' + c.code + ' đang ở trạng thái "báo mất" — dùng nút "Quét mã hàng tìm lại được" ở Kiểm kê để phục hồi'); return; }
   if (c.status === 'finished') { toast('ℹ️ ' + c.code + ' đã báo hết trước đó'); return; }
+  if (c.status !== 'sealed' && c.status !== 'open') { toast('⚠️ ' + c.code + ' đang chờ xử lý huỷ — không dùng được'); return; }
   if (!isAtomicUnitContainer(c)) { toast('⚠️ ' + c.code + ' không phải nguyên liệu đếm theo "cái" — không dùng ở bước này'); return; }
   if (reqRow.scannedIds.includes(c.id) || st.requirements.some(rr => rr.scannedIds.includes(c.id))) {
     toast('⚠️ Mã ' + c.code + ' vừa được quét rồi, không tính thêm lần nữa'); return;
@@ -12956,7 +12971,8 @@ async function confirmPrepStartAfterScan() {
       const cDoc = await fstore.collection(STOCK_CONTAINERS_COLL).doc(sc.id).get();
       if (!cDoc.exists) { toast('❌ Mã ' + sc.code + ' không còn tồn tại — bấm huỷ và quét lại'); renderPrepStartScanGate(); return; }
       cData = { id: cDoc.id, ...cDoc.data() };
-      if (cData.status !== 'sealed') {
+      // 'open' (cái rời lỡ bị quét mở ở Kho) vẫn dùng được — writeAtomicContainerFinish tự gỡ RT.
+      if (cData.status !== 'sealed' && cData.status !== 'open') {
         // [FIX] Bấm lại sau khi lượt trước lỡ đứt mạng giữa chừng (một số mã đã kịp
         // ghi 'finished', số khác thì chưa) — mã NÀY đã do chính người này chốt xong ở
         // lượt trước rồi thì coi là ổn, bỏ qua chứ không báo lỗi/bắt huỷ lại từ đầu.
@@ -15520,7 +15536,10 @@ async function _doSubmitStockCount(preResolvedStaff) {
     const scRef = await fstore.collection('stock_counts_gieogieo').add({
       items, countedBy: staff, status: 'pending_review',
       createdAt: new Date().toISOString(), businessDate: posDateKey(), source: 'pos',
-      scannedCodes
+      scannedCodes,
+      // Mã nhân viên báo "Không tìm thấy" TRONG lượt này — duyệt/từ chối phiếu kiểm kê bên
+      // Quản lý chỉ xử lý đúng các phiếu báo mất này, không vơ phiếu của lượt khác.
+      lostReportCodes: [...stockCountState.reportedLostSet]
     });
     // 🆕 GĐ4 kế hoạch V3 — PHẦN 3.2b: ghi audit trỏ đúng phiếu kiểm kê vừa gửi.
     logAutoChecklistResolved('stockcount_due', scRef.id, staffEmp);
