@@ -18966,10 +18966,21 @@ function prepCountWeighBatch(i, batchId, bi) {
   });
 }
 
-function prepCountToggleBatchDone(i, batchId) {
+// Báo hết một lô mà sổ vẫn còn hàng = đổ bỏ toàn bộ phần còn lại (ghi hao hụt).
+// Hỏi lại trước khi ghi để bấm nhầm không thành hao hụt. KHÔNG hiện số trên sổ —
+// giữ nguyên tắc cân mù (nhân viên không canh số cho khớp).
+function _prepCountBatchHasStock(b) { return !!b && (Number(b.qtyRemaining) || 0) > 0.005; }
+async function prepCountToggleBatchDone(i, batchId) {
   const l = _prepCountState[i];
   if (!l) return;
   const willDone = !l.batchDone[batchId];
+  const b = l.activeBatches.find(x => x.id === batchId);
+  if (willDone && _prepCountBatchHasStock(b)) {
+    const ok = await posConfirm('Lô ' + ((b && b.batchCode) || '') + ' · ' + (l.prepName || '') +
+      '\nTrên sổ lô này VẪN CÒN hàng. Báo hết nghĩa là đổ bỏ toàn bộ phần còn lại và ghi hao hụt.\n\nNếu hũ/khay vẫn còn, bấm "Quay lại" rồi dùng "Cân trừ bì".',
+      { okText: 'Đổ bỏ hết', cancelText: 'Quay lại', danger: true });
+    if (!ok || _prepCountState[i] !== l) return;
+  }
   l.batchDone[batchId] = willDone;
   l.batchWeighings[batchId] = [];   // đánh dấu hết/bỏ dấu đều làm số cân cũ vô nghĩa
   l.batchQty[batchId] = willDone ? 0 : null;
@@ -18979,9 +18990,15 @@ function prepCountToggleBatchDone(i, batchId) {
   renderPrepCountCard();
 }
 
-function prepCountToggleDiscardAll(i) {
+async function prepCountToggleDiscardAll(i) {
   const l = _prepCountState[i];
   if (!l) return;
+  if (!l.discardAll && l.activeBatches.some(_prepCountBatchHasStock)) {
+    const ok = await posConfirm((l.prepName || '') + '\nTrên sổ vẫn còn hàng ở ' + l.activeBatches.filter(_prepCountBatchHasStock).length +
+      ' lô. Bỏ hết nghĩa là đổ bỏ toàn bộ và ghi hao hụt cho tất cả các lô này.',
+      { okText: 'Đổ bỏ hết', cancelText: 'Quay lại', danger: true });
+    if (!ok || _prepCountState[i] !== l) return;
+  }
   _prepCountApplyDiscardAll(l, !l.discardAll);
   renderPrepCountCard();
 }
