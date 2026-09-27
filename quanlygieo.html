@@ -3256,20 +3256,6 @@ function recipeSizeRowsOn(menuRefKey, size, dateKey){
   const sizesObj = chon ? chon.newSizes : list[0].oldSizes;
   return sizesObj && sizesObj[size];
 }
-// Ghi một MỐC ĐỊNH MỨC MỚI nếu nội dung thực sự đổi. oldSizes=null (món chưa từng
-// có định mức trước đó) thì không ghi gì — không có "định mức cũ" nào để giữ lại.
-async function recordRecipeChange(menuRefKey, oldSizes, newSizes){
-  if(!oldSizes) return false;
-  if(JSON.stringify(oldSizes) === JSON.stringify(newSizes)) return false;
-  await fstore.collection(RECIPE_HIST_COLL).add({
-    menuRefKey, oldSizes, newSizes,
-    effectiveFrom: dkey(new Date()),
-    by: 'management', createdAt: new Date().toISOString()
-  });
-  await ensureRecipeHistory(true);
-  logAudit('recipe_change','recipe',menuRefKey,{effectiveFrom: dkey(new Date())});
-  return true;
-}
 function recipeHistoryFor(menuRefKey){
   const list = (RECIPE_HISTORY && RECIPE_HISTORY[menuRefKey]) || [];
   return list.slice().reverse();
@@ -3345,21 +3331,6 @@ function prepRecipeOn(prepId, dateKey){
   for(const h of list){ if(String(h.effectiveFrom) <= dateKey) chon = h; else break; }
   if(chon) return { batchInputs: chon.newBatchInputs||[], batchYield: Number(chon.newBatchYield)||0 };
   return { batchInputs: list[0].oldBatchInputs||[], batchYield: Number(list[0].oldBatchYield)||0 };
-}
-async function recordPrepRecipeChange(prepId, oldRec, newRec){
-  if(!oldRec) return false;
-  const oldKey = JSON.stringify({i:oldRec.batchInputs, y:oldRec.batchYield});
-  const newKey = JSON.stringify({i:newRec.batchInputs, y:newRec.batchYield});
-  if(oldKey === newKey) return false;
-  await fstore.collection(PREP_RECIPE_HIST_COLL).add({
-    prepId, oldBatchInputs: oldRec.batchInputs, oldBatchYield: oldRec.batchYield,
-    newBatchInputs: newRec.batchInputs, newBatchYield: newRec.batchYield,
-    effectiveFrom: dkey(new Date()),
-    by: 'management', createdAt: new Date().toISOString()
-  });
-  await ensurePrepRecipeHistory(true);
-  logAudit('prep_recipe_change','prep_item',prepId,{effectiveFrom: dkey(new Date())});
-  return true;
 }
 function prepRecipeHistoryFor(prepId){
   const list = (PREP_RECIPE_HISTORY && PREP_RECIPE_HISTORY[prepId]) || [];
@@ -6984,10 +6955,20 @@ async function saveRecipe(menuRefKey, sizesData){
   const ref = fstore.collection('recipes_gieogieo').doc(menuRefKey);
   const doc = await ref.get();
   const oldSizes = doc.exists ? (doc.data().sizes || null) : null;
-  await recordRecipeChange(menuRefKey, oldSizes, sizesData).catch(err=>{
-    console.warn('[Định mức] ghi lịch sử định mức lỗi (định mức mới vẫn được lưu):', err);
+  // Mốc lịch sử + định mức chính ghi trong CÙNG MỘT batch — không còn "định mức đã đổi mà thiếu
+  // mốc" (lưu lại cùng định mức không bù được) hay "có mốc mà định mức chưa từng áp dụng".
+  const doiDinhMuc = !!oldSizes && JSON.stringify(oldSizes) !== JSON.stringify(sizesData);
+  const batch = fstore.batch();
+  if(doiDinhMuc) batch.set(fstore.collection(RECIPE_HIST_COLL).doc(), {
+    menuRefKey, oldSizes, newSizes: sizesData, effectiveFrom: dkey(new Date()),
+    by: 'management', createdAt: new Date().toISOString()
   });
-  return ref.set({sizes: sizesData, updatedAt: new Date().toISOString()});
+  batch.set(ref, {sizes: sizesData, updatedAt: new Date().toISOString()});
+  await batch.commit();
+  if(doiDinhMuc){
+    await ensureRecipeHistory(true).catch(()=>{});
+    logAudit('recipe_change','recipe',menuRefKey,{effectiveFrom: dkey(new Date())});
+  }
 }
 function deleteRecipe(menuRefKey){
   return fstore.collection('recipes_gieogieo').doc(menuRefKey).delete();
@@ -14658,20 +14639,47 @@ async function qlReverseStockForOrder(orderId, billCode){
   // không hoàn lần hai (trước đây thấy một dòng như vậy là bỏ qua CẢ bill, kể cả món chưa hoàn).
   const daHoanCu = new Set(txs.map(d=>d.data()).filter(t=>t.reversal===true && t.type==='ADJUSTMENT').map(t=>t.itemId));
   const daHoanCuPrep = new Set(ptxs.map(d=>d.data()).filter(t=>t.reversal===true && t.type==='ADJUSTMENT').map(t=>t.prepId));
-  const gom = {}, allocOf = {}, locOf = {};
+  // Lượng + tem/lô CÒN PHẢI HOÀN = đã trừ (bán + thêm topping) − đã hoàn một phần (bớt topping
+  // khi sửa đơn bên POS). Cùng công thức với prepareOrderReversalNetPOS bên POS.
+  function tinhRong(docs, idField, allocField, sep){
+    const gross = {}, back = {}, allocs = {}, backAlloc = {};
+    docs.forEach(d => {
+      const t = d.data(), k = t[idField];
+      if(!k || t.type !== 'CONSUMPTION' || t.backfillNoStockEffect || t.voided) return;
+      if(t.reversal === true){
+        if(d.id === 'reversal_' + orderId + sep + k) return;
+        back[k] = (back[k]||0) + Math.abs(Number(t.qty)||0);
+        (t.reversedAllocations||[]).forEach(a => { const c = a.containerId||a.unitId; backAlloc[k+'|'+c] = (backAlloc[k+'|'+c]||0) + (Number(a.qty)||0); });
+        return;
+      }
+      if(!(Number(t.qty) < 0)) return;
+      gross[k] = (gross[k]||0) + Math.abs(Number(t.qty)||0);
+      if(Array.isArray(t[allocField])) allocs[k] = (allocs[k]||[]).concat(t[allocField]);
+    });
+    const qty = {}, outAlloc = {};
+    Object.keys(gross).forEach(k => {
+      const n = Math.round((gross[k] - (back[k]||0))*100)/100;
+      if(!(n > 0.005)) return;
+      qty[k] = n;
+      const byC = {};
+      (allocs[k]||[]).forEach(a => { const c = a.containerId||a.unitId; byC[c] = (byC[c]||0) + (Number(a.qty)||0); });
+      const list = Object.keys(byC).map(c => ({ containerId: c, qty: byC[c] - (backAlloc[k+'|'+c]||0) })).filter(x => x.qty > 0.005);
+      const tong = list.reduce((a,x)=>a+x.qty,0);
+      const f = tong > n ? n/tong : 1;
+      outAlloc[k] = list.map(x => ({ containerId: x.containerId, qty: Math.round(x.qty*f*100)/100 })).filter(x => x.qty > 0);
+    });
+    return { qty, allocs: outAlloc, gross };
+  }
+  const rongNL = tinhRong(txs, 'itemId', 'fifoAllocations', '_ing_');
+  const gom = rongNL.qty, allocOf = rongNL.allocs, locOf = {};
   txs.map(d => d.data()).filter(laGocTru).forEach(t => {
-    gom[t.itemId] = (gom[t.itemId] || 0) + Math.abs(Number(t.qty) || 0);
-    if(Array.isArray(t.fifoAllocations)) allocOf[t.itemId] = (allocOf[t.itemId] || []).concat(t.fifoAllocations);
-    if(t.locDeductedAt && Number(t.locDeducted) > 0){
+    if(t.locDeductedAt && Number(t.locDeducted) > 0 && gom[t.itemId]){
       const m = locOf[t.itemId] || (locOf[t.itemId] = {});
-      m[t.locDeductedAt] = (m[t.locDeductedAt] || 0) + Number(t.locDeducted);
+      m[t.locDeductedAt] = (m[t.locDeductedAt] || 0) + Number(t.locDeducted) * gom[t.itemId] / rongNL.gross[t.itemId];
     }
   });
-  const gomPrep = {}, allocPrep = {};
-  ptxs.map(d => d.data()).filter(laGocTru).forEach(t => {
-    gomPrep[t.prepId] = (gomPrep[t.prepId] || 0) + Math.abs(Number(t.qty) || 0);
-    if(Array.isArray(t.unitAllocations)) allocPrep[t.prepId] = (allocPrep[t.prepId] || []).concat(t.unitAllocations);
-  });
+  const rongBTP = tinhRong(ptxs, 'prepId', 'unitAllocations', '_prep_');
+  const gomPrep = rongBTP.qty, allocPrep = rongBTP.allocs;
   const items = await loadInventoryItems().catch(()=>INVENTORY_ITEMS||[]);
 
   // Giành quyền hoàn tem/lô bằng CÙNG claim với POS (reversal_unit_claims_gieogieo, id theo
@@ -20819,19 +20827,29 @@ async function submitInventoryItem(){
       const metaLuu = { name, minStock, costPerUnit, packagingUnits, staffCounts, isPackagingMaterial,
         trackingMode, countUnitName, stockManaged, openShelfLifeHours, printOpenLabel, vesselIds, originalPackId,
         ...(nlIsVolumeUnit(baseUnitNow) ? { densityGPerMl } : {}) };
-      await updateInventoryItemMeta(editingItemId, metaLuu);
-      // Ghi mốc giá SAU khi lưu thành công — không được để lịch sử có mốc mà bản ghi
-      // chính thì lưu hỏng. Ghi mốc hỏng cũng không nuốt lỗi: báo rõ để chủ quán biết
-      // giá đã đổi nhưng lịch sử chưa ghi được.
-      if(doiGia){
-        try{
-          await recordItemPriceChange({ itemId: editingItemId, itemName: name, unit: itemCu.unit,
-            newPrice: costPerUnit, oldPrice: giaCu, effectiveFrom: ngayApDung, source: 'manual' });
-          toast(`✅ Đã lưu · giá mới ${fmtUnitPrice(costPerUnit)}/${itemCu.unit} áp dụng từ ${ngayApDung}`);
-        }catch(err){
-          console.error('[Giá] ghi mốc giá thất bại', err);
-          showError('Đã lưu nguyên liệu nhưng CHƯA ghi được mốc giá — báo cáo cũ có thể bị tính theo giá mới. Thử sửa lại giá một lần nữa.');
-        }
+      // Mốc giá + bản ghi nguyên liệu ghi trong CÙNG MỘT batch: hoặc cả hai, hoặc không gì cả.
+      // Trước đây lưu nguyên liệu trước, ghi mốc sau — ghi mốc lỗi thì lần lưu lại cùng giá
+      // không còn thấy "đổi giá" nên không bao giờ bù được mốc; báo cáo tiếp tục dùng giá mốc cũ.
+      // Tự bù: giá đang lưu khác giá của mốc cuối cùng (mốc từng bị thiếu) → cũng ghi mốc.
+      await ensurePriceHistory();
+      const mocCuoi = priceHistoryFor(editingItemId)[0];
+      const lechMoc = !!mocCuoi && Math.abs((Number(mocCuoi.price)||0) - costPerUnit) > 1e-9;
+      const ghiMoc = doiGia || lechMoc;
+      const batch = fstore.batch();
+      batch.update(fstore.collection('inventory_items_gieogieo').doc(editingItemId), {...metaLuu, updatedAt: new Date().toISOString()});
+      if(ghiMoc) batch.set(fstore.collection(PRICE_COLL).doc(), {
+        itemId: editingItemId, itemName: name, unit: itemCu.unit||'',
+        price: costPerUnit, oldPrice: doiGia ? giaCu : (Number(mocCuoi.price)||0),
+        effectiveFrom: ngayApDung, source: doiGia ? 'manual' : 'manual_backfill',
+        poId: null, supplier: '', note: doiGia ? '' : 'Bù mốc giá từng ghi lỗi',
+        by: 'management', createdAt: new Date().toISOString()
+      });
+      await batch.commit();
+      memoDropItems();
+      if(ghiMoc){
+        await ensurePriceHistory(true);
+        logAudit('price_change','inventory_item',editingItemId,{ oldPrice: giaCu, newPrice: costPerUnit, effectiveFrom: ngayApDung, source: 'manual' });
+        toast(`✅ Đã lưu · giá mới ${fmtUnitPrice(costPerUnit)}/${itemCu.unit} áp dụng từ ${ngayApDung}`);
       } else toast('✅ Đã lưu thay đổi');
     } else {
       // Nguyên liệu MỚI thì chưa CB nào dùng được nó, không cần lan giá.
@@ -21319,13 +21337,25 @@ async function submitPrepItem(){
   try{
     if(editingPrepId){
       // [FIX — "BTP cũng cần lịch sử áp dụng"] Chép công thức CŨ trước khi ghi đè —
-      // xem recordPrepRecipeChange/prepRecipeOn. Chỉ ghi khi batchInputs/batchYield
+      // xem prepRecipeOn. Chỉ ghi khi batchInputs/batchYield
       // thực sự đổi (đổi các field khác như hạn dùng, dụng cụ... không tạo mốc mới).
-      if(_pOld) await recordPrepRecipeChange(editingPrepId,
-        { batchInputs: _pOld.batchInputs||[], batchYield: Number(_pOld.batchYield)||0 },
-        { batchInputs: data.batchInputs, batchYield: data.batchYield }
-      ).catch(err=>console.warn('[BTP] ghi lịch sử công thức mẻ lỗi (công thức mới vẫn được lưu):', err));
-      await updatePrepItem(editingPrepId, data); logAudit('update','prep_item',editingPrepId,data); toast('✅ Đã lưu');
+      // Mốc lịch sử + công thức chính ghi trong CÙNG MỘT batch (xem saveRecipe).
+      const cuRec = _pOld ? { batchInputs: _pOld.batchInputs||[], batchYield: Number(_pOld.batchYield)||0 } : null;
+      const doiCT = !!cuRec && JSON.stringify({i:cuRec.batchInputs, y:cuRec.batchYield}) !== JSON.stringify({i:data.batchInputs, y:data.batchYield});
+      const batch = fstore.batch();
+      if(doiCT) batch.set(fstore.collection(PREP_RECIPE_HIST_COLL).doc(), {
+        prepId: editingPrepId, oldBatchInputs: cuRec.batchInputs, oldBatchYield: cuRec.batchYield,
+        newBatchInputs: data.batchInputs, newBatchYield: data.batchYield,
+        effectiveFrom: dkey(new Date()), by: 'management', createdAt: new Date().toISOString()
+      });
+      batch.update(fstore.collection('prep_items_gieogieo').doc(editingPrepId), {...data, updatedAt: new Date().toISOString()});
+      await batch.commit();
+      memoDropPreps();
+      if(doiCT){
+        await ensurePrepRecipeHistory(true).catch(()=>{});
+        logAudit('prep_recipe_change','prep_item',editingPrepId,{effectiveFrom: dkey(new Date())});
+      }
+      logAudit('update','prep_item',editingPrepId,data); toast('✅ Đã lưu');
     }
     else { const ref = await addPrepItem(data); logAudit('create','prep_item',ref.id,data); toast('✅ Đã thêm thành phẩm'); }
     editingPrepId=null; prepDraft=null; renderKhoPrep();
@@ -25692,7 +25722,7 @@ function renderRecipeEditorBox(){
 }
 // [MỚI] Khối "Lịch sử định mức" trong ô sửa — cho chủ quán thấy rõ định mức đã đổi
 // mấy lần, từ ngày nào, để yên tâm rằng sửa hôm nay KHÔNG làm đổi giá vốn của bill
-// đã bán trước đó (xem recordRecipeChange/recipeSizeRowsOn).
+// đã bán trước đó (xem saveRecipe/recipeSizeRowsOn).
 // [MỚI — theo yêu cầu] So giá vốn TRƯỚC/SAU một lần đổi định mức, cho 1 size. Cả 3
 // kiểu đổi định mức chủ quán nêu — đổi định lượng (15g→13g), thêm/bớt nguyên liệu,
 // đổi hẳn sang nguyên liệu khác — đều tự lộ ra ở đây vì đều đi qua CÙNG một phép

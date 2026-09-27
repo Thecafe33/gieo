@@ -9797,7 +9797,11 @@ async function _submitDrinkWasteImpl() {
   // đổ N ly", thay vì đếm số dòng ledger (ra con số vô nghĩa) hoặc bóc chuỗi note.
   // Nhờ vậy chỉ tiêu "Remake" không cần chủ quán gõ tay nữa — nó CHÍNH LÀ số ly
   // nhân viên đã bấm đổ trong ngày, ghi ngay lúc xảy ra chứ không nhớ lại cuối ngày.
-  const wasteEventId = `dw_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  // Ghi lại sau khi lần trước lỗi một phần (cùng món/size/số ly/lý do) → DÙNG LẠI wasteEventId
+  // cũ: id dòng sổ cố định theo lần đổ nên dòng đã ghi lần trước tự bỏ qua, chỉ chạy dòng lỗi.
+  const dwSig = [m.id, khoTxState.drinkSize, qty, reason, JSON.stringify(toppings.map(t => [t.id, t.qty])), !!noCup].join('|');
+  const pendingDw = khoTxState.dwPending && khoTxState.dwPending.sig === dwSig ? khoTxState.dwPending : null;
+  const wasteEventId = pendingDw ? pendingDw.eventId : `dw_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const meta = {
     wasteKind: 'drink', wasteEventId,
     drinkItemId: m.id, drinkName: m.name, drinkSize: khoTxState.drinkSize,
@@ -9814,24 +9818,30 @@ async function _submitDrinkWasteImpl() {
   const results = await Promise.allSettled([
     ...ingredientIds.map(async id => {
       const qtyUsed = Math.abs(agg[id]);
+      const txId = wasteEventId + '_ing_' + id;
+      // Kiểm sổ TRƯỚC khi phân bổ tem (giống bán hàng) — đã ghi ở lần trước thì không trừ tem lần 2.
+      if ((await fstore.collection('stock_transactions_gieogieo').doc(txId).get()).exists) return;
       const allocations = await unitEngineAllocateConsumption(id, qtyUsed, undefined, { type: 'drink_waste', id: wasteEventId, note })
         .catch(err => { console.warn('[FIFO] phân bổ lỗi (đổ ly)', id, err); return []; });
       return applyStockTransactionPOS({
-        itemId: id, type: 'WASTE', qty: -qtyUsed,
+        itemId: id, type: 'WASTE', qty: -qtyUsed, txId,
         note, staff: staffEmp.fullName, staffEmployeeId: staffEmp.id,
         deriveFromUnits: allocations.length > 0,
         meta: allocations.length ? { ...meta, fifoAllocations: allocations } : meta
       });
     }),
-    ...prepIds.map(id => _wastePrepQtyPOS(id, prepAgg[id], note, staffEmp, meta))
+    ...prepIds.map(id => _wastePrepQtyPOS(id, prepAgg[id], note, staffEmp, meta, wasteEventId + '_prep_' + id))
   ]);
   const failed = results.filter(r => r.status === 'rejected');
   if (failed.length) {
+    // Giữ nguyên màn + lựa chọn để bấm "Ghi" lại: lần sau dùng lại wasteEventId → chỉ ghi dòng lỗi.
     console.warn('[Đổ ly] Một số nguyên liệu trừ thất bại:', failed.map(f => f.reason));
-    toastAutoReport(`⚠️ Đã ghi nhưng ${failed.length}/${results.length} nguyên liệu trừ lỗi`, 'Đổ ly: trừ nguyên liệu lỗi', { ref: String(Date.now()) });
-  } else {
-    toast(`✅ Đã ghi hao hụt ${qty} ly ${m.name} (${khoTxState.drinkSize})`);
+    khoTxState.dwPending = { sig: dwSig, eventId: wasteEventId };
+    toastAutoReport(`⚠️ ${failed.length}/${results.length} nguyên liệu chưa trừ được — bấm Ghi lại (chỉ ghi phần còn lỗi)`, 'Đổ ly: trừ nguyên liệu lỗi', { ref: wasteEventId });
+    return;
   }
+  khoTxState.dwPending = null;
+  toast(`✅ Đã ghi hao hụt ${qty} ly ${m.name} (${khoTxState.drinkSize})`);
   if (skipped.length) console.info('[Đổ ly] Bỏ qua:', skipped);
   khoTxState.drinkToppings = {}; khoTxState.drinkNoCup = false;
   showScreen('khoScreen');
@@ -9845,13 +9855,15 @@ async function _submitDrinkWasteImpl() {
 // không đụng RT/unitBase của lô nào cả — lô vẫn hiện còn nguyên trong khi thực tế đã mất một
 // phần vào ly bị đổ, lần bán kế tiếp Unit Engine tưởng lô còn nhiều hơn thực tế. Giờ phân bổ
 // FIFO vào đúng lô đang mở TRƯỚC (như applyPrepConsumptionPOS), cùng cơ chế, chỉ khác type.
-async function _wastePrepQtyPOS(prepId, qty, note, staffEmp, meta) {
+async function _wastePrepQtyPOS(prepId, qty, note, staffEmp, meta, txId) {
   const back = Math.abs(Number(qty) || 0);
   if (!back) return;
+  // txId cố định (đổ ly) → đã ghi ở lượt trước thì bỏ qua, không trừ lô lần 2.
+  if (txId && (await fstore.collection('prep_transactions_gieogieo').doc(txId).get()).exists) return;
   const unitAllocations = await unitEngineAllocateConsumption(prepId, back, 'prep_batches_gieogieo')
     .catch(err => { console.warn('[UnitEngine] phân bổ lô BTP (đổ ly) lỗi', prepId, err); return []; });
   const prepRef = fstore.collection('prep_items_gieogieo').doc(prepId);
-  const txRef = fstore.collection('prep_transactions_gieogieo').doc();
+  const txRef = txId ? fstore.collection('prep_transactions_gieogieo').doc(txId) : fstore.collection('prep_transactions_gieogieo').doc();
   await fstore.runTransaction(async (t) => {
     const doc = await t.get(prepRef);
     if (!doc.exists) throw new Error('Bán thành phẩm không tồn tại');
@@ -22192,6 +22204,39 @@ async function applyBackfillConsumptionNoStockEffect(order, orderId, businessDat
 // [BUG "xoá bill không await reverse" — FIX] Trả về { ok, failedCount } thay vì chỉ tự toast —
 // caller (delOrderConfirm) giờ AWAIT hàm này trước khi xoá bill khỏi RTDB, nên cần biết kết
 // quả thật để quyết định thông báo gì, không còn tự ý toast từ bên trong (tránh chồng toast).
+// Lượng + tem/lô CÒN PHẢI HOÀN của từng món khi xoá cả đơn = đã trừ − đã hoàn một phần trước đó.
+// Tem/lô: trừ theo reversedAllocations của các lượt hoàn trước; dòng hoàn cũ không lưu tem thì
+// co tỷ lệ allocations về đúng lượng ròng để không cộng vào tem nhiều hơn lượng cần hoàn.
+function prepareOrderReversalNetPOS(orderId, docs, idField, allocField, sep) {
+  const gross = {}, back = {}, allocs = {}, backAlloc = {};
+  docs.forEach(d => {
+    const t = d.data(), k = t[idField];
+    if (!k || t.type !== 'CONSUMPTION' || t.backfillNoStockEffect || t.voided) return;
+    if (t.reversal === true) {
+      if (d.id === 'reversal_' + orderId + sep + k) return;       // chính lượt xoá cả đơn
+      back[k] = (back[k] || 0) + Math.abs(Number(t.qty) || 0);
+      (t.reversedAllocations || []).forEach(a => { const c = a.containerId || a.unitId; backAlloc[k + '|' + c] = (backAlloc[k + '|' + c] || 0) + (Number(a.qty) || 0); });
+      return;
+    }
+    if (!(Number(t.qty) < 0)) return;
+    gross[k] = (gross[k] || 0) + Math.abs(Number(t.qty) || 0);
+    if (Array.isArray(t[allocField])) allocs[k] = (allocs[k] || []).concat(t[allocField]);
+  });
+  const qty = {};
+  Object.keys(gross).forEach(k => {
+    const n = round2(gross[k] - (back[k] || 0));
+    if (n > 0.005) qty[k] = n;
+    const list = [];
+    const byC = {};
+    (allocs[k] || []).forEach(a => { const c = a.containerId || a.unitId; byC[c] = (byC[c] || 0) + (Number(a.qty) || 0); });
+    Object.keys(byC).forEach(c => { const q = byC[c] - (backAlloc[k + '|' + c] || 0); if (q > 0.005) list.push({ containerId: c, qty: q }); });
+    const tong = list.reduce((a, x) => a + x.qty, 0);
+    const f = tong > (qty[k] || 0) && tong > 0 ? (qty[k] || 0) / tong : 1;
+    allocs[k] = qty[k] ? list.map(x => ({ containerId: x.containerId, qty: round2(x.qty * f) })).filter(x => x.qty > 0) : [];
+  });
+  Object.keys(allocs).forEach(k => { if (!qty[k]) delete allocs[k]; });
+  return { qty, allocs, gross };
+}
 async function reverseSalesConsumptionPOS(order, orderId) {
   try {
     // [FIX #C — "hoàn đơn tính lại công thức thay vì đọc ledger gốc"] TRƯỚC ĐÂY hàm này gọi
@@ -22209,23 +22254,20 @@ async function reverseSalesConsumptionPOS(order, orderId) {
       fstore.collection('stock_transactions_gieogieo').where('referenceId', '==', orderId).get(),
       fstore.collection('prep_transactions_gieogieo').where('referenceId', '==', orderId).get()
     ]);
-    const agg = {}, locBackMap = {}, fifoMap = {};
+    // Tính RÒNG: tổng đã trừ của đơn (bán + thêm topping) TRỪ ĐI những gì đã hoàn một phần trước
+    // đó (bớt topping khi sửa đơn). Trước đây lấy tổng gộp → hoàn thừa; hoặc lượt bớt topping
+    // dùng chung id nên lượt này bỏ qua cả món → hoàn thiếu. Dòng hoàn của CHÍNH lượt xoá cả
+    // đơn (id reversal_{đơn}_...) không trừ — nó đã có thì hàm hoàn tự bỏ qua (idempotent).
+    const net = prepareOrderReversalNetPOS(orderId, stockSnap.docs, 'itemId', 'fifoAllocations', '_ing_');
+    const agg = net.qty, fifoMap = net.allocs, locBackMap = {};
     stockSnap.forEach(d => {
       const t = d.data();
       if (t.reversal === true || t.type !== 'CONSUMPTION' || !(Number(t.qty) < 0)) return;
-      const qty = Math.abs(Number(t.qty) || 0);
-      agg[t.itemId] = (agg[t.itemId] || 0) + qty;
       if (typeof t.locDeducted === 'number') locBackMap[t.itemId] = (locBackMap[t.itemId] || 0) + t.locDeducted;
-      if (Array.isArray(t.fifoAllocations) && t.fifoAllocations.length) fifoMap[t.itemId] = (fifoMap[t.itemId] || []).concat(t.fifoAllocations);
     });
-    const prepAgg = {}, prepUnitAllocMap = {};
-    prepSnap.forEach(d => {
-      const t = d.data();
-      if (t.reversal === true || t.type !== 'CONSUMPTION' || !(Number(t.qty) < 0)) return;
-      const qty = Math.abs(Number(t.qty) || 0);
-      prepAgg[t.prepId] = (prepAgg[t.prepId] || 0) + qty;
-      if (Array.isArray(t.unitAllocations) && t.unitAllocations.length) prepUnitAllocMap[t.prepId] = (prepUnitAllocMap[t.prepId] || []).concat(t.unitAllocations);
-    });
+    Object.keys(locBackMap).forEach(k => { if (net.gross[k] > 0) locBackMap[k] = locBackMap[k] * (agg[k] || 0) / net.gross[k]; });
+    const pnet = prepareOrderReversalNetPOS(orderId, prepSnap.docs, 'prepId', 'unitAllocations', '_prep_');
+    const prepAgg = pnet.qty, prepUnitAllocMap = pnet.allocs;
     const note = 'Hoàn kho do XOÁ ĐƠN' + (order && order.billCode ? ' — ' + order.billCode : '');
     const ingredientIds = Object.keys(agg);
     const prepIds = Object.keys(prepAgg);
@@ -22354,7 +22396,11 @@ async function _loadPrepUnitAllocationsForOrderPOS(orderId) {
   return map;
 }
 
-async function _reverseIngredientConsumptionPOS(itemId, consumedQty, note, referenceId, locBack, fifoAllocations, atomicScanned) {
+// opKey (tuỳ chọn): khoá của RIÊNG lượt hoàn này, dùng cho id dòng sổ + claim. Mặc định =
+// referenceId (xoá cả đơn / huỷ mẻ). Hoàn MỘT PHẦN (bớt topping khi sửa đơn) phải truyền khoá
+// riêng — dùng chung id với lượt xoá cả đơn thì lượt xoá sau thấy "đã hoàn" và bỏ qua cả món.
+async function _reverseIngredientConsumptionPOS(itemId, consumedQty, note, referenceId, locBack, fifoAllocations, atomicScanned, opKey) {
+  const revKey = opKey || referenceId || 'norefid';
   const back = Math.abs(Number(consumedQty) || 0);
   if (!back) return;
   // [BUG#3 FIX] Hoàn NGƯỢC đúng phần đã phân bổ FIFO cho (các) tem lúc trừ — đọc thẳng từ
@@ -22370,7 +22416,7 @@ async function _reverseIngredientConsumptionPOS(itemId, consumedQty, note, refer
       // [BUG "hoàn Unit trước, ghi ledger sau → retry hoàn đôi" — FIX] claimId cố định theo
       // (referenceId + itemId) — bấm lại xoá đơn/huỷ mẻ sau khi bước ghi ledger reversal bên
       // dưới lỗi thật sẽ KHÔNG cộng RT lần 2, chỉ ghi nốt phần ledger còn thiếu.
-      const r = await _ueClaimedReverseAllocations((referenceId || 'norefid') + '_ing_' + itemId, itemId, fifoAllocations);
+      const r = await _ueClaimedReverseAllocations(revKey + '_ing_' + itemId, itemId, fifoAllocations);
       // Chỉ tin suy từ unit khi ÁP DỤNG ĐỦ 100% — thiếu 1 phần (transaction lỗi, hoặc không
       // còn tem nào để hoàn vào) mà vẫn suy từ unit sẽ làm đúng phần thiếu đó biến mất (xem
       // chú thích unitEngineReverseAllocations). ambiguous:true (claim còn 'claiming') cũng coi
@@ -22397,7 +22443,7 @@ async function _reverseIngredientConsumptionPOS(itemId, consumedQty, note, refer
   // cần hoàn 2 lần), KHÔNG chặn được bước ghi bên dưới tự chạy lại — currentStock/ledger vẫn bị
   // cộng thêm `back` một lần nữa. Giờ id CỐ ĐỊNH theo (referenceId + itemId): bấm lại đọc trúng
   // đúng dòng đã ghi, tự bỏ qua, không cộng đúp.
-  const txRef = fstore.collection('stock_transactions_gieogieo').doc('reversal_' + (referenceId || 'norefid') + '_ing_' + itemId);
+  const txRef = fstore.collection('stock_transactions_gieogieo').doc('reversal_' + revKey + '_ing_' + itemId);
   const rule = getPrimaryRefillRulePOS(itemId);
   let revOutside = null; // [TEM = SỰ THẬT] hoàn ngoài tem → ghi Sổ lệch sau transaction
   let revTemNL = false;
@@ -22437,6 +22483,8 @@ async function _reverseIngredientConsumptionPOS(itemId, consumedQty, note, refer
       // xem như 'full' (tem thật sẽ được BƯỚC 3.5 hoàn riêng), dù chưa recompute ngay tại đây.
       reversalCoverage: coveredByTem ? 'full' : 'untracked',
       ...(revOutside ? { outsideTem: true } : {}),
+      // Tem đã hoàn trong lượt này — lượt xoá cả đơn sau đó trừ ra, không hoàn trùng vào tem.
+      ...(fifoAllocations && fifoAllocations.length ? { reversedAllocations: fifoAllocations } : {}),
       ...(referenceId ? { referenceId } : {})
     });
   });
@@ -22453,7 +22501,8 @@ async function _reverseIngredientConsumptionPOS(itemId, consumedQty, note, refer
   }
 }
 
-async function _reversePrepConsumptionPOS(prepId, consumedQty, note, referenceId, unitAllocations) {
+async function _reversePrepConsumptionPOS(prepId, consumedQty, note, referenceId, unitAllocations, opKey) {
+  const revKey = opKey || referenceId || 'norefid';   // xem _reverseIngredientConsumptionPOS
   const back = Math.abs(Number(consumedQty) || 0);
   if (!back) return;
   // [BUG#3 FIX] Hoàn NGƯỢC đúng lô đã trừ lúc tiêu thụ — bản cũ chỉ hoàn currentStock
@@ -22466,7 +22515,7 @@ async function _reversePrepConsumptionPOS(prepId, consumedQty, note, referenceId
     try {
       // [BUG "hoàn Unit trước, ghi ledger sau → retry hoàn đôi" — FIX] claimId cố định theo
       // (referenceId + prepId), cùng cơ chế với hoàn nguyên liệu ở trên.
-      const r = await _ueClaimedReverseAllocations((referenceId || 'norefid') + '_prep_' + prepId, prepId, unitAllocations, 'prep_batches_gieogieo');
+      const r = await _ueClaimedReverseAllocations(revKey + '_prep_' + prepId, prepId, unitAllocations, 'prep_batches_gieogieo');
       // ambiguous:true → coi như đã hoàn để tránh cộng đúp untrackedPendingDelta (xem chú thích
       // ở _reverseIngredientConsumptionPOS).
       unitsTouched = r.ambiguous || r.appliedQty >= r.totalQty - 1e-6;
@@ -22476,7 +22525,7 @@ async function _reversePrepConsumptionPOS(prepId, consumedQty, note, referenceId
   const prepRef = fstore.collection('prep_items_gieogieo').doc(prepId);
   // [BUG "xoá đơn bấm lại sau khi xoá RTDB lỗi → hoàn đúp" — FIX] id CỐ ĐỊNH theo
   // (referenceId + prepId) — cùng lý do với _reverseIngredientConsumptionPOS ở trên.
-  const txRef = fstore.collection('prep_transactions_gieogieo').doc('reversal_' + (referenceId || 'norefid') + '_prep_' + prepId);
+  const txRef = fstore.collection('prep_transactions_gieogieo').doc('reversal_' + revKey + '_prep_' + prepId);
   await fstore.runTransaction(async (t) => {
     const doc = await t.get(prepRef);
     if (!doc.exists) throw new Error('Bán thành phẩm không tồn tại');
@@ -22495,6 +22544,7 @@ async function _reversePrepConsumptionPOS(prepId, consumedQty, note, referenceId
       type: 'CONSUMPTION', qty: back, resultingStock: next,
       note: note || '', referenceId: referenceId || null, reversal: true,
       reversalCoverage: unitsTouched ? 'full' : 'untracked',
+      ...(unitAllocations && unitAllocations.length ? { reversedAllocations: unitAllocations } : {}),
       createdAt: new Date().toISOString(), businessDate: posDateKey(), source: 'pos'
     });
   });
@@ -26987,8 +27037,8 @@ async function _submitAddonImpl() {
   showDet(o.id);
 
   // Trừ kho phần thêm — không chặn luồng, lỗi chỉ ghi log như applySalesConsumptionPOS.
-  applyAddonConsumptionPOS(before, { ...o, itemsArray: newItems }, o.id,
-    'Bổ sung topping' + (o.billCode ? ' — ' + o.billCode : ''));
+  trackConsumptionPOS(o.id, applyAddonConsumptionPOS(before, { ...o, itemsArray: newItems }, o.id,
+    'Bổ sung topping' + (o.billCode ? ' — ' + o.billCode : '')));
 
   // In phiếu bổ sung + tem bổ sung. Không in lại bill gốc.
   printAddonReceipt(o, addon);
@@ -27002,6 +27052,8 @@ async function _submitAddonImpl() {
 // thể dùng cỡ ly/nắp khác). Lấy hiệu số thì mọi thay đổi kiểu đó tự được tính đúng, và
 // dùng chung đúng một đường tính với lúc bán nên không bao giờ lệch nhau.
 async function applyAddonConsumptionPOS(orderBefore, orderAfter, orderId, note) {
+  // Khoá riêng của lần sửa này — dòng hoàn phần bớt không trùng id với lượt xoá cả đơn sau này.
+  const editKey = orderId + '_edit_' + Date.now().toString(36);
   try {
     const [recipes, toppingRecipes, packagingPresets, packagingItemOverrides, baggingRules, pkgRulesPack, baggingTable] =
       await Promise.all([ensureRecipesLoadedPOS(), ensureToppingRecipesLoadedPOS(), ensurePackagingPresetsLoadedPOS(), ensurePackagingItemOverridesLoadedPOS(), ensurePackagingBaggingRulesLoadedPOS(), ensurePackagingRulesLoadedPOS(), ensurePackagingBaggingTableLoadedPOS()]);
@@ -27042,16 +27094,27 @@ async function applyAddonConsumptionPOS(orderBefore, orderAfter, orderId, note) 
               deriveFromUnits: allocations.length > 0,
               ...(allocations.length ? { meta: { fifoAllocations: allocations } } : {})
             }))
-        : _reverseIngredientConsumptionPOS(id, -dIng[id], note + ' (giảm)', orderId, undefined, scaledAlloc(origFifoMap[id], -dIng[id])));
+        : _reverseIngredientConsumptionPOS(id, -dIng[id], note + ' (giảm)', orderId, undefined, scaledAlloc(origFifoMap[id], -dIng[id]), false, editKey));
     });
     Object.keys(dPrep).forEach(id => {
       jobs.push(dPrep[id] > 0
         ? applyPrepConsumptionPOS(id, dPrep[id], note, orderId)
-        : _reversePrepConsumptionPOS(id, -dPrep[id], note + ' (giảm)', orderId, scaledAlloc(origPrepAllocMap[id], -dPrep[id])));
+        : _reversePrepConsumptionPOS(id, -dPrep[id], note + ' (giảm)', orderId, scaledAlloc(origPrepAllocMap[id], -dPrep[id]), editKey));
     });
     if (!jobs.length) return;
+    const jobIds = [...Object.keys(dIng).map(id => ({ id, isPrep: false })), ...Object.keys(dPrep).map(id => ({ id, isPrep: true }))];
     const results = await Promise.allSettled(jobs);
-    results.forEach(r => { if (r.status === 'rejected') console.warn('[addon] trừ kho lỗi:', r.reason); });
+    // Đơn đã lưu + báo thành công trước (không chặn quầy vì lỗi kho) — dòng kho lỗi phải để lại
+    // cảnh báo BỀN cho Quản lý như bán thường, không chỉ console.
+    const failedLines = [];
+    results.forEach((r, i) => { if (r.status === 'rejected') {
+      console.warn('[addon] trừ kho lỗi:', r.reason);
+      failedLines.push({ ...jobIds[i], reason: String((r.reason && r.reason.message) || r.reason || '') });
+    } });
+    if (failedLines.length) {
+      _ueWarnGogsConsumptionFailed(orderId, orderAfter, failedLines).catch(() => {});
+      toastAutoReport('⚠️ Thêm topping: ' + failedLines.length + ' dòng kho chưa trừ được — đã báo Quản lý', 'Thêm topping: trừ kho lỗi', { ref: orderId });
+    }
     refreshFifoAlert().catch(() => {});
     // [MỚI — Tuần 4 truy xuất] order_stock_traces_gieogieo (ghi bởi applySalesConsumptionPOS lúc
     // bán) chỉ chụp đúng breakdown TẠI THỜI ĐIỂM BÁN — hàm này tính CHÊNH LỆCH rồi trừ/hoàn thẳng
