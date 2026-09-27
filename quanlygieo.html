@@ -6689,10 +6689,27 @@ async function approvePendingLostReportsForItem(itemId, countId, codes){
   // Phiếu kiểm kê mới ghi đúng danh sách mã báo mất của lượt đó; phiếu cũ (chưa có danh sách)
   // thì duyệt mọi phiếu báo mất đang chờ của món như trước.
   const docs = Array.isArray(codes) ? snap.docs.filter(d=>codes.includes(d.data().code)) : snap.docs;
+  let loi = 0;
   for(const rep of docs){
     const r = rep.data();
     const cRef = fstore.collection(CTN_COLL).doc(r.containerId);
     let lostQty = 0, meta = null;
+    // Tem ĐANG MỞ: gỡ khỏi RT (nguồn thật của phần đang mở) TRƯỚC khi đổi trạng thái. Gỡ lỗi thì
+    // để phiếu nguyên 'pending_review' — duyệt lại sẽ thử tiếp. Làm ngược lại (duyệt trước, gỡ
+    // sau) thì gỡ lỗi là tem đã 'lost' nhưng vẫn nằm trong RT, tồn tính lại vẫn cộng nó.
+    let liveUB = null;
+    const pre = await cRef.get();
+    if(pre.exists && pre.data().status === 'open'){
+      try{
+        const live = (await _ueActiveUnitsRef(itemId).child(r.containerId).once('value')).val();
+        if(live) liveUB = Number(live.unitBase)||0;
+        let ok = false;
+        for(let i=0;i<3 && !ok;i++){
+          try{ await _ueActiveUnitsRef(itemId).child(r.containerId).remove(); ok = true; }
+          catch(e){ if(i<2) await new Promise(res=>setTimeout(res,400)); else throw e; }
+        }
+      }catch(err){ console.warn('[báo mất] gỡ RT lỗi — để phiếu chờ, duyệt lại sau', r.containerId, err); loi++; continue; }
+    }
     await fstore.runTransaction(async t=>{
       lostQty = 0; meta = null;
       const cDoc = await t.get(cRef);
@@ -6710,13 +6727,7 @@ async function approvePendingLostReportsForItem(itemId, countId, codes){
       t.update(rep.ref, {status:'approved', reviewedAt:nowISO, approvedVia:'stock_count', countId: countId||''});
     });
     if(!meta) continue;
-    if(meta.status === 'open'){
-      try{
-        const live = (await _ueActiveUnitsRef(itemId).child(r.containerId).once('value')).val();
-        if(live) lostQty = Number(live.unitBase)||0;
-        await _ueActiveUnitsRef(itemId).child(r.containerId).remove();
-      }catch(err){ console.warn('[báo mất] gỡ RT lỗi', r.containerId, err); }
-    }
+    if(meta.status === 'open' && liveUB !== null) lostQty = liveUB;
     await fstore.collection('stock_transactions_gieogieo').doc('lost_'+rep.id).set({
       itemId, type:'WASTE', qty:-lostQty, reason:'lost_item', containerId:r.containerId,
       note:`Mất mã ${meta.code} (không tìm thấy khi kiểm kê)`, staff: r.reportedBy||'',
@@ -6726,6 +6737,7 @@ async function approvePendingLostReportsForItem(itemId, countId, codes){
       kind:'lost', txType:'WASTE', note:`Mất mã ${meta.code} — không tìm thấy khi kiểm kê`, referenceId: rep.id, staff: r.reportedBy||''});
   }
   await recomputeTemStock(itemId);
+  if(loi) throw new Error(loi + ' mã đang mở chưa gỡ được khỏi realtime — duyệt lại để thử tiếp');
 }
 async function rejectStockCount(countId, reviewerNote){
   const ref = fstore.collection('stock_counts_gieogieo').doc(countId);
@@ -21866,10 +21878,13 @@ function vesselUsedByPreps(vesselId){
 async function doDeleteVessel(id){
   const v = VESSELS.find(x=>x.id===id); if(!v) return;
   const dung = vesselUsedByPreps(id);
+  // Nguyên liệu dùng ngay cũng gắn dụng cụ cân (Kho ▸ Nguyên liệu ▸ Cân cuối ca).
+  const dungNL = (INVENTORY_ITEMS||[]).filter(it=>(it.vesselIds||[]).includes(id));
+  const canhBaoNL = dungNL.length ? `\n\n⚠️ Đang được ${dungNL.length} nguyên liệu dùng: ${dungNL.map(it=>it.name).join(', ')}.` : '';
   const canhBao = dung.length
     ? `\n\n⚠️ Đang được ${dung.length} bán thành phẩm dùng: ${dung.map(p=>p.name).join(', ')}.\nCác bán thành phẩm đó sẽ mất lựa chọn cân bằng dụng cụ này.`
     : '';
-  if(!confirm(`Xoá dụng cụ "${v.name}"?${canhBao}\n\nẢnh của nó cũng bị xoá hẳn khỏi Firebase.`)) return;
+  if(!confirm(`Xoá dụng cụ "${v.name}"?${canhBao}${canhBaoNL}\n\nẢnh của nó cũng bị xoá hẳn khỏi Firebase.`)) return;
   try{
     await fstore.collection(VESSEL_COLL).doc(id).delete();
     vesselPurgePaths([v.imagePath, ...(v.variants||[]).map(x=>x.imagePath)]);
@@ -21877,6 +21892,9 @@ async function doDeleteVessel(id){
     // đi lọc mọi lúc, và màn Quản lý hiện "5 dụng cụ" mà thật ra chỉ còn 4.
     await Promise.allSettled(dung.map(p=>fstore.collection('prep_items_gieogieo').doc(p.id)
       .update({ vesselIds: (p.vesselIds||[]).filter(x=>x!==id), updatedAt: new Date().toISOString() })));
+    await Promise.allSettled(dungNL.map(it=>fstore.collection('inventory_items_gieogieo').doc(it.id)
+      .update({ vesselIds: (it.vesselIds||[]).filter(x=>x!==id), updatedAt: new Date().toISOString() })));
+    if(dungNL.length) memoDropItems();
     logAudit('delete','prep_vessel',id,{ name:v.name });
     toast('🗑 Đã xoá');
     renderKhoVessels();
@@ -24273,7 +24291,8 @@ async function submitLocStock(){
     });
     if(fail) showError(`${fail}/${rows.length} dòng lưu không được — mở lại và thử lại đúng mấy dòng đó.`);
     else toast(`✅ Đã đặt tồn ${rows.length} nguyên liệu tại ${loc?loc.name:''}`);
-    locStockDraft = {};
+    // Chỉ xoá số của dòng đã lưu — dòng lỗi giữ nguyên để bấm lưu lại, khỏi đếm lại từ đầu.
+    locStockDraft = Object.fromEntries(rows.filter((_,i)=>res[i].status!=='fulfilled'));
     renderKhoLocStock();
   }catch(err){ console.error(err); showError('Lưu thất bại: '+(err.code||err.message||err)); }
 }

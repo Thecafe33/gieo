@@ -13187,8 +13187,11 @@ async function _startPrepBatchImpl(preResolvedStaff, atomicScanDone, atomicScann
         // atomicScannedContainerIds), nên bỏ qua ở đây.
         if (rec.alreadyAtomicScanned) return;
         try {
-          const rv = await unitEngineReverseAllocations(itemId, rec.allocations);
-          if (rv.appliedQty >= rv.totalQty - 1e-6) await _ueRecomputeCurrentStock(itemId, STOCK_CONTAINERS_COLL).catch(() => {});
+          // Cùng claimId với _reverseIngredientConsumptionPOS (bước hoàn theo sổ ở trên): nếu lần
+          // đọc sổ thứ hai lỗi khiến một input ĐÃ được hoàn bị coi nhầm là "không có sổ", claim
+          // đã tồn tại → không cộng vào tem lần hai.
+          const rv = await _ueClaimedReverseAllocations(batchRef.id + '_ing_' + itemId, itemId, rec.allocations);
+          if (rv.ambiguous || rv.appliedQty >= rv.totalQty - 1e-6) await _ueRecomputeCurrentStock(itemId, STOCK_CONTAINERS_COLL).catch(() => {});
           backOk++;
         } catch (err) { console.warn('[FIFO] hoàn allocations của input không có ledger lỗi', itemId, err); }
       }));
@@ -18883,7 +18886,7 @@ async function _finalizeHandoverOpen() {
       const finalQty = l.counted2;
       const varianceQty = finalQty - l.closeQty;
       const variancePct = l.closeQty !== 0 ? Math.round((varianceQty / l.closeQty) * 1000) / 10 : null;
-      alertJobs.push(fstore.collection('alerts_gieogieo').add({
+      alertJobs.push(() => fstore.collection('alerts_gieogieo').add({
         type: 'handover_variance', severity: recountMatched ? 'danger' : 'warning',
         businessDate: shiftState.businessDate, createdAt: now,
         title: `Chênh lệch giao ca — ${l.itemName}`,
@@ -18904,7 +18907,8 @@ async function _finalizeHandoverOpen() {
       staffEmployeeId: _handoverOpenStaff ? _handoverOpenStaff.id : '',
       countedAt: now
     });
-    if (alertJobs.length) await Promise.allSettled(alertJobs);
+    // Cảnh báo chỉ ghi SAU khi biên bản đã lưu — lưu lỗi rồi bấm lại không tạo cảnh báo trùng.
+    if (alertJobs.length) await Promise.allSettled(alertJobs.map(f => f()));
     // [FIX — "refill hết báo mà không ai biết"] Số đếm THẬT vừa xác nhận phải chảy
     // ngược lại locationStock ngay — đóng vòng lặp trôi dần khiến checklist refill và
     // chặn đóng ca tự tin nhầm vào số cũ (xem setLocationStockFromCountPOS). Best-effort:
@@ -18921,8 +18925,10 @@ async function _finalizeHandoverOpen() {
     logAutoChecklistResolved('count_handover', `${shiftState.businessDate}_open`, _handoverOpenStaff);
     toast(alertJobs.length ? `✅ Đã ghi nhận — ${alertJobs.length} món chênh lệch đã báo Quản lý` : '✅ Đã ghi nhận đếm giao ca');
   } catch (err) {
+    // Chưa lưu được biên bản → KHÔNG đi tiếp, giữ nguyên số đếm + người đếm trên màn để bấm lại.
     console.error('_finalizeHandoverOpen failed', err);
-    toast('❌ Lỗi lưu đếm giao ca: ' + (err.code || err.message || err));
+    toast('❌ Chưa lưu được đếm giao ca: ' + (err.code || err.message || err) + ' — bấm xác nhận lại');
+    return;
   }
   _handoverOpenStaff = null;
   await _continueAfterHandoverOpen();
@@ -19786,6 +19792,8 @@ async function _submitPrepCountImpl() {
   const now = new Date().toISOString();
   const lines = [];
   const jobs = [];
+  const jobPrep = [];   // BTP của từng job (null = job phụ như cảnh báo) — job lỗi thì cân lại đúng BTP đó
+  const pushJob = (prepId, p) => { jobs.push(p); jobPrep.push(prepId); };
 
   for (const l of _prepCountState) {
     const counted = Number(l.counted) || 0;
@@ -19826,7 +19834,7 @@ async function _submitPrepCountImpl() {
       if (l.discardAll || isExpired) {
         discardedQty += Math.max(0, Number(b.qtyRemaining) || 0);
         if (!discardReason) discardReason = l.discardAll ? 'Nhân viên bỏ hết cuối ngày' : 'Quá hạn sử dụng';
-        jobs.push(fstore.collection('prep_batches_gieogieo').doc(b.id).update({
+        pushJob(l.prepId, fstore.collection('prep_batches_gieogieo').doc(b.id).update({
           qtyRemaining: 0, unitBase: 0, status: 'expired', expiredAt: now,
           expiredReason: l.discardAll ? 'Nhân viên bỏ hết cuối ngày' : 'Quá hạn sử dụng'
         }));
@@ -19851,7 +19859,7 @@ async function _submitPrepCountImpl() {
       // [MỚI] Bảng kê cân của ĐÚNG lô này: dòng 1 lô dùng l.weighings (số cân đó
       // chính là số của lô duy nhất), dòng nhiều lô dùng bảng kê riêng từng lô.
       const wLo = l.perBatch ? (l.batchWeighings[b.id] || []) : (l.weighings || []);
-      jobs.push(fstore.collection('prep_batches_gieogieo').doc(b.id).update({
+      pushJob(l.prepId, fstore.collection('prep_batches_gieogieo').doc(b.id).update({
         qtyRemaining: take, unitBase: take,
         ...(wLo.length ? { countWeighMethod: 'vessel', countWeighings: wLo, countWeighedAt: now } : {}),
         ...(take <= 0 ? { status: 'used_up', usedUpAt: now } : {})
@@ -19902,7 +19910,7 @@ async function _submitPrepCountImpl() {
     // trước đây tạo TRƯỚC vòng lặp nên alert không biết lô nào vừa bị đánh dấu hết.
     if (!l.discardAll && l.sysQty > 0 && handoverIsOverThreshold(variance, l.sysQty)) {
       const variancePct = Math.round((variance / l.sysQty) * 1000) / 10;
-      jobs.push(fstore.collection('alerts_gieogieo').add({
+      pushJob(null, fstore.collection('alerts_gieogieo').add({
         type: 'prep_count_variance',
         // Hụt (âm) nguy hiểm hơn dư: có thể là thất thoát thật hoặc gõ nhầm làm mất
         // hàng khỏi sổ sách. Dư thì thường chỉ là đếm/nhập sai.
@@ -19956,7 +19964,7 @@ async function _submitPrepCountImpl() {
     //                  phải hao hụt — gộp chung vào waste sẽ thổi phồng con số và
     //                  làm mất ý nghĩa của chỉ tiêu waste.
     // Cộng lại 2 dòng vẫn đưa currentStock về đúng `counted`, không lệch sổ.
-    jobs.push((async () => {
+    pushJob(l.prepId, (async () => {
       // Chờ RT của TẤT CẢ lô thuộc item này xong TRƯỚC khi quyết định có suy currentStock từ
       // tổng unit hay không — thiếu bước chờ này thì recompute có thể chạy trước khi RT kịp
       // cập nhật, đọc trúng số cũ.
@@ -20048,13 +20056,16 @@ async function _submitPrepCountImpl() {
       try { await prepShortageClearAll(shortageSnap); }
       catch (err) { console.warn('[BTP âm] đóng khoản âm sau khi cân lỗi', err); }
     }
+    // BTP có lô/sổ cập nhật lỗi → KHÔNG coi là đã đếm: đưa vào danh sách cân lại (cơ chế
+    // prepCountRecountIds sẵn có) và mở lại màn cân chỉ cho các BTP đó.
+    const failedPrepIds = [...new Set(results.map((r, i) => r.status === 'rejected' ? jobPrep[i] : null).filter(Boolean))];
     const previouslyValid = (shiftState.closing && shiftState.closing.prepCountLines) || [];
     const refreshedIds = new Set(lines.map(l => l.prepId));
     const completeLines = previouslyValid.filter(l => !refreshedIds.has(l.prepId))
       .map(l => ({ ...l, countedAt: l.countedAt || (shiftState.closing && shiftState.closing.prepCountAt) || now }))
-      .concat(lines);
+      .concat(lines.filter(l => !failedPrepIds.includes(l.prepId)));
     await fstore.collection('daily_closings_gieogieo').doc(shiftState.businessDate).set({
-      prepCountLines: completeLines, prepCountAt: now, prepCountRecountIds: [],
+      prepCountLines: completeLines, prepCountAt: now, prepCountRecountIds: failedPrepIds,
       ...(shortageSnap ? { prepShortage: { ...((shiftState.closing && shiftState.closing.prepShortage) || {}), ...shortageSnap },
         prepShortageAnswered: false } : {}),
       prepCountBy: staffEmp.fullName, prepCountByEmployeeId: staffEmp.id
@@ -20063,9 +20074,14 @@ async function _submitPrepCountImpl() {
     shiftState.closing.prepCountLines = completeLines;
     if (shortageSnap) shiftState.closing.prepShortage = { ...(shiftState.closing.prepShortage || {}), ...shortageSnap };
     shiftState.closing.prepCountAt = now;
-    shiftState.closing.prepCountRecountIds = [];
+    shiftState.closing.prepCountRecountIds = failedPrepIds;
     if (failed.length) toastAutoReport('⚠️ Đã lưu nhưng ' + failed.length + ' lô BTP cập nhật lỗi', 'Đếm BTP cuối ca: cập nhật lô lỗi', { ref: shiftState.businessDate || '' });
     else toast('✅ Đã ghi nhận tồn bán thành phẩm');
+    if (failedPrepIds.length) {
+      toast('⚠️ ' + failedPrepIds.length + ' BTP chưa lưu được — cân lại đúng các BTP đó');
+      await _continueAfterHandoverClose();
+      return;
+    }
     await _continueAfterPrepCount();
   } catch (err) {
     console.error('submitPrepCount failed', err);
