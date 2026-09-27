@@ -20599,18 +20599,47 @@ function setHandoverBannerPOS(on) {
 // ---------- điều kiện BẮT BUỘC giao ca ----------
 async function handoverRequiredOnCheckOutPOS(emp) {
   try {
-    if (!shiftState.businessDate || shiftState.businessDate !== posDateKey()) return false;
-    const closeSnap = await fstore.collection('daily_closings_gieogieo').doc(posDateKey()).get();
+    const today = posDateKey();
+    // [FIX] Trước đây dựa vào shiftState + cache check-in của CHÍNH máy này — có 4 đường làm
+    // việc ép giao ca bị bỏ qua im lặng:
+    //   1. Người nhận check-in ở MÁY KHÁC sau khi màn này mở (cache làm mới 3 phút/lần) → máy
+    //      này tưởng không còn ai trong ca.
+    //   2. Bấm check-out khi màn Ca làm việc chưa nạp xong phiếu mở ca (shiftState.opening=null)
+    //      mà ngày đó chưa có đoạn ca 1 → không dựng được đoạn ca → coi như không có két.
+    //   3. Phiếu mở ca cũ không lưu staffEmployeeId → đoạn ca có custodianId rỗng, không bao giờ
+    //      khớp ai → không ai bị ép giao.
+    //   4. Lỗi đọc mạng → cho qua mà không ai biết.
+    // Giờ đọc TƯƠI cả ba thứ ngay lúc check-out, khớp người giữ két theo tên khi thiếu id, và
+    // lỗi thì vẫn cho check-out (không nhốt người) nhưng báo Quản lý.
+    // Giữ nguyên điều kiện ngày: shiftState của NGÀY KHÁC (app mở xuyên đêm, đang kết ca ngày cũ)
+    // không được ghi đè ở đây.
+    if (!shiftState.businessDate || shiftState.businessDate !== today) return false;
+    const [closeSnap, openSnap] = await Promise.all([
+      fstore.collection('daily_closings_gieogieo').doc(today).get(),
+      fstore.collection('daily_openings_gieogieo').doc(today).get()
+    ]);
     if (closeSnap.exists && closeSnap.data().status === 'closed') return false;  // đã đóng ngày, không còn két để giao
-    await loadSegmentsPOS(posDateKey());
+    if (openSnap.exists && !shiftState.opening) shiftState.opening = openSnap.data();   // màn Ca chưa nạp xong
+    await loadSegmentsPOS(today);
     const seg = await ensureOpeningSegmentPOS();
     if (!seg) return false;                                        // chưa mở ca
-    if (String(seg.custodianId || '') !== String(emp.id)) return false;  // không phải người giữ két
+    const laNguoiGiu = seg.custodianId
+      ? String(seg.custodianId) === String(emp.id)
+      : String(seg.custodianName || '').trim().toLowerCase() === String(emp.fullName || '').trim().toLowerCase();
+    if (!laNguoiGiu) return false;                                 // không phải người giữ két
+    await loadEmployeeShiftsTodayCache();
     return _employeeShiftsTodayCache.some(s => !s.checkedOutAt && s.employeeId !== emp.id);
   } catch (err) {
-    // Lỗi mạng/quyền → KHÔNG chặn check-out. Giữ người ta lại vì app không đọc
-    // được Firestore là tệ hơn nhiều so với thiếu một bản ghi giao ca.
-    console.warn('handoverRequiredOnCheckOutPOS lỗi (bỏ qua, cho check-out):', err);
+    // Lỗi mạng/quyền → KHÔNG chặn check-out (nhốt người lại vì app không đọc được Firestore còn
+    // tệ hơn), nhưng không im lặng: báo trên màn + để lại cảnh báo cho Quản lý.
+    console.warn('handoverRequiredOnCheckOutPOS lỗi (cho check-out, đã báo Quản lý):', err);
+    toast('⚠️ Không kiểm tra được giao ca (lỗi mạng) — đã báo Quản lý');
+    fstore.collection('alerts_gieogieo').add({
+      type: 'handover_check_failed', severity: 'warning', status: 'new',
+      businessDate: posDateKey(), createdAt: new Date().toISOString(),
+      title: `Không kiểm tra được giao ca khi ${emp.fullName || ''} check-out`,
+      staff: emp.fullName || '', staffEmployeeId: emp.id || '', error: String((err && err.message) || err)
+    }).catch(() => {});
     return false;
   }
 }
