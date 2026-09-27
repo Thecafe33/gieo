@@ -14648,7 +14648,8 @@ async function qlReverseStockForOrder(orderId, billCode){
       if(!k || t.type !== 'CONSUMPTION' || t.backfillNoStockEffect || t.voided) return;
       if(t.reversal === true){
         if(d.id === 'reversal_' + orderId + sep + k) return;
-        back[k] = (back[k]||0) + Math.abs(Number(t.qty)||0);
+        // xem prepareOrderReversalNetPOS: phần chưa vào tem (outsideTem) vẫn phải hoàn
+        back[k] = (back[k]||0) + (t.outsideTem ? (Number(t.appliedToUnitsQty)||0) : Math.abs(Number(t.qty)||0));
         (t.reversedAllocations||[]).forEach(a => { const c = a.containerId||a.unitId; backAlloc[k+'|'+c] = (backAlloc[k+'|'+c]||0) + (Number(a.qty)||0); });
         return;
       }
@@ -14690,13 +14691,21 @@ async function qlReverseStockForOrder(orderId, billCode){
     if(!(total > 0)) return { applied: 0, claimed: false };
     const ref = fstore.collection('reversal_unit_claims_gieogieo').doc(claimId);
     let mine = false, old = null;
+    const STALE_MS = 2 * 60 * 1000;   // = REVERSAL_CLAIM_STALE_MS bên POS
     await fstore.runTransaction(async t => {
       const d = await t.get(ref);
-      if(d.exists){ old = d.data(); return; }
+      old = d.exists ? d.data() : null;
+      if(old && old.status === 'done') return;
+      // Lượt khác đang hoàn dở (chưa quá hạn) → KHÔNG được coi là đã hoàn: báo lỗi, bill giữ
+      // nguyên để xoá lại sau. Quá hạn (lượt kia chết giữa chừng) thì giành lại và hoàn tiếp.
+      if(old && old.status === 'claiming' && typeof old.claimedAt === 'number' && Date.now() - old.claimedAt < STALE_MS) return;
       mine = true;
-      t.set(ref, { status: 'claiming', itemId: id, claimedAt: Date.now(), at: nowISO, by: 'management' });
+      t.set(ref, { status: 'claiming', itemId: id, claimedAt: Date.now(), at: nowISO, by: 'management' }, { merge: true });
     });
-    if(!mine) return { applied: old && old.status==='done' ? (Number(old.appliedQty)||0) : total, claimed: true };
+    if(!mine){
+      if(old && old.status === 'done') return { applied: Number(old.appliedQty)||0, claimed: true };
+      throw new Error('đang có lượt hoàn kho khác cho bill này — đợi 2 phút rồi xoá lại');
+    }
     const applied = await reverseIntoUnits(id, allocs, coll);
     await ref.set({ status: 'done', appliedQty: applied, totalQty: total, doneAt: new Date().toISOString() }, { merge: true });
     return { applied, claimed: false };
@@ -14786,6 +14795,14 @@ async function qlDoDeleteBill(id){
   if(btn){ btn.disabled = true; btn.textContent = 'Đang xoá…'; }
   try{
     await ensureAuth();
+    // POS trừ kho NỀN sau khi lưu bill và ghi order_stock_traces khi xong. Bill còn mới mà chưa có
+    // trace → POS có thể còn đang ghi sổ; hoàn ngay sẽ đọc sổ thiếu dòng rồi xoá bill, dòng trừ
+    // ghi xong sau đó không bao giờ được hoàn. Bill cũ (trước khi có trace) thì cho qua.
+    const tuoiPhut = (Date.now() - new Date(o.createdAt || 0).getTime()) / 60000;
+    if(tuoiPhut < 10){
+      const tr = await fstore.collection('order_stock_traces_gieogieo').doc(id).get();
+      if(!tr.exists) throw new Error('POS có thể vẫn đang trừ kho cho bill này — đợi vài phút rồi xoá lại');
+    }
     const kq = await qlReverseStockForOrder(id, o.billCode);
     // Hoàn kho lỗi → KHÔNG xoá bill (xoá rồi không còn gì để hoàn lại). Hoàn kho idempotent
     // theo từng món nên bấm xoá lại chỉ chạy nốt phần còn thiếu.
@@ -14796,16 +14813,20 @@ async function qlDoDeleteBill(id){
     const [dd, mm, yyyy] = String(o.date || '').split('/');
     if(!dd || !mm) throw new Error('Bill thiếu ngày, không xác định được chỗ lưu');
     const thang = MONTH_KEYS[parseInt(mm,10)-1];
-    await db.ref(`orders_gieogieo/${thang}/${dd}/${id}`).remove();
-    // Bill đã vào archive (ngày cũ) → gỡ luôn ở archive, không thì tải lại lịch sử nó hiện lại.
-    await fstore.collection('orders_gieogieo_archive').doc(`${thang}_${dd}_${yyyy}`)
-      .update({ ['orders.' + id]: firebase.firestore.FieldValue.delete() }).catch(() => {});
-    // Bill bổ sung sau kết ca → gỡ khoản tiền đã ghi vào phiếu đóng ngày (đối soát tiền mặt).
+    // Gỡ bill khỏi archive (ngày cũ) + khoản tiền bill bổ sung trong phiếu đóng ngày TRƯỚC khi xoá
+    // RTDB, không nuốt lỗi: lỗi thì dừng, bill còn nguyên để xoá lại. Chỉ gỡ khi thật sự có mục đó.
+    const arRef = fstore.collection('orders_gieogieo_archive').doc(`${thang}_${dd}_${yyyy}`);
+    const ar = await arRef.get();
+    if(ar.exists && ((ar.data()||{}).orders||{})[id])
+      await arRef.update({ ['orders.' + id]: firebase.firestore.FieldValue.delete() });
     if(o.backfillMode){
       const bd = o.businessDate || `${yyyy}-${String(mm).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
-      await fstore.collection('daily_closings_gieogieo').doc(bd)
-        .update({ ['postCloseBills.' + id]: firebase.firestore.FieldValue.delete() }).catch(() => {});
+      const clRef = fstore.collection('daily_closings_gieogieo').doc(bd);
+      const cl = await clRef.get();
+      if(cl.exists && ((cl.data()||{}).postCloseBills||{})[id])
+        await clRef.update({ ['postCloseBills.' + id]: firebase.firestore.FieldValue.delete() });
     }
+    await db.ref(`orders_gieogieo/${thang}/${dd}/${id}`).remove();
 
     // Ghi vết: ai xoá, lúc nào, bill gì, hoàn được bao nhiêu dòng kho.
     await fstore.collection('bill_deletions_gieogieo').add({
@@ -21916,15 +21937,20 @@ async function doDeleteVessel(id){
     : '';
   if(!confirm(`Xoá dụng cụ "${v.name}"?${canhBao}${canhBaoNL}\n\nẢnh của nó cũng bị xoá hẳn khỏi Firebase.`)) return;
   try{
+    // Gỡ id khỏi bán thành phẩm + nguyên liệu đang trỏ tới TRƯỚC khi xoá dụng cụ — để lại id chết
+    // thì màn Quản lý hiện "Cân được"/"5 dụng cụ" sai. Gỡ lỗi dòng nào thì DỪNG, chưa xoá dụng cụ,
+    // để bấm xoá lại (xoá trước thì không còn dụng cụ để bấm lại nữa).
+    const go = await Promise.allSettled([
+      ...dung.map(p=>fstore.collection('prep_items_gieogieo').doc(p.id)
+        .update({ vesselIds: (p.vesselIds||[]).filter(x=>x!==id), updatedAt: new Date().toISOString() })),
+      ...dungNL.map(it=>fstore.collection('inventory_items_gieogieo').doc(it.id)
+        .update({ vesselIds: (it.vesselIds||[]).filter(x=>x!==id), updatedAt: new Date().toISOString() }))]);
+    if(dung.length) memoDropPreps();
+    if(dungNL.length) memoDropItems();
+    const goLoi = go.filter(r=>r.status==='rejected').length;
+    if(goLoi) throw new Error(goLoi + ' món chưa gỡ được dụng cụ — CHƯA xoá dụng cụ, bấm xoá lại');
     await fstore.collection(VESSEL_COLL).doc(id).delete();
     vesselPurgePaths([v.imagePath, ...(v.variants||[]).map(x=>x.imagePath)]);
-    // Gỡ id khỏi các bán thành phẩm đang trỏ tới — để lại id chết thì POS phải
-    // đi lọc mọi lúc, và màn Quản lý hiện "5 dụng cụ" mà thật ra chỉ còn 4.
-    await Promise.allSettled(dung.map(p=>fstore.collection('prep_items_gieogieo').doc(p.id)
-      .update({ vesselIds: (p.vesselIds||[]).filter(x=>x!==id), updatedAt: new Date().toISOString() })));
-    await Promise.allSettled(dungNL.map(it=>fstore.collection('inventory_items_gieogieo').doc(it.id)
-      .update({ vesselIds: (it.vesselIds||[]).filter(x=>x!==id), updatedAt: new Date().toISOString() })));
-    if(dungNL.length) memoDropItems();
     logAudit('delete','prep_vessel',id,{ name:v.name });
     toast('🗑 Đã xoá');
     renderKhoVessels();

@@ -9800,6 +9800,7 @@ async function _submitDrinkWasteImpl() {
   // Ghi lại sau khi lần trước lỗi một phần (cùng món/size/số ly/lý do) → DÙNG LẠI wasteEventId
   // cũ: id dòng sổ cố định theo lần đổ nên dòng đã ghi lần trước tự bỏ qua, chỉ chạy dòng lỗi.
   const dwSig = [m.id, khoTxState.drinkSize, qty, reason, JSON.stringify(toppings.map(t => [t.id, t.qty])), !!noCup].join('|');
+  if (!khoTxState.dwPending) { try { khoTxState.dwPending = JSON.parse(localStorage.getItem('dwPending_pos') || 'null'); } catch (e) {} }
   const pendingDw = khoTxState.dwPending && khoTxState.dwPending.sig === dwSig ? khoTxState.dwPending : null;
   const wasteEventId = pendingDw ? pendingDw.eventId : `dw_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const meta = {
@@ -9823,12 +9824,24 @@ async function _submitDrinkWasteImpl() {
       if ((await fstore.collection('stock_transactions_gieogieo').doc(txId).get()).exists) return;
       const allocations = await unitEngineAllocateConsumption(id, qtyUsed, undefined, { type: 'drink_waste', id: wasteEventId, note })
         .catch(err => { console.warn('[FIFO] phân bổ lỗi (đổ ly)', id, err); return []; });
-      return applyStockTransactionPOS({
-        itemId: id, type: 'WASTE', qty: -qtyUsed, txId,
-        note, staff: staffEmp.fullName, staffEmployeeId: staffEmp.id,
-        deriveFromUnits: allocations.length > 0,
-        meta: allocations.length ? { ...meta, fifoAllocations: allocations } : meta
-      });
+      try {
+        return await applyStockTransactionPOS({
+          itemId: id, type: 'WASTE', qty: -qtyUsed, txId,
+          note, staff: staffEmp.fullName, staffEmployeeId: staffEmp.id,
+          deriveFromUnits: allocations.length > 0,
+          meta: allocations.length ? { ...meta, fifoAllocations: allocations } : meta
+        });
+      } catch (err) {
+        // Tem đã bị trừ ở RT mà sổ chưa ghi → hoàn tem ngay (như bán hàng), không thì bấm ghi lại
+        // sẽ trừ tem lần hai. Chỉ hoàn khi chắc sổ CHƯA ghi (mất ACK mà đã ghi thật thì giữ nguyên).
+        if (allocations.length) {
+          let daGhi = true;
+          try { daGhi = (await fstore.collection('stock_transactions_gieogieo').doc(txId).get()).exists; } catch (e) {}
+          if (!daGhi) await _ueClaimedReverseAllocations('dwfail_' + txId + '_' + Date.now(), id, allocations)
+            .then(() => _ueRecomputeCurrentStock(id, STOCK_CONTAINERS_COLL)).catch(e => console.warn('[Đổ ly] hoàn tem sau lỗi ghi sổ lỗi', id, e));
+        }
+        throw err;
+      }
     }),
     ...prepIds.map(id => _wastePrepQtyPOS(id, prepAgg[id], note, staffEmp, meta, wasteEventId + '_prep_' + id))
   ]);
@@ -9837,10 +9850,12 @@ async function _submitDrinkWasteImpl() {
     // Giữ nguyên màn + lựa chọn để bấm "Ghi" lại: lần sau dùng lại wasteEventId → chỉ ghi dòng lỗi.
     console.warn('[Đổ ly] Một số nguyên liệu trừ thất bại:', failed.map(f => f.reason));
     khoTxState.dwPending = { sig: dwSig, eventId: wasteEventId };
+    try { localStorage.setItem('dwPending_pos', JSON.stringify(khoTxState.dwPending)); } catch (e) {}
     toastAutoReport(`⚠️ ${failed.length}/${results.length} nguyên liệu chưa trừ được — bấm Ghi lại (chỉ ghi phần còn lỗi)`, 'Đổ ly: trừ nguyên liệu lỗi', { ref: wasteEventId });
     return;
   }
   khoTxState.dwPending = null;
+  try { localStorage.removeItem('dwPending_pos'); } catch (e) {}
   toast(`✅ Đã ghi hao hụt ${qty} ly ${m.name} (${khoTxState.drinkSize})`);
   if (skipped.length) console.info('[Đổ ly] Bỏ qua:', skipped);
   khoTxState.drinkToppings = {}; khoTxState.drinkNoCup = false;
@@ -9864,6 +9879,7 @@ async function _wastePrepQtyPOS(prepId, qty, note, staffEmp, meta, txId) {
     .catch(err => { console.warn('[UnitEngine] phân bổ lô BTP (đổ ly) lỗi', prepId, err); return []; });
   const prepRef = fstore.collection('prep_items_gieogieo').doc(prepId);
   const txRef = txId ? fstore.collection('prep_transactions_gieogieo').doc(txId) : fstore.collection('prep_transactions_gieogieo').doc();
+  try {
   await fstore.runTransaction(async (t) => {
     const doc = await t.get(prepRef);
     if (!doc.exists) throw new Error('Bán thành phẩm không tồn tại');
@@ -9887,6 +9903,16 @@ async function _wastePrepQtyPOS(prepId, qty, note, staffEmp, meta, txId) {
       ...(meta || {})
     });
   });
+  } catch (err) {
+    // Lô đã bị trừ ở RT mà sổ chưa ghi → hoàn lô (cùng lý do nhánh nguyên liệu ở đổ ly).
+    if (unitAllocations.length) {
+      let daGhi = true;
+      try { daGhi = (await txRef.get()).exists; } catch (e) {}
+      if (!daGhi) await _ueClaimedReverseAllocations('dwfail_' + txRef.id + '_' + Date.now(), prepId, unitAllocations, 'prep_batches_gieogieo')
+        .then(() => _ueRecomputeCurrentStock(prepId, 'prep_batches_gieogieo')).catch(e => console.warn('[Đổ ly] hoàn lô sau lỗi ghi sổ lỗi', prepId, e));
+    }
+    throw err;
+  }
   await _ueRecomputeCurrentStock(prepId, 'prep_batches_gieogieo').catch(() => {});
 }
 
@@ -21901,7 +21927,10 @@ async function reportMissingRecipePOS(skipped) {
 // Giữ promise theo orderId để bước xoá đợi nó xong trước.
 const _consumptionInflightPOS = new Map();
 function trackConsumptionPOS(orderId, promise) {
-  const p = Promise.resolve(promise).catch(() => {}).finally(() => {
+  // Nối với tác vụ đang chạy của cùng bill (vd bán rồi thêm topping ngay) — không thay thế,
+  // nút xoá phải đợi CẢ HAI.
+  const truoc = _consumptionInflightPOS.get(orderId);
+  const p = Promise.all([truoc, Promise.resolve(promise).catch(() => {})]).catch(() => {}).finally(() => {
     if (_consumptionInflightPOS.get(orderId) === p) _consumptionInflightPOS.delete(orderId);
   });
   _consumptionInflightPOS.set(orderId, p);
@@ -21933,7 +21962,14 @@ async function applySalesConsumptionPOS(order, orderId, businessDate) {
       + 'Tự động trừ theo GOGS' + (order && order.billCode ? ' — ' + order.billCode : '');
     const ingredientIds = Object.keys(agg);
     const prepIds = Object.keys(prepAgg);
-    if (!ingredientIds.length && !prepIds.length) return;
+    if (!ingredientIds.length && !prepIds.length) {
+      // Vẫn ghi trace rỗng: app Quản lý dựa vào trace để biết POS đã xử lý kho xong cho bill này.
+      fstore.collection('order_stock_traces_gieogieo').doc(orderId).set({
+        orderId, billCode: (order && order.billCode) || '', businessDate: businessDate || posDateKey(),
+        createdAt: new Date().toISOString(), ingredients: {}, preps: {}, noStockLines: true
+      }, { merge: true }).catch(() => {});
+      return;
+    }
     // [MỚI — đóng vòng truy xuất "bill → tem"] fifoAllocations/unitAllocations trước giờ chỉ
     // nằm trên từng dòng ledger CONSUMPTION, phục vụ đúng một việc: hoàn ngược lúc xoá đơn. Muốn
     // hỏi "bill này lấy từ tem/lô nào" phải dò lại đúng những dòng ledger đó qua referenceId —
@@ -22214,7 +22250,10 @@ function prepareOrderReversalNetPOS(orderId, docs, idField, allocField, sep) {
     if (!k || t.type !== 'CONSUMPTION' || t.backfillNoStockEffect || t.voided) return;
     if (t.reversal === true) {
       if (d.id === 'reversal_' + orderId + sep + k) return;       // chính lượt xoá cả đơn
-      back[k] = (back[k] || 0) + Math.abs(Number(t.qty) || 0);
+      // NL có tem mà lượt hoàn trước chỉ vào tem được một phần (outsideTem): phần chưa vào tem
+      // chỉ là dòng Sổ lệch, tồn (= tổng mã) chưa hề nhận lại → lượt này vẫn phải hoàn phần đó.
+      const daVao = t.outsideTem ? (Number(t.appliedToUnitsQty) || 0) : Math.abs(Number(t.qty) || 0);
+      back[k] = (back[k] || 0) + daVao;
       (t.reversedAllocations || []).forEach(a => { const c = a.containerId || a.unitId; backAlloc[k + '|' + c] = (backAlloc[k + '|' + c] || 0) + (Number(a.qty) || 0); });
       return;
     }
@@ -22483,8 +22522,11 @@ async function _reverseIngredientConsumptionPOS(itemId, consumedQty, note, refer
       // xem như 'full' (tem thật sẽ được BƯỚC 3.5 hoàn riêng), dù chưa recompute ngay tại đây.
       reversalCoverage: coveredByTem ? 'full' : 'untracked',
       ...(revOutside ? { outsideTem: true } : {}),
-      // Tem đã hoàn trong lượt này — lượt xoá cả đơn sau đó trừ ra, không hoàn trùng vào tem.
-      ...(fifoAllocations && fifoAllocations.length ? { reversedAllocations: fifoAllocations } : {}),
+      // Tem ĐÃ hoàn thật trong lượt này — lượt xoá cả đơn sau đó trừ ra, không hoàn trùng vào tem.
+      // Chỉ lưu khi hoàn ĐỦ (hoàn thiếu thì không biết tem nào đã nhận); appliedToUnitsQty = lượng
+      // thật sự vào tem — phần còn lại chưa vào tem nào nên lượt xoá cả đơn vẫn phải hoàn nó.
+      ...(coveredByTem && fifoAllocations && fifoAllocations.length ? { reversedAllocations: fifoAllocations } : {}),
+      ...(revTemNL ? { appliedToUnitsQty: coveredByTem ? back : round2(appliedQty) } : {}),
       ...(referenceId ? { referenceId } : {})
     });
   });
@@ -22544,7 +22586,8 @@ async function _reversePrepConsumptionPOS(prepId, consumedQty, note, referenceId
       type: 'CONSUMPTION', qty: back, resultingStock: next,
       note: note || '', referenceId: referenceId || null, reversal: true,
       reversalCoverage: unitsTouched ? 'full' : 'untracked',
-      ...(unitAllocations && unitAllocations.length ? { reversedAllocations: unitAllocations } : {}),
+      // Chỉ lưu khi hoàn ĐỦ vào lô (phần không vào lô đã giảm "âm chờ đối chiếu" — xem trên).
+      ...(unitsTouched && unitAllocations && unitAllocations.length ? { reversedAllocations: unitAllocations } : {}),
       createdAt: new Date().toISOString(), businessDate: posDateKey(), source: 'pos'
     });
   });
@@ -27387,6 +27430,18 @@ function delOrder() {
   document.getElementById('del-pin-error').style.display = 'none';
   setTimeout(() => document.getElementById('del-pin-input').focus(), 120);
 }
+async function removeBillSideRecordsPOS(orderId, month, day, yyyy, closingDate) {
+  const arRef = fstore.collection('orders_gieogieo_archive').doc(month + '_' + day + '_' + yyyy);
+  const ar = await arRef.get();
+  if (ar.exists && ((ar.data() || {}).orders || {})[orderId])
+    await arRef.update({ ['orders.' + orderId]: firebase.firestore.FieldValue.delete() });
+  if (closingDate) {
+    const clRef = fstore.collection('daily_closings_gieogieo').doc(closingDate);
+    const cl = await clRef.get();
+    if (cl.exists && ((cl.data() || {}).postCloseBills || {})[orderId])
+      await clRef.update({ ['postCloseBills.' + orderId]: firebase.firestore.FieldValue.delete() });
+  }
+}
 async function delOrderConfirm() {
   const pin = document.getElementById('del-pin-input').value.trim();
   if (pin !== '3367') {
@@ -27433,14 +27488,15 @@ async function delOrderConfirm() {
     toast('⚠️ ' + (isBackfillNoStock ? 'Huỷ dòng sổ' : 'Hoàn kho') + ' lỗi ' + (rv.failedCount ? rv.failedCount + ' dòng' : '') + ' — CHƯA xoá bill. Bấm xoá lại để thử tiếp.');
     return;
   }
-  // Bill đã vào archive (ngày cũ) thì phải gỡ cả ở archive, không thì tải lại lịch sử nó hiện lại.
-  await fstore.collection('orders_gieogieo_archive').doc(month + '_' + day + '_' + yyyy)
-    .update({ ['orders.' + delId]: firebase.firestore.FieldValue.delete() }).catch(() => {});
-  // Bill bổ sung sau kết ca: gỡ khoản tiền đã ghi vào phiếu đóng ngày.
-  if (o.backfillMode) {
-    const bd = o.businessDate || (yyyy + '-' + mm + '-' + dd);
-    await fstore.collection('daily_closings_gieogieo').doc(bd)
-      .update({ ['postCloseBills.' + delId]: firebase.firestore.FieldValue.delete() }).catch(() => {});
+  // Bill đã vào archive (ngày cũ) phải gỡ cả ở archive; bill bổ sung sau kết ca phải gỡ khoản
+  // tiền trong phiếu đóng ngày. Làm TRƯỚC khi xoá RTDB và KHÔNG nuốt lỗi: lỗi thì dừng, bill còn
+  // nguyên để bấm xoá lại (hoàn kho đã idempotent). Chỉ gỡ khi thật sự có mục đó.
+  try {
+    await removeBillSideRecordsPOS(delId, month, day, yyyy, o.backfillMode ? (o.businessDate || (yyyy + '-' + mm + '-' + dd)) : null);
+  } catch (err) {
+    _deletingOrderIds.delete(delId);
+    toast('⚠️ Đã hoàn kho nhưng chưa gỡ được bill khỏi lưu trữ/phiếu đóng ngày: ' + (err.message || err) + ' — bấm xoá lại');
+    return;
   }
 
   // Xoá trên Realtime Database
