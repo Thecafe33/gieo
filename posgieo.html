@@ -21868,6 +21868,17 @@ async function reportMissingRecipePOS(skipped) {
   if (jobs.length) await Promise.allSettled(jobs);
 }
 
+// Lượt trừ kho của bill chạy NỀN (không chặn thanh toán). Xoá bill ngay sau khi bán mà lượt đó
+// chưa xong thì bước hoàn đọc sổ còn thiếu dòng, rồi lượt trừ vẫn chạy tiếp → trừ mà không hoàn.
+// Giữ promise theo orderId để bước xoá đợi nó xong trước.
+const _consumptionInflightPOS = new Map();
+function trackConsumptionPOS(orderId, promise) {
+  const p = Promise.resolve(promise).catch(() => {}).finally(() => {
+    if (_consumptionInflightPOS.get(orderId) === p) _consumptionInflightPOS.delete(orderId);
+  });
+  _consumptionInflightPOS.set(orderId, p);
+  return p;
+}
 async function applySalesConsumptionPOS(order, orderId, businessDate) {
   try {
     const [recipes, toppingRecipes, packagingPresets, packagingItemOverrides, baggingRules, pkgRulesPack, baggingTable] = await Promise.all([ensureRecipesLoadedPOS(), ensureToppingRecipesLoadedPOS(), ensurePackagingPresetsLoadedPOS(), ensurePackagingItemOverridesLoadedPOS(), ensurePackagingBaggingRulesLoadedPOS(), ensurePackagingRulesLoadedPOS(), ensurePackagingBaggingTableLoadedPOS()]);
@@ -22101,7 +22112,15 @@ async function applyBackfillConsumptionNoStockEffect(order, orderId, businessDat
         backfillNoStockEffect: true
       }));
     });
-    if (jobs.length) await Promise.allSettled(jobs);
+    if (jobs.length) {
+      const rs = await Promise.allSettled(jobs);
+      const loi = rs.filter(r => r.status === 'rejected').length;
+      if (loi) {
+        console.warn('[Bổ sung bill] ghi sổ tiêu hao lỗi', loi, 'dòng', orderId);
+        toastAutoReport('⚠️ Bill bổ sung ' + ((order && order.billCode) || '') + ': ' + loi + ' dòng sổ giá vốn chưa ghi được',
+          'Bổ sung bill: ghi sổ tiêu hao lỗi', { ref: orderId });
+      }
+    }
     // [MỚI — Tuần 4 truy xuất] Đường này CỐ Ý không phân bổ FIFO (xem chú thích đầu hàm) nên
     // tra Bill ↔ Tem sẽ không thấy gì nếu không ghi rõ — dễ hiểu lầm thành "bill lỗi, không trừ
     // được kho" giống món chưa khai định mức. Ghi tường minh untrackedReason để phân biệt: đây
@@ -25990,11 +26009,9 @@ async function confirmPay(cashGiven, cashChange) {
     // toàn, tự nhận ra đã trừ kho rồi, không trừ đúp. Gọi lại KHÔNG ĐIỀU KIỆN (không gate theo
     // sideEffectsDone bên dưới) vì bản thân nó đã tự idempotent qua txId.
     if (_backfillMode) recordBackfillCashPOS(order, billRef.key, _backfillMode);
-    if (_backfillMode && _backfillMode.skipConsumption) {
-      applyBackfillConsumptionNoStockEffect(order, billRef.key, _backfillMode.businessDate);
-    } else {
-      applySalesConsumptionPOS(order, billRef.key, _backfillMode ? _backfillMode.businessDate : undefined);
-    }
+    trackConsumptionPOS(billRef.key, (_backfillMode && _backfillMode.skipConsumption)
+      ? applyBackfillConsumptionNoStockEffect(order, billRef.key, _backfillMode.businessDate)
+      : applySalesConsumptionPOS(order, billRef.key, _backfillMode ? _backfillMode.businessDate : undefined));
 
     // [BUG#20 FIX — thay cờ sideEffectsDone đọc-rồi-ghi KHÔNG NGUYÊN TỬ bằng CLAIM thật sự] Bản
     // trước chỉ đọc `existingSnap.val().sideEffectsDone` một lần rồi quyết định chạy hay không —
@@ -27325,9 +27342,27 @@ async function delOrderConfirm() {
   // (xem _voidBackfillConsumptionPOS ngay trên reverseSalesConsumptionPOS()).
   const isBackfillNoStock = o.backfillMode === 'before_close';
   toast(isBackfillNoStock ? '⏳ Đang huỷ bill bổ sung (không đụng tồn kho)...' : '⏳ Đang hoàn kho...');
+  // Lượt trừ kho của chính bill này còn đang chạy (vừa bán xong) → đợi nó xong mới hoàn.
+  if (_consumptionInflightPOS.has(delId)) await _consumptionInflightPOS.get(delId);
   const rv = isBackfillNoStock
     ? await _voidBackfillConsumptionPOS(delId)
     : await reverseSalesConsumptionPOS(o, delId);
+  // Hoàn kho lỗi → KHÔNG xoá bill: xoá rồi thì không còn gì để bấm hoàn lại. Hoàn kho tự
+  // idempotent (id cố định theo bill + món) nên bấm xoá lại chỉ chạy nốt phần còn thiếu.
+  if (!rv.ok) {
+    _deletingOrderIds.delete(delId);
+    toast('⚠️ ' + (isBackfillNoStock ? 'Huỷ dòng sổ' : 'Hoàn kho') + ' lỗi ' + (rv.failedCount ? rv.failedCount + ' dòng' : '') + ' — CHƯA xoá bill. Bấm xoá lại để thử tiếp.');
+    return;
+  }
+  // Bill đã vào archive (ngày cũ) thì phải gỡ cả ở archive, không thì tải lại lịch sử nó hiện lại.
+  await fstore.collection('orders_gieogieo_archive').doc(month + '_' + day + '_' + yyyy)
+    .update({ ['orders.' + delId]: firebase.firestore.FieldValue.delete() }).catch(() => {});
+  // Bill bổ sung sau kết ca: gỡ khoản tiền đã ghi vào phiếu đóng ngày.
+  if (o.backfillMode) {
+    const bd = o.businessDate || (yyyy + '-' + mm + '-' + dd);
+    await fstore.collection('daily_closings_gieogieo').doc(bd)
+      .update({ ['postCloseBills.' + delId]: firebase.firestore.FieldValue.delete() }).catch(() => {});
+  }
 
   // Xoá trên Realtime Database
   db.ref(rtPath).remove()
@@ -27338,7 +27373,7 @@ async function delOrderConfirm() {
       toast(rv.ok
         ? (isBackfillNoStock
           ? '🗑 Đã xoá bill bổ sung — không đụng tồn kho (bill này chưa từng trừ)'
-          : '🗑 Đã xoá đơn — nguyên liệu đã hoàn về quầy (stamp/voucher cần Quản lý xử lý tay)')
+          : '🗑 Đã xoá đơn — nguyên liệu đã hoàn về kho (stamp/voucher cần Quản lý xử lý tay)')
         : '🗑 Đã xoá đơn — nhưng ' + (isBackfillNoStock ? 'đánh dấu huỷ dòng sổ' : 'hoàn kho') + ' ' + (rv.failedCount ? 'lỗi ' + rv.failedCount + ' dòng' : 'lỗi hoàn toàn') + ', đã báo Quản lý (Hộp thư cảnh báo)');
       showScreen('hi');
     })
@@ -27649,12 +27684,17 @@ function runArchiveIfNeeded() {
         const data = snap.val();
         const docId = t.month + '_' + t.day + '_' + t.year;
 
-        // Ghi vào Firestore Archive, rồi xóa node RT
+        // Ghi vào Firestore Archive, rồi xóa node RT.
+        // merge:true — ngày đó có thể ĐÃ được archive trước (rồi có bill bổ sung ghi vào RT sau);
+        // set không merge sẽ ghi đè mất các bill cũ trong archive.
+        // Chỉ xoá đúng các bill vừa archive, không xoá cả node ngày: bill ghi vào giữa lúc đọc
+        // và lúc xoá sẽ còn lại, lượt sau archive nốt.
+        const keys = Object.keys(data);
         return fstore.collection('orders_gieogieo_archive').doc(docId).set({
           orders: data,
           archivedAt: new Date().toISOString(),
           month: t.month, day: t.day
-        }).then(() => snap.ref.remove())
+        }, { merge: true }).then(() => snap.ref.update(Object.fromEntries(keys.map(k => [k, null]))))
           .then(() => {
             archived++;
             console.log('[Archive] ✓ ' + t.month + '/' + t.day + '/' + t.year + ' → Firestore, xóa RT');
@@ -28622,11 +28662,9 @@ async function finalizeSplitPay() {
     // [MỚI] Cùng nhánh backfill với confirmPay() — xem chú thích ở đó.
     // Gọi lại KHÔNG ĐIỀU KIỆN (không gate theo sideEffectsDone bên dưới) vì tự idempotent qua txId.
     if (_backfillMode) recordBackfillCashPOS(order, billRef.key, _backfillMode);
-    if (_backfillMode && _backfillMode.skipConsumption) {
-      applyBackfillConsumptionNoStockEffect(order, billRef.key, _backfillMode.businessDate);
-    } else {
-      applySalesConsumptionPOS(order, billRef.key, _backfillMode ? _backfillMode.businessDate : undefined);
-    }
+    trackConsumptionPOS(billRef.key, (_backfillMode && _backfillMode.skipConsumption)
+      ? applyBackfillConsumptionNoStockEffect(order, billRef.key, _backfillMode.businessDate)
+      : applySalesConsumptionPOS(order, billRef.key, _backfillMode ? _backfillMode.businessDate : undefined));
 
     // [BUG#20 FIX] Cùng claim nguyên tử với confirmPay() — xem chú thích đầy đủ ở đó.
     const _seClaim = await _ueClaimCheckoutSideEffects(billRef.key);

@@ -2677,34 +2677,23 @@ async function invalidateSalesCache(reason, fromKey){
 
 async function fetchOrdersForDate(d){
   const month = MONTH_KEYS[d.getMonth()], day = pad(d.getDate()), year = d.getFullYear();
-  let orders = [];
+  // Một ngày có thể có bill ở CẢ archive lẫn RTDB (bill bổ sung ghi vào RTDB sau khi ngày đó
+  // đã archive, hoặc archive xong mà chưa kịp xoá RTDB). Đọc cả hai, gộp theo khoá bill (RTDB
+  // thắng) — trước đây RTDB có ≥1 bill là bỏ hẳn archive, bill cũ biến khỏi báo cáo.
+  const byKey = {};
+  const cungNam = o => { if(!o || !o.date) return true; return String(o.date.split('/')[2]) === String(year); };
+  try{
+    const docId = `${month}_${day}_${year}`;
+    const doc = await fstore.collection('orders_gieogieo_archive').doc(docId).get();
+    if(doc.exists) Object.entries(doc.data().orders || {}).forEach(([k,o]) => { byKey[k] = o; });
+  }catch(e){ console.warn('Archive orders read failed', e); }
   try{
     const snap = await db.ref(`orders_gieogieo/${month}/${day}`).once('value');
-    if(snap.exists()){
-      const val = snap.val() || {};
-      orders = Object.values(val).filter(o=>{
-        if(!o || !o.date) return true;
-        const y = o.date.split('/')[2];
-        return String(y) === String(year);
-      });
-    }
+    if(snap.exists()) Object.entries(snap.val() || {}).forEach(([k,o]) => { if(cungNam(o)) byKey[k] = o; });
   }catch(e){ console.warn('RTDB orders read failed', e); }
-  if(orders.length === 0){
-    // [ĐÃ VERIFY — rà soát] Trước đây ghi "chưa xác nhận POS có archive collection này
-    // hay không, giả định theo convention orders_xolifa_archive". Nay đã đối chiếu trực
-    // tiếp với posgieo.html: POS ghi archive ĐÚNG như giả định —
-    // `orders_gieogieo_archive/{month}_{day}_{year}` với field `orders` là nguyên node
-    // RTDB, sau đó XOÁ node RTDB gốc. Vì vậy fallback này là ĐƯỜNG ĐỌC DUY NHẤT cho
-    // những ngày đã bị archive, không phải phương án dự phòng cho vui.
-    try{
-      const docId = `${month}_${day}_${year}`;
-      const doc = await fstore.collection('orders_gieogieo_archive').doc(docId).get();
-      if(doc.exists){
-        const data = doc.data();
-        orders = Object.values(data.orders || {});
-      }
-    }catch(e){ console.warn('Archive orders read failed', e); }
-  }
+  // POS ghi archive vào `orders_gieogieo_archive/{month}_{day}_{year}` (field `orders` = nguyên
+  // node RTDB) rồi xoá các bill đó khỏi RTDB — archive là đường đọc duy nhất của ngày cũ.
+  const orders = Object.values(byKey);
   return orders;
 }
 
@@ -14236,16 +14225,17 @@ async function qlLoadBillsOfDate(d){
     if(o.date){ const y = String(o.date).split('/')[2]; if(String(y) !== String(year)) return; }
     ra.push({ id: key, ...o, items: o.itemsArray || [] });
   };
+  // Đọc CẢ archive lẫn RTDB, gộp theo khoá (RTDB thắng) — xem fetchOrdersForDate.
+  const src = {};
+  try{
+    const doc = await fstore.collection('orders_gieogieo_archive').doc(`${month}_${day}_${year}`).get();
+    if(doc.exists){ const o = (doc.data() || {}).orders || {}; Object.keys(o).forEach(k => { src[k] = o[k]; }); }
+  }catch(e){ console.warn('[Bill] đọc archive lỗi', e); }
   try{
     const snap = await db.ref(`orders_gieogieo/${month}/${day}`).once('value');
-    if(snap.exists()){ const val = snap.val() || {}; Object.keys(val).forEach(k => nhan(k, val[k])); }
+    if(snap.exists()){ const val = snap.val() || {}; Object.keys(val).forEach(k => { src[k] = val[k]; }); }
   }catch(e){ console.warn('[Bill] đọc RTDB lỗi', e); }
-  if(!ra.length){
-    try{
-      const doc = await fstore.collection('orders_gieogieo_archive').doc(`${month}_${day}_${year}`).get();
-      if(doc.exists){ const o = (doc.data() || {}).orders || {}; Object.keys(o).forEach(k => nhan(k, o[k])); }
-    }catch(e){ console.warn('[Bill] đọc archive lỗi', e); }
-  }
+  Object.keys(src).forEach(k => nhan(k, src[k]));
   return ra;
 }
 
@@ -14628,97 +14618,136 @@ function qlAskDeleteBill(id){
 // lỡ chạy hai lần cũng không cộng dồn.
 async function qlReverseStockForOrder(orderId, billCode){
   const note = 'Hoàn kho do Quản lý XOÁ ĐƠN' + (billCode ? ' — ' + billCode : '');
-  const ketQua = { nguyenLieu: 0, banThanhPham: 0, loi: 0 };
+  const ketQua = { nguyenLieu: 0, banThanhPham: 0, loi: 0, boQua: 0 };
+  const nowISO = new Date().toISOString();
 
-  let txs = [];
+  let txs = [], ptxs = [];
   try{
-    const snap = await fstore.collection('stock_transactions_gieogieo').where('referenceId','==',orderId).get();
-    txs = snap.docs.map(d => d.data());
-  }catch(err){ console.warn('[Hoàn kho] không đọc được sổ kho:', err); ketQua.loi++; }
-
-  if(txs.some(t => t.reversal === true)){
-    console.info('[Hoàn kho] Đơn', orderId, 'đã được hoàn trước đó — bỏ qua để không cộng dồn.');
-    return { nguyenLieu: 0, banThanhPham: 0, loi: 0, daHoanTruocDo: true };
+    const [s1, s2] = await Promise.all([
+      fstore.collection('stock_transactions_gieogieo').where('referenceId','==',orderId).get(),
+      fstore.collection('prep_transactions_gieogieo').where('referenceId','==',orderId).get()
+    ]);
+    txs = s1.docs; ptxs = s2.docs;
+  }catch(err){
+    // Không đọc được sổ thì KHÔNG được coi là "không có gì để hoàn" — dừng, bill giữ nguyên.
+    console.warn('[Hoàn kho] không đọc được sổ kho:', err);
+    ketQua.loi++; return ketQua;
   }
 
-  const goc = txs.filter(t => t.reversal !== true && t.type === 'CONSUMPTION' && Number(t.qty) < 0);
-  const gom = {}, allocOf = {};
-  goc.forEach(t => {
+  // Bill bổ sung "TRƯỚC kết ca" chưa từng trừ tồn thật (backfillNoStockEffect) — chỉ đánh dấu
+  // huỷ các dòng sổ đó như POS (_voidBackfillConsumptionPOS), tuyệt đối không cộng tồn.
+  const voidJobs = [...txs, ...ptxs].filter(d => d.data().backfillNoStockEffect && !d.data().voided)
+    .map(d => d.ref.update({ voided: true, voidedAt: nowISO, voidedReason: 'Bill bị xoá (Quản lý)' }));
+  const vr = await Promise.allSettled(voidJobs);
+  ketQua.loi += vr.filter(r => r.status === 'rejected').length;
+
+  const laGocTru = t => t.reversal !== true && !t.backfillNoStockEffect && !t.voided && t.type === 'CONSUMPTION' && Number(t.qty) < 0;
+  // Món đã được hoàn theo cách CŨ (dòng ADJUSTMENT reversal id ngẫu nhiên) → bỏ qua đúng món đó,
+  // không hoàn lần hai (trước đây thấy một dòng như vậy là bỏ qua CẢ bill, kể cả món chưa hoàn).
+  const daHoanCu = new Set(txs.map(d=>d.data()).filter(t=>t.reversal===true && t.type==='ADJUSTMENT').map(t=>t.itemId));
+  const daHoanCuPrep = new Set(ptxs.map(d=>d.data()).filter(t=>t.reversal===true && t.type==='ADJUSTMENT').map(t=>t.prepId));
+  const gom = {}, allocOf = {}, locOf = {};
+  txs.map(d => d.data()).filter(laGocTru).forEach(t => {
     gom[t.itemId] = (gom[t.itemId] || 0) + Math.abs(Number(t.qty) || 0);
     if(Array.isArray(t.fifoAllocations)) allocOf[t.itemId] = (allocOf[t.itemId] || []).concat(t.fifoAllocations);
+    if(t.locDeductedAt && Number(t.locDeducted) > 0){
+      const m = locOf[t.itemId] || (locOf[t.itemId] = {});
+      m[t.locDeductedAt] = (m[t.locDeductedAt] || 0) + Number(t.locDeducted);
+    }
+  });
+  const gomPrep = {}, allocPrep = {};
+  ptxs.map(d => d.data()).filter(laGocTru).forEach(t => {
+    gomPrep[t.prepId] = (gomPrep[t.prepId] || 0) + Math.abs(Number(t.qty) || 0);
+    if(Array.isArray(t.unitAllocations)) allocPrep[t.prepId] = (allocPrep[t.prepId] || []).concat(t.unitAllocations);
   });
   const items = await loadInventoryItems().catch(()=>INVENTORY_ITEMS||[]);
 
-  // [UNIT ENGINE] Món có tem: hoàn vào ĐÚNG tem đã bị trừ lúc bán (fifoAllocations), tồn chốt
-  // lại theo tổng mã. Trước đây cộng thẳng currentStock — lượt tính lại kế tiếp bên POS xoá
-  // mất khoản hoàn, tem vẫn nằm ở số đã trừ. Phần không hoàn được vào tem nào → Sổ lệch.
-  // Món không tem: cộng thẳng như cũ.
-  // Không dùng applyStockTransaction() ở đây: nó không nhận cờ `reversal`, mà gắn cờ bằng một
-  // lượt truy vấn sau đó thì có cửa sổ đua — hai lần xoá gần nhau sẽ thấy nhau chưa gắn cờ và
-  // cộng dồn hai lần. Ghi thẳng trong một transaction để cờ và số tồn luôn đi cùng nhau.
+  // Giành quyền hoàn tem/lô bằng CÙNG claim với POS (reversal_unit_claims_gieogieo, id theo
+  // bill + món) — hai lượt xoá cùng bill (Quản lý bấm 2 lần, hoặc POS và Quản lý cùng lúc)
+  // chỉ một lượt được cộng vào tem/lô. Claim đã tồn tại → coi như phần tem đã được lo.
+  async function hoanVaoTem(claimId, id, allocs, coll){
+    const total = (allocs||[]).reduce((a,x)=>a+(Number(x.qty)||0),0);
+    if(!(total > 0)) return { applied: 0, claimed: false };
+    const ref = fstore.collection('reversal_unit_claims_gieogieo').doc(claimId);
+    let mine = false, old = null;
+    await fstore.runTransaction(async t => {
+      const d = await t.get(ref);
+      if(d.exists){ old = d.data(); return; }
+      mine = true;
+      t.set(ref, { status: 'claiming', itemId: id, claimedAt: Date.now(), at: nowISO, by: 'management' });
+    });
+    if(!mine) return { applied: old && old.status==='done' ? (Number(old.appliedQty)||0) : total, claimed: true };
+    const applied = await reverseIntoUnits(id, allocs, coll);
+    await ref.set({ status: 'done', appliedQty: applied, totalQty: total, doneAt: new Date().toISOString() }, { merge: true });
+    return { applied, claimed: false };
+  }
+
+  // [UNIT ENGINE] Nguyên liệu có tem: hoàn vào ĐÚNG tem đã trừ lúc bán (fifoAllocations), tồn chốt
+  // lại theo tổng mã; phần không hoàn được vào tem nào → Sổ lệch. Không tem: cộng thẳng như cũ.
+  // Dòng sổ hoàn dùng ĐÚNG id của POS (reversal_{bill}_ing_{món}) → idempotent theo từng món, và
+  // POS/Quản lý không hoàn chồng lên nhau. Kèm hoàn tồn QUẦY + bộ đếm chờ refill như POS.
   const r1 = await Promise.allSettled(Object.keys(gom).map(async itemId => {
+    const txRef = fstore.collection('stock_transactions_gieogieo').doc('reversal_' + orderId + '_ing_' + itemId);
+    if(daHoanCu.has(itemId) || (await txRef.get()).exists){ ketQua.boQua++; return; }
     const it = items.find(x=>x.id===itemId);
     const tem = isTemTrackedItem(it);
-    const applied = tem ? await reverseIntoUnits(itemId, allocOf[itemId], CTN_COLL) : 0;
-    const outside = Math.round((gom[itemId] - applied)*100)/100;
-    let txId = null;
+    const back = gom[itemId];
+    const { applied } = tem ? await hoanVaoTem(orderId + '_ing_' + itemId, itemId, allocOf[itemId], CTN_COLL) : { applied: 0 };
+    const outside = Math.round((back - applied)*100)/100;
+    let daGhi = false;
     await fstore.runTransaction(async t => {
       const ref = fstore.collection('inventory_items_gieogieo').doc(itemId);
       const doc = await t.get(ref);
       if(!doc.exists) throw new Error('Nguyên liệu không còn tồn tại');
-      const cur = Number(doc.data().currentStock) || 0;
-      const next = tem ? cur : cur + gom[itemId];
-      t.update(ref, { currentStock: next, updatedAt: new Date().toISOString() });
-      const txRef = fstore.collection('stock_transactions_gieogieo').doc();
-      txId = txRef.id;
+      if((await t.get(txRef)).exists) return;
+      const d = doc.data();
+      const cur = Number(d.currentStock) || 0;
+      const next = tem ? cur : cur + back;
+      const upd = { currentStock: next, updatedAt: new Date().toISOString() };
+      Object.entries(locOf[itemId] || {}).forEach(([loc, q]) => {
+        upd[`locationStock.${loc}`] = (Number((d.locationStock||{})[loc]) || 0) + q;
+        upd[`unrefilledConsumption.${loc}`] = Math.max(0, (Number((d.unrefilledConsumption||{})[loc]) || 0) - back);
+      });
+      t.update(ref, upd);
       t.set(txRef, {
-        itemId, type: 'ADJUSTMENT', qty: gom[itemId], resultingStock: next,
-        note, staff: 'Quản lý', referenceId: orderId, reversal: true, reversalOf: orderId,
+        itemId, type: 'CONSUMPTION', qty: back, resultingStock: next,
+        note, staff: 'Quản lý', referenceId: orderId, reversal: true, reversalOf: orderId, reversedOrderId: orderId,
         ...(tem ? { reversalCoverage: outside > 0.005 ? 'partial' : 'full', ...(outside > 0.005 ? { outsideTem: true } : {}) } : {}),
         createdAt: new Date().toISOString(), businessDate: dkey(new Date()),
         status: 'posted', source: 'management'
       });
+      daGhi = true;
     });
     if(tem){
-      if(outside > 0.005) await logStockAnomaly('rev_'+txId, { itemId, itemName: (it&&it.name)||'', unit: (it&&it.unit)||'',
-        qty: outside, kind: 'reversal_outside_tem', txType: 'ADJUSTMENT', note, referenceId: orderId, staff: 'Quản lý' });
+      if(daGhi && outside > 0.005) await logStockAnomaly('rev_' + txRef.id, { itemId, itemName: (it&&it.name)||'', unit: (it&&it.unit)||'',
+        qty: outside, kind: 'reversal_outside_tem', txType: 'CONSUMPTION', note, referenceId: orderId, staff: 'Quản lý' });
       await recomputeTemStock(itemId);
     }
   }));
   memoDropItems();   // tồn kho vừa đổi
   r1.forEach(r => { if(r.status === 'fulfilled') ketQua.nguyenLieu++; else { ketQua.loi++; console.warn('[Hoàn kho] nguyên liệu lỗi:', r.reason); } });
 
-  // Bán thành phẩm — sổ riêng, cùng nguyên tắc: hoàn vào đúng lô (unitAllocations); phần
-  // không hoàn được vào lô nào giảm "âm chờ đối chiếu" (untrackedPendingDelta); tồn chốt lại
-  // theo tổng lô.
-  let ptxs = [];
-  try{
-    const snap = await fstore.collection('prep_transactions_gieogieo').where('referenceId','==',orderId).get();
-    ptxs = snap.docs.map(d => d.data());
-  }catch(err){ console.warn('[Hoàn kho] không đọc được sổ bán thành phẩm:', err); }
-  const gomPrep = {}, allocPrep = {};
-  ptxs.filter(t => t.reversal !== true && t.type === 'CONSUMPTION' && Number(t.qty) < 0)
-      .forEach(t => {
-        gomPrep[t.prepId] = (gomPrep[t.prepId] || 0) + Math.abs(Number(t.qty) || 0);
-        if(Array.isArray(t.unitAllocations)) allocPrep[t.prepId] = (allocPrep[t.prepId] || []).concat(t.unitAllocations);
-      });
-
+  // Bán thành phẩm: hoàn vào đúng lô (unitAllocations); phần không hoàn được vào lô nào giảm
+  // "âm chờ đối chiếu" (untrackedPendingDelta); tồn chốt lại theo tổng lô. Id như POS.
   const r2 = await Promise.allSettled(Object.keys(gomPrep).map(async prepId => {
-    const applied = await reverseIntoUnits(prepId, allocPrep[prepId], 'prep_batches_gieogieo');
-    const outside = Math.round((gomPrep[prepId] - applied)*100)/100;
+    const txRef = fstore.collection('prep_transactions_gieogieo').doc('reversal_' + orderId + '_prep_' + prepId);
+    if(daHoanCuPrep.has(prepId) || (await txRef.get()).exists){ ketQua.boQua++; return; }
+    const back = gomPrep[prepId];
+    const { applied } = await hoanVaoTem(orderId + '_prep_' + prepId, prepId, allocPrep[prepId], 'prep_batches_gieogieo');
+    const outside = Math.round((back - applied)*100)/100;
     await fstore.runTransaction(async t => {
       const ref = fstore.collection('prep_items_gieogieo').doc(prepId);
       const doc = await t.get(ref);
       if(!doc.exists) throw new Error('Bán thành phẩm không còn tồn tại');
+      if((await t.get(txRef)).exists) return;
       const d = doc.data();
-      const next = Number(d.currentStock) || 0;
       t.update(ref, { updatedAt: new Date().toISOString(),
         ...(outside > 0.005 ? { untrackedPendingDelta: firebase.firestore.FieldValue.increment(outside) } : {}) });
-      t.set(fstore.collection('prep_transactions_gieogieo').doc(), {
+      t.set(txRef, {
         prepId, prepCode: d.code || '', prepName: d.name || '', unit: d.unit || '',
-        type: 'ADJUSTMENT', qty: gomPrep[prepId], resultingStock: next,
+        type: 'CONSUMPTION', qty: back, resultingStock: Number(d.currentStock) || 0,
         note, referenceId: orderId, reversal: true, reversalOf: orderId,
-        reversalCoverage: outside > 0.005 ? 'partial' : 'full',
+        reversalCoverage: outside > 0.005 ? 'untracked' : 'full',
         createdAt: new Date().toISOString(), businessDate: dkey(new Date()), source: 'management'
       });
     });
@@ -14726,6 +14755,7 @@ async function qlReverseStockForOrder(orderId, billCode){
   }));
   r2.forEach(r => { if(r.status === 'fulfilled') ketQua.banThanhPham++; else { ketQua.loi++; console.warn('[Hoàn kho] BTP lỗi:', r.reason); } });
 
+  if(!Object.keys(gom).length && !Object.keys(gomPrep).length && !voidJobs.length) ketQua.khongCoGi = true;
   return ketQua;
 }
 
@@ -14737,12 +14767,25 @@ async function qlDoDeleteBill(id){
   try{
     await ensureAuth();
     const kq = await qlReverseStockForOrder(id, o.billCode);
+    // Hoàn kho lỗi → KHÔNG xoá bill (xoá rồi không còn gì để hoàn lại). Hoàn kho idempotent
+    // theo từng món nên bấm xoá lại chỉ chạy nốt phần còn thiếu.
+    if(kq.loi) throw new Error(`hoàn kho lỗi ${kq.loi} dòng — CHƯA xoá bill, bấm xoá lại để thử tiếp`);
 
     // Xoá bản ghi bán hàng SAU khi hoàn kho — hoàn kho không cần itemsArray (đọc
     // từ sổ) nhưng giữ đúng thứ tự này để nếu hoàn lỗi thì bill vẫn còn đó mà rà.
     const [dd, mm, yyyy] = String(o.date || '').split('/');
     if(!dd || !mm) throw new Error('Bill thiếu ngày, không xác định được chỗ lưu');
-    await db.ref(`orders_gieogieo/${MONTH_KEYS[parseInt(mm,10)-1]}/${dd}/${id}`).remove();
+    const thang = MONTH_KEYS[parseInt(mm,10)-1];
+    await db.ref(`orders_gieogieo/${thang}/${dd}/${id}`).remove();
+    // Bill đã vào archive (ngày cũ) → gỡ luôn ở archive, không thì tải lại lịch sử nó hiện lại.
+    await fstore.collection('orders_gieogieo_archive').doc(`${thang}_${dd}_${yyyy}`)
+      .update({ ['orders.' + id]: firebase.firestore.FieldValue.delete() }).catch(() => {});
+    // Bill bổ sung sau kết ca → gỡ khoản tiền đã ghi vào phiếu đóng ngày (đối soát tiền mặt).
+    if(o.backfillMode){
+      const bd = o.businessDate || `${yyyy}-${String(mm).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
+      await fstore.collection('daily_closings_gieogieo').doc(bd)
+        .update({ ['postCloseBills.' + id]: firebase.firestore.FieldValue.delete() }).catch(() => {});
+    }
 
     // Ghi vết: ai xoá, lúc nào, bill gì, hoàn được bao nhiêu dòng kho.
     await fstore.collection('bill_deletions_gieogieo').add({
@@ -14760,11 +14803,8 @@ async function qlDoDeleteBill(id){
     (_ngayBill ? clearSalesCache(_ngayBill, _ngayBill) : clearSalesCache()).catch(() => {});
 
     const ov = document.getElementById('qlDelBillOverlay'); if(ov) ov.remove();
-    toast(kq.daHoanTruocDo
-      ? '🗑 Đã xoá bill — kho đã được hoàn từ lần trước, không hoàn thêm'
-      : kq.loi
-        ? `🗑 Đã xoá bill — nhưng ${kq.loi} dòng hoàn kho lỗi, kiểm tra lại Kho`
-        : `🗑 Đã xoá bill · hoàn ${kq.nguyenLieu} nguyên liệu, ${kq.banThanhPham} bán thành phẩm`);
+    toast(`🗑 Đã xoá bill · xử lý ${kq.nguyenLieu} nguyên liệu, ${kq.banThanhPham} bán thành phẩm`
+      + (kq.boQua ? ` (${kq.boQua} dòng đã hoàn từ trước, không hoàn lại)` : ''));
     qlRenderBillBody();
   }catch(err){
     console.error('qlDoDeleteBill lỗi', err);
