@@ -776,18 +776,18 @@ body.assist-main-on .toast{bottom:calc(100px + var(--assist-h, 0px) + 10px);}
   font-size:12.5px;font-weight:700;color:var(--ds-ink60);cursor:pointer;white-space:nowrap;}
 .ds-seg button.on{background:#fff;color:var(--td);box-shadow:0 1px 3px var(--ds-shadow);}
 
-.ds-qty-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;}
-.ds-qty-box{background:var(--ds-card2);border-radius:16px;padding:10px 10px 12px;text-align:center;}
-.ds-qty-box .lbl{font-size:11px;font-weight:800;letter-spacing:.3px;text-transform:uppercase;margin-bottom:8px;}
+.ds-qty-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;margin-bottom:14px;}   /* minmax(0,…): hai ô luôn bằng nhau, không bị ô nhập số đẩy rộng ra */
+.ds-qty-box{background:var(--ds-card2);border-radius:16px;padding:10px 6px 12px;text-align:center;min-width:0;}
+.ds-qty-box .lbl{font-size:11px;font-weight:800;letter-spacing:.3px;text-transform:uppercase;margin-bottom:8px;white-space:nowrap;}
 .ds-qty-box.good .lbl{color:var(--ds-good);}
-.ds-qty-box.dmg .lbl{color:var(--ds-warn);}
-.ds-stepper{display:flex;align-items:center;justify-content:center;gap:6px;}
+.ds-qty-box.bad .lbl{color:var(--ds-warn);}
+.ds-stepper{display:flex;align-items:center;justify-content:center;gap:4px;min-width:0;}
 .ds-stepbtn{width:34px;height:34px;border-radius:50%;border:none;background:#fff;color:var(--td);
   font-size:18px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;
   box-shadow:0 1px 2px var(--ds-shadow);flex-shrink:0;}
 .ds-stepbtn:active{transform:scale(.9);}
 .ds-stepbtn:disabled{opacity:.35;cursor:default;}
-.ds-qtyval{width:56px;border:none;background:none;text-align:center;font-size:19px;font-weight:800;color:var(--td);
+.ds-qtyval{width:auto;flex:1 1 0;min-width:0;max-width:64px;border:none;background:none;text-align:center;font-size:19px;font-weight:800;color:var(--td);
   font-family:ui-monospace,"SF Mono","Roboto Mono",Menlo,Consolas,monospace;}
 .ds-qtyval::-webkit-outer-spin-button,.ds-qtyval::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
 .ds-qtyval:disabled{color:var(--ds-ink40);}
@@ -807,7 +807,7 @@ body.assist-main-on .toast{bottom:calc(100px + var(--assist-h, 0px) + 10px);}
 .ds-chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;}
 .ds-chip{font-size:11.5px;font-weight:700;padding:5px 10px;border-radius:999px;}
 .ds-chip.good{background:var(--ds-good-soft);color:var(--ds-good);}
-.ds-chip.dmg{background:var(--ds-warn-soft);color:var(--ds-warn);}
+.ds-chip.bad{background:var(--ds-warn-soft);color:var(--ds-warn);}
 .ds-chip.wrong{background:var(--ds-danger-soft);color:var(--ds-danger);}
 
 .ds-note-input{width:100%;border:1px solid var(--ds-line);background:var(--ds-card2);border-radius:12px;padding:10px 12px;
@@ -1553,7 +1553,7 @@ body.assist-main-on .toast{bottom:calc(100px + var(--assist-h, 0px) + 10px);}
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
     </button>
   </div>
-  <div style="overflow-y:auto;flex:1;padding:12px 16px 24px" id="poReceiveBody">
+  <div style="overflow-y:auto;flex:1;padding:12px 0 24px" id="poReceiveBody">
     <div style="text-align:center;padding:40px;color:#bbb">Đang tải...</div>
   </div>
 </div>
@@ -20286,18 +20286,59 @@ function renderPoReceiveSelect() {
   const box = document.getElementById('poReceiveBody');
   const pos = POS_PENDING_PO_CACHE || [];
   box.innerHTML = `
-    <div class="wal-section" style="margin:0 0 14px;">
-      <div class="wal-section-title">Đơn đặt hàng đang chờ (từ app Quản lý)</div>
-      ${pos.length ? pos.map(po => {
-        const summary = (po.lines || []).map(l => `${l.name} (đặt ${poLineQtyText(l, l.qtyExpectedBase)}${l.receivedGoodBase > 0 ? `, đã nhận ${poLineQtyText(l, l.receivedGoodBase)}` : ''})`).join(', ');
-        return `<button onclick="poSelectPO('${po.id}')" style="text-align:left;width:100%;padding:12px 14px;border-radius:14px;border:1.5px solid #e6e1d2;background:#fff;cursor:pointer;margin-bottom:8px;">
-          <div style="font-weight:700;font-size:13.5px;color:var(--td);">${po.supplier || '(không ghi nhà cung cấp)'}</div>
-          <div style="font-size:11.5px;color:#999;margin-top:2px;">${summary}</div>
-        </button>`;
-      }).join('') : '<div style="font-size:12.5px;color:#bbb;padding:6px 2px;">Không có đơn đặt hàng nào đang chờ.</div>'}
+    <div class="wal-section" style="margin:0 16px 14px;">
+      <div class="wal-section-title">Đơn đặt hàng đang chờ (từ app Quản lý)${pos.length ? `<span style="font-size:14px;font-weight:800;color:var(--gd);background:var(--gl);border-radius:999px;padding:2px 9px;letter-spacing:0;">${pos.length}</span>` : ''}</div>
+      ${pos.length ? pos.map(po => poPendingCardHtml(po)).join('') : '<div style="font-size:12.5px;color:#bbb;padding:6px 2px;">Không có đơn đặt hàng nào đang chờ.</div>'}
     </div>
     <div style="margin:0 16px;"><button class="ds-cta" onclick="poSelectFree()">Nhận hàng tự do (không theo đơn)</button></div>
   `;
+}
+
+// Tiến độ nhận của 1 dòng đơn: 'done' (đủ) | 'part' (nhận một phần) | 'none' (chưa nhận).
+function poLineProgress(l) {
+  const exp = Number(l.qtyExpectedBase) || 0, got = Number(l.receivedGoodBase) || 0;
+  return got <= 0 ? 'none' : (got >= exp ? 'done' : 'part');
+}
+// Viên thuốc số lượng của dòng: chưa nhận → "3 thùng" + quy đổi; đã nhận một phần → "2 / 5 thùng".
+function poLinePillHtml(l) {
+  const f = Number(l.orderUnitFactor) || 1, name = escHtmlPos(f > 1 ? (l.orderUnitName || l.unit || '') : (l.unit || ''));
+  const n = x => Number(x.toFixed(2)).toLocaleString('vi-VN');
+  const exp = Number(l.qtyExpectedBase) || 0, got = Number(l.receivedGoodBase) || 0;
+  const st = poLineProgress(l);
+  const bg = st === 'done' ? '#16a34a' : (st === 'part' ? '#c2703c' : 'var(--gd)');
+  const main = st === 'none' ? `${n(exp / f)} ${name}` : (st === 'done' ? `✓ ${n(exp / f)} ${name}` : `${n(got / f)} / ${n(exp / f)} ${name}`);
+  const sub = st === 'none' && f > 1 ? `<span style="display:block;font-size:10.5px;font-weight:700;opacity:.85;margin-top:1px;">${n(exp)} ${escHtmlPos(l.unit || '')}</span>` : '';
+  return `<div style="flex-shrink:0;padding:8px 14px;border-radius:999px;background:${bg};color:#fff;font-size:16px;font-weight:800;white-space:nowrap;text-align:center;line-height:1.15;">${main}${sub}</div>`;
+}
+function poPendingCardHtml(po) {
+  const lines = po.lines || [];
+  const prog = lines.map(poLineProgress);
+  const nDone = prog.filter(x => x === 'done').length;
+  const isPart = po.status === 'partial' || prog.some(x => x !== 'none');
+  const badge = isPart ? ['Nhận một phần', '#c2703c'] : ['Chờ nhận', 'var(--gd)'];
+  const sup = escHtmlPos(po.supplier || '(không ghi nhà cung cấp)');
+  const when = po.createdAt ? 'Đặt ' + fmtDateTimeShort(po.createdAt) : '';
+  const sub = isPart ? `${when ? when + ' · ' : ''}còn thiếu ${lines.length - nDone} mặt hàng` : `${when ? when + ' · ' : ''}${lines.length} mặt hàng`;
+  // Đơn dài / đã nhận một phần: hiện món còn thiếu trước, món đã đủ gấp lại.
+  const open = lines.map((l, i) => ({ l, st: prog[i] })).filter(x => x.st !== 'done');
+  const done = lines.map((l, i) => ({ l, st: prog[i] })).filter(x => x.st === 'done');
+  const rowHtml = ({ l, st }) => `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px 14px;margin-top:8px;background:${st === 'done' ? '#f3faf6' : '#FFFCF0'};border:1.5px solid ${st === 'done' ? '#cfe9da' : '#f0ead9'};border-radius:16px;">
+      <span style="min-width:0;font-size:17px;font-weight:800;color:${st === 'done' ? '#7d8f85' : 'var(--td)'};line-height:1.3;">${escHtmlPos(l.name || '')}${st === 'part' ? `<span style="display:block;font-size:12.5px;font-weight:700;color:#c2703c;margin-top:2px;">Còn thiếu ${poLineQtyText(l, (Number(l.qtyExpectedBase) || 0) - (Number(l.receivedGoodBase) || 0))}</span>` : ''}</span>
+      ${poLinePillHtml(l)}
+    </div>`;
+  const prBar = isPart ? `<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;"><div style="flex:1;height:8px;border-radius:999px;background:#EFE9D8;overflow:hidden;"><i style="display:block;height:100%;width:${lines.length ? Math.round(nDone / lines.length * 100) : 0}%;border-radius:999px;background:#c2703c;"></i></div><span style="font-size:12px;font-weight:800;color:#a89a7e;flex-shrink:0;">${nDone}/${lines.length} mặt hàng</span></div>` : '';
+  return `<div style="padding:14px;background:#FAF8F2;border:1.5px solid #F0EAD9;border-radius:22px;margin-bottom:12px;">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:12px;">
+      <div style="min-width:0;"><div style="font-size:21px;font-weight:800;color:var(--td);line-height:1.25;letter-spacing:-.2px;word-break:break-word;">${sup}</div>
+        <div style="font-size:13px;font-weight:700;color:var(--gd);margin-top:4px;">${sub}</div></div>
+      <span style="flex-shrink:0;font-size:12px;font-weight:800;color:#fff;padding:5px 10px;border-radius:999px;white-space:nowrap;background:${badge[1]};">${badge[0]}</span>
+    </div>
+    ${prBar}
+    ${open.map(rowHtml).join('')}
+    ${done.length ? `<details style="margin-top:8px;"><summary style="list-style:none;cursor:pointer;font-size:12.5px;font-weight:800;color:#a89a7e;text-decoration:underline;padding:6px 0;">Xem ${done.length} mặt hàng đã nhận đủ ▾</summary>${done.map(rowHtml).join('')}</details>` : ''}
+    ${po.note ? `<div style="margin-top:10px;padding:10px 12px;background:#fff;border:1.5px solid #F0EAD9;border-radius:14px;font-size:13px;font-weight:600;color:#8a7a52;line-height:1.4;">📝 ${escHtmlPos(po.note)}</div>` : ''}
+    <button onclick="poSelectPO('${po.id}')" style="width:100%;min-height:56px;margin-top:14px;border-radius:999px;font-family:'Google Sans',sans-serif;font-weight:800;font-size:16px;cursor:pointer;${isPart ? 'background:#fff;color:var(--gd);border:2px solid var(--gd);' : 'background:var(--gd);color:#fff;border:none;'}">${isPart ? 'Nhận tiếp' : 'Nhận hàng'} →</button>
+  </div>`;
 }
 
 // Viết số lượng theo ĐÚNG đơn vị Quản lý đã đặt. Đặt "3 gói" mà màn nhận hàng hiện
@@ -20321,6 +20362,7 @@ function poSelectPO(poId) {
     packagingUnits: (KHO_ITEMS_CACHE.find(x => x.id === l.itemId) || {}).packagingUnits || [],
     qtyExpectedBase: Number(l.qtyExpectedBase) || 0,
     orderUnitName: l.orderUnitName || '', orderUnitFactor: Number(l.orderUnitFactor) || 1,
+    receivedGoodBase: Number(l.receivedGoodBase) || 0,
     // Ô "Đơn vị" mở sẵn ĐÚNG đơn vị đã đặt, không phải đơn vị pha chế: đặt 3 gói thì
     // nhân viên gõ "3", khỏi phải quy đổi trong đầu.
     goodQty: 0, damagedQty: 0, unitFactor: Number(l.orderUnitFactor) || 1,
@@ -20479,7 +20521,7 @@ function poReceiveRefreshLinePreview(idx) {
   const goodBase = (Number(l.goodQty) || 0) * factor;
   const dmgBase = (Number(l.damagedQty) || 0) * factor;
   el.innerHTML = `<span class="ds-chip good">+${fmtPrepQty(goodBase)} ${escHtmlPos(l.unit || '')} tốt</span>`
-    + (dmgBase > 0 ? `<span class="ds-chip dmg">${fmtPrepQty(dmgBase)} ${escHtmlPos(l.unit || '')} hư hỏng</span>` : '');
+    + (dmgBase > 0 ? `<span class="ds-chip bad">${fmtPrepQty(dmgBase)} ${escHtmlPos(l.unit || '')} hư hỏng</span>` : '');
 }
 
 function poReceiveOnPhotoChange(input) {
@@ -20520,7 +20562,7 @@ function poReceiveLineCardHtml(l, idx, isFree) {
     ? `<div class="ds-chips"><span class="ds-chip wrong">Sai sản phẩm — không cộng kho</span></div>`
     : `<div class="ds-chips" id="polChips${idx}">
         <span class="ds-chip good">+${fmtPrepQty(goodBase)} ${escHtmlPos(l.unit || '')} tốt</span>
-        ${dmgBase > 0 ? `<span class="ds-chip dmg">${fmtPrepQty(dmgBase)} ${escHtmlPos(l.unit || '')} hư hỏng</span>` : ''}
+        ${dmgBase > 0 ? `<span class="ds-chip bad">${fmtPrepQty(dmgBase)} ${escHtmlPos(l.unit || '')} hư hỏng</span>` : ''}
       </div>`;
   return `
   <div class="ds-card${l.wrongProduct ? ' wrong' : ''}" data-po-card="${idx}">
@@ -20532,12 +20574,12 @@ function poReceiveLineCardHtml(l, idx, isFree) {
     </div>` : `
     <div style="padding:2px 0 12px;border-bottom:1px solid var(--ds-line);margin-bottom:14px;">
       <div style="font-size:17px;font-weight:800;color:var(--td);">${escHtmlPos(l.name || '')}</div>
-      <div style="font-size:12px;color:var(--ds-ink60);font-weight:600;margin-top:2px;">Đặt: ${poLineQtyText(l, l.qtyExpectedBase)}</div>
+      <div style="font-size:12px;color:var(--ds-ink60);font-weight:600;margin-top:2px;">Đặt: ${poLineQtyText(l, l.qtyExpectedBase)}${l.receivedGoodBase > 0 ? ` · <span style="color:var(--ds-good);">đã nhận ${poLineQtyText(l, l.receivedGoodBase)}</span>` : ''}</div>
     </div>`}
     ${opts.length > 1 ? `<div class="ds-seg">${segHtml}</div>` : ''}
     <div class="ds-qty-grid">
       <div class="ds-qty-box good"><div class="lbl">Số lượng tốt</div>${poReceiveStepperHtml(idx, 'goodQty', l.goodQty, l.wrongProduct)}</div>
-      <div class="ds-qty-box dmg"><div class="lbl">Hư hỏng</div>${poReceiveStepperHtml(idx, 'damagedQty', l.damagedQty, l.wrongProduct)}</div>
+      <div class="ds-qty-box bad"><div class="lbl">Hư hỏng</div>${poReceiveStepperHtml(idx, 'damagedQty', l.damagedQty, l.wrongProduct)}</div>
     </div>
     <label class="ds-wrongrow">
       <div class="wt"><b>Sai sản phẩm</b><span>Hàng giao không đúng — không cộng vào kho</span></div>
@@ -20554,12 +20596,22 @@ function poReceiveStepperHtml(idx, field, val, disabled) {
     <button class="ds-stepbtn" onclick="poReceiveStepQty(${idx},'${field}',1)" ${disabled ? 'disabled' : ''}>+</button>
   </div>`;
 }
+// Quay lại danh sách đơn; đã gõ số lượng thì hỏi trước để không mất dữ liệu đang nhập.
+async function poReceiveBack() {
+  const dirty = (poReceiveState.lines || []).some(l => (Number(l.goodQty) || 0) > 0 || (Number(l.damagedQty) || 0) > 0 || l.wrongProduct || l.note);
+  if (dirty && !(await posConfirm('Quay lại danh sách đơn?\nSố lượng đã nhập ở màn này sẽ mất.', { okText: 'Quay lại', cancelText: 'Ở lại' }))) return;
+  openPoReceiveScreen();
+}
 function renderPoReceiveForm() {
   const box = document.getElementById('poReceiveBody');
   const isFree = !poReceiveState.poId;
   const lines = poReceiveState.lines;
   box.innerHTML = `
-    <div class="ds-sec-h" style="margin-top:2px;"><span class="t">${isFree ? 'Nhận hàng tự do' : ('Theo đơn · ' + escHtmlPos(poReceiveState.supplier || '(không ghi NCC)'))}</span><span class="n">${lines.length} dòng</span></div>
+    <div style="margin:0 16px 14px;">
+      <button onclick="poReceiveBack()" style="background:none;border:none;padding:0;margin-bottom:8px;color:#a89a7e;font-family:'Google Sans',sans-serif;font-size:12.5px;font-weight:700;cursor:pointer;">&lsaquo; ${isFree ? 'Về danh sách đơn' : 'Chọn đơn khác'}</button>
+      <div style="font-size:21px;font-weight:800;color:var(--td);line-height:1.25;letter-spacing:-.2px;word-break:break-word;">${isFree ? 'Nhận hàng tự do' : escHtmlPos(poReceiveState.supplier || '(không ghi nhà cung cấp)')}</div>
+      <div style="font-size:13px;font-weight:700;color:var(--gd);margin-top:4px;">${isFree ? 'Không theo đơn đặt' : 'Theo đơn đặt'} · ${lines.length} dòng</div>
+    </div>
     ${lines.map((l, idx) => poReceiveLineCardHtml(l, idx, isFree)).join('') || `<div style="margin:0 16px 12px;font-size:12.5px;color:var(--ds-ink40);">Chưa có nguyên liệu nào — bấm "Thêm nguyên liệu" bên dưới.</div>`}
     ${isFree ? `<button class="ds-add-line" onclick="poReceiveAddFreeLine()"><span class="plus">+</span> Thêm nguyên liệu</button>` : ''}
 
