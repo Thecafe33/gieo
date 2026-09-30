@@ -1,4 +1,4 @@
-# Unit Engine — tài liệu API (`unit_engine.v1.js`, bản 1.0.0)
+# Unit Engine — tài liệu API (`unit_engine.v2.js`, bản 2.0.0; v1 giữ để quay lui)
 
 > Viết ở E5 (28/09/2026), cập nhật E6. Kế hoạch gốc: `docs/KE_HOACH_UNIT_ENGINE_DA_CUA_HANG.md`.
 > Bảng ghi của E0 (trước khi tách): `docs/BANG_GHI_ENGINE.md`.
@@ -23,7 +23,7 @@ Bất biến (chi tiết ở mục 2 kế hoạch):
 ## 2. Nạp và khởi tạo
 
 ```html
-<script src="unit_engine.v1.js"></script>   <!-- trước script chính; đổi bản = đổi tên file -->
+<script src="unit_engine.v2.js"></script>   <!-- trước script chính; đổi bản = đổi tên file -->
 ```
 
 ```js
@@ -196,3 +196,19 @@ Lập lại ảnh chụp từ bản gốc (khi cần):
 CORE=html CORE_HTML=<POS gốc> UPDATE=1 node tests/snapshot_core.test.js
 ```
 Tương tự cho `e4`, `prepcount`, và `wrap` (thêm `CORE_HTML_QL=<QL gốc>`).
+
+## Bán hàng trong lúc NL khoá cân cho mẻ chế biến
+
+NL của mẻ (`prep_ingredient_locks_gieogieo` + `__prepLock` trên RT) khoá từ lúc bắt đầu mẻ tới khi từng NL cân xong.
+- **Bán vẫn chạy** (POS truyền `duringPrepLock:true` ở `consume.allocate` và `ledger.apply`): trừ tem đúng FIFO như thường, cộng dồn
+  `saleHeld` trên tem (RT) — NL không tem thì `prepSaleHeld` trên NL. Dòng sổ bán gắn `prepWindowBatchId` = mẻ đang giữ khoá.
+  Mọi thao tác khác (đổ hao, điều chỉnh, kiểm kê, hoàn kho, báo hết, mở mã ở tab Kho…) vẫn bị chặn.
+- **Chụp mốc lúc cân:** khi cân/đếm xong một mã, POS gọi `prep.reconBookOf` lấy `{book, held}` (tồn RT + `saleHeld` lúc đó).
+  Chốt đối chiếu dùng `book` làm mốc: lượng mẻ dùng = `book − số cân` (phần bán TRƯỚC lúc cân nằm sẵn trong `book`).
+  `prepReconSetUnit(..., heldAt)` cho phép tồn RT lệch đúng phần bán SAU lúc cân và ghi vào RT `số cân − phần bán sau` (hàng bán sau
+  lúc cân vẫn bị trừ). Mã báo hết trong lúc khoá dùng `prepReconFinishBookBase`.
+- **Ghi nhận:** `prep.reconWindowSales(batch, NL)` liệt kê bill đã bán; chốt xong ghi `inputTrace.<NL>.windowSales/windowSoldQty` và đánh dấu
+  dòng bán `prepWindowSettled`. Màn Đối chiếu NL hiện "Trong lúc chờ đã bán …" (bill · món · lượng).
+- Hết khoá (`prepReconRelease`) dọn `saleHeld` / `prepSaleHeld`.
+- **Tab Kho:** NL đang chờ cân cho mẻ thì KHÔNG mở mã / báo hết ở tab Kho — làm ở màn Đối chiếu NL của mẻ.
+- Còn chặn: xoá bill (hoàn kho) của bill bán trong lúc khoá — làm lại sau khi NL cân xong.

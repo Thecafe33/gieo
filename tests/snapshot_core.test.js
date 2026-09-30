@@ -11,7 +11,7 @@ const { makeFake, normalize, dropStore, storeGaps, markFirstCall } = require('./
 const { loadCore } = require('./lib/core_loader');
 
 const SNAP = path.join(__dirname, 'snapshots', 'core.json');
-const hasEngine = fs.existsSync(path.join(__dirname, '..', 'unit_engine.v1.js'));
+const hasEngine = fs.existsSync(path.join(__dirname, '..', require('./lib/engine_file')));
 const kind = process.env.CORE || (hasEngine ? 'engine' : 'html');
 const C = 'stock_containers_gieogieo', PB = 'prep_batches_gieogieo', INV = 'inventory_items_gieogieo', PI = 'prep_items_gieogieo';
 const ITEM = { id: 'X', name: 'Sữa', unit: 'ml', trackingMode: 'unit', countUnitName: 'Hộp', packagingUnits: [{ name: 'Hộp', baseQty: 1000 }] };

@@ -33,7 +33,7 @@ const rows = (fake, coll) => Object.keys(fake.FS).filter(k => k.startsWith(coll 
   eq([rows(fake, 'stock_transactions_gieogieo').length, rows(fake, 'prep_transactions_gieogieo').length], [2, 2], 'bill bổ sung: gọi lại không ghi đôi');
   // Không còn .add() nào trên collection sổ trong engine / hai app
   const bad = [];
-  for (const f of ['unit_engine.v1.js', 'posgieo.html', 'quanlygieo.html']) {
+  for (const f of [require('./lib/engine_file'), 'posgieo.html', 'quanlygieo.html']) {
     const src = fs.readFileSync(path.resolve(__dirname, '..', f), 'utf8');
     const re = /collection\(\s*'(stock_transactions_gieogieo|prep_transactions_gieogieo)'\s*\)\s*\.add\(/g; let m;
     while ((m = re.exec(src))) bad.push(f + ':' + src.slice(0, m.index).split('\n').length);

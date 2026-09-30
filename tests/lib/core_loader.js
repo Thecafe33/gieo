@@ -39,7 +39,7 @@ function readConst(name) {
   const html = fs.readFileSync(path.join(ROOT, 'posgieo.html'), 'utf8');
   const m = new RegExp('const ' + name + "\\s*=\\s*'([^']*)'").exec(html);
   if (m) return m[1];
-  const e = path.join(ROOT, 'unit_engine.v1.js');
+  const e = path.join(ROOT, require('./engine_file'));
   if (fs.existsSync(e)) { const m2 = new RegExp('const ' + name + "\\s*=\\s*'([^']*)'").exec(fs.readFileSync(e, 'utf8')); if (m2) return m2[1]; }
   throw new Error('không thấy hằng ' + name);
 }
@@ -75,7 +75,7 @@ function loadHtml(fake, env) {
   return new Function(...names, src + '\nreturn {' + CORE_NAMES.join(',') + '};')(...names.map(n => g[n]));
 }
 
-function loadEngine(fake, env, file = 'unit_engine.v1.js') {
+function loadEngine(fake, env, file = require('./engine_file')) {
   const g = appGlobals(fake, env);
   const sandbox = { console: g.console, setTimeout: g.setTimeout, clearTimeout, setImmediate, Promise, Uint8Array };
   sandbox.window = sandbox; sandbox.globalThis = sandbox;
