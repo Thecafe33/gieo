@@ -11663,6 +11663,29 @@ async function _startPrepBatchImpl(preResolvedStaff, atomicScanDone, atomicScann
       // cuộn ngược qua đúng cơ chế dựa-vào-ledger đã có sẵn (_reversePrepBatchInputsPOS) là đủ,
       // không cần đường vòng qua perInputAllocations như nhánh lỗi-giữa-chừng ở trên.
       console.error('startPrepBatch: ghi lô cooking thất bại, đang hoàn lại nguyên liệu đã trừ', setErr);
+      // [Sửa lỗi mất phản hồi mạng] "Ghi lô lỗi" chưa chắc là lô CHƯA được ghi: lệnh có thể đã thành công
+      // ở máy chủ, chỉ mất phản hồi. Đọc lại đúng lô đó trước khi hoàn nguyên liệu — hoàn khi lô vẫn tồn tại
+      // thì vừa có lô đang nấu vừa có nguyên liệu quay lại kho (kho dư đúng bằng cả mẻ).
+      let batchState = 'unknown';
+      try { const chk = await batchRef.get(); batchState = chk.exists ? 'exists' : 'missing'; }
+      catch (chkErr) { console.warn('startPrepBatch: không đọc lại được lô để kiểm tra', chkErr); }
+      if (batchState === 'exists') {
+        batchCreated = true;   // lô đã có thật → coi như tạo xong, KHÔNG hoàn nguyên liệu, KHÔNG nhả khoá
+        prepReconGate = null;
+        toast('⚠️ Mạng chập chờn nhưng lô đã được tạo — kiểm tra thẻ "Đang chế biến"');
+        refreshFifoAlert().catch(() => {});
+        await loadPrepBatchesPOS();
+        renderPrepBatchForm();
+        return;
+      }
+      if (batchState === 'unknown') {
+        batchCreated = true;   // không biết lô có hay không → không được hoàn/nhả gì (hoàn nhầm nguy hiểm hơn để nguyên)
+        posAutoReportManager('Bắt đầu mẻ: không xác định được lô đã tạo chưa',
+          `${p.name || ''}: nguyên liệu đã trừ, chưa đọc lại được lô ${batchRef.id}. Kiểm tra tab Chế biến; nếu không có lô "đang nấu" thì hoàn nguyên liệu tay.`,
+          { ref: batchRef.id, prepName: p.name || '' }).catch(() => {});
+        toast('⚠️ Mạng lỗi — chưa xác định được lô đã tạo chưa. Đã báo Quản lý, đừng bấm bắt đầu lại.');
+        return;
+      }
       let backOk = 0;
       try {
         const rb = await _reversePrepBatchInputsPOS(batchRef.id,
@@ -21918,7 +21941,6 @@ function renderScCartPreview() {
   const el = document.getElementById('sc-cart-lines');
   if (!el) return;
   const items = Object.values(cart);
-  console.log('[renderScCartPreview] cart keys:', Object.keys(cart), '| items count:', items.length);
   if (!items.length) { el.innerHTML = '<div style="font-size:12px;color:#bbb;">Giỏ trống</div>'; return; }
 
   // [NEW-ICE] Nếu mọi đồ uống trong đơn cùng 1 mức đá → hiện 1 dòng nhãn chung
@@ -22212,13 +22234,8 @@ function calcChange() {
 // ============================================================
 // 3. NHÁNH CUSTOMER — Tra cứu & Voucher qua Firebase SDK
 // ============================================================
-// LƯU Ý: hàm onPhoneInput này bị ghi đè bởi định nghĩa onPhoneInput phía dưới (khu vực
-// "CUSTOMER LIST TAB — Infinite scroll" gần cuối file) — JS chỉ chạy bản khai báo SAU
-// cùng. Vẫn cập nhật đồng bộ ở đây để tránh nhầm lẫn nếu sau này có ai sửa nhầm bản này.
-function onPhoneInput(val) {
-  if (val.length === 10) lookupCustomer();
-  if (val.length < 6) requestClearCustomer(); // [FIX-freeTp-confirmBeforeClear]
-}
+// (onPhoneInput — hàm xử lý ô nhập SĐT — nằm ở khu vực "CUSTOMER LIST TAB — Infinite scroll" gần cuối file.
+//  Bản trùng tên ở đây trước kia là mã chết bị bản dưới ghi đè, đã gỡ để không sửa nhầm.)
 
 function lookupCustomer() {
   let phone = document.getElementById('cuph').value.trim().replace(/[^0-9]/g, '');
@@ -23247,7 +23264,8 @@ function weekStart() {
 }
 
 function openDatePicker() {
-  const today = new Date().toISOString().slice(0,10);
+  const n = new Date(), p2 = x => String(x).padStart(2, '0');
+  const today = `${n.getFullYear()}-${p2(n.getMonth() + 1)}-${p2(n.getDate())}`;   // ngày theo giờ máy (không dùng UTC: 0–7h sáng VN sẽ lệch về hôm trước)
   document.getElementById('dpFrom').value = today;
   document.getElementById('dpTo').value = today;
   document.getElementById('datePopup').classList.add('show');
@@ -25984,11 +26002,12 @@ function onPhoneInput(val) {
   }
 
   if (cleanVal.length >= 3) {
-    const matches = allCustomersCache.filter(c =>
-      c.id.startsWith(cleanVal) || c.id.includes(cleanVal));
+    // [Bảo mật] `customers` dùng chung với XOFA: chỉ nhận id toàn chữ số (SĐT) — id lạ không bao giờ lọt vào onclick/HTML.
+    const matches = allCustomersCache.filter(c => /^\d+$/.test(String(c.id)) &&
+      (c.id.startsWith(cleanVal) || c.id.includes(cleanVal)));
     if (matches.length > 0) {
       ac.innerHTML = matches.slice(0, 8).map(c => {
-        const displayName = c.nickname || c.name || 'Khách hàng';
+        const displayName = escHtmlPos(c.nickname || c.name || 'Khách hàng');   // [Bảo mật] tên khách do bên ngoài nhập — luôn lọc ký tự HTML
         const pts         = c.total_points || 0;
         const srcBadge    = '';
         const hlPhone = c.id.replace(
@@ -26099,7 +26118,7 @@ function _custRenderNextPage(reset) {
   slice.forEach(doc => {
     const d = doc.data();
     const phone = doc.id;
-    const nick = d.nickname || d.name || 'Khách hàng';
+    const nick = escHtmlPos(d.nickname || d.name || 'Khách hàng');   // [Bảo mật] xem onPhoneInput
     const pts = Number(d.total_points || 0).toLocaleString('vi-VN');
     const stamps = Number(d.stamp_count || 0);
     const free = Number(d.free_drink_available || 0);
@@ -26109,7 +26128,7 @@ function _custRenderNextPage(reset) {
     card.innerHTML = `
       <div style="min-width:0;flex:1;margin-right:10px;">
         <div style="font-size:16px;font-weight:700;color:var(--td);margin-bottom:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${nick}</div>
-        <div style="font-size:13px;color:var(--gt);font-weight:600;">${phone}</div>
+        <div style="font-size:13px;color:var(--gt);font-weight:600;">${escHtmlPos(phone)}</div>
         ${lastVisit ? `<div style="font-size:11px;color:#bbb;margin-top:2px;">Lần cuối: ${lastVisit}</div>` : ''}
       </div>
       <div style="text-align:right;flex-shrink:0;">
