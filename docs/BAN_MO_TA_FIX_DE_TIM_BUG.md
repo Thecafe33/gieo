@@ -193,3 +193,10 @@ Test: `tests/phan_bien_v15.test.js`, `tests/chuoi_bill.test.js` (59–61).
 61. Trừ kho lỗi vẫn đóng `done` → core trả kết quả; lỗi → `failed` + `failedLines` + plan lưu bền; chạy lại dùng plan.
 62. Đóng lô lúc xác minh bỏ qua kiểm phiên bản → đóng lô mang rev (rev node gỡ + 1); trạng thái đóng chỉ áp dụng khi số được nhận.
 Giới hạn còn lại: chưa có worker tự động chạy lại việc `failed`; `rev` khởi tạo theo giờ×1000.
+
+---
+## O. Đợt sửa theo bản rà bug lần 11 (engine v16) — lỗi 63–65
+Test: `tests/phan_bien_v16.test.js`, `tests/chuoi_bill.test.js` (63–64).
+63. Xoá bill từ Quản lý bỏ qua giao thức huỷ → dấu huỷ do engine ghi trong `reverseSales` (dùng chung hai app).
+64. Dấu huỷ chặn trừ nhưng chưa chặn hoàn của topping → hoàn có `opKey` (sửa topping) của bill đã huỷ bị bỏ qua.
+65. #62 còn hở khi node dựng thiếu `rev` → cấp rev lúc dựng node; hàm đồng bộ không ghi số thiếu rev đè bản đã có rev.

@@ -1,4 +1,4 @@
-// Bản rà bug lần 8 (01/10/2026) — lỗi 49–54 (ENGINE=unit_engine.v12.js để xem lỗi cũ).
+// Bản rà bug lần 11 (01/10/2026) — lỗi 65 (engine); 63–64 ở chuoi_bill.test.js.
 'use strict';
 const { makeFake } = require('./lib/fakefb');
 const { loadEngineModule } = require('./lib/engine');
@@ -71,71 +71,34 @@ const closedByNew = async (f, T0) => {                 // việc mới xác minh
 
 
 
+
+const snapAll = f => { const pi = f.fake.FS[PI + '/P'], lot = f.fake.FS[PB + '/b1']; return { rt: rtv(f, 'b1/unitBase'), lotUnit: lot.unitBase, lot: lot.qtyRemaining, stock: pi.currentStock, short: pi.pendingShortage || 0,
+  adj: Object.values(f.fake.FS).filter(v => v && v.fromPrepVerify).map(v => v.qty), task: (f.fake.FS[TASKS + '/verify_P'] || {}).status }; };
+
+
 (async () => {
-  // ── Lỗi 49: máy giữ bill cũ trong RAM vẫn bổ sung được — nay transaction ghi topping kiểm cờ trên dữ liệu máy chủ ──
-  {
-    const src = extract('posgieo.html', ['_submitAddonImpl']);
-    const log = []; const serverNode = { id: 'o1', date: '23/09/2026', deletionPending: true, total: 100, itemsArray: [], addons: [] };
-    const names = ['_addonState', '_addonOrder', 'orderAddonInfo', '_addonAmount', 'resolveStaffPinAndCheckin', 'posConfirm', '_addonApplyToItems', 'MONTH_KEYS', 'db', '_addonSameOrderState', 'toast', 'closeAddonSheet', 'showDet', 'trackConsumptionPOS', 'applyAddonConsumptionPOS', 'printAddonReceipt', 'printAddonLabel', 'fmt', 'tpLabel', 'log'];
-    const o = { id: 'o1', date: '23/09/2026', total: 100, itemsArray: [{ name: 'Trà' }], billCode: 'B1' };   // bản trong RAM: CHƯA có cờ
-    const vals = { _addonState: { itemIdx: 0, toppings: [{ n: 1 }], method: 'TIỀN MẶT', cashGiven: 0, seq: 1, totalCups: 1 }, _addonOrder: () => o, orderAddonInfo: () => ({ ok: true }), _addonAmount: () => 10, resolveStaffPinAndCheckin: async () => ({ id: 'E', fullName: 'E' }),
-      posConfirm: async () => true, _addonApplyToItems: () => ({ items: [] }), MONTH_KEYS: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L'], _addonSameOrderState: () => true, toast: m => log.push('toast:' + m), closeAddonSheet: () => {}, showDet: () => {},
-      trackConsumptionPOS: () => log.push('TRỪ KHO'), applyAddonConsumptionPOS: () => {}, printAddonReceipt: () => {}, printAddonLabel: () => {}, fmt: x => x, tpLabel: () => 't', log,
-      db: { ref: () => ({ transaction: async fn => { const r = fn(JSON.parse(JSON.stringify(serverNode))); return { committed: r !== undefined, snapshot: { val: () => serverNode } }; } }) } };
-    await new Function(...names, src + '\nreturn _submitAddonImpl();')(...names.map(n => vals[n]));
-    eq([log.some(x => /xoá dở/.test(x)), log.includes('TRỪ KHO')], [true, false], 'L49 bản RAM cũ không có cờ nhưng máy chủ có → từ chối, không trừ kho');
-  }
-  // ── Lỗi 50: ghi cờ xoá dở lỗi → DỪNG trước khi hoàn kho, nhả khoá thao tác ──
-  {
-    const src = extract('posgieo.html', ['delOrderConfirm']);
-    const log = []; const ids = new Set();
-    const names = ['document', 'orders', 'curOid', '_deletingOrderIds', 'toast', 'db', 'MONTH_KEYS', '_consumptionInflightPOS', 'UnitEngine', 'log'];
-    const vals = { document: { getElementById: id => ({ value: '3367', style: {}, focus() {} }) }, orders: [{ id: 'o1', date: '23/09/2026', backfillMode: null }], curOid: 'o1', _deletingOrderIds: ids, toast: m => log.push('toast:' + m),
-      db: { ref: () => ({ transaction: async () => { throw new Error('mất mạng'); } }) }, MONTH_KEYS: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L'], _consumptionInflightPOS: new Map(),
-      UnitEngine: { consume: { reverseSales: async () => { log.push('HOÀN KHO'); return { ok: true }; }, voidBackfill: async () => ({ ok: true }) } }, log };
-    await new Function(...names, src + '\nreturn delOrderConfirm();')(...names.map(n => vals[n]));
-    eq([log.includes('HOÀN KHO'), ids.has('o1'), log.some(x => /CHƯA hoàn kho/.test(x))], [false, false, true], 'L50 ghi cờ lỗi → không hoàn kho, nhả khoá, báo thử lại');
-  }
-  // ── Lỗi 51: hoàn tác RT xong nhưng đồng bộ lô lỗi → lần phục hồi sau VẪN đồng bộ (không đóng việc sớm) ──
-  {
-    const f = mk(prepWorld().fs, prepWorld().rt); const fn = {}; hookFenceOnce(f, fn); 
-    let failLotFlag = false; failLot(f, () => failLotFlag);
-    const release = gateRt(f, /active_units_gieogieo\/P\/b1$/);
-    const old = f.UE.duty.verifyCommit(line(80, 100), task(), ctx('C')).catch(e => e);
-    await sleep(30); await closedByNew(f);
-    fn.armed = async () => { fn.armed = null; T += 1000; await f.UE.consume.prepSale('P', 10, 'bán', 'bill_51_x', '2026-09-23', 'bill_51_x_prep_P'); await sleep(30); failLotFlag = true; };
-    T += 1000; release(); await old; await sleep(50);
-    eq([rtv(f, 'b1/unitBase'), f.fake.FS[PB + '/b1'].qtyRemaining], [-10, 70], 'L51 RT đã hoàn tác (−10) nhưng bản sao lô còn 70 (đồng bộ lỗi)');
-    failLotFlag = false; await f.UE.duty.recoverVerifyUndo();
-    const pi = f.fake.FS[PI + '/P'];
-    eq([rtv(f, 'b1/unitBase'), f.fake.FS[PB + '/b1'].qtyRemaining, pi.currentStock, pi.pendingShortage], [-10, 0, 0, 10], 'L51 lần phục hồi sau: không trừ lại RT (−10) nhưng đồng bộ lô 0, tồn 0, thiếu 10');
-  }
-  // ── Lỗi 52: cổng phiên bản áp dụng mọi nhánh và kiểm lại khi nhận lượt chốt ──
-  {
-    const f = mk(prepWorld().fs, prepWorld().rt);
-    const atMs = T; const bk = await f.UE.duty.lotBookAtExact('P', 'b1', atMs);
-    f.fake.FS['duty_config_gieogieo/current'] = {};                                              // chủ bỏ xác nhận sau khi đã chụp snapshot
-    let err = null; try { await f.UE.duty.verifyCommit(Object.assign(line(80, bk.book), { snaps: { b1: { book: bk.book, exact: bk.exact } } }), task(), ctx()); } catch (e) { err = e; }
-    eq([err && err.code, f.fake.FS[TASKS + '/verify_P'].status, rtv(f, 'b1/unitBase')], ['FLEET_UNCONFIRMED', 'open', 100], 'L52 bỏ xác nhận → lượt chốt bằng snapshot cũ bị từ chối');
-    const w = prepWorld(100); w.rt = {}; const g = mk(w.fs, w.rt); g.fake.FS['duty_config_gieogieo/current'] = {};
-    const nb = await g.UE.duty.lotBookAtExact('P', 'b1', T);
-    eq([nb.exact, nb.reason], [false, 'chua_xac_nhan_moi_may_da_cap_nhat'], 'L52 lô thiếu node RT cũng bị cổng chặn khi chưa xác nhận');
-  }
-  // ── Lỗi 53: nhật ký bị cắt trong cửa sổ 10 giây → không đóng dấu lại, exact:false ──
-  {
-    const f = mk(prepWorld().fs, prepWorld().rt);
-    const atMs = T;
-    for (let i = 0; i < 31; i++) { T += 100; await f.UE.consume.prepSale('P', 1, 'bán', 'bill_53_' + i, '2026-09-23', 'bill_53_' + i + '_prep_P'); }
-    const bk = await f.UE.duty.lotBookAtExact('P', 'b1', atMs);
-    eq([rtv(f, 'b1/unitBase'), bk.exact, bk.reason], [69, false, 'nhat_ky_bi_cat'], 'L53 31 lượt bán trong 3,1 s làm nhật ký bị cắt → exact:false (không "đóng dấu" 69 thành sổ tại mốc)');
-  }
-  // ── Lỗi 54: node xuất hiện giữa lúc đọc RT và đọc Firestore → dùng lịch sử của node ──
+  // ── 65: lô THIẾU node RT → xác minh dựng node (có rev ngay lúc dựng) → đóng lô chậm không đè lô dựng lại ──
   {
     const w = prepWorld(100); w.rt = {}; const f = mk(w.fs, w.rt);
-    const atMs = T; let armed = true;
-    hook(f, PB, 'get', async (d, id) => { if (armed && id === 'b1') { armed = false; T += 100; await f.fake.db.ref('active_units_gieogieo/P/b1').set({ code: 'L1', unitBase: 100, capacity: 733, openedAt: 1 }); await f.UE.consume.prepSale('P', 10, 'bán', 'bill_54_x', '2026-09-23', 'bill_54_x_prep_P'); await sleep(30); } return d.get(); });
-    const bk = await f.UE.duty.lotBookAtExact('P', 'b1', atMs);
-    eq([rtv(f, 'b1/unitBase'), bk.book, bk.exact], [90, 100, true], 'L54 node đăng ký lại + bán 10 giữa chừng → sổ tại mốc 100 (không phải 90)');
+    const orig = f.fake.fstore.runTransaction.bind(f.fake.fstore); let held = false, release; const gate = new Promise(r => { release = r; });
+    f.fake.fstore.runTransaction = async cb => { if (!held && /rtRev/.test(cb.toString())) { held = true; await gate; } return orig(cb); };
+    const op1 = f.UE.duty.verifyCommit(line(0, 100), task(), ctx('C')).catch(e => e);               // lô không node → dựng node, cân 0, gỡ node; đồng bộ đóng bị giữ
+    await sleep(60);
+    const created = rtv(f, 'b1');                                                                    // (đã gỡ) — kiểm: lô trước đó được dựng có rev
+    T += 1000;
+    await f.fake.db.ref('active_units_gieogieo/P/b1').set({ code: 'L1', unitBase: 80, capacity: 733, openedAt: 5 });
+    await f.fake.fstore.collection(PB).doc('b1').update({ status: 'active', qtyRemaining: 80, unitBase: 80 });
+    T += 1000; await f.UE.consume.prepSale('P', 10, 'bán', 'bill_65_x', '2026-09-23', 'bill_65_x_prep_P'); await sleep(40);
+    release(); await op1; await sleep(60);
+    const lot = f.fake.FS[PB + '/b1'];
+    eq([rtv(f, 'b1/unitBase'), lot.unitBase, lot.qtyRemaining, lot.status, typeof rtv(f, 'b1/rev')], [70, 70, 70, 'active', 'number'], 'L65 lô thiếu node: đóng lô chậm không đè lô dựng lại; node dựng bằng set có rev');
+  }
+  // ── rev ngay lúc dựng node (transaction) ──
+  {
+    const w = prepWorld(100); w.rt = {}; const f = mk(w.fs, w.rt);
+    const g = mk(w.fs, w.rt);
+    await g.UE.duty.verifyCommit(line(100, 100), task(), ctx());                                    // dựng node từ Firestore trong transaction
+    eq(typeof rtv(g, 'b1/rev'), 'number', 'node lô BTP dựng trong transaction (xác minh) được cấp rev');
   }
   console.log(ok ? 'ALL PASS' : 'SOME FAIL'); process.exit(ok ? 0 : 1);
 })().catch(e => { console.log('FAIL exception', e && e.stack); process.exit(1); });

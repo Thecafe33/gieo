@@ -212,7 +212,7 @@ Nút "Cập nhật" ở sidebar (`manualCheckUpdate`, dựa trên service worker
 <script src="https://cdn.jsdelivr.net/npm/bcryptjs@2.4.3/dist/bcrypt.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
 <!-- [E1] Unit Engine — nạp TRƯỚC script chính. Đổi phiên bản = đổi tên file (6.1). -->
-<script src="unit_engine.v15.js"></script>
+<script src="unit_engine.v16.js"></script>
 
 <style>
 :root{--gd:#E23A5D;--gm:#C22B49;--gl:#FDE6EA;--bg:#FFFCF0;--gt:#999;--td:#111;--bb:#E7ECFB;--bi:#1D3F91;
@@ -24970,8 +24970,7 @@ async function delOrderConfirm() {
     if (!(kq && kq.snapshot && kq.snapshot.val())) { _deletingOrderIds.delete(delId); toast('⚠️ Đơn không còn trên hệ thống — không cần xoá'); return; }
     if (!kq.committed && busy) { _deletingOrderIds.delete(delId); toast('⏳ Đang trừ kho phần bổ sung topping (có thể ở máy khác) — CHƯA xoá. Đợi vài giây rồi xoá lại.'); return; }
     o.deletionPending = true;
-    // [v15] Dấu huỷ bill (engine) TRƯỚC khi hoàn kho: khoản trừ kho đến muộn của bill này (worker cũ / thuê hết hạn) sẽ thấy dấu trong transaction ghi sổ và tự hoàn.
-    await UnitEngine.consume.markOrderCancelled(delId, 'delOrder');
+    // Dấu huỷ bill do engine ghi trong consume.reverseSales (dùng chung POS và Quản lý).
   } catch (flagErr) {
     console.warn('[xoá bill] không ghi được cờ xoá dở — dừng', flagErr);
     _deletingOrderIds.delete(delId);

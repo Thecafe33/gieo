@@ -131,5 +131,35 @@ const pinOk = base => { base.document.getElementById('del-pin-input').value = '3
     }, { computeConsumptionForOrder: calc2 }));
     eq([r.result, r.rt.active_units_gieogieo.P.b1.unitBase, r.rt.active_units_gieogieo.X.A.unitBase], [{ failed: ['X'], hasPlan: true, s1: 'failed', s2: 'done' }, 30, 170], '61 lỗi NL → việc `failed` + dòng lỗi + plan; chạy lại → `done`, NL 170, BTP 30 (không trừ đôi)');
   }
+
+  // ── 63: xoá bill từ QUẢN LÝ (consume.reverseOrder, không qua delOrderConfirm của POS) — worker topping đã lưu plan rồi chờ → bị chặn bởi dấu huỷ do engine ghi ──
+  {
+    let release; const gate = new Promise(r => { release = r; });
+    const r = await runWrapped('engine', spec(async (F, fake, base) => {
+      await F.applySalesConsumptionPOS(base.orders[0], 'bill_o1', '2026-09-28');            // BTP 100 → 50
+      await F._submitAddonImpl();                                                            // worker: giành thuê, lưu plan, chờ
+      await new Promise(x => setTimeout(x, 20));
+      const rv = await base.UnitEngine.consume.reverseOrder('bill_o1', { billCode: 'B001' });   // Quản lý: hoàn kho (engine ghi dấu huỷ)
+      await fake.db.ref(RTP).remove();                                                       // Quản lý: xoá bill
+      release(); await Promise.all(base.__tracked);
+      return rv.ok;
+    }, { _loadPrepUnitAllocationsForOrderPOS: async () => { await gate; return {}; } }));
+    eq([r.result, state(r)], [true, { rt: 100, lot: 100, stock: 100, short: 0, bill: false }], '63 xoá bill từ Quản lý: trừ topping đến muộn bị chặn — RT, lô, tồn đều 100');
+  }
+  // ── 64: chiều HOÀN của topping (giảm tiêu hao NL do đổi bao bì) đến sau khi bill bị xoá cũng bị chặn ──
+  {
+    let release; const gate = new Promise(r => { release = r; });
+    const calc3 = ord => { let n = 0; (ord.itemsArray || []).forEach(it => (it.toppings || []).forEach(t => { n += 1; })); return { agg: { X: 50 - 10 * n }, prepAgg: { P: 50 }, skipped: [] }; };   // thêm topping: NL X giảm 10 (bao bì khác)
+    const r = await runWrapped('engine', spec(async (F, fake, base) => {
+      await F.applySalesConsumptionPOS(base.orders[0], 'bill_o1', '2026-09-28');            // X 200 → 150, BTP 100 → 50
+      await F._submitAddonImpl();                                                            // worker: delta X = −10 (hoàn), lưu plan, chờ
+      await new Promise(x => setTimeout(x, 20));
+      const key = Object.keys((await fake.db.ref(RTP + '/consumeJobs').once('value')).val())[0];
+      await fake.db.ref(RTP + '/consumeJobs/' + key).update({ startedAt: 1 });               // thuê hết hạn (worker cũ vẫn sống)
+      pinOk(base); await F.delOrderConfirm();                                                // POS xoá bill: hoàn về X 200, BTP 100
+      release(); await Promise.all(base.__tracked);                                          // worker hoàn thêm 10?
+    }, { computeConsumptionForOrder: calc3, _loadLocDeductedForOrderPOS: async () => { await gate; return { fifoMap: { X: [{ containerId: 'A', qty: 50 }] } }; } }));
+    eq([r.rt.active_units_gieogieo.X.A.unitBase, state(r)], [200, { rt: 100, lot: 100, stock: 100, short: 0, bill: false }], '64 hoàn do sửa topping đến sau khi bill đã xoá → bỏ qua: NL 200 (không 210), BTP 100');
+  }
   console.log(ok ? 'ALL PASS' : 'SOME FAIL'); process.exit(ok ? 0 : 1);
 })().catch(e => { console.log('FAIL exception', e && e.stack); process.exit(1); });
