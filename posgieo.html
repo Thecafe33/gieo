@@ -9988,7 +9988,7 @@ async function _prepSugRefreshImpl() {
     const cs = await fstore.collection('prep_batches_gieogieo').where('status', '==', 'cooking').get();
     const pend = {};
     cs.forEach(d => { const b = d.data(), p = PREP_ITEMS_CACHE_POS.find(x => x.id === b.prepId);
-      const q = Number(b.qtyInitial) || (Number(b.ratio) || 1) * (Number(p && p.batchYield) || 0);
+      const q = Number(b.qtyInitial) || (Number(b.batchRatio) || 1) * (Number(p && p.batchYield) || 0);   // lô ghi số mẻ ở batchRatio
       pend[b.prepId] = (pend[b.prepId] || 0) + q; if (p) found.find(f => f.prep.id === b.prepId && (f.cookedToday = true)); });
     found.forEach(f => { f.pending = pend[f.prep.id] || 0; });
   }
@@ -10099,6 +10099,9 @@ async function openPrepBatchScreen() {
 
 // Nạp lô 'cooking' + 'active'. Không lấy lô đã dùng hết/bỏ — màn này chỉ phục vụ
 // việc đang làm, lịch sử đầy đủ để bên Management xem.
+// [KẸT Ở 'finishing'] Nạp cả lô 'finishing' (bấm Hoàn thành rồi rớt mạng/tắt app sau bước giành
+// lô) để hiện nút "Tiếp tục lưu" — xem resumePrepFinish. Mọi chỗ đọc bộ nhớ này đều lọc theo
+// trạng thái nên lô 'finishing' không lọt vào danh sách lô đang còn / lô để huỷ.
 //
 // [FIX "Bấm chế biến nhưng không hiện ô Đang chế biến"] Lỗi đọc lại danh sách này
 // (permission-denied, mất mạng, index thiếu...) TRƯỚC ĐÂY chỉ console.warn rồi âm
@@ -10109,7 +10112,7 @@ let _prepBatchesLoadError = null;
 async function loadPrepBatchesPOS() {
   try {
     const snap = await fstore.collection('prep_batches_gieogieo')
-      .where('status', 'in', ['cooking', 'active']).get();
+      .where('status', 'in', ['cooking', 'finishing', 'active']).get();
     PREP_BATCHES_CACHE_POS = snap.docs.map(d => ({ id: d.id, ...d.data() }))
       .sort((a, b) => String(a.finishedAt || a.startedAt || '').localeCompare(String(b.finishedAt || b.startedAt || '')));
     _prepBatchesLoadError = null;
@@ -10179,7 +10182,7 @@ function renderPrepBatchForm() {
 
   // Lô đang chế biến / còn hạn của TẤT CẢ thành phẩm (không chỉ cái đang chọn) —
   // nhân viên cần thấy toàn cảnh để biết còn gì đang trên bếp, khỏi nấu trùng.
-  const cooking = PREP_BATCHES_CACHE_POS.filter(b => b.status === 'cooking');
+  const cooking = PREP_BATCHES_CACHE_POS.filter(b => b.status === 'cooking' || b.status === 'finishing');
   const active  = PREP_BATCHES_CACHE_POS.filter(b => b.status === 'active' && Number(b.qtyRemaining) > 0);
 
   const ratioBtn = (label, val) => `<button onclick="prepBatchSetRatio(${val})" style="flex:1;min-width:64px;min-height:44px;padding:11px 6px;border-radius:12px;border:1.5px solid ${Math.abs(r-val)<0.001?'var(--gd)':'#e6e1d2'};background:${Math.abs(r-val)<0.001?'#FDE6EA':'#fff'};color:${Math.abs(r-val)<0.001?'var(--gd)':'#888'};font-family:'Google Sans',sans-serif;font-weight:700;font-size:13.5px;cursor:pointer;">${label}</button>`;
@@ -10196,6 +10199,7 @@ function renderPrepBatchForm() {
     <div class="wal-section" style="margin:0 0 14px;border:1.5px solid #fcd34d;background:#fffbeb;">
       <div class="wal-section-title" style="color:#92400e;font-size:15px;">🔥 Đang chế biến (${cooking.length})</div>
       ${cooking.map(b => {
+        if (b.status === 'finishing') return prepFinishingCardHTML(b);
         // [MỚI] Công thức mẻ này có dùng nguyên liệu "cái" (đơn vị nguyên, cần
         // dán tem) không — nếu có, nhắc quét ngay tại đây thay vì bắt nhân viên
         // nhớ quay lại màn Container sau. Bắt đầu chế biến chính là lúc gói/hộp
@@ -10395,6 +10399,22 @@ function prepFinishBlocked(batchId) {
     box.scrollIntoView({ behavior: 'smooth', block: 'center' });
     box.animate([{ boxShadow: '0 0 0 0 rgba(0,98,173,.6)' }, { boxShadow: '0 0 0 10px rgba(0,98,173,0)' }], { duration: 700, iterations: 3 });
   }
+}
+
+// Thẻ lô kẹt ở 'finishing' (đã bấm Hoàn thành, số cân đã chốt trong _pendingFinish, nhưng lưu
+// chưa xong). Không cho cân lại/huỷ — chỉ một nút làm tiếp đúng số đã chốt (xem resumePrepFinish).
+function prepFinishingCardHTML(b) {
+  const pf = b._pendingFinish || null;
+  const unit = escHtmlPos(b.unit || '');
+  return `
+        <div style="background:#fff;border:2px solid #fca5a5;border-radius:22px;padding:16px;margin-top:12px;">
+          <div style="font-size:21px;font-weight:800;color:#78350f;line-height:1.25;">${escHtmlPos(b.prepName || '')}</div>
+          <div style="font-size:13px;color:#a16207;margin-top:4px;">Bắt đầu ${fmtDateTimeShort(b.startedAt)}</div>
+          <div style="margin-top:12px;padding:12px 14px;background:#fef2f2;border-radius:14px;font-size:13.5px;font-weight:700;color:#b91c1c;line-height:1.5;">
+            Đã bấm Hoàn thành nhưng lưu chưa xong (mất mạng giữa chừng).${pf ? ` Số đã cân: <b>${fmtPrepQty(pf.qty)} ${unit}</b>${pf.staffFullName ? ' · ' + escHtmlPos(pf.staffFullName) : ''} — không cần cân lại.` : ''}
+          </div>
+          <button id="prepResume_${b.id}" onclick="${pf ? `resumePrepFinish('${b.id}')` : `openPrepFinishForm('${b.id}')`}" style="width:100%;min-height:56px;margin-top:12px;background:#16a34a;color:#fff;border:none;border-radius:99px;font-family:'Google Sans',sans-serif;font-weight:800;font-size:16px;cursor:pointer;">${pf ? 'Tiếp tục lưu' : 'Hoàn thành'}</button>
+        </div>`;
 }
 
 // Đồng hồ đếm ngược cho lô đang nấu. Dùng 1 interval CHUNG cho mọi lô (không mỗi
@@ -12446,28 +12466,71 @@ async function _submitPrepFinishImpl() {
       return;
     }
     if (fin.status === 'no_finish') { toast('❌ Lỗi nội bộ: thiếu dữ liệu hoàn thành, thử lại'); return; }
-    const finish = fin.finish;
-
-    // [TỐI ƯU] Trước đây gọi loadPrepBatchesPOS() — tải lại TOÀN BỘ lô từ Firestore
-    // chỉ để đọc lại đúng 1 lô vừa ghi, cộng thêm ~1 lượt mạng vào chuỗi 4 lượt đã có
-    // (PIN → sinh số lô → transaction → update lô) khiến nút đứng im tới ~3 giây.
-    // Ta đã biết chính xác mọi field vừa ghi, nên cập nhật thẳng cache tại chỗ.
-    Object.assign(b, {
-      batchCode: finish.batchCode, qtyInitial: finish.qty, qtyRemaining: finish.qty,
-      finishedAt: finish.finishedAt, expiresAt: finish.expiresAt, status: 'active',
-      finishedBy: finish.staffFullName, finishedByEmployeeId: finish.staffEmployeeId
-    });
-    showPrepLabelCard(b.id);   // hiện thẻ tem để nhân viên chép tay
-    // Tính lại giá vốn/yield thật của BTP — chạy nền, KHÔNG chặn nhân viên; lỗi ở
-    // đây không ảnh hưởng lô vừa lưu.
-    refreshPrepYieldStatsPOS(b.prepId).catch(err => console.warn('[Yield] cập nhật giá vốn lỗi:', err));
-    // Đồng bộ lại nền cho chắc (lô do máy khác tạo...) — KHÔNG await, không chặn UI.
-    loadPrepBatchesPOS().catch(err => console.warn('loadPrepBatchesPOS (nền) lỗi:', err));
-    prepSugRefresh();   // mẻ vừa xong → tồn BTP đổi, tính lại gợi ý
+    _prepAfterFinishOK(b, fin.finish);
   } catch (err) {
     console.error('submitPrepFinish failed', err);
     toast('❌ Lỗi: ' + (err.code || err.message || err));
   }
+}
+
+// Sau khi engine lưu xong lô (Hoàn thành hoặc Tiếp tục lưu): cập nhật màn hình.
+function _prepAfterFinishOK(b, finish) {
+  // [TỐI ƯU] Trước đây gọi loadPrepBatchesPOS() — tải lại TOÀN BỘ lô từ Firestore
+  // chỉ để đọc lại đúng 1 lô vừa ghi, cộng thêm ~1 lượt mạng vào chuỗi 4 lượt đã có
+  // (PIN → sinh số lô → transaction → update lô) khiến nút đứng im tới ~3 giây.
+  // Ta đã biết chính xác mọi field vừa ghi, nên cập nhật thẳng cache tại chỗ.
+  Object.assign(b, {
+    batchCode: finish.batchCode, qtyInitial: finish.qty, qtyRemaining: finish.qty,
+    finishedAt: finish.finishedAt, expiresAt: finish.expiresAt, status: 'active',
+    finishedBy: finish.staffFullName, finishedByEmployeeId: finish.staffEmployeeId
+  });
+  showPrepLabelCard(b.id);   // hiện thẻ tem để nhân viên chép tay
+  // Tính lại giá vốn/yield thật của BTP — chạy nền, KHÔNG chặn nhân viên; lỗi ở
+  // đây không ảnh hưởng lô vừa lưu.
+  refreshPrepYieldStatsPOS(b.prepId).catch(err => console.warn('[Yield] cập nhật giá vốn lỗi:', err));
+  // Đồng bộ lại nền cho chắc (lô do máy khác tạo...) — KHÔNG await, không chặn UI.
+  loadPrepBatchesPOS().catch(err => console.warn('loadPrepBatchesPOS (nền) lỗi:', err));
+  prepSugRefresh();   // mẻ vừa xong → tồn BTP đổi, tính lại gợi ý
+}
+
+// [KẸT Ở 'finishing'] Bấm Hoàn thành mà rớt mạng/tắt app SAU bước giành lô thì lô nằm ở 'finishing'
+// với số đã chốt trong _pendingFinish. Engine vốn làm tiếp được (prep.finishBatch đọc lại đúng số đã
+// chốt, dòng PRODUCTION id cố định nên không cộng tồn hai lần) — nhưng màn này trước đây chỉ nạp lô
+// 'cooking'/'active' nên lô kẹt biến mất, không ai bấm làm tiếp: BTP đã nấu không lên lô, bán ra ghi âm.
+// Làm tiếp đúng số đã chốt — không hỏi số mới, không cần PIN (người chốt đã ký lúc Hoàn thành).
+async function resumePrepFinish(batchId) {
+  if (_posSubmitBusy) { toast('⏳ Đang xử lý, vui lòng đợi giây lát...'); return; }
+  _posSubmitBusy = true;
+  const restoreBtn = setBtnBusy('prepResume_' + batchId, '⏳ Đang lưu tiếp...');
+  try {
+    const doc = await fstore.collection('prep_batches_gieogieo').doc(batchId).get();
+    const fresh = doc.exists ? { id: doc.id, ...doc.data() } : null;
+    const pf = fresh && fresh._pendingFinish;
+    if (!fresh || fresh.status !== 'finishing' || !pf) {
+      toast('ℹ️ Lô này đã được xử lý ở máy khác — đã tải lại');
+      await loadPrepBatchesPOS(); renderPrepBatchForm();
+      return;
+    }
+    const fin = await UnitEngine.prep.finishBatch(fresh, {
+      qty: pf.qty, batchCode: pf.batchCode, expiresAt: pf.expiresAt, inputCost: pf.inputCost,
+      weighLines: pf.weighLines || [], finishedAt: pf.finishedAt,
+      staffEmp: { id: pf.staffEmployeeId, fullName: pf.staffFullName },
+      sug: Number(pf.declaredYieldTotal) || 0, lechPct: Number(pf.yieldVariancePct) || 0
+    });
+    if (fin.status !== 'ok') {
+      toast('ℹ️ Lô này đã được xử lý ở máy khác — đã tải lại');
+      await loadPrepBatchesPOS(); renderPrepBatchForm();
+      return;
+    }
+    let b = PREP_BATCHES_CACHE_POS.find(x => x.id === batchId);
+    if (!b) { b = fresh; PREP_BATCHES_CACHE_POS.push(b); }
+    delete b._pendingFinish;
+    toast('✅ Đã lưu xong lô ' + (fin.finish.batchCode || ''));
+    _prepAfterFinishOK(b, fin.finish);
+  } catch (err) {
+    console.error('resumePrepFinish failed', err);
+    toast('❌ Chưa lưu được: ' + (err.code || err.message || err) + ' — bấm "Tiếp tục lưu" lại');
+  } finally { _posSubmitBusy = false; restoreBtn(); }
 }
 
 // ============================================================================

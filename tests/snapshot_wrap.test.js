@@ -102,10 +102,10 @@ const SEED_PREP = () => {
 const COOK = { id: 'c1', prepId: 'P', prepCode: 'CT', prepName: 'Cốt', unit: 'ml', batchRatio: 1, status: 'cooking', businessDate: '2026-09-28', shelfLifeType: 'hours', shelfLifeHours: 24, atomicScannedContainerIds: ['k1'] };
 const PREP_SCOPE = (f, r, dom, extra) => ({ ...POS_COMMON(f, r, null, [PREP_P]), PREP_BATCHES_CACHE_POS: [JSON.parse(JSON.stringify(COOK))], posConfirm: async () => true,
   prepBatchInputCostPOS: () => 1500, computePrepExpiry: () => '2026-09-29T08:00:00.000Z', refreshPrepYieldStatsPOS: async () => r('refreshPrepYieldStatsPOS')(), loadPrepBatchesPOS: async () => r('loadPrepBatchesPOS')(), ...(extra || {}) });
-S.POS_hoan_thanh_me = { app: 'pos', target: '_submitPrepFinishImpl', seed: SEED_PREP(),
+S.POS_hoan_thanh_me = { app: 'pos', target: '_submitPrepFinishImpl', helpers: ['_prepAfterFinishOK'], seed: SEED_PREP(),
   scope: (f, r, dom) => { dom.prepFinishQty = { value: '750' }; return PREP_SCOPE(f, r, dom, { _finishingBatchId: 'c1', _prepFinishWeighLines: [{ w: 800, tare: 50 }] }); },
   call: F => F._submitPrepFinishImpl() };
-S.POS_hoan_thanh_me_resume = { app: 'pos', target: '_submitPrepFinishImpl', seed: (() => { const s = SEED_PREP(); s.fs[PB + '/c1'] = { ...s.fs[PB + '/c1'], status: 'finishing', _pendingFinish: { qty: 700, batchCode: 'OLD', expiresAt: 'E', inputCost: 10, weighLines: [], weighMethod: 'manual', staffFullName: 'NV B', staffEmployeeId: 'e2', declaredYieldTotal: 800, yieldVariancePct: -12.5, finishedAt: '2026-09-28T00:00:00.000Z' } }; return s; })(),
+S.POS_hoan_thanh_me_resume = { app: 'pos', target: '_submitPrepFinishImpl', helpers: ['_prepAfterFinishOK'], seed: (() => { const s = SEED_PREP(); s.fs[PB + '/c1'] = { ...s.fs[PB + '/c1'], status: 'finishing', _pendingFinish: { qty: 700, batchCode: 'OLD', expiresAt: 'E', inputCost: 10, weighLines: [], weighMethod: 'manual', staffFullName: 'NV B', staffEmployeeId: 'e2', declaredYieldTotal: 800, yieldVariancePct: -12.5, finishedAt: '2026-09-28T00:00:00.000Z' } }; return s; })(),
   scope: (f, r, dom) => { dom.prepFinishQty = { value: '750' }; return PREP_SCOPE(f, r, dom, { _finishingBatchId: 'c1', _prepFinishWeighLines: [] }); },
   call: F => F._submitPrepFinishImpl() };
 S.POS_do_bo_theo_lo = { app: 'pos', target: '_submitPrepWasteImpl', seed: SEED_PREP(),
