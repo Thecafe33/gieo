@@ -41,7 +41,7 @@ const task = () => ({ id: 'verify_P', firstById: 'B', firstBy: 'Bình', firstAt:
     const fs = prepWorld().fs; fs[TASKS + '/verify_P'] = { ...fs[TASKS + '/verify_P'], status: 'processing', processingById: 'D', processingAt: new Date(T).toISOString() };
     const f = mk(fs, prepWorld().rt); let err = '';
     try { await f.UE.duty.verifyCommit(line(80, 100), task(), C_); } catch (e) { err = e.message; }
-    eq([/người khác đang xử lý|đang được người khác/.test(err), f.fake.rtGet('active_units_gieogieo/P/b1/unitBase')], [true, 100], 'L3b việc đang do người khác xử lý (còn mới) → từ chối, không ghi gì');
+    eq([/đang xử lý/.test(err), f.fake.rtGet('active_units_gieogieo/P/b1/unitBase')], [true, 100], 'L3b việc đang do người khác xử lý (còn mới) → từ chối, không ghi gì');
     f.fake.FS[TASKS + '/verify_P'].processingAt = new Date(T - 3 * 60000).toISOString();
     await f.UE.duty.verifyCommit(line(80, 100), task(), C_);
     near(f.fake.rtGet('active_units_gieogieo/P/b1/unitBase'), 80, 'L3b người kia bỏ dở quá 2 phút → giành lại làm được');

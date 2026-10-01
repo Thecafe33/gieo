@@ -1,4 +1,4 @@
-# Unit Engine — tài liệu API (`unit_engine.v6.js`, bản 6.0.0; v1–v5 giữ để quay lui)
+# Unit Engine — tài liệu API (`unit_engine.v7.js`, bản 7.0.0; v1–v6 giữ để quay lui)
 
 > Viết ở E5 (28/09/2026), cập nhật E6. Kế hoạch gốc: `docs/KE_HOACH_UNIT_ENGINE_DA_CUA_HANG.md`.
 > Bảng ghi của E0 (trước khi tách): `docs/BANG_GHI_ENGINE.md`.
@@ -255,3 +255,12 @@ Chưa làm: nguyên liệu (NL) — đối chiếu NL khi nấu đã có `respon
   Firestore của lô đồng bộ theo RT hiện hành (đọc lại, tối đa 3 vòng) nên bán xen không bị ghi đè; chỉ gỡ node RT khi về 0 (lô âm giữ nợ); dòng sổ `prep_verify_{task}_{firstAt}` không còn trùng id giữa hai việc của cùng BTP. `listOpenTasks/expireTasks` gồm cả `processing`.
 - **Hoàn kho khi NL đang khoá cân** (có từ trước, tái hiện ở v5): lỗi mang `code:'PREP_LOCKED'`, `_ueClaimedReverseAllocations` nhả claim, `_reverseIngredientConsumptionPOS` không nuốt → `reverseOrder` trả `ok:false` (bill được giữ, hoàn lại sau khi chốt mẻ). Trước đây ghi dòng hoàn "untracked" + Sổ lệch mà tem không được cộng.
 - **Bán BTP thiếu lô** (có từ trước): `applyPrepConsumptionPOS` suy tồn ngay khi bán vượt tồn (lô đi âm / không đủ lô / không có lô) để tồn không âm và `pendingShortage` hiện ngay; bán đủ lô không thêm lượt đọc.
+
+## Sửa theo bản rà bug lần 2 (v7, 01/10/2026) — test `tests/phan_bien_v7.test.js` (`ENGINE=unit_engine.v6.js` để xem lỗi cũ)
+- **`applyPrepConsumptionPOS`**: hai lượt CÙNG `txId` chạy chồng nhau chỉ trừ một lần — tuần tự hoá theo `prepId|txId` trong cùng máy; transaction ghi sổ đọc lại `txRef`, nếu lượt khác đã ghi thì HOÀN đúng phần RT vừa phân bổ và trả `{unitAllocations:[], duplicate:true}`. (Đường trừ NL `applyStockTransactionPOS` chưa đổi.)
+- **`duty.verifyCommit`** viết lại phần giành việc / ghi:
+  · giành bằng transaction kèm **token**; việc trên server phải đúng thế hệ với màn đang cầm (`firstAt` + `caseId`), người cân đầu kiểm tra trên dữ liệu vừa đọc;
+  · việc `processing` còn mới (≤ `DUTY.PROCESSING_STALE_MS` = 60 giây) thì kể cả cùng một nhân viên trên máy khác cũng bị từ chối; lượt lỗi tự **nhả việc về `open`** (`partialRt` nhớ RT đã ghi dở) nên làm lại ngay được; token được kiểm tra trước các ghi cuối và khi đóng việc;
+  · gỡ node RT về 0 bằng **transaction** (chỉ gỡ khi giá trị lúc gỡ vẫn ≈0, bán xen làm âm thì giữ nợ);
+  · ghi lô Firestore lỗi (sau thử lại) thì **báo lỗi, không đóng việc**; lô đồng bộ theo RT hiện hành;
+  · **dòng điều chỉnh = Σ số cân − Σ sổ lúc cân của các lô đã cân** (độc lập với bán xen / lô mới), tồn tổng là bước riêng (`_ueRecomputeCurrentStock`), không gán `currentStock = số cân`.

@@ -92,3 +92,16 @@ Cả 7 lỗi đều tái hiện được ở v5 (`ENGINE=unit_engine.v5.js node 
 6. `applyPrepConsumptionPOS` `return` trước bước suy tồn → suy tồn khi bán vượt tồn.
 7. Bấm "Tiếp tục" hai lần nhảy qua thẻ → khoá `_prepCountNextBusy` + kiểm tra thẻ còn là thẻ hiện tại sau khi chờ cổng.
 Phát hiện thêm khi sửa: dòng sổ `prep_verify_{task}` trùng id giữa hai việc cùng BTP (sửa trong lỗi 3). Snapshot `core` lập lại: chỉ khác thông báo lỗi khoá (`[PREP_LOCKED]`) và ca "bán BTP chưa có lô" nay có `pendingShortage` đúng.
+
+---
+## F. Đợt sửa theo bản rà bug lần 2 (engine v7) — lỗi 8–15, đều tái hiện được trước khi sửa
+(Lỗi 8 và 9 có từ code gốc POS.) Test: `tests/phan_bien_v7.test.js` (engine; `ENGINE=unit_engine.v6.js` để xem lỗi cũ) và `tests/duty_pos.test.js` mục 11–12 (POS).
+8. `continueAfterRefillChecklist` giữ `_posSubmitBusy` khi `_continueAfterCashPass` lỗi → `try/catch/finally` luôn nhả khoá + báo thử lại.
+9. `applyPrepConsumptionPOS` cùng `txId` chạy chồng trừ RT hai lần → tuần tự hoá theo `txId` + đọc lại `txRef` trong transaction, hoàn phần trừ trùng.
+10. Gỡ node lô về 0 xoá mất nợ do bán xen → gỡ có điều kiện bằng transaction RT.
+11. Dòng điều chỉnh xác minh dùng `tonSau − currentStock` (hai thời điểm/phạm vi khác nhau) → dùng đúng phần chênh của lần cân (Σ cân − Σ sổ lúc cân).
+12. Cùng nhân viên hai máy cùng ghi → token + từ chối khi lượt đang xử lý còn mới; lượt lỗi nhả việc.
+13. Màn cũ xử lý việc mới (kể cả tự xác minh mình) → so thế hệ việc (`firstAt`/`caseId`) và người cân đầu trên dữ liệu vừa đọc, trong transaction.
+14. Ghi lô lỗi vẫn báo thành công/đóng việc → báo lỗi, giữ việc mở.
+15. Xác minh hoàn tất muộn xoá màn cân mới → `_prepVerifyMode.session`; chỉ dọn màn nếu còn đúng phiên đã gửi.
+Đồng ý với nhận xét của bản rà: nói "chỉ còn khe hở nhỏ ở đồng bộ lô" ở v6 là chưa đủ — còn sai ở dòng sổ điều chỉnh (lỗi 11), gỡ node (lỗi 10) và đóng việc khi ghi lô lỗi (lỗi 14).

@@ -102,7 +102,7 @@ const mkLine = counted => { const l = { prepId: 'P', prepName: 'Cốt trà lài'
     const busy = {}; const l = mkLine(834); const task = { id: 'verify_P', firstById: 'B' };
     const src = extract('posgieo.html', ['submitPrepVerify', '_submitPrepVerifyImpl']);
     const fn = new Function('busy', 'l', 'task', 'toast', 'resolveStaffPinAndCheckin', 'exitPrepVerifyPOS', 'posDateKey', 'console',
-      'let _posSubmitBusy=false; let _dutyVerifyBusy=false; const _prepCountState=[l]; const _prepVerifyMode={task};\n' +
+      'let _posSubmitBusy=false; let _dutyVerifyBusy=false; const _prepCountState=[l]; const _prepVerifyMode={task, session:1};\n' +
       'const UnitEngine={clock:{now:()=>1},duty:{verifyCommit:async()=>{busy.pos=_posSubmitBusy; busy.duty=_dutyVerifyBusy; return {};}}};\n' + src + '\nreturn {submitPrepVerify};');
     await fn(busy, l, task, () => {}, async () => ({ id: 'C', fullName: 'Chi' }), () => {}, () => 'd', console).submitPrepVerify();
     eq([busy.pos, busy.duty], [false, true], 'xác minh giữ khoá riêng (_dutyVerifyBusy), KHÔNG giữ _posSubmitBusy → thanh toán không bị chặn');
@@ -110,9 +110,37 @@ const mkLine = counted => { const l = { prepId: 'P', prepName: 'Cốt trà lài'
   // 10. dựng màn đếm cuối ca luôn xoá chế độ xác minh cũ
   {
     const src = extract('posgieo.html', ['renderPrepCountScreen']);
-    const fn = new Function('lines', 'verifyTask', 'let _prepVerifyMode={task:{id:"cũ"}}; let _prepCountState=[]; let _prepCountCardIdx=0; const _prepCountApplyDiscardAll=()=>{}; const preloadVesselImagesPOS=()=>{}; const renderPrepCountCard=()=>{};\n' + src + '\nrenderPrepCountScreen(lines, verifyTask); return _prepVerifyMode;');
+    const fn = new Function('lines', 'verifyTask', 'let _prepVerifyMode={task:{id:"cũ"}}; let _prepVerifySeq=0; let _prepCountState=[]; let _prepCountCardIdx=0; const _prepCountApplyDiscardAll=()=>{}; const preloadVesselImagesPOS=()=>{}; const renderPrepCountCard=()=>{};\n' + src + '\nrenderPrepCountScreen(lines, verifyTask); return _prepVerifyMode;');
     const L = [{ prepId: 'P', activeBatches: [{ id: 'b1' }] }];
-    eq([fn(L, undefined), fn(L, { id: 'T' })], [null, { task: { id: 'T' } }], 'dựng màn đếm cuối ca → bỏ chế độ xác minh dính từ trước; mở cân lại → đặt đúng việc');
+    eq([fn(L, undefined), fn(L, { id: 'T' })], [null, { task: { id: 'T' }, session: 1 }], 'dựng màn đếm cuối ca → bỏ chế độ xác minh dính từ trước; mở cân lại → đặt đúng việc');
+  }
+  // 11. xác minh hoàn tất MUỘN khi nhân viên đã sang màn đếm kết ca → không xoá danh sách cân mới
+  {
+    let release; const slow = new Promise(r => { release = r; }); const calls = [];
+    const l = mkLine(834); const task = { id: 'verify_P', firstById: 'B' };
+    const src = extract('posgieo.html', ['submitPrepVerify', '_submitPrepVerifyImpl']);
+    const fn = new Function('l', 'task', 'slow', 'calls', 'toast', 'resolveStaffPinAndCheckin', 'exitPrepVerifyPOS', 'renderDutyTasksPOS', 'posDateKey', 'console',
+      'let _posSubmitBusy=false; let _dutyVerifyBusy=false; const _prepCountState=[l]; let _prepVerifyMode={task, session:1};\n' +
+      'const UnitEngine={clock:{now:()=>1},duty:{verifyCommit:async()=>{await slow; return {};}}};\n' + src + '\nreturn {submitPrepVerify, newScreen(){ _prepVerifyMode=null; _prepCountState.length=0; _prepCountState.push({prepId:"Q"}); }, state(){ return _prepCountState.map(x=>x.prepId); }};');
+    const F = fn(l, task, slow, calls, () => {}, async () => ({ id: 'C', fullName: 'Chi' }), () => calls.push('exit'), () => calls.push('tasks'), () => 'd', console);
+    const p = F.submitPrepVerify();
+    await new Promise(r => setImmediate(r));
+    F.newScreen();                       // nhân viên sang màn đếm kết ca và cân được BTP khác
+    release(); await p;
+    eq([calls, F.state()], [['tasks'], ['Q']], 'xác minh cũ xong muộn → không gọi exit (không xoá màn cân mới), chỉ làm mới danh sách việc');
+  }
+  // 12. kết ca: bước chuyển tiếp lỗi vẫn nhả khoá thanh toán
+  {
+    const src = extract('posgieo.html', ['continueAfterRefillChecklist']);
+    const mk = failing => new Function('toast', 'console', '_failing',
+      'let _posSubmitBusy=false; const clRemainingSec=()=>0; const _refillClearCountdown=()=>{}; const clLogComplete=async()=>{}; const fstore={collection:()=>({doc:()=>({set:async()=>{}})})};' +
+      'const shiftState={businessDate:"d",closing:{}}; const firebase={firestore:{FieldValue:{arrayUnion:x=>x}}}; const _refillChecklistState=[];' +
+      'const _continueAfterCashPass=async()=>{ if(_failing) throw new Error("ghi lỗi"); };\n' + src + '\nreturn {run: continueAfterRefillChecklist, busy: ()=>_posSubmitBusy};');
+    const toasts2 = [];
+    const bad = mk(true)((m) => toasts2.push(m), { warn() {}, error() {} }, true); await bad.run();
+    eq([bad.busy(), toasts2.some(m => /thử/.test(m))], [false, true], 'chuyển bước lỗi → vẫn nhả _posSubmitBusy và báo để thử lại');
+    const good = mk(false)(() => {}, { warn() {}, error() {} }, false); await good.run();
+    eq(good.busy(), false, 'chuyển bước thành công → nhả khoá');
   }
   console.log(ok ? 'ALL PASS' : 'SOME FAIL'); process.exit(ok ? 0 : 1);
 })().catch(e => { console.log('FAIL exception', e && e.stack); process.exit(1); });

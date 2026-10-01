@@ -212,7 +212,7 @@ Nút "Cập nhật" ở sidebar (`manualCheckUpdate`, dựa trên service worker
 <script src="https://cdn.jsdelivr.net/npm/bcryptjs@2.4.3/dist/bcrypt.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
 <!-- [E1] Unit Engine — nạp TRƯỚC script chính. Đổi phiên bản = đổi tên file (6.1). -->
-<script src="unit_engine.v6.js"></script>
+<script src="unit_engine.v7.js"></script>
 
 <style>
 :root{--gd:#E23A5D;--gm:#C22B49;--gl:#FDE6EA;--bg:#FFFCF0;--gt:#999;--td:#111;--bb:#E7ECFB;--bi:#1D3F91;
@@ -17235,8 +17235,12 @@ async function continueAfterRefillChecklist() {
   } catch (err) {
     console.warn('Ghi log refillChecklistOverrides thất bại (không chặn kết ca vì lỗi này):', err);
   }
-  await _continueAfterCashPass();
-  _posSubmitBusy = false;
+  // Luôn nhả khoá, kể cả khi bước chuyển tiếp lỗi — nếu không thanh toán/tạo bill bị từ chối "Đang xử lý…" cho tới khi tải lại app.
+  try { await _continueAfterCashPass(); }
+  catch (err) {
+    console.error('continueAfterRefillChecklist: chuyển bước lỗi', err);
+    toast('❌ Chưa chuyển được sang bước tiếp theo — bấm lại để thử');
+  } finally { _posSubmitBusy = false; }
 }
 // ============================================================
 // [GĐ3] ĐẾM BÁN THÀNH PHẨM CUỐI NGÀY
@@ -17641,7 +17645,8 @@ async function prepShortageSubmitAnswers(auto) {
 }
 
 let _prepCountState = [];
-let _prepVerifyMode = null;   // {task} khi màn đếm đang dùng để CÂN LẠI xác minh (không phải đếm cuối ca)
+let _prepVerifyMode = null;   // {task, session} khi màn đếm đang dùng để CÂN LẠI xác minh (không phải đếm cuối ca)
+let _prepVerifySeq = 0;       // mã phiên của màn cân lại — lượt gửi cũ hoàn tất muộn không được dọn màn của phiên mới
 // [THIẾT KẾ LẠI] Chỉ số BTP (dòng trong _prepCountState) đang hiện trên màn — màn
 // giờ hiện TỪNG BTP một dạng thẻ, lướt qua bằng nút back + "Tiếp tục", thay vì cuộn
 // một danh sách dài mọi loại cùng lúc. Đây là bước nhân viên bị kẹt lâu nhất trong
@@ -17659,7 +17664,7 @@ let _prepCountCardIdx = 0;
 // mỗi lô luôn là 1 khối "Mã lô + 2 nút", 1 lô thì khối đó chỉ lặp đúng 1 lần).
 // verifyTask: có → màn dùng để CÂN LẠI xác minh; không có → đếm cuối ca (luôn xoá chế độ xác minh cũ, kể cả khi người dùng thoát màn bằng menu).
 function renderPrepCountScreen(lines, verifyTask) {
-  _prepVerifyMode = verifyTask ? { task: verifyTask } : null;
+  _prepVerifyMode = verifyTask ? { task: verifyTask, session: ++_prepVerifySeq } : null;
   _prepCountState = lines.map(l => {
     const batchQty = {}, batchDone = {}, batchWeighings = {};
     l.activeBatches.forEach(b => { batchQty[b.id] = null; batchDone[b.id] = false; batchWeighings[b.id] = []; });
@@ -17996,7 +18001,7 @@ async function submitPrepVerify() {
   try { await _submitPrepVerifyImpl(); } finally { _dutyVerifyBusy = false; }
 }
 async function _submitPrepVerifyImpl() {
-  const l = _prepCountState[0], task = _prepVerifyMode && _prepVerifyMode.task;
+  const l = _prepCountState[0], task = _prepVerifyMode && _prepVerifyMode.task, sess = _prepVerifyMode && _prepVerifyMode.session;
   if (!l || !task) return;
   if (l.counted === null) { toast('⚠️ Cân hoặc báo hết đủ các lô'); return; }
   const emp = await resolveStaffPinAndCheckin('prepCountStaff');
@@ -18005,7 +18010,9 @@ async function _submitPrepVerifyImpl() {
   try {
     await UnitEngine.duty.verifyCommit(l, task, { now: new Date(UnitEngine.clock.now()).toISOString(), staff: emp, businessDate: posDateKey() });
     toast('✅ Đã ghi nhận số cân lại');
-    exitPrepVerifyPOS();
+    // Chỉ dọn màn nếu nó vẫn là phiên đã gửi — mạng chậm mà nhân viên đã sang màn đếm kết ca thì không được xoá số đang cân.
+    if (_prepVerifyMode && _prepVerifyMode.session === sess) exitPrepVerifyPOS();
+    else if (typeof renderDutyTasksPOS === 'function') renderDutyTasksPOS();
   } catch (err) {
     console.error('submitPrepVerify failed', err);
     toast('❌ ' + (err.message || err));
