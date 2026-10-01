@@ -36,6 +36,7 @@ const task = () => ({ id: 'verify_P', firstById: 'B', firstBy: 'Bình', firstAt:
 const ctx = (id = 'C') => ({ now: new Date(T + 60000).toISOString(), staff: { id, fullName: id }, businessDate: '2026-09-23' });
 const rtv = (f, p) => f.fake.rtGet('active_units_gieogieo/P/' + p);
 const hook = (f, coll, method, fn) => { const orig = f.fake.fstore.collection.bind(f.fake.fstore); f.fake.fstore.collection = name => { const c = orig(name); if (name !== coll) return c; return { ...c, doc: id => { const d = c.doc(id); return { ...d, [method]: (...a) => fn(d, id, ...a) }; } }; }; };
+const failLot = (f, condFn) => { const orig = f.fake.fstore.runTransaction.bind(f.fake.fstore); f.fake.fstore.runTransaction = fn => orig(async t => { const t2 = Object.create(t); t2.update = (r, ...a) => { if (condFn() && String(r.path).indexOf('prep_batches_gieogieo/') === 0) throw new Error('mất mạng'); return t.update(r, ...a); }; return fn(t2); }); };
 
 (async () => {
   // ── Lỗi 16: cùng bill, hai lượt (cùng máy / hai máy) chạy chồng → tem chỉ bị trừ một lần ──
@@ -75,7 +76,7 @@ const hook = (f, coll, method, fn) => { const orig = f.fake.fstore.collection.bi
   // ── Lỗi 18: lượt lỗi rồi mở lại màn với số cân/sổ KHÁC → làm tiếp bằng đúng dữ liệu lượt cũ ──
   {
     const f = mk(prepWorld().fs, prepWorld().rt); let fail = true;
-    hook(f, PB, 'update', (d, id, patch) => { if (fail) return Promise.reject(new Error('mất mạng')); return d.update(patch); });
+    failLot(f, () => fail);
     let err = ''; try { await f.UE.duty.verifyCommit(line(80, 100), task(), ctx()); } catch (e) { err = e.message; }
     eq([/mất mạng/.test(err), f.fake.FS[TASKS + '/verify_P'].status], [true, 'open'], 'L18 lượt đầu lỗi ghi lô, việc về open (RT đã ghi 80)');
     fail = false;
@@ -83,7 +84,7 @@ const hook = (f, coll, method, fn) => { const orig = f.fake.fstore.collection.bi
     const adj = Object.values(f.fake.FS).filter(v => v && v.fromPrepVerify);
     eq([adj.length, adj[0] && adj[0].qty, f.fake.FS[TASKS + '/verify_P'].status], [1, -20, 'done'], 'L18a mở lại với sổ mới 80 → vẫn ghi điều chỉnh −20 theo lượt đầu (không mất)');
     const g = mk(prepWorld().fs, prepWorld().rt); let fail2 = true;
-    hook(g, PB, 'update', (d, id, patch) => { if (fail2) return Promise.reject(new Error('mất mạng')); return d.update(patch); });
+    failLot(g, () => fail2);
     try { await g.UE.duty.verifyCommit(line(80, 100), task(), ctx()); } catch (e) { /* lượt 1 lỗi */ }
     fail2 = false;
     await g.UE.duty.verifyCommit(line(60, 100), task(), ctx());      // mở lại, cân 60
@@ -93,11 +94,11 @@ const hook = (f, coll, method, fn) => { const orig = f.fake.fstore.collection.bi
   {
     const f = mk(prepWorld().fs, prepWorld().rt); let slow = null, release;
     // B chậm ở bước ghi lô; trong lúc đó C giành việc (quá 60 giây) và hoàn tất
-    hook(f, PB, 'update', async (d, id, patch) => { if (!slow) { slow = new Promise(r => { release = r; }); await slow; } return d.update(patch); });
+    { const origTx = f.fake.fstore.runTransaction.bind(f.fake.fstore); let nTx = 0; f.fake.fstore.runTransaction = async fn => { if (++nTx === 3 && !slow) { slow = new Promise(r => { release = r; }); await slow; } return origTx(fn); }; }   // B chậm ở giao dịch thứ 3 (bước đồng bộ lô)
     const pB = f.UE.duty.verifyCommit(line(80, 100), task(), ctx('C')).then(() => 'ok', e => e.message);
     await new Promise(r => setTimeout(r, 20));
     T += 61000;
-    const f2 = f.UE; hook(f, PB, 'update', (d, id, patch) => d.update(patch));
+    const f2 = f.UE;
     const rC = await f2.duty.verifyCommit(line(80, 100), task(), { ...ctx('D'), now: new Date(T).toISOString() }).then(() => 'ok', e => e.message);
     release();
     const rB = await pB;

@@ -67,10 +67,8 @@ const task = () => ({ id: 'verify_P', firstById: 'B', firstBy: 'Bình', firstAt:
   // ── Lỗi 5: bán xen giữa bước ghi RT và ghi lô → số trên lô phải theo RT ──
   {
     const f = mk(prepWorld().fs, prepWorld().rt);
-    const orig = f.fake.fstore.collection.bind(f.fake.fstore); let sold = false;
-    f.fake.fstore.collection = name => { const c = orig(name); if (name !== PB) return c; return { ...c, doc: id => { const d = c.doc(id); return { ...d, update: async patch => {
-      if (!sold && patch && patch.qtyRemaining != null) { sold = true; await f.UE.consume.prepSale('P', 10, 'bán xen', 'bill_9_x', '2026-09-23', 'bill_9_x_prep_P'); }
-      return d.update(patch); } }; } }; };
+    const origTx = f.fake.fstore.runTransaction.bind(f.fake.fstore); let sold = false, nTx = 0;
+    f.fake.fstore.runTransaction = async fn => { if (++nTx === 3 && !sold) { sold = true; await f.UE.consume.prepSale('P', 10, 'bán xen', 'bill_9_x', '2026-09-23', 'bill_9_x_prep_P'); } return origTx(fn); };   // bán xen ngay trước bước đồng bộ lô
     await f.UE.duty.verifyCommit(line(80, 100), task(), C_);
     const rt = f.fake.rtGet('active_units_gieogieo/P/b1/unitBase'), fsq = f.fake.FS[PB + '/b1'];
     eq([rt, fsq.qtyRemaining, fsq.unitBase], [70, 70, 70], 'L5 bán 10 g xen vào → RT, qtyRemaining và unitBase của lô cùng 70');

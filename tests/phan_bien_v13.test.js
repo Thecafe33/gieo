@@ -36,6 +36,7 @@ const task = () => ({ id: 'verify_P', firstById: 'B', firstBy: 'Bình', firstAt:
 const ctx = (id = 'C') => ({ now: new Date(T + 60000).toISOString(), staff: { id, fullName: id }, businessDate: '2026-09-23' });
 const rtv = (f, p) => f.fake.rtGet('active_units_gieogieo/P/' + p);
 const hook = (f, coll, method, fn) => { const orig = f.fake.fstore.collection.bind(f.fake.fstore); f.fake.fstore.collection = name => { const c = orig(name); if (name !== coll) return c; return { ...c, doc: id => { const d = c.doc(id); return { ...d, [method]: (...a) => fn(d, id, ...a) }; } }; }; };
+const failLot = (f, condFn) => { const orig = f.fake.fstore.runTransaction.bind(f.fake.fstore); f.fake.fstore.runTransaction = fn => orig(async t => { const t2 = Object.create(t); t2.update = (r, ...a) => { if (condFn() && String(r.path).indexOf('prep_batches_gieogieo/') === 0) throw new Error('mất mạng'); return t.update(r, ...a); }; return fn(t2); }); };
 
 
 const dupWorld = (cur = 100) => ({ rt: { active_units_gieogieo: { P: { b1: { code: 'L1', unitBase: cur, capacity: 733, openedAt: 1 } } } },
@@ -97,15 +98,15 @@ const closedByNew = async (f, T0) => {                 // việc mới xác minh
   }
   // ── Lỗi 51: hoàn tác RT xong nhưng đồng bộ lô lỗi → lần phục hồi sau VẪN đồng bộ (không đóng việc sớm) ──
   {
-    const f = mk(prepWorld().fs, prepWorld().rt); const fn = {}; hookFenceOnce(f, fn); let failLot = false;
-    hook(f, PB, 'update', (d, id, ...a) => (failLot ? Promise.reject(new Error('Firestore lỗi')) : d.update(...a)));
+    const f = mk(prepWorld().fs, prepWorld().rt); const fn = {}; hookFenceOnce(f, fn); 
+    let failLotFlag = false; failLot(f, () => failLotFlag);
     const release = gateRt(f, /active_units_gieogieo\/P\/b1$/);
     const old = f.UE.duty.verifyCommit(line(80, 100), task(), ctx('C')).catch(e => e);
     await sleep(30); await closedByNew(f);
-    fn.armed = async () => { fn.armed = null; await f.UE.consume.prepSale('P', 10, 'bán', 'bill_51_x', '2026-09-23', 'bill_51_x_prep_P'); await sleep(30); failLot = true; };
+    fn.armed = async () => { fn.armed = null; await f.UE.consume.prepSale('P', 10, 'bán', 'bill_51_x', '2026-09-23', 'bill_51_x_prep_P'); await sleep(30); failLotFlag = true; };
     release(); await old; await sleep(50);
     eq([rtv(f, 'b1/unitBase'), f.fake.FS[PB + '/b1'].qtyRemaining], [-10, 70], 'L51 RT đã hoàn tác (−10) nhưng bản sao lô còn 70 (đồng bộ lỗi)');
-    failLot = false; await f.UE.duty.recoverVerifyUndo();
+    failLotFlag = false; await f.UE.duty.recoverVerifyUndo();
     const pi = f.fake.FS[PI + '/P'];
     eq([rtv(f, 'b1/unitBase'), f.fake.FS[PB + '/b1'].qtyRemaining, pi.currentStock, pi.pendingShortage], [-10, 0, 0, 10], 'L51 lần phục hồi sau: không trừ lại RT (−10) nhưng đồng bộ lô 0, tồn 0, thiếu 10');
   }

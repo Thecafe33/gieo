@@ -175,3 +175,12 @@ Test: `tests/phan_bien_v13.test.js`.
 54. Node xuất hiện giữa lúc đọc RT và Firestore → đọc RT lại sau Firestore, dùng lịch sử của node.
 Giữ nguyên hai lựa chọn nghiệp vụ: khoá bổ sung bill xoá dở; cổng phiên bản mặc định CHƯA xác nhận.
 Giới hạn còn lại: node chỉnh bằng `set` trực tiếp bắt đầu theo dõi lại từ đầu; cổng #48 dựa vào xác nhận của chủ.
+
+---
+## M. Đợt sửa theo bản rà bug lần 9 (engine v14 + POS) — lỗi 55–58 và chuỗi thao tác
+Test: `tests/phan_bien_v14.test.js`, `tests/chuoi_bill.test.js` (bán → thêm topping → xoá chạy hàm POS thật; kiểm RT, lô, tồn, thiếu chờ đối chiếu, bill).
+55. Topping đã ghi nhưng trừ kho đến sau khi bill bị xoá → việc trừ kho bền `consumeJobs` + "thuê" trên node bill; xoá bill chờ việc đang chạy / huỷ việc chưa bắt đầu.
+56. Chữa bất biến công nhận lại quá khứ → chữa tạo mốc mới (`chgTrim` = bây giờ); mốc cũ vẫn bị từ chối.
+57. Nhập đúng số RT hiện tại không chữa được → chữa theo trạng thái bất biến, không theo chênh lệch số lượng.
+58. Đồng bộ hoàn tác chậm ghi đè số lô mới → đồng bộ lô theo phiên bản RT (`rev`/`rtRev`), hàm chung.
+Giới hạn còn lại: các đường ghi lô tuyệt đối khác (đếm cuối ca, discardByLots, tạo/khôi phục/hết hạn lô) chưa mang `rev`; việc trừ kho bổ sung "pending" mà máy tạo chết trước khi giành thuê thì không có trừ kho nào (bill xoá sau đó huỷ việc đúng); luồng bán thường chưa dùng cơ chế thuê (chỉ bổ sung topping).

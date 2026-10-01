@@ -213,7 +213,7 @@ Nút "Cập nhật" ở sidebar (`manualCheckUpdate`, dựa trên service worker
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
 <!-- [E1] Unit Engine — nạp TRƯỚC script chính. Đổi phiên bản = đổi tên file (6.1). -->
 <script src="che_do_thu.v1.js?b=96d7f20f91"></script>
-<script src="unit_engine.v13.js?b=f609786cda"></script>
+<script src="unit_engine.v14.js?b=89e3b8f5e7"></script>
 
 <style>
 :root{--gd:#E23A5D;--gm:#C22B49;--gl:#FDE6EA;--bg:#FFFCF0;--gt:#999;--td:#111;--bb:#E7ECFB;--bi:#1D3F91;
@@ -24411,6 +24411,7 @@ async function _submitAddonImpl() {
     { okText: 'Xác nhận', cancelText: 'Huỷ' }))) return;
 
   const atISO = new Date().toISOString();
+  const addonId = o.id + '_edit_' + Date.now().toString(36);        // mã thao tác cố định của lần bổ sung này — dùng cho việc trừ kho bền
   const before = { ...o, itemsArray: (o.itemsArray || o.items || []) };
   const { items: newItems } = _addonApplyToItems(o, st.itemIdx, st.toppings, atISO, st.unitIdx);
   const newTotal = (Number(o.total) || 0) + amount;
@@ -24438,7 +24439,8 @@ async function _submitAddonImpl() {
       deleting = false;
       if (!_addonSameOrderState(cur, o)) { conflict = true; return; }   // undefined = huỷ transaction
       conflict = false;
-      return { ...cur, itemsArray: newItems, items: itemsSummary, total: newTotal, addons };
+      // [v14] Ghi VIỆC TRỪ KHO bền cùng transaction nhận topping: bill đang xoá / máy khác xoá bill sẽ thấy việc này (chờ nếu đang chạy, huỷ nếu chưa bắt đầu).
+      return { ...cur, itemsArray: newItems, items: itemsSummary, total: newTotal, addons, consumeJobs: { ...(cur.consumeJobs || {}), [addonId]: { status: 'pending', at: Date.now() } } };
     });
     const val = kq && kq.snapshot && kq.snapshot.val();
     if (!val) gone = true;
@@ -24468,7 +24470,7 @@ async function _submitAddonImpl() {
 
   // Trừ kho phần thêm — không chặn luồng, lỗi chỉ ghi log như applySalesConsumptionPOS.
   trackConsumptionPOS(o.id, applyAddonConsumptionPOS(before, { ...o, itemsArray: newItems }, o.id,
-    'Bổ sung topping' + (o.billCode ? ' — ' + o.billCode : '')));
+    'Bổ sung topping' + (o.billCode ? ' — ' + o.billCode : ''), addonId));
 
   // In phiếu bổ sung + tem bổ sung. Không in lại bill gốc.
   printAddonReceipt(o, addon);
@@ -24481,9 +24483,49 @@ async function _submitAddonImpl() {
 // của ly đó (resolvePackagingItemsForLinePOS nhận tham số hasTopping — ly có topping có
 // thể dùng cỡ ly/nắp khác). Lấy hiệu số thì mọi thay đổi kiểu đó tự được tính đúng, và
 // dùng chung đúng một đường tính với lúc bán nên không bao giờ lệch nhau.
-async function applyAddonConsumptionPOS(orderBefore, orderAfter, orderId, note) {
+// [v14] Việc trừ kho của một lần bổ sung đi qua "thuê" trên node bill (RT): chỉ chạy khi bill CHƯA bị khoá xoá và việc chưa bị huỷ; xoá bill ở máy khác chờ việc đang chạy
+// hoặc huỷ việc chưa bắt đầu — nên phần trừ topping không thể đến sau khi bill đã bị hoàn kho và xoá.
+const ADDON_JOB_STALE_MS = 120000;
+function _orderRtPathPOS(o) {
+  const [dd, mm] = String(o.date).split('/');
+  return 'orders_gieogieo/' + MONTH_KEYS[parseInt(mm, 10) - 1] + '/' + dd + '/' + o.id;
+}
+async function _addonJobStartPOS(o, addonId) {
+  let blocked = false;
+  const kq = await db.ref(_orderRtPathPOS(o)).transaction(cur => {
+    if (cur === null) return cur;
+    const jobs = { ...(cur.consumeJobs || {}) }, j = jobs[addonId];
+    if (cur.deletionPending || (j && j.status === 'cancelled')) { blocked = true; return; }
+    blocked = false;
+    jobs[addonId] = { ...(j || {}), status: 'running', startedAt: Date.now() };
+    return { ...cur, consumeJobs: jobs };
+  });
+  if (!(kq && kq.snapshot && kq.snapshot.val())) return 'gone';
+  return kq.committed ? 'ok' : (blocked ? 'cancelled' : 'ok');
+}
+async function _addonJobDonePOS(o, addonId) {
+  await db.ref(_orderRtPathPOS(o)).transaction(cur => {
+    if (cur === null || !(cur.consumeJobs && cur.consumeJobs[addonId])) return cur;
+    return { ...cur, consumeJobs: { ...cur.consumeJobs, [addonId]: { ...cur.consumeJobs[addonId], status: 'done', doneAt: Date.now() } } };
+  });
+}
+async function applyAddonConsumptionPOS(orderBefore, orderAfter, orderId, note, addonId) {
+  if (!addonId) return _applyAddonConsumptionCorePOS(orderBefore, orderAfter, orderId, note);
+  let st;
+  try { st = await _addonJobStartPOS(orderAfter, addonId); }
+  catch (err) {
+    console.warn('[addon] không giành được việc trừ kho (lỗi kết nối)', err);
+    _ueWarnGogsConsumptionFailed(orderId, orderAfter, [{ id: 'toàn bộ phần thêm topping', isPrep: false, reason: 'không giành được việc trừ kho: ' + String((err && err.message) || err || '') }]).catch(() => {});
+    toastAutoReport('⚠️ Thêm topping: chưa trừ kho được — đã báo Quản lý', 'Thêm topping: trừ kho lỗi', { ref: orderId });
+    return;
+  }
+  if (st !== 'ok') { console.info('[addon] bỏ qua trừ kho — bill đang xoá / đã xoá / việc bị huỷ', orderId, st); return; }
+  try { await _applyAddonConsumptionCorePOS(orderBefore, orderAfter, orderId, note, addonId); }
+  finally { await _addonJobDonePOS(orderAfter, addonId).catch(err => console.warn('[addon] không đánh dấu xong việc trừ kho', err)); }
+}
+async function _applyAddonConsumptionCorePOS(orderBefore, orderAfter, orderId, note, editKeyIn) {
   // Khoá riêng của lần sửa này — dòng hoàn phần bớt không trùng id với lượt xoá cả đơn sau này.
-  const editKey = orderId + '_edit_' + Date.now().toString(36);
+  const editKey = editKeyIn || (orderId + '_edit_' + Date.now().toString(36));
   try {
     const [recipes, toppingRecipes, packagingPresets, packagingItemOverrides, baggingRules, pkgRulesPack, baggingTable] =
       await Promise.all([ensureRecipesLoadedPOS(), ensureToppingRecipesLoadedPOS(), ensurePackagingPresetsLoadedPOS(), ensurePackagingItemOverridesLoadedPOS(), ensurePackagingBaggingRulesLoadedPOS(), ensurePackagingRulesLoadedPOS(), ensurePackagingBaggingTableLoadedPOS()]);
@@ -24885,8 +24927,19 @@ async function delOrderConfirm() {
   // Ghi cờ là ĐIỀU KIỆN để bắt đầu hoàn (không phải cố gắng hết sức): lỗi → dừng trước khi hoàn kho, nhả khoá thao tác trên máy. Dùng transaction (không `set` — tránh dựng lại
   // node bill đã bị máy khác xoá).
   try {
-    const kq = await db.ref(rtPath).transaction(cur => (cur === null ? cur : { ...cur, deletionPending: true }));
+    // [v14] Cùng transaction: có việc trừ kho bổ sung ĐANG CHẠY (chưa quá hạn) thì CHƯA khoá/xoá — chờ nó xong để phần trừ được hoàn cùng bill; việc chưa bắt đầu thì HUỶ
+    // (lúc bắt đầu nó thấy cờ/huỷ nên không trừ).
+    let busy = false;
+    const kq = await db.ref(rtPath).transaction(cur => {
+      if (cur === null) return cur;
+      const jobs = { ...(cur.consumeJobs || {}) }, now = Date.now();
+      busy = Object.keys(jobs).some(k => jobs[k].status === 'running' && now - (Number(jobs[k].startedAt) || 0) < ADDON_JOB_STALE_MS);
+      if (busy) return;
+      Object.keys(jobs).forEach(k => { if (jobs[k].status === 'pending' || jobs[k].status === 'running') jobs[k] = { ...jobs[k], status: 'cancelled' }; });
+      return { ...cur, consumeJobs: jobs, deletionPending: true };
+    });
     if (!(kq && kq.snapshot && kq.snapshot.val())) { _deletingOrderIds.delete(delId); toast('⚠️ Đơn không còn trên hệ thống — không cần xoá'); return; }
+    if (!kq.committed && busy) { _deletingOrderIds.delete(delId); toast('⏳ Đang trừ kho phần bổ sung topping (có thể ở máy khác) — CHƯA xoá. Đợi vài giây rồi xoá lại.'); return; }
     o.deletionPending = true;
   } catch (flagErr) {
     console.warn('[xoá bill] không ghi được cờ xoá dở — dừng', flagErr);

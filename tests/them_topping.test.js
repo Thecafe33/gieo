@@ -21,7 +21,7 @@ const TP = { id: 'tc', name: 'Trân châu', price: 10000, qty: 1 };
 // Tiêu hao giả: mỗi topping 50g NL X
 const calc = ord => { let n = 0; (ord.itemsArray || []).forEach(it => (it.toppings || []).forEach(t => { n += 50 * (Number(it.qty) || 1) * (Number(t.qty) || 1); })); return { agg: n ? { X: n } : {}, prepAgg: {} }; };
 const spec = (flow, extraScope) => ({
-  app: 'pos', target: '_submitAddonImpl', exports: ['_addonApplyToItems', 'applyAddonConsumptionPOS', '_addonConsumeIngredientPOS', '_addonSameOrderState'],
+  app: 'pos', target: '_submitAddonImpl', exports: ['_addonApplyToItems', 'applyAddonConsumptionPOS', '_applyAddonConsumptionCorePOS', '_addonJobStartPOS', '_addonJobDonePOS', '_orderRtPathPOS', '_addonConsumeIngredientPOS', '_addonSameOrderState'],
   helpers: ['_addonOrder', '_addonAmount', 'tpSum', 'tpQty', 'tpLabel', '_ueWarnGogsConsumptionFailed'], seed: seed(),
   scope: (fake, rec) => {
     const o = { id: 'o1', ...JSON.parse(JSON.stringify(ORDER)) }; o.items = o.itemsArray;

@@ -1,4 +1,4 @@
-// Bản rà bug lần 7 (01/10/2026) — lỗi 43–48 (ENGINE=unit_engine.v11.js để xem lỗi cũ).
+// Bản rà bug lần 9 (01/10/2026) — lỗi 55–58 + chuỗi thao tác (kiểm RT, lô, tồn, thiếu chờ đối chiếu, sổ, việc cùng lúc).
 'use strict';
 const { makeFake } = require('./lib/fakefb');
 const { loadEngineModule } = require('./lib/engine');
@@ -36,6 +36,7 @@ const task = () => ({ id: 'verify_P', firstById: 'B', firstBy: 'Bình', firstAt:
 const ctx = (id = 'C') => ({ now: new Date(T + 60000).toISOString(), staff: { id, fullName: id }, businessDate: '2026-09-23' });
 const rtv = (f, p) => f.fake.rtGet('active_units_gieogieo/P/' + p);
 const hook = (f, coll, method, fn) => { const orig = f.fake.fstore.collection.bind(f.fake.fstore); f.fake.fstore.collection = name => { const c = orig(name); if (name !== coll) return c; return { ...c, doc: id => { const d = c.doc(id); return { ...d, [method]: (...a) => fn(d, id, ...a) }; } }; }; };
+const failLot = (f, condFn) => { const orig = f.fake.fstore.runTransaction.bind(f.fake.fstore); f.fake.fstore.runTransaction = fn => orig(async t => { const t2 = Object.create(t); t2.update = (r, ...a) => { if (condFn() && String(r.path).indexOf('prep_batches_gieogieo/') === 0) throw new Error('mất mạng'); return t.update(r, ...a); }; return fn(t2); }); };
 
 
 const dupWorld = (cur = 100) => ({ rt: { active_units_gieogieo: { P: { b1: { code: 'L1', unitBase: cur, capacity: 733, openedAt: 1 } } } },
@@ -69,72 +70,66 @@ const closedByNew = async (f, T0) => {                 // việc mới xác minh
   await f.UE.duty.verifyCommit(line(0, 100), Object.assign(task(), { firstAt: '2026-09-23T07:00:00.000Z', caseId: 'c2' }), ctx('D')); };
 
 
+
+
+const snapAll = f => { const pi = f.fake.FS[PI + '/P'], lot = f.fake.FS[PB + '/b1']; return { rt: rtv(f, 'b1/unitBase'), lotUnit: lot.unitBase, lot: lot.qtyRemaining, stock: pi.currentStock, short: pi.pendingShortage || 0,
+  adj: Object.values(f.fake.FS).filter(v => v && v.fromPrepVerify).map(v => v.qty), task: (f.fake.FS[TASKS + '/verify_P'] || {}).status }; };
 (async () => {
-  // ── Lỗi 43: đóng dấu lại không được xoá nhật ký hợp lệ do máy khác vừa ghi ──
+  // ── 56: nhật ký đã vỡ (thiếu −10 không ghi) → Quản lý chỉnh 95 → mốc cân CŨ không được công nhận ──
   {
     const f = mk(prepWorld().fs, prepWorld().rt);
-    const atMs = T; let armed = true; const origRef = f.fake.db.ref.bind(f.fake.db);
-    const wrap = (r, p) => ({ ...r, transaction: async (...a) => { if (armed && /active_units_gieogieo\/P\/b1$/.test(p)) { armed = false; T += 100; await f.UE.consume.prepSale('P', 10, 'bán', 'bill_43_x', '2026-09-23', 'bill_43_x_prep_P'); } return r.transaction(...a); }, child: id => wrap(r.child(id), p + '/' + id) });
-    f.fake.db.ref = p => wrap(origRef(p), p);
-    const bk = await f.UE.duty.lotBookAtExact('P', 'b1', atMs);
-    eq([rtv(f, 'b1/unitBase'), bk.book, bk.exact], [90, 100, true], 'L43 bán xen ngay lúc đóng dấu → sổ tại mốc vẫn 100 (không xoá nhật ký, không trả 90)');
+    const atMs = T; const first = await f.UE.duty.lotBookAtExact('P', 'b1', atMs);               // cân lúc RT 100 (đóng dấu theo dõi)
+    await f.fake.db.ref('active_units_gieogieo/P/b1/unitBase').set(90);                          // máy cũ bán 10, không nhật ký
+    T += 60000; await f.UE.prep.setBatchQty('b1', 95);                                           // Quản lý chỉnh 95 (chữa)
+    const old = await f.UE.duty.lotBookAtExact('P', 'b1', atMs);
+    eq([first.exact, old.exact, old.reason], [true, false, 'nhat_ky_bi_cat'], 'L56 sau khi chữa, mốc cân CŨ vẫn exact:false (không dùng chgBase mới để công nhận quá khứ)');
+    let err = null; try { await f.UE.duty.verifyCommit(Object.assign(line(100, old.book), { snaps: { b1: { book: old.book, exact: old.exact } } }), task(), ctx()); } catch (e) { err = e; }
+    eq([err && err.code, rtv(f, 'b1/unitBase')], ['BOOK_INEXACT', 95], 'L56 xác minh bằng mốc cũ bị từ chối, RT giữ 95');
+    const fresh = await f.UE.duty.lotBookAtExact('P', 'b1', T);
+    eq([fresh.book, fresh.exact], [95, true], 'L56 mốc cân MỚI (sau lần chữa) dùng được: 95');
   }
-  // ── Lỗi 44: rào mới hơn không đủ để hoàn tác một lượt xác minh ĐÃ CHỐT hợp lệ ──
+  // ── 57: nhập đúng số RT hiện tại vẫn chữa được bất biến ──
   {
     const f = mk(prepWorld().fs, prepWorld().rt);
-    hook(f, 'duty_verify_undo_gieogieo', 'set', (d, id, ...a) => ((a[0] && a[0].status === 'done') ? Promise.reject(new Error('Firestore lỗi')) : d.set(...a)));
-    await f.UE.duty.verifyCommit(line(80, 100), task(), ctx('C'));                                // 100 → 80, hoàn tất; chỉ việc hoàn tác không ghi được 'done'
-    await f.fake.db.ref('duty_verify_fence_gieogieo/P').set({ gen: Date.parse('2026-09-23T07:00:00.000Z'), at: T });     // lượt xác minh KẾ TIẾP vừa giành rào
-    const n = await f.UE.duty.recoverVerifyUndo();
-    eq([rtv(f, 'b1/unitBase'), n], [80, 1], 'L44 worker không hoàn tác lượt đã chốt (RT vẫn 80), chỉ đóng việc');
+    const atMs = T; await f.UE.duty.lotBookAtExact('P', 'b1', atMs);
+    await f.fake.db.ref('active_units_gieogieo/P/b1/unitBase').set(90);                          // vỡ: chgBase 100, không nhật ký
+    T += 60000; await f.UE.prep.setBatchQty('b1', 90);                                           // nhập ĐÚNG số hiện tại
+    const old = await f.UE.duty.lotBookAtExact('P', 'b1', atMs), nw = await f.UE.duty.lotBookAtExact('P', 'b1', T);
+    eq([old.exact, nw.book, nw.exact], [false, 90, true], 'L57 nhập đúng 90 → đặt lại theo dõi: mốc cũ bị từ chối, mốc mới chính xác (90)');
   }
-  // ── Lỗi 45: không đọc được dấu hoàn bền → chưa biết → KHÔNG hoàn lần nữa ──
-  {
-    const f = mk(dupWorld(100).fs, dupWorld(100).rt);
-    f.fake.FS[TASKS + '/verify_P'] = prepWorld().fs[TASKS + '/verify_P']; f.fake.FS[CASES + '/c1'] = prepWorld().fs[CASES + '/c1'];
-    hook(f, 'dup_recovery_gieogieo', 'set', (d, id, ...a) => ((a[0] && a[0].status === 'done') ? Promise.reject(new Error('Firestore lỗi')) : d.set(...a)));
-    hook(f, 'reversal_unit_claims_gieogieo', 'set', (d, id, ...a) => ((a[0] && a[0].status === 'done') ? Promise.reject(new Error('Firestore lỗi')) : d.set(...a)));
-    await f.UE.consume.compensateDuplicate('prep', 'P', [{ containerId: 'b1', qty: 50 }], 'tx45');
-    await f.UE.duty.verifyCommit(line(0, 150), task(), ctx());
-    await f.fake.db.ref('active_units_gieogieo/P/b2').set({ code: 'L2', unitBase: 100, capacity: 733, openedAt: 5 });
-    let failMarks = true; const origRef = f.fake.db.ref.bind(f.fake.db);
-    const wrap = (r, p) => ({ ...r, once: (...a) => (failMarks && /rev_marks_gieogieo/.test(p) ? Promise.reject(new Error('RT đọc lỗi')) : r.once(...a)), child: id => wrap(r.child(id), p + '/' + id) });
-    f.fake.db.ref = p => wrap(origRef(p), p);
-    T += 130000; await f.UE.consume.recoverDuplicates();
-    eq([f.fake.rtGet('active_units_gieogieo/P/b2/unitBase'), Object.values(f.fake.FS).filter(v => v && v.txId === 'tx45').map(v => v.status)], [100, ['pending']], 'L45 đọc dấu bền lỗi → không hoàn (lô mới giữ 100), việc còn pending');
-    failMarks = false; T += 70000; await f.UE.consume.recoverDuplicates();
-    eq(f.fake.rtGet('active_units_gieogieo/P/b2/unitBase'), 100, 'L45 đọc lại được dấu → vẫn 100 (đã hoàn từ trước)');
-  }
-  // ── Lỗi 46: hoàn tác đồng bộ lô, tồn tổng và thiếu chờ đối chiếu ──
+  // ── 58: đồng bộ hoàn tác chậm không ghi đè số lô mới hơn ──
   {
     const f = mk(prepWorld().fs, prepWorld().rt); const fn = {}; hookFenceOnce(f, fn);
-    const release = gateRt(f, /active_units_gieogieo\/P\/b1$/);
+    const orig = f.fake.fstore.runTransaction.bind(f.fake.fstore); let gateNext = false, release, gotGate = false;
+    const gate = new Promise(r => { release = r; });
+    f.fake.fstore.runTransaction = async cb => { if (gateNext && /rtRev/.test(cb.toString())) { gateNext = false; gotGate = true; await gate; } return orig(cb); };
+    const rel = gateRt(f, /active_units_gieogieo\/P\/b1$/);
     const old = f.UE.duty.verifyCommit(line(80, 100), task(), ctx('C')).catch(e => e);
     await sleep(30); await closedByNew(f);
-    fn.armed = async () => { fn.armed = null; await f.UE.consume.prepSale('P', 10, 'bán', 'bill_46_x', '2026-09-23', 'bill_46_x_prep_P'); };
-    release(); await old; await sleep(50);
-    const pi = f.fake.FS[PI + '/P'];
-    eq([rtv(f, 'b1/unitBase'), f.fake.FS[PB + '/b1'].qtyRemaining, pi.currentStock, pi.pendingShortage], [-10, 0, 0, 10], 'L46 sau hoàn tác: RT −10, lô 0, tồn BTP 0, thiếu chờ đối chiếu 10');
+    fn.armed = async () => { fn.armed = null; await f.UE.consume.prepSale('P', 10, 'bán xen 1', 'bill_58_a', '2026-09-23', 'bill_58_a_prep_P'); await sleep(40); gateNext = true; };   // bán xen trước hoàn tác; sau đó bước đồng bộ lô của hoàn tác sẽ chờ
+    rel(); await sleep(150);
+    await f.UE.consume.prepSale('P', 10, 'bán xen', 'bill_58_x', '2026-09-23', 'bill_58_x_prep_P'); await sleep(40);   // bán xen: RT mới hơn, lô đã đồng bộ số mới
+    release(); await old; await sleep(60);
+    const s = snapAll(f);
+    eq([s.lotUnit, s.rt, s.lotUnit === s.rt, gotGate], [s.rt, s.rt, true, true], 'L58 bản sao lô (' + s.lotUnit + ') khớp RT (' + s.rt + ') — lượt đồng bộ chậm mang số cũ bị bỏ qua');
   }
-  // ── Lỗi 47: bill đã bắt đầu hoàn kho không được bổ sung thêm (khoá bền trên node bill) ──
-  {
-    const src = extract('posgieo.html', ['orderAddonInfo']);
-    const fn = new Function('ADDON_WINDOW_MIN', 'posDateKeyToDisplay', 'posDateKey', '_deletingOrderIds', src + '\nreturn orderAddonInfo;')(60, () => '23/09/2026', () => '2026-09-23', new Set());
-    const o = { id: 'x', createdAt: new Date().toISOString(), date: '23/09/2026', method: 'TIỀN MẶT' };
-    eq([fn(o).ok, fn(Object.assign({}, o, { deletionPending: true })).ok], [true, false], 'L47 bill có cờ xoá dở → không bổ sung được');
-    const html = require('fs').readFileSync(require('path').join(__dirname, '..', 'posgieo.html'), 'utf8');
-    const iFlag = html.indexOf("consumeJobs: jobs, deletionPending: true }"), iRev = html.indexOf('UnitEngine.consume.reverseSales(o, delId)');
-    eq([iFlag > 0, iFlag < iRev], [true, true], 'L47 cờ xoá dở được đặt TRƯỚC khi hoàn kho');
-  }
-  // ── Lỗi 48: chưa xác nhận mọi máy đã cập nhật → lịch sử nhật ký không được coi là chính xác ──
+  // ── Chuỗi: cân → Quản lý sửa lô → bán → xác minh: RT, lô, tồn, thiếu, sổ, việc phải khớp nhau ──
   {
     const f = mk(prepWorld().fs, prepWorld().rt);
-    f.fake.FS['duty_config_gieogieo/current'] = {};
-    const atMs = T; const a = await f.UE.duty.lotBookAtExact('P', 'b1', atMs);
-    eq([a.exact, a.reason], [false, 'chua_xac_nhan_moi_may_da_cap_nhat'], 'L48 chưa xác nhận → exact:false');
-    await f.UE.duty.setFleetCompliant(true, 'Chủ');
-    const b = await f.UE.duty.lotBookAtExact('P', 'b1', atMs);
-    eq([b.exact, await f.UE.duty.fleetCompliant()], [true, true], 'L48 chủ xác nhận → exact:true');
+    await f.UE.consume.prepSale('P', 10, 'bán', 'bill_c1_x', '2026-09-23', 'bill_c1_x_prep_P'); await sleep(30);   // 90
+    const atMs = T; const bk = await f.UE.duty.lotBookAtExact('P', 'b1', atMs);                    // cân tại 90
+    T += 1000; await f.UE.prep.setBatchQty('b1', 80); await sleep(30);                             // Quản lý sửa 80
+    T += 1000; await f.UE.consume.prepSale('P', 10, 'bán', 'bill_c2_x', '2026-09-23', 'bill_c2_x_prep_P'); await sleep(30);   // 70
+    await f.UE.duty.verifyCommit(Object.assign(line(90, bk.book), { snaps: { b1: { book: bk.book, exact: bk.exact } } }), task(), ctx());
+    await sleep(30);
+    eq([bk.book, bk.exact, snapAll(f)], [90, true, { rt: 70, lotUnit: 70, lot: 70, stock: 70, short: 0, adj: [], task: 'done' }], 'CHUỖI cân → sửa lô → bán → xác minh: RT = lô = tồn = 70, không thiếu, không điều chỉnh giả, việc xong');
+  }
+  // ── Chuỗi: chữa (setBatchQty) bị chặn khi có lượt cân lại dở ──
+  {
+    const f = mk(prepWorld().fs, prepWorld().rt);
+    f.fake.FS[TASKS + '/verify_P'] = Object.assign({}, f.fake.FS[TASKS + '/verify_P'], { status: 'open', partialRt: true });
+    let err = null; try { await f.UE.prep.setBatchQty('b1', 50); } catch (e) { err = e; }
+    eq([/lượt cân lại dở/.test((err && err.message) || ''), rtv(f, 'b1/unitBase')], [true, 100], 'chỉnh số lô bị chặn khi lượt cân lại còn dở (partialRt) — không xoá dữ liệu lượt đã sửa RT');
   }
   console.log(ok ? 'ALL PASS' : 'SOME FAIL'); process.exit(ok ? 0 : 1);
 })().catch(e => { console.log('FAIL exception', e && e.stack); process.exit(1); });

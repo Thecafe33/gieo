@@ -28,6 +28,7 @@ const task = () => ({ id: 'verify_P', firstById: 'B', firstBy: 'Bình', firstAt:
 const ctx = (id = 'C') => ({ now: new Date(T + 60000).toISOString(), staff: { id, fullName: id }, businessDate: '2026-09-23' });
 const rtv = (f, p) => f.fake.rtGet('active_units_gieogieo/P/' + p);
 const hook = (f, coll, method, fn) => { const orig = f.fake.fstore.collection.bind(f.fake.fstore); f.fake.fstore.collection = name => { const c = orig(name); if (name !== coll) return c; return { ...c, doc: id => { const d = c.doc(id); return { ...d, [method]: (...a) => fn(d, id, ...a) }; } }; }; };
+const failLot = (f, condFn) => { const orig = f.fake.fstore.runTransaction.bind(f.fake.fstore); f.fake.fstore.runTransaction = fn => orig(async t => { const t2 = Object.create(t); t2.update = (r, ...a) => { if (condFn() && String(r.path).indexOf('prep_batches_gieogieo/') === 0) throw new Error('mất mạng'); return t.update(r, ...a); }; return fn(t2); }); };
 
 (async () => {
   // ── Lỗi 9: hai lượt trừ BTP CÙNG txId chạy chồng nhau chỉ được trừ một lần ──
@@ -58,10 +59,9 @@ const hook = (f, coll, method, fn) => { const orig = f.fake.fstore.collection.bi
     // bán xen đúng lúc giữa bước ghi RT và bước ghi sổ/tồn (ở v6 là giao dịch thứ 2 trên Firestore)
     const origTx = f.fake.fstore.runTransaction.bind(f.fake.fstore); let nTx = 0;
     f.fake.fstore.runTransaction = async fn => { if (++nTx === 2) await f.UE.consume.prepSale('P', 10, 'bán xen', 'bill_8_x', '2026-09-23', 'bill_8_x_prep_P'); return origTx(fn); };
-    hook(f, PB, 'update', async (d, id, patch) => { if (!f._sold && patch && patch.qtyRemaining != null) { f._sold = true; await f.UE.consume.prepSale('P', 10, 'bán xen 2', 'bill_7_x', '2026-09-23', 'bill_7_x_prep_P'); } return d.update(patch); });
     await f.UE.duty.verifyCommit(line(100, 100), task(), ctx());
     const adj = Object.values(f.fake.FS).find(v => v && v.fromPrepVerify);
-    eq([f.fake.FS[PI + '/P'].currentStock, adj ? adj.qty : 0], [80, 0], 'L11a cân đúng 100, bán xen 10 + 10 → tồn 80 và KHÔNG có điều chỉnh giả');
+    eq([f.fake.FS[PI + '/P'].currentStock, adj ? adj.qty : 0], [90, 0], 'L11a cân đúng 100, bán xen 10 → tồn 90 và KHÔNG có điều chỉnh giả');
     const g = mk(world({ lots: [['b1', 100], ['b2', 200]] }).fs, world({ lots: [['b1', 100], ['b2', 200]] }).rt);
     await g.UE.duty.verifyCommit(line(100, 100), task(), ctx());
     const adj2 = Object.values(g.fake.FS).find(v => v && v.fromPrepVerify);
@@ -79,7 +79,7 @@ const hook = (f, coll, method, fn) => { const orig = f.fake.fstore.collection.bi
     eq([/đang xử lý|đã được xử lý/.test(err), rtv(f, 'b1/unitBase')], [true, 100], 'L12 cùng người, máy thứ hai khi lượt đầu còn mới → từ chối, không ghi');
     // lượt đầu lỗi → nhả việc → làm lại ngay được
     const g = mk(world().fs, world().rt);
-    hook(g, PB, 'update', () => Promise.reject(new Error('mất mạng')));
+    failLot(g, () => true);
     let e1 = ''; try { await g.UE.duty.verifyCommit(line(80, 100), task(), ctx('C')); } catch (e) { e1 = e.message; }
     eq([/mất mạng/.test(e1), g.fake.FS[TASKS + '/verify_P'].status], [true, 'open'], 'L12 lượt lỗi → việc được nhả về "open" để làm lại ngay');
   }
@@ -93,7 +93,7 @@ const hook = (f, coll, method, fn) => { const orig = f.fake.fstore.collection.bi
   // ── Lỗi 14: ghi lô Firestore thất bại → KHÔNG đóng việc; làm lại thì xong ──
   {
     const f = mk(world().fs, world().rt); let fail = true;
-    hook(f, PB, 'update', (d, id, patch) => { if (fail) return Promise.reject(new Error('mất mạng')); return d.update(patch); });
+    failLot(f, () => fail);
     let err = ''; try { await f.UE.duty.verifyCommit(line(80, 100), task(), ctx()); } catch (e) { err = e.message; }
     eq([/mất mạng|lô/.test(err), f.fake.FS[TASKS + '/verify_P'].status], [true, 'open'], 'L14 ghi lô lỗi → báo lỗi, việc chưa đóng');
     fail = false;
