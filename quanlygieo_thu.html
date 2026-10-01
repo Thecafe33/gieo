@@ -3879,6 +3879,31 @@ function laborMonthlyTotal(labor){
 //     tính, làm Labor cost ngày đó bị thiếu. Tab "Chấm công" liệt kê riêng nhóm này
 //     kèm nút sửa để Quản lý điền giờ ra thật.
 // ------------------------------------------------------------
+// ══════════════════════════════════════════════════════════════════════════
+// [LƯƠNG THEO MỐC] Lương/OT của nhân viên đổi theo thời gian (VD hết thử việc: 20K → 21K, OT 20K → 25K). TRƯỚC ĐÂY mọi hàm tính lương đọc
+// thẳng đơn giá HIỆN TẠI trong hồ sơ nên đổi đơn giá là cả quá khứ bị tính lại. Nay hồ sơ giữ `payHistory` = [{effectiveFrom:'YYYY-MM-DD', payType,
+// hourlyRate, otEnabled, otThresholdHours, otRate, fixedMonthlySalary}]; mỗi NGÀY dùng mức có effectiveFrom lớn nhất ≤ ngày đó.
+//   · Chưa có payHistory (nhân viên cũ) → dùng ảnh chụp payTerms POS đã ghi vào CA (BUG#35); không có ảnh chụp mới dùng hồ sơ hiện tại (như cũ).
+//   · Mốc gốc `legacy:true` (tạo tự động ở lần đổi lương đầu tiên, effectiveFrom '0000-00-00') đại diện cho "mọi ngày trước mốc đầu": nếu ca có ảnh chụp thì
+//     ảnh chụp thắng (chính xác hơn), không thì dùng mức gốc.
+// ══════════════════════════════════════════════════════════════════════════
+const PAY_FIELDS = ['payType','hourlyRate','otEnabled','otThresholdHours','otRate','fixedMonthlySalary'];
+function payTermsOfRecord(o){
+  o = o || {};
+  return { payType: o.payType||null, hourlyRate: Number(o.hourlyRate)||0, otEnabled: !!o.otEnabled,
+    otThresholdHours: Number(o.otThresholdHours)||0, otRate: Number(o.otRate)||0, fixedMonthlySalary: Number(o.fixedMonthlySalary)||0 };
+}
+function empPayTermsOn(emp, dateKey, snap){
+  const hist = (emp && Array.isArray(emp.payHistory) ? emp.payHistory : []).filter(h=>h && h.effectiveFrom)
+    .slice().sort((a,b)=>String(a.effectiveFrom).localeCompare(String(b.effectiveFrom)));
+  const useSnap = snap && snap.payType;
+  if(!hist.length) return payTermsOfRecord(useSnap ? snap : emp);
+  let pick = null;
+  for(const h of hist){ if(String(h.effectiveFrom) <= String(dateKey)) pick = h; else break; }
+  if(!pick) pick = hist[0];
+  if(pick.legacy && useSnap) return payTermsOfRecord(snap);
+  return payTermsOfRecord(pick);
+}
 // [NEW] computeWageForDayHours — tính tiền lương giờ cho 1 nhân viên trong 1
 // NGÀY (đã gộp đủ tất cả ca của ngày đó), có áp dụng OT nếu nhân viên bật OT.
 // Ngưỡng OT tính theo NGÀY (không phải theo từng ca riêng lẻ) — 1 người có 2 ca
@@ -3966,21 +3991,25 @@ async function computeActualLaborCostByDate(startDate, endDate){
   // tiền thẳng theo từng ca như bản cũ) — bắt buộc để áp đúng ngưỡng OT theo
   // ngày khi 1 người có nhiều ca/ngày (xem ghi chú computeWageForDayHours ở trên).
   const hoursByEmpDate = {}; // { "empId|date": tổng giờ }
+  const termsByEmpDate = {}; // { "empId|date": mức lương ĐÚNG NGÀY đó } — [LƯƠNG THEO MỐC]
   const _now = Date.now();
   shifts.forEach(s=>{
     const emp = empById[s.employeeId];
-    if(!emp || emp.payType!=='hourly_full' && emp.payType!=='hourly_part') return; // lương cứng không tính ở đây
+    if(!emp) return;
+    const terms = empPayTermsOn(emp, s.businessDate, s.payTerms);
+    if(terms.payType!=='hourly_full' && terms.payType!=='hourly_part') return; // lương cứng không tính ở đây
     // [FIX-ca-dang-chay] Ca đang chạy của HÔM NAY được tính tạm tới hiện tại — xem
     // shiftWorkedHours(). Ca treo ngày cũ vẫn trả 0 như trước.
     const hours = shiftWorkedHours(s, _now);
     if(hours<=0) return;
     const key = s.employeeId+'|'+s.businessDate;
     hoursByEmpDate[key] = (hoursByEmpDate[key]||0) + hours;
+    if(!termsByEmpDate[key]) termsByEmpDate[key] = terms;
   });
   Object.entries(hoursByEmpDate).forEach(([key, hours])=>{
     const sep = key.indexOf('|');
-    const employeeId = key.slice(0,sep), date = key.slice(sep+1);
-    const { amount } = computeWageForDayHours(empById[employeeId], hours);
+    const date = key.slice(sep+1);
+    const { amount } = computeWageForDayHours(termsByEmpDate[key], hours);
     addTo(date, amount);
   });
 
@@ -3994,9 +4023,9 @@ async function computeActualLaborCostByDate(startDate, endDate){
     const dateKey = dkey(cur);
     const dim = daysInMonth(cur);
     employees.forEach(emp=>{
-      if(isFixedPayType(emp) && emp.active!==false){
-        addTo(dateKey, (Number(emp.fixedMonthlySalary)||0) / dim);
-      }
+      if(emp.active===false) return;
+      const terms = empPayTermsOn(emp, dateKey);        // [LƯƠNG THEO MỐC] mức lương cứng đúng ngày
+      if(isFixedPayType(terms)) addTo(dateKey, terms.fixedMonthlySalary / dim);
     });
     cur.setDate(cur.getDate()+1);
   }
@@ -4027,21 +4056,24 @@ async function computeActualLaborBreakdownByEmployee(startDate, endDate){
   // do và cùng cách làm như Vế 1 của computeActualLaborCostByDate ở trên (bắt
   // buộc để ngưỡng OT tính đúng theo ngày, không theo từng ca riêng lẻ).
   const hoursByEmpDate = {}; // { "empId|date": tổng giờ }
+  const termsByEmpDate = {}; // [LƯƠNG THEO MỐC] mức lương đúng ngày
   const _now = Date.now();
   shifts.forEach(s=>{
     const emp = empById[s.employeeId];
-    if(!emp || (emp.payType!=='hourly_full' && emp.payType!=='hourly_part')) return;
+    if(!emp) return;
+    const terms = empPayTermsOn(emp, s.businessDate, s.payTerms);
+    if(terms.payType!=='hourly_full' && terms.payType!=='hourly_part') return;
     // [FIX-ca-dang-chay] Cùng quy tắc với computeActualLaborCostByDate.
     const hours = shiftWorkedHours(s, _now);
     if(hours<=0) return;
     const key = s.employeeId+'|'+s.businessDate;
     hoursByEmpDate[key] = (hoursByEmpDate[key]||0) + hours;
+    if(!termsByEmpDate[key]) termsByEmpDate[key] = terms;
   });
   Object.entries(hoursByEmpDate).forEach(([key, hours])=>{
     const sep = key.indexOf('|');
     const employeeId = key.slice(0,sep);
-    const emp = empById[employeeId];
-    const { amount, otHours } = computeWageForDayHours(emp, hours);
+    const { amount, otHours } = computeWageForDayHours(termsByEmpDate[key], hours);
     const bucket = ensure(employeeId);
     bucket.hours += hours;
     bucket.otHours += otHours;
@@ -4054,9 +4086,9 @@ async function computeActualLaborBreakdownByEmployee(startDate, endDate){
   while(cur<=end){
     const dim = daysInMonth(cur);
     employees.forEach(emp=>{
-      if(isFixedPayType(emp) && emp.active!==false){
-        ensure(emp.id).amount += (Number(emp.fixedMonthlySalary)||0)/dim;
-      }
+      if(emp.active===false) return;
+      const terms = empPayTermsOn(emp, dkey(cur));      // [LƯƠNG THEO MỐC]
+      if(isFixedPayType(terms)) ensure(emp.id).amount += terms.fixedMonthlySalary/dim;
     });
     cur.setDate(cur.getDate()+1);
   }
@@ -4288,7 +4320,10 @@ function deletePaymentMethod(id){
 // ------------------------------------------------------------
 async function loadEmployees(){
   const snap = await fstore.collection('employees_gieogieo').get();
-  return snap.docs.map(d=>({id:d.id, ...d.data()})).sort((a,b)=>(a.fullName||'').localeCompare(b.fullName||'','vi'));
+  const today = dkey(new Date());
+  // [LƯƠNG THEO MỐC] Có lịch sử lương → các trường lương cấp trên = mức ĐANG ÁP DỤNG hôm nay (nhãn/form hiển thị đúng); tính lương luôn đọc payHistory theo ngày.
+  return snap.docs.map(d=>{ const e = {id:d.id, ...d.data()}; if(Array.isArray(e.payHistory) && e.payHistory.length) Object.assign(e, empPayTermsOn(e, today)); return e; })
+    .sort((a,b)=>(a.fullName||'').localeCompare(b.fullName||'','vi'));
 }
 // Kiểm tra PIN đã bị nhân viên ACTIVE khác dùng chưa (loại trừ chính nhân viên
 // đang sửa qua excludeId). Trả về nhân viên đang giữ PIN đó nếu có, null nếu
@@ -7840,17 +7875,21 @@ function plPredictedLaborByDate(employees, schedules, startKey, endKey){
   const empById = {}; (employees||[]).forEach(e=>{ empById[e.id] = e; });
   const byDate = {};
   const hoursByEmpDate = {};   // { "empId|date": tổng giờ theo lịch }
+  const termsByEmpDate = {};   // [LƯƠNG THEO MỐC]
   (schedules||[]).forEach(s=>{
     const emp = empById[s.employeeId];
-    if(!emp || (emp.payType!=='hourly_full' && emp.payType!=='hourly_part')) return;
+    if(!emp) return;
+    const terms = empPayTermsOn(emp, s.date);          // [LƯƠNG THEO MỐC]
+    if(terms.payType!=='hourly_full' && terms.payType!=='hourly_part') return;
     const h = plScheduledHours(s);
     if(h <= 0) return;
     const k = s.employeeId + '|' + s.date;
     hoursByEmpDate[k] = (hoursByEmpDate[k]||0) + h;
+    if(!termsByEmpDate[k]) termsByEmpDate[k] = terms;
   });
   Object.entries(hoursByEmpDate).forEach(([k, h])=>{
     const sep = k.indexOf('|');
-    const { amount } = computeWageForDayHours(empById[k.slice(0,sep)], h);
+    const { amount } = computeWageForDayHours(termsByEmpDate[k], h);
     const date = k.slice(sep+1);
     byDate[date] = (byDate[date]||0) + amount;
   });
@@ -7859,8 +7898,9 @@ function plPredictedLaborByDate(employees, schedules, startKey, endKey){
   while(cur <= end){
     const key = dkey(cur), dim = daysInMonth(cur);
     (employees||[]).forEach(emp=>{
-      if(isFixedPayType(emp) && emp.active!==false)
-        byDate[key] = (byDate[key]||0) + (Number(emp.fixedMonthlySalary)||0)/dim;
+      if(emp.active===false) return;
+      const terms = empPayTermsOn(emp, key);
+      if(isFixedPayType(terms)) byDate[key] = (byDate[key]||0) + terms.fixedMonthlySalary/dim;
     });
     cur.setDate(cur.getDate()+1);
   }
@@ -16245,7 +16285,22 @@ function renderEmployeeFormFields(editing, payType, otEnabled){
         <div class="field" style="margin-bottom:0"><label>Số giờ cơ bản / ngày</label><input type="number" id="nvOtThreshold" value="${otThresholdHours}"></div>
         <div class="field" style="margin-bottom:0"><label>Đơn giá OT / giờ (đ)</label><input type="number" id="nvOtRate" value="${otRate}"></div>
       </div>` : ''}
+      ${editing ? `
+      <div class="field" style="margin-top:12px">
+        <label>Mức lương mới áp dụng từ ngày</label>
+        <input type="date" id="nvPayFrom" value="${escapeHtmlAttr(nvFormDraft.payFrom || dkey(new Date()))}" oninput="nvFormDraft.payFrom=this.value">
+        <div class="small-note">Chỉ dùng khi bạn ĐỔI hình thức/đơn giá/OT ở trên. Các ngày TRƯỚC mốc này giữ nguyên mức lương cũ (không bị tính lại). VD: hết thử việc từ 01/11 → chọn 01/11.</div>
+        ${nvPayHistoryHTML(editing)}
+      </div>` : ''}
   `;
+}
+// [LƯƠNG THEO MỐC] Danh sách các mốc lương đã lưu của nhân viên (chỉ xem).
+function nvPayHistoryHTML(e){
+  const hist = (e && Array.isArray(e.payHistory) ? e.payHistory : []).filter(h=>h && h.effectiveFrom)
+    .slice().sort((a,b)=>String(b.effectiveFrom).localeCompare(String(a.effectiveFrom)));
+  if(!hist.length) return '<div class="small-note" style="margin-top:8px">Chưa có lịch sử đổi lương — mức hiện tại áp dụng cho mọi ngày (hoặc theo ảnh chụp lương lúc check-in của từng ca).</div>';
+  return `<div style="margin-top:10px;font-size:12.5px;font-weight:700;color:var(--td);">Lịch sử mức lương</div>` + hist.map(h=>
+    `<div class="small-note" style="margin-top:4px">${h.legacy ? 'Trước đó' : 'Từ ' + escapeHtmlAttr(fmtDateVN(new Date(h.effectiveFrom+'T00:00:00')))}: ${payTypeLabel(h)}</div>`).join('');
 }
 // [FIX] Bật/tắt OT chỉ ẩn/hiện 2 ô cấu hình, KHÔNG gọi renderEntryNv() vẽ lại cả
 // form nữa — vẽ lại sẽ dựng form từ đầu và XOÁ SẠCH Họ tên/Mã PIN/Đơn giá giờ mà
@@ -16351,6 +16406,22 @@ async function submitEmployeeForm(){
   if(!fullName){ toast('⚠️ Nhập họ tên'); return; }
   if(!/^\d{4}$/.test(pin)){ toast('⚠️ Mã PIN phải đúng 4 chữ số'); return; }
   payInfo.roles = roles;
+  // [LƯƠNG THEO MỐC] Đổi lương khi SỬA → thêm một mốc vào payHistory (kèm mốc gốc ở lần đầu) thay vì chỉ ghi đè; các ngày trước mốc giữ mức cũ.
+  if(nvEditingId){
+    const cur = (nvEmployeesCache||[]).find(e=>e.id===nvEditingId) || {};
+    const before = payTermsOfRecord(cur), after = payTermsOfRecord(payInfo);
+    if(PAY_FIELDS.some(k=>before[k]!==after[k])){
+      const from = ((document.getElementById('nvPayFrom')||{}).value || dkey(new Date())).trim();
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(from)){ toast('⚠️ Chọn ngày áp dụng mức lương mới'); return; }
+      let hist = Array.isArray(cur.payHistory) ? cur.payHistory.slice() : [];
+      if(!hist.length) hist.push({ effectiveFrom:'0000-00-00', legacy:true, ...before });
+      hist = hist.filter(h=>h.effectiveFrom!==from);
+      hist.push({ effectiveFrom: from, ...after, changedAt: new Date().toISOString() });
+      hist.sort((a,b)=>String(a.effectiveFrom).localeCompare(String(b.effectiveFrom)));
+      payInfo.payHistory = hist;
+      Object.assign(payInfo, empPayTermsOn({payHistory:hist}, dkey(new Date())));   // trường cấp trên = mức đang áp dụng hôm nay
+    }
+  }
   try{
     if(nvEditingId){
       await updateEmployee(nvEditingId, fullName, pin, payInfo);
