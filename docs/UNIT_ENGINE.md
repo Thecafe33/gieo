@@ -1,4 +1,4 @@
-# Unit Engine — tài liệu API (`unit_engine.v4.js`, bản 4.0.0; v1–v3 giữ để quay lui)
+# Unit Engine — tài liệu API (`unit_engine.v5.js`, bản 5.0.0; v1–v4 giữ để quay lui)
 
 > Viết ở E5 (28/09/2026), cập nhật E6. Kế hoạch gốc: `docs/KE_HOACH_UNIT_ENGINE_DA_CUA_HANG.md`.
 > Bảng ghi của E0 (trước khi tách): `docs/BANG_GHI_ENGINE.md`.
@@ -240,3 +240,12 @@ thiếu cơ sở → `pool`, không đổ cho ai), `resolveVerification`.
 4. Chủ: `duty.reassign` (chia lại %, hoặc đánh dấu `recipe`/`waived`, bắt lý do, lưu lịch sử), `duty.keep`, `duty.resetBaseline`. Nhân viên: `duty.contest`.
 Giờ bán lấy từ id bill (`bill_<ms>_…`), không dùng giờ ghi sổ (bill bổ sung sau đóng ngày có giờ ghi muộn).
 Chưa làm: nguyên liệu (NL) — đối chiếu NL khi nấu đã có `responsibility` riêng; đo hiệu quả sau 2 tuần (B6).
+
+## NL theo ca + tóm tắt ngày (v5)
+- **NL cân cuối ca → hồ sơ vụ lệch theo ca.** `shiftWeighFinishPOS` (sau khi sổ đã ghi) gọi `duty.onNlWeigh` **chạy nền** (`duty.bg`) — không chờ, không khoá, lỗi không làm hỏng lần cân/kết ca/bán hàng.
+  Khoảng đo = từ mốc cân trước (`inventory_items.lastCount`, ghi mỗi lần cân) đến lần cân này; lượng bán theo giờ bill từ `stock_transactions` (CONSUMPTION, id `bill_<ms>_…`), cùng luật chia theo người "pha chế" có mặt như BTP.
+  Hồ sơ `duty_cases` có `type:'nl'`, `shiftWeighOp`. Lần cân đầu chưa có mốc → "chưa quy". Lệch cực đoan (vượt ngưỡng cân lại) mà chưa ai xác minh → "chưa quy" + thông báo. NL **chưa có** vòng "người khác cân lại" như BTP.
+  `duty.flush()` chờ các việc nền xong. Báo cáo tháng bỏ dòng sổ cân cuối ca đã có hồ sơ (không tính lại cho người đứng cân).
+- **Tóm tắt ngày:** `duty.digest(day)` đọc sổ NL/BTP, hồ sơ vụ lệch, Sổ lệch của ngày → từng NL/BTP: đi đâu (nhập, bán theo bill đã trừ hoàn, nấu mẻ, nấu ra, hao hụt khai, lệch cân/đếm, điều chỉnh, Sổ lệch), lệch bao nhiêu, ai chịu, phần không tính vào ai,
+  trạng thái (`ok/da_quy/chua_quy/cho_quyet/cho_xac_minh`) và vài câu tóm tắt. `duty.writeDigest(day)` (POS gọi NỀN khi đóng ngày) chờ `flush()` rồi lưu `duty_digests_gieogieo/{ngày}` + thông báo `duty_digest`.
+  Quản lý ▸ "Tóm tắt ngày & vụ lệch" hiện bản tóm tắt tính trực tiếp theo ngày chọn.

@@ -15,7 +15,7 @@ const env = {
   UnitEngine: { duty: { reassign: async (...a) => { calls.push(['reassign', ...a]); }, keep: async (...a) => { calls.push(['keep', ...a]); }, resetBaseline: async (...a) => { calls.push(['reset', ...a]); } } }
 };
 const names = Object.keys(env);
-const f = new Function(...names, code + '\nreturn {dutyCardHTML, dutyOpenReassign, dutyReassignSubmit, dutyMark, dutyMarkSubmit, dutyKeepCase, dutyResetBaseline, setList: (l, e) => { dutyList = l; dutyEmployees = e; }};');
+const f = new Function(...names, code + '\nreturn {dutyFlowText, dutyDigestItemHTML, dutyCardHTML, dutyOpenReassign, dutyReassignSubmit, dutyMark, dutyMarkSubmit, dutyKeepCase, dutyResetBaseline, setList: (l, e) => { dutyList = l; dutyEmployees = e; }};');
 const F = f(...names.map(n => env[n]));
 const c = { id: 'c1', prepId: 'p1', prepName: 'Cốt trà <lài>', unit: 'g', variance: -120, value: 240, status: 'contested', confidence: 'medium', createdAt: '2026-09-22T14:30:00Z',
   interval: { from: '2026-09-21T14:00:00Z', to: '2026-09-22T14:30:00Z' }, usageEvents: 12, usageTotal: 360, countedBy: { name: 'Bình' }, recount: { first: 7463 },
@@ -27,6 +27,15 @@ eq([html.includes('Cốt trà &lt;lài&gt;'), html.includes('An'), html.includes
   [true, true, true, true, true, true, true, true, true, true], 'thẻ vụ: người, %, cơ sở, định mức, phản đối, bằng chứng; tên được lọc HTML');
 eq(F.dutyCardHTML({ ...c, status: 'auto', contest: null }).includes('Giữ nguyên'), false, 'vụ không bị phản đối thì không có nút "Giữ nguyên"');
 eq(F.dutyCardHTML({ id: 'c2', prepId: 'p', prepName: 'X', unit: 'g', variance: 5, value: 5, status: 'no_checkpoint', allocations: [], pool: [{ kind: 'unknown', qty: 5, value: 5, reason: 'khong_co_moc_dem_truoc' }], interval: { from: null, to: 'z' } }).includes('chưa có mốc đếm trước'), true, 'vụ chưa có mốc: nêu rõ lý do chưa quy');
+// ── tóm tắt ngày ──
+const item = { kind: 'nl', id: 'X', name: 'Sữa <tươi>', unit: 'ml', status: 'cho_quyet', flows: { sales: 450, cooking: 400, produced: 0, wasteDeclared: 30, received: 1000, countVariance: -50, otherAdjust: 0 }, anomalies: 1, anomalyQty: -20,
+  cases: [{ id: 'c1' }], variance: -50, value: 100, allocations: [{ employeeName: 'An', value: 83 }, { employeeName: 'Bình', value: 17 }], pool: { recipe: 20, unknown: 0, dispute: 40 } };
+const ft = F.dutyFlowText(item);
+eq(['nhập 1.000 ml', 'bán theo bill 450 ml', 'dùng nấu mẻ 400 ml', 'hao hụt đã khai 30 ml', 'lệch khi cân/đếm −50 ml', '1 dòng Sổ lệch'].every(x => ft.includes(x)), true, 'tóm tắt "đi đâu": nhập, bán, nấu, hao hụt khai, lệch cân, Sổ lệch');
+eq(F.dutyFlowText({ flows: {}, unit: 'g' }), 'không có biến động', 'không có biến động → nói rõ');
+const ih = F.dutyDigestItemHTML(item);
+eq([ih.includes('NL · Sữa &lt;tươi&gt;'), ih.includes('An') && ih.includes('Bình'), ih.includes('Chờ bạn quyết'), ih.includes('lỗi định mức'), ih.includes('chờ quyết'), ih.includes('Xem vụ lệch')], [true, true, true, true, true, true], 'thẻ tóm tắt: loại NL, ai chịu, trạng thái, phần không tính vào ai');
+eq(F.dutyCardHTML({ ...c, type: 'nl' }).includes('NL · Cốt trà &lt;lài&gt;'), true, 'thẻ vụ lệch phân biệt NL / BTP');
 // nút chủ
 (async () => {
   F.setList([c], [{ id: 'A', fullName: 'An' }, { id: 'B', fullName: 'Bình' }]);

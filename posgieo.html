@@ -212,7 +212,7 @@ Nút "Cập nhật" ở sidebar (`manualCheckUpdate`, dựa trên service worker
 <script src="https://cdn.jsdelivr.net/npm/bcryptjs@2.4.3/dist/bcrypt.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
 <!-- [E1] Unit Engine — nạp TRƯỚC script chính. Đổi phiên bản = đổi tên file (6.1). -->
-<script src="unit_engine.v4.js"></script>
+<script src="unit_engine.v5.js"></script>
 
 <style>
 :root{--gd:#E23A5D;--gm:#C22B49;--gl:#FDE6EA;--bg:#FFFCF0;--gt:#999;--td:#111;--bb:#E7ECFB;--bi:#1D3F91;
@@ -19538,6 +19538,8 @@ async function _submitDailyCloseImpl() {
     // Đóng ngày = quán đã ngừng bán, không thể còn ai đang làm việc → mốc check-out
     // đúng nhất chính là thời điểm đóng ngày.
     await autoCheckOutAllOnClose(closedAt, shiftState.businessDate);
+    // Tóm tắt ngày cho chủ (NL/BTP đi đâu, lệch ở đâu, ai) — chạy NỀN, không chờ, lỗi không ảnh hưởng đóng ngày.
+    UnitEngine.duty.writeDigest(shiftState.businessDate).catch(err => console.warn('[duty] tóm tắt ngày lỗi (không ảnh hưởng đóng ngày)', err));
     renderShiftDashboard();
     renderCheckinBlock();
   } catch (err) {

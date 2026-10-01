@@ -84,3 +84,7 @@ Nguyên tắc cứng: **mọi phần quy cho một người phải có cơ sở 
   4. Khoảng giữa hai lần cân "không sạch" (có nấu/đổ/điều chỉnh): vẫn quy người đếm đầu nhưng độ tin cậy Vừa + ghi chú (kế hoạch chữ là chia theo ca).
   5. Mẻ nấu ghi sản lượng lệch ≥15% so với định lượng → phần thiếu/dư cùng chiều quy người nấu (độ tin cậy Vừa).
 - Chưa làm: nguyên liệu (NL) — đối chiếu NL khi nấu đã có người cân chốt riêng; B6 (đo lại sau 2 tuần); nút "sửa tồn BTP" vẫn là chức năng sẵn có ở Kho (không thêm nút mới ở màn vụ lệch).
+
+## 10. Bổ sung 01/10/2026 (engine v5): NL theo ca + tóm tắt ngày
+- NL cân cuối ca giờ cũng quy theo ca (cùng luật BTP), chạy nền, không chặn bán. **Chưa làm** cho NL: vòng "người khác cân lại để xác minh" (NL chỉ có xác nhận lệch >25% dung tích sẵn có ở màn cân); lệch cực đoan chưa xác minh → "chưa quy".
+- Tóm tắt ngày: một màn trả lời "NL/BTP đi đâu, lệch ở đâu, ai chịu", có thông báo cuối ngày cho chủ.
