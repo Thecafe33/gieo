@@ -1,4 +1,4 @@
-# Unit Engine — tài liệu API (`unit_engine.v3.js`, bản 3.0.0; v1, v2 giữ để quay lui)
+# Unit Engine — tài liệu API (`unit_engine.v4.js`, bản 4.0.0; v1–v3 giữ để quay lui)
 
 > Viết ở E5 (28/09/2026), cập nhật E6. Kế hoạch gốc: `docs/KE_HOACH_UNIT_ENGINE_DA_CUA_HANG.md`.
 > Bảng ghi của E0 (trước khi tách): `docs/BANG_GHI_ENGINE.md`.
@@ -218,3 +218,25 @@ Mã có số cân > mốc sổ = sổ lần cân trước ghi thiếu (VD lần 
 - Tem đặt theo số cân thật; mẻ dùng ghi theo định mức; phần dư = `Σcân − (Σmốc − định mức)` ghi **ADJUSTMENT tăng** `prep_surplus_{mẻ}_{NL}` (`prepReconSurplus`, `needsReview`).
 - Người cân mốc trước lấy từ `startCheckpoint` của mã: dòng `prep_after_{mẻ trước}_{NL}` được đánh dấu `entryErrorConfirmed` (người cân lượt đó **vẫn chịu trách nhiệm** phần dùng-thêm đã ghi); cảnh báo `alerts_gieogieo/prep_entry_error_*` cho Quản lý; vết mẻ `inputTrace.<NL>.bookUnderstated`.
 - Báo cáo tháng (Quản lý ▸ Đối chiếu NL theo nhân viên) hiện "Đã xác minh nhập sai số liệu" và người cân mốc trước.
+
+## Quy trách nhiệm lệch BTP theo ca — nhóm `duty` (v4)
+Kế hoạch và quyết định của chủ: `docs/KE_HOACH_TRACH_NHIEM_CA.md`. Chạy thử luật trên file xuất: `node tools/chay_thu_trach_nhiem.js <file-xuat-day-du.json> [chi-tiet]`.
+
+**Dữ liệu mới** (không phải dữ liệu kho; app cũng có thể đọc): `duty_cases_gieogieo` (hồ sơ vụ lệch), `duty_tasks_gieogieo` (việc cân lại `verify_{prepId}`), `duty_config_gieogieo/current`
+(`baselineResetAt[prepId]`), `prep_items.lastCount` (mốc đếm: giờ, số, người, `suspect`), `employee_shifts.roles` (chức năng chụp lúc check-in), `employees.roles` (`barista` = pha chế, `order`).
+
+**Hàm thuần** (`UnitEngine.duty.*`): `needsRecount` (≥50% lượng dùng và ≥150), `needsNotify` (>100% lượng dùng và ≥50), `sameWeigh`, `presence/onDuty` (người "pha chế" có mặt; không ai tích thì dự phòng cả ca),
+`detectRecipeBias` (lệch nền do công thức: ≥5 khoảng đo, ≥80% cùng chiều, và MỌI người cùng lệch cùng mức — lệch dồn vào một người là thói quen cá nhân, không miễn), `attributeInterval`
+(phân rã theo thứ tự: nhập sai đã xác minh → lệch nền công thức → người nấu mẻ ghi lệch ≥15% → lệch cực đoan CHƯA xác minh vào "chưa quy" → chia theo lượng bán theo sổ của người pha chế có mặt lúc bán;
+thiếu cơ sở → `pool`, không đổ cho ai), `resolveVerification`.
+
+**Luồng:**
+1. `prep.countCommitLine` (đếm cuối ca) ghi `lastCount` và gọi `duty.onCount`: lập hồ sơ vụ lệch cho MỌI lệch ≥1 đơn vị (kể cả 1%). Chưa có mốc trước → "chưa quy". Lệch vượt 100% lượng dùng → thông báo
+   `alerts_gieogieo` loại `duty_case`.
+2. Cổng "cân lại một lần" ở POS (`duty.gateCheck`, KHÔNG hiện số): vẫn lệch lần hai → `l.suspect` → hồ sơ `pending_verify` + việc `verify_{prepId}` (hết hạn 48 giờ → `closed_pool`).
+3. Người KHÁC cân lại (`duty.verifyCommit`), không khoá bán: mỗi lô chụp sổ lúc cân (`duty.lotBookNow`); RT ghi `số cân − phần bán sau lúc cân` trong transaction. Kết quả: `confirmed` (B ≈ A → lệch thật, chia theo ca),
+   `entry_error` (B nhỏ hơn ngưỡng, HOẶC B khớp sổ gốc trước lần đếm của A → tự quy người đếm đầu, độ tin cậy Mạnh nếu khoảng giữa sạch), `dispute` (B không khớp cả A lẫn sổ gốc → chờ chủ chọn A/B/cả hai).
+   Dòng sổ `ADJUSTMENT prep_verify_{task}` mang `responsibility` của người đếm sai.
+4. Chủ: `duty.reassign` (chia lại %, hoặc đánh dấu `recipe`/`waived`, bắt lý do, lưu lịch sử), `duty.keep`, `duty.resetBaseline`. Nhân viên: `duty.contest`.
+Giờ bán lấy từ id bill (`bill_<ms>_…`), không dùng giờ ghi sổ (bill bổ sung sau đóng ngày có giờ ghi muộn).
+Chưa làm: nguyên liệu (NL) — đối chiếu NL khi nấu đã có `responsibility` riêng; đo hiệu quả sau 2 tuần (B6).

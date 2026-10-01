@@ -1,4 +1,4 @@
-# Kế hoạch: tự động quy trách nhiệm hao hụt/lệch theo ca (bản v3, CHƯA làm)
+# Kế hoạch: tự động quy trách nhiệm hao hụt/lệch theo ca (bản v3 — B1–B5 ĐÃ LÀM trong engine v4, chưa deploy / chưa thử máy thật)
 
 Mục tiêu: hệ thống tự biết ai làm, nguyên nhân, vì sao; tự chốt; chủ nhận thông báo và giữ vài nút sửa phòng khi nhân viên nhập sai.
 Nguyên tắc cứng: **mọi phần quy cho một người phải có cơ sở dữ liệu; không đủ cơ sở thì để "chưa quy", không đổ đại. Bán hàng luôn được ưu tiên: không có bước nào chặn bán.**
@@ -72,3 +72,15 @@ Nguyên tắc cứng: **mọi phần quy cho một người phải có cơ sở 
 - Hệ thống biết ai là pha chế đang có mặt, không biết ai pha ly nào. Kết quả là phân bổ theo tiếp xúc có độ tin cậy, không phải bằng chứng từng ly.
 - Người quên check-in không nằm trong ca → không bị quy; vụ rơi vào "chưa quy".
 - Hao tự nhiên của BTP qua đêm (thạch hút nước, bay hơi) không được trừ riêng (chủ xác nhận nhân viên đã được tập huấn); phần này, nếu có, sẽ rơi vào lệch của người cân trước.
+
+## 9. Đã làm (01/10/2026) và chỗ khác kế hoạch chữ
+- B1–B5 xong: engine `unit_engine.v4.js` nhóm `duty`; POS (cổng cân lại một lần, việc chờ ở Ca làm việc, màn cân lại, "Xem phần trách nhiệm của tôi" + phản đối); Quản lý (hồ sơ nhân viên có chức năng, màn "Vụ lệch & trách nhiệm", thông báo,
+  báo cáo tháng, file xuất có `ca_lam_viec` và `duty_cases_gieogieo`). Tài liệu API: `docs/UNIT_ENGINE.md` mục "nhóm duty".
+- Khác kế hoạch chữ (đã cân nhắc, nói thẳng):
+  1. **Tranh chấp** chỉ khi B lệch nhiều so với A VÀ cũng không khớp "sổ gốc" trước lần đếm của A. Nếu B khớp sổ gốc thì có hai nguồn độc lập (sổ + B) chống lại số của A → tự quy A. Lý do: ví dụ của chủ (A sai 165 g, B cân lại) và ca
+     Cốt trà lài ×10 đều là trường hợp B lệch nhiều so với A; nếu coi đó là tranh chấp thì lỗi nhập rõ ràng nào cũng phải chờ chủ.
+  2. Lệch cực đoan chưa ai cân lại/xác minh → "chưa quy" (không chia cho người có mặt), vì rất có thể là nhập sai số.
+  3. Phát hiện lệch nền công thức cần so được ≥2 người; ca chỉ có một người pha chế thì không phân biệt được công thức với thói quen → không miễn, người đó chịu (độ tin cậy Vừa).
+  4. Khoảng giữa hai lần cân "không sạch" (có nấu/đổ/điều chỉnh): vẫn quy người đếm đầu nhưng độ tin cậy Vừa + ghi chú (kế hoạch chữ là chia theo ca).
+  5. Mẻ nấu ghi sản lượng lệch ≥15% so với định lượng → phần thiếu/dư cùng chiều quy người nấu (độ tin cậy Vừa).
+- Chưa làm: nguyên liệu (NL) — đối chiếu NL khi nấu đã có người cân chốt riêng; B6 (đo lại sau 2 tuần); nút "sửa tồn BTP" vẫn là chức năng sẵn có ở Kho (không thêm nút mới ở màn vụ lệch).

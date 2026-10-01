@@ -4205,7 +4205,7 @@
       });
       // [v4 duty] Hồ sơ vụ lệch (và việc xác minh nếu số này nghi lệch). Lỗi ở đây KHÔNG làm hỏng lần đếm.
       if (dutyMeta) {
-        try { await dutyOnCount({ prep: dutyMeta, prev: dutyPrev, now, by: { id: staffEmp.id, name: staffEmp.fullName }, count: tonSauDem, book: dutyBook, variance: dutyAdjust, businessDate: shiftState.businessDate, suspect: !!l.suspect }); }
+        try { await dutyOnCount({ prep: dutyMeta, prev: dutyPrev, now, by: { id: staffEmp.id, name: staffEmp.fullName }, count: tonSauDem, book: dutyBook, variance: dutyAdjust, businessDate: shiftState.businessDate, suspect: !!l.suspect, attempt1: l.attempt1 != null ? l.attempt1 : null }); }
         catch (err) { console.warn('[duty] ghi hồ sơ vụ lệch lỗi', l.prepId, err); }
       }
       // RT của mọi lô đã đúng số đếm — suy lại currentStock từ đó thay vì tin tonSauDem cộng
@@ -4632,10 +4632,8 @@
   }
   async function dutyLoadPrepTx(prepId, fromMs, toMs) {
     const rows = [], seen = {};
-    for (const day of _dutyDays(fromMs, toMs)) {
-      const snap = await C.fstore.collection(P.prepTx()).where('prepId', '==', prepId).where('businessDate', '==', day).get();
-      snap.docs.forEach(d => { if (!seen[d.id]) { seen[d.id] = 1; rows.push(Object.assign({ id: d.id }, d.data())); } });
-    }
+    const snaps = await Promise.all(_dutyDays(fromMs, toMs).map(day => C.fstore.collection(P.prepTx()).where('prepId', '==', prepId).where('businessDate', '==', day).get()));
+    snaps.forEach(snap => snap.docs.forEach(d => { if (!seen[d.id]) { seen[d.id] = 1; rows.push(Object.assign({ id: d.id }, d.data())); } }));
     return rows;
   }
   // Lượng dùng theo sổ trong (fromMs, toMs] — gộp theo bill, trừ phần đã hoàn khi xoá bill.
@@ -4659,18 +4657,26 @@
       const ms = _dMs(t.createdAt); return ms != null && ms > fromMs && ms <= toMs;
     });
   }
+  // Ca làm việc: nhiều BTP cùng đếm một lúc dùng chung một lượt đọc (nhớ ngắn hạn).
+  const _dutyShiftMemo = {};
   async function dutyLoadShifts(fromMs, toMs) {
-    const out = [], seen = {};
-    for (const day of _dutyDays(fromMs, toMs)) {
-      const snap = await C.fstore.collection('employee_shifts_gieogieo').where('businessDate', '==', day).get();
-      snap.docs.forEach(d => { if (seen[d.id]) return; seen[d.id] = 1; out.push(Object.assign({ id: d.id }, d.data())); });
-    }
-    return out.filter(s => { const a = _dMs(s.checkedInAt), b = _dMs(s.checkedOutAt); return a != null && a <= toMs && (b == null || b >= fromMs); });
+    const key = _dutyDays(fromMs, toMs).join(',');
+    const memo = _dutyShiftMemo[key];
+    if (memo && C.now() - memo.at < 60000) return memo.promise.then(list => list.filter(s => { const a = _dMs(s.checkedInAt), b = _dMs(s.checkedOutAt); return a != null && a <= toMs && (b == null || b >= fromMs); }));
+    const promise = (async () => {
+      const out = [], seen = {};
+      const snaps = await Promise.all(_dutyDays(fromMs, toMs).map(day => C.fstore.collection('employee_shifts_gieogieo').where('businessDate', '==', day).get()));
+      snaps.forEach(snap => snap.docs.forEach(d => { if (seen[d.id]) return; seen[d.id] = 1; out.push(Object.assign({ id: d.id }, d.data())); }));
+      return out;
+    })();
+    _dutyShiftMemo[key] = { at: C.now(), promise };
+    promise.catch(() => { delete _dutyShiftMemo[key]; });
+    return promise.then(out => out.filter(s => { const a = _dMs(s.checkedInAt), b = _dMs(s.checkedOutAt); return a != null && a <= toMs && (b == null || b >= fromMs); }));
   }
   async function dutyLoadProduction(prep, fromMs, toMs) {
     const out = [], seen = {};
-    for (const day of _dutyDays(fromMs, toMs)) {
-      const snap = await C.fstore.collection(P.batches()).where('prepId', '==', prep.id).where('businessDate', '==', day).get();
+    const snaps = await Promise.all(_dutyDays(fromMs, toMs).map(day => C.fstore.collection(P.batches()).where('prepId', '==', prep.id).where('businessDate', '==', day).get()));
+    for (const snap of snaps) {
       snap.docs.forEach(d => {
         if (seen[d.id]) return; seen[d.id] = 1; const b = d.data();
         const f = _dMs(b.finishedAt); if (b.status === 'cancelled' || f == null || f <= fromMs || f > toMs || !(Number(b.qtyInitial) > 0)) return;
@@ -4727,7 +4733,7 @@
     const id = _dutyCaseId(o.prep.id, toMs);
     const doc = { id, type: 'prep', prepId: o.prep.id, prepName: o.prep.name || '', unit: o.prep.unit || '', costPerUnit: Number(o.prep.costPerUnit) || 0,
       businessDate: o.businessDate, createdAt: o.now, interval: { from: o.prev ? o.prev.at : null, to: o.now }, countedBy: { id: o.by.id || '', name: o.by.name || '' },
-      count: round2(o.count), book: round2(o.book), variance: v, value: round2(_dAbs(v) * (Number(o.prep.costPerUnit) || 0)), verified: false, history: [] };
+      count: round2(o.count), book: round2(o.book), variance: v, recount: o.attempt1 != null ? { first: round2(o.attempt1) } : null, value: round2(_dAbs(v) * (Number(o.prep.costPerUnit) || 0)), verified: false, history: [] };
     let status = 'auto';
     if (fromMs == null || fromMs >= toMs) {
       Object.assign(doc, { status: 'no_checkpoint', allocations: [], parts: [], pool: [{ kind: 'unknown', qty: v, value: doc.value, reason: 'khong_co_moc_dem_truoc' }], confidence: 'weak', notes: ['khong_co_moc_dem_truoc'], usageTotal: 0, usageEvents: 0, bias: null });
@@ -4889,7 +4895,7 @@
   }
   async function _dutyAlertDone(caseId, by) {
     const snap = await C.fstore.collection('alerts_gieogieo').where('caseId', '==', caseId).get().catch(() => null);
-    if (snap) await Promise.all(snap.docs.map(d => d.ref.update({ status: 'done', resolvedAt: new Date(C.now()).toISOString(), resolvedBy: by || '' }).catch(() => {})));
+    if (snap) await Promise.all(snap.docs.map(d => d.ref.update({ status: 'resolved', resolvedAt: new Date(C.now()).toISOString(), resolvedBy: by || '' }).catch(() => {})));
   }
   // Chủ chia lại: o = {kind:'manual'|'entry_error'|'recipe'|'waived', shares:[{employeeId, employeeName, share 0..1}], reason, by:{id,name}}
   async function dutyReassign(caseId, o) {

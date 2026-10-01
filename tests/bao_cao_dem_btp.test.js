@@ -19,4 +19,18 @@ const g = r.byEmployee.e1;
 eq([r.events.length, g.events.length], [4, 4], '4 sự kiện: 3 chênh đếm + 1 hao hụt đã khai');
 eq([g.prepCountSurplus, g.prepCountShort, g.reportedWaste], [65994, 30 + 1200, 100], 'thừa/thiếu tách riêng; thiếu trừ phần bù; hao hụt khai giữ nguyên');
 eq(r.events.filter(e => e.category.startsWith('prepCount')).map(e => e.category).sort(), ['prepCountShort', 'prepCountShort', 'prepCountSurplus'], 'nhãn loại');
+// ── Hồ sơ vụ lệch (quy theo ca) thay cho "người đếm" khi đã có hồ sơ; phần không ai chịu tính riêng ──
+const adjRows = [
+  row({ qty: -100, totalCost: 100, createdAt: '2026-09-22T14:30:00.000Z' }),      // đã có hồ sơ vụ lệch → không tính theo người đếm nữa
+  row({ qty: -50, totalCost: 50, createdAt: '2026-09-23T14:30:00.000Z' })];       // chưa có hồ sơ → vẫn tính theo người đếm (dữ liệu cũ)
+const cases = [
+  { id: 'c1', prepId: 'p1', prepName: 'Cốt trà lài', unit: 'g', businessDate: '2026-09-22', createdAt: '2026-09-22T14:30:00.000Z', interval: { from: '2026-09-21T14:00:00.000Z', to: '2026-09-22T14:30:00.000Z' }, status: 'auto',
+    allocations: [{ employeeId: 'e1', employeeName: 'Vỹ', qty: -80, value: 80, confidence: 'strong', basis: ['nhap_sai_da_xac_minh'] }, { employeeId: 'e2', employeeName: 'Duy', qty: -20, value: 20, confidence: 'medium', basis: ['chia_theo_so_ban'] }],
+    pool: [{ kind: 'recipe', qty: -30, value: 30 }], entryErrorConfirmed: true, entryErrorQty: -80, verification: { by: 'Chi', at: 'x' } },
+  { id: 'c2', prepId: 'p2', prepName: 'Pudding', unit: 'g', businessDate: '2026-09-23', createdAt: 'z', interval: { to: 'z' }, status: 'dispute', allocations: [], pool: [{ kind: 'dispute', qty: -500, value: 500 }] }];
+const r2 = fn([], [], () => 0, adjRows, cases);
+const g1 = r2.byEmployee.e1, g2 = r2.byEmployee.e2;
+eq([g1.prepCountShort, g1.dutyShort, g1.dutyStrongShort, g2.dutyShort, g2.dutyStrongShort], [50, 80, 80, 20, 0], 'có hồ sơ vụ lệch → quy theo ca; dòng chưa có hồ sơ vẫn tính theo người đếm; chỉ phần Mạnh vào "căn cứ phạt"');
+eq([r2.dutyPool.recipe.value, r2.dutyPool.dispute.value, r2.dutyPool.dispute.count], [30, 500, 1], 'phần định mức / chờ quyết tính riêng, không vào ai');
+eq(r2.events.find(e => e.category === 'dutyShort' && e.employeeId === 'e1').entryError.qty, -80, 'sự kiện giữ dấu "đã xác minh nhập sai"');
 console.log(ok ? 'ALL PASS' : 'SOME FAIL'); process.exit(ok ? 0 : 1);

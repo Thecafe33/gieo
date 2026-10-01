@@ -126,7 +126,7 @@ const A = { id: 'B', fullName: 'Bình' };   // người đếm cuối ca
     await f.UE.duty.reassign(c0.id, { kind: 'manual', shares: [{ employeeId: 'B', employeeName: 'Bình', share: 0.6 }, { employeeId: 'C', employeeName: 'Chi', share: 0.4 }], reason: 'Hai người cùng thao tác', by: { id: 'M', name: 'Chủ' } });
     const c = docs(f, CASES)[0];
     eq([c.status, c.allocations.map(a => [a.employeeId, a.share]), c.history.length >= 2], ['manual', [['B', 0.6], ['C', 0.4]], true], 'S9 chia 60/40 cho cả hai, có lịch sử');
-    eq(docs(f, AL).every(a => a.status === 'done'), true, 'S9 thông báo được đóng');
+    eq(docs(f, AL).every(a => a.status === 'resolved'), true, 'S9 thông báo được đóng');
     // nhân viên không có phần thì không phản đối được; có phần thì phản đối → chờ chủ
     let e2 = ''; try { await f.UE.duty.contest(c.id, { byId: 'A', byName: 'An', reason: 'x' }); } catch (e) { e2 = e.message; }
     eq(/không có phần/.test(e2), true, 'S9 người không có phần không phản đối được');

@@ -1612,6 +1612,7 @@ body.assist-main-on .toast{bottom:calc(100px + var(--assist-h, 0px) + 10px);}
     <div id="checkinBlock">
       <div style="text-align:center;padding:20px;color:#bbb">Đang tải...</div>
     </div>
+    <div id="dutyTaskBlock"></div>
     <div id="shiftBody">
       <div style="text-align:center;padding:40px;color:#bbb">Đang tải...</div>
     </div>
@@ -14788,8 +14789,10 @@ async function renderCheckinBlock() {
         ${caBtn('doCheckIn()', 'login', 'Check-in', 'primary', 'flex:1;')}
         ${caBtn('doCheckOut()', 'door', 'Check-out', 'plain', 'flex:1;')}
       </div>
+      <button onclick="openMyDutyCasesPOS()" style="width:100%;margin-top:10px;padding:11px;background:none;border:none;color:#a89a7e;font-family:'Google Sans',sans-serif;font-size:13px;font-weight:800;text-decoration:underline;cursor:pointer;">Xem phần trách nhiệm của tôi</button>
     </div>
   `;
+  renderDutyTasksPOS();
 }
 async function doCheckIn() {
   if (_posSubmitBusy) { toast('⏳ Đang xử lý, vui lòng đợi giây lát...'); return; }
@@ -14830,6 +14833,8 @@ async function _doCheckInImpl() {
     toast(`✅ ${emp.fullName} đã check-in`);
     document.getElementById('checkinPin').value = '';
     renderCheckinBlock();
+    // Có BTP nghi lệch do người khác cân → nhắc (không chặn gì).
+    UnitEngine.duty.listOpenTasks().then(ts => { const n = ts.filter(t => t.firstById !== emp.id).length; if (n) setTimeout(() => toast('📋 Có ' + n + ' bán thành phẩm cần cân lại — xem ở Ca làm việc'), 2200); }).catch(() => {});
   } catch (err) {
     console.error('doCheckIn failed', err);
     toast('❌ Lỗi: ' + (err.code || err.message || err));
@@ -17636,6 +17641,7 @@ async function prepShortageSubmitAnswers(auto) {
 }
 
 let _prepCountState = [];
+let _prepVerifyMode = null;   // {task} khi màn đếm đang dùng để CÂN LẠI xác minh (không phải đếm cuối ca)
 // [THIẾT KẾ LẠI] Chỉ số BTP (dòng trong _prepCountState) đang hiện trên màn — màn
 // giờ hiện TỪNG BTP một dạng thẻ, lướt qua bằng nút back + "Tiếp tục", thay vì cuộn
 // một danh sách dài mọi loại cùng lúc. Đây là bước nhân viên bị kẹt lâu nhất trong
@@ -17660,7 +17666,7 @@ function renderPrepCountScreen(lines) {
   // Loại hết hạn: tự động đánh dấu "Đã báo hết" cho mọi lô ngay từ đầu — nhân viên
   // vẫn bấm lại "Cân trừ bì" được cho từng lô nếu hũ đó thực ra còn dùng tốt (không
   // tự ý khoá cứng, chỉ đặt sẵn giá trị mặc định an toàn hơn).
-  _prepCountState.forEach(l => { if (l.hasExpired) _prepCountApplyDiscardAll(l, true); });
+  _prepCountState.forEach(l => { if (l.hasExpired && !_prepVerifyMode) _prepCountApplyDiscardAll(l, true); });
   _prepCountCardIdx = 0;
   preloadVesselImagesPOS(_prepCountState.map(l => l.prepId));
   renderPrepCountCard();
@@ -17701,7 +17707,8 @@ function renderPrepCountCard() {
   const hasPrev = idx > 0;
 
   box.innerHTML = `
-    <div class="kc-title">Đếm bán thành phẩm</div>
+    <div class="kc-title">${_prepVerifyMode ? 'Cân lại bán thành phẩm' : 'Đếm bán thành phẩm'}</div>
+    ${_prepVerifyMode ? '<div class="kc-sub" style="margin-bottom:14px;">Cân từng lô như bình thường. Quán vẫn bán trong lúc bạn cân — hệ thống tự trừ phần đã bán.</div>' : ''}
     ${(shiftState.closing && (shiftState.closing.prepCountRecountIds || []).length) ? '<div class="kc-sub" style="margin-bottom:14px;color:#a32946;font-weight:700;">Chỉ cân lại bán thành phẩm được bill mới sử dụng.</div>' : ''}
     ${!l ? `<div class="kc-card"><div class="muted" style="text-align:center;padding:30px 0;">Không còn loại nào cần đếm.</div></div>` : `
     <div class="kc-card" style="margin:0 0 12px;">
@@ -17709,7 +17716,8 @@ function renderPrepCountCard() {
       ${!prepCanWeighPOS(l.prepId) ? prepWeighHintHTML(l.prepId) : ''}
       <div style="font-size:24px;font-weight:900;color:var(--td);line-height:1.15;letter-spacing:-.3px;">${l.prepName || ''}</div>
       <div style="font-size:14px;font-weight:700;color:${l.hasExpired ? '#c0392b' : 'var(--gd)'};margin-top:5px;">Đang có ${l.activeBatches.length} lô${l.hasExpired ? ' · Hết hạn' : ''}${l.hasCooking ? ' · còn lô đang nấu chưa xong' : ''}</div>
-      ${l.activeBatches.length > 1 ? `<button onclick="prepCountToggleDiscardAll(${idx})" style="margin-top:8px;background:none;border:none;padding:0;color:#aaa;font-family:'Google Sans',sans-serif;font-size:12px;font-weight:700;text-decoration:underline;cursor:pointer;">${l.discardAll ? 'Huỷ — không bỏ hết nữa' : `Bỏ hết cả ${l.activeBatches.length} lô →`}</button>` : ''}
+      ${l && l.recountDone && !_prepVerifyMode && l.counted === null ? '<div style="margin-top:10px;padding:10px 12px;background:#FBF0DC;border-radius:12px;color:#8a5a15;font-size:13px;font-weight:700;">Cân lại lần nữa để chắc chắn.</div>' : ''}
+      ${l.activeBatches.length > 1 && !_prepVerifyMode ? `<button onclick="prepCountToggleDiscardAll(${idx})" style="margin-top:8px;background:none;border:none;padding:0;color:#aaa;font-family:'Google Sans',sans-serif;font-size:12px;font-weight:700;text-decoration:underline;cursor:pointer;">${l.discardAll ? 'Huỷ — không bỏ hết nữa' : `Bỏ hết cả ${l.activeBatches.length} lô →`}</button>` : ''}
 
       <div style="margin-top:18px;display:flex;flex-direction:column;gap:12px;">
         ${l.activeBatches.map((b, bi) => {
@@ -17747,9 +17755,9 @@ function renderPrepCountCard() {
 
     <div class="kc-card" style="margin:0 0 14px;">${renderPinInput('prepCountStaff')}</div>
 
-    ${closeStepNavHTML(5)}
+    ${_prepVerifyMode ? `<button onclick="exitPrepVerifyPOS()" style="width:100%;margin:0 0 12px;padding:13px;background:#fff;border:1.5px solid #ddd;border-radius:999px;color:#666;font-family:'Google Sans',sans-serif;font-size:14px;font-weight:700;cursor:pointer;">Để sau</button>` : closeStepNavHTML(5)}
 
-    <button onclick="prepCountGoNext()" ${allDone ? '' : 'disabled'} class="kc-btn" style="background:${allDone ? 'var(--gd)' : '#f1eee4'};color:${allDone ? '#fff' : '#bbb'};cursor:${allDone ? 'pointer' : 'not-allowed'};margin-bottom:22px;">${!allDone ? 'Cân hoặc báo hết đủ các lô để tiếp tục' : (isLast ? 'Xác nhận & tiếp tục kết ca' : 'Tiếp tục')}</button>
+    <button onclick="prepCountGoNext()" ${allDone ? '' : 'disabled'} class="kc-btn" style="background:${allDone ? 'var(--gd)' : '#f1eee4'};color:${allDone ? '#fff' : '#bbb'};cursor:${allDone ? 'pointer' : 'not-allowed'};margin-bottom:22px;">${!allDone ? 'Cân hoặc báo hết đủ các lô để tiếp tục' : (_prepVerifyMode ? 'Xác nhận số cân lại' : (isLast ? 'Xác nhận & tiếp tục kết ca' : 'Tiếp tục'))}</button>
   `;
 }
 
@@ -17759,8 +17767,31 @@ function prepCountGoBack() {
 async function prepCountGoNext() {
   const l = _prepCountState[_prepCountCardIdx];
   if (!l || l.counted === null) { toast('⚠️ Cân hoặc báo hết đủ các lô trước khi tiếp tục'); return; }
+  if (_prepVerifyMode) { await submitPrepVerify(); return; }
+  // [CÂN LẠI MỘT LẦN] Lệch quá ngưỡng → bắt cân lại đúng 1 lần, KHÔNG nói số/hướng/mức lệch (cân mù). Cân lại lần hai vẫn
+  // lệch → ghi nhận như vậy nhưng đánh dấu "nghi lệch": khi người khác check-in sẽ có việc cân lại để xác minh.
+  if (!l.discardAll) {
+    let g = null;
+    try { g = await UnitEngine.duty.gateCheck(l); } catch (err) { console.warn('[duty] gateCheck lỗi — bỏ qua cổng', err); }
+    if (g) {
+      if (!l.recountDone && g.needs) {
+        l.attempt1 = l.counted; l.recountDone = true; l.suspect = false;
+        _prepCountResetLine(l);
+        toast('⚠️ Cân lại ' + (l.prepName || '') + ' thêm một lần nữa');
+        renderPrepCountCard();
+        return;
+      }
+      if (l.recountDone) l.suspect = !!g.needs;
+    }
+  }
   if (_prepCountCardIdx < _prepCountState.length - 1) { _prepCountCardIdx++; renderPrepCountCard(); }
   else await submitPrepCount();
+}
+// Xoá hết số đã cân của một dòng (để cân lại từ đầu, không hiện số cũ).
+function _prepCountResetLine(l) {
+  l.discardAll = false; l.weighings = [];
+  l.activeBatches.forEach(b => { l.batchQty[b.id] = null; l.batchDone[b.id] = false; l.batchWeighings[b.id] = []; });
+  _prepCountRefreshLineCounted(l);
 }
 
 // Cân riêng cho ĐÚNG một lô — nhân viên bê đúng khay/hũ của lô đó lên cân, đúng
@@ -17772,7 +17803,12 @@ function prepCountWeighBatch(i, batchId, bi) {
   openWeighPad({
     prepId: l.prepId, unit: l.unit,
     title: 'Cân lô ' + (b.batchCode || '') + ' · ' + (l.prepName || ''),
-    onDone: (total, lines) => {
+    onDone: async (total, lines) => {
+      // Cân lúc đang bán (xác minh): chụp sổ của lô ĐÚNG lúc cân — phần bán sau mốc này sẽ được trừ khi chốt.
+      if (_prepVerifyMode) {
+        try { (l.snaps = l.snaps || {})[batchId] = { book: await UnitEngine.duty.lotBookNow(l.prepId, batchId), at: new Date(UnitEngine.clock.now()).toISOString() }; }
+        catch (err) { console.warn('[duty] không chụp được sổ lô lúc cân', err); }
+      }
       l.batchWeighings[batchId] = lines;
       l.batchDone[batchId] = false;
       l.batchQty[batchId] = total;
@@ -17791,11 +17827,14 @@ async function prepCountToggleBatchDone(i, batchId) {
   if (!l) return;
   const willDone = !l.batchDone[batchId];
   const b = l.activeBatches.find(x => x.id === batchId);
-  if (willDone && _prepCountBatchHasStock(b)) {
+  if (willDone && !_prepVerifyMode && _prepCountBatchHasStock(b)) {
     const ok = await posConfirm('Lô ' + ((b && b.batchCode) || '') + ' · ' + (l.prepName || '') +
       '\nTrên sổ lô này VẪN CÒN hàng. Báo hết nghĩa là đổ bỏ toàn bộ phần còn lại và ghi hao hụt.\n\nNếu hũ/khay vẫn còn, bấm "Quay lại" rồi dùng "Cân trừ bì".',
       { okText: 'Đổ bỏ hết', cancelText: 'Quay lại', danger: true });
     if (!ok || _prepCountState[i] !== l) return;
+  }
+  if (_prepVerifyMode && willDone) {
+    try { (l.snaps = l.snaps || {})[batchId] = { book: await UnitEngine.duty.lotBookNow(l.prepId, batchId), at: new Date(UnitEngine.clock.now()).toISOString() }; } catch (err) { console.warn('[duty] không chụp được sổ lô', err); }
   }
   l.batchDone[batchId] = willDone;
   l.batchWeighings[batchId] = [];   // đánh dấu hết/bỏ dấu đều làm số cân cũ vô nghĩa
@@ -17892,6 +17931,119 @@ async function _submitPrepCountImpl() {
     console.error('submitPrepCount failed', err);
     toast('❌ Lỗi: ' + (err.code || err.message || err));
   }
+}
+
+// ═══════════════════════════════════════
+// [TRÁCH NHIỆM THEO CA] Việc cân lại BTP (xác minh số nghi lệch) khi người khác check-in + xem/phản đối vụ lệch của mình.
+// Kế hoạch: docs/KE_HOACH_TRACH_NHIEM_CA.md. Không chặn bán, không chặn check-in; làm khi rảnh. Cân mù: không hiện số.
+// ═══════════════════════════════════════
+const DUTY_BASIS_LABEL = { nhap_sai_da_xac_minh: 'nhập sai số (đã xác minh)', chia_theo_so_ban: 'có mặt lúc bán', nguoi_nau_me: 'nấu mẻ', chu_quyet_dinh: 'quản lý quyết định' };
+const DUTY_POOL_LABEL = { recipe: 'định mức/công thức', unknown: 'chưa xác định được', unverified: 'chờ xác minh', dispute: 'chờ quản lý quyết', waived: 'quản lý miễn' };
+let _dutyMine = null;
+async function dutyTasksHTMLPOS() {
+  let tasks = [];
+  try { await UnitEngine.duty.expireTasks(); tasks = await UnitEngine.duty.listOpenTasks(); } catch (err) { console.warn('[duty] không đọc được việc xác minh', err); }
+  if (!tasks.length) return '';
+  const hm = iso => new Date(iso).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' });
+  return `<div class="wal-section" style="margin:0 0 12px;padding:16px;">
+    ${caTitle('Cần cân lại', `<span style="font-size:13px;font-weight:800;color:var(--gd);background:var(--gl);border-radius:999px;padding:4px 10px;">${tasks.length}</span>`)}
+    <div style="font-size:12.5px;color:#8A8A90;margin:-4px 0 10px;">Người khác phải cân lại. Làm khi rảnh — không ảnh hưởng bán hàng.</div>
+    ${tasks.map(t => `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;margin-top:8px;background:#FFFCF0;border:1.5px solid #f0ead9;border-radius:16px;">
+      <div style="min-width:0;"><div style="font-size:17px;font-weight:800;color:var(--td);">${escHtmlPos(t.prepName || '')}</div><div style="font-size:12.5px;font-weight:700;color:#a89a7e;">Cân từ ${hm(t.createdAt)}</div></div>
+      <button onclick="openPrepVerifyPOS('${escHtmlPos(t.id)}')" style="flex-shrink:0;padding:10px 18px;border:none;border-radius:999px;background:var(--gd);color:#fff;font-family:'Google Sans',sans-serif;font-size:14px;font-weight:800;cursor:pointer;">Cân lại</button>
+    </div>`).join('')}
+  </div>`;
+}
+async function renderDutyTasksPOS() {
+  const box = document.getElementById('dutyTaskBlock'); if (!box) return;
+  box.innerHTML = await dutyTasksHTMLPOS();
+}
+async function openPrepVerifyPOS(taskId) {
+  showScreen('caLamViecScreen');
+  const box = document.getElementById('shiftBody'); showLoading(box);
+  let task = null, line = null;
+  try {
+    task = (await UnitEngine.duty.listOpenTasks()).find(t => t.id === taskId);
+    if (task) line = (await computePrepCountLinesPOS()).find(x => x.prepId === task.prepId);
+  } catch (err) { console.warn('[duty] mở việc cân lại lỗi', err); toast('❌ Không tải được dữ liệu cân lại'); exitPrepVerifyPOS(); return; }
+  if (!task) { toast('✅ Việc này đã được xử lý'); exitPrepVerifyPOS(); return; }
+  if (!line || !line.activeBatches.length) {
+    toast('⚠️ Bán thành phẩm này không còn lô để cân — việc sẽ tự đóng');
+    exitPrepVerifyPOS(); return;
+  }
+  _prepVerifyMode = { task };
+  renderPrepCountScreen([line]);
+}
+function exitPrepVerifyPOS() {
+  _prepVerifyMode = null; _prepCountState = [];
+  renderShiftDashboard(); renderCheckinBlock();
+}
+async function submitPrepVerify() {
+  if (_posSubmitBusy) { toast('⏳ Đang xử lý, vui lòng đợi giây lát...'); return; }
+  _posSubmitBusy = true;
+  try { await _submitPrepVerifyImpl(); } finally { _posSubmitBusy = false; }
+}
+async function _submitPrepVerifyImpl() {
+  const l = _prepCountState[0], task = _prepVerifyMode && _prepVerifyMode.task;
+  if (!l || !task) return;
+  if (l.counted === null) { toast('⚠️ Cân hoặc báo hết đủ các lô'); return; }
+  const emp = await resolveStaffPinAndCheckin('prepCountStaff');
+  if (!emp) return;
+  if (emp.id === task.firstById) { toast('⚠️ Cần người khác với người cân lần trước'); return; }
+  try {
+    await UnitEngine.duty.verifyCommit(l, task, { now: new Date(UnitEngine.clock.now()).toISOString(), staff: emp, businessDate: posDateKey() });
+    toast('✅ Đã ghi nhận số cân lại');
+    exitPrepVerifyPOS();
+  } catch (err) {
+    console.error('submitPrepVerify failed', err);
+    toast('❌ ' + (err.message || err));
+  }
+}
+// Xem phần trách nhiệm của chính mình (cần PIN) + phản đối kèm lý do.
+function openMyDutyCasesPOS() {
+  showScreen('caLamViecScreen');
+  _dutyMine = null;
+  _pinFieldForceAsk['dutyMinePin'] = true;   // luôn hỏi PIN, kể cả khi chỉ có một người trong ca
+  document.getElementById('shiftBody').innerHTML = `
+    <div class="kc-title">Phần trách nhiệm của tôi</div>
+    <div class="kc-card" style="margin:0 0 14px;">${renderPinInput('dutyMinePin', 'Mã PIN của bạn')}</div>
+    <button onclick="loadMyDutyCasesPOS()" class="kc-btn" style="background:var(--gd);color:#fff;margin-bottom:12px;">Xem</button>
+    <button onclick="renderShiftDashboard()" class="kc-btn" style="background:#f1eee4;color:#666;">Quay lại</button>`;
+}
+async function loadMyDutyCasesPOS() {
+  const emp = resolveStaffPinField('dutyMinePin'); if (!emp) return;
+  const box = document.getElementById('shiftBody'); showLoading(box);
+  let list = [];
+  try {
+    const to = posDateKey(), from = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+    list = (await UnitEngine.duty.listCases(from, to)).filter(c => (c.allocations || []).some(a => a.employeeId === emp.id) || (c.countedBy && c.countedBy.id === emp.id && c.status === 'dispute'));
+  } catch (err) { box.innerHTML = '<div class="kc-card">Không tải được dữ liệu.</div><button onclick="openMyDutyCasesPOS()" class="kc-btn" style="background:#f1eee4;color:#666;">Thử lại</button>'; return; }
+  _dutyMine = { emp, list };
+  const money = n => (Math.round(Math.abs(Number(n) || 0))).toLocaleString('vi-VN') + 'đ';
+  box.innerHTML = `<div class="kc-title">${escHtmlPos(emp.fullName)} — 30 ngày gần đây</div>
+    ${list.length ? list.map((c, i) => {
+      const a = (c.allocations || []).find(x => x.employeeId === emp.id);
+      const why = a ? (a.basis || []).map(b => DUTY_BASIS_LABEL[b] || b).join(', ') : 'đang chờ quản lý quyết';
+      const st = { auto: 'Đã chốt tự động', manual: 'Quản lý đã quyết', contested: 'Đang chờ quản lý xem phản đối', dispute: 'Chờ quản lý quyết', pending_verify: 'Chờ cân lại', closed_pool: 'Đã đóng' }[c.status] || c.status;
+      return `<div class="kc-card" style="margin:0 0 10px;">
+        <div style="font-size:17px;font-weight:800;color:var(--td);">${escHtmlPos(c.prepName || '')} <span style="font-size:12.5px;color:#a89a7e;font-weight:700;">${escHtmlPos(c.businessDate || '')}</span></div>
+        <div style="font-size:14px;font-weight:700;margin-top:4px;color:${a && a.qty < 0 ? '#c0392b' : 'var(--td)'};">${a ? 'Phần của bạn: ' + fmtPrepQty(Math.abs(a.qty)) + ' ' + escHtmlPos(c.unit || '') + ' (' + money(a.value) + ')' : 'Chưa quy cho ai'}</div>
+        <div style="font-size:12.5px;color:#8A8A90;margin-top:3px;">Cơ sở: ${escHtmlPos(why)} · ${escHtmlPos(st)}</div>
+        ${a && c.status !== 'contested' ? `<textarea id="dutyContestReason_${i}" placeholder="Lý do phản đối" style="width:100%;margin-top:10px;padding:10px;border:1.5px solid #ddd;border-radius:12px;font-family:inherit;font-size:14px;" rows="2"></textarea>
+        <button onclick="dutyContestPOS(${i})" style="margin-top:8px;padding:10px 16px;border:1.5px solid #c0392b;background:#fff;color:#c0392b;border-radius:999px;font-family:'Google Sans',sans-serif;font-size:13px;font-weight:800;cursor:pointer;">Phản đối</button>` : ''}
+      </div>`;
+    }).join('') : '<div class="kc-card"><div class="muted" style="text-align:center;padding:20px 0;">Chưa có vụ nào của bạn.</div></div>'}
+    <button onclick="renderShiftDashboard()" class="kc-btn" style="background:#f1eee4;color:#666;margin-top:6px;">Quay lại</button>`;
+}
+async function dutyContestPOS(i) {
+  const c = _dutyMine && _dutyMine.list[i]; if (!c) return;
+  const reason = ((document.getElementById('dutyContestReason_' + i) || {}).value || '').trim();
+  if (!reason) { toast('⚠️ Nhập lý do phản đối'); return; }
+  try {
+    await UnitEngine.duty.contest(c.id, { byId: _dutyMine.emp.id, byName: _dutyMine.emp.fullName, reason });
+    toast('✅ Đã gửi phản đối cho quản lý');
+    c.status = 'contested'; loadMyDutyCasesPOS();
+  } catch (err) { toast('❌ ' + (err.message || err)); }
 }
 
 // ══════════════════════════════════════════════════════════════════════════
