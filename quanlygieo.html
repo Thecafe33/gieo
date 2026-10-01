@@ -14351,10 +14351,11 @@ function renderHealthPeriodNav(){
 // index riêng, giống computeDailyClosingChecklist đang dùng).
 // ------------------------------------------------------------
 const _wasteIndexMissing = {};   // coll -> true khi đã biết chưa có composite index
-async function _ledgerWasteRows(coll, startKey, endKey){
+async function _ledgerWasteRows(coll, startKey, endKey, type){
+  type = type || 'WASTE';
   if(!_wasteIndexMissing[coll]){
     try{
-      const snap = await fstore.collection(coll).where('type','==','WASTE')
+      const snap = await fstore.collection(coll).where('type','==',type)
         .where('businessDate','>=',startKey).where('businessDate','<=',endKey).get();
       return snap.docs.map(d=>d.data());
     }catch(err){
@@ -14370,7 +14371,7 @@ async function _ledgerWasteRows(coll, startKey, endKey){
   const CHUNK = 20;   // không bắn cả trăm truy vấn cùng lúc
   for(let i=0; i<keys.length; i+=CHUNK){
     const snaps = await Promise.all(keys.slice(i, i+CHUNK).map(k =>
-      fstore.collection(coll).where('businessDate','==',k).where('type','==','WASTE').get()));
+      fstore.collection(coll).where('businessDate','==',k).where('type','==',type).get()));
     snaps.forEach(snap => snap.forEach(doc => rows.push(doc.data())));
   }
   return rows;
@@ -15980,13 +15981,35 @@ function renderCashHistory(history){
 let nvEditingId = null; // id nhân viên đang sửa (null = đang ở chế độ thêm mới)
 // 🆕 GĐ5 kế hoạch V3 — PHẦN 6.2: tách nội dung form (không kèm nút Lưu), dùng lại
 // cho cả card "Thêm mới" và popup "Sửa" — cùng 1 markup/ids như bản gốc.
+// Chức năng làm việc (cố định trong hồ sơ): người có 'barista' (pha chế) chịu hao hụt định lượng
+// trong khoảng thời gian họ có mặt; 'order' không chịu lệch định lượng. Tích được nhiều chức năng.
+const NV_ROLES = [{key:'barista', label:'Pha chế'}, {key:'order', label:'Order'}];
+function nvRolesOf(e){ return Array.isArray(e && e.roles) ? e.roles.filter(r=>NV_ROLES.some(x=>x.key===r)) : []; }
+function nvRolesLabel(e){
+  const r = nvRolesOf(e);
+  return r.length ? r.map(k=>NV_ROLES.find(x=>x.key===k).label).join(' + ') : 'chưa khai chức năng';
+}
+function nvToggleRole(key, checked){
+  const cur = new Set(nvFormDraft.roles !== null ? nvFormDraft.roles : nvRolesOf(nvEditingId ? (nvEmployeesCache||[]).find(e=>e.id===nvEditingId) : null));
+  if(checked) cur.add(key); else cur.delete(key);
+  nvFormDraft.roles = [...cur];
+}
+let nvEmployeesCache = [];
 function renderEmployeeFormFields(editing, payType, otEnabled){
+  const rolesNow = nvFormDraft.roles !== null ? nvFormDraft.roles : nvRolesOf(editing);
   const isHourly = payType==='hourly_full' || payType==='hourly_part';
   const otThresholdHours = editing && editing.otThresholdHours ? editing.otThresholdHours : 8;
   const otRate = editing && editing.otRate ? editing.otRate : 0;
   return `
       <div class="field"><label>Họ tên đầy đủ</label><input type="text" id="nvFullName" placeholder="VD: Nguyễn Thị Lan" value="${editing ? escapeHtmlAttr(editing.fullName||'') : ''}"></div>
       <div class="field"><label>Mã PIN (đúng 4 chữ số)</label><input type="text" id="nvPin" inputmode="numeric" maxlength="4" placeholder="VD: 1234" value="${editing ? escapeHtmlAttr(editing.pin||'') : ''}"></div>
+      <div class="field"><label>Chức năng làm việc</label>
+        <div style="display:flex;gap:16px;flex-wrap:wrap">
+          ${NV_ROLES.map(r=>`<label style="display:flex;align-items:center;gap:8px;font-size:14px;font-weight:600;color:var(--td);cursor:pointer;">
+            <input type="checkbox" id="nvRole_${r.key}" ${rolesNow.includes(r.key)?'checked':''} onchange="nvToggleRole('${r.key}', this.checked)" style="width:20px;height:20px;">${r.label}</label>`).join('')}
+        </div>
+        <div class="small-note">Người được tích <b>Pha chế</b> sẽ chịu trách nhiệm với hao hụt định lượng trong khoảng thời gian họ có mặt trong ca. <b>Order</b> không chịu lệch định lượng. Tích được cả hai.</div>
+      </div>
       <div class="field"><label>Hình thức lương</label>
         <select id="nvPayType" onchange="nvFormDraft.payType=this.value; renderEntryNv();">
           <option value="fixed" ${payType==='fixed'?'selected':''}>Lương cứng (theo tháng)</option>
@@ -16028,6 +16051,7 @@ async function renderEntryNv(){
   try{
     await ensureAuth();
     list = await loadEmployees();
+    nvEmployeesCache = list;
   }catch(err){
     console.error('loadEmployees failed', err);
     body.innerHTML = '<div class="muted">Không tải được danh sách nhân viên.</div>';
@@ -16057,7 +16081,7 @@ async function renderEntryNv(){
         <div class="litem">
           <div class="li-l">
             <div>${e.fullName || '(chưa đặt tên)'} ${e.active===false ? '<span class="tier tier-red" style="margin-left:4px">Đã nghỉ</span>' : ''}</div>
-            <div>Mã PIN: ${e.pin || '—'} · ${payTypeLabel(e)}</div>
+            <div>Mã PIN: ${e.pin || '—'} · ${nvRolesLabel(e)} · ${payTypeLabel(e)}</div>
           </div>
           <div class="li-r">
             <button class="iconbtn" onclick="nvStartEdit('${e.id}')">${ic('pencil')}</button>
@@ -16075,8 +16099,8 @@ async function renderEntryNv(){
 }
 // Mở/đóng form sửa — LUÔN xoá draft payType/otEnabled, nếu không thì lựa chọn
 // còn sót của nhân viên vừa xem sẽ hiện nhầm sang nhân viên mở kế tiếp.
-function nvStartEdit(id){ nvEditingId = id; nvFormDraft = { payType: null, otEnabled: null }; renderEntryNv(); }
-function nvCancelEdit(){ nvEditingId = null; nvFormDraft = { payType: null, otEnabled: null }; renderEntryNv(); }
+function nvStartEdit(id){ nvEditingId = id; nvFormDraft = { payType: null, otEnabled: null, roles: null }; renderEntryNv(); }
+function nvCancelEdit(){ nvEditingId = null; nvFormDraft = { payType: null, otEnabled: null, roles: null }; renderEntryNv(); }
 function payTypeLabel(e){
   const otNote = (e.otEnabled && (e.payType==='hourly_full'||e.payType==='hourly_part'))
     ? ` · OT: &gt;${fmtNum(e.otThresholdHours||8,1)}h/ngày = ${fmt(e.otRate||0)}/giờ`
@@ -16096,11 +16120,12 @@ function payTypeLabel(e){
 // "người dùng chưa đụng tới select" với "người dùng chủ động chọn lương cứng".
 // Nếu để 'fixed' thì nó luôn truthy và sẽ đè lên payType của nhân viên đang sửa.
 // otEnabled cũng khởi tạo null với cùng lý do (xem ghi chú ở renderEntryNv).
-let nvFormDraft = { payType: null, otEnabled: null };
+let nvFormDraft = { payType: null, otEnabled: null, roles: null };
 async function submitEmployeeForm(){
   const fullName = (document.getElementById('nvFullName').value||'').trim();
   const pin = (document.getElementById('nvPin').value||'').trim();
   const payType = document.getElementById('nvPayType').value;
+  const roles = NV_ROLES.filter(r=>{ const cb=document.getElementById('nvRole_'+r.key); return cb && cb.checked; }).map(r=>r.key);
   let payInfo;
   if(payType==='fixed'){
     payInfo = { payType, fixedMonthlySalary: Number(document.getElementById('nvFixedSalary').value)||0, hourlyRate: 0, otEnabled:false, otThresholdHours:0, otRate:0 };
@@ -16113,6 +16138,7 @@ async function submitEmployeeForm(){
   }
   if(!fullName){ toast('⚠️ Nhập họ tên'); return; }
   if(!/^\d{4}$/.test(pin)){ toast('⚠️ Mã PIN phải đúng 4 chữ số'); return; }
+  payInfo.roles = roles;
   try{
     if(nvEditingId){
       await updateEmployee(nvEditingId, fullName, pin, payInfo);
@@ -16124,7 +16150,7 @@ async function submitEmployeeForm(){
       toast('✅ Đã thêm nhân viên');
     }
     nvEditingId = null;
-    nvFormDraft = { payType: null, otEnabled: null };
+    nvFormDraft = { payType: null, otEnabled: null, roles: null };
     renderEntryNv();
   }catch(err){
     // findEmployeeByActivePin() ném lỗi có message rõ ràng (trùng PIN) — hiện
@@ -17661,7 +17687,27 @@ function thangKetTrachNhiemNL(txs, items, costOf, prepWasteTxs){
   }
   // Hao hụt BÁN THÀNH PHẨM (prep_transactions) — giá trị đã lưu sẵn ở totalCost.
   for(const t of prepWasteTxs||[]){
-    if(String(t.type||'').toUpperCase()!=='WASTE')continue;
+    const ptype=String(t.type||'').toUpperCase();
+    // Chênh lệch đếm BTP cuối ca: mọi lệch đều ghi (kể cả nhỏ), thiếu và thừa tách riêng.
+    if(ptype==='ADJUSTMENT'){
+      if(!t.fromPrepCount||t.reversal===true)continue;
+      const q=Number(t.qty)||0;
+      let tc=Math.abs(Number(t.totalCost)||0);
+      if(Number(t.substitutionQty)>0&&q<0)tc=Math.max(0,tc-Number(t.substitutionQty)*(Number(t.costPerUnit)||0));
+      if(!q)continue;
+      const r=t.responsibility||{};
+      const employeeId=r.employeeId||t.staffEmployeeId||'';
+      events.push({id:'',date:t.businessDate||String(t.createdAt||'').slice(0,10),at:t.createdAt||'',
+        referenceId:t.referenceId||'',itemId:t.prepId||'',itemName:t.prepName||t.prepId||'BTP',
+        unit:t.unit||'',category:q<0?'prepCountShort':'prepCountSurplus',qty:Math.abs(q),value:tc,employeeId,
+        employeeName:r.employeeName||t.staff||'Chưa rõ người ghi nhận',
+        role:r.role||(employeeId?'người đếm cuối ca':'chưa xác minh PIN'),
+        reason:r.reason||t.note||'',reportedByName:'',needsReview:false,reviewedAt:'',expectedQty:0,
+        varianceKind:'',codeIntervals:[],varianceAllocations:[],unitAllocations:[],
+        fromCheckpoint:null,toCheckpoint:null,containerCode:'',resolutionStatus:r.status||''});
+      continue;
+    }
+    if(ptype!=='WASTE')continue;
     const r=t.responsibility||{};
     const employeeId=r.employeeId||t.staffEmployeeId||'';
     events.push({id:'',date:t.businessDate||String(t.createdAt||'').slice(0,10),at:t.createdAt||'',
@@ -17681,16 +17727,18 @@ function thangKetTrachNhiemNL(txs, items, costOf, prepWasteTxs){
     const key=event.employeeId||'__unassigned';
     const group=byEmployee[key]||(byEmployee[key]={employeeId:event.employeeId,
       employeeName:event.employeeName,events:[],prepWaste:0,reportedWaste:0,
-      shortage:0,extraUse:0,otherCount:0});
+      shortage:0,extraUse:0,prepCountShort:0,prepCountSurplus:0,otherCount:0});
     group.events.push(event);
     if(event.category==='prepWaste')group.prepWaste+=event.value;
     else if(event.category==='reportedWaste')group.reportedWaste+=event.value;
     else if(event.category==='shortage')group.shortage+=event.value;
     else if(event.category==='extraUse')group.extraUse+=event.value;
+    else if(event.category==='prepCountShort')group.prepCountShort+=event.value;
+    else if(event.category==='prepCountSurplus')group.prepCountSurplus+=event.value;
     else group.otherCount++;
   }
   return {events,byEmployee,groups:Object.values(byEmployee).sort((a,b)=>
-    (b.prepWaste+b.reportedWaste+b.shortage+b.extraUse)-(a.prepWaste+a.reportedWaste+a.shortage+a.extraUse))};
+    (b.prepWaste+b.reportedWaste+b.shortage+b.extraUse+b.prepCountShort)-(a.prepWaste+a.reportedWaste+a.shortage+a.extraUse+a.prepCountShort))};
 }
 
 // Nguyên liệu KHÔNG có bất kỳ dòng sổ nào (bán/nấu/hao hụt/nhập/điều chỉnh) suốt cả
@@ -17730,8 +17778,11 @@ async function computeThangKetKhoExtra(startKey, endKey, items){
     .sort((a,b)=>b.giaTri-a.giaTri);
   const prepWasteTxs = await _ledgerWasteRows('prep_transactions_gieogieo', startKey, endKey)
     .catch(err=>{ console.warn('[Tổng kết tháng] hao hụt BTP lỗi', err); return []; });
+  // Chênh lệch đếm BTP cuối ca (ADJUSTMENT fromPrepCount): trước đây không vào báo cáo trách nhiệm.
+  const prepAdjTxs = await _ledgerWasteRows('prep_transactions_gieogieo', startKey, endKey, 'ADJUSTMENT')
+    .catch(err=>{ console.warn('[Tổng kết tháng] chênh đếm BTP lỗi', err); return []; });
   return { nhapList, tongNhap, tonLau,
-    responsibility:thangKetTrachNhiemNL(allTransactions,items,itemCostOn,prepWasteTxs) };
+    responsibility:thangKetTrachNhiemNL(allTransactions,items,itemCostOn,prepWasteTxs.concat(prepAdjTxs)) };
 }
 
 // Số NGÀY thực sự có mặt (giờ công > 0) của mỗi nhân viên trong tháng — khác với
@@ -17936,6 +17987,7 @@ function thangKetEmployeeCardHTML(e, tongGioTeam){
     ` : `<div class="row"><span class="rl">Số ngày làm (có chấm công)</span><span class="rv">${soNgay} ngày</span></div>`}
     <div class="row"><span class="rl">Hao hụt NL có PIN ghi/chốt</span><span class="rv" style="${trachNhiem?.prepWaste||trachNhiem?.reportedWaste?'color:var(--bad)':''}">${fmt((trachNhiem?.prepWaste||0)+(trachNhiem?.reportedWaste||0))}</span></div>
     <div class="row"><span class="rl">Thiếu tồn cần giải trình</span><span class="rv">${fmt(trachNhiem?.shortage||0)}</span></div>
+    <div class="row"><span class="rl">Chênh đếm BTP cuối ca · thiếu / thừa</span><span class="rv">${fmt(trachNhiem?.prepCountShort||0)} / ${fmt(trachNhiem?.prepCountSurplus||0)}</span></div>
     <div class="row"><span class="rl">Dùng vượt định mức · đã vào giá vốn</span><span class="rv">${fmt(trachNhiem?.extraUse||0)}</span></div>
     ${trachNhiem?.events.length?`<button class="btn outline sm" style="width:auto;color:#0062AD;border-color:#0062AD" onclick="thangKetOpenResponsibilitySheet(${trachNhiemIndex})">Xem ${trachNhiem.events.length} lượt theo mã</button>`:''}
     ${thangKetCashVarHTML(e)}
@@ -17962,6 +18014,7 @@ function thangKetResponsibilityHTML(){
     <div class="card" style="border:1px solid #0062AD">
       <div class="row"><span class="rl">Hao hụt NL đã ghi sổ</span><span class="rv" style="color:var(--bad)">${fmt(sum('prepWaste')+sum('reportedWaste'))}</span></div>
       <div class="row"><span class="rl">Thiếu tồn cần giải trình</span><span class="rv">${fmt(sum('shortage'))}</span></div>
+      <div class="row"><span class="rl">Chênh đếm BTP cuối ca · thiếu / thừa</span><span class="rv">${fmt(sum('prepCountShort'))} / ${fmt(sum('prepCountSurplus'))}</span></div>
       <div class="row"><span class="rl">Dùng vượt định mức · đã vào giá vốn</span><span class="rv">${fmt(sum('extraUse'))}</span></div>
       ${all.some(e=>e.entryError)?`<div class="row"><span class="rl" style="color:var(--bad)">Đã xác minh nhập sai số liệu (người cân vẫn chịu trách nhiệm)</span><span class="rv" style="color:var(--bad)">${all.filter(e=>e.entryError).length} lượt</span></div>`:''}
       ${all.some(e=>e.needsReview)?`<div class="row"><span class="rl" style="color:var(--warn)">Chờ quản lý duyệt</span><span class="rv" style="color:var(--warn)">${all.filter(e=>e.needsReview).length} lượt</span></div>`:''}
@@ -17969,7 +18022,7 @@ function thangKetResponsibilityHTML(){
     </div>
     ${groups.map((g,i)=>`<button class="card" onclick="thangKetOpenResponsibilitySheet(${i})" style="width:100%;text-align:left;border:1px solid #AACDE4;cursor:pointer;font:inherit;color:inherit">
       <div style="font-weight:800">${escapeHtmlAttr(g.employeeName)} ${!g.employeeId?'<span class="tier tier-amber">Chưa có PIN/ID</span>':''}</div>
-      <div class="small-note">${g.events.length} lượt · hao hụt ${fmt(g.prepWaste+g.reportedWaste)} · thiếu tồn ${fmt(g.shortage)} · dùng thêm ${fmt(g.extraUse)}${g.otherCount?' · lệch mã/định mức '+g.otherCount+' lượt':''}</div>
+      <div class="small-note">${g.events.length} lượt · hao hụt ${fmt(g.prepWaste+g.reportedWaste)} · thiếu tồn ${fmt(g.shortage)} · dùng thêm ${fmt(g.extraUse)} · đếm BTP thiếu ${fmt(g.prepCountShort)} / thừa ${fmt(g.prepCountSurplus)}${g.otherCount?' · lệch mã/định mức '+g.otherCount+' lượt':''}</div>
     </button>`).join('')||'<div class="card"><div class="empty-hint">Tháng này chưa có sự kiện đối chiếu NL hoặc hao hụt gắn nhân viên.</div></div>'}
     ${all.length?'<div class="small-note">Chạm vào một nhân viên để xem từng mã và mốc cân.</div>':''}`;
 }
@@ -18003,6 +18056,7 @@ function thangKetOpenResponsibilitySheet(index){
   if(!g)return;
   const labels={prepWaste:'Hao hụt lúc nấu',reportedWaste:'Hao hụt đã khai',
     shortage:'Thiếu tồn cần giải trình',surplus:'Thừa tồn khi cân',
+    prepCountShort:'Thiếu khi đếm BTP cuối ca',prepCountSurplus:'Thừa khi đếm BTP cuối ca',
     extraUse:'Dùng vượt định mức',underUse:'Dùng ít hơn định mức',lotShift:'Lấy lệch theo mã'};
   const checkpoint=c=>c?`${escapeHtmlAttr(qlFmtDT(c.at))} · ${escapeHtmlAttr(c.employeeName||'—')}`:'chưa có mốc';
   const cards=g.events.map(e=>{
@@ -18594,6 +18648,7 @@ async function buildExportPayload(mode){
   const payload = {
     _phienBan: _EXP_VERSION,
     btp_theo_ngay: await btp,
+    ca_lam_viec: _expCaLamViec(rangeData['employee_shifts_gieogieo']),
     nl_dem_giao_ca: _expDemNlGiaoCa(rangeData['daily_closings_gieogieo'], rangeData['daily_openings_gieogieo']),
     dong_doi_chieu_nl: _expDongDoiChieu(rangeData['stock_transactions_gieogieo']),
     so_lech_theo_ngay: _expTomTatSoLech(rangeData['stock_anomalies_gieogieo']),
@@ -18644,6 +18699,7 @@ async function buildExportPayload(mode){
   payload._mucBoQua = boQua;
   payload.huong_dan_phan_tich.khoi_moi_v2 = {
     btp_theo_ngay: 'Chuỗi BTP từng ngày: demHomTruoc + nauThem − dungTheoBill = soCuoiNgay; so với demCuoiNgay. tongKet[] có trung vị lệch, số ngày âm/dương, ngày nghi nhập sai. canhBao[] gắn sẵn cờ.',
+    ca_lam_viec: 'Ai vào/ra ca lúc nào, kèm chức năng (pha chế/order) chụp lúc check-in; chucNang=null là ca ghi trước khi có chức năng. Dùng để biết ai có mặt trong khoảng giữa hai lần đếm. btp_theo_ngay có nguoiDem/demLuc cho từng lần đếm cuối ca.',
     nl_dem_giao_ca: 'Số đếm NL theo mã/vị trí lúc giao ca & đóng ngày (thay cho phiếu kiểm kê đã duyệt).',
     dong_doi_chieu_nl: 'Các dòng sổ của luồng cân đối chiếu NL khi nấu: mẻ nào, ai cân, lệch loại gì; bán trong lúc NL khoá cân; sổ ghi thiếu + người cân mốc trước; đã xác minh nhập sai.',
     so_lech_theo_ngay: 'Sổ lệch gộp theo ngày/loại; dòng gốc ở duLieuTheoNgay.stock_anomalies_gieogieo.',
@@ -18654,7 +18710,7 @@ async function buildExportPayload(mode){
 
 
 // ════════ [Trích xuất v2] Các khối dựng sẵn để truy lệch BTP / NL ════════
-const _EXP_VERSION = 2;
+const _EXP_VERSION = 3;
 function _expMedian(a){ const v=a.filter(x=>Number.isFinite(x)).sort((x,y)=>x-y); if(!v.length) return null; const m=v.length>>1; return v.length%2?v[m]:(v[m-1]+v[m])/2; }
 function _expR(n){ return Number.isFinite(n) ? Math.round(n*100)/100 : null; }
 function _expDayOf(iso){ const t=new Date(iso); return isNaN(t)?'':dkey(t); }
@@ -18707,7 +18763,10 @@ function _expBtpTheoNgay(dates, closings, batches, prepTxs, prepItems){
         demHomTruoc:truoc, nauThem:nau, soMeNau:a?a.soMe:0, dungTheoBill:dung, soBillDung:a?a.bills.size:0,
         theoLoaiSoBTP:a?a.theoLoaiSoBTP:{}, loHuy:a?a.huyLo:0,
         soCuoiNgay:_expR(sc), demCuoiNgay:_expR(dem), lechKhiDem:_expR(lech), daBoKhiDem:l?_expR(Number(l.discardedQty)||0):null,
-        phuongPhapCan:l?(l.weighMethod||''):'' };
+        phuongPhapCan:l?(l.weighMethod||''):'',
+        // Ai đếm lượt cuối ca này (một người cho cả phiếu đếm) và lúc nào — để tách lệch theo người.
+        nguoiDem:l?((closeBy[day]||{}).prepCountBy||''):'', nguoiDemId:l?((closeBy[day]||{}).prepCountByEmployeeId||''):'',
+        demLuc:l?((closeBy[day]||{}).prepCountAt||''):'' };
       row.chenhChuoi = (truoc!=null && sc!=null && dung!=null) ? _expR(sc - (truoc + nau - dung)) : null;
       row.lechPctSo = (sc && sc>50 && lech!=null) ? _expR(lech/sc*100) : null;
       const canhBao = [];
@@ -18725,6 +18784,19 @@ function _expBtpTheoNgay(dates, closings, batches, prepTxs, prepItems){
   });
   rows.sort((a,b)=> String(a.ten).localeCompare(String(b.ten),'vi') || a.ngay.localeCompare(b.ngay));
   return { usageEventsTuNgay:ngayDauCoEvent, ghiChu:'usageEvents (bill nào trừ BTP lô nào) chỉ có từ ngày usageEventsTuNgay; trước đó dungTheoBill=0 KHÔNG có nghĩa là không bán.', tongKet, theoNgay:rows };
+}
+
+// CA LÀM VIỆC: ai có mặt lúc nào (vào/ra) và chức năng chụp lúc check-in (pha chế/order). Cần để biết ai ở trong
+// khoảng giữa hai lần cân/đếm. roles=null: ca ghi trước khi có chức năng nhân viên.
+function _expCaLamViec(shifts){
+  const out = {};
+  (shifts||[]).forEach(s=>{
+    const day = s.businessDate || _expDayOf(s.checkedInAt); if(!day) return;
+    (out[day] = out[day]||[]).push({ nhanVien:s.employeeName||'', nhanVienId:s.employeeId||'', vao:s.checkedInAt||'', ra:s.checkedOutAt||null,
+      chucNang:Array.isArray(s.roles)?s.roles:null });
+  });
+  Object.values(out).forEach(a=> a.sort((x,y)=>String(x.vao).localeCompare(String(y.vao))));
+  return out;
 }
 
 // SỐ ĐẾM NL GIAO CA / ĐÓNG NGÀY — thay cho doi_chieu_dinh_muc (cũ, dựa vào stock_counts đã duyệt: quy trình mới không còn tạo phiếu đó).

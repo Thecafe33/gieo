@@ -38,7 +38,6 @@ Nguyên tắc cứng: **mọi phần quy cho một người phải có cơ sở 
    - Lệch ≥ ngưỡng cân lại → **tranh chấp**: số của B không tự quyết. Hệ thống báo chủ; **chủ chọn quy cho A, cho B, hoặc cả hai (chia %), hoặc "định mức/miễn"**. Chưa chọn thì khoản đó ở "chờ quy", không cộng vào ai. Số tồn lấy theo số B cân (số thực tế mới nhất); chủ có nút sửa tồn nếu B sai.
    - B cân trùng số A → coi là thực tế, chuyển sang mục 2.
 6. Không ai xác minh trong 48 giờ → tự đóng, chuyển "chưa quy". BTP đã bỏ/hết hạn không còn để cân → "không xác minh được", chuyển "chưa quy".
-7. Tuỳ chọn: thỉnh thoảng yêu cầu cân lại cả mục KHÔNG lệch, để lời nhắc cân lại tự nó không báo hiệu có lệch.
 
 ## 4. Thông báo và nút của chủ
 - Mọi vụ đều được ghi và quy (mục 2). **Chỉ báo chủ khi**: lệch vượt 100% lượng dùng theo sổ (kèm tối thiểu 50 g), hoặc có **tranh chấp** cần chọn người.
@@ -46,7 +45,7 @@ Nguyên tắc cứng: **mọi phần quy cho một người phải có cơ sở 
 - **Tự chốt**: chủ không phải bấm gì, trừ vụ tranh chấp. Hồ sơ vụ lệch (`responsibility_cases_gieogieo`) lưu khoảng đo, phân rã, người + % + giá trị, bằng chứng (mã bill, ca, mẻ, mốc), độ tin cậy.
 - Nút chủ (chỉ phòng nhân viên nhập sai hoặc muốn đổi): sửa tồn BTP/NL, chia lại % cho một hoặc nhiều người (bắt lý do, ghi `responsibilityHistory`), đánh dấu "định mức / lỗi nhập / miễn".
 - Nhân viên xem được phần của chính mình và **phản đối kèm lý do**; phản đối đưa vụ về trạng thái chờ chủ xem.
-- Hệ thống **không tự trừ lương**. Nút thưởng/phạt chỉ đề xuất từ vụ độ tin cậy Mạnh. Nên đối chiếu nội quy và quy định pháp luật về khấu trừ lương trước khi dùng cho tiền.
+- Hệ thống **không tự trừ lương**. Nút thưởng/phạt chỉ đề xuất từ vụ độ tin cậy Mạnh (chủ đã đồng ý dùng độ tin cậy làm căn cứ). Nên đối chiếu nội quy và quy định pháp luật về khấu trừ lương trước khi dùng cho tiền.
 
 ## 5. Báo cáo tháng
 - Theo nhân viên: phần chịu theo loại (khai, nhập sai, chia theo ca) + độ tin cậy + bằng chứng.

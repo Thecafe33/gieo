@@ -14817,12 +14817,16 @@ async function _doCheckInImpl() {
     fixedMonthlySalary: Number(emp.fixedMonthlySalary) || 0,
     snapshotAt: new Date().toISOString()
   };
+  // Chức năng làm việc (pha chế/order) chụp vào ca như payTerms: sửa hồ sơ về sau không đổi
+  // lịch sử. Người được tích 'barista' chịu hao hụt định lượng trong khoảng họ có mặt.
+  const roles = Array.isArray(emp.roles) ? emp.roles.filter(r => typeof r === 'string' && r) : [];
   try {
+    const checkedInAt = new Date().toISOString();
     const ref = await fstore.collection('employee_shifts_gieogieo').add({
-      employeeId: emp.id, employeeName: emp.fullName, businessDate, payTerms,
-      checkedInAt: new Date().toISOString(), checkedOutAt: null
+      employeeId: emp.id, employeeName: emp.fullName, businessDate, payTerms, roles,
+      checkedInAt, checkedOutAt: null
     });
-    _employeeShiftsTodayCache.push({ id: ref.id, employeeId: emp.id, employeeName: emp.fullName, businessDate, payTerms, checkedInAt: new Date().toISOString(), checkedOutAt: null });
+    _employeeShiftsTodayCache.push({ id: ref.id, employeeId: emp.id, employeeName: emp.fullName, businessDate, payTerms, roles, checkedInAt, checkedOutAt: null });
     toast(`✅ ${emp.fullName} đã check-in`);
     document.getElementById('checkinPin').value = '';
     renderCheckinBlock();
