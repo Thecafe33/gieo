@@ -23,7 +23,7 @@ const world = (o = {}) => {
   return { rt, fs };
 };
 const line = (counted, snap, batches) => ({ prepId: 'P', prepName: 'Cốt trà lài', unit: 'g', activeBatches: batches || [{ id: 'b1', batchCode: 'L1', qtyRemaining: 100, qtyInitial: 733 }],
-  batchQty: { b1: counted }, batchWeighings: { b1: [{ w: counted }] }, snaps: { b1: { book: snap } } });
+  batchQty: { b1: counted }, batchWeighings: { b1: [{ w: counted }] }, snaps: { b1: { book: snap, exact: true } } });
 const task = () => ({ id: 'verify_P', firstById: 'B', firstBy: 'Bình', firstAt: '2026-09-22T14:30:00.000Z', countedQty: 100, bookBeforeCount: 100, usageBase: 50, caseId: 'c1', prepId: 'P' });
 const ctx = (id = 'C') => ({ now: new Date(T + 60000).toISOString(), staff: { id, fullName: id }, businessDate: '2026-09-23' });
 const rtv = (f, p) => f.fake.rtGet('active_units_gieogieo/P/' + p);

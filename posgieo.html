@@ -212,7 +212,7 @@ Nút "Cập nhật" ở sidebar (`manualCheckUpdate`, dựa trên service worker
 <script src="https://cdn.jsdelivr.net/npm/bcryptjs@2.4.3/dist/bcrypt.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
 <!-- [E1] Unit Engine — nạp TRƯỚC script chính. Đổi phiên bản = đổi tên file (6.1). -->
-<script src="unit_engine.v10.js"></script>
+<script src="unit_engine.v11.js"></script>
 
 <style>
 :root{--gd:#E23A5D;--gm:#C22B49;--gl:#FDE6EA;--bg:#FFFCF0;--gt:#999;--td:#111;--bb:#E7ECFB;--bi:#1D3F91;
@@ -14794,6 +14794,7 @@ async function renderCheckinBlock() {
   `;
   renderDutyTasksPOS();
   UnitEngine.consume.recoverDuplicates().catch(err => console.warn('[UnitEngine] phục hồi phần trừ trùng lỗi', err));
+  UnitEngine.duty.recoverVerifyUndo().catch(err => console.warn('[UnitEngine] hoàn tác xác minh dở lỗi', err));
 }
 async function doCheckIn() {
   if (_posSubmitBusy) { toast('⏳ Đang xử lý, vui lòng đợi giây lát...'); return; }
@@ -17823,8 +17824,14 @@ function prepCountWeighBatch(i, batchId, bi) {
       // Cân lúc đang bán (xác minh): sổ của lô TẠI MỐC đọc số cân (lấy mốc TRƯỚC khi đọc sổ; engine cộng lại phần bán sau mốc) — số cân và sổ cùng một mốc.
       if (_prepVerifyMode) {
         const atMs = UnitEngine.clock.now();
-        try { { const bk = await UnitEngine.duty.lotBookAtExact(l.prepId, batchId, atMs); (l.snaps = l.snaps || {})[batchId] = { book: bk.book, exact: bk.exact !== false, at: new Date(atMs).toISOString() }; } }
-        catch (err) { console.warn('[duty] không chụp được sổ lô lúc cân', err); }
+        // Đọc sổ lỗi → VÔ HIỆU snapshot cũ của lô và KHÔNG nhận số cân mới (nếu không số cân mới sẽ ghép với sổ của lần cân trước).
+        try { const bk = await UnitEngine.duty.lotBookAtExact(l.prepId, batchId, atMs); (l.snaps = l.snaps || {})[batchId] = { book: bk.book, exact: bk.exact === true, at: new Date(atMs).toISOString() }; }
+        catch (err) {
+          console.warn('[duty] không chụp được sổ lô lúc cân', err);
+          if (l.snaps) delete l.snaps[batchId];
+          toast('⚠️ Không đọc được sổ của lô — chưa ghi nhận số cân, hãy cân lại khi có mạng');
+          return;
+        }
       }
       l.batchWeighings[batchId] = lines;
       l.batchDone[batchId] = false;
@@ -17852,7 +17859,13 @@ async function prepCountToggleBatchDone(i, batchId) {
   }
   if (_prepVerifyMode && willDone) {
     const atMs = UnitEngine.clock.now();
-    try { { const bk = await UnitEngine.duty.lotBookAtExact(l.prepId, batchId, atMs); (l.snaps = l.snaps || {})[batchId] = { book: bk.book, exact: bk.exact !== false, at: new Date(atMs).toISOString() }; } } catch (err) { console.warn('[duty] không chụp được sổ lô', err); }
+    try { const bk = await UnitEngine.duty.lotBookAtExact(l.prepId, batchId, atMs); (l.snaps = l.snaps || {})[batchId] = { book: bk.book, exact: bk.exact === true, at: new Date(atMs).toISOString() }; }
+    catch (err) {
+      console.warn('[duty] không chụp được sổ lô', err);
+      if (l.snaps) delete l.snaps[batchId];
+      toast('⚠️ Không đọc được sổ của lô — chưa ghi nhận, hãy thử lại khi có mạng');
+      return;
+    }
   }
   l.batchDone[batchId] = willDone;
   l.batchWeighings[batchId] = [];   // đánh dấu hết/bỏ dấu đều làm số cân cũ vô nghĩa

@@ -140,3 +140,15 @@ Test: `tests/phan_bien_v10.test.js` (`ENGINE=unit_engine.v9.js` để xem lỗi 
 34. `revOps` loại theo số lượng → map có tuổi, không loại theo số lượng.
 35. Nhật ký quá 30 dòng bị cắt rồi vẫn dùng số sai → `lotBookAtExact` báo exact:false, `verifyCommit` từ chối (`BOOK_INEXACT`).
 Giới hạn còn lại: (a) hoàn tác của hàng rào thế hệ có khe ms (RTDB không có transaction chéo đường dẫn) — trong khe đó một lượt bán có thể thấy số tạm, phần chênh được giữ khi hoàn tác; (b) node cũ chưa có nhật ký nhưng chưa có bán sau mốc vẫn coi là chính xác (cho giai đoạn chuyển phiên bản).
+
+---
+## J. Đợt sửa theo bản rà bug lần 6 (engine v11) — lỗi 36–42
+Test: `tests/phan_bien_v11.test.js` (`ENGINE=unit_engine.v10.js` để xem lỗi cũ; v11 đạt hết).
+36. Hoàn tác node dựng lại có bán xen sai → phần cộng thêm tính theo số thực có trước transaction (node chưa có → cả `next`).
+37. Đọc rào/hoàn tác lỗi để lại số tạm → việc hoàn tác bền + `duty.recoverVerifyUndo()`.
+38. Đọc sổ lỗi vẫn dùng snapshot cũ → POS bỏ snapshot, không nhận số cân; engine đòi `exact === true`.
+39. Lô thiếu node RT kẹt vòng cân lại → exact:true cho lô không node; đóng dấu lại khi đọc ngay sau cân.
+40. Dấu hoàn mất khi node bị gỡ → dấu bền `rev_marks_gieogieo` ngoài vòng đời lô.
+41. Hạn dấu 3 ngày ngắn hơn việc chờ → dấu bền 90 ngày; việc chờ >60 ngày chuyển đối soát tay.
+42. `exact:true` dựa usageEvents → bất biến `chgBase + Σd`.
+Giới hạn còn lại: (a) ghi node RT và ghi việc hoàn tác/dấu bền là hai bước (RTDB/Firestore không chung transaction) — máy chết đúng giữa hai bước thì không có dấu; (b) đóng dấu lại khi đọc ngay sau cân tin rằng khoảng đọc ≤10 s không có biến động chưa ghi nhật ký; (c) node ghi đè bằng `set` trực tiếp (dựng mới) bắt đầu theo dõi lại từ đầu.

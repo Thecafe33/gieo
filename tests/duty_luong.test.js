@@ -79,7 +79,7 @@ const A = { id: 'B', fullName: 'Bình' };   // người đếm cuối ca
     // Chi cân thực tế (đúng sổ gốc 864.2 trừ lượt bán 30 g) rồi MỘT lượt bán nữa 20 g xen vào trước khi ghi
     const physical = 864.2 - 30;
     await f.UE.consume.prepSale('P', 20, 'bán', 'bill_' + (T + 1) + '_s2', '2026-09-23', 'bill_' + (T + 1) + '_s2_prep_P').catch(() => {});
-    const l = line(null, 864.2, { batchQty: { b1: physical }, batchWeighings: { b1: [{ w: physical }] }, snaps: { b1: { book: snapBook, at: new Date(T).toISOString() } } });
+    const l = line(null, 864.2, { batchQty: { b1: physical }, batchWeighings: { b1: [{ w: physical }] }, snaps: { b1: { book: snapBook, exact: true, at: new Date(T).toISOString() } } });
     const r = await f.UE.duty.verifyCommit(l, task, { now: new Date(T + 60000).toISOString(), staff: { id: 'C', fullName: 'Chi' }, businessDate: '2026-09-23' });
     eq(r.outcome, 'entry_error', 'S5 Chi cân khớp sổ gốc → A nhập sai');
     const c = docs(f, CASES)[0], t = docs(f, TASKS)[0];
@@ -103,7 +103,7 @@ const A = { id: 'B', fullName: 'Bình' };   // người đếm cuối ca
   {
     const f = await suspect(); const task = docs(f, TASKS)[0];
     const snapBook = await f.UE.duty.lotBookNow('P', 'b1');
-    const r = await f.UE.duty.verifyCommit(line(null, 864.2, { batchQty: { b1: 7460 }, snaps: { b1: { book: snapBook } } }), task, { now: new Date(T + 1000).toISOString(), staff: { id: 'C', fullName: 'Chi' }, businessDate: '2026-09-22' });
+    const r = await f.UE.duty.verifyCommit(line(null, 864.2, { batchQty: { b1: 7460 }, snaps: { b1: { book: snapBook, exact: true } } }), task, { now: new Date(T + 1000).toISOString(), staff: { id: 'C', fullName: 'Chi' }, businessDate: '2026-09-22' });
     const c = docs(f, CASES)[0];
     eq([r.outcome, c.status, c.verified, c.allocations.map(a => a.employeeId).sort()], ['confirmed', 'auto', true, ['A', 'B']], 'S7 hai lần cân như nhau → lệch thật, chia theo ca');
   }
@@ -112,7 +112,7 @@ const A = { id: 'B', fullName: 'Bình' };   // người đếm cuối ca
   {
     const f = await suspect(); const task = docs(f, TASKS)[0];
     const snapBook = await f.UE.duty.lotBookNow('P', 'b1');
-    const r = await f.UE.duty.verifyCommit(line(null, 864.2, { batchQty: { b1: 2500 }, snaps: { b1: { book: snapBook } } }), task, { now: new Date(T + 1000).toISOString(), staff: { id: 'C', fullName: 'Chi' }, businessDate: '2026-09-22' });
+    const r = await f.UE.duty.verifyCommit(line(null, 864.2, { batchQty: { b1: 2500 }, snaps: { b1: { book: snapBook, exact: true } } }), task, { now: new Date(T + 1000).toISOString(), staff: { id: 'C', fullName: 'Chi' }, businessDate: '2026-09-22' });
     const c = docs(f, CASES)[0];
     eq([r.outcome, c.status, c.allocations.length, c.pool[0].kind], ['dispute', 'dispute', 0, 'dispute'], 'S8 B không khớp A lẫn sổ gốc → tranh chấp');
     eq(docs(f, AL).some(a => a.kindOfAlert === 'dispute'), true, 'S8 báo chủ cần quy trách nhiệm');
