@@ -128,3 +128,15 @@ Test: `tests/phan_bien_v9.test.js` (`ENGINE=unit_engine.v8.js` để xem lỗi c
 27. Xác minh bỏ qua hoàn sau mốc cân → remain có dấu (bỏ `max(0, …)`).
 28. Lô cuối đã đóng, ghi sổ lỗi, không mở lại được → POS có đường "Ghi nốt" từ `task.attempt`.
 Giới hạn còn lại: (a) `lotBookAt` rơi về cách cũ (best-effort) với node chưa có `chg`; (b) nếu máy tắt/crash đúng giữa lúc trừ RT thừa và lúc ghi bất kỳ dấu nào (kể cả localStorage) thì không có dấu phục hồi — phát hiện qua cân/kiểm kê; (c) lượt xác minh cũ có thể ghi RT trong khe vài ms giữa lúc việc mới được tạo và lúc việc mới ghi RT lần đầu.
+
+---
+## I. Đợt sửa theo bản rà bug lần 5 (engine v10) — lỗi 29–35
+Test: `tests/phan_bien_v10.test.js` (`ENGINE=unit_engine.v9.js` để xem lỗi cũ; v10 đạt hết).
+29. Hai máy xoá cùng bill vẫn hoàn hai lần (cờ `iAmClaimer` sống sót qua lần chạy lại transaction) → đặt lại cờ mỗi lần callback; đường hoàn bill có dấu chống ghi lặp tại RT.
+30. Xác minh dựng lại node làm mất `revOps` → bộ bọc RT giữ metadata ở mọi transaction.
+31. Việc mới đóng lô về 0 vẫn bị lượt cũ dựng lại node → hàng rào thế hệ bền ở đường dẫn RT riêng + hoàn tác phần ghi của lượt cũ.
+32. Nhật ký `chg` thiếu ở `setBatchQty`/`discardByLots` → mọi đường đổi unitBase qua bộ bọc ghi delta.
+33. Hai tab ghi đè hàng đợi localStorage → mỗi việc một khoá.
+34. `revOps` loại theo số lượng → map có tuổi, không loại theo số lượng.
+35. Nhật ký quá 30 dòng bị cắt rồi vẫn dùng số sai → `lotBookAtExact` báo exact:false, `verifyCommit` từ chối (`BOOK_INEXACT`).
+Giới hạn còn lại: (a) hoàn tác của hàng rào thế hệ có khe ms (RTDB không có transaction chéo đường dẫn) — trong khe đó một lượt bán có thể thấy số tạm, phần chênh được giữ khi hoàn tác; (b) node cũ chưa có nhật ký nhưng chưa có bán sau mốc vẫn coi là chính xác (cho giai đoạn chuyển phiên bản).

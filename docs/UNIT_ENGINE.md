@@ -278,3 +278,12 @@ Chưa làm: nguyên liệu (NL) — đối chiếu NL khi nấu đã có `respon
 - **Bù trùng**: `unitEngineReverseAllocations(..., idemKey)` đánh dấu từng khoản hoàn `idemKey#i` trên node nhận (`revOps`) — lượt hoàn thứ hai cùng khoá coi như đã hoàn. Việc phục hồi có "thuê" 60 giây (`leaseAt`); ghi việc lên Firestore lỗi thì giữ hàng đợi cục bộ (bộ nhớ + localStorage `ue_dup_recovery_gieogieo`) và `recoverDuplicates()` ghi lại/chạy tiếp. Hoàn một phần cũng được làm lại an toàn (tối đa 5 lượt rồi `needs_manual`).
 - **POS**: mở việc cân lại có `attempt` mà không còn lô → màn "Ghi nốt số cân lại" (chỉ PIN), không bắt cân lại.
 - Snapshot `core`/`e4`/`ql` được cập nhật: chỉ thêm trường `chg` trên node RT lô BTP (và đánh số lại nhãn thời gian trong `ql`).
+
+## Sửa theo bản rà bug lần 5 (v10, 01/10/2026) — test `tests/phan_bien_v10.test.js` (`ENGINE=unit_engine.v9.js` để xem lỗi cũ)
+- **Bộ bọc RT `_ueActiveUnitsRef`**: mọi transaction trên `active_units_gieogieo` giữ metadata khi node bị dựng lại (`chg`, `chgTrim`, `revOps`, `dutyVerifyOp/Gen`) và, với lô BTP, tự ghi dòng `chg` delta cùng transaction nếu nơi gọi chưa ghi — nên `setBatchQty`, `discardByLots`, đếm, xác minh… đều giữ nhật ký sổ lô.
+- **Hoàn bill hai máy**: cờ `iAmClaimer/existingData/tookOver` đặt lại ở đầu MỖI lần callback transaction claim chạy; đường hoàn bill (NL và BTP) cũng mang dấu chống ghi lặp tại RT (`revOps`).
+- **`revOps` = {khoá: ms}** (khoá RT hợp lệ: ký tự lạ → `_`). Không loại theo số lượng, không xoá khi thao tác "xong" (lượt chậm vẫn có thể đến sau); chỉ hết hạn theo tuổi 3 ngày.
+- **Hàng rào thế hệ bền** `duty_verify_fence_gieogieo/{prepId}` = {gen}: lượt xác minh giành rào trước khi ghi RT, đọc lại sau mỗi lô; thấy thế hệ mới hơn thì hoàn tác phần mình ghi (trừ đúng phần chênh, giữ bán xen) và dừng. Không mất khi lô đóng.
+- **`duty.lotBookAtExact(prepId,batchId,atMs)` → {book, exact, reason}**: exact:false khi nhật ký bị cắt quá mốc / node không nhật ký mà có bán sau mốc / mất node. `verifyCommit` từ chối (`code:'BOOK_INEXACT'`, cân lại lô đó) thay vì điều chỉnh kho theo số không chắc. POS ghi `snaps[batchId].exact`. `duty.lotBookAt` vẫn trả số (best-effort).
+- **Hàng đợi bù trùng cục bộ**: mỗi việc một khoá localStorage `ue_dup_recovery_gieogieo__{opId}`; chỉ xoá khoá đã lên Firestore thành công.
+- Snapshot `core`/`e4`/`ql`/`wrap`/`prepcount`: chỉ thêm `chg`/`revOps` trên node RT (đã đối chiếu tự động).

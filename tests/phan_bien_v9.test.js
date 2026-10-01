@@ -110,11 +110,13 @@ const line2 = () => ({ prepId: 'P', prepName: 'Cốt trà lài', unit: 'g', acti
   }
   // ── Lỗi 26: lỗi ghi việc phục hồi → hàng đợi cục bộ (bộ nhớ + localStorage), máy khác/phiên mới vẫn phục hồi được ──
   {
-    const store = {}; global.localStorage = { getItem: k => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); }, removeItem: k => { delete store[k]; } };
+    const store = {}; global.localStorage = { getItem: k => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); }, removeItem: k => { delete store[k]; }, get length() { return Object.keys(store).length; }, key: i => Object.keys(store)[i] || null };
+    const dupKeys = () => Object.keys(store).filter(k => k.indexOf('ue_dup_recovery_gieogieo__') === 0);
     const f = mk(dupWorld(100).fs, dupWorld(100).rt); let failDup = true;
     hook(f, 'dup_recovery_gieogieo', 'set', (d, id, ...a) => (failDup ? Promise.reject(new Error('Firestore lỗi')) : d.set(...a)));
     const r = await f.UE.consume.compensateDuplicate('prep', 'P', [{ containerId: 'b1', qty: 50 }], 'tx26');
     eq([r.ok, rtv(f, 'b1/unitBase')], [true, 150], 'L26 hoàn vẫn chạy dù không ghi được việc (RT 150)');
+    Object.keys(store).forEach(k => delete store[k]);                                                  // kịch bản trước để lại khoá của nó
     const f2 = mk(dupWorld(100).fs, dupWorld(100).rt); let failDup2 = true;
     hook(f2, 'dup_recovery_gieogieo', 'set', (d, id, ...a) => (failDup2 ? Promise.reject(new Error('Firestore lỗi')) : d.set(...a)));
     hook(f2, 'stock_containers_gieogieo', 'x', () => {});
@@ -122,11 +124,11 @@ const line2 = () => ({ prepId: 'P', prepName: 'Cốt trà lài', unit: 'g', acti
     f2.fake.db.ref = p => { const r0 = origRef(p); const wrap = r1 => ({ ...r1, transaction: (...a) => (failRt ? Promise.reject(new Error('RT lỗi')) : r1.transaction(...a)), child: id => wrap(r1.child(id)) }); return wrap(r0); };
     const r2 = await f2.UE.consume.compensateDuplicate('prep', 'P', [{ containerId: 'b1', qty: 50 }], 'tx26b');
     failDup2 = false; failRt = false;
-    eq([r2.ok, rtv(f2, 'b1/unitBase'), JSON.parse(store.ue_dup_recovery_gieogieo || '[]').length], [false, 100, 1], 'L26 hoàn lỗi + ghi việc lỗi → còn 1 việc trong hàng đợi cục bộ (không mất dấu)');
+    eq([r2.ok, rtv(f2, 'b1/unitBase'), dupKeys().length], [false, 100, 1], 'L26 hoàn lỗi + ghi việc lỗi → còn 1 việc trong hàng đợi cục bộ (không mất dấu)');
     const UE3 = initUE(f2.fake);                                                                       // phiên mới (như mở lại app) — đọc hàng đợi từ localStorage
     T += 70000;
     await UE3.consume.recoverDuplicates();
-    eq([rtv(f2, 'b1/unitBase'), Object.values(f2.fake.FS).filter(v => v && v.txId === 'tx26b').map(v => v.status), (JSON.parse(store.ue_dup_recovery_gieogieo || '[]')).length], [150, ['done'], 0], 'L26 phiên mới phục hồi từ hàng đợi cục bộ: RT 150, việc ghi lên Firestore và đóng, hàng đợi trống');
+    eq([rtv(f2, 'b1/unitBase'), Object.values(f2.fake.FS).filter(v => v && v.txId === 'tx26b').map(v => v.status), dupKeys().length], [150, ['done'], 0], 'L26 phiên mới phục hồi từ hàng đợi cục bộ: RT 150, việc ghi lên Firestore và đóng, hàng đợi trống');
     delete global.localStorage;
   }
   // ── Lỗi 28: lô cuối đã đóng, ghi sổ lỗi → mở lại ghi nốt từ task.attempt (engine + POS) ──

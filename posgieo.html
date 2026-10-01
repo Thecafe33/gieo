@@ -212,7 +212,7 @@ Nút "Cập nhật" ở sidebar (`manualCheckUpdate`, dựa trên service worker
 <script src="https://cdn.jsdelivr.net/npm/bcryptjs@2.4.3/dist/bcrypt.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
 <!-- [E1] Unit Engine — nạp TRƯỚC script chính. Đổi phiên bản = đổi tên file (6.1). -->
-<script src="unit_engine.v9.js"></script>
+<script src="unit_engine.v10.js"></script>
 
 <style>
 :root{--gd:#E23A5D;--gm:#C22B49;--gl:#FDE6EA;--bg:#FFFCF0;--gt:#999;--td:#111;--bb:#E7ECFB;--bi:#1D3F91;
@@ -17823,7 +17823,7 @@ function prepCountWeighBatch(i, batchId, bi) {
       // Cân lúc đang bán (xác minh): sổ của lô TẠI MỐC đọc số cân (lấy mốc TRƯỚC khi đọc sổ; engine cộng lại phần bán sau mốc) — số cân và sổ cùng một mốc.
       if (_prepVerifyMode) {
         const atMs = UnitEngine.clock.now();
-        try { (l.snaps = l.snaps || {})[batchId] = { book: await UnitEngine.duty.lotBookAt(l.prepId, batchId, atMs), at: new Date(atMs).toISOString() }; }
+        try { { const bk = await UnitEngine.duty.lotBookAtExact(l.prepId, batchId, atMs); (l.snaps = l.snaps || {})[batchId] = { book: bk.book, exact: bk.exact !== false, at: new Date(atMs).toISOString() }; } }
         catch (err) { console.warn('[duty] không chụp được sổ lô lúc cân', err); }
       }
       l.batchWeighings[batchId] = lines;
@@ -17852,7 +17852,7 @@ async function prepCountToggleBatchDone(i, batchId) {
   }
   if (_prepVerifyMode && willDone) {
     const atMs = UnitEngine.clock.now();
-    try { (l.snaps = l.snaps || {})[batchId] = { book: await UnitEngine.duty.lotBookAt(l.prepId, batchId, atMs), at: new Date(atMs).toISOString() }; } catch (err) { console.warn('[duty] không chụp được sổ lô', err); }
+    try { { const bk = await UnitEngine.duty.lotBookAtExact(l.prepId, batchId, atMs); (l.snaps = l.snaps || {})[batchId] = { book: bk.book, exact: bk.exact !== false, at: new Date(atMs).toISOString() }; } } catch (err) { console.warn('[duty] không chụp được sổ lô', err); }
   }
   l.batchDone[batchId] = willDone;
   l.batchWeighings[batchId] = [];   // đánh dấu hết/bỏ dấu đều làm số cân cũ vô nghĩa

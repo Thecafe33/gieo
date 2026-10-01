@@ -134,7 +134,7 @@ const hook = (f, coll, method, fn) => { const orig = f.fake.fstore.collection.bi
     const order = []; let clock = 1000;
     const l = { prepId: 'P', prepName: 'X', unit: 'g', activeBatches: [{ id: 'b1', batchCode: 'L1' }], batchQty: {}, batchDone: {}, batchWeighings: {} };
     const fn = new Function('l', 'order', 'clockRef', 'let _prepCountState=[l]; let _prepVerifyMode={task:{}}; const _prepCountRefreshLineCounted=()=>{}; const renderPrepCountCard=()=>{}; const console={warn(){}};\n' +
-      'const UnitEngine={clock:{now:()=>clockRef.v},duty:{lotBookAt:async(p,b,at)=>{ order.push(["lotBookAt",at]); clockRef.v+=500; return 90; }}};\n' +
+      'const UnitEngine={clock:{now:()=>clockRef.v},duty:{lotBookAtExact:async(p,b,at)=>{ order.push(["lotBookAt",at]); clockRef.v+=500; return {book:90,exact:true}; }}};\n' +
       'const openWeighPad=o=>{ clockRef.v=2000; order.push("scale"); return o.onDone(100,[{w:100}]); };\n' + src + '\nprepCountWeighBatch(0,"b1",0); return new Promise(r=>setTimeout(()=>r(l),10));');
     const clockRef = { v: 1000 }; const lr = await fn(l, order, clockRef);
     eq([order, lr.snaps.b1.book, lr.snaps.b1.at], [['scale', ['lotBookAt', 2000]], 90, new Date(2000).toISOString()], 'L21 POS: mốc đọc số cân lấy TRƯỚC khi đọc sổ, truyền cho lotBookAt (không dùng giờ sau khi đọc)');
