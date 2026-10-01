@@ -2213,7 +2213,7 @@ html.tab-ui:not(.nav-off) .sidebar{background:#F2F2F7;border-right:1px solid rgb
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-storage-compat.js"></script>
 <!-- [E3] Unit Engine — dùng CHUNG file với POS, nạp TRƯỚC script chính. Đổi phiên bản = đổi tên file (6.1). -->
 <script src="che_do_thu.v1.js?b=96d7f20f91"></script>
-<script src="unit_engine.v3.js?b=8d6c18bc8f"></script>
+<script src="unit_engine.v4.js?b=036f7095cb"></script>
 <script>
 // [BẢN THỬ] Thiếu che_do_thu → DỪNG trước khi khởi tạo Firebase (không đọc/ghi được gì).
 if (!window.GieoThu) { document.body.insertAdjacentHTML('afterbegin', '<div style="position:fixed;inset:0;z-index:2147483647;background:#b91c1c;color:#fff;font:700 18px/1.5 sans-serif;padding:30px">⛔ BẢN THỬ không tải được ' + "che_do_thu.v1.js" + ' — đã dừng, không ghi gì. Tải lại trang.</div>'); throw new Error('Bản thử: thiếu che_do_thu'); }
@@ -9718,6 +9718,129 @@ let btpAmFrom = null, btpAmTo = null;
 // substitutes = [{kind:'prep'|'item', id, ratio}]; cấu hình cũ {prepId, ratio} đọc như kind 'prep'.
 function btpSubNorm(x){ return { kind: x.kind==='item' ? 'item' : 'prep', id: x.id || x.prepId, ratio: Number(x.ratio)>0 ? Number(x.ratio) : 1 }; }
 let btpAmExtraNL = [];   // NL dùng thẳng được thêm vào bảng cấu hình trong phiên này (chưa có substitutes)
+// ════════ [TRÁCH NHIỆM THEO CA] Màn "Vụ lệch & trách nhiệm" ════════
+// Hệ thống tự quy trách nhiệm (UnitEngine.duty); chủ chỉ cần xử lý vụ tranh chấp / bị phản đối, hoặc đổi khi nhân viên nhập sai.
+// Kế hoạch: docs/KE_HOACH_TRACH_NHIEM_CA.md.
+const DUTY_BASIS_LABEL = { nhap_sai_da_xac_minh:'nhập sai số (đã xác minh)', chia_theo_so_ban:'có mặt lúc bán', nguoi_nau_me:'nấu mẻ', chu_quyet_dinh:'quản lý quyết định' };
+const DUTY_POOL_LABEL = { recipe:'Lỗi định mức/công thức', unknown:'Chưa xác định được', unverified:'Chờ xác minh (lệch cực đoan)', dispute:'Chờ quản lý quyết', waived:'Quản lý miễn' };
+const DUTY_POOL_WHY = { khong_co_moc_dem_truoc:'chưa có mốc đếm trước', khong_co_luot_ban_trong_khoang:'không có lượt bán trong khoảng', khong_xac_dinh_duoc_ca_cua_so_ban:'không xác định được ca của phần lớn lượt bán',
+  ban_khong_ro_gio_hoac_ca:'có lượt bán không rõ giờ/ca', lech_cuc_doan_chua_xac_minh:'lệch quá lớn, chưa ai cân lại để xác minh', dinh_muc_lech_nen:'lệch nền nhiều ngày ở mọi người', hai_lan_can_lech_nhau_nhieu:'hai lần cân lệch nhau, chưa rõ ai đúng',
+  chu_xac_nhan_dinh_muc:'chủ xác nhận là lỗi định mức', chu_mien:'chủ miễn', chu_chua_quy_het:'chủ chưa quy hết', khong_xac_minh_duoc_48h:'không ai xác minh trong 48 giờ', bi_dem_lai_truoc_khi_xac_minh:'bị đếm lại trước khi xác minh' };
+const DUTY_STATUS_LABEL = { auto:['Tự động chốt','green'], manual:['Quản lý đã quyết','blue'], contested:['Bị phản đối','amber'], dispute:['Tranh chấp — cần quyết','red'], pending_verify:['Chờ người khác cân lại','amber'], closed_pool:['Đã đóng — chưa quy','amber'], no_checkpoint:['Chưa có mốc trước','amber'] };
+const DUTY_CONF_LABEL = { strong:'Mạnh', medium:'Vừa', weak:'Yếu' };
+let dutyFrom = '', dutyTo = '', dutyFilter = 'todo', dutyList = [], dutyEmployees = [];
+function dutyQtyHTML(q, unit){ return (q>0?'+':q<0?'−':'') + fmtNum(Math.abs(q),1) + ' ' + escapeHtmlAttr(unit||''); }
+async function renderKhoDuty(){
+  const box = document.getElementById('khoBody');
+  const homNay = dkey(new Date());
+  if(!dutyFrom) dutyFrom = _thLuiNgay(homNay, 14);
+  if(!dutyTo) dutyTo = homNay;
+  box.innerHTML = '<div class="muted">Đang tải...</div>';
+  try{
+    const [list, emps] = await Promise.all([UnitEngine.duty.listCases(dutyFrom, dutyTo), loadEmployees().catch(()=>[])]);
+    dutyList = list; dutyEmployees = emps.filter(e=>e.active!==false);
+  }catch(err){ box.innerHTML = '<div class="card"><div class="muted">Không tải được vụ lệch: '+escapeHtmlAttr(err.code||err.message||String(err))+'</div></div>'; return; }
+  const need = c => c.status==='dispute' || c.status==='contested';
+  const shown = dutyFilter==='todo' ? dutyList.filter(need) : dutyList;
+  const sumP = (pred)=> dutyList.reduce((s,c)=> s + (c.pool||[]).filter(pred).reduce((t,p)=>t+Math.abs(Number(p.value)||0),0), 0);
+  const personVal = dutyList.reduce((s,c)=> s + (c.allocations||[]).reduce((t,a)=>t+Math.abs(Number(a.value)||0),0), 0);
+  box.innerHTML = `
+    <div class="card">
+      <div class="card-h"><h3>Vụ lệch &amp; trách nhiệm</h3></div>
+      <div class="small-note" style="margin-bottom:10px">Hệ thống tự quy trách nhiệm theo ca và tự chốt. Bạn chỉ cần xử lý vụ <b>tranh chấp</b> hoặc <b>bị phản đối</b>, hoặc đổi khi nhân viên nhập sai. Phần không đủ cơ sở được để "chưa quy", không đổ cho ai.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <input type="date" value="${dutyFrom}" onchange="dutyFrom=this.value; renderKhoDuty()"> → <input type="date" value="${dutyTo}" onchange="dutyTo=this.value; renderKhoDuty()">
+        <button class="btn ${dutyFilter==='todo'?'':'outline'} sm" style="width:auto" onclick="dutyFilter='todo'; renderKhoDuty()">Cần xử lý (${dutyList.filter(need).length})</button>
+        <button class="btn ${dutyFilter==='all'?'':'outline'} sm" style="width:auto" onclick="dutyFilter='all'; renderKhoDuty()">Tất cả (${dutyList.length})</button>
+      </div>
+      <div class="row" style="margin-top:10px"><span class="rl">Đã quy cho người</span><span class="rv">${fmt(personVal)}</span></div>
+      <div class="row"><span class="rl">Lỗi định mức/công thức (không ai chịu)</span><span class="rv">${fmt(sumP(p=>p.kind==='recipe'))}</span></div>
+      <div class="row"><span class="rl">Chưa quy được (thiếu cơ sở)</span><span class="rv">${fmt(sumP(p=>p.kind==='unknown'||p.kind==='unverified'))}</span></div>
+      <div class="row"><span class="rl">Chờ quản lý quyết</span><span class="rv" style="${sumP(p=>p.kind==='dispute')?'color:var(--bad)':''}">${fmt(sumP(p=>p.kind==='dispute'))}</span></div>
+    </div>
+    ${shown.length ? shown.map(c=>dutyCardHTML(c)).join('') : '<div class="card"><div class="empty-hint">'+(dutyFilter==='todo'?'Không có vụ nào cần bạn xử lý.':'Chưa có vụ lệch trong khoảng này.')+'</div></div>'}`;
+}
+function dutyCardHTML(c){
+  const st = DUTY_STATUS_LABEL[c.status] || [c.status,'amber'];
+  const at = c.createdAt ? qlFmtDT(c.createdAt) : (c.businessDate||'');
+  const allocs = (c.allocations||[]).map(a=>`<div class="row"><span class="rl"><b>${escapeHtmlAttr(a.employeeName||a.employeeId||'?')}</b> · ${fmtNum((a.share||0)*100,0)}% · ${escapeHtmlAttr((a.basis||[]).map(b=>DUTY_BASIS_LABEL[b]||b).join(', '))} <span class="tier tier-${a.confidence==='strong'?'green':'blue'}" style="margin-left:4px">${DUTY_CONF_LABEL[a.confidence]||''}</span></span><span class="rv">${dutyQtyHTML(a.qty,c.unit)} · ${fmt(a.value)}</span></div>`).join('');
+  const pools = (c.pool||[]).map(p=>`<div class="row"><span class="rl">${escapeHtmlAttr(DUTY_POOL_LABEL[p.kind]||p.kind)} <span class="small-note">(${escapeHtmlAttr(DUTY_POOL_WHY[p.reason]||p.reason||'')})</span></span><span class="rv">${dutyQtyHTML(p.qty,c.unit)} · ${fmt(p.value)}</span></div>`).join('');
+  const v = c.verification;
+  const evid = [
+    c.interval && c.interval.from ? `Khoảng đo ${escapeHtmlAttr(qlFmtDT(c.interval.from))} → ${escapeHtmlAttr(qlFmtDT(c.interval.to))}` : 'Chưa có mốc đếm trước',
+    `${c.usageEvents||0} lượt bán theo sổ (${fmtNum(c.usageTotal||0,0)} ${escapeHtmlAttr(c.unit||'')})`,
+    c.countedBy && c.countedBy.name ? `đếm: ${escapeHtmlAttr(c.countedBy.name)}` : '',
+    c.recount ? 'đã cân lại 1 lần, vẫn như cũ' : '',
+    v ? `${escapeHtmlAttr(v.by||'')} cân lại: ${fmtNum(v.bCount,1)} so với sổ lúc đó ${fmtNum(v.bBook,1)}${v.clean===false?' (khoảng giữa không sạch)':''}` : '',
+    (c.notes||[]).includes('du_phong_khong_ai_khai_pha_che') ? 'ca không ai tích "Pha chế" → chia cho mọi người trong ca' : ''
+  ].filter(Boolean).join(' · ');
+  const hist = (c.history||[]).filter(h=>h.type==='reassign'||h.type==='contest'||h.type==='keep').map(h=>`${escapeHtmlAttr(qlFmtDT(h.at))}: ${h.type==='contest'?'phản đối':h.type==='keep'?'giữ nguyên':'chia lại'} (${escapeHtmlAttr(h.by||'')}) ${escapeHtmlAttr(h.reason||'')}`).join('<br>');
+  const ctst = c.contest ? `<div class="alert" style="margin:8px 0"><div>${escapeHtmlAttr(c.contest.by||'')} phản đối: <i>${escapeHtmlAttr(c.contest.reason||'')}</i></div></div>` : '';
+  return `<div class="card" style="border:1px solid ${c.status==='dispute'||c.status==='contested'?'#E2A9A9':'#AACDE4'}">
+    <div class="card-h"><h3>${escapeHtmlAttr(c.prepName||'')}</h3><span class="tier tier-${st[1]}">${st[0]}</span></div>
+    <div class="small-note">${escapeHtmlAttr(at)} · lệch <b>${dutyQtyHTML(c.variance,c.unit)}</b> (${fmt(c.value)}) · độ tin cậy ${DUTY_CONF_LABEL[c.confidence]||'—'}${c.entryErrorConfirmed?' · <b style="color:var(--bad)">đã xác minh nhập sai số</b>':''}</div>
+    ${ctst}${allocs}${pools}
+    <div class="small-note" style="margin-top:6px">${evid}</div>
+    ${hist?`<div class="small-note" style="margin-top:4px">${hist}</div>`:''}
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+      <button class="btn sm" style="width:auto" onclick="dutyOpenReassign('${c.id}')">Chia lại</button>
+      <button class="btn outline sm" style="width:auto" onclick="dutyMark('${c.id}','recipe')">Là lỗi định mức</button>
+      <button class="btn outline sm" style="width:auto" onclick="dutyMark('${c.id}','waived')">Miễn</button>
+      ${c.status==='contested'?`<button class="btn outline sm" style="width:auto" onclick="dutyKeepCase('${c.id}')">Giữ nguyên</button>`:''}
+      <button class="btn outline sm" style="width:auto" onclick="dutyResetBaseline('${c.prepId}')">Đã chỉnh định mức — đặt lại nền</button>
+    </div>
+  </div>`;
+}
+function dutyOpenReassign(caseId){
+  const c = dutyList.find(x=>x.id===caseId); if(!c) return;
+  const cur = {}; (c.allocations||[]).forEach(a=>{ cur[a.employeeId||a.employeeName] = Math.round((a.share||0)*100); });
+  const rows = dutyEmployees.map(e=>`<div class="field" style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+    <label style="flex:1;margin:0">${escapeHtmlAttr(e.fullName||'')} <span class="small-note">${escapeHtmlAttr(nvRolesLabel(e))}</span></label>
+    <input type="number" min="0" max="100" step="1" id="dutyShare_${e.id}" value="${cur[e.id]||0}" style="width:80px"> %</div>`).join('');
+  openEditSheet('Chia lại — ' + (c.prepName||''), `
+    <div class="small-note" style="margin-bottom:10px">Lệch ${dutyQtyHTML(c.variance,c.unit)} (${fmt(c.value)}). Chọn một hoặc nhiều người và tỉ lệ (tổng tối đa 100%). Phần không chia hết sẽ để "chưa quy".</div>
+    ${rows || '<div class="muted">Chưa có nhân viên nào.</div>'}
+    <div class="field"><label>Lý do (bắt buộc)</label><textarea id="dutyReason" rows="2" placeholder="VD: cả hai cùng thao tác mẻ này"></textarea></div>
+    <button class="btn" onclick="dutyReassignSubmit('${c.id}')">Lưu</button>`);
+}
+async function dutyReassignSubmit(caseId){
+  const shares = dutyEmployees.map(e=>({ employeeId:e.id, employeeName:e.fullName||'', share:(Number((document.getElementById('dutyShare_'+e.id)||{}).value)||0)/100 })).filter(x=>x.share>0);
+  const reason = ((document.getElementById('dutyReason')||{}).value||'').trim();
+  if(!shares.length){ toast('⚠️ Chọn ít nhất một người'); return; }
+  if(shares.reduce((s,x)=>s+x.share,0) > 1.0001){ toast('⚠️ Tổng tỉ lệ vượt 100%'); return; }
+  if(!reason){ toast('⚠️ Nhập lý do'); return; }
+  try{
+    await UnitEngine.duty.reassign(caseId, { kind:'manual', shares, reason, by:{ name:'Quản lý' } });
+    logAudit('update','duty_case',caseId,{kind:'reassign',shares,reason});
+    closeEditSheet(true); toast('✅ Đã chia lại'); renderKhoDuty();
+  }catch(err){ toast('❌ ' + (err.message||err)); }
+}
+function dutyMark(caseId, kind){
+  const c = dutyList.find(x=>x.id===caseId); if(!c) return;
+  const label = kind==='recipe' ? 'Xác nhận đây là lỗi định mức/công thức (không ai chịu)' : 'Miễn trách nhiệm vụ này';
+  openEditSheet(label, `<div class="small-note" style="margin-bottom:10px">${escapeHtmlAttr(c.prepName||'')} · lệch ${dutyQtyHTML(c.variance,c.unit)} (${fmt(c.value)})</div>
+    <div class="field"><label>Lý do (bắt buộc)</label><textarea id="dutyReason" rows="2"></textarea></div>
+    <button class="btn" onclick="dutyMarkSubmit('${caseId}','${kind}')">Xác nhận</button>`);
+}
+async function dutyMarkSubmit(caseId, kind){
+  const reason = ((document.getElementById('dutyReason')||{}).value||'').trim();
+  if(!reason){ toast('⚠️ Nhập lý do'); return; }
+  try{
+    await UnitEngine.duty.reassign(caseId, { kind, reason, by:{ name:'Quản lý' } });
+    logAudit('update','duty_case',caseId,{kind,reason});
+    closeEditSheet(true); toast('✅ Đã ghi nhận'); renderKhoDuty();
+  }catch(err){ toast('❌ ' + (err.message||err)); }
+}
+async function dutyKeepCase(caseId){
+  try{ await UnitEngine.duty.keep(caseId, { by:{ name:'Quản lý' }, reason:'giữ nguyên sau khi xem phản đối' }); toast('✅ Đã giữ nguyên'); renderKhoDuty(); }
+  catch(err){ toast('❌ ' + (err.message||err)); }
+}
+async function dutyResetBaseline(prepId){
+  if(!confirm('Bạn đã chỉnh định mức cho bán thành phẩm này? Hệ thống sẽ bỏ các khoảng đo cũ khi tính lệch nền, bắt đầu lại từ bây giờ.')) return;
+  try{ await UnitEngine.duty.resetBaseline(prepId, 'Quản lý'); toast('✅ Đã đặt lại nền'); }
+  catch(err){ toast('❌ ' + (err.message||err)); }
+}
+
 async function renderKhoBtpAm(){
   const box = document.getElementById('khoBody');
   const homNay = dkey(new Date());
@@ -11165,6 +11288,7 @@ const NAV_SECTIONS = [
   // không phải cấu hình đặt-một-lần — chúng là việc ĐỌC SỐ: đối chiếu, dự báo,
   // trích xuất. Gom lại một chỗ để nhánh Kho còn đúng phần vận hành hàng hoá.
   { group:'Phân tích & dữ liệu', items:[
+    {key:'kho:duty',          ic:'detective', label:'Vụ lệch & trách nhiệm', go:"goKho('duty')",     sub:'Ai chịu, vì sao'},
     {key:'kho:lechkho',       ic:'detective', label:'Lệch kho & định lượng', go:"goKho('lechkho')",  sub:'Sau mỗi lần kiểm kê'},
     {key:'kho:dubao',         ic:'chart',     label:'Dự báo & số mẻ',        go:"goKho('dubao')",    sub:'Trước khi nấu'},
     {key:'entry:ngaydacbiet', ic:'calendar',  label:'Ngày đặc biệt',         go:"goEntry('ngaydacbiet')", sub:'Khai trước ngày lễ'},
@@ -12088,6 +12212,7 @@ async function computeStoreHealth(){
     const nTienGiaoCa = docs.filter(a=>a.type==='handover_cash_variance').length;
     const nPrepCount = docs.filter(a=>a.type==='prep_count_variance').length;
     const nYield = docs.filter(a=>a.type==='prep_yield_mismatch').length;
+    const nDuty = docs.filter(a=>a.type==='duty_case').length;
     const missing = docs.filter(a=>a.type==='missing_recipe');
     // Lệch TIỀN khi bàn giao đứng trên cùng: đây là loại chỉ đích danh được ca nào
     // gây ra, và để lâu thì không ai còn nhớ nổi hôm đó có chuyện gì.
@@ -12104,12 +12229,14 @@ async function computeStoreHealth(){
     // Sai yield không làm mất hàng nhưng làm SAI GIÁ VỐN mọi ly bán ra — để vàng
     // vì không cần xử lý gấp trong ngày, nhưng để lâu thì báo cáo lãi lỗ sai theo.
     if(nYield) push('yellow', 'Yield khai lệch số cân thật — giá vốn đang sai', nYield, `switchScreen('inbox')`);
+    // Vụ lệch cần xem trách nhiệm: lệch rất lớn, nhập sai đã xác minh, tranh chấp, nhân viên phản đối.
+    if(nDuty) push('red', 'Vụ lệch cần xem trách nhiệm', nDuty, `goKho('duty')`);
     if(missing.length){
       // Bán ra mà không trừ kho — càng để lâu, tồn kho càng lệch xa thực tế.
       const luot = missing.reduce((s,a)=>s+(Number(a.hitCount)||1),0);
       push('red', `Bán ra chưa trừ được kho — món/topping thiếu định mức/GOGS (${luot} lượt bán)`, missing.length, `switchScreen('inbox')`);
     }
-    const khac = docs.length - nGiaoCa - nTienGiaoCa - nPrepCount - nYield - missing.length;
+    const khac = docs.length - nGiaoCa - nTienGiaoCa - nPrepCount - nYield - nDuty - missing.length;
     if(khac>0) push('yellow', 'Cảnh báo khác chưa xem', khac, `switchScreen('inbox')`);
   } else { console.warn('storeHealth: alerts lỗi', alertsRes.reason); push('red','Cảnh báo — không kiểm tra được','!',`switchScreen('inbox')`,true); }
 
@@ -12768,6 +12895,17 @@ async function renderAlertInbox(){
           <button onclick="cashViewDate='${a.businessDate}'; goEntry('cash')">Xem đoạn ca</button>
           <button onclick="markAlertStatus('${a.id}','resolved')">Đã xử lý</button>
         </div>` : ''}
+      </div>`;
+    }
+    if(a.type==='duty_case'){
+      return `<div class="alert-card ${isNew?'':'resolved'}">
+        <div class="ac-title">${escapeHtmlAttr(a.title||'Vụ lệch cần xem')} ${isNew?'':'<span class="tier tier-green" style="margin-left:4px">Đã xử lý</span>'}</div>
+        <div class="ac-row">Ngày: ${a.businessDate||'—'} · <b>${escapeHtmlAttr(a.itemName||'')}</b> · lệch <b>${dutyQtyHTML(Number(a.variance)||0,a.unit)}</b> (${fmt(a.value)})</div>
+        ${(a.allocations||[]).map(x=>`<div class="ac-row">${escapeHtmlAttr(x.employeeName||'')}: ${dutyQtyHTML(x.qty,a.unit)} (${fmtNum((x.share||0)*100,0)}%)</div>`).join('')}
+        <div class="ac-actions">
+          <button onclick="goKho('duty')">Mở vụ lệch</button>
+          ${isNew?`<button onclick="markAlertStatus('${a.id}','seen')">Đã xem</button>`:''}
+        </div>
       </div>`;
     }
     const varTxt = a.varianceQty>0 ? `+${fmtNum(a.varianceQty,1)}` : fmtNum(a.varianceQty,1);
@@ -17641,7 +17779,7 @@ let thangKetAdjust = {};      // employeeId -> {thuong:[{amount,reason}], phat:[
 // thiếu tồn lúc cân, và dùng vượt định mức là ba loại KHÁC NHAU: phần dùng
 // thêm đã nằm trong giá vốn, không được tính thêm lần nữa vào hao hụt P&L.
 // Chỉ nối nhân viên bằng PIN/id; bản ghi cũ chỉ có tên nằm ở nhóm chưa xác định.
-function thangKetTrachNhiemNL(txs, items, costOf, prepWasteTxs){
+function thangKetTrachNhiemNL(txs, items, costOf, prepWasteTxs, dutyCases){
   const itemById=Object.fromEntries((items||[]).map(x=>[x.id,x]));
   const events=[];
   for(const t of txs||[]){
@@ -17690,12 +17828,15 @@ function thangKetTrachNhiemNL(txs, items, costOf, prepWasteTxs){
         correctedBy:t.entryErrorCorrectedBy||'',at:t.entryErrorAt||''}:null,
       previousWeighers:Array.isArray(t.previousWeighers)?t.previousWeighers:[]});
   }
+  // Lệch đếm BTP đã có hồ sơ vụ lệch (quy theo ca) thì KHÔNG tính lại theo "người đếm" — tránh tính hai lần.
+  const caseKeys=new Set((dutyCases||[]).map(c=>(c.prepId||'')+'|'+((c.interval&&c.interval.to)||'')));
   // Hao hụt BÁN THÀNH PHẨM (prep_transactions) — giá trị đã lưu sẵn ở totalCost.
   for(const t of prepWasteTxs||[]){
     const ptype=String(t.type||'').toUpperCase();
     // Chênh lệch đếm BTP cuối ca: mọi lệch đều ghi (kể cả nhỏ), thiếu và thừa tách riêng.
     if(ptype==='ADJUSTMENT'){
       if(!t.fromPrepCount||t.reversal===true)continue;
+      if(caseKeys.has((t.prepId||'')+'|'+(t.createdAt||'')))continue;
       const q=Number(t.qty)||0;
       let tc=Math.abs(Number(t.totalCost)||0);
       if(Number(t.substitutionQty)>0&&q<0)tc=Math.max(0,tc-Number(t.substitutionQty)*(Number(t.costPerUnit)||0));
@@ -17726,13 +17867,27 @@ function thangKetTrachNhiemNL(txs, items, costOf, prepWasteTxs){
       varianceAllocations:[],unitAllocations:[],fromCheckpoint:null,toCheckpoint:null,
       containerCode:'',resolutionStatus:r.status||''});
   }
+  // Hồ sơ vụ lệch (quy theo ca): mỗi phần quy cho một người là một sự kiện, kèm độ tin cậy; phần không ai chịu tính riêng.
+  const dutyPool={recipe:{value:0,count:0},unknown:{value:0,count:0},unverified:{value:0,count:0},dispute:{value:0,count:0},waived:{value:0,count:0}};
+  for(const c of dutyCases||[]){
+    for(const a of c.allocations||[]){
+      const q=Number(a.qty)||0; if(!q)continue;
+      events.push({id:c.id||'',date:c.businessDate||'',at:c.createdAt||'',referenceId:c.id||'',itemId:c.prepId||'',itemName:c.prepName||'BTP',unit:c.unit||'',
+        category:q<0?'dutyShort':'dutySurplus',qty:Math.abs(q),value:Math.abs(Number(a.value)||0),employeeId:a.employeeId||'',employeeName:a.employeeName||'Chưa rõ người',
+        role:'quy theo ca · độ tin cậy '+(a.confidence==='strong'?'Mạnh':a.confidence==='medium'?'Vừa':'Yếu'),
+        reason:(a.basis||[]).join(', '),reportedByName:'',needsReview:false,reviewedAt:'',expectedQty:0,varianceKind:'',codeIntervals:[],varianceAllocations:[],unitAllocations:[],
+        fromCheckpoint:null,toCheckpoint:null,containerCode:'',resolutionStatus:c.status||'',confidence:a.confidence||'',
+        entryError:c.entryErrorConfirmed?{qty:Number(c.entryErrorQty)||0,foundIn:c.id||'',correctedBy:(c.verification&&c.verification.by)||'',at:(c.verification&&c.verification.at)||''}:null,previousWeighers:[]});
+    }
+    for(const p of c.pool||[]){ const k=dutyPool[p.kind]||dutyPool.unknown; k.value+=Math.abs(Number(p.value)||0); k.count++; }
+  }
   events.sort((a,b)=>String(b.at).localeCompare(String(a.at)));
   const byEmployee={};
   for(const event of events){
     const key=event.employeeId||'__unassigned';
     const group=byEmployee[key]||(byEmployee[key]={employeeId:event.employeeId,
       employeeName:event.employeeName,events:[],prepWaste:0,reportedWaste:0,
-      shortage:0,extraUse:0,prepCountShort:0,prepCountSurplus:0,otherCount:0});
+      shortage:0,extraUse:0,prepCountShort:0,prepCountSurplus:0,dutyShort:0,dutySurplus:0,dutyStrongShort:0,otherCount:0});
     group.events.push(event);
     if(event.category==='prepWaste')group.prepWaste+=event.value;
     else if(event.category==='reportedWaste')group.reportedWaste+=event.value;
@@ -17740,10 +17895,12 @@ function thangKetTrachNhiemNL(txs, items, costOf, prepWasteTxs){
     else if(event.category==='extraUse')group.extraUse+=event.value;
     else if(event.category==='prepCountShort')group.prepCountShort+=event.value;
     else if(event.category==='prepCountSurplus')group.prepCountSurplus+=event.value;
+    else if(event.category==='dutyShort'){ group.dutyShort+=event.value; if(event.confidence==='strong')group.dutyStrongShort+=event.value; }
+    else if(event.category==='dutySurplus')group.dutySurplus+=event.value;
     else group.otherCount++;
   }
-  return {events,byEmployee,groups:Object.values(byEmployee).sort((a,b)=>
-    (b.prepWaste+b.reportedWaste+b.shortage+b.extraUse+b.prepCountShort)-(a.prepWaste+a.reportedWaste+a.shortage+a.extraUse+a.prepCountShort))};
+  return {events,byEmployee,dutyPool,groups:Object.values(byEmployee).sort((a,b)=>
+    (b.prepWaste+b.reportedWaste+b.shortage+b.extraUse+b.prepCountShort+b.dutyShort)-(a.prepWaste+a.reportedWaste+a.shortage+a.extraUse+a.prepCountShort+a.dutyShort))};
 }
 
 // Nguyên liệu KHÔNG có bất kỳ dòng sổ nào (bán/nấu/hao hụt/nhập/điều chỉnh) suốt cả
@@ -17786,8 +17943,10 @@ async function computeThangKetKhoExtra(startKey, endKey, items){
   // Chênh lệch đếm BTP cuối ca (ADJUSTMENT fromPrepCount): trước đây không vào báo cáo trách nhiệm.
   const prepAdjTxs = await _ledgerWasteRows('prep_transactions_gieogieo', startKey, endKey, 'ADJUSTMENT')
     .catch(err=>{ console.warn('[Tổng kết tháng] chênh đếm BTP lỗi', err); return []; });
+  const dutyCases = await UnitEngine.duty.listCases(startKey, endKey)
+    .catch(err=>{ console.warn('[Tổng kết tháng] vụ lệch lỗi', err); return []; });
   return { nhapList, tongNhap, tonLau,
-    responsibility:thangKetTrachNhiemNL(allTransactions,items,itemCostOn,prepWasteTxs.concat(prepAdjTxs)) };
+    responsibility:thangKetTrachNhiemNL(allTransactions,items,itemCostOn,prepWasteTxs.concat(prepAdjTxs),dutyCases) };
 }
 
 // Số NGÀY thực sự có mặt (giờ công > 0) của mỗi nhân viên trong tháng — khác với
@@ -17993,6 +18152,8 @@ function thangKetEmployeeCardHTML(e, tongGioTeam){
     <div class="row"><span class="rl">Hao hụt NL có PIN ghi/chốt</span><span class="rv" style="${trachNhiem?.prepWaste||trachNhiem?.reportedWaste?'color:var(--bad)':''}">${fmt((trachNhiem?.prepWaste||0)+(trachNhiem?.reportedWaste||0))}</span></div>
     <div class="row"><span class="rl">Thiếu tồn cần giải trình</span><span class="rv">${fmt(trachNhiem?.shortage||0)}</span></div>
     <div class="row"><span class="rl">Chênh đếm BTP cuối ca · thiếu / thừa</span><span class="rv">${fmt(trachNhiem?.prepCountShort||0)} / ${fmt(trachNhiem?.prepCountSurplus||0)}</span></div>
+    ${trachNhiem && (trachNhiem.dutyShort||trachNhiem.dutySurplus) ? `<div class="row"><span class="rl">Quy theo ca (BTP) · thiếu / thừa</span><span class="rv">${fmt(trachNhiem.dutyShort)} / ${fmt(trachNhiem.dutySurplus)}</span></div>
+    <div class="row"><span class="rl">— trong đó độ tin cậy <b>Mạnh</b> (căn cứ đề xuất thưởng/phạt)</span><span class="rv">${fmt(trachNhiem.dutyStrongShort)}</span></div>` : ''}
     <div class="row"><span class="rl">Dùng vượt định mức · đã vào giá vốn</span><span class="rv">${fmt(trachNhiem?.extraUse||0)}</span></div>
     ${trachNhiem?.events.length?`<button class="btn outline sm" style="width:auto;color:#0062AD;border-color:#0062AD" onclick="thangKetOpenResponsibilitySheet(${trachNhiemIndex})">Xem ${trachNhiem.events.length} lượt theo mã</button>`:''}
     ${thangKetCashVarHTML(e)}
@@ -18020,6 +18181,9 @@ function thangKetResponsibilityHTML(){
       <div class="row"><span class="rl">Hao hụt NL đã ghi sổ</span><span class="rv" style="color:var(--bad)">${fmt(sum('prepWaste')+sum('reportedWaste'))}</span></div>
       <div class="row"><span class="rl">Thiếu tồn cần giải trình</span><span class="rv">${fmt(sum('shortage'))}</span></div>
       <div class="row"><span class="rl">Chênh đếm BTP cuối ca · thiếu / thừa</span><span class="rv">${fmt(sum('prepCountShort'))} / ${fmt(sum('prepCountSurplus'))}</span></div>
+      <div class="row"><span class="rl">Quy theo ca (BTP) · thiếu / thừa</span><span class="rv">${fmt(sum('dutyShort'))} / ${fmt(sum('dutySurplus'))}</span></div>
+      ${(()=>{ const dp=thangKetData?.khoExtra?.responsibility?.dutyPool||{}; const v=k=>(dp[k]&&dp[k].value)||0;
+        return `<div class="row"><span class="rl">Không tính vào ai — lỗi định mức / chưa quy / chờ quản lý quyết</span><span class="rv">${fmt(v('recipe'))} / ${fmt(v('unknown')+v('unverified'))} / ${fmt(v('dispute'))}</span></div>`; })()}
       <div class="row"><span class="rl">Dùng vượt định mức · đã vào giá vốn</span><span class="rv">${fmt(sum('extraUse'))}</span></div>
       ${all.some(e=>e.entryError)?`<div class="row"><span class="rl" style="color:var(--bad)">Đã xác minh nhập sai số liệu (người cân vẫn chịu trách nhiệm)</span><span class="rv" style="color:var(--bad)">${all.filter(e=>e.entryError).length} lượt</span></div>`:''}
       ${all.some(e=>e.needsReview)?`<div class="row"><span class="rl" style="color:var(--warn)">Chờ quản lý duyệt</span><span class="rv" style="color:var(--warn)">${all.filter(e=>e.needsReview).length} lượt</span></div>`:''}
@@ -18027,7 +18191,7 @@ function thangKetResponsibilityHTML(){
     </div>
     ${groups.map((g,i)=>`<button class="card" onclick="thangKetOpenResponsibilitySheet(${i})" style="width:100%;text-align:left;border:1px solid #AACDE4;cursor:pointer;font:inherit;color:inherit">
       <div style="font-weight:800">${escapeHtmlAttr(g.employeeName)} ${!g.employeeId?'<span class="tier tier-amber">Chưa có PIN/ID</span>':''}</div>
-      <div class="small-note">${g.events.length} lượt · hao hụt ${fmt(g.prepWaste+g.reportedWaste)} · thiếu tồn ${fmt(g.shortage)} · dùng thêm ${fmt(g.extraUse)} · đếm BTP thiếu ${fmt(g.prepCountShort)} / thừa ${fmt(g.prepCountSurplus)}${g.otherCount?' · lệch mã/định mức '+g.otherCount+' lượt':''}</div>
+      <div class="small-note">${g.events.length} lượt · hao hụt ${fmt(g.prepWaste+g.reportedWaste)} · thiếu tồn ${fmt(g.shortage)} · dùng thêm ${fmt(g.extraUse)} · đếm BTP thiếu ${fmt(g.prepCountShort)} / thừa ${fmt(g.prepCountSurplus)} · quy theo ca ${fmt(g.dutyShort)} / ${fmt(g.dutySurplus)}${g.otherCount?' · lệch mã/định mức '+g.otherCount+' lượt':''}</div>
     </button>`).join('')||'<div class="card"><div class="empty-hint">Tháng này chưa có sự kiện đối chiếu NL hoặc hao hụt gắn nhân viên.</div></div>'}
     ${all.length?'<div class="small-note">Chạm vào một nhân viên để xem từng mã và mốc cân.</div>':''}`;
 }
@@ -18062,6 +18226,7 @@ function thangKetOpenResponsibilitySheet(index){
   const labels={prepWaste:'Hao hụt lúc nấu',reportedWaste:'Hao hụt đã khai',
     shortage:'Thiếu tồn cần giải trình',surplus:'Thừa tồn khi cân',
     prepCountShort:'Thiếu khi đếm BTP cuối ca',prepCountSurplus:'Thừa khi đếm BTP cuối ca',
+    dutyShort:'Quy theo ca — thiếu',dutySurplus:'Quy theo ca — thừa',
     extraUse:'Dùng vượt định mức',underUse:'Dùng ít hơn định mức',lotShift:'Lấy lệch theo mã'};
   const checkpoint=c=>c?`${escapeHtmlAttr(qlFmtDT(c.at))} · ${escapeHtmlAttr(c.employeeName||'—')}`:'chưa có mốc';
   const cards=g.events.map(e=>{
@@ -18320,7 +18485,9 @@ const EXPORT_RANGE_COLLS = [
   // lúc báo hết, và có quá hạn sau khi mở hay không.
   'stock_containers_gieogieo',
   // [Trích xuất v2] Sổ lệch: mọi khoản trừ/chỉnh không gắn được vào mã/lô nào — nơi lệch BTP/NL thường lộ ra.
-  'stock_anomalies_gieogieo'
+  'stock_anomalies_gieogieo',
+  // [Trích xuất v3] Hồ sơ vụ lệch: ai chịu, vì sao, cơ sở, độ tin cậy (quy trách nhiệm theo ca).
+  'duty_cases_gieogieo'
 ];
 // Nhỏ hoặc không chắc có businessDate → lấy hết rồi lọc trong JS.
 const EXPORT_SMALL_COLLS = ['alerts_gieogieo', 'handover_records_gieogieo', 'receiving_records_gieogieo', 'purchase_orders_gieogieo'];
@@ -18690,7 +18857,8 @@ async function buildExportPayload(mode){
       alerts_gieogieo: rangeData['alerts_gieogieo'],
       receiving_records_gieogieo: rangeData['receiving_records_gieogieo'],
       daily_openings_gieogieo: rangeData['daily_openings_gieogieo'],
-      stock_anomalies_gieogieo: rangeData['stock_anomalies_gieogieo']
+      stock_anomalies_gieogieo: rangeData['stock_anomalies_gieogieo'],
+      duty_cases_gieogieo: rangeData['duty_cases_gieogieo']
     }
   };
   // Bỏ mục RỖNG/chết (dễ làm người đọc tưởng "không có dữ liệu" khi thật ra mục đó không còn nguồn) — ghi rõ ở _mucBoQua.
@@ -18704,6 +18872,7 @@ async function buildExportPayload(mode){
   payload._mucBoQua = boQua;
   payload.huong_dan_phan_tich.khoi_moi_v2 = {
     btp_theo_ngay: 'Chuỗi BTP từng ngày: demHomTruoc + nauThem − dungTheoBill = soCuoiNgay; so với demCuoiNgay. tongKet[] có trung vị lệch, số ngày âm/dương, ngày nghi nhập sai. canhBao[] gắn sẵn cờ.',
+    vu_lech: 'Hồ sơ vụ lệch ở duLieuTheoNgay.duty_cases_gieogieo: variance (âm=thiếu), allocations[] (người, %, cơ sở, độ tin cậy), pool[] (phần không ai chịu: recipe/unknown/unverified/dispute/waived), verification (người cân lại), status.',
     ca_lam_viec: 'Ai vào/ra ca lúc nào, kèm chức năng (pha chế/order) chụp lúc check-in; chucNang=null là ca ghi trước khi có chức năng. Dùng để biết ai có mặt trong khoảng giữa hai lần đếm. btp_theo_ngay có nguoiDem/demLuc cho từng lần đếm cuối ca.',
     nl_dem_giao_ca: 'Số đếm NL theo mã/vị trí lúc giao ca & đóng ngày (thay cho phiếu kiểm kê đã duyệt).',
     dong_doi_chieu_nl: 'Các dòng sổ của luồng cân đối chiếu NL khi nấu: mẻ nào, ai cân, lệch loại gì; bán trong lúc NL khoá cân; sổ ghi thiếu + người cân mốc trước; đã xác minh nhập sai.',
@@ -19566,6 +19735,7 @@ async function renderEntryKho(){
   else if(curKhoSub==='lechkho') renderKhoLech();
   else if(curKhoSub==='solech') renderKhoSoLech();
   else if(curKhoSub==='btpam') renderKhoBtpAm();
+  else if(curKhoSub==='duty') renderKhoDuty();
   else if(curKhoSub==='dubao') renderKhoDuBao();
   else if(curKhoSub==='wastereasons') renderKhoWasteReasons();
   else if(curKhoSub==='checklist') renderKhoChecklist();
