@@ -152,3 +152,14 @@ Test: `tests/phan_bien_v11.test.js` (`ENGINE=unit_engine.v10.js` để xem lỗi
 41. Hạn dấu 3 ngày ngắn hơn việc chờ → dấu bền 90 ngày; việc chờ >60 ngày chuyển đối soát tay.
 42. `exact:true` dựa usageEvents → bất biến `chgBase + Σd`.
 Giới hạn còn lại: (a) ghi node RT và ghi việc hoàn tác/dấu bền là hai bước (RTDB/Firestore không chung transaction) — máy chết đúng giữa hai bước thì không có dấu; (b) đóng dấu lại khi đọc ngay sau cân tin rằng khoảng đọc ≤10 s không có biến động chưa ghi nhật ký; (c) node ghi đè bằng `set` trực tiếp (dựng mới) bắt đầu theo dõi lại từ đầu.
+
+---
+## K. Đợt sửa theo bản rà bug lần 7 (engine v12) — lỗi 43–48
+Test: `tests/phan_bien_v12.test.js` (`ENGINE=unit_engine.v11.js` để xem lỗi cũ; v12 đạt hết).
+43. Đóng dấu lại xoá nhật ký hợp lệ → kiểm tra lại trong transaction.
+44. Worker hoàn tác lượt đã chốt → kiểm `verification.op` trên hồ sơ vụ lệch.
+45. Đọc dấu hoàn bền lỗi vẫn hoàn → ambiguous, giữ việc.
+46. Hoàn tác chỉ sửa RT → đồng bộ lô, tồn, thiếu chờ đối chiếu.
+47. Xoá bill dở rồi bổ sung topping → cờ `deletionPending` chặn bổ sung (đổi hành vi: bill đang xoá dở không bổ sung được).
+48. Bất biến tổng không phát hiện hai thay đổi không nhật ký triệt tiêu nhau → cổng "đã xác nhận mọi máy cập nhật" do chủ bật; chưa bật thì không coi sổ tại mốc là chính xác.
+Giới hạn còn lại: máy chạy engine < v11 vẫn có thể đổi sổ không ghi nhật ký — cổng #48 dựa vào việc chủ xác nhận, không tự phát hiện được.

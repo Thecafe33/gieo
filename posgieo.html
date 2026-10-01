@@ -212,7 +212,7 @@ Nút "Cập nhật" ở sidebar (`manualCheckUpdate`, dựa trên service worker
 <script src="https://cdn.jsdelivr.net/npm/bcryptjs@2.4.3/dist/bcrypt.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
 <!-- [E1] Unit Engine — nạp TRƯỚC script chính. Đổi phiên bản = đổi tên file (6.1). -->
-<script src="unit_engine.v11.js"></script>
+<script src="unit_engine.v12.js"></script>
 
 <style>
 :root{--gd:#E23A5D;--gm:#C22B49;--gl:#FDE6EA;--bg:#FFFCF0;--gt:#999;--td:#111;--bb:#E7ECFB;--bi:#1D3F91;
@@ -24110,6 +24110,7 @@ function orderAddonInfo(o) {
   // một ngày đã chốt tự đổi. Chặn hẳn, hiếm gặp nên không đáng phải xử lý phức tạp hơn.
   if (o.date !== posDateKeyToDisplay(posDateKey())) return { ok: false, minsLeft: 0, why: 'Đơn thuộc ngày khác — không bổ sung được' };
   if (_deletingOrderIds.has(o.id)) return { ok: false, minsLeft: 0, why: 'Đơn đang được xoá' };
+  if (o.deletionPending) return { ok: false, minsLeft: 0, why: 'Đơn đang xoá dở (đã hoàn kho một phần) — bấm xoá lại để hoàn tất, không bổ sung được' };
   if (o.method === 'TÍNH RIÊNG') return { ok: false, minsLeft: 0, why: 'Đơn Tính riêng chưa hỗ trợ bổ sung' };
   return { ok: true, minsLeft, why: '' };
 }
@@ -24867,6 +24868,10 @@ async function delOrderConfirm() {
   const month = MONTH_KEYS[monthIdx];
   const day = dd;
   const rtPath = 'orders_gieogieo/' + month + '/' + day + '/' + delId;
+  // [v12] Khoá sửa BỀN dùng chung giữa các máy: từ lúc bắt đầu hoàn kho, bill không được bổ sung thêm (claim/dòng hoàn cố định theo bill nên phần tiêu thụ thêm sau đó
+  // sẽ bị bỏ qua ở lần xoá lại). Cờ nằm trên chính node bill trong RT; bill bị xoá xong thì cờ biến mất cùng bill.
+  o.deletionPending = true;
+  try { await db.ref(rtPath + '/deletionPending').set(true); } catch (flagErr) { console.warn('[xoá bill] không ghi được cờ xoá dở', flagErr); }
 
   // [BUG "xoá bill không await reverse" — FIX] Trước đây gọi reverseSalesConsumptionPOS()
   // KHÔNG await rồi xoá bill khỏi RTDB gần như ngay lập tức — nếu hoàn kho lỗi (một phần hay

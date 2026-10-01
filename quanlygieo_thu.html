@@ -2213,7 +2213,7 @@ html.tab-ui:not(.nav-off) .sidebar{background:#F2F2F7;border-right:1px solid rgb
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-storage-compat.js"></script>
 <!-- [E3] Unit Engine — dùng CHUNG file với POS, nạp TRƯỚC script chính. Đổi phiên bản = đổi tên file (6.1). -->
 <script src="che_do_thu.v1.js?b=96d7f20f91"></script>
-<script src="unit_engine.v11.js?b=3677ec9343"></script>
+<script src="unit_engine.v12.js?b=fa0f584cae"></script>
 <script>
 // [BẢN THỬ] Thiếu che_do_thu → DỪNG trước khi khởi tạo Firebase (không đọc/ghi được gì).
 if (!window.GieoThu) { document.body.insertAdjacentHTML('afterbegin', '<div style="position:fixed;inset:0;z-index:2147483647;background:#b91c1c;color:#fff;font:700 18px/1.5 sans-serif;padding:30px">⛔ BẢN THỬ không tải được ' + "che_do_thu.v1.js" + ' — đã dừng, không ghi gì. Tải lại trang.</div>'); throw new Error('Bản thử: thiếu che_do_thu'); }
@@ -9835,14 +9835,20 @@ async function renderKhoDuty(){
   if(!dutyTo) dutyTo = homNay;
   box.innerHTML = dutyTabsHTML()+'<div class="muted">Đang tải...</div>';
   try{
-    const [list, emps] = await Promise.all([UnitEngine.duty.listCases(dutyFrom, dutyTo), loadEmployees().catch(()=>[])]);
-    dutyList = list; dutyEmployees = emps.filter(e=>e.active!==false);
+    const [list, emps, fleet] = await Promise.all([UnitEngine.duty.listCases(dutyFrom, dutyTo), loadEmployees().catch(()=>[]), UnitEngine.duty.fleetCompliant().catch(()=>false)]);
+    dutyList = list; dutyEmployees = emps.filter(e=>e.active!==false); dutyFleet = !!fleet;
   }catch(err){ box.innerHTML = dutyTabsHTML()+'<div class="card"><div class="muted">Không tải được vụ lệch: '+escapeHtmlAttr(err.code||err.message||String(err))+'</div></div>'; return; }
   const need = c => c.status==='dispute' || c.status==='contested';
   const shown = dutyFilter==='todo' ? dutyList.filter(need) : dutyList;
   const sumP = (pred)=> dutyList.reduce((s,c)=> s + (c.pool||[]).filter(pred).reduce((t,p)=>t+Math.abs(Number(p.value)||0),0), 0);
   const personVal = dutyList.reduce((s,c)=> s + (c.allocations||[]).reduce((t,a)=>t+Math.abs(Number(a.value)||0),0), 0);
   box.innerHTML = dutyTabsHTML()+`
+    <div class="card">
+      <div class="card-h"><h3>Cân lại BTP — kiểm tra phiên bản</h3></div>
+      <div class="small-note" style="margin-bottom:8px">Để hệ thống chốt chính xác số cân lại, <b>mọi máy POS/Quản lý phải đã mở bản mới</b> (đóng hẳn app rồi mở lại). Xác nhận khi đã chắc — chưa xác nhận thì việc "Cân lại" sẽ báo không đủ dữ liệu để chốt.</div>
+      <div class="row"><span class="rl">Trạng thái</span><span class="rv" style="${dutyFleet?'color:var(--ok,green)':'color:var(--bad)'}">${dutyFleet?'Đã xác nhận':'Chưa xác nhận'}</span></div>
+      <button class="btn ${dutyFleet?'outline':''} sm" style="width:auto;margin-top:8px" onclick="dutyToggleFleet(${dutyFleet?'false':'true'})">${dutyFleet?'Bỏ xác nhận (có máy cũ)':'Xác nhận mọi máy đã cập nhật'}</button>
+    </div>
     <div class="card">
       <div class="card-h"><h3>Vụ lệch &amp; trách nhiệm</h3></div>
       <div class="small-note" style="margin-bottom:10px">Hệ thống tự quy trách nhiệm theo ca và tự chốt. Bạn chỉ cần xử lý vụ <b>tranh chấp</b> hoặc <b>bị phản đối</b>, hoặc đổi khi nhân viên nhập sai. Phần không đủ cơ sở được để "chưa quy", không đổ cho ai.</div>
@@ -9932,6 +9938,12 @@ async function dutyMarkSubmit(caseId, kind){
 async function dutyKeepCase(caseId){
   try{ await UnitEngine.duty.keep(caseId, { by:{ name:'Quản lý' }, reason:'giữ nguyên sau khi xem phản đối' }); toast('✅ Đã giữ nguyên'); renderKhoDuty(); }
   catch(err){ toast('❌ ' + (err.message||err)); }
+}
+let dutyFleet = false;
+async function dutyToggleFleet(flag){
+  try{ await UnitEngine.duty.setFleetCompliant(flag, 'Quản lý'); toast(flag?'✅ Đã xác nhận mọi máy đã cập nhật':'Đã bỏ xác nhận'); }
+  catch(err){ toast('❌ '+(err.message||err)); }
+  renderKhoDuty();
 }
 async function dutyResetBaseline(prepId){
   if(!confirm('Bạn đã chỉnh định mức cho bán thành phẩm này? Hệ thống sẽ bỏ các khoảng đo cũ khi tính lệch nền, bắt đầu lại từ bây giờ.')) return;

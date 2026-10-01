@@ -294,3 +294,10 @@ Chưa làm: nguyên liệu (NL) — đối chiếu NL khi nấu đã có `respon
 - **`lotBookAtExact`** chứng minh "không có biến động" bằng bất biến `unitBase == chgBase + Σ chg.d` (`chgBase` cuốn theo khi cắt nhật ký), không dùng `usageEvents`. Đọc ≤ `DUTY.BOOK_FRESH_MS` (10 s) sau lúc cân mà bất biến vỡ/chưa theo dõi/bị cắt → đóng dấu lại (chgBase = số hiện tại) và coi là chính xác (số hiện tại chính là số tại mốc) — tự chữa vòng "cân lại mãi". Lô không có node RT → exact:true (không thể bị bán trừ; chỉnh tay đều dựng node). Lỗi đọc thì ném lỗi.
 - **Dấu hoàn bền** `rev_marks_gieogieo/{itemId}/{khoá}` (giữ 90 ngày, ngoài vòng đời tem/lô) bổ sung cho `revOps` trong node: node bị gỡ/đóng không làm mất dấu. `recoverDuplicates` chuyển việc chờ quá 60 ngày sang `needs_manual` + cảnh báo thay vì tự hoàn.
 - Snapshot `core`/`wrap`: thêm dòng log transaction `rev_marks_gieogieo` và các trường metadata.
+
+## Sửa theo bản rà bug lần 7 (v12, 01/10/2026) — test `tests/phan_bien_v12.test.js` (`ENGINE=unit_engine.v11.js` để xem lỗi cũ)
+- **Đóng dấu lại (`lotBookAtExact`)** kiểm tra lại NGAY TRONG transaction: nếu máy khác vừa ghi nhật ký hợp lệ thì không xoá, dùng lịch sử đó.
+- **`duty.fleetCompliant()/setFleetCompliant(flag, by)`** (`duty_config_gieogieo/current.fleetCompliant`, Quản lý có nút ở màn Vụ lệch): bất biến tổng không chứng minh được lịch sử khi còn máy cũ (hai thay đổi không ghi nhật ký triệt tiêu nhau). Chưa xác nhận → `exact:false` (`chua_xac_nhan_moi_may_da_cap_nhat`) → "Cân lại" bị từ chối cho tới khi chủ xác nhận mọi máy đã cập nhật.
+- **Hoàn tác xác minh**: worker không hoàn tác lượt đã chốt — hồ sơ vụ lệch mang `verification.op = opId` (ghi cùng transaction đóng việc); rào mới hơn chưa đủ. Sau hoàn tác đồng bộ bản sao Firestore của lô, tồn tổng và thiếu chờ đối chiếu từ RT; lỗi đồng bộ → việc còn pending.
+- **Dấu hoàn bền**: không đọc được `rev_marks_gieogieo` → `ambiguous` (không hoàn; claim được nhả; việc phục hồi còn pending).
+- **POS xoá bill**: đặt cờ `deletionPending` trên node bill (RT) TRƯỚC khi hoàn kho; `orderAddonInfo` từ chối bổ sung bill đang xoá dở (claim/dòng hoàn cố định theo bill nên phần tiêu thụ thêm sẽ bị bỏ qua).
