@@ -213,7 +213,7 @@ Nút "Cập nhật" ở sidebar (`manualCheckUpdate`, dựa trên service worker
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
 <!-- [E1] Unit Engine — nạp TRƯỚC script chính. Đổi phiên bản = đổi tên file (6.1). -->
 <script src="che_do_thu.v1.js?b=96d7f20f91"></script>
-<script src="unit_engine.v5.js?b=eb83cbcd93"></script>
+<script src="unit_engine.v6.js?b=fb10673890"></script>
 
 <style>
 :root{--gd:#E23A5D;--gm:#C22B49;--gl:#FDE6EA;--bg:#FFFCF0;--gt:#999;--td:#111;--bb:#E7ECFB;--bi:#1D3F91;
@@ -17662,7 +17662,9 @@ let _prepCountCardIdx = 0;
 // [SỬA] Bỏ hẳn nhánh "1 lô dùng UI gọn khác" — giờ MỌI dòng đều perBatch:true, xử
 // lý đồng nhất 1 lô hay nhiều lô như nhau (đơn giản hơn, và khớp đúng thiết kế mới:
 // mỗi lô luôn là 1 khối "Mã lô + 2 nút", 1 lô thì khối đó chỉ lặp đúng 1 lần).
-function renderPrepCountScreen(lines) {
+// verifyTask: có → màn dùng để CÂN LẠI xác minh; không có → đếm cuối ca (luôn xoá chế độ xác minh cũ, kể cả khi người dùng thoát màn bằng menu).
+function renderPrepCountScreen(lines, verifyTask) {
+  _prepVerifyMode = verifyTask ? { task: verifyTask } : null;
   _prepCountState = lines.map(l => {
     const batchQty = {}, batchDone = {}, batchWeighings = {};
     l.activeBatches.forEach(b => { batchQty[b.id] = null; batchDone[b.id] = false; batchWeighings[b.id] = []; });
@@ -17769,7 +17771,14 @@ function renderPrepCountCard() {
 function prepCountGoBack() {
   if (_prepCountCardIdx > 0) { _prepCountCardIdx--; renderPrepCountCard(); }
 }
+// Bấm hai lần khi mạng chậm: lượt hai bị bỏ (khoá), và sau khi chờ cổng cân lại phải kiểm tra thẻ hiện tại chưa đổi — không nhảy qua BTP chưa cân.
+let _prepCountNextBusy = false;
 async function prepCountGoNext() {
+  if (_prepCountNextBusy) return;
+  _prepCountNextBusy = true;
+  try { await _prepCountGoNextImpl(); } finally { _prepCountNextBusy = false; }
+}
+async function _prepCountGoNextImpl() {
   const l = _prepCountState[_prepCountCardIdx];
   if (!l || l.counted === null) { toast('⚠️ Cân hoặc báo hết đủ các lô trước khi tiếp tục'); return; }
   if (_prepVerifyMode) { await submitPrepVerify(); return; }
@@ -17778,6 +17787,7 @@ async function prepCountGoNext() {
   if (!l.discardAll) {
     let g = null;
     try { g = await UnitEngine.duty.gateCheck(l); } catch (err) { console.warn('[duty] gateCheck lỗi — bỏ qua cổng', err); }
+    if (_prepCountState[_prepCountCardIdx] !== l) return;   // thẻ đã đổi trong lúc chờ mạng
     if (g) {
       if (!l.recountDone && g.needs) {
         l.attempt1 = l.counted; l.recountDone = true; l.suspect = false;
@@ -17976,17 +17986,19 @@ async function openPrepVerifyPOS(taskId) {
     toast('⚠️ Bán thành phẩm này không còn lô để cân — việc sẽ tự đóng');
     exitPrepVerifyPOS(); return;
   }
-  _prepVerifyMode = { task };
-  renderPrepCountScreen([line]);
+  renderPrepCountScreen([line], task);
 }
 function exitPrepVerifyPOS() {
   _prepVerifyMode = null; _prepCountState = [];
   renderShiftDashboard(); renderCheckinBlock();
 }
+// Khoá RIÊNG cho xác minh: KHÔNG dùng _posSubmitBusy (khoá chung của thanh toán/tạo bill) — cân lại chạy lúc quán đang bán, không được làm
+// thanh toán bị từ chối "Đang xử lý…".
+let _dutyVerifyBusy = false;
 async function submitPrepVerify() {
-  if (_posSubmitBusy) { toast('⏳ Đang xử lý, vui lòng đợi giây lát...'); return; }
-  _posSubmitBusy = true;
-  try { await _submitPrepVerifyImpl(); } finally { _posSubmitBusy = false; }
+  if (_dutyVerifyBusy) { toast('⏳ Đang ghi số cân lại, vui lòng đợi giây lát...'); return; }
+  _dutyVerifyBusy = true;
+  try { await _submitPrepVerifyImpl(); } finally { _dutyVerifyBusy = false; }
 }
 async function _submitPrepVerifyImpl() {
   const l = _prepCountState[0], task = _prepVerifyMode && _prepVerifyMode.task;
@@ -21447,6 +21459,7 @@ function filterType(type, btn) {
 // NAV
 // ============================================================
 function showScreen(id) {
+  if (id !== 'caLamViecScreen') _prepVerifyMode = null;   // đang cân lại xác minh mà rời màn bằng menu: không để chế độ này dính sang kết ca
   // Giao ca có thể tiếp tục khi ra màn bán; mở/kết ca rời màn thì tạm dừng nhãn.
   if(id !== 'caLamViecScreen' && _shiftWorkflowPOS && _shiftWorkflowPOS.phase !== 'handover') stopShiftWorkflowPOS();
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));

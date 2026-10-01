@@ -3,7 +3,7 @@
 const { extract } = require('./lib/extract');
 let ok = true;
 const eq = (a, b, m) => { if (JSON.stringify(a) !== JSON.stringify(b)) { ok = false; console.log('FAIL', m, JSON.stringify(a).slice(0, 500), '!=', JSON.stringify(b).slice(0, 500)); } else console.log('ok', m); };
-const names = ['_prepCountState', '_prepCountCardIdx', '_prepVerifyMode', 'UnitEngine', 'toast', 'renderPrepCountCard', 'submitPrepCount', '_prepCountRefreshLineCounted', 'submitPrepVerify',
+const names = ['_prepCountState', '_prepCountCardIdx', '_prepVerifyMode', '_prepCountNextBusy', 'UnitEngine', 'toast', 'renderPrepCountCard', 'submitPrepCount', '_prepCountRefreshLineCounted', 'submitPrepVerify',
   'resolveStaffPinAndCheckin', 'exitPrepVerifyPOS', '_posSubmitBusy', 'posDateKey', 'console'];
 const load = (g, fns) => { const src = extract('posgieo.html', fns); const f = new Function(...Object.keys(g), src + '\nreturn {' + fns.join(',') + '};'); return f(...Object.values(g)); };
 const mkLine = counted => { const l = { prepId: 'P', prepName: 'Cốt trà lài', sysQty: 864, activeBatches: [{ id: 'b1' }], batchQty: { b1: counted }, batchDone: { b1: false }, batchWeighings: { b1: [{ w: counted }] }, weighings: [], discardAll: false, counted }; return l; };
@@ -11,12 +11,12 @@ const mkLine = counted => { const l = { prepId: 'P', prepName: 'Cốt trà lài'
 (async () => {
   const toasts = []; let submitted = 0, rendered = 0, idx = 0;
   const mkEnv = (needsFn) => ({
-    _prepCountState: [], _prepCountCardIdx: 0, _prepVerifyMode: null,
+    _prepCountState: [], _prepCountCardIdx: 0, _prepVerifyMode: null, _prepCountNextBusy: false,
     UnitEngine: { duty: { gateCheck: async l => ({ needs: needsFn(l), variance: 1, usage: 1, book: 1 }) } },
     toast: m => toasts.push(m), renderPrepCountCard: () => { rendered++; }, submitPrepCount: async () => { submitted++; }, console: { warn() {}, log() {}, error() {} }
   });
   // load hàm thật
-  const fnsNeeded = ['prepCountGoNext', '_prepCountResetLine'];
+  const fnsNeeded = ['prepCountGoNext', '_prepCountGoNextImpl', '_prepCountResetLine'];
   const mkF = needs => {
     const env = mkEnv(needs); const l = mkLine(7463.6); env._prepCountState = [l];
     const refresh = ln => { const all = ln.activeBatches.every(b => ln.batchQty[b.id] !== null); ln.counted = all ? ln.activeBatches.reduce((s, b) => s + (Number(ln.batchQty[b.id]) || 0), 0) : null; };
@@ -78,6 +78,41 @@ const mkLine = counted => { const l = { prepId: 'P', prepName: 'Cốt trà lài'
     eq([calls.length, /khác/.test(toasts[0] || '')], [0, true], 'người cân lần trước không tự xác minh');
     await mk({ id: 'C', fullName: 'Chi' })();
     eq([calls[0][0] === l, calls[0][1].id, calls[0][2].staff.id, calls[0][2].businessDate, calls[1]], [true, 'verify_P', 'C', '2026-09-23', 'exit'], 'người khác → gọi engine với mốc sổ đã chụp rồi thoát màn');
+  }
+  // 8. bấm "Tiếp tục" hai lần khi mạng chậm → chỉ qua MỘT thẻ (không nhảy qua BTP chưa cân)
+  {
+    let release; const slow = new Promise(r => { release = r; }); const S = { idx: 0, cards: [mkLine(860), mkLine(500), mkLine(300)] }; let renders = 0;
+    const src = extract('posgieo.html', ['prepCountGoNext', '_prepCountGoNextImpl', '_prepCountResetLine']).replace(/_prepCountCardIdx/g, 'S.idx').replace(/_prepCountState/g, 'S.cards');
+    const fn = new Function('S', 'toast', 'renderPrepCountCard', 'submitPrepCount', 'submitPrepVerify', '_prepCountRefreshLineCounted', 'UnitEngine', 'console', 'let _prepCountNextBusy=false; let _prepVerifyMode=null;\n' + src + '\nreturn {prepCountGoNext};');
+    const F = fn(S, () => {}, () => { renders++; }, async () => {}, async () => {}, () => {}, { duty: { gateCheck: async () => { await slow; return { needs: false }; } } }, { warn() {} });
+    const a = F.prepCountGoNext(), b2 = F.prepCountGoNext();
+    release(); await Promise.all([a, b2]);
+    eq([S.idx, renders], [1, 1], 'bấm Tiếp tục hai lần khi chờ mạng → chỉ qua 1 thẻ, không nhảy qua thẻ chưa cân');
+    // thẻ bị đổi trong lúc chờ mạng (VD quay lại thẻ trước) → không tự đi tiếp
+    let release2; const slow2 = new Promise(r => { release2 = r; }); const S2 = { idx: 0, cards: [mkLine(860), mkLine(500)] }; renders = 0;
+    const src2 = extract('posgieo.html', ['prepCountGoNext', '_prepCountGoNextImpl', '_prepCountResetLine']).replace(/_prepCountCardIdx/g, 'S.idx').replace(/_prepCountState/g, 'S.cards');
+    const F2 = new Function('S', 'toast', 'renderPrepCountCard', 'submitPrepCount', 'submitPrepVerify', '_prepCountRefreshLineCounted', 'UnitEngine', 'console', 'let _prepCountNextBusy=false; let _prepVerifyMode=null;\n' + src2 + '\nreturn {prepCountGoNext};')(
+      S2, () => {}, () => { renders++; }, async () => {}, async () => {}, () => {}, { duty: { gateCheck: async () => { await slow2; return { needs: false }; } } }, { warn() {} });
+    const p2 = F2.prepCountGoNext(); S2.cards[0] = mkLine(861);   // thẻ hiện tại bị thay trong lúc chờ
+    release2(); await p2;
+    eq([S2.idx, renders], [0, 0], 'thẻ đổi trong lúc chờ cổng → không đi tiếp');
+  }
+  // 9. xác minh dùng khoá RIÊNG, không giữ khoá thanh toán
+  {
+    const busy = {}; const l = mkLine(834); const task = { id: 'verify_P', firstById: 'B' };
+    const src = extract('posgieo.html', ['submitPrepVerify', '_submitPrepVerifyImpl']);
+    const fn = new Function('busy', 'l', 'task', 'toast', 'resolveStaffPinAndCheckin', 'exitPrepVerifyPOS', 'posDateKey', 'console',
+      'let _posSubmitBusy=false; let _dutyVerifyBusy=false; const _prepCountState=[l]; const _prepVerifyMode={task};\n' +
+      'const UnitEngine={clock:{now:()=>1},duty:{verifyCommit:async()=>{busy.pos=_posSubmitBusy; busy.duty=_dutyVerifyBusy; return {};}}};\n' + src + '\nreturn {submitPrepVerify};');
+    await fn(busy, l, task, () => {}, async () => ({ id: 'C', fullName: 'Chi' }), () => {}, () => 'd', console).submitPrepVerify();
+    eq([busy.pos, busy.duty], [false, true], 'xác minh giữ khoá riêng (_dutyVerifyBusy), KHÔNG giữ _posSubmitBusy → thanh toán không bị chặn');
+  }
+  // 10. dựng màn đếm cuối ca luôn xoá chế độ xác minh cũ
+  {
+    const src = extract('posgieo.html', ['renderPrepCountScreen']);
+    const fn = new Function('lines', 'verifyTask', 'let _prepVerifyMode={task:{id:"cũ"}}; let _prepCountState=[]; let _prepCountCardIdx=0; const _prepCountApplyDiscardAll=()=>{}; const preloadVesselImagesPOS=()=>{}; const renderPrepCountCard=()=>{};\n' + src + '\nrenderPrepCountScreen(lines, verifyTask); return _prepVerifyMode;');
+    const L = [{ prepId: 'P', activeBatches: [{ id: 'b1' }] }];
+    eq([fn(L, undefined), fn(L, { id: 'T' })], [null, { task: { id: 'T' } }], 'dựng màn đếm cuối ca → bỏ chế độ xác minh dính từ trước; mở cân lại → đặt đúng việc');
   }
   console.log(ok ? 'ALL PASS' : 'SOME FAIL'); process.exit(ok ? 0 : 1);
 })().catch(e => { console.log('FAIL exception', e && e.stack); process.exit(1); });

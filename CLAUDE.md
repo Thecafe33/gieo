@@ -26,7 +26,7 @@
 - Nguyên tắc **tem = sự thật**: tồn NL = Σ tem sealed (Firestore) + Σ `unitBase` tem đang mở (RT `active_units_gieogieo/{itemId}/{containerId}`). Khoản không gắn được vào mã → Sổ lệch (`stock_anomalies_gieogieo`).
 - 15 bất biến B1–B15: mục 2.1 của kế hoạch. **Mọi thay đổi phải giữ nguyên.**
 - Chỗ POS và Quản lý lệch nhau → **theo POS**. Chỗ POS không có → danh sách F, chủ dự án duyệt.
-- **Engine là file riêng `unit_engine.v5.js`** (bản hiện hành; v1–v4 giữ để quay lui; dùng chung 2 app, API: `docs/UNIT_ENGINE.md`). App **không ghi thẳng** dữ liệu kho — gọi `UnitEngine.<nhóm>.<hàm>`; `tools/check_boundaries.js` chặn. Sửa engine đã deploy = tạo `unit_engine.v{N+1}.js` (bản cũ cache immutable), sửa cả 2 HTML trỏ tới.
+- **Engine là file riêng `unit_engine.v6.js`** (bản hiện hành; v1–v5 giữ để quay lui; dùng chung 2 app, API: `docs/UNIT_ENGINE.md`). App **không ghi thẳng** dữ liệu kho — gọi `UnitEngine.<nhóm>.<hàm>`; `tools/check_boundaries.js` chặn. Sửa engine đã deploy = tạo `unit_engine.v{N+1}.js` (bản cũ cache immutable), sửa cả 2 HTML trỏ tới.
 
 ## Kế hoạch & tiến độ
 - Kế hoạch đầy đủ: `docs/KE_HOACH_UNIT_ENGINE_DA_CUA_HANG.md` (đọc mục cần thiết, không cần đọc hết).

@@ -80,3 +80,15 @@ Test: `duty_pos`.
 14. **Không làm**: vòng xác minh cho NL; đo hiệu quả sau 2 tuần (B6); nút "sửa tồn" mới (dùng chức năng Kho sẵn có); `storeId` cho `employees` (đa cửa hàng).
 
 Bất biến cần soi lại sau mỗi sửa: tồn NL = Σ tem sealed + Σ `unitBase` tem đang mở (RT); BTP: `currentStock` = Σ `qtyRemaining` các lô; mọi lần ghi RT lô BTP phải đồng bộ Firestore (`_ueRecomputeCurrentStock`); không thêm đường ghi thẳng kho từ app.
+
+---
+## E. Đợt sửa theo bản rà bug của agent khác (engine v6) — đã kiểm chứng từng lỗi trước khi sửa
+Cả 7 lỗi đều tái hiện được ở v5 (`ENGINE=unit_engine.v5.js node tests/phan_bien_v6.test.js`). Lỗi 4 và 6 **có từ code gốc POS** (không phải từ các sửa phiên này) nhưng nằm trên đường bán/xoá bill nên được sửa hẹp.
+1. Xác minh chiếm `_posSubmitBusy` (khoá thanh toán) → dùng khoá riêng `_dutyVerifyBusy` (POS `submitPrepVerify`).
+2. `_prepVerifyMode` dính khi thoát màn bằng menu → `renderPrepCountScreen(lines, verifyTask)` luôn đặt/xoá chế độ theo lần dựng màn, `showScreen` xoá khi rời màn Ca làm việc; engine từ chối khi BTP không khớp việc.
+3. Xác minh lỗi giữa chừng rồi bấm lại trừ thêm; hai máy cùng xác minh → giành việc (transaction), RT có dấu thao tác.
+4. Xoá bill lúc NL khoá cân báo thành công dù tem chưa hoàn → `PREP_LOCKED` ném lên, nhả claim.
+5. Bán xen làm lô Firestore bị ghi đè số cũ → đồng bộ lô theo RT hiện hành, đọc lại sau khi ghi.
+6. `applyPrepConsumptionPOS` `return` trước bước suy tồn → suy tồn khi bán vượt tồn.
+7. Bấm "Tiếp tục" hai lần nhảy qua thẻ → khoá `_prepCountNextBusy` + kiểm tra thẻ còn là thẻ hiện tại sau khi chờ cổng.
+Phát hiện thêm khi sửa: dòng sổ `prep_verify_{task}` trùng id giữa hai việc cùng BTP (sửa trong lỗi 3). Snapshot `core` lập lại: chỉ khác thông báo lỗi khoá (`[PREP_LOCKED]`) và ca "bán BTP chưa có lô" nay có `pendingShortage` đúng.

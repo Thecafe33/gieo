@@ -1,4 +1,4 @@
-# Unit Engine — tài liệu API (`unit_engine.v5.js`, bản 5.0.0; v1–v4 giữ để quay lui)
+# Unit Engine — tài liệu API (`unit_engine.v6.js`, bản 6.0.0; v1–v5 giữ để quay lui)
 
 > Viết ở E5 (28/09/2026), cập nhật E6. Kế hoạch gốc: `docs/KE_HOACH_UNIT_ENGINE_DA_CUA_HANG.md`.
 > Bảng ghi của E0 (trước khi tách): `docs/BANG_GHI_ENGINE.md`.
@@ -249,3 +249,9 @@ Chưa làm: nguyên liệu (NL) — đối chiếu NL khi nấu đã có `respon
 - **Tóm tắt ngày:** `duty.digest(day)` đọc sổ NL/BTP, hồ sơ vụ lệch, Sổ lệch của ngày → từng NL/BTP: đi đâu (nhập, bán theo bill đã trừ hoàn, nấu mẻ, nấu ra, hao hụt khai, lệch cân/đếm, điều chỉnh, Sổ lệch), lệch bao nhiêu, ai chịu, phần không tính vào ai,
   trạng thái (`ok/da_quy/chua_quy/cho_quyet/cho_xac_minh`) và vài câu tóm tắt. `duty.writeDigest(day)` (POS gọi NỀN khi đóng ngày) chờ `flush()` rồi lưu `duty_digests_gieogieo/{ngày}` + thông báo `duty_digest`.
   Quản lý ▸ "Tóm tắt ngày & vụ lệch" hiện bản tóm tắt tính trực tiếp theo ngày chọn.
+
+## Sửa theo bản rà bug (v6, 01/10/2026) — test `tests/phan_bien_v6.test.js` (`ENGINE=unit_engine.v5.js` để xem lỗi cũ)
+- **Xác minh cân lại (`duty.verifyCommit`)**: giành việc bằng transaction (`status:'processing'` + `processingById/At`; người khác chỉ giành lại sau 2 phút), từ chối khi BTP đang cân không khớp `task.prepId`; RT của lô mang dấu `dutyVerifyOp` → làm lại sau lỗi giữa chừng KHÔNG trừ thêm phần "đã bán" giả;
+  Firestore của lô đồng bộ theo RT hiện hành (đọc lại, tối đa 3 vòng) nên bán xen không bị ghi đè; chỉ gỡ node RT khi về 0 (lô âm giữ nợ); dòng sổ `prep_verify_{task}_{firstAt}` không còn trùng id giữa hai việc của cùng BTP. `listOpenTasks/expireTasks` gồm cả `processing`.
+- **Hoàn kho khi NL đang khoá cân** (có từ trước, tái hiện ở v5): lỗi mang `code:'PREP_LOCKED'`, `_ueClaimedReverseAllocations` nhả claim, `_reverseIngredientConsumptionPOS` không nuốt → `reverseOrder` trả `ok:false` (bill được giữ, hoàn lại sau khi chốt mẻ). Trước đây ghi dòng hoàn "untracked" + Sổ lệch mà tem không được cộng.
+- **Bán BTP thiếu lô** (có từ trước): `applyPrepConsumptionPOS` suy tồn ngay khi bán vượt tồn (lô đi âm / không đủ lô / không có lô) để tồn không âm và `pendingShortage` hiện ngay; bán đủ lô không thêm lượt đọc.
