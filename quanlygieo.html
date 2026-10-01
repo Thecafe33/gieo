@@ -18259,7 +18259,9 @@ const EXPORT_RANGE_COLLS = [
   // [TIÊU HAO] Tem từng chai/gói — mã 8 ký tự POS tự sinh khi nhận hàng. Đây là
   // nguồn duy nhất biết được một chai mở lúc nào, hết lúc nào, còn thừa bao nhiêu
   // lúc báo hết, và có quá hạn sau khi mở hay không.
-  'stock_containers_gieogieo'
+  'stock_containers_gieogieo',
+  // [Trích xuất v2] Sổ lệch: mọi khoản trừ/chỉnh không gắn được vào mã/lô nào — nơi lệch BTP/NL thường lộ ra.
+  'stock_anomalies_gieogieo'
 ];
 // Nhỏ hoặc không chắc có businessDate → lấy hết rồi lọc trong JS.
 const EXPORT_SMALL_COLLS = ['alerts_gieogieo', 'handover_records_gieogieo', 'receiving_records_gieogieo', 'purchase_orders_gieogieo'];
@@ -18586,7 +18588,15 @@ async function buildExportPayload(mode){
     tenBanThanhPham: Object.fromEntries((cfg['prep_items_gieogieo']||[]).map(p=>[p.id, {ma:p.code, ten:p.name, donVi:p.unit, yieldMoiMe:Number(p.batchYield)||0, soNguyenLieuVao:(p.batchInputs||[]).length}]))
   };
 
+  // [Trích xuất v2] Khối dựng sẵn để truy lệch BTP / NL
+  const btp = _expSafe('btp theo ngày', async()=> _expBtpTheoNgay(dates, rangeData['daily_closings_gieogieo'], rangeData['prep_batches_gieogieo'],
+    rangeData['prep_transactions_gieogieo'], cfg['prep_items_gieogieo']), errors);
   const payload = {
+    _phienBan: _EXP_VERSION,
+    btp_theo_ngay: await btp,
+    nl_dem_giao_ca: _expDemNlGiaoCa(rangeData['daily_closings_gieogieo'], rangeData['daily_openings_gieogieo']),
+    dong_doi_chieu_nl: _expDongDoiChieu(rangeData['stock_transactions_gieogieo']),
+    so_lech_theo_ngay: _expTomTatSoLech(rangeData['stock_anomalies_gieogieo']),
     _mota: 'Trích xuất dữ liệu Gieo Gieo để đối chiếu định mức / chế biến / tồn kho. Mọi số lượng theo đơn vị pha chế đã khai ở inventory_items.',
     huong_dan_phan_tich: _expHuongDanPhanTich(),
     nguyen_tac_du_lieu: _expNguyenTacDuLieu(),
@@ -18618,10 +18628,146 @@ async function buildExportPayload(mode){
       shift_segments_gieogieo: rangeData['shift_segments_gieogieo'],
       daily_closings_gieogieo: rangeData['daily_closings_gieogieo'],
       alerts_gieogieo: rangeData['alerts_gieogieo'],
-      receiving_records_gieogieo: rangeData['receiving_records_gieogieo']
+      receiving_records_gieogieo: rangeData['receiving_records_gieogieo'],
+      daily_openings_gieogieo: rangeData['daily_openings_gieogieo'],
+      stock_anomalies_gieogieo: rangeData['stock_anomalies_gieogieo']
     }
   };
+  // Bỏ mục RỖNG/chết (dễ làm người đọc tưởng "không có dữ liệu" khi thật ra mục đó không còn nguồn) — ghi rõ ở _mucBoQua.
+  const boQua = [];
+  ['usage_tracking_start','du_bao_va_thuc_te'].forEach(k=>{ const v = payload[k]; if(v==null || (Array.isArray(v) && !v.length)){ delete payload[k]; boQua.push(k); } });
+  if(payload.do_phu_dinh_muc && !payload.do_phu_dinh_muc.soLyBanRa){ delete payload.do_phu_dinh_muc; boQua.push('do_phu_dinh_muc'); }
+  if(payload.tong_quan_lech && !payload.tong_quan_lech.soCoDuLieu){
+    payload.doi_chieu_dinh_muc_ghiChu = 'doi_chieu_dinh_muc KHÔNG có dữ liệu: mục này tính từ stock_counts (phiếu kiểm kê đã duyệt) mà quy trình hiện tại không còn tạo. Dùng nl_dem_giao_ca (số đếm giao ca) + khoTheoNgay thay thế.';
+    delete payload.doi_chieu_dinh_muc; boQua.push('doi_chieu_dinh_muc');
+  }
+  payload._mucBoQua = boQua;
+  payload.huong_dan_phan_tich.khoi_moi_v2 = {
+    btp_theo_ngay: 'Chuỗi BTP từng ngày: demHomTruoc + nauThem − dungTheoBill = soCuoiNgay; so với demCuoiNgay. tongKet[] có trung vị lệch, số ngày âm/dương, ngày nghi nhập sai. canhBao[] gắn sẵn cờ.',
+    nl_dem_giao_ca: 'Số đếm NL theo mã/vị trí lúc giao ca & đóng ngày (thay cho phiếu kiểm kê đã duyệt).',
+    dong_doi_chieu_nl: 'Các dòng sổ của luồng cân đối chiếu NL khi nấu: mẻ nào, ai cân, lệch loại gì; bán trong lúc NL khoá cân; sổ ghi thiếu + người cân mốc trước; đã xác minh nhập sai.',
+    so_lech_theo_ngay: 'Sổ lệch gộp theo ngày/loại; dòng gốc ở duLieuTheoNgay.stock_anomalies_gieogieo.',
+    luu_y: 'Lệch ĐỀU cùng chiều nhiều ngày → nghi định mức/cỡ mẻ khai sai. Lệch VỌT một ngày → nghi nhập sai số đếm/cân. usageEvents chỉ có từ usageEventsTuNgay.'
+  };
   return payload;
+}
+
+
+// ════════ [Trích xuất v2] Các khối dựng sẵn để truy lệch BTP / NL ════════
+const _EXP_VERSION = 2;
+function _expMedian(a){ const v=a.filter(x=>Number.isFinite(x)).sort((x,y)=>x-y); if(!v.length) return null; const m=v.length>>1; return v.length%2?v[m]:(v[m-1]+v[m])/2; }
+function _expR(n){ return Number.isFinite(n) ? Math.round(n*100)/100 : null; }
+function _expDayOf(iso){ const t=new Date(iso); return isNaN(t)?'':dkey(t); }
+
+// CHUỖI BTP THEO NGÀY — mỗi BTP mỗi ngày một dòng:
+//   đếm hôm trước + nấu thêm − dùng (bill) = sổ cuối → so với đếm cuối ngày.
+// `chenhChuoi` = sổ cuối − (đếm hôm trước + nấu − dùng): phần sổ ghi mà chuỗi không giải thích được
+//   (đổ hao/huỷ/điều chỉnh/hoàn bill… — xem `theoLoaiSoBTP`). `lech` = đếm − sổ do POS ghi lúc đếm.
+// Cờ canhBao: dem_vot_so_voi_so (lệch > 50% sổ và > 300) → nghi NHẬP SAI số đếm, không phải hao hụt.
+function _expBtpTheoNgay(dates, closings, batches, prepTxs, prepItems){
+  const nameOf = {}; (prepItems||[]).forEach(p=> nameOf[p.id] = { ten:p.name, ma:p.code, donVi:p.unit, mePhai:Number(p.batchYield)||0 });
+  const closeBy = {}; (closings||[]).forEach(c=> closeBy[c.businessDate||c.id] = c);
+  const per = {};   // prepId → ngày → cộng dồn
+  const acc = (pid, day)=>{ per[pid] = per[pid]||{}; return per[pid][day] = per[pid][day] || { nau:0, soMe:0, dung:0, bills:new Set(), theoLoaiSoBTP:{}, huyLo:0 }; };
+  let ngayDauCoEvent = null;
+  (batches||[]).forEach(b=>{
+    if(!b.prepId) return;
+    const q = Number(b.qtyInitial)||0;
+    if(q > 0){ const a = acc(b.prepId, (b.finishedAt ? _expDayOf(b.finishedAt) : '') || b.businessDate || _expDayOf(b.startedAt)); a.nau += q; a.soMe++; }
+    if(b.status==='cancelled' || b.status==='discarded'){ const a = acc(b.prepId, b.businessDate || _expDayOf(b.startedAt)); a.huyLo++; }
+    (b.usageEvents||[]).forEach(e=>{
+      if(e.type!=='consumed') return;
+      const day = _expDayOf(e.at); if(!day) return;
+      const a = acc(b.prepId, day); a.dung += Number(e.qty)||0; if(e.refId) a.bills.add(e.refId);
+      if(!ngayDauCoEvent || day < ngayDauCoEvent) ngayDauCoEvent = day;
+    });
+  });
+  (prepTxs||[]).forEach(t=>{
+    if(!t.prepId) return;
+    const day = t.businessDate || _expDayOf(t.createdAt); if(!day) return;
+    const a = acc(t.prepId, day);
+    const key = (t.reversal ? 'hoan_' : '') + String(t.type||'khac');
+    const o = a.theoLoaiSoBTP[key] = a.theoLoaiSoBTP[key] || { qty:0, soDong:0 };
+    o.qty = _expR(o.qty + (Number(t.qty)||0)); o.soDong++;
+  });
+  const ids = new Set([...Object.keys(per)]);
+  (closings||[]).forEach(c=> (c.prepCountLines||[]).forEach(l=>{ if(l.prepId) ids.add(l.prepId); }));
+  const rows = [], tongKet = {};
+  ids.forEach(pid=>{
+    const meta = nameOf[pid] || {};
+    let truoc = null;
+    const lechDs = [], nghi = [];
+    dates.forEach(day=>{
+      const l = ((closeBy[day]||{}).prepCountLines||[]).find(x=>x.prepId===pid);
+      const a = (per[pid]||{})[day];
+      if(!l && !a) return;
+      const sc = l ? Number(l.systemQty) : null, dem = l ? Number(l.countedQty) : null, lech = l ? Number(l.varianceQty) : null;
+      const nau = a ? _expR(a.nau) : 0, dung = a ? _expR(a.dung) : 0;
+      const row = { prepId:pid, ten:meta.ten||(l&&l.prepName)||pid, donVi:meta.donVi||(l&&l.unit)||'', ngay:day,
+        demHomTruoc:truoc, nauThem:nau, soMeNau:a?a.soMe:0, dungTheoBill:dung, soBillDung:a?a.bills.size:0,
+        theoLoaiSoBTP:a?a.theoLoaiSoBTP:{}, loHuy:a?a.huyLo:0,
+        soCuoiNgay:_expR(sc), demCuoiNgay:_expR(dem), lechKhiDem:_expR(lech), daBoKhiDem:l?_expR(Number(l.discardedQty)||0):null,
+        phuongPhapCan:l?(l.weighMethod||''):'' };
+      row.chenhChuoi = (truoc!=null && sc!=null && dung!=null) ? _expR(sc - (truoc + nau - dung)) : null;
+      row.lechPctSo = (sc && sc>50 && lech!=null) ? _expR(lech/sc*100) : null;
+      const canhBao = [];
+      if(lech!=null && Math.abs(lech) > 300 && sc!=null && Math.abs(lech) > 0.5*Math.max(Math.abs(sc),1)) canhBao.push('dem_vot_so_voi_so');
+      if(ngayDauCoEvent && day < ngayDauCoEvent) canhBao.push('chua_co_usageEvents_truoc_ngay_'+ngayDauCoEvent);
+      if(row.chenhChuoi!=null && Math.abs(row.chenhChuoi) > 100) canhBao.push('chuoi_khong_khop');
+      row.canhBao = canhBao;
+      if(lech!=null) lechDs.push(lech);
+      if(canhBao.includes('dem_vot_so_voi_so')) nghi.push({ ngay:day, lech:_expR(lech), dem:_expR(dem), so:_expR(sc) });
+      if(dem!=null) truoc = dem;
+      rows.push(row);
+    });
+    tongKet[pid] = { ten:meta.ten||pid, donVi:meta.donVi||'', soNgayCoDem:lechDs.length, trungViLech:_expR(_expMedian(lechDs)),
+      soNgayAm:lechDs.filter(x=>x<-1).length, soNgayDuong:lechDs.filter(x=>x>1).length, ngayNghiNhapSai:nghi };
+  });
+  rows.sort((a,b)=> String(a.ten).localeCompare(String(b.ten),'vi') || a.ngay.localeCompare(b.ngay));
+  return { usageEventsTuNgay:ngayDauCoEvent, ghiChu:'usageEvents (bill nào trừ BTP lô nào) chỉ có từ ngày usageEventsTuNgay; trước đó dungTheoBill=0 KHÔNG có nghĩa là không bán.', tongKet, theoNgay:rows };
+}
+
+// SỐ ĐẾM NL GIAO CA / ĐÓNG NGÀY — thay cho doi_chieu_dinh_muc (cũ, dựa vào stock_counts đã duyệt: quy trình mới không còn tạo phiếu đó).
+// Gom mọi mảng có {itemId, countedQty} trong phiếu mở/đóng ngày (handoverCloseLines, shiftInventoryCloseLines…).
+function _expDemNlGiaoCa(closings, openings){
+  const out = {};
+  const take = (doc, nguon)=>{
+    const day = doc.businessDate || doc.id;
+    Object.keys(doc).forEach(k=>{
+      const arr = doc[k];
+      if(!Array.isArray(arr) || !arr.length || !arr[0] || typeof arr[0]!=='object' || !('itemId' in arr[0]) || !('countedQty' in arr[0])) return;
+      arr.forEach(l=>{ (out[day] = out[day]||[]).push({ nguon:nguon+'.'+k, itemId:l.itemId, ten:l.itemName||'', donVi:l.unit||'',
+        viTri:l.locationId||'', dem:_expR(Number(l.countedQty)), soSo:_expR(Number(l.expectedQty ?? l.systemQty ?? NaN)),
+        lechGhiNhan:_expR(Number(l.lossQty ?? l.varianceQty ?? NaN)), trangThai:l.status||'', lyDo:l.reasons||null }); });
+    });
+  };
+  (closings||[]).forEach(c=> take(c,'daily_closings'));
+  (openings||[]).forEach(c=> take(c,'daily_openings'));
+  return out;
+}
+
+// DÒNG SỔ ĐỐI CHIẾU NL / BÁN TRONG LÚC KHOÁ CÂN / NHẬP SAI — gọn, để thấy ai cân, mẻ nào, lệch loại gì.
+function _expDongDoiChieu(txs){
+  return (txs||[]).filter(t=> t.prepRecon || t.prepReconVariance || t.prepReconSurplus || t.prepReconStage || t.prepWindowBatchId || t.entryErrorConfirmed)
+    .map(t=>({ id:t.id, ngay:t.businessDate||_expDayOf(t.createdAt), at:t.createdAt||'', itemId:t.itemId, loai:t.type, qty:Number(t.qty)||0,
+      meId:t.referenceId||'', nguoi:(t.responsibility&&t.responsibility.employeeName)||t.staff||'',
+      kieuLech:t.varianceKind||'', dinhMuc:t.expectedQty!=null?Number(t.expectedQty):null, canXemLai:!!t.needsReview,
+      banTrongLucKhoaChoMe:t.prepWindowBatchId||'', soBanGhiThieu:!!t.prepReconSurplus,
+      nhapSai:t.entryErrorConfirmed?{ qty:t.entryErrorQty, phatHienOMe:t.entryErrorFoundInBatch, nguoiSua:t.entryErrorCorrectedBy }:null,
+      mocTruoc:(t.previousWeighers||[]).map(w=>({ nguoi:w.employeeName, ma:w.code, me:w.batchId, luc:w.at })),
+      ghiChu:t.note||'' }));
+}
+// Sổ lệch gộp theo ngày + loại khoản
+function _expTomTatSoLech(rows){
+  const out = {};
+  (rows||[]).forEach(r=>{
+    const d = r.businessDate || _expDayOf(r.createdAt) || 'khong-ro';
+    const k = (r.kind||r.loai||'khac');
+    const o = ((out[d] = out[d]||{})[k] = (out[d][k] || { soDong:0, qty:0, theoNguyenLieu:{} }));
+    const q = Number(r.qty)||0; o.soDong++; o.qty = _expR(o.qty + q);
+    const id = r.itemName || r.itemId || '?'; o.theoNguyenLieu[id] = _expR((o.theoNguyenLieu[id]||0) + q);
+  });
+  return out;
 }
 
 function _expFileName(mode){
