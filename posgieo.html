@@ -212,7 +212,7 @@ Nút "Cập nhật" ở sidebar (`manualCheckUpdate`, dựa trên service worker
 <script src="https://cdn.jsdelivr.net/npm/bcryptjs@2.4.3/dist/bcrypt.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
 <!-- [E1] Unit Engine — nạp TRƯỚC script chính. Đổi phiên bản = đổi tên file (6.1). -->
-<script src="unit_engine.v17.js"></script>
+<script src="unit_engine.v18.js"></script>
 
 <style>
 :root{--gd:#E23A5D;--gm:#C22B49;--gl:#FDE6EA;--bg:#FFFCF0;--gt:#999;--td:#111;--bb:#E7ECFB;--bi:#1D3F91;
@@ -10116,6 +10116,12 @@ async function loadPrepBatchesPOS() {
     PREP_BATCHES_CACHE_POS = snap.docs.map(d => ({ id: d.id, ...d.data() }))
       .sort((a, b) => String(a.finishedAt || a.startedAt || '').localeCompare(String(b.finishedAt || b.startedAt || '')));
     _prepBatchesLoadError = null;
+    // [v18] Mẻ đã huỷ mà hoàn kho chưa xong (cancelSettled:false) — hiện thẻ "Hoàn tiếp". Lỗi đọc phần này không
+    // được làm hỏng danh sách chính.
+    try {
+      const un = await fstore.collection('prep_batches_gieogieo').where('cancelSettled', '==', false).get();
+      un.docs.forEach(d => { if (!PREP_BATCHES_CACHE_POS.some(x => x.id === d.id)) PREP_BATCHES_CACHE_POS.push({ id: d.id, ...d.data() }); });
+    } catch (e) { console.warn('loadPrepBatchesPOS: không đọc được mẻ huỷ chưa hoàn xong', e); }
   } catch (err) {
     console.warn('loadPrepBatchesPOS lỗi:', err);
     PREP_BATCHES_CACHE_POS = [];
@@ -10183,6 +10189,7 @@ function renderPrepBatchForm() {
   // Lô đang chế biến / còn hạn của TẤT CẢ thành phẩm (không chỉ cái đang chọn) —
   // nhân viên cần thấy toàn cảnh để biết còn gì đang trên bếp, khỏi nấu trùng.
   const cooking = PREP_BATCHES_CACHE_POS.filter(b => b.status === 'cooking' || b.status === 'finishing');
+  const unsettled = PREP_BATCHES_CACHE_POS.filter(b => b.status === 'cancelled' && b.cancelSettled === false);
   const active  = PREP_BATCHES_CACHE_POS.filter(b => b.status === 'active' && Number(b.qtyRemaining) > 0);
 
   const ratioBtn = (label, val) => `<button onclick="prepBatchSetRatio(${val})" style="flex:1;min-width:64px;min-height:44px;padding:11px 6px;border-radius:12px;border:1.5px solid ${Math.abs(r-val)<0.001?'var(--gd)':'#e6e1d2'};background:${Math.abs(r-val)<0.001?'#FDE6EA':'#fff'};color:${Math.abs(r-val)<0.001?'var(--gd)':'#888'};font-family:'Google Sans',sans-serif;font-weight:700;font-size:13.5px;cursor:pointer;">${label}</button>`;
@@ -10195,6 +10202,18 @@ function renderPrepBatchForm() {
       <div style="font-size:12px;color:#991b1b;line-height:1.6;">Lỗi: ${escHtmlPos(_prepBatchesLoadError)}<br>Nếu vừa bấm "Bắt đầu chế biến" mà không thấy thẻ hiện ra ở dưới: nguyên liệu <b>có thể đã bị trừ kho rồi</b>, chỉ là màn này không đọc lại được để hiện thẻ. Đừng bấm chế biến lại — thử bấm nút tải lại ở góc trên hoặc thoát vào lại màn này trước.</div>
       <button onclick="loadPrepBatchesPOS().then(renderPrepBatchForm)" style="width:100%;margin-top:8px;padding:11px;background:#fff;color:#b91c1c;border:1.5px solid #fca5a5;border-radius:12px;font-weight:700;font-size:13px;cursor:pointer;">Tải lại</button>
     </div>` : ''}
+    ${unsettled.length ? `
+    <div class="wal-section" style="margin:0 0 14px;border:1.5px solid #fca5a5;background:#fef2f2;">
+      <div class="wal-section-title" style="color:#b91c1c;font-size:15px;">⚠️ Mẻ đã huỷ — hoàn kho chưa xong (${unsettled.length})</div>
+      ${unsettled.map(b => `
+        <div style="background:#fff;border:1.5px solid #fca5a5;border-radius:18px;padding:14px;margin-top:10px;">
+          <div style="font-size:18px;font-weight:800;color:#7f1d1d;">${escHtmlPos(b.prepName || '')}</div>
+          <div style="font-size:12.5px;color:#991b1b;margin-top:3px;">Huỷ ${b.cancelledAt ? fmtDateTimeShort(b.cancelledAt) : ''}${b.cancelledBy ? ' · ' + escHtmlPos(b.cancelledBy) : ''}${b.cancelReason ? ' · ' + escHtmlPos(b.cancelReason) : ''}</div>
+          <div style="font-size:12.5px;color:#7f1d1d;margin-top:6px;line-height:1.5;">Còn nguyên liệu / tem chưa hoàn về kho (mất mạng hoặc tắt app giữa lúc huỷ). Bấm Hoàn tiếp — làm đúng như lúc huỷ, không cần nhập lại.</div>
+          <button id="prepCancelRetry_${b.id}" onclick="retryPrepCancelSettle('${b.id}')" style="width:100%;min-height:52px;margin-top:10px;background:#b91c1c;color:#fff;border:none;border-radius:99px;font-family:'Google Sans',sans-serif;font-weight:800;font-size:15.5px;cursor:pointer;">Hoàn tiếp</button>
+        </div>`).join('')}
+    </div>` : ''}
+
     ${cooking.length ? `
     <div class="wal-section" style="margin:0 0 14px;border:1.5px solid #fcd34d;background:#fffbeb;">
       <div class="wal-section-title" style="color:#92400e;font-size:15px;">🔥 Đang chế biến (${cooking.length})</div>
@@ -10520,6 +10539,10 @@ let prepReconGate = null, prepReconForm = null;
 //              thống TỰ gửi cảnh báo cho Quản lý (alerts_gieogieo), nhân viên chỉ
 //              cần biết là đã báo. Không đụng luồng bán hàng.
 function prepFlowError(msg, kind) { const e = new Error(msg); e.kind = kind; return e; }
+function prepBlockedAlertId(batchId, itemId) { return ('pos_prep_blocked_' + (batchId || 'x') + '_' + (itemId || 'x')).replace(/[^\w\-]/g, '_').slice(0, 180); }
+// [v18 — phương án A] NL của mẻ đang kẹt (đã gặp lỗi loại 'manager'): key 'mẻ|NL' → lý do. Màn đối chiếu thấy key
+// này (hoặc cảnh báo kẹt còn mở trên máy chủ) thì hiện khối "Tự chốt theo số cân hiện có" — xem prepForcePanelHTML.
+const _prepReconStuck = {};
 async function prepFlowToastError(err, prefix) {
   const msg = (prefix || '') + (err && err.message || err);
   const st = prepReconForm;
@@ -10533,7 +10556,8 @@ async function prepFlowToastError(err, prefix) {
   }
   if (err && err.kind === 'manager') {
     const it = st && KHO_ITEMS_CACHE.find(x => x.id === st.itemId);
-    const docId = ('pos_prep_blocked_' + ((st && st.batchId) || 'x') + '_' + ((st && st.itemId) || 'x')).replace(/[^\w\-]/g, '_').slice(0, 180);
+    const docId = prepBlockedAlertId(st && st.batchId, st && st.itemId);
+    if (st && st.batchId && st.itemId) _prepReconStuck[st.batchId + '|' + st.itemId] = String(err.message || err);
     try {
       await fstore.collection('alerts_gieogieo').doc(docId).set({
         type: 'pos_prep_blocked', severity: 'warning', status: 'new',
@@ -10541,11 +10565,13 @@ async function prepFlowToastError(err, prefix) {
         message: String(err.message || err), batchId: (st && st.batchId) || '', itemId: (st && st.itemId) || '',
         itemName: (it && it.name) || '', businessDate: posDateKey(), createdAt: new Date().toISOString()
       }, { merge: true });
-      toast('⚠️ ' + msg + ' — hệ thống ĐÃ TỰ BÁO Quản lý, bạn không cần làm gì thêm');
+      toast('⚠️ ' + msg + ' — đã báo Quản lý. Có thể tự chốt theo số cân hiện có ở khung đỏ trên màn này');
     } catch (e) {
       console.warn('[NL-RECON] gửi cảnh báo Quản lý lỗi', e);
-      toast('⚠️ ' + msg + ' — chưa gửi được cảnh báo, hãy báo Quản lý');
+      toast('⚠️ ' + msg + ' — chưa gửi được cảnh báo. Có thể tự chốt theo số cân hiện có ở khung đỏ trên màn này');
     }
+    // Vẽ lại màn đối chiếu để hiện khối tự chốt (openPrepReconForm tự bắt lỗi của nó — không lặp lại vào đây).
+    if (st && st.batchId && st.itemId) openPrepReconForm(st.batchId, st.itemId).catch(() => {});
     return;
   }
   toast('❌ ' + msg);
@@ -11057,7 +11083,9 @@ async function openPrepReconForm(batchId,itemId) {
     const palette='#0062AD';
     const box=document.getElementById('prepBatchBody');
     prepSetBack(openPrepBatchScreen);
-    box.innerHTML=prepReconFormHTML({it,b,row,batchId,itemId,finishedUnits,values:prepReconForm.values,countable,multiCode,
+    // [v18 — phương án A] NL đang kẹt → khối "Tự chốt theo số cân hiện có" ở đầu màn.
+    prepForcePrepare(await prepReconStuckReason(batchId,itemId,row),{batchId,itemId,it,b,row,live,finishedUnits,countable});
+    box.innerHTML=prepForcePanelHTML()+prepReconFormHTML({it,b,row,batchId,itemId,finishedUnits,values:prepReconForm.values,countable,multiCode,
       complete,changedLots,observed,diff,compared,residue,staleUnits,processingUncommitted,windowSales,
       varianceKind:prepReconForm.varianceKind,note:prepReconForm.note});
     if(row.status==='processing'&&!processingUncommitted)toast('↩️ Đang tiếp tục lượt chốt số cân trước đó');
@@ -11341,6 +11369,134 @@ async function prepReconPostSave() {
     }
   }
   finally{_posSubmitBusy=false;restoreBtn();}
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// [v18 — PHƯƠNG ÁN A, chủ dự án chốt 01/10/2026] TỰ CHỐT NL KHI ĐỐI CHIẾU BỊ KẸT
+// Trước đây gặp lỗi loại "báo Quản lý" (mã mất khỏi danh sách đang mở, lượt chốt ghi dở rồi tồn đổi...) thì mẻ kẹt
+// vĩnh viễn: không Hoàn thành/Huỷ được, NL khoá (chặn nấu mẻ mới dùng NL đó, chặn cân cuối ca) mà Quản lý cũng
+// không có nút gỡ. Nay nhân viên tự gỡ ngay trên POS: cân/đếm lại MỌI mã đang mở của NL rồi bấm chốt — engine đặt
+// tồn mã = số cân, ghi phần mẻ dùng + phần chênh ("chưa quy", Sổ lệch), mở khoá NL và báo Quản lý
+// (UnitEngine.prep.reconForceSettle). Chỉ hiện khi NL thật sự đang kẹt (đã gặp lỗi đó, hoặc cảnh báo kẹt còn mở).
+// ══════════════════════════════════════════════════════════════════════════
+let _prepForce = null;   // {key, batchId, itemId, itemName, unit, batchName, countable, multi, msg, units:[{id,code,book,qty,held,lines,manual,verified}], vanished, finished}
+async function prepReconStuckReason(batchId, itemId, row) {
+  if (!row || row.status === 'done' || (row.units || [])[0]?.id === '__aggregate') return '';
+  const key = batchId + '|' + itemId;
+  if (_prepReconStuck[key]) return _prepReconStuck[key];
+  try {
+    const d = await fstore.collection('alerts_gieogieo').doc(prepBlockedAlertId(batchId, itemId)).get();
+    if (d.exists && d.data().status === 'new') return (_prepReconStuck[key] = String(d.data().message || 'Đối chiếu NL bị kẹt'));
+  } catch (err) { console.warn('[Tự chốt] không đọc được cảnh báo kẹt', err); }
+  return '';
+}
+function prepForcePrepare(msg, c) {
+  if (!msg) { _prepForce = null; return; }
+  const key = c.batchId + '|' + c.itemId;
+  const cu = _prepForce && _prepForce.key === key ? _prepForce : null;
+  const live = c.live || [];
+  _prepForce = {
+    key, batchId: c.batchId, itemId: c.itemId, itemName: (c.it && c.it.name) || '', unit: (c.it && c.it.unit) || c.row.unit || '',
+    batchName: c.b.prepName || '', countable: !!c.countable, multi: live.length > 1, msg,
+    units: live.map(u => { const o = cu && cu.units.find(x => x.id === u.id); return o || { id: u.id, code: u.code, book: u.unitBase, qty: null, held: null, lines: [], manual: false, verified: false }; }),
+    vanished: (c.row.units || []).filter(u => u.id !== '__aggregate' && !live.some(x => x.id === u.id) && !c.finishedUnits.has(u.id)).map(u => ({ id: u.id, code: u.code })),
+    finished: (c.row.units || []).filter(u => c.finishedUnits.has(u.id)).map(u => ({ id: u.id, code: u.code }))
+  };
+}
+function prepForceUnitsHTML() {
+  const f = _prepForce; if (!f) return '';
+  const unit = escHtmlPos(f.unit);
+  const rows = f.units.map((u, j) => {
+    let right;
+    if (Number.isFinite(u.qty)) right = `<b style="color:#b91c1c">${fmtPrepQty(u.qty)} ${unit}</b><button onclick="prepForceRedo(${j})" style="margin-left:8px;padding:7px 11px;border-radius:10px;border:1px solid #b91c1c;background:#fff;color:#b91c1c;font-size:12.5px;font-weight:700">${f.countable ? 'Đếm lại' : 'Cân lại'}</button>`;
+    else if (f.countable) right = `<input id="prepForceCount_${j}" type="number" inputmode="decimal" min="0" step="0.01" placeholder="Còn lại" style="width:90px;padding:9px;border:1.5px solid #b91c1c;border-radius:10px">
+        <button onclick="prepForceMeasure(${j})" style="margin-left:6px;padding:9px 12px;border-radius:10px;border:0;background:#b91c1c;color:#fff;font-weight:800">Lưu</button>`;
+    else right = `<button onclick="prepForceMeasure(${j})" style="padding:10px 16px;border-radius:10px;border:0;background:#b91c1c;color:#fff;font-weight:800">⚖️ Cân</button>`;
+    return `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 0;border-top:1px dashed #fca5a5">
+      <span style="font-size:14px"><b>mã ${escHtmlPos(u.code)}</b><br><span style="font-size:12px;color:#7f1d1d">sổ hiện ${fmtPrepQty(u.book)} ${unit}${f.multi && !u.verified && !Number.isFinite(u.qty) ? ' · quét đúng tem trước' : ''}</span></span>
+      <span style="text-align:right;white-space:nowrap">${right}</span></div>`;
+  }).join('');
+  const other = f.finished.map(u => `<div style="font-size:12.5px;color:#7f1d1d;padding:4px 0">mã ${escHtmlPos(u.code)} — đã báo hết trong mẻ (tính vào mẻ)</div>`).join('')
+    + f.vanished.map(u => `<div style="font-size:12.5px;color:#7f1d1d;padding:4px 0">mã ${escHtmlPos(u.code)} — không còn mở, không cân được (ghi Sổ lệch)</div>`).join('');
+  return rows + other;
+}
+function prepForcePanelHTML() {
+  const f = _prepForce; if (!f) return '';
+  const xong = f.units.every(u => Number.isFinite(u.qty));
+  return `<div id="prepForcePanel" class="kc-card" style="margin:0 0 12px;border:2px solid #fca5a5;background:#fef2f2">
+    <div style="font-size:16px;font-weight:900;color:#b91c1c">⚠️ Không chốt bình thường được</div>
+    <div style="font-size:13px;color:#7f1d1d;margin-top:6px;line-height:1.5">Lý do: ${escHtmlPos(f.msg)}</div>
+    <div style="font-size:13px;color:#7f1d1d;margin-top:6px;line-height:1.5">Tự chốt: ${f.countable ? 'đếm' : 'cân'} lại <b>các mã đang mở</b> của ${escHtmlPos(f.itemName)} rồi bấm nút dưới. Tồn mã đặt theo số ${f.countable ? 'đếm' : 'cân'}; phần không khớp ghi Sổ lệch (chưa quy cho ai) và báo Quản lý. NL được mở khoá, mẻ Hoàn thành / Huỷ như thường.</div>
+    <div id="prepForceUnits" style="margin-top:8px">${prepForceUnitsHTML()}</div>
+    <div style="margin-top:10px">${renderPinInput('prepForceStaff')}</div>
+    <button id="prepForceBtn" onclick="prepForceSubmit()" ${xong ? '' : 'disabled'} style="width:100%;min-height:56px;margin-top:10px;background:${xong ? '#b91c1c' : '#e5e7eb'};color:${xong ? '#fff' : '#9ca3af'};border:0;border-radius:99px;font:800 16px 'Google Sans',sans-serif">Chốt theo số ${f.countable ? 'đếm' : 'cân'} hiện có</button>
+  </div>`;
+}
+function prepForceRerender() {
+  const f = _prepForce, box = document.getElementById('prepForceUnits'), btn = document.getElementById('prepForceBtn');
+  if (box) box.innerHTML = prepForceUnitsHTML();
+  if (btn && f) {
+    const xong = f.units.every(u => Number.isFinite(u.qty));
+    btn.disabled = !xong; btn.style.background = xong ? '#b91c1c' : '#e5e7eb'; btn.style.color = xong ? '#fff' : '#9ca3af';
+  }
+}
+function prepForceRedo(j) {
+  const u = _prepForce && _prepForce.units[j]; if (!u) return;
+  Object.assign(u, { qty: null, held: null, lines: [], manual: false });
+  prepForceRerender();
+}
+async function prepForceMeasure(j) {
+  const f = _prepForce, u = f && f.units[j]; if (!u) return;
+  if (f.multi && !u.verified) {   // nhiều mã cùng mở: quét đúng tem trước khi cân/đếm — không lấy số của mã khác
+    try { if (!await prepReconScanExact(f.itemId, u.id, u.code)) return; u.verified = true; }
+    catch (err) { toast('❌ Không kiểm tra được tem: ' + (err.message || err)); return; }
+  }
+  if (f.countable) {
+    const el = document.getElementById('prepForceCount_' + j), v = el ? el.value : '';
+    if (v === '' || !(Number(v) >= 0)) { toast('⚠️ Nhập số còn lại của mã ' + u.code); return; }
+    return prepForceSet(j, Number(v), [], true);
+  }
+  openWeighPad({ itemId: f.itemId, unit: f.unit, title: 'Cân lại · ' + f.itemName + ' · ' + u.code, reconcileMode: true, allowZero: true,
+    onDone: (qty, lines) => prepForceSet(j, qty, lines, false) });
+}
+// Ghi số cân/đếm + chụp bộ đếm "đã bán trong lúc khoá" NGAY LÚC đó (engine trừ phần bán sau lúc cân).
+async function prepForceSet(j, qty, lines, manual) {
+  const f = _prepForce, u = f && f.units[j]; if (!u) return;
+  let bk = null;
+  try { bk = await UnitEngine.prep.reconBookOf(f.itemId, u.id); }
+  catch (err) { toast('❌ Không đọc được tồn hiện tại của mã — kiểm tra mạng rồi cân lại'); return; }
+  if (!bk) { toast('⚠️ Mã ' + u.code + ' không còn đang mở — đã tải lại màn'); openPrepReconForm(f.batchId, f.itemId); return; }
+  Object.assign(u, { qty: round2(Number(qty) || 0), lines: lines || [], manual: !!manual, held: bk.held, book: bk.book });
+  prepForceRerender();
+}
+async function prepForceSubmit() {
+  const f = _prepForce; if (!f) return;
+  if (_posSubmitBusy) { toast('⏳ Đang xử lý, vui lòng đợi giây lát...'); return; }
+  const chua = f.units.find(u => !Number.isFinite(u.qty));
+  if (chua) { toast('⚠️ ' + (f.countable ? 'Đếm' : 'Cân') + ' mã ' + chua.code + ' trước'); return; }
+  const staffEmp = await resolveStaffPinAndCheckin('prepForceStaff');
+  if (!staffEmp) return;
+  const ds = f.units.map(u => '• mã ' + u.code + ': sổ ' + fmtPrepQty(u.book) + ' → ' + (f.countable ? 'đếm ' : 'cân ') + fmtPrepQty(u.qty) + ' ' + f.unit).join('\n');
+  if (!(await posConfirm(`Tự chốt ${f.itemName} của mẻ ${f.batchName} theo số ${f.countable ? 'đếm' : 'cân'} hiện có?\n\n${ds}${f.vanished.length ? '\n• ' + f.vanished.length + ' mã không còn mở → ghi Sổ lệch' : ''}\n\nPhần không khớp ghi Sổ lệch và báo Quản lý.`,
+    { okText: 'Chốt', cancelText: 'Không' }))) return;
+  _posSubmitBusy = true;
+  const restoreBtn = setBtnBusy('prepForceBtn', '⏳ Đang chốt...');
+  try {
+    const kq = await UnitEngine.prep.reconForceSettle(f.batchId, f.itemId, { staffEmp, reason: f.msg,
+      units: f.units.map(u => ({ unitId: u.id, qty: u.qty, lines: u.lines || [], heldAt: u.held, manual: !!u.manual })) });
+    // Cảnh báo "kẹt" đã được xử lý bằng tự chốt — chỉ cập nhật nếu có (update không tạo doc mới).
+    fstore.collection('alerts_gieogieo').doc(prepBlockedAlertId(f.batchId, f.itemId))
+      .update({ status: 'resolved', resolvedBy: 'pos_force_settle', resolvedByName: staffEmp.fullName, resolvedAt: new Date().toISOString() }).catch(() => {});
+    delete _prepReconStuck[f.key];
+    _prepForce = null; prepReconForm = null;
+    toast(kq && kq.already ? 'ℹ️ Nguyên liệu này đã được chốt rồi' : `✅ Đã tự chốt ${f.itemName} — NL đã mở khoá, đã báo Quản lý`);
+    refreshFifoAlert().catch(() => {});
+    openPrepBatchScreen();
+  } catch (err) {
+    console.error('prepForceSubmit', err);
+    toast('❌ ' + (err.message || err));
+    if (err && err.code === 'PREP_FORCE_UNWEIGHED') openPrepReconForm(f.batchId, f.itemId);
+  } finally { _posSubmitBusy = false; restoreBtn(); }
 }
 
 // Bấm "Bắt đầu chế biến" đi qua đây trước — công thức không có nguyên liệu
@@ -12332,10 +12488,15 @@ async function _submitPrepCancelImpl() {
   // BƯỚC 2 — GIÀNH lô bằng transaction trước khi hoàn. Hai tablet cùng bấm huỷ một
   // lô thì chỉ một bên qua được cửa này; nếu hoàn trước rồi mới đổi trạng thái thì
   // cả hai cùng hoàn và kho dư gấp đôi — sai nặng hơn nhiều so với việc huỷ hụt.
+  // [v18] Kế hoạch huỷ (lý do, người, câu trả lời từng NL đã cân + phần cân lại) ghi CÙNG transaction —
+  // app tắt/rớt mạng giữa lúc hoàn thì mẻ vẫn hiện "Hoàn tiếp" (cancelSettled:false), làm tiếp đúng kế hoạch.
   const cancelledAt = new Date().toISOString();
+  const plan = { reason, staffName: staffEmp.fullName, staffId: staffEmp.id,
+    recon: rc ? rc.items.map(g => ({ itemId: g.itemId, itemName: g.itemName, unit: g.unit, answer: g.answer, taken: g.taken,
+      returns: g.answer === 'da_tra' ? g.units.filter(x => !x.gone && x.returned > 0.005).map(x => ({ unitId: x.unitId, code: x.code, returned: x.returned })) : [] })) : [] };
   try {
     // [E4.6] Giành lô 'cooking' → 'cancelled' (transaction) — unit_engine.v1.js (prep.claimCancel).
-    await UnitEngine.prep.claimCancel(b.id, { cancelledAt, reason, staffEmp });
+    await UnitEngine.prep.claimCancel(b.id, { cancelledAt, reason, staffEmp, plan });
   } catch (err) {
     console.warn('submitPrepCancel: không giành được lô', err);
     toast('⚠️ ' + (err.message || err));
@@ -12343,78 +12504,126 @@ async function _submitPrepCancelImpl() {
     return;
   }
 
-  // BƯỚC 3 — hoàn nguyên liệu. Tới đây lô đã chắc chắn là của mình.
+  // BƯỚC 3 → 3.5 — tới đây lô đã chắc chắn là của mình.
   const note = `Hoàn kho do HUỶ MẺ ${b.prepName || ''}${b.prepCode ? ' (' + b.prepCode + ')' : ''} — ${reason}`;
+  const reconDetail = rc ? { cancelReconAnswer: Object.fromEntries(rc.items.map(g => [g.itemId, g.answer])),
+    cancelReconWeighed: rc.items.flatMap(g => g.units.map(x => ({ itemId: g.itemId, containerId: x.unitId, code: x.code, taken: x.taken, answer: g.answer,
+      weighed: x.weighed, liveBefore: x.live, returned: (g.answer === 'da_tra' && !x.gone) ? x.returned : 0, gone: !!x.gone })).concat(
+      g.blocked.map(x => ({ itemId: g.itemId, containerId: x.unitId, code: x.code, taken: x.taken, answer: g.answer, returned: 0, finished: true })))) } : null;
+  const r = await _runPrepCancelSettle(b, { txs, plan, staffEmp, note, reason, retry: false, reconDetail });
+  const { ok, failed, reconFail, reconTxt, atomicIds, atomicOk, atomicFailed } = r;
+
+  const atomicMsg = atomicIds.length
+    ? (atomicFailed ? ` — ${atomicFailed}/${atomicIds.length} tem đã quét CHƯA hoàn lại được` : `, ${atomicOk} tem đã quét cũng được hoàn lại`)
+    : '';
+  const conLai = r.allOk ? '' : ' · bấm "Hoàn tiếp" ở màn Nấu chế biến để làm nốt';
+  if (rc) {
+    _prepCancelRecon = null;
+    const reconMsg = reconTxt.length ? ` · ${reconTxt.join(' · ')}` : '';
+    if (failed || reconFail) toastAutoReport(`⚠️ Đã huỷ mẻ nhưng ${failed + reconFail} NL hoàn kho lỗi${reconMsg}${atomicMsg}${conLai}`, 'Huỷ mẻ: hoàn kho lỗi', { ref: String(Date.now()) });
+    else toast(`✅ Đã huỷ mẻ${ok ? ` và hoàn ${ok} nguyên liệu về kho` : ''}${reconMsg}${atomicMsg}${conLai}`);
+  } else if (failed) {
+    toastAutoReport(`⚠️ Đã huỷ mẻ nhưng ${failed}/${ok + failed} nguyên liệu hoàn kho lỗi${atomicMsg}${conLai}`, 'Huỷ mẻ: hoàn kho lỗi', { ref: String(Date.now()) });
+  } else if (ok) {
+    toast(`✅ Đã huỷ mẻ và hoàn ${ok} nguyên liệu về kho${atomicMsg}${conLai}`);
+  } else {
+    toast(`✅ Đã huỷ mẻ (lô này không trừ nguyên liệu nào)${atomicMsg}${conLai}`);
+  }
+  openPrepBatchScreen();     // hàm này tự nạp lại danh sách lô
+}
+
+// Các bước hoàn kho của Huỷ mẻ — dùng chung cho lần huỷ đầu và "Hoàn tiếp". Mọi bước đều chạy lại an toàn:
+//   · hoàn NL theo dòng trừ gốc: claim + dòng hoàn id cố định theo (mẻ + NL) — đã hoàn thì bỏ qua;
+//   · NL đã cân đối chiếu (cancelSettleRecon): RT theo op trên mã, sổ theo dấu trong lý do sửa; lượt Hoàn tiếp bỏ qua
+//     mã không còn nhận được (phần đó thành hao hụt) để mẻ không kẹt mãi;
+//   · tem "cái rời" đã quét: engine nhận ra tem đã hoàn cho CHÍNH mẻ này (không hoàn nhầm khi tem đã được mẻ khác dùng lại).
+// Xong hết → cancelSettled:true (hết hiện "Hoàn tiếp"); còn bước lỗi → false.
+async function _runPrepCancelSettle(b, o) {
+  const { txs, plan, staffEmp, note, reason, retry } = o;
   let ok = 0, failed = 0;
   if (txs.length) {
     const results = await Promise.allSettled(txs.map(t =>
       UnitEngine.consume.reverseIngredient(t.itemId, t.qty, note, b.id, t.locDeducted, t.fifoAllocations, t.atomicScanned)
     ));
-    failed = results.filter(r => r.status === 'rejected').length;
+    failed = results.filter(x => x.status === 'rejected').length;
     ok = results.length - failed;
-    if (failed) console.warn('[Huỷ mẻ] hoàn lỗi:', results.filter(r => r.status === 'rejected').map(f => f.reason));
+    if (failed) console.warn('[Huỷ mẻ] hoàn lỗi:', results.filter(x => x.status === 'rejected').map(f => f.reason));
     refreshFifoAlert().catch(() => {}); // huỷ mẻ có thể vừa "mở lại" phần tem chưa thật sự cạn
   }
 
-  // BƯỚC 3.2 — [NL đã cân đối chiếu] từng NL: hoàn phần đã trả (cân lại) vào đúng mã, phần còn lại → HAO HỤT (engine).
+  // [NL đã cân đối chiếu] từng NL: hoàn phần đã trả (cân lại) vào đúng mã, phần còn lại → HAO HỤT (engine).
   let reconOk = 0, reconFail = 0; const reconTxt = [];
-  if (rc) {
-    for (const g of rc.items) {
-      try {
-        const kq = await UnitEngine.prep.cancelSettleRecon(b.id, g.itemId, {
-          answer: g.answer, staffEmp, batchName: b.prepName || '', reason,
-          returns: g.units.filter(x => !x.gone && x.returned > 0.005).map(x => ({ unitId: x.unitId, code: x.code, returned: x.returned })) });
-        reconOk++;
-        const p = [];
-        if (kq.returned > 0.005) p.push(`hoàn +${fmtPrepQty(kq.returned)} ${g.unit}`);
-        if (kq.lost > 0.005) p.push(`hao hụt ${fmtPrepQty(kq.lost)} ${g.unit}`);
-        if (p.length) reconTxt.push(`${g.itemName} ${p.join(', ')}`);
-      } catch (err) { reconFail++; console.warn('[Huỷ mẻ] xử lý NL đã cân lỗi', g.itemId, err); }
-    }
+  for (const g of ((plan && plan.recon) || [])) {
+    try {
+      const kq = await UnitEngine.prep.cancelSettleRecon(b.id, g.itemId, {
+        answer: g.answer, staffEmp, batchName: b.prepName || '', reason, returns: g.returns || [], ...(retry ? { skipMissing: true } : {}) });
+      reconOk++;
+      const p = [];
+      if (kq.returned > 0.005) p.push(`hoàn +${fmtPrepQty(kq.returned)} ${g.unit || ''}`);
+      if (kq.lost > 0.005) p.push(`hao hụt ${fmtPrepQty(kq.lost)} ${g.unit || ''}`);
+      if (kq.skipped && kq.skipped.length) p.push(`mã ${kq.skipped.join(', ')} không còn mở — tính hao hụt`);
+      if (p.length) reconTxt.push(`${g.itemName || g.itemId} ${p.join(', ')}`);
+    } catch (err) { reconFail++; console.warn('[Huỷ mẻ] xử lý NL đã cân lỗi', g.itemId, err); }
   }
 
-  // BƯỚC 3.5 — hoàn lại đúng những tem "cái" đã quét ở cổng quét bắt buộc lúc bắt đầu
-  // (xem startPrepBatchGate/prepStartGateScan) về 'sealed'. Số LƯỢNG nguyên liệu đã
-  // được cộng lại đúng ở BƯỚC 3 rồi, nhưng nếu thiếu bước này thì CHÍNH CÁI TEM đã
-  // quét vẫn kẹt vĩnh viễn ở 'finished' (coi như đã dùng hết) dù mẻ chưa từng thực sự
-  // được nấu — nhân viên quét lại tem cũ ở lần nấu sau sẽ bị báo "đã báo hết trước đó".
+  // Hoàn lại đúng những tem "cái" đã quét ở cổng quét bắt buộc lúc bắt đầu về 'sealed'. Số LƯỢNG nguyên liệu đã
+  // được cộng lại ở bước trên, nhưng thiếu bước này thì CHÍNH CÁI TEM đã quét vẫn kẹt ở 'finished' (coi như đã
+  // dùng hết) dù mẻ chưa từng thực sự được nấu.
   const atomicIds = Array.isArray(b.atomicScannedContainerIds) ? b.atomicScannedContainerIds : [];
   let atomicOk = 0, atomicFailed = 0;
   if (atomicIds.length) {
     const results = await Promise.allSettled(
       atomicIds.map(cid => UnitEngine.lifecycle.reverseAtomicFinish(cid, b.id, staffEmp, note))
     );
-    results.forEach(r => { if (r.status === 'fulfilled' && r.value) atomicOk++; else atomicFailed++; });
+    results.forEach(x => { if (x.status === 'fulfilled' && x.value) atomicOk++; else atomicFailed++; });
   }
 
-  // Ghi lại kết quả hoàn lên chính lô — để Quản lý rà được lô nào hoàn hụt.
+  const allOk = !failed && !reconFail && !atomicFailed;
+  // Ghi lại kết quả hoàn lên chính lô — để Quản lý rà được lô nào hoàn hụt; cancelSettled quyết định "Hoàn tiếp".
+  const reconDetail = o.reconDetail || ((plan && plan.recon && plan.recon.length)
+    ? { cancelReconAnswer: Object.fromEntries(plan.recon.map(g => [g.itemId, g.answer])), cancelReconWeighed: b.cancelReconWeighed || [] } : null);
   try {
     await UnitEngine.prep.recordCancelResult(b.id, {   // [E4.6]
       cancelReversedCount: ok, cancelReverseFailedCount: failed,
       cancelAtomicRevertedCount: atomicOk, cancelAtomicRevertFailedCount: atomicFailed,
-      ...(rc ? { cancelReconAnswer: Object.fromEntries(rc.items.map(g => [g.itemId, g.answer])), cancelReconReturnedCount: reconOk, cancelReconReturnFailedCount: reconFail,
-        cancelReconWeighed: rc.items.flatMap(g => g.units.map(x => ({ itemId: g.itemId, containerId: x.unitId, code: x.code, taken: x.taken, answer: g.answer,
-          weighed: x.weighed, liveBefore: x.live, returned: (g.answer === 'da_tra' && !x.gone) ? x.returned : 0, gone: !!x.gone })).concat(
-          g.blocked.map(x => ({ itemId: g.itemId, containerId: x.unitId, code: x.code, taken: x.taken, answer: g.answer, returned: 0, finished: true })))) } : {})
+      ...(reconDetail ? { ...reconDetail, cancelReconReturnedCount: reconOk, cancelReconReturnFailedCount: reconFail } : {}),
+      cancelSettled: allOk
     });
   } catch (err) { console.warn('submitPrepCancel: không ghi được kết quả hoàn', err); }
+  return { ok, failed, reconOk, reconFail, reconTxt, atomicIds, atomicOk, atomicFailed, allOk };
+}
 
-  const atomicMsg = atomicIds.length
-    ? (atomicFailed ? ` — ${atomicFailed}/${atomicIds.length} tem đã quét CHƯA hoàn lại được, kiểm tra tay` : `, ${atomicOk} tem đã quét cũng được hoàn lại`)
-    : '';
-  if (rc) {
-    _prepCancelRecon = null;
-    const reconMsg = reconTxt.length ? ` · ${reconTxt.join(' · ')}` : '';
-    if (failed || reconFail) toastAutoReport(`⚠️ Đã huỷ mẻ nhưng ${failed + reconFail} NL hoàn kho lỗi${reconMsg}${atomicMsg}`, 'Huỷ mẻ: hoàn kho lỗi', { ref: String(Date.now()) });
-    else toast(`✅ Đã huỷ mẻ${ok ? ` và hoàn ${ok} nguyên liệu về kho` : ''}${reconMsg}${atomicMsg}`);
-  } else if (failed) {
-    toastAutoReport(`⚠️ Đã huỷ mẻ nhưng ${failed}/${ok + failed} nguyên liệu hoàn kho lỗi${atomicMsg}`, 'Huỷ mẻ: hoàn kho lỗi', { ref: String(Date.now()) });
-  } else if (ok) {
-    toast(`✅ Đã huỷ mẻ và hoàn ${ok} nguyên liệu về kho${atomicMsg}`);
-  } else {
-    toast(`✅ Đã huỷ mẻ (lô này không trừ nguyên liệu nào)${atomicMsg}`);
-  }
-  openPrepBatchScreen();     // hàm này tự nạp lại danh sách lô
+// [v18] "Hoàn tiếp" — mẻ đã huỷ mà bước hoàn kho chưa xong (lỗi mạng, app tắt giữa chừng...). Trước đây lô đã
+// 'cancelled' thì không còn nút nào: phần NL chưa hoàn nằm lại mất, chỉ có một cảnh báo mà Quản lý cũng không có
+// nút làm lại. Làm tiếp đúng kế hoạch đã ghi lúc huỷ (cancelPlan) — không hỏi lại, không cần PIN (người huỷ đã ký).
+async function retryPrepCancelSettle(batchId) {
+  if (_posSubmitBusy) { toast('⏳ Đang xử lý, vui lòng đợi giây lát...'); return; }
+  _posSubmitBusy = true;
+  const restoreBtn = setBtnBusy('prepCancelRetry_' + batchId, '⏳ Đang hoàn tiếp...');
+  try {
+    const doc = await fstore.collection('prep_batches_gieogieo').doc(batchId).get();
+    const b = doc.exists ? { id: doc.id, ...doc.data() } : null;
+    if (!b || b.status !== 'cancelled' || b.cancelSettled !== false) {
+      toast('ℹ️ Mẻ này đã hoàn xong — đã tải lại');
+      await loadPrepBatchesPOS(); renderPrepBatchForm();
+      return;
+    }
+    const plan = b.cancelPlan || { recon: [] };
+    const reason = plan.reason || b.cancelReason || '';
+    const staffEmp = { id: plan.staffId || b.cancelledByEmployeeId || '', fullName: plan.staffName || b.cancelledBy || '' };
+    let txs;
+    try { txs = await _loadBatchConsumptionTxPOS(b.id); }
+    catch (err) { toast('❌ Không đọc được dữ liệu trừ kho của lô — thử lại khi có mạng'); return; }
+    const note = `Hoàn kho do HUỶ MẺ ${b.prepName || ''}${b.prepCode ? ' (' + b.prepCode + ')' : ''} — ${reason}`;
+    const r = await _runPrepCancelSettle(b, { txs, plan, staffEmp, note, reason, retry: true });
+    const conLoi = r.failed + r.reconFail + r.atomicFailed;
+    toast(r.allOk ? `✅ Đã hoàn xong mẻ huỷ ${b.prepName || ''}${r.reconTxt.length ? ' · ' + r.reconTxt.join(' · ') : ''}`
+      : `⚠️ Vẫn còn ${conLoi} bước chưa hoàn được — thử lại sau (có thể NL đang chờ cân ở mẻ khác)`);
+    await loadPrepBatchesPOS(); renderPrepBatchForm();
+  } catch (err) {
+    console.error('retryPrepCancelSettle', err);
+    toast('❌ Chưa hoàn tiếp được: ' + (err.message || err));
+  } finally { _posSubmitBusy = false; restoreBtn(); }
 }
 
 async function submitPrepFinish() {

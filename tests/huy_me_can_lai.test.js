@@ -38,7 +38,7 @@ const spec = (flow, mutate) => {
   const sd = seed(); if (mutate) mutate(sd);
   const batch = JSON.parse(JSON.stringify(sd.fs[PB + '/c1']));
   return {
-    app: 'pos', target: '_submitPrepCancelImpl', exports: EXPORTS, helpers: ['_loadBatchConsumptionTxPOS', 'prepReconIsCountable', 'prepReconReadUnits', 'prepReconIsLow', 'escHtmlPos'], seed: sd,
+    app: 'pos', target: '_submitPrepCancelImpl', exports: EXPORTS, helpers: ['_loadBatchConsumptionTxPOS', '_runPrepCancelSettle', 'prepReconIsCountable', 'prepReconReadUnits', 'prepReconIsLow', 'escHtmlPos'], seed: sd,
     scope: (fake, rec, dom) => {
       dom.prepCancelReason = { value: 'Bấm nhầm thành phẩm' };
       return { _posSubmitBusy: false, resolveStaffPinAndCheckin: async () => STAFF, posDateKey: () => '2026-09-28', posConfirm: async () => true,

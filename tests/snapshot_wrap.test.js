@@ -113,7 +113,7 @@ S.POS_do_bo_theo_lo = { app: 'pos', target: '_submitPrepWasteImpl', seed: SEED_P
     return PREP_SCOPE(f, r, dom, { khoTxState: { prepId: 'P' }, pwReadLines: () => [{ batchId: 'b1', batchCode: 'L1', qty: 100, con: 100 }, { batchId: 'b2', batchCode: 'L2', qty: 50, con: 300 }],
       pwBatchesFor: () => [1, 2], WASTE_REASONS_CACHE: [], _pwWeighings: { b2: { w: 60, tare: 10 } }, showScreen: r('showScreen') }); },
   call: F => F._submitPrepWasteImpl() };
-S.POS_huy_me = { app: 'pos', target: '_submitPrepCancelImpl', seed: SEED_PREP(), helpers: ['_loadBatchConsumptionTxPOS', '_reverseAtomicContainerFinish'],
+S.POS_huy_me = { app: 'pos', target: '_submitPrepCancelImpl', seed: SEED_PREP(), helpers: ['_loadBatchConsumptionTxPOS', '_reverseAtomicContainerFinish', '_runPrepCancelSettle'],
   scope: (f, r, dom) => { dom.prepCancelReason = { value: 'khét' }; return PREP_SCOPE(f, r, dom, { _cancellingBatchId: 'c1', openPrepBatchScreen: r('openPrepBatchScreen') }); },
   call: F => F._submitPrepCancelImpl() };
 
