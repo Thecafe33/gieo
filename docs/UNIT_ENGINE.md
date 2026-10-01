@@ -328,3 +328,8 @@ Không thêm trạng thái/cơ chế mới — chỉ đặt cơ chế sẵn có 
 - **Hoàn do sửa topping** (`reverseIngredient/reversePrep` có `opKey`) của bill đã huỷ thì bỏ qua (hoàn để xoá bill gọi không `opKey` nên không bị chặn). Đọc dấu lỗi → ném.
 - **`rev` cấp ngay lúc dựng node lô BTP**: bộ bọc RT gán rev cho node mới (transaction và `set` qua engine). `_ueSyncPrepLot` chỉ ghi số THIẾU rev khi bản sao lô chưa từng có rtRev.
 Giới hạn còn lại: kiểm dấu huỷ cho hoàn do sửa topping nằm ngay trước bước hoàn (khe vài ms nếu dấu ghi đúng giữa hai bước); chưa có worker tự chạy lại việc `failed`; `rev` khởi từ giờ×1000.
+
+## Kiểm luồng (v17, 01/10/2026)
+- Firebase giả (`tests/lib/fakefb.js`) mặc định chạy **chế độ NGHIÊM**: từ chối như Firebase thật — RT: `undefined`/NaN/Infinity, khoá chứa `. # $ [ ] /`; Firestore: `undefined`. `FAKE_STRICT=0` để tắt; `FAKE_STRICT_LOG=<file>` ghi cả vi phạm bị nuốt trong `catch`.
+- Phát hiện khi chạy toàn bộ test ở chế độ nghiêm: thông báo vụ lệch (`dutyAlert`) ghi `businessDate: undefined` → Firestore thật từ chối, cảnh báo mất im lặng. v17: `_st` bỏ khoá undefined (đệ quy object thường; phần tử mảng undefined → null; FieldValue giữ nguyên) + `dutyAlert` lấy ngày kinh doanh hiện tại khi vụ thiếu ngày.
+- `tests/chuoi_bill.test.js` có kịch bản **NGÀY BÌNH THƯỜNG** (bán → thêm topping → bán bill 2 → POS xoá bill 1 → Quản lý xoá bill 2 → đổ bỏ BTP → Quản lý chỉnh lô → cân lại xác minh) kiểm sau MỖI bước: tồn NL = Σ tem RT, tồn BTP = Σ lô dương, bản sao lô Firestore = RT.

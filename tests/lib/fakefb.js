@@ -7,6 +7,25 @@
 'use strict';
 const clone = v => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
 const SENT = Symbol('fv');
+// [Kiểm luồng] Chế độ NGHIÊM (mặc định bật; FAKE_STRICT=0 để tắt): từ chối dữ liệu mà Firebase THẬT từ chối —
+// RT: giá trị undefined / NaN / Infinity, khoá chứa . # $ [ ] / ; Firestore: giá trị undefined (app không bật ignoreUndefinedProperties).
+const STRICT = process.env.FAKE_STRICT !== '0';
+const strictFail = msg => { if (process.env.FAKE_STRICT_LOG) { try { require('fs').appendFileSync(process.env.FAKE_STRICT_LOG, msg + '  [' + (require('path').basename(process.argv[1] || '')) + ']\n' + new Error().stack.split('\n').slice(3, 9).join('\n') + '\n'); } catch (e) { /* bỏ qua */ } } throw new Error(msg); };
+function strictRt(v, path) {
+  if (!STRICT) return;
+  if (v === undefined) strictFail('[RT thật từ chối] giá trị undefined tại ' + path);
+  if (typeof v === 'number' && !Number.isFinite(v)) strictFail('[RT thật từ chối] số không hợp lệ (' + v + ') tại ' + path);
+  if (v && typeof v === 'object') for (const k of Object.keys(v)) {
+    if (!Array.isArray(v) && /[.#$\[\]\/]/.test(k)) strictFail('[RT thật từ chối] khoá không hợp lệ "' + k + '" tại ' + path);
+    strictRt(v[k], path + '/' + k);
+  }
+}
+function strictFs(v, path) {
+  if (!STRICT) return;
+  if (v === undefined) strictFail('[Firestore thật từ chối] giá trị undefined tại ' + path);
+  if (v && typeof v === 'object' && !v[SENT]) for (const k of Object.keys(v)) strictFs(v[k], path + '.' + k);
+}
+
 const FieldValue = {
   delete: () => ({ [SENT]: 'delete' }),
   increment: n => ({ [SENT]: 'inc', n }),
@@ -45,6 +64,7 @@ function makeFake(opts = {}) {
   const rtGet = p => parts(p).reduce((o, k) => (o == null ? undefined : o[k]), RT.root);
   const prune = o => { if (o && typeof o === 'object') { for (const k of Object.keys(o)) { prune(o[k]); if (o[k] === null || (o[k] && typeof o[k] === 'object' && !Object.keys(o[k]).length)) delete o[k]; } } return o; };
   const rtSet = (p, v) => {
+    if (v !== null) strictRt(v, p || '/');
     const ks = parts(p);
     if (!ks.length) { RT.root = v == null ? {} : clone(v); return; }
     let o = RT.root; for (const k of ks.slice(0, -1)) { if (!o[k] || typeof o[k] !== 'object') o[k] = {}; o = o[k]; }
@@ -116,9 +136,10 @@ function makeFake(opts = {}) {
   const VER = {};
   const bump = k => { VER[k] = (VER[k] || 0) + 1; };
   const w = {
-    set: (c, id, x, o) => { const k = c + '/' + id; bump(k); FS[k] = (o && o.merge && FS[k]) ? mergeInto(FS[k], x) : deepVal(x); },
+    set: (c, id, x, o) => { strictFs(x, c + '/' + id); const k = c + '/' + id; bump(k); FS[k] = (o && o.merge && FS[k]) ? mergeInto(FS[k], x) : deepVal(x); },
     update: (c, id, x) => {
       const k = c + '/' + id; if (FS[k] === undefined) { const e = new Error('No document to update: ' + k); e.code = 'not-found'; throw e; }
+      strictFs(x, k);
       bump(k);
       for (const [path, v] of Object.entries(x)) { const ks = path.split('.'); let o = FS[k]; for (const kk of ks.slice(0, -1)) { if (!o[kk] || typeof o[kk] !== 'object') o[kk] = {}; o = o[kk]; } applyFV(o, ks[ks.length - 1], v); }
     },
@@ -172,8 +193,8 @@ function makeFake(opts = {}) {
       const ops = [], reads = {};
       const t = {
         get: async r => { if (r._c) reads[r._c + '/' + r.id] = VER[r._c + '/' + r.id] || 0; return r._c ? docSnap(r._c, r.id) : r.get(); },
-        set: (r, x, o) => { ops.push(() => { log.push(['fs.tx.set', r.path]); w.set(r._c, r.id, x, o); }); return t; },
-        update: (r, x) => { ops.push(() => { log.push(['fs.tx.update', r.path]); w.update(r._c, r.id, x); }); return t; },
+        set: (r, x, o) => { strictFs(x, r.path); ops.push(() => { log.push(['fs.tx.set', r.path]); w.set(r._c, r.id, x, o); }); return t; },
+        update: (r, x) => { strictFs(x, r.path); ops.push(() => { log.push(['fs.tx.update', r.path]); w.update(r._c, r.id, x); }); return t; },
         delete: r => { ops.push(() => { log.push(['fs.tx.delete', r.path]); w.delete(r._c, r.id); }); return t; }
       };
       const res = await fn(t);
