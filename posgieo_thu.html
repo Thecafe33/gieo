@@ -213,7 +213,7 @@ Nút "Cập nhật" ở sidebar (`manualCheckUpdate`, dựa trên service worker
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
 <!-- [E1] Unit Engine — nạp TRƯỚC script chính. Đổi phiên bản = đổi tên file (6.1). -->
 <script src="che_do_thu.v1.js?b=96d7f20f91"></script>
-<script src="unit_engine.v14.js?b=89e3b8f5e7"></script>
+<script src="unit_engine.v15.js?b=aea621cd66"></script>
 
 <style>
 :root{--gd:#E23A5D;--gm:#C22B49;--gl:#FDE6EA;--bg:#FFFCF0;--gt:#999;--td:#111;--bb:#E7ECFB;--bi:#1D3F91;
@@ -24490,47 +24490,63 @@ function _orderRtPathPOS(o) {
   const [dd, mm] = String(o.date).split('/');
   return 'orders_gieogieo/' + MONTH_KEYS[parseInt(mm, 10) - 1] + '/' + dd + '/' + o.id;
 }
+// Trạng thái việc: pending → running(owner) → done | failed(failedLines) ; cancelled (bill bị xoá). Hợp đồng: `done`/`cancelled` KHÔNG chạy lại; `running` còn hạn thuộc owner khác thì từ chối;
+// quá hạn thì máy khác tiếp quản (owner mới) — worker cũ nếu còn sống vẫn bị chặn ở bước ghi sổ bởi dấu huỷ bill (engine) và mọi khoản trừ có txId cố định (chạy lại không trừ đôi).
+// Kế hoạch trừ kho (plan) được lưu bền trên việc nên chạy lại dùng ĐÚNG khoản đã tính, không tính lại theo công thức có thể đã đổi.
+// Trả { st: 'ok'|'busy'|'done'|'cancelled'|'gone', owner, plan }.
 async function _addonJobStartPOS(o, addonId) {
-  let blocked = false;
+  const owner = 'w' + Date.now().toString(36) + Math.floor(Math.random() * 1e9).toString(36);
+  let verdict = null, plan = null;
   const kq = await db.ref(_orderRtPathPOS(o)).transaction(cur => {
     if (cur === null) return cur;
+    verdict = null; plan = null;
     const jobs = { ...(cur.consumeJobs || {}) }, j = jobs[addonId];
-    if (cur.deletionPending || (j && j.status === 'cancelled')) { blocked = true; return; }
-    blocked = false;
-    jobs[addonId] = { ...(j || {}), status: 'running', startedAt: Date.now() };
+    if (cur.deletionPending || (j && j.status === 'cancelled')) { verdict = 'cancelled'; return; }
+    if (j && j.status === 'done') { verdict = 'done'; return; }
+    if (j && j.status === 'running' && Date.now() - (Number(j.startedAt) || 0) < ADDON_JOB_STALE_MS) { verdict = 'busy'; return; }
+    plan = j && j.plan ? j.plan : null;
+    jobs[addonId] = { ...(j || {}), status: 'running', owner, startedAt: Date.now(), tries: (Number(j && j.tries) || 0) + 1 };
     return { ...cur, consumeJobs: jobs };
   });
-  if (!(kq && kq.snapshot && kq.snapshot.val())) return 'gone';
-  return kq.committed ? 'ok' : (blocked ? 'cancelled' : 'ok');
+  if (!(kq && kq.snapshot && kq.snapshot.val())) return { st: 'gone' };
+  if (kq.committed) return { st: 'ok', owner, plan };
+  return { st: verdict || 'busy' };
 }
-async function _addonJobDonePOS(o, addonId) {
+// Ghi vào việc CHỈ khi vẫn là owner (worker cũ bị tiếp quản không ghi đè trạng thái của worker mới).
+async function _addonJobUpdatePOS(o, addonId, owner, patch) {
+  let mine = false;
   await db.ref(_orderRtPathPOS(o)).transaction(cur => {
-    if (cur === null || !(cur.consumeJobs && cur.consumeJobs[addonId])) return cur;
-    return { ...cur, consumeJobs: { ...cur.consumeJobs, [addonId]: { ...cur.consumeJobs[addonId], status: 'done', doneAt: Date.now() } } };
+    mine = false;
+    const j = cur && cur.consumeJobs && cur.consumeJobs[addonId];
+    if (!j || j.owner !== owner || j.status === 'cancelled') return cur;
+    mine = true;
+    return { ...cur, consumeJobs: { ...cur.consumeJobs, [addonId]: { ...j, ...patch } } };
   });
+  return mine;
 }
 async function applyAddonConsumptionPOS(orderBefore, orderAfter, orderId, note, addonId) {
   if (!addonId) return _applyAddonConsumptionCorePOS(orderBefore, orderAfter, orderId, note);
-  let st;
-  try { st = await _addonJobStartPOS(orderAfter, addonId); }
+  let got;
+  try { got = await _addonJobStartPOS(orderAfter, addonId); }
   catch (err) {
     console.warn('[addon] không giành được việc trừ kho (lỗi kết nối)', err);
     _ueWarnGogsConsumptionFailed(orderId, orderAfter, [{ id: 'toàn bộ phần thêm topping', isPrep: false, reason: 'không giành được việc trừ kho: ' + String((err && err.message) || err || '') }]).catch(() => {});
     toastAutoReport('⚠️ Thêm topping: chưa trừ kho được — đã báo Quản lý', 'Thêm topping: trừ kho lỗi', { ref: orderId });
     return;
   }
-  if (st !== 'ok') { console.info('[addon] bỏ qua trừ kho — bill đang xoá / đã xoá / việc bị huỷ', orderId, st); return; }
-  try { await _applyAddonConsumptionCorePOS(orderBefore, orderAfter, orderId, note, addonId); }
-  finally { await _addonJobDonePOS(orderAfter, addonId).catch(err => console.warn('[addon] không đánh dấu xong việc trừ kho', err)); }
+  if (got.st !== 'ok') { console.info('[addon] không chạy việc trừ kho:', got.st, orderId); return; }
+  const ctx = { plan: got.plan, savePlan: plan => _addonJobUpdatePOS(orderAfter, addonId, got.owner, { plan }) };
+  let res;
+  try { res = await _applyAddonConsumptionCorePOS(orderBefore, orderAfter, orderId, note, addonId, ctx); }
+  catch (err) { res = { ok: false, failedLines: [{ id: '*', isPrep: false, reason: String((err && err.message) || err || '') }] }; }
+  // Lỗi → trạng thái `failed` kèm dòng lỗi (KHÔNG đóng `done`): chạy lại sẽ dùng đúng plan đã lưu.
+  await _addonJobUpdatePOS(orderAfter, addonId, got.owner, res && res.ok ? { status: 'done', doneAt: Date.now() } : { status: 'failed', failedLines: (res && res.failedLines) || [], failedAt: Date.now() })
+    .catch(err => console.warn('[addon] không ghi được trạng thái việc trừ kho', err));
 }
-async function _applyAddonConsumptionCorePOS(orderBefore, orderAfter, orderId, note, editKeyIn) {
+async function _applyAddonConsumptionCorePOS(orderBefore, orderAfter, orderId, note, editKeyIn, jobCtx) {
   // Khoá riêng của lần sửa này — dòng hoàn phần bớt không trùng id với lượt xoá cả đơn sau này.
   const editKey = editKeyIn || (orderId + '_edit_' + Date.now().toString(36));
   try {
-    const [recipes, toppingRecipes, packagingPresets, packagingItemOverrides, baggingRules, pkgRulesPack, baggingTable] =
-      await Promise.all([ensureRecipesLoadedPOS(), ensureToppingRecipesLoadedPOS(), ensurePackagingPresetsLoadedPOS(), ensurePackagingItemOverridesLoadedPOS(), ensurePackagingBaggingRulesLoadedPOS(), ensurePackagingRulesLoadedPOS(), ensurePackagingBaggingTableLoadedPOS()]);
-    const calc = ord => computeConsumptionForOrder(ord, recipes, toppingRecipes, packagingPresets, packagingItemOverrides, baggingRules, pkgRulesPack.rules, pkgRulesPack.config, baggingTable);
-    const a = calc(orderBefore), b = calc(orderAfter);
     const jobs = [];
     const diffOf = (mapA, mapB) => {
       const out = {};
@@ -24540,7 +24556,16 @@ async function _applyAddonConsumptionCorePOS(orderBefore, orderAfter, orderId, n
       });
       return out;
     };
-    const dIng = diffOf(a.agg, b.agg), dPrep = diffOf(a.prepAgg, b.prepAgg);
+    let dIng, dPrep;
+    if (jobCtx && jobCtx.plan) { dIng = jobCtx.plan.dIng || {}; dPrep = jobCtx.plan.dPrep || {}; }      // chạy lại: dùng ĐÚNG kế hoạch đã lưu, không tính lại theo công thức
+    else {
+      const [recipes, toppingRecipes, packagingPresets, packagingItemOverrides, baggingRules, pkgRulesPack, baggingTable] =
+        await Promise.all([ensureRecipesLoadedPOS(), ensureToppingRecipesLoadedPOS(), ensurePackagingPresetsLoadedPOS(), ensurePackagingItemOverridesLoadedPOS(), ensurePackagingBaggingRulesLoadedPOS(), ensurePackagingRulesLoadedPOS(), ensurePackagingBaggingTableLoadedPOS()]);
+      const calc = ord => computeConsumptionForOrder(ord, recipes, toppingRecipes, packagingPresets, packagingItemOverrides, baggingRules, pkgRulesPack.rules, pkgRulesPack.config, baggingTable);
+      const a = calc(orderBefore), b = calc(orderAfter);
+      dIng = diffOf(a.agg, b.agg); dPrep = diffOf(a.prepAgg, b.prepAgg);
+      if (jobCtx && !(await jobCtx.savePlan({ dIng, dPrep }))) return { ok: false, failedLines: [{ id: '*', isPrep: false, reason: 'mất quyền xử lý việc (đã bị tiếp quản/huỷ)' }] };
+    }
     // [BUG "Add-on giảm không hoàn Unit" — FIX] Chiều GIẢM là hiệu số của 2 lần tính cả đơn,
     // không trỏ thẳng về đúng 1 giao dịch gốc — nhưng KHÔNG có allocations nào để hoàn nghĩa
     // là Unit không được cộng lại trong khi currentStock (qua nhánh cộng thẳng của
@@ -24567,7 +24592,7 @@ async function _applyAddonConsumptionCorePOS(orderBefore, orderAfter, orderId, n
         ? UnitEngine.consume.prepSale(id, dPrep[id], note, orderId, undefined, 'addon_' + editKey + '_prep_' + id)
         : UnitEngine.consume.reversePrep(id, -dPrep[id], note + ' (giảm)', orderId, scaledAlloc(origPrepAllocMap[id], -dPrep[id]), editKey));
     });
-    if (!jobs.length) return;
+    if (!jobs.length) return { ok: true, failedLines: [] };
     const jobIds = [...Object.keys(dIng).map(id => ({ id, isPrep: false })), ...Object.keys(dPrep).map(id => ({ id, isPrep: true }))];
     const results = await Promise.allSettled(jobs);
     // Đơn đã lưu + báo thành công trước (không chặn quầy vì lỗi kho) — dòng kho lỗi phải để lại
@@ -24592,12 +24617,14 @@ async function _applyAddonConsumptionCorePOS(orderBefore, orderAfter, orderId, n
     UnitEngine.consume.writeTrace(orderId, {
       edited: true, editedAt: new Date().toISOString()
     }, { merge: true }).catch(err => console.warn('[stockTrace] đánh dấu edited lỗi', orderId, err));
+    return { ok: failedLines.length === 0, failedLines };
   } catch (err) {
     // [Sửa lỗi 6] Lỗi nạp công thức / tính chênh lệch → cả phần thêm CHƯA trừ kho: để lại cảnh báo BỀN.
     console.warn('[addon] applyAddonConsumptionPOS lỗi (không ảnh hưởng bill):', err);
     _ueWarnGogsConsumptionFailed(orderId, orderAfter, [{ id: 'toàn bộ phần thêm topping', isPrep: false,
       reason: 'không tính được tiêu hao: ' + String((err && err.message) || err || '') }]).catch(() => {});
     toastAutoReport('⚠️ Thêm topping: chưa trừ kho được — đã báo Quản lý', 'Thêm topping: trừ kho lỗi', { ref: orderId });
+    return { ok: false, failedLines: [{ id: '*', isPrep: false, reason: 'không tính được tiêu hao: ' + String((err && err.message) || err || '') }] };
   }
 }
 
@@ -24605,6 +24632,8 @@ async function _applyAddonConsumptionCorePOS(orderBefore, orderAfter, orderId, n
 // txId cố định theo lần sửa, ghi sổ thử lại vài lần; vẫn lỗi mà sổ thật sự CHƯA có dòng thì hoàn phần
 // đã trừ khỏi tem (không để tem giảm mà sổ không có gì — xoá bill sau này sẽ không hoàn được).
 async function _addonConsumeIngredientPOS(id, qty, note, orderId, txId) {
+  // [v15] Chạy lại cùng txId: kiểm sổ TRƯỚC khi phân bổ tem (fail-closed: không đọc được thì không trừ) — không trừ tem lần hai.
+  if ((await fstore.collection('stock_transactions_gieogieo').doc(txId).get()).exists) return { alreadyApplied: true };
   const allocations = await UnitEngine.consume.allocate(id, qty, undefined, { type: 'order', id: orderId, duringPrepLock: true })
     .catch(err => { console.warn('[FIFO] phân bổ lỗi', id, err); return []; });
   const ghi = () => UnitEngine.ledger.apply({
@@ -24614,7 +24643,12 @@ async function _addonConsumeIngredientPOS(id, qty, note, orderId, txId) {
   });
   let lastErr = null;
   for (let lan = 0; lan < 3; lan++) {
-    try { return await ghi(); }
+    try {
+      const applied = await ghi();
+      // Lượt khác đã ghi sổ trước / bill đã bị xoá: phần tem vừa trừ thêm phải được hoàn (đường bù trùng bền của engine).
+      if (applied && applied.alreadyApplied && allocations.length) await UnitEngine.consume.compensateDuplicate('item', id, allocations, txId);
+      return applied;
+    }
     catch (err) { lastErr = err; if (lan < 2) await new Promise(r => setTimeout(r, 400 * (lan + 1))); }
   }
   if (allocations.length) {
@@ -24941,6 +24975,8 @@ async function delOrderConfirm() {
     if (!(kq && kq.snapshot && kq.snapshot.val())) { _deletingOrderIds.delete(delId); toast('⚠️ Đơn không còn trên hệ thống — không cần xoá'); return; }
     if (!kq.committed && busy) { _deletingOrderIds.delete(delId); toast('⏳ Đang trừ kho phần bổ sung topping (có thể ở máy khác) — CHƯA xoá. Đợi vài giây rồi xoá lại.'); return; }
     o.deletionPending = true;
+    // [v15] Dấu huỷ bill (engine) TRƯỚC khi hoàn kho: khoản trừ kho đến muộn của bill này (worker cũ / thuê hết hạn) sẽ thấy dấu trong transaction ghi sổ và tự hoàn.
+    await UnitEngine.consume.markOrderCancelled(delId, 'delOrder');
   } catch (flagErr) {
     console.warn('[xoá bill] không ghi được cờ xoá dở — dừng', flagErr);
     _deletingOrderIds.delete(delId);

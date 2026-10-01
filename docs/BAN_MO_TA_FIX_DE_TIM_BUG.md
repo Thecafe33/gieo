@@ -184,3 +184,12 @@ Test: `tests/phan_bien_v14.test.js`, `tests/chuoi_bill.test.js` (bán → thêm 
 57. Nhập đúng số RT hiện tại không chữa được → chữa theo trạng thái bất biến, không theo chênh lệch số lượng.
 58. Đồng bộ hoàn tác chậm ghi đè số lô mới → đồng bộ lô theo phiên bản RT (`rev`/`rtRev`), hàm chung.
 Giới hạn còn lại: các đường ghi lô tuyệt đối khác (đếm cuối ca, discardByLots, tạo/khôi phục/hết hạn lô) chưa mang `rev`; việc trừ kho bổ sung "pending" mà máy tạo chết trước khi giành thuê thì không có trừ kho nào (bill xoá sau đó huỷ việc đúng); luồng bán thường chưa dùng cơ chế thuê (chỉ bổ sung topping).
+
+---
+## N. Đợt sửa theo bản rà bug lần 10 (engine v15 + POS) — lỗi 59–62
+Test: `tests/phan_bien_v15.test.js`, `tests/chuoi_bill.test.js` (59–61).
+59. Thuê hết hạn nhưng worker cũ vẫn trừ muộn → dấu huỷ bill kiểm trong transaction ghi sổ (engine) + chỉ owner hiện tại ghi được plan/trạng thái.
+60. Chạy lại cùng `addonId` trừ NL lần hai → `done`/`cancelled`/`running` còn hạn bị từ chối; NL kiểm sổ trước khi phân bổ tem.
+61. Trừ kho lỗi vẫn đóng `done` → core trả kết quả; lỗi → `failed` + `failedLines` + plan lưu bền; chạy lại dùng plan.
+62. Đóng lô lúc xác minh bỏ qua kiểm phiên bản → đóng lô mang rev (rev node gỡ + 1); trạng thái đóng chỉ áp dụng khi số được nhận.
+Giới hạn còn lại: chưa có worker tự động chạy lại việc `failed`; `rev` khởi tạo theo giờ×1000.
