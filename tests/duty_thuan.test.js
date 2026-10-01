@@ -77,12 +77,16 @@ eq(D.detectRecipeBias(mk(8, [-40], [{ A: 1 }])).reason, 'khong_phan_biet_duoc_vo
 eq(D.detectRecipeBias(mk(8, [-40, 30, -35, 20], [{ A: 1 }, { B: 1 }])).reason, 'khong_cung_chieu', 'lệch lúc thiếu lúc dư → không phải công thức');
 
 // ── Xác minh khi người khác cân lại ──
-let v = D.resolveVerification({ a: { count: 7463, book: 864 }, b: { count: 880, book: 864 + 0 }, base: 490, clean: true });
-eq([v.outcome, v.dB, v.entryErrorQty, v.trueVariance], ['entry_error', 16, -16, 6615], 'B lệch nhỏ so với sổ → A nhập sai phần đó, phần còn lại là lệch thật');
+let v = D.resolveVerification({ a: { count: 1000, book: 835 }, b: { count: 960, book: 1000 }, base: 400, clean: true });
+eq([v.outcome, v.dB, v.entryErrorQty, v.trueVariance], ['entry_error', -40, 40, 125], 'B lệch nhỏ so với số A (không khớp trong sai số cân) → A nhập sai phần đó, phần còn lại là lệch thật');
+v = D.resolveVerification({ a: { count: 1000, book: 835 }, b: { count: 995, book: 1000 }, base: 400, clean: true });
+eq([v.outcome, v.trueVariance], ['confirmed', 165], 'B cân như số A (trong sai số cân) → lệch thật');
 v = D.resolveVerification({ a: { count: 699, book: 864 }, b: { count: 864 - 165 + 0, book: 699 }, base: 490, clean: true });
 eq([v.outcome, v.dB], ['confirmed', 0], 'B cân trùng sổ lúc đó → lệch của A là thật');
 v = D.resolveVerification({ a: { count: 7463, book: 864 }, b: { count: 730, book: 7463 }, base: 490, clean: true });
-eq([v.outcome, v.dB, v.trueVariance], ['dispute', -6733, null], 'B lệch rất nhiều so với số A → tranh chấp, chủ quyết');
+eq([v.outcome, v.dB, v.trueVariance], ['dispute', -6733, null], 'B lệch rất nhiều so với A và cũng không khớp sổ gốc 864 → tranh chấp, chủ quyết');
+v = D.resolveVerification({ a: { count: 7463.6, book: 864.2 }, b: { count: 870, book: 7463.6 }, base: 490, clean: true });
+eq([v.outcome, v.bookAgree, v.entryErrorQty], ['entry_error', true, 6593.6], 'B lệch rất nhiều so với A nhưng KHỚP sổ gốc (864) → A nhập sai (×10), tự quy A');
 v = D.resolveVerification({ a: { count: 1000, book: 835 }, b: { count: 835, book: 1000 }, base: 400, clean: true });
 eq([v.outcome, v.vA, v.dB, v.entryErrorQty, v.trueVariance], ['entry_error', 165, -165, 165, 0], 'A cân dư 165 g (ví dụ của chủ) → 165 g là lỗi nhập của A, lệch thật = 0');
 console.log(ok ? 'ALL PASS' : 'SOME FAIL'); process.exit(ok ? 0 : 1);

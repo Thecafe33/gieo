@@ -4156,12 +4156,15 @@
       const prepRef = C.fstore.collection('prep_items_gieogieo').doc(l.prepId);
       const wasteRef = C.fstore.collection('prep_transactions_gieogieo').doc();
       const adjRef = C.fstore.collection('prep_transactions_gieogieo').doc();
+      // [v4 duty] mốc đếm trước + số liệu cho hồ sơ vụ lệch (gán lại mỗi lần giao dịch chạy).
+      let dutyPrev = null, dutyMeta = null, dutyAdjust = 0, dutyBook = 0;
       await C.fstore.runTransaction(async (t) => {
         const doc = await t.get(prepRef);
         if (!doc.exists) return;
         const d = doc.data();
         const cur = Number(d.currentStock) || 0;
         const gia = Number(d.costPerUnit) || 0;
+        dutyPrev = d.lastCount || null; dutyMeta = { id: l.prepId, name: l.prepName || d.name || '', unit: l.unit || d.unit || '', costPerUnit: gia, batchYield: Number(d.batchYield) || 0 };
         const diff = tonSauDem - cur;
         // Phần lệch KHÔNG do đổ bỏ. VD sổ đã về 0 từ trước, đếm 0, đổ 100:
         // diff = 0 nhưng thực tế đổ 100 → adjust = +100 (sổ vốn thiếu 100 so
@@ -4175,7 +4178,9 @@
         // Cân cuối ca là số THẬT: khoản "âm chờ đối chiếu" (untrackedPendingDelta + lô âm) đã
         // được chụp ở prepShortageCollect (đối chiếu sau kiểm kê NL cuối ca) — đóng lại tại đây,
         // không dồn sang ngày sau.
-        t.update(prepRef, { currentStock: tonSauDem, untrackedPendingDelta: 0, pendingShortage: 0, updatedAt: now });
+        dutyAdjust = adjust; dutyBook = round2(cur - discardedQty);
+        t.update(prepRef, { currentStock: tonSauDem, untrackedPendingDelta: 0, pendingShortage: 0, updatedAt: now,
+          lastCount: { at: now, qty: tonSauDem, byId: staffEmp.id || '', by: staffEmp.fullName || '', businessDate: shiftState.businessDate, suspect: !!l.suspect, kind: 'close_count' } });
         if (discardedQty > 0) {
           t.set(wasteRef, _st({
             ...chung,
@@ -4198,6 +4203,11 @@
           }));
         }
       });
+      // [v4 duty] Hồ sơ vụ lệch (và việc xác minh nếu số này nghi lệch). Lỗi ở đây KHÔNG làm hỏng lần đếm.
+      if (dutyMeta) {
+        try { await dutyOnCount({ prep: dutyMeta, prev: dutyPrev, now, by: { id: staffEmp.id, name: staffEmp.fullName }, count: tonSauDem, book: dutyBook, variance: dutyAdjust, businessDate: shiftState.businessDate, suspect: !!l.suspect }); }
+        catch (err) { console.warn('[duty] ghi hồ sơ vụ lệch lỗi', l.prepId, err); }
+      }
       // RT của mọi lô đã đúng số đếm — suy lại currentStock từ đó thay vì tin tonSauDem cộng
       // tay (2 số phải khớp nhau nếu RT đồng bộ đủ, nhưng suy từ unit mới là nguồn không thể
       // lệch tiếp ở lần Unit Engine chạy kế tiếp). RT lỗi thì giữ nguyên tonSauDem vừa ghi.
@@ -4592,15 +4602,344 @@
   //   a: {count, book, byId, byName}  — số A cân và sổ lúc A cân
   //   b: {count, book, byId, byName}  — số B cân và sổ TẠI GIỜ B cân (đã trừ các lần bán từ lúc A chốt)
   //   base: nền so phần trăm (lượng dùng), clean: khoảng giữa chỉ có bán đã ghi
-  // Trả {outcome:'confirmed'|'entry_error'|'dispute', trueVariance, entryErrorQty, dB}
+  // Trả {outcome:'confirmed'|'entry_error'|'dispute', trueVariance, entryErrorQty, dB}. Tranh chấp chỉ khi B lệch nhiều so với A
+  // VÀ cũng không khớp sổ gốc.
   function dutyResolveVerification(o) {
     const vA = round2((Number(o.a.count) || 0) - (Number(o.a.book) || 0));
     const dB = round2((Number(o.b.count) || 0) - (Number(o.b.book) || 0));
-    if (_dAbs(dB) < DUTY.RESOLUTION) return { outcome: 'confirmed', vA, dB, trueVariance: vA, entryErrorQty: 0 };
+    if (_dAbs(dB) < DUTY.RESOLUTION || dutySameWeigh(o.b.count, o.b.book)) return { outcome: 'confirmed', vA, dB, trueVariance: vA, entryErrorQty: 0 };   // B cân như số A (trong sai số cân)
     const big = dutyNeedsRecount({ variance: dB, usage: o.base, book: o.a.book });
-    if (big) return { outcome: 'dispute', vA, dB, trueVariance: null, entryErrorQty: null };
+    // Số B cân khớp với SỔ GỐC trước lần đếm của A (đã trừ các lần bán từ đó) = hai nguồn độc lập (sổ + B) cùng chống lại số của A
+    // → A nhập sai, dù hai lần cân lệch nhau nhiều. B không khớp cả A lẫn sổ gốc → không ai chắc đúng → chủ quyết.
+    const bookAgree = dutySameWeigh(o.b.count, (Number(o.b.book) || 0) - vA);
+    if (big && !bookAgree) return { outcome: 'dispute', vA, dB, trueVariance: null, entryErrorQty: null };
     // A đếm sai e = −dB; vA = vTrue + e.
-    return { outcome: 'entry_error', vA, dB, trueVariance: round2(vA + dB), entryErrorQty: round2(-dB), clean: o.clean !== false };
+    return { outcome: 'entry_error', vA, dB, trueVariance: round2(vA + dB), entryErrorQty: round2(-dB), clean: o.clean !== false, bookAgree };
+  }
+
+
+  // ════════════════════════ [v4] DUTY — đọc dữ liệu, ghi hồ sơ vụ lệch, việc xác minh ════════════════════════
+  const DUTY_CASES = 'duty_cases_gieogieo', DUTY_TASKS = 'duty_tasks_gieogieo', DUTY_CFG = 'duty_config_gieogieo';
+  const _dayKey = ms => new Date(ms + 7 * 3600 * 1000).toISOString().slice(0, 10);       // ngày theo giờ Việt Nam
+  const _dutyDays = (fromMs, toMs) => { const out = []; for (let t = fromMs - 86400000; t <= toMs + 86400000; t += 86400000) { const k = _dayKey(t); if (out.indexOf(k) < 0) out.push(k); } return out; };
+  const _dutyNowMs = () => C.now();
+  // Giờ của dòng bán: id bill mang giờ tạo (bill_<ms>_…) — đúng cả với bill bổ sung sau đóng ngày (createdAt khi đó là giờ bổ sung).
+  function dutyTxTime(t) {
+    const m = /^bill_(\d{12,14})_/.exec(String(t.referenceId || t.id || ''));
+    if (m) return Number(m[1]);
+    if (t.backfillAfterClose) return null;
+    return _dMs(t.createdAt);
+  }
+  async function dutyLoadPrepTx(prepId, fromMs, toMs) {
+    const rows = [], seen = {};
+    for (const day of _dutyDays(fromMs, toMs)) {
+      const snap = await C.fstore.collection(P.prepTx()).where('prepId', '==', prepId).where('businessDate', '==', day).get();
+      snap.docs.forEach(d => { if (!seen[d.id]) { seen[d.id] = 1; rows.push(Object.assign({ id: d.id }, d.data())); } });
+    }
+    return rows;
+  }
+  // Lượng dùng theo sổ trong (fromMs, toMs] — gộp theo bill, trừ phần đã hoàn khi xoá bill.
+  function dutyUsageFromTx(rows, fromMs, toMs) {
+    const by = {};
+    (rows || []).forEach(t => {
+      const ty = String(t.type || '').toUpperCase(), q = Number(t.qty) || 0;
+      const isCons = ty === 'CONSUMPTION', isRev = ty === 'ADJUSTMENT' && t.reversal === true;
+      if (!isCons && !isRev) return;
+      const key = t.referenceId || t.id;
+      const o = by[key] || (by[key] = { refId: key, qty: 0, at: null, ms: null, timeUnknown: false, createdMs: null });
+      o.qty += -q;
+      if (isCons) { const tm = dutyTxTime(t); if (tm == null) o.timeUnknown = true; else { o.ms = tm; o.at = new Date(tm).toISOString(); } o.createdMs = _dMs(t.createdAt); }
+    });
+    return Object.keys(by).map(k => by[k]).filter(e => e.qty > 0.0001).filter(e => { const ms = e.timeUnknown ? e.createdMs : e.ms; return ms != null && ms > fromMs && ms <= toMs; });
+  }
+  // Khoảng "sạch" = chỉ có bán đã ghi (không nấu, đổ, điều chỉnh khác) trong (fromMs, toMs].
+  function dutyIsClean(rows, fromMs, toMs) {
+    return !(rows || []).some(t => {
+      const ty = String(t.type || '').toUpperCase(); if (ty === 'CONSUMPTION' || (ty === 'ADJUSTMENT' && t.reversal === true)) return false;
+      const ms = _dMs(t.createdAt); return ms != null && ms > fromMs && ms <= toMs;
+    });
+  }
+  async function dutyLoadShifts(fromMs, toMs) {
+    const out = [], seen = {};
+    for (const day of _dutyDays(fromMs, toMs)) {
+      const snap = await C.fstore.collection('employee_shifts_gieogieo').where('businessDate', '==', day).get();
+      snap.docs.forEach(d => { if (seen[d.id]) return; seen[d.id] = 1; out.push(Object.assign({ id: d.id }, d.data())); });
+    }
+    return out.filter(s => { const a = _dMs(s.checkedInAt), b = _dMs(s.checkedOutAt); return a != null && a <= toMs && (b == null || b >= fromMs); });
+  }
+  async function dutyLoadProduction(prep, fromMs, toMs) {
+    const out = [], seen = {};
+    for (const day of _dutyDays(fromMs, toMs)) {
+      const snap = await C.fstore.collection(P.batches()).where('prepId', '==', prep.id).where('businessDate', '==', day).get();
+      snap.docs.forEach(d => {
+        if (seen[d.id]) return; seen[d.id] = 1; const b = d.data();
+        const f = _dMs(b.finishedAt); if (b.status === 'cancelled' || f == null || f <= fromMs || f > toMs || !(Number(b.qtyInitial) > 0)) return;
+        out.push({ batchId: d.id, staffId: b.staffEmployeeId || '', staffName: b.staff || '', recorded: Number(b.qtyInitial) || 0, expected: (Number(b.batchRatio) || 1) * (Number(prep.batchYield) || 0), at: b.finishedAt });
+      });
+    }
+    return out;
+  }
+  async function dutyConfig() {
+    try { const d = await C.fstore.collection(DUTY_CFG).doc('current').get(); return d.exists ? d.data() : {}; } catch (e) { return {}; }
+  }
+  async function dutyLoadHistory(prepId, sinceMs) {
+    const snap = await C.fstore.collection(DUTY_CASES).where('prepId', '==', prepId).get();
+    return snap.docs.map(d => d.data()).filter(c => c.bias && c.interval && (_dMs(c.interval.to) || 0) > (sinceMs || 0))
+      .sort((a, b) => (_dMs(a.interval.to) || 0) - (_dMs(b.interval.to) || 0)).slice(-10).map(c => c.bias);
+  }
+  // Tính phân rã cho một khoảng đo (đọc dữ liệu rồi gọi hàm thuần). o: {prep, fromMs, toMs, variance, book, entryError, verified}
+  async function dutyCompute(o) {
+    const { prep, fromMs, toMs } = o;
+    const rows = await dutyLoadPrepTx(prep.id, fromMs, toMs);
+    const usage = dutyUsageFromTx(rows, fromMs, toMs);
+    const shifts = await dutyLoadShifts(fromMs, toMs);
+    const production = await dutyLoadProduction(prep, fromMs, toMs);
+    const cfg = await dutyConfig();
+    const resetMs = _dMs((cfg.baselineResetAt || {})[prep.id]) || 0;
+    const base = dutyDetectRecipeBias(await dutyLoadHistory(prep.id, resetMs));
+    const usageTotal = round2(usage.reduce((s, e) => s + e.qty, 0));
+    const result = dutyAttributeInterval({ variance: o.variance, costPerUnit: prep.costPerUnit, usage: usage.map(e => ({ at: e.at, qty: e.qty, refId: e.refId, timeUnknown: e.timeUnknown })),
+      shifts, closeAt: new Date(toMs).toISOString(), entryError: o.entryError || null, baseline: base.recipe ? { ratio: base.ratio } : null,
+      production, verified: !!o.verified, book: o.book });
+    // Hồ sơ cho phát hiện lệch nền sau này: chỉ khoảng đã đủ tin cậy (không phải lệch cực đoan chưa xác minh / tranh chấp).
+    let bias = null;
+    if (result.notes.indexOf('chua_xac_minh') < 0) {
+      const vTrue = round2(o.variance - ((o.entryError && Number(o.entryError.qty)) || 0));
+      const w = {}, ex = result.parts.find(p => p.kind === 'exposure'), exSum = ex ? ex.allocations.reduce((s, a) => s + _dAbs(a.qty), 0) : 0;
+      if (ex && exSum > 0) ex.allocations.forEach(a => { w[a.employeeId || a.employeeName] = round2(_dAbs(a.qty) / exSum * 1000) / 1000; });
+      if (usageTotal > 0) bias = { variance: vTrue, usage: usageTotal, weights: w };
+    }
+    return { result, usageTotal, usageEvents: usage.length, usageRefs: usage.slice(0, 40).map(e => e.refId), clean: dutyIsClean(rows, fromMs, toMs), rows, bias, baseline: base };
+  }
+  const _dutyCaseId = (prepId, ms) => P.key('prep', prepId, ms);
+  async function dutyAlert(c, kind, title, severity) {
+    await C.fstore.collection('alerts_gieogieo').doc(P.key('duty', c.id, kind)).set(_st({
+      type: 'duty_case', severity: severity || 'warning', status: 'new', businessDate: c.businessDate, createdAt: new Date(C.now()).toISOString(),
+      title, caseId: c.id, prepId: c.prepId, itemName: c.prepName, unit: c.unit, variance: c.variance, value: c.value,
+      allocations: (c.allocations || []).map(a => ({ employeeId: a.employeeId, employeeName: a.employeeName, qty: a.qty, share: a.share })),
+      confidence: c.confidence, caseStatus: c.status, kindOfAlert: kind }));
+  }
+  // Ghi hồ sơ vụ lệch sau một lần ĐẾM CUỐI CA. o: {prep, prev:{at,qty,byId,by}|null, now (ISO), by:{id,name}, count, book, variance, businessDate, suspect}
+  async function dutyOnCount(o) {
+    const v = round2(o.variance), toMs = _dMs(o.now);
+    if (_dAbs(v) < DUTY.RESOLUTION) return null;
+    const fromMs = o.prev && _dMs(o.prev.at);
+    const id = _dutyCaseId(o.prep.id, toMs);
+    const doc = { id, type: 'prep', prepId: o.prep.id, prepName: o.prep.name || '', unit: o.prep.unit || '', costPerUnit: Number(o.prep.costPerUnit) || 0,
+      businessDate: o.businessDate, createdAt: o.now, interval: { from: o.prev ? o.prev.at : null, to: o.now }, countedBy: { id: o.by.id || '', name: o.by.name || '' },
+      count: round2(o.count), book: round2(o.book), variance: v, value: round2(_dAbs(v) * (Number(o.prep.costPerUnit) || 0)), verified: false, history: [] };
+    let status = 'auto';
+    if (fromMs == null || fromMs >= toMs) {
+      Object.assign(doc, { status: 'no_checkpoint', allocations: [], parts: [], pool: [{ kind: 'unknown', qty: v, value: doc.value, reason: 'khong_co_moc_dem_truoc' }], confidence: 'weak', notes: ['khong_co_moc_dem_truoc'], usageTotal: 0, usageEvents: 0, bias: null });
+    } else {
+      const c = await dutyCompute({ prep: o.prep, fromMs, toMs, variance: v, book: o.book, verified: false });
+      status = o.suspect ? 'pending_verify' : 'auto';
+      Object.assign(doc, { status, allocations: c.result.allocations, parts: c.result.parts, pool: c.result.pool, confidence: c.result.confidence, notes: c.result.notes, kind: c.result.kind,
+        usageTotal: c.usageTotal, usageEvents: c.usageEvents, usageRefs: c.usageRefs, bias: c.bias });
+    }
+    doc.needsNotify = dutyNeedsNotify({ variance: v, usage: doc.usageTotal, book: o.book });
+    await C.fstore.collection(DUTY_CASES).doc(id).set(_st(doc));
+    if (o.suspect) {
+      const old = await C.fstore.collection(DUTY_TASKS).doc('verify_' + o.prep.id).get();
+      if (old.exists && old.data().status === 'open') {
+        await C.fstore.collection(DUTY_TASKS).doc('verify_' + o.prep.id).update({ status: 'superseded', supersededAt: o.now });
+        if (old.data().caseId) await C.fstore.collection(DUTY_CASES).doc(old.data().caseId).update({ status: 'closed_pool', closedReason: 'bi_dem_lai_truoc_khi_xac_minh', closedAt: o.now }).catch(() => {});
+      }
+      await C.fstore.collection(DUTY_TASKS).doc('verify_' + o.prep.id).set(_st({ id: 'verify_' + o.prep.id, type: 'verify_count', status: 'open', prepId: o.prep.id, prepName: o.prep.name || '', unit: o.prep.unit || '',
+        caseId: id, firstById: o.by.id || '', firstBy: o.by.name || '', firstAt: o.now, countedQty: round2(o.count), bookBeforeCount: round2(o.book), usageBase: doc.usageTotal,
+        createdAt: o.now, expireAt: new Date(toMs + DUTY.VERIFY_TTL_MS).toISOString(), businessDate: o.businessDate }));
+    }
+    if (doc.needsNotify)
+      await dutyAlert(doc, 'big', 'Lệch lớn — ' + (o.prep.name || '') + (o.suspect ? ' (chờ người khác cân lại)' : ''), o.suspect ? 'warning' : 'danger').catch(() => {});
+    return doc;
+  }
+  // Cân lúc đang bán: sổ hiện tại của MỘT lô (RT là nguồn thật phần đang mở, thiếu thì Firestore).
+  async function dutyLotBookNow(prepId, batchId) {
+    try { const v = (await _ueActiveUnitsRef(prepId).child(batchId).once('value')).val(); if (v && Number.isFinite(Number(v.unitBase))) return round2(Number(v.unitBase)); } catch (e) { /* rơi về Firestore */ }
+    const d = await C.fstore.collection(P.batches()).doc(batchId).get();
+    return d.exists ? round2(Number(d.data().qtyRemaining) || 0) : 0;
+  }
+  // Cổng "cân lại một lần": trả {needs, variance, usage, book}. KHÔNG đưa số này ra màn hình (cân mù).
+  async function dutyGateCheck(l) {
+    const now = C.now(), batches = l.activeBatches || [];
+    const expired = b => b.shelfLifeType === 'endOfDay' || (b.expiresAt && new Date(b.expiresAt) <= new Date(now));
+    const declared = batches.reduce((s, b) => s + ((l.discardAll || expired(b)) ? Math.max(0, Number(b.qtyRemaining) || 0) : 0), 0);
+    const book = round2((Number(l.sysQty) || 0) - declared);
+    const variance = round2((Number(l.counted) || 0) - book);
+    let usage = 0;
+    try {
+      const pd = await C.fstore.collection('prep_items_gieogieo').doc(l.prepId).get();
+      const last = pd.exists ? pd.data().lastCount : null, fromMs = last && _dMs(last.at);
+      if (fromMs != null) usage = dutyUsageFromTx(await dutyLoadPrepTx(l.prepId, fromMs, now), fromMs, now).reduce((s, e) => s + e.qty, 0);
+    } catch (e) { console.warn('[duty] gateCheck không đọc được lượng dùng — so với số sổ', e); }
+    return { needs: !l.discardAll && dutyNeedsRecount({ variance, usage, book }), variance, usage: round2(usage), book };
+  }
+  // Việc xác minh đang mở; hết hạn thì đóng (chuyển "chưa quy").
+  async function dutyExpireTasks() {
+    const now = new Date(C.now()).toISOString(); let n = 0;
+    const snap = await C.fstore.collection(DUTY_TASKS).where('status', '==', 'open').get();
+    for (const d of snap.docs) {
+      const t = d.data(); if (!(_dMs(t.expireAt) <= C.now())) continue;
+      await d.ref.update({ status: 'expired', expiredAt: now });
+      if (t.caseId) await C.fstore.collection(DUTY_CASES).doc(t.caseId).update({ status: 'closed_pool', closedReason: 'khong_xac_minh_duoc_48h', closedAt: now }).catch(() => {});
+      await C.fstore.collection('prep_items_gieogieo').doc(t.prepId).update({ 'lastCount.suspect': false }).catch(() => {});
+      n++;
+    }
+    return n;
+  }
+  async function dutyListOpenTasks() {
+    const snap = await C.fstore.collection(DUTY_TASKS).where('status', '==', 'open').get();
+    return snap.docs.map(d => Object.assign({ id: d.id }, d.data())).filter(t => !(_dMs(t.expireAt) <= C.now()))
+      .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+  }
+
+  // Người KHÁC cân lại lúc đang bán (không khoá): mỗi lô chốt theo mốc sổ chụp lúc cân — số còn lại = số cân − phần đã bán
+  // từ lúc cân. Sau đó giải vụ: lệch thật / A nhập sai (tự quy A) / tranh chấp (chủ quyết).
+  // l: {prepId, prepName, unit, activeBatches, batchQty, batchWeighings, snaps:{batchId:{book,at}}}; task: dòng duty_tasks;
+  // ctx: {now (ISO), staff:{id, fullName}, businessDate}.
+  async function dutyVerifyCommit(l, task, ctx) {
+    const now = ctx.now, st = ctx.staff, nowMs = _dMs(now);
+    if (!st || !st.id) throw new Error('Thiếu người cân lại');
+    if (st.id === task.firstById) throw new Error('Người cân lại phải khác người cân lần trước');
+    const tRef = C.fstore.collection(DUTY_TASKS).doc(task.id);
+    const t0 = await tRef.get();
+    if (!t0.exists || t0.data().status !== 'open') throw new Error('Việc xác minh này đã được xử lý');
+    const lots = []; let Bcount = 0, Bbook = 0, tonSau = 0;
+    for (const b of (l.activeBatches || [])) {
+      const counted = Number((l.batchQty || {})[b.id]);
+      if (!Number.isFinite(counted)) throw new Error('Chưa cân lô ' + (b.batchCode || ''));
+      const snap = l.snaps && l.snaps[b.id];
+      const curNow = await dutyLotBookNow(l.prepId, b.id);
+      const snapBook = snap && Number.isFinite(Number(snap.book)) ? Number(snap.book) : curNow;
+      // Ghi RT bằng transaction: phần đã bán tính TẠI lúc ghi, bán xen không bị mất.
+      let node = null;
+      const res = await _ueRetryAsync(() => _ueActiveUnitsRef(l.prepId).child(b.id).transaction(cur => {
+        const base = cur && Number.isFinite(Number(cur.unitBase)) ? Number(cur.unitBase) : curNow;
+        const sold = Math.max(0, round2(snapBook - base));
+        return { code: (cur && cur.code) || b.batchCode || '', itemName: (cur && cur.itemName) || l.prepName || '', unit: (cur && cur.unit) || l.unit || '',
+          capacity: (cur && cur.capacity) || Number(b.qtyInitial) || counted, openedAt: (cur && cur.openedAt) || C.now(), unitBase: Math.max(0, round2(counted - sold)) };
+      }));
+      node = (res && res.snapshot && res.snapshot.val()) || { unitBase: Math.max(0, counted - Math.max(0, snapBook - curNow)) };
+      const remain = round2(Number(node.unitBase) || 0);
+      lots.push({ b, counted, snapBook, remain });
+      Bcount += counted; Bbook += snapBook; tonSau += remain;
+    }
+    Bcount = round2(Bcount); Bbook = round2(Bbook); tonSau = round2(tonSau);
+    // Giải vụ
+    const cRef = C.fstore.collection(DUTY_CASES).doc(task.caseId);
+    const cs = (await cRef.get()).data() || {};
+    const fromMs = _dMs(task.firstAt);
+    const rows = await dutyLoadPrepTx(l.prepId, fromMs, nowMs);
+    const clean = dutyIsClean(rows, fromMs, nowMs);
+    const res2 = dutyResolveVerification({ a: { count: task.countedQty, book: task.bookBeforeCount }, b: { count: Bcount, book: Bbook }, base: task.usageBase, clean });
+    const prep = { id: l.prepId, name: l.prepName, unit: l.unit, costPerUnit: Number(cs.costPerUnit) || 0, batchYield: 0 };
+    try { const pd = await C.fstore.collection('prep_items_gieogieo').doc(l.prepId).get(); if (pd.exists) { prep.costPerUnit = Number(pd.data().costPerUnit) || prep.costPerUnit; prep.batchYield = Number(pd.data().batchYield) || 0; } } catch (e) { /* giữ số cũ */ }
+    const cFrom = cs.interval && _dMs(cs.interval.from), cTo = cs.interval && _dMs(cs.interval.to);
+    const patch = { verification: { outcome: res2.outcome, byId: st.id, by: st.fullName || '', at: now, bCount: Bcount, bBook: Bbook, dB: res2.dB, clean }, history: C.FieldValue.arrayUnion({ at: now, type: 'verify', outcome: res2.outcome, by: st.fullName || '', dB: res2.dB }) };
+    const responsibility = res2.outcome === 'entry_error'
+      ? { employeeId: task.firstById, employeeName: task.firstBy, role: 'người cân sai (đã xác minh)', status: 'assigned', reason: 'Cân lại lệch so với số đã ghi' }
+      : res2.outcome === 'dispute' ? { employeeId: '', employeeName: '', role: 'tranh chấp — chờ quản lý quyết', status: 'pending' } : null;
+    if (res2.outcome === 'dispute') {
+      Object.assign(patch, { status: 'dispute', allocations: [], parts: [], pool: [{ kind: 'dispute', qty: cs.variance, value: cs.value, reason: 'hai_lan_can_lech_nhau_nhieu' }], confidence: 'weak', verified: false, needsNotify: true });
+    } else if (cFrom != null && cTo != null) {
+      const ee = res2.outcome === 'entry_error' ? { qty: res2.entryErrorQty, byId: task.firstById, byName: task.firstBy, clean: res2.clean !== false } : null;
+      const c = await dutyCompute({ prep, fromMs: cFrom, toMs: cTo, variance: cs.variance, book: cs.book, entryError: ee, verified: true });
+      Object.assign(patch, { status: 'auto', verified: true, allocations: c.result.allocations, parts: c.result.parts, pool: c.result.pool, confidence: c.result.confidence, notes: c.result.notes, kind: c.result.kind,
+        usageTotal: c.usageTotal, usageEvents: c.usageEvents, usageRefs: c.usageRefs, bias: c.bias, entryErrorConfirmed: !!ee, entryErrorQty: ee ? ee.qty : 0 });
+    } else {
+      Object.assign(patch, { status: 'closed_pool', verified: true });
+    }
+    // Sổ + tồn: chốt tồn theo các lô vừa cân (đã trừ phần bán xen).
+    const prepRef = C.fstore.collection('prep_items_gieogieo').doc(l.prepId);
+    let adjust = 0;
+    await C.fstore.runTransaction(async t => {
+      const doc = await t.get(prepRef); if (!doc.exists) return;
+      const d = doc.data(), cur = Number(d.currentStock) || 0, gia = Number(d.costPerUnit) || 0;
+      adjust = round2(tonSau - cur);
+      t.update(prepRef, { currentStock: tonSau, updatedAt: now, lastCount: { at: now, qty: tonSau, byId: st.id, by: st.fullName || '', businessDate: ctx.businessDate, suspect: false, kind: 'verify', taskId: task.id } });
+      if (adjust !== 0) t.set(C.fstore.collection(P.prepTx()).doc('prep_verify_' + task.id), _st({
+        prepId: l.prepId, prepCode: d.code || '', prepName: l.prepName || '', unit: l.unit || '', type: 'ADJUSTMENT', qty: adjust, resultingStock: tonSau,
+        totalCost: round2(Math.abs(adjust) * gia), costPerUnit: gia, note: 'Cân lại xác minh số đếm của ' + (task.firstBy || '') + ' (' + res2.outcome + ')',
+        staff: st.fullName || '', staffEmployeeId: st.id, referenceId: task.caseId, createdAt: now, businessDate: ctx.businessDate, source: _src(), fromPrepVerify: true, dutyCaseId: task.caseId,
+        ...(responsibility ? { responsibility } : {}) }));
+    });
+    // Lô
+    for (const x of lots) {
+      const wLo = (l.batchWeighings || {})[x.b.id] || [];
+      await C.fstore.collection(P.batches()).doc(x.b.id).update({ qtyRemaining: x.remain, unitBase: x.remain,
+        ...(wLo.length ? { countWeighMethod: 'vessel', countWeighings: wLo, countWeighedAt: now } : {}), ...(x.remain <= 0 ? { status: 'used_up', usedUpAt: now } : {}) }).catch(err => console.warn('[duty] cập nhật lô lỗi', x.b.id, err));
+      if (x.remain <= 0) await _ueRetryAsync(() => _ueActiveUnitsRef(l.prepId).child(x.b.id).remove()).catch(() => {});
+    }
+    await _ueRecomputeCurrentStock(l.prepId, 'prep_batches_gieogieo').catch(() => {});
+    await cRef.update(patch);
+    await tRef.update({ status: 'done', outcome: res2.outcome, verifiedById: st.id, verifiedBy: st.fullName || '', verifiedAt: now, dB: res2.dB, bCount: Bcount, bBook: Bbook });
+    const merged = Object.assign({}, cs, patch, { id: task.caseId });
+    if (res2.outcome === 'entry_error')
+      await dutyAlert(merged, 'entry_error', task.firstBy + ' nhập sai số ' + (l.prepName || '') + ' (' + fmtPrepQty(res2.entryErrorQty) + ' ' + (l.unit || '') + ') — ' + (st.fullName || '') + ' cân lại', 'warning').catch(() => {});
+    if (res2.outcome === 'dispute')
+      await dutyAlert(merged, 'dispute', 'Hai lần cân lệch nhau nhiều — cần quy trách nhiệm: ' + (l.prepName || ''), 'danger').catch(() => {});
+    return { outcome: res2.outcome, dB: res2.dB, caseId: task.caseId, adjust, tonSau };
+  }
+
+  // ── Quản lý / nhân viên tác động lên vụ lệch ──
+  async function _dutyCase(caseId) {
+    const ref = C.fstore.collection(DUTY_CASES).doc(caseId), s = await ref.get();
+    if (!s.exists) throw new Error('Không thấy vụ lệch ' + caseId);
+    return { ref, c: s.data() };
+  }
+  async function _dutyAlertDone(caseId, by) {
+    const snap = await C.fstore.collection('alerts_gieogieo').where('caseId', '==', caseId).get().catch(() => null);
+    if (snap) await Promise.all(snap.docs.map(d => d.ref.update({ status: 'done', resolvedAt: new Date(C.now()).toISOString(), resolvedBy: by || '' }).catch(() => {})));
+  }
+  // Chủ chia lại: o = {kind:'manual'|'entry_error'|'recipe'|'waived', shares:[{employeeId, employeeName, share 0..1}], reason, by:{id,name}}
+  async function dutyReassign(caseId, o) {
+    const { ref, c } = await _dutyCase(caseId);
+    if (!o || !String(o.reason || '').trim()) throw new Error('Cần nhập lý do');
+    const v = Number(c.variance) || 0, cost = Number(c.costPerUnit) || 0, kind = o.kind || 'manual';
+    let allocations = [], pool = [];
+    if (kind === 'recipe') pool = [{ kind: 'recipe', qty: v, value: round2(_dAbs(v) * cost), reason: 'chu_xac_nhan_dinh_muc' }];
+    else if (kind === 'waived') pool = [{ kind: 'waived', qty: v, value: round2(_dAbs(v) * cost), reason: 'chu_mien' }];
+    else {
+      const sh = (o.shares || []).filter(x => Number(x.share) > 0); const sum = sh.reduce((s, x) => s + Number(x.share), 0);
+      if (!sh.length || sum > 1.0001) throw new Error('Tỉ lệ chia không hợp lệ');
+      allocations = sh.map(x => { const q = round2(v * Number(x.share)); return { employeeId: x.employeeId || '', employeeName: x.employeeName || '', qty: q, value: round2(_dAbs(q) * cost), share: round2(Number(x.share) * 1000) / 1000, basis: ['chu_quyet_dinh'], confidence: 'strong' }; });
+      const left = round2(v - allocations.reduce((s, a) => s + a.qty, 0));
+      if (_dAbs(left) >= DUTY.RESOLUTION) pool = [{ kind: 'unknown', qty: left, value: round2(_dAbs(left) * cost), reason: 'chu_chua_quy_het' }];
+    }
+    const now = new Date(C.now()).toISOString();
+    await ref.update(_st({ status: 'manual', manualKind: kind, allocations, pool, parts: [{ kind: 'manual', qty: v, allocations }], confidence: 'strong', verified: true, needsNotify: false,
+      manual: { by: (o.by && o.by.name) || '', byId: (o.by && o.by.id) || '', at: now, reason: o.reason },
+      history: C.FieldValue.arrayUnion({ at: now, type: 'reassign', kind, by: (o.by && o.by.name) || '', reason: o.reason, before: { allocations: c.allocations || [], pool: c.pool || [], status: c.status } }) }));
+    await _dutyAlertDone(caseId, o.by && o.by.name);
+    return { allocations, pool };
+  }
+  // Nhân viên phản đối phần của mình.
+  async function dutyContest(caseId, o) {
+    const { ref, c } = await _dutyCase(caseId);
+    if (!o || !o.byId || !String(o.reason || '').trim()) throw new Error('Cần PIN và lý do');
+    const mine = (c.allocations || []).some(a => a.employeeId === o.byId) || (c.countedBy && c.countedBy.id === o.byId);
+    if (!mine) throw new Error('Vụ này không có phần của bạn');
+    const now = new Date(C.now()).toISOString();
+    await ref.update({ status: 'contested', contest: { byId: o.byId, by: o.byName || '', reason: o.reason, at: now, previousStatus: c.status },
+      history: C.FieldValue.arrayUnion({ at: now, type: 'contest', by: o.byName || '', reason: o.reason }) });
+    await dutyAlert(Object.assign({}, c, { status: 'contested', id: caseId }), 'contest', (o.byName || '') + ' phản đối phần trách nhiệm — ' + (c.prepName || ''), 'warning').catch(() => {});
+  }
+  // Chủ giữ nguyên phân bổ sau khi xem phản đối.
+  async function dutyKeep(caseId, o) {
+    const { ref, c } = await _dutyCase(caseId);
+    if (c.status !== 'contested') throw new Error('Vụ này không có phản đối');
+    const now = new Date(C.now()).toISOString();
+    await ref.update({ status: (c.contest && c.contest.previousStatus) || 'auto', history: C.FieldValue.arrayUnion({ at: now, type: 'keep', by: (o.by && o.by.name) || '', reason: o.reason || '' }) });
+    await _dutyAlertDone(caseId, o.by && o.by.name);
+  }
+  async function dutyResetBaseline(prepId, by) {
+    const now = new Date(C.now()).toISOString();
+    await C.fstore.collection(DUTY_CFG).doc('current').set(_st({ baselineResetAt: { [prepId]: now }, updatedAt: now, updatedBy: by || '' }), { merge: true });
+    return now;
+  }
+  async function dutyListCases(fromDate, toDate) {
+    const snap = await C.fstore.collection(DUTY_CASES).where('businessDate', '>=', fromDate).where('businessDate', '<=', toDate).get();
+    return snap.docs.map(d => Object.assign({ id: d.id }, d.data())).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
   }
 
   const fn = { _ueActiveUnitsRef, _ueRetryAsync, _ueComputeAllocation, missingUnitsWarning, unitEngineAllocateConsumption, _ueMaybeWarnUntrackedConsumption, _ueWarnAllocateRtdbError, _ueRecomputeCurrentStock, _ueSyncQtyRemainingClamped, unitEngineReverseAllocations, _ueClaimedReverseAllocations, unitEngineOnOpen, unitEngineFinishOpenUnit, isTemTrackedNL, isAtomicUnitItem, prepReconRecoverOrphan, prepReconAcquire, prepReconRelease, prepReconAssertFree, prepReconSetUnit, applyPrepConsumptionPOS, applyStockTransactionPOS, applyStockTransferPOS, setLocationStockFromCountPOS, logStockAnomalyPOS, createContainersForReceipt, findContainerByCode, loadOpenContainers, sinhMaNgauNhien, capMaKhoDuyNhat, genStockContainerCode, genPrepBatchCode, prepareOrderReversalNetPOS, reverseSalesConsumptionPOS, _voidBackfillConsumptionPOS, _ueWarnReverseFailed, _reverseIngredientConsumptionPOS, _reversePrepConsumptionPOS, _applyFifoNotEmpty, writeAtomicContainerFinish, _reverseAtomicContainerFinish, _wastePrepQtyPOS, prepShortageClearAll, shiftWeighErr, shiftWeighAbsSig, shiftWeighResetUnitPOS, shiftWeighResFromRtPOS, shiftWeighFinishPOS, shiftWeighHealPendingPOS, shiftWeighReclassToConsumptionPOS, shiftWeighApplyLinePOS, setLocationStock, prepBatchSetQtyCore, prepBatchRestoreCore, approvePendingLostReportsForItem, ctnAdjustCore, prepReconIsLow, prepReconReadUnits, prepReconCheckpointAtStart, prepReconAttachOpenUnit };
@@ -4626,7 +4965,9 @@
     shift: { resetUnit: shiftWeighResetUnitPOS, healPending: shiftWeighHealPendingPOS, applyLine: shiftWeighApplyLinePOS, reclassToConsumption: shiftWeighReclassToConsumptionPOS, absSig: shiftWeighAbsSig, finish: shiftWeighFinishPOS, resFromRt: shiftWeighResFromRtPOS },
     util: { retry: _ueRetryAsync, round2, fmtQty: fmtPrepQty },
     duty: { CFG: DUTY, base: dutyBase, needsRecount: dutyNeedsRecount, needsNotify: dutyNeedsNotify, sameWeigh: dutySameWeigh, presence: dutyPresence, onDuty: dutyOnDuty,
-      detectRecipeBias: dutyDetectRecipeBias, attributeInterval: dutyAttributeInterval, resolveVerification: dutyResolveVerification },
+      detectRecipeBias: dutyDetectRecipeBias, attributeInterval: dutyAttributeInterval, resolveVerification: dutyResolveVerification,
+      gateCheck: dutyGateCheck, lotBookNow: dutyLotBookNow, onCount: dutyOnCount, verifyCommit: dutyVerifyCommit, expireTasks: dutyExpireTasks, listOpenTasks: dutyListOpenTasks,
+      reassign: dutyReassign, contest: dutyContest, keep: dutyKeep, resetBaseline: dutyResetBaseline, listCases: dutyListCases, usageSince: async (prepId, fromMs, toMs) => dutyUsageFromTx(await dutyLoadPrepTx(prepId, fromMs, toMs), fromMs, toMs), txTime: dutyTxTime },
     // [E6] Đồng hồ engine: now() (giờ máy chủ khi serverClock), offset (ms) đang dùng.
     clock: { now: () => C.now(), offset: () => C.clockOffset, isServer: () => !!C.serverClock }
   };
