@@ -7361,8 +7361,9 @@ function computeBaggingCostForOrder(order, dateKey){
 // PURCHASE ORDERS (PO) — Firestore collection purchase_orders_gieogieo
 // Giai đoạn 5 (mục 8 POS_Management_Integration_Workflow.md): "Management CÓ THỂ có
 // PO/Expected Receipt" — nghĩa là PO là TUỲ CHỌN, không bắt buộc cho mọi lần nhập hàng.
-// POS vẫn có thể nhập hàng tự do (không theo PO) qua khoTxScreen như Giai đoạn 3.
-// Khi có PO, POS đọc `lines[].qtyExpectedBase` để đối chiếu Đủ/Thiếu/Thừa lúc nhận hàng.
+// POS nhận hàng tự do (không theo PO) CHỈ khi không còn đơn 'pending'/'partial' — còn đơn đang
+// chờ thì POS khoá nút tự do, hàng phải nhận theo đơn (chủ quán yêu cầu 01/10/2026, posgieo
+// poSelectFree). Khi có PO, POS đọc `lines[].qtyExpectedBase` để đối chiếu Đủ/Thiếu/Thừa.
 //
 // Doc shape:
 // {
@@ -7382,8 +7383,8 @@ const PO_STATUS_LABEL = {
   received:  {label:'Đã nhận đủ',      color:'green'},
   cancelled: {label:'Đã huỷ',          color:'red'},
   // [MỚI] Khác "Huỷ": đơn này ĐÃ có hàng về (một phần), chỉ là phần thiếu sẽ KHÔNG về
-  // nữa từ đúng nhà cung cấp này (mua bù chỗ khác qua "Nhập hàng tự do", hoặc chấp nhận
-  // thiếu luôn) — xem closePurchaseOrderNoMore().
+  // nữa từ đúng nhà cung cấp này (mua bù chỗ khác — đóng đơn xong POS mới mở lại "Nhận hàng
+  // tự do" để nhập hàng bù — hoặc chấp nhận thiếu luôn) — xem confirmClosePONoMore().
   closed:    {label:'Đã đóng (thiếu)', color:'nf'}
 };
 async function loadPurchaseOrders(){
@@ -13911,11 +13912,18 @@ function bfTieuDe(n){
 }
 
 // Nhãn phương thức thanh toán — màu để liếc phát biết ngay tiền mặt hay chuyển khoản.
-function bfTagMethod(m){
+// [CK XÁC NHẬN TAY] Chuyển khoản do NHÂN VIÊN tự bấm xác nhận (bankConfirmMethod 'manual_staff',
+// không phải hệ thống tự nhận qua bank_confirmations) mang nhãn riêng màu đỏ ngay trên dòng bill,
+// không phải mở chi tiết mới thấy. Bill Tính riêng có nhóm CK xác nhận tay: thêm nhãn này cạnh
+// nhãn "Tính riêng". Cùng điều kiện với nhãn "CK THỦ CÔNG" ở Lịch sử bill (qlRenderBillList).
+function bfTagMethod(m, o){
   const s = String(m || '');
+  const ckTay = `<span class="bfeed-tag" style="background:var(--bad-bg);color:var(--bad)">Chuyển khoản - xác nhận tay</span>`;
   if(/TIỀN MẶT/i.test(s))     return `<span class="bfeed-tag" style="background:var(--ok-bg);color:var(--ok)">Tiền mặt</span>`;
-  if(/CHUYỂN KHOẢN/i.test(s)) return `<span class="bfeed-tag" style="background:var(--bb);color:var(--bi)">Chuyển khoản</span>`;
-  if(/TÍNH RIÊNG/i.test(s))   return `<span class="bfeed-tag" style="background:var(--warn-bg);color:var(--warn)">Tính riêng</span>`;
+  if(/CHUYỂN KHOẢN/i.test(s)) return (o && o.bankConfirmMethod === 'manual_staff') ? ckTay
+    : `<span class="bfeed-tag" style="background:var(--bb);color:var(--bi)">Chuyển khoản</span>`;
+  if(/TÍNH RIÊNG/i.test(s))   return `<span class="bfeed-tag" style="background:var(--warn-bg);color:var(--warn)">Tính riêng</span>`
+    + ((o && (o.splitGroups || []).some(g => g && g.bankConfirmMethod === 'manual_staff')) ? ckTay : '');
   return s ? `<span class="bfeed-tag" style="background:var(--fill);color:var(--gt)">${escapeHtmlAttr(s)}</span>` : '';
 }
 
@@ -13949,6 +13957,11 @@ function bfChiTiet(o){
   // Lịch sử bill mới thấy CK nào do nhân viên tự bấm xác nhận.
   if(o.bankConfirmMethod === 'manual_staff')
     phu.push(kv('Xác nhận CK', `<span style="color:#92400e">⚠️ Thủ công bởi ${escapeHtmlAttr(o.bankConfirmedBy||'(không rõ)')}</span>`));
+  // Bill Tính riêng: mỗi nhóm CK tự mang người xác nhận — liệt kê đủ người đã bấm tay.
+  const nguoiCKTay = [...new Set((o.splitGroups || []).filter(g => g && g.bankConfirmMethod === 'manual_staff')
+    .map(g => g.bankConfirmedBy || '(không rõ)'))];
+  if(nguoiCKTay.length)
+    phu.push(kv('Xác nhận CK', `<span style="color:#92400e">⚠️ Thủ công bởi ${escapeHtmlAttr(nguoiCKTay.join(', '))}</span>`));
   return `<div class="bfeed-body">
     ${mon.length ? mon.map(bfDongMon).join('') : `<div class="small-note">${escapeHtmlAttr(o.items || 'Không có chi tiết món')}</div>`}
     <div style="border-top:1px solid var(--line);margin-top:6px;padding-top:6px">${phu.join('') || '<div class="small-note">Không có thông tin thêm.</div>'}</div>
@@ -13973,7 +13986,7 @@ function renderBillFeed(){
         <span class="bfeed-main">
           <span class="bfeed-items">${escapeHtmlAttr(tomTat)}</span>
           <span class="bfeed-meta">
-            ${bfTagMethod(o.method)}
+            ${bfTagMethod(o.method, o)}
             <span>${soLy || '?'} món</span>
             ${o.isToGo ? '<span>· mang đi</span>' : ''}
             ${o.isShip ? '<span>· ship</span>' : ''}
@@ -24014,12 +24027,14 @@ async function confirmCancelPO(id){
 // chủ quán biết chắc phần THIẾU sẽ không về nữa từ đúng nhà cung cấp này (mua bù ở chỗ
 // khác qua "Nhập hàng tự do" — ghi vào sổ kho như một giao dịch RIÊNG, không đụng gì tới
 // PO — hoặc đơn giản là chấp nhận thiếu luôn). Không đụng receivedGoodBase/tồn kho —
-// KHÔNG được tăng số "đã nhận" lên cho khớp, vì hàng bù đã cộng tồn kho một lần rồi qua
-// đường Nhập hàng tự do; tăng thêm ở đây là cộng tồn hai lần cho cùng một lượng hàng.
+// KHÔNG được tăng số "đã nhận" lên cho khớp, vì hàng bù cộng tồn kho riêng qua đường
+// Nhập hàng tự do; tăng thêm ở đây là cộng tồn hai lần cho cùng một lượng hàng.
 // Chỉ đổi status để đơn thôi nằm trong "Đơn đặt hàng chưa nhận đủ" mãi mãi dù đã xử lý
 // xong theo cách khác — đúng thứ chủ quán báo: đã tra ra là đã bù, mà cảnh báo cứ còn.
+// [01/10/2026] Còn đơn 'pending'/'partial' thì POS KHOÁ "Nhận hàng tự do" — nên phải đóng
+// đơn TRƯỚC, POS mới nhận tự do được hàng mua bù.
 async function confirmClosePONoMore(id){
-  if(!confirm('Đóng đơn này dù còn thiếu hàng?\n\nDùng khi phần thiếu sẽ KHÔNG về nữa từ nhà cung cấp này (đã mua bù chỗ khác qua "Nhập hàng tự do", hoặc chấp nhận thiếu). Đóng đơn KHÔNG đụng gì tới tồn kho — chỉ để đơn thôi hiện ở mục "chưa nhận đủ".')) return;
+  if(!confirm('Đóng đơn này dù còn thiếu hàng?\n\nDùng khi phần thiếu sẽ KHÔNG về nữa từ nhà cung cấp này (mua bù chỗ khác, hoặc chấp nhận thiếu). Còn đơn đang chờ thì POS khoá "Nhận hàng tự do" — đóng đơn xong POS mới nhận tự do được hàng mua bù. Đóng đơn KHÔNG đụng gì tới tồn kho — chỉ để đơn thôi hiện ở mục "chưa nhận đủ".')) return;
   try{
     await fstore.collection('purchase_orders_gieogieo').doc(id).update({ status:'closed', closedAt:new Date().toISOString() });
     logAudit('close_no_more','purchase_order',id,{});

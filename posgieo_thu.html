@@ -826,6 +826,7 @@ body.assist-main-on .toast{bottom:calc(100px + var(--assist-h, 0px) + 10px);}
   background:var(--gd);color:#fff;font-family:'Google Sans',sans-serif;letter-spacing:.1px;}
 .ds-cta:active{transform:scale(.985);}
 .ds-cta:disabled{background:var(--ds-card2);color:var(--ds-ink40);cursor:default;}
+.ds-cta.is-locked{background:var(--ds-card2);color:var(--ds-ink40);}   /* trông như khoá nhưng vẫn bấm được để báo lý do */
 
 /* [MỚI-DS] Popup CHUẨN — nổi GIỮA màn hình, không trượt từ đáy (đã chốt theo yêu cầu). */
 .ds-sheet-bg{position:fixed;inset:0;background:rgba(10,8,6,.5);z-index:9999;display:none;align-items:center;justify-content:center;padding:20px;}
@@ -1541,7 +1542,8 @@ body.assist-main-on .toast{bottom:calc(100px + var(--assist-h, 0px) + 10px);}
 <!-- [NEW-SCREEN] NHẬN HÀNG (PO) — Giai đoạn 5 POS_Management_Integration_Workflow.md, mục 8.
      PO là TUỲ CHỌN (Management có thể tạo purchase_orders_gieogieo hoặc không). Màn này hỗ trợ:
        - Chọn 1 PO đang chờ/1 phần → hiện các dòng dự kiến để đối chiếu Đủ/Thiếu/Thừa.
-       - Hoặc "Nhận hàng tự do" (không theo PO nào) — vẫn ghi đầy đủ vào cùng ledger.
+       - Hoặc "Nhận hàng tự do" (không theo PO nào) — vẫn ghi đầy đủ vào cùng ledger. Chỉ mở
+         khi KHÔNG còn đơn đang chờ nhận/nhận một phần (khoá từ 01/10/2026 — xem poSelectFree).
      Mỗi dòng hỗ trợ: số lượng thực nhận (tốt, cộng kho), số lượng hư hỏng (không cộng kho,
      ghi WASTE riêng), cờ "sai sản phẩm" (không cộng kho, chỉ ghi chú). Ghi chung + ảnh chứng từ
      (tuỳ chọn, upload Firebase Storage). Ghi vào stock_transactions_gieogieo qua
@@ -20620,12 +20622,16 @@ async function openPoReceiveScreen() {
 function renderPoReceiveSelect() {
   const box = document.getElementById('poReceiveBody');
   const pos = POS_PENDING_PO_CACHE || [];
+  // [KHOÁ NHẬN TỰ DO] Còn đơn đang chờ thì nút tự do hiện khoá — vẫn bấm được để báo vì sao
+  // (xem poSelectFree), không dùng `disabled` vì nút disabled bấm vào im lặng, không báo gì.
+  const khoaTuDo = pos.length > 0;
   box.innerHTML = `
     <div class="wal-section" style="margin:0 16px 14px;">
       <div class="wal-section-title">Đơn đặt hàng đang chờ (từ app Quản lý)${pos.length ? `<span style="font-size:14px;font-weight:800;color:var(--gd);background:var(--gl);border-radius:999px;padding:2px 9px;letter-spacing:0;">${pos.length}</span>` : ''}</div>
       ${pos.length ? pos.map(po => poPendingCardHtml(po)).join('') : '<div style="font-size:12.5px;color:#bbb;padding:6px 2px;">Không có đơn đặt hàng nào đang chờ.</div>'}
     </div>
-    <div style="margin:0 16px;"><button class="ds-cta" onclick="poSelectFree()">Nhận hàng tự do (không theo đơn)</button></div>
+    <div style="margin:0 16px;"><button class="ds-cta${khoaTuDo ? ' is-locked' : ''}" onclick="poSelectFree()">${khoaTuDo ? '🔒 ' : ''}Nhận hàng tự do (không theo đơn)</button>
+      ${khoaTuDo ? '<div style="font-size:12.5px;font-weight:700;color:#a89a7e;text-align:center;margin-top:8px;">Đang có đơn chờ nhận — nhận hàng theo đơn ở trên</div>' : ''}</div>
   `;
 }
 
@@ -20705,7 +20711,28 @@ function poSelectPO(poId) {
   }));
   renderPoReceiveForm();
 }
-function poSelectFree() {
+// [KHOÁ NHẬN TỰ DO — chủ quán yêu cầu 01/10/2026] Đang có đơn đặt hàng chờ nhận (chờ nhận hoặc
+// mới nhận một phần — đúng danh sách "Đơn đặt hàng đang chờ" của màn này) thì KHÔNG cho nhận tự do:
+// hàng về phải nhận theo đơn để đối chiếu đủ/thiếu với số đã đặt. Đọc lại danh sách đơn ngay lúc
+// bấm (đơn Quản lý vừa tạo sau khi mở màn cũng khoá); đọc lỗi thì dùng danh sách lúc mở màn.
+// Mất mạng: Firestore KHÔNG báo lỗi mà trả kết quả từ bộ nhớ đệm (fromCache) — rỗng từ đệm là
+// "chưa biết", không phải "hết đơn" (cùng cách _watchShiftOpenedStatus), nên giữ danh sách lúc mở
+// màn; chỉ kết quả từ máy chủ mới được xoá khoá (đơn vừa nhận đủ/đóng/huỷ).
+// Chỉ khoá ở cửa vào: phiếu tự do đang ghi dở (bấm "Xác nhận" lại sau rớt mạng) không bị chặn.
+// Đơn nhận một phần mà phần thiếu không về nữa: Quản lý "Đóng đơn (thiếu)" thì nút mở lại.
+async function poSelectFree() {
+  let pos = POS_PENDING_PO_CACHE || [];
+  try {
+    const snap = await fstore.collection('purchase_orders_gieogieo').where('status', 'in', ['pending', 'partial']).get();
+    const moi = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+      .sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
+    if (moi.length || !(snap.metadata && snap.metadata.fromCache)) pos = POS_PENDING_PO_CACHE = moi;
+  } catch (err) { console.warn('[Nhận hàng tự do] không đọc lại được đơn đang chờ — dùng danh sách lúc mở màn', err); }
+  if (pos.length) {
+    toast('🔒 Đang có đơn chờ nhận, vui lòng bấm nhận hàng của đơn');
+    renderPoReceiveSelect();
+    return;
+  }
   poReceiveState.poId = null;
   poReceiveState.supplier = '';
   poReceiveState.lines = [];
