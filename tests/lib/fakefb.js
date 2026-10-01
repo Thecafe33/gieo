@@ -112,13 +112,17 @@ function makeFake(opts = {}) {
   const docSnap = (c, id) => { const d = FS[c + '/' + id]; return { id, exists: d !== undefined, data: () => clone(d), get: f => (d ? clone(d[f]) : undefined), ref: docRef(c, id) }; };
   const fsFail = () => { if (FS_CTL.failNext) { const e = FS_CTL.failNext; FS_CTL.failNext = null; throw e; } };
   const FS_CTL = { failNext: null };
+  // Phiên bản từng doc — để runTransaction phát hiện xung đột như Firestore thật (đọc xong mà doc đã bị ghi → chạy lại).
+  const VER = {};
+  const bump = k => { VER[k] = (VER[k] || 0) + 1; };
   const w = {
-    set: (c, id, x, o) => { const k = c + '/' + id; FS[k] = (o && o.merge && FS[k]) ? mergeInto(FS[k], x) : deepVal(x); },
+    set: (c, id, x, o) => { const k = c + '/' + id; bump(k); FS[k] = (o && o.merge && FS[k]) ? mergeInto(FS[k], x) : deepVal(x); },
     update: (c, id, x) => {
       const k = c + '/' + id; if (FS[k] === undefined) { const e = new Error('No document to update: ' + k); e.code = 'not-found'; throw e; }
+      bump(k);
       for (const [path, v] of Object.entries(x)) { const ks = path.split('.'); let o = FS[k]; for (const kk of ks.slice(0, -1)) { if (!o[kk] || typeof o[kk] !== 'object') o[kk] = {}; o = o[kk]; } applyFV(o, ks[ks.length - 1], v); }
     },
-    delete: (c, id) => { delete FS[c + '/' + id]; }
+    delete: (c, id) => { bump(c + '/' + id); delete FS[c + '/' + id]; }
   };
   function docRef(c, id) {
     return {
@@ -164,16 +168,20 @@ function makeFake(opts = {}) {
     collection: coll,
     runTransaction: async fn => {
       fsFail();
-      const ops = [];
+      for (let attempt = 0; attempt < 6; attempt++) {
+      const ops = [], reads = {};
       const t = {
-        get: async r => (r._c ? docSnap(r._c, r.id) : r.get()),
+        get: async r => { if (r._c) reads[r._c + '/' + r.id] = VER[r._c + '/' + r.id] || 0; return r._c ? docSnap(r._c, r.id) : r.get(); },
         set: (r, x, o) => { ops.push(() => { log.push(['fs.tx.set', r.path]); w.set(r._c, r.id, x, o); }); return t; },
         update: (r, x) => { ops.push(() => { log.push(['fs.tx.update', r.path]); w.update(r._c, r.id, x); }); return t; },
         delete: r => { ops.push(() => { log.push(['fs.tx.delete', r.path]); w.delete(r._c, r.id); }); return t; }
       };
       const res = await fn(t);
+      if (Object.keys(reads).some(k => (VER[k] || 0) !== reads[k])) continue;   // xung đột: có ai ghi doc đã đọc → chạy lại callback
       ops.forEach(o => o());
       return res;
+      }
+      throw new Error('transaction: quá nhiều xung đột');
     },
     batch: () => {
       const ops = [];

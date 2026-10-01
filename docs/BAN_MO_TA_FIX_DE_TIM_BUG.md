@@ -105,3 +105,14 @@ Phát hiện thêm khi sửa: dòng sổ `prep_verify_{task}` trùng id giữa h
 14. Ghi lô lỗi vẫn báo thành công/đóng việc → báo lỗi, giữ việc mở.
 15. Xác minh hoàn tất muộn xoá màn cân mới → `_prepVerifyMode.session`; chỉ dọn màn nếu còn đúng phiên đã gửi.
 Đồng ý với nhận xét của bản rà: nói "chỉ còn khe hở nhỏ ở đồng bộ lô" ở v6 là chưa đủ — còn sai ở dòng sổ điều chỉnh (lỗi 11), gỡ node (lỗi 10) và đóng việc khi ghi lô lỗi (lỗi 14).
+
+---
+## G. Đợt sửa theo bản rà bug lần 3 (engine v8) — lỗi 16–21
+Test: `tests/phan_bien_v8.test.js` (`ENGINE=unit_engine.v7.js` để xem lỗi cũ; v8 đạt hết).
+16. Đường trừ NL cùng bill chạy chồng (cùng/khác máy) → mutex theo orderId + `alreadyApplied` thì hoàn phần tem vừa trừ.
+17. `dupInTx` báo "đã bù" khi chưa chắc → hoàn qua `compensateDuplicate`, kiểm hoàn ĐỦ, ghi việc phục hồi bền, `recoverDuplicates` chạy lại; hoàn dở → `needs_manual` + cảnh báo.
+18. Mở lại màn xác minh sau lỗi dùng số mới → lưu `attempt` trong việc, mở lại dùng lại số lượt đầu.
+19. Token chỉ kiểm một lần → kiểm trước mỗi ghi RT/lô và trong transaction sổ + đóng việc.
+20. RT lô bị kẹp ≥0 làm mất nợ → ghi `counted − sold` không kẹp.
+21. POS đọc sổ lô sau lúc cân → lấy mốc trước, dùng `lotBookAt`.
+Giới hạn: `lotBookAt` dựa `usageEvents` (best-effort); phục hồi bền chạy khi POS mở khối check-in; hoàn dở một phần cần quản lý xử lý tay (`needs_manual`).

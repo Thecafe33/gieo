@@ -264,3 +264,10 @@ Chưa làm: nguyên liệu (NL) — đối chiếu NL khi nấu đã có `respon
   · gỡ node RT về 0 bằng **transaction** (chỉ gỡ khi giá trị lúc gỡ vẫn ≈0, bán xen làm âm thì giữ nợ);
   · ghi lô Firestore lỗi (sau thử lại) thì **báo lỗi, không đóng việc**; lô đồng bộ theo RT hiện hành;
   · **dòng điều chỉnh = Σ số cân − Σ sổ lúc cân của các lô đã cân** (độc lập với bán xen / lô mới), tồn tổng là bước riêng (`_ueRecomputeCurrentStock`), không gán `currentStock = số cân`.
+
+## Sửa theo bản rà bug lần 3 (v8, 01/10/2026) — test `tests/phan_bien_v8.test.js` (`ENGINE=unit_engine.v7.js` để xem lỗi cũ)
+- **`consume.compensateDuplicate(kind,id,allocations,txId)`**: lượt trừ bị phát hiện trùng (`txRef` đã có) hoàn đúng phần đã trừ; ghi việc phục hồi bền `dup_recovery_gieogieo/{opId}` TRƯỚC khi hoàn. Hoàn đủ → `done`; hoàn dở/lỗi → `pending` (tối đa 5 lượt rồi `needs_manual`) + cảnh báo `duplicate_deduction_unreversed`. `applyPrepConsumptionPOS` trả `compensated` thật (không còn mặc định true). `consume.recoverDuplicates()` thử lại các việc `pending` (POS gọi ở khối check-in).
+- **NL (POS)**: `applySalesConsumptionPOS` tuần tự hoá theo orderId trong máy; khác máy: `ledger.apply` trả `alreadyApplied` thì POS gọi `compensateDuplicate` để hoàn phần tem vừa trừ.
+- **`duty.verifyCommit`**: số liệu lượt đầu (`attempt`: số cân, sổ lúc cân, từng lô) lưu vào việc khi giành; mở lại sau lỗi dùng lại đúng `attempt` (không dùng số mới của màn). Token kiểm tra trước MỖI ghi RT/lô và trong transaction sổ + đóng việc. RT lô ghi `counted − sold` **không kẹp 0** (nợ âm được giữ).
+- **`duty.lotBookAt(prepId,batchId,atMs)`**: sổ lô tại mốc cân = sổ RT hiện tại + Σ `usageEvents` có `at > atMs`. POS lấy `atMs` TRƯỚC khi đọc sổ rồi gọi hàm này (best-effort theo `usageEvents`).
+- `tests/lib/fakefb.js`: transaction có kiểm tra xung đột theo phiên bản doc + thử lại (giống Firestore), cần để tái hiện lỗi hai máy.

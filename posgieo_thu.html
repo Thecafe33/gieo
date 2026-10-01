@@ -213,7 +213,7 @@ Nút "Cập nhật" ở sidebar (`manualCheckUpdate`, dựa trên service worker
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
 <!-- [E1] Unit Engine — nạp TRƯỚC script chính. Đổi phiên bản = đổi tên file (6.1). -->
 <script src="che_do_thu.v1.js?b=96d7f20f91"></script>
-<script src="unit_engine.v7.js?b=72d456b175"></script>
+<script src="unit_engine.v8.js?b=9347c34e20"></script>
 
 <style>
 :root{--gd:#E23A5D;--gm:#C22B49;--gl:#FDE6EA;--bg:#FFFCF0;--gt:#999;--td:#111;--bb:#E7ECFB;--bi:#1D3F91;
@@ -14798,6 +14798,7 @@ async function renderCheckinBlock() {
     </div>
   `;
   renderDutyTasksPOS();
+  UnitEngine.consume.recoverDuplicates().catch(err => console.warn('[UnitEngine] phục hồi phần trừ trùng lỗi', err));
 }
 async function doCheckIn() {
   if (_posSubmitBusy) { toast('⏳ Đang xử lý, vui lòng đợi giây lát...'); return; }
@@ -17824,9 +17825,10 @@ function prepCountWeighBatch(i, batchId, bi) {
     prepId: l.prepId, unit: l.unit,
     title: 'Cân lô ' + (b.batchCode || '') + ' · ' + (l.prepName || ''),
     onDone: async (total, lines) => {
-      // Cân lúc đang bán (xác minh): chụp sổ của lô ĐÚNG lúc cân — phần bán sau mốc này sẽ được trừ khi chốt.
+      // Cân lúc đang bán (xác minh): sổ của lô TẠI MỐC đọc số cân (lấy mốc TRƯỚC khi đọc sổ; engine cộng lại phần bán sau mốc) — số cân và sổ cùng một mốc.
       if (_prepVerifyMode) {
-        try { (l.snaps = l.snaps || {})[batchId] = { book: await UnitEngine.duty.lotBookNow(l.prepId, batchId), at: new Date(UnitEngine.clock.now()).toISOString() }; }
+        const atMs = UnitEngine.clock.now();
+        try { (l.snaps = l.snaps || {})[batchId] = { book: await UnitEngine.duty.lotBookAt(l.prepId, batchId, atMs), at: new Date(atMs).toISOString() }; }
         catch (err) { console.warn('[duty] không chụp được sổ lô lúc cân', err); }
       }
       l.batchWeighings[batchId] = lines;
@@ -17854,7 +17856,8 @@ async function prepCountToggleBatchDone(i, batchId) {
     if (!ok || _prepCountState[i] !== l) return;
   }
   if (_prepVerifyMode && willDone) {
-    try { (l.snaps = l.snaps || {})[batchId] = { book: await UnitEngine.duty.lotBookNow(l.prepId, batchId), at: new Date(UnitEngine.clock.now()).toISOString() }; } catch (err) { console.warn('[duty] không chụp được sổ lô', err); }
+    const atMs = UnitEngine.clock.now();
+    try { (l.snaps = l.snaps || {})[batchId] = { book: await UnitEngine.duty.lotBookAt(l.prepId, batchId, atMs), at: new Date(atMs).toISOString() }; } catch (err) { console.warn('[duty] không chụp được sổ lô', err); }
   }
   l.batchDone[batchId] = willDone;
   l.batchWeighings[batchId] = [];   // đánh dấu hết/bỏ dấu đều làm số cân cũ vô nghĩa
@@ -20230,7 +20233,16 @@ function trackConsumptionPOS(orderId, promise) {
   _consumptionInflightPOS.set(orderId, p);
   return p;
 }
+// [v8] Hai lượt trừ kho cho CÙNG một bill (bấm đúp / gửi lại sau timeout) chạy chồng nhau từng cùng vượt bước kiểm tra sổ rồi cùng trừ RT.
+// Tuần tự hoá theo orderId: lượt sau chạy khi lượt trước xong, thấy sổ đã có và dừng.
+const _salesConsumeChains = new Map();
 async function applySalesConsumptionPOS(order, orderId, businessDate) {
+  const prev = _salesConsumeChains.get(orderId) || Promise.resolve();
+  const run = prev.catch(() => {}).then(() => _applySalesConsumptionCorePOS(order, orderId, businessDate));
+  _salesConsumeChains.set(orderId, run);
+  try { return await run; } finally { if (_salesConsumeChains.get(orderId) === run) _salesConsumeChains.delete(orderId); }
+}
+async function _applySalesConsumptionCorePOS(order, orderId, businessDate) {
   try {
     const [recipes, toppingRecipes, packagingPresets, packagingItemOverrides, baggingRules, pkgRulesPack, baggingTable] = await Promise.all([ensureRecipesLoadedPOS(), ensureToppingRecipesLoadedPOS(), ensurePackagingPresetsLoadedPOS(), ensurePackagingItemOverridesLoadedPOS(), ensurePackagingBaggingRulesLoadedPOS(), ensurePackagingRulesLoadedPOS(), ensurePackagingBaggingTableLoadedPOS()]);
     const { agg, prepAgg, skipped } = computeConsumptionForOrder(order, recipes, toppingRecipes, packagingPresets, packagingItemOverrides, baggingRules, pkgRulesPack.rules, pkgRulesPack.config, baggingTable);
@@ -20309,7 +20321,7 @@ async function applySalesConsumptionPOS(order, orderId, businessDate) {
           .catch(err => { console.warn('[FIFO] phân bổ lỗi', ingId, err); return []; });
         ingredientAllocations[ingId] = { qty, allocations };
         try {
-          return await UnitEngine.ledger.apply({
+          const applied = await UnitEngine.ledger.apply({
             itemId: ingId, type: 'CONSUMPTION', qty: -qty,
             note, staff: '', referenceId: orderId,
             deriveFromUnits: allocations.length > 0,
@@ -20319,6 +20331,9 @@ async function applySalesConsumptionPOS(order, orderId, businessDate) {
               ...(isBackfillAfterClose ? { backfillAfterClose: true } : {})
             } } : {})
           });
+          // Máy khác đã ghi sổ bill này giữa lúc kiểm tra và ghi → phần RT vừa trừ THÊM phải hoàn (kiểm tra hoàn đủ; chưa đủ thì engine lưu việc phục hồi bền + cảnh báo).
+          if (applied && applied.alreadyApplied && allocations.length) await UnitEngine.consume.compensateDuplicate('item', ingId, allocations, txId);
+          return applied;
         } catch (err) {
           if (allocations.length) {
             let actuallyCommitted = false;
