@@ -213,7 +213,7 @@ Nút "Cập nhật" ở sidebar (`manualCheckUpdate`, dựa trên service worker
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
 <!-- [E1] Unit Engine — nạp TRƯỚC script chính. Đổi phiên bản = đổi tên file (6.1). -->
 <script src="che_do_thu.v1.js?b=96d7f20f91"></script>
-<script src="unit_engine.v12.js?b=fa0f584cae"></script>
+<script src="unit_engine.v13.js?b=f609786cda"></script>
 
 <style>
 :root{--gd:#E23A5D;--gm:#C22B49;--gl:#FDE6EA;--bg:#FFFCF0;--gt:#999;--td:#111;--bb:#E7ECFB;--bi:#1D3F91;
@@ -17830,7 +17830,10 @@ function prepCountWeighBatch(i, batchId, bi) {
       if (_prepVerifyMode) {
         const atMs = UnitEngine.clock.now();
         // Đọc sổ lỗi → VÔ HIỆU snapshot cũ của lô và KHÔNG nhận số cân mới (nếu không số cân mới sẽ ghép với sổ của lần cân trước).
-        try { const bk = await UnitEngine.duty.lotBookAtExact(l.prepId, batchId, atMs); (l.snaps = l.snaps || {})[batchId] = { book: bk.book, exact: bk.exact === true, at: new Date(atMs).toISOString() }; }
+        try {
+          const bk = await UnitEngine.duty.lotBookAtExact(l.prepId, batchId, atMs); (l.snaps = l.snaps || {})[batchId] = { book: bk.book, exact: bk.exact === true, at: new Date(atMs).toISOString() };
+          if (bk.exact !== true && bk.reason === 'chua_xac_nhan_moi_may_da_cap_nhat') toast('⚠️ Quản lý chưa xác nhận mọi máy đã cập nhật — chưa chốt được số cân lại. Báo Quản lý.');
+        }
         catch (err) {
           console.warn('[duty] không chụp được sổ lô lúc cân', err);
           if (l.snaps) delete l.snaps[batchId];
@@ -24426,10 +24429,13 @@ async function _submitAddonImpl() {
 
   // [Sửa lỗi 5] Ghi bằng transaction + so trạng thái đơn lúc mở: máy khác vừa sửa đơn (thêm topping,
   // đổi tổng / dòng món) → HUỶ, không ghi đè mất phần của máy kia. Kho chỉ trừ sau khi ghi đơn thành công.
-  let conflict = false, gone = false;
+  let conflict = false, gone = false, deleting = false;
   try {
     const kq = await db.ref(rtPath).transaction(cur => {
       if (cur === null) return cur;   // chưa có bản cục bộ — trả null để máy chủ gửi bản thật rồi chạy lại
+      // [v13] Bill đang xoá dở (cờ BỀN trên chính node bill, do máy khác ghi) → KHÔNG ghi thêm: kiểm ngay trong transaction vì bản trong RAM có thể cũ.
+      if (cur.deletionPending) { deleting = true; return; }
+      deleting = false;
       if (!_addonSameOrderState(cur, o)) { conflict = true; return; }   // undefined = huỷ transaction
       conflict = false;
       return { ...cur, itemsArray: newItems, items: itemsSummary, total: newTotal, addons };
@@ -24446,6 +24452,7 @@ async function _submitAddonImpl() {
     return;
   }
   if (gone) { toast('⚠️ Đơn không còn trên hệ thống (có thể vừa bị xoá) — chưa thêm gì'); closeAddonSheet(); return; }
+  if (deleting) { o.deletionPending = true; toast('⚠️ Đơn đang xoá dở (đã hoàn kho một phần) — không bổ sung được. Chưa thu tiền, chưa trừ kho.'); closeAddonSheet(); return; }
   if (conflict) { toast('⚠️ Đơn vừa được sửa ở máy khác — mở lại đơn rồi thêm lại. Chưa thu tiền, chưa trừ kho.'); closeAddonSheet(); showDet(o.id); return; }
 
   // Cập nhật RAM. Listener child_added không bắn cho lần sửa này nên phải tự đồng bộ;
@@ -24875,8 +24882,18 @@ async function delOrderConfirm() {
   const rtPath = 'orders_gieogieo/' + month + '/' + day + '/' + delId;
   // [v12] Khoá sửa BỀN dùng chung giữa các máy: từ lúc bắt đầu hoàn kho, bill không được bổ sung thêm (claim/dòng hoàn cố định theo bill nên phần tiêu thụ thêm sau đó
   // sẽ bị bỏ qua ở lần xoá lại). Cờ nằm trên chính node bill trong RT; bill bị xoá xong thì cờ biến mất cùng bill.
-  o.deletionPending = true;
-  try { await db.ref(rtPath + '/deletionPending').set(true); } catch (flagErr) { console.warn('[xoá bill] không ghi được cờ xoá dở', flagErr); }
+  // Ghi cờ là ĐIỀU KIỆN để bắt đầu hoàn (không phải cố gắng hết sức): lỗi → dừng trước khi hoàn kho, nhả khoá thao tác trên máy. Dùng transaction (không `set` — tránh dựng lại
+  // node bill đã bị máy khác xoá).
+  try {
+    const kq = await db.ref(rtPath).transaction(cur => (cur === null ? cur : { ...cur, deletionPending: true }));
+    if (!(kq && kq.snapshot && kq.snapshot.val())) { _deletingOrderIds.delete(delId); toast('⚠️ Đơn không còn trên hệ thống — không cần xoá'); return; }
+    o.deletionPending = true;
+  } catch (flagErr) {
+    console.warn('[xoá bill] không ghi được cờ xoá dở — dừng', flagErr);
+    _deletingOrderIds.delete(delId);
+    toast('⚠️ Chưa khoá được đơn để xoá (lỗi kết nối) — CHƯA hoàn kho, CHƯA xoá. Thử lại.');
+    return;
+  }
 
   // [BUG "xoá bill không await reverse" — FIX] Trước đây gọi reverseSalesConsumptionPOS()
   // KHÔNG await rồi xoá bill khỏi RTDB gần như ngay lập tức — nếu hoàn kho lỗi (một phần hay

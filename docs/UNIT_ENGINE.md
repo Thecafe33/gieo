@@ -301,3 +301,10 @@ Chưa làm: nguyên liệu (NL) — đối chiếu NL khi nấu đã có `respon
 - **Hoàn tác xác minh**: worker không hoàn tác lượt đã chốt — hồ sơ vụ lệch mang `verification.op = opId` (ghi cùng transaction đóng việc); rào mới hơn chưa đủ. Sau hoàn tác đồng bộ bản sao Firestore của lô, tồn tổng và thiếu chờ đối chiếu từ RT; lỗi đồng bộ → việc còn pending.
 - **Dấu hoàn bền**: không đọc được `rev_marks_gieogieo` → `ambiguous` (không hoàn; claim được nhả; việc phục hồi còn pending).
 - **POS xoá bill**: đặt cờ `deletionPending` trên node bill (RT) TRƯỚC khi hoàn kho; `orderAddonInfo` từ chối bổ sung bill đang xoá dở (claim/dòng hoàn cố định theo bill nên phần tiêu thụ thêm sẽ bị bỏ qua).
+
+## Sửa theo bản rà bug lần 8 (v13, 01/10/2026) — test `tests/phan_bien_v13.test.js` (`ENGINE=unit_engine.v12.js` để xem lỗi engine cũ; L49/L50 kiểm POS nên chạy trên HTML hiện hành)
+- **Hoàn tác xác minh**: bước đồng bộ lô/tồn/thiếu chờ đối chiếu từ RT LUÔN chạy khi xử lý việc (tách khỏi "đã hoàn tác RT"), idempotent; việc chỉ đóng khi đồng bộ xong.
+- **Cổng phiên bản** (`duty.fleetCompliant`) áp dụng cho MỌI nhánh của `lotBookAtExact` (kể cả lô thiếu node RT) và kiểm lại khi `verifyCommit` nhận lượt chốt (`code:'FLEET_UNCONFIRMED'`), kể cả lượt dùng dữ liệu đã lưu — chủ bỏ xác nhận thì dừng, lượt dở được làm tiếp khi xác nhận lại. Mặc định CHƯA xác nhận.
+- **Đóng dấu** chỉ cho node CHƯA từng theo dõi (không `chgBase`, không `chg`), kiểm lại trong transaction. Nhật ký bị cắt quá mốc hoặc bất biến vỡ → `exact:false`, không công nhận lại mốc cũ. Chữa: Quản lý "Điều chỉnh số lô" (`prep.setBatchQty`) giữ nhật ký, thêm dòng delta và tính lại `chgBase`.
+- **Lô thiếu node RT**: đọc RT lại SAU khi đọc Firestore; node xuất hiện giữa chừng thì dùng lịch sử của nó (tối đa 3 vòng).
+- **POS**: ghi cờ `deletionPending` bằng transaction, lỗi → dừng trước khi hoàn kho và nhả khoá; transaction ghi topping kiểm `cur.deletionPending` trên dữ liệu máy chủ.

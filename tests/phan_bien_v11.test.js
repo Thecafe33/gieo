@@ -163,8 +163,8 @@ const closedByNew = async (f, T0) => {                 // việc mới xác minh
     eq([late.book, late.exact], [90, false], 'L42 đọc muộn: bất biến vỡ → exact:false (không còn tin "không thấy bán")');
     let err = null; try { await f.UE.duty.verifyCommit(Object.assign(line(100, late.book), { snaps: { b1: { book: late.book, exact: late.exact } } }), task(), ctx()); } catch (e) { err = e; }
     eq([err && err.code, rtv(f, 'b1/unitBase')], ['BOOK_INEXACT', 90], 'L42 xác minh bị từ chối, RT giữ 90');
-    const again = await f.UE.duty.lotBookAtExact('P', 'b1', T);                                  // cân lại (đọc ngay sau cân) → đóng dấu lại, thoát vòng lặp
-    eq([again.book, again.exact], [90, true], 'L42 cân lại → đóng dấu lại, exact:true (hết vòng "cân lại mãi")');
+    const again = await f.UE.duty.lotBookAtExact('P', 'b1', T);                                  // [v13] lịch sử đã có mà vỡ → KHÔNG đóng dấu lại (chữa bằng Điều chỉnh số lô)
+    eq([again.book, again.exact], [90, false], 'L42 (v13) cân lại: bất biến vỡ → vẫn exact:false, không công nhận lại mốc');
   }
   console.log(ok ? 'ALL PASS' : 'SOME FAIL'); process.exit(ok ? 0 : 1);
 })().catch(e => { console.log('FAIL exception', e && e.stack); process.exit(1); });

@@ -23,7 +23,7 @@ const world = (opt = {}) => {
 };
 let T = Z('2026-09-22T14:30:00.000Z');
 const mk = opt => {
-  const fake = makeFake(world(opt)); const UE = loadEngineModule();
+  const fake = makeFake(world(opt)); fake.FS['duty_config_gieogieo/current'] = Object.assign({ fleetCompliant: true }, fake.FS['duty_config_gieogieo/current'] || {}); const UE = loadEngineModule();
   UE.init({ app: 'pos', fstore: fake.fstore, db: fake.db, FieldValue: fake.FieldValue, businessDate: () => '2026-09-22', now: () => T, random: () => 0.5, hooks: { notify() {}, report() {} }, appFns: { handoverIsOverThreshold: () => false } });
   return { fake, UE };
 };

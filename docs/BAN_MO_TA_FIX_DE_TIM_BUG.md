@@ -163,3 +163,15 @@ Test: `tests/phan_bien_v12.test.js` (`ENGINE=unit_engine.v11.js` để xem lỗi
 47. Xoá bill dở rồi bổ sung topping → cờ `deletionPending` chặn bổ sung (đổi hành vi: bill đang xoá dở không bổ sung được).
 48. Bất biến tổng không phát hiện hai thay đổi không nhật ký triệt tiêu nhau → cổng "đã xác nhận mọi máy cập nhật" do chủ bật; chưa bật thì không coi sổ tại mốc là chính xác.
 Giới hạn còn lại: máy chạy engine < v11 vẫn có thể đổi sổ không ghi nhật ký — cổng #48 dựa vào việc chủ xác nhận, không tự phát hiện được.
+
+---
+## L. Đợt sửa theo bản rà bug lần 8 (engine v13) — lỗi 49–54
+Test: `tests/phan_bien_v13.test.js`.
+49. Máy giữ bill cũ trong RAM vẫn bổ sung được → transaction ghi topping kiểm cờ `deletionPending` trên dữ liệu máy chủ.
+50. Ghi cờ xoá dở lỗi vẫn hoàn kho → dừng trước khi hoàn, nhả khoá thao tác.
+51. Đồng bộ sau hoàn tác lỗi bị bỏ qua ở lần phục hồi sau → đồng bộ lô/tồn/thiếu luôn chạy (idempotent) trước khi đóng việc.
+52. Cổng phiên bản chưa chặn mọi đường → áp dụng mọi nhánh đọc và kiểm lại trong `verifyCommit`.
+53. Nhật ký bị cắt vẫn bị "đóng dấu" → chỉ đóng dấu node chưa từng theo dõi; lịch sử bị cắt thì exact:false.
+54. Node xuất hiện giữa lúc đọc RT và Firestore → đọc RT lại sau Firestore, dùng lịch sử của node.
+Giữ nguyên hai lựa chọn nghiệp vụ: khoá bổ sung bill xoá dở; cổng phiên bản mặc định CHƯA xác nhận.
+Giới hạn còn lại: node chỉnh bằng `set` trực tiếp bắt đầu theo dõi lại từ đầu; cổng #48 dựa vào xác nhận của chủ.

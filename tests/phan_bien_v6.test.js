@@ -9,7 +9,7 @@ const near = (a, b, m) => eq(Math.round(a * 100) / 100, b, m);
 const PI = 'prep_items_gieogieo', PB = 'prep_batches_gieogieo', TASKS = 'duty_tasks_gieogieo', CASES = 'duty_cases_gieogieo';
 let T = Date.parse('2026-09-23T08:30:00.000Z');
 const mk = (fs, rt) => {
-  const fake = makeFake({ rt: rt || {}, fs: fs || {} }); const UE = loadEngineModule(FILE);
+  const fake = makeFake({ rt: rt || {}, fs: fs || {} }); fake.FS['duty_config_gieogieo/current'] = Object.assign({ fleetCompliant: true }, fake.FS['duty_config_gieogieo/current'] || {}); const UE = loadEngineModule(FILE);
   UE.init({ app: 'pos', fstore: fake.fstore, db: fake.db, FieldValue: fake.FieldValue, businessDate: () => '2026-09-23', now: () => T, random: () => 0.5, hooks: { notify() {}, report() {} }, appFns: { handoverIsOverThreshold: () => false } });
   return { fake, UE };
 };
