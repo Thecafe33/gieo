@@ -179,5 +179,29 @@ const trace = r => r.fs[PB + '/c1'].inputTrace.X;
       call: F => F.openConfirmFinishSheet({ id: 'A', itemId: 'X', itemName: 'Sữa tươi', code: 'AAA', status: 'open', baseQty: 1000, unit: 'ml' }, false) });
     eq([rFin.calls.some(c => c[0] === 'openStockScanSheet'), /báo hết/.test(String((rFin.calls.find(c => c[0] === 'toast') || [])[1]))], [false, true], 'S10 báo hết ở tab Kho khi NL khoá → chặn, không mở popup');
   }
+
+  // S11. Ca thực tế 01/10: sổ mã còn 171 g, cân ra 337 g, định mức 20 g (lần cân trước của NV A nhập sai −165 g)
+  {
+    const seed = mkSeed(false);
+    seed.rt.active_units_gieogieo.X.A.unitBase = 171; seed.fs[CTN + '/A'].unitBase = 171; seed.fs[INV + '/X'].currentStock = 171;
+    seed.fs[PB + '/c1'].reconcileInputs.X.expected = 20;
+    seed.fs[PB + '/c1'].reconcileInputs.X.units = [{ id: 'A', code: 'AAA', baseline: 171, bookBaseline: 171, heldAtBook: 0, preVerified: false,
+      startCheckpoint: { stage: 'after', at: '2026-09-29T12:05:00.000Z', batchId: 'prevB', employeeId: 'eA', employeeName: 'Nhân viên A' } }];
+    seed.fs[TX + '/prep_after_prevB_X'] = { itemId: 'X', type: 'CONSUMPTION', qty: -185, prepRecon: true, varianceKind: 'extra_usage', expectedQty: 20, referenceId: 'prevB',
+      responsibility: { employeeId: 'eA', employeeName: 'Nhân viên A' } };
+    const sp = spec(false, async (F, fake, base) => {
+      await lock(base.UnitEngine);
+      await weigh(F, base, 337);
+      await F.prepReconPostSave();
+    }, { note: 'Lần cân trước nhập sai' });
+    sp.seed = seed;
+    const r = await runWrapped('engine', sp);
+    eq([r.error, rtA(r).unitBase, r.fs[INV + '/X'].currentStock], [null, 337, 337], 'S11 cân nhiều hơn sổ vẫn chốt được: tem = số cân thật 337');
+    eq([T(r, 'prep_after_c1_X').qty, T(r, 'prep_surplus_c1_X') && [T(r, 'prep_surplus_c1_X').type, T(r, 'prep_surplus_c1_X').qty]], [-20, ['ADJUSTMENT', 186]], 'S11 mẻ dùng theo định mức 20; điều chỉnh tăng 186 (sổ ghi thiếu)');
+    const prev = T(r, 'prep_after_prevB_X');
+    eq([prev.entryErrorConfirmed, prev.entryErrorFoundInBatch, prev.responsibility.employeeName], [true, 'c1', 'Nhân viên A'], 'S11 lượt cân trước được đánh dấu nhập sai, người cân vẫn là NV A');
+    const al = r.fs['alerts_gieogieo/prep_entry_error_c1_X'];
+    eq([!!al, al && al.previousWeighers[0].employeeName, trace(r).bookUnderstated.qty], [true, 'Nhân viên A', 186], 'S11 báo Quản lý + vết mẻ ghi người cân mốc trước');
+  }
   console.log(ok ? 'ALL PASS' : 'SOME FAIL'); process.exit(ok ? 0 : 1);
 })().catch(e => { console.log('FAIL exception', e && e.stack); process.exit(1); });

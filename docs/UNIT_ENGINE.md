@@ -1,4 +1,4 @@
-# Unit Engine — tài liệu API (`unit_engine.v2.js`, bản 2.0.0; v1 giữ để quay lui)
+# Unit Engine — tài liệu API (`unit_engine.v3.js`, bản 3.0.0; v1, v2 giữ để quay lui)
 
 > Viết ở E5 (28/09/2026), cập nhật E6. Kế hoạch gốc: `docs/KE_HOACH_UNIT_ENGINE_DA_CUA_HANG.md`.
 > Bảng ghi của E0 (trước khi tách): `docs/BANG_GHI_ENGINE.md`.
@@ -23,7 +23,7 @@ Bất biến (chi tiết ở mục 2 kế hoạch):
 ## 2. Nạp và khởi tạo
 
 ```html
-<script src="unit_engine.v2.js"></script>   <!-- trước script chính; đổi bản = đổi tên file -->
+<script src="unit_engine.v3.js"></script>   <!-- trước script chính; đổi bản = đổi tên file -->
 ```
 
 ```js
@@ -212,3 +212,9 @@ NL của mẻ (`prep_ingredient_locks_gieogieo` + `__prepLock` trên RT) khoá t
 - Hết khoá (`prepReconRelease`) dọn `saleHeld` / `prepSaleHeld`.
 - **Tab Kho:** NL đang chờ cân cho mẻ thì KHÔNG mở mã / báo hết ở tab Kho — làm ở màn Đối chiếu NL của mẻ.
 - Còn chặn: xoá bill (hoàn kho) của bill bán trong lúc khoá — làm lại sau khi NL cân xong.
+
+## Cân đối chiếu ra NHIỀU HƠN sổ (v3)
+Mã có số cân > mốc sổ = sổ lần cân trước ghi thiếu (VD lần trước cân sai, trừ oan 165 g). Không còn chặn:
+- Tem đặt theo số cân thật; mẻ dùng ghi theo định mức; phần dư = `Σcân − (Σmốc − định mức)` ghi **ADJUSTMENT tăng** `prep_surplus_{mẻ}_{NL}` (`prepReconSurplus`, `needsReview`).
+- Người cân mốc trước lấy từ `startCheckpoint` của mã: dòng `prep_after_{mẻ trước}_{NL}` được đánh dấu `entryErrorConfirmed` (người cân lượt đó **vẫn chịu trách nhiệm** phần dùng-thêm đã ghi); cảnh báo `alerts_gieogieo/prep_entry_error_*` cho Quản lý; vết mẻ `inputTrace.<NL>.bookUnderstated`.
+- Báo cáo tháng (Quản lý ▸ Đối chiếu NL theo nhân viên) hiện "Đã xác minh nhập sai số liệu" và người cân mốc trước.

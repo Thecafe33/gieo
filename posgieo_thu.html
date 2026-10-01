@@ -213,7 +213,7 @@ Nút "Cập nhật" ở sidebar (`manualCheckUpdate`, dựa trên service worker
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
 <!-- [E1] Unit Engine — nạp TRƯỚC script chính. Đổi phiên bản = đổi tên file (6.1). -->
 <script src="che_do_thu.v1.js?b=96d7f20f91"></script>
-<script src="unit_engine.v2.js?b=ee252ba8c3"></script>
+<script src="unit_engine.v3.js?b=8d6c18bc8f"></script>
 
 <style>
 :root{--gd:#E23A5D;--gm:#C22B49;--gl:#FDE6EA;--bg:#FFFCF0;--gt:#999;--td:#111;--bb:#E7ECFB;--bi:#1D3F91;
@@ -10915,7 +10915,14 @@ function prepReconFormHTML(c){
   }).join('');
   const kind=c.varianceKind||'';
   const opt=(val,label)=>`<option value="${val}" ${kind===val?'selected':''}>${label}</option>`;
-  const explain=needExplain?`<div style="margin-top:14px;padding:14px;background:#fffbeb;border:1.5px solid #fcd34d;border-radius:16px">
+  const sur=compared&&compared.surplusLots&&compared.surplusLots.length?compared.surplusLots:null;
+  const surplusPanel=sur?`<div style="margin-top:14px;padding:14px;background:#fffbeb;border:1.5px solid #fcd34d;border-radius:16px">
+      <div style="font-size:14px;font-weight:800;color:#92400e">Thực tế NHIỀU HƠN sổ</div>
+      <div style="font-size:13px;color:#78350f;margin-top:4px">${sur.map(l=>`Mã <b>${escHtmlPos(l.code)}</b>: cân ${fmtPrepQty(c.values[l.containerId]?.qty)} ${unit}, sổ chỉ ghi ${fmtPrepQty((row.units.find(x=>x.id===l.containerId)||{}).baseline)} ${unit} (hơn ${fmtPrepQty(l.qty)})`).join('<br>')}</div>
+      <div style="font-size:12.5px;color:#92400e;margin-top:6px;line-height:1.5">Hệ thống hiểu sổ lần cân trước ghi thiếu. Mẻ này tính dùng đúng định mức <b>${fmtPrepQty(row.expected)} ${unit}</b>; tồn mã đặt theo số cân thật. Phần chênh vẫn tính cho người cân mốc trước${(()=>{const n=[...new Set(sur.map(l=>(row.units.find(x=>x.id===l.containerId)||{}).startCheckpoint).filter(Boolean).map(cp=>cp.employeeName).filter(Boolean))];return n.length?' (<b>'+n.map(escHtmlPos).join(', ')+'</b>)':'';})()} và được báo Quản lý.</div>
+      <input placeholder="Ghi ngắn lý do (bắt buộc)" value="${escHtmlPos(c.note||'')}" oninput="prepReconForm.note=this.value;prepReconForm.varianceKind='book_understated'" style="width:100%;box-sizing:border-box;margin-top:8px;padding:11px;border:1.5px solid #fcd34d;border-radius:12px;background:#fff;color:#1f1f1f;font:600 14px 'Google Sans',sans-serif">
+    </div>`:'';
+  const explain=needExplain&&sur?surplusPanel:needExplain?`<div style="margin-top:14px;padding:14px;background:#fffbeb;border:1.5px solid #fcd34d;border-radius:16px">
       <div style="font-size:14px;font-weight:800;color:#92400e">Cần giải trình chênh lệch</div>
       <div style="font-size:13px;color:#78350f;margin-top:4px">Đã giảm <b>${fmtPrepQty(observed)} ${unit}</b> · so với định mức <b>${diff>0?'+':''}${fmtPrepQty(diff)} ${unit}</b></div>
       <div style="font-size:12.5px;color:#92400e;margin-top:4px">${changedLots.map(u=>`${escHtmlPos(u.code)}: ${u.delta>0?'+':''}${fmtPrepQty(u.delta)}`).join(' · ')}</div>
@@ -11184,6 +11191,15 @@ function prepReconClassifyUsage(submitted, expected, kind='') {
       fromCheckpoint:u.startCheckpoint||null,preVerified:!!u.preVerified};
   });
   const observed=round2(lotBreakdown.reduce((n,u)=>n+u.observed,0));
+  // [Cân ra NHIỀU HƠN sổ] Mã có số cân lớn hơn mốc sổ = sổ lần trước ghi thiếu (VD lần trước cân sai). Lượng mẻ
+  // dùng không đo được → tính theo định mức; phần dư xử lý riêng (ghi điều chỉnh tăng + truy người cân mốc trước).
+  const surplusLots=submitted.filter(u=>!u.finished&&u.after>u.baseline+0.015)
+    .map(u=>({containerId:u.id,code:u.code,qty:round2(u.after-u.baseline)}));
+  if(surplusLots.length){
+    return {observed,variance:0,actual:round2(Number(expected)||0),
+      allocations:lotBreakdown.filter(u=>u.planned>0.005).map(u=>({containerId:u.containerId,code:u.code,qty:u.planned})),
+      varianceAllocations:[],lotBreakdown,shortfall:0,surplusLots};
+  }
   const variance=kind==='extra_usage'?0:Math.max(0,round2(observed-expected));
   const actual=round2(observed-variance);
   const allocations=lotBreakdown.filter(u=>u.containerId!=='__aggregate')
@@ -11265,7 +11281,10 @@ async function prepReconPostSave() {
         const err=new Error(`Mã ${changed.code}: mốc ${fmtPrepQty(changed.baseline)}, tồn hiện ${current?fmtPrepQty(current.unitBase):'không còn mở'}. Nạp mốc mới và cân lại trước khi chốt.`);
         err.code='PREP_RECON_STALE';throw err;
       }
-      if(submitted.some(u=>u.after>u.baseline+0.015))throw new Error('Số còn lại lớn hơn mốc trước. Kiểm tra mã, bì hoặc lượt nhập thêm.');
+      // Số cân lớn hơn sổ KHÔNG còn bị chặn: chốt theo nhánh "sổ ghi thấp hơn thực tế" (xem prepReconClassifyUsage) —
+      // tồn = số cân, mẻ dùng theo định mức, phần dư truy người cân mốc trước, báo Quản lý. Bắt buộc ghi lý do.
+      const surplusMode=submitted.some(u=>!u.finished&&u.after>u.baseline+0.015);
+      if(surplusMode)st.varianceKind='book_understated';
       let comparison=prepReconClassifyUsage(submitted,row.expected,st.varianceKind);
       const residue=prepReconResidueAuto(row.units,finished,comparison,row.expected);
       if(residue){st.varianceKind=residue.kind;st.note=residue.note;
@@ -11273,7 +11292,7 @@ async function prepReconPostSave() {
       if(comparison.lotBreakdown.some(u=>Math.abs(u.delta)>0.015)&&!(st.note||'').trim())
         throw new Error('Một hoặc nhiều mã lệch định mức — ghi lý do trước khi chốt');
       const diff=round2(comparison.observed-row.expected);
-      const kinds=diff>0.015?['prior_variance','extra_usage','waste','uncertain']
+      const kinds=surplusMode?['book_understated']:diff>0.015?['prior_variance','extra_usage','waste','uncertain']
         :diff< -0.015?['under_usage','uncertain']:['lot_shift','uncertain'];
       if(comparison.lotBreakdown.some(u=>Math.abs(u.delta)>0.015)&&!kinds.includes(st.varianceKind))
         throw new Error('Một hoặc nhiều mã lệch định mức — chọn nguyên nhân và nhận trách nhiệm');
