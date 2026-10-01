@@ -116,3 +116,15 @@ Test: `tests/phan_bien_v8.test.js` (`ENGINE=unit_engine.v7.js` để xem lỗi c
 20. RT lô bị kẹp ≥0 làm mất nợ → ghi `counted − sold` không kẹp.
 21. POS đọc sổ lô sau lúc cân → lấy mốc trước, dùng `lotBookAt`.
 Giới hạn: `lotBookAt` dựa `usageEvents` (best-effort); phục hồi bền chạy khi POS mở khối check-in; hoàn dở một phần cần quản lý xử lý tay (`needs_manual`).
+
+---
+## H. Đợt sửa theo bản rà bug lần 4 (engine v9) — lỗi 22–28
+Test: `tests/phan_bien_v9.test.js` (`ENGINE=unit_engine.v8.js` để xem lỗi cũ; v9 đạt hết).
+22. Phục hồi bù trùng hoàn hai lần → khoá idempotent theo thao tác ngay trên node RT + thuê 60 giây trên việc phục hồi.
+23. `lotBookAt` ghép hai ảnh khác thời điểm, bỏ qua hoàn → nhật ký thay đổi có dấu ghi cùng transaction với `unitBase`, đọc một lần.
+24. Token chưa chặn lượt cũ ghi RT → thế hệ `dutyVerifyGen` kiểm trong transaction RT.
+25. Thử lại đóng nhầm lô chưa xử lý → tiến độ từng lô `rtDone` lưu trong `task.attempt`.
+26. Lỗi ghi việc phục hồi làm mất dấu → hàng đợi cục bộ (bộ nhớ + localStorage) + ghi lại khi `recoverDuplicates`.
+27. Xác minh bỏ qua hoàn sau mốc cân → remain có dấu (bỏ `max(0, …)`).
+28. Lô cuối đã đóng, ghi sổ lỗi, không mở lại được → POS có đường "Ghi nốt" từ `task.attempt`.
+Giới hạn còn lại: (a) `lotBookAt` rơi về cách cũ (best-effort) với node chưa có `chg`; (b) nếu máy tắt/crash đúng giữa lúc trừ RT thừa và lúc ghi bất kỳ dấu nào (kể cả localStorage) thì không có dấu phục hồi — phát hiện qua cân/kiểm kê; (c) lượt xác minh cũ có thể ghi RT trong khe vài ms giữa lúc việc mới được tạo và lúc việc mới ghi RT lần đầu.

@@ -212,7 +212,7 @@ Nút "Cập nhật" ở sidebar (`manualCheckUpdate`, dựa trên service worker
 <script src="https://cdn.jsdelivr.net/npm/bcryptjs@2.4.3/dist/bcrypt.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
 <!-- [E1] Unit Engine — nạp TRƯỚC script chính. Đổi phiên bản = đổi tên file (6.1). -->
-<script src="unit_engine.v8.js"></script>
+<script src="unit_engine.v9.js"></script>
 
 <style>
 :root{--gd:#E23A5D;--gm:#C22B49;--gl:#FDE6EA;--bg:#FFFCF0;--gt:#999;--td:#111;--bb:#E7ECFB;--bi:#1D3F91;
@@ -17985,11 +17985,26 @@ async function openPrepVerifyPOS(taskId) {
     if (task) line = (await computePrepCountLinesPOS()).find(x => x.prepId === task.prepId);
   } catch (err) { console.warn('[duty] mở việc cân lại lỗi', err); toast('❌ Không tải được dữ liệu cân lại'); exitPrepVerifyPOS(); return; }
   if (!task) { toast('✅ Việc này đã được xử lý'); exitPrepVerifyPOS(); return; }
+  // [v9] Lượt cân lại trước đã cân xong nhưng chưa ghi hết (lô đã đóng/về 0 nên không còn gì để cân): số liệu nằm sẵn trong task.attempt → ghi nốt, KHÔNG bắt cân lại.
+  const hasStored = !!(task.attempt && Array.isArray(task.attempt.lots) && task.attempt.lots.length && (task.partialRt === true || task.status === 'processing'));
+  if (hasStored && (!line || !line.activeBatches.length)) { renderPrepVerifyRecoveryPOS(task); return; }
   if (!line || !line.activeBatches.length) {
     toast('⚠️ Bán thành phẩm này không còn lô để cân — việc sẽ tự đóng');
     exitPrepVerifyPOS(); return;
   }
   renderPrepCountScreen([line], task);
+}
+function renderPrepVerifyRecoveryPOS(task) {
+  _prepVerifyMode = { task, session: ++_prepVerifySeq, recovery: true };
+  _prepCountState = [{ prepId: task.prepId, prepName: task.prepName || '', unit: task.unit || '', activeBatches: [], batchQty: {}, batchWeighings: {}, snaps: {}, counted: 0 }];
+  document.getElementById('shiftBody').innerHTML = `
+    <div class="kc-card" style="margin:0 0 14px;">
+      <div style="font-size:17px;font-weight:800;color:var(--td);margin-bottom:6px;">${escHtmlPos(task.prepName || '')}</div>
+      <div style="font-size:13.5px;font-weight:600;color:#8A8A90;line-height:1.5;">Lượt cân lại trước đã cân xong nhưng chưa ghi hết vào sổ. Số cân đã được lưu — chỉ cần nhập mã PIN và ghi nốt, không cần cân lại.</div>
+    </div>
+    <div class="kc-card" style="margin:0 0 14px;">${renderPinInput('prepCountStaff')}</div>
+    <button onclick="exitPrepVerifyPOS()" style="width:100%;margin:0 0 12px;padding:13px;background:#fff;border:1.5px solid #ddd;border-radius:999px;color:#666;font-family:'Google Sans',sans-serif;font-size:14px;font-weight:700;cursor:pointer;">Để sau</button>
+    <button onclick="submitPrepVerify()" class="kc-btn" style="background:var(--gd);color:#fff;margin-bottom:22px;">Ghi nốt số cân lại</button>`;
 }
 function exitPrepVerifyPOS() {
   _prepVerifyMode = null; _prepCountState = [];
