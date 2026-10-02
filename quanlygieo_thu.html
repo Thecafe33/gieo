@@ -4522,6 +4522,8 @@ function addInventoryItem(data){
     // mang mã tem bị vứt ngay khi mở. Bật thì POS in tem mở mới (giữ mã cũ + giờ mở) để dán
     // sang dụng cụ đựng, xem submitOpenContainer()/POSTemPrinter.printOpenLabel bên posgieo.
     printOpenLabel: !!data.printOpenLabel,
+    // prepWholePack — [NẤU NGUYÊN GÓI] công thức chế biến luôn dùng trọn gói: POS quét gói còn nguyên + báo hết, không cân.
+    prepWholePack: !!data.prepWholePack,
     // densityGPerMl — tỉ trọng g/ml cho nguyên liệu ml/l, để POS cân trừ bì được (posItemWeighFactor).
     densityGPerMl: Number(data.densityGPerMl) > 0 ? Number(data.densityGPerMl) : 0,
     // [MỚI] vesselIds — dụng cụ đựng dùng để CÂN món này ở POS (tự trừ bì), lấy
@@ -10765,9 +10767,13 @@ function prepSugRatioOk(prep, r, khoItems, isAtomic){
   for(const [id, q] of Object.entries(per)){
     const it = (khoItems||[]).find(i=>i.id===id);
     if(!it || it.stockManaged===false) continue;
+    const r2 = x => Math.round(x*100)/100;
+    // [NẤU NGUYÊN GÓI] NL bật "Nấu dùng nguyên gói": số mẻ phải ra tròn gói (chép y hệt ở 2 app).
+    const pkNg = it.prepWholePack===true ? (it.packagingUnits||[]).find(x=>x.name===it.countUnitName) : null;
+    const goiNg = pkNg && Number(pkNg.baseQty)>1 ? Number(pkNg.baseQty) : 0;
+    if(goiNg){ if(!Number.isInteger(r2(q*r/goiNg))) return false; continue; }
     const u = String(it.unit||'').trim().toLowerCase();
     if(u!=='cái' && u!=='miếng') continue;
-    const r2 = x => Math.round(x*100)/100;
     const need = isAtomic(it) || Number.isInteger(r2(q));
     if(need && !Number.isInteger(r2(q*r))) return false;
   }
@@ -20359,6 +20365,8 @@ function renderTrackingBox(){
   const prevShelf = document.getElementById('invOpenShelfLife')?.value;
   const prevPrintOpenLabelEl = document.getElementById('invPrintOpenLabel');
   const printOpenLabelChecked = prevPrintOpenLabelEl ? prevPrintOpenLabelEl.checked : !!(editingItem && editingItem.printOpenLabel);
+  const prevWholePackEl = document.getElementById('invPrepWholePack');
+  const wholePackChecked = prevWholePackEl ? prevWholePackEl.checked : !!(editingItem && editingItem.prepWholePack);
 
   // Giá trị một đơn vị kiểm kê — cơ sở để gợi ý có đáng dán tem không.
   const chosen = rows.find(r=>r.name===curCountUnit);
@@ -20403,6 +20411,11 @@ function renderTrackingBox(){
       <label class="nlf-sw" style="margin-top:12px;border-top:1px solid var(--line);padding-top:12px">
         <span><b>In tem mở khi báo mở</b><small>Bao bì gốc bị vứt khi mở: POS bắt in tem mới dán vào dụng cụ đựng.</small></span>
         <input type="checkbox" id="invPrintOpenLabel" ${printOpenLabelChecked ? 'checked' : ''}>
+      </label>` : ''}
+      ${cur!=='none' && chosen && heSo > 1 ? `
+      <label class="nlf-sw" style="margin-top:12px;border-top:1px solid var(--line);padding-top:12px">
+        <span><b>Nấu dùng nguyên ${escapeHtmlAttr(chosen.name)}</b><small>Công thức chế biến luôn dùng trọn ${escapeHtmlAttr(chosen.name)} (1 ${escapeHtmlAttr(chosen.name)} = ${fmtNum(heSo, 2)} ${escapeHtmlAttr(baseUnit)}): khi nấu POS bắt quét mã ${escapeHtmlAttr(chosen.name)} còn nguyên rồi báo hết, không cân. Số mẻ phải ra tròn ${escapeHtmlAttr(chosen.name)}.</small></span>
+        <input type="checkbox" id="invPrepWholePack" ${wholePackChecked ? 'checked' : ''}>
       </label>` : ''}`;
 }
 function setTrackingMode(m){
@@ -20614,6 +20627,7 @@ function nlItemsGridHtml(list, isLow, isNeg){
         : tm==='unit' ? '<span class="tier tier-green">Tem từng ' + escapeHtmlAttr(cu.name) + '</span>'
         : tm==='batch' ? '<span class="tier tier-amber">Tem theo lô</span>' : '',
       it.printOpenLabel && managed && tm!=='none' ? '<span class="tier tier-green">In tem mở</span>' : '',
+      it.prepWholePack && managed && tm!=='none' ? '<span class="tier tier-green">Nấu nguyên ' + escapeHtmlAttr(cu.name) + '</span>' : '',
       it.staffCounts === false ? '<span class="tier tier-blue">NV không kiểm kê</span>' : '',
       (it.vesselIds||[]).length ? '<span class="tier tier-green">Cân được</span>' : ''
     ].filter(Boolean).join('');
@@ -20790,6 +20804,8 @@ async function submitInventoryItem(){
   // In tem mở khi báo mở — chỉ có nghĩa khi món này có dán tem (trackingMode khác 'none'),
   // ô tick chỉ tồn tại trên form trong trường hợp đó nên chốt luôn ở đây cho chắc.
   const printOpenLabel = trackingMode !== 'none' && !!document.getElementById('invPrintOpenLabel')?.checked;
+  // [NẤU NGUYÊN GÓI] ô chỉ hiện khi có tem + đơn vị kiểm kê > 1 đơn vị cơ bản; ngoài trường hợp đó luôn tắt.
+  const prepWholePack = trackingMode !== 'none' && stockManaged && !!document.getElementById('invPrepWholePack')?.checked;
   // ---- Dụng cụ cân (nguyên liệu dùng ngay) ----
   // Đơn vị không cân được thì xoá sạch lựa chọn — giữ lại chỉ làm POS hiện nút cân
   // cho ra số sai đơn vị. Ngược lại, khi VESSELS chưa nạp được (mất mạng lúc mở
@@ -20828,7 +20844,7 @@ async function submitInventoryItem(){
     if(editingItemId){
       savedItemId = editingItemId;
       const metaLuu = { name, minStock, costPerUnit, packagingUnits, staffCounts, isPackagingMaterial,
-        trackingMode, countUnitName, stockManaged, openShelfLifeHours, printOpenLabel, vesselIds, originalPackId,
+        trackingMode, countUnitName, stockManaged, openShelfLifeHours, printOpenLabel, prepWholePack, vesselIds, originalPackId,
         ...(nlIsVolumeUnit(baseUnitNow) ? { densityGPerMl } : {}) };
       // Mốc giá + bản ghi nguyên liệu ghi trong CÙNG MỘT batch: hoặc cả hai, hoặc không gì cả.
       // Trước đây lưu nguyên liệu trước, ghi mốc sau — ghi mốc lỗi thì lần lưu lại cùng giá
@@ -20860,7 +20876,7 @@ async function submitInventoryItem(){
         name, unit: document.getElementById('invUnit').value,
         currentStock: v('invStart') * f('invStartUnit'),
         minStock, costPerUnit, packagingUnits, staffCounts, isPackagingMaterial,
-        trackingMode, countUnitName, stockManaged, openShelfLifeHours, printOpenLabel, vesselIds, originalPackId,
+        trackingMode, countUnitName, stockManaged, openShelfLifeHours, printOpenLabel, prepWholePack, vesselIds, originalPackId,
         densityGPerMl
       });
       idMoiTao = refMoi && refMoi.id;

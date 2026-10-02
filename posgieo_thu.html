@@ -9783,9 +9783,13 @@ function prepSugRatioOk(prep, r, khoItems, isAtomic){
   for(const [id, q] of Object.entries(per)){
     const it = (khoItems||[]).find(i=>i.id===id);
     if(!it || it.stockManaged===false) continue;
+    const r2 = x => Math.round(x*100)/100;
+    // [NẤU NGUYÊN GÓI] NL bật "Nấu dùng nguyên gói": số mẻ phải ra tròn gói (chép y hệt ở 2 app).
+    const pkNg = it.prepWholePack===true ? (it.packagingUnits||[]).find(x=>x.name===it.countUnitName) : null;
+    const goiNg = pkNg && Number(pkNg.baseQty)>1 ? Number(pkNg.baseQty) : 0;
+    if(goiNg){ if(!Number.isInteger(r2(q*r/goiNg))) return false; continue; }
     const u = String(it.unit||'').trim().toLowerCase();
     if(u!=='cái' && u!=='miếng') continue;
-    const r2 = x => Math.round(x*100)/100;
     const need = isAtomic(it) || Number.isInteger(r2(q));
     if(need && !Number.isInteger(r2(q*r))) return false;
   }
@@ -10372,7 +10376,7 @@ function renderPrepBatchForm() {
         const thieu = (ton !== null) && exact > ton;
         return `
         <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px 14px;margin-top:8px;background:${thieu ? '#fef2f2' : '#FFFCF0'};border:1.5px solid ${thieu ? '#fca5a5' : '#f0ead9'};border-radius:16px;">
-          <span style="min-width:0;font-size:17px;font-weight:800;color:var(--td);line-height:1.3;">${nameOf(row.itemId)}${thieu ? `<span style="display:block;font-size:12.5px;color:#c0392b;font-weight:700;margin-top:2px;">Kho chỉ còn ${fmtPrepQty(ton)} ${unitOf(row.itemId)}</span>` : ''}</span>
+          <span style="min-width:0;font-size:17px;font-weight:800;color:var(--td);line-height:1.3;">${nameOf(row.itemId)}${prepWholePackSize(it) ? `<span style="display:block;font-size:12.5px;color:#9a3412;font-weight:700;margin-top:2px;">Dùng nguyên ${escHtmlPos(it.countUnitName || 'gói')} — quét mã, không cân</span>` : ''}${thieu ? `<span style="display:block;font-size:12.5px;color:#c0392b;font-weight:700;margin-top:2px;">Kho chỉ còn ${fmtPrepQty(ton)} ${unitOf(row.itemId)}</span>` : ''}</span>
           <span style="flex-shrink:0;padding:8px 14px;border-radius:99px;background:${thieu ? '#c0392b' : 'var(--gd)'};color:#fff;font-size:16px;font-weight:800;white-space:nowrap;">${fmtPrepQty(exact)} ${unitOf(row.itemId)}</span>
         </div>`;
       }).join('') || '<div style="font-size:12.5px;color:#bbb;padding:8px 0;">Công thức mẻ chưa khai nguyên liệu nào.</div>'}
@@ -10516,18 +10520,36 @@ let prepStartScanState = null;
 
 // Số CÁI cần quét cho ĐÚNG tỷ lệ mẻ sắp nấu. Cổng bắt đầu chặn kết quả
 // phân số trước khi quét, nên số tem chốt phải khớp đúng lượng ghi sổ.
+// [NẤU NGUYÊN GÓI — chủ quán chốt 02/10/2026] NL có tem, có quy cách đếm > 1 đơn vị (vd bí đao: 1 gói = 600 g) và
+// được bật "Nấu dùng nguyên gói" ở Quản lý (prepWholePack): công thức chế biến luôn dùng TRỌN gói, không có gói dở.
+// Khi nấu, xử lý như NL "cái rời": bắt quét đủ N gói CHƯA MỞ → báo hết luôn (tồn giảm đúng N × quy cách theo tổng
+// tem), không cân, không khoá NL, không qua đối chiếu. Huỷ mẻ trả gói về chưa mở (cùng đường với cái rời).
+// Trả số đơn vị cơ bản của 1 gói (600), 0 nếu NL không thuộc loại này.
+function prepWholePackSize(item) {
+  if (!item || item.prepWholePack !== true || item.stockManaged === false) return 0;
+  if (item.trackingMode !== 'unit' && item.trackingMode !== 'batch') return 0;
+  if (UnitEngine.classify.isAtomic(item)) return 0;
+  const pk = (item.packagingUnits || []).find(x => x.name === item.countUnitName);
+  const b = pk ? Number(pk.baseQty) : 0;
+  return b > 1 ? b : 0;
+}
 function computeAtomicRequirementsForPrep(p, ratio) {
   const grouped=new Map();
   (p && p.batchInputs || []).filter(r=>r.itemId&&Number(r.qty)>0).forEach(r=>
     grouped.set(r.itemId,(grouped.get(r.itemId)||0)+Number(r.qty)));
   return [...grouped].map(([itemId,qty])=>({itemId,qty,
     item:KHO_ITEMS_CACHE.find(x=>x.id===itemId)}))
-    .filter(r => UnitEngine.classify.isAtomic(r.item))
-    .map(r => ({
-      itemId: r.itemId,
-      name: (r.item && r.item.name) || '',
-      required: Math.max(1, Math.round(r.qty * (Number(ratio) || 0)))
-    }));
+    .filter(r => UnitEngine.classify.isAtomic(r.item) || prepWholePackSize(r.item) > 0)
+    .map(r => {
+      const goi = prepWholePackSize(r.item);
+      return {
+        itemId: r.itemId,
+        name: (r.item && r.item.name) || '',
+        // Nguyên gói: số GÓI = lượng cần ÷ quy cách (prepCountQuantityError đã chặn trường hợp ra số gói lẻ).
+        required: Math.max(1, Math.round(r.qty * (Number(ratio) || 0) / (goi || 1))),
+        ...(goi ? { wholePack: goi, packName: r.item.countUnitName || 'gói', unit: r.item.unit || '' } : {})
+      };
+    });
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -10624,6 +10646,13 @@ function prepCountQuantityError(p,ratio) {
     per.set(r.itemId,(per.get(r.itemId)||0)+Number(r.qty)));
   for(const [id,perBatch] of per){
     const item=KHO_ITEMS_CACHE.find(x=>x.id===id);
+    const goi=prepWholePackSize(item);
+    if(goi){   // [NẤU NGUYÊN GÓI] số mẻ phải ra tròn gói
+      const soGoi=round2(perBatch*ratio/goi);
+      if(!Number.isInteger(soGoi))
+        return item.name+' dùng nguyên '+(item.countUnitName||'gói')+' ('+fmtPrepQty(goi)+' '+(item.unit||'')+'): '+fmtPrepQty(perBatch*ratio)+' '+(item.unit||'')+' = '+fmtPrepQty(soGoi)+' '+(item.countUnitName||'gói')+' — chọn số mẻ ra tròn '+(item.countUnitName||'gói');
+      continue;
+    }
     if(!item||item.stockManaged===false||!prepReconIsCountable(item))continue;
     const qty=round2(perBatch*ratio);
     if(!(UnitEngine.classify.isAtomic(item)||Number.isInteger(round2(perBatch))))continue;   // loại C
@@ -10640,7 +10669,7 @@ function prepReconRows(p, ratio) {
     item:KHO_ITEMS_CACHE.find(x=>x.id===itemId)})).filter(r=>
     r.item && r.item.stockManaged !== false && r.item.staffCounts !== false
     && (posItemWeighFactor(r.item)>0 || prepReconIsCountable(r.item))
-    && !UnitEngine.classify.isAtomic(r.item));
+    && !UnitEngine.classify.isAtomic(r.item) && !prepWholePackSize(r.item));
 }
 // [E4.6] Chuyển vào unit_engine.v1.js (chép nguyên văn) — tên cũ giữ làm lớp chuyển tiếp.
 
@@ -11546,7 +11575,7 @@ function renderPrepStartScanGate() {
         <div style="padding:12px 0;${idx === 0 ? '' : 'border-top:1px solid #fdba74;'}">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
             <div style="min-width:0;">
-              <div style="font-size:14.5px;font-weight:700;color:var(--td);">${escHtmlPos(r.name)}</div>
+              <div style="font-size:14.5px;font-weight:700;color:var(--td);">${escHtmlPos(r.name)}${r.wholePack ? ` <span style="font-size:12.5px;color:#9a3412;">· ${r.required} ${escHtmlPos(r.packName)} còn nguyên (1 ${escHtmlPos(r.packName)} = ${fmtPrepQty(r.wholePack)} ${escHtmlPos(r.unit)})</span>` : ''}</div>
               <div style="font-size:13px;font-weight:700;color:${done ? '#16a34a' : '#c2410c'};margin-top:3px;">
                 ${done ? ('✅ Đã quét đủ ' + r.required) : ('Đã quét ' + r.scannedIds.length + '/' + r.required + ' — còn thiếu ' + remain + ', quét tiếp tục')}
               </div>
@@ -11580,7 +11609,13 @@ async function prepStartGateScan(itemId) {
   if (c.status === 'lost') { toast('⚠️ ' + c.code + ' đang ở trạng thái "báo mất" — dùng nút "Quét mã hàng tìm lại được" ở Kiểm kê để phục hồi'); return; }
   if (c.status === 'finished') { toast('ℹ️ ' + c.code + ' đã báo hết trước đó'); return; }
   if (c.status !== 'sealed' && c.status !== 'open') { toast('⚠️ ' + c.code + ' đang chờ xử lý huỷ — không dùng được'); return; }
-  if (!isAtomicUnitContainer(c)) { toast('⚠️ ' + c.code + ' không phải nguyên liệu đếm theo "cái" — không dùng ở bước này'); return; }
+  if (reqRow.wholePack) {
+    // [NẤU NGUYÊN GÓI] chỉ nhận gói CHƯA MỞ, đúng quy cách (công thức dùng trọn gói — không có gói dở).
+    if (c.status !== 'sealed') { toast('⚠️ ' + c.code + ' đã mở — mẻ này dùng nguyên ' + reqRow.packName + ', quét ' + reqRow.packName + ' còn nguyên'); return; }
+    if (Math.abs((Number(c.baseQty) || 0) - reqRow.wholePack) > 0.005) {
+      toast('⚠️ Tem ' + c.code + ' là ' + fmtPrepQty(c.baseQty) + ' ' + (c.unit || '') + ', không phải 1 ' + reqRow.packName + ' (' + fmtPrepQty(reqRow.wholePack) + ' ' + reqRow.unit + ')'); return;
+    }
+  } else if (!isAtomicUnitContainer(c)) { toast('⚠️ ' + c.code + ' không phải nguyên liệu đếm theo "cái" — không dùng ở bước này'); return; }
   if (reqRow.scannedIds.includes(c.id) || st.requirements.some(rr => rr.scannedIds.includes(c.id))) {
     toast('⚠️ Mã ' + c.code + ' vừa được quét rồi, không tính thêm lần nữa'); return;
   }
@@ -11593,7 +11628,7 @@ async function prepStartGateScan(itemId) {
   // [MỚI — FIX "KIT bột sữa/Sữa gạo quét rồi mà Chi tiết lô không thấy tem"] Giữ lại
   // luôn mã + đơn vị của tem vừa quét, không chỉ mỗi id — xem lý do đầy đủ ở
   // confirmPrepStartAfterScan().
-  (reqRow.scannedContainers = reqRow.scannedContainers || []).push({ id: c.id, code: c.code || '', unit: c.unit || '' });
+  (reqRow.scannedContainers = reqRow.scannedContainers || []).push({ id: c.id, code: c.code || '', unit: c.unit || '', baseQty: Number(c.baseQty) || 1 });
   savePrepStartScanState();
   toast('✅ Đã quét ' + c.code);
   const allDone = st.requirements.every(x => x.scannedIds.length >= x.required);
@@ -11628,7 +11663,7 @@ async function confirmPrepStartAfterScan() {
   const atomicAllocationsByItem = {};
   st.requirements.forEach(r => {
     atomicAllocationsByItem[r.itemId] = (r.scannedContainers || []).map(c => ({
-      containerId: c.id, code: c.code, itemName: r.name || '', unit: c.unit || '', qty: 1
+      containerId: c.id, code: c.code, itemName: r.name || '', unit: c.unit || '', qty: r.wholePack ? (Number(c.baseQty) || r.wholePack) : 1
     }));
   });
 
@@ -11645,7 +11680,9 @@ async function confirmPrepStartAfterScan() {
       if (!cDoc.exists) { toast('❌ Mã ' + sc.code + ' không còn tồn tại — bấm huỷ và quét lại'); renderPrepStartScanGate(); return; }
       cData = { id: cDoc.id, ...cDoc.data() };
       // 'open' (cái rời lỡ bị quét mở ở Kho) vẫn dùng được — writeAtomicContainerFinish tự gỡ RT.
-      if (cData.status !== 'sealed' && cData.status !== 'open') {
+      // [NẤU NGUYÊN GÓI] gói phải còn nguyên tới lúc chốt — bị mở ở nơi khác trong lúc chờ thì quét lại.
+      const goiDaMo = sc.reqRow.wholePack && cData.status === 'open';
+      if (goiDaMo || (cData.status !== 'sealed' && cData.status !== 'open')) {
         // [FIX] Bấm lại sau khi lượt trước lỡ đứt mạng giữa chừng (một số mã đã kịp
         // ghi 'finished', số khác thì chưa) — mã NÀY đã do chính người này chốt xong ở
         // lượt trước rồi thì coi là ổn, bỏ qua chứ không báo lỗi/bắt huỷ lại từ đầu.
@@ -11800,7 +11837,7 @@ async function _startPrepBatchImpl(preResolvedStaff, atomicScanDone, atomicScann
       // — đúng nguyên nhân "-17 cái" dù quầy vẫn còn 8 gói. Bỏ qua unitEngineAllocateConsumption (không có
       // gì để phân bổ) và báo deriveFromUnits=true thẳng cho các input này để formula tự suy lại đúng theo
       // tem sealed, không cộng thêm nợ ảo — đồng thời tránh luôn cảnh báo giả "không có tem nào đang mở".
-      const alreadyAtomicScanned = !!atomicScanDone && UnitEngine.classify.isAtomic(item);
+      const alreadyAtomicScanned = !!atomicScanDone && (UnitEngine.classify.isAtomic(item) || prepWholePackSize(item) > 0);
       // [FIX "Chi tiết lô không thấy tem của KIT bột sữa/Sữa gạo dù đã quét bắt buộc"]
       // TRƯỚC ĐÂY luôn là [] — đúng cho việc TRỪ KHO (tem đã chốt 'finished' ngay lúc
       // quét ở cổng, không cần allocate lại), nhưng lại làm inputTrace của lô không có
