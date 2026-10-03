@@ -239,6 +239,24 @@ body{font-family:'Google Sans',sans-serif;background:var(--bg);max-width:430px;m
 .screen.active{display:flex;}
 #sm{background:#fff;}
 .mh{background:#fff;padding:16px 16px 0;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:10;}
+/* [TARGET NV] Bấm logo GIEO GIEO → "đảo" tối nở ra kiểu Dynamic Island: 2 thanh % target ngày + tháng,
+   5 giây tự thu về chữ GIEO GIEO. Chỉ hiện %, không hiện số tiền — xem stOpenIsland(). */
+.gg-logo{cursor:pointer;-webkit-tap-highlight-color:transparent;transition:opacity .2s ease;}
+.gg-logo.gg-hide{opacity:0;}
+.gg-island{position:absolute;left:50%;top:8px;z-index:60;width:min(340px,calc(100vw - 32px));box-sizing:border-box;
+  padding:14px 18px 6px;border-radius:30px;background:#0d0d0f;color:#f5f5f7;box-shadow:0 14px 34px rgba(0,0,0,.38);
+  transform:translateX(-50%) scale(.32,.42);transform-origin:50% 20%;opacity:0;pointer-events:none;
+  transition:transform .48s cubic-bezier(.2,1.25,.35,1),opacity .22s ease;}
+.gg-island.open{transform:translateX(-50%) scale(1,1);opacity:1;pointer-events:auto;}
+.gg-row{display:flex;justify-content:space-between;align-items:baseline;font-family:'Google Sans',sans-serif;font-size:13px;font-weight:600;color:#a1a1a6;}
+.gg-pct{font-family:'Google Sans Display',sans-serif;font-size:22px;font-weight:800;color:#fff;letter-spacing:-.3px;}
+.gg-bar{height:8px;border-radius:99px;background:#2c2c2e;overflow:hidden;margin:6px 0 12px;}
+.gg-bar>i{display:block;height:100%;width:0;border-radius:99px;background:linear-gradient(90deg,#30d158,#66e08a);
+  transition:width .8s cubic-bezier(.2,.8,.2,1) .12s;}
+.gg-bar.month>i{background:linear-gradient(90deg,#0a84ff,#64d2ff);}
+.gg-bar.over>i{background:linear-gradient(90deg,#ffd60a,#ff9f0a);}
+.gg-off{font-size:12px;color:#8e8e93;margin:4px 0 12px;}
+@media (prefers-reduced-motion: reduce){ .gg-island,.gg-bar>i,.gg-logo{transition:none;} }
 .hbg{width:44px;height:44px;border:none;background:#FFFCF0;border-radius:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:5px;}
 .hbg span{display:block;width:20px;height:2px;background:#333;border-radius:2px;}
 
@@ -915,7 +933,9 @@ body.assist-main-on .toast{bottom:calc(100px + var(--assist-h, 0px) + 10px);}
       <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#333" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 00-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
       <span class="cb" id="fifoAlertBadge"></span>
     </button>
-    <span class="mt" style="font-family:'Google Sans Display',sans-serif;font-size:26px;font-weight:900;letter-spacing:-0.5px;position:absolute;left:50%;transform:translateX(-50%);pointer-events:none;">GIEO GIEO</span>
+    <span class="mt gg-logo" id="ggLogo" role="button" onclick="stToggleIsland()" style="font-family:'Google Sans Display',sans-serif;font-size:26px;font-weight:900;letter-spacing:-0.5px;position:absolute;left:50%;transform:translateX(-50%);">GIEO GIEO</span>
+    <!-- [TARGET NV] Đảo tối hiện % target ngày/tháng — xem stOpenIsland(). -->
+    <div class="gg-island" id="ggIsland" onclick="stCloseIsland()" aria-hidden="true"></div>
     <!-- [ADD-printer-quickstatus] Trạng thái nhanh 2 máy in (Bill/Tem) — bấm để tự dò & kết nối
          lại máy nào đang mất kết nối, không cần vào tận màn Máy in. margin-left:auto để tự đẩy
          sang phải kể cả khi nút togoToggle ở trên đang ẩn (không chiếm layout). -->
@@ -16507,6 +16527,7 @@ async function _writeShiftOpen(staffEmp, openingCash, prev, mismatch) {
     _segments = [];
     await ensureOpeningSegmentPOS();
     toast(mismatch ? '✅ Đã mở ca — đã ghi nhận chênh lệch' : '✅ Đã mở ca');
+    stSnapshotOnOpen();   // [TARGET NV] chụp doanh thu các ngày trước (nền, không chặn)
     await _continueAfterHandoverOpenGate();
   } catch (err) {
     console.error('submitShiftOpen failed', err);
@@ -21669,6 +21690,158 @@ async function _submitPoReceiveImpl() {
     console.error('submitPoReceive failed', err);
     toast('❌ Lỗi: ' + (err.code || err.message || err));
   }
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// [TARGET NV] Target doanh thu cho nhân viên (để tạo động lực — target thật của quán vẫn ở
+// config_history_gieogieo, không đụng). Doanh thu = Σ total của bill trong ngày, cùng công thức ô
+// "Doanh thu" ở Quản lý (aggregateOrders). Ba hàm stPickConfig/stDailyTargets/stPct CHÉP Y HỆT ở
+// posgieo + quanlygieo (test so khớp).
+//   Cấu hình: staff_target_config_gieogieo/{YYYY-MM} = { mode:'weekday'|'month',
+//     weekday:{'1'..'6', '0'=CN}: đ/ngày, monthTotal: đ, offDays:['YYYY-MM-DD'] }.
+//     Tháng chưa lưu cấu hình riêng → dùng cấu hình tháng gần nhất trước đó (ngày nghỉ không mang theo).
+//     mode 'month': target tháng chia đều cho các ngày bán (trừ ngày nghỉ).
+//   Chụp số: staff_target_days_gieogieo/{YYYY-MM}.days['YYYY-MM-DD'] = { revenue, bills, at } — POS chụp
+//     lúc mở ca hôm sau (bù luôn mọi ngày còn thiếu trong tháng), chụp rồi không chụp lại.
+// ══════════════════════════════════════════════════════════════════════════
+function stPickConfig(ym, docs) {
+  let best = null;
+  (docs || []).forEach(x => { if (x && x.id && x.id <= ym && (!best || x.id > best.id)) best = x; });
+  if (!best) return null;
+  return {
+    mode: best.mode === 'month' ? 'month' : 'weekday',
+    weekday: { ...(best.weekday || {}) },
+    monthTotal: Number(best.monthTotal) || 0,
+    offDays: best.id === ym ? (best.offDays || []).filter(k => String(k).startsWith(ym + '-')) : [],
+    fromMonth: best.id
+  };
+}
+function stDailyTargets(ym, cfg) {
+  const out = {};
+  if (!cfg) return out;
+  const [y, m] = ym.split('-').map(Number), n = new Date(y, m, 0).getDate();
+  const off = new Set(cfg.offDays || []), keys = [];
+  for (let i = 1; i <= n; i++) keys.push(ym + '-' + String(i).padStart(2, '0'));
+  const soNgayBan = keys.filter(k => !off.has(k)).length;
+  keys.forEach(k => {
+    if (off.has(k)) out[k] = 0;
+    else if (cfg.mode === 'month') out[k] = soNgayBan ? (Number(cfg.monthTotal) || 0) / soNgayBan : 0;
+    else out[k] = Number((cfg.weekday || {})[String(new Date(k + 'T12:00:00').getDay())]) || 0;
+  });
+  return out;
+}
+function stPct(revenue, target) {
+  return target > 0 ? Math.floor((Number(revenue) || 0) / target * 100) : null;
+}
+const ST_CFG_COLL = 'staff_target_config_gieogieo', ST_DAYS_COLL = 'staff_target_days_gieogieo';
+let _stCache = null, _stLoading = null, _stIslandTimer = null;
+
+async function stLoadConfig(ym) {
+  const doc = await fstore.collection(ST_CFG_COLL).doc(ym).get();
+  if (doc.exists) return stPickConfig(ym, [{ id: doc.id, ...doc.data() }]);
+  const id = firebase.firestore.FieldPath.documentId();
+  const snap = await fstore.collection(ST_CFG_COLL).where(id, '<', ym).orderBy(id, 'desc').limit(1).get();
+  return stPickConfig(ym, snap.docs.map(d => ({ id: d.id, ...d.data() })));
+}
+// Doanh thu một ngày ĐÃ QUA — đọc như Quản lý (fetchOrdersForDate): archive (ngày ≥ 3 ngày trước mới có)
+// + RT, gộp theo khoá bill. RT của 3 ngày gần nhất đang có listener nên đọc lại không tốn lượt mạng.
+// Lỗi đọc thì NÉM — không chụp số 0 giả.
+async function stRevenueForDate(dateKey) {
+  const d = new Date(dateKey + 'T12:00:00');
+  const month = MONTH_KEYS[d.getMonth()], day = String(d.getDate()).padStart(2, '0');
+  const tuoi = Math.round((new Date(posDateKey() + 'T12:00:00') - d) / 86400000);
+  const byKey = {};
+  if (tuoi >= 3) {
+    const a = await fstore.collection('orders_gieogieo_archive').doc(month + '_' + day + '_' + d.getFullYear()).get();
+    if (a.exists) Object.entries((a.data() || {}).orders || {}).forEach(([k, o]) => { byKey[k] = o; });
+  }
+  const s = await db.ref('orders_gieogieo/' + month + '/' + day).once('value');
+  Object.entries(s.val() || {}).forEach(([k, o]) => { byKey[k] = o; });
+  const hienThi = posDateKeyToDisplay(dateKey);
+  const list = Object.values(byKey).filter(o => o && o.date === hienThi);
+  return { revenue: list.reduce((t, o) => t + (Number(o.total) || 0), 0), bills: list.length };
+}
+// Chụp các ngày trong tháng (trước hôm nay) chưa có số. Ngày nào đọc lỗi thì bỏ qua, lượt sau chụp tiếp.
+async function stEnsureSnapshots(ym, days) {
+  const today = posDateKey(), out = { ...(days || {}) }, moi = {};
+  const [y, m] = ym.split('-').map(Number), n = new Date(y, m, 0).getDate();
+  for (let i = 1; i <= n; i++) {
+    const k = ym + '-' + String(i).padStart(2, '0');
+    if (k >= today) break;
+    if (out[k]) continue;
+    try { moi[k] = { ...(await stRevenueForDate(k)), at: new Date().toISOString() }; out[k] = moi[k]; }
+    catch (err) { console.warn('[Target NV] chưa chụp được ngày', k, err); }
+  }
+  if (Object.keys(moi).length) {
+    try { await fstore.collection(ST_DAYS_COLL).doc(ym).set({ days: moi }, { merge: true }); }
+    catch (err) { console.warn('[Target NV] ghi số chụp lỗi', err); }
+  }
+  return out;
+}
+// Nạp cấu hình + số đã chụp của tháng (2–3 lượt đọc), giữ 30 phút trong máy; bấm logo nhiều lần không đọc lại.
+async function stLoad(force) {
+  const today = posDateKey(), ym = today.slice(0, 7);
+  if (!force && _stCache && _stCache.today === today && Date.now() - _stCache.at < 30 * 60000) return _stCache;
+  if (_stLoading) return _stLoading;
+  _stLoading = (async () => {
+    const [cfg, dDoc] = await Promise.all([stLoadConfig(ym), fstore.collection(ST_DAYS_COLL).doc(ym).get()]);
+    const days = await stEnsureSnapshots(ym, dDoc.exists ? ((dDoc.data() || {}).days || {}) : {});
+    _stCache = { today, ym, cfg, days, targets: stDailyTargets(ym, cfg), at: Date.now() };
+    return _stCache;
+  })();
+  try { return await _stLoading; } finally { _stLoading = null; }
+}
+// Mở ca xong → chụp số các ngày còn thiếu (chạy nền, không chặn mở ca).
+function stSnapshotOnOpen() {
+  stLoad(true).catch(err => console.warn('[Target NV] chụp số lúc mở ca lỗi', err));
+}
+// % ngày = doanh thu hôm nay (bill đang có trong máy) / target hôm nay.
+// % tháng = (Σ số đã chụp các ngày trước trong tháng + hôm nay) / Σ target cả tháng.
+function stProgress(c, orderList, todayDisplay) {
+  const doanhThuHomNay = (orderList || []).filter(o => o && o.date === todayDisplay).reduce((t, o) => t + (Number(o.total) || 0), 0);
+  let doanhThuThang = doanhThuHomNay;
+  Object.entries(c.days || {}).forEach(([k, v]) => { if (k < c.today && k.startsWith(c.ym)) doanhThuThang += Number(v && v.revenue) || 0; });
+  const targetThang = Object.values(c.targets || {}).reduce((a, b) => a + b, 0);
+  const nghi = !!(c.cfg && (c.cfg.offDays || []).includes(c.today));
+  return { dayPct: nghi ? null : stPct(doanhThuHomNay, (c.targets || {})[c.today] || 0), monthPct: stPct(doanhThuThang, targetThang),
+    dayOff: nghi, hasCfg: targetThang > 0, month: Number(c.ym.slice(5)) };
+}
+function stIslandHTML(p) {
+  const bar = (pct, cls) => `<div class="gg-bar ${cls}${pct >= 100 ? ' over' : ''}"><i data-w="${Math.min(100, Math.max(0, pct || 0))}"></i></div>`;
+  return `<div class="gg-row"><span>Hôm nay</span><span class="gg-pct">${p.dayOff ? '—' : (p.dayPct == null ? '—' : p.dayPct + '%')}</span></div>`
+    + (p.dayOff ? '<div class="gg-off">Hôm nay là ngày nghỉ</div>' : bar(p.dayPct, 'day'))
+    + `<div class="gg-row"><span>Tháng ${p.month}</span><span class="gg-pct">${p.monthPct == null ? '—' : p.monthPct + '%'}</span></div>`
+    + bar(p.monthPct, 'month');
+}
+async function stToggleIsland() {
+  const el = document.getElementById('ggIsland');
+  if (!el) return;
+  if (el.classList.contains('open')) { stCloseIsland(); return; }
+  let c;
+  try { c = await stLoad(false); }
+  catch (err) { console.warn('[Target NV] nạp lỗi', err); toast('⚠️ Chưa tải được target — kiểm tra mạng rồi bấm lại'); return; }
+  const p = stProgress(c, orders, todayKey());
+  if (!p.hasCfg) return;   // Quản lý chưa đặt target → không mở gì
+  stOpenIsland(el, p);
+}
+function stOpenIsland(el, p) {
+  el.innerHTML = stIslandHTML(p);
+  el.classList.add('open');
+  el.setAttribute('aria-hidden', 'false');
+  const logo = document.getElementById('ggLogo');
+  if (logo) logo.classList.add('gg-hide');
+  // Thanh chạy từ 0 lên sau khi đảo nở ra.
+  requestAnimationFrame(() => requestAnimationFrame(() =>
+    el.querySelectorAll('.gg-bar>i').forEach(i => { i.style.width = i.dataset.w + '%'; })));
+  clearTimeout(_stIslandTimer);
+  _stIslandTimer = setTimeout(stCloseIsland, 5000);
+}
+function stCloseIsland() {
+  clearTimeout(_stIslandTimer);
+  const el = document.getElementById('ggIsland');
+  if (el) { el.classList.remove('open'); el.setAttribute('aria-hidden', 'true'); }
+  const logo = document.getElementById('ggLogo');
+  if (logo) logo.classList.remove('gg-hide');
 }
 
 function loadMenu() {

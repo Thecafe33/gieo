@@ -25837,6 +25837,139 @@ async function removeAsset(id){
   }catch(err){ console.error(err); showError('Không xoá được: '+(err.code||err.message||err)); }
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+// [TARGET NV] Target doanh thu cho nhân viên (để tạo động lực — target thật của quán vẫn ở
+// config_history_gieogieo, không đụng). Doanh thu = Σ total của bill trong ngày, cùng công thức ô
+// "Doanh thu" ở Quản lý (aggregateOrders). Ba hàm stPickConfig/stDailyTargets/stPct CHÉP Y HỆT ở
+// posgieo + quanlygieo (test so khớp).
+//   Cấu hình: staff_target_config_gieogieo/{YYYY-MM} = { mode:'weekday'|'month',
+//     weekday:{'1'..'6', '0'=CN}: đ/ngày, monthTotal: đ, offDays:['YYYY-MM-DD'] }.
+//     Tháng chưa lưu cấu hình riêng → dùng cấu hình tháng gần nhất trước đó (ngày nghỉ không mang theo).
+//     mode 'month': target tháng chia đều cho các ngày bán (trừ ngày nghỉ).
+//   Chụp số: staff_target_days_gieogieo/{YYYY-MM}.days['YYYY-MM-DD'] = { revenue, bills, at } — POS chụp
+//     lúc mở ca hôm sau (bù luôn mọi ngày còn thiếu trong tháng), chụp rồi không chụp lại.
+// ══════════════════════════════════════════════════════════════════════════
+function stPickConfig(ym, docs) {
+  let best = null;
+  (docs || []).forEach(x => { if (x && x.id && x.id <= ym && (!best || x.id > best.id)) best = x; });
+  if (!best) return null;
+  return {
+    mode: best.mode === 'month' ? 'month' : 'weekday',
+    weekday: { ...(best.weekday || {}) },
+    monthTotal: Number(best.monthTotal) || 0,
+    offDays: best.id === ym ? (best.offDays || []).filter(k => String(k).startsWith(ym + '-')) : [],
+    fromMonth: best.id
+  };
+}
+function stDailyTargets(ym, cfg) {
+  const out = {};
+  if (!cfg) return out;
+  const [y, m] = ym.split('-').map(Number), n = new Date(y, m, 0).getDate();
+  const off = new Set(cfg.offDays || []), keys = [];
+  for (let i = 1; i <= n; i++) keys.push(ym + '-' + String(i).padStart(2, '0'));
+  const soNgayBan = keys.filter(k => !off.has(k)).length;
+  keys.forEach(k => {
+    if (off.has(k)) out[k] = 0;
+    else if (cfg.mode === 'month') out[k] = soNgayBan ? (Number(cfg.monthTotal) || 0) / soNgayBan : 0;
+    else out[k] = Number((cfg.weekday || {})[String(new Date(k + 'T12:00:00').getDay())]) || 0;
+  });
+  return out;
+}
+function stPct(revenue, target) {
+  return target > 0 ? Math.floor((Number(revenue) || 0) / target * 100) : null;
+}
+const ST_CFG_COLL = 'staff_target_config_gieogieo';
+let _stQl = null;   // { docs, ym, mode, weekday, monthTotal, off:Set, fromMonth }
+const ST_THU = [['1', 'T2'], ['2', 'T3'], ['3', 'T4'], ['4', 'T5'], ['5', 'T6'], ['6', 'T7'], ['0', 'CN']];
+function stShortMoney(v) {
+  v = Number(v) || 0;
+  if (v >= 1e6) return (v / 1e6).toLocaleString('vi-VN', { maximumFractionDigits: 2 }) + 'tr';
+  if (v >= 1e3) return Math.round(v / 1e3).toLocaleString('vi-VN') + 'k';
+  return v ? String(Math.round(v)) : '0';
+}
+function stCurCfg() {
+  const s = _stQl;
+  return { mode: s.mode, weekday: s.weekday, monthTotal: s.monthTotal, offDays: [...s.off] };
+}
+async function stQlInit(ym) {
+  const box = document.getElementById('stCard');
+  if (!box) return;
+  try {
+    if (!_stQl || !_stQl.docs) {
+      const snap = await fstore.collection(ST_CFG_COLL).get();
+      _stQl = { docs: snap.docs.map(d => ({ id: d.id, ...d.data() })) };
+    }
+  } catch (err) { box.innerHTML = '<div class="muted">Không tải được cấu hình target nhân viên.</div>'; console.warn('[Target NV]', err); return; }
+  ym = ym || dkey(new Date()).slice(0, 7);
+  const cfg = stPickConfig(ym, _stQl.docs);
+  Object.assign(_stQl, { ym, mode: cfg ? cfg.mode : 'weekday', weekday: cfg ? cfg.weekday : {},
+    monthTotal: cfg ? cfg.monthTotal : 0, off: new Set(cfg ? cfg.offDays : []), fromMonth: cfg ? cfg.fromMonth : null });
+  stQlRender();
+}
+function stQlRender() {
+  const s = _stQl, box = document.getElementById('stCard');
+  if (!box || !s) return;
+  const nguon = !s.fromMonth ? '<div class="small-note" style="margin-bottom:8px">Tháng này chưa có target — nhập rồi bấm Lưu.</div>'
+    : s.fromMonth !== s.ym ? `<div class="small-note" style="margin-bottom:8px">Tháng này chưa lưu riêng — đang dùng target tháng ${s.fromMonth}. Bấm Lưu để chốt cho tháng ${s.ym} (đánh dấu ngày nghỉ nếu có).</div>` : '';
+  box.innerHTML = `
+    <div class="small-note" style="margin-bottom:10px">Target cho nhân viên để tạo động lực — POS chỉ hiện <b>%</b> đã đạt (bấm logo GIEO GIEO), không hiện số tiền. Không ảnh hưởng Target KPI ở trên.</div>
+    <div class="field"><label>Tháng</label><input type="month" id="stMonth" value="${s.ym}" onchange="stQlInit(this.value)"></div>
+    ${nguon}
+    <div class="seg" style="margin-bottom:10px">
+      <button type="button" class="${s.mode === 'weekday' ? 'active' : ''}" onclick="stQlSetMode('weekday')">Nhập theo thứ</button>
+      <button type="button" class="${s.mode === 'month' ? 'active' : ''}" onclick="stQlSetMode('month')">Nhập theo tháng</button>
+    </div>
+    <div id="stInputs">${s.mode === 'weekday'
+      ? `<div class="grid2">${ST_THU.map(([k, l]) => `<div class="field"><label>${l} (đ)</label><input type="number" min="0" step="10000" value="${Number(s.weekday[k]) || ''}" oninput="stQlSetWeekday('${k}',this.value)"></div>`).join('')}</div>`
+      : `<div class="field"><label>Target tháng (đ)</label><input type="number" min="0" step="100000" value="${s.monthTotal || ''}" oninput="stQlSetMonthTotal(this.value)"></div>`}</div>
+    <div class="small-note" style="margin:4px 0 6px">Bấm vào ngày để tắt/bật <b>ngày nghỉ</b> (ngày nghỉ không tính target).</div>
+    <div id="stCal"></div>
+    <div id="stSum" style="margin-top:10px"></div>
+    <button class="btn" style="margin-top:12px" onclick="stQlSave()">${ic('save', 15)} Lưu target tháng ${s.ym}</button>`;
+  stQlRenderCal();
+}
+function stQlRenderCal() {
+  const s = _stQl, cal = document.getElementById('stCal'), sum = document.getElementById('stSum');
+  if (!cal || !s) return;
+  const t = stDailyTargets(s.ym, stCurCfg());
+  const keys = Object.keys(t).sort();
+  const lech = (new Date(keys[0] + 'T12:00:00').getDay() + 6) % 7;   // T2 đứng đầu
+  const o = 'display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:46px;border-radius:10px;font-size:11px;';
+  cal.innerHTML = `<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px">
+    ${ST_THU.map(([, l]) => `<div style="text-align:center;font-size:11px;font-weight:700;color:var(--muted,#888)">${l}</div>`).join('')}
+    ${'<div></div>'.repeat(lech)}
+    ${keys.map(k => { const nghi = s.off.has(k);
+      return `<button type="button" onclick="stQlToggleOff('${k}')" style="${o}border:1px solid ${nghi ? '#ddd' : 'var(--line,#e5e5e5)'};background:${nghi ? '#f1f1f1' : '#fff'};color:${nghi ? '#aaa' : 'inherit'};cursor:pointer;padding:2px">
+        <b style="font-size:13px">${Number(k.slice(8))}</b><span>${nghi ? 'Nghỉ' : stShortMoney(t[k])}</span></button>`; }).join('')}
+  </div>`;
+  const tong = keys.reduce((a, k) => a + t[k], 0), ban = keys.filter(k => !s.off.has(k)).length;
+  sum.innerHTML = `<div class="row"><span class="rl">Target tháng</span><span class="rv"><b>${fmt(tong)}</b></span></div>
+    <div class="row"><span class="rl">Ngày bán / nghỉ</span><span class="rv">${ban} / ${keys.length - ban}</span></div>
+    <div class="row"><span class="rl">Trung bình mỗi ngày bán</span><span class="rv">${fmt(ban ? tong / ban : 0)}</span></div>`;
+}
+function stQlSetMode(m) { if (_stQl) { _stQl.mode = m === 'month' ? 'month' : 'weekday'; stQlRender(); } }
+function stQlSetWeekday(k, v) { _stQl.weekday[k] = Math.max(0, Number(v) || 0); stQlRenderCal(); }
+function stQlSetMonthTotal(v) { _stQl.monthTotal = Math.max(0, Number(v) || 0); stQlRenderCal(); }
+function stQlToggleOff(k) { const o = _stQl.off; if (o.has(k)) o.delete(k); else o.add(k); stQlRenderCal(); }
+async function stQlSave() {
+  const s = _stQl;
+  if (!s) return;
+  const weekday = {};
+  ST_THU.forEach(([k]) => { weekday[k] = Math.max(0, Number(s.weekday[k]) || 0); });
+  const data = { mode: s.mode, weekday, monthTotal: s.mode === 'month' ? Math.max(0, Number(s.monthTotal) || 0) : 0,
+    offDays: [...s.off].filter(k => k.startsWith(s.ym + '-')).sort(), updatedAt: new Date().toISOString() };
+  const tong = Object.values(stDailyTargets(s.ym, stPickConfig(s.ym, [{ id: s.ym, ...data }]))).reduce((a, b) => a + b, 0);
+  if (!(tong > 0)) { toast('⚠️ Nhập target trước khi lưu'); return; }
+  try {
+    await fstore.collection(ST_CFG_COLL).doc(s.ym).set(data);
+    logAudit('update', 'staff_target', s.ym, { mode: data.mode, monthTarget: Math.round(tong), offDays: data.offDays.length });
+    const i = s.docs.findIndex(x => x.id === s.ym);
+    if (i >= 0) s.docs[i] = { id: s.ym, ...data }; else s.docs.push({ id: s.ym, ...data });
+    toast('✅ Đã lưu target tháng ' + s.ym + ' — ' + fmt(tong));
+    stQlInit(s.ym);
+  } catch (err) { console.error(err); showError('Không lưu được target: ' + (err.code || err.message || err)); }
+}
+
 function renderEntryTarget(){
   const body = document.getElementById('entryBody');
   const t = CONFIG.targets, l = CONFIG.labor, f = FINANCE;
@@ -25880,6 +26013,9 @@ function renderEntryTarget(){
     <div class="sec-title">Lịch sử áp dụng</div>
     <div class="card" id="cfgHistoryList"></div>
 
+    <div class="sec-title">Target nhân viên (động lực)</div>
+    <div class="card" id="stCard"><div class="muted">Đang tải…</div></div>
+
     <div class="sec-title">Tài chính</div>
     <div class="card">
       <div class="field"><label>Cash reserve hiện có (đ)</label><input type="number" id="fCash" value="${f.cashReserve}"></div>
@@ -25897,6 +26033,7 @@ function renderEntryTarget(){
       document.getElementById('laborPreview').textContent = fmt(laborMonthlyTotal(labor));
     });
   });
+  stQlInit();   // [TARGET NV]
   const histBox = document.getElementById('cfgHistoryList');
   if(CONFIG_HISTORY.length===0){
     histBox.innerHTML = '<div class="muted">Chưa có lịch sử — đang dùng giá trị mặc định.</div>';
