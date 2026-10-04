@@ -10,7 +10,7 @@
 ## 0. Khi nào lấy file này ra
 
 Chỉ bắt đầu khi **đủ cả 3**:
-1. Bản hiện tại (engine **`unit_engine.v18.js`** + 2 HTML trỏ v18) đã deploy và chạy **ổn định ở cửa hàng 1** ít nhất vài tuần: Sổ lệch không tăng bất thường, kiểm kê cuối ca khớp, vụ lệch (`duty`) hợp lý, không lỗi đồng bộ. **[04/10]** Lúc cập nhật file này **chưa xác nhận** v18 đã deploy — hỏi chủ dự án trước.
+1. Bản hiện tại (engine **`unit_engine.v18.js`** + 2 HTML trỏ v18) đã deploy và chạy **ổn định ở cửa hàng 1** ít nhất vài tuần: Sổ lệch không tăng bất thường, kiểm kê cuối ca khớp, vụ lệch (`duty`) hợp lý, không lỗi đồng bộ. **[04/10]** Chủ dự án xác nhận: v18 **đã deploy**, chạy ổn được **1–3 tuần** tính tới 04/10 — chưa đủ, theo dõi thêm.
 2. Đã trả lời các câu hỏi ở **mục 4** (ít nhất O8, O7, O13 trước M2–M3).
 3. Có thời gian cho một **cửa sổ bảo trì ngoài giờ bán** (M2) và một môi trường **staging** (bản sao project Firebase hoặc project thử).
 

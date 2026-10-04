@@ -12,7 +12,7 @@
 | Chế độ thử | `che_do_thu.v1.js` + `posgieo_thu.html`, `quanlygieo_thu.html` | sinh lại bằng `node tools/tao_ban_thu.js .` sau **mỗi** lần sửa HTML |
 | Test | `sh tests/run_all.sh` | 50 file `tests/*.test.js`, chỉ cần `node` |
 
-**Trạng thái deploy: CHƯA XÁC NHẬN.** Chủ dự án tự deploy; phiên mới hỏi chủ dự án bản nào đang chạy ở quán và đã chạy ổn bao lâu trước khi bắt đầu việc lớn (đa cửa hàng cần ≥ vài tuần ổn định — `docs/KE_HOACH_DA_CUA_HANG.md` mục 0).
+**Trạng thái deploy (chủ dự án xác nhận 04/10/2026): v18 ĐÃ DEPLOY**, chạy ổn ở cửa hàng 1 được **1–3 tuần**. Đa cửa hàng cần ≥ vài tuần ổn định (`docs/KE_HOACH_DA_CUA_HANG.md` mục 0) → theo dõi thêm rồi mới làm M0. Chủ dự án tự deploy; phiên mới hỏi lại trước việc lớn nếu đã qua lâu.
 
 ## 2. Đã làm (theo thứ tự)
 

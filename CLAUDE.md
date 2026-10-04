@@ -34,7 +34,7 @@
 - Kế hoạch đa cửa hàng (chưa làm, chờ chủ dự án gọi; đã cập nhật theo hiện trạng 04/10): `docs/KE_HOACH_DA_CUA_HANG.md`.
 - **Chế độ thử** (`che_do_thu.v1.js`, `docs/CHE_DO_THU.md`): bản `*_thu.html` sinh bằng `tools/tao_ban_thu.js`, khoá cứng vùng thử `__test_gieogieo`. App thật **không bao giờ** nạp `che_do_thu` (predeploy_check chặn). Sửa code → Claude chạy lại `tao_ban_thu.js` và **gửi sẵn 2 file `_thu`** cho chủ dự án. Chủ dự án **giữ nguyên cách để file** (một thư mục deploy) — không yêu cầu tách thư mục.
 - Tài liệu cũ (nhật ký 28/09, bản mô tả cho người rà bug, báo cáo bug kho/cân, kế hoạch rebuild cũ): `docs/luu_tru/` — chỉ tra cứu, không làm theo.
-- Trạng thái deploy của bản hiện hành: **chưa xác nhận** — hỏi chủ dự án trước việc lớn.
+- Trạng thái deploy: chủ dự án xác nhận ngày 04/10/2026 — **v18 đã deploy**, chạy ổn ở cửa hàng 1 được **1–3 tuần** (chưa đủ "vài tuần" cho đa cửa hàng). Hỏi lại trước việc lớn.
 
 ## Kiểm tra
 - Test: `sh tests/run_all.sh` (chỉ cần `node`). Test trích hàm thẳng từ HTML qua `tests/lib/extract.js` — đổi tên hàm thì sửa danh sách tên trong file test.
