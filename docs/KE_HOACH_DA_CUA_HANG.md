@@ -1,21 +1,23 @@
 # Gieo Gieo — Kế hoạch mở đa cửa hàng (M0 → M6)
 
-> Lập ngày 28/09/2026, sau khi xong K0, F4, E0 → E6, F1–F6, F5 (chưa deploy lúc lập).
-> File này **tự đủ** để bắt đầu lại sau nhiều tháng. Nguồn chi tiết: mục 7–9 của
-> `docs/KE_HOACH_UNIT_ENGINE_DA_CUA_HANG.md`; API engine: `docs/UNIT_ENGINE.md`;
-> việc đã làm: `docs/NHAT_KY_PHIEN_28-09-2026.md`.
+> Lập ngày 28/09/2026. **Cập nhật theo hiện trạng 04/10/2026** (engine v18, sau các tính năng 30/09–04/10).
+> File này **tự đủ** để bắt đầu lại sau nhiều tháng. Hiện trạng chung: `docs/TRANG_THAI.md`; nguồn chi tiết:
+> mục 7–9 của `docs/KE_HOACH_UNIT_ENGINE_DA_CUA_HANG.md`; API engine: `docs/UNIT_ENGINE.md`.
+> Phần thay đổi so với bản 28/09 đánh dấu **[04/10]**.
 
 ---
 
 ## 0. Khi nào lấy file này ra
 
 Chỉ bắt đầu khi **đủ cả 3**:
-1. Bản hiện tại (engine `unit_engine.v1.js`) đã deploy và chạy **ổn định ở cửa hàng 1** ít nhất vài tuần: Sổ lệch không tăng bất thường, kiểm kê cuối ca khớp, không lỗi đồng bộ.
+1. Bản hiện tại (engine **`unit_engine.v18.js`** + 2 HTML trỏ v18) đã deploy và chạy **ổn định ở cửa hàng 1** ít nhất vài tuần: Sổ lệch không tăng bất thường, kiểm kê cuối ca khớp, vụ lệch (`duty`) hợp lý, không lỗi đồng bộ. **[04/10]** Lúc cập nhật file này **chưa xác nhận** v18 đã deploy — hỏi chủ dự án trước.
 2. Đã trả lời các câu hỏi ở **mục 4** (ít nhất O8, O7, O13 trước M2–M3).
 3. Có thời gian cho một **cửa sổ bảo trì ngoài giờ bán** (M2) và một môi trường **staging** (bản sao project Firebase hoặc project thử).
 
 **Câu mở đầu gợi ý cho phiên Claude mới:**
-> Đọc CLAUDE.md, docs/KE_HOACH_DA_CUA_HANG.md và docs/UNIT_ENGINE.md. Chạy `sh tests/run_all.sh` và `node tools/check_boundaries.js`. Bắt đầu M0 (mục 5) — phản biện trước, báo tôi rồi mới sửa. Không deploy.
+> Đọc CLAUDE.md, docs/TRANG_THAI.md, docs/KE_HOACH_DA_CUA_HANG.md và docs/UNIT_ENGINE.md. Chạy `sh tests/run_all.sh` và `node tools/check_boundaries.js`. Bắt đầu M0 (mục 5) — phản biện trước, báo tôi rồi mới sửa. Không deploy.
+
+**[04/10] Mỗi giai đoạn nên mở một phiên mới.** Mức model gợi ý: trả lời mục 4 + phản biện kế hoạch → Opus, effort high · M0 → Sonnet, medium · M1 → Sonnet, high · M2a/M2 → Opus, xhigh (script chuyển dữ liệu + quay lui: max) · M3 → Opus, xhigh · M4 → Sonnet, high (phần cộng gộp số liệu: Opus, high) · M5 → Opus, xhigh · M6 → Sonnet, medium (lỗi lệch kho/tiền: Opus, high).
 
 ---
 
@@ -30,6 +32,8 @@ Engine đã *biết* `storeId` nhưng cố định `'gg01'`, còn **mọi dữ l
 | Ca / kết ca / kiểm kê: `daily_closings/{ngày}`, `daily_openings`, `handover_*`, `shift_inventory_counts/{ngày}_{phase}` | Khoá theo **ngày** → quán này **ghi đè** ca của quán kia |
 | Chuyển khoản: `orderId = GG + ddMMHHmmss` | Hai quán tạo QR cùng giây → trùng khoá xác nhận |
 | Tài khoản: mọi máy đăng nhập chung `cafe33@…`, rules = đăng nhập là toàn quyền | Không có ranh giới dữ liệu giữa quán |
+| **[04/10]** Quy trách nhiệm theo ca (`duty_*`), dấu hoàn RT (`rev_marks_gieogieo/{itemId}`, `duty_verify_fence_gieogieo/{prepId}`) | Vụ lệch, rào xác minh của hai quán lẫn vào nhau |
+| **[04/10]** Target nhân viên (`staff_target_*`), hoà vốn/lãi lỗ ngày, lương theo lịch | Target và số chụp gộp hai quán; chi phí/lương/khấu hao chưa tách theo quán |
 
 **Phương án tạm (không khuyên)** nếu bắt buộc mở gấp trước khi xong M1–M3: nhân bản riêng hai app với hậu tố dữ liệu khác (vd `_gieogieo2`). Được: dữ liệu tách hẳn. Mất: báo cáo gộp, chuyển kho, nhân viên/khách dùng chung dễ lệch; sau này phải gộp lại — ngược hướng D4.
 
@@ -43,7 +47,10 @@ Engine đã *biết* `storeId` nhưng cố định `'gg01'`, còn **mọi dữ l
 - **Giờ máy chủ** (`serverClock`) + mốc chống ghi đè B9 thống nhất giữa các máy — cần khi nhiều máy/nhiều quán cùng ghi.
 - **Bộ test** (`sh tests/run_all.sh`) + kiểm tra trước deploy (`sh tools/predeploy_check.sh`).
 
-Chưa có: lớp truy cập dữ liệu cho phần **ngoài** engine (bán hàng, ca, báo cáo… ~580 lời gọi `collection('…')`), buộc cập nhật từ xa, tài khoản theo quán.
+- **[04/10]** Engine đã qua 7 vòng rà bug (v6–v17) + Firebase giả **chế độ nghiêm** (`tests/lib/fakefb.js` báo lỗi như Firebase thật) — nền test đủ chắc để làm test ảnh chụp trước/sau cho M1–M2.
+- **[04/10]** Chế độ thử (`che_do_thu.v1.js`, bản `_thu`) chạy code mới trên bản sao dữ liệu thật — dùng thử từng bước M0–M4 trước khi bật cho quán.
+
+Chưa có: lớp truy cập dữ liệu cho phần **ngoài** engine (bán hàng, ca, báo cáo… **[04/10] 567 lời gọi `collection(`: POS 262, Quản lý 305**; engine v18 có thêm 212 nhưng đi qua khối `P`/hằng của engine), buộc cập nhật từ xa (`app_config_gieogieo`, `APP_VERSION` — chưa có), tài khoản theo quán, `tools/site_files.txt`.
 
 ---
 
@@ -81,7 +88,9 @@ Chưa có: lớp truy cập dữ liệu cho phần **ngoài** engine (bán hàng
 | O5 | Có bếp trung tâm nấu BTP chuyển đi không? | M5 |
 | O6 | Kho trung tâm thao tác trên POS rút gọn hay trên Quản lý? | M5 |
 | — | Quán 2 có menu / giá / khuyến mãi khác quán 1 không? | M4 |
-| — | Staging: tạo project Firebase thử riêng, hay bản sao dữ liệu trong project hiện tại? | M2 |
+| — | Staging: tạo project Firebase thử riêng, hay bản sao dữ liệu trong project hiện tại? **[04/10]** Chế độ thử (`__test_gieogieo`) đủ cho M0, M1, M4; **không đủ** cho M2 (cần thử cả rules, index, webhook) | M2 |
+| **[04/10]** O14 | Target nhân viên theo quán hay toàn chuỗi? (mặc định đề xuất: theo quán) | M4 |
+| **[04/10]** O15 | Chi phí cố định, tài sản/khấu hao, lương cứng: gắn theo quán hay chia theo tỷ lệ? (quyết định cách tính hoà vốn từng quán) | M4 |
 
 ---
 
@@ -89,7 +98,8 @@ Chưa có: lớp truy cập dữ liệu cho phần **ngoài** engine (bán hàng
 
 Mỗi bước: **phản biện → báo → sửa → test → chủ dự án deploy & thử máy thật**. Không gộp nhiều bước vào một lần deploy.
 
-### M0 — Chuẩn bị (nhỏ, làm đầu tiên)
+### M0 — Chuẩn bị (nhỏ, làm đầu tiên) — **[04/10] chưa làm mục nào**
+0. Tạo `tools/site_files.txt` (danh sách file của XOFA / The Cafe 33 trên site Hosting dùng chung) để `predeploy_check` chặn deploy làm mất file của họ.
 1. **Buộc cập nhật từ xa** (mục 6.4 kế hoạch gốc — chưa làm): doc `app_config_gieogieo/versions = { minPos, minQuanly, maintenance:{from,to,message} }`, đọc bằng listener. Máy có phiên bản < `min*` → banner + tự tải lại khi **không có bill đang mở**. `maintenance` hiệu lực → màn bảo trì. *Đây là điều kiện bắt buộc của M2.*
 2. Thêm hằng `APP_VERSION` vào 2 HTML; `predeploy_check` kiểm 2 app cùng tăng phiên bản khi đổi engine.
 3. (Tuỳ) Hợp nhất các dấu mốc chống ghi đè về `lastAbsWrite` (E5-2 để lại) — làm cùng M2 cho đỡ đổi dữ liệu hai lần.
@@ -98,7 +108,8 @@ Mỗi bước: **phản biện → báo → sửa → test → chủ dự án de
 
 ### M1 — Lớp truy cập dữ liệu ngoài engine (không đổi hành vi)
 - File dùng chung `data_access.v1.js`: `coll(name)`, `rt(path)`, `dayKey(ngày)` — hiện trả đúng tên/khoá cũ (`storeId` cố định).
-- Thay dần ~580 lời gọi `fstore.collection('…')` (POS ~284, Quản lý ~296) + đường dẫn RT viết cứng bằng lớp này; mở rộng `tools/check_boundaries.js` để chặn `collection('…_gieogieo')` viết cứng mới.
+- Thay dần **567** lời gọi `fstore.collection('…')` (POS 262, Quản lý 305 — đếm 04/10) + đường dẫn RT viết cứng bằng lớp này; mở rộng `tools/check_boundaries.js` để chặn `collection('…_gieogieo')` viết cứng mới.
+- **[04/10]** Lớp dữ liệu phải nạp được cả trong chế độ thử: `che_do_thu` tráo `fstore.collection`/`db.ref` ở tầng dưới nên lớp mới không cần biết; nhưng danh sách collection cấu hình chép sang vùng thử (`che_do_thu.v1.js`, mảng đầu file) phải thêm các collection mới (`staff_target_config`…) → `che_do_thu.v2.js` (bản cũ cache immutable).
 - Script AST liệt kê mọi `where/orderBy` → **danh sách index** cần tạo cho M2.
 
 **Xong khi**: test xanh, checker báo không còn tên collection viết cứng; hành vi không đổi.
@@ -120,7 +131,7 @@ Mỗi bước: **phản biện → báo → sửa → test → chủ dự án de
    2. Gắn `storeId:'gg01'` cho mọi bản ghi loại **S** (mục 6).
    3. Sao chép doc khoá theo ngày/tháng sang khoá mới `gg01_…`.
    4. Tạo `store_item_state_gieogieo/gg01_{itemId}` (nếu M2a chưa tạo).
-   5. RT: `active_units_gieogieo/*` → `active_units_gieogieo/gg01/*`; `orders_gieogieo/{tháng}` → `orders_gieogieo/gg01/{tháng}`; `billCounters_gieogieo` → `billCounters_gieogieo/gg01`.
+   5. RT: `active_units_gieogieo/*` → `active_units_gieogieo/gg01/*`; `orders_gieogieo/{tháng}` → `orders_gieogieo/gg01/{tháng}`; `billCounters_gieogieo` → `billCounters_gieogieo/gg01`; **[04/10]** `rev_marks_gieogieo/*` → `rev_marks_gieogieo/gg01/*`; `duty_verify_fence_gieogieo/*` → `duty_verify_fence_gieogieo/gg01/*`.
    6. **Không ghi** `customers`, `rewards`, `bank_confirmations`.
 5. **Khoá chỉ-đọc** đường dẫn/khoá cũ bằng rules — máy nào còn bản cũ sẽ lỗi ghi thay vì ghi lệch chỗ.
 6. **Kiểm đếm** trước/sau: số doc từng collection; tổng `currentStock` từng món; tổng `unitBase` tem mở; số tem sealed; doanh thu 30 ngày.
@@ -145,6 +156,9 @@ Mỗi bước: **phản biện → báo → sửa → test → chủ dự án de
 - Menu RT giữ chung + `store_menu_overrides_gieogieo/{storeId}` = `{hidden:[…], price:{…}}`; công thức chung.
 - Khuyến mãi: mỗi chương trình / chiến dịch thêm `stores: 'all' | [storeId…]` (thiếu = toàn hệ thống; **không** dùng trường `scope` cũ). `togoSettings_gieogieo` → danh sách chương trình có `stores`, hoặc cấu hình chung + `togoSettingsOverrides_gieogieo/{storeId}` — chốt khi làm.
 - Phiếu nhập, lịch làm việc, checklist, ngày đặc biệt theo quán; nút "sao chép cấu hình từ cửa hàng A".
+- **[04/10]** Lãi/lỗ & hoà vốn theo quán: `computeDayPL` / `plBreakEven` (hoà vốn ngày: chỉ giá vốn + phí kênh là biên phí; lương, cố định, khấu hao, hao hụt, chi phí biến đổi là phần cần đắp) nhận chi phí/lương/khấu hao **của quán** (O15). Lương dự đoán (`plPredictedLaborByDate`) lọc lịch theo `storeId` (D7).
+- **[04/10]** Target nhân viên: cấu hình `staff_target_config_gieogieo/{storeId}_{YYYY-MM}`, số chụp `staff_target_days_gieogieo/{storeId}_{YYYY-MM}` (O14); POS đọc bill RT theo quán. Ba hàm dùng chung `stPickConfig/stDailyTargets/stPct` đổi đồng thời ở 2 app (test so khớp).
+- **[04/10]** Kế hoạch trách nhiệm ca (`duty`): vụ lệch, việc xác minh, tóm tắt ngày lọc theo quán; ngưỡng `duty_config` chung hay theo quán — chốt khi làm.
 
 ### M5 — Chuyển kho & kho trung tâm (chỉ khi cần)
 ```
@@ -188,6 +202,11 @@ Engine thêm nhóm `transfer.*` + collection `stock_transfers_gieogieo`. Kho tru
 | `expense_categories`, `hr_settings`, `ingredient_original_packs`, `note_reasons`, `waste_reasons`, `payment_methods`, `packaging_*`, `payroll_month_adjustments`, `recipes`, `recipe_history`, `recipe_suggestions`, `topping_recipes`, `prep_recipe_history`, `prep_vessels` | G | |
 | `audit_logs`, `config_history`, `price_history`, `loyalty_bill_effects`, `loyalty_pending_retry`, `stamp_free_redemptions` | G+s | |
 | `shift_checklists`, `special_days` | C | |
+| **[04/10]** `duty_cases`, `duty_tasks`, `duty_digests`, `duty_verify_undo`, `dup_recovery`, `order_cancel_marks` | S | nhóm `duty` (v4–v5) + dấu/phục hồi của engine (v9–v16) |
+| **[04/10]** `duty_config` | C | ngưỡng quy trách nhiệm — chung, có thể ghi đè theo quán |
+| **[04/10]** `staff_target_config`, `staff_target_days` | S | khoá `{YYYY-MM}` → `{storeId}_{YYYY-MM}` (O14) |
+| **[04/10]** `inventory_items.prepWholePack` | G | trường danh mục (nấu dùng nguyên gói) — đi theo danh mục chung |
+| **[04/10]** Storage `receiving_photos_gieogieo/{recordId}` | S | ảnh phiếu nhận, theo phiếu (đã theo quán qua `receiving_records`) |
 | `customers` | **X** | chỉ thêm trường tuỳ chọn |
 | `rewards` | — | của The Cafe 33, Gieo Gieo không dùng (F4) |
 | `finance` | ? | O3 |
@@ -204,6 +223,9 @@ Engine thêm nhóm `transfer.*` + collection `stock_transfers_gieogieo`. Kho tru
 | `menu_gieogieo`, `menu_togo_gieogieo`, `food_gieogieo`, `food_menu_gieogieo`, `toppings_gieogieo` | giữ + `store_menu_overrides_gieogieo` | C |
 | `togoSettings_gieogieo`, `sales_assist_config_gieogieo`, `appFeeSettings_gieogieo` | chung + phạm vi quán (M4) | C |
 | `printer_layout_gieogieo`, `sales_assist_stats_gieogieo` | theo quán | S |
+| **[04/10]** `rev_marks_gieogieo/{itemId}` (dấu hoàn bền, v10) | `rev_marks_gieogieo/{storeId}/{itemId}` | S |
+| **[04/10]** `duty_verify_fence_gieogieo/{prepId}` (rào xác minh, v9) | `duty_verify_fence_gieogieo/{storeId}/{prepId}` | S |
+| **[04/10]** `session_display_gieogieo` | xoá (K0, sau khi mọi máy tải lại) — không chuyển | — |
 | `bank_confirmations` | giữ; khoá có mã quán (M3) | X |
 | `kiosk_config` | của XOFA — không đụng | X |
 
@@ -220,6 +242,7 @@ Engine thêm nhóm `transfer.*` + collection `stock_transfers_gieogieo`. Kho tru
 | Deploy xoá / quay lui nhầm file thương hiệu khác (chung một site Hosting) | Rất cao | `tools/site_files.txt` + `predeploy_check`; quay lui bằng sửa tiến |
 | Thiếu index sau M2 → màn hình lỗi truy vấn | Cao | Danh sách index từ M1, tạo trước M2 |
 | Chi phí đọc tăng (hạn mức chung ba thương hiệu) | Trung bình | `storeId` trên mọi truy vấn S; bỏ đọc toàn lịch sử; theo dõi Usage |
+| **[04/10]** Bỏ sót đường dẫn mới thêm sau 28/09 (`duty_*`, `rev_marks`, `staff_target_*`…) khi chuyển dữ liệu | Cao | Trước M2 chạy lại danh sách bằng AST (`npm run inventory`) và đối chiếu bảng mục 6 — không dựa vào bảng tay |
 
 ---
 
@@ -228,5 +251,6 @@ Engine thêm nhóm `transfer.*` + collection `stock_transfers_gieogieo`. Kho tru
 - 15 bất biến engine B1–B15 (`docs/UNIT_ENGINE.md` mục 1) — đặc biệt **tem = sự thật**, FIFO theo `openedAt`, chống đúp theo `txId`.
 - `sh tests/run_all.sh` xanh; `node tools/check_boundaries.js` sạch; thêm test ảnh chụp cho mọi nghiệp vụ đổi đường dẫn (so trước/sau như E4).
 - Dữ liệu ghi ra **tương thích ngược** (chỉ thêm trường) cho tới đúng bước M2 có bảo trì.
-- Đổi engine = file phiên bản mới `unit_engine.v{N+1}.js`, cả hai HTML trỏ cùng bản, giữ bản cũ ≥ 7 ngày.
+- Đổi engine = file phiên bản mới `unit_engine.v{N+1}.js` (bản kế tiếp: **v19**), cả hai HTML trỏ cùng bản, ghi `tools/engine_releases.txt`, giữ bản cũ (hiện giữ toàn bộ v1–v18).
+- Sau mỗi lần sửa HTML: `node tools/tao_ban_thu.js .` và gửi 2 file `_thu`.
 - Claude **không deploy**; chủ dự án chạy `sh tools/predeploy_check.sh` rồi `firebase deploy --only hosting`.

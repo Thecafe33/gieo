@@ -1,4 +1,6 @@
-# Unit Engine — tài liệu API (`unit_engine.v7.js`, bản 7.0.0; v1–v6 giữ để quay lui)
+# Unit Engine — tài liệu API (bản hiện hành `unit_engine.v18.js`; v1–v17 giữ để quay lui)
+
+> Phần API bên dưới viết ở v7; thay đổi từ v8 → v18 ghi theo từng mục cuối file.
 
 > Viết ở E5 (28/09/2026), cập nhật E6. Kế hoạch gốc: `docs/KE_HOACH_UNIT_ENGINE_DA_CUA_HANG.md`.
 > Bảng ghi của E0 (trước khi tách): `docs/BANG_GHI_ENGINE.md`.
