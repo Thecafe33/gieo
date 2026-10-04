@@ -47,6 +47,13 @@ const P = (o) => ({ payType: 'hourly_full', hourlyRate: 20000, otEnabled: true, 
   // Dự đoán theo lịch cũng theo mốc
   const pr = F.plPredictedLaborByDate([emp], [{ employeeId: 'e1', date: '2026-10-30', hours: 10 }, { employeeId: 'e1', date: '2026-11-02', hours: 10 }], '2026-10-30', '2026-11-02');
   eq([pr['2026-10-30'], pr['2026-11-02']], [200000, 218000], 'dự đoán theo lịch cũng dùng mức đúng ngày');
+  // Lịch còn sót của người đã nghỉ (màn Lịch không hiện để xoá) → không tính tiền.
+  const vi = { id: 'vi', active: true, payType: 'hourly_part', hourlyRate: 15000 };
+  const duy = { id: 'duy', active: true, payType: 'hourly_full', hourlyRate: 20000, otEnabled: true, otThresholdHours: 8, otRate: 25000 };
+  const vy = { id: 'vy', active: false, payType: 'hourly_part', hourlyRate: 15000 };
+  const nghi = F.plPredictedLaborByDate([vi, duy, vy], [{ employeeId: 'vi', date: '2026-10-04', hours: 10.5 }, { employeeId: 'duy', date: '2026-10-04', hours: 10.5 },
+    { employeeId: 'vy', date: '2026-10-04', hours: 6 }], '2026-10-04', '2026-10-04');
+  eq(nghi['2026-10-04'], 10.5 * 15000 + 8 * 20000 + 2.5 * 25000, 'lịch sót của nhân viên đã nghỉ không cộng vào lương dự đoán (380K, không phải 470K)');
   // Không lịch sử, không ảnh chụp = hành vi cũ
   const plain = { id: 'e6', active: true, ...P({}) };
   const b6 = await build([plain], [sh('e6', '2026-10-05', 8, 16)]).computeActualLaborCostByDate('2026-10-05', '2026-10-05');

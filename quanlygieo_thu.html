@@ -7881,7 +7881,9 @@ function plPredictedLaborByDate(employees, schedules, startKey, endKey){
   const termsByEmpDate = {};   // [LƯƠNG THEO MỐC]
   (schedules||[]).forEach(s=>{
     const emp = empById[s.employeeId];
-    if(!emp) return;
+    // [FIX lịch sót của người đã nghỉ] Màn Lịch chỉ hiện nhân viên đang làm — lịch cũ còn sót của người
+    // "Đã nghỉ" không ai thấy để xoá mà vẫn bị cộng tiền. Bỏ qua như phần lương cứng ở dưới.
+    if(!emp || emp.active===false) return;
     const terms = empPayTermsOn(emp, s.date);          // [LƯƠNG THEO MỐC]
     if(terms.payType!=='hourly_full' && terms.payType!=='hourly_part') return;
     const h = plScheduledHours(s);
