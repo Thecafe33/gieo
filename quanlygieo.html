@@ -8794,8 +8794,8 @@ async function renderBookAlerts(targetId){
 //     tính trên cửa sổ 30 ngày còn lãi tính trên hôm nay, nên hai con số không thể
 //     khớp và phải dựng cả một bảng đối chiếu để giải thích. Nay cùng một bộ số:
 //
-//         Biên đóng góp = 1 − (giá vốn + hao hụt + biến phí) / doanh thu
-//         Hoà vốn       = (lương + chi phí cố định + khấu hao) / biên đóng góp
+//         Biên đóng góp = 1 − (giá vốn + phí kênh) / doanh thu
+//         Hoà vốn       = (lương + chi phí cố định + khấu hao + hao hụt + chi phí biến đổi) / biên đóng góp
 //
 //     Đẳng thức tự nhiên đúng, không cần giải thích gì thêm:
 //         lãi = (doanh thu − hoà vốn) × biên đóng góp
@@ -8818,11 +8818,14 @@ async function renderBookAlerts(targetId){
 function plBreakEven(pl, bienDuPhong){
   if(!pl) return null;
   const dt = Number(pl.doanhThu) || 0;
-  const bienPhi = (pl.giaVon||0) + (pl.bienPhiKhac||0) + (pl.phiKenh||0);
-  // Khấu hao VÀ hao hụt nằm TRONG chi phí cố định — cả hai là chi phí thật đã/sẽ
+  // [FIX hoà vốn ngày — 04/10/2026] Chỉ giá vốn + phí kênh thật sự tăng theo TỪNG LY. "Chi phí biến đổi"
+  // (khoản chi đã duyệt trong ngày) là số tiền đã tiêu rồi, bán thêm không làm nó tăng — để nó trong biên phí
+  // thì 275k chi trên 674k doanh thu kéo biên từ 63% xuống 23%, hoà vốn vọt 1,47tr → 2,9tr. Cùng lý do với hao hụt.
+  const bienPhi = (pl.giaVon||0) + (pl.phiKenh||0);
+  // Khấu hao, hao hụt VÀ chi phí biến đổi của ngày nằm TRONG phần cần đắp — chi phí thật đã/sẽ
   // phát sinh không phụ thuộc vào việc bán thêm được bao nhiêu ly, doanh thu phải
-  // đắp được cả hai thì mới gọi là hoà vốn.
-  const coDinh = (pl.luong||0) + (pl.chiPhiCoDinh||0) + (pl.khauHao||0) + (pl.haoHut||0);
+  // đắp được hết thì mới gọi là hoà vốn.
+  const coDinh = (pl.luong||0) + (pl.chiPhiCoDinh||0) + (pl.khauHao||0) + (pl.haoHut||0) + (pl.bienPhiKhac||0);
   // Chưa bán được đồng nào thì không đo được biên của hôm nay — mượn biên tham chiếu
   // (30 ngày gần nhất) và nói rõ là ước tính, chứ không chia cho 0.
   const uocTinh = !(dt > 0);
