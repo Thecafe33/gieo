@@ -106,6 +106,32 @@ const log = console.log, table = console.table; console.table = () => {};
   D5.tat();
   Query.prototype.get = goiGoc;
 
+  // Bộ đếm tự gặp lỗi (đọc stack / màn / lưu máy đều ném lỗi) → app vẫn đọc bình thường, nhận đúng snapshot.
+  const hong = () => { throw new Error('hỏng'); };
+  const D6 = cai(ns, { now: () => clock, ngay: () => 'x', stack: hong, man: hong, luu: hong, docLuu: hong });
+  const snapQ1 = await new Query('a', [1, 2]).get();
+  const snapD1 = await new DocumentReference('b/c').get();
+  let nhanNghe = 0; nghe = [];
+  new Query('a').onSnapshot(s => { nhanNghe++; });
+  nghe[0]({ size: 1, metadata: meta(false) });
+  ok(snapQ1.size === 2 && snapD1.exists === true && nhanNghe === 1, 'bộ đếm lỗi nội bộ: app vẫn nhận đúng kết quả đọc + listener');
+  D6.tat();
+
+  // Bản đo sinh từ bản thật: chỉ thêm đúng 1 dòng nạp bộ đếm (trước initializeApp) + tiêu đề [ĐO].
+  const fs = require('fs'), os = require('os'), path = require('path'), cp = require('child_process');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dem-'));
+  cp.execFileSync('node', [path.join(__dirname, '..', 'tools', 'tao_ban_dem.js'), tmp]);
+  for (const [that, doLuong] of [['posgieo.html', 'posgieo_dem.html'], ['quanlygieo.html', 'quanlygieo_dem.html']]) {
+    const a = fs.readFileSync(path.join(__dirname, '..', that), 'utf8').split('\n');
+    const b = fs.readFileSync(path.join(tmp, doLuong), 'utf8').split('\n');
+    const them = b.filter(l => /dem_luot_doc\.v1\.js/.test(l));
+    const conLai = b.filter(l => !/dem_luot_doc\.v1\.js/.test(l)).map(l => l.replace('<title>[ĐO] ', '<title>'));
+    const iDem = b.findIndex(l => /dem_luot_doc\.v1\.js/.test(l)), iInit = b.findIndex(l => /firebase\.initializeApp\(/.test(l));
+    ok(them.length === 1 && conLai.join('\n') === a.join('\n') && iDem >= 0 && iDem < iInit, doLuong + ' = ' + that + ' + 1 dòng bộ đếm (trước initializeApp) + tiêu đề');
+  }
+  ok(fs.existsSync(path.join(tmp, 'dem_luot_doc.v1.js')) && fs.readFileSync(path.join(tmp, 'dem_luot_doc.v1.js'), 'utf8') === fs.readFileSync(path.join(__dirname, '..', 'tools', 'dem_luot_doc.js'), 'utf8'), 'dem_luot_doc.v1.js = tools/dem_luot_doc.js');
+  fs.rmSync(tmp, { recursive: true, force: true });
+
   console.table = table;
   console.log(fail ? 'SOME FAIL' : 'ALL PASS');
   process.exitCode = fail;
