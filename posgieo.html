@@ -22029,6 +22029,7 @@ function showScreen(id) {
   }
   if (id === 'sc') {
     updCoTotal(); // updCoTotal đã gọi renderScCartPreview() bên trong
+    fetchAllCustomersCache();   // [GIẢM-ĐỌC] gợi ý SĐT chỉ nạp khi vào màn thanh toán (tối đa 1 lần/ngày)
   }
   if (id === 'mn') renderMnList();
   if (id === 'tg') { loadTogoSettings(); loadTgAdminUI(); loadAppFeeSettings(); }
@@ -23184,6 +23185,7 @@ async function confirmAddMember() {
     };
     allCustomersCache = allCustomersCache.filter(c => c.id !== phone);
     allCustomersCache.unshift(newEntry);
+    _custAcSave();   // [GIẢM-ĐỌC] bản gợi ý trong máy có luôn khách mới, không chờ lần làm mới hôm sau
 
     // Tự chọn thành viên vừa tạo vào đơn hiện tại
     document.getElementById('cuph').value = phone;
@@ -26888,22 +26890,38 @@ async function finalizeSplitPay() {
 // ============================================================
 let allCustomersCache = [];
 
-/**
- * Tải cache khách hàng từ CẢ HAI nguồn song song:
- *   Firestore customers → nickname, total_points, stamp_count (single source of truth)
- */
-function fetchAllCustomersCache() {
-  if (allCustomersCache.length > 0) return;
-
-  fstore.collection('customers').get().then(snap => {
-    const list = [];
-    snap.forEach(doc => { list.push({ id: doc.id, _src: 'fs', ...doc.data() }); });
-    allCustomersCache = list.sort((a, b) => (b.total_points || 0) - (a.total_points || 0));
-  }).catch(err => console.error('Cache error', err));
+// [GIẢM-ĐỌC] Danh sách gợi ý SĐT (chỉ để TÌM số — tem / ly miễn phí luôn đọc thẳng doc(sđt) ở
+// lookupCustomer). Trước đây đọc TOÀN BỘ `customers` (~1.000 khách, dùng chung 3 thương hiệu)
+// 5 giây sau MỖI lần mở app, và mỗi lần gõ SĐT trong lúc lượt tải đầu chưa xong lại đọc thêm
+// một lượt toàn bộ. Giờ:
+//   · chỉ nạp khi vào màn thanh toán (showScreen('sc')) hoặc gõ SĐT;
+//   · lời gọi trùng trong lúc đang tải dùng chung một lượt;
+//   · giữ trong máy (localStorage, chỉ 4 trường gợi ý dùng) — làm mới tối đa 1 lần / ngày.
+// Gợi ý vẫn lọc trên danh sách đầy đủ như cũ; chỉ số điểm trong dòng gợi ý có thể cũ tối đa 1 ngày.
+const CUST_AC_LS = 'custAc_gieogieo_v1';
+let _custAcDay = null;       // ngày (posDateKey) của bản danh sách đang có
+let _custAcLoading = null;   // lượt tải đang chạy — gọi trùng thì bỏ qua
+function _custAcSave() {
+  try { localStorage.setItem(CUST_AC_LS, JSON.stringify({ day: _custAcDay, list: allCustomersCache })); } catch (e) {}
 }
-
-// Gọi luôn khi khởi tạo
-setTimeout(fetchAllCustomersCache, 5000);
+function fetchAllCustomersCache() {
+  const today = posDateKey();
+  if (_custAcDay === today || _custAcLoading) return;
+  let c = null;
+  try { c = JSON.parse(localStorage.getItem(CUST_AC_LS) || 'null'); } catch (e) {}
+  if (c && Array.isArray(c.list)) {
+    if (!allCustomersCache.length) allCustomersCache = c.list;   // bản hôm trước vẫn gợi ý được trong lúc tải bản mới
+    if (c.day === today) { _custAcDay = today; return; }
+  }
+  _custAcLoading = fstore.collection('customers').get().then(snap => {
+    const list = [];
+    snap.forEach(doc => { const d = doc.data() || {}; list.push({ id: doc.id, _src: 'fs', nickname: d.nickname, name: d.name, total_points: d.total_points }); });
+    allCustomersCache = list.sort((a, b) => (b.total_points || 0) - (a.total_points || 0));
+    _custAcDay = today;
+    _custAcSave();
+  }).catch(err => console.error('Cache error', err))
+    .then(() => { _custAcLoading = null; });
+}
 
 function onPhoneInput(val) {
   const ac = document.getElementById('phone-autocomplete');

@@ -137,6 +137,7 @@ Mỗi bước: **phản biện → báo → sửa → test → tạo bản `_thu
 **Xong khi**: mở Sức khoẻ tháng / Tháng kết tốn ≈ số ngày + sổ hôm nay, không còn ≈ số dòng sổ cả tháng.
 
 ### T3 — POS: khách hàng (N1 + N2) — giữ nguyên cách gợi ý (chủ dự án chốt 05/10)
+**[05/10] ĐÃ LÀM (chưa deploy)** — `fetchAllCustomersCache` + `showScreen('sc')` + `confirmAddMember`; test `tests/khach_goi_y.test.js`. Màn Khách hàng (`_custFetchAll`, sắp theo điểm, hiện số của từng khách) **giữ nguyên** — dùng bản 1 ngày ở đó sẽ hiện số cũ (đổi hành vi).
 - **Không** đổi cách gợi ý số điện thoại (vẫn lọc cả "bắt đầu bằng" lẫn "chứa" trên danh sách đầy đủ).
 - Bỏ `setTimeout(fetchAllCustomersCache, 5000)` lúc mở app. Danh sách chỉ nạp khi **vào màn thanh toán** (`#sc`) lần đầu — ý của chủ dự án.
 - Danh sách giữ trong máy (localStorage, đọc/ghi bọc try/catch) kèm ngày nạp; **mỗi ngày làm mới tối đa 1 lần** (lần vào màn thanh toán đầu tiên trong ngày). Tải lại app trong ngày → dùng bản trong máy, không đọc Firestore.
