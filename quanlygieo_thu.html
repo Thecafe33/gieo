@@ -4481,7 +4481,7 @@ function memoDropItems(){ _memo.items = null; }
 function memoDropPreps(){ _memo.preps = null; }
 function memoDropAll(){
   memoDropItems(); memoDropPreps();
-  try{ memoDropExpenses(); _stockRangeInflight.clear(); }catch(e){}   // khai báo nằm phía dưới file
+  try{ memoDropExpenses(); _ledgerRangeInflight.clear(); }catch(e){}   // khai báo nằm phía dưới file
 }
 
 async function loadInventoryItems(){
@@ -14689,21 +14689,125 @@ async function computeWasteByDateRange(startDate, endDate){
   return { wasteByDate };
 }
 
-// [GIẢM-ĐỌC] Tổng kết tháng gọi computeLedgerRealMetrics và computeThangKetKhoExtra CÙNG
-// LÚC trên cùng một khoảng ngày — trước đây đọc sổ kho cả tháng 2 lần. Dùng chung đúng
-// một lượt đọc khi hai lời gọi trùng khoảng và cách nhau không quá 10 giây (snapshot chỉ
-// đọc, không bị sửa), nên số liệu y như đọc riêng.
-const _stockRangeInflight = new Map();   // 'start|end' -> {p, at}
-function _stockTxRangeSnap(startKey, endKey){
+// ------------------------------------------------------------
+// [GIẢM-ĐỌC] T2 — SỔ KHO THEO KHOẢNG NGÀY, NGÀY ĐÃ CHỐT ĐỌC BẢN TỔNG HỢP (docs/KE_HOACH_TOI_UU_DOC.md)
+//
+// Đo 05/10: Tổng kết tháng (30 ngày) đọc ~10.700 dòng sổ gốc MỖI lần mở; Theo kỳ ~3.400.
+// Gần hết là dòng BÁN HÀNG THƯỜNG (CONSUMPTION của bill: không prepRecon, không wasteKind) —
+// chỉ góp vào tiêu hao. Bản tổng hợp ledger_day_summaries_gieogieo/met_{ngày}:
+//   · dòng bán hàng thường → gộp {i: itemId, q: Σ tiêu hao, n: số dòng tiêu hao ≥ 0} theo nguyên liệu;
+//   · MỌI dòng khác (hao hụt, điều chỉnh, nhập, cân cuối ca, đối chiếu mẻ, hoàn bill kiểu Quản lý…)
+//     giữ NGUYÊN VĂN → chạy qua đúng code tính cũ (computeLedgerRealMetrics, thangKetTrachNhiemNL);
+//   · sổ BTP: giữ nguyên văn dòng ADJUSTMENT / WASTE (chỉ hai loại này được tính);
+//   · items: mọi nguyên liệu có ≥ 1 dòng sổ trong ngày (Tổng kết tháng: "hàng không động").
+// Giá KHÔNG lưu — nhân itemCostOn(itemId, ngày) lúc đọc như cũ. Cùng luật với bản tổng hợp tiêu hao:
+// chỉ ngày đã quá CACHE_BUFFER_DAYS; mỗi lần dùng kiểm "ngày cũ bị ghi thêm" bằng 1 lượt limit(1)
+// trên mỗi sổ (index businessDate + createdAt đã có); không dùng được → đọc sổ gốc như trước.
+// ------------------------------------------------------------
+const MET_SUM_V = 1;
+let _metSumOff = false;
+const _laDongBanThuong = t => t.type === 'CONSUMPTION' && !t.prepRecon && !t.wasteKind;
+const _maxCreatedAt = rows => rows.reduce((m,t)=> (typeof t.createdAt === 'string' && t.createdAt > m) ? t.createdAt : m, '');
+function _metSumFromRows(dateKey, stockRows, prepRows){
+  const keep = [], plain = {}, items = new Set();
+  stockRows.forEach(t=>{
+    if(t.itemId) items.add(t.itemId);
+    if(!_laDongBanThuong(t)){ keep.push(t); return; }
+    const k = t.itemId == null ? '' : (typeof t.itemId) + ':' + t.itemId;
+    const p = plain[k] || (plain[k] = { i: t.itemId == null ? '' : t.itemId, q: 0, n: 0 });
+    const dung = txConsumedQty(t);
+    p.q += dung; if(dung >= 0) p.n++;
+  });
+  return { v: MET_SUM_V, date: dateKey, stockMax: _maxCreatedAt(stockRows), prepMax: _maxCreatedAt(prepRows),
+    stockCount: stockRows.length, prepCount: prepRows.length, keep, plain: Object.values(plain), items: [...items],
+    prep: prepRows.filter(t => t.type === 'ADJUSTMENT' || t.type === 'WASTE') };
+}
+async function _metSumFresh(sum){
+  const [a, b] = await Promise.all([
+    fstore.collection('stock_transactions_gieogieo').where('businessDate','==',sum.date).where('createdAt','>',sum.stockMax || '').limit(1).get(),
+    fstore.collection('prep_transactions_gieogieo').where('businessDate','==',sum.date).where('createdAt','>',sum.prepMax || '').limit(1).get()
+  ]);
+  return a.empty && b.empty;
+}
+const _rowsOf = snap => snap.docs.map(d=>({id:d.id, ...d.data()}));
+async function _ledgerRawRange(a, b){
+  const [s, p] = await Promise.all([
+    fstore.collection('stock_transactions_gieogieo').where('businessDate','>=',a).where('businessDate','<=',b).get(),
+    fstore.collection('prep_transactions_gieogieo').where('businessDate','>=',a).where('businessDate','<=',b).get()
+  ]);
+  return { stock: _rowsOf(s), prep: _rowsOf(p) };
+}
+// Trả { stock: dòng xử lý từng dòng, plain: [{date, i, q, n}] (dòng bán thường đã gộp), prep: dòng sổ BTP,
+// items: Set nguyên liệu có dòng sổ }. Ngày đọc sổ gốc → mọi dòng nằm trong stock, plain rỗng.
+// Hai lời gọi cùng khoảng trong 10 giây (Tổng kết tháng gọi 2 hàm cùng lúc) dùng chung một lượt.
+const _ledgerRangeInflight = new Map();
+function _ledgerRangeRows(startKey, endKey){
   const key = startKey + '|' + endKey;
-  const cu = _stockRangeInflight.get(key);
+  const cu = _ledgerRangeInflight.get(key);
   if(cu && Date.now() - cu.at < 10000) return cu.p;
-  const p = fstore.collection('stock_transactions_gieogieo')
-    .where('businessDate','>=',startKey).where('businessDate','<=',endKey).get();
+  const p = _ledgerRangeRowsImpl(startKey, endKey);
   const muc = { p, at: Date.now() };
-  _stockRangeInflight.set(key, muc);
-  p.catch(()=>{}).then(()=>setTimeout(()=>{ if(_stockRangeInflight.get(key) === muc) _stockRangeInflight.delete(key); }, 10000));
+  _ledgerRangeInflight.set(key, muc);
+  p.catch(()=>{}).then(()=>setTimeout(()=>{ if(_ledgerRangeInflight.get(key) === muc) _ledgerRangeInflight.delete(key); }, 10000));
   return p;
+}
+async function _ledgerRangeRowsImpl(startKey, endKey){
+  const out = { stock: [], plain: [], prep: [], items: new Set() };
+  const themGoc = r => { r.stock.forEach(t=>{ out.stock.push(t); if(t.itemId) out.items.add(t.itemId); }); r.prep.forEach(t=>out.prep.push(t)); };
+  const themSum = s => {
+    s.keep.forEach(t=>out.stock.push(t));
+    s.plain.forEach(x=>out.plain.push({ date: s.date, i: x.i === '' ? undefined : x.i, q: x.q, n: x.n }));
+    s.items.forEach(i=>out.items.add(i));
+    s.prep.forEach(t=>out.prep.push(t));
+  };
+  const homNay = dkey(new Date());
+  const moc = new Date(homNay+'T00:00:00'); moc.setDate(moc.getDate() - CACHE_BUFFER_DAYS - 1);
+  const ngayChotCuoi = dkey(moc);
+  const pastEnd = endKey < ngayChotCuoi ? endKey : ngayChotCuoi;
+  if(_metSumOff || pastEnd < startKey){ themGoc(await _ledgerRawRange(startKey, endKey)); return out; }
+
+  const tongHop = {};
+  try{
+    const snap = await fstore.collection(LEDGER_SUM_COLL)
+      .where(firebase.firestore.FieldPath.documentId(), '>=', 'met_'+startKey)
+      .where(firebase.firestore.FieldPath.documentId(), '<=', 'met_'+pastEnd).get();
+    const ung = snap.docs.map(d=>d.data()).filter(x => x && x.v === MET_SUM_V && x.date && typeof x.stockMax === 'string' && typeof x.prepMax === 'string'
+      && Array.isArray(x.keep) && Array.isArray(x.plain) && Array.isArray(x.items) && Array.isArray(x.prep));
+    if(!ung.length) await _metSumFresh({ date: startKey, stockMax: '9999', prepMax: '9999' });   // biết sớm thiếu index
+    const kq = await Promise.all(ung.map(x => _metSumFresh(x).then(ok=>({x, ok}))));
+    kq.forEach(({x, ok}) => { if(ok) tongHop[x.date] = x; });
+  }catch(err){
+    _metSumOff = true;
+    console.warn('[Sổ kho] chưa dùng được bản tổng hợp theo ngày — đọc sổ gốc như cũ.'
+      + (_histIsMissingIndex(err) ? ' Thiếu composite index (businessDate + createdAt): ' + (_histIndexUrl(err) || err.message) : ''), err);
+    themGoc(await _ledgerRawRange(startKey, endKey)); return out;
+  }
+
+  // Theo thứ tự ngày (giữ thứ tự dòng như khi đọc cả khoảng một lượt): đoạn thiếu đọc sổ gốc rồi lưu tổng hợp.
+  const builtAt = new Date().toISOString();
+  let k = startKey;
+  while(k <= pastEnd){
+    if(tongHop[k]){ themSum(tongHop[k]); k = _dayShift(k, 1); continue; }
+    let b = k; while(_dayShift(b, 1) <= pastEnd && !tongHop[_dayShift(b, 1)]) b = _dayShift(b, 1);
+    const r = await _ledgerRawRange(k, b);
+    themGoc(r);
+    const ngayHopLe = new Set(); for(let x = k; x <= b; x = _dayShift(x, 1)) ngayHopLe.add(x);
+    const sTheoNgay = {}, pTheoNgay = {};
+    r.stock.forEach(t=>{ (sTheoNgay[t.businessDate] = sTheoNgay[t.businessDate] || []).push(t); });
+    r.prep.forEach(t=>{ (pTheoNgay[t.businessDate] = pTheoNgay[t.businessDate] || []).push(t); });
+    // Dòng mang businessDate sai dạng mà lọt vào khoảng → không lưu tổng hợp đoạn này (lần sau đọc gốc tiếp, không sót).
+    if(![...Object.keys(sTheoNgay), ...Object.keys(pTheoNgay)].some(x => !ngayHopLe.has(x))){
+      for(const x of ngayHopLe){
+        const sum = { ..._metSumFromRows(x, sTheoNgay[x] || [], pTheoNgay[x] || []), builtAt };
+        if(JSON.stringify(sum).length > 900000) continue;   // gần giới hạn 1 MB của một tài liệu → để đọc gốc
+        fstore.collection(LEDGER_SUM_COLL).doc('met_'+x).set(sum)
+          .catch(err => console.warn('[Sổ kho] không lưu được tổng hợp ngày', x, err));
+      }
+    }
+    k = _dayShift(b, 1);
+  }
+  if(endKey > pastEnd) themGoc(await _ledgerRawRange(_dayShift(pastEnd, 1), endKey));
+  return out;
 }
 
 // Lượng TIÊU HAO của một dòng sổ (dương = đã dùng), hoặc null nếu dòng không phải
@@ -14722,15 +14826,13 @@ function txConsumedQty(t){
 async function computeLedgerRealMetrics(startDate, endDate){
   const startKey = dkey(startDate), endKey = dkey(endDate);
   await ensurePriceHistory();
-  const [txSnap, items, prepTxSnap] = await Promise.all([
-    _stockTxRangeSnap(startKey, endKey),
-    loadInventoryItems(),
-    // [SỬA — rà soát] TRƯỚC ĐÂY chỉ đọc stock_transactions_gieogieo, nên hao hụt BÁN
-    // THÀNH PHẨM (huỷ cốt/topping đã nấu — ghi ở ledger RIÊNG prep_transactions_gieogieo,
-    // xem lý do tách collection ở phần Chế biến cấp 1) bị BỎ SÓT hoàn toàn khỏi "Waste
-    // thật". Với quán dùng nhiều bán thành phẩm, đây là phần hao hụt ĐẮT NHẤT (đã tốn
-    // công nấu) mà lại không được đếm — làm số Waste thật thấp giả tạo.
-    fstore.collection('prep_transactions_gieogieo').where('businessDate','>=',startKey).where('businessDate','<=',endKey).get()
+  // [SỬA — rà soát] Đọc CẢ sổ BTP (prep_transactions_gieogieo): hao hụt bán thành phẩm (huỷ cốt/topping
+  // đã nấu) là phần hao hụt đắt nhất — trước đây bị bỏ sót khỏi "Waste thật".
+  // [GIẢM-ĐỌC] T2: hai sổ đọc qua _ledgerRangeRows — ngày đã chốt lấy bản tổng hợp (dòng bán hàng thường
+  // đã gộp theo nguyên liệu, mọi dòng khác nguyên văn), cùng con số như đọc sổ gốc.
+  const [L, items] = await Promise.all([
+    _ledgerRangeRows(startKey, endKey),
+    loadInventoryItems()
   ]);
   // [SỬA] Trước đây định giá bằng costPerUnit HIỆN TẠI nên hao hụt/tiêu hao của
   // tháng trước bị tính lại theo giá hôm nay. Giờ mỗi giao dịch được định giá bằng
@@ -14765,8 +14867,7 @@ async function computeLedgerRealMetrics(startDate, endDate){
   // HỤT vẫn là hao hụt thật (nằm trong Waste thật) nhưng đếm riêng để thấy; phần DƯ là số đo
   // được chứ không phải lệch kiểm kho → để riêng, KHÔNG gộp vào "Điều chỉnh kiểm kho".
   let shiftWeighLossValue=0, shiftWeighSurplusValue=0, shiftWeighCount=0;
-  txSnap.forEach(doc=>{
-    const t = doc.data();
+  L.stock.forEach(t=>{
     const cost = costOf(t.itemId, t.businessDate);
     const val = Math.abs(Number(t.qty)||0) * cost;
     const dung = txConsumedQty(t);
@@ -14787,10 +14888,11 @@ async function computeLedgerRealMetrics(startDate, endDate){
       if(Number(t.qty) < 0) adjShortValue += val; else adjSurplusValue += val;
     }
   });
+  // Dòng bán hàng thường của ngày đã chốt (đã gộp theo nguyên liệu trong bản tổng hợp) — cùng nhánh tiêu hao ở trên.
+  L.plain.forEach(x=>{ consumptionValue += x.q * costOf(x.i, x.date); consumptionCount += x.n; });
   let prepWasteValue=0, prepWasteCount=0, prepAdjValue=0, prepAdjCount=0, prepWasteMissingCost=0;
   let prepAdjShortValue=0, prepAdjSurplusValue=0;
-  prepTxSnap.forEach(doc=>{
-    const t = doc.data();
+  L.prep.forEach(t=>{
     if(t.type==='ADJUSTMENT'){
       // Hoàn BTP khi Quản lý xoá bill: trả lại phần đã bán, không phải chênh lệch đếm.
       if(t.reversal === true) return;
@@ -18088,15 +18190,15 @@ function thangKetTrachNhiemNL(txs, items, costOf, prepWasteTxs, dutyCases){
 // của tháng cho cả việc này lẫn "nhập hàng tháng này" bên dưới, đỡ quét sổ 2 lần.
 async function computeThangKetKhoExtra(startKey, endKey, items){
   await ensurePriceHistory();
-  const snap = await _stockTxRangeSnap(startKey, endKey);
+  // [GIẢM-ĐỌC] T2: dùng chung lượt nạp với computeLedgerRealMetrics. Ngày đã chốt chỉ còn dòng KHÔNG phải
+  // bán hàng thường — đúng những dòng thangKetTrachNhiemNL và "nhập hàng" dùng; "có dòng sổ" lấy từ L.items.
+  const L = await _ledgerRangeRows(startKey, endKey);
   const nhapTheoItem = {};      // itemId -> {qty, value}
-  const dongTheoItem = new Set(); // itemId có ít nhất 1 dòng sổ trong tháng
+  const dongTheoItem = L.items; // itemId có ít nhất 1 dòng sổ trong tháng
   const allTransactions=[];
-  snap.forEach(doc=>{
-    const t = {id:doc.id,...doc.data()};
+  L.stock.forEach(t=>{
     allTransactions.push(t);
     if(!t.itemId) return;
-    dongTheoItem.add(t.itemId);
     const cost = itemCostOn(t.itemId, t.businessDate);
     if(t.type === 'RECEIVING'){
       const qty = Number(t.qty)||0;

@@ -129,6 +129,8 @@ Mỗi bước: **phản biện → báo → sửa → test → tạo bản `_thu
 **Xong khi**: có bảng lượt đọc theo thao tác + tổng một ngày POS; xác nhận (hoặc sửa) thứ tự P2–P6; biết phần của Gieo Gieo trong tổng của project.
 
 ### T2 — Quản lý: sổ kho theo ngày (N1) — lợi nhất
+**[05/10] ĐÃ LÀM (chưa deploy)** — `_ledgerRangeRows` (khối `[GIẢM-ĐỌC] T2` cạnh `txConsumedQty`) + bản tổng hợp `ledger_day_summaries_gieogieo/met_{ngày}`: dòng bán hàng thường gộp theo nguyên liệu, mọi dòng khác giữ nguyên văn (chạy qua đúng code cũ), sổ BTP giữ ADJUSTMENT/WASTE. `computeLedgerRealMetrics` + `computeThangKetKhoExtra` dùng chung một lượt nạp; bỏ `_stockTxRangeSnap`. Test `tests/so_kho_tong_hop.test.js` (đọc tổng hợp = đọc sổ gốc, kể cả ngày bị ghi thêm / businessDate sai dạng; 2.043 → 93 lượt trên dữ liệu thử); đã so trực tiếp với hàm cũ trong git: bằng nhau. Lần đầu mở mỗi khoảng vẫn đọc sổ gốc một lần để dựng tổng hợp.
+**Còn lại sau T2** (chưa làm): 3 ngày gần nhất + hôm nay vẫn đọc sổ gốc (`CACHE_BUFFER_DAYS`) — phần lớn của màn Hôm nay (~2.100) và Theo kỳ; lịch sử 1 nguyên liệu ~150/món.
 - Mở rộng bản tổng hợp `ledger_day_summaries_gieogieo` (cùng cơ chế `ledgerConsumptionStats`: ngày đã qua tính một lần, kiểm "ngày cũ bị ghi thêm" bằng 1 lượt đọc `limit(1)`, giá **không** lưu — nhân `itemCostOn` lúc đọc) cho mọi khối mà `computeLedgerRealMetrics` và `computeThangKetKhoExtra` cần: hao hụt (theo ngày, theo sự kiện đổ ly), tiêu hao, điều chỉnh, nhập; sổ BTP cùng cách.
 - Phiên bản tổng hợp tăng `LEDGER_SUM_V` (bản cũ tự dựng lại).
 - Hôm nay vẫn đọc sổ gốc nhưng **một lần cho cả màn** (Hôm nay + Vốn trong kho + Sức khoẻ "hôm nay" dùng chung), đệm tới khi có ghi mới hoặc người dùng bấm Tải lại.
