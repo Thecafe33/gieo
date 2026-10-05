@@ -31,6 +31,7 @@
 ## Kế hoạch & tiến độ
 - **Đọc trước tiên: `docs/TRANG_THAI.md`** — bản hiện hành (engine v18), việc đã làm tới 04/10/2026, việc còn mở, bản đồ tài liệu, quy trình mỗi lần sửa.
 - Kế hoạch gốc: `docs/KE_HOACH_UNIT_ENGINE_DA_CUA_HANG.md` (đọc mục cần thiết, không cần đọc hết; mục 2.1 = bất biến B1–B15).
+- **Kế hoạch tối ưu lượt đọc** (05/10, ưu tiên trước đa cửa hàng): `docs/KE_HOACH_TOI_UU_DOC.md` — 3 nguyên tắc N1–N3, giai đoạn T0–T6. Code mới phải theo N1–N3.
 - Kế hoạch đa cửa hàng (chưa làm, chờ chủ dự án gọi; đã cập nhật theo hiện trạng 04/10): `docs/KE_HOACH_DA_CUA_HANG.md`.
 - **Chế độ thử** (`che_do_thu.v1.js`, `docs/CHE_DO_THU.md`): bản `*_thu.html` sinh bằng `tools/tao_ban_thu.js`, khoá cứng vùng thử `__test_gieogieo`. App thật **không bao giờ** nạp `che_do_thu` (predeploy_check chặn). Sửa code → Claude chạy lại `tao_ban_thu.js` và **gửi sẵn 2 file `_thu`** cho chủ dự án. Chủ dự án **giữ nguyên cách để file** (một thư mục deploy) — không yêu cầu tách thư mục.
 - Tài liệu cũ (nhật ký 28/09, bản mô tả cho người rà bug, báo cáo bug kho/cân, kế hoạch rebuild cũ): `docs/luu_tru/` — chỉ tra cứu, không làm theo.

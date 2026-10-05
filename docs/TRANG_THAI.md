@@ -33,6 +33,7 @@
 | Việc | Ghi chú |
 |---|---|
 | Màn **Doanh thu** của POS vẫn hiện số tiền | Chủ quán chưa quyết có ẩn không (pill target chỉ hiện %) |
+| **Tối ưu lượt đọc T0 → T6** (vượt 50K lượt đọc ngày 04/10) | `docs/KE_HOACH_TOI_UU_DOC.md` — T0 (tạo 6 composite index, chủ dự án) làm trước; ưu tiên hơn đa cửa hàng |
 | Đa cửa hàng M0 → M6 | `docs/KE_HOACH_DA_CUA_HANG.md` (đã cập nhật theo hiện trạng 04/10) |
 | O13 — mã nguồn webhook Cloud Run | cần cho M3 |
 | `tools/site_files.txt` (danh sách file của Gieo Gieo trên site Hosting dùng chung) | chưa có — làm ở M0 |
@@ -46,6 +47,7 @@
 | `CLAUDE.md` | luôn — quy tắc làm việc |
 | `docs/TRANG_THAI.md` | luôn — file này |
 | `docs/UNIT_ENGINE.md` | sửa kho / engine (API, bất biến B1–B15, lịch sử v1–v18) |
+| `docs/KE_HOACH_TOI_UU_DOC.md` | tối ưu lượt đọc Firestore / xử lý trùng (N1–N3, T0–T6) |
 | `docs/KE_HOACH_DA_CUA_HANG.md` | làm đa cửa hàng |
 | `docs/KE_HOACH_UNIT_ENGINE_DA_CUA_HANG.md` | kế hoạch gốc (mục 2.1 = bất biến; mục 7–9 = đa cửa hàng chi tiết) |
 | `docs/KE_HOACH_TRACH_NHIEM_CA.md` | nhóm `duty` (quy trách nhiệm theo ca) |
