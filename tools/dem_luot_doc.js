@@ -30,7 +30,7 @@
     env = env || {};
     const now = env.now || (() => Date.now());
     const ngay = env.ngay || (() => { const d = new Date(now()); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); });
-    const layStack = env.stack || (() => String(new Error().stack || ''));
+    const layStack = env.stack || function __dldStack() { return String(new Error().stack || ''); };
     const layMan = env.man || (() => '?');
     const luu = env.luu || (() => {});
     const docLuu = env.docLuu || (() => null);
@@ -45,7 +45,7 @@
     let moc = { at: now(), tong: st.tong, dong: {} };
     Object.keys(st.dong).forEach(k => { moc.dong[k] = st.dong[k].luot; });
 
-    function noiGoi() {
+    function __dldNoiGoi() {
       const dongs = layStack().split('\n').slice(1).map(s => s.trim()).filter(s => s && !BO_QUA.test(s));
       let ten = '', noi = '';
       for (const s of dongs) {
@@ -73,8 +73,8 @@
       if (st.tong % 50 < n) { try { luu(st); } catch (e) {} }
     }
     // Mọi lỗi của bộ đếm bị chặn tại đây — không bao giờ làm hỏng lượt đọc của app.
-    function ctxMoi(kieu, layColl) {
-      try { const g = noiGoi(); let man = '?'; try { man = layMan(); } catch (e) {} return { kieu, coll: layColl(), ten: g.ten, noi: g.noi, man }; }
+    function __dldCtx(kieu, layColl) {
+      try { const g = __dldNoiGoi(); let man = '?'; try { man = layMan(); } catch (e) {} return { kieu, coll: layColl(), ten: g.ten, noi: g.noi, man }; }
       catch (e) { return null; }
     }
     function dem(ctx, n) { try { if (ctx) ghi(ctx, n); } catch (e) {} }
@@ -92,23 +92,23 @@
     }
 
     ns.DocumentReference.prototype.get = function __dldDocGet() {
-      const ctx = ctxMoi('doc.get', () => collOfRef(this));
+      const ctx = __dldCtx('doc.get', () => collOfRef(this));
       return goc.dGet.apply(this, arguments).then(s => { if (tuMayChu(s)) dem(ctx, 1); return s; });
     };
     ns.Query.prototype.get = function __dldQueryGet() {
-      const ctx = ctxMoi('query.get', () => collOfQuery(this));
+      const ctx = __dldCtx('query.get', () => collOfQuery(this));
       return goc.qGet.apply(this, arguments).then(s => { if (tuMayChu(s)) dem(ctx, Math.max(1, (s && s.size) || 0)); return s; });
     };
     ns.Transaction.prototype.get = function __dldTxGet(ref) {
-      const ctx = ctxMoi('tx.get', () => collOfRef(ref));
+      const ctx = __dldCtx('tx.get', () => collOfRef(ref));
       return goc.tGet.apply(this, arguments).then(s => { dem(ctx, 1); return s; });
     };
     ns.DocumentReference.prototype.onSnapshot = function __dldDocSnap() {
-      const ctx = ctxMoi('nghe.doc', () => collOfRef(this));
+      const ctx = __dldCtx('nghe.doc', () => collOfRef(this));
       return goc.dSnap.apply(this, bocNghe(arguments, s => { if (tuMayChu(s)) dem(ctx, 1); }));
     };
     ns.Query.prototype.onSnapshot = function __dldQuerySnap() {
-      const ctx = ctxMoi('nghe.query', () => collOfQuery(this));
+      const ctx = __dldCtx('nghe.query', () => collOfQuery(this));
       let dau = true;
       return goc.qSnap.apply(this, bocNghe(arguments, s => {
         if (!tuMayChu(s)) return;

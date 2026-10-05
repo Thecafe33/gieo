@@ -137,6 +137,21 @@ const log = console.log, table = console.table; console.table = () => {};
   ok(qd.indexOf(fs.readFileSync(path.join(__dirname, '..', 'tools', 'dem_luot_doc.js'), 'utf8')) > 0 && !fs.existsSync(path.join(tmp, 'dem_luot_doc.v1.js')), 'bộ đếm nhúng nguyên văn tools/dem_luot_doc.js, không cần file .js riêng');
   fs.rmSync(tmp, { recursive: true, force: true });
 
+  // Stack THẬT khi bộ đếm NHÚNG trong HTML (cùng tên file với app): phải bỏ qua dòng của chính bộ đếm, lấy đúng hàm app.
+  {
+    const vm = require('vm');
+    const nguon = require('fs').readFileSync(require('path').join(__dirname, '..', 'tools', 'dem_luot_doc.js'), 'utf8');
+    const hop = { module: { exports: {} }, console: { log() {}, table() {} } };
+    vm.runInNewContext(nguon, hop, { filename: 'https://the-cafe-33.web.app/quanlygieo_dem.html' });
+    const D7 = hop.module.exports.cai(ns, { now: () => clock, ngay: () => 'nhung', man: () => 'QL:thangket' });   // stack mặc định = stack thật
+    const appCode = 'async function renderThangKet(q) { return q.get(); } renderThangKet;';
+    const renderThangKet = vm.runInThisContext(appCode, { filename: 'https://the-cafe-33.web.app/quanlygieo_dem.html' });
+    await renderThangKet(new Query('stock_transactions_gieogieo', [1, 2, 3]));
+    const r = Object.values(D7._st().dong)[0];
+    ok(r && r.ham === 'renderThangKet' && r.luot === 3 && /^quanlygieo_dem\.html:\d+$/.test(r.noi), 'nhúng trong HTML: lấy đúng hàm app (không phải hàm của bộ đếm) → ' + (r && r.ham));
+    D7.tat();
+  }
+
   console.table = table;
   console.log(fail ? 'SOME FAIL' : 'ALL PASS');
   process.exitCode = fail;
