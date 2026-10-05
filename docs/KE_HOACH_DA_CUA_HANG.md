@@ -89,7 +89,7 @@ Cái giá (chấp nhận): hai kiểu đặt tên mãi mãi (chỉ lớp đườ
 | ~~O13~~ | ~~Mã nguồn webhook~~ → **đã đọc 05/10** (mục 4.1) | — |
 | **O7** | Giới hạn độ dài nội dung CK của ngân hàng — nội dung quán mới `TTHD GG02ddMMHHmmss` = 19 ký tự (quán hiện tại 17). Thử 1 giao dịch thật để chắc | Bước 2 |
 | ~~O17~~ | ~~Chung hay riêng STK?~~ → **chung `0977570035`** (05/10) — webhook không sửa gì | — |
-| **O16** | Duyệt cách **gắn máy với cửa hàng** ở mục 5, Bước 2 (đề xuất 05/10: mã gắn máy do Quản lý cấp; không dùng đường link) | Bước 2 |
+| ~~O16~~ | ~~Cách chọn quán trên POS~~ → **chốt 05/10**: màn đăng nhập cửa hàng bằng mã 6 ký tự, máy tự nhớ, sidebar hiện tên + địa chỉ + nút đăng xuất (mục 5, Bước 2). Còn xác nhận: đổi mã ở Quản lý thì máy đang dùng phải nhập lại ở lần mở app sau? | Bước 2 |
 | O3 | `finance_gieogieo` chứa gì (dùng chung hay theo quán)? | Bước 1 |
 | O4 | Có chuyển tem **đang mở** giữa quán không? (mặc định: không) | Bước 5 |
 | O5 | Có bếp trung tâm nấu BTP chuyển đi không? | Bước 5 |
@@ -134,15 +134,14 @@ Mỗi bước: **phản biện → báo → sửa → test → `tao_ban_thu` →
 
 ### Bước 2 — Quán mới chạy được (quán hiện tại không đổi)
 - **Tồn theo quán**: quán ≠ `gg01` để trạng thái tồn (`currentStock`, `locationStock`, `unrefilledConsumption`, `refillUncertain`, `pendingShortage`, `untrackedPendingDelta`, `_ueLastRecomputeStart`, `lastCount`) ở `store_item_state_gieogieo__{storeId}/{itemId}`; danh mục `inventory_items` / `prep_items` dùng chung. Engine `P.itemState` theo quán; hàm nạp danh mục ở app trả danh mục + tồn của quán đang chạy. `gg01` giữ tồn trong doc danh mục như cũ.
-- **Gắn máy với cửa hàng** (đề xuất 05/10 — chờ duyệt O16). APK giữ **một đường link chung** cho mọi quán; không dùng tham số link.
-  - **Quản lý → Cửa hàng**: danh sách quán (`stores_gieogieo/{storeId}` = `{name, ckCode:'02', pairCode, active}`); tạo quán mới; mỗi quán có **mã gắn máy** 6 số (xem / tạo lại được — tạo lại thì mã cũ hết hiệu lực, máy đã gắn không bị ảnh hưởng).
-  - **POS lúc mở app** đọc gắn kết trong máy (localStorage `gieo_store_v1` = `{storeId, name, boundAt}`):
-    - đã gắn → chạy theo quán đó;
-    - chưa gắn và hệ thống **mới chỉ có `gg01`** → tự gắn `gg01`, không hỏi gì (mọi máy quán hiện tại tự gắn khi lên bản mới, **nhân viên không phải làm gì**);
-    - chưa gắn và đã có ≥ 2 quán (máy mới / máy bị xoá dữ liệu) → màn **"Gắn máy với cửa hàng"**: nhập mã gắn máy → hiện tên quán → xác nhận → gắn. Chưa gắn thì chưa bán được (máy mới đang cài đặt — không phải chặn bán khi mất mạng, D17 vẫn giữ); cần mạng một lần lúc gắn.
-  - **Tên quán luôn hiện trên đầu màn hình POS**; mọi bill / bản ghi mang `storeId`.
-  - **Đổi quán** trên máy đã gắn: Cài đặt → "Đổi cửa hàng" → nhập mã gắn máy của quán kia; chỉ cho đổi khi giỏ trống và máy không còn ca đang mở.
-  - Chế độ thử (`_thu`) có localStorage riêng → gắn riêng, thử quán mới không ảnh hưởng máy thật.
+- **Đăng nhập cửa hàng trên POS** (chủ dự án chốt 05/10 — **không tự gắn quán**, kể cả máy quán hiện tại). APK giữ một đường link chung; không dùng tham số link.
+  - **Quản lý → Cửa hàng**: danh sách quán `stores_gieogieo/{storeId}` = `{name, address, ckCode:'02', code, active}`; tạo / sửa quán; mỗi quán một **mã cửa hàng 6 ký tự** (chữ in hoa + số, bỏ ký tự dễ nhầm O/0, I/1) — xem / đổi được.
+  - **POS chưa đăng nhập cửa hàng** (máy mới, máy vừa lên bản có tính năng này, hoặc đã đăng xuất) → màn **"Đăng nhập cửa hàng"**: nhập mã 6 ký tự → hiện **tên + địa chỉ** quán → xác nhận. Chưa đăng nhập thì chưa vào bán được (cài đặt máy — cần mạng lúc nhập mã; không phải chặn bán khi đang chạy mà rớt mạng, D17 giữ nguyên).
+  - **Máy tự nhớ** (localStorage `gieo_store_v1` = `{storeId, code, name, address, at}`) → mở app hằng ngày không phải nhập lại.
+  - **Thanh bên (sidebar) luôn hiện rõ**: "POS của cửa hàng **{tên}** — {địa chỉ}" + nút **Đăng xuất khỏi cửa hàng** (hỏi xác nhận; không cho khi giỏ đang có món / bill đang chờ thanh toán; ca đang mở thì cảnh báo). Đăng xuất → xoá mã đã nhớ → phải nhập lại đúng mã của quán đó. Đầu màn hình bán hàng có nhãn tên quán.
+  - **Quản lý đổi mã của quán** → máy đang đăng nhập quán đó phải nhập mã mới ở **lần mở app sau** (POS so mã đã nhớ với cấu hình quán khi mở app — dùng chung listener cấu hình, không thêm vòng đọc; không đá ra giữa ca). — *chờ chủ dự án xác nhận điểm này*.
+  - Mọi bill / bản ghi mang `storeId`. Chế độ thử (`_thu`) có localStorage riêng → đăng nhập riêng.
+  - **Thứ tự triển khai** (vì máy quán hiện tại cũng phải nhập mã): deploy Quản lý có màn Cửa hàng **trước** → chủ dự án tạo hồ sơ `gg01` (tên, địa chỉ, mã) → mới deploy POS có màn đăng nhập, **ngoài giờ bán**, và nhập mã ngay trên từng máy.
 - **Số bill**: tự tách vì `billCounters_gieogieo__{storeId}` là gốc riêng; nhãn bill in thêm mã quán (quán ≠ `gg01`).
 - **Chuyển khoản** (mục 4.1 — webhook đã đọc):
   1. `genBankOrderId()`: quán ≠ `gg01` → `GG` + 2 số mã quán + `ddMMHHmmss`; quán hiện tại giữ nguyên.
@@ -216,7 +215,8 @@ Mỗi bước: **phản biện → báo → sửa → test → `tao_ban_thu` →
 |---|---|---|
 | Bước 1 làm đổi hành vi quán hiện tại | Cao | `gg01` → chuỗi cũ y hệt (test từng tên); 50+ test hiện có xanh nguyên; chế độ thử; theo dõi 1 tuần trước Bước 2 |
 | Code viết sau này đi vòng lớp đường dẫn → quán mới ghi vào chỗ quán cũ | Cao | `check_paths.js` trong `predeploy_check`; tên chưa đăng ký ném lỗi |
-| Máy quán mới chạy nhầm quán | Cao | Máy chưa gắn chỉ tự gắn `gg01` khi hệ thống mới có 1 quán; từ quán thứ 2 phải nhập mã gắn máy; tên quán trên đầu màn hình; đổi quán cần mã |
+| Máy chạy nhầm quán | Cao | Không tự gắn: máy nào cũng phải nhập mã 6 ký tự của quán; tên + địa chỉ quán trên sidebar, nhãn quán trên màn bán; đăng xuất / vào quán khác cần mã |
+| Lên bản POS có màn đăng nhập mà quán hiện tại chưa có mã → không vào bán được | Cao | Thứ tự triển khai Bước 2: Quản lý + hồ sơ `gg01` trước, POS sau, ngoài giờ bán |
 | Webhook Cloud Run hỏng → **cả ba thương hiệu** mất tự xác nhận CK | Thấp (05/10) | Mã quán mới khớp regex sẵn có → không sửa webhook; STK riêng chỉ thêm 1 dòng, thử CK thật từng thương hiệu |
 | Nút xoá "không đọc được ngày" ở Quản lý xoá nhầm CK của XOFA / quán mới | Cao (có từ trước) | Bước 2 mục CK.3 |
 | Làm hỏng XOFA / The Cafe 33 | Rất cao | D18; không đổi rules / tài khoản chung ở Bước 1–4 |
