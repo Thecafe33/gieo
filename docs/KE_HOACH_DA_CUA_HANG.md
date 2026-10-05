@@ -89,7 +89,7 @@ Cái giá (chấp nhận): hai kiểu đặt tên mãi mãi (chỉ lớp đườ
 | ~~O13~~ | ~~Mã nguồn webhook~~ → **đã đọc 05/10** (mục 4.1) | — |
 | **O7** | Giới hạn độ dài nội dung CK của ngân hàng — nội dung quán mới `TTHD GG02ddMMHHmmss` = 19 ký tự (quán hiện tại 17). Thử 1 giao dịch thật để chắc | Bước 2 |
 | ~~O17~~ | ~~Chung hay riêng STK?~~ → **chung `0977570035`** (05/10) — webhook không sửa gì | — |
-| ~~O16~~ | ~~Cách chọn quán trên POS~~ → **chốt 05/10**: màn đăng nhập cửa hàng bằng mã 6 ký tự, máy tự nhớ, sidebar hiện tên + địa chỉ + nút đăng xuất (mục 5, Bước 2). Còn xác nhận: đổi mã ở Quản lý thì máy đang dùng phải nhập lại ở lần mở app sau? | Bước 2 |
+| ~~O16~~ | ~~Cách chọn quán trên POS~~ → **chốt 05/10**: màn đăng nhập cửa hàng bằng mã 6 ký tự, máy tự nhớ, sidebar hiện tên + địa chỉ + nút đăng xuất (mục 5, Bước 2). Đổi mã ở Quản lý không bắt máy đang dùng nhập lại. | — |
 | O3 | `finance_gieogieo` chứa gì (dùng chung hay theo quán)? | Bước 1 |
 | O4 | Có chuyển tem **đang mở** giữa quán không? (mặc định: không) | Bước 5 |
 | O5 | Có bếp trung tâm nấu BTP chuyển đi không? | Bước 5 |
@@ -139,7 +139,7 @@ Mỗi bước: **phản biện → báo → sửa → test → `tao_ban_thu` →
   - **POS chưa đăng nhập cửa hàng** (máy mới, máy vừa lên bản có tính năng này, hoặc đã đăng xuất) → màn **"Đăng nhập cửa hàng"**: nhập mã 6 ký tự → hiện **tên + địa chỉ** quán → xác nhận. Chưa đăng nhập thì chưa vào bán được (cài đặt máy — cần mạng lúc nhập mã; không phải chặn bán khi đang chạy mà rớt mạng, D17 giữ nguyên).
   - **Máy tự nhớ** (localStorage `gieo_store_v1` = `{storeId, code, name, address, at}`) → mở app hằng ngày không phải nhập lại.
   - **Thanh bên (sidebar) luôn hiện rõ**: "POS của cửa hàng **{tên}** — {địa chỉ}" + nút **Đăng xuất khỏi cửa hàng** (hỏi xác nhận; không cho khi giỏ đang có món / bill đang chờ thanh toán; ca đang mở thì cảnh báo). Đăng xuất → xoá mã đã nhớ → phải nhập lại đúng mã của quán đó. Đầu màn hình bán hàng có nhãn tên quán.
-  - **Quản lý đổi mã của quán** → máy đang đăng nhập quán đó phải nhập mã mới ở **lần mở app sau** (POS so mã đã nhớ với cấu hình quán khi mở app — dùng chung listener cấu hình, không thêm vòng đọc; không đá ra giữa ca). — *chờ chủ dự án xác nhận điểm này*.
+  - **Quản lý đổi mã của quán** → **không ảnh hưởng máy đang đăng nhập** (chủ dự án chốt 05/10: không được bắt nhập lại mã — làm chậm bán hàng). POS **không** so lại mã khi mở app; mã mới chỉ áp cho lần đăng nhập sau (máy mới / sau khi đăng xuất).
   - Mọi bill / bản ghi mang `storeId`. Chế độ thử (`_thu`) có localStorage riêng → đăng nhập riêng.
   - **Thứ tự triển khai** (vì máy quán hiện tại cũng phải nhập mã): deploy Quản lý có màn Cửa hàng **trước** → chủ dự án tạo hồ sơ `gg01` (tên, địa chỉ, mã) → mới deploy POS có màn đăng nhập, **ngoài giờ bán**, và nhập mã ngay trên từng máy.
 - **Số bill**: tự tách vì `billCounters_gieogieo__{storeId}` là gốc riêng; nhãn bill in thêm mã quán (quán ≠ `gg01`).
