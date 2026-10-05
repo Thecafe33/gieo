@@ -105,6 +105,7 @@ Mỗi bước: **phản biện → báo → sửa → test → tạo bản `_thu
 - Bỏ `setTimeout(fetchAllCustomersCache, 5000)` lúc mở app. Danh sách chỉ nạp khi **vào màn thanh toán** (`#sc`) lần đầu — ý của chủ dự án.
 - Danh sách giữ trong máy (localStorage, đọc/ghi bọc try/catch) kèm ngày nạp; **mỗi ngày làm mới tối đa 1 lần** (lần vào màn thanh toán đầu tiên trong ngày). Tải lại app trong ngày → dùng bản trong máy, không đọc Firestore.
 - Khách vừa tạo ở POS: đã được thêm vào danh sách trong máy sẵn (`allCustomersCache.unshift` trong luồng tạo khách) → ghi luôn vào bản lưu.
+- **Tem / ly miễn phí KHÔNG BAO GIỜ lấy từ danh sách gợi ý** (đã kiểm 05/10): bấm dòng gợi ý → `selectPhone` → `lookupCustomer`; gõ đủ 10 số → `lookupCustomer`. Cả hai đọc thẳng `doc(sđt)` từ máy chủ rồi `renderCustomerInfo` hiện tem / ly miễn phí; đổi ly (`consumeFreeToGoDrink`) và cộng tem (`loyaltyAddStamps`) đọc lại trong transaction. Danh sách gợi ý chỉ dùng để tìm số (SĐT, tên, điểm The Cafe 33).
 - Gõ đủ 10 số → vẫn `lookupCustomer` đọc thẳng `doc(sđt)` → điểm / tem / ly miễn phí luôn đúng. Chỉ số điểm hiện trong dòng gợi ý có thể cũ tối đa 1 ngày; khách XOFA / The Cafe 33 tạo trong ngày chưa hiện trong gợi ý (gõ đủ số vẫn tra ra).
 - Màn Khách hàng (`_custFetchAll`): dùng lại cùng danh sách trong máy nếu đã có trong ngày, thay vì tải lại toàn bộ.
 - Không ghi, không đổi cấu trúc `customers` (dùng chung XOFA / The Cafe 33).
