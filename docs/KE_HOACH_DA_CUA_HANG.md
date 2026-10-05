@@ -12,7 +12,7 @@
 Bắt đầu Bước 1 khi:
 1. Bản tối ưu lượt đọc T2/T3 (05/10) **đã deploy** và Firebase Usage cho thấy lượt đọc/ngày đã giảm rõ — mỗi quán mới cộng thêm lượt đọc vào cùng hạn mức.
 2. v18 (hoặc bản sau) chạy ổn ở quán hiện tại ≥ vài tuần (04/10: mới 1–3 tuần).
-3. Bước 2 cần trả lời trước **O7, O8, O16** (mục 4; O13, O17 đã xong 05/10). Bước 1 không cần.
+3. Câu hỏi cho Bước 2 đã chốt hết (O7, O8, O13, O16, O17 — 05/10).
 
 **Câu mở đầu cho phiên Claude mới (mỗi bước một phiên):**
 > Đọc CLAUDE.md, docs/TRANG_THAI.md, docs/KE_HOACH_DA_CUA_HANG.md và docs/UNIT_ENGINE.md. Chạy `sh tests/run_all.sh` và `node tools/check_boundaries.js`. Làm **Bước N** (mục 5) — phản biện trước, báo tôi rồi mới sửa. Không deploy.
@@ -77,7 +77,7 @@ Cái giá (chấp nhận): hai kiểu đặt tên mãi mãi (chỉ lớp đườ
 | **D16** | Không gian tên | **[05/10]** Mọi collection / gốc RT giữ hậu tố `_gieogieo`; quán ≠ `gg01` thêm `__{storeId}` sau tên. Collection mới: `stores_gieogieo` (G), `store_item_state_gieogieo` (S) |
 | D17 | Không chặn bán | Không cơ chế nào chặn bán / chặn khởi động khi offline |
 | D18 | Dùng chung với XOFA & The Cafe 33 | `customers`, `bank_confirmations`, webhook Cloud Run, tài khoản `cafe33@…`, rules: Gieo Gieo **chỉ được thêm**, không đổi cấu trúc / quyền / hành vi của họ. `rewards`, `kiosk_config`: không ghi |
-| **D19** | Lớp đường dẫn | **[05/10]** Một file dùng chung `data_access.v1.js` giữ **bảng đăng ký** (mỗi collection / gốc RT: S, G, G+s, C, X) và **quy tắc đặt tên duy nhất**; app + engine chỉ lấy đường dẫn qua đây. Tên chưa đăng ký → báo lỗi (test bắt trước deploy) |
+| **D19** | Lớp đường dẫn | **[05/10]** `data_access.v1.js` giữ **bảng đăng ký** (S / G / X) và **quy tắc đặt tên duy nhất**, bọc ở gốc SDK (`fstore.collection` / `doc`, `db.ref`) — app + engine không tự đổi tên. Tên chưa đăng ký: `check_paths.js` chặn trước deploy; lúc chạy, quán khác `gg01` báo lỗi |
 
 ---
 
@@ -85,9 +85,9 @@ Cái giá (chấp nhận): hai kiểu đặt tên mãi mãi (chỉ lớp đườ
 
 | # | Câu hỏi | Cần trước |
 |---|---|---|
-| **O8** | Mã cửa hàng: đề xuất `gg01` (quán hiện tại — đúng mặc định engine), `gg02`, … — hậu tố tên dùng `gg02`; mã CK dùng **2 chữ số** `02` (mục 4.1) | Bước 2 |
+| ~~O8~~ | ~~Mã cửa hàng~~ → **chốt 05/10: GG01 (quán hiện tại), GG02, GG03…** Trong dữ liệu dùng chữ thường `gg01`, `gg02` (đúng mặc định engine + `storeId` đã ghi trên bản ghi); hậu tố tên `__gg02`; mã CK quán mới `GG` + `02` + ngày giờ | — |
 | ~~O13~~ | ~~Mã nguồn webhook~~ → **đã đọc 05/10** (mục 4.1) | — |
-| **O7** | Giới hạn độ dài nội dung CK của ngân hàng — nội dung quán mới `TTHD GG02ddMMHHmmss` = 19 ký tự (quán hiện tại 17). Thử 1 giao dịch thật để chắc | Bước 2 |
+| ~~O7~~ | ~~Độ dài nội dung CK~~ → chủ dự án **không thử** (05/10); nội dung quán mới `TTHD GG02ddMMHHmmss` = 19 ký tự (quán hiện tại 17) | — |
 | ~~O17~~ | ~~Chung hay riêng STK?~~ → **chung `0977570035`** (05/10) — webhook không sửa gì | — |
 | ~~O16~~ | ~~Cách chọn quán trên POS~~ → **chốt 05/10**: màn đăng nhập cửa hàng bằng mã 6 ký tự, máy tự nhớ, sidebar hiện tên + địa chỉ + nút đăng xuất (mục 5, Bước 2). Đổi mã ở Quản lý không bắt máy đang dùng nhập lại. | — |
 | O3 | `finance_gieogieo` chứa gì (dùng chung hay theo quán)? | Bước 1 |
@@ -116,19 +116,15 @@ Cái giá (chấp nhận): hai kiểu đặt tên mãi mãi (chỉ lớp đườ
 
 Mỗi bước: **phản biện → báo → sửa → test → `tao_ban_thu` → chủ dự án deploy & thử máy thật**. Không gộp hai bước vào một lần deploy.
 
-### Bước 1 — Lớp đường dẫn + chốt chặn (quán hiện tại: hành vi y hệt)
-Đây là **lần duy nhất** quán hiện tại bị đụng — chỉ code, không dữ liệu.
-1. `data_access.v1.js` (nạp trước engine ở cả 2 app; chế độ thử nạp được):
-   - Bảng đăng ký lấy từ mục 6 (chạy lại `npm run inventory` để không sót tên mới).
-   - `coll(name)` / `rt(path)` / `storeId()`: S + quán ≠ `gg01` → thêm `__{storeId}`; còn lại trả **đúng chuỗi cũ**. Tên chưa đăng ký → ném lỗi.
-2. **Engine v19** (`unit_engine.v19.js`, 2 HTML trỏ cùng bản): 194 lời gọi viết cứng + RT đi qua `P`, `P` lấy tên từ `data_access` — một quy tắc, không chép hai nơi.
-3. POS + Quản lý: ~520 lời gọi `collection('…')` / `ref('…')` → `coll()` / `rt()`. Máy móc, không đổi hành vi.
-4. **Chốt chặn** (vào `predeploy_check.sh`): `tools/check_paths.js` báo lỗi khi có `collection('…')` / `ref('…')` / tên ghép chuỗi nằm ngoài `data_access`; tên trong bảng đăng ký phải khớp tên thật đang dùng.
-5. Test:
-   - **Đồng nhất `gg01`**: với mọi tên đăng ký, `coll/rt` của `gg01` = chuỗi cũ; toàn bộ test hiện có (50+ file) xanh nguyên.
-   - **Cách ly**: Firebase giả, chạy bán / nấu / kiểm kê / kết ca cho `gg01` và `gg02` xen nhau → `gg02` không ghi vào collection S nào không hậu tố; `gg01` không đọc thấy dữ liệu `gg02`.
-6. Chế độ thử: `che_do_thu.v2.js` nếu danh sách collection chép sang vùng thử cần đổi.
-7. `tools/site_files.txt` — danh sách file của XOFA / The Cafe 33 trên site Hosting dùng chung, để `predeploy_check` chặn deploy làm mất file của họ (chủ dự án cung cấp danh sách).
+### Bước 1 — Lớp đường dẫn + chốt chặn — **[05/10] ĐÃ LÀM (chưa deploy)**
+Phản biện 05/10 → **đổi cách làm so với bản đầu** (không sửa ~700 lời gọi, không cần engine v19 ở bước này): bọc ở gốc SDK như chế độ thử đã chạy ổn.
+- `data_access.v1.js` (`GieoData`): bảng đăng ký `REG` (87 collection Firestore, 17 gốc RT, 1 đường dẫn Storage — S / G / X) + `install({fstore, db, storeId})` bọc `fstore.collection` / `fstore.doc` / `db.ref` (chặn `collectionGroup`, `refFromURL`, gốc RT ở quán khác). Quán `gg01` → **trả đúng tên cũ**; tên lạ ở `gg01` đi tiếp + cảnh báo, ở quán khác → lỗi. Bước 1 **chỉ cho chạy `gg01`** (`install` chặn quán khác nếu không có `allowMulti` — chỉ test dùng).
+- 2 HTML: `<script src="data_access.v1.js">` trước engine + 1 dòng `GieoData.install(...)` ngay sau dòng tạo `fstore` (thiếu file → chạy tiếp như cũ). Engine **không đổi** (dùng chung `fstore` / `db` đã bọc). Bản `_thu`: `GieoThu.install` (trong) rồi `GieoData.install` (ngoài).
+- REST `_ddShallow` (Quản lý → dọn dữ liệu) đổi đường dẫn qua `GieoData.rtPath`.
+- `tools/check_paths.js` (trong `predeploy_check.sh`): mọi tên collection / gốc RT / Storage + mọi chuỗi dạng `…_gieogieo` phải đăng ký (bắt cả tên truyền qua biến); 2 app nạp `data_access` đúng 1 lần trước engine, `install` ngay sau `fstore`; REST tới RTDB phải qua `rtPath`. Chuỗi không phải đường dẫn khai ở `tools/paths_allow.json`. `predeploy_check.js` đòi file `data_access.v*.js` có trong thư mục deploy; `tao_ban_thu` / `tao_ban_dem` chép kèm.
+- Test `tests/da_cua_hang_b1.test.js`: quy tắc tên; **24 kịch bản giao diện thật (POS + Quản lý + engine) giống từng byte** khi có lớp ở `gg01`; cùng 24 kịch bản chạy ở `gg02` → dữ liệu riêng của quán hiện tại không đổi, không lượt ghi lọt; chế độ thử + `gg02` vẫn trong vùng thử; `check_paths` bắt tên mới / thiếu `install`. Chạy thử 2 app thật + 2 bản `_thu` trên Chromium (Firebase 10.13.2, chặn mạng): không lỗi trang, thiếu file vẫn chạy.
+- **Phát hiện cho Bước 2**: chạy ở `gg02`, engine + app còn ghi vào doc danh mục dùng chung `inventory_items` / `prep_items` (trạng thái tồn) — đúng phần "tồn theo quán" của Bước 2 (cần engine v19).
+- Quy tắc: sửa `data_access` đã deploy = tạo `data_access.v{N+1}.js` (cache lâu như engine), sửa cả 2 HTML; collection / gốc RT mới phải đăng ký vào `REG`.
 
 **Xong khi**: deploy, quán hiện tại chạy ≥ 1 tuần không khác biệt (Sổ lệch, kết ca, lượt đọc).
 

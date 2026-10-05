@@ -27,6 +27,7 @@
 - 15 bất biến B1–B15: mục 2.1 của kế hoạch. **Mọi thay đổi phải giữ nguyên.**
 - Chỗ POS và Quản lý lệch nhau → **theo POS**. Chỗ POS không có → danh sách F, chủ dự án duyệt.
 - **Engine là file riêng `unit_engine.v18.js`** (bản hiện hành; v1–v17 giữ để quay lui — không sửa, không xoá; dùng chung 2 app, API: `docs/UNIT_ENGINE.md`). App **không ghi thẳng** dữ liệu kho — gọi `UnitEngine.<nhóm>.<hàm>`; `tools/check_boundaries.js` chặn. Sửa engine đã deploy = tạo `unit_engine.v{N+1}.js` (bản cũ cache immutable), sửa cả 2 HTML trỏ tới.
+- **Lớp đường dẫn `data_access.v1.js`** (đa cửa hàng Bước 1, 05/10): bọc `fstore`/`db` ngay sau khi tạo; quán hiện tại `gg01` giữ nguyên mọi tên. Cùng quy tắc phiên bản như engine (sửa bản đã deploy = `v{N+1}`).
 
 ## Kế hoạch & tiến độ
 - **Đọc trước tiên: `docs/TRANG_THAI.md`** — bản hiện hành (engine v18), việc đã làm tới 04/10/2026, việc còn mở, bản đồ tài liệu, quy trình mỗi lần sửa.
@@ -42,4 +43,5 @@
 - Cú pháp: tách các `<script>` inline ra file tạm rồi `node --check` từng file.
 - Kiểm kê truy cập Firebase (AST): `npm i` một lần, rồi `npm run inventory` → `inv_ast.json`.
 - Ranh giới engine: `node tools/check_boundaries.js` (phải báo "RANH GIỚI SẠCH").
+- Lớp đường dẫn đa cửa hàng: `node tools/check_paths.js` (phải báo "ĐƯỜNG DẪN SẠCH"). Collection / gốc RT mới → đăng ký vào `GieoData.REG` trong `data_access.v1.js` (S riêng từng quán / G dùng chung / X dùng chung XOFA–The Cafe 33).
 - Trước deploy (chủ dự án chạy, từ thư mục làm việc): `sh tools/predeploy_check.sh <thư mục deploy>` — gồm cả ranh giới + test.

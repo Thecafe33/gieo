@@ -47,8 +47,26 @@ function loadThu(fake) {
   vm.runInContext(fs.readFileSync(path.join(ROOT, 'che_do_thu.v1.js'), 'utf8'), sb, { filename: 'che_do_thu.v1.js' });
   return sb.GieoThu;
 }
+// opts.quan = 'gg01' | 'gg02' …: cài LỚP ĐƯỜNG DẪN ĐA CỬA HÀNG (data_access.v1.js) như app thật (sau chế độ thử nếu có).
+// Quán khác gg01: dữ liệu S của kịch bản được chép sang tên có hậu tố (dữ liệu của quán đó), bản gốc giữ lại làm
+// "mồi" = dữ liệu quán hiện tại; trả thêm `quan` = { gocDoi, ghiLot[], ghiChung[] } để kiểm cách ly.
+function loadData() {
+  const vm = require('vm');
+  const sb = { console: { log() {}, warn() {}, error() {}, info() {} } };
+  sb.window = sb; sb.globalThis = sb; vm.createContext(sb);
+  vm.runInContext(fs.readFileSync(path.join(ROOT, 'data_access.v1.js'), 'utf8'), sb, { filename: 'data_access.v1.js' });
+  return sb.GieoData;
+}
 async function runWrapped(kind, spec, opts) {
-  const fake = makeFake(JSON.parse(JSON.stringify(spec.seed)));
+  const quanId = opts && opts.quan;
+  const GD = quanId ? loadData() : null;
+  const seed = JSON.parse(JSON.stringify(spec.seed));
+  const laS = (k, p) => { const h = String(p).replace(/^\/+/, '').split('/')[0]; return GD.REG[k][h] === 'S'; };
+  if (GD && quanId !== GD.LEGACY) {
+    for (const [k, v] of Object.entries(seed.fs || {})) if (laS('fs', k)) seed.fs[GD.fsPath(k, quanId)] = JSON.parse(JSON.stringify(v));
+    for (const [k, v] of Object.entries(seed.rt || {})) if (laS('rt', k)) seed.rt[GD.rtPath(k, quanId)] = JSON.parse(JSON.stringify(v));
+  }
+  const fake = makeFake(seed);
   let thu = null;
   if (opts && opts.thu) {
     const GT = loadThu(fake);
@@ -56,6 +74,15 @@ async function runWrapped(kind, spec, opts) {
     await GT._seed();
     thu = { GT, realFs: JSON.stringify(Object.entries(fake.FS).filter(([k]) => !k.startsWith('__test_gieogieo/')).sort()),
       realRt: JSON.stringify(Object.fromEntries(Object.entries(fake.RT.root || {}).filter(([k]) => k !== '__test_gieogieo'))), logStart: fake.log.length };
+  }
+  let quan = null;
+  if (GD) {
+    GD.install({ fstore: fake.fstore, db: fake.db, storeId: quanId, allowMulti: quanId !== GD.LEGACY });
+    // Realtime DB không lưu nút rỗng ({}), Firebase giả tự tỉa chúng khi có lượt ghi bất kỳ → tỉa trước khi so.
+    const tia = v => { if (!v || typeof v !== 'object') return v; const o = {}; for (const [k, x] of Object.entries(v)) { const y = tia(x); if (y !== undefined && !(y && typeof y === 'object' && !Object.keys(y).length)) o[k] = y; } return Object.keys(o).length ? o : undefined; };
+    const goc = () => JSON.stringify([Object.entries(fake.FS).filter(([k]) => laS('fs', k.replace(/^__test_gieogieo\/data\//, ''))).sort(),
+      Object.entries(fake.RT.root || {}).filter(([k]) => laS('rt', k)).map(([k, v]) => [k, tia(v)])]);
+    quan = { goc, truoc: goc(), logStart: fake.log.length };
   }
   const calls = [];
   const prim = a => a.filter(x => x == null || typeof x !== 'object' && typeof x !== 'function');
@@ -95,6 +122,13 @@ async function runWrapped(kind, spec, opts) {
   try { result = await spec.call(F, fake, base); } catch (e) { error = String(e && e.message || e); }
   for (let i = 0; i < 6; i++) { await new Promise(r => setImmediate(r)); await new Promise(r => setTimeout(r, 3)); }
   const log = fake.log.map((x, i) => [x, i]).sort((a, b) => (a[0][1] < b[0][1] ? -1 : a[0][1] > b[0][1] ? 1 : a[1] - b[1])).map(x => x[0]);
+  if (quan && quanId !== GD.LEGACY) {
+    const after = fake.log.slice(quan.logStart);
+    const dauDuongDan = e => String(e[1]).replace(/^__test_gieogieo\/(data\/)?/, '').split('/')[0];
+    const lot = after.filter(e => { const h = dauDuongDan(e); const k = e[0].startsWith('rt') ? 'rt' : 'fs'; return GD.REG[k][h] === 'S'; }).map(e => e.join(' '));
+    const chung = [...new Set(after.filter(e => { const h = dauDuongDan(e); const k = e[0].startsWith('rt') ? 'rt' : 'fs'; return GD.REG[k][h] && GD.REG[k][h] !== 'S'; }).map(e => dauDuongDan(e)))].sort();
+    return { error, calls, quan: { gocDoi: quan.goc() !== quan.truoc, ghiLot: lot, ghiChung: chung, soGhi: after.length }, fake, thu: thu && { escaped: fake.log.slice(thu.logStart).filter(e => !(String(e[1]).startsWith('__test_gieogieo/') || e[1] === '__test_gieogieo')).map(e => e.join(' ')) } };
+  }
   if (thu) {
     const after = fake.log.slice(thu.logStart);
     const escaped = after.filter(e => !(String(e[1]).startsWith('__test_gieogieo/') || e[1] === '__test_gieogieo')).map(e => e.join(' '));

@@ -53,7 +53,7 @@ try {
   tao('posgieo.html', 'posgieo_thu.html', 'pos');
   tao('quanlygieo.html', 'quanlygieo_thu.html', 'quanly');
 } catch (e) { console.log('❌ ' + e.message); process.exit(1); }
-if (OUT !== ROOT) for (const f of fs.readdirSync(ROOT).filter(f => /^(unit_engine|che_do_thu)\.v\d+\.js$/.test(f))) {
+if (OUT !== ROOT) for (const f of fs.readdirSync(ROOT).filter(f => /^(unit_engine|che_do_thu|data_access)\.v\d+\.js$/.test(f))) {
   fs.copyFileSync(path.join(ROOT, f), path.join(OUT, f)); console.log('✅ ' + f);
 }
 console.log('Xong. Mở /posgieo_thu.html và /quanlygieo_thu.html sau khi deploy. App thật không đổi.');

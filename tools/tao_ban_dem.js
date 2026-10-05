@@ -44,7 +44,7 @@ try {
   tao('posgieo.html', 'posgieo_dem.html');
   tao('quanlygieo.html', 'quanlygieo_dem.html');
 } catch (e) { console.log('❌ ' + e.message); process.exit(1); }
-if (OUT !== ROOT) for (const f of fs.readdirSync(ROOT).filter(f => /^unit_engine\.v\d+\.js$/.test(f))) {
+if (OUT !== ROOT) for (const f of fs.readdirSync(ROOT).filter(f => /^(unit_engine|data_access)\.v\d+\.js$/.test(f))) {
   if (!fs.existsSync(path.join(OUT, f))) { fs.copyFileSync(path.join(ROOT, f), path.join(OUT, f)); console.log('✅ ' + f); }
 }
 console.log('Xong. Deploy rồi mở /posgieo_dem.html, /quanlygieo_dem.html bằng Chrome — DỮ LIỆU THẬT. App thật không đổi.');

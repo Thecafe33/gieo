@@ -10,6 +10,7 @@
 //   6. (nếu có tools/site_files.txt) không thiếu file của XOFA / The Cafe 33.
 //   7. CHẾ ĐỘ THỬ: app THẬT tuyệt đối không nạp che_do_thu / không gọi GieoThu.install;
 //      bản thử PHẢI có đủ: nạp che_do_thu, chốt trước initializeApp, đúng 1 lần GieoThu.install.
+//   10. Lớp đường dẫn đa cửa hàng: HTML nạp data_access.v*.js thì file đó phải có (check_paths.js chạy riêng trong predeploy_check.sh).
 //   9. BẢN ĐO (posgieo_dem / quanlygieo_dem — tools/tao_ban_dem.js): nhúng đúng 1 bộ đếm, không chế độ thử;
 //      app thật và bản thử KHÔNG được nạp dem_luot_doc.
 //   8. (nhắc) thư mục deploy có tools/ tests/ docs/ … mà firebase.json không "ignore" → bị công khai trên web.
@@ -31,6 +32,8 @@ function kiemHtml(h, laThu) {
   const eng = [...src.matchAll(/<script\s+src="(unit_engine\.v(\d+)\.js)(?:\?[^"]*)?"/g)];
   if (eng.length > 1) loi.push(h + ': có ' + eng.length + ' thẻ engine (chỉ được 1)');
   if (eng.length === 1 && !co(eng[0][1])) loi.push(h + ' trỏ tới ' + eng[0][1] + ' nhưng file này KHÔNG có trong thư mục');
+  // [Đa cửa hàng — Bước 1] HTML nào nạp lớp đường dẫn thì file đó phải có trong thư mục deploy.
+  for (const m of src.matchAll(/<script\s+src="(data_access\.v\d+\.js)(?:\?[^"]*)?"/g)) if (!co(m[1])) loi.push(h + ' trỏ tới ' + m[1] + ' nhưng file này KHÔNG có trong thư mục');
   const thu = [...src.matchAll(/<script\s+src="(che_do_thu\.v\d+\.js)(?:\?[^"]*)?"/g)];
   const install = (c.match(/GieoThu\.install\(/g) || []).length;
   if (/\[BẢN ĐO\]|dem_luot_doc|demLuotDoc/.test(src)) loi.push(h + ': có BỘ ĐẾM lượt đọc (bản đo) — chỉ *_dem.html được có (chép nhầm bản _dem?)');

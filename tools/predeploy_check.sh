@@ -15,6 +15,8 @@ echo "== thư mục deploy: $DEPLOY"
 node tools/predeploy_check.js "$DEPLOY" || exit 1
 echo "== rào ranh giới Unit Engine (code nguồn)"
 node tools/check_boundaries.js || { echo "=> KHÔNG ĐƯỢC DEPLOY"; exit 1; }
+echo "== lớp đường dẫn đa cửa hàng (code nguồn)"
+node tools/check_paths.js || { echo "=> KHÔNG ĐƯỢC DEPLOY"; exit 1; }
 echo "== test tự động (code nguồn)"
 sh tests/run_all.sh >/tmp/gieo_test_$$.log 2>&1 || { tail -30 /tmp/gieo_test_$$.log; rm -f /tmp/gieo_test_$$.log; echo "=> KHÔNG ĐƯỢC DEPLOY"; exit 1; }
 tail -1 /tmp/gieo_test_$$.log; rm -f /tmp/gieo_test_$$.log

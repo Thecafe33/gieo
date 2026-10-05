@@ -2212,6 +2212,7 @@ html.tab-ui:not(.nav-off) .sidebar{background:#F2F2F7;border-right:1px solid rgb
      tự thử lại, tự lấy đúng tên bucket trong firebaseConfig. -->
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-storage-compat.js"></script>
 <!-- [E3] Unit Engine — dùng CHUNG file với POS, nạp TRƯỚC script chính. Đổi phiên bản = đổi tên file (6.1). -->
+<script src="data_access.v1.js"></script>
 <script src="che_do_thu.v1.js?b=96d7f20f91"></script>
 <script src="unit_engine.v18.js?b=f1f1381586"></script>
 <script>
@@ -2249,6 +2250,9 @@ firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 const fstore = firebase.firestore();
 GieoThu.install({ app: 'quanly', firebase, db, fstore });   // [BẢN THỬ] mọi đọc/ghi → vùng thử
+// [ĐA CỬA HÀNG — Bước 1] Lớp đường dẫn theo quán (data_access.v1.js): quán hiện tại 'gg01' → mọi tên giữ NGUYÊN.
+// Thiếu file (mạng chập lúc tải) → chạy tiếp như cũ: với 'gg01' không bọc cũng y hệt.
+if (window.GieoData) GieoData.install({ fstore, db, storeId: 'gg01' }); else console.error('[GieoData] không nạp được data_access.v1.js — chạy tiếp với đường dẫn cũ (cửa hàng gg01)');
 const auth = firebase.auth();
 // [E3] Khởi tạo Unit Engine cho Quản lý. Thiếu file engine → banner + tự tải lại sau 5 giây (6.3).
 if (window.UnitEngine) {
@@ -16841,6 +16845,8 @@ async function _ddToken(){
 async function _ddShallow(path, token){
   // [Chế độ thử] REST đi thẳng vào RTDB THẬT (không qua SDK) → các công cụ dọn dữ liệu tắt khi thử.
   if(window.GieoThu && GieoThu.active) throw new Error('Công cụ dọn dữ liệu tắt ở chế độ thử');
+  // [ĐA CỬA HÀNG] REST không qua SDK → tự đổi đường dẫn theo quán (quán hiện tại: giữ nguyên).
+  if(window.GieoData) path = GieoData.rtPath(path);
   const r = await fetch(`${RTDB_URL}/${path}.json?shallow=true&auth=${encodeURIComponent(token)}`);
   if(!r.ok) throw new Error(`Đọc ${path} lỗi HTTP ${r.status}`);
   const j = await r.json();
