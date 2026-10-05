@@ -86,11 +86,14 @@ Mỗi bước: **phản biện → báo → sửa → test → tạo bản `_thu
 
 **Xong khi**: 6 index Enabled; có mốc lượt đọc/ngày. **[05/10]** Index không phải nguyên nhân → bước tiếp theo là T1 (đo), vì chưa biết phần nào của 52K là Gieo Gieo, phần nào là XOFA / The Cafe 33.
 
-### T1 — Đo chính xác (công cụ dán vào Console, không deploy)
-- `tools/dem_luot_doc.js` (cùng kiểu `tools/don_myGifts_free_stamp.js`): dán vào Console của POS / Quản lý → bọc `get` / `onSnapshot` / `runTransaction` ở tầng SDK, đếm **số tài liệu trả về** theo collection + hàm gọi (lấy từ stack) + màn đang đứng; lệnh `demLuotDoc.bang()` in bảng xếp hạng.
-- Đo một vòng chuẩn: mở Quản lý → Hôm nay → Sức khoẻ (tuần, tháng) → Báo cáo → Tháng kết; POS: mở app → bán 5 bill → kiểm kê → cân cuối ca.
+### T1 — Đo chính xác (công cụ dán vào Console, không deploy) — **[05/10] công cụ đã có, chờ chủ dự án đo**
+- `tools/dem_luot_doc.js` (cùng kiểu `tools/don_myGifts_free_stamp.js`; test `tests/dem_luot_doc.test.js`; đã chạy thử trên Chromium + SDK compat 10.13.2 thật): bọc `get` / `onSnapshot` / `transaction.get` ở tầng SDK, đếm lượt đọc tính tiền theo **collection + hàm gọi + nơi gọi (file:dòng) + màn**. Không sửa app, không ghi Firebase. Số đếm lưu trong máy theo ngày → app tải lại thì dán lại, đếm tiếp.
+- Lệnh: `demLuotDoc.bang()`, `.theoMan()`, `.theoCollection()`, `.moc('tên việc')`, `.xuat()`, `.datLai()`, `.tat()` (chi tiết ở đầu file).
+- **Đo 1 — từng thao tác** (Quản lý trên máy tính): dán công cụ → `moc('bắt đầu')` → mở Hôm nay → `moc('Hôm nay')` → Sức khoẻ (Hôm nay / Tuần / Tháng) → `moc(...)` sau mỗi lần → Báo cáo → Tháng kết → NL-BTP → Kho.
+- **Đo 2 — cả ngày POS**: dán công cụ lúc mở máy đầu ngày; app tải lại thì dán lại; cuối ngày (sau kết ca) `demLuotDoc.bang(60)` + `xuat()` gửi lại.
+- So tổng Đo 2 (+ phần Quản lý một ngày) với số trên Firebase Usage cùng ngày → phần còn lại là của XOFA / The Cafe 33.
 
-**Xong khi**: có bảng lượt đọc theo hành động, xác nhận (hoặc sửa) thứ tự P1–P6.
+**Xong khi**: có bảng lượt đọc theo thao tác + tổng một ngày POS; xác nhận (hoặc sửa) thứ tự P2–P6; biết phần của Gieo Gieo trong tổng của project.
 
 ### T2 — Quản lý: sổ kho theo ngày (N1) — lợi nhất
 - Mở rộng bản tổng hợp `ledger_day_summaries_gieogieo` (cùng cơ chế `ledgerConsumptionStats`: ngày đã qua tính một lần, kiểm "ngày cũ bị ghi thêm" bằng 1 lượt đọc `limit(1)`, giá **không** lưu — nhân `itemCostOn` lúc đọc) cho mọi khối mà `computeLedgerRealMetrics` và `computeThangKetKhoExtra` cần: hao hụt (theo ngày, theo sự kiện đổ ly), tiêu hao, điều chỉnh, nhập; sổ BTP cùng cách.

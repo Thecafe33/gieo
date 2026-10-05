@@ -33,7 +33,7 @@
 | Việc | Ghi chú |
 |---|---|
 | Màn **Doanh thu** của POS vẫn hiện số tiền | Chủ quán chưa quyết có ẩn không (pill target chỉ hiện %) |
-| **Tối ưu lượt đọc T0 → T6** (vượt 50K lượt đọc ngày 04/10) | `docs/KE_HOACH_TOI_UU_DOC.md` — T0 (tạo 6 composite index, chủ dự án) làm trước; ưu tiên hơn đa cửa hàng |
+| **Tối ưu lượt đọc T0 → T6** (vượt 50K lượt đọc ngày 04/10) | `docs/KE_HOACH_TOI_UU_DOC.md` — ưu tiên hơn đa cửa hàng. T0: 4/6 index đã có từ trước (không phải nguyên nhân), còn 2 index `_histLoad`. T1: công cụ `tools/dem_luot_doc.js` đã có — **chờ chủ dự án đo** rồi mới sửa T2/T3 |
 | Đa cửa hàng M0 → M6 | `docs/KE_HOACH_DA_CUA_HANG.md` (đã cập nhật theo hiện trạng 04/10) |
 | O13 — mã nguồn webhook Cloud Run | cần cho M3 |
 | `tools/site_files.txt` (danh sách file của Gieo Gieo trên site Hosting dùng chung) | chưa có — làm ở M0 |
