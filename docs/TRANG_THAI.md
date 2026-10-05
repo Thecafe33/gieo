@@ -34,9 +34,9 @@
 |---|---|
 | Màn **Doanh thu** của POS vẫn hiện số tiền | Chủ quán chưa quyết có ẩn không (pill target chỉ hiện %) |
 | **Tối ưu lượt đọc T0 → T6** (vượt 50K lượt đọc ngày 04/10) | `docs/KE_HOACH_TOI_UU_DOC.md` — ưu tiên hơn đa cửa hàng. T0: 4/6 index đã có từ trước (không phải nguyên nhân), còn 2 index `_histLoad`. T1: công cụ `tools/dem_luot_doc.js` + **bản đo** `posgieo_dem.html` / `quanlygieo_dem.html` (sinh bằng `tools/tao_ban_dem.js`, dữ liệu thật, nút 📊) — đã đo 05/10 (QL 22.880 lượt/13 phút, 83% sổ gốc; POS ~990 lượt `customers` mỗi lần mở app). **T3 + T2 đã làm 05/10 (chưa deploy)** — xem mục T2/T3 của kế hoạch. Bản đo đã gỡ khỏi repo — xoá `*_dem.html`, `dem_luot_doc.v1.js` khỏi thư mục deploy |
-| Đa cửa hàng M0 → M6 | `docs/KE_HOACH_DA_CUA_HANG.md` (đã cập nhật theo hiện trạng 04/10) |
+| Đa cửa hàng Bước 0 → 5 | `docs/KE_HOACH_DA_CUA_HANG.md` — **viết lại 05/10**: một project, quán hiện tại giữ nguyên chỗ cũ (không chuyển dữ liệu), quán mới collection `…__{storeId}`; Bước 1 = lớp đường dẫn `data_access.v1.js` + engine v19 + chốt chặn |
 | O13 — mã nguồn webhook Cloud Run | cần cho M3 |
-| `tools/site_files.txt` (danh sách file của Gieo Gieo trên site Hosting dùng chung) | chưa có — làm ở M0 |
+| `tools/site_files.txt` (danh sách file của Gieo Gieo trên site Hosting dùng chung) | chưa có — làm ở Bước 1 của kế hoạch đa cửa hàng |
 | 2 câu hỏi nhỏ còn treo từ 28/09 | xoá dòng ADJUSTMENT kiểu cũ ở Quản lý; nhãn `voucherUsed = __free_stamp__…` của bill ly tem — `docs/luu_tru/NHAT_KY_PHIEN_28-09-2026.md` mục 13 |
 | Việc dọn sau deploy (chủ dự án) | xoá node RT `session_display_gieogieo` (K0); dọn `myGifts.__free_stamp__*` bằng `tools/don_myGifts_free_stamp.js` — cùng file nhật ký mục 14 bước 8 |
 
@@ -49,7 +49,7 @@
 | `docs/UNIT_ENGINE.md` | sửa kho / engine (API, bất biến B1–B15, lịch sử v1–v18) |
 | `docs/KE_HOACH_TOI_UU_DOC.md` | tối ưu lượt đọc Firestore / xử lý trùng (N1–N3, T0–T6) |
 | `docs/KE_HOACH_DA_CUA_HANG.md` | làm đa cửa hàng |
-| `docs/KE_HOACH_UNIT_ENGINE_DA_CUA_HANG.md` | kế hoạch gốc (mục 2.1 = bất biến; mục 7–9 = đa cửa hàng chi tiết) |
+| `docs/KE_HOACH_UNIT_ENGINE_DA_CUA_HANG.md` | kế hoạch gốc (mục 2.1 = bất biến; mục 7–9 đa cửa hàng là hướng cũ — đã thay bằng `KE_HOACH_DA_CUA_HANG.md` 05/10) |
 | `docs/KE_HOACH_TRACH_NHIEM_CA.md` | nhóm `duty` (quy trách nhiệm theo ca) |
 | `docs/CHE_DO_THU.md` | chế độ thử `_thu` |
 | `docs/TARGET_NHAN_VIEN.md` | target nhân viên |
