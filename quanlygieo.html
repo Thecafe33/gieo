@@ -2245,9 +2245,24 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 const fstore = firebase.firestore();
-// [ĐA CỬA HÀNG — Bước 1] Lớp đường dẫn theo quán (data_access.v1.js): quán hiện tại 'gg01' → mọi tên giữ NGUYÊN.
-// Thiếu file (mạng chập lúc tải) → chạy tiếp như cũ: với 'gg01' không bọc cũng y hệt.
-if (window.GieoData) GieoData.install({ fstore, db, storeId: 'gg01' }); else console.error('[GieoData] không nạp được data_access.v1.js — chạy tiếp với đường dẫn cũ (cửa hàng gg01)');
+// [ĐA CỬA HÀNG — Bước 1+2] Lớp đường dẫn theo quán (data_access.v1.js): quán hiện tại 'gg01' → mọi tên giữ NGUYÊN.
+// catalogMirror: mọi lượt sửa danh mục NL / BTP ở đây tự ghi cùng trường đó sang bản danh mục của các quán khác
+// (không bao giờ chép tồn; xoá món bị chặn khi quán khác còn tồn) — Cấu hình ▸ Cửa hàng.
+// Thiếu file (mạng chập lúc tải) → báo đỏ + tự tải lại: chạy không bọc thì sửa danh mục không tới quán khác.
+if (window.GieoData) {
+  GieoData.install({ fstore, db, storeId: 'gg01', catalogMirror: true });
+  GieoData.onCatalogSyncError = e => {
+    const ds = (e.loi || []).map(x => (x.storeId || '').toUpperCase() + ': ' + x.error).join(' · ');
+    try { toast('⚠️ Đã lưu ở quán này, nhưng CHƯA đồng bộ sang ' + ds); } catch (er) {}
+  };
+} else {
+  const bar = document.createElement('div');
+  bar.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#c0392b;color:#fff;font:700 16px sans-serif;padding:30px;text-align:center';
+  bar.textContent = '⚠️ Chưa tải được data_access.v1.js — đang tải lại…';
+  (document.body || document.documentElement).appendChild(bar);
+  setTimeout(() => location.reload(), 5000);
+  throw new Error('[GieoData] thiếu data_access.v1.js — dừng app');
+}
 const auth = firebase.auth();
 // [E3] Khởi tạo Unit Engine cho Quản lý. Thiếu file engine → banner + tự tải lại sau 5 giây (6.3).
 if (window.UnitEngine) {
@@ -2385,6 +2400,7 @@ function toast(msg){
 // Dùng: ic('trash') · ic('check', 20) · ic('x', 16, 'var(--bad)')
 // ============================================================
 const ICON_PATHS = {
+  store:       '<path d="M4 10v10h16V10"/><path d="M3 10l2-6h14l2 6"/><path d="M10 20v-5h4v5"/>',
   menu:        '<path d="M4 7h16M4 12h16M4 17h16"/>',
   refresh:     '<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 5v6h-6"/>',
   x:           '<path d="M6 6l12 12M18 6L6 18"/>',
@@ -11428,6 +11444,7 @@ const NAV_SECTIONS = [
     {key:'entry:target', ic:'settings', label:'Mục tiêu',  go:"goEntry('target')"},
     {key:'sim',          ic:'sliders',  label:'Mô phỏng',  go:"switchScreen('sim')"},
     {key:'entry:dondep', ic:'trash',    label:'Dọn dữ liệu', go:"goEntry('dondep')"},
+    {key:'entry:stores', ic:'store',    label:'Cửa hàng',    go:"goEntry('stores')", sub:'Mã đăng nhập POS · đồng bộ danh mục'},
   ]},
   // [BÊ TỪ POS] Hai màn này trước nằm trong app POS — chuyển sang đây vì sửa giá
   // và cấu hình khuyến mãi là việc của chủ quán, không phải của nhân viên bán hàng.
@@ -15601,6 +15618,7 @@ function renderEntry(){
   if(curEntryTab==='luong') renderEntryLuong();
   if(curEntryTab==='nhacnho') renderEntryNhacNho();
   if(curEntryTab==='dondep') renderEntryDonDep();
+  if(curEntryTab==='stores') renderEntryStores();
   if(curEntryTab==='audit') renderEntryAudit();
   if(curEntryTab==='export') renderEntryExport();
 }
@@ -16857,10 +16875,11 @@ function _ddRecentKeys(){
   }
   return out;
 }
-// Suy ngày từ key bank_confirmations dạng GG + DDMMHHmmss (xem vietqrOrderId bên POS).
+// Suy ngày từ key bank_confirmations dạng GG + DDMMHHmmss (xem vietqrOrderId bên POS); quán khác GG01 có
+// thêm 2 số quán ngay sau GG (GG02 + DDMMHHmmss — genBankOrderId, đa cửa hàng Bước 2).
 // Không có năm trong key nên lấy lần xuất hiện GẦN NHẤT của DD/MM tính tới hôm nay.
 function _ddDateFromBankKey(k){
-  const m = /^GG(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})$/.exec(String(k||''));
+  const m = /^GG(?:\d{2})?(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})$/.exec(String(k||''));
   if(!m) return null;
   const [_, DD, MM, HH, mi, ss] = m;
   const now = new Date();
@@ -16906,9 +16925,11 @@ async function ddScan(){
       }
     }
     // --- Xác nhận chuyển khoản ---
+    // bank_confirmations dùng CHUNG với XOFA / The Cafe 33 (webhook ghi cả 3 thương hiệu) — chỉ xét mã của
+    // Gieo Gieo (bắt đầu 'GG'); mã của thương hiệu khác chỉ đếm, KHÔNG BAO GIỜ đưa vào danh sách xoá.
     const bankKeys = await _ddShallow('bank_confirmations', token);
-    const bank = bankKeys.map(k => ({ key:k, date:_ddDateFromBankKey(k) }));
-    _ddScan = { at:new Date(), days, bank, months:months.length };
+    const bank = bankKeys.filter(k => /^GG/.test(k)).map(k => ({ key:k, date:_ddDateFromBankKey(k) }));
+    _ddScan = { at:new Date(), days, bank, bankOther: bankKeys.length - bank.length, months:months.length };
   }catch(err){
     console.error('ddScan failed', err);
     body.innerHTML = `<div class="muted">Quét thất bại: ${escapeHtmlAttr(err.message||err)}</div>
@@ -16939,7 +16960,8 @@ function _ddRender(body){
 
     <div class="sec-title">Xác nhận chuyển khoản (bank_confirmations)</div>
     <div class="card">
-      <div class="row"><span class="rl">Tổng bản ghi</span><span class="rv"><b style="color:${sc.bank.length>1000?'var(--bad)':'var(--td)'}">${sc.bank.length}</b></span></div>
+      <div class="row"><span class="rl">Bản ghi của Gieo Gieo (mã GG…)</span><span class="rv"><b style="color:${sc.bank.length>1000?'var(--bad)':'var(--td)'}">${sc.bank.length}</b></span></div>
+      ${sc.bankOther?`<div class="row"><span class="rl">Của XOFA / The Cafe 33 (không đụng)</span><span class="rv">${sc.bankOther}</span></div>`:''}
       <div class="row"><span class="rl">Cũ hơn 7 ngày (xoá được)</span><span class="rv"><b>${bankOld.length}</b></span></div>
       ${bankUnknown.length?`<div class="row"><span class="rl">Không đọc được ngày từ mã</span><span class="rv"><b>${bankUnknown.length}</b></span></div>`:''}
       <div class="small-note" style="margin-top:6px">Đây là bản ghi bắt tay dùng một lần giữa ngân hàng và POS. Sau khi bill đã lên, nó không còn giá trị gì. Bản POS mới tự xoá ngay sau khi dùng; nút dưới đây dọn đống tồn từ trước.</div>
@@ -17059,6 +17081,171 @@ async function ddDeleteBankUnknown(){
     toast(`✅ Đã xoá ${n} bản ghi`);
     ddScan();
   }catch(err){ console.error('ddDeleteBankUnknown failed', err); toast('❌ ' + (err.message||err)); }
+}
+
+// ============================================================================
+// [ĐA CỬA HÀNG — Bước 2] CỬA HÀNG — stores_gieogieo (dùng chung) — docs/KE_HOACH_DA_CUA_HANG.md
+//
+// · Mỗi cửa hàng: mã quán ggNN (GG01 = quán hiện tại, GG02, GG03… — cố định, không đổi), tên, địa chỉ,
+//   MÃ ĐĂNG NHẬP 6 KÝ TỰ (máy POS nhập một lần, máy tự nhớ), đang hoạt động / đã ngừng.
+// · Đổi mã đăng nhập: chỉ máy đăng nhập MỚI phải dùng mã mới; máy đã đăng nhập KHÔNG bị hỏi lại (chủ dự án chốt).
+// · Ngừng cửa hàng: máy mới không đăng nhập được nữa; máy đang chạy không bị đẩy ra.
+// · Thêm cửa hàng: chép danh mục NL / BTP của quán này (tồn = 0) + quy tắc refill + vị trí kho, rồi mới bật
+//   "sẵn danh mục" (catalogReady) — từ đó mọi lần sửa danh mục ở đây tự đồng bộ sang (GieoData catalogMirror).
+// · Đồng bộ danh mục: kiểm / sửa chỗ lệch (vd lượt đồng bộ từng lỗi mạng). Không xoá món thừa, không đụng tồn.
+// ============================================================================
+const STORE_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';   // bỏ O / 0 / I / 1 cho khỏi đọc nhầm
+let _stDiff = null;   // kết quả kiểm lệch danh mục gần nhất
+function storeNewCode(daCo){
+  for(let lan=0; lan<50; lan++){
+    const a = new Uint8Array(6); crypto.getRandomValues(a);
+    const c = Array.from(a, x => STORE_CODE_CHARS[x % STORE_CODE_CHARS.length]).join('');
+    if(!daCo.has(c)) return c;
+  }
+  throw new Error('Không sinh được mã mới — thử lại');
+}
+async function renderEntryStores(){
+  const body = document.getElementById('entryBody');
+  showLoading(body, 'Đang tải cửa hàng...');
+  let list;
+  try{ await ensureAuth(); list = (await GieoData.stores(true)).filter(x => GieoData.hopLe(x.id)).sort((a,b)=>a.id<b.id?-1:1); }
+  catch(err){ body.innerHTML = `<div class="muted">Không tải được danh sách cửa hàng: ${escapeHtmlAttr(err.message||err)}</div>`; return; }
+  const cur = GieoData.storeId();
+  const coQuanNay = list.some(x => x.id === cur);
+  const the = st => `
+    <div class="card" style="${st.active===false?'opacity:.6':''}">
+      <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
+        <div>
+          <div style="font-weight:800;font-size:16px">${escapeHtmlAttr(st.name||'(chưa đặt tên)')} <span style="font-size:12px;color:var(--gt)">· ${st.id.toUpperCase()}${st.id===cur?' · quán đang xem':''}</span></div>
+          <div class="small-note">📍 ${escapeHtmlAttr(st.address||'(chưa có địa chỉ)')}</div>
+        </div>
+        <div style="text-align:right;flex-shrink:0">
+          <div class="small-note">Mã đăng nhập POS</div>
+          <div style="font:800 20px/1.2 monospace;letter-spacing:3px">${escapeHtmlAttr(st.code||'—')}</div>
+        </div>
+      </div>
+      <div class="small-note" style="margin-top:6px">${st.active===false?'⛔ Đã ngừng — máy mới không đăng nhập được':'✅ Đang hoạt động'}${st.id!==cur?(st.catalogReady?' · danh mục đã sẵn':' · ⚠️ danh mục chưa chép xong — bấm "Đồng bộ danh mục"'):''}${st.id!=='gg01'?` · mã CK: GG${GieoData.ckCode(st.id)}…`:''}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+        <button class="btn outline sm" onclick="storeEdit('${st.id}')">Sửa tên / địa chỉ</button>
+        <button class="btn outline sm" onclick="storeNewLoginCode('${st.id}')">Đổi mã đăng nhập</button>
+        ${st.id!==cur?`<button class="btn outline sm" onclick="storeToggleActive('${st.id}')">${st.active===false?'Mở lại':'Ngừng hoạt động'}</button>`:''}
+      </div>
+    </div>`;
+  const khac = list.filter(x => x.id !== cur && x.active !== false);
+  body.innerHTML = `
+    ${coQuanNay ? '' : `
+    <div class="card" style="border:2px solid var(--gm)">
+      <div style="font-weight:800;font-size:15px">Bước đầu: tạo hồ sơ cho cửa hàng hiện tại (${cur.toUpperCase()})</div>
+      <div class="small-note" style="margin:6px 0 12px">Máy POS cần <b>mã 6 ký tự</b> của cửa hàng để đăng nhập (nhập một lần, máy tự nhớ). Tạo hồ sơ xong, mã hiện ngay ở đây — nhập mã đó trên POS.</div>
+      <div class="field"><label>Tên cửa hàng</label><input id="stNewName" placeholder="vd Gieo Gieo Long Xuyên"></div>
+      <div class="field"><label>Địa chỉ</label><input id="stNewAddr" placeholder="Số nhà, đường, phường…"></div>
+      <button class="btn" onclick="storeCreate(true)">Tạo hồ sơ ${cur.toUpperCase()}</button>
+    </div>`}
+    ${list.map(the).join('')}
+    ${coQuanNay ? `
+    <div class="sec-title">Thêm cửa hàng mới</div>
+    <div class="card">
+      <div class="small-note" style="margin-bottom:10px">Cửa hàng mới nhận mã <b>GG${String(list.reduce((m,x)=>Math.max(m, Number(x.id.slice(2))||0), 1)+1).padStart(2,'0')}</b>, có <b>bản danh mục riêng</b> chép từ quán này (tồn = 0 — nhập hàng qua POS của quán đó), dùng chung menu, công thức, nhân viên, khách hàng, tài khoản ngân hàng. Dữ liệu bán / kho / ca của mỗi quán tách riêng.</div>
+      <div class="field"><label>Tên cửa hàng</label><input id="stNewName" placeholder="vd Gieo Gieo Cần Thơ"></div>
+      <div class="field"><label>Địa chỉ</label><input id="stNewAddr" placeholder="Số nhà, đường, phường…"></div>
+      <button class="btn" onclick="storeCreate(false)">Tạo cửa hàng</button>
+    </div>` : ''}
+    ${khac.length ? `
+    <div class="sec-title">Đồng bộ danh mục NL / BTP</div>
+    <div class="card">
+      <div class="small-note" style="margin-bottom:10px">Sửa danh mục ở đây tự ghi sang các quán khác. Nút này kiểm lại chỗ lệch (vd lượt đồng bộ từng lỗi mạng) và sửa — chỉ chép trường danh mục, <b>không đụng tồn</b>, không xoá món.</div>
+      <button class="btn outline" onclick="storeCatalogCheck(false)">Kiểm lệch</button>
+      <div id="stDiffBox" style="margin-top:10px">${_stDiff ? storeDiffHtml(_stDiff) : ''}</div>
+    </div>` : ''}`;
+}
+function storeDiffHtml(d){
+  const lech = d.filter(x => x.kind !== 'thua'), thua = d.filter(x => x.kind === 'thua');
+  const ten = x => { const L = x.name === 'prep_items_gieogieo' ? PREP_ITEMS : INVENTORY_ITEMS; const it = (L||[]).find(i => i.id === x.id); return escapeHtmlAttr(it ? it.name : x.id); };
+  if(!d.length) return '<div class="small-note" style="color:var(--ok)">✅ Danh mục các quán khớp nhau.</div>';
+  return `${lech.length ? `<div style="font-weight:700;margin-bottom:6px">${lech.length} chỗ lệch / thiếu</div>
+      ${lech.slice(0,40).map(x => `<div class="small-note">${x.storeId.toUpperCase()} · ${x.name==='prep_items_gieogieo'?'BTP':'NL'} ${ten(x)} — ${x.kind==='thieu'?'thiếu món':'lệch: '+escapeHtmlAttr((x.fields||[]).join(', '))}</div>`).join('')}
+      ${lech.length>40?`<div class="small-note">… và ${lech.length-40} chỗ khác</div>`:''}
+      <button class="btn" style="margin-top:10px" onclick="storeCatalogCheck(true)">Sửa ${lech.length} chỗ lệch</button>` : '<div class="small-note" style="color:var(--ok)">✅ Không có chỗ lệch.</div>'}
+    ${thua.length ? `<div class="small-note" style="margin-top:10px">ℹ️ ${thua.length} món chỉ có ở quán khác (đã xoá ở đây khi quán đó còn tồn, hoặc tạo riêng) — giữ nguyên.</div>` : ''}`;
+}
+async function storeCatalogCheck(apply){
+  const box = document.getElementById('stDiffBox');
+  if(apply && !confirm('Chép các trường danh mục lệch sang quán khác? Tồn của các quán KHÔNG bị đụng.')) return;
+  if(box) showLoading(box, apply ? 'Đang sửa...' : 'Đang kiểm...');
+  try{
+    await ensureAuth();
+    // tên món cho danh sách lệch (đã có trong bộ nhớ thì không đọc lại)
+    if(!INVENTORY_ITEMS.length) INVENTORY_ITEMS = await loadInventoryItems().catch(()=>[]);
+    if(!(PREP_ITEMS||[]).length) PREP_ITEMS = await loadPrepItems().catch(()=>[]);
+    _stDiff = await GieoData.catalogDiff(!!apply);
+    if(apply){ logAudit('catalog_sync','store','*',{ fixed: _stDiff.filter(x=>x.kind!=='thua').length }); _stDiff = await GieoData.catalogDiff(false); toast('✅ Đã đồng bộ danh mục'); }
+    if(box) box.innerHTML = storeDiffHtml(_stDiff);
+  }catch(err){ console.error('storeCatalogCheck', err); if(box) box.innerHTML = `<div class="muted">Lỗi: ${escapeHtmlAttr(err.message||err)}</div>`; }
+}
+async function storeCreate(laQuanNay){
+  const name = (document.getElementById('stNewName')?.value||'').trim();
+  const address = (document.getElementById('stNewAddr')?.value||'').trim();
+  if(!name || !address){ toast('⚠️ Nhập đủ tên và địa chỉ — POS hiện đúng hai thông tin này để nhân viên biết máy thuộc quán nào'); return; }
+  try{
+    await ensureAuth();
+    const list = (await GieoData.stores(true)).filter(x => GieoData.hopLe(x.id));
+    const cur = GieoData.storeId();
+    const id = laQuanNay ? cur : 'gg' + String(list.reduce((m,x)=>Math.max(m, Number(x.id.slice(2))||0), 1)+1).padStart(2,'0');
+    if(list.some(x => x.id === id)){ toast('⚠️ ' + id.toUpperCase() + ' đã có'); renderEntryStores(); return; }
+    if(!laQuanNay && !confirm(`Tạo cửa hàng ${id.toUpperCase()} — "${name}"?\n\nChép danh mục nguyên liệu / bán thành phẩm (tồn = 0), quy tắc refill, vị trí kho từ quán này sang.`)) return;
+    const code = storeNewCode(new Set(list.map(x => x.code)));
+    const now = new Date().toISOString();
+    const ref = fstore.collection('stores_gieogieo').doc(id);
+    // Quán mới: catalogReady=false TRƯỚC khi chép — đang chép dở thì sửa danh mục chưa đồng bộ sang (tránh ghi vào
+    // bản chưa đủ); chép xong mới bật, rồi kiểm lệch một lượt để bắt các lần sửa trong lúc chép.
+    await ref.set({ name, address, code, active: true, catalogReady: !!laQuanNay, createdAt: now, createdBy: 'management' });
+    if(!laQuanNay){
+      toast('⏳ Đang chép danh mục sang ' + id.toUpperCase() + '…');
+      const dem = await GieoData.seedNewStore(id);
+      await ref.update({ catalogReady: true, seededAt: new Date().toISOString(), seedCounts: dem });
+      await GieoData.stores(true);
+      await GieoData.catalogDiff(true);
+    }
+    logAudit('create','store',id,{ name, address });
+    toast(`✅ Đã tạo ${id.toUpperCase()} · mã đăng nhập POS: ${code}`);
+  }catch(err){ console.error('storeCreate', err); showError('Tạo cửa hàng lỗi: ' + (err.code||err.message||err)); }
+  renderEntryStores();
+}
+async function storeEdit(id){
+  const st = (await GieoData.stores()).find(x => x.id === id); if(!st) return;
+  const name = prompt('Tên cửa hàng ' + id.toUpperCase(), st.name || ''); if(name == null) return;
+  const address = prompt('Địa chỉ cửa hàng ' + id.toUpperCase(), st.address || ''); if(address == null) return;
+  if(!name.trim() || !address.trim()){ toast('⚠️ Tên và địa chỉ không được trống'); return; }
+  try{
+    await ensureAuth();
+    await fstore.collection('stores_gieogieo').doc(id).update({ name: name.trim(), address: address.trim(), updatedAt: new Date().toISOString() });
+    logAudit('update','store',id,{ name: name.trim(), address: address.trim() });
+    toast('✅ Đã lưu — POS cập nhật ở lần mở app kế tiếp');
+  }catch(err){ showError('Lưu lỗi: ' + (err.code||err.message||err)); }
+  renderEntryStores();
+}
+async function storeNewLoginCode(id){
+  if(!confirm(`Đổi mã đăng nhập của ${id.toUpperCase()}?\n\nMã cũ hết dùng để đăng nhập máy MỚI. Máy POS đang đăng nhập vẫn chạy bình thường, không phải nhập lại.`)) return;
+  try{
+    await ensureAuth();
+    const list = await GieoData.stores(true);
+    const code = storeNewCode(new Set(list.map(x => x.code)));
+    await fstore.collection('stores_gieogieo').doc(id).update({ code, updatedAt: new Date().toISOString() });
+    logAudit('update','store',id,{ codeChanged: true });
+    toast('✅ Mã mới của ' + id.toUpperCase() + ': ' + code);
+  }catch(err){ showError('Đổi mã lỗi: ' + (err.code||err.message||err)); }
+  renderEntryStores();
+}
+async function storeToggleActive(id){
+  const st = (await GieoData.stores()).find(x => x.id === id); if(!st || id === GieoData.storeId()) return;
+  const ngung = st.active !== false;
+  if(!confirm(ngung ? `Ngừng ${id.toUpperCase()}?\n\nMáy mới không đăng nhập được, danh mục thôi đồng bộ sang. Máy đang chạy không bị đẩy ra; dữ liệu giữ nguyên.` : `Mở lại ${id.toUpperCase()}? Nhớ bấm "Kiểm lệch" để đồng bộ danh mục đã sửa trong lúc ngừng.`)) return;
+  try{
+    await ensureAuth();
+    await fstore.collection('stores_gieogieo').doc(id).update({ active: !ngung, updatedAt: new Date().toISOString() });
+    logAudit('update','store',id,{ active: !ngung });
+  }catch(err){ showError('Lỗi: ' + (err.code||err.message||err)); }
+  renderEntryStores();
 }
 
 // ============================================================================

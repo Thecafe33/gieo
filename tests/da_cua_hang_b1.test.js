@@ -2,7 +2,7 @@
 //  1. Quy tắc tên: quán hiện tại gg01 → tên cũ y hệt; quán khác → dữ liệu riêng (S) thêm '__{storeId}', dùng chung giữ tên.
 //  2. ĐỒNG NHẤT gg01: 24 kịch bản giao diện thật (POS + Quản lý + engine) cho kết quả GIỐNG TỪNG BYTE khi có / không có lớp.
 //  3. CÁCH LY gg02: cùng 24 kịch bản chạy ở quán gg02 — dữ liệu riêng của quán hiện tại (mồi) không đổi, không lượt ghi
-//     nào vào collection / gốc RT riêng mà thiếu hậu tố; liệt kê dữ liệu dùng chung bị ghi (tồn trong danh mục → Bước 2).
+//     nào vào collection / gốc RT riêng mà thiếu hậu tố; không ghi dữ liệu dùng chung (danh mục theo quán — Bước 2).
 //  4. Chế độ thử + gg02: mọi lượt ghi vẫn trong vùng thử.
 //  5. Chốt chặn tools/check_paths.js: đạt trên code hiện tại; bắt được tên chưa đăng ký.
 'use strict';
@@ -23,8 +23,10 @@ const nap = () => { const m = { exports: {} }; new Function('window', 'module', 
     ok(ten.every(n => G.fsPath(n, 'gg01') === n) && goc.every(n => G.rtPath(n + '/a/b', 'gg01') === n + '/a/b'), 'gg01: ' + ten.length + ' collection + ' + goc.length + ' gốc RT giữ nguyên tên');
     ok(G.fsPath('stock_transactions_gieogieo', 'gg02') === 'stock_transactions_gieogieo__gg02' && G.fsPath('daily_closings_gieogieo/2026-10-05', 'gg02') === 'daily_closings_gieogieo__gg02/2026-10-05', 'gg02: dữ liệu riêng thêm hậu tố, giữ phần sau đường dẫn');
     ok(G.rtPath('active_units_gieogieo/X/A', 'gg02') === 'active_units_gieogieo__gg02/X/A' && G.rtPath('/orders_gieogieo/thang10', 'gg03') === 'orders_gieogieo__gg03/thang10', 'gg02/gg03: gốc RT riêng (không lồng dưới gốc quán hiện tại)');
-    ok(['inventory_items_gieogieo', 'recipes_gieogieo', 'employees_gieogieo', 'customers'].every(n => G.fsPath(n, 'gg02') === n)
-      && ['menu_gieogieo', 'bank_confirmations', '.info'].every(n => G.rtPath(n, 'gg02') === n), 'gg02: danh mục, công thức, nhân viên, khách, menu, CK, .info dùng chung');
+    ok(['recipes_gieogieo', 'employees_gieogieo', 'customers'].every(n => G.fsPath(n, 'gg02') === n)
+      && ['menu_gieogieo', 'bank_confirmations', '.info'].every(n => G.rtPath(n, 'gg02') === n), 'gg02: công thức, nhân viên, khách, menu, CK, .info dùng chung');
+    ok(G.fsPath('inventory_items_gieogieo/X', 'gg02') === 'inventory_items_gieogieo__gg02/X' && G.fsPath('prep_items_gieogieo', 'gg02') === 'prep_items_gieogieo__gg02'
+      && G.fsPath('inventory_items_gieogieo', 'gg01') === 'inventory_items_gieogieo', 'Bước 2: danh mục NL / BTP theo quán (C) — gg01 tên cũ, gg02 bản riêng');
     let loi = ''; try { G.fsPath('ten_la_gieogieo', 'gg02'); } catch (e) { loi = e.message; }
     ok(/chưa đăng ký/.test(loi) && G.fsPath('ten_la_gieogieo', 'gg01') === 'ten_la_gieogieo', 'tên lạ: gg02 báo lỗi; gg01 đi tiếp như cũ');
     ok(['customers', 'bank_confirmations'].every(n => (G.REG.fs[n] || G.REG.rt[n]) === 'X'), 'customers, bank_confirmations: loại X (dùng chung XOFA / The Cafe 33)');
@@ -33,12 +35,12 @@ const nap = () => { const m = { exports: {} }; new Function('window', 'module', 
   {
     const thu = (o) => { const G = nap(); const f = makeFake({}); try { G.install(Object.assign({ fstore: f.fstore, db: f.db }, o)); return 'OK'; } catch (e) { return e.message; } };
     ok(thu({ storeId: 'gg01' }) === 'OK', 'install gg01');
-    ok(/Bước 1 chỉ chạy/.test(thu({ storeId: 'gg02' })), 'Bước 1: quán khác gg01 bị chặn (chưa có tồn theo quán)');
-    ok(/không hợp lệ/.test(thu({ storeId: 'GG02', allowMulti: true })) && /không hợp lệ/.test(thu({ storeId: 'x', allowMulti: true })), 'mã cửa hàng sai dạng bị chặn');
-    const G = nap(); const f = makeFake({}); G.install({ fstore: f.fstore, db: f.db, storeId: 'gg02', allowMulti: true });
+    ok(thu({ storeId: 'gg02' }) === 'OK' && thu({ storeId: null }) === 'OK', 'install gg02 / chưa đăng nhập (null)');
+    ok(/không hợp lệ/.test(thu({ storeId: 'GG02' })) && /không hợp lệ/.test(thu({ storeId: 'x' })), 'mã cửa hàng sai dạng bị chặn');
+    const G = nap(); const f = makeFake({}); G.install({ fstore: f.fstore, db: f.db, storeId: 'gg02' });
     let a = '', b = ''; try { f.db.ref(); } catch (e) { a = e.message; } try { f.db.ref(''); } catch (e) { b = e.message; }
     ok(/gốc/.test(a) && /gốc/.test(b), 'gg02: truy cập gốc Realtime DB bị chặn');
-    let c = ''; try { G.install({ fstore: f.fstore, db: f.db, storeId: 'gg02', allowMulti: true }); } catch (e) { c = e.message; }
+    let c = ''; try { G.install({ fstore: f.fstore, db: f.db, storeId: 'gg02' }); } catch (e) { c = e.message; }
     ok(/đã cài/.test(c), 'không cài hai lần');
   }
 
@@ -69,10 +71,8 @@ const nap = () => { const m = { exports: {} }; new Function('window', 'module', 
     ok(!loiLot.length, 'gg02: không lượt ghi nào vào chỗ riêng của quán hiện tại' + (loiLot.length ? ' — ' + loiLot.join(' ; ') : ''));
     ok(!doiGoc.length, 'gg02: dữ liệu riêng của quán hiện tại không đổi một byte' + (doiGoc.length ? ' — ' + doiGoc.join(', ') : ''));
     ok(!loiChay.length, 'gg02: kịch bản chạy như ở gg01 (không lỗi mới)' + (loiChay.length ? ' — ' + loiChay.join(' ; ') : ''));
-    const choPhep = new Set(['inventory_items_gieogieo', 'prep_items_gieogieo']);   // tồn nằm trong doc danh mục — tách ở Bước 2
-    const ngoai = [...chung].filter(x => !choPhep.has(x));
     console.log('     dữ liệu dùng chung được ghi khi chạy gg02: ' + ([...chung].join(', ') || '(không)'));
-    ok(!ngoai.length, 'gg02: chỉ ghi dữ liệu dùng chung đã biết (tồn trong danh mục NL/BTP → tách ở Bước 2)' + (ngoai.length ? ' — lạ: ' + ngoai.join(', ') : ''));
+    ok(!chung.size, 'gg02 (Bước 2): bán / kho / sơ chế ở quán khác KHÔNG ghi gì vào dữ liệu dùng chung (tồn nằm trong danh mục của quán)');
   }
 
   // ── 4. Chế độ thử + gg02 (bản _thu sau Bước 2) ──
@@ -96,7 +96,7 @@ const nap = () => { const m = { exports: {} }; new Function('window', 'module', 
     fs.writeFileSync(p, fs.readFileSync(p, 'utf8').replace("const CAKE_ACCOUNT_NO", "const __thuTen = () => fstore.collection('kho_moi_gieogieo');\nconst CAKE_ACCOUNT_NO"));
     const r1 = chay({ CHECK_PATHS_ROOT: tmp });
     ok(r1.code === 1 && /kho_moi_gieogieo/.test(r1.out), 'check_paths: bắt collection mới chưa đăng ký');
-    fs.writeFileSync(p, fs.readFileSync(path.join(ROOT, 'posgieo.html'), 'utf8').replace(/if \(window\.GieoData\) GieoData\.install\([^\n]*\n/, ''));
+    fs.writeFileSync(p, fs.readFileSync(path.join(ROOT, 'posgieo.html'), 'utf8').replace(/if \(window\.GieoData\) GieoData\.install\(/, 'if (window.GieoData) GieoData.khongCai('));
     const r2 = chay({ CHECK_PATHS_ROOT: tmp });
     ok(r2.code === 1 && /GieoData\.install/.test(r2.out), 'check_paths: bắt app thiếu GieoData.install');
     fs.rmSync(tmp, { recursive: true, force: true });

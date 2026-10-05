@@ -994,6 +994,8 @@ body.assist-main-on .toast{bottom:calc(100px + var(--assist-h, 0px) + 10px);}
     </button>
   </div>
   <div class="sdm" style="padding-top: 24px;">
+    <!-- [ĐA CỬA HÀNG] Thẻ "đây là POS của cửa hàng …" + đăng xuất khỏi cửa hàng — renderSdbStore() -->
+    <div id="sdbStore"></div>
     <div class="sdi" onclick="openRevenueScreen()">
       <div class="sdic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><rect x="3" y="12" width="4" height="9" rx="1" fill="#C22B49"/><rect x="10" y="7" width="4" height="14" rx="1" fill="#C22B49"/><rect x="17" y="3" width="4" height="18" rx="1" fill="#C22B49" opacity=".5"/></svg></div>
       <div style="flex:1"><div class="sdit">Doanh thu</div><div class="sdid">Báo cáo tổng quan</div></div>
@@ -2339,14 +2341,34 @@ if (typeof firebase === 'undefined') {
 if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
 const db     = firebase.database();
 const fstore = firebase.firestore();
-// [ĐA CỬA HÀNG — Bước 1] Lớp đường dẫn theo quán (data_access.v1.js): quán hiện tại 'gg01' → mọi tên giữ NGUYÊN.
-// Thiếu file (mạng chập lúc tải) → chạy tiếp như cũ: với 'gg01' không bọc cũng y hệt.
-if (window.GieoData) GieoData.install({ fstore, db, storeId: 'gg01' }); else console.error('[GieoData] không nạp được data_access.v1.js — chạy tiếp với đường dẫn cũ (cửa hàng gg01)');
+// [ĐA CỬA HÀNG — Bước 2] Máy POS gắn với MỘT cửa hàng bằng mã 6 ký tự của cửa hàng đó (Quản lý ▸ Cấu hình ▸
+// Cửa hàng). Nhập MỘT lần, máy tự nhớ (localStorage 'gieo_store_v1') — các lần mở app sau vào thẳng bán hàng,
+// KHÔNG hỏi lại mã, kể cả khi Quản lý đổi mã (chủ dự án chốt 05/10: không làm chậm bán hàng).
+// Máy CHƯA gắn → màn nhập mã, app DỪNG (không đọc / ghi dữ liệu quán nào; không bao giờ tự gắn quán).
+// Lớp đường dẫn (data_access.v1.js): quán 'gg01' → mọi tên giữ NGUYÊN như trước; quán khác → dữ liệu riêng.
+// Thiếu file data_access (mạng chập lúc tải): máy gắn gg01 → chạy tiếp như cũ (không bọc cũng y hệt);
+// máy gắn quán khác / chưa gắn → báo đỏ + tự tải lại (chạy không bọc = ghi nhầm vào dữ liệu GG01).
+// Bản thử (*_thu.html — che_do_thu): luôn là vùng thử của GG01, không cần mã.
+const POS_AUTH_EMAIL = 'cafe33@xolifa.com', POS_AUTH_PASS = 'xolifaangiang';
+const POS_STORE = (window.GieoThu && GieoThu.active)
+  ? { storeId: 'gg01', name: 'Bản thử', address: 'Vùng thử — chép từ dữ liệu cửa hàng GG01', thu: true }
+  : (() => { try { const v = JSON.parse(localStorage.getItem('gieo_store_v1') || 'null'); return v && /^gg\d{2}$/.test(v.storeId) ? v : null; } catch (e) { return null; } })();
+if (window.GieoData) GieoData.install({ fstore, db, storeId: POS_STORE ? POS_STORE.storeId : null });
+else if (POS_STORE && POS_STORE.storeId === 'gg01') console.error('[GieoData] không nạp được data_access.v1.js — máy gắn GG01: chạy tiếp với đường dẫn cũ');
+else {
+  const bar = document.createElement('div');
+  bar.style.cssText = 'position:fixed;inset:0;z-index:2147483000;background:#c0392b;color:#fff;font:700 16px sans-serif;padding:30px;text-align:center';
+  bar.textContent = '⚠️ Chưa tải được data_access.v1.js — đang tải lại…';
+  (document.body || document.documentElement).appendChild(bar);
+  setTimeout(() => location.reload(), 5000);
+  throw new Error('[GieoData] thiếu data_access.v1.js — dừng app');
+}
+if (!POS_STORE) { posStoreLoginScreen(); throw new Error('[ĐA CỬA HÀNG] máy chưa đăng nhập cửa hàng — app dừng, chờ nhập mã'); }
 // [E1] Khởi tạo Unit Engine. Thiếu file engine (mạng chập lúc tải) → banner đỏ + tự tải lại sau
 // 5 giây; KHÔNG có nhánh chặn bán nào khác (D17, mục 6.3 kế hoạch).
 if (window.UnitEngine) {
   UnitEngine.init({
-    app: 'pos', fstore, db, FieldValue: firebase.firestore.FieldValue, storeId: 'gg01', serverClock: true,   // [E6] C1: giờ máy chủ cho mốc suy tồn (R3)
+    app: 'pos', fstore, db, FieldValue: firebase.firestore.FieldValue, storeId: POS_STORE.storeId, serverClock: true,   // [E6] C1: giờ máy chủ cho mốc suy tồn (R3)
     businessDate: () => posDateKey(),
     getItems: () => KHO_ITEMS_CACHE, getPreps: () => PREP_ITEMS_CACHE_POS,
     getRefillRule: itemId => getPrimaryRefillRulePOS(itemId),
@@ -7377,9 +7399,10 @@ auth.onAuthStateChanged(user => {
     // localStorage sống sót qua F5/đóng app) — idempotent theo billId nên chạy lại vô hại.
     loyaltyFlushPending().catch(err => console.warn('loyaltyFlushPending lỗi:', err));
     setInterval(() => loyaltyFlushPending().catch(() => {}), 3 * 60 * 1000);
+    posStoreRefreshInfo(); // [ĐA CỬA HÀNG] tên / địa chỉ cửa hàng mới nhất cho thẻ ở sidebar (1 lượt đọc / lần mở app)
   }
 });
-auth.signInWithEmailAndPassword('cafe33@xolifa.com', 'xolifaangiang')
+auth.signInWithEmailAndPassword(POS_AUTH_EMAIL, POS_AUTH_PASS)
   .catch(err => {
     console.warn('signInWithEmailAndPassword failed:', err);
     if (!_menuInited) {
@@ -22070,8 +22093,120 @@ function showScreen(id) {
       })();
   }
 }
-function openSdb() { document.getElementById('sdb').classList.add('open'); document.getElementById('ov').classList.add('show'); }
+function openSdb() { renderSdbStore(); document.getElementById('sdb').classList.add('open'); document.getElementById('ov').classList.add('show'); }
 function closeSdb() { document.getElementById('sdb').classList.remove('open'); document.getElementById('ov').classList.remove('show'); }
+// ============================================================
+// [ĐA CỬA HÀNG — Bước 2] CỬA HÀNG CỦA MÁY NÀY — đăng nhập bằng mã 6 ký tự / thẻ ở sidebar / đăng xuất
+// ============================================================
+// Màn nhập mã: chạy khi máy CHƯA gắn cửa hàng — lúc đó app đã DỪNG ở khối cài đặt (không có auth, menu, đơn…),
+// nên hàm này tự đăng nhập Firebase và chỉ đọc stores_gieogieo (dùng chung). Gắn xong → tải lại trang.
+function posStoreLoginScreen() {
+  const o = document.createElement('div');
+  o.id = 'posStoreLogin';
+  o.style.cssText = 'position:fixed;inset:0;z-index:2147483000;background:#fff;display:flex;align-items:center;justify-content:center;padding:20px;overflow:auto';
+  o.innerHTML = '<div style="max-width:380px;width:100%;text-align:center">'
+    + '<div style="font-size:44px">🏪</div>'
+    + '<div style="font-size:21px;font-weight:800;color:#C22B49;margin-top:6px">Đăng nhập cửa hàng</div>'
+    + '<div style="font-size:13.5px;color:#555;margin:8px 0 18px;line-height:1.5">Máy này chưa gắn với cửa hàng nào. Nhập <b>mã 6 ký tự</b> của cửa hàng '
+    + '(Quản lý ▸ Cấu hình ▸ Cửa hàng). Chỉ nhập <b>một lần</b> — máy tự nhớ, các lần mở sau vào thẳng bán hàng.</div>'
+    + '<input id="psCode" maxlength="6" autocomplete="off" autocapitalize="characters" spellcheck="false" inputmode="text"'
+    + ' style="width:100%;box-sizing:border-box;font-size:28px;font-weight:800;letter-spacing:10px;text-align:center;text-transform:uppercase;padding:12px;border:2px solid #ddd;border-radius:14px;outline:none">'
+    + '<div id="psMsg" style="min-height:20px;font-size:13.5px;color:#c0392b;margin-top:8px"></div>'
+    + '<button id="psGo" style="width:100%;margin-top:6px;padding:15px;border:0;border-radius:14px;background:#C22B49;color:#fff;font-size:16px;font-weight:800">Tiếp tục</button>'
+    + '<div id="psConfirm"></div></div>';
+  document.body.appendChild(o);
+  const $ = id => document.getElementById(id);
+  let sai = 0, khoaDen = 0, dangTim = false;
+  const msg = (t, mau) => { $('psMsg').style.color = mau || '#c0392b'; $('psMsg').textContent = t || ''; };
+  async function tim() {
+    if (dangTim) return;
+    const code = String($('psCode').value || '').trim().toUpperCase();
+    $('psConfirm').innerHTML = '';
+    if (Date.now() < khoaDen) { msg('Nhập sai nhiều lần — thử lại sau ' + Math.ceil((khoaDen - Date.now()) / 1000) + ' giây'); return; }
+    if (!/^[A-Z0-9]{6}$/.test(code)) { msg('Mã gồm đúng 6 chữ / số'); return; }
+    dangTim = true; $('psGo').disabled = true; msg('Đang kiểm tra…', '#888');
+    try {
+      if (!firebase.auth().currentUser) await firebase.auth().signInWithEmailAndPassword(POS_AUTH_EMAIL, POS_AUTH_PASS);
+      const st = await GieoData.findStoreByCode(code);
+      if (!st) {
+        sai++; if (sai >= 5) { khoaDen = Date.now() + 30000; sai = 0; }
+        msg('Mã không đúng, hoặc cửa hàng đã ngừng hoạt động'); return;
+      }
+      msg('');
+      $('psConfirm').innerHTML = '<div style="margin-top:16px;padding:16px;border-radius:14px;background:#fdf1f3;border:1px solid #f3c6cf;text-align:left">'
+        + '<div style="font-size:11.5px;color:#C22B49;font-weight:800;letter-spacing:.5px">MÁY NÀY SẼ LÀ POS CỦA CỬA HÀNG</div>'
+        + '<div style="font-size:18px;font-weight:800;margin-top:4px">' + escHtmlPos(st.name || st.id.toUpperCase()) + ' <span style="font-size:12px;color:#888">· ' + st.id.toUpperCase() + '</span></div>'
+        + '<div style="font-size:13.5px;color:#444;margin-top:4px">📍 ' + escHtmlPos(st.address || '(chưa có địa chỉ)') + '</div>'
+        + '<button id="psYes" style="width:100%;margin-top:14px;padding:14px;border:0;border-radius:12px;background:#27ae60;color:#fff;font-size:15px;font-weight:800">Đúng cửa hàng này — vào bán hàng</button>'
+        + '<button id="psNo" style="width:100%;margin-top:8px;padding:12px;border:0;border-radius:12px;background:#eee;color:#333;font-size:14px;font-weight:700">Không phải — nhập lại</button></div>';
+      $('psYes').onclick = () => {
+        try { GieoData.binding.save({ storeId: st.id, code, name: st.name || '', address: st.address || '', at: new Date().toISOString() }); }
+        catch (e) { msg('Máy không lưu được (bộ nhớ trình duyệt bị chặn) — không vào được'); return; }
+        location.reload();
+      };
+      $('psNo').onclick = () => { $('psConfirm').innerHTML = ''; $('psCode').value = ''; $('psCode').focus(); };
+    } catch (e) {
+      console.error('[ĐA CỬA HÀNG] kiểm tra mã lỗi', e);
+      msg('Không kiểm tra được (mạng?) — thử lại. ' + (e && (e.code || e.message) || ''));
+    } finally { dangTim = false; $('psGo').disabled = false; }
+  }
+  $('psGo').onclick = tim;
+  $('psCode').addEventListener('keydown', e => { if (e.key === 'Enter') tim(); });
+  setTimeout(() => { try { $('psCode').focus(); } catch (e) {} }, 150);
+}
+// Thẻ đầu sidebar: "Đây là POS của cửa hàng …" + địa chỉ + nút đăng xuất khỏi cửa hàng. Không hiện mã 6 ký tự.
+function renderSdbStore() {
+  const el = document.getElementById('sdbStore');
+  if (!el || !POS_STORE) return;
+  el.innerHTML = '<div style="margin:0 4px 14px;padding:12px 14px;border-radius:14px;background:#fdf1f3;border:1px solid #f3c6cf">'
+    + '<div style="font-size:11px;color:#C22B49;font-weight:800;letter-spacing:.5px">' + (POS_STORE.thu ? 'BẢN THỬ' : 'ĐÂY LÀ POS CỦA CỬA HÀNG') + '</div>'
+    + '<div style="font-size:16px;font-weight:800;margin-top:2px">' + escHtmlPos(POS_STORE.name || POS_STORE.storeId.toUpperCase())
+    + ' <span style="font-size:12px;color:#888;font-weight:700">· ' + POS_STORE.storeId.toUpperCase() + '</span></div>'
+    + '<div style="font-size:12.5px;color:#555;margin-top:3px">📍 ' + escHtmlPos(POS_STORE.address || '(chưa có địa chỉ — thêm ở Quản lý ▸ Cấu hình ▸ Cửa hàng)') + '</div>'
+    + (POS_STORE.thu ? '' : '<button onclick="posStoreLogout()" style="margin-top:10px;padding:8px 12px;border:1px solid #C22B49;border-radius:10px;background:#fff;color:#C22B49;font-size:13px;font-weight:700">Đăng xuất khỏi cửa hàng</button>')
+    + '</div>';
+}
+// Tên / địa chỉ mới nhất (Quản lý có thể sửa). KHÔNG kiểm lại mã — đổi mã không bắt máy đã gắn nhập lại.
+async function posStoreRefreshInfo() {
+  if (!POS_STORE || POS_STORE.thu || !window.GieoData) return;
+  try {
+    const d = await fstore.collection('stores_gieogieo').doc(POS_STORE.storeId).get();
+    if (!d.exists) return;
+    const s = d.data() || {};
+    if ((s.name || '') === (POS_STORE.name || '') && (s.address || '') === (POS_STORE.address || '')) return;
+    POS_STORE.name = s.name || POS_STORE.name || ''; POS_STORE.address = s.address || '';
+    GieoData.binding.save(Object.assign({}, POS_STORE));
+    renderSdbStore();
+  } catch (e) { console.warn('[ĐA CỬA HÀNG] không tải được thông tin cửa hàng', e); }
+}
+// Đăng xuất khỏi cửa hàng: chặn khi đang có đơn dở; cần mã quản lý (tránh bấm nhầm — vào lại phải có mã 6 ký tự).
+function posStoreLogout() {
+  if (!POS_STORE || POS_STORE.thu) return;
+  if (Object.keys(cart || {}).length) { toast('🚫 Giỏ đang có món — thanh toán hoặc xoá giỏ trước khi đăng xuất cửa hàng'); return; }
+  if (_vietqrOrderId) { toast('🚫 Đang chờ khách chuyển khoản — xong đơn rồi mới đăng xuất cửa hàng'); return; }
+  const o = document.createElement('div');
+  o.id = 'posStoreLogout';
+  o.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px';
+  o.innerHTML = '<div style="background:#fff;max-width:360px;width:100%;border-radius:16px;padding:20px">'
+    + '<div style="font-size:17px;font-weight:800;color:#C22B49">Đăng xuất khỏi cửa hàng?</div>'
+    + '<div style="font-size:13.5px;color:#444;margin-top:8px;line-height:1.5">Máy sẽ thôi là POS của <b>' + escHtmlPos(POS_STORE.name || POS_STORE.storeId.toUpperCase()) + '</b>. '
+    + 'Muốn bán tiếp phải nhập lại <b>mã 6 ký tự</b> của cửa hàng.'
+    + (_isShiftOpenedToday ? '<br>⚠️ Ca hôm nay đang mở — đơn đã bán vẫn giữ nguyên, chốt ca được ở máy khác của quán hoặc sau khi đăng nhập lại.' : '') + '</div>'
+    + '<input id="psOutPin" type="password" inputmode="numeric" placeholder="Mã quản lý" style="width:100%;box-sizing:border-box;margin-top:14px;padding:12px;font-size:18px;text-align:center;border:2px solid #ddd;border-radius:12px">'
+    + '<div id="psOutMsg" style="min-height:18px;font-size:13px;color:#c0392b;margin-top:6px"></div>'
+    + '<div style="display:flex;gap:8px;margin-top:6px"><button id="psOutNo" style="flex:1;padding:12px;border:0;border-radius:12px;background:#eee;font-weight:700">Huỷ</button>'
+    + '<button id="psOutYes" style="flex:1;padding:12px;border:0;border-radius:12px;background:#C22B49;color:#fff;font-weight:800">Đăng xuất</button></div></div>';
+  document.body.appendChild(o);
+  const pin = document.getElementById('psOutPin');
+  document.getElementById('psOutNo').onclick = () => o.remove();
+  document.getElementById('psOutYes').onclick = () => {
+    if (pin.value.trim() !== MANAGER_OVERRIDE_PIN) { document.getElementById('psOutMsg').textContent = 'Sai mã quản lý'; pin.value = ''; pin.focus(); return; }
+    if (window.GieoData) GieoData.binding.clear(); else { try { localStorage.removeItem('gieo_store_v1'); } catch (e) {} }
+    location.reload();
+  };
+  setTimeout(() => pin.focus(), 120);
+}
+
 // Mã quản lý dùng chung cho các thao tác chỉ Quản lý mới được làm — xem tab Doanh thu
 // và nút "Sửa định lượng thu được" ở màn Chế biến (openPrepYieldEditForm). Cùng MỘT
 // mã cho cả hai chỗ theo đúng yêu cầu, gom về một hằng số để sau này đổi mã chỉ sửa
@@ -22868,7 +23003,10 @@ function genBankOrderId() {
   // [CHANGED] Thêm giây (trước đây chỉ tới phút) — vì giờ "Tính riêng" có thể tạo
   // nhiều mã QR liên tiếp trong cùng 1 phút (mỗi khách trả 1 phần), nếu chỉ tính
   // tới phút sẽ dễ trùng mã orderId → ghi đè nhầm bank_confirmations của nhau.
-  return 'GG' + p(now.getDate()) + p(now.getMonth()+1) + p(now.getHours()) + p(now.getMinutes()) + p(now.getSeconds());
+  // [ĐA CỬA HÀNG] Quán khác GG01 chèn số quán ngay sau 'GG' (GG02ddMMHHmmss) — webhook ghi chung
+  // bank_confirmations của cả 3 thương hiệu, mã không bao giờ trùng giữa các quán. GG01 giữ y như cũ.
+  const quan = (window.GieoData && GieoData.daDangNhap() && !GieoData.laQuanCu()) ? GieoData.ckCode() : '';
+  return 'GG' + quan + p(now.getDate()) + p(now.getMonth()+1) + p(now.getHours()) + p(now.getMinutes()) + p(now.getSeconds());
 }
 
 let _vietqrOrderId = null;

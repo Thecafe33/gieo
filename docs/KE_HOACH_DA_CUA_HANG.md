@@ -118,33 +118,30 @@ Mỗi bước: **phản biện → báo → sửa → test → `tao_ban_thu` →
 
 ### Bước 1 — Lớp đường dẫn + chốt chặn — **[05/10] ĐÃ LÀM (chưa deploy)**
 Phản biện 05/10 → **đổi cách làm so với bản đầu** (không sửa ~700 lời gọi, không cần engine v19 ở bước này): bọc ở gốc SDK như chế độ thử đã chạy ổn.
-- `data_access.v1.js` (`GieoData`): bảng đăng ký `REG` (87 collection Firestore, 17 gốc RT, 1 đường dẫn Storage — S / G / X) + `install({fstore, db, storeId})` bọc `fstore.collection` / `fstore.doc` / `db.ref` (chặn `collectionGroup`, `refFromURL`, gốc RT ở quán khác). Quán `gg01` → **trả đúng tên cũ**; tên lạ ở `gg01` đi tiếp + cảnh báo, ở quán khác → lỗi. Bước 1 **chỉ cho chạy `gg01`** (`install` chặn quán khác nếu không có `allowMulti` — chỉ test dùng).
+- `data_access.v1.js` (`GieoData`): bảng đăng ký `REG` (87 collection Firestore, 17 gốc RT, 1 đường dẫn Storage — S / G / X) + `install({fstore, db, storeId})` bọc `fstore.collection` / `fstore.doc` / `db.ref` (chặn `collectionGroup`, `refFromURL`, gốc RT ở quán khác). Quán `gg01` → **trả đúng tên cũ**; tên lạ ở `gg01` đi tiếp + cảnh báo, ở quán khác → lỗi. (Bước 1 chỉ cho chạy `gg01`; Bước 2 bỏ chốt này.)
 - 2 HTML: `<script src="data_access.v1.js">` trước engine + 1 dòng `GieoData.install(...)` ngay sau dòng tạo `fstore` (thiếu file → chạy tiếp như cũ). Engine **không đổi** (dùng chung `fstore` / `db` đã bọc). Bản `_thu`: `GieoThu.install` (trong) rồi `GieoData.install` (ngoài).
 - REST `_ddShallow` (Quản lý → dọn dữ liệu) đổi đường dẫn qua `GieoData.rtPath`.
 - `tools/check_paths.js` (trong `predeploy_check.sh`): mọi tên collection / gốc RT / Storage + mọi chuỗi dạng `…_gieogieo` phải đăng ký (bắt cả tên truyền qua biến); 2 app nạp `data_access` đúng 1 lần trước engine, `install` ngay sau `fstore`; REST tới RTDB phải qua `rtPath`. Chuỗi không phải đường dẫn khai ở `tools/paths_allow.json`. `predeploy_check.js` đòi file `data_access.v*.js` có trong thư mục deploy; `tao_ban_thu` / `tao_ban_dem` chép kèm.
 - Test `tests/da_cua_hang_b1.test.js`: quy tắc tên; **24 kịch bản giao diện thật (POS + Quản lý + engine) giống từng byte** khi có lớp ở `gg01`; cùng 24 kịch bản chạy ở `gg02` → dữ liệu riêng của quán hiện tại không đổi, không lượt ghi lọt; chế độ thử + `gg02` vẫn trong vùng thử; `check_paths` bắt tên mới / thiếu `install`. Chạy thử 2 app thật + 2 bản `_thu` trên Chromium (Firebase 10.13.2, chặn mạng): không lỗi trang, thiếu file vẫn chạy.
-- **Phát hiện cho Bước 2**: chạy ở `gg02`, engine + app còn ghi vào doc danh mục dùng chung `inventory_items` / `prep_items` (trạng thái tồn) — đúng phần "tồn theo quán" của Bước 2 (cần engine v19).
+- **Phát hiện cho Bước 2**: chạy ở `gg02`, engine + app còn ghi vào doc danh mục dùng chung `inventory_items` / `prep_items` (trạng thái tồn) → Bước 2 giải bằng danh mục theo quán (không cần engine v19).
 - Quy tắc: sửa `data_access` đã deploy = tạo `data_access.v{N+1}.js` (cache lâu như engine), sửa cả 2 HTML; collection / gốc RT mới phải đăng ký vào `REG`.
 
 **Xong khi**: deploy, quán hiện tại chạy ≥ 1 tuần không khác biệt (Sổ lệch, kết ca, lượt đọc).
 
-### Bước 2 — Quán mới chạy được (quán hiện tại không đổi)
-- **Tồn theo quán**: quán ≠ `gg01` để trạng thái tồn (`currentStock`, `locationStock`, `unrefilledConsumption`, `refillUncertain`, `pendingShortage`, `untrackedPendingDelta`, `_ueLastRecomputeStart`, `lastCount`) ở `store_item_state_gieogieo__{storeId}/{itemId}`; danh mục `inventory_items` / `prep_items` dùng chung. Engine `P.itemState` theo quán; hàm nạp danh mục ở app trả danh mục + tồn của quán đang chạy. `gg01` giữ tồn trong doc danh mục như cũ.
-- **Đăng nhập cửa hàng trên POS** (chủ dự án chốt 05/10 — **không tự gắn quán**, kể cả máy quán hiện tại). APK giữ một đường link chung; không dùng tham số link.
-  - **Quản lý → Cửa hàng**: danh sách quán `stores_gieogieo/{storeId}` = `{name, address, ckCode:'02', code, active}`; tạo / sửa quán; mỗi quán một **mã cửa hàng 6 ký tự** (chữ in hoa + số, bỏ ký tự dễ nhầm O/0, I/1) — xem / đổi được.
-  - **POS chưa đăng nhập cửa hàng** (máy mới, máy vừa lên bản có tính năng này, hoặc đã đăng xuất) → màn **"Đăng nhập cửa hàng"**: nhập mã 6 ký tự → hiện **tên + địa chỉ** quán → xác nhận. Chưa đăng nhập thì chưa vào bán được (cài đặt máy — cần mạng lúc nhập mã; không phải chặn bán khi đang chạy mà rớt mạng, D17 giữ nguyên).
-  - **Máy tự nhớ** (localStorage `gieo_store_v1` = `{storeId, code, name, address, at}`) → mở app hằng ngày không phải nhập lại.
-  - **Thanh bên (sidebar) luôn hiện rõ**: "POS của cửa hàng **{tên}** — {địa chỉ}" + nút **Đăng xuất khỏi cửa hàng** (hỏi xác nhận; không cho khi giỏ đang có món / bill đang chờ thanh toán; ca đang mở thì cảnh báo). Đăng xuất → xoá mã đã nhớ → phải nhập lại đúng mã của quán đó. Đầu màn hình bán hàng có nhãn tên quán.
-  - **Quản lý đổi mã của quán** → **không ảnh hưởng máy đang đăng nhập** (chủ dự án chốt 05/10: không được bắt nhập lại mã — làm chậm bán hàng). POS **không** so lại mã khi mở app; mã mới chỉ áp cho lần đăng nhập sau (máy mới / sau khi đăng xuất).
-  - Mọi bill / bản ghi mang `storeId`. Chế độ thử (`_thu`) có localStorage riêng → đăng nhập riêng.
-  - **Thứ tự triển khai** (vì máy quán hiện tại cũng phải nhập mã): deploy Quản lý có màn Cửa hàng **trước** → chủ dự án tạo hồ sơ `gg01` (tên, địa chỉ, mã) → mới deploy POS có màn đăng nhập, **ngoài giờ bán**, và nhập mã ngay trên từng máy.
-- **Số bill**: tự tách vì `billCounters_gieogieo__{storeId}` là gốc riêng; nhãn bill in thêm mã quán (quán ≠ `gg01`).
-- **Chuyển khoản** (mục 4.1 — webhook đã đọc):
-  1. `genBankOrderId()`: quán ≠ `gg01` → `GG` + 2 số mã quán + `ddMMHHmmss`; quán hiện tại giữ nguyên.
-  2. Chung STK (O17, 05/10) → **không đụng webhook**.
-  3. Quản lý: `_ddDateFromBankKey` hiểu `GG` + 12 số; `ddDeleteBankUnknown` chỉ xét khoá tiền tố `GG` (không bao giờ xoá `DH…` của XOFA).
-  4. Thử 1 CK thật của quán mới ở chế độ thử (Bước 4).
-- Check-in ghi `storeId`; nhân viên có `storeTags`.
+### Bước 2 — Quán mới chạy được (quán hiện tại không đổi) — **[05/10] ĐÃ LÀM (chưa deploy)**
+Chủ dự án chọn 05/10: **bản danh mục riêng mỗi quán** (thay cho `store_item_state` ở bản đầu) → **engine không đổi** (vẫn v18).
+- **Danh mục theo quán** (loại **C** trong `REG`): `inventory_items`, `prep_items` của quán ≠ `gg01` ở `…__{storeId}` — tồn nằm trong bản của quán y như quán hiện tại. Cùng mã món giữa các quán (công thức dùng chung trỏ đúng).
+  - **Đồng bộ tự động** (`GieoData.install({…, catalogMirror: true})` — chỉ Quản lý): mọi lượt ghi danh mục qua `doc().set/update/delete`, `collection().add`, `batch()` tự ghi cùng trường sang mọi quán khác **đang hoạt động + đã sẵn danh mục** (`catalogReady`). **Không bao giờ chép trường tồn** (`STATE_FIELDS` — kể cả dạng `lastCount.suspect`); lượt ghi chỉ có trường tồn (engine) → không đồng bộ, không tốn lượt đọc. Không phải sửa từng hàm Quản lý; chỗ ghi danh mục viết sau này cũng tự đồng bộ. POS không bật.
+  - **Xoá món** bị chặn trước khi xoá nếu quán khác còn tồn món đó. Món thiếu ở quán khác / lỗi mạng → quán đang chạy vẫn lưu, toast báo "chưa đồng bộ sang GG0x".
+  - **Tạo quán mới** (`seedNewStore`): chép danh mục (chỉ trường danh mục, tồn 0) + `refill_rules`, `storage_locations` (sửa lại sau); bật `catalogReady` sau khi chép xong, rồi kiểm lệch một lượt.
+  - **Đồng bộ danh mục** (`catalogDiff`): kiểm / sửa lệch theo `CATALOG_FIELDS`; không xoá món thừa, không đụng tồn.
+- **Chưa đăng nhập cửa hàng** (`storeId: null`): lớp đường dẫn chặn mọi S / C, chỉ đọc được G / X.
+- **POS — đăng nhập cửa hàng** (đúng như chủ dự án chốt): máy chưa gắn → màn "Đăng nhập cửa hàng" (mã 6 ký tự → hiện tên + địa chỉ → xác nhận), **app dừng hẳn** cho tới khi gắn; không bao giờ tự gắn. Máy nhớ `gieo_store_v1` → các lần mở sau vào thẳng, **không so lại mã** (Quản lý đổi mã không bắt máy đang dùng nhập lại). Sai 5 lần → chờ 30 giây. Sidebar: thẻ "Đây là POS của cửa hàng {tên} · GG0x — {địa chỉ}" + **Đăng xuất khỏi cửa hàng** (chặn khi giỏ có món / đang chờ CK; cảnh báo khi ca đang mở; cần **mã quản lý**). Tên / địa chỉ làm mới 1 lượt đọc mỗi lần mở app. Thiếu `data_access`: máy gắn `gg01` chạy tiếp như cũ; máy gắn quán khác / chưa gắn → báo đỏ + tự tải lại. Bản `_thu` luôn là vùng thử GG01, không hỏi mã.
+- **Quản lý → Cấu hình → Cửa hàng**: hồ sơ `gg01` (bước đầu bắt buộc), danh sách quán (tên, địa chỉ, mã đăng nhập, trạng thái, mã CK), thêm quán (`gg` + số kế tiếp), sửa tên / địa chỉ, đổi mã, ngừng / mở lại, kiểm lệch danh mục. Mã 6 ký tự bỏ O/0/I/1, không trùng. Thiếu `data_access` → báo đỏ + tải lại (chạy không bọc thì sửa danh mục không tới quán khác).
+- **Chuyển khoản**: `genBankOrderId()` quán ≠ `gg01` → `GG02ddMMHHmmss`; `gg01` y cũ. Dọn dữ liệu: `_ddDateFromBankKey` hiểu cả 12 số; **chỉ xét khoá `GG…`** — khoá của XOFA / The Cafe 33 chỉ đếm, không bao giờ vào danh sách xoá (sửa luôn lỗi cũ: nút "xoá không rõ ngày" từng xoá được khoá `DH…` của XOFA).
+- Bản ghi mới do engine tạo đã mang `storeId` (E6). Test: `tests/da_cua_hang_b2.test.js` (đồng bộ, chặn xoá, quán mới, kiểm lệch, chưa đăng nhập, gắn máy, mã CK, 24 kịch bản thật ở `gg01` có bật đồng bộ → không ghi gì sang `gg02`); `da_cua_hang_b1` cập nhật: chạy `gg02` không còn ghi vào dữ liệu dùng chung. Chromium: màn nhập mã → gắn → vào thẳng → sidebar → đăng xuất; máy `gg01` vào thẳng, mã CK y cũ; thiếu file → báo đỏ; màn Cửa hàng; 2 bản `_thu`.
+- **Còn lại trước khi mở quán 2 (Bước 4)**: nhãn bill in mã quán (quán ≠ `gg01`); check-in / nhân viên `storeTags`; nhãn tên quán đầu màn bán hàng (chưa làm — sidebar đã hiện).
+- **Triển khai** (máy quán hiện tại cũng phải nhập mã một lần): deploy **ngoài giờ bán** → mở Quản lý ▸ Cấu hình ▸ Cửa hàng → tạo hồ sơ GG01 (tên, địa chỉ) → lấy mã → nhập trên từng máy POS. Muốn POS không dừng phút nào: deploy lần 1 chỉ Quản lý + `data_access` (giữ `posgieo.html` cũ), tạo hồ sơ, rồi deploy lần 2 có POS.
 
 ### Bước 3 — Quản lý đa quán
 - Bộ chọn quán (mặc định quán hiện tại): 1 quán / nhiều / toàn chuỗi; báo cáo gộp = đọc từng quán rồi cộng (bản tổng hợp theo ngày `ledger_day_summaries` đi theo quán → `…__{storeId}`).
@@ -174,19 +171,19 @@ Phản biện 05/10 → **đổi cách làm so với bản đầu** (không sử
 
 ## 6. Phân loại dữ liệu (bảng đăng ký của `data_access`)
 
-**S** theo quán (`gg01` tên cũ, quán khác `+__{storeId}`) · **G** dùng chung · **G+s** dùng chung, bản ghi mang `storeId` · **C** chung có ghi đè theo quán · **X** dùng chung với XOFA & The Cafe 33. Tên bỏ hậu tố `_gieogieo`. **Trước Bước 1 chạy lại `npm run inventory` và đối chiếu — không dựa vào bảng tay.**
+**S** theo quán (`gg01` tên cũ, quán khác `+__{storeId}`) · **G** dùng chung · **G+s** dùng chung, bản ghi mang `storeId` · **C** danh mục theo quán (Bước 2 — `inventory_items`, `prep_items`; trong `REG`) · **G+o** chung có ghi đè theo quán (Bước 3) · **X** dùng chung với XOFA & The Cafe 33. Tên bỏ hậu tố `_gieogieo`. **Trước Bước 1 chạy lại `npm run inventory` và đối chiếu — không dựa vào bảng tay.**
 
 | Collection | Loại | Ghi chú |
 |---|---|---|
-| `alerts`, `assets`, `assist_profile_effects`, `bill_deletions`, `book_closings`, `cashfund`, `checklist_activity_logs`, `checkout_side_effects`, `cogs`, `daily_closings`, `daily_openings`, `daily_ops`, `daily_sales_cache`, `employee_stock_deductions`, `expenses`, `handover_counts`, `handover_records`, `label_reprints`, `ledger_day_summaries`, `order_stock_traces`, `orders_gieogieo_archive`, `prep_batches`, `prep_forecasts`, `prep_ingredient_locks`, `prep_shortage_recons`, `prep_transactions`, `purchase_orders`, `receiving_records`, `refill_rules`, `reversal_unit_claims`, `sales_assist_logs`, `shift_inventory_counts`, `shift_segments`, `shift_workflows`, `staff_notes`, `stock_anomalies`, `stock_containers`, `stock_counts`, `stock_label_reports`, `stock_lost_reports`, `stock_transactions`, `storage_locations`, `work_schedules`, `store_item_state` | S | khoá theo ngày / tháng giữ nguyên (đã tách theo collection) |
+| `alerts`, `assets`, `assist_profile_effects`, `bill_deletions`, `book_closings`, `cashfund`, `checklist_activity_logs`, `checkout_side_effects`, `cogs`, `daily_closings`, `daily_openings`, `daily_ops`, `daily_sales_cache`, `employee_stock_deductions`, `expenses`, `handover_counts`, `handover_records`, `label_reprints`, `ledger_day_summaries`, `order_stock_traces`, `orders_gieogieo_archive`, `prep_batches`, `prep_forecasts`, `prep_ingredient_locks`, `prep_shortage_recons`, `prep_transactions`, `purchase_orders`, `receiving_records`, `refill_rules`, `reversal_unit_claims`, `sales_assist_logs`, `shift_inventory_counts`, `shift_segments`, `shift_workflows`, `staff_notes`, `stock_anomalies`, `stock_containers`, `stock_counts`, `stock_label_reports`, `stock_lost_reports`, `stock_transactions`, `storage_locations`, `work_schedules` | S | khoá theo ngày / tháng giữ nguyên (đã tách theo collection) |
 | `employee_shifts` | S | nơi check-in |
 | `duty_cases`, `duty_tasks`, `duty_digests`, `duty_verify_undo`, `dup_recovery`, `order_cancel_marks`, `loyalty_bill_effects`?, `stamp_free_redemptions`? | S / ? | `loyalty_bill_effects`, `stamp_free_redemptions` ghi cùng transaction với `customers` (X) theo `billId` — giữ G+s nếu `billId` không trùng giữa quán; chốt ở Bước 1 |
 | `staff_target_config`, `staff_target_days` | S | O14 |
-| `inventory_items`, `prep_items` | G (danh mục) | tồn của quán ≠ `gg01` ở `store_item_state` (Bước 2) |
+| `inventory_items`, `prep_items` | C (danh mục theo quán) | Bước 2: mỗi quán một bản (tồn trong bản của quán), Quản lý sửa → tự đồng bộ trường danh mục |
 | `employees` | G | + `storeTags` |
 | `expense_categories`, `hr_settings`, `ingredient_original_packs`, `note_reasons`, `waste_reasons`, `payment_methods`, `packaging_*`, `payroll_month_adjustments`, `recipes`, `recipe_history`, `recipe_suggestions`, `topping_recipes`, `prep_recipe_history`, `prep_vessels`, `stores` | G | |
 | `audit_logs`, `config_history`, `price_history`, `loyalty_pending_retry` | G+s | |
-| `shift_checklists`, `special_days`, `duty_config` | C | |
+| `shift_checklists`, `special_days`, `duty_config` | G+o | |
 | Storage `receiving_photos_gieogieo/{recordId}` | S | theo phiếu (phiếu đã theo quán) |
 | `customers` | X | chỉ thêm trường tuỳ chọn |
 | `rewards` | — | của The Cafe 33, Gieo Gieo không dùng |

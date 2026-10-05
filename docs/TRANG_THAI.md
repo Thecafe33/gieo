@@ -7,7 +7,7 @@
 | Thành phần | Bản | Ghi chú |
 |---|---|---|
 | Engine kho | `unit_engine.v18.js` (01/10/2026) | v1–v17 giữ để quay lui — **không sửa, không xoá** (cache immutable). Danh sách: `tools/engine_releases.txt` |
-| Lớp đường dẫn | `data_access.v1.js` (05/10, chưa deploy) | đa cửa hàng Bước 1 — 2 app nạp trước engine; kiểm bằng `node tools/check_paths.js` |
+| Lớp đường dẫn | `data_access.v1.js` (bản 1.1.0 — 05/10, chưa deploy) | đa cửa hàng Bước 1 + 2 — 2 app nạp trước engine; danh mục NL/BTP theo quán + đồng bộ; đăng nhập cửa hàng; kiểm bằng `node tools/check_paths.js` |
 | App bán hàng | `posgieo.html` | trỏ v18 |
 | App quản lý | `quanlygieo.html` | trỏ v18 |
 | Chế độ thử | `che_do_thu.v1.js` + `posgieo_thu.html`, `quanlygieo_thu.html` | sinh lại bằng `node tools/tao_ban_thu.js .` sau **mỗi** lần sửa HTML |
@@ -35,7 +35,8 @@
 |---|---|
 | Màn **Doanh thu** của POS vẫn hiện số tiền | Chủ quán chưa quyết có ẩn không (pill target chỉ hiện %) |
 | **Tối ưu lượt đọc T0 → T6** (vượt 50K lượt đọc ngày 04/10) | `docs/KE_HOACH_TOI_UU_DOC.md` — ưu tiên hơn đa cửa hàng. T0: 4/6 index đã có từ trước (không phải nguyên nhân), còn 2 index `_histLoad`. T1: công cụ `tools/dem_luot_doc.js` + **bản đo** `posgieo_dem.html` / `quanlygieo_dem.html` (sinh bằng `tools/tao_ban_dem.js`, dữ liệu thật, nút 📊) — đã đo 05/10 (QL 22.880 lượt/13 phút, 83% sổ gốc; POS ~990 lượt `customers` mỗi lần mở app). **T3 + T2 đã làm 05/10 (chưa deploy)** — xem mục T2/T3 của kế hoạch. Bản đo đã gỡ khỏi repo — xoá `*_dem.html`, `dem_luot_doc.v1.js` khỏi thư mục deploy |
-| **Đa cửa hàng Bước 1 — ĐÃ LÀM 05/10 (chưa deploy)** | `data_access.v1.js` + `tools/check_paths.js` + test `da_cua_hang_b1`; quán hiện tại giữ nguyên mọi đường dẫn. Deploy cùng T2/T3 được (đều không đổi hành vi). Bước 2 tiếp theo: tồn theo quán (engine v19), đăng nhập cửa hàng, CK quán mới |
+| **Đa cửa hàng Bước 1 — ĐÃ LÀM 05/10 (chưa deploy)** | `data_access.v1.js` + `tools/check_paths.js` + test `da_cua_hang_b1`; quán hiện tại giữ nguyên mọi đường dẫn. Deploy cùng T2/T3 được (đều không đổi hành vi). |
+| **Đa cửa hàng Bước 2 — ĐÃ LÀM 05/10 (chưa deploy)** | Danh mục NL/BTP riêng mỗi quán + Quản lý tự đồng bộ (engine giữ v18); POS màn **đăng nhập cửa hàng** (mã 6 ký tự, nhớ máy, sidebar tên + địa chỉ + đăng xuất); Quản lý ▸ Cấu hình ▸ **Cửa hàng**; mã CK `GG02…`; dọn CK chỉ xét khoá `GG…`. Test `da_cua_hang_b2`. **Deploy ngoài giờ bán — sau deploy POS dừng ở màn nhập mã tới khi tạo hồ sơ GG01 ở Quản lý** (runbook: kế hoạch mục 5 Bước 2). Còn trước Bước 4: nhãn bill mã quán, `storeTags` nhân viên |
 | Đa cửa hàng Bước 0 → 5 | `docs/KE_HOACH_DA_CUA_HANG.md` — **viết lại 05/10**: một project, quán hiện tại giữ nguyên chỗ cũ (không chuyển dữ liệu), quán mới collection `…__{storeId}`; Bước 1 = lớp đường dẫn `data_access.v1.js` + engine v19 + chốt chặn |
 | O13 — mã nguồn webhook Cloud Run | cần cho M3 |
 | `tools/site_files.txt` (danh sách file của Gieo Gieo trên site Hosting dùng chung) | chưa có — làm ở Bước 1 của kế hoạch đa cửa hàng |

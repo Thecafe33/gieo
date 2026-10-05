@@ -61,7 +61,8 @@ async function runWrapped(kind, spec, opts) {
   const quanId = opts && opts.quan;
   const GD = quanId ? loadData() : null;
   const seed = JSON.parse(JSON.stringify(spec.seed));
-  const laS = (k, p) => { const h = String(p).replace(/^\/+/, '').split('/')[0]; return GD.REG[k][h] === 'S'; };
+  // S (riêng từng quán) + C (danh mục theo quán — Bước 2) = chỗ RIÊNG của quán.
+  const laS = (k, p) => { const h = String(p).replace(/^\/+/, '').split('/')[0]; return GD.REG[k][h] === 'S' || GD.REG[k][h] === 'C'; };
   if (GD && quanId !== GD.LEGACY) {
     for (const [k, v] of Object.entries(seed.fs || {})) if (laS('fs', k)) seed.fs[GD.fsPath(k, quanId)] = JSON.parse(JSON.stringify(v));
     for (const [k, v] of Object.entries(seed.rt || {})) if (laS('rt', k)) seed.rt[GD.rtPath(k, quanId)] = JSON.parse(JSON.stringify(v));
@@ -77,7 +78,7 @@ async function runWrapped(kind, spec, opts) {
   }
   let quan = null;
   if (GD) {
-    GD.install({ fstore: fake.fstore, db: fake.db, storeId: quanId, allowMulti: quanId !== GD.LEGACY });
+    GD.install({ fstore: fake.fstore, db: fake.db, storeId: quanId, catalogMirror: !!(opts && opts.mirror) });
     // Realtime DB không lưu nút rỗng ({}), Firebase giả tự tỉa chúng khi có lượt ghi bất kỳ → tỉa trước khi so.
     const tia = v => { if (!v || typeof v !== 'object') return v; const o = {}; for (const [k, x] of Object.entries(v)) { const y = tia(x); if (y !== undefined && !(y && typeof y === 'object' && !Object.keys(y).length)) o[k] = y; } return Object.keys(o).length ? o : undefined; };
     const goc = () => JSON.stringify([Object.entries(fake.FS).filter(([k]) => laS('fs', k.replace(/^__test_gieogieo\/data\//, ''))).sort(),
@@ -125,8 +126,8 @@ async function runWrapped(kind, spec, opts) {
   if (quan && quanId !== GD.LEGACY) {
     const after = fake.log.slice(quan.logStart);
     const dauDuongDan = e => String(e[1]).replace(/^__test_gieogieo\/(data\/)?/, '').split('/')[0];
-    const lot = after.filter(e => { const h = dauDuongDan(e); const k = e[0].startsWith('rt') ? 'rt' : 'fs'; return GD.REG[k][h] === 'S'; }).map(e => e.join(' '));
-    const chung = [...new Set(after.filter(e => { const h = dauDuongDan(e); const k = e[0].startsWith('rt') ? 'rt' : 'fs'; return GD.REG[k][h] && GD.REG[k][h] !== 'S'; }).map(e => dauDuongDan(e)))].sort();
+    const lot = after.filter(e => { const h = dauDuongDan(e); const k = e[0].startsWith('rt') ? 'rt' : 'fs'; return GD.REG[k][h] === 'S' || GD.REG[k][h] === 'C'; }).map(e => e.join(' '));
+    const chung = [...new Set(after.filter(e => { const h = dauDuongDan(e); const k = e[0].startsWith('rt') ? 'rt' : 'fs'; return GD.REG[k][h] && GD.REG[k][h] !== 'S' && GD.REG[k][h] !== 'C'; }).map(e => dauDuongDan(e)))].sort();
     return { error, calls, quan: { gocDoi: quan.goc() !== quan.truoc, ghiLot: lot, ghiChung: chung, soGhi: after.length }, fake, thu: thu && { escaped: fake.log.slice(thu.logStart).filter(e => !(String(e[1]).startsWith('__test_gieogieo/') || e[1] === '__test_gieogieo')).map(e => e.join(' ')) } };
   }
   if (thu) {
