@@ -75,6 +75,31 @@ Các index các fallback khác đang chờ (thiếu thì đọc nhiều hơn, s�
 
 ---
 
+### 3.1 Kết quả đo thật — Quản lý, 05/10 (bản đo `quanlygieo_dem.html`, ~13 phút thao tác)
+
+**Tổng 22.880 lượt đọc** — gần **một nửa** hạn mức miễn phí của cả project trong một lượt xem Quản lý.
+
+| Collection | Lượt | Tỷ lệ |
+|---|---|---|
+| `stock_transactions_gieogieo` | 11.756 (82 lần gọi) | 51% |
+| `prep_transactions_gieogieo` | 7.227 (24 lần gọi) | 32% |
+| các collection khác cộng lại | ~3.900 | 17% |
+
+| Thao tác (mốc) | Lượt đọc |
+|---|---|
+| **Tổng kết tháng — tháng cũ đủ 30 ngày** | **10.679** |
+| Theo kỳ | 3.450 |
+| Mở app (Hôm nay · Sức khoẻ quán) | 2.110 |
+| Tổng kết tháng — tháng này (5 ngày) | 1.951 |
+| Lịch sử 10 nguyên liệu | 1.493 (~150/món) |
+| Mở tab Nguyên liệu | 1.402 |
+| Lịch sử 5 BTP | 977 (~195/món) |
+| Quay lại Hôm nay | 463 |
+| COGS món / topping / bao bì | 115 / 12 / 69 |
+
+Kết luận: **P2 xác nhận** — 83% lượt đọc là đọc **sổ gốc** (stock + prep transactions) theo khoảng ngày; Tổng kết tháng cũ ≈ 350 dòng sổ/ngày × 30 ngày. Ngày 04/10 (đầu tháng) xem Tổng kết tháng 9 vài lần là đủ vượt 50K. → **T2 làm trước tiên.** POS chưa đo.
+(Bản đo đầu ghi nhầm cột "hàm" — đã sửa; số theo collection / màn / mốc vẫn đúng.)
+
 ## 4. Lộ trình
 
 Mỗi bước: **phản biện → báo → sửa → test → tạo bản `_thu` → chủ dự án deploy & thử máy thật → so lượt đọc với mốc**.
