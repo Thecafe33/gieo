@@ -10,7 +10,7 @@
 //   6. (nếu có tools/site_files.txt) không thiếu file của XOFA / The Cafe 33.
 //   7. CHẾ ĐỘ THỬ: app THẬT tuyệt đối không nạp che_do_thu / không gọi GieoThu.install;
 //      bản thử PHẢI có đủ: nạp che_do_thu, chốt trước initializeApp, đúng 1 lần GieoThu.install.
-//   9. BẢN ĐO (posgieo_dem / quanlygieo_dem — tools/tao_ban_dem.js): nạp đúng 1 dem_luot_doc.v*.js, không chế độ thử;
+//   9. BẢN ĐO (posgieo_dem / quanlygieo_dem — tools/tao_ban_dem.js): nhúng đúng 1 bộ đếm, không chế độ thử;
 //      app thật và bản thử KHÔNG được nạp dem_luot_doc.
 //   8. (nhắc) thư mục deploy có tools/ tests/ docs/ … mà firebase.json không "ignore" → bị công khai trên web.
 'use strict';
@@ -33,7 +33,7 @@ function kiemHtml(h, laThu) {
   if (eng.length === 1 && !co(eng[0][1])) loi.push(h + ' trỏ tới ' + eng[0][1] + ' nhưng file này KHÔNG có trong thư mục');
   const thu = [...src.matchAll(/<script\s+src="(che_do_thu\.v\d+\.js)(?:\?[^"]*)?"/g)];
   const install = (c.match(/GieoThu\.install\(/g) || []).length;
-  if (/<script\s+src="dem_luot_doc\./.test(src)) loi.push(h + ': đang nạp BỘ ĐẾM lượt đọc (dem_luot_doc) — chỉ bản _dem được nạp (chép nhầm bản _dem?)');
+  if (/\[BẢN ĐO\]|dem_luot_doc|demLuotDoc/.test(src)) loi.push(h + ': có BỘ ĐẾM lượt đọc (bản đo) — chỉ *_dem.html được có (chép nhầm bản _dem?)');
   if (!laThu) {
     if (thu.length || install) loi.push(h + ': APP THẬT đang nạp CHẾ ĐỘ THỬ — tuyệt đối không deploy (chép nhầm bản _thu?)');
   } else {
@@ -54,9 +54,8 @@ function N0() { const v = [...new Set(Object.values(banThat))]; return v.length 
 // [T1 tối ưu đọc] Bản ĐO (posgieo_dem / quanlygieo_dem, sinh bằng tools/tao_ban_dem.js): app thật + bộ đếm, chạy DỮ LIỆU THẬT.
 for (const h of ['posgieo_dem.html', 'quanlygieo_dem.html'].filter(co)) {
   const src = doc(h);
-  const dem = [...src.matchAll(/<script\s+src="(dem_luot_doc\.v\d+\.js)(?:\?[^"]*)?"/g)];
-  if (dem.length !== 1) loi.push(h + ': bản đo phải nạp đúng 1 dem_luot_doc.v*.js (thấy ' + dem.length + ') — sinh lại bằng tools/tao_ban_dem.js');
-  else if (!co(dem[0][1])) loi.push(h + ' trỏ tới ' + dem[0][1] + ' nhưng file này KHÔNG có trong thư mục');
+  const dem = (src.match(/<script>\/\* \[BẢN ĐO\] bộ đếm lượt đọc/g) || []).length;
+  if (dem !== 1) loi.push(h + ': bản đo phải nhúng đúng 1 bộ đếm (thấy ' + dem + ') — sinh lại bằng tools/tao_ban_dem.js');
   if (/che_do_thu\./.test(code(src))) loi.push(h + ': bản đo không được nạp chế độ thử');
   const eng = /<script\s+src="(unit_engine\.v(\d+)\.js)(?:\?[^"]*)?"/.exec(src);
   if (eng && N0() && Number(eng[2]) !== N0()) nhac.push(h + ' dùng engine v' + eng[2] + ' khác app thật — sinh lại bằng tools/tao_ban_dem.js cho khớp');

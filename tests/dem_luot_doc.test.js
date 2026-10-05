@@ -124,13 +124,17 @@ const log = console.log, table = console.table; console.table = () => {};
   for (const [that, doLuong] of [['posgieo.html', 'posgieo_dem.html'], ['quanlygieo.html', 'quanlygieo_dem.html']]) {
     const a = fs.readFileSync(path.join(__dirname, '..', that), 'utf8').split('\n');
     const b = fs.readFileSync(path.join(tmp, doLuong), 'utf8').split('\n');
-    const them = b.filter(l => /<!-- \[BẢN ĐO\]/.test(l));
-    const conLai = b.filter(l => !/<!-- \[BẢN ĐO\]/.test(l)).map(l => l.replace('<title>[ĐO] ', '<title>'));
-    const iDem = b.findIndex(l => /<script src="dem_luot_doc\.v1\.js/.test(l)), iInit = b.findIndex(l => /firebase\.initializeApp\(/.test(l));
-    ok(them.length === 2 && conLai.join('\n') === a.join('\n') && iDem >= 0 && iDem < iInit && /if \(!window\.demLuotDoc\)/.test(b[iDem + 1]),
-      doLuong + ' = ' + that + ' + dòng nạp bộ đếm (trước initializeApp) + dòng báo đỏ khi bộ đếm không chạy + tiêu đề');
+    const iMo = b.findIndex(l => l.startsWith('<script>/* [BẢN ĐO] bộ đếm lượt đọc'));
+    const iDong = b.findIndex(l => l === '</script><!-- [BẢN ĐO] hết bộ đếm -->');
+    const iBao = b.findIndex(l => /<!-- \[BẢN ĐO\] báo lỗi -->$/.test(l));
+    const conLai = b.filter((l, i) => !(i >= iMo && i <= iDong) && i !== iBao).map(l => l.replace('<title>[ĐO] ', '<title>'));
+    const iInit = b.findIndex(l => /firebase\.initializeApp\(/.test(l));
+    const iFs = b.findIndex(l => /firebase-firestore-compat\.js/.test(l));
+    ok(iMo === iFs + 1 && iDong > iMo && iBao === iDong + 1 && iDong < iInit && conLai.join('\n') === a.join('\n'),
+      doLuong + ' = ' + that + ' + bộ đếm nhúng ngay sau firestore-compat (trước initializeApp) + dòng báo lỗi + tiêu đề');
   }
-  ok(fs.existsSync(path.join(tmp, 'dem_luot_doc.v1.js')) && fs.readFileSync(path.join(tmp, 'dem_luot_doc.v1.js'), 'utf8') === fs.readFileSync(path.join(__dirname, '..', 'tools', 'dem_luot_doc.js'), 'utf8'), 'dem_luot_doc.v1.js = tools/dem_luot_doc.js');
+  const qd = fs.readFileSync(path.join(tmp, 'quanlygieo_dem.html'), 'utf8');
+  ok(qd.indexOf(fs.readFileSync(path.join(__dirname, '..', 'tools', 'dem_luot_doc.js'), 'utf8')) > 0 && !fs.existsSync(path.join(tmp, 'dem_luot_doc.v1.js')), 'bộ đếm nhúng nguyên văn tools/dem_luot_doc.js, không cần file .js riêng');
   fs.rmSync(tmp, { recursive: true, force: true });
 
   console.table = table;
