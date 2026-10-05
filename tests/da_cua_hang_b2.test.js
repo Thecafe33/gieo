@@ -162,6 +162,40 @@ const lay = (f, k) => f.FS[k];
     ok(G2.ckCode('gg01') === '01' && G2.ckCode('gg12') === '12' && G2.ckCode('x') === '', 'mã CK theo quán: gg02 → 02');
   }
 
+  // ── 6. Mọi trường engine / POS / Quản lý ghi lên doc danh mục NL / BTP phải được PHÂN LOẠI ──
+  // (STATE_FIELDS = tồn riêng từng quán, không đồng bộ; CATALOG_FIELDS = danh mục, đồng bộ / kiểm lệch).
+  // Trường mới chưa phân loại → đỏ: trường tồn mà lọt vào đồng bộ sẽ chép số của quán này sang quán khác.
+  {
+    const acorn = require('acorn'), walk = require('acorn-walk');
+    const G = nap();
+    const STATE = new Set(G.STATE_FIELDS), CAT = new Set([].concat(...Object.values(G.CATALOG_FIELDS)));
+    const META = new Set(['createdAt', 'createdBy']);   // chỉ lúc tạo — không cần đồng bộ / kiểm lệch
+    const srcs = { 'unit_engine.v18.js': fs.readFileSync(path.join(ROOT, 'unit_engine.v18.js'), 'utf8') };
+    for (const f of ['posgieo.html', 'quanlygieo.html']) srcs[f] = (fs.readFileSync(path.join(ROOT, f), 'utf8').match(/<script>([\s\S]*?)<\/script>/) || [])[1] || '';
+    const la = [], tong = { n: 0 };
+    for (const [ten, src] of Object.entries(srcs)) {
+      const ast = acorn.parse(src, { ecmaVersion: 'latest', sourceType: 'script', locations: true, allowReturnOutsideFunction: true });
+      const init = {};
+      walk.full(ast, n => { if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.init) init[n.id.name] = (init[n.id.name] || '') + ' ' + src.slice(n.init.start, n.init.end); });
+      const laDanhMuc = t => /inventory_items|prep_items|_btpOwnerColl|itemState/.test(t + (/^[A-Za-z_$][\w$]*$/.test(t) ? (init[t] || '') : ''));
+      walk.full(ast, n => {
+        if (n.type !== 'CallExpression' || n.callee.type !== 'MemberExpression' || !['update', 'set', 'add'].includes(n.callee.property.name)) return;
+        let target, obj;
+        if (n.arguments.length >= 2 && n.arguments[1].type === 'ObjectExpression') { target = src.slice(n.arguments[0].start, n.arguments[0].end); obj = n.arguments[1]; }
+        else if (n.arguments[0] && n.arguments[0].type === 'ObjectExpression') { target = src.slice(n.callee.object.start, n.callee.object.end); obj = n.arguments[0]; }
+        else return;
+        if (!laDanhMuc(target)) return;
+        for (const p of obj.properties) {
+          if (p.type !== 'Property' || p.computed && !(p.key.type === 'TemplateLiteral')) continue;   // ...spread: nguồn đã quét ở chỗ dựng object
+          const key = p.key.type === 'Identifier' ? p.key.name : p.key.type === 'TemplateLiteral' ? p.key.quasis[0].value.cooked : String(p.key.value);
+          const top = key.split('.')[0]; tong.n++;
+          if (!STATE.has(top) && !CAT.has(top) && !META.has(top)) la.push(ten + ':' + n.loc.start.line + ' ' + key);
+        }
+      });
+    }
+    ok(tong.n > 40 && !la.length, 'mọi trường ghi lên danh mục NL / BTP (' + tong.n + ' chỗ) đều đã phân loại tồn / danh mục' + (la.length ? ' — CHƯA phân loại: ' + la.join(', ') : ''));
+  }
+
   console.log(fail ? 'SOME FAIL' : 'ALL PASS');
   process.exitCode = fail;
 })().catch(e => { console.log('FAIL lỗi', e); process.exitCode = 1; });

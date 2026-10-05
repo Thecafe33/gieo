@@ -73,9 +73,9 @@
   const CATALOG_FIELDS = {
     inventory_items_gieogieo: ['name', 'unit', 'minStock', 'costPerUnit', 'packagingUnits', 'staffCounts', 'isPackagingMaterial',
       'trackingMode', 'countUnitName', 'stockManaged', 'openShelfLifeHours', 'printOpenLabel', 'prepWholePack', 'vesselIds',
-      'originalPackId', 'densityGPerMl', 'shiftCountTiming', 'active'],
+      'originalPackId', 'densityGPerMl', 'shiftCountTiming', 'substitutes', 'active'],
     prep_items_gieogieo: ['code', 'name', 'unit', 'wastePct', 'batchYield', 'batchInputs', 'costPerUnit', 'totalInputCost',
-      'shelfLifeType', 'shelfLifeHours', 'prepTimeMinutes', 'dailyTarget', 'vesselIds', 'instructions', 'active']
+      'shelfLifeType', 'shelfLifeHours', 'prepTimeMinutes', 'dailyTarget', 'vesselIds', 'instructions', 'substitutes', 'active']
   };
   // Tồn khởi đầu của bản danh mục mới ở quán khác.
   const STATE_DEFAULT = { currentStock: 0 };
