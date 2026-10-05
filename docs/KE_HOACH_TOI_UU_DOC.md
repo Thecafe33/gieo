@@ -49,14 +49,14 @@ Giữ nguyên: bất biến B1–B15, **con số hiển thị không đổi** (t
 
 ## 3. Thủ phạm (xếp theo mức nghi ngờ — ước lượng, chưa đo)
 
-Giả định ~150 bill/ngày × ~8 dòng sổ/bill ≈ **1.200 dòng sổ kho/ngày**.
+Chủ dự án xác nhận 05/10: **1 máy POS, < 60 bill/ngày** → ~60 × ~8 dòng sổ/bill ≈ **500 dòng sổ kho/ngày**. Các ước lượng dưới đây theo mức đó.
 
 | # | Ở đâu | Vì sao tốn | Ước lượng |
 |---|---|---|---|
-| **P1** | **Thiếu composite index** → các cơ chế giảm-đọc **âm thầm lui về đọc sổ gốc** (chỉ `console.warn`) | `ledgerConsumptionStats` (Vốn trong kho, chạy nền ở màn **Hôm nay** và Sức khoẻ) cần index `stock_transactions (businessDate, createdAt)`; thiếu → đọc **30 ngày sổ gốc** mỗi lần (đệm 5 phút) | ~36.000 / lần mở Quản lý |
-| **P2** | QL `computeLedgerRealMetrics` — gọi từ Hôm nay, Sức khoẻ, Báo cáo (2 kỳ), Tháng kết, NL-BTP | Đọc **mọi dòng** sổ NL + sổ BTP trong khoảng ngày, không đệm, không tổng hợp | Hôm nay ~1.200/lần; tháng ~36.000/lần; năm: lớn hơn nhiều |
+| **P1** | **Thiếu composite index** → các cơ chế giảm-đọc **âm thầm lui về đọc sổ gốc** (chỉ `console.warn`) | `ledgerConsumptionStats` (Vốn trong kho, chạy nền ở màn **Hôm nay** và Sức khoẻ) cần index `stock_transactions (businessDate, createdAt)`; thiếu → đọc **30 ngày sổ gốc** mỗi lần (đệm 5 phút) | ~15.000 / lần mở Quản lý |
+| **P2** | QL `computeLedgerRealMetrics` — gọi từ Hôm nay, Sức khoẻ, Báo cáo (2 kỳ), Tháng kết, NL-BTP | Đọc **mọi dòng** sổ NL + sổ BTP trong khoảng ngày, không đệm, không tổng hợp | Hôm nay ~500/lần; tháng ~15.000/lần; năm: lớn hơn nhiều |
 | **P3** | POS `fetchAllCustomersCache` (5 giây sau khi mở app) + màn Khách hàng `_custFetchAll` | Đọc **toàn bộ** `customers` (dùng chung 3 thương hiệu) | số khách × số lần mở POS × số máy |
-| **P4** | Engine `dutyCompute` (cân cuối ca / đếm BTP có lệch) | Đọc sổ của món trong **3 ngày** (khoảng đo ± 1 ngày đệm); `dutyLoadHistory` đọc mọi vụ lệch của món | ~450 / món hay bán; ~5.000 / lần cân 15 món |
+| **P4** | Engine `dutyCompute` (cân cuối ca / đếm BTP có lệch) | Đọc sổ của món trong **3 ngày** (khoảng đo ± 1 ngày đệm); `dutyLoadHistory` đọc mọi vụ lệch của món | ~180 / món hay bán; ~2.500 / lần cân 15 món |
 | **P5** | POS đọc cả `inventory_items` / `prep_items` ở 20 chỗ (mở màn Kho, Hao hụt, Nhận hàng, Kiểm kê, Chế biến, checklist…) | Bỏ qua bộ đệm có sẵn | ~100–200 / lần mở màn |
 | **P6** | QL đọc cả lịch sử: `loadExpensesAll`, `loadAssetsAll` (không đệm), `ensurePriceHistory`, `ensureRecipeHistory`, `ensurePrepRecipeHistory`, `loadDailyOpsAll`, `loadBookClosings`, `config_history` (không `limit`) | Collection lớn dần, đệm 20 giây – 5 phút | tăng dần theo tháng |
 
@@ -100,10 +100,15 @@ Mỗi bước: **phản biện → báo → sửa → test → tạo bản `_thu
 
 **Xong khi**: mở Sức khoẻ tháng / Tháng kết tốn ≈ số ngày + sổ hôm nay, không còn ≈ số dòng sổ cả tháng.
 
-### T3 — POS: khách hàng (N2) — **đổi cách gợi ý, cần chủ dự án duyệt**
-- Bỏ tải toàn bộ `customers` lúc mở app. Gợi ý khi gõ ≥ 4 số: truy vấn theo mã tài liệu bắt đầu bằng phần đã gõ, `limit(10)`; đệm theo đầu số đã hỏi.
-- Màn Khách hàng: tải từng trang 200 khi cuộn / bấm "Xem thêm", không tự tải hết.
+### T3 — POS: khách hàng (N1 + N2) — giữ nguyên cách gợi ý (chủ dự án chốt 05/10)
+- **Không** đổi cách gợi ý số điện thoại (vẫn lọc cả "bắt đầu bằng" lẫn "chứa" trên danh sách đầy đủ).
+- Bỏ `setTimeout(fetchAllCustomersCache, 5000)` lúc mở app. Danh sách chỉ nạp khi **vào màn thanh toán** (`#sc`) lần đầu — ý của chủ dự án.
+- Danh sách giữ trong máy (localStorage, đọc/ghi bọc try/catch) kèm ngày nạp; **mỗi ngày làm mới tối đa 1 lần** (lần vào màn thanh toán đầu tiên trong ngày). Tải lại app trong ngày → dùng bản trong máy, không đọc Firestore.
+- Khách vừa tạo ở POS: đã được thêm vào danh sách trong máy sẵn (`allCustomersCache.unshift` trong luồng tạo khách) → ghi luôn vào bản lưu.
+- Gõ đủ 10 số → vẫn `lookupCustomer` đọc thẳng `doc(sđt)` → điểm / tem / ly miễn phí luôn đúng. Chỉ số điểm hiện trong dòng gợi ý có thể cũ tối đa 1 ngày; khách XOFA / The Cafe 33 tạo trong ngày chưa hiện trong gợi ý (gõ đủ số vẫn tra ra).
+- Màn Khách hàng (`_custFetchAll`): dùng lại cùng danh sách trong máy nếu đã có trong ngày, thay vì tải lại toàn bộ.
 - Không ghi, không đổi cấu trúc `customers` (dùng chung XOFA / The Cafe 33).
+- Lượt đọc: từ "số khách × số lần mở app" còn "số khách × 1 lần/ngày".
 
 ### T4 — Lớp dữ liệu dùng chung (N3)
 - POS: một chỗ giữ `inventory_items` + `prep_items` bằng listener (cùng mẫu `_posLiveSubscribe`) — 20 chỗ đọc thẳng chuyển sang đọc từ đó; engine vẫn nhận qua `getItems` / `getPreps` như cũ. Màn nào **cần số tồn chính xác tại thời điểm ghi** thì vẫn đọc trong transaction của engine (không đổi).
@@ -125,8 +130,8 @@ Mỗi bước: **phản biện → báo → sửa → test → tạo bản `_thu
 
 | # | Câu hỏi | Cần trước |
 |---|---|---|
-| Q1 | Số máy POS, số bill/ngày, Quản lý mở trên máy nào / bao nhiêu lần một ngày? | T1 |
-| Q2 | XOFA & The Cafe 33 còn chạy trên project `the-cafe-33` không? (phần lượt đọc của họ không nằm trong kế hoạch này) | T1 |
-| Q3 | Gợi ý số điện thoại khi gõ ≥ 4 số (thay vì tải sẵn toàn bộ) — đồng ý? | T3 |
+| Q1 | ~~Số máy POS, số bill/ngày~~ → **1 máy POS, < 60 bill/ngày** (05/10). Còn hỏi: Quản lý mở trên máy nào, khoảng bao nhiêu lần/ngày? | T1 |
+| Q2 | ~~XOFA & The Cafe 33 còn chạy?~~ → **Có, cùng project** (05/10). Lượt đọc của họ tính chung hạn mức nhưng không nằm trong kế hoạch này → T0/T1 phải tách được phần của Gieo Gieo để biết còn bao nhiêu chỗ | T1 |
+| Q3 | ~~Đổi cách gợi ý SĐT?~~ → **Không đổi**; nạp khách khi vào màn thanh toán (05/10) — xem T3 | — |
 | Q4 | Nút "Tải lại" ở Quản lý là cách duy nhất để lấy số mới khi máy khác vừa ghi (thay cho tự đọc lại sau 20 giây) — đồng ý, hay cần listener cho màn nào? | T4 |
-| Q5 | Mục tiêu: dưới bao nhiêu lượt đọc/ngày (đề xuất ≤ 25K cho 1 quán, chừa chỗ cho quán 2 và hai thương hiệu kia)? | T2 |
+| Q5 | ~~Mục tiêu?~~ → **Cả project < 50K lượt đọc/ngày** (hạn mức miễn phí) (05/10). Vì XOFA & The Cafe 33 dùng chung, phần của Gieo Gieo phải nhỏ hơn 50K trừ phần của họ — đo ở T0/T1 | — |
