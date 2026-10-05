@@ -100,6 +100,13 @@ Các index các fallback khác đang chờ (thiếu thì đọc nhiều hơn, s�
 Kết luận: **P2 xác nhận** — 83% lượt đọc là đọc **sổ gốc** (stock + prep transactions) theo khoảng ngày; Tổng kết tháng cũ ≈ 350 dòng sổ/ngày × 30 ngày. Ngày 04/10 (đầu tháng) xem Tổng kết tháng 9 vài lần là đủ vượt 50K. → **T2 làm trước tiên.** POS chưa đo.
 (Bản đo đầu ghi nhầm cột "hàm" — đã sửa; số theo collection / màn / mốc vẫn đúng.)
 
+### 3.2 Kết quả đo thật — POS, 05/10 (bản đo `posgieo_dem.html`, vài luồng — đang bán thật nên không bấm lưu)
+
+**Tổng 2.336 lượt**, trong đó **`customers` 1.980 (85%)** = 2 lần đọc **toàn bộ** khách (~990 khách/lần — collection dùng chung 3 thương hiệu) bởi `fetchAllCustomersCache` (5 giây sau khi mở app). Còn lại nhỏ: `inventory_items` 161, `stock_containers` 71, `prep_items` 45, `prep_batches` 21…
+Theo mốc: vào POS 70 · vào tab Nấu chế biến 1.233 (gồm lượt tải khách chạy nền).
+→ **P3 xác nhận**: mỗi lần mở / tải lại POS ≈ 990 lượt chỉ cho gợi ý số điện thoại. Thêm lỗ hổng N1: `fetchAllCustomersCache` chỉ chặn khi danh sách đã có — trong lúc lượt tải đầu chưa xong, **mỗi lần gõ** vào ô SĐT (`onPhoneInput`) gọi thêm một lượt đọc toàn bộ. T3 sửa cả hai (gộp lời gọi đang chạy + giữ trong máy 1 ngày).
+Chưa đo: luồng lưu bill, kiểm kê, cân cuối ca, nhận hàng (cần bấm lưu thật).
+
 ## 4. Lộ trình
 
 Mỗi bước: **phản biện → báo → sửa → test → tạo bản `_thu` → chủ dự án deploy & thử máy thật → so lượt đọc với mốc**.
