@@ -53,7 +53,7 @@ Chủ dự án xác nhận 05/10: **1 máy POS, < 60 bill/ngày** → ~60 × ~8 
 
 | # | Ở đâu | Vì sao tốn | Ước lượng |
 |---|---|---|---|
-| **P1** | **Thiếu composite index** → các cơ chế giảm-đọc **âm thầm lui về đọc sổ gốc** (chỉ `console.warn`) | `ledgerConsumptionStats` (Vốn trong kho, chạy nền ở màn **Hôm nay** và Sức khoẻ) cần index `stock_transactions (businessDate, createdAt)`; thiếu → đọc **30 ngày sổ gốc** mỗi lần (đệm 5 phút) | ~15.000 / lần mở Quản lý |
+| ~~P1~~ **(loại 05/10: 4 index đã có từ trước 04/10 → bản tổng hợp đang chạy đúng)** | Thiếu composite index → các cơ chế giảm-đọc **âm thầm lui về đọc sổ gốc** (chỉ `console.warn`) | `ledgerConsumptionStats` (Vốn trong kho, chạy nền ở màn **Hôm nay** và Sức khoẻ) cần index `stock_transactions (businessDate, createdAt)`; thiếu → đọc **30 ngày sổ gốc** mỗi lần (đệm 5 phút) | ~15.000 / lần mở Quản lý |
 | **P2** | QL `computeLedgerRealMetrics` — gọi từ Hôm nay, Sức khoẻ, Báo cáo (2 kỳ), Tháng kết, NL-BTP | Đọc **mọi dòng** sổ NL + sổ BTP trong khoảng ngày, không đệm, không tổng hợp | Hôm nay ~500/lần; tháng ~15.000/lần; năm: lớn hơn nhiều |
 | **P3** | POS `fetchAllCustomersCache` (5 giây sau khi mở app) + màn Khách hàng `_custFetchAll` | Đọc **toàn bộ** `customers` (dùng chung 3 thương hiệu) | số khách × số lần mở POS × số máy |
 | **P4** | Engine `dutyCompute` (cân cuối ca / đếm BTP có lệch) | Đọc sổ của món trong **3 ngày** (khoảng đo ± 1 ngày đệm); `dutyLoadHistory` đọc mọi vụ lệch của món | ~180 / món hay bán; ~2.500 / lần cân 15 món |
@@ -80,11 +80,11 @@ Các index các fallback khác đang chờ (thiếu thì đọc nhiều hơn, s�
 Mỗi bước: **phản biện → báo → sửa → test → tạo bản `_thu` → chủ dự án deploy & thử máy thật → so lượt đọc với mốc**.
 
 ### T0 — Không sửa code (chủ dự án làm ngay)
-1. Firebase Console → Firestore → **Indexes → Composite**: tạo 6 index ở bảng mục 3 (hoặc mở Quản lý trên trình duyệt có Console, bấm đường link tạo index trong các dòng cảnh báo `Cần tạo composite index…`). Chờ trạng thái **Enabled**.
+1. **[05/10] 4 index đầu đã có từ trước; còn thiếu 2 index `_histLoad`** (`itemId`/`prepId` ↑ + `createdAt` ↓). Firebase Console → Firestore → **Indexes → Composite**: tạo 6 index ở bảng mục 3 (hoặc mở Quản lý trên trình duyệt có Console, bấm đường link tạo index trong các dòng cảnh báo `Cần tạo composite index…`). Chờ trạng thái **Enabled**.
 2. Firestore → **Usage**: chụp biểu đồ lượt đọc theo giờ của 2–3 ngày gần nhất làm **mốc**; ghi lại giờ vọt lên trùng với việc gì (mở Quản lý xem báo cáo / cân cuối ca / bật máy POS).
 3. Ghi số máy POS, số bill/ngày, XOFA & The Cafe 33 còn chạy trên project này không.
 
-**Xong khi**: 6 index Enabled; có mốc lượt đọc/ngày. Kỳ vọng P1 giảm ngay.
+**Xong khi**: 6 index Enabled; có mốc lượt đọc/ngày. **[05/10]** Index không phải nguyên nhân → bước tiếp theo là T1 (đo), vì chưa biết phần nào của 52K là Gieo Gieo, phần nào là XOFA / The Cafe 33.
 
 ### T1 — Đo chính xác (công cụ dán vào Console, không deploy)
 - `tools/dem_luot_doc.js` (cùng kiểu `tools/don_myGifts_free_stamp.js`): dán vào Console của POS / Quản lý → bọc `get` / `onSnapshot` / `runTransaction` ở tầng SDK, đếm **số tài liệu trả về** theo collection + hàm gọi (lấy từ stack) + màn đang đứng; lệnh `demLuotDoc.bang()` in bảng xếp hạng.
