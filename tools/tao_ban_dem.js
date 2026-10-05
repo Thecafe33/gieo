@@ -21,6 +21,8 @@ const DEM_FILE = 'dem_luot_doc.v1.js';
 const dem = fs.readFileSync(DEM_SRC);
 const hash = require('crypto').createHash('sha1').update(dem).digest('hex').slice(0, 10);
 
+// Bộ đếm không chạy (file chưa deploy, hosting trả trang khác thay cho JS, hoặc lỗi lúc cài) → báo đỏ đầu trang, app vẫn chạy.
+const BAO_LOI = '<script>if (!window.demLuotDoc) document.addEventListener(\'DOMContentLoaded\', function () { document.body.insertAdjacentHTML(\'afterbegin\', \'<div style="position:fixed;top:0;left:0;right:0;z-index:2147483647;background:#b91c1c;color:#fff;font:700 15px/1.4 sans-serif;padding:10px 14px">⚠️ BẢN ĐO: bộ đếm KHÔNG chạy — mở /' + DEM_FILE + ' trong trình duyệt xem có hiện mã JavaScript không (thiếu file trên hosting?).</div>\'); });</script>   <!-- [BẢN ĐO] -->';
 function tao(src, dst) {
   let h = fs.readFileSync(path.join(ROOT, src), 'utf8');
   const re = /<script src="https:\/\/www\.gstatic\.com\/firebasejs\/[\d.]+\/firebase-firestore-compat\.js"><\/script>/g;
@@ -28,7 +30,7 @@ function tao(src, dst) {
   if (n !== 1) throw new Error(src + ': cần đúng 1 thẻ firebase-firestore-compat.js, thấy ' + n);
   if (/che_do_thu\.|GieoThu\.install|dem_luot_doc\./.test(h.replace(/<!--[\s\S]*?-->/g, '').replace(/\/\/.*$/gm, '').replace(/GieoThu && GieoThu/g, '')))
     throw new Error(src + ': file nguồn đã có chế độ thử / bộ đếm — phải sinh từ bản THẬT');
-  h = h.replace(re, m => m + '\n<script src="' + DEM_FILE + '?b=' + hash + '" charset="utf-8"></script>   <!-- [BẢN ĐO] bộ đếm lượt đọc — chỉ có ở *_dem.html -->');
+  h = h.replace(re, m => m + '\n<script src="' + DEM_FILE + '?b=' + hash + '" charset="utf-8"></script>   <!-- [BẢN ĐO] bộ đếm lượt đọc — chỉ có ở *_dem.html -->\n' + BAO_LOI);
   h = h.replace(/<title>/, '<title>[ĐO] ');
   const iDem = h.indexOf('<script src="' + DEM_FILE), iInit = h.search(/firebase\.initializeApp\(/);
   if (iDem < 0 || iInit < 0 || iDem > iInit) throw new Error(dst + ': bộ đếm phải nạp trước initializeApp');
