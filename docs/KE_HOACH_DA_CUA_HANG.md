@@ -12,7 +12,7 @@
 Bắt đầu Bước 1 khi:
 1. Bản tối ưu lượt đọc T2/T3 (05/10) **đã deploy** và Firebase Usage cho thấy lượt đọc/ngày đã giảm rõ — mỗi quán mới cộng thêm lượt đọc vào cùng hạn mức.
 2. v18 (hoặc bản sau) chạy ổn ở quán hiện tại ≥ vài tuần (04/10: mới 1–3 tuần).
-3. Bước 2 cần trả lời trước **O7, O8, O13, O16** (mục 4). Bước 1 không cần.
+3. Bước 2 cần trả lời trước **O7, O8, O16, O17** (mục 4; O13 đã xong 05/10). Bước 1 không cần.
 
 **Câu mở đầu cho phiên Claude mới (mỗi bước một phiên):**
 > Đọc CLAUDE.md, docs/TRANG_THAI.md, docs/KE_HOACH_DA_CUA_HANG.md và docs/UNIT_ENGINE.md. Chạy `sh tests/run_all.sh` và `node tools/check_boundaries.js`. Làm **Bước N** (mục 5) — phản biện trước, báo tôi rồi mới sửa. Không deploy.
@@ -85,9 +85,10 @@ Cái giá (chấp nhận): hai kiểu đặt tên mãi mãi (chỉ lớp đườ
 
 | # | Câu hỏi | Cần trước |
 |---|---|---|
-| **O8** | Mã cửa hàng: đề xuất `gg01` (quán hiện tại — đúng mặc định engine), `gg02`, … Dùng trong hậu tố tên và mã CK | Bước 2 |
-| **O13** | Mã nguồn webhook Cloud Run (xác nhận CK) — tiền tố từng thương hiệu, cách tách `orderId`, cách ghi RT | Bước 2 |
-| **O7** | Giới hạn độ dài nội dung CK của ngân hàng | Bước 2 |
+| **O8** | Mã cửa hàng: đề xuất `gg01` (quán hiện tại — đúng mặc định engine), `gg02`, … — hậu tố tên dùng `gg02`; mã CK dùng **2 chữ số** `02` (mục 4.1) | Bước 2 |
+| ~~O13~~ | ~~Mã nguồn webhook~~ → **đã đọc 05/10** (mục 4.1) | — |
+| **O7** | Giới hạn độ dài nội dung CK của ngân hàng — nội dung quán mới `TTHD GG02ddMMHHmmss` = 19 ký tự (quán hiện tại 17). Thử 1 giao dịch thật để chắc | Bước 2 |
+| **O17** | Quán mới dùng **chung STK** `0977570035` hay STK riêng? Chung → webhook không sửa gì; riêng → thêm đúng 1 dòng vào `KNOWN_ACCOUNTS` | Bước 2 |
 | **O16** | Máy chọn quán thế nào: mã quán trong đường link APK (`posgieo.html?quan=gg02`) + máy nhớ quán của mình + tên quán hiện trên đầu màn hình. Mở nhầm link quán khác trên máy đã gắn quán → **cảnh báo** hay **tự dùng quán đã gắn**? | Bước 2 |
 | O3 | `finance_gieogieo` chứa gì (dùng chung hay theo quán)? | Bước 1 |
 | O4 | Có chuyển tem **đang mở** giữa quán không? (mặc định: không) | Bước 5 |
@@ -96,6 +97,18 @@ Cái giá (chấp nhận): hai kiểu đặt tên mãi mãi (chỉ lớp đườ
 | — | Quán 2 có menu / giá / khuyến mãi khác quán 1 không? | Bước 3 |
 | O14 | Target nhân viên theo quán hay toàn chuỗi? (đề xuất: theo quán) | Bước 3 |
 | O15 | Chi phí cố định, khấu hao, lương cứng: gắn theo quán hay chia tỷ lệ? (hoà vốn từng quán) | Bước 3 |
+
+### 4.1 Webhook xác nhận CK (Cloud Run `processCakePayment`) — đọc 05/10
+
+- Đọc Gmail báo có tiền; nhận mã bằng `/TTHD ([A-Z]{2}\d+)/` (**2 chữ in hoa + dãy số bất kỳ dài**), chỉ nhận mail có STK trong `KNOWN_ACCOUNTS` (`0964674795` PosX/XOFA, `0977570035` posgieo), ghi RT `bank_confirmations/{orderId}` = `{orderId, amount, account, confirmedAt, source}`.
+- POS hiện tạo mã `genBankOrderId()` = `GG` + `ddMMHHmmss` (10 số), nội dung `TTHD GG…`.
+- **Kết luận**: quán mới dùng mã `GG` + **2 số mã quán** + `ddMMHHmmss` (12 số), vd `GG020510143055`:
+  - webhook **nhận được ngay, không sửa code** (regex nhận dãy số dài bất kỳ); khác STK thì chỉ thêm 1 dòng `KNOWN_ACCOUNTS` (O17);
+  - **không bao giờ trùng** mã quán hiện tại (10 số ≠ 12 số) và không đụng tiền tố `DH` của XOFA;
+  - quán hiện tại **không đổi gì**.
+- Quản lý → dọn dữ liệu (`_ddDateFromBankKey` chỉ hiểu `GG` + 10 số):
+  - `ddDeleteBankOld` chỉ xoá `GG` + 10 số cũ > 7 ngày → **không** đụng XOFA (đính chính bản 04/10).
+  - **`ddDeleteBankUnknown` (nút xoá "không đọc được ngày") xoá cả khoá `DH…` của XOFA và sẽ xoá khoá quán mới** → Bước 2 sửa: hiểu thêm `GG` + 12 số; chỉ liệt kê / xoá khoá tiền tố `GG`.
 
 ---
 
@@ -123,12 +136,11 @@ Mỗi bước: **phản biện → báo → sửa → test → `tao_ban_thu` →
 - **Tồn theo quán**: quán ≠ `gg01` để trạng thái tồn (`currentStock`, `locationStock`, `unrefilledConsumption`, `refillUncertain`, `pendingShortage`, `untrackedPendingDelta`, `_ueLastRecomputeStart`, `lastCount`) ở `store_item_state_gieogieo__{storeId}/{itemId}`; danh mục `inventory_items` / `prep_items` dùng chung. Engine `P.itemState` theo quán; hàm nạp danh mục ở app trả danh mục + tồn của quán đang chạy. `gg01` giữ tồn trong doc danh mục như cũ.
 - **Chọn quán trên máy** (O16): mã quán từ đường link → máy nhớ; không có mã + máy chưa gắn quán = `gg01` (máy hiện tại); tên quán luôn hiện trên đầu màn hình.
 - **Số bill**: tự tách vì `billCounters_gieogieo__{storeId}` là gốc riêng; nhãn bill in thêm mã quán (quán ≠ `gg01`).
-- **Chuyển khoản** — thứ tự bắt buộc (giữ từ bản cũ):
-  1. Đọc mã nguồn webhook (O13).
-  2. Sửa webhook nhận **thêm** dạng `GG{mã quán}{ddMMHHmmss}`, **giữ nguyên** `GG{ddMMHHmmss}` (quán hiện tại) và toàn bộ dạng của XOFA / The Cafe 33; mã quán không tạo chuỗi trùng tiền tố thương hiệu khác; kiểm độ dài (O7).
-  3. Deploy webhook ngoài giờ bán của **cả ba**, thử **một giao dịch CK thật cho mỗi thương hiệu**.
-  4. Mới bật dạng mới cho POS quán mới. POS quán hiện tại **không đổi**.
-  5. `ddDeleteBankOld` hiện xoá **mọi** khoá > 7 ngày, kể cả của XOFA / The Cafe 33 → giới hạn chỉ xoá khoá tiền tố `GG`.
+- **Chuyển khoản** (mục 4.1 — webhook đã đọc):
+  1. `genBankOrderId()`: quán ≠ `gg01` → `GG` + 2 số mã quán + `ddMMHHmmss`; quán hiện tại giữ nguyên.
+  2. STK riêng (O17) → thêm 1 dòng `KNOWN_ACCOUNTS`, deploy webhook ngoài giờ bán của cả ba, thử 1 CK thật mỗi thương hiệu. Chung STK → không đụng webhook.
+  3. Quản lý: `_ddDateFromBankKey` hiểu `GG` + 12 số; `ddDeleteBankUnknown` chỉ xét khoá tiền tố `GG` (không bao giờ xoá `DH…` của XOFA).
+  4. Thử 1 CK thật của quán mới ở chế độ thử (Bước 4).
 - Check-in ghi `storeId`; nhân viên có `storeTags`.
 
 ### Bước 3 — Quản lý đa quán
@@ -197,7 +209,8 @@ Mỗi bước: **phản biện → báo → sửa → test → `tao_ban_thu` →
 | Bước 1 làm đổi hành vi quán hiện tại | Cao | `gg01` → chuỗi cũ y hệt (test từng tên); 50+ test hiện có xanh nguyên; chế độ thử; theo dõi 1 tuần trước Bước 2 |
 | Code viết sau này đi vòng lớp đường dẫn → quán mới ghi vào chỗ quán cũ | Cao | `check_paths.js` trong `predeploy_check`; tên chưa đăng ký ném lỗi |
 | Máy quán mới mở nhầm link không mã quán → ghi vào quán hiện tại | Cao | Máy nhớ quán (O16); tên quán trên đầu màn hình; APK quán mới gắn link có mã |
-| Webhook Cloud Run hỏng → **cả ba thương hiệu** mất tự xác nhận CK | Rất cao | Thứ tự Bước 2; chỉ thêm dạng mới; thử giao dịch thật từng thương hiệu; vẫn xác nhận tay được |
+| Webhook Cloud Run hỏng → **cả ba thương hiệu** mất tự xác nhận CK | Thấp (05/10) | Mã quán mới khớp regex sẵn có → không sửa webhook; STK riêng chỉ thêm 1 dòng, thử CK thật từng thương hiệu |
+| Nút xoá "không đọc được ngày" ở Quản lý xoá nhầm CK của XOFA / quán mới | Cao (có từ trước) | Bước 2 mục CK.3 |
 | Làm hỏng XOFA / The Cafe 33 | Rất cao | D18; không đổi rules / tài khoản chung ở Bước 1–4 |
 | Deploy xoá nhầm file thương hiệu khác (chung site Hosting) | Rất cao | `tools/site_files.txt` + `predeploy_check` |
 | Quán mới thiếu composite index → màn hình lỗi / đọc gốc nhiều | Cao | Runbook Bước 4 tạo index theo danh sách sinh tự động |
