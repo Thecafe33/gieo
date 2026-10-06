@@ -2355,11 +2355,15 @@ GieoThu.install({ app: 'pos', firebase, db, fstore });   // [BẢN THỬ] mọi 
 // Lớp đường dẫn (data_access.v2.js): quán 'gg01' → mọi tên giữ NGUYÊN như trước; quán khác → dữ liệu riêng.
 // Thiếu file data_access (mạng chập lúc tải): máy gắn gg01 → chạy tiếp như cũ (không bọc cũng y hệt);
 // máy gắn quán khác / chưa gắn → báo đỏ + tự tải lại (chạy không bọc = ghi nhầm vào dữ liệu GG01).
-// Bản thử (*_thu.html — che_do_thu): luôn là vùng thử của GG01, không cần mã.
+// Bản thử (*_thu.html — che_do_thu): mặc định vùng thử của GG01, không cần mã; "Thử cửa hàng khác" ở sidebar đăng nhập
+// mã của một quán tạo trong vùng thử (Quản lý bản thử ▸ Cửa hàng) — thử quán mới trước khi mở thật (Bước 4).
+// localStorage của bản thử có tiền tố riêng (che_do_thu) → không đụng máy thật.
 const POS_AUTH_EMAIL = 'cafe33@xolifa.com', POS_AUTH_PASS = 'xolifaangiang';
-const POS_STORE = (window.GieoThu && GieoThu.active)
-  ? { storeId: 'gg01', name: 'Bản thử', address: 'Vùng thử — chép từ dữ liệu cửa hàng GG01', thu: true }
-  : (() => { try { const v = JSON.parse(localStorage.getItem('gieo_store_v1') || 'null'); return v && /^gg\d{2}$/.test(v.storeId) ? v : null; } catch (e) { return null; } })();
+const POS_THU = !!(window.GieoThu && GieoThu.active);
+const _posBind = (() => { try { const v = JSON.parse(localStorage.getItem('gieo_store_v1') || 'null'); return v && /^gg\d{2}$/.test(v.storeId) ? v : null; } catch (e) { return null; } })();
+const POS_STORE = POS_THU
+  ? Object.assign({ storeId: 'gg01', name: 'Bản thử', address: 'Vùng thử — chép từ dữ liệu cửa hàng GG01' }, _posBind || {}, { thu: true })
+  : _posBind;
 if (window.GieoData) GieoData.install({ fstore, db, storeId: POS_STORE ? POS_STORE.storeId : null });
 else if (POS_STORE && POS_STORE.storeId === 'gg01') console.error('[GieoData] không nạp được data_access.v2.js — máy gắn GG01: chạy tiếp với đường dẫn cũ');
 else {
@@ -22107,7 +22111,8 @@ function closeSdb() { document.getElementById('sdb').classList.remove('open'); d
 // ============================================================
 // Màn nhập mã: chạy khi máy CHƯA gắn cửa hàng — lúc đó app đã DỪNG ở khối cài đặt (không có auth, menu, đơn…),
 // nên hàm này tự đăng nhập Firebase và chỉ đọc stores_gieogieo (dùng chung). Gắn xong → tải lại trang.
-function posStoreLoginScreen() {
+function posStoreLoginScreen(coTheDong) {
+  if (document.getElementById('posStoreLogin')) return;
   const o = document.createElement('div');
   o.id = 'posStoreLogin';
   o.style.cssText = 'position:fixed;inset:0;z-index:2147483000;background:#fff;display:flex;align-items:center;justify-content:center;padding:20px;overflow:auto';
@@ -22120,7 +22125,9 @@ function posStoreLoginScreen() {
     + ' style="width:100%;box-sizing:border-box;font-size:28px;font-weight:800;letter-spacing:10px;text-align:center;text-transform:uppercase;padding:12px;border:2px solid #ddd;border-radius:14px;outline:none">'
     + '<div id="psMsg" style="min-height:20px;font-size:13.5px;color:#c0392b;margin-top:8px"></div>'
     + '<button id="psGo" style="width:100%;margin-top:6px;padding:15px;border:0;border-radius:14px;background:#C22B49;color:#fff;font-size:16px;font-weight:800">Tiếp tục</button>'
-    + '<div id="psConfirm"></div></div>';
+    + '<div id="psConfirm"></div>'
+    + (coTheDong ? '<button onclick="document.getElementById(\'posStoreLogin\').remove()" style="width:100%;margin-top:14px;padding:12px;border:0;border-radius:12px;background:#eee;color:#333;font-size:14px;font-weight:700">Đóng</button>' : '')
+    + '</div>';
   document.body.appendChild(o);
   const $ = id => document.getElementById(id);
   let sai = 0, khoaDen = 0, dangTim = false;
@@ -22172,11 +22179,20 @@ function renderSdbStore() {
     + ' <span style="font-size:11.5px;color:#888;font-weight:700">· ' + POS_STORE.storeId.toUpperCase() + '</span></div>'
     + '<div style="font-size:12px;color:#666;line-height:1.3;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">📍 '
     + escHtmlPos(POS_STORE.address || '(chưa có địa chỉ)') + '</div></div>';
-  if (out) out.innerHTML = POS_STORE.thu ? '' : '<div style="text-align:center;margin-top:18px"><span onclick="posStoreLogout()" style="font-size:12px;color:#aaa;text-decoration:underline;cursor:pointer;padding:6px">Đăng xuất khỏi cửa hàng</span></div>';
+  if (out) out.innerHTML = POS_STORE.thu
+    ? '<div style="text-align:center;margin-top:18px"><span onclick="closeSdb();posStoreLoginScreen(true)" style="font-size:12px;color:#888;text-decoration:underline;cursor:pointer;padding:6px">Thử cửa hàng khác (mã quán tạo trong Quản lý bản thử)</span>'
+      + (POS_STORE.storeId !== 'gg01' ? '<br><span onclick="posThuVeGG01()" style="font-size:12px;color:#888;text-decoration:underline;cursor:pointer;padding:6px">Về thử GG01</span>' : '') + '</div>'
+    : '<div style="text-align:center;margin-top:18px"><span onclick="posStoreLogout()" style="font-size:12px;color:#aaa;text-decoration:underline;cursor:pointer;padding:6px">Đăng xuất khỏi cửa hàng</span></div>';
+}
+// Bản thử: bỏ quán thử đang gắn, về vùng thử GG01.
+function posThuVeGG01() {
+  if (!POS_THU) return;
+  if (Object.keys(cart || {}).length) { toast('🚫 Giỏ đang có món — thanh toán hoặc xoá giỏ trước'); return; }
+  GieoData.binding.clear(); location.reload();
 }
 // Tên / địa chỉ mới nhất (Quản lý có thể sửa). KHÔNG kiểm lại mã — đổi mã không bắt máy đã gắn nhập lại.
 async function posStoreRefreshInfo() {
-  if (!POS_STORE || POS_STORE.thu || !window.GieoData) return;
+  if (!POS_STORE || !window.GieoData || (POS_STORE.thu && !_posBind)) return;
   try {
     const d = await fstore.collection('stores_gieogieo').doc(POS_STORE.storeId).get();
     if (!d.exists) return;

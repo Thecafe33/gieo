@@ -150,7 +150,8 @@ Chủ dự án chọn 05/10: **bản danh mục riêng mỗi quán** (thay cho `
   - Xem tất cả: cài `storeId: null` → mọi dữ liệu riêng bị chặn tận gốc. Chỉ có **Hôm nay tổng hợp** (chỉ xem): doanh thu + bill từng quán + tổng; việc cần xử lý gộp, gắn nhãn quán (`computeStoreHealth` trong `withStore`, xoá bộ đệm trước/sau mỗi quán) — bấm một việc → chuyển đúng quán, mở đúng việc (`ql_after_switch_v1`); tồn kho so sánh NL + BTP (cột từng quán + tổng, mặc định chỉ món âm / dưới ngưỡng). Mục khác → hộp "chọn cửa hàng để mở mục này".
   - Đơn đặt hàng: ô "Cửa hàng nhận" (khi có từ 2 quán) → đơn ghi vào sổ đơn của quán nhận (`GieoData.collFor`), có trường `storeId`.
   - Test `tests/da_cua_hang_b3.test.js`; Chromium: ô chọn quán, chuyển Tất cả, chốt chặn mục khác, màn tổng hợp, bấm việc → chuyển đúng quán.
-  - **Chưa làm (chờ chủ dự án)**: Báo cáo kỳ / Tổng kết tháng ở chế độ tất cả; các mục còn lại bên dưới (menu / khuyến mãi theo quán, lương, mục tiêu, lịch theo quán).
+  - **Báo cáo · Tất cả cửa hàng** (06/10): Báo cáo kỳ / Sức khoẻ tài chính / Tổng kết tháng ở chế độ Tất cả → một bảng: mỗi quán một cột + Tổng (doanh thu, bill, AOV, ly/bill, giá vốn, lãi gộp, lương, hao hụt, đổ ly, chi phí vận hành, đóng góp, EBIT) cho Tuần này / Tuần trước / Tháng này / Tháng trước — cùng `computeKPIs` với Báo cáo kỳ, từng quán trong `withStore`; Tổng = cộng số tuyệt đối rồi tính lại tỷ lệ.
+  - Mục tiêu, lịch làm việc, chi phí, sổ tiền: đã theo quán sẵn (dữ liệu riêng). Menu / giá / khuyến mãi / lương theo quán: xem "Không làm" ở Bước 4.
 - **Chủ dự án chốt 06/10**:
   - Quản lý có **cả hai chế độ**: **xem từng quán** (chuyển qua lại giữa các quán) và **xem tất cả cửa hàng**. Mỗi máy nhớ lựa chọn lần trước.
   - **Kho**: tem, lô, tồn, sổ của mỗi quán là riêng (đã tách ở Bước 2). Xem từng quán thì mọi màn Kho giữ nguyên như hiện nay, và **mọi thao tác ghi chỉ làm ở chế độ này**. Xem tất cả thì **chỉ xem**: bảng tồn so sánh (mỗi NL/BTP một dòng, cột từng quán + tổng) và việc kho cần xử lý gộp lại, gắn nhãn quán, bấm vào là chuyển sang đúng quán. Tem / lô không gộp thành một danh sách.
@@ -163,10 +164,25 @@ Chủ dự án chọn 05/10: **bản danh mục riêng mỗi quán** (thay cho `
 - Phiếu nhập, lịch làm, checklist, ngày đặc biệt theo quán; nút "sao chép cấu hình từ quán A".
 - Lãi/lỗ & hoà vốn theo quán (O15); lương dự đoán lọc lịch theo quán (D7); target nhân viên theo quán (O14); `duty` (vụ lệch, xác minh, tóm tắt ngày) theo quán; `duty_config` chung có ghi đè theo quán.
 
-### Bước 4 — Thử & mở quán 2
-- Chạy quán 2 trong **chế độ thử** (bản `_thu`, `?quan=gg02`) — bán, nấu, kiểm kê, kết ca, CK thử.
-- Runbook khai trương: tạo `stores_gieogieo/gg02`; **tạo composite index** cho collection có hậu tố (danh sách sinh từ bảng đăng ký + index đang có); máy POS + link; menu/giá ghi đè; refill rules, vị trí kho; nhân viên `storeTags`; thử CK thật.
-- Mở thật; theo dõi 2–4 tuần: lệch tồn, Sổ lệch, **lượt đọc** (hạn mức chung), CK.
+### Bước 4 — Thử & mở quán 2 — **[06/10] công cụ đã sẵn, chờ chủ dự án chạy runbook**
+Đã làm 06/10: bản thử POS "Thử cửa hàng khác" (đăng nhập mã quán tạo trong vùng thử); `tools/index_quan_moi.js` (danh sách composite index cho quán mới, quét code); Báo cáo · Tất cả cửa hàng (tuần / tháng). Không cần sửa code thêm để mở quán 2.
+
+**A. Thử trong bản thử** (`posgieo_thu.html` / `quanlygieo_thu.html`, dữ liệu thử — không đụng dữ liệu thật):
+1. Quản lý bản thử ▸ Cấu hình ▸ Cửa hàng: tạo hồ sơ GG01 (vùng thử) → Thêm cửa hàng mới (GG02 thử) → ghi lại mã 6 ký tự.
+2. POS bản thử ▸ sidebar ▸ "Thử cửa hàng khác" → nhập mã GG02 thử → bán, nhận hàng (sinh tem), mở tem, nấu BTP, kiểm kê, kết ca.
+3. Quản lý bản thử: đổi qua lại GG01 / GG02 / Tất cả — số liệu tách đúng quán; tồn GG01 thử không đổi khi bán ở GG02 thử.
+4. Xong: "Về thử GG01"; Kết thúc thử để xoá vùng thử (xoá cả dữ liệu thử của GG02).
+
+**B. Mở thật**:
+1. `node tools/index_quan_moi.js gg02` → tạo **6 composite index** ở Firebase Console ▸ Firestore ▸ Indexes ▸ Composite (Query scope: Collection), chờ **Enabled**. (Thiếu index: màn lọc + sắp xếp ở quán 2 lỗi hoặc đọc sổ gốc tốn gấp nhiều lần.)
+2. Quản lý (đang xem GG01) ▸ Cấu hình ▸ Cửa hàng ▸ Thêm cửa hàng mới: tên + địa chỉ GG02 → danh mục NL / BTP chép sang (tồn 0), refill rules + vị trí kho chép sang. Lấy mã 6 ký tự.
+3. Quản lý ▸ chọn GG02 ở đầu sidebar: sửa refill rules / vị trí kho cho đúng quán 2; danh mục chi phí, nhân viên dùng chung (không phải làm).
+4. Máy POS quán 2: mở link POS như quán 1 → nhập mã GG02 → **cài đầu bill (tên, địa chỉ) ở POS ▸ Máy in** (cấu hình in tách theo quán).
+5. Nhập hàng đầu kỳ quán 2: Quản lý (GG02) ▸ Đặt hàng (Cửa hàng nhận: GG02) → POS GG02 nhận hàng, in tem.
+6. Thử 1 lần chuyển khoản thật nhỏ ở quán 2 (mã CK `GG02…`, cùng tài khoản ngân hàng — webhook không đổi).
+7. Theo dõi 2–4 tuần: Sổ lệch, kết ca, **lượt đọc** (hạn mức chung cả 3 thương hiệu), CK.
+
+**Không làm (đã cân nhắc 06/10)**: nhãn bill in mã quán (đầu bill cấu hình riêng theo quán là đủ); menu / giá / khuyến mãi riêng từng quán (hai quán dùng chung menu, giá, khuyến mãi — khi cần khác thì làm); nhân viên `storeTags` (nhân viên dùng chung, ai cũng check-in được ở quán nào — ca ghi đúng quán). **Lương** tính theo ca ở quán đang xem: nhân viên làm ở cả 2 quán thì lương nằm ở 2 quán — cần "Lương · Tất cả cửa hàng" thì báo.
 
 ### Bước 5 — Khi cần
 - **Chuyển kho / kho trung tâm**:

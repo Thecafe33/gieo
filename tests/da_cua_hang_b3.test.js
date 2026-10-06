@@ -59,6 +59,19 @@ const TX = 'stock_transactions_gieogieo';
     ok(code === 1 && /bản data_access mới nhất/.test(out), 'check_paths: bắt app còn nạp data_access cũ');
     fs.rmSync(tmp, { recursive: true, force: true });
   }
+  // ── 5. Công cụ index cho quán mới: đủ 6 composite index quán hiện tại đang có (KE_HOACH_TOI_UU_DOC mục 3) ──
+  {
+    const { quet } = require('../tools/index_quan_moi.js');
+    const ds = quet().map(x => x.coll + '|' + x.truong.map(t => t.join(':')).join(','));
+    const can = ['stock_transactions_gieogieo|businessDate:ASC,createdAt:ASC', 'prep_transactions_gieogieo|businessDate:ASC,createdAt:ASC',
+      'stock_transactions_gieogieo|type:ASC,businessDate:ASC', 'prep_transactions_gieogieo|type:ASC,businessDate:ASC',
+      'stock_transactions_gieogieo|itemId:ASC,createdAt:DESC', 'prep_transactions_gieogieo|prepId:ASC,createdAt:DESC'];
+    const thieu = can.filter(x => !ds.includes(x));
+    ok(!thieu.length, 'tools/index_quan_moi.js: đủ 6 index của quán hiện tại (' + ds.length + ' index)' + (thieu.length ? ' — thiếu ' + thieu.join(', ') : ''));
+    let out = ''; try { out = cp.execFileSync('node', [path.join(ROOT, 'tools', 'index_quan_moi.js'), 'gg02', '--json'], { encoding: 'utf8' }); } catch (e) { out = ''; }
+    let j = null; try { j = JSON.parse(out); } catch (e) {}
+    ok(j && j.indexes.length === ds.length && j.indexes.every(x => /__gg02$/.test(x.collectionGroup)), 'tools/index_quan_moi.js gg02 --json: firestore.indexes.json đúng tên collection của quán mới');
+  }
   console.log(fail ? 'SOME FAIL' : 'ALL PASS');
   process.exitCode = fail;
 })().catch(e => { console.log('FAIL lỗi', e); process.exitCode = 1; });

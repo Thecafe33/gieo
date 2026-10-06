@@ -2355,7 +2355,7 @@ function setSync(busy){
 }
 async function reloadCurrent(){
   clearError();
-  if(QL_ALL){ renderTodayAll(); return; }   // [Bước 3] Xem tất cả: chỉ có màn Hôm nay tổng hợp
+  if(QL_ALL){ (curScreen === 'report' ? renderReportAll : renderTodayAll)(); return; }   // [Bước 3] Xem tất cả: Hôm nay + Báo cáo tổng hợp
   memoDropAll();   // bấm Tải lại là muốn số MỚI, không phải số trong bộ đệm
   try{ await ensureAuth(); await loadConfig(); }catch(err){ console.warn('reload config failed', err); }
   if(curScreen==='today') renderToday();
@@ -12267,7 +12267,8 @@ function switchScreen(s){
   // đưa về đúng màn Hôm nay đã gộp.
   if(s === 'storehealth') s = 'today';
   // [Bước 3] Xem tất cả cửa hàng: chỉ có màn Hôm nay tổng hợp — mục khác hỏi chọn quán rồi mở đúng mục đó.
-  if(QL_ALL && s !== 'today'){ qlOpenStorePicker({ nav: qlNavKeyFor(s) }); return; }
+  if(QL_ALL && (s === 'thangket' || s === 'health')) s = 'report';   // Báo cáo · Tất cả cửa hàng
+  if(QL_ALL && s !== 'today' && s !== 'report'){ qlOpenStorePicker({ nav: qlNavKeyFor(s) }); return; }
   curScreen = s;
   document.querySelectorAll('.screen').forEach(el=>el.classList.remove('active'));
   document.getElementById('screen-'+s).classList.add('active');
@@ -12302,7 +12303,7 @@ function switchScreen(s){
   if(s==='todayops') renderTodayOps();
   if(s==='nlbtp') renderNlBtp();
   if(s==='health') renderHealth();
-  if(s==='report') renderReport();
+  if(s==='report') (QL_ALL ? renderReportAll() : renderReport());
   if(s==='mix') renderMix();
   if(s==='customer') renderCustomer();
   if(s==='thangket') renderThangKet();
@@ -17255,7 +17256,7 @@ function drawTodayAll(){
   box.innerHTML = `
     <div class="card" style="border:1.5px solid var(--gd)">
       <div style="font-weight:800;font-size:15px">🧾 Tất cả cửa hàng · hôm nay ${dkey(new Date()).split('-').reverse().slice(0,2).join('/')}</div>
-      <div class="small-note" style="margin-top:4px">Chỉ xem. Bấm vào một việc để chuyển sang đúng cửa hàng đó và xử lý. Kho, ca, nhân viên… làm việc theo từng cửa hàng — chọn ở đầu sidebar.</div>
+      <div class="small-note" style="margin-top:4px">Chỉ xem. Bấm vào một việc để chuyển sang đúng cửa hàng đó và xử lý. Kho, ca, nhân viên… làm việc theo từng cửa hàng — chọn ở đầu sidebar. Báo cáo tuần / tháng của cả chuỗi: <a href="#" onclick="switchScreen('report');return false">Báo cáo · Tất cả</a>.</div>
     </div>
     <div class="sec-title">Doanh thu hôm nay</div>
     <div class="card">${dongDT}
@@ -17272,6 +17273,89 @@ function drawTodayAll(){
       <button class="btn outline sm" onclick="_todayAllChiCanXem=!_todayAllChiCanXem;drawTodayAll()">${_todayAllChiCanXem?'Hiện tất cả':'Chỉ món cần xem'}</button></div>
     <div class="card">${bang('nl')}</div>
     <div class="card">${bang('btp')}</div>`;
+}
+
+// ---------- Báo cáo — XEM TẤT CẢ CỬA HÀNG (chỉ xem) ----------
+// Thay cho Báo cáo kỳ / Sức khoẻ tài chính / Tổng kết tháng khi đang Xem tất cả. Mỗi quán tính bằng ĐÚNG computeKPIs
+// của Báo cáo kỳ (cùng nguồn: bill, giá vốn, chi phí, lương, hao hụt), chạy TUẦN TỰ trong withStore, xoá đệm mỗi quán;
+// cột Tổng = cộng số tuyệt đối rồi tính lại tỷ lệ (không cộng %).
+let _rpAllKy = 'tuan';
+let _qlAllChungDaNap = false;
+async function qlAllNapChung(){   // dữ liệu DÙNG CHUNG cần cho giá vốn (init bỏ qua ở chế độ Xem tất cả)
+  if(_qlAllChungDaNap) return;
+  const [top, pres, ovr, bag, rules, rulesCfg, bagTbl] = await Promise.all([loadToppingRecipes(), loadPackagingPresets(), loadPackagingItemOverrides(),
+    loadPackagingBaggingRules(), loadPackagingRules(), loadPackagingRulesConfig(), loadPackagingBaggingTable(),
+    loadRecipes(), loadHrSettings().catch(()=>null), ensurePriceHistory().catch(()=>null)]);
+  TOPPING_RECIPES = top; PACKAGING_PRESETS = pres; PACKAGING_ITEM_OVERRIDES = ovr; PACKAGING_BAGGING_RULES = bag;
+  PACKAGING_RULES = rules; PACKAGING_RULES_CONFIG = rulesCfg; PACKAGING_BAGGING_TABLE = bagTbl;
+  _qlAllChungDaNap = true;
+}
+function _rpAllRange(k){
+  const nay = new Date(); nay.setHours(0,0,0,0);
+  if(k === 'tuan') return { ...weekRangeFor(0), label:'Tuần này' };
+  if(k === 'tuantruoc') return { ...weekRangeFor(-1), label:'Tuần trước' };
+  if(k === 'thang') return { start:new Date(nay.getFullYear(), nay.getMonth(), 1), end:nay, label:'Tháng này' };
+  return { start:new Date(nay.getFullYear(), nay.getMonth()-1, 1), end:new Date(nay.getFullYear(), nay.getMonth(), 0), label:'Tháng trước' };
+}
+async function renderReportAll(){
+  const body = document.getElementById('reportBody'); if(!body) return;
+  const wn = document.querySelector('#screen-report .weeknav'); if(wn) wn.style.display = 'none';
+  const r = _rpAllRange(_rpAllKy);
+  const chip = (k, t) => `<button class="btn ${_rpAllKy===k?'':'outline'} sm" onclick="_rpAllKy='${k}';renderReportAll()">${t}</button>`;
+  const dau = `<div class="card" style="border:1.5px solid var(--gd)"><div style="font-weight:800;font-size:15px">🧾 Báo cáo · Tất cả cửa hàng</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">${chip('tuan','Tuần này')}${chip('tuantruoc','Tuần trước')}${chip('thang','Tháng này')}${chip('thangtruoc','Tháng trước')}</div>
+      <div class="small-note" style="margin-top:8px">${fmtDateVN(r.start)} — ${fmtDateVN(r.end)}. Chỉ xem. Chi tiết từng ngày, món, ca: chọn từng cửa hàng ở đầu sidebar.</div></div>`;
+  body.innerHTML = dau + '<div class="muted">Đang tính từng cửa hàng...</div>';
+  setSync(true);
+  try{
+    await ensureAuth(); await qlLoadStores(); await qlAllNapChung();
+    const ds = qlActiveStores();
+    if(!ds.length){ body.innerHTML = dau + '<div class="muted">Chưa có hồ sơ cửa hàng nào.</div>'; return; }
+    const kq = [];
+    for(const st of ds){
+      kq.push(await GieoData.withStore(st.id, async ()=>{
+        memoDropAll(); _costMemo = {};
+        const [items, preps] = await Promise.all([loadInventoryItems(), loadPrepItems(), loadCogsMaps(), loadConfig().catch(()=>null)]);
+        INVENTORY_ITEMS = items; PREP_ITEMS = preps;
+        const [sales, opsAll, expAll, assets, labor, led] = await Promise.all([
+          fetchSalesRange(r.start, r.end), loadDailyOpsAll(), loadExpensesAll(), loadAssetsAll(),
+          HR_SETTINGS.useActualLaborCost ? computeActualLaborCostByDate(dkey(r.start), dkey(r.end)) : Promise.resolve(null),
+          computeLedgerRealMetrics(r.start, r.end)
+        ]);
+        const kpi = computeKPIs({ perDaySales:sales.perDay, opsSum:sumDailyOps(opsAll, r.start, r.end), expList:filterExpenses(expAll, r.start, r.end), assets,
+          actualLaborByDate:labor, ledgerWasteValue: led ? led.wasteValue : null, drinkWasteCups: led ? led.drinkWasteCups : 0 });
+        return { st, kpi };
+      }).catch(err=>({ st, err })));
+    }
+    memoDropAll(); _costMemo = {}; INVENTORY_ITEMS = []; PREP_ITEMS = [];
+    const ok = kq.filter(x=>x.kpi);
+    const S = k => ok.reduce((t,x)=>t+(Number(x.kpi[k])||0),0);
+    const tong = { revenue:S('revenue'), bills:S('bills'), items:S('items'), cogs:S('cogs'), grossProfit:S('grossProfit'), laborCost:S('laborCost'),
+      wasteAmount:S('wasteAmount'), remakeCups:S('remakeCups'), opex:S('opex'), contribution:S('contribution'), ebit:S('ebit') };
+    tong.aov = tong.bills ? tong.revenue/tong.bills : 0; tong.ipt = tong.bills ? tong.items/tong.bills : 0;
+    tong.cogsPct = tong.revenue ? tong.cogs/tong.revenue : 0; tong.laborPct = tong.revenue ? tong.laborCost/tong.revenue : 0;
+    const cot = [...kq.map(x=>x.kpi || null), tong];
+    const dong = (ten, f) => `<tr style="border-top:1px solid var(--line,#eee)"><td style="padding:6px 0">${ten}</td>${cot.map((k,i)=>`<td style="text-align:right;${i===cot.length-1?'font-weight:800':''}">${k?f(k):'<span style="color:var(--bad)">lỗi</span>'}</td>`).join('')}</tr>`;
+    const tien = k => x => fmt(Number(x[k])||0);
+    body.innerHTML = dau + `<div class="card"><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
+      <tr style="color:var(--gt);font-size:12px"><th style="text-align:left"></th>${kq.map(x=>`<th style="text-align:right">${x.st.id.toUpperCase()}</th>`).join('')}<th style="text-align:right">Tổng</th></tr>
+      ${dong('Doanh thu', tien('revenue'))}
+      ${dong('Bill', x=>fmtNum(x.bills||0,0))}
+      ${dong('AOV (đ/bill)', tien('aov'))}
+      ${dong('Ly / bill', x=>fmtNum(x.ipt||0,2))}
+      ${dong('Giá vốn', x=>fmt(Number(x.cogs)||0)+' <span class="muted-sm">'+fmtPct(x.cogsPct||0)+'</span>')}
+      ${dong('Lãi gộp', tien('grossProfit'))}
+      ${dong('Lương', x=>fmt(Number(x.laborCost)||0)+' <span class="muted-sm">'+fmtPct(x.laborPct||0)+'</span>')}
+      ${dong('Hao hụt', tien('wasteAmount'))}
+      ${dong('Đổ ly / pha hỏng', x=>fmtNum(x.remakeCups||0,0)+' ly')}
+      ${dong('Chi phí vận hành', tien('opex'))}
+      ${dong('Đóng góp (contribution)', tien('contribution'))}
+      ${dong('Lợi nhuận (EBIT)', tien('ebit'))}
+    </table></div>
+    ${kq.filter(x=>x.err).map(x=>`<div class="small-note" style="color:var(--bad);margin-top:6px">${x.st.id.toUpperCase()}: không tính được — ${escapeHtmlAttr(x.err.message||x.err)}</div>`).join('')}
+    <div class="small-note" style="margin-top:8px">${kq.map(x=>`${x.st.id.toUpperCase()} = ${escapeHtmlAttr(x.st.name||'')}`).join(' · ')}</div></div>`;
+  }catch(err){ console.error('renderReportAll lỗi', err); body.innerHTML = dau + `<div class="muted">Không tính được: ${escapeHtmlAttr(err.message||err)}</div>`; }
+  finally{ setSync(false); }
 }
 
 // ============================================================================
