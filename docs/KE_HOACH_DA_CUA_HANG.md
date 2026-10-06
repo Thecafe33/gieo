@@ -149,7 +149,7 @@ Chủ dự án chọn 05/10: **bản danh mục riêng mỗi quán** (thay cho `
   - **Kho**: tem, lô, tồn, sổ của mỗi quán là riêng (đã tách ở Bước 2). Xem từng quán thì mọi màn Kho giữ nguyên như hiện nay, và **mọi thao tác ghi chỉ làm ở chế độ này**. Xem tất cả thì **chỉ xem**: bảng tồn so sánh (mỗi NL/BTP một dòng, cột từng quán + tổng) và việc kho cần xử lý gộp lại, gắn nhãn quán, bấm vào là chuyển sang đúng quán. Tem / lô không gộp thành một danh sách.
   - **Không có chuyển nguyên liệu giữa các quán.**
   - **Đơn đặt hàng**: mỗi đơn riêng; lúc tạo đơn **chọn cửa hàng nhận** (mặc định = quán đang xem). Đơn nằm ở dữ liệu của quán đó, POS quán đó nhận hàng.
-  - Còn hỏi: mức tồn tối thiểu (cảnh báo sắp hết) — chung một mức hay riêng từng quán.
+  - **Mức tồn tối thiểu** (`minStock`, cảnh báo sắp hết): **chung cho mọi quán** — giữ trong danh mục chung, đồng bộ như hiện nay (Bước 2), không làm mức riêng theo quán.
 - Bộ chọn quán (mặc định quán hiện tại): 1 quán / nhiều / toàn chuỗi; báo cáo gộp = đọc từng quán rồi cộng (bản tổng hợp theo ngày `ledger_day_summaries` đi theo quán → `…__{storeId}`).
 - Menu chung + `store_menu_overrides_gieogieo/{storeId}` = `{hidden:[…], price:{…}}`; công thức chung.
 - Khuyến mãi: chương trình / chiến dịch có `stores: 'all' | [storeId…]` (thiếu = toàn hệ thống).
