@@ -54,7 +54,7 @@ function loadData() {
   const vm = require('vm');
   const sb = { console: { log() {}, warn() {}, error() {}, info() {} } };
   sb.window = sb; sb.globalThis = sb; vm.createContext(sb);
-  vm.runInContext(fs.readFileSync(path.join(ROOT, 'data_access.v1.js'), 'utf8'), sb, { filename: 'data_access.v1.js' });
+  vm.runInContext(fs.readFileSync(path.join(ROOT, (require('fs').readdirSync(ROOT).filter(f => /^data_access\.v\d+\.js$/.test(f)).sort((a, b) => +a.match(/\d+/)[0] - +b.match(/\d+/)[0]).pop())), 'utf8'), sb, { filename: 'data_access (bản mới nhất)' });
   return sb.GieoData;
 }
 async function runWrapped(kind, spec, opts) {

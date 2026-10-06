@@ -13,7 +13,7 @@ const { makeFake } = require('./lib/fakefb');
 let fail = 0;
 const ok = (c, m) => { console.log((c ? 'ok ' : 'FAIL ') + m); if (!c) fail = 1; };
 const ROOT = path.join(__dirname, '..');
-const nap = () => { const m = { exports: {} }; new Function('window', 'module', fs.readFileSync(path.join(ROOT, 'data_access.v1.js'), 'utf8'))({}, m); return m.exports.GieoData; };
+const nap = () => { const m = { exports: {} }; new Function('window', 'module', fs.readFileSync(path.join(ROOT, (require('fs').readdirSync(ROOT).filter(f => /^data_access\.v\d+\.js$/.test(f)).sort((a, b) => +a.match(/\d+/)[0] - +b.match(/\d+/)[0]).pop())), 'utf8'))({}, m); return m.exports.GieoData; };
 
 (async () => {
   // ── 1. Quy tắc tên ──

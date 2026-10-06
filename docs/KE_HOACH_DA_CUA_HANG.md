@@ -144,6 +144,13 @@ Chủ dự án chọn 05/10: **bản danh mục riêng mỗi quán** (thay cho `
 - **Triển khai** (máy quán hiện tại cũng phải nhập mã một lần): deploy **ngoài giờ bán** → mở Quản lý ▸ Cấu hình ▸ Cửa hàng → tạo hồ sơ GG01 (tên, địa chỉ) → lấy mã → nhập trên từng máy POS. Muốn POS không dừng phút nào: deploy lần 1 chỉ Quản lý + `data_access` (giữ `posgieo.html` cũ), tạo hồ sơ, rồi deploy lần 2 có POS.
 
 ### Bước 3 — Quản lý đa quán
+- **[06/10] ĐÃ LÀM phần chính (chưa deploy)**:
+  - `data_access.v2.js` (v1 đã deploy, giữ để quay lui): thêm `withStore(id, fn)` — chỉ chạy khi app cài `storeId: null` (Xem tất cả), đổi tạm quán cho đúng một hàm, **tuần tự có khoá**, xong trả về null. `check_paths` buộc 2 app nạp bản `data_access` mới nhất; test + công cụ tự đọc bản mới nhất.
+  - Quản lý: `QL_VIEW` (localStorage `ql_view_store_v1`) = `gg01` / `gg02`… / `all`. Ô chọn ở đầu sidebar (ẩn khi chỉ có 1 quán); tiêu đề luôn ghi quán đang xem. Đổi quán = lưu + tải lại trang. Từng quán: mọi màn y như trước, dữ liệu quán đó.
+  - Xem tất cả: cài `storeId: null` → mọi dữ liệu riêng bị chặn tận gốc. Chỉ có **Hôm nay tổng hợp** (chỉ xem): doanh thu + bill từng quán + tổng; việc cần xử lý gộp, gắn nhãn quán (`computeStoreHealth` trong `withStore`, xoá bộ đệm trước/sau mỗi quán) — bấm một việc → chuyển đúng quán, mở đúng việc (`ql_after_switch_v1`); tồn kho so sánh NL + BTP (cột từng quán + tổng, mặc định chỉ món âm / dưới ngưỡng). Mục khác → hộp "chọn cửa hàng để mở mục này".
+  - Đơn đặt hàng: ô "Cửa hàng nhận" (khi có từ 2 quán) → đơn ghi vào sổ đơn của quán nhận (`GieoData.collFor`), có trường `storeId`.
+  - Test `tests/da_cua_hang_b3.test.js`; Chromium: ô chọn quán, chuyển Tất cả, chốt chặn mục khác, màn tổng hợp, bấm việc → chuyển đúng quán.
+  - **Chưa làm (chờ chủ dự án)**: Báo cáo kỳ / Tổng kết tháng ở chế độ tất cả; các mục còn lại bên dưới (menu / khuyến mãi theo quán, lương, mục tiêu, lịch theo quán).
 - **Chủ dự án chốt 06/10**:
   - Quản lý có **cả hai chế độ**: **xem từng quán** (chuyển qua lại giữa các quán) và **xem tất cả cửa hàng**. Mỗi máy nhớ lựa chọn lần trước.
   - **Kho**: tem, lô, tồn, sổ của mỗi quán là riêng (đã tách ở Bước 2). Xem từng quán thì mọi màn Kho giữ nguyên như hiện nay, và **mọi thao tác ghi chỉ làm ở chế độ này**. Xem tất cả thì **chỉ xem**: bảng tồn so sánh (mỗi NL/BTP một dòng, cột từng quán + tổng) và việc kho cần xử lý gộp lại, gắn nhãn quán, bấm vào là chuyển sang đúng quán. Tem / lô không gộp thành một danh sách.

@@ -27,13 +27,13 @@
 - 15 bất biến B1–B15: mục 2.1 của kế hoạch. **Mọi thay đổi phải giữ nguyên.**
 - Chỗ POS và Quản lý lệch nhau → **theo POS**. Chỗ POS không có → danh sách F, chủ dự án duyệt.
 - **Engine là file riêng `unit_engine.v18.js`** (bản hiện hành; v1–v17 giữ để quay lui — không sửa, không xoá; dùng chung 2 app, API: `docs/UNIT_ENGINE.md`). App **không ghi thẳng** dữ liệu kho — gọi `UnitEngine.<nhóm>.<hàm>`; `tools/check_boundaries.js` chặn. Sửa engine đã deploy = tạo `unit_engine.v{N+1}.js` (bản cũ cache immutable), sửa cả 2 HTML trỏ tới.
-- **Lớp đường dẫn `data_access.v1.js`** (đa cửa hàng Bước 1+2, 05/10): bọc `fstore`/`db` ngay sau khi tạo; quán hiện tại `gg01` giữ nguyên mọi tên. Danh mục `inventory_items`/`prep_items` theo quán (loại C) — Quản lý bật `catalogMirror` nên sửa danh mục tự đồng bộ sang quán khác (không chép trường tồn `STATE_FIELDS`; trường tồn mới → thêm vào đó). POS gắn cửa hàng bằng mã 6 ký tự (`gieo_store_v1`), chưa gắn → app dừng ở màn nhập mã; **không bao giờ tự gắn quán, không bắt máy đã gắn nhập lại mã**. Cùng quy tắc phiên bản như engine (sửa bản đã deploy = `v{N+1}`).
+- **Lớp đường dẫn `data_access.v2.js`** (đa cửa hàng Bước 1+2+3; v1 đã deploy — giữ quay lui): bọc `fstore`/`db` ngay sau khi tạo; quán hiện tại `gg01` giữ nguyên mọi tên. Danh mục `inventory_items`/`prep_items` theo quán (loại C) — Quản lý bật `catalogMirror` nên sửa danh mục tự đồng bộ sang quán khác (không chép trường tồn `STATE_FIELDS`; trường tồn mới → thêm vào đó). POS gắn cửa hàng bằng mã 6 ký tự (`gieo_store_v1`), chưa gắn → app dừng ở màn nhập mã; **không bao giờ tự gắn quán, không bắt máy đã gắn nhập lại mã**. Quản lý: `QL_VIEW` = từng quán hoặc `all` (Xem tất cả: `storeId` null, chỉ đọc từng quán qua `GieoData.withStore`, tuần tự). Cùng quy tắc phiên bản như engine (sửa bản đã deploy = `v{N+1}`).
 
 ## Kế hoạch & tiến độ
 - **Đọc trước tiên: `docs/TRANG_THAI.md`** — bản hiện hành (engine v18), việc đã làm tới 04/10/2026, việc còn mở, bản đồ tài liệu, quy trình mỗi lần sửa.
 - Kế hoạch gốc: `docs/KE_HOACH_UNIT_ENGINE_DA_CUA_HANG.md` (đọc mục cần thiết, không cần đọc hết; mục 2.1 = bất biến B1–B15).
 - **Kế hoạch tối ưu lượt đọc** (05/10, ưu tiên trước đa cửa hàng): `docs/KE_HOACH_TOI_UU_DOC.md` — 3 nguyên tắc N1–N3, giai đoạn T0–T6. Code mới phải theo N1–N3.
-- Kế hoạch đa cửa hàng: `docs/KE_HOACH_DA_CUA_HANG.md` — một project, quán hiện tại `gg01` giữ nguyên mọi đường dẫn (không chuyển dữ liệu), quán mới tên + `__{storeId}`; Bước 0–5. **Bước 1 + 2 đã làm 05/10 (chưa deploy)**.
+- Kế hoạch đa cửa hàng: `docs/KE_HOACH_DA_CUA_HANG.md` — một project, quán hiện tại `gg01` giữ nguyên mọi đường dẫn (không chuyển dữ liệu), quán mới tên + `__{storeId}`; Bước 0–5. **Bước 1 + 2 đã deploy; Bước 3 phần chính đã làm 06/10 (chưa deploy)**.
 - **Chế độ thử** (`che_do_thu.v1.js`, `docs/CHE_DO_THU.md`): bản `*_thu.html` sinh bằng `tools/tao_ban_thu.js`, khoá cứng vùng thử `__test_gieogieo`. App thật **không bao giờ** nạp `che_do_thu` (predeploy_check chặn). Sửa code → Claude chạy lại `tao_ban_thu.js` và **gửi sẵn 2 file `_thu`** cho chủ dự án. Chủ dự án **giữ nguyên cách để file** (một thư mục deploy) — không yêu cầu tách thư mục.
 - Tài liệu cũ (nhật ký 28/09, bản mô tả cho người rà bug, báo cáo bug kho/cân, kế hoạch rebuild cũ): `docs/luu_tru/` — chỉ tra cứu, không làm theo.
 - Trạng thái deploy: chủ dự án xác nhận ngày 04/10/2026 — **v18 đã deploy**, chạy ổn ở cửa hàng 1 được **1–3 tuần** (chưa đủ "vài tuần" cho đa cửa hàng). Hỏi lại trước việc lớn.
@@ -43,5 +43,5 @@
 - Cú pháp: tách các `<script>` inline ra file tạm rồi `node --check` từng file.
 - Kiểm kê truy cập Firebase (AST): `npm i` một lần, rồi `npm run inventory` → `inv_ast.json`.
 - Ranh giới engine: `node tools/check_boundaries.js` (phải báo "RANH GIỚI SẠCH").
-- Lớp đường dẫn đa cửa hàng: `node tools/check_paths.js` (phải báo "ĐƯỜNG DẪN SẠCH"). Collection / gốc RT mới → đăng ký vào `GieoData.REG` trong `data_access.v1.js` (S riêng từng quán / C danh mục theo quán / G dùng chung / X dùng chung XOFA–The Cafe 33).
+- Lớp đường dẫn đa cửa hàng: `node tools/check_paths.js` (phải báo "ĐƯỜNG DẪN SẠCH"). Collection / gốc RT mới → đăng ký vào `GieoData.REG` trong `data_access` bản mới nhất (S riêng từng quán / C danh mục theo quán / G dùng chung / X dùng chung XOFA–The Cafe 33).
 - Trước deploy (chủ dự án chạy, từ thư mục làm việc): `sh tools/predeploy_check.sh <thư mục deploy>` — gồm cả ranh giới + test.

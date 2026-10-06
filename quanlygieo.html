@@ -1692,6 +1692,8 @@ html.tab-ui:not(.nav-off) .sidebar{background:#F2F2F7;border-right:1px solid rgb
       </svg>
       <div class="brand disp">GIEO GIEO</div>
     </div>
+    <!-- [ĐA CỬA HÀNG — Bước 3] Đang xem cửa hàng nào / Tất cả — renderSbStore() (ẩn khi chỉ có 1 quán) -->
+    <div id="sbStore"></div>
     <!-- Tìm nhanh trong menu: 40+ mục điều hướng, gõ 2-3 chữ nhanh hơn cuộn dò bằng mắt.
          Trên máy có bàn phím: Ctrl/⌘ + K để nhảy vào ô này, ↑↓ chọn, Enter mở, Esc thoát. -->
     <div class="nav-search">
@@ -2212,7 +2214,7 @@ html.tab-ui:not(.nav-off) .sidebar{background:#F2F2F7;border-right:1px solid rgb
      tự thử lại, tự lấy đúng tên bucket trong firebaseConfig. -->
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-storage-compat.js"></script>
 <!-- [E3] Unit Engine — dùng CHUNG file với POS, nạp TRƯỚC script chính. Đổi phiên bản = đổi tên file (6.1). -->
-<script src="data_access.v1.js"></script>
+<script src="data_access.v2.js"></script>
 <script src="unit_engine.v18.js"></script>
 <script>
 // ============================================================
@@ -2245,12 +2247,19 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 const fstore = firebase.firestore();
-// [ĐA CỬA HÀNG — Bước 1+2] Lớp đường dẫn theo quán (data_access.v1.js): quán hiện tại 'gg01' → mọi tên giữ NGUYÊN.
+// [ĐA CỬA HÀNG — Bước 1+2+3] Lớp đường dẫn theo quán (data_access.v2.js): quán hiện tại 'gg01' → mọi tên giữ NGUYÊN.
 // catalogMirror: mọi lượt sửa danh mục NL / BTP ở đây tự ghi cùng trường đó sang bản danh mục của các quán khác
 // (không bao giờ chép tồn; xoá món bị chặn khi quán khác còn tồn) — Cấu hình ▸ Cửa hàng.
+// [Bước 3] QL_VIEW = quán đang xem ('gg01', 'gg02'…) hoặc 'all' (Xem tất cả cửa hàng) — mỗi máy nhớ ở localStorage.
+// Đổi quán = lưu rồi TẢI LẠI trang (mọi bộ đệm / listener bắt đầu sạch, không lẫn số giữa hai quán).
+// 'all' → cài storeId null: MỌI dữ liệu riêng của quán bị chặn tận gốc (không thể ghi nhầm); màn Hôm nay tổng hợp
+// đọc từng quán qua GieoData.withStore (tuần tự), các mục khác hỏi chọn quán.
 // Thiếu file (mạng chập lúc tải) → báo đỏ + tự tải lại: chạy không bọc thì sửa danh mục không tới quán khác.
+const QL_VIEW_KEY = 'ql_view_store_v1';
+const QL_VIEW = (() => { try { const v = localStorage.getItem(QL_VIEW_KEY); return v === 'all' || /^gg\d{2}$/.test(v || '') ? v : 'gg01'; } catch (e) { return 'gg01'; } })();
+const QL_ALL = QL_VIEW === 'all';
 if (window.GieoData) {
-  GieoData.install({ fstore, db, storeId: 'gg01', catalogMirror: true });
+  GieoData.install({ fstore, db, storeId: QL_ALL ? null : QL_VIEW, catalogMirror: true });
   GieoData.onCatalogSyncError = e => {
     const ds = (e.loi || []).map(x => (x.storeId || '').toUpperCase() + ': ' + x.error).join(' · ');
     try { toast('⚠️ Đã lưu ở quán này, nhưng CHƯA đồng bộ sang ' + ds); } catch (er) {}
@@ -2258,16 +2267,16 @@ if (window.GieoData) {
 } else {
   const bar = document.createElement('div');
   bar.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#c0392b;color:#fff;font:700 16px sans-serif;padding:30px;text-align:center';
-  bar.textContent = '⚠️ Chưa tải được data_access.v1.js — đang tải lại…';
+  bar.textContent = '⚠️ Chưa tải được data_access.v2.js — đang tải lại…';
   (document.body || document.documentElement).appendChild(bar);
   setTimeout(() => location.reload(), 5000);
-  throw new Error('[GieoData] thiếu data_access.v1.js — dừng app');
+  throw new Error('[GieoData] thiếu data_access.v2.js — dừng app');
 }
 const auth = firebase.auth();
 // [E3] Khởi tạo Unit Engine cho Quản lý. Thiếu file engine → banner + tự tải lại sau 5 giây (6.3).
 if (window.UnitEngine) {
   UnitEngine.init({
-    app: 'quanly', fstore, db, FieldValue: firebase.firestore.FieldValue, storeId: 'gg01', serverClock: true,   // [E6] C1: giờ máy chủ cho mốc suy tồn (R3)
+    app: 'quanly', fstore, db, FieldValue: firebase.firestore.FieldValue, storeId: QL_ALL ? 'gg01' : QL_VIEW, serverClock: true,   // 'all': engine không chạy nghiệp vụ nào (mọi dữ liệu riêng bị chặn)   // [E6] C1: giờ máy chủ cho mốc suy tồn (R3)
     businessDate: () => dkey(new Date()),
     getItems: () => INVENTORY_ITEMS, getPreps: () => PREP_ITEMS,
     getRefillRule: itemId => (_qlRefillActive || []).find(r => r.itemId === itemId) || null,
@@ -2346,6 +2355,7 @@ function setSync(busy){
 }
 async function reloadCurrent(){
   clearError();
+  if(QL_ALL){ renderTodayAll(); return; }   // [Bước 3] Xem tất cả: chỉ có màn Hôm nay tổng hợp
   memoDropAll();   // bấm Tải lại là muốn số MỚI, không phải số trong bộ đệm
   try{ await ensureAuth(); await loadConfig(); }catch(err){ console.warn('reload config failed', err); }
   if(curScreen==='today') renderToday();
@@ -7414,7 +7424,12 @@ async function loadPurchaseOrders(){
   return snap.docs.map(d=>({id:d.id, ...d.data()}));
 }
 function addPurchaseOrder(data){
-  return fstore.collection('purchase_orders_gieogieo').add({
+  // [ĐA CỬA HÀNG — Bước 3] Đơn thuộc về CỬA HÀNG NHẬN (chủ dự án chốt 06/10: đặt đơn riêng, chọn đơn cho quán nào).
+  // Quán nhận khác quán đang xem → ghi thẳng vào sổ đơn của quán đó (POS quán đó thấy để nhận hàng).
+  const nhan = data.storeId || GieoData.storeId();
+  const coll = nhan !== GieoData.storeId() ? GieoData.collFor('purchase_orders_gieogieo', nhan) : fstore.collection('purchase_orders_gieogieo');
+  return coll.add({
+    storeId: nhan,
     supplier: data.supplier || '',
     note: data.note || '',
     status: 'pending',
@@ -12251,6 +12266,8 @@ function switchScreen(s){
   // [GỘP MÀN] Giữ lại tên cũ để mọi nút/đường dẫn cũ trong app không gãy — nó chỉ
   // đưa về đúng màn Hôm nay đã gộp.
   if(s === 'storehealth') s = 'today';
+  // [Bước 3] Xem tất cả cửa hàng: chỉ có màn Hôm nay tổng hợp — mục khác hỏi chọn quán rồi mở đúng mục đó.
+  if(QL_ALL && s !== 'today'){ qlOpenStorePicker({ nav: qlNavKeyFor(s) }); return; }
   curScreen = s;
   document.querySelectorAll('.screen').forEach(el=>el.classList.remove('active'));
   document.getElementById('screen-'+s).classList.add('active');
@@ -12261,7 +12278,8 @@ function switchScreen(s){
   const navKey = currentNavKey();
   if(t) t.textContent = NAV_LABEL[navKey] || '';
   const k = document.getElementById('hdrKicker');
-  if(k) k.textContent = NAV_GROUP[navKey] || '';
+  // [Bước 3] Có từ 2 quán: tiêu đề luôn ghi đang xem quán nào — tránh sửa nhầm quán.
+  if(k) k.textContent = (qlMultiStore() ? (QL_ALL ? 'Tất cả cửa hàng' : QL_VIEW.toUpperCase()) + (NAV_GROUP[navKey] ? ' · ' : '') : '') + (NAV_GROUP[navKey] || '');
   document.title = (NAV_LABEL[navKey] ? NAV_LABEL[navKey] + ' · ' : '') + 'Gieo Gieo';
   renderSidebarNav();
   renderReportSubNav();
@@ -12275,12 +12293,12 @@ function switchScreen(s){
   if(s==='tg') loadMenuForManager().then(()=>{ loadTogoSettings(); loadTgAdminUI(); loadAppFeeSettings(); }).catch(err=>{ console.error(err); showError('Không tải được menu: '+(err.message||err)); });
   // Bảng tin bill chỉ nghe khi đang đứng ở màn Hôm nay — sang màn khác thì gỡ,
   // không giữ một listener realtime chạy nền suốt phiên.
-  if(s === 'today') attachBillFeed(); else detachBillFeed();
+  if(s === 'today' && !QL_ALL) attachBillFeed(); else detachBillFeed();
   if(s !== 'today'){ detachTodayShiftInfo(); const si = document.getElementById('todayShiftInfo'); if(si) si.innerHTML = ''; }
   if(s === 'bills') renderBills().catch(err=>{ console.error(err); showError('Không mở được Lịch sử bill: '+(err.message||err)); });
   if(s==='assist') renderAssist().catch(err=>{ console.error(err); showError('Không mở được Trợ lý bán hàng: '+(err.message||err)); });
   if(s==='inbox') renderAlertInbox();
-  if(s==='today') renderToday();
+  if(s==='today') (QL_ALL ? renderTodayAll() : renderToday());
   if(s==='todayops') renderTodayOps();
   if(s==='nlbtp') renderNlBtp();
   if(s==='health') renderHealth();
@@ -17081,6 +17099,179 @@ async function ddDeleteBankUnknown(){
     toast(`✅ Đã xoá ${n} bản ghi`);
     ddScan();
   }catch(err){ console.error('ddDeleteBankUnknown failed', err); toast('❌ ' + (err.message||err)); }
+}
+
+// ============================================================================
+// [ĐA CỬA HÀNG — Bước 3] CHỌN CỬA HÀNG ĐANG XEM + "XEM TẤT CẢ CỬA HÀNG" — docs/KE_HOACH_DA_CUA_HANG.md
+//
+// Chủ dự án chốt 06/10: Quản lý xem TỪNG quán (chuyển qua lại) và XEM TẤT CẢ. Mỗi máy nhớ lựa chọn (QL_VIEW_KEY).
+// · Từng quán: cả app chạy đúng như trước, dữ liệu của quán đó. Đổi quán = lưu + tải lại trang.
+// · Tất cả: chỉ màn Hôm nay (tổng hợp, CHỈ XEM). Lớp đường dẫn cài storeId null → mọi lệnh đọc/ghi dữ liệu riêng
+//   của quán bị chặn tận gốc; số liệu từng quán đọc qua GieoData.withStore (tuần tự, xoá bộ đệm giữa các quán).
+//   Mục khác → hỏi chọn quán rồi mở đúng mục đó (QL_AFTER_KEY, sessionStorage). Không gộp tem / lô / tồn để thao tác.
+// ============================================================================
+let QL_STORES = [];   // stores_gieogieo — nạp ở init (vài doc)
+const QL_AFTER_KEY = 'ql_after_switch_v1';
+function qlStoreName(id){ const s = QL_STORES.find(x=>x.id===id); return (s && s.name) || String(id||'').toUpperCase(); }
+function qlActiveStores(){ return QL_STORES.filter(s=>s.active!==false); }
+function qlMultiStore(){ return QL_ALL || qlActiveStores().length > 1 || QL_VIEW !== 'gg01'; }
+async function qlLoadStores(){
+  try{ QL_STORES = (await GieoData.stores(true)).filter(s=>GieoData.hopLe(s.id)).sort((a,b)=>a.id<b.id?-1:1); }
+  catch(err){ console.warn('[Cửa hàng] không tải được danh sách cửa hàng', err); }
+  renderSbStore();
+}
+function renderSbStore(){
+  const el = document.getElementById('sbStore');
+  const k = document.getElementById('hdrKicker');
+  if(k && qlMultiStore()){ const g = NAV_GROUP[currentNavKey()]; k.textContent = (QL_ALL ? 'Tất cả cửa hàng' : QL_VIEW.toUpperCase()) + (g ? ' · ' + g : ''); }
+  if(!el) return;
+  if(!qlMultiStore()){ el.innerHTML = ''; return; }
+  const nhan = QL_ALL ? 'Tất cả cửa hàng' : `${escapeHtmlAttr(qlStoreName(QL_VIEW))} <span style="color:var(--gt);font-weight:600">· ${QL_VIEW.toUpperCase()}</span>`;
+  el.innerHTML = `<button onclick="qlOpenStorePicker()" style="display:flex;align-items:center;gap:8px;width:calc(100% - 24px);margin:4px 12px 10px;padding:10px 12px;border-radius:12px;border:1.5px solid ${QL_ALL?'var(--gd)':'#f3c6cf'};background:${QL_ALL?'#eef4ff':'#fdf1f3'};font:inherit;font-size:14px;font-weight:800;text-align:left;cursor:pointer">
+      <span>🏪</span><span style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${nhan}</span>${ic('chevronDown',14)}</button>`;
+}
+// Mở bảng chọn quán. `after` (tuỳ chọn) = việc làm ngay sau khi chuyển: {nav:'kho:po'} hoặc {js:"goKho('po')"}.
+function qlOpenStorePicker(after){
+  const ds = qlActiveStores().length ? qlActiveStores() : [{id:'gg01'}];
+  const a = after ? escapeHtmlAttr(JSON.stringify(after)) : '';
+  const nut = (v, label, sub, dangXem) => `<button class="btn ${dangXem?'':'outline'}" data-after="${a}" onclick="qlSwitchView('${v}', this.dataset.after)"
+      style="width:100%;margin-bottom:8px;text-align:left;display:block">${label}${sub?`<div style="font-size:12px;font-weight:500;opacity:.8;margin-top:2px">${sub}</div>`:''}</button>`;
+  openEditSheet(after ? 'Chọn cửa hàng để mở mục này' : 'Xem cửa hàng', `
+    ${after ? '<div class="small-note" style="margin-bottom:12px">Mục này xem và làm việc theo <b>từng cửa hàng</b> — chọn cửa hàng:</div>' : ''}
+    ${ds.map(st=>nut(st.id, `🏪 ${escapeHtmlAttr(st.name||st.id.toUpperCase())} · ${st.id.toUpperCase()}`, escapeHtmlAttr(st.address||''), !after && !QL_ALL && st.id===QL_VIEW)).join('')}
+    ${after ? '' : nut('all', '🧾 Tất cả cửa hàng', 'Hôm nay của mọi quán — chỉ xem, bấm vào việc để chuyển sang quán đó', QL_ALL)}`);
+}
+function qlSwitchView(v, afterJson){
+  if(!(v === 'all' || GieoData.hopLe(v))) return;
+  if(v === QL_VIEW && !afterJson){ closeEditSheet(true); return; }
+  try{
+    localStorage.setItem(QL_VIEW_KEY, v);
+    if(afterJson) sessionStorage.setItem(QL_AFTER_KEY, afterJson); else sessionStorage.removeItem(QL_AFTER_KEY);
+  }catch(err){ toast('⚠️ Máy không lưu được lựa chọn cửa hàng (bộ nhớ trình duyệt bị chặn)'); return; }
+  location.reload();
+}
+// Sau khi chuyển quán (đã tải lại): làm nốt việc đang dở — mở đúng mục / bấm đúng việc cần xử lý.
+function qlRunAfterSwitch(){
+  let a = null;
+  try{ a = JSON.parse(sessionStorage.getItem(QL_AFTER_KEY) || 'null'); sessionStorage.removeItem(QL_AFTER_KEY); }catch(e){}
+  if(!a || QL_ALL) return;
+  try{
+    if(a.nav){ const it = NAV_SECTIONS.flatMap(s=>s.items).find(x=>x.key===a.nav); if(it) new Function(it.go)(); }
+    else if(a.js) new Function(a.js)();
+  }catch(err){ console.warn('[Cửa hàng] mở mục sau khi chuyển quán lỗi', err); }
+}
+// Khoá nhãn mục đích của switchScreen (giống currentNavKey nhưng cho màn SẮP mở).
+function qlNavKeyFor(s){
+  if(s !== 'entry') return s;
+  if(curEntryTab === 'kho') return 'kho:' + (KHO_TAB_OWNER[curKhoSub] || curKhoSub);
+  if(curEntryTab === 'kho2') return 'kho2:' + curKho2Sub;
+  return 'entry:' + curEntryTab;
+}
+
+// ---------- Màn Hôm nay — XEM TẤT CẢ CỬA HÀNG (chỉ xem) ----------
+let _todayAllChiCanXem = true;   // bảng tồn: chỉ món âm / dưới ngưỡng ở ít nhất 1 quán
+let _todayAllData = null;
+async function renderTodayAll(){
+  const scr = document.getElementById('screen-today');
+  if(!scr) return;
+  let box = document.getElementById('todayAll');
+  if(!box){
+    [...scr.children].forEach(c=>{ c.style.display = 'none'; });
+    box = document.createElement('div'); box.id = 'todayAll'; scr.appendChild(box);
+  }
+  box.innerHTML = '<div class="muted">Đang đọc số liệu từng cửa hàng...</div>';
+  setSync(true);
+  try{
+    await ensureAuth();
+    await qlLoadStores();
+    const ds = qlActiveStores();
+    if(!ds.length){ box.innerHTML = '<div class="muted">Chưa có hồ sơ cửa hàng nào — chọn GG01 ở đầu sidebar, vào Cấu hình ▸ Cửa hàng để tạo.</div>'; return; }
+    await Promise.all([ensurePriceHistory().catch(()=>null), loadRecipes().catch(()=>null)]);
+    const today = new Date(), out = [];
+    // TUẦN TỰ từng quán (withStore có khoá): các hàm tính dùng chung fstore + bộ đệm — xoá đệm trước/sau mỗi quán.
+    for(const st of ds){
+      const r = await GieoData.withStore(st.id, async ()=>{
+        memoDropAll(); _costMemo = {}; INVENTORY_ITEMS = []; PREP_ITEMS = [];
+        const [items, preps] = await Promise.all([loadInventoryItems(), loadPrepItems()]);
+        INVENTORY_ITEMS = items; PREP_ITEMS = preps;
+        const [sales, health] = await Promise.all([
+          fetchSalesRange(today, today).catch(err=>({err})),
+          computeStoreHealth().catch(err=>({err}))
+        ]);
+        return { st, items, preps, sales, health };
+      }).catch(err=>({ st, err }));
+      out.push(r);
+    }
+    memoDropAll(); _costMemo = {}; INVENTORY_ITEMS = []; PREP_ITEMS = [];
+    _todayAllData = out;
+    drawTodayAll();
+  }catch(err){
+    console.error('renderTodayAll lỗi', err);
+    box.innerHTML = `<div class="muted">Không đọc được số liệu: ${escapeHtmlAttr(err.message||err)}</div>`;
+  }finally{ setSync(false); }
+}
+function drawTodayAll(){
+  const box = document.getElementById('todayAll'); if(!box || !_todayAllData) return;
+  const out = _todayAllData;
+  const ten = st => `${escapeHtmlAttr(st.name||st.id.toUpperCase())} <span style="color:var(--gt);font-weight:600">· ${st.id.toUpperCase()}</span>`;
+  const nhanQuan = st => `<span style="display:inline-block;font-size:11px;font-weight:800;padding:1px 6px;border-radius:6px;background:#fdf1f3;color:#C22B49;margin-right:6px">${st.id.toUpperCase()}</span>`;
+  // 1. Doanh thu hôm nay
+  let tDT = 0, tBill = 0;
+  const dongDT = out.map(r=>{
+    const d = r.sales && r.sales.perDay && r.sales.perDay[0];
+    if(!d) return `<div class="row"><span class="rl">${ten(r.st)}</span><span class="rv" style="color:var(--bad)">không đọc được</span></div>`;
+    tDT += Number(d.revenue)||0; tBill += Number(d.bills)||0;
+    return `<div class="row"><span class="rl">${ten(r.st)}</span><span class="rv"><b>${fmt(Number(d.revenue)||0)}</b> · ${Number(d.bills)||0} bill</span></div>`;
+  }).join('');
+  // 2. Việc cần xử lý — gộp, gắn nhãn quán; bấm → chuyển sang quán đó rồi mở đúng việc
+  const viec = [];
+  out.forEach(r=>{
+    if(r.err || !Array.isArray(r.health)){ viec.push({tier:'red', st:r.st, label:'Không kiểm tra được việc cần xử lý', count:'!', onclick:''}); return; }
+    r.health.forEach(x=>viec.push({...x, st:r.st}));
+  });
+  const red = viec.filter(x=>x.tier==='red'), yellow = viec.filter(x=>x.tier==='yellow');
+  STORE_HEALTH_ISSUE_COUNT = red.length; renderSidebarNav();
+  const dongViec = x => `<div class="health-item ${x.tier}" data-after="${x.onclick?escapeHtmlAttr(JSON.stringify({js:x.onclick})):''}" onclick="qlSwitchView('${x.st.id}', this.dataset.after)">
+      <div class="hi-label">${nhanQuan(x.st)}${x.label}</div><div class="hi-count">${x.count} ›</div></div>`;
+  // 3. Tồn so sánh (CHỈ XEM) — mỗi NL / BTP một dòng, cột từng quán + tổng
+  const bang = (kind) => {
+    const map = new Map();
+    out.forEach((r,i)=>(kind==='nl' ? (r.items||[]).filter(it=>itemStockManaged(it)) : (r.preps||[]).filter(p=>p.active!==false)).forEach(it=>{
+      if(!map.has(it.id)) map.set(it.id, {id:it.id, name:it.name||'', unit:it.unit||'', min:Number(it.minStock)||0, v:new Array(out.length).fill(null)});
+      map.get(it.id).v[i] = Number(it.currentStock)||0;
+    }));
+    let rows = [...map.values()].sort((a,b)=>a.name.localeCompare(b.name,'vi'));
+    const canXem = r => r.v.some(x=>x!=null && (x<0 || (r.min>0 && x<r.min)));
+    const tong = rows.length;
+    if(_todayAllChiCanXem) rows = rows.filter(canXem);
+    const o = (x, r) => x==null ? '<td style="color:var(--gt)">—</td>'
+      : `<td style="text-align:right;${x<0?'color:var(--bad);font-weight:800':(r.min>0&&x<r.min?'color:var(--warn);font-weight:800':'')}">${fmtNum(x,0)}</td>`;
+    return `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
+      <tr style="color:var(--gt);font-size:12px"><th style="text-align:left;padding:4px 0">${kind==='nl'?'Nguyên liệu':'Bán thành phẩm'}</th>${out.map(r=>`<th style="text-align:right">${r.st.id.toUpperCase()}</th>`).join('')}<th style="text-align:right">Tổng</th></tr>
+      ${rows.map(r=>`<tr style="border-top:1px solid var(--line,#eee)"><td style="padding:5px 0">${escapeHtmlAttr(r.name)} <span style="color:var(--gt);font-size:11.5px">${escapeHtmlAttr(r.unit)}${r.min>0&&kind==='nl'?' · ngưỡng '+fmtNum(r.min,0):''}</span></td>${r.v.map(x=>o(x,r)).join('')}<td style="text-align:right;font-weight:700">${fmtNum(r.v.reduce((s,x)=>s+(x||0),0),0)}</td></tr>`).join('')
+        || `<tr><td colspan="${out.length+2}" class="small-note" style="padding:8px 0;color:var(--ok)">Không có món nào âm hoặc dưới ngưỡng.</td></tr>`}
+    </table></div><div class="small-note" style="margin-top:4px">${_todayAllChiCanXem?`Đang hiện món âm / dưới ngưỡng (${rows.length}/${tong})`:`Đang hiện tất cả (${tong})`}</div>`;
+  };
+  box.innerHTML = `
+    <div class="card" style="border:1.5px solid var(--gd)">
+      <div style="font-weight:800;font-size:15px">🧾 Tất cả cửa hàng · hôm nay ${dkey(new Date()).split('-').reverse().slice(0,2).join('/')}</div>
+      <div class="small-note" style="margin-top:4px">Chỉ xem. Bấm vào một việc để chuyển sang đúng cửa hàng đó và xử lý. Kho, ca, nhân viên… làm việc theo từng cửa hàng — chọn ở đầu sidebar.</div>
+    </div>
+    <div class="sec-title">Doanh thu hôm nay</div>
+    <div class="card">${dongDT}
+      <div class="row" style="border-top:1.5px solid var(--line,#eee);margin-top:4px;padding-top:6px"><span class="rl"><b>Tổng ${out.length} cửa hàng</b></span><span class="rv"><b>${fmt(tDT)}</b> · ${tBill} bill</span></div>
+      <div class="small-note" style="margin-top:6px">Lãi/lỗ, hoà vốn, bảng tin bill: chọn từng cửa hàng.</div>
+    </div>
+    <div class="sec-title">Việc cần xử lý</div>
+    <div>
+      ${(!red.length && !yellow.length) ? `<div class="health-all-clear">${ic('check',20)} Mọi cửa hàng đều ổn</div>` : ''}
+      ${red.length ? `<div class="health-group-title">${icDot('var(--bad)')} Cần xử lý ngay (${red.length})</div>${red.map(dongViec).join('')}` : ''}
+      ${yellow.length ? `<div class="health-group-title">${icDot('var(--warn)')} Nên xem (${yellow.length})</div>${yellow.map(dongViec).join('')}` : ''}
+    </div>
+    <div class="sec-title" style="display:flex;justify-content:space-between;align-items:center">Tồn kho so sánh
+      <button class="btn outline sm" onclick="_todayAllChiCanXem=!_todayAllChiCanXem;drawTodayAll()">${_todayAllChiCanXem?'Hiện tất cả':'Chỉ món cần xem'}</button></div>
+    <div class="card">${bang('nl')}</div>
+    <div class="card">${bang('btp')}</div>`;
 }
 
 // ============================================================================
@@ -24255,6 +24446,9 @@ function poCardHtml(po){
 // [PO-UI] Form tạo đơn mở trong popup giữa màn thay vì nằm cố định đầu trang.
 function poOpenDraft(){
   openEditSheet('Đơn đặt hàng mới', `
+    ${qlActiveStores().length > 1 ? `<div class="field"><label>Cửa hàng nhận hàng</label>
+      <select id="poStore" onchange="poMetaChange('storeId',this.value)" style="font-weight:700">${qlActiveStores().map(st=>`<option value="${st.id}" ${(poDraftMeta.storeId||QL_VIEW)===st.id?'selected':''}>${escapeHtmlAttr(st.name||st.id.toUpperCase())} · ${st.id.toUpperCase()}</option>`).join('')}</select>
+      <div class="small-note" style="margin-top:4px">Đơn nằm ở cửa hàng này — chỉ POS của cửa hàng này thấy để nhận hàng.</div></div>` : ''}
     <div class="field"><label>Nhà cung cấp (tuỳ chọn)</label><input type="text" id="poSupplier" placeholder="VD: Đại lý sữa ABC" value="${escapeHtmlAttr(poDraftMeta.supplier)}" oninput="poMetaChange('supplier',this.value)"></div>
     <div class="po-hint">Chỉ điền "Giá lần này" khi giá khác giá đang lưu. Giá mới áp dụng từ ngày chọn, ngày trước giữ giá cũ.</div>
     <div id="poDraftLines">${poDraftLinesHtml()}</div>
@@ -24297,8 +24491,10 @@ async function submitPurchaseOrder(){
   }).filter(l=>l.qtyExpectedBase>0);
   if(!lines.length){ toast('⚠️ Số lượng đặt phải lớn hơn 0'); return; }
   try{
-    const poRef = await addPurchaseOrder({ supplier, note, lines, createdBy: '' });
-    toast('✅ Đã tạo đơn đặt hàng — POS sẽ thấy khi nhận hàng');
+    const storeNhan = poDraftMeta.storeId || GieoData.storeId();
+    const poRef = await addPurchaseOrder({ supplier, note, lines, createdBy: '', storeId: storeNhan });
+    toast(storeNhan === GieoData.storeId() ? '✅ Đã tạo đơn đặt hàng — POS sẽ thấy khi nhận hàng'
+      : `✅ Đã tạo đơn cho ${qlStoreName(storeNhan)} (${storeNhan.toUpperCase()}) — POS cửa hàng đó sẽ thấy khi nhận hàng; danh sách đơn ở đây là của ${QL_VIEW.toUpperCase()}`);
 
     // ---- Cập nhật giá cho những dòng CÓ đổi giá ----
     // Hai việc, đúng thứ tự: ghi MỐC GIÁ (lịch sử, không xoá được) rồi mới cập nhật
@@ -27201,6 +27397,16 @@ function saveTopping() {
     return;
   }
   clearError();
+  // [ĐA CỬA HÀNG — Bước 3] Danh sách cửa hàng (vài doc) cho ô chọn quán + nhãn tiêu đề.
+  await qlLoadStores();
+  if(QL_ALL){
+    // Xem tất cả: không nạp cấu hình / danh mục của quán nào (đều là dữ liệu riêng — bị chặn); vào thẳng màn tổng hợp.
+    renderSidebarNav(); renderReportSubNav();
+    syncTgSettingsFromCloud(); syncAppFeeFromCloud();
+    setSync(false);
+    switchScreen('today');
+    return;
+  }
   // [TỐC ĐỘ] Hai cái này không phụ thuộc nhau — chạy song song, một vòng mạng
   // thay vì hai.
   {
@@ -27262,6 +27468,7 @@ function saveTopping() {
   // renderToday() đã tự gọi renderStoreHealth('todayHealth') bên trong (và nó gọi
   // tiếp renderBookAlerts('todayBook')), nên gọi đúng một hàm này là đủ cả ba khối.
   await renderToday();
+  qlRunAfterSwitch();   // [Bước 3] vừa chuyển quán từ màn khác → mở đúng mục / việc đang dở
 })();
 
 // ============================================================

@@ -26,7 +26,7 @@ const FILES = ['posgieo.html', 'quanlygieo.html'].concat(engineFile ? [engineFil
 
 // Đọc bảng đăng ký từ data_access.v1.js (không chạy trình duyệt — chỉ lấy GieoData.REG).
 function loadRegistry() {
-  const src = fs.readFileSync(path.join(ROOT, 'data_access.v1.js'), 'utf8');
+  const src = fs.readFileSync(path.join(ROOT, (require('fs').readdirSync(ROOT).filter(f => /^data_access\.v\d+\.js$/.test(f)).sort((a, b) => +a.match(/\d+/)[0] - +b.match(/\d+/)[0]).pop())), 'utf8');
   const sandbox = { window: {}, module: { exports: {} } };
   new Function('window', 'module', src)(sandbox.window, sandbox.module);
   const G = sandbox.module.exports.GieoData || sandbox.window.GieoData;
@@ -102,13 +102,13 @@ for (const key of Object.keys(byName).sort()) {
   const [kind, name] = [key.slice(0, 2), key.slice(3)];
   const reg = kind === 'fs' ? G.REG.fs[name] : kind === 'rt' ? G.REG.rt[name] : G.REG.st[name];
   if (LIST) console.log((reg || '??').padEnd(3), key.padEnd(48), byName[key].slice(0, 3).join(', ') + (byName[key].length > 3 ? ' …(' + byName[key].length + ')' : ''));
-  if (!reg) loi.push('Chưa đăng ký ' + key + ' (dùng ở ' + byName[key].slice(0, 3).join(', ') + ') — thêm vào GieoData.REG trong data_access.v1.js (S / G / X)');
+  if (!reg) loi.push('Chưa đăng ký ' + key + ' (dùng ở ' + byName[key].slice(0, 3).join(', ') + ') — thêm vào GieoData.REG trong data_access (bản mới nhất) (S / C / G / X)');
 }
 // Lời gọi dùng tên trong biến: tên thật luôn xuất hiện dưới dạng chuỗi ở đâu đó → mọi chuỗi dạng …_gieogieo phải đã đăng ký
 // (hoặc được khai là KHÔNG phải đường dẫn trong tools/paths_allow.json). Lúc chạy, lớp bọc còn kiểm lần nữa.
 for (const h of Object.keys(chuoi).sort()) {
   if (G.REG.fs[h] || G.REG.rt[h] || G.REG.st[h] || ALLOW.khong_phai_duong_dan[h]) continue;
-  loi.push('Chuỗi "' + h + '" giống tên dữ liệu nhưng chưa đăng ký (ở ' + chuoi[h].slice(0, 3).join(', ') + ') — đăng ký trong data_access.v1.js, hoặc khai trong tools/paths_allow.json nếu không phải đường dẫn');
+  loi.push('Chuỗi "' + h + '" giống tên dữ liệu nhưng chưa đăng ký (ở ' + chuoi[h].slice(0, 3).join(', ') + ') — đăng ký trong data_access (bản mới nhất), hoặc khai trong tools/paths_allow.json nếu không phải đường dẫn');
 }
 for (const d of dynamic) {
   if (/collectionGroup|refFromURL|ref\(\) không đối số/.test(d.how)) loi.push('Lời gọi bị cấm ở lớp đường dẫn: ' + d.file + ':' + d.line + ' ' + d.src.replace(/\s+/g, ' '));
@@ -119,6 +119,8 @@ for (const h of ['posgieo.html', 'quanlygieo.html']) {
   const t = fs.readFileSync(path.join(ROOT, h), 'utf8');
   const tags = t.match(/<script src="data_access\.v\d+\.js[^"]*"><\/script>/g) || [];
   if (tags.length !== 1) loi.push(h + ': phải nạp đúng 1 data_access.v*.js (thấy ' + tags.length + ')');
+  const moiNhat = fs.readdirSync(ROOT).filter(f => /^data_access\.v\d+\.js$/.test(f)).sort((x, y) => +x.match(/\d+/)[0] - +y.match(/\d+/)[0]).pop();
+  if (tags.length === 1 && !tags[0].includes('"' + moiNhat)) loi.push(h + ': phải nạp bản data_access mới nhất (' + moiNhat + '), đang nạp ' + tags[0]);
   const iDa = t.indexOf('<script src="data_access'), iEng = t.indexOf('<script src="unit_engine');
   if (iDa < 0 || iEng < 0 || iDa > iEng) loi.push(h + ': data_access phải nạp TRƯỚC unit_engine');
   const inst = (t.match(/GieoData\.install\(/g) || []).length;
