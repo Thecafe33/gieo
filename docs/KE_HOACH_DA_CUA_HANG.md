@@ -144,6 +144,12 @@ Chủ dự án chọn 05/10: **bản danh mục riêng mỗi quán** (thay cho `
 - **Triển khai** (máy quán hiện tại cũng phải nhập mã một lần): deploy **ngoài giờ bán** → mở Quản lý ▸ Cấu hình ▸ Cửa hàng → tạo hồ sơ GG01 (tên, địa chỉ) → lấy mã → nhập trên từng máy POS. Muốn POS không dừng phút nào: deploy lần 1 chỉ Quản lý + `data_access` (giữ `posgieo.html` cũ), tạo hồ sơ, rồi deploy lần 2 có POS.
 
 ### Bước 3 — Quản lý đa quán
+- **Chủ dự án chốt 06/10**:
+  - Quản lý có **cả hai chế độ**: **xem từng quán** (chuyển qua lại giữa các quán) và **xem tất cả cửa hàng**. Mỗi máy nhớ lựa chọn lần trước.
+  - **Kho**: tem, lô, tồn, sổ của mỗi quán là riêng (đã tách ở Bước 2). Xem từng quán thì mọi màn Kho giữ nguyên như hiện nay, và **mọi thao tác ghi chỉ làm ở chế độ này**. Xem tất cả thì **chỉ xem**: bảng tồn so sánh (mỗi NL/BTP một dòng, cột từng quán + tổng) và việc kho cần xử lý gộp lại, gắn nhãn quán, bấm vào là chuyển sang đúng quán. Tem / lô không gộp thành một danh sách.
+  - **Không có chuyển nguyên liệu giữa các quán.**
+  - **Đơn đặt hàng**: mỗi đơn riêng; lúc tạo đơn **chọn cửa hàng nhận** (mặc định = quán đang xem). Đơn nằm ở dữ liệu của quán đó, POS quán đó nhận hàng.
+  - Còn hỏi: mức tồn tối thiểu (cảnh báo sắp hết) — chung một mức hay riêng từng quán.
 - Bộ chọn quán (mặc định quán hiện tại): 1 quán / nhiều / toàn chuỗi; báo cáo gộp = đọc từng quán rồi cộng (bản tổng hợp theo ngày `ledger_day_summaries` đi theo quán → `…__{storeId}`).
 - Menu chung + `store_menu_overrides_gieogieo/{storeId}` = `{hidden:[…], price:{…}}`; công thức chung.
 - Khuyến mãi: chương trình / chiến dịch có `stores: 'all' | [storeId…]` (thiếu = toàn hệ thống).
