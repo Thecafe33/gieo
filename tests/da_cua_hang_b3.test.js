@@ -72,6 +72,11 @@ const TX = 'stock_transactions_gieogieo';
     let j = null; try { j = JSON.parse(out); } catch (e) {}
     ok(j && j.indexes.length === ds.length && j.indexes.every(x => /__gg02$/.test(x.collectionGroup)), 'tools/index_quan_moi.js gg02 --json: firestore.indexes.json đúng tên collection của quán mới');
   }
+  // ── 6. Nhật ký mở két tay (POS) — dữ liệu riêng từng quán ──
+  {
+    const G = nap();
+    ok(G.REG.fs.cash_drawer_logs_gieogieo === 'S' && G.fsPath('cash_drawer_logs_gieogieo', 'gg02') === 'cash_drawer_logs_gieogieo__gg02', 'cash_drawer_logs_gieogieo: riêng từng quán (gg02 → __gg02)');
+  }
   console.log(fail ? 'SOME FAIL' : 'ALL PASS');
   process.exitCode = fail;
 })().catch(e => { console.log('FAIL lỗi', e); process.exitCode = 1; });

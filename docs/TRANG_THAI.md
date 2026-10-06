@@ -7,7 +7,7 @@
 | Thành phần | Bản | Ghi chú |
 |---|---|---|
 | Engine kho | `unit_engine.v18.js` (01/10/2026) | v1–v17 giữ để quay lui — **không sửa, không xoá** (cache immutable). Danh sách: `tools/engine_releases.txt` |
-| Lớp đường dẫn | `data_access.v2.js` (06/10, chưa deploy; v1 đã deploy — giữ quay lui) | đa cửa hàng Bước 1 + 2 + 3 (withStore cho Xem tất cả) — 2 app nạp trước engine; danh mục NL/BTP theo quán + đồng bộ; đăng nhập cửa hàng; kiểm bằng `node tools/check_paths.js` |
+| Lớp đường dẫn | `data_access.v3.js` (06/10, chưa deploy; v1 đã deploy, v2 — giữ quay lui) | đa cửa hàng Bước 1 + 2 + 3 (withStore cho Xem tất cả) — 2 app nạp trước engine; danh mục NL/BTP theo quán + đồng bộ; đăng nhập cửa hàng; kiểm bằng `node tools/check_paths.js` |
 | App bán hàng | `posgieo.html` | trỏ v18 |
 | App quản lý | `quanlygieo.html` | trỏ v18 |
 | Chế độ thử | `che_do_thu.v1.js` + `posgieo_thu.html`, `quanlygieo_thu.html` | sinh lại bằng `node tools/tao_ban_thu.js .` sau **mỗi** lần sửa HTML |
@@ -38,6 +38,7 @@
 | **Đa cửa hàng Bước 1 — ĐÃ LÀM 05/10 (chưa deploy)** | `data_access.v1.js` + `tools/check_paths.js` + test `da_cua_hang_b1`; quán hiện tại giữ nguyên mọi đường dẫn. Deploy cùng T2/T3 được (đều không đổi hành vi). |
 | **Đa cửa hàng Bước 2 — ĐÃ DEPLOY 06/10** | Danh mục NL/BTP riêng mỗi quán + Quản lý tự đồng bộ (engine giữ v18); POS màn **đăng nhập cửa hàng** (mã 6 ký tự, nhớ máy, sidebar tên + địa chỉ + đăng xuất); Quản lý ▸ Cấu hình ▸ **Cửa hàng**; mã CK `GG02…`; dọn CK chỉ xét khoá `GG…`. Test `da_cua_hang_b2`. **Deploy ngoài giờ bán — sau deploy POS dừng ở màn nhập mã tới khi tạo hồ sơ GG01 ở Quản lý** (runbook: kế hoạch mục 5 Bước 2). Còn trước Bước 4: nhãn bill mã quán, `storeTags` nhân viên |
 | **Đa cửa hàng Bước 3 — ĐÃ LÀM phần chính 06/10 (chưa deploy)** | Quản lý xem từng quán / Xem tất cả (Hôm nay tổng hợp: doanh thu, việc cần xử lý gắn nhãn quán, tồn so sánh — chỉ xem); đơn đặt hàng chọn cửa hàng nhận; `data_access.v2.js`. Thêm 06/10: Báo cáo · Tất cả cửa hàng (tuần / tháng), bản thử POS "Thử cửa hàng khác", `tools/index_quan_moi.js` (6 index cho quán mới). **Bước 4 = runbook** ở kế hoạch mục 5 — không cần sửa code thêm để mở quán 2 |
+| **Mở két bằng tay trên POS — ĐÃ LÀM 06/10 (chưa deploy)** | Nút két ở thanh trên màn bán hàng → chọn lý do + PIN người mở → gửi lệnh mở két qua máy in Bill (cùng lệnh mở két khi thanh toán) → ghi `cash_drawer_logs_gieogieo` (riêng từng quán, đăng ký ở `data_access.v3.js`). Quản lý: Tiền mặt ▸ "Mở két ngoài bán hàng" theo ngày + dòng vàng ở Hôm nay · Sức khoẻ quán. Mở két khi thanh toán tiền mặt vẫn tự động, không ghi nhật ký này |
 | Đa cửa hàng Bước 0 → 5 | `docs/KE_HOACH_DA_CUA_HANG.md` — **viết lại 05/10**: một project, quán hiện tại giữ nguyên chỗ cũ (không chuyển dữ liệu), quán mới collection `…__{storeId}`; Bước 1 = lớp đường dẫn `data_access.v1.js` + engine v19 + chốt chặn |
 | O13 — mã nguồn webhook Cloud Run | cần cho M3 |
 | `tools/site_files.txt` (danh sách file của Gieo Gieo trên site Hosting dùng chung) | chưa có — làm ở Bước 1 của kế hoạch đa cửa hàng |

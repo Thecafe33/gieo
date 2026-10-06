@@ -2214,7 +2214,7 @@ html.tab-ui:not(.nav-off) .sidebar{background:#F2F2F7;border-right:1px solid rgb
      tự thử lại, tự lấy đúng tên bucket trong firebaseConfig. -->
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-storage-compat.js"></script>
 <!-- [E3] Unit Engine — dùng CHUNG file với POS, nạp TRƯỚC script chính. Đổi phiên bản = đổi tên file (6.1). -->
-<script src="data_access.v2.js"></script>
+<script src="data_access.v3.js"></script>
 <script src="unit_engine.v18.js"></script>
 <script>
 // ============================================================
@@ -2247,7 +2247,7 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 const fstore = firebase.firestore();
-// [ĐA CỬA HÀNG — Bước 1+2+3] Lớp đường dẫn theo quán (data_access.v2.js): quán hiện tại 'gg01' → mọi tên giữ NGUYÊN.
+// [ĐA CỬA HÀNG — Bước 1+2+3] Lớp đường dẫn theo quán (data_access.v3.js): quán hiện tại 'gg01' → mọi tên giữ NGUYÊN.
 // catalogMirror: mọi lượt sửa danh mục NL / BTP ở đây tự ghi cùng trường đó sang bản danh mục của các quán khác
 // (không bao giờ chép tồn; xoá món bị chặn khi quán khác còn tồn) — Cấu hình ▸ Cửa hàng.
 // [Bước 3] QL_VIEW = quán đang xem ('gg01', 'gg02'…) hoặc 'all' (Xem tất cả cửa hàng) — mỗi máy nhớ ở localStorage.
@@ -2267,10 +2267,10 @@ if (window.GieoData) {
 } else {
   const bar = document.createElement('div');
   bar.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#c0392b;color:#fff;font:700 16px sans-serif;padding:30px;text-align:center';
-  bar.textContent = '⚠️ Chưa tải được data_access.v2.js — đang tải lại…';
+  bar.textContent = '⚠️ Chưa tải được data_access.v3.js — đang tải lại…';
   (document.body || document.documentElement).appendChild(bar);
   setTimeout(() => location.reload(), 5000);
-  throw new Error('[GieoData] thiếu data_access.v2.js — dừng app');
+  throw new Error('[GieoData] thiếu data_access.v3.js — dừng app');
 }
 const auth = firebase.auth();
 // [E3] Khởi tạo Unit Engine cho Quản lý. Thiếu file engine → banner + tự tải lại sau 5 giây (6.3).
@@ -12517,6 +12517,12 @@ async function computeStoreHealth(){
       push('yellow', `Ngày ${yest} đã đóng ca nhưng chưa đếm giao ca CUỐI CA (refill)`, '—', `goKho('refill')`);
   }catch(err){ console.warn('storeHealth: đếm giao ca refill lỗi', err); }
 
+  // ---- [MỞ KÉT] Mở két bằng tay hôm nay (nút trên POS) — vàng: cần biết, không phải sự cố ----
+  try{
+    const mk = await loadCashDrawerLogs(today);
+    if(mk.length) push('yellow', `Mở két ngoài bán hàng hôm nay (${mk.length} lần)`, mk.length, `cashViewDate='${today}'; goEntry('cash')`);
+  }catch(err){ console.warn('storeHealth: nhật ký mở két lỗi', err); }
+
   // ---- [MỚI] Hao hụt & huỷ hôm nay ----
   // Trước đây phải TỰ mở "Hao hụt & huỷ" (từ thẻ Lãi/lỗ) hoặc "Hôm nay · Vận hành"
   // mới biết hôm nay có lượt nào bị huỷ — dễ bỏ sót đúng lượt cần xem lại nhất (hết
@@ -16159,6 +16165,21 @@ async function forceCloseStaleDay(dateKey){
   }catch(err){ console.error(err); showError('Đóng ngày thất bại: '+(err.code||err.message||err)); }
 }
 
+// [MỞ KÉT] Nhật ký mở két bằng tay trên POS (nút ở thanh trên màn bán hàng) — cash_drawer_logs_gieogieo, theo ngày.
+// Mở két lúc thanh toán tiền mặt là tự động, không nằm ở đây.
+async function loadCashDrawerLogs(day){
+  const snap = await fstore.collection('cash_drawer_logs_gieogieo').where('businessDate','==',day).get();
+  return snap.docs.map(d=>({id:d.id, ...d.data()})).sort((a,b)=>String(a.createdAt).localeCompare(String(b.createdAt)));
+}
+async function renderCashDrawerLog(day){
+  const box = document.getElementById('cashDrawerLog'); if(!box) return;
+  try{
+    const ds = await loadCashDrawerLogs(day);
+    box.innerHTML = `<div class="card">${ds.length ? ds.map(x=>`<div class="row"><span class="rl"><b>${x.createdAt ? new Date(x.createdAt).toLocaleTimeString('vi-VN',{hour:'2-digit',minute:'2-digit'}) : '—'}</b> · ${escapeHtmlAttr(x.employeeName||'—')}</span><span class="rv">${escapeHtmlAttr(x.reason||'')}${x.note?' — '+escapeHtmlAttr(x.note):''}</span></div>`).join('')
+      : '<div class="small-note">Không có lần mở két nào ngoài lúc thanh toán.</div>'}
+      <div class="small-note" style="margin-top:6px">Nhân viên mở két bằng nút trên POS (phải chọn lý do + nhập PIN). Mở két khi thanh toán tiền mặt là tự động, không tính ở đây.</div></div>`;
+  }catch(err){ console.warn('renderCashDrawerLog lỗi', err); box.innerHTML = '<div class="card"><div class="muted">Không đọc được nhật ký mở két.</div></div>'; }
+}
 async function renderEntryCash(){
   const body = document.getElementById('entryBody');
   if(!cashViewDate) cashViewDate = dkey(new Date());
@@ -16188,6 +16209,8 @@ async function renderEntryCash(){
     <div id="segTimeline"><div class="muted">Đang tải...</div></div>
     <div class="sec-title" style="margin-top:14px">Đối soát tiền mặt cả ngày</div>
     <div id="cashDetail"><div class="muted">Đang tải...</div></div>
+    <div class="sec-title" style="margin-top:14px">Mở két ngoài bán hàng</div>
+    <div id="cashDrawerLog"><div class="muted">Đang tải...</div></div>
     <div class="sec-title" style="margin-top:14px">Lịch sử kết ca gần đây</div>
     <div id="cashHistory"><div class="muted">Đang tải...</div></div>
   `;
@@ -16204,6 +16227,7 @@ async function renderEntryCash(){
     renderCashDetail(detail, checklist);
     renderCashHistory(history);
     renderStaleDaysBox(stale);
+    renderCashDrawerLog(cashViewDate);
   }catch(err){
     console.error('renderEntryCash failed', err);
     document.getElementById('cashDetail').innerHTML = '<div class="muted">Không tải được.</div>';

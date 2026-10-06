@@ -212,7 +212,7 @@ Nút "Cập nhật" ở sidebar (`manualCheckUpdate`, dựa trên service worker
 <script src="https://cdn.jsdelivr.net/npm/bcryptjs@2.4.3/dist/bcrypt.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
 <!-- [E1] Unit Engine — nạp TRƯỚC script chính. Đổi phiên bản = đổi tên file (6.1). -->
-<script src="data_access.v2.js"></script>
+<script src="data_access.v3.js"></script>
 <script src="unit_engine.v18.js"></script>
 
 <style>
@@ -940,7 +940,12 @@ body.assist-main-on .toast{bottom:calc(100px + var(--assist-h, 0px) + 10px);}
     <!-- [ADD-printer-quickstatus] Trạng thái nhanh 2 máy in (Bill/Tem) — bấm để tự dò & kết nối
          lại máy nào đang mất kết nối, không cần vào tận màn Máy in. margin-left:auto để tự đẩy
          sang phải kể cả khi nút togoToggle ở trên đang ẩn (không chiếm layout). -->
-    <button class="pqs-btn" id="printerQuickBtn" onclick="printerQuickReconnect()" style="margin-left:auto;"
+    <!-- [MỞ KÉT] Mở két tiền bằng tay (ngoài lúc thanh toán) — hỏi lý do + người mở, ghi nhật ký cho Quản lý.
+         Lệnh mở két đi qua máy in Bill (két cắm vào máy in đó) — xem openCashDrawerManualPOS(). -->
+    <button class="pqs-btn" id="drawerBtn" onclick="openCashDrawerSheetPOS()" style="margin-left:auto;margin-right:6px;padding:0 12px;height:36px;" title="Mở két tiền">
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#666" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="10" width="20" height="10" rx="2"/><path d="M6 10V6h12v4"/><path d="M10 15h4"/></svg>
+    </button>
+    <button class="pqs-btn" id="printerQuickBtn" onclick="printerQuickReconnect()" style="
       title="Trạng thái máy in — bấm để dò & kết nối lại">
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#666" stroke-width="2" stroke-linecap="round"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
       <div class="pqs-dots">
@@ -2347,7 +2352,7 @@ const fstore = firebase.firestore();
 // Cửa hàng). Nhập MỘT lần, máy tự nhớ (localStorage 'gieo_store_v1') — các lần mở app sau vào thẳng bán hàng,
 // KHÔNG hỏi lại mã, kể cả khi Quản lý đổi mã (chủ dự án chốt 05/10: không làm chậm bán hàng).
 // Máy CHƯA gắn → màn nhập mã, app DỪNG (không đọc / ghi dữ liệu quán nào; không bao giờ tự gắn quán).
-// Lớp đường dẫn (data_access.v2.js): quán 'gg01' → mọi tên giữ NGUYÊN như trước; quán khác → dữ liệu riêng.
+// Lớp đường dẫn (data_access.v3.js): quán 'gg01' → mọi tên giữ NGUYÊN như trước; quán khác → dữ liệu riêng.
 // Thiếu file data_access (mạng chập lúc tải): máy gắn gg01 → chạy tiếp như cũ (không bọc cũng y hệt);
 // máy gắn quán khác / chưa gắn → báo đỏ + tự tải lại (chạy không bọc = ghi nhầm vào dữ liệu GG01).
 // Bản thử (*_thu.html — che_do_thu): mặc định vùng thử của GG01, không cần mã; "Thử cửa hàng khác" ở sidebar đăng nhập
@@ -2360,14 +2365,14 @@ const POS_STORE = POS_THU
   ? Object.assign({ storeId: 'gg01', name: 'Bản thử', address: 'Vùng thử — chép từ dữ liệu cửa hàng GG01' }, _posBind || {}, { thu: true })
   : _posBind;
 if (window.GieoData) GieoData.install({ fstore, db, storeId: POS_STORE ? POS_STORE.storeId : null });
-else if (POS_STORE && POS_STORE.storeId === 'gg01') console.error('[GieoData] không nạp được data_access.v2.js — máy gắn GG01: chạy tiếp với đường dẫn cũ');
+else if (POS_STORE && POS_STORE.storeId === 'gg01') console.error('[GieoData] không nạp được data_access.v3.js — máy gắn GG01: chạy tiếp với đường dẫn cũ');
 else {
   const bar = document.createElement('div');
   bar.style.cssText = 'position:fixed;inset:0;z-index:2147483000;background:#c0392b;color:#fff;font:700 16px sans-serif;padding:30px;text-align:center';
-  bar.textContent = '⚠️ Chưa tải được data_access.v2.js — đang tải lại…';
+  bar.textContent = '⚠️ Chưa tải được data_access.v3.js — đang tải lại…';
   (document.body || document.documentElement).appendChild(bar);
   setTimeout(() => location.reload(), 5000);
-  throw new Error('[GieoData] thiếu data_access.v2.js — dừng app');
+  throw new Error('[GieoData] thiếu data_access.v3.js — dừng app');
 }
 if (!POS_STORE) { posStoreLoginScreen(); throw new Error('[ĐA CỬA HÀNG] máy chưa đăng nhập cửa hàng — app dừng, chờ nhập mã'); }
 // [E1] Khởi tạo Unit Engine. Thiếu file engine (mạng chập lúc tải) → banner đỏ + tự tải lại sau
@@ -22101,6 +22106,70 @@ function showScreen(id) {
 }
 function openSdb() { renderSdbStore(); document.getElementById('sdb').classList.add('open'); document.getElementById('ov').classList.add('show'); }
 function closeSdb() { document.getElementById('sdb').classList.remove('open'); document.getElementById('ov').classList.remove('show'); }
+// ============================================================
+// [MỞ KÉT] Mở két tiền bằng tay — chủ dự án yêu cầu 06/10: nút ngay trên màn bán hàng, mỗi lần mở lưu nhật ký
+// để Quản lý biết (cash_drawer_logs_gieogieo — riêng từng quán; Quản lý ▸ Tiền mặt + Hôm nay · Sức khoẻ quán).
+// Mở két khi THANH TOÁN tiền mặt vẫn tự động như cũ (POSPrinter.openCashDrawerIfConnected) và KHÔNG ghi nhật ký này.
+// Bắt buộc: lý do + người mở (PIN — có đúng 1 người đang trong ca thì tự điền, giống các chỗ ký tên khác).
+// Két cắm qua máy in Bill → máy in chưa kết nối thì không mở được, không ghi gì.
+// ============================================================
+const CASH_DRAWER_REASONS = ['Đổi tiền lẻ', 'Thối thêm cho khách', 'Kiểm đếm két', 'Khác'];
+let _cashDrawerReason = '';
+function openCashDrawerSheetPOS() {
+  if (!POSPrinter.connected || !POSPrinter.engine || typeof POSPrinter.engine.openDrawer !== 'function') {
+    toast('⚠️ Máy in Bill chưa kết nối — két mở qua máy in. Bấm biểu tượng máy in để kết nối lại.');
+    return;
+  }
+  _cashDrawerReason = '';
+  const o = document.createElement('div');
+  o.id = 'cashDrawerSheet';
+  o.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.45);display:flex;align-items:flex-end;justify-content:center';
+  o.innerHTML = '<div style="background:#fff;width:100%;max-width:430px;border-radius:22px 22px 0 0;padding:20px 18px 24px;max-height:90vh;overflow:auto">'
+    + '<div style="font-size:18px;font-weight:800">Mở két tiền</div>'
+    + '<div style="font-size:12.5px;color:#888;margin-top:4px">Mỗi lần mở két ngoài lúc thanh toán đều được ghi lại cho Quản lý.</div>'
+    + '<div style="font-size:13px;font-weight:700;margin:14px 0 8px">Lý do</div>'
+    + '<div id="cdReasons" style="display:flex;flex-wrap:wrap;gap:8px">'
+    + CASH_DRAWER_REASONS.map(r => '<button data-r="' + r + '" onclick="cashDrawerPickReasonPOS(this)" style="padding:9px 14px;border-radius:20px;border:1.5px solid #ddd;background:#fff;font-family:inherit;font-size:13.5px;font-weight:700;cursor:pointer">' + r + '</button>').join('')
+    + '</div>'
+    + '<input id="cdNote" placeholder="Ghi chú (bắt buộc nếu chọn Khác)" style="width:100%;box-sizing:border-box;margin-top:12px;padding:11px 12px;border:1.5px solid #ddd;border-radius:12px;font-family:inherit;font-size:14px">'
+    + renderPinInput('cashDrawer', 'Người mở két (PIN 4 số)')
+    + '<div style="display:flex;gap:8px;margin-top:14px"><button onclick="document.getElementById(\'cashDrawerSheet\').remove()" style="flex:1;padding:13px;border:0;border-radius:12px;background:#eee;font-family:inherit;font-weight:700">Huỷ</button>'
+    + '<button id="cdGo" onclick="confirmCashDrawerOpenPOS()" style="flex:2;padding:13px;border:0;border-radius:12px;background:#C22B49;color:#fff;font-family:inherit;font-size:15px;font-weight:800">Mở két</button></div></div>';
+  o.addEventListener('click', e => { if (e.target === o) o.remove(); });
+  document.body.appendChild(o);
+}
+function cashDrawerPickReasonPOS(btn) {
+  _cashDrawerReason = btn.dataset.r;
+  document.querySelectorAll('#cdReasons button').forEach(b => {
+    const on = b === btn;
+    b.style.background = on ? '#C22B49' : '#fff'; b.style.color = on ? '#fff' : '#333'; b.style.borderColor = on ? '#C22B49' : '#ddd';
+  });
+}
+async function confirmCashDrawerOpenPOS() {
+  const note = (document.getElementById('cdNote')?.value || '').trim();
+  if (!_cashDrawerReason) { toast('⚠️ Chọn lý do mở két'); return; }
+  if (_cashDrawerReason === 'Khác' && !note) { toast('⚠️ Ghi rõ lý do vào ô ghi chú'); return; }
+  const emp = resolveStaffPinField('cashDrawer');
+  if (!emp) return;
+  const nut = document.getElementById('cdGo'); if (nut) nut.disabled = true;
+  try {
+    await POSPrinter.engine.openDrawer();
+  } catch (err) {
+    console.warn('[Mở két] gửi lệnh lỗi', err);
+    toast('❌ Không gửi được lệnh mở két — kiểm tra máy in Bill rồi thử lại');
+    if (nut) nut.disabled = false;
+    return;
+  }
+  document.getElementById('cashDrawerSheet')?.remove();
+  // Ghi nhật ký SAU khi lệnh đã đi (két đã bật). Mất mạng: Firestore tự xếp hàng ghi khi có mạng lại.
+  fstore.collection('cash_drawer_logs_gieogieo').add({
+    businessDate: posDateKey(), createdAt: new Date().toISOString(),
+    employeeId: emp.id || '', employeeName: emp.fullName || '', reason: _cashDrawerReason, note,
+    storeId: (window.GieoData && GieoData.storeId()) || 'gg01'
+  }).catch(err => { console.warn('[Mở két] ghi nhật ký lỗi', err); toast('⚠️ Két đã mở nhưng CHƯA ghi được nhật ký — báo Quản lý'); });
+  toast('✅ Đã mở két — đã ghi nhật ký');
+}
+
 // ============================================================
 // [ĐA CỬA HÀNG — Bước 2] CỬA HÀNG CỦA MÁY NÀY — đăng nhập bằng mã 6 ký tự / thẻ ở sidebar / đăng xuất
 // ============================================================
