@@ -344,7 +344,7 @@ body{font-family:'Google Sans',sans-serif;background:var(--bg);max-width:430px;m
 .sbp{font-size:18px;font-weight:700;color:var(--gm);}
 .ov{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:200;display:none;}
 .ov.show{display:block;}
-.sdb{position:fixed;top:0;left:0;width:82%;max-width:340px;height:100%;background:var(--bg);z-index:201;transform:translateX(-100%);transition:transform .28s cubic-bezier(.4,0,.2,1);padding:60px 20px 40px;display:flex;flex-direction:column;}
+.sdb{position:fixed;top:0;left:0;width:82%;max-width:340px;height:100%;background:var(--bg);z-index:201;transform:translateX(-100%);transition:transform .28s cubic-bezier(.4,0,.2,1);padding:60px 20px 40px;display:flex;flex-direction:column;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;}
 .sdb.open{transform:translateX(0);}
 .sdc{position:absolute;top:20px;right:20px;width:36px;height:36px;background:#e4e4e4;border:none;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#666;}
 .sda{width:64px;height:64px;border-radius:50%;border:2px solid var(--gm);display:flex;align-items:center;justify-content:center;background:#fff;margin-bottom:12px;}
@@ -1065,6 +1065,8 @@ body.assist-main-on .toast{bottom:calc(100px + var(--assist-h, 0px) + 10px);}
       <span class="printer-status-dot" style="width:9px;height:9px;border-radius:50%;background:#ccc;margin-right:6px;flex-shrink:0;"></span>
       <span class="sdar">›</span>
     </div>
+    <!-- [ĐA CỬA HÀNG] Đăng xuất khỏi cửa hàng — chữ nhỏ ở CUỐI sidebar (không nằm cạnh tên quán cho khỏi chạm nhầm), cần mã quản lý -->
+    <div id="sdbStoreOut"></div>
   </div>
 </div>
 
@@ -22108,7 +22110,7 @@ function posStoreLoginScreen() {
     + '<div style="font-size:44px">🏪</div>'
     + '<div style="font-size:21px;font-weight:800;color:#C22B49;margin-top:6px">Đăng nhập cửa hàng</div>'
     + '<div style="font-size:13.5px;color:#555;margin:8px 0 18px;line-height:1.5">Máy này chưa gắn với cửa hàng nào. Nhập <b>mã 6 ký tự</b> của cửa hàng '
-    + '(Quản lý ▸ Cấu hình ▸ Cửa hàng). Chỉ nhập <b>một lần</b> — máy tự nhớ, các lần mở sau vào thẳng bán hàng.</div>'
+    + '— <b>hỏi quản lý</b> để lấy mã. Chỉ nhập một lần, máy tự nhớ.</div>'
     + '<input id="psCode" maxlength="6" autocomplete="off" autocapitalize="characters" spellcheck="false" inputmode="text"'
     + ' style="width:100%;box-sizing:border-box;font-size:28px;font-weight:800;letter-spacing:10px;text-align:center;text-transform:uppercase;padding:12px;border:2px solid #ddd;border-radius:14px;outline:none">'
     + '<div id="psMsg" style="min-height:20px;font-size:13.5px;color:#c0392b;margin-top:8px"></div>'
@@ -22156,15 +22158,16 @@ function posStoreLoginScreen() {
 }
 // Thẻ đầu sidebar: "Đây là POS của cửa hàng …" + địa chỉ + nút đăng xuất khỏi cửa hàng. Không hiện mã 6 ký tự.
 function renderSdbStore() {
-  const el = document.getElementById('sdbStore');
+  const el = document.getElementById('sdbStore'), out = document.getElementById('sdbStoreOut');
   if (!el || !POS_STORE) return;
-  el.innerHTML = '<div style="margin:0 4px 14px;padding:12px 14px;border-radius:14px;background:#fdf1f3;border:1px solid #f3c6cf">'
-    + '<div style="font-size:11px;color:#C22B49;font-weight:800;letter-spacing:.5px">' + (POS_STORE.thu ? 'BẢN THỬ' : 'ĐÂY LÀ POS CỦA CỬA HÀNG') + '</div>'
-    + '<div style="font-size:16px;font-weight:800;margin-top:2px">' + escHtmlPos(POS_STORE.name || POS_STORE.storeId.toUpperCase())
-    + ' <span style="font-size:12px;color:#888;font-weight:700">· ' + POS_STORE.storeId.toUpperCase() + '</span></div>'
-    + '<div style="font-size:12.5px;color:#555;margin-top:3px">📍 ' + escHtmlPos(POS_STORE.address || '(chưa có địa chỉ — thêm ở Quản lý ▸ Cấu hình ▸ Cửa hàng)') + '</div>'
-    + (POS_STORE.thu ? '' : '<button onclick="posStoreLogout()" style="margin-top:10px;padding:8px 12px;border:1px solid #C22B49;border-radius:10px;background:#fff;color:#C22B49;font-size:13px;font-weight:700">Đăng xuất khỏi cửa hàng</button>')
-    + '</div>';
+  // Gọn 2 dòng (tên · mã quán / địa chỉ) — sidebar có 7–8 mục, thẻ to đẩy mục cuối (Máy in) ra khỏi màn máy nhỏ.
+  el.innerHTML = '<div style="margin:0 2px 2px;padding:8px 12px;border-radius:12px;background:#fdf1f3;border:1px solid #f3c6cf">'
+    + '<div style="font-size:14px;font-weight:800;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">🏪 '
+    + (POS_STORE.thu ? 'BẢN THỬ · ' : '') + escHtmlPos(POS_STORE.name || POS_STORE.storeId.toUpperCase())
+    + ' <span style="font-size:11.5px;color:#888;font-weight:700">· ' + POS_STORE.storeId.toUpperCase() + '</span></div>'
+    + '<div style="font-size:12px;color:#666;line-height:1.3;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">📍 '
+    + escHtmlPos(POS_STORE.address || '(chưa có địa chỉ)') + '</div></div>';
+  if (out) out.innerHTML = POS_STORE.thu ? '' : '<div style="text-align:center;margin-top:18px"><span onclick="posStoreLogout()" style="font-size:12px;color:#aaa;text-decoration:underline;cursor:pointer;padding:6px">Đăng xuất khỏi cửa hàng</span></div>';
 }
 // Tên / địa chỉ mới nhất (Quản lý có thể sửa). KHÔNG kiểm lại mã — đổi mã không bắt máy đã gắn nhập lại.
 async function posStoreRefreshInfo() {
