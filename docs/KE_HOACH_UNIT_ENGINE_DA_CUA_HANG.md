@@ -817,7 +817,7 @@ Collection mới (giữ hậu tố — D16): `stores_gieogieo`, `store_item_stat
 | `order_stock_traces` | S | |
 | `orders_gieogieo_archive` | S | `{tháng}_{ngày}_{năm}` → thêm `storeId`; việc lưu trữ chạy theo cửa hàng |
 | `packaging_*` (6) | G | |
-| `payroll_month_adjustments` | G | |
+| `payroll_month_adjustments` | S | 07/10: chuyển G → S (data_access.v4) |
 | `prep_batches`, `prep_transactions`, `prep_shortage_recons` | S | |
 | `prep_forecasts` | S | `{ngày}_{prepId}` → thêm `storeId` |
 | `prep_ingredient_locks` | S | `{itemId}` → `{storeId}_{itemId}` |

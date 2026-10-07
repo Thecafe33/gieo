@@ -77,6 +77,23 @@ const TX = 'stock_transactions_gieogieo';
     const G = nap();
     ok(G.REG.fs.cash_drawer_logs_gieogieo === 'S' && G.fsPath('cash_drawer_logs_gieogieo', 'gg02') === 'cash_drawer_logs_gieogieo__gg02', 'cash_drawer_logs_gieogieo: riêng từng quán (gg02 → __gg02)');
   }
+  // ── 7. Thưởng / phạt / lương thực nhận theo tháng (Tổng kết tháng) — riêng từng quán từ data_access.v4 ──
+  {
+    const G = nap();
+    ok(G.REG.fs.payroll_month_adjustments_gieogieo === 'S' && G.fsPath('payroll_month_adjustments_gieogieo', 'gg01') === 'payroll_month_adjustments_gieogieo'
+      && G.fsPath('payroll_month_adjustments_gieogieo', 'gg02') === 'payroll_month_adjustments_gieogieo__gg02', 'payroll_month_adjustments: riêng từng quán, GG01 giữ nguyên tên (dữ liệu cũ không đổi)');
+  }
+  // ── 8. Quản lý: danh sách nhân viên theo quán (Lương / Tổng kết tháng) ──
+  {
+    const { extract } = require('./lib/extract');
+    const src = extract('quanlygieo.html', ['isFixedPayType', 'empFixedPayHere', 'qlEmpThuocQuan']);
+    const mk = (view, soQuan) => new Function('QL_VIEW', 'GieoData', 'qlActiveStores', src + '\nreturn qlEmpThuocQuan;')(view, { storeId: () => view }, () => Array(soQuan).fill({}));
+    const co = { id: 'a', payType: 'fixed' }, gio = { id: 'b', payType: 'hourly_part' }, co2 = { id: 'c', payType: 'fixed', homeStore: 'gg02' };
+    const f1 = mk('gg01', 1), f2 = mk('gg02', 2);
+    ok(f1(gio, null, null, 0) && f1(co2, null, null, 0), 'một quán: danh sách nhân viên như cũ');
+    ok(!f2(co, null, null, 0) && !f2(gio, { amount: 0, hours: 0 }, null, 0) && f2(co2, null, null, 0) && f2(gio, { amount: 50000, hours: 2 }, null, 0)
+      && f2(gio, null, { thuong: [{ amount: 1 }], phat: [], finalPay: null }, 0) && f2(gio, null, null, 1), 'GG02: chỉ người có ca / lương / quán chính / thưởng-phạt ở GG02');
+  }
   console.log(fail ? 'SOME FAIL' : 'ALL PASS');
   process.exitCode = fail;
 })().catch(e => { console.log('FAIL lỗi', e); process.exitCode = 1; });

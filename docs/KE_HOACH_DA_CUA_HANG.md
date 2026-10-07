@@ -152,6 +152,16 @@ Chủ dự án chọn 05/10: **bản danh mục riêng mỗi quán** (thay cho `
   - Test `tests/da_cua_hang_b3.test.js`; Chromium: ô chọn quán, chuyển Tất cả, chốt chặn mục khác, màn tổng hợp, bấm việc → chuyển đúng quán.
   - **Báo cáo · Tất cả cửa hàng** (06/10): Báo cáo kỳ / Sức khoẻ tài chính / Tổng kết tháng ở chế độ Tất cả → một bảng: mỗi quán một cột + Tổng (doanh thu, bill, AOV, ly/bill, giá vốn, lãi gộp, lương, hao hụt, đổ ly, chi phí vận hành, đóng góp, EBIT) cho Tuần này / Tuần trước / Tháng này / Tháng trước — cùng `computeKPIs` với Báo cáo kỳ, từng quán trong `withStore`; Tổng = cộng số tuyệt đối rồi tính lại tỷ lệ.
   - Mục tiêu, lịch làm việc, chi phí, sổ tiền: đã theo quán sẵn (dữ liệu riêng). Menu / giá / khuyến mãi / lương theo quán: xem "Không làm" ở Bước 4.
+  - **[07/10] Rà Quản lý khi có từ 2 quán** (`data_access.v4.js`):
+    - Lương cứng chỉ tính cho **quán chính** của nhân viên (`employees.homeStore`, thiếu = `gg01`; `empFixedPayHere`) ở chi phí lương thật, lương dự đoán theo lịch, bảng lương — trước đây mọi quán cộng đủ lương cứng của mọi nhân viên (Tất cả cửa hàng gấp đôi). Ô "Quán chính" ở form Nhân viên khi có ≥ 2 quán.
+    - `payroll_month_adjustments` (thưởng / phạt / lương thực nhận) G → **S**: GG01 giữ nguyên tên + dữ liệu cũ, quán khác `__{storeId}`.
+    - Lương / Tổng kết tháng: chỉ liệt kê nhân viên có ca / lương / quán chính / thưởng-phạt ở quán đang xem (`qlEmpThuocQuan`), ghi số người bị ẩn.
+    - Mục tiêu: nhãn "chung mọi cửa hàng" (Target KPI, Cấu hình Labor — `config_history`) / "riêng GGxx" (Target nhân viên, Tài chính). Bật Labor thật (`hr_settings`) ghi "chung mọi cửa hàng".
+    - Kiểm toán: `audit_logs` ghi `storeId`, danh sách gắn nhãn quán (bản ghi cũ = GG01).
+    - Trích xuất dữ liệu: tên file `gieo-ggNN-…` + trường `_cuaHang` (một quán: tên file như cũ).
+    - Tạo quán mới: chép thêm ngưỡng tài chính (`FINANCE_COPY_FIELDS`: lệch kiểm kê, lệch bao bì, dung sai tiền mặt / giao ca, tiền đầu ca mặc định, hao hụt thật) — không chép vốn đầu tư / quỹ / mốc thu hồi vốn.
+    - Trợ lý bán hàng ▸ "Dựng lại hồ sơ thói quen khách": **khoá** khi có ≥ 2 quán (đọc bill một quán rồi ghi đè `customers.assist_profile` dùng chung → mất thói quen ở quán kia; POS vẫn tự cộng dồn sau mỗi đơn).
+    - Chưa làm: Khách hàng · Tất cả cửa hàng (khách đi cả 2 quán đang bị tách theo quán).
 - **Chủ dự án chốt 06/10**:
   - Quản lý có **cả hai chế độ**: **xem từng quán** (chuyển qua lại giữa các quán) và **xem tất cả cửa hàng**. Mỗi máy nhớ lựa chọn lần trước.
   - **Kho**: tem, lô, tồn, sổ của mỗi quán là riêng (đã tách ở Bước 2). Xem từng quán thì mọi màn Kho giữ nguyên như hiện nay, và **mọi thao tác ghi chỉ làm ở chế độ này**. Xem tất cả thì **chỉ xem**: bảng tồn so sánh (mỗi NL/BTP một dòng, cột từng quán + tổng) và việc kho cần xử lý gộp lại, gắn nhãn quán, bấm vào là chuyển sang đúng quán. Tem / lô không gộp thành một danh sách.
@@ -176,13 +186,13 @@ Chủ dự án chọn 05/10: **bản danh mục riêng mỗi quán** (thay cho `
 **B. Mở thật**:
 1. `node tools/index_quan_moi.js gg02` → tạo **6 composite index** ở Firebase Console ▸ Firestore ▸ Indexes ▸ Composite (Query scope: Collection), chờ **Enabled**. (Thiếu index: màn lọc + sắp xếp ở quán 2 lỗi hoặc đọc sổ gốc tốn gấp nhiều lần.)
 2. Quản lý (đang xem GG01) ▸ Cấu hình ▸ Cửa hàng ▸ Thêm cửa hàng mới: tên + địa chỉ GG02 → danh mục NL / BTP chép sang (tồn 0), refill rules + vị trí kho chép sang. Lấy mã 6 ký tự.
-3. Quản lý ▸ chọn GG02 ở đầu sidebar: sửa refill rules / vị trí kho cho đúng quán 2; danh mục chi phí, nhân viên dùng chung (không phải làm).
+3. Quản lý ▸ chọn GG02 ở đầu sidebar: sửa refill rules / vị trí kho cho đúng quán 2; danh mục chi phí, nhân viên dùng chung (không phải làm). **Nhân viên lương cứng làm chính ở quán 2** → Nhân sự ▸ Nhân viên ▸ sửa ▸ "Quán chính" = GG02. Cấu hình ▸ Mục tiêu ▸ Tài chính (đang xem GG02): khai vốn đầu tư / quỹ của quán 2 nếu muốn theo dõi thu hồi vốn.
 4. Máy POS quán 2: mở link POS như quán 1 → nhập mã GG02 → **cài đầu bill (tên, địa chỉ) ở POS ▸ Máy in** (cấu hình in tách theo quán).
 5. Nhập hàng đầu kỳ quán 2: Quản lý (GG02) ▸ Đặt hàng (Cửa hàng nhận: GG02) → POS GG02 nhận hàng, in tem.
 6. Thử 1 lần chuyển khoản thật nhỏ ở quán 2 (mã CK `GG02…`, cùng tài khoản ngân hàng — webhook không đổi).
 7. Theo dõi 2–4 tuần: Sổ lệch, kết ca, **lượt đọc** (hạn mức chung cả 3 thương hiệu), CK.
 
-**Không làm (đã cân nhắc 06/10)**: nhãn bill in mã quán (đầu bill cấu hình riêng theo quán là đủ); menu / giá / khuyến mãi riêng từng quán (hai quán dùng chung menu, giá, khuyến mãi — khi cần khác thì làm); nhân viên `storeTags` (nhân viên dùng chung, ai cũng check-in được ở quán nào — ca ghi đúng quán). **Lương** tính theo ca ở quán đang xem: nhân viên làm ở cả 2 quán thì lương nằm ở 2 quán — cần "Lương · Tất cả cửa hàng" thì báo.
+**Không làm (đã cân nhắc 06/10)**: nhãn bill in mã quán (đầu bill cấu hình riêng theo quán là đủ); menu / giá / khuyến mãi riêng từng quán (hai quán dùng chung menu, giá, khuyến mãi — khi cần khác thì làm); nhân viên `storeTags` (nhân viên dùng chung, ai cũng check-in được ở quán nào — ca ghi đúng quán). **Lương** tính theo ca ở quán đang xem (lương cứng: quán chính, 07/10): nhân viên làm ở cả 2 quán thì lương giờ nằm ở 2 quán — cần "Lương · Tất cả cửa hàng" thì báo.
 
 ### Bước 5 — Khi cần
 - **Chuyển kho / kho trung tâm**:
@@ -209,8 +219,9 @@ Chủ dự án chọn 05/10: **bản danh mục riêng mỗi quán** (thay cho `
 | `duty_cases`, `duty_tasks`, `duty_digests`, `duty_verify_undo`, `dup_recovery`, `order_cancel_marks`, `loyalty_bill_effects`?, `stamp_free_redemptions`? | S / ? | `loyalty_bill_effects`, `stamp_free_redemptions` ghi cùng transaction với `customers` (X) theo `billId` — giữ G+s nếu `billId` không trùng giữa quán; chốt ở Bước 1 |
 | `staff_target_config`, `staff_target_days` | S | O14 |
 | `inventory_items`, `prep_items` | C (danh mục theo quán) | Bước 2: mỗi quán một bản (tồn trong bản của quán), Quản lý sửa → tự đồng bộ trường danh mục |
-| `employees` | G | + `storeTags` |
-| `expense_categories`, `hr_settings`, `ingredient_original_packs`, `note_reasons`, `waste_reasons`, `payment_methods`, `packaging_*`, `payroll_month_adjustments`, `recipes`, `recipe_history`, `recipe_suggestions`, `topping_recipes`, `prep_recipe_history`, `prep_vessels`, `stores` | G | |
+| `employees` | G | lương cứng tính cho quán chính `homeStore` (07/10); `storeTags`: không làm |
+| `payroll_month_adjustments` | S | thưởng / phạt theo tháng — 07/10 G → S (data_access.v4) |
+| `expense_categories`, `hr_settings`, `ingredient_original_packs`, `note_reasons`, `waste_reasons`, `payment_methods`, `packaging_*`, `recipes`, `recipe_history`, `recipe_suggestions`, `topping_recipes`, `prep_recipe_history`, `prep_vessels`, `stores` | G | |
 | `audit_logs`, `config_history`, `price_history`, `loyalty_pending_retry` | G+s | |
 | `shift_checklists`, `special_days`, `duty_config` | G+o | |
 | Storage `receiving_photos_gieogieo/{recordId}` | S | theo phiếu (phiếu đã theo quán) |

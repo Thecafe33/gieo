@@ -2214,7 +2214,7 @@ html.tab-ui:not(.nav-off) .sidebar{background:#F2F2F7;border-right:1px solid rgb
      tự thử lại, tự lấy đúng tên bucket trong firebaseConfig. -->
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-storage-compat.js"></script>
 <!-- [E3] Unit Engine — dùng CHUNG file với POS, nạp TRƯỚC script chính. Đổi phiên bản = đổi tên file (6.1). -->
-<script src="data_access.v3.js"></script>
+<script src="data_access.v4.js"></script>
 <script src="che_do_thu.v1.js?b=96d7f20f91"></script>
 <script src="unit_engine.v18.js?b=f1f1381586"></script>
 <script>
@@ -2252,7 +2252,7 @@ firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 const fstore = firebase.firestore();
 GieoThu.install({ app: 'quanly', firebase, db, fstore });   // [BẢN THỬ] mọi đọc/ghi → vùng thử
-// [ĐA CỬA HÀNG — Bước 1+2+3] Lớp đường dẫn theo quán (data_access.v3.js): quán hiện tại 'gg01' → mọi tên giữ NGUYÊN.
+// [ĐA CỬA HÀNG — Bước 1+2+3] Lớp đường dẫn theo quán (data_access.v4.js): quán hiện tại 'gg01' → mọi tên giữ NGUYÊN.
 // catalogMirror: mọi lượt sửa danh mục NL / BTP ở đây tự ghi cùng trường đó sang bản danh mục của các quán khác
 // (không bao giờ chép tồn; xoá món bị chặn khi quán khác còn tồn) — Cấu hình ▸ Cửa hàng.
 // [Bước 3] QL_VIEW = quán đang xem ('gg01', 'gg02'…) hoặc 'all' (Xem tất cả cửa hàng) — mỗi máy nhớ ở localStorage.
@@ -2272,10 +2272,10 @@ if (window.GieoData) {
 } else {
   const bar = document.createElement('div');
   bar.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#c0392b;color:#fff;font:700 16px sans-serif;padding:30px;text-align:center';
-  bar.textContent = '⚠️ Chưa tải được data_access.v3.js — đang tải lại…';
+  bar.textContent = '⚠️ Chưa tải được data_access.v4.js — đang tải lại…';
   (document.body || document.documentElement).appendChild(bar);
   setTimeout(() => location.reload(), 5000);
-  throw new Error('[GieoData] thiếu data_access.v3.js — dừng app');
+  throw new Error('[GieoData] thiếu data_access.v4.js — dừng app');
 }
 const auth = firebase.auth();
 // [E3] Khởi tạo Unit Engine cho Quản lý. Thiếu file engine → banner + tự tải lại sau 5 giây (6.3).
@@ -3836,6 +3836,9 @@ const FINANCE_DEFAULTS = {cashReserve:0, initialInvestment:0, stockCountVariance
   // một con số không mô tả đúng giai đoạn nào.
   usageTrackingStart:'2026-09-06'};
 
+// Ngưỡng vận hành chép sang khi tạo quán mới (storeCreate) — KHÔNG gồm vốn đầu tư, quỹ, mốc thu hồi vốn.
+const FINANCE_COPY_FIELDS = ['stockCountVarianceThresholdPct', 'packagingVarianceThresholdPct', 'cashToleranceAmount',
+  'handoverToleranceAmount', 'openingCashNextDayDefault', 'useActualWaste'];
 let CONFIG_HISTORY = []; // [{id, effectiveFrom:'YYYY-MM-DD', targets:{...}, labor:{...}}], sorted asc theo effectiveFrom
 let CONFIG = JSON.parse(JSON.stringify(DEFAULTS));
 let FINANCE = {...FINANCE_DEFAULTS};
@@ -3879,6 +3882,8 @@ function saveFinance(data){
 function logAudit(action, entity, entityId, details){
   return fstore.collection('audit_logs_gieogieo').add({
     action, entity, entityId: entityId||null, details: details||{},
+    // [ĐA CỬA HÀNG] audit_logs dùng chung mọi quán — ghi quán đang xem để màn Kiểm toán gắn nhãn (thiếu = gg01).
+    storeId: (window.GieoData && GieoData.storeId()) || (QL_ALL ? null : QL_VIEW),
     actor: 'management', createdAt: new Date().toISOString()
   }).catch(err=>console.warn('[Audit] Ghi log thất bại (không chặn thao tác):', err));
 }
@@ -3969,6 +3974,14 @@ function computeWageForDayHours(emp, hoursInDay){
 function isFixedPayType(emp){
   return !!emp && emp.payType !== 'hourly_full' && emp.payType !== 'hourly_part';
 }
+// [ĐA CỬA HÀNG] Nhân viên dùng chung mọi quán, nhưng LƯƠNG CỨNG chỉ tính cho QUÁN CHÍNH của người đó
+// (emp.homeStore, thiếu = 'gg01'). Trước đây mỗi quán đều cộng đủ lương cứng của mọi nhân viên → quán 2 gánh lương
+// của nhân viên quán 1, "Tất cả cửa hàng" cộng gấp đôi. Lương giờ không đổi: đã theo ca chấm công ở từng quán.
+// Quán đang tính = GieoData.storeId() (trong withStore là quán được chọn); 'all' ngoài withStore → không quán nào.
+function empFixedPayHere(emp){
+  const cur = (typeof GieoData !== 'undefined' && GieoData.storeId && GieoData.storeId()) || (typeof QL_VIEW !== 'undefined' ? QL_VIEW : 'gg01');
+  return ((emp && emp.homeStore) || 'gg01') === cur;
+}
 
 // ══════════════════════════════════════════════════════════════════════════
 // [FIX-ca-dang-chay] GIỜ LÀM CỦA MỘT CA — phân biệt "đang trong ca" với "quên bấm ra"
@@ -4055,7 +4068,7 @@ async function computeActualLaborCostByDate(startDate, endDate){
     employees.forEach(emp=>{
       if(emp.active===false) return;
       const terms = empPayTermsOn(emp, dateKey);        // [LƯƠNG THEO MỐC] mức lương cứng đúng ngày
-      if(isFixedPayType(terms)) addTo(dateKey, terms.fixedMonthlySalary / dim);
+      if(isFixedPayType(terms) && empFixedPayHere(emp)) addTo(dateKey, terms.fixedMonthlySalary / dim);
     });
     cur.setDate(cur.getDate()+1);
   }
@@ -4118,7 +4131,7 @@ async function computeActualLaborBreakdownByEmployee(startDate, endDate){
     employees.forEach(emp=>{
       if(emp.active===false) return;
       const terms = empPayTermsOn(emp, dkey(cur));      // [LƯƠNG THEO MỐC]
-      if(isFixedPayType(terms)) ensure(emp.id).amount += terms.fixedMonthlySalary/dim;
+      if(isFixedPayType(terms) && empFixedPayHere(emp)) ensure(emp.id).amount += terms.fixedMonthlySalary/dim;
     });
     cur.setDate(cur.getDate()+1);
   }
@@ -7940,7 +7953,7 @@ function plPredictedLaborByDate(employees, schedules, startKey, endKey){
     (employees||[]).forEach(emp=>{
       if(emp.active===false) return;
       const terms = empPayTermsOn(emp, key);
-      if(isFixedPayType(terms)) byDate[key] = (byDate[key]||0) + terms.fixedMonthlySalary/dim;
+      if(isFixedPayType(terms) && empFixedPayHere(emp)) byDate[key] = (byDate[key]||0) + terms.fixedMonthlySalary/dim;
     });
     cur.setDate(cur.getDate()+1);
   }
@@ -11062,7 +11075,7 @@ async function dbXuatDuLieuMe(btn){
     ]);
     const pick = (o, keys) => { const r = {}; keys.forEach(k => { if(o[k] !== undefined) r[k] = o[k]; }); return r; };
     const data = {
-      meta: { app:'gieo', kind:'prep_batch_analysis', from, to, exportedAt: new Date().toISOString(),
+      meta: { app:'gieo', kind:'prep_batch_analysis', cuaHang: QL_VIEW, from, to, exportedAt: new Date().toISOString(),
         projectId: (firebase.app().options||{}).projectId || '', counts:{ preps:preps.length, txs:txs.length, batches:batches.length } },
       prepItems: preps.map(p => pick(p, ['id','code','name','unit','batchYield','shelfLifeType','shelfLifeHours',
         'currentStock','costPerUnit','prepTimeMinutes','active','category','yieldActual','declaredYield'])),
@@ -11076,7 +11089,7 @@ async function dbXuatDuLieuMe(btn){
         'prepCountAt','prepCountLines','reopeningAfterSaleAt']))
     };
     const text = JSON.stringify(data);
-    downloadJsonFile(text, `gieo-du-lieu-me-nau_${from}_${to}.json`);
+    downloadJsonFile(text, `gieo-${_expQuanTag()}du-lieu-me-nau_${from}_${to}.json`);
     toast(`✅ Đã xuất ${txs.length} lượt BTP, ${batches.length} lô (${_expSizeLabel(text)})`);
   }catch(err){
     console.error('dbXuatDuLieuMe lỗi', err);
@@ -16475,7 +16488,7 @@ function renderEmployeeFormFields(editing, payType, otEnabled){
         <div class="small-note">Lương giờ tính theo ĐÚNG giờ check-in/check-out thực tế trên POS — đi trễ/về sớm ảnh hưởng trực tiếp tới số tiền. Lương cứng không đổi theo giờ giấc, nhưng vẫn cần check-in/out để theo dõi đi trễ/đủ công.</div>
       </div>
       ${payType==='fixed'
-        ? `<div class="field"><label>Lương cứng / tháng (đ)</label><input type="number" id="nvFixedSalary" value="${editing ? (editing.fixedMonthlySalary||0) : 0}"></div>`
+        ? `<div class="field"><label>Lương cứng / tháng (đ)</label><input type="number" id="nvFixedSalary" value="${editing ? (editing.fixedMonthlySalary||0) : 0}"></div>${nvHomeStoreField(editing)}`
         : `<div class="field"><label>Đơn giá / giờ (đ)</label><input type="number" id="nvHourlyRate" value="${editing ? (editing.hourlyRate||0) : 0}"></div>`}
       ${isHourly ? `
       <div class="field">
@@ -16578,7 +16591,7 @@ function payTypeLabel(e){
     : '';
   if(e.payType==='hourly_full') return `${fmt(e.hourlyRate||0)}/giờ (Full-time)${otNote}`;
   if(e.payType==='hourly_part') return `${fmt(e.hourlyRate||0)}/giờ (Part-time)${otNote}`;
-  if(e.payType==='fixed') return `${fmt(e.fixedMonthlySalary||0)}/tháng (lương cứng)`;
+  if(e.payType==='fixed') return `${fmt(e.fixedMonthlySalary||0)}/tháng (lương cứng${qlActiveStores().length>1 || (e.homeStore&&e.homeStore!=='gg01') ? ' · quán chính '+(e.homeStore||'gg01').toUpperCase() : ''})`;
   // [FIX] TRƯỚC ĐÂY: mọi payType khác 'hourly_full'/'hourly_part' (kể cả
   // null/undefined — nhân viên mới tạo chưa lưu Hình thức lương) đều bị coi
   // NGẦM là "lương cứng, 0đ/tháng" — trông như dữ liệu hợp lệ nên không ai phát
@@ -16592,6 +16605,18 @@ function payTypeLabel(e){
 // Nếu để 'fixed' thì nó luôn truthy và sẽ đè lên payType của nhân viên đang sửa.
 // otEnabled cũng khởi tạo null với cùng lý do (xem ghi chú ở renderEntryNv).
 let nvFormDraft = { payType: null, otEnabled: null, roles: null };
+// [ĐA CỬA HÀNG] Quán chính của nhân viên lương cứng — lương cứng chỉ tính vào lãi/lỗ + bảng lương của quán này
+// (empFixedPayHere). Chỉ hiện khi có từ 2 quán (hoặc người này đã gắn quán khác GG01); một quán thì như cũ.
+function nvHomeStoreField(editing){
+  // Người đã có: thiếu homeStore = GG01 (đúng như empFixedPayHere đang tính); người mới: mặc định quán đang xem.
+  const cur = nvFormDraft.homeStore || (editing ? (editing.homeStore || 'gg01') : (QL_ALL ? 'gg01' : QL_VIEW));
+  const ds = qlActiveStores();
+  if(ds.length < 2 && cur === 'gg01') return '';
+  const ids = ds.map(x=>x.id); if(!ids.includes(cur)) ids.push(cur);
+  return `<div class="field"><label>Quán chính (tính lương cứng)</label>
+    <select id="nvHomeStore" onchange="nvFormDraft.homeStore=this.value">${ids.sort().map(id=>`<option value="${id}" ${id===cur?'selected':''}>${escapeHtmlAttr(qlStoreName(id))} · ${id.toUpperCase()}</option>`).join('')}</select>
+    <div class="small-note">Lương cứng của người này chỉ tính vào lãi/lỗ và bảng lương của quán chính. Làm ca ở quán khác vẫn chấm công bình thường.</div></div>`;
+}
 async function submitEmployeeForm(){
   const fullName = (document.getElementById('nvFullName').value||'').trim();
   const pin = (document.getElementById('nvPin').value||'').trim();
@@ -16600,6 +16625,7 @@ async function submitEmployeeForm(){
   let payInfo;
   if(payType==='fixed'){
     payInfo = { payType, fixedMonthlySalary: Number(document.getElementById('nvFixedSalary').value)||0, hourlyRate: 0, otEnabled:false, otThresholdHours:0, otRate:0 };
+    const hs = document.getElementById('nvHomeStore'); if(hs && hs.value) payInfo.homeStore = hs.value;
   } else {
     const otEnabledVal = !!(document.getElementById('nvOtEnabled') && document.getElementById('nvOtEnabled').checked);
     const otThresholdHours = otEnabledVal ? (Number(document.getElementById('nvOtThreshold').value)||8) : 0;
@@ -17496,7 +17522,7 @@ async function storeCreate(laQuanNay){
     const cur = GieoData.storeId();
     const id = laQuanNay ? cur : 'gg' + String(list.reduce((m,x)=>Math.max(m, Number(x.id.slice(2))||0), 1)+1).padStart(2,'0');
     if(list.some(x => x.id === id)){ toast('⚠️ ' + id.toUpperCase() + ' đã có'); renderEntryStores(); return; }
-    if(!laQuanNay && !confirm(`Tạo cửa hàng ${id.toUpperCase()} — "${name}"?\n\nChép danh mục nguyên liệu / bán thành phẩm (tồn = 0), quy tắc refill, vị trí kho từ quán này sang.`)) return;
+    if(!laQuanNay && !confirm(`Tạo cửa hàng ${id.toUpperCase()} — "${name}"?\n\nChép danh mục nguyên liệu / bán thành phẩm (tồn = 0), quy tắc refill, vị trí kho, các ngưỡng cài đặt (lệch kiểm kê, dung sai tiền mặt, tiền đầu ca) từ quán này sang.`)) return;
     const code = storeNewCode(new Set(list.map(x => x.code)));
     const now = new Date().toISOString();
     const ref = fstore.collection('stores_gieogieo').doc(id);
@@ -17507,6 +17533,11 @@ async function storeCreate(laQuanNay){
       toast('⏳ Đang chép danh mục sang ' + id.toUpperCase() + '…');
       const dem = await GieoData.seedNewStore(id);
       await ref.update({ catalogReady: true, seededAt: new Date().toISOString(), seedCounts: dem });
+      // Cài đặt tài chính (finance_gieogieo, riêng quán): chép các NGƯỠNG vận hành của quán đang xem — không chép vốn
+      // đầu tư / quỹ / mốc thu hồi vốn (của riêng từng quán, khai ở Mục tiêu ▸ Tài chính khi xem quán mới).
+      const nguong = {};
+      FINANCE_COPY_FIELDS.forEach(k => { if(FINANCE[k] !== undefined) nguong[k] = FINANCE[k]; });
+      await GieoData.collFor('finance_gieogieo', id).doc('current').set({ ...nguong, copiedFrom: cur, copiedAt: new Date().toISOString() }, { merge: true });
       await GieoData.stores(true);
       await GieoData.catalogDiff(true);
     }
@@ -18483,12 +18514,15 @@ async function renderEntryLuong(){
   }
   catch(err){ console.warn('computeActualLaborCostByDate/Breakdown failed', err); }
   const totalMonth = Object.values(byDate).reduce((s,v)=>s+v,0);
+  const nhieuQuan = qlMultiStore();
+  const empsDangLam = employees.filter(e=>e.active!==false);
+  const empsQuan = empsDangLam.filter(e=>qlEmpThuocQuan(e, byEmp[e.id], null, 0));   // [ĐA CỬA HÀNG] chỉ người có ca / lương ở quán này
 
   body.innerHTML = `
     <div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:10px;">
         <div style="flex:1;min-width:0;">
-          <div style="font-size:15px;font-weight:650;color:var(--td);line-height:1.4;">Dùng Labor cost TÍNH THẬT từ chấm công</div>
+          <div style="font-size:15px;font-weight:650;color:var(--td);line-height:1.4;">Dùng Labor cost TÍNH THẬT từ chấm công${nhieuQuan ? ' <span class="small-note">(chung mọi cửa hàng)</span>' : ''}</div>
           <div style="font-size:12.5px;color:var(--gt);margin-top:3px;">thay cho ước lượng thủ công ở tab COGS/Mục tiêu</div>
         </div>
         <div class="togo-toggle-wrap ${HR_SETTINGS.useActualLaborCost?'active':''}" style="flex-shrink:0"
@@ -18509,9 +18543,11 @@ async function renderEntryLuong(){
     </div>
     <div class="sec-title">Chi tiết lương tháng ${m}/${y}</div>
     <div class="card">
-      <div class="row"><span class="rl"><b>Tổng Labor cost tháng này</b></span><span class="rv"><b>${fmt(totalMonth)}</b></span></div>
+      <div class="row"><span class="rl"><b>Tổng Labor cost tháng này${nhieuQuan ? ' · ' + QL_VIEW.toUpperCase() : ''}</b></span><span class="rv"><b>${fmt(totalMonth)}</b></span></div>
+      ${nhieuQuan ? '<div class="small-note">Chỉ tính lương ở cửa hàng này: lương giờ theo ca chấm công tại đây, lương cứng của người có quán chính là cửa hàng này (đặt ở Nhân viên).</div>' : ''}
     </div>
-    ${employees.filter(e=>e.active!==false).map(e=>{
+    ${empsQuan.length < empsDangLam.length ? `<div class="small-note" style="margin:0 2px 8px">Ẩn ${empsDangLam.length - empsQuan.length} nhân viên không có ca hay lương ở ${QL_VIEW.toUpperCase()} tháng này.</div>` : ''}
+    ${empsQuan.map(e=>{
       const b = byEmp[e.id] || {hours:0, otHours:0, amount:0};
       const isHourly = e.payType==='hourly_full'||e.payType==='hourly_part';
       const otNote = (isHourly && b.otHours>0) ? ` · trong đó <span style="color:var(--warn);font-weight:700">${fmtNum(b.otHours,1)}h OT</span>` : '';
@@ -18743,6 +18779,18 @@ async function computeThangKetSoNgayCong(startKey, endKey){
 }
 
 // ---------- Thưởng/phạt + lương thực nhận — chủ quán tự khai, lưu theo tháng ----------
+// [ĐA CỬA HÀNG] Nhân viên dùng chung mọi quán — Lương / Tổng kết tháng của MỘT quán chỉ liệt kê người có dính
+// tới quán đó trong kỳ: có giờ / ngày công / tiền ở quán này, lương cứng tính cho quán này (quán chính), hoặc đã có
+// thưởng / phạt / lương thực nhận lưu ở đây. Chỉ một quán (GG01) → giữ nguyên danh sách như cũ.
+function qlEmpThuocQuan(e, b, adj, soNgayCong){
+  if(qlActiveStores().length < 2 && QL_VIEW === 'gg01') return true;
+  if(b && ((Number(b.amount)||0) > 0 || (Number(b.hours)||0) > 0)) return true;
+  if((Number(soNgayCong)||0) > 0) return true;
+  if(isFixedPayType(e) && empFixedPayHere(e)) return true;
+  return !!(adj && (((adj.thuong||[]).length) || ((adj.phat||[]).length) || adj.finalPay != null));
+}
+// payroll_month_adjustments_gieogieo là dữ liệu RIÊNG TỪNG QUÁN (data_access.v4): thưởng / phạt / lương thực nhận
+// nhập ở quán nào nằm ở quán đó — GG01 giữ nguyên sổ cũ.
 function thangKetAdjDocId(employeeId, monthKey){ return employeeId + '_' + monthKey; }
 async function thangKetLoadAdjustments(monthKey, emps){
   thangKetAdjust = {};
@@ -19114,8 +19162,10 @@ async function renderThangKet(){
 
     await thangKetLoadAdjustments(thangKetMonth, emps);
 
+    const empsDangLam = (emps||[]).filter(e=>e.active!==false);
+    const empsQuan = empsDangLam.filter(e=>qlEmpThuocQuan(e, (empBreakdown||{})[e.id], thangKetAdjust[e.id], (soNgayCongByEmp||{})[e.id]));
     thangKetData = { y, m, start, end, monthEnd, startKey, endKey,
-      emps: (emps||[]).filter(e=>e.active!==false), empBreakdown, soNgayCongByEmp,
+      emps: empsQuan, empAn: empsDangLam.length - empsQuan.length, empBreakdown, soNgayCongByEmp,
       mix, khoExtra, plTong, plDays, plBook, expAll, cashVar };
 
     thangKetRedraw();
@@ -19190,6 +19240,7 @@ function thangKetRedraw(){
     <div id="thangKetResponsibilityBox">${d.khoExtra?thangKetResponsibilityHTML():'<div class="card"><div class="muted">Không đọc được sổ NL tháng này.</div></div>'}</div>
     ${thangKetCashVarSummaryHTML()}
     ${d.emps.length ? d.emps.map(e=>thangKetEmployeeCardHTML(e, tongGioTeam)).join('') : '<div class="card"><div class="empty-hint">Chưa có nhân viên đang hoạt động.</div></div>'}
+    ${d.empAn ? `<div class="small-note" style="margin:6px 2px">Ẩn ${d.empAn} nhân viên không có ca, lương hay thưởng/phạt ở ${QL_VIEW.toUpperCase()} trong tháng này.</div>` : ''}
   `;
 
   body.innerHTML = head + taiChinh + banHang + kho + nhanSu;
@@ -19614,6 +19665,7 @@ async function buildExportPayload(mode){
     // tới hoặc chưa có giao dịch nào — KHÔNG được hiểu là bán 0.
     du_bao_va_thuc_te: duBaoDoiChieu,
     _taoLuc: new Date().toISOString(),
+    _cuaHang: { id: QL_VIEW, ten: qlStoreName(QL_VIEW) },
     _khoang: { tuNgay: startKey, denNgay: endKey, soNgay: dates.length },
     _cheDo: mode,
     _loiKhiDoc: errors,
@@ -19790,8 +19842,10 @@ function _expTomTatSoLech(rows){
   return out;
 }
 
+// [ĐA CỬA HÀNG] Có từ 2 quán: tên file + nội dung ghi mã quán — file của GG01 và GG02 không trùng tên, đọc là biết quán nào.
+function _expQuanTag(){ return qlMultiStore() ? QL_VIEW + '-' : ''; }
 function _expFileName(mode){
-  return `gieo-${mode==='full'?'daydu':'gon'}-${exportFrom}_den_${exportTo}.json`;
+  return `gieo-${_expQuanTag()}${mode==='full'?'daydu':'gon'}-${exportFrom}_den_${exportTo}.json`;
 }
 function _expSizeLabel(str){
   const kb = str.length / 1024;
@@ -20205,7 +20259,8 @@ function renderAuditLogList(logs){
   const actionLabel = {approve:['Duyệt','green'], reject:['Từ chối','red'], cancel:['Huỷ','amber']};
   el.innerHTML = logs.length ? logs.map(l=>{
     const [label,color] = actionLabel[l.action] || [l.action,'blue'];
-    return `<div class="row"><span class="rl"><span class="tier tier-${color}" style="margin-right:6px">${label}</span>${l.entity}${l.entityId?(' · '+l.entityId.slice(0,8)):''}</span><span class="rv small-note">${(l.createdAt||'').replace('T',' ').slice(0,16)}</span></div>`;
+    const quan = qlMultiStore() ? `<span class="tier tier-blue" style="margin-right:6px">${escapeHtmlAttr(String(l.storeId||'gg01').toUpperCase())}</span>` : '';
+    return `<div class="row"><span class="rl">${quan}<span class="tier tier-${color}" style="margin-right:6px">${label}</span>${l.entity}${l.entityId?(' · '+l.entityId.slice(0,8)):''}</span><span class="rv small-note">${(l.createdAt||'').replace('T',' ').slice(0,16)}</span></div>`;
   }).join('') : '<div class="muted">Chưa có nhật ký nào.</div>';
 }
 async function renderAuditEmployeeActivity(){
@@ -26583,10 +26638,14 @@ function renderEntryTarget(){
   const body = document.getElementById('entryBody');
   const t = CONFIG.targets, l = CONFIG.labor, f = FINANCE;
   const todayKey = dkey(new Date());
+  // [ĐA CỬA HÀNG] Target KPI + Cấu hình Labor (config_history) DÙNG CHUNG mọi quán; Target nhân viên + Tài chính riêng quán.
+  const nhieuQuan = qlMultiStore();
+  const chung = nhieuQuan ? ' <span class="small-note" style="font-weight:600">· chung mọi cửa hàng</span>' : '';
+  const rieng = nhieuQuan ? ` <span class="small-note" style="font-weight:600">· riêng ${QL_VIEW.toUpperCase()}</span>` : '';
   body.innerHTML = `
     <div class="small-note" style="margin-bottom:10px">Target & Labor được lưu theo <b>lịch sử áp dụng</b> — mỗi lần lưu sẽ tạo 1 phiên bản mới có hiệu lực từ ngày bạn chọn. Khi xem Sức khỏe/Báo cáo của ngày/tháng cũ, app sẽ tự dùng đúng phiên bản đang hiệu lực ở thời điểm đó, không bị đè bởi số liệu mới nhất.</div>
 
-    <div class="sec-title">Target KPI</div>
+    <div class="sec-title">Target KPI${chung}</div>
     <div class="card">
       <div class="field"><label>Áp dụng từ ngày</label><input type="date" id="cfgEffFrom" value="${todayKey}"></div>
       <div class="grid2">
@@ -26607,7 +26666,7 @@ function renderEntryTarget(){
       </div>
     </div>
 
-    <div class="sec-title">Cấu hình Labor</div>
+    <div class="sec-title">Cấu hình Labor${chung}</div>
     <div class="card">
       <div class="field"><label>Full-time (đ/tháng)</label><input type="number" id="lFT" value="${l.fulltimeCost}"></div>
       <div class="grid2">
@@ -26622,10 +26681,10 @@ function renderEntryTarget(){
     <div class="sec-title">Lịch sử áp dụng</div>
     <div class="card" id="cfgHistoryList"></div>
 
-    <div class="sec-title">Target nhân viên (động lực)</div>
+    <div class="sec-title">Target nhân viên (động lực)${rieng}</div>
     <div class="card" id="stCard"><div class="muted">Đang tải…</div></div>
 
-    <div class="sec-title">Tài chính</div>
+    <div class="sec-title">Tài chính${rieng}</div>
     <div class="card">
       <div class="field"><label>Cash reserve hiện có (đ)</label><input type="number" id="fCash" value="${f.cashReserve}"></div>
       <div class="field"><label>Vốn đầu tư ban đầu (đ) <span class="small-note">— để trống/0 để tự tính từ tổng CAPEX</span></label><input type="number" id="fInv" value="${f.initialInvestment}"></div>
@@ -28824,6 +28883,12 @@ async function assistRebuildStats() {
 // tính năng, cho khách cũ cũng có hồ sơ ngay thay vì phải đợi họ quay lại đủ
 // vài lần. Ghi theo lô 400 doc — Firestore giới hạn 500 thao tác một batch.
 async function assistRebuildProfiles() {
+  // [ĐA CỬA HÀNG] Hồ sơ nằm trên doc customers DÙNG CHUNG mọi quán (POS mỗi quán tự cộng dồn sau mỗi đơn), còn bill
+  // ở đây chỉ là bill của quán đang xem → dựng lại sẽ GHI ĐÈ, xoá phần thói quen khách đã có ở quán khác. Có từ 2 quán: khoá.
+  if (qlActiveStores().length > 1 || QL_VIEW !== 'gg01') {
+    alert('Đã khoá khi có từ 2 cửa hàng.\n\nHồ sơ thói quen khách dùng chung mọi cửa hàng và POS đã tự cộng dồn sau mỗi đơn. Dựng lại từ bill của một cửa hàng sẽ xoá phần thói quen khách đã có ở cửa hàng khác.');
+    return;
+  }
   const days = Math.max(7, Math.min(180, Number(document.getElementById('assistBuildDays').value) || 60));
   if (!confirm(`Dựng lại hồ sơ thói quen từ ${days} ngày gần nhất?\n\nHồ sơ hiện có của những khách xuất hiện trong khoảng này sẽ bị GHI ĐÈ bằng số đọc được.`)) return;
   const btn = document.getElementById('assistBtnProfile');

@@ -3,11 +3,11 @@
 const { extract } = require('./lib/extract');
 let ok = true;
 const eq = (a, b, m) => { if (JSON.stringify(a) !== JSON.stringify(b)) { ok = false; console.log('FAIL', m, JSON.stringify(a), '!=', JSON.stringify(b)); } else console.log('ok', m); };
-const names = ['payTermsOfRecord', 'empPayTermsOn', 'computeWageForDayHours', 'isFixedPayType', 'isShiftInProgress', 'shiftWorkedHours', 'computeActualLaborCostByDate', 'computeActualLaborBreakdownByEmployee', 'plPredictedLaborByDate'];
+const names = ['payTermsOfRecord', 'empPayTermsOn', 'computeWageForDayHours', 'isFixedPayType', 'empFixedPayHere', 'isShiftInProgress', 'shiftWorkedHours', 'computeActualLaborCostByDate', 'computeActualLaborBreakdownByEmployee', 'plPredictedLaborByDate'];
 const src = extract('quanlygieo.html', names);
-const build = (employees, shifts) => {
+const build = (employees, shifts, quan) => {
   const dkey = d => d.toISOString().slice(0, 10);
-  const stubs = { dkey, daysInMonth: d => new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate(), plScheduledHours: s => s.hours, loadEmployees: async () => employees,
+  const stubs = { dkey, QL_VIEW: quan || 'gg01', GieoData: { storeId: () => (quan === 'all' ? null : quan || 'gg01') }, daysInMonth: d => new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate(), plScheduledHours: s => s.hours, loadEmployees: async () => employees,
     fstore: { collection: () => ({ where() { return this; }, get: async () => ({ docs: shifts.map(s => ({ data: () => s })) }) }) } };
   const ks = Object.keys(stubs);
   return new Function(...ks, src + '\nreturn {empPayTermsOn, computeActualLaborCostByDate, computeActualLaborBreakdownByEmployee, plPredictedLaborByDate};')(...ks.map(k => stubs[k]));
@@ -80,6 +80,20 @@ const P = (o) => ({ payType: 'hourly_full', hourlyRate: 20000, otEnabled: true, 
     const cur2 = { ...cur, hourlyRate: 21000, otRate: 25000, payHistory: hist };
     const c = mkForm(cur2, { rate: 22000, ot: 25000, from: '2027-01-01' }); await c.run();
     eq([c.saved[0].payHistory.map(h => h.effectiveFrom), c.saved[0].hourlyRate], [['0000-00-00', '2026-11-01', '2027-01-01'], 21000], 'form: mốc tương lai thêm vào lịch sử, mức hiện hành (cấp trên) giữ 21K tới ngày đó');
+  }
+  // ── Đa cửa hàng: lương cứng chỉ tính cho QUÁN CHÍNH (homeStore, thiếu = gg01); lương giờ theo ca của quán đang xem ──
+  {
+    const co = { id: 'c1', active: true, payType: 'fixed', fixedMonthlySalary: 3100000 };          // không khai → gg01
+    const c2 = { id: 'c2', active: true, payType: 'fixed', fixedMonthlySalary: 6200000, homeStore: 'gg02' };
+    const ngay = '2026-10-05';
+    const g1 = await build([co, c2], [], 'gg01').computeActualLaborCostByDate(ngay, ngay);
+    const g2 = await build([co, c2], [], 'gg02').computeActualLaborCostByDate(ngay, ngay);
+    const al = await build([co, c2], [], 'all').computeActualLaborCostByDate(ngay, ngay);
+    eq([g1[ngay], g2[ngay], al[ngay] || 0], [100000, 200000, 0], 'lương cứng: gg01 chỉ tính người quán chính gg01, gg02 chỉ người gg02; tổng 2 quán = đúng 1 lần');
+    const bd2 = await build([co, c2], [], 'gg02').computeActualLaborBreakdownByEmployee(ngay, ngay);
+    eq([bd2.c1 ? bd2.c1.amount : 0, bd2.c2.amount], [0, 200000], 'bảng lương gg02: không có lương cứng của người quán chính gg01');
+    const pr2 = build([co, c2], [], 'gg02').plPredictedLaborByDate([co, c2], [], ngay, ngay);
+    eq(pr2[ngay], 200000, 'lương dự đoán gg02: chỉ lương cứng người gg02');
   }
   console.log(ok ? 'ALL PASS' : 'SOME FAIL'); process.exit(ok ? 0 : 1);
 })().catch(e => { console.log('FAIL exception', e && e.stack); process.exit(1); });
