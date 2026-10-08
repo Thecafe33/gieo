@@ -2380,6 +2380,35 @@ else {
   throw new Error('[GieoData] thiếu data_access.v4.js — dừng app');
 }
 if (!POS_STORE) { posStoreLoginScreen(); throw new Error('[ĐA CỬA HÀNG] máy chưa đăng nhập cửa hàng — app dừng, chờ nhập mã'); }
+// [ĐA CỬA HÀNG] Dữ liệu lưu trên máy (localStorage) gắn với MỘT quán: cache cấu hình in của quán, việc dở (quét NL nấu,
+// đổ ly ghi lỗi, khoá chống trùng đơn đang chờ), gợi ý nấu, bảng tần suất trợ lý, hàng đợi lưu trữ bill. Máy đổi sang
+// quán khác (đăng xuất GG01 → nhập mã GG02, bản thử "Thử cửa hàng khác") thì bỏ hết — để nguyên là in đầu bill của
+// GG01 ở GG02, khôi phục mẻ nấu dở của GG01 sang GG02… Đăng xuất bị chặn khi còn việc dở (posLsViecDo), nên tới
+// đây những việc đó đã xong. Cấu hình in tem đã canh chỉnh theo MÁY IN (pos_tem_*), cấu hình chung chuỗi (khuyến mãi,
+// phí app, trợ lý), hàng đợi tích điểm (khách dùng chung) giữ nguyên. Máy chưa có dấu (bản cũ) → coi là của quán hiện tại.
+const POS_LS_STORE_KEY = 'gieo_ls_store_v1';
+const POS_LS_THEO_QUAN = ['pos_printer_layout_cache', 'gieo_prepStartScanState_v1', 'dwPending_pos', 'pos_pending_checkout_v1',
+  'prepSugHist_v1', 'prepSugLead_v1', 'salesAssistStats_gieogieo', 'pendingArchiveDays_pos', 'lastCleanup_pos', 'lastArchiveRun_pos'];
+(() => {
+  try {
+    const cu = localStorage.getItem(POS_LS_STORE_KEY);
+    if (cu && cu !== POS_STORE.storeId) {
+      POS_LS_THEO_QUAN.forEach(k => localStorage.removeItem(k));
+      console.warn('[ĐA CỬA HÀNG] máy chuyển ' + cu + ' → ' + POS_STORE.storeId + ': đã bỏ dữ liệu lưu trên máy của quán cũ');
+    }
+    if (cu !== POS_STORE.storeId) localStorage.setItem(POS_LS_STORE_KEY, POS_STORE.storeId);
+  } catch (e) {}
+})();
+// Việc còn dở chỉ máy này biết (chưa lên Firestore, gắn với quán) — đăng xuất phải xác nhận bỏ, không im lặng mất.
+// (Hàng đợi tích điểm không gắn quán — khách dùng chung — nên giữ và gửi tiếp ở quán mới.)
+function posLsViecDo() {
+  const co = k => { try { const v = localStorage.getItem(k); if (!v || v === 'null') return false; const j = JSON.parse(v); return Array.isArray(j) ? j.length > 0 : !!j; } catch (e) { return false; } };
+  const ds = [];
+  if (co('pos_pending_checkout_v1')) ds.push('một đơn đang thanh toán dở (chưa xác nhận xong)');
+  if (co('dwPending_pos')) ds.push('một lần đổ ly ghi chưa xong');
+  if (co('gieo_prepStartScanState_v1')) ds.push('một mẻ nấu đang quét nguyên liệu dở');
+  return ds;
+}
 // [E1] Khởi tạo Unit Engine. Thiếu file engine (mạng chập lúc tải) → banner đỏ + tự tải lại sau
 // 5 giây; KHÔNG có nhánh chặn bán nào khác (D17, mục 6.3 kế hoạch).
 if (window.UnitEngine) {
@@ -8449,8 +8478,7 @@ async function openWasteScreen() {
       fstore.collection('prep_items_gieogieo').get(),
       loadPrepBatchesPOS()
     ]);
-    PREP_ITEMS_CACHE_POS = psnap.docs.map(d => ({ id: d.id, ...d.data() }))
-      .filter(x => x.active !== false)
+    PREP_ITEMS_CACHE_POS = psnap.docs.map(d => ({ id: d.id, ...d.data() }))   // ĐỦ cả BTP ngừng dùng — xem POS_PREP_CON_DUNG
       .sort((a, b) => String(a.code || '').localeCompare(String(b.code || ''), 'vi'));
     // [MỚI] Dụng cụ đựng để huỷ bằng hình thức cân.
     await ensurePrepVesselsPOS();
@@ -9713,6 +9741,10 @@ function weighSummaryHTML(lines, unit, onRedo) {
 // tách làm hai, muốn xem toàn cảnh phải đọc 2 collection.
 // ============================================================
 let PREP_ITEMS_CACHE_POS = [];
+// [NGỪNG SỬ DỤNG] PREP_ITEMS_CACHE_POS giữ ĐỦ mọi BTP, kể cả Quản lý đã "Ngừng sử dụng" (active === false): engine dò
+// "mã này là BTP?" qua getPreps (_ueIsPrepId) và mọi màn tra lô đang mở / đối chiếu / hao hụt tìm BTP theo mã — thiếu là
+// trừ kho nhầm sang nguyên liệu. Chỉ chỗ BẮT ĐẦU NẤU MẺ MỚI (chọn món, gợi ý nấu) bỏ BTP ngừng dùng — trừ món đang chọn dở.
+function POS_PREP_CON_DUNG(dangChon) { return PREP_ITEMS_CACHE_POS.filter(x => x.active !== false || (dangChon && x.id === dangChon)); }
 // [GĐ2] ratio thay cho batches: cho nấu 0,4 mẻ / 0,75 mẻ... Định lượng nguyên liệu
 // giữ NGUYÊN SỐ LẺ (quán có cân tiểu ly), không làm tròn — làm tròn sẽ sai đáng kể
 // với nguyên liệu định lượng nhỏ khi nấu mẻ nhỏ.
@@ -10021,7 +10053,7 @@ async function _prepSugRefreshImpl() {
   if (!_prepSug.usedReady || _prepSug.usedDay !== posDateKey()) await _prepSugInitUsed();
   if (!PREP_ITEMS_CACHE_POS.length) {
     const ps = await fstore.collection('prep_items_gieogieo').get();
-    PREP_ITEMS_CACHE_POS = ps.docs.map(d => ({ id: d.id, ...d.data() })).filter(p => p.active !== false)
+    PREP_ITEMS_CACHE_POS = ps.docs.map(d => ({ id: d.id, ...d.data() }))
       .sort((a, b) => String(a.code || '').localeCompare(String(b.code || ''), 'vi'));
   }
   if (typeof ensureKhoItemsPOS === 'function') await ensureKhoItemsPOS().catch(() => {});
@@ -10031,7 +10063,7 @@ async function _prepSugRefreshImpl() {
   const full = _prepSug.full || Date.now() - _prepSug.rtAt > 10 * 60000 || new Date(_prepSug.rtAt).getDate() !== now.getDate();
   const touched = _prepSug.touched; _prepSug.touched = new Set(); _prepSug.full = false;
   if (full) _prepSug.rtAt = Date.now();
-  for (const prep of PREP_ITEMS_CACHE_POS) {
+  for (const prep of POS_PREP_CON_DUNG()) {
     const dm = prepSugDemand(_prepSug.sums, prep.id);
     if (dm.n < PREP_SUG.minDays || !(dm.d > 0)) continue;
     if (full || touched.has(prep.id) || !_prepSug.rt[prep.id]) {
@@ -10113,7 +10145,6 @@ async function openPrepBatchScreen() {
       fstore.collection('inventory_items_gieogieo').get()
     ]);
     PREP_ITEMS_CACHE_POS = prepSnap.docs.map(d => ({ id: d.id, ...d.data() }))
-      .filter(p => p.active !== false)
       .sort((a, b) => String(a.code || '').localeCompare(String(b.code || ''), 'vi'));
     KHO_ITEMS_CACHE = itemSnap.docs.map(d => ({ id: d.id, ...d.data() }));
   } catch (err) {
@@ -10137,7 +10168,7 @@ async function openPrepBatchScreen() {
   // ngay, ảnh về sau; chờ ảnh ở đây là bắt bếp đứng nhìn màn trắng.
   await ensurePrepVesselsPOS();
   preloadVesselImagesPOS(PREP_ITEMS_CACHE_POS.map(x => x.id));
-  const first = PREP_ITEMS_CACHE_POS[0];
+  const first = POS_PREP_CON_DUNG()[0] || PREP_ITEMS_CACHE_POS[0];
   prepBatchState = { prepId: first.id, ratio: 1, actualYield: Number(first.batchYield) || 0 };
   _prepSugLearnLead(PREP_BATCHES_CACHE_POS);
   const pre = window._prepSugPreselect; window._prepSugPreselect = null;
@@ -10389,7 +10420,7 @@ function renderPrepBatchForm() {
       <div class="wal-section-title">Thành phẩm cần nấu</div>
       <div class="wal-input-group" style="padding:4px 14px;">
         <select onchange="prepBatchSelect(this.value)" style="width:100%;border:none;outline:none;font-family:'Google Sans',sans-serif;font-size:15px;font-weight:600;color:var(--td);background:transparent;padding:10px 0;">
-          ${PREP_ITEMS_CACHE_POS.map(x => `<option value="${x.id}" ${x.id === p.id ? 'selected' : ''}>${x.code || ''} · ${x.name || ''}</option>`).join('')}
+          ${POS_PREP_CON_DUNG(p.id).map(x => `<option value="${x.id}" ${x.id === p.id ? 'selected' : ''}>${x.code || ''} · ${x.name || ''}</option>`).join('')}
         </select>
       </div>
       <div style="font-size:11.5px;color:#999;margin-top:8px;">1 mẻ ra ${Number(p.batchYield || 0).toLocaleString('vi-VN')} ${p.unit || ''} · HSD ${prepExpiryLabel({ shelfLifeType: p.shelfLifeType, shelfLifeHours: p.shelfLifeHours, expiresAt: null })}${Number(p.prepTimeMinutes) > 0 ? ` · nấu ~${p.prepTimeMinutes} phút` : ''}</div>
@@ -17700,7 +17731,7 @@ async function computePrepCountLinesPOS() {
   try {
     if (!PREP_ITEMS_CACHE_POS.length) {
       const psnap = await fstore.collection('prep_items_gieogieo').get();
-      PREP_ITEMS_CACHE_POS = psnap.docs.map(d => ({ id: d.id, ...d.data() })).filter(x => x.active !== false);
+      PREP_ITEMS_CACHE_POS = psnap.docs.map(d => ({ id: d.id, ...d.data() }));
     }
     await ensurePrepVesselsPOS();
   } catch (err) { console.warn('[Đếm BTP] không nạp được dụng cụ (vẫn gõ tay được):', err); }
@@ -21166,7 +21197,7 @@ function poReceiveAddFreeLine() {
   const usedIds = poReceiveState.lines.map(l => l.itemId);
   dsOpenItemPicker({
     title: 'Thêm nguyên liệu',
-    items: KHO_ITEMS_CACHE,
+    items: KHO_ITEMS_CACHE.filter(x => x.active !== false),   // [NGỪNG SỬ DỤNG] Quản lý đã ngừng → không nhập mới
     excludeIds: usedIds,
     onPick(it) {
       // [FIX "nhập 1 lon thành 1g"] Mặc định đơn vị lớn nhất đã khai (Lon/Thùng/Chai...),
@@ -21208,7 +21239,7 @@ function poReceiveOpenItemPicker(idx) {
   const usedIds = poReceiveState.lines.filter((x, i) => i !== idx).map(x => x.itemId);
   dsOpenItemPicker({
     title: 'Đổi nguyên liệu',
-    items: KHO_ITEMS_CACHE,
+    items: KHO_ITEMS_CACHE.filter(x => x.active !== false),
     excludeIds: usedIds,
     onPick(it) { poReceiveLineChangeItem(idx, it.id); }
   });
@@ -22215,6 +22246,9 @@ function posStoreLoginScreen(coTheDong) {
         sai++; if (sai >= 5) { khoaDen = Date.now() + 30000; sai = 0; }
         msg('Mã không đúng, hoặc cửa hàng đã ngừng hoạt động'); return;
       }
+      // Quán mới tạo ở Quản lý mà chưa chép xong danh mục (mạng đứt giữa chừng) → KHÔNG cho vào bán: bán / nhận hàng
+      // trên danh mục thiếu là ghi tồn vào món không tồn tại. Quản lý bấm "Tiếp tục thiết lập" xong thì mã dùng được.
+      if (st.catalogReady === false) { msg('Cửa hàng ' + st.id.toUpperCase() + ' đang được thiết lập ở Quản lý — chờ thiết lập xong rồi nhập lại mã'); return; }
       msg('');
       $('psConfirm').innerHTML = '<div style="margin-top:16px;padding:16px;border-radius:14px;background:#fdf1f3;border:1px solid #f3c6cf;text-align:left">'
         + '<div style="font-size:11.5px;color:#C22B49;font-weight:800;letter-spacing:.5px">MÁY NÀY SẼ LÀ POS CỦA CỬA HÀNG</div>'
@@ -22277,6 +22311,8 @@ function posStoreLogout() {
   if (!POS_STORE || POS_STORE.thu) return;
   if (Object.keys(cart || {}).length) { toast('🚫 Giỏ đang có món — thanh toán hoặc xoá giỏ trước khi đăng xuất cửa hàng'); return; }
   if (_vietqrOrderId) { toast('🚫 Đang chờ khách chuyển khoản — xong đơn rồi mới đăng xuất cửa hàng'); return; }
+  const viecDo = posLsViecDo();
+  if (viecDo.length && !confirm('Máy này còn việc dở chưa gửi lên hệ thống:\n\n• ' + viecDo.join('\n• ') + '\n\nNên làm cho xong rồi mới đăng xuất. Đăng xuất bây giờ thì các việc này BỊ BỎ (không chuyển sang quán khác).\n\nVẫn đăng xuất?')) return;
   const o = document.createElement('div');
   o.id = 'posStoreLogout';
   o.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px';

@@ -101,7 +101,7 @@ const posFns = (fake, UE) => {
   {
     const fake = makeFake({ rt: {}, fs: { [PB + '/c1']: { prepId: 'P', status: 'cooking', batchRatio: 2, qtyInitial: 0 } } });
     const UE = initUE(fake);
-    const src = extract('posgieo.html', ['_prepSugRefreshImpl']);
+    const src = extract('posgieo.html', ['_prepSugRefreshImpl', 'POS_PREP_CON_DUNG']);
     const seen = [];
     const stubs = { fstore: fake.fstore, db: fake.db, UnitEngine: UE, posDateKey: () => '2026-10-01',
       prepSugLoadHistory: async () => {}, _prepSugInitUsed: async () => {}, ensureKhoItemsPOS: async () => {},

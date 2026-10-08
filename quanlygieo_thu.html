@@ -2701,8 +2701,10 @@ async function loadPosMenu(kind){
 // đệm. Xoá cả bộ đệm nghĩa là lần mở màn sau phải tải lại bill + ghi lại MỌI ngày (Thu
 // hồi vốn trải tới 730 ngày), nên chỗ nào biết chắc chỉ một khoảng ngày bị ảnh hưởng thì
 // truyền khoảng vào. Không truyền gì = xoá hết như cũ.
-async function clearSalesCache(fromKey, toKey){
-  let q = fstore.collection('daily_sales_cache_gieogieo');
+// storeId (tuỳ chọn, đa cửa hàng): xoá bộ đệm của quán khác quán đang xem — xem invalidateSalesCache.
+async function clearSalesCache(fromKey, toKey, storeId){
+  let q = (storeId && window.GieoData && storeId !== GieoData.storeId())
+    ? GieoData.collFor('daily_sales_cache_gieogieo', storeId) : fstore.collection('daily_sales_cache_gieogieo');
   if(fromKey) q = q.where(firebase.firestore.FieldPath.documentId(), '>=', fromKey);
   if(toKey)   q = q.where(firebase.firestore.FieldPath.documentId(), '<=', toKey);
   const snap = await q.get();
@@ -2730,11 +2732,16 @@ async function clearSalesCache(fromKey, toKey){
 async function invalidateSalesCache(reason, fromKey){
   // Đổi giá/định mức → mọi giá vốn dẫn xuất đã nhớ đều hết hạn.
   _costMemo = {};
-  try{
-    const n = await clearSalesCache(fromKey);
-    if(n) console.info(`[cache] Đã xoá ${n} ngày cache do đổi cấu hình: ${reason||''}`);
-  }catch(err){
-    console.warn('[cache] Xoá cache tự động thất bại (không ảnh hưởng dữ liệu vừa lưu) —', reason, err);
+  // [ĐA CỬA HÀNG] Định mức, giá NL, bao bì, GOGS topping… DÙNG CHUNG mọi quán → bộ đệm doanh thu của MỌI quán
+  // đều hết hạn, không chỉ quán đang xem (trước đây GG02 giữ giá vốn cũ trong cache tới khi có người tự xoá).
+  const ds = (typeof QL_STORES !== 'undefined' && QL_STORES.length > 1) ? QL_STORES.map(x=>x.id) : [null];
+  for(const id of ds){
+    try{
+      const n = await clearSalesCache(fromKey, undefined, id);
+      if(n) console.info(`[cache] Đã xoá ${n} ngày cache${id?' ('+id+')':''} do đổi cấu hình: ${reason||''}`);
+    }catch(err){
+      console.warn('[cache] Xoá cache tự động thất bại (không ảnh hưởng dữ liệu vừa lưu) —', id||'', reason, err);
+    }
   }
 }
 
@@ -6430,6 +6437,9 @@ function updateInventoryItemMeta(id, data){
   memoDropItems();
   return fstore.collection('inventory_items_gieogieo').doc(id).update({...data, updatedAt: new Date().toISOString()});
 }
+// [NGỪNG SỬ DỤNG] Danh sách cho Ô CHỌN NL / BTP: bỏ món đã ngừng sử dụng (active === false) — trừ món đang được chọn
+// sẵn ở dòng cũ (giữ để dòng đó không mất tên / không tự đổi sang món khác).
+function conDung(list, dangChon){ return (list||[]).filter(x => x && (x.active !== false || (dangChon && x.id === dangChon))); }
 function deleteInventoryItem(id){
   memoDropItems();
   return fstore.collection('inventory_items_gieogieo').doc(id).delete();
@@ -10026,7 +10036,7 @@ async function renderKhoBtpAm(){
   const optAll = (exceptKind, exceptId) =>
     `<optgroup label="Bán thành phẩm">${preps.filter(p=>p.active!==false && !(exceptKind==='prep'&&p.id===exceptId))
       .map(p=>`<option value="prep:${p.id}">${escapeHtmlAttr(p.name||'')}</option>`).join('')}</optgroup>`+
-    `<optgroup label="Nguyên liệu dùng thẳng">${nls.filter(i=>i.stockManaged!==false && !(exceptKind==='item'&&i.id===exceptId))
+    `<optgroup label="Nguyên liệu dùng thẳng">${nls.filter(i=>i.stockManaged!==false && i.active!==false && !(exceptKind==='item'&&i.id===exceptId))
       .map(i=>`<option value="item:${i.id}">${escapeHtmlAttr(i.name||'')}</option>`).join('')}</optgroup>`;
   const nlRows = nls.filter(i=>(i.substitutes||[]).length || btpAmExtraNL.includes(i.id));
   const cfgRow = (kind, o) => `<div class="kx-line" style="margin-bottom:6px;flex-direction:column;align-items:stretch">
@@ -10090,7 +10100,7 @@ async function renderKhoBtpAm(){
       ${preps.filter(p=>p.active!==false).map(p=>cfgRow('prep', p)).join('')}
       ${nlRows.map(i=>cfgRow('item', i)).join('')}
       <div style="display:flex;gap:6px;margin-top:10px">
-        <select id="baAddNL" style="flex:1"><option value="">+ Thêm nguyên liệu dùng thẳng làm topping…</option>${nls.filter(i=>i.stockManaged!==false && !nlRows.includes(i)).map(i=>`<option value="${i.id}">${escapeHtmlAttr(i.name||'')}</option>`).join('')}</select>
+        <select id="baAddNL" style="flex:1"><option value="">+ Thêm nguyên liệu dùng thẳng làm topping…</option>${nls.filter(i=>i.stockManaged!==false && i.active!==false && !nlRows.includes(i)).map(i=>`<option value="${i.id}">${escapeHtmlAttr(i.name||'')}</option>`).join('')}</select>
         <button class="btn outline sm" onclick="const v=document.getElementById('baAddNL').value;if(v){btpAmExtraNL.push(v);renderKhoBtpAm();}">Thêm</button>
       </div>
     </div>`;
@@ -12489,7 +12499,7 @@ async function computeStoreHealth(){
     const neg = items.filter(it=>itemStockManaged(it) && Number(it.currentStock)<0);
     if(neg.length) push('red', 'Nguyên liệu có tồn kho ÂM', neg.length, `goKho('items','negative')`, false, 'kho');
     // 🟡 dưới ngưỡng cảnh báo — nên xem, chưa phải cháy nhà
-    const low = items.filter(it=>itemStockManaged(it) && Number(it.minStock)>0 && Number(it.currentStock)<Number(it.minStock) && Number(it.currentStock)>=0);
+    const low = items.filter(it=>it.active!==false && itemStockManaged(it) && Number(it.minStock)>0 && Number(it.currentStock)<Number(it.minStock) && Number(it.currentStock)>=0);
     if(low.length) push('yellow', 'Nguyên liệu dưới ngưỡng cảnh báo', low.length, `goKho('items','low')`, false, 'kho');
   } else { console.warn('storeHealth: nguyên liệu lỗi', itemsRes.reason); push('red','Tồn kho — không kiểm tra được','!',`goKho('items')`,true,'kho'); }
 
@@ -13326,7 +13336,7 @@ async function renderToday(){
   // [GĐ6] hdrSub đã bỏ — tiêu đề topbar giờ hiển thị TÊN MÀN đang mở (setScreenTitle),
   // ngày tháng vẫn có ở từng màn nên không cần lặp lại trên thanh tiêu đề.
 
-  const lowStockItems = invItems.filter(it=> itemStockManaged(it) && Number(it.minStock)>0 && Number(it.currentStock) < Number(it.minStock));
+  const lowStockItems = invItems.filter(it=> it.active!==false && itemStockManaged(it) && Number(it.minStock)>0 && Number(it.currentStock) < Number(it.minStock));
   const nudge = document.getElementById('todayNudge');
   let nudgeHtml = '';
   if(lowStockItems.length) nudgeHtml += `<div class="nudge"><span>${ic('package')} ${lowStockItems.length} nguyên liệu sắp hết: ${lowStockItems.map(i=>i.name).join(', ')}.</span><button onclick="goKho('items','low')">Xem kho</button></div>`;
@@ -13562,7 +13572,7 @@ async function renderTodayOps(){
   (async () => {
     try{
       const items = await loadInventoryItems();
-      const low = items.filter(it=> itemStockManaged(it) && Number(it.minStock)>0 && Number(it.currentStock) < Number(it.minStock));
+      const low = items.filter(it=> it.active!==false && itemStockManaged(it) && Number(it.minStock)>0 && Number(it.currentStock) < Number(it.minStock));
       if(!low.length){ boxes.items.innerHTML = '<div class="empty-hint">Không có nguyên liệu nào dưới định mức.</div>'; return; }
       boxes.items.innerHTML = low.slice(0,10).map(it=>`
         <div class="litem" onclick="goKho('items','low')" style="cursor:pointer">
@@ -17292,8 +17302,9 @@ function drawTodayAll(){
   // 3. Tồn so sánh (CHỈ XEM) — mỗi NL / BTP một dòng, cột từng quán + tổng
   const bang = (kind) => {
     const map = new Map();
-    out.forEach((r,i)=>(kind==='nl' ? (r.items||[]).filter(it=>itemStockManaged(it)) : (r.preps||[]).filter(p=>p.active!==false)).forEach(it=>{
-      if(!map.has(it.id)) map.set(it.id, {id:it.id, name:it.name||'', unit:it.unit||'', min:Number(it.minStock)||0, v:new Array(out.length).fill(null)});
+    // Món ngừng sử dụng: chỉ hiện khi còn tồn khác 0 ở quán nào đó, và không xét ngưỡng sắp hết.
+    out.forEach((r,i)=>(kind==='nl' ? (r.items||[]).filter(it=>itemStockManaged(it) && (it.active!==false || Number(it.currentStock))) : (r.preps||[]).filter(p=>p.active!==false || Number(p.currentStock))).forEach(it=>{
+      if(!map.has(it.id)) map.set(it.id, {id:it.id, name:it.name||'', unit:it.unit||'', min:it.active===false?0:(Number(it.minStock)||0), v:new Array(out.length).fill(null)});
       map.get(it.id).v[i] = Number(it.currentStock)||0;
     }));
     let rows = [...map.values()].sort((a,b)=>a.name.localeCompare(b.name,'vi'));
@@ -17315,7 +17326,7 @@ function drawTodayAll(){
     </div>
     <div class="sec-title">Doanh thu hôm nay</div>
     <div class="card">${dongDT}
-      <div class="row" style="border-top:1.5px solid var(--line,#eee);margin-top:4px;padding-top:6px"><span class="rl"><b>Tổng ${out.length} cửa hàng</b></span><span class="rv"><b>${fmt(tDT)}</b> · ${tBill} bill</span></div>
+      <div class="row" style="border-top:1.5px solid var(--line,#eee);margin-top:4px;padding-top:6px"><span class="rl"><b>${(()=>{ const loi = out.filter(r=>!(r.sales && r.sales.perDay && r.sales.perDay[0])).map(r=>r.st.id.toUpperCase()); return loi.length ? `Tổng tạm tính — thiếu ${loi.join(', ')}` : `Tổng ${out.length} cửa hàng`; })()}</b></span><span class="rv"><b>${fmt(tDT)}</b> · ${tBill} bill</span></div>
       <div class="small-note" style="margin-top:6px">Lãi/lỗ, hoà vốn, bảng tin bill: chọn từng cửa hàng.</div>
     </div>
     <div class="sec-title">Việc cần xử lý</div>
@@ -17364,11 +17375,13 @@ async function renderReportAll(){
   setSync(true);
   try{
     await ensureAuth(); await qlLoadStores(); await qlAllNapChung();
-    const ds = qlActiveStores();
+    // Báo cáo kỳ đã qua: tính cả quán ĐÃ NGỪNG — có doanh thu trong kỳ thì vẫn phải có cột (ngừng hôm nay
+    // không được làm mất doanh thu đầu tháng khỏi tổng chuỗi); không có bill nào trong kỳ thì bỏ cột.
+    const ds = QL_STORES.slice();
     if(!ds.length){ body.innerHTML = dau + '<div class="muted">Chưa có hồ sơ cửa hàng nào.</div>'; return; }
-    const kq = [];
+    const kq0 = [];
     for(const st of ds){
-      kq.push(await GieoData.withStore(st.id, async ()=>{
+      kq0.push(await GieoData.withStore(st.id, async ()=>{
         memoDropAll(); _costMemo = {};
         const [items, preps] = await Promise.all([loadInventoryItems(), loadPrepItems(), loadCogsMaps(), loadConfig().catch(()=>null)]);
         INVENTORY_ITEMS = items; PREP_ITEMS = preps;
@@ -17383,7 +17396,9 @@ async function renderReportAll(){
       }).catch(err=>({ st, err })));
     }
     memoDropAll(); _costMemo = {}; INVENTORY_ITEMS = []; PREP_ITEMS = [];
+    const kq = kq0.filter(x=>x.err || x.st.active!==false || (Number(x.kpi.bills)||0) > 0 || (Number(x.kpi.revenue)||0) > 0);
     const ok = kq.filter(x=>x.kpi);
+    const thieu = kq.filter(x=>x.err).map(x=>x.st.id.toUpperCase());
     const S = k => ok.reduce((t,x)=>t+(Number(x.kpi[k])||0),0);
     const tong = { revenue:S('revenue'), bills:S('bills'), items:S('items'), cogs:S('cogs'), grossProfit:S('grossProfit'), laborCost:S('laborCost'),
       wasteAmount:S('wasteAmount'), remakeCups:S('remakeCups'), opex:S('opex'), contribution:S('contribution'), ebit:S('ebit') };
@@ -17393,7 +17408,7 @@ async function renderReportAll(){
     const dong = (ten, f) => `<tr style="border-top:1px solid var(--line,#eee)"><td style="padding:6px 0">${ten}</td>${cot.map((k,i)=>`<td style="text-align:right;${i===cot.length-1?'font-weight:800':''}">${k?f(k):'<span style="color:var(--bad)">lỗi</span>'}</td>`).join('')}</tr>`;
     const tien = k => x => fmt(Number(x[k])||0);
     body.innerHTML = dau + `<div class="card"><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
-      <tr style="color:var(--gt);font-size:12px"><th style="text-align:left"></th>${kq.map(x=>`<th style="text-align:right">${x.st.id.toUpperCase()}</th>`).join('')}<th style="text-align:right">Tổng</th></tr>
+      <tr style="color:var(--gt);font-size:12px"><th style="text-align:left"></th>${kq.map(x=>`<th style="text-align:right">${x.st.id.toUpperCase()}</th>`).join('')}<th style="text-align:right">${thieu.length?'Tổng tạm tính':'Tổng'}</th></tr>
       ${dong('Doanh thu', tien('revenue'))}
       ${dong('Bill', x=>fmtNum(x.bills||0,0))}
       ${dong('AOV (đ/bill)', tien('aov'))}
@@ -17407,8 +17422,9 @@ async function renderReportAll(){
       ${dong('Đóng góp (contribution)', tien('contribution'))}
       ${dong('Lợi nhuận (EBIT)', tien('ebit'))}
     </table></div>
+    ${thieu.length ? `<div class="small-note" style="color:var(--bad);margin-top:6px;font-weight:700">Tổng tạm tính — thiếu ${thieu.join(', ')} (đọc lỗi, KHÔNG phải doanh thu 0). Mở lại để tính lại.</div>` : ''}
     ${kq.filter(x=>x.err).map(x=>`<div class="small-note" style="color:var(--bad);margin-top:6px">${x.st.id.toUpperCase()}: không tính được — ${escapeHtmlAttr(x.err.message||x.err)}</div>`).join('')}
-    <div class="small-note" style="margin-top:8px">${kq.map(x=>`${x.st.id.toUpperCase()} = ${escapeHtmlAttr(x.st.name||'')}`).join(' · ')}</div></div>`;
+    <div class="small-note" style="margin-top:8px">${kq.map(x=>`${x.st.id.toUpperCase()} = ${escapeHtmlAttr(x.st.name||'')}${x.st.active===false?' (đã ngừng)':''}`).join(' · ')}</div></div>`;
   }catch(err){ console.error('renderReportAll lỗi', err); body.innerHTML = dau + `<div class="muted">Không tính được: ${escapeHtmlAttr(err.message||err)}</div>`; }
   finally{ setSync(false); }
 }
@@ -17454,10 +17470,11 @@ async function renderEntryStores(){
           <div style="font:800 20px/1.2 monospace;letter-spacing:3px">${escapeHtmlAttr(st.code||'—')}</div>
         </div>
       </div>
-      <div class="small-note" style="margin-top:6px">${st.active===false?'⛔ Đã ngừng — máy mới không đăng nhập được':'✅ Đang hoạt động'}${st.id!==cur?(st.catalogReady?' · danh mục đã sẵn':' · ⚠️ danh mục chưa chép xong — bấm "Đồng bộ danh mục"'):''}${st.id!=='gg01'?` · mã CK: GG${GieoData.ckCode(st.id)}…`:''}</div>
+      <div class="small-note" style="margin-top:6px">${st.active===false?'⛔ Đã ngừng — máy mới không đăng nhập được':'✅ Đang hoạt động'}${st.id!==cur?(st.catalogReady?' · danh mục đã sẵn':' · ⚠️ <b>chưa thiết lập xong</b> — POS chưa nhập mã được, bấm "Tiếp tục thiết lập"'):''}${st.id!=='gg01'?` · mã CK: GG${GieoData.ckCode(st.id)}…`:''}</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
         <button class="btn outline sm" onclick="storeEdit('${st.id}')">Sửa tên / địa chỉ</button>
         <button class="btn outline sm" onclick="storeNewLoginCode('${st.id}')">Đổi mã đăng nhập</button>
+        ${st.id!==cur && !st.catalogReady && cur ? `<button class="btn sm" onclick="storeResumeSetup('${st.id}')">Tiếp tục thiết lập</button>` : ''}
         ${st.id!==cur?`<button class="btn outline sm" onclick="storeToggleActive('${st.id}')">${st.active===false?'Mở lại':'Ngừng hoạt động'}</button>`:''}
       </div>
     </div>`;
@@ -17533,17 +17550,61 @@ async function storeCreate(laQuanNay){
       toast('⏳ Đang chép danh mục sang ' + id.toUpperCase() + '…');
       const dem = await GieoData.seedNewStore(id);
       await ref.update({ catalogReady: true, seededAt: new Date().toISOString(), seedCounts: dem });
-      // Cài đặt tài chính (finance_gieogieo, riêng quán): chép các NGƯỠNG vận hành của quán đang xem — không chép vốn
-      // đầu tư / quỹ / mốc thu hồi vốn (của riêng từng quán, khai ở Mục tiêu ▸ Tài chính khi xem quán mới).
-      const nguong = {};
-      FINANCE_COPY_FIELDS.forEach(k => { if(FINANCE[k] !== undefined) nguong[k] = FINANCE[k]; });
-      await GieoData.collFor('finance_gieogieo', id).doc('current').set({ ...nguong, copiedFrom: cur, copiedAt: new Date().toISOString() }, { merge: true });
+      await storeCopyFinance(id, cur);
       await GieoData.stores(true);
       await GieoData.catalogDiff(true);
     }
     logAudit('create','store',id,{ name, address });
     toast(`✅ Đã tạo ${id.toUpperCase()} · mã đăng nhập POS: ${code}`);
-  }catch(err){ console.error('storeCreate', err); showError('Tạo cửa hàng lỗi: ' + (err.code||err.message||err)); }
+  }catch(err){ console.error('storeCreate', err); showError('Tạo cửa hàng lỗi: ' + (err.code||err.message||err) + ' — nếu hồ sơ đã tạo, bấm "Tiếp tục thiết lập" ở thẻ cửa hàng đó (POS chưa vào được cho tới khi xong).'); }
+  renderEntryStores();
+}
+// Cài đặt tài chính (finance_gieogieo, riêng quán): chép các NGƯỠNG vận hành của quán đang xem — không chép vốn
+// đầu tư / quỹ / mốc thu hồi vốn (của riêng từng quán, khai ở Mục tiêu ▸ Tài chính khi xem quán mới).
+// chiKhiChuaCo: quán mới đã có cài đặt riêng thì giữ nguyên (dùng khi Tiếp tục thiết lập).
+async function storeCopyFinance(id, tuQuan, chiKhiChuaCo){
+  const ref = GieoData.collFor('finance_gieogieo', id).doc('current');
+  if(chiKhiChuaCo && (await ref.get()).exists) return;
+  const nguong = {};
+  FINANCE_COPY_FIELDS.forEach(k => { if(FINANCE[k] !== undefined) nguong[k] = FINANCE[k]; });
+  await ref.set({ ...nguong, copiedFrom: tuQuan, copiedAt: new Date().toISOString() }, { merge: true });
+}
+// [ĐA CỬA HÀNG] Tạo cửa hàng bị đứt giữa chừng (mạng) → hồ sơ còn catalogReady=false: POS KHÔNG vào được, "Kiểm lệch"
+// bỏ qua quán đó. Nút này chép TIẾP phần còn thiếu từ quán đang xem — CHỈ THÊM doc chưa có (danh mục NL/BTP với tồn 0,
+// quy tắc refill, vị trí kho, ngưỡng tài chính), KHÔNG ghi đè doc đã có, nên không bao giờ đưa tồn đã phát sinh về 0.
+// Xong mới bật catalogReady rồi kiểm lệch một lượt (chép trường danh mục lệch — không đụng tồn).
+const STORE_SETUP_COPY = ['refill_rules_gieogieo', 'storage_locations_gieogieo'];
+async function storeResumeSetup(id){
+  const cur = GieoData.storeId();
+  if(!cur || id === cur) return;
+  if(!confirm(`Tiếp tục thiết lập ${id.toUpperCase()}?\n\nChỉ chép phần CÒN THIẾU từ ${cur.toUpperCase()} (danh mục NL/BTP tồn = 0, quy tắc refill, vị trí kho, ngưỡng cài đặt). Món / cấu hình đã có ở ${id.toUpperCase()} giữ nguyên.`)) return;
+  try{
+    await ensureAuth();
+    toast('⏳ Đang chép phần còn thiếu sang ' + id.toUpperCase() + '…');
+    const dem = {};
+    const themThieu = async (name, lamDoc) => {
+      const [nguon, dich] = await Promise.all([fstore.collection(name).get(), GieoData.collFor(name, id).get()]);
+      const co = new Set(dich.docs.map(d => d.id));
+      const thieu = nguon.docs.filter(d => !co.has(d.id));
+      for(let i = 0; i < thieu.length; i += 400){
+        const b = fstore.batch();
+        thieu.slice(i, i + 400).forEach(d => b.set(GieoData.collFor(name, id).doc(d.id), lamDoc(d.data())));
+        await b.commit();
+      }
+      dem[name] = thieu.length;
+    };
+    for(const name of Object.keys(GieoData.CATALOG_FIELDS)){
+      await themThieu(name, src => { const o = {}; GieoData.CATALOG_FIELDS[name].forEach(k => { if(src[k] !== undefined) o[k] = src[k]; });
+        return Object.assign(o, { currentStock: 0, createdAt: new Date().toISOString() }); });
+    }
+    for(const name of STORE_SETUP_COPY) await themThieu(name, src => src);
+    await storeCopyFinance(id, cur, true);
+    await fstore.collection('stores_gieogieo').doc(id).update({ catalogReady: true, seededAt: new Date().toISOString(), resumedSetup: dem });
+    await GieoData.stores(true);
+    await GieoData.catalogDiff(true);
+    logAudit('resume_setup','store',id, dem);
+    toast('✅ ' + id.toUpperCase() + ' đã thiết lập xong — POS nhập mã được');
+  }catch(err){ console.error('storeResumeSetup', err); showError('Chưa thiết lập xong: ' + (err.code||err.message||err) + ' — bấm lại "Tiếp tục thiết lập".'); }
   renderEntryStores();
 }
 async function storeEdit(id){
@@ -21260,7 +21321,7 @@ async function openItemContainers(itemId){
 }
 
 function nlItemsGridHtml(list, isLow, isNeg){
-  isLow = isLow || (it => itemStockManaged(it) && Number(it.minStock)>0 && Number(it.currentStock) < Number(it.minStock) && Number(it.currentStock)>=0);
+  isLow = isLow || (it => it.active!==false && itemStockManaged(it) && Number(it.minStock)>0 && Number(it.currentStock) < Number(it.minStock) && Number(it.currentStock)>=0);
   isNeg = isNeg || (it => itemStockManaged(it) && Number(it.currentStock) < 0);
   const tu = (khoItemsFilter ? '' : khoItemsSearch).trim().toLowerCase();
   const shown = tu ? list.filter(it => String(it.name||'').toLowerCase().includes(tu)) : list;
@@ -21269,7 +21330,8 @@ function nlItemsGridHtml(list, isLow, isNeg){
       : (khoItemsFilter ? '<div class="muted">Không còn món nào ở nhóm này — có thể vừa được nhập thêm.</div>'
                         : '<div class="muted">Chưa có nguyên liệu nào</div>');
   }
-  return `<div class="nl-grid">${shown.map(it=>{
+  // [NGỪNG SỬ DỤNG] món ngừng dùng xuống cuối danh sách, mờ đi.
+  return `<div class="nl-grid">${shown.slice().sort((a,b)=>(a.active===false)-(b.active===false)).map(it=>{
     // Tồn âm = sổ sách đang sai (phải chỉnh số), khác hẳn Sắp hết (cần nhập thêm).
     const neg = isNeg(it), low = isLow(it);
     const managed = itemStockManaged(it);
@@ -21277,6 +21339,7 @@ function nlItemsGridHtml(list, isLow, isNeg){
     const cu = itemCountUnit(it);
     const tags = [
       neg ? '<span class="tier tier-red">Tồn ÂM</span>' : (low ? '<span class="tier tier-amber">Sắp hết</span>' : ''),
+      it.active===false ? '<span class="tier tier-amber">Ngừng sử dụng</span>' : '',
       !managed ? '<span class="tier tier-blue">Không quản kho</span>'
         : tm==='unit' ? '<span class="tier tier-green">Tem từng ' + escapeHtmlAttr(cu.name) + '</span>'
         : tm==='batch' ? '<span class="tier tier-amber">Tem theo lô</span>' : '',
@@ -21293,7 +21356,7 @@ function nlItemsGridHtml(list, isLow, isNeg){
       it.costPerUnit ? `~${fmt(it.costPerUnit)}/${escapeHtmlAttr(it.unit||'')}` : '',
       (it.packagingUnits||[]).map(p=>`1 ${escapeHtmlAttr(p.name)} = ${fmtNum(p.baseQty,0)} ${escapeHtmlAttr(it.unit||'')}`).join(', ')
     ].filter(Boolean).join(' · ');
-    return `<div class="nl-card nl-click${neg?' nl-neg':''}" onclick="openItemContainers('${it.id}')">
+    return `<div class="nl-card nl-click${neg?' nl-neg':''}" ${it.active===false?'style="opacity:.6"':''} onclick="openItemContainers('${it.id}')">
       <div class="nl-head">
         <div class="nl-name">${escapeHtmlAttr(it.name||'')}</div>
         <div class="nl-stock"><b>${stockMain}</b>${stockSub?`<span>${stockSub}</span>`:''}</div>
@@ -21304,7 +21367,8 @@ function nlItemsGridHtml(list, isLow, isNeg){
         <button class="btn ${neg?'':'outline'} sm" onclick="startAdjustItem('${it.id}')">Sửa tồn</button>
         <button class="btn outline sm" onclick="startEditItem('${it.id}')">${ic('pencil',15)} Sửa</button>
         <button class="iconbtn nl-sp" onclick="openItemHistory('${it.id}')" title="Lịch sử biến động tồn kho">${ic('clock')}</button>
-        <button class="iconbtn" onclick="removeInventoryItem('${it.id}')" title="Xoá nguyên liệu">${ic('x')}</button>
+        <button class="btn outline sm" onclick="catalogSetActive('item','${it.id}',${it.active===false})">${it.active===false?'Dùng lại':'Ngừng sử dụng'}</button>
+        <button class="iconbtn" onclick="removeInventoryItem('${it.id}')" title="Xoá nguyên liệu (chỉ món chưa từng dùng)">${ic('x')}</button>
       </div>
     </div>`;
   }).join('')}</div>`;
@@ -21338,7 +21402,7 @@ function renderKhoItems(){
   const box = document.getElementById('khoBody');
   const editingItem = editingItemId ? INVENTORY_ITEMS.find(x=>x.id===editingItemId) : null;
   // [FIX] Lọc theo khoItemsFilter khi được mở từ link "Sức khoẻ quán"/nudge.
-  const isLow = it => itemStockManaged(it) && Number(it.minStock)>0 && Number(it.currentStock) < Number(it.minStock) && Number(it.currentStock)>=0;
+  const isLow = it => it.active!==false && itemStockManaged(it) && Number(it.minStock)>0 && Number(it.currentStock) < Number(it.minStock) && Number(it.currentStock)>=0;
   const isNeg = it => itemStockManaged(it) && Number(it.currentStock) < 0;
   const shown = khoItemsFilter==='low' ? INVENTORY_ITEMS.filter(isLow)
               : khoItemsFilter==='negative' ? INVENTORY_ITEMS.filter(isNeg)
@@ -21557,8 +21621,62 @@ async function submitInventoryItem(){
     renderKhoItems();
   }catch(err){ console.error(err); showError('Lưu nguyên liệu thất bại: '+(err.code||err.message||err)); }
 }
+// ═══ [NGỪNG SỬ DỤNG] NL / BTP (chủ dự án chọn 08/10) ════════════════════════════════════════════
+// Món đã từng có tồn / tem / lô / giao dịch thì KHÔNG xoá (xoá làm mồ côi tem, sổ kho, lịch sử định mức, tra cứu) —
+// thay bằng NGỪNG SỬ DỤNG: active=false trên doc danh mục (trường danh mục → tự đồng bộ sang mọi quán). Món ngừng dùng:
+// vẫn nằm trong sổ, tồn / tem hiện có vẫn tính, tra cứu lịch sử được; không còn trong ô chọn để đặt hàng, định mức,
+// công thức BTP (conDung), không cảnh báo sắp hết; BTP ngừng dùng thì POS không nấu (POS đã lọc active sẵn).
+// Xoá hẳn chỉ còn cho món CHƯA TỪNG DÙNG ở quán này (tạo nhầm) — quán khác còn tồn thì data_access chặn (chanXoa).
+async function catalogLyDoKhongXoa(kind, id){
+  const L = kind === 'item' ? INVENTORY_ITEMS : PREP_ITEMS;
+  const x = (L||[]).find(i => i.id === id) || {};
+  if((Number(x.currentStock)||0) !== 0) return 'còn tồn ' + fmtNum(Number(x.currentStock)||0, 1) + ' ' + (x.unit||'');
+  const co = async q => !(await q.limit(1).get()).empty;
+  if(kind === 'item'){
+    if(await co(fstore.collection('stock_containers_gieogieo').where('itemId','==',id))) return 'đã có tem';
+    if(await co(fstore.collection('stock_transactions_gieogieo').where('itemId','==',id))) return 'đã có giao dịch trong sổ kho';
+  } else {
+    if(await co(fstore.collection('prep_batches_gieogieo').where('prepId','==',id))) return 'đã có lô nấu';
+    if(await co(fstore.collection('prep_transactions_gieogieo').where('prepId','==',id))) return 'đã có giao dịch trong sổ BTP';
+  }
+  return '';
+}
+async function catalogSetActive(kind, id, dungLai){
+  const L = kind === 'item' ? INVENTORY_ITEMS : PREP_ITEMS;
+  const x = (L||[]).find(i => i.id === id); if(!x) return;
+  const nhieuQuan = qlActiveStores().length > 1;
+  const msg = dungLai
+    ? `Dùng lại "${x.name}"?${nhieuQuan ? ' (áp dụng cho mọi cửa hàng)' : ''}`
+    : `Ngừng sử dụng "${x.name}"?\n\n• Vẫn giữ trong sổ: tồn, tem/lô hiện có vẫn tính, lịch sử tra cứu được.\n• Không còn trong ô chọn khi đặt hàng, khai định mức, công thức BTP; không báo sắp hết.`
+      + (kind === 'prep' ? '\n• POS không nấu mẻ mới món này.' : '\n• Định mức món đang dùng nó vẫn trừ kho khi bán — sửa định mức nếu đã thay nguyên liệu.')
+      + (nhieuQuan ? '\n• Áp dụng cho mọi cửa hàng (danh mục dùng chung).' : '')
+      + '\n\nBấm "Dùng lại" bất cứ lúc nào để bật lại.';
+  if(!confirm(msg)) return;
+  try{
+    await ensureAuth();
+    // Chỉ ghi `active` (trường danh mục — catalogMirror tự chép sang mọi quán); giờ đổi nằm ở nhật ký Kiểm toán.
+    if(kind === 'item') await fstore.collection('inventory_items_gieogieo').doc(id).update({ active: !!dungLai });
+    else await fstore.collection('prep_items_gieogieo').doc(id).update({ active: !!dungLai });
+    logAudit(dungLai ? 'reactivate' : 'deactivate', kind === 'item' ? 'inventory_item' : 'prep_item', id, { name: x.name || '' });
+    if(kind === 'item'){ memoDropItems(); INVENTORY_ITEMS = await loadInventoryItems(); renderKhoItems(); }
+    else { memoDropPreps(); PREP_ITEMS = await loadPrepItems(); renderKhoPrep(); }
+    toast(dungLai ? '✅ Đã dùng lại' : '⏸ Đã ngừng sử dụng');
+  }catch(err){ console.error('catalogSetActive', err); showError('Không lưu được: ' + (err.code||err.message||err)); }
+}
+async function catalogXoaHoacNgung(kind, id){
+  let lyDo = '';
+  try{ await ensureAuth(); lyDo = await catalogLyDoKhongXoa(kind, id); }
+  catch(err){ showError('Không kiểm tra được món này (mạng?) — chưa xoá: ' + (err.code||err.message||err)); return false; }
+  if(!lyDo) return true;
+  const L = kind === 'item' ? INVENTORY_ITEMS : PREP_ITEMS;
+  const x = (L||[]).find(i => i.id === id) || {};
+  if(x.active === false){ alert(`Không xoá được "${x.name||id}": ${lyDo}. Món đã ở trạng thái Ngừng sử dụng — giữ để tra cứu lịch sử.`); return false; }
+  if(confirm(`Không xoá được "${x.name||id}": ${lyDo}.\n\nXoá sẽ làm mất tra cứu tem / sổ / lịch sử. Chuyển sang NGỪNG SỬ DỤNG thay cho xoá?`)) await catalogSetActive(kind, id, false);
+  return false;
+}
 async function removeInventoryItem(id){
-  if(!confirm('Xoá nguyên liệu này? Định mức đang tham chiếu tới nó (nếu có) sẽ không tự xoá theo.')) return;
+  if(!(await catalogXoaHoacNgung('item', id))) return;
+  if(!confirm('Xoá hẳn nguyên liệu này? (Chưa từng có tồn / tem / giao dịch ở quán này.) Định mức đang tham chiếu tới nó (nếu có) sẽ không tự xoá theo.')) return;
   try{ await deleteInventoryItem(id); toast('🗑 Đã xoá'); renderEntryKho(); }
   catch(err){ console.error(err); showError('Xoá thất bại: '+(err.code||err.message||err)); }
 }
@@ -21704,7 +21822,7 @@ function renderPrepEditor(){
         <button class="iconbtn" onclick="prepRemoveInput(${idx})" aria-label="Xoá nguyên liệu ${idx+1}">${ic('x')}</button>
       </div>
       <div class="field"><select onchange="prepInputChange(${idx},'itemId',this.value)">
-        ${INVENTORY_ITEMS.map(it=>`<option value="${it.id}" ${it.id===r.itemId?'selected':''}>${escapeHtmlAttr(it.name)}</option>`).join('')}
+        ${conDung(INVENTORY_ITEMS, r.itemId).map(it=>`<option value="${it.id}" ${it.id===r.itemId?'selected':''}>${escapeHtmlAttr(it.name)}</option>`).join('')}
       </select></div>
       <div class="field" style="margin-bottom:0"><label>Định lượng cho 1 mẻ</label>
         <div class="pkg-eq">
@@ -21799,9 +21917,10 @@ function prepShelfLabel(p){
 // [BTP-UI] Danh sách Bán thành phẩm dùng cùng kiểu thẻ với tab Nguyên liệu, bản gọn hơn (.btp).
 function btpGridHtml(){
   if(!PREP_ITEMS.length) return '<div class="muted">Chưa có thành phẩm chế biến nào</div>';
-  return `<div class="nl-grid btp">${PREP_ITEMS.map(p=>{
+  return `<div class="nl-grid btp">${PREP_ITEMS.slice().sort((a,b)=>(a.active===false)-(b.active===false)).map(p=>{
     const u = escapeHtmlAttr(p.unit||'');
     const tags = [
+      p.active===false ? '<span class="tier tier-amber">Ngừng sử dụng — POS không nấu được</span>' : '',
       `<span class="tier tier-blue">${prepShelfLabel(p)}</span>`,
       Number(p.prepTimeMinutes)>0 ? `<span class="tier tier-blue">Nấu ~${p.prepTimeMinutes} phút</span>` : '',
       (p.vesselIds||[]).length ? `<span class="tier tier-green">Cân bằng ${p.vesselIds.length} dụng cụ</span>`
@@ -21812,7 +21931,7 @@ function btpGridHtml(){
       `${fmtUnitPrice(p.costPerUnit)}/${u}`,
       Number(p.dailyTarget)>0 ? `Cần/ngày ${fmtNum(p.dailyTarget,0)} ${u}` : ''
     ].filter(Boolean).join(' · ');
-    return `<div class="nl-card">
+    return `<div class="nl-card" ${p.active===false?'style="opacity:.6"':''}>
       <div class="nl-head">
         <div class="nl-name">${p.code?`<span class="btp-code">${escapeHtmlAttr(p.code)}</span>`:''}${escapeHtmlAttr(p.name||'')}</div>
         <div class="nl-stock"><b>${fmtNum(p.currentStock,1)} ${u}</b><span>đang tồn</span></div>
@@ -21822,7 +21941,8 @@ function btpGridHtml(){
       <div class="nl-actions">
         <button class="btn outline sm" onclick="prepStartEdit('${p.id}')">${ic('pencil',15)} Sửa</button>
         <button class="iconbtn nl-sp" onclick="openPrepHistory('${p.id}')" title="Lịch sử biến động tồn">${ic('clock')}</button>
-        <button class="iconbtn" onclick="doDeletePrepItem('${p.id}')" title="Xoá bán thành phẩm">${ic('x')}</button>
+        <button class="btn outline sm" onclick="catalogSetActive('prep','${p.id}',${p.active===false})">${p.active===false?'Dùng lại':'Ngừng sử dụng'}</button>
+        <button class="iconbtn" onclick="doDeletePrepItem('${p.id}')" title="Xoá bán thành phẩm (chỉ món chưa từng dùng)">${ic('x')}</button>
       </div>
     </div>`;
   }).join('')}</div>`;
@@ -22035,7 +22155,8 @@ async function submitPrepItem(){
   }catch(err){ console.error(err); showError('Lưu thất bại: '+(err.code||err.message||err)); }
 }
 async function doDeletePrepItem(id){
-  if(!confirm('Xoá thành phẩm chế biến này? Công thức món đang dùng nó sẽ không tự xoá theo — cần sửa lại thủ công.')) return;
+  if(!(await catalogXoaHoacNgung('prep', id))) return;
+  if(!confirm('Xoá hẳn thành phẩm chế biến này? (Chưa từng có tồn / lô / giao dịch ở quán này.) Công thức món đang dùng nó sẽ không tự xoá theo — cần sửa lại thủ công.')) return;
   try{ await deletePrepItem(id); logAudit('delete','prep_item',id,{}); toast('🗑 Đã xoá'); renderKhoPrep(); }
   catch(err){ console.error(err); showError('Xoá thất bại: '+(err.code||err.message||err)); }
 }
@@ -23038,8 +23159,8 @@ async function renderToppingCogsEditor(){
           <label>${r.refType==='prep' ? 'Thành phẩm CB' : 'Tên nguyên liệu'}</label>
           <select onchange="toppingCogsInputChange(${idx}, ${r.refType==='prep' ? "'prepId'" : "'itemId'"}, this.value)">
             ${r.refType==='prep'
-              ? PREP_ITEMS.map(p=>`<option value="${p.id}" ${p.id===r.prepId?'selected':''}>${escapeHtmlAttr(p.code||'')} ${escapeHtmlAttr(p.name)}</option>`).join('')
-              : INVENTORY_ITEMS.map(it=>`<option value="${it.id}" ${it.id===r.itemId?'selected':''}>${escapeHtmlAttr(it.name)}</option>`).join('')}
+              ? conDung(PREP_ITEMS, r.prepId).map(p=>`<option value="${p.id}" ${p.id===r.prepId?'selected':''}>${escapeHtmlAttr(p.code||'')} ${escapeHtmlAttr(p.name)}</option>`).join('')
+              : conDung(INVENTORY_ITEMS, r.itemId).map(it=>`<option value="${it.id}" ${it.id===r.itemId?'selected':''}>${escapeHtmlAttr(it.name)}</option>`).join('')}
           </select>
         </div>
       </div>
@@ -23193,7 +23314,7 @@ function renderPackagingEditor(){
       </div>
       <div class="field"><label>Nguyên liệu</label>
         <select onchange="packagingItemChange(${idx},'itemId',this.value)">
-          ${INVENTORY_ITEMS.map(x=>`<option value="${x.id}" ${x.id===r.itemId?'selected':''}>${escapeHtmlAttr(x.name)}</option>`).join('')}
+          ${conDung(INVENTORY_ITEMS, r.itemId).map(x=>`<option value="${x.id}" ${x.id===r.itemId?'selected':''}>${escapeHtmlAttr(x.name)}</option>`).join('')}
         </select>
       </div>
       <div class="field" style="margin-bottom:0"><label>Định lượng cho 1 lần bán size này</label>
@@ -23294,7 +23415,7 @@ function renderPkgOvEditor(){
         </div>
         <div class="field"><label>Nguyên liệu</label>
           <select onchange="pkgOvItemChange(${idx},'itemId',this.value)">
-            ${INVENTORY_ITEMS.map(x=>`<option value="${x.id}" ${x.id===r.itemId?'selected':''}>${escapeHtmlAttr(x.name)}</option>`).join('')}
+            ${conDung(INVENTORY_ITEMS, r.itemId).map(x=>`<option value="${x.id}" ${x.id===r.itemId?'selected':''}>${escapeHtmlAttr(x.name)}</option>`).join('')}
           </select>
         </div>
         <div class="field" style="margin-bottom:0"><label>Định lượng</label>
@@ -23411,7 +23532,7 @@ function renderPkgBagEditor(){
         </div>
         <div class="field"><label>Nguyên liệu</label>
           <select onchange="pkgBagItemChange(${idx},'itemId',this.value)">
-            ${INVENTORY_ITEMS.map(x=>`<option value="${x.id}" ${x.id===r.itemId?'selected':''}>${escapeHtmlAttr(x.name)}</option>`).join('')}
+            ${conDung(INVENTORY_ITEMS, r.itemId).map(x=>`<option value="${x.id}" ${x.id===r.itemId?'selected':''}>${escapeHtmlAttr(x.name)}</option>`).join('')}
           </select>
         </div>
         <div class="field" style="margin-bottom:0"><label>Định lượng cho 1 ${PKG_BAG_KIT_LABELS[pkgBagActiveKit].toLowerCase()}</label>
@@ -23602,7 +23723,7 @@ function renderPkgRulesSection(menu){
       </div>
       <div class="field"><label>Vật tư</label>
         <select onchange="pkgRuleField('itemId',this.value)">
-          ${INVENTORY_ITEMS.map(x=>`<option value="${x.id}" ${x.id===d.itemId?'selected':''}>${escapeHtmlAttr(x.name)}</option>`).join('')}
+          ${conDung(INVENTORY_ITEMS, d.itemId).map(x=>`<option value="${x.id}" ${x.id===d.itemId?'selected':''}>${escapeHtmlAttr(x.name)}</option>`).join('')}
         </select>
       </div>
       <div class="field"><label>Điều kiện topping/CB1</label>
@@ -23783,7 +23904,7 @@ function renderPkgBagTableSection(){
             <button class="iconbtn" onclick="pkgBagTblRemoveItem(${i})">${ic('x')}</button></div>
           <div class="field"><label>Vật tư</label>
             <select onchange="pkgBagTblItemChange(${i},'itemId',this.value)">
-              ${INVENTORY_ITEMS.map(x=>`<option value="${x.id}" ${x.id===r.itemId?'selected':''}>${escapeHtmlAttr(x.name)}</option>`).join('')}
+              ${conDung(INVENTORY_ITEMS, r.itemId).map(x=>`<option value="${x.id}" ${x.id===r.itemId?'selected':''}>${escapeHtmlAttr(x.name)}</option>`).join('')}
             </select></div>
           <div class="field" style="margin-bottom:0"><label>Số lượng</label>
             <div class="pkg-eq"><input type="number" step="0.01" value="${r.qty}" oninput="pkgBagTblItemChange(${i},'qty',this.value)">
@@ -24323,7 +24444,7 @@ function renderKhoStockin(){
   box.innerHTML = `
     <div class="card">
       <div class="field"><label>Nguyên liệu</label>
-        <select id="siItem">${INVENTORY_ITEMS.map(it=>`<option value="${it.id}">${it.name} — đang có ${fmtNum(it.currentStock,1)} ${it.unit}</option>`).join('')}</select>
+        <select id="siItem">${conDung(INVENTORY_ITEMS).map(it=>`<option value="${it.id}">${it.name} — đang có ${fmtNum(it.currentStock,1)} ${it.unit}</option>`).join('')}</select>
       </div>
       <div class="grid2">
         <div class="field"><label>Số lượng nhập</label><input type="number" id="siQty" value="0" step="0.01"></div>
@@ -24490,7 +24611,7 @@ function poDraftLinesHtml(){
     <div class="po-dl">
       <div class="field"><label>Nguyên liệu</label>
         <select onchange="poDraftLineChange(${idx},'itemId',this.value)">
-          ${INVENTORY_ITEMS.map(x=>`<option value="${x.id}" ${x.id===l.itemId?'selected':''}>${escapeHtmlAttr(x.name)}</option>`).join('')}
+          ${conDung(INVENTORY_ITEMS, l.itemId).map(x=>`<option value="${x.id}" ${x.id===l.itemId?'selected':''}>${escapeHtmlAttr(x.name)}</option>`).join('')}
         </select>
       </div>
       <div class="field"><label>Số lượng đặt</label>
@@ -24961,7 +25082,7 @@ async function renderKhoRefill(){
     <div class="card">
       <div class="field"><label>Nguyên liệu</label>
         <select onchange="refillDraft.itemId=this.value; refillDraft.unitFactor=1; renderKhoRefill()">
-          ${INVENTORY_ITEMS.map(x=>`<option value="${x.id}" ${x.id===refillDraft.itemId?'selected':''}>${x.name}</option>`).join('')}
+          ${conDung(INVENTORY_ITEMS, refillDraft.itemId).map(x=>`<option value="${x.id}" ${x.id===refillDraft.itemId?'selected':''}>${x.name}</option>`).join('')}
         </select>
       </div>
       <div class="grid2">
@@ -26284,14 +26405,14 @@ function renderRecipeEditorBox(){
           </div>
           <div class="field">${t==='prep'
             ? `<select onchange="recipeRowChange('${size}',${idx},'prepId',this.value); renderRecipeEditorBox()">
-                 ${PREP_ITEMS.map(p=>`<option value="${p.id}" ${p.id===row.prepId?'selected':''}>${escapeHtmlAttr(p.code||'')} · ${escapeHtmlAttr(p.name||'')}</option>`).join('')}
+                 ${conDung(PREP_ITEMS, row.prepId).map(p=>`<option value="${p.id}" ${p.id===row.prepId?'selected':''}>${escapeHtmlAttr(p.code||'')} · ${escapeHtmlAttr(p.name||'')}</option>`).join('')}
                </select>`
             : t==='topping'
             ? `<select onchange="recipeRowChange('${size}',${idx},'toppingId',this.value); renderRecipeEditorBox()">
                  ${TOPPINGS.map(tp=>`<option value="${tp.id}" ${tp.id===row.toppingId?'selected':''}>${escapeHtmlAttr(tp.name||'')}</option>`).join('')}
                </select>`
             : `<select onchange="recipeRowChange('${size}',${idx},'itemId',this.value); renderRecipeEditorBox()">
-                 ${INVENTORY_ITEMS.map(it=>`<option value="${it.id}" ${it.id===row.itemId?'selected':''}>${escapeHtmlAttr(it.name)}</option>`).join('')}
+                 ${conDung(INVENTORY_ITEMS, row.itemId).map(it=>`<option value="${it.id}" ${it.id===row.itemId?'selected':''}>${escapeHtmlAttr(it.name)}</option>`).join('')}
                </select>`}
           </div>
           <div class="field" style="margin-bottom:0"><label>${t==='topping' ? 'Số phần có sẵn trong ly' : 'Định lượng mỗi ly'}</label>

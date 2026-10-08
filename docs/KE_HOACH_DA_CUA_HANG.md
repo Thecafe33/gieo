@@ -162,6 +162,13 @@ Chủ dự án chọn 05/10: **bản danh mục riêng mỗi quán** (thay cho `
     - Tạo quán mới: chép thêm ngưỡng tài chính (`FINANCE_COPY_FIELDS`: lệch kiểm kê, lệch bao bì, dung sai tiền mặt / giao ca, tiền đầu ca mặc định, hao hụt thật) — không chép vốn đầu tư / quỹ / mốc thu hồi vốn.
     - Trợ lý bán hàng ▸ "Dựng lại hồ sơ thói quen khách": **khoá** khi có ≥ 2 quán (đọc bill một quán rồi ghi đè `customers.assist_profile` dùng chung → mất thói quen ở quán kia; POS vẫn tự cộng dồn sau mỗi đơn).
     - Chưa làm: Khách hàng · Tất cả cửa hàng (khách đi cả 2 quán đang bị tách theo quán).
+  - **[08/10] Rà trước khi mở GG02** (từ một bản review bên ngoài, đã đối chiếu code; không đổi `data_access`):
+    - Tạo cửa hàng đứt giữa chừng: POS **từ chối mã** của quán `catalogReady === false`; Cửa hàng ▸ **Tiếp tục thiết lập** (`storeResumeSetup`) chỉ THÊM doc còn thiếu (danh mục tồn 0, refill, vị trí kho, ngưỡng tài chính) — không ghi đè doc đã có, nên không đưa tồn về 0 — rồi bật `catalogReady` + kiểm lệch.
+    - POS dữ liệu trên máy: dấu `gieo_ls_store_v1`; máy đổi quán → bỏ `POS_LS_THEO_QUAN` (cache máy in, quét nấu dở, đổ ly dở, khoá chống trùng đơn, gợi ý nấu, tần suất trợ lý, hàng đợi lưu trữ bill). Giữ `pos_tem_*` (canh theo máy in), cấu hình chung, hàng đợi tích điểm (khách dùng chung). Đăng xuất: liệt kê việc dở, phải xác nhận bỏ.
+    - Đổi cấu hình giá vốn (định mức, giá NL, bao bì…): `invalidateSalesCache` xoá bộ đệm doanh thu của **mọi** quán.
+    - Báo cáo · Tất cả cửa hàng: gồm quán đã ngừng nếu có bill trong kỳ; có quán đọc lỗi → "Tổng tạm tính — thiếu GGxx" (cả màn Hôm nay tổng hợp).
+    - **Ngừng sử dụng NL / BTP** (chủ dự án chọn): `active=false` (trường danh mục, đồng bộ mọi quán). Xoá chỉ còn cho món chưa từng có tồn / tem / lô / giao dịch ở quán đang xem (+ `chanXoa` quán khác). Món ngừng dùng: bỏ khỏi ô chọn (`conDung`), cảnh báo sắp hết, nhận hàng tự do (POS), chọn BTP nấu mẻ mới (`POS_PREP_CON_DUNG`). POS giữ ĐỦ BTP trong `PREP_ITEMS_CACHE_POS` (engine dò BTP qua `getPreps`).
+    - Không làm: đồng bộ danh mục khi hai máy sửa cùng lúc (hiếm; Kiểm lệch sửa được); phân quyền theo quán (Bước 5); `fetchOrdersForDate` bỏ qua lỗi đọc (có từ trước, mọi báo cáo — việc riêng).
 - **Chủ dự án chốt 06/10**:
   - Quản lý có **cả hai chế độ**: **xem từng quán** (chuyển qua lại giữa các quán) và **xem tất cả cửa hàng**. Mỗi máy nhớ lựa chọn lần trước.
   - **Kho**: tem, lô, tồn, sổ của mỗi quán là riêng (đã tách ở Bước 2). Xem từng quán thì mọi màn Kho giữ nguyên như hiện nay, và **mọi thao tác ghi chỉ làm ở chế độ này**. Xem tất cả thì **chỉ xem**: bảng tồn so sánh (mỗi NL/BTP một dòng, cột từng quán + tổng) và việc kho cần xử lý gộp lại, gắn nhãn quán, bấm vào là chuyển sang đúng quán. Tem / lô không gộp thành một danh sách.
