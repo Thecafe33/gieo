@@ -2878,7 +2878,7 @@ let _cfCheckoutDenoms = cfEmptyDenoms(); // số tờ khách đưa đang nhập 
 //              lớp chặn cuối, không phụ thuộc cấu hình tay, nên vẫn đúng cả khi
 //              ai đó quên cập nhật danh sách.
 let togoSettings = {
-  gift: { enabled: false, buyQty: 5, freeQty: 1, categories: [] },
+  gift: { enabled: false, buyQty: 5, freeQty: 1, categories: [], sizes: [] },   // sizes rỗng = mọi size
   giftMenu: { itemIds: [], maxPrice: 0, capByCheapest: true },
   discount: { enabled: false, minQty: 3, pct: 10, maxAmt: 50000 },
   freeTopping: { enabled: false, itemIds: [], toppingIds: [] } // Free topping cho thành viên
@@ -3365,7 +3365,8 @@ function syncTgSettingsFromCloud() {
     const cloud = snap.val();
     if (!cloud) return; // chưa có ai cấu hình trên Firebase — giữ nguyên cache local hiện tại
     togoSettings = {
-      gift: { ...togoSettings.gift, ...(cloud.gift || {}) },
+      // gift.sizes: RT không lưu mảng rỗng → cloud thiếu trường = KHÔNG giới hạn size (không giữ size cũ của máy).
+      gift: { ...togoSettings.gift, ...(cloud.gift || {}), sizes: (cloud.gift && Array.isArray(cloud.gift.sizes)) ? cloud.gift.sizes : [] },
       giftMenu: { ...togoSettings.giftMenu, ...(cloud.giftMenu || {}) },
       discount: { ...togoSettings.discount, ...(cloud.discount || {}) },
       freeTopping: { ...togoSettings.freeTopping, ...(cloud.freeTopping || {}) }
@@ -8064,6 +8065,17 @@ function loadTgAdminUI() {
 function getCartTotalQty() {
   return Object.values(cart).reduce((a, b) => a + b.qty, 0);
 }
+// [KHUYẾN MÃI — ĐIỀU KIỆN SIZE] Số ly tính cho "Mua X tặng Y". gift.sizes rỗng / chưa khai = mọi size (y như trước:
+// đếm cả giỏ). Có chọn size (vd ['L']) → chỉ đếm ly TRẢ TIỀN đúng size đó (không tính ly tặng, đồ ăn).
+function giftEligibleQtyPOS() {
+  const sizes = (togoSettings.gift && Array.isArray(togoSettings.gift.sizes)) ? togoSettings.gift.sizes : [];
+  if (!sizes.length) return getCartTotalQty();
+  return Object.values(cart).reduce((a, c) => a + (c && !c.isFree && !c.isFood && sizes.includes(c.size) ? (Number(c.qty) || 0) : 0), 0);
+}
+function giftSizeNotePOS() {
+  const sizes = (togoSettings.gift && Array.isArray(togoSettings.gift.sizes)) ? togoSettings.gift.sizes : [];
+  return sizes.length ? ' size ' + sizes.join('/') : '';
+}
 
 let togoDiscountAmt = 0; // amount to deduct from total
 
@@ -8083,8 +8095,9 @@ function checkTogoBeforeCheckout(onProceed) {
   // totalQty ở đây là số ly khách TRẢ TIỀN: nhánh này chỉ chạy khi giỏ chưa có ly
   // tặng nào (alreadyHasFreeItem), nên ly tặng không thể tự cộng vào để đẻ ra
   // lượt tặng tiếp theo.
-  if (!alreadyHasFreeItem && g.enabled && g.buyQty > 0 && totalQty >= g.buyQty) {
-    const soLuot = Math.floor(totalQty / g.buyQty);
+  const giftQty = giftEligibleQtyPOS();   // chỉ ly đúng size điều kiện (nếu có khai)
+  if (!alreadyHasFreeItem && g.enabled && g.buyQty > 0 && giftQty >= g.buyQty) {
+    const soLuot = Math.floor(giftQty / g.buyQty);
     const tongTang = soLuot * (g.freeQty || 1);
     openTogoGiftPopup(tongTang, onProceed);
     return;
@@ -27771,24 +27784,25 @@ function assistProviderTogoPromo(out) {
   const d = togoSettings.discount || {};
   const totalQty = assistCartQty();
 
-  if (g.enabled && Number(g.buyQty) > 0 && totalQty > 0 && !assistCartHasFreeCup()) {
+  const giftQty = giftEligibleQtyPOS(), sz = giftSizeNotePOS();   // điều kiện size (nếu có khai)
+  if (g.enabled && Number(g.buyQty) > 0 && giftQty > 0 && !assistCartHasFreeCup()) {
     const buyQty = Number(g.buyQty), freeQty = Number(g.freeQty) || 1;
-    if (totalQty >= buyQty) {
-      const soLuot = Math.floor(totalQty / buyQty);
+    if (giftQty >= buyQty) {
+      const soLuot = Math.floor(giftQty / buyQty);
       out.push({
         key: 'promo_gift_met',
         kind: 'promo_near',
         icon: '🎁',
         tone: 'gift',
         score: 200,
-        text: `Đơn đã đủ ${buyQty} ly — báo khách được tặng <b>${soLuot * freeQty} ly</b>, mời khách chọn món tặng.`,
-        short: `Đủ ${buyQty} ly — khách được tặng <b>${soLuot * freeQty} ly</b>.`,
+        text: `Đơn đã đủ ${buyQty} ly${sz} — báo khách được tặng <b>${soLuot * freeQty} ly</b>, mời khách chọn món tặng.`,
+        short: `Đủ ${buyQty} ly${sz} — khách được tặng <b>${soLuot * freeQty} ly</b>.`,
         actLabel: 'Đã báo khách',
         act: { type: 'none' },
-        meta: { promo: 'togo_gift', state: 'met', buyQty, freeQty, have: totalQty }
+        meta: { promo: 'togo_gift', state: 'met', buyQty, freeQty, have: giftQty }
       });
     } else {
-      const thieu = buyQty - totalQty;
+      const thieu = buyQty - giftQty;
       // Chỉ gợi ý khi còn thiếu không quá 1/3 chặng — thiếu 4/5 ly mà mời thêm
       // là ép mua, khách khó chịu.
       if (thieu > 0 && thieu <= Math.max(1, Math.ceil(buyQty / 3))) {
@@ -27798,11 +27812,11 @@ function assistProviderTogoPromo(out) {
           icon: '💡',
           tone: 'gift',
           score: 190 - thieu,
-          text: `Đơn hiện có ${totalQty} ly — mời khách mua thêm <b>${thieu} ly</b> để được tặng ${freeQty} ly.`,
-          short: `Thêm <b>${thieu} ly</b> nữa → khách được tặng ${freeQty} ly.`,
+          text: `Đơn hiện có ${giftQty} ly${sz} — mời khách mua thêm <b>${thieu} ly${sz}</b> để được tặng ${freeQty} ly.`,
+          short: `Thêm <b>${thieu} ly${sz}</b> nữa → khách được tặng ${freeQty} ly.`,
           actLabel: 'Thêm món',
           act: { type: 'menu' },
-          meta: { promo: 'togo_gift', state: 'near', gap: thieu, buyQty, freeQty, have: totalQty }
+          meta: { promo: 'togo_gift', state: 'near', gap: thieu, buyQty, freeQty, have: giftQty }
         });
       }
     }

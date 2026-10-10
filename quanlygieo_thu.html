@@ -1908,6 +1908,11 @@ html.tab-ui:not(.nav-off) .sidebar{background:#F2F2F7;border-right:1px solid rgb
         </div>
       </div>
       <div style="background:#f5f5f5;border-radius:14px;padding:14px;margin-bottom:12px;">
+        <div style="font-size:10px;font-weight:700;color:var(--gt);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">Điều kiện size ly mua</div>
+        <div style="font-size:11.5px;color:#888;line-height:1.5;margin-bottom:10px;">Chỉ đếm ly <b>đúng size được chọn</b> vào "Số ly mua" (vd chọn L: mua 2 ly L mới được tặng, ly M không tính). <b>Không chọn size nào = mọi size đều tính.</b></div>
+        <div id="tg-gift-sizes" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
+      </div>
+      <div style="background:#f5f5f5;border-radius:14px;padding:14px;margin-bottom:12px;">
         <div style="font-size:10px;font-weight:700;color:var(--gt);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">Menu quà tặng</div>
         <div style="font-size:11.5px;color:#888;line-height:1.5;margin-bottom:10px;">Chọn đúng những món được phép tặng. Áp dụng cho <b>cả</b> chương trình mua N tặng 1 <b>lẫn</b> đổi tem/voucher lấy ly miễn phí. Không tick món nào thì quay về lọc theo danh mục bên dưới.</div>
         <div id="tg-giftmenu-list" style="display:flex;flex-direction:column;gap:6px;max-height:260px;overflow-y:auto;"></div>
@@ -26927,7 +26932,7 @@ let _mnColor = '#E23A5D';
 let appSaleSettings = { feePct: 10 }; // % phí sàn mặc định 10%
 
 let togoSettings = {
-  gift: { enabled: false, buyQty: 5, freeQty: 1, categories: [] },
+  gift: { enabled: false, buyQty: 5, freeQty: 1, categories: [], sizes: [] },   // sizes rỗng = mọi size
   giftMenu: { itemIds: [], maxPrice: 0, capByCheapest: true },
   discount: { enabled: false, minQty: 3, pct: 10, maxAmt: 50000 },
   freeTopping: { enabled: false, itemIds: [], toppingIds: [] }
@@ -27114,6 +27119,7 @@ function loadTgAdminUI() {
   renderTgGiftToggle();
   renderTgDiscToggle();
   renderTgGiftMenu();
+  renderTgGiftSizes();
   renderTgCategoryList();
   renderTgFreeTpToggle();
   renderTgFreeTpItemList();
@@ -27320,6 +27326,30 @@ function renderMnToppingList() {
       </div>
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ccc" stroke-width="2.5" stroke-linecap="round"><path d="M9 18l6-6-6-6"/></svg>
     </div>`).join('');
+}
+
+// [KHUYẾN MÃI — ĐIỀU KIỆN SIZE] gift.sizes: rỗng = mọi size (như trước); có chọn → POS chỉ đếm ly trả tiền đúng size
+// (giftEligibleQtyPOS bên POS). Danh sách size lấy từ menu To Go (+ size đã chọn mà menu không còn, để bỏ chọn được).
+function renderTgGiftSizes() {
+  const el = document.getElementById('tg-gift-sizes');
+  if (!el) return;
+  const chon = Array.isArray(togoSettings.gift.sizes) ? togoSettings.gift.sizes : [];
+  const src = MENU_TOGO.length ? MENU_TOGO : MENU;
+  const ds = [];
+  src.forEach(m => (m.sizes || []).forEach(z => { const l = String((z && z.label) || '').trim(); if (l && l !== '-' && !ds.includes(l)) ds.push(l); }));
+  chon.forEach(l => { if (!ds.includes(l)) ds.push(l); });
+  if (!ds.length) { el.innerHTML = '<div style="font-size:12px;color:#bbb;">Chưa có size nào trong menu.</div>'; return; }
+  el.innerHTML = ds.map(l => {
+    const on = chon.includes(l);
+    return `<label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:8px 14px;border-radius:12px;border:1.5px solid ${on ? 'var(--gm)' : '#ddd'};background:#fff;">
+      <input type="checkbox" value="${escapeHtmlAttr(l)}" ${on ? 'checked' : ''} onchange="onTgGiftSizeChange(this)" style="width:18px;height:18px;cursor:pointer;accent-color:var(--gm);">
+      <span style="font-size:14px;font-weight:700;color:var(--td);">Size ${escapeHtmlAttr(l)}</span></label>`;
+  }).join('') + `<div style="width:100%;font-size:12px;font-weight:600;color:${chon.length ? 'var(--gm)' : '#888'};margin-top:2px;">${chon.length ? 'Đang áp dụng: chỉ ly size ' + chon.map(escapeHtmlAttr).join(' / ') : 'Đang áp dụng: mọi size'} — bấm "Lưu" để áp dụng.</div>`;
+}
+function onTgGiftSizeChange(cb) {
+  const cur = Array.isArray(togoSettings.gift.sizes) ? togoSettings.gift.sizes.slice() : [];
+  togoSettings.gift.sizes = cb.checked ? (cur.includes(cb.value) ? cur : cur.concat(cb.value)) : cur.filter(x => x !== cb.value);
+  renderTgGiftSizes();
 }
 
 function renderTgCategoryList() {
@@ -27615,7 +27645,8 @@ function syncTgSettingsFromCloud() {
     const cloud = snap.val();
     if (!cloud) return; // chưa có ai cấu hình trên Firebase — giữ nguyên cache local hiện tại
     togoSettings = {
-      gift: { ...togoSettings.gift, ...(cloud.gift || {}) },
+      // gift.sizes: RT không lưu mảng rỗng → cloud thiếu trường = KHÔNG giới hạn size (không giữ size cũ của máy).
+      gift: { ...togoSettings.gift, ...(cloud.gift || {}), sizes: (cloud.gift && Array.isArray(cloud.gift.sizes)) ? cloud.gift.sizes : [] },
       giftMenu: { ...togoSettings.giftMenu, ...(cloud.giftMenu || {}) },
       discount: { ...togoSettings.discount, ...(cloud.discount || {}) },
       freeTopping: { ...togoSettings.freeTopping, ...(cloud.freeTopping || {}) }
