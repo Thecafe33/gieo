@@ -16732,8 +16732,8 @@ function renderShiftCloseCountForm(canGhiChu) {
     </div>
     ${canGhiChu ? `
     <div class="kc-card">
-      <div style="font-size:14px;font-weight:700;color:#999;margin-bottom:8px;">Lý do lệch (bắt buộc)</div>
-      <div style="font-size:12px;color:#999;line-height:1.5;margin-bottom:8px;">Lần đếm cuối — ghi rõ chuyện đã xảy ra để Quản lý biết vì sao lệch.</div>
+      <div style="font-size:14px;font-weight:700;color:#999;margin-bottom:8px;">Ghi chú (không bắt buộc)</div>
+      <div style="font-size:12px;color:#999;line-height:1.5;margin-bottom:8px;">Lần đếm cuối — bấm Xác nhận là qua. Nếu biết vì sao lệch thì ghi lại giúp Quản lý; không biết thì để trống.</div>
       <textarea id="shiftCloseNote" rows="3" placeholder="VD: Thối nhầm cho khách 20.000đ lúc trưa, đã báo ca trưởng" style="width:100%;box-sizing:border-box;padding:14px;border:1.5px solid #F0EAD9;background:#FAF8F2;border-radius:18px;font-size:14px;font-family:inherit;line-height:1.5;resize:vertical;outline:none;" oninput="this.style.borderColor='#F0EAD9'"></textarea>
     </div>` : ''}
     <div class="kc-card">${renderPinInput('shiftCloseStaff')}</div>
@@ -16759,6 +16759,9 @@ async function _submitShiftCloseImpl() {
   if (!staffEmp) return;
   const staff = staffEmp.fullName;
   const box = document.getElementById('shiftBody');
+  // [FIX kẹt kết ca] Ô ghi chú NẰM TRONG #shiftBody — phải đọc nó TRƯỚC khi ghi đè #shiftBody bằng "Đang đối soát...".
+  // Trước đây đọc sau → luôn rỗng, nhân viên gõ gì cũng bị báo "ghi rõ lý do" mãi, không bao giờ qua được lần đếm cuối.
+  const ghiChuNhap = String((document.getElementById('shiftCloseNote') || {}).value || '').trim();
   box.innerHTML = '<div style="text-align:center;padding:40px;color:#bbb">Đang đối soát...</div>';
   const actualCash = cfDenomTotal(_shiftCloseDenoms);
   let tolerance = 0;
@@ -16804,29 +16807,9 @@ async function _submitShiftCloseImpl() {
       .catch(() => 0);
     const hetLuot = !passed && (soLanTruoc + 1) >= CASH_COUNT_MAX_ATTEMPTS;
 
-    // Hết lượt mà chưa khớp thì bắt ghi rõ vì sao — người đếm là người biết
-    // trong ca có chuyện gì. Không có dòng này thì Quản lý chỉ thấy một con số
-    // lệch trơ trọi, không đoán được nguyên nhân.
-    let lyDoLech = '';
-    if (hetLuot) {
-      lyDoLech = (document.getElementById('shiftCloseNote') || {}).value || '';
-      lyDoLech = String(lyDoLech).trim();
-      if (lyDoLech.length < 5) {
-        // Thiếu dòng ghi chú thì đừng bắt đếm lại từ đầu — giữ nguyên số vừa đếm,
-        // chỉ đòi phần còn thiếu. Bắt đếm lại ở đây là dạy nhân viên rằng ô ghi
-        // chú là một hình phạt, và họ sẽ gõ bừa cho xong.
-        const soDaDem = Object.assign({}, _shiftCloseDenoms);
-        toast('⚠️ Đây là lần đếm cuối — ghi rõ lý do lệch trước khi kết ca');
-        renderShiftCloseCountForm(true);
-        _shiftCloseDenoms = soDaDem;
-        cfRenderDenomGrid('shiftCloseGrid', _shiftCloseDenoms, 'shiftChangeCloseDenom');
-        const oTong = document.getElementById('shiftCloseTotal');
-        if (oTong) oTong.textContent = cfDenomTotal(_shiftCloseDenoms).toLocaleString('vi-VN') + 'đ';
-        const oNote = document.getElementById('shiftCloseNote');
-        if (oNote) { oNote.value = lyDoLech; oNote.style.borderColor = 'var(--gd)'; oNote.focus(); }
-        return;
-      }
-    }
+    // Hết lượt mà chưa khớp → GHI NHẬN đúng số đã đếm và cho qua (chủ dự án chốt 11/10: KHÔNG bắt ghi lý do — lý do không đổi
+    // được số tiền đã đếm, bắt nhập chỉ làm kẹt nhân viên). Ghi chú là TUỲ CHỌN: có thì lưu để Quản lý đọc ở màn Tiền mặt.
+    const lyDoLech = hetLuot ? ghiChuNhap : '';
 
     const attempt = { actualCash, expectedCash: expected, variance: diff, passed, staff, staffEmployeeId: staffEmp.id, enteredAt: new Date().toISOString(), ...(lyDoLech ? { note: lyDoLech } : {}) };
     const chotSo = passed || hetLuot;
@@ -16871,7 +16854,7 @@ async function _submitShiftCloseImpl() {
           <div style="font-weight:700;font-size:15px;color:var(--td);margin-bottom:8px;">Số tiền chưa khớp</div>
           <div style="font-size:13px;color:#999;line-height:1.6;">Vui lòng đếm lại hoặc kiểm tra các khoản thu/chi trong ngày — có thể có bill bị bỏ sót, chi tiêu chưa ghi, hoặc nhập sai hình thức thanh toán.</div>
           <div style="margin-top:12px;background:#fff7e6;border:1.5px solid #fbbf24;border-radius:14px;padding:12px 14px;font-size:12.5px;font-weight:600;color:#92400e;line-height:1.55;text-align:left;">
-            Đây là <b>lần đếm cuối</b>. Lần này đếm xong, dù còn lệch hệ thống vẫn <b>ghi nhận đúng số bạn đếm</b> và cho kết ca — nhưng phải <b>ghi rõ lý do</b>. Không cần đếm đi đếm lại cho khớp.
+            Đây là <b>lần đếm cuối</b>. Lần này đếm xong, dù còn lệch hệ thống vẫn <b>ghi nhận đúng số bạn đếm</b> và cho kết ca. Không cần đếm đi đếm lại cho khớp.
           </div>
         </div>
         <button onclick="renderShiftCloseReview()" style="width:100%;padding:12px;background:none;border:1px solid #ddd;color:var(--gt);border-radius:14px;font-weight:600;font-size:13px;cursor:pointer;margin-bottom:10px;">← Rà soát lại thu/chi</button>
