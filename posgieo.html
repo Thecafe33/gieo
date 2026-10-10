@@ -212,7 +212,7 @@ Nút "Cập nhật" ở sidebar (`manualCheckUpdate`, dựa trên service worker
 <script src="https://cdn.jsdelivr.net/npm/bcryptjs@2.4.3/dist/bcrypt.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
 <!-- [E1] Unit Engine — nạp TRƯỚC script chính. Đổi phiên bản = đổi tên file (6.1). -->
-<script src="data_access.v4.js"></script>
+<script src="data_access.v5.js"></script>
 <script src="unit_engine.v18.js"></script>
 
 <style>
@@ -2352,7 +2352,7 @@ const fstore = firebase.firestore();
 // Cửa hàng). Nhập MỘT lần, máy tự nhớ (localStorage 'gieo_store_v1') — các lần mở app sau vào thẳng bán hàng,
 // KHÔNG hỏi lại mã, kể cả khi Quản lý đổi mã (chủ dự án chốt 05/10: không làm chậm bán hàng).
 // Máy CHƯA gắn → màn nhập mã, app DỪNG (không đọc / ghi dữ liệu quán nào; không bao giờ tự gắn quán).
-// Lớp đường dẫn (data_access.v4.js): quán 'gg01' → mọi tên giữ NGUYÊN như trước; quán khác → dữ liệu riêng.
+// Lớp đường dẫn (data_access.v5.js): quán 'gg01' → mọi tên giữ NGUYÊN như trước; quán khác → dữ liệu riêng.
 // Thiếu file data_access (mạng chập lúc tải): máy gắn gg01 → chạy tiếp như cũ (không bọc cũng y hệt);
 // máy gắn quán khác / chưa gắn → báo đỏ + tự tải lại (chạy không bọc = ghi nhầm vào dữ liệu GG01).
 // Bản thử (*_thu.html — che_do_thu): mặc định vùng thử của GG01, không cần mã; "Thử cửa hàng khác" ở sidebar đăng nhập
@@ -2365,14 +2365,14 @@ const POS_STORE = POS_THU
   ? Object.assign({ storeId: 'gg01', name: 'Bản thử', address: 'Vùng thử — chép từ dữ liệu cửa hàng GG01' }, _posBind || {}, { thu: true })
   : _posBind;
 if (window.GieoData) GieoData.install({ fstore, db, storeId: POS_STORE ? POS_STORE.storeId : null });
-else if (POS_STORE && POS_STORE.storeId === 'gg01') console.error('[GieoData] không nạp được data_access.v4.js — máy gắn GG01: chạy tiếp với đường dẫn cũ');
+else if (POS_STORE && POS_STORE.storeId === 'gg01') console.error('[GieoData] không nạp được data_access.v5.js — máy gắn GG01: chạy tiếp với đường dẫn cũ');
 else {
   const bar = document.createElement('div');
   bar.style.cssText = 'position:fixed;inset:0;z-index:2147483000;background:#c0392b;color:#fff;font:700 16px sans-serif;padding:30px;text-align:center';
-  bar.textContent = '⚠️ Chưa tải được data_access.v4.js — đang tải lại…';
+  bar.textContent = '⚠️ Chưa tải được data_access.v5.js — đang tải lại…';
   (document.body || document.documentElement).appendChild(bar);
   setTimeout(() => location.reload(), 5000);
-  throw new Error('[GieoData] thiếu data_access.v4.js — dừng app');
+  throw new Error('[GieoData] thiếu data_access.v5.js — dừng app');
 }
 if (!POS_STORE) { posStoreLoginScreen(); throw new Error('[ĐA CỬA HÀNG] máy chưa đăng nhập cửa hàng — app dừng, chờ nhập mã'); }
 // [ĐA CỬA HÀNG] Dữ liệu lưu trên máy (localStorage) gắn với MỘT quán: cache cấu hình in của quán, việc dở (quét NL nấu,
@@ -27183,6 +27183,22 @@ let _custAcLoading = null;   // lượt tải đang chạy — gọi trùng thì
 function _custAcSave() {
   try { localStorage.setItem(CUST_AC_LS, JSON.stringify({ day: _custAcDay, list: allCustomersCache })); } catch (e) {}
 }
+// [GIẢM-ĐỌC · DÙNG CHUNG CẢ CHUỖI] Trước đây MỖI máy POS tự đọc cả bảng `customers` (~1.000 doc) mỗi ngày → thêm quán / máy là
+// tăng gấp bội, mà hạn mức đọc dùng chung 3 thương hiệu. Giờ ba tầng, tầng sau chỉ chạy khi tầng trước không có bản của HÔM NAY:
+//   1. bản trong máy (localStorage)                       → 0 lượt đọc
+//   2. bản dùng chung `customer_ac_cache_gieogieo/current` → 1 lượt đọc (máy nào cũng dùng, mọi quán)
+//   3. đọc cả bảng `customers` rồi GHI bản dùng chung       → ~1.000 lượt, chỉ máy đầu tiên của ngày
+// Bản dùng chung là MỘT trường chuỗi JSON (không phải mảng doc / mảng map: mỗi trường con bị lập chỉ mục, vài chục nghìn
+// khách sẽ chạm trần chỉ mục của doc); quá ~900KB thì không chia sẻ (mỗi máy tự đọc như trước). Lỗi ở tầng 2 → rơi xuống
+// tầng 3 như cũ. Hai máy dựng cùng lúc chỉ tốn thêm một lượt đọc, kết quả giống nhau nên ghi đè vô hại.
+const CUST_AC_SHARED = 'customer_ac_cache_gieogieo';
+const CUST_AC_MAX_BYTES = 900000;
+function _custAcPack(list) { return JSON.stringify(list.map(c => [c.id, c.name || '', c.nickname || '', Number(c.total_points) || 0])); }
+function _custAcUnpack(json) {
+  const a = JSON.parse(json);
+  if (!Array.isArray(a)) throw new Error('bản dùng chung hỏng');
+  return a.map(r => ({ id: r[0], _src: 'fs', name: r[1] || undefined, nickname: r[2] || undefined, total_points: r[3] || 0 }));
+}
 function fetchAllCustomersCache() {
   const today = posDateKey();
   if (_custAcDay === today || _custAcLoading) return;
@@ -27192,13 +27208,36 @@ function fetchAllCustomersCache() {
     if (!allCustomersCache.length) allCustomersCache = c.list;   // bản hôm trước vẫn gợi ý được trong lúc tải bản mới
     if (c.day === today) { _custAcDay = today; return; }
   }
-  _custAcLoading = fstore.collection('customers').get().then(snap => {
-    const list = [];
-    snap.forEach(doc => { const d = doc.data() || {}; list.push({ id: doc.id, _src: 'fs', nickname: d.nickname, name: d.name, total_points: d.total_points }); });
-    allCustomersCache = list.sort((a, b) => (b.total_points || 0) - (a.total_points || 0));
+  const dungBan = list => {
+    allCustomersCache = list.slice().sort((a, b) => (b.total_points || 0) - (a.total_points || 0));
     _custAcDay = today;
     _custAcSave();
-  }).catch(err => console.error('Cache error', err))
+  };
+  const docChung = fstore.collection(CUST_AC_SHARED).doc('current');
+  _custAcLoading = docChung.get()
+    .then(d => {
+      const v = d && d.exists ? d.data() : null;
+      if (!v || v.day !== today || typeof v.json !== 'string') return false;   // chưa có bản hôm nay → dựng
+      dungBan(_custAcUnpack(v.json));
+      return true;
+    })
+    .catch(err => { console.warn('[gợi ý SĐT] không đọc được bản dùng chung — đọc cả bảng như cũ:', err); return false; })
+    .then(xong => {
+      if (xong) return;
+      return fstore.collection('customers').get().then(snap => {
+        const list = [];
+        snap.forEach(doc => { const d = doc.data() || {}; list.push({ id: doc.id, _src: 'fs', nickname: d.nickname, name: d.name, total_points: d.total_points }); });
+        dungBan(list);
+        // Chia sẻ cho các máy khác (lỗi ghi không ảnh hưởng máy này).
+        try {
+          const json = _custAcPack(allCustomersCache);
+          const bytes = new TextEncoder().encode(json).length;   // giới hạn doc Firestore tính theo BYTE (tiếng Việt có dấu 2–3 byte / ký tự)
+          if (bytes < CUST_AC_MAX_BYTES) docChung.set({ day: today, count: allCustomersCache.length, json, builtAt: new Date().toISOString() }).catch(e => console.warn('[gợi ý SĐT] không ghi được bản dùng chung:', e));
+          else console.warn('[gợi ý SĐT] danh sách khách quá lớn để chia sẻ (' + bytes + ' byte) — mỗi máy tự đọc');
+        } catch (e) { console.warn('[gợi ý SĐT] không đóng gói được bản dùng chung:', e); }
+      });
+    })
+    .catch(err => console.error('Cache error', err))
     .then(() => { _custAcLoading = null; });
 }
 
@@ -27672,7 +27711,9 @@ function assistProviderCustomerCheck(out) {
   if (!p || (Number(p.orders) || 0) < (Number(cfg.minOrders) || 2)) return;
   const totalOrders = Number(p.orders) || 0;
   const minRatio = Number(cfg.minRatio) || 0.6;
-  const tenKhach = curCustomer.name || 'Khách';
+  // [Bảo mật] tên khách do bên ngoài nhập (bảng customers dùng chung XOFA / The Cafe 33) và câu gợi ý vẽ bằng innerHTML
+  // (_assistCardHTML) → BẮT BUỘC escape, như tên món / topping / size ở các câu dưới.
+  const tenKhach = assistEsc(curCustomer.name || 'Khách');
 
   // ── Thói quen về ĐÁ ──
   if (cfg.ice !== false && p.ice) {

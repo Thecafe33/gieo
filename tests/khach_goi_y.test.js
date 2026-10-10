@@ -6,16 +6,19 @@ let fail = 0;
 const ok = (c, m) => { console.log((c ? 'ok ' : 'FAIL ') + m); if (!c) fail = 1; };
 
 const html = fs.readFileSync(path.join(__dirname, '..', 'posgieo.html'), 'utf8');
-const src = extract('posgieo.html', ['_custAcSave', 'fetchAllCustomersCache']);
+const src = extract('posgieo.html', ['_custAcSave', '_custAcPack', '_custAcUnpack', 'fetchAllCustomersCache']);
 
 function mayPos(ls, khach, homNay) {
   const st = { reads: 0, goi: 0, hoan: [] };
-  const fstore = { collection: (c) => ({ get: () => { st.goi++; return new Promise(res => st.hoan.push(() => { st.reads += Math.max(1, khach.length);
+  // Bản dùng chung cả chuỗi (10/10): ở đây luôn CHƯA có bản hôm nay → rơi xuống đọc cả bảng như trước (ca có bản dùng chung: da_cua_hang_mo_quan.test.js).
+  const chung = { doc: () => ({ get: async () => ({ exists: false }), set: async () => {} }) };
+  const fstore = { collection: (c) => c === 'customer_ac_cache_gieogieo' ? chung : ({ get: () => { st.goi++; return new Promise(res => st.hoan.push(() => { st.reads += Math.max(1, khach.length);
     res({ forEach: f => khach.forEach(k => f({ id: k.id, data: () => k })) }); })); } }) };
-  const ctx = { fstore, localStorage: ls, posDateKey: () => homNay.v, console: { error() {} } };
-  const F = new Function('ctx', 'with (ctx) { let allCustomersCache = []; const CUST_AC_LS = "custAc_gieogieo_v1"; let _custAcDay = null; let _custAcLoading = null;\n' + src +
+  const ctx = { fstore, localStorage: ls, posDateKey: () => homNay.v, console: { error() {}, warn() {} }, TextEncoder };
+  const F = new Function('ctx', 'with (ctx) { let allCustomersCache = []; const CUST_AC_LS = "custAc_gieogieo_v1"; const CUST_AC_SHARED = "customer_ac_cache_gieogieo"; const CUST_AC_MAX_BYTES = 900000; let _custAcDay = null; let _custAcLoading = null;\n' + src +
     '\n return { fetchAllCustomersCache, list: () => allCustomersCache, them: e => { allCustomersCache.unshift(e); _custAcSave(); } }; }')(ctx);
-  st.xong = async () => { while (st.hoan.length) st.hoan.shift()(); await new Promise(r => setTimeout(r, 0)); };
+  const nhip = () => new Promise(r => setTimeout(r, 0));
+  st.xong = async () => { await nhip(); while (st.hoan.length) { st.hoan.shift()(); await nhip(); } };   // đọc doc dùng chung trước, rồi mới tới bảng khách
   return { F, st };
 }
 const lsMoi = () => { const m = {}; return { getItem: k => (k in m ? m[k] : null), setItem: (k, v) => { m[k] = String(v); }, _m: m }; };

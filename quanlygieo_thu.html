@@ -2219,7 +2219,7 @@ html.tab-ui:not(.nav-off) .sidebar{background:#F2F2F7;border-right:1px solid rgb
      tự thử lại, tự lấy đúng tên bucket trong firebaseConfig. -->
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-storage-compat.js"></script>
 <!-- [E3] Unit Engine — dùng CHUNG file với POS, nạp TRƯỚC script chính. Đổi phiên bản = đổi tên file (6.1). -->
-<script src="data_access.v4.js"></script>
+<script src="data_access.v5.js"></script>
 <script src="che_do_thu.v1.js?b=96d7f20f91"></script>
 <script src="unit_engine.v18.js?b=f1f1381586"></script>
 <script>
@@ -2257,7 +2257,7 @@ firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 const fstore = firebase.firestore();
 GieoThu.install({ app: 'quanly', firebase, db, fstore });   // [BẢN THỬ] mọi đọc/ghi → vùng thử
-// [ĐA CỬA HÀNG — Bước 1+2+3] Lớp đường dẫn theo quán (data_access.v4.js): quán hiện tại 'gg01' → mọi tên giữ NGUYÊN.
+// [ĐA CỬA HÀNG — Bước 1+2+3] Lớp đường dẫn theo quán (data_access.v5.js): quán hiện tại 'gg01' → mọi tên giữ NGUYÊN.
 // catalogMirror: mọi lượt sửa danh mục NL / BTP ở đây tự ghi cùng trường đó sang bản danh mục của các quán khác
 // (không bao giờ chép tồn; xoá món bị chặn khi quán khác còn tồn) — Cấu hình ▸ Cửa hàng.
 // [Bước 3] QL_VIEW = quán đang xem ('gg01', 'gg02'…) hoặc 'all' (Xem tất cả cửa hàng) — mỗi máy nhớ ở localStorage.
@@ -2277,10 +2277,10 @@ if (window.GieoData) {
 } else {
   const bar = document.createElement('div');
   bar.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#c0392b;color:#fff;font:700 16px sans-serif;padding:30px;text-align:center';
-  bar.textContent = '⚠️ Chưa tải được data_access.v4.js — đang tải lại…';
+  bar.textContent = '⚠️ Chưa tải được data_access.v5.js — đang tải lại…';
   (document.body || document.documentElement).appendChild(bar);
   setTimeout(() => location.reload(), 5000);
-  throw new Error('[GieoData] thiếu data_access.v4.js — dừng app');
+  throw new Error('[GieoData] thiếu data_access.v5.js — dừng app');
 }
 const auth = firebase.auth();
 // [E3] Khởi tạo Unit Engine cho Quản lý. Thiếu file engine → banner + tự tải lại sau 5 giây (6.3).
@@ -17640,13 +17640,31 @@ async function storeNewLoginCode(id){
 async function storeToggleActive(id){
   const st = (await GieoData.stores()).find(x => x.id === id); if(!st || id === GieoData.storeId()) return;
   const ngung = st.active !== false;
-  if(!confirm(ngung ? `Ngừng ${id.toUpperCase()}?\n\nMáy mới không đăng nhập được, danh mục thôi đồng bộ sang. Máy đang chạy không bị đẩy ra; dữ liệu giữ nguyên.` : `Mở lại ${id.toUpperCase()}? Nhớ bấm "Kiểm lệch" để đồng bộ danh mục đã sửa trong lúc ngừng.`)) return;
+  if(!confirm(ngung ? `Ngừng ${id.toUpperCase()}?\n\nMáy mới không đăng nhập được, danh mục thôi đồng bộ sang. Máy đang chạy không bị đẩy ra; dữ liệu giữ nguyên.` : `Mở lại ${id.toUpperCase()}?\n\nSau khi mở, app kiểm danh mục NL / BTP của quán này so với quán đang xem (${GieoData.storeId().toUpperCase()}) — những chỗ sửa trong lúc ngừng sẽ được hỏi chép lại (không đụng tồn).`)) return;
   try{
     await ensureAuth();
     await fstore.collection('stores_gieogieo').doc(id).update({ active: !ngung, updatedAt: new Date().toISOString() });
     logAudit('update','store',id,{ active: !ngung });
-  }catch(err){ showError('Lỗi: ' + (err.code||err.message||err)); }
+  }catch(err){ showError('Lỗi: ' + (err.code||err.message||err)); renderEntryStores(); return; }
+  // [QUÁN NGỪNG] Quán ngừng không nhận đồng bộ danh mục → mở lại là phải kiểm lệch riêng quán đó (không đụng quán khác).
+  // Lỗi ở bước này KHÔNG làm hỏng việc mở lại: quán đã mở, nút "Kiểm lệch" bên dưới vẫn chạy được.
+  if(!ngung) await storeCatalogAfterReopen(id);
   renderEntryStores();
+}
+async function storeCatalogAfterReopen(id){
+  try{
+    await GieoData.stores(true);   // bỏ bộ nhớ danh sách quán (30 giây) để quán vừa mở lại được tính vào
+    if(!INVENTORY_ITEMS.length) INVENTORY_ITEMS = await loadInventoryItems().catch(()=>[]);
+    if(!(PREP_ITEMS||[]).length) PREP_ITEMS = await loadPrepItems().catch(()=>[]);
+    const d = (await GieoData.catalogDiff(false, id)).filter(x => x.kind !== 'thua');
+    if(!d.length){ toast('✅ Đã mở lại ' + id.toUpperCase() + ' — danh mục khớp quán đang xem'); return; }
+    const thieu = d.filter(x => x.kind === 'thieu').length, lech = d.length - thieu;
+    if(confirm(`${id.toUpperCase()} đã mở lại. Danh mục NL / BTP của quán này lệch ${GieoData.storeId().toUpperCase()}: thiếu ${thieu} món, lệch trường ${lech} món.\n\nChép lại cho khớp? (Chỉ trường danh mục — tồn của ${id.toUpperCase()} giữ nguyên.)`)){
+      await GieoData.catalogDiff(true, id);
+      logAudit('catalog_sync','store',id,{ fixed: d.length, after: 'reopen' });
+      toast('✅ Đã đồng bộ danh mục sang ' + id.toUpperCase());
+    } else toast('Chưa đồng bộ — bấm "Kiểm lệch" ở mục Đồng bộ danh mục khi cần');
+  }catch(err){ console.error('storeCatalogAfterReopen', err); toast('⚠️ Đã mở lại, nhưng chưa kiểm được danh mục — bấm "Kiểm lệch" bên dưới'); }
 }
 
 // ============================================================================

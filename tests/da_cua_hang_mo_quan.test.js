@@ -94,6 +94,80 @@ const chay = (src, ret, stubs) => { const ks = Object.keys(stubs); return new Fu
     const pos2 = pos.slice(pos.indexOf('async function tim()'), pos.indexOf("$('psGo').onclick"));
     ok(/st\.catalogReady === false/.test(pos2), 'POS: mã của quán chưa thiết lập xong → không cho vào');
   }
+  // ── 5. (10/10) Tên khách độc hại không chạy được trong gợi ý trợ lý ──
+  {
+    const html = fs.readFileSync(path.join(ROOT, 'posgieo.html'), 'utf8');
+    const i0 = html.indexOf('function assistEsc(s) {');
+    const escSrc = html.slice(i0, html.indexOf('\n}\n', i0) + 3);   // nguyên văn hàm thật (bộ tách hàm không đọc được regex /"/g)
+    ok(i0 > 0 && /&lt;/.test(escSrc), 'tìm được assistEsc thật trong posgieo.html');
+    const src = escSrc + '\n' + extract('posgieo.html', ['assistProviderCustomerCheck']);
+    const doc = '<img src=x onerror="window.__xss=1">';
+    const ds = [];
+    const st = { assistConfig: { customerCheck: {} }, curCustomer: { name: doc }, loyaltyCustomer: { assist_profile: { orders: 5, ice: { it: 5 }, toppings: {}, items: {}, sizes: {} } },
+      assistDrinkLines: () => [{ c: { ice: 'chung' } }], assistCartLines: () => [{ c: { ice: 'chung', itemId: 'a', size: 'M', toppings: [] } }], assistPaidLines: () => [{ c: { ice: 'chung', itemId: 'a', size: 'M', toppings: [] } }], iceMode: c => c.ice, ICE_LABELS: { it: 'Ít đá' }, assistMenuItem: () => null, getActiveMenu: () => [] };
+    const ks = Object.keys(st);
+    new Function(...ks, src + '\nassistProviderCustomerCheck(arguments[arguments.length - 1]);')(...ks.map(k => st[k]), ds);
+    ok(ds.length >= 1 && ds.every(x => !/<img/i.test(x.text)) && /&lt;img/.test(ds[0].text), 'gợi ý trợ lý: tên khách có thẻ HTML bị escape (không còn <img>)');
+    const ds2 = []; st.curCustomer = { name: 'Lan' };
+    new Function(...ks, src + '\nassistProviderCustomerCheck(arguments[arguments.length - 1]);')(...ks.map(k => st[k]), ds2);
+    ok(ds2.length >= 1 && /Lan thường chọn/.test(ds2[0].text), 'tên khách bình thường vẫn hiện đúng');
+  }
+  // ── 6. (10/10) Quán đã ngừng: chốt chặn xoá + kiểm lệch riêng một quán ──
+  {
+    const f = makeFake({ fs: {
+      'stores_gieogieo/gg01': { code: 'AAAAAA', active: true, catalogReady: true },
+      'stores_gieogieo/gg02': { code: 'BBBBBB', active: false, catalogReady: true, name: 'Q2' },
+      'stores_gieogieo/gg03': { code: 'CCCCCC', active: true, catalogReady: true },
+      'inventory_items_gieogieo/M': { name: 'Sữa', unit: 'ml', minStock: 500, currentStock: 0 },
+      'inventory_items_gieogieo__gg02/M': { name: 'Sữa cũ tên', unit: 'ml', minStock: 100, currentStock: 70 },
+      'inventory_items_gieogieo__gg03/M': { name: 'Sữa cũ tên', unit: 'ml', minStock: 100, currentStock: 0 } }, rt: {} });
+    const G = nap(); G.install({ fstore: f.fstore, db: f.db, storeId: 'gg01', catalogMirror: true });
+    let loi = ''; try { await f.fstore.collection('inventory_items_gieogieo').doc('M').delete(); } catch (e) { loi = e.message; }
+    ok(/Q2 \(đã ngừng\) còn tồn 70/.test(loi) && f.FS['inventory_items_gieogieo/M'], 'xoá món khi quán ĐÃ NGỪNG còn tồn → bị chặn, nói rõ quán đã ngừng');
+    const only = await G.catalogDiff(true, 'gg03');
+    ok(only.length === 1 && only[0].storeId === 'gg03' && f.FS['inventory_items_gieogieo__gg03/M'].name === 'Sữa' && f.FS['inventory_items_gieogieo__gg02/M'].name === 'Sữa cũ tên', 'catalogDiff(apply, gg03): chỉ sửa gg03, quán khác không đụng');
+    await f.fstore.collection('stores_gieogieo').doc('gg02').update({ active: true }); await G.stores(true);
+    const sau = await G.catalogDiff(true, 'gg02');
+    ok(sau.length === 1 && f.FS['inventory_items_gieogieo__gg02/M'].name === 'Sữa' && f.FS['inventory_items_gieogieo__gg02/M'].currentStock === 70, 'mở lại quán: kiểm lệch sửa danh mục, tồn 70 giữ nguyên');
+    // quán ngừng KHÔNG nhận đồng bộ (đúng như văn bản "thôi đồng bộ")
+    await f.fstore.collection('stores_gieogieo').doc('gg02').update({ active: false }); await G.stores(true);
+    await f.fstore.collection('inventory_items_gieogieo').doc('M').update({ name: 'Sữa đổi tên' });
+    ok(f.FS['inventory_items_gieogieo__gg03/M'].name === 'Sữa đổi tên' && f.FS['inventory_items_gieogieo__gg02/M'].name === 'Sữa', 'sửa danh mục: quán đang chạy nhận đồng bộ, quán ngừng thì không');
+  }
+  // ── 7. (10/10) Gợi ý SĐT khách: bản trong máy → bản dùng chung → đọc cả bảng ──
+  {
+    const src = extract('posgieo.html', ['_custAcPack', '_custAcUnpack', 'fetchAllCustomersCache']);
+    const TODAY = '2026-10-10';
+    const mk = ({ local, shared, sharedErr, customers }) => {
+      const dem = { shared: 0, customers: 0, ghi: [] }, kho = {};
+      if (local) kho.custAc_gieogieo_v1 = JSON.stringify(local);
+      const docs = customers.map(c => ({ id: c.id, data: () => c }));
+      const fst = { collection: n => n === 'customers'
+        ? { get: async () => { dem.customers += docs.length; return { forEach: fn => docs.forEach(fn) }; } }
+        : { doc: () => ({ get: async () => { dem.shared++; if (sharedErr) throw new Error('mất mạng'); return { exists: !!shared, data: () => shared }; }, set: async x => { dem.ghi.push(x); } }) } };
+      const stubs = { fstore: fst, posDateKey: () => TODAY, console: quiet, TextEncoder,
+        localStorage: { getItem: k => (k in kho ? kho[k] : null), setItem: (k, v) => { kho[k] = v; } },
+        CUST_AC_LS: 'custAc_gieogieo_v1', CUST_AC_SHARED: 'customer_ac_cache_gieogieo', CUST_AC_MAX_BYTES: 900000 };
+      const ks = Object.keys(stubs);
+      const F = new Function(...ks, 'let allCustomersCache = [], _custAcDay = null, _custAcLoading = null;\nfunction _custAcSave() { localStorage.setItem(CUST_AC_LS, JSON.stringify({ day: _custAcDay, list: allCustomersCache })); }\n' + src
+        + '\nreturn { run: fetchAllCustomersCache, lay: () => allCustomersCache, cho: () => _custAcLoading };')(...ks.map(k => stubs[k]));
+      return { dem, F };
+    };
+    const KH = [{ id: '0901', name: 'An', total_points: 10 }, { id: '0902', nickname: 'Bi', name: 'Bình', total_points: 50 }, { id: '0903', name: 'Ca Đặng Ơi', total_points: 0 }];
+    let t = mk({ local: { day: TODAY, list: [{ id: 'x' }] }, customers: KH }); t.F.run();
+    ok(t.dem.shared === 0 && t.dem.customers === 0, 'bản trong máy còn mới (hôm nay): 0 lượt đọc');
+    const chung = { day: TODAY, json: JSON.stringify([['0902', 'Bình', 'Bi', 50], ['0901', 'An', '', 10]]) };
+    t = mk({ local: { day: '2026-10-09', list: [{ id: 'cu' }] }, shared: chung, customers: KH }); t.F.run(); await t.F.cho();
+    ok(t.dem.shared === 1 && t.dem.customers === 0 && t.F.lay().map(c => c.id).join() === '0902,0901' && t.F.lay()[0].nickname === 'Bi', 'trong máy cũ + có bản dùng chung hôm nay: đọc 1 doc, KHÔNG đọc bảng khách');
+    t = mk({ shared: { day: '2026-10-09', json: '[]' }, customers: KH }); t.F.run(); await t.F.cho();
+    const g = t.dem.ghi[0];
+    ok(t.dem.customers === 3 && t.dem.ghi.length === 1 && g.day === TODAY && g.count === 3 && JSON.parse(g.json)[0][0] === '0902' && t.F.lay().length === 3, 'bản dùng chung cũ: đọc cả bảng 1 lần rồi GHI bản mới cho các máy khác (xếp theo điểm)');
+    t = mk({ sharedErr: true, customers: KH }); t.F.run(); await t.F.cho();
+    ok(t.dem.customers === 3 && t.F.lay().length === 3, 'không đọc được bản dùng chung (mạng): lùi về đọc cả bảng như trước, vẫn có gợi ý');
+    const lon = Array.from({ length: 30000 }, (_, i) => ({ id: '09' + String(i).padStart(8, '0'), name: 'Nguyễn Thị Hồng Ánh ' + i, total_points: i }));
+    t = mk({ shared: null, customers: lon }); t.F.run(); await t.F.cho();
+    ok(t.dem.ghi.length === 0 && t.F.lay().length === 30000, 'danh sách quá lớn (>900KB): không chia sẻ, máy này vẫn dùng bình thường');
+  }
   console.log(fail ? 'SOME FAIL' : 'ALL PASS');
   process.exitCode = fail;
 })().catch(e => { console.log('FAIL lỗi', e && e.stack || e); process.exitCode = 1; });

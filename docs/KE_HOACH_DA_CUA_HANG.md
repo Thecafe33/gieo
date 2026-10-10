@@ -169,6 +169,12 @@ Chủ dự án chọn 05/10: **bản danh mục riêng mỗi quán** (thay cho `
     - Báo cáo · Tất cả cửa hàng: gồm quán đã ngừng nếu có bill trong kỳ; có quán đọc lỗi → "Tổng tạm tính — thiếu GGxx" (cả màn Hôm nay tổng hợp).
     - **Ngừng sử dụng NL / BTP** (chủ dự án chọn): `active=false` (trường danh mục, đồng bộ mọi quán). Xoá chỉ còn cho món chưa từng có tồn / tem / lô / giao dịch ở quán đang xem (+ `chanXoa` quán khác). Món ngừng dùng: bỏ khỏi ô chọn (`conDung`), cảnh báo sắp hết, nhận hàng tự do (POS), chọn BTP nấu mẻ mới (`POS_PREP_CON_DUNG`). POS giữ ĐỦ BTP trong `PREP_ITEMS_CACHE_POS` (engine dò BTP qua `getPreps`).
     - Không làm: đồng bộ danh mục khi hai máy sửa cùng lúc (hiếm; Kiểm lệch sửa được); phân quyền theo quán (Bước 5); `fetchOrdersForDate` bỏ qua lỗi đọc (có từ trước, mọi báo cáo — việc riêng).
+  - **[10/10] Quét lỗi hệ thống** (`data_access.v5.js`; ESLint no-undef / TDZ trên cả 5 script + rà tay):
+    - **XSS tên khách trong gợi ý trợ lý POS** (`assistProviderCustomerCheck`): `tenKhach` chưa escape, câu gợi ý vẽ bằng `innerHTML`; `customers` dùng chung XOFA / The Cafe 33 nên người ngoài đặt được tên. Đã chứng minh trên Chromium (script chạy), nay `assistEsc`. Test `da_cua_hang_mo_quan` mục 5 (đã kiểm: đỏ với mã cũ).
+    - **Quán đã ngừng**: chốt chặn xoá NL / BTP tính cả quán ngừng còn tồn (`khacKeCaNgung`, v5); `catalogDiff(apply, onlyStoreId)` (v5); Quản lý "Mở lại" tự kiểm lệch riêng quán đó rồi hỏi chép (`storeCatalogAfterReopen`) — thay cho dòng nhắc "nhớ bấm Kiểm lệch". Quán ngừng vẫn KHÔNG nhận đồng bộ liên tục (đúng văn bản "thôi đồng bộ").
+    - **Giảm lượt đọc bảng khách**: gợi ý SĐT ở POS dùng 3 tầng — bản trong máy → bản dùng chung cả chuỗi `customer_ac_cache_gieogieo/current` (G, một trường chuỗi JSON, 1 lượt đọc) → đọc cả bảng `customers` rồi ghi bản dùng chung (chỉ máy đầu tiên của ngày). Trước đây mỗi máy tự đọc ~1.000 doc / ngày. Lỗi tầng 2 → lùi về đọc cả bảng; quá 900KB → không chia sẻ.
+    - Đã biết, chủ dự án chấp nhận: tài khoản đăng nhập chung + `MANAGER_OVERRIDE_PIN` nằm trong mã nguồn công khai; Rules = đã đăng nhập toàn quyền (xem Bước 5: tài khoản theo quán + rules).
+    - Chưa xác minh được: webhook Cloud Run đọc mã CK `GG02…` thế nào (mã nguồn webhook không có trong repo) → làm bước chuyển khoản thử nhỏ ở runbook Bước 4B.6 TRƯỚC khi bán thật.
 - **Chủ dự án chốt 06/10**:
   - Quản lý có **cả hai chế độ**: **xem từng quán** (chuyển qua lại giữa các quán) và **xem tất cả cửa hàng**. Mỗi máy nhớ lựa chọn lần trước.
   - **Kho**: tem, lô, tồn, sổ của mỗi quán là riêng (đã tách ở Bước 2). Xem từng quán thì mọi màn Kho giữ nguyên như hiện nay, và **mọi thao tác ghi chỉ làm ở chế độ này**. Xem tất cả thì **chỉ xem**: bảng tồn so sánh (mỗi NL/BTP một dòng, cột từng quán + tổng) và việc kho cần xử lý gộp lại, gắn nhãn quán, bấm vào là chuyển sang đúng quán. Tem / lô không gộp thành một danh sách.
@@ -230,6 +236,7 @@ Chủ dự án chọn 05/10: **bản danh mục riêng mỗi quán** (thay cho `
 | `payroll_month_adjustments` | S | thưởng / phạt theo tháng — 07/10 G → S (data_access.v4) |
 | `expense_categories`, `hr_settings`, `ingredient_original_packs`, `note_reasons`, `waste_reasons`, `payment_methods`, `packaging_*`, `recipes`, `recipe_history`, `recipe_suggestions`, `topping_recipes`, `prep_recipe_history`, `prep_vessels`, `stores` | G | |
 | `audit_logs`, `config_history`, `price_history`, `loyalty_pending_retry` | G+s | |
+| `customer_ac_cache` | G | 10/10: danh sách gợi ý SĐT khách dùng chung cả chuỗi (1 doc `current`) |
 | `shift_checklists`, `special_days`, `duty_config` | G+o | |
 | Storage `receiving_photos_gieogieo/{recordId}` | S | theo phiếu (phiếu đã theo quán) |
 | `customers` | X | chỉ thêm trường tuỳ chọn |
