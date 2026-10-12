@@ -913,8 +913,8 @@ html.tab-ui .field input[type=checkbox],html.tab-ui .field input[type=radio]{
 .nl-tags{display:flex;flex-wrap:wrap;gap:6px;}
 .nl-tags .tier{margin:0 !important;}
 .nl-meta{font-size:13.5px;color:var(--gt);line-height:1.5;}
-.nl-actions{display:flex;align-items:center;gap:8px;margin-top:auto;padding-top:10px;border-top:1px solid var(--line);}
-.nl-actions .btn.sm{min-height:44px;padding:0 16px;font-weight:800;}
+.nl-actions{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-top:auto;padding-top:10px;border-top:1px solid var(--line);}
+.nl-actions .btn.sm{min-height:44px;padding:0 16px;font-weight:800;white-space:nowrap;}   /* nowrap: nút không bị bẻ 2–3 dòng; hàng thiếu chỗ thì XUỐNG DÒNG nguyên nút, không tràn khỏi thẻ */
 .nl-actions .iconbtn{width:44px;height:44px;}
 .nl-actions .nl-sp{margin-left:auto;}
 /* Kho 2.0: thanh tab lớn, thẻ tem/lô dạng lưới (tablet 2-3 cột) */
@@ -1093,6 +1093,10 @@ html.tab-ui .edit-sheet.nl-sheet{width:min(1080px,94vw);max-height:92vh;}
   transform-origin:top right;
 }
 .more-menu.open{display:block;animation:pi .18s var(--ease-out);}
+/* Menu mở LÊN trên (nút ở đáy thẻ — mở xuống sẽ đè sang thẻ bên dưới). `html` đứng trước để thắng `html.tab-ui .more-menu`. */
+html .more-menu.up,html.tab-ui .more-menu.up{top:auto;bottom:52px;transform-origin:bottom right;}
+/* Món NL / BTP đã ngừng sử dụng: chỉ làm mờ phần chữ — KHÔNG làm mờ cả thẻ (menu ⋯ nằm trong thẻ sẽ bị mờ theo, khó đọc). */
+.nl-card.nl-off .nl-head,.nl-card.nl-off .nl-tags,.nl-card.nl-off .nl-meta{opacity:.55;}
 .more-menu button{
   display:flex;align-items:center;gap:11px;width:100%;text-align:left;
   padding:13px 15px;min-height:48px;
@@ -2586,12 +2590,14 @@ function closeEditSheet(silent){
 // Gom các nút icon phụ (↑ ↓ 🔒 ⏸ ✕...) vào 1 menu thả xuống thay vì xếp hàng
 // ngang sát nhau — dễ chạm hơn, đỡ bấm nhầm. actions: [{label, onclick, danger, icon}]
 let _moreMenuOpenId = null;
-function renderMoreMenuBtn(id, actionsJson){
+function renderMoreMenuBtn(id, actionsJson, moLen){
   return `<div class="more-menu-wrap">
-    <button class="iconbtn" onclick="toggleMoreMenu('${id}', event)">${ic('dots')}</button>
-    <div class="more-menu" id="moreMenu_${id}">${actionsJson}</div>
+    <button class="iconbtn" onclick="toggleMoreMenu('${id}', event)" aria-label="Thêm thao tác" title="Thêm">${ic('dots')}</button>
+    <div class="more-menu${moLen ? ' up' : ''}" id="moreMenu_${id}">${actionsJson}</div>
   </div>`;
 }
+// Đóng mọi menu "…" đang mở (gọi khi chọn một mục — trong thẻ NL / BTP vùng nút chặn sự kiện nổi bọt nên không tự đóng).
+function closeMoreMenus(){ document.querySelectorAll('.more-menu.open').forEach(el=>el.classList.remove('open')); _moreMenuOpenId = null; }
 function toggleMoreMenu(id, ev){
   if(ev) ev.stopPropagation();
   const willOpen = _moreMenuOpenId !== id;
@@ -21374,7 +21380,7 @@ function nlItemsGridHtml(list, isLow, isNeg){
       it.costPerUnit ? `~${fmt(it.costPerUnit)}/${escapeHtmlAttr(it.unit||'')}` : '',
       (it.packagingUnits||[]).map(p=>`1 ${escapeHtmlAttr(p.name)} = ${fmtNum(p.baseQty,0)} ${escapeHtmlAttr(it.unit||'')}`).join(', ')
     ].filter(Boolean).join(' · ');
-    return `<div class="nl-card nl-click${neg?' nl-neg':''}" ${it.active===false?'style="opacity:.6"':''} onclick="openItemContainers('${it.id}')">
+    return `<div class="nl-card nl-click${neg?' nl-neg':''}${it.active===false?' nl-off':''}" onclick="openItemContainers('${it.id}')">
       <div class="nl-head">
         <div class="nl-name">${escapeHtmlAttr(it.name||'')}</div>
         <div class="nl-stock"><b>${stockMain}</b>${stockSub?`<span>${stockSub}</span>`:''}</div>
@@ -21385,8 +21391,10 @@ function nlItemsGridHtml(list, isLow, isNeg){
         <button class="btn ${neg?'':'outline'} sm" onclick="startAdjustItem('${it.id}')">Sửa tồn</button>
         <button class="btn outline sm" onclick="startEditItem('${it.id}')">${ic('pencil',15)} Sửa</button>
         <button class="iconbtn nl-sp" onclick="openItemHistory('${it.id}')" title="Lịch sử biến động tồn kho">${ic('clock')}</button>
-        <button class="btn outline sm" onclick="catalogSetActive('item','${it.id}',${it.active===false})">${it.active===false?'Dùng lại':'Ngừng sử dụng'}</button>
-        <button class="iconbtn" onclick="removeInventoryItem('${it.id}')" title="Xoá nguyên liệu (chỉ món chưa từng dùng)">${ic('x')}</button>
+        ${renderMoreMenuBtn('nl_'+it.id, `
+          <button onclick="closeMoreMenus();catalogSetActive('item','${it.id}',${it.active===false})">${it.active===false?ic('play',15)+' Dùng lại':ic('pause',15)+' Ngừng sử dụng'}</button>
+          <button class="danger" onclick="closeMoreMenus();removeInventoryItem('${it.id}')">${ic('trash',15)} Xoá nguyên liệu…</button>
+        `, true)}
       </div>
     </div>`;
   }).join('')}</div>`;
@@ -21949,7 +21957,7 @@ function btpGridHtml(){
       `${fmtUnitPrice(p.costPerUnit)}/${u}`,
       Number(p.dailyTarget)>0 ? `Cần/ngày ${fmtNum(p.dailyTarget,0)} ${u}` : ''
     ].filter(Boolean).join(' · ');
-    return `<div class="nl-card" ${p.active===false?'style="opacity:.6"':''}>
+    return `<div class="nl-card${p.active===false?' nl-off':''}">
       <div class="nl-head">
         <div class="nl-name">${p.code?`<span class="btp-code">${escapeHtmlAttr(p.code)}</span>`:''}${escapeHtmlAttr(p.name||'')}</div>
         <div class="nl-stock"><b>${fmtNum(p.currentStock,1)} ${u}</b><span>đang tồn</span></div>
@@ -21959,8 +21967,10 @@ function btpGridHtml(){
       <div class="nl-actions">
         <button class="btn outline sm" onclick="prepStartEdit('${p.id}')">${ic('pencil',15)} Sửa</button>
         <button class="iconbtn nl-sp" onclick="openPrepHistory('${p.id}')" title="Lịch sử biến động tồn">${ic('clock')}</button>
-        <button class="btn outline sm" onclick="catalogSetActive('prep','${p.id}',${p.active===false})">${p.active===false?'Dùng lại':'Ngừng sử dụng'}</button>
-        <button class="iconbtn" onclick="doDeletePrepItem('${p.id}')" title="Xoá bán thành phẩm (chỉ món chưa từng dùng)">${ic('x')}</button>
+        ${renderMoreMenuBtn('bt_'+p.id, `
+          <button onclick="closeMoreMenus();catalogSetActive('prep','${p.id}',${p.active===false})">${p.active===false?ic('play',15)+' Dùng lại':ic('pause',15)+' Ngừng sử dụng'}</button>
+          <button class="danger" onclick="closeMoreMenus();doDeletePrepItem('${p.id}')">${ic('trash',15)} Xoá bán thành phẩm…</button>
+        `, true)}
       </div>
     </div>`;
   }).join('')}</div>`;

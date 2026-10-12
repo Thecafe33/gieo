@@ -168,6 +168,14 @@ const chay = (src, ret, stubs) => { const ks = Object.keys(stubs); return new Fu
     t = mk({ shared: null, customers: lon }); t.F.run(); await t.F.cho();
     ok(t.dem.ghi.length === 0 && t.F.lay().length === 30000, 'danh sách quá lớn (>900KB): không chia sẻ, máy này vẫn dùng bình thường');
   }
+  // ── 8. (12/10) Thẻ NL / BTP: Ngừng sử dụng + Xoá nằm trong menu ⋯ (không còn nút to dễ bấm nhầm, không làm tràn hàng nút) ──
+  {
+    const ql = fs.readFileSync(path.join(ROOT, 'quanlygieo.html'), 'utf8');
+    ok(!/class="btn[^"]*sm"[^>]*onclick="catalogSetActive\(/.test(ql) && !/class="iconbtn"[^>]*onclick="(removeInventoryItem|doDeletePrepItem)\(/.test(ql), 'thẻ NL / BTP: không còn nút Ngừng sử dụng / Xoá đặt thẳng trên hàng nút');
+    ok(/renderMoreMenuBtn\('nl_'\+it\.id,[\s\S]*?catalogSetActive\('item'[\s\S]*?removeInventoryItem\([\s\S]*?, true\)/.test(ql) && /renderMoreMenuBtn\('bt_'\+p\.id,[\s\S]*?catalogSetActive\('prep'[\s\S]*?doDeletePrepItem\([\s\S]*?, true\)/.test(ql), 'cả hai loại thẻ: Ngừng sử dụng + Xoá trong menu ⋯, mở lên trên');
+    ok(/\.nl-actions\{[^}]*flex-wrap:wrap/.test(ql) && /\.nl-actions \.btn\.sm\{[^}]*white-space:nowrap/.test(ql), 'hàng nút: cho xuống dòng nguyên nút, chữ không bị bẻ nhiều dòng');
+    ok(!/class="nl-card[^"]*"[^>]*style="opacity/.test(ql) && /\.nl-card\.nl-off \.nl-head/.test(ql), 'món ngừng dùng chỉ mờ phần chữ, không mờ cả thẻ (menu không bị mờ theo)');
+  }
   console.log(fail ? 'SOME FAIL' : 'ALL PASS');
   process.exitCode = fail;
 })().catch(e => { console.log('FAIL lỗi', e && e.stack || e); process.exitCode = 1; });
