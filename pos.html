@@ -5145,6 +5145,7 @@ function selectBedItem(index) {
                     <span class="text-3xl font-black text-slate-800 tracking-tighter">${data.end}</span>
                 </div>
             </div>
+            ${bookingCreatedAtVN(data) ? `<p class="text-center text-[11px] font-bold text-gray-400 -mt-2">Đặt lúc <span class="text-slate-700 font-black">${bookingCreatedAtVN(data)}</span></p>` : ''}
 
             <div id="row-checkout-time" class="hidden text-center bg-gray-100/50 rounded-2xl p-2 border border-gray-200/50">
                 <span class="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Thực tế check-out lúc</span>
@@ -6747,6 +6748,42 @@ function calculateAndSaveCheckout(booking, realTimeStr) {
 
 // [MỚI] Hiển thị "Đi cùng" — khi đi 3 người, app gộp 2 người đi cùng vào chung
 // compName/compPhone dạng "Tên A, Tên B" — POS tách ra hiển thị danh sách.
+// [FIX 12/10/2026] Lịch bed được ĐẶT lúc nào — trước đây POS không hiện.
+// index.html (app khách) ghi createdAt = new Date().toISOString() → giờ UTC chuẩn (đuôi Z), đọc thẳng sẽ lệch 7 tiếng.
+// Lịch tạo ở POS (walk-in) không có createdAt → lấy từ mã push Firebase (8 ký tự đầu = mốc ms lúc tạo).
+// Luôn hiện theo giờ Việt Nam (Asia/Ho_Chi_Minh), không phụ thuộc múi giờ đang cài trên máy.
+var _PUSH_CHARS = '-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz';
+function _pushKeyTimeMs(k) {
+    if (typeof k !== 'string' || k.length !== 20) return null;
+    var t = 0;
+    for (var i = 0; i < 8; i++) {
+        var v = _PUSH_CHARS.indexOf(k.charAt(i));
+        if (v < 0) return null;
+        t = t * 64 + v;
+    }
+    // Chỉ nhận mốc hợp lý (2015 → ngày mai) — chuỗi 20 ký tự bất kỳ không phải mã push thì bỏ qua.
+    return (t > 1420070400000 && t < Date.now() + 86400000) ? t : null;
+}
+function bookingCreatedAtVN(b) {
+    if (!b) return '';
+    var ms = null;
+    if (b.createdAt != null && b.createdAt !== '') {
+        var d0 = new Date(b.createdAt);
+        if (!isNaN(d0.getTime())) ms = d0.getTime();
+    }
+    if (ms == null) ms = _pushKeyTimeMs(b.id || b.key);
+    if (ms == null) return '';
+    try {
+        var parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit',
+            day: '2-digit', month: '2-digit', year: 'numeric', hour12: false }).formatToParts(new Date(ms));
+        var g = function(t) { var x = parts.find(function(p) { return p.type === t; }); return x ? x.value : ''; };
+        return g('hour') + ':' + g('minute') + ' ' + g('day') + '/' + g('month') + '/' + g('year');
+    } catch (e) {
+        // Máy quá cũ không có múi giờ trong Intl: tự cộng +7 (Việt Nam không đổi giờ theo mùa).
+        var v = new Date(ms + 7 * 3600000), p2 = function(n) { return String(n).padStart(2, '0'); };
+        return p2(v.getUTCHours()) + ':' + p2(v.getUTCMinutes()) + ' ' + p2(v.getUTCDate()) + '/' + p2(v.getUTCMonth() + 1) + '/' + v.getUTCFullYear();
+    }
+}
 function _companionHTML(b, nameCls, phoneCls) {
     nameCls  = nameCls  || 'text-[14px] font-black text-gray-800 truncate';
     phoneCls = phoneCls || 'text-[11px] text-gray-400 font-bold mt-0.5';
@@ -8084,6 +8121,7 @@ function renderDetailContentMobile(b) {
         <div class="bg-white rounded-[1.5rem] p-4 shadow-sm border border-gray-100">
             <p class="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1.5">Ngày đặt</p>
             <p class="text-[13px] font-black text-gray-800">${b.date || b.displayDate || b.bookingDate || '--'}</p>
+            ${bookingCreatedAtVN(b) ? `<p class="text-[11px] font-bold text-gray-500 mt-1">Đặt lúc ${bookingCreatedAtVN(b)}</p>` : ''}
             <p class="text-[11px] text-gray-400 mt-1">${b.source === 'app_index' ? '📱 App' : '🖥️ POS'}</p>
         </div>
     </div>
