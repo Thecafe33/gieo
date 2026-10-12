@@ -2530,6 +2530,7 @@ function autoLoginPOS() {
     auth.signInWithEmailAndPassword(email, pass)
         .then((userCredential) => {
             // Chạy archive sau khi đăng nhập thành công
+            runBedAutoCloseStale();   // [FIX 12/10] tự trả bed quên bấm ở ngày cũ — xem runBedAutoCloseStale
             setTimeout(runAutoArchive, 5000);
             setTimeout(runAutoArchiveOrders, 7000);
             setTimeout(syncRewardsToRT, 10000);
@@ -2556,6 +2557,8 @@ function syncRewardsToRT() {
 
 // ── Auto-archive bedBookings cũ hơn 3 ngày sang Firestore, rồi xóa khỏi RT ──
 function runAutoArchive() {
+    // [FIX 12/10] Đang tự trả bed ngày cũ → chờ xong rồi mới archive (để archive lấy bản đã trả).
+    if (typeof _bedAutoCloseRunning !== 'undefined' && _bedAutoCloseRunning) { _bedAutoCloseRunning.then(runAutoArchive, runAutoArchive); return; }
     var now = new Date();
     now.setHours(0, 0, 0, 0);
 
@@ -6601,6 +6604,137 @@ function triggerBedAutoStop() {
 
 startBedAutoStopTimer();
 
+// ══════════════════════════════════════════════════════════════════════════
+// [FIX 12/10/2026] TỰ TRẢ BED QUÊN BẤM Ở NGÀY CŨ (chủ quán yêu cầu)
+//
+// Vấn đề: quên bấm "Trả Bed" thì lịch treo "đang dùng" mãi. Quay lại ngày cũ bấm trả thì
+// handleBedCheckout tính trễ giờ theo HÔM NAY (ra cả ngàn phút), và nếu ngày đó đã được
+// runAutoArchive chuyển sang Firestore (RT bị xoá) thì lệnh update RT dựng lại một node
+// chỉ có vài trường → lần mở ngày đó sau chỉ đọc RT (bỏ qua archive) → cả ngày hiện lỗi.
+//
+// Cơ chế: mỗi ngày (lần đầu POS đăng nhập trong ngày, hoặc POS để mở qua nửa đêm) quét
+// BED_AUTOCLOSE_DAYS ngày trước; lịch còn "đang dùng" mà đã quá giờ kết thúc khách đặt
+// → tự trả ĐÚNG GIỜ KẾT THÚC ĐÃ ĐẶT (chủ quán xác nhận: lịch quên bấm luôn là khách ra
+// đúng giờ; khách ra trễ thì nhân viên đã bấm trả để tính thêm phí).
+//   · Ngày còn ở RT → ghi RT. Ngày đã archive → ghi thẳng vào bedBookings_archive (KHÔNG
+//     dựng lại node RT). Chạy XONG mới cho runAutoArchive chạy, để archive lấy bản đã trả.
+//   · totalSpend tính như calculateSessionSpend nhưng theo ĐÚNG ngày của lịch.
+//   · Đánh dấu autoCheckout + autoCheckoutAt để phân biệt với lần bấm tay.
+//   · Không đụng lịch "chờ khách" / "đã hủy" / "đã xong"; không đụng lịch chưa tới giờ kết thúc
+//     (VD lịch qua đêm hôm qua 23:00 → 03:00 sáng nay).
+// ══════════════════════════════════════════════════════════════════════════
+var BED_AUTOCLOSE_DAYS = 14;
+var _bedAutoCloseRunning = null;
+function _bedIsActiveStatus(b) {
+    var st = String((b && b.status) || '');
+    return st.includes('active') || st.includes('đang dùng');
+}
+function _bedHmOn(y, m, d, hm) {
+    var p = String(hm || '').split(':');
+    if (p.length < 2) return null;
+    var t = new Date(+y, +m - 1, +d, +p[0], +p[1], 0);
+    return isNaN(t.getTime()) ? null : t;
+}
+// Mốc bắt đầu / kết thúc thật của lịch; kết thúc ≤ bắt đầu = qua đêm (+1 ngày).
+function _bedSessionBounds(b, y, m, d) {
+    var s0 = _bedHmOn(y, m, d, b.start || b.startTime), e0 = _bedHmOn(y, m, d, b.end || b.endTime);
+    if (!e0) return null;
+    if (s0 && e0 <= s0) e0.setDate(e0.getDate() + 1);
+    return { start: s0, end: e0 };
+}
+function _bedNeedsAutoClose(b, y, m, d, nowMs) {
+    if (!b || !_bedIsActiveStatus(b)) return false;
+    var bd = _bedSessionBounds(b, y, m, d);
+    return !!bd && nowMs - bd.end.getTime() > 5 * 60000;   // cùng ngưỡng 5 phút "ra đúng giờ" của handleBedCheckout
+}
+// Như calculateSessionSpend (bill cùng SĐT, trong giờ lịch ± 5 phút) nhưng theo đúng ngày của lịch.
+function _bedSessionSpendOn(orders, b, y, m, d) {
+    var bd = _bedSessionBounds(b, y, m, d);
+    if (!bd || !bd.start || !b.phone) return 0;
+    var from = bd.start.getTime() - 5 * 60000, to = bd.end.getTime() + 59000 + 5 * 60000;
+    var total = 0;
+    (orders || []).forEach(function(o) {
+        if (!o || normalizePhone(o.sdt) !== normalizePhone(b.phone)) return;
+        var t = new Date(o.createdAt).getTime();
+        if (t >= from && t <= to) total += Number(o.total || 0);
+    });
+    return total;
+}
+function _bedTodayKey() {
+    var n = new Date();
+    return n.getFullYear() + '-' + String(n.getMonth() + 1).padStart(2, '0') + '-' + String(n.getDate()).padStart(2, '0');
+}
+function runBedAutoCloseStale() {
+    if (_bedAutoCloseRunning) return _bedAutoCloseRunning;
+    var todayKey = _bedTodayKey();
+    try { if (localStorage.getItem('bedAutoClose_day') === todayKey) return Promise.resolve(0); } catch (e) {}
+    _bedAutoCloseRunning = (async function() {
+        var now = new Date(), nowMs = now.getTime();
+        var closed = 0, failed = false, chuaToiGio = 0;
+        for (var i = 1; i <= BED_AUTOCLOSE_DAYS; i++) {
+            var dt = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+            var y = String(dt.getFullYear()), m = String(dt.getMonth() + 1).padStart(2, '0'), d = String(dt.getDate()).padStart(2, '0');
+            var rtPath = 'bedBookings/' + y + '/' + m + '/' + d;
+            try {
+                // Cùng thứ tự đọc với màn quản lý bed: RT có dữ liệu thì dùng RT, không thì archive.
+                var snap = await db.ref(rtPath).once('value');
+                var data = snap.val();
+                var fromRt = !!(data && Object.keys(data).length);
+                var fsRef = null;
+                if (!fromRt) {
+                    fsRef = fstore.collection('bedBookings_archive').doc(y).collection(m).doc(d);
+                    var doc = await fsRef.get();
+                    data = doc.exists ? (doc.data().bookings || null) : null;
+                }
+                if (!data) continue;
+                var stuck = Object.keys(data).filter(function(k) { return _bedNeedsAutoClose(data[k], y, m, d, nowMs); });
+                // Lịch qua đêm còn đang dùng hợp lệ (chưa tới giờ kết thúc) → quét lại sau, không chốt "đã quét hôm nay".
+                chuaToiGio += Object.keys(data).filter(function(k) { return data[k] && _bedIsActiveStatus(data[k]) && stuck.indexOf(k) < 0; }).length;
+                if (!stuck.length) continue;
+                var orders = await fetchOrdersByDateRange(new Date(+y, +m - 1, +d), new Date(+y, +m - 1, +d + 1));
+                for (var j = 0; j < stuck.length; j++) {
+                    var k = stuck[j], b = data[k];
+                    var patch = {
+                        status: 'đã xong',
+                        realEndTime: b.end || b.endTime,
+                        totalSpend: _bedSessionSpendOn(orders, b, y, m, d),
+                        autoCheckout: true,
+                        autoCheckoutAt: new Date().toISOString(),
+                        autoCheckoutReason: 'Quên bấm trả bed — tự trả đúng giờ kết thúc đã đặt'
+                    };
+                    if (fromRt) {
+                        // Đọc lại đúng lịch ngay trước khi ghi: máy POS khác vừa bấm trả tay thì thôi.
+                        var cur = (await db.ref(rtPath + '/' + k).once('value')).val();
+                        if (!cur || !_bedIsActiveStatus(cur)) continue;
+                        await db.ref(rtPath + '/' + k).update(patch);
+                    } else {
+                        var upd = {};
+                        Object.keys(patch).forEach(function(f) { upd['bookings.' + k + '.' + f] = patch[f]; });
+                        await fsRef.update(upd);
+                    }
+                    closed++;
+                }
+            } catch (err) {
+                failed = true;
+                console.warn('[Tự trả bed] lỗi ngày ' + y + '/' + m + '/' + d + ':', err && err.message);
+            }
+        }
+        // Có lỗi (mạng, quyền) hoặc còn lịch qua đêm chưa tới giờ → không ghi mốc "đã quét hôm nay", lần sau thử lại.
+        if (!failed && !chuaToiGio) { try { localStorage.setItem('bedAutoClose_day', todayKey); } catch (e) {} }
+        if (closed > 0 && typeof showAppModal === 'function') {
+            showAppModal('Đã tự trả bed', closed + ' lịch bed ngày trước quên bấm trả — đã tự trả đúng giờ kết thúc khách đặt.', '🛏️');
+        }
+        return closed;
+    })().finally(function() { _bedAutoCloseRunning = null; });
+    return _bedAutoCloseRunning;
+}
+// POS để mở qua nửa đêm: kiểm tra mỗi 5 phút, sang ngày mới thì quét (mỗi ngày một lần).
+setInterval(function() {
+    if (!firebase.auth().currentUser) return;
+    var last = null; try { last = localStorage.getItem('bedAutoClose_day'); } catch (e) {}
+    if (last !== _bedTodayKey()) runBedAutoCloseStale();
+}, 5 * 60000);
+
 var _lastSeenAutoStopLog = null;
 db.ref('bedAutoStopLog').limitToLast(1).on('value', function(snap) {
     if (!snap.exists()) return;
@@ -6746,8 +6880,6 @@ function calculateAndSaveCheckout(booking, realTimeStr) {
     });
 }
 
-// [MỚI] Hiển thị "Đi cùng" — khi đi 3 người, app gộp 2 người đi cùng vào chung
-// compName/compPhone dạng "Tên A, Tên B" — POS tách ra hiển thị danh sách.
 // [FIX 12/10/2026] Lịch bed được ĐẶT lúc nào — trước đây POS không hiện.
 // index.html (app khách) ghi createdAt = new Date().toISOString() → giờ UTC chuẩn (đuôi Z), đọc thẳng sẽ lệch 7 tiếng.
 // Lịch tạo ở POS (walk-in) không có createdAt → lấy từ mã push Firebase (8 ký tự đầu = mốc ms lúc tạo).
@@ -6784,6 +6916,9 @@ function bookingCreatedAtVN(b) {
         return p2(v.getUTCHours()) + ':' + p2(v.getUTCMinutes()) + ' ' + p2(v.getUTCDate()) + '/' + p2(v.getUTCMonth() + 1) + '/' + v.getUTCFullYear();
     }
 }
+
+// [MỚI] Hiển thị "Đi cùng" — khi đi 3 người, app gộp 2 người đi cùng vào chung
+// compName/compPhone dạng "Tên A, Tên B" — POS tách ra hiển thị danh sách.
 function _companionHTML(b, nameCls, phoneCls) {
     nameCls  = nameCls  || 'text-[14px] font-black text-gray-800 truncate';
     phoneCls = phoneCls || 'text-[11px] text-gray-400 font-bold mt-0.5';
