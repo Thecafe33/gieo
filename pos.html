@@ -732,8 +732,8 @@ input, button, select, textarea { font-size: 1rem; }
 @media (min-width: 768px) {
   /* Cột A — tab chức năng */
   #view-discount #mgr-col-a { width: 248px !important; max-width: 248px !important; min-width: 220px !important; }
-  #view-discount #mgr-col-a button[id^="mgr-tab-"] { font-size: 15px !important; padding: 13px 16px !important; gap: 12px !important; border-radius: 16px !important; margin-bottom: 6px !important; }
-  #view-discount #mgr-col-a button[id^="mgr-tab-"] svg { width: 19px !important; height: 19px !important; }
+  #view-discount #mgr-col-a button[id^="mgr-tab-"] { white-space: nowrap !important; font-size: 15px !important; padding: 13px 16px !important; gap: 12px !important; border-radius: 16px !important; margin-bottom: 6px !important; }
+  #view-discount #mgr-col-a button[id^="mgr-tab-"] svg { width: 19px !important; height: 19px !important; flex-shrink: 0 !important; }
   #view-discount #mgr-col-a button[id^="mgr-tab-"]:not([style*="background: rgb(0, 98, 65)"]):not([style*="background:#006241"]):hover { background: #ECEEEF !important; color: #111827 !important; }
 
   /* Cột B — danh sách */
@@ -766,9 +766,9 @@ input, button, select, textarea { font-size: 1rem; }
 }
 /* Màn PC nhỏ (768–1279px): thu 2 cột trái để form còn đủ rộng */
 @media (min-width: 768px) and (max-width: 1279px) {
-  #view-discount #mgr-col-a { width: 190px !important; max-width: 190px !important; min-width: 170px !important; }
-  #view-discount #mgr-col-a button[id^="mgr-tab-"] { font-size: 14px !important; padding: 11px 12px !important; }
-  #view-discount #mgr-col-b-wrap { width: 250px !important; max-width: 250px !important; min-width: 220px !important; }
+  #view-discount #mgr-col-a { width: 176px !important; max-width: 176px !important; min-width: 160px !important; }
+  #view-discount #mgr-col-a button[id^="mgr-tab-"] { font-size: 14px !important; padding: 11px 12px !important; white-space: nowrap !important; }
+  #view-discount #mgr-col-b-wrap { width: 300px !important; max-width: 300px !important; min-width: 260px !important; }
   #view-discount [id^="mgr-c-"] > div[style*="overflow-y:auto"] { padding: 22px 24px !important; }
 }
 </style>
@@ -10904,27 +10904,47 @@ function renderDiscountList() {
             var _scp = d.scope || 'cafe33';
             var scopeBadge = '<span style="font-size:0.6rem;font-weight:800;background:' + _scopeBg[_scp] + ';color:' + _scopeClr[_scp] + ';padding:2px 8px;border-radius:999px;">' + _scopeLabels[_scp] + '</span>';
 
-            var info = document.createElement('div');
-            info.style.cssText = 'flex:1;min-width:0;';
-            info.innerHTML =
-                '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px;">' +
-                    (d.code ? '<span style="font-family:monospace;font-weight:900;font-size:0.95rem;color:#006241;letter-spacing:0.06em;">' + d.code + '</span>' : '') +
-                    (d.type ? '<span style="font-size:0.6rem;font-weight:800;background:' + tBg + ';color:' + tClr + ';padding:2px 8px;border-radius:999px;">' + (typeLabels[d.type] || d.type) + '</span>' : '') +
-                    scopeBadge +
-                    statusHtml +
-                '</div>' +
-                '<p style="font-size:0.875rem;font-weight:700;color:#374151;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin:0 0 4px 0;">' + (d.label || d.name || '') + '</p>' +
-                (function() {
-                    var allItems = (d.targetItems || (d.targetItem ? [d.targetItem] : [])).concat(d.targetItemsXl || (d.targetItemXl ? [d.targetItemXl] : []));
-                    // dedup
-                    var seen = {}; allItems = allItems.filter(function(n) { if (seen[n]) return false; seen[n] = true; return true; });
-                    return allItems.length ? '<p style="font-size:0.7rem;color:#9ca3af;margin:0 0 2px 0;">📦 <b style="color:#6b7280;">' + allItems.join(' · ') + '</b></p>' : '';
-                })() +
-                '<span style="font-size:0.85rem;font-weight:900;color:#EF4444;">' + valueText + '</span>';
+            // [12/10/2026] Thẻ quà làm lại cho ĐỌC ĐỦ nội dung (chủ quán: tên bị cắt "…", nhãn xếp chồng dọc).
+            // Hàng 1: ảnh nhỏ + TÊN ĐẦY ĐỦ (xuống dòng, không cắt) — tên chiếm cả hàng.
+            // Hàng 2: MỨC GIẢM nổi bật + nhãn loại / quán / bật-tắt / mã (tự xuống dòng khi hẹp).
+            // Hàng 3: "Áp dụng:" + danh sách món đầy đủ. Dữ liệu & thao tác bấm giữ nguyên như cũ.
+            var _esc = function(t) { return String(t == null ? '' : t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); };
+            var _chip = function(txt, bg, clr, mono) {
+                return '<span style="display:inline-flex;align-items:center;font-size:0.6rem;font-weight:800;background:' + bg + ';color:' + clr + ';padding:3px 9px;border-radius:999px;white-space:nowrap;line-height:1.3;' + (mono ? 'font-family:monospace;letter-spacing:0.04em;' : '') + '">' + txt + '</span>';
+            };
+            var allItems = (d.targetItems || (d.targetItem ? [d.targetItem] : [])).concat(d.targetItemsXl || (d.targetItemXl ? [d.targetItemXl] : []));
+            var _seen = {}; allItems = allItems.filter(function(n) { if (!n || _seen[n]) return false; _seen[n] = true; return true; });
 
-            row.appendChild(imgEl);
-            row.appendChild(info);
-            row.appendChild(Object.assign(document.createElement('span'), { innerText: '›', style: { fontSize: '1.2rem', opacity: '0.3' } }));
+            row.style.flexDirection = 'column';
+            row.style.alignItems = 'stretch';
+            row.style.gap = '8px';
+            imgEl.style.width = '40px'; imgEl.style.height = '40px'; imgEl.style.borderRadius = '12px'; imgEl.style.fontSize = '1.2rem';
+
+            var head = document.createElement('div');
+            head.style.cssText = 'display:flex;align-items:flex-start;gap:10px;';
+            var nameEl = document.createElement('div');
+            nameEl.style.cssText = 'flex:1;min-width:0;font-size:0.9rem;font-weight:800;color:#111827;line-height:1.35;word-break:break-word;padding-top:2px;';
+            nameEl.innerHTML = _esc(d.label || d.name || '(chưa đặt tên)');
+            head.appendChild(imgEl); head.appendChild(nameEl);
+
+            var chips = document.createElement('div');
+            chips.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;';
+            chips.style.alignItems = 'center';
+            chips.innerHTML =
+                '<span style="font-size:0.95rem;font-weight:900;color:#EF4444;white-space:nowrap;margin-right:2px;">' + _esc(valueText) + '</span>' +
+                (d.type ? _chip(typeLabels[d.type] || _esc(d.type), tBg, tClr) : '') +
+                scopeBadge.replace('padding:2px 8px;', 'padding:3px 9px;white-space:nowrap;') +
+                statusHtml.replace('padding:2px 8px;', 'padding:3px 9px;white-space:nowrap;') +
+                (d.code ? _chip(_esc(d.code), '#ECFDF5', '#006241', true) : '');
+
+            row.appendChild(head);
+            row.appendChild(chips);
+            if (allItems.length) {
+                var itemsEl = document.createElement('div');
+                itemsEl.style.cssText = 'font-size:0.72rem;color:#4b5563;background:#F8FAFC;border-radius:12px;padding:7px 10px;line-height:1.5;word-break:break-word;';
+                itemsEl.innerHTML = '<b style="color:#6b7280;">Áp dụng:</b> ' + allItems.map(_esc).join(' · ');
+                row.appendChild(itemsEl);
+            }
             row.addEventListener('click', function() { discountFormLoad(k, d); });
             listEl.appendChild(row);
         });
