@@ -43,6 +43,15 @@ không đụng `data_access`, không đổi hành vi của `posgieo.html` / `qua
 14. **Mục tiêu** (mục riêng trong menu): đặt theo **tháng**, mỗi tháng một mức; tháng chưa đặt dùng mức của tháng gần nhất trước đó (từng ô riêng). 3 ô: The Cafe 33 (so với Tổng nước), XOFA (so với không gồm Food), **Chung 2 quán nhập riêng** (so với Doanh thu chung). Kỳ khác tháng: mục tiêu ngày = mục tiêu tháng ÷ số ngày tháng đó, cộng theo các ngày trong kỳ. Kỳ chưa hết có thêm dòng "Tiến độ tới hôm nay".
     Lưu: `revenue_targets_tc33xofa/months` → `{ m: { 'YYYY-MM': { tc33, xofa, all, updatedAt } } }` (1 doc, 1 lượt đọc).
 
+### Bổ sung 12/10 (lần 3) — gộp doanh thu Gieo Gieo
+
+15. Màn Doanh thu có thêm **Gieo Gieo, tách từng cửa hàng** (danh sách `stores_gieogieo`; quán đã ngừng chỉ hiện khi kỳ đó có doanh thu). Mở quán Gieo mới → tự hiện thêm thẻ, không phải sửa code.
+    Mỗi thẻ chỉ có: **Doanh thu** (= Σ tổng bill, đúng số "Doanh thu" của quanlygieo), **Tiền mặt / Chuyển khoản** (y như `updRv` của posgieo, gồm cả Food), Food (nếu có), Số bill, So hôm qua. Chi tiết khác xem ở quanlygieo.
+    Đọc như `fetchOrdersForDate` của quanlygieo: archive + RT gộp theo mã bill; tên theo quán như data_access — gg01 `orders_gieogieo` / `orders_gieogieo_archive`, quán mới thêm `__{id}`. **Chỉ đọc**, không nạp `data_access`, không ghi gì của Gieo.
+16. **Doanh thu chung** = Tổng nước TC33 + XOFA không gồm Food + doanh thu mọi quán Gieo; thanh % đóng góp chia theo từng quán (cộng đúng 100%). Biểu đồ thêm cột Gieo (mọi quán cộng lại).
+17. **Mục tiêu Gieo đọc từ quanlygieo — không cấu hình mới**: mục tiêu doanh thu ngày = Target AOV × Target Bill/ngày của phiên bản `config_history_gieogieo` có hiệu lực ngày đó (chưa có phiên bản → mặc định của quanlygieo; test chốt 2 bên trùng nhau). Target KPI Gieo dùng chung mọi quán Gieo → mỗi quán cùng một mức.
+    Mục tiêu chung = ô "Chung The Cafe 33 + XOFA" (màn Mục tiêu) + mục tiêu Gieo × số quán Gieo đang hiện. Chưa đặt ô Chung → ô lớn báo chưa đặt.
+
 ## 3. Nguồn dữ liệu đọc doanh thu (không ghi)
 
 | Quán | 3 ngày gần nhất (RT) | Đã lưu trữ (Firestore) |

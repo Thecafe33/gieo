@@ -9,8 +9,9 @@ const eq = (a, b, m) => { if (JSON.stringify(a) !== JSON.stringify(b)) { ok = fa
 
 const M = new Function(extract('manage.html', ['tcEmptySum', 'tcIsTransfer', 'tcAddOrder', 'tcSummarize', 'xoEmptySum', 'xoAddOrder', 'xoSummarize',
   'payTermsOfRecord', 'empPayTermsOn', 'computeWageForDayHours', 'isShiftInProgress', 'shiftWorkedHours', 'laborByEmployee', 'pad', 'dkey',
-  'parseDkey', 'addDays', 'targetMonthValue', 'daysInMonthYm', 'targetForRange', 'sharePct']) +
-  '\nreturn { tcSummarize, xoSummarize, laborByEmployee, targetMonthValue, targetForRange, sharePct };')();
+  'parseDkey', 'addDays', 'targetMonthValue', 'daysInMonthYm', 'targetForRange', 'sharePcts', 'sharePct',
+  'ggEmptySum', 'ggAddOrder', 'ggSummarize', 'gieoTargetsOn', 'gieoTargetForRange', 'ggName', 'gieoLabel']) +
+  '\nconst GIEO_LEGACY = "gg01", GIEO_TARGET_DEFAULTS = { aov:46000, billsPerDay:60 };\nreturn { tcSummarize, xoSummarize, laborByEmployee, targetMonthValue, targetForRange, sharePct, sharePcts, ggSummarize, gieoTargetForRange, ggName, gieoLabel };')();
 
 // Bộ sinh số giả ngẫu nhiên cố định — test lặp lại được.
 let seed = 12345; const rnd = n => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
@@ -70,6 +71,31 @@ eq([xs.cash, xs.bank, xs.instore, xs.togo, xs.total, xs.food, xs.foodCash, xs.fo
   'XOFA: Tiền mặt / CK / Tại quán / To Go / Tổng / Food (TM, CK) khớp updRv của PosX.html (300 đơn ngẫu nhiên)');
 eq(xs.hours.reduce((a, b) => a + b, 0), xs.total, 'XOFA: biểu đồ không gồm Food');
 eq(xs.ship, xoOrders.filter(o => o.isShip === true).length, 'XOFA: đếm đơn ship');
+
+// ── Gieo Gieo: tiền mặt / chuyển khoản như updRv của posgieo.html; doanh thu = Σ bill như quanlygieo ──
+const out2 = {};
+const fakeDoc2 = { getElementById: id => (out2[id] = out2[id] || { style: {}, set textContent(v) { this.v = v; }, get textContent() { return this.v; } }) };
+const updRvGieo = new Function('document', 'fmt', '_updShipStats', 'orders', 'todayKey', '_rvFrom', extract('posgieo.html', ['updRv']) + '\nreturn updRv;')(
+  fakeDoc2, n => String(n), () => {}, [], () => '12/10/2026', null);
+updRvGieo(xoOrders);
+const num2 = id => Number(String(out2[id].v).replace(/\./g, ''));
+const gs = M.ggSummarize(xoOrders);
+eq([gs.cash + gs.foodCash, gs.bank + gs.foodBank], [num2('rv-cash') + num2('rv-food-cash'), num2('rv-bank') + num2('rv-food-bank')],
+  'Gieo: Tiền mặt / Chuyển khoản (gồm Food) khớp updRv của posgieo.html (300 đơn ngẫu nhiên)');
+eq(gs.revenue, xoOrders.reduce((a, o) => a + o.total, 0), 'Gieo: Doanh thu = Σ tổng bill (như aggregateOrders của quanlygieo)');
+eq([M.ggName('orders_gieogieo', 'gg01'), M.ggName('orders_gieogieo_archive', 'gg02')], ['orders_gieogieo', 'orders_gieogieo_archive__gg02'],
+  'Gieo: tên dữ liệu theo quán như data_access (gg01 giữ nguyên, quán mới thêm __id)');
+eq([M.gieoLabel({ id: 'gg01', name: 'X' }, false), M.gieoLabel({ id: 'gg02', name: 'Quận 3' }, true), M.gieoLabel({ id: 'gg02', name: '' }, true)],
+  ['Gieo Gieo', 'Gieo Gieo · Quận 3', 'Gieo Gieo · GG02'], 'Gieo: nhãn cửa hàng');
+const H = [{ effectiveFrom: '2026-10-05', targets: { aov: 50000, billsPerDay: 40 } }];
+eq(M.gieoTargetForRange(H, '2026-10-04', '2026-10-05'), 46000 * 60 + 50000 * 40, 'Gieo: mục tiêu ngày = AOV × bill/ngày theo phiên bản có hiệu lực (trước phiên bản đầu = mặc định của quanlygieo)');
+{
+  const fs = require('fs'), path = require('path');
+  const ql = fs.readFileSync(path.join(__dirname, '..', 'quanlygieo.html'), 'utf8').match(/targets: *\{aov:(\d+), *billsPerDay:(\d+)/);
+  const mg = fs.readFileSync(path.join(__dirname, '..', 'manage.html'), 'utf8').match(/GIEO_TARGET_DEFAULTS = \{ *aov:(\d+), *billsPerDay:(\d+)/);
+  eq(mg && mg.slice(1, 3), ql && ql.slice(1, 3), 'Gieo: mục tiêu mặc định trong manage.html trùng DEFAULTS.targets của quanlygieo.html');
+}
+eq(M.sharePcts([1, 1, 1]), [34, 33, 33], '% đóng góp nhiều quán cộng đúng 100');
 
 // ── Lương giờ (OT theo ngày) ─────────────────────────────────────────────
 const emps = [{ id: 'a', payType: 'hourly_part', hourlyRate: 20000, otEnabled: true, otThresholdHours: 8, otRate: 30000 },
