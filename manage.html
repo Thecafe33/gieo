@@ -2422,11 +2422,19 @@ function drawRev(r){
   const soLabel = r.mode === 'day' ? 'So hôm qua' : 'So hôm kia';
   const diff = (a, b)=>{ const v = a - b; return `<span class="${v>=0?'mg-up':'mg-down'}">${v>=0?'▲':'▼'} ${fmtN(Math.abs(v))}</span>`; };
   const soRow = (cur, prevSum, pick)=> oneDay && prevSum ? `<div class="mg-l"><span>${soLabel}</span>${diff(cur, pick(prevSum))}</div>` : '';
-  // Mục tiêu: TC33 / XOFA / Chung TC33+XOFA ở mục Mục tiêu; Gieo ĐỌC của quanlygieo (AOV × bill/ngày, mỗi quán).
+  // Mục tiêu (chủ dự án chốt 12/10): TC33 / XOFA đặt ở mục Mục tiêu; Gieo ĐỌC của quanlygieo (AOV × bill/ngày, mỗi quán).
+  //   · Mục tiêu CHUNG = một số chủ quán tự nhập cho TẤT CẢ quán (ô 'all') — mức mong muốn, được phép thấp hơn tổng
+  //     mục tiêu từng quán để quán này bù quán kia.
+  //   · Cộng mục tiêu từng quán = TC33 + XOFA + Gieo × số quán Gieo đang hiện — hiện kèm để so.
   const T0 = TARGETS || {};
   const ggTg = (a, b)=> r.ggHist ? gieoTargetForRange(r.ggHist, a, b) : null;
   const tgTc = (a, b)=> targetForRange(T0, a, b, 'tc33'), tgXo = (a, b)=> targetForRange(T0, a, b, 'xofa');
-  const tgAll = (a, b)=>{ const x = targetForRange(T0, a, b, 'all'); if(!x) return null; const g = ggTg(a, b); return G.length && g == null ? null : x + (g || 0) * G.length; };
+  const tgAll = (a, b)=> targetForRange(T0, a, b, 'all');
+  // Cộng mục tiêu từng quán; thiếu phần nào thì ghi rõ phần đó chưa có (không âm thầm cộng thiếu).
+  const tgSum = (a, b)=>{
+    const parts = [['The Cafe 33', tgTc(a, b)], ['XOFA', tgXo(a, b)]].concat(G.map(x=>[gieoLabel(x.s, many), ggTg(a, b)]));
+    return { v: parts.reduce((t, p)=> t + (p[1] || 0), 0), thieu: parts.filter(p=>!p[1]).map(p=>p[0]) };
+  };
   const seg = ['day','yesterday','week','month','year','custom'].map(m=>`<button class="${r.mode===m?'active':''}" onclick="revSetMode('${m}')">${label[m]}</button>`).join('');
   const buckets = revBuckets(r);
   const daily = keys.filter(k => k <= today).slice().reverse();
@@ -2459,8 +2467,10 @@ function drawRev(r){
         ${parts.map(p=>`<span style="width:${chung ? p.v / chung * 100 : 0}%;background:${p.color};"></span>`).join('')}
       </div>
       <div class="mg-share-lg">${parts.map((p, i)=>`<span><i style="background:${p.color}"></i>${esc(p.name)} ${pcts[i]}% · ${fmtGon(p.v)}</span>`).join('')}</div>
-      ${tgtBlock(chung, tgAll, r, `<div class="mg-tgt"><div class="mg-tgt-l"><span>Chưa đặt mục tiêu chung The Cafe 33 + XOFA</span><a href="#" onclick="switchScreen('target');return false" style="color:inherit;font-weight:700">Đặt ›</a></div></div>`)}
-      <div class="ksub" style="margin-top:10px">Doanh thu chung = Tổng nước TC33 + XOFA không gồm Food + doanh thu Gieo Gieo. Mục tiêu chung = mục tiêu chung TC33 + XOFA + mục tiêu Gieo (đọc từ Quản lý Gieo). Tổng thu cả bill (gồm Ăn vặt, Food): ${fmt(tcAll + xoAll + ggRev)}</div>
+      ${tgtBlock(chung, tgAll, r, `<div class="mg-tgt"><div class="mg-tgt-l"><span>Chưa đặt mục tiêu chung</span><a href="#" onclick="switchScreen('target');return false" style="color:inherit;font-weight:700">Đặt ›</a></div></div>`)}
+      ${(()=>{ const t = tgSum(r.from, r.to); if(!t.v) return '';
+        return `<div class="mg-pace" style="margin-top:8px">Cộng mục tiêu từng quán: <b style="color:#fff">${fmtGon(t.v)}</b> · đạt ${Math.round(chung / t.v * 100)}%${t.thieu.length ? ' — chưa có mục tiêu: ' + esc(t.thieu.join(', ')) : ''}</div>`; })()}
+      <div class="ksub" style="margin-top:10px">Doanh thu chung = Tổng nước TC33 + XOFA không gồm Food + doanh thu Gieo Gieo. Mục tiêu chung là mức bạn tự đặt cho tất cả quán (có thể thấp hơn tổng mục tiêu từng quán). Tổng thu cả bill (gồm Ăn vặt, Food): ${fmt(tcAll + xoAll + ggRev)}</div>
     </div>
 
     <div class="mg-cols">
@@ -2529,7 +2539,7 @@ function drawRev(r){
 //   · Kỳ khác tháng: mục tiêu từng ngày = mục tiêu tháng ÷ số ngày của tháng đó, cộng theo các ngày trong kỳ.
 // Lưu: revenue_targets_tc33xofa/months { m: { 'YYYY-MM': { tc33, xofa, all, updatedAt } } } — 1 doc, 1 lượt đọc.
 // ==========================================================================
-const TARGET_KEYS = [{ key:'tc33', label:'The Cafe 33', note:'Tổng nước' }, { key:'xofa', label:'XOFA', note:'không gồm Food' }, { key:'all', label:'Chung The Cafe 33 + XOFA', note:'Tổng nước TC33 + XOFA không gồm Food' }];
+const TARGET_KEYS = [{ key:'tc33', label:'The Cafe 33', note:'Tổng nước' }, { key:'xofa', label:'XOFA', note:'không gồm Food' }, { key:'all', label:'Mục tiêu chung — tất cả quán (gồm Gieo Gieo)', note:'Doanh thu chung' }];
 const TARGET_DOC = () => fstore.collection('revenue_targets_tc33xofa').doc('months');
 let TARGETS = null;
 async function loadTargets(force){
@@ -2613,7 +2623,7 @@ async function renderTarget(){
           <input type="number" inputmode="numeric" id="tg_${k.key}" value="${own}" placeholder="${inh ? fmtN(inh.value) + ' (đang dùng mức tháng ' + inh.from.slice(5) + '/' + inh.from.slice(0, 4) + ')' : 'VD: 60000000'}">
           <div class="small-note" id="tgDay_${k.key}">${own || inh ? '≈ ' + fmt((own || inh.value) / daysInMonthYm(targetMonth)) + ' / ngày' : ''}</div></div>`;
       }).join('')}
-      <div class="small-note" style="margin:-6px 0 12px">Tổng 2 quán đang nhập: <b id="tgSum">${fmt((Number(cur.tc33)||0) + (Number(cur.xofa)||0))}</b> — mục tiêu chung nhập riêng, không bắt buộc bằng tổng này.</div>
+      <div class="small-note" style="margin:-6px 0 12px">Cộng mục tiêu từng quán tháng ${m}/${y}: <b id="tgSum"></b><br>Mục tiêu chung là mức bạn mong muốn cho cả hệ thống — được phép thấp hơn tổng này để quán này bù quán kia.</div>
       <button class="btn" onclick="saveTarget()">${ic('save',15)} Lưu mục tiêu tháng ${m}/${y}</button>
       ${T[targetMonth] ? `<button class="btn outline" style="margin-top:8px" onclick="deleteTarget()">Xoá mức riêng của tháng ${m}/${y}</button>` : ''}
     </div>
@@ -2623,7 +2633,7 @@ async function renderTarget(){
         <div class="row"><span class="rl">Tháng ${m}/${y} · mỗi cửa hàng</span><span class="rv">${fmt(ggMonth)}</span></div>
         ${ggN > 1 ? `<div class="row"><span class="rl">${ggN} cửa hàng Gieo</span><span class="rv">${fmt(ggMonth * ggN)}</span></div>` : ''}`
       : '<div class="muted">Không đọc được mục tiêu của Quản lý Gieo.</div>'}
-      <div class="small-note">Sửa ở Quản lý Gieo › Cấu hình › Mục tiêu (Target AOV, Target Bill/ngày). Mục tiêu chung ở màn Doanh thu = mục tiêu chung The Cafe 33 + XOFA ở trên + mục tiêu Gieo.</div>
+      <div class="small-note">Sửa ở Quản lý Gieo › Cấu hình › Mục tiêu (Target AOV, Target Bill/ngày). Mỗi cửa hàng Gieo cùng một mức (Target KPI của Gieo dùng chung mọi cửa hàng).</div>
     </div>
     <div class="sec-title">Các tháng đã đặt (The Cafe 33 · XOFA)</div>
     <div class="card mg-scroll">${months.length ? `<table class="kt">
@@ -2632,9 +2642,14 @@ async function renderTarget(){
         ${TARGET_KEYS.map(k=>`<td style="text-align:right">${Number(T[mm][k.key]) > 0 ? fmtN(T[mm][k.key]) : '—'}</td>`).join('')}</tr>`).join('')}</tbody></table>`
       : '<div class="muted">Chưa đặt mục tiêu tháng nào.</div>'}</div>
   `;
-  ['tc33','xofa'].forEach(k=>document.getElementById('tg_'+k).addEventListener('input', ()=>{
-    document.getElementById('tgSum').textContent = fmt((Number(document.getElementById('tg_tc33').value)||0) + (Number(document.getElementById('tg_xofa').value)||0));
-  }));
+  // Cộng mục tiêu từng quán = TC33 + XOFA (ô đang nhập, trống thì mức đang dùng) + Gieo × số quán Gieo đang mở.
+  const tgSumUpd = ()=>{
+    const val = k=>{ const v = Number(document.getElementById('tg_'+k).value); if(v > 0) return v; const inh = targetMonthValue(T, targetMonth, k); return inh ? inh.value : 0; };
+    const g = (ggMonth || 0) * ggN;
+    document.getElementById('tgSum').textContent = fmt(val('tc33') + val('xofa') + g) + ` (TC33 ${fmtGon(val('tc33'))} + XOFA ${fmtGon(val('xofa'))} + Gieo ${fmtGon(g)})`;
+  };
+  ['tc33','xofa'].forEach(k=>document.getElementById('tg_'+k).addEventListener('input', tgSumUpd));
+  tgSumUpd();
 }
 async function saveTarget(){
   if(!/^\d{4}-\d{2}$/.test(targetMonth)){ toast('⚠️ Chọn tháng'); return; }

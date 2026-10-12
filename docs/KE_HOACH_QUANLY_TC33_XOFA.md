@@ -50,7 +50,10 @@ không đụng `data_access`, không đổi hành vi của `posgieo.html` / `qua
     Đọc như `fetchOrdersForDate` của quanlygieo: archive + RT gộp theo mã bill; tên theo quán như data_access — gg01 `orders_gieogieo` / `orders_gieogieo_archive`, quán mới thêm `__{id}`. **Chỉ đọc**, không nạp `data_access`, không ghi gì của Gieo.
 16. **Doanh thu chung** = Tổng nước TC33 + XOFA không gồm Food + doanh thu mọi quán Gieo; thanh % đóng góp chia theo từng quán (cộng đúng 100%). Biểu đồ thêm cột Gieo (mọi quán cộng lại).
 17. **Mục tiêu Gieo đọc từ quanlygieo — không cấu hình mới**: mục tiêu doanh thu ngày = Target AOV × Target Bill/ngày của phiên bản `config_history_gieogieo` có hiệu lực ngày đó (chưa có phiên bản → mặc định của quanlygieo; test chốt 2 bên trùng nhau). Target KPI Gieo dùng chung mọi quán Gieo → mỗi quán cùng một mức.
-    Mục tiêu chung = ô "Chung The Cafe 33 + XOFA" (màn Mục tiêu) + mục tiêu Gieo × số quán Gieo đang hiện. Chưa đặt ô Chung → ô lớn báo chưa đặt.
+18. **Mục tiêu chung (chốt lại 12/10)** — hai con số khác nhau, hiện cả hai ở ô lớn:
+    - **Mục tiêu chung** = một số chủ quán tự nhập cho TẤT CẢ quán (gồm Gieo) ở màn Mục tiêu (ô `all`) — mức mong muốn, được phép THẤP HƠN tổng mục tiêu từng quán để quán này bù quán kia. So với Doanh thu chung.
+    - **Cộng mục tiêu từng quán** = TC33 + XOFA + Gieo × số quán Gieo (VD 20 + 35 + 30 + 30 = 115tr, mục tiêu chung 110tr). Thiếu mục tiêu quán nào thì ghi rõ quán đó.
+    (Bản trước tính mục tiêu chung = ô Chung TC33 + XOFA + Gieo — đã bỏ.)
 
 ## 3. Nguồn dữ liệu đọc doanh thu (không ghi)
 
