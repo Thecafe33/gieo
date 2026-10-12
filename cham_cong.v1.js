@@ -204,7 +204,6 @@
           return '<div class="ccx-row"><span>' + esc(s.employeeName) + '</span><span class="r">Vào ' + hm(s.checkedInAt) + ' · ' +
             (s.checkedOutAt ? 'Ra ' + hm(s.checkedOutAt) : '<span class="ccx-on">đang trong ca</span>') + '</span></div>';
         }).join('') : '<div class="ccx-none">Chưa có lượt chấm công nào hôm nay.</div>') +
-        '<div class="ccx-note">Mỗi người tối đa ' + MAX_PER_DAY + ' lần vào/ra một ngày. Quên check-out thì báo Quản lý sửa giờ.</div>' +
       '</div>';
     var p = document.getElementById('ccx-pin');
     p.addEventListener('input', onPinInput);

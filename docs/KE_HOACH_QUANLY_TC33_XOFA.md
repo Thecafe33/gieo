@@ -54,6 +54,7 @@ không đụng `data_access`, không đổi hành vi của `posgieo.html` / `qua
     - **Mục tiêu chung** = một số chủ quán tự nhập cho TẤT CẢ quán (gồm Gieo) ở màn Mục tiêu (ô `all`) — mức mong muốn, được phép THẤP HƠN tổng mục tiêu từng quán để quán này bù quán kia. So với Doanh thu chung.
     - **Cộng mục tiêu từng quán** = TC33 + XOFA + Gieo × số quán Gieo (VD 20 + 35 + 30 + 30 = 115tr, mục tiêu chung 110tr). Thiếu mục tiêu quán nào thì ghi rõ quán đó.
     (Bản trước tính mục tiêu chung = ô Chung TC33 + XOFA + Gieo — đã bỏ.)
+19. **Giao diện gọn (12/10)**: ghi chú / giải thích KHÔNG hiện sẵn — để sau nút ⓘ (`infoI(html)` trong manage.html), bấm mới mở. Chỉ hiện sẵn: số liệu, cảnh báo cần xử lý (ca quên check-out…), trạng thái trống. Code mới theo cùng quy ước.
 
 ## 3. Nguồn dữ liệu đọc doanh thu (không ghi)
 

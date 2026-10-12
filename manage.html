@@ -1707,6 +1707,13 @@ html.tab-ui:not(.nav-off) .sidebar{background:#F2F2F7;border-right:1px solid rgb
 .mg-tag{display:inline-block;font-size:11.5px;font-weight:700;border-radius:999px;padding:2px 8px;margin-right:4px;background:var(--fill);color:var(--ink-2);}
 .mg-tag.tc33{background:#E6F2EC;color:#004D33;} .mg-tag.xofa{background:#E7EEFC;color:#2B57A8;} .mg-tag.gieo{background:#FCE7EC;color:#B7284A;}
 .mg-scroll{overflow-x:auto;}
+/* Nút ⓘ — giải thích ẩn, bấm mới mở */
+.mg-iw{display:inline;}
+.mg-ib{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;margin:-4px 0 -6px 2px;border-radius:50%;color:var(--ink-4);vertical-align:middle;}
+.mg-ib.on,.mg-ib:hover{color:var(--gd);background:var(--gl);}
+.mg-i-body{display:block;font-size:12.5px;font-weight:500;color:var(--gt);line-height:1.6;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-sm);padding:9px 12px;margin:6px 0 4px;text-transform:none;letter-spacing:0;white-space:normal;}
+.mg-i-body[hidden]{display:none;}
+.kcard-wide .mg-ib{color:rgba(255,255,255,.8);} .kcard-wide .mg-ib.on{background:rgba(255,255,255,.18);color:#fff;}
 /* Mục tiêu + % đóng góp */
 .mg-share{display:flex;height:10px;border-radius:99px;overflow:hidden;background:rgba(255,255,255,.26);margin-top:12px;}
 .mg-share span{display:block;height:100%;}
@@ -1832,6 +1839,7 @@ const ICON_PATHS = {
   users:    '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16.5 5.2a3.5 3.5 0 0 1 0 5.6M17.5 13.6a6.5 6.5 0 0 1 4 6.4"/>',
   calendar: '<rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 2.8v4M16 2.8v4"/>',
   chart:    '<path d="M3.5 20.5h17"/><path d="M6.5 20.5v-6M11 20.5V7M15.5 20.5v-9M20 20.5V4"/>',
+  info:     '<circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.6v.4"/>',
   flag:     '<path d="M5 21V4"/><path d="M5 4h11l-2 4 2 4H5"/>',
   coins:    '<ellipse cx="12" cy="6.5" rx="7.5" ry="3.2"/><path d="M4.5 6.5v11c0 1.8 3.4 3.2 7.5 3.2s7.5-1.4 7.5-3.2v-11"/><path d="M4.5 12c0 1.8 3.4 3.2 7.5 3.2s7.5-1.4 7.5-3.2"/>',
   clock:    '<circle cx="12" cy="12" r="9"/><path d="M12 6.8V12l3.4 2.2"/>',
@@ -1860,6 +1868,18 @@ function toast(msg){
   t.classList.add('show');
   clearTimeout(window._toastT);
   window._toastT = setTimeout(()=>t.classList.remove('show'), 2400);
+}
+// Ghi chú giải thích: ẩn sau nút ⓘ, bấm mới mở (chủ dự án 12/10 — hạn chế chữ trên màn hình cho đỡ rối).
+// Trả về một khối inline: nút + phần giải thích ẩn (mở ra thì xuống dòng, chiếm cả bề ngang).
+function infoI(html){
+  return `<span class="mg-iw"><button type="button" class="mg-ib" aria-label="Giải thích" aria-expanded="false" onclick="mgToggleI(this, event)">${ic('info',16)}</button><span class="mg-i-body" hidden>${html}</span></span>`;
+}
+function mgToggleI(b, ev){
+  if(ev){ ev.preventDefault(); ev.stopPropagation(); }
+  const body = b.nextElementSibling; if(!body) return;
+  body.hidden = !body.hidden;
+  b.setAttribute('aria-expanded', String(!body.hidden));
+  b.classList.toggle('on', !body.hidden);
 }
 function showError(msg){
   const b = document.getElementById('errBanner');
@@ -2451,14 +2471,16 @@ function drawRev(r){
       ${s.food > 0 ? `<div class="mg-l"><span>Trong đó Food</span><span>${fmtN(s.food)}</span></div>` : ''}
       <div class="mg-l"><span>Số bill</span><span>${fmtN(s.count)}</span></div>
       ${soRow(s.revenue, D('gg_' + x.s.id, yk), p=>p.revenue)}
-      <div class="small-note" style="margin-top:6px">Chi tiết (món, giá vốn, lãi lỗ, kho…) xem ở Quản lý Gieo.</div>
     </div>`; }).join('');
   body.innerHTML = `
     <div class="seg">${seg}</div>
     ${r.mode === 'custom' ? `<div class="mg-range">
       <input type="date" id="revFrom" value="${REV_FROM}"> <span>–</span> <input type="date" id="revTo" value="${REV_TO}">
       <button class="btn" onclick="revApplyCustom()">Xem</button></div>` : ''}
-    <div class="mg-period">${label[r.mode]} · ${period}</div>
+    <div class="mg-period">${label[r.mode]} · ${period} ${infoI(`<b>Doanh thu chung</b> = Tổng nước The Cafe 33 + XOFA không gồm Food + doanh thu Gieo Gieo. Tổng thu cả bill (gồm Ăn vặt, Food): <b>${fmt(tcAll + xoAll + ggRev)}</b>.<br>
+      <b>Mục tiêu chung</b> là mức bạn tự đặt cho tất cả quán (có thể thấp hơn tổng mục tiêu từng quán). Mục tiêu Gieo đọc từ Quản lý Gieo.<br>
+      Chia doanh thu đúng như mỗi POS: The Cafe 33 theo loại món trong menu; XOFA tách Food như PosX; Gieo Gieo tiền mặt / chuyển khoản như POS Gieo, doanh thu = tổng bill như Quản lý Gieo (chi tiết món, giá vốn, lãi lỗ, kho xem ở Quản lý Gieo).<br>
+      Số ngày cũ hơn ${REV_STABLE_AFTER} ngày được lưu trong máy — bấm ⟳ để đọc lại.`)}</div>
 
     <div class="kcard kcard-wide lv-green" style="margin-bottom:12px">
       <div class="klabel">Doanh thu chung</div>
@@ -2470,7 +2492,6 @@ function drawRev(r){
       ${tgtBlock(chung, tgAll, r, `<div class="mg-tgt"><div class="mg-tgt-l"><span>Chưa đặt mục tiêu chung</span><a href="#" onclick="switchScreen('target');return false" style="color:inherit;font-weight:700">Đặt ›</a></div></div>`)}
       ${(()=>{ const t = tgSum(r.from, r.to); if(!t.v) return '';
         return `<div class="mg-pace" style="margin-top:8px">Cộng mục tiêu từng quán: <b style="color:#fff">${fmtGon(t.v)}</b> · đạt ${Math.round(chung / t.v * 100)}%${t.thieu.length ? ' — chưa có mục tiêu: ' + esc(t.thieu.join(', ')) : ''}</div>`; })()}
-      <div class="ksub" style="margin-top:10px">Doanh thu chung = Tổng nước TC33 + XOFA không gồm Food + doanh thu Gieo Gieo. Mục tiêu chung là mức bạn tự đặt cho tất cả quán (có thể thấp hơn tổng mục tiêu từng quán). Tổng thu cả bill (gồm Ăn vặt, Food): ${fmt(tcAll + xoAll + ggRev)}</div>
     </div>
 
     <div class="mg-cols">
@@ -2527,7 +2548,7 @@ function drawRev(r){
         const g = G.reduce((a, y)=> a + (D('gg_' + y.s.id, k) ? D('gg_' + y.s.id, k).revenue : 0), 0);
         return `<tr><td>${fmtDateVN(parseDkey(k)).slice(0,5)}</td><td style="text-align:right">${fmtN(t.drink+t.khac)}</td><td style="text-align:right">${fmtN(x.total)}</td><td style="text-align:right">${fmtN(g)}</td><td style="text-align:right"><b>${fmtN(t.drink+t.khac+x.total+g)}</b></td></tr>`; }).join('')}</tbody>
     </table></div>` : ''}
-    <div class="small-note" style="margin:10px 2px 0">Chia doanh thu đúng như mỗi POS: The Cafe 33 phân nhóm theo loại món trong menu (nhóm Khác hiện luôn); XOFA tách Food riêng như màn Doanh thu của PosX; Gieo Gieo tiền mặt / chuyển khoản như màn Doanh thu của POS Gieo, doanh thu = tổng bill như Quản lý Gieo. Số ngày cũ hơn ${REV_STABLE_AFTER} ngày được lưu trong máy — bấm ⟳ để đọc lại.</div>
+    
   `;
 }
 
@@ -2612,28 +2633,26 @@ async function renderTarget(){
   const months = Object.keys(T).filter(m => TARGET_KEYS.some(k => Number(T[m][k.key]) > 0)).sort().reverse();
   const [y, m] = targetMonth.split('-').map(Number);
   body.innerHTML = `
-    <div class="small-note" style="margin:0 0 10px">Đặt mục tiêu doanh thu theo THÁNG. Tháng chưa đặt sẽ dùng mức của tháng gần nhất trước đó. Xem Hôm nay / Tuần / Năm thì mục tiêu tự chia theo số ngày.</div>
     <div class="card">
-      <div class="field"><label>Tháng</label>
+      <div class="field"><label>Tháng ${infoI('Đặt mục tiêu doanh thu theo THÁNG; tháng chưa đặt dùng mức của tháng gần nhất trước đó. Xem Hôm nay / Tuần / Năm thì mục tiêu tự chia theo số ngày.<br>The Cafe 33 so với Tổng nước · XOFA so với không gồm Food · Mục tiêu chung so với Doanh thu chung — là mức bạn mong muốn cho cả hệ thống, được phép thấp hơn tổng mục tiêu từng quán để quán này bù quán kia.')}</label>
         <input type="month" id="tgMonth" value="${targetMonth}" onchange="targetMonth=this.value;renderTarget()"></div>
       ${TARGET_KEYS.map(k=>{
         const own = Number(cur[k.key]) > 0 ? Number(cur[k.key]) : '';
         const inh = own ? null : targetMonthValue(T, targetMonth, k.key);
-        return `<div class="field"><label>${k.label} <span class="small-note" style="font-weight:500">— so với ${k.note}</span></label>
+        return `<div class="field"><label>${k.label}</label>
           <input type="number" inputmode="numeric" id="tg_${k.key}" value="${own}" placeholder="${inh ? fmtN(inh.value) + ' (đang dùng mức tháng ' + inh.from.slice(5) + '/' + inh.from.slice(0, 4) + ')' : 'VD: 60000000'}">
           <div class="small-note" id="tgDay_${k.key}">${own || inh ? '≈ ' + fmt((own || inh.value) / daysInMonthYm(targetMonth)) + ' / ngày' : ''}</div></div>`;
       }).join('')}
-      <div class="small-note" style="margin:-6px 0 12px">Cộng mục tiêu từng quán tháng ${m}/${y}: <b id="tgSum"></b><br>Mục tiêu chung là mức bạn mong muốn cho cả hệ thống — được phép thấp hơn tổng này để quán này bù quán kia.</div>
+      <div class="small-note" style="margin:-6px 0 12px">Cộng mục tiêu từng quán tháng ${m}/${y}: <b id="tgSum"></b></div>
       <button class="btn" onclick="saveTarget()">${ic('save',15)} Lưu mục tiêu tháng ${m}/${y}</button>
       ${T[targetMonth] ? `<button class="btn outline" style="margin-top:8px" onclick="deleteTarget()">Xoá mức riêng của tháng ${m}/${y}</button>` : ''}
     </div>
-    <div class="sec-title">Gieo Gieo — đọc từ Quản lý Gieo</div>
+    <div class="sec-title">Gieo Gieo — đọc từ Quản lý Gieo ${infoI('Sửa ở Quản lý Gieo › Cấu hình › Mục tiêu (Target AOV, Target Bill/ngày). Mỗi cửa hàng Gieo cùng một mức (Target KPI của Gieo dùng chung mọi cửa hàng).')}</div>
     <div class="card">
       ${ggT ? `<div class="row"><span class="rl">Mục tiêu ngày (AOV ${fmt(ggT.aov)} × ${fmtN(ggT.billsPerDay)} bill)</span><span class="rv">${fmt(ggT.aov * ggT.billsPerDay)}</span></div>
         <div class="row"><span class="rl">Tháng ${m}/${y} · mỗi cửa hàng</span><span class="rv">${fmt(ggMonth)}</span></div>
         ${ggN > 1 ? `<div class="row"><span class="rl">${ggN} cửa hàng Gieo</span><span class="rv">${fmt(ggMonth * ggN)}</span></div>` : ''}`
       : '<div class="muted">Không đọc được mục tiêu của Quản lý Gieo.</div>'}
-      <div class="small-note">Sửa ở Quản lý Gieo › Cấu hình › Mục tiêu (Target AOV, Target Bill/ngày). Mỗi cửa hàng Gieo cùng một mức (Target KPI của Gieo dùng chung mọi cửa hàng).</div>
     </div>
     <div class="sec-title">Các tháng đã đặt (The Cafe 33 · XOFA)</div>
     <div class="card mg-scroll">${months.length ? `<table class="kt">
@@ -2756,8 +2775,7 @@ async function renderNv(){
   const flt = [['cafe','TC33 + XOFA'],['tc33','The Cafe 33'],['xofa','XOFA'],['all','Tất cả (cả Gieo)']]
     .map(([k,l])=>`<button class="btn sm ${NV_FILTER===k?'':'outline'}" onclick="NV_FILTER='${k}';renderNv()">${l}</button>`).join('');
   body.innerHTML = `
-    <div class="sec-title" style="margin-top:0">Thêm nhân viên</div>
-    <div class="small-note" style="margin:0 0 10px">Danh sách nhân viên DÙNG CHUNG với Gieo Gieo (mỗi người một mã PIN 4 số duy nhất). Tích "Làm ở cửa hàng" để người đó check-in / check-out được ở POS của quán đó. Nhân sự cứng của The Cafe 33 / XOFA không cần thêm vào đây.</div>
+    <div class="sec-title" style="margin-top:0">Thêm nhân viên ${infoI('Danh sách nhân viên DÙNG CHUNG với Gieo Gieo (mỗi người một mã PIN 4 số duy nhất). Tích "Làm ở cửa hàng" để người đó check-in / check-out được ở POS của quán đó. Nhân sự cứng của The Cafe 33 / XOFA không cần thêm vào đây.<br>Nghỉ việc: bấm ⏸ (Ngừng) — lịch sử chấm công giữ nguyên, PIN được trả lại cho người khác dùng. Xoá hẳn nhân viên chỉ làm ở Quản lý Gieo.')}</div>
     ${editing ? '' : `<div class="card">${nvFormFields(null)}<button class="btn" onclick="nvSubmit()">Thêm nhân viên</button></div>`}
     <div class="sec-title">Danh sách (${show.length})</div>
     <div class="mg-filter">${flt}</div>
@@ -2774,7 +2792,6 @@ async function renderNv(){
           </div>
         </div>`).join('') : '<div class="muted">Chưa có nhân viên nào ở nhóm này.</div>'}
     </div>
-    <div class="small-note" style="margin:8px 2px 0">Nghỉ việc: bấm ⏸ (Ngừng) — lịch sử chấm công giữ nguyên, PIN được trả lại cho người khác dùng. Xoá hẳn nhân viên chỉ làm ở Quản lý Gieo.</div>
   `;
   if(editing) openEditSheet('Sửa nhân viên', nvFormFields(editing) + `<button class="btn" style="margin-top:14px" onclick="nvSubmit()">${ic('save',15)} Lưu thay đổi</button>`, nvCancelEdit);
   else closeEditSheet(true);
@@ -2787,32 +2804,28 @@ function nvFormFields(editing){
   return `
     <div class="field"><label>Họ tên đầy đủ</label><input type="text" id="nvFullName" placeholder="VD: Nguyễn Thị Lan" value="${editing ? esc(editing.fullName||'') : ''}"></div>
     <div class="field"><label>Mã PIN (đúng 4 chữ số)</label><input type="text" id="nvPin" inputmode="numeric" maxlength="4" placeholder="VD: 1234" value="${editing ? esc(editing.pin||'') : ''}"></div>
-    <div class="field"><label>Làm ở cửa hàng (chọn được nhiều)</label>
+    <div class="field"><label>Làm ở cửa hàng (chọn được nhiều) ${infoI('Chỉ người được tích The Cafe 33 / XOFA mới check-in được ở POS quán đó. Bỏ tích Gieo Gieo KHÔNG đổi gì ở app Gieo (POS Gieo hiện chưa lọc theo mục này).')}</label>
       <div class="mg-chk">${WORK_STORE_OPTS.map(o=>`<label><input type="checkbox" id="nvWs_${o.id}" ${ws.includes(o.id)?'checked':''} onchange="nvWsChange()">${o.label}</label>`).join('')}</div>
-      <div class="small-note">Chỉ người được tích The Cafe 33 / XOFA mới check-in được ở POS quán đó. Bỏ tích Gieo Gieo KHÔNG đổi gì ở app Gieo (POS Gieo hiện chưa lọc theo mục này).</div>
     </div>
     ${fixed ? `<div class="field"><label>Hình thức lương</label><div class="small-note" style="margin:0">${payTypeLabel(editing)}. Người lương cứng: sửa lương ở Quản lý Gieo.</div></div>` : `
-    <div class="field"><label>Hình thức lương</label>
+    <div class="field"><label>Hình thức lương ${infoI('Lương giờ tính theo ĐÚNG giờ check-in / check-out trên POS.')}</label>
       <select id="nvPayType" onchange="nvDraft.payType=this.value">
         <option value="hourly_full" ${payType==='hourly_full'?'selected':''}>Theo giờ — Full-time</option>
         <option value="hourly_part" ${payType!=='hourly_full'?'selected':''}>Theo giờ — Part-time</option>
       </select>
-      <div class="small-note">Lương giờ tính theo ĐÚNG giờ check-in / check-out trên POS.</div>
     </div>
     <div class="field"><label>Đơn giá / giờ (đ)</label><input type="number" id="nvHourlyRate" value="${editing ? (editing.hourlyRate||0) : 0}"></div>
     <div class="field">
       <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--td);cursor:pointer;font-weight:600;">
-        <input type="checkbox" id="nvOtEnabled" ${otEnabled?'checked':''} onchange="nvToggleOt()" style="width:20px;height:20px;"> Bật lương OT (tăng ca)
+        <input type="checkbox" id="nvOtEnabled" ${otEnabled?'checked':''} onchange="nvToggleOt()" style="width:20px;height:20px;"> Bật lương OT (tăng ca) ${infoI('Mỗi ngày, số giờ VƯỢT "Số giờ cơ bản" tính theo đơn giá OT (gộp các ca trong cùng ngày, cùng quán).')}
       </label>
-      <div class="small-note">Mỗi ngày, số giờ VƯỢT "Số giờ cơ bản" tính theo đơn giá OT (gộp các ca trong cùng ngày, cùng quán).</div>
     </div>
     <div class="grid2" id="nvOtFields" style="${otEnabled?'':'display:none'}">
       <div class="field" style="margin-bottom:0"><label>Số giờ cơ bản / ngày</label><input type="number" id="nvOtThreshold" value="${editing && editing.otThresholdHours ? editing.otThresholdHours : 8}"></div>
       <div class="field" style="margin-bottom:0"><label>Đơn giá OT / giờ (đ)</label><input type="number" id="nvOtRate" value="${editing && editing.otRate ? editing.otRate : 0}"></div>
     </div>
-    ${editing ? `<div class="field" style="margin-top:12px"><label>Mức lương mới áp dụng từ ngày</label>
-      <input type="date" id="nvPayFrom" value="${dkey(new Date())}">
-      <div class="small-note">Chỉ dùng khi ĐỔI hình thức / đơn giá / OT. Các ngày trước mốc này giữ mức lương cũ (dùng chung lịch sử lương với Quản lý Gieo).</div></div>` : ''}`}
+    ${editing ? `<div class="field" style="margin-top:12px"><label>Mức lương mới áp dụng từ ngày ${infoI('Chỉ dùng khi ĐỔI hình thức / đơn giá / OT. Các ngày trước mốc này giữ mức lương cũ (dùng chung lịch sử lương với Quản lý Gieo).')}</label>
+      <input type="date" id="nvPayFrom" value="${dkey(new Date())}"></div>` : ''}`}
   `;
 }
 function nvWsChange(){ nvDraft.workStores = WORK_STORE_OPTS.filter(o=>{ const c = document.getElementById('nvWs_'+o.id); return c && c.checked; }).map(o=>o.id); }
@@ -2918,7 +2931,7 @@ async function renderLich(){
   body.innerHTML = `
     ${storeSeg('renderLich')}
     ${!staff.length ? `<div class="card"><div class="muted">Chưa có nhân viên nào được tích làm ở ${STORES[HR_STORE].name} — vào mục Nhân viên để tích.</div></div>` : `
-    <div class="sec-title" style="margin-top:0">Xếp lịch nhanh cho nhiều ngày</div>
+    <div class="sec-title" style="margin-top:0">Xếp lịch nhanh cho nhiều ngày ${infoI(`Ghi đè lịch đã có của đúng những ngày khớp thứ đã chọn, ở ${STORES[HR_STORE].name}. Sau đó vẫn sửa / xoá riêng từng ngày ở khung bên dưới.`)}</div>
     <div class="card">
       <div class="field"><label>Nhân viên</label>
         <select onchange="bulkLich.employeeId=this.value">${staff.map(e=>`<option value="${e.id}" ${e.id===bulkLich.employeeId?'selected':''}>${esc(e.fullName)}</option>`).join('')}</select></div>
@@ -2934,7 +2947,6 @@ async function renderLich(){
         <div class="field" style="margin-bottom:0"><label>Giờ vào</label><input type="time" value="${bulkLich.startTime}" onchange="bulkLich.startTime=this.value"></div>
         <div class="field" style="margin-bottom:0"><label>Giờ ra</label><input type="time" value="${bulkLich.endTime}" onchange="bulkLich.endTime=this.value"></div></div>` : ''}
       <button class="btn" style="margin-top:10px" onclick="submitBulkLich()">Áp dụng hàng loạt</button>
-      <div class="small-note">Ghi đè lịch đã có của đúng những ngày khớp thứ đã chọn, ở ${STORES[HR_STORE].name}.</div>
     </div>
     <div class="sec-title">Xếp lịch cho 1 ngày</div>
     <div class="card"><div class="field" style="margin-bottom:0"><label>Ngày</label>
@@ -3033,8 +3045,7 @@ async function renderCc(){
       ${dangCa.map(t=>`<div class="row"><span class="rl">${esc(t.employeeName||'(không rõ)')} <span style="color:var(--ink-4)">vào ${hhmm(t.checkedInAt)}</span></span><span class="rv"><span class="tier tier-green">${fmtNum(shiftWorkedHours(t),1)}h tạm tính</span></span></div>`).join('')}
     </div>` : ''}
     ${treo.length ? `<div class="card" style="border-left:3px solid var(--bad);">
-      <div style="font-weight:700;font-size:14px;color:var(--bad);margin-bottom:6px;">${ic('alert',14)} ${treo.length} ca ngày trước quên check-out — CHƯA được tính lương</div>
-      <div class="small-note" style="margin-bottom:8px;">Bấm "Sửa" để điền giờ ra thật; không nhớ chính xác thì điền giờ đóng cửa hôm đó.</div>
+      <div style="font-weight:700;font-size:14px;color:var(--bad);margin-bottom:6px;">${ic('alert',14)} ${treo.length} ca ngày trước quên check-out — CHƯA được tính lương ${infoI('Bấm "Sửa" để điền giờ ra thật; không nhớ chính xác thì điền giờ đóng cửa hôm đó.')}</div>
       ${treo.map(t=>`<div class="row"><span class="rl">${esc(t.employeeName||'(không rõ)')} · ${fmtDateVN(parseDkey(t.businessDate))} <span style="color:var(--ink-4)">vào ${hhmm(t.checkedInAt)}</span></span>
         <span class="rv"><button class="btn sm outline" style="width:auto;padding:0 12px" onclick="ccDate='${t.businessDate}';ccEditId='${t.id}';ccAddOpen=false;renderCc()">Sửa</button></span></div>`).join('')}
     </div>` : ''}
@@ -3058,8 +3069,7 @@ async function renderCc(){
           const tag = (s.manualEntry || s.manualEdit) ? '<span class="tier tier-amber" style="margin-left:6px">sửa tay</span>' : '';
           const form = ccEditId === s.id ? `<div style="padding:8px 0 4px;border-bottom:1px dashed var(--line-2);">
             <div class="grid2"><div class="field" style="margin-bottom:6px"><label>Giờ vào</label><input type="time" id="cc-in-${s.id}" value="${hhmm(s.checkedInAt)}"></div>
-            <div class="field" style="margin-bottom:6px"><label>Giờ ra</label><input type="time" id="cc-out-${s.id}" value="${hhmm(s.checkedOutAt)}"></div></div>
-            <div class="small-note" style="margin-bottom:8px;">Bỏ trống giờ ra = vẫn để ca mở. Giờ ra nhỏ hơn giờ vào = ca qua đêm.</div>
+            <div class="field" style="margin-bottom:6px"><label>Giờ ra ${infoI('Bỏ trống = vẫn để ca mở. Giờ ra nhỏ hơn giờ vào = ca qua đêm.')}</label><input type="time" id="cc-out-${s.id}" value="${hhmm(s.checkedOutAt)}"></div></div>
             <div style="display:flex;gap:8px;"><button class="btn outline sm" onclick="ccEditId=null;renderCc()">Huỷ</button><button class="btn sm" onclick="ccSave('${s.id}')">Lưu</button>
             <button class="btn outline sm" style="color:var(--bad);border-color:var(--bad)" onclick="ccDelete('${s.id}')">Xoá</button></div></div>` : '';
           return `<div class="row"><span class="rl">Vào ${hhmm(s.checkedInAt)}${tag}</span><span class="rv">
@@ -3077,9 +3087,8 @@ async function renderCc(){
         <div style="display:flex;gap:8px;"><button class="btn outline" onclick="ccAddOpen=false;renderCc()">Huỷ</button><button class="btn" onclick="ccAdd()">Lưu ca bù</button></div>`
       : `<button class="btn outline" onclick="ccAddOpen=true;renderCc()">＋ Thêm ca bù (nhân viên bị sót chấm công)</button>`}
     </div>
-    <div class="card" style="margin-top:10px"><div class="field" style="margin-bottom:0"><label>Ngưỡng đi trễ (phút) — áp dụng cho cả The Cafe 33 và XOFA</label>
-      <input type="number" value="${HR_SETTINGS.lateGraceMinutes}" onchange="saveLateGrace(this.value)"></div>
-      <div class="small-note">Cài đặt riêng của 2 quán này (không đổi ngưỡng của Gieo).</div></div>
+    <div class="card" style="margin-top:10px"><div class="field" style="margin-bottom:0"><label>Ngưỡng đi trễ (phút) ${infoI('Trễ hơn số phút này so với giờ vào theo lịch mới tính là "Trễ". Áp dụng cho cả The Cafe 33 và XOFA — cài đặt riêng, không đổi ngưỡng của Gieo.')}</label>
+      <input type="number" value="${HR_SETTINGS.lateGraceMinutes}" onchange="saveLateGrace(this.value)"></div></div>
   `;
 }
 async function ccSave(id){
@@ -3187,7 +3196,7 @@ async function renderLuong(){
       <div class="klabel">Lương giờ tháng ${m}/${y}</div><div class="kval">${fmt(sum.tc + sum.xo)}</div>
       <div class="ksub">The Cafe 33 ${fmt(sum.tc)} · XOFA ${fmt(sum.xo)}</div></div>
     ${treo ? `<div class="card" style="border-left:3px solid var(--bad)"><div class="small-note" style="margin:0;color:var(--bad)">${ic('alert',14)} ${treo} ca quên check-out trong tháng chưa được tính — sửa ở mục Chấm công.</div></div>` : ''}
-    <div class="sec-title">Từng người</div>
+    <div class="sec-title">Từng người ${infoI('Tiền = giờ chấm công thật × đơn giá đúng ngày (theo lịch sử lương), OT tính theo từng ngày ở từng quán. Ca hôm nay đang mở tính tạm tới hiện tại. *Giờ ở Gieo chỉ để tham khảo — lương phần đó xem ở Quản lý Gieo.')}</div>
     <div class="card mg-scroll"><table class="kt">
       <thead><tr><th>Nhân viên</th><th style="text-align:right">Giờ TC33</th><th style="text-align:right">Giờ XOFA</th><th style="text-align:right">Tiền</th><th style="text-align:right">Giờ Gieo*</th></tr></thead>
       <tbody>${rows.length ? rows.map(r=>`<tr>
@@ -3196,7 +3205,6 @@ async function renderLuong(){
         <td style="text-align:right"><b>${fmt(r.total)}</b></td><td style="text-align:right;color:var(--gt)">${r.gieo ? fmtNum(r.gieo,1)+'h' : '—'}</td></tr>`).join('')
         : '<tr><td colspan="5"><div class="muted">Chưa có ca nào trong tháng.</div></td></tr>'}</tbody>
     </table></div>
-    <div class="small-note" style="margin:8px 2px 0">Tiền = giờ chấm công thật × đơn giá đúng ngày (theo lịch sử lương), OT tính theo từng ngày ở từng quán. Ca hôm nay đang mở tính tạm tới hiện tại. *Giờ ở Gieo chỉ để tham khảo — lương phần đó xem ở Quản lý Gieo.</div>
   `;
 }
 
