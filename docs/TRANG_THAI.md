@@ -28,6 +28,7 @@
 - **02/10** — NL "nấu dùng nguyên gói" (cờ `prepWholePack` trên `inventory_items`): quét gói nguyên + báo hết, không cân.
 - **03/10** — Target nhân viên (động lực): `docs/TARGET_NHAN_VIEN.md`.
 - **04/10** — Lương dự đoán theo lịch bỏ lịch sót của nhân viên đã nghỉ; hoà vốn của ngày: chi phí biến đổi đã chi nằm trong phần cần đắp.
+- **12/10** — App quản lý riêng cho The Cafe 33 + XOFA: `manage.html` (doanh thu 2 quán song song + Nhân sự) và màn Ca làm việc `cham_cong.v1.js` gắn vào `pos.html` / `PosX.html` (2 file này nay nằm trong repo). Không đụng engine / data_access / app Gieo. Chi tiết: `docs/KE_HOACH_QUANLY_TC33_XOFA.md`. **Chưa deploy.**
 
 ## 3. Còn mở (chưa làm — không tự làm khi chưa được giao)
 
@@ -65,6 +66,7 @@
 | `docs/KE_HOACH_TRACH_NHIEM_CA.md` | nhóm `duty` (quy trách nhiệm theo ca) |
 | `docs/CHE_DO_THU.md` | chế độ thử `_thu` |
 | `docs/TARGET_NHAN_VIEN.md` | target nhân viên |
+| `docs/KE_HOACH_QUANLY_TC33_XOFA.md` | `manage.html`, `cham_cong.v1.js`, `pos.html` / `PosX.html` (The Cafe 33 + XOFA) |
 | `docs/BANG_GHI_ENGINE.md` | bảng hàm ghi dữ liệu kho (tự sinh) |
 | `docs/luu_tru/` | tài liệu cũ, chỉ để tra cứu — **không** làm theo |
 

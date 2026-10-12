@@ -1,0 +1,2915 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#F3F2F0">
+<meta name="color-scheme" content="light">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<title>Quản lý Cafe 33 · XOFA</title>
+<!-- Quản lý The Cafe 33 (pos.html) + XOFA (PosX.html) — docs/KE_HOACH_QUANLY_TC33_XOFA.md.
+     Giao diện chép từ quanlygieo.html (hệ "Aurora"), màu chủ đạo xanh #006241 của pos.html. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://firestore.googleapis.com" crossorigin>
+<link rel="preconnect" href="https://identitytoolkit.googleapis.com" crossorigin>
+<link rel="preconnect" href="https://www.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400..800&display=swap"
+      media="print" onload="this.media='all';this.onload=null">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400..800&display=swap"></noscript>
+<style>
+/* ==========================================================================
+   THE CAFE 33 + XOFA — QUẢN LÝ · chép hệ thiết kế "Aurora" của quanlygieo.html, đổi màu chủ đạo sang xanh #006241 của pos.html
+   --------------------------------------------------------------------------
+   Viết lại toàn bộ lớp giao diện (dựng lại từ đầu), giữ NGUYÊN 100% tên class
+   và id để 11.000 dòng JS render bên dưới không phải sửa một chữ nào.
+
+   Nguyên tắc:
+   1. NGÔN NGỮ THỊ GIÁC  — phẳng, nhiều khoảng thở, bo góc lớn, đổ bóng mềm
+      nhiều lớp thay cho viền cứng; kính mờ ở thanh cố định (iOS/HyperOS).
+   2. CHỮ ĐỌC ĐƯỢC       — thang chữ bắt đầu từ 15px (cũ: 10.5–12.5px), mọi
+      nhãn phụ tối thiểu 13px, tương phản đạt WCAG AA.
+   3. HAI HÌNH THÁI      — điện thoại: một cột, vùng chạm ≥48px, sheet trượt
+      từ đáy; máy tính bảng (html.tab-ui): sidebar cắm cố định, nhiều cột,
+      hover/con trỏ/viền focus cho chuột + bàn phím vật lý.
+   4. MỘT NGUỒN SỰ THẬT  — mọi màu/khoảng cách/bo góc/bóng đều là biến ở :root.
+      Các biến CŨ (--gd,--gt,--td,--bg,--line...) được GIỮ LẠI vì hàng trăm
+      style inline trong JS đang gọi tới chúng — chỉ đổi GIÁ TRỊ, không đổi tên.
+   ========================================================================== */
+
+:root{
+  /* ---- Thương hiệu ---- */
+  --gd:#006241;          /* accent chính (giữ đúng màu POS) */
+  --gm:#004D33;          /* accent đậm — chữ trên nền nhạt, trạng thái nhấn */
+  --gl:#E6F2EC;          /* accent nhạt — nền chip/nhãn đang chọn */
+  --accent-glow:rgba(0,98,65,.16);
+
+  /* ---- Nền & bề mặt ---- */
+  --bg:#F3F2F0;          /* nền app — xám ấm trung tính, làm thẻ trắng nổi lên */
+  --card:#FFFFFF;        /* bề mặt nổi */
+  --surface-2:#FAF9F8;   /* ô lõm trong thẻ */
+  --fill:#EDECE9;        /* nền điều khiển (track, nút phụ) */
+  --fill-2:#E3E1DD;      /* nền điều khiển khi nhấn */
+  --line:#E6E3DF;        /* đường kẻ tóc */
+  --line-2:#D5D1CB;      /* đường kẻ đậm hơn */
+
+  /* ---- Chữ ---- */
+  --td:#17151A;          /* chữ chính */
+  --ink-2:#585460;       /* chữ phụ */
+  --gt:#6C6873;          /* chữ nhạt (đã tăng tương phản so với #948E7E cũ) */
+  --ink-4:#9B96A2;       /* chữ mờ nhất */
+
+  /* ---- Ngữ nghĩa ---- */
+  --ok:#12855A;      --ok-bg:#E2F4EB;   --ok-line:#B7E0CB;
+  --warn:#A8690B;    --warn-bg:#FBF0DC; --warn-line:#EBD3A0;
+  --bad:#D2333F;     --bad-bg:#FCE7E9;  --bad-line:#F3C3C8;
+  --bi:#2B57A8;      --bb:#E7EEFC;      --bi-line:#C2D4F5;
+
+  /* ---- Bo góc ---- */
+  --r-xs:10px; --r-sm:14px; --r-md:18px; --r-lg:22px; --r-xl:28px; --r-pill:999px;
+
+  /* ---- Đổ bóng nhiều lớp (mềm, không viền cứng) ---- */
+  --sh-1:0 1px 2px rgba(23,21,26,.04), 0 1px 3px rgba(23,21,26,.03);
+  --sh-2:0 2px 4px rgba(23,21,26,.04), 0 8px 20px -8px rgba(23,21,26,.12);
+  --sh-3:0 8px 16px -8px rgba(23,21,26,.14), 0 24px 48px -16px rgba(23,21,26,.22);
+  --sh-pop:0 12px 28px -8px rgba(23,21,26,.18), 0 32px 64px -24px rgba(23,21,26,.30);
+
+  /* ---- Chuyển động ---- */
+  --ease:cubic-bezier(.32,.72,0,1);      /* "lò xo" kiểu iOS */
+  --ease-out:cubic-bezier(.22,1,.36,1);
+  --dur:.24s;
+
+  /* ---- Chiều cao chạm ---- */
+  --tap:50px;
+
+  /* ---- Font ---- */
+  --font:-apple-system,BlinkMacSystemFont,'SF Pro Text','Inter var',Inter,'Segoe UI Variable Text','Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;
+  --font-disp:-apple-system,BlinkMacSystemFont,'SF Pro Display','Inter var',Inter,'Segoe UI Variable Display','Segoe UI',Roboto,sans-serif;
+}
+
+/* ---------- Reset ---------- */
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+/* [FIX] Nếu không có dòng này, bất kỳ rule nào khác đặt display (kể cả các rule
+   :has() ở khối "16.6 Danh sách trải nhiều cột" bên dưới) sẽ THẮNG thuộc tính
+   hidden mặc định của trình duyệt — khiến phần tử đang [hidden] vẫn hiện ra dù
+   JS đã set .hidden=true (đây là nguyên nhân nút "Thu gọn" ở Sức khoẻ quán
+   không gấp lại được trên tablet: #todayHealth vừa [hidden] vừa khớp
+   div:has(> .health-item + .health-item) nên bị ép display:grid). */
+[hidden]{display:none!important;}
+html{-webkit-text-size-adjust:100%;}
+html,body{background:var(--bg);}
+body{
+  font-family:var(--font);
+  font-size:15px;line-height:1.45;letter-spacing:-.005em;
+  color:var(--td);
+  max-width:430px;margin:0 auto;min-height:100vh;
+  overflow-x:hidden;position:relative;
+  -webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;
+  text-rendering:optimizeLegibility;
+}
+button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit;letter-spacing:inherit;}
+button{cursor:pointer;background:none;border:none;}
+b,strong{font-weight:650;}
+h1,h2,h3,h4{font-weight:650;letter-spacing:-.015em;}
+.disp{font-family:var(--font-disp);font-weight:700;letter-spacing:-.02em;}
+.mono{font-variant-numeric:tabular-nums;font-weight:650;}
+
+/* Thanh cuộn: điện thoại ẩn hẳn; có chuột thì hiện mảnh để còn biết vị trí. */
+*{scrollbar-width:none;}
+*::-webkit-scrollbar{display:none;}
+@media (pointer:fine){
+  *{scrollbar-width:thin;scrollbar-color:var(--line-2) transparent;}
+  *::-webkit-scrollbar{display:block;width:10px;height:10px;}
+  *::-webkit-scrollbar-thumb{background:var(--line-2);border-radius:99px;border:3px solid transparent;background-clip:content-box;}
+  *::-webkit-scrollbar-thumb:hover{background:#bdb8b1;background-clip:content-box;}
+  *::-webkit-scrollbar-track{background:transparent;}
+}
+
+/* Bàn phím vật lý: mọi thứ bấm được đều có vòng focus rõ ràng. */
+:focus{outline:none;}
+:focus-visible{outline:2.5px solid var(--gd);outline-offset:2px;border-radius:6px;}
+.sidebar-item:focus-visible,.btn:focus-visible,.ftag:focus-visible,.iconbtn:focus-visible,
+.seg button:focus-visible,.report-subnav button:focus-visible,.litem:focus-visible{outline-offset:3px;}
+
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+@keyframes fadein{from{opacity:0;transform:translateY(6px) scale(.995)}to{opacity:1;transform:none}}
+@keyframes pi{from{opacity:0;transform:translateY(12px) scale(.97)}to{opacity:1;transform:none}}
+
+/* ==========================================================================
+   1. KHUNG TỔNG
+   ========================================================================== */
+.app-shell{display:flex;min-height:100vh;}
+.main-col{flex:1;min-width:0;padding-bottom:max(24px,env(safe-area-inset-bottom));}
+
+/* ---------- Sidebar ---------- */
+/* [FIX] Trước đây CẢ sidebar là một khối cuộn: 40 mục menu dài hơn màn hình
+   nên mục cuối ("Kiểm toán") bị đẩy khuất dưới đáy, mà thanh cuộn thì bị ẩn
+   nên không có dấu hiệu nào cho biết còn nội dung bên dưới. Giờ tách làm hai:
+   phần đầu (logo + ô tìm) đứng yên, CHỈ danh sách menu cuộn — và thanh cuộn
+   của riêng danh sách đó luôn hiện, mảnh, để thấy ngay là còn cuộn được. */
+.sidebar{
+  position:fixed;top:0;left:0;bottom:0;width:290px;z-index:120;
+  background:var(--card);
+  border-right:1px solid var(--line);
+  transform:translateX(-102%);transition:transform var(--dur) var(--ease);
+  display:flex;flex-direction:column;overflow:hidden;
+  padding:max(14px,env(safe-area-inset-top)) 12px 0;
+  box-shadow:var(--sh-3);
+}
+.sidebar-brand,.nav-search{flex-shrink:0;}
+#sidebarNav{
+  flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;
+  padding-bottom:calc(28px + env(safe-area-inset-bottom));
+  scrollbar-width:thin;scrollbar-color:var(--line-2) transparent;
+}
+#sidebarNav::-webkit-scrollbar{display:block;width:6px;}
+#sidebarNav::-webkit-scrollbar-thumb{background:var(--line-2);border-radius:99px;}
+#sidebarNav::-webkit-scrollbar-track{background:transparent;}
+.sidebar.open{transform:translateX(0);}
+.sidebar-backdrop{
+  display:none;position:fixed;inset:0;z-index:110;
+  background:rgba(23,21,26,.34);backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px);
+}
+.sidebar-backdrop.open{display:block;animation:fadein .2s ease;}
+
+.sidebar-brand{display:flex;align-items:center;gap:11px;padding:8px 10px 14px;}
+.sidebar-brand .brand{font-size:19px !important;color:var(--td);letter-spacing:-.03em;}
+.seedmark{flex-shrink:0;}
+
+.sidebar-group-label{
+  font-size:12px;font-weight:700;color:var(--ink-4);
+  text-transform:uppercase;letter-spacing:.08em;
+  padding:18px 12px 7px;
+}
+/* Nhánh con (nhóm Kho) — đường dẫn dọc bên trái để thấy rõ đây là tầng 2,
+   và chữ của mục con thẳng hàng với chữ của mục cha thay vì thụt ngược ra
+   ngoài như trước. */
+.sidebar-subtree{
+  margin:2px 0 8px 22px;padding-left:12px;
+  border-left:2px solid var(--line);
+}
+.sidebar-sub-label{
+  font-size:11.5px;font-weight:700;color:var(--ink-4);
+  text-transform:uppercase;letter-spacing:.07em;padding:12px 10px 4px;
+}
+.sidebar-subtree > .sidebar-sub-label:first-child{padding-top:4px;}
+/* Chấm "bạn đang ở trong nhóm này" khi nhóm Kho đang thu lại */
+.sidebar-item .sb-here{
+  width:7px;height:7px;border-radius:50%;background:var(--gd);flex-shrink:0;margin-left:auto;
+}
+.sidebar-item .sb-here + .sb-caret{margin-left:8px;}
+.sidebar-item{
+  display:flex;align-items:center;gap:12px;width:100%;text-align:left;
+  padding:11px 12px;min-height:48px;border-radius:var(--r-sm);
+  font-size:15px;font-weight:550;color:var(--td);position:relative;
+  transition:background .15s ease,color .15s ease,transform .12s var(--ease-out);
+}
+.sidebar-item>span:not(.sb-ic):not(.sb-dot):not(.sb-caret):not(.sb-here){flex:1;min-width:0;}
+.sidebar-item:active{background:var(--fill);transform:scale(.985);}
+.sidebar-item.active{background:var(--gl);color:var(--gm);font-weight:650;}
+.sidebar-item.active .sb-ic{color:var(--gd);}
+.sidebar-item .sb-ic{width:22px;display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--gt);}
+.sidebar-item .sb-dot{
+  position:absolute;right:12px;top:50%;transform:translateY(-50%);
+  width:9px;height:9px;border-radius:50%;background:var(--bad);
+  box-shadow:0 0 0 3px rgba(210,51,63,.16);
+}
+.sidebar-item.sub{padding:9px 12px;min-height:42px;font-size:14.5px;font-weight:500;color:var(--ink-2);}
+.sidebar-item.sub.active{font-weight:650;color:var(--gm);}
+.sidebar-item.sidebar-head .sb-caret{margin-left:auto;display:flex;align-items:center;color:var(--ink-4);}
+
+/* Ô tìm nhanh trong sidebar — 18 mục Kho không còn phải cuộn dò bằng mắt. */
+.nav-search{position:relative;padding:2px 4px 6px;}
+.nav-search input{
+  width:100%;height:44px;border:none;border-radius:var(--r-sm);
+  background:var(--fill);padding:0 14px 0 38px;
+  font-size:15px;color:var(--td);
+}
+.nav-search input::placeholder{color:var(--ink-4);}
+.nav-search input:focus{background:var(--card);box-shadow:0 0 0 2px var(--gd) inset;}
+.nav-search .ns-ic{position:absolute;left:16px;top:50%;transform:translateY(-60%);color:var(--ink-4);pointer-events:none;display:flex;}
+.nav-search .ns-kbd{
+  position:absolute;right:14px;top:50%;transform:translateY(-60%);
+  font-size:11.5px;font-weight:650;color:var(--ink-4);
+  background:var(--card);border:1px solid var(--line);border-radius:6px;padding:2px 6px;
+  pointer-events:none;display:none;
+}
+.nav-empty{padding:18px 14px;font-size:14px;color:var(--gt);text-align:center;}
+
+/* ==========================================================================
+   2. THANH TIÊU ĐỀ (kính mờ)
+   ========================================================================== */
+.topbar{
+  position:sticky;top:0;z-index:60;
+  padding:max(10px,env(safe-area-inset-top)) 16px 10px;
+  background:rgba(243,242,240,.82);
+  backdrop-filter:saturate(180%) blur(20px);
+  -webkit-backdrop-filter:saturate(180%) blur(20px);
+  border-bottom:1px solid transparent;
+  transition:border-color .2s ease,background .2s ease;
+}
+html.scrolled .topbar{border-bottom-color:var(--line);background:rgba(243,242,240,.92);}
+@supports not (backdrop-filter:blur(1px)){ .topbar{background:var(--bg);} }
+.topbar-row{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:48px;}
+.brandrow{display:flex;align-items:center;gap:10px;min-width:0;}
+.hdr-titles{min-width:0;}
+#hdrKicker{
+  font-size:11.5px;font-weight:700;color:var(--ink-4);
+  text-transform:uppercase;letter-spacing:.07em;line-height:1.2;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+#hdrKicker:empty{display:none;}
+.brand{color:var(--gd);line-height:1.15;}
+#hdrTitle{
+  font-size:21px !important;color:var(--td);letter-spacing:-.03em;line-height:1.2;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;
+}
+.topbar-actions{display:flex;align-items:center;gap:8px;flex-shrink:0;}
+
+/* Trạng thái đồng bộ — chấm + chữ, thu về chỉ còn chấm khi màn hẹp. */
+.sync{
+  display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:550;color:var(--gt);
+  background:var(--fill);border-radius:var(--r-pill);padding:6px 11px 6px 9px;
+}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--ok);flex-shrink:0;box-shadow:0 0 0 3px rgba(18,133,90,.14);}
+.dot.busy{background:var(--warn);box-shadow:0 0 0 3px rgba(168,105,11,.14);animation:pulse 1.1s infinite;}
+@media (max-width:520px){ .sync span:last-child{display:none;} .sync{padding:9px;} }
+html.phone-ui .sync span:last-child{display:none;}
+html.phone-ui .sync{padding:9px;}
+
+/* Nút tròn trên thanh tiêu đề */
+.hib,.hamburger-btn{
+  width:44px;height:44px;border-radius:50%;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
+  background:var(--fill);color:var(--ink-2);
+  transition:background .15s ease,transform .12s var(--ease-out),color .15s ease;
+}
+.hib:active,.hamburger-btn:active{background:var(--fill-2);transform:scale(.92);}
+#reloadBtn.spin{animation:spin .8s linear infinite;}
+
+#errBanner{
+  margin:0 14px 10px;border-radius:var(--r-sm);
+  background:var(--bad-bg);color:var(--bad);border:1px solid var(--bad-line);
+  font-size:13.5px;font-weight:600;padding:12px 14px;line-height:1.45;
+}
+
+/* ==========================================================================
+   3. MÀN HÌNH & KHUNG NỘI DUNG
+   ========================================================================== */
+.screen{display:none;min-height:100vh;flex-direction:column;background:var(--bg);}
+.screen.active{display:flex;animation:fadein .22s var(--ease-out);}
+.wrap{padding:14px 14px calc(32px + env(safe-area-inset-bottom));}
+
+/* Tiêu đề nhóm nội dung */
+.sec-title{
+  font-size:13px;font-weight:700;color:var(--gt);
+  text-transform:uppercase;letter-spacing:.06em;
+  margin:26px 4px 10px;display:flex;align-items:center;gap:6px;
+}
+.sec-title:first-child{margin-top:2px;}
+
+.divider{height:1px;background:var(--line);margin:18px 0;border:none;}
+.muted{color:var(--gt);font-size:14px;text-align:center;padding:26px 0;line-height:1.6;}
+.muted-sm{color:var(--ink-4);font-size:13px;}
+.small-note{font-size:12.5px;color:var(--gt);line-height:1.6;margin-top:4px;}
+.row-info-tag{font-size:12px;color:var(--ink-4);font-weight:550;}
+
+/* ==========================================================================
+   4. THẺ & DÒNG DỮ LIỆU (kiểu "inset grouped list" của iOS)
+   ========================================================================== */
+.card{
+  background:var(--card);border-radius:var(--r-lg);
+  padding:16px;margin-bottom:12px;
+  box-shadow:var(--sh-1);border:1px solid rgba(230,227,223,.7);
+}
+.card-h{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;}
+.card-h h3{font-size:16px;font-weight:650;color:var(--td);display:flex;align-items:center;gap:7px;}
+
+.row{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:11px 0;border-bottom:1px solid var(--line);
+  font-size:15px;min-height:46px;
+}
+.row:last-child{border-bottom:none;}
+.row:first-child{padding-top:2px;}
+.row .rl{color:var(--ink-2);min-width:0;}
+.row .rv{
+  font-weight:650;font-variant-numeric:tabular-nums;
+  display:flex;align-items:center;gap:7px;font-size:15px;
+  text-align:right;flex-shrink:0;color:var(--td);
+}
+.row .rv.small-note{font-weight:500;margin-top:0;}
+
+/* ==========================================================================
+   5. LƯỚI CHỈ SỐ (KPI)
+   ========================================================================== */
+.kgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+
+/* ---------- Thẻ chỉ số MINI (màn Hôm nay) ----------
+   Vì sao có loại thẻ này: 6 chỉ số phụ (bill, AOV, IPT, ly, doanh thu/giờ công,
+   vốn trong kho) mà mỗi cái một thẻ lớn thì chiếm 3 màn hình cuộn. Thẻ lớn để
+   dành cho 2 con số người ta mở app ra là tìm — doanh thu và lãi/lỗ; phần còn
+   lại xếp 3 cột, đọc lướt được trong một cái nhìn.
+   Không có thanh meter ở đây: thay bằng TÔ MÀU chính con số theo trạng thái
+   (đỏ/vàng/xanh) + một dòng mục tiêu bé bên dưới — cùng lượng thông tin, tốn
+   một phần ba chiều cao. */
+.kmini-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px;}
+.kmini{background:var(--card);border-radius:var(--r-lg);padding:11px 11px 10px;
+  border:1px solid rgba(230,227,223,.7);box-shadow:var(--sh-1);min-width:0;}
+.kmini .kmlabel{font-size:10px;font-weight:800;color:var(--gt);text-transform:uppercase;letter-spacing:.4px;line-height:1.25;}
+.kmini .kmval{font-size:17.5px;font-weight:800;color:var(--td);margin-top:4px;line-height:1.15;letter-spacing:-.2px;overflow-wrap:anywhere;}
+.kmini .kmsub{font-size:10.5px;color:var(--gt);margin-top:3px;line-height:1.35;overflow-wrap:anywhere;}
+.kmini.st-bad .kmval{color:var(--bad);}
+.kmini.st-warn .kmval{color:var(--warn);}
+.kmini.st-ok .kmval{color:var(--ok);}
+/* Thẻ Doanh thu bị dính sát thanh "việc cần xử lý" phía trên — hai khối khác
+   hẳn nhau về vai trò, cần một nhịp thở giữa chúng. */
+#todayGrid{margin-top:14px;}
+html.tab-ui .kmini-grid{grid-template-columns:repeat(6,1fr);gap:12px;}
+html.tab-ui .kmini{padding:14px 14px 12px;border-radius:var(--r-xl);}
+html.tab-ui .kmini .kmval{font-size:21px;}
+
+/* ---------- Tiêu đề mục GẬP ĐƯỢC ----------
+   Dùng cho những khối "xem thì hay, không xem cũng chẳng sao" (hoạt động kho).
+   Mặc định gập lại để màn Hôm nay không dài ra vì thứ mỗi tuần mới cần đọc. */
+/* [MỚI] "Hoạt động kho hôm nay" + "Hoạt động BTP hôm nay" — ở tablet xếp 2 cột
+   song song thay vì nối tiếp nhau theo chiều dọc (mỗi cột tự cao theo nội dung
+   của nó, không kéo giãn theo cột kia). Điện thoại giữ nguyên xếp dọc. */
+html.tab-ui .feed2col{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start;}
+.sec-fold{display:flex;align-items:center;gap:8px;width:100%;background:none;border:none;
+  padding:14px 2px 6px;font-family:inherit;cursor:pointer;text-align:left;}
+.sec-fold .sf-t{font-size:12.5px;font-weight:800;color:var(--gt);text-transform:uppercase;letter-spacing:.06em;}
+.sec-fold .sf-c{font-size:11px;font-weight:800;color:var(--gm);background:var(--gl);border-radius:999px;padding:2px 8px;flex-shrink:0;}
+.sec-fold .sf-ch{margin-left:auto;color:var(--gt);display:inline-flex;transition:transform .15s var(--ease-out);}
+.sec-fold[aria-expanded="true"] .sf-ch{transform:rotate(180deg);}
+
+/* ---------- Bảng tin BILL BÁN HÀNG (màn Hôm nay) ----------
+   Để chủ quán vừa xem camera vừa đối chiếu bill mà không phải mở lại POS.
+   Bill mới về thì TỰ BUNG chi tiết một lát rồi thu lại — đúng khoảnh khắc cần
+   nhìn là lúc nó vừa xảy ra; để nguyên bung hết thì vài chục bill sau là một
+   trang dài vô tận. */
+.bfeed{display:flex;flex-direction:column;gap:7px;}
+.bfeed-row{background:var(--card);border:1px solid rgba(230,227,223,.7);border-radius:var(--r-md);
+  box-shadow:var(--sh-1);overflow:hidden;transition:border-color .3s ease;}
+.bfeed-row.moi{border-color:var(--gd);box-shadow:0 0 0 3px var(--accent-glow);}
+.bfeed-head{display:flex;align-items:center;gap:10px;padding:10px 12px;cursor:pointer;width:100%;
+  background:none;border:none;font-family:inherit;text-align:left;}
+.bfeed-time{font-size:12px;font-weight:800;color:var(--gm);font-variant-numeric:tabular-nums;flex-shrink:0;}
+.bfeed-main{flex:1;min-width:0;}
+/* [FIX] display:block bắt buộc phải có — .bfeed-items vốn là <span> (display:inline
+   mặc định), mà overflow/text-overflow KHÔNG có tác dụng trên phần tử inline. Thiếu
+   dòng này, bill nhiều món tên dài tràn thẳng ra ngoài, đè lên số tiền bên phải thay
+   vì bị cắt "...". */
+.bfeed-items{display:block;font-size:13px;font-weight:650;color:var(--td);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.bfeed-meta{font-size:10.5px;color:var(--gt);margin-top:2px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.bfeed-total{font-size:14.5px;font-weight:800;color:var(--td);flex-shrink:0;font-variant-numeric:tabular-nums;}
+.bfeed-tag{font-size:9.5px;font-weight:800;border-radius:999px;padding:1px 7px;white-space:nowrap;}
+.bfeed-body{padding:2px 12px 11px;border-top:1px dashed var(--line-2);}
+.bfeed-li{display:flex;justify-content:space-between;gap:10px;padding:5px 0;font-size:12.5px;color:var(--td);}
+.bfeed-li .bl-tp{font-size:11px;color:var(--gt);padding-left:12px;}
+.bfeed-kv{display:flex;justify-content:space-between;gap:10px;font-size:12px;color:var(--gt);padding:3px 0;}
+
+/* Thanh tóm tắt "việc cần xử lý" — một dòng, bấm mới bung danh sách ra. Danh
+   sách đầy đủ nằm ngay đầu màn Hôm nay đẩy mọi chỉ số xuống dưới nếp gấp. */
+.hbar-sum{display:flex;align-items:center;gap:9px;width:100%;text-align:left;cursor:pointer;
+  background:var(--card);border:1px solid rgba(230,227,223,.7);border-radius:var(--r-lg);
+  box-shadow:var(--sh-1);padding:11px 13px;font-family:inherit;margin-bottom:2px;}
+.hbar-sum .hbs-txt{flex:1;min-width:0;font-size:13px;font-weight:700;color:var(--td);line-height:1.4;}
+.hbar-sum .hbs-cnt{font-size:12px;font-weight:800;color:var(--gt);flex-shrink:0;}
+.hbar-sum.ok{border-color:rgba(27,169,111,.35);}
+.hbar-sum.warn{border-color:rgba(216,154,42,.45);}
+.hbar-sum.bad{border-color:rgba(232,81,93,.45);}
+.kcard{
+  background:var(--card);border-radius:var(--r-lg);
+  padding:16px 16px 14px;box-shadow:var(--sh-1);
+  border:1px solid rgba(230,227,223,.7);
+  display:flex;flex-direction:column;
+}
+.kcard .klabel{
+  font-size:12.5px;color:var(--gt);font-weight:650;
+  text-transform:uppercase;letter-spacing:.05em;
+}
+.kcard .kval{
+  font-family:var(--font-disp);
+  font-size:24px;font-weight:700;margin-top:6px;letter-spacing:-.03em;
+  font-variant-numeric:tabular-nums;color:var(--td);line-height:1.15;
+}
+.kcard .ksub{font-size:13px;color:var(--gt);margin-top:4px;line-height:1.4;}
+
+/* Thẻ doanh thu — nền gradient thương hiệu, chiếm trọn hàng */
+.kcard.kcard-wide{
+  grid-column:1 / -1;border:none;
+  background:linear-gradient(140deg,#1E8A5E 0%,var(--gd) 46%,#00513A 100%);
+  box-shadow:0 8px 24px -10px rgba(0,98,65,.55),var(--sh-1);
+  color:#fff;
+}
+.kcard.kcard-wide .klabel{color:rgba(255,255,255,.78);}
+.kcard.kcard-wide .kval{color:#fff;font-size:32px;}
+.kcard.kcard-wide .ksub{color:rgba(255,255,255,.8);}
+.kcard.kcard-wide .meter-bar{background:rgba(255,255,255,.26);}
+.kcard.kcard-wide .meter-fill{background:#fff !important;}
+.kcard.kcard-wide .meter-foot{color:rgba(255,255,255,.85);}
+.kcard.kcard-wide .tier{background:rgba(255,255,255,.2);color:#fff;}
+
+/* ---- 5 MỨC SỨC KHOẺ CỦA NGÀY ----
+   Màu là thứ đọc được từ xa, trước cả khi kịp đọc con số. Thang này bám đúng
+   những mốc CÓ THẬT trong kinh doanh chứ không phải màu cho vui:
+     đỏ    — chưa đủ đắp chi phí, hôm nay đang lỗ
+     vàng  — đã hết lỗ nhưng chưa tới mục tiêu
+     xanh  — đạt mục tiêu tối thiểu
+     lam   — vượt mục tiêu
+     tím   — vượt xa, ngày rất tốt
+   Dùng gradient tối màu để chữ trắng luôn đủ tương phản ở cả hai chế độ sáng/tối. */
+.kcard.kcard-wide.lv-red{background:linear-gradient(140deg,#E8515D 0%,#D2333F 48%,#A81F2C 100%);
+  box-shadow:0 8px 24px -10px rgba(210,51,63,.55),var(--sh-1);}
+.kcard.kcard-wide.lv-amber{background:linear-gradient(140deg,#D89A2A 0%,#B87D12 48%,#93610A 100%);
+  box-shadow:0 8px 24px -10px rgba(184,125,18,.5),var(--sh-1);}
+.kcard.kcard-wide.lv-green{background:linear-gradient(140deg,#1BA96F 0%,#12855A 48%,#0B6644 100%);
+  box-shadow:0 8px 24px -10px rgba(18,133,90,.5),var(--sh-1);}
+.kcard.kcard-wide.lv-blue{background:linear-gradient(140deg,#3B72C9 0%,#2B57A8 48%,#1D3F80 100%);
+  box-shadow:0 8px 24px -10px rgba(43,87,168,.5),var(--sh-1);}
+.kcard.kcard-wide.lv-top{background:linear-gradient(135deg,#12855A 0%,#2B57A8 38%,#6D3BC9 72%,#004D33 100%);
+  box-shadow:0 10px 28px -10px rgba(109,59,201,.55),var(--sh-1);}
+
+/* Thanh đo có VẠCH MỐC (hoà vốn / mục tiêu).
+   Lớp mốc phải nằm NGOÀI .meter-bar: .meter-bar có overflow:hidden để bo tròn phần
+   đã đạt, đặt nhãn bên trong thì nhãn bị cắt mất sạch. */
+.meter-wrap{position:relative;}
+.meter-marks{position:absolute;left:0;right:0;top:0;height:0;pointer-events:none;}
+.meter-mark{position:absolute;top:-3px;width:2px;height:14px;border-radius:2px;background:#fff;
+  box-shadow:0 0 0 1px rgba(0,0,0,.18);}
+.meter-mark-lbl{position:absolute;top:14px;transform:translateX(-50%);font-size:9.5px;font-weight:700;
+  white-space:nowrap;color:rgba(255,255,255,.92);}
+
+/* ==========================================================================
+   6. THANH TIẾN ĐỘ / CHỈ SỐ NHỎ
+   ========================================================================== */
+.meter{margin-top:10px;}
+.meter-bar{height:8px;border-radius:99px;background:var(--fill);overflow:hidden;}
+.meter-fill{height:100%;border-radius:99px;transition:width .6s var(--ease);}
+.meter-fill.red{background:linear-gradient(90deg,#E8535D,var(--bad));}
+.meter-fill.amber{background:linear-gradient(90deg,#D69A2A,var(--warn));}
+.meter-fill.green{background:linear-gradient(90deg,#2CA872,var(--ok));}
+.meter-fill.blue{background:linear-gradient(90deg,#4B7BD1,var(--bi));}
+.meter-foot{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:7px;font-size:12.5px;color:var(--gt);font-weight:550;}
+
+.metric{
+  background:var(--surface-2);border:1px solid var(--line);
+  border-radius:var(--r-sm);padding:13px 14px 12px;margin:8px 0;
+}
+.metric-top{display:flex;align-items:center;justify-content:space-between;gap:10px;}
+.metric-label{font-size:14px;color:var(--ink-2);display:flex;align-items:center;gap:6px;}
+.metric-label .tgt-dot{width:6px;height:6px;border-radius:50%;background:var(--gd);flex-shrink:0;}
+.metric-val{font-weight:700;font-size:15px;font-variant-numeric:tabular-nums;color:var(--td);}
+
+/* ==========================================================================
+   7. NHÃN TRẠNG THÁI
+   ========================================================================== */
+.tier,.badge{
+  display:inline-flex;align-items:center;gap:5px;
+  font-size:12.5px;font-weight:650;padding:4px 10px;border-radius:var(--r-pill);
+  font-variant-numeric:tabular-nums;white-space:nowrap;line-height:1.3;
+}
+.badge{margin-top:8px;}
+.tier-red,.badge.red{background:var(--bad-bg);color:var(--bad);}
+.tier-amber,.badge.amber{background:var(--warn-bg);color:var(--warn);}
+.tier-green,.badge.green{background:var(--ok-bg);color:var(--ok);}
+.tier-blue,.badge.blue{background:var(--bb);color:var(--bi);}
+.badge .bdot{width:6px;height:6px;border-radius:50%;background:currentColor;flex-shrink:0;}
+
+/* ==========================================================================
+   8. CẢNH BÁO
+   ========================================================================== */
+/* [SỬA] border-left dày trên thẻ bo góc 18px tạo ra một cái nêm vuông ở hai
+   góc trái. Đổi thành vạch màu bo tròn vẽ bằng ::before, nằm hẳn bên trong. */
+.alert{
+  position:relative;display:flex;gap:11px;align-items:flex-start;
+  background:var(--card);border:1px solid var(--line);border-radius:var(--r-md);
+  padding:13px 15px 13px 22px;margin-bottom:9px;font-size:14.5px;line-height:1.55;
+  box-shadow:var(--sh-1);
+}
+.alert::before{
+  content:'';position:absolute;left:7px;top:11px;bottom:11px;
+  width:4px;border-radius:99px;background:var(--ink-4);
+}
+.alert.red::before{background:var(--bad);}
+.alert.amber::before{background:var(--warn);}
+.alert.green::before{background:var(--ok);}
+.alert.blue::before{background:var(--bi);}
+.alert.red{background:linear-gradient(90deg,var(--bad-bg) 0%,var(--card) 46%);}
+.alert.amber{background:linear-gradient(90deg,var(--warn-bg) 0%,var(--card) 46%);}
+.alert.green{background:linear-gradient(90deg,var(--ok-bg) 0%,var(--card) 46%);}
+.alert.blue{background:linear-gradient(90deg,var(--bb) 0%,var(--card) 46%);}
+.alert .ic{font-size:17px;line-height:1.45;flex-shrink:0;}
+
+.alert-card{
+  background:var(--card);border:1px solid var(--bad-line);
+  border-radius:var(--r-md);padding:15px 16px;margin-bottom:11px;box-shadow:var(--sh-1);
+}
+/* [SỬA] Trước đây thẻ "đã xử lý" chỉ hạ opacity xuống .62 trên NỀN ĐỎ y hệt thẻ mới
+   — nhìn thoáng qua vẫn là một thẻ đỏ mờ đi chứ không giống "việc đã xong", phải đọc
+   chữ mới biết. Đổi hẳn màu nền/viền sang trung tính, bỏ opacity — nhất quán với
+   tier-green "Đã xử lý" đã có sẵn trên tiêu đề thẻ. */
+.alert-card.resolved{background:var(--fill);border-color:var(--line);}
+.alert-card.resolved .ac-title{color:var(--gt);}
+.alert-card .ac-title{font-size:15px;font-weight:700;color:var(--bad);margin-bottom:8px;}
+.alert-card .ac-row{font-size:14px;color:var(--td);padding:3px 0;}
+/* Đối chiếu từng lô trong cảnh báo kiểm kê BTP. Giữ khối này cạnh alert-card
+   để dễ thay đổi riêng luồng cảnh báo mà không ảnh hưởng các thẻ khác. */
+.prep-alert-lots{margin:10px 0;border:1px solid #b8d4e8;border-radius:12px;overflow:hidden;background:var(--card);}
+.prep-alert-lots-title{padding:8px 11px;background:#eef6fc;color:#0062AD;font-size:12.5px;font-weight:700;}
+.prep-alert-lot{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:9px 11px;border-top:1px solid #e3edf4;}
+.prep-alert-lot-code{color:#004b86;font-size:13.5px;font-weight:700;overflow-wrap:anywhere;}
+.prep-alert-lot-qty{font-size:12.5px;color:var(--gm);margin-top:2px;}
+.prep-alert-lot-result{font-size:12.5px;font-weight:700;text-align:right;white-space:nowrap;color:#0062AD;}
+.prep-alert-lot-result.short{color:#bc3830;}
+.prep-alert-lot-result.extra{color:#9a661a;}
+.prep-alert-lot-result.match{color:#168052;}
+/* [SỬA] ac-infer trước là <div> luôn xổ hết chữ — vài dòng giải thích đã đủ dài để
+   che khuất mất mấy dòng ac-row phía trên, đọc lướt cả màn Hộp thư cảnh báo rất mỏi.
+   Đổi sang <details>/<summary>: gập lại mặc định, cần đọc mới bấm mở — vẫn cùng một
+   nội dung, không mất thông tin nào. */
+.alert-card details.ac-infer{margin:9px 0;}
+.alert-card details.ac-infer summary{
+  font-size:12.5px;font-weight:700;color:var(--gt);cursor:pointer;list-style:none;
+  padding:4px 2px;user-select:none;display:flex;align-items:center;gap:4px;
+}
+.alert-card details.ac-infer summary::-webkit-details-marker{display:none;}
+.alert-card details.ac-infer summary::after{content:'▸';font-weight:400;}
+.alert-card details.ac-infer[open] summary::after{content:'▾';}
+.alert-card .ac-infer-body{font-size:13.5px;color:var(--gm);background:var(--gl);border-radius:var(--r-xs);padding:9px 11px;margin-top:4px;line-height:1.55;}
+.alert-card .ac-actions{display:flex;gap:9px;margin-top:11px;flex-wrap:wrap;}
+.alert-card .ac-actions button{
+  flex:1;min-width:120px;min-height:46px;border-radius:var(--r-xs);
+  border:1px solid var(--line-2);background:var(--card);color:var(--td);
+  font-size:14px;font-weight:650;transition:background .15s ease,transform .12s var(--ease-out);
+}
+.alert-card .ac-actions button:active{background:var(--fill);transform:scale(.98);}
+
+/* ---------- Sức khoẻ quán ---------- */
+.health-group-title{
+  font-size:13px;font-weight:700;color:var(--gt);
+  text-transform:uppercase;letter-spacing:.06em;margin:24px 4px 10px;
+}
+.health-group-title:first-child{margin-top:2px;}
+.health-item{
+  position:relative;
+  background:var(--card);border:1px solid var(--line);
+  border-radius:var(--r-md);padding:15px 16px 15px 24px;margin-bottom:9px;
+  display:flex;justify-content:space-between;align-items:center;gap:12px;
+  min-height:62px;cursor:pointer;box-shadow:var(--sh-1);
+  transition:transform .14s var(--ease-out),box-shadow .16s ease;
+}
+.health-item::before{
+  content:'';position:absolute;left:8px;top:13px;bottom:13px;
+  width:4px;border-radius:99px;background:var(--line-2);
+}
+.health-item:active{transform:scale(.985);}
+.health-item.red::before{background:var(--bad);}
+.health-item.yellow::before{background:var(--warn);}
+.health-item.gray::before{background:var(--line-2);}
+.health-item .hi-label{font-size:15px;font-weight:600;color:var(--td);}
+.health-item .hi-count{font-size:14px;font-weight:650;color:var(--gt);white-space:nowrap;flex-shrink:0;}
+.health-all-clear{
+  background:linear-gradient(160deg,var(--ok-bg),#F2FBF6);
+  border:1px solid var(--ok-line);border-radius:var(--r-lg);
+  padding:32px 20px;text-align:center;color:var(--ok);font-weight:650;font-size:16px;line-height:1.6;
+}
+
+/* ---------- Truy cập nhanh (màn Hôm nay) — mỗi ô một màu riêng, bảng màu mới
+   xanh #0062AD/vàng thay cho hồng thương hiệu (đây là khối điều hướng, không
+   phải nút hành động chính nên không cần dùng màu --gd). ---------- */
+.qa-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px;}
+.qa-item{display:flex;flex-direction:column;align-items:center;gap:8px;padding:14px 6px;
+  background:#fff;border-radius:16px;cursor:pointer;font-family:inherit;
+  transition:transform .12s var(--ease-out),background .15s ease;}
+.qa-item:active{transform:scale(.96);}
+.qa-item .qa-ic{width:38px;height:38px;border-radius:11px;display:flex;
+  align-items:center;justify-content:center;flex-shrink:0;}
+.qa-item .qa-label{font-size:11.5px;font-weight:700;color:var(--td);text-align:center;line-height:1.3;}
+html.tab-ui .qa-grid{grid-template-columns:repeat(6,1fr);gap:12px;}
+html.tab-ui .qa-item{padding:18px 8px;border-radius:20px;}
+html.tab-ui .qa-item .qa-ic{width:48px;height:48px;border-radius:14px;}
+html.tab-ui .qa-item .qa-label{font-size:12.5px;}
+
+/* ---------- Nudge ---------- */
+.nudge{
+  background:var(--warn-bg);border:1px solid var(--warn-line);color:var(--warn);
+  border-radius:var(--r-md);padding:14px 15px;font-size:14px;line-height:1.5;
+  display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;
+}
+.nudge button{
+  background:var(--warn);color:#fff;border-radius:var(--r-pill);
+  padding:10px 16px;min-height:42px;font-size:13.5px;font-weight:650;white-space:nowrap;flex-shrink:0;
+}
+
+/* ==========================================================================
+   9. ĐIỀU KHIỂN CHỌN (segmented / chip)
+   Hai vai trò tách bạch:
+     .seg            → chuyển "chế độ xem" (giống segmented control iOS: viên
+                       trắng nổi trên rãnh xám).
+     .ftag / .report-subnav → bộ lọc & chuyển màn (viên bo tròn, chọn = màu thương hiệu).
+   ========================================================================== */
+.seg{
+  display:flex;background:var(--fill);border-radius:var(--r-sm);
+  padding:3px;gap:2px;margin-bottom:16px;overflow-x:auto;
+}
+.seg button{
+  flex:1;background:transparent;padding:11px 8px;min-height:44px;
+  border-radius:11px;font-size:14px;font-weight:600;color:var(--ink-2);
+  white-space:nowrap;transition:background .18s var(--ease-out),color .18s ease,box-shadow .18s ease;
+}
+.seg button.active{background:var(--card);color:var(--gm);box-shadow:var(--sh-1);}
+
+.filter-bar{display:flex;gap:9px;overflow-x:auto;padding:2px 0 4px;margin-bottom:16px;}
+.ftag,.report-subnav button{
+  border-radius:var(--r-pill);padding:11px 18px;min-height:44px;
+  font-size:14px;font-weight:600;white-space:nowrap;flex-shrink:0;
+  background:var(--card);color:var(--ink-2);border:1px solid var(--line);
+  transition:background .16s ease,color .16s ease,border-color .16s ease,transform .12s var(--ease-out);
+}
+.ftag:active,.report-subnav button:active{transform:scale(.96);}
+.ftag.active,.report-subnav button.active{
+  background:var(--gd);color:#fff;border-color:var(--gd);
+  box-shadow:0 4px 14px -6px var(--accent-glow);
+}
+.report-subnav{display:flex;gap:9px;margin-bottom:18px;overflow-x:auto;padding:2px 0 4px;}
+
+/* [MỚI — bảng màu riêng cho tính năng mới/đã fix từ đây trở đi]: vàng + xanh #0062AD +
+   nền kem, KHÔNG đụng var(--gd) — đó là màu thương hiệu dùng khắp app, đổi thẳng biến đó
+   sẽ nhuộm lại toàn bộ nút/tab đang có, ngoài phạm vi được yêu cầu. Dùng thêm class .nf
+   (New Feature) cạnh .ftag/.litem khi muốn theo bảng màu này, không thay .ftag mặc định. */
+.ftag.nf{background:#FFF8E7;color:#0062AD;border:1.5px solid #0062AD;}
+.ftag.nf.active{background:#FFD34D;color:#0062AD;border-color:#0062AD;box-shadow:none;}
+.nf-bg{background:#FFF8E7;border-radius:var(--r-md,12px);}
+.tier-nf{background:#FFF8E7;color:#0062AD;border:1px solid #0062AD;}
+.btn.nf{background:#FFF8E7;color:#0062AD;border:1.5px solid #0062AD;}
+
+/* ---------- Điều hướng tuần ---------- */
+.weeknav{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  background:var(--card);border:1px solid var(--line);border-radius:var(--r-md);
+  padding:6px;margin-bottom:16px;box-shadow:var(--sh-1);
+}
+.weeknav button{
+  width:44px;height:44px;border-radius:50%;
+  background:var(--fill);color:var(--ink-2);font-size:18px;line-height:1;
+  display:flex;align-items:center;justify-content:center;
+  transition:background .15s ease,transform .12s var(--ease-out);
+}
+.weeknav button:active{background:var(--fill-2);transform:scale(.94);}
+.weeknav .wk-label{font-size:15.5px;font-weight:650;color:var(--td);text-align:center;flex:1;}
+
+/* ==========================================================================
+   10. BIỂU MẪU
+   ========================================================================== */
+.field{margin-bottom:16px;}
+.field label{display:block;font-size:14px;font-weight:600;color:var(--ink-2);margin-bottom:7px;}
+.field input,.field select,.field textarea{
+  width:100%;border:1px solid var(--line-2);background:var(--card);
+  border-radius:var(--r-sm);padding:13px 14px;min-height:var(--tap);
+  font-size:16px;color:var(--td);
+  transition:border-color .15s ease,box-shadow .15s ease,background .15s ease;
+  appearance:none;-webkit-appearance:none;
+}
+.field select{
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236C6873' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9.5l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 13px center;padding-right:40px;
+}
+.field input::placeholder,.field textarea::placeholder{color:var(--ink-4);}
+.field input:focus,.field select:focus,.field textarea:focus{
+  outline:none;border-color:var(--gd);box-shadow:0 0 0 4px var(--accent-glow);
+}
+.field input:disabled,.field select:disabled,.field textarea:disabled{background:var(--fill);color:var(--gt);}
+.field textarea{resize:vertical;min-height:88px;line-height:1.55;}
+.field .hint{font-size:12.5px;color:var(--gt);margin-top:6px;line-height:1.55;}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;}
+@media (max-width:560px){.grid3{grid-template-columns:1fr;}}
+
+/* ---------- [NEW-ASSIST] Hàng xếp thứ tự ưu tiên gợi ý ---------- */
+.as-rank{
+  display:flex;align-items:center;gap:12px;
+  background:var(--card);border:1px solid var(--line);border-radius:var(--r-md);
+  padding:12px 14px;margin-bottom:9px;transition:opacity .15s ease;
+}
+.as-rank.off{opacity:.5;}
+.as-rank-no{
+  width:30px;height:30px;flex-shrink:0;border-radius:50%;
+  background:var(--gl);color:var(--gm);font-size:14px;font-weight:800;
+  display:flex;align-items:center;justify-content:center;
+}
+.as-rank-body{flex:1;min-width:0;}
+.as-rank-name{font-size:14.5px;font-weight:650;color:var(--td);}
+.as-rank-note{font-size:12.5px;color:var(--gt);line-height:1.5;margin-top:3px;}
+.as-rank-ctrl{display:flex;align-items:center;gap:4px;flex-shrink:0;}
+.as-rank-ctrl .iconbtn:disabled{opacity:.25;pointer-events:none;}
+/* Công tắc bật/tắt — ô tick vuông trong một hàng toàn nút tròn nhìn rất lạc lõng */
+.as-sw{position:relative;display:inline-block;width:44px;height:26px;flex-shrink:0;margin-left:4px;cursor:pointer;}
+.as-sw input{position:absolute;opacity:0;width:100%;height:100%;margin:0;cursor:pointer;}
+.as-sw span{position:absolute;inset:0;background:var(--line-2);border-radius:999px;transition:background .18s ease;}
+.as-sw span::after{content:'';position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;
+  background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.25);transition:transform .18s var(--ease-out);}
+.as-sw input:checked + span{background:var(--gd);}
+.as-sw input:checked + span::after{transform:translateX(18px);}
+.as-sw input:focus-visible + span{outline:2px solid var(--gd);outline-offset:2px;}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   [NEW] LỊCH SỬ BILL — CLONE NGUYÊN XI GIAO DIỆN TỪ POS
+   Chép đúng từng luật CSS của posgieo.html, không "dịch" sang ngôn ngữ thiết kế
+   của app này. Lý do: hai app phải nhìn ra CÙNG MỘT THỨ — chủ quán đối chiếu với
+   màn hình nhân viên đang mở, đổi màu hay đổi bố cục là bắt người ta dịch bằng
+   mắt giữa hai bản.
+   Toàn bộ nằm dưới .pos-clone và KHAI LẠI biến màu của POS ngay tại đó — biến
+   cùng tên (--gd, --gm, --td…) ở app này mang giá trị khác, không khai lại thì
+   màu sẽ lai giữa hai hệ.
+   ══════════════════════════════════════════════════════════════════════════ */
+.pos-clone{font-family:inherit;}
+.pos-clone *{box-sizing:border-box;}
+/* Thanh tiêu đề — cùng khuôn với hai màn đã bê trước (nút đóng trái, tên màn ở
+   giữa, khoảng trống 44px bên phải cho cân). */
+.pos-clone .pc-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:0 0 16px;}
+.pos-clone .pc-head-t{font-size:20px;font-weight:700;color:var(--td);}
+.pos-clone .hs{margin:0 0 12px;background:#fff;border-radius:14px;display:flex;align-items:center;padding:12px 16px;gap:10px;border:1.5px solid transparent;}
+.pos-clone .hs:focus-within{border-color:var(--gm);}
+.pos-clone .hs input{flex:1;border:none;outline:none;font-family:inherit;font-size:15px;color:var(--td);background:transparent;min-height:0;box-shadow:none;padding:0;}
+.pos-clone .hs input::placeholder{color:#ccc;}
+.pos-clone .hdg{padding:0 0 8px;}
+.pos-clone .hdl{font-size:13px;font-weight:700;color:var(--td);padding:10px 0 8px;}
+.pos-clone .hit{background:#fff;border:1.5px solid #ece7db;border-radius:16px;padding:16px 18px;display:flex;align-items:center;gap:14px;margin-bottom:10px;cursor:pointer;transition:transform .12s;width:100%;text-align:left;font-family:inherit;}
+.pos-clone .hit:active{transform:scale(.98);}
+.pos-clone .hii{width:44px;height:44px;background:#f5f2e9;border-radius:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.pos-clone .hin{flex:1;min-width:0;}
+.pos-clone .hitime{font-size:17px;font-weight:700;color:var(--td);}
+.pos-clone .himeta{font-size:13px;color:var(--gt);margin-top:2px;}
+.pos-clone .himeta span{color:var(--gd);font-weight:600;}
+.pos-clone .hip{font-size:16px;font-weight:700;color:var(--td);}
+.pos-clone .him{font-size:12px;color:var(--gt);font-weight:500;margin-top:2px;text-align:right;}
+.pos-clone .hit.app-order{background:#f0faf4;border:1.5px solid #86efac;}
+.pos-clone .hit.app-order .hii{background:#dcfce7;}
+.pos-clone .hit.app-order .hii svg{stroke:#16a34a;}
+.pos-clone .hit.app-order .hip{color:#15803d;}
+.pos-clone .hit.bank-order{background:var(--gl);border:1.5px solid #BFDCCB;}
+.pos-clone .hit.bank-order .hii{background:#fff;}
+.pos-clone .hit.bank-order .hii svg{stroke:var(--gm);}
+.pos-clone .hit.bank-order .hip{color:var(--gm);}
+.pos-clone .hit.split-order{background:#f5f3ff;border:1.5px solid #ddd6fe;}
+.pos-clone .hit.split-order .hii{background:#ede9fe;}
+.pos-clone .hit.split-order .hii svg{stroke:#7c3aed;}
+.pos-clone .hit.split-order .hip{color:#6d28d9;}
+.pos-clone .btn-close-screen{background:var(--gd);border:none;border-radius:50%;width:44px;height:44px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+/* Nút xoá: bên POS là nút tròn nổi cố định ở góc màn hình. Ở đây màn này nằm
+   trong một trang cuộn dài nên nút nổi sẽ trôi lung tung trên cả các màn khác —
+   giữ nguyên hình dạng và màu, chỉ neo vào cuối thẻ chi tiết. */
+.pos-clone .bdel{width:56px;height:56px;border-radius:50%;background:#e74c3c;border:none;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 16px rgba(231,76,60,.35);}
+.pos-clone .pc-body{padding:0;}
+.pos-clone .pc-date{display:flex;gap:8px;margin:0 0 12px;}
+.pos-clone .pc-date input{flex:1;min-width:0;background:#fff;border:1.5px solid #ece7db;border-radius:14px;padding:11px 13px;
+  font-family:inherit;font-size:14px;color:var(--td);outline:none;min-height:0;box-shadow:none;}
+.pos-clone .pc-date button{background:var(--gd);color:#fff;border:none;border-radius:14px;padding:0 18px;
+  font-family:inherit;font-size:14px;font-weight:700;cursor:pointer;flex-shrink:0;min-height:0;width:auto;}
+.pos-clone .pc-sum{margin:0 0 14px;background:#fff;border:1.5px solid #ece7db;border-radius:14px;padding:12px 16px;
+  display:flex;align-items:center;justify-content:space-between;}
+.pos-clone .pc-sum b{font-size:18px;color:var(--td);}
+.pos-clone .pc-empty{text-align:center;padding:40px;color:#bbb;font-size:14px;}
+
+/* ---------- [NEW-ASSIST] Khối một điều kiện của chiến dịch ---------- */
+.as-cond{
+  background:var(--surface-2);border:1px solid var(--line);
+  border-radius:var(--r-md);padding:14px;margin-bottom:12px;
+}
+.as-cond-h{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;}
+.as-cond-n{font-size:12.5px;font-weight:700;color:var(--gt);text-transform:uppercase;letter-spacing:.06em;}
+/* [FIX] Ô TICK BỊ LUẬT CỦA Ô NHẬP CHỮ NUỐT MẤT.
+   `.field input` ở trên đặt `appearance:none` (để tự vẽ ô nhập chữ), cộng border +
+   border-radius + padding 13px + min-height bằng cỡ ngón tay. Áp lên một ô tick thì
+   nó XOÁ SẠCH dấu tick và biến ô thành một khung bo tròn RỖNG: nhìn không biết đang
+   bật hay tắt, bấm vào cũng không thấy gì đổi.
+   Luật `input[type=checkbox]` cũ tuy đứng sau và thắng ở width/height, nhưng KHÔNG
+   hoàn tác appearance/border/padding nên ô vẫn rỗng. Phải hoàn tác đủ, và đặt độ ưu
+   tiên cao hơn `.field input` bằng cách nêu cả `.field`.
+   Phải nêu THÊM `html.tab-ui .field input` (luật riêng cho giao diện tablet, đặt ở
+   cuối file và ép min-height:46px) — không nêu thì ô tick vẫn cao 46px như ô nhập
+   chữ. Đây đúng là lỗi bộ kiểm thử bắt được sau lần sửa đầu. */
+input[type=checkbox],input[type=radio],
+.field input[type=checkbox],.field input[type=radio],
+html.tab-ui .field input[type=checkbox],html.tab-ui .field input[type=radio]{
+  appearance:auto;-webkit-appearance:auto;
+  width:20px;height:20px;min-height:0;padding:0;
+  border:none;border-radius:0;background:none;box-shadow:none;
+  accent-color:var(--gd);flex-shrink:0;cursor:pointer;
+}
+.field input[type=checkbox]:focus,.field input[type=radio]:focus{box-shadow:none;outline:2px solid var(--gd);outline-offset:2px;}
+
+/* ---------- Nút ---------- */
+.btn{
+  background:var(--gd);color:#fff;border-radius:var(--r-sm);
+  padding:14px 18px;min-height:var(--tap);
+  font-size:16px;font-weight:650;width:100%;letter-spacing:-.01em;
+  display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  box-shadow:0 4px 14px -6px var(--accent-glow);
+  transition:background .15s ease,transform .12s var(--ease-out),box-shadow .15s ease;
+}
+.btn:active{background:var(--gm);transform:scale(.985);box-shadow:none;}
+.btn.outline{background:var(--card);color:var(--gd);border:1.5px solid var(--gd);box-shadow:none;}
+.btn.outline:active{background:var(--gl);}
+.btn.sm{width:auto;padding:10px 16px;min-height:42px;font-size:14px;border-radius:var(--r-pill);}
+.btn.danger{background:var(--bad);box-shadow:0 4px 14px -6px rgba(210,51,63,.4);}
+.btn.danger:active{background:#B62A35;}
+.btn:disabled{opacity:.45;pointer-events:none;}
+
+/* ---------- Khối dòng lặp lại (quy cách/định mức/đặt hàng) ---------- */
+.pkg-row{
+  background:var(--surface-2);border:1px solid var(--line);
+  border-radius:var(--r-md);padding:14px 14px 12px;margin-bottom:12px;
+}
+.pkg-row-h{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;}
+.pkg-row-n{font-size:12.5px;font-weight:700;color:var(--gt);text-transform:uppercase;letter-spacing:.06em;}
+.pkg-eq{display:flex;gap:9px;align-items:stretch;}
+.pkg-eq input{flex:1.1;min-width:0;}
+.pkg-eq select{flex:1;min-width:0;}
+.pkg-out{font-size:13.5px;color:var(--gm);font-weight:600;margin-top:4px;padding-top:10px;border-top:1px dashed var(--line-2);}
+.unit-tag{
+  display:flex;align-items:center;padding:0 14px;background:var(--gl);color:var(--gm);
+  border-radius:var(--r-sm);font-size:14px;font-weight:650;white-space:nowrap;
+}
+.empty-hint{
+  font-size:14px;color:var(--gt);line-height:1.65;
+  background:var(--card);border:1.5px dashed var(--line-2);
+  border-radius:var(--r-md);padding:24px 18px;text-align:center;
+}
+.unit-explainer{
+  font-size:13.5px;line-height:1.7;color:var(--gm);
+  background:var(--gl);border-radius:var(--r-md);padding:14px 16px;margin:2px 0 16px;
+}
+/* ---------- [NL-UI] Tab Nguyên liệu: thẻ danh sách + form sửa gọn, ưu tiên tablet ---------- */
+.nl-top{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin:0 0 16px;}
+.nl-title{font-size:21px;font-weight:800;color:var(--td);display:flex;align-items:center;gap:8px;margin-right:auto;}
+.nl-pill{display:inline-block;font-size:13px;font-weight:800;color:var(--gd);background:var(--gl);border-radius:999px;padding:4px 10px;}
+.nl-search{flex:1 1 220px;max-width:360px;min-height:48px;border:1.5px solid var(--line);border-radius:999px;padding:0 18px;font-size:15px;background:var(--card);}
+.nl-search:focus{outline:none;border-color:var(--gd);box-shadow:0 0 0 3px var(--gl);}
+.nl-add{width:auto !important;min-height:48px;padding:0 22px;border-radius:999px;font-size:15px;font-weight:800;}
+.nl-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px;align-items:stretch;}
+.nl-card{background:var(--card);border:1.5px solid var(--line);border-radius:20px;padding:18px 18px 14px;display:flex;flex-direction:column;gap:10px;box-shadow:var(--sh-1);}
+.nl-card.nl-click{cursor:pointer;}
+.nl-card.nl-click:active{transform:scale(.995);}
+.nl-card.nl-neg{border-color:var(--bad-line);}
+.nl-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;}
+.nl-name{font-size:18px;font-weight:800;color:var(--td);line-height:1.3;min-width:0;}
+.nl-stock{text-align:right;flex-shrink:0;font-variant-numeric:tabular-nums;}
+.nl-stock b{display:block;font-size:20px;font-weight:800;color:var(--td);white-space:nowrap;}
+.nl-stock span{display:block;font-size:12.5px;color:var(--gt);white-space:nowrap;}
+.nl-card.nl-neg .nl-stock b{color:var(--bad);}
+.nl-tags{display:flex;flex-wrap:wrap;gap:6px;}
+.nl-tags .tier{margin:0 !important;}
+.nl-meta{font-size:13.5px;color:var(--gt);line-height:1.5;}
+.nl-actions{display:flex;align-items:center;gap:8px;margin-top:auto;padding-top:10px;border-top:1px solid var(--line);}
+.nl-actions .btn.sm{min-height:44px;padding:0 16px;font-weight:800;}
+.nl-actions .iconbtn{width:44px;height:44px;}
+.nl-actions .nl-sp{margin-left:auto;}
+/* Kho 2.0: thanh tab lớn, thẻ tem/lô dạng lưới (tablet 2-3 cột) */
+.k2-nav{display:flex;flex-wrap:wrap;gap:10px;margin:0 0 18px;}
+.k2-nav button{display:inline-flex;align-items:center;gap:8px;min-height:52px;padding:0 20px;border-radius:999px;border:1.5px solid var(--line);background:var(--card);color:var(--td);font-size:15.5px;font-weight:800;cursor:pointer;font-family:inherit;}
+.k2-nav button.active{background:var(--gd);border-color:var(--gd);color:#fff;}
+.k2-top{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin:0 0 14px;}
+.k2-title{font-size:21px;font-weight:800;color:var(--td);margin-right:auto;}
+.k2-refresh{width:auto !important;min-height:48px;padding:0 18px;border-radius:999px;font-weight:800;}
+.k2-tabs{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 6px;align-items:center;}
+.k2-tabs + .k2-tabs{margin-top:8px;}
+.k2-tabs-l{font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--gt);min-width:92px;}
+.k2-tab{display:inline-flex;align-items:center;gap:8px;min-height:46px;padding:0 16px;border-radius:999px;border:1.5px solid var(--line);background:var(--card);color:var(--ink-2);font-size:15px;font-weight:800;cursor:pointer;font-family:inherit;}
+.k2-tab.active{border-color:var(--td);background:var(--td);color:#fff;}
+.k2-tab .k2-n{font-size:12.5px;font-weight:800;border-radius:999px;padding:2px 8px;background:var(--fill);color:var(--ink-2);font-variant-numeric:tabular-nums;}
+.k2-tab .k2-n.bad{background:var(--bad);color:#fff;}
+.k2-tab .k2-n.warn{background:var(--warn);color:#fff;}
+.k2-tab.active .k2-n{background:rgba(255,255,255,.2);color:#fff;}
+.k2-note{font-size:14px;color:var(--gt);margin:10px 2px 14px;}
+.k2-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;align-items:stretch;}
+.k2-card{background:var(--card);border:1.5px solid var(--line);border-radius:20px;padding:16px 18px;display:flex;flex-direction:column;gap:8px;box-shadow:var(--sh-1);cursor:pointer;text-align:left;}
+.k2-card.bad{border-color:var(--bad-line);}
+.k2-card.warn{border-color:var(--warn-line);}
+.k2-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;}
+.k2-name{font-size:17px;font-weight:800;color:var(--td);line-height:1.3;min-width:0;}
+.k2-code{font-size:12.5px;color:var(--gt);letter-spacing:.5px;font-variant-numeric:tabular-nums;}
+.k2-head .tier{flex-shrink:0;margin:0 !important;}
+.k2-meta{font-size:14px;color:var(--ink-2);line-height:1.5;}
+.k2-meta b{color:var(--td);}
+.k2-sub{font-size:13px;color:var(--gt);line-height:1.45;}
+.k2-act{display:flex;gap:8px;margin-top:auto;padding-top:10px;border-top:1px solid var(--line);}
+.k2-act .btn{width:auto !important;min-height:44px;padding:0 18px;border-radius:999px;font-weight:800;}
+.k2-empty{background:var(--card);border:1.5px dashed var(--line-2);border-radius:20px;padding:28px;text-align:center;color:var(--gt);font-size:15px;}
+.k2-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin:0 0 16px;}
+.k2-stat{background:var(--card);border:1.5px solid var(--line);border-radius:18px;padding:14px 16px;}
+.k2-stat small{display:block;font-size:13px;color:var(--gt);font-weight:700;}
+.k2-stat b{display:block;font-size:26px;font-weight:800;color:var(--td);margin-top:2px;font-variant-numeric:tabular-nums;}
+.k2-stat span{display:block;font-size:12.5px;color:var(--gt);margin-top:2px;}
+.k2-stat.click{cursor:pointer;}
+.k2-stat.bad b{color:var(--bad);} .k2-stat.warn b{color:var(--warn);} .k2-stat.ok b{color:var(--ok);}
+@media (max-width:600px){.k2-tabs-l{width:100%;}.k2-nav button{min-height:46px;padding:0 16px;font-size:15px;}.k2-stats{grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;}.k2-stat{padding:12px;}.k2-stat b{font-size:22px;}.k2-stat span{display:none;}}
+.k2-list{display:flex;flex-direction:column;gap:10px;}
+.k2-row{display:flex;align-items:center;gap:12px;width:100%;min-height:60px;padding:0 18px;border-radius:18px;border:1.5px solid var(--line);background:var(--card);color:var(--td);font-size:16px;font-weight:700;text-align:left;cursor:pointer;font-family:inherit;}
+.k2-row.red{border-color:var(--bad-line);} .k2-row.yellow{border-color:var(--warn-line);}
+.k2-dot{width:10px;height:10px;border-radius:50%;background:var(--gt);flex-shrink:0;}
+.k2-row.red .k2-dot{background:var(--bad);} .k2-row.yellow .k2-dot{background:var(--warn);}
+.k2-row-l{flex:1;min-width:0;}
+.k2-row-n{font-size:18px;font-weight:800;font-variant-numeric:tabular-nums;}
+.k2-row.red .k2-row-n{color:var(--bad);} .k2-row.yellow .k2-row-n{color:var(--warn);}
+.k2-row svg{color:var(--gt);flex-shrink:0;}
+.k2-sec{font-size:18px;font-weight:800;color:var(--td);margin:20px 2px 10px;display:flex;align-items:center;gap:8px;}
+
+html.tab-ui .edit-sheet.nl-sheet{width:min(1080px,94vw);max-height:92vh;}
+.nlf{display:flex;flex-direction:column;gap:14px;}
+.nlf-card{background:var(--card);border:1.5px solid var(--line);border-radius:18px;padding:18px;}
+.nlf-h{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:17px;font-weight:800;color:var(--td);margin-bottom:12px;}
+.nlf-h .btn.sm{min-height:40px;}
+.nlf-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px 16px;}
+.nlf-grid .field{margin-bottom:0;}
+.nlf .field .hint,.nlf .small-note{font-size:13px;line-height:1.45;}
+.nlf-note{font-size:13px;color:var(--gt);line-height:1.45;margin:-4px 0 12px;}
+.nlf-sw{display:flex;align-items:center;gap:14px;padding:12px 0;border-top:1px solid var(--line);cursor:pointer;}
+.nlf-sw:first-of-type{border-top:none;padding-top:0;}
+.nlf-sw > span{flex:1;min-width:0;}
+.nlf-sw b{display:block;font-size:15px;color:var(--td);}
+.nlf-sw small{display:block;font-size:13px;color:var(--gt);margin-top:2px;line-height:1.4;}
+.nlf-sw input[type=checkbox]{appearance:none;-webkit-appearance:none;flex-shrink:0;width:52px;height:32px;border-radius:999px;background:var(--fill-2,#ddd);position:relative;cursor:pointer;transition:background .15s ease;margin:0;}
+.nlf-sw input[type=checkbox]::after{content:'';position:absolute;top:3px;left:3px;width:26px;height:26px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.25);transition:transform .18s ease;}
+.nlf-sw input[type=checkbox]:checked{background:var(--gd);}
+.nlf-sw input[type=checkbox]:checked::after{transform:translateX(20px);}
+.nlf-pkg{display:grid;grid-template-columns:minmax(120px,1.3fr) auto minmax(90px,1fr) minmax(90px,1fr) auto;gap:10px;align-items:center;padding:10px 0;border-top:1px solid var(--line);}
+.nlf-pkg.field{margin-bottom:0;}
+.nlf-pkg:first-child{border-top:none;padding-top:0;}
+.nlf-pkg input,.nlf-pkg select{min-height:46px;width:100%;min-width:0;}
+.nlf-pkg .nlf-eq{font-size:16px;font-weight:800;color:var(--gt);}
+.nlf-pkg .pkg-out{grid-column:1 / -1;border-top:none;padding-top:0;margin-top:-2px;font-size:13px;}
+@media (max-width:600px){
+  .nlf-pkg{grid-template-columns:1fr 1fr auto;}
+  .nlf-pkg input[id^=pkgName]{grid-column:1 / -1;}
+  .nl-grid{grid-template-columns:1fr;}
+  .nl-search{max-width:none;}
+  .nlf-pkg .nlf-eq{display:none;}
+}
+.nlf-save{position:sticky;bottom:-26px;margin:0 -26px -26px;padding:14px 26px 20px;background:linear-gradient(to bottom,rgba(255,255,255,0),var(--bg) 30%);display:flex;justify-content:flex-end;}
+.nlf-save .btn{width:auto;min-width:260px;min-height:52px;border-radius:999px;font-size:16px;font-weight:800;}
+@media (max-width:600px){ .nlf-save{margin:0 -18px -24px;padding:14px 18px 20px;} .nlf-save .btn{width:100%;} }
+.nlf .seg.nlf-seg{max-width:none;width:100%;margin-bottom:8px;overflow:visible;}
+.nlf-seg button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;min-height:66px !important;white-space:normal;text-align:center;padding:10px 12px;}
+.nlf-seg button b{font-size:15px;font-weight:800;}
+.nlf-seg button small{font-size:12.5px;font-weight:500;color:var(--gt);line-height:1.3;}
+.nlf-seg button.active small{color:var(--gm);}
+
+
+/* ---------- [MỚI] TỒN THEO VỊ TRÍ — thẻ đối chiếu riêng, to & rõ hơn hẳn khối
+   dùng chung .pkg-row (vốn cho form quy cách/định mức, không phải chỗ đếm-đặt-số
+   quan trọng mỗi lần lệch kho). Viền trái đổi màu theo mức độ để lướt mắt là
+   thấy ngay dòng nào đang có vấn đề, không phải đọc từng số. ---------- */
+.ls-card{
+  background:var(--card);border:1.5px solid var(--line);border-left:5px solid var(--line);
+  border-radius:18px;padding:18px;margin-bottom:14px;box-shadow:var(--sh-1);
+}
+.ls-card.ls-lech{border-left-color:var(--warn);}
+.ls-card.ls-neg{border-left-color:var(--bad);}
+.ls-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:14px;flex-wrap:wrap;}
+.ls-name{font-size:17px;font-weight:800;color:var(--td);}
+.ls-total-tag{font-size:12.5px;font-weight:700;color:var(--gm);background:var(--gl);padding:5px 12px;border-radius:999px;white-space:nowrap;}
+.ls-current{display:flex;align-items:center;justify-content:space-between;gap:10px;padding-bottom:14px;margin-bottom:14px;border-bottom:1px dashed var(--line-2);}
+.ls-current-label{font-size:14px;color:var(--ink-2);}
+.ls-current-val{font-size:22px;font-weight:800;font-variant-numeric:tabular-nums;color:var(--td);white-space:nowrap;}
+.ls-current-val.ls-neg-val{color:var(--bad);}
+.ls-input-row{display:flex;gap:10px;align-items:stretch;margin-bottom:10px;}
+.ls-input-row input{flex:1;min-width:0;height:54px;font-size:21px;font-weight:800;
+  border:1.5px solid var(--line);border-radius:14px;padding:0 16px;font-variant-numeric:tabular-nums;}
+.ls-input-row input:focus{border-color:var(--gd);outline:none;box-shadow:0 0 0 3px var(--gl);}
+.ls-input-row .unit-tag{height:54px;padding:0 16px;font-size:15px;border-radius:14px;}
+.ls-preview{font-size:14.5px;font-weight:650;color:var(--gm);}
+.ls-warn{margin-top:12px;font-size:13.5px;line-height:1.65;color:#92400e;background:var(--warn-bg);border-radius:12px;padding:12px 14px;}
+
+/* ==========================================================================
+   11. DÒNG DANH SÁCH
+   ========================================================================== */
+.litem{
+  background:var(--card);border:1px solid rgba(230,227,223,.8);
+  border-radius:var(--r-md);padding:14px 15px;margin-bottom:9px;min-height:64px;
+  display:flex;justify-content:space-between;align-items:center;gap:12px;
+  /* Cho phép XUỐNG DÒNG. Trước đây .li-r có flex-shrink:0 + nowrap còn .li-l chỉ
+     min-width:0 — nên khi khối phải rộng hơn chỗ trống (ô 360px ở giao diện
+     tablet, dòng có 4 nút) thì .li-l bị bóp về gần 0: chữ rớt mỗi dòng một từ,
+     còn khối phải tràn ra ngoài thẻ, đè lên nhau. Giờ hết chỗ thì khối phải tự
+     xuống hàng dưới, không món nào bị nghiền nữa. */
+  flex-wrap:wrap;row-gap:8px;
+  box-shadow:var(--sh-1);
+  transition:box-shadow .16s ease,border-color .16s ease,transform .14s var(--ease-out);
+}
+.litem .li-l{min-width:0;flex:1 1 190px;}
+.litem .li-l div:first-child{font-size:15.5px;font-weight:600;color:var(--td);line-height:1.35;}
+.litem .li-l div:last-child{font-size:13.5px;color:var(--gt);margin-top:3px;line-height:1.45;}
+.litem .li-r{
+  font-size:15px;font-weight:650;text-align:right;white-space:nowrap;
+  font-variant-numeric:tabular-nums;display:flex;align-items:center;gap:9px;flex-shrink:0;
+  /* margin-left:auto để khi xuống hàng vẫn dính lề phải; flex-wrap để chính dãy
+     nút cũng gãy được nếu thẻ hẹp hơn cả dãy nút. */
+  margin-left:auto;flex-wrap:wrap;justify-content:flex-end;
+}
+/* Nút icon trong danh sách: TRÒN và CÓ MÀU theo hành động, thay cho một dãy
+   nút xám vuông bo góc giống hệt nhau (trước đây phải đọc icon mới biết nút nào
+   xoá, nút nào sửa). Màu gán tự động qua data-ic mà hàm ic() gắn vào mỗi SVG —
+   không phải sửa hơn 40 chỗ gọi trong JS. Trình duyệt không hiểu :has() thì
+   rơi về màu thương hiệu mặc định, vẫn tròn, vẫn có màu. */
+.iconbtn{
+  background:var(--gl);border-radius:50%;
+  width:46px;height:46px;color:var(--gd);flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
+  transition:background .15s ease,color .15s ease,transform .12s var(--ease-out);
+}
+.iconbtn:active{transform:scale(.9);filter:brightness(.94);}
+.iconbtn:has([data-ic="x"]),.iconbtn:has([data-ic="trash"]){background:var(--bad-bg);color:var(--bad);}
+.iconbtn:has([data-ic="pencil"]){background:var(--bb);color:var(--bi);}
+.iconbtn:has([data-ic="check"]){background:var(--ok-bg);color:var(--ok);}
+.iconbtn:has([data-ic="pause"]),.iconbtn:has([data-ic="play"]){background:var(--warn-bg);color:var(--warn);}
+.iconbtn:has([data-ic="clock"]){background:var(--fill);color:var(--ink-2);}
+.iconbtn:has([data-ic="dots"]),
+.iconbtn:has([data-ic="chevronUp"]),.iconbtn:has([data-ic="chevronDown"]),
+.iconbtn:has([data-ic="arrowUp"]),.iconbtn:has([data-ic="arrowDown"]){background:var(--fill);color:var(--ink-2);}
+/* Menu "..." — mục xoá cũng phải đỏ ngay từ icon */
+.more-menu button.danger .ic-svg{color:var(--bad);}
+
+/* ---------- Menu "..." (kiểu context menu iOS) ---------- */
+.more-menu-wrap{position:relative;flex-shrink:0;}
+.more-menu{
+  display:none;position:absolute;right:0;top:52px;z-index:80;
+  background:rgba(255,255,255,.86);
+  backdrop-filter:saturate(180%) blur(24px);-webkit-backdrop-filter:saturate(180%) blur(24px);
+  border:1px solid var(--line);border-radius:var(--r-md);
+  box-shadow:var(--sh-pop);min-width:210px;overflow:hidden;
+  transform-origin:top right;
+}
+.more-menu.open{display:block;animation:pi .18s var(--ease-out);}
+.more-menu button{
+  display:flex;align-items:center;gap:11px;width:100%;text-align:left;
+  padding:13px 15px;min-height:48px;
+  border-bottom:1px solid var(--line);font-size:15px;font-weight:550;color:var(--td);
+  transition:background .12s ease;
+}
+.more-menu button:last-child{border-bottom:none;}
+.more-menu button:active{background:var(--fill);}
+.more-menu button.danger{color:var(--bad);}
+
+/* ==========================================================================
+   12. SHEET / HỘP THOẠI DÙNG CHUNG
+   ========================================================================== */
+#editSheetWrap{position:fixed;inset:0;z-index:200;visibility:hidden;}
+#editSheetWrap.open{visibility:visible;}
+.edit-sheet-backdrop{
+  position:absolute;inset:0;background:rgba(23,21,26,.42);
+  backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);
+  opacity:0;transition:opacity .24s ease;
+}
+#editSheetWrap.open .edit-sheet-backdrop{opacity:1;}
+.edit-sheet{
+  position:absolute;left:0;right:0;bottom:0;max-height:92vh;
+  background:var(--bg);border-radius:var(--r-xl) var(--r-xl) 0 0;
+  display:flex;flex-direction:column;
+  transform:translateY(100%);transition:transform .34s var(--ease);
+  box-shadow:0 -10px 40px rgba(23,21,26,.22);
+}
+#editSheetWrap.open .edit-sheet{transform:translateY(0);}
+/* Tay nắm kéo — dấu hiệu "kéo xuống để đóng" quen thuộc trên di động. */
+.edit-sheet::before{
+  content:'';position:absolute;top:8px;left:50%;transform:translateX(-50%);
+  width:40px;height:5px;border-radius:99px;background:var(--line-2);
+}
+.edit-sheet-head{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:22px 18px 12px;flex-shrink:0;border-bottom:1px solid var(--line);
+  background:var(--bg);border-radius:var(--r-xl) var(--r-xl) 0 0;
+}
+.edit-sheet-title{font-size:19px;font-weight:700;color:var(--td);letter-spacing:-.02em;min-width:0;}
+.edit-sheet-x{
+  background:var(--fill);border-radius:50%;width:40px;height:40px;color:var(--ink-2);
+  display:flex;align-items:center;justify-content:center;flex-shrink:0;
+  transition:background .15s ease,transform .12s var(--ease-out);
+}
+.edit-sheet-x:active{background:var(--fill-2);transform:scale(.92);}
+.edit-sheet-body{
+  overflow-y:auto;overscroll-behavior:contain;flex:1;
+  padding:18px 18px calc(24px + env(safe-area-inset-bottom));
+}
+
+/* ==========================================================================
+   13. BẢNG
+   ========================================================================== */
+table.kt{width:100%;border-collapse:collapse;font-size:14px;}
+table.kt th{
+  text-align:left;color:var(--gt);font-weight:650;font-size:12px;
+  text-transform:uppercase;letter-spacing:.05em;
+  padding:9px 7px;border-bottom:1px solid var(--line-2);
+  position:sticky;top:0;background:var(--card);
+}
+table.kt td{padding:11px 7px;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums;font-size:14px;color:var(--td);}
+table.kt td:first-child{font-weight:550;}
+table.kt tr:last-child td{border-bottom:none;}
+
+/* ==========================================================================
+   14. CHẨN ĐOÁN / MÔ PHỎNG / TOAST
+   ========================================================================== */
+.diag{background:var(--gl);border-radius:var(--r-md);padding:16px 17px;margin-top:6px;}
+.diag div{
+  font-size:14.5px;line-height:1.65;padding-left:18px;position:relative;
+  margin-bottom:9px;color:var(--gm);
+}
+.diag div:last-child{margin-bottom:0;}
+.diag div::before{content:'';position:absolute;left:0;top:.62em;width:6px;height:6px;border-radius:50%;background:var(--gd);}
+
+.simres:empty{display:none;}
+.simres{
+  background:linear-gradient(140deg,#1E8A5E,var(--gd) 48%,#00513A);
+  color:#fff;border-radius:var(--r-lg);padding:20px;margin-top:8px;
+  box-shadow:0 10px 30px -12px rgba(0,98,65,.55);
+}
+.simres .sr-row{display:flex;justify-content:space-between;gap:12px;padding:10px 0;font-size:14.5px;border-bottom:1px solid rgba(255,255,255,.22);}
+.simres .sr-row:last-child{border-bottom:none;}
+.simres .sr-row b{font-size:16px;font-variant-numeric:tabular-nums;color:#fff;}
+
+.toast{
+  position:fixed;left:50%;bottom:calc(28px + env(safe-area-inset-bottom));
+  transform:translateX(-50%) translateY(12px) scale(.96);
+  background:rgba(28,26,32,.92);
+  backdrop-filter:saturate(180%) blur(20px);-webkit-backdrop-filter:saturate(180%) blur(20px);
+  color:#fff;padding:14px 22px;border-radius:var(--r-pill);
+  font-size:14.5px;font-weight:600;z-index:999;
+  opacity:0;pointer-events:none;max-width:min(92vw,460px);text-align:center;
+  box-shadow:var(--sh-pop);
+  transition:opacity .22s ease,transform .3s var(--ease);
+}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0) scale(1);}
+
+/* Icon SVG inline (hàm ic()) */
+.ic-svg{vertical-align:-.17em;flex-shrink:0;}
+.iconbtn .ic-svg,.sidebar-item .ic-svg,.more-menu button .ic-svg,.hib .ic-svg,.hamburger-btn .ic-svg{vertical-align:middle;}
+.sec-title .ic-svg,.card-h h3 .ic-svg{vertical-align:-.15em;}
+
+/* ==========================================================================
+   15. HAI MÀN BÊ TỪ POS — Khuyến mãi (#tg) & Quản lý Menu (#mn)
+   --------------------------------------------------------------------------
+   [HOÀN NGUYÊN theo yêu cầu] Hai màn này giữ ĐÚNG giao diện gốc bê từ POS —
+   chủ quán quen mắt và thấy dễ dùng hơn bản viết lại. Toàn bộ rule bên dưới
+   là bản chép nguyên từ POS, KHÔNG áp hệ thiết kế v4 lên.
+   Ba khác biệt duy nhất so với bản gốc, đều là sửa lỗi chứ không đổi kiểu dáng:
+     · 'Google Sans' không còn được nạp → dùng font kế thừa của app;
+     · thêm @keyframes pi (ba popup vẫn gọi tới nhưng chưa từng tồn tại);
+     · các rule .screen/.ftag/.toast trùng tên với hệ thiết kế chung thì bỏ,
+       vì chúng là rule TOÀN CỤC chứ không riêng 2 màn này.
+   ========================================================================== */
+.tbb{flex:1;border:none;background:transparent;border-radius:24px;padding:10px 0;font-family:inherit;font-size:14px;font-weight:600;color:#888;cursor:pointer;transition:all .2s;}
+.tbb.active{background:var(--gd);color:#fff;}
+/* Nút đóng to */
+.btn-close-screen{width:40px;height:40px;border-radius:50%;background:var(--gd);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+/* To Go Toggle */
+.togo-toggle-wrap{display:flex;align-items:center;gap:8px;background:#f5f5f5;border-radius:20px;padding:5px 10px 5px 8px;cursor:pointer;user-select:none;transition:background .2s;}
+.togo-toggle-wrap.active{background:#fff3cd;}
+.togo-switch{width:36px;height:20px;background:#ccc;border-radius:10px;position:relative;transition:background .2s;flex-shrink:0;}
+.togo-switch::after{content:'';width:16px;height:16px;background:#fff;border-radius:50%;position:absolute;top:2px;left:2px;transition:left .2s;box-shadow:0 1px 3px rgba(0,0,0,.2);}
+.togo-toggle-wrap.active .togo-switch{background:#f59e0b;}
+.togo-toggle-wrap.active .togo-switch::after{left:18px;}
+.togo-toggle-wrap.active .togo-label{color:#b45309;}
+/* [FIX] CÔNG TẮC PHẢI NHÌN LÀ BIẾT ĐANG BẬT HAY TẮT.
+   Hai lỗi cộng lại làm hai trạng thái trông y hệt nhau:
+     1. Thẻ bọc bị style INLINE `background:#f0f0f0` ghi đè, nên luật
+        `.togo-toggle-wrap.active{background:...}` không bao giờ có tác dụng.
+     2. Chữ "Bật"/"Tắt" bị ghim cứng `color:#888` cho CẢ HAI trạng thái — khác nhau
+        đúng một chữ nhỏ 11px cùng màu xám, đọc lướt không thể phân biệt.
+   Giờ: bật = viền + nền + chữ + cần gạt đều XANH LÁ, tắt = xám nhạt. Xanh lá chứ
+   không dùng màu thương hiệu (hồng đậm) — hồng đọc ra là "cảnh báo", không phải
+   "đang chạy". */
+.togo-toggle-wrap{border:1.5px solid #e3e0d6;}
+.togo-toggle-wrap.active{background:#e9f8ef;border-color:#22c55e;}
+.togo-toggle-wrap.active .togo-switch{background:#22c55e;}
+.togo-status{font-size:11.5px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;color:#8f8f8f;transition:color .2s;}
+.togo-toggle-wrap.active .togo-status{color:#15803d;}
+.tg-section{background:#fff;border-radius:20px;margin:0 16px 16px;padding:20px;}
+.tg-input-row{display:flex;gap:10px;margin-bottom:12px;}
+.tg-input-group{flex:1;background:#f5f5f5;border-radius:14px;padding:12px 14px;}
+.tg-input-label{font-size:10px;font-weight:700;color:var(--gt);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;}
+.tg-input-group input{width:100%;border:none;outline:none;font-family:inherit;font-size:18px;font-weight:700;color:var(--td);background:transparent;}
+.tg-save-btn{width:100%;padding:14px;background:var(--gd);color:#fff;border:none;border-radius:14px;font-family:inherit;font-size:15px;font-weight:700;cursor:pointer;margin-top:4px;}
+.tg-toggle-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;}
+.tg-toggle-label{font-size:14px;font-weight:600;color:var(--td);}
+
+/* ---------- Biểu đồ cột "Bill theo giờ" (màn Hôm nay) ----------
+   Một chuỗi số liệu duy nhất nên không cần chú giải: tiêu đề mục đã nói đang vẽ
+   gì. Cột dùng đúng màu nhấn sẵn có của app, chữ dùng token chữ — không tô chữ
+   theo màu cột. Trục và lưới để nhạt, số liệu là thứ duy nhất được phép đậm. */
+.hchart{background:var(--card);border:1px solid rgba(230,227,223,.8);border-radius:var(--r-md);
+  padding:16px 14px 12px;box-shadow:var(--sh-1);}
+.hchart-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:14px;padding:0 2px;}
+.hchart-hero{font-size:26px;font-weight:800;color:var(--td);letter-spacing:-.02em;line-height:1;}
+.hchart-hero span{font-size:13px;font-weight:600;color:var(--gt);letter-spacing:0;margin-left:4px;}
+.hchart-note{font-size:12px;color:var(--gt);text-align:right;line-height:1.5;}
+/* Cuộn ngang khi nhiều giờ hơn bề ngang màn — không bao giờ bóp cột nhỏ hơn ngón tay. */
+.hchart-scroll{overflow-x:auto;scrollbar-width:none;}
+.hchart-scroll::-webkit-scrollbar{display:none;}
+.hbars{display:flex;align-items:flex-end;gap:2px;min-width:100%;}
+.hbar{flex:1 0 30px;display:flex;flex-direction:column;align-items:center;gap:0;cursor:default;}
+.hbar-n{font-size:12px;font-weight:700;color:var(--td);line-height:1;margin-bottom:5px;font-variant-numeric:tabular-nums;}
+.hbar-n.zero{color:var(--ink-4);font-weight:600;}
+/* 4px bo tròn ở ĐẦU cột, vuông ở chân — chân cột phải nằm đúng trên đường nền. */
+.hbar-fill{width:100%;max-width:24px;background:var(--gd);border-radius:4px 4px 0 0;min-height:2px;
+  transition:filter .12s ease;}
+.hbar-fill.empty{background:var(--fill);}
+.hbar:hover .hbar-fill{filter:brightness(.92);}
+.hbar-h{font-size:11px;color:var(--gt);margin-top:7px;line-height:1;font-variant-numeric:tabular-nums;}
+.hbar.peak .hbar-h{color:var(--td);font-weight:700;}
+.hchart-base{height:1px;background:var(--line-2);margin-top:0;}
+.hchart-empty{padding:26px 8px;text-align:center;color:var(--gt);font-size:13.5px;}
+
+/* ==========================================================================
+   16. LỚP MÁY TÍNH BẢNG / MÀN LỚN  (html.tab-ui)
+   --------------------------------------------------------------------------
+   Tablet ở đây được dùng KÈM CHUỘT + BÀN PHÍM VẬT LÝ, nên khác điện thoại ở:
+     · sidebar cắm cố định, luôn thấy — không phải mở drawer từng lần;
+     · có trạng thái hover cho mọi thứ bấm được (chuột cần phản hồi trước khi bấm);
+     · con trỏ, vòng focus, phím tắt (Esc / Ctrl+K / ↑↓) đều hoạt động;
+     · danh sách trải nhiều cột thay vì một dải hẹp giữa màn;
+     · popup là hộp thoại giữa màn, không phải sheet trượt từ đáy.
+   Toàn bộ khối này chỉ chạy khi <html> có class .tab-ui → tắt class là về
+   nguyên bản điện thoại, không để lại di chứng.
+   ========================================================================== */
+
+/* Trước khi JS kịp gắn class: màn rộng vẫn ra bố cục rộng thay vì dải 430px */
+@media (min-width:900px){
+  html:not(.phone-ui):not(.tab-ui) body{max-width:none;}
+  html:not(.phone-ui):not(.tab-ui) .sidebar{position:sticky;transform:none;box-shadow:none;}
+}
+
+html.tab-ui body{max-width:none;font-size:15px;}
+html.tab-ui .app-shell{max-width:none;}
+html.tab-ui .main-col{max-width:none;padding-bottom:0;min-width:0;}
+
+/* ---------- 16.1 Sidebar cố định ---------- */
+html.tab-ui:not(.nav-off) .sidebar{
+  position:sticky;top:0;height:100vh;width:288px;flex-shrink:0;
+  transform:none;box-shadow:none;
+  background:rgba(255,255,255,.72);
+  backdrop-filter:saturate(180%) blur(24px);-webkit-backdrop-filter:saturate(180%) blur(24px);
+  padding:18px 14px 24px;
+}
+html.tab-ui:not(.nav-off) .sidebar-backdrop{display:none !important;}
+html.tab-ui.nav-off .sidebar{position:fixed;transform:translateX(-102%);}
+html.tab-ui .sidebar-brand{padding:6px 10px 16px;}
+html.tab-ui .sidebar-item{min-height:44px;padding:9px 12px;font-size:15px;}
+html.tab-ui .sidebar-item.sub{min-height:40px;font-size:14.5px;padding:8px 12px;}
+/* [SỬA] Trước dùng box-shadow inset 3px — bóng đổ CHỮ NHẬT nên ở hai đầu viên
+   thuốc bo tròn nó thò ra hai góc vuông. Giờ là một viên nhỏ bo tròn, nằm gọn
+   bên trong. */
+html.tab-ui .sidebar-item{position:relative;}
+html.tab-ui .sidebar-item.active::before{
+  content:'';position:absolute;left:4px;top:50%;transform:translateY(-50%);
+  width:3px;height:20px;border-radius:99px;background:var(--gd);
+}
+html.tab-ui .nav-search .ns-kbd{display:block;}
+
+/* ---------- 16.2 Thanh tiêu đề ---------- */
+html.tab-ui .topbar{padding:12px 32px;}
+html.tab-ui .topbar-row{max-width:1440px;margin:0 auto;min-height:56px;}
+html.tab-ui #hdrTitle{font-size:26px !important;}
+html.tab-ui #hdrKicker{font-size:12px;}
+html.tab-ui .hamburger-btn{display:flex;}
+html.tab-ui .sync{font-size:13px;}
+html.tab-ui .sync span:last-child{display:inline;}
+
+/* ---------- 16.3 Vùng nội dung ---------- */
+html.tab-ui .wrap{padding:24px 32px 56px;max-width:1440px;margin:0 auto;width:100%;}
+html.tab-ui .sec-title{font-size:13.5px;margin:30px 2px 12px;}
+html.tab-ui .card{padding:22px 24px;border-radius:var(--r-xl);margin-bottom:16px;}
+html.tab-ui .card-h h3{font-size:17px;}
+html.tab-ui .row{font-size:15px;padding:12px 0;min-height:48px;}
+html.tab-ui .muted{font-size:15px;}
+
+/* ---------- 16.4 Lưới KPI ---------- */
+html.tab-ui .kgrid{grid-template-columns:repeat(auto-fit,minmax(232px,1fr));gap:16px;}
+html.tab-ui .kcard{padding:20px 20px 18px;border-radius:var(--r-xl);}
+html.tab-ui .kcard .kval{font-size:27px;}
+/* [MỚI] Thẻ Doanh thu (kcard-wide) chiếm TRỌN chiều ngang màn Hôm nay ở chế độ
+   tablet thay vì chỉ 2 cột trong lưới — đúng thẻ "hero" đầu trang, xứng đáng
+   nổi bật nhất trên màn hình rộng. */
+html.tab-ui .kcard.kcard-wide{grid-column:1 / -1;padding:28px 32px 26px;}
+html.tab-ui .kcard.kcard-wide .kval{font-size:56px;}
+html.tab-ui .kcard.kcard-wide .meter-bar{height:10px;}
+html.tab-ui .kcard.kcard-plai{grid-column:1 / -1;padding:26px 30px 24px;}
+
+/* [MỚI] Badge "Ca hiện tại" + check-in/out nhân viên — góc trên phải màn Hôm nay,
+   bảng màu mới (vàng/xanh #0062AD/nền kem) vì đây là tính năng mới thêm. */
+.shift-badge{cursor:pointer;text-align:right;padding:7px 14px;border-radius:var(--r-pill);
+  background:var(--fill);color:#0062AD;font-size:12px;line-height:1.45;
+  transition:background .15s ease,transform .12s var(--ease-out);}
+.shift-badge:active{background:var(--fill-2);transform:scale(.97);}
+.shift-badge-line1{font-weight:700;}
+.shift-badge-line2{opacity:.75;}
+.shift-badge-closed{font-weight:700;}
+.shift-badge-live{background:#eef6fc;border:1px solid #b8d4e8;}
+html.tab-ui .shift-badge{font-size:13.5px;padding:9px 18px;}
+
+/* ---------- 16.5 Biểu mẫu: nhiều cột, nút không kéo dài vô nghĩa ---------- */
+html.tab-ui .grid2{grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:16px;}
+html.tab-ui .field input,html.tab-ui .field select,html.tab-ui .field textarea{
+  min-height:46px;padding:11px 14px;font-size:15px;
+}
+html.tab-ui .btn{min-height:46px;font-size:15px;}
+html.tab-ui .btn.sm{min-height:40px;font-size:14px;}
+html.tab-ui .card > .btn:not(.sm){max-width:360px;}
+/* Nút chính không việc gì phải kéo dài hết bề ngang 1400px của màn lớn */
+html.tab-ui .wrap > .btn:not(.sm){max-width:360px;}
+html.tab-ui .tg-save-btn{max-width:360px;}
+html.tab-ui .iconbtn{width:42px;height:42px;}
+html.tab-ui .seg{max-width:820px;}
+html.tab-ui .seg button{min-height:42px;font-size:14.5px;}
+html.tab-ui .filter-bar{flex-wrap:wrap;overflow:visible;}
+html.tab-ui .ftag,html.tab-ui .report-subnav button{min-height:42px;font-size:14.5px;padding:10px 20px;}
+html.tab-ui .weeknav{max-width:520px;}
+html.tab-ui .weeknav button{width:42px;height:42px;}
+html.tab-ui .litem{min-height:60px;padding:16px 18px;row-gap:12px;}
+/* Ô lưới 360px không đủ cho cả tên lẫn dãy nút trên một hàng, nên dãy nút xuống
+   hàng dưới — cho nó nhỉnh ra một chút để ngón tay chạm thoải mái, thay vì bóp
+   nút lại hoặc giấu bớt vào menu "...". */
+html.tab-ui .litem .li-r{gap:10px;padding-top:2px;}
+html.tab-ui .more-menu{top:48px;}
+html.tab-ui .more-menu button{min-height:44px;}
+/* [MỚI] Khối "Sức khoẻ quán" ở chế độ tablet — bo tròn hơn, mập hơn, và tô màu
+   theo đúng loại cảnh báo thay vì chỉ một vạch mảnh bên trái trên nền trắng
+   (nhìn rối, không phân biệt được loại nào với loại nào ở khoảng cách xa). */
+html.tab-ui .health-item{
+  min-height:64px;padding:16px 20px;border-radius:var(--r-xl);
+  box-shadow:none;
+}
+html.tab-ui .health-item::before{display:none;}
+/* [FIX] Nền màu đặc mà không viền thì thanh tóm tắt (.hbar-sum) và card bên dưới
+   cùng đỏ nhìn dính vào nhau, không phân biệt được đâu là đâu — thêm viền cùng
+   tông nhưng đậm hơn nền một chút để tách lớp rõ ràng. */
+html.tab-ui .health-item.red{background:var(--bad-bg);border:1.5px solid var(--bad-line);}
+html.tab-ui .health-item.yellow{background:var(--warn-bg);border:1.5px solid var(--warn-line);}
+html.tab-ui .health-item.gray{background:var(--fill);border:1.5px solid var(--line);}
+html.tab-ui .health-item.red .hi-label{color:var(--bad);}
+html.tab-ui .health-item.yellow .hi-label{color:var(--warn);}
+html.tab-ui .health-item .hi-label{font-size:15.5px;font-weight:700;}
+/* [MỚI] Thẻ cảnh báo chi tiết (Hộp thư cảnh báo, mở từ "Sức khoẻ quán") — cùng
+   ngôn ngữ thiết kế: bo tròn hẳn, tô nguyên nền theo trạng thái, nút hành động
+   to hơn cho ngón tay bấm thoải mái trên màn rộng. */
+html.tab-ui .alert-card{
+  border-radius:var(--r-xl);padding:20px 22px;box-shadow:none;
+  border:1.5px solid var(--bad-line);background:var(--bad-bg);
+}
+html.tab-ui .alert-card.resolved{background:var(--fill);border-color:var(--line);}
+html.tab-ui .alert-card .ac-title{font-size:16px;}
+html.tab-ui .alert-card .ac-row{font-size:14.5px;}
+html.tab-ui .alert-card .ac-infer-body{background:#fff;border-radius:var(--r-md);}
+html.tab-ui .alert-card .ac-actions button{
+  min-height:50px;border-radius:var(--r-lg);background:#fff;font-size:14.5px;
+}
+html.tab-ui .health-item.red .hi-count{color:var(--bad);opacity:.8;}
+html.tab-ui .health-item.yellow .hi-count{color:var(--warn);opacity:.8;}
+html.tab-ui .health-group-title{margin:22px 4px 10px;font-size:12.5px;}
+html.tab-ui .hbar-sum{
+  border-radius:var(--r-xl);padding:14px 18px;box-shadow:none;
+}
+html.tab-ui .hbar-sum.bad{background:var(--bad-bg);border:1.5px solid var(--bad-line);}
+html.tab-ui .hbar-sum.warn{background:var(--warn-bg);border:1.5px solid var(--warn-line);}
+html.tab-ui .hbar-sum.ok{background:var(--ok-bg);border:1.5px solid var(--ok-line);}
+html.tab-ui .hbar-sum.bad .hbs-txt{color:var(--bad);}
+html.tab-ui .hbar-sum.warn .hbs-txt{color:var(--warn);}
+html.tab-ui .hbar-sum .hbs-txt{font-size:14px;}
+html.tab-ui table.kt th{font-size:12.5px;padding:10px 10px;}
+html.tab-ui table.kt td{font-size:14.5px;padding:12px 10px;}
+
+/* ---------- 16.6 Danh sách trải nhiều cột ----------
+   :has() bắt đúng "hộp nào đang chứa từ 2 dòng trở lên" mà không phải sửa hàng
+   chục hàm render. Trình duyệt cũ không hiểu :has() thì bỏ qua, danh sách vẫn
+   xếp dọc bình thường (không vỡ layout). */
+html.tab-ui :is(.wrap,.edit-sheet-body) div:has(> .litem + .litem),
+html.tab-ui :is(.wrap,.edit-sheet-body) div:has(> .health-item + .health-item),
+html.tab-ui :is(.wrap,.edit-sheet-body) div:has(> .alert + .alert),
+html.tab-ui :is(.wrap,.edit-sheet-body) div:has(> .alert-card + .alert-card){
+  display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));
+  gap:12px;align-items:start;
+}
+html.tab-ui :is(.wrap,.edit-sheet-body) div:has(> .litem + .litem) > *:not(.litem),
+html.tab-ui :is(.wrap,.edit-sheet-body) div:has(> .health-item + .health-item) > *:not(.health-item),
+html.tab-ui :is(.wrap,.edit-sheet-body) div:has(> .alert + .alert) > *:not(.alert),
+html.tab-ui :is(.wrap,.edit-sheet-body) div:has(> .alert-card + .alert-card) > *:not(.alert-card){
+  grid-column:1 / -1;
+}
+html.tab-ui :is(.wrap,.edit-sheet-body) div:has(> .litem + .litem) > .litem,
+html.tab-ui :is(.wrap,.edit-sheet-body) div:has(> .health-item + .health-item) > .health-item,
+html.tab-ui :is(.wrap,.edit-sheet-body) div:has(> .alert + .alert) > .alert,
+html.tab-ui :is(.wrap,.edit-sheet-body) div:has(> .alert-card + .alert-card) > .alert-card{margin-bottom:0;}
+
+/* ---------- 16.7 Popup giữa màn thay cho sheet đáy ---------- */
+html.tab-ui .edit-sheet{
+  top:50%;left:50%;right:auto;bottom:auto;
+  width:min(820px,92vw);max-height:88vh;border-radius:var(--r-xl);
+  transform:translate(-50%,-46%) scale(.98);opacity:0;
+  transition:transform .26s var(--ease),opacity .18s ease;
+  box-shadow:var(--sh-pop);
+}
+html.tab-ui #editSheetWrap.open .edit-sheet{transform:translate(-50%,-50%) scale(1);opacity:1;}
+html.tab-ui .edit-sheet::before{display:none;}
+html.tab-ui .edit-sheet-head{padding:20px 26px 14px;border-radius:var(--r-xl) var(--r-xl) 0 0;}
+html.tab-ui .edit-sheet-body{padding:22px 26px 26px;}
+html.tab-ui .toast{bottom:36px;}
+
+/* ---------- 16.8 Hai màn POS (giữ nguyên bản gốc) ---------- */
+html.tab-ui #tgBody{
+  max-width:1280px;margin:0 auto;
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));
+  gap:4px 22px;align-items:start;
+}
+html.tab-ui #tg > div:first-child,
+html.tab-ui #mn > div:first-child{padding:16px 28px 0;}
+html.tab-ui #tg > div:first-child span,
+html.tab-ui #mn > div:first-child span{font-size:23px;}
+html.tab-ui .tg-section{padding:22px;border-radius:22px;}
+html.tab-ui .tg-input-group input{font-size:19px;}
+html.tab-ui .tg-save-btn{max-width:340px;}
+html.tab-ui #mn-list{max-width:1280px;margin:0 auto;width:100%;padding:20px 28px 48px;}
+/* Mỗi nhóm món trải thành lưới thẻ; tiêu đề nhóm vẫn chiếm trọn 1 hàng */
+html.tab-ui #mn-list > div{
+  display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));
+  gap:12px;align-items:start;
+}
+html.tab-ui #mn-list > div > div:not([onclick]){grid-column:1 / -1;}
+html.tab-ui #mn-list > div > div[onclick]{margin-bottom:0 !important;}
+html.tab-ui #screen-mn .tbb,html.tab-ui #screen-tg .tbb{font-size:15px;padding:13px 0;}
+html.tab-ui #screen-mn > div > div:nth-child(2){max-width:560px;margin-left:28px;}
+
+/* ---------- 16.9 Tablet dựng đứng / chia đôi màn ---------- */
+@media (max-width:1023px){
+  html.tab-ui:not(.nav-off) .sidebar{width:244px;}
+  html.tab-ui .sidebar-item{font-size:14.5px;}
+  html.tab-ui .wrap{padding:20px 20px 44px;}
+  html.tab-ui .topbar{padding:10px 20px;}
+  html.tab-ui #hdrTitle{font-size:22px !important;}
+  html.tab-ui #mn-list{padding:18px 18px 40px;}
+  html.tab-ui #tg > div:first-child,
+  html.tab-ui #mn > div:first-child{padding:14px 18px 0;}
+  html.tab-ui #screen-mn > div > div:nth-child(2){margin-left:18px;}
+}
+
+/* ==========================================================================
+   17. HOVER — chỉ bật cho thiết bị CÓ con trỏ thật (chuột / trackpad).
+   Trên cảm ứng, :hover bị "dính" sau khi chạm nên tuyệt đối không bật.
+   ========================================================================== */
+@media (hover:hover) and (pointer:fine){
+  .sidebar-item:hover{background:var(--fill);}
+  .sidebar-item.active:hover{background:var(--gl);}
+  .hib:hover,.hamburger-btn:hover,.weeknav button:hover,
+  .edit-sheet-x:hover{background:var(--fill-2);color:var(--td);}
+  /* Nút icon đã có màu riêng theo hành động — hover chỉ làm đậm lên,
+     KHÔNG được ghi đè thành xám (làm thế là mất luôn tín hiệu màu). */
+  .iconbtn:hover{filter:brightness(.94);}
+  .btn:hover{background:#EE4467;box-shadow:0 6px 18px -6px var(--accent-glow);}
+  .btn.outline:hover{background:var(--gl);}
+  .btn.danger:hover{background:#DE3C48;}
+  .ftag:hover,.report-subnav button:hover{background:var(--fill);border-color:var(--line-2);}
+  .ftag.active:hover,.report-subnav button.active:hover{background:var(--gm);border-color:var(--gm);}
+  .seg button:hover{color:var(--td);}
+  .litem:hover,.health-item:hover{
+    border-color:var(--line-2);box-shadow:var(--sh-2);transform:translateY(-1px);
+  }
+  .more-menu button:hover{background:var(--fill);}
+  .more-menu button.danger:hover{background:var(--bad-bg);}
+  .alert-card .ac-actions button:hover{background:var(--fill);}
+  table.kt tbody tr:hover td{background:var(--surface-2);}
+  .row:hover .rl{color:var(--td);}
+}
+
+/* Trên máy có chuột, mọi thứ bấm được phải hiện con trỏ tay. */
+@media (pointer:fine){
+  .litem,.health-item,label,summary{cursor:default;}
+  [onclick],button,.health-item,.togo-toggle-wrap{cursor:pointer;}
+  input,textarea,select{cursor:auto;}
+}
+
+/* ==========================================================================
+   18. ÉP CHẾ ĐỘ ĐIỆN THOẠI TRÊN MÁY MÀN LỚN (html.phone-ui)
+   ========================================================================== */
+html.phone-ui body{max-width:430px;}
+html.phone-ui .app-shell{max-width:430px;margin:0 auto;}
+html.phone-ui .sidebar{position:fixed;top:0;height:auto;width:290px;transform:translateX(-102%);}
+html.phone-ui .sidebar.open{transform:translateX(0);}
+html.phone-ui .sidebar-backdrop.open{display:block !important;}
+html.phone-ui .main-col{max-width:none;}
+html.phone-ui .hamburger-btn{display:flex;}
+html.phone-ui .nav-search .ns-kbd{display:none;}
+
+/* ==========================================================================
+   19. TÔN TRỌNG TUỲ CHỌN HỆ THỐNG
+   ========================================================================== */
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms !important;animation-iteration-count:1 !important;transition-duration:.01ms !important;}
+}
+@media print{
+  .sidebar,.sidebar-backdrop,.topbar,.toast,.report-subnav,.filter-bar,.seg{display:none !important;}
+  .wrap{padding:0;}
+  .card,.litem,.kcard{box-shadow:none;border:1px solid #ddd;}
+}
+/* [NL-RECON] Toàn bộ màu của thư viện bì gốc nằm trong một phạm vi riêng. */
+#originalPackPanel{--gd:#0062AD;--gl:#EAF3FA;--accent-glow:rgba(0,98,173,.22)}
+#originalPackPanel .btn:not(.outline){background:#0062AD}
+#originalPackPanel .btn.outline{color:#0062AD;border-color:#0062AD}
+#originalPackPanel .btn.outline:hover{background:#EAF3FA}
+#originalPackPanel .iconbtn{color:#0062AD;background:#EAF3FA}
+#originalPackPanel .original-pack-actions{display:grid;grid-template-columns:minmax(0,1fr);gap:10px;margin-top:12px}
+#originalPackPanel .original-pack-actions .btn{display:flex;width:100%;min-width:0;margin:0;box-sizing:border-box}
+@media (hover:hover) and (pointer:fine){#originalPackPanel .btn:not(.outline):hover{background:#00518f}}
+
+/* ==========================================================================
+   iPadOS — menu kiểu Cài đặt (icon trong ô màu bo góc, mục đang chọn tô kín
+   màu nhấn) và thanh segmented bo tròn hẳn ở đầu các màn Kho.
+   ========================================================================== */
+.sidebar-item .sb-ic.tile{width:30px;height:30px;border-radius:8px;color:#fff;background:var(--tile,#8E8E93);}
+.sidebar-item .sb-ic.tile svg{width:18px;height:18px;}
+.sidebar-item.active{background:var(--gd);color:#fff;font-weight:650;}
+.sidebar-item.active .sb-ic{color:#fff;}
+.sidebar-item.active .sb-ic.tile{background:rgba(255,255,255,.22);box-shadow:inset 0 0 0 1px rgba(255,255,255,.18);}
+html.tab-ui .sidebar-item.active::before{display:none;}
+html.tab-ui .sidebar-item{border-radius:12px;gap:12px;}
+html.tab-ui:not(.nav-off) .sidebar{background:#F2F2F7;border-right:1px solid rgba(60,60,67,.12);}
+.sidebar-group-label{text-transform:none;letter-spacing:0;font-size:15px;font-weight:700;color:var(--td);padding:20px 12px 6px;}
+@media (hover:hover) and (pointer:fine){ .sidebar-item.active:hover{background:var(--gm);} }
+
+/* Segmented control bo tròn hẳn (viên thuốc), kiểu iPadOS mới */
+.k2-nav{display:flex;width:fit-content;flex-wrap:nowrap;gap:2px;padding:4px;border-radius:999px;background:rgba(118,118,128,.12);max-width:100%;overflow-x:auto;scrollbar-width:none;}
+.k2-nav::-webkit-scrollbar{display:none;}
+.k2-nav button{min-height:42px;padding:0 20px;border:none;border-radius:999px;background:transparent;color:var(--td);font-size:15px;font-weight:600;white-space:nowrap;display:inline-flex;align-items:center;gap:6px;}
+.k2-nav button.active{background:#fff;color:var(--td);box-shadow:0 3px 8px rgba(0,0,0,.12),0 1px 1px rgba(0,0,0,.04);}
+.k2-nav + .k2-nav{margin-top:0;}
+.k2-seg{margin:0 0 6px;}
+.k2-seg .k2-n{font-size:12.5px;font-weight:700;border-radius:999px;padding:1px 7px;background:rgba(118,118,128,.16);color:var(--ink-2);font-variant-numeric:tabular-nums;}
+.k2-seg .k2-n.bad{background:var(--bad);color:#fff;} .k2-seg .k2-n.warn{background:var(--warn);color:#fff;}
+
+/* Card kiểu apple.com: bo góc lớn, không viền, bóng rất mềm, khoảng thở rộng.
+   Trạng thái cảnh báo chỉ còn một viền mảnh màu nhạt bên trong. */
+.nl-card,.k2-card,.k2-stat{border:none;border-radius:28px;box-shadow:0 2px 6px rgba(0,0,0,.03),0 12px 32px rgba(0,0,0,.06);}
+.nl-card{padding:24px 24px 18px;gap:12px;}
+.k2-card{padding:22px 24px;gap:10px;}
+.k2-stat{padding:18px 22px;}
+.nl-grid,.k2-grid{gap:18px;}
+.nl-card.nl-neg,.k2-card.bad{box-shadow:inset 0 0 0 1.5px var(--bad-line),0 12px 32px rgba(0,0,0,.06);}
+.k2-card.warn{box-shadow:inset 0 0 0 1.5px var(--warn-line),0 12px 32px rgba(0,0,0,.06);}
+.k2-empty{border-radius:28px;border-style:solid;border-color:transparent;box-shadow:0 12px 32px rgba(0,0,0,.05);}
+.nl-actions,.k2-act{border-top-color:rgba(60,60,67,.1);}
+.k2-card:active{transform:scale(.99);}
+.nl-grid.btp{grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:14px;}
+.btp .nl-card{padding:16px 18px 12px;gap:8px;border-radius:24px;}
+.btp .nl-name{font-size:16px;}
+.btp .btp-code{display:block;font-size:12px;font-weight:700;color:var(--gt);letter-spacing:.04em;margin-bottom:2px;}
+.btp .nl-stock b{font-size:18px;}
+.btp .nl-stock span{font-size:12px;}
+.btp .nl-meta{font-size:13px;}
+.btp .nl-actions{padding-top:8px;}
+.btp .nl-actions .btn.sm{min-height:40px;}
+.btp .nl-actions .iconbtn{width:40px;height:40px;}
+.nl-grid.po{grid-template-columns:repeat(auto-fill,minmax(min(400px,100%),1fr));}
+.po .nl-actions .btn.sm{white-space:nowrap;}
+.po .nl-name{font-size:17px;}
+.po .nl-stock .tier{margin:0 !important;}
+.po .nl-stock span:not(.tier){margin-top:4px;}
+.po-lines{display:flex;flex-direction:column;gap:8px;}
+.po-line{padding:10px 12px;border-radius:14px;background:rgba(118,118,128,.07);}
+.po-line-n{font-size:14.5px;font-weight:700;color:var(--td);display:flex;flex-wrap:wrap;align-items:center;gap:6px;}
+.po-line-n .tier{margin:0 !important;}
+.po-line-q{font-size:13px;color:var(--gt);margin-top:2px;font-variant-numeric:tabular-nums;}
+.po-fix{font-size:12.5px;color:var(--warn);line-height:1.45;}
+.po-hint{font-size:14px;color:var(--gt);margin:-6px 0 14px;}
+.po-quick{max-width:640px;}
+.po-dl{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1.4fr) minmax(0,1fr) 44px;gap:12px;align-items:start;padding:14px 16px 4px;margin-bottom:10px;border-radius:20px;background:rgba(118,118,128,.07);}
+.po-dl .field{margin-bottom:10px;}
+.po-dl .hint{font-size:12px;}
+.po-dl-x{margin-top:26px;width:44px;height:44px;}
+@media (max-width:760px){.po-dl{grid-template-columns:1fr 44px;}.po-dl .field{grid-column:1;}.po-dl-x{grid-column:2;grid-row:1;}}
+.po-quick .card{border:none;border-radius:28px;padding:22px 24px;box-shadow:0 2px 6px rgba(0,0,0,.03),0 12px 32px rgba(0,0,0,.06);}
+.kx-stack{display:flex;flex-direction:column;gap:18px;max-width:980px;}
+.kx-card{background:var(--card);border-radius:28px;padding:22px 24px;box-shadow:0 2px 6px rgba(0,0,0,.03),0 12px 32px rgba(0,0,0,.06);}
+.kx-h{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:18px;font-weight:800;color:var(--td);margin-bottom:8px;}
+.kx-hbtn{margin-left:auto;display:flex;gap:8px;}
+.kx-hbtn .btn.sm{min-height:40px;width:auto;padding:0 16px;}
+.kx-note{font-size:13.5px;color:var(--gt);line-height:1.45;margin:0 0 14px;}
+.kx-card .nlf-grid + .kx-note{margin:12px 0 0;}
+.kx-rows{display:flex;flex-direction:column;}
+.kx-trow{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-top:1px solid rgba(60,60,67,.1);}
+.kx-trow:first-child{border-top:none;}
+.kx-trow b{font-size:15px;color:var(--td);} .kx-trow small{font-size:12.5px;color:var(--gt);}
+.kx-mini{padding:3px;}
+.kx-mini button{min-height:36px;padding:0 14px;font-size:13.5px;}
+.kx-swgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:0 28px;}
+.kx-swgrid .nlf-sw{border-top:1px solid rgba(60,60,67,.1);padding:10px 0;}
+.kx-swgrid .nlf-sw b{font-size:14.5px;}
+.kx-line{display:flex;justify-content:space-between;gap:12px;padding:10px 12px;border-radius:14px;background:rgba(118,118,128,.07);}
+.kx-line.bad{background:var(--bad-bg);}
+.kx-l{min-width:0;font-size:14.5px;color:var(--td);} .kx-l .tier{margin:0 !important;}
+.kx-sub{font-size:12.5px;color:var(--gt);margin-top:2px;font-weight:400;}
+.kx-sub.warn{color:var(--warn);} .kx-sub.bad{color:var(--bad);}
+.kx-r{text-align:right;flex-shrink:0;font-variant-numeric:tabular-nums;}
+.kx-r b{display:block;font-size:15px;color:var(--td);white-space:nowrap;} .kx-r span{display:block;font-size:12px;color:var(--gt);}
+.kx-line.bad .kx-r b{color:var(--bad);}
+.kx-kv{display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-top:1px solid rgba(60,60,67,.08);font-size:14px;color:var(--td);}
+.kx-kv:first-child{border-top:none;} .kx-kv b{font-variant-numeric:tabular-nums;white-space:nowrap;}
+@media (max-width:600px){.kx-trow{flex-direction:column;align-items:flex-start;}.kx-hbtn{margin-left:0;width:100%;}}
+.kx-btns{display:flex;gap:10px;margin-top:14px;} .kx-btns .btn{width:auto;padding:0 24px;}
+.kx-kv small{display:block;font-size:12px;color:var(--gt);}
+.hist-pos{color:var(--ok) !important;} .hist-neg{color:var(--bad) !important;}
+.hist-phs{display:flex;flex-wrap:wrap;gap:6px;} .hist-ph{width:52px;height:52px;object-fit:cover;border-radius:12px;}
+.vs-img{width:56px;height:56px;flex-shrink:0;border-radius:16px;background:#fff;box-shadow:inset 0 0 0 1px rgba(60,60,67,.12);display:flex;align-items:center;justify-content:center;overflow:hidden;}
+.vs-img img{width:100%;height:100%;object-fit:contain;}
+.vs-img span{font-size:18px;font-weight:800;color:var(--ink-4);}
+.wr-add{display:flex;gap:10px;flex:1 1 360px;max-width:520px;}
+.wr-add .nl-search{max-width:none;}
+.nl-grid.wr .nl-card{flex-direction:row;align-items:center;gap:12px;padding:14px 16px 14px 20px;}
+.nl-grid.wr .nlf-sw{flex:1;border:none;padding:0;}
+.nl-grid.wr .nlf-sw b{font-size:16px;}
+.nl-grid.wr .iconbtn{width:40px;height:40px;flex-shrink:0;}
+.wr-off .nlf-sw b{color:var(--gt);}
+</style>
+<style>
+/* ==========================================================================
+   Phần riêng của manage.html (không có trong quanlygieo)
+   ========================================================================== */
+:root{ --tc33:#006241; --xofa:#2B57A8; }
+.mg-brandmark{width:30px;height:30px;border-radius:50%;background:var(--gd);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:12px;flex-shrink:0;letter-spacing:-.02em;}
+.mg-range{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:-6px 0 14px;}
+.mg-range input{height:42px;border-radius:var(--r-sm);border:1px solid var(--line-2);background:var(--card);padding:0 10px;font-size:14px;}
+.mg-range .btn{width:auto;padding:0 16px;height:42px;}
+.mg-period{font-size:13.5px;color:var(--gt);font-weight:600;margin:-6px 2px 12px;}
+.mg-cols{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start;}
+.mg-store{background:var(--card);border-radius:var(--r-lg);box-shadow:var(--sh-2);padding:14px 14px 10px;min-width:0;}
+.mg-store-h{display:flex;align-items:center;gap:8px;font-weight:750;font-size:15px;margin-bottom:6px;}
+.mg-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;display:inline-block;}
+.mg-big{font-size:24px;font-weight:750;letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1.15;}
+.mg-biglab{font-size:12px;font-weight:700;color:var(--gt);text-transform:uppercase;letter-spacing:.06em;margin-top:2px;}
+.mg-l{display:flex;justify-content:space-between;gap:8px;padding:7px 0;border-bottom:1px solid var(--line);font-size:13.5px;}
+.mg-l:last-child{border-bottom:none;}
+.mg-l span:first-child{color:var(--ink-2);min-width:0;}
+.mg-l span:last-child{font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap;}
+.mg-sub{font-size:11.5px;font-weight:750;color:var(--ink-4);text-transform:uppercase;letter-spacing:.07em;margin:12px 0 2px;}
+.mg-food{background:#FFF8E7;border-radius:var(--r-sm);padding:6px 10px;margin-top:8px;}
+.mg-food .mg-l{border-bottom-color:#F3E6C4;}
+.mg-up{color:var(--ok);} .mg-down{color:var(--bad);}
+.mg-chart{width:100%;height:auto;display:block;}
+.mg-chart text{font-size:10px;fill:var(--gt);font-family:var(--font);}
+.mg-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12.5px;color:var(--ink-2);font-weight:600;margin-bottom:8px;}
+.mg-legend span{display:inline-flex;align-items:center;gap:6px;}
+.mg-chk{display:flex;gap:14px;flex-wrap:wrap;}
+.mg-chk label{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:600;color:var(--td);cursor:pointer;}
+.mg-chk input{width:20px;height:20px;}
+.mg-filter{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;}
+.mg-filter .btn{width:auto;}
+.mg-tag{display:inline-block;font-size:11.5px;font-weight:700;border-radius:999px;padding:2px 8px;margin-right:4px;background:var(--fill);color:var(--ink-2);}
+.mg-tag.tc33{background:#E6F2EC;color:#004D33;} .mg-tag.xofa{background:#E7EEFC;color:#2B57A8;} .mg-tag.gieo{background:#FCE7EC;color:#B7284A;}
+.mg-scroll{overflow-x:auto;}
+@media (max-width:380px){ .mg-big{font-size:20px;} .mg-store{padding:12px 10px 8px;} .mg-l{font-size:12.5px;} }
+html.tab-ui .mg-big{font-size:30px;}
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+  <div class="sidebar-backdrop" id="sidebarBackdrop" onclick="closeSidebar()"></div>
+  <div class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+      <span class="mg-brandmark">33</span>
+      <div class="brand disp">CAFE 33 · XOFA</div>
+    </div>
+    <div id="sidebarNav"></div>
+  </div>
+
+  <div class="main-col">
+    <div class="topbar">
+      <div class="topbar-row">
+        <div class="brandrow">
+          <button class="hamburger-btn" id="hamburgerBtn" onclick="toggleNav(event)" aria-label="Menu"></button>
+          <div class="hdr-titles">
+            <div id="hdrKicker"></div>
+            <div class="brand disp" id="hdrTitle">Doanh thu</div>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <div class="sync"><span class="dot busy" id="syncDot"></span><span id="syncTxt">syncing</span></div>
+          <button id="uiModeBtn" class="hib" onclick="cycleUiMode()" title="Đổi giao diện"></button>
+          <button id="reloadBtn" class="hib" onclick="reloadCurrent()" aria-label="Tải lại"></button>
+        </div>
+      </div>
+    </div>
+    <div id="errBanner" style="display:none"></div>
+
+    <div class="screen active" id="screen-rev"><div class="wrap"><div id="revBody"></div></div></div>
+    <div class="screen" id="screen-nv"><div class="wrap"><div id="nvBody"></div></div></div>
+    <div class="screen" id="screen-lich"><div class="wrap"><div id="lichBody"></div></div></div>
+    <div class="screen" id="screen-cc"><div class="wrap"><div id="ccBody"></div></div></div>
+    <div class="screen" id="screen-luong"><div class="wrap"><div id="luongBody"></div></div></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
+<script>
+// ==========================================================================
+// manage.html — Quản lý The Cafe 33 (pos.html) + XOFA (PosX.html)
+// Kế hoạch & quyết định đã chốt: docs/KE_HOACH_QUANLY_TC33_XOFA.md
+//   · Doanh thu: CHỈ ĐỌC đơn của 2 POS, chia đúng như mỗi POS đang chia
+//     (TC33 = calculateStats của pos.html, nhóm "Khác" hiện luôn; XOFA = updRv của PosX.html).
+//   · Nhân sự: hồ sơ dùng chung employees_gieogieo (trường workStores chọn quán làm việc);
+//     lịch / chấm công / cài đặt RIÊNG của 2 quán này — không đụng dữ liệu Gieo.
+//   · Không có Kho / NL / BTP / FIFO / lãi lỗ / mở ca – kết ca.
+// ==========================================================================
+const firebaseConfig = {
+  apiKey:            "AIzaSyCNh1-16gYZ0P30Fkd-2tB-O89PXkPX9Lc",
+  authDomain:        "the-cafe-33.firebaseapp.com",
+  databaseURL:       "https://the-cafe-33-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId:         "the-cafe-33",
+  storageBucket:      "the-cafe-33.appspot.com"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+const fstore = firebase.firestore();
+const auth = firebase.auth();
+
+// Cùng tài khoản dùng chung như quanlygieo.html (rules hiện tại: đã đăng nhập = toàn quyền).
+let _authReady = null;
+function ensureAuth(){
+  if(_authReady) return _authReady;
+  _authReady = new Promise((resolve, reject)=>{
+    const unsub = auth.onAuthStateChanged(user=>{ if(user){ unsub(); resolve(user); } });
+    auth.signInWithEmailAndPassword('cafe33@xolifa.com', 'xolifaangiang')
+      .catch(err=>{ unsub(); _authReady = null; reject(err); });
+  });
+  return _authReady;
+}
+
+// Quán do app này quản lý. Collection chấm công / lịch là của riêng từng quán.
+const STORES = {
+  tc33: { id:'tc33', name:'The Cafe 33', short:'TC33', color:'var(--tc33)', shifts:'employee_shifts_tc33', sched:'work_schedules_tc33' },
+  xofa: { id:'xofa', name:'XOFA',        short:'XOFA', color:'var(--xofa)', shifts:'employee_shifts_xofa', sched:'work_schedules_xofa' }
+};
+const STORE_IDS = ['tc33','xofa'];
+const WORK_STORE_OPTS = [{id:'gieo', label:'Gieo Gieo'}, {id:'tc33', label:'The Cafe 33'}, {id:'xofa', label:'XOFA'}];
+const HR_DOC = () => fstore.collection('hr_settings_tc33xofa').doc('current');
+const MONTH_KEYS = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+
+// ==========================================================================
+// TIỆN ÍCH GIAO DIỆN — chép từ quanlygieo.html (toast, ic, showLoading, sheet…)
+// ==========================================================================
+const ICON_PATHS = {
+  menu:     '<path d="M4 7h16M4 12h16M4 17h16"/>',
+  refresh:  '<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 5v6h-6"/>',
+  x:        '<path d="M6 6l12 12M18 6L6 18"/>',
+  check:    '<path d="M4 12.5l5 5L20 6.5"/>',
+  pencil:   '<path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3z"/>',
+  trash:    '<path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13"/>',
+  pause:    '<path d="M9 5v14M15 5v14"/>',
+  play:     '<path d="M7 5l12 7-12 7z"/>',
+  save:     '<path d="M5 4h11l3 3v13H5z"/><path d="M9 4v5h6V4M8 20v-6h8v6"/>',
+  alert:    '<path d="M12 3.5L2.5 20h19z"/><path d="M12 9.5v5M12 17.2v.3"/>',
+  lock:     '<rect x="4.5" y="10.5" width="15" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/>',
+  users:    '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16.5 5.2a3.5 3.5 0 0 1 0 5.6M17.5 13.6a6.5 6.5 0 0 1 4 6.4"/>',
+  calendar: '<rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 2.8v4M16 2.8v4"/>',
+  chart:    '<path d="M3.5 20.5h17"/><path d="M6.5 20.5v-6M11 20.5V7M15.5 20.5v-9M20 20.5V4"/>',
+  coins:    '<ellipse cx="12" cy="6.5" rx="7.5" ry="3.2"/><path d="M4.5 6.5v11c0 1.8 3.4 3.2 7.5 3.2s7.5-1.4 7.5-3.2v-11"/><path d="M4.5 12c0 1.8 3.4 3.2 7.5 3.2s7.5-1.4 7.5-3.2"/>',
+  clock:    '<circle cx="12" cy="12" r="9"/><path d="M12 6.8V12l3.4 2.2"/>',
+  hourglass:'<path d="M6.5 3h11M6.5 21h11"/><path d="M7.5 3v3.5L12 11l4.5-4.5V3M7.5 21v-3.5L12 13l4.5 4.5V21"/>',
+  tablet:   '<rect x="2.5" y="4.5" width="19" height="15" rx="2.2"/><path d="M9 19.5v-15"/>',
+  phone:    '<rect x="7" y="2.5" width="10" height="19" rx="2.2"/><path d="M10.8 18.6h2.4"/>',
+  auto:     '<rect x="2.5" y="4.5" width="19" height="15" rx="2.2"/><path d="M8.2 15.5l3.3-7 3.3 7M9.4 13.2h4.2"/>'
+};
+function ic(name, size, color){
+  const p = ICON_PATHS[name];
+  if(!p) return '';
+  const s = size || 16;
+  return '<svg class="ic-svg" data-ic="'+name+'" width="'+s+'" height="'+s+'" viewBox="0 0 24 24" fill="none" stroke="'+(color||'currentColor')+'" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+p+'</svg>';
+}
+const _TOAST_ICON = {
+  '✅':['check','var(--ok)'], '⚠️':['alert','var(--warn)'], '⚠':['alert','var(--warn)'],
+  '❌':['x','var(--bad)'], '🗑':['trash','var(--bad)'], '⏳':['hourglass','var(--gt)'], '🔒':['lock','var(--gt)']
+};
+function toast(msg){
+  const t = document.getElementById('toast');
+  let text = String(msg), iconHtml = '';
+  for(const emo of Object.keys(_TOAST_ICON)){
+    if(text.startsWith(emo)){ const spec = _TOAST_ICON[emo]; iconHtml = ic(spec[0], 15, spec[1]) + ' '; text = text.slice(emo.length).trim(); break; }
+  }
+  t.innerHTML = iconHtml + esc(text);
+  t.classList.add('show');
+  clearTimeout(window._toastT);
+  window._toastT = setTimeout(()=>t.classList.remove('show'), 2400);
+}
+function showError(msg){
+  const b = document.getElementById('errBanner');
+  b.style.display = msg ? 'block' : 'none';
+  b.textContent = msg || '';
+}
+function showLoading(el, text){
+  if(!el) return;
+  if(!el.innerHTML.trim()){ el.innerHTML = '<div class="muted" style="padding:8px 0">' + (text || 'Đang tải...') + '</div>'; return; }
+  el.style.transition = 'opacity .12s'; el.style.opacity = '.5'; el.style.pointerEvents = 'none';
+  if(el._loadObs) return;
+  el._loadObs = new MutationObserver(()=>{ el.style.opacity=''; el.style.pointerEvents=''; });
+  el._loadObs.observe(el, { childList:true });
+}
+function setSync(busy){
+  document.getElementById('syncDot').className = 'dot' + (busy ? ' busy' : '');
+  document.getElementById('syncTxt').textContent = busy ? 'đang đồng bộ' : 'đã cập nhật';
+  const rb = document.getElementById('reloadBtn');
+  if(rb){ rb.classList.toggle('spin', busy); rb.disabled = busy; }
+}
+function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function escJs(s){ return esc(String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'")); }
+function fmt(n){ return Math.round(n||0).toLocaleString('vi-VN') + 'đ'; }
+function fmtN(n){ return Math.round(n||0).toLocaleString('vi-VN'); }
+function fmtNum(n,d=1){ return (n||0).toLocaleString('vi-VN', {maximumFractionDigits:d}); }
+function fmtGon(n){
+  const v = Math.round(Number(n)||0), a = Math.abs(v);
+  if(a >= 1000000) return (v/1000000).toFixed(a >= 10000000 ? 0 : 1).replace('.',',') + 'tr';
+  if(a >= 10000)   return Math.round(v/1000) + 'k';
+  return v.toLocaleString('vi-VN');
+}
+function pad(n){ return String(n).padStart(2,'0'); }
+function dkey(d){ return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; }
+function parseDkey(k){ const [y,m,d] = String(k).split('-').map(Number); return new Date(y, m-1, d); }
+function fmtDateVN(d){ return `${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()}`; }
+function addDays(d, n){ const x = new Date(d); x.setDate(x.getDate()+n); return x; }
+function daysBetween(a, b){ return Math.round((parseDkey(b) - parseDkey(a)) / 86400000); }
+
+let _editSheetOnClose = null;
+function openEditSheet(title, bodyHtml, onClose){
+  const old = document.getElementById('editSheetWrap');
+  if(old) old.remove();
+  _editSheetOnClose = onClose || null;
+  const wrap = document.createElement('div');
+  wrap.id = 'editSheetWrap';
+  wrap.innerHTML = `
+    <div class="edit-sheet-backdrop" onclick="closeEditSheet()"></div>
+    <div class="edit-sheet">
+      <div class="edit-sheet-head">
+        <div class="edit-sheet-title">${esc(title)}</div>
+        <button class="edit-sheet-x" onclick="closeEditSheet()">${ic('x')}</button>
+      </div>
+      <div class="edit-sheet-body">${bodyHtml}</div>
+    </div>`;
+  document.body.appendChild(wrap);
+  requestAnimationFrame(()=> requestAnimationFrame(()=> wrap.classList.add('open')));
+}
+function closeEditSheet(silent){
+  const wrap = document.getElementById('editSheetWrap');
+  const cb = _editSheetOnClose; _editSheetOnClose = null;
+  if(wrap){ wrap.classList.remove('open'); setTimeout(()=> wrap.remove(), 220); }
+  if(cb && !silent) cb();
+}
+document.getElementById('hamburgerBtn').innerHTML = ic('menu', 20);
+document.getElementById('reloadBtn').innerHTML = ic('refresh', 18);
+
+// ==========================================================================
+// ĐIỀU HƯỚNG — sidebar như quanlygieo (điện thoại: drawer; máy tính bảng: cắm cố định)
+// ==========================================================================
+const NAV_SECTIONS = [
+  { group:'Tổng quan', items:[
+    {key:'rev',   ic:'chart',    label:'Doanh thu 2 quán'},
+  ]},
+  { group:'Nhân sự', items:[
+    {key:'nv',    ic:'users',    label:'Nhân viên'},
+    {key:'lich',  ic:'calendar', label:'Lịch làm việc'},
+    {key:'cc',    ic:'clock',    label:'Chấm công'},
+    {key:'luong', ic:'coins',    label:'Lương'},
+  ]},
+];
+const SB_TILE = { chart:'#34C759', users:'#007AFF', calendar:'#FF3B30', clock:'#8E8E93', coins:'#30B0C7' };
+const NAV_LABEL = {}; const NAV_GROUP = {};
+NAV_SECTIONS.forEach(s=>s.items.forEach(it=>{ NAV_LABEL[it.key]=it.label; NAV_GROUP[it.key]=s.group; }));
+let curScreen = 'rev';
+const RENDER = { rev:()=>renderRev(), nv:()=>renderNv(), lich:()=>renderLich(), cc:()=>renderCc(), luong:()=>renderLuong() };
+
+function renderSidebarNav(){
+  document.getElementById('sidebarNav').innerHTML = NAV_SECTIONS.map(sec=>`
+    <div class="sidebar-group-label">${sec.group}</div>
+    ${sec.items.map(it=>`<button class="sidebar-item ${curScreen===it.key?'active':''}" onclick="switchScreen('${it.key}')">
+      <span class="sb-ic tile" style="--tile:${SB_TILE[it.ic]||'#8E8E93'}">${ic(it.ic,18)}</span><span>${it.label}</span></button>`).join('')}
+  `).join('');
+}
+function switchScreen(s){
+  curScreen = s;
+  document.querySelectorAll('.screen').forEach(el=>el.classList.remove('active'));
+  document.getElementById('screen-'+s).classList.add('active');
+  document.getElementById('hdrTitle').textContent = NAV_LABEL[s] || '';
+  document.getElementById('hdrKicker').textContent = 'The Cafe 33 · XOFA' + (NAV_GROUP[s] ? ' · ' + NAV_GROUP[s] : '');
+  document.title = (NAV_LABEL[s] ? NAV_LABEL[s] + ' · ' : '') + 'Quản lý Cafe 33 · XOFA';
+  renderSidebarNav();
+  closeSidebar();
+  window.scrollTo(0, 0);
+  runRender(s);
+}
+async function runRender(s){
+  showError('');
+  setSync(true);
+  try{ await ensureAuth(); await RENDER[s](); }
+  catch(err){ console.error('[render]', s, err); showError('Lỗi: ' + (err.code || err.message || err)); }
+  finally{ setSync(false); }
+}
+function reloadCurrent(){
+  if(curScreen === 'rev'){ REV_MEM = { tc33:{}, xofa:{} }; _tcMenu = null; _tcLegacy = null; }
+  if(curScreen === 'rev' && confirm('Xoá cả số liệu ngày cũ đã lưu trong máy và đọc lại từ đầu?\n(Bấm Huỷ = chỉ tải lại số mới)')) revCacheClear();
+  EMP_CACHE = null;
+  runRender(curScreen);
+}
+function openSidebar(){ document.getElementById('sidebar').classList.add('open'); document.getElementById('sidebarBackdrop').classList.add('open'); }
+function closeSidebar(){ document.getElementById('sidebar').classList.remove('open'); document.getElementById('sidebarBackdrop').classList.remove('open'); }
+
+// Giao diện máy tính bảng — cùng cơ chế .tab-ui của quanlygieo (khoá localStorage riêng).
+const UI_MODE_KEY = 'mg_ui_mode', NAV_OFF_KEY = 'mg_ui_nav_off', TABLET_MIN_W = 800;
+const UI_MODES = ['auto','tablet','phone'];
+const UI_MODE_META = { auto:{ic:'auto',label:'Tự động'}, tablet:{ic:'tablet',label:'Máy tính bảng'}, phone:{ic:'phone',label:'Điện thoại'} };
+let UI_MODE = 'auto';
+try{ const m = localStorage.getItem(UI_MODE_KEY); if(UI_MODES.includes(m)) UI_MODE = m; }catch(e){}
+function isWideViewport(){ return Math.max(document.documentElement.clientWidth || 0, window.innerWidth || 0) >= TABLET_MIN_W; }
+function isTabletUiOn(){ return document.documentElement.classList.contains('tab-ui'); }
+function navHiddenPref(){ try{ return localStorage.getItem(NAV_OFF_KEY) === '1'; }catch(e){ return false; } }
+function applyUiMode(){
+  const root = document.documentElement;
+  const tablet = UI_MODE === 'tablet' || (UI_MODE === 'auto' && isWideViewport());
+  root.classList.toggle('tab-ui', tablet);
+  root.classList.toggle('phone-ui', !tablet);
+  root.classList.toggle('nav-off', tablet && navHiddenPref());
+  if(!tablet) closeSidebar();
+  const btn = document.getElementById('uiModeBtn');
+  const meta = UI_MODE_META[UI_MODE];
+  btn.innerHTML = ic(meta.ic, 18);
+  btn.title = 'Giao diện: ' + meta.label + ' — chạm để đổi';
+}
+function cycleUiMode(){
+  UI_MODE = UI_MODES[(UI_MODES.indexOf(UI_MODE) + 1) % UI_MODES.length];
+  try{ localStorage.setItem(UI_MODE_KEY, UI_MODE); }catch(e){}
+  applyUiMode();
+  toast('Giao diện: ' + UI_MODE_META[UI_MODE].label);
+  if(curScreen === 'rev' && REV_LAST) drawRev(REV_LAST);
+}
+function toggleNav(ev){
+  if(ev) ev.stopPropagation();
+  const root = document.documentElement;
+  if(isTabletUiOn()){
+    const off = !root.classList.contains('nav-off');
+    root.classList.toggle('nav-off', off);
+    try{ localStorage.setItem(NAV_OFF_KEY, off ? '1' : '0'); }catch(e){}
+    closeSidebar();
+  }else openSidebar();
+}
+let _uiModeTimer = null;
+window.addEventListener('resize', ()=>{ clearTimeout(_uiModeTimer); _uiModeTimer = setTimeout(applyUiMode, 120); });
+applyUiMode();
+
+// ==========================================================================
+// DOANH THU — HÀM TÍNH (thuần, test được: tests/manage_doanh_thu.test.js)
+// ==========================================================================
+// ---- The Cafe 33: y như calculateStats() của pos.html ----
+// Mỗi món tìm trong menu RT `menu` theo TÊN (không phân biệt hoa thường); type chứa "ăn vặt" / "đồ ăn" /
+// "snack" → Ăn vặt; chứa "khác" hoặc = "khac" → Khác; còn lại → Đồ uống. Giá: giá trên món nếu > 0, không thì
+// priceM || priceL của menu. Đơn cũ không có itemsArray → tách chuỗi items "Tên(size)xSL, …".
+// Tiền mặt / Chuyển khoản tính theo o.total (cả bill). Đơn total <= 0 bỏ qua hẳn.
+function tcEmptySum(){ return { drink:0, snack:0, khac:0, cash:0, transfer:0, total:0, count:0, hours:new Array(12).fill(0) }; }
+function tcIsTransfer(method){
+  const m = String(method || '').toLowerCase();
+  return m.includes('chuyển khoản') || m.includes('chuyen khoan') || m.includes('bank') || m.includes('transfer');
+}
+function tcAddOrder(sum, o, menu){
+  const amount = Number(o && o.total) || 0;
+  if(amount <= 0) return sum;
+  let orderDrink = 0, orderKhac = 0;
+  const one = (name, qty, itemPrice)=>{
+    const nm = String(name || '').toLowerCase();
+    const menuItem = (menu || []).find(m => m && m.name && String(m.name).toLowerCase() === nm);
+    const finalPrice = (itemPrice > 0) ? itemPrice : (menuItem ? (Number(menuItem.priceM || menuItem.priceL) || 0) : 0);
+    const subTotal = finalPrice * qty;
+    const type = menuItem ? String(menuItem.type || '').toLowerCase() : '';
+    if(type.includes('ăn vặt') || type.includes('đồ ăn') || type.includes('snack')) sum.snack += subTotal;
+    else if(type.includes('khác') || type === 'khac'){ sum.khac += subTotal; orderKhac += subTotal; }
+    else { sum.drink += subTotal; orderDrink += subTotal; }
+  };
+  if(Array.isArray(o.itemsArray)){
+    o.itemsArray.forEach(i=>{ if(i) one(i.name, Number(i.qty) || 1, Number(i.price) || 0); });
+  } else if(o.items){
+    String(o.items).split(',').forEach(str=>{
+      str = str.trim();
+      const x = str.lastIndexOf('x');
+      if(x > -1){
+        const qty = parseInt(str.substring(x + 1)) || 1;
+        one(str.substring(0, x).trim().split('(')[0].trim(), qty, 0);
+      }
+    });
+  }
+  if(tcIsTransfer(o.method)) sum.transfer += amount; else sum.cash += amount;
+  sum.total += amount; sum.count++;
+  const d = new Date(o.createdAt || Date.now());
+  if(!isNaN(d)) sum.hours[Math.floor(d.getHours()/2)] += orderDrink + orderKhac;   // biểu đồ POS (bật 🐶) = nước + Khác
+  return sum;
+}
+function tcSummarize(orders, menu){ const s = tcEmptySum(); (orders||[]).forEach(o=>tcAddOrder(s, o, menu)); return s; }
+
+// ---- XOFA: y như updRv() của PosX.html ----
+// Food tách riêng (foodTotal, theo foodMethod || method; TÍNH RIÊNG chia theo tỉ lệ splitGroups).
+// Tổng = Σ (total − foodTotal) = Tại quán + To Go. Tiền mặt / Chuyển khoản của phần không-Food.
+function xoEmptySum(){ return { total:0, cash:0, bank:0, togo:0, instore:0, food:0, foodCash:0, foodBank:0, ship:0, shipRev:0, count:0, hours:new Array(12).fill(0) }; }
+function xoAddOrder(sum, o){
+  if(!o) return sum;
+  const total = Number(o.total) || 0;
+  const ft = Number(o.foodTotal) || 0;
+  const fMethod = o.foodMethod || o.method;
+  if(ft > 0){
+    if(fMethod === 'TIỀN MẶT') sum.foodCash += ft;
+    else if(fMethod === 'CHUYỂN KHOẢN') sum.foodBank += ft;
+    else if(o.splitGroups && o.splitGroups.length){
+      const sgCash = o.splitGroups.filter(g => g.method === 'TIỀN MẶT').reduce((s,g) => s+(g.total||0),0);
+      const sgBank = o.splitGroups.filter(g => g.method === 'CHUYỂN KHOẢN').reduce((s,g) => s+(g.total||0),0);
+      const sgTot = sgCash + sgBank || 1;
+      sum.foodCash += Math.round(ft * sgCash / sgTot);
+      sum.foodBank += Math.round(ft * sgBank / sgTot);
+    } else sum.foodCash += ft;
+  }
+  const netAmt = ft > 0 ? (total - ft) : total;
+  if(o.method === 'TIỀN MẶT') sum.cash += netAmt;
+  else if(o.method === 'CHUYỂN KHOẢN') sum.bank += netAmt;
+  else if(o.method === 'TÍNH RIÊNG' && o.splitGroups && o.splitGroups.length){
+    const ratio = total > 0 ? (netAmt / total) : 1;
+    o.splitGroups.forEach(g=>{
+      if(g.method === 'TIỀN MẶT') sum.cash += Math.round((g.total || 0) * ratio);
+      else if(g.method === 'CHUYỂN KHOẢN') sum.bank += Math.round((g.total || 0) * ratio);
+    });
+  } else sum.cash += netAmt;
+  const net = total - ft;
+  sum.total += net;
+  if(o.isToGo === true) sum.togo += net; else sum.instore += net;
+  sum.food = sum.foodCash + sum.foodBank;
+  if(o.isShip === true){ sum.ship++; sum.shipRev += total; }
+  sum.count++;
+  const h = parseInt(String(o.time || '').split(':')[0], 10);
+  if(h >= 0 && h < 24) sum.hours[Math.floor(h/2)] += net;   // biểu đồ PosX: không gồm Food
+  return sum;
+}
+function xoSummarize(orders){ const s = xoEmptySum(); (orders||[]).forEach(o=>xoAddOrder(s, o)); return s; }
+
+// Cộng nhiều ngày lại (các trường số + mảng giờ).
+function sumMerge(a, b){
+  Object.keys(b).forEach(k=>{
+    if(Array.isArray(b[k])) b[k].forEach((v,i)=>{ a[k][i] = (a[k][i]||0) + v; });
+    else if(typeof b[k] === 'number') a[k] = (a[k]||0) + b[k];
+  });
+  return a;
+}
+
+// ==========================================================================
+// DOANH THU — ĐỌC DỮ LIỆU (chỉ đọc)
+// ==========================================================================
+// Ngày đã qua > 8 ngày: POS đã chuyển sang lưu trữ, hầu như không đổi nữa → giữ bản tổng hợp trong máy (N1),
+// lần sau khỏi đọc lại. Nút Tải lại xoá được. Hôm nay + 8 ngày gần nhất luôn đọc mới.
+const REV_CACHE_KEY = 'mg_rev_cache_v1';
+const REV_STABLE_AFTER = 8;
+let REV_MEM = { tc33:{}, xofa:{} };
+function revCacheLoad(){ try{ const j = JSON.parse(localStorage.getItem(REV_CACHE_KEY) || '{}'); return { tc33:j.tc33||{}, xofa:j.xofa||{} }; }catch(e){ return { tc33:{}, xofa:{} }; } }
+function revCacheSave(c){ try{ localStorage.setItem(REV_CACHE_KEY, JSON.stringify(c)); }catch(e){ console.warn('[doanh thu] không lưu được đệm', e); } }
+function revCacheClear(){ try{ localStorage.removeItem(REV_CACHE_KEY); }catch(e){} REV_MEM = { tc33:{}, xofa:{} }; }
+
+let _tcMenu = null, _tcLegacy = null;
+async function tcMenu(){
+  if(_tcMenu) return _tcMenu;
+  const snap = await db.ref('menu').once('value');
+  const v = snap.val();
+  _tcMenu = v ? (Array.isArray(v) ? v : Object.values(v)).filter(Boolean) : [];
+  return _tcMenu;
+}
+// Node cũ `order` — pos.html vẫn cộng vào báo cáo (lọc theo createdAt), nên ở đây cũng vậy. Đọc 1 lần mỗi phiên.
+async function tcLegacyOrders(){
+  if(_tcLegacy) return _tcLegacy;
+  try{ const s = await db.ref('order').once('value'); _tcLegacy = s.val() ? Object.values(s.val()).filter(Boolean) : []; }
+  catch(e){ _tcLegacy = []; }
+  return _tcLegacy;
+}
+// TC33 — y như fetchOrdersByDateRange của pos.html: RT orders/{yyyy}/{mon}/{dd}; RT trống → orders_archive.
+async function tcFetchDay(k){
+  const d = parseDkey(k);
+  const y = String(d.getFullYear()), mon = MONTH_KEYS[d.getMonth()], dd = pad(d.getDate());
+  const snap = await db.ref(`orders/${y}/${mon}/${dd}`).once('value');
+  if(snap.exists() && snap.val()) return Object.values(snap.val()).filter(Boolean);
+  const doc = await fstore.collection('orders_archive').doc(y).collection(mon).doc(dd).get();
+  return (doc.exists && doc.data() && doc.data().orders) ? Object.values(doc.data().orders).filter(Boolean) : [];
+}
+// XOFA — đường dẫn RT KHÔNG có năm (orders_xolifa/{mon}/{dd}); POS chuyển sang orders_xolifa_archive/{mon}_{dd}_{yyyy}
+// trong cửa sổ 3→7 ngày, ghi gộp (merge) → một ngày có thể nằm ở CẢ HAI chỗ. Ngày gần: đọc cả hai rồi gộp theo
+// mã đơn. Ngày cũ: đọc archive; archive không có mới đọc RT. Đơn ở RT luôn lọc theo o.date để không lẫn năm khác.
+async function xoFetchDay(k){
+  const d = parseDkey(k);
+  const mon = MONTH_KEYS[d.getMonth()], dd = pad(d.getDate()), yyyy = d.getFullYear();
+  const dateStr = `${dd}/${pad(d.getMonth()+1)}/${yyyy}`;
+  const recent = daysBetween(k, dkey(new Date())) <= REV_STABLE_AFTER;
+  const rt = async ()=>{ const s = await db.ref(`orders_xolifa/${mon}/${dd}`).once('value'); return s.val() || {}; };
+  const fs = async ()=>{ const doc = await fstore.collection('orders_xolifa_archive').doc(`${mon}_${dd}_${yyyy}`).get(); return doc.exists ? (doc.data().orders || {}) : null; };
+  let merged = {};
+  if(recent){
+    const [a, b] = await Promise.all([fs(), rt()]);
+    merged = Object.assign({}, a || {}, b);
+  } else {
+    const a = await fs();
+    merged = a !== null ? a : await rt();
+  }
+  return Object.values(merged).filter(o => o && o.date === dateStr);
+}
+// Chạy song song có giới hạn — xem cả năm là vài trăm lượt đọc, không bắn một lúc.
+async function pool(items, n, fn){
+  const out = new Array(items.length); let i = 0;
+  await Promise.all(Array.from({length: Math.min(n, items.length)}, async ()=>{
+    while(i < items.length){ const j = i++; out[j] = await fn(items[j], j); }
+  }));
+  return out;
+}
+// Trả { tc33:{dkey:sum}, xofa:{dkey:sum} } cho mọi ngày trong [from, to].
+async function revLoadRange(from, to, onProgress){
+  const today = dkey(new Date());
+  const keys = [];
+  for(let d = parseDkey(from); dkey(d) <= to; d = addDays(d, 1)) keys.push(dkey(d));
+  const cache = revCacheLoad();
+  const menu = await tcMenu();
+  const legacy = await tcLegacyOrders();
+  const res = { tc33:{}, xofa:{} };
+  let done = 0; const total = keys.length * 2;
+  const tick = ()=>{ done++; if(onProgress && (done % 10 === 0 || done === total)) onProgress(done, total); };
+  const jobs = [];
+  keys.forEach(k=>{
+    const stable = k < today && daysBetween(k, today) > REV_STABLE_AFTER;
+    jobs.push({ st:'tc33', k, stable }, { st:'xofa', k, stable });
+  });
+  let dirty = false;
+  await pool(jobs, 16, async j=>{
+    const hit = REV_MEM[j.st][j.k] || (j.stable ? cache[j.st][j.k] : null);
+    if(hit){ res[j.st][j.k] = hit; tick(); return; }
+    let sum;
+    if(j.st === 'tc33'){
+      const orders = await tcFetchDay(j.k);
+      const leg = legacy.filter(o => o && o.createdAt && dkey(new Date(o.createdAt)) === j.k);
+      sum = tcSummarize(orders.concat(leg), menu);
+    } else {
+      sum = xoSummarize(await xoFetchDay(j.k));
+    }
+    res[j.st][j.k] = sum;
+    if(j.stable){ cache[j.st][j.k] = sum; dirty = true; }
+    if(j.k !== today) REV_MEM[j.st][j.k] = sum;
+    tick();
+  });
+  if(dirty) revCacheSave(cache);
+  return res;
+}
+
+// ==========================================================================
+// DOANH THU — MÀN HÌNH
+// ==========================================================================
+let REV_MODE = 'day';
+let REV_FROM = dkey(new Date()), REV_TO = dkey(new Date());
+let REV_LAST = null;
+let _revReq = 0;
+function revRangeFor(mode){
+  const now = new Date();
+  if(mode === 'week'){ const dow = now.getDay() || 7; const s = addDays(now, 1 - dow); return [dkey(s), dkey(addDays(s, 6))]; }
+  if(mode === 'month') return [dkey(new Date(now.getFullYear(), now.getMonth(), 1)), dkey(new Date(now.getFullYear(), now.getMonth()+1, 0))];
+  if(mode === 'year') return [`${now.getFullYear()}-01-01`, `${now.getFullYear()}-12-31`];
+  if(mode === 'custom') return [REV_FROM, REV_TO];
+  return [dkey(now), dkey(now)];
+}
+function revSetMode(m){ REV_MODE = m; runRender('rev'); }
+function revApplyCustom(){
+  const a = document.getElementById('revFrom').value, b = document.getElementById('revTo').value;
+  if(!a || !b || a > b){ toast('⚠️ Khoảng ngày không hợp lệ'); return; }
+  REV_FROM = a; REV_TO = b; REV_MODE = 'custom'; runRender('rev');
+}
+async function renderRev(){
+  const body = document.getElementById('revBody');
+  const req = ++_revReq;
+  let [from, to] = revRangeFor(REV_MODE);
+  const today = dkey(new Date());
+  const toRead = to > today ? today : to;            // ngày tương lai không có đơn — khỏi đọc
+  // "So hôm qua" ở tab Hôm nay (pos.html có thẻ này) → đọc kèm hôm qua.
+  const readFrom = REV_MODE === 'day' ? dkey(addDays(parseDkey(from), -1)) : from;
+  showLoading(body, 'Đang đọc đơn hàng 2 quán...');
+  if(body.querySelector('.muted')) body.querySelector('.muted').textContent = 'Đang đọc đơn hàng 2 quán...';
+  let data = { tc33:{}, xofa:{} };
+  if(readFrom <= toRead){
+    data = await revLoadRange(readFrom, toRead, (d, t)=>{
+      const m = body.querySelector('.muted'); if(m && req === _revReq) m.textContent = `Đang đọc đơn hàng 2 quán... ${Math.round(d/t*100)}%`;
+    });
+  }
+  if(req !== _revReq) return;
+  REV_LAST = { mode: REV_MODE, from, to, data };
+  drawRev(REV_LAST);
+}
+// Gom ngày → cột biểu đồ: Hôm nay = 12 khung 2 giờ; ≤ 31 ngày = từng ngày; dài hơn = từng tháng.
+function revBuckets(r){
+  const days = [];
+  for(let d = parseDkey(r.from); dkey(d) <= r.to; d = addDays(d, 1)) days.push(dkey(d));
+  if(r.mode === 'day'){
+    return ['0h','2h','4h','6h','8h','10h','12h','14h','16h','18h','20h','22h'].map((label, i)=>({
+      label, tc: (r.data.tc33[r.from] ? r.data.tc33[r.from].hours[i] : 0), xo: (r.data.xofa[r.from] ? r.data.xofa[r.from].hours[i] : 0) }));
+  }
+  const nuoc = s => s ? s.drink + s.khac : 0;
+  if(days.length <= 31){
+    const WD = ['CN','T2','T3','T4','T5','T6','T7'];
+    return days.map(k=>{ const d = parseDkey(k); return {
+      label: r.mode === 'week' ? WD[d.getDay()] : (r.mode === 'month' ? String(d.getDate()) : `${d.getDate()}/${d.getMonth()+1}`),
+      tc: nuoc(r.data.tc33[k]), xo: (r.data.xofa[k] ? r.data.xofa[k].total : 0) }; });
+  }
+  const by = {};
+  days.forEach(k=>{
+    const mk = k.slice(0,7);
+    const b = by[mk] || (by[mk] = { label: 'T' + Number(k.slice(5,7)) + (r.from.slice(0,4) !== r.to.slice(0,4) ? '/' + k.slice(2,4) : ''), tc:0, xo:0 });
+    b.tc += nuoc(r.data.tc33[k]); b.xo += r.data.xofa[k] ? r.data.xofa[k].total : 0;
+  });
+  return Object.values(by);
+}
+function revChartSvg(buckets){
+  const W = isTabletUiOn() ? 900 : 380, H = 200, pl = 34, pr = 6, pt = 14, pb = 26;
+  const cw = W - pl - pr, ch = H - pt - pb;
+  const max = Math.max(1, ...buckets.map(b => Math.max(b.tc, b.xo)));
+  const step = cw / Math.max(1, buckets.length);
+  const bw = Math.max(1.5, Math.min(18, step * 0.36));
+  const every = Math.ceil(buckets.length / (isTabletUiOn() ? 31 : 12));
+  let g = '';
+  [0, .5, 1].forEach(f=>{
+    const y = pt + ch - ch * f;
+    g += `<line x1="${pl}" x2="${W-pr}" y1="${y}" y2="${y}" stroke="var(--line)" stroke-width="1"/>` +
+         `<text x="${pl-4}" y="${y+3}" text-anchor="end">${fmtGon(max*f)}</text>`;
+  });
+  buckets.forEach((b, i)=>{
+    const cx = pl + step * i + step / 2;
+    const h1 = ch * b.tc / max, h2 = ch * b.xo / max;
+    g += `<rect x="${cx - bw - 0.5}" y="${pt + ch - h1}" width="${bw}" height="${h1}" rx="2" fill="var(--tc33)"><title>${esc(b.label)} · The Cafe 33: ${fmt(b.tc)}</title></rect>`;
+    g += `<rect x="${cx + 0.5}" y="${pt + ch - h2}" width="${bw}" height="${h2}" rx="2" fill="var(--xofa)"><title>${esc(b.label)} · XOFA: ${fmt(b.xo)}</title></rect>`;
+    if(i % every === 0) g += `<text x="${cx}" y="${H - 8}" text-anchor="middle">${esc(b.label)}</text>`;
+  });
+  return `<svg class="mg-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Biểu đồ doanh thu 2 quán">${g}</svg>`;
+}
+function drawRev(r){
+  const body = document.getElementById('revBody');
+  const today = dkey(new Date());
+  const keys = []; for(let d = parseDkey(r.from); dkey(d) <= r.to; d = addDays(d, 1)) keys.push(dkey(d));
+  const T = keys.reduce((a,k)=> r.data.tc33[k] ? sumMerge(a, r.data.tc33[k]) : a, tcEmptySum());
+  const X = keys.reduce((a,k)=> r.data.xofa[k] ? sumMerge(a, r.data.xofa[k]) : a, xoEmptySum());
+  const tcNuoc = T.drink + T.khac;
+  const tcAll = T.cash + T.transfer;            // mọi tiền thu TC33 (theo o.total, gồm Ăn vặt)
+  const xoAll = X.total + X.food;               // mọi tiền thu XOFA (gồm Food)
+  const label = { day:'Hôm nay', week:'Tuần này', month:'Tháng này', year:'Năm nay', custom:'Tuỳ chọn' };
+  const period = r.from === r.to ? fmtDateVN(parseDkey(r.from)) : `${fmtDateVN(parseDkey(r.from))} – ${fmtDateVN(parseDkey(r.to))}`;
+  // So hôm qua — như thẻ "So hôm qua" của pos.html (cả bill) và cùng cách cho XOFA (không gồm Food).
+  let yRow = '', yRowX = '';
+  if(r.mode === 'day'){
+    const yk = dkey(addDays(parseDkey(r.from), -1));
+    const yt = r.data.tc33[yk], yx = r.data.xofa[yk];
+    const diff = (a, b)=>{ const v = a - b; return `<span class="${v>=0?'mg-up':'mg-down'}">${v>=0?'▲':'▼'} ${fmtN(Math.abs(v))}</span>`; };
+    if(yt) yRow = `<div class="mg-l"><span>So hôm qua</span>${diff(T.total, yt.total)}</div>`;
+    if(yx) yRowX = `<div class="mg-l"><span>So hôm qua</span>${diff(X.total, yx.total)}</div>`;
+  }
+  const seg = ['day','week','month','year','custom'].map(m=>`<button class="${r.mode===m?'active':''}" onclick="revSetMode('${m}')">${label[m]}</button>`).join('');
+  const buckets = revBuckets(r);
+  const daily = keys.filter(k => k <= today).slice().reverse();
+  body.innerHTML = `
+    <div class="seg">${seg}</div>
+    ${r.mode === 'custom' ? `<div class="mg-range">
+      <input type="date" id="revFrom" value="${REV_FROM}"> <span>–</span> <input type="date" id="revTo" value="${REV_TO}">
+      <button class="btn" onclick="revApplyCustom()">Xem</button></div>` : ''}
+    <div class="mg-period">${label[r.mode]} · ${period}</div>
+
+    <div class="kcard kcard-wide lv-green" style="margin-bottom:12px">
+      <div class="klabel">Tổng thu 2 quán</div>
+      <div class="kval">${fmt(tcAll + xoAll)}</div>
+      <div class="ksub">The Cafe 33 ${fmt(tcAll)} · XOFA ${fmt(xoAll)} — gồm cả Ăn vặt (TC33) và Food (XOFA)</div>
+    </div>
+
+    <div class="mg-cols">
+      <div class="mg-store">
+        <div class="mg-store-h"><span class="mg-dot" style="background:var(--tc33)"></span>The Cafe 33</div>
+        <div class="mg-big" style="color:var(--tc33)">${fmtN(tcNuoc)}</div>
+        <div class="mg-biglab">Tổng nước</div>
+        <div class="mg-sub">Theo nhóm món</div>
+        <div class="mg-l"><span>Đồ uống</span><span>${fmtN(T.drink)}</span></div>
+        <div class="mg-l"><span>Khác</span><span>${fmtN(T.khac)}</span></div>
+        <div class="mg-l"><span>Ăn vặt</span><span>${fmtN(T.snack)}</span></div>
+        <div class="mg-sub">Thanh toán</div>
+        <div class="mg-l"><span>Tiền mặt</span><span>${fmtN(T.cash)}</span></div>
+        <div class="mg-l"><span>Chuyển khoản</span><span>${fmtN(T.transfer)}</span></div>
+        <div class="mg-l"><span>Số đơn</span><span>${fmtN(T.count)}</span></div>
+        ${yRow}
+      </div>
+      <div class="mg-store">
+        <div class="mg-store-h"><span class="mg-dot" style="background:var(--xofa)"></span>XOFA</div>
+        <div class="mg-big" style="color:var(--xofa)">${fmtN(X.total)}</div>
+        <div class="mg-biglab">Tổng (không gồm Food)</div>
+        <div class="mg-sub">Theo hình thức</div>
+        <div class="mg-l"><span>Tại quán</span><span>${fmtN(X.instore)}</span></div>
+        <div class="mg-l"><span>To Go</span><span>${fmtN(X.togo)}</span></div>
+        <div class="mg-sub">Thanh toán</div>
+        <div class="mg-l"><span>Tiền mặt</span><span>${fmtN(X.cash)}</span></div>
+        <div class="mg-l"><span>Chuyển khoản</span><span>${fmtN(X.bank)}</span></div>
+        <div class="mg-l"><span>Số đơn</span><span>${fmtN(X.count)}</span></div>
+        <div class="mg-l"><span>Đơn ship</span><span>${fmtN(X.ship)} · ${fmtN(X.shipRev)}</span></div>
+        ${yRowX}
+        <div class="mg-food">
+          <div class="mg-l"><span><b>Food</b></span><span>${fmtN(X.food)}</span></div>
+          <div class="mg-l"><span>Tiền mặt</span><span>${fmtN(X.foodCash)}</span></div>
+          <div class="mg-l"><span>Chuyển khoản</span><span>${fmtN(X.foodBank)}</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sec-title">Biểu đồ ${r.mode === 'day' ? 'theo khung giờ' : (buckets.length > 31 || keys.length > 31 ? 'theo tháng' : 'theo ngày')}</div>
+    <div class="card">
+      <div class="mg-legend"><span><span class="mg-dot" style="background:var(--tc33)"></span>The Cafe 33 · Tổng nước</span><span><span class="mg-dot" style="background:var(--xofa)"></span>XOFA · không gồm Food</span></div>
+      ${revChartSvg(buckets)}
+    </div>
+
+    ${daily.length > 1 ? `<div class="sec-title">Từng ngày</div>
+    <div class="card mg-scroll"><table class="kt">
+      <thead><tr><th>Ngày</th><th style="text-align:right">TC33 · nước</th><th style="text-align:right">XOFA</th><th style="text-align:right">Tổng thu</th></tr></thead>
+      <tbody>${daily.map(k=>{ const t = r.data.tc33[k] || tcEmptySum(), x = r.data.xofa[k] || xoEmptySum();
+        return `<tr><td>${fmtDateVN(parseDkey(k)).slice(0,5)}</td><td style="text-align:right">${fmtN(t.drink+t.khac)}</td><td style="text-align:right">${fmtN(x.total)}</td><td style="text-align:right">${fmtN(t.cash+t.transfer+x.total+x.food)}</td></tr>`; }).join('')}</tbody>
+    </table></div>` : ''}
+    <div class="small-note" style="margin:10px 2px 0">Chia doanh thu đúng như mỗi POS: The Cafe 33 phân nhóm theo loại món trong menu (nhóm Khác hiện luôn); XOFA tách Food riêng như màn Doanh thu của PosX. "Tổng thu" là số tiền thu cả bill. Số ngày cũ hơn ${REV_STABLE_AFTER} ngày được lưu trong máy — bấm ⟳ để đọc lại.</div>
+  `;
+}
+
+// ==========================================================================
+// NHÂN VIÊN — hồ sơ dùng chung employees_gieogieo (như quanlygieo)
+// ==========================================================================
+// Trường mới `workStores`: quán người này làm việc. Thiếu = ['gieo'] (nhân viên Gieo như trước).
+// pos.html / PosX.html chỉ cho check-in người có tích đúng quán (cham_cong.v1.js).
+// Lương tính ở đây: CHỈ lương giờ. Người lương cứng (của Gieo) — chỉ sửa tên / PIN / cửa hàng, lương sửa ở quanlygieo.
+let EMP_CACHE = null;
+async function loadEmployees(force){
+  if(EMP_CACHE && !force) return EMP_CACHE;
+  const snap = await fstore.collection('employees_gieogieo').get();
+  const today = dkey(new Date());
+  EMP_CACHE = snap.docs.map(d=>{ const e = {id:d.id, ...d.data()}; if(Array.isArray(e.payHistory) && e.payHistory.length) Object.assign(e, empPayTermsOn(e, today)); return e; })
+    .sort((a,b)=>(a.fullName||'').localeCompare(b.fullName||'','vi'));
+  return EMP_CACHE;
+}
+function workStoresOf(e){
+  const ws = e && Array.isArray(e.workStores) ? e.workStores.filter(x=>typeof x === 'string' && x) : [];
+  return ws.length ? ws : ['gieo'];
+}
+function worksAt(e, st){ return workStoresOf(e).includes(st); }
+function isHourly(e){ return !!e && (e.payType === 'hourly_full' || e.payType === 'hourly_part'); }
+function storeTags(e){ return workStoresOf(e).map(s=>`<span class="mg-tag ${s}">${s==='gieo'?'Gieo':s==='tc33'?'TC33':s==='xofa'?'XOFA':esc(s)}</span>`).join(''); }
+
+// [LƯƠNG THEO MỐC] — chép nguyên từ quanlygieo.html: mỗi NGÀY dùng mức có effectiveFrom lớn nhất ≤ ngày đó;
+// chưa có payHistory → ảnh chụp payTerms của ca, không có mới dùng hồ sơ hiện tại.
+const PAY_FIELDS = ['payType','hourlyRate','otEnabled','otThresholdHours','otRate','fixedMonthlySalary'];
+function payTermsOfRecord(o){
+  o = o || {};
+  return { payType: o.payType||null, hourlyRate: Number(o.hourlyRate)||0, otEnabled: !!o.otEnabled,
+    otThresholdHours: Number(o.otThresholdHours)||0, otRate: Number(o.otRate)||0, fixedMonthlySalary: Number(o.fixedMonthlySalary)||0 };
+}
+function empPayTermsOn(emp, dateKey, snap){
+  const hist = (emp && Array.isArray(emp.payHistory) ? emp.payHistory : []).filter(h=>h && h.effectiveFrom)
+    .slice().sort((a,b)=>String(a.effectiveFrom).localeCompare(String(b.effectiveFrom)));
+  const useSnap = snap && snap.payType;
+  if(!hist.length) return payTermsOfRecord(useSnap ? snap : emp);
+  let pick = null;
+  for(const h of hist){ if(String(h.effectiveFrom) <= String(dateKey)) pick = h; else break; }
+  if(!pick) pick = hist[0];
+  if(pick.legacy && useSnap) return payTermsOfRecord(snap);
+  return payTermsOfRecord(pick);
+}
+// OT tính theo NGÀY (gộp mọi ca trong ngày trước khi so ngưỡng) — như computeWageForDayHours của quanlygieo.
+function computeWageForDayHours(emp, hoursInDay){
+  const rate = Number(emp && emp.hourlyRate)||0;
+  if(!emp || !emp.otEnabled) return { amount: hoursInDay*rate, regularHours: hoursInDay, otHours: 0 };
+  const threshold = Number(emp.otThresholdHours)||8, otRate = Number(emp.otRate)||0;
+  if(hoursInDay <= threshold) return { amount: hoursInDay*rate, regularHours: hoursInDay, otHours: 0 };
+  return { amount: threshold*rate + (hoursInDay-threshold)*otRate, regularHours: threshold, otHours: hoursInDay - threshold };
+}
+// Giờ một ca: có giờ ra → ra − vào; đang mở của HÔM NAY → tạm tới hiện tại; mở của ngày đã qua → 0 (không đoán).
+function isShiftInProgress(s){ return !!s && !s.checkedOutAt && s.businessDate === dkey(new Date()); }
+function shiftWorkedHours(s, nowMs){
+  if(!s || !s.checkedInAt) return 0;
+  const inMs = new Date(s.checkedInAt).getTime();
+  if(isNaN(inMs)) return 0;
+  let endMs;
+  if(s.checkedOutAt){ endMs = new Date(s.checkedOutAt).getTime(); if(isNaN(endMs)) return 0; }
+  else { if(!isShiftInProgress(s)) return 0; endMs = nowMs || Date.now(); }
+  return Math.max(0, (endMs - inMs) / 3600000);
+}
+function payTypeLabel(e){
+  const ot = (e.otEnabled && isHourly(e)) ? ` · OT: &gt;${fmtNum(e.otThresholdHours||8,1)}h/ngày = ${fmt(e.otRate||0)}/giờ` : '';
+  if(e.payType==='hourly_full') return `${fmt(e.hourlyRate||0)}/giờ (Full-time)${ot}`;
+  if(e.payType==='hourly_part') return `${fmt(e.hourlyRate||0)}/giờ (Part-time)${ot}`;
+  if(e.payType==='fixed') return `Lương cứng ${fmt(e.fixedMonthlySalary||0)}/tháng (tính ở Quản lý Gieo)`;
+  return '⚠️ Chưa khai hình thức lương';
+}
+
+let NV_FILTER = 'cafe';     // 'cafe' = có TC33 hoặc XOFA · 'all' · 'tc33' · 'xofa'
+let nvEditingId = null;
+let nvDraft = { payType:null, otEnabled:null, workStores:null };
+async function renderNv(){
+  const body = document.getElementById('nvBody');
+  showLoading(body);
+  const list = await loadEmployees(true);
+  const show = list.filter(e => NV_FILTER === 'all' ? true : NV_FILTER === 'cafe' ? (worksAt(e,'tc33') || worksAt(e,'xofa')) : worksAt(e, NV_FILTER));
+  const editing = nvEditingId ? list.find(e=>e.id===nvEditingId) : null;
+  const flt = [['cafe','TC33 + XOFA'],['tc33','The Cafe 33'],['xofa','XOFA'],['all','Tất cả (cả Gieo)']]
+    .map(([k,l])=>`<button class="btn sm ${NV_FILTER===k?'':'outline'}" onclick="NV_FILTER='${k}';renderNv()">${l}</button>`).join('');
+  body.innerHTML = `
+    <div class="sec-title" style="margin-top:0">Thêm nhân viên</div>
+    <div class="small-note" style="margin:0 0 10px">Danh sách nhân viên DÙNG CHUNG với Gieo Gieo (mỗi người một mã PIN 4 số duy nhất). Tích "Làm ở cửa hàng" để người đó check-in / check-out được ở POS của quán đó. Nhân sự cứng của The Cafe 33 / XOFA không cần thêm vào đây.</div>
+    ${editing ? '' : `<div class="card">${nvFormFields(null)}<button class="btn" onclick="nvSubmit()">Thêm nhân viên</button></div>`}
+    <div class="sec-title">Danh sách (${show.length})</div>
+    <div class="mg-filter">${flt}</div>
+    <div class="card">
+      ${show.length ? show.map(e=>`
+        <div class="litem">
+          <div class="li-l">
+            <div>${esc(e.fullName || '(chưa đặt tên)')} ${e.active===false ? '<span class="tier tier-red" style="margin-left:4px">Đã nghỉ</span>' : ''}</div>
+            <div>${storeTags(e)} Mã PIN: ${esc(e.pin || '—')} · ${payTypeLabel(e)}</div>
+          </div>
+          <div class="li-r">
+            <button class="iconbtn" onclick="nvStartEdit('${e.id}')" aria-label="Sửa">${ic('pencil')}</button>
+            <button class="iconbtn" onclick="nvToggleActive('${e.id}', ${e.active===false})" aria-label="${e.active===false?'Bật lại':'Ngừng'}">${e.active===false ? ic('play') : ic('pause')}</button>
+          </div>
+        </div>`).join('') : '<div class="muted">Chưa có nhân viên nào ở nhóm này.</div>'}
+    </div>
+    <div class="small-note" style="margin:8px 2px 0">Nghỉ việc: bấm ⏸ (Ngừng) — lịch sử chấm công giữ nguyên, PIN được trả lại cho người khác dùng. Xoá hẳn nhân viên chỉ làm ở Quản lý Gieo.</div>
+  `;
+  if(editing) openEditSheet('Sửa nhân viên', nvFormFields(editing) + `<button class="btn" style="margin-top:14px" onclick="nvSubmit()">${ic('save',15)} Lưu thay đổi</button>`, nvCancelEdit);
+  else closeEditSheet(true);
+}
+function nvFormFields(editing){
+  const fixed = editing && editing.payType === 'fixed';
+  const payType = nvDraft.payType || (editing ? (editing.payType || 'hourly_part') : 'hourly_part');
+  const otEnabled = nvDraft.otEnabled !== null ? nvDraft.otEnabled : (editing ? !!editing.otEnabled : false);
+  const ws = nvDraft.workStores || (editing ? workStoresOf(editing) : ['tc33']);
+  return `
+    <div class="field"><label>Họ tên đầy đủ</label><input type="text" id="nvFullName" placeholder="VD: Nguyễn Thị Lan" value="${editing ? esc(editing.fullName||'') : ''}"></div>
+    <div class="field"><label>Mã PIN (đúng 4 chữ số)</label><input type="text" id="nvPin" inputmode="numeric" maxlength="4" placeholder="VD: 1234" value="${editing ? esc(editing.pin||'') : ''}"></div>
+    <div class="field"><label>Làm ở cửa hàng (chọn được nhiều)</label>
+      <div class="mg-chk">${WORK_STORE_OPTS.map(o=>`<label><input type="checkbox" id="nvWs_${o.id}" ${ws.includes(o.id)?'checked':''} onchange="nvWsChange()">${o.label}</label>`).join('')}</div>
+      <div class="small-note">Chỉ người được tích The Cafe 33 / XOFA mới check-in được ở POS quán đó. Bỏ tích Gieo Gieo KHÔNG đổi gì ở app Gieo (POS Gieo hiện chưa lọc theo mục này).</div>
+    </div>
+    ${fixed ? `<div class="field"><label>Hình thức lương</label><div class="small-note" style="margin:0">${payTypeLabel(editing)}. Người lương cứng: sửa lương ở Quản lý Gieo.</div></div>` : `
+    <div class="field"><label>Hình thức lương</label>
+      <select id="nvPayType" onchange="nvDraft.payType=this.value">
+        <option value="hourly_full" ${payType==='hourly_full'?'selected':''}>Theo giờ — Full-time</option>
+        <option value="hourly_part" ${payType!=='hourly_full'?'selected':''}>Theo giờ — Part-time</option>
+      </select>
+      <div class="small-note">Lương giờ tính theo ĐÚNG giờ check-in / check-out trên POS.</div>
+    </div>
+    <div class="field"><label>Đơn giá / giờ (đ)</label><input type="number" id="nvHourlyRate" value="${editing ? (editing.hourlyRate||0) : 0}"></div>
+    <div class="field">
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--td);cursor:pointer;font-weight:600;">
+        <input type="checkbox" id="nvOtEnabled" ${otEnabled?'checked':''} onchange="nvToggleOt()" style="width:20px;height:20px;"> Bật lương OT (tăng ca)
+      </label>
+      <div class="small-note">Mỗi ngày, số giờ VƯỢT "Số giờ cơ bản" tính theo đơn giá OT (gộp các ca trong cùng ngày, cùng quán).</div>
+    </div>
+    <div class="grid2" id="nvOtFields" style="${otEnabled?'':'display:none'}">
+      <div class="field" style="margin-bottom:0"><label>Số giờ cơ bản / ngày</label><input type="number" id="nvOtThreshold" value="${editing && editing.otThresholdHours ? editing.otThresholdHours : 8}"></div>
+      <div class="field" style="margin-bottom:0"><label>Đơn giá OT / giờ (đ)</label><input type="number" id="nvOtRate" value="${editing && editing.otRate ? editing.otRate : 0}"></div>
+    </div>
+    ${editing ? `<div class="field" style="margin-top:12px"><label>Mức lương mới áp dụng từ ngày</label>
+      <input type="date" id="nvPayFrom" value="${dkey(new Date())}">
+      <div class="small-note">Chỉ dùng khi ĐỔI hình thức / đơn giá / OT. Các ngày trước mốc này giữ mức lương cũ (dùng chung lịch sử lương với Quản lý Gieo).</div></div>` : ''}`}
+  `;
+}
+function nvWsChange(){ nvDraft.workStores = WORK_STORE_OPTS.filter(o=>{ const c = document.getElementById('nvWs_'+o.id); return c && c.checked; }).map(o=>o.id); }
+function nvToggleOt(){
+  const cb = document.getElementById('nvOtEnabled'), box = document.getElementById('nvOtFields');
+  if(cb && box) box.style.display = cb.checked ? '' : 'none';
+  nvDraft.otEnabled = cb ? cb.checked : false;
+}
+function nvStartEdit(id){ nvEditingId = id; nvDraft = { payType:null, otEnabled:null, workStores:null }; renderNv(); }
+function nvCancelEdit(){ nvEditingId = null; nvDraft = { payType:null, otEnabled:null, workStores:null }; renderNv(); }
+async function nvSubmit(){
+  const fullName = (document.getElementById('nvFullName').value||'').trim();
+  const pin = (document.getElementById('nvPin').value||'').trim();
+  const workStores = WORK_STORE_OPTS.filter(o=>{ const c = document.getElementById('nvWs_'+o.id); return c && c.checked; }).map(o=>o.id);
+  if(!fullName){ toast('⚠️ Nhập họ tên'); return; }
+  if(!/^\d{4}$/.test(pin)){ toast('⚠️ Mã PIN phải đúng 4 chữ số'); return; }
+  if(!workStores.length){ toast('⚠️ Chọn ít nhất 1 cửa hàng'); return; }
+  const list = await loadEmployees(true);
+  const cur = nvEditingId ? (list.find(e=>e.id===nvEditingId) || {}) : null;
+  const clash = list.find(e => e.pin === pin && e.active !== false && e.id !== nvEditingId);
+  if(clash){ toast(`❌ Mã PIN ${pin} đã được dùng bởi "${clash.fullName}" — chọn PIN khác`); return; }
+  const patch = { fullName, pin, workStores };
+  if(!(cur && cur.payType === 'fixed')){
+    const otEnabled = !!(document.getElementById('nvOtEnabled') && document.getElementById('nvOtEnabled').checked);
+    const otRate = otEnabled ? (Number(document.getElementById('nvOtRate').value)||0) : 0;
+    if(otEnabled && !otRate){ toast('⚠️ Nhập đơn giá lương OT'); return; }
+    const pay = { payType: document.getElementById('nvPayType').value, hourlyRate: Number(document.getElementById('nvHourlyRate').value)||0,
+      fixedMonthlySalary: 0, otEnabled, otThresholdHours: otEnabled ? (Number(document.getElementById('nvOtThreshold').value)||8) : 0, otRate };
+    if(cur){
+      // Đổi lương khi SỬA → thêm mốc vào payHistory (như quanlygieo), các ngày trước mốc giữ mức cũ.
+      const before = payTermsOfRecord(cur), after = payTermsOfRecord(pay);
+      if(PAY_FIELDS.some(k=>before[k]!==after[k])){
+        const from = ((document.getElementById('nvPayFrom')||{}).value || dkey(new Date())).trim();
+        if(!/^\d{4}-\d{2}-\d{2}$/.test(from)){ toast('⚠️ Chọn ngày áp dụng mức lương mới'); return; }
+        let hist = Array.isArray(cur.payHistory) ? cur.payHistory.slice() : [];
+        if(!hist.length) hist.push({ effectiveFrom:'0000-00-00', legacy:true, ...before });
+        hist = hist.filter(h=>h.effectiveFrom!==from);
+        hist.push({ effectiveFrom: from, ...after, changedAt: new Date().toISOString() });
+        hist.sort((a,b)=>String(a.effectiveFrom).localeCompare(String(b.effectiveFrom)));
+        Object.assign(patch, empPayTermsOn({payHistory:hist}, dkey(new Date())), { payHistory: hist });
+      }
+    } else Object.assign(patch, pay);
+  }
+  try{
+    if(cur){ await fstore.collection('employees_gieogieo').doc(nvEditingId).update(patch); toast('✅ Đã lưu'); }
+    else { await fstore.collection('employees_gieogieo').add({ ...patch, active:true, roles:[], createdAt:new Date().toISOString(), createdFrom:'manage' }); toast('✅ Đã thêm nhân viên'); }
+    nvEditingId = null; nvDraft = { payType:null, otEnabled:null, workStores:null };
+    closeEditSheet(true);
+    EMP_CACHE = null;
+    renderNv();
+  }catch(err){ toast('❌ ' + (err.message||err)); }
+}
+async function nvToggleActive(id, active){
+  try{
+    if(active){
+      const list = await loadEmployees(true);
+      const me = list.find(e=>e.id===id);
+      const clash = me && list.find(e => e.pin === me.pin && e.active !== false && e.id !== id);
+      if(clash){ toast(`❌ PIN ${me.pin} đang thuộc "${clash.fullName}" — sửa PIN trước khi bật lại`); return; }
+    } else if(!confirm('Ngừng nhân viên này? (không check-in được nữa ở mọi quán — kể cả Gieo)')) return;
+    await fstore.collection('employees_gieogieo').doc(id).update({ active });
+    EMP_CACHE = null; toast('✅ Đã lưu'); renderNv();
+  }catch(err){ toast('❌ ' + (err.message||err)); }
+}
+
+// ==========================================================================
+// CHỌN QUÁN cho Lịch / Chấm công
+// ==========================================================================
+let HR_STORE = 'tc33';
+function storeSeg(onclickFn){
+  return `<div class="seg">${STORE_IDS.map(s=>`<button class="${HR_STORE===s?'active':''}" onclick="HR_STORE='${s}';${onclickFn}()">${STORES[s].name}</button>`).join('')}</div>`;
+}
+function staffOf(list, st){ return list.filter(e => e.active !== false && worksAt(e, st)); }
+
+// ==========================================================================
+// LỊCH LÀM VIỆC — work_schedules_{tc33|xofa}/{employeeId}_{date} (cùng mô hình quanlygieo)
+// ==========================================================================
+function schedColl(){ return fstore.collection(STORES[HR_STORE].sched); }
+function scheduleDocId(employeeId, date){ return `${employeeId}_${date}`; }
+function saveScheduleEntry(employeeId, employeeName, date, startTime, endTime, isOff){
+  return schedColl().doc(scheduleDocId(employeeId, date)).set({
+    employeeId, employeeName, date, store: HR_STORE, startTime: isOff ? null : startTime, endTime: isOff ? null : endTime,
+    isOff: !!isOff, updatedAt: new Date().toISOString()
+  });
+}
+let lichViewDate = dkey(new Date());
+let bulkLich = { employeeId:null, startDate: dkey(new Date()), endDate: dkey(new Date()), weekdays:[1,2,3,4,5,6,0], startTime:'08:00', endTime:'16:00', isOff:false };
+async function renderLich(){
+  const body = document.getElementById('lichBody');
+  showLoading(body);
+  const [emps, snap] = await Promise.all([loadEmployees(), schedColl().where('date','==',lichViewDate).get()]);
+  const staff = staffOf(emps, HR_STORE);
+  if(!staff.find(e=>e.id===bulkLich.employeeId)) bulkLich.employeeId = staff.length ? staff[0].id : null;
+  const schedByEmp = {}; snap.docs.forEach(d=>{ const s = d.data(); schedByEmp[s.employeeId] = s; });
+  const rank = e=>{ const s = schedByEmp[e.id]; return !s ? 0 : (s.isOff ? 2 : 1); };
+  const sorted = staff.slice().sort((a,b)=>rank(a)-rank(b));
+  const WD = [{v:1,l:'T2'},{v:2,l:'T3'},{v:3,l:'T4'},{v:4,l:'T5'},{v:5,l:'T6'},{v:6,l:'T7'},{v:0,l:'CN'}];
+  const nXep = staff.filter(e=>schedByEmp[e.id] && !schedByEmp[e.id].isOff).length;
+  const nNghi = staff.filter(e=>schedByEmp[e.id] && schedByEmp[e.id].isOff).length;
+  const nChua = staff.length - nXep - nNghi;
+  const badge = s => !s ? '<span class="badge red"><span class="bdot"></span>Chưa xếp</span>'
+    : (s.isOff ? '<span class="badge amber"><span class="bdot"></span>Nghỉ</span>' : `<span class="badge green"><span class="bdot"></span>${esc(s.startTime||'')}–${esc(s.endTime||'')}</span>`);
+  body.innerHTML = `
+    ${storeSeg('renderLich')}
+    ${!staff.length ? `<div class="card"><div class="muted">Chưa có nhân viên nào được tích làm ở ${STORES[HR_STORE].name} — vào mục Nhân viên để tích.</div></div>` : `
+    <div class="sec-title" style="margin-top:0">Xếp lịch nhanh cho nhiều ngày</div>
+    <div class="card">
+      <div class="field"><label>Nhân viên</label>
+        <select onchange="bulkLich.employeeId=this.value">${staff.map(e=>`<option value="${e.id}" ${e.id===bulkLich.employeeId?'selected':''}>${esc(e.fullName)}</option>`).join('')}</select></div>
+      <div class="grid2">
+        <div class="field" style="margin-bottom:0"><label>Từ ngày</label><input type="date" value="${bulkLich.startDate}" onchange="bulkLich.startDate=this.value"></div>
+        <div class="field" style="margin-bottom:0"><label>Đến ngày</label><input type="date" value="${bulkLich.endDate}" onchange="bulkLich.endDate=this.value"></div>
+      </div>
+      <div class="field" style="margin-top:12px"><label>Áp dụng cho các thứ</label>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">${WD.map(w=>`<button type="button" class="btn sm ${bulkLich.weekdays.includes(w.v)?'':'outline'}" style="width:auto" onclick="bulkLichWd(${w.v})">${w.l}</button>`).join('')}</div></div>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--gt);margin-bottom:10px;cursor:pointer;">
+        <input type="checkbox" ${bulkLich.isOff?'checked':''} onchange="bulkLich.isOff=this.checked;renderLich()" style="width:20px;height:20px;"> Đánh dấu NGHỈ cho các ngày đã chọn</label>
+      ${!bulkLich.isOff ? `<div class="grid2">
+        <div class="field" style="margin-bottom:0"><label>Giờ vào</label><input type="time" value="${bulkLich.startTime}" onchange="bulkLich.startTime=this.value"></div>
+        <div class="field" style="margin-bottom:0"><label>Giờ ra</label><input type="time" value="${bulkLich.endTime}" onchange="bulkLich.endTime=this.value"></div></div>` : ''}
+      <button class="btn" style="margin-top:10px" onclick="submitBulkLich()">Áp dụng hàng loạt</button>
+      <div class="small-note">Ghi đè lịch đã có của đúng những ngày khớp thứ đã chọn, ở ${STORES[HR_STORE].name}.</div>
+    </div>
+    <div class="sec-title">Xếp lịch cho 1 ngày</div>
+    <div class="card"><div class="field" style="margin-bottom:0"><label>Ngày</label>
+      <div style="display:flex;gap:6px"><input type="date" id="lichDate" value="${lichViewDate}" style="flex:1">
+      <button class="btn" style="width:auto;padding:0 16px" onclick="lichViewDate=document.getElementById('lichDate').value;renderLich()">Xem</button></div></div></div>
+    <div class="card">
+      <div style="display:flex;gap:14px;font-size:12px;color:var(--gt);margin-bottom:10px;flex-wrap:wrap;">
+        <span>Đã xếp: <b style="color:var(--ok)">${nXep}</b></span><span>Nghỉ: <b style="color:var(--warn)">${nNghi}</b></span><span>Chưa xếp: <b style="color:var(--bad)">${nChua}</b></span></div>
+      <table class="kt"><thead><tr><th>Nhân viên</th><th>Ca ngày ${fmtDateVN(parseDkey(lichViewDate))}</th></tr></thead>
+      <tbody>${sorted.map(e=>`<tr><td>${esc(e.fullName)}</td><td>${badge(schedByEmp[e.id])}</td></tr>`).join('')}</tbody></table>
+    </div>
+    ${sorted.map(e=>{
+      const s = schedByEmp[e.id], off = s ? !!s.isOff : false;
+      return `<div class="card" style="margin-bottom:8px;border-left:4px solid ${!s?'var(--bad)':(off?'var(--gt)':'var(--ok)')}">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;"><b>${esc(e.fullName)}</b>${badge(s)}</div>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--gt);margin-bottom:8px;cursor:pointer;">
+          <input type="checkbox" id="lichOff_${e.id}" ${off?'checked':''} onchange="document.getElementById('lichTW_${e.id}').style.display=this.checked?'none':''" style="width:20px;height:20px;"> Nghỉ ngày này</label>
+        <div class="grid2" id="lichTW_${e.id}" style="${off?'display:none':''}">
+          <div class="field" style="margin-bottom:0"><label>Giờ vào</label><input type="time" id="lichStart_${e.id}" value="${s && s.startTime ? s.startTime : '08:00'}"></div>
+          <div class="field" style="margin-bottom:0"><label>Giờ ra</label><input type="time" id="lichEnd_${e.id}" value="${s && s.endTime ? s.endTime : '16:00'}"></div></div>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button class="btn sm" style="width:auto" onclick="submitSchedule('${e.id}','${escJs(e.fullName)}')">${s ? 'Cập nhật' : 'Lưu lịch'}</button>
+          ${s ? `<button class="btn sm outline" style="width:auto" onclick="deleteSchedule('${e.id}')">Xoá lịch ngày này</button>` : ''}</div>
+      </div>`; }).join('')}`}
+  `;
+}
+function bulkLichWd(w){ const i = bulkLich.weekdays.indexOf(w); if(i>=0) bulkLich.weekdays.splice(i,1); else bulkLich.weekdays.push(w); renderLich(); }
+async function submitBulkLich(){
+  const emp = (await loadEmployees()).find(e=>e.id===bulkLich.employeeId);
+  if(!emp){ toast('⚠️ Chọn nhân viên'); return; }
+  if(!bulkLich.startDate || !bulkLich.endDate || bulkLich.startDate > bulkLich.endDate){ toast('⚠️ Khoảng ngày không hợp lệ'); return; }
+  if(!bulkLich.weekdays.length){ toast('⚠️ Chọn ít nhất 1 thứ'); return; }
+  if(!bulkLich.isOff && (!bulkLich.startTime || !bulkLich.endTime)){ toast('⚠️ Nhập đủ giờ vào/ra'); return; }
+  const dates = [];
+  for(let d = parseDkey(bulkLich.startDate); dkey(d) <= bulkLich.endDate; d = addDays(d, 1)) if(bulkLich.weekdays.includes(d.getDay())) dates.push(dkey(d));
+  if(!dates.length){ toast('⚠️ Không có ngày nào khớp thứ đã chọn'); return; }
+  if(dates.length > 120){ toast('⚠️ Tối đa 120 ngày mỗi lần'); return; }
+  if(!confirm(`Xếp lịch ${STORES[HR_STORE].name} cho ${emp.fullName}: ${dates.length} ngày. Tiếp tục?`)) return;
+  try{
+    await Promise.all(dates.map(d => saveScheduleEntry(emp.id, emp.fullName, d, bulkLich.startTime, bulkLich.endTime, bulkLich.isOff)));
+    toast(`✅ Đã xếp lịch ${dates.length} ngày cho ${emp.fullName}`); renderLich();
+  }catch(err){ toast('❌ ' + (err.message||err)); }
+}
+async function submitSchedule(employeeId, employeeName){
+  const isOff = document.getElementById('lichOff_'+employeeId).checked;
+  const st = isOff ? null : document.getElementById('lichStart_'+employeeId).value;
+  const en = isOff ? null : document.getElementById('lichEnd_'+employeeId).value;
+  if(!isOff && (!st || !en)){ toast('⚠️ Nhập đủ giờ vào/ra'); return; }
+  try{ await saveScheduleEntry(employeeId, employeeName, lichViewDate, st, en, isOff); toast('✅ Đã lưu lịch'); renderLich(); }
+  catch(err){ toast('❌ ' + (err.message||err)); }
+}
+async function deleteSchedule(employeeId){
+  if(!confirm('Xoá lịch làm việc ngày này của nhân viên?')) return;
+  try{ await schedColl().doc(scheduleDocId(employeeId, lichViewDate)).delete(); toast('🗑 Đã xoá lịch'); renderLich(); }
+  catch(err){ toast('❌ ' + (err.message||err)); }
+}
+
+// ==========================================================================
+// CHẤM CÔNG — employee_shifts_{tc33|xofa} (POS ghi qua cham_cong.v1.js). Sửa / bù / xoá như quanlygieo.
+// 2 quán không có đóng ngày nên KHÔNG có ai tự chốt ca bỏ quên — ca treo hiện đỏ ở đây để điền giờ ra.
+// ==========================================================================
+let HR_SETTINGS = { lateGraceMinutes: 10 };
+async function loadHrSettings(){ const d = await HR_DOC().get(); HR_SETTINGS = { lateGraceMinutes: 10, ...(d.exists ? d.data() : {}) }; return HR_SETTINGS; }
+function shiftColl(st){ return fstore.collection(STORES[st || HR_STORE].shifts); }
+let ccDate = dkey(new Date()), ccEditId = null, ccAddOpen = false, ccEmps = [];
+function hhmm(iso){ if(!iso) return ''; const d = new Date(iso); return isNaN(d) ? '' : `${pad(d.getHours())}:${pad(d.getMinutes())}`; }
+function toIso(dateKey, t){ if(!t) return null; const [h,m] = t.split(':').map(Number); const d = parseDkey(dateKey); d.setHours(h||0, m||0, 0, 0); return d.toISOString(); }
+// Giờ ra ≤ giờ vào = ca qua đêm (rạng sáng hôm sau), vẫn thuộc cùng businessDate.
+function outIso(dateKey, inIsoV, t){ if(!t) return null; let o = new Date(toIso(dateKey, t)); if(o <= new Date(inIsoV)) o = new Date(o.getTime() + 86400000); return o.toISOString(); }
+async function renderCc(){
+  const body = document.getElementById('ccBody');
+  showLoading(body);
+  const [snap, sched, emps, treoSnap] = await Promise.all([
+    shiftColl().where('businessDate','==',ccDate).get(),
+    fstore.collection(STORES[HR_STORE].sched).where('date','==',ccDate).get(),
+    loadEmployees(),
+    shiftColl().where('checkedOutAt','==',null).get(),
+    loadHrSettings()
+  ]);
+  ccEmps = emps;
+  const today = dkey(new Date());
+  const shifts = snap.docs.map(d=>({id:d.id, ...d.data()}));
+  const schedByEmp = {}; sched.docs.forEach(d=>{ const s = d.data(); schedByEmp[s.employeeId] = s; });
+  const all = treoSnap.docs.map(d=>({id:d.id, ...d.data()})).sort((a,b)=>String(a.businessDate).localeCompare(String(b.businessDate)));
+  const treo = all.filter(t=>String(t.businessDate) < today);
+  const dangCa = all.filter(t=>String(t.businessDate) === today);
+  const byEmp = {}; shifts.forEach(s=>{ (byEmp[s.employeeId] = byEmp[s.employeeId] || []).push(s); });
+  const staff = staffOf(emps, HR_STORE);
+  body.innerHTML = `
+    ${storeSeg('renderCc')}
+    <div class="card"><div class="field" style="margin-bottom:0"><label>Xem ngày</label>
+      <div style="display:flex;gap:6px"><input type="date" id="ccDateInput" value="${ccDate}" style="flex:1">
+      <button class="btn" style="width:auto;padding:0 16px" onclick="ccDate=document.getElementById('ccDateInput').value;ccEditId=null;renderCc()">Xem</button></div></div></div>
+    ${dangCa.length ? `<div class="card">
+      <div style="font-weight:700;font-size:14px;margin-bottom:6px;">${dangCa.length} người đang trong ca</div>
+      ${dangCa.map(t=>`<div class="row"><span class="rl">${esc(t.employeeName||'(không rõ)')} <span style="color:var(--ink-4)">vào ${hhmm(t.checkedInAt)}</span></span><span class="rv"><span class="tier tier-green">${fmtNum(shiftWorkedHours(t),1)}h tạm tính</span></span></div>`).join('')}
+    </div>` : ''}
+    ${treo.length ? `<div class="card" style="border-left:3px solid var(--bad);">
+      <div style="font-weight:700;font-size:14px;color:var(--bad);margin-bottom:6px;">${ic('alert',14)} ${treo.length} ca ngày trước quên check-out — CHƯA được tính lương</div>
+      <div class="small-note" style="margin-bottom:8px;">Bấm "Sửa" để điền giờ ra thật; không nhớ chính xác thì điền giờ đóng cửa hôm đó.</div>
+      ${treo.map(t=>`<div class="row"><span class="rl">${esc(t.employeeName||'(không rõ)')} · ${fmtDateVN(parseDkey(t.businessDate))} <span style="color:var(--ink-4)">vào ${hhmm(t.checkedInAt)}</span></span>
+        <span class="rv"><button class="btn sm outline" style="width:auto;padding:0 12px" onclick="ccDate='${t.businessDate}';ccEditId='${t.id}';ccAddOpen=false;renderCc()">Sửa</button></span></div>`).join('')}
+    </div>` : ''}
+    <div class="sec-title">Chấm công ${STORES[HR_STORE].name} · ${fmtDateVN(parseDkey(ccDate))} (${Object.keys(byEmp).length} người)</div>
+    ${Object.keys(byEmp).length ? Object.keys(byEmp).map(empId=>{
+      const list = byEmp[empId].sort((a,b)=>new Date(a.checkedInAt) - new Date(b.checkedInAt));
+      const sc = schedByEmp[empId];
+      let late = '<span class="tier tier-amber">Chưa xếp lịch</span>';
+      if(sc && sc.isOff) late = '<span class="tier tier-blue">Lịch: nghỉ</span>';
+      else if(sc && sc.startTime){
+        const [h,m] = sc.startTime.split(':').map(Number);
+        const start = parseDkey(ccDate); start.setHours(h, m, 0, 0);
+        const diff = Math.round((new Date(list[0].checkedInAt) - start - (HR_SETTINGS.lateGraceMinutes||0)*60000)/60000);
+        late = diff > 0 ? `<span class="tier tier-red">Trễ ${diff} phút</span>` : '<span class="tier tier-green">Đúng giờ</span>';
+      }
+      const hours = list.reduce((a,s)=>a + shiftWorkedHours(s), 0);
+      const boQuen = list.some(x=>!x.checkedOutAt && !isShiftInProgress(x));
+      return `<div class="card" style="margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><b>${esc(list[0].employeeName)}</b>${late}</div>
+        ${list.map(s=>{
+          const tag = (s.manualEntry || s.manualEdit) ? '<span class="tier tier-amber" style="margin-left:6px">sửa tay</span>' : '';
+          const form = ccEditId === s.id ? `<div style="padding:8px 0 4px;border-bottom:1px dashed var(--line-2);">
+            <div class="grid2"><div class="field" style="margin-bottom:6px"><label>Giờ vào</label><input type="time" id="cc-in-${s.id}" value="${hhmm(s.checkedInAt)}"></div>
+            <div class="field" style="margin-bottom:6px"><label>Giờ ra</label><input type="time" id="cc-out-${s.id}" value="${hhmm(s.checkedOutAt)}"></div></div>
+            <div class="small-note" style="margin-bottom:8px;">Bỏ trống giờ ra = vẫn để ca mở. Giờ ra nhỏ hơn giờ vào = ca qua đêm.</div>
+            <div style="display:flex;gap:8px;"><button class="btn outline sm" onclick="ccEditId=null;renderCc()">Huỷ</button><button class="btn sm" onclick="ccSave('${s.id}')">Lưu</button>
+            <button class="btn outline sm" style="color:var(--bad);border-color:var(--bad)" onclick="ccDelete('${s.id}')">Xoá</button></div></div>` : '';
+          return `<div class="row"><span class="rl">Vào ${hhmm(s.checkedInAt)}${tag}</span><span class="rv">
+            ${s.checkedOutAt ? 'Ra ' + hhmm(s.checkedOutAt) : (isShiftInProgress(s) ? '<span style="color:var(--ok)">đang trong ca</span>' : '<span style="color:var(--bad)">quên check-out</span>')}
+            <button class="btn sm outline" style="width:auto;padding:0 10px;margin-left:8px" onclick="ccEditId=(ccEditId==='${s.id}'?null:'${s.id}');renderCc()">Sửa</button></span></div>${form}`;
+        }).join('')}
+        <div class="row"><span class="rl"><b>Tổng giờ làm</b></span><span class="rv"><b>${fmtNum(hours,2)}h</b></span></div>
+        ${boQuen ? `<div class="small-note" style="color:var(--bad)">${ic('alert',14)} Có ca quên check-out — chưa được tính giờ / lương. Bấm "Sửa" để điền giờ ra.</div>` : ''}
+      </div>`;
+    }).join('') : '<div class="card"><div class="muted">Không có ai check-in ngày này.</div></div>'}
+    <div class="card">
+      ${ccAddOpen ? `<div style="font-weight:700;font-size:14px;margin-bottom:8px;">Thêm ca bù — ${fmtDateVN(parseDkey(ccDate))}</div>
+        <div class="field"><label>Nhân viên</label><select id="cc-add-emp">${staff.map(e=>`<option value="${e.id}">${esc(e.fullName)}</option>`).join('')}</select></div>
+        <div class="grid2"><div class="field"><label>Giờ vào</label><input type="time" id="cc-add-in"></div><div class="field"><label>Giờ ra (trống = chưa ra)</label><input type="time" id="cc-add-out"></div></div>
+        <div style="display:flex;gap:8px;"><button class="btn outline" onclick="ccAddOpen=false;renderCc()">Huỷ</button><button class="btn" onclick="ccAdd()">Lưu ca bù</button></div>`
+      : `<button class="btn outline" onclick="ccAddOpen=true;renderCc()">＋ Thêm ca bù (nhân viên bị sót chấm công)</button>`}
+    </div>
+    <div class="card" style="margin-top:10px"><div class="field" style="margin-bottom:0"><label>Ngưỡng đi trễ (phút) — áp dụng cho cả The Cafe 33 và XOFA</label>
+      <input type="number" value="${HR_SETTINGS.lateGraceMinutes}" onchange="saveLateGrace(this.value)"></div>
+      <div class="small-note">Cài đặt riêng của 2 quán này (không đổi ngưỡng của Gieo).</div></div>
+  `;
+}
+async function ccSave(id){
+  const inV = document.getElementById('cc-in-'+id).value, outV = document.getElementById('cc-out-'+id).value;
+  if(!inV){ toast('⚠️ Phải có giờ vào'); return; }
+  const checkedInAt = toIso(ccDate, inV);
+  const checkedOutAt = outV ? outIso(ccDate, checkedInAt, outV) : null;
+  if(checkedOutAt){ const h = (new Date(checkedOutAt) - new Date(checkedInAt))/3600000; if(h > 16 && !confirm('Ca này dài ' + h.toFixed(1) + ' giờ — có chắc không?')) return; }
+  try{ await shiftColl().doc(id).update({ checkedInAt, checkedOutAt, manualEdit:true, manualEditAt:new Date().toISOString(), manualEditBy:'manage' }); ccEditId = null; toast('✅ Đã sửa chấm công'); renderCc(); }
+  catch(err){ toast('❌ ' + (err.message||err)); }
+}
+async function ccDelete(id){
+  if(!confirm('Xoá hẳn bản ghi chấm công này? Không khôi phục được.')) return;
+  try{ await shiftColl().doc(id).delete(); ccEditId = null; toast('✅ Đã xoá bản ghi'); renderCc(); }
+  catch(err){ toast('❌ ' + (err.message||err)); }
+}
+async function ccAdd(){
+  const empId = (document.getElementById('cc-add-emp')||{}).value, inV = document.getElementById('cc-add-in').value, outV = document.getElementById('cc-add-out').value;
+  if(!empId){ toast('⚠️ Chọn nhân viên'); return; }
+  if(!inV){ toast('⚠️ Nhập giờ vào'); return; }
+  const emp = ccEmps.find(e=>e.id===empId);
+  const checkedInAt = toIso(ccDate, inV), checkedOutAt = outV ? outIso(ccDate, checkedInAt, outV) : null;
+  try{
+    const dup = await shiftColl().where('businessDate','==',ccDate).get();
+    if(dup.docs.some(d=>{ const x = d.data(); return x.employeeId === empId && x.checkedInAt === checkedInAt; })){ toast('⚠️ Đã có bản ghi đúng giờ vào này rồi'); return; }
+    await shiftColl().add({ employeeId: empId, employeeName: emp ? emp.fullName : '(không rõ)', businessDate: ccDate, store: HR_STORE,
+      checkedInAt, checkedOutAt, manualEntry:true, manualEditAt:new Date().toISOString(), manualEditBy:'manage' });
+    ccAddOpen = false; toast('✅ Đã thêm ca bù'); renderCc();
+  }catch(err){ toast('❌ ' + (err.message||err)); }
+}
+async function saveLateGrace(v){
+  try{ await HR_DOC().set({ lateGraceMinutes: Number(v)||0, updatedAt:new Date().toISOString() }, { merge:true }); toast('✅ Đã lưu'); renderCc(); }
+  catch(err){ toast('❌ ' + (err.message||err)); }
+}
+
+// ==========================================================================
+// LƯƠNG — lương giờ từ chấm công ở TC33 / XOFA (OT theo ngày, từng quán), như computeActualLaborBreakdownByEmployee
+// của quanlygieo. Cột "Giờ ở Gieo" chỉ để tham khảo — lương phần đó tính ở Quản lý Gieo.
+// ==========================================================================
+let luongMonth = dkey(new Date()).slice(0,7);
+// Thuần: shifts = [{employeeId, businessDate, checkedInAt, checkedOutAt, payTerms}], trả { empId: {hours, otHours, amount} }.
+function laborByEmployee(employees, shifts, nowMs){
+  const empById = {}; employees.forEach(e=>empById[e.id]=e);
+  const hoursKey = {}, termsKey = {};
+  shifts.forEach(s=>{
+    const emp = empById[s.employeeId]; if(!emp) return;
+    const terms = empPayTermsOn(emp, s.businessDate, s.payTerms);
+    if(terms.payType!=='hourly_full' && terms.payType!=='hourly_part') return;
+    const h = shiftWorkedHours(s, nowMs); if(h <= 0) return;
+    const k = s.employeeId + '|' + s.businessDate;
+    hoursKey[k] = (hoursKey[k]||0) + h;
+    if(!termsKey[k]) termsKey[k] = terms;
+  });
+  const out = {};
+  Object.entries(hoursKey).forEach(([k, h])=>{
+    const id = k.slice(0, k.indexOf('|'));
+    const r = computeWageForDayHours(termsKey[k], h);
+    const b = out[id] || (out[id] = { hours:0, otHours:0, amount:0 });
+    b.hours += h; b.otHours += r.otHours; b.amount += r.amount;
+  });
+  return out;
+}
+async function gieoHoursByEmployee(from, to){
+  // Ca chấm công ở các quán Gieo: gg01 = employee_shifts_gieogieo, quán khác = employee_shifts_gieogieo__{id} (data_access).
+  let ids = ['gg01'];
+  try{ const s = await fstore.collection('stores_gieogieo').get(); const x = s.docs.map(d=>d.id).filter(id=>/^gg\d{2}$/.test(id)); if(x.length) ids = Array.from(new Set(['gg01', ...x])); }catch(e){}
+  const out = {};
+  await Promise.all(ids.map(async id=>{
+    const name = id === 'gg01' ? 'employee_shifts_gieogieo' : 'employee_shifts_gieogieo__' + id;
+    try{
+      const snap = await fstore.collection(name).where('businessDate','>=',from).where('businessDate','<=',to).get();
+      snap.docs.forEach(d=>{ const s = d.data(); out[s.employeeId] = (out[s.employeeId]||0) + shiftWorkedHours(s); });
+    }catch(e){ console.warn('[Lương] không đọc được', name, e); }
+  }));
+  return out;
+}
+async function renderLuong(){
+  const body = document.getElementById('luongBody');
+  showLoading(body);
+  const [y, m] = luongMonth.split('-').map(Number);
+  const from = dkey(new Date(y, m-1, 1)), to = dkey(new Date(y, m, 0));
+  const [emps, tcSnap, xoSnap, gieo] = await Promise.all([
+    loadEmployees(true),
+    shiftColl('tc33').where('businessDate','>=',from).where('businessDate','<=',to).get(),
+    shiftColl('xofa').where('businessDate','>=',from).where('businessDate','<=',to).get(),
+    gieoHoursByEmployee(from, to)
+  ]);
+  const now = Date.now();
+  const tcShifts = tcSnap.docs.map(d=>d.data()), xoShifts = xoSnap.docs.map(d=>d.data());
+  const L = { tc33: laborByEmployee(emps, tcShifts, now), xofa: laborByEmployee(emps, xoShifts, now) };
+  const treo = tcShifts.concat(xoShifts).filter(s=>!s.checkedOutAt && !isShiftInProgress(s)).length;
+  const ids = new Set([...Object.keys(L.tc33), ...Object.keys(L.xofa)]);
+  emps.filter(e=>e.active!==false && isHourly(e) && (worksAt(e,'tc33')||worksAt(e,'xofa'))).forEach(e=>ids.add(e.id));
+  const rows = Array.from(ids).map(id=>{
+    const e = emps.find(x=>x.id===id) || { id, fullName: '(đã xoá)' };
+    const a = L.tc33[id] || {hours:0,otHours:0,amount:0}, b = L.xofa[id] || {hours:0,otHours:0,amount:0};
+    return { e, a, b, total: a.amount + b.amount, gieo: gieo[id] || 0 };
+  }).sort((p,q)=>q.total - p.total || (p.e.fullName||'').localeCompare(q.e.fullName||'','vi'));
+  const sum = rows.reduce((s,r)=>({ tc: s.tc + r.a.amount, xo: s.xo + r.b.amount }), { tc:0, xo:0 });
+  body.innerHTML = `
+    <div class="card"><div class="field" style="margin-bottom:0"><label>Xem tháng</label>
+      <div style="display:flex;gap:6px"><input type="month" id="luongMonthInput" value="${luongMonth}" style="flex:1">
+      <button class="btn" style="width:auto;padding:0 16px" onclick="luongMonth=document.getElementById('luongMonthInput').value;renderLuong()">Xem</button></div></div></div>
+    <div class="kcard kcard-wide lv-green" style="margin-bottom:12px">
+      <div class="klabel">Lương giờ tháng ${m}/${y}</div><div class="kval">${fmt(sum.tc + sum.xo)}</div>
+      <div class="ksub">The Cafe 33 ${fmt(sum.tc)} · XOFA ${fmt(sum.xo)}</div></div>
+    ${treo ? `<div class="card" style="border-left:3px solid var(--bad)"><div class="small-note" style="margin:0;color:var(--bad)">${ic('alert',14)} ${treo} ca quên check-out trong tháng chưa được tính — sửa ở mục Chấm công.</div></div>` : ''}
+    <div class="sec-title">Từng người</div>
+    <div class="card mg-scroll"><table class="kt">
+      <thead><tr><th>Nhân viên</th><th style="text-align:right">Giờ TC33</th><th style="text-align:right">Giờ XOFA</th><th style="text-align:right">Tiền</th><th style="text-align:right">Giờ Gieo*</th></tr></thead>
+      <tbody>${rows.length ? rows.map(r=>`<tr>
+        <td>${esc(r.e.fullName)}<div class="small-note" style="margin:2px 0 0">${isHourly(r.e) ? payTypeLabel(r.e) : 'không phải lương giờ'}${(r.a.otHours+r.b.otHours)>0 ? ` · <span style="color:var(--warn);font-weight:700">${fmtNum(r.a.otHours+r.b.otHours,1)}h OT</span>` : ''}</div></td>
+        <td style="text-align:right">${fmtNum(r.a.hours,1)}h</td><td style="text-align:right">${fmtNum(r.b.hours,1)}h</td>
+        <td style="text-align:right"><b>${fmt(r.total)}</b></td><td style="text-align:right;color:var(--gt)">${r.gieo ? fmtNum(r.gieo,1)+'h' : '—'}</td></tr>`).join('')
+        : '<tr><td colspan="5"><div class="muted">Chưa có ca nào trong tháng.</div></td></tr>'}</tbody>
+    </table></div>
+    <div class="small-note" style="margin:8px 2px 0">Tiền = giờ chấm công thật × đơn giá đúng ngày (theo lịch sử lương), OT tính theo từng ngày ở từng quán. Ca hôm nay đang mở tính tạm tới hiện tại. *Giờ ở Gieo chỉ để tham khảo — lương phần đó xem ở Quản lý Gieo.</div>
+  `;
+}
+
+// ==========================================================================
+// KHỞI ĐỘNG
+// ==========================================================================
+renderSidebarNav();
+switchScreen('rev');
+</script>
+</body>
+</html>

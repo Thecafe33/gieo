@@ -6,6 +6,7 @@
 - Mỗi app là **một file HTML duy nhất**, JS inline, không build step. Firebase **compat 10.13.2** (Firestore + Realtime Database + Auth + Storage), project `the-cafe-33`.
 - Host: **Firebase Hosting**. Chủ dự án **tự deploy** cả thư mục bằng `firebase deploy --only hosting` từ Termux. **Claude không bao giờ chạy deploy.**
 - Project Firebase và thư mục deploy **dùng chung với XOFA và The Cafe 33**. Không sửa, không xoá, không di chuyển file của hai thương hiệu đó.
+- **Ngoại lệ (chủ dự án cho phép 12/10/2026)**: `pos.html` (The Cafe 33) và `PosX.html` (XOFA) nằm trong repo; chỉ được sửa phần **Ca làm việc** (thẻ `cham_cong.v*.js` + nút mở). App quản lý riêng của 2 quán: `manage.html`. Màn Ca làm việc: `cham_cong.v1.js` (cùng quy tắc phiên bản như engine). Quyết định đã chốt: `docs/KE_HOACH_QUANLY_TC33_XOFA.md`. Các file khác của 2 thương hiệu (`index.html`…) vẫn không đụng.
 
 ## Quy tắc làm việc (bắt buộc)
 1. Trả lời bằng **tiếng Việt**.
