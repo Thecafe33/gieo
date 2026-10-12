@@ -77,3 +77,11 @@ không đụng `data_access`, không đổi hành vi của `posgieo.html` / `qua
 
 - `quanlygieo` vẫn liệt kê cả người chỉ làm TC33 / XOFA ở màn Lịch làm việc / Lương của Gieo (0 giờ). Lọc theo `workStores` = đổi hành vi Gieo → hỏi trước.
 - `posgieo` vẫn cho người chỉ làm TC33 / XOFA check-in ở Gieo.
+
+## 6. Sửa 12/10 (lần 4) — Ca làm việc & bed
+
+- `cham_cong.v2.js` (v1 đã deploy — giữ nguyên để quay lui): màn rộng ≥ 768px (PC / tablet) mở **popup** giữa màn (bấm nền mờ / ✕ / Esc để đóng); điện thoại giữ toàn màn. Cả 2 POS trỏ sang v2.
+- `pos.html` bản PC: nút Ca làm việc là **nút tròn nhỏ** (icon) ở cuối hàng nút trên cùng. Menu điện thoại: thẻ Ca làm việc dời xuống **cuối** (sau Quản lý Bed).
+- `PosX.html`: mục Ca làm việc dời xuống **cuối** menu bên (sau Màn hình phụ) — giữ nguyên vị trí các mục cũ nhân viên đã quen.
+- Quy ước: thêm mục mới vào menu có sẵn của 2 POS → đặt **cuối**, không chèn giữa các mục cũ.
+
