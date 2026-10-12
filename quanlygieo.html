@@ -2223,8 +2223,12 @@ html.tab-ui:not(.nav-off) .sidebar{background:#F2F2F7;border-right:1px solid rgb
      tự thử lại, tự lấy đúng tên bucket trong firebaseConfig. -->
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-storage-compat.js"></script>
 <!-- [E3] Unit Engine — dùng CHUNG file với POS, nạp TRƯỚC script chính. Đổi phiên bản = đổi tên file (6.1). -->
-<script src="data_access.v5.js"></script>
+<script src="data_access.v6.js"></script>
+<!-- [TỰ PHỤC HỒI] Nạp file lần đầu thất bại (404 bị trình duyệt NHỚ vì header immutable khi HTML lên site trước file JS, hoặc mạng chập)
+     → nạp lại ĐÚNG MỘT LẦN bằng địa chỉ khác (?r=1 — khác khoá cache) trước khi script chính chạy. Không đổi tên file / không cần deploy lại. (Viết '<scr'+'ipt' để tools/predeploy_check không đếm nhầm thành thẻ thứ hai; có id để các công cụ quét — chỉ lấy khối script TRẦN (không thuộc tính) đầu tiên làm script chính — không lấy nhầm.) -->
+<script id="gdRetry">if(!window.GieoData){document.write('<scr'+'ipt src="data_access.v6.js?r=1"><\/scr'+'ipt>');}</script>
 <script src="unit_engine.v18.js"></script>
+<script id="ueRetry">if(!window.UnitEngine){document.write('<scr'+'ipt src="unit_engine.v18.js?r=1"><\/scr'+'ipt>');}</script>
 <script>
 // ============================================================
 // FIREBASE — dùng chung project với posgieotest.html (the-cafe-33)
@@ -2256,7 +2260,7 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 const fstore = firebase.firestore();
-// [ĐA CỬA HÀNG — Bước 1+2+3] Lớp đường dẫn theo quán (data_access.v5.js): quán hiện tại 'gg01' → mọi tên giữ NGUYÊN.
+// [ĐA CỬA HÀNG — Bước 1+2+3] Lớp đường dẫn theo quán (data_access.v6.js): quán hiện tại 'gg01' → mọi tên giữ NGUYÊN.
 // catalogMirror: mọi lượt sửa danh mục NL / BTP ở đây tự ghi cùng trường đó sang bản danh mục của các quán khác
 // (không bao giờ chép tồn; xoá món bị chặn khi quán khác còn tồn) — Cấu hình ▸ Cửa hàng.
 // [Bước 3] QL_VIEW = quán đang xem ('gg01', 'gg02'…) hoặc 'all' (Xem tất cả cửa hàng) — mỗi máy nhớ ở localStorage.
@@ -2276,10 +2280,19 @@ if (window.GieoData) {
 } else {
   const bar = document.createElement('div');
   bar.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#c0392b;color:#fff;font:700 16px sans-serif;padding:30px;text-align:center';
-  bar.textContent = '⚠️ Chưa tải được data_access.v5.js — đang tải lại…';
+  bar.innerHTML = '⚠️ Chưa tải được data_access.v6.js<div id="gdChanDoan" style="font:600 15px sans-serif;margin:16px auto 0;max-width:520px;line-height:1.6">Đang kiểm tra máy chủ…</div>'
+    + '<button onclick="location.reload()" style="margin-top:18px;padding:12px 26px;border:0;border-radius:12px;font:800 15px sans-serif;background:#fff;color:#c0392b">Tải lại</button>';
   (document.body || document.documentElement).appendChild(bar);
-  setTimeout(() => location.reload(), 5000);
-  throw new Error('[GieoData] thiếu data_access.v5.js — dừng app');
+  // Hỏi thẳng máy chủ để biết lý do THẬT (404 = file chưa có trong thư mục deploy; mạng; hay trình duyệt không chạy được).
+  let _gdTuTai = true;
+  const _gdGhi = t => { const d = document.getElementById('gdChanDoan'); if (d) d.textContent = t; };
+  fetch('data_access.v6.js?chandoan=' + Date.now(), { cache: 'no-store' }).then(r => {
+    if (r.status === 404) { _gdTuTai = false; _gdGhi('Máy chủ báo 404 — file data_access.v6.js CHƯA có trên site. Chép file vào thư mục deploy, chạy lại firebase deploy, rồi bấm Tải lại.'); }
+    else if (r.ok) _gdGhi('Máy chủ có file (HTTP ' + r.status + ') nhưng trình duyệt không chạy được — thử xoá dữ liệu trang / bộ nhớ đệm của app rồi mở lại; nếu vẫn lỗi, so sánh file trên site với bản gốc (có thể bị cắt dở khi chép).');
+    else _gdGhi('Máy chủ trả về HTTP ' + r.status + ' cho file này.');
+  }).catch(() => _gdGhi('Không kết nối được máy chủ (mạng?) — tự thử lại sau vài giây.'));
+  setTimeout(() => { if (_gdTuTai) location.reload(); }, 8000);
+  throw new Error('[GieoData] thiếu data_access.v6.js — dừng app');
 }
 const auth = firebase.auth();
 // [E3] Khởi tạo Unit Engine cho Quản lý. Thiếu file engine → banner + tự tải lại sau 5 giây (6.3).

@@ -176,6 +176,18 @@ const chay = (src, ret, stubs) => { const ks = Object.keys(stubs); return new Fu
     ok(/\.nl-actions\{[^}]*flex-wrap:wrap/.test(ql) && /\.nl-actions \.btn\.sm\{[^}]*white-space:nowrap/.test(ql), 'hàng nút: cho xuống dòng nguyên nút, chữ không bị bẻ nhiều dòng');
     ok(!/class="nl-card[^"]*"[^>]*style="opacity/.test(ql) && /\.nl-card\.nl-off \.nl-head/.test(ql), 'món ngừng dùng chỉ mờ phần chữ, không mờ cả thẻ (menu không bị mờ theo)');
   }
+  // ── 9. (12/10) Nạp data_access / engine tự phục hồi: 404 bị nhớ (header immutable) hay mạng chập không làm app đỏ vĩnh viễn ──
+  {
+    for (const h of ['posgieo.html', 'quanlygieo.html']) {
+      const t = fs.readFileSync(path.join(ROOT, h), 'utf8');
+      const iDa = t.indexOf('<script src="' + BAN + '"></script>'), iThuDa = t.indexOf("if(!window.GieoData){document.write('<scr'+'ipt src=\"" + BAN + "?r=1\">");
+      const iEn = t.indexOf('<script src="unit_engine.'), iThuEn = t.indexOf("if(!window.UnitEngine){document.write('<scr'+'ipt src=\"unit_engine.");
+      ok(iDa > 0 && iThuDa > iDa && iThuDa < iEn && iEn > 0 && iThuEn > iEn, h + ': thẻ thử lại ngay sau thẻ nạp data_access và engine (chạy trước script chính)');
+      ok(t.indexOf('<script>') > t.indexOf('id="ueRetry"') && (t.match(/<script>([\s\S]*?)<\/script>/) || [])[1].length > 100000, h + ': khối script trần ĐẦU TIÊN vẫn là script chính của app (các công cụ quét lấy đúng khối này; dòng thử lại có id nên không bị lấy nhầm)');
+      ok((t.match(/<script src="unit_engine\.v\d+\.js/g) || []).length === 1 && (t.match(/<script src="data_access\.v\d+\.js/g) || []).length === 1, h + ': dòng thử lại không bị công cụ kiểm tra đếm nhầm thành thẻ thứ hai');
+      ok(/fetch\('data_access\.v\d+\.js\?chandoan=/.test(t) && /status === 404/.test(t) && /_gdTuTai/.test(t), h + ': màn đỏ chẩn đoán 404 / mạng và không tự tải lại vô hạn khi file chưa có trên site');
+    }
+  }
   console.log(fail ? 'SOME FAIL' : 'ALL PASS');
   process.exitCode = fail;
 })().catch(e => { console.log('FAIL lỗi', e && e.stack || e); process.exitCode = 1; });
