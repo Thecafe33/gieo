@@ -36,6 +36,13 @@ không đụng `data_access`, không đổi hành vi của `posgieo.html` / `qua
 10. Lịch làm việc riêng từng quán: `work_schedules_tc33`, `work_schedules_xofa`, doc id `{employeeId}_{date}` như Gieo; một người có thể có lịch ở 2 quán cùng ngày.
 11. Đăng nhập: cùng tài khoản dùng chung như `quanlygieo`.
 
+### Bổ sung 12/10 (lần 2)
+
+12. Thêm kỳ **Hôm qua** (biểu đồ theo khung giờ, dòng "So hôm kia").
+13. Ô lớn đổi thành **Doanh thu chung 2 quán** = Tổng nước TC33 + Tổng không gồm Food XOFA (số chính của từng POS), kèm thanh **% đóng góp** của từng quán (2 số cộng đúng 100). Tổng thu cả bill (gồm Ăn vặt, Food) vẫn ghi ở dòng phụ. Mỗi cột quán có nhãn "Góp …% tổng".
+14. **Mục tiêu** (mục riêng trong menu): đặt theo **tháng**, mỗi tháng một mức; tháng chưa đặt dùng mức của tháng gần nhất trước đó (từng ô riêng). 3 ô: The Cafe 33 (so với Tổng nước), XOFA (so với không gồm Food), **Chung 2 quán nhập riêng** (so với Doanh thu chung). Kỳ khác tháng: mục tiêu ngày = mục tiêu tháng ÷ số ngày tháng đó, cộng theo các ngày trong kỳ. Kỳ chưa hết có thêm dòng "Tiến độ tới hôm nay".
+    Lưu: `revenue_targets_tc33xofa/months` → `{ m: { 'YYYY-MM': { tc33, xofa, all, updatedAt } } }` (1 doc, 1 lượt đọc).
+
 ## 3. Nguồn dữ liệu đọc doanh thu (không ghi)
 
 | Quán | 3 ngày gần nhất (RT) | Đã lưu trữ (Firestore) |
@@ -49,7 +56,8 @@ không đụng `data_access`, không đổi hành vi của `posgieo.html` / `qua
 
 - Chép `manage.html`, `cham_cong.v1.js`, `pos.html`, `PosX.html` vào thư mục deploy.
 - Rules Firestore: nếu rules không phải dạng "đã đăng nhập = toàn quyền mọi collection", cần mở thêm
-  `employee_shifts_tc33`, `employee_shifts_xofa`, `work_schedules_tc33`, `work_schedules_xofa`, `hr_settings_tc33xofa`.
+  `employee_shifts_tc33`, `employee_shifts_xofa`, `work_schedules_tc33`, `work_schedules_xofa`, `hr_settings_tc33xofa`,
+  `revenue_targets_tc33xofa`.
 - Vào `manage.html` → Nhân viên → tích "Làm ở cửa hàng" cho người sẽ chấm công ở TC33 / XOFA.
 
 ## 5. Còn để ngỏ (báo, chưa làm)

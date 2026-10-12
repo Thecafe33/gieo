@@ -1706,6 +1706,19 @@ html.tab-ui:not(.nav-off) .sidebar{background:#F2F2F7;border-right:1px solid rgb
 .mg-tag{display:inline-block;font-size:11.5px;font-weight:700;border-radius:999px;padding:2px 8px;margin-right:4px;background:var(--fill);color:var(--ink-2);}
 .mg-tag.tc33{background:#E6F2EC;color:#004D33;} .mg-tag.xofa{background:#E7EEFC;color:#2B57A8;} .mg-tag.gieo{background:#FCE7EC;color:#B7284A;}
 .mg-scroll{overflow-x:auto;}
+/* Mục tiêu + % đóng góp */
+.mg-share{display:flex;height:10px;border-radius:99px;overflow:hidden;background:rgba(255,255,255,.26);margin-top:12px;}
+.mg-share span{display:block;height:100%;}
+.mg-share-lg{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:13px;font-weight:650;margin-top:6px;color:rgba(255,255,255,.92);}
+.mg-share-lg i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;vertical-align:middle;border:1.5px solid #fff;}
+.mg-pct{display:inline-block;font-size:12px;font-weight:750;border-radius:999px;padding:2px 8px;margin-top:6px;background:var(--fill);color:var(--ink-2);}
+.mg-tgt{margin-top:8px;}
+.mg-tgt .meter{margin-top:4px;}
+.mg-tgt-l{display:flex;justify-content:space-between;gap:6px;font-size:12.5px;color:var(--gt);font-weight:600;}
+.mg-tgt-l b{color:var(--td);font-weight:700;}
+.mg-pace{font-size:12px;color:var(--gt);margin-top:4px;}
+.kcard.kcard-wide .mg-tgt-l{color:rgba(255,255,255,.85);} .kcard.kcard-wide .mg-tgt-l b{color:#fff;}
+.kcard.kcard-wide .mg-pace{color:rgba(255,255,255,.8);}
 @media (max-width:380px){ .mg-big{font-size:20px;} .mg-store{padding:12px 10px 8px;} .mg-l{font-size:12.5px;} }
 html.tab-ui .mg-big{font-size:30px;}
 </style>
@@ -1746,6 +1759,7 @@ html.tab-ui .mg-big{font-size:30px;}
     <div class="screen" id="screen-lich"><div class="wrap"><div id="lichBody"></div></div></div>
     <div class="screen" id="screen-cc"><div class="wrap"><div id="ccBody"></div></div></div>
     <div class="screen" id="screen-luong"><div class="wrap"><div id="luongBody"></div></div></div>
+    <div class="screen" id="screen-target"><div class="wrap"><div id="targetBody"></div></div></div>
   </div>
 </div>
 
@@ -1817,6 +1831,7 @@ const ICON_PATHS = {
   users:    '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16.5 5.2a3.5 3.5 0 0 1 0 5.6M17.5 13.6a6.5 6.5 0 0 1 4 6.4"/>',
   calendar: '<rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 2.8v4M16 2.8v4"/>',
   chart:    '<path d="M3.5 20.5h17"/><path d="M6.5 20.5v-6M11 20.5V7M15.5 20.5v-9M20 20.5V4"/>',
+  flag:     '<path d="M5 21V4"/><path d="M5 4h11l-2 4 2 4H5"/>',
   coins:    '<ellipse cx="12" cy="6.5" rx="7.5" ry="3.2"/><path d="M4.5 6.5v11c0 1.8 3.4 3.2 7.5 3.2s7.5-1.4 7.5-3.2v-11"/><path d="M4.5 12c0 1.8 3.4 3.2 7.5 3.2s7.5-1.4 7.5-3.2"/>',
   clock:    '<circle cx="12" cy="12" r="9"/><path d="M12 6.8V12l3.4 2.2"/>',
   hourglass:'<path d="M6.5 3h11M6.5 21h11"/><path d="M7.5 3v3.5L12 11l4.5-4.5V3M7.5 21v-3.5L12 13l4.5 4.5V21"/>',
@@ -1916,6 +1931,7 @@ document.getElementById('reloadBtn').innerHTML = ic('refresh', 18);
 const NAV_SECTIONS = [
   { group:'Tổng quan', items:[
     {key:'rev',   ic:'chart',    label:'Doanh thu 2 quán'},
+    {key:'target',ic:'flag',     label:'Mục tiêu'},
   ]},
   { group:'Nhân sự', items:[
     {key:'nv',    ic:'users',    label:'Nhân viên'},
@@ -1924,11 +1940,11 @@ const NAV_SECTIONS = [
     {key:'luong', ic:'coins',    label:'Lương'},
   ]},
 ];
-const SB_TILE = { chart:'#34C759', users:'#007AFF', calendar:'#FF3B30', clock:'#8E8E93', coins:'#30B0C7' };
+const SB_TILE = { flag:'#FF9500', chart:'#34C759', users:'#007AFF', calendar:'#FF3B30', clock:'#8E8E93', coins:'#30B0C7' };
 const NAV_LABEL = {}; const NAV_GROUP = {};
 NAV_SECTIONS.forEach(s=>s.items.forEach(it=>{ NAV_LABEL[it.key]=it.label; NAV_GROUP[it.key]=s.group; }));
 let curScreen = 'rev';
-const RENDER = { rev:()=>renderRev(), nv:()=>renderNv(), lich:()=>renderLich(), cc:()=>renderCc(), luong:()=>renderLuong() };
+const RENDER = { rev:()=>renderRev(), nv:()=>renderNv(), lich:()=>renderLich(), cc:()=>renderCc(), luong:()=>renderLuong(), target:()=>renderTarget() };
 
 function renderSidebarNav(){
   document.getElementById('sidebarNav').innerHTML = NAV_SECTIONS.map(sec=>`
@@ -1959,7 +1975,7 @@ async function runRender(s){
 function reloadCurrent(){
   if(curScreen === 'rev'){ REV_MEM = { tc33:{}, xofa:{} }; _tcMenu = null; _tcLegacy = null; }
   if(curScreen === 'rev' && confirm('Xoá cả số liệu ngày cũ đã lưu trong máy và đọc lại từ đầu?\n(Bấm Huỷ = chỉ tải lại số mới)')) revCacheClear();
-  EMP_CACHE = null;
+  EMP_CACHE = null; TARGETS = null;
   runRender(curScreen);
 }
 function openSidebar(){ document.getElementById('sidebar').classList.add('open'); document.getElementById('sidebarBackdrop').classList.add('open'); }
@@ -2219,6 +2235,7 @@ function revRangeFor(mode){
   if(mode === 'month') return [dkey(new Date(now.getFullYear(), now.getMonth(), 1)), dkey(new Date(now.getFullYear(), now.getMonth()+1, 0))];
   if(mode === 'year') return [`${now.getFullYear()}-01-01`, `${now.getFullYear()}-12-31`];
   if(mode === 'custom') return [REV_FROM, REV_TO];
+  if(mode === 'yesterday'){ const y = dkey(addDays(now, -1)); return [y, y]; }
   return [dkey(now), dkey(now)];
 }
 function revSetMode(m){ REV_MODE = m; runRender('rev'); }
@@ -2233,11 +2250,13 @@ async function renderRev(){
   let [from, to] = revRangeFor(REV_MODE);
   const today = dkey(new Date());
   const toRead = to > today ? today : to;            // ngày tương lai không có đơn — khỏi đọc
-  // "So hôm qua" ở tab Hôm nay (pos.html có thẻ này) → đọc kèm hôm qua.
-  const readFrom = REV_MODE === 'day' ? dkey(addDays(parseDkey(from), -1)) : from;
+  // "So hôm qua" ở tab Hôm nay (pos.html có thẻ này) → đọc kèm ngày trước đó (tab Hôm qua: so hôm kia).
+  const oneDay = REV_MODE === 'day' || REV_MODE === 'yesterday';
+  const readFrom = oneDay ? dkey(addDays(parseDkey(from), -1)) : from;
   showLoading(body, 'Đang đọc đơn hàng 2 quán...');
   if(body.querySelector('.muted')) body.querySelector('.muted').textContent = 'Đang đọc đơn hàng 2 quán...';
   let data = { tc33:{}, xofa:{} };
+  await loadTargets().catch(err=>{ console.warn('[mục tiêu] không đọc được', err); TARGETS = TARGETS || {}; });
   if(readFrom <= toRead){
     data = await revLoadRange(readFrom, toRead, (d, t)=>{
       const m = body.querySelector('.muted'); if(m && req === _revReq) m.textContent = `Đang đọc đơn hàng 2 quán... ${Math.round(d/t*100)}%`;
@@ -2251,7 +2270,7 @@ async function renderRev(){
 function revBuckets(r){
   const days = [];
   for(let d = parseDkey(r.from); dkey(d) <= r.to; d = addDays(d, 1)) days.push(dkey(d));
-  if(r.mode === 'day'){
+  if(r.mode === 'day' || r.mode === 'yesterday'){
     return ['0h','2h','4h','6h','8h','10h','12h','14h','16h','18h','20h','22h'].map((label, i)=>({
       label, tc: (r.data.tc33[r.from] ? r.data.tc33[r.from].hours[i] : 0), xo: (r.data.xofa[r.from] ? r.data.xofa[r.from].hours[i] : 0) }));
   }
@@ -2301,18 +2320,22 @@ function drawRev(r){
   const tcNuoc = T.drink + T.khac;
   const tcAll = T.cash + T.transfer;            // mọi tiền thu TC33 (theo o.total, gồm Ăn vặt)
   const xoAll = X.total + X.food;               // mọi tiền thu XOFA (gồm Food)
-  const label = { day:'Hôm nay', week:'Tuần này', month:'Tháng này', year:'Năm nay', custom:'Tuỳ chọn' };
+  // Doanh thu chung (chủ dự án chốt 12/10): số chính của từng POS — TC33 Tổng nước, XOFA không gồm Food.
+  const chung = tcNuoc + X.total;
+  const [pctTc, pctXo] = sharePct(tcNuoc, X.total);
+  const label = { day:'Hôm nay', yesterday:'Hôm qua', week:'Tuần này', month:'Tháng này', year:'Năm nay', custom:'Tuỳ chọn' };
   const period = r.from === r.to ? fmtDateVN(parseDkey(r.from)) : `${fmtDateVN(parseDkey(r.from))} – ${fmtDateVN(parseDkey(r.to))}`;
   // So hôm qua — như thẻ "So hôm qua" của pos.html (cả bill) và cùng cách cho XOFA (không gồm Food).
   let yRow = '', yRowX = '';
-  if(r.mode === 'day'){
+  if(r.mode === 'day' || r.mode === 'yesterday'){
     const yk = dkey(addDays(parseDkey(r.from), -1));
+    const soLabel = r.mode === 'day' ? 'So hôm qua' : 'So hôm kia';
     const yt = r.data.tc33[yk], yx = r.data.xofa[yk];
     const diff = (a, b)=>{ const v = a - b; return `<span class="${v>=0?'mg-up':'mg-down'}">${v>=0?'▲':'▼'} ${fmtN(Math.abs(v))}</span>`; };
-    if(yt) yRow = `<div class="mg-l"><span>So hôm qua</span>${diff(T.total, yt.total)}</div>`;
-    if(yx) yRowX = `<div class="mg-l"><span>So hôm qua</span>${diff(X.total, yx.total)}</div>`;
+    if(yt) yRow = `<div class="mg-l"><span>${soLabel}</span>${diff(T.total, yt.total)}</div>`;
+    if(yx) yRowX = `<div class="mg-l"><span>${soLabel}</span>${diff(X.total, yx.total)}</div>`;
   }
-  const seg = ['day','week','month','year','custom'].map(m=>`<button class="${r.mode===m?'active':''}" onclick="revSetMode('${m}')">${label[m]}</button>`).join('');
+  const seg = ['day','yesterday','week','month','year','custom'].map(m=>`<button class="${r.mode===m?'active':''}" onclick="revSetMode('${m}')">${label[m]}</button>`).join('');
   const buckets = revBuckets(r);
   const daily = keys.filter(k => k <= today).slice().reverse();
   body.innerHTML = `
@@ -2323,9 +2346,14 @@ function drawRev(r){
     <div class="mg-period">${label[r.mode]} · ${period}</div>
 
     <div class="kcard kcard-wide lv-green" style="margin-bottom:12px">
-      <div class="klabel">Tổng thu 2 quán</div>
-      <div class="kval">${fmt(tcAll + xoAll)}</div>
-      <div class="ksub">The Cafe 33 ${fmt(tcAll)} · XOFA ${fmt(xoAll)} — gồm cả Ăn vặt (TC33) và Food (XOFA)</div>
+      <div class="klabel">Doanh thu chung 2 quán</div>
+      <div class="kval">${fmt(chung)}</div>
+      <div class="mg-share" role="img" aria-label="The Cafe 33 ${pctTc}% · XOFA ${pctXo}%">
+        <span style="width:${chung ? tcNuoc / chung * 100 : 0}%;background:var(--tc33);"></span><span style="width:${chung ? X.total / chung * 100 : 0}%;background:var(--xofa);"></span>
+      </div>
+      <div class="mg-share-lg"><span><i style="background:var(--tc33)"></i>The Cafe 33 ${pctTc}% · ${fmtGon(tcNuoc)}</span><span><i style="background:var(--xofa)"></i>XOFA ${pctXo}% · ${fmtGon(X.total)}</span></div>
+      ${tgtBlock(chung, 'all', r)}
+      <div class="ksub" style="margin-top:10px">Doanh thu chung = Tổng nước TC33 + Tổng không gồm Food XOFA. Tổng thu cả bill (gồm Ăn vặt, Food): ${fmt(tcAll + xoAll)}</div>
     </div>
 
     <div class="mg-cols">
@@ -2333,6 +2361,8 @@ function drawRev(r){
         <div class="mg-store-h"><span class="mg-dot" style="background:var(--tc33)"></span>The Cafe 33</div>
         <div class="mg-big" style="color:var(--tc33)">${fmtN(tcNuoc)}</div>
         <div class="mg-biglab">Tổng nước</div>
+        <span class="mg-pct" style="background:#E6F2EC;color:#004D33">Góp ${pctTc}% tổng</span>
+        ${tgtBlock(tcNuoc, 'tc33', r)}
         <div class="mg-sub">Theo nhóm món</div>
         <div class="mg-l"><span>Đồ uống</span><span>${fmtN(T.drink)}</span></div>
         <div class="mg-l"><span>Khác</span><span>${fmtN(T.khac)}</span></div>
@@ -2347,6 +2377,8 @@ function drawRev(r){
         <div class="mg-store-h"><span class="mg-dot" style="background:var(--xofa)"></span>XOFA</div>
         <div class="mg-big" style="color:var(--xofa)">${fmtN(X.total)}</div>
         <div class="mg-biglab">Tổng (không gồm Food)</div>
+        <span class="mg-pct" style="background:#E7EEFC;color:#2B57A8">Góp ${pctXo}% tổng</span>
+        ${tgtBlock(X.total, 'xofa', r)}
         <div class="mg-sub">Theo hình thức</div>
         <div class="mg-l"><span>Tại quán</span><span>${fmtN(X.instore)}</span></div>
         <div class="mg-l"><span>To Go</span><span>${fmtN(X.togo)}</span></div>
@@ -2364,7 +2396,7 @@ function drawRev(r){
       </div>
     </div>
 
-    <div class="sec-title">Biểu đồ ${r.mode === 'day' ? 'theo khung giờ' : (buckets.length > 31 || keys.length > 31 ? 'theo tháng' : 'theo ngày')}</div>
+    <div class="sec-title">Biểu đồ ${r.from === r.to ? 'theo khung giờ' : (buckets.length > 31 || keys.length > 31 ? 'theo tháng' : 'theo ngày')}</div>
     <div class="card">
       <div class="mg-legend"><span><span class="mg-dot" style="background:var(--tc33)"></span>The Cafe 33 · Tổng nước</span><span><span class="mg-dot" style="background:var(--xofa)"></span>XOFA · không gồm Food</span></div>
       ${revChartSvg(buckets)}
@@ -2376,8 +2408,131 @@ function drawRev(r){
       <tbody>${daily.map(k=>{ const t = r.data.tc33[k] || tcEmptySum(), x = r.data.xofa[k] || xoEmptySum();
         return `<tr><td>${fmtDateVN(parseDkey(k)).slice(0,5)}</td><td style="text-align:right">${fmtN(t.drink+t.khac)}</td><td style="text-align:right">${fmtN(x.total)}</td><td style="text-align:right">${fmtN(t.cash+t.transfer+x.total+x.food)}</td></tr>`; }).join('')}</tbody>
     </table></div>` : ''}
-    <div class="small-note" style="margin:10px 2px 0">Chia doanh thu đúng như mỗi POS: The Cafe 33 phân nhóm theo loại món trong menu (nhóm Khác hiện luôn); XOFA tách Food riêng như màn Doanh thu của PosX. "Tổng thu" là số tiền thu cả bill. Số ngày cũ hơn ${REV_STABLE_AFTER} ngày được lưu trong máy — bấm ⟳ để đọc lại.</div>
+    <div class="small-note" style="margin:10px 2px 0">Chia doanh thu đúng như mỗi POS: The Cafe 33 phân nhóm theo loại món trong menu (nhóm Khác hiện luôn); XOFA tách Food riêng như màn Doanh thu của PosX. "Doanh thu chung" và % đóng góp tính trên số chính của mỗi POS; mục tiêu đặt ở mục Mục tiêu. Số ngày cũ hơn ${REV_STABLE_AFTER} ngày được lưu trong máy — bấm ⟳ để đọc lại.</div>
   `;
+}
+
+// ==========================================================================
+// MỤC TIÊU DOANH THU (chủ dự án chốt 12/10)
+//   · Đặt theo THÁNG, mỗi tháng một mức; tháng chưa đặt dùng mức của tháng gần nhất trước đó (từng ô riêng).
+//   · 3 ô: The Cafe 33 (so với Tổng nước), XOFA (so với Tổng không gồm Food), Chung 2 quán (nhập riêng,
+//     so với Doanh thu chung = 2 số trên cộng lại).
+//   · Kỳ khác tháng: mục tiêu từng ngày = mục tiêu tháng ÷ số ngày của tháng đó, cộng theo các ngày trong kỳ.
+// Lưu: revenue_targets_tc33xofa/months { m: { 'YYYY-MM': { tc33, xofa, all, updatedAt } } } — 1 doc, 1 lượt đọc.
+// ==========================================================================
+const TARGET_KEYS = [{ key:'tc33', label:'The Cafe 33', note:'Tổng nước' }, { key:'xofa', label:'XOFA', note:'không gồm Food' }, { key:'all', label:'Chung 2 quán', note:'Doanh thu chung' }];
+const TARGET_DOC = () => fstore.collection('revenue_targets_tc33xofa').doc('months');
+let TARGETS = null;
+async function loadTargets(force){
+  if(TARGETS && !force) return TARGETS;
+  const d = await TARGET_DOC().get();
+  TARGETS = (d.exists && d.data().m) || {};
+  return TARGETS;
+}
+// Mức của tháng ym: tháng gần nhất ≤ ym có giá trị > 0 cho ô đó. Trả { value, from } hoặc null.
+function targetMonthValue(T, ym, key){
+  let best = null;
+  Object.keys(T || {}).forEach(m=>{
+    const v = Number(T[m] && T[m][key]);
+    if(m <= ym && v > 0 && (!best || m > best.from)) best = { value: v, from: m };
+  });
+  return best;
+}
+function daysInMonthYm(ym){ const [y, m] = ym.split('-').map(Number); return new Date(y, m, 0).getDate(); }
+// Mục tiêu của khoảng ngày [from, to] — cộng từng ngày (mục tiêu tháng ÷ số ngày tháng đó). Không ngày nào có mức → null.
+function targetForRange(T, from, to, key){
+  let sum = 0, any = false; const memo = {};
+  for(let d = parseDkey(from); dkey(d) <= to; d = addDays(d, 1)){
+    const ym = dkey(d).slice(0, 7);
+    if(!(ym in memo)) memo[ym] = targetMonthValue(T, ym, key);
+    if(memo[ym]){ sum += memo[ym].value / daysInMonthYm(ym); any = true; }
+  }
+  return any ? Math.round(sum) : null;
+}
+// % đóng góp làm tròn sao cho 2 số cộng lại đúng 100.
+function sharePct(a, b){
+  const t = (a || 0) + (b || 0);
+  if(t <= 0) return [0, 0];
+  const pa = Math.round(a / t * 100);
+  return [pa, 100 - pa];
+}
+function tgtLevel(ratio){ return ratio >= 1 ? 'green' : ratio >= 0.8 ? 'blue' : ratio >= 0.5 ? 'amber' : 'red'; }
+// Khối mục tiêu dưới một con số doanh thu. Kỳ chưa hết (có ngày sau hôm nay) → thêm dòng tiến độ tới hôm nay.
+function tgtBlock(actual, key, r){
+  const T = TARGETS || {};
+  const tg = targetForRange(T, r.from, r.to, key);
+  if(!tg) return `<div class="mg-tgt"><div class="mg-tgt-l"><span>Chưa đặt mục tiêu</span><a href="#" onclick="switchScreen('target');return false" style="color:inherit;font-weight:700">Đặt ›</a></div></div>`;
+  const ratio = actual / tg;
+  const today = dkey(new Date());
+  let pace = '';
+  if(r.to > today && r.from <= today){
+    const tgNow = targetForRange(T, r.from, today, key);
+    if(tgNow){ const d = actual - tgNow; pace = `<div class="mg-pace">Tiến độ tới hôm nay: ${Math.round(actual / tgNow * 100)}% (${d >= 0 ? 'vượt' : 'thiếu'} ${fmtGon(Math.abs(d))})</div>`; }
+  }
+  return `<div class="mg-tgt">
+    <div class="mg-tgt-l"><span>Mục tiêu ${fmtGon(tg)}</span><b>${Math.round(ratio * 100)}%</b></div>
+    <div class="meter"><div class="meter-bar"><div class="meter-fill ${tgtLevel(ratio)}" style="width:${Math.max(3, Math.min(100, ratio * 100))}%"></div></div></div>
+    ${actual < tg ? `<div class="mg-pace">Còn thiếu ${fmtGon(tg - actual)}</div>` : ''}${pace}
+  </div>`;
+}
+
+let targetMonth = dkey(new Date()).slice(0, 7);
+async function renderTarget(){
+  const body = document.getElementById('targetBody');
+  showLoading(body);
+  const T = await loadTargets(true);
+  const cur = T[targetMonth] || {};
+  const months = Object.keys(T).filter(m => TARGET_KEYS.some(k => Number(T[m][k.key]) > 0)).sort().reverse();
+  const [y, m] = targetMonth.split('-').map(Number);
+  body.innerHTML = `
+    <div class="small-note" style="margin:0 0 10px">Đặt mục tiêu doanh thu theo THÁNG. Tháng chưa đặt sẽ dùng mức của tháng gần nhất trước đó. Xem Hôm nay / Tuần / Năm thì mục tiêu tự chia theo số ngày.</div>
+    <div class="card">
+      <div class="field"><label>Tháng</label>
+        <input type="month" id="tgMonth" value="${targetMonth}" onchange="targetMonth=this.value;renderTarget()"></div>
+      ${TARGET_KEYS.map(k=>{
+        const own = Number(cur[k.key]) > 0 ? Number(cur[k.key]) : '';
+        const inh = own ? null : targetMonthValue(T, targetMonth, k.key);
+        return `<div class="field"><label>${k.label} <span class="small-note" style="font-weight:500">— so với ${k.note}</span></label>
+          <input type="number" inputmode="numeric" id="tg_${k.key}" value="${own}" placeholder="${inh ? fmtN(inh.value) + ' (đang dùng mức tháng ' + inh.from.slice(5) + '/' + inh.from.slice(0, 4) + ')' : 'VD: 60000000'}">
+          <div class="small-note" id="tgDay_${k.key}">${own || inh ? '≈ ' + fmt((own || inh.value) / daysInMonthYm(targetMonth)) + ' / ngày' : ''}</div></div>`;
+      }).join('')}
+      <div class="small-note" style="margin:-6px 0 12px">Tổng 2 quán đang nhập: <b id="tgSum">${fmt((Number(cur.tc33)||0) + (Number(cur.xofa)||0))}</b> — mục tiêu chung nhập riêng, không bắt buộc bằng tổng này.</div>
+      <button class="btn" onclick="saveTarget()">${ic('save',15)} Lưu mục tiêu tháng ${m}/${y}</button>
+      ${T[targetMonth] ? `<button class="btn outline" style="margin-top:8px" onclick="deleteTarget()">Xoá mức riêng của tháng ${m}/${y}</button>` : ''}
+    </div>
+    <div class="sec-title">Các tháng đã đặt</div>
+    <div class="card mg-scroll">${months.length ? `<table class="kt">
+      <thead><tr><th>Tháng</th><th style="text-align:right">TC33</th><th style="text-align:right">XOFA</th><th style="text-align:right">Chung</th></tr></thead>
+      <tbody>${months.map(mm=>`<tr style="cursor:pointer" onclick="targetMonth='${mm}';renderTarget()"><td>${mm.slice(5)}/${mm.slice(0,4)}</td>
+        ${TARGET_KEYS.map(k=>`<td style="text-align:right">${Number(T[mm][k.key]) > 0 ? fmtN(T[mm][k.key]) : '—'}</td>`).join('')}</tr>`).join('')}</tbody></table>`
+      : '<div class="muted">Chưa đặt mục tiêu tháng nào.</div>'}</div>
+  `;
+  ['tc33','xofa'].forEach(k=>document.getElementById('tg_'+k).addEventListener('input', ()=>{
+    document.getElementById('tgSum').textContent = fmt((Number(document.getElementById('tg_tc33').value)||0) + (Number(document.getElementById('tg_xofa').value)||0));
+  }));
+}
+async function saveTarget(){
+  if(!/^\d{4}-\d{2}$/.test(targetMonth)){ toast('⚠️ Chọn tháng'); return; }
+  const rec = { updatedAt: new Date().toISOString() };
+  let any = false;
+  for(const k of TARGET_KEYS){
+    const raw = document.getElementById('tg_'+k.key).value.trim();
+    if(raw === '') continue;
+    const v = Math.round(Number(raw));
+    if(!(v > 0)){ toast('⚠️ Mục tiêu ' + k.label + ' phải là số dương'); return; }
+    rec[k.key] = v; any = true;
+  }
+  if(!any){ toast('⚠️ Nhập ít nhất một mục tiêu'); return; }
+  try{
+    // Ghi đè cả tháng (ô bỏ trống = dùng mức tháng trước), không đụng các tháng khác.
+    await TARGET_DOC().set({ m: { [targetMonth]: rec } }, { mergeFields: ['m.' + targetMonth] });
+    TARGETS = null; toast('✅ Đã lưu mục tiêu'); renderTarget();
+  }catch(err){ toast('❌ ' + (err.message||err)); }
+}
+async function deleteTarget(){
+  if(!confirm('Xoá mức riêng của tháng này? Tháng này sẽ dùng mức của tháng gần nhất trước đó.')) return;
+  try{ await TARGET_DOC().update({ ['m.' + targetMonth]: firebase.firestore.FieldValue.delete() }); TARGETS = null; toast('🗑 Đã xoá'); renderTarget(); }
+  catch(err){ toast('❌ ' + (err.message||err)); }
 }
 
 // ==========================================================================

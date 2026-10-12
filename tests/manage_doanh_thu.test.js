@@ -8,8 +8,9 @@ let ok = true;
 const eq = (a, b, m) => { if (JSON.stringify(a) !== JSON.stringify(b)) { ok = false; console.log('FAIL', m, JSON.stringify(a).slice(0, 400), '!=', JSON.stringify(b).slice(0, 400)); } else console.log('ok', m); };
 
 const M = new Function(extract('manage.html', ['tcEmptySum', 'tcIsTransfer', 'tcAddOrder', 'tcSummarize', 'xoEmptySum', 'xoAddOrder', 'xoSummarize',
-  'payTermsOfRecord', 'empPayTermsOn', 'computeWageForDayHours', 'isShiftInProgress', 'shiftWorkedHours', 'laborByEmployee', 'pad', 'dkey']) +
-  '\nreturn { tcSummarize, xoSummarize, laborByEmployee };')();
+  'payTermsOfRecord', 'empPayTermsOn', 'computeWageForDayHours', 'isShiftInProgress', 'shiftWorkedHours', 'laborByEmployee', 'pad', 'dkey',
+  'parseDkey', 'addDays', 'targetMonthValue', 'daysInMonthYm', 'targetForRange', 'sharePct']) +
+  '\nreturn { tcSummarize, xoSummarize, laborByEmployee, targetMonthValue, targetForRange, sharePct };')();
 
 // Bộ sinh số giả ngẫu nhiên cố định — test lặp lại được.
 let seed = 12345; const rnd = n => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
@@ -80,6 +81,17 @@ const L = M.laborByEmployee(emps, [sh('a', '2026-10-01', '07:00', '12:00'), sh('
 eq(L.a, { hours: 10, otHours: 2, amount: 8 * 20000 + 2 * 30000 }, 'Lương: 2 ca cùng ngày gộp 10h → 2h OT; ca quên check-out ngày cũ không tính');
 eq(L.b, undefined, 'Lương: người lương cứng không tính ở đây');
 eq(L.c.amount, 2 * 20000 + 2 * 25000, 'Lương: đơn giá theo mốc lịch sử lương');
+
+// ── Mục tiêu theo tháng ──────────────────────────────────────────────────
+const TG = { '2026-08': { tc33: 3100000, all: 9300000 }, '2026-10': { tc33: 6200000, xofa: 3000000 } };
+eq(M.targetMonthValue(TG, '2026-09', 'tc33'), { value: 3100000, from: '2026-08' }, 'Mục tiêu: tháng chưa đặt dùng mức tháng gần nhất trước đó');
+eq(M.targetMonthValue(TG, '2026-10', 'all'), { value: 9300000, from: '2026-08' }, 'Mục tiêu: từng ô tự lùi riêng (tháng 10 không đặt Chung → dùng tháng 8)');
+eq(M.targetMonthValue(TG, '2026-07', 'tc33'), null, 'Mục tiêu: trước tháng đặt đầu tiên → chưa có');
+eq(M.targetForRange(TG, '2026-10-12', '2026-10-12', 'tc33'), 200000, 'Mục tiêu ngày = mục tiêu tháng ÷ số ngày tháng đó');
+eq(M.targetForRange(TG, '2026-09-29', '2026-10-02', 'tc33'), 2 * 103333 + 2 * 200000 + 1, 'Mục tiêu tuần vắt qua 2 tháng cộng theo từng ngày');
+eq(M.targetForRange(TG, '2026-10-01', '2026-10-31', 'xofa'), 3000000, 'Mục tiêu cả tháng = đúng mức tháng');
+eq(M.targetForRange(TG, '2026-07-01', '2026-07-31', 'xofa'), null, 'Mục tiêu: kỳ chưa đặt → null');
+eq([M.sharePct(1, 2), M.sharePct(0, 0), M.sharePct(5, 0)], [[33, 67], [0, 0], [100, 0]], '% đóng góp cộng lại đúng 100');
 
 // ── cham_cong.v1.js ──────────────────────────────────────────────────────
 const C = require('../cham_cong.v1.js');
