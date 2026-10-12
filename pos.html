@@ -772,6 +772,29 @@ input, button, select, textarea { font-size: 1rem; }
   #view-discount [id^="mgr-c-"] > div[style*="overflow-y:auto"] { padding: 22px 24px !important; }
 }
 </style>
+
+<!-- [12/10/2026] Hàng nút trên cùng bản PC: CỐ ĐỊNH một kiểu ở mọi màn (chủ quán: màn order co chữ thành 2 hàng,
+     màn khác 1 hàng). switchView() gán lại class nhỏ hơn bản HTML ban đầu nên kích thước nhảy theo màn — lớp này
+     ép cùng cỡ chữ / đệm, chữ không xuống dòng, nút không bị co. -->
+<style>
+@media (min-width: 768px) {
+  #header-bar-pc { gap: 20px !important; }
+  #header-bar-pc > div:has(> #btn-nav-revenue) { flex-shrink: 0; flex-wrap: nowrap; gap: 10px !important; }
+  #header-bar-pc button[id^="btn-nav-"]:not(#btn-nav-calamviec) {
+    white-space: nowrap !important; flex-shrink: 0 !important;
+    font-size: 11px !important; line-height: 1 !important; letter-spacing: .08em !important;
+    padding: 0 18px !important; height: 44px !important; border-radius: 16px !important;
+  }
+  #header-bar-pc #btn-nav-calamviec { flex-shrink: 0 !important; width: 44px !important; height: 44px !important; border-radius: 16px !important; }
+}
+/* Màn PC hẹp (máy tính bảng nhỏ, có giỏ hàng bên phải): thu đệm để vẫn nằm gọn MỘT hàng, cùng cỡ ở mọi màn. */
+@media (min-width: 768px) and (max-width: 1199px) {
+  #header-bar-pc { padding-left: 20px !important; padding-right: 20px !important; gap: 14px !important; }
+  #header-bar-pc > h2 { font-size: 30px !important; }
+  #header-bar-pc > div:has(> #btn-nav-revenue) { gap: 6px !important; }
+  #header-bar-pc button[id^="btn-nav-"]:not(#btn-nav-calamviec) { padding: 0 12px !important; letter-spacing: .04em !important; }
+}
+</style>
 </head>
 <body class="flex text-left">
    <div id="mobile-sidebar" class="fixed inset-y-0 left-0 w-[85%] max-w-[340px] bg-[#F2F2F7] shadow-[20px_0_60px_rgba(0,0,0,0.15)] transform -translate-x-full transition-transform duration-300 z-[9999] flex flex-col font-['Inter'] overflow-hidden border-r border-gray-200/50">
@@ -2730,10 +2753,17 @@ var pendingBedOrder = null;
 var activeOrderingBedId = null;
 var isCheckoutFlow = false;
 
-setInterval(() => {
+// [12/10/2026] Đồng hồ ẩn khi đang ở màn order (giỏ hàng bên phải đang hiện) để thanh trên cùng đủ chỗ —
+// chủ quán: nút bị co thành 2 hàng ở màn order. Các màn khác vẫn hiện đồng hồ.
+function _syncHeaderClock() {
     const el = document.getElementById('clock');
-    if(el) el.innerText = new Date().toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
-}, 1000);
+    if (!el) return;
+    const cart = document.getElementById('sidebar-cart');
+    const cartShown = !!(cart && cart.offsetParent !== null && getComputedStyle(cart).display !== 'none');
+    el.style.display = cartShown ? 'none' : '';
+    if (!cartShown) el.innerText = new Date().toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+}
+setInterval(_syncHeaderClock, 1000);
 
 window.onload = function() {
 
@@ -4611,6 +4641,7 @@ function updateFilterCardStyles(activeType) {
 }
 
 function switchView(v) {
+    setTimeout(_syncHeaderClock, 0);   // [12/10] ẩn/hiện đồng hồ theo màn — xem _syncHeaderClock
     var histMob = document.getElementById('view-history-mobile');
     if (histMob) histMob.classList.add('hidden');
 
