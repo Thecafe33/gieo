@@ -3444,7 +3444,7 @@ function openGiftDetail(index) {
     if (userData.total_points >= item.cost) {
         btn.disabled = false; btn.innerHTML = 'XÁC NHẬN ĐỔI NGAY';
         btn.className = "w-full py-4 rounded-2xl bg-[#006241] text-white font-bold text-sm uppercase tracking-widest shadow-lg active:scale-[0.98] transition-transform";
-        btn.onclick = () => { document.getElementById('gift-detail-modal').classList.add('hidden'); redeemGift(item.name, item.cost); };
+        btn.onclick = () => { document.getElementById('gift-detail-modal').classList.add('hidden'); redeemGift(item.name, item.cost, item._docId); };
         prog.className = "h-full bg-[#006241] rounded-full transition-all duration-500";
         msg.classList.add('hidden');
     } else {
@@ -3456,7 +3456,7 @@ function openGiftDetail(index) {
     document.getElementById('gift-detail-modal').classList.remove('hidden');
 }
 
-function redeemGift(name, cost) {
+function redeemGift(name, cost, rewardKey) {
     if(!confirm(`Đổi "${name}" với ${cost} điểm?`)) return;
     const np = (userData.total_points || 0) - cost;
     if(np < 0) return alert("Lỗi điểm");
@@ -3493,6 +3493,8 @@ function redeemGift(name, cost) {
     giftUpdate['myGifts.' + giftKey + '.time']       = giftRecord.time;
     giftUpdate['myGifts.' + giftKey + '.used']       = giftRecord.used;
     giftUpdate['myGifts.' + giftKey + '.redeemedAt'] = giftRecord.redeemedAt;
+    // [FIX 13/10] Ghi kèm mã cấu hình quà để POS áp đúng loại quà (POS đọc g.rewardKey; trước đây thiếu → POS không áp được)
+    if (rewardKey) giftUpdate['myGifts.' + giftKey + '.rewardKey'] = rewardKey;
     giftUpdate['total_points'] = firebase.firestore.FieldValue.increment(-cost);
     fstore.collection('customers').doc(curPhone).update(giftUpdate).then(() => {
         userData.total_points = np;

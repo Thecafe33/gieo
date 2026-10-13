@@ -7173,7 +7173,17 @@ function autoAddBedItems(booking) {
         return;
     }
 
+    // [FIX 13/10] Giờ bed đã được áp phiếu quà (_vKey, vd "Voucher +1h sử dụng bed") phải GIỮ lại và tính
+    // vào số giờ — trước đây bị xoá rồi thêm lại giá gốc khi mở lại lịch, phiếu vẫn bị đánh dấu đã dùng.
+    var _bedGiftHours = function(nm) {
+        return cart.reduce(function(s, c) {
+            return s + ((c._vKey && String(c._originalName || c.name || '').toLowerCase() === nm) ? (c.qty || 1) : 0);
+        }, 0);
+    };
+    var giftNormal = _bedGiftHours('1h bed'), giftExtra = _bedGiftHours('1h bed từ h5');
+
     cart = cart.filter(i => {
+        if (i._vKey) return true;
         var n = (i.name || '').toLowerCase();
         return n !== '1h bed' && n !== '1h bed từ h5';
     });
@@ -7189,13 +7199,13 @@ function autoAddBedItems(booking) {
             return;
         }
         var price = (item.priceM > 0) ? item.priceM : item.priceL;
-        var ex = cart.find(function(c) { return c.name === item.name && c.size === 'M'; });
+        var ex = cart.find(function(c) { return !c._vKey && c.name === item.name && c.size === 'M'; });
         if (ex) ex.qty++;
         else cart.push({ name: item.name, size: 'M', price: price, qty: 1 });
     };
 
-    for (var i = 0; i < hoursNormal; i++) addItem('1h bed');
-    for (var j = 0; j < hoursExtra;  j++) addItem('1h bed từ h5');
+    for (var i = giftNormal; i < hoursNormal; i++) addItem('1h bed');
+    for (var j = giftExtra;  j < hoursExtra;  j++) addItem('1h bed từ h5');
 
     // ── Voucher Bed 1h miễn phí (Hợp tác XOFA & The cafe 33) ──
     // Đã được khách tự động áp lúc đặt lịch qua App (index.html) — POS chỉ cần trừ giá tương ứng.
@@ -10496,23 +10506,56 @@ function giftVoucherAddToCart(phone, key, name, code, rewardKey) {
         }
     }
 
+    // [FIX 13/10] Không tìm được cấu hình quà → trước đây im lặng (nút vẫn "Đã thêm", lúc thanh toán
+    // phiếu bị đánh dấu ĐÃ DÙNG dù không giảm đồng nào). Nay báo rõ + bỏ phiếu khỏi bill.
+    function rewardNotFound() {
+        _giftVoucherKey = null; _giftVoucherPhone = null; renderCart();
+        if (typeof showAppModal === 'function')
+            showAppModal('Không áp được quà', 'Không tìm thấy cấu hình của quà <b>' + _escGiftTxt(name) + '</b> trong mục Quà tặng (có thể đã bị xoá / đổi tên).<br>Phiếu của khách <b>chưa bị trừ</b>.', '⚠️');
+        if (typeof scanGiftVouchers === 'function') scanGiftVouchers(phone);
+    }
+
     if (rewardKey) {
         if (_discountCache[rewardKey]) { applyReward(_discountCache[rewardKey]); }
         else { fstore.collection('rewards').doc(rewardKey).get().then(function(doc) {
-            var r = doc.exists ? doc.data() : null; if (r) _discountCache[rewardKey] = r; applyReward(r);
+            var r = doc.exists ? doc.data() : null;
+            if (r) { _discountCache[rewardKey] = r; applyReward(r); }
+            else { var f = _findRewardForGift(_discountCache, code, name); f ? applyReward(f.r) : rewardNotFound(); }
         }); }
     } else {
-        var codeUp = (code || '').toUpperCase().trim(), found = null;
-        Object.keys(_discountCache).forEach(function(k) {
-            if (!found && _discountCache[k].code && _discountCache[k].code.toUpperCase().trim() === codeUp) found = _discountCache[k];
-        });
-        if (found) { applyReward(found); }
-        else { fstore.collection('rewards').where('code', '==', codeUp).limit(1).get().then(function(snap) {
-            var r2 = null;
-            if (!snap.empty) r2 = snap.docs[0].data();
-            applyReward(r2);
-        }); }
+        // [FIX 13/10] Phiếu đổi trên App (index.html) không có rewardKey và mang mã riêng TC33-xxxx
+        // (không phải mã của quà) → tìm theo mã trước, không thấy thì theo TÊN quà.
+        var found = _findRewardForGift(_discountCache, code, name);
+        if (found) { applyReward(found.r); }
+        else { fstore.collection('rewards').where('code', '==', (code || '').toUpperCase().trim()).limit(1).get().then(function(snap) {
+            if (!snap.empty) applyReward(snap.docs[0].data()); else rewardNotFound();
+        }).catch(rewardNotFound); }
     }
+}
+
+function _escGiftTxt(x) {
+    return String(x == null ? '' : x).replace(/[&<>\u0022\u0027]/g, function(c) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; });
+}
+
+/** [FIX 13/10] Tìm cấu hình quà (collection rewards) cho 1 phiếu của khách: theo mã quà, rồi theo tên
+ *  (label / name, không phân biệt hoa thường, bỏ khoảng trắng thừa). Trùng tên → ưu tiên quà đang BẬT. */
+function _findRewardForGift(cache, code, name) {
+    var keys = Object.keys(cache || {});
+    var codeUp = (code || '').toUpperCase().trim();
+    if (codeUp) {
+        for (var i = 0; i < keys.length; i++) {
+            var c = cache[keys[i]];
+            if (c && c.code && String(c.code).toUpperCase().trim() === codeUp) return { key: keys[i], r: c };
+        }
+    }
+    var norm = function(x) { return String(x || '').toLowerCase().replace(/\s+/g, ' ').trim(); };
+    var nm = norm(name);
+    if (!nm) return null;
+    var hits = keys.filter(function(k) { var c = cache[k]; return c && (norm(c.label) === nm || norm(c.name) === nm); });
+    if (!hits.length) return null;
+    var on = hits.filter(function(k) { return cache[k].active !== false; });
+    var k0 = (on.length ? on : hits)[0];
+    return { key: k0, r: cache[k0] };
 }
 
 function openPickCartModal(reward, vKey, vCode, vName) {
