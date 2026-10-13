@@ -3048,8 +3048,13 @@ function handleBooking() {
              let until = storeStatus.offUntil ? new Date(storeStatus.offUntil) : null;
              if (until && now < until) {
                  clearTimeout(safetyTimer); loading.classList.add('hidden');
-                 const timeStr = until.toLocaleTimeString('vi-VN', {hour: '2-digit', minute:'2-digit'});
-                 showAppModal("Bed đang tạm ngưng", `<span class="text-red-500 font-bold">${storeStatus.reason || "Bảo trì"}</span><br>Vui lòng quay lại sau <b>${timeStr}</b> nhé!`, "🛑");
+                 // [FIX 13/10] Trước chỉ hiện GIỜ mở lại → khách không biết ngày nào. Nay: Lý do + thứ/ngày/giờ (giờ VN).
+                 const _esc = (x) => String(x == null ? '' : x).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+                 showAppModal("Bed đang tạm ngưng",
+                     `<div style="text-align:left;display:inline-block;line-height:1.7;">`
+                     + `<div><span class="text-gray-400 font-bold">Lý do:</span> <span class="text-red-500 font-bold">${_esc(storeStatus.reason || "Bảo trì")}</span></div>`
+                     + `<div><span class="text-gray-400 font-bold">Mở lại:</span> <b>${_storeReopenTextVN(until, now)}</b></div>`
+                     + `</div><br>Bạn vui lòng đặt lịch sau thời gian này nhé!`, "🛑");
                  return;
              }
         }
@@ -3559,6 +3564,19 @@ async function saveVoucherImage() {
 }
 
 // --- KHO QUÀ: XEM DANH SÁCH QUÀ ĐÃ ĐỔI ---
+
+// [FIX 13/10] Thời điểm mở lại bed sau tạm ngưng, theo giờ Việt Nam:
+// "10:00 · Thứ Tư, 15/10/2026 (ngày mai)". offUntil do POS lưu dạng ISO (UTC).
+function _storeReopenTextVN(until, now) {
+    var VN = 7 * 3600000;
+    var u = new Date(until.getTime() + VN), n = new Date((now || new Date()).getTime() + VN); // đọc bằng getUTC* = giờ VN
+    var p2 = function (x) { return (x < 10 ? '0' : '') + x; };
+    var THU = ['Chủ Nhật', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy'];
+    var dayDiff = Math.round((Date.UTC(u.getUTCFullYear(), u.getUTCMonth(), u.getUTCDate()) - Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate())) / 86400000);
+    var rel = dayDiff <= 0 ? 'hôm nay' : dayDiff === 1 ? 'ngày mai' : dayDiff === 2 ? 'ngày kia' : 'còn ' + dayDiff + ' ngày';
+    return p2(u.getUTCHours()) + ':' + p2(u.getUTCMinutes()) + ' · ' + THU[u.getUTCDay()] + ', '
+        + p2(u.getUTCDate()) + '/' + p2(u.getUTCMonth() + 1) + '/' + u.getUTCFullYear() + ' (' + rel + ')';
+}
 
 // --- HÀM XEM LỊCH SỬ ĐẶT BED (ĐÃ SỬA: LẤY TỪ FIREBASE) ---
 // --- HÀM XEM LỊCH SỬ (ĐÃ FIX LỖI ẨN ĐƠN) ---
