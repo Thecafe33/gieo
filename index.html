@@ -2084,6 +2084,10 @@ function submitRegister() {
 // ════════════════════════════════════════════════════
 var _BD_DAYS = 7;
 function _bdP2(x) { return (x < 10 ? '0' : '') + x; }
+// [FIX 13/10] "Hôm nay" theo giờ Việt Nam (UTC+7), không phụ thuộc múi giờ máy khách.
+// Trước dùng toISOString() = ngày UTC → 0:00–7:00 sáng VN bị lùi về hôm qua.
+function _vnTodayParts(nowMs) { var d = new Date((nowMs == null ? Date.now() : nowMs) + 7 * 3600000); return [d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()]; }
+function _vnTodayYmd(nowMs) { var t = _vnTodayParts(nowMs); return t[0] + '-' + (t[1] < 9 ? '0' : '') + (t[1] + 1) + '-' + (t[2] < 10 ? '0' : '') + t[2]; }
 function _bdYmd(d) { return d.getFullYear() + '-' + _bdP2(d.getMonth() + 1) + '-' + _bdP2(d.getDate()); }
 function _bdMin(hhmm) { var p = String(hhmm || '').split(':'); if (p.length < 2 || p[0] === '') return null; return parseInt(p[0], 10) * 60 + parseInt(p[1], 10); }
 function _bdHm(min) { min = ((min % 1440) + 1440) % 1440; return _bdP2(Math.floor(min / 60)) + ':' + _bdP2(min % 60); }
@@ -2102,9 +2106,9 @@ function _bdRenderChips() {
     var box = document.getElementById('bd-chips'), other = document.getElementById('bd-other'), inp = document.getElementById('book-date');
     if (!box || !other || !inp) return;
     box.querySelectorAll('.bd-day').forEach(function (e) { e.remove(); });
-    var THU = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'], now = new Date(), hit = false;
+    var THU = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'], t0 = _vnTodayParts(), hit = false;
     for (var i = 0; i < _BD_DAYS; i++) {
-        var d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + i), ymd = _bdYmd(d);
+        var d = new Date(t0[0], t0[1], t0[2] + i), ymd = _bdYmd(d);
         var b = document.createElement('button');
         b.type = 'button'; b.className = 'bd-chip bd-day' + (inp.value === ymd ? ' on' : ''); b.dataset.ymd = ymd;
         b.innerHTML = '<span class="bd-t">' + (i === 0 ? 'Hôm nay' : i === 1 ? 'Mai' : THU[d.getDay()]) + '</span><b class="bd-n">' + d.getDate() + '</b>';
@@ -2191,7 +2195,7 @@ function _bdSync() {
 
 // --- 2. LOGIC CHUNG ---
 window.onload = function() {
-    const today = new Date().toISOString().split('T')[0];
+    const today = _vnTodayYmd();
     document.getElementById('book-date').setAttribute('min', today);
     document.getElementById('book-date').value = today; // [MỚI] điền sẵn ngày hôm nay, đỡ 1 bước nhập
     if(curPhone) showDashboard(curPhone);
@@ -3395,7 +3399,7 @@ function handleBooking() {
                             setGuestCount(1);
 
                             showBookingSuccessModal(startVal, endVal, function() {
-                                document.getElementById('book-date').value = new Date().toISOString().split('T')[0];
+                                document.getElementById('book-date').value = _vnTodayYmd();
                                 showTab('user');
                             });
                         }).catch(function(e){ clearTimeout(safetyTimer); loading.classList.add('hidden'); alert('Lỗi: '+e.message); });
@@ -4352,7 +4356,7 @@ function showReschedule(key, dateYMD) {
         document.getElementById('re-start').value = booking.start || '';
         document.getElementById('re-end').value   = booking.end   || '';
 
-        var today = new Date().toISOString().split('T')[0];
+        var today = _vnTodayYmd();
         document.getElementById('re-date').setAttribute('min', today);
 
         var hint = document.getElementById('reschedule-hint');
@@ -4406,7 +4410,7 @@ function openRescheduleModal(key) {
         document.getElementById('re-start').value = booking.start || cached.start;
         document.getElementById('re-end').value = booking.end || cached.end;
 
-        const today = new Date().toISOString().split('T')[0];
+        const today = _vnTodayYmd();
         document.getElementById('re-date').setAttribute('min', today);
 
         const hint = document.getElementById('reschedule-hint');
