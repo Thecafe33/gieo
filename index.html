@@ -1033,6 +1033,10 @@ input[type="checkbox"]:checked::after{
     background:radial-gradient(ellipse 130% 75% at 50% 26%,#0a4434 0%,#06281f 42%,#03150f 78%,#010b08 100%);padding:max(26px,env(safe-area-inset-top)) 28px max(22px,env(safe-area-inset-bottom))}
   #login-screen.hidden{display:none!important}
   #login-screen *{box-sizing:border-box}
+  /* body có pb-32 (chừa thanh menu dưới) + nền trắng → lộ dải trắng dưới màn đăng nhập. Chỉ khi màn này đang hiện: bỏ đệm, nền tối. */
+  body:has(#login-screen:not(.hidden)){padding-bottom:0!important;background:#010b08!important}
+  html:has(#login-screen:not(.hidden)){background:#010b08}
+  body.lc-on{padding-bottom:0!important;background:#010b08!important}
   /* aurora cũ — nhạt hơn */
   /* chiều sâu: viền tối dần (vignette) phủ lên nền + sao, dưới nội dung */
   #login-screen:after{content:'';position:absolute;inset:0;z-index:0;pointer-events:none;background:radial-gradient(ellipse 85% 70% at 50% 40%,transparent 45%,rgba(0,6,4,.55) 80%,rgba(0,4,3,.85) 100%)}
@@ -1134,6 +1138,11 @@ input[type="checkbox"]:checked::after{
       <p class="lc-footer">The cafe 33 × XOFA</p>
     </div>
     <script>
+    (function () { // dự phòng :has — body.lc-on khi màn đăng nhập đang hiện
+      var ls = document.getElementById('login-screen'); if (!ls || !window.MutationObserver) return;
+      var sync = function () { document.body && document.body.classList.toggle('lc-on', !ls.classList.contains('hidden')); };
+      sync(); new MutationObserver(sync).observe(ls, { attributes: true, attributeFilter: ['class'] });
+    })();
     (function () { // sao lấp lánh: vị trí / cỡ / nhịp ngẫu nhiên, chỉ dựng 1 lần
       var box = document.getElementById('lc-stars'); if (!box) return;
       var html = '';
