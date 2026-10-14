@@ -2092,7 +2092,7 @@ luv u</textarea>
                 <h3 class="text-white text-xl font-bold tracking-wide">Chọn Giường</h3>
                 <p class="text-green-100/80 text-sm mt-0.5">Vui lòng chọn vị trí còn trống</p>
             </div>
-            <button onclick="document.getElementById('bed-select-modal').classList.add('hidden')"
+            <button onclick="closeBedSelectModal()"
                 class="relative z-10 w-8 h-8 rounded-full bg-black/20 flex items-center justify-center text-white hover:bg-black/30 transition backdrop-blur-md">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" /></svg>
             </button>
@@ -2753,6 +2753,7 @@ var currentBedList = [];
 var selectedBedIndex = -1;
 var bedCountdownInterval = null;
 var pendingBedOrder = null;
+var _bedPayPending = null; // [FIX 14/10] đơn đã thu, chờ chọn bed mới lưu (saveOrderToFirebase → finalizeBedCheckIn)
 var activeOrderingBedId = null;
 var isCheckoutFlow = false;
 
@@ -5754,6 +5755,24 @@ function finalizeBedCheckIn(bedId) {
     document.getElementById('bed-select-modal').classList.add('hidden');
     document.getElementById('loading-overlay').style.display = 'flex';
 
+    // [FIX 14/10] Đơn đã thu đang chờ bed → lưu đơn (kèm số bed) trước, lưu xong mới active bed.
+    var _pay = (_bedPayPending && _bedPayPending.bookingId === bookingId) ? _bedPayPending : null;
+    if (_pay) {
+        _pay.orderData.bedId = bedId;
+        _pushPaidOrder(_pay.orderData, _pay.finalSdt, pendingBedOrder, false, function (err) {
+            if (err) {
+                document.getElementById('loading-overlay').style.display = 'none';
+                document.getElementById('bed-select-modal').classList.remove('hidden');
+                return;
+            }
+            _bedPayPending = null;
+            _activateBed();
+        });
+        return;
+    }
+    _activateBed();
+
+    function _activateBed() {
     _updateBedBooking(pendingBedOrder, {
         status: 'active',
         bedId: bedId,
@@ -5786,6 +5805,16 @@ function finalizeBedCheckIn(bedId) {
             alert("Lỗi Firebase: " + err.message);
         }
     });
+    }
+}
+
+// [FIX 14/10] Đóng bảng Chọn Giường khi đơn đã thu đang chờ bed = bỏ đơn đó (chưa lưu gì); giỏ giữ nguyên để thanh toán lại.
+function closeBedSelectModal() {
+    if (_bedPayPending) {
+        if (!confirm("Đơn này CHƯA ĐƯỢC LƯU — phải chọn bed thì đơn mới lưu.\n\nVẫn đóng? (giỏ hàng giữ nguyên, bấm thanh toán lại để chọn bed)")) return;
+        _bedPayPending = null;
+    }
+    document.getElementById('bed-select-modal').classList.add('hidden');
 }
 function openBookingModal() { var _ost=document.getElementById('override_start_time'); if(_ost) _ost.value=''; document.getElementById('modal-add-booking').classList.remove('hidden'); document.getElementById('new_cust_name').value = "Khách vãng lai"; document.getElementById('new_cust_phone').value = ""; document.getElementById('new_cust_phone').focus(); switchTimeMode('duration');
         if (typeof syncToCustomerDisplay === 'function') {
@@ -7732,10 +7761,29 @@ function saveOrderToFirebase(method) {
         customerName: finalCustName
     };
 
+    // [FIX 14/10] Lịch chưa có bed: tiền đã thu nhưng CHƯA lưu đơn — mở Chọn Giường trước.
+    // Chọn bed → finalizeBedCheckIn lưu đơn (kèm số bed) rồi mới active bed. Văng app / đóng bảng
+    // trước khi chọn bed = đơn chưa lưu (không trừ quà, không cộng điểm) → mở lịch thanh toán lại, không thu 2 lần.
+    if (!isCheckout && currentBooking && (currentBooking.bedId === "WAITING" || !currentBooking.bedId)) {
+        isSavingOrder = false;
+        if (document.getElementById('qr-modal')) document.getElementById('qr-modal').classList.add('hidden');
+        _bedPayPending = { bookingId: currentBooking.id || currentBooking.key, orderData: orderData, finalSdt: finalSdt };
+        renderBedSelection();
+        document.getElementById('bed-select-modal').classList.remove('hidden');
+        return;
+    }
+    _pushPaidOrder(orderData, finalSdt, currentBooking, isCheckout, null);
+}
+
+// Lưu đơn đã thu + các bước sau thanh toán. done(err) có = đơn đi kèm bước xếp bed (finalizeBedCheckIn lo phần còn lại).
+function _pushPaidOrder(orderData, finalSdt, currentBooking, isCheckout, done) {
+    const currentTotal = orderData.total;
+    isSavingOrder = true;
     getOrdersRef().push(orderData, (error) => {
         isSavingOrder = false;
         if (error) {
             alert("❌ Lỗi lưu đơn: " + error.message);
+            if (done) done(error);
         } else {
 
             // ── Cộng điểm vào customers/ ──
@@ -7768,6 +7816,8 @@ function saveOrderToFirebase(method) {
             resetDiscountState(true);
             if(document.getElementById('qr-modal')) document.getElementById('qr-modal').classList.add('hidden');
 
+            if (done) { done(null); return; }
+
             if (isCheckout && currentBooking) {
                 syncToCustomerDisplay('success');
 
@@ -7777,12 +7827,6 @@ function saveOrderToFirebase(method) {
                 resetOrderingMode();
                 openBedManager();
                 setTimeout(() => showAppModal("Hoàn tất", "Đã thanh toán và TRẢ BED thành công!", "🏁"), 300);
-            }
-
-            else if (currentBooking && (currentBooking.bedId === "WAITING" || !currentBooking.bedId)) {
-                renderBedSelection();
-                document.getElementById('bed-select-modal').classList.remove('hidden');
-
             }
 
             else {
@@ -12043,7 +12087,7 @@ window.addEventListener('popstate', function(event) {
 
     const bedSelect = document.getElementById('bed-select-modal');
     if (bedSelect && !bedSelect.classList.contains('hidden')) {
-        bedSelect.classList.add('hidden');
+        closeBedSelectModal();
         return;
     }
 
