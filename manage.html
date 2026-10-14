@@ -1731,6 +1731,45 @@ html.tab-ui:not(.nav-off) .sidebar{background:#F2F2F7;border-right:1px solid rgb
 .kcard.kcard-wide .mg-pace{color:rgba(255,255,255,.8);}
 @media (max-width:380px){ .mg-big{font-size:20px;} .mg-store{padding:12px 10px 8px;} .mg-l{font-size:12.5px;} }
 html.tab-ui .mg-big{font-size:30px;}
+/* [14/10] Dashboard Doanh thu — thẻ quán dạng mới, tối ưu PC */
+.sc-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:14px;align-items:stretch;margin-bottom:6px;}
+.sc{background:var(--card);border-radius:var(--r-lg);box-shadow:var(--sh-2);padding:16px 16px 14px;min-width:0;display:flex;flex-direction:column;}
+.sc-h{display:flex;align-items:center;gap:8px;font-size:15px;}
+.sc-h b{font-weight:750;}
+.sc-share{margin-left:auto;font-size:12px;font-weight:750;border-radius:999px;padding:3px 9px;white-space:nowrap;}
+.sc-num{display:flex;align-items:flex-end;justify-content:space-between;gap:10px;margin-top:10px;}
+.sc-big{font-size:28px;font-weight:780;letter-spacing:-.02em;line-height:1.05;color:var(--c);font-variant-numeric:tabular-nums;}
+.sc-lab{font-size:11.5px;font-weight:700;color:var(--gt);text-transform:uppercase;letter-spacing:.06em;margin-top:4px;}
+.sc-so{text-align:right;flex-shrink:0;border-radius:12px;padding:5px 9px;}
+.sc-so b{display:block;font-size:14px;font-weight:750;font-variant-numeric:tabular-nums;}
+.sc-so span{font-size:11px;font-weight:600;opacity:.8;}
+.sc-so.up{background:#E6F4EC;color:var(--ok);} .sc-so.down{background:#FDECEC;color:var(--bad);}
+.sc .mg-tgt{margin-top:12px;}
+.sc-sec{font-size:11px;font-weight:750;color:var(--ink-4);text-transform:uppercase;letter-spacing:.07em;margin:14px 0 6px;}
+.sc-bar{display:flex;height:9px;border-radius:99px;overflow:hidden;background:var(--fill);gap:2px;}
+.sc-bar span{display:block;height:100%;min-width:3px;}
+.sc-kv{display:grid;gap:10px;margin-top:8px;}
+.sc-kv div{min-width:0;}
+.sc-kv span{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.sc-kv i{width:8px;height:8px;border-radius:2px;flex-shrink:0;}
+.sc-kv b{display:block;font-size:15px;font-weight:720;font-variant-numeric:tabular-nums;white-space:nowrap;margin-top:1px;padding-left:14px;}
+.sc-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(74px,1fr));gap:8px;margin-top:12px;}
+.sc-tile{background:#F5F4F1;border-radius:12px;padding:8px 10px;min-width:0;}
+.sc-tile span{display:block;font-size:11px;font-weight:700;color:var(--gt);text-transform:uppercase;letter-spacing:.05em;}
+.sc-tile b{display:block;font-size:16px;font-weight:750;font-variant-numeric:tabular-nums;margin-top:2px;white-space:nowrap;}
+.sc-tile small{display:block;font-size:11.5px;color:var(--ink-2);font-weight:600;margin-top:1px;line-height:1.35;}
+.sc-tile.food{background:#FFF8E7;}
+.mg-bottom{display:block;}
+html.tab-ui .sc-row{gap:18px;}
+html.tab-ui .sc{padding:20px 22px 18px;border-radius:var(--r-xl);}
+html.tab-ui .sc-big{font-size:34px;}
+@media (min-width:1500px){ html.tab-ui .mg-bottom.two{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:18px;align-items:start;} } /* màn rộng: biểu đồ | bảng (cột bảng = bề rộng bảng); hẹp hơn: xếp chồng */
+@media (min-width:1500px){ html.tab-ui .mg-bottom.two .mg-daily{max-height:420px;overflow:auto;} }
+html.tab-ui .mg-daily thead th{position:sticky;top:0;background:var(--card);}
+.mg-daily{padding:10px 14px !important;}
+.mg-daily .kt{width:100%;}
+.mg-daily .kt th,.mg-daily .kt td{padding:9px 8px;white-space:nowrap;font-size:13.5px;}
+.mg-daily .kt th{font-size:11px;}
 </style>
 </head>
 <body>
@@ -2405,8 +2444,8 @@ function revBuckets(r){
   return Object.values(by);
 }
 const SERIES = [{ k:'tc', name:'The Cafe 33', color:'var(--tc33)' }, { k:'xo', name:'XOFA', color:'var(--xofa)' }, { k:'gg', name:'Gieo Gieo', color:'var(--gieo)' }];
-function revChartSvg(buckets){
-  const W = isTabletUiOn() ? 900 : 380, H = 200, pl = 34, pr = 6, pt = 14, pb = 26;
+function revChartSvg(buckets, narrow){
+  const W = isTabletUiOn() ? (narrow ? 620 : 900) : 380, H = 200, pl = 34, pr = 6, pt = 14, pb = 26;
   const cw = W - pl - pr, ch = H - pt - pb;
   const max = Math.max(1, ...buckets.map(b => Math.max(b.tc, b.xo, b.gg || 0)));
   const step = cw / Math.max(1, buckets.length);
@@ -2474,20 +2513,33 @@ function drawRev(r){
   const seg = ['day','yesterday','week','month','year','custom'].map(m=>`<button class="${r.mode===m?'active':''}" onclick="revSetMode('${m}')">${label[m]}</button>`).join('');
   const buckets = revBuckets(r);
   const daily = keys.filter(k => k <= today).slice().reverse();
+  // [14/10] Thẻ quán dạng mới (chủ dự án: tối ưu PC). Giữ đủ mọi con số cũ, chỉ đổi cách trình bày:
+  //   số lớn + chip so hôm qua · mục tiêu (tgtBlock cũ) · thanh tỉ lệ (nhóm món / hình thức / thanh toán) · ô số nhỏ.
+  const scBar = items => {
+    const tot = items.reduce((a, i)=> a + (i.v || 0), 0);
+    return `<div class="sc-bar">${tot > 0 ? items.map(i=>`<span style="flex:${i.v || 0} 1 0;background:${i.c}"></span>`).join('') : ''}</div>
+      <div class="sc-kv" style="grid-template-columns:repeat(${items.length},minmax(0,1fr))">${items.map(i=>`<div><span><i style="background:${i.c}"></i>${i.l}</span><b>${fmtN(i.v)}</b></div>`).join('')}</div>`;
+  };
+  const scSo = (cur, prevSum, pick)=>{
+    if(!(oneDay && prevSum)) return '';
+    const v = cur - pick(prevSum);
+    return `<div class="sc-so ${v >= 0 ? 'up' : 'down'}"><b>${v >= 0 ? '▲' : '▼'} ${fmtN(Math.abs(v))}</b><span>${soLabel.toLowerCase()}</span></div>`;
+  };
+  const scTile = (l, v, sub)=> `<div class="sc-tile"><span>${l}</span><b>${v}</b>${sub ? `<small>${sub}</small>` : ''}</div>`;
+  const scCard = o => `<div class="sc" style="--c:${o.c}">
+      <div class="sc-h"><span class="mg-dot" style="background:${o.c}"></span><b>${o.name}</b>${o.tag || ''}<span class="sc-share" style="background:${o.pctBg};color:${o.pctFg}">Góp ${o.pct}%</span></div>
+      <div class="sc-num"><div><div class="sc-big">${fmtN(o.big)}</div><div class="sc-lab">${o.bigLab}</div></div>${o.so}</div>
+      <div class="sc-tiles">${o.tiles.join('')}</div>
+      ${o.tgt}
+      ${o.secs.map(x=>`<div class="sc-sec">${x.t}</div>${scBar(x.items)}`).join('')}
+    </div>`;
   const ggCards = G.map((x, n)=>{ const s = x.sum; const pct = pcts[2 + n]; const col = GIEO_COLORS[x.i % GIEO_COLORS.length];
-    return `<div class="mg-store">
-      <div class="mg-store-h"><span class="mg-dot" style="background:${col}"></span>${esc(gieoLabel(x.s, many))}${x.s.active ? '' : ' <span class="tier" style="background:var(--fill);color:var(--gt)">đã ngừng</span>'}</div>
-      <div class="mg-big" style="color:${col}">${fmtN(s.revenue)}</div>
-      <div class="mg-biglab">Doanh thu</div>
-      <span class="mg-pct" style="background:#FCE7EC;color:#B7284A">Góp ${pct}% tổng</span>
-      ${tgtBlock(s.revenue, ggTg, r, '<div class="mg-tgt"><div class="mg-tgt-l"><span>Không đọc được mục tiêu của Quản lý Gieo</span></div></div>')}
-      <div class="mg-sub">Thanh toán</div>
-      <div class="mg-l"><span>Tiền mặt</span><span>${fmtN(s.cash + s.foodCash)}</span></div>
-      <div class="mg-l"><span>Chuyển khoản</span><span>${fmtN(s.bank + s.foodBank)}</span></div>
-      ${s.food > 0 ? `<div class="mg-l"><span>Trong đó Food</span><span>${fmtN(s.food)}</span></div>` : ''}
-      <div class="mg-l"><span>Số bill</span><span>${fmtN(s.count)}</span></div>
-      ${soRow(s.revenue, D('gg_' + x.s.id, yk), p=>p.revenue)}
-    </div>`; }).join('');
+    return scCard({ c: col, name: esc(gieoLabel(x.s, many)), pct, pctBg:'#FCE7EC', pctFg:'#B7284A',
+      tag: x.s.active ? '' : ' <span class="tier" style="background:var(--fill);color:var(--gt)">đã ngừng</span>',
+      big: s.revenue, bigLab: 'Doanh thu', so: scSo(s.revenue, D('gg_' + x.s.id, yk), p=>p.revenue),
+      tgt: tgtBlock(s.revenue, ggTg, r, '<div class="mg-tgt"><div class="mg-tgt-l"><span>Không đọc được mục tiêu của Quản lý Gieo</span></div></div>'),
+      secs: [{ t:'Thanh toán', items:[{ l:'Tiền mặt', v: s.cash + s.foodCash, c: col }, { l:'Chuyển khoản', v: s.bank + s.foodBank, c:'#F4A9B9' }] }],
+      tiles: [scTile('Số bill', fmtN(s.count))].concat(s.food > 0 ? [scTile('Trong đó Food', fmtN(s.food))] : []) }); }).join('');
   body.innerHTML = `
     <div class="seg">${seg}</div>
     ${r.mode === 'custom' ? `<div class="mg-range">
@@ -2510,59 +2562,37 @@ function drawRev(r){
         return `<div class="mg-pace" style="margin-top:8px">Cộng mục tiêu từng quán: <b style="color:#fff">${fmtGon(t.v)}</b> · đạt ${Math.round(chung / t.v * 100)}%${t.thieu.length ? ' — chưa có mục tiêu: ' + esc(t.thieu.join(', ')) : ''}</div>`; })()}
     </div>
 
-    <div class="mg-cols">
-      <div class="mg-store">
-        <div class="mg-store-h"><span class="mg-dot" style="background:var(--tc33)"></span>The Cafe 33</div>
-        <div class="mg-big" style="color:var(--tc33)">${fmtN(tcNuoc)}</div>
-        <div class="mg-biglab">Tổng nước</div>
-        <span class="mg-pct" style="background:#E6F2EC;color:#004D33">Góp ${pctTc}% tổng</span>
-        ${tgtBlock(tcNuoc, tgTc, r)}
-        <div class="mg-sub">Theo nhóm món</div>
-        <div class="mg-l"><span>Đồ uống</span><span>${fmtN(T.drink)}</span></div>
-        <div class="mg-l"><span>Khác</span><span>${fmtN(T.khac)}</span></div>
-        <div class="mg-l"><span>Ăn vặt</span><span>${fmtN(T.snack)}</span></div>
-        <div class="mg-sub">Thanh toán</div>
-        <div class="mg-l"><span>Tiền mặt</span><span>${fmtN(T.cash)}</span></div>
-        <div class="mg-l"><span>Chuyển khoản</span><span>${fmtN(T.transfer)}</span></div>
-        <div class="mg-l"><span>Số đơn</span><span>${fmtN(T.count)}</span></div>
-        ${soRow(T.total, D('tc33', yk), p=>p.total)}
-      </div>
-      <div class="mg-store">
-        <div class="mg-store-h"><span class="mg-dot" style="background:var(--xofa)"></span>XOFA</div>
-        <div class="mg-big" style="color:var(--xofa)">${fmtN(X.total)}</div>
-        <div class="mg-biglab">Tổng (không gồm Food)</div>
-        <span class="mg-pct" style="background:#E7EEFC;color:#2B57A8">Góp ${pctXo}% tổng</span>
-        ${tgtBlock(X.total, tgXo, r)}
-        <div class="mg-sub">Theo hình thức</div>
-        <div class="mg-l"><span>Tại quán</span><span>${fmtN(X.instore)}</span></div>
-        <div class="mg-l"><span>To Go</span><span>${fmtN(X.togo)}</span></div>
-        <div class="mg-sub">Thanh toán</div>
-        <div class="mg-l"><span>Tiền mặt</span><span>${fmtN(X.cash)}</span></div>
-        <div class="mg-l"><span>Chuyển khoản</span><span>${fmtN(X.bank)}</span></div>
-        <div class="mg-l"><span>Số đơn</span><span>${fmtN(X.count)}</span></div>
-        <div class="mg-l"><span>Đơn ship</span><span>${fmtN(X.ship)} · ${fmtN(X.shipRev)}</span></div>
-        ${soRow(X.total, D('xofa', yk), p=>p.total)}
-        <div class="mg-food"><!-- [14/10] gọn 3 dòng → 1 dòng + dòng phụ thanh toán -->
-          <div class="mg-l"><span><b>Food</b></span><span>${fmtN(X.food)}</span></div>
-          <div class="mg-food-pay">Tiền mặt ${fmtN(X.foodCash)} · Chuyển khoản ${fmtN(X.foodBank)}</div>
+    <div class="sc-row">
+      ${scCard({ c:'var(--tc33)', name:'The Cafe 33', pct: pctTc, pctBg:'#E6F2EC', pctFg:'#004D33',
+        big: tcNuoc, bigLab:'Tổng nước', so: scSo(T.total, D('tc33', yk), p=>p.total), tgt: tgtBlock(tcNuoc, tgTc, r),
+        secs: [{ t:'Theo nhóm món', items:[{ l:'Đồ uống', v:T.drink, c:'#006241' }, { l:'Khác', v:T.khac, c:'#4FA383' }, { l:'Ăn vặt', v:T.snack, c:'#B5DCCB' }] },
+               { t:'Thanh toán', items:[{ l:'Tiền mặt', v:T.cash, c:'#006241' }, { l:'Chuyển khoản', v:T.transfer, c:'#9CCFBA' }] }],
+        tiles: [scTile('Số đơn', fmtN(T.count))] })}
+      ${scCard({ c:'var(--xofa)', name:'XOFA', pct: pctXo, pctBg:'#E7EEFC', pctFg:'#2B57A8',
+        big: X.total, bigLab:'Tổng (không gồm Food)', so: scSo(X.total, D('xofa', yk), p=>p.total), tgt: tgtBlock(X.total, tgXo, r),
+        secs: [{ t:'Theo hình thức', items:[{ l:'Tại quán', v:X.instore, c:'#2B57A8' }, { l:'To Go', v:X.togo, c:'#9DB5E3' }] },
+               { t:'Thanh toán', items:[{ l:'Tiền mặt', v:X.cash, c:'#2B57A8' }, { l:'Chuyển khoản', v:X.bank, c:'#9DB5E3' }] }],
+        tiles: [scTile('Số đơn', fmtN(X.count)), scTile('Đơn ship', fmtN(X.ship) + ' đơn', fmtN(X.shipRev)),
+                `<div class="sc-tile food"><span>Food</span><b>${fmtN(X.food)}</b><small>TM ${fmtN(X.foodCash)}<br>CK ${fmtN(X.foodBank)}</small></div>`] })}
+      ${ggCards}
+    </div>
+
+    <div class="mg-bottom ${daily.length > 1 ? 'two' : ''}">
+      <div class="mg-bottom-c">
+        <div class="sec-title">Biểu đồ ${r.from === r.to ? 'theo khung giờ' : (buckets.length > 31 || keys.length > 31 ? 'theo tháng' : 'theo ngày')}</div>
+        <div class="card">
+          <div class="mg-legend"><span><span class="mg-dot" style="background:var(--tc33)"></span>The Cafe 33 · Tổng nước</span><span><span class="mg-dot" style="background:var(--xofa)"></span>XOFA · không gồm Food</span><span><span class="mg-dot" style="background:var(--gieo)"></span>Gieo Gieo${many ? ' (mọi cửa hàng)' : ''}</span></div>
+          ${revChartSvg(buckets, daily.length > 1 && window.innerWidth >= 1500)}
         </div>
       </div>
+      ${daily.length > 1 ? `<div class="mg-bottom-c"><div class="sec-title">Từng ngày</div>
+      <div class="card mg-scroll mg-daily"><table class="kt">
+        <thead><tr><th>Ngày</th><th style="text-align:right">TC33 · nước</th><th style="text-align:right">XOFA</th><th style="text-align:right">Gieo</th><th style="text-align:right">Chung</th></tr></thead>
+        <tbody>${daily.map(k=>{ const t = D('tc33', k) || tcEmptySum(), x = D('xofa', k) || xoEmptySum();
+          const g = G.reduce((a, y)=> a + (D('gg_' + y.s.id, k) ? D('gg_' + y.s.id, k).revenue : 0), 0);
+          return `<tr><td>${fmtDateVN(parseDkey(k)).slice(0,5)}</td><td style="text-align:right">${fmtN(t.drink+t.khac)}</td><td style="text-align:right">${fmtN(x.total)}</td><td style="text-align:right">${fmtN(g)}</td><td style="text-align:right"><b>${fmtN(t.drink+t.khac+x.total+g)}</b></td></tr>`; }).join('')}</tbody>
+      </table></div></div>` : ''}
     </div>
-    ${G.length ? `<div class="sec-title">Gieo Gieo${many ? ` · ${G.length} cửa hàng` : ''}</div><div class="mg-cols ${G.length === 1 ? 'mg-one' : ''}">${ggCards}</div>` : ''}
-
-    <div class="sec-title">Biểu đồ ${r.from === r.to ? 'theo khung giờ' : (buckets.length > 31 || keys.length > 31 ? 'theo tháng' : 'theo ngày')}</div>
-    <div class="card">
-      <div class="mg-legend"><span><span class="mg-dot" style="background:var(--tc33)"></span>The Cafe 33 · Tổng nước</span><span><span class="mg-dot" style="background:var(--xofa)"></span>XOFA · không gồm Food</span><span><span class="mg-dot" style="background:var(--gieo)"></span>Gieo Gieo${many ? ' (mọi cửa hàng)' : ''}</span></div>
-      ${revChartSvg(buckets)}
-    </div>
-
-    ${daily.length > 1 ? `<div class="sec-title">Từng ngày</div>
-    <div class="card mg-scroll"><table class="kt">
-      <thead><tr><th>Ngày</th><th style="text-align:right">TC33 · nước</th><th style="text-align:right">XOFA</th><th style="text-align:right">Gieo</th><th style="text-align:right">Chung</th></tr></thead>
-      <tbody>${daily.map(k=>{ const t = D('tc33', k) || tcEmptySum(), x = D('xofa', k) || xoEmptySum();
-        const g = G.reduce((a, y)=> a + (D('gg_' + y.s.id, k) ? D('gg_' + y.s.id, k).revenue : 0), 0);
-        return `<tr><td>${fmtDateVN(parseDkey(k)).slice(0,5)}</td><td style="text-align:right">${fmtN(t.drink+t.khac)}</td><td style="text-align:right">${fmtN(x.total)}</td><td style="text-align:right">${fmtN(g)}</td><td style="text-align:right"><b>${fmtN(t.drink+t.khac+x.total+g)}</b></td></tr>`; }).join('')}</tbody>
-    </table></div>` : ''}
     
   `;
 }
