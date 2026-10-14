@@ -4976,95 +4976,116 @@ window.handleLogout = function() {
 </script>
 
 <!-- ═══════════════════════════════════════════════════════ -->
-<!-- PRE-ORDER — [14/10] thiết kế lại: popup giữa màn (chủ dự án chọn), đếm nước ở đầu, −/+ ngay trên dòng món.
-     Giữ nguyên mọi id & hàm cũ (poOpen/poClose/poGoS2/poAddBlanket/poConfirm…) — chỉ đổi giao diện. -->
+<!-- PRE-ORDER — [14/10] bản 2 (chủ dự án duyệt hướng): popup giữa màn, tông espresso / kem / caramel riêng,
+     kiểu thực đơn in: chỉ tên món + giá, không icon. Giữ mọi id & hàm po* cũ — chỉ đổi giao diện. -->
 <!-- ═══════════════════════════════════════════════════════ -->
 <style>
-#po-overlay{position:fixed;inset:0;z-index:500;background:rgba(4,19,13,.45);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);align-items:center;justify-content:center;padding:16px}
-#po-sheet{position:relative;width:100%;max-width:420px;height:84vh;max-height:700px;min-height:480px;background:#f6f8f7;border-radius:28px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 30px 60px -20px rgba(0,0,0,.45);opacity:0;transform:scale(.94) translateY(12px);transition:opacity .25s ease,transform .32s cubic-bezier(.22,1,.36,1)}
-#po-sheet .pox-grab{display:none}
-#po-sheet .pox-top{padding-top:18px}
-.pox-top{flex-shrink:0;padding:10px 20px 0;background:#fff}
-.pox-grab{width:40px;height:5px;border-radius:9px;background:#e2e6e4;margin:0 auto 12px}
-.pox-steps{display:flex;gap:6px;margin-bottom:14px}
-.pox-steps i{flex:1;height:4px;border-radius:9px;background:#e5ebe8;transition:background .25s}
-.pox-steps i.on{background:#00a36c}
-.pox-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
-.pox-head h2{margin:0;font-size:22px;font-weight:900;color:#1e3932;letter-spacing:-.02em;line-height:1.15}
-.pox-head p{margin:4px 0 0;font-size:12.5px;font-weight:600;color:#8b9892}
-.pox-x{width:36px;height:36px;border-radius:50%;background:#f1f3f2;color:#6b7280;display:flex;align-items:center;justify-content:center;flex-shrink:0;border:0}
-.pox-back{width:36px;height:36px;border-radius:50%;background:#f1f3f2;color:#1e3932;display:flex;align-items:center;justify-content:center;flex-shrink:0;border:0;margin-right:10px}
-.pox-need{display:flex;align-items:center;gap:12px;margin:14px 0 12px;padding:11px 14px;border-radius:16px;background:#fff7ed;border:1px solid #fde4c8;transition:background .25s,border-color .25s}
-.pox-need.ok{background:#ecfdf3;border-color:#bbf0d2}
-.pox-need .cups{display:flex;gap:4px;flex-shrink:0}
-.pox-need .cups b{width:24px;height:24px;border-radius:8px;background:#fff;border:1.5px dashed #f5b971;display:flex;align-items:center;justify-content:center;font-size:13px}
-.pox-need .cups b.on{border:0;background:#00a36c;color:#fff}
-.pox-need .tx{font-size:12.5px;font-weight:700;color:#9a4b0f;line-height:1.35}
-.pox-need.ok .tx{color:#047857}
+#po-overlay{--pe:#2b1d14;--pe2:#3d2a1d;--pc:#fbf7f1;--pk:#fff;--pi:#2b1d14;--ps:#8f7f70;--pa:#b8692e;--pa2:#9a521d;--pl:#eee4d7;--pf:#f5ece0;--pg:#2f7d55;
+  position:fixed;inset:0;z-index:500;background:rgba(30,20,12,.5);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);align-items:center;justify-content:center;padding:16px}
+#po-sheet{position:relative;width:100%;max-width:420px;height:84vh;max-height:700px;min-height:480px;background:var(--pc);border-radius:28px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 30px 70px -24px rgba(30,20,12,.6);opacity:0;transform:scale(.95) translateY(10px);transition:opacity .25s ease,transform .34s cubic-bezier(.22,1,.36,1)}
+#po-s1,#po-s2,#po-s3{animation:poxIn .32s cubic-bezier(.22,1,.36,1)}
+@keyframes poxIn{from{opacity:0;transform:translateX(14px)}to{opacity:1;transform:none}}
+/* phần đầu nâu espresso */
+.pox-top{flex-shrink:0;background:var(--pe);color:#f6eadb;padding:18px 20px 16px;position:relative}
+.pox-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.pox-head .ti{display:flex;align-items:center;gap:10px;min-width:0}
+.pox-head h2{margin:0;font-size:20px;font-weight:800;letter-spacing:-.01em;color:#fff7ee;line-height:1.2}
+.pox-head p{margin:3px 0 0;font-size:12px;font-weight:600;color:#cdb9a5}
+.pox-x,.pox-back{width:34px;height:34px;border-radius:50%;border:0;background:rgba(255,255,255,.1);color:#f6eadb;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.pox-prog{display:flex;gap:6px;margin-top:16px}
+.pox-prog div{flex:1}
+.pox-prog i{display:block;height:3px;border-radius:9px;background:rgba(255,255,255,.14);overflow:hidden;position:relative}
+.pox-prog i:after{content:"";position:absolute;inset:0;background:#e3a26b;transform:scaleX(0);transform-origin:left;transition:transform .45s cubic-bezier(.22,1,.36,1)}
+.pox-prog div.on i:after{transform:scaleX(1)}
+.pox-prog span{display:block;margin-top:6px;font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#a8927d}
+.pox-prog div.on span{color:#f2c9a2}
+/* đếm nước */
+.pox-need{display:flex;align-items:center;gap:12px;margin:0;padding:12px 20px;background:var(--pf);border-bottom:1px solid var(--pl)}
+.pox-need .tx{flex:1;font-size:12.5px;font-weight:700;color:var(--pi);line-height:1.35}
+.pox-need .tx small{display:block;font-size:11.5px;font-weight:600;color:var(--ps)}
+.pox-need .bar{width:74px;height:6px;border-radius:9px;background:#e7dccd;overflow:hidden;flex-shrink:0}
+.pox-need .bar i{display:block;height:100%;border-radius:9px;background:var(--pa);transition:width .35s cubic-bezier(.22,1,.36,1)}
+.pox-need.ok .bar i{background:var(--pg)}
+.pox-need.ok .tx{color:var(--pg)}
+/* tìm + danh mục */
+.pox-tools{flex-shrink:0;padding:12px 16px 0;background:var(--pc)}
 .pox-search{position:relative}
-.pox-search svg{position:absolute;left:14px;top:50%;transform:translateY(-50%);color:#9ca3af}
-.pox-search input{width:100%;height:44px;border-radius:14px;background:#f3f5f4;border:1.5px solid transparent;padding:0 14px 0 40px;font-size:14px;font-weight:600;color:#1e3932;outline:none}
-.pox-search input:focus{background:#fff;border-color:rgba(0,98,65,.35)}
-#po-cats{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;padding:12px 0 12px;-webkit-overflow-scrolling:touch}
+.pox-search svg{position:absolute;left:14px;top:50%;transform:translateY(-50%);color:var(--ps)}
+.pox-search input{width:100%;height:42px;border-radius:14px;background:var(--pk);border:1px solid var(--pl);padding:0 14px 0 40px;font-size:14px;font-weight:600;color:var(--pi);outline:none;transition:border-color .2s}
+.pox-search input:focus{border-color:var(--pa)}
+#po-cats{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;padding:10px 0 10px;-webkit-overflow-scrolling:touch}
 #po-cats::-webkit-scrollbar{display:none}
-.pox-cat{white-space:nowrap;flex-shrink:0;height:34px;padding:0 15px;border-radius:999px;border:1.5px solid #e6ebe8;background:#fff;color:#4b5a54;font-weight:800;font-size:12.5px}
-.pox-cat.on{background:#006241;border-color:#006241;color:#fff}
-#po-menu{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 16px 16px;display:flex;flex-direction:column;gap:8px}
-.pox-it{display:flex;align-items:center;gap:12px;background:#fff;border-radius:18px;padding:10px 12px;border:1.5px solid transparent;box-shadow:0 1px 2px rgba(0,0,0,.03);cursor:pointer;-webkit-tap-highlight-color:transparent}
-.pox-it.sel{border-color:rgba(0,163,108,.45);background:#f4fbf7}
-.pox-ic{width:46px;height:46px;border-radius:14px;background:#eef8f2;display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0}
+.pox-cat{white-space:nowrap;flex-shrink:0;height:32px;padding:0 14px;border-radius:999px;border:0;background:transparent;color:var(--ps);font-weight:800;font-size:13px;transition:background .2s,color .2s}
+.pox-cat.on{background:var(--pe);color:#fff7ee}
+/* danh sách món kiểu thực đơn */
+#po-menu{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:2px 16px 16px}
+.pox-sec{font-size:11px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--pa2);margin:14px 4px 6px}
+.pox-grp{background:var(--pk);border-radius:18px;padding:0 14px;box-shadow:0 1px 0 var(--pl)}
+.pox-it{display:flex;align-items:center;gap:12px;padding:13px 0;border-bottom:1px solid var(--pl);cursor:pointer;-webkit-tap-highlight-color:transparent}
+.pox-grp .pox-it:last-child{border-bottom:0}
 .pox-nm{flex:1;min-width:0}
-.pox-nm b{display:block;font-size:14.5px;font-weight:800;color:#1e3932;line-height:1.3}
-.pox-nm span{display:block;font-size:12.5px;font-weight:700;color:#00a36c;margin-top:2px}
-.pox-add{width:34px;height:34px;border-radius:50%;background:#e6f4ee;color:#006241;border:0;font-size:20px;font-weight:900;line-height:1;display:flex;align-items:center;justify-content:center;flex-shrink:0}
-.pox-step{display:flex;align-items:center;gap:2px;background:#006241;border-radius:999px;padding:3px;flex-shrink:0}
-.pox-step button{width:30px;height:30px;border-radius:50%;border:0;background:rgba(255,255,255,.14);color:#fff;font-size:18px;font-weight:900;line-height:1;display:flex;align-items:center;justify-content:center}
-.pox-step b{min-width:22px;text-align:center;color:#fff;font-size:14px;font-weight:900}
-.pox-cnt{display:flex;align-items:center;gap:6px;flex-shrink:0;font-size:12px;font-weight:800;color:#006241}
-.pox-cnt b{min-width:26px;height:26px;padding:0 8px;border-radius:999px;background:#006241;color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px}
-.pox-empty{text-align:center;padding:40px 0;color:#9ca3af;font-size:14px;font-weight:700}
-.pox-foot{flex-shrink:0;padding:12px 16px 16px;background:#fff;box-shadow:0 -10px 24px -18px rgba(0,0,0,.25)}
-.pox-cta{width:100%;min-height:56px;border-radius:999px;border:0;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:0 8px 0 22px;color:#fff;font-weight:900;font-size:15px;background:linear-gradient(135deg,#00a36c,#006241);box-shadow:0 12px 24px -12px rgba(0,98,65,.6)}
-.pox-cta .r{display:flex;align-items:center;gap:6px;background:rgba(255,255,255,.16);border-radius:999px;padding:10px 14px;font-size:13.5px}
-.pox-cta[disabled]{background:#e5e7eb;color:#6b7280;box-shadow:none;justify-content:center;padding:0 22px}
+.pox-nm b{display:block;font-size:15px;font-weight:800;color:var(--pi);line-height:1.3}
+.pox-nm span{display:block;font-size:12.5px;font-weight:600;color:var(--ps);margin-top:3px;font-variant-numeric:tabular-nums}
+.pox-it.sel .pox-nm b{color:var(--pa2)}
+.pox-add{width:32px;height:32px;border-radius:50%;background:transparent;border:1.5px solid #dcc9b4;color:var(--pa2);font-size:19px;font-weight:700;line-height:1;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:transform .15s}
+.pox-add:active{transform:scale(.9)}
+.pox-step{display:flex;align-items:center;background:var(--pa);border-radius:999px;padding:2px;flex-shrink:0;animation:poxPop .22s ease}
+@keyframes poxPop{from{transform:scale(.8);opacity:.4}}
+.pox-step button{width:30px;height:30px;border-radius:50%;border:0;background:transparent;color:#fff;font-size:18px;font-weight:800;line-height:1;display:flex;align-items:center;justify-content:center}
+.pox-step b{min-width:20px;text-align:center;color:#fff;font-size:14px;font-weight:900}
+.pox-cnt{display:flex;align-items:center;gap:6px;flex-shrink:0;font-size:12px;font-weight:800;color:var(--pa2)}
+.pox-cnt b{min-width:26px;height:26px;padding:0 8px;border-radius:999px;background:var(--pa);color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px}
+.pox-empty{text-align:center;padding:40px 0;color:var(--ps);font-size:14px;font-weight:700}
+/* chân popup */
+.pox-foot{flex-shrink:0;padding:12px 16px 16px;background:var(--pc);border-top:1px solid var(--pl)}
+.pox-cta{width:100%;min-height:54px;border-radius:999px;border:0;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:0 8px 0 22px;color:#fff7ee;font-weight:800;font-size:15px;background:var(--pe);box-shadow:0 14px 26px -14px rgba(43,29,20,.75);transition:background .2s,transform .12s}
+.pox-cta:active{transform:scale(.99)}
+.pox-cta .r{display:flex;align-items:center;gap:6px;background:var(--pa);border-radius:999px;padding:10px 14px;font-size:13.5px;color:#fff}
+.pox-cta[disabled]{background:#e9dfd2;color:var(--ps);box-shadow:none;justify-content:center;padding:0 22px}
 .pox-cta[disabled] .r{display:none}
-#po-s2 .pox-body{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:10px 28px}
-.pox-blk{width:96px;height:96px;border-radius:30px;background:linear-gradient(160deg,#e9f7f0,#d8efe3);display:flex;align-items:center;justify-content:center;font-size:46px;margin-bottom:18px}
-#po-s2 h3{margin:0 0 8px;font-size:21px;font-weight:900;color:#1e3932}
-#po-s2 .pox-body p{margin:0;font-size:14px;line-height:1.55;color:#6b7280;max-width:290px}
-.pox-price{margin-top:16px;display:inline-flex;align-items:center;gap:8px;background:#fff;border:1px solid #e3ece7;border-radius:999px;padding:8px 16px;font-size:14px;font-weight:800;color:#1e3932}
-.pox-price b{color:#006241}
-.pox-2btn{display:flex;flex-direction:column;gap:10px}
-.pox-ghost{width:100%;height:50px;border-radius:999px;border:0;background:#f1f3f2;color:#4b5a54;font-weight:800;font-size:14px}
-#po-review{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:14px 16px;display:flex;flex-direction:column;gap:8px}
-.pox-rv{display:flex;align-items:center;gap:12px;background:#fff;border-radius:16px;padding:12px 14px}
-.pox-rv .q{min-width:30px;height:30px;border-radius:10px;background:#eef8f2;color:#006241;font-size:13px;font-weight:900;display:flex;align-items:center;justify-content:center}
-.pox-rv .n{flex:1;min-width:0;font-size:14px;font-weight:800;color:#1e3932}
-.pox-rv .n small{font-size:11px;font-weight:800;color:#6b7280;background:#f1f3f2;border-radius:6px;padding:1px 6px;margin-left:6px}
-.pox-rv .p{font-size:14px;font-weight:900;color:#1e3932}
-.pox-tot{margin:0 16px 12px;background:#fff;border-radius:18px;padding:12px 16px}
-.pox-tot .l{display:flex;justify-content:space-between;font-size:13px;font-weight:700;color:#8b9892;padding:3px 0}
-.pox-tot .g{display:flex;justify-content:space-between;align-items:baseline;border-top:1px dashed #e3e8e5;margin-top:8px;padding-top:10px}
-.pox-tot .g span{font-size:14px;font-weight:900;color:#1e3932}
-.pox-tot .g b{font-size:22px;font-weight:900;color:#006241}
-.pox-tot .note{font-size:11.5px;font-weight:600;color:#9ca3af;margin-top:6px}
+.pox-cta.c{justify-content:center;padding:0 22px}
+/* bước 2: chăn */
+#po-s2 .pox-body{flex:1;display:flex;flex-direction:column;justify-content:center;padding:20px 22px}
+#po-s2 h3{margin:0 0 6px;font-size:22px;font-weight:800;color:var(--pi);letter-spacing:-.01em}
+#po-s2 .lead{margin:0 0 20px;font-size:14px;line-height:1.55;color:var(--ps)}
+.pox-opt{display:flex;align-items:center;gap:14px;width:100%;text-align:left;background:var(--pk);border:1.5px solid var(--pl);border-radius:18px;padding:16px;margin-bottom:10px;transition:border-color .2s,background .2s}
+.pox-opt:active{border-color:var(--pa);background:#fffaf4}
+.pox-opt .dot{width:22px;height:22px;border-radius:50%;border:2px solid #d8c6b2;flex-shrink:0}
+.pox-opt b{display:block;font-size:15px;font-weight:800;color:var(--pi)}
+.pox-opt small{display:block;font-size:12.5px;font-weight:600;color:var(--ps);margin-top:2px}
+.pox-opt .pr{margin-left:auto;font-size:14px;font-weight:800;color:var(--pa2);white-space:nowrap}
+/* bước 3: hoá đơn */
+#po-review{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:16px}
+.pox-bill{background:var(--pk);border-radius:18px;padding:6px 16px 4px}
+.pox-rv{display:flex;align-items:baseline;gap:10px;padding:11px 0;border-bottom:1px dashed var(--pl)}
+.pox-rv:last-child{border-bottom:0}
+.pox-rv .q{font-size:13px;font-weight:800;color:var(--pa2);min-width:24px}
+.pox-rv .n{flex:1;min-width:0;font-size:14.5px;font-weight:700;color:var(--pi)}
+.pox-rv .n small{font-size:11px;font-weight:800;color:var(--ps);border:1px solid var(--pl);border-radius:6px;padding:0 5px;margin-left:6px}
+.pox-rv .p{font-size:14px;font-weight:800;color:var(--pi);font-variant-numeric:tabular-nums}
+.pox-tot{margin:0 16px 12px;background:var(--pf);border-radius:18px;padding:12px 16px}
+.pox-tot .l{display:flex;justify-content:space-between;font-size:13px;font-weight:600;color:var(--ps);padding:3px 0;font-variant-numeric:tabular-nums}
+.pox-tot .g{display:flex;justify-content:space-between;align-items:baseline;border-top:1px dashed #dccbb6;margin-top:8px;padding-top:10px}
+.pox-tot .g span{font-size:14px;font-weight:800;color:var(--pi)}
+.pox-tot .g b{font-size:22px;font-weight:900;color:var(--pi);font-variant-numeric:tabular-nums}
+.pox-tot .note{font-size:11.5px;font-weight:600;color:var(--ps);margin-top:6px}
 /* chọn size */
-#po-size-overlay{position:fixed;inset:0;z-index:600;background:rgba(4,19,13,.4);align-items:center;justify-content:center;padding:16px}
-#po-size-sheet{width:100%;max-width:380px;background:#fff;border-radius:26px;padding:20px;box-shadow:0 30px 60px -20px rgba(0,0,0,.45);opacity:0;transform:scale(.94);transition:opacity .2s ease,transform .28s cubic-bezier(.22,1,.36,1)}
-#po-size-sheet .pox-grab{display:none}
-#po-size-item-name{margin:0;font-size:19px;font-weight:900;color:#1e3932}
-.pox-sz{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:14px 0 14px}
-.pox-szc{border-radius:20px;border:2px solid #e6ebe8;padding:14px;display:flex;flex-direction:column;gap:12px;background:#fff}
-.pox-szc.on{border-color:#00a36c;background:#f4fbf7}
-.pox-szc .h{display:flex;align-items:baseline;justify-content:space-between}
-.pox-szc .h b{font-size:22px;font-weight:900;color:#1e3932}
-.pox-szc .h span{font-size:13px;font-weight:800;color:#00a36c}
-.pox-szc .st{display:flex;align-items:center;justify-content:space-between;background:#f1f3f2;border-radius:999px;padding:3px}
-.pox-szc.on .st{background:#006241}
-.pox-szc .st button{width:34px;height:34px;border-radius:50%;border:0;background:#fff;color:#006241;font-size:18px;font-weight:900;line-height:1}
-.pox-szc.on .st button{background:rgba(255,255,255,.16);color:#fff}
-.pox-szc .st b{font-size:15px;font-weight:900;color:#9ca3af}
+#po-size-overlay{position:fixed;inset:0;z-index:600;background:rgba(30,20,12,.45);align-items:center;justify-content:center;padding:16px}
+#po-size-sheet{width:100%;max-width:360px;background:#fbf7f1;border-radius:24px;padding:20px;box-shadow:0 30px 60px -20px rgba(30,20,12,.6);opacity:0;transform:scale(.95);transition:opacity .2s ease,transform .28s cubic-bezier(.22,1,.36,1)}
+#po-size-item-name{margin:0;font-size:19px;font-weight:800;color:#2b1d14}
+.pox-sz{display:flex;flex-direction:column;gap:8px;margin:14px 0}
+.pox-szc{display:flex;align-items:center;gap:12px;border-radius:16px;border:1.5px solid #eee4d7;background:#fff;padding:10px 10px 10px 16px;transition:border-color .2s,background .2s}
+.pox-szc.on{border-color:#b8692e;background:#fffaf4}
+.pox-szc .h{flex:1;display:flex;align-items:baseline;gap:10px}
+.pox-szc .h b{font-size:16px;font-weight:900;color:#2b1d14}
+.pox-szc .h span{font-size:13.5px;font-weight:700;color:#8f7f70;font-variant-numeric:tabular-nums}
+.pox-szc .st{display:flex;align-items:center;border-radius:999px;padding:2px;background:#f5ece0}
+.pox-szc.on .st{background:#b8692e}
+.pox-szc .st button{width:32px;height:32px;border-radius:50%;border:0;background:transparent;color:#9a521d;font-size:18px;font-weight:800;line-height:1}
+.pox-szc.on .st button{color:#fff}
+.pox-szc .st b{min-width:22px;text-align:center;font-size:14px;font-weight:900;color:#b9a693}
 .pox-szc.on .st b{color:#fff}
+#po-size-sheet .pox-cta{background:#2b1d14;color:#fff7ee}
 </style>
 <div id="po-overlay" class="hidden" style="display:none;" onclick="if(event.target===this)poClose()">
   <div id="po-sheet">
@@ -5072,14 +5093,13 @@ window.handleLogout = function() {
     <!-- ── BƯỚC 1: Chọn món ── -->
     <div id="po-s1" style="height:100%;overflow:hidden;flex-direction:column;display:flex;">
       <div class="pox-top">
-        <div class="pox-grab"></div>
-        <div class="pox-steps"><i class="on"></i><i></i><i></i></div>
-        <div class="pox-head">
-          <div><h2>Gọi món trước</h2><p>Quán làm sẵn khi bạn tới · trả tiền tại quán</p></div>
-          <button class="pox-x" onclick="poClose()" aria-label="Đóng"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
-        </div>
-        <div id="po-drink-hint" class="pox-need"></div>
-        <div class="pox-search"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+        <div class="pox-head"><div class="ti"><div><h2>Gọi món trước</h2><p>Quán làm sẵn khi bạn tới · trả tiền tại quán</p></div></div>
+          <button class="pox-x" onclick="poClose()" aria-label="Đóng"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+        <div class="pox-prog"><div class="on"><i></i><span>Chọn món</span></div><div><i></i><span>Chăn</span></div><div><i></i><span>Xác nhận</span></div></div>
+      </div>
+      <div id="po-drink-hint" class="pox-need"></div>
+      <div class="pox-tools">
+        <div class="pox-search"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
           <input id="po-search" type="text" placeholder="Tìm tên món..." oninput="poFilterMenu(this.value)" autocomplete="off"></div>
         <div id="po-cats"></div>
       </div>
@@ -5092,30 +5112,24 @@ window.handleLogout = function() {
     <!-- ── BƯỚC 2: Chăn bed ── -->
     <div id="po-s2" style="height:100%;overflow:hidden;flex-direction:column;display:none;">
       <div class="pox-top">
-        <div class="pox-grab"></div>
-        <div class="pox-steps"><i class="on"></i><i class="on"></i><i></i></div>
-        <div class="pox-head"><div style="display:flex;align-items:center"><button class="pox-back" onclick="poShowStep(1)" aria-label="Quay lại"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button><h2>Thêm chăn?</h2></div>
-          <button class="pox-x" onclick="poClose()" aria-label="Đóng"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+        <div class="pox-head"><div class="ti"><button class="pox-back" onclick="poShowStep(1)" aria-label="Quay lại"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button><div><h2>Gọi món trước</h2><p>Thêm một chút ấm áp</p></div></div>
+          <button class="pox-x" onclick="poClose()" aria-label="Đóng"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+        <div class="pox-prog"><div class="on"><i></i><span>Chọn món</span></div><div class="on"><i></i><span>Chăn</span></div><div><i></i><span>Xác nhận</span></div></div>
       </div>
       <div class="pox-body">
-        <div class="pox-blk">🛏️</div>
-        <h3>Bên trong Bed hơi lạnh!</h3>
-        <p>Thêm một chiếc <b style="color:#1e3932">chăn bed</b> để ấm áp hơn trong suốt thời gian nằm nhé.</p>
-        <div class="pox-price">Chăn bed · <b id="po-blanket-price">4.000đ</b></div>
-      </div>
-      <div class="pox-foot pox-2btn">
-        <button class="pox-cta" style="justify-content:center;padding:0 22px" onclick="poAddBlanket()">Thêm chăn</button>
-        <button class="pox-ghost" onclick="poSkipBlanket()">Không cần</button>
+        <h3>Bên trong bed hơi lạnh</h3>
+        <p class="lead">Bạn có muốn thêm chăn để ấm hơn trong suốt thời gian nằm không?</p>
+        <button class="pox-opt" onclick="poAddBlanket()"><span class="dot"></span><span><b>Có, thêm chăn</b><small>Quán để sẵn trên bed cho bạn</small></span><span class="pr">+<span id="po-blanket-price">4.000đ</span></span></button>
+        <button class="pox-opt" onclick="poSkipBlanket()"><span class="dot"></span><span><b>Không cần</b><small>Đi tiếp tới xác nhận</small></span></button>
       </div>
     </div>
 
-    <!-- ── BƯỚC 3: Xem lại ── -->
+    <!-- ── BƯỚC 3: Xác nhận ── -->
     <div id="po-s3" style="height:100%;overflow:hidden;flex-direction:column;display:none;">
-      <div class="pox-top" style="padding-bottom:14px">
-        <div class="pox-grab"></div>
-        <div class="pox-steps"><i class="on"></i><i class="on"></i><i class="on"></i></div>
-        <div class="pox-head"><div style="display:flex;align-items:center"><button class="pox-back" onclick="poShowStep(1)" aria-label="Sửa món"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button><div><h2>Xem lại đơn</h2><p>Bấm ← để sửa món</p></div></div>
-          <button class="pox-x" onclick="poClose()" aria-label="Đóng"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+      <div class="pox-top">
+        <div class="pox-head"><div class="ti"><button class="pox-back" onclick="poShowStep(1)" aria-label="Sửa món"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button><div><h2>Xem lại đơn</h2><p>Bấm ← để sửa món</p></div></div>
+          <button class="pox-x" onclick="poClose()" aria-label="Đóng"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+        <div class="pox-prog"><div class="on"><i></i><span>Chọn món</span></div><div class="on"><i></i><span>Chăn</span></div><div class="on"><i></i><span>Xác nhận</span></div></div>
       </div>
       <div id="po-review"></div>
       <div class="pox-tot">
@@ -5126,7 +5140,7 @@ window.handleLogout = function() {
         <div class="note">Tạm tính · có thể thay đổi khi thanh toán tại quán</div>
       </div>
       <div class="pox-foot">
-        <button class="pox-cta" style="justify-content:center;padding:0 22px" onclick="poConfirm()">Xác nhận gọi món</button>
+        <button class="pox-cta c" onclick="poConfirm()">Xác nhận gọi món</button>
       </div>
     </div>
 
@@ -5136,9 +5150,8 @@ window.handleLogout = function() {
 <!-- CHỌN SIZE (món có 2 size) -->
 <div id="po-size-overlay" class="hidden" style="display:none;" onclick="if(event.target===this)poCloseSizePopup()">
   <div id="po-size-sheet">
-    <div class="pox-grab"></div>
     <p id="po-size-item-name"></p>
-    <p style="margin:4px 0 0;font-size:12.5px;font-weight:600;color:#8b9892">Chọn size và số lượng</p>
+    <p style="margin:4px 0 0;font-size:12.5px;font-weight:600;color:#8f7f70">Chọn size và số lượng</p>
     <div id="po-size-btns"></div>
   </div>
 </div>
@@ -5159,17 +5172,8 @@ var _poSizeCurrent    = null; // {name, priceM, priceL}
 var _poPendingPreorder = null; // lưu tạm pre-order trước khi ghi RT
 var _guestCount = 1; // số khách đi cùng (1-3), mặc định 1
 
-// [14/10] Giao diện pre-order: escape tên món (tên có dấu nháy trước đây làm hỏng nút bấm) + icon theo loại
+// [14/10] Giao diện pre-order: escape tên món (tên có dấu nháy trước đây làm hỏng nút bấm)
 function _poEsc(x) { return String(x == null ? '' : x).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
-function _poIcon(type, name) {
-    var t = ((type || '') + ' ' + (name || '')).toLowerCase();
-    if (/ăn vặt|đồ ăn|snack|bánh|khoai|chiên/.test(t)) return '🍟';
-    if (/matcha|trà xanh/.test(t)) return '🍵';
-    if (/trà|tea/.test(t)) return '🧋';
-    if (/đá xay|smoothie|sinh tố|ép|nước ép/.test(t)) return '🥤';
-    if (/latte|cafe|cà phê|coffee|americano|bạc xỉu|espresso|capu/.test(t)) return '☕';
-    return '🥤';
-}
 // ── Phân loại "Nước" — DÙNG ĐÚNG RULE NHƯ POS để khớp số liệu 2 bên ──
 // (xem pos.html: isDrink = !isSnack && !isKhac)
 function _poIsDrinkType(type) {
@@ -5437,19 +5441,25 @@ function poRenderMenu(cat, q){
         el.innerHTML = '<div style="text-align:center;padding:40px 0;color:#9ca3af;font-size:0.85rem;font-weight:700;">Không tìm thấy món</div>';
         return;
     }
-    // [14/10] Dòng món mới: icon theo loại · tên · giá · nút + (chưa chọn) / −qty+ (1 size) / số lượng (2 size → mở chọn size)
-    el.innerHTML = list.map(function(m, k){
+    // [14/10] Kiểu thực đơn in: tên món + giá, không icon. Xem "Tất cả" (không tìm) → chia nhóm theo danh mục.
+    function rowHtml(m, k){
         var hasM = m.priceM > 0, hasL = m.priceL > 0;
         var totalQty = _poItems.filter(function(i){ return i.name===m.name; }).reduce(function(s,i){ return s+i.qty; }, 0);
-        var pLine = (hasM && hasL) ? ('M ' + m.priceM.toLocaleString('vi-VN') + 'đ · L ' + m.priceL.toLocaleString('vi-VN') + 'đ')
+        var pLine = (hasM && hasL) ? ('M ' + m.priceM.toLocaleString('vi-VN') + 'đ  ·  L ' + m.priceL.toLocaleString('vi-VN') + 'đ')
                   : ((hasM ? m.priceM : m.priceL) || 0).toLocaleString('vi-VN') + 'đ';
         var right;
         if (!totalQty) right = '<button type="button" class="pox-add" data-act="add" aria-label="Thêm">+</button>';
         else if (hasM && hasL) right = '<span class="pox-cnt"><b>'+totalQty+'</b>Sửa</span>';
         else right = '<span class="pox-step"><button type="button" data-act="minus" aria-label="Bớt">−</button><b>'+totalQty+'</b><button type="button" data-act="add" aria-label="Thêm">+</button></span>';
-        return '<div class="pox-it'+(totalQty?' sel':'')+'" data-k="'+k+'"><div class="pox-ic">'+_poIcon(m.type, m.name)+'</div>'
-             + '<div class="pox-nm"><b>'+_poEsc(m.name)+'</b><span>'+pLine+'</span></div>'+right+'</div>';
-    }).join('');
+        return '<div class="pox-it'+(totalQty?' sel':'')+'" data-k="'+k+'"><div class="pox-nm"><b>'+_poEsc(m.name)+'</b><span>'+pLine+'</span></div>'+right+'</div>';
+    }
+    if (cat === 'all' && !q) {
+        var order = [], groups = {};
+        list.forEach(function(m, k){ var c = m.type || 'Khác'; if (!groups[c]) { groups[c] = []; order.push(c); } groups[c].push(rowHtml(m, k)); });
+        el.innerHTML = order.map(function(c){ return '<div class="pox-sec">'+_poEsc(c)+'</div><div class="pox-grp">'+groups[c].join('')+'</div>'; }).join('');
+    } else {
+        el.innerHTML = '<div style="height:10px"></div><div class="pox-grp">' + list.map(rowHtml).join('') + '</div>';
+    }
     el.querySelectorAll('.pox-it').forEach(function(row){
         var m = list[+row.dataset.k];
         row.onclick = function(ev){
@@ -5503,14 +5513,14 @@ function poRenderSizeBtns(){
     var qM = (_poItems.find(function(i){return i.name===name&&i.size==='M';})||{qty:0}).qty;
     var qL = (_poItems.find(function(i){return i.name===name&&i.size==='L';})||{qty:0}).qty;
 
-    // [14/10] 2 ô M / L cạnh nhau, mỗi ô có −/+
+    // [14/10] Mỗi size một hàng: size · giá · −/+
     function sizeCard(size, price, qty){
-        return '<div class="pox-szc'+(qty>0?' on':'')+'" data-size="'+size+'" data-price="'+price+'" data-q="'+qty+'"><div class="h"><b>'+size+'</b><span>'+price.toLocaleString('vi-VN')+'đ</span></div>'
+        return '<div class="pox-szc'+(qty>0?' on':'')+'" data-size="'+size+'" data-price="'+price+'" data-q="'+qty+'"><div class="h"><b>Size '+size+'</b><span>'+price.toLocaleString('vi-VN')+'đ</span></div>'
              + '<div class="st"><button type="button" data-d="-1" aria-label="Bớt">−</button><b>'+qty+'</b><button type="button" data-d="1" aria-label="Thêm">+</button></div></div>';
     }
     var box = document.getElementById('po-size-btns');
     box.innerHTML = '<div class="pox-sz">' + (pM>0 ? sizeCard('M',pM,qM) : '') + (pL>0 ? sizeCard('L',pL,qL) : '') + '</div>'
-        + '<button type="button" class="pox-cta" style="justify-content:center;padding:0 22px" onclick="poCloseSizePopup()">Xong</button>';
+        + '<button type="button" class="pox-cta c" onclick="poCloseSizePopup()">Xong</button>';
     box.querySelectorAll('.pox-szc').forEach(function(c){
         c.querySelectorAll('button[data-d]').forEach(function(b){
             b.onclick = function(){ var d = +b.dataset.d; if (d < 0 && !(+c.dataset.q > 0)) return; poSizeQty(name, c.dataset.size, +c.dataset.price, d); };
@@ -5559,12 +5569,11 @@ function poUpdateBtn1(){
         btn.disabled = false;
     }
     if (hint) {
-        var ok = drinkCount >= required, cups = '';
-        for (var c = 0; c < required; c++) cups += '<b class="' + (c < drinkCount ? 'on' : '') + '">' + (c < drinkCount ? '✓' : '☕') + '</b>';
+        var ok = drinkCount >= required, pct = Math.min(100, Math.round(drinkCount / required * 100));
         hint.className = 'pox-need' + (ok ? ' ok' : '');
-        hint.innerHTML = '<span class="cups">' + cups + '</span><span class="tx">'
-            + (ok ? 'Đủ nước cho ' + required + ' người rồi — thêm món khác tuỳ thích'
-                  : 'Mỗi khách gọi tối thiểu 1 nước · đã chọn <b>' + drinkCount + '/' + required + '</b>') + '</span>';
+        hint.innerHTML = '<span class="tx">' + (ok ? 'Đủ nước cho ' + required + ' người' : 'Đã chọn ' + drinkCount + '/' + required + ' nước')
+            + '<small>' + (ok ? 'Thêm món khác tuỳ thích' : 'Mỗi khách gọi tối thiểu 1 nước') + '</small></span>'
+            + '<span class="bar"><i style="width:' + pct + '%"></i></span>';
     }
 }
 
@@ -5590,6 +5599,7 @@ function poRenderReview(){
             return '<div class="pox-rv"><span class="q">'+i.qty+'×</span><span class="n">'+_poEsc(i.name)+(two && i.size ? '<small>'+_poEsc(i.size)+'</small>' : '')+'</span>'
                  + '<span class="p">'+(i.price*i.qty).toLocaleString('vi-VN')+'đ</span></div>';
         }).join('');
+        el.innerHTML = '<div class="pox-bill">' + el.innerHTML + '</div>';
     }
     // Phí bed
     var bedFee=0, hrs=_poBookingData.hours||0;
