@@ -1025,114 +1025,121 @@ input[type="checkbox"]:checked::after{
     </div>
   </div>
 
-  <div id="login-screen" class="flex flex-col items-center justify-center min-h-screen text-center" style="background:#04130d;position:relative;overflow:hidden;padding:40px 32px;">
+  <!-- [14/10] MÀN ĐĂNG NHẬP: thao tác như bản cũ (ô SĐT giữa màn, nằm trên nền, nút pill cũ) + "33" / quỹ đạo / ngôi sao của bản thiết kế mới,
+       thêm chuyển động vũ trụ (quỹ đạo quay, hành tinh chạy, sao lấp lánh, "33" ánh sáng lướt). Nền gradient xanh, aurora cũ nhạt hơn.
+       Giữ id: login-screen, login-sdt, btn-login; hàm login(), showRegister(). Mọi style gói trong #login-screen. -->
+  <style id="login-cosmos">
+  #login-screen{position:relative;display:flex;flex-direction:column;align-items:center;min-height:100vh;min-height:100svh;overflow:hidden;isolation:isolate;text-align:center;color:#f4fbef;
+    background:linear-gradient(165deg,#03231a 0%,#053e30 42%,#08523d 72%,#0b5f47 100%);padding:max(26px,env(safe-area-inset-top)) 28px max(22px,env(safe-area-inset-bottom))}
+  #login-screen.hidden{display:none!important}
+  #login-screen *{box-sizing:border-box}
+  /* aurora cũ — nhạt hơn */
+  #login-screen .lc-blob{position:absolute;border-radius:50%;pointer-events:none;z-index:-2;will-change:transform}
+  #login-screen .lc-blob>i{display:block;width:100%;height:100%;border-radius:50%}
+  #login-screen .lc-b1{width:300px;height:280px;top:-90px;left:-90px;animation:lsblob1 11s ease-in-out infinite alternate}
+  #login-screen .lc-b1>i{background:radial-gradient(circle at 40% 40%,#38e39a 0%,#0a6f4c 55%,transparent 100%);filter:blur(60px);opacity:.34}
+  #login-screen .lc-b2{width:260px;height:240px;top:-70px;right:-80px;animation:lsblob2 13s ease-in-out infinite alternate}
+  #login-screen .lc-b2>i{background:radial-gradient(circle at 60% 40%,#5fe0c4 0%,#0b5a3f 60%,transparent 100%);filter:blur(56px);opacity:.28}
+  #login-screen .lc-b3{width:240px;height:220px;bottom:-60px;left:-50px;animation:lsblob3 10s ease-in-out infinite alternate}
+  #login-screen .lc-b3>i{background:radial-gradient(circle,#c4f5a0 0%,#0a6f4c 65%,transparent 100%);filter:blur(54px);opacity:.16}
+  #login-screen .lc-b4{width:220px;height:200px;bottom:-40px;right:-40px;animation:lsblob4 9s ease-in-out infinite alternate}
+  #login-screen .lc-b4>i{background:radial-gradient(circle,#55f0b4 0%,#064a33 70%,transparent 100%);filter:blur(52px);opacity:.16}
+  /* bầu trời sao */
+  #login-screen .lc-stars{position:absolute;inset:0;z-index:-1;pointer-events:none}
+  #login-screen .lc-star{position:absolute;width:var(--s,2px);height:var(--s,2px);border-radius:50%;background:#eafff2;box-shadow:0 0 6px #bfffe0;opacity:.15;animation:lc-twinkle var(--d,4s) ease-in-out var(--dl,0s) infinite}
+  @keyframes lc-twinkle{0%,100%{opacity:.12;transform:scale(.7)}50%{opacity:.95;transform:scale(1.15)}}
+  #login-screen .lc-shoot{position:absolute;top:14%;left:-20%;width:120px;height:1px;background:linear-gradient(90deg,transparent,#eafff2cc);opacity:0;transform:rotate(18deg);animation:lc-shoot 9s ease-in 3s infinite;z-index:-1;pointer-events:none}
+  @keyframes lc-shoot{0%{opacity:0;transform:translate(0,0) rotate(18deg)}3%{opacity:.9}11%{opacity:0;transform:translate(150vw,48vw) rotate(18deg)}100%{opacity:0;transform:translate(150vw,48vw) rotate(18deg)}}
+  /* thương hiệu */
+  #login-screen .lc-brand{width:100%;max-width:420px;display:flex;align-items:center;justify-content:space-between;position:relative;z-index:2}
+  #login-screen .lc-logo{font-family:'League Spartan','Inter',sans-serif;font-size:22px;font-weight:800;letter-spacing:-.8px;line-height:1;color:#fff;text-shadow:0 0 22px rgba(0,232,122,.35)}
+  #login-screen .lc-xofa{font-family:'League Spartan','Inter',sans-serif;font-size:18px;font-weight:800;letter-spacing:2px;line-height:1;color:#fff;text-shadow:0 0 22px rgba(0,232,122,.35)}
+  /* vùng giữa: 33 + quỹ đạo + chữ + ô nhập */
+  #login-screen .lc-main{flex:1;width:100%;max-width:420px;display:flex;flex-direction:column;justify-content:center;position:relative;z-index:1;padding:0 0 9vh}
+  #login-screen .lc-cosmos{position:relative;height:150px;margin:0 auto 4px;width:100%;pointer-events:none}
+  #login-screen .lc-33{position:absolute;left:50%;top:50%;transform:translate(-50%,-52%);font-family:'League Spartan','Arial',sans-serif;font-size:200px;font-weight:800;letter-spacing:-16px;line-height:1;padding-right:16px;color:transparent;
+    background:linear-gradient(115deg,#d9f3c9 0%,#b7dac5 22%,#ffffff 30%,#9fd6b8 38%,#ffffff22 52%,#7cc5a4 70%,#e7f9d8 88%);background-size:260% 100%;-webkit-background-clip:text;background-clip:text;
+    filter:drop-shadow(0 0 26px rgba(124,224,170,.28)) drop-shadow(0 16px 24px rgba(0,30,20,.45));opacity:.8;animation:lc-sheen 7s ease-in-out infinite,lc-breathe 6s ease-in-out infinite}
+  @keyframes lc-sheen{0%{background-position:100% 0}55%,100%{background-position:0 0}}
+  @keyframes lc-breathe{0%,100%{transform:translate(-50%,-52%) scale(1)}50%{transform:translate(-50%,-55%) scale(1.03)}}
+  /* quỹ đạo: elip nghiêng, viền mờ + hành tinh chạy quanh */
+  #login-screen .lc-orbit{position:absolute;left:50%;top:50%;width:300px;height:300px;margin:-150px 0 0 -150px;transform:rotate(-24deg) scaleY(.32)}
+  #login-screen .lc-ring{position:absolute;inset:0;border-radius:50%;border:2px solid rgba(215,243,220,.42);box-shadow:0 0 16px rgba(160,240,200,.18)}
+  #login-screen .lc-ring.b{inset:-34px;border:1.5px dashed rgba(215,243,220,.18);animation:lc-spin 60s linear infinite reverse}
+  #login-screen .lc-run{position:absolute;inset:0;animation:lc-spin 9s linear infinite}
+  #login-screen .lc-run.slow{inset:-34px;animation-duration:22s;animation-direction:reverse}
+  #login-screen .lc-planet{position:absolute;left:50%;top:-7px;width:14px;height:14px;margin-left:-7px;border-radius:50%;background:radial-gradient(circle at 35% 35%,#ffffff,#a8ffd0 45%,#36c88a 100%);box-shadow:0 0 14px 4px rgba(150,255,200,.55)}
+  #login-screen .lc-run.slow .lc-planet{width:8px;height:8px;margin-left:-4px;top:-4px;background:#e4f4cd;box-shadow:0 0 10px 3px rgba(228,244,205,.5)}
+  @keyframes lc-spin{to{transform:rotate(360deg)}}
+  #login-screen .lc-spark{position:absolute;right:8%;top:4px;font-size:38px;font-weight:300;line-height:1;color:#e4f4cd;text-shadow:0 0 18px rgba(228,244,205,.8);animation:lc-spark 5s ease-in-out infinite}
+  #login-screen .lc-spark.sm{right:auto;left:10%;top:auto;bottom:10px;font-size:20px;animation-duration:6.5s;animation-delay:-2s}
+  @keyframes lc-spark{0%,100%{transform:rotate(0) scale(.85);opacity:.55}50%{transform:rotate(90deg) scale(1.15);opacity:1}}
+  #login-screen .lc-eyebrow{font-size:10px;font-weight:700;letter-spacing:2.6px;text-transform:uppercase;margin:0 0 10px;color:#bfe6cf}
+  #login-screen .lc-h1{font-size:clamp(30px,8.6vw,40px);font-weight:700;letter-spacing:-1.4px;line-height:1.08;margin:0;color:#fffdf0}
+  #login-screen .lc-h1 span{color:#cdeba6}
+  #login-screen .lc-caption{margin:10px 0 22px;font-size:12px;color:#d3ebdc;display:flex;gap:9px;align-items:center;justify-content:center;flex-wrap:wrap}
+  #login-screen .lc-caption i{width:3px;height:3px;border-radius:50%;background:#b8d59c}
+  /* ô nhập + nút: như bản cũ, nằm thẳng trên nền */
+  #login-screen #login-sdt{display:block;width:100%;height:58px;padding:0 26px;border-radius:999px!important;background:rgba(255,255,255,.08);border:1px solid rgba(160,240,200,.28);color:#fff;font-family:'Inter',sans-serif;font-size:17px;font-weight:600;text-align:center;letter-spacing:.5px;outline:none;-webkit-tap-highlight-color:transparent;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);transition:border-color .2s,background .2s,box-shadow .2s}
+  #login-screen #login-sdt::placeholder{color:rgba(255,255,255,.4);font-weight:500;letter-spacing:0}
+  #login-screen #login-sdt:focus{border-color:rgba(160,255,200,.65);background:rgba(255,255,255,.12);box-shadow:0 0 0 4px rgba(120,230,170,.12)}
+  #login-screen #btn-login{width:100%;height:58px;margin-top:14px;color:#fff;font-family:'Inter',sans-serif;font-size:15px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;cursor:pointer;box-shadow:0 0 30px rgba(0,180,100,.3),0 6px 18px rgba(0,0,0,.35);-webkit-tap-highlight-color:transparent;transition:transform .15s}
+  #login-screen #btn-login:active{transform:scale(.97)}
+  /* chân trang */
+  #login-screen .lc-foot{width:100%;max-width:420px;position:relative;z-index:2}
+  #login-screen .lc-reg-q{margin:0;font-size:13px;color:rgba(255,255,255,.42);font-weight:500}
+  #login-screen .lc-reg{background:none;border:none;color:#7dffb8;font-size:12px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;cursor:pointer;padding:8px 6px;font-family:'Inter',sans-serif;text-shadow:0 0 12px rgba(77,255,160,.35)}
+  #login-screen .lc-footer{margin:10px 0 0;font-size:9px;letter-spacing:1.8px;text-transform:uppercase;color:rgba(214,238,222,.38)}
+  @media(max-height:640px){#login-screen .lc-main{padding-bottom:4vh}#login-screen .lc-cosmos{height:115px}#login-screen .lc-33{font-size:140px;letter-spacing:-11px}#login-screen .lc-orbit{transform:rotate(-24deg) scaleY(.32) scale(.72)}#login-screen .lc-caption{margin-bottom:18px}}
+  @media(min-width:800px){#login-screen .lc-cosmos{height:240px}#login-screen .lc-33{font-size:250px;letter-spacing:-20px}#login-screen .lc-orbit{transform:rotate(-24deg) scaleY(.32) scale(1.25)}}
+  @media(prefers-reduced-motion:reduce){#login-screen *{animation:none!important}}
+  @keyframes lsblob1{0%{transform:translate(0,0) scale(1)}33%{transform:translate(50px,20px) scale(1.1)}66%{transform:translate(25px,45px) scale(.95)}100%{transform:translate(60px,30px) scale(1.18)}}
+  @keyframes lsblob2{0%{transform:translate(0,0) scale(1)}33%{transform:translate(-30px,35px) scale(1.08)}66%{transform:translate(-15px,55px) scale(1.12)}100%{transform:translate(-40px,45px) scale(.92)}}
+  @keyframes lsblob3{0%{transform:translate(0,0) scale(1)}50%{transform:translate(35px,-25px) scale(1.2)}100%{transform:translate(20px,-40px) scale(1.08)}}
+  @keyframes lsblob4{0%{transform:translate(0,0) scale(1)}50%{transform:translate(-25px,-20px) scale(1.15)}100%{transform:translate(-35px,-30px) scale(.9)}}
+  </style>
+  <div id="login-screen">
+    <div class="lc-blob lc-b1"><i></i></div><div class="lc-blob lc-b2"><i></i></div><div class="lc-blob lc-b3"><i></i></div><div class="lc-blob lc-b4"><i></i></div>
+    <div class="lc-stars" id="lc-stars" aria-hidden="true"></div>
+    <div class="lc-shoot" aria-hidden="true"></div>
 
-    <!-- Aurora background blobs -->
-    <div style="position:absolute;width:280px;height:260px;top:-80px;left:-80px;border-radius:50%;will-change:transform;animation:lsblob1 9s ease-in-out infinite alternate;pointer-events:none;">
-      <div style="width:100%;height:100%;border-radius:50%;background:radial-gradient(circle at 40% 40%,#00e87a 0%,#006241 55%,transparent 100%);filter:blur(50px);opacity:0.65;"></div>
-    </div>
-    <div style="position:absolute;width:240px;height:220px;top:-60px;right:-60px;border-radius:50%;will-change:transform;animation:lsblob2 11s ease-in-out infinite alternate;pointer-events:none;">
-      <div style="width:100%;height:100%;border-radius:50%;background:radial-gradient(circle at 60% 40%,#00d4aa 0%,#004d33 60%,transparent 100%);filter:blur(48px);opacity:0.55;"></div>
-    </div>
-    <div style="position:absolute;width:200px;height:180px;bottom:-40px;left:-30px;border-radius:50%;will-change:transform;animation:lsblob3 8s ease-in-out infinite alternate;pointer-events:none;">
-      <div style="width:100%;height:100%;border-radius:50%;background:radial-gradient(circle,#a8ff78 0%,#006241 65%,transparent 100%);filter:blur(44px);opacity:0.3;"></div>
-    </div>
-    <div style="position:absolute;width:180px;height:160px;bottom:-30px;right:-20px;border-radius:50%;will-change:transform;animation:lsblob4 7s ease-in-out infinite alternate;pointer-events:none;">
-      <div style="width:100%;height:100%;border-radius:50%;background:radial-gradient(circle,#00ffa3 0%,#003d28 70%,transparent 100%);filter:blur(42px);opacity:0.28;"></div>
-    </div>
+    <div class="lc-brand"><span class="lc-logo">The cafe 33</span><span class="lc-xofa">XOFA</span></div>
 
-    <!-- Noise overlay -->
-    <div style="position:absolute;inset:0;opacity:0.04;background-image:url(\"data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\");background-size:200px 200px;pointer-events:none;"></div>
-
-    <!-- Glass overlay -->
-    <div style="position:absolute;inset:0;background:rgba(4,19,13,0.35);pointer-events:none;"></div>
-
-    <!-- Content -->
-    <div style="position:relative;z-index:2;width:100%;">
-
-      <!-- Logos side by side, cùng kích thước -->
-      <div style="display:flex;align-items:center;justify-content:center;gap:0;margin-bottom:28px;">
-        <!-- The cafe 33 -->
-        <div style="flex:1;display:flex;flex-direction:column;align-items:center;">
-          <h1 style="font-family:'League Spartan',sans-serif;font-weight:900;font-size:26px;color:#ffffff;letter-spacing:-0.5px;margin:0 0 4px;line-height:1;text-shadow:0 0 24px rgba(0,232,122,0.6),0 0 48px rgba(0,200,100,0.3),0 0 80px rgba(0,160,80,0.2);">The cafe 33</h1>
-          <span style="font-size:8px;font-weight:600;letter-spacing:0.22em;text-transform:uppercase;color:rgba(77,255,160,0.45);">MEMBERSHIP</span>
+    <div class="lc-main">
+      <div class="lc-cosmos" aria-hidden="true">
+        <div class="lc-orbit">
+          <div class="lc-ring b"></div><div class="lc-ring"></div>
+          <div class="lc-run"><span class="lc-planet"></span></div>
+          <div class="lc-run slow"><span class="lc-planet"></span></div>
         </div>
-
-        <!-- Divider -->
-        <div style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:0 14px;flex-shrink:0;">
-          <div style="width:1px;height:28px;background:linear-gradient(to bottom,transparent,rgba(0,232,122,0.3),transparent);"></div>
-          <span style="font-size:8px;font-weight:700;color:rgba(255,255,255,0.2);letter-spacing:0.1em;">&amp;</span>
-          <div style="width:1px;height:28px;background:linear-gradient(to bottom,transparent,rgba(0,232,122,0.3),transparent);"></div>
-        </div>
-
-        <!-- XOLIFA -->
-        <div style="flex:1;display:flex;flex-direction:column;align-items:center;">
-          <h1 style="font-family:'League Spartan',sans-serif;font-weight:900;font-size:26px;color:#ffffff;letter-spacing:2px;margin:0 0 4px;line-height:1;text-shadow:0 0 24px rgba(0,232,122,0.6),0 0 48px rgba(0,200,100,0.3),0 0 80px rgba(0,160,80,0.2);">XOFA</h1>
-          <span style="font-size:8px;font-weight:600;letter-spacing:0.22em;text-transform:uppercase;color:rgba(77,255,160,0.45);">COFFEE &amp; TEA</span>
-        </div>
+        <div class="lc-33">33</div>
+        <span class="lc-spark">✳</span><span class="lc-spark sm">✳</span>
       </div>
-
-      <!-- Tagline -->
-      <div style="margin-bottom:36px;">
-        <div style="display:inline-flex;align-items:center;gap:8px;background:rgba(0,180,90,0.1);border:1px solid rgba(77,255,160,0.18);border-radius:99px;padding:7px 18px;">
-          <span style="display:inline-block;width:5px;height:5px;border-radius:50%;background:#4dffa0;box-shadow:0 0 6px #4dffa0;animation:lspulse 2s ease-in-out infinite;"></span>
-          <span style="font-size:10px;font-weight:700;color:rgba(255,255,255,0.55);letter-spacing:0.18em;text-transform:uppercase;">Tích điểm nhận đặc quyền</span>
-        </div>
-      </div>
-
-      <!-- Input -->
-      <div style="position:relative;margin-bottom:14px;">
-        <input type="tel" id="login-sdt" placeholder="Số điện thoại của bạn..."
-          style="width:100%;padding:18px 24px;border-radius:18px;background:rgba(255,255,255,0.06);border:1px solid rgba(77,255,160,0.2);color:#ffffff;font-size:16px;font-weight:600;text-align:center;outline:none;box-sizing:border-box;font-family:'Inter',sans-serif;-webkit-tap-highlight-color:transparent;"
-          onfocus="this.style.borderColor='rgba(77,255,160,0.5)';this.style.background='rgba(255,255,255,0.09)';"
-          onblur="this.style.borderColor='rgba(77,255,160,0.2)';this.style.background='rgba(255,255,255,0.06)';">
-        <div style="position:absolute;inset:0;border-radius:18px;pointer-events:none;background:linear-gradient(135deg,rgba(255,255,255,0.04) 0%,transparent 60%);"></div>
-      </div>
-
-      <!-- Login button -->
-      <button id="btn-login" onclick="login()"
-        style="width:100%;padding:18px 24px;border-radius:18px;background:linear-gradient(135deg,#006241 0%,#00a36c 100%);border:none;color:#ffffff;font-size:15px;font-weight:800;letter-spacing:0.1em;text-transform:uppercase;cursor:pointer;font-family:'Inter',sans-serif;box-shadow:0 0 32px rgba(0,180,100,0.35),0 4px 16px rgba(0,0,0,0.4);transition:all 0.2s;-webkit-tap-highlight-color:transparent;position:relative;overflow:hidden;"
-        ontouchstart="this.style.transform='scale(0.97)'" ontouchend="this.style.transform='scale(1)'">
-        <div style="position:absolute;inset:0;background:linear-gradient(135deg,rgba(255,255,255,0.12) 0%,transparent 60%);pointer-events:none;"></div>
-        Đăng nhập
-      </button>
-
-      <!-- Register link -->
-      <p style="margin-top:24px;font-size:13px;color:rgba(255,255,255,0.3);font-weight:500;">Chưa có tài khoản?</p>
-      <button onclick="showRegister()" style="background:none;border:none;color:#4dffa0;font-size:12px;font-weight:800;letter-spacing:0.14em;text-transform:uppercase;cursor:pointer;padding:8px 0;font-family:'Inter',sans-serif;text-shadow:0 0 12px rgba(77,255,160,0.4);">
-        Đăng ký thành viên mới
-      </button>
+      <p class="lc-eyebrow">Một tài khoản · Hai chốn quen</p>
+      <h1 class="lc-h1">Chốn quen.<br><span>Đặc quyền riêng.</span></h1>
+      <p class="lc-caption"><span>Tích điểm</span><i></i><span>Đổi quà</span><i></i><span>Đặt Cafe in Bed</span></p>
+      <form onsubmit="event.preventDefault();login()" autocomplete="on">
+        <input type="tel" inputmode="tel" autocomplete="tel" id="login-sdt" placeholder="Số điện thoại của bạn...">
+        <button id="btn-login" type="submit">Đăng nhập</button>
+      </form>
     </div>
 
-    <style>
-      @keyframes lsblob1 {
-        0%   { transform:translate(0,0) scale(1); }
-        33%  { transform:translate(50px,20px) scale(1.1); }
-        66%  { transform:translate(25px,45px) scale(0.95); }
-        100% { transform:translate(60px,30px) scale(1.18); }
+    <div class="lc-foot">
+      <p class="lc-reg-q">Chưa có tài khoản?</p>
+      <button type="button" class="lc-reg" onclick="showRegister()">Đăng ký thành viên mới</button>
+      <p class="lc-footer">The cafe 33 × XOFA</p>
+    </div>
+    <script>
+    (function () { // sao lấp lánh: vị trí / cỡ / nhịp ngẫu nhiên, chỉ dựng 1 lần
+      var box = document.getElementById('lc-stars'); if (!box) return;
+      var html = '';
+      for (var i = 0; i < 46; i++) {
+        var s = (Math.random() < .18 ? 3 : (Math.random() < .5 ? 2 : 1.4));
+        html += '<i class="lc-star" style="left:' + (Math.random() * 100).toFixed(1) + '%;top:' + (Math.random() * 100).toFixed(1) + '%;--s:' + s + 'px;--d:' + (2.5 + Math.random() * 4).toFixed(1) + 's;--dl:-' + (Math.random() * 6).toFixed(1) + 's"></i>';
       }
-      @keyframes lsblob2 {
-        0%   { transform:translate(0,0) scale(1); }
-        33%  { transform:translate(-30px,35px) scale(1.08); }
-        66%  { transform:translate(-15px,55px) scale(1.12); }
-        100% { transform:translate(-40px,45px) scale(0.92); }
-      }
-      @keyframes lsblob3 {
-        0%   { transform:translate(0,0) scale(1); }
-        50%  { transform:translate(35px,-25px) scale(1.2); }
-        100% { transform:translate(20px,-40px) scale(1.08); }
-      }
-      @keyframes lsblob4 {
-        0%   { transform:translate(0,0) scale(1); }
-        50%  { transform:translate(-25px,-20px) scale(1.15); }
-        100% { transform:translate(-35px,-30px) scale(0.9); }
-      }
-      @keyframes lspulse {
-        0%,100% { opacity:1; transform:scale(1); }
-        50%      { opacity:0.4; transform:scale(0.7); }
-      }
-      #login-sdt::placeholder { color:rgba(255,255,255,0.25); }
-    </style>
+      box.innerHTML = html;
+    })();
+    </script>
   </div>
 <div id="register-screen" class="hidden flex-col min-h-screen p-8 bg-white text-center">
     <div class="pt-2 mb-6 text-left">
