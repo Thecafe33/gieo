@@ -684,8 +684,6 @@ input, button, select, textarea { font-size: 1rem; }
     from { opacity: 0; transform: translateY(-6px); }
     to { opacity: 1; transform: translateY(0); }
 }
-/* [14/10] Pill order bed chỉ dành cho PC (điện thoại có thanh riêng) */
-@media only screen and (max-width: 768px) { #main-container > #bed-dynamic-island { display: none !important; } }
 #bed-dynamic-island:not(.hidden) {
     display: flex !important;
     animation: slide-up-island 0.4s cubic-bezier(0.16, 1, 0.3, 1);
@@ -941,25 +939,6 @@ input, button, select, textarea { font-size: 1rem; }
     <div class="flex items-center gap-3 ml-auto">
         <span id="clock" class="font-mono text-sm font-bold text-gray-400 tabular-nums"></span>
     </div>
-</div>
-<!-- [14/10] Pill "đang order cho bed" (PC): hàng riêng dưới thanh đầu — trước nổi giữa thanh đầu, đè lên các nút tab. Giữ id/hàm cũ. -->
-<div id="bed-dynamic-island" class="hidden shrink-0 self-center items-center gap-4 bg-[#1e3932] rounded-full pl-2 pr-2 py-2 mt-3 mb-1 shadow-lg min-w-[460px] max-w-[92%]">
-    <div class="flex items-center justify-center w-11 h-11 bg-white/15 rounded-full shrink-0">
-        <span class="material-symbols-outlined text-white text-[24px]">bed</span>
-    </div>
-    <div class="flex-1 min-w-0">
-        <p class="text-emerald-300 text-[10px] font-black uppercase tracking-[0.18em] leading-none mb-1">Đang order cho bed</p>
-        <p class="flex items-baseline gap-2 min-w-0 leading-tight">
-            <span id="island-cust-name" class="text-white font-black text-[16px] uppercase truncate">Tên khách</span>
-            <span id="island-time-range" class="text-white/70 text-[13px] font-bold tracking-wide shrink-0">00:00 - 00:00</span>
-        </p>
-    </div>
-    <div class="bg-emerald-500 px-3.5 py-1.5 rounded-full shrink-0">
-        <span id="island-duration" class="text-white font-black text-[12px] uppercase">0 Tiếng</span>
-    </div>
-    <button onclick="resetOrderingMode()" class="shrink-0 flex items-center gap-1.5 h-11 pl-3 pr-4 rounded-full bg-white/10 hover:bg-red-500 text-white font-black text-[12px] uppercase tracking-wide transition-colors">
-        <span class="material-symbols-outlined text-[20px]">close</span> Thoát order
-    </button>
 </div>
    <div id="view-menu" class="flex-1 flex flex-col overflow-hidden relative bg-[#F2F2F7]">
 
@@ -5704,22 +5683,24 @@ function _doShowBedDetail(booking, bedId) {
     }
 
     if (cartInfo) {
+        // [14/10] Dải "ĐANG ORDER: BED xx - tên" → pill (icon giường, tên, bed · giờ, số tiếng, nút thoát).
+        // Cùng chỗ, cùng khoảng chiếm như dải cũ → menu / thanh đầu / nút trong giỏ không xê dịch. Thay pill nổi ở thanh đầu (trước đè lên nút tab).
         var guestName = booking.name || "Khách hàng";
-        cartInfo.className = "p-3 mb-3 rounded-2xl text-center font-black uppercase text-[10px] tracking-widest animate-pulse border-2";
-
-        if (booking.bedId && booking.bedId != 0 && booking.bedId != "WAITING") {
-            cartInfo.innerText = `🟢 ĐANG ORDER: BED 0${booking.bedId} - ${guestName}`;
-            cartInfo.classList.add('bg-green-50', 'text-[#006241]', 'border-[#006241]/20');
-            cartInfo.classList.remove('bg-amber-50', 'text-[#d97706]', 'border-[#d97706]/20');
-        } else {
-            cartInfo.innerText = `🟠 ĐANG ORDER: KHÁCH CHỜ - ${guestName}`;
-            cartInfo.classList.add('bg-amber-50', 'text-[#d97706]', 'border-[#d97706]/20');
-            cartInfo.classList.remove('bg-green-50', 'text-[#006241]', 'border-[#006241]/20');
-        }
+        var _hasBed = booking.bedId && booking.bedId != 0 && booking.bedId != "WAITING";
+        var _e = (typeof _escGiftTxt === 'function') ? _escGiftTxt : function (x) { return String(x == null ? '' : x); };
+        var _dur = (typeof getDurationLabel === 'function') ? getDurationLabel(booking.start, booking.end) : '';
+        cartInfo.className = 'cart-bed-pill ' + (_hasBed ? 'has-bed' : 'waiting');
+        cartInfo.removeAttribute('style');
+        cartInfo.innerHTML =
+            '<span class="cbp-ic"><span class="material-symbols-outlined">bed</span></span>'
+            + '<span class="cbp-txt"><span class="cbp-name">' + _e(guestName) + '</span>'
+            + '<span class="cbp-sub">' + (_hasBed ? 'BED 0' + _e(booking.bedId) : 'KHÁCH CHỜ XẾP BED') + ' · ' + _e(booking.start || '') + ' – ' + _e(booking.end || '') + '</span></span>'
+            + (_dur ? '<span class="cbp-dur">' + _e(_dur) + '</span>' : '')
+            + '<button type="button" class="cbp-x" title="Thoát order bed" aria-label="Thoát order bed" onclick="resetOrderingMode()"><span class="material-symbols-outlined">close</span></button>';
     }
 
     const island = document.getElementById('bed-dynamic-island');
-    if (island && booking) {
+    if (island && booking && false) { // [14/10] thay bằng pill ở đầu giỏ hàng (#cart-bed-info)
         document.getElementById('island-cust-name').innerText = booking.name || "Khách lẻ";
         document.getElementById('island-time-range').innerText = `${booking.start} - ${booking.end}`;
         document.getElementById('island-duration').innerText = getDurationLabel(booking.start, booking.end);
@@ -13926,6 +13907,21 @@ function keypadConfirm() {
     #mob-cat-spacer { height: 74px !important; }
     #view-menu-content #menu-grid p.menu-price { background: rgba(255,255,255,.92) !important; color: var(--mc, #006241) !important; font-size: 13px !important; font-weight: 700 !important; padding: 5px 10px !important; border-radius: 20px !important; min-width: 0 !important; align-self: flex-start !important; }
 }
+</style>
+<!-- [14/10] PILL ORDER BED ở đầu giỏ hàng PC (#cart-bed-info.cart-bed-pill) — cao 38px + lề dưới 10px = đúng chỗ dải cũ (đã đo: ô SĐT không xê dịch) -->
+<style>
+#cart-bed-info.cart-bed-pill{ display:flex; align-items:center; gap:10px; height:38px; margin-bottom:10px; padding:0 4px; border-radius:999px; background:#1e3932; color:#fff; box-shadow:0 6px 16px -8px rgba(30,57,50,.6); }
+#cart-bed-info.cart-bed-pill.waiting{ background:#b45309; box-shadow:0 6px 16px -8px rgba(180,83,9,.6); }
+#cart-bed-info .cbp-ic{ width:30px; height:30px; border-radius:999px; background:rgba(255,255,255,.16); display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+#cart-bed-info .cbp-ic .material-symbols-outlined{ font-size:19px; }
+#cart-bed-info .cbp-txt{ flex:1; min-width:0; display:flex; flex-direction:column; line-height:1.15; }
+#cart-bed-info .cbp-name{ font-weight:900; font-size:12.5px; text-transform:uppercase; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+#cart-bed-info .cbp-sub{ font-weight:700; font-size:10px; letter-spacing:.04em; opacity:.8; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+#cart-bed-info .cbp-dur{ flex-shrink:0; background:#10b981; color:#fff; font-weight:900; font-size:10px; text-transform:uppercase; padding:3px 8px; border-radius:999px; }
+#cart-bed-info.waiting .cbp-dur{ background:rgba(255,255,255,.22); }
+#cart-bed-info .cbp-x{ width:30px; height:30px; border-radius:999px; background:rgba(255,255,255,.12); color:#fff; display:flex; align-items:center; justify-content:center; flex-shrink:0; transition:background .15s; }
+#cart-bed-info .cbp-x:hover{ background:#ef4444; }
+#cart-bed-info .cbp-x .material-symbols-outlined{ font-size:18px; }
 </style>
 <!-- [14/10] CHUÔNG BED: (1) lịch hôm nay chờ nhận bed + nhãn MỚI; (2) bed đang dùng sắp hết giờ (≤ 10 phút) / quá giờ.
      Chỉ dùng 1 listener RT bedBookings/{hôm nay} — đếm giờ tính lại trên máy mỗi 30 giây, không đọc thêm. -->
