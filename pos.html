@@ -887,9 +887,15 @@ input, button, select, textarea { font-size: 1rem; }
 
 <div class="flex-1 bg-white rounded-[2.5rem] shadow-xl overflow-hidden flex flex-col relative border-2 border-white transition-colors duration-500" id="main-container">
   <div class="md:hidden px-5 py-4 flex items-center justify-between sticky top-0 z-50 transition-all duration-300 relative"
-     style="background: #F2F2F7; border-bottom: 1px solid rgba(0,0,0,0.05);"> <button onclick="toggleMobileMenu()" class="w-12 h-12 rounded-full bg-white shadow-sm border border-white flex items-center justify-center text-[#006241] active:scale-90 transition-transform relative z-10">
+     style="background: #F2F2F7; border-bottom: 1px solid rgba(0,0,0,0.05);"> <div class="flex items-center gap-2 relative z-10"> <button onclick="toggleMobileMenu()" class="w-12 h-12 rounded-full bg-white shadow-sm border border-white flex items-center justify-center text-[#006241] active:scale-90 transition-transform relative z-10">
         <svg xmlns="http://www.w3.org/2000/svg" class="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"></line><line x1="4" y1="12" x2="20" y2="12"></line><line x1="4" y1="18" x2="12" y2="18"></line></svg>
     </button>
+    <!-- [14/10] Chuông lịch bed chờ nhận (_bellRender) -->
+    <button id="bell-btn-mob" onclick="bellOpen()" aria-label="Lịch bed chờ nhận" class="bell-btn w-10 h-10 rounded-full bg-white shadow-sm border border-white flex items-center justify-center text-[#006241] active:scale-90 transition-transform relative">
+        <span class="material-symbols-outlined text-[22px]">notifications</span>
+        <span class="bell-count hidden absolute -top-1 -right-1 min-w-[20px] h-5 px-1 rounded-full bg-red-500 text-white text-[10px] font-black flex items-center justify-center border-2 border-white"></span>
+    </button>
+    </div>
 
     <h2 class="brand-font text-3xl font-black text-[#006241] tracking-tighter cursor-pointer absolute left-1/2 -translate-x-1/2" onclick="switchView('menu')">The cafe 33</h2>
 
@@ -922,6 +928,11 @@ input, button, select, textarea { font-size: 1rem; }
         <!-- Ca làm việc: nút tròn nhỏ, mở popup (cham_cong.v2.js) -->
         <button id="btn-nav-calamviec" onclick="ChamCong.open()" title="Ca làm việc — Check-in / Check-out" aria-label="Ca làm việc" class="w-11 h-11 bg-gray-100 text-gray-500 rounded-2xl flex items-center justify-center hover:bg-[#006241] hover:text-white active:scale-95 transition-all">
             <span class="material-symbols-outlined text-[22px]">badge</span>
+        </button>
+        <!-- [14/10] Chuông lịch bed chờ nhận (_bellRender) -->
+        <button id="bell-btn-pc" onclick="bellOpen()" title="Lịch bed chờ nhận" aria-label="Lịch bed chờ nhận" class="bell-btn w-11 h-11 bg-gray-100 text-gray-500 rounded-2xl flex items-center justify-center hover:bg-[#006241] hover:text-white active:scale-95 transition-all relative">
+            <span class="material-symbols-outlined text-[22px]">notifications</span>
+            <span class="bell-count hidden absolute -top-1 -right-1 min-w-[20px] h-5 px-1 rounded-full bg-red-500 text-white text-[10px] font-black flex items-center justify-center border-2 border-white"></span>
         </button>
     </div>
   <div id="bed-dynamic-island" class="hidden absolute left-[55%] -translate-x-1/2 flex items-center bg-[#1e3932] rounded-full py-1.5 px-5 gap-3 border border-white/10 shadow-2xl z-50 animate-slide-up min-w-[320px]">
@@ -2824,6 +2835,7 @@ fstore.collection('customers').onSnapshot(snap => {
     });
     switchView('menu');
     listenToClientInput();
+    _bellInit();
 
     checkAndSyncDailyRevenue();
 };
@@ -13877,6 +13889,125 @@ function keypadConfirm() {
     try { t.showPicker(); } catch (_) {}
   }, true);
 })();
+</script>
+
+<!-- [14/10] CHUÔNG LỊCH BED: lịch hôm nay đang chờ nhận bed (chưa có bed, chưa huỷ/xong) + nhãn MỚI cho lịch tạo sau lần xem gần nhất -->
+<style>
+.bell-btn.bell-has{ background:#006241 !important; color:#fff !important; }
+.bell-btn.bell-new .material-symbols-outlined{ animation: bellRing 1.6s ease-in-out infinite; transform-origin: 50% 10%; }
+@keyframes bellRing{ 0%,60%,100%{transform:rotate(0)} 10%{transform:rotate(14deg)} 20%{transform:rotate(-12deg)} 30%{transform:rotate(9deg)} 40%{transform:rotate(-6deg)} 50%{transform:rotate(3deg)} }
+#bell-modal .bell-row{ display:flex; align-items:center; gap:12px; width:100%; text-align:left; background:#fff; border-radius:20px; padding:14px 16px; box-shadow:0 2px 10px rgba(0,0,0,.04); }
+#bell-modal .bell-row:active{ background:#f0fdf4; }
+#bell-modal .bell-time{ flex-shrink:0; min-width:58px; height:44px; border-radius:14px; background:#e8f5ee; color:#006241; font-weight:900; font-size:15px; display:flex; align-items:center; justify-content:center; }
+#bell-modal .bell-row.late .bell-time{ background:#fef3c7; color:#b45309; }
+#bell-modal .bell-new-tag{ background:#ef4444; color:#fff; font-size:9px; font-weight:900; padding:2px 7px; border-radius:99px; letter-spacing:.05em; margin-left:6px; vertical-align:middle; }
+</style>
+<div id="bell-modal" class="hidden fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onclick="if(event.target===this) bellClose()">
+  <div class="bg-[#F2F2F7] w-full max-w-[400px] max-h-[85vh] rounded-3xl shadow-2xl overflow-hidden flex flex-col animate-bed-pop">
+    <div class="bg-[#006241] px-6 py-5 flex justify-between items-center shrink-0">
+      <div>
+        <h3 class="text-white text-xl font-bold tracking-wide">Lịch chờ nhận bed</h3>
+        <p id="bell-sub" class="text-green-100/80 text-sm mt-0.5">Hôm nay</p>
+      </div>
+      <button onclick="bellClose()" aria-label="Đóng" class="w-8 h-8 rounded-full bg-black/20 flex items-center justify-center text-white">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
+      </button>
+    </div>
+    <div id="bell-list" class="p-4 space-y-3 overflow-y-auto"></div>
+    <div class="px-6 pb-5 text-center text-gray-400 text-[10px] font-medium uppercase tracking-wider">Chạm vào lịch để mở ở màn Bed</div>
+  </div>
+</div>
+<script>
+var _bellRef = null, _bellDay = '', _bellList = [], _bellSeenKey = 'pos_bell_seen_v1';
+function _bellDayKey(d) { d = d || new Date(); return d.getFullYear() + '/' + String(d.getMonth() + 1).padStart(2, '0') + '/' + String(d.getDate()).padStart(2, '0'); }
+function _bellSeen() { try { return +localStorage.getItem(_bellSeenKey) || 0; } catch (e) { return 0; } }
+function _bellIsWaiting(b) {
+    if (!b) return false;
+    var st = String(b.status || '').toLowerCase();
+    if (st.indexOf('đã hủy') >= 0 || st.indexOf('đã huỷ') >= 0 || st.indexOf('đã xong') >= 0 || st.indexOf('active') >= 0 || st.indexOf('đang dùng') >= 0) return false;
+    return !b.bedId || b.bedId == 'WAITING';
+}
+// Lịch tạo sau lần xem danh sách gần nhất (khách tại quầy do nhân viên tự tạo → không tính MỚI)
+function _bellIsNew(b, seen) {
+    if (!b || b.isWalkIn || b.type === 'walk-in') return false;
+    var t = (typeof _bookingCreatedMs === 'function') ? _bookingCreatedMs(b) : 0;
+    return t > seen;
+}
+function _bellInit() {
+    var day = _bellDayKey();
+    if (day === _bellDay && _bellRef) return;
+    if (_bellRef) { try { _bellRef.off('value'); } catch (e) {} }
+    _bellDay = day;
+    _bellRef = db.ref('bedBookings/' + day);
+    _bellRef.on('value', function (snap) {
+        var data = snap.val() || {};
+        _bellList = Object.keys(data).map(function (k) { var o = Object.assign({}, data[k]); o.id = k; o.key = k; return o; })
+            .filter(_bellIsWaiting)
+            .sort(function (a, b) { return String(a.start || '').localeCompare(String(b.start || '')); });
+        _bellRender();
+    });
+}
+setInterval(function () { if (_bellRef && _bellDayKey() !== _bellDay) _bellInit(); }, 60000); // qua ngày → nghe ngày mới
+function _bellRender() {
+    var seen = _bellSeen(), n = _bellList.length;
+    var hasNew = _bellList.some(function (b) { return _bellIsNew(b, seen); });
+    document.querySelectorAll('.bell-btn').forEach(function (btn) {
+        btn.classList.toggle('bell-has', n > 0);
+        btn.classList.toggle('bell-new', hasNew);
+        var c = btn.querySelector('.bell-count');
+        if (c) { c.textContent = n > 99 ? '99+' : String(n); c.classList.toggle('hidden', n === 0); }
+    });
+    var m = document.getElementById('bell-modal');
+    if (m && !m.classList.contains('hidden')) _bellRenderList(seen);
+}
+function _bellRenderList(seen) {
+    var box = document.getElementById('bell-list'); if (!box) return;
+    var sub = document.getElementById('bell-sub');
+    if (sub) sub.textContent = _bellList.length ? ('Hôm nay · ' + _bellList.length + ' lịch') : 'Hôm nay';
+    if (!_bellList.length) { box.innerHTML = '<div class="text-center text-gray-400 text-sm font-bold py-10">Không có lịch nào đang chờ</div>'; return; }
+    var esc = (typeof _escGiftTxt === 'function') ? _escGiftTxt : function (x) { return String(x == null ? '' : x); };
+    var now = new Date(), nowHm = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+    box.innerHTML = _bellList.map(function (b, i) {
+        var t = (typeof _bookingCreatedMs === 'function') ? _bookingCreatedMs(b) : 0;
+        var made = t ? new Date(t).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '';
+        var late = b.start && String(b.start) < nowHm;
+        var walk = (b.isWalkIn || b.type === 'walk-in');
+        return '<button type="button" class="bell-row' + (late ? ' late' : '') + '" data-i="' + i + '">'
+            + '<span class="bell-time">' + esc(b.start || '--:--') + '</span>'
+            + '<span class="flex-1 min-w-0">'
+            + '<span class="flex items-center min-w-0"><span class="text-[15px] font-black text-gray-900 truncate">' + esc(b.name || 'Khách') + '</span>' + (_bellIsNew(b, seen) ? '<span class="bell-new-tag shrink-0">MỚI</span>' : '') + '</span>'
+            + '<span class="block text-[12px] font-semibold text-gray-400 mt-0.5">' + esc(b.start || '') + ' – ' + esc(b.end || '') + (walk ? ' · Tại quầy' : ' · App') + (made ? ' · đặt lúc ' + made : '') + (late ? ' · đã tới giờ' : '') + '</span>'
+            + '</span>'
+            + '<span class="material-symbols-outlined text-gray-300">chevron_right</span>'
+            + '</button>';
+    }).join('');
+    box.querySelectorAll('.bell-row').forEach(function (el) { el.onclick = function () { bellGo(_bellList[+el.getAttribute('data-i')]); }; });
+}
+function bellOpen() {
+    var seen = _bellSeen();
+    document.getElementById('bell-modal').classList.remove('hidden');
+    _bellRenderList(seen);               // hiện nhãn MỚI theo lần xem trước
+    try { localStorage.setItem(_bellSeenKey, String(Date.now())); } catch (e) {}
+    document.querySelectorAll('.bell-btn').forEach(function (btn) { btn.classList.remove('bell-new'); });
+}
+function bellClose() { document.getElementById('bell-modal').classList.add('hidden'); }
+// Mở màn Bed rồi mở đúng lịch (chờ màn Bed nạp xong danh sách)
+function bellGo(b) {
+    if (!b) return;
+    bellClose();
+    openBedManager();
+    var mobile = window.innerWidth <= 768, tries = 0;
+    var iv = setInterval(function () {
+        tries++;
+        if (mobile) {
+            if ((globalAllBookings || []).some(function (x) { return x.id === b.id; })) { clearInterval(iv); showMobileBedDetail(b.id); return; }
+        } else {
+            var idx = (currentBedList || []).findIndex(function (x) { return x.id === b.id; });
+            if (idx >= 0) { clearInterval(iv); selectBedItem(idx); return; }
+        }
+        if (tries > 30) clearInterval(iv);
+    }, 150);
+}
 </script>
 </body>
 </html>
