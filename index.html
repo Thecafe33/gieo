@@ -835,6 +835,33 @@ button:active{ transition-duration: .12s !important; }
 .rw-img img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
 .rw-arrow{flex-shrink:0;width:40px;height:40px;border-radius:50%;background:#eef8f2;color:#006241;display:flex;align-items:center;justify-content:center}
 
+/* ── [13/10] Báo lỗi tại chỗ (thay alert) · Bed tạm ngưng · Lịch sắp tới ── */
+.bk-err-box{box-shadow:0 0 0 2px #f87171 !important;background-color:#fff5f5 !important;border-radius:16px;transition:box-shadow .2s}
+/* ô đang được chọn (focus) vẫn giữ viền đỏ tới khi khách gõ — đè rule focus xanh của ô bg-gray-50 */
+#tab-bed input.bk-err-box, #tab-bed input.bk-err-box:focus{box-shadow:0 0 0 2px #f87171 !important;border-color:#f87171 !important;background-color:#fff5f5 !important}
+.bk-err-msg{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:#dc2626;margin:6px 4px 0;text-align:left;animation:bkErrIn .25s ease}
+.bk-err-msg:before{content:"!";flex-shrink:0;width:16px;height:16px;border-radius:50%;background:#dc2626;color:#fff;font-size:11px;font-weight:900;display:flex;align-items:center;justify-content:center}
+@keyframes bkErrIn{from{opacity:0;transform:translateY(-3px)}}
+.bk-off{display:flex;gap:12px;align-items:flex-start;background:linear-gradient(160deg,#fff 0%,#fff6f5 100%);border:1px solid #fde2df;border-radius:22px;padding:14px 16px;margin:-6px 0 18px;text-align:left;box-shadow:0 10px 24px -16px rgba(185,28,28,.35)}
+.bk-off .ic{width:38px;height:38px;border-radius:12px;background:#fee2e2;display:flex;align-items:center;justify-content:center;flex-shrink:0;color:#dc2626}
+.bk-off .t{font-size:14px;font-weight:900;color:#991b1b;margin:1px 0 6px}
+.bk-off .r{display:flex;gap:8px;font-size:12.5px;line-height:1.5;color:#7f1d1d}
+.bk-off .r span:first-child{flex-shrink:0;width:52px;color:#b45353;font-weight:700}
+.bk-off .r span:last-child{font-weight:800}
+.bk-up{display:flex;gap:14px;align-items:stretch;background:#fff;border-radius:24px;padding:14px;margin:-6px 0 18px;text-align:left;border:1px solid rgba(0,98,65,.08);box-shadow:0 1px 2px rgba(0,0,0,.04),0 16px 34px -20px rgba(0,60,40,.35)}
+.bk-up .d{width:62px;flex-shrink:0;border-radius:18px;background:linear-gradient(160deg,#00a36c,#006241);color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px 0}
+.bk-up .d small{font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;opacity:.8}
+.bk-up .d b{font-size:24px;font-weight:900;line-height:1.1}
+.bk-up .m{flex:1;min-width:0;display:flex;flex-direction:column}
+.bk-up .k{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.bk-up .k span:first-child{font-size:10px;font-weight:800;letter-spacing:.12em;color:#00a36c;text-transform:uppercase}
+.bk-up .chip{font-size:10.5px;font-weight:800;color:#92400e;background:#fff4e0;padding:3px 9px;border-radius:999px;white-space:nowrap}
+.bk-up .tm{font-size:21px;font-weight:900;color:#1e3932;letter-spacing:-.01em;margin:4px 0 1px;font-variant-numeric:tabular-nums}
+.bk-up .s{font-size:12px;font-weight:600;color:#8b9892}
+.bk-up .a{display:flex;gap:8px;margin-top:10px}
+.bk-up .a button{flex:1;height:36px;border-radius:999px;font-size:12.5px;font-weight:800;background:#f3f5f4;color:#1e3932}
+.bk-up .a button.x{color:#dc2626}
+
 /* ── [13/10] Chọn ngày dạng chip · thanh số giờ · vòng đếm ngược ── */
 .bd-chips{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;padding:2px 2px 4px;margin:4px -2px 0;-webkit-overflow-scrolling:touch}
 .bd-chips::-webkit-scrollbar{display:none}
@@ -1372,6 +1399,9 @@ input[type="checkbox"]:checked::after{
         </div>
       </div>
       <!-- ── END BANNER ── -->
+      <!-- [13/10] Bed tạm ngưng + Lịch sắp tới — nằm dưới Lưu ý quan trọng -->
+      <div id="bk-store-off" class="bk-off" style="display:none"></div>
+      <div id="bk-upcoming"></div>
 
       <h3 class="text-2xl text-[#006241] mb-6 brand-font text-left">Đặt chỗ Cafe in Bed</h3>
       <div class="bg-white p-7 rounded-[2.5rem] shadow-sm border border-gray-100 space-y-7 text-left">
@@ -1971,10 +2001,10 @@ function _fetchBookingsByPhone(phone, callback) {
     var results = [];
     var rtKeys = new Set();
 
-    // Build danh sách ngày: từ 180 ngày trước đến hôm nay
+    // [13/10] Chỉ 30 ngày gần nhất (trước quét 180 ngày → mở Lịch sử rất chậm, tốn lượt đọc). Chủ dự án chốt.
     var days = [];
     var now = new Date(); now.setHours(0,0,0,0);
-    for (var i = 0; i <= 180; i++) {
+    for (var i = 0; i <= 30; i++) {
         var d = new Date(now);
         d.setDate(now.getDate() - i);
         var y = d.getFullYear();
@@ -2223,6 +2253,117 @@ function _bdSync() {
         _bdSync();
         // Code cũ có chỗ gán .value trực tiếp (đặt xong, đổi giờ gợi ý…) không bắn sự kiện → soát nhẹ mỗi 0,7 giây
         setInterval(_bdSync, 700);
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', go); else go();
+})();
+
+// ════════════════════════════════════════════════════
+// [13/10] BÁO LỖI TẠI CHỖ — thay alert(): viền đỏ quanh ô thiếu + dòng nhắc ngay dưới, cuộn tới đó.
+// Tự gỡ khi khách sửa ô đó. Trả về undefined để dùng kiểu `return _bkFieldErr(...)` như alert cũ.
+// ════════════════════════════════════════════════════
+function _bkFieldErr(id, msg) {
+    var el = document.getElementById(id);
+    if (!el) { if (typeof showAppModal === 'function') showAppModal('Còn thiếu thông tin', msg, '📝'); return; }
+    // Ô cần tô viền: checkbox nội quy → khung chứa nó; còn lại → chính ô nhập / hàng chip
+    var box = (el.type === 'checkbox') ? el.parentElement : el;
+    document.querySelectorAll('.bk-err-msg').forEach(function (m) { m.remove(); });
+    document.querySelectorAll('.bk-err-box').forEach(function (b) { b.classList.remove('bk-err-box'); });
+    box.classList.add('bk-err-box');
+    var m = document.createElement('p'); m.className = 'bk-err-msg'; m.textContent = msg;
+    box.insertAdjacentElement('afterend', m);
+    try { box.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) { box.scrollIntoView(); }
+    if (el.type === 'text' || el.type === 'tel') setTimeout(function () { try { el.focus({ preventScroll: true }); } catch (e) {} }, 350);
+    var clear = function () { box.classList.remove('bk-err-box'); if (m.parentNode) m.remove(); };
+    ['input', 'change', 'click'].forEach(function (ev) { box.addEventListener(ev, clear, { once: true }); });
+    if (id === 'bd-chips') document.getElementById('book-date').addEventListener('change', clear, { once: true });
+}
+
+// ════════════════════════════════════════════════════
+// [13/10] BED TẠM NGƯNG — thẻ dưới "Lưu ý quan trọng" (theo dõi store_status, POS bật/tắt là đổi ngay)
+// ════════════════════════════════════════════════════
+var _storeOffRef = null, _storeOffTimer = null;
+function _storeOffRender(st) {
+    var box = document.getElementById('bk-store-off'); if (!box) return;
+    clearTimeout(_storeOffTimer);
+    var until = st && st.isOff && st.offUntil ? new Date(st.offUntil) : null, now = new Date();
+    if (!until || isNaN(until) || until <= now) { box.style.display = 'none'; box.innerHTML = ''; return; }
+    var esc = function (x) { return String(x == null ? '' : x).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+    box.innerHTML = '<div class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 12h8"/></svg></div>'
+        + '<div style="min-width:0"><div class="t">Bed đang tạm ngưng nhận lịch</div>'
+        + '<div class="r"><span>Lý do</span><span>' + esc(st.reason || 'Bảo trì') + '</span></div>'
+        + '<div class="r"><span>Mở lại</span><span>' + _storeReopenTextVN(until, now) + '</span></div></div>';
+    box.style.display = 'flex';
+    _storeOffTimer = setTimeout(function () { _storeOffRender(st); }, Math.min(until - now + 1000, 3600000)); // tới giờ mở lại tự ẩn
+}
+function _storeOffWatch() {
+    if (_storeOffRef || typeof db === 'undefined') return;
+    _storeOffRef = db.ref('store_status');
+    _storeOffRef.on('value', function (snap) { _storeOffRender(snap.val()); });
+}
+
+// ════════════════════════════════════════════════════
+// [13/10] LỊCH SẮP TỚI — dưới "Lưu ý quan trọng": lịch của khách từ hôm nay tới 7 ngày tới (chưa huỷ / chưa xong,
+// chưa hết giờ). Đọc RT bedBookings từng ngày (ngày tương lai chưa bị lưu trữ nên không cần đọc kho lưu trữ),
+// nhớ 2 phút; đặt xong / đóng Lịch sử (sau đổi giờ, huỷ) thì đọc lại. Nút Đổi giờ / Huỷ dùng lại hàm cũ.
+// ════════════════════════════════════════════════════
+var _UP_DAYS = 7, _upCacheAt = 0, _upList = [];
+function _upTimeMs(b) {
+    var d = _parseBedDateKey(b.date || b.bookingDate); if (!d || !b.end) return 0;
+    var e = String(b.end).split(':');
+    return new Date(+d.year, +d.month - 1, +d.day, +e[0], +e[1]).getTime();
+}
+function _upcomingRefresh(force) {
+    if (!curPhone || typeof db === 'undefined') return;
+    if (!force && _upCacheAt && Date.now() - _upCacheAt < 120000) { _upcomingRender(); return; }
+    var phone = curPhone.replace(/[^0-9]/g, ''), t0 = _vnTodayParts(), out = [], pending = _UP_DAYS + 1;
+    _upCacheAt = Date.now();
+    for (var i = 0; i <= _UP_DAYS; i++) {
+        (function (d) {
+            var path = 'bedBookings/' + d.getFullYear() + '/' + _bdP2(d.getMonth() + 1) + '/' + _bdP2(d.getDate());
+            db.ref(path).once('value', function (snap) {
+                var v = snap.val() || {};
+                Object.keys(v).forEach(function (k) {
+                    var b = v[k]; if (!b || !b.phone || b.phone.replace(/[^0-9]/g, '') !== phone) return;
+                    var st = (b.status || '').toLowerCase(); if (st === 'đã hủy' || st === 'đã xong') return;
+                    var bb = Object.assign({ key: k }, b); if (_upTimeMs(bb) <= Date.now()) return;
+                    out.push(bb);
+                });
+                if (--pending === 0) { out.sort(function (a, b) { return _upTimeMs(a) - _upTimeMs(b); }); _upList = out; _upcomingRender(); }
+            }, function () { if (--pending === 0) { _upList = out; _upcomingRender(); } });
+        })(new Date(t0[0], t0[1], t0[2] + i));
+    }
+}
+function _upcomingRender() {
+    var box = document.getElementById('bk-upcoming'); if (!box) return;
+    if (!_upList.length) { box.innerHTML = ''; return; }
+    var THU = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'], t0 = _vnTodayParts();
+    var today = new Date(t0[0], t0[1], t0[2]).getTime();
+    box.innerHTML = _upList.map(function (b) {
+        var d = _parseBedDateKey(b.date || b.bookingDate), dd = new Date(+d.year, +d.month - 1, +d.day);
+        var diff = Math.round((dd.getTime() - today) / 86400000), mins = minutesUntilStart(b), chip;
+        if (diff === 0) chip = mins > 0 ? ('Hôm nay · còn ' + (mins >= 60 ? Math.floor(mins / 60) + 'g' + (mins % 60 ? _bdP2(mins % 60) : '') : mins + ' phút')) : 'Đang tới giờ';
+        else chip = diff === 1 ? 'Ngày mai' : (diff === 2 ? 'Ngày kia' : 'Còn ' + diff + ' ngày');
+        var bed = (b.bedId && b.bedId !== 'WAITING') ? ('Bed 0' + b.bedId) : (b.preferredBed ? ('Bed 0' + b.preferredBed + ' (đã chọn)') : 'Quán xếp bed khi bạn tới');
+        var meta = bed + ' · ' + (parseInt(b.guestCount, 10) || 1) + ' người';
+        var key = String(b.key).replace(/[^A-Za-z0-9_-]/g, '');
+        return '<div class="bk-up"><div class="d"><small>' + (diff === 0 ? 'Nay' : THU[dd.getDay()]) + '</small><b>' + dd.getDate() + '</b><small>Th' + (dd.getMonth() + 1) + '</small></div>'
+            + '<div class="m"><div class="k"><span>Lịch sắp tới</span><span class="chip">' + chip + '</span></div>'
+            + '<div class="tm">' + String(b.start || '').replace(/[^0-9:]/g, '') + ' – ' + String(b.end || '').replace(/[^0-9:]/g, '') + '</div>'
+            + '<div class="s">' + meta + '</div>'
+            + '<div class="a"><button type="button" onclick="_upAct(\'' + key + '\',\'r\')">Đổi giờ</button><button type="button" class="x" onclick="_upAct(\'' + key + '\',\'c\')">Huỷ lịch</button></div></div></div>';
+    }).join('');
+}
+// Đổi giờ / Huỷ: đưa lịch vào _historyCache (2 hàm cũ tra ở đó) rồi gọi đúng hàm cũ — mọi quy tắc khoá giữ nguyên
+function _upAct(key, act) {
+    var b = _upList.find(function (x) { return x.key === key; }); if (!b) return;
+    if (!_historyCache.find(function (x) { return x.key === key; })) _historyCache.push(b);
+    if (act === 'r') openRescheduleModal(key); else cancelBooking(key);
+}
+// Đóng Lịch sử (sau khi đổi giờ / huỷ ở đó hoặc từ thẻ) → đọc lại Lịch sắp tới
+(function () {
+    function go() {
+        var hm = document.getElementById('history-modal'); if (!hm || !window.MutationObserver) return;
+        new MutationObserver(function () { if (hm.classList.contains('hidden')) _upcomingRefresh(true); }).observe(hm, { attributes: true, attributeFilter: ['class'] });
     }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', go); else go();
 })();
@@ -3144,7 +3285,7 @@ function _checkActiveBooking(phone, dateYMD, callback) {
 
 function handleBooking() {
     // A. Validate Input (Giữ nguyên)
-    if (!document.getElementById('agree-rules').checked) return alert("Vui lòng đồng ý nội quy!");
+    if (!document.getElementById('agree-rules').checked) return _bkFieldErr('agree-rules', 'Bạn tick vào đây để đồng ý nội quy nhé');
 
     // A2. [MỚI] Bắt buộc pre-order đủ số nước theo số khách (mỗi khách 1 nước)
     var _requiredDrinks = _guestCount || 1;
@@ -3157,8 +3298,8 @@ function handleBooking() {
     // A3. [MỚI] Bắt buộc tên người đi cùng nếu đi từ 2 người trở lên
     var _cNameCheck  = (document.getElementById('book-cname')||{}).value || '';
     var _cName2Check = (document.getElementById('book-cname2')||{}).value || '';
-    if (_guestCount >= 2 && !_cNameCheck.trim()) return alert("Vui lòng nhập tên người đi cùng!");
-    if (_guestCount >= 3 && !_cName2Check.trim()) return alert("Vui lòng nhập tên người đi cùng thứ 2!");
+    if (_guestCount >= 2 && !_cNameCheck.trim()) return _bkFieldErr('book-cname', 'Nhập tên người đi cùng nhé');
+    if (_guestCount >= 3 && !_cName2Check.trim()) return _bkFieldErr('book-cname2', 'Nhập tên người đi cùng thứ 2 nhé');
 
     const loading = document.getElementById('loading-overlay');
     
@@ -3167,7 +3308,7 @@ function handleBooking() {
     const startVal = document.getElementById('book-start').value;
     let endVal = document.getElementById('book-end').value;
 
-    if(!dateVal || !startVal || !endVal) return alert("Nhập đủ ngày giờ!");
+    if(!dateVal || !startVal || !endVal) return _bkFieldErr(!dateVal ? 'bd-chips' : (!startVal ? 'book-start' : 'book-end'), !dateVal ? 'Chọn ngày bạn đến nhé' : (!startVal ? 'Chọn giờ bắt đầu nhé' : 'Chọn giờ kết thúc (hoặc kéo thanh số giờ) nhé'));
 
     const now = new Date();
     const d = String(now.getDate()).padStart(2, '0');
@@ -3286,7 +3427,7 @@ function handleBooking() {
         
         if(sMin >= eMin || sMin < 480 || eMin > _bedClosingMin || eMin - sMin < 30) { 
             clearTimeout(safetyTimer); loading.classList.add('hidden'); 
-            return alert(`Giờ không hợp lệ (08:00–${_bedClosingTime}, tối thiểu 30p)!`); 
+            return _bkFieldErr(sMin < 480 || sMin >= eMin ? 'book-start' : 'book-end', `Giờ chưa hợp lệ — quán nhận bed 08:00–${_bedClosingTime}, tối thiểu 30 phút`); 
         }
 
         // D. Check Active Booking
@@ -3483,6 +3624,7 @@ function handleBooking() {
 
 // --- MODAL ĐẶT BED THÀNH CÔNG (CÓ ẢNH ĐẬU XE) ---
 function showBookingSuccessModal(startVal, endVal, cb) {
+    _upCacheAt = 0; // [13/10] đặt xong → lần mở tab Đặt bed sau đọc lại Lịch sắp tới
     const overlay = document.getElementById('booking-success-overlay');
     document.getElementById('bs-time').innerHTML = `${startVal} – ${endVal}`;
     overlay.classList.remove('hidden');
@@ -6194,6 +6336,8 @@ showTab = function(t) {
         // Dọn dẹp listener cũ mỗi khi mở tab
         _bavStop();
         _bedTabInit();
+        _upcomingRefresh(false);
+        _storeOffWatch();
     }
 };
 
