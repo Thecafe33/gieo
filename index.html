@@ -767,8 +767,9 @@ button:active{ transition-duration: .12s !important; }
 [class~="active:scale-90"]:active{ transform: scale(0.97) !important; }
 [class~="active:scale-[0.98]"]:active{ transform: scale(0.99) !important; }
 
-/* [13/10] Thẻ thành viên: nhãn hạng 1 dòng, cách số điểm ≥12px; không đủ chỗ → số điểm xuống dòng (thẻ tự cao thêm, min 15rem thay h-60 cố định) */
-.mc-rank-row{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 12px}
+/* [13/10] Thẻ thành viên: nhãn hạng & số điểm LUÔN 1 hàng (chủ dự án chốt). Nhãn gọn 1 dòng, cách số ≥12px;
+   số điểm quá dài so với chỗ trống → tự giảm cỡ chữ (_mcFitPoints), không xuống dòng. */
+.mc-rank-row{display:flex;flex-wrap:nowrap;align-items:center;justify-content:space-between;gap:12px;min-width:0}
 /* ── 8. Thẻ thành viên (Member Card) — "Liquid Glass" sáng màu ──
    Nền sáng, nhiều đốm màu (xanh lá/vàng/hồng/xanh dương) trôi chậm
    bên dưới một lớp kính mờ phủ lên trên, tạo cảm giác cao cấp mà
@@ -1159,10 +1160,10 @@ input[type="checkbox"]:checked::after{
         </div>
         <div class="z-10">
           <p id="user-name-display" class="text-3xl font-bold uppercase mb-3" style="letter-spacing:0.05em;color:#14251f;text-shadow:0 1px 2px rgba(255,255,255,0.6);"></p>
-          <!-- [13/10] nhãn hạng 1 dòng + khoảng hở cố định với số điểm; không đủ chỗ thì số điểm xuống dòng (căn phải) -->
+          <!-- [13/10] nhãn hạng gọn 1 dòng + số điểm cùng hàng; số dài thì tự nhỏ chữ (_mcFitPoints) -->
           <div class="mc-rank-row">
-            <p id="user-rank" style="white-space:nowrap;flex-shrink:0;margin:0;font-size:10px;font-weight:800;letter-spacing:0.12em;text-transform:uppercase;background:linear-gradient(135deg,#f3e2ab,#c9a94e 60%,#a9873c);color:#3a2e0d;padding:6px 14px;border-radius:999px;box-shadow:0 3px 10px rgba(180,140,50,0.35);"></p>
-            <div class="text-right" style="margin-left:auto;line-height:1;white-space:nowrap;"><span id="user-points" class="text-5xl font-black" style="color:#00543a;text-shadow:0 1px 2px rgba(255,255,255,0.5);">0</span><span class="text-xs ml-1 font-bold" style="color:#00543a;opacity:0.7;">★</span></div>
+            <p id="user-rank" style="white-space:nowrap;flex-shrink:0;margin:0;font-size:10px;font-weight:800;letter-spacing:0.06em;text-transform:uppercase;background:linear-gradient(135deg,#f3e2ab,#c9a94e 60%,#a9873c);color:#3a2e0d;padding:6px 11px;border-radius:999px;box-shadow:0 3px 10px rgba(180,140,50,0.35);"></p>
+            <div class="text-right" style="margin-left:auto;line-height:1;white-space:nowrap;flex-shrink:0;"><span id="user-points" class="text-5xl font-black" style="color:#00543a;text-shadow:0 1px 2px rgba(255,255,255,0.5);">0</span><span class="text-xs ml-1 font-bold" style="color:#00543a;opacity:0.7;">★</span></div>
           </div>
         </div>
       </div>
@@ -2226,6 +2227,31 @@ function _bdSync() {
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', go); else go();
 })();
 
+// [13/10] Thẻ thành viên — nhãn hạng gọn (thẻ đã ghi MEMBER CARD nên bỏ chữ "Thành viên" ở đầu;
+// hạng thường giữ "Thành viên"). Chỉ đổi chữ HIỂN THỊ, cách xếp hạng không đổi.
+function _mcRankShort(r) {
+    var t = String(r || '').replace(/^Thành viên\s*/i, '').replace(/['"‘’“”]/g, '').trim();
+    return t || 'Thành viên';
+}
+// Số điểm & nhãn hạng luôn 1 hàng: hàng không đủ chỗ → giảm dần cỡ chữ số điểm (48px → tối thiểu 20px).
+function _mcFitPoints() {
+    var pts = document.getElementById('user-points'), row = document.getElementById('user-rank');
+    row = row && row.parentElement;
+    if (!pts || !row || !row.clientWidth) return;
+    var size = 48;
+    pts.style.fontSize = size + 'px';
+    while (row.scrollWidth > row.clientWidth && size > 20) { size -= 2; pts.style.fontSize = size + 'px'; }
+}
+// Thẻ có thể đang ẩn (tab khác) lúc điền điểm → đo lại khi hàng hiện ra / đổi kích thước
+(function () {
+    function go() {
+        var row = document.getElementById('user-rank'); row = row && row.parentElement;
+        if (row && window.ResizeObserver) new ResizeObserver(function () { _mcFitPoints(); }).observe(row);
+        else window.addEventListener('resize', _mcFitPoints);
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', go); else go();
+})();
+
 // --- 2. LOGIC CHUNG ---
 window.onload = function() {
     const today = _vnTodayYmd();
@@ -2372,7 +2398,8 @@ function showDashboard(phone) {
             if (p >= 55000) r = "Thành viên 'siu thân'";
             else if (p >= 33000) r = "Thành viên 'thân iu'";
             else if (p >= 10000) r = "Thành viên Bạc";
-            document.getElementById('user-rank').innerText = r;
+            document.getElementById('user-rank').innerText = _mcRankShort(r);
+            _mcFitPoints();
 
             // ==========================================================
             // 🎯 LẤY ĐÚNG KEY TỪ FIREBASE (lastCompName)
@@ -3689,6 +3716,7 @@ function redeemGift(name, cost, rewardKey) {
 
         const pointEl = document.getElementById('user-points');
         if(pointEl) pointEl.innerText = np.toLocaleString();
+        if (typeof _mcFitPoints === 'function') _mcFitPoints();
 
         showGiftVoucher({ name, cost, date: dateStr, time: timeStr, code: voucherCode });
 
