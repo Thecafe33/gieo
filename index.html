@@ -2368,6 +2368,17 @@ function _upAct(key, act) {
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', go); else go();
 })();
 
+// [14/10] PHÍ KHÔNG ĐẶT TRƯỚC — đặt lịch sát giờ (< 15 phút trước giờ bắt đầu) không bị chặn,
+// nhưng báo sẽ tính 10K (quán cần thời gian nhận lịch, chuẩn bị nước, dọn bed). POS dùng cùng mốc 15 phút.
+var NO_PREBOOK_MIN = 15, _noPrebookOkFor = null;
+/** Số phút từ BÂY GIỜ (giờ VN) tới giờ bắt đầu của lịch; null nếu không phải hôm nay / thiếu giờ. */
+function _noPrebookMinsLeft(dateYmd, startHm, nowMs) {
+    if (!dateYmd || !startHm || dateYmd !== _vnTodayYmd(nowMs)) return null;
+    var st = _bdMin(startHm); if (st == null) return null;
+    var vn = new Date((nowMs == null ? Date.now() : nowMs) + 7 * 3600000);
+    return st - (vn.getUTCHours() * 60 + vn.getUTCMinutes());
+}
+
 // [13/10] Thẻ thành viên — nhãn hạng gọn (thẻ đã ghi MEMBER CARD nên bỏ chữ "Thành viên" ở đầu;
 // hạng thường giữ "Thành viên"). Chỉ đổi chữ HIỂN THỊ, cách xếp hạng không đổi.
 function _mcRankShort(r) {
@@ -3382,6 +3393,25 @@ function handleBooking() {
         }
     }
 
+    // [14/10] Đặt quá sát giờ (< 15 phút trước giờ bắt đầu): KHÔNG chặn, báo sẽ tính phí không đặt trước 10K.
+    // Khách đồng ý → đánh dấu lịch (noPrebookFee) để POS cộng phí. Đổi ngày/giờ → hỏi lại.
+    var _npMins = _noPrebookMinsLeft(dateVal, startVal);
+    if (_npMins !== null && _npMins < NO_PREBOOK_MIN && _noPrebookOkFor !== dateVal + '|' + startVal) {
+        var _mb = document.getElementById('modal-btn-main'), _sb = document.getElementById('modal-btn-sub');
+        var _mbT = _mb.textContent, _sbT = _sb.textContent;
+        var _restore = function () { _mb.textContent = _mbT; _sb.textContent = _sbT; };
+        showAppModal("Lịch hơi sát giờ",
+            'Giờ bắt đầu <b>' + _bdHm(_bdMin(startVal)) + '</b> chỉ còn <b>' + Math.max(0, _npMins) + ' phút</b> nữa — quán cần khoảng ' + NO_PREBOOK_MIN + ' phút để nhận lịch, chuẩn bị nước và dọn bed.'
+            + '<br><br>Bạn vẫn đặt được, nhưng sẽ tính thêm <b>phí không đặt trước 10.000đ</b>. Hoặc chọn giờ bắt đầu muộn hơn để không mất phí.',
+            "⏱️",
+            function () { _restore(); _noPrebookOkFor = dateVal + '|' + startVal; setTimeout(function () { handleBooking(); }, 250); },
+            true);
+        _mb.textContent = 'Vẫn đặt · +10.000đ';
+        _sb.textContent = 'Chọn giờ khác';
+        var _sbOn = _sb.onclick; _sb.onclick = function () { _restore(); if (_sbOn) _sbOn(); var st = document.getElementById('book-start'); if (st) try { st.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) {} };
+        return;
+    }
+
     // --- CÁC BƯỚC TIẾP THEO (LOGIC CŨ) ---
     loading.classList.remove('hidden');
     // Safety timer tăng lên 30s — flow cần quét 180 ngày booking nên chậm hơn 5s
@@ -3510,6 +3540,8 @@ function handleBooking() {
                         bedId: "", status: "chờ xếp bed", type: "app",
                         createdAt: new Date().toISOString()
                     };
+                    // [14/10] Khách đã đồng ý phí không đặt trước (đặt < 15 phút trước giờ bắt đầu) → POS cộng 10K
+                    if (_noPrebookOkFor === dateVal + '|' + startVal) bookingData.noPrebookFee = 10000;
                     if (finalPreferredBed > 0) {
                         bookingData.preferredBed = finalPreferredBed;
                         bookingData.preferBedFee = finalPreferBedFee;
@@ -3624,6 +3656,7 @@ function handleBooking() {
 
 // --- MODAL ĐẶT BED THÀNH CÔNG (CÓ ẢNH ĐẬU XE) ---
 function showBookingSuccessModal(startVal, endVal, cb) {
+    _noPrebookOkFor = null;
     _upCacheAt = 0; // [13/10] đặt xong → lần mở tab Đặt bed sau đọc lại Lịch sắp tới
     const overlay = document.getElementById('booking-success-overlay');
     document.getElementById('bs-time').innerHTML = `${startVal} – ${endVal}`;

@@ -7222,6 +7222,12 @@ function autoAddBedItems(booking) {
         }
     }
 
+    // [14/10] Phí không đặt trước 10K — lịch tạo ở quầy (walk-in), hoặc đặt qua App < 15 phút trước giờ
+    // bắt đầu / trước lúc nhận bed (đặt xong mới tới). Xem _noPrebookFeeReason.
+    cart = cart.filter(function(c) { return c.name !== NO_PREBOOK_FEE_NAME; });
+    var _npReason = _noPrebookFeeReason(booking, Date.now());
+    if (_npReason) cart.push({ name: NO_PREBOOK_FEE_NAME, size: 'Phí', price: NO_PREBOOK_FEE, qty: 1 });
+
     // Thêm phí chọn ô bed nếu khách có yêu cầu và phí > 0
     var bedPickFee = parseInt(booking.preferBedFee) || 0;
     if (bedPickFee > 0) {
@@ -7236,10 +7242,37 @@ function autoAddBedItems(booking) {
         ? `Đã thêm ${totalHours} × 1h Bed`
         : `Đã thêm 4 × 1h Bed + ${hoursExtra} × 1h Bed (h5+)`;
     if (bedPickFee > 0) msg += ` · +${bedPickFee.toLocaleString()}đ phí chọn Bed 0${booking.preferredBed}`;
+    if (_npReason) msg += ` · +10.000đ phí không đặt trước (${_npReason})`;
     if (booking.bedVoucherApplied && booking.bedVoucherApplied.hours > 0) {
         msg += ` · 🎁 Đã áp ${Math.min(booking.bedVoucherApplied.hours, totalHours)} Voucher Bed miễn phí`;
     }
     if (typeof showToast === 'function') showToast('🛏️ ' + msg);
+}
+
+// [14/10] PHÍ KHÔNG ĐẶT TRƯỚC (chủ dự án): quán cần ~15 phút để nhận lịch, chuẩn bị nước, dọn bed.
+// Tính 10K khi: lịch tạo ở quầy (walk-in) · App đã báo & khách đồng ý (noPrebookFee) · đặt < 15 phút trước
+// giờ bắt đầu · hoặc lúc nhận bed (mở order) < 15 phút sau lúc đặt (đặt xong mới tới / cố tình tới sớm).
+var NO_PREBOOK_MIN = 15, NO_PREBOOK_FEE = 10000, NO_PREBOOK_FEE_NAME = 'Phí không đặt trước';
+function _bookingCreatedMs(b) {
+    if (!b) return 0;
+    if (b.createdAt) { var t = (typeof b.createdAt === 'number') ? b.createdAt : Date.parse(b.createdAt); if (!isNaN(t)) return t; }
+    return _pushKeyTimeMs(b.key || b.id || '') || 0;
+}
+function _bookingStartMs(b) {
+    var d = _parseDateKey(b && b.date); if (!d || !b.start) return 0;
+    var p = String(b.start).split(':');
+    return new Date(+d.year, +d.month - 1, +d.day, +p[0], +p[1] || 0).getTime();
+}
+/** Lý do tính phí (chuỗi ngắn) hoặc '' nếu không tính. */
+function _noPrebookFeeReason(b, nowMs) {
+    if (!b) return '';
+    if (b.type === 'walk-in' || b.isWalkIn) return 'khách tại quầy';
+    if (b.noPrebookFee) return 'khách đặt sát giờ, đã đồng ý trên App';
+    var created = _bookingCreatedMs(b); if (!created) return '';
+    var lim = NO_PREBOOK_MIN * 60000, start = _bookingStartMs(b);
+    if (start && start - created < lim) return 'đặt chưa tới ' + NO_PREBOOK_MIN + ' phút trước giờ bắt đầu';
+    if (nowMs - created < lim) return 'nhận bed chưa tới ' + NO_PREBOOK_MIN + ' phút sau lúc đặt';
+    return '';
 }
 
 /** Khi bed active (nhân viên mở chi tiết bed / gán bed) — đánh dấu voucher Bed đã dùng, không còn giá trị */

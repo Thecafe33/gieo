@@ -63,11 +63,12 @@ const cache = { gift_A: BED, gift_B: { label: '1 Gấu bông', type: 'fixed', va
 
 // 7) Mở lại lịch bed sau khi đã áp quà → autoAddBedItems không được xoá dòng quà / thêm trùng giờ
 (() => {
-  const src2 = extract('pos.html', ['autoAddBedItems']);
-  const run = new Function('cart0', [
+  const src2 = extract('pos.html', ['autoAddBedItems', '_parseDateKey', '_pushKeyTimeMs', '_bookingCreatedMs', '_bookingStartMs', '_noPrebookFeeReason']);
+  const run = new Function('cart0', 'bk', [
+    "var _PUSH_CHARS = '-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz'; var NO_PREBOOK_MIN = 15, NO_PREBOOK_FEE = 10000, NO_PREBOOK_FEE_NAME = 'Phí không đặt trước';",
     'var cart = cart0; var menu = [{ name: "1h bed", priceM: 15000 }, { name: "1h bed từ h5", priceM: 20000 }];',
     'function renderCart() {} function showToast() {}', src2,
-    'autoAddBedItems({ start: "14:05", end: "16:29" }); return cart;'].join('\n'));
+    'autoAddBedItems(bk || { start: "14:05", end: "16:29" }); return cart;'].join('\n'));
   const after = run([{ name: '1h bed', size: 'M', price: 15000, qty: 2 },
     { name: '1h bed', size: 'M', price: 0, qty: 1, _vKey: 'gift_k1', _giftType: 'item', _originalPrice: 15000, _originalName: '1h bed' }]);
   const tot = after.reduce((s, i) => s + i.price * i.qty, 0), hours = after.reduce((s, i) => s + (/1h bed/.test(i.name) ? i.qty : 0), 0);
@@ -78,4 +79,10 @@ const cache = { gift_A: BED, gift_B: { label: '1 Gấu bông', type: 'fixed', va
   const r2 = [fresh.reduce((s, i) => s + i.price * i.qty, 0), fresh.length];
   if (JSON.stringify(r2) !== JSON.stringify([45000, 1])) { console.log('FAIL Lịch mới', JSON.stringify(r2)); process.exitCode = 1; console.log('SOME FAIL'); }
   else console.log('ok Lịch chưa áp quà → 3 × 1h bed như cũ');
+  // [14/10] Lịch tạo ở quầy → thêm đúng 1 dòng phí không đặt trước 10K (mở lại order không cộng trùng)
+  let w = run([], { start: '14:00', end: '15:00', type: 'walk-in' });
+  w = run(w, { start: '14:00', end: '15:00', type: 'walk-in' });
+  const fee = w.filter(i => i.name === 'Phí không đặt trước');
+  if (fee.length !== 1 || fee[0].price !== 10000 || w.reduce((s, i) => s + i.price * i.qty, 0) !== 25000) { console.log('FAIL Phí không đặt trước walk-in', JSON.stringify(w)); process.exitCode = 1; console.log('SOME FAIL'); }
+  else console.log('ok Lịch tại quầy: 1h bed 15.000 + phí không đặt trước 10.000, mở lại order không cộng trùng');
 })();
