@@ -5017,7 +5017,7 @@ const sortedPCList = [...currentBedList].map((item, idx) => ({...item, originalI
         var bedLabel = isCancelled ? "Đã Hủy" : ((b.bedId && b.bedId != "WAITING") ? `BED 0${b.bedId}` : "Chờ Xếp");
 
         return `
-        <div onclick="selectBedItem(${b.originalIndex})" class="${wrapperClass}">
+        <div onclick="selectBedItem(${b.originalIndex})" data-bk="${b.id}" class="${wrapperClass}">
             <div class="flex justify-between items-center mb-1.5">
                 <span class="font-black text-[10px] opacity-70 uppercase tracking-widest">${bedLabel}</span>
                 <div class="w-2.5 h-2.5 rounded-full ${statusDot}"></div>
@@ -5041,6 +5041,7 @@ const sortedPCList = [...currentBedList].map((item, idx) => ({...item, originalI
             }
         </div>`;
     }).join('');
+    if (typeof _bedEndDecorate === 'function') _bedEndDecorate();
 }
 function renderRightColumnMap() {
     var container = document.getElementById('vertical-map-container');
@@ -5101,8 +5102,8 @@ function renderRightColumnMap() {
         }
 
         html += `
-        <div onclick="selectBedFromMap(${i})"
-             class="${boxClass} aspect-square rounded-[2rem] flex flex-col items-center justify-center cursor-pointer transition-all duration-300 active:scale-95 group relative">
+        <div onclick="selectBedFromMap(${i})" ${booking ? `data-bk="${booking.id}"` : ''}
+             class="${booking ? 'bk-tile ' : ''}${boxClass} aspect-square rounded-[2rem] flex flex-col items-center justify-center cursor-pointer transition-all duration-300 active:scale-95 group relative">
 
             ${statusDot}
             ${contentHTML}
@@ -5112,6 +5113,7 @@ function renderRightColumnMap() {
     });
 
     container.innerHTML = html;
+    if (typeof _bedEndDecorate === 'function') _bedEndDecorate();
 }
 function selectBedFromMap(bedId) {
     var index = currentBedList.findIndex(b => b.bedId == bedId && b.status && !b.status.includes('đã xong') && !b.status.includes('đã hủy'));
@@ -6048,7 +6050,7 @@ function closeAppModal() {
     }
 }
 function parseTimeObj(timeStr) { if (!timeStr) return null; var d = new Date(); var parts = timeStr.split(':'); d.setHours(parseInt(parts[0]), parseInt(parts[1]), 0, 0); return d; }
-function startPanelCountdown(endTimeStr) { stopPanelCountdown(); var clockEl = document.getElementById('detail-countdown'); if(!clockEl) return; var timeParts = endTimeStr.split(':'); if(timeParts.length < 2) return; var endDate = new Date(); endDate.setHours(parseInt(timeParts[0]), parseInt(timeParts[1]), 0); bedCountdownInterval = setInterval(function() { var diff = endDate - new Date(); var isOver = diff < 0; diff = Math.abs(diff); var h = Math.floor(diff / 3600000); var m = Math.floor((diff % 3600000) / 60000); var s = Math.floor((diff % 60000) / 1000); var fmt = v => v < 10 ? "0"+v : v; clockEl.innerText = (isOver ? '-' : '') + fmt(h) + ":" + fmt(m) + ":" + fmt(s); clockEl.className = isOver ? "text-3xl font-black text-red-500 font-mono tracking-tighter" : "text-3xl font-black text-[#006241] font-mono tracking-tighter"; }, 1000); }
+function startPanelCountdown(endTimeStr) { stopPanelCountdown(); var clockEl = document.getElementById('detail-countdown'); if(!clockEl) return; var timeParts = endTimeStr.split(':'); if(timeParts.length < 2) return; var endDate = new Date(); endDate.setHours(parseInt(timeParts[0]), parseInt(timeParts[1]), 0); bedCountdownInterval = setInterval(function() { var diff = endDate - new Date(); var isOver = diff < 0; diff = Math.abs(diff); var h = Math.floor(diff / 3600000); var m = Math.floor((diff % 3600000) / 60000); var s = Math.floor((diff % 60000) / 1000); var fmt = v => v < 10 ? "0"+v : v; clockEl.innerText = (isOver ? '-' : '') + fmt(h) + ":" + fmt(m) + ":" + fmt(s); clockEl.className = isOver ? "text-3xl font-black text-red-500 font-mono tracking-tighter" : (diff <= 10 * 60000 ? "text-3xl font-black text-amber-500 font-mono tracking-tighter" : "text-3xl font-black text-[#006241] font-mono tracking-tighter"); }, 1000); }
 function stopPanelCountdown() { if (bedCountdownInterval) clearInterval(bedCountdownInterval); }
 function switchTimeMode(mode) {
     var btnDur = document.getElementById('tab-duration');
@@ -8218,6 +8220,7 @@ function changeBedDateMobile(dateVal) {
             return b.displayDate === targetDateStr;
         });
         renderMobileBedList(list);
+        if (typeof _bedEndDecorate === 'function') _bedEndDecorate();
     });
 }
 
@@ -8285,7 +8288,7 @@ function renderMobileBedList(list) {
         }
 
         return `
-        <div onclick="showMobileBedDetail('${b.id}')"
+        <div onclick="showMobileBedDetail('${b.id}')" data-bk="${b.id}"
              class="${cardBg} squircle p-5 shadow-sm active:scale-[0.98] transition-all border relative overflow-hidden mb-3">
             <div class="flex justify-between items-start mb-1.5 relative z-10">
                 <span class="text-[10px] font-black tracking-[0.15em] uppercase ${subColor}">${statusLabel}</span>
@@ -13918,6 +13921,15 @@ function keypadConfirm() {
 #bell-modal .bell-row.warn .bell-time{ background:#f59e0b; color:#fff; }
 #bell-modal .bell-row.over{ background:#fef2f2; box-shadow:inset 0 0 0 2px #fca5a5; }
 #bell-modal .bell-row.over .bell-time{ background:#dc2626; color:#fff; }
+/* Thẻ bed (danh sách PC, Live Status, danh sách điện thoại): cam = còn ≤ 10 phút, đỏ = quá giờ — _bedEndDecorate */
+[data-bk].bk-warn{ background:#fffbeb !important; border-color:#f59e0b !important; color:#92400e !important; box-shadow:0 0 0 2px #fcd34d !important; }
+[data-bk].bk-over{ background:#fef2f2 !important; border-color:#ef4444 !important; color:#991b1b !important; box-shadow:0 0 0 2px #fca5a5 !important; }
+[data-bk].bk-tile.bk-warn{ background:#d97706 !important; color:#fff !important; box-shadow:0 10px 24px -6px rgba(217,119,6,.5) !important; }
+[data-bk].bk-tile.bk-over{ background:#dc2626 !important; color:#fff !important; box-shadow:0 10px 24px -6px rgba(220,38,38,.5) !important; }
+[data-bk].bk-warn::after, [data-bk].bk-over::after{ content:attr(data-bk-tag); position:absolute; z-index:20; top:8px; left:50%; transform:translateX(-50%); font-size:10px; font-weight:900; letter-spacing:.04em; padding:2px 8px; border-radius:99px; white-space:nowrap; color:#fff; }
+[data-bk].bk-warn::after{ background:#d97706; }
+[data-bk].bk-over::after{ background:#dc2626; }
+[data-bk].bk-tile.bk-warn::after, [data-bk].bk-tile.bk-over::after{ background:rgba(0,0,0,.25); }
 #bell-modal .bell-new-tag{ background:#ef4444; color:#fff; font-size:9px; font-weight:900; padding:2px 7px; border-radius:99px; letter-spacing:.05em; margin-left:6px; vertical-align:middle; }
 </style>
 <div id="bell-modal" class="hidden fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onclick="if(event.target===this) bellClose()">
@@ -13985,9 +13997,26 @@ function _bellCompute() {
     _bellRender();
 }
 setInterval(function () {
+    _bedEndDecorate();
     if (_bellRef && _bellDayKey() !== _bellDay) { _bellInit(); return; } // qua ngày → nghe ngày mới
     if (_bellRef) _bellCompute();                                          // đếm giờ lại trên máy, không đọc
 }, 30000);
+// Tô thẻ bed đang dùng sắp hết / quá giờ. Lấy lịch từ dữ liệu màn Bed đã có (currentBedList / globalAllBookings), không đọc thêm.
+function _bedEndDecorate() {
+    var els = document.querySelectorAll('[data-bk]'); if (!els.length) return;
+    var now = Date.now(), map = {};
+    [].concat(globalAllBookings || [], currentBedList || []).forEach(function (b) { if (b && b.id) map[b.id] = b; });
+    els.forEach(function (el) {
+        var b = map[el.getAttribute('data-bk')], left = (b && _bellIsActive(b)) ? _bellMinsLeft(b, now) : null;
+        var warn = left !== null && left >= 0 && left <= BELL_WARN_MIN, over = left !== null && left < 0;
+        el.classList.toggle('bk-warn', warn);
+        el.classList.toggle('bk-over', over);
+        if (warn || over) {
+            if (getComputedStyle(el).position === 'static') el.style.position = 'relative';
+            el.setAttribute('data-bk-tag', over ? ('QUÁ ' + (-left) + ' PHÚT') : (left === 0 ? 'HẾT GIỜ' : 'CÒN ' + left + ' PHÚT'));
+        } else el.removeAttribute('data-bk-tag');
+    });
+}
 function _bellRender() {
     var seen = _bellSeen(), n = _bellList.length + _bellEnding.length;
     var hasNew = _bellList.some(function (b) { return _bellIsNew(b, seen); })
