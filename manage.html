@@ -1993,12 +1993,26 @@ async function runRender(s){
   catch(err){ console.error('[render]', s, err); showError('Lỗi: ' + (err.code || err.message || err)); }
   finally{ setSync(false); }
 }
-function reloadCurrent(){
+// [14/10] Bấm = tải lại số mới, không hỏi (trước: hộp confirm mỗi lần — chủ dự án thấy phiền).
+// Nhấn giữ ~0,6 giây = xoá cả số liệu ngày cũ đã lưu trong máy rồi đọc lại từ đầu (việc hiếm, trước nằm trong hộp confirm).
+let _reloadLongDone = false;
+function reloadCurrent(clearOld){
+  if(_reloadLongDone && clearOld !== true){ _reloadLongDone = false; return; } // click ngay sau nhấn giữ: bỏ qua
   if(curScreen === 'rev'){ REV_MEM = {}; _tcMenu = null; _tcLegacy = null; _ggStores = null; _ggConfig = null; }
-  if(curScreen === 'rev' && confirm('Xoá cả số liệu ngày cũ đã lưu trong máy và đọc lại từ đầu?\n(Bấm Huỷ = chỉ tải lại số mới)')) revCacheClear();
+  if(curScreen === 'rev' && clearOld === true){ revCacheClear(); toast('Đã xoá số liệu ngày cũ trong máy — đang đọc lại từ đầu'); }
   EMP_CACHE = null; TARGETS = null;
   runRender(curScreen);
 }
+(function(){
+  const btn = document.getElementById('reloadBtn'); if(!btn) return;
+  let t = null;
+  const start = () => { clearTimeout(t); _reloadLongDone = false; if(btn.disabled) return; t = setTimeout(() => { _reloadLongDone = true; if(navigator.vibrate) navigator.vibrate(30); reloadCurrent(true); }, 600); };
+  const stop = () => { clearTimeout(t); t = null; };
+  btn.addEventListener('pointerdown', start);
+  ['pointerup','pointerleave','pointercancel'].forEach(e => btn.addEventListener(e, stop));
+  btn.addEventListener('contextmenu', e => e.preventDefault());
+  btn.title = 'Tải lại (nhấn giữ: xoá số liệu ngày cũ trong máy rồi đọc lại)';
+})();
 function openSidebar(){ document.getElementById('sidebar').classList.add('open'); document.getElementById('sidebarBackdrop').classList.add('open'); }
 function closeSidebar(){ document.getElementById('sidebar').classList.remove('open'); document.getElementById('sidebarBackdrop').classList.remove('open'); }
 
