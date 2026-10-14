@@ -4976,122 +4976,167 @@ window.handleLogout = function() {
 </script>
 
 <!-- ═══════════════════════════════════════════════════════ -->
-<!-- PRE-ORDER MODAL (fixed height, tap-to-select + size)   -->
+<!-- PRE-ORDER — [14/10] thiết kế lại: sheet trượt từ dưới, đếm nước ở đầu, −/+ ngay trên dòng món.
+     Giữ nguyên mọi id & hàm cũ (poOpen/poClose/poGoS2/poAddBlanket/poConfirm…) — chỉ đổi giao diện. -->
 <!-- ═══════════════════════════════════════════════════════ -->
-<div id="po-overlay"
-     class="fixed inset-0 z-[500] hidden items-center justify-center p-4"
-     style="background:rgba(0,0,0,0.6);backdrop-filter:blur(10px);display:none;">
+<style>
+#po-overlay{position:fixed;inset:0;z-index:500;background:rgba(4,19,13,.45);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);align-items:flex-end;justify-content:center}
+#po-sheet{position:relative;width:100%;max-width:480px;height:90vh;max-height:760px;min-height:520px;background:#f6f8f7;border-radius:28px 28px 0 0;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 -20px 50px -20px rgba(0,0,0,.35);transform:translateY(100%);transition:transform .38s cubic-bezier(.22,1,.36,1)}
+.pox-top{flex-shrink:0;padding:10px 20px 0;background:#fff}
+.pox-grab{width:40px;height:5px;border-radius:9px;background:#e2e6e4;margin:0 auto 12px}
+.pox-steps{display:flex;gap:6px;margin-bottom:14px}
+.pox-steps i{flex:1;height:4px;border-radius:9px;background:#e5ebe8;transition:background .25s}
+.pox-steps i.on{background:#00a36c}
+.pox-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.pox-head h2{margin:0;font-size:22px;font-weight:900;color:#1e3932;letter-spacing:-.02em;line-height:1.15}
+.pox-head p{margin:4px 0 0;font-size:12.5px;font-weight:600;color:#8b9892}
+.pox-x{width:36px;height:36px;border-radius:50%;background:#f1f3f2;color:#6b7280;display:flex;align-items:center;justify-content:center;flex-shrink:0;border:0}
+.pox-back{width:36px;height:36px;border-radius:50%;background:#f1f3f2;color:#1e3932;display:flex;align-items:center;justify-content:center;flex-shrink:0;border:0;margin-right:10px}
+.pox-need{display:flex;align-items:center;gap:12px;margin:14px 0 12px;padding:11px 14px;border-radius:16px;background:#fff7ed;border:1px solid #fde4c8;transition:background .25s,border-color .25s}
+.pox-need.ok{background:#ecfdf3;border-color:#bbf0d2}
+.pox-need .cups{display:flex;gap:4px;flex-shrink:0}
+.pox-need .cups b{width:24px;height:24px;border-radius:8px;background:#fff;border:1.5px dashed #f5b971;display:flex;align-items:center;justify-content:center;font-size:13px}
+.pox-need .cups b.on{border:0;background:#00a36c;color:#fff}
+.pox-need .tx{font-size:12.5px;font-weight:700;color:#9a4b0f;line-height:1.35}
+.pox-need.ok .tx{color:#047857}
+.pox-search{position:relative}
+.pox-search svg{position:absolute;left:14px;top:50%;transform:translateY(-50%);color:#9ca3af}
+.pox-search input{width:100%;height:44px;border-radius:14px;background:#f3f5f4;border:1.5px solid transparent;padding:0 14px 0 40px;font-size:14px;font-weight:600;color:#1e3932;outline:none}
+.pox-search input:focus{background:#fff;border-color:rgba(0,98,65,.35)}
+#po-cats{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;padding:12px 0 12px;-webkit-overflow-scrolling:touch}
+#po-cats::-webkit-scrollbar{display:none}
+.pox-cat{white-space:nowrap;flex-shrink:0;height:34px;padding:0 15px;border-radius:999px;border:1.5px solid #e6ebe8;background:#fff;color:#4b5a54;font-weight:800;font-size:12.5px}
+.pox-cat.on{background:#006241;border-color:#006241;color:#fff}
+#po-menu{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 16px 16px;display:flex;flex-direction:column;gap:8px}
+.pox-it{display:flex;align-items:center;gap:12px;background:#fff;border-radius:18px;padding:10px 12px;border:1.5px solid transparent;box-shadow:0 1px 2px rgba(0,0,0,.03);cursor:pointer;-webkit-tap-highlight-color:transparent}
+.pox-it.sel{border-color:rgba(0,163,108,.45);background:#f4fbf7}
+.pox-ic{width:46px;height:46px;border-radius:14px;background:#eef8f2;display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0}
+.pox-nm{flex:1;min-width:0}
+.pox-nm b{display:block;font-size:14.5px;font-weight:800;color:#1e3932;line-height:1.3}
+.pox-nm span{display:block;font-size:12.5px;font-weight:700;color:#00a36c;margin-top:2px}
+.pox-add{width:34px;height:34px;border-radius:50%;background:#e6f4ee;color:#006241;border:0;font-size:20px;font-weight:900;line-height:1;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.pox-step{display:flex;align-items:center;gap:2px;background:#006241;border-radius:999px;padding:3px;flex-shrink:0}
+.pox-step button{width:30px;height:30px;border-radius:50%;border:0;background:rgba(255,255,255,.14);color:#fff;font-size:18px;font-weight:900;line-height:1;display:flex;align-items:center;justify-content:center}
+.pox-step b{min-width:22px;text-align:center;color:#fff;font-size:14px;font-weight:900}
+.pox-cnt{display:flex;align-items:center;gap:6px;flex-shrink:0;font-size:12px;font-weight:800;color:#006241}
+.pox-cnt b{min-width:26px;height:26px;padding:0 8px;border-radius:999px;background:#006241;color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px}
+.pox-empty{text-align:center;padding:40px 0;color:#9ca3af;font-size:14px;font-weight:700}
+.pox-foot{flex-shrink:0;padding:12px 16px calc(14px + env(safe-area-inset-bottom));background:#fff;box-shadow:0 -10px 24px -18px rgba(0,0,0,.25)}
+.pox-cta{width:100%;min-height:56px;border-radius:999px;border:0;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:0 8px 0 22px;color:#fff;font-weight:900;font-size:15px;background:linear-gradient(135deg,#00a36c,#006241);box-shadow:0 12px 24px -12px rgba(0,98,65,.6)}
+.pox-cta .r{display:flex;align-items:center;gap:6px;background:rgba(255,255,255,.16);border-radius:999px;padding:10px 14px;font-size:13.5px}
+.pox-cta[disabled]{background:#e5e7eb;color:#6b7280;box-shadow:none;justify-content:center;padding:0 22px}
+.pox-cta[disabled] .r{display:none}
+#po-s2 .pox-body{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:10px 28px}
+.pox-blk{width:96px;height:96px;border-radius:30px;background:linear-gradient(160deg,#e9f7f0,#d8efe3);display:flex;align-items:center;justify-content:center;font-size:46px;margin-bottom:18px}
+#po-s2 h3{margin:0 0 8px;font-size:21px;font-weight:900;color:#1e3932}
+#po-s2 .pox-body p{margin:0;font-size:14px;line-height:1.55;color:#6b7280;max-width:290px}
+.pox-price{margin-top:16px;display:inline-flex;align-items:center;gap:8px;background:#fff;border:1px solid #e3ece7;border-radius:999px;padding:8px 16px;font-size:14px;font-weight:800;color:#1e3932}
+.pox-price b{color:#006241}
+.pox-2btn{display:flex;flex-direction:column;gap:10px}
+.pox-ghost{width:100%;height:50px;border-radius:999px;border:0;background:#f1f3f2;color:#4b5a54;font-weight:800;font-size:14px}
+#po-review{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:14px 16px;display:flex;flex-direction:column;gap:8px}
+.pox-rv{display:flex;align-items:center;gap:12px;background:#fff;border-radius:16px;padding:12px 14px}
+.pox-rv .q{min-width:30px;height:30px;border-radius:10px;background:#eef8f2;color:#006241;font-size:13px;font-weight:900;display:flex;align-items:center;justify-content:center}
+.pox-rv .n{flex:1;min-width:0;font-size:14px;font-weight:800;color:#1e3932}
+.pox-rv .n small{font-size:11px;font-weight:800;color:#6b7280;background:#f1f3f2;border-radius:6px;padding:1px 6px;margin-left:6px}
+.pox-rv .p{font-size:14px;font-weight:900;color:#1e3932}
+.pox-tot{margin:0 16px 12px;background:#fff;border-radius:18px;padding:12px 16px}
+.pox-tot .l{display:flex;justify-content:space-between;font-size:13px;font-weight:700;color:#8b9892;padding:3px 0}
+.pox-tot .g{display:flex;justify-content:space-between;align-items:baseline;border-top:1px dashed #e3e8e5;margin-top:8px;padding-top:10px}
+.pox-tot .g span{font-size:14px;font-weight:900;color:#1e3932}
+.pox-tot .g b{font-size:22px;font-weight:900;color:#006241}
+.pox-tot .note{font-size:11.5px;font-weight:600;color:#9ca3af;margin-top:6px}
+/* chọn size */
+#po-size-overlay{position:fixed;inset:0;z-index:600;background:rgba(4,19,13,.4);align-items:flex-end;justify-content:center}
+#po-size-sheet{width:100%;max-width:480px;background:#fff;border-radius:26px 26px 0 0;padding:10px 20px calc(20px + env(safe-area-inset-bottom));transform:translateY(100%);transition:transform .32s cubic-bezier(.22,1,.36,1)}
+#po-size-item-name{margin:0;font-size:19px;font-weight:900;color:#1e3932}
+.pox-sz{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:14px 0 14px}
+.pox-szc{border-radius:20px;border:2px solid #e6ebe8;padding:14px;display:flex;flex-direction:column;gap:12px;background:#fff}
+.pox-szc.on{border-color:#00a36c;background:#f4fbf7}
+.pox-szc .h{display:flex;align-items:baseline;justify-content:space-between}
+.pox-szc .h b{font-size:22px;font-weight:900;color:#1e3932}
+.pox-szc .h span{font-size:13px;font-weight:800;color:#00a36c}
+.pox-szc .st{display:flex;align-items:center;justify-content:space-between;background:#f1f3f2;border-radius:999px;padding:3px}
+.pox-szc.on .st{background:#006241}
+.pox-szc .st button{width:34px;height:34px;border-radius:50%;border:0;background:#fff;color:#006241;font-size:18px;font-weight:900;line-height:1}
+.pox-szc.on .st button{background:rgba(255,255,255,.16);color:#fff}
+.pox-szc .st b{font-size:15px;font-weight:900;color:#9ca3af}
+.pox-szc.on .st b{color:#fff}
+</style>
+<div id="po-overlay" class="hidden" style="display:none;" onclick="if(event.target===this)poClose()">
+  <div id="po-sheet">
 
-  <!-- Card — kích thước CỐ ĐỊNH, không co giãn -->
-  <div id="po-sheet"
-       class="relative w-full max-w-sm bg-white rounded-[2rem] shadow-2xl flex flex-col overflow-hidden"
-       style="height:82vh;max-height:640px;min-height:480px;
-              opacity:0;transform:scale(0.9) translateY(14px);
-              transition:opacity 0.28s ease,transform 0.32s cubic-bezier(0.34,1.4,0.64,1);">
-
-    <!-- ── STEP 1: Chọn món ── -->
-    <div id="po-s1" class="flex flex-col" style="height:100%;overflow:hidden;">
-      <!-- Header -->
-      <div class="flex-shrink-0 px-5 pt-5 pb-3 border-b border-gray-100">
-        <div class="flex items-center justify-between mb-1">
-          <h2 class="brand-font text-xl font-black text-[#006241]">Gọi món trước</h2>
-          <button onclick="poClose()"
-            class="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-400 font-bold text-base active:scale-90 transition-all">&times;</button>
+    <!-- ── BƯỚC 1: Chọn món ── -->
+    <div id="po-s1" style="height:100%;overflow:hidden;flex-direction:column;display:flex;">
+      <div class="pox-top">
+        <div class="pox-grab"></div>
+        <div class="pox-steps"><i class="on"></i><i></i><i></i></div>
+        <div class="pox-head">
+          <div><h2>Gọi món trước</h2><p>Quán làm sẵn khi bạn tới · trả tiền tại quán</p></div>
+          <button class="pox-x" onclick="poClose()" aria-label="Đóng"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
         </div>
-        <p class="text-[10px] text-gray-400 font-bold uppercase tracking-widest">Nhân viên chuẩn bị sẵn khi bạn đến</p>
-        <!-- Search -->
-        <input id="po-search" type="text" placeholder="Tìm tên món..."
-          oninput="poFilterMenu(this.value)"
-          class="mt-3 w-full px-4 py-2.5 bg-gray-50 rounded-2xl text-sm font-semibold text-gray-700 outline-none border-2 border-transparent focus:border-[#006241] transition-all">
-        <!-- Category tabs -->
-        <div id="po-cats"
-             class="flex gap-2 mt-2 overflow-x-auto"
-             style="scrollbar-width:none;-webkit-overflow-scrolling:touch;flex-shrink:0;"></div>
+        <div id="po-drink-hint" class="pox-need"></div>
+        <div class="pox-search"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+          <input id="po-search" type="text" placeholder="Tìm tên món..." oninput="poFilterMenu(this.value)" autocomplete="off"></div>
+        <div id="po-cats"></div>
       </div>
-      <!-- List — scrollable, fills remaining height -->
-      <div id="po-menu" class="overflow-y-auto px-4 py-3 space-y-2"
-           style="flex:1;-webkit-overflow-scrolling:touch;"></div>
-      <!-- Footer -->
-      <div class="flex-shrink-0 px-5 pb-5 pt-3 border-t border-gray-100">
-        <p id="po-drink-hint" style="font-size:10.5px;font-weight:700;color:#6b7280;text-align:center;margin:0 0 8px;">Quy định: mỗi khách gọi tối thiểu 1 nước</p>
-        <button id="po-btn1" onclick="poGoS2()"
-          class="w-full py-3 text-white font-black rounded-2xl text-sm uppercase active:scale-95 transition-all shadow-md"
-          style="background:#006241;">
-          <span id="po-btn1-txt">Tiếp tục</span>
-        </button>
+      <div id="po-menu"></div>
+      <div class="pox-foot">
+        <button id="po-btn1" class="pox-cta" onclick="poGoS2()"><span id="po-btn1-txt">Tiếp tục</span><span class="r" id="po-btn1-r"></span></button>
       </div>
     </div>
 
-    <!-- ── STEP 2: Chăn bed ── -->
-    <div id="po-s2" class="flex-col" style="height:100%;overflow:hidden;display:none;">
-      <div class="flex-1 flex flex-col items-center justify-center px-8 py-6 text-center">
-        <div class="text-5xl mb-5">🥶</div>
-        <h2 class="brand-font text-xl text-[#006241] font-black mb-2">Bên trong Bed hơi lạnh!</h2>
-        <p class="text-gray-500 text-sm leading-relaxed mb-5">
-          Bạn có muốn thêm <b class="text-gray-800">Chăn bed</b> để ấm hơn trong quá trình sử dụng không?
-        </p>
-        <div class="w-full bg-green-50 rounded-2xl p-4 border-2 border-dashed border-green-200">
-          <p class="font-black text-gray-800 text-sm">Chăn bed</p>
-          <p id="po-blanket-price" class="text-xs text-[#006241] font-bold mt-0.5">4.000đ</p>
-        </div>
+    <!-- ── BƯỚC 2: Chăn bed ── -->
+    <div id="po-s2" style="height:100%;overflow:hidden;flex-direction:column;display:none;">
+      <div class="pox-top">
+        <div class="pox-grab"></div>
+        <div class="pox-steps"><i class="on"></i><i class="on"></i><i></i></div>
+        <div class="pox-head"><div style="display:flex;align-items:center"><button class="pox-back" onclick="poShowStep(1)" aria-label="Quay lại"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button><h2>Thêm chăn?</h2></div>
+          <button class="pox-x" onclick="poClose()" aria-label="Đóng"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
       </div>
-      <div class="flex-shrink-0 px-5 pb-5 flex gap-3">
-        <button onclick="poSkipBlanket()"
-          class="flex-1 py-4 bg-gray-100 text-gray-500 font-black rounded-2xl text-sm uppercase active:scale-95 transition-all">Không cần</button>
-        <button onclick="poAddBlanket()"
-          class="flex-1 py-4 text-white font-black rounded-2xl text-sm uppercase active:scale-95 transition-all shadow-lg"
-          style="background:#006241;">Thêm vào</button>
+      <div class="pox-body">
+        <div class="pox-blk">🛏️</div>
+        <h3>Bên trong Bed hơi lạnh!</h3>
+        <p>Thêm một chiếc <b style="color:#1e3932">chăn bed</b> để ấm áp hơn trong suốt thời gian nằm nhé.</p>
+        <div class="pox-price">Chăn bed · <b id="po-blanket-price">4.000đ</b></div>
+      </div>
+      <div class="pox-foot pox-2btn">
+        <button class="pox-cta" style="justify-content:center;padding:0 22px" onclick="poAddBlanket()">Thêm chăn</button>
+        <button class="pox-ghost" onclick="poSkipBlanket()">Không cần</button>
       </div>
     </div>
 
-    <!-- ── STEP 3: Xem lại ── -->
-    <div id="po-s3" class="flex-col" style="height:100%;overflow:hidden;display:none;">
-      <div class="flex-shrink-0 px-5 pt-5 pb-3 border-b border-gray-100">
-        <h2 class="brand-font text-xl text-[#006241] font-black">Xem lại đơn</h2>
-        <p class="text-[10px] text-gray-400 font-bold uppercase tracking-widest mt-0.5">Tổng tạm tính · có thể thay đổi khi thanh toán</p>
+    <!-- ── BƯỚC 3: Xem lại ── -->
+    <div id="po-s3" style="height:100%;overflow:hidden;flex-direction:column;display:none;">
+      <div class="pox-top" style="padding-bottom:14px">
+        <div class="pox-grab"></div>
+        <div class="pox-steps"><i class="on"></i><i class="on"></i><i class="on"></i></div>
+        <div class="pox-head"><div style="display:flex;align-items:center"><button class="pox-back" onclick="poShowStep(1)" aria-label="Sửa món"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button><div><h2>Xem lại đơn</h2><p>Bấm ← để sửa món</p></div></div>
+          <button class="pox-x" onclick="poClose()" aria-label="Đóng"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
       </div>
-      <!-- Items list -->
-      <div id="po-review" class="overflow-y-auto px-4 py-3 space-y-2"
-           style="flex:1;-webkit-overflow-scrolling:touch;"></div>
-
-      <!-- Totals -->
-      <div class="flex-shrink-0 mx-5 mb-3 rounded-2xl border border-gray-100 overflow-hidden" style="background:#f8faf8;">
-        <div class="px-4 pt-3 pb-1 flex justify-between text-xs text-gray-400 font-bold uppercase tracking-wide">
-          <span>Phí Bed</span><span id="po-bed-fee">---</span>
-        </div>
-        <div class="px-4 pb-1 flex justify-between text-xs text-gray-400 font-bold uppercase tracking-wide">
-          <span>Đồ uống / ăn</span><span id="po-food-sum">---</span>
-        </div>
-
-        <div class="px-4 py-3 border-t border-gray-200 flex justify-between items-center">
-          <span class="font-black text-sm text-gray-800">Tổng tạm tính</span>
-          <span id="po-grand" class="font-black text-lg text-[#006241]">---</span>
-        </div>
+      <div id="po-review"></div>
+      <div class="pox-tot">
+        <div class="l"><span>Phí bed</span><span id="po-bed-fee">---</span></div>
+        <div class="l"><span>Đồ uống / ăn</span><span id="po-food-sum">---</span></div>
+        <div class="l" id="po-disc-row" style="display:none"><span>Giảm giá</span><span id="po-disc-val"></span></div>
+        <div class="g"><span>Tổng tạm tính</span><b id="po-grand">---</b></div>
+        <div class="note">Tạm tính · có thể thay đổi khi thanh toán tại quán</div>
       </div>
-      <div class="flex-shrink-0 px-5 pb-5">
-        <button onclick="poConfirm()"
-          class="w-full py-4 font-black text-white rounded-2xl text-sm uppercase active:scale-95 transition-all shadow-lg"
-          style="background:linear-gradient(135deg,#006241,#00a86b);">
-          Xác nhận Pre-order
-        </button>
+      <div class="pox-foot">
+        <button class="pox-cta" style="justify-content:center;padding:0 22px" onclick="poConfirm()">Xác nhận gọi món</button>
       </div>
     </div>
 
   </div><!-- /po-sheet -->
 </div><!-- /po-overlay -->
 
-<!-- SIZE PICKER (hiện khi bấm món có 2 size) -->
-<div id="po-size-overlay"
-     class="fixed inset-0 z-[600] hidden items-end justify-center"
-     style="background:rgba(0,0,0,0.45);backdrop-filter:blur(4px);display:none;"
-     onclick="if(event.target===this)poCloseSizePopup()">
-  <div id="po-size-sheet"
-       class="w-full max-w-sm bg-white rounded-t-[2rem] px-5 pt-5 pb-8 shadow-2xl"
-       style="transform:translateY(100%);transition:transform 0.3s cubic-bezier(0.34,1.4,0.64,1);">
-    <div class="w-10 h-1 bg-gray-200 rounded-full mx-auto mb-5"></div>
-    <p id="po-size-item-name" class="font-black text-gray-800 text-base mb-1"></p>
-    <p class="text-[10px] text-gray-400 font-bold uppercase tracking-widest mb-5">Chọn size để thêm vào đơn</p>
-    <div id="po-size-btns" class="flex flex-col gap-3"></div>
+<!-- CHỌN SIZE (món có 2 size) -->
+<div id="po-size-overlay" class="hidden" style="display:none;" onclick="if(event.target===this)poCloseSizePopup()">
+  <div id="po-size-sheet">
+    <div class="pox-grab"></div>
+    <p id="po-size-item-name"></p>
+    <p style="margin:4px 0 0;font-size:12.5px;font-weight:600;color:#8b9892">Chọn size và số lượng</p>
+    <div id="po-size-btns"></div>
   </div>
 </div>
 
@@ -5111,6 +5156,17 @@ var _poSizeCurrent    = null; // {name, priceM, priceL}
 var _poPendingPreorder = null; // lưu tạm pre-order trước khi ghi RT
 var _guestCount = 1; // số khách đi cùng (1-3), mặc định 1
 
+// [14/10] Giao diện pre-order: escape tên món (tên có dấu nháy trước đây làm hỏng nút bấm) + icon theo loại
+function _poEsc(x) { return String(x == null ? '' : x).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+function _poIcon(type, name) {
+    var t = ((type || '') + ' ' + (name || '')).toLowerCase();
+    if (/ăn vặt|đồ ăn|snack|bánh|khoai|chiên/.test(t)) return '🍟';
+    if (/matcha|trà xanh/.test(t)) return '🍵';
+    if (/trà|tea/.test(t)) return '🧋';
+    if (/đá xay|smoothie|sinh tố|ép|nước ép/.test(t)) return '🥤';
+    if (/latte|cafe|cà phê|coffee|americano|bạc xỉu|espresso|capu/.test(t)) return '☕';
+    return '🥤';
+}
 // ── Phân loại "Nước" — DÙNG ĐÚNG RULE NHƯ POS để khớp số liệu 2 bên ──
 // (xem pos.html: isDrink = !isSnack && !isKhac)
 function _poIsDrinkType(type) {
@@ -5288,8 +5344,7 @@ function poOpen() {
     // Trigger animation
     requestAnimationFrame(function(){
         requestAnimationFrame(function(){
-            sh.style.opacity = '1';
-            sh.style.transform = 'scale(1) translateY(0)';
+            sh.style.transform = 'translateY(0)';
         });
     });
     // Load menu
@@ -5313,8 +5368,7 @@ function poOpen() {
 // ── Close ──────────────────────────────────────────────────
 function poClose() {
     var sh = document.getElementById('po-sheet');
-    sh.style.opacity = '0';
-    sh.style.transform = 'scale(0.9) translateY(14px)';
+    sh.style.transform = 'translateY(100%)';
     setTimeout(function(){
         var ov = document.getElementById('po-overlay');
         ov.style.display = 'none';
@@ -5328,6 +5382,7 @@ function poShowStep(n) {
         document.getElementById(id).style.display = 'none';
     });
     document.getElementById('po-s'+n).style.display = 'flex';
+    if (n === 1) poUpdateBtn1();
 }
 function poGoS2()       {
     if (_poDrinkCount(_poItems) < (_guestCount || 1)) return; // chặn phòng khi nút chưa kịp disable
@@ -5351,13 +5406,12 @@ function poRenderCats() {
         var c = m.type||'Khác';
         if (cats.indexOf(c)<0) cats.push(c);
     });
-    document.getElementById('po-cats').innerHTML = cats.map(function(cat){
+    var el = document.getElementById('po-cats');
+    el.innerHTML = cats.map(function(cat, k){
         var label  = cat==='all' ? 'Tất cả' : cat;
-        var active = cat === _poCurCat;
-        return '<button onclick="poCatSwitch(\''+cat+'\')" style="white-space:nowrap;padding:5px 14px;border-radius:999px;border:none;cursor:pointer;font-weight:800;font-size:0.72rem;flex-shrink:0;transition:all 0.15s;'
-               +(active?'background:#006241;color:white;':'background:#f3f4f6;color:#6b7280;')
-               +'">'+ label +'</button>';
+        return '<button type="button" class="pox-cat'+(cat === _poCurCat ? ' on' : '')+'" data-k="'+k+'">'+ _poEsc(label) +'</button>';
     }).join('');
+    el.querySelectorAll('.pox-cat').forEach(function(b){ b.onclick = function(){ poCatSwitch(cats[+b.dataset.k]); }; });
 }
 function poCatSwitch(cat){
     _poCurCat = cat;
@@ -5378,35 +5432,32 @@ function poRenderMenu(cat, q){
         el.innerHTML = '<div style="text-align:center;padding:40px 0;color:#9ca3af;font-size:0.85rem;font-weight:700;">Không tìm thấy món</div>';
         return;
     }
-    el.innerHTML = list.map(function(m){
+    // [14/10] Dòng món mới: icon theo loại · tên · giá · nút + (chưa chọn) / −qty+ (1 size) / số lượng (2 size → mở chọn size)
+    el.innerHTML = list.map(function(m, k){
         var hasM = m.priceM > 0, hasL = m.priceL > 0;
-        var totalQty = _poItems.filter(function(i){ return i.name===m.name; })
-                               .reduce(function(s,i){ return s+i.qty; }, 0);
-        var sel = totalQty > 0;
-
-        // Price line
-        var pLine = '';
-        if (hasM && hasL) pLine = 'M: '+m.priceM.toLocaleString()+'đ &nbsp;·&nbsp; L: '+m.priceL.toLocaleString()+'đ';
-        else if (hasM)    pLine = m.priceM.toLocaleString()+'đ';
-        else if (hasL)    pLine = m.priceL.toLocaleString()+'đ';
-
-        // Right badge
-        var badge = sel
-            ? '<span style="background:#006241;color:white;border-radius:999px;padding:3px 12px;font-size:0.75rem;font-weight:900;flex-shrink:0;">'+totalQty+'</span>'
-            : '<span style="width:26px;height:26px;border-radius:50%;background:#f0fdf4;display:inline-flex;align-items:center;justify-content:center;color:#006241;font-size:1.1rem;font-weight:900;flex-shrink:0;line-height:1;">+</span>';
-
-        return '<div onclick="poItemTap(\''+m.name+'\','+m.priceM+','+m.priceL+')" '
-             + 'style="background:white;border-radius:14px;padding:11px 14px;'
-             + 'border:2px solid '+(sel?'#006241':'#f0f0f0')+';'
-             + 'display:flex;align-items:center;gap:10px;cursor:pointer;'
-             + 'transition:border 0.12s;user-select:none;-webkit-tap-highlight-color:transparent;">'
-             +   '<div style="flex:1;min-width:0;">'
-             +     '<p style="font-weight:800;font-size:0.88rem;color:#1f2937;margin:0 0 2px;">'+ m.name +'</p>'
-             +     '<p style="font-size:0.72rem;color:#059669;font-weight:700;margin:0;">'+ pLine +'</p>'
-             +   '</div>'
-             +   badge
-             + '</div>';
+        var totalQty = _poItems.filter(function(i){ return i.name===m.name; }).reduce(function(s,i){ return s+i.qty; }, 0);
+        var pLine = (hasM && hasL) ? ('M ' + m.priceM.toLocaleString('vi-VN') + 'đ · L ' + m.priceL.toLocaleString('vi-VN') + 'đ')
+                  : ((hasM ? m.priceM : m.priceL) || 0).toLocaleString('vi-VN') + 'đ';
+        var right;
+        if (!totalQty) right = '<button type="button" class="pox-add" data-act="add" aria-label="Thêm">+</button>';
+        else if (hasM && hasL) right = '<span class="pox-cnt"><b>'+totalQty+'</b>Sửa</span>';
+        else right = '<span class="pox-step"><button type="button" data-act="minus" aria-label="Bớt">−</button><b>'+totalQty+'</b><button type="button" data-act="add" aria-label="Thêm">+</button></span>';
+        return '<div class="pox-it'+(totalQty?' sel':'')+'" data-k="'+k+'"><div class="pox-ic">'+_poIcon(m.type, m.name)+'</div>'
+             + '<div class="pox-nm"><b>'+_poEsc(m.name)+'</b><span>'+pLine+'</span></div>'+right+'</div>';
     }).join('');
+    el.querySelectorAll('.pox-it').forEach(function(row){
+        var m = list[+row.dataset.k];
+        row.onclick = function(ev){
+            var act = ev.target && ev.target.dataset ? ev.target.dataset.act : '';
+            var hasM = m.priceM > 0, hasL = m.priceL > 0;
+            if (act === 'minus' && !(hasM && hasL)) {
+                var sz = hasM ? 'M' : 'L';
+                poSizeQty(m.name, sz, hasM ? m.priceM : m.priceL, -1);
+                return;
+            }
+            poItemTap(m.name, m.priceM, m.priceL);
+        };
+    });
     poUpdateBtn1();
 }
 
@@ -5447,28 +5498,19 @@ function poRenderSizeBtns(){
     var qM = (_poItems.find(function(i){return i.name===name&&i.size==='M';})||{qty:0}).qty;
     var qL = (_poItems.find(function(i){return i.name===name&&i.size==='L';})||{qty:0}).qty;
 
-    function sizeRow(size, price, qty){
-        return '<div style="display:flex;align-items:center;justify-content:space-between;'
-               +'background:#f8f9fa;border-radius:16px;padding:13px 16px;'
-               +'border:2px solid '+(qty>0?'#006241':'transparent')+';margin-bottom:2px;">'
-               +'  <div>'
-               +'    <p style="font-weight:900;font-size:0.9rem;color:#1f2937;margin:0;">Size '+size+'</p>'
-               +'    <p style="font-size:0.78rem;color:#059669;font-weight:700;margin:0;">'+price.toLocaleString()+'đ</p>'
-               +'  </div>'
-               +'  <div style="display:flex;align-items:center;gap:10px;">'
-               +   (qty>0?'<button onclick="poSizeQty(\''+name+'\',\''+size+'\','+price+',-1)" style="width:32px;height:32px;border-radius:50%;border:none;background:#fee2e2;color:#ef4444;font-weight:900;font-size:1.1rem;cursor:pointer;line-height:1;">−</button>':'')
-               +   (qty>0?'<span style="font-weight:900;font-size:1rem;color:#006241;min-width:20px;text-align:center;">'+qty+'</span>':'')
-               +'    <button onclick="poSizeQty(\''+name+'\',\''+size+'\','+price+',1)" style="width:32px;height:32px;border-radius:50%;border:none;background:'+(qty>0?'#006241':'#e6f4ef')+';color:'+(qty>0?'white':'#006241')+';font-weight:900;font-size:1.1rem;cursor:pointer;line-height:1;">+</button>'
-               +'  </div>'
-               +'</div>';
+    // [14/10] 2 ô M / L cạnh nhau, mỗi ô có −/+
+    function sizeCard(size, price, qty){
+        return '<div class="pox-szc'+(qty>0?' on':'')+'" data-size="'+size+'" data-price="'+price+'" data-q="'+qty+'"><div class="h"><b>'+size+'</b><span>'+price.toLocaleString('vi-VN')+'đ</span></div>'
+             + '<div class="st"><button type="button" data-d="-1" aria-label="Bớt">−</button><b>'+qty+'</b><button type="button" data-d="1" aria-label="Thêm">+</button></div></div>';
     }
-
-    document.getElementById('po-size-btns').innerHTML =
-        (pM>0 ? sizeRow('M',pM,qM) : '') +
-        (pL>0 ? sizeRow('L',pL,qL) : '') +
-        '<button onclick="poCloseSizePopup()" style="width:100%;padding:14px;margin-top:8px;'
-        +'background:#006241;color:white;border:none;border-radius:16px;'
-        +'font-weight:900;font-size:0.88rem;cursor:pointer;letter-spacing:0.05em;">XONG</button>';
+    var box = document.getElementById('po-size-btns');
+    box.innerHTML = '<div class="pox-sz">' + (pM>0 ? sizeCard('M',pM,qM) : '') + (pL>0 ? sizeCard('L',pL,qL) : '') + '</div>'
+        + '<button type="button" class="pox-cta" style="justify-content:center;padding:0 22px" onclick="poCloseSizePopup()">Xong</button>';
+    box.querySelectorAll('.pox-szc').forEach(function(c){
+        c.querySelectorAll('button[data-d]').forEach(function(b){
+            b.onclick = function(){ var d = +b.dataset.d; if (d < 0 && !(+c.dataset.q > 0)) return; poSizeQty(name, c.dataset.size, +c.dataset.price, d); };
+        });
+    });
 }
 function poSizeQty(name, size, price, delta){
     var idx = _poItems.findIndex(function(i){ return i.name===name&&i.size===size; });
@@ -5502,23 +5544,22 @@ function poUpdateBtn1(){
     var hint  = document.getElementById('po-drink-hint');
     if (!txt||!btn) return;
 
+    var r = document.getElementById('po-btn1-r');
     if (drinkCount < required) {
-        var remain = required - drinkCount;
-        txt.textContent = 'Cần thêm ' + remain + ' nước nữa';
-        btn.style.background = '#d1d5db';
+        txt.textContent = 'Chọn thêm ' + (required - drinkCount) + ' nước nữa';
         btn.disabled = true;
-        btn.style.cursor = 'not-allowed';
     } else {
-        txt.textContent = count>0
-            ? 'Tiếp tục ('+count+' món · '+total.toLocaleString()+'đ)'
-            : 'Tiếp tục';
-        btn.style.background = 'linear-gradient(135deg,#006241,#00a86b)';
+        txt.textContent = count + ' món · ' + total.toLocaleString('vi-VN') + 'đ';
+        if (r) r.innerHTML = 'Tiếp tục <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>';
         btn.disabled = false;
-        btn.style.cursor = 'pointer';
     }
     if (hint) {
-        hint.innerHTML = 'Quy định: mỗi khách gọi tối thiểu 1 nước · Đã có <b style="color:'
-            + (drinkCount>=required?'#006241':'#dc2626') + '">' + drinkCount + '/' + required + '</b> nước';
+        var ok = drinkCount >= required, cups = '';
+        for (var c = 0; c < required; c++) cups += '<b class="' + (c < drinkCount ? 'on' : '') + '">' + (c < drinkCount ? '✓' : '☕') + '</b>';
+        hint.className = 'pox-need' + (ok ? ' ok' : '');
+        hint.innerHTML = '<span class="cups">' + cups + '</span><span class="tx">'
+            + (ok ? 'Đủ nước cho ' + required + ' người rồi — thêm món khác tuỳ thích'
+                  : 'Mỗi khách gọi tối thiểu 1 nước · đã chọn <b>' + drinkCount + '/' + required + '</b>') + '</span>';
     }
 }
 
@@ -5529,22 +5570,20 @@ function poBlanketUpdateUI(){
     var price = _poBlanketItem
         ? (_poBlanketItem.priceM>0 ? _poBlanketItem.priceM : (_poBlanketItem.priceL||4000))
         : 4000;
-    el.textContent = price.toLocaleString()+'đ';
+    el.textContent = price.toLocaleString('vi-VN')+'đ';
 }
 
 // ── Review ─────────────────────────────────────────────────
 function poRenderReview(){
     var el = document.getElementById('po-review');
     if (_poItems.length===0){
-        el.innerHTML = '<div style="text-align:center;padding:24px;color:#9ca3af;font-size:0.85rem;font-weight:700;">Không có món nào</div>';
+        el.innerHTML = '<div class="pox-empty">Không có món nào</div>';
     } else {
         el.innerHTML = _poItems.map(function(i){
-            var sL = (i.size&&i.size!=='M') ? ' ('+i.size+')' : '';
-            return '<div style="background:white;border-radius:13px;padding:10px 14px;border:1px solid #f0f0f0;display:flex;align-items:center;gap:8px;">'
-                 + '  <span style="font-weight:700;font-size:0.85rem;color:#1f2937;flex:1;">'+i.name+sL+'</span>'
-                 + '  <span style="font-size:0.78rem;color:#9ca3af;font-weight:600;">×'+i.qty+'</span>'
-                 + '  <span style="font-size:0.85rem;font-weight:900;color:#006241;min-width:54px;text-align:right;">'+(i.price*i.qty).toLocaleString()+'đ</span>'
-                 + '</div>';
+            var m = _poMenuData.find(function(x){ return x.name === i.name; }) || {};
+            var two = m.priceM > 0 && m.priceL > 0;
+            return '<div class="pox-rv"><span class="q">'+i.qty+'×</span><span class="n">'+_poEsc(i.name)+(two && i.size ? '<small>'+_poEsc(i.size)+'</small>' : '')+'</span>'
+                 + '<span class="p">'+(i.price*i.qty).toLocaleString('vi-VN')+'đ</span></div>';
         }).join('');
     }
     // Phí bed
@@ -5559,10 +5598,11 @@ function poRenderReview(){
     var food = _poItems.reduce(function(s,i){return s+i.price*i.qty;},0);
     var disc = _poAppliedVoucher ? _poAppliedVoucher.discount : 0;
     var grand= Math.max(0, bedFee+food-disc);
-    document.getElementById('po-bed-fee').textContent  = hrs>0 ? bedFee.toLocaleString()+'đ (~'+hrs+'h)' : 'Xác nhận khi đến';
-    document.getElementById('po-food-sum').textContent = food>0 ? food.toLocaleString()+'đ' : '0đ';
-    document.getElementById('po-grand').textContent    = grand.toLocaleString()+'đ';
+    document.getElementById('po-bed-fee').textContent  = hrs>0 ? bedFee.toLocaleString('vi-VN')+'đ · '+hrs+' giờ' : 'Xác nhận khi đến';
+    document.getElementById('po-food-sum').textContent = food>0 ? food.toLocaleString('vi-VN')+'đ' : '0đ';
+    document.getElementById('po-grand').textContent    = grand.toLocaleString('vi-VN')+'đ';
     var dr = document.getElementById('po-disc-row');
+    if (!dr) return; // [14/10] trước đây thiếu dòng này trong HTML → lỗi mỗi lần xem lại
     if (disc>0){ dr.style.display='flex'; document.getElementById('po-disc-val').textContent='−'+disc.toLocaleString()+'đ'; }
     else dr.style.display='none';
 }
