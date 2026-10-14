@@ -3966,10 +3966,10 @@ function showHistoryDetailMobile(idx) {
         totalText.parentElement.classList.add('text-[#006B44]');
 
         btnCancel.onclick = function() {
-            if(confirm("Xác nhận hủy đơn hàng này?")) {
+            _posConfirm("Xác nhận hủy đơn hàng này?", "Hủy đơn", "Không").then(function(ok) { if (!ok) return;
                 executeRefundAction(idx, true);
                 closeHistoryDetailMobile();
-            }
+            });
         };
     }
 
@@ -5821,9 +5821,13 @@ function finalizeBedCheckIn(bedId) {
 }
 
 // [FIX 14/10] Đóng bảng Chọn Giường khi đơn đã thu đang chờ bed = bỏ đơn đó (chưa lưu gì); giỏ giữ nguyên để thanh toán lại.
-function closeBedSelectModal() {
+function closeBedSelectModal(_ok) {
     if (_bedPayPending) {
-        if (!confirm("Đơn này CHƯA ĐƯỢC LƯU — phải chọn bed thì đơn mới lưu.\n\nVẫn đóng? (giỏ hàng giữ nguyên, bấm thanh toán lại để chọn bed)")) return;
+        if (_ok !== true) {
+            _posConfirm("Đơn này CHƯA ĐƯỢC LƯU — phải chọn bed thì đơn mới lưu.\n\nVẫn đóng? (giỏ hàng giữ nguyên, bấm thanh toán lại để chọn bed)", "Vẫn đóng", "Chọn bed")
+                .then(function (ok) { if (ok) closeBedSelectModal(true); });
+            return;
+        }
         _bedPayPending = null;
     }
     document.getElementById('bed-select-modal').classList.add('hidden');
@@ -8360,6 +8364,9 @@ function getCountdownStr(endTimeStr) {
         diff = Math.abs(diff);
         label = "QUÁ GIỜ";
         style = "bg-red-500 text-white animate-pulse border border-white/30";
+    } else if (diff <= 10 * 60000) { // [14/10] còn ≤ 10 phút — báo trước (cùng mốc với chuông BELL_WARN_MIN)
+        label = "SẮP HẾT GIỜ";
+        style = "bg-amber-500 text-white border border-white/30";
     }
 
     const h = Math.floor(diff / 3600000);
@@ -9858,9 +9865,7 @@ function updateStoreStatusUI() {
 
 function handleStoreStatusClick() {
     if (currentStoreStatus.isOff) {
-        if (confirm("Mở lại quán ngay lập tức?")) {
-            resumeStore();
-        }
+        _posConfirm("Mở lại quán ngay lập tức?", "Mở lại", "Không").then(function(ok) { if (ok) resumeStore(); });
     } else {
         const now = new Date();
         now.setMinutes(now.getMinutes() + 60);
@@ -9970,10 +9975,14 @@ function openMoveBedModal(bookingId) {
     document.getElementById('modal-move-bed').classList.remove('hidden');
 }
 
-function confirmMoveBed(newBedId) {
+function confirmMoveBed(newBedId, _reason) {
     if (!bookingToMove) return;
-
-    const reason = prompt(`Bạn đang chuyển khách từ Bed 0${bookingToMove.bedId} sang Bed 0${newBedId}.\nNhập nguyên nhân (Vd: Bẩn, Máy lạnh hỏng...):`);
+    if (_reason === undefined) {
+        _posPrompt(`Bạn đang chuyển khách từ Bed 0${bookingToMove.bedId} sang Bed 0${newBedId}.\nNhập nguyên nhân (Vd: Bẩn, Máy lạnh hỏng...):`)
+            .then(function (r) { confirmMoveBed(newBedId, r); });
+        return;
+    }
+    const reason = _reason;
 
     if (reason === null) return;
     if (reason.trim() === "") return alert("Bắt buộc phải nhập lý do để lưu lịch sử!");
@@ -10925,8 +10934,8 @@ function screenMoveSlide(idx, dir) {
     screenRenderList();
 }
 
-function screenRemoveSlide(idx) {
-    if (!confirm('Xóa slide ' + (idx+1) + '?')) return;
+function screenRemoveSlide(idx, _ok) {
+    if (_ok !== true) { _posConfirm('Xóa slide ' + (idx+1) + '?', 'Xóa', 'Không').then(function(ok){ if (ok) screenRemoveSlide(idx, true); }); return; }
     _screenSlides.splice(idx, 1);
     if (window._screenEditIdx === idx) {
         window._screenEditIdx = null;
@@ -11474,10 +11483,11 @@ function discountFormSave() {
     }
 }
 
-function discountFormDelete() {
+function discountFormDelete(_ok) {
     var editKey = document.getElementById('df-editing-key').value;
     var label = document.getElementById('df-label').value;
-    if (!editKey || !confirm('Xóa "' + label + '"?')) return;
+    if (!editKey) return;
+    if (_ok !== true) { _posConfirm('Xóa "' + label + '"?', 'Xóa', 'Không').then(function(ok){ if (ok) discountFormDelete(true); }); return; }
     fstore.collection('rewards').doc(editKey).delete().then(function() {
         // Remove from RT mirror too
         db.ref('rewards_mirror/' + editKey).remove();
@@ -13716,10 +13726,10 @@ function menuEditorSave() {
     }
 }
 
-function menuEditorDeleteItem() {
+function menuEditorDeleteItem(_ok) {
     if (!_meEditingKey) return;
     var name = document.getElementById('me-name').value || 'món này';
-    if (!confirm('Xóa "'+name+'" khỏi menu?')) return;
+    if (_ok !== true) { _posConfirm('Xóa "'+name+'" khỏi menu?', 'Xóa', 'Không').then(function(ok){ if (ok) menuEditorDeleteItem(true); }); return; }
 
     if (_meEditingKey.startsWith('idx_')) {
         var idx = parseInt(_meEditingKey.replace('idx_',''));
@@ -13891,22 +13901,30 @@ function keypadConfirm() {
 })();
 </script>
 
-<!-- [14/10] CHUÔNG LỊCH BED: lịch hôm nay đang chờ nhận bed (chưa có bed, chưa huỷ/xong) + nhãn MỚI cho lịch tạo sau lần xem gần nhất -->
+<!-- [14/10] CHUÔNG BED: (1) lịch hôm nay chờ nhận bed + nhãn MỚI; (2) bed đang dùng sắp hết giờ (≤ 10 phút) / quá giờ.
+     Chỉ dùng 1 listener RT bedBookings/{hôm nay} — đếm giờ tính lại trên máy mỗi 30 giây, không đọc thêm. -->
 <style>
 .bell-btn.bell-has{ background:#006241 !important; color:#fff !important; }
+.bell-btn.bell-warn{ background:#d97706 !important; color:#fff !important; }
+.bell-btn.bell-over{ background:#dc2626 !important; color:#fff !important; }
 .bell-btn.bell-new .material-symbols-outlined{ animation: bellRing 1.6s ease-in-out infinite; transform-origin: 50% 10%; }
 @keyframes bellRing{ 0%,60%,100%{transform:rotate(0)} 10%{transform:rotate(14deg)} 20%{transform:rotate(-12deg)} 30%{transform:rotate(9deg)} 40%{transform:rotate(-6deg)} 50%{transform:rotate(3deg)} }
+#bell-modal .bell-sec{ font-size:11px; font-weight:900; letter-spacing:.08em; text-transform:uppercase; color:#6b7280; padding:4px 6px 0; }
 #bell-modal .bell-row{ display:flex; align-items:center; gap:12px; width:100%; text-align:left; background:#fff; border-radius:20px; padding:14px 16px; box-shadow:0 2px 10px rgba(0,0,0,.04); }
 #bell-modal .bell-row:active{ background:#f0fdf4; }
-#bell-modal .bell-time{ flex-shrink:0; min-width:58px; height:44px; border-radius:14px; background:#e8f5ee; color:#006241; font-weight:900; font-size:15px; display:flex; align-items:center; justify-content:center; }
+#bell-modal .bell-time{ flex-shrink:0; min-width:58px; height:44px; padding:0 6px; border-radius:14px; background:#e8f5ee; color:#006241; font-weight:900; font-size:15px; display:flex; align-items:center; justify-content:center; }
 #bell-modal .bell-row.late .bell-time{ background:#fef3c7; color:#b45309; }
+#bell-modal .bell-row.warn{ background:#fffbeb; box-shadow:inset 0 0 0 2px #fcd34d; }
+#bell-modal .bell-row.warn .bell-time{ background:#f59e0b; color:#fff; }
+#bell-modal .bell-row.over{ background:#fef2f2; box-shadow:inset 0 0 0 2px #fca5a5; }
+#bell-modal .bell-row.over .bell-time{ background:#dc2626; color:#fff; }
 #bell-modal .bell-new-tag{ background:#ef4444; color:#fff; font-size:9px; font-weight:900; padding:2px 7px; border-radius:99px; letter-spacing:.05em; margin-left:6px; vertical-align:middle; }
 </style>
 <div id="bell-modal" class="hidden fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onclick="if(event.target===this) bellClose()">
   <div class="bg-[#F2F2F7] w-full max-w-[400px] max-h-[85vh] rounded-3xl shadow-2xl overflow-hidden flex flex-col animate-bed-pop">
     <div class="bg-[#006241] px-6 py-5 flex justify-between items-center shrink-0">
       <div>
-        <h3 class="text-white text-xl font-bold tracking-wide">Lịch chờ nhận bed</h3>
+        <h3 class="text-white text-xl font-bold tracking-wide">Thông báo bed</h3>
         <p id="bell-sub" class="text-green-100/80 text-sm mt-0.5">Hôm nay</p>
       </div>
       <button onclick="bellClose()" aria-label="Đóng" class="w-8 h-8 rounded-full bg-black/20 flex items-center justify-center text-white">
@@ -13914,18 +13932,29 @@ function keypadConfirm() {
       </button>
     </div>
     <div id="bell-list" class="p-4 space-y-3 overflow-y-auto"></div>
-    <div class="px-6 pb-5 text-center text-gray-400 text-[10px] font-medium uppercase tracking-wider">Chạm vào lịch để mở ở màn Bed</div>
+    <div class="px-6 pb-5 text-center text-gray-400 text-[10px] font-medium uppercase tracking-wider">Chạm vào lịch để mở ở màn Bed (Gia hạn / Trả bed / Xếp bed)</div>
   </div>
 </div>
 <script>
-var _bellRef = null, _bellDay = '', _bellList = [], _bellSeenKey = 'pos_bell_seen_v1';
+var _bellRef = null, _bellDay = '', _bellAll = [], _bellList = [], _bellEnding = [], _bellSeenKey = 'pos_bell_seen_v1';
+var BELL_WARN_MIN = 10, _bellAck = {}; // _bellAck: báo hết giờ đã xem (theo lịch + mức sắp hết / quá giờ), chỉ trong phiên
 function _bellDayKey(d) { d = d || new Date(); return d.getFullYear() + '/' + String(d.getMonth() + 1).padStart(2, '0') + '/' + String(d.getDate()).padStart(2, '0'); }
 function _bellSeen() { try { return +localStorage.getItem(_bellSeenKey) || 0; } catch (e) { return 0; } }
+function _bellSt(b) { return String((b && b.status) || '').toLowerCase(); }
 function _bellIsWaiting(b) {
     if (!b) return false;
-    var st = String(b.status || '').toLowerCase();
+    var st = _bellSt(b);
     if (st.indexOf('đã hủy') >= 0 || st.indexOf('đã huỷ') >= 0 || st.indexOf('đã xong') >= 0 || st.indexOf('active') >= 0 || st.indexOf('đang dùng') >= 0) return false;
     return !b.bedId || b.bedId == 'WAITING';
+}
+function _bellIsActive(b) { var st = _bellSt(b); return st.indexOf('active') >= 0 || st.indexOf('đang dùng') >= 0; }
+// Số phút còn lại tới giờ trả bed (âm = quá giờ). Giờ kết thúc nhỏ hơn giờ bắt đầu = qua nửa đêm.
+function _bellMinsLeft(b, nowMs) {
+    var e = String((b && b.end) || ''), s = String((b && (b.checkInTime || b.start)) || '');
+    var pe = e.split(':'); if (pe.length < 2 || isNaN(+pe[0])) return null;
+    var now = new Date(nowMs), end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), +pe[0], +pe[1] || 0, 0, 0).getTime();
+    if (s && /^\d{1,2}:\d{2}/.test(s) && e < s && now.getHours() >= 12) end += 86400000;
+    return Math.trunc((end - nowMs) / 60000);
 }
 // Lịch tạo sau lần xem danh sách gần nhất (khách tại quầy do nhân viên tự tạo → không tính MỚI)
 function _bellIsNew(b, seen) {
@@ -13933,6 +13962,7 @@ function _bellIsNew(b, seen) {
     var t = (typeof _bookingCreatedMs === 'function') ? _bookingCreatedMs(b) : 0;
     return t > seen;
 }
+function _bellEndKey(b) { return b.id + '|' + (b._left < 0 ? 'over' : 'warn'); }
 function _bellInit() {
     var day = _bellDayKey();
     if (day === _bellDay && _bellRef) return;
@@ -13941,18 +13971,32 @@ function _bellInit() {
     _bellRef = db.ref('bedBookings/' + day);
     _bellRef.on('value', function (snap) {
         var data = snap.val() || {};
-        _bellList = Object.keys(data).map(function (k) { var o = Object.assign({}, data[k]); o.id = k; o.key = k; return o; })
-            .filter(_bellIsWaiting)
-            .sort(function (a, b) { return String(a.start || '').localeCompare(String(b.start || '')); });
-        _bellRender();
+        _bellAll = Object.keys(data).map(function (k) { var o = Object.assign({}, data[k]); o.id = k; o.key = k; return o; });
+        _bellCompute();
     });
 }
-setInterval(function () { if (_bellRef && _bellDayKey() !== _bellDay) _bellInit(); }, 60000); // qua ngày → nghe ngày mới
+function _bellCompute() {
+    var now = Date.now();
+    _bellList = _bellAll.filter(_bellIsWaiting)
+        .sort(function (a, b) { return String(a.start || '').localeCompare(String(b.start || '')); });
+    _bellEnding = _bellAll.filter(_bellIsActive).map(function (b) { var o = Object.assign({}, b); o._left = _bellMinsLeft(b, now); return o; })
+        .filter(function (b) { return b._left !== null && b._left <= BELL_WARN_MIN; })
+        .sort(function (a, b) { return a._left - b._left; });
+    _bellRender();
+}
+setInterval(function () {
+    if (_bellRef && _bellDayKey() !== _bellDay) { _bellInit(); return; } // qua ngày → nghe ngày mới
+    if (_bellRef) _bellCompute();                                          // đếm giờ lại trên máy, không đọc
+}, 30000);
 function _bellRender() {
-    var seen = _bellSeen(), n = _bellList.length;
-    var hasNew = _bellList.some(function (b) { return _bellIsNew(b, seen); });
+    var seen = _bellSeen(), n = _bellList.length + _bellEnding.length;
+    var hasNew = _bellList.some(function (b) { return _bellIsNew(b, seen); })
+        || _bellEnding.some(function (b) { return !_bellAck[_bellEndKey(b)]; });
+    var hasOver = _bellEnding.some(function (b) { return b._left < 0; });
     document.querySelectorAll('.bell-btn').forEach(function (btn) {
         btn.classList.toggle('bell-has', n > 0);
+        btn.classList.toggle('bell-warn', _bellEnding.length > 0 && !hasOver);
+        btn.classList.toggle('bell-over', hasOver);
         btn.classList.toggle('bell-new', hasNew);
         var c = btn.querySelector('.bell-count');
         if (c) { c.textContent = n > 99 ? '99+' : String(n); c.classList.toggle('hidden', n === 0); }
@@ -13963,31 +14007,57 @@ function _bellRender() {
 function _bellRenderList(seen) {
     var box = document.getElementById('bell-list'); if (!box) return;
     var sub = document.getElementById('bell-sub');
-    if (sub) sub.textContent = _bellList.length ? ('Hôm nay · ' + _bellList.length + ' lịch') : 'Hôm nay';
-    if (!_bellList.length) { box.innerHTML = '<div class="text-center text-gray-400 text-sm font-bold py-10">Không có lịch nào đang chờ</div>'; return; }
+    var parts = [];
+    if (_bellEnding.length) parts.push(_bellEnding.length + ' bed sắp hết / quá giờ');
+    if (_bellList.length) parts.push(_bellList.length + ' lịch chờ nhận');
+    if (sub) sub.textContent = 'Hôm nay' + (parts.length ? ' · ' + parts.join(' · ') : '');
+    if (!_bellList.length && !_bellEnding.length) { box.innerHTML = '<div class="text-center text-gray-400 text-sm font-bold py-10">Không có thông báo nào</div>'; return; }
     var esc = (typeof _escGiftTxt === 'function') ? _escGiftTxt : function (x) { return String(x == null ? '' : x); };
     var now = new Date(), nowHm = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
-    box.innerHTML = _bellList.map(function (b, i) {
-        var t = (typeof _bookingCreatedMs === 'function') ? _bookingCreatedMs(b) : 0;
-        var made = t ? new Date(t).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '';
-        var late = b.start && String(b.start) < nowHm;
-        var walk = (b.isWalkIn || b.type === 'walk-in');
-        return '<button type="button" class="bell-row' + (late ? ' late' : '') + '" data-i="' + i + '">'
-            + '<span class="bell-time">' + esc(b.start || '--:--') + '</span>'
-            + '<span class="flex-1 min-w-0">'
-            + '<span class="flex items-center min-w-0"><span class="text-[15px] font-black text-gray-900 truncate">' + esc(b.name || 'Khách') + '</span>' + (_bellIsNew(b, seen) ? '<span class="bell-new-tag shrink-0">MỚI</span>' : '') + '</span>'
-            + '<span class="block text-[12px] font-semibold text-gray-400 mt-0.5">' + esc(b.start || '') + ' – ' + esc(b.end || '') + (walk ? ' · Tại quầy' : ' · App') + (made ? ' · đặt lúc ' + made : '') + (late ? ' · đã tới giờ' : '') + '</span>'
-            + '</span>'
-            + '<span class="material-symbols-outlined text-gray-300">chevron_right</span>'
-            + '</button>';
-    }).join('');
-    box.querySelectorAll('.bell-row').forEach(function (el) { el.onclick = function () { bellGo(_bellList[+el.getAttribute('data-i')]); }; });
+    var rows = [];
+    if (_bellEnding.length) {
+        rows.push('<div class="bell-sec">Bed sắp hết giờ</div>');
+        _bellEnding.forEach(function (b, i) {
+            var over = b._left < 0;
+            var txt = over ? ('Quá ' + (-b._left) + ' phút') : (b._left === 0 ? 'Hết giờ ngay' : 'Còn ' + b._left + ' phút');
+            rows.push('<button type="button" class="bell-row ' + (over ? 'over' : 'warn') + '" data-k="e" data-i="' + i + '">'
+                + '<span class="bell-time">BED 0' + esc(b.bedId) + '</span>'
+                + '<span class="flex-1 min-w-0">'
+                + '<span class="block text-[15px] font-black text-gray-900 truncate">' + esc(b.name || 'Khách') + '</span>'
+                + '<span class="block text-[12px] font-bold mt-0.5 ' + (over ? 'text-red-600' : 'text-amber-700') + '">' + txt + ' · trả lúc ' + esc(b.end || '') + '</span>'
+                + '</span>'
+                + '<span class="material-symbols-outlined text-gray-300">chevron_right</span>'
+                + '</button>');
+        });
+    }
+    if (_bellList.length) {
+        if (_bellEnding.length) rows.push('<div class="bell-sec">Chờ nhận bed</div>');
+        _bellList.forEach(function (b, i) {
+            var t = (typeof _bookingCreatedMs === 'function') ? _bookingCreatedMs(b) : 0;
+            var made = t ? new Date(t).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '';
+            var late = b.start && String(b.start) < nowHm;
+            var walk = (b.isWalkIn || b.type === 'walk-in');
+            rows.push('<button type="button" class="bell-row' + (late ? ' late' : '') + '" data-k="w" data-i="' + i + '">'
+                + '<span class="bell-time">' + esc(b.start || '--:--') + '</span>'
+                + '<span class="flex-1 min-w-0">'
+                + '<span class="flex items-center min-w-0"><span class="text-[15px] font-black text-gray-900 truncate">' + esc(b.name || 'Khách') + '</span>' + (_bellIsNew(b, seen) ? '<span class="bell-new-tag shrink-0">MỚI</span>' : '') + '</span>'
+                + '<span class="block text-[12px] font-semibold text-gray-400 mt-0.5">' + esc(b.start || '') + ' – ' + esc(b.end || '') + (walk ? ' · Tại quầy' : ' · App') + (made ? ' · đặt lúc ' + made : '') + (late ? ' · đã tới giờ' : '') + '</span>'
+                + '</span>'
+                + '<span class="material-symbols-outlined text-gray-300">chevron_right</span>'
+                + '</button>');
+        });
+    }
+    box.innerHTML = rows.join('');
+    box.querySelectorAll('.bell-row').forEach(function (el) {
+        el.onclick = function () { var src = el.getAttribute('data-k') === 'e' ? _bellEnding : _bellList; bellGo(src[+el.getAttribute('data-i')]); };
+    });
 }
 function bellOpen() {
     var seen = _bellSeen();
     document.getElementById('bell-modal').classList.remove('hidden');
     _bellRenderList(seen);               // hiện nhãn MỚI theo lần xem trước
     try { localStorage.setItem(_bellSeenKey, String(Date.now())); } catch (e) {}
+    _bellEnding.forEach(function (b) { _bellAck[_bellEndKey(b)] = 1; });
     document.querySelectorAll('.bell-btn').forEach(function (btn) { btn.classList.remove('bell-new'); });
 }
 function bellClose() { document.getElementById('bell-modal').classList.add('hidden'); }
@@ -14008,6 +14078,98 @@ function bellGo(b) {
         if (tries > 30) clearInterval(iv);
     }, 150);
 }
+</script>
+
+<!-- [14/10] HỘP THÔNG BÁO TRONG APP: thay alert / confirm / prompt của trình duyệt (trong app bọc trên điện thoại hiện tên trang web, chặn cả màn).
+     alert() → không chặn, các thông báo xếp hàng hiện lần lượt. Hỏi / nhập → _posConfirm / _posPrompt trả Promise. -->
+<style>
+#pos-dlg{ position:fixed; inset:0; z-index:200000; display:none; align-items:center; justify-content:center; padding:24px; background:rgba(0,0,0,.4); -webkit-backdrop-filter:blur(4px); backdrop-filter:blur(4px); }
+#pos-dlg.open{ display:flex; }
+#pos-dlg .pd-card{ width:100%; max-width:340px; background:#fff; border-radius:32px; padding:28px 24px 20px; text-align:center; box-shadow:0 30px 60px rgba(0,0,0,.3); animation: bedPopIn .2s cubic-bezier(0.16,1,0.3,1) both; }
+#pos-dlg .pd-title{ font-weight:900; font-size:18px; color:#006241; letter-spacing:.02em; margin-bottom:8px; }
+#pos-dlg.err .pd-title{ color:#dc2626; }
+#pos-dlg .pd-msg{ font-size:15px; line-height:1.5; color:#4b5563; font-weight:600; white-space:pre-line; word-break:break-word; max-height:50vh; overflow:auto; }
+#pos-dlg .pd-input{ width:100%; margin-top:14px; padding:14px 16px; border-radius:18px; border:2px solid #e5e7eb; font-size:15px; font-weight:600; outline:none; }
+#pos-dlg .pd-input:focus{ border-color:#006241; }
+#pos-dlg .pd-btns{ display:flex; gap:10px; margin-top:20px; }
+#pos-dlg .pd-btns button{ flex:1; height:52px; border-radius:26px; font-weight:900; font-size:14px; text-transform:uppercase; letter-spacing:.04em; }
+#pos-dlg .pd-ok{ background:#006241; color:#fff; box-shadow:0 8px 20px -6px rgba(0,98,65,.5); }
+#pos-dlg .pd-cancel{ background:#f3f4f6; color:#6b7280; }
+</style>
+<div id="pos-dlg" role="dialog" aria-modal="true">
+  <div class="pd-card">
+    <div class="pd-title"></div>
+    <div class="pd-msg"></div>
+    <input class="pd-input" type="text" style="display:none">
+    <div class="pd-btns"><button type="button" class="pd-cancel">Huỷ</button><button type="button" class="pd-ok">Đã hiểu</button></div>
+  </div>
+</div>
+<script>
+var _posDlgQ = [], _posDlgCur = null;
+function _posDlg(o) { return new Promise(function (res) { o.res = res; _posDlgQ.push(o); if (!_posDlgCur) _posDlgNext(); }); }
+function _posDlgNext() {
+    var o = _posDlgCur = _posDlgQ.shift(); if (!o) return;
+    var el = document.getElementById('pos-dlg'); if (!el) { o.res(o.kind === 'confirm' ? false : null); _posDlgCur = null; return; }
+    var msg = String(o.msg == null ? '' : o.msg);
+    var isErr = /^\s*(❌|⚠️|⛔)|lỗi/i.test(msg);
+    el.classList.toggle('err', isErr && o.kind === 'alert');
+    el.querySelector('.pd-title').textContent = o.title || (o.kind === 'alert' ? (isErr ? 'Có lỗi' : 'Thông báo') : 'Xác nhận');
+    el.querySelector('.pd-msg').textContent = msg;
+    var inp = el.querySelector('.pd-input'), ok = el.querySelector('.pd-ok'), cancel = el.querySelector('.pd-cancel');
+    inp.style.display = o.kind === 'prompt' ? '' : 'none'; inp.value = o.def || '';
+    cancel.style.display = o.kind === 'alert' ? 'none' : '';
+    ok.textContent = o.okText || (o.kind === 'alert' ? 'Đã hiểu' : 'Đồng ý');
+    cancel.textContent = o.cancelText || 'Huỷ';
+    function done(v) { el.classList.remove('open'); _posDlgCur = null; o.res(v); setTimeout(_posDlgNext, 60); }
+    ok.onclick = function () { done(o.kind === 'prompt' ? inp.value : (o.kind === 'confirm' ? true : undefined)); };
+    cancel.onclick = function () { done(o.kind === 'prompt' ? null : false); };
+    inp.onkeydown = function (e) { if (e.key === 'Enter') ok.onclick(); };
+    el.classList.add('open');
+    if (o.kind === 'prompt') setTimeout(function () { try { inp.focus(); } catch (e) {} }, 50);
+}
+function _posConfirm(msg, okText, cancelText) { return _posDlg({ kind: 'confirm', msg: msg, okText: okText, cancelText: cancelText }); }
+function _posPrompt(msg, def) { return _posDlg({ kind: 'prompt', msg: msg, def: def }); }
+window.alert = function (msg) { _posDlg({ kind: 'alert', msg: msg }); };
+</script>
+
+<!-- [14/10] BÁO MẤT MẠNG: .info/connected của Realtime Database (trạng thái kết nối của máy, không tính lượt đọc) + sự kiện online/offline. -->
+<div id="pos-net" style="display:none;position:fixed;left:0;right:0;top:0;z-index:200001;padding:calc(6px + env(safe-area-inset-top)) 12px 6px;font-weight:800;font-size:12px;color:#fff;box-shadow:0 6px 18px rgba(0,0,0,.2);text-align:center;line-height:1.3"></div>
+<script>
+(function () {
+    var everOn = false, isOff = false, offTimer = null, hideTimer = null;
+    function show(off) {
+        var el = document.getElementById('pos-net'); if (!el) return;
+        clearTimeout(hideTimer);
+        if (off) {
+            el.style.background = '#dc2626';
+            el.textContent = 'Mất mạng — đơn chưa gửi được, đừng tắt app';
+            el.style.display = 'block';
+        } else {
+            el.style.background = '#006241';
+            el.textContent = 'Đã có mạng lại';
+            el.style.display = 'block';
+            hideTimer = setTimeout(function () { el.style.display = 'none'; }, 3000);
+        }
+    }
+    // Chờ 3 giây mới báo mất — tránh nháy khi mạng chập chờn
+    function setOff(off) {
+        if (off) {
+            if (isOff || offTimer) return;
+            offTimer = setTimeout(function () { offTimer = null; isOff = true; show(true); }, 3000);
+        } else {
+            clearTimeout(offTimer); offTimer = null;
+            if (isOff) { isOff = false; show(false); }
+        }
+    }
+    window.addEventListener('offline', function () { setOff(true); });
+    window.addEventListener('online', function () { if (everOn) setOff(false); });
+    try {
+        db.ref('.info/connected').on('value', function (s) {
+            if (s.val() === true) { everOn = true; setOff(false); }
+            else if (everOn) setOff(true);
+        });
+    } catch (e) {}
+})();
 </script>
 </body>
 </html>
