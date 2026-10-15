@@ -7,11 +7,11 @@ const { extract } = require('./lib/extract');
 let ok = true;
 const eq = (a, b, m) => { if (JSON.stringify(a) !== JSON.stringify(b)) { ok = false; console.log('FAIL', m, JSON.stringify(a).slice(0, 400), '!=', JSON.stringify(b).slice(0, 400)); } else console.log('ok', m); };
 
-const M = new Function(extract('manage.html', ['tcEmptySum', 'tcIsTransfer', 'tcIsKhacLine', 'tcAddOrder', 'tcSummarize', 'xoEmptySum', 'xoAddOrder', 'xoSummarize',
+const M = new Function(extract('manage.html', ['vnHour', 'tcEmptySum', 'tcIsTransfer', 'tcIsKhacLine', 'tcAddOrder', 'tcSummarize', 'xoEmptySum', 'xoAddOrder', 'xoSummarize',
   'payTermsOfRecord', 'empPayTermsOn', 'computeWageForDayHours', 'isShiftInProgress', 'shiftWorkedHours', 'laborByEmployee', 'pad', 'dkey',
-  'parseDkey', 'addDays', 'targetMonthValue', 'daysInMonthYm', 'targetForRange', 'sharePcts', 'sharePct',
+  'parseDkey', 'addDays', 'targetMonthValue', 'daysInMonthYm', 'targetForRange', 'sharePcts',
   'ggEmptySum', 'ggAddOrder', 'ggSummarize', 'gieoTargetsOn', 'gieoTargetForRange', 'ggName', 'gieoLabel']) +
-  '\nconst GIEO_LEGACY = "gg01", GIEO_TARGET_DEFAULTS = { aov:46000, billsPerDay:60 };\nreturn { tcSummarize, xoSummarize, laborByEmployee, targetMonthValue, targetForRange, sharePct, sharePcts, ggSummarize, gieoTargetForRange, ggName, gieoLabel };')();
+  '\nconst GIEO_LEGACY = "gg01", GIEO_TARGET_DEFAULTS = { aov:46000, billsPerDay:60 };\nreturn { tcSummarize, xoSummarize, laborByEmployee, targetMonthValue, targetForRange, sharePcts, ggSummarize, gieoTargetForRange, ggName, gieoLabel };')();
 
 // Bộ sinh số giả ngẫu nhiên cố định — test lặp lại được.
 let seed = 12345; const rnd = n => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
@@ -128,7 +128,7 @@ eq(M.targetForRange(TG, '2026-10-12', '2026-10-12', 'tc33'), 200000, 'Mục tiê
 eq(M.targetForRange(TG, '2026-09-29', '2026-10-02', 'tc33'), 2 * 103333 + 2 * 200000 + 1, 'Mục tiêu tuần vắt qua 2 tháng cộng theo từng ngày');
 eq(M.targetForRange(TG, '2026-10-01', '2026-10-31', 'xofa'), 3000000, 'Mục tiêu cả tháng = đúng mức tháng');
 eq(M.targetForRange(TG, '2026-07-01', '2026-07-31', 'xofa'), null, 'Mục tiêu: kỳ chưa đặt → null');
-eq([M.sharePct(1, 2), M.sharePct(0, 0), M.sharePct(5, 0)], [[33, 67], [0, 0], [100, 0]], '% đóng góp cộng lại đúng 100');
+eq([M.sharePcts([1, 2]), M.sharePcts([0, 0]), M.sharePcts([5, 0])], [[33, 67], [0, 0], [100, 0]], '% đóng góp cộng lại đúng 100');
 
 // ── cham_cong.v2.js (bản hiện hành) ──────────────────────────────────────────────────────
 const C = require('../cham_cong.v2.js');
