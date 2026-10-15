@@ -80,8 +80,9 @@
     var codes = (st && st.codes) || [];
     if (codes.length) {
       html += '<div class="lx-codes">' + codes.map(function (c) {
-        var T = LiXi.TYPES[c.type], chip = c.used ? '<span class="lx-chip used">Đã dùng</span>' : (LiXi.inUse(now) ? '<span class="lx-chip ok">Dùng được</span>' : '<span class="lx-chip">Từ mùng 3</span>');
-        return '<div class="lx-code"><div class="t"><b>' + esc(T.label) + '</b><small>Mã ' + esc(c.id) + ' · tại ' + esc(storeOf(c.type)) + ' · ' + esc(T.note) + '</small></div>' + chip + '</div>';
+        var T = LiXi.TYPES[c.type], chip = c.used ? '<span class="lx-chip used">Đã dùng</span>' : c.reservedBooking ? '<span class="lx-chip ok">Đã giữ cho lịch</span>' : (LiXi.inUse(now) ? '<span class="lx-chip ok">Dùng được</span>' : '<span class="lx-chip">Từ mùng 3</span>');
+        var extra = (!c.used && c.reservedInfo) ? ' · lịch ' + esc(c.reservedInfo) : '';
+        return '<div class="lx-code"><div class="t"><b>' + esc(T.label) + '</b><small>Mã ' + esc(c.id) + ' · tại ' + esc(storeOf(c.type)) + ' · ' + esc(T.note) + extra + '</small></div>' + chip + '</div>';
       }).join('') + '</div>';
     } else if (st && !st.give) {
       html += '<div class="lx-hint">Bạn chưa có mã lì xì nào.</div>';
@@ -139,8 +140,139 @@
     });
   });
 
+  // ── +1h BED: lịch đặt qua app có dùng mã → KÉO DÀI thêm 1 giờ ngay lúc đặt ──
+  // Mọi chỗ kiểm trùng lịch (app khách + POS) chỉ đọc giờ `end` → lịch 13:00–15:00 dùng mã được lưu 13:00–16:00:
+  // khách sau thấy 15:00–16:00 đã có người, không chồng lịch. POS: lịch có `lixiBed1h` → tự trừ 1 giờ khi tính tiền.
+  var bedOn = true, pending = null, box = null;
+  function $(id) { return document.getElementById(id); }
+  function bed1hCode() {
+    if (!st) return null;
+    return (st.codes || []).filter(function (c) { return c.type === 'bed1h' && !c.used && !c.reservedBooking; })[0] || null;
+  }
+  function closeMin() { try { return _bedClosingMin || 1250; } catch (e) { return 1250; } }
+  function closeStr() { try { return _bedClosingTime || '20:50'; } catch (e) { return '20:50'; } }
+  /** {code, base, ext} nếu dùng được với ngày / giờ đang chọn; {why} nếu có mã nhưng chưa dùng được; null nếu không có mã */
+  function bedPlan(dateVal, s, e) {
+    var c = bed1hCode(); if (!c) return null;
+    if (!LiXi.dateInUse(dateVal)) return { why: 'Mã +1h bed dùng cho lịch từ mùng 3 → mùng 10 Tết (8/2 → 15/2).' };
+    if (!s || !e) return { why: '' };
+    var paid = LiXi.mins(e) - LiXi.mins(s), T = LiXi.TYPES.bed1h;
+    if (paid < (T.minBedHours || 2) * 60) return { why: 'Mã +1h bed áp cho lịch từ ' + (T.minBedHours || 2) + ' giờ — chọn thêm giờ để được tặng 1 giờ.', code: c.id };
+    var ext = LiXi.hm(LiXi.mins(e) + LiXi.BED_FREE_MIN);
+    if (LiXi.mins(e) + LiXi.BED_FREE_MIN > closeMin()) return { why: 'Lịch kết thúc ' + e + ' — cộng 1 giờ sẽ quá giờ quán nhận bed (' + closeStr() + '). Chọn giờ kết thúc sớm hơn để dùng mã.', code: c.id };
+    return { code: c.id, base: e, ext: ext };
+  }
+  function bedUi() {
+    var btn = $('btn-booking'); if (!btn) return;
+    if (!box) {
+      box = document.createElement('div'); box.id = 'lx-bed1h';
+      box.style.cssText = 'display:none;margin:0 0 12px;padding:12px 14px;border-radius:18px;background:linear-gradient(135deg,#fff7e6,#fdecd2);border:1.5px solid #e9b949;color:#5c0d1f;font-size:13px;line-height:1.45;';
+      btn.parentNode.insertBefore(box, btn);
+    }
+    var pl = bedPlan(($('book-date') || {}).value, ($('book-start') || {}).value, ($('book-end') || {}).value);
+    if (!pl) { box.style.display = 'none'; return; }
+    var html;
+    if (pl.ext) html = '<label style="display:flex;gap:10px;align-items:flex-start;cursor:pointer;"><input type="checkbox" id="lx-bed1h-on"' + (bedOn ? ' checked' : '') + ' style="margin-top:3px;width:18px;height:18px;accent-color:#7a1027;">' +
+      '<span><b>🧧 Dùng lì xì +1h bed miễn phí</b> (mã ' + esc(pl.code) + ')<br>' + (bedOn ? 'Lịch của bạn kết thúc <b>' + pl.ext + '</b> thay vì ' + pl.base + ' — giờ cuối miễn phí.' : 'Bật để được tặng thêm 1 giờ (kết thúc ' + pl.ext + ').') + '</span></label>';
+    else if (pl.why) html = '<b>🧧 Bạn có lì xì +1h bed</b><br><span style="color:#9a6a3a">' + esc(pl.why) + '</span>';
+    else { box.style.display = 'none'; return; }
+    if (box.getAttribute('data-h') !== html) { box.innerHTML = html; box.setAttribute('data-h', html); var cb = $('lx-bed1h-on'); if (cb) cb.onchange = function () { bedOn = cb.checked; box.setAttribute('data-h', ''); bedUi(); }; }
+    box.style.display = 'block';
+  }
+  setInterval(function () { var t = $('tab-bed'); if (t && !t.classList.contains('hidden') && st) bedUi(); }, 800);
+
+  var _hb = window.handleBooking;
+  if (typeof _hb === 'function') window.handleBooking = function () {
+    var sEl = $('book-start'), eEl = $('book-end'), dEl = $('book-date');
+    if (!sEl || !eEl) return _hb.apply(this, arguments);
+    var dur = LiXi.mins(eEl.value) - LiXi.mins(sEl.value), r;
+    // gọi lại từ chính handleBooking (app tự dời giờ khi đặt quá sát / chọn giờ gợi ý): giờ trên form đã gồm +1h → không cộng lần 2
+    // (lần gọi lại đó luôn đổi giờ bắt đầu; khách tự chọn lại cùng giờ bắt đầu = lượt đặt mới → tính lại từ đầu)
+    if (pending && dur === pending.extDur && sEl.value !== pending.start && Date.now() - pending.at < 120000) {
+      pending.at = Date.now(); pending.start = sEl.value;
+      r = _hb.apply(this, arguments);
+      eEl.value = LiXi.hm(LiXi.mins(sEl.value) + pending.baseDur);
+      return r;
+    }
+    var pl = bedOn ? bedPlan(dEl && dEl.value, sEl.value, eEl.value) : null;
+    if (!pl || !pl.ext) { pending = null; return _hb.apply(this, arguments); }
+    pending = { code: pl.code, baseDur: dur, extDur: dur + LiXi.BED_FREE_MIN, at: Date.now(), start: sEl.value };
+    eEl.value = pl.ext;                               // handleBooking đọc giờ NGAY đầu hàm → kiểm giờ đóng cửa + trùng lịch theo khung đã cộng
+    try { r = _hb.apply(this, arguments); } finally { eEl.value = pl.base; }
+    return r;
+  };
+  // hết chỗ → app gợi ý khung giờ (đã gồm +1h) → khách chọn: form về giờ khách TRẢ TIỀN, bấm Đặt sẽ cộng lại 1 giờ
+  var _aab = window.applyAutoBook;
+  if (typeof _aab === 'function') window.applyAutoBook = function (timeRange) {
+    var r = _aab.apply(this, arguments), P = pending, a = String(timeRange || '').split(' - ');
+    if (P && a.length === 2 && LiXi.mins(a[1]) - LiXi.mins(a[0]) === P.extDur) { var eEl = $('book-end'); if (eEl) eEl.value = LiXi.hm(LiXi.mins(a[0]) + P.baseDur); }
+    pending = null;
+    return r;
+  };
+  var _pnb = window._pushNewBedBooking;
+  if (typeof _pnb === 'function') window._pushNewBedBooking = function (bookingData, callback, presetKey) {
+    var self = this, args = arguments;
+    var P = pending;
+    if (!P || !bookingData || bookingData.type !== 'app' || LiXi.mins(bookingData.end) - LiXi.mins(bookingData.start) !== P.extDur) return _pnb.apply(self, args);
+    pending = null;
+    var d = _parseBedDateKey(bookingData.date), rtPath = 'bedBookings/' + d.year + '/' + d.month + '/' + d.day;
+    var key = presetKey || db.ref(rtPath).push().key;
+    var baseEnd = LiXi.hm(LiXi.mins(bookingData.end) - LiXi.BED_FREE_MIN);
+    // giữ mã TRƯỚC rồi mới lưu lịch: mã vừa bị dùng / giữ ở chỗ khác → lịch giữ giờ cũ (không kéo dài, không trừ)
+    LiXi.reserve(curPhone, P.code, { key: key, path: rtPath + '/' + key, info: bookingData.date.slice(0, 5) + ' ' + bookingData.start + '–' + bookingData.end }).then(function () {
+      bookingData.lixiBed1h = { code: P.code, phone: curPhone, freeMin: LiXi.BED_FREE_MIN, baseEnd: baseEnd, by: 'app' };
+    }).catch(function () {
+      bookingData.end = baseEnd;
+      if (bookingData.preorder && bookingData.preorder.bookingEnd) bookingData.preorder.bookingEnd = baseEnd;
+      setTimeout(function () { showAppModal('Lì xì +1h bed', 'Mã lì xì vừa được dùng ở chỗ khác nên lịch giữ giờ kết thúc <b>' + baseEnd + '</b> nhé.', '🧧'); }, 1200);
+    }).then(function () {
+      _pnb.call(self, bookingData, function () { refresh(true); if (callback) callback.apply(this, arguments); }, key);
+    });
+  };
+  // huỷ lịch → trả mã
+  var _rfd = window._refundBedVoucherIfAny;
+  if (typeof _rfd === 'function') window._refundBedVoucherIfAny = function (booking) {
+    var L = booking && booking.lixiBed1h;
+    if (L && L.code) LiXi.unreserve(L.phone || curPhone, L.code, booking.key || booking.id).then(function () { refresh(true); }).catch(function () {});
+    return _rfd.apply(this, arguments);
+  };
+  // đổi giờ: form hiện giờ khách TRẢ TIỀN (bỏ 1 giờ tặng); lưu thì cộng lại 1 giờ
+  function editingLixi() {
+    try { var c = (_historyCache || []).filter(function (b) { return b.key === editingBookingKey; })[0]; return c && c.lixiBed1h ? c : null; } catch (e) { return null; }
+  }
+  var reM = $('reschedule-modal');
+  if (reM && window.MutationObserver) new MutationObserver(function () {
+    if (reM.classList.contains('hidden')) return;
+    var b = editingLixi(), reE = $('re-end'), h = $('reschedule-hint'); if (!b || !reE) return;
+    setTimeout(function () {
+      if (reE.value === b.end) reE.value = LiXi.hm(LiXi.mins(b.end) - LiXi.BED_FREE_MIN);
+      if (h && h.textContent.indexOf('🧧') < 0) h.textContent += ' · 🧧 lịch có lì xì +1h: chọn giờ kết thúc bạn trả tiền, Bé Gạo tự cộng thêm 1 giờ';
+    }, 0);
+  }).observe(reM, { attributes: true, attributeFilter: ['class'] });
+  var _dsr = window._doSubmitReschedule;
+  if (typeof _dsr === 'function') window._doSubmitReschedule = function () {
+    var b = editingLixi(), reS = $('re-start'), reE = $('re-end'), reD = $('re-date');
+    if (!b || !reS || !reE) return _dsr.apply(this, arguments);
+    var T = LiXi.TYPES.bed1h, paid = LiXi.mins(reE.value) - LiXi.mins(reS.value), base = reE.value;
+    if (!LiXi.dateInUse(reD && reD.value)) return alert('Lịch có lì xì +1h bed chỉ đổi sang ngày mùng 3 → mùng 10 Tết (8/2 → 15/2).');
+    if (paid < (T.minBedHours || 2) * 60) return alert('Lịch có lì xì +1h bed cần từ ' + (T.minBedHours || 2) + ' giờ trở lên.');
+    if (LiXi.mins(base) + LiXi.BED_FREE_MIN > closeMin()) return alert('Cộng 1 giờ tặng sẽ quá giờ quán nhận bed (' + closeStr() + ') — chọn giờ kết thúc sớm hơn.');
+    reE.value = LiXi.hm(LiXi.mins(base) + LiXi.BED_FREE_MIN);
+    var L = b.lixiBed1h, dd = String((reD && reD.value) || '').split('-');
+    resched = { at: Date.now(), phone: L.phone || curPhone, code: L.code, key: b.key, path: (typeof _editingBookingPath !== 'undefined' && _editingBookingPath) || '',
+      info: (dd.length === 3 ? dd[2] + '/' + dd[1] : '') + ' ' + reS.value + '–' + reE.value };
+    try { return _dsr.apply(this, arguments); } finally { reE.value = base; }
+  };
+  // đổi giờ thành công (app mở lại Lịch sử) → cập nhật dòng "đã giữ cho lịch …" trên mã
+  var resched = null, _oh = window.openHistory;
+  if (typeof _oh === 'function') window.openHistory = function () {
+    var R = resched; resched = null;
+    if (R && Date.now() - R.at < 30000) LiXi.reserve(R.phone, R.code, { key: R.key, path: R.path, info: R.info }).then(function () { refresh(true); }).catch(function () {});
+    return _oh.apply(this, arguments);
+  };
+
   // ── móc vào app ──
-  window.LiXiUI = { avail: avail, open: openModal, refresh: refresh };
+  window.LiXiUI = { avail: avail, open: openModal, refresh: refresh, bedPlan: bedPlan };
   var _sd = window.showDashboard;
   if (typeof _sd === 'function') window.showDashboard = function () { var r = _sd.apply(this, arguments); setTimeout(function () { refresh(true); }, 900); return r; };
   // chạm Bé Gạo khi còn bao → mở popup

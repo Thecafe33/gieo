@@ -31,11 +31,11 @@
     deleteCode: '3367'
   };
   var TYPES = {
-    upsize_xofa: { store: 'xofa', label: 'Upsize miễn phí tại XOFA',        short: 'Upsize XOFA', note: 'Miễn phần chênh M→L cho 1 ly size L' },
-    upsize_tc33: { store: 'tc33', label: 'Upsize miễn phí tại The cafe 33', short: 'Upsize 33',   note: 'Miễn phần chênh M→L cho 1 ly size L' },
-    giam5k_xofa: { store: 'xofa', label: 'Giảm 5K đơn XOFA',               short: '-5K XOFA',    note: 'Đơn từ 30.000đ', value: 5000, minOrder: 30000 },
-    giam10k_bed: { store: 'tc33', label: 'Giảm 10K lịch bed',              short: '-10K bed',    note: 'Trừ 10.000đ trên bill có giờ bed', value: 10000 },
-    bed1h:       { store: 'tc33', label: '+1h bed miễn phí',               short: '+1h bed',     note: 'Trừ 1 giờ bed — lịch từ 2 giờ', minBedHours: 2 }
+    upsize_xofa: { store: 'xofa', label: 'Upsize miễn phí tại XOFA',        short: 'Upsize XOFA', note: 'Upsize lên L miễn phí khi mua M' },
+    upsize_tc33: { store: 'tc33', label: 'Upsize miễn phí tại The cafe 33', short: 'Upsize 33',   note: 'Upsize lên L miễn phí khi mua M' },
+    giam5k_xofa: { store: 'xofa', label: 'Giảm 5K đơn XOFA',               short: '-5K XOFA',    note: 'Giảm 5K cho đơn từ 30K', value: 5000, minOrder: 30000 },
+    giam10k_bed: { store: 'tc33', label: 'Giảm 10K lịch bed',              short: '-10K bed',    note: 'Giảm 10K khi đặt bed', value: 10000 },
+    bed1h:       { store: 'tc33', label: '+1h bed miễn phí',               short: '+1h bed',     note: 'Tặng thêm 1 giờ bed cho lịch từ 2 giờ', minBedHours: 2 }
   };
   var STORE_NAME = { xofa: 'XOFA', tc33: 'The cafe 33' };
 
@@ -96,7 +96,8 @@
     var c = (data && data.codes) || {}, out = [];
     Object.keys(c).forEach(function (id) {
       var v = c[id]; if (!v || !TYPES[v.type] || !/^TET[A-Z0-9]{5}$/.test(id)) return;   // mã lạ (ghi tay sai dạng) → bỏ qua; mã được chèn vào giao diện POS
-      out.push({ id: id, type: v.type, at: v.at || '', used: !!v.used, usedAt: v.usedAt || null, usedStore: v.usedStore || null });
+      out.push({ id: id, type: v.type, at: v.at || '', used: !!v.used, usedAt: v.usedAt || null, usedStore: v.usedStore || null,
+        reservedBooking: v.reservedBooking || null, reservedPath: v.reservedPath || null, reservedInfo: v.reservedInfo || null });
     });
     out.sort(function (a, b) { return a.at < b.at ? -1 : a.at > b.at ? 1 : 0; });
     return out;
@@ -160,13 +161,59 @@
     return ref(p).set({ phone: p, extra: FV.increment(1), earned: FV.increment(1), lastEarnAt: new Date(now()).toISOString(),
       lastEarnStore: store || '', lastEarnOrder: orderId || '' }, { merge: true }).then(function () { return true; });
   }
-  /** Mã còn dùng được ở quán `store` ('xofa' | 'tc33') — trả [] ngoài giai đoạn dùng (không đọc gì) */
-  function usableCodes(phone, store) {
+  /** Mã còn dùng được ở quán `store` ('xofa' | 'tc33') — trả [] ngoài giai đoạn dùng (không đọc gì).
+   *  Mã đã GIỮ cho 1 lịch bed (+1h bed đặt qua app) chỉ hiện khi đang tính tiền đúng lịch đó (bookingKey). */
+  function usableCodes(phone, store, bookingKey) {
     var p = normPhone(phone);
     if (!FS || p.length < 9 || !inUse()) return Promise.resolve([]);
     return ref(p).get().then(function (s) {
-      return codesOf(s.exists ? s.data() : null).filter(function (c) { return !c.used && TYPES[c.type].store === store; });
+      return codesOf(s.exists ? s.data() : null).filter(function (c) {
+        return !c.used && TYPES[c.type].store === store && (!c.reservedBooking || (bookingKey && c.reservedBooking === bookingKey));
+      });
     });
+  }
+  /** Giữ mã cho 1 lịch bed (app khách, lúc đặt). Mã đã dùng / đang giữ cho lịch khác → lỗi. */
+  function reserve(phone, id, booking) {
+    var p = normPhone(phone), r = ref(p), err = null;
+    booking = booking || {};
+    if (!FS || !id || !booking.key) return Promise.reject(new Error('thieu'));
+    return FS.runTransaction(function (tx) {
+      return tx.get(r).then(function (s) {
+        var c = s.exists && s.data().codes && s.data().codes[id];
+        if (!c) { err = 'khong-co'; return; }
+        if (c.used) { err = 'da-dung'; return; }
+        if (c.reservedBooking && c.reservedBooking !== booking.key) { err = 'dang-giu'; return; }
+        var u = {};
+        u['codes.' + id + '.reservedBooking'] = booking.key;
+        u['codes.' + id + '.reservedPath'] = booking.path || '';
+        u['codes.' + id + '.reservedInfo'] = booking.info || '';
+        u['codes.' + id + '.reservedAt'] = new Date(now()).toISOString();
+        tx.update(r, u);
+      });
+    }).then(function () { if (err) throw new Error(err); return true; });
+  }
+  /** Trả mã về (huỷ lịch) — chỉ khi đang giữ đúng cho lịch này và chưa dùng */
+  function unreserve(phone, id, bookingKey) {
+    var p = normPhone(phone), r = ref(p), done = false;
+    if (!FS || !id) return Promise.resolve(false);
+    return FS.runTransaction(function (tx) {
+      return tx.get(r).then(function (s) {
+        var c = s.exists && s.data().codes && s.data().codes[id];
+        if (!c || c.used || c.reservedBooking !== bookingKey) return;
+        var u = {};
+        u['codes.' + id + '.reservedBooking'] = null; u['codes.' + id + '.reservedPath'] = null;
+        u['codes.' + id + '.reservedInfo'] = null; u['codes.' + id + '.reservedAt'] = null;
+        tx.update(r, u); done = true;
+      });
+    }).then(function () { return done; });
+  }
+  // giờ "HH:MM" ± phút
+  function hm(min) { min = ((min % 1440) + 1440) % 1440; return String(Math.floor(min / 60)).padStart(2, '0') + ':' + String(min % 60).padStart(2, '0'); }
+  function mins(s) { var a = String(s || '').split(':'); return (+a[0] || 0) * 60 + (+a[1] || 0); }
+  /** Ngày lịch bed ("DD/MM/YYYY" hoặc "YYYY-MM-DD") có nằm trong giai đoạn dùng mã không */
+  function dateInUse(d) {
+    var m = String(d || '').match(/^(\d{2})\/(\d{2})\/(\d{4})$/), k = m ? m[3] + '-' + m[2] + '-' + m[1] : String(d || '').slice(0, 10);
+    return k >= CFG.useFrom && k <= CFG.useTo;
   }
   /** Đánh dấu đã dùng (sau khi thanh toán thành công). Transaction: mã đã dùng ở máy khác → báo lỗi 'da-dung'. */
   function markUsed(phone, id, info) {
@@ -228,6 +275,7 @@
     now: now, vnDay: vnDay, inGive: inGive, inUse: inUse, isOver: isOver, isHot: isHot, daysToTet: daysToTet,
     boughtRecently: boughtRecently, chance: chance, pickPrize: pickPrize, draw: draw, normPhone: normPhone, newCodeId: newCodeId,
     init: init, stateOf: stateOf, load: load, open: open, grantOpen: grantOpen, usableCodes: usableCodes, markUsed: markUsed,
+    reserve: reserve, unreserve: unreserve, hm: hm, mins: mins, dateInUse: dateInUse, BED_FREE_MIN: 60,
     stats: stats, deleteAll: deleteAll, fmtVnd: fmtVnd,
     _setOffset: function (v) { offset = v; }
   };

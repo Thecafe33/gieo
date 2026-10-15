@@ -68,6 +68,19 @@ chk(L.normPhone('+84 912 345 678') === '0912345678', 'chuẩn hoá SĐT 84 → 0
   chk(doc().codes[ux[0].id].used === true && doc().codes[ux[0].id].usedAmount === 6000, 'thanh toán xong: đánh dấu đã dùng');
   let e2 = null; try { await L.markUsed(P, ux[0].id, { store: 'xofa' }); } catch (e) { e2 = e.message; } chk(e2 === 'da-dung', 'mã đã dùng → không dùng lại (2 máy cùng lúc)');
   chk((await L.usableCodes(P, 'xofa')).length === 0, 'mã đã dùng biến khỏi danh sách');
+  // +1h bed: app khách GIỮ mã cho 1 lịch → POS chỉ thấy khi tính đúng lịch đó
+  const bid = ut[0].id;
+  await L.reserve(P, bid, { key: 'BK1', path: 'bedBookings/2027/2/9/BK1', info: '09/02 13:00–16:00' });
+  chk(doc().codes[bid].reservedBooking === 'BK1' && doc().codes[bid].reservedInfo === '09/02 13:00–16:00', 'giữ mã +1h bed cho lịch BK1');
+  chk((await L.usableCodes(P, 'tc33')).length === 0 && (await L.usableCodes(P, 'tc33', 'BK2')).length === 0, 'mã đang giữ: bill khác / lịch khác không thấy');
+  chk((await L.usableCodes(P, 'tc33', 'BK1')).length === 1, 'tính tiền đúng lịch BK1: thấy mã');
+  let e3 = null; try { await L.reserve(P, bid, { key: 'BK2' }); } catch (e) { e3 = e.message; } chk(e3 === 'dang-giu', 'mã đã giữ cho lịch khác → không giữ lần 2');
+  await L.reserve(P, bid, { key: 'BK1' }); chk(doc().codes[bid].reservedBooking === 'BK1', 'giữ lại cho đúng lịch cũ (đổi giờ): không lỗi');
+  chk(await L.unreserve(P, bid, 'BK2') === false && doc().codes[bid].reservedBooking === 'BK1', 'trả mã sai lịch: không đổi');
+  chk(await L.unreserve(P, bid, 'BK1') === true && !doc().codes[bid].reservedBooking && (await L.usableCodes(P, 'tc33')).length === 1, 'huỷ lịch → trả mã, dùng lại được');
+  let e4 = null; try { await L.reserve(P, ux[0].id, { key: 'BK3' }); } catch (e) { e4 = e.message; } chk(e4 === 'da-dung', 'mã đã dùng → không giữ được');
+  chk(L.dateInUse('08/02/2027') && L.dateInUse('2027-02-15') && !L.dateInUse('07/02/2027') && !L.dateInUse('2027-02-16'), 'ngày lịch bed trong giai đoạn dùng: mùng 3 → mùng 10');
+  chk(L.hm(L.mins('15:00') + 60) === '16:00' && L.hm(L.mins('23:30') + 60) === '00:30', 'cộng 60 phút vào giờ lịch');
   // mùng 11: hết hạn
   setNow('2027-02-16T08:00:00');
   chk((await L.usableCodes(P, 'tc33')).length === 0, 'mùng 11: không còn mã dùng được');

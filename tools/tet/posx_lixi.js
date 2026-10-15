@@ -43,31 +43,96 @@
   }
 
   function netWithout() { var t = getCartTotal(); return cart[KEY] ? t - (cart[KEY].price * cart[KEY].qty) : t; }
-  function amountFor(c) {
-    var T = LiXi.TYPES[c.type];
-    if (c.type === 'upsize_xofa') {
-      var best = 0, M = (typeof getActiveMenu === 'function' ? getActiveMenu() : MENU) || [];
-      Object.keys(cart).forEach(function (k) {
-        var it = cart[k];
-        if (!it || it.isFree || it._vKey || it._discountId || it._lixiCode || it.size !== 'L') return;
-        var m = M.filter(function (x) { return x.id === it.itemId; })[0]; if (!m || !m.sizes) return;
-        var pm = m.sizes.filter(function (s) { return s.label === 'M'; })[0], pl = m.sizes.filter(function (s) { return s.label === 'L'; })[0];
-        if (pm && pl && pl.price > pm.price) best = Math.max(best, pl.price - pm.price);
-      });
-      return best > 0 ? { amt: best } : { err: 'Giỏ chưa có ly size L để upsize miễn phí.' };
-    }
-    if (c.type === 'giam5k_xofa') return netWithout() >= T.minOrder ? { amt: T.value } : { err: 'Mã giảm 5K áp cho đơn từ ' + LiXi.fmtVnd(T.minOrder) + '.' };
-    return { err: 'Mã này không dùng ở XOFA.' };
+  function special(it) { return !it || it.isFree || it._vKey || it._discountId || it._lixiCode; }
+  function sizesOf(it) {
+    var M = (typeof getActiveMenu === 'function' ? getActiveMenu() : MENU) || [];
+    var m = M.filter(function (x) { return x.id === it.itemId; })[0]; if (!m || !m.sizes) return null;
+    var pm = m.sizes.filter(function (s) { return s.label === 'M'; })[0], pl = m.sizes.filter(function (s) { return s.label === 'L'; })[0];
+    return (pm && pl && pl.price > pm.price) ? { M: pm.price, L: pl.price } : null;
   }
+  // Upsize: khách mua M → tách 1 ly sang L (pha chế thấy đúng size L), dòng lì xì trừ phần chênh → khách trả giá M.
+  function doUpsize(code) {
+    var keys = Object.keys(cart);
+    for (var i = 0; i < keys.length; i++) {
+      var k = keys[i], it = cart[k]; if (special(it) || it._lixiUp || it.size !== 'M') continue;
+      var z = sizesOf(it); if (!z) continue;
+      var nk = k + '_lxL';
+      if (it.qty > 1) { it.qty--; cart[nk] = Object.assign({}, it, { qty: 1, size: 'L', price: z.L, _lixiUp: code, _lixiFrom: k, _lixiMPrice: it.price }); }
+      else { delete cart[k]; cart[nk] = Object.assign({}, it, { size: 'L', price: z.L, _lixiUp: code, _lixiFrom: k, _lixiMPrice: it.price }); }
+      return { amt: z.L - z.M };
+    }
+    var best = 0;
+    Object.keys(cart).forEach(function (k) { var it = cart[k]; if (special(it) || it.size !== 'L') return; var z = sizesOf(it); if (z) best = Math.max(best, z.L - z.M); });
+    return best > 0 ? { amt: best } : { err: 'Giỏ chưa có ly nào size M (có size L) để upsize.' };
+  }
+  function undoUpsize(code) {
+    Object.keys(cart).forEach(function (k) {
+      var it = cart[k]; if (!it || it._lixiUp !== code) return;
+      // trả ĐÚNG 1 ly về M (dòng L có thể đã bị bấm + thêm ly: phần còn lại giữ là ly L thường)
+      var z = sizesOf(it), from = it._lixiFrom, back = Object.assign({}, it, { size: 'M', price: z ? z.M : it._lixiMPrice, qty: 1 });   // giá M theo menu đang dùng (To Go / Tại quán)
+      delete back._lixiUp; delete back._lixiFrom; delete back._lixiMPrice;
+      if (it.qty > 1) { it.qty--; delete it._lixiUp; delete it._lixiFrom; delete it._lixiMPrice; } else delete cart[k];
+      if (cart[from]) cart[from].qty++; else cart[from] = back;
+    });
+  }
+  function invalidReason(line) {
+    var t = line._lixiType, T = LiXi.TYPES[t];
+    if (t === 'upsize_xofa') {
+      var ok = Object.keys(cart).some(function (k) { var it = cart[k]; if (special(it) || it.size !== 'L') return false; var z = sizesOf(it); return z && z.L - z.M >= -line.price; });
+      return ok ? '' : 'giỏ không còn ly size L được upsize';
+    }
+    if (t === 'giam5k_xofa') return netWithout() >= T.minOrder ? '' : 'đơn chưa tới ' + LiXi.fmtVnd(T.minOrder);
+    return 'mã không dùng ở XOFA';
+  }
+  function dropLine(reason) {
+    var line = cart[KEY]; if (!line) return;
+    delete cart[KEY]; undoUpsize(line._lixiCode);
+    if (reason) toast('🧧 Đã bỏ mã lì xì ' + line._lixiCode + ': ' + reason);
+  }
+  // Bấm "Áp": đọc lại mã từ Firebase (1 lượt) — mã vừa dùng ở máy / quầy khác thì báo ngay, không trừ tiền
   function toggle(c, phone) {
-    if (cart[KEY] && cart[KEY]._lixiCode === c.id) { delete cart[KEY]; refresh(); render(cache.codes, phone); return; }
+    var on = '';
+    for (var k in cart) if (cart[k] && cart[k]._lixiCode) on = cart[k]._lixiCode;
+    if (on === c.id) return toggleNow(c, phone);                         // Bỏ — không cần đọc
+    LiXi.usableCodes(phone, STORE, '').then(function (codes) {
+      cache = { phone: phone, at: Date.now(), codes: codes }; render(codes, phone);
+      var f = codes.filter(function (x) { return x.id === c.id; })[0];
+      if (!f) { (typeof toast === 'function' ? toast : alert)('🧧 Mã ' + c.id + ' vừa được dùng hoặc không còn hợp lệ.'); return; }
+      toggleNow(f, phone);
+    }).catch(function (e) { (typeof toast === 'function' ? toast : alert)('🧧 Không kiểm tra được mã (mạng?) — thử lại.'); });
+  }
+  function toggleNow(c, phone) {
+    if (cart[KEY] && cart[KEY]._lixiCode === c.id) { dropLine(''); refresh(); render(cache.codes, phone); return; }
     if (typeof _appliedDiscountId !== 'undefined' && _appliedDiscountId) { toast('🧧 Bill đang dùng mã giảm giá khác — mỗi bill chỉ 1 mã.'); return; }
-    var r = amountFor(c);
-    if (r.err) { toast('🧧 ' + r.err); return; }
+    if (cart[KEY]) dropLine('');                                         // 1 bill 1 mã
+    var r;
+    if (c.type === 'upsize_xofa') r = doUpsize(c.id);
+    else if (c.type === 'giam5k_xofa') r = netWithout() >= LiXi.TYPES[c.type].minOrder ? { amt: LiXi.TYPES[c.type].value } : { err: 'Mã giảm 5K áp cho đơn từ ' + LiXi.fmtVnd(LiXi.TYPES[c.type].minOrder) + '.' };
+    else r = { err: 'Mã này không dùng ở XOFA.' };
+    if (r.err) { toast('🧧 ' + r.err); refresh(); render(cache.codes, phone); return; }
     cart[KEY] = { name: '🧧 Lì xì Tết 2027 · ' + LiXi.TYPES[c.type].short, size: '', price: -r.amt, qty: 1,
       _discountId: 'lixi_' + c.id, _discountCode: c.id + ' · Lì xì Tết', _lixiCode: c.id, _lixiPhone: phone, _lixiType: c.type };
     refresh(); render(cache.codes, phone);
   }
+  // giỏ đổi (tăng/giảm/xoá món…) → mã không còn đủ điều kiện thì tự bỏ (báo nhân viên)
+  var _uf = window.updFooter, inUf = false;
+  if (typeof _uf === 'function') window.updFooter = function () {
+    if (!inUf && cart[KEY]) { var why = invalidReason(cart[KEY]); if (why) { inUf = true; try { dropLine(why); } finally { inUf = false; } } }
+    var r = _uf.apply(this, arguments);
+    if (cache.phone && panel.style.display !== 'none') render(cache.codes, cache.phone);
+    return r;
+  };
+  var _cd = window.cartDel;
+  if (typeof _cd === 'function') window.cartDel = function (k) {
+    if (k === KEY) { dropLine(''); updFooter(); refreshMenuBadges(); return; }
+    return _cd.apply(this, arguments);
+  };
+  // chốt chặn trước khi lưu đơn (mọi cách trả đều qua confirmPay)
+  var _cp = window.confirmPay;
+  if (typeof _cp === 'function') window.confirmPay = function () {
+    if (cart[KEY]) { var why = invalidReason(cart[KEY]); if (why) { dropLine(why); refresh(); return; } }
+    return _cp.apply(this, arguments);
+  };
 
   // ── móc vào app ──
   var _rci = window.renderCustomerInfo;
@@ -77,8 +142,15 @@
   // nút ✕ của dòng lì xì gọi removeAppliedDiscount() (dòng có _discountId): không có mã giảm giá thường đang áp → bỏ dòng lì xì
   var _rad = window.removeAppliedDiscount;
   if (typeof _rad === 'function') window.removeAppliedDiscount = function () {
-    if (!_appliedDiscountId && cart[KEY]) { delete cart[KEY]; if (cache.phone) render(cache.codes, cache.phone); }
+    if (!_appliedDiscountId && cart[KEY]) { dropLine(''); if (cache.phone) render(cache.codes, cache.phone); }
     return _rad.apply(this, arguments);
+  };
+  // đổi To Go ↔ Tại quán: app tính lại giá + gỡ mã giảm giá đang áp → lì xì cũng gỡ (giá chênh M/L khác nhau), nhân viên áp lại
+  var _tg = window.toggleTogo;
+  if (typeof _tg === 'function') window.toggleTogo = function () {
+    var before = isToGo, r = _tg.apply(this, arguments);
+    if (isToGo !== before && cart[KEY]) { dropLine('đổi ' + (isToGo ? 'To Go' : 'Tại quán') + ' — bấm Áp lại'); refresh(); if (cache.phone) render(cache.codes, cache.phone); }
+    return r;
   };
   var _adc = window.applyDiscountCode;
   if (typeof _adc === 'function') window.applyDiscountCode = function () {
