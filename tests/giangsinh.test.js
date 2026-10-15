@@ -19,8 +19,9 @@ const bo = moi.replace(/\n<!-- BẢN GIÁNG SINH[^\n]*-->/, '')
   .replace(/\n    <div class="lc-snow"[\s\S]*?<\/script>/, '')
   .replace(/\n    <!-- \[GIÁNG SINH\] tuyết trong app -->[\s\S]*?<\/script>/, '')
   .replace('<span class="lc-spark">❄\uFE0E</span><span class="lc-spark sm">❄\uFE0E</span>', '<span class="lc-spark">✳</span><span class="lc-spark sm">✳</span>')
-  .replace('Merry Christmas · Ba chốn quen', 'Một tài khoản · Ba chốn quen');
+  .replace('<span class="lc-xm">Merry Christmas</span> · Ba chốn quen', 'Một tài khoản · Ba chốn quen');
 chk(mau(bo) === mau(goc), 'ngoài phần chèn chỉ khác mã màu so với index.html');
 chk(!/#006241|rgba\(0,98,65/i.test(moi), 'không còn sót màu xanh lá chính (#006241)');
 chk(moi.includes('id="app-snow"'), 'có tuyết trong app');
+chk(moi.includes('id="app-orn"') && (moi.match(/class="lc-tree t\d"/g) || []).length === 3, 'có quả châu trong app + 3 cây thông ở màn đăng nhập');
 console.log(ok ? 'ALL PASS' : 'SOME FAIL'); process.exit(ok ? 0 : 1);
