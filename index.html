@@ -6642,25 +6642,25 @@ showTab = function(t) {
   if (pp) pp.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); window.brandIsland(); } });
 })();
 </script>
-<!-- [BÉ GẠO] 16/10 — linh vật Gieo Gieo bản pixel, đi dạo trên thanh menu dưới (chỉ khi đã đăng nhập).
+<!-- [BÉ GẠO] 16/10 — linh vật Gieo Gieo bản pixel, nhỏ (40×46), đi qua lại vài chỗ ở góc trái trên thanh menu dưới (chỉ khi đã đăng nhập).
      Sprite vẽ bằng tools/be_gao/ve_be_gao.py (7 khung: đứng · nhắm mắt · 4 bước đi · cười), nhúng base64 ~2KB.
      Chỉ animate transform (GPU); hẹn giờ thưa (vài giây 1 lần); không đọc / ghi Firebase. Chạm bé = nhảy + nói 1 câu.
      Lâu không thao tác → ngủ (Zzz), chạm / cuộn màn = thức. Thanh menu ẩn / tab ẩn = dừng hẳn. -->
 <style>
-#bg-pet{position:fixed;left:0;bottom:94px;width:80px;height:92px;z-index:49;pointer-events:none;display:none}
+#bg-pet{position:fixed;left:0;bottom:99px;width:40px;height:46px;z-index:49;pointer-events:none;display:none}
 #bg-pet.on{display:block}
 #bg-pet .bgp-move,#bg-pet .bgp-flip,#bg-pet .bgp-hop{position:absolute;inset:0;will-change:transform}
 #bg-pet .bgp-win{position:absolute;inset:0;overflow:hidden;pointer-events:auto;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
-#bg-pet .bgp-strip{display:block;width:560px;height:92px;max-width:none;image-rendering:pixelated;image-rendering:crisp-edges;transform:translateX(0);will-change:transform;-webkit-user-drag:none;user-select:none}
+#bg-pet .bgp-strip{display:block;width:280px;height:46px;max-width:none;image-rendering:pixelated;image-rendering:crisp-edges;transform:translateX(0);will-change:transform;-webkit-user-drag:none;user-select:none}
 #bg-pet .bgp-strip.walk{animation:bgp-walk .62s steps(4) infinite}
-@keyframes bgp-walk{from{transform:translateX(-160px)}to{transform:translateX(-480px)}}
+@keyframes bgp-walk{from{transform:translateX(-80px)}to{transform:translateX(-240px)}}
 #bg-pet.sleep .bgp-hop{animation:bgp-breath 2.6s ease-in-out infinite;transform-origin:50% 100%}
 @keyframes bgp-breath{0%,100%{transform:scale(1,1)}50%{transform:scale(1.03,.97)}}
-#bg-pet .bgp-say{position:absolute;left:50%;bottom:calc(100% + 4px);transform:translateX(-50%) scale(.6);transform-origin:50% 100%;opacity:0;white-space:nowrap;
+#bg-pet .bgp-say{position:absolute;left:-10px;bottom:calc(100% + 6px);transform:scale(.6);transform-origin:24px 100%;opacity:0;white-space:nowrap;
   background:#fff;color:#1f2a6b;font:700 12px/1.25 'Inter',sans-serif;padding:7px 11px;border-radius:14px;box-shadow:0 6px 18px rgba(20,30,80,.16);border:1.5px solid #2040c8;transition:opacity .18s ease,transform .22s cubic-bezier(.3,1.4,.5,1)}
-#bg-pet .bgp-say:after{content:'';position:absolute;left:50%;top:100%;margin-left:-5px;border:5px solid transparent;border-top-color:#2040c8}
-#bg-pet .bgp-say.show{opacity:1;transform:translateX(-50%) scale(1)}
-#bg-pet .bgp-z{position:absolute;right:2px;top:-4px;font:800 14px/1 'Inter',sans-serif;color:#2040c8;opacity:0}
+#bg-pet .bgp-say:after{content:'';position:absolute;left:25px;top:100%;margin-left:-5px;border:5px solid transparent;border-top-color:#2040c8}
+#bg-pet .bgp-say.show{opacity:1;transform:scale(1)}
+#bg-pet .bgp-z{position:absolute;right:-4px;top:-6px;font:800 11px/1 'Inter',sans-serif;color:#2040c8;opacity:0}
 #bg-pet.sleep .bgp-z{animation:bgp-z 2.4s ease-out infinite}
 @keyframes bgp-z{0%{opacity:0;transform:translate(0,6px) scale(.7)}25%{opacity:.9}100%{opacity:0;transform:translate(10px,-18px) scale(1.15)}}
 </style>
@@ -6670,7 +6670,8 @@ showTab = function(t) {
 </div>
 <script>
 (function () {
-  var FW = 80, SPEED = 34, SLEEP_MS = 40000;            // px/giây khi đi; 40 giây không thao tác → ngủ
+  // [16/10 b2] chủ dự án: bé nhỏ lại (40×46, sprite 1:1) + chỉ đi quanh vài chỗ ở góc trái — không đi ngang cả màn (vướng thao tác màn Đặt bed)
+  var FW = 40, SPEED = 16, SLEEP_MS = 40000, SPOTS = [18, 52, 86];   // px/giây khi đi; 40 giây không thao tác → ngủ
   var SAY = ['Bé Gạo chào bạn nè!', 'Hôm nay uống gì nè?', 'Ú nụ · đi ù ịch~', 'Tích đủ tem là có ly free đó!', 'Gạo đi dạo xíu…'];
   var TAP = ['Hihi, nhột quá!', 'Ú nụ nè!', 'Bé Gạo đây!', 'Ghé Gieo Gieo uống sữa gạo nha!'];
   var pet = document.getElementById('bg-pet'), nav = document.getElementById('nav-bar');
@@ -6678,9 +6679,8 @@ showTab = function(t) {
   var move = pet.querySelector('.bgp-move'), flip = pet.querySelector('.bgp-flip'), hop = pet.querySelector('.bgp-hop'),
       strip = pet.querySelector('.bgp-strip'), say = pet.querySelector('.bgp-say');
   var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  var x = 24, walking = null, timer = null, sayT = null, running = false, lastAct = Date.now(), asleep = false;
+  var x = SPOTS[0], walking = null, timer = null, sayT = null, running = false, lastAct = Date.now(), asleep = false;
   function rnd(a, b) { return a + Math.random() * (b - a); }
-  function maxX() { return Math.max(16, document.documentElement.clientWidth - FW - 16); }
   function setX(v) { x = v; move.style.transform = 'translateX(' + v + 'px)'; }
   function frame(k) { strip.classList.remove('walk'); strip.style.transform = 'translateX(' + (-k * FW) + 'px)'; }
   function curX() { var m = getComputedStyle(move).transform; if (m && m !== 'none') { var v = m.match(/-?[\d.]+/g); if (v) return +v[4]; } return x; }
@@ -6710,7 +6710,7 @@ showTab = function(t) {
     if (!running) return;
     if (Date.now() - lastAct > SLEEP_MS) { if (!asleep) sleep(); return; }
     var r = Math.random();
-    if (r < .58) walkTo(Math.round(rnd(16, maxX())));
+    if (r < .5) { var to = SPOTS.filter(function (v) { return v !== x; }); walkTo(to[Math.floor(Math.random() * to.length)]); }
     else if (r < .82) { blink(); next(rnd(2500, 5000)); }
     else { speak(SAY[Math.floor(Math.random() * SAY.length)]); next(rnd(3500, 6000)); }
   }
@@ -6719,7 +6719,7 @@ showTab = function(t) {
     e.stopPropagation(); lastAct = Date.now();
     if (asleep) { wake(true); }
     stopWalk(); frame(6); speak(TAP[Math.floor(Math.random() * TAP.length)], 2000);
-    if (!reduce) hop.animate([{ transform: 'translateY(0)' }, { transform: 'translateY(-20px)', offset: .4 }, { transform: 'translateY(0)', offset: .75 }, { transform: 'translateY(-5px)', offset: .87 }, { transform: 'translateY(0)' }],
+    if (!reduce) hop.animate([{ transform: 'translateY(0)' }, { transform: 'translateY(-10px)', offset: .4 }, { transform: 'translateY(0)', offset: .75 }, { transform: 'translateY(-3px)', offset: .87 }, { transform: 'translateY(0)' }],
       { duration: 560, easing: 'ease-out' });
     setTimeout(function () { if (!walking && !asleep) frame(0); }, 1100);
     next(rnd(2500, 4000));
@@ -6727,13 +6727,12 @@ showTab = function(t) {
   ['pointerdown', 'scroll', 'keydown'].forEach(function (ev) { window.addEventListener(ev, function () { lastAct = Date.now(); if (asleep) wake(); }, { passive: true, capture: true }); });
   function start() {
     if (running) return; running = true; pet.classList.add('on');
-    setX(Math.min(x, maxX())); frame(0); lastAct = Date.now(); next(1200);
+    setX(x); frame(0); lastAct = Date.now(); next(1200);
   }
   function stop() { running = false; clearTimeout(timer); timer = null; stopWalk(); pet.classList.remove('on', 'sleep'); asleep = false; }
   function sync() { (!nav.classList.contains('hidden') && !document.hidden) ? start() : stop(); }
   new MutationObserver(sync).observe(nav, { attributes: true, attributeFilter: ['class'] });
   document.addEventListener('visibilitychange', sync);
-  window.addEventListener('resize', function () { if (running && x > maxX()) { stopWalk(); setX(maxX()); } });
   sync();
 })();
 </script>
