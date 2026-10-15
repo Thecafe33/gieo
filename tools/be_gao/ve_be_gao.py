@@ -1,12 +1,14 @@
 # Bé Gạo pixel (linh vật Gieo Gieo) — vẽ từng ô, xuất bảng sprite cho app khách (index.html).
 #   python3 tools/be_gao/ve_be_gao.py  → be_gao_sheet.png + in ra data-URI để dán vào khối [BÉ GẠO] trong index.html
+#   Bản Giáng sinh: xframe() — áo len cây thông, ngôi sao phát sáng thay vịt (khung cao thêm PAD=4 ô)
 from PIL import Image
 import math
 W,H=40,46
 PAL={'w':(255,246,220),'s':(236,220,178),'S':(214,193,146),'h':(255,255,255),'o':(92,74,58),
  'b':(32,64,200),'B':(18,36,130),'e':(24,40,140),'l':(255,255,255),'p':(247,168,160),'m':(70,45,40),
- 'y':(255,214,40),'Y':(222,160,0),'r':(244,140,30),'k':(0,0,0)}
-def frame(bob=0, lf=(0,0), rf=(0,0), arm=0, blink=False, happy=False):
+ 'y':(255,214,40),'Y':(222,160,0),'r':(244,140,30),'k':(0,0,0),
+ 'g':(52,150,84),'G':(26,100,56),'q':(104,190,118),'R':(222,44,64),'L':(255,236,140,120),'u':(255,250,200)}
+def frame(bob=0, lf=(0,0), rf=(0,0), arm=0, blink=False, happy=False, xmas=False):
     g=[[None]*W for _ in range(H)]
     def put(x,y,c):
         if 0<=x<W and 0<=y<H: g[y][x]=c
@@ -19,9 +21,9 @@ def frame(bob=0, lf=(0,0), rf=(0,0), arm=0, blink=False, happy=False):
         return bool(r) and r[0]<=x<=r[1]
     # arms (behind body edge)
     for (ax,ay) in [(4,29+arm),(5,29+arm),(6,29+arm),(4,30+arm),(5,30+arm),(6,30+arm),(5,28+arm),(5,31+arm)]:
-        put(ax,ay+bob,'w')
+        put(ax,ay+bob,'g' if xmas else 'w')
     for (ax,ay) in [(33,29-arm),(34,29-arm),(35,29-arm),(33,30-arm),(34,30-arm),(35,30-arm),(34,28-arm),(34,31-arm)]:
-        put(ax,ay+bob,'w')
+        put(ax,ay+bob,'g' if xmas else 'w')
     # feet
     for fx0,(dx,dy) in [(11,lf),(22,rf)]:
         for x in range(fx0+dx,fx0+dx+6):
@@ -57,30 +59,45 @@ def frame(bob=0, lf=(0,0), rf=(0,0), arm=0, blink=False, happy=False):
     for (x,y) in [(18,ey+3),(19,ey+4),(20,ey+4),(21,ey+3)]: put(x,y,'m')
     for (x,y) in [(10,ey+5),(11,ey+5),(12,ey+5),(11,ey+6),(12,ey+6),(26,ey+5),(27,ey+5),(28,ey+5),(26,ey+6),(27,ey+6)]:
         if g[y][x] in ('w','s'): put(x,y,'p')
-    # dây đeo chéo (vai trái → hông phải)
-    for i in range(0,17):
-        x=8+i; y=int(round(27+bob+i*0.36))
-        if (x,y) in body: put(x,y,'b')
-        if (x,y+1) in body: put(x,y+1,'b')
-    # túi
-    bx,by=24,32+bob
-    for x in range(bx,bx+8):
-        for y in range(by,by+6): put(x,y,'b')
-    for x in range(bx,bx+8): put(x,by+5,'B')
-    for y in range(by,by+6): put(bx+7,y,'B')
-    for x in range(bx+1,bx+7): put(x,by+2,'B')  # nắp túi
-    put(bx+3,by+3,'y'); put(bx+4,by+3,'y'); put(bx+3,by+2,'y'); put(bx+4,by+2,'y'); put(bx+4,by+3,'Y')
-    # vịt kẹp tóc
-    dx0,dy0=21,5+bob
-    DUCK=["..yy...",
-          ".yyyy..",
-          "ryky..y",
-          ".yyyyyy",
-          ".yyyyY.",
-          "bbbbbb."]
-    for j,row in enumerate(DUCK):
-        for i,c in enumerate(row):
-            if c!='.': put(dx0+i,dy0-3+j,c)
+    if not xmas:
+        # dây đeo chéo (vai trái → hông phải)
+        for i in range(0,17):
+            x=8+i; y=int(round(27+bob+i*0.36))
+            if (x,y) in body: put(x,y,'b')
+            if (x,y+1) in body: put(x,y+1,'b')
+        # túi
+        bx,by=24,32+bob
+        for x in range(bx,bx+8):
+            for y in range(by,by+6): put(x,y,'b')
+        for x in range(bx,bx+8): put(x,by+5,'B')
+        for y in range(by,by+6): put(bx+7,y,'B')
+        for x in range(bx+1,bx+7): put(x,by+2,'B')  # nắp túi
+        put(bx+3,by+3,'y'); put(bx+4,by+3,'y'); put(bx+3,by+2,'y'); put(bx+4,by+2,'y'); put(bx+4,by+3,'Y')
+        # vịt kẹp tóc
+        dx0,dy0=21,5+bob
+        DUCK=["..yy...",
+              ".yyyy..",
+              "ryky..y",
+              ".yyyyyy",
+              ".yyyyY.",
+              "bbbbbb."]
+        for j,row in enumerate(DUCK):
+            for i,c in enumerate(row):
+                if c!='.': put(dx0+i,dy0-3+j,c)
+    else:
+        # ÁO LEN CÂY THÔNG: thân dưới mặt là cây thông 3 tầng (mép răng cưa), dây kim tuyến, quả châu
+        Z=[0,1,2,1]
+        for (x,y) in body:
+            if y-bob>=28+Z[x%4]: put(x,y,'G' if g[y][x] in ('s','S') else 'g')
+        for x in range(4,36):            # mép tầng lá bên trong (răng cưa đậm)
+            for t in (32,36):
+                y=t+Z[x%4]+bob
+                if (x,y) in body and g[y][x]=='g': put(x,y,'G')
+        for i in range(0,19):            # dây kim tuyến vàng chéo, liền mạch
+            x=9+i; y=int(round(30+bob+i*0.28))
+            if (x,y) in body and g[y][x] in ('g','G'): put(x,y,'y')
+        for (x,y,c) in [(14,34,'R'),(25,34,'u'),(20,31,'R'),(11,38,'u'),(18,38,'R'),(27,38,'R')]:
+            if (x,y+bob) in body: put(x,y+bob,c)
     # viền tự động
     out=[row[:] for row in g]
     for y in range(H):
@@ -88,16 +105,43 @@ def frame(bob=0, lf=(0,0), rf=(0,0), arm=0, blink=False, happy=False):
             if g[y][x] is None:
                 nb=[g[y+dy][x+dx] for dx,dy in ((1,0),(-1,0),(0,1),(0,-1)) if 0<=x+dx<W and 0<=y+dy<H and g[y+dy][x+dx] is not None]
                 if nb:
-                    out[y][x]='B' if any(c in 'bB' for c in nb) and not any(c in 'wsSh' for c in nb) else ('Y' if all(c in 'yYrk' for c in nb) else 'o')
+                    out[y][x]='B' if any(c in 'bB' for c in nb) and not any(c in 'wsSh' for c in nb) else ('Y' if all(c in 'yYrkuL' for c in nb) else 'o')
     return out
+PAD=4   # bản Giáng sinh: khung cao thêm 4 ô phía trên cho ngôi sao + quầng sáng
+def xframe(bob=0, **kw):
+    g=[[None]*W for _ in range(PAD)] + frame(bob=bob, xmas=True, **kw)
+    STAR=["...y...",
+          "..yuy..",
+          "yyyuyyy",
+          ".yuuuy.",
+          "..yyy..",
+          ".yy.yy.",
+          ".y...y."]
+    sx,sy=19,2+bob
+    star=set()
+    for j,row in enumerate(STAR):
+        for i,c in enumerate(row):
+            if c!='.': g[sy+j][sx+i]=c; star.add((sx+i,sy+j))
+    ring=set()
+    for (x,y) in star:
+        for dx,dy in ((1,0),(-1,0),(0,1),(0,-1)):
+            if (x+dx,y+dy) not in star and 0<=y+dy<len(g): ring.add((x+dx,y+dy))
+    for (x,y) in ring:
+        if g[y][x] in (None,'o'): g[y][x]='Y'
+    for (x,y) in list(ring):     # quầng sáng 1 ô quanh viền sao
+        for dx,dy in ((1,0),(-1,0),(0,1),(0,-1),(1,1),(-1,-1),(1,-1),(-1,1)):
+            X,Y=x+dx,y+dy
+            if 0<=Y<len(g) and 0<=X<W and g[Y][X] is None: g[Y][X]='L'
+    return g
 def img(g,scale=8,bg=None):
-    im=Image.new('RGBA',(W,H),(0,0,0,0) if bg is None else bg+(255,))
+    Hh=len(g)
+    im=Image.new('RGBA',(W,Hh),(0,0,0,0) if bg is None else bg+(255,))
     px=im.load()
-    for y in range(H):
+    for y in range(Hh):
         for x in range(W):
             c=g[y][x]
-            if c: px[x,y]=PAL[c]+(255,)
-    return im.resize((W*scale,H*scale),Image.NEAREST)
+            if c: px[x,y]=PAL[c] if len(PAL[c])==4 else PAL[c]+(255,)
+    return im.resize((W*scale,Hh*scale),Image.NEAREST)
 def walk():
     # 4 khung đi: chân trước nhấc / đặt, thân nhún 1px, tay đánh
     return [frame(bob=0, lf=(-1,-1), rf=(1,0), arm=1), frame(bob=1, lf=(0,0), rf=(0,0), arm=0),
