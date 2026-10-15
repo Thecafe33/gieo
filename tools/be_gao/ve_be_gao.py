@@ -1,6 +1,6 @@
 # Bé Gạo pixel (linh vật Gieo Gieo) — vẽ từng ô, xuất bảng sprite cho app khách (index.html).
 #   python3 tools/be_gao/ve_be_gao.py  → be_gao_sheet.png + in ra data-URI để dán vào khối [BÉ GẠO] trong index.html
-#   Bản Giáng sinh: xframe() — áo len cây thông, ngôi sao phát sáng thay vịt (khung cao thêm PAD=4 ô)
+#   Bản Giáng sinh: xframe() — Bé Gạo thành CÂY THÔNG nhỏ (3 tầng lá, mặt Bé Gạo, sao phát sáng, giày xanh), khung 40×50
 from PIL import Image
 import math
 W,H=40,46
@@ -107,9 +107,84 @@ def frame(bob=0, lf=(0,0), rf=(0,0), arm=0, blink=False, happy=False, xmas=False
                 if nb:
                     out[y][x]='B' if any(c in 'bB' for c in nb) and not any(c in 'wsSh' for c in nb) else ('Y' if all(c in 'yYrkuL' for c in nb) else 'o')
     return out
-PAD=4   # bản Giáng sinh: khung cao thêm 4 ô phía trên cho ngôi sao + quầng sáng
-def xframe(bob=0, **kw):
-    g=[[None]*W for _ in range(PAD)] + frame(bob=bob, xmas=True, **kw)
+PAD=4   # (giữ tên cũ) bản Giáng sinh cao hơn bản thường 4 ô: H+PAD = 50
+PAL.update({'O':(20,66,40),'n':(122,78,44),'N':(88,54,30)})
+def xframe(bob=0, lf=(0,0), rf=(0,0), arm=0, blink=False, happy=False):
+    """Bé Gạo GIÁNG SINH = một cây thông nhỏ biết đi: 3 tầng lá, mặt Bé Gạo, sao phát sáng, quả châu, giày xanh."""
+    HH=H+PAD; g=[[None]*W for _ in range(HH)]
+    def put(x,y,c):
+        if 0<=x<W and 0<=y<HH: g[y][x]=c
+    cx=19.5; body=set()
+    TIERS=[(9,19,1.5,8.5),(16,29,4.5,13.5),(24,41,7.5,17.5)]   # (trên, dưới, nửa rộng trên, nửa rộng dưới)
+    def tier(y0,y1,w0,w1,mark):
+        cells=set()
+        for y in range(y0,y1+1):
+            t=(y-y0)/(y1-y0); hw=w0+(w1-w0)*t**0.85
+            if y>=y1-1: hw-= (2.2 if y==y1 else 0.8)          # bo tròn 2 góc đáy tầng
+            for x in range(W):
+                if abs(x+.5-cx)<=hw: cells.add((x,y+bob))
+        return cells
+    # tầng dưới vẽ trước, tầng trên phủ lên (mép "váy" lá của tầng trên đè xuống tầng dưới)
+    tiers=[tier(*t,i) for i,t in enumerate(TIERS)]
+    for i in (2,1,0):
+        for (x,y) in tiers[i]:
+            put(x,y,'g'); body.add((x,y))
+        for (x,y) in tiers[i]:                                 # bóng phải + sáng trái
+            if (x+2,y) not in tiers[i]: put(x,y,'G')
+            elif (x-2,y) not in tiers[i] and y-bob<TIERS[i][1]-1: put(x,y,'q')
+        if i<2:                                                # bóng đổ dưới mép tầng trên
+            for (x,y) in tiers[i]:
+                if (x,y+1) not in tiers[i] and (x,y+1) in tiers[i+1]: put(x,y+1,'G')
+    # tuyết đọng trên mép mỗi tầng (bên trái)
+    for (x,y) in [(14,19),(15,19),(16,20),(9,29),(10,29),(11,30),(6,41),(7,41),(8,40),(26,29),(27,30),(30,41),(31,40)]:
+        if (x,y+bob) in body: put(x,y+bob,'h')
+    # tay = nhánh lá nhỏ hai bên tầng dưới
+    for (ax,ay) in [(3,34+arm),(4,34+arm),(5,34+arm),(3,33+arm),(4,33+arm),(4,35+arm),(2,34+arm)]:
+        if (ax,ay+bob) not in body: put(ax,ay+bob,'g')
+    for (ax,ay) in [(36,34-arm),(35,34-arm),(34,34-arm),(36,33-arm),(35,33-arm),(35,35-arm),(37,34-arm)]:
+        if (ax,ay+bob) not in body: put(ax,ay+bob,'G')
+    # gốc cây + giày xanh
+    for x in range(17,23):
+        for y in (42,43): put(x,y+bob,'n' if x<21 else 'N')
+    for fx0,(dx,dy) in [(11,lf),(23,rf)]:
+        for x in range(fx0+dx,fx0+dx+6):
+            for y in range(43+dy,46+dy):
+                if (x in (fx0+dx,fx0+dx+5)) and y==43+dy: continue
+                put(x,y,'b')
+        for x in range(fx0+dx+1,fx0+dx+5): put(x,45+dy,'B')
+    # MẶT (tầng dưới, phần trên)
+    ey=31+bob
+    for ex in (14,24):
+        if happy:
+            put(ex-1,ey+2,'e'); put(ex,ey+1,'e'); put(ex+1,ey+1,'e'); put(ex+2,ey+2,'e')
+        elif blink:
+            put(ex,ey+2,'e'); put(ex+1,ey+2,'e')
+        else:
+            for dy in range(4):
+                for dx in range(2): put(ex+dx,ey+dy,'e')
+            put(ex,ey,'l')
+    for (x,y) in [(18,ey+3),(19,ey+4),(20,ey+4),(21,ey+3)]: put(x,y,'m')
+    for (x,y) in [(10,ey+5),(11,ey+5),(12,ey+5),(11,ey+6),(27,ey+5),(28,ey+5),(29,ey+5),(28,ey+6)]: put(x,y,'p')
+    # dây kim tuyến + quả châu (tránh vùng mặt)
+    for i in range(0,13):
+        x=13+i; y=int(round(13+bob+i*0.42))
+        if (x,y) in body: put(x,y,'y')
+    for i in range(0,19):
+        x=10+i; y=int(round(22+bob+i*0.36))
+        if (x,y) in body: put(x,y,'y')
+    for (x,y,c) in [(18,12,'R'),(15,16,'u'),(23,17,'R'),(12,24,'R'),(21,23,'u'),(27,23,'R'),(16,26,'y'),
+                    (8,37,'R'),(14,39,'u'),(20,38,'R'),(26,39,'y'),(31,37,'R')]:
+        if (x,y+bob) in body: put(x,y+bob,c)
+    # viền: xanh đậm quanh lá, nâu đậm quanh gốc, xanh đậm quanh giày
+    out=[r[:] for r in g]
+    for y in range(HH):
+        for x in range(W):
+            if g[y][x] is None:
+                nb=[g[y+dy][x+dx] for dx,dy in ((1,0),(-1,0),(0,1),(0,-1)) if 0<=x+dx<W and 0<=y+dy<HH and g[y+dy][x+dx] is not None]
+                if nb:
+                    out[y][x]='B' if all(c in 'bB' for c in nb) else ('N' if all(c in 'nNbB' for c in nb) else 'O')
+    g=out
+    # NGÔI SAO trên ngọn + quầng sáng
     STAR=["...y...",
           "..yuy..",
           "yyyuyyy",
@@ -117,7 +192,7 @@ def xframe(bob=0, **kw):
           "..yyy..",
           ".yy.yy.",
           ".y...y."]
-    sx,sy=19,2+bob
+    sx,sy=17,3+bob
     star=set()
     for j,row in enumerate(STAR):
         for i,c in enumerate(row):
@@ -125,13 +200,13 @@ def xframe(bob=0, **kw):
     ring=set()
     for (x,y) in star:
         for dx,dy in ((1,0),(-1,0),(0,1),(0,-1)):
-            if (x+dx,y+dy) not in star and 0<=y+dy<len(g): ring.add((x+dx,y+dy))
+            if (x+dx,y+dy) not in star and 0<=y+dy<HH: ring.add((x+dx,y+dy))
     for (x,y) in ring:
-        if g[y][x] in (None,'o'): g[y][x]='Y'
-    for (x,y) in list(ring):     # quầng sáng 1 ô quanh viền sao
+        if g[y][x] in (None,'O'): g[y][x]='Y'
+    for (x,y) in list(ring):
         for dx,dy in ((1,0),(-1,0),(0,1),(0,-1),(1,1),(-1,-1),(1,-1),(-1,1)):
             X,Y=x+dx,y+dy
-            if 0<=Y<len(g) and 0<=X<W and g[Y][X] is None: g[Y][X]='L'
+            if 0<=Y<HH and 0<=X<W and g[Y][X] is None: g[Y][X]='L'
     return g
 def img(g,scale=8,bg=None):
     Hh=len(g)
