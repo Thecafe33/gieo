@@ -6749,5 +6749,32 @@ showTab = function(t) {
   if (pp) pp.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); window.brandIsland(); } });
 })();
 </script>
+<!-- [GIỜ HĐ — ÁNH SÁNG] 16/10 — dòng giờ hoạt động bed (#bed-hours-info, lớp .voucher-shine) chạy ánh sáng bằng background-position
+     liên tục → trình duyệt tính lại style + bố cục ~60 lần/giây khi đứng ở màn Đặt bed (đo). Đổi thành: lướt 1 lần (3 giây) rồi nghỉ,
+     10 giây lướt lại; chỉ khi dòng này đang thấy trên màn (IntersectionObserver) và tab đang mở. Nhìn vẫn như cũ, tốn ~1/3. -->
+<style>
+#bed-hours-info.voucher-shine{animation:none}
+#bed-hours-info.voucher-shine.hr-sweep{animation:shimmer 3s linear 1}
+</style>
+<script>
+(function () {
+  var el = document.getElementById('bed-hours-info'), REST = 7000, t = null, seen = false;
+  if (!el) return;
+  function sweep() {
+    t = null;
+    if (!seen || document.hidden) return;
+    el.classList.remove('hr-sweep'); void el.offsetWidth; el.classList.add('hr-sweep');
+  }
+  el.addEventListener('animationend', function () { el.classList.remove('hr-sweep'); if (seen && !t) t = setTimeout(sweep, REST); });
+  function stop() { clearTimeout(t); t = null; el.classList.remove('hr-sweep'); }
+  if (!window.IntersectionObserver) { seen = true; sweep(); return; }
+  new IntersectionObserver(function (es) {
+    seen = es[es.length - 1].isIntersecting;
+    if (seen) { if (!t && !el.classList.contains('hr-sweep')) t = setTimeout(sweep, 400); } else stop();
+  }).observe(el);
+  document.addEventListener('visibilitychange', function () { if (document.hidden) stop(); else if (seen && !t) t = setTimeout(sweep, 400); });
+})();
+</script>
+<!-- [/GIỜ HĐ — ÁNH SÁNG] -->
 </body>
 </html>
