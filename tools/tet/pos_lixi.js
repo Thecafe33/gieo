@@ -59,7 +59,23 @@
   function special(it) { return !it || it._vKey || it._discountId || it._lixiCode; }
   function menuOf(name) { return (menu || []).filter(function (x) { return String(x.name).toLowerCase() === String(name).toLowerCase(); })[0]; }
   function bedHours() { return bedLines().reduce(function (s, l) { return s + (Number(l.qty) || 0); }, 0); }
-  function onBed() { return typeof pendingBedOrder !== 'undefined' && !!pendingBedOrder; }
+  // "đang order cho bed" = có lịch gắn vào bill VÀ pill order bed (#cart-bed-info) đang hiện ở đầu giỏ (mở lịch → Gọi món).
+  // Luồng Trả bed (proceedToCheckoutFlow) gắn lịch nhưng không có pill → không áp mã bed.
+  function bedLinked() {      // bill còn gắn lịch để order (không phải luồng Trả bed) — dùng để TỰ GỠ mã (pill điện thoại hiện trễ vài trăm ms)
+    return typeof pendingBedOrder !== 'undefined' && !!pendingBedOrder && !(typeof isCheckoutFlow !== 'undefined' && isCheckoutFlow);
+  }
+  function onBed() {         // dùng khi bấm Áp: phải có pill
+    if (!bedLinked()) return false;
+    var pill = document.getElementById('cart-bed-info');
+    return !!(pill && pill.isConnected);                    // điện thoại: giỏ PC ẩn nhưng pill vẫn được tạo — chỉ xét có pill
+  }
+  // pill hiện giờ kết thúc mới sau khi +1h / bỏ +1h
+  function refreshPill(bk) {
+    var pill = document.getElementById('cart-bed-info'); if (!pill || !bk) return;
+    var sub = pill.querySelector('.cbp-sub'), dur = pill.querySelector('.cbp-dur');
+    if (sub) sub.textContent = sub.textContent.replace(/·\s*[0-9:]+\s*–\s*[0-9:]*\s*$/, '· ' + (bk.start || '') + ' – ' + (bk.end || ''));
+    if (dur && typeof getDurationLabel === 'function') dur.textContent = getDurationLabel(bk.start, bk.end);
+  }
   function lastHourPrice() {      // giờ được tặng = giờ CUỐI của lịch → giá "1h bed từ h5" nếu lịch > 4 giờ
     var beds = bedLines(), h5 = beds.filter(function (l) { return String(l.name).toLowerCase() === '1h bed từ h5'; })[0];
     var h1 = beds.filter(function (l) { return String(l.name).toLowerCase() === '1h bed'; })[0];
@@ -127,7 +143,7 @@
   function invalidReason(line) {
     var t = line._lixiType, T = LiXi.TYPES[t];
     if (t === 'upsize_tc33') return line.size === 'L' ? '' : 'ly không còn size L';
-    if (isBedType(t) && !onBed()) return 'mã bed chỉ áp khi order cho bed';
+    if (isBedType(t) && !bedLinked()) return 'mã bed chỉ áp khi order cho bed';
     if (t === 'giam10k_bed') return bedHours() > 0 ? '' : 'bill không còn giờ bed';
     if (t === 'bed1h') return bedHours() >= (T.minBedHours || 2) + 1 ? '' : 'lịch không còn đủ ' + ((T.minBedHours || 2) + 1) + ' giờ (2 giờ + 1 giờ tặng)';
     return 'mã không dùng ở The cafe 33';
@@ -165,6 +181,7 @@
     if (!L || L.code !== code || L.used || !bk.end) return;
     var base = LiXi.hm(LiXi.mins(bk.end) - (Number(L.freeMin) || LiXi.BED_FREE_MIN));   // tính từ giờ kết thúc hiện tại (khách có thể đã đổi giờ trên app)
     patchLocal(bk, { end: base, lixiBed1h: null });
+    refreshPill(bk);
     _updateBedBooking(bk, { end: base, lixiBed1h: null }, function (err) { if (err) alert('🧧 Không trả lịch về ' + base + ': ' + err.message); });
     if (L.by === 'app') LiXi.unreserve(L.phone, code, bookingKey(bk)).catch(function (e) { console.warn('[lì xì] trả mã', e); });
     setTimeout(function () { autoAddBedItems(bk); if (typeof showSyncToast === 'function') showSyncToast('🧧 Đã bỏ +1h bed — lịch về lại ' + base); }, 0);
@@ -176,7 +193,7 @@
   function toggle(c, phone) {
     var li = lixiLine();
     if (li >= 0 && cart[li]._lixiCode === c.id) return toggleNow(c, phone);   // Bỏ — không cần đọc
-    if (isBedType(c.type) && !onBed()) { alert('🧧 Mã bed chỉ áp khi đang order cho 1 lịch bed (mở lịch bed → Gọi món).'); return; }
+    if (isBedType(c.type) && !onBed()) { alert('🧧 Mã bed chỉ áp khi đang order cho 1 lịch bed (có pill bed ở đầu giỏ: mở lịch bed → Gọi món).'); return; }
     var bk = curBk();
     LiXi.usableCodes(phone, STORE, bk).then(function (codes) {
       cache = { phone: phone, bk: bk, at: Date.now(), codes: codes }; render(codes, phone);
@@ -214,6 +231,7 @@
     _updateBedBooking(bk, { end: newEnd, lixiBed1h: info }, function (err) {
       if (err) { alert('🧧 Không kéo dài được lịch: ' + err.message); return; }
       patchLocal(bk, { end: newEnd, lixiBed1h: info });
+      refreshPill(bk);
       autoAddBedItems(bk);
       if (typeof showSyncToast === 'function') showSyncToast('🧧 Lịch được cộng thêm 1 giờ — kết thúc ' + newEnd);
     });

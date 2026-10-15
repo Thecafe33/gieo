@@ -35,7 +35,7 @@ const twJs = 'document.head.insertAdjacentHTML("beforeend", ' + JSON.stringify('
     const lixiLine = () => cart.find(c => c._lixiCode);
     const sum = () => cart.reduce((s, i) => s + i.price * i.qty, 0);
     const btn = id => document.querySelector('#lixi-panel .lx-btn[data-id="' + id + '"]');
-    const reset = () => { cart = []; pendingBedOrder = null; renderCart(); document.getElementById('kh-sdt').value = ''; };
+    const reset = () => { cart = []; pendingBedOrder = null; isCheckoutFlow = false; const pl = document.getElementById('cart-bed-info'); if (pl) pl.remove(); renderCart(); document.getElementById('kh-sdt').value = ''; };
     async function phone(P) { document.getElementById('kh-sdt').value = P; checkSdtLive(); await sleep(900); }
     async function ap(id) { const x = btn(id); if (!x) return false; x.click(); await sleep(250); return true; }
     const orders = () => { const t = __RT2.tree().orders || {}; const out = []; (function walk(o) { Object.keys(o || {}).forEach(k => { const v = o[k]; if (v && v.itemsArray) out.push(v); else if (v && typeof v === 'object') walk(v); }); })(t); return out; };
@@ -46,7 +46,9 @@ const twJs = 'document.head.insertAdjacentHTML("beforeend", ' + JSON.stringify('
       __RT2.put(bk.path, Object.assign({}, bk, { id: null, key: null, path: null }));
       globalAllBookings = (globalAllBookings || []).concat([bk]); return bk;
     }
-    async function openBooking(bk) { pendingBedOrder = bk; document.getElementById('kh-sdt').value = bk.phone; checkSdtLive(); autoAddBedItems(bk); await sleep(900); }
+    // mở lịch đúng như nhân viên bấm "Gọi món" ở thẻ bed (showBedDetail → _doShowBedDetail: SĐT, giờ bed, pill order bed)
+    async function openBooking(bk) { activeOrderingBedId = bk.bedId; pendingBedOrder = bk; _doShowBedDetail(bk, bk.bedId); await sleep(900); document.getElementById('app-modal') && document.getElementById('app-modal').classList.add('hidden'); }
+    const pillTxt = () => { const pl = document.getElementById('cart-bed-info'); return pl ? pl.textContent.replace(/\s+/g, ' ') : ''; };
 
     const pickRows = () => [...document.querySelectorAll('#pick-cart-list > div')];
     async function pick(name, size) {     // popup chọn ly upsize
@@ -129,6 +131,7 @@ const twJs = 'document.head.insertAdjacentHTML("beforeend", ' + JSON.stringify('
     reset(); let bk = mkBooking('BK6', '13:00', '15:00', P); await openBooking(bk);
     addToCart('Bạc xỉu', 'M', 25000);
     chk(cart.filter(c => c.name === '1h bed').reduce((s, c) => s + c.qty, 0) === 2 && !btn('TETG10K1').classList.contains('off'), '6d. mở lịch 13:00–15:00 → 2 giờ bed, mã bed bấm được', cart);
+    chk(/BED 02/.test(pillTxt()) && /13:00 – 15:00/.test(pillTxt()), '6d2. đang có pill order bed ở đầu giỏ', pillTxt());
     await ap('TETG10K1');
     const iBed = cart.findIndex(c => c.name === '1h bed'), iLx = cart.indexOf(lixiLine());
     chk(lixiLine() && lixiLine().price === -10000 && sum() === 45000 && iLx === iBed + 1, '6e. giảm 10K → 55.000 − 10.000; dòng lì xì nằm NGAY DƯỚI giờ bed', [sum(), cart.map(c => c.name)]);
@@ -148,6 +151,7 @@ const twJs = 'document.head.insertAdjacentHTML("beforeend", ' + JSON.stringify('
     const rt7 = __RT2.get('bedBookings/2027/02/09/BK7');
     chk(rt7.end === '16:00' && rt7.lixiBed1h && rt7.lixiBed1h.code === 'TETB1H01' && rt7.lixiBed1h.baseEnd === '15:00', '7b. lịch trên Firebase kéo tới 16:00 (Đặt bed / lịch trống thấy đúng)', rt7);
     chk(globalAllBookings.find(x => x.id === 'BK7').end === '16:00', '7c. danh sách lịch trên máy cũng 16:00');
+    chk(/13:00 – 16:00/.test(pillTxt()), '7c2. pill order bed đổi thành 13:00 – 16:00', pillTxt());
     chk(cart.filter(c => c.name === '1h bed').reduce((s, c) => s + c.qty, 0) === 3 && lixiLine() && lixiLine().price === -15000 && sum() === 30000, '7d. bill: 3 giờ bed − 1 giờ tặng = 30.000', [sum(), cart]);
     chk(cart.indexOf(lixiLine()) === cart.findIndex(c => c.name === '1h bed') + 1 && /Tặng 1 giờ bed/.test(rowOf(lixiLine()).textContent) && rowOf(lixiLine()).classList.contains('lx-bedrow'), '7d2. dòng "Lì xì Tết · Tặng 1 giờ bed (giờ cuối)" nằm ngay dưới giờ bed');
     document.getElementById('app-modal').classList.add('hidden'); await sleep(2600); await window.__shot('lx_pos_bed1h');
@@ -204,6 +208,15 @@ const twJs = 'document.head.insertAdjacentHTML("beforeend", ' + JSON.stringify('
     bk = mkBooking('BK14', '13:00', '16:00', P, { lixiBed1h: { code: 'TETB1H07', phone: P, freeMin: 60, baseEnd: '15:00', by: 'app' } }); await openBooking(bk); await sleep(300);
     chk(!lixiLine() && __RT2.get('bedBookings/2027/02/09/BK14').end === '16:00', '14. mã của lịch đã dùng rồi → kiểm lại Firebase, gỡ dòng trừ (lịch giữ nguyên)', cart);
     await dl();
+
+    // ── 14b. Luồng Trả bed (không có pill order bed) → không áp mã bed ──
+    reset(); P = mkPhone(); seed(P, { TETG10K6: { type: 'giam10k_bed', at: 'x' } });
+    bk = mkBooking('BK14B', '13:00', '15:00', P);
+    addToCart('1h bed', 'M', 15000); addToCart('1h bed', 'M', 15000);
+    proceedToCheckoutFlow(bk); await sleep(900);
+    chk(!document.getElementById('cart-bed-info') && btn('TETG10K6') && btn('TETG10K6').classList.contains('off'), '14b. Trả bed (không pill) → mã bed mờ', pillTxt());
+    await ap('TETG10K6');
+    chk(!lixiLine() && /pill bed/.test(await dl()), '14c. bấm Áp khi Trả bed → báo cần pill bed, không áp');
 
     // ── 15. Chặn trước thanh toán: rời chế độ bed mà chưa vẽ lại giỏ → bấm thanh toán bị chặn ──
     reset(); P = mkPhone(); seed(P, { TETG10K5: { type: 'giam10k_bed', at: 'x' } });
