@@ -1,5 +1,6 @@
 // [LÌ XÌ TẾT 2027 — pos_tet.html (The cafe 33)] Sinh bởi tools/tao_ban_tet.js — KHÔNG sửa tay trong pos_tet.html.
-// Nhập SĐT tích điểm → hiện mã lì xì dùng được ở The cafe 33 (tag "Tết 2027") → nhân viên bấm "Áp" → dòng giảm trong giỏ.
+// Nhập SĐT tích điểm → hiện mã lì xì dùng được ở The cafe 33 (tag "Tết 2027") → nhân viên bấm "Áp" → upsize: chọn ly trong giỏ;
+// mã bed (chỉ khi order cho bed): dòng lì xì ngay dưới giờ bed.
 // Thanh toán xong: đánh dấu mã đã dùng + cộng 1 lượt mở lì xì cho SĐT (trong giai đoạn phát). Tab Quản lý "Lì xì 2027".
 (function () {
   if (!window.LiXi) { console.warn('[lì xì] thiếu lixi.v1.js'); return; }
@@ -29,9 +30,10 @@
     if (!codes.length) { panel.style.display = 'none'; panel.innerHTML = ''; return; }
     var li = lixiLine(), appliedId = li >= 0 ? cart[li]._lixiCode : null;
     panel.innerHTML = '<div class="lx-h">🧧 Lì xì của khách <span class="lx-tag">TẾT 2027</span></div>' + codes.map(function (c) {
-      var T = LiXi.TYPES[c.type], on = c.id === appliedId;
-      return '<div class="lx-row"><div class="lx-t"><b>' + esc(T.label) + '</b><small>Mã ' + esc(c.id) + ' · ' + esc(T.note) + '</small></div>' +
-        '<button class="lx-btn' + (on ? ' off' : '') + '" data-id="' + esc(c.id) + '">' + (on ? 'Bỏ' : 'Áp') + '</button></div>';
+      var T = LiXi.TYPES[c.type], on = c.id === appliedId, noBed = isBedType(c.type) && !onBed() && !on;
+      return '<div class="lx-row"' + (noBed ? ' style="opacity:.6"' : '') + '><div class="lx-t"><b>' + esc(T.label) + '</b><small>Mã ' + esc(c.id) + ' · ' + esc(T.note) +
+        (noBed ? ' · <b style="display:inline;color:#b45309">chỉ áp khi order cho bed</b>' : '') + '</small></div>' +
+        '<button class="lx-btn' + (on || noBed ? ' off' : '') + '" data-id="' + esc(c.id) + '">' + (on ? 'Bỏ' : 'Áp') + '</button></div>';
     }).join('') + '<div class="lx-msg">Mỗi bill dùng 1 mã · hạn ' + LiXi.useRange + '</div>';
     panel.style.display = 'block';
     Array.prototype.forEach.call(panel.querySelectorAll('.lx-btn'), function (b) {
@@ -50,63 +52,108 @@
   function scanSoon() { clearTimeout(timer); timer = setTimeout(scan, 600); }
 
   // ── điều kiện + số tiền từng loại ──
+  // Upsize: nhân viên chọn 1 ly trong giỏ → ly đó thành size L, GIỮ GIÁ M (không có dòng "−xK"), tag lì xì gắn ngay dưới món.
+  // Mã bed (giảm 10K / +1h): chỉ áp khi đang order cho 1 lịch bed (pill bed ở đầu giỏ) — dòng lì xì nằm ngay dưới giờ bed.
+  function isUp(it) { return !!(it && it._lixiCode && /^upsize/.test(it._lixiType || '')); }
+  function isBedType(t) { return t === 'giam10k_bed' || t === 'bed1h'; }
   function special(it) { return !it || it._vKey || it._discountId || it._lixiCode; }
   function menuOf(name) { return (menu || []).filter(function (x) { return String(x.name).toLowerCase() === String(name).toLowerCase(); })[0]; }
   function bedHours() { return bedLines().reduce(function (s, l) { return s + (Number(l.qty) || 0); }, 0); }
+  function onBed() { return typeof pendingBedOrder !== 'undefined' && !!pendingBedOrder; }
   function lastHourPrice() {      // giờ được tặng = giờ CUỐI của lịch → giá "1h bed từ h5" nếu lịch > 4 giờ
     var beds = bedLines(), h5 = beds.filter(function (l) { return String(l.name).toLowerCase() === '1h bed từ h5'; })[0];
     var h1 = beds.filter(function (l) { return String(l.name).toLowerCase() === '1h bed'; })[0];
     return Number((h5 || h1 || {}).price) || 0;
   }
   function bookingKey(bk) { return bk ? (bk.id || bk.key || '') : ''; }
-  // Upsize: khách mua M → tách 1 ly sang L (pha chế thấy đúng size L), dòng lì xì trừ phần chênh → khách trả giá M.
-  // Giỏ đã có sẵn ly L (nhân viên bấm L) → chỉ trừ phần chênh.
-  function doUpsize(code) {
-    for (var i = 0; i < cart.length; i++) {
-      var it = cart[i]; if (special(it) || it._lixiUp || it.size !== 'M') continue;
-      var m = menuOf(it.name); if (!m || !(m.priceM > 0) || !(m.priceL > m.priceM)) continue;
-      if (it.qty > 1) { it.qty--; cart.splice(i + 1, 0, Object.assign({}, it, { qty: 1, size: 'L', price: m.priceL, _lixiUp: code, _lixiMPrice: it.price })); }
-      else { it._lixiMPrice = it.price; it.size = 'L'; it.price = m.priceL; it._lixiUp = code; }
-      return { amt: m.priceL - m.priceM };
-    }
-    var best = 0;
-    cart.forEach(function (it) { if (special(it) || it.size !== 'L') return; var m = menuOf(it.name); if (m && m.priceM > 0 && m.priceL > m.priceM) best = Math.max(best, m.priceL - m.priceM); });
-    return best > 0 ? { amt: best } : { err: 'Giỏ chưa có ly nào size M (có size L) để upsize.' };
+  // ly đủ điều kiện upsize: món có size L đắt hơn M; ly M → L giữ giá M; ly đã bấm sẵn L → tính giá M
+  function upCandidates() {
+    var out = [];
+    cart.forEach(function (it, i) {
+      if (special(it) || (it.size !== 'M' && it.size !== 'L')) return;
+      var m = menuOf(it.name); if (!m || !(m.priceM > 0) || !(m.priceL > m.priceM)) return;
+      out.push({ i: i, it: it, M: m.priceM, L: m.priceL });
+    });
+    return out;
   }
-  // Trả ĐÚNG 1 ly về M (dòng L có thể đã bị bấm thêm ly L → qty > 1: phần còn lại giữ là ly L thường)
-  function undoUpsize(code) {
-    for (var i = cart.length - 1; i >= 0; i--) {
-      var it = cart[i]; if (!it || it._lixiUp !== code) continue;
-      var mPrice = it._lixiMPrice;
-      delete it._lixiUp; delete it._lixiSplit; delete it._lixiMPrice;
-      if (it.qty > 1) it.qty--; else cart.splice(i, 1);
-      var back = cart.filter(function (c) { return !special(c) && c.name === it.name && c.size === 'M'; })[0];
-      if (back) back.qty++; else cart.splice(i, 0, { name: it.name, size: 'M', price: mPrice, qty: 1 });
+  function pickCup(c, phone) {
+    var list = upCandidates();
+    if (!list.length) { alert('🧧 Giỏ chưa có ly nào upsize được (món có size L). Thêm món trước rồi bấm Áp.'); return; }
+    var modal = document.getElementById('modal-pick-cart-item'), listEl = document.getElementById('pick-cart-list');
+    if (!modal || !listEl) { applyUpsize(c, phone, list[0]); return; }
+    document.getElementById('pick-cart-title').innerText = '🧧 Lì xì: chọn ly upsize M → L';
+    document.getElementById('pick-cart-subtitle').innerText = 'Mã ' + c.id + ' · ly được chọn lên size L, khách trả giá M';
+    listEl.innerHTML = '';
+    list.forEach(function (o) {
+      var row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:16px 18px;border-radius:24px;border:2px solid #f3d9a4;background:#fff;';
+      row.innerHTML = '<div style="flex:1;min-width:0;"><p style="font-weight:800;font-size:1rem;color:#111827;margin:0 0 3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(o.it.name) +
+        ' <span style="font-size:.75rem;color:#9ca3af;">(' + esc(o.it.size) + (o.it.qty > 1 ? ' ×' + o.it.qty : '') + ')</span></p>' +
+        '<p style="font-size:.85rem;font-weight:700;color:#7a1027;margin:0;">Size L <s style="color:#bbb;">' + o.L.toLocaleString() + 'đ</s> → ' + o.M.toLocaleString() + 'đ</p></div>';
+      var b = document.createElement('button');
+      b.style.cssText = 'background:linear-gradient(135deg,#a3172f,#6e0d22);color:#ffe7a3;border:none;border-radius:22px;padding:10px 18px;font-size:.85rem;font-weight:900;cursor:pointer;flex-shrink:0;margin-left:12px;';
+      b.innerText = 'Upsize';
+      b.onclick = function () { closePickCartModal(); applyUpsize(c, phone, o); };
+      row.appendChild(b); listEl.appendChild(row);
+    });
+    modal.style.display = 'flex';
+  }
+  function applyUpsize(c, phone, o) {
+    var it = cart[o.i]; if (!it || special(it)) { alert('🧧 Giỏ vừa thay đổi — bấm Áp lại.'); return; }
+    var li = lixiLine(); if (li >= 0) { removeLine(li, ''); if (cart.indexOf(it) < 0 || special(it)) { alert('🧧 Giỏ vừa thay đổi — bấm Áp lại.'); rerender(); return; } }   // 1 bill 1 mã
+    var tag = { _lixiCode: c.id, _lixiPhone: phone, _lixiType: c.type, _lixiMPrice: o.M, _lixiLPrice: o.L, _lixiOrigSize: it.size, _lixiOrigPrice: it.price };
+    var idx = cart.indexOf(it);
+    if (it.qty > 1) { it.qty--; cart.splice(idx + 1, 0, Object.assign({ name: it.name, qty: 1 }, tag, { size: 'L', price: o.M })); }
+    else Object.assign(it, tag, { size: 'L', price: o.M });
+    rerender();
+  }
+  // trả ly upsize về như trước khi áp (M → M; ly đã bấm L → L giá L), gộp vào dòng cùng món nếu có
+  function revertUp(i) {
+    var it = cart[i], size = it._lixiOrigSize || 'M', price = it._lixiOrigPrice || it._lixiMPrice;
+    ['_lixiCode', '_lixiPhone', '_lixiType', '_lixiMPrice', '_lixiLPrice', '_lixiOrigSize', '_lixiOrigPrice'].forEach(function (f) { delete it[f]; });
+    it.size = size; it.price = price;
+    var back = cart.filter(function (x, j) { return j !== i && !special(x) && x.name === it.name && x.size === size && x.price === price; })[0];
+    if (back) { back.qty += it.qty; cart.splice(i, 1); }
+  }
+  // ly upsize chỉ 1 ly: bấm "+" / gộp thêm cùng món L → phần dư thành ly L thường (giá L)
+  function normalizeUp() {
+    for (var i = 0; i < cart.length; i++) {
+      var it = cart[i]; if (!isUp(it) || it.qty <= 1) continue;
+      var extra = it.qty - 1; it.qty = 1;
+      cart.splice(i + 1, 0, { name: it.name, size: 'L', price: it._lixiLPrice, qty: extra });
     }
   }
   /** Còn hợp lệ với giỏ hiện tại không (gọi mỗi lần giỏ đổi + ngay trước khi thanh toán) → '' hoặc lý do */
   function invalidReason(line) {
     var t = line._lixiType, T = LiXi.TYPES[t];
-    if (t === 'upsize_tc33') {
-      var ok = cart.some(function (it) { if (special(it) || it.size !== 'L') return false; var m = menuOf(it.name); return m && m.priceL - m.priceM >= -line.price; });
-      return ok ? '' : 'giỏ không còn ly size L được upsize';
-    }
+    if (t === 'upsize_tc33') return line.size === 'L' ? '' : 'ly không còn size L';
+    if (isBedType(t) && !onBed()) return 'mã bed chỉ áp khi order cho bed';
     if (t === 'giam10k_bed') return bedHours() > 0 ? '' : 'bill không còn giờ bed';
     if (t === 'bed1h') return bedHours() >= (T.minBedHours || 2) + 1 ? '' : 'lịch không còn đủ ' + ((T.minBedHours || 2) + 1) + ' giờ (2 giờ + 1 giờ tặng)';
     return 'mã không dùng ở The cafe 33';
   }
-  // Bỏ dòng lì xì: trả ly upsize về M; mã +1h bed thì trả lịch về giờ kết thúc cũ (và trả mã nếu app khách đã giữ)
+  // Bỏ mã: ly upsize trả về cũ; mã +1h bed thì trả lịch về giờ kết thúc cũ (và trả mã nếu app khách đã giữ)
   function removeLine(li, reason, keepBooking) {
-    var line = cart[li]; cart.splice(li, 1); undoUpsize(line._lixiCode);
-    if (line._lixiType === 'bed1h' && !keepBooking) revertBed1h(line._lixiCode);
-    if (reason) alert('🧧 Đã bỏ mã lì xì ' + line._lixiCode + ': ' + reason + '.');
+    var line = cart[li], code = line._lixiCode;
+    if (isUp(line)) revertUp(li);
+    else { cart.splice(li, 1); if (line._lixiType === 'bed1h' && !keepBooking) revertBed1h(code); }
+    if (reason) alert('🧧 Đã bỏ mã lì xì ' + code + ': ' + reason + '.');
   }
   function dropLine(reason) { var li = lixiLine(); if (li >= 0) removeLine(li, reason); }
-  function pushLine(c, amt, phone, bkPath) {
+  var NAMES = { giam10k_bed: 'Lì xì Tết · Giảm 10K lịch bed', bed1h: 'Lì xì Tết · Tặng 1 giờ bed (giờ cuối)' };
+  function pushLine(c, amt, phone, bkPath) {     // chỉ mã bed (dòng trừ tiền) — đặt ngay dưới giờ bed (placeBedLine)
     var li = lixiLine(); if (li >= 0) removeLine(li, '');   // 1 bill 1 mã
-    cart.push({ name: LINE + ' · ' + LiXi.TYPES[c.type].short, size: '', price: -amt, qty: 1,
+    cart.push({ name: '🧧 ' + (NAMES[c.type] || LINE), size: '', price: -amt, qty: 1,
       _discountId: 'lixi_' + c.id, _discountCode: c.id, _discountTarget: 'Lì xì Tết 2027', _lixiCode: c.id, _lixiPhone: phone, _lixiType: c.type,
       _lixiBkPath: bkPath || '' });
+    placeBedLine();
+  }
+  function placeBedLine() {
+    var li = lixiLine(); if (li < 0 || isUp(cart[li])) return;
+    var last = -1; cart.forEach(function (c, i) { if (bedLines().indexOf(c) >= 0) last = i; });
+    if (last < 0) return;
+    var line = cart.splice(li, 1)[0]; if (li < last) last--;
+    cart.splice(last + 1, 0, line);
   }
   function bkPathOf(bk) { try { return (bk && _getBedBookingPath(bk)) || ''; } catch (e) { return ''; } }
   function patchLocal(bk, data) {
@@ -127,30 +174,25 @@
 
   // Bấm "Áp": đọc lại mã từ Firebase (1 lượt) — mã vừa dùng ở máy / quầy khác thì báo ngay, không trừ tiền
   function toggle(c, phone) {
-    var on = '';
-    for (var k in cart) if (cart[k] && cart[k]._lixiCode) on = cart[k]._lixiCode;
-    if (on === c.id) return toggleNow(c, phone);                         // Bỏ — không cần đọc
+    var li = lixiLine();
+    if (li >= 0 && cart[li]._lixiCode === c.id) return toggleNow(c, phone);   // Bỏ — không cần đọc
+    if (isBedType(c.type) && !onBed()) { alert('🧧 Mã bed chỉ áp khi đang order cho 1 lịch bed (mở lịch bed → Gọi món).'); return; }
     var bk = curBk();
     LiXi.usableCodes(phone, STORE, bk).then(function (codes) {
       cache = { phone: phone, bk: bk, at: Date.now(), codes: codes }; render(codes, phone);
       var f = codes.filter(function (x) { return x.id === c.id; })[0];
-      if (!f) { (typeof toast === 'function' ? toast : alert)('🧧 Mã ' + c.id + ' vừa được dùng hoặc không còn hợp lệ.'); return; }
+      if (!f) { alert('🧧 Mã ' + c.id + ' vừa được dùng hoặc không còn hợp lệ.'); return; }
       toggleNow(f, phone);
-    }).catch(function (e) { (typeof toast === 'function' ? toast : alert)('🧧 Không kiểm tra được mã (mạng?) — thử lại.'); });
+    }).catch(function () { alert('🧧 Không kiểm tra được mã (mạng?) — thử lại.'); });
   }
   function toggleNow(c, phone) {
     var li = lixiLine();
-    if (li >= 0 && cart[li]._lixiCode === c.id) {                       // Bỏ
-      dropLine(''); rerender(); return;
-    }
-    if (c.type === 'upsize_tc33') {
-      var li2 = lixiLine(); if (li2 >= 0) removeLine(li2, '');
-      var u = doUpsize(c.id); if (u.err) { alert('🧧 ' + u.err); rerender(); return; }
-      pushLine(c, u.amt, phone); rerender(); return;
-    }
+    if (li >= 0 && cart[li]._lixiCode === c.id) { dropLine(''); rerender(); return; }   // Bỏ
+    if (c.type === 'upsize_tc33') return pickCup(c, phone);
+    if (isBedType(c.type) && !onBed()) { alert('🧧 Mã bed chỉ áp khi đang order cho 1 lịch bed.'); return; }
     if (c.type === 'giam10k_bed') {
       if (bedHours() <= 0) { alert('🧧 Bill chưa có giờ bed.'); return; }
-      pushLine(c, LiXi.TYPES[c.type].value, phone); rerender(); return;
+      pushLine(c, LiXi.TYPES[c.type].value, phone, bkPathOf(pendingBedOrder)); rerender(); return;
     }
     if (c.type === 'bed1h') return applyBed1h(c, phone);
     alert('🧧 Mã này không dùng ở The cafe 33.');
@@ -166,6 +208,7 @@
     if (paidH < (T.minBedHours || 2)) { alert('🧧 Mã +1h bed áp cho lịch từ ' + (T.minBedHours || 2) + ' giờ trở lên.'); return; }
     var newEnd = LiXi.hm(LiXi.mins(bk.end) + LiXi.BED_FREE_MIN), close = (typeof currentBedClosingTime === 'string' && currentBedClosingTime) || '20:50';
     if (LiXi.mins(newEnd) > LiXi.mins(close) || LiXi.mins(newEnd) <= LiXi.mins(bk.end)) { alert('🧧 Lịch kết thúc ' + bk.end + ' — cộng thêm 1 giờ sẽ quá giờ đóng cửa (' + close + ').'); return; }
+    var li = lixiLine(); if (li >= 0) { removeLine(li, ''); rerender(); }   // 1 bill 1 mã
     var info = { code: c.id, phone: phone, freeMin: LiXi.BED_FREE_MIN, baseEnd: bk.end, by: 'pos' };
     if (typeof showSyncToast === 'function') showSyncToast('🧧 Đang cộng 1 giờ vào lịch…');
     _updateBedBooking(bk, { end: newEnd, lixiBed1h: info }, function (err) {
@@ -176,23 +219,53 @@
     });
   }
 
+  // ── tag lì xì gắn dưới món (giỏ PC + giỏ điện thoại) ──
+  var css2 = document.createElement('style');
+  css2.textContent = '.lx-itag{display:flex;align-items:center;gap:6px;margin-top:4px;padding:3px 8px;border-radius:8px;background:#fff1d6;border:1px solid #f0c674;color:#7a1027;font-size:10.5px;font-weight:800;line-height:1.3}' +
+    '.lx-itag s{color:#b9a78a;font-weight:600}.lx-itag button{margin-left:auto;border:none;background:none;color:#b91c1c;font-weight:900;cursor:pointer;font-size:12px;padding:0 2px}' +
+    '.lx-bedrow{margin-top:-6px!important;margin-left:14px;border-left:3px solid #e9b949!important;background:#fff7e6!important;border-radius:0 12px 12px 0!important}' +
+    '.lx-bedrow p{color:#7a1027!important}';
+  document.head.appendChild(css2);
+  window.lixiDropCode = function () { dropLine(''); rerender(); };
+  function upTagHtml(it) {
+    return '<div class="lx-itag">🧧 Lì xì Tết · Upsize M→L miễn phí <span><s>' + Number(it._lixiLPrice).toLocaleString() + 'đ</s> ' + Number(it.price).toLocaleString() + 'đ</span>' +
+      '<button type="button" onclick="lixiDropCode()" title="Bỏ mã">✕</button></div>';
+  }
+  function decorate(listEl) {
+    if (!listEl) return;
+    cart.forEach(function (it, i) {
+      var row = listEl.children[i]; if (!row || !it || !it._lixiCode) return;
+      if (isUp(it)) {
+        var info = row.firstElementChild; if (info && !info.querySelector('.lx-itag')) info.insertAdjacentHTML('beforeend', upTagHtml(it));
+        var qb = row.lastElementChild; if (qb && qb !== info) qb.style.visibility = 'hidden';   // ly upsize cố định 1 ly — bỏ bằng ✕ trên tag
+      } else {
+        row.classList.add('lx-bedrow');
+        var nm = row.querySelector('p'); if (nm) { nm.classList.remove('truncate', 'max-w-[130px]', 'capitalize-first'); nm.style.whiteSpace = 'normal'; }
+      }
+    });
+  }
+
   // ── móc vào app ──
   var _check = window.checkSdtLive;
   if (typeof _check === 'function') window.checkSdtLive = function () { var r = _check.apply(this, arguments); scanSoon(); return r; };
   var _reset = window.resetPhoneInput;
   if (typeof _reset === 'function') window.resetPhoneInput = function () { var r = _reset.apply(this, arguments); panel.style.display = 'none'; return r; };
-  // giỏ đổi → mã không còn đủ điều kiện thì tự bỏ (báo nhân viên)
+  // giỏ đổi → mã không còn đủ điều kiện thì tự bỏ (báo nhân viên); ly upsize giữ 1 ly; dòng mã bed nằm ngay dưới giờ bed
   var _rc = window.renderCart;
   if (typeof _rc === 'function') window.renderCart = function () {
-    if (!silent) { var li = lixiLine(); if (li >= 0) { var why = invalidReason(cart[li]); if (why) dropLine(why); } }
+    if (!silent) { normalizeUp(); var li = lixiLine(); if (li >= 0) { var why = invalidReason(cart[li]); if (why) dropLine(why); } }
+    placeBedLine();
     var r = _rc.apply(this, arguments);
+    decorate(document.getElementById('cart-list'));
     if (!silent && cache.phone && panel.style.display !== 'none') render(cache.codes, cache.phone);
     return r;
   };
+  var _ocm = window.openCartModal;
+  if (typeof _ocm === 'function') window.openCartModal = function () { var r = _ocm.apply(this, arguments); decorate(document.getElementById('sheet-cart-list')); return r; };
   var _rci = window.removeCartItem;
   if (typeof _rci === 'function') window.removeCartItem = function (idx) {
     var it = cart[idx];
-    if (it && it._lixiCode) { removeLine(idx, ''); rerender(); return; }
+    if (it && it._lixiCode && !isUp(it)) { removeLine(idx, ''); rerender(); return; }
     return _rci.apply(this, arguments);
   };
   // lịch bed: tính giờ xong → lịch có +1h lì xì (đặt qua app / áp ở quầy) thì thêm dòng trừ giờ cuối
@@ -212,12 +285,13 @@
           var k = lixiLine(); if (k >= 0 && cart[k]._lixiCode === L.code) { removeLine(k, 'mã đã dùng hoặc hết hạn', true); rerender(); }
         }).catch(function () {});
       }
-    }
+    } else { placeBedLine(); rerender(); }
     return r;
   };
   // chốt chặn trước khi lưu đơn
   var _save = window.saveOrderToFirebase;
   if (typeof _save === 'function') window.saveOrderToFirebase = function () {
+    normalizeUp();
     var li = lixiLine();
     if (li >= 0) { var why = invalidReason(cart[li]); if (why) { dropLine(why); rerender(); return; } }
     return _save.apply(this, arguments);
@@ -227,7 +301,8 @@
     var items = (orderData && orderData.itemsArray) || [], line = null;
     items.forEach(function (it) { if (it && it._lixiCode) line = it; });
     if (line) {
-      LiXi.markUsed(line._lixiPhone, line._lixiCode, { store: STORE, amount: -Number(line.price) || 0 })
+      var amt = isUp(line) ? (Number(line._lixiLPrice) || 0) - (Number(line.price) || 0) : -Number(line.price) || 0;
+      LiXi.markUsed(line._lixiPhone, line._lixiCode, { store: STORE, amount: amt })
         .then(function () { if (line._lixiType === 'bed1h' && line._lixiBkPath) db.ref(line._lixiBkPath + '/lixiBed1h/used').set(true); })
         .catch(function (e) { alert('🧧 Mã lì xì ' + line._lixiCode + ' không đánh dấu được (' + e.message + ') — kiểm tra lại.'); });
       cache = { phone: '', bk: '', at: 0, codes: [] };

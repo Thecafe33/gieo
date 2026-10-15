@@ -48,65 +48,97 @@ const twJs = 'document.head.insertAdjacentHTML("beforeend", ' + JSON.stringify('
     }
     async function openBooking(bk) { pendingBedOrder = bk; document.getElementById('kh-sdt').value = bk.phone; checkSdtLive(); autoAddBedItems(bk); await sleep(900); }
 
-    // ── 1. Upsize TC33: khách mua Bạc xỉu M ×2 → 1 ly lên L, trả giá 2 ly M ──
+    const pickRows = () => [...document.querySelectorAll('#pick-cart-list > div')];
+    async function pick(name, size) {     // popup chọn ly upsize
+      const row = pickRows().find(r => r.textContent.includes(name) && (!size || r.textContent.includes('(' + size)));
+      if (!row) return false; row.querySelector('button').click(); await sleep(150); return true;
+    }
+    const modalOpen = () => { const m = document.getElementById('modal-pick-cart-item'); return m && m.style.display === 'flex'; };
+    const rowOf = it => document.getElementById('cart-list').children[cart.indexOf(it)];
+
+    // ── 1. Upsize TC33: khách mua Bạc xỉu M ×2 → bấm mã → popup chọn ly → 1 ly lên L GIỮ GIÁ M, tag dưới món ──
     reset(); let P = mkPhone(); seed(P, { TETUPA01: { type: 'upsize_tc33', at: 'x' }, TETXOF01: { type: 'upsize_xofa', at: 'x' }, TETXOF02: { type: 'giam5k_xofa', at: 'x' } });
-    addToCart('Bạc xỉu', 'M', 25000); addToCart('Bạc xỉu', 'M', 25000);
+    addToCart('Bạc xỉu', 'M', 25000); addToCart('Bạc xỉu', 'M', 25000); addToCart('Cà phê đen', 'M', 20000);
     await phone(P);
     chk(document.getElementById('lixi-panel').style.display === 'block' && !!btn('TETUPA01'), '1a. nhập SĐT → khung lì xì hiện mã upsize The cafe 33');
     chk(!btn('TETXOF01') && !btn('TETXOF02'), '1b. mã của XOFA KHÔNG hiện ở The cafe 33');
     chk(/Upsize lên L miễn phí khi mua M/.test(document.getElementById('lixi-panel').textContent), '1c. chữ trên mã: "Upsize lên L miễn phí khi mua M"');
     await ap('TETUPA01');
+    chk(modalOpen() && pickRows().length === 1 && /Bạc xỉu/.test(pickRows()[0].textContent) && cart.every(c => !c._lixiCode), '1d. bấm Áp → popup chọn ly (chỉ ly có size L: Bạc xỉu, không có Cà phê đen), chưa đổi giỏ', pickRows().map(r => r.textContent));
+    await window.__shot('lx_pos_pick');
+    await pick('Bạc xỉu');
     const mLine = cart.find(c => c.name === 'Bạc xỉu' && c.size === 'M'), lLine = cart.find(c => c.name === 'Bạc xỉu' && c.size === 'L');
-    chk(mLine && mLine.qty === 1 && lLine && lLine.qty === 1 && lLine.price === 30000, '1d. áp → 1 ly M + 1 ly L (pha chế thấy đúng size L)', cart);
-    chk(lixiLine() && lixiLine().price === -5000 && sum() === 50000 && currentTotal === 50000, '1e. dòng lì xì −5.000 → tổng 50.000 = giá 2 ly M', [sum(), currentTotal]);
+    chk(!modalOpen() && mLine && mLine.qty === 1 && lLine && lLine.qty === 1 && lLine.price === 25000 && lLine._lixiCode === 'TETUPA01', '1e. chọn ly → 1 ly M + 1 ly L giá M 25.000 (pha chế thấy size L)', cart);
+    chk(!cart.some(c => c.price < 0) && sum() === 70000 && currentTotal === 70000, '1f. KHÔNG có dòng "−xK" — tổng 70.000 = 2 ly M + cà phê đen', [sum(), currentTotal]);
+    const tag1 = rowOf(lLine) && rowOf(lLine).querySelector('.lx-itag');
+    chk(tag1 && /Upsize M→L miễn phí/.test(tag1.textContent) && /30,000đ/.test(tag1.textContent), '1g. tag "🧧 Lì xì Tết · Upsize M→L miễn phí" gắn ngay dưới ly L (giá L gạch)', tag1 && tag1.textContent);
     await window.__shot('lx_pos_upsize');
-    chk(btn('TETUPA01').textContent === 'Bỏ', '1f. nút đổi thành "Bỏ"');
+    chk(btn('TETUPA01').textContent === 'Bỏ', '1h. nút trên khung đổi thành "Bỏ"');
     let o = await pay();
-    chk(o && o.total === 50000 && o.itemsArray.some(i => i._lixiCode === 'TETUPA01') && o.itemsArray.some(i => i.size === 'L'), '1g. thanh toán: đơn lưu tổng 50.000, có dòng lì xì + ly L', o && [o.total, o.items]);
+    chk(o && o.total === 70000 && o.itemsArray.some(i => i._lixiCode === 'TETUPA01' && i.size === 'L' && i.price === 25000), '1i. thanh toán: đơn 70.000, ly L giá 25.000 mang mã', o && [o.total, o.items]);
     await sleep(300);
     let d = DB['lixi_tet_2027/' + P];
-    chk(d.codes.TETUPA01.used === true && d.codes.TETUPA01.usedStore === 'tc33' && d.codes.TETUPA01.usedAmount === 5000, '1h. mã đánh dấu đã dùng ở The cafe 33, số tiền 5.000', d.codes.TETUPA01);
-    chk(d.extra === 1 && d.earned === 1, '1i. đơn có SĐT (mùng 4, trong đợt phát) → +1 lượt mở bao', [d.extra, d.earned]);
-    await phone(P); chk(!btn('TETUPA01'), '1j. mã đã dùng không hiện lại');
+    chk(d.codes.TETUPA01.used === true && d.codes.TETUPA01.usedStore === 'tc33' && d.codes.TETUPA01.usedAmount === 5000, '1j. mã đã dùng ở The cafe 33, ưu đãi 5.000 (chênh M→L)', d.codes.TETUPA01);
+    chk(d.extra === 1 && d.earned === 1, '1k. đơn có SĐT (mùng 4, trong đợt phát) → +1 lượt mở bao', [d.extra, d.earned]);
+    await phone(P); chk(!btn('TETUPA01'), '1l. mã đã dùng không hiện lại');
     await dl();
 
-    // ── 2. Upsize: chỉ có món không có size L → báo, không trừ ──
+    // ── 2. Upsize: giỏ không có món nào có size L → báo, không mở popup ──
     reset(); P = mkPhone(); seed(P, { TETUPA02: { type: 'upsize_tc33', at: 'x' } });
     addToCart('Cà phê đen', 'M', 20000); await phone(P); await ap('TETUPA02');
-    chk(!lixiLine() && sum() === 20000 && /size M \(có size L\)/.test(await dl()), '2. giỏ không có ly M nào lên được L → báo, không trừ tiền');
+    chk(!modalOpen() && !lixiLine() && sum() === 20000 && /upsize được/.test(await dl()), '2. giỏ không có ly nào có size L → báo, không trừ');
+    // đóng popup không chọn → giỏ giữ nguyên
+    addToCart('Bạc xỉu', 'M', 25000); await ap('TETUPA02'); closePickCartModal(); await sleep(50);
+    chk(!lixiLine() && sum() === 45000, '2b. mở popup rồi đóng không chọn → giỏ giữ nguyên');
 
-    // ── 3. Upsize: nhân viên đã bấm sẵn size L → chỉ trừ phần chênh ──
-    reset(); addToCart('Trà đào', 'L', 36000); await phone(P); await ap('TETUPA02');
-    chk(lixiLine() && lixiLine().price === -6000 && sum() === 30000, '3. giỏ có sẵn Trà đào L → trừ 6.000 → khách trả giá M (30.000)', cart);
+    // ── 3. Nhân viên đã bấm sẵn size L → chọn ly đó → tính giá M ──
+    reset(); addToCart('Trà đào', 'L', 36000); await phone(P); await ap('TETUPA02'); await pick('Trà đào', 'L');
+    chk(lixiLine() && lixiLine().size === 'L' && lixiLine().price === 30000 && sum() === 30000, '3. ly Trà đào L có sẵn → tính giá M 30.000', cart);
+    window.lixiDropCode(); await sleep(50);
+    chk(!lixiLine() && cart[0].size === 'L' && cart[0].price === 36000, '3b. bỏ mã → ly về L giá 36.000 như lúc chưa áp', cart);
 
-    // ── 4. Bỏ mã (✕ trong giỏ) → ly trả về M ──
-    reset(); addToCart('Bạc xỉu', 'M', 25000); addToCart('Bạc xỉu', 'M', 25000); await phone(P); await ap('TETUPA02');
-    removeCartItem(cart.indexOf(lixiLine())); await sleep(100);
-    chk(!lixiLine() && cart.length === 1 && cart[0].size === 'M' && cart[0].qty === 2 && sum() === 50000, '4a. ✕ dòng lì xì → Bạc xỉu M ×2 như cũ', cart);
-    await ap('TETUPA02'); await ap('TETUPA02');
-    chk(!lixiLine() && cart.length === 1 && cart[0].qty === 2, '4b. bấm "Áp" rồi "Bỏ" trên khung → về như cũ', cart);
-    // ly L bị bấm thêm 1 ly L nữa rồi bỏ mã → chỉ 1 ly về M
-    await ap('TETUPA02'); addToCart('Bạc xỉu', 'L', 30000);
-    removeCartItem(cart.indexOf(lixiLine())); await sleep(100);
+    // ── 4. Bỏ mã (✕ trên tag / "Bỏ" trên khung) → ly trả về M, gộp lại ──
+    reset(); addToCart('Bạc xỉu', 'M', 25000); addToCart('Bạc xỉu', 'M', 25000); await phone(P); await ap('TETUPA02'); await pick('Bạc xỉu');
+    rowOf(lixiLine()).querySelector('.lx-itag button').click(); await sleep(100);
+    chk(!lixiLine() && cart.length === 1 && cart[0].size === 'M' && cart[0].qty === 2 && sum() === 50000, '4a. ✕ trên tag → Bạc xỉu M ×2 như cũ', cart);
+    await ap('TETUPA02'); await pick('Bạc xỉu'); await ap('TETUPA02');
+    chk(!lixiLine() && cart.length === 1 && cart[0].qty === 2, '4b. Áp → chọn ly → "Bỏ" trên khung → về như cũ', cart);
+    // ly upsize bị gộp thêm 1 ly L (bấm món L) → ly thêm tính giá L; bỏ mã → chỉ 1 ly về M
+    await ap('TETUPA02'); await pick('Bạc xỉu'); addToCart('Bạc xỉu', 'L', 30000); await sleep(50);
+    const up4 = lixiLine(), extraL = cart.find(c => c.size === 'L' && !c._lixiCode);
+    chk(up4 && up4.qty === 1 && extraL && extraL.qty === 1 && extraL.price === 30000 && sum() === 80000, '4c. gọi thêm 1 ly Bạc xỉu L → ly đó giá L 30.000, ly lì xì vẫn 1 ly giá M', cart);
+    window.lixiDropCode(); await sleep(50);
     const m4 = cart.find(c => c.size === 'M'), l4 = cart.find(c => c.size === 'L');
-    chk(m4 && m4.qty === 2 && l4 && l4.qty === 1 && sum() === 80000, '4c. upsize + khách gọi thêm 1 ly L, rồi bỏ mã → 2 M + 1 L (ly L gọi thêm giữ nguyên)', cart);
+    chk(m4 && m4.qty === 2 && l4 && l4.qty === 1 && sum() === 80000, '4d. bỏ mã → 2 M + 1 L', cart);
     await dl();
 
-    // ── 5. Xoá ly L đã upsize → mã tự bỏ + báo ──
-    reset(); addToCart('Bạc xỉu', 'M', 25000); addToCart('Bạc xỉu', 'M', 25000); await phone(P); await ap('TETUPA02');
-    removeCartItem(cart.findIndex(c => c.size === 'L')); await sleep(100);
-    chk(!lixiLine() && sum() === 25000 && /không còn ly size L/.test(await dl()), '5. xoá ly L → dòng lì xì tự bỏ (không trừ oan), báo nhân viên', cart);
+    // ── 5. Bớt ly upsize (−) → mã tự rời bill, không trừ gì ──
+    reset(); addToCart('Bạc xỉu', 'M', 25000); addToCart('Bạc xỉu', 'M', 25000); await phone(P); await ap('TETUPA02'); await pick('Bạc xỉu');
+    updateQty(cart.indexOf(lixiLine()), -1); await sleep(100);
+    chk(!lixiLine() && sum() === 25000, '5. bớt ly upsize → còn 1 ly M 25.000, mã không bị dùng', cart);
+    await dl();
 
-    // ── 6. Giảm 10K lịch bed ──
+    // ── 6. Giảm 10K lịch bed: CHỈ khi đang order cho bed (pill bed) ──
     reset(); P = mkPhone(); seed(P, { TETG10K1: { type: 'giam10k_bed', at: 'x' } });
-    addToCart('Bạc xỉu', 'M', 25000); await phone(P); await ap('TETG10K1');
-    chk(!lixiLine() && /chưa có giờ bed/.test(await dl()), '6a. bill không có giờ bed → không áp giảm 10K');
-    reset(); let bk = mkBooking('BK6', '13:00', '15:00', P); await openBooking(bk);
-    chk(cart.filter(c => c.name === '1h bed').reduce((s, c) => s + c.qty, 0) === 2, '6b. mở lịch 13:00–15:00 → 2 giờ bed', cart);
+    addToCart('Bạc xỉu', 'M', 25000); await phone(P);
+    chk(btn('TETG10K1').classList.contains('off') && /chỉ áp khi order cho bed/.test(document.getElementById('lixi-panel').textContent), '6a. không order cho bed → mã bed mờ, ghi "chỉ áp khi order cho bed"');
     await ap('TETG10K1');
-    chk(lixiLine() && lixiLine().price === -10000 && sum() === 20000, '6c. áp giảm 10K → 30.000 − 10.000 = 20.000', [sum(), cart]);
+    chk(!lixiLine() && /order cho 1 lịch bed/.test(await dl()), '6b. bấm Áp khi không order cho bed → báo, không áp');
+    addToCart('1h bed', 'M', 15000); addToCart('1h bed', 'M', 15000); await ap('TETG10K1');
+    chk(!lixiLine() && /order cho 1 lịch bed/.test(await dl()), '6c. tự thêm món "1h bed" vào bill thường (không pill bed) → vẫn không áp', cart);
+    reset(); let bk = mkBooking('BK6', '13:00', '15:00', P); await openBooking(bk);
+    addToCart('Bạc xỉu', 'M', 25000);
+    chk(cart.filter(c => c.name === '1h bed').reduce((s, c) => s + c.qty, 0) === 2 && !btn('TETG10K1').classList.contains('off'), '6d. mở lịch 13:00–15:00 → 2 giờ bed, mã bed bấm được', cart);
+    await ap('TETG10K1');
+    const iBed = cart.findIndex(c => c.name === '1h bed'), iLx = cart.indexOf(lixiLine());
+    chk(lixiLine() && lixiLine().price === -10000 && sum() === 45000 && iLx === iBed + 1, '6e. giảm 10K → 55.000 − 10.000; dòng lì xì nằm NGAY DƯỚI giờ bed', [sum(), cart.map(c => c.name)]);
+    chk(rowOf(lixiLine()).classList.contains('lx-bedrow') && /Giảm 10K lịch bed/.test(rowOf(lixiLine()).textContent), '6f. dòng lì xì hiển thị gắn vào giờ bed ("Lì xì Tết · Giảm 10K lịch bed")');
+    const keep6 = pendingBedOrder; pendingBedOrder = null; renderCart(); await sleep(50);
+    chk(!lixiLine() && /chỉ áp khi order cho bed/.test(await dl()), '6g. bill không còn gắn lịch bed (giỏ vẫn còn món) → mã bed tự gỡ + báo');
+    resetOrderingMode(true);
+    await openBooking(bk); addToCart('Bạc xỉu', 'M', 25000); await ap('TETG10K1');
     o = await pay(); await sleep(300);
-    chk(o && o.total === 20000 && DB['lixi_tet_2027/' + P].codes.TETG10K1.used === true, '6d. thanh toán lịch bed → đơn 20.000, mã đã dùng', o && o.total);
+    chk(o && o.total === 45000 && DB['lixi_tet_2027/' + P].codes.TETG10K1.used === true && DB['lixi_tet_2027/' + P].codes.TETG10K1.usedAmount === 10000, '6h. thanh toán lịch bed → đơn 45.000, mã đã dùng', o && o.total);
 
     // ── 7. +1h bed áp ở quầy: lịch 13:00–15:00 (2 giờ) → kéo dài tới 16:00, trả 2 giờ ──
     reset(); P = mkPhone(); seed(P, { TETB1H01: { type: 'bed1h', at: 'x' } });
@@ -117,6 +149,7 @@ const twJs = 'document.head.insertAdjacentHTML("beforeend", ' + JSON.stringify('
     chk(rt7.end === '16:00' && rt7.lixiBed1h && rt7.lixiBed1h.code === 'TETB1H01' && rt7.lixiBed1h.baseEnd === '15:00', '7b. lịch trên Firebase kéo tới 16:00 (Đặt bed / lịch trống thấy đúng)', rt7);
     chk(globalAllBookings.find(x => x.id === 'BK7').end === '16:00', '7c. danh sách lịch trên máy cũng 16:00');
     chk(cart.filter(c => c.name === '1h bed').reduce((s, c) => s + c.qty, 0) === 3 && lixiLine() && lixiLine().price === -15000 && sum() === 30000, '7d. bill: 3 giờ bed − 1 giờ tặng = 30.000', [sum(), cart]);
+    chk(cart.indexOf(lixiLine()) === cart.findIndex(c => c.name === '1h bed') + 1 && /Tặng 1 giờ bed/.test(rowOf(lixiLine()).textContent) && rowOf(lixiLine()).classList.contains('lx-bedrow'), '7d2. dòng "Lì xì Tết · Tặng 1 giờ bed (giờ cuối)" nằm ngay dưới giờ bed');
     document.getElementById('app-modal').classList.add('hidden'); await sleep(2600); await window.__shot('lx_pos_bed1h');
     o = await pay(); await sleep(400);
     chk(o && o.total === 30000 && DB['lixi_tet_2027/' + P].codes.TETB1H01.used === true, '7e. thanh toán → 30.000, mã đã dùng', o && o.total);
@@ -172,12 +205,12 @@ const twJs = 'document.head.insertAdjacentHTML("beforeend", ' + JSON.stringify('
     chk(!lixiLine() && __RT2.get('bedBookings/2027/02/09/BK14').end === '16:00', '14. mã của lịch đã dùng rồi → kiểm lại Firebase, gỡ dòng trừ (lịch giữ nguyên)', cart);
     await dl();
 
-    // ── 15. Chặn trước thanh toán: giỏ đổi làm mã hết điều kiện ──
-    reset(); P = mkPhone(); seed(P, { TETUPA03: { type: 'upsize_tc33', at: 'x' } });
-    addToCart('Bạc xỉu', 'M', 25000); await phone(P); await ap('TETUPA03');
-    const li15 = cart.findIndex(c => c.size === 'L'); cart.splice(li15, 1);   // xoá thẳng (không qua renderCart)
+    // ── 15. Chặn trước thanh toán: rời chế độ bed mà chưa vẽ lại giỏ → bấm thanh toán bị chặn ──
+    reset(); P = mkPhone(); seed(P, { TETG10K5: { type: 'giam10k_bed', at: 'x' } });
+    bk = mkBooking('BK15', '13:00', '15:00', P); await openBooking(bk); await ap('TETG10K5');
+    pendingBedOrder = null;                                               // không qua renderCart
     o = await pay();
-    chk(!o && !lixiLine() && /không còn ly size L/.test(await dl()), '15. giỏ mất ly L mà chưa vẽ lại → bấm thanh toán bị chặn, gỡ mã');
+    chk(!o && !lixiLine() && /chỉ áp khi order cho bed/.test(await dl()), '15. bill không còn gắn lịch bed → thanh toán bị chặn, gỡ mã bed');
 
     // ── 16. Ngoài hạn ──
     reset(); P = mkPhone(); seed(P, { TETG10K4: { type: 'giam10k_bed', at: 'x' } });

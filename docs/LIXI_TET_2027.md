@@ -19,8 +19,9 @@ Tháng Chạp năm Bính Ngọ chỉ có 29 ngày → **không có 30 Tết**; g
 - **Tỉ lệ trúng**: có mua nước trong 24h (`customers.lastVisit` — cả 3 quán đều ghi khi tích điểm/tem) → 90%. Không mua: 10%, riêng 4 ngày lộc → 80%.
 - **Loại quà khi trúng**: upsize XOFA 25% · upsize The cafe 33 25% · giảm 5K đơn XOFA 25% · giảm 10K lịch bed 15% · +1h bed 10%.
 - **Điều kiện** (chữ trên mã):
-  - **Upsize** — "Upsize lên L miễn phí khi mua M", đúng quán ghi trên mã. Bấm Áp: 1 ly M (món có size L) **đổi thành L** trong giỏ (pha chế thấy đúng size), dòng lì xì trừ phần chênh → khách trả giá M. Giỏ có sẵn ly L thì chỉ trừ phần chênh. Bỏ mã → đúng 1 ly trả về M. XOFA đổi To Go ↔ Tại quán khi đang áp → gỡ mã (giá khác nhau), áp lại.
-  - **Giảm 5K** — đơn XOFA từ 30K. **Giảm 10K** — bill có giờ bed ở The cafe 33.
+  - **Upsize** — "Upsize lên L miễn phí khi mua M", đúng quán ghi trên mã. Cách áp (cả XOFA và The cafe 33): chọn món xong → nhập SĐT → bấm **Áp** ở mã upsize → **popup chọn ly** trong giỏ (chỉ hiện ly của món có size L) → ly được chọn lên **size L, giữ giá M**, tag "🧧 Lì xì Tết · Upsize M→L miễn phí" gắn ngay dưới món (không có dòng "−xK"). Ly đó cố định 1 ly (bấm thêm cùng món L thì ly thêm tính giá L). Bỏ mã (✕ trên tag / "Bỏ") → ly trả về như trước. XOFA đổi To Go ↔ Tại quán khi đang áp → gỡ mã, áp lại. Số tiền ưu đãi ghi trên mã = chênh L − M.
+  - **Giảm 5K** — đơn XOFA từ 30K: dòng giảm toàn đơn "Lì xì Tết · Giảm 5K đơn từ 30K".
+  - **Mã bed (Giảm 10K, +1h)** — **chỉ áp khi đang order cho 1 lịch bed** (pill bed ở đầu giỏ). Không order cho bed thì mã hiện mờ "chỉ áp khi order cho bed"; tự thêm món "1h bed" vào bill thường cũng không áp được; bill rời lịch bed thì mã tự gỡ. Dòng lì xì nằm **ngay dưới giờ bed** ("Lì xì Tết · Giảm 10K lịch bed" / "Lì xì Tết · Tặng 1 giờ bed (giờ cuối)").
   - **+1h bed** — "Tặng thêm 1 giờ bed cho lịch từ 2 giờ": lịch được **kéo dài thêm 1 giờ** (giờ kết thúc `end` +60 phút) → mọi chỗ kiểm trùng (app khách, POS) thấy đúng giờ mới, khách sau không đặt chồng. Không quá giờ quán nhận bed (`bed_closing_time`), lịch trong mùng 3 → mùng 10.
     - Đặt qua **app khách**: tab Đặt bed hiện khung "Dùng lì xì +1h bed — lịch kết thúc 16:00 thay vì 15:00" (tick bỏ được). Bấm đặt: kiểm trùng + giờ đóng cửa theo khung đã cộng; **giữ mã** (`reserve`) trước khi lưu lịch — mã vừa dùng / giữ chỗ khác thì lịch giữ giờ cũ + báo. Lịch lưu `lixiBed1h = {code, phone, freeMin:60, baseEnd, by:'app'}`. Huỷ lịch → trả mã. Đổi giờ: ô kết thúc hiện giờ khách trả tiền, lưu thì cộng lại 1 giờ. Hết chỗ → gợi ý giờ (đã gồm 1 giờ tặng) → chọn gợi ý thì form về giờ trả tiền.
     - **POS** mở lịch có `lixiBed1h` → tự thêm dòng trừ **giờ cuối** (giá "1h bed từ h5" nếu lịch > 4 giờ) + đọc lại Firebase (mã đã dùng → gỡ). Thanh toán xong ghi `lixiBed1h/used` (mở lại lịch không trừ lần 2).
@@ -45,7 +46,7 @@ Lượt đọc: app khách đọc 1 lần khi vào app (chỉ trong giai đoạn
 
 - `node tests/lixi.test.js` — lịch, tỉ lệ, mở bao, cộng lượt, dùng / giữ / trả mã, thống kê, xoá (chỉ cần node, nằm trong `tests/run_all.sh`).
 - `node tests/tet.test.js` — 3 bản `_tet` khớp bản gốc hiện tại, chỉ chèn thêm.
-- Trình duyệt (cần Playwright): `tools/tet/e2e/` — áp đủ 5 loại mã + thanh toán thật ở pos_tet (43 kịch bản) / PosX_tet (28), đặt bed +1h ở index_tet (27: kéo dài lịch, khách sau bị chặn đúng, hết chỗ, giờ đóng cửa, lịch < 2 giờ, mã giữ chỗ khác, huỷ, đổi giờ). Chạy lại sau mỗi lần sửa pos / PosX / index hoặc phần gắn.
+- Trình duyệt (cần Playwright): `tools/tet/e2e/` — áp đủ 5 loại mã + thanh toán thật ở pos_tet (53 kịch bản) / PosX_tet (34), đặt bed +1h ở index_tet (27: kéo dài lịch, khách sau bị chặn đúng, hết chỗ, giờ đóng cửa, lịch < 2 giờ, mã giữ chỗ khác, huỷ, đổi giờ). Chạy lại sau mỗi lần sửa pos / PosX / index hoặc phần gắn.
 
 ## Deploy (chủ dự án tự làm)
 
