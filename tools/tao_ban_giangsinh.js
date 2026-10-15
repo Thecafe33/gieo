@@ -165,8 +165,14 @@ const APP_SNOW = `
     })();
     </script>`;
 
+// Bé Gạo (khối [BÉ GẠO] … [/BÉ GẠO] trong index.html): chủ dự án cho vào bản THƯỜNG trước (16/10) — bản Giáng sinh tạm bỏ.
+// Muốn bản Giáng sinh cũng có bé → đổi thành true rồi chạy lại.
+const BE_GAO = false;
+const BE_GAO_RE = /<!-- \[BÉ GẠO\][\s\S]*?<!-- \[\/BÉ GẠO\] -->\n?/;
+
 function taoGiangSinh(src) {
   let h = src;
+  if (!BE_GAO) h = h.replace(BE_GAO_RE, '');
   const thay = (tim, moi, ten) => {
     const n = h.split(tim).length - 1;
     if (n !== 1) throw new Error('index.html: cần đúng 1 chỗ "' + ten + '", thấy ' + n + ' — màn đăng nhập đã đổi, sửa lại tools/tao_ban_giangsinh.js');
@@ -200,4 +206,4 @@ if (require.main === module) {
   fs.writeFileSync(path.join(out, 'index_giangsinh.html'), h);
   console.log('✅ Đã ghi ' + path.join(out, 'index_giangsinh.html'));
 }
-module.exports = { taoGiangSinh, doiMauToanBo };
+module.exports = { taoGiangSinh, doiMauToanBo, BE_GAO, BE_GAO_RE };

@@ -2,9 +2,10 @@
 // → sửa index.html mà quên sinh lại thì test này báo (tới mùa bật lên không bị thành app cũ thiếu tính năng).
 const fs = require('fs'); const path = require('path');
 const ROOT = path.resolve(__dirname, '..');
-const { taoGiangSinh } = require('../tools/tao_ban_giangsinh.js');
-const goc = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
-const moi = taoGiangSinh(goc);
+const { taoGiangSinh, BE_GAO, BE_GAO_RE } = require('../tools/tao_ban_giangsinh.js');
+const gocDu = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+const goc = BE_GAO ? gocDu : gocDu.replace(BE_GAO_RE, '');   // bản Giáng sinh tạm chưa có Bé Gạo
+const moi = taoGiangSinh(gocDu);
 const co = fs.existsSync(path.join(ROOT, 'index_giangsinh.html')) ? fs.readFileSync(path.join(ROOT, 'index_giangsinh.html'), 'utf8') : null;
 let ok = true; const chk = (c, m) => { console.log((c ? 'ok ' : 'FAIL ') + m); if (!c) ok = false; };
 chk(co === moi, 'index_giangsinh.html khớp index.html hiện tại (lệch → chạy: node tools/tao_ban_giangsinh.js)');

@@ -6642,5 +6642,101 @@ showTab = function(t) {
   if (pp) pp.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); window.brandIsland(); } });
 })();
 </script>
+<!-- [BÉ GẠO] 16/10 — linh vật Gieo Gieo bản pixel, đi dạo trên thanh menu dưới (chỉ khi đã đăng nhập).
+     Sprite vẽ bằng tools/be_gao/ve_be_gao.py (7 khung: đứng · nhắm mắt · 4 bước đi · cười), nhúng base64 ~2KB.
+     Chỉ animate transform (GPU); hẹn giờ thưa (vài giây 1 lần); không đọc / ghi Firebase. Chạm bé = nhảy + nói 1 câu.
+     Lâu không thao tác → ngủ (Zzz), chạm / cuộn màn = thức. Thanh menu ẩn / tab ẩn = dừng hẳn. -->
+<style>
+#bg-pet{position:fixed;left:0;bottom:94px;width:80px;height:92px;z-index:49;pointer-events:none;display:none}
+#bg-pet.on{display:block}
+#bg-pet .bgp-move,#bg-pet .bgp-flip,#bg-pet .bgp-hop{position:absolute;inset:0;will-change:transform}
+#bg-pet .bgp-win{position:absolute;inset:0;overflow:hidden;pointer-events:auto;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+#bg-pet .bgp-strip{display:block;width:560px;height:92px;max-width:none;image-rendering:pixelated;image-rendering:crisp-edges;transform:translateX(0);will-change:transform;-webkit-user-drag:none;user-select:none}
+#bg-pet .bgp-strip.walk{animation:bgp-walk .62s steps(4) infinite}
+@keyframes bgp-walk{from{transform:translateX(-160px)}to{transform:translateX(-480px)}}
+#bg-pet.sleep .bgp-hop{animation:bgp-breath 2.6s ease-in-out infinite;transform-origin:50% 100%}
+@keyframes bgp-breath{0%,100%{transform:scale(1,1)}50%{transform:scale(1.03,.97)}}
+#bg-pet .bgp-say{position:absolute;left:50%;bottom:calc(100% + 4px);transform:translateX(-50%) scale(.6);transform-origin:50% 100%;opacity:0;white-space:nowrap;
+  background:#fff;color:#1f2a6b;font:700 12px/1.25 'Inter',sans-serif;padding:7px 11px;border-radius:14px;box-shadow:0 6px 18px rgba(20,30,80,.16);border:1.5px solid #2040c8;transition:opacity .18s ease,transform .22s cubic-bezier(.3,1.4,.5,1)}
+#bg-pet .bgp-say:after{content:'';position:absolute;left:50%;top:100%;margin-left:-5px;border:5px solid transparent;border-top-color:#2040c8}
+#bg-pet .bgp-say.show{opacity:1;transform:translateX(-50%) scale(1)}
+#bg-pet .bgp-z{position:absolute;right:2px;top:-4px;font:800 14px/1 'Inter',sans-serif;color:#2040c8;opacity:0}
+#bg-pet.sleep .bgp-z{animation:bgp-z 2.4s ease-out infinite}
+@keyframes bgp-z{0%{opacity:0;transform:translate(0,6px) scale(.7)}25%{opacity:.9}100%{opacity:0;transform:translate(10px,-18px) scale(1.15)}}
+</style>
+<div id="bg-pet" aria-hidden="true">
+  <div class="bgp-move"><div class="bgp-flip"><div class="bgp-hop"><div class="bgp-win"><img class="bgp-strip" alt="" draggable="false" src="data:image/png;base64,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"></div></div></div>
+    <div class="bgp-z">z</div><div class="bgp-say"></div></div>
+</div>
+<script>
+(function () {
+  var FW = 80, SPEED = 34, SLEEP_MS = 40000;            // px/giây khi đi; 40 giây không thao tác → ngủ
+  var SAY = ['Bé Gạo chào bạn nè!', 'Hôm nay uống gì nè?', 'Ú nụ · đi ù ịch~', 'Tích đủ tem là có ly free đó!', 'Gạo đi dạo xíu…'];
+  var TAP = ['Hihi, nhột quá!', 'Ú nụ nè!', 'Bé Gạo đây!', 'Ghé Gieo Gieo uống sữa gạo nha!'];
+  var pet = document.getElementById('bg-pet'), nav = document.getElementById('nav-bar');
+  if (!pet || !nav || !pet.animate) return;
+  var move = pet.querySelector('.bgp-move'), flip = pet.querySelector('.bgp-flip'), hop = pet.querySelector('.bgp-hop'),
+      strip = pet.querySelector('.bgp-strip'), say = pet.querySelector('.bgp-say');
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var x = 24, walking = null, timer = null, sayT = null, running = false, lastAct = Date.now(), asleep = false;
+  function rnd(a, b) { return a + Math.random() * (b - a); }
+  function maxX() { return Math.max(16, document.documentElement.clientWidth - FW - 16); }
+  function setX(v) { x = v; move.style.transform = 'translateX(' + v + 'px)'; }
+  function frame(k) { strip.classList.remove('walk'); strip.style.transform = 'translateX(' + (-k * FW) + 'px)'; }
+  function curX() { var m = getComputedStyle(move).transform; if (m && m !== 'none') { var v = m.match(/-?[\d.]+/g); if (v) return +v[4]; } return x; }
+  function stopWalk() { if (walking) { var cx = curX(); walking.cancel(); walking = null; setX(cx); } frame(0); }
+  function next(ms) { clearTimeout(timer); if (running) timer = setTimeout(act, ms); }
+  function speak(t, ms) {
+    say.textContent = t; say.classList.add('show');
+    clearTimeout(sayT); sayT = setTimeout(function () { say.classList.remove('show'); }, ms || 2200);
+  }
+  function blink() { frame(1); setTimeout(function () { if (!walking && !asleep) frame(0); }, 150); }
+  function walkTo(nx) {
+    stopWalk();
+    var dir = nx >= x ? 1 : -1, dur = Math.abs(nx - x) / SPEED * 1000;
+    flip.style.transform = dir < 0 ? 'scaleX(-1)' : '';
+    if (reduce || dur < 200) { setX(nx); next(rnd(3000, 6000)); return; }
+    strip.classList.add('walk');
+    walking = move.animate([{ transform: 'translateX(' + x + 'px)' }, { transform: 'translateX(' + nx + 'px)' }], { duration: dur, easing: 'linear', fill: 'forwards' });
+    walking.onfinish = function () { walking = null; setX(nx); frame(0); next(rnd(2500, 6000)); };
+  }
+  function sleep() { stopWalk(); asleep = true; frame(1); pet.classList.add('sleep'); speak('Zzz… Gạo ngủ xíu', 1800); }
+  function wake(quiet) {
+    if (!asleep) return; asleep = false; pet.classList.remove('sleep'); frame(6);
+    if (!quiet) speak('Ơ, bạn về rồi!', 1800);
+    setTimeout(function () { if (!walking && !asleep) frame(0); }, 900); next(rnd(1500, 3000));
+  }
+  function act() {
+    if (!running) return;
+    if (Date.now() - lastAct > SLEEP_MS) { if (!asleep) sleep(); return; }
+    var r = Math.random();
+    if (r < .58) walkTo(Math.round(rnd(16, maxX())));
+    else if (r < .82) { blink(); next(rnd(2500, 5000)); }
+    else { speak(SAY[Math.floor(Math.random() * SAY.length)]); next(rnd(3500, 6000)); }
+  }
+  // 'click' (không phải pointerdown): bé nhảy SAU khi trình duyệt đã chốt chỗ chạm — nhảy sớm thì cú chạm lọt xuống thẻ phía sau
+  pet.querySelector('.bgp-win').addEventListener('click', function (e) {
+    e.stopPropagation(); lastAct = Date.now();
+    if (asleep) { wake(true); }
+    stopWalk(); frame(6); speak(TAP[Math.floor(Math.random() * TAP.length)], 2000);
+    if (!reduce) hop.animate([{ transform: 'translateY(0)' }, { transform: 'translateY(-20px)', offset: .4 }, { transform: 'translateY(0)', offset: .75 }, { transform: 'translateY(-5px)', offset: .87 }, { transform: 'translateY(0)' }],
+      { duration: 560, easing: 'ease-out' });
+    setTimeout(function () { if (!walking && !asleep) frame(0); }, 1100);
+    next(rnd(2500, 4000));
+  });
+  ['pointerdown', 'scroll', 'keydown'].forEach(function (ev) { window.addEventListener(ev, function () { lastAct = Date.now(); if (asleep) wake(); }, { passive: true, capture: true }); });
+  function start() {
+    if (running) return; running = true; pet.classList.add('on');
+    setX(Math.min(x, maxX())); frame(0); lastAct = Date.now(); next(1200);
+  }
+  function stop() { running = false; clearTimeout(timer); timer = null; stopWalk(); pet.classList.remove('on', 'sleep'); asleep = false; }
+  function sync() { (!nav.classList.contains('hidden') && !document.hidden) ? start() : stop(); }
+  new MutationObserver(sync).observe(nav, { attributes: true, attributeFilter: ['class'] });
+  document.addEventListener('visibilitychange', sync);
+  window.addEventListener('resize', function () { if (running && x > maxX()) { stopWalk(); setX(maxX()); } });
+  sync();
+})();
+</script>
+<!-- [/BÉ GẠO] -->
 </body>
 </html>
