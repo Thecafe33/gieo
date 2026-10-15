@@ -1,5 +1,6 @@
 # Bé Gạo pixel (linh vật Gieo Gieo) — vẽ từng ô, xuất bảng sprite cho app khách (index.html).
 #   python3 tools/be_gao/ve_be_gao.py  → be_gao_sheet.png + in ra data-URI để dán vào khối [BÉ GẠO] trong index.html
+#   Bản Tết 2027 (Đinh Mùi): tframe() — Bé Gạo DÊ (sừng vàng, tai cụp, râu, khăn đỏ đô viền vàng, lì xì, giày đỏ đô)
 #   Bản Giáng sinh: xframe() — Bé Gạo thành CÂY THÔNG nhỏ (3 tầng lá, mặt Bé Gạo, sao phát sáng, giày xanh), khung 40×50
 from PIL import Image
 import math
@@ -8,7 +9,7 @@ PAL={'w':(255,246,220),'s':(236,220,178),'S':(214,193,146),'h':(255,255,255),'o'
  'b':(32,64,200),'B':(18,36,130),'e':(24,40,140),'l':(255,255,255),'p':(247,168,160),'m':(70,45,40),
  'y':(255,214,40),'Y':(222,160,0),'r':(244,140,30),'k':(0,0,0),
  'g':(52,150,84),'G':(26,100,56),'q':(104,190,118),'R':(222,44,64),'L':(255,236,140,120),'u':(255,250,200)}
-def frame(bob=0, lf=(0,0), rf=(0,0), arm=0, blink=False, happy=False, xmas=False):
+def frame(bob=0, lf=(0,0), rf=(0,0), arm=0, blink=False, happy=False, xmas=False, tet=False):
     g=[[None]*W for _ in range(H)]
     def put(x,y,c):
         if 0<=x<W and 0<=y<H: g[y][x]=c
@@ -59,7 +60,32 @@ def frame(bob=0, lf=(0,0), rf=(0,0), arm=0, blink=False, happy=False, xmas=False
     for (x,y) in [(18,ey+3),(19,ey+4),(20,ey+4),(21,ey+3)]: put(x,y,'m')
     for (x,y) in [(10,ey+5),(11,ey+5),(12,ey+5),(11,ey+6),(12,ey+6),(26,ey+5),(27,ey+5),(28,ey+5),(26,ey+6),(27,ey+6)]:
         if g[y][x] in ('w','s'): put(x,y,'p')
-    if not xmas:
+    if tet:
+        # TẾT 2027 — năm Đinh Mùi: Bé Gạo DÊ. Sừng vàng cong, tai dê cụp, râu dê, khăn đỏ đô viền vàng, bao lì xì.
+        HORN=[(17,11),(16,11),(16,10),(15,10),(15,9),(14,9),(14,8),(13,8),(13,7),(12,7),(12,6),(11,6),(10,6),(10,7),(9,7),(9,8)]
+        DARK=[(16,11),(15,10),(14,9),(13,8),(12,7),(10,7),(9,8)]
+        for (x,y) in HORN: put(x,y+bob,'y'); put(43-x,y+bob,'y')        # sừng trái + phải (đối xứng quanh chóp)
+        for (x,y) in DARK: put(x,y+bob,'Y'); put(43-x,y+bob,'Y')
+        for (x,y) in [(6,15),(7,15),(8,15),(9,14),(10,14),(11,14),(7,16),(8,16),(9,16),(10,15),(11,15)]:
+            if (x,y+bob) not in body: put(x,y+bob,'w')              # tai trái cụp ngang
+        for (x,y) in [(8,15),(9,15)]: put(x,y+bob,'p')
+        for (x,y) in [(32,15),(33,15),(34,15),(31,14),(30,14),(32,16),(33,16),(31,16),(30,15),(31,15)]:
+            if (x,y+bob) not in body: put(x,y+bob,'w')              # tai phải
+        for (x,y) in [(31,15),(32,15)]: put(x,y+bob,'p')
+        for (x,y,c) in [(19,26,'h'),(20,26,'h'),(19,27,'h'),(20,27,'h'),(20,28,'h'),(18,26,'S'),(21,26,'S'),(21,27,'S'),(19,28,'S'),(21,28,'S'),(20,29,'S')]:
+            put(x,y+bob,c)                                             # râu dê
+        for (x,y) in body:                                             # khăn đỏ đô ngang cổ + viền vàng
+            yy=y-bob
+            if yy in (29,30) and not (19<=x<=21 and yy<=29): put(x,y,'D')
+            if yy==31: put(x,y,'y')
+        for (x,y) in [(12,29),(16,30),(24,29),(28,30)]: put(x,y+bob,'y')  # chấm vàng trên khăn
+        for (x,y,c) in [(9,31,'D'),(10,31,'D'),(9,32,'D'),(10,32,'D'),(9,33,'D'),(10,33,'E'),(9,34,'y'),(10,34,'y')]:
+            put(x,y+bob,c)                                             # đuôi khăn
+        for x in range(33,38):                                         # bao lì xì trên tay phải
+            for y in range(28,35): put(x,y+bob-arm,'R')
+        for x in range(33,38): put(x,28+bob-arm,'E'); put(x,30+bob-arm,'y')
+        for (x,y) in [(35,32),(35,33)]: put(x,y+bob-arm,'y')
+    elif not xmas:
         # dây đeo chéo (vai trái → hông phải)
         for i in range(0,17):
             x=8+i; y=int(round(27+bob+i*0.36))
@@ -105,10 +131,10 @@ def frame(bob=0, lf=(0,0), rf=(0,0), arm=0, blink=False, happy=False, xmas=False
             if g[y][x] is None:
                 nb=[g[y+dy][x+dx] for dx,dy in ((1,0),(-1,0),(0,1),(0,-1)) if 0<=x+dx<W and 0<=y+dy<H and g[y+dy][x+dx] is not None]
                 if nb:
-                    out[y][x]='B' if any(c in 'bB' for c in nb) and not any(c in 'wsSh' for c in nb) else ('Y' if all(c in 'yYrkuL' for c in nb) else 'o')
+                    out[y][x]='B' if any(c in 'bB' for c in nb) and not any(c in 'wsSh' for c in nb) else ('Y' if all(c in 'yYrkuL' for c in nb) else ('E' if all(c in 'DERyY' for c in nb) else 'o'))
     return out
 PAD=4   # (giữ tên cũ) bản Giáng sinh cao hơn bản thường 4 ô: H+PAD = 50
-PAL.update({'O':(20,66,40),'n':(122,78,44),'N':(88,54,30)})
+PAL.update({'O':(20,66,40),'n':(122,78,44),'N':(88,54,30),'D':(128,18,42),'E':(84,10,26)})
 def xframe(bob=0, lf=(0,0), rf=(0,0), arm=0, blink=False, happy=False):
     """Bé Gạo GIÁNG SINH = một cây thông nhỏ biết đi: 3 tầng lá, mặt Bé Gạo, sao phát sáng, quả châu, giày xanh."""
     HH=H+PAD; g=[[None]*W for _ in range(HH)]
@@ -224,6 +250,16 @@ def walk():
 def sheet():
     """Bảng sprite dùng trong app: 0 đứng · 1 nhắm mắt · 2–5 đi bộ · 6 cười"""
     fr=[frame(), frame(blink=True)] + walk() + [frame(happy=True, arm=1)]
+    im=Image.new('RGBA',(W*len(fr),H),(0,0,0,0))
+    for i,f in enumerate(fr): im.paste(img(f,1),(i*W,0))
+    return im
+def tframe(**kw):
+    """Bé Gạo TẾT (dê): giày đỏ đô thay xanh"""
+    g=frame(tet=True, **kw)
+    return [[{'b':'D','B':'E'}.get(c,c) for c in row] for row in g]
+def tsheet():
+    T=tframe
+    fr=[T(), T(blink=True), T(bob=0, lf=(-1,-1), rf=(1,0), arm=1), T(bob=1), T(bob=0, lf=(-1,0), rf=(1,-1), arm=-1), T(bob=1), T(happy=True, arm=1)]
     im=Image.new('RGBA',(W*len(fr),H),(0,0,0,0))
     for i,f in enumerate(fr): im.paste(img(f,1),(i*W,0))
     return im
