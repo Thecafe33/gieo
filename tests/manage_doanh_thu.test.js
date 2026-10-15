@@ -7,7 +7,7 @@ const { extract } = require('./lib/extract');
 let ok = true;
 const eq = (a, b, m) => { if (JSON.stringify(a) !== JSON.stringify(b)) { ok = false; console.log('FAIL', m, JSON.stringify(a).slice(0, 400), '!=', JSON.stringify(b).slice(0, 400)); } else console.log('ok', m); };
 
-const M = new Function(extract('manage.html', ['tcEmptySum', 'tcIsTransfer', 'tcAddOrder', 'tcSummarize', 'xoEmptySum', 'xoAddOrder', 'xoSummarize',
+const M = new Function(extract('manage.html', ['tcEmptySum', 'tcIsTransfer', 'tcIsKhacLine', 'tcAddOrder', 'tcSummarize', 'xoEmptySum', 'xoAddOrder', 'xoSummarize',
   'payTermsOfRecord', 'empPayTermsOn', 'computeWageForDayHours', 'isShiftInProgress', 'shiftWorkedHours', 'laborByEmployee', 'pad', 'dkey',
   'parseDkey', 'addDays', 'targetMonthValue', 'daysInMonthYm', 'targetForRange', 'sharePcts', 'sharePct',
   'ggEmptySum', 'ggAddOrder', 'ggSummarize', 'gieoTargetsOn', 'gieoTargetForRange', 'ggName', 'gieoLabel']) +
@@ -22,7 +22,9 @@ const menu = [
   { name: 'Bánh tráng trộn', type: 'Ăn vặt', priceM: 20000 }, { name: 'Khoai chiên', type: 'Đồ ăn', priceM: 30000 },
   { name: 'Thuê mền', type: 'Khác', priceM: 10000 }, { name: 'Gửi xe', type: 'khac', priceM: 5000 }, { name: 'Snack', type: 'SNACK', priceM: 12000 }
 ];
-const names = menu.map(m => m.name).concat(['Món đã xoá', 'Khuyến mãi đặc biệt']);
+// + dòng không có trong menu: giờ bed, phí (size "Phí"), nợ cũ → phải vào nhóm Khác (sửa 16/10)
+const FEE = ['Phí không đặt trước', 'Nợ cũ: Phí vệ sinh', 'Phí chọn Bed 02'];
+const names = menu.map(m => m.name).concat(['Món đã xoá', 'Khuyến mãi đặc biệt', '1h bed', '1h bed từ h5'], FEE);
 const day = new Date(2026, 9, 12);
 const tcOrders = [];
 for (let i = 0; i < 300; i++) {
@@ -30,15 +32,15 @@ for (let i = 0; i < 300; i++) {
   const n = 1 + rnd(4); const arr = [];
   for (let j = 0; j < n; j++) {
     const nm = names[rnd(names.length)];
-    arr.push({ name: rnd(3) ? nm : nm.toUpperCase(), qty: 1 + rnd(3), price: nm === 'Khuyến mãi đặc biệt' ? -5000 : (rnd(4) ? 20000 + rnd(5) * 1000 : 0) });
+    arr.push({ name: rnd(3) ? nm : nm.toUpperCase(), size: FEE.indexOf(nm) >= 0 ? 'Phí' : 'M', qty: 1 + rnd(3), price: nm === 'Khuyến mãi đặc biệt' ? -5000 : (rnd(4) ? 20000 + rnd(5) * 1000 : 0) });
   }
   const total = rnd(15) ? arr.reduce((s, x) => s + x.price * x.qty, 0) : 0;
   const method = ['Tiền mặt', 'Chuyển khoản', 'bank', 'TRANSFER', '', 'chuyen khoan'][rnd(6)];
   const o = { total, method, createdAt: d.toISOString() };
-  if (rnd(5)) o.itemsArray = arr; else o.items = arr.map(x => `${x.name}(M)x${x.qty}`).join(', ');
+  if (rnd(5)) o.itemsArray = arr; else o.items = arr.map(x => `${x.name}(${x.size})x${x.qty}`).join(', ');
   tcOrders.push(o);
 }
-const calculateStats = new Function('menu', extract('pos.html', ['calculateStats']) + '\nreturn calculateStats;')(menu);
+const calculateStats = new Function('menu', extract('pos.html', ['_isKhacLine', 'calculateStats']) + '\nreturn calculateStats;')(menu);
 const key = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
 const pos = calculateStats(tcOrders, 'custom', key, key);
 const mg = M.tcSummarize(tcOrders, menu);
@@ -46,6 +48,15 @@ eq([mg.drink, mg.snack, mg.khac, mg.cash, mg.transfer], [pos.drinkTotal, pos.sna
   'TC33: Đồ uống / Ăn vặt / Khác / Tiền mặt / Chuyển khoản khớp calculateStats của pos.html (300 đơn ngẫu nhiên)');
 eq(mg.total, mg.cash + mg.transfer, 'TC33: Tổng thu = Tiền mặt + Chuyển khoản');
 eq(mg.hours.reduce((a, b) => a + b, 0), pos.drinkTotal + pos.khacTotal, 'TC33: biểu đồ = Tổng nước (Đồ uống + Khác) như pos.html khi bật 🐶');
+{ // giờ bed, phí, nợ cũ → Khác (không phải nước); món thường vẫn là nước
+  const o = { total: 101000, method: 'Tiền mặt', itemsArray: [{ name: '1h bed', size: 'M', qty: 3, price: 15000 }, { name: 'Bạc xỉu', size: 'M', qty: 1, price: 29000 },
+    { name: 'Phí không đặt trước', size: 'Phí', qty: 1, price: 10000 }, { name: 'Nợ cũ: Phí vệ sinh', size: 'Phí', qty: 1, price: 17000 }] };
+  const a = M.tcSummarize([o], menu), b = calculateStats([Object.assign({ createdAt: new Date(2026, 9, 12, 19).toISOString() }, o)], 'custom', key, key);
+  eq([a.drink, a.khac], [29000, 72000], 'TC33: 3 giờ bed + phí không đặt trước + nợ cũ → Khác (72.000), chỉ Bạc xỉu là nước');
+  eq([b.drinkTotal, b.khacTotal], [29000, 72000], 'TC33 pos.html: cùng phân nhóm');
+  const s2 = M.tcSummarize([{ total: 55000, method: 'Tiền mặt', items: '1h bed (M)x2, Nợ cũ: Phí hủy muộn (Phí)x1, Cà phê sữa (M)x1' }], [{ name: 'Cà phê sữa', type: 'Cà phê', priceM: 25000 }, { name: '1h bed', type: 'Bed', priceM: 15000 }]);
+  eq([s2.drink, s2.khac], [25000, 30000], 'TC33: đơn cũ dạng chuỗi — giờ bed → Khác; nợ cũ không có giá trong chuỗi (0đ)');
+}
 eq(M.tcSummarize([{ total: 0, method: 'Tiền mặt', itemsArray: [{ name: 'Cà phê sữa', qty: 1, price: 25000 }] }], menu).count, 0, 'TC33: đơn total 0 bỏ qua như POS');
 
 // ── XOFA ─────────────────────────────────────────────────────────────────

@@ -2889,7 +2889,7 @@ async function checkAndSyncDailyRevenue() {
                     const menuItem = menu.find(m => m.name.toLowerCase() === (item.name||'').toLowerCase());
                     const type = menuItem ? String(menuItem.type || '').toLowerCase() : '';
                     const isSnack = type.includes('ăn vặt') || type.includes('đồ ăn') || type.includes('snack');
-                    const isKhac = type.includes('khác') || type === 'khac';
+                    const isKhac = type.includes('khác') || type === 'khac' || _isKhacLine(item.name, item.size);
                     if (!isSnack && !isKhac) {
                         const price = (item.price > 0) ? item.price : (menuItem ? (menuItem.priceM || menuItem.priceL) : 0);
                         drinkTotal += price * (item.qty || 1);
@@ -4288,6 +4288,13 @@ function openRevenue(mode) {
         }
     });
 }
+// [FIX 16/10] Giờ bed, phí (size "Phí": phí không đặt trước, phí chọn bed…) và nợ cũ là khoản KHÁC — không phải doanh thu nước
+// (chủ dự án: chỉ cộng vào doanh thu khi bật 🐶). Dòng không có trong menu trước đây rơi vào nhánh "nước". manage.html dùng cùng quy tắc (tcIsKhacLine).
+function _isKhacLine(name, size) {
+    var n = String(name || '').trim().toLowerCase();
+    return String(size || '').trim().toLowerCase() === 'phí' || n.indexOf('nợ cũ') === 0 || n.indexOf('phí ') === 0
+        || n === '1h bed' || n === '1h bed từ h5';
+}
 function calculateStats(orders, mode, customStart, customEnd) {
     var now = new Date();
     var startTime, endTime;
@@ -4365,7 +4372,7 @@ function calculateStats(orders, mode, customStart, customEnd) {
 
             var orderDrink = 0; var orderSnack = 0; var orderKhac = 0;
 
-            const processSingleItem = (name, qty, itemPrice) => {
+            const processSingleItem = (name, qty, itemPrice, size) => {
                 const menuItem = menu.find(m => m.name.toLowerCase() === name.toLowerCase());
 
                 const finalPrice = (itemPrice > 0) ? itemPrice : (menuItem ? (menuItem.priceM || menuItem.priceL) : 0);
@@ -4376,7 +4383,7 @@ function calculateStats(orders, mode, customStart, customEnd) {
                 if (type.includes('ăn vặt') || type.includes('đồ ăn') || type.includes('snack')) {
                     stats.snackTotal += subTotal;
                     orderSnack += subTotal;
-                } else if (type.includes('khác') || type === 'khac') {
+                } else if (type.includes('khác') || type === 'khac' || _isKhacLine(name, size)) {
                     stats.khacTotal = (stats.khacTotal || 0) + subTotal;
                     orderKhac += subTotal;
                 } else {
@@ -4387,7 +4394,7 @@ function calculateStats(orders, mode, customStart, customEnd) {
 
             if (o.itemsArray && Array.isArray(o.itemsArray)) {
                 o.itemsArray.forEach(i => {
-                    processSingleItem(i.name, i.qty || 1, i.price || 0);
+                    processSingleItem(i.name, i.qty || 1, i.price || 0, i.size);
                 });
             }
             else if (o.items) {
@@ -4399,7 +4406,8 @@ function calculateStats(orders, mode, customStart, customEnd) {
                         var qty = parseInt(str.substring(xIndex + 1)) || 1;
                         var nameFull = str.substring(0, xIndex).trim();
                         var nameOnly = nameFull.split('(')[0].trim();
-                        processSingleItem(nameOnly, qty, 0);
+                        var sizeM = nameFull.match(/\(([^)]*)\)\s*$/);
+                        processSingleItem(nameOnly, qty, 0, sizeM ? sizeM[1].trim() : '');
                     }
                 });
             }
@@ -4833,6 +4841,7 @@ function _loadBedBookingsForDays(days, callback) {
 
 var _bedManagerListenerRef = null; // [FIX] giữ ref để gỡ listener cũ, tránh rò rỉ mỗi lần mở lại
 var _bedManagerMobileListenerRef = null; // [FIX] tương tự cho bản mobile
+var _bedManagerListenerCb = null, _bedManagerMobileListenerCb = null; // [FIX 16/10] hàm listener — gỡ đúng hàm, không gỡ listener khác (chuông)
 function openBedManager() {
     document.getElementById('loading-overlay').style.display = 'flex';
     switchView('bed');
@@ -4847,9 +4856,11 @@ function openBedManager() {
     if(picker) picker.value = todayInputFormat;
 
     // [FIX] Gỡ listener cũ trước khi gắn lại — tránh rò rỉ listener khi mở lại nhiều lần
-    if (_bedManagerListenerRef) { _bedManagerListenerRef.off('value'); }
+    // [FIX 16/10] off('value') KHÔNG kèm hàm = gỡ MỌI listener ở nhánh ngày (kể cả chuông _bellRef → chuông đứng hình,
+    // lịch đã active vẫn hiện "chờ nhận · đã tới giờ"). Chỉ gỡ đúng hàm của màn này.
+    if (_bedManagerListenerRef) { _bedManagerListenerRef.off('value', _bedManagerListenerCb); }
     _bedManagerListenerRef = db.ref('bedBookings/' + yyyy + '/' + mm + '/' + dd);
-    _bedManagerListenerRef.on('value', snap => {
+    _bedManagerListenerRef.on('value', _bedManagerListenerCb = snap => {
         // Load ngày được chọn. globalAllBookings sẽ được build từ multi-day load khi changeBedDate gọi
         _loadBedBookingsForDays([todayInputFormat], function(bookings) {
             globalAllBookings = bookings;
@@ -7835,16 +7846,32 @@ function showBillModal(bookingId) {
     totalEl.innerText = '--';
     modal.classList.remove('hidden');
 
-    // Query orders hôm nay theo bedId và phone
+    // [FIX 16/10] Trước: lấy MỌI đơn trong ngày cùng số bed HOẶC cùng SĐT → cộng cả bill khách trước trên cùng bed
+    // (vd 101K thành 196K, thêm giờ bed + phí không đặt trước của khách khác). Nay theo đúng quy tắc của
+    // "Chi tiêu tạm tính" (calculateSessionSpend): cùng SĐT, tạo trong khung giờ lịch (±5 phút).
+    // Lịch không có SĐT (khách tại quầy) → cùng số bed + trong khung giờ.
+    var _bw = (function () {
+        var st = String(booking.checkInTime || booking.start || ''), en = String(booking.end || '');
+        if (!/^\d{1,2}:\d{2}/.test(st) || !/^\d{1,2}:\d{2}/.test(en)) return null;
+        var n = new Date(), ps = st.split(':'), pe = en.split(':');
+        var a = new Date(n.getFullYear(), n.getMonth(), n.getDate(), +ps[0], +ps[1], 0);
+        var z = new Date(n.getFullYear(), n.getMonth(), n.getDate(), +pe[0], +pe[1], 59);
+        if (z < a) z.setDate(z.getDate() + 1);
+        return { from: a.getTime() - 5 * 60000, to: z.getTime() + 5 * 60000 };
+    })();
+    var _bPhone = normalizePhone(booking.phone || '');
     getOrdersRef().once('value', function(snap) {
         var data = snap.val();
         var orders = [];
         if (data) {
             Object.keys(data).forEach(function(k) {
                 var o = data[k];
-                var matchBed   = booking.bedId && o.bedId && String(o.bedId) === String(booking.bedId);
-                var matchPhone = booking.phone && o.sdt && o.sdt.replace(/[^0-9]/g,'') === booking.phone.replace(/[^0-9]/g,'');
-                if (matchBed || matchPhone) orders.push(o);
+                var t = new Date(o.createdAt).getTime();
+                if (_bw && !(t >= _bw.from && t <= _bw.to)) return;
+                var match = _bPhone
+                    ? (o.sdt && normalizePhone(o.sdt) === _bPhone)
+                    : (booking.bedId && o.bedId && String(o.bedId) === String(booking.bedId));
+                if (match) orders.push(o);
             });
         }
 
@@ -8151,9 +8178,9 @@ function openBedManagerMobile() {
     const todayParts = todayISO.split('-');
 
     // [FIX] Gỡ listener cũ trước khi gắn lại — tránh rò rỉ listener khi mở lại nhiều lần
-    if (_bedManagerMobileListenerRef) { _bedManagerMobileListenerRef.off('value'); }
+    if (_bedManagerMobileListenerRef) { _bedManagerMobileListenerRef.off('value', _bedManagerMobileListenerCb); }   // [FIX 16/10] chỉ gỡ hàm của màn này
     _bedManagerMobileListenerRef = db.ref('bedBookings/' + todayParts[0] + '/' + todayParts[1] + '/' + todayParts[2]);
-    _bedManagerMobileListenerRef.on('value', snap => {
+    _bedManagerMobileListenerRef.on('value', _bedManagerMobileListenerCb = snap => {
         _loadBedBookingsForDays([todayISO], function(bookings) {
             globalAllBookings = globalAllBookings.filter(b => b.displayDate !== new Date().toLocaleDateString('en-GB'));
             globalAllBookings = globalAllBookings.concat(bookings);
@@ -13938,7 +13965,7 @@ function keypadConfirm() {
   </div>
 </div>
 <script>
-var _bellRef = null, _bellDay = '', _bellAll = [], _bellList = [], _bellEnding = [], _bellSeenKey = 'pos_bell_seen_v1';
+var _bellRef = null, _bellCb = null, _bellDay = '', _bellAll = [], _bellList = [], _bellEnding = [], _bellSeenKey = 'pos_bell_seen_v1';
 var BELL_WARN_MIN = 10, _bellAck = {}; // _bellAck: báo hết giờ đã xem (theo lịch + mức sắp hết / quá giờ), chỉ trong phiên
 function _bellDayKey(d) { d = d || new Date(); return d.getFullYear() + '/' + String(d.getMonth() + 1).padStart(2, '0') + '/' + String(d.getDate()).padStart(2, '0'); }
 function _bellSeen() { try { return +localStorage.getItem(_bellSeenKey) || 0; } catch (e) { return 0; } }
@@ -13968,10 +13995,10 @@ function _bellEndKey(b) { return b.id + '|' + (b._left < 0 ? 'over' : 'warn'); }
 function _bellInit() {
     var day = _bellDayKey();
     if (day === _bellDay && _bellRef) return;
-    if (_bellRef) { try { _bellRef.off('value'); } catch (e) {} }
+    if (_bellRef) { try { _bellRef.off('value', _bellCb); } catch (e) {} }   // [FIX 16/10] chỉ gỡ hàm của chuông
     _bellDay = day;
     _bellRef = db.ref('bedBookings/' + day);
-    _bellRef.on('value', function (snap) {
+    _bellRef.on('value', _bellCb = function (snap) {
         var data = snap.val() || {};
         _bellAll = Object.keys(data).map(function (k) { var o = Object.assign({}, data[k]); o.id = k; o.key = k; return o; });
         _bellCompute();

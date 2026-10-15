@@ -2112,29 +2112,37 @@ function tcIsTransfer(method){
   const m = String(method || '').toLowerCase();
   return m.includes('chuyển khoản') || m.includes('chuyen khoan') || m.includes('bank') || m.includes('transfer');
 }
+// [FIX 16/10] Giờ bed ("1h bed", "1h bed từ h5"), phí (size "Phí": phí không đặt trước, phí chọn bed…) và nợ cũ ("Nợ cũ: …")
+// thuộc nhóm KHÁC (trước rơi vào Đồ uống vì không phải loại "khác" trong menu). Tổng doanh thu (nước + Khác) không đổi. = _isKhacLine của pos.html.
+function tcIsKhacLine(name, size){
+  const n = String(name || '').trim().toLowerCase();
+  return String(size || '').trim().toLowerCase() === 'phí' || n.indexOf('nợ cũ') === 0 || n.indexOf('phí ') === 0
+    || n === '1h bed' || n === '1h bed từ h5';
+}
 function tcAddOrder(sum, o, menu){
   const amount = Number(o && o.total) || 0;
   if(amount <= 0) return sum;
   let orderDrink = 0, orderKhac = 0;
-  const one = (name, qty, itemPrice)=>{
+  const one = (name, qty, itemPrice, size)=>{
     const nm = String(name || '').toLowerCase();
     const menuItem = (menu || []).find(m => m && m.name && String(m.name).toLowerCase() === nm);
     const finalPrice = (itemPrice > 0) ? itemPrice : (menuItem ? (Number(menuItem.priceM || menuItem.priceL) || 0) : 0);
     const subTotal = finalPrice * qty;
     const type = menuItem ? String(menuItem.type || '').toLowerCase() : '';
     if(type.includes('ăn vặt') || type.includes('đồ ăn') || type.includes('snack')) sum.snack += subTotal;
-    else if(type.includes('khác') || type === 'khac'){ sum.khac += subTotal; orderKhac += subTotal; }
+    else if(type.includes('khác') || type === 'khac' || tcIsKhacLine(name, size)){ sum.khac += subTotal; orderKhac += subTotal; }
     else { sum.drink += subTotal; orderDrink += subTotal; }
   };
   if(Array.isArray(o.itemsArray)){
-    o.itemsArray.forEach(i=>{ if(i) one(i.name, Number(i.qty) || 1, Number(i.price) || 0); });
+    o.itemsArray.forEach(i=>{ if(i) one(i.name, Number(i.qty) || 1, Number(i.price) || 0, i.size); });
   } else if(o.items){
     String(o.items).split(',').forEach(str=>{
       str = str.trim();
       const x = str.lastIndexOf('x');
       if(x > -1){
         const qty = parseInt(str.substring(x + 1)) || 1;
-        one(str.substring(0, x).trim().split('(')[0].trim(), qty, 0);
+        const full = str.substring(0, x).trim(), sz = full.match(/\(([^)]*)\)\s*$/);
+        one(full.split('(')[0].trim(), qty, 0, sz ? sz[1].trim() : '');
       }
     });
   }
