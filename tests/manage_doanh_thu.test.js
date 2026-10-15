@@ -1,7 +1,7 @@
 // manage.html (Quản lý The Cafe 33 + XOFA) — doanh thu phải chia Y NHƯ 2 POS đang chia (docs/KE_HOACH_QUANLY_TC33_XOFA.md):
 //   · The Cafe 33: so với calculateStats() trích thẳng từ pos.html.
 //   · XOFA: so với updRv() trích thẳng từ PosX.html.
-// Thêm: lương giờ (OT theo ngày) và các hàm thuần của cham_cong.v2.js.
+// Thêm: lương giờ (OT theo ngày) và các hàm thuần của cham_cong.v3.js.
 'use strict';
 const { extract } = require('./lib/extract');
 let ok = true;
@@ -130,8 +130,8 @@ eq(M.targetForRange(TG, '2026-10-01', '2026-10-31', 'xofa'), 3000000, 'Mục ti�
 eq(M.targetForRange(TG, '2026-07-01', '2026-07-31', 'xofa'), null, 'Mục tiêu: kỳ chưa đặt → null');
 eq([M.sharePcts([1, 2]), M.sharePcts([0, 0]), M.sharePcts([5, 0])], [[33, 67], [0, 0], [100, 0]], '% đóng góp cộng lại đúng 100');
 
-// ── cham_cong.v2.js (bản hiện hành) ──────────────────────────────────────────────────────
-const C = require('../cham_cong.v2.js');
+// ── cham_cong.v3.js (bản hiện hành) ──────────────────────────────────────────────────────
+const C = require('../cham_cong.v3.js');
 const E = [{ id: 'g', pin: '1111', fullName: 'Gieo', active: true }, { id: 't', pin: '2222', fullName: 'Tc', active: true, workStores: ['gieo', 'tc33'] },
   { id: 'x', pin: '3333', fullName: 'Nghỉ', active: false, workStores: ['tc33'] }];
 eq([C.findByPin(E, '1111', 'tc33').error, C.findByPin(E, '2222', 'tc33').emp.id, C.findByPin(E, '2222', 'xofa').error, C.findByPin(E, '3333', 'tc33').error, C.findByPin(E, '12a4', 'tc33').error],

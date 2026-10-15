@@ -286,6 +286,33 @@ html[data-theme="dark"] .outlet-widget{background:radial-gradient(ellipse at 12%
 .be-gg-name{display:flex;align-items:center;color:var(--ink);font-weight:650}
 .be-gg-row .swatch{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
 @media(max-width:760px){.be-inputs{grid-template-columns:1fr}.overview-be{font-size:12px}.widget-be-sub small{max-width:55%}}
+/* [CHI PHÍ] tab Chi phí */
+.cost-pending{padding:18px 20px;margin-bottom:16px;border:1px solid #f2d48a;background:color-mix(in srgb,#ffd46c 12%,var(--panel))}
+.cost-pending .panel-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:8px}
+.cost-pend-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 0;border-top:1px solid var(--line)}
+.cost-pend-row>div:first-child{min-width:0}.cost-pend-row b{display:block;font-size:14px}.cost-pend-row small{display:block;font-size:12px;color:var(--sub);margin-top:2px;overflow-wrap:anywhere}
+.cost-actions{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+.cost-actions .record-edit.danger{color:var(--red)}
+.cost-tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px;margin-bottom:16px}
+.cost-tile{padding:16px 18px;display:flex;flex-direction:column;gap:4px;min-width:0}
+.cost-tile span{display:flex;align-items:center;font-size:13px;font-weight:650;color:var(--sub)}
+.cost-tile b{font-size:22px;font-weight:850;letter-spacing:-.5px}
+.cost-tile small{font-size:11.5px;color:var(--sub);line-height:1.45}
+.cost-tile.cost-total{background:var(--green);color:#fff;border-color:transparent}.cost-tile.cost-total span,.cost-tile.cost-total small{color:#ffffffd9}
+.cost-store{padding:18px 20px;margin-bottom:16px}
+.cost-store .panel-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
+.cost-store .panel-head h2{display:flex;align-items:center}
+.cost-cats{display:grid;gap:7px;margin-bottom:14px}
+.cost-cat{display:grid;grid-template-columns:minmax(120px,1.1fr) 2fr auto;align-items:center;gap:12px;font-size:13px}
+.cost-cat span{display:flex;flex-direction:column;min-width:0}.cost-cat small{font-size:10.5px;color:var(--sub)}
+.cost-cat i{display:block;height:8px;border-radius:99px;background:color-mix(in srgb,var(--c) 16%,transparent);position:relative;overflow:hidden}
+.cost-cat i::after{content:"";position:absolute;inset:0 auto 0 0;width:var(--w);background:var(--c);border-radius:99px}
+.cost-table td{vertical-align:middle}.cost-note{max-width:260px;overflow-wrap:anywhere;color:var(--sub)}
+tr.is-rejected td,.cost-card.is-rejected{opacity:.55}
+.cost-card .cost-actions{margin-top:8px;justify-content:flex-start}
+.cat-row{display:grid;grid-template-columns:minmax(0,1fr) 130px auto;gap:8px;align-items:center;margin-bottom:8px}
+.cat-on{display:flex;align-items:center;gap:5px;font-size:12px;white-space:nowrap}
+@media(max-width:760px){.cost-pend-row{flex-direction:column;align-items:stretch}.cost-pend-row .cost-actions{justify-content:stretch}.cost-pend-row .cost-actions .btn{flex:1}.cost-cat{grid-template-columns:minmax(0,1fr) 70px auto;gap:8px}.cost-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}.cost-tile b{font-size:18px}.cost-tile.cost-total{grid-column:1/-1}.cat-row{grid-template-columns:minmax(0,1fr) 104px auto}}
 [hidden]{display:none!important}
 </style>
 <!-- Embedded Inter font, licensed under the SIL Open Font License:
@@ -878,20 +905,86 @@ function plBreakEven(pl, bienDuPhong){
     conThieu: hoaVon == null ? null : hoaVon - dt
   };
 }
-// days: [{ date, rev }] các ngày đã qua của kỳ. null = chưa cấu hình ngày nào.
-function tcxBreakEven(B, store, days){
-  let F = 0, V = 0, Rv = 0, co = 0, thieu = 0, cogs = null;
+// days: [{ date, rev }] các ngày đã qua của kỳ. exp: { list, cats } chi phí thật của quán (phủ trọn các tháng của kỳ) hoặc null.
+// Chủ dự án chốt (16/10): THÁNG NÀO đã có chi phí thật (tab Chi phí, đã duyệt) → dùng chi phí thật của từng ngày
+// (loại Giá vốn → giá vốn, còn lại → chi phí cố định cần đắp, như quanlygieo); tháng chưa có → cấu hình tab Điểm hoà vốn.
+// null = không ngày nào có số.
+function tcxBreakEven(B, store, days, exp){
+  let F = 0, V = 0, Rv = 0, co = 0, thieu = 0, cogs = null, thuc = 0;
+  const al = exp ? expAllocate(exp.list, exp.cats) : null;
   (days || []).forEach(x=>{
-    const ym = x.date.slice(0, 7), rec = beMonthValue(B, ym, store);
+    const ym = x.date.slice(0, 7), rev = Number(x.rev) || 0;
+    if(al && al.months.has(ym)){ const a = al.byDay[x.date] || { fixed: 0, cogs: 0 }; F += a.fixed; V += a.cogs; Rv += rev; co++; thuc++; return; }
+    const rec = beMonthValue(B, ym, store);
     if(!rec){ thieu++; return; }
-    const rev = Number(x.rev) || 0;
     F += rec.fixed / daysInMonthYm(ym); V += rev * rec.cogsPct / 100; Rv += rev; co++; cogs = rec.cogsPct;
   });
   if(!co) return null;
+  if(cogs == null){ const r = beMonthValue(B, (days[days.length - 1] || {}).date ? days[days.length - 1].date.slice(0, 7) : '9999-99', store); cogs = r ? r.cogsPct : 35; }
   const be = plBreakEven({ doanhThu: Rv, giaVon: V, chiPhiCoDinh: F }, 1 - cogs / 100);
   const lai = Rv - V - F;
-  return { nguon: 'cauhinh', hoaVon: be.hoaVon, khongTheHoaVon: be.khongTheHoaVon, lai, dat: lai >= 0, doanhThu: Rv, chiPhiCoDinh: F, giaVon: V, soNgay: co, thieu };
+  return { nguon: thuc === co ? 'thuc' : thuc ? 'tron' : 'cauhinh', hoaVon: be.hoaVon, khongTheHoaVon: be.khongTheHoaVon, lai, dat: lai >= 0, doanhThu: Rv, chiPhiCoDinh: F, giaVon: V, soNgay: co, soNgayThuc: thuc, thieu };
 }
+// ==========================================================================
+// CHI PHÍ THE CAFE 33 / XOFA (16/10) — expenses_tc33 / expenses_xofa, cùng dạng bản ghi chi phí của quanlygieo:
+//   periodType 'onetime' (date) | 'period' (startDate → endDate, chia đều theo ngày; date = startDate để truy vấn)
+//   amountKind 'actual' | 'estimate' (chưa có hoá đơn) · status 'approved' | 'pending_review' (POS XOFA gửi) | 'rejected'
+//   source 'manage' | 'pos' · costType chụp lúc ghi; tính theo danh mục hiện tại (như costTypeOf của quanlygieo).
+// Danh mục dùng chung 2 quán: expense_config_tc33xofa/categories { items:[{id,label,costType,active}] }.
+// ==========================================================================
+const EXP_COLL = { tc33: 'expenses_tc33', xofa: 'expenses_xofa' };
+const EXP_CFG_DOC = () => fstore.collection('expense_config_tc33xofa').doc('categories');
+// Trùng cham_cong.v3.js (test khoá).
+const DEFAULT_EXPENSE_CATS = [
+  { id: 'nguyen_lieu', label: 'Nguyên liệu / mua hàng', costType: 'cogs' },
+  { id: 'da', label: 'Đá', costType: 'cogs' },
+  { id: 'ly_bao_bi', label: 'Ly / bao bì / vật tư', costType: 'cogs' },
+  { id: 'thue_nha', label: 'Tiền thuê nhà', costType: 'fixed' },
+  { id: 'luong', label: 'Lương / thưởng', costType: 'fixed' },
+  { id: 'dien', label: 'Tiền điện', costType: 'fixed' },
+  { id: 'nuoc', label: 'Tiền nước', costType: 'fixed' },
+  { id: 'internet', label: 'Internet / điện thoại', costType: 'fixed' },
+  { id: 'sua_chua', label: 'Sửa chữa / bảo trì', costType: 'fixed' },
+  { id: 'ship', label: 'Ship / vận chuyển', costType: 'fixed' },
+  { id: 'marketing', label: 'Marketing', costType: 'fixed' },
+  { id: 'khac', label: 'Khác', costType: 'fixed' }
+];
+function expenseCatsAll(cfg){ const it = cfg && Array.isArray(cfg.items) ? cfg.items.filter(c=>c && c.label) : []; return it.length ? it : DEFAULT_EXPENSE_CATS; }
+function expenseCats(cfg){ return expenseCatsAll(cfg).filter(c=>c.active !== false); }
+function expCostType(e, cats){ const c = (cats || []).find(x=>x.label === e.category); const t = c ? c.costType : e.costType; return t === 'cogs' ? 'cogs' : 'fixed'; }
+function expCounts(e){ return !!e && e.status !== 'pending_review' && e.status !== 'rejected'; }
+// Phân bổ từng khoản ĐÃ DUYỆT về từng ngày (khoản theo kỳ chia đều) → byDay { date:{fixed,cogs} }, months = các tháng có chi phí thật.
+function expAllocate(list, cats){
+  const byDay = {}, months = new Set();
+  const add = (d, k, v)=>{ const o = byDay[d] || (byDay[d] = { fixed: 0, cogs: 0 }); o[k] += v; months.add(d.slice(0, 7)); };
+  (list || []).filter(expCounts).forEach(e=>{
+    const amt = Number(e.amount) || 0, k = expCostType(e, cats);
+    if(e.periodType === 'period' && e.startDate && e.endDate){
+      const n = daysBetween(e.startDate, e.endDate) + 1; if(!(n > 0)) return;
+      for(let d = parseDkey(e.startDate); dkey(d) <= e.endDate; d = addDays(d, 1)) add(dkey(d), k, amt / n);
+    } else if(e.date) add(e.date, k, amt);
+  });
+  return { byDay, months };
+}
+// Phần của một khoản rơi vào [from, to] (khoản theo kỳ tính theo số ngày giao nhau) — như expenseAllocatedAmount của quanlygieo.
+function expAmountIn(e, from, to){
+  const amt = Number(e.amount) || 0;
+  if(e.periodType === 'period' && e.startDate && e.endDate){
+    const n = daysBetween(e.startDate, e.endDate) + 1, s = e.startDate > from ? e.startDate : from, en = e.endDate < to ? e.endDate : to;
+    const ov = daysBetween(s, en) + 1; return n > 0 && ov > 0 ? amt / n * ov : 0;
+  }
+  return e.date >= from && e.date <= to ? amt : 0;
+}
+let EXP_CFG = null;
+async function loadExpenseCfg(force){ if(EXP_CFG && !force) return EXP_CFG; const d = await EXP_CFG_DOC().get(); EXP_CFG = d.exists ? d.data() : {}; return EXP_CFG; }
+// Khoản chi của quán chạm [from, to]: 2 truy vấn — theo ngày (một lần + kỳ bắt đầu trong khoảng) và kỳ còn chạy tới from.
+async function readExpensesRange(store, from, to){
+  const col = fstore.collection(EXP_COLL[store]);
+  const [a, b] = await Promise.all([col.where('date','>=',from).where('date','<=',to).get(), col.where('endDate','>=',from).get()]);
+  const m = new Map(); a.docs.concat(b.docs).forEach(d=>m.set(d.id, { ...d.data(), id: d.id, store }));
+  return [...m.values()].filter(e=> e.periodType === 'period' ? (e.startDate <= to && e.endDate >= from) : (e.date >= from && e.date <= to));
+}
+const monthStartOf = k => k.slice(0, 7) + '-01', monthEndOf = k => k.slice(0, 7) + '-' + String(daysInMonthYm(k.slice(0, 7))).padStart(2, '0');
 // Gieo: byDate = { 'YYYY-MM-DD': tóm tắt } của 1 quán; dates = các ngày đã qua của kỳ.
 const PL_SUM_KEYS = ['doanhThu','giaVon','phiKenh','luong','chiPhiCoDinh','khauHao','haoHut','bienPhiKhac','tongChiPhi','lai','laiTruocKhauHao'];
 function ggBreakEven(byDate, dates){
@@ -926,15 +1019,17 @@ function validStore(id){if(!STORE_IDS.includes(id))throw new Error('Cửa hàng 
 function validDate(value){if(!/^\d{4}-\d{2}-\d{2}$/.test(value)||dkey(parseDkey(value))!==value)throw new Error('Ngày không hợp lệ.');return value}
 function validTime(value){return /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value)}
 function shiftColl(store){return fstore.collection(validStore(store).shifts)}
-function invalidateRevenue(clearOld=false){BE_CFG=null;REV_MEM={};_tcMenu=null;_tcLegacy=null;_ggStores=null;_ggConfig=null;TARGETS=null;if(clearOld)revCacheClear()}
+function invalidateRevenue(clearOld=false){BE_CFG=null;EXP_CFG=null;REV_MEM={};_tcMenu=null;_tcLegacy=null;_ggStores=null;_ggConfig=null;TARGETS=null;if(clearOld)revCacheClear()}
 function invalidateEmployees(){EMP_CACHE=null}
 async function readRevenue(from,to,compare){
  await ensureAuth();validDate(from);validDate(to);if(from>to||daysBetween(from,to)>730)throw new Error('Chọn khoảng ngày hợp lệ, tối đa 2 năm.');
  const today=dkey(new Date()),start=compare?dkey(addDays(parseDkey(from),-1)):from,end=to>today?today:to;
  const [targets,cfg,records,beCfg]=await Promise.all([loadTargets(),gieoConfigHistory(),gieoStores(),loadBreakeven().catch(e=>{console.warn('[hoà vốn] không đọc được cấu hình',e);return null})]);
  const peEnd=to>today?today:to;
- const [data,pl]=await Promise.all([start<=end?revLoadRange(start,end):{},readPlDays(records,from,peEnd)]);
- return{from,to,data,targets,cfg,records,beCfg,pl,comparison:!!compare};
+ const expOf=st=>from<=peEnd?readExpensesRange(st,monthStartOf(from),monthEndOf(peEnd)).catch(e=>{console.warn('[chi phí] không đọc được',st,e);return null}):Promise.resolve(null);
+ const [data,pl,expTc,expXo,expCfg]=await Promise.all([start<=end?revLoadRange(start,end):{},readPlDays(records,from,peEnd),expOf('tc33'),expOf('xofa'),loadExpenseCfg().catch(()=>null)]);
+ const cats=expenseCatsAll(expCfg);
+ return{from,to,data,targets,cfg,records,beCfg,pl,exp:{tc33:expTc&&{list:expTc,cats},xofa:expXo&&{list:expXo,cats}},comparison:!!compare};
 }
 async function readSettings(force=false){await ensureAuth();if(force){TARGETS=null;_ggConfig=null;_ggStores=null}const[targets,cfg,records]=await Promise.all([loadTargets(force),gieoConfigHistory(),gieoStores()]);return{targets,cfg,records}}
 async function readEmployees(force=false){await ensureAuth();return loadEmployees(force)}
@@ -989,6 +1084,37 @@ async function readBreakeven(month,force=false){
  const[beCfg,records]=await Promise.all([loadBreakeven(force),gieoStores()]);
  return{beCfg,records,month,from,to,pl:await readPlDays(records,from,to)};
 }
+// ---- Tab Chi phí ----
+async function readCosts(month,force=false){
+ await ensureAuth();if(!/^\d{4}-(?:0[1-9]|1[0-2])$/.test(month))throw new Error('Tháng không hợp lệ.');if(force){_ggStores=null;EXP_CFG=null}
+ const today=dkey(new Date()),from=month+'-01',end=monthEndOf(from),plTo=end>today?today:end;
+ const pend=st=>fstore.collection(EXP_COLL[st]).where('status','==','pending_review').get().then(s=>s.docs.map(d=>({...d.data(),id:d.id,store:st})));
+ const[cfg,records,tc,xo,pTc,pXo]=await Promise.all([loadExpenseCfg(force),gieoStores(),readExpensesRange('tc33',from,end),readExpensesRange('xofa',from,end),pend('tc33'),pend('xofa')]);
+ return{month,from,to:end,plTo,cfg,cats:expenseCatsAll(cfg),records,list:{tc33:tc,xofa:xo},pending:pTc.concat(pXo).sort((a,b)=>String(a.createdAt).localeCompare(String(b.createdAt))),pl:from<=plTo?await readPlDays(records,from,plTo):{}};
+}
+function expValidate(v,cats){
+ const amount=Math.round(Number(v.amount));if(!Number.isSafeInteger(amount)||amount<=0||amount>100000000000)throw new Error('Nhập số tiền dương hợp lệ.');
+ const cat=(cats||[]).find(c=>c.label===v.category);if(!cat)throw new Error('Chọn danh mục chi phí.');
+ const doc={category:cat.label,costType:cat.costType==='cogs'?'cogs':'fixed',amount,note:String(v.note||'').trim().slice(0,300),amountKind:v.estimate?'estimate':'actual'};
+ if(v.periodType==='period'){validDate(v.startDate);validDate(v.endDate);if(v.endDate<v.startDate)throw new Error('Ngày kết thúc kỳ phải sau ngày bắt đầu.');if(daysBetween(v.startDate,v.endDate)>366)throw new Error('Kỳ sử dụng tối đa 1 năm.');Object.assign(doc,{periodType:'period',startDate:v.startDate,endDate:v.endDate,date:v.startDate})}
+ else{validDate(v.date);Object.assign(doc,{periodType:'onetime',date:v.date,startDate:firebase.firestore.FieldValue.delete(),endDate:firebase.firestore.FieldValue.delete()})}
+ return doc;
+}
+async function writeExpense(store,id,values){
+ await ensureAuth();validStore(store);const cats=expenseCatsAll(await loadExpenseCfg());const doc=expValidate(values,cats);const col=fstore.collection(EXP_COLL[store]);
+ if(id){await col.doc(id).update({...doc,editedAt:new Date().toISOString()})}
+ else{if(doc.periodType==='onetime'){delete doc.startDate;delete doc.endDate}await col.add({...doc,status:'approved',source:'manage',store,createdAt:new Date().toISOString()})}
+}
+async function deleteExpenseDoc(store,id){await ensureAuth();validStore(store);await fstore.collection(EXP_COLL[store]).doc(id).delete()}
+async function reviewExpense(store,id,approve,note){await ensureAuth();validStore(store);await fstore.collection(EXP_COLL[store]).doc(id).update(approve?{status:'approved',reviewedAt:new Date().toISOString()}:{status:'rejected',reviewedAt:new Date().toISOString(),reviewNote:String(note||'').slice(0,300)})}
+// Số dự đoán → số thật khi hoá đơn về (giữ số cũ để giải thích, như setExpenseActual của quanlygieo).
+async function setExpenseActual(store,id,amount,oldAmount){await ensureAuth();validStore(store);const n=Math.round(Number(amount));if(!Number.isSafeInteger(n)||n<=0)throw new Error('Nhập số tiền thật.');await fstore.collection(EXP_COLL[store]).doc(id).update({amount:n,amountKind:'actual',estimatedAmount:Number(oldAmount)||0,actualAt:new Date().toISOString()})}
+async function writeExpenseCats(items){
+ await ensureAuth();const seen=new Set(),out=[];
+ for(const c of items||[]){const label=String(c.label||'').trim().slice(0,60);if(!label)continue;const key=label.toLowerCase();if(seen.has(key))throw new Error('Trùng tên danh mục: '+label);seen.add(key);out.push({id:c.id||('c_'+Date.now().toString(36)+out.length),label,costType:c.costType==='cogs'?'cogs':'fixed',active:c.active!==false})}
+ if(!out.some(c=>c.active))throw new Error('Cần ít nhất một danh mục đang dùng.');
+ await EXP_CFG_DOC().set({items:out,updatedAt:new Date().toISOString()});EXP_CFG=null;
+}
 async function writeBreakeven(month,values){
  await ensureAuth();if(!/^\d{4}-(?:0[1-9]|1[0-2])$/.test(month))throw new Error('Tháng không hợp lệ.');
  const rec={updatedAt:new Date().toISOString()};
@@ -1001,7 +1127,7 @@ async function writeBreakeven(month,values){
  await BE_DOC().set({m:{[month]:rec}},{mergeFields:['m.'+month]});BE_CFG=null;
 }
 async function deleteBreakeven(month){await ensureAuth();if(!/^\d{4}-(?:0[1-9]|1[0-2])$/.test(month))throw new Error('Tháng không hợp lệ.');await BE_DOC().update({['m.'+month]:firebase.firestore.FieldValue.delete()});BE_CFG=null}
-return{readBreakeven,writeBreakeven,deleteBreakeven,beMonthValue,tcxBreakEven,ggBreakEven,plBreakEven,readRevenue,readSettings,readEmployees,readSchedules,readAttendance,readPayroll,writeEmployee,writeEmployeeActive,writeSchedule,deleteSchedule,writeScheduleBatch,writeShift,deleteShift,writeLateGrace,writeTargets,deleteTargets,invalidateRevenue,invalidateEmployees,targetMonthValue,targetForRange,gieoTargetForRange,gieoTargetsOn,empPayTermsOn,computeWageForDayHours,laborByEmployee,shiftWorkedHours,isShiftInProgress,workStoresOf,tcSummarize,xoSummarize,ggSummarize,tcEmptySum,xoEmptySum,ggEmptySum,sumMerge};
+return{readCosts,writeExpense,deleteExpenseDoc,reviewExpense,setExpenseActual,writeExpenseCats,expAmountIn,expCostType,expCounts,expenseCats,expenseCatsAll,DEFAULT_EXPENSE_CATS,readBreakeven,writeBreakeven,deleteBreakeven,beMonthValue,tcxBreakEven,ggBreakEven,plBreakEven,readRevenue,readSettings,readEmployees,readSchedules,readAttendance,readPayroll,writeEmployee,writeEmployeeActive,writeSchedule,deleteSchedule,writeScheduleBatch,writeShift,deleteShift,writeLateGrace,writeTargets,deleteTargets,invalidateRevenue,invalidateEmployees,targetMonthValue,targetForRange,gieoTargetForRange,gieoTargetsOn,empPayTermsOn,computeWageForDayHours,laborByEmployee,shiftWorkedHours,isShiftInProgress,workStoresOf,tcSummarize,xoSummarize,ggSummarize,tcEmptySum,xoEmptySum,ggEmptySum,sumMerge};
 
 })();
 
@@ -1015,7 +1141,7 @@ const money=n=>Math.round(n||0).toLocaleString('vi-VN'), amount=n=>`${money(n)} 
 const shortMoney=n=>n>=1e6?(n/1e6).toLocaleString('vi-VN',{maximumFractionDigits:1})+'tr':Math.round(n/1000)+'k';
 let TODAY=currentDate();
 const parseDate=s=>new Date(s+'T12:00:00');const dateKey=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;const addDays=(s,n)=>{const d=parseDate(s);d.setDate(d.getDate()+n);return dateKey(d)};const dateVN=s=>parseDate(s).toLocaleDateString('vi-VN');
-const NAV=[['rev','overview','Tổng quan'],['target','flag','Mục tiêu'],['hoavon','trend','Điểm hoà vốn'],['nv','users','Nhân viên'],['lich','calendar','Lịch làm việc'],['cc','clock','Chấm công'],['luong','wallet','Bảng lương']];
+const NAV=[['rev','overview','Tổng quan'],['target','flag','Mục tiêu'],['hoavon','trend','Điểm hoà vốn'],['chiphi','receipt','Chi phí'],['nv','users','Nhân viên'],['lich','calendar','Lịch làm việc'],['cc','clock','Chấm công'],['luong','wallet','Bảng lương']];
 const HR_STORE_IDS=['tc33','xofa'];
 const BRAND_META={tc33:{id:'tc33',name:'The cafe 33',short:'The cafe 33',mono:'33',c:'var(--tc)'},xofa:{id:'xofa',name:'XOFA',short:'XOFA',mono:'x',c:'var(--xo)'},gieo:{id:'gieo',name:'Gieo Gieo',short:'Gieo',mono:'g.',c:'var(--gg)'}};
 let stores=buildStoreCatalog([]);   // TC33 + XOFA có sẵn — Lịch / Chấm công không phụ thuộc màn Tổng quan đã tải
@@ -1023,23 +1149,23 @@ function workplaceOptions(){return [BRAND_META.tc33,BRAND_META.xofa,BRAND_META.g
 function hrStores(){return stores.filter(st=>HR_STORE_IDS.includes(st.id))}
 function storeLabel(id){return id==='gieo'?'Gieo Gieo':stores.find(st=>st.id===id)?.name||id}
 function saved(k,fallback){try{const v=JSON.parse(localStorage.getItem('manage_sol_'+k));return v??fallback}catch{return fallback}}
-const state={view:'rev',range:'day',store:'all',from:TODAY,to:TODAY,theme:saved('theme','light'),hidden:new Set(),query:'',week:0,attendanceDate:TODAY,payrollMonth:TODAY.slice(0,7),targetMonth:TODAY.slice(0,7),beMonth:TODAY.slice(0,7)};
+const state={view:'rev',range:'day',store:'all',from:TODAY,to:TODAY,theme:saved('theme','light'),hidden:new Set(),query:'',week:0,attendanceDate:TODAY,payrollMonth:TODAY.slice(0,7),targetMonth:TODAY.slice(0,7),beMonth:TODAY.slice(0,7),costMonth:TODAY.slice(0,7)};
 let employees=[],schedules={},goals={},shifts=[];
 function toast(t){$('#toast').textContent=t;$('#toast').classList.add('show');clearTimeout(window.toastTimer);window.toastTimer=setTimeout(()=>$('#toast').classList.remove('show'),2900)}
 function toggleSidebar(force){const open=force??!$('#sidebar').classList.contains('open');$('#sidebar').classList.toggle('open',open);$('#overlay').classList.toggle('open',open);$('#menuButton').setAttribute('aria-expanded',String(open));if(open)$('#nav button').focus()}
 function setTheme(){document.documentElement.dataset.theme=state.theme;$('#themeButton').innerHTML=icon(state.theme==='dark'?'sun':'moon');$('#themeButton').setAttribute('aria-label',state.theme==='dark'?'Đổi sang giao diện sáng':'Đổi sang giao diện tối')}
 function toggleTheme(){state.theme=state.theme==='dark'?'light':'dark';persist('theme',state.theme);setTheme()}
-const NAV_COLOURS={rev:'#087e57',target:'#e98b10',hoavon:'#d2333f',nv:'#2776d9',lich:'#9a4ddd',cc:'#ed5c49',luong:'#179ea7',more:'#58718b'};
+const NAV_COLOURS={rev:'#087e57',target:'#e98b10',hoavon:'#d2333f',chiphi:'#b45309',nv:'#2776d9',lich:'#9a4ddd',cc:'#ed5c49',luong:'#179ea7',more:'#58718b'};
 function navGlyph(k,i){return `<span class="nav-glyph" style="--navc:${NAV_COLOURS[k]}">${icon(i)}</span>`}
 function nav(){
  let html='<div class="nav-label">Kinh doanh</div>';
  NAV.forEach(([k,i,t],n)=>{if(k==='nv')html+='<div class="nav-label">Nhân sự</div>';html+=`<button class="nav-item ${state.view===k?'active':''}" onclick="navigate('${k}')" ${state.view===k?'aria-current="page"':''} title="${t}">${navGlyph(k,i)}<span class="nav-text">${t}</span></button>`});
  $('#nav').innerHTML=html;
- $('#bottomNav').innerHTML=[['rev','overview','Tổng quan'],['target','flag','Mục tiêu'],['lich','calendar','Lịch làm'],['more','more','Thêm']].map(([k,i,t])=>`<button class="${state.view===k||k==='more'&&['hoavon','nv','cc','luong'].includes(state.view)?'active':''}" onclick="${k==='more'?'toggleSidebar()':`navigate('${k}')`}" ${state.view===k?'aria-current="page"':''}>${navGlyph(k,i)}<span>${t}</span></button>`).join('');
+ $('#bottomNav').innerHTML=[['rev','overview','Tổng quan'],['target','flag','Mục tiêu'],['lich','calendar','Lịch làm'],['more','more','Thêm']].map(([k,i,t])=>`<button class="${state.view===k||k==='more'&&['hoavon','chiphi','nv','cc','luong'].includes(state.view)?'active':''}" onclick="${k==='more'?'toggleSidebar()':`navigate('${k}')`}" ${state.view===k?'aria-current="page"':''}>${navGlyph(k,i)}<span>${t}</span></button>`).join('');
 }
 function normaliseScope(){
  if(state.view==='rev'){if(state.store==='gieo')state.store='brand:gieo';if(!['all','brand:gieo'].includes(state.store)&&!stores.some(st=>st.id===state.store))state.store='all'}
- else if(state.view==='nv'){if(state.store==='brand:gieo'||stores.find(st=>st.id===state.store)?.brand==='gieo')state.store='gieo';if(!['all','tc33','xofa','gieo'].includes(state.store))state.store='all'}
+ else if(state.view==='nv'||state.view==='chiphi'){if(state.store==='brand:gieo'||stores.find(st=>st.id===state.store)?.brand==='gieo')state.store='gieo';if(!['all','tc33','xofa','gieo'].includes(state.store))state.store='all'}
  else if(state.view==='lich'){if(!HR_STORE_IDS.includes(state.store))state.store='tc33'}
  else if(['cc','luong'].includes(state.view)&&!['all',...HR_STORE_IDS].includes(state.store))state.store='all';
 }
@@ -1047,7 +1173,7 @@ function scopeLabel(){if(state.store==='all')return 'Toàn hệ thống';if(stat
 
 function renderStorePicker(){
  const gieoCount=revenueStores().filter(st=>st.brand==='gieo').length;
- const showGieo=['rev','nv'].includes(state.view),opts=[...(state.view==='lich'?[]:[{id:'all',name:'Tất cả',short:'Tất cả',mono:'',c:'var(--green)'}]),BRAND_META.tc33,BRAND_META.xofa,...(showGieo?[{...BRAND_META.gieo,id:state.view==='nv'?'gieo':'brand:gieo',name:'Gieo Gieo',count:state.view==='rev'?gieoCount:0}]:[])];
+ const showGieo=['rev','nv','chiphi'].includes(state.view),opts=[...(state.view==='lich'?[]:[{id:'all',name:'Tất cả',short:'Tất cả',mono:'',c:'var(--green)'}]),BRAND_META.tc33,BRAND_META.xofa,...(showGieo?[{...BRAND_META.gieo,id:['nv','chiphi'].includes(state.view)?'gieo':'brand:gieo',name:'Gieo Gieo',count:state.view==='rev'?gieoCount:0}]:[])];
  $('#storeSwitcher').hidden=['target','hoavon'].includes(state.view);$('#outletButton').hidden=['target','hoavon'].includes(state.view);$('#storeSwitcher').dataset.storeTabs=opts.length;
  $('#storeSwitcher').innerHTML=opts.map(st=>{const active=state.store===st.id||(st.id==='brand:gieo'&&stores.find(point=>point.id===state.store)?.brand==='gieo'),hold=state.view==='rev'&&st.id==='brand:gieo';return `<button class="brand-tab ${active?'active':''}" style="--c:${st.c}" onclick="setStore('${st.id}')" ${hold?'data-gieo-hold aria-haspopup="dialog" aria-keyshortcuts="ArrowDown Shift+Enter" aria-description="Bấm xem tổng Gieo Gieo. Nhấn giữ để chọn một điểm riêng." title="Bấm xem tổng · Nhấn giữ chọn điểm"':''} aria-label="${st.id==='all'?'Tất cả cửa hàng':st.name}" aria-pressed="${active}"><span class="brand-tab-mark">${st.id==='all'?icon('overview'):esc(st.mono)}</span><span class="brand-tab-label"><span class="desktop-brand-label">${esc(st.name)}</span><span class="mobile-brand-label">${esc(st.short||st.name)}</span>${st.count?`<span class="brand-point-count">${st.count}</span>`:''}</span></button>`}).join('');
  const count=state.view==='rev'?selectedStores().length:['lich','cc','luong'].includes(state.view)?HR_STORE_IDS.length:workplaceOptions().length;
@@ -1256,7 +1382,7 @@ function storeDetails(id){
  const s=storeRange(stores.find(s=>s.id===id));
  const kv=(a,b)=>`<div class="detail-row"><span>${a}</span><b class="num">${money(b)} ₫</b></div>`;
  const category=id==='tc33'?`<div class="detail-section"><h3>Theo nhóm món</h3>${kv('Đồ uống',s.drink)}${kv('Khác',s.other)}${kv('Ăn vặt · ngoài doanh thu chung',s.food)}</div>`:id==='xofa'?`<div class="detail-section"><h3>Theo hình thức</h3>${kv('Tại quán',s.instore)}${kv('Mang đi',s.togo)}<div class="detail-row"><span>Đơn ship</span><b>${s.ship} đơn · ${money(s.shipRev)} ₫</b></div></div>`:'';
- const b=s.be,gieo=s.brand==='gieo',beSec=`<div class="detail-section detail-be"><h3>Điểm hoà vốn · ${gieo?'số của Quản lý Gieo':'theo cấu hình'}</h3>${beHas(b)?`${kv('Doanh thu hoà vốn',b.hoaVon)}<div class="detail-row"><span>Trạng thái</span><b class="${b.dat?'be-ok':'be-loss'}">${b.dat?'Đã hoà vốn':'Chưa hoà vốn'}</b></div>${kv(b.dat?(gieo?'Lãi':'Lãi ước tính'):'Đang lỗ',Math.abs(b.lai))}${gieo?`<div class="detail-row"><span>Số ngày có số</span><b>${b.soNgay}/${b.soNgay+b.thieu}${b.mucTinCay?' · '+MUC_TIN_CAY[b.mucTinCay]:''}</b></div>`:''}`:`<p class="inline-note">${esc(beEmptyReason(s))}</p>`}</div>`;
+ const b=s.be,gieo=s.brand==='gieo',beSec=`<div class="detail-section detail-be"><h3>Điểm hoà vốn · ${beHas(b)?beNguon(b):gieo?'số của Quản lý Gieo':'chưa có số'}</h3>${beHas(b)?`${kv('Doanh thu hoà vốn',b.hoaVon)}<div class="detail-row"><span>Trạng thái</span><b class="${b.dat?'be-ok':'be-loss'}">${b.dat?'Đã hoà vốn':'Chưa hoà vốn'}</b></div>${kv(b.dat?(gieo||b.nguon==='thuc'?'Lãi':'Lãi ước tính'):'Đang lỗ',Math.abs(b.lai))}${gieo?`<div class="detail-row"><span>Số ngày có số</span><b>${b.soNgay}/${b.soNgay+b.thieu}${b.mucTinCay?' · '+MUC_TIN_CAY[b.mucTinCay]:''}</b></div>`:''}`:`<p class="inline-note">${esc(beEmptyReason(s))}</p>`}</div>`;
  openDialog(esc(s.name),`<div class="detail-revenue-head" style="--c:${s.c}"><div><p class="small muted">${esc(s.meta)}</p><div class="detail-total num">${amount(s.rev)}</div><p class="small muted">${rangeDates()[0]===rangeDates()[1]?dateVN(rangeDates()[0]):rangeDates().map(dateVN).join(' – ')}</p></div><span class="store-monogram">${s.mono}</span></div><div class="detail-grid"><div class="detail-tile"><span>Hoá đơn</span><b class="num">${money(s.count)}</b></div><div class="detail-tile"><span>Đạt mục tiêu</span><b class="num">${s.target?Math.floor(s.rev/s.target*100)+'%':'Chưa đặt'}</b></div></div><div class="detail-columns"><div class="detail-section"><h3>Thanh toán ${id==='tc33'?'· cả bill':''}</h3>${kv('Tiền mặt',s.cash)}${kv('Chuyển khoản',s.bank)}</div>${category}</div>${id==='xofa'?`<div class="detail-section detail-food"><h3>Food · ngoài doanh thu chung</h3><div class="detail-food-grid">${kv('Tổng Food',s.food)}${kv('Tiền mặt',s.foodCash)}${kv('Chuyển khoản',s.foodBank)}</div></div>`:''}<div class="inline-note">${id==='tc33'?'Tiền mặt + chuyển khoản bao gồm Ăn vặt. Doanh thu chung của quán chỉ gồm Đồ uống + Khác.':id==='xofa'?'Food được tách riêng, không cộng vào doanh thu chung. Đơn ship nằm trong doanh thu quán.':'Chi tiết món, giá vốn và kho tiếp tục xem ở hệ thống Quản lý Gieo.'}</div>${beSec}`,false);
  $('#dialog').classList.add('store-detail');
 }
@@ -1284,7 +1410,7 @@ function mapShift(s,store){return{id:store+'_'+safeId(s.id),rawId:s.id,employee:
 function clockVN(value){if(!value)return '';const d=new Date(value);return Number.isNaN(+d)?'':new Intl.DateTimeFormat('vi-VN',{timeZone:'Asia/Ho_Chi_Minh',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(d)}
 function currentDate(){return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Ho_Chi_Minh',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date())}
 function employeeType(e){return{hourly_part:'Part-time',hourly_full:'Full-time',fixed:'Lương cố định',unknown:'Chưa khai lương'}[e.type]||'Chưa khai lương'}
-function loadKey(){if(state.view==='rev')return'rev:'+rangeDates().join('|');if(state.view==='lich')return'lich:'+hrStore()+':'+weekDates()[0];if(state.view==='cc')return'cc:'+ccStoreIds().join(',')+':'+state.attendanceDate;if(state.view==='luong')return'luong:'+state.payrollMonth;if(state.view==='hoavon')return'hoavon:'+state.beMonth;return state.view}
+function loadKey(){if(state.view==='rev')return'rev:'+rangeDates().join('|');if(state.view==='lich')return'lich:'+hrStore()+':'+weekDates()[0];if(state.view==='cc')return'cc:'+ccStoreIds().join(',')+':'+state.attendanceDate;if(state.view==='luong')return'luong:'+state.payrollMonth;if(state.view==='hoavon')return'hoavon:'+state.beMonth;if(state.view==='chiphi')return'chiphi:'+state.costMonth;return state.view}
 async function loadCurrent(force=false){
  const view=state.view,key=loadKey();if(!force&&live.loadingKey===key)return;const token=++live.request;live.loadingKey=key;live.error=null;render();
  try{
@@ -1293,6 +1419,7 @@ async function loadCurrent(force=false){
   else if(view==='nv')result=await backend.readEmployees(true);
   else if(view==='target')result=await backend.readSettings(force);
   else if(view==='hoavon')result=await backend.readBreakeven(state.beMonth,force);
+  else if(view==='chiphi')result=await backend.readCosts(state.costMonth,force);
   else if(view==='lich'){const ds=weekDates(),store=hrStore();result={store,employees:await backend.readEmployees(),records:await backend.readSchedules(store,ds[0],ds[6])}}
   else if(view==='cc'){const[people,attendance]=await Promise.all([backend.readEmployees(),backend.readAttendance(ccStoreIds(),state.attendanceDate)]);result={people,...attendance}}
   else if(view==='luong')result=await backend.readPayroll(state.payrollMonth);
@@ -1301,6 +1428,7 @@ async function loadCurrent(force=false){
   if(view==='nv')employees=result.map(mapEmployee);
   if(view==='target'){goals=result.targets;live.cfg=result.cfg;live.records=result.records;stores=buildStoreCatalog(result.records)}
   if(view==='hoavon'){live.be=result;live.records=result.records;stores=buildStoreCatalog(result.records)}
+  if(view==='chiphi'){live.cost=result;live.records=result.records;stores=buildStoreCatalog(result.records)}
   if(view==='lich'){employees=result.employees.map(mapEmployee);for(const k of Object.keys(schedules))if(k.startsWith(result.store+'|'))delete schedules[k];for(const s of result.records)schedules[result.store+'|'+safeId(s.employeeId)+'|'+s.date]={off:!!s.isOff,start:s.startTime||'',end:s.endTime||'',assigned:true}}
   if(view==='cc'){employees=result.people.map(mapEmployee);live.lateGrace=Number(result.settings.lateGraceMinutes)||0;shifts=[];live.stale=[];live.ccSchedules=new Map();for(const group of result.groups){shifts.push(...group.day.map(s=>mapShift(s,group.store)));live.stale.push(...group.open.filter(s=>s.businessDate<currentDate()).map(s=>mapShift(s,group.store)));for(const s of group.schedules)live.ccSchedules.set(group.store+'|'+safeId(s.employeeId),s)}}
   if(view==='luong'){live.payroll=result;employees=result.employees.map(mapEmployee)}
@@ -1315,7 +1443,7 @@ function render(){
  const key=loadKey();let html;
  if(live.error?.key===key)html=pageHead(label,'')+`<section class="panel load-error" role="alert"><b>Chưa tải được dữ liệu</b><p>${esc(live.error.message)}</p><button class="btn" onclick="loadCurrent(true)">${icon('refresh')}Thử lại</button></section>`;
  else if(live.ready[state.view]!==key){html=pageHead(label,'')+'<section class="panel live-loading" role="status"><span class="loading-ring"></span><b>Đang đọc dữ liệu…</b></section>';if(live.loadingKey!==key)queueMicrotask(()=>loadCurrent())}
- else html=({rev:dashboard,nv:staffView,lich:scheduleView,cc:attendanceView,luong:payrollView,target:targetView,hoavon:breakevenView}[state.view])();
+ else html=({rev:dashboard,nv:staffView,lich:scheduleView,cc:attendanceView,luong:payrollView,target:targetView,hoavon:breakevenView,chiphi:costView}[state.view])();
  $('#view').innerHTML='<div class="page-enter">'+html+'</div>';hydrateIcons();const sync=$('#liveSync');sync.textContent=live.loadingKey===key?'Đang cập nhật':live.error?.key===key?'Chưa tải được':live.updatedAt?'Đã cập nhật '+clockVN(new Date(live.updatedAt).toISOString()):'Đang kết nối';sync.dataset.state=live.error?.key===key?'error':live.loadingKey===key?'loading':'ok';if(state.view==='rev'&&live.ready.rev===key)fitDashboardChart();
 }
 async function refreshLive(button,clearOld=false){button?.animate([{transform:'rotate(0)'},{transform:'rotate(360deg)'}],{duration:450});if(state.view==='rev')backend.invalidateRevenue(clearOld);backend.invalidateEmployees();delete live.ready[state.view];await loadCurrent(true)}
@@ -1336,15 +1464,17 @@ function storeBreakEven(s,key,from,to){
  const today=currentDate(),dates=[];for(let d=from;d<=to&&d<=today;d=addDays(d,1))dates.push(d);
  if(!live.rev||!dates.length)return null;
  if(s.brand==='gieo')return live.rev.pl?backend.ggBreakEven(live.rev.pl[s.id],dates):null;
- if(!live.rev.beCfg)return null;
- return backend.tcxBreakEven(live.rev.beCfg,s.id,dates.map(date=>{const d=live.rev.data[key]?.[date];return{date,rev:d?(s.id==='tc33'?d.drink+d.khac:d.total):0}}));
+ const exp=live.rev.exp?.[s.id]||null;if(!live.rev.beCfg&&!exp)return null;
+ return backend.tcxBreakEven(live.rev.beCfg||{},s.id,dates.map(date=>{const d=live.rev.data[key]?.[date];return{date,rev:d?(s.id==='tc33'?d.drink+d.khac:d.total):0}}),exp);
 }
+const BE_NGUON={thuc:'theo chi phí thật',tron:'chi phí thật + cấu hình',cauhinh:'ước tính theo cấu hình'};
+function beNguon(b){return b&&b.nguon==='quanlygieo'?'số của Quản lý Gieo':BE_NGUON[b&&b.nguon]||'theo cấu hình'}
 function beHas(b){return !!(b&&b.hoaVon!=null&&(b.nguon!=='quanlygieo'||b.coSo))}
 const MUC_TIN_CAY={'dang-chay':'Đang chạy','chot-ngay':'Chờ hoá đơn','chot-thang':'Đủ số thật'};
 function beEmptyReason(s){
  const b=s.be,gieo=s.brand==='gieo';
  if(b&&b.khongTheHoaVon)return 'Không có điểm hoà vốn — giá vốn đang ăn hết doanh thu';
- if(!gieo)return live.rev&&!live.rev.beCfg?'Không đọc được cấu hình hoà vốn':'Chưa cấu hình điểm hoà vốn';
+ if(!gieo)return live.rev&&!live.rev.beCfg&&!live.rev.exp?.[s.id]?'Không đọc được chi phí / cấu hình hoà vốn':'Chưa có chi phí tháng này, chưa cấu hình hoà vốn';
  if(live.rev?.pl&&live.rev.pl[s.id]===null)return 'Không đọc được số của Quản lý Gieo';
  return 'Chưa có số từ Quản lý Gieo — mở Quản lý Gieo để cập nhật';
 }
@@ -1352,7 +1482,7 @@ function beNote(s){
  const b=s.be,gieo=s.brand==='gieo',note=[];
  if(gieo&&b.mucTinCay)note.push(MUC_TIN_CAY[b.mucTinCay]||'');
  if(b.thieu>0)note.push(gieo?'thiếu số '+b.thieu+' ngày':'chưa cấu hình '+b.thieu+' ngày');
- if(!gieo)note.push('ước tính theo cấu hình');
+ if(!gieo)note.push(beNguon(b));
  return note.filter(Boolean).join(' · ');
 }
 // Dòng hoà vốn ở widget từng quán: đã / chưa hoà vốn, đang lỗ bao nhiêu; Gieo thêm lãi (y chang quanlygieo).
@@ -1438,8 +1568,66 @@ function breakevenView(){
   return `<div class="detail-row be-gg-row"><span><b class="be-gg-name"><i class="swatch" style="background:${st.c}"></i>${esc('Gieo '+(st.code||r.id.toUpperCase()))}</b>${beHas(b)?`<small>Hoà vốn ${money(b.hoaVon)} ₫ · ${b.soNgay}/${dates.length} ngày có số${b.mucTinCay?' · '+MUC_TIN_CAY[b.mucTinCay]:''}</small>`:''}</span><b>${val}</b></div>`}).join('');
  const hist=Object.keys(B).filter(m=>['tc33','xofa'].some(k=>Number(B[m]?.[k]?.fixed)>0)).sort().reverse();
  setTimeout(()=>{beCalc('tc33',days);beCalc('xofa',days)},0);
- return pageHead('Điểm hoà vốn','Doanh thu cần đạt để không lỗ — theo tháng.',dateControl('month',month,'state.beMonth=this.value;render()','Tháng hoà vốn'))+`<div class="target-layout"><form class="panel form-panel" onsubmit="saveBreakeven(event)"><div class="panel-head"><h2>Tháng ${month.slice(5)}/${month.slice(0,4)}</h2><span class="pill">${days} ngày</span></div>${hrStores().map(field).join('')}<p class="small muted">Chi phí cố định: mặt bằng, lương, điện nước, khấu hao… cả tháng. Giá vốn: phần trăm doanh thu đi vào nguyên liệu, ly, bao bì. Ô trống dùng mức tháng gần nhất trước đó.</p><div class="form-actions">${own.tc33||own.xofa?'<button type="button" class="btn secondary" onclick="deleteBreakevenMonth()">Xoá mức tháng này</button>':''}<button type="submit" class="btn">${icon('check')}Lưu điểm hoà vốn</button></div></form><aside class="panel target-explainer"><h2>Gieo Gieo · chỉ đọc</h2><p>Hoà vốn và lãi lấy y chang Quản lý Gieo (giá vốn theo công thức, chi phí đã duyệt, lương, khấu hao, hao hụt). Số được cập nhật mỗi lần mở Quản lý Gieo.</p>${dates.length?`<h3 class="be-aside-h">Từ ${dateVN(res.from)} tới ${dateVN(res.to)}</h3>${gg||'<p>Chưa có quán Gieo.</p>'}`:'<p>Tháng này chưa bắt đầu.</p>'}<p><b>Cách tính TC33 / XOFA</b> — hoà vốn = chi phí cố định ÷ (1 − giá vốn %), cùng công thức Quản lý Gieo. Mỗi ngày gánh chi phí cố định tháng ÷ số ngày của tháng; lỗ = chi phí cố định − (doanh thu − giá vốn).</p>${hist.length?`<div class="target-history">${hist.map(m=>`<button class="btn secondary" type="button" onclick="state.beMonth='${m}';render()">Tháng ${m.slice(5)}/${m.slice(0,4)}</button>`).join('')}</div>`:''}</aside></div>${footer('secondary-footer')}`;
+ return pageHead('Điểm hoà vốn','Doanh thu cần đạt để không lỗ — theo tháng.',dateControl('month',month,'state.beMonth=this.value;render()','Tháng hoà vốn'))+`<div class="target-layout"><form class="panel form-panel" onsubmit="saveBreakeven(event)"><div class="panel-head"><h2>Tháng ${month.slice(5)}/${month.slice(0,4)}</h2><span class="pill">${days} ngày</span></div>${hrStores().map(field).join('')}<p class="small muted">Chi phí cố định: mặt bằng, lương, điện nước, khấu hao… cả tháng. Giá vốn: phần trăm doanh thu đi vào nguyên liệu, ly, bao bì. Ô trống dùng mức tháng gần nhất trước đó. <b>Tháng đã có chi phí thật ở tab Chi phí thì hoà vốn tính theo chi phí thật</b> — mức ở đây dùng cho tháng chưa nhập.</p><div class="form-actions">${own.tc33||own.xofa?'<button type="button" class="btn secondary" onclick="deleteBreakevenMonth()">Xoá mức tháng này</button>':''}<button type="submit" class="btn">${icon('check')}Lưu điểm hoà vốn</button></div></form><aside class="panel target-explainer"><h2>Gieo Gieo · chỉ đọc</h2><p>Hoà vốn và lãi lấy y chang Quản lý Gieo (giá vốn theo công thức, chi phí đã duyệt, lương, khấu hao, hao hụt). Số được cập nhật mỗi lần mở Quản lý Gieo.</p>${dates.length?`<h3 class="be-aside-h">Từ ${dateVN(res.from)} tới ${dateVN(res.to)}</h3>${gg||'<p>Chưa có quán Gieo.</p>'}`:'<p>Tháng này chưa bắt đầu.</p>'}<p><b>Cách tính TC33 / XOFA</b> — hoà vốn = chi phí cố định ÷ (1 − giá vốn %), cùng công thức Quản lý Gieo. Mỗi ngày gánh chi phí cố định tháng ÷ số ngày của tháng; lỗ = chi phí cố định − (doanh thu − giá vốn).</p>${hist.length?`<div class="target-history">${hist.map(m=>`<button class="btn secondary" type="button" onclick="state.beMonth='${m}';render()">Tháng ${m.slice(5)}/${m.slice(0,4)}</button>`).join('')}</div>`:''}</aside></div>${footer('secondary-footer')}`;
 }
+// ==========================================================================
+// TAB CHI PHÍ — TC33 / XOFA nhập + duyệt (POS XOFA gửi từ Ca làm việc); Gieo đọc sổ lãi/lỗ quanlygieo (pl_days)
+// ==========================================================================
+const GG_COST_ROWS=[['giaVon','Giá vốn'],['luong','Lương'],['chiPhiCoDinh','Chi phí cố định'],['bienPhiKhac','Chi phí biến đổi'],['khauHao','Khấu hao'],['haoHut','Hao hụt & huỷ'],['phiKenh','Phí kênh bán']];
+const COST_TYPE_LABEL={cogs:'Giá vốn',fixed:'Vận hành'};
+function costStoreSum(c,st){
+ const cats=c.cats||[],list=(c.list?.[st]||[]).filter(backend.expCounts),byCat={};let fixed=0,cogs=0;
+ list.forEach(e=>{const v=backend.expAmountIn(e,c.from,c.to);if(backend.expCostType(e,cats)==='cogs')cogs+=v;else fixed+=v;byCat[e.category]=(byCat[e.category]||0)+v});
+ return{total:fixed+cogs,fixed,cogs,byCat,count:list.length,est:list.filter(e=>e.amountKind==='estimate').length};
+}
+function costGieoSum(c,id){
+ const m=c.pl?.[id];if(!m)return null;const ds=Object.values(m),o={soNgay:ds.length};
+ ['tongChiPhi',...GG_COST_ROWS.map(r=>r[0])].forEach(k=>{o[k]=ds.reduce((a,x)=>a+(Number(x[k])||0),0)});return o;
+}
+function costPeriodText(e){return e.periodType==='period'?dateVN(e.startDate).slice(0,5)+' – '+dateVN(e.endDate):dateVN(e.date)}
+function costStatus(e){return e.status==='pending_review'?'<span class="pill warn">Chờ duyệt</span>':e.status==='rejected'?'<span class="pill down">Từ chối</span>':e.amountKind==='estimate'?'<span class="pill">Dự đoán</span>':'<span class="pill up">Đã duyệt</span>'}
+function costActions(e){const a=`'${e.store}','${esc(e.id)}'`;return `<div class="cost-actions">${e.amountKind==='estimate'&&e.status!=='rejected'?`<button class="record-edit" onclick="expenseActual(${a})">Số thật</button>`:''}<button class="record-edit" onclick="editExpense(${a})">${icon('edit')}Sửa</button><button class="record-edit danger" onclick="removeExpense(${a})" aria-label="Xoá">${icon('close')}</button></div>`}
+function costView(){
+ const c=live.cost||{},sc=state.store,cats=c.cats||[],month=state.costMonth;
+ const hrShown=HR_STORE_IDS.filter(id=>sc==='all'||sc===id),ggShown=sc==='all'||sc==='gieo'?(c.records||[]).filter(r=>r.active!==false||Object.keys(c.pl?.[r.id]||{}).length):[];
+ const S={};hrShown.forEach(id=>S[id]=costStoreSum(c,id));const G={};ggShown.forEach(r=>G[r.id]=costGieoSum(c,r.id));
+ const total=hrShown.reduce((a,id)=>a+S[id].total,0)+ggShown.reduce((a,r)=>a+(G[r.id]?.tongChiPhi||0),0);
+ const pend=(c.pending||[]).filter(e=>sc==='all'||sc===e.store);
+ const nameOf=id=>id==='gieo'?'Gieo Gieo':(stores.find(s=>s.id===id)?.name||id);
+ const ggName=r=>{const st=stores.find(s=>s.id===r.id);return 'Gieo '+(st?.code||r.id.toUpperCase())};
+ const plDays=c.from&&c.plTo&&c.from<=c.plTo?Math.round((parseDate(c.plTo)-parseDate(c.from))/86400000)+1:0;
+ const tools=`<button class="btn secondary" onclick="editExpenseCats()">Danh mục</button><button class="btn" onclick="editExpense()">${icon('plus')}Thêm chi phí</button>${dateControl('month',month,'state.costMonth=this.value;render()','Tháng chi phí')}`;
+ const pendHtml=pend.length?`<section class="panel cost-pending"><div class="panel-head"><h2>${pend.length} khoản chờ duyệt</h2><span class="small muted">Nhân viên ghi ở màn Ca làm việc</span></div>${pend.map(e=>`<div class="cost-pend-row"><div><b>${esc(e.category)} · <span class="num">${money(e.amount)} ₫</span></b><small>${esc(nameOf(e.store))} · ${dateVN(e.date)}${e.createdAt?' '+clockVN(e.createdAt):''}${e.note?' · '+esc(e.note):''}</small></div><div class="cost-actions"><button class="btn secondary" onclick="rejectExpense('${e.store}','${esc(e.id)}')">Từ chối</button><button class="btn" onclick="editExpense('${e.store}','${esc(e.id)}',true)">Sửa</button><button class="btn" onclick="approveExpense('${e.store}','${esc(e.id)}')">${icon('check')}Duyệt</button></div></div>`).join('')}</section>`:'';
+ const tiles=hrShown.map(id=>{const s=S[id],st=stores.find(x=>x.id===id)||{};return `<div class="panel cost-tile" style="--c:${st.c}"><span><i class="swatch" style="background:${st.c}"></i>${esc(nameOf(id))}</span><b class="num">${money(s.total)} ₫</b><small>Giá vốn ${shortMoney(s.cogs)} · Vận hành ${shortMoney(s.fixed)}${s.est?' · '+s.est+' dự đoán':''}</small></div>`}).concat(ggShown.map(r=>{const g=G[r.id],st=stores.find(x=>x.id===r.id)||{};return `<div class="panel cost-tile" style="--c:${st.c}"><span><i class="swatch" style="background:${st.c}"></i>${esc(ggName(r))}</span><b class="num">${g&&g.soNgay?money(g.tongChiPhi)+' ₫':'Chưa có số'}</b><small>${g&&g.soNgay?'Lương '+shortMoney(g.luong)+' · Giá vốn '+shortMoney(g.giaVon)+' · '+g.soNgay+'/'+plDays+' ngày':g===null?'Không đọc được':'Mở Quản lý Gieo để cập nhật'}</small></div>`})).join('');
+ const hrPanel=id=>{const s=S[id],st=stores.find(x=>x.id===id)||{},list=(c.list?.[id]||[]).slice().sort((a,b)=>String(b.date).localeCompare(String(a.date))||String(b.createdAt).localeCompare(String(a.createdAt))),cats2=Object.entries(s.byCat).sort((a,b)=>b[1]-a[1]),max=cats2.length?cats2[0][1]:0;
+  return `<section class="panel cost-store" style="--c:${st.c}"><div class="panel-head"><h2><i class="swatch" style="background:${st.c}"></i>${esc(nameOf(id))}</h2><b class="num">${money(s.total)} ₫</b></div>${cats2.length?`<div class="cost-cats">${cats2.map(([k,v])=>`<div class="cost-cat"><span>${esc(k)}<small>${COST_TYPE_LABEL[backend.expCostType({category:k},cats)]}</small></span><i style="--w:${max?(v/max*100).toFixed(1):0}%"></i><b class="num">${money(v)}</b></div>`).join('')}</div>`:list.length?'<p class="small muted" style="margin:0 0 10px">Chưa có khoản đã duyệt trong tháng.</p>':'<p class="empty">Chưa có khoản chi nào trong tháng.</p>'}${list.length?`<div class="table-scroll desktop-records"><table class="table cost-table"><thead><tr><th>Ngày / kỳ</th><th>Danh mục</th><th>Ghi chú</th><th class="right">Số tiền</th><th>Trạng thái</th><th></th></tr></thead><tbody>${list.map(e=>`<tr class="${e.status==='rejected'?'is-rejected':''}"><td class="num">${costPeriodText(e)}</td><td>${esc(e.category)}</td><td class="cost-note">${esc(e.note||'')}${e.source==='pos'?' <small class="muted">· POS</small>':''}${e.actualAt?` <small class="muted">· dự đoán ${money(e.estimatedAmount)} → thật</small>`:''}</td><td class="right num"><b>${money(e.amount)}</b>${e.periodType==='period'?`<small class="table-sub">tháng này ${money(backend.expAmountIn(e,c.from,c.to))}</small>`:''}</td><td>${costStatus(e)}</td><td>${costActions(e)}</td></tr>`).join('')}</tbody></table></div><div class="mobile-records">${list.map(e=>`<article class="record-card cost-card ${e.status==='rejected'?'is-rejected':''}"><div class="record-head"><div><h3>${esc(e.category)} · <span class="num">${money(e.amount)} ₫</span></h3><p class="record-store">${costPeriodText(e)}${e.note?' · '+esc(e.note):''}${e.source==='pos'?' · POS':''}</p></div>${costStatus(e)}</div>${costActions(e)}</article>`).join('')}</div>`:''}</section>`};
+ const ggPanel=r=>{const g=G[r.id],st=stores.find(x=>x.id===r.id)||{};return `<section class="panel cost-store" style="--c:${st.c}"><div class="panel-head"><h2><i class="swatch" style="background:${st.c}"></i>${esc(ggName(r))}</h2><b class="num">${g&&g.soNgay?money(g.tongChiPhi)+' ₫':'—'}</b></div>${g&&g.soNgay?GG_COST_ROWS.map(([k,l])=>`<div class="detail-row"><span>${l}</span><b class="num">${money(g[k])} ₫</b></div>`).join('')+`<p class="inline-note">Theo sổ lãi/lỗ của Quản lý Gieo · ${g.soNgay}/${plDays} ngày có số. Phiếu nhận hàng, lương, điện nước… nhập và chốt sổ ở Quản lý Gieo.</p>`:`<p class="empty">${g===null?'Không đọc được số của Quản lý Gieo.':'Chưa có số — mở Quản lý Gieo để cập nhật.'}</p>`}</section>`};
+ return '<div class="cost-page">'+pageHead('Chi phí','Chi phí hoạt động từng cửa hàng · tháng '+month.slice(5)+'/'+month.slice(0,4)+'.',tools)+pendHtml+`<div class="cost-tiles"><div class="panel cost-tile cost-total"><span>Tổng chi phí${sc==='all'?' chung':''}</span><b class="num">${money(total)} ₫</b><small>TC33 / XOFA: khoản đã duyệt trong tháng · Gieo: sổ lãi/lỗ${c.to>currentDate()?' tới hôm nay':''}</small></div>${tiles}</div>${hrShown.map(hrPanel).join('')}${ggShown.map(ggPanel).join('')}${footer('secondary-footer')}</div>`;
+}
+function editExpense(store,id,fromPending){
+ const c=live.cost||{},cats=c.cats||[],e=id?((c.list?.[store]||[]).concat(c.pending||[]).find(x=>x.id===id&&x.store===store)):null;if(id&&!e){toast('Khoản chi không còn — tải lại.');return}
+ const st=store||(HR_STORE_IDS.includes(state.store)?state.store:'tc33'),today=currentDate(),mStart=state.costMonth+'-01',mEnd=state.costMonth+'-'+String(new Date(Number(state.costMonth.slice(0,4)),Number(state.costMonth.slice(5)),0).getDate()).padStart(2,'0');
+ const v=e||{category:'',amount:'',periodType:'onetime',date:today>=mStart&&today<=mEnd?today:mStart,startDate:mStart,endDate:mEnd,note:''},period=v.periodType==='period';
+ const active=backend.expenseCats(c.cfg),opts=active.some(x=>x.label===v.category)||!v.category?active:active.concat([{label:v.category,costType:v.costType}]);
+ openDialog(id?'Sửa khoản chi':'Thêm chi phí',`<form onsubmit="saveExpense(event,'${id?st:''}','${id?esc(id):''}',${fromPending?'true':'false'})"><div class="form-grid"><div class="field"><label for="expStore">Cửa hàng</label><select class="input" id="expStore" name="store" ${id?'disabled':''}>${HR_STORE_IDS.map(x=>`<option value="${x}" ${x===st?'selected':''}>${esc(BRAND_META[x].name)}</option>`).join('')}</select></div><div class="field"><label for="expCat">Danh mục</label><select class="input" id="expCat" name="category" required><option value="">Chọn…</option>${['cogs','fixed'].map(t=>`<optgroup label="${COST_TYPE_LABEL[t]}">${opts.filter(x=>(x.costType==='cogs'?'cogs':'fixed')===t).map(x=>`<option ${x.label===v.category?'selected':''}>${esc(x.label)}</option>`).join('')}</optgroup>`).join('')}</select></div></div><div class="field"><label for="expAmt">Số tiền · ₫</label><input class="input num" id="expAmt" name="amount" type="text" inputmode="numeric" autocomplete="off" maxlength="16" required value="${v.amount?groupMoneyInput(v.amount):''}" oninput="this.value=groupMoneyInput(this.value)"></div><div class="field"><span class="field-label">Tính vào</span><div class="check-row"><label><input type="radio" name="periodType" value="onetime" ${period?'':'checked'} onchange="expPeriodToggle(false)">Một ngày</label><label><input type="radio" name="periodType" value="period" ${period?'checked':''} onchange="expPeriodToggle(true)">Theo kỳ (chia đều mỗi ngày)</label></div></div><div class="field" id="expOne" ${period?'hidden':''}><label for="expDate">Ngày</label><input class="input" id="expDate" name="date" type="date" value="${v.date||today}"></div><div class="form-grid" id="expPeriod" ${period?'':'hidden'}><div class="field"><label for="expFrom">Từ ngày</label><input class="input" id="expFrom" name="startDate" type="date" value="${v.startDate||mStart}"></div><div class="field"><label for="expTo">Tới ngày</label><input class="input" id="expTo" name="endDate" type="date" value="${v.endDate||mEnd}"><small>Tiền điện, nước, thuê nhà… nhập theo kỳ sử dụng.</small></div></div><div class="check-row"><label><input type="checkbox" name="estimate" ${v.amountKind==='estimate'?'checked':''}>Số dự đoán (chưa có hoá đơn — nhập số thật sau)</label></div><div class="field" style="margin-top:12px"><label for="expNote">Ghi chú</label><input class="input" id="expNote" name="note" maxlength="300" autocomplete="off" value="${esc(v.note||'')}"></div>${fromPending?'<p class="inline-note">Lưu xong khoản này vẫn chờ duyệt — bấm Duyệt để tính vào chi phí.</p>':''}<div class="form-actions"><button type="button" class="btn secondary" onclick="closeDialog()">Huỷ</button><button type="submit" class="btn">Lưu</button></div></form>`);
+}
+function expPeriodToggle(p){const a=$('#expOne'),b=$('#expPeriod');if(a)a.hidden=p;if(b)b.hidden=!p}
+async function saveExpense(event,store,id){
+ event.preventDefault();const form=event.target,f=new FormData(form),st=store||f.get('store'),button=form.querySelector('[type="submit"]');
+ const values={category:f.get('category'),amount:goalNumber(f.get('amount')),periodType:f.get('periodType'),date:f.get('date'),startDate:f.get('startDate'),endDate:f.get('endDate'),estimate:f.has('estimate'),note:f.get('note')};
+ button.disabled=true;const ok=await commitAction('exp:'+(id||'new'),()=>backend.writeExpense(st,id||null,values),async()=>{closeDialog();invalidateViews('chiphi','rev','hoavon');await loadCurrent(true);toast(id?'Đã lưu khoản chi.':'Đã thêm chi phí.')});if(!ok&&button.isConnected)button.disabled=false;
+}
+async function approveExpense(store,id){await commitAction('exp:'+id,()=>backend.reviewExpense(store,id,true),async()=>{invalidateViews('chiphi','rev','hoavon');await loadCurrent(true);toast('Đã duyệt chi phí.')})}
+async function rejectExpense(store,id){const note=prompt('Lý do từ chối (không bắt buộc):','');if(note===null)return;await commitAction('exp:'+id,()=>backend.reviewExpense(store,id,false,note),async()=>{invalidateViews('chiphi');await loadCurrent(true);toast('Đã từ chối.')})}
+async function removeExpense(store,id){if(!confirm('Xoá hẳn khoản chi này? Không khôi phục được.'))return;await commitAction('exp:'+id,()=>backend.deleteExpenseDoc(store,id),async()=>{invalidateViews('chiphi','rev','hoavon');await loadCurrent(true);toast('Đã xoá khoản chi.')})}
+async function expenseActual(store,id){const e=(live.cost?.list?.[store]||[]).find(x=>x.id===id);if(!e)return;const raw=prompt('Số tiền thật theo hoá đơn (đang dự đoán '+money(e.amount)+' ₫):','');if(raw===null)return;const n=goalNumber(String(raw).replace(/[.\s]/g,''));await commitAction('exp:'+id,()=>backend.setExpenseActual(store,id,n,e.amount),async()=>{invalidateViews('chiphi','rev','hoavon');await loadCurrent(true);toast('Đã thay bằng số thật.')})}
+function catRowHtml(x){return `<div class="cat-row" data-id="${esc(x.id||'')}"><input class="input" name="label" value="${esc(x.label||'')}" maxlength="60" placeholder="Tên danh mục" aria-label="Tên danh mục"><select class="input" name="costType" aria-label="Loại">${['cogs','fixed'].map(t=>`<option value="${t}" ${(x.costType==='cogs'?'cogs':'fixed')===t?'selected':''}>${COST_TYPE_LABEL[t]}</option>`).join('')}</select><label class="cat-on"><input type="checkbox" name="active" ${x.active!==false?'checked':''}>Dùng</label></div>`}
+function addExpenseCatRow(){document.getElementById('catRows').insertAdjacentHTML('beforeend',catRowHtml({label:'',costType:'fixed'}))}
+function editExpenseCats(){
+ const all=backend.expenseCatsAll(live.cost?.cfg);
+ openDialog('Danh mục chi phí',`<form onsubmit="saveExpenseCats(event)"><p class="inline-note">Dùng chung The cafe 33 và XOFA (cả màn Ca làm việc của XOFA). <b>Giá vốn</b>: khoản tăng theo số ly bán (nguyên liệu, đá, ly) · <b>Vận hành</b>: thuê nhà, lương, điện nước… — điểm hoà vốn tính theo loại này. Bỏ tích "Dùng" để ẩn, không mất các khoản đã ghi.</p><div id="catRows">${all.map(catRowHtml).join('')}</div><button type="button" class="btn secondary" onclick="addExpenseCatRow()">${icon('plus')}Thêm danh mục</button><div class="form-actions"><button type="button" class="btn secondary" onclick="closeDialog()">Huỷ</button><button type="submit" class="btn">Lưu danh mục</button></div></form>`);
+}
+async function saveExpenseCats(event){event.preventDefault();const items=[...document.querySelectorAll('#catRows .cat-row')].map(r=>({id:r.dataset.id||null,label:r.querySelector('[name=label]').value,costType:r.querySelector('[name=costType]').value,active:r.querySelector('[name=active]').checked}));await commitAction('expcats',()=>backend.writeExpenseCats(items),async()=>{closeDialog();invalidateViews('chiphi','rev');await loadCurrent(true);toast('Đã lưu danh mục.')})}
 async function saveBreakeven(event){event.preventDefault();const form=event.target,f=new FormData(form),month=state.beMonth,button=form.querySelector('[type="submit"]'),v=id=>({fixed:f.get(id+'_fixed')===''?'':goalNumber(f.get(id+'_fixed')),cogsPct:beParsePct(f.get(id+'_cogs'))});button.disabled=true;const ok=await commitAction('be:'+month,()=>backend.writeBreakeven(month,{tc33:v('tc33'),xofa:v('xofa')}),async()=>{invalidateViews('hoavon','rev');await loadCurrent(true);toast('Đã lưu điểm hoà vốn tháng.')});if(!ok&&button.isConnected)button.disabled=false}
 async function deleteBreakevenMonth(){const month=state.beMonth;if(!confirm('Xoá mức hoà vốn riêng tháng này và dùng mức tháng trước?'))return;await commitAction('be:'+month,()=>backend.deleteBreakeven(month),async()=>{invalidateViews('hoavon','rev');await loadCurrent(true);toast('Đã xoá mức riêng của tháng.')})}
 async function deleteTargetMonth(){const month=state.targetMonth;if(!confirm('Xoá mức riêng tháng này và dùng mức tháng trước?'))return;await commitAction('targets:'+month,()=>backend.deleteTargets(month),async()=>{invalidateViews('target','rev');await loadCurrent(true);toast('Đã xoá mức riêng của tháng.')})}
