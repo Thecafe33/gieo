@@ -2508,6 +2508,8 @@ const auth = firebase.auth();
 
 // ── bedBookings path helpers ──────────────────────────────────────────────
 // Parse dateStr: DD/MM/YYYY hoặc YYYY-MM-DD → { year, month, day }
+// [FIX 16/10] Ngày "YYYY-MM-DD" theo GIỜ VIỆT NAM (UTC+7) — không dùng toISOString() (ngày UTC: 0h–7h sáng VN ra ngày hôm trước).
+function _vnYmd(d) { return new Date((d ? d.getTime() : Date.now()) + 7 * 3600000).toISOString().slice(0, 10); }
 function _parseDateKey(dateStr) {
     if (!dateStr) return null;
     var s = dateStr.trim();
@@ -8172,11 +8174,11 @@ function openBedManagerMobile() {
         btnBed.classList.remove('bg-gray-100', 'text-gray-400');
     }
 
-    const today = new Date().toISOString().split('T')[0];
+    const today = _vnYmd();   // [FIX 16/10] trước: toISOString = ngày UTC → 0h–7h sáng VN ra ngày hôm trước
     const picker = document.getElementById('mob-date-picker');
     if(picker && !picker.value) picker.value = today;
 
-    const todayISO = new Date().toISOString().split('T')[0];
+    const todayISO = _vnYmd();
     const todayParts = todayISO.split('-');
 
     // [FIX] Gỡ listener cũ trước khi gắn lại — tránh rò rỉ listener khi mở lại nhiều lần
@@ -8672,8 +8674,8 @@ function selectSmartTime(type) {
         startLastWeek.setDate(endLastWeek.getDate() - 6);
         startLastWeek.setHours(0,0,0,0);
 
-        start = startLastWeek.toISOString().split('T')[0];
-        end = endLastWeek.toISOString().split('T')[0];
+        start = _vnYmd(startLastWeek);   // [FIX 16/10] toISOString đổi 0h VN thành ngày hôm trước (UTC) → "Tuần trước" lệch 1 ngày
+        end = _vnYmd(endLastWeek);
         label = "Tuần trước";
     }
     else if (type === 'last_month') {
@@ -9181,7 +9183,7 @@ function openMobileDateFilter() {
     if(modal) {
         modal.classList.remove('hidden');
 
-        const today = new Date().toISOString().split('T')[0];
+        const today = _vnYmd();
         const startInput = document.getElementById('filter-start-date');
         const endInput = document.getElementById('filter-end-date');
 
