@@ -274,6 +274,7 @@ if __name__=='__main__':
     import base64, io, os, sys
     out=os.path.dirname(os.path.abspath(__file__))
     xsheet().save(os.path.join(out,'be_gao_giangsinh_sheet.png'), optimize=True)   # tools/tao_ban_giangsinh.js đọc file này
+    tsheet().save(os.path.join(out,'be_gao_tet_sheet.png'), optimize=True)         # tools/tet/index_tet.js đọc file này
     sh=sheet(); sh.save(os.path.join(out,'be_gao_sheet.png'), optimize=True)
     b=io.BytesIO(); sh.save(b,'PNG',optimize=True)
     print('data:image/png;base64,'+base64.b64encode(b.getvalue()).decode())
