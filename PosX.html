@@ -4421,6 +4421,9 @@ async function loyaltyAddStamps(phone, drinkCount) {
 // Ly khuyến mãi (isFree hoặc giá 0đ) KHÔNG được tính vào lượt đếm điều kiện.
 // Voucher: 1 giờ Bed miễn phí (giá trị 15.000đ), hạn dùng 7 ngày
 // ============================================================
+// [16/10/2026] Chủ dự án: NGỪNG chương trình voucher Bed 1h (từ bản PosX này) + huỷ voucher cũ (pos.html / app khách không áp nữa).
+// true = bật lại như cũ.
+const BED_VOUCHER_ACTIVE = false;
 const BED_VOUCHER_EXPIRE_DAYS = 7;
 const BED_VOUCHER_HOUR_VALUE  = 15000;
 
@@ -4477,6 +4480,7 @@ async function _writeBedVoucherEntries(phone, count, source, orderId) {
  * việc ghi Firestore chạy nền (fire-and-forget) phía sau.
  */
 function grantBedVoucherIfQualified(phone, items, total, isTogoOrder, orderId) {
+  if (!BED_VOUCHER_ACTIVE) return 0;
   const count = _computeBedVoucherCount(items, total, isTogoOrder);
   if (!phone || count <= 0) return 0;
 
@@ -4596,6 +4600,7 @@ document.addEventListener('click', function(e) {
 async function backfillBedVoucher(orderId) {
   const o = orders.find(x => x.id === orderId);
   if (!o) return;
+  if (!BED_VOUCHER_ACTIVE) { toast('Chương trình voucher Bed đã ngừng.'); return; }
   if (o.bedVoucherBackfilled) { toast('ℹ️ Đơn này đã được xử lý rồi.'); return; }
 
   const count = _computeBedVoucherCount(o.itemsArray || (o.items && o.items.map ? o.items : []), o.total, o.isToGo);
@@ -4663,10 +4668,10 @@ function _bvShowPhoneReminderModal(onContinue) {
   m.innerHTML = '<div style="background:#fff;width:100%;max-width:360px;border-radius:26px;overflow:hidden;">'
     + '<div style="background:linear-gradient(135deg,#ec4899,#db2777);padding:26px 24px;text-align:center;">'
     + '<div style="font-size:40px;margin-bottom:6px;">🎁</div>'
-    + '<p style="color:#fff;font-weight:900;font-size:16px;margin:0;line-height:1.4;">Xin số điện thoại tích điểm<br>để nhận voucher BED</p>'
+    + '<p style="color:#fff;font-weight:900;font-size:16px;margin:0;line-height:1.4;">' + (BED_VOUCHER_ACTIVE ? 'Xin số điện thoại tích điểm<br>để nhận voucher BED' : 'Xin số điện thoại<br>để tích điểm cho khách') + '</p>'
     + '</div>'
     + '<div style="padding:20px 24px;">'
-    + '<p style="font-size:12.5px;color:#6b7280;font-weight:600;text-align:center;line-height:1.6;margin:0 0 16px;">Đơn hàng đủ điều kiện sẽ được tặng Voucher Bed miễn phí nếu có SĐT khách.</p>'
+    + '<p style="font-size:12.5px;color:#6b7280;font-weight:600;text-align:center;line-height:1.6;margin:0 0 16px;">' + (BED_VOUCHER_ACTIVE ? 'Đơn hàng đủ điều kiện sẽ được tặng Voucher Bed miễn phí nếu có SĐT khách.' : 'Có SĐT thì khách được tích điểm / tem cho đơn này.') + '</p>'
     + '<div style="display:flex;gap:10px;">'
     + '<button id="bv-pr-back" style="flex:1;padding:13px;border:1.5px solid #e5e7eb;border-radius:14px;background:#fff;color:#6b7280;font-weight:800;font-size:12px;cursor:pointer;">Quay lại nhập SĐT</button>'
     + '<button id="bv-pr-continue" style="flex:1;padding:13px;border:none;border-radius:14px;background:linear-gradient(135deg,#ec4899,#db2777);color:#fff;font-weight:900;font-size:12px;cursor:pointer;">Vẫn tiếp tục</button>'
@@ -5595,7 +5600,7 @@ function showDet(id) {
       </div>
     </div>
 
-    ${(!o.phone && !o.bedVoucherBackfilled) ? `
+    ${(BED_VOUCHER_ACTIVE && !o.phone && !o.bedVoucherBackfilled) ? `
     <!-- Cộng Voucher Bed (tích điểm bù) — đặt TRƯỚC tổng bill để dễ thấy -->
     <div style="background:linear-gradient(135deg,#fdf2f8,#fce7f3);border:1.5px solid #f9a8d4;border-radius:20px;padding:16px 18px;margin-bottom:12px;">
       <div id="bv-bf-prompt-${o.id}" style="display:flex;align-items:center;gap:12px;">

@@ -5785,8 +5785,7 @@ function finalizeBedCheckIn(bedId) {
         document.getElementById('loading-overlay').style.display = 'none';
 
         if (!err) {
-            // Bed đã chính thức active — đánh dấu voucher Bed (nếu có áp) là đã dùng, không hoàn lại được nữa
-            _markBedVoucherUsedIfAny(pendingBedOrder);
+            // [16/10/2026] voucher Bed đã ngừng — không còn đánh dấu voucher đã dùng khi bed active
 
             syncToCustomerDisplay('success', {
                 orderType: 'bed',
@@ -7245,20 +7244,10 @@ function autoAddBedItems(booking) {
     for (var i = giftNormal; i < hoursNormal; i++) addItem('1h bed');
     for (var j = giftExtra;  j < hoursExtra;  j++) addItem('1h bed từ h5');
 
-    // ── Voucher Bed 1h miễn phí (Hợp tác XOFA & The cafe 33) ──
-    // Đã được khách tự động áp lúc đặt lịch qua App (index.html) — POS chỉ cần trừ giá tương ứng.
+    // ── Voucher Bed 1h miễn phí (Hợp tác XOFA & The cafe 33) — [16/10/2026] chủ dự án: NGỪNG + huỷ voucher cũ.
+    // Không trừ giá theo booking.bedVoucherApplied nữa (lịch cũ có áp voucher vẫn tính đủ giờ bed).
+    // Giữ lệnh lọc: giỏ còn sót dòng voucher cũ thì bỏ đi.
     cart = cart.filter(function(c) { return c.name !== '🎁 Voucher Bed miễn phí (XOFA)'; });
-    if (booking.bedVoucherApplied && booking.bedVoucherApplied.hours > 0) {
-        var voucherHours = Math.min(booking.bedVoucherApplied.hours, totalHours);
-        if (voucherHours > 0) {
-            cart.push({
-                name: '🎁 Voucher Bed miễn phí (XOFA)',
-                size: 'Voucher',
-                price: -(voucherHours * 15000),
-                qty: 1
-            });
-        }
-    }
 
     // [14/10] Phí không đặt trước 10K — lịch tạo ở quầy (walk-in), hoặc đặt qua App < 15 phút trước giờ
     // bắt đầu / trước lúc nhận bed (đặt xong mới tới). Xem _noPrebookFeeReason.
@@ -7281,9 +7270,6 @@ function autoAddBedItems(booking) {
         : `Đã thêm 4 × 1h Bed + ${hoursExtra} × 1h Bed (h5+)`;
     if (bedPickFee > 0) msg += ` · +${bedPickFee.toLocaleString()}đ phí chọn Bed 0${booking.preferredBed}`;
     if (_npReason) msg += ` · +10.000đ phí không đặt trước (${_npReason})`;
-    if (booking.bedVoucherApplied && booking.bedVoucherApplied.hours > 0) {
-        msg += ` · 🎁 Đã áp ${Math.min(booking.bedVoucherApplied.hours, totalHours)} Voucher Bed miễn phí`;
-    }
     if (typeof showToast === 'function') showToast('🛏️ ' + msg);
 }
 
@@ -7311,21 +7297,6 @@ function _noPrebookFeeReason(b, nowMs) {
     if (start && start - created < lim) return 'đặt chưa tới ' + NO_PREBOOK_MIN + ' phút trước giờ bắt đầu';
     if (nowMs - created < lim) return 'nhận bed chưa tới ' + NO_PREBOOK_MIN + ' phút sau lúc đặt';
     return '';
-}
-
-/** Khi bed active (nhân viên mở chi tiết bed / gán bed) — đánh dấu voucher Bed đã dùng, không còn giá trị */
-function _markBedVoucherUsedIfAny(booking) {
-    if (!booking || !booking.bedVoucherApplied || !booking.bedVoucherApplied.keys || !booking.bedVoucherApplied.keys.length) return;
-    var phone = (booking.phone || '').replace(/[^0-9]/g, '');
-    if (!phone) return;
-    var upd = {};
-    booking.bedVoucherApplied.keys.forEach(function(k) {
-        upd['bedVouchers.' + k + '.used']   = true;
-        upd['bedVouchers.' + k + '.usedAt'] = new Date().toISOString();
-    });
-    fstore.collection('customers').doc(phone).update(upd).catch(function(e) {
-        console.warn('[_markBedVoucherUsedIfAny]', e);
-    });
 }
 
 function autoAddMenuItemToCart(itemName) {

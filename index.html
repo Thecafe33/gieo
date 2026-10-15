@@ -2679,6 +2679,9 @@ function _renderDebtCard(data) {
 // ── END CARD NỢ PHÍ ────────────────────────────────────────────
 
 // ── HỢP TÁC XOFA & THE CAFE 33 — VOUCHER BED 1H MIỄN PHÍ ────────
+// [16/10/2026] Chủ dự án: NGỪNG voucher Bed 1h + huỷ voucher cũ — không hiện thẻ, không đọc bedVouchers, không áp khi đặt bed.
+// true = bật lại (PosX: BED_VOUCHER_ACTIVE; pos.html đã gỡ phần trừ giá — bật lại phải khôi phục cả ở đó).
+var BED_VOUCHER_ACTIVE = false;
 var BED_VOUCHER_HOUR_VALUE = 15000;
 var _bedVoucherAvailable   = []; // danh sách voucher còn hạn & chưa dùng/chưa đặt trước
 var _bedVoucherApplied     = null; // {keys:[...], hours:N, value:N} đang áp cho lượt đặt hiện tại
@@ -2692,6 +2695,7 @@ function _bedVoucherIsValid(v) {
 /** Tải danh sách voucher Bed còn hiệu lực của khách & cập nhật card */
 function _loadBedVoucherCard(phone) {
     if (!phone) return;
+    if (!BED_VOUCHER_ACTIVE) { _bedVoucherAvailable = []; _updateBedVoucherPreview(); return; }   // thẻ giữ ẩn (display:none sẵn), không đọc Firestore
     fstore.collection('customers').doc(phone).get().then(function(snap) {
         var raw = (snap.exists && snap.data().bedVouchers) ? snap.data().bedVouchers : {};
         var list = [];
@@ -4228,6 +4232,7 @@ function minutesUntilStart(booking) {
 // --- HỦY LỊCH (có kiểm tra thời gian & phí phạt) ---
 /** Hoàn lại voucher Bed đã áp cho 1 booking khi booking bị hủy (mở lại để dùng cho lần đặt khác) */
 function _refundBedVoucherIfAny(booking) {
+    if (!BED_VOUCHER_ACTIVE) return;   // [16/10/2026] voucher đã huỷ — không hoàn lại
     if (!booking || !booking.bedVoucherApplied || !booking.bedVoucherApplied.keys || !booking.bedVoucherApplied.keys.length) return;
     var phone = (booking.phone || curPhone || '').replace(/[^0-9]/g, '');
     if (!phone) return;
