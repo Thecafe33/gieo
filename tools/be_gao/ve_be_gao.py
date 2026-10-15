@@ -227,9 +227,17 @@ def sheet():
     im=Image.new('RGBA',(W*len(fr),H),(0,0,0,0))
     for i,f in enumerate(fr): im.paste(img(f,1),(i*W,0))
     return im
+def xsheet():
+    """Bảng sprite Giáng sinh (cây thông), cùng thứ tự khung với sheet(): 40×50 mỗi khung"""
+    X=xframe
+    fr=[X(), X(blink=True), X(bob=0, lf=(-1,-1), rf=(1,0), arm=1), X(bob=1), X(bob=0, lf=(-1,0), rf=(1,-1), arm=-1), X(bob=1), X(happy=True, arm=1)]
+    im=Image.new('RGBA',(W*len(fr),H+PAD),(0,0,0,0))
+    for i,f in enumerate(fr): im.paste(img(f,1),(i*W,0))
+    return im
 if __name__=='__main__':
     import base64, io, os, sys
     out=os.path.dirname(os.path.abspath(__file__))
+    xsheet().save(os.path.join(out,'be_gao_giangsinh_sheet.png'), optimize=True)   # tools/tao_ban_giangsinh.js đọc file này
     sh=sheet(); sh.save(os.path.join(out,'be_gao_sheet.png'), optimize=True)
     b=io.BytesIO(); sh.save(b,'PNG',optimize=True)
     print('data:image/png;base64,'+base64.b64encode(b.getvalue()).decode())

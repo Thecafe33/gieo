@@ -165,14 +165,50 @@ const APP_SNOW = `
     })();
     </script>`;
 
-// Bé Gạo (khối [BÉ GẠO] … [/BÉ GẠO] trong index.html): chủ dự án cho vào bản THƯỜNG trước (16/10) — bản Giáng sinh tạm bỏ.
-// Muốn bản Giáng sinh cũng có bé → đổi thành true rồi chạy lại.
-const BE_GAO = false;
+// Bé Gạo (khối [BÉ GẠO] … [/BÉ GẠO] trong index.html). Bản Giáng sinh (16/10, chủ dự án duyệt): Bé Gạo CÂY THÔNG
+// (tools/be_gao/be_gao_giangsinh_sheet.png — vẽ bằng ve_be_gao.py xsheet()), sao lấp lánh, câu nói Giáng sinh + đếm ngày tới 25/12 (giờ VN).
+// false = bỏ hẳn bé khỏi bản Giáng sinh.
+const BE_GAO = true;
 const BE_GAO_RE = /<!-- \[BÉ GẠO\][\s\S]*?<!-- \[\/BÉ GẠO\] -->\n?/;
+function beGaoGiangSinh(block) {
+  let b = block;
+  const doi = (tim, moi, ten) => {
+    const n = b.split(tim).length - 1;
+    if (n !== 1) throw new Error('khối [BÉ GẠO] trong index.html: cần đúng 1 chỗ "' + ten + '", thấy ' + n + ' — sửa lại tools/tao_ban_giangsinh.js');
+    b = b.replace(tim, () => moi);
+  };
+  const png = fs.readFileSync(path.join(ROOT, 'tools/be_gao/be_gao_giangsinh_sheet.png')).toString('base64');
+  // khung 40×50 (cao hơn 4 ô cho ngôi sao); chân cách đáy khung 4 ô → đáy khung thấp hơn 1px để chân vẫn chạm mép thanh menu
+  doi('bottom:99px;width:40px;height:46px;', 'bottom:100px;width:40px;height:50px;', 'cỡ khung');
+  doi('width:280px;height:46px;', 'width:280px;height:50px;', 'cỡ dải sprite');
+  const re = /(<img class="bgp-strip"[^>]*src=")data:image\/png;base64,[^"]+(")/;
+  if (!re.test(b)) throw new Error('khối [BÉ GẠO]: không thấy ảnh sprite');
+  b = b.replace(re, (m, a, z) => a + 'data:image/png;base64,' + png + z);
+  doi('<div class="bgp-hop"><div class="bgp-win">', '<div class="bgp-hop"><i class="bgp-glow"></i><div class="bgp-win">', 'bgp-hop');
+  doi('</style>\n<div id="bg-pet"', '#bg-pet .bgp-glow{position:absolute;left:12px;top:-2px;width:17px;height:17px;border-radius:50%;pointer-events:none;' +
+    'background:radial-gradient(circle,rgba(255,244,170,.95),rgba(255,214,70,.4) 45%,transparent 70%);opacity:.4;will-change:opacity;animation:bgp-glow 1.8s ease-in-out infinite}\n' +
+    '@keyframes bgp-glow{0%,100%{opacity:.35}50%{opacity:1}}\n#bg-pet.sleep .bgp-glow{animation:none;opacity:.3}\n</style>\n<div id="bg-pet"', 'style');
+  const iS = b.indexOf('  var SAY = ['), iT = b.indexOf('\n', b.indexOf('  var TAP = ['));
+  if (iS < 0 || iT < 0) throw new Error('khối [BÉ GẠO]: không thấy SAY / TAP');
+  b = b.slice(0, iS) +
+`  // [GIÁNG SINH] đếm ngày tới 25/12 theo giờ VN (tính trên máy, không đọc Firebase)
+  function demNgayNoel() {
+    var n = new Date(Date.now() + 7 * 3600e3), y = n.getUTCFullYear();
+    var d = Math.round((Date.UTC(y, 11, 25) - Date.UTC(y, n.getUTCMonth(), n.getUTCDate())) / 864e5);
+    return d > 1 ? 'Còn ' + d + ' ngày nữa là Giáng sinh rồi đó!' : d === 1 ? 'Tối nay là đêm Noel rồi đó!' :
+      d === 0 ? 'Merry Christmas! Giáng sinh vui vẻ nha!' : 'Giáng sinh vui vẻ! Năm mới ghé 33 nha!';
+  }
+  var SAY = [demNgayNoel, demNgayNoel, 'Merry Christmas!', 'Giáng sinh là ghé 33 nha!', 'Mùa đông uống gì ấm nè?', 'Ho ho ho~ Bé Gạo đây!'];
+  var TAP = ['Merry Christmas!', 'Hihi, nhột quá!', 'Ho ho ho~', 'Giáng sinh là ghé 33 nha!', demNgayNoel];` + b.slice(iT);
+  doi('lastAct = Date.now(); next(1200);', 'lastAct = Date.now(); next(1200);\n    if (!window._bgNoelHi) { window._bgNoelHi = 1; setTimeout(function () { if (running && !asleep) speak(demNgayNoel(), 2800); }, 1600); }', 'start');
+  doi('<!-- [BÉ GẠO] 16/10', '<!-- [BÉ GẠO] (bản GIÁNG SINH: Bé Gạo cây thông, sao lấp lánh, câu nói + đếm ngày Noel — tools/tao_ban_giangsinh.js) 16/10', 'đầu khối');
+  return b;
+}
 
 function taoGiangSinh(src) {
   let h = src;
   if (!BE_GAO) h = h.replace(BE_GAO_RE, '');
+  else { const m = h.match(BE_GAO_RE); if (!m) throw new Error('index.html: không thấy khối [BÉ GẠO]'); h = h.replace(BE_GAO_RE, () => beGaoGiangSinh(m[0])); }
   const thay = (tim, moi, ten) => {
     const n = h.split(tim).length - 1;
     if (n !== 1) throw new Error('index.html: cần đúng 1 chỗ "' + ten + '", thấy ' + n + ' — màn đăng nhập đã đổi, sửa lại tools/tao_ban_giangsinh.js');
@@ -206,4 +242,4 @@ if (require.main === module) {
   fs.writeFileSync(path.join(out, 'index_giangsinh.html'), h);
   console.log('✅ Đã ghi ' + path.join(out, 'index_giangsinh.html'));
 }
-module.exports = { taoGiangSinh, doiMauToanBo, BE_GAO, BE_GAO_RE };
+module.exports = { taoGiangSinh, doiMauToanBo, BE_GAO, BE_GAO_RE, beGaoGiangSinh };

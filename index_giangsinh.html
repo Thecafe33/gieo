@@ -6776,5 +6776,111 @@ showTab = function(t) {
 })();
 </script>
 <!-- [/GIỜ HĐ — ÁNH SÁNG] -->
+<!-- [BÉ GẠO] (bản GIÁNG SINH: Bé Gạo cây thông, sao lấp lánh, câu nói + đếm ngày Noel — tools/tao_ban_giangsinh.js) 16/10 — linh vật Gieo Gieo bản pixel, nhỏ (40×46), đi qua lại vài chỗ ở góc trái trên thanh menu dưới (chỉ khi đã đăng nhập).
+     Sprite vẽ bằng tools/be_gao/ve_be_gao.py (7 khung: đứng · nhắm mắt · 4 bước đi · cười), nhúng base64 ~2KB.
+     Chỉ animate transform (GPU); hẹn giờ thưa (vài giây 1 lần); không đọc / ghi Firebase. Chạm bé = nhảy + nói 1 câu.
+     Lâu không thao tác → ngủ (Zzz), chạm / cuộn màn = thức. Thanh menu ẩn / tab ẩn = dừng hẳn. -->
+<style>
+#bg-pet{position:fixed;left:0;bottom:100px;width:40px;height:50px;z-index:49;pointer-events:none;display:none}
+#bg-pet.on{display:block}
+#bg-pet .bgp-move,#bg-pet .bgp-flip,#bg-pet .bgp-hop{position:absolute;inset:0;will-change:transform}
+#bg-pet .bgp-win{position:absolute;inset:0;overflow:hidden;pointer-events:auto;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+#bg-pet .bgp-strip{display:block;width:280px;height:50px;max-width:none;image-rendering:pixelated;image-rendering:crisp-edges;transform:translateX(0);will-change:transform;-webkit-user-drag:none;user-select:none}
+#bg-pet .bgp-strip.walk{animation:bgp-walk .62s steps(4) infinite}
+@keyframes bgp-walk{from{transform:translateX(-80px)}to{transform:translateX(-240px)}}
+#bg-pet.sleep .bgp-hop{animation:bgp-breath 2.6s ease-in-out infinite;transform-origin:50% 100%}
+@keyframes bgp-breath{0%,100%{transform:scale(1,1)}50%{transform:scale(1.03,.97)}}
+#bg-pet .bgp-say{position:absolute;left:-10px;bottom:calc(100% + 6px);transform:scale(.6);transform-origin:24px 100%;opacity:0;white-space:nowrap;
+  background:#fff;color:#1f2a6b;font:700 12px/1.25 'Inter',sans-serif;padding:7px 11px;border-radius:14px;box-shadow:0 6px 18px rgba(20,30,80,.16);border:1.5px solid #2040c8;transition:opacity .18s ease,transform .22s cubic-bezier(.3,1.4,.5,1)}
+#bg-pet .bgp-say:after{content:'';position:absolute;left:25px;top:100%;margin-left:-5px;border:5px solid transparent;border-top-color:#2040c8}
+#bg-pet .bgp-say.show{opacity:1;transform:scale(1)}
+#bg-pet .bgp-z{position:absolute;right:-4px;top:-6px;font:800 11px/1 'Inter',sans-serif;color:#2040c8;opacity:0}
+#bg-pet.sleep .bgp-z{animation:bgp-z 2.4s ease-out infinite}
+@keyframes bgp-z{0%{opacity:0;transform:translate(0,6px) scale(.7)}25%{opacity:.9}100%{opacity:0;transform:translate(10px,-18px) scale(1.15)}}
+#bg-pet .bgp-glow{position:absolute;left:12px;top:-2px;width:17px;height:17px;border-radius:50%;pointer-events:none;background:radial-gradient(circle,rgba(255,244,170,.95),rgba(255,214,70,.4) 45%,transparent 70%);opacity:.4;will-change:opacity;animation:bgp-glow 1.8s ease-in-out infinite}
+@keyframes bgp-glow{0%,100%{opacity:.35}50%{opacity:1}}
+#bg-pet.sleep .bgp-glow{animation:none;opacity:.3}
+</style>
+<div id="bg-pet" aria-hidden="true">
+  <div class="bgp-move"><div class="bgp-flip"><div class="bgp-hop"><i class="bgp-glow"></i><div class="bgp-win"><img class="bgp-strip" alt="" draggable="false" src="data:image/png;base64,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"></div></div></div>
+    <div class="bgp-z">z</div><div class="bgp-say"></div></div>
+</div>
+<script>
+(function () {
+  // [16/10 b2] chủ dự án: bé nhỏ lại (40×46, sprite 1:1) + chỉ đi quanh vài chỗ ở góc trái — không đi ngang cả màn (vướng thao tác màn Đặt bed)
+  var FW = 40, SPEED = 16, SLEEP_MS = 40000, SPOTS = [18, 52, 86];   // px/giây khi đi; 40 giây không thao tác → ngủ
+  // [GIÁNG SINH] đếm ngày tới 25/12 theo giờ VN (tính trên máy, không đọc Firebase)
+  function demNgayNoel() {
+    var n = new Date(Date.now() + 7 * 3600e3), y = n.getUTCFullYear();
+    var d = Math.round((Date.UTC(y, 11, 25) - Date.UTC(y, n.getUTCMonth(), n.getUTCDate())) / 864e5);
+    return d > 1 ? 'Còn ' + d + ' ngày nữa là Giáng sinh rồi đó!' : d === 1 ? 'Tối nay là đêm Noel rồi đó!' :
+      d === 0 ? 'Merry Christmas! Giáng sinh vui vẻ nha!' : 'Giáng sinh vui vẻ! Năm mới ghé 33 nha!';
+  }
+  var SAY = [demNgayNoel, demNgayNoel, 'Merry Christmas!', 'Giáng sinh là ghé 33 nha!', 'Mùa đông uống gì ấm nè?', 'Ho ho ho~ Bé Gạo đây!'];
+  var TAP = ['Merry Christmas!', 'Hihi, nhột quá!', 'Ho ho ho~', 'Giáng sinh là ghé 33 nha!', demNgayNoel];
+  var pet = document.getElementById('bg-pet'), nav = document.getElementById('nav-bar');
+  if (!pet || !nav || !pet.animate) return;
+  var move = pet.querySelector('.bgp-move'), flip = pet.querySelector('.bgp-flip'), hop = pet.querySelector('.bgp-hop'),
+      strip = pet.querySelector('.bgp-strip'), say = pet.querySelector('.bgp-say');
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var x = SPOTS[0], walking = null, timer = null, sayT = null, running = false, lastAct = Date.now(), asleep = false;
+  function rnd(a, b) { return a + Math.random() * (b - a); }
+  function setX(v) { x = v; move.style.transform = 'translateX(' + v + 'px)'; }
+  function frame(k) { strip.classList.remove('walk'); strip.style.transform = 'translateX(' + (-k * FW) + 'px)'; }
+  function curX() { var m = getComputedStyle(move).transform; if (m && m !== 'none') { var v = m.match(/-?[\d.]+/g); if (v) return +v[4]; } return x; }
+  function stopWalk() { if (walking) { var cx = curX(); walking.cancel(); walking = null; setX(cx); } frame(0); }
+  function next(ms) { clearTimeout(timer); if (running) timer = setTimeout(act, ms); }
+  function speak(t, ms) {
+    say.textContent = t; say.classList.add('show');
+    clearTimeout(sayT); sayT = setTimeout(function () { say.classList.remove('show'); }, ms || 2200);
+  }
+  function blink() { frame(1); setTimeout(function () { if (!walking && !asleep) frame(0); }, 150); }
+  function walkTo(nx) {
+    stopWalk();
+    var dir = nx >= x ? 1 : -1, dur = Math.abs(nx - x) / SPEED * 1000;
+    flip.style.transform = dir < 0 ? 'scaleX(-1)' : '';
+    if (reduce || dur < 200) { setX(nx); next(rnd(3000, 6000)); return; }
+    strip.classList.add('walk');
+    walking = move.animate([{ transform: 'translateX(' + x + 'px)' }, { transform: 'translateX(' + nx + 'px)' }], { duration: dur, easing: 'linear', fill: 'forwards' });
+    walking.onfinish = function () { walking = null; setX(nx); frame(0); next(rnd(2500, 6000)); };
+  }
+  function sleep() { stopWalk(); asleep = true; frame(1); pet.classList.add('sleep'); speak('Zzz… Gạo ngủ xíu', 1800); }
+  function wake(quiet) {
+    if (!asleep) return; asleep = false; pet.classList.remove('sleep'); frame(6);
+    if (!quiet) speak('Ơ, bạn về rồi!', 1800);
+    setTimeout(function () { if (!walking && !asleep) frame(0); }, 900); next(rnd(1500, 3000));
+  }
+  function act() {
+    if (!running) return;
+    if (Date.now() - lastAct > SLEEP_MS) { if (!asleep) sleep(); return; }
+    var r = Math.random();
+    if (r < .5) { var to = SPOTS.filter(function (v) { return v !== x; }); walkTo(to[Math.floor(Math.random() * to.length)]); }
+    else if (r < .82) { blink(); next(rnd(2500, 5000)); }
+    else { var t = SAY[Math.floor(Math.random() * SAY.length)]; speak(typeof t === 'function' ? t() : t); next(rnd(3500, 6000)); }
+  }
+  // 'click' (không phải pointerdown): bé nhảy SAU khi trình duyệt đã chốt chỗ chạm — nhảy sớm thì cú chạm lọt xuống thẻ phía sau
+  pet.querySelector('.bgp-win').addEventListener('click', function (e) {
+    e.stopPropagation(); lastAct = Date.now();
+    if (asleep) { wake(true); }
+    stopWalk(); frame(6); var t = TAP[Math.floor(Math.random() * TAP.length)]; speak(typeof t === 'function' ? t() : t, 2000);
+    if (!reduce) hop.animate([{ transform: 'translateY(0)' }, { transform: 'translateY(-10px)', offset: .4 }, { transform: 'translateY(0)', offset: .75 }, { transform: 'translateY(-3px)', offset: .87 }, { transform: 'translateY(0)' }],
+      { duration: 560, easing: 'ease-out' });
+    setTimeout(function () { if (!walking && !asleep) frame(0); }, 1100);
+    next(rnd(2500, 4000));
+  });
+  ['pointerdown', 'scroll', 'keydown'].forEach(function (ev) { window.addEventListener(ev, function () { lastAct = Date.now(); if (asleep) wake(); }, { passive: true, capture: true }); });
+  function start() {
+    if (running) return; running = true; pet.classList.add('on');
+    setX(x); frame(0); lastAct = Date.now(); next(1200);
+    if (!window._bgNoelHi) { window._bgNoelHi = 1; setTimeout(function () { if (running && !asleep) speak(demNgayNoel(), 2800); }, 1600); }
+  }
+  function stop() { running = false; clearTimeout(timer); timer = null; stopWalk(); pet.classList.remove('on', 'sleep'); asleep = false; }
+  function sync() { (!nav.classList.contains('hidden') && !document.hidden) ? start() : stop(); }
+  new MutationObserver(sync).observe(nav, { attributes: true, attributeFilter: ['class'] });
+  document.addEventListener('visibilitychange', sync);
+  sync();
+})();
+</script>
+<!-- [/BÉ GẠO] -->
 </body>
 </html>
