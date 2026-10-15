@@ -25,7 +25,7 @@ eq([C.expensePayload({ category: 'Đá', amount: 0, cats: C.DEFAULT_EXPENSE_CATS
   eq(/cham_cong\.v3\.js/.test(tc) && /ChamCong\.init\(\{ store: 'tc33' \}\)/.test(tc), true, 'pos.html nạp v3, không bật khung chi phí');
 }
 
-const NAMES = ['pad', 'parseDkey', 'addDays', 'dkey', 'daysBetween', 'daysInMonthYm', 'beMonthValue', 'plBreakEven', 'expenseCatsAll', 'expenseCats', 'expCostType', 'expCounts', 'expAllocate', 'expAmountIn', 'tcxBreakEven'];
+const NAMES = ['pad', 'parseDkey', 'addDays', 'dkey', 'daysBetween', 'daysInMonthYm', 'beMonthValue', 'plBreakEven', 'expenseCatsAll', 'expenseCats', 'expCostType', 'expCounts', 'expAllocate', 'expAmountIn', 'tcxBreakEven', 'expPaidOf'];
 const M = new Function(src.match(/const DEFAULT_EXPENSE_CATS = (\[[\s\S]*?\n\]);/)[0] + '\n' + extract('manage.html', NAMES) + '\nreturn {' + NAMES.join(',') + '};')();
 const cats = M.expenseCatsAll(null);
 const E = [
@@ -55,5 +55,16 @@ near(r2.lai, (1000000 - 400000 - 1000000) + (500000), 'Lãi cộng 2 phần: 30/
 const r3 = M.tcxBreakEven(B, 'tc33', [{ date: '2026-09-30', rev: 0 }], { list: E, cats });
 eq(r3.nguon, 'cauhinh', 'Tháng chưa có chi phí thật → cấu hình');
 eq(M.tcxBreakEven({}, 'xofa', [{ date: '2026-10-16', rev: 5 }], { list: [], cats }), null, 'Không chi phí, không cấu hình → chưa có số');
+
+// ── Trả trước nhiều tháng (chủ dự án 16/10): XOFA trả tiền thuê QUÝ ngày 1/11 → kỳ 1/11/2026 – 31/1/2027, ĐÃ TRẢ, chia đều mỗi ngày ──
+const Q = { id: 'q', periodType: 'period', startDate: '2026-11-01', endDate: '2027-01-31', date: '2026-11-01', paidDate: '2026-11-01', category: 'Tiền thuê nhà', amount: 9200000, status: 'approved', source: 'manage' };
+const aq = M.expAllocate([Q], cats);
+eq([Object.keys(aq.byDay).length, [...aq.months]], [92, ['2026-11', '2026-12', '2027-01']], 'Thuê quý: 92 ngày, vắt qua năm, cả 3 tháng có chi phí thật');
+near(aq.byDay['2027-01-15'].fixed, 100000, 'Thuê quý: mỗi ngày gánh 9,2tr ÷ 92 = 100k (cả ngày tháng 1/2027)');
+near(M.expAmountIn(Q, '2026-12-01', '2026-12-31'), 3100000, 'Thuê quý: chi phí tháng 12 = 31 ngày × 100k');
+eq([M.expPaidOf(Q), M.expPaidOf({ source: 'pos', date: '2026-11-03', status: 'pending_review' }), M.expPaidOf({ source: 'manage', date: '2026-11-03' }), M.expPaidOf({ source: 'pos', date: '2026-11-03', status: 'rejected' })],
+  ['2026-11-01', '2026-11-03', null, null], 'Ngày trả: theo paidDate; khoản POS = trả ngay hôm ghi; chưa ghi = chưa trả');
+const rq = M.tcxBreakEven({}, 'xofa', [{ date: '2027-01-15', rev: 300000 }], { list: [Q], cats });
+near(rq.lai, 300000 - 100000, 'Hoà vốn ngày 15/1/2027: tiền thuê trả từ 1/11 vẫn được tính 100k vào ngày đó');
 
 console.log(ok ? 'ALL PASS' : 'SOME FAIL'); process.exit(ok ? 0 : 1);
