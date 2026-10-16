@@ -447,7 +447,8 @@
  *   tc33 (pos.html):    _pushPaidOrder + clearDebtAfterPayment (chỉ chạy khi đơn lưu thành công) → bốc → popup QR;
  *                       checkSdtLive / resetPhoneInput → khung Gấu Noel (Đổi quà, Mở lượt tại quầy); tab Quản lý «Gấu Noel».
  *   xofa (PosX.html):   _loyaltyAfterSave → bốc; renderCustomerInfo / clearCustomer → khung; delOrderConfirm → huỷ bill.
- *   gieo (posgieo.html): assistFinalizeOrder → bốc; buildReceiptContent / renderReceiptCanvas → QR cuối bill;
+ *   gieo (posgieo.html): assistFinalizeOrder → bốc; POSPrinter.autoPrintIfEnabled → hỏi «Quay tại quán / Quét mã ở nhà» trước khi in;
+ *                       buildReceiptContent / renderReceiptCanvas → QR cuối bill (bỏ khi quay tại quán);
  *                       renderCustomerInfo / clearCustomer → khung; delOrderConfirm → huỷ bill.
  */
 (function () {
@@ -655,6 +656,7 @@
   function sauBoc(sdt, kq) {
     if (!kq || !kq.soLuot) { if (kq && kq.loi === 'chua-co-kho') console.warn('[gấu] quán ' + store() + ' chưa nhập kho — tab Quản lý pos'); return; }
     if (APP === 'tc33') popupQR(sdt, kq.soLuot);
+    else if (APP === 'gieo') { /* Gieo: popup «Khách quay ở đâu?» trước khi in bill lo phần báo */ }
     else { toast('🧸 Khách có ' + kq.soLuot + ' lượt quay gấu Noel — quét QR để quay'); phat('qr', { sdt: sdt, soLuot: kq.soLuot }); }
   }
   function chayBoc(don) {
@@ -662,8 +664,8 @@
     var sdt = G.normPhone(don.sdt);
     if (sdt.length < 10) return;
     if (G.soLuot(don.ly) === 0 && !don.bed160) return;
-    G.boc(don).then(function (kq) { sauBoc(sdt, kq); })
-      .catch(function (e) { console.warn('[gấu] bốc thăm lỗi', e); toast('⚠️ Chưa bốc được lượt gấu Noel (' + e.message + ')'); });
+    return G.boc(don).then(function (kq) { sauBoc(sdt, kq); return kq; })
+      .catch(function (e) { console.warn('[gấu] bốc thăm lỗi', e); toast('⚠️ Chưa bốc được lượt gấu Noel (' + e.message + ')'); return null; });
   }
   function demLy(items, laNuoc) {
     var ly = 0, tien = 0;
@@ -743,24 +745,66 @@
   // ── Gieo Gieo ──
   if (APP === 'gieo') {
     var laNuocGieo = function (c) { return !c.isFood && !c.isFree && !c._discountId && !c._vKey; };
+    var bocCua = typeof WeakMap === 'function' ? new WeakMap() : null;   // đơn → lời hứa bốc thăm (popup «Quay tại quán» chờ kết quả)
+    var noiQuay = typeof WeakMap === 'function' ? new WeakMap() : null;  // đơn → 'quan' | 'nha' (không ghi thêm trường vào đơn)
     boc('assistFinalizeOrder', function (cu) {
       return function (order, orderId) {
         try { return cu.apply(this, arguments); }
         finally {   // gọi ngay sau khi đơn đã lưu → bốc kể cả khi phần thống kê gợi ý lỗi
           an(function () {
             var n = demLy(order && order.itemsArray, laNuocGieo);
-            chayBoc({ store: store(), sdt: order && order.phone, bill: String(orderId || ''), ly: n.ly, tienNuoc: n.tien });
+            var pr = chayBoc({ store: store(), sdt: order && order.phone, bill: String(orderId || ''), ly: n.ly, tienNuoc: n.tien });
+            if (pr && bocCua && order && typeof order === 'object') bocCua.set(order, pr);
           })();
         }
       };
     });
+    // [16/10 chủ dự án] Thanh toán xong, đơn có lượt → hỏi «Khách quay ở đâu?» TRƯỚC khi in bill:
+    //   Quay tại quán → bill KHÔNG in QR (tiết kiệm giấy), mở vòng quay ngay trên POS (giỏ trống thì không vào được ô SĐT nữa);
+    //   Quét mã ở nhà → bill in QR như cũ. Không chọn trong 15 giây → coi như quét mã ở nhà (bill không bị treo).
+    function hoiNoiQuay(order, xong) {
+      var L = G.soLuot(demLy(order.itemsArray, laNuocGieo).ly), sdt = G.normPhone(order.phone), con = 15, t = null, daChon = false;
+      var o = ov('<h3>🎄 Khách có ' + L + ' lượt quay gấu</h3><p>Khách quay ở đâu?</p>' +
+        '<div class="gn-acts" style="flex-direction:column;align-items:stretch">' +
+        '<button class="gn-btn" data-a="quan" style="padding:16px;font-size:16px">🎡 Quay tại quán<br><small style="font-weight:600;opacity:.85">vòng quay hiện trên POS · bill không in QR</small></button>' +
+        '<button class="gn-btn gn-g" data-a="nha" style="padding:16px;font-size:16px">📱 Quét mã ở nhà<br><small style="font-weight:600;opacity:.85">bill in kèm mã QR · <span data-dem>15</span>s</small></button></div>');
+      var chon = function (taiQuan) {
+        if (daChon) return; daChon = true; clearInterval(t);
+        if (noiQuay) noiQuay.set(order, taiQuan ? 'quan' : 'nha');
+        if (!taiQuan) dongOv();
+        try { xong(); } catch (e) { console.warn('[gấu] in bill', e); }
+        if (!taiQuan) return;
+        var msgEl = o.querySelector('p'); if (msgEl) msgEl.textContent = 'Đang lấy lượt quay…';
+        var pr = bocCua && bocCua.get(order);
+        Promise.resolve(pr).then(function (kq) {
+          if (kq && kq.soLuot) moTaiQuay(sdt);
+          else { dongOv(); toast('⚠️ Chưa có lượt quay cho đơn này' + (kq && kq.loi === 'chua-co-kho' ? ' (quán chưa nhập kho gấu)' : '')); }
+        });
+      };
+      o.querySelector('[data-a=quan]').onclick = function () { chon(true); };
+      o.querySelector('[data-a=nha]').onclick = function () { chon(false); };
+      t = setInterval(function () { con--; var d = o.querySelector('[data-dem]'); if (d) d.textContent = String(con); if (con <= 0) chon(false); }, 1000);
+    }
+    var gauDuDieuKien = function (order) {
+      try { return !!order && G.dangMua() && G.normPhone(order.phone).length >= 10 && G.soLuot(demLy(order.itemsArray, laNuocGieo).ly) > 0; } catch (e) { return false; }
+    };
+    try {
+      var PP = POSPrinter, inCu = PP && PP.autoPrintIfEnabled;
+      if (typeof inCu === 'function') PP.autoPrintIfEnabled = function (order) {
+        var self = this, args = arguments;
+        if (!gauDuDieuKien(order) || !noiQuay || noiQuay.has(order)) return inCu.apply(self, args);
+        noiQuay.set(order, 'cho');
+        hoiNoiQuay(order, function () { inCu.apply(self, args); });
+      };
+      else console.warn('[gấu] posgieo không có POSPrinter.autoPrintIfEnabled — bỏ qua hỏi nơi quay');
+    } catch (e) { console.warn('[gấu] không thấy POSPrinter', e); }
     // QR cuối bill in: dòng đánh dấu {type:'gauNoel'} → renderReceiptCanvas vẽ khối QR (renderer gốc không có loại 'qr')
     boc('buildReceiptContent', function (cu) {
       return function (order) {
         var r = cu.apply(this, arguments);
         try {
           var L = G.soLuot(demLy(order && order.itemsArray, laNuocGieo).ly);
-          if (Array.isArray(r) && L > 0 && G.dangMua() && G.normPhone(order.phone).length >= 10) r = r.concat([{ type: 'gauNoel', soLuot: L }]);
+          if (Array.isArray(r) && L > 0 && !(noiQuay && noiQuay.get(order) === 'quan') && G.dangMua() && G.normPhone(order.phone).length >= 10) r = r.concat([{ type: 'gauNoel', soLuot: L }]);
         } catch (e) { console.warn('[gấu] bill', e); }
         return r;
       };

@@ -8,6 +8,8 @@ const ROOT = path.resolve(__dirname, '../..'), E2E = path.join(ROOT, 'tools/tet/
 let mock = fs.readFileSync(path.join(E2E, 'mockfb.js'), 'utf8').replace('update(d){ FS[key][id]=', 'update(d){ FS[key]=FS[key]||{}; FS[key][id]=');
 mock += "\nfirebase.database.ServerValue={TIMESTAMP:0}; firebase.firestore.FieldValue={delete(){return null;},serverTimestamp(){return null;},increment(n){return n;},arrayUnion(){return [];}}; firebase.storage=function(){return {ref(){return {child(){return {put(){return Promise.resolve({ref:{getDownloadURL(){return Promise.resolve('')}}})}}}}}}};\n";
 mock += fs.readFileSync(path.join(E2E, 'rtmem.js'), 'utf8');
+// posgieo: GieoData.install cần fstore.batch (Firestore giả thiếu) — thêm batch rỗng để app chạy tới POSPrinter
+mock += "\n(function(){var f=firebase.firestore,FV=f.FieldValue;firebase.firestore=Object.assign(function(){var o=f();if(!o.batch)o.batch=function(){return{set(){},update(){},delete(){},commit(){return Promise.resolve();}};};return o;},{FieldValue:FV});})();\n";
 mock += "\n__RT2.put('menu',[{name:'Bạc xỉu',type:'Cà phê',priceM:25000,priceL:30000},{name:'Trà đào',type:'Trà',priceM:30000},{name:'Bánh tráng',type:'Ăn vặt',priceM:20000},{name:'1h bed',type:'Bed',priceM:15000},{name:'1h bed từ h5',type:'Bed',priceM:10000}]); __RT2.put('bed_closing_time','20:50');\n";
 const fake = fs.readFileSync(path.join(E2E, 'lixi_fake_inpage.js'), 'utf8');
 const twJs = 'document.head.insertAdjacentHTML("beforeend","<style>.hidden{display:none!important}</style>");';
@@ -231,6 +233,28 @@ const CHUNG = (fake) => {
     chk(withQr.height > base.height + 150, 'G4. renderReceiptCanvas vẽ thêm QR cuối bill', [base.height, withQr.height]);
     window.__qr = withQr.toDataURL();
     chk(!buildReceiptContent(Object.assign({}, order, { phone: '' }), LAY).some(x => x && x.type === 'gauNoel'), 'G5. đơn không SĐT → bill không có QR');
+    // hỏi «Khách quay ở đâu?» trước khi in
+    const inRa = []; POSPrinter.autoPrintEnabled = true; POSPrinter.connected = true;
+    POSPrinter.printOrder = o => { inRa.push(buildReceiptContent(o, LAY).some(x => x && x.type === 'gauNoel')); return Promise.resolve(); };
+    const ov = () => document.getElementById('gn-ov'), mo = () => ov() && ov().style.display === 'flex';
+    const oA = Object.assign({}, order, { phone: '0944000222' });
+    try { assistFinalizeOrder(oA, 'GB2'); } catch (e) {}
+    POSPrinter.autoPrintIfEnabled(oA); await sleep(300);
+    chk(mo() && /Khách quay ở đâu/.test(ov().textContent) && inRa.length === 0, 'G7. đơn có lượt → hỏi «Khách quay ở đâu?», CHƯA in bill', ov() && ov().textContent);
+    await window.__shot('gau_gieo_hoi');
+    ov().querySelector('[data-a=nha]').click(); await sleep(300);
+    chk(inRa.length === 1 && inRa[0] === true && !mo(), 'G8. «Quét mã ở nhà» → in bill CÓ QR, đóng popup', inRa);
+    const oB = Object.assign({}, order, { phone: '0944000333' });
+    try { assistFinalizeOrder(oB, 'GB3'); } catch (e) {}
+    POSPrinter.autoPrintIfEnabled(oB); await sleep(300);
+    ov().querySelector('[data-a=quan]').click(); await sleep(800);
+    chk(inRa.length === 2 && inRa[1] === false, 'G9. «Quay tại quán» → bill in KHÔNG có QR (tiết kiệm giấy)', inRa);
+    chk(mo() && !!ov().querySelector('.gn-vong') && !!ov().querySelector('[data-a=quay]'), 'G10. «Quay tại quán» → vòng quay mở ngay trên POS (không cần nhập lại SĐT)');
+    ov().querySelector('[data-a=quay]').click(); await sleep(6000);
+    chk(DB['gau_noel_2026/0944000333'] && Object.values(DB['gau_noel_2026/0944000333'].luot)[0].opened === true, 'G11. quay tại quán → lượt đã mở');
+    ov().querySelector('[data-a=x]').click(); await sleep(100);
+    POSPrinter.autoPrintIfEnabled(Object.assign({}, order, { phone: '' })); await sleep(200);
+    chk(inRa.length === 3 && !mo(), 'G12. đơn không có SĐT → in luôn, không hỏi');
     await G.datCfg({ bat: false });
     chk(!buildReceiptContent(order, LAY).some(x => x && x.type === 'gauNoel'), 'G6. đang TẮT → bill không có QR');
     Math.random = rnd;
