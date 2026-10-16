@@ -512,6 +512,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 <dialog class="dialog" id="dialog" aria-labelledby="dialogTitle"><div class="dialog-inner" id="dialogInner"></div></dialog>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script><script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script><script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script><script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
+<!-- [LÃI/LỖ GIEO TỰ TÍNH] lớp đổi tên bảng theo quán + bộ tính lãi / lỗ chép nguyên văn từ quanlygieo (tools/tao_lai_lo.js) -->
+<script src="data_access.v7.js"></script><script src="lai_lo.v1.js"></script>
 <script>
 const backend=(()=>{
 const firebaseConfig = {
@@ -1401,6 +1403,48 @@ async function readPlDays(records, from, to){
   if(dirty) plCacheSave(cache);
   return out;
 }
+// ==========================================================================
+// [LÃI/LỖ GIEO TỰ TÍNH — 16/10] Chủ dự án: manage không phải chờ mở quanlygieo mới có lãi / lỗ. Ngày nào CHƯA CÓ
+// bản tóm tắt (pl_days) hoặc bản đã CŨ thì manage tự tính bằng lai_lo.v1.js (chép nguyên văn bộ tính của quanlygieo
+// — cùng số) rồi ghi lại pl_days → quanlygieo / máy khác dùng lại, không ai tính lại ngày đã có số.
+//   · "Cũ": ngày đã qua mà bản ghi lúc ngày đó CHƯA HẾT (tính giữa ngày, sau đó còn bán); hôm nay: ghi quá 10 phút.
+//   · Chỉ tính trong PL_COMPUTE_BACK ngày gần nhất (ngày xa hơn: đã có sổ / cache ngày của quanlygieo).
+//   · Chạy NỀN sau khi màn đã hiện; mỗi quán tuần tự.
+// ==========================================================================
+const PL_TODAY_TTL = 10 * 60000, PL_COMPUTE_BACK = 62;
+function plNeedDays(byDate, from, to, nowMs){
+  const now = new Date(nowMs), today = dkey(now), lo = dkey(addDays(now, -PL_COMPUTE_BACK)), out = [];
+  for(let d = from < lo ? lo : from; d <= to && d <= today; d = dkey(addDays(parseDkey(d), 1))){
+    const x = byDate && byDate[d], at = x && x.updatedAt ? Date.parse(x.updatedAt) : 0;
+    if(!x) out.push(d);
+    else if(d === today){ if(!(nowMs - at < PL_TODAY_TTL)) out.push(d); }
+    else if(at < Date.parse(dkey(addDays(parseDkey(d), 1)) + 'T00:00:00+07:00')) out.push(d);
+  }
+  return out;
+}
+function plCachePut(id, list){
+  const cutoff = dkey(addDays(new Date(), -PL_STABLE_DAYS)), cache = plCacheLoad(), c = cache[id]; if(!c) return;
+  let dirty = false;
+  list.forEach(o=>{ const ym = o.date.slice(0, 7); if(monthEndOf(ym + '-01') < cutoff && c[ym]){ c[ym][o.date] = o; dirty = true; } });
+  if(dirty) plCacheSave(cache);
+}
+// pl: { storeId: { ngày: tóm tắt } } (đã đọc) — bổ sung tại chỗ. onStore(id) gọi sau mỗi quán có số mới. Trả số ngày đã tính.
+async function plFillMissing(records, pl, from, to, onStore){
+  if(typeof window === 'undefined' || !window.LaiLo || !pl) return 0;
+  let n = 0;
+  for(const r of records || []){
+    if(r.active === false || pl[r.id] === null) continue;
+    const need = plNeedDays(pl[r.id], from, to, Date.now());
+    if(!need.length) continue;
+    try{
+      const res = await window.LaiLo.tinh({ fstore, db, storeId: r.id, from: need[0], to: need[need.length - 1] });
+      const at = new Date().toISOString(), col = fstore.collection(ggName('pl_days_gieogieo', r.id)), batch = fstore.batch(), put = [];
+      res.tomTat.filter(o=>need.includes(o.date)).forEach(o=>{ const x = Object.assign({}, o, { storeId: r.id, updatedAt: at, by: 'manage' }); batch.set(col.doc(o.date), x); put.push(x); });
+      if(put.length){ await batch.commit(); const m = pl[r.id] || (pl[r.id] = {}); put.forEach(x=>{ m[x.date] = x; }); plCachePut(r.id, put); n += put.length; if(onStore) onStore(r.id); }
+    }catch(e){ console.warn('[lãi/lỗ Gieo] không tự tính được', r.id, e); }
+  }
+  return n;
+}
 // Production adapters. Collection names and pay-history semantics follow manage.html.
 function validStore(id){if(!STORE_IDS.includes(id))throw new Error('Cửa hàng không hợp lệ.');return STORES[id]}
 function validDate(value){if(!/^\d{4}-\d{2}-\d{2}$/.test(value)||dkey(parseDkey(value))!==value)throw new Error('Ngày không hợp lệ.');return value}
@@ -1532,7 +1576,7 @@ async function writeBreakeven(month,values){
  await BE_DOC().set({m:{[month]:rec}},{mergeFields:['m.'+month]});BE_CFG=null;
 }
 async function deleteBreakeven(month){await ensureAuth();if(!/^\d{4}-(?:0[1-9]|1[0-2])$/.test(month))throw new Error('Tháng không hợp lệ.');await BE_DOC().update({['m.'+month]:firebase.firestore.FieldValue.delete()});BE_CFG=null}
-return{readOffDays,writeOffDays,isStoreOff,offStoresOf,readCash,writeCashReceipt,writeCashStart,ggCashExpected,tcxCashExpected,readAssets,writeAsset,deleteAsset,assetMonthly,assetDepDay,assetRecovered,assetEndDate,assetLive,expMonthSum,sumsToAlloc,readCosts,writeExpense,deleteExpenseDoc,reviewExpense,setExpenseActual,markExpensePaid,expPaidOf,writeExpenseCats,expAmountIn,expCostType,expCounts,expenseCats,expenseCatsAll,DEFAULT_EXPENSE_CATS,readBreakeven,writeBreakeven,deleteBreakeven,beMonthValue,tcxBreakEven,ggBreakEven,plBreakEven,readRevenue,readSettings,readEmployees,readSchedules,readAttendance,readPayroll,writeEmployee,writeEmployeeActive,writeSchedule,deleteSchedule,writeScheduleBatch,writeShift,deleteShift,writeLateGrace,writeTargets,deleteTargets,invalidateRevenue,invalidateEmployees,targetMonthValue,targetForRange,gieoTargetForRange,gieoTargetsOn,empPayTermsOn,computeWageForDayHours,laborByEmployee,shiftWorkedHours,isShiftInProgress,workStoresOf,tcSummarize,xoSummarize,ggSummarize,tcEmptySum,xoEmptySum,ggEmptySum,sumMerge};
+return{plFillMissing,plNeedDays,readOffDays,writeOffDays,isStoreOff,offStoresOf,readCash,writeCashReceipt,writeCashStart,ggCashExpected,tcxCashExpected,readAssets,writeAsset,deleteAsset,assetMonthly,assetDepDay,assetRecovered,assetEndDate,assetLive,expMonthSum,sumsToAlloc,readCosts,writeExpense,deleteExpenseDoc,reviewExpense,setExpenseActual,markExpensePaid,expPaidOf,writeExpenseCats,expAmountIn,expCostType,expCounts,expenseCats,expenseCatsAll,DEFAULT_EXPENSE_CATS,readBreakeven,writeBreakeven,deleteBreakeven,beMonthValue,tcxBreakEven,ggBreakEven,plBreakEven,readRevenue,readSettings,readEmployees,readSchedules,readAttendance,readPayroll,writeEmployee,writeEmployeeActive,writeSchedule,deleteSchedule,writeScheduleBatch,writeShift,deleteShift,writeLateGrace,writeTargets,deleteTargets,invalidateRevenue,invalidateEmployees,targetMonthValue,targetForRange,gieoTargetForRange,gieoTargetsOn,empPayTermsOn,computeWageForDayHours,laborByEmployee,shiftWorkedHours,isShiftInProgress,workStoresOf,tcSummarize,xoSummarize,ggSummarize,tcEmptySum,xoEmptySum,ggEmptySum,sumMerge};
 
 })();
 
@@ -1849,6 +1893,7 @@ async function loadCurrent(force=false){
   if(view==='nv')employees=result.map(mapEmployee);
   if(view==='target'){goals=result.targets;live.cfg=result.cfg;live.records=result.records;live.tOff=result.off;stores=buildStoreCatalog(result.records)}
   if(view==='hoavon'){live.be=result;live.records=result.records;stores=buildStoreCatalog(result.records)}
+  if(view==='rev'||view==='hoavon')setTimeout(()=>plAutoFill(view,result),0);
   if(view==='chiphi'){live.cost=result;live.records=result.records;stores=buildStoreCatalog(result.records)}
   if(view==='taisan'){live.assets=result.assets;live.records=result.records;stores=buildStoreCatalog(result.records)}
   if(view==='tienmat'){live.cash=result;live.records=result.records;stores=buildStoreCatalog(result.records)}
@@ -1902,7 +1947,15 @@ function beEmptyReason(s){
  if(!gieo)return live.rev&&!live.rev.beCfg&&!live.rev.exp?.[s.id]?'Không đọc được chi phí / cấu hình hoà vốn':'Chưa có chi phí vận hành tháng này, chưa cấu hình hoà vốn';
  if(live.rev?.pl&&live.rev.pl[s.id]===null)return 'Không đọc được số của Quản lý Gieo';
  if(!(s.rev>0))return s.offDays&&s.offDays===s.nDays?'Đóng cửa — chưa có số lãi / lỗ':'Không bán hàng trong kỳ này — chưa có số lãi / lỗ';
- return 'Chưa có số từ Quản lý Gieo — mở Quản lý Gieo để cập nhật';
+ return live.plBusy?'Đang tính lãi / lỗ…':'Chưa có số lãi / lỗ';
+}
+// [LÃI/LỖ GIEO TỰ TÍNH] Màn đã hiện → tính NỀN những ngày Gieo chưa có số / số đã cũ (backend.plFillMissing), xong quán nào vẽ lại.
+function plAutoFill(view,res){
+ if(!res||!res.pl||!res.records||res._plFill)return;res._plFill=true;
+ const today=currentDate(),to=res.to>today?today:res.to;if(!(res.from<=to))return;
+ live.plBusy=true;
+ const again=()=>{if(state.view===view&&(view==='rev'?live.rev:live.be)===res)render()};
+ backend.plFillMissing(res.records,res.pl,res.from,to,again).catch(e=>console.warn('[lãi/lỗ Gieo]',e)).finally(()=>{live.plBusy=false;again()});
 }
 function beNote(s){
  const b=s.be,gieo=s.brand==='gieo',note=[];
@@ -2046,7 +2099,7 @@ function breakevenView(){
   return `<div class="detail-row be-gg-row"><span><b class="be-gg-name"><i class="swatch" style="background:${st.c}"></i>${esc('Gieo '+(st.code||r.id.toUpperCase()))}</b>${beHas(b)?`<small>Hoà vốn ${money(b.hoaVon)} ₫ · ${b.soNgay}/${dates.length} ngày có số${b.mucTinCay?' · '+MUC_TIN_CAY[b.mucTinCay]:''}</small>`:''}</span><b>${val}</b></div>`}).join('');
  const hist=Object.keys(B).filter(m=>['tc33','xofa'].some(k=>Number(B[m]?.[k]?.fixed)>0)).sort().reverse();
  setTimeout(()=>{beCalc('tc33',days);beCalc('xofa',days)},0);
- return pageHead('Điểm hoà vốn','Doanh thu cần đạt để không lỗ — theo tháng.',dateControl('month',month,'state.beMonth=this.value;render()','Tháng hoà vốn'))+`<div class="target-layout"><form class="panel form-panel" onsubmit="saveBreakeven(event)"><div class="panel-head"><h2>Tháng ${month.slice(5)}/${month.slice(0,4)}</h2><span class="pill">${days} ngày</span></div>${hrStores().map(field).join('')}<p class="small muted">Chi phí cố định: mặt bằng, lương, điện nước… cả tháng (khấu hao tài sản nhập ở tab Tài sản, tự cộng thêm). Ô trống dùng mức tháng gần nhất trước đó. <b>Tháng đã nhập chi phí vận hành ở tab Chi phí (thuê, lương, điện…) thì hoà vốn tính theo chi phí đó</b> — mức ở đây dùng cho tháng chưa nhập. Khoản nhân viên gửi từ Ca làm việc (cả chờ duyệt) luôn cộng thêm. Khoản mua hằng ngày (nguyên liệu, đá, ly) không tính vào hoà vốn.</p><div class="form-actions">${own.tc33||own.xofa?'<button type="button" class="btn secondary" onclick="deleteBreakevenMonth()">Xoá mức tháng này</button>':''}<button type="submit" class="btn">${icon('check')}Lưu điểm hoà vốn</button></div></form><aside class="panel target-explainer"><h2>Gieo Gieo · chỉ đọc</h2><p>Hoà vốn và lãi lấy y chang Quản lý Gieo (giá vốn theo công thức, chi phí đã duyệt, lương, khấu hao, hao hụt). Số được cập nhật mỗi lần mở Quản lý Gieo.</p>${dates.length?`<h3 class="be-aside-h">Từ ${dateVN(res.from)} tới ${dateVN(res.to)}</h3>${gg||'<p>Chưa có quán Gieo.</p>'}`:'<p>Tháng này chưa bắt đầu.</p>'}<p><b>Cách tính TC33 / XOFA</b> — chưa tính được giá vốn từng ly nên không có lãi / lỗ: hoà vốn mỗi ngày = chi phí vận hành của ngày đó (khoản theo kỳ chia đều theo ngày) + khấu hao tài sản; doanh thu vượt số này là đã hoà vốn.</p>${hist.length?`<div class="target-history">${hist.map(m=>`<button class="btn secondary" type="button" onclick="state.beMonth='${m}';render()">Tháng ${m.slice(5)}/${m.slice(0,4)}</button>`).join('')}</div>`:''}</aside></div>${footer('secondary-footer')}`;
+ return pageHead('Điểm hoà vốn','Doanh thu cần đạt để không lỗ — theo tháng.',dateControl('month',month,'state.beMonth=this.value;render()','Tháng hoà vốn'))+`<div class="target-layout"><form class="panel form-panel" onsubmit="saveBreakeven(event)"><div class="panel-head"><h2>Tháng ${month.slice(5)}/${month.slice(0,4)}</h2><span class="pill">${days} ngày</span></div>${hrStores().map(field).join('')}<p class="small muted">Chi phí cố định: mặt bằng, lương, điện nước… cả tháng (khấu hao tài sản nhập ở tab Tài sản, tự cộng thêm). Ô trống dùng mức tháng gần nhất trước đó. <b>Tháng đã nhập chi phí vận hành ở tab Chi phí (thuê, lương, điện…) thì hoà vốn tính theo chi phí đó</b> — mức ở đây dùng cho tháng chưa nhập. Khoản nhân viên gửi từ Ca làm việc (cả chờ duyệt) luôn cộng thêm. Khoản mua hằng ngày (nguyên liệu, đá, ly) không tính vào hoà vốn.</p><div class="form-actions">${own.tc33||own.xofa?'<button type="button" class="btn secondary" onclick="deleteBreakevenMonth()">Xoá mức tháng này</button>':''}<button type="submit" class="btn">${icon('check')}Lưu điểm hoà vốn</button></div></form><aside class="panel target-explainer"><h2>Gieo Gieo · chỉ đọc</h2><p>Hoà vốn và lãi tính y chang Quản lý Gieo (giá vốn theo công thức, chi phí đã duyệt, lương, khấu hao, hao hụt) — ngày nào chưa có số thì manage tự tính, không cần mở Quản lý Gieo.</p>${dates.length?`<h3 class="be-aside-h">Từ ${dateVN(res.from)} tới ${dateVN(res.to)}</h3>${gg||'<p>Chưa có quán Gieo.</p>'}`:'<p>Tháng này chưa bắt đầu.</p>'}<p><b>Cách tính TC33 / XOFA</b> — chưa tính được giá vốn từng ly nên không có lãi / lỗ: hoà vốn mỗi ngày = chi phí vận hành của ngày đó (khoản theo kỳ chia đều theo ngày) + khấu hao tài sản; doanh thu vượt số này là đã hoà vốn.</p>${hist.length?`<div class="target-history">${hist.map(m=>`<button class="btn secondary" type="button" onclick="state.beMonth='${m}';render()">Tháng ${m.slice(5)}/${m.slice(0,4)}</button>`).join('')}</div>`:''}</aside></div>${footer('secondary-footer')}`;
 }
 // ==========================================================================
 // TAB CHI PHÍ — TC33 / XOFA nhập + duyệt (POS XOFA gửi từ Ca làm việc); Gieo đọc sổ lãi/lỗ quanlygieo (pl_days)
