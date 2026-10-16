@@ -15,6 +15,7 @@
 4. Đổi **hành vi nghiệp vụ** (không chỉ sắp xếp code) → hỏi trước.
 5. File rất lớn: **không đọc cả file**; tìm theo tên hàm (`grep -n "function tenHam"`), đọc từng đoạn. Số dòng trong tài liệu sẽ trôi — luôn tìm theo tên.
 6. Sau mỗi sửa đổi: chạy kiểm tra ở mục "Kiểm tra" bên dưới.
+7. **Sau MỌI sửa đổi file gốc** (`pos.html`, `PosX.html`, `posgieo.html`, `quanlygieo.html`, `manage.html`, `index.html`, `kiosk.html`, `*.js`…): chạy `sh tools/sinh_lai_tat_ca.sh` — sinh lại bản Giáng sinh / Tết / thử và bộ deploy theo mùa `ban_deploy/{thuong,giangsinh,tet}/`, rồi commit CẢ các file sinh ra. Không sửa tay file sinh tự động (`index_giangsinh.html`, `*_tet.html`, `*_thu.html`, mọi thứ trong `ban_deploy/`). Gửi file cho chủ dự án: gửi bản trong `ban_deploy/<mùa đang chạy>/` (đã đặt đúng tên).
 
 ## Bối cảnh nghiệp vụ đã chốt
 - Gieo Gieo **chỉ bán to-go** (`isToGo` là hằng `true`; nhánh "Tại quán"/Point đã gỡ ở F5).
@@ -42,6 +43,7 @@
 - Trạng thái deploy: chủ dự án xác nhận ngày 04/10/2026 — **v18 đã deploy**, chạy ổn ở cửa hàng 1 được **1–3 tuần** (chưa đủ "vài tuần" cho đa cửa hàng). Hỏi lại trước việc lớn.
 
 ## Kiểm tra
+- **Sinh lại mọi file tự động + test**: `sh tools/sinh_lai_tat_ca.sh` (bắt buộc sau mỗi lần sửa — xem quy tắc 7; `bo_deploy.test.js`, `giangsinh.test.js`, `tet.test.js` báo nếu quên).
 - Test: `sh tests/run_all.sh` (chỉ cần `node`). Test trích hàm thẳng từ HTML qua `tests/lib/extract.js` — đổi tên hàm thì sửa danh sách tên trong file test.
 - Cú pháp: tách các `<script>` inline ra file tạm rồi `node --check` từng file.
 - Kiểm kê truy cập Firebase (AST): `npm i` một lần, rồi `npm run inventory` → `inv_ast.json`.

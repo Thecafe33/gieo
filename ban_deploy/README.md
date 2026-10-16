@@ -25,10 +25,17 @@ máy còn giữ bản HTML cũ trong bộ nhớ đệm vẫn xin các file đó.
 
 ## Không sửa tay trong thư mục này
 
-File gốc nằm ở gốc repo (`pos.html`, `PosX.html`, `posgieo.html`, `kiosk.html`, `index.html`…). Sửa file gốc rồi chạy:
+**Không tự đồng bộ.** File gốc nằm ở gốc repo (`pos.html`, `PosX.html`, `posgieo.html`, `kiosk.html`, `index.html`…).
+Thư mục này chỉ được cập nhật khi chạy lệnh sinh lại — sửa file gốc mà không chạy thì các bộ ở đây vẫn là bản CŨ.
+
+**Sau MỌI lần sửa file gốc** (người hay Claude, phiên nào cũng vậy):
 
 ```sh
-node tools/tao_ban_giangsinh.js && node tools/tao_ban_tet.js && node tools/tao_ban_thu.js . && node tools/tao_bo_deploy.js
+sh tools/sinh_lai_tat_ca.sh
 ```
 
-`tests/bo_deploy.test.js` báo nếu quên sinh lại.
+Lệnh này sinh lại theo đúng thứ tự: bản Giáng sinh (`index_giangsinh.html`) → bản Tết (`*_tet.html`) → bản thử (`*_thu.html`)
+→ 3 bộ ở đây, rồi chạy toàn bộ test. Sau đó commit CẢ file gốc lẫn các file sinh ra.
+`tests/bo_deploy.test.js` (cùng `giangsinh.test.js`, `tet.test.js`) báo lỗi nếu quên sinh lại.
+
+Quy tắc này cũng ghi trong `CLAUDE.md` (quy tắc 7) — phiên làm việc mới của Claude đọc file đó trước.

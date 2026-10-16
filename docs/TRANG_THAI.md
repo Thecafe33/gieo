@@ -79,3 +79,7 @@
 4. Commit (kèm dòng Co-Authored-By) → push `Phan-tach-unit-engine`. Không tạo PR nếu không được yêu cầu.
 5. Gửi file cho chủ dự án: **📤 UPLOAD** (HTML + `_thu` + engine mới nếu có) / **💾 CHỈ LƯU, KHÔNG UPLOAD** (test, docs).
 6. Claude **không deploy**.
+
+## Bộ deploy theo mùa (16/10/2026)
+- `ban_deploy/{thuong,giangsinh,tet}/` = bộ file đặt sẵn đúng tên cho từng mùa (chủ dự án tải đúng thư mục về deploy) — xem `ban_deploy/README.md`.
+- **SINH TỰ ĐỘNG, không tự đồng bộ**: sau mọi lần sửa file gốc chạy `sh tools/sinh_lai_tat_ca.sh` rồi commit cả file sinh ra (CLAUDE.md quy tắc 7).
