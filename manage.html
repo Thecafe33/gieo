@@ -333,6 +333,19 @@ tr.is-rejected td,.cost-card.is-rejected{opacity:.55}
 .detail-close{margin-top:18px}.close-today{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;border-radius:16px;border:1.5px solid var(--line);background:var(--panel)}.close-today>div{display:grid;gap:2px;min-width:0}.close-today small{color:var(--sub);font-size:12.5px}.close-today .btn{flex:0 0 auto}
 .close-today.is-off{border-color:#8d938f;background:color-mix(in srgb,#8d938f 12%,var(--panel))}
 .close-range{display:grid;gap:10px;margin-top:12px}.close-range .btn{justify-self:start}.close-label{font-size:13px;font-weight:700;color:var(--sub)}.close-list{display:grid;gap:8px;margin-top:14px}.close-list .off-chips{justify-content:flex-start}
+/* [POPUP QUÁN — 16/10] số to, đọc được không cần dí sát màn hình; khối Đóng cửa thu gọn ở cuối */
+.dialog.store-detail .detail-row{font-size:15px!important;padding:12px 0}.dialog.store-detail .detail-row b{font-size:16px;font-weight:650;white-space:nowrap}
+.dialog.store-detail .detail-tile span{font-size:13px}.dialog.store-detail .detail-tile b{font-size:26px!important;font-weight:700}
+.dialog.store-detail .detail-section h3{font-size:16px}.dialog.store-detail .inline-note{font-size:13.5px!important;line-height:1.5}
+.dialog.store-detail .detail-revenue-head .small{font-size:13.5px}.dialog.store-detail .detail-revenue-head .detail-total{font-size:42px}
+@media(max-width:760px){.dialog.store-detail .detail-revenue-head .detail-total{font-size:34px}.dialog.store-detail .detail-tile b{font-size:23px!important}}
+.detail-close{border:1.5px solid var(--line);border-radius:16px;padding:0 16px;margin-top:20px!important}.detail-close>summary{list-style:none;display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:54px;cursor:pointer;font-size:15px;font-weight:700}.detail-close>summary::-webkit-details-marker{display:none}
+.detail-close>summary::after{content:"";width:9px;height:9px;border:solid var(--sub);border-width:0 2px 2px 0;transform:rotate(45deg);margin:-4px 2px 0 4px;transition:transform .2s;flex:0 0 auto}.detail-close[open]>summary::after{transform:rotate(-135deg);margin-top:4px}
+.detail-columns:has(> .detail-section:only-child){grid-template-columns:1fr}
+.detail-close .close-today{background:var(--fill);border-color:transparent}.detail-close .close-today.is-off{background:color-mix(in srgb,#8d938f 16%,var(--panel))}
+.close-sum-t{display:inline-flex;align-items:center;gap:8px}.close-sum-t svg{width:17px;height:17px}.close-sum-s{margin-left:auto;font-size:13px;font-weight:600;color:var(--sub);text-align:right}.detail-close[open]{padding-bottom:16px}
+/* [BIỂU ĐỒ] chừa đệm dưới cho hàng mốc giờ (trước chữ dính sát mép thẻ) */
+.panel.dashboard-chart{padding-bottom:22px!important}
 .outlet-widget.is-closed .widget-revenue-value,.outlet-widget.is-closed .widget-share{opacity:.7}
 @media(max-width:760px){.close-today{flex-wrap:wrap}.close-today .btn{width:100%}.close-range .btn{justify-self:stretch}}
 @media(max-width:760px){.off-panel{padding:17px}.off-dates{grid-template-columns:minmax(0,1fr)}}
@@ -540,7 +553,8 @@ function addDays(d, n){ const x = new Date(d); x.setDate(x.getDate()+n); return 
 function daysBetween(a, b){ return Math.round((parseDkey(b) - parseDkey(a)) / 86400000); }
 function dkey(d){return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Ho_Chi_Minh',year:'numeric',month:'2-digit',day:'2-digit'}).format(d)}
 function vnHour(d){return Number(new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Ho_Chi_Minh',hour:'2-digit',hourCycle:'h23'}).format(d))}
-function tcEmptySum(){ return { drink:0, snack:0, khac:0, cash:0, cashMain:0, transfer:0, total:0, count:0, hours:new Array(12).fill(0) }; }
+// h24 (16/10): doanh thu TỪNG GIỜ cho biểu đồ theo giờ (hours 2 giờ/ô giữ lại cho bản đệm cũ).
+function tcEmptySum(){ return { drink:0, snack:0, khac:0, cash:0, cashMain:0, transfer:0, total:0, count:0, hours:new Array(12).fill(0), h24:new Array(24).fill(0) }; }
 function tcIsTransfer(method){
   const m = String(method || '').toLowerCase();
   return m.includes('chuyển khoản') || m.includes('chuyen khoan') || m.includes('bank') || m.includes('transfer');
@@ -582,7 +596,7 @@ function tcAddOrder(sum, o, menu){
   if(tcIsTransfer(o.method)) sum.transfer += amount; else { sum.cash += amount; sum.cashMain += Math.max(0, amount - orderSnack); }
   sum.total += amount; sum.count++;
   const d = new Date(o.createdAt || Date.now());
-  if(!isNaN(d)) sum.hours[Math.floor(vnHour(d)/2)] += orderDrink + orderKhac;   // biểu đồ POS (bật 🐶) = nước + Khác
+  if(!isNaN(d)){ const hh = vnHour(d); sum.hours[Math.floor(hh/2)] += orderDrink + orderKhac; sum.h24[hh] += orderDrink + orderKhac; }   // biểu đồ POS (bật 🐶) = nước + Khác
   return sum;
 }
 function tcSummarize(orders, menu){ const s = tcEmptySum(); (orders||[]).forEach(o=>tcAddOrder(s, o, menu)); return s; }
@@ -590,7 +604,7 @@ function tcSummarize(orders, menu){ const s = tcEmptySum(); (orders||[]).forEach
 // ---- XOFA: y như updRv() của PosX.html ----
 // Food tách riêng (foodTotal, theo foodMethod || method; TÍNH RIÊNG chia theo tỉ lệ splitGroups).
 // Tổng = Σ (total − foodTotal) = Tại quán + To Go. Tiền mặt / Chuyển khoản của phần không-Food.
-function xoEmptySum(){ return { total:0, cash:0, bank:0, togo:0, instore:0, food:0, foodCash:0, foodBank:0, ship:0, shipRev:0, count:0, hours:new Array(12).fill(0) }; }
+function xoEmptySum(){ return { total:0, cash:0, bank:0, togo:0, instore:0, food:0, foodCash:0, foodBank:0, ship:0, shipRev:0, count:0, hours:new Array(12).fill(0), h24:new Array(24).fill(0) }; }
 function xoAddOrder(sum, o){
   if(!o) return sum;
   const total = Number(o.total) || 0;
@@ -624,7 +638,7 @@ function xoAddOrder(sum, o){
   if(o.isShip === true){ sum.ship++; sum.shipRev += total; }
   sum.count++;
   const h = parseInt(String(o.time || '').split(':')[0], 10);
-  if(h >= 0 && h < 24) sum.hours[Math.floor(h/2)] += net;   // biểu đồ PosX: không gồm Food
+  if(h >= 0 && h < 24){ sum.hours[Math.floor(h/2)] += net; sum.h24[h] += net; }   // biểu đồ PosX: không gồm Food
   return sum;
 }
 function xoSummarize(orders){ const s = xoEmptySum(); (orders||[]).forEach(o=>xoAddOrder(s, o)); return s; }
@@ -632,14 +646,14 @@ function xoSummarize(orders){ const s = xoEmptySum(); (orders||[]).forEach(o=>xo
 // Tiền mặt / Chuyển khoản / Food: y như updRv() của posgieo.html (cùng một hàm với PosX → dùng lại xoAddOrder).
 // Doanh thu = Σ o.total của mọi bill (gồm Food) — đúng số "Doanh thu" của quanlygieo (aggregateOrders), cũng là số
 // mà mục tiêu của Gieo (AOV × bill/ngày) so với. Chi tiết khác xem ở quanlygieo.
-function ggEmptySum(){ return Object.assign(xoEmptySum(), { revenue:0, hoursRev:new Array(12).fill(0) }); }
+function ggEmptySum(){ return Object.assign(xoEmptySum(), { revenue:0, hoursRev:new Array(12).fill(0), h24Rev:new Array(24).fill(0) }); }
 function ggAddOrder(sum, o){
   if(!o) return sum;
   xoAddOrder(sum, o);
   const total = Number(o.total) || 0;
   sum.revenue += total;
   const h = parseInt(String(o.time || '').split(':')[0], 10);
-  if(h >= 0 && h < 24) sum.hoursRev[Math.floor(h/2)] += total;
+  if(h >= 0 && h < 24){ sum.hoursRev[Math.floor(h/2)] += total; sum.h24Rev[h] += total; }
   return sum;
 }
 function ggSummarize(orders){ const s = ggEmptySum(); (orders||[]).forEach(o=>ggAddOrder(s, o)); return s; }
@@ -647,7 +661,7 @@ function ggSummarize(orders){ const s = ggEmptySum(); (orders||[]).forEach(o=>gg
 // Cộng nhiều ngày lại (các trường số + mảng giờ).
 function sumMerge(a, b){
   Object.keys(b).forEach(k=>{
-    if(Array.isArray(b[k])) b[k].forEach((v,i)=>{ a[k][i] = (a[k][i]||0) + v; });
+    if(Array.isArray(b[k])){ if(!Array.isArray(a[k])) a[k] = []; b[k].forEach((v,i)=>{ a[k][i] = (a[k][i]||0) + v; }); }
     else if(typeof b[k] === 'number') a[k] = (a[k]||0) + b[k];
   });
   return a;
@@ -846,7 +860,8 @@ async function revSources(){
   ].concat(gg.map(s=>({ key:'gg_' + s.id, run: async k=> ggSummarize(await ggFetchDay(s.id, k)) })));
 }
 // Trả { tc33:{dkey:sum}, xofa:{…}, gg_gg01:{…}, … } cho mọi ngày trong [from, to].
-async function revLoadRange(from, to, onProgress, only){
+// need24 (tuỳ chọn): ngày đang xem biểu đồ theo giờ — bản đệm cũ chưa có h24 thì đọc lại riêng ngày đó.
+async function revLoadRange(from, to, onProgress, only, need24){
   const today = dkey(new Date());
   const keys = [];
   for(let d = parseDkey(from); dkey(d) <= to; d = addDays(d, 1)) keys.push(dkey(d));
@@ -863,7 +878,8 @@ async function revLoadRange(from, to, onProgress, only){
   let dirty = false;
   await pool(jobs, 16, async j=>{
     const key = j.s.key;
-    const hit = (REV_MEM[key] || {})[j.k] || (j.stable ? (cache[key] || {})[j.k] : null);
+    let hit = (REV_MEM[key] || {})[j.k] || (j.stable ? (cache[key] || {})[j.k] : null);
+    if(hit && need24 && j.k === need24 && !hit.h24) hit = null;
     if(hit){ res[key][j.k] = hit; tick(); return; }
     const sum = await j.s.run(j.k);
     res[key][j.k] = sum;
@@ -1383,7 +1399,7 @@ async function readRevenue(from,to,compare){
  const peEnd=to>today?today:to;
  const expOf=st=>from<=peEnd?readExpenseSums(st,from,peEnd).catch(e=>{console.warn('[chi phí] không đọc được tổng hợp',st,e);return null}):Promise.resolve(null);
  const offOf=records.length?readOffDays(from,to).catch(e=>{console.warn('[ngày nghỉ] không đọc được',e);return{}}):Promise.resolve({});
- const [data,pl,expTc,expXo,expCfg,assets,off]=await Promise.all([start<=end?revLoadRange(start,end):{},readPlDays(records.filter(r=>r.active!==false),from,peEnd),expOf('tc33'),expOf('xofa'),loadExpenseCfg().catch(()=>null),loadAssets().catch(e=>{console.warn('[tài sản] không đọc được',e);return null}),offOf]);
+ const [data,pl,expTc,expXo,expCfg,assets,off]=await Promise.all([start<=end?revLoadRange(start,end,null,null,from===to?from:null):{},readPlDays(records.filter(r=>r.active!==false),from,peEnd),expOf('tc33'),expOf('xofa'),loadExpenseCfg().catch(()=>null),loadAssets().catch(e=>{console.warn('[tài sản] không đọc được',e);return null}),offOf]);
  const cats=expenseCatsAll(expCfg);
  return{from,to,data,targets,cfg,records,beCfg,pl,assets,off,exp:{tc33:expTc&&sumsToAlloc(expTc,cats),xofa:expXo&&sumsToAlloc(expXo,cats)},comparison:!!compare};
 }
@@ -1662,22 +1678,25 @@ function chartSeries(points){
  if(points.length===1)return [{...points[0],members:points}];
  return ['tc33','xofa','gieo'].map(brand=>{const members=points.filter(st=>st.brand===brand);return {...BRAND_META[brand],members,name:BRAND_META[brand].name+(brand==='gieo'&&members.length>1?' · '+members.length+' điểm':'')}}).filter(series=>series.members.length);
 }
+// [BIỂU ĐỒ — 16/10] Theo giờ: TỪNG GIỜ (trước gom 2 giờ / cột), khung mặc định 8h–22h (giờ mở cửa thường ngày);
+// có bill sớm / muộn hơn (TC33 mở 7h, lễ tết đóng 23h) thì tự nới tới đúng giờ đó. Nhiều quán: các quán Gieo đã gộp một
+// chuỗi "Gieo Gieo · N điểm" (chartSeries) và cột theo giờ là CỘT CHỒNG theo thương hiệu → thêm quán không làm cột mảnh đi.
 function chartSvg(points,dimensions){
- const list=chartSeries(points),[from,to]=rangeDates();let labels=[],values=list.map(()=>[]);
- ({labels,values}=chartValues(list,from,to));
-
- const W=dimensions?.width||(innerWidth<=760?380:900),H=dimensions?.height||190,L=innerWidth<=760?37:50,R=10,T=12,B=25,cw=W-L-R,ch=Math.max(15,H-T-B);
+ const list=chartSeries(points),[from,to]=rangeDates(),{labels,tips,values,stacked}=chartValues(list,from,to);
+ const mob=innerWidth<=760,W=dimensions?.width||(mob?380:900),H=dimensions?.height||190,L=mob?37:50,R=10,T=12,B=30,cw=W-L-R,ch=Math.max(15,H-T-B);
  const visible=list.map((st,j)=>({st,j})).filter(x=>!state.hidden.has(x.st.id));
- const maxRaw=Math.max(1,...visible.flatMap(x=>values[x.j])),pow=Math.pow(10,Math.floor(Math.log10(maxRaw))),max=Math.ceil(maxRaw/pow)*pow;
- const step=cw/Math.max(1,labels.length),bw=Math.max(.7,Math.min(16,step*.76/Math.max(1,visible.length)-2)),gap=Math.min(3,step*.035);
- currentBuckets=labels.map((label,i)=>({label,rows:visible.map(({st,j})=>({name:st.name,c:st.c,value:values[j][i]}))}));
- let html=`<svg class="chart-svg column-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Biểu đồ cột doanh thu ${esc(list.map(st=>st.name).join(', '))}. Mỗi nhóm cột là một ${from===to?'khung giờ':'kỳ'}." preserveAspectRatio="none">`;
+ const maxRaw=Math.max(1,...(stacked?labels.map((_,i)=>visible.reduce((n,x)=>n+Math.max(0,values[x.j][i]),0)):visible.flatMap(x=>values[x.j]))),pow=Math.pow(10,Math.floor(Math.log10(maxRaw))),max=Math.ceil(maxRaw/pow)*pow;
+ const step=cw/Math.max(1,labels.length),bw=stacked?Math.max(4,Math.min(30,step*.6)):Math.max(.7,Math.min(16,step*.76/Math.max(1,visible.length)-2)),gap=Math.min(3,step*.035);
+ currentBuckets=labels.map((label,i)=>({label:tips?tips[i]:label,rows:visible.map(({st,j})=>({name:st.name,c:st.c,value:values[j][i]}))}));
+ let html=`<svg class="chart-svg column-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Biểu đồ cột doanh thu ${esc(list.map(st=>st.name).join(', '))}. Mỗi ${stacked?'cột là một giờ, chồng theo quán':'nhóm cột là một kỳ'}." preserveAspectRatio="none">`;
  [0,.5,1].forEach(f=>{const y=T+ch*(1-f);html+=`<path d="M${L} ${y}H${W-R}" stroke="var(--line)" stroke-dasharray="${f?'3 4':'0'}"/><text x="${L-8}" y="${y+4}" text-anchor="end">${f?shortMoney(max*f):'0'}</text>`});
- const every=Math.ceil(labels.length/(innerWidth<=760?5:12));
- labels.forEach((label,i)=>{const center=L+step*(i+.5),span=visible.length*bw+Math.max(0,visible.length-1)*gap;
-  visible.forEach(({st,j},n)=>{const v=values[j][i],h=ch*v/max;html+=`<rect class="data-bar" x="${center-span/2+n*(bw+gap)}" y="${T+ch-h}" width="${bw}" height="${h}" rx="${Math.min(3,bw/3)}" fill="${st.c}"><title>${esc(label)} · ${esc(st.name)}: ${money(v)}đ</title></rect>`});
-  if(i%every===0)html+=`<text x="${center}" y="${H-5}" text-anchor="middle">${esc(label)}</text>`;
-  html+=`<rect x="${L+step*i}" y="${T}" width="${step}" height="${ch}" fill="transparent" tabindex="0" role="button" aria-label="${label}: ${currentBuckets[i].rows.map(r=>r.name+' '+money(r.value)+' đồng').join(', ')}" onpointerenter="chartTip(${i},this)" onpointerleave="hideChartTip()" onclick="chartTip(${i},this)" onfocus="chartTip(${i},this)" onblur="hideChartTip()" onkeydown="if(event.key==='Enter')chartTip(${i},this)"/>`;
+ const every=Math.ceil(labels.length/(mob?(stacked?8:5):(stacked?24:12)));
+ labels.forEach((label,i)=>{const center=L+step*(i+.5);
+  if(stacked){let y=T+ch;const segs=visible.map(({st,j})=>({st,v:Math.max(0,values[j][i])})).filter(x=>x.v>0);
+   segs.forEach((x,n)=>{const h=ch*x.v/max,top=n===segs.length-1;y-=h;html+=`<rect class="data-bar" x="${center-bw/2}" y="${y}" width="${bw}" height="${Math.max(0,h-(top?0:1))}" rx="${top?Math.min(4,bw/3):0}" fill="${x.st.c}"><title>${esc(currentBuckets[i].label)} · ${esc(x.st.name)}: ${money(x.v)}đ</title></rect>`})}
+  else{const span=visible.length*bw+Math.max(0,visible.length-1)*gap;visible.forEach(({st,j},n)=>{const v=values[j][i],h=ch*v/max;html+=`<rect class="data-bar" x="${center-span/2+n*(bw+gap)}" y="${T+ch-h}" width="${bw}" height="${h}" rx="${Math.min(3,bw/3)}" fill="${st.c}"><title>${esc(label)} · ${esc(st.name)}: ${money(v)}đ</title></rect>`})}
+  if(i%every===0)html+=`<text x="${center}" y="${H-9}" text-anchor="middle">${esc(label)}</text>`;
+  html+=`<rect x="${L+step*i}" y="${T}" width="${step}" height="${ch}" fill="transparent" tabindex="0" role="button" aria-label="${esc(currentBuckets[i].label)}: ${currentBuckets[i].rows.map(r=>r.name+' '+money(r.value)+' đồng').join(', ')}" onpointerenter="chartTip(${i},this)" onpointerleave="hideChartTip()" onclick="chartTip(${i},this)" onfocus="chartTip(${i},this)" onblur="hideChartTip()" onkeydown="if(event.key==='Enter')chartTip(${i},this)"/>`;
  });return html+'</svg>';
 }
 function chartTip(i,el){const tip=$('#chartTip'),wrap=$('#chartWrap'),b=currentBuckets[i];if(!tip||!b)return;tip.innerHTML=`<b>${esc(b.label)}</b>`+b.rows.map(r=>`<div class="row"><span><i class="dot" style="background:${r.c}"></i> ${esc(r.name)}</span><b>${money(r.value)} ₫</b></div>`).join('');tip.style.display='block';const r=el.getBoundingClientRect(),w=wrap.getBoundingClientRect();tip.style.left=Math.max(tip.offsetWidth/2,Math.min(w.width-tip.offsetWidth/2,r.x+r.width/2-w.x))+'px';tip.style.top='27px'}
@@ -1759,14 +1778,14 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape')toggleSidebar(false)
 
 
 function showRevenueInfo(){const list=selectedStores().map(storeRange),all=list.reduce((a,s)=>a+s.rev+(s.brand==='gieo'?0:s.food),0);openDialog('Đọc đúng doanh thu.',`<div class="detail-row"><span>The cafe 33</span><b>Đồ uống + Khác, không gồm Ăn vặt</b></div><div class="detail-row"><span>XOFA</span><b>Không gồm Food</b></div><div class="detail-row"><span>Gieo Gieo</span><b>Tổng doanh thu bill</b></div><div class="revenue-colour-key"><h3>Màu của ô doanh thu chung</h3><span><i style="background:#d2333f"></i>Dưới 50%</span><span><i style="background:#b87d12"></i>50–79%</span><span><i style="background:#2b57a8"></i>80–99%</span><span><i style="background:#12855a"></i>Từ 100% · đã đạt</span></div><div class="detail-section"><h3>Ở kỳ và cửa hàng đang chọn</h3><div class="detail-row"><span>Tổng thu cả bill, gồm Food</span><b>${money(all)} ₫</b></div></div><div class="detail-section"><h3>Điểm hoà vốn</h3><div class="detail-row"><span>The cafe 33 · XOFA</span><b>Chi phí cố định ÷ (1 − giá vốn %), cấu hình ở tab Điểm hoà vốn</b></div><div class="detail-row"><span>Gieo Gieo</span><b>Y chang Quản lý Gieo (lãi / lỗ từng ngày)</b></div><div class="detail-row"><span>Vạch trên thanh</span><b>Cộng hoà vốn các quán đang xem, tính tới hôm nay</b></div></div><p class="inline-note">Cách cộng bám theo file gốc. Tiền mặt và chuyển khoản của The cafe 33 tính cả Ăn vặt; các khoản Food của XOFA xem riêng trong chi tiết. “Trung bình / hoá đơn” lấy doanh thu chung chia tổng số bill.</p>`)}
-function storeDetails(id){
+function storeDetails(id,keepClose){
  const s=storeRange(stores.find(s=>s.id===id));
  const kv=(a,b)=>`<div class="detail-row"><span>${a}</span><b class="num">${money(b)} ₫</b></div>`;
  const category=id==='tc33'?`<div class="detail-section"><h3>Theo nhóm món</h3>${kv('Đồ uống',s.drink)}${kv('Khác',s.other)}${kv('Ăn vặt · ngoài doanh thu chung',s.food)}</div>`:id==='xofa'?`<div class="detail-section"><h3>Theo hình thức</h3>${kv('Tại quán',s.instore)}${kv('Mang đi',s.togo)}<div class="detail-row"><span>Đơn ship</span><b>${s.ship} đơn · ${money(s.shipRev)} ₫</b></div></div>`:'';
  const b=s.be,gieo=s.brand==='gieo',beSec=`<div class="detail-section detail-be"><h3>Điểm hoà vốn · ${beHas(b)?beNguon(b):gieo?'số của Quản lý Gieo':'chưa có số'}</h3>${beHas(b)?`${kv('Doanh thu hoà vốn',b.hoaVon)}<div class="detail-row"><span>Trạng thái</span><b class="${b.dat?'be-ok':'be-loss'}">${b.dat?'Đã hoà vốn':'Chưa hoà vốn'}</b></div>${kv(b.dat?(gieo||b.nguon==='thuc'?'Lãi':'Lãi ước tính'):'Đang lỗ',Math.abs(b.lai))}${gieo?`<div class="detail-row"><span>Số ngày có số</span><b>${b.soNgay}/${b.soNgay+b.thieu}${b.mucTinCay?' · '+MUC_TIN_CAY[b.mucTinCay]:''}</b></div>`:''}`:`<p class="inline-note">${esc(beEmptyReason(s))}</p>`}</div>`;
- openDialog(esc(s.name),`<div class="detail-revenue-head" style="--c:${s.c}"><div><p class="small muted">${esc(s.meta)}</p><div class="detail-total num">${amount(s.rev)}</div><p class="small muted">${rangeDates()[0]===rangeDates()[1]?dateVN(rangeDates()[0]):rangeDates().map(dateVN).join(' – ')}</p></div><span class="store-monogram">${s.mono}</span></div>${gieo?`<div class="detail-section detail-close"><h3>Đóng cửa</h3><div id="close-body" data-id="${esc(id)}"><p class="small muted">Đang đọc lịch đóng cửa…</p></div></div>`:''}<div class="detail-grid"><div class="detail-tile"><span>Hoá đơn</span><b class="num">${money(s.count)}</b></div><div class="detail-tile"><span>Đạt mục tiêu</span><b class="num">${storeClosedAll(s)?'Đóng cửa':s.target?Math.floor(s.rev/s.target*100)+'%':'Chưa đặt'}</b></div></div><div class="detail-columns"><div class="detail-section"><h3>Thanh toán ${id==='tc33'?'· cả bill':''}</h3>${kv('Tiền mặt',s.cash)}${kv('Chuyển khoản',s.bank)}</div>${category}</div>${id==='xofa'?`<div class="detail-section detail-food"><h3>Food · ngoài doanh thu chung</h3><div class="detail-food-grid">${kv('Tổng Food',s.food)}${kv('Tiền mặt',s.foodCash)}${kv('Chuyển khoản',s.foodBank)}</div></div>`:''}<div class="inline-note">${id==='tc33'?'Tiền mặt + chuyển khoản bao gồm Ăn vặt. Doanh thu chung của quán chỉ gồm Đồ uống + Khác.':id==='xofa'?'Food được tách riêng, không cộng vào doanh thu chung. Đơn ship nằm trong doanh thu quán.':'Chi tiết món, giá vốn và kho tiếp tục xem ở hệ thống Quản lý Gieo.'}</div>${beSec}`,false);
+ openDialog(esc(s.name),`<div class="detail-revenue-head" style="--c:${s.c}"><div><p class="small muted">${esc(s.meta)}</p><div class="detail-total num">${amount(s.rev)}</div><p class="small muted">${rangeDates()[0]===rangeDates()[1]?dateVN(rangeDates()[0]):rangeDates().map(dateVN).join(' – ')}</p></div><span class="store-monogram">${s.mono}</span></div><div class="detail-grid"><div class="detail-tile"><span>Hoá đơn</span><b class="num">${money(s.count)}</b></div><div class="detail-tile"><span>Đạt mục tiêu</span><b class="num">${storeClosedAll(s)?'Đóng cửa':s.target?Math.floor(s.rev/s.target*100)+'%':'Chưa đặt'}</b></div></div><div class="detail-columns"><div class="detail-section"><h3>Thanh toán ${id==='tc33'?'· cả bill':''}</h3>${kv('Tiền mặt',s.cash)}${kv('Chuyển khoản',s.bank)}</div>${category}</div>${id==='xofa'?`<div class="detail-section detail-food"><h3>Food · ngoài doanh thu chung</h3><div class="detail-food-grid">${kv('Tổng Food',s.food)}${kv('Tiền mặt',s.foodCash)}${kv('Chuyển khoản',s.foodBank)}</div></div>`:''}<div class="inline-note">${id==='tc33'?'Tiền mặt + chuyển khoản bao gồm Ăn vặt. Doanh thu chung của quán chỉ gồm Đồ uống + Khác.':id==='xofa'?'Food được tách riêng, không cộng vào doanh thu chung. Đơn ship nằm trong doanh thu quán.':'Chi tiết món, giá vốn và kho tiếp tục xem ở hệ thống Quản lý Gieo.'}</div>${beSec}${gieo?`<details class="detail-section detail-close" id="close-det"${keepClose?' open':''}><summary><span class="close-sum-t">${icon('calendar')}Đóng cửa</span><span class="close-sum-s" id="close-sum">${storeClosedAll(s)?'Đang đóng cửa':''}</span></summary><div id="close-body" data-id="${esc(id)}"><p class="small muted">Đang đọc lịch đóng cửa…</p></div></details>`:''}`,false);
  $('#dialog').classList.add('store-detail');
- if(gieo)closeSecLoad(id);
+ if(gieo){closeSecLoad(id);if(keepClose)$('#close-det')?.scrollIntoView({block:'nearest'})}
 }
 function openRange(){openDialog('Chọn khoảng thời gian',`<div class="range-options">${[['day','Hôm nay'],['yesterday','Hôm qua'],['week','Tuần này'],['month','Tháng này'],['year','Năm nay']].map(([k,l])=>`<button class="btn ${state.range===k?'':'secondary'}" onclick="closeDialog();setRange('${k}')">${l}</button>`).join('')}</div><form onsubmit="applyRange(event)"><div class="form-grid"><div class="field"><label for="rangeFrom">Từ ngày</label><input id="rangeFrom" class="input" type="date" name="from" required value="${rangeDates()[0]}"></div><div class="field"><label for="rangeTo">Đến ngày</label><input id="rangeTo" class="input" type="date" name="to" required value="${rangeDates()[1]}"></div></div><p class="small muted">Ngày tương lai chưa có đơn hàng.</p><div class="form-actions"><button type="submit" class="btn">Áp dụng</button></div></form>`)}
 function applyRange(ev){ev.preventDefault();const f=new FormData(ev.target),from=f.get('from'),to=f.get('to');if(to<from){toast('Ngày kết thúc cần sau ngày bắt đầu.');return}if((parseDate(to)-parseDate(from))/86400000>730){toast('Chọn khoảng tối đa 2 năm.');return}state.from=from;state.to=to;closeDialog();setRange('custom')}
@@ -1881,8 +1900,14 @@ function beWidget(s){
  const detail=b.dat?(gieo?'Lãi <b class="num">'+shortMoney(b.lai)+'</b>':'Vượt hoà vốn <b class="num">'+shortMoney(Math.max(0,s.rev-b.hoaVon))+'</b>'):'Đang lỗ <b class="num">'+shortMoney(-b.lai)+'</b>';
  return `<div class="widget-be ${b.dat?'is-ok':'is-loss'}" title="Hoà vốn ${money(b.hoaVon)} đồng · ${b.dat?'đã hoà vốn':'đang lỗ '+money(-b.lai)+' đồng'}${gieo&&b.dat?' · lãi '+money(b.lai)+' đồng':''}"><div class="widget-be-row"><span>Hoà vốn <b class="num">${shortMoney(b.hoaVon)}</b></span><span class="widget-be-pill">${icon(b.dat?'check':'info')}${b.dat?'Đã hoà vốn':'Chưa hoà vốn'}</span></div><div class="widget-be-row widget-be-sub"><span>${detail}</span><small>${esc(beNote(s))}</small></div></div>`;
 }
+const CHART_OPEN=8,CHART_CLOSE=22;   // khung giờ mặc định của biểu đồ theo giờ: 8h–22h
+// Doanh thu giờ h (0–23) của một quán trong bản tóm tắt ngày. Bản đệm cũ chỉ có ô 2 giờ → dồn vào giờ chẵn.
+function hourRev(d,s,h){if(!d)return 0;const a=s.brand==='gieo'?d.h24Rev:d.h24;if(a)return a[h]||0;const o=s.brand==='gieo'?d.hoursRev:d.hours;return o&&h%2===0?o[h/2]||0:0}
+// Khung giờ hiển thị: [8, 21] nới ra tới giờ sớm nhất / muộn nhất có doanh thu (mọi chuỗi, kể cả đang ẩn → trục không nhảy khi bật tắt).
+function chartHourSpan(per){let a=CHART_OPEN,b=CHART_CLOSE-1;per.forEach(r=>r.forEach((v,h)=>{if(v){a=Math.min(a,h);b=Math.max(b,h)}}));return[a,b]}
 function chartValues(series,from,to){
- if(from===to){const labels=Array.from({length:12},(_,i)=>i*2+'–'+(i*2+2)+'h'),values=series.map(group=>labels.map((_,i)=>group.members.reduce((n,s)=>{const d=live.rev?.data[s.brand==='gieo'?'gg_'+s.id:s.id]?.[from];return n+(d?(s.brand==='gieo'?d.hoursRev?.[i]:d.hours?.[i])||0:0)},0)));return{labels,values}}
+ if(from===to){const per=series.map(group=>Array.from({length:24},(_,h)=>group.members.reduce((n,s)=>n+hourRev(live.rev?.data[s.brand==='gieo'?'gg_'+s.id:s.id]?.[from],s,h),0))),[a,b]=chartHourSpan(per),hs=[];for(let h=a;h<=b;h++)hs.push(h);
+  return{labels:hs.map(h=>h+'h'),tips:hs.map(h=>h+'h – '+(h+1)+'h'),values:per.map(r=>hs.map(h=>r[h])),stacked:true}}
  const days=[];for(let d=from;d<=to;d=addDays(d,1))days.push(d);const buckets=days.length<=31?days.map(d=>[d]):[...new Set(days.map(d=>d.slice(0,7)))].map(m=>days.filter(d=>d.startsWith(m)));
  return{labels:buckets.map(b=>days.length<=31?b[0].slice(8)+'/'+b[0].slice(5,7):b[0].slice(5,7)+'/'+b[0].slice(0,4)),values:series.map(group=>buckets.map(bucket=>group.members.reduce((n,s)=>n+bucket.reduce((a,date)=>{const d=live.rev?.data[s.brand==='gieo'?'gg_'+s.id:s.id]?.[date];return a+(d?(s.id==='tc33'?d.drink+d.khac:s.brand==='gieo'?d.revenue:d.total):0)},0),0)))};
 }
@@ -1946,12 +1971,13 @@ async function closeSecLoad(id){
  try{off=await backend.readOffDays(TODAY,addDays(TODAY,92))}catch(e){const b=box();if(b)b.innerHTML='<p class="small muted">Không đọc được lịch đóng cửa.</p>';return}
  const b=box();if(!b)return;
  const days=Object.keys(off).filter(d=>backend.isStoreOff(off,d,id)).sort(),todayOff=days.includes(TODAY),next=days.filter(d=>d!==TODAY);
+ const sum=$('#close-sum');if(sum)sum.textContent=(todayOff?'Hôm nay đóng cửa':'Hôm nay mở cửa')+(next.length?' · sắp đóng '+next.length+' ngày':'');
  b.innerHTML=`<div class="close-today ${todayOff?'is-off':''}"><div><b>${todayOff?'Hôm nay đang đóng cửa':'Hôm nay đang mở cửa'}</b><small>${dateVN(TODAY)}${todayOff?' · mục tiêu hôm nay = 0':''}</small></div><button class="btn ${todayOff?'secondary':''}" type="button" onclick="storeSetClosed('${esc(id)}','${TODAY}','${TODAY}',${!todayOff})">${todayOff?'Mở cửa lại':'Đóng cửa hôm nay'}</button></div>`+
   `<form class="close-range" onsubmit="storeCloseRange(event,'${esc(id)}')"><span class="close-label">Đóng nhiều ngày liên tục</span><div class="off-dates"><label class="field"><span>Từ ngày</span><input class="input" type="date" name="from" value="${addDays(TODAY,1)}" required onclick="openNativePicker(this)"></label><label class="field"><span>Đến ngày</span><input class="input" type="date" name="to" value="" required onclick="openNativePicker(this)"></label></div><button class="btn secondary" type="submit">${icon('calendar')}Đóng cửa các ngày này</button></form>`+
   (next.length?`<div class="close-list"><span class="close-label">Sắp đóng cửa</span><div class="off-chips">${next.map(d=>`<span class="off-chip">${dateVN(d).slice(0,5)} ${['CN','T2','T3','T4','T5','T6','T7'][parseDate(d).getDay()]}<button type="button" onclick="storeSetClosed('${esc(id)}','${d}','${d}',false)" aria-label="Bỏ đóng cửa ngày ${dateVN(d)}">×</button></span>`).join('')}</div></div>`:'');
 }
 async function storeSetClosed(id,from,to,on){
- await commitAction('off:'+id,()=>backend.writeOffDays(from,to,[id],on),async()=>{await offRefresh();toast(on?'Đã đóng cửa '+(from===to?(from===TODAY?'hôm nay':dateVN(from)):dateVN(from)+' – '+dateVN(to))+'.':'Đã mở cửa lại '+(from===TODAY?'hôm nay':dateVN(from))+'.');if($('#close-body')?.dataset.id===id)storeDetails(id)});
+ await commitAction('off:'+id,()=>backend.writeOffDays(from,to,[id],on),async()=>{await offRefresh();toast(on?'Đã đóng cửa '+(from===to?(from===TODAY?'hôm nay':dateVN(from)):dateVN(from)+' – '+dateVN(to))+'.':'Đã mở cửa lại '+(from===TODAY?'hôm nay':dateVN(from))+'.');if($('#close-body')?.dataset.id===id)storeDetails(id,true)});
 }
 function storeCloseRange(event,id){
  event.preventDefault();const f=new FormData(event.target),from=String(f.get('from')||''),to=String(f.get('to')||'');
