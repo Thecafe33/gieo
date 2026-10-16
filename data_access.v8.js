@@ -6,6 +6,7 @@
  *     → ghi thêm dấu { 'từ_đến': lúc } vào pl_dirty_gieogieo/{quán} (dữ liệu dùng chung mọi quán → /_all). Lượt ghi của HÔM NAY không
  *     ghi dấu (POS bán hàng không ghi thêm gì). plNgayCanTinh: quy tắc DUY NHẤT (quanlygieo + manage) chọn ngày phải tính lại.
  *     Quản lý cài plDirtyLookup: true → sửa / xoá bản ghi không kèm ngày (duyệt chi phí, sửa ca…) đọc bản ghi trước để biết ngày.
+ *     + pl_book_gieogieo (S): SỔ GỘP lãi/lỗ — 1 bản ghi 'days' / quán chứa tóm tắt từng ngày (đọc 1 lượt thay vì mỗi ngày 1 lượt).
  * v7 (16/10): v6 + đăng ký pl_days_gieogieo (S) — quanlygieo ghi tóm tắt lãi/lỗ từng ngày, manage.html (TC33 + XOFA) đọc để hiện hoà vốn / lãi các quán Gieo.
  * v6 (12/10): NỘI DUNG GIỐNG HỆT v5 — chỉ đổi tên file. Lý do: header `immutable` làm trình duyệt NHỚ cả năm một lần xin file lúc nó chưa
  *     có trên site (404); tên file mới thì chưa từng bị xin nên không dính bản 404 đã nhớ.
@@ -51,7 +52,7 @@
     'checklist_activity_logs', 'checkout_side_effects', 'cogs', 'daily_closings', 'daily_openings', 'daily_ops',
     'daily_sales_cache', 'dup_recovery', 'duty_cases', 'duty_digests', 'duty_tasks', 'duty_verify_undo',
     'employee_shifts', 'employee_stock_deductions', 'expenses', 'finance', 'handover_counts', 'handover_records',
-    'label_reprints', 'ledger_day_summaries', 'order_cancel_marks', 'order_stock_traces', 'payroll_month_adjustments', 'pl_days', 'prep_batches',
+    'label_reprints', 'ledger_day_summaries', 'order_cancel_marks', 'order_stock_traces', 'payroll_month_adjustments', 'pl_book', 'pl_days', 'prep_batches',
     'prep_forecasts', 'prep_ingredient_locks', 'prep_shortage_recons', 'prep_transactions', 'purchase_orders',
     'receiving_records', 'refill_rules', 'reversal_unit_claims', 'sales_assist_logs', 'shift_inventory_counts',
     'shift_segments', 'shift_workflows', 'staff_notes', 'staff_target_config', 'staff_target_days',

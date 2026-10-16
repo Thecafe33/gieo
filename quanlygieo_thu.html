@@ -8193,6 +8193,10 @@ function plLuuTomTat(days, opts){
     lo.reduce((p, phan) => p.then(()=>{
       const b = fstore.batch();
       phan.forEach(x => b.set(coll.doc(x.o.date), Object.assign({}, x.o, { storeId, updatedAt: at })));
+      // [SỔ GỘP — 16/10] Cùng lượt ghi: tóm tắt các ngày này vào sổ gộp của quán (pl_book_gieogieo/days) — màn Hoà vốn 30 ngày,
+      // Thu hồi vốn và manage đọc 1 bản ghi này thay vì mỗi ngày 1 bản.
+      const so = {}; phan.forEach(x => { so[x.o.date] = Object.assign({}, x.o, { updatedAt: at }); });
+      b.set(fstore.collection('pl_book_gieogieo').doc('days'), { d: so, at, storeId }, { merge: true });
       return b.commit().then(()=>{
         let m = {}; try{ m = JSON.parse(localStorage.getItem(memoKey) || '{}') || {}; }catch(e){}
         phan.forEach(x=>{ m[x.o.date] = x.sig; });
@@ -8217,12 +8221,21 @@ async function plNgayTuSo(startDate, endDate){
   const from = dkey(startDate), to = dkey(endDate);
   let by = {}, marks = null;
   try{
-    const [snap, m] = await Promise.all([
-      fstore.collection('pl_days_gieogieo').where('date','>=',from).where('date','<=',to).get(),
-      GieoData.plDocDau(fstore, storeId)
-    ]);
-    snap.docs.forEach(d=>{ const x = d.data(); if(x && x.date) by[x.date] = x; });
+    // [SỔ GỘP] 1 lượt đọc cho mọi ngày (+ 2 lượt dấu). Chưa có sổ (lần đầu) → đọc pl_days của khoảng rồi tạo sổ.
+    const soRef = fstore.collection('pl_book_gieogieo').doc('days');
+    const [so, m] = await Promise.all([soRef.get(), GieoData.plDocDau(fstore, storeId)]);
     marks = m;
+    if(so.exists && so.data().d) Object.entries(so.data().d).forEach(([k, x])=>{ if(k >= from && k <= to && x) by[k] = Object.assign({ date: k }, x); });
+    if(so.exists && so.data().d){
+      // Giữ sổ gọn: quá 800 ngày → bỏ các ngày cũ nhất (màn Thu hồi vốn chỉ quét tối đa 730 ngày).
+      const ks = Object.keys(so.data().d).sort(), du = ks.length - 800;
+      if(du > 0){ const del = firebase.firestore.FieldValue.delete(), upd = {}; ks.slice(0, du).forEach(k=>{ upd['d.' + k] = del; }); soRef.update(upd).catch(()=>{}); }
+    }
+    else {
+      const snap = await fstore.collection('pl_days_gieogieo').where('date','>=',from).where('date','<=',to).get();
+      const moi = {}; snap.docs.forEach(d=>{ const x = d.data(); if(x && x.date){ by[x.date] = x; const o = Object.assign({}, x); delete o.storeId; moi[x.date] = o; } });
+      if(Object.keys(moi).length) soRef.set({ d: moi, at: new Date().toISOString(), storeId }, { merge: true }).catch(e=>console.warn('[sổ gộp] không tạo được:', e));
+    }
   }catch(err){ console.warn('[pl_days] không đọc được bản tóm tắt — tính đầy đủ:', err); return computeDailyPLRange(startDate, endDate); }
   const need = GieoData.plNgayCanTinh(by, from, to, { marks });
   const map = new Map(Object.values(by).map(x=>[x.date, x]));

@@ -57,7 +57,7 @@ near(r1.hoaVon, r2_.hoaVon, 'Hoà vốn từ bản tổng hợp = từ từng kh
   const q = (f = []) => ({ where: (a, op, v) => q(f.concat([[op, v]])), get: async () => { queries++; return { docs: Object.values(docs).filter(x => f.every(([op, v]) => op === '>=' ? x.date >= v : x.date <= v)).map(x => ({ data: () => x })) }; } });
   const env = { fstore: { collection: () => q() }, localStorage: { getItem: k => LS[k] || null, setItem: (k, v) => { LS[k] = v; } }, console: { warn() {} } };
   const realNow = Date; global.Date = class extends realNow { constructor(...a) { super(...(a.length ? a : ['2026-10-16T05:00:00Z'])); } static now() { return new realNow('2026-10-16T05:00:00Z').getTime(); } };
-  const read = new Function(...Object.keys(env), HELP + extract('manage.html', ['pad', 'parseDkey', 'addDays', 'dkey', 'daysInMonthYm', 'pool', 'ggName', 'plCacheLoad', 'plCacheSave', 'readPlDays']) +
+  const read = new Function(...Object.keys(env), HELP + extract('manage.html', ['pad', 'parseDkey', 'addDays', 'dkey', 'daysInMonthYm', 'pool', 'ggName', 'plCacheLoad', 'plCacheSave', 'readPlBook', 'readPlDays']) +
     "\nconst GIEO_LEGACY='gg01', PL_CACHE_KEY='mg_pl_cache_v1', PL_STABLE_DAYS=35;\nreturn readPlDays;")(...Object.values(env));
   const R = [{ id: 'gg01' }];
   const y1 = await read(R, '2026-01-01', '2026-10-15');
@@ -68,6 +68,17 @@ near(r1.hoaVon, r2_.hoaVon, 'Hoà vốn từ bản tổng hợp = từ từng kh
   eq(got <= 46, true, 'Lần 2: chỉ đọc lại phần chưa ổn định (≤ 46 ngày gần nhất, đọc ' + got + ')');
   const m1 = await read(R, '2026-03-10', '2026-03-20');
   eq(Object.keys(m1.gg01).length, 11, 'Khoảng nằm trong tháng đã lưu: lấy từ đệm, đúng khoảng ngày');
+  // Sổ gộp: quán đã có sổ → 1 lượt đọc cho mọi ngày, không truy vấn pl_days
+  {
+    let soReads = 0, q2 = 0;
+    const book = { d: {} }; Object.keys(docs).forEach(k => { book.d[k] = { lai: 2, updatedAt: 'x' }; });
+    const env2 = { fstore: { collection: () => ({ doc: () => ({ get: async () => { soReads++; return { exists: true, data: () => book }; } }), where: () => ({ where: () => ({ get: async () => { q2++; return { docs: [] }; } }) }) }) },
+      localStorage: env.localStorage, console: { warn() {} } };
+    const read2 = new Function(...Object.keys(env2), HELP + extract('manage.html', ['pad', 'parseDkey', 'addDays', 'dkey', 'daysInMonthYm', 'pool', 'ggName', 'plCacheLoad', 'plCacheSave', 'readPlBook', 'readPlDays']) +
+      "\nconst GIEO_LEGACY='gg01', PL_CACHE_KEY='mg_pl_cache_v1', PL_STABLE_DAYS=35;\nreturn readPlDays;")(...Object.values(env2));
+    const y3 = await read2(R, '2026-01-01', '2026-10-15');
+    eq([Object.keys(y3.gg01).length, y3.gg01['2026-05-05'].lai, soReads, q2], [288, 2, 1, 0], 'Sổ gộp: cả năm = 1 lượt đọc (288 ngày), không truy vấn pl_days');
+  }
   global.Date = realNow;
   console.log(ok ? 'ALL PASS' : 'SOME FAIL'); process.exit(ok ? 0 : 1);
 })();

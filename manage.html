@@ -1371,9 +1371,23 @@ function ggBreakEven(byDate, dates){
 const PL_CACHE_KEY = 'mg_pl_cache_v1', PL_STABLE_DAYS = 35;
 function plCacheLoad(){ try{ const j = JSON.parse(localStorage.getItem(PL_CACHE_KEY) || '{}'); return j && typeof j === 'object' ? j : {}; }catch(e){ return {}; } }
 function plCacheSave(c){ try{ localStorage.setItem(PL_CACHE_KEY, JSON.stringify(c)); }catch(e){ console.warn('[hoà vốn] không lưu được đệm', e); } }
+// [SỔ GỘP — 16/10] Đọc sổ gộp của quán (pl_book_gieogieo/days — 1 lượt cho mọi ngày, quanlygieo + manage cùng ghi).
+// Quán chưa có sổ → cách cũ (truy vấn pl_days theo khoảng + đệm tháng ổn định).
+async function readPlBook(id, from, to){
+  try{
+    const d = await fstore.collection(ggName('pl_book_gieogieo', id)).doc('days').get();
+    if(!d.exists || !d.data() || !d.data().d) return null;
+    const m = {}; Object.entries(d.data().d).forEach(([k, x])=>{ if(k >= from && k <= to && x) m[k] = Object.assign({ date: k }, x); });
+    return m;
+  }catch(e){ return null; }
+}
 async function readPlDays(records, from, to){
   const out = {};
   if(!(from <= to)) return out;
+  const so = {}; await pool(records || [], 4, async r=>{ so[r.id] = await readPlBook(r.id, from, to); });
+  const conLai = (records || []).filter(r=>{ if(so[r.id]){ out[r.id] = so[r.id]; return false; } return true; });
+  if(!conLai.length) return out;
+  records = conLai;
   const cutoff = dkey(addDays(new Date(), -PL_STABLE_DAYS)), cache = plCacheLoad(); let dirty = false;
   await pool(records || [], 4, async r=>{
     try{
@@ -1438,6 +1452,8 @@ async function plFillMissing(records, pl, from, to, onStore){
       const res = await window.LaiLo.tinh({ fstore, db, storeId: r.id, from: need[0], to: need[need.length - 1] });
       const at = new Date().toISOString(), col = fstore.collection(ggName('pl_days_gieogieo', r.id)), batch = fstore.batch(), put = [];
       res.tomTat.filter(o=>need.includes(o.date)).forEach(o=>{ const x = Object.assign({}, o, { storeId: r.id, updatedAt: at, by: 'manage' }); batch.set(col.doc(o.date), x); put.push(x); });
+      // [SỔ GỘP] cùng lượt ghi: cập nhật đúng các ngày vừa tính trong sổ gộp của quán (ghi đè ngày đó, không cộng chồng).
+      if(put.length){ const so = {}; put.forEach(x=>{ const o = Object.assign({}, x); delete o.storeId; so[x.date] = o; }); batch.set(fstore.collection(ggName('pl_book_gieogieo', r.id)).doc('days'), { d: so, at, storeId: r.id }, { merge: true }); }
       if(put.length){ await batch.commit(); const m = pl[r.id] || (pl[r.id] = {}); put.forEach(x=>{ m[x.date] = x; }); plCachePut(r.id, put); n += put.length; if(onStore) onStore(r.id); }
     }catch(e){ console.warn('[lãi/lỗ Gieo] không tự tính được', r.id, e); }
   }

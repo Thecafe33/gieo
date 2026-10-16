@@ -69,15 +69,15 @@ eq(M.ggBreakEven(null, ['2026-10-16']), null, 'Gieo: không đọc được → 
 // ── quanlygieo plLuuTomTat: chỉ ghi ngày đổi số, hôm nay chỉ màn Hôm nay ghi, Xem tất cả không ghi ──
 (async () => {
   const mk = (QL_ALL, storeId) => {
-    const writes = [], LS = {};
+    const writes = [], LS = {}, so = [];   // so: lượt ghi sổ gộp (pl_book_gieogieo/days) — cùng batch với pl_days
     const fstore = { collection: n => ({ doc: id => ({ path: n + '/' + id }) }),
-      batch: () => { const ops = []; return { set: (ref, d) => ops.push([ref.path, d]), commit: () => { writes.push(...ops); return Promise.resolve(); } }; } };
+      batch: () => { const ops = []; return { set: (ref, d) => (ref.path === 'pl_book_gieogieo/days' ? ops.push(['SO', d]) : ops.push([ref.path, d])), commit: () => { ops.forEach(o => (o[0] === 'SO' ? so.push(o[1]) : writes.push(o))); return Promise.resolve(); } }; } };
     const GieoData = { storeId: () => storeId };
     const env = { QL_ALL, fstore, GieoData, window: { GieoData }, localStorage: { getItem: k => LS[k] || null, setItem: (k, v) => { LS[k] = v; } },
       dkey: () => '2026-10-16', configForDate: () => ({ targets: { cogsPct: 35 } }), console: { warn(...a) { console.log('WARN', ...a); } } };
     const f = new Function(...Object.keys(env), "const PL_TOM_TAT_KEYS=['doanhThu','giaVon','phiKenh','luong','chiPhiCoDinh','khauHao','haoHut','bienPhiKhac','tongChiPhi','lai','laiTruocKhauHao'];\n" +
       extract('quanlygieo.html', ['plBreakEven', 'plTomTatNgay', 'plLuuTomTat']) + '\nreturn plLuuTomTat;')(...Object.values(env));
-    return { f, writes, LS };
+    return { f, writes, LS, so };
   };
   const tick = () => new Promise(r => setTimeout(r, 5));
   const today = day('2026-10-16', 400000, 120000, 200000, { mucTinCay: 'dang-chay' });
@@ -85,10 +85,12 @@ eq(M.ggBreakEven(null, ['2026-10-16']), null, 'Gieo: không đọc được → 
   A.f(days.concat([today])); await tick();
   eq(A.writes.map(w => w[0]), ['pl_days_gieogieo/2026-10-13', 'pl_days_gieogieo/2026-10-14', 'pl_days_gieogieo/2026-10-15'], 'Ghi các ngày đã qua; hôm nay để màn Hôm nay ghi');
   eq(A.writes[0][1].storeId === 'gg01' && A.writes[0][1].hoaVon > 0 && !!A.writes[0][1].updatedAt, true, 'Bản ghi có quán, hoà vốn, giờ cập nhật');
+  eq([A.so.length, Object.keys(A.so[0].d), A.so[0].d['2026-10-14'].lai, !!A.so[0].d['2026-10-14'].updatedAt], [1, ['2026-10-13', '2026-10-14', '2026-10-15'], A.writes[1][1].lai, true], 'Sổ gộp: cùng lượt ghi, đúng các ngày vừa ghi, cùng số');
   A.f(days); await tick();
   eq(A.writes.length, 3, 'Mở lại, số không đổi → không ghi lại');
   A.f([day('2026-10-14', 950000, 300000, 200000)]); await tick();
   eq(A.writes.length, 4, 'Số một ngày đổi (chi phí / doanh thu cập nhật) → ghi lại đúng ngày đó');
+  eq([A.so.length, Object.keys(A.so[1].d)], [2, ['2026-10-14']], 'Sổ gộp: ghi ĐÈ đúng ngày đổi (không cộng chồng)');
   A.f([today], { homNay: true, be: Q.plBreakEven(today, 0.6) }); await tick();
   eq(A.writes[4][0] + ' ' + A.writes[4][1].hoaVon, 'pl_days_gieogieo/2026-10-16 ' + Math.round(Q.plBreakEven(today, 0.6).hoaVon * 100) / 100, 'Màn Hôm nay ghi hôm nay, đúng hoà vốn đang hiện');
   const X = mk(true, null); X.f(days); await tick();
