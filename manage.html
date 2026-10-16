@@ -836,29 +836,46 @@ function isStoreOff(off, date, id){
   return !!(v && v.length) && (v.includes('*') || (!!id && v.includes(id)));
 }
 // { 'YYYY-MM-DD': ['gg01'] | ['*'] } cho [from, to] — 1 truy vấn theo mã ngày, chỉ trả ngày có quán nghỉ.
+// [16/10] Ngày đóng cửa The cafe 33 / XOFA: bảng RIÊNG off_days_tc33xofa/{ngày}.offStores (['tc33'|'xofa']) — không chung bảng
+// ngày đặc biệt của Gieo (ở đó ngày cũ "Nghỉ / đóng cửa" = MỌI quán Gieo; để chung thì TC33 / XOFA bị tính nghỉ theo).
+const OFF_TCX_COLL = 'off_days_tc33xofa', TCX_IDS = ['tc33', 'xofa'];
+// { ngày: [mã quán] } cho [from, to] — 2 truy vấn (Gieo + TC33/XOFA). '*' của Gieo bung ra đúng các quán Gieo.
 async function readOffDays(from, to){
   const P = firebase.firestore.FieldPath.documentId();
-  const s = await fstore.collection(OFF_COLL).where(P, '>=', from).where(P, '<=', to).get();
-  const m = {};
-  s.docs.forEach(doc=>{ const v = offStoresOf(doc.data()); if(v.length) m[doc.id] = v; });
+  const [s, t, gg] = await Promise.all([
+    fstore.collection(OFF_COLL).where(P, '>=', from).where(P, '<=', to).get(),
+    fstore.collection(OFF_TCX_COLL).where(P, '>=', from).where(P, '<=', to).get().catch(e=>{ console.warn('[ngày đóng cửa TC33/XOFA] không đọc được', e); return { docs: [] }; }),
+    gieoStores().catch(()=>[])
+  ]);
+  const m = {}, ggIds = gg.map(r=>r.id), add = (d, v)=>{ m[d] = [...new Set((m[d] || []).concat(v))].sort(); };
+  s.docs.forEach(doc=>{ let v = offStoresOf(doc.data()); if(v.includes('*')) v = ggIds.length ? ggIds.slice() : v; if(v.length) add(doc.id, v); });
+  t.docs.forEach(doc=>{ const v = (doc.data().offStores || []).filter(x=>TCX_IDS.includes(x)); if(v.length) add(doc.id, v); });
   return m;
 }
-// Bật / tắt nghỉ cho các quán `ids` trong [from, to] (tối đa 62 ngày): 1 truy vấn đọc + 1 lần ghi gộp.
+// Bật / tắt đóng cửa cho các quán `ids` trong [from, to] (tối đa 62 ngày). Quán Gieo → special_days_gieogieo (quanlygieo đọc);
+// TC33 / XOFA → off_days_tc33xofa. Mỗi bảng: 1 truy vấn đọc + 1 lần ghi gộp.
 async function writeOffDays(from, to, ids, on){
   await ensureAuth(); validDate(from); validDate(to);
   if(from > to) throw new Error('Ngày bắt đầu phải trước ngày kết thúc.');
   if(daysBetween(from, to) > 61) throw new Error('Tối đa 62 ngày mỗi lần.');
-  const all = (await gieoStores()).map(r=>r.id);
   if(!ids.length) throw new Error('Chọn ít nhất 1 quán.');
-  ids.forEach(id=>{ if(!all.includes(id)) throw new Error('Quán Gieo không hợp lệ.'); });
+  const all = (await gieoStores()).map(r=>r.id);
+  const gg = ids.filter(id=>!TCX_IDS.includes(id)), tcx = ids.filter(id=>TCX_IDS.includes(id));
+  gg.forEach(id=>{ if(!all.includes(id)) throw new Error('Quán không hợp lệ.'); });
+  let n = 0;
+  if(gg.length) n += await offGhiBang(OFF_COLL, all, gg, from, to, on, true);
+  if(tcx.length) n += await offGhiBang(OFF_TCX_COLL, TCX_IDS, tcx, from, to, on, false);
+  return n;
+}
+async function offGhiBang(coll, all, ids, from, to, on, gieo){
   const P = firebase.firestore.FieldPath.documentId();
-  const snap = await fstore.collection(OFF_COLL).where(P, '>=', from).where(P, '<=', to).get();
+  const snap = await fstore.collection(coll).where(P, '>=', from).where(P, '<=', to).get();
   const cur = {}; snap.docs.forEach(doc=>{ cur[doc.id] = doc.data(); });
   const batch = fstore.batch(), at = new Date().toISOString(); let n = 0;
   for(let d = from; d <= to; d = dkey(addDays(parseDkey(d), 1))){
-    const x = cur[d] || null, next = offNextList(offStoresOf(x), all, ids, on);
-    if(x && JSON.stringify(offStoresOf(x)) === JSON.stringify(next) && Array.isArray(x.offStores)) continue;
-    const ref = fstore.collection(OFF_COLL).doc(d);
+    const x = cur[d] || null, list = gieo ? offStoresOf(x) : ((x && x.offStores) || []), next = offNextList(list, all, ids, on);
+    if(x && JSON.stringify(list) === JSON.stringify(next) && Array.isArray(x.offStores)) continue;
+    const ref = fstore.collection(coll).doc(d);
     if(!next.length && !x) continue;
     if(!next.length && x && !x.loai) batch.delete(ref);          // doc chỉ để ghi nghỉ → xoá hẳn
     else batch.set(ref, { date: d, offStores: next, offBy: 'manage', offUpdatedAt: at }, { merge: true });
@@ -938,10 +955,12 @@ function targetMonthValue(T, ym, key){
 }
 function daysInMonthYm(ym){ const [y, m] = ym.split('-').map(Number); return new Date(y, m, 0).getDate(); }
 // Mục tiêu của khoảng ngày [from, to] — cộng từng ngày (mục tiêu tháng ÷ số ngày tháng đó). Không ngày nào có mức → null.
-function targetForRange(T, from, to, key){
+// off (tuỳ chọn): ngày quán `key` đóng cửa → mục tiêu ngày đó = 0 (như Gieo).
+function targetForRange(T, from, to, key, off){
   let sum = 0, any = false; const memo = {};
   for(let d = parseDkey(from); dkey(d) <= to; d = addDays(d, 1)){
     const ym = dkey(d).slice(0, 7);
+    if(off && isStoreOff(off, dkey(d), key)){ if(!(ym in memo)) memo[ym] = targetMonthValue(T, ym, key); if(memo[ym]) any = true; continue; }
     if(!(ym in memo)) memo[ym] = targetMonthValue(T, ym, key);
     if(memo[ym]){ sum += memo[ym].value / daysInMonthYm(ym); any = true; }
   }
@@ -1494,13 +1513,13 @@ async function readRevenue(from,to,compare){
  const expOf=st=>from<=peEnd?readExpenseSums(st,from,peEnd).catch(e=>{console.warn('[chi phí] không đọc được tổng hợp',st,e);return null}):Promise.resolve(null);
  // Khoản CHỜ DUYỆT (XOFA gửi từ Ca làm việc…) chưa nằm trong bản tổng hợp → đọc riêng (thường rất ít), cộng vào hoà vốn.
  const pendOf=st=>from<=peEnd?fstore.collection(EXP_COLL[st]).where('status','==','pending_review').get().then(q=>q.docs.map(d=>({...d.data(),id:d.id}))).catch(e=>{console.warn('[chi phí] không đọc được khoản chờ duyệt',st,e);return[]}):Promise.resolve([]);
- const offOf=records.length?readOffDays(from,to).catch(e=>{console.warn('[ngày nghỉ] không đọc được',e);return{}}):Promise.resolve({});
+ const offOf=readOffDays(from,to).catch(e=>{console.warn('[ngày nghỉ] không đọc được',e);return{}});
  const [data,pl,expTc,expXo,expCfg,assets,off,pTc,pXo]=await Promise.all([start<=end?revLoadRange(start,end,null,null,from===to?from:null):{},readPlDays(records.filter(r=>r.active!==false),from,peEnd),expOf('tc33'),expOf('xofa'),loadExpenseCfg().catch(()=>null),loadAssets().catch(e=>{console.warn('[tài sản] không đọc được',e);return null}),offOf,pendOf('tc33'),pendOf('xofa')]);
  const cats=expenseCatsAll(expCfg),al=(sum,pend)=>{const p=pend.length?expAllocate(pend,cats,true):null;return sum?allocMerge(sumsToAlloc(sum,cats),p):p};
  return{from,to,data,targets,cfg,records,beCfg,pl,assets,off,exp:{tc33:al(expTc,pTc),xofa:al(expXo,pXo)},comparison:!!compare};
 }
 // month (tuỳ chọn): đọc thêm ngày nghỉ Gieo của tháng đó cho tab Mục tiêu (1 truy vấn).
-async function readSettings(force=false,month){await ensureAuth();if(force){TARGETS=null;_ggConfig=null;_ggStores=null}const[targets,cfg,records]=await Promise.all([loadTargets(force),gieoConfigHistory(),gieoStores()]);let off=null;if(month&&records.length){const end=month+'-'+String(daysInMonthYm(month)).padStart(2,'0');off=await readOffDays(month+'-01',end).catch(e=>{console.warn('[ngày nghỉ] không đọc được',e);return null})}return{targets,cfg,records,off}}
+async function readSettings(force=false,month){await ensureAuth();if(force){TARGETS=null;_ggConfig=null;_ggStores=null}const[targets,cfg,records]=await Promise.all([loadTargets(force),gieoConfigHistory(),gieoStores()]);let off=null;if(month){const end=month+'-'+String(daysInMonthYm(month)).padStart(2,'0');off=await readOffDays(month+'-01',end).catch(e=>{console.warn('[ngày nghỉ] không đọc được',e);return null})}return{targets,cfg,records,off}}
 async function readEmployees(force=false){await ensureAuth();return loadEmployees(force)}
 async function readSchedules(store,from,to){await ensureAuth();validStore(store);validDate(from);validDate(to);const snap=await fstore.collection(STORES[store].sched).where('date','>=',from).where('date','<=',to).get();return snap.docs.map(d=>({...d.data(),id:d.id}))}
 async function readAttendance(ids,date){
@@ -1907,9 +1926,9 @@ function storeDetails(id,keepClose){
  const kv=(a,b)=>`<div class="detail-row"><span>${a}</span><b class="num">${money(b)} ₫</b></div>`;
  const category=id==='tc33'?`<div class="detail-section"><h3>Theo nhóm món</h3>${kv('Đồ uống',s.drink)}${kv('Khác',s.other)}${kv('Ăn vặt · ngoài doanh thu chung',s.food)}</div>`:id==='xofa'?`<div class="detail-section"><h3>Theo hình thức</h3>${kv('Tại quán',s.instore)}${kv('Mang đi',s.togo)}<div class="detail-row"><span>Đơn ship</span><b>${s.ship} đơn · ${money(s.shipRev)} ₫</b></div></div>`:'';
  const b=s.be,gieo=s.brand==='gieo',beSec=`<div class="detail-section detail-be"><h3>Điểm hoà vốn · ${beHas(b)?beNguon(b):gieo?'số của Quản lý Gieo':'chưa có số'}</h3>${beHas(b)?`${kv('Doanh thu hoà vốn',b.hoaVon)}<div class="detail-row"><span>Trạng thái</span><b class="${b.dat?'be-ok':'be-loss'}">${b.dat?'Đã hoà vốn':'Chưa hoà vốn'}</b></div>${gieo?kv(b.dat?'Lãi':'Đang lỗ',Math.abs(b.lai)):kv(b.dat?'Vượt hoà vốn':'Còn thiếu',b.dat?b.vuot:b.conThieu)+kv('Chi phí vận hành',b.chiPhiCoDinh)+(b.khauHao?kv('Khấu hao tài sản',b.khauHao):'')}${gieo?`<div class="detail-row"><span>Số ngày có số</span><b>${b.soNgay}/${b.soNgay+b.thieu}${b.mucTinCay?' · '+MUC_TIN_CAY[b.mucTinCay]:''}</b></div>`:''}`:`<p class="inline-note">${esc(beEmptyReason(s))}</p>`}</div>`;
- openDialog(esc(s.name),`<div class="detail-revenue-head" style="--c:${s.c}"><div><p class="small muted">${esc(s.meta)}</p><div class="detail-total num">${amount(s.rev)}</div><p class="small muted">${rangeDates()[0]===rangeDates()[1]?dateVN(rangeDates()[0]):rangeDates().map(dateVN).join(' – ')}</p></div><span class="store-monogram">${s.mono}</span></div><div class="detail-grid"><div class="detail-tile"><span>Hoá đơn</span><b class="num">${money(s.count)}</b></div><div class="detail-tile"><span>Đạt mục tiêu</span><b class="num">${storeClosedAll(s)?'Đóng cửa':s.target?Math.floor(s.rev/s.target*100)+'%':'Chưa đặt'}</b></div></div><div class="detail-columns"><div class="detail-section"><h3>Thanh toán ${id==='tc33'?'· cả bill':''}</h3>${kv('Tiền mặt',s.cash)}${kv('Chuyển khoản',s.bank)}</div>${category}</div>${id==='xofa'?`<div class="detail-section detail-food"><h3>Food · ngoài doanh thu chung</h3><div class="detail-food-grid">${kv('Tổng Food',s.food)}${kv('Tiền mặt',s.foodCash)}${kv('Chuyển khoản',s.foodBank)}</div></div>`:''}<div class="inline-note">${id==='tc33'?'Tiền mặt + chuyển khoản bao gồm Ăn vặt. Doanh thu chung của quán chỉ gồm Đồ uống + Khác.':id==='xofa'?'Food được tách riêng, không cộng vào doanh thu chung. Đơn ship nằm trong doanh thu quán.':'Chi tiết món, giá vốn và kho tiếp tục xem ở hệ thống Quản lý Gieo.'}</div>${beSec}${gieo?`<details class="detail-section detail-close" id="close-det"${keepClose?' open':''}><summary><span class="close-sum-t">${icon('calendar')}Đóng cửa</span><span class="close-sum-s" id="close-sum">${storeClosedAll(s)?'Đang đóng cửa':''}</span></summary><div id="close-body" data-id="${esc(id)}"><p class="small muted">Đang đọc lịch đóng cửa…</p></div></details>`:''}`,false);
+ openDialog(esc(s.name),`<div class="detail-revenue-head" style="--c:${s.c}"><div><p class="small muted">${esc(s.meta)}</p><div class="detail-total num">${amount(s.rev)}</div><p class="small muted">${rangeDates()[0]===rangeDates()[1]?dateVN(rangeDates()[0]):rangeDates().map(dateVN).join(' – ')}</p></div><span class="store-monogram">${s.mono}</span></div><div class="detail-grid"><div class="detail-tile"><span>Hoá đơn</span><b class="num">${money(s.count)}</b></div><div class="detail-tile"><span>Đạt mục tiêu</span><b class="num">${storeClosedAll(s)?'Đóng cửa':s.target?Math.floor(s.rev/s.target*100)+'%':'Chưa đặt'}</b></div></div><div class="detail-columns"><div class="detail-section"><h3>Thanh toán ${id==='tc33'?'· cả bill':''}</h3>${kv('Tiền mặt',s.cash)}${kv('Chuyển khoản',s.bank)}</div>${category}</div>${id==='xofa'?`<div class="detail-section detail-food"><h3>Food · ngoài doanh thu chung</h3><div class="detail-food-grid">${kv('Tổng Food',s.food)}${kv('Tiền mặt',s.foodCash)}${kv('Chuyển khoản',s.foodBank)}</div></div>`:''}<div class="inline-note">${id==='tc33'?'Tiền mặt + chuyển khoản bao gồm Ăn vặt. Doanh thu chung của quán chỉ gồm Đồ uống + Khác.':id==='xofa'?'Food được tách riêng, không cộng vào doanh thu chung. Đơn ship nằm trong doanh thu quán.':'Chi tiết món, giá vốn và kho tiếp tục xem ở hệ thống Quản lý Gieo.'}</div>${beSec}${true?`<details class="detail-section detail-close" id="close-det"${keepClose?' open':''}><summary><span class="close-sum-t">${icon('calendar')}Đóng cửa</span><span class="close-sum-s" id="close-sum">${storeClosedAll(s)?'Đang đóng cửa':''}</span></summary><div id="close-body" data-id="${esc(id)}"><p class="small muted">Đang đọc lịch đóng cửa…</p></div></details>`:''}`,false);
  $('#dialog').classList.add('store-detail');
- if(gieo){closeSecLoad(id);if(keepClose)$('#close-det')?.scrollIntoView({block:'nearest'})}
+ closeSecLoad(id);if(keepClose)$('#close-det')?.scrollIntoView({block:'nearest'});
 }
 function openRange(){openDialog('Chọn khoảng thời gian',`<div class="range-options">${[['day','Hôm nay'],['yesterday','Hôm qua'],['week','Tuần này'],['month','Tháng này'],['year','Năm nay']].map(([k,l])=>`<button class="btn ${state.range===k?'':'secondary'}" onclick="closeDialog();setRange('${k}')">${l}</button>`).join('')}</div><form onsubmit="applyRange(event)"><div class="form-grid"><div class="field"><label for="rangeFrom">Từ ngày</label><input id="rangeFrom" class="input" type="date" name="from" required value="${rangeDates()[0]}"></div><div class="field"><label for="rangeTo">Đến ngày</label><input id="rangeTo" class="input" type="date" name="to" required value="${rangeDates()[1]}"></div></div><p class="small muted">Ngày tương lai chưa có đơn hàng.</p><div class="form-actions"><button type="submit" class="btn">Áp dụng</button></div></form>`)}
 function applyRange(ev){ev.preventDefault();const f=new FormData(ev.target),from=f.get('from'),to=f.get('to');if(to<from){toast('Ngày kết thúc cần sau ngày bắt đầu.');return}if((parseDate(to)-parseDate(from))/86400000>730){toast('Chọn khoảng tối đa 2 năm.');return}state.from=from;state.to=to;closeDialog();setRange('custom')}
@@ -1983,13 +2002,13 @@ function showAbout(){openDialog('Quản lý cửa hàng',`<p class="inline-note"
 function rangeDates(){const now=currentDate(),d=parseDate(now),m=now.slice(0,7);switch(state.range){case'yesterday':return[addDays(now,-1),addDays(now,-1)];case'week':{const a=addDays(now,1-(d.getDay()||7));return[a,addDays(a,6)]}case'month':return[m+'-01',dateKey(new Date(d.getFullYear(),d.getMonth()+1,0,12))];case'year':return[now.slice(0,4)+'-01-01',now.slice(0,4)+'-12-31'];case'custom':return[state.from,state.to];default:return[now,now]}}
 function goalForMonth(month,id){if(id==='gieo'||stores.find(s=>s.id===id)?.brand==='gieo'){const end=dateKey(new Date(Number(month.slice(0,4)),Number(month.slice(5)),0,12));return backend.gieoTargetForRange(live.cfg,month+'-01',end)}return backend.targetMonthValue(goals,month,id)?.value??null}
 // [NGÀY NGHỈ GIEO] Quán Gieo nghỉ ngày nào thì mục tiêu ngày đó = 0 (off: ngày nghỉ đã đọc — mặc định của kỳ Tổng quan).
-function goalForRange(id,from,to,off){if(id==='gieo'||stores.find(s=>s.id===id)?.brand==='gieo')return backend.gieoTargetForRange(live.cfg,from,to,off===undefined?live.rev?.off:off,id==='gieo'?null:id);return backend.targetForRange(goals,from,to,id)}
+function goalForRange(id,from,to,off){if(id==='gieo'||stores.find(s=>s.id===id)?.brand==='gieo')return backend.gieoTargetForRange(live.cfg,from,to,off===undefined?live.rev?.off:off,id==='gieo'?null:id);return backend.targetForRange(goals,from,to,id,id==='all'?null:(off===undefined?live.rev?.off:off))}
 function offDaysOf(id,from,to,off){let n=0;if(!off)return 0;for(let d=from;d<=to;d=addDays(d,1))if(backend.isStoreOff(off,d,id))n++;return n}
 function storeRange(s){
  const[from,to]=rangeDates(),key=s.brand==='gieo'?'gg_'+s.id:s.id,empty=s.brand==='gieo'?backend.ggEmptySum:s.id==='tc33'?backend.tcEmptySum:backend.xoEmptySum;let sum=empty();
  for(let d=from;d<=to;d=addDays(d,1)){const value=live.rev?.data[key]?.[d];if(value)backend.sumMerge(sum,value)}
  const prev=live.rev?.data[key]?.[addDays(from,-1)],rev=s.id==='tc33'?sum.drink+sum.khac:s.brand==='gieo'?sum.revenue:sum.total;
- return{...s,rev,bill:sum.total||0,prevBill:prev?prev.total||0:null,prev:prev?(s.id==='tc33'?prev.drink+prev.khac:s.brand==='gieo'?prev.revenue:prev.total):null,drink:sum.drink||0,other:sum.khac||0,food:s.id==='tc33'?sum.snack:sum.food,cash:(sum.cash||0)+(s.brand==='gieo'?sum.foodCash||0:0),bank:s.id==='tc33'?sum.transfer||0:(sum.bank||0)+(s.brand==='gieo'?sum.foodBank||0:0),foodCash:sum.foodCash||0,foodBank:sum.foodBank||0,count:sum.count||0,instore:sum.instore||0,togo:sum.togo||0,ship:sum.ship||0,shipRev:sum.shipRev||0,target:goalForRange(s.id,from,to),be:storeBreakEven(s,key,from,to),offDays:s.brand==='gieo'?offDaysOf(s.id,from,to,live.rev?.off):0,nDays:Math.round((parseDate(to)-parseDate(from))/864e5)+1};
+ return{...s,rev,bill:sum.total||0,prevBill:prev?prev.total||0:null,prev:prev?(s.id==='tc33'?prev.drink+prev.khac:s.brand==='gieo'?prev.revenue:prev.total):null,drink:sum.drink||0,other:sum.khac||0,food:s.id==='tc33'?sum.snack:sum.food,cash:(sum.cash||0)+(s.brand==='gieo'?sum.foodCash||0:0),bank:s.id==='tc33'?sum.transfer||0:(sum.bank||0)+(s.brand==='gieo'?sum.foodBank||0:0),foodCash:sum.foodCash||0,foodBank:sum.foodBank||0,count:sum.count||0,instore:sum.instore||0,togo:sum.togo||0,ship:sum.ship||0,shipRev:sum.shipRev||0,target:goalForRange(s.id,from,to),be:storeBreakEven(s,key,from,to),offDays:offDaysOf(s.id,from,to,live.rev?.off),nDays:Math.round((parseDate(to)-parseDate(from))/864e5)+1};
 }
 // [HOÀ VỐN] null = không đọc được / chưa có gì. Gieo: tóm tắt của quanlygieo; TC33 / XOFA: cấu hình tab Điểm hoà vốn.
 function storeBreakEven(s,key,from,to){
@@ -2099,7 +2118,7 @@ function targetView(){
 // Quản lý Gieo đọc cùng chỗ → mục tiêu ngày nghỉ = 0 ở cả hai app.
 // [ĐÓNG CỬA TỪ WIDGET — 16/10] Chủ dự án: bấm widget quán Gieo ở Tổng quan → popup → "Đóng cửa hôm nay" / đóng nhiều ngày
 // liền — chọn đúng quán ngay, nhanh hơn vào tab Mục tiêu (khung đó vẫn giữ). Cùng backend.writeOffDays.
-function storeClosedAll(s){return s.brand==='gieo'&&s.offDays>0&&s.offDays===s.nDays}
+function storeClosedAll(s){return s.offDays>0&&s.offDays===s.nDays}
 async function closeSecLoad(id){
  const box=()=>{const b=$('#close-body');return b&&b.dataset.id===id?b:null};let off;
  try{off=await backend.readOffDays(TODAY,addDays(TODAY,92))}catch(e){const b=box();if(b)b.innerHTML='<p class="small muted">Không đọc được lịch đóng cửa.</p>';return}
@@ -2122,10 +2141,10 @@ function storeCloseRange(event,id){
 // Sau khi đổi ngày đóng cửa: chỉ đọc lại ngày đóng cửa của kỳ đang xem (1 truy vấn), không đọc lại doanh thu.
 async function offRefresh(){invalidateViews('target');if(live.rev&&live.rev.from){try{live.rev.off=await backend.readOffDays(live.rev.from,live.rev.to)}catch(e){invalidateViews('rev')}}render()}
 function offPanel(month){
- const gg=stores.filter(s=>s.brand==='gieo'&&s.active),off=live.tOff;if(!gg.length)return'';
- const days=Object.keys(off||{}).filter(d=>d.startsWith(month)).sort(),def=TODAY.startsWith(month)?TODAY:month+'-01',name=id=>{const st=stores.find(s=>s.id===id);return st?'Gieo '+st.code:id.toUpperCase()};
+ const gg=stores.filter(s=>s.active),off=live.tOff;if(!gg.length)return'';   // [16/10] cả The cafe 33 / XOFA
+ const days=Object.keys(off||{}).filter(d=>d.startsWith(month)).sort(),def=TODAY.startsWith(month)?TODAY:month+'-01',name=id=>{const st=stores.find(s=>s.id===id);return st?(st.brand==='gieo'?'Gieo '+st.code:st.name):id.toUpperCase()};
  const list=off===null?'<p class="small muted">Không đọc được ngày nghỉ tháng này.</p>':days.length?days.map(d=>`<div class="detail-row off-row"><span><b>${dateVN(d).slice(0,5)}</b> ${['CN','T2','T3','T4','T5','T6','T7'][parseDate(d).getDay()]}</span><span class="off-chips">${off[d].map(id=>`<span class="off-chip">${id==='*'?'Mọi quán · khai ở Quản lý Gieo':esc(name(id))}<button type="button" onclick="removeOff('${d}','${esc(id)}')" aria-label="Bỏ nghỉ ${esc(id==='*'?'mọi quán':name(id))} ngày ${dateVN(d)}">×</button></span>`).join('')}</span></div>`).join(''):'<p class="small muted">Tháng này chưa có ngày đóng cửa.</p>';
- return `<section class="panel off-panel"><div class="panel-head"><h2>Ngày đóng cửa Gieo Gieo</h2><span class="pill">${days.length} ngày</span></div><p class="small muted">Quán đóng cửa: mục tiêu ngày đó = 0 ở đây và ở Quản lý Gieo; lãi / lỗ vẫn tính chi phí cố định như mọi ngày. Nhanh hơn: bấm widget quán ở Tổng quan → Đóng cửa.</p><form class="off-form" onsubmit="saveOff(event)"><div class="off-dates"><label class="field"><span>Từ ngày</span><input class="input" type="date" name="from" value="${def}" required onclick="openNativePicker(this)"></label><label class="field"><span>Đến ngày <small>(trống = 1 ngày)</small></span><input class="input" type="date" name="to" value="" onclick="openNativePicker(this)"></label></div><div class="seg-pick">${gg.map(st=>`<label><input type="checkbox" name="st" value="${esc(st.id)}" ${gg.length===1?'checked':''}><span>${esc('Gieo '+st.code)}</span></label>`).join('')}</div><div class="form-actions"><button type="submit" class="btn">${icon('check')}Đóng cửa</button></div></form><div class="off-list">${list}</div></section>`;
+ return `<section class="panel off-panel"><div class="panel-head"><h2>Ngày đóng cửa các quán</h2><span class="pill">${days.length} ngày</span></div><p class="small muted">Quán đóng cửa: mục tiêu ngày đó = 0 (quán Gieo: cả ở Quản lý Gieo); chi phí cố định vẫn tính vào hoà vốn / lãi lỗ như mọi ngày. Nhanh hơn: bấm widget quán ở Tổng quan → Đóng cửa.</p><form class="off-form" onsubmit="saveOff(event)"><div class="off-dates"><label class="field"><span>Từ ngày</span><input class="input" type="date" name="from" value="${def}" required onclick="openNativePicker(this)"></label><label class="field"><span>Đến ngày <small>(trống = 1 ngày)</small></span><input class="input" type="date" name="to" value="" onclick="openNativePicker(this)"></label></div><div class="seg-pick">${gg.map(st=>`<label><input type="checkbox" name="st" value="${esc(st.id)}" ${gg.length===1?'checked':''}><span>${esc(name(st.id))}</span></label>`).join('')}</div><div class="form-actions"><button type="submit" class="btn">${icon('check')}Đóng cửa</button></div></form><div class="off-list">${list}</div></section>`;
 }
 async function saveOff(event){
  event.preventDefault();const f=new FormData(event.target),from=String(f.get('from')||''),to=String(f.get('to')||'')||from,ids=f.getAll('st').map(String);
