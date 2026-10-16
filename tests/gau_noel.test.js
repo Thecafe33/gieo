@@ -96,6 +96,29 @@ chk(G.heSoKho(kho, G.chang('2026-11-23'), 'v45') === 0.7 && G.heSoKho(khoMoi(7),
   chk(!vuot.length && k.phat <= 400, '40 ngày × 60 bill: không kho ngẫu nhiên nào vượt trần, tổng ≤ số gấu thật (' + k.phat + ' con)' + (vuot.length ? ' ' + vuot.join(', ') : ''));
 })();
 
+// ── dashboard: tổng hợp thuần
+(() => {
+  const H = '2026-12-10', at = (d, h) => d + 'T0' + h + ':00:00.000Z';
+  const kho = { tc33: { tong: 40, phat: 3, cap: capDeu(4), dung: { W3: { v80: 1, bed: 2 } }, pre: { v80: 1, bed: 2 } }, xofa: { tong: 100, phat: 1, cap: capDeu(9) } };
+  const ds = [
+    { id: '0901', data: { luot: { a: { store: 'tc33', at: at(H, 3), win: true }, b: { store: 'tc33', at: at('2026-12-09', 3), win: false } },
+      qua: { GAUAAAA1: { store: 'tc33', at: at(H, 3), used: true, usedAt: at(H, 5) } } } },
+    { id: '0902', data: { luot: { a: { store: 'tc33', at: at(H, 1), win: true }, b: { store: 'tc33', at: at(H, 2), win: true }, c: { store: 'xofa', at: at(H, 2), win: true } },
+      qua: { GAUBBBB1: { store: 'tc33', at: at(H, 1), used: true, usedAt: at(H, 2) }, GAUBBBB2: { store: 'tc33', at: at(H, 2), used: true, usedAt: at(H, 3) }, GAUBBBB3: { store: 'xofa', at: at(H, 2), used: true, usedAt: at(H, 4) } } } },
+    { id: '0903', data: { streak: 40, luot: { a: { store: 'xofa', at: at('2026-12-01', 2), win: false } } } },
+    { id: '0904', data: {} }
+  ];
+  const D = G.tongHop(ds, kho, H);
+  chk(D.quan.tc33.trungHom === 3 && D.quan.tc33.nhanHom === 3 && D.quan.xofa.trungHom === 1 && D.he.trungHom === 4 && D.he.nhanHom === 4, 'dashboard: hôm nay đã tặng / đã nhận từng quán + cả hệ thống', D.he);
+  chk(D.quan.tc33.con === 37 && D.he.tong === 140 && D.he.phat === 4 && D.he.con === 136, 'dashboard: còn trong kho = số gấu thật − đã phát');
+  const k2 = D.khach.find(k => k.sdt === '0902'), k3 = D.khach.find(k => k.sdt === '0903');
+  chk(D.khach[0].sdt === '0902' && k2.nhan === 3 && k2.quan.tc33 === 2 && k2.quan.xofa === 1 && k2.nghi.length >= 2, 'SĐT nhận 3 con (3 con trong 1 ngày, trúng 3/3) → nghi ngờ, lên đầu bảng', k2.nghi);
+  chk(k3 && k3.nghi.some(x => /chuỗi trượt lạ/.test(x)), 'hồ sơ bị sửa (chuỗi trượt lớn hơn số lượt) → nghi ngờ');
+  chk(!D.khach.find(k => k.sdt === '0904') && !D.khach.find(k => k.sdt === '0901').nghi.length && D.nghi === 2, 'SĐT bình thường không bị đánh dấu; doc trống không vào bảng');
+  const kb = G.khoKichBan(kho.tc33, H);
+  chk(kb.w === 'W3' && kb.ngau.v80.chang[0] === 1 && kb.ngau.v80.chang[1] === 4 && kb.ngau.v80.truoc23.join() === '1,24' && kb.chac.bed === 2, 'kho từng kịch bản: chặng hiện tại / trước 23 / chắc trúng', kb);
+})();
+
 chk(/^GAU[A-HJ-NP-Z2-9]{5}$/.test(G.maNhan(Math.random)) && G.normPhone('+84 912 345 678') === '0912345678', 'mã GAU + 5 ký tự (không 0/O/1/I) · chuẩn hoá SĐT');
 
 // ── giao dịch

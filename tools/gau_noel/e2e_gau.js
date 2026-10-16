@@ -105,6 +105,15 @@ const CHUNG = (fake) => {
     chk(!pn.querySelector('[data-doi]'), '14. khung không còn nút Đổi quà cho mã đó');
     resetPhoneInput(); await sleep(50);
     chk(pn.style.display === 'none', '15. xoá SĐT → khung ẩn');
+    // dashboard trong tab Gấu Noel
+    switchMgrTab('gaunoel'); await sleep(800);
+    const dash = $('gn-dash');
+    chk(dash && /Dashboard Gấu Noel/.test(dash.textContent) && /Hôm nay đã tặng/.test(dash.textContent) && dash.querySelectorAll('.gd-w').length === 3, '15b. tab Gấu Noel có dashboard: hôm nay đã tặng + 3 thẻ quán', dash && dash.textContent.slice(0, 120));
+    const rowP = [...dash.querySelectorAll('table tr')].find(tr => tr.textContent.includes(P));
+    chk(rowP && /Kho từng kịch bản/.test(dash.textContent), '15c. bảng kho từng kịch bản + bảng khách có SĐT vừa nhận gấu', rowP && rowP.textContent);
+    { const sh = document.createElement('div'); sh.style.cssText = 'position:fixed;inset:0;z-index:2147483600;background:#fff;overflow:auto;padding:24px'; sh.appendChild(dash); document.body.appendChild(sh);
+      await sleep(100); await window.__shot('gau_dashboard'); sh.remove(); }
+    switchMgrTab('label'); await sleep(100);
     // bed > 160K (không tính ăn vặt)
     const P2 = '0912000222';
     reset(); pendingBedOrder = null; activeOrderingBedId = '3';
