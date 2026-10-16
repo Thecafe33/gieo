@@ -232,6 +232,69 @@ const CHUNG = (fake) => {
   if (OUT) { const u = await p.evaluate(() => window.__qr); if (u) fs.writeFileSync(path.join(OUT, 'gau_bill_gieo.png'), Buffer.from(u.split(',')[1], 'base64')); }
   inKq('posgieo.html (Gieo Gieo)', R, errs); await p.close();
 
+  // ════ index_giangsinh.html (app khách) ════
+  {
+    const pg = await b.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+    const errs2 = []; pg.on('pageerror', e => errs2.push(e.message)); pg.on('dialog', d => d.dismiss());
+    await pg.exposeFunction('__shot', n => (OUT ? pg.screenshot({ path: path.join(OUT, n + '.png') }) : null));
+    await pg.addInitScript(() => { try { localStorage.setItem('member_phone', '0955000111'); } catch (e) {} });
+    await pg.route('**/*', r => { const u = r.request().url();
+      if (u.includes('firebase-app-compat')) return r.fulfill({ contentType: 'application/javascript', body: mock });
+      if (u.includes('firebasejs')) return r.fulfill({ contentType: 'application/javascript', body: '' });
+      if (u.includes('cdn.tailwindcss.com')) return r.fulfill({ contentType: 'application/javascript', body: twJs });
+      if (u.startsWith('file:') || u.includes('fonts.g')) return r.continue(); return r.abort(); });
+    await pg.goto('file://' + ROOT + '/index_giangsinh.html').catch(() => {}); await pg.waitForTimeout(2500);
+    R = await pg.evaluate(async ([fake]) => {
+      const R = []; window.__R = R; const chk = (c, m, x) => R.push((c ? 'ok   ' : 'FAIL ') + m + (c || x === undefined ? '' : ' → ' + JSON.stringify(x)));
+      const sleep = ms => new Promise(r => setTimeout(r, ms)); const $ = id => document.getElementById(id);
+      if (!window.GauNoel) { chk(false, 'I0. index_giangsinh không nạp gau_noel_giangsinh.v1.js'); return R; }
+      eval(fake); const F = window.__lxFake, DB = window.__LXFS, G = GauNoel;
+      // Firestore giả + nghe doc (onSnapshot)
+      const LS = [], oc = F.fstore.collection, ot = F.fstore.runTransaction;
+      const bao = () => LS.forEach(l => l.r.get().then(l.cb));
+      F.fstore.collection = c => { const col = oc(c), od = col.doc; col.doc = id => { const r = od(id); r.onSnapshot = cb => { const l = { r, cb }; LS.push(l); setTimeout(() => r.get().then(cb), 0); return () => { const i = LS.indexOf(l); if (i >= 0) LS.splice(i, 1); }; }; return r; }; return col; };
+      F.fstore.runTransaction = fn => ot(fn).then(v => { bao(); return v; });
+      G.init({ fstore: F.fstore, FieldValue: F.FieldValue }); G._setOffset(Date.parse('2026-11-25T15:00:00+07:00') - Date.now());
+      const w = $('welcome-popup'); if (w) { w.classList.add('hidden'); w.style.display = 'none'; }
+      const P = '0955000111';
+      DB['gau_noel_2026/' + P] = { sdt: P, luot: {
+          xofa_b1_0: { store: 'xofa', bill: 'b1', at: '2026-11-25T03:00:00.000Z', win: true, code: 'GAUAB2CD', k: 'v45', w: 'W1', opened: false },
+          xofa_b1_1: { store: 'xofa', bill: 'b1', at: '2026-11-25T03:00:00.000Z', win: false, code: '', k: '', w: 'W1', opened: false },
+          tc33_b0_0: { store: 'tc33', bill: 'b0', at: '2026-11-20T03:00:00.000Z', win: true, code: 'GAUZZ9YY', k: 'bed', w: 'W0', opened: true } },
+        qua: { GAUAB2CD: { store: 'xofa', bill: 'b1', luot: 'xofa_b1_0', at: '2026-11-25T03:00:00.000Z', used: false },
+          GAUZZ9YY: { store: 'tc33', bill: 'b0', luot: 'tc33_b0_0', at: '2026-11-20T03:00:00.000Z', used: true, usedAt: '2026-11-21T03:00:00.000Z' } } };
+      G.apCfg(null); G.khachBat(); await sleep(300);
+      chk(!$('gn-q').classList.contains('on') && $('gn-the').style.display === 'none', 'I1. chương trình TẮT → không popup, không thẻ, không đọc lượt');
+      G.apCfg({ bat: true }); G.khachBat(); await sleep(1500);
+      chk($('gn-q').classList.contains('on') && /2 lượt quay/.test($('gn-q').textContent), 'I2. có lượt → popup «Bạn có 2 lượt quay»', $('gn-q').textContent);
+      const the = $('gn-the');
+      chk(the.style.display === 'block' && /2 lượt/.test(the.textContent) && !/GAUAB2CD/.test(the.textContent) && /GAUZZ9YY/.test(the.textContent) && /Đã nhận/.test(the.textContent), 'I3. thẻ dưới thẻ thành viên: 2 lượt chưa quay; gấu của lượt chưa quay CHƯA lộ mã; gấu đã nhận hiện «Đã nhận»', the.textContent);
+      chk(the.previousElementSibling && the.previousElementSibling.classList.contains('card-gradient'), 'I4. thẻ nằm ngay dưới thẻ thành viên');
+      await window.__shot('gau_khach_popup');
+      $('gn-q').querySelector('[data-a=quay]').click(); await sleep(400);
+      chk(/Đang quay/.test($('gn-q').textContent), 'I5. bấm Quay → hộp quà lắc');
+      await sleep(1600);
+      chk(/trúng 1 gấu bông/i.test($('gn-q').textContent) && /GAUAB2CD/.test($('gn-q').textContent) && /XOFA/.test($('gn-q').textContent) && DB['gau_noel_2026/' + P].luot.xofa_b1_0.opened === true, 'I6. mở lượt cũ nhất → trúng: mã GAUAB2CD, nhận tại XOFA', $('gn-q').textContent);
+      await window.__shot('gau_khach_trung');
+      await sleep(200);
+      chk(/GAUAB2CD/.test(the.textContent) && /1 lượt/.test(the.textContent), 'I7. thẻ cập nhật: hiện mã vừa trúng, còn 1 lượt');
+      $('gn-q').querySelector('[data-a=quay]').click(); await sleep(2000);
+      chk(/Chưa trúng/.test($('gn-q').textContent) && /hết lượt/.test($('gn-q').textContent) && !$('gn-q').querySelector('[data-a=quay]'), 'I8. lượt 2 trượt → hết lượt, không còn nút Quay');
+      $('gn-q').querySelector('[data-a=x]').click(); await sleep(300);
+      chk(!$('gn-q').classList.contains('on') && !/lượt\s*chưa quay/.test(the.textContent), 'I9. đóng popup; thẻ không còn dòng lượt chưa quay');
+      showTab('user'); await sleep(200); the.scrollIntoView(); await sleep(200); await window.__shot('gau_khach_the');
+      // nhận lượt mới khi đang mở app → popup tự hiện
+      await G.docKhach(P).set({ luot: { gg01_b9_0: { store: 'gg01', bill: 'b9', at: '2026-11-25T08:00:00.000Z', win: false, code: '', k: '', w: 'W1', opened: false } } }, { merge: true });
+      LS.forEach(l => l.r.get().then(l.cb)); await sleep(1500);
+      chk($('gn-q').classList.contains('on') && /1 lượt quay/.test($('gn-q').textContent), 'I10. vừa thanh toán xong (lượt mới) → popup tự hiện', [$('gn-q').className, $('gn-q').textContent, LS.length, JSON.stringify(DB['gau_noel_2026/' + P].luot.gg01_b9_0), the.textContent]);
+      $('gn-q').querySelector('[data-a=x]').click();
+      G.apCfg({ bat: false }); G.khachBat(); await sleep(200);
+      chk(the.style.display === 'none', 'I11. TẮT chương trình → ẩn thẻ');
+      return R;
+    }, [fake]).catch(async e => (await pg.evaluate(() => window.__R || []).catch(() => [])).concat(['FAIL dừng giữa chừng: ' + e.message.split('\n')[0]]));
+    inKq('index_giangsinh.html (app khách)', R, errs2); await pg.close();
+  }
+
   await b.close();
   console.log('FAIL: ' + tong.fail + ' / ' + (tong.ok + tong.fail));
   process.exit(tong.fail ? 1 : 0);

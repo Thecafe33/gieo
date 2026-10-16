@@ -2,7 +2,8 @@
  *   pos.html (The cafe 33) · PosX.html (XOFA) · posgieo.html (Gieo Gieo) — BỐC THĂM lúc thanh toán đơn có SĐT, Đổi quà,
  *     Mở lượt tại quầy, huỷ bill (PosX / Gieo). The cafe 33: popup QR sau thanh toán. Gieo: QR cuối bill in.
  *   kiosk.html (màn hình phụ XOFA) — data-quan="kiosk": QR + số lượt sau thanh toán, chiếu lại «Mở lượt tại quầy» (RT gau_noel_2026_kiosk).
- *   index_giangsinh.html (app khách) — MỞ lượt đã bốc (quay), thẻ gấu dưới thẻ thành viên.
+ *   index_giangsinh.html (app khách) — data-quan="khach" (chèn bởi tools/tao_ban_giangsinh.js): popup «Bạn có N lượt quay» khi có lượt,
+ *     quay = MỞ lượt đã bốc, thẻ «Gấu Noel của bạn» dưới thẻ thành viên (mã nhận, quán nhận, đã nhận).
  *   pos.html → Quản lý → «Gấu Noel»: CÔNG TẮC BẬT / TẮT chương trình (cả 3 quán chỉ chạy khi bật), ngày bắt đầu,
  *     nhập kho từng quán, thống kê, XOÁ HẾT dữ liệu khi hết đợt.
  * Kế hoạch: docs/KE_HOACH_GAU_NOEL_2026.md. Chủ dự án chốt 16/10/2026:
@@ -29,7 +30,8 @@
  *           Không đụng customers, đơn hàng, điểm, tem. Báo lỗi giữa chừng → bấm lại, xoá tiếp phần còn lại.
  *   2. Gỡ 1 thẻ <script src="gau_noel_giangsinh.v…js" …> trước </body> ở: pos.html, PosX.html, posgieo.html
  *      + kiosk.html (màn hình phụ XOFA)
- *      (+ index_giangsinh.html: chạy lại node tools/tao_ban_giangsinh.js nếu bản Giáng sinh còn dùng; hoặc về index.html).
+ *      + index_giangsinh.html: đặt GAU_NOEL = '' trong tools/tao_ban_giangsinh.js rồi chạy lại node tools/tao_ban_giangsinh.js
+ *        (hoặc deploy lại index.html bình thường nếu hết mùa Giáng sinh).
  *      Tìm nhanh: grep -n "gau_noel_giangsinh" *.html
  *   3. Chạy lại bản sinh tự động có chép từ các file trên: node tools/tao_ban_tet.js (pos_tet / PosX_tet), node tools/tao_ban_thu.js
  *      (posgieo_thu / quanlygieo_thu); chạy sh tests/run_all.sh — xoá luôn tests/gau_noel.test.js.
@@ -432,6 +434,7 @@
     soLuot: soLuot, bandOf: bandOf, pTurn: pTurn, nguongLai: nguongLai, chacTrung: chacTrung, laiDon: laiDon,
     conKho: conKho, heSoKho: heSoKho, heSoNgayGio: heSoNgayGio, bocThuan: bocThuan, maNhan: maNhan, normPhone: normPhone,
     stateOf: stateOf, init: init, boc: boc, load: load, mo: mo, quaTaiQuan: quaTaiQuan, doi: doi, huyBill: huyBill,
+    docKhach: function (p) { return refKhach(p); },
     luuKho: luuKho, docKho: docKho, thongKe: thongKe, xoaHet: xoaHet,
     _setOffset: function (v) { offset = v; }
   };
@@ -451,7 +454,7 @@
   'use strict';
   if (typeof document === 'undefined' || !window.GauNoel) return;
   var me = document.currentScript, APP = me && me.getAttribute('data-quan');
-  if (!APP || ['tc33', 'xofa', 'gieo', 'kiosk'].indexOf(APP) < 0) return;
+  if (!APP || ['tc33', 'xofa', 'gieo', 'kiosk', 'khach'].indexOf(APP) < 0) return;
   var G = window.GauNoel, URL_KHACH = 'https://the-cafe-33.web.app';
   // QR tĩnh dẫn tới URL_KHACH (29×29, mức M — dựng sẵn bằng qrcode-generator, không cần thư viện lúc chạy)
   var QR_N = 29, QR_PATH = 'M0 0h7v1h-7zM11 0h1v1h-1zM15 0h2v1h-2zM18 0h3v1h-3zM22 0h7v1h-7zM0 1h1v1h-1zM6 1h1v1h-1zM9 1h1v1h-1zM11 1h2v1h-2zM17 1h2v1h-2zM20 1h1v1h-1zM22 1h1v1h-1zM28 1h1v1h-1zM0 2h1v1h-1zM2 2h3v1h-3zM6 2h1v1h-1zM8 2h5v1h-5zM14 2h1v1h-1zM16 2h1v1h-1zM18 2h1v1h-1zM20 2h1v1h-1zM22 2h1v1h-1zM24 2h3v1h-3zM28 2h1v1h-1zM0 3h1v1h-1zM2 3h3v1h-3zM6 3h1v1h-1zM8 3h1v1h-1zM12 3h1v1h-1zM16 3h3v1h-3zM22 3h1v1h-1zM24 3h3v1h-3zM28 3h1v1h-1zM0 4h1v1h-1zM2 4h3v1h-3zM6 4h1v1h-1zM8 4h2v1h-2zM11 4h5v1h-5zM17 4h4v1h-4zM22 4h1v1h-1zM24 4h3v1h-3zM28 4h1v1h-1zM0 5h1v1h-1zM6 5h1v1h-1zM8 5h1v1h-1zM13 5h5v1h-5zM20 5h1v1h-1zM22 5h1v1h-1zM28 5h1v1h-1zM0 6h7v1h-7zM8 6h1v1h-1zM10 6h1v1h-1zM12 6h1v1h-1zM14 6h1v1h-1zM16 6h1v1h-1zM18 6h1v1h-1zM20 6h1v1h-1zM22 6h7v1h-7zM8 7h1v1h-1zM10 7h1v1h-1zM13 7h1v1h-1zM15 7h1v1h-1zM18 7h3v1h-3zM0 8h1v1h-1zM2 8h5v1h-5zM11 8h1v1h-1zM14 8h2v1h-2zM17 8h1v1h-1zM20 8h1v1h-1zM22 8h5v1h-5zM0 9h1v1h-1zM2 9h1v1h-1zM4 9h2v1h-2zM8 9h2v1h-2zM15 9h2v1h-2zM18 9h7v1h-7zM28 9h1v1h-1zM1 10h2v1h-2zM4 10h1v1h-1zM6 10h1v1h-1zM8 10h1v1h-1zM10 10h1v1h-1zM12 10h1v1h-1zM18 10h1v1h-1zM21 10h1v1h-1zM23 10h2v1h-2zM1 11h3v1h-3zM12 11h1v1h-1zM14 11h1v1h-1zM16 11h1v1h-1zM19 11h2v1h-2zM22 11h2v1h-2zM25 11h1v1h-1zM27 11h1v1h-1zM2 12h1v1h-1zM6 12h2v1h-2zM9 12h1v1h-1zM12 12h1v1h-1zM16 12h2v1h-2zM19 12h1v1h-1zM25 12h2v1h-2zM1 13h2v1h-2zM4 13h1v1h-1zM8 13h1v1h-1zM10 13h1v1h-1zM13 13h3v1h-3zM19 13h1v1h-1zM21 13h2v1h-2zM24 13h1v1h-1zM28 13h1v1h-1zM0 14h2v1h-2zM3 14h6v1h-6zM10 14h2v1h-2zM13 14h4v1h-4zM18 14h1v1h-1zM20 14h2v1h-2zM23 14h4v1h-4zM1 15h1v1h-1zM3 15h1v1h-1zM9 15h5v1h-5zM15 15h1v1h-1zM18 15h2v1h-2zM23 15h2v1h-2zM27 15h1v1h-1zM0 16h2v1h-2zM5 16h3v1h-3zM10 16h3v1h-3zM14 16h2v1h-2zM17 16h1v1h-1zM20 16h1v1h-1zM25 16h2v1h-2zM0 17h5v1h-5zM7 17h1v1h-1zM9 17h1v1h-1zM12 17h1v1h-1zM15 17h2v1h-2zM19 17h1v1h-1zM21 17h4v1h-4zM26 17h1v1h-1zM28 17h1v1h-1zM0 18h1v1h-1zM3 18h1v1h-1zM5 18h4v1h-4zM11 18h1v1h-1zM18 18h1v1h-1zM20 18h1v1h-1zM24 18h1v1h-1zM26 18h1v1h-1zM0 19h1v1h-1zM2 19h2v1h-2zM8 19h2v1h-2zM14 19h1v1h-1zM16 19h1v1h-1zM18 19h2v1h-2zM21 19h2v1h-2zM27 19h1v1h-1zM0 20h1v1h-1zM2 20h3v1h-3zM6 20h1v1h-1zM10 20h1v1h-1zM16 20h1v1h-1zM18 20h1v1h-1zM20 20h5v1h-5zM26 20h3v1h-3zM8 21h2v1h-2zM13 21h3v1h-3zM17 21h4v1h-4zM24 21h5v1h-5zM0 22h7v1h-7zM9 22h1v1h-1zM12 22h6v1h-6zM19 22h2v1h-2zM22 22h1v1h-1zM24 22h3v1h-3zM0 23h1v1h-1zM6 23h1v1h-1zM8 23h1v1h-1zM10 23h4v1h-4zM15 23h1v1h-1zM17 23h2v1h-2zM20 23h1v1h-1zM24 23h1v1h-1zM28 23h1v1h-1zM0 24h1v1h-1zM2 24h3v1h-3zM6 24h1v1h-1zM8 24h2v1h-2zM11 24h1v1h-1zM14 24h2v1h-2zM20 24h5v1h-5zM26 24h3v1h-3zM0 25h1v1h-1zM2 25h3v1h-3zM6 25h1v1h-1zM8 25h3v1h-3zM13 25h1v1h-1zM15 25h2v1h-2zM18 25h2v1h-2zM25 25h2v1h-2zM0 26h1v1h-1zM2 26h3v1h-3zM6 26h1v1h-1zM8 26h2v1h-2zM11 26h1v1h-1zM13 26h2v1h-2zM18 26h10v1h-10zM0 27h1v1h-1zM6 27h1v1h-1zM9 27h2v1h-2zM14 27h1v1h-1zM16 27h1v1h-1zM20 27h1v1h-1zM24 27h2v1h-2zM27 27h1v1h-1zM0 28h7v1h-7zM8 28h2v1h-2zM13 28h2v1h-2zM16 28h1v1h-1zM18 28h1v1h-1zM23 28h4v1h-4z';
@@ -473,6 +476,7 @@
   try { fs0 = fstore; db0 = db; } catch (e) { /* app không có fstore/db toàn cục */ }
   if (!fs0) { console.warn('[gấu] không thấy fstore'); return; }
   G.init({ fstore: fs0, db: db0, FieldValue: window.firebase && firebase.firestore && firebase.firestore.FieldValue });
+  if (APP === 'khach') { ganKhach(fs0); return; }
   function store() {
     if (APP !== 'gieo') return APP;
     try { return window.GieoData && GieoData.storeId ? GieoData.storeId() : null; } catch (e) { return null; }
@@ -951,5 +955,135 @@
     // kiosk đăng nhập rồi mới nghe (rules cần đăng nhập) — gắn lại mỗi khi trạng thái đăng nhập đổi
     try { firebase.auth().onAuthStateChanged(function () { gan(); }); } catch (e) { gan(); }
     G.kioskVe = ve;   // test
+  }
+
+  // ── index_giangsinh.html (app khách The cafe 33) — quay = MỞ lượt đã bốc ở POS; thẻ gấu dưới thẻ thành viên ──
+  // Đọc: 1 doc công tắc + doc của chính khách (nghe khi đang bật, để vừa thanh toán xong quét QR là thấy lượt). Tắt = không đọc doc khách.
+  function ganKhach(fsk) {
+    var css = document.createElement('style');
+    css.textContent =
+      '#gn-the{margin:0 0 24px;border-radius:32px;overflow:hidden;position:relative;padding:18px 18px 16px;color:#f2f8ff;background:radial-gradient(circle at 90% -10%,#2b5e9e 0%,#14325a 50%,#0b1d38 100%);box-shadow:0 14px 34px rgba(11,29,56,.3)}' +
+      '#gn-the:before{content:"";position:absolute;right:-40px;top:-40px;width:160px;height:160px;border-radius:50%;background:radial-gradient(circle,rgba(190,225,255,.28),transparent 70%)}' +
+      '#gn-the .gt-h{display:flex;align-items:center;gap:10px;position:relative}#gn-the .gt-ic{width:42px;height:42px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:24px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.22)}' +
+      '#gn-the .gt-tt{flex:1;min-width:0}#gn-the .gt-tt b{display:block;font-size:16px;font-weight:900;color:#fff}#gn-the .gt-tt small{display:block;font-size:11.5px;color:rgba(220,236,255,.75);margin-top:1px}' +
+      '#gn-the .gt-tag{font-size:10px;font-weight:900;letter-spacing:.08em;padding:4px 9px;border-radius:99px;background:#d62b3a;color:#fff}' +
+      '#gn-the .gt-luot{display:flex;align-items:center;gap:12px;margin-top:14px;position:relative;padding:12px 14px;border-radius:18px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.18)}' +
+      '#gn-the .gt-luot b{font-size:26px;font-weight:900;color:#fff;line-height:1}#gn-the .gt-luot span{display:block;font-size:12px;color:rgba(220,236,255,.8);margin-top:2px}' +
+      '#gn-the .gt-btn,#gn-q .gq-btn{border:none;border-radius:99px;padding:12px 18px;font-weight:900;font-size:13px;cursor:pointer;color:#fff;background:linear-gradient(135deg,#ef4655,#b3162a);box-shadow:0 6px 16px rgba(179,22,42,.35);-webkit-tap-highlight-color:transparent}' +
+      '#gn-the .gt-qua{margin-top:12px;display:flex;flex-direction:column;gap:8px;position:relative}' +
+      '#gn-the .gt-g{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:18px;background:#fff;color:#0b1d38}#gn-the .gt-g .e{font-size:30px;line-height:1}' +
+      '#gn-the .gt-g .t{flex:1;min-width:0}#gn-the .gt-g .t b{display:block;font-size:18px;font-weight:900;letter-spacing:.1em;color:#b3162a}#gn-the .gt-g .t small{display:block;font-size:11.5px;color:#4b5b73;margin-top:2px;line-height:1.4}' +
+      '#gn-the .gt-g.used{background:rgba(255,255,255,.1);color:rgba(220,236,255,.7)}#gn-the .gt-g.used .t b{color:rgba(220,236,255,.6);text-decoration:line-through}#gn-the .gt-g.used .t small{color:rgba(220,236,255,.6)}' +
+      '#gn-the .gt-foot{font-size:11px;color:rgba(220,236,255,.65);margin-top:12px;line-height:1.5;position:relative}' +
+      '#gn-q{position:fixed;inset:0;z-index:190;display:none;align-items:center;justify-content:center;padding:24px;background:rgba(3,9,20,.88)}#gn-q.on{display:flex}' +
+      '#gn-q .gq-box{width:min(320px,88vw);text-align:center;color:#f2f8ff}#gn-q h3{margin:0;font-size:20px;font-weight:900;color:#fff}#gn-q .gq-sub{font-size:13px;color:rgba(220,236,255,.8);margin-top:4px}' +
+      '#gn-q .gq-gift{font-size:110px;line-height:1;margin:22px 0 10px;display:inline-block;will-change:transform}' +
+      '@keyframes gnQLac{0%,100%{transform:rotate(0) scale(1)}20%{transform:rotate(-12deg) scale(1.05)}40%{transform:rotate(10deg) scale(1.08)}60%{transform:rotate(-8deg) scale(1.05)}80%{transform:rotate(6deg)}}' +
+      '@keyframes gnQNo{0%{transform:scale(.4);opacity:0}70%{transform:scale(1.12);opacity:1}100%{transform:scale(1)}}' +
+      '#gn-q .lac{animation:gnQLac .45s ease-in-out infinite}#gn-q .no{animation:gnQNo .5s cubic-bezier(.3,1.4,.5,1)}' +
+      '#gn-q .gq-say{font-size:14px;line-height:1.5;min-height:44px}#gn-q .gq-code{display:inline-block;margin-top:8px;padding:8px 14px;border-radius:12px;background:#fff;color:#b3162a;font:900 22px/1 monospace;letter-spacing:.12em}' +
+      '#gn-q .gq-btns{display:flex;gap:10px;justify-content:center;margin-top:16px;flex-wrap:wrap}#gn-q .gq-x{background:rgba(255,255,255,.14);box-shadow:none}' +
+      '@media(prefers-reduced-motion:reduce){#gn-q *{animation:none!important}}';
+    document.head.appendChild(css);
+    var the = document.createElement('div'); the.id = 'gn-the'; the.style.display = 'none';
+    var mc = document.querySelector('#tab-user .card-gradient');
+    if (mc && mc.parentNode) mc.parentNode.insertBefore(the, mc.nextSibling);
+    var q = document.createElement('div'); q.id = 'gn-q';
+    q.innerHTML = '<div class="gq-box"><h3>🎄 Quay trúng gấu Noel</h3><div class="gq-sub"></div><div class="gq-gift">🎁</div><div class="gq-say"></div><div class="gq-btns"></div></div>';
+    document.body.appendChild(q);
+    var sub = q.querySelector('.gq-sub'), gift = q.querySelector('.gq-gift'), say = q.querySelector('.gq-say'), btns = q.querySelector('.gq-btns');
+    var sdt = '', unDoc = null, st = null, daBao = -1, dangQuay = false, cfgNghe = false;
+    function phone() { try { return G.normPhone(curPhone || ''); } catch (e) { return ''; } }
+    function ngay(iso) { var d = String(iso || '').slice(0, 10).split('-'); return d.length === 3 ? d[2] + '/' + d[1] : ''; }
+    var HAN = G.CFG.hanNhan.split('-').reverse().slice(0, 2).join('/');
+    function veThe() {
+      if (!st || !G.dangNhan()) { the.style.display = 'none'; the.innerHTML = ''; return; }
+      // gấu của lượt CHƯA quay thì chưa hiện (giữ bất ngờ) — quay xong mới thấy mã
+      var moRoi = {}; st.luot.forEach(function (l) { if (l.opened) moRoi[l.id] = 1; });
+      var thay = st.qua.filter(function (x) { return x.used || !x.luot || moRoi[x.luot]; });
+      var cho = thay.filter(function (x) { return !x.used; }), da = thay.filter(function (x) { return x.used; }), n = st.chuaMo.length;
+      var h = '<div class="gt-h"><div class="gt-ic">🧸</div><div class="gt-tt"><b>Gấu Noel của bạn</b><small>Mua từ 2 ly, đọc SĐT khi order → nhận lượt quay</small></div><span class="gt-tag">NOEL</span></div>';
+      if (n) h += '<div class="gt-luot"><div style="flex:1"><b>' + n + ' lượt</b><span>chưa quay</span></div><button class="gt-btn" data-q="1">Quay ngay</button></div>';
+      if (cho.length || da.length) h += '<div class="gt-qua">' + cho.map(function (x) {
+        return '<div class="gt-g"><div class="e">🧸</div><div class="t"><b>' + esc(x.code) + '</b><small>1 gấu bông · nhận tại <b style="display:inline;font-size:11.5px;letter-spacing:0;color:#0b1d38">' + esc(G.tenQuan(x.store)) + '</b><br>Đưa mã cho nhân viên · hạn ' + HAN + '</small></div></div>';
+      }).join('') + da.map(function (x) {
+        return '<div class="gt-g used"><div class="e">🧸</div><div class="t"><b>' + esc(x.code) + '</b><small>Đã nhận ' + ngay(x.usedAt) + ' tại ' + esc(G.tenQuan(x.store)) + '</small></div></div>';
+      }).join('') + '</div>';
+      if (!n && !cho.length && !da.length) h += '<div class="gt-foot" style="font-size:12.5px;color:rgba(235,244,255,.9)">Mua từ 2 ly ở The cafe 33, XOFA hoặc Gieo Gieo, đọc số điện thoại khi order — mỗi 2 ly là 1 lượt quay gấu bông. Đơn từ 6 ly chắc chắn có gấu!</div>';
+      h += '<div class="gt-foot">Trúng ở quán nào nhận ở quán đó · khách chọn gấu tại quầy · nhận tới hết ' + HAN + '</div>';
+      the.innerHTML = h; the.style.display = 'block';
+      var b = the.querySelector('[data-q]'); if (b) b.onclick = function () { moPopup(); };
+    }
+    function moPopup() {
+      if (!st || !st.chuaMo.length) return;
+      dangQuay = false; gift.className = 'gq-gift'; gift.textContent = '🎁';
+      sub.innerHTML = 'Bạn có <b>' + st.chuaMo.length + ' lượt quay</b>';
+      say.textContent = 'Chạm Quay để mở quà!';
+      btns.innerHTML = '<button class="gq-btn" data-a="quay">Quay</button><button class="gq-btn gq-x" data-a="x">Để sau</button>';
+      q.classList.add('on'); ganNut();
+    }
+    function ganNut() {
+      var bq = btns.querySelector('[data-a=quay]'), bx = btns.querySelector('[data-a=x]');
+      if (bx) bx.onclick = function () { if (!dangQuay) q.classList.remove('on'); };
+      if (bq) bq.onclick = quay;
+      gift.onclick = function () { if (!dangQuay && btns.querySelector('[data-a=quay]')) quay(); };
+    }
+    function quay() {
+      if (dangQuay) return; dangQuay = true;
+      gift.className = 'gq-gift lac'; gift.textContent = '🎁'; say.textContent = 'Đang quay…'; btns.innerHTML = '';
+      var t0 = Date.now();
+      G.mo(sdt).then(function (kq) {
+        setTimeout(function () {
+          dangQuay = false; gift.className = 'gq-gift no';
+          if (kq.win) {
+            gift.textContent = '🧸';
+            say.innerHTML = '<b>Chúc mừng! Bạn trúng 1 gấu bông</b><br>Nhận tại ' + esc(G.tenQuan(kq.store)) + ' · hạn ' + HAN + '<br><span class="gq-code">' + esc(kq.code) + '</span>';
+          } else { gift.textContent = '🎄'; say.innerHTML = 'Chưa trúng lần này<br>Chúc bạn may mắn lần sau!'; }
+          sub.innerHTML = kq.conLai > 0 ? 'Còn <b>' + kq.conLai + ' lượt</b>' : 'Đã quay hết lượt';
+          btns.innerHTML = (kq.conLai > 0 ? '<button class="gq-btn" data-a="quay">Quay tiếp</button>' : '') + '<button class="gq-btn gq-x" data-a="x">' + (kq.win ? 'Xem gấu của tôi' : 'Đóng') + '</button>';
+          ganNut();
+          var bx = btns.querySelector('[data-a=x]');
+          if (kq.win && bx) bx.onclick = function () { q.classList.remove('on'); try { if (typeof showTab === 'function') showTab('user'); } catch (e) {} setTimeout(function () { the.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 250); };
+        }, Math.max(0, 1500 - (Date.now() - t0)));
+      }).catch(function (e) {
+        dangQuay = false; gift.className = 'gq-gift'; gift.textContent = '🎄';
+        say.textContent = e.message === 'het-luot' ? 'Bạn đã quay hết lượt.' : e.message === 'het-dot' ? 'Chương trình đã kết thúc.' : 'Chưa quay được, thử lại sau nhé.';
+        btns.innerHTML = '<button class="gq-btn gq-x" data-a="x">Đóng</button>'; ganNut();
+      });
+    }
+    // popup tự hiện khi có lượt mới (lần đầu vào app hoặc vừa thanh toán xong) — chờ popup chào mừng đóng
+    function baoNeuCo() {
+      var n = st ? st.chuaMo.length : 0;
+      if (!dangQuay && n > 0 && n > daBao && !q.classList.contains('on')) {
+        var w = document.getElementById('welcome-popup'), cho = 0;
+        (function doi() {
+          var mo = w && !w.classList.contains('hidden') && w.style.display !== 'none';
+          if (mo && ++cho < 120) { setTimeout(doi, 1000); return; }
+          if (st && st.chuaMo.length && !q.classList.contains('on')) moPopup();
+        })();
+      }
+      daBao = n;
+    }
+    function dung() { if (unDoc) { try { unDoc(); } catch (e) {} unDoc = null; } st = null; veThe(); }
+    function bat() {
+      var p = phone();
+      if (p.length < 10 || !G.dangNhan()) { sdt = ''; dung(); return; }
+      if (p === sdt && unDoc) return;
+      dung(); sdt = p; daBao = -1;
+      try {
+        unDoc = G.docKhach(p).onSnapshot(function (s) {
+          if (sdt !== p) return;
+          st = G.stateOf(s.exists ? s.data() : null); veThe();
+          baoNeuCo();
+        }, function (e) { console.warn('[gấu] đọc lượt', e); });
+      } catch (e) { console.warn('[gấu]', e); }
+    }
+    G.khachBat = bat;   // test
+    var _sd = window.showDashboard;
+    if (typeof _sd === 'function') window.showDashboard = function () {
+      var r = _sd.apply(this, arguments);
+      if (!cfgNghe) { cfgNghe = true; G.ngheCfg(function () { bat(); }); } else bat();
+      return r;
+    };
   }
 })();

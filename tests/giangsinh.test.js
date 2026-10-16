@@ -2,7 +2,7 @@
 // → sửa index.html mà quên sinh lại thì test này báo (tới mùa bật lên không bị thành app cũ thiếu tính năng).
 const fs = require('fs'); const path = require('path');
 const ROOT = path.resolve(__dirname, '..');
-const { taoGiangSinh, BE_GAO, BE_GAO_RE } = require('../tools/tao_ban_giangsinh.js');
+const { taoGiangSinh, BE_GAO, BE_GAO_RE, GAU_NOEL } = require('../tools/tao_ban_giangsinh.js');
 const gocDu = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
 const goc = gocDu.replace(BE_GAO_RE, '');   // khối Bé Gạo bản Giáng sinh được thay riêng (hình cây thông, câu nói) — kiểm riêng bên dưới
 const moi = taoGiangSinh(gocDu);
@@ -15,7 +15,7 @@ for (const id of ['id="login-screen"', 'id="login-sdt"', 'id="btn-login"', 'logi
 const mau = x => x.replace(/#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?(?![0-9a-zA-Z_-])/g, '#M')
   .replace(/\b(rgba?\(\s*)\d{1,3}(\s*,\s*)\d{1,3}(\s*,\s*)\d{1,3}/g, '$1M$2M$3M')
   .replace(/-(green|emerald|teal|lime|sky)-(\d{2,3})\b/g, '-M-$2');
-const bo = moi.replace(/\n<!-- BẢN GIÁNG SINH[^\n]*-->/, '')
+const bo = moi.replace(GAU_NOEL + '</body>', '</body>').replace(/\n<!-- BẢN GIÁNG SINH[^\n]*-->/, '')
   .replace(/\n  <!-- \[GIÁNG SINH\][\s\S]*?<\/style>/, '')
   .replace(/\n    <div class="lc-snow"[\s\S]*?<\/script>/, '')
   .replace(/\n    <!-- \[GIÁNG SINH\] tuyết trong app -->[\s\S]*?<\/script>/, '')
@@ -37,5 +37,6 @@ if (BE_GAO) {
 }
 chk(!/#006241|rgba\(0,98,65/i.test(moi), 'không còn sót màu xanh lá chính (#006241)');
 chk(moi.includes('id="app-snow"'), 'có tuyết trong app');
+chk(!GAU_NOEL || (moi.split('gau_noel_giangsinh.v1.js" data-quan="khach"').length === 2), 'gắn quay trúng gấu Noel (1 thẻ script data-quan="khach")');
 chk(moi.includes('id="app-orn"') && (moi.match(/class="lc-tree t\d"/g) || []).length === 3, 'có quả châu trong app + 3 cây thông ở màn đăng nhập');
 console.log(ok ? 'ALL PASS' : 'SOME FAIL'); process.exit(ok ? 0 : 1);
