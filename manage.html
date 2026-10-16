@@ -319,11 +319,17 @@ tr.is-rejected td,.cost-card.is-rejected{opacity:.55}
 .tip:hover::after,.tip:focus::after{opacity:1;visibility:visible}
 .seg-pick{display:flex;flex-wrap:wrap;gap:8px}
 .seg-pick label{position:relative;cursor:pointer;display:inline-flex}
-.seg-pick input[type=radio]{position:absolute;opacity:0;width:1px;height:1px;pointer-events:none}
+.seg-pick input[type=radio],.seg-pick input[type=checkbox]{position:absolute;opacity:0;width:1px;height:1px;pointer-events:none}
 .seg-pick label>span{display:inline-flex;align-items:center;min-height:44px;padding:0 18px;border-radius:999px;border:1.5px solid var(--line);background:var(--panel);font-size:14px;font-weight:650;color:var(--ink)}
 .seg-pick input:checked+span{border-color:var(--green);background:color-mix(in srgb,var(--green) 12%,var(--panel));color:var(--green)}
 .seg-pick input:focus-visible+span{outline:2px solid var(--green);outline-offset:2px}
 .seg-num{align-items:center;gap:8px}.seg-pick .seg-num>span{border:0;background:none;padding:0;min-height:0;font-weight:600;color:var(--sub)}.seg-num input.input{width:90px;min-height:44px;text-align:right}
+/* [NGÀY NGHỈ GIEO] tab Mục tiêu + nhãn Quán nghỉ trên widget */
+.off-panel{margin-top:18px;padding:20px}.off-panel .panel-head{margin-bottom:6px}.off-form{display:grid;gap:12px;margin:12px 0 6px}.off-dates{display:grid;grid-template-columns:repeat(2,minmax(0,220px));gap:12px}.off-dates .field{display:grid;gap:6px;font-size:13px;font-weight:650;color:var(--sub)}.off-dates small{font-weight:500}.off-form .form-actions{justify-content:flex-start;margin:0}
+.off-list{display:grid;gap:2px;margin-top:8px}.off-row{align-items:center}.off-chips{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end}.off-chip{display:inline-flex;align-items:center;gap:4px;padding:4px 4px 4px 12px;border-radius:999px;background:color-mix(in srgb,var(--amber,#d98a00) 14%,var(--panel));color:var(--ink);font-size:13px;font-weight:650}.off-chip button{width:28px;height:28px;border:0;border-radius:50%;background:transparent;color:var(--sub);font-size:18px;line-height:1;cursor:pointer}.off-chip button:hover{background:color-mix(in srgb,var(--ink) 10%,transparent);color:var(--ink)}
+.widget-off{display:inline-flex;align-items:center;gap:5px;color:var(--sub);font-weight:700}.widget-off svg{width:14px;height:14px}
+.off-dates .input{width:100%;min-width:0}
+@media(max-width:760px){.off-panel{padding:17px}.off-dates{grid-template-columns:minmax(0,1fr)}}
 .big-check{display:flex;align-items:center;gap:12px;min-height:50px;padding:10px 14px;border:1.5px solid var(--line);border-radius:14px;cursor:pointer;font-size:14px;font-weight:650;margin-top:10px;background:var(--panel)}
 .big-check input{appearance:none;-webkit-appearance:none;width:24px;height:24px;border:2px solid var(--sub);border-radius:7px;flex:0 0 auto;display:grid;place-items:center;margin:0;background:var(--panel);cursor:pointer}
 .big-check input:checked{background:var(--green);border-color:var(--green)}
@@ -757,10 +763,70 @@ function gieoTargetsOn(hist, dateKey){
   for(const v of hist || []){ if((v.effectiveFrom || '') <= dateKey) picked = v; else break; }
   return Object.assign({}, GIEO_TARGET_DEFAULTS, picked ? (picked.targets || {}) : {});
 }
-function gieoTargetForRange(hist, from, to){
+// off / id (tuỳ chọn): ngày quán Gieo `id` nghỉ (readOffDays) → mục tiêu ngày đó = 0. Không truyền → như cũ.
+function gieoTargetForRange(hist, from, to, off, id){
   let sum = 0;
-  for(let d = parseDkey(from); dkey(d) <= to; d = addDays(d, 1)){ const t = gieoTargetsOn(hist, dkey(d)); sum += (Number(t.aov)||0) * (Number(t.billsPerDay)||0); }
+  for(let d = parseDkey(from); dkey(d) <= to; d = addDays(d, 1)){ if(isStoreOff(off, dkey(d), id)) continue; const t = gieoTargetsOn(hist, dkey(d)); sum += (Number(t.aov)||0) * (Number(t.billsPerDay)||0); }
   return Math.round(sum);
+}
+
+// ==========================================================================
+// [NGÀY NGHỈ GIEO — 16/10] Chủ dự án đặt ngày nghỉ từng quán Gieo Ở ĐÂY (manage); quanlygieo ĐỌC cùng chỗ
+// (offStoresOf / isStoreOff chép y — test ngay_nghi.test.js khoá).
+// Lưu: special_days_gieogieo/{YYYY-MM-DD}.offStores = ['gg01', …] — bảng "Ngày đặc biệt" dùng chung mọi quán Gieo
+// (loại G, đã đăng ký trong data_access → không cần bản mới). Chỉ ghi offStores / offBy / offUpdatedAt / date,
+// KHÔNG đụng loai / ten của quanlygieo (một ngày vừa "Lễ" vừa nghỉ quán 2 vẫn giữ "Lễ" cho dự báo).
+// Ngày cũ khai "Nghỉ / đóng cửa" ở quanlygieo mà chưa có offStores → coi như MỌI quán Gieo nghỉ ('*').
+// Có offStores (kể cả rỗng) → đúng danh sách đó (manage đã sửa lại).
+// Quán nghỉ: mục tiêu ngày đó = 0 (manage + quanlygieo), widget ghi "Nghỉ"; lãi/lỗ vẫn tính chi phí cố định như cũ.
+// ==========================================================================
+const OFF_COLL = 'special_days_gieogieo';
+function offStoresOf(d){
+  if(!d) return [];
+  if(Array.isArray(d.offStores)) return d.offStores.filter(x=>typeof x === 'string' && x);
+  return d.loai === 'dong_cua' ? ['*'] : [];
+}
+function isStoreOff(off, date, id){
+  const v = off && off[date];
+  return !!(v && v.length) && (v.includes('*') || (!!id && v.includes(id)));
+}
+// { 'YYYY-MM-DD': ['gg01'] | ['*'] } cho [from, to] — 1 truy vấn theo mã ngày, chỉ trả ngày có quán nghỉ.
+async function readOffDays(from, to){
+  const P = firebase.firestore.FieldPath.documentId();
+  const s = await fstore.collection(OFF_COLL).where(P, '>=', from).where(P, '<=', to).get();
+  const m = {};
+  s.docs.forEach(doc=>{ const v = offStoresOf(doc.data()); if(v.length) m[doc.id] = v; });
+  return m;
+}
+// Bật / tắt nghỉ cho các quán `ids` trong [from, to] (tối đa 62 ngày): 1 truy vấn đọc + 1 lần ghi gộp.
+async function writeOffDays(from, to, ids, on){
+  await ensureAuth(); validDate(from); validDate(to);
+  if(from > to) throw new Error('Ngày bắt đầu phải trước ngày kết thúc.');
+  if(daysBetween(from, to) > 61) throw new Error('Tối đa 62 ngày mỗi lần.');
+  const all = (await gieoStores()).map(r=>r.id);
+  if(!ids.length) throw new Error('Chọn ít nhất 1 quán.');
+  ids.forEach(id=>{ if(!all.includes(id)) throw new Error('Quán Gieo không hợp lệ.'); });
+  const P = firebase.firestore.FieldPath.documentId();
+  const snap = await fstore.collection(OFF_COLL).where(P, '>=', from).where(P, '<=', to).get();
+  const cur = {}; snap.docs.forEach(doc=>{ cur[doc.id] = doc.data(); });
+  const batch = fstore.batch(), at = new Date().toISOString(); let n = 0;
+  for(let d = from; d <= to; d = dkey(addDays(parseDkey(d), 1))){
+    const x = cur[d] || null, next = offNextList(offStoresOf(x), all, ids, on);
+    if(x && JSON.stringify(offStoresOf(x)) === JSON.stringify(next) && Array.isArray(x.offStores)) continue;
+    const ref = fstore.collection(OFF_COLL).doc(d);
+    if(!next.length && !x) continue;
+    if(!next.length && x && !x.loai) batch.delete(ref);          // doc chỉ để ghi nghỉ → xoá hẳn
+    else batch.set(ref, { date: d, offStores: next, offBy: 'manage', offUpdatedAt: at }, { merge: true });
+    n++;
+  }
+  if(n) await batch.commit();
+  return n;
+}
+// Danh sách quán nghỉ sau khi bật / tắt. '*' (ngày cũ "Nghỉ / đóng cửa") → bung ra mọi quán rồi mới bỏ quán được tắt.
+function offNextList(list, all, ids, on){
+  let v = list.includes('*') ? all.slice() : list.slice();
+  v = on ? v.concat(ids.filter(id=>!v.includes(id))) : v.filter(id=>!ids.includes(id));
+  return v.sort();
 }
 
 // Nguồn doanh thu: TC33, XOFA, rồi từng quán Gieo ('gg_gg01', 'gg_gg02'…).
@@ -1310,11 +1376,13 @@ async function readRevenue(from,to,compare){
  const [targets,cfg,records,beCfg]=await Promise.all([loadTargets(),gieoConfigHistory(),gieoStores(),loadBreakeven().catch(e=>{console.warn('[hoà vốn] không đọc được cấu hình',e);return null})]);
  const peEnd=to>today?today:to;
  const expOf=st=>from<=peEnd?readExpenseSums(st,from,peEnd).catch(e=>{console.warn('[chi phí] không đọc được tổng hợp',st,e);return null}):Promise.resolve(null);
- const [data,pl,expTc,expXo,expCfg,assets]=await Promise.all([start<=end?revLoadRange(start,end):{},readPlDays(records.filter(r=>r.active!==false),from,peEnd),expOf('tc33'),expOf('xofa'),loadExpenseCfg().catch(()=>null),loadAssets().catch(e=>{console.warn('[tài sản] không đọc được',e);return null})]);
+ const offOf=records.length?readOffDays(from,to).catch(e=>{console.warn('[ngày nghỉ] không đọc được',e);return{}}):Promise.resolve({});
+ const [data,pl,expTc,expXo,expCfg,assets,off]=await Promise.all([start<=end?revLoadRange(start,end):{},readPlDays(records.filter(r=>r.active!==false),from,peEnd),expOf('tc33'),expOf('xofa'),loadExpenseCfg().catch(()=>null),loadAssets().catch(e=>{console.warn('[tài sản] không đọc được',e);return null}),offOf]);
  const cats=expenseCatsAll(expCfg);
- return{from,to,data,targets,cfg,records,beCfg,pl,assets,exp:{tc33:expTc&&sumsToAlloc(expTc,cats),xofa:expXo&&sumsToAlloc(expXo,cats)},comparison:!!compare};
+ return{from,to,data,targets,cfg,records,beCfg,pl,assets,off,exp:{tc33:expTc&&sumsToAlloc(expTc,cats),xofa:expXo&&sumsToAlloc(expXo,cats)},comparison:!!compare};
 }
-async function readSettings(force=false){await ensureAuth();if(force){TARGETS=null;_ggConfig=null;_ggStores=null}const[targets,cfg,records]=await Promise.all([loadTargets(force),gieoConfigHistory(),gieoStores()]);return{targets,cfg,records}}
+// month (tuỳ chọn): đọc thêm ngày nghỉ Gieo của tháng đó cho tab Mục tiêu (1 truy vấn).
+async function readSettings(force=false,month){await ensureAuth();if(force){TARGETS=null;_ggConfig=null;_ggStores=null}const[targets,cfg,records]=await Promise.all([loadTargets(force),gieoConfigHistory(),gieoStores()]);let off=null;if(month&&records.length){const end=month+'-'+String(daysInMonthYm(month)).padStart(2,'0');off=await readOffDays(month+'-01',end).catch(e=>{console.warn('[ngày nghỉ] không đọc được',e);return null})}return{targets,cfg,records,off}}
 async function readEmployees(force=false){await ensureAuth();return loadEmployees(force)}
 async function readSchedules(store,from,to){await ensureAuth();validStore(store);validDate(from);validDate(to);const snap=await fstore.collection(STORES[store].sched).where('date','>=',from).where('date','<=',to).get();return snap.docs.map(d=>({...d.data(),id:d.id}))}
 async function readAttendance(ids,date){
@@ -1424,7 +1492,7 @@ async function writeBreakeven(month,values){
  await BE_DOC().set({m:{[month]:rec}},{mergeFields:['m.'+month]});BE_CFG=null;
 }
 async function deleteBreakeven(month){await ensureAuth();if(!/^\d{4}-(?:0[1-9]|1[0-2])$/.test(month))throw new Error('Tháng không hợp lệ.');await BE_DOC().update({['m.'+month]:firebase.firestore.FieldValue.delete()});BE_CFG=null}
-return{readCash,writeCashReceipt,writeCashStart,ggCashExpected,tcxCashExpected,readAssets,writeAsset,deleteAsset,assetMonthly,assetDepDay,assetRecovered,assetEndDate,assetLive,expMonthSum,sumsToAlloc,readCosts,writeExpense,deleteExpenseDoc,reviewExpense,setExpenseActual,markExpensePaid,expPaidOf,writeExpenseCats,expAmountIn,expCostType,expCounts,expenseCats,expenseCatsAll,DEFAULT_EXPENSE_CATS,readBreakeven,writeBreakeven,deleteBreakeven,beMonthValue,tcxBreakEven,ggBreakEven,plBreakEven,readRevenue,readSettings,readEmployees,readSchedules,readAttendance,readPayroll,writeEmployee,writeEmployeeActive,writeSchedule,deleteSchedule,writeScheduleBatch,writeShift,deleteShift,writeLateGrace,writeTargets,deleteTargets,invalidateRevenue,invalidateEmployees,targetMonthValue,targetForRange,gieoTargetForRange,gieoTargetsOn,empPayTermsOn,computeWageForDayHours,laborByEmployee,shiftWorkedHours,isShiftInProgress,workStoresOf,tcSummarize,xoSummarize,ggSummarize,tcEmptySum,xoEmptySum,ggEmptySum,sumMerge};
+return{readOffDays,writeOffDays,isStoreOff,offStoresOf,readCash,writeCashReceipt,writeCashStart,ggCashExpected,tcxCashExpected,readAssets,writeAsset,deleteAsset,assetMonthly,assetDepDay,assetRecovered,assetEndDate,assetLive,expMonthSum,sumsToAlloc,readCosts,writeExpense,deleteExpenseDoc,reviewExpense,setExpenseActual,markExpensePaid,expPaidOf,writeExpenseCats,expAmountIn,expCostType,expCounts,expenseCats,expenseCatsAll,DEFAULT_EXPENSE_CATS,readBreakeven,writeBreakeven,deleteBreakeven,beMonthValue,tcxBreakEven,ggBreakEven,plBreakEven,readRevenue,readSettings,readEmployees,readSchedules,readAttendance,readPayroll,writeEmployee,writeEmployeeActive,writeSchedule,deleteSchedule,writeScheduleBatch,writeShift,deleteShift,writeLateGrace,writeTargets,deleteTargets,invalidateRevenue,invalidateEmployees,targetMonthValue,targetForRange,gieoTargetForRange,gieoTargetsOn,empPayTermsOn,computeWageForDayHours,laborByEmployee,shiftWorkedHours,isShiftInProgress,workStoresOf,tcSummarize,xoSummarize,ggSummarize,tcEmptySum,xoEmptySum,ggEmptySum,sumMerge};
 
 })();
 
@@ -1553,7 +1621,7 @@ function dashboard(){
  // [HOÀ VỐN] Hoà vốn chung = cộng hoà vốn từng quán đang xem. Thiếu quán nào → chỉ ghi chữ, không vẽ vạch (vạch thiếu
  // một quán là vạch sai). Một quán Gieo cộng theo số của quanlygieo, TC33 / XOFA theo cấu hình tab Điểm hoà vốn.
  // Cộng mục tiêu từng quán (như bản cũ): khi xem Tất cả, mục tiêu chung là số tự đặt — hiện kèm tổng mục tiêu từng quán để so; thiếu quán nào ghi rõ.
- const tgList=list.filter(st=>st.target>0),tgSum=tgList.reduce((n,st)=>n+st.target,0),tgMiss=list.filter(st=>!(st.target>0));
+ const tgList=list.filter(st=>st.target>0),tgSum=tgList.reduce((n,st)=>n+st.target,0),tgMiss=list.filter(st=>!(st.target>0)&&!(st.offDays&&st.offDays===st.nDays));
  const goalSumLine=state.store==='all'&&tgSum>0?`<div class="overview-tgsum">Cộng mục tiêu từng quán <b class="num">${shortMoney(tgSum)}</b> · đạt <b>${Math.floor(total/tgSum*100)}%</b>${tgMiss.length?' — chưa có mục tiêu: '+esc(tgMiss.map(st=>st.brand==='gieo'?'Gieo '+st.code:st.name).join(', ')):''}</div>`:'';
  const beList=list.filter(st=>beHas(st.be)),beMissing=list.filter(st=>!beHas(st.be)),beTotal=beList.reduce((n,st)=>n+st.be.hoaVon,0),beFull=beList.length>0&&!beMissing.length,beName=st=>st.brand==='gieo'?'Gieo '+st.code:st.name;
  // Vạch luôn vẽ khi có ≥ 1 quán có số: quán chưa có số coi như vừa đủ hoà vốn bằng chính doanh thu của nó → vạch = hoà vốn
@@ -1581,7 +1649,7 @@ function dashboard(){
 function storeSo(s){const[from,to]=rangeDates();if(from!==to)return'';const tc=s.id==='tc33',cur=tc?s.bill:s.rev,prev=tc?s.prevBill:s.prev;if(prev==null)return'';const v=cur-prev,pct=prev>0?Math.round(v/prev*100):null,lab=from===currentDate()?'so hôm qua':'so hôm kia';return `<span class="widget-so ${v>=0?'up':'down'}" title="${tc?'Cả bill (gồm Ăn vặt) như thẻ So hôm qua của POS':''}"><b>${v>=0?'▲':'▼'} ${money(Math.abs(v))} ₫${pct!=null?' ('+(v>=0?'+':'−')+Math.abs(pct)+'%)':''}</b>${lab}</span>`}
 function storeCard(s,total,share){
  const p=s.target?Math.floor(s.rev/s.target*100):0,isGieo=s.brand==='gieo',heading=isGieo?'Gieo Gieo':s.name,subtitle=isGieo?s.code+' · '+s.location:s.id==='tc33'?'Đồ uống + Khác':'Không gồm Food',mark=isGieo?s.code.slice(2):s.mono;
- return `<article class="outlet-widget" style="--c:${s.c};--widget-number-size:${Math.min(13.8,100/(money(s.rev).length*.68+.9)).toFixed(2)}cqw" aria-label="${esc(s.name)}"><div class="widget-head"><span class="widget-brandmark" aria-hidden="true">${esc(mark)}</span><div class="widget-heading"><h3>${esc(heading)}</h3><p title="${esc(s.name)}">${esc(subtitle)}</p></div><button class="widget-open" onclick="storeDetails('${s.id}')" aria-label="Chi tiết ${esc(s.name)}">${icon('arrow')}</button></div><div class="widget-main"><button class="widget-revenue" onclick="storeDetails('${s.id}')" aria-label="Xem doanh thu ${esc(s.name)}"><span class="widget-revenue-label">Doanh thu</span><strong class="widget-revenue-value num">${money(s.rev)}<span>đ</span></strong></button><span class="widget-share">Đóng góp <b>${share}%</b> doanh thu đang xem</span>${storeSo(s)}</div><div class="widget-goal"><div class="widget-goal-row"><span>${s.target?'Mục tiêu '+shortMoney(s.target):'Chưa đặt mục tiêu'}</span><strong class="num ${s.target&&s.rev>=s.target?'goal-reached':''}">${s.target&&s.rev>=s.target?icon('check'):''}${s.target?p+'%':'—'}</strong></div>${s.target?goalProgress(s.rev/s.target,'Mục tiêu '+s.name,true):''}</div>${beWidget(s)}<div class="widget-metrics"><div><span>Hoá đơn</span><b class="num">${money(s.count)}</b></div><div><span>Tiền mặt</span><b class="num">${money(s.cash)}</b></div><div><span>Chuyển khoản</span><b class="num">${money(s.bank)}</b></div></div></article>`;
+ return `<article class="outlet-widget" style="--c:${s.c};--widget-number-size:${Math.min(13.8,100/(money(s.rev).length*.68+.9)).toFixed(2)}cqw" aria-label="${esc(s.name)}"><div class="widget-head"><span class="widget-brandmark" aria-hidden="true">${esc(mark)}</span><div class="widget-heading"><h3>${esc(heading)}</h3><p title="${esc(s.name)}">${esc(subtitle)}</p></div><button class="widget-open" onclick="storeDetails('${s.id}')" aria-label="Chi tiết ${esc(s.name)}">${icon('arrow')}</button></div><div class="widget-main"><button class="widget-revenue" onclick="storeDetails('${s.id}')" aria-label="Xem doanh thu ${esc(s.name)}"><span class="widget-revenue-label">Doanh thu</span><strong class="widget-revenue-value num">${money(s.rev)}<span>đ</span></strong></button><span class="widget-share">Đóng góp <b>${share}%</b> doanh thu đang xem</span>${storeSo(s)}</div><div class="widget-goal"><div class="widget-goal-row"><span>${s.offDays&&s.offDays===s.nDays?`<b class="widget-off">${icon('calendar')}Quán nghỉ${s.nDays>1?' cả kỳ':''}</b>`:s.target?'Mục tiêu '+shortMoney(s.target)+(s.offDays?' · nghỉ '+s.offDays+' ngày':''):'Chưa đặt mục tiêu'}</span>${s.offDays&&s.offDays===s.nDays?'':`<strong class="num ${s.target&&s.rev>=s.target?'goal-reached':''}">${s.target&&s.rev>=s.target?icon('check'):''}${s.target?p+'%':'—'}</strong>`}</div>${s.target?goalProgress(s.rev/s.target,'Mục tiêu '+s.name,true):''}</div>${beWidget(s)}<div class="widget-metrics"><div><span>Hoá đơn</span><b class="num">${money(s.count)}</b></div><div><span>Tiền mặt</span><b class="num">${money(s.cash)}</b></div><div><span>Chuyển khoản</span><b class="num">${money(s.bank)}</b></div></div></article>`;
 }
 let currentBuckets=[];
 function chartSeries(points){
@@ -1717,14 +1785,14 @@ function mapShift(s,store){return{id:store+'_'+safeId(s.id),rawId:s.id,employee:
 function clockVN(value){if(!value)return '';const d=new Date(value);return Number.isNaN(+d)?'':new Intl.DateTimeFormat('vi-VN',{timeZone:'Asia/Ho_Chi_Minh',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(d)}
 function currentDate(){return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Ho_Chi_Minh',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date())}
 function employeeType(e){return{hourly_part:'Part-time',hourly_full:'Full-time',fixed:'Lương cố định',unknown:'Chưa khai lương'}[e.type]||'Chưa khai lương'}
-function loadKey(){if(state.view==='rev')return'rev:'+rangeDates().join('|');if(state.view==='lich')return'lich:'+hrStore()+':'+weekDates()[0];if(state.view==='cc')return'cc:'+ccStoreIds().join(',')+':'+state.attendanceDate;if(state.view==='luong')return'luong:'+state.payrollMonth;if(state.view==='hoavon')return'hoavon:'+state.beMonth;if(state.view==='chiphi')return'chiphi:'+state.costMonth;if(state.view==='tienmat')return'tienmat:'+state.cashDate;return state.view}
+function loadKey(){if(state.view==='rev')return'rev:'+rangeDates().join('|');if(state.view==='lich')return'lich:'+hrStore()+':'+weekDates()[0];if(state.view==='cc')return'cc:'+ccStoreIds().join(',')+':'+state.attendanceDate;if(state.view==='luong')return'luong:'+state.payrollMonth;if(state.view==='hoavon')return'hoavon:'+state.beMonth;if(state.view==='chiphi')return'chiphi:'+state.costMonth;if(state.view==='tienmat')return'tienmat:'+state.cashDate;if(state.view==='target')return'target:'+state.targetMonth;return state.view}
 async function loadCurrent(force=false){
  const view=state.view,key=loadKey();if(!force&&live.loadingKey===key)return;const token=++live.request;live.loadingKey=key;live.error=null;render();
  try{
   let result;
   if(view==='rev')result=await backend.readRevenue(...rangeDates(),['day','yesterday'].includes(state.range));
   else if(view==='nv')result=await backend.readEmployees(true);
-  else if(view==='target')result=await backend.readSettings(force);
+  else if(view==='target')result=await backend.readSettings(force,state.targetMonth);
   else if(view==='hoavon')result=await backend.readBreakeven(state.beMonth,force);
   else if(view==='chiphi')result=await backend.readCosts(state.costMonth,force);
   else if(view==='taisan')result=await backend.readAssets(force);
@@ -1735,7 +1803,7 @@ async function loadCurrent(force=false){
   if(token!==live.request||key!==loadKey())return;
   if(view==='rev'){live.rev=result;live.cfg=result.cfg;live.records=result.records;goals=result.targets;stores=buildStoreCatalog(result.records)}
   if(view==='nv')employees=result.map(mapEmployee);
-  if(view==='target'){goals=result.targets;live.cfg=result.cfg;live.records=result.records;stores=buildStoreCatalog(result.records)}
+  if(view==='target'){goals=result.targets;live.cfg=result.cfg;live.records=result.records;live.tOff=result.off;stores=buildStoreCatalog(result.records)}
   if(view==='hoavon'){live.be=result;live.records=result.records;stores=buildStoreCatalog(result.records)}
   if(view==='chiphi'){live.cost=result;live.records=result.records;stores=buildStoreCatalog(result.records)}
   if(view==='taisan'){live.assets=result.assets;live.records=result.records;stores=buildStoreCatalog(result.records)}
@@ -1763,12 +1831,14 @@ function footer(extra=''){return `<footer class="view-footer ${extra}"><span>${l
 function showAbout(){openDialog('Quản lý cửa hàng',`<p class="inline-note">Doanh thu đọc từ POS của The cafe 33, XOFA và từng cửa hàng Gieo Gieo. Hồ sơ nhân viên dùng chung; lịch và chấm công ở đây quản lý riêng The cafe 33 / XOFA.</p><div class="detail-section"><div class="detail-row"><span>Ngày cũ hơn 8 ngày</span><b>Dùng bản tổng hợp đã lưu</b></div><div class="detail-row"><span>Giờ của ca đang mở hôm nay</span><b>Tạm tính đến hiện tại</b></div></div><button class="btn secondary" onclick="closeDialog();refreshLive(null,true)">${icon('refresh')}Đọc lại toàn bộ kỳ đang xem</button>`)}
 function rangeDates(){const now=currentDate(),d=parseDate(now),m=now.slice(0,7);switch(state.range){case'yesterday':return[addDays(now,-1),addDays(now,-1)];case'week':{const a=addDays(now,1-(d.getDay()||7));return[a,addDays(a,6)]}case'month':return[m+'-01',dateKey(new Date(d.getFullYear(),d.getMonth()+1,0,12))];case'year':return[now.slice(0,4)+'-01-01',now.slice(0,4)+'-12-31'];case'custom':return[state.from,state.to];default:return[now,now]}}
 function goalForMonth(month,id){if(id==='gieo'||stores.find(s=>s.id===id)?.brand==='gieo'){const end=dateKey(new Date(Number(month.slice(0,4)),Number(month.slice(5)),0,12));return backend.gieoTargetForRange(live.cfg,month+'-01',end)}return backend.targetMonthValue(goals,month,id)?.value??null}
-function goalForRange(id,from,to){if(id==='gieo'||stores.find(s=>s.id===id)?.brand==='gieo')return backend.gieoTargetForRange(live.cfg,from,to);return backend.targetForRange(goals,from,to,id)}
+// [NGÀY NGHỈ GIEO] Quán Gieo nghỉ ngày nào thì mục tiêu ngày đó = 0 (off: ngày nghỉ đã đọc — mặc định của kỳ Tổng quan).
+function goalForRange(id,from,to,off){if(id==='gieo'||stores.find(s=>s.id===id)?.brand==='gieo')return backend.gieoTargetForRange(live.cfg,from,to,off===undefined?live.rev?.off:off,id==='gieo'?null:id);return backend.targetForRange(goals,from,to,id)}
+function offDaysOf(id,from,to,off){let n=0;if(!off)return 0;for(let d=from;d<=to;d=addDays(d,1))if(backend.isStoreOff(off,d,id))n++;return n}
 function storeRange(s){
  const[from,to]=rangeDates(),key=s.brand==='gieo'?'gg_'+s.id:s.id,empty=s.brand==='gieo'?backend.ggEmptySum:s.id==='tc33'?backend.tcEmptySum:backend.xoEmptySum;let sum=empty();
  for(let d=from;d<=to;d=addDays(d,1)){const value=live.rev?.data[key]?.[d];if(value)backend.sumMerge(sum,value)}
  const prev=live.rev?.data[key]?.[addDays(from,-1)],rev=s.id==='tc33'?sum.drink+sum.khac:s.brand==='gieo'?sum.revenue:sum.total;
- return{...s,rev,bill:sum.total||0,prevBill:prev?prev.total||0:null,prev:prev?(s.id==='tc33'?prev.drink+prev.khac:s.brand==='gieo'?prev.revenue:prev.total):null,drink:sum.drink||0,other:sum.khac||0,food:s.id==='tc33'?sum.snack:sum.food,cash:(sum.cash||0)+(s.brand==='gieo'?sum.foodCash||0:0),bank:s.id==='tc33'?sum.transfer||0:(sum.bank||0)+(s.brand==='gieo'?sum.foodBank||0:0),foodCash:sum.foodCash||0,foodBank:sum.foodBank||0,count:sum.count||0,instore:sum.instore||0,togo:sum.togo||0,ship:sum.ship||0,shipRev:sum.shipRev||0,target:goalForRange(s.id,from,to),be:storeBreakEven(s,key,from,to)};
+ return{...s,rev,bill:sum.total||0,prevBill:prev?prev.total||0:null,prev:prev?(s.id==='tc33'?prev.drink+prev.khac:s.brand==='gieo'?prev.revenue:prev.total):null,drink:sum.drink||0,other:sum.khac||0,food:s.id==='tc33'?sum.snack:sum.food,cash:(sum.cash||0)+(s.brand==='gieo'?sum.foodCash||0:0),bank:s.id==='tc33'?sum.transfer||0:(sum.bank||0)+(s.brand==='gieo'?sum.foodBank||0:0),foodCash:sum.foodCash||0,foodBank:sum.foodBank||0,count:sum.count||0,instore:sum.instore||0,togo:sum.togo||0,ship:sum.ship||0,shipRev:sum.shipRev||0,target:goalForRange(s.id,from,to),be:storeBreakEven(s,key,from,to),offDays:s.brand==='gieo'?offDaysOf(s.id,from,to,live.rev?.off):0,nDays:Math.round((parseDate(to)-parseDate(from))/864e5)+1};
 }
 // [HOÀ VỐN] null = không đọc được / chưa có gì. Gieo: tóm tắt của quanlygieo; TC33 / XOFA: cấu hình tab Điểm hoà vốn.
 function storeBreakEven(s,key,from,to){
@@ -1787,7 +1857,7 @@ function beEmptyReason(s){
  if(b&&b.khongTheHoaVon)return 'Không có điểm hoà vốn — giá vốn đang ăn hết doanh thu';
  if(!gieo)return live.rev&&!live.rev.beCfg&&!live.rev.exp?.[s.id]?'Không đọc được chi phí / cấu hình hoà vốn':'Chưa có chi phí tháng này, chưa cấu hình hoà vốn';
  if(live.rev?.pl&&live.rev.pl[s.id]===null)return 'Không đọc được số của Quản lý Gieo';
- if(!(s.rev>0))return 'Không bán hàng trong kỳ này — chưa có số lãi / lỗ';
+ if(!(s.rev>0))return s.offDays&&s.offDays===s.nDays?'Quán nghỉ — chưa có số lãi / lỗ':'Không bán hàng trong kỳ này — chưa có số lãi / lỗ';
  return 'Chưa có số từ Quản lý Gieo — mở Quản lý Gieo để cập nhật';
 }
 function beNote(s){
@@ -1856,7 +1926,28 @@ function payrollView(){
 }
 function targetView(){
  const month=state.targetMonth,days=new Date(Number(month.slice(0,4)),Number(month.slice(5)),0).getDate(),own=goals[month]||{},gieo=goalForMonth(month,'gieo'),count=live.records.filter(s=>s.active!==false).length;
- return pageHead('Mục tiêu doanh thu','Mục tiêu tháng và mức đang có hiệu lực.',dateControl('month',month,'state.targetMonth=this.value;render()','Tháng mục tiêu'))+`<div class="target-layout"><form class="panel form-panel" onsubmit="saveTargets(event)"><div class="panel-head"><h2>Tháng ${month.slice(5)}/${month.slice(0,4)}</h2><span class="pill">${days} ngày</span></div>${[...hrStores(),{id:'all',name:'Mục tiêu chung',meta:'Mức kỳ vọng của toàn hệ thống',c:'var(--green)'}].map(st=>{const inherited=backend.targetMonthValue(goals,month,st.id);return `<div class="target-field"><div><label for="goal-${st.id}"><i class="swatch" style="background:${st.c}"></i>${esc(st.name)}</label><small>${st.id==='all'?'Đặt riêng, không bắt buộc bằng tổng từng quán':esc(st.meta)}</small></div><div><input class="input num" id="goal-${st.id}" name="${st.id}" type="text" inputmode="numeric" autocomplete="off" maxlength="20" value="${groupMoneyInput(own[st.id]||'')}" placeholder="${inherited?groupMoneyInput(inherited.value)+' đang dùng':'Chưa đặt'}" oninput="formatGoalInput(this,${days})" onblur="validateGoalInput(this)"><small id="daily-${st.id}" style="text-align:right">${inherited?'≈ '+money(inherited.value/days)+' ₫ / ngày':''}</small></div></div>`}).join('')}<p class="small muted">Ô trống dùng mức tháng gần nhất trước đó.</p><div class="form-actions">${goals[month]?'<button type="button" class="btn secondary" onclick="deleteTargetMonth()">Xoá mức tháng này</button>':''}<button type="submit" class="btn">${icon('check')}Lưu mục tiêu</button></div></form><aside class="panel target-explainer"><h2>Gieo Gieo · chỉ đọc</h2><p>Mục tiêu lấy từ Quản lý Gieo theo AOV × số bill/ngày, áp dụng theo từng ngày có hiệu lực.</p><div class="detail-row"><span>Tháng này · mỗi điểm</span><b>${money(gieo)}đ</b></div><div class="detail-row"><span>${count} điểm đang mở</span><b>${money(gieo*count)}đ</b></div><p>Sửa mục tiêu Gieo tại Quản lý Gieo › Cấu hình. Mục tiêu chung ở đây là mức bạn đặt riêng cho toàn hệ thống.</p><div class="target-history">${Object.keys(goals).filter(m=>['tc33','xofa','all'].some(k=>Number(goals[m]?.[k])>0)).sort().reverse().map(m=>`<button class="btn secondary" type="button" onclick="state.targetMonth='${m}';render()">Tháng ${m.slice(5)}/${m.slice(0,4)}</button>`).join('')}</div></aside></div>${footer('secondary-footer')}`;
+ const mEnd=month+'-'+String(days).padStart(2,'0'),ggT=stores.filter(s=>s.brand==='gieo'&&s.active).map(st=>({st,off:offDaysOf(st.id,month+'-01',mEnd,live.tOff),goal:goalForRange(st.id,month+'-01',mEnd,live.tOff||null)}));
+ return pageHead('Mục tiêu doanh thu','Mục tiêu tháng và mức đang có hiệu lực.',dateControl('month',month,'state.targetMonth=this.value;render()','Tháng mục tiêu'))+`<div class="target-layout"><form class="panel form-panel" onsubmit="saveTargets(event)"><div class="panel-head"><h2>Tháng ${month.slice(5)}/${month.slice(0,4)}</h2><span class="pill">${days} ngày</span></div>${[...hrStores(),{id:'all',name:'Mục tiêu chung',meta:'Mức kỳ vọng của toàn hệ thống',c:'var(--green)'}].map(st=>{const inherited=backend.targetMonthValue(goals,month,st.id);return `<div class="target-field"><div><label for="goal-${st.id}"><i class="swatch" style="background:${st.c}"></i>${esc(st.name)}</label><small>${st.id==='all'?'Đặt riêng, không bắt buộc bằng tổng từng quán':esc(st.meta)}</small></div><div><input class="input num" id="goal-${st.id}" name="${st.id}" type="text" inputmode="numeric" autocomplete="off" maxlength="20" value="${groupMoneyInput(own[st.id]||'')}" placeholder="${inherited?groupMoneyInput(inherited.value)+' đang dùng':'Chưa đặt'}" oninput="formatGoalInput(this,${days})" onblur="validateGoalInput(this)"><small id="daily-${st.id}" style="text-align:right">${inherited?'≈ '+money(inherited.value/days)+' ₫ / ngày':''}</small></div></div>`}).join('')}<p class="small muted">Ô trống dùng mức tháng gần nhất trước đó.</p><div class="form-actions">${goals[month]?'<button type="button" class="btn secondary" onclick="deleteTargetMonth()">Xoá mức tháng này</button>':''}<button type="submit" class="btn">${icon('check')}Lưu mục tiêu</button></div></form><aside class="panel target-explainer"><h2>Gieo Gieo · chỉ đọc</h2><p>Mục tiêu lấy từ Quản lý Gieo theo AOV × số bill/ngày, áp dụng theo từng ngày có hiệu lực.</p><div class="detail-row"><span>Tháng này · mỗi điểm</span><b>${money(gieo)}đ</b></div>${ggT.some(x=>x.off)?ggT.map(x=>`<div class="detail-row"><span>Gieo ${esc(x.st.code)} · nghỉ ${x.off} ngày</span><b>${money(x.goal)}đ</b></div>`).join('')+`<div class="detail-row"><span>${count} điểm đang mở · trừ ngày nghỉ</span><b>${money(ggT.reduce((n,x)=>n+x.goal,0))}đ</b></div>`:`<div class="detail-row"><span>${count} điểm đang mở</span><b>${money(gieo*count)}đ</b></div>`}<p>Sửa mục tiêu Gieo tại Quản lý Gieo › Cấu hình. Mục tiêu chung ở đây là mức bạn đặt riêng cho toàn hệ thống.</p><div class="target-history">${Object.keys(goals).filter(m=>['tc33','xofa','all'].some(k=>Number(goals[m]?.[k])>0)).sort().reverse().map(m=>`<button class="btn secondary" type="button" onclick="state.targetMonth='${m}';render()">Tháng ${m.slice(5)}/${m.slice(0,4)}</button>`).join('')}</div></aside></div>${offPanel(month)}${footer('secondary-footer')}`;
+}
+// [NGÀY NGHỈ GIEO — 16/10] Đặt / bỏ ngày nghỉ từng quán Gieo. Ghi special_days_gieogieo.offStores (backend.writeOffDays);
+// Quản lý Gieo đọc cùng chỗ → mục tiêu ngày nghỉ = 0 ở cả hai app.
+function offPanel(month){
+ const gg=stores.filter(s=>s.brand==='gieo'&&s.active),off=live.tOff;if(!gg.length)return'';
+ const days=Object.keys(off||{}).filter(d=>d.startsWith(month)).sort(),def=TODAY.startsWith(month)?TODAY:month+'-01',name=id=>{const st=stores.find(s=>s.id===id);return st?'Gieo '+st.code:id.toUpperCase()};
+ const list=off===null?'<p class="small muted">Không đọc được ngày nghỉ tháng này.</p>':days.length?days.map(d=>`<div class="detail-row off-row"><span><b>${dateVN(d).slice(0,5)}</b> ${['CN','T2','T3','T4','T5','T6','T7'][parseDate(d).getDay()]}</span><span class="off-chips">${off[d].map(id=>`<span class="off-chip">${id==='*'?'Mọi quán · khai ở Quản lý Gieo':esc(name(id))}<button type="button" onclick="removeOff('${d}','${esc(id)}')" aria-label="Bỏ nghỉ ${esc(id==='*'?'mọi quán':name(id))} ngày ${dateVN(d)}">×</button></span>`).join('')}</span></div>`).join(''):'<p class="small muted">Tháng này chưa có ngày nghỉ.</p>';
+ return `<section class="panel off-panel"><div class="panel-head"><h2>Ngày nghỉ Gieo Gieo</h2><span class="pill">${days.length} ngày</span></div><p class="small muted">Quán nghỉ: mục tiêu ngày đó = 0 ở đây và ở Quản lý Gieo; lãi / lỗ vẫn tính chi phí cố định như mọi ngày.</p><form class="off-form" onsubmit="saveOff(event)"><div class="off-dates"><label class="field"><span>Từ ngày</span><input class="input" type="date" name="from" value="${def}" required onclick="openNativePicker(this)"></label><label class="field"><span>Đến ngày <small>(trống = 1 ngày)</small></span><input class="input" type="date" name="to" value="" onclick="openNativePicker(this)"></label></div><div class="seg-pick">${gg.map(st=>`<label><input type="checkbox" name="st" value="${esc(st.id)}" ${gg.length===1?'checked':''}><span>${esc('Gieo '+st.code)}</span></label>`).join('')}</div><div class="form-actions"><button type="submit" class="btn">${icon('check')}Đặt nghỉ</button></div></form><div class="off-list">${list}</div></section>`;
+}
+async function saveOff(event){
+ event.preventDefault();const f=new FormData(event.target),from=String(f.get('from')||''),to=String(f.get('to')||'')||from,ids=f.getAll('st').map(String);
+ if(!ids.length){toast('Chọn quán nghỉ.');return}
+ if(to<from){toast('Đến ngày phải sau Từ ngày.');return}
+ const b=event.target.querySelector('[type="submit"]');b.disabled=true;
+ const ok=await commitAction('off',()=>backend.writeOffDays(from,to,ids,true),async()=>{invalidateViews('rev');await loadCurrent(true);toast('Đã đặt nghỉ '+(from===to?dateVN(from):dateVN(from)+' – '+dateVN(to))+'.')});
+ if(!ok&&b.isConnected)b.disabled=false;
+}
+async function removeOff(d,id){
+ const ids=id==='*'?stores.filter(s=>s.brand==='gieo').map(s=>s.id):[id];
+ await commitAction('off',()=>backend.writeOffDays(d,d,ids,false),async()=>{invalidateViews('rev');await loadCurrent(true);toast('Đã bỏ ngày nghỉ '+dateVN(d)+'.')});
 }
 function validateGoalInput(input){const n=goalNumber(input.value);input.setCustomValidity(input.value===''||Number.isSafeInteger(n)&&n>0&&n<=1000000000000?'':'Nhập số tiền dương, tối đa 1,000,000,000,000 đồng.')}
 async function saveTargets(event){event.preventDefault();const form=event.target,values=Object.fromEntries([...new FormData(form)].map(([key,value])=>[key,value===''?'':goalNumber(value)])),month=state.targetMonth,button=form.querySelector('[type="submit"]');button.disabled=true;const ok=await commitAction('targets:'+month,()=>backend.writeTargets(month,values),async()=>{invalidateViews('target','rev');await loadCurrent(true);toast('Đã lưu mục tiêu tháng.')});if(!ok&&button.isConnected)button.disabled=false}

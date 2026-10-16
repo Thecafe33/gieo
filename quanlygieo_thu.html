@@ -9650,8 +9650,48 @@ function saveSpecialDay(date, data){
   return fstore.collection('special_days_gieogieo').doc(date)
     .set({...data, date, updatedAt:new Date().toISOString()}, {merge:true});
 }
-function deleteSpecialDay(date){
-  return fstore.collection('special_days_gieogieo').doc(date).delete();
+// [NGÀY NGHỈ — 16/10] Ngày có quán nghỉ do manage đặt (offStores) → chỉ gỡ phần "ngày đặc biệt", giữ ngày nghỉ.
+async function deleteSpecialDay(date){
+  const ref = fstore.collection('special_days_gieogieo').doc(date), cur = await ref.get();
+  if(cur.exists && Array.isArray(cur.data().offStores) && cur.data().offStores.length){
+    const del = firebase.firestore.FieldValue.delete();
+    return ref.update({ loai: del, ten: del, ghiChu: del, updatedAt: new Date().toISOString() });
+  }
+  return ref.delete();
+}
+
+// ------------------------------------------------------------
+// [NGÀY NGHỈ — 16/10] NGÀY NGHỈ TỪNG QUÁN do manage.html đặt (special_days_gieogieo/{ngày}.offStores = ['gg01', …]).
+// Chủ dự án: cấu hình ở manage, quanlygieo chỉ ĐỌC và ghi nhận — quán nghỉ thì mục tiêu ngày đó = 0
+// (Hôm nay / Sức khoẻ / Báo cáo tuần), Hôm nay báo "Quán nghỉ". Lãi/lỗ không đổi (chi phí cố định vẫn chạy).
+// Ngày cũ khai "Nghỉ / đóng cửa" chưa có offStores → mọi quán nghỉ. offStoresOf / isStoreOff chép y manage
+// (test ngay_nghi.test.js khoá). Xem tất cả cửa hàng: chỉ tính ngày MỌI quán nghỉ.
+// ------------------------------------------------------------
+function offStoresOf(d){
+  if(!d) return [];
+  if(Array.isArray(d.offStores)) return d.offStores.filter(x=>typeof x === 'string' && x);
+  return d.loai === 'dong_cua' ? ['*'] : [];
+}
+function isStoreOff(off, date, id){
+  const v = off && off[date];
+  return !!(v && v.length) && (v.includes('*') || (!!id && v.includes(id)));
+}
+function offStoreHere(){ return (typeof GieoData !== 'undefined' && GieoData.storeId && GieoData.storeId()) || null; }
+// { ngày: ['gg01'] | ['*'] } — đọc qua loadSpecialDays, nhớ 2 phút để mở lại màn không đọc lại.
+const _offMem = {};
+async function loadOffDays(from, to){
+  const k = from + '|' + to, hit = _offMem[k];
+  if(hit && Date.now() - hit.at < 120000) return hit.m;
+  const m = {};
+  (await loadSpecialDays(from, to)).forEach(r=>{ const v = offStoresOf(r); if(v.length) m[r.date] = v; });
+  _offMem[k] = { at: Date.now(), m };
+  return m;
+}
+// Số ngày quán ĐANG XEM mở cửa trong [start, end] (Date) — thay salesRes.dayCount khi nhân mục tiêu ngày.
+function soNgayMoCua(off, start, end, id){
+  let n = 0;
+  for(let d = new Date(dkey(start) + 'T12:00:00'); dkey(d) <= dkey(end); d.setDate(d.getDate() + 1)) if(!isStoreOff(off, dkey(d), id)) n++;
+  return n;
 }
 
 // ------------------------------------------------------------
@@ -10549,7 +10589,8 @@ async function renderEntryNgayDacBiet(){
     <div class="unit-explainer" style="margin-bottom:12px">
       Dùng để sau này giải thích những ngày bán vọt lên hoặc tụt hẳn — và để phần dự báo không lấy một ngày lễ ra làm chuẩn cho mọi thứ 5 khác.<br>
       App <b>không tự biết lịch Âm</b>: Tết ta đổi ngày mỗi năm, nhúng sẵn một bảng lịch âm vào app là dựng sẵn một chỗ sẽ sai âm thầm vài năm nữa. Khai tay mất năm giây và luôn đúng.<br>
-      Ngày chưa khai thì trong file JSON ghi <b>null</b> — "chưa khai" khác với "đã xác nhận là ngày thường".
+      Ngày chưa khai thì trong file JSON ghi <b>null</b> — "chưa khai" khác với "đã xác nhận là ngày thường".<br>
+      <b>Ngày quán nghỉ</b> đặt ở <b>manage › Mục tiêu › Ngày nghỉ Gieo Gieo</b> (từng quán) — app này chỉ đọc: quán nghỉ thì mục tiêu ngày đó = 0.
     </div>
     <div class="sec-title">Đã khai</div>
     <div id="sdList"><div class="muted">Đang tải...</div></div>`;
@@ -10563,8 +10604,8 @@ async function renderEntryNgayDacBiet(){
   }
   document.getElementById('sdList').innerHTML = _sdList.length
     ? _sdList.map(d=>`<div class="litem">
-        <div class="li-l"><div>${d.date} · <b>${specialDayLabel(d.loai)}</b></div><div>${escapeHtmlAttr(d.ten||'')}</div></div>
-        <div class="li-r"><button class="iconbtn" onclick="removeSpecialDay('${d.date}')">${ic('trash')}</button></div>
+        <div class="li-l"><div>${d.date}${d.loai ? ` · <b>${specialDayLabel(d.loai)}</b>` : ''}${Array.isArray(d.offStores) && d.offStores.length ? ` · <span class="tier" style="background:var(--warn-bg);color:var(--warn)">Nghỉ ${escapeHtmlAttr(d.offStores.map(x=>String(x).toUpperCase()).join(', '))} (manage)</span>` : ''}</div><div>${escapeHtmlAttr(d.ten||'')}</div></div>
+        <div class="li-r">${d.loai ? `<button class="iconbtn" onclick="removeSpecialDay('${d.date}')">${ic('trash')}</button>` : ''}</div>
       </div>`).join('')
     : '<div class="muted">Chưa khai ngày nào.</div>';
 }
@@ -11216,7 +11257,9 @@ async function dbChay(){
     const lichSuBtp = thLichSuBTP(txs);
     const tpHist = thLichSuTopping(salesRes.perDay);
     dbThieuNgayTopping = tpHist.ngayThieuDuLieu.length;
-    const ddMap = {}; (sdays||[]).forEach(d=> ddMap[d.date] = d);
+    // [NGÀY NGHỈ] Ngày chỉ có quán nghỉ do manage đặt (không khai loại): quán đang xem nghỉ → coi là "Nghỉ / đóng cửa";
+    // quán khác nghỉ → ngày thường của quán này (không bỏ khỏi nền / xu hướng).
+    const ddMap = {}; (sdays||[]).forEach(d=>{ if(d.loai) ddMap[d.date] = d; else if(isStoreOff({ [d.date]: offStoresOf(d) }, d.date, offStoreHere())) ddMap[d.date] = Object.assign({}, d, { loai: 'dong_cua' }); });
 
     const mot = ({ id, ten, donVi, shelfLifeType, yieldMoiMe, ton, lichSuNgay, loai, ghiChuTon, phu }) => {
       const dubao = thDuBao({ lichSuNgay, ngayDich: dbNgay, ngayDacBiet: ddMap });
@@ -13406,6 +13449,7 @@ async function renderToday(){
     loadEmployees().catch(()=>[]),
     loadSchedulesForDate(dkey(today)).catch(()=>[])
   ]);
+  const offHomNay = isStoreOff(await loadOffDays(dkey(today), dkey(today)).catch(()=>null), dkey(today), offStoreHere());
   const kpi = computeKPIs({
     perDaySales: salesRes.perDay, opsSum: {},
     expList: filterExpenses(expAll, today, today), assets, actualLaborByDate,
@@ -13425,6 +13469,7 @@ async function renderToday(){
   // nay để chủ động cấu hình trước, thay vì tự phát hiện qua việc nhân viên
   // báo lại "màn Chi phí ở POS không dùng được".
   const activeExpCats = (expCatsToday||[]).filter(c=>c.active!==false);
+  if(offHomNay) nudgeHtml += `<div class="nudge"><span>${ic('calendar')} Hôm nay quán nghỉ (đặt ở manage) — mục tiêu doanh thu hôm nay = 0.</span></div>`;
   if(!activeExpCats.length) nudgeHtml += `<div class="nudge"><span>${ic('ban')} Chưa cấu hình danh mục chi phí — nhân viên KHÔNG thể ghi chi phí ở POS cho tới khi có ít nhất 1 danh mục.</span><button onclick="expConfigOpen=true; goEntry('exp')">Cấu hình ngay</button></div>`;
   nudge.innerHTML = nudgeHtml;
 
@@ -13450,9 +13495,10 @@ async function renderToday(){
   });
 
   const t = kpi.targetCfg.targets;
-  const dailyTarget = t.aov*t.billsPerDay;
+  const mtBill = offHomNay ? 0 : t.billsPerDay;   // [NGÀY NGHỈ] quán nghỉ → mục tiêu 0
+  const dailyTarget = t.aov*mtBill;
   // Hai mục tiêu SUY RA từ mục tiêu đã khai — xem ghi chú ở miniCards bên dưới.
-  const mtLyBanRa = (Number(t.billsPerDay)||0) * (Number(t.ipt)||0);
+  const mtLyBanRa = (Number(mtBill)||0) * (Number(t.ipt)||0);
   const mtDTGioCong = (() => {
     const gioCong = Number((kpi.targetCfg.labor||{}).parttimeHourly) || 0;
     const tyLeLuong = (Number(t.aov) > 0) ? (Number(t.laborBillTarget)||0) / Number(t.aov) : 0;
@@ -13480,7 +13526,7 @@ async function renderToday(){
     // không xây một màn chi tiết riêng thứ hai cho cùng một con số.
     {label:'Hao hụt', val: fmt(kpi.wasteAmount), st: statusLowerBetter(kpi.wastePct*100, t.wasteTargetPct, 0.34), sub:`${fmtPct(kpi.wastePct)} DT · MT ≤${t.wasteTargetPct}%`,
       onclick: plHomNay.haoHut > 0 ? `openWasteDetailSheet('${plHomNay.date}')` : ''},
-    {label:'Số bill', val: kpi.bills, st: statusHigherBetter(kpi.bills, t.billsPerDay, 0.1), sub:`MT ${t.billsPerDay}`},
+    {label:'Số bill', val: kpi.bills, st: statusHigherBetter(kpi.bills, mtBill, 0.1), sub: offHomNay ? 'Quán nghỉ' : `MT ${t.billsPerDay}`},
     {label:'AOV', val: fmtGon(kpi.aov), st: statusAOV(kpi.aov, t.aov), sub:`MT ${fmtGon(t.aov)}`},
     {label:'IPT', val: fmtNum(kpi.ipt,2), st: statusHigherBetter(kpi.ipt, t.ipt, 0.08), sub:`MT ${fmtNum(t.ipt,2)} món/bill`},
     {label:'Ly bán ra', val: kpi.items, st: mtLyBanRa > 0 ? statusHigherBetter(kpi.items, mtLyBanRa, 0.1) : null,
@@ -15470,6 +15516,8 @@ async function renderHealth(){
     loadSchedulesForRange(dkey(start), dkey(end)).catch(()=>[]),
     loadBookClosings().catch(()=>({}))
   ]);
+  const offKy = await loadOffDays(dkey(start), dkey(end)).catch(()=>null);
+  const ngayMo = soNgayMoCua(offKy, start, end, offStoreHere()), ngayNghi = salesRes.dayCount - ngayMo;
   // LÃI/LỖ TỪNG NGÀY — dùng chung máy tính với thẻ ở màn Hôm nay. Mọi dữ liệu cần
   // thiết đã nằm trong Promise.all ở trên nên không tốn thêm lượt mạng nào.
   const plLaborDuDoan = plPredictedLaborByDate(emps, scheds, dkey(start), dkey(end));
@@ -15496,9 +15544,9 @@ async function renderHealth(){
     ledgerWasteValue: ledgerReal ? ledgerReal.wasteValue : null
   });
   const t = kpi.targetCfg.targets;
-  const rangeLabel = curHealthPeriod==='today' ? '' : `<div class="small-note" style="margin-bottom:10px">Khoảng xem: ${fmtDateVN(start)} — ${fmtDateVN(end)} (${salesRes.dayCount} ngày, ${salesRes.cachedCount} ngày lấy từ cache)</div>`;
+  const rangeLabel = curHealthPeriod==='today' ? '' : `<div class="small-note" style="margin-bottom:10px">Khoảng xem: ${fmtDateVN(start)} — ${fmtDateVN(end)} (${salesRes.dayCount} ngày${ngayNghi > 0 ? ', quán nghỉ ' + ngayNghi + ' ngày' : ''}, ${salesRes.cachedCount} ngày lấy từ cache)</div>`;
 
-  const dailyTarget = t.aov*t.billsPerDay*salesRes.dayCount;
+  const dailyTarget = t.aov*t.billsPerDay*ngayMo;   // [NGÀY NGHỈ] ngày quán nghỉ không tính mục tiêu
   const mAov = achievement(kpi.aov,t.aov,'higher'), sAov = statusAOV(kpi.aov,t.aov);
   const mIpt = achievement(kpi.ipt,t.ipt,'higher'), sIpt = statusHigherBetter(kpi.ipt,t.ipt,0.08);
   const mRev = achievement(kpi.revenue,dailyTarget,'higher'), sRev = statusHigherBetter(kpi.revenue,dailyTarget,0.1);
@@ -15664,11 +15712,12 @@ async function renderReport(){
   const prevKpi = computeKPIs({perDaySales:prevSalesRes.perDay, opsSum:prevOpsSum, expList:filterExpenses(expAll,prevRange.start,prevRange.end), assets, actualLaborByDate:prevActualLaborByDate, ledgerWasteValue: ledgerRealPrev ? ledgerRealPrev.wasteValue : null, drinkWasteCups: ledgerRealPrev ? ledgerRealPrev.drinkWasteCups : 0});
 
   const t = kpi.targetCfg.targets;
-  const weekTarget = t.aov*t.billsPerDay*salesRes.dayCount;
+  const ngayMo = soNgayMoCua(await loadOffDays(dkey(start), dkey(end)).catch(()=>null), start, end, offStoreHere());   // [NGÀY NGHỈ]
+  const weekTarget = t.aov*t.billsPerDay*ngayMo;
   const pctChip = (ratio, status)=> ratio==null ? '<span class="muted-sm">—</span>' : `<span class="tier tier-${status.level}">${Math.round(ratio*100)}%</span>`;
   const rows = [
     ['Revenue', fmt(kpi.revenue), fmt(prevKpi.revenue), pctChip(achievement(kpi.revenue,weekTarget,'higher'), statusHigherBetter(kpi.revenue,weekTarget,0.1))],
-    ['Bills', kpi.bills, prevKpi.bills, pctChip(achievement(kpi.bills,t.billsPerDay*salesRes.dayCount,'higher'), statusHigherBetter(kpi.bills,t.billsPerDay*salesRes.dayCount,0.1))],
+    ['Bills', kpi.bills, prevKpi.bills, pctChip(achievement(kpi.bills,t.billsPerDay*ngayMo,'higher'), statusHigherBetter(kpi.bills,t.billsPerDay*ngayMo,0.1))],
     ['AOV', fmt(kpi.aov), fmt(prevKpi.aov), pctChip(achievement(kpi.aov,t.aov,'higher'), statusAOV(kpi.aov,t.aov))],
     ['AIV', fmt(kpi.aiv), fmt(prevKpi.aiv), '—'],
     ['IPT', fmtNum(kpi.ipt,2), fmtNum(prevKpi.ipt,2), pctChip(achievement(kpi.ipt,t.ipt,'higher'), statusHigherBetter(kpi.ipt,t.ipt,0.08))],
@@ -15698,7 +15747,7 @@ async function renderReport(){
   }
   if(kpi.aov < t.aov*0.978) diag.push(`AOV ${fmt(kpi.aov)} thấp hơn target ${fmt(t.aov)}.`);
   if(kpi.laborPerCup > t.laborCupTarget){
-    diag.push(`Labor/Cup ${fmt(kpi.laborPerCup)} cao hơn target ${fmt(t.laborCupTarget)}` + (kpi.bills < t.billsPerDay*salesRes.dayCount ? `, chủ yếu do volume thấp hơn target.` : `.`));
+    diag.push(`Labor/Cup ${fmt(kpi.laborPerCup)} cao hơn target ${fmt(t.laborCupTarget)}` + (kpi.bills < t.billsPerDay*ngayMo ? `, chủ yếu do volume thấp hơn target.` : `.`));
   }
   if(mix.length){
     const top = mix[0];

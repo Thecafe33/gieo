@@ -10,7 +10,7 @@ const eq = (a, b, m) => { if (JSON.stringify(a) !== JSON.stringify(b)) { ok = fa
 const M = new Function(extract('manage.html', ['vnHour', 'tcEmptySum', 'tcIsTransfer', 'tcIsKhacLine', 'tcAddOrder', 'tcSummarize', 'xoEmptySum', 'xoAddOrder', 'xoSummarize',
   'payTermsOfRecord', 'empPayTermsOn', 'computeWageForDayHours', 'isShiftInProgress', 'shiftWorkedHours', 'laborByEmployee', 'pad', 'dkey',
   'parseDkey', 'addDays', 'targetMonthValue', 'daysInMonthYm', 'targetForRange', 'sharePcts',
-  'ggEmptySum', 'ggAddOrder', 'ggSummarize', 'gieoTargetsOn', 'gieoTargetForRange', 'ggName', 'gieoLabel']) +
+  'ggEmptySum', 'ggAddOrder', 'ggSummarize', 'gieoTargetsOn', 'isStoreOff', 'gieoTargetForRange', 'ggName', 'gieoLabel']) +
   '\nconst GIEO_LEGACY = "gg01", GIEO_TARGET_DEFAULTS = { aov:46000, billsPerDay:60 };\nreturn { tcSummarize, xoSummarize, laborByEmployee, targetMonthValue, targetForRange, sharePcts, ggSummarize, gieoTargetForRange, ggName, gieoLabel };')();
 
 // Bộ sinh số giả ngẫu nhiên cố định — test lặp lại được.
