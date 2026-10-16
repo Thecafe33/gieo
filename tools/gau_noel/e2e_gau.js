@@ -187,6 +187,32 @@ const CHUNG = (fake) => {
     await sleep(5800);
     chk(K().ev && K().ev.loai === 'ketqua' && K().ev.conLai === 2, 'X8. kết quả → màn hình phụ hiện kết quả, còn 2 lượt', K().ev);
     window.__kKq = JSON.parse(JSON.stringify(K()));
+    ovx().querySelector('[data-a=x]') && ovx().querySelector('[data-a=x]').click(); await sleep(200);
+    // quay TẠI QUẦY trúng gấu của chính quán → mã tự «Đã nhận» (không bấm Đổi quà)
+    const P6 = '0933000666'; document.getElementById('cuph').value = P6;
+    _loyaltyAfterSave([{ name: 'Trà sữa', price: 30000, qty: 6 }], 180000, 'XK6'); await sleep(600);
+    ovx().querySelector('[data-a=quan]').click(); await sleep(300);
+    for (let i = 0; i < 3; i++) { const b = ovx().querySelector('[data-a=quay]'); if (!b || b.style.display === 'none') break; b.click(); await sleep(5700); }
+    const d6 = DB['gau_noel_2026/' + P6], q6 = Object.values(d6.qua || {});
+    chk(q6.length >= 1 && q6.every(g => g.used === true && g.usedBy === 'quay tại quầy'), 'X9. đơn 6 ly quay tại quầy → trúng gấu XOFA → mã TỰ chuyển «Đã nhận»', q6);
+    chk(DB['gau_noel_2026_kho/xofa'].doi >= 1 && DB['gau_noel_2026_kho/xofa'].ma[Object.keys(d6.qua)[0]].used === true, 'X10. sổ mã quán + kho đếm đã nhận cập nhật');
+    ovx().querySelector('[data-a=x]').click(); await sleep(200);
+    // nút «🧸 Đổi gấu» ở sidebar — giỏ trống vẫn đổi được
+    const nut = document.querySelector('#sdb #gn-sdb-btn');
+    nut.classList.add('on'); document.getElementById('sdb').classList.add('open'); document.getElementById('ov').classList.add('show'); await sleep(400);
+    await window.__shot('gau_posx_sidebar'); document.getElementById('sdb').classList.remove('open'); document.getElementById('ov').classList.remove('show');
+    chk(!!nut && /Đổi gấu/.test(nut.textContent), 'X11. sidebar PosX có nút «🧸 Đổi gấu» (góc trái trên)');
+    const P7 = '0933000777'; document.getElementById('cuph').value = '';
+    await G.boc({ store: 'xofa', sdt: P7, bill: 'XK7', ly: 6, tienNuoc: 180000 }, () => 0.99);   // trúng chắc (đơn nhiều ly), khách KHÔNG quay ở quán
+    await G.mo(P7); await G.mo(P7); await G.mo(P7);                                               // khách tự quay trên app
+    nut.click(); await sleep(200);
+    chk(mox() && /Đổi gấu Noel/.test(ovx().textContent), 'X12. bấm nút → popup Đổi gấu Noel (nhập SĐT)');
+    ovx().querySelector('#gn-dg-sdt').value = P7; ovx().querySelector('[data-a=tim]').click(); await sleep(400);
+    const bd = ovx().querySelector('[data-doi]');
+    chk(!!bd && /Đổi quà/.test(bd.textContent), 'X13. khách tự quay trên app → mã chờ nhận → có nút Đổi quà (không cần có món trong giỏ)');
+    bd.click(); await sleep(500);
+    chk(Object.values(DB['gau_noel_2026/' + P7].qua)[0].used === true && !ovx().querySelector('[data-doi]'), 'X14. Đổi quà trong popup → mã hết hiệu lực, dòng biến mất');
+    ovx().querySelector('[data-a=x]').click();
     return R;
   }, [fake, CHUNG.toString()]).catch(async e => (await p.evaluate(() => window.__R || []).catch(() => [])).concat(['FAIL dừng giữa chừng: ' + e.message.split('\n')[0]]));
   const kQr = await p.evaluate(() => window.__kQr), kKq = await p.evaluate(() => window.__kKq);
@@ -272,6 +298,7 @@ const CHUNG = (fake) => {
     ov().querySelector('[data-a=x]').click(); await sleep(100);
     POSPrinter.autoPrintIfEnabled(Object.assign({}, order, { phone: '' })); await sleep(200);
     chk(inRa.length === 3 && !mo(), 'G12. đơn không có SĐT → in luôn, không hỏi');
+    chk(!!document.querySelector('#sdb #gn-sdb-btn'), 'G13. sidebar posgieo có nút «🧸 Đổi gấu»');
     await G.datCfg({ bat: false });
     chk(!buildReceiptContent(order, LAY).some(x => x && x.type === 'gauNoel'), 'G6. đang TẮT → bill không có QR');
     Math.random = rnd;

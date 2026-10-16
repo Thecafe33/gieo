@@ -627,10 +627,12 @@
   var css = document.createElement('style');
   css.textContent =
     '#gn-panel{margin:10px 0 0;border-radius:16px;background:linear-gradient(135deg,#fff5f5,#f0fdf4);border:1.5px solid #fca5a5;padding:10px 12px;display:none;font-family:inherit}' +
-    '#gn-panel .gn-h{display:flex;align-items:center;gap:8px;font-weight:900;font-size:13px;color:#991b1b}' +
-    '#gn-panel .gn-tag{font-size:10px;font-weight:900;letter-spacing:.06em;padding:3px 8px;border-radius:99px;background:#166534;color:#fff}' +
-    '#gn-panel .gn-row{display:flex;align-items:center;gap:8px;margin-top:8px;padding:8px 10px;border-radius:12px;background:#fff;border:1px solid #fecaca}' +
-    '#gn-panel .gn-t{flex:1;min-width:0}#gn-panel .gn-t b{display:block;font-size:13px;color:#111827}#gn-panel .gn-t small{display:block;font-size:11px;color:#6b7280}' +
+    '.gn-khung .gn-h{display:flex;align-items:center;gap:8px;font-weight:900;font-size:13px;color:#991b1b}' +
+    '.gn-khung .gn-tag{font-size:10px;font-weight:900;letter-spacing:.06em;padding:3px 8px;border-radius:99px;background:#166534;color:#fff}' +
+    '.gn-khung .gn-row{display:flex;align-items:center;gap:8px;margin-top:8px;padding:8px 10px;border-radius:12px;background:#fff;border:1px solid #fecaca}' +
+    '.gn-khung .gn-t{flex:1;min-width:0}.gn-khung .gn-t b{display:block;font-size:13px;color:#111827}.gn-khung .gn-t small{display:block;font-size:11px;color:#6b7280}' +
+    '#gn-sdb-btn{position:absolute;top:16px;left:16px;z-index:5;display:none;align-items:center;gap:6px;border:none;border-radius:12px;padding:8px 12px;font-weight:800;font-size:12px;cursor:pointer;background:#fde8e8;color:#991b1b;font-family:inherit}#gn-sdb-btn.on{display:flex}' +
+    '#gn-ov .gn-khung{text-align:left;margin-top:12px;max-height:46vh;overflow:auto}#gn-ov .gn-in{display:flex;gap:8px;margin-top:10px}#gn-ov .gn-in input{flex:1;min-width:0;padding:12px 14px;border-radius:14px;border:1.5px solid #e5e7eb;font-size:17px;font-weight:800;letter-spacing:.04em;font-family:inherit}' +
     '.gn-btn{border:none;border-radius:99px;padding:8px 14px;font-weight:900;font-size:12px;cursor:pointer;background:#b91c1c;color:#fff;font-family:inherit}' +
     '.gn-btn.gn-g{background:#166534}.gn-btn.gn-x{background:#f3f4f6;color:#374151}.gn-btn:disabled{opacity:.5}' +
     '#gn-ov{position:fixed;inset:0;z-index:2147483000;background:rgba(17,24,39,.55);display:flex;align-items:center;justify-content:center;padding:20px;font-family:inherit}' +
@@ -670,23 +672,30 @@
 
   /** Mở lượt tại quầy (khách không dùng app) — từng lượt một */
   /** uuTien: mảng mã lượt mở trước (lượt của đơn vừa thanh toán / của quán này) — tránh mở lượt cũ ở quán khác. */
-  function moTaiQuay(sdt, uuTien) {
+  // [16/10 chủ dự án] Quay TẠI QUẦY mà trúng gấu của chính quán này → khách nhận ngay → mã tự chuyển «Đã nhận»
+  // (không cần bấm Đổi quà). Trúng gấu của lượt mua ở quán KHÁC → vẫn chờ nhận ở quán đó. Lượt khách tự quay trên app → đổi ở quán như cũ.
+  function moTaiQuay(sdt, uuTien, khiDong) {
     var o = ov('<h3>🎄 Vòng quay gấu Noel</h3>' + vongSvg(250) + '<p id="gn-mo-msg">Bấm Quay để quay lượt của khách</p>' +
       '<div class="gn-acts"><button class="gn-btn" data-a="quay">Quay</button><button class="gn-btn gn-x" data-a="x">Đóng</button></div>');
     var vong = o.querySelector('.gn-vong'), msg = o.querySelector('#gn-mo-msg'), bQuay = o.querySelector('[data-a=quay]'), bX = o.querySelector('[data-a=x]');
-    bX.onclick = function () { dongOv(); phat('dong'); quet(sdt, true); };
+    bX.onclick = function () { dongOv(); phat('dong'); if (typeof khiDong === 'function') khiDong(); else quet(sdt, true); };
     phat('mo', { sdt: sdt });
     bQuay.onclick = function () {
       bQuay.disabled = true; bX.disabled = true; msg.textContent = 'Đang quay…';
       G.mo(sdt, uuTien && uuTien.length ? uuTien : undefined).then(function (kq) {
+        var q = store(), taiDay = kq.win && kq.store === q;
+        // trúng gấu của quán này → đổi luôn (song song lúc vòng đang quay)
+        var nhan = taiDay ? G.doi(q, sdt, kq.code, 'quay tại quầy').then(function () { return true; }, function (e) { return e; }) : Promise.resolve(false);
         phat('quay', { sdt: sdt, win: kq.win, code: kq.code, store: kq.store, conLai: kq.conLai });
-        quayVong(vong, kq.win, function () {
+        quayVong(vong, kq.win, function () { nhan.then(function (daNhan) {
           bX.disabled = false;
-          if (kq.win) msg.innerHTML = '<b>🧸 Trúng 1 gấu bông!</b><br>Nhận tại ' + esc(G.tenQuan(kq.store)) + '<div class="gn-code">' + esc(kq.code) + '</div>';
+          if (kq.win && daNhan === true) msg.innerHTML = '<b>🧸 Trúng 1 gấu bông!</b><br><b style="color:#166534">Đưa gấu ngay cho khách</b> (khách chọn)<br><small>Mã ' + esc(kq.code) + ' đã tự chuyển «Đã nhận»</small>';
+          else if (kq.win && taiDay) msg.innerHTML = '<b>🧸 Trúng 1 gấu bông!</b> · mã ' + esc(kq.code) + '<br><b style="color:#b91c1c">⚠️ Chưa ghi được «Đã nhận» (' + esc(daNhan && daNhan.message || 'lỗi') + ')</b> — bấm Đổi quà trong khung Gấu Noel trước khi đưa gấu';
+          else if (kq.win) msg.innerHTML = '<b>🧸 Trúng 1 gấu bông!</b><br>Lượt mua ở ' + esc(G.tenQuan(kq.store)) + ' → nhận tại ' + esc(G.tenQuan(kq.store)) + '<div class="gn-code">' + esc(kq.code) + '</div>';
           else msg.innerHTML = 'Chưa trúng lần này — chúc may mắn lần sau!';
-          phat('ketqua', { sdt: sdt, win: kq.win, code: kq.code, store: kq.store, conLai: kq.conLai });
+          phat('ketqua', { sdt: sdt, win: kq.win, code: kq.code, store: kq.store, conLai: kq.conLai, daNhan: daNhan === true });
           if (kq.conLai > 0) { bQuay.disabled = false; bQuay.textContent = 'Quay tiếp (còn ' + kq.conLai + ')'; } else bQuay.style.display = 'none';
-        });
+        }); });
       }).catch(function (e) {
         bX.disabled = false;
         msg.textContent = e.message === 'het-luot' ? 'Khách đã quay hết lượt.' : 'Lỗi: ' + e.message; bQuay.style.display = 'none';
@@ -713,11 +722,46 @@
   }
 
   // ── khung Gấu Noel cạnh ô SĐT: quà chưa nhận + Đổi quà + lượt chưa quay ──
-  var panel = document.createElement('div'); panel.id = 'gn-panel';
+  var panel = document.createElement('div'); panel.id = 'gn-panel'; panel.className = 'gn-khung';
   var neo = APP === 'tc33' ? ($('gift-panel') || $('sdt-status')) : $('voucherList');
   if (neo && neo.parentNode) neo.parentNode.insertBefore(panel, neo.nextSibling);
   var dangQuet = '', quetLuc = 0, qTimer = null;
   function anPanel() { panel.style.display = 'none'; panel.innerHTML = ''; dangQuet = ''; }
+  /** Vẽ khung gấu của 1 SĐT vào el (khung cạnh ô SĐT · popup Đổi gấu ở sidebar). lamMoi() = đọc lại + vẽ lại. Trả có nội dung không. */
+  function veKhung(el, sdt, st, lamMoi) {
+    var q = store(), cho = st.qua.filter(function (x) { return !x.used; });
+    var tai = cho.filter(function (x) { return x.store === q; }), khac = cho.filter(function (x) { return x.store !== q; });
+    if (!tai.length && !khac.length && !st.chuaMo.length) { el.innerHTML = ''; return false; }
+    var h = '<div class="gn-h">🧸 Gấu Noel của khách <span class="gn-tag">GIÁNG SINH</span></div>';
+    tai.forEach(function (x) {
+      h += '<div class="gn-row"><div class="gn-t"><b>1 gấu bông · ' + esc(x.code) + '</b><small>Trúng ' + esc(String(x.at || '').slice(0, 10)) + ' · khách chọn gấu tại quầy</small></div>' +
+        '<button class="gn-btn gn-g" data-doi="' + esc(x.code) + '">Đổi quà</button></div>';
+    });
+    khac.forEach(function (x) {
+      h += '<div class="gn-row"><div class="gn-t"><b>' + esc(x.code) + '</b><small>Nhận tại ' + esc(G.tenQuan(x.store)) + ' (không đổi ở quán này)</small></div></div>';
+    });
+    if (st.chuaMo.length) h += '<div class="gn-row"><div class="gn-t"><b>Còn ' + st.chuaMo.length + ' lượt chưa quay</b><small>Khách không dùng app → quay tại quầy (trúng thì nhận ngay)</small></div>' +
+      '<button class="gn-btn" data-mo="1">Mở lượt</button></div>';
+    el.innerHTML = h;
+    Array.prototype.forEach.call(el.querySelectorAll('[data-doi]'), function (b) {
+      b.onclick = function () {
+        var code = b.getAttribute('data-doi');
+        hoi('Đổi quà mã ' + code + ': đưa 1 gấu bông cho khách (khách chọn)?\nMã sẽ hết hiệu lực.').then(function (ok) {
+          if (!ok) return;
+          b.disabled = true;
+          G.doi(q, sdt, code, '').then(function () { toast('✅ Đã đổi ' + code + ' — đưa 1 gấu bông cho khách'); lamMoi(); })
+            .catch(function (e) {
+              b.disabled = false;
+              toast({ 'da-doi': '⚠️ Mã ' + code + ' đã đổi rồi', 'sai-quan': '⚠️ Mã này nhận ở quán khác', 'khong-co': '⚠️ Không thấy mã', 'ma-la': '⛔ Mã không có trong sổ của quán — KHÔNG đưa gấu, báo quản lý', 'het-han': '⚠️ Đã hết hạn nhận gấu' }[e.message] || ('❌ Lỗi: ' + e.message));
+              lamMoi();
+            });
+        });
+      };
+    });
+    var uu = st.chuaMo.filter(function (x) { return x.store === q; }).map(function (x) { return x.id; });
+    var bm = el.querySelector('[data-mo]'); if (bm) bm.onclick = function () { moTaiQuay(sdt, uu, lamMoi); };
+    return true;
+  }
   function quet(sdt, ep) {
     sdt = G.normPhone(sdt);
     if (sdt.length < 10 || !G.dangNhan() || !store()) { anPanel(); return; }
@@ -725,38 +769,30 @@
     dangQuet = sdt; quetLuc = Date.now();
     G.load(sdt).then(function (st) {
       if (dangQuet !== sdt) return;
-      var q = store(), cho = st.qua.filter(function (x) { return !x.used; });
-      var tai = cho.filter(function (x) { return x.store === q; }), khac = cho.filter(function (x) { return x.store !== q; });
-      if (!tai.length && !khac.length && !st.chuaMo.length) { panel.style.display = 'none'; panel.innerHTML = ''; return; }
-      var h = '<div class="gn-h">🧸 Gấu Noel của khách <span class="gn-tag">GIÁNG SINH</span></div>';
-      tai.forEach(function (x) {
-        h += '<div class="gn-row"><div class="gn-t"><b>1 gấu bông · ' + esc(x.code) + '</b><small>Trúng ' + esc(String(x.at || '').slice(0, 10)) + ' · khách chọn gấu tại quầy</small></div>' +
-          '<button class="gn-btn gn-g" data-doi="' + esc(x.code) + '">Đổi quà</button></div>';
-      });
-      khac.forEach(function (x) {
-        h += '<div class="gn-row"><div class="gn-t"><b>' + esc(x.code) + '</b><small>Nhận tại ' + esc(G.tenQuan(x.store)) + ' (không đổi ở quán này)</small></div></div>';
-      });
-      if (st.chuaMo.length) h += '<div class="gn-row"><div class="gn-t"><b>Còn ' + st.chuaMo.length + ' lượt chưa quay</b><small>Khách không dùng app → mở tại quầy</small></div>' +
-        '<button class="gn-btn" data-mo="1">Mở lượt</button></div>';
-      panel.innerHTML = h; panel.style.display = 'block';
-      Array.prototype.forEach.call(panel.querySelectorAll('[data-doi]'), function (b) {
-        b.onclick = function () {
-          var code = b.getAttribute('data-doi');
-          hoi('Đổi quà mã ' + code + ': đưa 1 gấu bông cho khách (khách chọn)?\nMã sẽ hết hiệu lực.').then(function (ok) {
-            if (!ok) return;
-            b.disabled = true;
-            G.doi(q, sdt, code, '').then(function () { toast('✅ Đã đổi ' + code + ' — đưa 1 gấu bông cho khách'); quet(sdt, true); })
-              .catch(function (e) {
-                b.disabled = false;
-                toast({ 'da-doi': '⚠️ Mã ' + code + ' đã đổi rồi', 'sai-quan': '⚠️ Mã này nhận ở quán khác', 'khong-co': '⚠️ Không thấy mã', 'ma-la': '⛔ Mã không có trong sổ của quán — KHÔNG đưa gấu, báo quản lý', 'het-han': '⚠️ Đã hết hạn nhận gấu' }[e.message] || ('❌ Lỗi: ' + e.message));
-                quet(sdt, true);
-              });
-          });
-        };
-      });
-      var uu = st.chuaMo.filter(function (x) { return x.store === q; }).map(function (x) { return x.id; });
-      var bm = panel.querySelector('[data-mo]'); if (bm) bm.onclick = function () { moTaiQuay(sdt, uu); };
+      panel.style.display = veKhung(panel, sdt, st, function () { quet(sdt, true); }) ? 'block' : 'none';
     }).catch(function (e) { console.warn('[gấu] đọc khách', e); });
+  }
+  /** Popup «Đổi gấu Noel» (nút ở sidebar PosX / posgieo) — không cần có món trong giỏ. */
+  function moDoiGau(sdtSan) {
+    if (!G.dangNhan()) { toast('Chương trình Gấu Noel đang tắt'); return; }
+    var o = ov('<h3>🧸 Đổi gấu Noel</h3><p>Nhập SĐT khách để xem gấu chưa nhận / lượt chưa quay</p>' +
+      '<div class="gn-in"><input type="tel" inputmode="numeric" id="gn-dg-sdt" placeholder="SĐT khách" autocomplete="off"><button class="gn-btn gn-g" data-a="tim">Tìm</button></div>' +
+      '<div class="gn-khung" id="gn-dg-kq"></div><div class="gn-acts"><button class="gn-btn gn-x" data-a="x">Đóng</button></div>');
+    var inp = o.querySelector('#gn-dg-sdt'), kq = o.querySelector('#gn-dg-kq');
+    var tim = function () {
+      var sdt = G.normPhone(inp.value);
+      if (sdt.length < 10) { kq.innerHTML = '<p style="color:#b91c1c">SĐT chưa đủ số</p>'; return; }
+      kq.innerHTML = '<p>Đang tìm…</p>';
+      G.load(sdt).then(function (st) {
+        // Đổi quà → vẽ lại tại chỗ; Mở lượt → vòng quay dùng chung hộp → đóng vòng quay thì mở lại popup này với SĐT đó
+        if (!veKhung(kq, sdt, st, function () { if (document.getElementById('gn-dg-kq') === kq) tim(); else moDoiGau(sdt); }))
+          kq.innerHTML = '<p>Khách chưa có gấu chờ nhận / lượt chưa quay.</p>';
+      }).catch(function (e) { kq.innerHTML = '<p style="color:#b91c1c">Lỗi: ' + esc(e.message) + '</p>'; });
+    };
+    o.querySelector('[data-a=tim]').onclick = tim;
+    inp.onkeydown = function (e) { if (e.key === 'Enter') tim(); };
+    o.querySelector('[data-a=x]').onclick = dongOv;
+    if (sdtSan) { inp.value = sdtSan; tim(); } else setTimeout(function () { try { inp.focus(); } catch (e) {} }, 50);
   }
   function quetSau(sdt) { clearTimeout(qTimer); qTimer = setTimeout(function () { quet(sdt); }, 600); }
 
@@ -837,7 +873,7 @@
       d = d || {}; var p = G.normPhone(d.sdt);
       batDaGhi = G.dangBat();
       KREF.update({ bat: batDaGhi, ev: { loai: loai, sdt: p ? p.slice(-3) : '', soLuot: Number(d.soLuot) || 0, win: !!d.win, code: d.code || '',
-        store: d.store || '', conLai: Number(d.conLai) || 0, at: Date.now() } }).catch(function (e) { console.warn('[gấu] màn hình phụ', e); });
+        store: d.store || '', conLai: Number(d.conLai) || 0, daNhan: !!d.daNhan, at: Date.now() } }).catch(function (e) { console.warn('[gấu] màn hình phụ', e); });
     };
     G.ngheCfg(function () {
       var b = G.dangBat(); if (!KREF || b === batDaGhi) return;
@@ -964,8 +1000,18 @@
     });
   }
 
+  // ── nút «🧸 Đổi gấu» góc trái trên sidebar (PosX / posgieo — giỏ trống vẫn đổi được, khách chỉ ghé nhận gấu) ──
+  var nutSdb = null;
+  if ((APP === 'xofa' || APP === 'gieo') && $('sdb')) {
+    nutSdb = document.createElement('button'); nutSdb.id = 'gn-sdb-btn'; nutSdb.type = 'button';
+    nutSdb.innerHTML = '🧸 Đổi gấu';
+    nutSdb.onclick = function () { try { if (typeof closeSdb === 'function') closeSdb(); } catch (e) {} moDoiGau(); };
+    $('sdb').appendChild(nutSdb);
+  }
+  G.moDoiGau = moDoiGau;
+
   // ── nghe công tắc: tắt → ẩn mọi thứ ──
-  G.ngheCfg(function () { if (!G.dangNhan()) { anPanel(); dongOv(); } });
+  G.ngheCfg(function () { if (nutSdb) nutSdb.classList.toggle('on', G.dangNhan()); if (!G.dangNhan()) { anPanel(); dongOv(); } });
 
   // ── pos.html → Quản lý → «Gấu Noel» ──
   function ganTabQuanLy() {
@@ -1231,7 +1277,7 @@
       else if (ev.loai === 'mo') { var v0 = khungVong('🎄 Vòng quay gấu Noel', sdt, 120); v0.removeAttribute('data-r'); v0.querySelector('svg').style.transition = 'none'; v0.querySelector('svg').style.transform = 'rotate(0deg)'; }
       else if (ev.loai === 'quay') quayVong(khungVong('Đang quay…', sdt, 60), !!ev.win);
       else if (ev.loai === 'ketqua') khungVong(ev.win ? 'Chúc mừng!' : 'Chưa trúng lần này', ev.win
-        ? '<b>🧸 Trúng 1 gấu bông</b><br>Nhận tại ' + esc(G.tenQuan(ev.store)) + '<div class="k-code" style="margin-top:8px;display:inline-block">' + esc(ev.code) + '</div>' + (ev.conLai > 0 ? '<br>Còn ' + ev.conLai + ' lượt' : '')
+        ? (ev.daNhan ? '<b>🧸 Trúng 1 gấu bông</b><br>Nhận gấu ngay tại quầy nhé!' : '<b>🧸 Trúng 1 gấu bông</b><br>Nhận tại ' + esc(G.tenQuan(ev.store)) + '<div class="k-code" style="margin-top:8px;display:inline-block">' + esc(ev.code) + '</div>') + (ev.conLai > 0 ? '<br>Còn ' + ev.conLai + ' lượt' : '')
         : 'Chúc bạn may mắn lần sau!' + (ev.conLai > 0 ? '<br>Còn ' + ev.conLai + ' lượt' : ''), 30);
       else an();
     }
