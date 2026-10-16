@@ -1860,22 +1860,22 @@ luv u</textarea>
     <div id="mob-bed-list-screen" class="flex flex-col h-full w-full absolute inset-0 z-10 bg-[#F2F2F7]">
         <header class="flex justify-between items-end px-5 pt-6 pb-6 bg-[#F2F2F7] shrink-0">
             <div>
-                <p class="text-[11px] font-bold tracking-widest text-slate-400 uppercase">The Cafe 33</p>
-                <h1 class="text-3xl font-bold tracking-tight text-slate-900">Danh sách</h1>
+                <p class="mn-eyebrow text-[11px] font-bold uppercase">The Cafe 33</p>
+                <h1 class="mn-h1 text-3xl">Danh sách</h1>
             </div>
-            <div class="bg-white px-3 py-1.5 rounded-full shadow-sm flex items-center gap-2 border border-slate-200">
-                <input type="date" id="mob-date-picker" onchange="changeBedDateMobile(this.value)" class="text-sm font-bold bg-transparent border-none p-0 outline-none w-[90px] text-slate-700">
-                <span class="material-symbols-outlined text-lg text-slate-400">calendar_today</span>
+            <div class="mn-date px-3 py-1.5 rounded-full flex items-center gap-2">
+                <input type="date" id="mob-date-picker" onchange="changeBedDateMobile(this.value)" class="text-sm font-bold bg-transparent border-none p-0 outline-none w-[90px]" style="color:inherit">
+                <span class="material-symbols-outlined text-lg">calendar_today</span>
             </div>
         </header>
 
-        <div id="mob-bed-list-container" class="flex-1 overflow-y-auto px-5 pb-32 space-y-3 custom-scrollbar">
+        <div id="mob-bed-list-container" class="flex-1 overflow-y-auto px-5 pt-2 pb-32 space-y-3 custom-scrollbar">
             </div>
 
         <div class="absolute bottom-6 left-0 right-0 px-6 pointer-events-none z-20">
-            <button onclick="openBookingModal()" class="pointer-events-auto mx-auto flex items-center justify-center gap-2 bg-[#064E3B] text-white w-full h-16 rounded-[22px] shadow-2xl shadow-emerald-900/30 active:scale-95 transition-all">
-                <span class="material-symbols-outlined text-2xl font-bold">add</span>
-                <span class="text-lg font-bold tracking-wide">ĐẶT MỚI</span>
+            <button onclick="openBookingModal()" class="pointer-events-auto mn-fab mx-auto flex items-center justify-center gap-2 w-full h-16 rounded-[22px] active:scale-95 transition-all">
+                <span class="material-symbols-outlined text-2xl">add</span>
+                <span class="text-lg font-extrabold">Đặt mới</span>
             </button>
         </div>
     </div>
@@ -4977,65 +4977,40 @@ const sortedPCList = [...currentBedList].map((item, idx) => ({...item, originalI
         var isActive = (b.status && (b.status.includes('active') || b.status.includes('đang dùng')));
         var isSelected = (b.originalIndex === selectedBedIndex);
 
-        var wrapperClass = "cursor-pointer p-4 rounded-[32px] transition-all duration-200 mb-3 border relative group ";
-        var statusTextUI = "";
+        // [GIAO DIỆN BED 16/10] Phong cách thẻ điểm bán (manage): màu trạng thái = class k-* (giữ màu cũ), khung / kích thước như cũ
+        var k = isCancelled ? 'k-cancel' : isDone ? 'k-done' : isActive ? 'k-active' : 'k-idle';
+        var wrapperClass = "nb-card " + k + " cursor-pointer p-4 rounded-[32px] transition-all duration-200 mb-3 border relative group";
+        if (isSelected) wrapperClass += " is-sel scale-[1.02] z-10";
+        else if (isCancelled && b.cancelType !== 'auto_timeout') wrapperClass += " is-muted";
 
-        if (isSelected) {
-            wrapperClass += "bg-[#006241] border-[#006241] text-white shadow-lg scale-[1.02] z-10";
-        } else if (isCancelled) {
-            if (b.cancelType === 'auto_timeout') {
-                wrapperClass += "bg-red-50 border-red-100 text-red-900";
-                statusTextUI = "AUTO TIMEOUT";
-            } else {
-                wrapperClass += "bg-red-50 border-red-100 text-red-800 opacity-70 grayscale-[0.5]";
-                statusTextUI = "ĐÃ HỦY";
-            }
-        } else if (isDone) {
-            wrapperClass += "bg-gray-100 border-gray-200 text-gray-500 hover:bg-gray-200";
-        } else if (isActive) {
-            wrapperClass += "bg-[#E6F4F1] border-[#bce3db] text-[#006241] shadow-sm";
-        } else {
-            wrapperClass += "bg-white border-gray-100 text-gray-600 hover:bg-gray-50 hover:shadow-md hover:border-gray-200";
-        }
-
-        var statusDot = "";
-        if (isCancelled) statusDot = "bg-red-500";
-        else if (isDone) statusDot = "bg-gray-400";
-        else if (isActive) statusDot = "bg-green-500 animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.6)]";
-        else statusDot = "bg-amber-400";
-
-        var timeDisplay = `${b.start} - ${b.end}`;
+        var timeDisplay = `${b.start} – ${b.end}`;
         if (isCancelled) {
-            timeDisplay = (b.cancelType === 'auto_timeout') ? "QUÁ GIỜ (HỦY)"
-                : (b.cancelType === 'late_cancel_preorder') ? "🔴 CẦN THU TIỀN NƯỚC"
-                : "ĐÃ HỦY LỊCH";
+            timeDisplay = (b.cancelType === 'auto_timeout') ? "Quá giờ · tự huỷ"
+                : (b.cancelType === 'late_cancel_preorder') ? "Cần thu tiền nước"
+                : "Đã huỷ lịch";
         } else if (isDone && b.realEndTime) {
-            timeDisplay = `Check-out: ${b.realEndTime}`;
+            timeDisplay = `Check-out ${b.realEndTime}`;
         }
 
-        var bedLabel = isCancelled ? "Đã Hủy" : ((b.bedId && b.bedId != "WAITING") ? `BED 0${b.bedId}` : "Chờ Xếp");
+        var bedLabel = isCancelled ? "Đã huỷ" : ((b.bedId && b.bedId != "WAITING") ? `BED 0${b.bedId}` : "Chờ xếp");
 
         return `
         <div onclick="selectBedItem(${b.originalIndex})" data-bk="${b.id}" class="${wrapperClass}">
             <div class="flex justify-between items-center mb-1.5">
-                <span class="font-black text-[10px] opacity-70 uppercase tracking-widest">${bedLabel}</span>
-                <div class="w-2.5 h-2.5 rounded-full ${statusDot}"></div>
+                <span class="nb-label font-extrabold text-[10px] uppercase">${bedLabel}</span>
+                <div class="nb-dot w-2.5 h-2.5 rounded-full${isActive ? ' pulse' : ''}"></div>
             </div>
-            <div class="font-black text-sm truncate mb-1.5 leading-tight">${b.name}</div>
-            <div class="text-[10px] font-mono flex justify-between opacity-80 font-bold items-center">
+            <div class="nb-name text-sm truncate mb-1.5 leading-tight">${b.name}</div>
+            <div class="nb-time text-[10px] flex justify-between font-bold items-center">
                 <span>${timeDisplay}</span>
-                ${b.totalSpend ? `<span class="bg-black/10 px-1.5 rounded text-[9px]">${Number(b.totalSpend).toLocaleString()}đ</span>` : ''}
+                ${b.totalSpend ? `<span class="nb-amt px-1.5 text-[9px]">${Number(b.totalSpend).toLocaleString()}đ</span>` : ''}
             </div>
             ${(b.preorder && (_hasActivePreorder(b) || b.preorder.status === 'loaded'))
-                ? `<div style="margin-top:6px;display:inline-flex;align-items:center;gap:4px;background:${isSelected?'rgba(255,255,255,0.2)':'#fef9c3'};border:1px solid ${isSelected?'rgba(255,255,255,0.3)':'#fde047'};border-radius:8px;padding:3px 8px;">
-                    <span style="font-size:0.6rem;font-weight:900;color:${isSelected?'white':'#854d0e'};">🍜 Pre-order</span>
-                  </div>`
+                ? `<div style="margin-top:6px;"><span class="nb-chip"><span class="material-symbols-outlined">ramen_dining</span>Pre-order</span></div>`
                 : ''
             }
             ${b.preferredBed
-                ? `<div style="margin-top:4px;display:inline-flex;align-items:center;gap:4px;background:${isSelected?'rgba(255,255,255,0.2)':'#e0f2fe'};border:1px solid ${isSelected?'rgba(255,255,255,0.3)':'#7dd3fc'};border-radius:8px;padding:3px 8px;">
-                    <span style="font-size:0.6rem;font-weight:900;color:${isSelected?'white':'#0369a1'};">⭐ Chọn: Bed 0${b.preferredBed}${b.preferBedFee>0?' · +'+b.preferBedFee.toLocaleString()+'đ':' · Miễn phí'}</span>
-                  </div>`
+                ? `<div style="margin-top:4px;"><span class="nb-chip bed"><span class="material-symbols-outlined">star</span>Chọn Bed 0${b.preferredBed}${b.preferBedFee>0?' · +'+b.preferBedFee.toLocaleString()+'đ':' · Miễn phí'}</span></div>`
                 : ''
             }
         </div>`;
@@ -5156,7 +5131,7 @@ function selectBedItem(index) {
     if(empty) empty.classList.add('hidden');
     if(panel) {
         panel.classList.remove('hidden');
-        panel.className = "flex flex-col h-full bg-[#F2F4F7] relative overflow-hidden rounded-[2.5rem]";
+        panel.className = "flex flex-col h-full bg-[#F2F4F7] relative overflow-hidden rounded-[20px]";   // [GIAO DIỆN BED 16/10] bo khớp khung ngoài 20px
     }
 
     var isDone = (data.status && data.status.includes('đã xong'));
@@ -5174,105 +5149,104 @@ function selectBedItem(index) {
 
     let subTitleHTML = "";
     if (isCancelled) {
-        let reason = "ĐÃ HỦY";
-        if (data.cancelType === 'auto_timeout') reason = "AUTO HỦY (QUÁ GIỜ)";
-        else if (data.cancelType === 'customer') reason = "KHÁCH BÁO HỦY";
-        else if (data.cancelType === 'store') reason = "QUÁN HỦY (SYSTEM)";
-        else if (data.cancelType === 'late_cancel_preorder') reason = "🔴 CẦN GỌI THU TIỀN NƯỚC";
-        subTitleHTML = `<span class="text-xl font-black text-red-500 uppercase tracking-tight">${reason}</span>`;
+        let reason = "Đã huỷ";
+        if (data.cancelType === 'auto_timeout') reason = "Tự huỷ (quá giờ)";
+        else if (data.cancelType === 'customer') reason = "Khách báo huỷ";
+        else if (data.cancelType === 'store') reason = "Quán huỷ";
+        else if (data.cancelType === 'late_cancel_preorder') reason = "Cần gọi thu tiền nước";
+        subTitleHTML = `<span class="nd-sub text-xl">${reason}</span>`;
     } else if (isDone) {
-        subTitleHTML = `<span class="text-xl font-black text-gray-400 uppercase">BED 0${data.bedId} (ĐÃ TRẢ)</span>`;
+        subTitleHTML = `<span class="nd-sub text-xl">BED 0${data.bedId} · đã trả</span>`;
     } else {
-        subTitleHTML = `<span class="text-2xl font-black text-[#065F46]" id="detail-bed-name">${hasBed ? `BED 0${data.bedId}` : "CHỜ XẾP"}</span>`;
+        subTitleHTML = `<span class="nd-sub text-2xl" style="color:var(--bd-tc)" id="detail-bed-name">${hasBed ? `BED 0${data.bedId}` : "Chờ xếp bed"}</span>`;
     }
+    // [GIAO DIỆN BED 16/10] màu khung chi tiết theo nhãn trạng thái cũ: đang dùng xanh · chờ vàng · xong xám · huỷ đỏ
+    var detailColor = isCancelled ? 'var(--bd-cancel)' : isDone ? 'var(--bd-done)' : isActive ? 'var(--bd-tc)' : 'var(--bd-wait)';
 
     panel.innerHTML = `
-    <div class="spatial-glass w-full h-full flex flex-col relative rounded-[2.5rem] overflow-hidden">
+    <div class="nd w-full h-full flex flex-col relative rounded-[20px] overflow-hidden" style="--c:${detailColor}">
 
         <div class="px-8 pt-6 pb-2 shrink-0">
             <div class="flex items-start justify-between">
                 <div class="flex-1 pr-4">
-                    <h1 class="text-3xl md:text-4xl font-black tracking-tighter text-[#1e293b] leading-tight mb-1 line-clamp-2 overflow-hidden text-ellipsis" style="max-height: 5rem;">
+                    <h1 class="nd-name text-3xl md:text-4xl leading-tight mb-1 line-clamp-2 overflow-hidden text-ellipsis" style="max-height: 5rem;">
                         ${data.name || "Khách lẻ"}
                     </h1>
 
                     <div class="flex items-center gap-2 flex-wrap">
                         ${subTitleHTML}
                         ${(!isDone && !isCancelled) ? `
-                        <button onclick="openEditBookingModal('${bookingId}')"
-                            class="flex items-center gap-1 px-2.5 py-1 rounded-full bg-gray-100 hover:bg-[#006241] text-gray-500 hover:text-white text-[10px] font-black uppercase tracking-wide transition-all active:scale-95 border border-gray-200 hover:border-[#006241]">
-                            <span class="material-symbols-outlined text-[13px]">edit</span>
+                        <button onclick="openEditBookingModal('${bookingId}')" class="nd-edit transition-all active:scale-95">
+                            <span class="material-symbols-outlined">edit</span>
                             Sửa
                         </button>` : ''}
-                        <div id="detail-timer-box" class="hidden ml-4 px-3 py-1 bg-red-50 text-red-600 rounded-lg flex items-center gap-2 animate-pulse">
-                            <span class="material-symbols-outlined text-sm">timer</span>
-                            <span id="detail-countdown" class="font-black font-mono text-lg tracking-tight">--:--</span>
+                        <div id="detail-timer-box" class="hidden nd-timer">
+                            <span class="material-symbols-outlined">timer</span>
+                            <b id="detail-countdown">--:--</b>
                         </div>
                     </div>
                 </div>
 
-                <div id="detail-status-badge" class="px-5 py-2 rounded-2xl border transition-colors shrink-0">
-                    <span class="font-black text-sm tracking-widest uppercase">WAITING</span>
-                </div>
+                <div id="detail-status-badge" class="nd-badge shrink-0"><i></i><span>Chờ khách</span></div>
             </div>
         </div>
 
         <div class="flex-1 overflow-y-auto px-8 pb-4 hide-scroll space-y-4">
 
             <div class="grid grid-cols-2 gap-4">
-                <div class="p-4 glass-card-inner rounded-[2rem] flex flex-col justify-center">
-                    <p class="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1">LIÊN HỆ</p>
-                    <h4 class="text-xl font-black text-slate-800 truncate">${data.phone || "--"}</h4>
-                    <div class="flex items-center gap-1 text-emerald-600">
+                <div class="p-4 nd-tile rounded-[2rem] flex flex-col justify-center">
+                    <p class="nd-lab mb-1">Liên hệ</p>
+                    <h4 class="nd-val text-xl truncate">${data.phone || "--"}</h4>
+                    <div class="flex items-center gap-1 nd-ok">
                         <span class="material-symbols-outlined text-xs">verified</span>
-                        <span class="text-[10px] font-bold">Khách hàng</span>
+                        <span class="text-[11px] font-bold">Khách hàng</span>
                     </div>
                 </div>
 
-                <div class="p-4 glass-card-inner rounded-[2rem] flex flex-col justify-center">
-                    <p class="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1">${data.guestCount ? 'SỐ KHÁCH: ' + data.guestCount : 'ĐI CÙNG'}</p>
-                    ${_companionHTML(data, 'text-xl font-black text-slate-800 truncate', 'text-xs font-bold text-gray-500')}
+                <div class="p-4 nd-tile rounded-[2rem] flex flex-col justify-center">
+                    <p class="nd-lab mb-1">${data.guestCount ? 'Số khách: ' + data.guestCount : 'Đi cùng'}</p>
+                    ${_companionHTML(data, 'nd-val text-xl truncate', 'text-xs font-semibold nd-meta')}
                 </div>
             </div>
 
-            <div class="p-4 bg-white/60 border border-white/40 rounded-[2rem] flex items-center justify-around shadow-sm">
+            <div class="p-4 nd-tile rounded-[2rem] flex items-center justify-around">
                 <div class="text-center">
-                    <p class="text-[9px] font-black text-gray-400 uppercase tracking-[0.2em] mb-1">BẮT ĐẦU</p>
-                    <span class="text-3xl font-black text-slate-800 tracking-tighter">${data.start}</span>
+                    <p class="nd-lab mb-1">Bắt đầu</p>
+                    <span class="nd-time text-3xl">${data.start}</span>
                 </div>
-                <div class="text-gray-300">
-                    <span class="material-symbols-outlined text-3xl font-light">arrow_forward</span>
+                <div class="nd-arrow">
+                    <span class="material-symbols-outlined text-3xl">arrow_forward</span>
                 </div>
                 <div class="text-center">
-                    <p class="text-[9px] font-black text-gray-400 uppercase tracking-[0.2em] mb-1">KẾT THÚC</p>
-                    <span class="text-3xl font-black text-slate-800 tracking-tighter">${data.end}</span>
+                    <p class="nd-lab mb-1">Kết thúc</p>
+                    <span class="nd-time text-3xl">${data.end}</span>
                 </div>
             </div>
-            ${bookingCreatedAtVN(data) ? `<p class="text-center text-[11px] font-bold text-gray-400 -mt-2">Đặt lúc <span class="text-slate-700 font-black">${bookingCreatedAtVN(data)}</span></p>` : ''}
+            ${bookingCreatedAtVN(data) ? `<p class="text-center text-[11.5px] font-semibold nd-meta -mt-2">Đặt lúc <b>${bookingCreatedAtVN(data)}</b></p>` : ''}
 
-            <div id="row-checkout-time" class="hidden text-center bg-gray-100/50 rounded-2xl p-2 border border-gray-200/50">
-                <span class="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Thực tế check-out lúc</span>
-                <div class="font-black text-slate-800 text-2xl tracking-tight" id="detail-real-end">--:--</div>
+            <div id="row-checkout-time" class="hidden nd-out text-center rounded-2xl p-2">
+                <span class="nd-lab">${isCancelled ? 'Lý do' : 'Thực tế check-out lúc'}</span>
+                <div class="nd-val text-2xl" id="detail-real-end">--:--</div>
             </div>
 
             <div id="done-session-info" class="hidden space-y-3"></div>
 
             <div id="wrapper-btn-cancel" class="hidden pt-2">
-                <button id="btn-action-cancel" class="w-full py-3 rounded-2xl border-2 border-dashed border-red-200 text-red-400 font-black uppercase tracking-[0.2em] text-[10px] hover:bg-red-50 transition-all">
-                    HỦY LỊCH NÀY
+                <button id="btn-action-cancel" class="nd-btn soft red w-full py-3 rounded-2xl">
+                    Huỷ lịch này
                 </button>
             </div>
         </div>
 
         <div id="detail-action-buttons" class="px-6 pb-6 pt-2">
-            <div class="bg-white/90 backdrop-blur-xl p-3 rounded-[2rem] shadow-[0_8px_24px_-6px_rgba(0,0,0,0.12)] border border-white flex items-center gap-3">
-                <button id="btn-action-order" class="flex-1 h-14 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-[2rem] font-black text-sm uppercase flex items-center justify-center gap-2 transition-all active:scale-95 shadow-inner">
-                    <span class="material-symbols-outlined">restaurant</span>
-                    Gọi Món
+            <div class="nd-bar p-3 rounded-[2rem] flex items-center gap-3">
+                <button id="btn-action-order" class="nd-btn plain flex-1 h-14 rounded-[2rem]">
+                    <span class="material-symbols-outlined">local_cafe</span>
+                    Gọi món
                 </button>
-                <button id="btn-action-checkout" class="flex-1 h-14 bg-[#065F46] hover:bg-[#044e39] text-white rounded-[2rem] font-black text-sm uppercase flex items-center justify-center gap-2 shadow-lg shadow-emerald-900/20 transition-all active:scale-95">
-                    <span class="material-symbols-outlined">meeting_room</span>
-                    Xếp Bed Ngay
+                <button id="btn-action-checkout" class="nd-btn solid flex-1 h-14 rounded-[2rem]">
+                    <span class="material-symbols-outlined">bed</span>
+                    Xếp bed ngay
                 </button>
             </div>
         </div>
@@ -5283,18 +5257,16 @@ function selectBedItem(index) {
     var badge = document.getElementById('detail-status-badge');
     var badgeContent = badge.querySelector('span');
 
+    // màu nhãn theo --c của khung (detailColor)
+    badge.className = "nd-badge shrink-0" + (isActive ? " pulse" : "");
     if (isDone) {
-        badge.className = "px-5 py-2 rounded-2xl border border-gray-200 bg-gray-100 text-gray-500";
-        badgeContent.innerText = "ĐÃ XONG";
+        badgeContent.innerText = "Đã xong";
     } else if (isCancelled) {
-        badge.className = "px-5 py-2 rounded-2xl border border-red-200 bg-red-50 text-red-500";
-        badgeContent.innerText = (data.cancelType === 'late_cancel_preorder') ? "🔴 CẦN THU TIỀN NƯỚC" : "ĐÃ HỦY";
+        badgeContent.innerText = (data.cancelType === 'late_cancel_preorder') ? "Cần thu tiền nước" : "Đã huỷ";
     } else if (isActive) {
-        badge.className = "px-5 py-2 rounded-2xl border border-emerald-200 bg-emerald-50 text-[#065F46] shadow-sm";
-        badgeContent.innerText = "ACTIVE";
+        badgeContent.innerText = "Đang dùng";
     } else {
-        badge.className = "px-5 py-2 rounded-2xl border border-amber-200 bg-amber-50 text-amber-600 shadow-sm";
-        badgeContent.innerText = "CHỜ KHÁCH";
+        badgeContent.innerText = "Chờ khách";
     }
 
     var timerBox = document.getElementById('detail-timer-box');
@@ -5343,14 +5315,14 @@ function selectBedItem(index) {
             wrapperCancel.innerHTML = `
                 <div class="flex gap-2 mt-3">
                     <button onclick="openMoveBedModal('${bookingId}')"
-                        class="flex-1 h-14 rounded-[32px] bg-white border-2 border-amber-100 text-amber-600 font-black uppercase tracking-[0.15em] text-[12px] shadow-[0_4px_10px_rgba(251,191,36,0.1)] hover:border-amber-300 hover:shadow-md active:scale-95 transition-all flex items-center justify-center gap-2 group">
-                        <span class="material-symbols-outlined text-[18px] group-hover:rotate-180 transition-transform duration-500">sync_alt</span>
-                        Đổi Bed
+                        class="nd-btn soft amber flex-1 h-14 rounded-[32px] group">
+                        <span class="material-symbols-outlined group-hover:rotate-180 transition-transform duration-500">sync_alt</span>
+                        Đổi bed
                     </button>
                     <button onclick="openExtendModal(window.currentPcBooking, null)"
-                        class="flex-1 h-14 rounded-[32px] bg-white border-2 border-[#006241]/30 text-[#006241] font-black uppercase tracking-[0.15em] text-[12px] shadow-[0_4px_10px_rgba(0,98,65,0.08)] hover:border-[#006241]/50 hover:shadow-md active:scale-95 transition-all flex items-center justify-center gap-2 group">
-                        <span class="material-symbols-outlined text-[18px]">more_time</span>
-                        Gia Hạn
+                        class="nd-btn soft flex-1 h-14 rounded-[32px]">
+                        <span class="material-symbols-outlined">more_time</span>
+                        Gia hạn
                     </button>
                 </div>
             `;
@@ -5363,14 +5335,14 @@ function selectBedItem(index) {
             wrapperCancel.innerHTML = `
                 <div class="flex gap-2 mt-1">
                     <button id="btn-action-cancel"
-                        class="flex-1 h-13 py-3 rounded-[20px] border-2 border-dashed border-red-200 text-red-400 font-black uppercase tracking-[0.15em] text-[11px] hover:bg-red-50 active:scale-95 transition-all flex items-center justify-center gap-1.5">
-                        <span class="material-symbols-outlined text-[16px]">cancel</span>
-                        Hủy Lịch
+                        class="nd-btn soft red flex-1 py-3 rounded-[20px]">
+                        <span class="material-symbols-outlined">cancel</span>
+                        Huỷ lịch
                     </button>
                     <button id="btn-action-extend"
-                        class="flex-1 h-13 py-3 rounded-[20px] border-2 border-[#006241]/30 text-[#006241] font-black uppercase tracking-[0.15em] text-[11px] bg-white hover:border-[#006241]/60 hover:bg-green-50 active:scale-95 transition-all flex items-center justify-center gap-1.5 shadow-sm">
-                        <span class="material-symbols-outlined text-[16px]">more_time</span>
-                        Gia Hạn
+                        class="nd-btn soft flex-1 py-3 rounded-[20px]">
+                        <span class="material-symbols-outlined">more_time</span>
+                        Gia hạn
                     </button>
                 </div>
             `;
@@ -5406,32 +5378,32 @@ function selectBedItem(index) {
                 var infoDiv = document.getElementById('done-session-info');
                 if (infoDiv) {
                     infoDiv.innerHTML = `
-                    <div class="bg-white border border-emerald-100 rounded-[2rem] p-4 shadow-sm relative overflow-hidden group">
+                    <div class="nd-spend rounded-[2rem] p-4 relative overflow-hidden">
                         <div class="flex justify-between items-center mb-2">
                             <div>
-                                <p class="text-[9px] font-bold uppercase tracking-[0.2em] text-gray-400 mb-1">CHI TIÊU TẠM TÍNH</p>
+                                <p class="nd-lab mb-1">Chi tiêu tạm tính</p>
                                 <div class="flex items-baseline gap-1">
-                                    <span class="text-3xl font-black tracking-tight text-[#065F46]">${total.toLocaleString()}</span>
-                                    <span class="text-xs font-bold opacity-60 text-[#065F46]">VNĐ</span>
+                                    <span class="big text-3xl">${total.toLocaleString()}</span>
+                                    <span class="text-sm font-bold" style="color:var(--bd-tc);opacity:.65">đ</span>
                                 </div>
                             </div>
-                            <div class="w-10 h-10 bg-emerald-50 rounded-full flex items-center justify-center text-[#065F46] cursor-pointer active:scale-90 transition-transform" onclick="showBillModal('${bookingId}')" title="Xem hoá đơn">
+                            <div class="nd-round w-10 h-10 rounded-full flex items-center justify-center cursor-pointer active:scale-90 transition-transform" onclick="showBillModal('${bookingId}')" title="Xem hoá đơn">
                                 <span class="material-symbols-outlined">receipt_long</span>
                             </div>
                         </div>
 
-                        <div class="border-t border-dashed border-emerald-100 pt-2 flex justify-center gap-2">
+                        <div class="nd-dash pt-3 flex justify-center gap-2">
                             <button onclick="copyBedNotification('${data.end}')"
-                                class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-gray-50 hover:bg-emerald-50 text-gray-500 hover:text-emerald-600 transition-all active:scale-95">
-                                <span class="material-symbols-outlined text-[16px]">content_copy</span>
-                                <span class="text-[10px] font-bold uppercase">Copy Thông báo kết thúc</span>
+                                class="nd-chipbtn transition-all active:scale-95">
+                                <span class="material-symbols-outlined">content_copy</span>
+                                Copy thông báo kết thúc
                             </button>
                             <button onclick="sendWarning(this)" data-id="${bookingId}" data-name="${data.name||'Khách hàng'}"
                                 id="warn-btn-pc-${bookingId}"
-                                class="warn-btn relative flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-50 hover:bg-amber-100 text-amber-600 border border-amber-200 transition-all active:scale-95">
-                                <span class="material-symbols-outlined text-[16px]">warning</span>
-                                <span class="text-[10px] font-bold uppercase">Cảnh báo</span>
-                                <span class="warn-badge-pc hidden absolute -top-1.5 -right-1.5 text-[9px] font-black text-white rounded-full w-4 h-4 flex items-center justify-center bg-red-500"></span>
+                                class="warn-btn nd-chipbtn amber transition-all active:scale-95">
+                                <span class="material-symbols-outlined">warning</span>
+                                Cảnh báo
+                                <span class="warn-badge-pc bd-cnt hidden"></span>
                             </button>
                         </div>
                     </div>`;
@@ -5452,48 +5424,48 @@ function renderDoneSessionInfo(total, hasPenalty, penaltyAmt, phone, bookingId) 
     var infoDiv = document.getElementById('done-session-info');
     if (!infoDiv) return;
 
+    // [GIAO DIỆN BED 16/10] cùng khối như cũ, phong cách mới
     var totalHTML = `
-    <div class="bg-gradient-to-br from-[#065F46] to-[#044e39] rounded-[2rem] p-6 text-white shadow-lg relative overflow-hidden">
+    <div class="nd-hero rounded-[2rem] p-6 relative overflow-hidden">
         <div class="absolute top-0 right-0 p-4 opacity-20"><span class="material-symbols-outlined text-6xl">payments</span></div>
-        <p class="text-[10px] font-bold uppercase tracking-[0.2em] opacity-80 mb-1">TỔNG CHI TIÊU</p>
+        <p class="text-[12px] font-semibold opacity-80 mb-1">Tổng chi tiêu</p>
         <div class="flex items-baseline gap-1">
-            <span class="text-4xl font-black tracking-tight">${total.toLocaleString()}</span>
-            <span class="text-sm font-bold opacity-80">VNĐ</span>
+            <span class="big text-4xl">${total.toLocaleString()}</span>
+            <span class="text-sm font-bold opacity-80">đ</span>
         </div>
     </div>`;
 
     var penaltyHTML = '';
     if (hasPenalty) {
         penaltyHTML = `
-        <div class="bg-red-50 rounded-[2rem] p-6 border border-red-100 flex flex-col gap-4 relative overflow-hidden">
-            <div class="absolute -right-4 -top-4 w-20 h-20 bg-red-200 rounded-full opacity-30"></div>
+        <div class="nd-pen rounded-[2rem] p-6 flex flex-col gap-4 relative overflow-hidden">
             <div class="flex items-center gap-4 relative z-10">
-                <div class="w-12 h-12 bg-red-100 text-red-500 rounded-2xl flex items-center justify-center shadow-sm">
+                <div class="nd-pen-ic w-12 h-12 rounded-2xl flex items-center justify-center">
                     <span class="material-symbols-outlined text-2xl">warning</span>
                 </div>
                 <div>
-                    <p class="text-[10px] font-black text-red-400 uppercase tracking-widest">ĐÃ PHẠT VỆ SINH</p>
-                    <p class="text-2xl font-black text-red-600">${penaltyAmt.toLocaleString()}đ</p>
+                    <p class="nd-lab">Đã phạt vệ sinh</p>
+                    <p class="amt text-2xl">${penaltyAmt.toLocaleString()}đ</p>
                 </div>
             </div>
             <div class="flex gap-3 relative z-10">
-                <button onclick="openCleaningModal('${phone}', '${bookingId}')" class="flex-1 py-3 bg-white border border-red-200 text-red-500 rounded-xl font-bold text-xs uppercase shadow-sm hover:bg-red-50 transition-all">Sửa</button>
-                <button onclick="deletePenalty('${phone}', '${bookingId}')" class="flex-1 py-3 bg-red-500 text-white rounded-xl font-bold text-xs uppercase shadow-lg shadow-red-200 hover:bg-red-600 transition-all">Xóa</button>
+                <button onclick="openCleaningModal('${phone}', '${bookingId}')" class="nd-btn soft red flex-1 py-3 rounded-xl">Sửa</button>
+                <button onclick="deletePenalty('${phone}', '${bookingId}')" class="nd-btn solid red flex-1 py-3 rounded-xl">Xoá</button>
             </div>
         </div>`;
     } else {
         penaltyHTML = `
-        <div onclick="openCleaningModal('${phone}', '${bookingId}')" class="group bg-white rounded-[2rem] p-5 border-2 border-dashed border-gray-200 hover:border-red-200 cursor-pointer transition-all flex items-center justify-between">
+        <div onclick="openCleaningModal('${phone}', '${bookingId}')" class="nd-addpen group rounded-[2rem] p-5 cursor-pointer transition-all flex items-center justify-between">
             <div class="flex items-center gap-4">
-                <div class="w-12 h-12 bg-gray-100 group-hover:bg-red-100 text-gray-400 group-hover:text-red-500 rounded-2xl flex items-center justify-center transition-colors">
+                <div class="w-12 h-12 rounded-2xl flex items-center justify-center" style="background:var(--bd-fill);color:var(--bd-sub)">
                     <span class="material-symbols-outlined">cleaning_services</span>
                 </div>
                 <div>
-                    <h4 class="font-black text-gray-600 group-hover:text-red-500 uppercase text-sm transition-colors">Thêm phí vệ sinh</h4>
-                    <p class="text-xs text-gray-400">Nếu khách làm bẩn nệm/sàn</p>
+                    <h4 class="nd-val text-sm">Thêm phí vệ sinh</h4>
+                    <p class="text-xs nd-meta">Nếu khách làm bẩn nệm / sàn</p>
                 </div>
             </div>
-            <span class="material-symbols-outlined text-gray-300 group-hover:text-red-400">add_circle</span>
+            <span class="material-symbols-outlined" style="color:var(--bd-sub)">add_circle</span>
         </div>`;
     }
 
@@ -5509,32 +5481,32 @@ function setupActionButtons(bookingId, data, hasBed, btnOrder, btnCheckout, btnC
     }
     if (btnOrder) {
         var hasPreorder = _hasActivePreorder(data);
+        btnOrder.style.background = '';
+        btnOrder.style.color = '';
 
         if (hasPreorder) {
             var poQty = _countPreorderQty(data.preorder);
-            btnOrder.innerHTML = '<span style="display:flex;align-items:center;gap:5px;">🍜 Pre-order <span style="background:rgba(255,255,255,0.35);border-radius:6px;padding:1px 7px;font-size:0.72rem;">' + poQty + ' món</span></span>';
-            btnOrder.style.background = 'linear-gradient(135deg,#b45309,#d97706)';
-            btnOrder.style.color = 'white';
+            btnOrder.className = 'nd-btn solid amber flex-1 h-14 rounded-[2rem]';
+            btnOrder.innerHTML = '<span class="material-symbols-outlined">ramen_dining</span>Pre-order <span style="background:#ffffff38;border-radius:99px;padding:1px 8px;font-size:12px;">' + poQty + ' món</span>';
             btnOrder.onclick = function() {
                 showPreorderModal(data, bookingId);
             };
         } else {
-            btnOrder.innerHTML = "<span>☕ Gọi Món</span>";
-            btnOrder.style.background = '';
-            btnOrder.style.color = '';
+            btnOrder.className = 'nd-btn plain flex-1 h-14 rounded-[2rem]';
+            btnOrder.innerHTML = '<span class="material-symbols-outlined">local_cafe</span>Gọi món';
             btnOrder.onclick = function() { showBedDetail(data.bedId); };
         }
     }
     if (btnCheckout) {
         if (!hasBed) {
-            btnCheckout.innerHTML = '<span>🛏️ Xếp Bed Ngay</span>';
+            btnCheckout.innerHTML = '<span class="material-symbols-outlined">bed</span>Xếp bed ngay';
             btnCheckout.onclick = function() {
                 pendingBedOrder = data;
                 renderBedSelection();
                 document.getElementById('bed-select-modal').classList.remove('hidden');
             };
         } else {
-            btnCheckout.innerHTML = '<span>Trả Bed</span>';
+            btnCheckout.innerHTML = '<span class="material-symbols-outlined">logout</span>Trả bed';
             btnCheckout.onclick = function() { handleBedCheckout(data); };
         }
     }
@@ -6050,7 +6022,7 @@ function closeAppModal() {
     }
 }
 function parseTimeObj(timeStr) { if (!timeStr) return null; var d = new Date(); var parts = timeStr.split(':'); d.setHours(parseInt(parts[0]), parseInt(parts[1]), 0, 0); return d; }
-function startPanelCountdown(endTimeStr) { stopPanelCountdown(); var clockEl = document.getElementById('detail-countdown'); if(!clockEl) return; var timeParts = endTimeStr.split(':'); if(timeParts.length < 2) return; var endDate = new Date(); endDate.setHours(parseInt(timeParts[0]), parseInt(timeParts[1]), 0); bedCountdownInterval = setInterval(function() { var diff = endDate - new Date(); var isOver = diff < 0; diff = Math.abs(diff); var h = Math.floor(diff / 3600000); var m = Math.floor((diff % 3600000) / 60000); var s = Math.floor((diff % 60000) / 1000); var fmt = v => v < 10 ? "0"+v : v; clockEl.innerText = (isOver ? '-' : '') + fmt(h) + ":" + fmt(m) + ":" + fmt(s); clockEl.className = isOver ? "text-3xl font-black text-red-500 font-mono tracking-tighter" : (diff <= 10 * 60000 ? "text-3xl font-black text-amber-500 font-mono tracking-tighter" : "text-3xl font-black text-[#006241] font-mono tracking-tighter"); }, 1000); }
+function startPanelCountdown(endTimeStr) { stopPanelCountdown(); var clockEl = document.getElementById('detail-countdown'); if(!clockEl) return; var timeParts = endTimeStr.split(':'); if(timeParts.length < 2) return; var endDate = new Date(); endDate.setHours(parseInt(timeParts[0]), parseInt(timeParts[1]), 0); bedCountdownInterval = setInterval(function() { var diff = endDate - new Date(); var isOver = diff < 0; diff = Math.abs(diff); var h = Math.floor(diff / 3600000); var m = Math.floor((diff % 3600000) / 60000); var s = Math.floor((diff % 60000) / 1000); var fmt = v => v < 10 ? "0"+v : v; clockEl.innerText = (isOver ? '-' : '') + fmt(h) + ":" + fmt(m) + ":" + fmt(s); var box = clockEl.parentElement; if (box) { box.classList.toggle('over', isOver); box.classList.toggle('warn', !isOver && diff <= 10 * 60000); } /* [GIAO DIỆN BED 16/10] màu theo viên .nd-timer */ }, 1000); }
 function stopPanelCountdown() { if (bedCountdownInterval) clearInterval(bedCountdownInterval); }
 function switchTimeMode(mode) {
     var btnDur = document.getElementById('tab-duration');
@@ -7007,7 +6979,7 @@ function calculateAndSaveCheckout(booking, realTimeStr) {
             }
             else {
                 alert("Lỗi: " + err.message);
-                if(btnCheckout) btnCheckout.innerHTML = '<span>🏁 Trả Bed</span>';
+                if(btnCheckout) btnCheckout.innerHTML = '<span class="material-symbols-outlined">logout</span>Trả bed';
             }
         });
     });
@@ -7333,7 +7305,7 @@ function processCheckoutFirebase(booking) {
         if(!err) openBedManager();
         else {
             alert("Lỗi: " + err.message);
-            if(btnCheckout) btnCheckout.innerHTML = '<span>🏁 Trả Bed</span>';
+            if(btnCheckout) btnCheckout.innerHTML = '<span class="material-symbols-outlined">logout</span>Trả bed';
         }
     });
 }
@@ -8242,50 +8214,31 @@ function renderMobileBedList(list) {
         const isActive = status.includes('active') || status.includes('đang dùng');
         const isWaiting = (!b.bedId || b.bedId == "WAITING") && !isCancelled && !isDone;
 
-        let cardBg = "bg-white",
-            titleColor = "text-slate-900",
-            subColor = "text-slate-500",
-            dotColor = "bg-slate-300",
+        // [GIAO DIỆN BED 16/10] phong cách thẻ điểm bán, giữ khung squircle p-5 và màu cũ:
+        // huỷ đỏ · đang dùng xanh · chờ xếp vàng · xong xám nhạt · đã xếp bed chờ khách trắng
+        let k = "k-idle",
+            dotStyle = ' style="--dot:#cbd5e1"',
             statusLabel = b.bedId && b.bedId != "WAITING" ? `BED 0${b.bedId}` : "CHỜ XẾP";
 
         if (isCancelled) {
-            cardBg = "bg-red-50 border-red-100";
-            titleColor = "text-red-900";
-            subColor = "text-red-400";
-            dotColor = "bg-red-500";
-            statusLabel = (b.cancelType === 'late_cancel_preorder') ? "🔴 CẦN THU TIỀN" : "ĐÃ HỦY";
+            k = "k-cancel"; dotStyle = '';
+            statusLabel = (b.cancelType === 'late_cancel_preorder') ? "Cần thu tiền" : "Đã huỷ";
         }
-        else if (isActive) {
-            cardBg = "bg-[#E6F4F1] border-[#bce3db]";
-            titleColor = "text-[#006241]";
-            subColor = "text-[#006241]/70";
-            dotColor = "bg-green-500 animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.4)]";
-        }
-        else if (isWaiting) {
-            cardBg = "bg-amber-50 border-amber-100";
-            titleColor = "text-amber-900";
-            subColor = "text-amber-600/70";
-            dotColor = "bg-amber-500";
-            statusLabel = "CHỜ XẾP";
-        }
-        else if (isDone) {
-            cardBg = "bg-white border-slate-100";
-            titleColor = "text-slate-400";
-            subColor = "text-slate-300";
-            dotColor = "bg-slate-200";
-        }
+        else if (isActive) { k = "k-active"; dotStyle = ''; }
+        else if (isWaiting) { k = "k-wait"; dotStyle = ''; statusLabel = "Chờ xếp"; }
+        else if (isDone) { k = "k-done is-faded"; dotStyle = ''; }
 
         return `
-        <div onclick="showMobileBedDetail('${b.id}')" data-bk="${b.id}"
-             class="${cardBg} squircle p-5 shadow-sm active:scale-[0.98] transition-all border relative overflow-hidden mb-3">
-            <div class="flex justify-between items-start mb-1.5 relative z-10">
-                <span class="text-[10px] font-black tracking-[0.15em] uppercase ${subColor}">${statusLabel}</span>
-                <div class="w-2.5 h-2.5 rounded-full ${dotColor}"></div>
+        <div onclick="showMobileBedDetail('${b.id}')" data-bk="${b.id}"${dotStyle}
+             class="nb-card ${k} squircle p-5 active:scale-[0.98] transition-all border relative mb-3">
+            <div class="flex justify-between items-start mb-1.5">
+                <span class="nb-label text-[10px] font-extrabold uppercase">${statusLabel}</span>
+                <div class="nb-dot w-2.5 h-2.5 rounded-full${isActive ? ' pulse' : ''}"></div>
             </div>
-            <h3 class="text-xl font-black mb-2 ${titleColor} relative z-10 tracking-tight leading-none">${b.name}</h3>
-            <div class="flex items-center gap-2 text-xs ${subColor} relative z-10 font-bold">
+            <h3 class="nb-name text-xl mb-2 tracking-tight leading-none">${b.name}</h3>
+            <div class="nb-time flex items-center gap-2 text-xs font-bold">
                 <span class="material-symbols-outlined text-[14px]">schedule</span>
-                <span>${isDone ? "Check-out lúc: " + (b.realEndTime || b.end) : b.start + " - " + b.end}</span>
+                <span>${isDone ? "Check-out lúc " + (b.realEndTime || b.end) : b.start + " – " + b.end}</span>
             </div>
         </div>`;
     }).join('');
@@ -8315,19 +8268,19 @@ function _showMobileBedDetailRender(booking) {
     if (isActive) {
         topBtn = `
         <button onclick="openMoveBedModal('${booking.id}')"
-            class="w-11 h-11 rounded-full bg-amber-50 flex items-center justify-center text-amber-600 shadow-[0_2px_10px_rgba(245,158,11,0.2)] active:scale-90 transition-transform border border-amber-100">
-            <span class="material-symbols-outlined text-[22px] font-bold">sync</span>
+            class="mn-nav-btn amber w-11 h-11 rounded-full flex items-center justify-center active:scale-90 transition-transform">
+            <span class="material-symbols-outlined text-[22px]">sync</span>
         </button>`;
     }
 
     const headerHtml = `
         <nav class="flex items-center justify-between px-5 py-4 bg-[#F2F2F7] sticky top-0 z-40">
-            <button onclick="closeMobileBedDetail()" class="w-11 h-11 rounded-full bg-white flex items-center justify-center text-slate-800 shadow-[0_2px_10px_rgba(0,0,0,0.05)] active:scale-90 transition-transform border border-gray-100">
+            <button onclick="closeMobileBedDetail()" class="mn-nav-btn w-11 h-11 rounded-full flex items-center justify-center active:scale-90 transition-transform">
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="3" stroke="currentColor" class="w-5 h-5">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
                 </svg>
             </button>
-            <h1 class="text-lg font-black text-slate-900 uppercase tracking-tight">Chi tiết</h1>
+            <h1 class="mn-title text-lg">Chi tiết</h1>
 
             ${topBtn}
         </nav>`;
@@ -8340,7 +8293,8 @@ function _showMobileBedDetailRender(booking) {
 var mobileTimerInterval = null;
 
 function getCountdownStr(endTimeStr) {
-    if (!endTimeStr || endTimeStr === "--:--") return { timeStr: "--:--", label: "...", style: "bg-gray-400" };
+    // [GIAO DIỆN BED 16/10] style = class viên .mn-live; color = màu số đếm (trước: nhãn "CÒN LẠI" chữ trắng trên nền trắng → không đọc được)
+    if (!endTimeStr || endTimeStr === "--:--") return { timeStr: "--:--", label: "...", style: "mn-live", color: "var(--bd-tc)" };
 
     const now = new Date();
     const parts = endTimeStr.split(':');
@@ -8348,16 +8302,19 @@ function getCountdownStr(endTimeStr) {
     end.setHours(parseInt(parts[0]), parseInt(parts[1]), 0, 0);
 
     let diff = end - now;
-    let label = "CÒN LẠI";
-    let style = "bg-white/20 text-white";
+    let label = "Còn lại";
+    let style = "mn-live";
+    let color = "var(--bd-tc)";
 
     if (diff < 0) {
         diff = Math.abs(diff);
-        label = "QUÁ GIỜ";
-        style = "bg-red-500 text-white animate-pulse border border-white/30";
+        label = "Quá giờ";
+        style = "mn-live over";
+        color = "var(--bd-over)";
     } else if (diff <= 10 * 60000) { // [14/10] còn ≤ 10 phút — báo trước (cùng mốc với chuông BELL_WARN_MIN)
-        label = "SẮP HẾT GIỜ";
-        style = "bg-amber-500 text-white border border-white/30";
+        label = "Sắp hết giờ";
+        style = "mn-live warn";
+        color = "var(--bd-warn)";
     }
 
     const h = Math.floor(diff / 3600000);
@@ -8366,7 +8323,7 @@ function getCountdownStr(endTimeStr) {
 
     const timeStr = `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 
-    return { timeStr, label, style };
+    return { timeStr, label, style, color };
 }
 
 function renderDetailContentMobile(b) {
@@ -8384,81 +8341,81 @@ function renderDetailContentMobile(b) {
 
     const countdown = isActive ? getCountdownStr(b.end) : null;
 
-    // --- Status badge ---
-    let statusBg, statusLabel;
-    if (isCancelled)    { statusBg = 'bg-red-100 text-red-600 border border-red-200';           statusLabel = (b.cancelType === 'late_cancel_preorder') ? '🔴 Cần thu tiền nước' : 'Đã hủy'; }
-    else if (isDone)    { statusBg = 'bg-gray-100 text-gray-500 border border-gray-200';         statusLabel = 'Đã xong'; }
-    else if (isActive)  { statusBg = 'bg-emerald-100 text-emerald-700 border border-emerald-200'; statusLabel = 'Đang dùng'; }
-    else if (isWaiting) { statusBg = 'bg-amber-100 text-amber-700 border border-amber-200';      statusLabel = 'Chờ xếp bed'; }
-    else                { statusBg = 'bg-blue-100 text-blue-600 border border-blue-200';          statusLabel = 'Đã đặt'; }
+    // --- Status badge --- [GIAO DIỆN BED 16/10] màu theo nhãn cũ: huỷ đỏ · xong xám · đang dùng xanh · chờ xếp vàng · đã đặt xanh dương
+    let heroK, statusLabel;
+    if (isCancelled)    { heroK = 'k-cancel'; statusLabel = (b.cancelType === 'late_cancel_preorder') ? 'Cần thu tiền nước' : 'Đã huỷ'; }
+    else if (isDone)    { heroK = 'k-done';   statusLabel = 'Đã xong'; }
+    else if (isActive)  { heroK = 'k-active'; statusLabel = 'Đang dùng'; }
+    else if (isWaiting) { heroK = 'k-wait';   statusLabel = 'Chờ xếp bed'; }
+    else                { heroK = 'k-booked'; statusLabel = 'Đã đặt'; }
 
-    const bedLabel = isWaiting ? 'WAITING' : `Bed 0${b.bedId}`;
+    const bedLabel = isWaiting ? 'Chờ xếp' : `Bed 0${b.bedId}`;
 
     container.innerHTML = `
     <!-- Header info block -->
-    <div class="bg-white rounded-[2rem] p-5 shadow-sm border border-gray-100">
+    <div class="wg ${heroK} rounded-[2rem] p-5">
         <div class="flex items-start justify-between mb-4">
             <div class="flex-1 min-w-0">
-                <p class="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Khách hàng</p>
-                <h2 class="text-2xl font-black text-[#1e3932] truncate">${b.name || 'Khách'}</h2>
-                <p class="text-sm font-bold text-gray-500 mt-0.5">${b.phone || '--'}</p>
+                <p class="nd-lab mb-1">Khách hàng</p>
+                <h2 class="nd-val text-2xl truncate" style="letter-spacing:-.8px">${b.name || 'Khách'}</h2>
+                <p class="text-sm font-semibold nd-meta mt-0.5" style="font-variant-numeric:tabular-nums">${b.phone || '--'}</p>
             </div>
             <div class="flex flex-col items-end gap-2 shrink-0 ml-3">
-                <span class="text-lg font-black text-[#006241]">${bedLabel}</span>
-                <span class="text-[10px] font-black uppercase px-2.5 py-1 rounded-full ${statusBg}">${statusLabel}</span>
+                <span class="text-lg font-extrabold" style="color:var(--bd-tc)">${bedLabel}</span>
+                <span class="nd-badge${isActive ? ' pulse' : ''}" style="padding:5px 11px 5px 9px;font-size:11px"><i></i>${statusLabel}</span>
             </div>
         </div>
 
         <!-- Giờ bắt đầu / kết thúc -->
-        <div class="flex items-center justify-between bg-gray-50 rounded-[1.2rem] px-5 py-3">
+        <div class="mn-timebox flex items-center justify-between rounded-[1.2rem] px-5 py-3">
             <div class="text-center">
-                <p class="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-0.5">Bắt đầu</p>
-                <p class="text-2xl font-black text-gray-800 tracking-tight">${b.start}</p>
+                <p class="nd-lab mb-0.5">Bắt đầu</p>
+                <p class="nd-time text-2xl" style="color:var(--bd-ink)">${b.start}</p>
             </div>
-            <span class="material-symbols-outlined text-gray-300 text-2xl">arrow_forward</span>
+            <span class="material-symbols-outlined nd-arrow text-2xl">arrow_forward</span>
             <div class="text-center">
-                <p class="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-0.5">${isDone ? 'Thực tế trả' : 'Kết thúc'}</p>
-                <p class="text-2xl font-black ${isDone ? 'text-rose-600' : 'text-gray-800'} tracking-tight">${isDone ? (b.realEndTime || b.end) : b.end}</p>
+                <p class="nd-lab mb-0.5">${isDone ? 'Thực tế trả' : 'Kết thúc'}</p>
+                <p class="nd-time text-2xl${isDone ? ' mn-real' : ''}" style="color:var(--bd-ink)">${isDone ? (b.realEndTime || b.end) : b.end}</p>
             </div>
         </div>
 
         ${isActive ? `
         <!-- Timer đếm ngược -->
         <div class="mt-3 flex items-center justify-between px-1">
-            <div id="mob-live-badge" class="${countdown.style} px-3 py-1 rounded-full text-[11px] font-black">${countdown.label}</div>
-            <div id="mob-live-timer" class="timer-font text-3xl font-black text-[#006241] tracking-tight">${countdown.timeStr}</div>
+            <span id="mob-live-badge" class="${countdown.style}"><i></i>${countdown.label}</span>
+            <span id="mob-live-timer" class="mn-digits text-3xl" style="color:${countdown.color}">${countdown.timeStr}</span>
         </div>` : ''}
     </div>
 
     <!-- Info grid: Đi cùng + Tags -->
     <div class="grid grid-cols-2 gap-3">
-        <div class="bg-white rounded-[1.5rem] p-4 shadow-sm border border-gray-100">
-            ${b.guestCount ? '<p class="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1.5">Số khách: ' + b.guestCount + '</p>' : '<p class="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1.5">Đi cùng</p>'}
-            ${_companionHTML(b)}
+        <div class="nd-tile rounded-[1.5rem] p-4">
+            ${b.guestCount ? '<p class="nd-lab mb-1.5">Số khách: ' + b.guestCount + '</p>' : '<p class="nd-lab mb-1.5">Đi cùng</p>'}
+            ${_companionHTML(b, 'nd-val text-[14px] truncate', 'text-[11px] font-semibold nd-meta mt-0.5')}
         </div>
-        <div class="bg-white rounded-[1.5rem] p-4 shadow-sm border border-gray-100">
-            <p class="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1.5">Ngày đặt</p>
-            <p class="text-[13px] font-black text-gray-800">${b.date || b.displayDate || b.bookingDate || '--'}</p>
-            ${bookingCreatedAtVN(b) ? `<p class="text-[11px] font-bold text-gray-500 mt-1">Đặt lúc ${bookingCreatedAtVN(b)}</p>` : ''}
-            <p class="text-[11px] text-gray-400 mt-1">${b.source === 'app_index' ? '📱 App' : '🖥️ POS'}</p>
+        <div class="nd-tile rounded-[1.5rem] p-4">
+            <p class="nd-lab mb-1.5">Ngày đặt</p>
+            <p class="nd-val text-[13px]">${b.date || b.displayDate || b.bookingDate || '--'}</p>
+            ${bookingCreatedAtVN(b) ? `<p class="text-[11px] font-semibold nd-meta mt-1">Đặt lúc <b>${bookingCreatedAtVN(b)}</b></p>` : ''}
+            <p class="mn-src text-[11px] mt-1"><span class="material-symbols-outlined">${b.source === 'app_index' ? 'smartphone' : 'desktop_windows'}</span>${b.source === 'app_index' ? 'App' : 'POS'}</p>
         </div>
     </div>
 
     <!-- Tags: preorder, preferredBed -->
     ${(hasPreorder || b.preferredBed || b.bookingBonus) ? `
     <div class="flex flex-wrap gap-2">
-        ${hasPreorder ? `<span class="text-[11px] font-black px-3 py-1.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">🍜 Pre-order</span>` : ''}
-        ${b.preferredBed ? `<span class="text-[11px] font-black px-3 py-1.5 rounded-full bg-blue-100 text-blue-800 border border-blue-200">⭐ Bed 0${b.preferredBed}</span>` : ''}
-        ${b.bookingBonus ? `<span class="text-[11px] font-black px-3 py-1.5 rounded-full bg-green-100 text-green-800 border border-green-200">🎁 Bonus</span>` : ''}
+        ${hasPreorder ? `<span class="nb-chip big"><span class="material-symbols-outlined">ramen_dining</span>Pre-order</span>` : ''}
+        ${b.preferredBed ? `<span class="nb-chip big bed"><span class="material-symbols-outlined">star</span>Bed 0${b.preferredBed}</span>` : ''}
+        ${b.bookingBonus ? `<span class="nb-chip big bonus"><span class="material-symbols-outlined">redeem</span>Bonus</span>` : ''}
     </div>` : ''}
 
     <!-- Chi tiêu tạm tính -->
-    <div class="bg-white rounded-[1.5rem] px-5 py-4 shadow-sm border border-gray-100 flex items-center justify-between">
+    <div class="nd-spend rounded-[1.5rem] px-5 py-4 flex items-center justify-between">
         <div>
-            <p class="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-0.5">Chi tiêu tạm tính</p>
-            <span id="mob-detail-total-display" class="text-2xl font-black text-[#006241] tracking-tight">...</span>
+            <p class="nd-lab mb-0.5">Chi tiêu tạm tính</p>
+            <span id="mob-detail-total-display" class="big text-2xl">...</span>
         </div>
-        <button onclick="showBillModal('${b.id}')" class="w-10 h-10 bg-emerald-50 rounded-full flex items-center justify-center text-[#006241] active:scale-90 transition-transform cursor-pointer">
+        <button onclick="showBillModal('${b.id}')" class="nd-round w-10 h-10 rounded-full flex items-center justify-center active:scale-90 transition-transform cursor-pointer">
             <span class="material-symbols-outlined text-[20px]">receipt_long</span>
         </button>
     </div>
@@ -8467,78 +8424,72 @@ function renderDetailContentMobile(b) {
     ${isActive ? `
     <div class="flex gap-3">
         <button onclick="copyBedNotification('${b.end}')"
-            class="flex-1 h-11 bg-white border border-gray-200 rounded-[1rem] flex items-center justify-center gap-2 text-gray-600 text-[12px] font-black uppercase active:scale-95 transition-transform shadow-sm">
-            <span class="material-symbols-outlined text-[17px]">content_copy</span>
+            class="nd-btn plain flex-1 h-11 rounded-[1rem]" style="font-size:12.5px">
+            <span class="material-symbols-outlined" style="font-size:17px">content_copy</span>
             Copy TB
         </button>
         <button onclick="sendWarning(this)" data-id="${b.id}" data-name="${b.name||'Khách hàng'}"
-            class="warn-mob-btn relative flex-1 h-11 bg-amber-50 border border-amber-200 rounded-[1rem] flex items-center justify-center gap-2 text-amber-700 text-[12px] font-black uppercase active:scale-95 transition-transform shadow-sm">
-            <span class="material-symbols-outlined text-[17px]">warning</span>
+            class="warn-mob-btn nd-btn soft amber relative flex-1 h-11 rounded-[1rem]" style="font-size:12.5px">
+            <span class="material-symbols-outlined" style="font-size:17px">warning</span>
             Cảnh báo
-            <span class="warn-mob-badge hidden absolute -top-1 -right-1 text-[9px] font-black text-white rounded-full w-4 h-4 flex items-center justify-center bg-red-500"></span>
+            <span class="warn-mob-badge bd-cnt hidden"></span>
         </button>
     </div>` : ''}
 
     <!-- Phí vệ sinh (done only, chưa tính) -->
     ${(isDone && !isCancelled && !b.hasPenalty) ? `
-    <div class="bg-white rounded-[1.5rem] p-5 shadow-sm border border-gray-100">
+    <div class="nd-tile rounded-[1.5rem] p-5">
         <div class="flex items-center justify-between mb-3">
-            <span class="text-[13px] font-black text-gray-800">Phí vệ sinh</span>
-            <span class="text-[10px] font-black uppercase px-2 py-1 rounded-full bg-orange-100 text-orange-700 border border-orange-200">Nợ sau</span>
+            <span class="nd-val text-[13px]">Phí vệ sinh</span>
+            <span class="mn-owe text-[10.5px] font-extrabold px-2.5 py-1 rounded-full">Nợ sau</span>
         </div>
         <div class="flex gap-2">
-            <button onclick="submitCleaningFee(20000)" class="high-gloss-button flex-1 py-3 rounded-full text-[13px] font-bold text-slate-900">20K</button>
-            <button onclick="submitCleaningFee(30000)" class="high-gloss-button flex-1 py-3 rounded-full text-[13px] font-bold text-slate-900">30K</button>
-            <button onclick="submitCleaningFee(50000)" class="high-gloss-button flex-1 py-3 rounded-full text-[13px] font-bold text-slate-900">50K</button>
+            <button onclick="submitCleaningFee(20000)" class="nd-btn plain flex-1 py-3 rounded-full">20K</button>
+            <button onclick="submitCleaningFee(30000)" class="nd-btn plain flex-1 py-3 rounded-full">30K</button>
+            <button onclick="submitCleaningFee(50000)" class="nd-btn plain flex-1 py-3 rounded-full">50K</button>
         </div>
     </div>` : ''}
     ${(isDone && b.hasPenalty && b.penaltyAmount > 0) ? `
-    <div class="bg-red-50 rounded-[1.5rem] p-5 border border-red-100 flex items-center justify-between">
+    <div class="nd-pen rounded-[1.5rem] p-5 flex items-center justify-between">
         <div class="flex items-center gap-3">
-            <div class="w-9 h-9 bg-red-100 rounded-full flex items-center justify-center">
-                <span class="material-symbols-outlined text-red-500 text-[18px]">cleaning_services</span>
+            <div class="nd-pen-ic w-9 h-9 rounded-full flex items-center justify-center">
+                <span class="material-symbols-outlined text-[18px]">cleaning_services</span>
             </div>
-            <span class="text-[13px] font-black text-red-700">Đã tính phí vệ sinh</span>
+            <span class="nd-val text-[13px]" style="color:var(--bd-over)">Đã tính phí vệ sinh</span>
         </div>
-        <span class="text-[15px] font-black text-red-600">${Number(b.penaltyAmount).toLocaleString()}đ</span>
+        <span class="amt text-[15px]">${Number(b.penaltyAmount).toLocaleString()}đ</span>
     </div>` : ''}
     `;
 
     // --- Action buttons ---
     let btnHtml = '';
-    const orderStyle = _hasActivePreorder(b)
-        ? 'background:linear-gradient(135deg,#b45309,#d97706);color:white;border:none;'
-        : 'background:white;border:2px solid #006241;color:#006241;';
-    const orderLabel = _hasActivePreorder(b)
-        ? '🍜 Pre-order (' + _countPreorderQty(b.preorder) + ')'
-        : '☕ Gọi Món';
+    const orderBtn = _hasActivePreorder(b)
+        ? `<button onclick="handleMobileBedOrder('${b.id}')" class="nd-btn solid amber flex-1 h-14 rounded-[1.5rem]" style="font-size:14px"><span class="material-symbols-outlined">ramen_dining</span>Pre-order <span style="background:#ffffff38;border-radius:99px;padding:1px 8px;font-size:12px">${_countPreorderQty(b.preorder)}</span></button>`
+        : `<button onclick="handleMobileBedOrder('${b.id}')" class="nd-btn soft flex-1 h-14 rounded-[1.5rem]" style="font-size:14px"><span class="material-symbols-outlined">local_cafe</span>Gọi món</button>`;
 
     if (isCancelled || isDone) {
         btnHtml = `
         <div class="p-4 pb-6">
-            <button onclick="closeMobileBedDetail()" class="w-full h-14 bg-gray-100 text-gray-500 rounded-[1.5rem] font-black text-[14px] uppercase active:scale-95 transition-transform">Đóng</button>
+            <button onclick="closeMobileBedDetail()" class="nd-btn plain w-full h-14 rounded-[1.5rem]" style="font-size:14px">Đóng</button>
         </div>`;
     } else if (isWaiting) {
         btnHtml = `
         <div class="p-4 pb-6 space-y-3">
             <div class="flex gap-3">
                 <button onclick="openExtendModal(window.currentMobileBooking, null)"
-                    class="flex-1 h-12 bg-white border-2 border-[#006241]/30 text-[#006241] rounded-[1.2rem] font-black text-[12px] uppercase active:scale-95 transition-transform flex items-center justify-center gap-1.5 shadow-sm">
-                    <span class="material-symbols-outlined text-[17px]">more_time</span> Gia hạn
+                    class="nd-btn soft flex-1 h-12 rounded-[1.2rem]">
+                    <span class="material-symbols-outlined">more_time</span> Gia hạn
                 </button>
                 <button onclick="if(window.currentMobileBooking){var b=window.currentMobileBooking;document.getElementById('modal-cancel-reason').classList.remove('hidden');window.pendingCancelId=b.id;}"
-                    class="flex-1 h-12 bg-white border-2 border-red-200 text-red-500 rounded-[1.2rem] font-black text-[12px] uppercase active:scale-95 transition-transform flex items-center justify-center gap-1.5 shadow-sm">
-                    <span class="material-symbols-outlined text-[17px]">cancel</span> Hủy
+                    class="nd-btn soft red flex-1 h-12 rounded-[1.2rem]">
+                    <span class="material-symbols-outlined">cancel</span> Huỷ
                 </button>
             </div>
             <div class="flex gap-3">
-                <button onclick="handleMobileBedOrder('${b.id}')"
-                    class="flex-1 h-14 rounded-[1.5rem] font-black text-[14px] active:scale-95 transition-transform flex items-center justify-center gap-2 shadow-sm"
-                    style="${orderStyle}">${orderLabel}
-                </button>
+                ${orderBtn}
                 <button onclick="pendingBedOrder=window.currentMobileBooking; renderBedSelection(); document.getElementById('bed-select-modal').classList.remove('hidden');"
-                    class="flex-1 h-14 bg-[#006241] rounded-[1.5rem] text-white font-black text-[14px] shadow-lg shadow-[#006241]/20 active:scale-95 transition-transform uppercase">
-                    🛏️ Xếp Bed
+                    class="nd-btn solid flex-1 h-14 rounded-[1.5rem]" style="font-size:14px">
+                    <span class="material-symbols-outlined">bed</span>Xếp bed
                 </button>
             </div>
         </div>`;
@@ -8547,22 +8498,19 @@ function renderDetailContentMobile(b) {
         <div class="p-4 pb-6 space-y-3">
             <div class="flex gap-3">
                 <button onclick="openExtendModal(window.currentMobileBooking, null)"
-                    class="flex-1 h-12 bg-white border-2 border-[#006241]/30 text-[#006241] rounded-[1.2rem] font-black text-[12px] uppercase active:scale-95 transition-transform flex items-center justify-center gap-1.5 shadow-sm">
-                    <span class="material-symbols-outlined text-[17px]">more_time</span> Gia hạn
+                    class="nd-btn soft flex-1 h-12 rounded-[1.2rem]">
+                    <span class="material-symbols-outlined">more_time</span> Gia hạn
                 </button>
                 <button onclick="openMoveBedModal('${b.id}')"
-                    class="flex-1 h-12 bg-white border-2 border-amber-200 text-amber-600 rounded-[1.2rem] font-black text-[12px] uppercase active:scale-95 transition-transform flex items-center justify-center gap-1.5 shadow-sm">
-                    <span class="material-symbols-outlined text-[17px]">sync_alt</span> Đổi Bed
+                    class="nd-btn soft amber flex-1 h-12 rounded-[1.2rem]">
+                    <span class="material-symbols-outlined">sync_alt</span> Đổi bed
                 </button>
             </div>
             <div class="flex gap-3">
-                <button onclick="handleMobileBedOrder('${b.id}')"
-                    class="flex-1 h-14 rounded-[1.5rem] font-black text-[14px] active:scale-95 transition-transform flex items-center justify-center gap-2 shadow-sm"
-                    style="${orderStyle}">${orderLabel}
-                </button>
+                ${orderBtn}
                 <button onclick="handleBedCheckout(window.currentMobileBooking)"
-                    class="flex-1 h-14 bg-[#006241] rounded-[1.5rem] text-white font-black text-[14px] shadow-lg shadow-[#006241]/20 active:scale-95 transition-transform uppercase">
-                    🏁 Trả Bed
+                    class="nd-btn solid flex-1 h-14 rounded-[1.5rem]" style="font-size:14px">
+                    <span class="material-symbols-outlined">logout</span>Trả bed
                 </button>
             </div>
         </div>`;
@@ -8594,7 +8542,8 @@ function renderDetailContentMobile(b) {
             const tEl = document.getElementById('mob-live-timer');
             const bEl = document.getElementById('mob-live-badge');
             if (tEl) tEl.innerText = c.timeStr;
-            if (bEl) { bEl.innerText = c.label; bEl.className = `${c.style} px-3 py-1 rounded-full text-[11px] font-black`; }
+            if (tEl) tEl.style.color = c.color;
+            if (bEl) { bEl.innerHTML = '<i></i>' + c.label; bEl.className = c.style; }
         }, 1000);
     }
 }
@@ -13941,15 +13890,133 @@ function keypadConfirm() {
 #bell-modal .bell-row.over{ background:#fef2f2; box-shadow:inset 0 0 0 2px #fca5a5; }
 #bell-modal .bell-row.over .bell-time{ background:#dc2626; color:#fff; }
 /* Thẻ bed (danh sách PC, Live Status, danh sách điện thoại): cam = còn ≤ 10 phút, đỏ = quá giờ — _bedEndDecorate */
-[data-bk].bk-warn{ background:#fffbeb !important; border-color:#f59e0b !important; color:#92400e !important; box-shadow:0 0 0 2px #fcd34d !important; }
-[data-bk].bk-over{ background:#fef2f2 !important; border-color:#ef4444 !important; color:#991b1b !important; box-shadow:0 0 0 2px #fca5a5 !important; }
+[data-bk]:not(.nb-card).bk-warn{ background:#fffbeb !important; border-color:#f59e0b !important; color:#92400e !important; box-shadow:0 0 0 2px #fcd34d !important; }
+[data-bk]:not(.nb-card).bk-over{ background:#fef2f2 !important; border-color:#ef4444 !important; color:#991b1b !important; box-shadow:0 0 0 2px #fca5a5 !important; }
 [data-bk].bk-tile.bk-warn{ background:#d97706 !important; color:#fff !important; box-shadow:0 10px 24px -6px rgba(217,119,6,.5) !important; }
 [data-bk].bk-tile.bk-over{ background:#dc2626 !important; color:#fff !important; box-shadow:0 10px 24px -6px rgba(220,38,38,.5) !important; }
-[data-bk].bk-warn::after, [data-bk].bk-over::after{ content:attr(data-bk-tag); position:absolute; z-index:20; top:8px; left:50%; transform:translateX(-50%); font-size:10px; font-weight:900; letter-spacing:.04em; padding:2px 8px; border-radius:99px; white-space:nowrap; color:#fff; }
-[data-bk].bk-warn::after{ background:#d97706; }
-[data-bk].bk-over::after{ background:#dc2626; }
+[data-bk]:not(.nb-card).bk-warn::after, [data-bk]:not(.nb-card).bk-over::after{ content:attr(data-bk-tag); position:absolute; z-index:20; top:8px; left:50%; transform:translateX(-50%); font-size:10px; font-weight:900; letter-spacing:.04em; padding:2px 8px; border-radius:99px; white-space:nowrap; color:#fff; }
+[data-bk]:not(.nb-card).bk-warn::after{ background:#d97706; }
+[data-bk]:not(.nb-card).bk-over::after{ background:#dc2626; }
 [data-bk].bk-tile.bk-warn::after, [data-bk].bk-tile.bk-over::after{ background:rgba(0,0,0,.25); }
 #bell-modal .bell-new-tag{ background:#ef4444; color:#fff; font-size:9px; font-weight:900; padding:2px 7px; border-radius:99px; letter-spacing:.05em; margin-left:6px; vertical-align:middle; }
+</style>
+<style>
+/* [GIAO DIỆN BED 16/10] Màn Bed (PC + điện thoại) mặc phong cách thẻ điểm bán của manage.html — GIỮ NGUYÊN bố cục, kích thước,
+   id, nút và màu trạng thái cũ; chỉ đổi nền / viền / chữ. Màu thẻ = biến --c (đặt bằng class k-*), mọi màu khác pha từ --c.
+   Thẻ list: nb-*  ·  khung chi tiết PC + khối chi tiết điện thoại: nd-*, wg  ·  riêng điện thoại: mn-*.
+   CSS này nằm SAU CSS Tailwind CDN (chèn ở <head>) → class nào đặt display phải nhường .hidden (luật cuối khối). */
+:root{
+  --bd-panel:#ffffff; --bd-ink:#202c27; --bd-sub:#738078; --bd-muted:#53655a; --bd-line:#e7ece7; --bd-fill:#f4f6f3;
+  /* màu trạng thái theo bản cũ */
+  --bd-tc:#006241; --bd-warn:#d97706; --bd-over:#dc2626; --bd-wait:#f59e0b; --bd-done:#9ca3af; --bd-cancel:#ef4444; --bd-idle:#94a3b8; --bd-booked:#2563eb;
+  --bd-pre:#a16207; --bd-bedc:#0369a1; --bd-bonus:#15803d; --bd-rose:#e11d48; --bd-amber:#b45309;
+}
+.nb-card,.wg,.nd{--c:var(--bd-tc);--ct:color-mix(in srgb,var(--c) 84%,#111827);color:var(--bd-ink)}
+.nb-card,.wg{border-color:color-mix(in srgb,var(--c) 16%,var(--bd-panel));
+  background:radial-gradient(ellipse at 12% 0%,color-mix(in srgb,var(--c) 22%,var(--bd-panel)),transparent 86%),color-mix(in srgb,var(--c) 7%,var(--bd-panel));
+  box-shadow:inset 0 1px 0 #ffffff80,0 4px 14px color-mix(in srgb,var(--c) 8%,transparent)}
+.wg{border:1px solid color-mix(in srgb,var(--c) 16%,var(--bd-panel))}
+.nb-card:hover{box-shadow:inset 0 1px 0 #ffffff80,0 8px 20px color-mix(in srgb,var(--c) 16%,transparent)}
+.k-active{--c:var(--bd-tc)}.k-wait{--c:var(--bd-wait)}.k-idle{--c:var(--bd-idle);--dot:var(--bd-wait)}.k-done{--c:var(--bd-done)}.k-cancel{--c:var(--bd-cancel)}.k-booked{--c:var(--bd-booked)}
+.nb-label{color:var(--ct);letter-spacing:.12em}
+.nb-dot{background:var(--dot,var(--c))}
+.nb-dot.pulse,.nd-badge.pulse i,.mn-live i{animation:bdPulse 1.8s ease-out infinite}
+@keyframes bdPulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,currentColor 55%,transparent)}100%{box-shadow:0 0 0 7px transparent}}
+.nb-dot.pulse{color:var(--c)}
+.nb-name{color:var(--bd-ink);font-weight:800;letter-spacing:-.2px}
+.nb-card.is-faded .nb-name{color:var(--bd-sub)}
+.nb-time{color:var(--bd-muted);font-variant-numeric:tabular-nums}
+.nb-amt{background:color-mix(in srgb,var(--c) 12%,var(--bd-panel));color:var(--ct);border-radius:99px;font-weight:800}
+.nb-chip{--k:var(--bd-pre);display:inline-flex;align-items:center;gap:4px;border-radius:99px;padding:3px 8px;font-size:.6rem;font-weight:800;
+  background:color-mix(in srgb,var(--k) 11%,var(--bd-panel));color:var(--k);border:1px solid color-mix(in srgb,var(--k) 24%,var(--bd-panel))}
+.nb-chip.bed{--k:var(--bd-bedc)}.nb-chip.bonus{--k:var(--bd-bonus)}
+.nb-chip .material-symbols-outlined{font-size:12px}
+.nb-chip.big{font-size:11px;padding:6px 12px}.nb-chip.big .material-symbols-outlined{font-size:15px}
+.nb-card.is-muted{opacity:.75;filter:saturate(.75)}
+.nb-card.is-sel{--c:var(--bd-tc);background:var(--c);border-color:var(--c);color:#fff;box-shadow:0 14px 28px -12px color-mix(in srgb,var(--c) 75%,transparent)}
+.nb-card.is-sel .nb-label,.nb-card.is-sel .nb-name{color:#fff}
+.nb-card.is-sel .nb-label{opacity:.8}
+.nb-card.is-sel .nb-time{color:#ffffffd0}
+.nb-card.is-sel .nb-dot{background:#fff;color:#fff}
+.nb-card.is-sel .nb-amt,.nb-card.is-sel .nb-chip{background:#ffffff26;color:#fff;border-color:#ffffff40}
+/* sắp hết / quá giờ (_bedEndDecorate): đổi --c, nhãn viên thuốc ở mép trên */
+.nb-card.bk-warn{--c:var(--bd-warn)}.nb-card.bk-over{--c:var(--bd-over)}
+.nb-card.bk-warn::after,.nb-card.bk-over::after{content:attr(data-bk-tag);position:absolute;z-index:20;top:-8px;left:50%;transform:translateX(-50%);font-size:10px;font-weight:800;letter-spacing:.02em;padding:3px 10px;border-radius:99px;white-space:nowrap;color:#fff;background:var(--c);box-shadow:0 4px 10px -3px color-mix(in srgb,var(--c) 60%,transparent)}
+.nb-card.is-sel.bk-warn::after,.nb-card.is-sel.bk-over::after{background:#fff;color:var(--c)}
+
+/* Khung chi tiết PC (selectBedItem) — bo 20px khớp khung trắng ngoài (trước 2.5rem lồng trong 20px → lộ góc trắng) */
+.nd{background:radial-gradient(ellipse at 8% 0%,color-mix(in srgb,var(--c) 16%,var(--bd-panel)),transparent 62%),color-mix(in srgb,var(--c) 3%,#f6f7f5)}
+.nd-name{color:var(--bd-ink);font-weight:850;letter-spacing:-1.2px}
+.nd-sub{color:var(--ct);font-weight:850;letter-spacing:-.4px}
+.nd-edit{display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:99px;font-size:11px;font-weight:750;color:var(--ct);
+  background:color-mix(in srgb,var(--bd-panel) 75%,transparent);border:1px solid color-mix(in srgb,var(--c) 20%,var(--bd-line))}
+.nd-edit:hover{background:var(--c);color:#fff}
+.nd-edit .material-symbols-outlined{font-size:14px}
+.nd-timer{--k:var(--bd-tc);display:inline-flex;align-items:center;gap:6px;margin-left:8px;padding:4px 11px 4px 9px;border-radius:99px;
+  background:color-mix(in srgb,var(--k) 10%,var(--bd-panel));border:1px solid color-mix(in srgb,var(--k) 22%,var(--bd-panel));color:var(--k)}
+.nd-timer b{font-size:17px;font-weight:850;font-variant-numeric:tabular-nums;letter-spacing:-.4px}
+.nd-timer .material-symbols-outlined{font-size:16px}
+.nd-timer.warn{--k:var(--bd-warn)}.nd-timer.over{--k:var(--bd-over);background:var(--bd-over);color:#fff;border-color:var(--bd-over)}
+.nd-badge{display:inline-flex;align-items:center;gap:7px;padding:8px 14px 8px 12px;border-radius:99px;font-size:12.5px;font-weight:800;white-space:nowrap;color:var(--ct);
+  background:color-mix(in srgb,var(--bd-panel) 75%,transparent);border:1px solid color-mix(in srgb,var(--c) 20%,var(--bd-line))}
+.nd-badge i{width:8px;height:8px;border-radius:50%;background:currentColor}
+.nd-tile{background:var(--bd-panel);border:1px solid var(--bd-line);box-shadow:0 3px 12px -8px #18332424,0 1px 2px #18332404}
+.nd-lab{font-size:12px;font-weight:650;color:var(--bd-sub);line-height:1.4}
+.nd-val{color:var(--bd-ink);font-weight:800;letter-spacing:-.4px;font-variant-numeric:tabular-nums}
+.nd-ok{color:var(--bd-tc)}
+.nd-time{color:var(--ct);font-weight:850;letter-spacing:-1px;font-variant-numeric:tabular-nums}
+.nd-arrow{color:color-mix(in srgb,var(--c) 40%,var(--bd-line))}
+.nd-meta{color:var(--bd-sub)}.nd-meta b{color:var(--bd-ink);font-weight:800}
+.nd-out{background:var(--bd-fill);border:1px solid var(--bd-line)}
+.nd-spend{background:radial-gradient(ellipse at 0% 0%,color-mix(in srgb,var(--bd-tc) 14%,var(--bd-panel)),transparent 80%),var(--bd-panel);border:1px solid color-mix(in srgb,var(--bd-tc) 16%,var(--bd-panel))}
+.nd-spend .big{color:var(--bd-tc);font-weight:850;letter-spacing:-1.2px;font-variant-numeric:tabular-nums}
+.nd-round{background:color-mix(in srgb,var(--bd-tc) 10%,var(--bd-panel));color:var(--bd-tc)}
+.nd-dash{border-top:1px dashed color-mix(in srgb,var(--bd-tc) 22%,var(--bd-panel))}
+.nd-chipbtn{--k:var(--bd-muted);display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:99px;font-size:11.5px;font-weight:750;position:relative;
+  background:color-mix(in srgb,var(--k) 8%,var(--bd-panel));color:var(--k);border:1px solid color-mix(in srgb,var(--k) 20%,var(--bd-panel))}
+.nd-chipbtn.amber{--k:var(--bd-amber)}
+.nd-chipbtn .material-symbols-outlined{font-size:16px}
+.bd-cnt{position:absolute;top:-6px;right:-6px;width:17px;height:17px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:9.5px;font-weight:850;color:#fff;background:#ef4444}
+.nd-hero{background:var(--bd-tc);color:#fff;box-shadow:0 10px 24px -14px #15352699}
+.nd-hero .big{font-weight:850;letter-spacing:-1.4px;font-variant-numeric:tabular-nums}
+.nd-pen{background:color-mix(in srgb,var(--bd-over) 7%,var(--bd-panel));border:1px solid color-mix(in srgb,var(--bd-over) 18%,var(--bd-panel))}
+.nd-pen-ic{background:color-mix(in srgb,var(--bd-over) 12%,var(--bd-panel));color:var(--bd-over)}
+.nd-pen .amt{color:var(--bd-over);font-weight:850}
+.nd-addpen{background:var(--bd-panel);border:1.5px dashed var(--bd-line)}
+.nd-addpen:hover{border-color:color-mix(in srgb,var(--bd-over) 35%,var(--bd-panel))}
+.nd-btn{--k:var(--bd-tc);display:flex;align-items:center;justify-content:center;gap:8px;font-weight:800;font-size:13.5px;letter-spacing:-.1px;transition:transform .15s}
+.nd-btn:active{transform:scale(.97)}
+.nd-btn .material-symbols-outlined{font-size:19px}
+.nd-btn.soft{background:color-mix(in srgb,var(--k) 8%,var(--bd-panel));color:var(--k);border:1px solid color-mix(in srgb,var(--k) 24%,var(--bd-panel))}
+.nd-btn.soft:hover{background:color-mix(in srgb,var(--k) 14%,var(--bd-panel))}
+.nd-btn.solid{background:var(--k);color:#fff;box-shadow:0 8px 18px -10px color-mix(in srgb,var(--k) 80%,transparent)}
+.nd-btn.plain{background:var(--bd-fill);color:var(--bd-ink);border:1px solid var(--bd-line)}
+.nd-btn.amber{--k:var(--bd-amber)}.nd-btn.red{--k:var(--bd-over)}
+.nd-bar{background:color-mix(in srgb,var(--bd-panel) 92%,transparent);border:1px solid var(--bd-line);box-shadow:0 8px 24px -10px #1833242e}
+
+/* Điện thoại (renderMobileBedList, _showMobileBedDetailRender, renderDetailContentMobile) */
+.mn-eyebrow{color:var(--bd-sub);letter-spacing:.14em}
+.mn-h1{color:var(--bd-ink);font-weight:850;letter-spacing:-1px}
+.mn-date{background:color-mix(in srgb,var(--bd-tc) 8%,var(--bd-panel));border:1px solid color-mix(in srgb,var(--bd-tc) 18%,var(--bd-panel));color:var(--bd-tc)}
+.mn-fab{background:var(--bd-tc);color:#fff;box-shadow:0 18px 30px -14px color-mix(in srgb,var(--bd-tc) 85%,transparent)}
+.mn-nav-btn{background:var(--bd-panel);border:1px solid var(--bd-line);color:var(--bd-ink);box-shadow:0 2px 10px #0000000d}
+.mn-nav-btn.amber{background:color-mix(in srgb,var(--bd-warn) 9%,var(--bd-panel));border-color:color-mix(in srgb,var(--bd-warn) 24%,var(--bd-panel));color:var(--bd-warn)}
+.mn-title{color:var(--bd-ink);font-weight:850;letter-spacing:-.4px}
+.mn-timebox{background:color-mix(in srgb,var(--bd-panel) 78%,transparent);border:1px solid color-mix(in srgb,var(--c) 14%,var(--bd-panel))}
+.mn-real{color:var(--bd-rose)!important}
+.mn-live{--k:var(--bd-tc);display:inline-flex;align-items:center;gap:6px;padding:5px 11px 5px 9px;border-radius:99px;font-size:11.5px;font-weight:800;
+  background:color-mix(in srgb,var(--k) 10%,var(--bd-panel));color:var(--k);border:1px solid color-mix(in srgb,var(--k) 22%,var(--bd-panel))}
+.mn-live i{width:7px;height:7px;border-radius:50%;background:currentColor}
+.mn-live.warn{--k:var(--bd-warn);background:var(--bd-warn);color:#fff;border-color:var(--bd-warn)}
+.mn-live.over{--k:var(--bd-over);background:var(--bd-over);color:#fff;border-color:var(--bd-over)}
+.mn-digits{font-weight:850;font-variant-numeric:tabular-nums;letter-spacing:-1px}
+.mn-src{display:inline-flex;align-items:center;gap:4px;color:var(--bd-sub);font-weight:650}
+.mn-src .material-symbols-outlined{font-size:14px}
+.mn-owe{background:color-mix(in srgb,var(--bd-warn) 10%,var(--bd-panel));color:var(--bd-warn);border:1px solid color-mix(in srgb,var(--bd-warn) 24%,var(--bd-panel))}
+
+/* .hidden (Tailwind) phải thắng các class trên dù CSS này nạp sau */
+.nb-card.hidden,.nb-chip.hidden,.nd-timer.hidden,.nd-badge.hidden,.nd-edit.hidden,.nd-btn.hidden,.nd-chipbtn.hidden,.bd-cnt.hidden,.mn-live.hidden,.mn-src.hidden{display:none!important}
+@media(prefers-reduced-motion:reduce){.nb-dot.pulse,.nd-badge.pulse i,.mn-live i{animation:none}}
 </style>
 <div id="bell-modal" class="hidden fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onclick="if(event.target===this) bellClose()">
   <div class="bg-[#F2F2F7] w-full max-w-[400px] max-h-[85vh] rounded-3xl shadow-2xl overflow-hidden flex flex-col animate-bed-pop">
@@ -14032,7 +14099,9 @@ function _bedEndDecorate() {
         el.classList.toggle('bk-over', over);
         if (warn || over) {
             if (getComputedStyle(el).position === 'static') el.style.position = 'relative';
-            el.setAttribute('data-bk-tag', over ? ('QUÁ ' + (-left) + ' PHÚT') : (left === 0 ? 'HẾT GIỜ' : 'CÒN ' + left + ' PHÚT'));
+            var tag = over ? ('QUÁ ' + (-left) + ' PHÚT') : (left === 0 ? 'HẾT GIỜ' : 'CÒN ' + left + ' PHÚT');
+            if (el.classList.contains('nb-card')) tag = tag.charAt(0) + tag.slice(1).toLowerCase();   // thẻ list phong cách mới
+            el.setAttribute('data-bk-tag', tag);
         } else el.removeAttribute('data-bk-tag');
     });
 }
