@@ -212,10 +212,10 @@ Nút "Cập nhật" ở sidebar (`manualCheckUpdate`, dựa trên service worker
 <script src="https://cdn.jsdelivr.net/npm/bcryptjs@2.4.3/dist/bcrypt.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
 <!-- [E1] Unit Engine — nạp TRƯỚC script chính. Đổi phiên bản = đổi tên file (6.1). -->
-<script src="data_access.v8.js"></script>
+<script src="data_access.v9.js"></script>
 <!-- [TỰ PHỤC HỒI] Nạp file lần đầu thất bại (404 bị trình duyệt NHỚ vì header immutable khi HTML lên site trước file JS, hoặc mạng chập)
      → nạp lại ĐÚNG MỘT LẦN bằng địa chỉ khác (?r=1 — khác khoá cache) trước khi script chính chạy. Không đổi tên file / không cần deploy lại. (Viết '<scr'+'ipt' để tools/predeploy_check không đếm nhầm thành thẻ thứ hai; có id để các công cụ quét — chỉ lấy khối script TRẦN (không thuộc tính) đầu tiên làm script chính — không lấy nhầm.) -->
-<script id="gdRetry">if(!window.GieoData){document.write('<scr'+'ipt src="data_access.v8.js?r=1"><\/scr'+'ipt>');}</script>
+<script id="gdRetry">if(!window.GieoData){document.write('<scr'+'ipt src="data_access.v9.js?r=1"><\/scr'+'ipt>');}</script>
 <script src="che_do_thu.v1.js?b=96d7f20f91"></script>
 <script src="unit_engine.v18.js?b=f1f1381586"></script>
 <script id="ueRetry">if(!window.UnitEngine){document.write('<scr'+'ipt src="unit_engine.v18.js?r=1"><\/scr'+'ipt>');}</script>
@@ -2361,7 +2361,7 @@ GieoThu.install({ app: 'pos', firebase, db, fstore });   // [BẢN THỬ] mọi 
 // Cửa hàng). Nhập MỘT lần, máy tự nhớ (localStorage 'gieo_store_v1') — các lần mở app sau vào thẳng bán hàng,
 // KHÔNG hỏi lại mã, kể cả khi Quản lý đổi mã (chủ dự án chốt 05/10: không làm chậm bán hàng).
 // Máy CHƯA gắn → màn nhập mã, app DỪNG (không đọc / ghi dữ liệu quán nào; không bao giờ tự gắn quán).
-// Lớp đường dẫn (data_access.v8.js): quán 'gg01' → mọi tên giữ NGUYÊN như trước; quán khác → dữ liệu riêng.
+// Lớp đường dẫn (data_access.v9.js): quán 'gg01' → mọi tên giữ NGUYÊN như trước; quán khác → dữ liệu riêng.
 // Thiếu file data_access (mạng chập lúc tải): máy gắn gg01 → chạy tiếp như cũ (không bọc cũng y hệt);
 // máy gắn quán khác / chưa gắn → báo đỏ + tự tải lại (chạy không bọc = ghi nhầm vào dữ liệu GG01).
 // Bản thử (*_thu.html — che_do_thu): mặc định vùng thử của GG01, không cần mã; "Thử cửa hàng khác" ở sidebar đăng nhập
@@ -2374,23 +2374,23 @@ const POS_STORE = POS_THU
   ? Object.assign({ storeId: 'gg01', name: 'Bản thử', address: 'Vùng thử — chép từ dữ liệu cửa hàng GG01' }, _posBind || {}, { thu: true })
   : _posBind;
 if (window.GieoData) GieoData.install({ fstore, db, storeId: POS_STORE ? POS_STORE.storeId : null });
-else if (POS_STORE && POS_STORE.storeId === 'gg01') console.error('[GieoData] không nạp được data_access.v8.js — máy gắn GG01: chạy tiếp với đường dẫn cũ');
+else if (POS_STORE && POS_STORE.storeId === 'gg01') console.error('[GieoData] không nạp được data_access.v9.js — máy gắn GG01: chạy tiếp với đường dẫn cũ');
 else {
   const bar = document.createElement('div');
   bar.style.cssText = 'position:fixed;inset:0;z-index:2147483000;background:#c0392b;color:#fff;font:700 16px sans-serif;padding:30px;text-align:center';
-  bar.innerHTML = '⚠️ Chưa tải được data_access.v8.js<div id="gdChanDoan" style="font:600 15px sans-serif;margin:16px auto 0;max-width:520px;line-height:1.6">Đang kiểm tra máy chủ…</div>'
+  bar.innerHTML = '⚠️ Chưa tải được data_access.v9.js<div id="gdChanDoan" style="font:600 15px sans-serif;margin:16px auto 0;max-width:520px;line-height:1.6">Đang kiểm tra máy chủ…</div>'
     + '<button onclick="location.reload()" style="margin-top:18px;padding:12px 26px;border:0;border-radius:12px;font:800 15px sans-serif;background:#fff;color:#c0392b">Tải lại</button>';
   (document.body || document.documentElement).appendChild(bar);
   // Hỏi thẳng máy chủ để biết lý do THẬT (404 = file chưa có trong thư mục deploy; mạng; hay trình duyệt không chạy được).
   let _gdTuTai = true;
   const _gdGhi = t => { const d = document.getElementById('gdChanDoan'); if (d) d.textContent = t; };
-  fetch('data_access.v8.js?chandoan=' + Date.now(), { cache: 'no-store' }).then(r => {
-    if (r.status === 404) { _gdTuTai = false; _gdGhi('Máy chủ báo 404 — file data_access.v8.js CHƯA có trên site. Chép file vào thư mục deploy, chạy lại firebase deploy, rồi bấm Tải lại.'); }
+  fetch('data_access.v9.js?chandoan=' + Date.now(), { cache: 'no-store' }).then(r => {
+    if (r.status === 404) { _gdTuTai = false; _gdGhi('Máy chủ báo 404 — file data_access.v9.js CHƯA có trên site. Chép file vào thư mục deploy, chạy lại firebase deploy, rồi bấm Tải lại.'); }
     else if (r.ok) _gdGhi('Máy chủ có file (HTTP ' + r.status + ') nhưng trình duyệt không chạy được — thử xoá dữ liệu trang / bộ nhớ đệm của app rồi mở lại; nếu vẫn lỗi, so sánh file trên site với bản gốc (có thể bị cắt dở khi chép).');
     else _gdGhi('Máy chủ trả về HTTP ' + r.status + ' cho file này.');
   }).catch(() => _gdGhi('Không kết nối được máy chủ (mạng?) — tự thử lại sau vài giây.'));
   setTimeout(() => { if (_gdTuTai) location.reload(); }, 8000);
-  throw new Error('[GieoData] thiếu data_access.v8.js — dừng app');
+  throw new Error('[GieoData] thiếu data_access.v9.js — dừng app');
 }
 if (!POS_STORE) { posStoreLoginScreen(); throw new Error('[ĐA CỬA HÀNG] máy chưa đăng nhập cửa hàng — app dừng, chờ nhập mã'); }
 // [ĐA CỬA HÀNG] Dữ liệu lưu trên máy (localStorage) gắn với MỘT quán: cache cấu hình in của quán, việc dở (quét NL nấu,
@@ -29084,5 +29084,7 @@ assistLoadLocalCache();
   }, true);
 })();
 </script>
+<!-- [GẤU NOEL 2026] quay trúng gấu Giáng sinh — bật/tắt ở pos.html › Quản lý › Gấu Noel. Hết đợt: xem hướng dẫn gỡ đầu file gau_noel_giangsinh.v1.js -->
+<script src="gau_noel_giangsinh.v1.js" data-quan="gieo"></script>
 </body>
 </html>

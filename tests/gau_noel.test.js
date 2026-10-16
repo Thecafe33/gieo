@@ -5,6 +5,7 @@ delete require.cache[require.resolve('../gau_noel_giangsinh.v1.js')];
 const G = require('../gau_noel_giangsinh.v1.js');
 const at = iso => Date.parse(iso + '+07:00');
 const setNow = iso => G._setOffset(at(iso) - Date.now());
+G.apCfg({ bat: true });   // phần thuần + giao dịch: coi như đã bật (công tắc test riêng bên dưới)
 const near = (a, b) => Math.abs(a - b) < 1e-9;
 const seq = arr => { const a = arr.slice(); return () => (a.length ? a.shift() : 0.999); };
 
@@ -101,6 +102,19 @@ chk(/^GAU[A-HJ-NP-Z2-9]{5}$/.test(G.maNhan(Math.random)) && G.normPhone('+84 912
 (async () => {
   const f = makeFake();
   G.init({ fstore: f.fstore, FieldValue: f.FieldValue });
+  // công tắc: tắt = không gì chạy; bật + ngày bắt đầu lưu ở _cfg
+  setNow('2026-11-25T10:00:00');
+  G.apCfg(null);
+  chk(!G.dangMua() && !G.dangNhan() && !G.dangBat(), 'mặc định TẮT: không bốc, không mở lượt, không đổi quà');
+  let x0 = await G.boc({ store: 'gg01', sdt: '0912345678', bill: 'bz', ly: 6, tienNuoc: 200000 });
+  chk(x0.soLuot === 0 && !f.FS['gau_noel_2026/0912345678'], 'tắt: thanh toán không ghi gì');
+  let eb = null; try { await G.datCfg({ batDau: '2026-12-24' }); } catch (er) { eb = er.message; }
+  chk(eb === 'ngay', 'ngày bắt đầu sau 23/12 → từ chối');
+  await G.datCfg({ bat: true, batDau: '2026-10-20', by: 'test' });
+  chk(G.dangBat() && G.CFG.batDau === '2026-10-20' && f.FS['gau_noel_2026_kho/_cfg'].bat === true, 'BẬT + đổi ngày bắt đầu (ghi _cfg)');
+  setNow('2026-10-21T10:00:00'); chk(G.dangMua() && G.chang('2026-10-21').w === 'W0', 'bắt đầu sớm 20/10: 21/10 đã nhận lượt (tuần mở màn)');
+  await G.datCfg({ batDau: G.BAT_DAU_GOC }); chk(G.CFG.batDau === '2026-11-15', 'trả ngày bắt đầu 15/11');
+  await G.docCfg(); chk(G.dangBat(), 'đọc lại _cfg: vẫn bật');
   const P = '0912345678', D = () => f.FS['gau_noel_2026/' + P], K = s => f.FS['gau_noel_2026_kho/' + s];
   setNow('2026-11-10T10:00:00');
   let x = await G.boc({ store: 'gg01', sdt: P, bill: 'b0', ly: 2, tienNuoc: 50000 });
@@ -109,6 +123,7 @@ chk(/^GAU[A-HJ-NP-Z2-9]{5}$/.test(G.maNhan(Math.random)) && G.normPhone('+84 912
   x = await G.boc({ store: 'gg01', sdt: P, bill: 'b1', ly: 2, tienNuoc: 50000 });
   chk(x.loi === 'chua-co-kho' && !D(), 'quán chưa nhập kho: không bốc, không ghi');
   await G.luuKho('gg01', capDeu(5), 50); await G.luuKho('xofa', capDeu(5), 50);
+  chk(Object.keys(await G.docKho()).sort().join() === 'gg01,xofa', 'đọc kho: bỏ doc công tắc _cfg');
   x = await G.boc({ store: 'gg01', sdt: P, bill: 'b1', ly: 2, tienNuoc: 50000 }, seq([0.05, 0.1, 0.2, 0.3, 0.4, 0.5]));
   const code = x.luot[0].code;
   chk(x.soLuot === 1 && x.trung === 1 && /^GAU/.test(code) && D().qua[code].store === 'gg01' && K('gg01').phat === 1 && K('gg01').dung.W1.v45 === 1, 'thanh toán: bốc trong 1 giao dịch — lượt + mã ghi vào khách, trừ kho quán');
@@ -141,6 +156,6 @@ chk(/^GAU[A-HJ-NP-Z2-9]{5}$/.test(G.maNhan(Math.random)) && G.normPhone('+84 912
   chk(tk.khach === 1 && tk.nhan === 1, 'thống kê');
   e = null; try { await G.xoaHet('0000'); } catch (er) { e = er.message; } chk(e === 'sai-ma' && D(), 'xoá hết: sai mã → không xoá');
   const n = await G.xoaHet('2512');
-  chk(n === 3 && !D() && !K('gg01') && !K('xofa'), 'xoá hết dữ liệu chương trình (khách + kho)');
+  chk(n === 4 && !D() && !K('gg01') && !K('xofa') && !K('_cfg'), 'xoá hết dữ liệu chương trình (khách + kho + công tắc)');
   console.log(ok ? 'ALL PASS' : 'SOME FAIL'); if (!ok) process.exit(1);
 })().catch(e => { console.log('FAIL ' + e.stack); process.exit(1); });
