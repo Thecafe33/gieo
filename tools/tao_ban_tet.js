@@ -13,6 +13,7 @@
 const fs = require('fs'); const path = require('path');
 const ROOT = path.resolve(__dirname, '..');
 const LIXI = 'lixi.v1.js';
+const { boGauNoel } = require('./gau_noel/bo_gau.js');   // bản Tết không chạy Gấu Noel (Giáng sinh đã hết)
 const rd = f => fs.readFileSync(path.join(ROOT, f), 'utf8');
 
 function thayDung1(h, tim, moi, ten, nguon) {
@@ -29,14 +30,14 @@ function ganLixi(h, glueFile, nguon) {
 }
 
 function taoPosTet(src) {
-  let h = ganLixi(src, 'pos_lixi.js', 'pos.html');
+  let h = ganLixi(boGauNoel(src), 'pos_lixi.js', 'pos.html');
   // đơn lưu thành công (cả luồng bed finalizeBedCheckIn) → đánh dấu mã đã dùng + cộng lượt mở
   const neo = "const normalizedSdt = (typeof normalizePhone === 'function') ? normalizePhone(finalSdt) : finalSdt;";
   h = thayDung1(h, neo, neo + "\n            if (window.lixiAfterPaid) { try { window.lixiAfterPaid(normalizedSdt, finalSdt, orderData); } catch (e) { console.warn('[lì xì]', e); } }",
     '_pushPaidOrder: normalizedSdt', 'pos.html');
   return h;
 }
-function taoPosXTet(src) { return ganLixi(src, 'posx_lixi.js', 'PosX.html'); }
+function taoPosXTet(src) { return ganLixi(boGauNoel(src), 'posx_lixi.js', 'PosX.html'); }
 
 let taoIndexTet = null;
 try { taoIndexTet = require('./tet/index_tet.js').taoIndexTet; } catch (e) { if (e.code !== 'MODULE_NOT_FOUND') throw e; }

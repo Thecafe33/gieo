@@ -15,8 +15,10 @@ const pos = rd('pos_tet.html'), posx = rd('PosX_tet.html'), idx = rd('index_tet.
 chk(/<script src="lixi\.v1\.js"><\/script>/.test(pos) && /<script src="lixi\.v1\.js"><\/script>/.test(posx) && /<script src="lixi\.v1\.js"><\/script>/.test(idx), 'cả 3 bản nạp lixi.v1.js');
 chk(!/lixi\.v\d+\.js/.test(rd('pos.html') + rd('PosX.html') + rd('index.html')), 'bản bình thường KHÔNG có lì xì');
 const posBo = boChen(pos).replace(/\n            if \(window\.lixiAfterPaid\) \{[^\n]*\n/, '\n');
-chk(posBo === rd('pos.html'), 'pos_tet = pos.html + phần chèn (không sửa / xoá gì)');
-chk(boChen(posx) === rd('PosX.html'), 'PosX_tet = PosX.html + phần chèn (không sửa / xoá gì)');
+const { boGauNoel } = require('../tools/gau_noel/bo_gau.js');   // bản Tết bỏ thẻ Gấu Noel 2026 (Giáng sinh đã hết)
+chk(posBo === boGauNoel(rd('pos.html')), 'pos_tet = pos.html (bỏ Gấu Noel) + phần chèn (không sửa / xoá gì khác)');
+chk(boChen(posx) === boGauNoel(rd('PosX.html')), 'PosX_tet = PosX.html (bỏ Gấu Noel) + phần chèn (không sửa / xoá gì khác)');
+chk(!/gau_noel_giangsinh/.test(pos + posx + idx), 'bản Tết KHÔNG nạp Gấu Noel');
 chk(/lixiAfterPaid\(normalizedSdt, finalSdt, orderData\)/.test(pos), 'pos_tet: móc sau khi đơn lưu thành công (_pushPaidOrder)');
 
 // index: ngoài phần chèn chỉ khác mã màu; khối Bé Gạo được thay riêng (dê) — so phần còn lại

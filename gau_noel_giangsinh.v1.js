@@ -28,7 +28,8 @@
  *        c. Bấm «Xoá dữ liệu Gấu Noel…», nhập mã 2512 → xoá hết gau_noel_2026 (khách, lượt, mã) + gau_noel_2026_kho (kho, công tắc)
  *           + Realtime gau_noel_2026_kiosk (màn hình phụ).
  *           Không đụng customers, đơn hàng, điểm, tem. Báo lỗi giữa chừng → bấm lại, xoá tiếp phần còn lại.
- *   2. Gỡ 1 thẻ <script src="gau_noel_giangsinh.v…js" …> trước </body> ở: pos.html, PosX.html, posgieo.html
+ *   2. Deploy bộ ban_deploy/thuong/ (đã bỏ sẵn thẻ Gấu Noel — xem ban_deploy/README.md). Muốn bỏ hẳn khỏi file gốc trong repo:
+ *      gỡ 1 thẻ <script src="gau_noel_giangsinh.v…js" …> trước </body> ở: pos.html, PosX.html, posgieo.html
  *      + kiosk.html (màn hình phụ XOFA)
  *      + index_giangsinh.html: đặt GAU_NOEL = '' trong tools/tao_ban_giangsinh.js rồi chạy lại node tools/tao_ban_giangsinh.js
  *        (hoặc deploy lại index.html bình thường nếu hết mùa Giáng sinh).
