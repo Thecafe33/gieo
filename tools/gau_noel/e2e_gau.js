@@ -151,24 +151,32 @@ const CHUNG = (fake) => {
     await sleep(600);
     const d = DB['gau_noel_2026/0933000111'], ls = d ? Object.values(d.luot) : [];
     chk(ls.length === 2 && ls[0].ly === 4 && ls[0].tienNuoc === 120000 && ls[0].store === 'xofa' && ls[0].bill === 'XK1', 'X1. _loyaltyAfterSave (đơn đã lưu) → 4 ly tính tiền (bỏ Food, ly tặng) = 2 lượt', ls);
-    chk(!document.getElementById('gn-ov') || document.getElementById('gn-ov').style.display !== 'flex', 'X2. XOFA không bật popup QR trên POS (QR ở màn hình phụ — chờ file)');
+    const ovx = () => document.getElementById('gn-ov'), mox = () => ovx() && ovx().style.display === 'flex';
+    chk(mox() && /Khách quay ở đâu/.test(ovx().textContent) && !(__RT2.get('gau_noel_2026_kiosk/xofa') || {}).ev, 'X2. thanh toán xong → POS hỏi «Khách quay ở đâu?», màn hình phụ CHƯA hiện gì');
+    ovx().querySelector('[data-a=nha]').click(); await sleep(200);
     Math.random = rnd;
     chk(typeof window.delOrderConfirm === 'function' && /3367/.test(String(window.delOrderConfirm)), 'X3. đã bọc delOrderConfirm (huỷ bill trả kho)');
     const K = () => __RT2.get('gau_noel_2026_kiosk/xofa') || {};
     chk(K().bat === true && K().ev && K().ev.loai === 'qr' && K().ev.soLuot === 2 && K().ev.sdt === '111', 'X4. màn hình phụ: ghi bat + sự kiện QR 2 lượt (SĐT chỉ 3 số cuối)', K());
     window.__kQr = JSON.parse(JSON.stringify(K()));
+    // đơn 2: Quay tại quán → vòng quay POS + màn hình phụ ngay
+    _loyaltyAfterSave([{ name: 'Trà sữa', price: 30000, qty: 2 }], 60000, 'XK2'); await sleep(600);
+    chk(mox() && /Khách quay ở đâu/.test(ovx().textContent), 'X4b. đơn 2 → hỏi lại');
+    ovx().querySelector('[data-a=quan]').click(); await sleep(300);
+    chk(mox() && !!ovx().querySelector('.gn-vong') && K().ev.loai === 'mo', 'X4c. «Quay tại quán» → vòng quay trên POS, màn hình phụ hiện vòng quay', K().ev);
+    ovx().querySelector('[data-a=x]').click(); await sleep(200);
     // mở lượt tại quầy từ khung khách → chiếu lên màn hình phụ
     document.getElementById('cuph').value = '0933000111'; try { renderCustomerInfo(0, 0); } catch (e) {}
     await sleep(900);
     const pn = document.getElementById('gn-panel'), bm = pn && pn.querySelector('[data-mo]');
-    chk(!!bm && /Còn 2 lượt chưa quay/.test(pn.textContent), 'X5. nhập SĐT → khung Gấu Noel có «Mở lượt» (2 lượt)', pn && pn.textContent);
+    chk(!!bm && /Còn 3 lượt chưa quay/.test(pn.textContent), 'X5. nhập SĐT → khung Gấu Noel có «Mở lượt» (3 lượt)', pn && pn.textContent);
     if (bm) { bm.click(); await sleep(100); }
     chk(K().ev && K().ev.loai === 'mo', 'X6. bấm Mở lượt → màn hình phụ hiện «Mở lượt quay»');
     const q = document.getElementById('gn-ov') && document.getElementById('gn-ov').querySelector('[data-a=quay]');
     if (q) { q.click(); await sleep(300); }
     chk(K().ev && K().ev.loai === 'quay' && K().ev.win === false && !!document.querySelector('#gn-ov .gn-vong svg'), 'X7. bấm Quay → vòng quay trên POS + màn hình phụ quay cùng kết quả');
     await sleep(5800);
-    chk(K().ev && K().ev.loai === 'ketqua' && K().ev.conLai === 1, 'X8. kết quả → màn hình phụ hiện kết quả, còn 1 lượt', K().ev);
+    chk(K().ev && K().ev.loai === 'ketqua' && K().ev.conLai === 2, 'X8. kết quả → màn hình phụ hiện kết quả, còn 2 lượt', K().ev);
     window.__kKq = JSON.parse(JSON.stringify(K()));
     return R;
   }, [fake, CHUNG.toString()]).catch(async e => (await p.evaluate(() => window.__R || []).catch(() => [])).concat(['FAIL dừng giữa chừng: ' + e.message.split('\n')[0]]));
@@ -192,7 +200,7 @@ const CHUNG = (fake) => {
     await db.ref('session_display_xolifa').set({ state: 'ordering', cart: [{ name: 'Trà', qty: 1, price: 30000 }], total: 30000 }); await sleep(100);
     chk(!$('gn-k').classList.contains('on') && $('orders-list').style.display !== 'none', 'K5. khách sau bắt đầu order → thu QR, hiện lại giỏ hàng');
     await db.ref('gau_noel_2026_kiosk/xofa').set(now(kKq)); await sleep(150);
-    chk($('gn-k').classList.contains('on') && /Còn 1 lượt/.test($('gn-k').textContent) && $('gn-k').querySelector('.gn-vong'), 'K6. chiếu kết quả «Mở lượt tại quầy» (vòng quay + kết quả)', $('gn-k').textContent);
+    chk($('gn-k').classList.contains('on') && /Còn 2 lượt/.test($('gn-k').textContent) && $('gn-k').querySelector('.gn-vong'), 'K6. chiếu kết quả «Mở lượt tại quầy» (vòng quay + kết quả)', $('gn-k').textContent);
     await db.ref('gau_noel_2026_kiosk/xofa').set(now({ bat: true, ev: { loai: 'mo', sdt: '111' } })); await sleep(150);
     await db.ref('gau_noel_2026_kiosk/xofa').set(now({ bat: true, ev: { loai: 'quay', sdt: '111', win: true } })); await sleep(300);
     const kx = /rotate\(([-\d.]+)deg\)/.exec($('gn-k').querySelector('.gn-vong svg').style.transform);

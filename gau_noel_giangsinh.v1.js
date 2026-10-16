@@ -446,7 +446,7 @@
  * Chỉ BỌC hàm sẵn có của app — không sửa code bên trong app. App đổi tên hàm → phần gắn tự bỏ qua (cảnh báo console).
  *   tc33 (pos.html):    _pushPaidOrder + clearDebtAfterPayment (chỉ chạy khi đơn lưu thành công) → bốc → popup QR;
  *                       checkSdtLive / resetPhoneInput → khung Gấu Noel (Đổi quà, Mở lượt tại quầy); tab Quản lý «Gấu Noel».
- *   xofa (PosX.html):   _loyaltyAfterSave → bốc; renderCustomerInfo / clearCustomer → khung; delOrderConfirm → huỷ bill.
+ *   xofa (PosX.html):   _loyaltyAfterSave → bốc → hỏi «Quay tại quán / Quét mã» (màn hình phụ: vòng quay hoặc QR); renderCustomerInfo / clearCustomer → khung; delOrderConfirm → huỷ bill.
  *   gieo (posgieo.html): assistFinalizeOrder → bốc; POSPrinter.autoPrintIfEnabled → hỏi «Quay tại quán / Quét mã ở nhà» trước khi in;
  *                       buildReceiptContent / renderReceiptCanvas → QR cuối bill (bỏ khi quay tại quán);
  *                       renderCustomerInfo / clearCustomer → khung; delOrderConfirm → huỷ bill.
@@ -605,6 +605,24 @@
     };
   }
 
+  /** «Khách quay ở đâu?» (Gieo trước khi in bill · XOFA trước khi hiện QR màn hình phụ). chon(taiQuan) gọi đúng 1 lần;
+   *  Quay tại quán → giữ popup (chon mở vòng quay); 15 giây không chọn → quét mã. */
+  function popupNoiQuay(L, moTaQuan, moTaNha, chon) {
+    var con = 15, t = null, daChon = false;
+    var o = ov('<h3>🎄 Khách có ' + L + ' lượt quay gấu</h3><p>Khách quay ở đâu?</p>' +
+      '<div class="gn-acts" style="flex-direction:column;align-items:stretch">' +
+      '<button class="gn-btn" data-a="quan" style="padding:16px;font-size:16px">🎡 Quay tại quán<br><small style="font-weight:600;opacity:.85">' + moTaQuan + '</small></button>' +
+      '<button class="gn-btn gn-g" data-a="nha" style="padding:16px;font-size:16px">📱 Quét mã ở nhà<br><small style="font-weight:600;opacity:.85">' + moTaNha + ' · <span data-dem>15</span>s</small></button></div>');
+    var lam = function (taiQuan) {
+      if (daChon) return; daChon = true; clearInterval(t);
+      if (taiQuan) { var p = o.querySelector('p'); if (p) p.textContent = 'Đang mở vòng quay…'; } else dongOv();
+      chon(taiQuan);
+    };
+    o.querySelector('[data-a=quan]').onclick = function () { lam(true); };
+    o.querySelector('[data-a=nha]').onclick = function () { lam(false); };
+    t = setInterval(function () { con--; var d = o.querySelector('[data-dem]'); if (d) d.textContent = String(con); if (con <= 0) lam(false); }, 1000);
+  }
+
   // ── khung Gấu Noel cạnh ô SĐT: quà chưa nhận + Đổi quà + lượt chưa quay ──
   var panel = document.createElement('div'); panel.id = 'gn-panel';
   var neo = APP === 'tc33' ? ($('gift-panel') || $('sdt-status')) : $('voucherList');
@@ -657,6 +675,12 @@
     if (!kq || !kq.soLuot) { if (kq && kq.loi === 'chua-co-kho') console.warn('[gấu] quán ' + store() + ' chưa nhập kho — tab Quản lý pos'); return; }
     if (APP === 'tc33') popupQR(sdt, kq.soLuot);
     else if (APP === 'gieo') { /* Gieo: popup «Khách quay ở đâu?» trước khi in bill lo phần báo */ }
+    else if (APP === 'xofa') {   // [16/10] hỏi nơi quay: tại quán → vòng quay POS + màn hình phụ; ở nhà → QR trên màn hình phụ
+      popupNoiQuay(kq.soLuot, 'vòng quay trên POS + màn hình phụ', 'QR hiện trên màn hình phụ', function (taiQuan) {
+        if (taiQuan) moTaiQuay(sdt);
+        else phat('qr', { sdt: sdt, soLuot: kq.soLuot });
+      });
+    }
     else { toast('🧸 Khách có ' + kq.soLuot + ' lượt quay gấu Noel — quét QR để quay'); phat('qr', { sdt: sdt, soLuot: kq.soLuot }); }
   }
   function chayBoc(don) {
@@ -763,27 +787,16 @@
     //   Quay tại quán → bill KHÔNG in QR (tiết kiệm giấy), mở vòng quay ngay trên POS (giỏ trống thì không vào được ô SĐT nữa);
     //   Quét mã ở nhà → bill in QR như cũ. Không chọn trong 15 giây → coi như quét mã ở nhà (bill không bị treo).
     function hoiNoiQuay(order, xong) {
-      var L = G.soLuot(demLy(order.itemsArray, laNuocGieo).ly), sdt = G.normPhone(order.phone), con = 15, t = null, daChon = false;
-      var o = ov('<h3>🎄 Khách có ' + L + ' lượt quay gấu</h3><p>Khách quay ở đâu?</p>' +
-        '<div class="gn-acts" style="flex-direction:column;align-items:stretch">' +
-        '<button class="gn-btn" data-a="quan" style="padding:16px;font-size:16px">🎡 Quay tại quán<br><small style="font-weight:600;opacity:.85">vòng quay hiện trên POS · bill không in QR</small></button>' +
-        '<button class="gn-btn gn-g" data-a="nha" style="padding:16px;font-size:16px">📱 Quét mã ở nhà<br><small style="font-weight:600;opacity:.85">bill in kèm mã QR · <span data-dem>15</span>s</small></button></div>');
-      var chon = function (taiQuan) {
-        if (daChon) return; daChon = true; clearInterval(t);
+      var L = G.soLuot(demLy(order.itemsArray, laNuocGieo).ly), sdt = G.normPhone(order.phone);
+      popupNoiQuay(L, 'vòng quay hiện trên POS · bill không in QR', 'bill in kèm mã QR', function (taiQuan) {
         if (noiQuay) noiQuay.set(order, taiQuan ? 'quan' : 'nha');
-        if (!taiQuan) dongOv();
         try { xong(); } catch (e) { console.warn('[gấu] in bill', e); }
         if (!taiQuan) return;
-        var msgEl = o.querySelector('p'); if (msgEl) msgEl.textContent = 'Đang lấy lượt quay…';
-        var pr = bocCua && bocCua.get(order);
-        Promise.resolve(pr).then(function (kq) {
+        Promise.resolve(bocCua && bocCua.get(order)).then(function (kq) {
           if (kq && kq.soLuot) moTaiQuay(sdt);
           else { dongOv(); toast('⚠️ Chưa có lượt quay cho đơn này' + (kq && kq.loi === 'chua-co-kho' ? ' (quán chưa nhập kho gấu)' : '')); }
         });
-      };
-      o.querySelector('[data-a=quan]').onclick = function () { chon(true); };
-      o.querySelector('[data-a=nha]').onclick = function () { chon(false); };
-      t = setInterval(function () { con--; var d = o.querySelector('[data-dem]'); if (d) d.textContent = String(con); if (con <= 0) chon(false); }, 1000);
+      });
     }
     var gauDuDieuKien = function (order) {
       try { return !!order && G.dangMua() && G.normPhone(order.phone).length >= 10 && G.soLuot(demLy(order.itemsArray, laNuocGieo).ly) > 0; } catch (e) { return false; }
