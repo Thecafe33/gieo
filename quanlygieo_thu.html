@@ -8225,16 +8225,20 @@ async function plNgayTuSo(startDate, endDate){
     const soRef = fstore.collection('pl_book_gieogieo').doc('days');
     const [so, m] = await Promise.all([soRef.get(), GieoData.plDocDau(fstore, storeId)]);
     marks = m;
-    if(so.exists && so.data().d) Object.entries(so.data().d).forEach(([k, x])=>{ if(k >= from && k <= to && x) by[k] = Object.assign({ date: k }, x); });
-    if(so.exists && so.data().d){
-      // Giữ sổ gọn: quá 800 ngày → bỏ các ngày cũ nhất (màn Thu hồi vốn chỉ quét tối đa 730 ngày).
-      const ks = Object.keys(so.data().d).sort(), du = ks.length - 800;
-      if(du > 0){ const del = firebase.firestore.FieldValue.delete(), upd = {}; ks.slice(0, du).forEach(k=>{ upd['d.' + k] = del; }); soRef.update(upd).catch(()=>{}); }
-    }
-    else {
-      const snap = await fstore.collection('pl_days_gieogieo').where('date','>=',from).where('date','<=',to).get();
-      const moi = {}; snap.docs.forEach(d=>{ const x = d.data(); if(x && x.date){ by[x.date] = x; const o = Object.assign({}, x); delete o.storeId; moi[x.date] = o; } });
-      if(Object.keys(moi).length) soRef.set({ d: moi, at: new Date().toISOString(), storeId }, { merge: true }).catch(e=>console.warn('[sổ gộp] không tạo được:', e));
+    const sd = so.exists ? (so.data() || {}) : {}, book = sd.d || {};
+    Object.entries(book).forEach(([k, x])=>{ if(k >= from && k <= to && x) by[k] = Object.assign({ date: k }, x); });
+    // [SỔ GỘP — mốc du, 16/10] Sổ chỉ chắc ĐỦ mọi ngày ≥ du (đã chép pl_days từ đó) — plLuuTomTat merge vài ngày nên sổ có thể có
+    // mà thiếu ngày cũ. Khoảng xem bắt đầu trước du (hoặc sổ chưa có du): đọc pl_days phần trước du (1 truy vấn), bù vào sổ, hạ du.
+    // Cùng quy tắc với readPlBook của manage.
+    if(!sd.du || from < sd.du){
+      let q = fstore.collection('pl_days_gieogieo').where('date','>=',from); if(sd.du) q = q.where('date','<',sd.du);
+      const snap = await q.get(), moi = {};
+      snap.docs.forEach(d=>{ const x = d.data(); if(!x || !x.date || book[x.date]) return; const o = Object.assign({}, x); delete o.storeId; moi[x.date] = o; if(x.date <= to) by[x.date] = Object.assign({ date: x.date }, o); });
+      soRef.set({ d: moi, du: from, at: new Date().toISOString(), storeId }, { merge: true }).catch(e=>console.warn('[sổ gộp] không bù được:', e));
+    } else {
+      // Giữ sổ gọn: quá 800 ngày → bỏ các ngày cũ nhất (màn Thu hồi vốn chỉ quét tối đa 730 ngày); mốc du lên ngày cũ nhất còn giữ.
+      const ks = Object.keys(book).sort(), bo = ks.length - 800;
+      if(bo > 0){ const del = firebase.firestore.FieldValue.delete(), upd = {}; ks.slice(0, bo).forEach(k=>{ upd['d.' + k] = del; }); if(ks[bo] > sd.du) upd.du = ks[bo]; soRef.update(upd).catch(()=>{}); }
     }
   }catch(err){ console.warn('[pl_days] không đọc được bản tóm tắt — tính đầy đủ:', err); return computeDailyPLRange(startDate, endDate); }
   const need = GieoData.plNgayCanTinh(by, from, to, { marks });

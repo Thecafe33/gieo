@@ -46,6 +46,13 @@ eq(Object.keys(a1.byDay).length, Object.keys(a2.byDay).length, 'Tổng hợp: đ
 eq(Object.keys(a2.byDay).every(d => Math.abs(a1.byDay[d].fixed - a2.byDay[d].fixed) < 0.02 && Math.abs(a1.byDay[d].cogs - a2.byDay[d].cogs) < 0.02), true, 'Tổng hợp: từng ngày khớp phân bổ trực tiếp (Giá vốn / Vận hành)');
 eq([...a1.months].sort(), ['2026-11', '2026-12', '2027-01'], 'Tổng hợp: tháng có chi phí thật');
 eq([sums['2026-11'].base, M.expMonthSum([E[2]], '2026-12').base], [true, false], 'Tổng hợp: base = tháng có khoản vận hành do manage nhập (khoản nhân viên gửi không tính)');
+// Đổi TÊN danh mục Giá vốn sau khi đã có bản tổng hợp: tháng cũ vẫn là Giá vốn (loại chụp lúc ghi, t) — trước rơi về Vận hành.
+{
+  const E2 = [{ id: 'm2', periodType: 'onetime', date: '2026-12-05', category: 'Nguyên liệu / mua hàng', costType: 'cogs', amount: 300000, status: 'approved' }];
+  const s2 = { '2026-12': M.expMonthSum(E2, '2026-12') }, renamed = cats.map(c => c.label === 'Nguyên liệu / mua hàng' ? { ...c, label: 'Nguyên liệu' } : c);
+  const al = M.sumsToAlloc(s2, renamed);
+  eq([s2['2026-12'].t['Nguyên liệu / mua hàng'], al.byDay['2026-12-05'].cogs, al.byDay['2026-12-05'].fixed], ['cogs', 300000, 0], 'Đổi tên danh mục: tháng cũ vẫn tính Giá vốn');
+}
 eq([...a1.base].sort(), ['2026-11', '2026-12', '2027-01'], 'Tổng hợp → phân bổ: giữ base từng tháng');
 const r1 = M.tcxBreakEven({}, 'xofa', [{ date: '2026-12-05', rev: 1000000 }], a1), r2_ = M.tcxBreakEven({}, 'xofa', [{ date: '2026-12-05', rev: 1000000 }], { list: E, cats });
 near(r1.hoaVon, r2_.hoaVon, 'Hoà vốn từ bản tổng hợp = từ từng khoản chi');
@@ -71,13 +78,26 @@ near(r1.hoaVon, r2_.hoaVon, 'Hoà vốn từ bản tổng hợp = từ từng kh
   // Sổ gộp: quán đã có sổ → 1 lượt đọc cho mọi ngày, không truy vấn pl_days
   {
     let soReads = 0, q2 = 0;
-    const book = { d: {} }; Object.keys(docs).forEach(k => { book.d[k] = { lai: 2, updatedAt: 'x' }; });
+    const book = { d: {}, du: '2026-01-01' }; Object.keys(docs).forEach(k => { book.d[k] = { lai: 2, updatedAt: 'x' }; });
     const env2 = { fstore: { collection: () => ({ doc: () => ({ get: async () => { soReads++; return { exists: true, data: () => book }; } }), where: () => ({ where: () => ({ get: async () => { q2++; return { docs: [] }; } }) }) }) },
       localStorage: env.localStorage, console: { warn() {} } };
     const read2 = new Function(...Object.keys(env2), HELP + extract('manage.html', ['pad', 'parseDkey', 'addDays', 'dkey', 'daysInMonthYm', 'pool', 'ggName', 'plCacheLoad', 'plCacheSave', 'readPlBook', 'readPlDays']) +
       "\nconst GIEO_LEGACY='gg01', PL_CACHE_KEY='mg_pl_cache_v1', PL_STABLE_DAYS=35;\nreturn readPlDays;")(...Object.values(env2));
     const y3 = await read2(R, '2026-01-01', '2026-10-15');
     eq([Object.keys(y3.gg01).length, y3.gg01['2026-05-05'].lai, soReads, q2], [288, 2, 1, 0], 'Sổ gộp: cả năm = 1 lượt đọc (288 ngày), không truy vấn pl_days');
+    // Sổ có mà THIẾU ngày cũ (chỉ vài ngày do lượt ghi Hôm nay merge, chưa có mốc du) → bù pl_days 1 lần, ghi mốc du; lần sau 1 lượt.
+    const book2 = { d: { '2026-10-15': { lai: 9, updatedAt: 'y' } } }; let q3 = 0, wrote = null;
+    const pq = (f = []) => ({ where: (a2, op, v) => pq(f.concat([[op, v]])), get: async () => { q3++; return { docs: Object.values(docs).filter(x => f.every(([op, v]) => op === '>=' ? x.date >= v : op === '<' ? x.date < v : x.date <= v)).map(x => ({ data: () => x })) }; } });
+    const env3 = { fstore: { collection: name => /pl_book/.test(name) ? { doc: () => ({ get: async () => ({ exists: true, data: () => book2 }), set: async (v) => { wrote = v; Object.assign(book2.d, v.d); book2.du = v.du; } }) } : pq() }, localStorage: env.localStorage, console: { warn() {} } };
+    const read3 = new Function(...Object.keys(env3), HELP + extract('manage.html', ['pad', 'parseDkey', 'addDays', 'dkey', 'daysInMonthYm', 'pool', 'ggName', 'plCacheLoad', 'plCacheSave', 'readPlBook', 'readPlDays']) +
+      "\nconst GIEO_LEGACY='gg01', PL_CACHE_KEY='mg_pl_cache_v1', PL_STABLE_DAYS=35;\nreturn readPlDays;")(...Object.values(env3));
+    const y4 = await read3(R, '2026-01-01', '2026-10-15'); await new Promise(r => setTimeout(r, 5));
+    eq([Object.keys(y4.gg01).length, y4.gg01['2026-10-15'].lai, q3, wrote && wrote.du, wrote && Object.keys(wrote.d).length], [288, 9, 1, '2026-01-01', 287],
+      'Sổ thiếu ngày cũ: bù pl_days 1 truy vấn (giữ ngày sổ đã có), ghi mốc du');
+    q3 = 0; await read3(R, '2026-03-01', '2026-10-15');
+    eq(q3, 0, 'Lần sau (từ sau mốc du): không truy vấn pl_days');
+    q3 = 0; await read3(R, '2025-12-01', '2026-10-15');
+    eq([q3, book2.du], [1, '2025-12-01'], 'Xem lùi trước mốc: chỉ truy vấn phần trước du, hạ mốc');
   }
   global.Date = realNow;
   console.log(ok ? 'ALL PASS' : 'SOME FAIL'); process.exit(ok ? 0 : 1);
