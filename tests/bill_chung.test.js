@@ -27,7 +27,8 @@ eq([B.billWinSlide(new Set(['a', 'b', 'c']), 'a', 3), B.billWinSlide(new Set(['a
 
 const U = new Function(extract('manage.html', ['bfTime', 'bfIsNew']) + '\nreturn { bfTime, bfIsNew };')();
 const at = Date.parse('2026-10-16T05:00:00Z');
-eq([U.bfTime({ date: '16/10/2026', time: '12:00' }), U.bfTime({ createdAt: '2026-10-16T05:00:00Z' })], [at, at], 'Giờ bill: createdAt, thiếu thì date + time giờ VN');
+eq([U.bfTime({ date: '16/10/2026', time: '12:00' }), U.bfTime({ createdAt: '2026-10-16T05:00:00Z' }), U.bfTime({ createdAt: at })], [at, at, at], 'Giờ bill: createdAt (chuỗi ISO hoặc SỐ ms như pos.html TC33), thiếu thì date + time giờ VN');
+eq(U.bfIsNew({ createdAt: at + 1000 }, at), true, 'Bill TC33 (createdAt số) vừa bán vẫn được tô Mới');
 eq([U.bfIsNew({ createdAt: '2026-10-16T04:59:58Z' }, at), U.bfIsNew({ createdAt: '2026-10-16T04:50:00Z' }, at), U.bfIsNew({}, at)], [true, false, false], 'Mới = ghi sau lúc gắn (trừ hao 3 giây)');
 
 (async () => {

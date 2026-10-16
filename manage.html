@@ -2068,7 +2068,8 @@ function bfSync(){
 // Bill VỪA BÁN hay bill cũ Firebase trả lúc mới gắn? Phải về SAU đợt ban đầu (w.ready) VÀ giờ ghi đơn sau lúc gắn (như
 // bfLaBillMoi của quanlygieo, trừ hao 3 giây lệch giờ máy) — bill cũ lọt vào cửa sổ khi bill khác bị xoá không bị coi là mới.
 function bfIsNew(o,at){const t=bfTime(o);return t>0&&t>=at-3000}
-function bfTime(o){const t=Date.parse(o&&o.createdAt);if(!isNaN(t))return t;const m=/^(\d{2})\/(\d{2})\/(\d{4})$/.exec(String(o&&o.date||'')),h=/^(\d{1,2}):(\d{2})/.exec(String(o&&o.time||''));return m&&h?Date.parse(`${m[3]}-${m[2]}-${m[1]}T${h[1].padStart(2,'0')}:${h[2]}:00+07:00`):0}
+// createdAt: chuỗi ISO (XOFA / Gieo) hoặc SỐ ms — pos.html (TC33) ghi ServerValue.TIMESTAMP (trước đọc ra 0 → bill TC33 rơi xuống cuối, sau Xem thêm).
+function bfTime(o){const c=o&&o.createdAt,t=typeof c==='number'?c:Date.parse(c);if(t>0)return t;const m=/^(\d{2})\/(\d{2})\/(\d{4})$/.exec(String(o&&o.date||'')),h=/^(\d{1,2}):(\d{2})/.exec(String(o&&o.time||''));return m&&h?Date.parse(`${m[3]}-${m[2]}-${m[1]}T${h[1].padStart(2,'0')}:${h[2]}:00+07:00`):0}
 function bfOn(id,w,type,k,o){
  if(BF.watch[id]!==w)return;const key=id+'_'+k;
  if(type==='error'){delete BF.watch[id];w.stop&&w.stop();BF.err=friendlyError(o);bfRender();return}
