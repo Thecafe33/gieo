@@ -37,6 +37,6 @@ if (BE_GAO) {
 }
 chk(!/#006241|rgba\(0,98,65/i.test(moi), 'không còn sót màu xanh lá chính (#006241)');
 chk(moi.includes('id="app-snow"'), 'có tuyết trong app');
-chk(!GAU_NOEL || (moi.split('gau_noel_giangsinh.v1.js" data-quan="khach"').length === 2), 'gắn quay trúng gấu Noel (1 thẻ script data-quan="khach")');
+chk(!GAU_NOEL || (moi.split('gau_noel_giangsinh.v2.js" data-quan="khach"').length === 2), 'gắn quay trúng gấu Noel (1 thẻ script data-quan="khach")');
 chk(moi.includes('id="app-orn"') && (moi.match(/class="lc-tree t\d"/g) || []).length === 3, 'có quả châu trong app + 3 cây thông ở màn đăng nhập');
 console.log(ok ? 'ALL PASS' : 'SOME FAIL'); process.exit(ok ? 0 : 1);

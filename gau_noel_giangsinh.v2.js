@@ -1,4 +1,4 @@
-/* gau_noel_giangsinh.v1.js — QUAY TRÚNG GẤU GIÁNG SINH 2026, dùng chung 3 quán + app khách:
+/* gau_noel_giangsinh.v2.js — QUAY TRÚNG GẤU GIÁNG SINH 2026, dùng chung 3 quán + app khách:
  *   pos.html (The cafe 33) · PosX.html (XOFA) · posgieo.html (Gieo Gieo) — BỐC THĂM lúc thanh toán đơn có SĐT, Đổi quà,
  *     Mở lượt tại quầy, huỷ bill (PosX / Gieo). The cafe 33: popup QR sau thanh toán. Gieo: QR cuối bill in.
  *   kiosk.html (màn hình phụ XOFA) — data-quan="kiosk": QR + số lượt sau thanh toán, chiếu lại «Mở lượt tại quầy» (RT gau_noel_2026_kiosk).
@@ -17,9 +17,11 @@
  *   - Chỉ chạy khi CÔNG TẮC BẬT (gau_noel_2026_kho/_cfg.bat — tab Quản lý pos) VÀ trong ngày của đợt (giờ máy chủ .info/serverTimeOffset).
  *     Tắt (mặc định) = không bốc, không hiện gì, không ghi gì; chỉ nghe 1 doc _cfg.
  *   - Dữ liệu riêng (không đụng customers): gau_noel_2026/{sđt}, gau_noel_2026_kho/{quán | _cfg}.
- *   - Gắn vào app bằng ĐÚNG 1 THẺ trước </body>: <script src="gau_noel_giangsinh.v1.js" data-quan="tc33|xofa|gieo"></script>
+ *   - Gắn vào app bằng ĐÚNG 1 THẺ trước </body>: <script src="gau_noel_giangsinh.v2.js" data-quan="tc33|xofa|gieo"></script>
  *     Phần gắn chỉ BỌC hàm sẵn có của app từ bên ngoài (không sửa code bên trong app).
- * Sửa file này sau khi đã deploy = tạo gau_noel_giangsinh.v2.js (cùng quy tắc phiên bản như engine).
+ * v2 (16/10): v1 đã deploy bị sửa tại chỗ (vòng quay, nút Đổi gấu sidebar, quay tại quầy tự «Đã nhận», bed 160K lúc vào active, bán qua app
+ *     không lượt, dashboard…) → máy giữ v1 trong bộ nhớ đệm không thấy → đổi tên v2. v1 giữ nguyên trên hosting (máy còn HTML cũ xin nó).
+ * Sửa file này sau khi đã deploy = tạo gau_noel_giangsinh.v3.js (cùng quy tắc phiên bản như engine).
  *
  * ═══ GỠ CHƯƠNG TRÌNH SẠCH SẼ KHI HẾT GIÁNG SINH (sau 31/12/2026) ═══
  *   1. pos.html (The cafe 33) → Quản lý → tab «Gấu Noel»:
@@ -1155,7 +1157,7 @@
         '<div style="margin-top:10px;padding:16px;border-radius:16px;border:1.5px dashed #fca5a5;background:#fff5f5;">' +
         '<div style="font-weight:900;color:#b91c1c;">Xoá toàn bộ dữ liệu Gấu Noel (khi hết đợt)</div>' +
         '<div style="font-size:12.5px;color:#7f1d1d;margin:6px 0 12px;line-height:1.6;">Xoá hết lượt, mã nhận, kho và công tắc trên Firebase. Không đụng hồ sơ khách, đơn hàng, điểm, tem. Không hoàn tác được. ' +
-        'Sau khi xoá: gỡ thẻ script gau_noel_giangsinh ở pos.html, PosX.html, posgieo.html (hướng dẫn đầu file gau_noel_giangsinh.v1.js).</div>' +
+        'Sau khi xoá: gỡ thẻ script gau_noel_giangsinh ở pos.html, PosX.html, posgieo.html (hướng dẫn đầu file gau_noel_giangsinh.v2.js).</div>' +
         '<button class="gn-btn" id="gn-xoa">Xoá dữ liệu Gấu Noel…</button><div id="gn-xoa-msg" style="font-size:12.5px;margin-top:10px;color:#7f1d1d;"></div></div>';
       pane.querySelector('#gn-bat').onclick = function () {
         var on = !G.dangBat();

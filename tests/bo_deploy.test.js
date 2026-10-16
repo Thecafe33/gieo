@@ -12,7 +12,7 @@ for (const ten of Object.keys(kq)) {
 }
 const s = (ten, f) => String(kq[ten][f] || '');
 chk(['pos.html', 'PosX.html', 'posgieo.html', 'kiosk.html', 'index.html', 'posgieo_thu.html'].every(f => !/gau_noel_giangsinh/.test(s('thuong', f)) && !/lixi\.v\d/.test(s('thuong', f))), 'bản thường: không Gấu Noel, không lì xì');
-chk(['pos.html', 'PosX.html', 'posgieo.html', 'kiosk.html', 'index.html'].every(f => /gau_noel_giangsinh\.v\d+\.js/.test(s('giangsinh', f))) && !!kq.giangsinh['gau_noel_giangsinh.v1.js'], 'bản Giáng sinh: 5 app nạp Gấu Noel + có file .js');
+chk(['pos.html', 'PosX.html', 'posgieo.html', 'kiosk.html', 'index.html'].every(f => /gau_noel_giangsinh\.v\d+\.js/.test(s('giangsinh', f))) && !!kq.giangsinh['gau_noel_giangsinh.v2.js'], 'bản Giáng sinh: 5 app nạp Gấu Noel + có file .js');
 chk(/BẢN GIÁNG SINH/.test(s('giangsinh', 'index.html')) && /BẢN TẾT 2027/.test(s('tet', 'index.html')), 'index đúng mùa (Giáng sinh / Tết)');
 chk(['pos.html', 'PosX.html', 'index.html'].every(f => /lixi\.v1\.js/.test(s('tet', f))) && !Object.keys(kq.tet).some(f => /gau_noel/.test(f) || (/\.html$/.test(f) && /gau_noel_giangsinh/.test(s('tet', f)))), 'bản Tết: lì xì ở pos / PosX / index, không Gấu Noel');
 console.log(ok ? 'ALL PASS' : 'SOME FAIL'); process.exit(ok ? 0 : 1);

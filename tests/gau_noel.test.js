@@ -1,8 +1,8 @@
-// gau_noel_giangsinh.v1.js — quay trúng gấu Giáng sinh 2026: chặng, tỉ lệ 5 yếu tố, luật chắc trúng, trần kho, giao dịch POS / app khách.
+// gau_noel_giangsinh.v2.js — quay trúng gấu Giáng sinh 2026: chặng, tỉ lệ 5 yếu tố, luật chắc trúng, trần kho, giao dịch POS / app khách.
 const { makeFake } = require('./lib/fakefb');
 let ok = true; const chk = (c, m) => { console.log((c ? 'ok ' : 'FAIL ') + m); if (!c) ok = false; };
-delete require.cache[require.resolve('../gau_noel_giangsinh.v1.js')];
-const G = require('../gau_noel_giangsinh.v1.js');
+delete require.cache[require.resolve('../gau_noel_giangsinh.v2.js')];
+const G = require('../gau_noel_giangsinh.v2.js');
 const at = iso => Date.parse(iso + '+07:00');
 const setNow = iso => G._setOffset(at(iso) - Date.now());
 G.apCfg({ bat: true });   // phần thuần + giao dịch: coi như đã bật (công tắc test riêng bên dưới)
@@ -117,6 +117,14 @@ chk(G.heSoKho(kho, G.chang('2026-11-23'), 'v45') === 0.7 && G.heSoKho(khoMoi(7),
   chk(!D.khach.find(k => k.sdt === '0904') && !D.khach.find(k => k.sdt === '0901').nghi.length && D.nghi === 2, 'SĐT bình thường không bị đánh dấu; doc trống không vào bảng');
   const kb = G.khoKichBan(kho.tc33, H);
   chk(kb.w === 'W3' && kb.ngau.v80.chang[0] === 1 && kb.ngau.v80.chang[1] === 4 && kb.ngau.v80.truoc23.join() === '1,24' && kb.chac.bed === 2, 'kho từng kịch bản: chặng hiện tại / trước 23 / chắc trúng', kb);
+})();
+
+// các app phải nạp BẢN MỚI NHẤT (bản đã deploy bị máy giữ trong bộ nhớ đệm — sửa = tạo vN+1 và trỏ tới)
+(() => {
+  const fs = require('fs'), path = require('path'), R = path.join(__dirname, '..');
+  const moi = fs.readdirSync(R).filter(f => /^gau_noel_giangsinh\.v\d+\.js$/.test(f)).sort((a, b) => +a.match(/v(\d+)/)[1] - +b.match(/v(\d+)/)[1]).pop();
+  const sai = ['pos.html', 'PosX.html', 'posgieo.html', 'kiosk.html', 'index_giangsinh.html'].filter(f => !fs.readFileSync(path.join(R, f), 'utf8').includes('<script src="' + moi + '"'));
+  chk(!sai.length, 'các app nạp bản mới nhất ' + moi + (sai.length ? ' — sai: ' + sai.join(', ') : ''));
 })();
 
 chk(/^GAU[A-HJ-NP-Z2-9]{5}$/.test(G.maNhan(Math.random)) && G.normPhone('+84 912 345 678') === '0912345678', 'mã GAU + 5 ký tự (không 0/O/1/I) · chuẩn hoá SĐT');

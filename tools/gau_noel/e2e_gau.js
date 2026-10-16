@@ -229,7 +229,7 @@ const CHUNG = (fake) => {
   R = await p.evaluate(async ([kQr, kKq]) => {
     const R = []; window.__R = R; const chk = (c, m, x) => R.push((c ? 'ok   ' : 'FAIL ') + m + (c || x === undefined ? '' : ' → ' + JSON.stringify(x)));
     const sleep = ms => new Promise(r => setTimeout(r, ms)); const $ = id => document.getElementById(id);
-    if (!window.GauNoel) { chk(false, 'K0. kiosk không nạp được gau_noel_giangsinh.v1.js'); return R; }
+    if (!window.GauNoel) { chk(false, 'K0. kiosk không nạp được gau_noel_giangsinh.v2.js'); return R; }
     const now = o => Object.assign({}, o, { ev: Object.assign({}, o.ev, { at: Date.now() }) });
     chk(!$('gn-k').classList.contains('on') && !$('gn-kb').classList.contains('on'), 'K1. chưa có dữ liệu → không hiện gì');
     await db.ref('gau_noel_2026_kiosk/xofa').set(now(kQr)); await sleep(150);
@@ -264,7 +264,7 @@ const CHUNG = (fake) => {
   ({ p, errs } = await moTrang(b, 'posgieo.html', { width: 1280, height: 800 }));
   R = await p.evaluate(async ([fake, chung]) => {
     const R = []; window.__R = R; const chk = (c, m, x) => R.push((c ? 'ok   ' : 'FAIL ') + m + (c || x === undefined ? '' : ' → ' + JSON.stringify(x)));
-    if (!window.GauNoel) { chk(false, 'G0. trang không nạp được gau_noel_giangsinh.v1.js'); return R; }
+    if (!window.GauNoel) { chk(false, 'G0. trang không nạp được gau_noel_giangsinh.v2.js'); return R; }
     const { cap } = (eval('(' + chung + ')'))(fake);
     const sleep = ms => new Promise(r => setTimeout(r, ms)); const DB = window.__LXFS, G = GauNoel;
     if (window.GieoData) GieoData.storeId = () => 'gg01';
@@ -332,7 +332,7 @@ const CHUNG = (fake) => {
     R = await pg.evaluate(async ([fake]) => {
       const R = []; window.__R = R; const chk = (c, m, x) => R.push((c ? 'ok   ' : 'FAIL ') + m + (c || x === undefined ? '' : ' → ' + JSON.stringify(x)));
       const sleep = ms => new Promise(r => setTimeout(r, ms)); const $ = id => document.getElementById(id);
-      if (!window.GauNoel) { chk(false, 'I0. index_giangsinh không nạp gau_noel_giangsinh.v1.js'); return R; }
+      if (!window.GauNoel) { chk(false, 'I0. index_giangsinh không nạp gau_noel_giangsinh.v2.js'); return R; }
       eval(fake); const F = window.__lxFake, DB = window.__LXFS, G = GauNoel;
       // Firestore giả + nghe doc (onSnapshot)
       const LS = [], oc = F.fstore.collection, ot = F.fstore.runTransaction;

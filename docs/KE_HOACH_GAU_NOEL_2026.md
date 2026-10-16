@@ -31,7 +31,7 @@ Khách order, nhập SĐT tích điểm (3 quán)
 - Giao dịch mỗi đơn có SĐT: đọc 2 doc + ghi 2 doc. App khách: 1 lần đọc khi mở app (chỉ trong đợt) + nghe doc của mình khi đang mở; kho 3 quán đọc khi khách mở thẻ gấu.
 - posgieo ghi qua lớp đường dẫn: đăng ký 2 collection vào `GieoData.REG` loại **G** (dùng chung, giữ nguyên tên) — `data_access` bản mới nhất; nếu v8 đã deploy thì tạo **v9**.
 
-## 3. Lõi dùng chung trong `gau_noel_giangsinh.v1.js` (như `lixi.v1.js`)
+## 3. Lõi dùng chung trong `gau_noel_giangsinh.v2.js` (như `lixi.v1.js`)
 
 - Hàm thuần (test được, không Firebase): `soLuot(ly)`, `bandOf(tienNuoc/lượt)`, `pTurn(...)` = số ly × giá đơn × lịch sử SĐT × ngày/giờ × kho (trần 60%), `chacTrung(streak, acc, ngày)`, `chang(ngày)` (mở màn / tuần / 15–22/12 / 23 / 24 / 25), `conKho(kho, chặng)`, `heSoKho(đã phát, kế hoạch)`, `maNhan()`.
 - Giao dịch: `boc(store, sđt, bill)` (POS, sau khi đơn lưu), `mo(sđt, id)` (app khách), `doi(store, sđt, code, nhânViên)` (POS), `huyBill(store, sđt, bill)` (POS huỷ / xoá bill: trả kho + trả chuỗi nếu quà chưa nhận; đã nhận thì gắn cờ cho Quản lý).
@@ -55,7 +55,7 @@ Code trong 3 POS **tự tắt ngoài đợt** (đọc ngày máy chủ): trướ
 | GĐ | Việc | Kiểm tra |
 |---|---|---|
 | 0 | Chốt các câu hỏi mục 6; số bill thật 30 ngày TC33 / XOFA → chạy lại mô phỏng → số kho chốt | — |
-| 1 | `gau_noel_giangsinh.v1.js` (hàm thuần + giao dịch) | `tests/gau_noel.test.js`: 20 kịch bản ở trang mô phỏng thành điều kiện test; trần kho không bao giờ vượt; chắc trúng cần đủ lượt **và** đủ lãi; 2 máy cùng đổi 1 mã → máy sau báo lỗi (Firestore giả `tests/lib/fakefb.js`) |
+| 1 | `gau_noel_giangsinh.v2.js` (hàm thuần + giao dịch) | `tests/gau_noel.test.js`: 20 kịch bản ở trang mô phỏng thành điều kiện test; trần kho không bao giờ vượt; chắc trúng cần đủ lượt **và** đủ lãi; 2 máy cùng đổi 1 mã → máy sau báo lỗi (Firestore giả `tests/lib/fakefb.js`) |
 | 2 | Gắn 3 POS: bốc thăm sau thanh toán, Đổi quà, huỷ bill, QR (Gieo in bill, TC33 popup) | test trình duyệt như `tools/tet/e2e/` (thanh toán thật → có lượt → đổi quà); `sh tests/run_all.sh`, ranh giới, đường dẫn |
 | 3 | index_giangsinh: popup quay, thẻ gấu, chuông, tủ gấu | test `giangsinh.test.js` (ngoài phần chèn chỉ khác màu) + e2e đăng nhập SĐT có lượt |
 | 4 | manage tab Gấu Noel | test hàm tổng hợp |
@@ -65,7 +65,7 @@ Code trong 3 POS **tự tắt ngoài đợt** (đọc ngày máy chủ): trướ
 
 1. Khách chỉ cần mua để có lượt, quay lúc nào là việc của khách → giữ **bốc ở POS lúc thanh toán**, app khách mở kết quả bất cứ lúc nào tới hạn nhận (ngày mua quyết định tỉ lệ: mua 23–25/12 hưởng ×3).
 2. Hạn nhận **31/12/2026**; gấu chưa nhận quay về kho.
-3. **Một file riêng `gau_noel_giangsinh.v1.js`** (lõi + phần gắn) — 3 POS và index_giangsinh cùng nạp, tự bật / tắt theo ngày máy chủ. Hết đợt: pos.html → Quản lý → tab nhỏ **«Gấu Noel»** → xoá hết dữ liệu (mã xác nhận `2512`) → gỡ thẻ `<script>` ở các app. Tab Quản lý này cũng là chỗ nhập kho từng quán + thống kê (không cần tab ở manage.html).
+3. **Một file riêng `gau_noel_giangsinh.v2.js`** (lõi + phần gắn) — 3 POS và index_giangsinh cùng nạp, tự bật / tắt theo ngày máy chủ. Hết đợt: pos.html → Quản lý → tab nhỏ **«Gấu Noel»** → xoá hết dữ liệu (mã xác nhận `2512`) → gỡ thẻ `<script>` ở các app. Tab Quản lý này cũng là chỗ nhập kho từng quán + thống kê (không cần tab ở manage.html).
 4. `data_access.v8.js` **đã deploy** → posgieo cần **v9** = v8 + đăng ký `gau_noel_2026`, `gau_noel_2026_kho` loại X (dùng chung 3 thương hiệu), posgieo + quanlygieo trỏ v9.
 5. Cần nút **«Mở lượt tại quầy»** trên POS cho khách không dùng app; PosX đồng bộ màn này lên màn hình phụ — **chờ file màn hình phụ**.
 6. QR XOFA: theo màn hình phụ (chờ file).
@@ -73,13 +73,13 @@ Code trong 3 POS **tự tắt ngoài đợt** (đọc ngày máy chủ): trướ
 
 ## 7. Tiến độ
 
-- GĐ1 xong: `gau_noel_giangsinh.v1.js` (lõi: chặng, 5 yếu tố, luật chắc trúng, kho ngẫu nhiên theo chặng + carry Noel + trần cứng `tong` mỗi quán; giao dịch `boc` / `mo` / `quaTaiQuan` / `doi` / `huyBill`; `luuKho` / `docKho` / `thongKe` / `xoaHet`) + `tests/gau_noel.test.js`.
+- GĐ1 xong: `gau_noel_giangsinh.v2.js` (lõi: chặng, 5 yếu tố, luật chắc trúng, kho ngẫu nhiên theo chặng + carry Noel + trần cứng `tong` mỗi quán; giao dịch `boc` / `mo` / `quaTaiQuan` / `doi` / `huyBill`; `luuKho` / `docKho` / `thongKe` / `xoaHet`) + `tests/gau_noel.test.js`.
 - Mã quán trong dữ liệu: `tc33`, `xofa`, Gieo theo mã quán (`gg01`…). Số kho từng quán nhập ở tab Quản lý (số từ trang mô phỏng — vẫn chờ số bill thật 30 ngày TC33 / XOFA).
-- GĐ2 xong (16/10, chủ dự án deploy từ hôm nay): **công tắc bật / tắt** `gau_noel_2026_kho/_cfg` (`bat`, `batDau`) — mặc định TẮT, tab pos.html › Quản lý › «Gấu Noel» (bật/tắt, ngày bắt đầu, kho từng quán, thống kê, xoá mã 2512). Gắn 3 POS bằng 1 thẻ `<script src="gau_noel_giangsinh.v1.js" data-quan="tc33|xofa|gieo">` trước `</body>`, chỉ bọc hàm sẵn có:
+- GĐ2 xong (16/10, chủ dự án deploy từ hôm nay): **công tắc bật / tắt** `gau_noel_2026_kho/_cfg` (`bat`, `batDau`) — mặc định TẮT, tab pos.html › Quản lý › «Gấu Noel» (bật/tắt, ngày bắt đầu, kho từng quán, thống kê, xoá mã 2512). Gắn 3 POS bằng 1 thẻ `<script src="gau_noel_giangsinh.v2.js" data-quan="tc33|xofa|gieo">` trước `</body>`, chỉ bọc hàm sẵn có:
   - TC33: `_pushPaidOrder` + `clearDebtAfterPayment` → bốc → popup QR (+ Mở lượt tại quầy); `checkSdtLive` / `resetPhoneInput` → khung Gấu Noel (Đổi quà, Mở lượt). Bed > 160K tính theo TỪNG BILL (giờ bed + nước, bỏ ăn vặt).
   - XOFA: `_loyaltyAfterSave` → bốc; `renderCustomerInfo` / `clearCustomer` → khung; `delOrderConfirm` → huỷ bill. Màn hình phụ `kiosk.html` (chủ dự án gửi 16/10, thêm 1 thẻ `data-quan="kiosk"`): PosX ghi RT `gau_noel_2026_kiosk/xofa` `{bat, ev}` (SĐT chỉ 3 số cuối) → kiosk hiện QR + số lượt ở khung phải (giữ tới khi khách sau order, tối đa 90 giây), chiếu lại Mở lượt tại quầy (mở / quay / kết quả), banner Giáng sinh thay banner voucher bed khi đang bật. Xoá hết dữ liệu xoá cả nhánh RT này.
   - Gieo: `assistFinalizeOrder` → bốc; `buildReceiptContent` + `renderReceiptCanvas` → QR cuối bill; khung; huỷ bill. `data_access.v9.js` (posgieo, quanlygieo, manage trỏ v9).
-  - Hướng dẫn gỡ sạch: đầu file `gau_noel_giangsinh.v1.js`. Test trình duyệt: `node tools/gau_noel/e2e_gau.js`.
+  - Hướng dẫn gỡ sạch: đầu file `gau_noel_giangsinh.v2.js`. Test trình duyệt: `node tools/gau_noel/e2e_gau.js`.
 - GĐ3 xong (16/10): `index_giangsinh.html` — `tools/tao_ban_giangsinh.js` chèn 1 thẻ `data-quan="khach"` (hằng `GAU_NOEL`; hết đợt đặt '' rồi chạy lại). Bọc `showDashboard` → nghe công tắc; đang bật thì nghe doc của khách → popup «Bạn có N lượt quay» tự hiện khi có lượt mới (chờ popup chào mừng đóng), Quay = `mo` (hộp quà lắc → gấu / cây thông), thẻ «Gấu Noel của bạn» ngay dưới thẻ thành viên: lượt chưa quay + Quay ngay, mã nhận + quán nhận + hạn, gấu đã nhận gạch ngang. Gấu của lượt CHƯA quay không lộ mã trên thẻ.
 - VÒNG QUAY (chủ dự án 16/10): thay hộp quà ở app khách, POS (Mở lượt tại quầy) và màn hình phụ — 3 ô: Gấu bông · Chúc bạn may mắn lần sau · Merry Christmas; trúng → kim trong ô Gấu bông, trượt → kim dừng SÁT MÉP ô Gấu bông (2–6°) để hồi hộp (`gocDung`). Vòng chỉ diễn kết quả đã bốc ở POS. POS gửi sự kiện «quay» kèm kết quả → màn hình phụ quay cùng, dừng cùng loại ô.
 - Gieo (chủ dự án 16/10): giỏ trống thì không vào được ô SĐT → thanh toán xong đơn có lượt hỏi «Khách quay ở đâu?» TRƯỚC khi in bill (bọc `POSPrinter.autoPrintIfEnabled`): Quay tại quán → bill KHÔNG in QR + vòng quay mở ngay trên POS; Quét mã ở nhà → bill có QR; 15 giây không chọn → quét mã ở nhà. Lựa chọn giữ trong bộ nhớ (WeakMap), không ghi thêm trường vào đơn; In lại bill sau đó vẫn có QR.

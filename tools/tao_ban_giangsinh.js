@@ -15,7 +15,7 @@
 const fs = require('fs'); const path = require('path');
 const ROOT = path.resolve(__dirname, '..');
 // Gấu Noel 2026: 1 thẻ script trước </body> (chương trình bật / tắt ở pos.html › Quản lý › Gấu Noel). Hết đợt: đặt GAU_NOEL = '' rồi chạy lại.
-const GAU_NOEL = '<!-- [GIÁNG SINH] quay trúng gấu Noel 2026 (gau_noel_giangsinh.v1.js) -->\n<script src="gau_noel_giangsinh.v1.js" data-quan="khach"></script>\n';
+const GAU_NOEL = '<!-- [GIÁNG SINH] quay trúng gấu Noel 2026 (gau_noel_giangsinh.v2.js) -->\n<script src="gau_noel_giangsinh.v2.js" data-quan="khach"></script>\n';
 
 const CSS = `
   <!-- [GIÁNG SINH] tông lạnh — chỉ phủ lên màn đăng nhập, sinh bởi tools/tao_ban_giangsinh.js -->
@@ -233,7 +233,7 @@ function taoGiangSinh(src) {
   // 6. đổi màu xanh lá → xanh băng toàn file
   h = doiMauToanBo(h);
   // 7. dấu nhận biết
-  // [GẤU NOEL 2026] quay trúng gấu (gau_noel_giangsinh.v1.js — tự tắt khi chương trình TẮT ở pos › Quản lý › Gấu Noel)
+  // [GẤU NOEL 2026] quay trúng gấu (gau_noel_giangsinh.v2.js — tự tắt khi chương trình TẮT ở pos › Quản lý › Gấu Noel)
   thay('</body>', GAU_NOEL + '</body>', '</body>');
   thay('<!DOCTYPE html>', '<!DOCTYPE html>\n<!-- BẢN GIÁNG SINH — sinh tự động từ index.html bằng tools/tao_ban_giangsinh.js. KHÔNG sửa tay: sửa index.html rồi chạy lại. -->', 'DOCTYPE');
   return h;
