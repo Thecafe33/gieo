@@ -32,7 +32,7 @@
 
 ## Kế hoạch & tiến độ
 - **Đọc trước tiên: `docs/TRANG_THAI.md`** — bản hiện hành (engine v18), việc đã làm tới 04/10/2026, việc còn mở, bản đồ tài liệu, quy trình mỗi lần sửa.
-- **Gấu Noel 2026** (quay trúng gấu, 3 quán): `gau_noel_giangsinh.v1.js` (lõi + phần gắn, 1 thẻ script `data-quan` ở pos / PosX / posgieo, chỉ bọc hàm app), công tắc ở pos › Quản lý › Gấu Noel (mặc định TẮT), kế hoạch `docs/KE_HOACH_GAU_NOEL_2026.md`, test `gau_noel.test.js` + `tools/gau_noel/e2e_gau.js`; gỡ khi hết đợt: hướng dẫn đầu file. posgieo/quanlygieo/manage dùng `data_access.v9.js` (= v8 + 2 tên gau_noel_2026* loại X).
+- **Gấu Noel 2026** (quay trúng gấu, 3 quán): `gau_noel_giangsinh.v1.js` (lõi + phần gắn, 1 thẻ script `data-quan` ở pos / PosX / posgieo / kiosk.html — màn hình phụ XOFA, chủ dự án gửi 16/10, chỉ thêm thẻ đó; chỉ bọc hàm app), công tắc ở pos › Quản lý › Gấu Noel (mặc định TẮT), kế hoạch `docs/KE_HOACH_GAU_NOEL_2026.md`, test `gau_noel.test.js` + `tools/gau_noel/e2e_gau.js`; gỡ khi hết đợt: hướng dẫn đầu file. posgieo/quanlygieo/manage dùng `data_access.v9.js` (= v8 + 2 tên gau_noel_2026* loại X).
 - Kế hoạch gốc: `docs/KE_HOACH_UNIT_ENGINE_DA_CUA_HANG.md` (đọc mục cần thiết, không cần đọc hết; mục 2.1 = bất biến B1–B15).
 - **Kế hoạch tối ưu lượt đọc** (05/10, ưu tiên trước đa cửa hàng): `docs/KE_HOACH_TOI_UU_DOC.md` — 3 nguyên tắc N1–N3, giai đoạn T0–T6. Code mới phải theo N1–N3.
 - Kế hoạch đa cửa hàng: `docs/KE_HOACH_DA_CUA_HANG.md` — một project, quán hiện tại `gg01` giữ nguyên mọi đường dẫn (không chuyển dữ liệu), quán mới tên + `__{storeId}`; Bước 0–5. **Bước 1 + 2 đã deploy; Bước 3 phần chính đã làm 06/10 (chưa deploy)**.

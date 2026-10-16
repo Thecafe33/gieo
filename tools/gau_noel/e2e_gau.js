@@ -1,7 +1,7 @@
 // E2E Gấu Noel 2026 (trình duyệt thật — cần Playwright + Chromium; không thuộc tests/run_all.sh)
 //   node tools/gau_noel/e2e_gau.js [thư_mục_ảnh]
 // pos.html: tab Quản lý (bật/tắt, kho) → thanh toán thật (saveOrderToFirebase) → popup QR → khung khách → Mở lượt tại quầy → Đổi quà; bed > 160K.
-// PosX.html: _loyaltyAfterSave → bốc. posgieo.html: assistFinalizeOrder → bốc, QR cuối bill (buildReceiptContent + renderReceiptCanvas).
+// PosX.html: _loyaltyAfterSave → bốc, màn hình phụ. kiosk.html: QR / Mở lượt tại quầy chiếu từ PosX. posgieo.html: assistFinalizeOrder → bốc, QR cuối bill (buildReceiptContent + renderReceiptCanvas).
 // Firebase giả: tools/tet/e2e/mockfb.js + rtmem.js (RT) và lixi_fake_inpage.js (Firestore của bảng chương trình).
 const { chromium } = require('playwright'); const fs = require('fs'), path = require('path');
 const ROOT = path.resolve(__dirname, '../..'), E2E = path.join(ROOT, 'tools/tet/e2e'), OUT = process.argv[2] || '';
@@ -142,6 +142,7 @@ const CHUNG = (fake) => {
     const R = []; window.__R = R; const chk = (c, m, x) => R.push((c ? 'ok   ' : 'FAIL ') + m + (c || x === undefined ? '' : ' → ' + JSON.stringify(x)));
     const sleep = ms => new Promise(r => setTimeout(r, ms)); const DB = window.__LXFS, G = GauNoel;
     await G.datCfg({ bat: true }); await G.luuKho('xofa', cap, 50);
+
     document.getElementById('cuph').value = '0933000111';
     const rnd = Math.random; Math.random = () => 0.99;
     _loyaltyAfterSave([{ name: 'Trà sữa', price: 30000, qty: 4 }, { name: 'Bánh', price: 20000, qty: 2, isFood: true }, { name: 'Tặng', price: 0, qty: 1, isFree: true }], 160000, 'XK1');
@@ -151,9 +152,55 @@ const CHUNG = (fake) => {
     chk(!document.getElementById('gn-ov') || document.getElementById('gn-ov').style.display !== 'flex', 'X2. XOFA không bật popup QR trên POS (QR ở màn hình phụ — chờ file)');
     Math.random = rnd;
     chk(typeof window.delOrderConfirm === 'function' && /3367/.test(String(window.delOrderConfirm)), 'X3. đã bọc delOrderConfirm (huỷ bill trả kho)');
+    const K = () => __RT2.get('gau_noel_2026_kiosk/xofa') || {};
+    chk(K().bat === true && K().ev && K().ev.loai === 'qr' && K().ev.soLuot === 2 && K().ev.sdt === '111', 'X4. màn hình phụ: ghi bat + sự kiện QR 2 lượt (SĐT chỉ 3 số cuối)', K());
+    window.__kQr = JSON.parse(JSON.stringify(K()));
+    // mở lượt tại quầy từ khung khách → chiếu lên màn hình phụ
+    document.getElementById('cuph').value = '0933000111'; try { renderCustomerInfo(0, 0); } catch (e) {}
+    await sleep(900);
+    const pn = document.getElementById('gn-panel'), bm = pn && pn.querySelector('[data-mo]');
+    chk(!!bm && /Còn 2 lượt chưa quay/.test(pn.textContent), 'X5. nhập SĐT → khung Gấu Noel có «Mở lượt» (2 lượt)', pn && pn.textContent);
+    if (bm) { bm.click(); await sleep(100); }
+    chk(K().ev && K().ev.loai === 'mo', 'X6. bấm Mở lượt → màn hình phụ hiện «Mở lượt quay»');
+    const q = document.getElementById('gn-ov') && document.getElementById('gn-ov').querySelector('[data-a=quay]');
+    if (q) { q.click(); await sleep(150); }
+    chk(K().ev && K().ev.loai === 'quay', 'X7. bấm Quay → màn hình phụ lắc hộp quà');
+    await sleep(1900);
+    chk(K().ev && K().ev.loai === 'ketqua' && K().ev.conLai === 1, 'X8. kết quả → màn hình phụ hiện kết quả, còn 1 lượt', K().ev);
+    window.__kKq = JSON.parse(JSON.stringify(K()));
     return R;
   }, [fake, CHUNG.toString()]).catch(async e => (await p.evaluate(() => window.__R || []).catch(() => [])).concat(['FAIL dừng giữa chừng: ' + e.message.split('\n')[0]]));
+  const kQr = await p.evaluate(() => window.__kQr), kKq = await p.evaluate(() => window.__kKq);
   inKq('PosX.html (XOFA)', R, errs); await p.close();
+
+  // ════ kiosk.html (màn hình phụ XOFA) ════
+  ({ p, errs } = await moTrang(b, 'kiosk.html', { width: 1920, height: 1080 }));
+  R = await p.evaluate(async ([kQr, kKq]) => {
+    const R = []; window.__R = R; const chk = (c, m, x) => R.push((c ? 'ok   ' : 'FAIL ') + m + (c || x === undefined ? '' : ' → ' + JSON.stringify(x)));
+    const sleep = ms => new Promise(r => setTimeout(r, ms)); const $ = id => document.getElementById(id);
+    if (!window.GauNoel) { chk(false, 'K0. kiosk không nạp được gau_noel_giangsinh.v1.js'); return R; }
+    const now = o => Object.assign({}, o, { ev: Object.assign({}, o.ev, { at: Date.now() }) });
+    chk(!$('gn-k').classList.contains('on') && !$('gn-kb').classList.contains('on'), 'K1. chưa có dữ liệu → không hiện gì');
+    await db.ref('gau_noel_2026_kiosk/xofa').set(now(kQr)); await sleep(150);
+    chk($('gn-k').classList.contains('on') && /2 lượt/.test($('gn-k').textContent) && $('gn-k').querySelector('svg path') && /…111/.test($('gn-k').textContent), 'K2. sau thanh toán: QR + "2 lượt" + SĐT …111 ở khung phải', $('gn-k').textContent);
+    chk($('gn-kb').classList.contains('on') && $('bed-voucher-banner').style.display === 'none', 'K3. đang bật: banner «quay trúng gấu bông» thay banner voucher bed cũ');
+    await window.__shot('gau_kiosk_qr');
+    await db.ref('session_display_xolifa').set({ state: 'idle', cart: [], total: 0 }); await sleep(100);
+    chk($('gn-k').classList.contains('on'), 'K4. POS về «idle» 5 giây sau thanh toán → QR vẫn giữ');
+    await db.ref('session_display_xolifa').set({ state: 'ordering', cart: [{ name: 'Trà', qty: 1, price: 30000 }], total: 30000 }); await sleep(100);
+    chk(!$('gn-k').classList.contains('on') && $('orders-list').style.display !== 'none', 'K5. khách sau bắt đầu order → thu QR, hiện lại giỏ hàng');
+    await db.ref('gau_noel_2026_kiosk/xofa').set(now(kKq)); await sleep(150);
+    chk($('gn-k').classList.contains('on') && /Còn 1 lượt/.test($('gn-k').textContent), 'K6. chiếu kết quả «Mở lượt tại quầy»', $('gn-k').textContent);
+    await db.ref('gau_noel_2026_kiosk/xofa').set(now({ bat: true, ev: { loai: 'ketqua', win: true, code: 'GAUAB2CD', store: 'xofa', conLai: 0 } })); await sleep(150);
+    chk(/Trúng 1 gấu bông/.test($('gn-k').textContent) && /GAUAB2CD/.test($('gn-k').textContent) && /XOFA/.test($('gn-k').textContent), 'K7. trúng → gấu + mã + quán nhận');
+    await window.__shot('gau_kiosk_trung');
+    await db.ref('gau_noel_2026_kiosk/xofa/bat').set(false); await sleep(150);
+    chk(!$('gn-k').classList.contains('on') && !$('gn-kb').classList.contains('on') && $('bed-voucher-banner').style.display === '', 'K8. TẮT → ẩn hết, kiosk về như cũ');
+    await db.ref('gau_noel_2026_kiosk/xofa').set({ bat: true, ev: { loai: 'qr', soLuot: 1, at: Date.now() - 11 * 60e3 } }); await sleep(150);
+    chk(!$('gn-k').classList.contains('on'), 'K9. sự kiện cũ hơn 10 phút (mở lại kiosk) → không hiện');
+    return R;
+  }, [kQr, kKq]).catch(async e => (await p.evaluate(() => window.__R || []).catch(() => [])).concat(['FAIL dừng giữa chừng: ' + e.message.split('\n')[0]]));
+  inKq('kiosk.html (màn hình phụ XOFA)', R, errs); await p.close();
 
   // ════ posgieo.html (Gieo Gieo) ════
   ({ p, errs } = await moTrang(b, 'posgieo.html', { width: 1280, height: 800 }));

@@ -1,6 +1,7 @@
 /* gau_noel_giangsinh.v1.js — QUAY TRÚNG GẤU GIÁNG SINH 2026, dùng chung 3 quán + app khách:
  *   pos.html (The cafe 33) · PosX.html (XOFA) · posgieo.html (Gieo Gieo) — BỐC THĂM lúc thanh toán đơn có SĐT, Đổi quà,
  *     Mở lượt tại quầy, huỷ bill (PosX / Gieo). The cafe 33: popup QR sau thanh toán. Gieo: QR cuối bill in.
+ *   kiosk.html (màn hình phụ XOFA) — data-quan="kiosk": QR + số lượt sau thanh toán, chiếu lại «Mở lượt tại quầy» (RT gau_noel_2026_kiosk).
  *   index_giangsinh.html (app khách) — MỞ lượt đã bốc (quay), thẻ gấu dưới thẻ thành viên.
  *   pos.html → Quản lý → «Gấu Noel»: CÔNG TẮC BẬT / TẮT chương trình (cả 3 quán chỉ chạy khi bật), ngày bắt đầu,
  *     nhập kho từng quán, thống kê, XOÁ HẾT dữ liệu khi hết đợt.
@@ -23,9 +24,11 @@
  *   1. pos.html (The cafe 33) → Quản lý → tab «Gấu Noel»:
  *        a. Bấm TẮT chương trình (3 quán ngừng ngay, không cần deploy).
  *        b. (Tuỳ chọn) Tải thống kê, chụp màn hình để lưu số liệu đợt.
- *        c. Bấm «Xoá dữ liệu Gấu Noel…», nhập mã 2512 → xoá hết gau_noel_2026 (khách, lượt, mã) + gau_noel_2026_kho (kho, công tắc).
+ *        c. Bấm «Xoá dữ liệu Gấu Noel…», nhập mã 2512 → xoá hết gau_noel_2026 (khách, lượt, mã) + gau_noel_2026_kho (kho, công tắc)
+ *           + Realtime gau_noel_2026_kiosk (màn hình phụ).
  *           Không đụng customers, đơn hàng, điểm, tem. Báo lỗi giữa chừng → bấm lại, xoá tiếp phần còn lại.
  *   2. Gỡ 1 thẻ <script src="gau_noel_giangsinh.v…js" …> trước </body> ở: pos.html, PosX.html, posgieo.html
+ *      + kiosk.html (màn hình phụ XOFA)
  *      (+ index_giangsinh.html: chạy lại node tools/tao_ban_giangsinh.js nếu bản Giáng sinh còn dùng; hoặc về index.html).
  *      Tìm nhanh: grep -n "gau_noel_giangsinh" *.html
  *   3. Chạy lại bản sinh tự động có chép từ các file trên: node tools/tao_ban_tet.js (pos_tet / PosX_tet), node tools/tao_ban_thu.js
@@ -220,10 +223,12 @@
   }
 
   // ── Firebase ──────────────────────────────────────────────
-  var FS = null, FV = null;
+  var FS = null, FV = null, DB = null;
+  var KIOSK_ROOT = 'gau_noel_2026_kiosk';   // RT: màn hình phụ XOFA (kiosk.html) — { xofa: { bat, ev } }
   function init(o) {
     o = o || {};
     FS = o.fstore || FS;
+    DB = o.db || DB;
     FV = o.FieldValue || FV || (root.firebase && root.firebase.firestore && root.firebase.firestore.FieldValue) || null;
     if (o.db && o.db.ref) {
       try { o.db.ref('.info/serverTimeOffset').on('value', function (s) { offset = Number(s && s.val ? s.val() : 0) || 0; }); } catch (e) {}
@@ -415,11 +420,13 @@
         return b.commit().then(function () { done += snap.docs.length; if (onProgress) onProgress(done); return round(coll); });
       });
     }
-    return round(CFG.coll).then(function () { return round(CFG.khoColl); }).then(function () { return done; });
+    return round(CFG.coll).then(function () { return round(CFG.khoColl); })
+      .then(function () { return DB && DB.ref ? DB.ref(KIOSK_ROOT).remove() : null; })
+      .then(function () { return done; });
   }
 
   var GauNoel = {
-    CFG: CFG, BAT_DAU_GOC: BAT_DAU_GOC, tenQuan: tenQuan, apCfg: apCfg, dangBat: dangBat, ngheCfg: ngheCfg, docCfg: docCfg, datCfg: datCfg,
+    CFG: CFG, KIOSK_ROOT: KIOSK_ROOT, BAT_DAU_GOC: BAT_DAU_GOC, tenQuan: tenQuan, apCfg: apCfg, dangBat: dangBat, ngheCfg: ngheCfg, docCfg: docCfg, datCfg: datCfg,
     KHO_NGAU: KHO_NGAU, KHO_CHAC: KHO_CHAC, TEN_KHO: TEN_KHO, TEN_QUAN: TEN_QUAN,
     now: now, vnDay: vnDay, vnHour: vnHour, dangMua: dangMua, dangNhan: dangNhan, hetDot: hetDot, chang: chang,
     soLuot: soLuot, bandOf: bandOf, pTurn: pTurn, nguongLai: nguongLai, chacTrung: chacTrung, laiDon: laiDon,
@@ -444,7 +451,7 @@
   'use strict';
   if (typeof document === 'undefined' || !window.GauNoel) return;
   var me = document.currentScript, APP = me && me.getAttribute('data-quan');
-  if (!APP || ['tc33', 'xofa', 'gieo'].indexOf(APP) < 0) return;
+  if (!APP || ['tc33', 'xofa', 'gieo', 'kiosk'].indexOf(APP) < 0) return;
   var G = window.GauNoel, URL_KHACH = 'https://the-cafe-33.web.app';
   // QR tĩnh dẫn tới URL_KHACH (29×29, mức M — dựng sẵn bằng qrcode-generator, không cần thư viện lúc chạy)
   var QR_N = 29, QR_PATH = 'M0 0h7v1h-7zM11 0h1v1h-1zM15 0h2v1h-2zM18 0h3v1h-3zM22 0h7v1h-7zM0 1h1v1h-1zM6 1h1v1h-1zM9 1h1v1h-1zM11 1h2v1h-2zM17 1h2v1h-2zM20 1h1v1h-1zM22 1h1v1h-1zM28 1h1v1h-1zM0 2h1v1h-1zM2 2h3v1h-3zM6 2h1v1h-1zM8 2h5v1h-5zM14 2h1v1h-1zM16 2h1v1h-1zM18 2h1v1h-1zM20 2h1v1h-1zM22 2h1v1h-1zM24 2h3v1h-3zM28 2h1v1h-1zM0 3h1v1h-1zM2 3h3v1h-3zM6 3h1v1h-1zM8 3h1v1h-1zM12 3h1v1h-1zM16 3h3v1h-3zM22 3h1v1h-1zM24 3h3v1h-3zM28 3h1v1h-1zM0 4h1v1h-1zM2 4h3v1h-3zM6 4h1v1h-1zM8 4h2v1h-2zM11 4h5v1h-5zM17 4h4v1h-4zM22 4h1v1h-1zM24 4h3v1h-3zM28 4h1v1h-1zM0 5h1v1h-1zM6 5h1v1h-1zM8 5h1v1h-1zM13 5h5v1h-5zM20 5h1v1h-1zM22 5h1v1h-1zM28 5h1v1h-1zM0 6h7v1h-7zM8 6h1v1h-1zM10 6h1v1h-1zM12 6h1v1h-1zM14 6h1v1h-1zM16 6h1v1h-1zM18 6h1v1h-1zM20 6h1v1h-1zM22 6h7v1h-7zM8 7h1v1h-1zM10 7h1v1h-1zM13 7h1v1h-1zM15 7h1v1h-1zM18 7h3v1h-3zM0 8h1v1h-1zM2 8h5v1h-5zM11 8h1v1h-1zM14 8h2v1h-2zM17 8h1v1h-1zM20 8h1v1h-1zM22 8h5v1h-5zM0 9h1v1h-1zM2 9h1v1h-1zM4 9h2v1h-2zM8 9h2v1h-2zM15 9h2v1h-2zM18 9h7v1h-7zM28 9h1v1h-1zM1 10h2v1h-2zM4 10h1v1h-1zM6 10h1v1h-1zM8 10h1v1h-1zM10 10h1v1h-1zM12 10h1v1h-1zM18 10h1v1h-1zM21 10h1v1h-1zM23 10h2v1h-2zM1 11h3v1h-3zM12 11h1v1h-1zM14 11h1v1h-1zM16 11h1v1h-1zM19 11h2v1h-2zM22 11h2v1h-2zM25 11h1v1h-1zM27 11h1v1h-1zM2 12h1v1h-1zM6 12h2v1h-2zM9 12h1v1h-1zM12 12h1v1h-1zM16 12h2v1h-2zM19 12h1v1h-1zM25 12h2v1h-2zM1 13h2v1h-2zM4 13h1v1h-1zM8 13h1v1h-1zM10 13h1v1h-1zM13 13h3v1h-3zM19 13h1v1h-1zM21 13h2v1h-2zM24 13h1v1h-1zM28 13h1v1h-1zM0 14h2v1h-2zM3 14h6v1h-6zM10 14h2v1h-2zM13 14h4v1h-4zM18 14h1v1h-1zM20 14h2v1h-2zM23 14h4v1h-4zM1 15h1v1h-1zM3 15h1v1h-1zM9 15h5v1h-5zM15 15h1v1h-1zM18 15h2v1h-2zM23 15h2v1h-2zM27 15h1v1h-1zM0 16h2v1h-2zM5 16h3v1h-3zM10 16h3v1h-3zM14 16h2v1h-2zM17 16h1v1h-1zM20 16h1v1h-1zM25 16h2v1h-2zM0 17h5v1h-5zM7 17h1v1h-1zM9 17h1v1h-1zM12 17h1v1h-1zM15 17h2v1h-2zM19 17h1v1h-1zM21 17h4v1h-4zM26 17h1v1h-1zM28 17h1v1h-1zM0 18h1v1h-1zM3 18h1v1h-1zM5 18h4v1h-4zM11 18h1v1h-1zM18 18h1v1h-1zM20 18h1v1h-1zM24 18h1v1h-1zM26 18h1v1h-1zM0 19h1v1h-1zM2 19h2v1h-2zM8 19h2v1h-2zM14 19h1v1h-1zM16 19h1v1h-1zM18 19h2v1h-2zM21 19h2v1h-2zM27 19h1v1h-1zM0 20h1v1h-1zM2 20h3v1h-3zM6 20h1v1h-1zM10 20h1v1h-1zM16 20h1v1h-1zM18 20h1v1h-1zM20 20h5v1h-5zM26 20h3v1h-3zM8 21h2v1h-2zM13 21h3v1h-3zM17 21h4v1h-4zM24 21h5v1h-5zM0 22h7v1h-7zM9 22h1v1h-1zM12 22h6v1h-6zM19 22h2v1h-2zM22 22h1v1h-1zM24 22h3v1h-3zM0 23h1v1h-1zM6 23h1v1h-1zM8 23h1v1h-1zM10 23h4v1h-4zM15 23h1v1h-1zM17 23h2v1h-2zM20 23h1v1h-1zM24 23h1v1h-1zM28 23h1v1h-1zM0 24h1v1h-1zM2 24h3v1h-3zM6 24h1v1h-1zM8 24h2v1h-2zM11 24h1v1h-1zM14 24h2v1h-2zM20 24h5v1h-5zM26 24h3v1h-3zM0 25h1v1h-1zM2 25h3v1h-3zM6 25h1v1h-1zM8 25h3v1h-3zM13 25h1v1h-1zM15 25h2v1h-2zM18 25h2v1h-2zM25 25h2v1h-2zM0 26h1v1h-1zM2 26h3v1h-3zM6 26h1v1h-1zM8 26h2v1h-2zM11 26h1v1h-1zM13 26h2v1h-2zM18 26h10v1h-10zM0 27h1v1h-1zM6 27h1v1h-1zM9 27h2v1h-2zM14 27h1v1h-1zM16 27h1v1h-1zM20 27h1v1h-1zM24 27h2v1h-2zM27 27h1v1h-1zM0 28h7v1h-7zM8 28h2v1h-2zM13 28h2v1h-2zM16 28h1v1h-1zM18 28h1v1h-1zM23 28h4v1h-4z';
@@ -461,6 +468,7 @@
   }
   function an(fn) { return function () { try { return fn.apply(this, arguments); } catch (e) { console.warn('[gấu]', e); } }; }
 
+  if (APP === 'kiosk') { ganKiosk(); return; }
   var fs0 = null, db0 = null;
   try { fs0 = fstore; db0 = db; } catch (e) { /* app không có fstore/db toàn cục */ }
   if (!fs0) { console.warn('[gấu] không thấy fstore'); return; }
@@ -651,6 +659,20 @@
 
   // ── XOFA ──
   if (APP === 'xofa') {
+    // màn hình phụ (kiosk.html nghe gau_noel_2026_kiosk/xofa): chỉ ghi khi có sự kiện; SĐT chỉ gửi 3 số cuối
+    var KREF = null; try { KREF = db0 && db0.ref(G.KIOSK_ROOT + '/xofa'); } catch (e) {}
+    var batDaGhi = null;
+    G.onManHinh = function (loai, d) {
+      if (!KREF) return;
+      d = d || {}; var p = G.normPhone(d.sdt);
+      batDaGhi = G.dangBat();
+      KREF.update({ bat: batDaGhi, ev: { loai: loai, sdt: p ? p.slice(-3) : '', soLuot: Number(d.soLuot) || 0, win: !!d.win, code: d.code || '',
+        store: d.store || '', conLai: Number(d.conLai) || 0, at: Date.now() } }).catch(function (e) { console.warn('[gấu] màn hình phụ', e); });
+    };
+    G.ngheCfg(function () {
+      var b = G.dangBat(); if (!KREF || b === batDaGhi) return;
+      batDaGhi = b; KREF.child('bat').set(b).catch(function () { batDaGhi = null; });
+    });
     boc('_loyaltyAfterSave', function (cu) {
       return function (items, total, orderId) {
         var sdt = ($('cuph') || {}).value || '';
@@ -856,5 +878,78 @@
         return cu.apply(this, arguments);
       };
     });
+  }
+
+  // ── kiosk.html (màn hình phụ XOFA) — chỉ hiển thị, không Firestore. Nghe RT gau_noel_2026_kiosk/xofa ──
+  function ganKiosk() {
+    var dbk = null; try { dbk = db; } catch (e) {}
+    if (!dbk || !dbk.ref) { console.warn('[gấu] kiosk không thấy db'); return; }
+    var css = document.createElement('style');
+    css.textContent =
+      '#gn-k{display:none;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:16px 12px;flex:1;background:linear-gradient(180deg,#fff5f5,#f0fdf4);overflow:hidden;text-align:center}' +
+      '#gn-k.on{display:flex}#gn-k .k-t{font-size:15px;font-weight:700;color:#991b1b;line-height:1.3}#gn-k .k-s{font-size:12px;color:#374151;line-height:1.5}' +
+      '#gn-k .k-n{font-size:30px;font-weight:700;color:#166534;line-height:1}#gn-k .k-big{font-size:64px;line-height:1}' +
+      '#gn-k .k-code{font-size:20px;font-weight:700;letter-spacing:2px;color:#166534;background:#fff;border-radius:10px;padding:6px 12px;border:2px dashed #86efac}' +
+      '#gn-k .k-qr{width:100%;max-width:230px;aspect-ratio:1}#gn-k .k-qr svg{width:100%;height:100%}' +
+      '@keyframes gnKLac{0%,100%{transform:rotate(0)}25%{transform:rotate(-14deg)}75%{transform:rotate(12deg)}}#gn-k .lac{animation:gnKLac .5s ease-in-out infinite}' +
+      '#gn-kb{flex-shrink:0;margin:6px 12px;padding:6px 10px;border-radius:10px;background:linear-gradient(135deg,#fef2f2,#dcfce7);border:1px solid #fca5a5;display:none;align-items:center;gap:6px;font-size:8.5px;font-weight:700;color:#7f1d1d;line-height:1.3}#gn-kb.on{display:flex}';
+    document.head.appendChild(css);
+    var right = document.getElementById('panel-right'), bill = document.getElementById('bill-total-block');
+    if (!right) return;
+    var k = document.createElement('div'); k.id = 'gn-k';
+    right.insertBefore(k, bill || null);
+    var ban = document.createElement('div'); ban.id = 'gn-kb';
+    ban.innerHTML = '<span style="font-size:12px">🧸</span><span>Giáng sinh: mua từ 2 ly + đọc SĐT tích điểm → quay trúng gấu bông!</span>';
+    var neoBan = document.getElementById('bed-voucher-banner');
+    if (neoBan && neoBan.parentNode) neoBan.parentNode.insertBefore(ban, neoBan.nextSibling); else right.insertBefore(ban, right.firstChild);
+    var anTimer = null, lastAt = 0, bat = false;
+    var CAC = ['orders-list', 'done-panel', 'qr-panel'];
+    function hien(html, giay) {
+      k.innerHTML = html; k.classList.add('on');
+      CAC.forEach(function (id) { var e = document.getElementById(id); if (e) e.style.visibility = 'hidden'; if (e && id === 'orders-list') e.style.display = 'none'; });
+      clearTimeout(anTimer); if (giay) anTimer = setTimeout(an, giay * 1000);
+    }
+    function an() {
+      clearTimeout(anTimer); k.classList.remove('on'); k.innerHTML = '';
+      CAC.forEach(function (id) { var e = document.getElementById(id); if (e) e.style.visibility = ''; });
+      var ol = document.getElementById('orders-list'), dp = document.getElementById('done-panel'), qp = document.getElementById('qr-panel');
+      if (ol && !(dp && dp.classList.contains('visible')) && !(qp && qp.classList.contains('visible'))) ol.style.display = '';
+    }
+    function ve(ev) {
+      if (!ev || !bat || Date.now() - (Number(ev.at) || 0) > 10 * 60e3) { an(); return; }
+      var sdt = ev.sdt ? 'SĐT …' + esc(ev.sdt) : '';
+      if (ev.loai === 'qr') hien('<div class="k-t">🎄 Quay trúng gấu Noel</div><div class="k-n">' + (Number(ev.soLuot) || 0) + ' lượt</div>' +
+        '<div class="k-qr">' + qrSvg(230) + '</div><div class="k-s">Quét mã → đăng nhập ' + (sdt || 'SĐT') + ' → bấm <b>Quay</b></div>', 90);
+      else if (ev.loai === 'mo') hien('<div class="k-t">🎁 Mở lượt quay</div><div class="k-big">🎁</div><div class="k-s">' + sdt + '</div>', 120);
+      else if (ev.loai === 'quay') hien('<div class="k-t">Đang quay…</div><div class="k-big lac">🎁</div><div class="k-s">' + sdt + '</div>', 60);
+      else if (ev.loai === 'ketqua') hien(ev.win
+        ? '<div class="k-t">Chúc mừng!</div><div class="k-big">🧸</div><div class="k-s"><b>Trúng 1 gấu bông</b><br>Nhận tại ' + esc(G.tenQuan(ev.store)) + '</div><div class="k-code">' + esc(ev.code) + '</div>' +
+          (ev.conLai > 0 ? '<div class="k-s">Còn ' + ev.conLai + ' lượt</div>' : '')
+        : '<div class="k-t">Chưa trúng lần này</div><div class="k-big">🎄</div><div class="k-s">Chúc bạn may mắn lần sau!' + (ev.conLai > 0 ? '<br>Còn ' + ev.conLai + ' lượt' : '') + '</div>', 30);
+      else an();
+    }
+    var ref = null, cb = null, cuoi = null, sref = null, scb = null;
+    function gan() {
+      if (ref && cb) ref.off('value', cb);
+      if (sref && scb) sref.off('value', scb);
+      // giỏ mới (session_display_xolifa.state khác 'done') → thu khung QR gấu lại; đang mở lượt tại quầy thì giữ
+      sref = dbk.ref('session_display_xolifa/state');
+      scb = sref.on('value', function (s) {
+        var st = String(s.val() || '').toLowerCase();
+        if (st && st !== 'done' && st !== 'idle' && k.classList.contains('on') && cuoi && cuoi.loai === 'qr') an();
+      }, function () {});
+      ref = dbk.ref(G.KIOSK_ROOT + '/xofa');
+      cb = ref.on('value', function (snap) {
+        var v = snap.val() || {};
+        bat = v.bat === true; ban.classList.toggle('on', bat);
+        var nb = document.getElementById('bed-voucher-banner'); if (nb) nb.style.display = bat ? 'none' : '';
+        var ev = v.ev || null, at = ev ? Number(ev.at) || 0 : 0;
+        if (at !== lastAt || !bat) { lastAt = at; ve(ev); }
+        cuoi = ev;
+      }, function (e) { console.warn('[gấu] kiosk', e); });
+    }
+    // kiosk đăng nhập rồi mới nghe (rules cần đăng nhập) — gắn lại mỗi khi trạng thái đăng nhập đổi
+    try { firebase.auth().onAuthStateChanged(function () { gan(); }); } catch (e) { gan(); }
+    G.kioskVe = ve;   // test
   }
 })();

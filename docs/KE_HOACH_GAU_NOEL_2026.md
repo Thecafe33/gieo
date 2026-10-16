@@ -77,7 +77,7 @@ Code trong 3 POS **tự tắt ngoài đợt** (đọc ngày máy chủ): trướ
 - Mã quán trong dữ liệu: `tc33`, `xofa`, Gieo theo mã quán (`gg01`…). Số kho từng quán nhập ở tab Quản lý (số từ trang mô phỏng — vẫn chờ số bill thật 30 ngày TC33 / XOFA).
 - GĐ2 xong (16/10, chủ dự án deploy từ hôm nay): **công tắc bật / tắt** `gau_noel_2026_kho/_cfg` (`bat`, `batDau`) — mặc định TẮT, tab pos.html › Quản lý › «Gấu Noel» (bật/tắt, ngày bắt đầu, kho từng quán, thống kê, xoá mã 2512). Gắn 3 POS bằng 1 thẻ `<script src="gau_noel_giangsinh.v1.js" data-quan="tc33|xofa|gieo">` trước `</body>`, chỉ bọc hàm sẵn có:
   - TC33: `_pushPaidOrder` + `clearDebtAfterPayment` → bốc → popup QR (+ Mở lượt tại quầy); `checkSdtLive` / `resetPhoneInput` → khung Gấu Noel (Đổi quà, Mở lượt). Bed > 160K tính theo TỪNG BILL (giờ bed + nước, bỏ ăn vặt).
-  - XOFA: `_loyaltyAfterSave` → bốc; `renderCustomerInfo` / `clearCustomer` → khung; `delOrderConfirm` → huỷ bill. QR màn hình phụ: chờ file (`GauNoel.onManHinh` để nối).
+  - XOFA: `_loyaltyAfterSave` → bốc; `renderCustomerInfo` / `clearCustomer` → khung; `delOrderConfirm` → huỷ bill. Màn hình phụ `kiosk.html` (chủ dự án gửi 16/10, thêm 1 thẻ `data-quan="kiosk"`): PosX ghi RT `gau_noel_2026_kiosk/xofa` `{bat, ev}` (SĐT chỉ 3 số cuối) → kiosk hiện QR + số lượt ở khung phải (giữ tới khi khách sau order, tối đa 90 giây), chiếu lại Mở lượt tại quầy (mở / quay / kết quả), banner Giáng sinh thay banner voucher bed khi đang bật. Xoá hết dữ liệu xoá cả nhánh RT này.
   - Gieo: `assistFinalizeOrder` → bốc; `buildReceiptContent` + `renderReceiptCanvas` → QR cuối bill; khung; huỷ bill. `data_access.v9.js` (posgieo, quanlygieo, manage trỏ v9).
   - Hướng dẫn gỡ sạch: đầu file `gau_noel_giangsinh.v1.js`. Test trình duyệt: `node tools/gau_noel/e2e_gau.js`.
-- Tiếp: GĐ3 index_giangsinh (popup quay + thẻ gấu); PosX màn hình phụ khi có file.
+- Tiếp: GĐ3 index_giangsinh (popup quay + thẻ gấu).

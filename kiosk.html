@@ -1,0 +1,1342 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cafe Kiosk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Google+Sans+Display:wght@400;700&family=Google+Sans+Text:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:        #ffffff;
+    --surface:   #ffffff;
+    --surface2:  #f5f5f5;
+    --border:    #e8e8e8;
+    --border2:   #d0d0d0;
+    --accent:    #b5822a;
+    --text:      #1a1714;
+    --text2:     #6b6558;
+    --text3:     #a89e90;
+    --red:       #c0392b;
+    --red-bg:    #fdf0ee;
+    --green:     #2e7d32;
+    --green-bg:  #edf7ee;
+    --amber:     #b5822a;
+    --amber-bg:  #fdf3e0;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    width: 100vw; height: 100vh;
+    overflow: hidden;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Google Sans Text', 'Google Sans', sans-serif;
+    user-select: none;
+    -webkit-user-select: none;
+    pointer-events: none;
+    touch-action: none;
+    cursor: none;
+  }
+
+  #app {
+    display: flex;
+    width: 100vw; height: 100vh;
+    background: #ffffff;
+  }
+
+  /* ══ LEFT: SLIDESHOW 30% ══ */
+  #panel-left {
+    width: 30%; height: 100%;
+    position: relative;
+    overflow: hidden;
+    flex-shrink: 0;
+    background: #f5f5f5;
+    border-right: 1px solid var(--border);
+  }
+
+  .slide {
+    position: absolute; inset: 0;
+    opacity: 0;
+    transition: opacity 1.4s cubic-bezier(0.4,0,0.2,1);
+  }
+  .slide.active { opacity: 1; }
+
+  .slide img, .slide video {
+    width: 100%; height: 100%;
+    object-fit: cover; display: block;
+  }
+
+  #panel-left::after {
+    content: '';
+    position: absolute; left: 0; right: 0; bottom: 0;
+    height: 72px;
+    background: linear-gradient(transparent, rgba(0,0,0,0.2));
+    pointer-events: none; z-index: 5;
+  }
+
+  #slide-dots {
+    position: absolute; bottom: 14px;
+    left: 50%; transform: translateX(-50%);
+    display: flex; gap: 5px; z-index: 10;
+  }
+  /* Đảm bảo gradient overlay chỉ phủ vùng slideshow */
+  #panel-left::after {
+    height: 60px;
+    top: auto; /* override lại để chắc chắn bottom-only */
+  }
+
+  .dot {
+    width: 5px; height: 5px; border-radius: 50%;
+    background: rgba(255,255,255,0.45);
+    transition: all 0.35s ease;
+  }
+  .dot.active {
+    background: #fff; width: 18px; border-radius: 3px;
+  }
+
+  .slide-placeholder {
+    width: 100%; height: 100%;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 12px;
+    background: var(--surface2); color: var(--text3);
+  }
+  .slide-placeholder span {
+    font-size: 11px; letter-spacing: 1.5px;
+    text-transform: uppercase;
+  }
+
+  /* ══ LEFT TOP: FOOD MENU — 44% height, tĩnh không chuyển cảnh ══ */
+  #food-panel {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 44%;
+    overflow: hidden;
+    background: #f0f0f0;
+    border-bottom: 1px solid var(--border);
+    z-index: 2;
+  }
+
+  #food-panel img {
+    width: 100%; height: 100%;
+    object-fit: contain;
+    object-position: top center;
+    display: block;
+  }
+
+  #food-panel-placeholder {
+    width: 100%; height: 100%;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 10px; color: var(--text3);
+    background: var(--surface2);
+  }
+  #food-panel-placeholder span {
+    font-size: 10px; letter-spacing: 1.5px;
+    text-transform: uppercase;
+  }
+
+  /* ══ LEFT BOTTOM: SLIDESHOW — 56% height ══ */
+  /* slide-container fill đúng vùng bottom 56% — inset overridden bởi JS khi cần */
+  #slide-container {
+    position: absolute;
+    top: 44%; left: 0; right: 0; bottom: 0;
+  }
+
+  /* slide dots nằm trong vùng slideshow (bottom 56%) */
+  #slide-dots {
+    bottom: 14px;
+  }
+
+  /* ══ MID: MENU 50% — full height, no topbar ══ */
+  #panel-mid {
+    width: 50%; height: 100%;
+    position: relative; background: #ffffff;
+    overflow: hidden; flex-shrink: 0;
+    border-right: 1px solid var(--border);
+  }
+
+  #menu-pages {
+    position: absolute; inset: 0;
+  }
+
+  .menu-page {
+    position: absolute; inset: 0;
+    opacity: 0; transition: opacity 0.9s ease;
+  }
+  .menu-page.active { opacity: 1; }
+
+  .menu-page img {
+    width: 100%; height: 100%;
+    object-fit: contain; object-position: top center; display: block;
+  }
+
+  .menu-placeholder {
+    width: 100%; height: 100%;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 14px; color: var(--text3);
+  }
+  .menu-placeholder p {
+    font-size: 13px; letter-spacing: 1px;
+    text-transform: uppercase; opacity: 0.5;
+  }
+
+  /* ══ RIGHT: CART / SESSION DISPLAY 20% ══ */
+  #panel-right {
+    width: 20%; height: 100%;
+    background: #ffffff;
+    display: flex; flex-direction: column;
+    flex-shrink: 0; overflow: hidden;
+  }
+
+  #orders-header {
+    flex-shrink: 0;
+    padding: 18px 16px 14px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+
+  .orders-title {
+    font-size: 11px; font-weight: 500;
+    letter-spacing: 2px; text-transform: uppercase; color: var(--text3);
+  }
+
+  .orders-badge {
+    background: var(--accent); color: #fff;
+    font-size: 11px; font-weight: 700;
+    padding: 2px 10px; border-radius: 20px;
+    min-width: 26px; text-align: center;
+  }
+
+  #orders-list {
+    flex: 1; overflow: hidden;
+    padding: 10px 10px 0; display: flex;
+    flex-direction: column; gap: 8px;
+  }
+
+  /* ORDER / CART CARD */
+  .order-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 13px 13px 11px;
+    position: relative; overflow: hidden;
+    animation: cardIn 0.45s cubic-bezier(0.16,1,0.3,1);
+    transition: opacity 0.4s ease, transform 0.4s ease, max-height 0.4s ease, padding 0.4s ease;
+    max-height: 300px;
+  }
+
+  .order-card::before {
+    content: ''; position: absolute;
+    left: 0; top: 0; bottom: 0; width: 3px;
+    background: var(--border2); border-radius: 0;
+  }
+  .order-card.status-cash_payment::before { background: var(--amber); }
+  .order-card.status-ready::before        { background: var(--green); }
+  .order-card.status-cancelled::before    { background: var(--red); }
+
+  .order-card.removing {
+    opacity: 0; transform: translateX(10px);
+    max-height: 0 !important; padding: 0 13px; margin: 0;
+  }
+
+  @keyframes cardIn {
+    from { opacity: 0; transform: translateY(-8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .card-top {
+    display: flex; align-items: flex-start;
+    justify-content: space-between; margin-bottom: 7px; gap: 6px;
+  }
+
+  .card-session-id {
+    font-family: 'Google Sans Display', 'Google Sans', sans-serif;
+    font-size: 13px; font-weight: 700;
+    color: var(--text2); line-height: 1; letter-spacing: 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    max-width: 70%;
+  }
+
+  .card-status-pill {
+    font-size: 10px; font-weight: 500;
+    padding: 3px 8px; border-radius: 20px;
+    white-space: nowrap; flex-shrink: 0;
+    background: var(--surface2); color: var(--text3);
+  }
+  .status-cash_payment .card-status-pill { background: var(--amber-bg); color: var(--amber); }
+  .status-ready        .card-status-pill { background: var(--green-bg); color: var(--green); }
+  .status-cancelled    .card-status-pill { background: var(--red-bg);   color: var(--red); }
+
+  .card-items { list-style: none; margin-bottom: 8px; }
+
+  .card-item {
+    font-size: 12px; color: var(--text2);
+    padding: 2px 0; display: flex; align-items: center; gap: 6px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .card-item::before {
+    content: ''; width: 3px; height: 3px;
+    border-radius: 50%; background: var(--text3); flex-shrink: 0;
+  }
+
+  .card-item-price {
+    margin-left: auto; font-size: 11px;
+    color: var(--text3); flex-shrink: 0;
+  }
+
+  .card-footer {
+    display: flex; align-items: center; justify-content: space-between;
+    border-top: 1px solid var(--border); padding-top: 8px; margin-top: 4px;
+  }
+
+  .card-time  { font-size: 11px; color: var(--text3); }
+  .card-price {
+    font-family: 'Google Sans', sans-serif;
+    font-size: 14px; font-weight: 700; color: var(--accent);
+  }
+
+  /* ── CUSTOMER NAME — trong header ── */
+  #customer-bar {
+    flex-shrink: 0;
+    padding: 8px 16px 10px;
+    border-bottom: 1px solid var(--border);
+    display: none;
+    align-items: center; gap: 8px;
+    background: #fafafa;
+  }
+  #customer-bar.visible { display: flex; }
+
+  .customer-icon {
+    width: 24px; height: 24px; border-radius: 50%;
+    background: var(--accent); color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .customer-icon svg { width: 12px; height: 12px; }
+
+  .customer-name {
+    font-size: 11px; font-weight: 600; color: var(--text);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    flex: 1; min-width: 0;
+  }
+
+  .customer-points {
+    font-size: 10px; color: var(--text3);
+    white-space: nowrap; flex-shrink: 0;
+  }
+
+  /* ── BANNER KHUYẾN MÃI: HỢP TÁC XOFA & THE CAFE 33 (VOUCHER BED) ── */
+  #bed-voucher-banner {
+    flex-shrink: 0;
+    margin: 6px 12px;
+    padding: 6px 10px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, #fdf6ec 0%, #f5e6cc 100%);
+    border: 1px solid rgba(180,130,60,0.3);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  #bed-voucher-banner .bvb-icon {
+    font-size: 12px; line-height: 1; flex-shrink: 0;
+  }
+  #bed-voucher-banner .bvb-sub {
+    font-size: 8.5px; font-weight: 700; color: #3d1f00; line-height: 1.3; margin: 0;
+  }
+
+  /* ── THÔNG BÁO NHẬN VOUCHER — hiện trong panel "done" (không che toàn màn hình) ── */
+  .done-voucher {
+    display: none;
+    margin-top: 4px;
+    padding: 10px 16px;
+    border-radius: 14px;
+    background: linear-gradient(135deg, #fce7f3, #fbcfe8);
+    border: 1px solid #f9a8d4;
+    color: #9d174d;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.5;
+    text-align: center;
+    max-width: 92%;
+  }
+  .done-voucher.visible { display: block; }
+
+  /* ── CART LIST ── */
+  #orders-list {
+    flex: 1; overflow-y: auto; overflow-x: hidden;
+    padding: 0;
+    min-height: 0; /* critical: allow flex child to shrink */
+  }
+
+  .cart-item-row {
+    display: flex; align-items: center;
+    padding: 9px 12px 9px 8px;
+    border-bottom: 1px solid var(--border);
+    gap: 6px;
+    animation: cartIn 0.25s ease;
+  }
+  @keyframes cartIn {
+    from { opacity: 0; transform: translateY(-3px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .cart-qty-badge {
+    width: 20px; height: 20px; border-radius: 5px;
+    background: #fdf3e0;
+    color: var(--accent); font-size: 10px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .cart-item-info { flex: 1; min-width: 0; }
+
+  .cart-item-name {
+    font-size: 10px; font-weight: 500; color: var(--text);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+
+  .cart-item-meta {
+    font-size: 9px; color: var(--text3); margin-top: 1px;
+  }
+
+  .cart-item-price {
+    font-size: 10px; font-weight: 700;
+    color: #1a1714; flex-shrink: 0;
+  }
+
+  .cart-item-toppings {
+    display: flex; flex-direction: column; gap: 1px;
+    margin-top: 2px;
+  }
+
+  .cart-item-topping {
+    font-size: 9px; color: var(--text3);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    display: flex; align-items: center; gap: 3px;
+  }
+
+  .cart-item-topping::before {
+    content: '+';
+    font-size: 8px;
+    color: var(--accent);
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+
+  /* ── EMPTY STATE ── */
+  .orders-empty {
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 10px; color: var(--text3);
+    padding: 20px; text-align: center;
+    height: 100%;
+  }
+  .orders-empty svg { opacity: 0.2; }
+  .orders-empty p {
+    font-size: 11px; letter-spacing: 1px;
+    text-transform: uppercase; opacity: 0.4; line-height: 1.9;
+  }
+
+  /* ── TOTAL BILL BLOCK — pinned bottom ── */
+  #bill-total-block {
+    flex-shrink: 0;
+    border-top: 2px solid var(--border);
+    background: #ffffff;
+    padding-bottom: 4px;
+  }
+
+  .bill-label {
+    font-size: 9px; font-weight: 500;
+    letter-spacing: 2px; text-transform: uppercase;
+    color: var(--text3); margin-bottom: 2px;
+  }
+
+  .bill-main-row {
+    padding: 12px 16px 8px;
+  }
+
+  .bill-amount {
+    font-family: 'Google Sans Display', 'Google Sans', sans-serif;
+    font-size: 34px; font-weight: 700;
+    color: var(--accent); letter-spacing: -1px; line-height: 1;
+  }
+
+  .bill-sub-rows {
+    padding: 0 16px 10px;
+    display: flex; flex-direction: column; gap: 5px;
+  }
+
+  .bill-sub-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding-top: 5px;
+    border-top: 1px dashed var(--border2);
+  }
+
+  .bill-sub-label {
+    font-size: 10px; color: var(--text3);
+  }
+
+  .bill-paid-val {
+    font-family: 'Google Sans', sans-serif;
+    font-size: 13px; font-weight: 700; color: var(--text2);
+  }
+
+  .bill-change-val {
+    font-family: 'Google Sans', sans-serif;
+    font-size: 13px; font-weight: 700; color: var(--green);
+  }
+
+  .bill-empty {
+    font-size: 11px; color: var(--text3);
+    text-align: center; padding: 14px 16px;
+    letter-spacing: 1px; text-transform: uppercase;
+    opacity: 0.5;
+  }
+
+  /* ── DONE PANEL — cảm ơn sau khi thanh toán ── */
+  #done-panel {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    padding: 24px 16px;
+    flex: 1;
+    background: #fff;
+  }
+  #done-panel.visible { display: flex; }
+
+  .done-icon {
+    width: 64px; height: 64px;
+    background: #e8f5ee;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    animation: popIn .4s cubic-bezier(.34,1.56,.64,1);
+  }
+  @keyframes popIn {
+    0% { transform: scale(0); opacity: 0; }
+    100% { transform: scale(1); opacity: 1; }
+  }
+  .done-title {
+    font-size: 16px; font-weight: 700;
+    color: #1a4a2e; text-align: center;
+  }
+  .done-amount {
+    font-size: 28px; font-weight: 700;
+    color: #1e6b3c; letter-spacing: -0.5px;
+  }
+  .done-method {
+    font-size: 11px; font-weight: 600;
+    color: #999; text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  .done-thanks {
+    font-size: 13px; color: #aaa;
+    text-align: center; line-height: 1.6;
+  }
+
+  /* ── QR PANEL trong panel-right ── */
+  #qr-panel {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 16px 12px;
+    flex: 1;
+    background: #fff;
+    overflow: hidden;
+  }
+  #qr-panel.visible { display: flex; }
+
+  .qr-bank-tag {
+    display: flex; align-items: center; gap: 6px;
+    background: #e8f5ee; border-radius: 10px;
+    padding: 5px 12px;
+  }
+  .qr-bank-tag span {
+    font-size: 11px; font-weight: 700; color: #1a4a2e;
+  }
+
+  .qr-img {
+    width: 100%; max-width: 160px; height: auto;
+    aspect-ratio: 1;
+    border-radius: 12px;
+    border: 2px solid #e8e8e8;
+  }
+
+  .qr-amount-label {
+    font-size: 10px; font-weight: 600;
+    color: #999; text-transform: uppercase;
+    letter-spacing: 1px; margin-bottom: -4px;
+  }
+
+  .qr-amount {
+    font-size: 22px; font-weight: 700;
+    color: #1a4a2e; letter-spacing: -0.5px; line-height: 1;
+    text-align: center;
+  }
+
+  .qr-addinfo {
+    background: #f5f5f5; border-radius: 8px;
+    padding: 6px 12px; font-size: 11px;
+    font-weight: 700; color: #1e6b3c;
+    letter-spacing: .5px; text-align: center;
+  }
+
+  .qr-hint {
+    font-size: 10px; color: #bbb;
+    text-align: center; line-height: 1.5;
+  }
+
+  .qr-waiting {
+    display: flex; align-items: center; gap: 6px;
+    background: #fff8e1; border-radius: 10px;
+    padding: 6px 12px;
+  }
+  .qr-waiting span {
+    font-size: 11px; font-weight: 600; color: #e67e22;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+  .qr-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: #e67e22;
+    animation: pulse 1.2s ease infinite;
+  }
+</style>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
+</head>
+<body>
+<div id="app">
+
+  <!-- LEFT: FOOD MENU (top 44%) + SLIDESHOW (bottom 56%) -->
+  <div id="panel-left">
+
+    <!-- TOP: Food menu tĩnh, không chuyển cảnh -->
+    <div id="food-panel">
+      <div id="food-panel-placeholder">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4">
+          <path d="M3 11l19-9-9 19-2-8-8-2z"/>
+        </svg>
+        <span>Đồ ăn</span>
+      </div>
+    </div>
+
+    <!-- BOTTOM: Slideshow -->
+    <div id="slide-container">
+      <div class="slide-placeholder" id="slide-placeholder">
+        <svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <rect x="2" y="5" width="20" height="14" rx="2"/>
+          <path d="m10 9 6 3-6 3V9z"/>
+        </svg>
+        <span>Chưa có nội dung</span>
+      </div>
+    </div>
+    <div id="slide-dots"></div>
+
+  </div>
+
+  <!-- MID: MENU ONLY (no topbar) -->
+  <div id="panel-mid">
+    <div id="menu-pages">
+      <div class="menu-page active" id="menu-placeholder-page">
+        <div class="menu-placeholder">
+          <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
+            <path d="M4 6h16M4 12h16M4 18h10"/>
+          </svg>
+          <p>Menu chưa được cấu hình</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT: SESSION / CART -->
+  <div id="panel-right">
+
+    <!-- HEADER + TÊN KHÁCH CÙNG BOX -->
+    <div style="flex-shrink:0; border-bottom: 1px solid var(--border);">
+      <div id="orders-header" style="padding:14px 16px 12px; display:flex; align-items:center; justify-content:space-between; border-bottom: none;">
+        <div class="orders-title">Giỏ hàng</div>
+        <div class="orders-badge" id="orders-count">0</div>
+      </div>
+      <div id="customer-bar">
+        <div class="customer-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>
+          </svg>
+        </div>
+        <div class="customer-name" id="customer-name-text"></div>
+        <div class="customer-points" id="customer-points-text"></div>
+      </div>
+    </div>
+
+    <!-- BANNER KHUYẾN MÃI — HỢP TÁC XOFA & THE CAFE 33 -->
+    <div id="bed-voucher-banner">
+      <div class="bvb-icon">🎁</div>
+      <p class="bvb-sub">Tặng 1 voucher miễn phí 1h Bed khi mua từ 2 ly nước — đọc SĐT để nhận nhé!</p>
+    </div>
+
+    <!-- DANH SÁCH MÓN -->
+    <div id="orders-list">
+      <div class="orders-empty" id="orders-empty">
+        <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4">
+          <circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 3"/>
+        </svg>
+        <p>Chưa có<br>giỏ hàng</p>
+      </div>
+    </div>
+
+    <!-- DONE PANEL — hiện sau khi thanh toán thành công -->
+    <div id="done-panel">
+      <div class="done-icon">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none">
+          <circle cx="12" cy="12" r="10" fill="#1a4a2e"/>
+          <path d="M7 12.5l3.5 3.5 6.5-7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <div class="done-title">Thanh toán thành công!</div>
+      <div class="done-amount" id="done-amount"></div>
+      <div class="done-method" id="done-method"></div>
+      <div class="done-voucher" id="done-voucher"></div>
+      <div class="done-thanks">Cảm ơn bạn!</div>
+    </div>
+
+    <!-- QR PANEL — hiện trong vùng cart khi CK -->
+    <div id="qr-panel">
+      <div class="qr-bank-tag">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect x="2" y="5" width="20" height="14" rx="3" fill="#1a4a2e"/><path d="M2 10h20" stroke="#fff" stroke-width="1.5"/><rect x="5" y="13" width="4" height="2.5" rx="1" fill="#fff" opacity=".7"/></svg>
+        <span>Cake by VPBank</span>
+      </div>
+      <img id="qr-img" class="qr-img" src="" alt="QR">
+      <div class="qr-amount-label">Số tiền thanh toán</div>
+      <div class="qr-amount" id="qr-amount">0đ</div>
+      <div class="qr-addinfo" id="qr-addinfo"></div>
+      <div class="qr-hint">Quét bằng app ngân hàng bất kỳ<br>Giữ đúng nội dung chuyển khoản</div>
+      <div class="qr-waiting">
+        <div class="qr-dot"></div>
+        <span>Đang chờ xác nhận...</span>
+      </div>
+    </div>
+
+    <!-- TỔNG BILL — luôn hiển thị ở dưới cùng -->
+    <div id="bill-total-block">
+      <div id="bill-empty" class="bill-empty">—</div>
+      <div id="bill-content" style="display:none">
+        <div class="bill-main-row">
+          <div class="bill-label">Tổng thanh toán</div>
+          <div class="bill-amount" id="bill-amount">0đ</div>
+        </div>
+        <div class="bill-sub-rows" id="bill-sub-rows" style="display:none">
+          <div class="bill-sub-row" id="bill-paid-row" style="display:none">
+            <span class="bill-sub-label">Khách đưa</span>
+            <span class="bill-paid-val" id="bill-paid-val">0đ</span>
+          </div>
+          <div class="bill-sub-row" id="bill-change-row" style="display:none">
+            <span class="bill-sub-label">Tiền thối</span>
+            <span class="bill-change-val" id="bill-change-val">0đ</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+</div>
+
+<script>
+/* ── FIREBASE CONFIG ── */
+var firebaseConfig = {
+  apiKey:        "AIzaSyCNh1-16gYZ0P30Fkd-2tB-O89PXkPX9Lc",
+  authDomain:    "the-cafe-33.firebaseapp.com",
+  databaseURL:   "https://the-cafe-33-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId:     "the-cafe-33",
+  storageBucket: "the-cafe-33.firebasestorage.app",
+  messagingSenderId: "...",
+  appId:         "..."
+};
+if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+var db   = firebase.database();
+var auth = firebase.auth();
+
+/* ── SLIDESHOW ── */
+var slides = [], cur = 0, slideTimer = null;
+var normalSlideItems = [], normalSlideDur = 6000; // backup slides gốc để restore sau DG
+
+function buildSlides(items, dur) {
+  var c = document.getElementById('slide-container');
+  var d = document.getElementById('slide-dots');
+  c.innerHTML = ''; d.innerHTML = ''; slides = []; cur = 0;
+  if (slideTimer) clearTimeout(slideTimer);
+
+  if (!items || !items.length) {
+    c.innerHTML = '<div class="slide-placeholder"><svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="m10 9 6 3-6 3V9z"/></svg><span>Không có nội dung</span></div>';
+    return;
+  }
+
+  items.forEach(function(item, i) {
+    var s = document.createElement('div');
+    s.className = 'slide' + (i === 0 ? ' active' : '');
+    if (item.type === 'video') {
+      var v = document.createElement('video');
+      v.src = item.url; v.muted = true; v.playsInline = true; v.loop = false; v.preload = 'auto';
+      s.appendChild(v);
+    } else {
+      var img = document.createElement('img');
+      img.src = item.url; img.loading = 'lazy';
+      s.appendChild(img);
+    }
+    c.appendChild(s); slides.push(s);
+    var dot = document.createElement('div');
+    dot.className = 'dot' + (i === 0 ? ' active' : '');
+    d.appendChild(dot);
+  });
+
+  function go(idx) {
+    var dots = d.querySelectorAll('.dot');
+    slides[cur].classList.remove('active'); dots[cur].classList.remove('active');
+    var pv = slides[cur].querySelector('video');
+    if (pv) { pv.pause(); pv.currentTime = 0; }
+    cur = (idx + slides.length) % slides.length;
+    slides[cur].classList.add('active'); dots[cur].classList.add('active');
+    var v = slides[cur].querySelector('video');
+    if (v) { v.play().catch(function(){}); v.onended = function() { go(cur + 1); }; }
+    else { if (slideTimer) clearTimeout(slideTimer); slideTimer = setTimeout(function() { go(cur + 1); }, dur); }
+  }
+
+  var fv = slides[0].querySelector('video');
+  if (fv) { fv.play().catch(function(){}); fv.onended = function() { go(1); }; }
+  else slideTimer = setTimeout(function() { go(1); }, dur);
+}
+
+/* ── MENU ── */
+var menuTimer = null;
+var kioskConfig = null; // cache kiosk_config
+
+function buildMenu(pages) {
+  var el = document.getElementById('menu-pages');
+  el.innerHTML = '';
+  if (menuTimer) clearInterval(menuTimer);
+  if (!pages || !pages.length) {
+    el.innerHTML = '<div class="menu-page active"><div class="menu-placeholder"><svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M4 6h16M4 12h16M4 18h10"/></svg><p>Menu chưa cấu hình</p></div></div>';
+    return;
+  }
+  pages.forEach(function(p, i) {
+    var d = document.createElement('div');
+    d.className = 'menu-page' + (i === 0 ? ' active' : '');
+    var img = document.createElement('img'); img.src = p.url;
+    d.appendChild(img); el.appendChild(d);
+  });
+  if (pages.length > 1) {
+    var idx = 0;
+    menuTimer = setInterval(function() {
+      var ps = el.querySelectorAll('.menu-page');
+      ps[idx].classList.remove('active');
+      idx = (idx + 1) % pages.length;
+      ps[idx].classList.add('active');
+    }, 15000);
+  }
+}
+
+// Chuyển menu dựa theo isToGo flag
+function applyMenuMode(isToGo) {
+  if (!kioskConfig) return;
+  var pages = isToGo
+    ? (kioskConfig.togoMenuPages && kioskConfig.togoMenuPages.length ? kioskConfig.togoMenuPages : kioskConfig.menuPages)
+    : kioskConfig.menuPages;
+  buildMenu(pages || []);
+}
+
+/* ── HELPERS ── */
+function fmtP(p) {
+  return p != null ? new Intl.NumberFormat('vi-VN').format(p) + 'đ' : '';
+}
+
+/* ── SESSION DISPLAY ── */
+var sessionCards = {};
+
+var STATE_LABELS = {
+  cart:         'Giỏ hàng',
+  cash_payment: 'Tiền mặt',
+  pending:      'Chờ xử lý',
+  ready:        'Sẵn sàng',
+  cancelled:    'Đã hủy',
+  done:         'Hoàn thành'
+};
+
+var STATE_PILL_CLASS = {
+  cart:         'state-cart',
+  cash_payment: 'state-cash',
+  pending:      'state-cart',
+  ready:        'state-done',
+  done:         'state-done',
+  cancelled:    'state-cancelled'
+};
+
+function updateBillDisplay(data) {
+  var billEmpty   = document.getElementById('bill-empty');
+  var billContent = document.getElementById('bill-content');
+
+  if (!data) {
+    billEmpty.style.display = '';
+    billContent.style.display = 'none';
+    document.getElementById('orders-count').textContent = '0';
+    return;
+  }
+
+  var total  = Number(data.total  || 0);
+  var paid   = Number(data.paid   || 0);
+  var change = data.change != null ? Number(data.change) : Math.max(0, paid - total);
+  var st     = (data.state || 'cart').toLowerCase();
+
+  billEmpty.style.display = 'none';
+  billContent.style.display = '';
+
+  document.getElementById('bill-amount').textContent = fmtP(total);
+
+  // Paid & change — chỉ hiện khi state = cash_payment và có paid
+  var subRows   = document.getElementById('bill-sub-rows');
+  var paidRow   = document.getElementById('bill-paid-row');
+  var changeRow = document.getElementById('bill-change-row');
+
+  if (st === 'cash_payment' && paid > 0) {
+    subRows.style.display = '';
+    paidRow.style.display = '';
+    document.getElementById('bill-paid-val').textContent = fmtP(paid);
+    if (change >= 0) {
+      changeRow.style.display = '';
+      document.getElementById('bill-change-val').textContent = fmtP(change);
+    } else {
+      changeRow.style.display = 'none';
+    }
+  } else {
+    subRows.style.display   = 'none';
+    paidRow.style.display   = 'none';
+    changeRow.style.display = 'none';
+  }
+}
+
+function renderSession(sessionId, data) {
+  var list  = document.getElementById('orders-list');
+  var empty = document.getElementById('orders-empty');
+
+  // Lưu data
+  sessionCards[sessionId] = data;
+
+  // --- Tên khách hàng: chỉ hiện nếu có tên thật (không phải Khách mới/lẻ) ---
+  var custBar    = document.getElementById('customer-bar');
+  var custName   = document.getElementById('customer-name-text');
+  var custPoints = document.getElementById('customer-points-text');
+  var name = data.customerName || '';
+  var isRealName = name && name !== 'Khách mới' && name !== 'Khách lẻ';
+  if (isRealName) {
+    custBar.classList.add('visible');
+    custName.textContent   = name;
+    custPoints.textContent = data.customerPoints ? data.customerPoints + ' điểm' : '';
+  } else {
+    custBar.classList.remove('visible');
+  }
+
+  // --- Danh sách món: mỗi index trong cart là 1 loại món ---
+  // Firebase array: { 0: {name,price,qty,size}, 1: {...}, 2: {...} }
+  var cartRaw = data.cart;
+  var cartItems = [];
+  if (Array.isArray(cartRaw)) {
+    cartItems = cartRaw.filter(Boolean); // lọc null slot
+  } else if (cartRaw && typeof cartRaw === 'object') {
+    // Object với key 0,1,2... → sort theo key
+    cartItems = Object.keys(cartRaw)
+      .sort(function(a, b) { return Number(a) - Number(b); })
+      .map(function(k) { return cartRaw[k]; })
+      .filter(Boolean);
+  }
+
+  // Xóa nội dung cũ (trừ empty state)
+  var existing = list.querySelectorAll('.cart-item-row');
+  existing.forEach(function(el) { el.remove(); });
+
+  if (cartItems.length === 0) {
+    empty.style.display = '';
+    document.getElementById('orders-count').textContent = '0';
+  } else {
+    empty.style.display = 'none';
+    var totalQtyCount = cartItems.reduce(function(s,c){ return s + Number(c.qty||1); }, 0);
+    document.getElementById('orders-count').textContent = totalQtyCount;
+
+    cartItems.forEach(function(it) {
+      var name  = it.name  || '?';
+      var qty   = Number(it.qty || it.quantity || 1);
+      var size  = it.size  || '';
+      var price = Number(it.price || 0);
+      var toppingSum = Number(it.toppingSum || 0);
+      var lineTotal = (price + toppingSum) * qty;
+
+      // FIX: Hiển thị giá đồng giá + gạch giá gốc nếu item có flag isDg
+      var isDg = !!it.isDg;
+      var originalPrice = it.originalPrice != null ? Number(it.originalPrice) : null;
+      var priceHtml;
+      if (isDg && originalPrice != null && originalPrice > price) {
+        var origLineTotal = (originalPrice + toppingSum) * qty;
+        priceHtml = '<div class="cart-item-price" style="text-align:right;">'
+          + '<span style="font-size:9px;color:#bbb;text-decoration:line-through;display:block;line-height:1.2;">' + fmtP(origLineTotal) + '</span>'
+          + '<span style="color:var(--green);">' + fmtP(lineTotal) + '</span>'
+          + '</div>';
+      } else {
+        priceHtml = '<div class="cart-item-price">' + (lineTotal > 0 ? fmtP(lineTotal) : '') + '</div>';
+      }
+
+      // FIX: Badge ĐG hiển thị sau tên size
+      var dgBadge = isDg
+        ? '<span style="display:inline-block;font-size:8px;font-weight:700;background:#e8f5ee;color:#2e7d32;border-radius:4px;padding:1px 5px;margin-left:4px;vertical-align:middle;">Đồng giá</span>'
+        : '';
+
+      // Build topping HTML
+      var toppings = it.toppings;
+      var toppingHtml = '';
+      if (Array.isArray(toppings) && toppings.length > 0) {
+        toppingHtml = '<div class="cart-item-toppings">'
+          + toppings.map(function(t) {
+              return '<div class="cart-item-topping">'
+                + (t.name || '')
+                + (t.price > 0 ? ' <span style="color:var(--accent);font-weight:700;">' + fmtP(t.price) + '</span>' : '')
+                + '</div>';
+            }).join('')
+          + '</div>';
+      }
+
+      var row = document.createElement('div');
+      row.className = 'cart-item-row';
+      row.innerHTML =
+        '<div class="cart-qty-badge">' + qty + '</div>' +
+        '<div class="cart-item-info">' +
+          '<div class="cart-item-name">' + name + '</div>' +
+          (size ? '<div class="cart-item-meta">Size ' + size + dgBadge + '</div>' : (isDg ? '<div class="cart-item-meta">' + dgBadge + '</div>' : '')) +
+          toppingHtml +
+        '</div>' +
+        priceHtml;
+      list.appendChild(row);
+    });
+  }
+
+  // Bill
+  updateBillDisplay(data);
+}
+
+function removeSession(sessionId) {
+  delete sessionCards[sessionId];
+  // Reset UI
+  var list = document.getElementById('orders-list');
+  list.querySelectorAll('.cart-item-row').forEach(function(el) { el.remove(); });
+  document.getElementById('orders-empty').style.display = '';
+  document.getElementById('customer-bar').classList.remove('visible');
+  document.getElementById('orders-count').textContent = '0';
+  updateBillDisplay(null);
+}
+
+/* ── ĐỒNG GIÁ PROMO SLIDE ── */
+var dgConfig = null;
+var dgCheckTimer = null;
+var dgPromoActive = false;
+
+function isDgNowActive(cfg) {
+  if (!cfg || !cfg.enabled) return false;
+  var now  = new Date();
+  var dow  = now.getDay();
+  var hhmm = now.getHours() * 60 + now.getMinutes();
+  var parts = function(t) { var a=(t||'00:00').split(':'); return [parseInt(a[0])||0, parseInt(a[1])||0]; };
+  var s = parts(cfg.timeStart), e = parts(cfg.timeEnd);
+  var startMin = s[0]*60+s[1], endMin = e[0]*60+e[1];
+  var inTime = hhmm >= startMin && hhmm < endMin;
+  var inDay  = false;
+  if (cfg.days === 'all') inDay = true;
+  else if (cfg.days === '2-6') inDay = dow >= 1 && dow <= 5;
+  else if (cfg.days === '2-7') inDay = dow >= 1 && dow <= 6;
+  return inTime && inDay;
+}
+
+function buildFoodPanel(imgUrl) {
+  var panel = document.getElementById('food-panel');
+  if (!panel) return;
+  if (!imgUrl) {
+    // Hiện placeholder nếu chưa có ảnh
+    panel.innerHTML = '<div id="food-panel-placeholder">'
+      + '<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 11l19-9-9 19-2-8-8-2z"/></svg>'
+      + '<span style="font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:#a89e90;">Đồ ăn</span>'
+      + '</div>';
+    return;
+  }
+  // Dùng background-image thay vì <img> để Android TV render nét hơn
+  panel.innerHTML = '';
+  panel.style.backgroundImage   = 'url("' + imgUrl + '")';
+  panel.style.backgroundSize    = '100% 100%';
+  panel.style.backgroundRepeat  = 'no-repeat';
+  panel.style.backgroundPosition = 'top center';
+}
+
+function buildDgPromoSlide(cfg) {
+  var panelLeft = document.getElementById('panel-left');
+
+  // Pause normal slideshow
+  if (slideTimer) { clearTimeout(slideTimer); slideTimer = null; }
+  if (slides.length) {
+    slides.forEach(function(s) { s.classList.remove('active'); var v = s.querySelector('video'); if (v) v.pause(); });
+  }
+
+  // Remove old promo wrapper if any
+  var old = document.getElementById('dg-promo-wrapper');
+  if (old) old.remove();
+
+  // Ẩn slide-container, hiện promo trong vùng 56% bottom
+  // (food-panel vẫn hiện ở 44% top — không thay đổi)
+  var slideContainer = document.getElementById('slide-container');
+  slideContainer.style.display = 'none';
+
+  var fmtNum = function(p) { return new Intl.NumberFormat('vi-VN').format(p); };
+
+  // Items list
+  var items = cfg.items || [];
+  var itemsHtml = items.map(function(it) {
+    return '<div style="display:flex;align-items:center;gap:12px;padding:8px 16px;background:rgba(255,255,255,0.12);border-radius:12px;">'
+      + '<div style="width:8px;height:8px;border-radius:50%;background:#f9d857;flex-shrink:0;"></div>'
+      + '<span style="font-size:15px;font-weight:700;color:#ffffff;letter-spacing:.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+it.name+'</span>'
+      + '</div>';
+  }).join('');
+
+  // Price label
+  var priceLabel = fmtNum(cfg.fixedPrice||0) + 'đ';
+  var priceLLabel = (cfg.fixedPriceL && cfg.fixedPriceL > 0) ? ' · L: ' + fmtNum(cfg.fixedPriceL) + 'đ' : '';
+
+  // Build 56% promo panel
+  var promo = document.createElement('div');
+  promo.id = 'dg-promo-wrapper';
+  promo.style.cssText = 'position:absolute;top:44%;left:0;right:0;bottom:0;overflow:hidden;';
+
+  // Background: image fills fully, dark overlay for readability
+  var bgHtml = '';
+  if (cfg.promoImg) {
+    bgHtml = '<img src="'+cfg.promoImg+'" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center;">'
+           + '<div style="position:absolute;inset:0;background:linear-gradient(160deg,rgba(10,30,18,0.82) 0%,rgba(20,60,35,0.78) 100%);"></div>';
+  } else {
+    bgHtml = '<div style="position:absolute;inset:0;background:linear-gradient(160deg,#0d2b1a 0%,#1a4a2e 60%,#1e6b3c 100%);"></div>';
+  }
+
+  promo.innerHTML = bgHtml
+    + '<div style="position:relative;z-index:2;width:100%;height:100%;display:flex;flex-direction:column;justify-content:center;padding:16px 18px;gap:8px;">'
+    + '<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;">'
+    + '<span style="font-size:11px;font-weight:700;letter-spacing:2.5px;color:rgba(255,255,255,.65);text-transform:uppercase;">ĐỒNG GIÁ</span>'
+    + '<div style="height:1px;flex:1;background:rgba(255,255,255,.2);align-self:center;"></div>'
+    + '<span style="font-size:10px;font-weight:700;color:rgba(255,255,255,.6);letter-spacing:.5px;">'+cfg.timeStart+' – '+cfg.timeEnd+'</span>'
+    + '</div>'
+    + '<div style="font-family:\'Google Sans Display\',\'Google Sans\',sans-serif;font-size:42px;font-weight:900;color:#f9d857;letter-spacing:-2px;line-height:1;">'+priceLabel+'</div>'
+    + '<div style="font-size:11px;color:rgba(255,255,255,.7);margin-top:-4px;font-weight:600;">/ ly' + (priceLLabel ? ' (size M)' + priceLLabel : '') + ' · Bill từ '+(cfg.minQty||2)+' ly</div>'
+    + '<div style="display:flex;flex-direction:column;gap:6px;margin-top:4px;">'+itemsHtml+'</div>'
+    + '</div>';
+
+  panelLeft.appendChild(promo);
+
+  // Divider line between 44% and 56%
+  var divider = document.createElement('div');
+  divider.id = 'dg-divider';
+  divider.style.cssText = 'display:none;'; // đường kẻ đã có ở border-bottom của #food-panel
+  panelLeft.appendChild(divider);
+
+  // Dots ẩn theo slide-container khi DG active
+  var dots = document.getElementById('slide-dots');
+  if (dots) dots.style.display = 'none';
+
+  dgPromoActive = true;
+}
+
+function removeDgPromoSlide() {
+  var promo = document.getElementById('dg-promo-wrapper');
+  if (promo) promo.remove();
+  var divider = document.getElementById('dg-divider');
+  if (divider) divider.remove();
+  dgPromoActive = false;
+
+  // Restore slide-container về vùng 56% bottom (CSS rule đã định nghĩa top:44%)
+  var slideContainer = document.getElementById('slide-container');
+  slideContainer.style.display = '';  // bỏ display:none — CSS rule tự fill lại
+
+  // Restore dots
+  var dots = document.getElementById('slide-dots');
+  if (dots) dots.style.display = '';
+
+  // Restart normal slideshow từ bản backup slides gốc (không dùng slides[] vì có thể đã bị ghi đè bởi dgSlides)
+  if (normalSlideItems.length > 0) {
+    buildSlides(normalSlideItems, normalSlideDur);
+  }
+}
+
+function checkDgState() {
+  var shouldBeActive = isDgNowActive(dgConfig);
+  if (shouldBeActive && !dgPromoActive) {
+    buildDgPromoSlide(dgConfig);
+  } else if (!shouldBeActive && dgPromoActive) {
+    removeDgPromoSlide();
+  }
+}
+
+/* ── QR OVERLAY FUNCTIONS ── */
+function showDonePanel(data) {
+  var panel      = document.getElementById('done-panel');
+  var ordersList = document.getElementById('orders-list');
+  var qrPanel    = document.getElementById('qr-panel');
+
+  // Ẩn giỏ hàng và QR nếu đang hiện
+  if (ordersList) ordersList.style.display = 'none';
+  qrPanel.classList.remove('visible');
+
+  // Điền thông tin
+  var amount = document.getElementById('done-amount');
+  var method = document.getElementById('done-method');
+  if (data && data.total)
+    amount.textContent = new Intl.NumberFormat('vi-VN').format(data.total) + 'đ';
+  else
+    amount.textContent = '';
+  if (data && data.method)
+    method.textContent = data.method === 'CHUYỂN KHOẢN' ? '💳 Chuyển khoản' : '💵 Tiền mặt';
+  else
+    method.textContent = '';
+
+  // Thông báo nhận Voucher Bed (nếu đơn đủ điều kiện) — hiện gọn trong khu vực cart, không che toàn màn hình
+  var voucherEl = document.getElementById('done-voucher');
+  if (voucherEl) {
+    var vCount = (data && data.bedVoucherGranted) ? parseInt(data.bedVoucherGranted) : 0;
+    if (vCount > 0) {
+      voucherEl.textContent = '🎁 Bạn đã nhận được ' + vCount + ' voucher miễn phí 1h Bed tại The cafe 33';
+      voucherEl.classList.add('visible');
+    } else {
+      voucherEl.textContent = '';
+      voucherEl.classList.remove('visible');
+    }
+  }
+
+  panel.classList.add('visible');
+}
+
+function hideDonePanel() {
+  var panel      = document.getElementById('done-panel');
+  var ordersList = document.getElementById('orders-list');
+  var voucherEl  = document.getElementById('done-voucher');
+  panel.classList.remove('visible');
+  if (voucherEl) { voucherEl.classList.remove('visible'); voucherEl.textContent = ''; }
+  if (ordersList) ordersList.style.display = '';
+}
+
+function showQROverlay(data) {
+  var panel   = document.getElementById('qr-panel');
+  var img     = document.getElementById('qr-img');
+  var amount  = document.getElementById('qr-amount');
+  var addinfo = document.getElementById('qr-addinfo');
+  var ordersList = document.getElementById('orders-list');
+
+  if (data.qrUrl) img.src = data.qrUrl;
+  if (data.bankAmount != null)
+    amount.textContent = new Intl.NumberFormat('vi-VN').format(data.bankAmount) + 'đ';
+  if (data.bankAddInfo)
+    addinfo.textContent = data.bankAddInfo;
+
+  // Ẩn danh sách giỏ hàng, hiện QR
+  if (ordersList) ordersList.style.display = 'none';
+  panel.classList.add('visible');
+}
+
+function hideQROverlay() {
+  var panel = document.getElementById('qr-panel');
+  var ordersList = document.getElementById('orders-list');
+  panel.classList.remove('visible');
+  // Hiện lại giỏ hàng
+  if (ordersList) ordersList.style.display = '';
+}
+
+/* ── FIREBASE LISTENERS ── */
+function startListeners() {
+  // Lắng nghe trực tiếp node session_display_xolifa
+  db.ref('session_display_xolifa').on('value', function(snap) {
+    var data = snap.val();
+    if (data && typeof data === 'object') {
+      // Xử lý state bank_qr — hiện QR trong vùng cart
+      if (data.state === 'bank_qr') {
+        hideDonePanel();
+        showQROverlay(data);
+        return;
+      }
+      // Xử lý state done — hiện màn hình cảm ơn
+      if (data.state === 'done') {
+        hideQROverlay();
+        showDonePanel(data);
+        return;
+      }
+      // Các state khác — ẩn tất cả panel phụ
+      hideQROverlay();
+      hideDonePanel();
+      // Xử lý isToGo — chuyển menu khi flag thay đổi
+      var isToGo = data.isToGo === true;
+      applyMenuMode(isToGo);
+      renderSession('session_display_xolifa', data);
+    } else {
+      hideQROverlay();
+      applyMenuMode(false);
+      removeSession('session_display_xolifa');
+    }
+  });
+
+  // Slides & menu từ Firebase
+  db.ref('kiosk_config').on('value', function(snap) {
+    var kc = snap.val();
+    if (!kc) {
+      try { kc = JSON.parse(localStorage.getItem('kiosk_config') || 'null'); } catch(e) {}
+    }
+    if (!kc) return;
+    kioskConfig = kc; // cache để applyMenuMode dùng
+    if (kc.slides && kc.slides.length) {
+      normalSlideItems = kc.slides; // lưu slides gốc để restore sau DG
+      normalSlideDur   = (kc.slideDuration || 6) * 1000;
+      buildSlides(normalSlideItems, normalSlideDur);
+    }
+    // Load food menu image (top 44% panel)
+    var foodImg = kc.foodImg;
+    buildFoodPanel(foodImg && typeof foodImg === 'object' ? foodImg.url : foodImg || null);
+    // Menu: load theo trạng thái isToGo hiện tại
+    db.ref('session_display_xolifa/isToGo').once('value').then(function(s) {
+      applyMenuMode(s.val() === true);
+    }).catch(function() {
+      if (kc.menuPages && kc.menuPages.length) buildMenu(kc.menuPages);
+    });
+  });
+
+  // Đồng giá config
+  db.ref('donggia_config').on('value', function(snap) {
+    dgConfig = snap.val();
+    checkDgState();
+  });
+
+  // Check đồng giá state mỗi 30s (để tự bật/tắt đúng giờ)
+  if (dgCheckTimer) clearInterval(dgCheckTimer);
+  dgCheckTimer = setInterval(checkDgState, 30000);
+}
+
+auth.signInWithEmailAndPassword("elio@thecafe33.com", "Thecafe33ty")
+  .then(function() {
+    console.log("Kiosk connected");
+    startListeners();
+  })
+  .catch(function(e) {
+    console.error("Auth error:", e);
+    // Thử lắng nghe dù không login (nếu rules public)
+    startListeners();
+  });
+</script>
+<!-- [GẤU NOEL 2026] màn hình phụ: QR + chiếu lại «Mở lượt tại quầy» của PosX (RT gau_noel_2026_kiosk). Hết đợt: xem hướng dẫn gỡ đầu file gau_noel_giangsinh.v1.js -->
+<script src="gau_noel_giangsinh.v1.js" data-quan="kiosk"></script>
+</body>
+</html>
