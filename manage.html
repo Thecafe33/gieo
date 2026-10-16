@@ -515,7 +515,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script><script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script><script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script><script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
 <!-- [LÃI/LỖ GIEO TỰ TÍNH] lớp đổi tên bảng theo quán + bộ tính lãi / lỗ chép nguyên văn từ quanlygieo (tools/tao_lai_lo.js) -->
-<script src="data_access.v7.js"></script><script src="lai_lo.v1.js"></script>
+<script src="data_access.v8.js"></script><script src="lai_lo.v1.js"></script>
 <script>
 const backend=(()=>{
 const firebaseConfig = {
@@ -1414,15 +1414,10 @@ async function readPlDays(records, from, to){
 //   · Chạy NỀN sau khi màn đã hiện; mỗi quán tuần tự.
 // ==========================================================================
 const PL_TODAY_TTL = 10 * 60000, PL_COMPUTE_BACK = 62;
-function plNeedDays(byDate, from, to, nowMs){
-  const now = new Date(nowMs), today = dkey(now), lo = dkey(addDays(now, -PL_COMPUTE_BACK)), out = [];
-  for(let d = from < lo ? lo : from; d <= to && d <= today; d = dkey(addDays(parseDkey(d), 1))){
-    const x = byDate && byDate[d], at = x && x.updatedAt ? Date.parse(x.updatedAt) : 0;
-    if(!x) out.push(d);
-    else if(d === today){ if(!(nowMs - at < PL_TODAY_TTL)) out.push(d); }
-    else if(at < Date.parse(dkey(addDays(parseDkey(d), 1)) + 'T00:00:00+07:00')) out.push(d);
-  }
-  return out;
+// Quy tắc DUY NHẤT (data_access.v8 — quanlygieo dùng cùng hàm): thiếu / ghi lúc ngày chưa hết / có dấu thay đổi
+// (thu-chi, sửa ca, sửa bill… ở ngày cũ) sau lúc ghi / hôm nay quá 10 phút. marks: GieoData.plDocDau.
+function plNeedDays(byDate, from, to, nowMs, marks){
+  return window.GieoData.plNgayCanTinh(byDate, from, to, { marks, now: nowMs, back: PL_COMPUTE_BACK, ttl: PL_TODAY_TTL });
 }
 function plCachePut(id, list){
   const cutoff = dkey(addDays(new Date(), -PL_STABLE_DAYS)), cache = plCacheLoad(), c = cache[id]; if(!c) return;
@@ -1432,11 +1427,12 @@ function plCachePut(id, list){
 }
 // pl: { storeId: { ngày: tóm tắt } } (đã đọc) — bổ sung tại chỗ. onStore(id) gọi sau mỗi quán có số mới. Trả số ngày đã tính.
 async function plFillMissing(records, pl, from, to, onStore){
-  if(typeof window === 'undefined' || !window.LaiLo || !pl) return 0;
+  if(typeof window === 'undefined' || !window.LaiLo || !window.GieoData || !window.GieoData.plNgayCanTinh || !pl) return 0;
   let n = 0;
   for(const r of records || []){
     if(r.active === false || pl[r.id] === null) continue;
-    const need = plNeedDays(pl[r.id], from, to, Date.now());
+    let marks = null; try{ marks = await window.GieoData.plDocDau(fstore, r.id); }catch(e){ console.warn('[lãi/lỗ Gieo] không đọc được dấu thay đổi', r.id, e); }
+    const need = plNeedDays(pl[r.id], from, to, Date.now(), marks);
     if(!need.length) continue;
     try{
       const res = await window.LaiLo.tinh({ fstore, db, storeId: r.id, from: need[0], to: need[need.length - 1] });

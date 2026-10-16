@@ -1,13 +1,13 @@
 // lai_lo.v1.js — SINH TỰ ĐỘNG bằng node tools/tao_lai_lo.js từ quanlygieo.html. KHÔNG SỬA TAY (sửa quanlygieo rồi sinh lại,
 // đã deploy thì tăng phiên bản). Bộ tính lãi / lỗ từng ngày của quán Gieo — chép nguyên văn 138 hàm / biến của quanlygieo,
-// manage.html gọi để tự tính (không phải chờ mở quanlygieo). Cần data_access.v7.js (GieoData.fsPath / rtPath) nạp trước.
+// manage.html gọi để tự tính (không phải chờ mở quanlygieo). Cần data_access (bản mới nhất — GieoData.fsPath / rtPath) nạp trước.
 (function(root){
 // ---- chỗ gắn với app (do tools/tao_lai_lo.js thêm) ----
 let _quan = 'gg01', _fs = null, _rt = null, _khoang = null;
 let QL_VIEW = 'gg01', QL_ALL = false;
 const GieoData = { storeId: () => _quan };
 function plLuuTomTat(){}
-const _DA = () => { const g = root.GieoData; if(!g || !g.fsPath) throw new Error('lai_lo: cần data_access.v7.js'); return g; };
+const _DA = () => { const g = root.GieoData; if(!g || !g.fsPath) throw new Error('lai_lo: cần data_access'); return g; };
 const _LS_HIST = { price_history_gieogieo: 1, recipe_history_gieogieo: 1, prep_recipe_history_gieogieo: 1 };
 function _histColl(name){
   // Bảng CHỈ THÊM: giữ trong máy (localStorage), mỗi lần chỉ đọc mốc createdAt mới hơn mốc lớn nhất đã có.

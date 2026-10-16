@@ -5,7 +5,7 @@
 // CÁCH LÀM: chép NGUYÊN VĂN từ quanlygieo.html mọi hàm / biến cấp cao mà computeDailyPLRange (lãi/lỗ từng ngày — giá vốn
 // theo công thức + lịch sử giá, chi phí, lương, khấu hao, hao hụt) cần tới, theo đúng thứ tự trong file gốc → số tính ra
 // Y HỆT quanlygieo, không có công thức thứ hai. Chỉ thay những chỗ gắn với app:
-//   · fstore / db           → lớp bọc đổi tên bảng theo quán (GieoData.fsPath / rtPath của data_access.v7.js);
+//   · fstore / db           → lớp bọc đổi tên bảng theo quán (GieoData.fsPath / rtPath của data_access (bản mới nhất));
 //   · QL_VIEW / QL_ALL      → quán đang tính; plLuuTomTat → bỏ (manage tự ghi pl_days);
 //   · loadExpensesAll       → chỉ đọc chi phí CHẠM khoảng ngày đang tính (cùng kết quả: mỗi ngày chỉ dùng khoản chạm ngày đó);
 //   · 3 bảng lịch sử (giá, định mức món, công thức mẻ — CHỈ THÊM, không bao giờ sửa / xoá) → giữ trong máy, mỗi lần
@@ -44,14 +44,14 @@ function build(){
   const body = names.map(k => tops[k].text).join('\n');
   return `// lai_lo.v${VERSION}.js — SINH TỰ ĐỘNG bằng node tools/tao_lai_lo.js từ quanlygieo.html. KHÔNG SỬA TAY (sửa quanlygieo rồi sinh lại,
 // đã deploy thì tăng phiên bản). Bộ tính lãi / lỗ từng ngày của quán Gieo — chép nguyên văn ${names.length} hàm / biến của quanlygieo,
-// manage.html gọi để tự tính (không phải chờ mở quanlygieo). Cần data_access.v7.js (GieoData.fsPath / rtPath) nạp trước.
+// manage.html gọi để tự tính (không phải chờ mở quanlygieo). Cần data_access (bản mới nhất — GieoData.fsPath / rtPath) nạp trước.
 (function(root){
 // ---- chỗ gắn với app (do tools/tao_lai_lo.js thêm) ----
 let _quan = 'gg01', _fs = null, _rt = null, _khoang = null;
 let QL_VIEW = 'gg01', QL_ALL = false;
 const GieoData = { storeId: () => _quan };
 function plLuuTomTat(){}
-const _DA = () => { const g = root.GieoData; if(!g || !g.fsPath) throw new Error('lai_lo: cần data_access.v7.js'); return g; };
+const _DA = () => { const g = root.GieoData; if(!g || !g.fsPath) throw new Error('lai_lo: cần data_access'); return g; };
 const _LS_HIST = { price_history_gieogieo: 1, recipe_history_gieogieo: 1, prep_recipe_history_gieogieo: 1 };
 function _histColl(name){
   // Bảng CHỈ THÊM: giữ trong máy (localStorage), mỗi lần chỉ đọc mốc createdAt mới hơn mốc lớn nhất đã có.

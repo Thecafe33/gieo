@@ -16,7 +16,8 @@ catch (e) { eq(String(e.stdout), 'KHỚP', 'lai_lo.v1.js khớp quanlygieo.html'
 
 // ---- manage: ngày nào phải tự tính (plNeedDays) ----
 {
-  const N = new Function(extract('manage.html', ['pad', 'parseDkey', 'addDays', 'dkey', 'plNeedDays']) + '\nconst PL_TODAY_TTL = 10 * 60000, PL_COMPUTE_BACK = 62;\nreturn plNeedDays;')();
+  const DA0 = require('fs').readdirSync(path.join(__dirname, '..')).filter(f => /^data_access\.v\d+\.js$/.test(f)).sort((a, b) => +a.match(/\d+/)[0] - +b.match(/\d+/)[0]).pop();
+  const N = new Function('window', extract('manage.html', ['pad', 'parseDkey', 'addDays', 'dkey', 'plNeedDays']) + '\nconst PL_TODAY_TTL = 10 * 60000, PL_COMPUTE_BACK = 62;\nreturn plNeedDays;')({ GieoData: require(path.join(__dirname, '..', DA0)).GieoData });
   const now = Date.parse('2026-10-16T08:00:00Z');            // 15h giờ VN
   const by = {
     '2026-10-13': { updatedAt: '2026-10-14T02:00:00Z' },      // ghi sau khi ngày 13 đã hết → đủ
@@ -27,6 +28,7 @@ catch (e) { eq(String(e.stdout), 'KHỚP', 'lai_lo.v1.js khớp quanlygieo.html'
   eq(N(by, '2026-10-16', '2026-10-16', now + 6 * 60000), ['2026-10-16'], 'Hôm nay ghi quá 10 phút → tính lại');
   eq(N({}, '2026-01-01', '2026-10-16', now).length, 63, 'Chỉ tự tính 62 ngày gần nhất (+ hôm nay)');
   eq(N({}, '2026-10-16', '2026-10-31', now), ['2026-10-16'], 'Không tính ngày tương lai');
+  eq(N(by, '2026-10-13', '2026-10-13', now, { '2026-10-13_': '2026-10-15T00:00:00Z' }), ['2026-10-13'], 'manage dùng dấu thay đổi: ngày 13 đã đủ nhưng có khoản thu-chi ghi sau → tính lại');
 }
 // ---- Firestore / RT giả, đếm lượt đọc theo bảng ----
 const FS = {}, RT = {}, reads = {}, LS = {};
@@ -49,8 +51,8 @@ const fstore = { collection: c => query(c, []), batch: () => ({ set() {}, commit
 const db = { ref: p => ({ once: async () => ({ exists: () => RT[p] !== undefined, val: () => RT[p] }) }) };
 global.firebase = { firestore: { FieldPath: { documentId: () => ID } } };
 global.localStorage = { getItem: k => (k in LS ? LS[k] : null), setItem: (k, v) => { LS[k] = String(v); } };
-require(path.join(__dirname, '..', 'data_access.v7.js'));
-global.GieoData = require(path.join(__dirname, '..', 'data_access.v7.js')).GieoData;
+const DA = require('fs').readdirSync(path.join(__dirname, '..')).filter(f => /^data_access\.v\d+\.js$/.test(f)).sort((a, b) => +a.match(/\d+/)[0] - +b.match(/\d+/)[0]).pop();
+global.GieoData = require(path.join(__dirname, '..', DA)).GieoData;
 require(path.join(__dirname, '..', 'lai_lo.v1.js'));
 const LaiLo = global.LaiLo;
 
