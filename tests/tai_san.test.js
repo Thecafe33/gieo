@@ -12,7 +12,7 @@ const src = fs.readFileSync(path.join(__dirname, '..', 'manage.html'), 'utf8');
 const CATS = src.match(/const DEFAULT_EXPENSE_CATS = (\[[\s\S]*?\n\]);/)[0];
 const HELP = "const monthStartOf = k => k.slice(0, 7) + '-01', monthEndOf = k => k.slice(0, 7) + '-' + String(daysInMonthYm(k.slice(0, 7))).padStart(2, '0');\nconst r2 = v => Math.round(v * 100) / 100;\n";
 const N = ['pad', 'parseDkey', 'addDays', 'dkey', 'daysBetween', 'daysInMonthYm', 'beMonthValue', 'plBreakEven', 'expenseCatsAll', 'expCostType', 'expCounts', 'expPaidOf', 'expAllocate',
-  'assetEndDate', 'assetLive', 'assetMonthly', 'assetDepDay', 'assetRecovered', 'tcxBreakEven', 'expMonthsOf', 'expMonthSum', 'sumsToAlloc'];
+  'assetEndDate', 'assetLive', 'assetMonthly', 'assetDepDay', 'assetRecovered', 'tcxBreakEven', 'expMonthsOf', 'expMonthSum', 'sumsToAlloc', 'expIsBase'];
 const M = new Function(CATS + '\n' + HELP + extract('manage.html', N) + '\nreturn {' + N.join(',') + '};')();
 const Q = new Function(extract('quanlygieo.html', ['pad', 'dkey', 'monthlyDepreciation']) + '\nreturn { monthlyDepreciation };')();
 
@@ -29,7 +29,7 @@ near(M.assetRecovered(A[3], '2026-10-31'), 1000000, 'Đèn: hết tháng 10 thu 
 eq(M.assetMonthly(A, 'tc33', '2026-10-05'), 1000000, 'Tài sản đã ngừng (bán / thanh lý) không khấu hao');
 const B = { '2026-12': { xofa: { fixed: 3100000, cogsPct: 40 } } };
 const be = M.tcxBreakEven(B, 'xofa', [{ date: '2026-12-10', rev: 500000 }], null, A);
-near(be.lai, 500000 * 0.6 - 100000 - 2000000 / 31, 'Hoà vốn: khấu hao tài sản cộng vào phần cần đắp của ngày');
+near(be.hoaVon, 100000 + 2000000 / 31, 'Hoà vốn: khấu hao tài sản cộng vào phần cần đắp của ngày');
 near(be.khauHao, 2000000 / 31, 'Hoà vốn: tách riêng số khấu hao');
 
 // ── Bản tổng hợp chi phí tháng = phân bổ từng khoản ──
@@ -45,8 +45,10 @@ const a1 = M.sumsToAlloc(sums, cats), a2 = M.expAllocate(E, cats);
 eq(Object.keys(a1.byDay).length, Object.keys(a2.byDay).length, 'Tổng hợp: đủ ngày như phân bổ trực tiếp');
 eq(Object.keys(a2.byDay).every(d => Math.abs(a1.byDay[d].fixed - a2.byDay[d].fixed) < 0.02 && Math.abs(a1.byDay[d].cogs - a2.byDay[d].cogs) < 0.02), true, 'Tổng hợp: từng ngày khớp phân bổ trực tiếp (Giá vốn / Vận hành)');
 eq([...a1.months].sort(), ['2026-11', '2026-12', '2027-01'], 'Tổng hợp: tháng có chi phí thật');
+eq([sums['2026-11'].base, M.expMonthSum([E[2]], '2026-12').base], [true, false], 'Tổng hợp: base = tháng có khoản vận hành do manage nhập (khoản nhân viên gửi không tính)');
+eq([...a1.base].sort(), ['2026-11', '2026-12', '2027-01'], 'Tổng hợp → phân bổ: giữ base từng tháng');
 const r1 = M.tcxBreakEven({}, 'xofa', [{ date: '2026-12-05', rev: 1000000 }], a1), r2_ = M.tcxBreakEven({}, 'xofa', [{ date: '2026-12-05', rev: 1000000 }], { list: E, cats });
-near(r1.lai, r2_.lai, 'Hoà vốn từ bản tổng hợp = từ từng khoản chi');
+near(r1.hoaVon, r2_.hoaVon, 'Hoà vốn từ bản tổng hợp = từ từng khoản chi');
 
 // ── Lãi/lỗ Gieo: đệm tháng ổn định ──
 (async () => {

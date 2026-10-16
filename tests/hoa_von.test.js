@@ -29,20 +29,21 @@ eq(extract('manage.html', ['plBreakEven']), extract('quanlygieo.html', ['plBreak
 const B = { '2026-10': { tc33: { fixed: 31000000, cogsPct: 40 } }, '2026-12': { tc33: { fixed: 62000000, cogsPct: 30 }, xofa: { fixed: 3100000, cogsPct: 50 } } };
 eq(M.beMonthValue(B, '2026-11', 'tc33'), { fixed: 31000000, cogsPct: 40, from: '2026-10' }, 'Cấu hình: tháng chưa đặt dùng tháng gần nhất trước đó');
 eq(M.beMonthValue(B, '2026-11', 'xofa'), null, 'Cấu hình: trước tháng đặt đầu tiên → chưa có');
+// [16/10] TC33 / XOFA không có lãi / lỗ: hoà vốn = chi phí cố định của các ngày (% giá vốn cũ trong cấu hình bỏ qua).
 const t1 = M.tcxBreakEven(B, 'tc33', [{ date: '2026-10-16', rev: 2000000 }]);
-near(t1.hoaVon, 1000000 / 0.6, 'TC33 1 ngày: hoà vốn = (31tr ÷ 31 ngày) ÷ (1 − 40%)');
-near(t1.lai, 2000000 - 800000 - 1000000, 'TC33 1 ngày: lãi = doanh thu − giá vốn − chi phí cố định');
-eq(t1.dat, true, 'TC33: doanh thu 2tr > hoà vốn 1,67tr → đã hoà vốn');
+near(t1.hoaVon, 1000000, 'TC33 1 ngày: hoà vốn = 31tr ÷ 31 ngày (không chia cho giá vốn %)');
+eq([t1.dat, t1.lai], [true, undefined], 'TC33: doanh thu 2tr > hoà vốn 1tr → đã hoà vốn; không có số lãi / lỗ');
+near(t1.vuot, 1000000, 'TC33: vượt hoà vốn 1tr');
 const t2 = M.tcxBreakEven(B, 'tc33', [{ date: '2026-10-16', rev: 500000 }, { date: '2026-10-17', rev: 700000 }]);
-near(t2.lai, 1200000 * 0.6 - 2000000, 'TC33 2 ngày: đang lỗ = chi phí cố định 2 ngày − phần biên đóng góp');
-near((1200000 - t2.hoaVon) * 0.6, t2.lai, 'TC33: lãi = (doanh thu − hoà vốn) × biên đóng góp');
+near(t2.hoaVon, 2000000, 'TC33 2 ngày: hoà vốn = chi phí cố định 2 ngày');
 eq(t2.dat, false, 'TC33: dưới hoà vốn → chưa hoà vốn');
+near(t2.conThieu, 800000, 'TC33: còn thiếu 800k');
 const t3 = M.tcxBreakEven(B, 'xofa', [{ date: '2026-11-30', rev: 100000 }, { date: '2026-12-01', rev: 300000 }]);
 eq([t3.soNgay, t3.thieu], [1, 1], 'XOFA: ngày chưa cấu hình không tính, đếm thiếu');
-near(t3.hoaVon, 100000 / 0.5, 'XOFA: hoà vốn ngày 1/12 = 100k ÷ 50%');
+near(t3.hoaVon, 100000, 'XOFA: hoà vốn ngày 1/12 = 3,1tr ÷ 31');
 eq(M.tcxBreakEven(B, 'xofa', [{ date: '2026-10-01', rev: 1 }]), null, 'XOFA chưa cấu hình → null');
 const t4 = M.tcxBreakEven(B, 'tc33', [{ date: '2026-10-16', rev: 0 }]);
-near(t4.hoaVon, 1000000 / 0.6, 'TC33 chưa bán: hoà vốn mượn biên theo giá vốn cấu hình (ước tính)');
+eq([Math.round(t4.hoaVon), t4.conThieu > 0], [1000000, true], 'TC33 chưa bán: còn thiếu đúng chi phí cố định ngày');
 
 // ── Gieo: tóm tắt quanlygieo → manage ──────────────────────────────────
 const day = (date, dt, gv, cd, extra = {}) => {

@@ -25,7 +25,7 @@ eq([C.expensePayload({ category: 'Đá', amount: 0, cats: C.DEFAULT_EXPENSE_CATS
   eq(/cham_cong\.v3\.js/.test(tc) && /ChamCong\.init\(\{ store: 'tc33' \}\)/.test(tc), true, 'pos.html nạp v3, không bật khung chi phí');
 }
 
-const NAMES = ['pad', 'parseDkey', 'addDays', 'dkey', 'daysBetween', 'daysInMonthYm', 'beMonthValue', 'plBreakEven', 'expenseCatsAll', 'expenseCats', 'expCostType', 'expCounts', 'expAllocate', 'expAmountIn', 'tcxBreakEven', 'expPaidOf'];
+const NAMES = ['pad', 'parseDkey', 'addDays', 'dkey', 'daysBetween', 'daysInMonthYm', 'beMonthValue', 'plBreakEven', 'expenseCatsAll', 'expenseCats', 'expCostType', 'expCounts', 'expAllocate', 'expAmountIn', 'tcxBreakEven', 'expPaidOf', 'expIsBase'];
 const M = new Function(src.match(/const DEFAULT_EXPENSE_CATS = (\[[\s\S]*?\n\]);/)[0] + '\n' + extract('manage.html', NAMES) + '\nreturn {' + NAMES.join(',') + '};')();
 const cats = M.expenseCatsAll(null);
 const E = [
@@ -45,16 +45,29 @@ near(al.byDay['2026-10-17'].fixed, 800000, 'Ngày 17: điện (dự đoán vẫn
 eq([...al.months], ['2026-10'], 'Tháng có chi phí thật');
 
 const B = { '2026-09': { tc33: { fixed: 30000000, cogsPct: 40 } } };
+// [16/10] Hoà vốn TC33 / XOFA = chi phí VẬN HÀNH (đã duyệt + chờ duyệt) + khấu hao; mua hàng (Giá vốn) không tính.
 const r = M.tcxBreakEven(B, 'tc33', [{ date: '2026-10-16', rev: 1000000 }], { list: E, cats });
-eq(r.nguon, 'thuc', 'Tháng có chi phí thật → tính theo chi phí thật');
-near(r.lai, 1000000 - 400000 - 100000, 'Lãi = doanh thu − giá vốn (mua hàng) − vận hành');
-near(r.hoaVon, 100000 / 0.6, 'Hoà vốn = vận hành ÷ (1 − giá vốn / doanh thu)');
+eq(r.nguon, 'thuc', 'Tháng có chi phí vận hành → tính theo chi phí đó');
+near(r.hoaVon, 100000, 'Ngày 16: hoà vốn = thuê nhà 100k (mua hàng 400k, đá chờ duyệt 50k là Giá vốn → không tính; từ chối không tính)');
+const Pd = E.concat([{ id: 'f', periodType: 'onetime', date: '2026-10-16', category: 'Sửa chữa / bảo trì', amount: 60000, status: 'pending_review', source: 'pos' }]);
+near(M.tcxBreakEven(B, 'tc33', [{ date: '2026-10-16', rev: 1000000 }], { list: Pd, cats }).hoaVon, 160000, 'Khoản vận hành CHỜ DUYỆT cộng thẳng vào hoà vốn');
+near(M.expAllocate(Pd, cats, true).byDay['2026-10-16'].fixed, 160000, 'expAllocate có chờ duyệt: tính cả khoản chờ duyệt, bỏ khoản từ chối');
 const r2 = M.tcxBreakEven(B, 'tc33', [{ date: '2026-09-30', rev: 1000000 }, { date: '2026-10-16', rev: 1000000 }], { list: E, cats });
-eq([r2.nguon, r2.soNgayThuc, r2.soNgay], ['tron', 1, 2], 'Kỳ vắt 2 tháng: tháng 9 theo cấu hình, tháng 10 theo chi phí thật');
-near(r2.lai, (1000000 - 400000 - 1000000) + (500000), 'Lãi cộng 2 phần: 30/9 lỗ 400k theo cấu hình, 16/10 lãi 500k');
+eq([r2.nguon, r2.soNgayThuc, r2.soNgay], ['tron', 1, 2], 'Kỳ vắt 2 tháng: tháng 9 theo cấu hình, tháng 10 theo chi phí vận hành');
+near(r2.hoaVon, 1000000 + 100000, 'Hoà vốn 2 ngày: 30/9 cấu hình 1tr + 16/10 vận hành 100k');
 const r3 = M.tcxBreakEven(B, 'tc33', [{ date: '2026-09-30', rev: 0 }], { list: E, cats });
-eq(r3.nguon, 'cauhinh', 'Tháng chưa có chi phí thật → cấu hình');
+eq(r3.nguon, 'cauhinh', 'Tháng chưa có chi phí vận hành → cấu hình');
+const onlyBuy = [{ id: 'z', periodType: 'onetime', date: '2026-09-30', category: 'Nguyên liệu / mua hàng', amount: 900000, status: 'approved' }];
+eq(M.tcxBreakEven(B, 'tc33', [{ date: '2026-09-30', rev: 0 }], { list: onlyBuy, cats }).nguon, 'cauhinh', 'Tháng chỉ có khoản mua hàng → vẫn dùng chi phí cố định cấu hình');
 eq(M.tcxBreakEven({}, 'xofa', [{ date: '2026-10-16', rev: 5 }], { list: [], cats }), null, 'Không chi phí, không cấu hình → chưa có số');
+// Tháng chỉ có khoản nhân viên gửi từ Ca làm việc (chờ duyệt / đã duyệt) → KHÔNG thay chi phí cố định cấu hình, mà cộng thêm.
+const Bx = { '2026-10': { xofa: { fixed: 6200000 } } };
+const posOnly = [{ id: 'p1', periodType: 'onetime', date: '2026-10-16', category: 'Sửa chữa / bảo trì', amount: 50000, status: 'pending_review', source: 'pos' },
+  { id: 'p2', periodType: 'onetime', date: '2026-10-16', category: 'Khác', amount: 30000, status: 'approved', source: 'pos' },
+  { id: 'p3', periodType: 'onetime', date: '2026-10-16', category: 'Đá', amount: 40000, status: 'pending_review', source: 'pos' }];
+const rx = M.tcxBreakEven(Bx, 'xofa', [{ date: '2026-10-16', rev: 0 }], { list: posOnly, cats });
+eq([rx.nguon, Math.round(rx.hoaVon)], ['cauhinh', 200000 + 50000 + 30000], 'XOFA: cấu hình 200k/ngày + khoản nhân viên gửi 80k (đá là Giá vốn → không tính)');
+eq(M.tcxBreakEven({}, 'xofa', [{ date: '2026-10-16', rev: 0 }], { list: posOnly, cats }).hoaVon, 80000, 'Chưa cấu hình: chỉ còn khoản nhân viên gửi');
 
 // ── Trả trước nhiều tháng (chủ dự án 16/10): XOFA trả tiền thuê QUÝ ngày 1/11 → kỳ 1/11/2026 – 31/1/2027, ĐÃ TRẢ, chia đều mỗi ngày ──
 const Q = { id: 'q', periodType: 'period', startDate: '2026-11-01', endDate: '2027-01-31', date: '2026-11-01', paidDate: '2026-11-01', category: 'Tiền thuê nhà', amount: 9200000, status: 'approved', source: 'manage' };
@@ -65,6 +78,6 @@ near(M.expAmountIn(Q, '2026-12-01', '2026-12-31'), 3100000, 'Thuê quý: chi ph�
 eq([M.expPaidOf(Q), M.expPaidOf({ source: 'pos', date: '2026-11-03', status: 'pending_review' }), M.expPaidOf({ source: 'manage', date: '2026-11-03' }), M.expPaidOf({ source: 'pos', date: '2026-11-03', status: 'rejected' })],
   ['2026-11-01', '2026-11-03', null, null], 'Ngày trả: theo paidDate; khoản POS = trả ngay hôm ghi; chưa ghi = chưa trả');
 const rq = M.tcxBreakEven({}, 'xofa', [{ date: '2027-01-15', rev: 300000 }], { list: [Q], cats });
-near(rq.lai, 300000 - 100000, 'Hoà vốn ngày 15/1/2027: tiền thuê trả từ 1/11 vẫn được tính 100k vào ngày đó');
+near(rq.hoaVon, 100000, 'Hoà vốn ngày 15/1/2027: tiền thuê trả từ 1/11 vẫn được tính 100k vào ngày đó');
 
 console.log(ok ? 'ALL PASS' : 'SOME FAIL'); process.exit(ok ? 0 : 1);
