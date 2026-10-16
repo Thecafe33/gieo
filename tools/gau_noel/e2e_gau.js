@@ -115,18 +115,20 @@ const CHUNG = (fake) => {
       await sleep(100); await window.__shot('gau_dashboard'); sh.remove(); }
     switchMgrTab('label'); await sleep(100);
     // bed > 160K (không tính ăn vặt)
-    const P2 = '0912000222';
-    reset(); pendingBedOrder = null; activeOrderingBedId = '3';
+    // bed: chỉ BILL LÚC VÀO ACTIVE BED (finalizeBedCheckIn → _pushPaidOrder có hàm done) mới xét «trên 160K = trúng chắc»
+    const P2 = '0912000222', bk2 = { id: 'BKX', key: 'BKX', phone: P2, name: 'Khách bed', bedId: 'WAITING', status: 'chờ khách', start: '13:00', end: '23:00' };
+    reset();
     for (let i = 0; i < 10; i++) addToCart('1h bed', 'M', 15000); addToCart('Bạc xỉu', 'M', 25000); addToCart('Bánh tráng', 'M', 20000);
-    $('kh-sdt').value = P2; saveOrderToFirebase('Chuyển khoản'); await sleep(900);
+    const od2 = { id: Date.now(), createdAt: 0, sdt: P2, items: '', itemsArray: cart.slice(), total: 195000, paid: 195000, change: 0, method: 'Chuyển khoản', points: 0, bedId: '3', customerName: 'Khách bed' };
+    await new Promise(res => _pushPaidOrder(od2, P2, bk2, false, function () { res(); })); await sleep(900);
     let d2 = DB['gau_noel_2026/' + P2], l2 = d2 ? Object.values(d2.luot) : [];
-    chk(l2.length === 1 && l2[0].k === 'bed' && l2[0].win, '16. bill bed: 150K giờ bed + 25K nước = 175K (bỏ 20K ăn vặt) → trúng chắc', l2);
+    chk(l2.length === 1 && l2[0].k === 'bed' && l2[0].win, '16. bill LÚC VÀO ACTIVE BED: 150K giờ bed + 25K nước = 175K (bỏ 20K ăn vặt) → trúng chắc', l2);
     $('gn-ov') && $('gn-ov').querySelector('[data-a=x]') && $('gn-ov').querySelector('[data-a=x]').click();
     const P3 = '0912000333';
     reset(); activeOrderingBedId = '4';
-    for (let i = 0; i < 9; i++) addToCart('1h bed', 'M', 15000); addToCart('Bánh tráng', 'M', 20000); addToCart('Bánh tráng', 'M', 20000);
+    for (let i = 0; i < 10; i++) addToCart('1h bed', 'M', 15000); addToCart('Bạc xỉu', 'M', 25000);
     $('kh-sdt').value = P3; saveOrderToFirebase('Chuyển khoản'); await sleep(900);
-    chk(!DB['gau_noel_2026/' + P3], '17. bill bed 135K + 40K ăn vặt (chỉ 135K tính) → không trúng chắc, 0 ly → không lượt');
+    chk(!DB['gau_noel_2026/' + P3], '17. bill GỌI THÊM giữa giờ bed 175K → KHÔNG xét bed 160K (1 ly → không lượt)');
     activeOrderingBedId = null;
     // TẮT
     switchMgrTab('gaunoel'); await sleep(200); $('gn-bat').click(); await sleep(300);
@@ -165,6 +167,10 @@ const CHUNG = (fake) => {
     ovx().querySelector('[data-a=nha]').click(); await sleep(200);
     Math.random = rnd;
     chk(typeof window.delOrderConfirm === 'function' && /3367/.test(String(window.delOrderConfirm)), 'X3. đã bọc delOrderConfirm (huỷ bill trả kho)');
+    isAppSale = true; document.getElementById('cuph').value = '0933000999';
+    _loyaltyAfterSave([{ name: 'Trà sữa', price: 30000, qty: 6 }], 180000, 'XAPP'); await sleep(500); isAppSale = false;
+    chk(!DB['gau_noel_2026/0933000999'] && !mox(), 'X3b. đơn BÁN QUA APP → không lượt, không hỏi');
+    document.getElementById('cuph').value = '0933000111';
     const K = () => __RT2.get('gau_noel_2026_kiosk/xofa') || {};
     chk(K().bat === true && K().ev && K().ev.loai === 'qr' && K().ev.soLuot === 2 && K().ev.sdt === '111', 'X4. màn hình phụ: ghi bat + sự kiện QR 2 lượt (SĐT chỉ 3 số cuối)', K());
     window.__kQr = JSON.parse(JSON.stringify(K()));
@@ -299,6 +305,10 @@ const CHUNG = (fake) => {
     POSPrinter.autoPrintIfEnabled(Object.assign({}, order, { phone: '' })); await sleep(200);
     chk(inRa.length === 3 && !mo(), 'G12. đơn không có SĐT → in luôn, không hỏi');
     chk(!!document.querySelector('#sdb #gn-sdb-btn'), 'G13. sidebar posgieo có nút «🧸 Đổi gấu»');
+    const oApp = Object.assign({}, order, { phone: '0944000888', isAppSale: true });
+    try { assistFinalizeOrder(oApp, 'GAPP'); } catch (e) {}
+    POSPrinter.autoPrintIfEnabled(oApp); await sleep(400);
+    chk(!DB['gau_noel_2026/0944000888'] && !mo() && inRa[inRa.length - 1] === false, 'G14. đơn BÁN QUA APP → không lượt, không hỏi, bill không QR');
     await G.datCfg({ bat: false });
     chk(!buildReceiptContent(order, LAY).some(x => x && x.type === 'gauNoel'), 'G6. đang TẮT → bill không có QR');
     Math.random = rnd;

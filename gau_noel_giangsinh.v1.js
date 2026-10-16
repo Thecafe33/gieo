@@ -842,20 +842,21 @@
       var t = m ? String(m.type || '').toLowerCase() : '';
       return t.indexOf('khác') >= 0 || t === 'khac' || (typeof _isKhacLine === 'function' && _isKhacLine(c.name, c.size));
     }
-    G.donTc33 = function (orderData, finalSdt, booking) {   // tách riêng để test
+    // [16/10 chủ dự án] «Bed trên 160K = trúng chắc» chỉ xét BILL LÚC VÀO ACTIVE BED (finalizeBedCheckIn → _pushPaidOrder có hàm done);
+    // bill gọi thêm giữa giờ / bill trả bed → chỉ tính lượt theo số ly như đơn thường.
+    G.donTc33 = function (orderData, finalSdt, booking, vaoBed) {   // tách riêng để test
       var items = (orderData && orderData.itemsArray) || [];
       var n = demLy(items, function (c) { return !laAnVat(c) && !laKhac(c); });
       var bedTien = 0; items.forEach(function (c) { if (c && !laAnVat(c)) bedTien += (Number(c.price) || 0) * (Number(c.qty) || 0); });
-      var laBed = !!(booking || (orderData && orderData.bedId && orderData.bedId !== 'WAITING'));
-      return { store: 'tc33', sdt: finalSdt, bill: String(orderData && orderData.id || ''), ly: n.ly, tienNuoc: n.tien, bed160: laBed && bedTien > G.CFG.bedToiThieu };
+      return { store: 'tc33', sdt: finalSdt, bill: String(orderData && orderData.id || ''), ly: n.ly, tienNuoc: n.tien, bed160: !!(vaoBed && booking) && bedTien > G.CFG.bedToiThieu };
     };
-    boc('_pushPaidOrder', function (cu) { return function (orderData, finalSdt, currentBooking) { cho = { o: orderData, s: finalSdt, b: currentBooking }; return cu.apply(this, arguments); }; });
+    boc('_pushPaidOrder', function (cu) { return function (orderData, finalSdt, currentBooking, isCheckout, done) { cho = { o: orderData, s: finalSdt, b: currentBooking, vao: typeof done === 'function' && !isCheckout }; return cu.apply(this, arguments); }; });
     // clearDebtAfterPayment chỉ được gọi ở nhánh LƯU THÀNH CÔNG của _pushPaidOrder
     boc('clearDebtAfterPayment', function (cu) {
       return function () {
         var c = cho; cho = null;
         try { return cu.apply(this, arguments); }
-        finally { if (c && c.o) an(function () { anPanel(); chayBoc(G.donTc33(c.o, c.s, c.b)); })(); }
+        finally { if (c && c.o) an(function () { anPanel(); chayBoc(G.donTc33(c.o, c.s, c.b, c.vao)); })(); }
       };
     });
     boc('checkSdtLive', function (cu) { return function () { var r = cu.apply(this, arguments); an(function () { var el = $('kh-sdt'); quetSau(el ? el.value : ''); })(); return r; }; });
@@ -881,10 +882,11 @@
     });
     boc('_loyaltyAfterSave', function (cu) {
       return function (items, total, orderId) {
-        var sdt = ($('cuph') || {}).value || '';
+        var sdt = ($('cuph') || {}).value || '', quaApp = false;
+        try { quaApp = !!isAppSale; } catch (e) {}   // [16/10] bán qua app không tích điểm → không lượt gấu
         try { return cu.apply(this, arguments); }
         finally {   // đơn đã lưu trước khi hàm này chạy → bốc kể cả khi phần tích điểm lỗi
-          an(function () {
+          if (!quaApp) an(function () {
             var n = demLy(items, function (c) { return typeof isPaidCupLine === 'function' ? isPaidCupLine(c) : (!c.isFood && !c.isFree && !c._discountId); });
             chayBoc({ store: 'xofa', sdt: sdt, bill: String(orderId || ''), ly: n.ly, tienNuoc: n.tien });
           })();
@@ -902,7 +904,7 @@
       return function (order, orderId) {
         try { return cu.apply(this, arguments); }
         finally {   // gọi ngay sau khi đơn đã lưu → bốc kể cả khi phần thống kê gợi ý lỗi
-          an(function () {
+          if (!(order && order.isAppSale)) an(function () {   // [16/10] bán qua app không tích điểm → không lượt gấu
             var n = demLy(order && order.itemsArray, laNuocGieo);
             var pr = chayBoc({ store: store(), sdt: order && order.phone, bill: String(orderId || ''), ly: n.ly, tienNuoc: n.tien });
             if (pr && bocCua && order && typeof order === 'object') bocCua.set(order, pr);
@@ -930,7 +932,7 @@
       });
     }
     var gauDuDieuKien = function (order) {
-      try { return !!order && G.dangMua() && G.normPhone(order.phone).length >= 10 && G.soLuot(demLy(order.itemsArray, laNuocGieo).ly) > 0; } catch (e) { return false; }
+      try { return !!order && !order.isAppSale && G.dangMua() && G.normPhone(order.phone).length >= 10 && G.soLuot(demLy(order.itemsArray, laNuocGieo).ly) > 0; } catch (e) { return false; }
     };
     try {
       var PP = POSPrinter, inCu = PP && PP.autoPrintIfEnabled;
@@ -948,7 +950,7 @@
         var r = cu.apply(this, arguments);
         try {
           var L = G.soLuot(demLy(order && order.itemsArray, laNuocGieo).ly);
-          if (Array.isArray(r) && L > 0 && !(noiQuay && (noiQuay.get(order) === 'quan' || noiQuay.get(order) === 'khong')) && G.dangMua() && G.normPhone(order.phone).length >= 10) r = r.concat([{ type: 'gauNoel', soLuot: L }]);
+          if (Array.isArray(r) && L > 0 && !order.isAppSale && !(noiQuay && (noiQuay.get(order) === 'quan' || noiQuay.get(order) === 'khong')) && G.dangMua() && G.normPhone(order.phone).length >= 10) r = r.concat([{ type: 'gauNoel', soLuot: L }]);
         } catch (e) { console.warn('[gấu] bill', e); }
         return r;
       };
