@@ -464,6 +464,58 @@
   }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
   function $(id) { return document.getElementById(id); }
+  // ── VÒNG QUAY (dùng chung POS / màn hình phụ / app khách) ──
+  // Kết quả đã bốc ở POS lúc thanh toán; vòng chỉ quay rồi DỪNG ĐÚNG Ô của kết quả đó. Chỉ animate transform.
+  // 3 ô (chủ dự án 16/10): Gấu bông · Chúc bạn may mắn lần sau · Merry Christmas.
+  // Không trúng → kim dừng SÁT MÉP ô Gấu bông (cách 2–6°) để tạo hồi hộp.
+  var VONG = [
+    { id: 'gau', nen: '#d62b3a', chu: '#ffffff', ic: '🧸', dong: ['GẤU BÔNG'] },
+    { id: 'mm', nen: '#ffffff', chu: '#b3162a', ic: '🍀', dong: ['CHÚC BẠN', 'MAY MẮN', 'LẦN SAU'] },
+    { id: 'xmas', nen: '#166534', chu: '#ffffff', ic: '🎄', dong: ['MERRY', 'CHRISTMAS'] }
+  ], VONG_O = VONG.length, VONG_GOC = 360 / VONG_O;
+  (function () {
+    var c = document.createElement('style');
+    c.textContent = '.gn-vong{position:relative;margin:12px auto 8px;max-width:100%}' +
+      '.gn-vong svg{width:100%;height:100%;display:block;will-change:transform;transform:rotate(0deg)}' +
+      '.gn-vong .gn-kim{position:absolute;left:50%;top:-8px;margin-left:-14px;width:0;height:0;border-left:14px solid transparent;border-right:14px solid transparent;border-top:26px solid #f3c64a;z-index:2;filter:drop-shadow(0 2px 3px rgba(0,0,0,.45))}' +
+      '@media(prefers-reduced-motion:reduce){.gn-vong svg{transition:none!important}}';
+    document.head.appendChild(c);
+  })();
+  function vongSvg(px) {
+    var R = 100, h = '', rad = function (d) { return (d - 90) * Math.PI / 180; }, f = function (n) { return n.toFixed(2); };
+    VONG.forEach(function (o, i) {
+      var a0 = rad(i * VONG_GOC - VONG_GOC / 2), a1 = rad(i * VONG_GOC + VONG_GOC / 2);
+      h += '<path d="M0 0L' + f(R * Math.cos(a0)) + ' ' + f(R * Math.sin(a0)) + 'A' + R + ' ' + R + ' 0 0 1 ' + f(R * Math.cos(a1)) + ' ' + f(R * Math.sin(a1)) +
+        'Z" fill="' + o.nen + '" stroke="#f3d27a" stroke-width="1.5"/><g transform="rotate(' + (i * VONG_GOC) + ')">' +
+        '<text x="0" y="-70" text-anchor="middle" font-size="24">' + o.ic + '</text>' +
+        o.dong.map(function (t, j) {
+          return '<text x="0" y="' + (-50 + j * 13.5) + '" text-anchor="middle" font-size="10" font-weight="900" letter-spacing=".4" fill="' + o.chu + '" font-family="Inter,Arial,sans-serif">' + t + '</text>';
+        }).join('') + '</g>';
+    });
+    for (var j = 0; j < 12; j++) { var b = rad(j * 30); h += '<circle cx="' + f(105 * Math.cos(b)) + '" cy="' + f(105 * Math.sin(b)) + '" r="2.6" fill="#fff7d6"/>'; }
+    return '<div class="gn-vong" style="width:' + px + 'px;height:' + px + 'px"><div class="gn-kim"></div>' +
+      '<svg viewBox="-112 -112 224 224"><circle r="110" fill="#e9b949"/><circle r="102" fill="#7a1027"/>' + h +
+      '<circle r="17" fill="#fff7d6" stroke="#e9b949" stroke-width="4"/><text y="6" text-anchor="middle" font-size="16">⭐</text></svg></div>';
+  }
+  /** Góc (trên vòng, độ, 0 = giữa ô Gấu bông) sẽ nằm dưới kim. win → trong ô Gấu bông; trượt → sát mép ô Gấu bông, phía ô bên cạnh. */
+  function gocDung(win, rnd) {
+    var nua = VONG_GOC / 2;
+    if (win) return (rnd() - 0.5) * 2 * (nua - 10);                 // trong ô gấu, cách mép ≥ 10°
+    var sat = 2 + rnd() * 4;                                        // 2–6° ngoài mép
+    return rnd() < 0.5 ? nua + sat : -(nua + sat);
+  }
+  /** Quay vòng tới đúng kết quả, xong gọi cb. Quay tiếp nối từ góc hiện tại (≥ 5 vòng). */
+  function quayVong(vong, win, cb) {
+    var svg = vong && vong.querySelector('svg'); if (!svg) { if (cb) cb(); return; }
+    var cur = Number(vong.getAttribute('data-r')) || 0, theta = gocDung(!!win, Math.random);
+    var dich = ((-theta) % 360 + 360) % 360, r = cur + 5 * 360 + ((dich - cur % 360) + 360) % 360;
+    vong.setAttribute('data-r', String(r));
+    var ms = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches ? 50 : 5200;
+    svg.style.transition = 'transform ' + ms + 'ms cubic-bezier(.1,.55,.08,1)';
+    svg.style.transform = 'rotate(' + r + 'deg)';
+    setTimeout(function () { if (cb) cb(); }, ms + 200);
+  }
+  G._vong = { svg: vongSvg, quay: quayVong, gocDung: gocDung, O: VONG_O };
   function boc(name, fn) {   // bọc hàm toàn cục của app
     var cu = window[name];
     if (typeof cu !== 'function') { console.warn('[gấu] app không có hàm ' + name + ' — bỏ qua phần gắn này'); return false; }
@@ -496,9 +548,7 @@
     '#gn-ov .gn-card{background:#fff;border-radius:28px;max-width:380px;width:100%;padding:24px 22px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.3)}' +
     '#gn-ov h3{margin:0 0 4px;font-size:20px;font-weight:900;color:#991b1b}#gn-ov p{margin:6px 0;font-size:14px;color:#374151;line-height:1.5}' +
     '#gn-ov .gn-qr{display:flex;justify-content:center;margin:14px 0}#gn-ov .gn-acts{display:flex;gap:10px;justify-content:center;margin-top:16px;flex-wrap:wrap}' +
-    '#gn-ov .gn-big{font-size:64px;line-height:1;margin:6px 0}#gn-ov .gn-code{font-size:26px;font-weight:900;letter-spacing:.12em;color:#166534}' +
-    '@keyframes gnLac{0%,100%{transform:rotate(0)}20%{transform:rotate(-14deg)}40%{transform:rotate(12deg)}60%{transform:rotate(-8deg)}80%{transform:rotate(6deg)}}' +
-    '#gn-ov .gn-lac{animation:gnLac .5s ease-in-out infinite}' +
+    '#gn-ov .gn-code{font-size:26px;font-weight:900;letter-spacing:.12em;color:#166534}' +
     '#gn-toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);z-index:2147483001;background:#111827;color:#fff;padding:12px 18px;border-radius:14px;font-size:14px;font-weight:700;max-width:90vw;box-shadow:0 8px 30px rgba(0,0,0,.3);font-family:inherit}';
   document.head.appendChild(css);
   var tTimer = null;
@@ -531,25 +581,24 @@
 
   /** Mở lượt tại quầy (khách không dùng app) — từng lượt một */
   function moTaiQuay(sdt) {
-    var o = ov('<h3>🎁 Mở lượt quay</h3><div class="gn-big">🎁</div><p id="gn-mo-msg">Bấm Quay để mở lượt</p>' +
+    var o = ov('<h3>🎄 Vòng quay gấu Noel</h3>' + vongSvg(250) + '<p id="gn-mo-msg">Bấm Quay để quay lượt của khách</p>' +
       '<div class="gn-acts"><button class="gn-btn" data-a="quay">Quay</button><button class="gn-btn gn-x" data-a="x">Đóng</button></div>');
-    var big = o.querySelector('.gn-big'), msg = o.querySelector('#gn-mo-msg'), bQuay = o.querySelector('[data-a=quay]');
-    o.querySelector('[data-a=x]').onclick = function () { dongOv(); phat('dong'); quet(sdt, true); };
+    var vong = o.querySelector('.gn-vong'), msg = o.querySelector('#gn-mo-msg'), bQuay = o.querySelector('[data-a=quay]'), bX = o.querySelector('[data-a=x]');
+    bX.onclick = function () { dongOv(); phat('dong'); quet(sdt, true); };
     phat('mo', { sdt: sdt });
     bQuay.onclick = function () {
-      bQuay.disabled = true; big.textContent = '🎁'; big.className = 'gn-big gn-lac'; msg.textContent = 'Đang quay…';
-      phat('quay', { sdt: sdt });
-      var t0 = Date.now();
+      bQuay.disabled = true; bX.disabled = true; msg.textContent = 'Đang quay…';
       G.mo(sdt).then(function (kq) {
-        setTimeout(function () {
-          big.className = 'gn-big';
-          if (kq.win) { big.textContent = '🧸'; msg.innerHTML = '<b>Trúng 1 gấu bông!</b><br>Nhận tại ' + esc(G.tenQuan(kq.store)) + '<div class="gn-code">' + esc(kq.code) + '</div>'; }
-          else { big.textContent = '🎄'; msg.innerHTML = 'Chưa trúng lần này — chúc may mắn lần sau!'; }
+        phat('quay', { sdt: sdt, win: kq.win, code: kq.code, store: kq.store, conLai: kq.conLai });
+        quayVong(vong, kq.win, function () {
+          bX.disabled = false;
+          if (kq.win) msg.innerHTML = '<b>🧸 Trúng 1 gấu bông!</b><br>Nhận tại ' + esc(G.tenQuan(kq.store)) + '<div class="gn-code">' + esc(kq.code) + '</div>';
+          else msg.innerHTML = 'Chưa trúng lần này — chúc may mắn lần sau!';
           phat('ketqua', { sdt: sdt, win: kq.win, code: kq.code, store: kq.store, conLai: kq.conLai });
           if (kq.conLai > 0) { bQuay.disabled = false; bQuay.textContent = 'Quay tiếp (còn ' + kq.conLai + ')'; } else bQuay.style.display = 'none';
-        }, Math.max(0, 1600 - (Date.now() - t0)));
+        });
       }).catch(function (e) {
-        big.className = 'gn-big'; big.textContent = '🎄';
+        bX.disabled = false;
         msg.textContent = e.message === 'het-luot' ? 'Khách đã quay hết lượt.' : 'Lỗi: ' + e.message; bQuay.style.display = 'none';
       });
     };
@@ -892,10 +941,9 @@
     css.textContent =
       '#gn-k{display:none;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:16px 12px;flex:1;background:linear-gradient(180deg,#fff5f5,#f0fdf4);overflow:hidden;text-align:center}' +
       '#gn-k.on{display:flex}#gn-k .k-t{font-size:15px;font-weight:700;color:#991b1b;line-height:1.3}#gn-k .k-s{font-size:12px;color:#374151;line-height:1.5}' +
-      '#gn-k .k-n{font-size:30px;font-weight:700;color:#166534;line-height:1}#gn-k .k-big{font-size:64px;line-height:1}' +
+      '#gn-k .k-n{font-size:30px;font-weight:700;color:#166534;line-height:1}' +
       '#gn-k .k-code{font-size:20px;font-weight:700;letter-spacing:2px;color:#166534;background:#fff;border-radius:10px;padding:6px 12px;border:2px dashed #86efac}' +
-      '#gn-k .k-qr{width:100%;max-width:230px;aspect-ratio:1}#gn-k .k-qr svg{width:100%;height:100%}' +
-      '@keyframes gnKLac{0%,100%{transform:rotate(0)}25%{transform:rotate(-14deg)}75%{transform:rotate(12deg)}}#gn-k .lac{animation:gnKLac .5s ease-in-out infinite}' +
+      '#gn-k .gn-vong{width:min(230px,90%)!important;height:auto!important;aspect-ratio:1}#gn-k .k-qr{width:100%;max-width:230px;aspect-ratio:1}#gn-k .k-qr svg{width:100%;height:100%}' +
       '#gn-kb{flex-shrink:0;margin:6px 12px;padding:6px 10px;border-radius:10px;background:linear-gradient(135deg,#fef2f2,#dcfce7);border:1px solid #fca5a5;display:none;align-items:center;gap:6px;font-size:8.5px;font-weight:700;color:#7f1d1d;line-height:1.3}#gn-kb.on{display:flex}';
     document.head.appendChild(css);
     var right = document.getElementById('panel-right'), bill = document.getElementById('bill-total-block');
@@ -909,7 +957,8 @@
     var anTimer = null, lastAt = 0, bat = false;
     var CAC = ['orders-list', 'done-panel', 'qr-panel'];
     function hien(html, giay) {
-      k.innerHTML = html; k.classList.add('on');
+      if (html != null) k.innerHTML = html;
+      k.classList.add('on');
       CAC.forEach(function (id) { var e = document.getElementById(id); if (e) e.style.visibility = 'hidden'; if (e && id === 'orders-list') e.style.display = 'none'; });
       clearTimeout(anTimer); if (giay) anTimer = setTimeout(an, giay * 1000);
     }
@@ -919,17 +968,23 @@
       var ol = document.getElementById('orders-list'), dp = document.getElementById('done-panel'), qp = document.getElementById('qr-panel');
       if (ol && !(dp && dp.classList.contains('visible')) && !(qp && qp.classList.contains('visible'))) ol.style.display = '';
     }
+    // mở / quay / kết quả dùng chung 1 vòng (không dựng lại) để vòng dừng đúng chỗ rồi hiện kết quả bên dưới
+    function khungVong(tieuDe, chu, giay) {
+      if (!k.querySelector('.gn-vong')) hien('<div class="k-t"></div>' + vongSvg(230) + '<div class="k-s"></div>', giay);
+      else hien(null, giay);
+      k.querySelector('.k-t').innerHTML = tieuDe; k.querySelector('.k-s').innerHTML = chu;
+      return k.querySelector('.gn-vong');
+    }
     function ve(ev) {
       if (!ev || !bat || Date.now() - (Number(ev.at) || 0) > 10 * 60e3) { an(); return; }
       var sdt = ev.sdt ? 'SĐT …' + esc(ev.sdt) : '';
       if (ev.loai === 'qr') hien('<div class="k-t">🎄 Quay trúng gấu Noel</div><div class="k-n">' + (Number(ev.soLuot) || 0) + ' lượt</div>' +
         '<div class="k-qr">' + qrSvg(230) + '</div><div class="k-s">Quét mã → đăng nhập ' + (sdt || 'SĐT') + ' → bấm <b>Quay</b></div>', 90);
-      else if (ev.loai === 'mo') hien('<div class="k-t">🎁 Mở lượt quay</div><div class="k-big">🎁</div><div class="k-s">' + sdt + '</div>', 120);
-      else if (ev.loai === 'quay') hien('<div class="k-t">Đang quay…</div><div class="k-big lac">🎁</div><div class="k-s">' + sdt + '</div>', 60);
-      else if (ev.loai === 'ketqua') hien(ev.win
-        ? '<div class="k-t">Chúc mừng!</div><div class="k-big">🧸</div><div class="k-s"><b>Trúng 1 gấu bông</b><br>Nhận tại ' + esc(G.tenQuan(ev.store)) + '</div><div class="k-code">' + esc(ev.code) + '</div>' +
-          (ev.conLai > 0 ? '<div class="k-s">Còn ' + ev.conLai + ' lượt</div>' : '')
-        : '<div class="k-t">Chưa trúng lần này</div><div class="k-big">🎄</div><div class="k-s">Chúc bạn may mắn lần sau!' + (ev.conLai > 0 ? '<br>Còn ' + ev.conLai + ' lượt' : '') + '</div>', 30);
+      else if (ev.loai === 'mo') { var v0 = khungVong('🎄 Vòng quay gấu Noel', sdt, 120); v0.removeAttribute('data-r'); v0.querySelector('svg').style.transition = 'none'; v0.querySelector('svg').style.transform = 'rotate(0deg)'; }
+      else if (ev.loai === 'quay') quayVong(khungVong('Đang quay…', sdt, 60), !!ev.win);
+      else if (ev.loai === 'ketqua') khungVong(ev.win ? 'Chúc mừng!' : 'Chưa trúng lần này', ev.win
+        ? '<b>🧸 Trúng 1 gấu bông</b><br>Nhận tại ' + esc(G.tenQuan(ev.store)) + '<div class="k-code" style="margin-top:8px;display:inline-block">' + esc(ev.code) + '</div>' + (ev.conLai > 0 ? '<br>Còn ' + ev.conLai + ' lượt' : '')
+        : 'Chúc bạn may mắn lần sau!' + (ev.conLai > 0 ? '<br>Còn ' + ev.conLai + ' lượt' : ''), 30);
       else an();
     }
     var ref = null, cb = null, cuoi = null, sref = null, scb = null;
@@ -977,10 +1032,7 @@
       '#gn-the .gt-foot{font-size:11px;color:rgba(220,236,255,.65);margin-top:12px;line-height:1.5;position:relative}' +
       '#gn-q{position:fixed;inset:0;z-index:190;display:none;align-items:center;justify-content:center;padding:24px;background:rgba(3,9,20,.88)}#gn-q.on{display:flex}' +
       '#gn-q .gq-box{width:min(320px,88vw);text-align:center;color:#f2f8ff}#gn-q h3{margin:0;font-size:20px;font-weight:900;color:#fff}#gn-q .gq-sub{font-size:13px;color:rgba(220,236,255,.8);margin-top:4px}' +
-      '#gn-q .gq-gift{font-size:110px;line-height:1;margin:22px 0 10px;display:inline-block;will-change:transform}' +
-      '@keyframes gnQLac{0%,100%{transform:rotate(0) scale(1)}20%{transform:rotate(-12deg) scale(1.05)}40%{transform:rotate(10deg) scale(1.08)}60%{transform:rotate(-8deg) scale(1.05)}80%{transform:rotate(6deg)}}' +
-      '@keyframes gnQNo{0%{transform:scale(.4);opacity:0}70%{transform:scale(1.12);opacity:1}100%{transform:scale(1)}}' +
-      '#gn-q .lac{animation:gnQLac .45s ease-in-out infinite}#gn-q .no{animation:gnQNo .5s cubic-bezier(.3,1.4,.5,1)}' +
+      '#gn-q .gn-vong{width:min(280px,76vw)!important;height:auto!important;aspect-ratio:1;margin:18px auto 14px}' +
       '#gn-q .gq-say{font-size:14px;line-height:1.5;min-height:44px}#gn-q .gq-code{display:inline-block;margin-top:8px;padding:8px 14px;border-radius:12px;background:#fff;color:#b3162a;font:900 22px/1 monospace;letter-spacing:.12em}' +
       '#gn-q .gq-btns{display:flex;gap:10px;justify-content:center;margin-top:16px;flex-wrap:wrap}#gn-q .gq-x{background:rgba(255,255,255,.14);box-shadow:none}' +
       '@media(prefers-reduced-motion:reduce){#gn-q *{animation:none!important}}';
@@ -989,9 +1041,9 @@
     var mc = document.querySelector('#tab-user .card-gradient');
     if (mc && mc.parentNode) mc.parentNode.insertBefore(the, mc.nextSibling);
     var q = document.createElement('div'); q.id = 'gn-q';
-    q.innerHTML = '<div class="gq-box"><h3>🎄 Quay trúng gấu Noel</h3><div class="gq-sub"></div><div class="gq-gift">🎁</div><div class="gq-say"></div><div class="gq-btns"></div></div>';
+    q.innerHTML = '<div class="gq-box"><h3>🎄 Vòng quay gấu Noel</h3><div class="gq-sub"></div>' + vongSvg(280) + '<div class="gq-say"></div><div class="gq-btns"></div></div>';
     document.body.appendChild(q);
-    var sub = q.querySelector('.gq-sub'), gift = q.querySelector('.gq-gift'), say = q.querySelector('.gq-say'), btns = q.querySelector('.gq-btns');
+    var sub = q.querySelector('.gq-sub'), vong = q.querySelector('.gn-vong'), say = q.querySelector('.gq-say'), btns = q.querySelector('.gq-btns');
     var sdt = '', unDoc = null, st = null, daBao = -1, dangQuay = false, cfgNghe = false;
     function phone() { try { return G.normPhone(curPhone || ''); } catch (e) { return ''; } }
     function ngay(iso) { var d = String(iso || '').slice(0, 10).split('-'); return d.length === 3 ? d[2] + '/' + d[1] : ''; }
@@ -1016,9 +1068,9 @@
     }
     function moPopup() {
       if (!st || !st.chuaMo.length) return;
-      dangQuay = false; gift.className = 'gq-gift'; gift.textContent = '🎁';
+      dangQuay = false;
       sub.innerHTML = 'Bạn có <b>' + st.chuaMo.length + ' lượt quay</b>';
-      say.textContent = 'Chạm Quay để mở quà!';
+      say.textContent = 'Chạm Quay để quay vòng!';
       btns.innerHTML = '<button class="gq-btn" data-a="quay">Quay</button><button class="gq-btn gq-x" data-a="x">Để sau</button>';
       q.classList.add('on'); ganNut();
     }
@@ -1026,27 +1078,25 @@
       var bq = btns.querySelector('[data-a=quay]'), bx = btns.querySelector('[data-a=x]');
       if (bx) bx.onclick = function () { if (!dangQuay) q.classList.remove('on'); };
       if (bq) bq.onclick = quay;
-      gift.onclick = function () { if (!dangQuay && btns.querySelector('[data-a=quay]')) quay(); };
+      vong.onclick = function () { if (!dangQuay && btns.querySelector('[data-a=quay]')) quay(); };
     }
     function quay() {
       if (dangQuay) return; dangQuay = true;
-      gift.className = 'gq-gift lac'; gift.textContent = '🎁'; say.textContent = 'Đang quay…'; btns.innerHTML = '';
-      var t0 = Date.now();
+      say.textContent = 'Đang quay…'; btns.innerHTML = '';
       G.mo(sdt).then(function (kq) {
-        setTimeout(function () {
-          dangQuay = false; gift.className = 'gq-gift no';
-          if (kq.win) {
-            gift.textContent = '🧸';
-            say.innerHTML = '<b>Chúc mừng! Bạn trúng 1 gấu bông</b><br>Nhận tại ' + esc(G.tenQuan(kq.store)) + ' · hạn ' + HAN + '<br><span class="gq-code">' + esc(kq.code) + '</span>';
-          } else { gift.textContent = '🎄'; say.innerHTML = 'Chưa trúng lần này<br>Chúc bạn may mắn lần sau!'; }
+        quayVong(vong, kq.win, function () {
+          dangQuay = false;
+          if (kq.win) say.innerHTML = '<b>🧸 Chúc mừng! Bạn trúng 1 gấu bông</b><br>Nhận tại ' + esc(G.tenQuan(kq.store)) + ' · hạn ' + HAN + '<br><span class="gq-code">' + esc(kq.code) + '</span>';
+          else say.innerHTML = 'Chưa trúng lần này<br>Chúc bạn may mắn lần sau!';
           sub.innerHTML = kq.conLai > 0 ? 'Còn <b>' + kq.conLai + ' lượt</b>' : 'Đã quay hết lượt';
           btns.innerHTML = (kq.conLai > 0 ? '<button class="gq-btn" data-a="quay">Quay tiếp</button>' : '') + '<button class="gq-btn gq-x" data-a="x">' + (kq.win ? 'Xem gấu của tôi' : 'Đóng') + '</button>';
           ganNut();
           var bx = btns.querySelector('[data-a=x]');
           if (kq.win && bx) bx.onclick = function () { q.classList.remove('on'); try { if (typeof showTab === 'function') showTab('user'); } catch (e) {} setTimeout(function () { the.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 250); };
-        }, Math.max(0, 1500 - (Date.now() - t0)));
+          baoNeuCo();
+        });
       }).catch(function (e) {
-        dangQuay = false; gift.className = 'gq-gift'; gift.textContent = '🎄';
+        dangQuay = false;
         say.textContent = e.message === 'het-luot' ? 'Bạn đã quay hết lượt.' : e.message === 'het-dot' ? 'Chương trình đã kết thúc.' : 'Chưa quay được, thử lại sau nhé.';
         btns.innerHTML = '<button class="gq-btn gq-x" data-a="x">Đóng</button>'; ganNut();
       });

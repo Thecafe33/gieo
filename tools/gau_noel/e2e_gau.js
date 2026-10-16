@@ -82,8 +82,8 @@ const CHUNG = (fake) => {
     await window.__shot('gau_popup_qr');
     // mở tại quầy
     ov.querySelector('[data-a=mo]').click(); await sleep(100);
-    $('gn-ov').querySelector('[data-a=quay]').click(); await sleep(2000);
-    chk(/Chưa trúng/.test($('gn-ov').textContent) && Object.values(DB['gau_noel_2026/' + P].luot)[0].opened === true, '9. Mở lượt tại quầy → quay → trượt, lượt đã mở');
+    $('gn-ov').querySelector('[data-a=quay]').click(); await sleep(5800);
+    chk(/Chưa trúng/.test($('gn-ov').textContent) && Object.values(DB['gau_noel_2026/' + P].luot)[0].opened === true, '9. Mở lượt tại quầy → vòng quay → trượt, lượt đã mở');
     $('gn-ov').querySelector('[data-a=x]').click(); await sleep(100);
     // bill 6 ly → chắc 1 gấu
     reset(); for (let i = 0; i < 6; i++) addToCart('Bạc xỉu', 'M', 25000);
@@ -163,9 +163,9 @@ const CHUNG = (fake) => {
     if (bm) { bm.click(); await sleep(100); }
     chk(K().ev && K().ev.loai === 'mo', 'X6. bấm Mở lượt → màn hình phụ hiện «Mở lượt quay»');
     const q = document.getElementById('gn-ov') && document.getElementById('gn-ov').querySelector('[data-a=quay]');
-    if (q) { q.click(); await sleep(150); }
-    chk(K().ev && K().ev.loai === 'quay', 'X7. bấm Quay → màn hình phụ lắc hộp quà');
-    await sleep(1900);
+    if (q) { q.click(); await sleep(300); }
+    chk(K().ev && K().ev.loai === 'quay' && K().ev.win === false && !!document.querySelector('#gn-ov .gn-vong svg'), 'X7. bấm Quay → vòng quay trên POS + màn hình phụ quay cùng kết quả');
+    await sleep(5800);
     chk(K().ev && K().ev.loai === 'ketqua' && K().ev.conLai === 1, 'X8. kết quả → màn hình phụ hiện kết quả, còn 1 lượt', K().ev);
     window.__kKq = JSON.parse(JSON.stringify(K()));
     return R;
@@ -190,7 +190,14 @@ const CHUNG = (fake) => {
     await db.ref('session_display_xolifa').set({ state: 'ordering', cart: [{ name: 'Trà', qty: 1, price: 30000 }], total: 30000 }); await sleep(100);
     chk(!$('gn-k').classList.contains('on') && $('orders-list').style.display !== 'none', 'K5. khách sau bắt đầu order → thu QR, hiện lại giỏ hàng');
     await db.ref('gau_noel_2026_kiosk/xofa').set(now(kKq)); await sleep(150);
-    chk($('gn-k').classList.contains('on') && /Còn 1 lượt/.test($('gn-k').textContent), 'K6. chiếu kết quả «Mở lượt tại quầy»', $('gn-k').textContent);
+    chk($('gn-k').classList.contains('on') && /Còn 1 lượt/.test($('gn-k').textContent) && $('gn-k').querySelector('.gn-vong'), 'K6. chiếu kết quả «Mở lượt tại quầy» (vòng quay + kết quả)', $('gn-k').textContent);
+    await db.ref('gau_noel_2026_kiosk/xofa').set(now({ bat: true, ev: { loai: 'mo', sdt: '111' } })); await sleep(150);
+    await db.ref('gau_noel_2026_kiosk/xofa').set(now({ bat: true, ev: { loai: 'quay', sdt: '111', win: true } })); await sleep(300);
+    const kx = /rotate\(([-\d.]+)deg\)/.exec($('gn-k').querySelector('.gn-vong svg').style.transform);
+    chk(kx && +kx[1] > 1800 && /Đang quay/.test($('gn-k').textContent), 'K6b. POS bấm Quay → vòng trên màn hình phụ quay', kx && kx[1]);
+    await sleep(5500); await window.__shot('gau_kiosk_vong');
+    let kth = ((-(+kx[1])) % 360 + 360) % 360; if (kth > 180) kth -= 360;
+    chk(Math.abs(kth) < 50, 'K6c. vòng màn hình phụ dừng đúng ô «Gấu bông» như kết quả', kth);
     await db.ref('gau_noel_2026_kiosk/xofa').set(now({ bat: true, ev: { loai: 'ketqua', win: true, code: 'GAUAB2CD', store: 'xofa', conLai: 0 } })); await sleep(150);
     chk(/Trúng 1 gấu bông/.test($('gn-k').textContent) && /GAUAB2CD/.test($('gn-k').textContent) && /XOFA/.test($('gn-k').textContent), 'K7. trúng → gấu + mã + quán nhận');
     await window.__shot('gau_kiosk_trung');
@@ -263,6 +270,8 @@ const CHUNG = (fake) => {
           tc33_b0_0: { store: 'tc33', bill: 'b0', at: '2026-11-20T03:00:00.000Z', win: true, code: 'GAUZZ9YY', k: 'bed', w: 'W0', opened: true } },
         qua: { GAUAB2CD: { store: 'xofa', bill: 'b1', luot: 'xofa_b1_0', at: '2026-11-25T03:00:00.000Z', used: false },
           GAUZZ9YY: { store: 'tc33', bill: 'b0', luot: 'tc33_b0_0', at: '2026-11-20T03:00:00.000Z', used: true, usedAt: '2026-11-21T03:00:00.000Z' } } };
+      let okW = true, okL = true; for (let i = 0; i < 2000; i++) { const w = G._vong.gocDung(true, Math.random), l = Math.abs(G._vong.gocDung(false, Math.random)); if (!(Math.abs(w) <= 50)) okW = false; if (!(l >= 62 && l <= 66)) okL = false; }
+      chk(G._vong.O === 3 && okW && okL, 'I0. vòng 3 ô; 2000 lần: trúng luôn trong ô Gấu bông, trượt luôn sát mép Gấu bông 2–6°');
       G.apCfg(null); G.khachBat(); await sleep(300);
       chk(!$('gn-q').classList.contains('on') && $('gn-the').style.display === 'none', 'I1. chương trình TẮT → không popup, không thẻ, không đọc lượt');
       G.apCfg({ bat: true }); G.khachBat(); await sleep(1500);
@@ -271,14 +280,21 @@ const CHUNG = (fake) => {
       chk(the.style.display === 'block' && /2 lượt/.test(the.textContent) && !/GAUAB2CD/.test(the.textContent) && /GAUZZ9YY/.test(the.textContent) && /Đã nhận/.test(the.textContent), 'I3. thẻ dưới thẻ thành viên: 2 lượt chưa quay; gấu của lượt chưa quay CHƯA lộ mã; gấu đã nhận hiện «Đã nhận»', the.textContent);
       chk(the.previousElementSibling && the.previousElementSibling.classList.contains('card-gradient'), 'I4. thẻ nằm ngay dưới thẻ thành viên');
       await window.__shot('gau_khach_popup');
-      $('gn-q').querySelector('[data-a=quay]').click(); await sleep(400);
-      chk(/Đang quay/.test($('gn-q').textContent), 'I5. bấm Quay → hộp quà lắc');
-      await sleep(1600);
+      $('gn-q').querySelector('[data-a=quay]').click(); await sleep(600);
+      const xoay = () => { const m = /rotate\(([-\d.]+)deg\)/.exec($('gn-q').querySelector('.gn-vong svg').style.transform); return m ? +m[1] : 0; };
+      chk(/Đang quay/.test($('gn-q').textContent) && xoay() > 1800, 'I5. bấm Quay → vòng quay quay (≥ 5 vòng)', xoay());
+      await sleep(5200);
+      const kim = () => { let th = ((-xoay()) % 360 + 360) % 360; if (th > 180) th -= 360; return th; };   // góc dưới kim, 0 = giữa ô Gấu bông
+      chk(Math.abs(kim()) < 50, 'I5b. trúng → kim dừng TRONG ô «Gấu bông»', kim());
+      await window.__shot('gau_khach_trung');
       chk(/trúng 1 gấu bông/i.test($('gn-q').textContent) && /GAUAB2CD/.test($('gn-q').textContent) && /XOFA/.test($('gn-q').textContent) && DB['gau_noel_2026/' + P].luot.xofa_b1_0.opened === true, 'I6. mở lượt cũ nhất → trúng: mã GAUAB2CD, nhận tại XOFA', $('gn-q').textContent);
       await window.__shot('gau_khach_trung');
       await sleep(200);
       chk(/GAUAB2CD/.test(the.textContent) && /1 lượt/.test(the.textContent), 'I7. thẻ cập nhật: hiện mã vừa trúng, còn 1 lượt');
-      $('gn-q').querySelector('[data-a=quay]').click(); await sleep(2000);
+      $('gn-q').querySelector('[data-a=quay]').click(); await sleep(6000);
+      const k2 = Math.abs(kim());
+      chk(k2 > 60 && k2 <= 66.5, 'I8a. trượt → kim dừng NGOÀI ô Gấu bông nhưng SÁT MÉP (2–6°)', kim());
+      await window.__shot('gau_khach_truot');
       chk(/Chưa trúng/.test($('gn-q').textContent) && /hết lượt/.test($('gn-q').textContent) && !$('gn-q').querySelector('[data-a=quay]'), 'I8. lượt 2 trượt → hết lượt, không còn nút Quay');
       $('gn-q').querySelector('[data-a=x]').click(); await sleep(300);
       chk(!$('gn-q').classList.contains('on') && !/lượt\s*chưa quay/.test(the.textContent), 'I9. đóng popup; thẻ không còn dòng lượt chưa quay');
