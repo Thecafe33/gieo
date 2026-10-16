@@ -4976,9 +4976,11 @@ const sortedPCList = [...currentBedList].map((item, idx) => ({...item, originalI
         var isCancelled = (b.status && b.status.includes('đã hủy'));
         var isActive = (b.status && (b.status.includes('active') || b.status.includes('đang dùng')));
         var isSelected = (b.originalIndex === selectedBedIndex);
+        var isWaiting = (!b.bedId || b.bedId == "WAITING") && !isCancelled && !isDone && !isActive;
 
         // [GIAO DIỆN BED 16/10] Phong cách thẻ điểm bán (manage): màu trạng thái = class k-* (giữ màu cũ), khung / kích thước như cũ
-        var k = isCancelled ? 'k-cancel' : isDone ? 'k-done' : isActive ? 'k-active' : 'k-idle';
+        // [FIX 16/10] lịch chờ xếp bed → vàng (k-wait) như bản điện thoại; trước rơi vào k-idle xám trùng màu bed đã trả
+        var k = isCancelled ? 'k-cancel' : isDone ? 'k-done' : isActive ? 'k-active' : isWaiting ? 'k-wait' : 'k-idle';
         var wrapperClass = "nb-card " + k + " cursor-pointer p-4 rounded-[32px] transition-all duration-200 mb-3 border relative group";
         if (isSelected) wrapperClass += " is-sel scale-[1.02] z-10";
         else if (isCancelled && b.cancelType !== 'auto_timeout') wrapperClass += " is-muted";
