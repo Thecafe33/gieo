@@ -177,7 +177,7 @@
       return true;
     };
     for (var l = 0; l < L; l++) {
-      var k = null;
+      var k = null, muon = false;
       if (bed && l === 0) k = 'bed';
       else if (chacTrung(out.streak, out.acc, noel)) k = 'pity';
       else if (chacLy && l === L - 1 && wins === 0) k = 'big';
@@ -186,11 +186,11 @@
         var ok = conKho(kho, ch, band), r = rand();
         if (ok && r < pTurn(L, tienLuot, out.streak, hsNg, heSoKho(kho, ch, band)) && trao(band)) {
           k = band;
-          if (ok === 'carry') kho.carry = (Number(kho.carry) || 0) + 1;
+          if (ok === 'carry') { kho.carry = (Number(kho.carry) || 0) + 1; muon = true; }
         }
       }
       if (k) { wins++; out.streak = 0; out.acc = 0; } else out.streak++;
-      out.luot.push({ k: k, win: !!k, w: ch.w, noel: noel });
+      out.luot.push({ k: k, win: !!k, w: ch.w, noel: noel, carry: !!(k && muon) });
     }
     return out;
   }
@@ -279,17 +279,24 @@
         var cu = luotCua(d).filter(function (x) { return x.store === don.store && x.bill === bill; });
         if (cu.length) { kq = { soLuot: cu.length, trung: cu.filter(function (x) { return x.win; }).length, luot: cu, cu: true }; return; }
         if (!kho) { kq = { soLuot: 0, loi: 'chua-co-kho' }; return; }
-        var r = bocThuan(d, kho, don, n, rand), at = new Date(n).toISOString(), luot = {}, qua = {}, list = [];
-        var daCo = (d.qua || {});
+        var r = bocThuan(d, kho, don, n, rand), at = new Date(n).toISOString(), luot = {}, qua = {}, list = [], ma = {};
+        var daCo = (d.qua || {}), maKho = kho.ma || {};
         r.luot.forEach(function (x, i) {
           var id = don.store + '_' + bill + '_' + i, code = null;
-          if (x.win) { do { code = maNhan(rand); } while (daCo[code] || qua[code]); qua[code] = { store: don.store, bill: bill, luot: id, at: at, used: false }; }
+          if (x.win) {
+            var thu = 0;   // tối đa 60 lần (nguồn ngẫu nhiên hỏng / trùng liên tục) → đổi sang Math.random, rồi ghép thêm số thứ tự
+            do { code = maNhan(thu < 30 ? rand : Math.random); thu++; } while ((daCo[code] || qua[code] || maKho[code]) && thu < 60);
+            if (daCo[code] || qua[code] || maKho[code]) code = 'GAU' + ('00000' + (Object.keys(maKho).length + i + 1).toString(36).toUpperCase()).slice(-5);
+            qua[code] = { store: don.store, bill: bill, luot: id, at: at, used: false }; }
           luot[id] = { store: don.store, bill: bill, at: at, ly: Number(don.ly) || 0, tienNuoc: Number(don.tienNuoc) || 0,
             k: x.k || '', w: x.w, win: x.win, code: code || '', opened: false };
+          if (x.carry) luot[id].carry = true;
+          if (code) ma[code] = { sdt: p, bill: bill, at: at, used: false };
           list.push(Object.assign({ id: id }, luot[id]));
         });
         tx.set(rk, { sdt: p, streak: r.streak, acc: r.acc, luot: luot, qua: qua, lastAt: at }, { merge: true });
-        tx.set(rq, { dung: kho.dung, pre: kho.pre, phat: kho.phat || 0, carry: kho.carry || 0, lastAt: at }, { merge: true });
+        // sổ mã của quán (ma.{mã}) — Đổi quà đối chiếu cả 2 nơi: mã chỉ ghi vào hồ sơ khách (tự ghi được) thì không đổi được
+        tx.set(rq, { dung: kho.dung, pre: kho.pre, phat: kho.phat || 0, carry: kho.carry || 0, ma: ma, lastAt: at }, { merge: true });
         kq = { soLuot: list.length, trung: list.filter(function (x) { return x.win; }).length, luot: list };
       });
     }).then(function () { return kq; });
@@ -302,7 +309,8 @@
     return refKhach(p).get().then(function (s) { return stateOf(s.exists ? s.data() : null); });
   }
 
-  /** Mở (quay) 1 lượt đã bốc — app khách hoặc nút "Mở lượt tại quầy". id bỏ trống = lượt chưa mở cũ nhất. */
+  /** Mở (quay) 1 lượt đã bốc — app khách hoặc nút "Mở lượt tại quầy". id: mã lượt, hoặc mảng ưu tiên
+   *  (lượt đầu tiên trong mảng còn chưa mở); không có / hết → lượt chưa mở cũ nhất. */
   function mo(sdt, id) {
     var p = normPhone(sdt);
     if (!FS || p.length < 9) return Promise.reject(new Error('sdt'));
@@ -311,7 +319,9 @@
     return FS.runTransaction(function (tx) {
       return tx.get(r).then(function (s) {
         var d = s.exists ? s.data() : {}, ds = luotCua(d).filter(function (x) { return !x.opened && !x.huy; });
-        var x = id ? ds.filter(function (y) { return y.id === id; })[0] : ds[0];
+        var x = null;
+        if (Array.isArray(id)) { for (var i = 0; i < id.length && !x; i++) x = ds.filter(function (y) { return y.id === id[i]; })[0] || null; if (!x) x = ds[0]; }
+        else x = id ? ds.filter(function (y) { return y.id === id; })[0] : ds[0];
         if (!x) { err = 'het-luot'; return; }
         var u = {}; u['luot.' + x.id + '.opened'] = true; u['luot.' + x.id + '.openedAt'] = new Date(now()).toISOString();
         tx.update(r, u);
@@ -335,16 +345,21 @@
     if (!FS || p.length < 9) return Promise.reject(new Error('sdt'));
     if (!dangNhan()) return Promise.reject(new Error('het-han'));
     var r = refKhach(p), rq = refKho(store), err = null;
+    if (!/^GAU[A-Z0-9]{5}$/.test(String(code || ''))) return Promise.reject(new Error('khong-co'));
     return FS.runTransaction(function (tx) {
-      return tx.get(r).then(function (s) {
-        var q = ((s.exists ? s.data() : {}).qua || {})[code];
+      return Promise.all([tx.get(r), tx.get(rq)]).then(function (ss) {
+        var q = ((ss[0].exists ? ss[0].data() : {}).qua || {})[code];
         if (!q || q.huy) { err = 'khong-co'; return; }
         if (q.store !== store) { err = 'sai-quan'; return; }
         if (q.used) { err = 'da-doi'; return; }
+        var m = ((ss[1].exists ? ss[1].data() : {}).ma || {})[code];
+        if (!m || normPhone(m.sdt) !== p) { err = 'ma-la'; return; }   // không có trong sổ mã của quán → không đổi
+        if (m.used) { err = 'da-doi'; return; }
         var u = {}, at = new Date(now()).toISOString();
         u['qua.' + code + '.used'] = true; u['qua.' + code + '.usedAt'] = at; u['qua.' + code + '.usedBy'] = String(nv || '');
         tx.update(r, u);
-        tx.set(rq, { doi: FV ? FV.increment(1) : 1 }, { merge: true });
+        var ma = {}; ma[code] = { used: true, usedAt: at };
+        tx.set(rq, { doi: FV ? FV.increment(1) : 1, ma: ma }, { merge: true });
       });
     }).then(function () { if (err) throw new Error(err); return true; });
   }
@@ -360,7 +375,7 @@
         if (!ss[0].exists) return;
         var d = ss[0].data(), kho = ss[1].exists ? ss[1].data() : {}, u = {}, ku = {}, ds = luotCua(d).filter(function (x) { return x.store === store && x.bill === bill && !x.huy; });
         if (!ds.length) return;
-        var dung = kho.dung || {}, pre = kho.pre || {}, phat = Number(kho.phat) || 0, canh = Number(kho.canhBao) || 0;
+        var dung = kho.dung || {}, pre = kho.pre || {}, phat = Number(kho.phat) || 0, canh = Number(kho.canhBao) || 0, carry = Number(kho.carry) || 0;
         ds.forEach(function (x) {
           kq.bo++;
           var q = x.code ? (d.qua || {})[x.code] : null;
@@ -369,12 +384,16 @@
             var dw = dung[x.w] = dung[x.w] || {}; dw[x.k] = Math.max(0, (Number(dw[x.k]) || 0) - 1);
             if (x.w.charAt(0) === 'W') pre[x.k] = Math.max(0, (Number(pre[x.k]) || 0) - 1);
             phat = Math.max(0, phat - 1); kq.traKho++;
+            if (x.carry) carry = Math.max(0, carry - 1);   // gấu 23–25/12 mượn phần trước 23 chưa phát → trả lại phần đó
           }
           u['luot.' + x.id] = FV.delete();
-          if (x.code) u['qua.' + x.code] = FV.delete();
+          if (x.code) { u['qua.' + x.code] = FV.delete(); ku['ma.' + x.code] = FV.delete(); }
         });
         tx.update(rk, u);
-        if (ss[1].exists) tx.set(rq, { dung: dung, pre: pre, phat: phat, canhBao: canh }, { merge: true });
+        if (ss[1].exists) {
+          ku.dung = dung; ku.pre = pre; ku.phat = phat; ku.canhBao = canh; ku.carry = carry;
+          tx.update(rq, ku);
+        }
       });
     }).then(function () { return kq; });
   }
@@ -571,17 +590,18 @@
   function phat(loai, d) { try { if (typeof G.onManHinh === 'function') G.onManHinh(loai, d); } catch (e) { console.warn('[gấu] màn hình phụ', e); } }
 
   /** Popup QR sau thanh toán (The cafe 33) */
-  function popupQR(sdt, n) {
+  function popupQR(sdt, n, ids) {
     phat('qr', { sdt: sdt, soLuot: n });
     var o = ov('<h3>🎄 Quay trúng gấu Noel</h3><p>Khách có <b>' + n + ' lượt quay</b></p>' +
       '<div class="gn-qr">' + qrSvg(220) + '</div><p style="font-size:12.5px;color:#6b7280">Quét mã → đăng nhập SĐT ' + esc(sdt.slice(0, 4)) + '… → bấm Quay</p>' +
       '<div class="gn-acts"><button class="gn-btn gn-g" data-a="mo">Mở lượt tại quầy</button><button class="gn-btn gn-x" data-a="x">Đóng</button></div>');
     o.querySelector('[data-a=x]').onclick = function () { dongOv(); phat('dong'); };
-    o.querySelector('[data-a=mo]').onclick = function () { moTaiQuay(sdt); };
+    o.querySelector('[data-a=mo]').onclick = function () { moTaiQuay(sdt, ids); };
   }
 
   /** Mở lượt tại quầy (khách không dùng app) — từng lượt một */
-  function moTaiQuay(sdt) {
+  /** uuTien: mảng mã lượt mở trước (lượt của đơn vừa thanh toán / của quán này) — tránh mở lượt cũ ở quán khác. */
+  function moTaiQuay(sdt, uuTien) {
     var o = ov('<h3>🎄 Vòng quay gấu Noel</h3>' + vongSvg(250) + '<p id="gn-mo-msg">Bấm Quay để quay lượt của khách</p>' +
       '<div class="gn-acts"><button class="gn-btn" data-a="quay">Quay</button><button class="gn-btn gn-x" data-a="x">Đóng</button></div>');
     var vong = o.querySelector('.gn-vong'), msg = o.querySelector('#gn-mo-msg'), bQuay = o.querySelector('[data-a=quay]'), bX = o.querySelector('[data-a=x]');
@@ -589,7 +609,7 @@
     phat('mo', { sdt: sdt });
     bQuay.onclick = function () {
       bQuay.disabled = true; bX.disabled = true; msg.textContent = 'Đang quay…';
-      G.mo(sdt).then(function (kq) {
+      G.mo(sdt, uuTien && uuTien.length ? uuTien : undefined).then(function (kq) {
         phat('quay', { sdt: sdt, win: kq.win, code: kq.code, store: kq.store, conLai: kq.conLai });
         quayVong(vong, kq.win, function () {
           bX.disabled = false;
@@ -659,13 +679,14 @@
             G.doi(q, sdt, code, '').then(function () { toast('✅ Đã đổi ' + code + ' — đưa 1 gấu bông cho khách'); quet(sdt, true); })
               .catch(function (e) {
                 b.disabled = false;
-                toast({ 'da-doi': '⚠️ Mã ' + code + ' đã đổi rồi', 'sai-quan': '⚠️ Mã này nhận ở quán khác', 'khong-co': '⚠️ Không thấy mã', 'het-han': '⚠️ Đã hết hạn nhận gấu' }[e.message] || ('❌ Lỗi: ' + e.message));
+                toast({ 'da-doi': '⚠️ Mã ' + code + ' đã đổi rồi', 'sai-quan': '⚠️ Mã này nhận ở quán khác', 'khong-co': '⚠️ Không thấy mã', 'ma-la': '⛔ Mã không có trong sổ của quán — KHÔNG đưa gấu, báo quản lý', 'het-han': '⚠️ Đã hết hạn nhận gấu' }[e.message] || ('❌ Lỗi: ' + e.message));
                 quet(sdt, true);
               });
           });
         };
       });
-      var bm = panel.querySelector('[data-mo]'); if (bm) bm.onclick = function () { moTaiQuay(sdt); };
+      var uu = st.chuaMo.filter(function (x) { return x.store === q; }).map(function (x) { return x.id; });
+      var bm = panel.querySelector('[data-mo]'); if (bm) bm.onclick = function () { moTaiQuay(sdt, uu); };
     }).catch(function (e) { console.warn('[gấu] đọc khách', e); });
   }
   function quetSau(sdt) { clearTimeout(qTimer); qTimer = setTimeout(function () { quet(sdt); }, 600); }
@@ -673,11 +694,12 @@
   // ── bốc thăm sau thanh toán ──
   function sauBoc(sdt, kq) {
     if (!kq || !kq.soLuot) { if (kq && kq.loi === 'chua-co-kho') console.warn('[gấu] quán ' + store() + ' chưa nhập kho — tab Quản lý pos'); return; }
-    if (APP === 'tc33') popupQR(sdt, kq.soLuot);
+    var ids = (kq.luot || []).map(function (x) { return x.id; });
+    if (APP === 'tc33') popupQR(sdt, kq.soLuot, ids);
     else if (APP === 'gieo') { /* Gieo: popup «Khách quay ở đâu?» trước khi in bill lo phần báo */ }
     else if (APP === 'xofa') {   // [16/10] hỏi nơi quay: tại quán → vòng quay POS + màn hình phụ; ở nhà → QR trên màn hình phụ
       popupNoiQuay(kq.soLuot, 'vòng quay trên POS + màn hình phụ', 'QR hiện trên màn hình phụ', function (taiQuan) {
-        if (taiQuan) moTaiQuay(sdt);
+        if (taiQuan) moTaiQuay(sdt, ids);
         else phat('qr', { sdt: sdt, soLuot: kq.soLuot });
       });
     }
@@ -786,15 +808,19 @@
     // [16/10 chủ dự án] Thanh toán xong, đơn có lượt → hỏi «Khách quay ở đâu?» TRƯỚC khi in bill:
     //   Quay tại quán → bill KHÔNG in QR (tiết kiệm giấy), mở vòng quay ngay trên POS (giỏ trống thì không vào được ô SĐT nữa);
     //   Quét mã ở nhà → bill in QR như cũ. Không chọn trong 15 giây → coi như quét mã ở nhà (bill không bị treo).
+    // Chờ bốc thăm xong (thường < 1 giây) rồi mới hỏi: không có lượt thật (quán chưa nhập kho, lỗi mạng…) → in bill KHÔNG QR, không hỏi.
     function hoiNoiQuay(order, xong) {
-      var L = G.soLuot(demLy(order.itemsArray, laNuocGieo).ly), sdt = G.normPhone(order.phone);
-      popupNoiQuay(L, 'vòng quay hiện trên POS · bill không in QR', 'bill in kèm mã QR', function (taiQuan) {
-        if (noiQuay) noiQuay.set(order, taiQuan ? 'quan' : 'nha');
-        try { xong(); } catch (e) { console.warn('[gấu] in bill', e); }
-        if (!taiQuan) return;
-        Promise.resolve(bocCua && bocCua.get(order)).then(function (kq) {
-          if (kq && kq.soLuot) moTaiQuay(sdt);
-          else { dongOv(); toast('⚠️ Chưa có lượt quay cho đơn này' + (kq && kq.loi === 'chua-co-kho' ? ' (quán chưa nhập kho gấu)' : '')); }
+      var sdt = G.normPhone(order.phone), xongRoi = false;
+      var inBill = function (cach) { if (xongRoi) return; xongRoi = true; if (noiQuay) noiQuay.set(order, cach); try { xong(); } catch (e) { console.warn('[gấu] in bill', e); } };
+      var cho = setTimeout(function () { inBill('nha'); }, 8000);   // bốc thăm treo quá 8 giây → in bill như cũ (có QR)
+      Promise.resolve(bocCua && bocCua.get(order)).then(function (kq) {
+        clearTimeout(cho);
+        if (xongRoi) return;
+        if (!kq || !kq.soLuot) { inBill('khong'); if (kq && kq.loi === 'chua-co-kho') toast('⚠️ Quán chưa nhập kho gấu Noel — đơn này chưa có lượt quay'); return; }
+        var ids = (kq.luot || []).map(function (x) { return x.id; });
+        popupNoiQuay(kq.soLuot, 'vòng quay hiện trên POS · bill không in QR', 'bill in kèm mã QR', function (taiQuan) {
+          inBill(taiQuan ? 'quan' : 'nha');
+          if (taiQuan) moTaiQuay(sdt, ids);
         });
       });
     }
@@ -817,7 +843,7 @@
         var r = cu.apply(this, arguments);
         try {
           var L = G.soLuot(demLy(order && order.itemsArray, laNuocGieo).ly);
-          if (Array.isArray(r) && L > 0 && !(noiQuay && noiQuay.get(order) === 'quan') && G.dangMua() && G.normPhone(order.phone).length >= 10) r = r.concat([{ type: 'gauNoel', soLuot: L }]);
+          if (Array.isArray(r) && L > 0 && !(noiQuay && (noiQuay.get(order) === 'quan' || noiQuay.get(order) === 'khong')) && G.dangMua() && G.normPhone(order.phone).length >= 10) r = r.concat([{ type: 'gauNoel', soLuot: L }]);
         } catch (e) { console.warn('[gấu] bill', e); }
         return r;
       };
@@ -927,7 +953,9 @@
         '<button class="gn-btn" id="gn-xoa">Xoá dữ liệu Gấu Noel…</button><div id="gn-xoa-msg" style="font-size:12.5px;margin-top:10px;color:#7f1d1d;"></div></div>';
       pane.querySelector('#gn-bat').onclick = function () {
         var on = !G.dangBat();
-        hoi(on ? 'BẬT quay trúng gấu Noel cho cả 3 quán?' : 'TẮT quay trúng gấu Noel? Cả 3 quán ngừng bốc lượt, khách không mở lượt / đổi quà được nữa.').then(function (ok) {
+        var conHan = !G.hetDot() && G.vnDay() >= G.CFG.batDau;
+        hoi(on ? 'BẬT quay trúng gấu Noel cho cả 3 quán?' : 'TẮT quay trúng gấu Noel? Cả 3 quán ngừng bốc lượt, khách KHÔNG mở lượt / đổi quà được nữa.' +
+          (conHan ? '\n\nLưu ý: sau 25/12 chương trình tự ngừng bốc lượt; khách vẫn cần quay + nhận gấu tới hết ' + G.CFG.hanNhan.split('-').reverse().slice(0, 2).join('/') + ' — chỉ TẮT khi muốn dừng hẳn.' : '')).then(function (ok) {
           if (!ok) return;
           G.datCfg({ bat: on, by: 'pos' }).then(function () { toast(on ? '✅ Đã BẬT chương trình' : '⏸ Đã TẮT chương trình'); ve(); })
             .catch(function (e) { toast('❌ Lỗi: ' + e.message); });
@@ -968,8 +996,12 @@
               var v = Math.max(0, Math.round(Number(i.value) || 0)), c = i.getAttribute('data-c'), k = cap[i.getAttribute('data-b')];
               if (c.charAt(0) === 'n' && c.length === 2) k.n[+c.charAt(1)] = v; else k[c] = v;
             });
-            var m = card.querySelector('[data-msg]'); m.textContent = 'Đang lưu…';
-            G.luuKho(id, cap, card.querySelector('[data-tong]').value).then(function () { m.textContent = '✅ Đã lưu'; }).catch(function (e) { m.textContent = '❌ ' + e.message; });
+            var m = card.querySelector('[data-msg]'), tong = Math.round(Number(card.querySelector('[data-tong]').value) || 0);
+            var tongCap = 0; G.KHO_NGAU.forEach(function (k) { tongCap += cap[k].pre + cap[k].n[0] + cap[k].n[1] + cap[k].n[2]; });
+            if (tong <= 0) { m.textContent = '⚠️ Nhập «Số gấu thật của quán» (> 0) — bằng 0 thì quán không trúng được con nào'; return; }
+            if (tong < tongCap) m.textContent = '⚠️ Số gấu thật (' + tong + ') ít hơn tổng trần kho ngẫu nhiên (' + tongCap + ') — hết gấu thật thì ngừng trúng. Đang lưu…';
+            else m.textContent = 'Đang lưu…';
+            G.luuKho(id, cap, tong).then(function () { m.textContent = (/⚠️/.test(m.textContent) ? m.textContent.replace('Đang lưu…', '') + ' ' : '') + '✅ Đã lưu'; }).catch(function (e) { m.textContent = '❌ ' + e.message; });
           };
         });
       }).catch(function (e) { pane.querySelector('#gn-kho').textContent = 'Lỗi đọc kho: ' + e.message; });

@@ -132,20 +132,44 @@ chk(/^GAU[A-HJ-NP-Z2-9]{5}$/.test(G.maNhan(Math.random)) && G.normPhone('+84 912
   await G.boc({ store: 'gg01', sdt: P, bill: 'b2', ly: 2, tienNuoc: 30000 }, seq([0.9]));
   let st = await G.load(P);
   chk(st.chuaMo.length === 2 && st.qua.length === 1, 'app khách: 2 lượt chưa quay, 1 quà');
-  let m1 = await G.mo(P); let m2 = await G.mo(P);
-  chk(m1.win && m1.code === code && !m2.win && m2.conLai === 0, 'quay = mở lượt cũ nhất trước; lượt 2 trượt');
+  let m1 = await G.mo(P, ['gg01_khongco_0', 'gg01_b2_0']);
+  chk(!m1.win && m1.id === 'gg01_b2_0', 'mở theo danh sách ưu tiên (lượt của đơn vừa thanh toán) trước lượt cũ hơn');
+  let m2 = await G.mo(P);
+  chk(m2.win && m2.code === code && m2.conLai === 0, 'không ưu tiên → lượt chưa mở cũ nhất');
   let e = null; try { await G.mo(P); } catch (er) { e = er.message; } chk(e === 'het-luot', 'hết lượt chưa mở');
   e = null; try { await G.doi('xofa', P, code, 'nv1'); } catch (er) { e = er.message; } chk(e === 'sai-quan', 'trúng ở Gieo → XOFA không đổi được');
   chk((await G.quaTaiQuan(P, 'gg01')).length === 1 && (await G.quaTaiQuan(P, 'xofa')).length === 0, 'khung Đổi quà chỉ hiện quà của quán này');
   chk(await G.doi('gg01', P, code, 'nv1') === true && D().qua[code].used && K('gg01').doi === 1, 'Đổi quà: mã hết hiệu lực, kho đếm đã nhận');
   e = null; try { await G.doi('gg01', P, code, 'nv2'); } catch (er) { e = er.message; } chk(e === 'da-doi', 'đổi lần 2 (máy khác) → báo đã đổi');
+  chk(K('gg01').ma[code] && K('gg01').ma[code].sdt === P && K('gg01').ma[code].used === true, 'sổ mã của quán: mã ghi lúc bốc, đánh dấu đã đổi');
+  // khách tự ghi mã giả vào hồ sơ của mình (rules hiện cho phép) → không có trong sổ mã của quán → không đổi được
+  f.FS['gau_noel_2026/' + P].qua.GAUFAKE2 = { store: 'gg01', at: 'x', used: false };
+  e = null; try { await G.doi('gg01', P, 'GAUFAKE2', 'nv1'); } catch (er) { e = er.message; } chk(e === 'ma-la' && !f.FS['gau_noel_2026/' + P].qua.GAUFAKE2.used, 'mã giả (chỉ có trong hồ sơ khách) → «ma-la», không đổi');
+  // mã thật của khách A nhưng ghi sang hồ sơ khách B → sổ ghi SĐT A → không đổi
+  const P2 = '0912999888'; f.FS['gau_noel_2026/' + P2] = { qua: { [code]: { store: 'gg01', at: 'x', used: false } } };
+  e = null; try { await G.doi('gg01', P2, code, 'nv1'); } catch (er) { e = er.message; } chk(e === 'ma-la' || e === 'da-doi', 'chép mã của khách khác sang SĐT mình → không đổi');
+  delete f.FS['gau_noel_2026/' + P2];
   // huỷ bill: quà chưa nhận → trả kho
   const z = await G.boc({ store: 'gg01', sdt: P, bill: 'b3', ly: 2, tienNuoc: 50000 }, seq([0.01, 0.2, 0.3, 0.4, 0.5, 0.6]));
   const phat0 = K('gg01').phat;
   const h = await G.huyBill('gg01', P, 'b3');
   chk(z.trung === 1 && h.traKho === 1 && K('gg01').phat === phat0 - 1 && !D().qua[z.luot[0].code] && !Object.keys(D().luot).some(id => id.indexOf('_b3_') > 0), 'huỷ bill có gấu chưa nhận → bỏ lượt, trả kho');
+  // gấu 23/12 «mượn» phần trước 23 chưa phát (carry) → huỷ bill trả lại carry
+  setNow('2026-12-23T10:00:00');
+  const kc = f.FS['gau_noel_2026_kho/gg01']; kc.dung = Object.assign({}, kc.dung, { N0: { v45: 5 } }); kc.carry = 0;
+  const zc = await G.boc({ store: 'gg01', sdt: P, bill: 'b4', ly: 2, tienNuoc: 50000 }, seq([0.0, 0.2, 0.3, 0.4, 0.5, 0.6]));
+  chk(zc.trung === 1 && f.FS['gau_noel_2026_kho/gg01'].carry === 1 && D().luot.gg01_b4_0.carry === true, '23/12 hết trần ngày → trúng bằng phần mượn (carry = 1, lượt đánh dấu carry)');
+  await G.huyBill('gg01', P, 'b4');
+  chk(f.FS['gau_noel_2026_kho/gg01'].carry === 0 && !(f.FS['gau_noel_2026_kho/gg01'].ma || {})[zc.luot[0].code], 'huỷ bill đó → trả carry về 0, xoá mã khỏi sổ');
+  setNow('2026-11-25T10:00:00');
   const h2 = await G.huyBill('gg01', P, 'b1');
   chk(h2.daNhan === 1 && K('gg01').canhBao === 1 && D().luot['gg01_b1_0'].huy === true, 'huỷ bill có gấu ĐÃ nhận → giữ, gắn cờ cho Quản lý');
+  // nguồn ngẫu nhiên hỏng (luôn cùng 1 số) → mã trùng liên tục: không treo, mã vẫn khác nhau
+  await G.luuKho('tc33', capDeu(5), 50);
+  const hong = () => 0.5;
+  const ca = await G.boc({ store: 'tc33', sdt: '0912111001', bill: 'h1', ly: 0, tienNuoc: 0, bed160: true }, hong);
+  const cb = await G.boc({ store: 'tc33', sdt: '0912111002', bill: 'h2', ly: 0, tienNuoc: 0, bed160: true }, hong);
+  chk(ca.trung === 1 && cb.trung === 1 && ca.luot[0].code !== cb.luot[0].code && /^GAU[A-Z0-9]{5}$/.test(cb.luot[0].code), 'nguồn ngẫu nhiên hỏng → không treo, 2 mã vẫn khác nhau', [ca.luot[0].code, cb.luot[0].code]);
   setNow('2026-12-26T10:00:00');
   x = await G.boc({ store: 'gg01', sdt: P, bill: 'b9', ly: 6, tienNuoc: 200000 });
   chk(x.soLuot === 0, 'sau 25/12: đơn không có lượt');
@@ -153,9 +177,9 @@ chk(/^GAU[A-HJ-NP-Z2-9]{5}$/.test(G.maNhan(Math.random)) && G.normPhone('+84 912
   st = await G.load(P);
   chk(st.het && !st.chuaMo.length, 'qua 31/12: hết đợt, không đọc');
   const tk = await G.thongKe();
-  chk(tk.khach === 1 && tk.nhan === 1, 'thống kê');
+  chk(tk.khach === 3 && tk.nhan === 1, 'thống kê');
   e = null; try { await G.xoaHet('0000'); } catch (er) { e = er.message; } chk(e === 'sai-ma' && D(), 'xoá hết: sai mã → không xoá');
   const n = await G.xoaHet('2512');
-  chk(n === 4 && !D() && !K('gg01') && !K('xofa') && !K('_cfg'), 'xoá hết dữ liệu chương trình (khách + kho + công tắc)');
+  chk(n === 7 && !D() && !K('gg01') && !K('xofa') && !K('tc33') && !K('_cfg'), 'xoá hết dữ liệu chương trình (khách + kho + công tắc)');
   console.log(ok ? 'ALL PASS' : 'SOME FAIL'); if (!ok) process.exit(1);
 })().catch(e => { console.log('FAIL ' + e.stack); process.exit(1); });
