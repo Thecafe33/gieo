@@ -11,11 +11,13 @@
 | App bán hàng | `posgieo.html` | trỏ v18 |
 | App quản lý | `quanlygieo.html` | trỏ v18 |
 | Chế độ thử | `che_do_thu.v1.js` + `posgieo_thu.html`, `quanlygieo_thu.html` | sinh lại bằng `node tools/tao_ban_thu.js .` sau **mỗi** lần sửa HTML |
-| Test | `sh tests/run_all.sh` | 87 file `tests/*.test.js`, chỉ cần `node` |
+| Test | `sh tests/run_all.sh` | 88 file `tests/*.test.js`, chỉ cần `node` |
 
 **Trạng thái deploy (chủ dự án xác nhận 04/10/2026): v18 ĐÃ DEPLOY**, chạy ổn ở cửa hàng 1 được **1–3 tuần**. Đa cửa hàng cần ≥ vài tuần ổn định (`docs/KE_HOACH_DA_CUA_HANG.md` mục 0) → theo dõi thêm rồi mới làm M0. Chủ dự án tự deploy; phiên mới hỏi lại trước việc lớn nếu đã qua lâu.
 
 ## 2. Đã làm (theo thứ tự)
+
+**Mới nhất 17/10 — chuông header và cảnh báo BTP đã xem**: thay tiêu đề Hôm nay trùng sidebar bằng chuông trên header cố định, bỏ nút trong nội dung và nút X. Cuộn chuột/cảm ứng hoặc đổi focus không đóng hộp; chỉ thao tác đóng có chủ ý. Sửa hộp thư chỉ tải 40 bản gần nhất: giờ lấy đủ mục chưa xem, gộp 40 lịch sử. Sau khi lưu Đã xem/Đã xử lý, cập nhật số và danh sách tại máy, không đọc lại; chống lượt nạp cũ hồi sinh cảnh báo, tách trạng thái theo quán. BTP Đã xem có nhãn đúng và vẫn xử lý tiếp được. Không sửa engine, tồn kho, lãi/lỗ, manage hay Menu/Khuyến mãi. Sinh lại bản thử và ba bộ deploy; chưa deploy Hosting. Chi tiết: `docs/GIAO_DIEN_QUANLY.md`; test `tests/thong_bao_canh_bao.test.js`, `tools/ql_giao_dien/e2e_thong_bao.js`.
 
 **Mới nhất 17/10 — gọn feed Kho/BTP và hộp thông báo Hôm nay**: hai widget xem nhanh cùng 6 lượt mới nhất, Mở rộng vẫn đủ dữ liệu. Cảnh báo thành hộp nổi hồng nhẹ, danh sách cuộn riêng, lọc Cần xử lý/Nên xem, giữ hành động và đường vào hộp thư đầy đủ. Đóng bằng X/Escape/bấm ngoài; cập nhật giữ bộ lọc/cuộn/focus, không đọc Firebase khi mở/lọc/đóng. Kiểm trình duyệt riêng 132 mục ở PC/tablet/mobile. Không thay Menu/Khuyến mãi, manage, bộ tính hoặc dữ liệu. Sinh lại bản thử và ba bộ deploy; chủ dự án tự deploy Hosting. Chi tiết: `docs/GIAO_DIEN_QUANLY.md`, tool `tools/ql_giao_dien/e2e_thong_bao.js`.
 

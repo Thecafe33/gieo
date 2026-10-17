@@ -20,11 +20,14 @@ Kho và BTP cùng xem nhanh **6 lượt gần nhất** (thay 8). Danh sách ngu�
 
 ## Hộp thông báo màn Hôm nay (17/10, tinh gọn theo phản hồi)
 
-- `#todayNotifications` chứa nút Thông báo với số việc và hộp nổi `#todayHealth`, tối đa 440px, co theo viewport điện thoại. Thay danh sách thẻ lớn hai cột bằng các dòng gọn trong một khung hồng nhẹ, cuộn riêng; mở hộp không đẩy các chỉ số xuống dưới.
+- `#todayNotifications` là chuông trên header cố định, thay tiêu đề trùng sidebar trên màn Hôm nay của từng quán; bỏ nút thông báo trong nội dung. Các màn khác giữ tiêu đề; Menu/Khuyến mãi giữ header cũ. `#todayHealth` nằm trực tiếp dưới body, ngoài lớp backdrop-filter của header, tối đa 440px và co theo viewport điện thoại. Khung hồng nhẹ, cuộn riêng, không đẩy dashboard; vị trí bám theo chuông khi mở và đổi kích thước.
 - Lọc Tất cả / Cần xử lý / Nên xem, giữ đủ nội dung, số lượng và hành động do `computeStoreHealth` trả về. Không tự đánh dấu đã xem/đã xử lý. Nút cuối mở hộp thư cảnh báo đầy đủ như cũ.
-- Đóng bằng X, Escape, bấm ra ngoài hoặc rời màn; cuộn trang ngoài đóng hộp, cuộn trong danh sách giữ mở. Escape/X trả focus về nút mở. Popup mặc định đóng khi tải trang, không dùng tuỳ chọn nhớ mở của bố cục cũ.
+- Không có nút X. Đóng bằng bấm lại chuông, Escape, click/tap bên ngoài, chọn thông báo hoặc rời màn. Cuộn ngoài/trong, vuốt cảm ứng và đổi focus đều không tự đóng; dùng click thay pointerdown để không nhầm thao tác vuốt thành tap. Escape trả focus về chuông. Mặc định đóng khi tải trang, không nhớ mở từ bố cục cũ.
 - Vẽ lại giữ bộ lọc, vị trí cuộn và focus đang có trong hộp. Dùng kết quả sức khoẻ đã nạp; mở/lọc/đóng không gọi Firebase. Không sửa bộ tính, Menu/Khuyến mãi hay giao diện manage.
-- `node tools/ql_giao_dien/e2e_thong_bao.js`: 132 kiểm tra ở 1366/853/390/320px, Firebase giả và chặn mạng ngoài; kiểm 6 lượt, mở rộng đủ danh sách, thao tác hộp thông báo, cập nhật giữ trạng thái, đường điều hướng và không đọc thêm.
+- Hộp thư chi tiết lấy **toàn bộ `status:new`**, gộp với 40 bản gần nhất cho lịch sử, khử trùng theo id tài liệu thật. Trước đây chỉ lấy 40 bản gần nhất nên cảnh báo cũ vẫn được bộ đếm tính nhưng không có trong danh sách để xử lý. `loadNewAlerts` dùng chung truy vấn đang chạy; không gắn listener mới hay polling.
+- Sau khi ghi trạng thái thành công, cập nhật danh sách chưa xem, lịch sử, nhóm cảnh báo và số trên chuông ngay trong máy, không tải lại toàn bộ sức khoẻ/hộp thư. Trạng thái riêng từng quán; lượt đọc khởi chạy trước lúc lưu không hồi sinh mục vừa xử lý. Ghi lỗi giữ nguyên cảnh báo. BTP `seen` có nhãn Đã xem và vẫn chuyển tiếp được sang Đã xử lý; không tự sửa tồn hoặc xoá cảnh báo cũ.
+- `node tools/ql_giao_dien/e2e_thong_bao.js`: kiểm 1366/853/390/320px bằng Firebase giả, chặn mạng ngoài; 6 lượt, mở rộng đủ danh sách, chuông/header, cuộn chuột/cảm ứng, click/tap ngoài, trạng thái/focus, đường điều hướng và nút trạng thái thật. `tests/thong_bao_canh_bao.test.js` kiểm cửa sổ 40 bản, trạng thái, lỗi ghi, trả kết quả muộn, gộp truy vấn, cách ly từng quán và không đọc lại sau lưu.
+- Kết quả lượt chuông: 182 kiểm tra trình duyệt riêng, 540 widget toàn app, 207 bill realtime và 56 khung điều hướng đạt; 18 kiểm tra trạng thái nằm trong bộ 88 file unit/regression. Bộ tính dùng chung khớp nguyên bản. Sinh lại bản thử và ba bộ deploy; gói tải riêng chỉ có `quanlygieo.html` và `quanlygieo_thu.html`.
 
 ## Chỉ số & lãi/lỗ màn Hôm nay (17/10, lượt widget)
 
