@@ -17,6 +17,9 @@
 
 ## 2. Đã làm (theo thứ tự)
 
+**17/10 — popup Bill chung chỉ còn widget xanh**: bỏ khung trắng, padding và tiêu đề ngoài của dialog. Tiêu đề duy nhất cùng nút X nằm trong đầu widget; giữ cuộn riêng, Esc/bấm ngoài để đóng và trả focus về Xem thêm sau khi RT vẽ lại. Các dialog khác giữ khung như trước. Chỉ sửa manage; sinh lại ba bộ deploy, gói tải riêng chỉ `manage.html`.
+
+
 **17/10 — bo góc cột doanh thu manage**: bỏ bo cả bốn góc của từng đoạn màu; bo hai góc trên theo đường bao cả cột, đáy và ranh giới các phần màu phẳng, nối sát. Cùng kiểu cho cột giờ/ngày/tháng và khi ẩn/hiện điểm bán. Dữ liệu/tổng/tooltip giữ nguyên; sinh lại ba bộ deploy, gói tải riêng chỉ `manage.html`.
 
 

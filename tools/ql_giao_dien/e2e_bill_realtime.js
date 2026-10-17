@@ -36,6 +36,8 @@ const server=require('http').createServer((req,res)=>{const f=path.resolve(ROOT,
  check(await p.evaluate(()=>document.querySelector('#billFeed .bf-more').parentElement===document.querySelector('#billFeed .bf-live').parentElement),'manage '+width+': Xem thêm cạnh Trực tiếp trên đầu');
  await p.click('#billFeed .bf-more');check(await p.locator('#bfModal .bill-widget').count()===1,'manage '+width+': Xem thêm mở popup cùng UI widget');
  check(await p.evaluate(()=>[...document.querySelectorAll('#bfModal .bf-entry')].every(e=>!e.hidden)),'manage '+width+': popup hiện toàn bộ bill đã giữ');
+ check(await p.evaluate(()=>{const d=document.getElementById('dialog'),inner=document.getElementById('dialogInner'),style=getComputedStyle(d);return style.backgroundColor==='rgba(0, 0, 0, 0)'&&parseFloat(style.paddingTop)===0&&parseFloat(getComputedStyle(inner).paddingTop)===0&&!inner.querySelector('.dialog-head')}),'manage '+width+': popup chỉ có widget xanh, không khung trắng/padding/tiêu đề ngoài');
+ check(await p.evaluate(()=>document.querySelectorAll('#dialog #dialogTitle').length===1&&document.querySelector('#dialog #dialogTitle').textContent==='Bill chung'&&!!document.querySelector('#bfModal .widget-head .bf-close')),'manage '+width+': một tiêu đề duy nhất và nút X nằm trong đầu widget');
  const geometry=await p.evaluate(()=>{
   const d=document.getElementById('dialog'),header=document.querySelector('#bfModal .widget-head'),entry=document.querySelector('#bfModal .bf-entry.is-open'),head=entry.querySelector('.bf-row'),detail=entry.querySelector('.bf-detail');
   return {width:d.getBoundingClientRect().width,headerBG:getComputedStyle(header).backgroundColor,headBG:getComputedStyle(head).backgroundColor,detailBG:getComputedStyle(detail).backgroundColor,gap:detail.getBoundingClientRect().top-head.getBoundingClientRect().bottom,detailHeight:detail.getBoundingClientRect().height,stripe:getComputedStyle(detail).borderLeftWidth,overflow:document.querySelector('#bfModal').scrollWidth>document.querySelector('#bfModal').clientWidth+1};
@@ -55,6 +57,12 @@ const server=require('http').createServer((req,res)=>{const f=path.resolve(ROOT,
  check(await p.evaluate(()=>['.bf-row','.bf-detail','.widget-head'].every(s=>getComputedStyle(document.querySelector('#bfModal '+s)).backgroundColor==='rgba(0, 0, 0, 0)')),'manage '+width+': theme tối vẫn dùng nền liền mạch');
  fs.mkdirSync(ROOT+'/work/bill-ui',{recursive:true});await p.screenshot({path:ROOT+'/work/bill-ui/manage-dark-'+width+'.png'});await p.evaluate(()=>toggleTheme());await p.waitForTimeout(350);
  fs.mkdirSync(ROOT+'/work/bill-ui',{recursive:true});await p.screenshot({path:ROOT+'/work/bill-ui/manage-'+width+'.png'});
+ await p.click('#bfModal .bf-close');await p.waitForTimeout(80);
+ check(await p.evaluate(()=>!document.getElementById('dialog').open&&document.activeElement===document.querySelector('#billFeed .bf-more')),'manage '+width+': nút X đóng popup và trả focus về Xem thêm sau RT vẽ lại');
+ await p.click('#billFeed .bf-more');await p.keyboard.press('Escape');await p.waitForTimeout(80);check(await p.evaluate(()=>!document.getElementById('dialog').open),'manage '+width+': Esc vẫn đóng popup widget');
+ await p.click('#billFeed .bf-more');await p.mouse.click(2,2);await p.waitForTimeout(80);check(await p.evaluate(()=>!document.getElementById('dialog').open),'manage '+width+': bấm ngoài popup vẫn đóng');
+ await p.evaluate(()=>openDialog('Kiểm tra hộp thoại khác','<p>Thông tin</p>'));
+ check(await p.evaluate(()=>{const d=document.getElementById('dialog');return d.open&&!d.classList.contains('bill-dialog')&&!!d.querySelector('.dialog-head')&&getComputedStyle(d).backgroundColor!=='rgba(0, 0, 0, 0)'}),'manage '+width+': các hộp thoại khác giữ khung/tiêu đề bình thường');
  await p.evaluate(()=>closeDialog());
  await p.evaluate(()=>{state.range='day';render();const i=currentBuckets.findIndex(b=>b.label.startsWith('10h'));chartTip(i,document.querySelector('#chartWrap svg rect[tabindex]'))});
  check(await p.locator('#chartTip').innerText().then(s=>s.includes('Tổng doanh thu')),'manage '+width+': tooltip có tổng doanh thu');

@@ -25,6 +25,10 @@ Popup PC/tablet giảm từ `min(1100px,96vw)` còn `min(880px,76.8vw)` (20%); �
 
 Mỗi cột dùng một đường bao chỉ bo hai góc trên, đáy phẳng. Các phần màu bên trong là hình chữ nhật nối sát, không bo góc riêng và không trừ chiều cao tạo khe giữa các phần. Áp dụng cả cột chồng theo giờ và cột theo ngày/tháng; giữ dữ liệu, tooltip, màu và thao tác bật/tắt điểm bán. Mã clip duy nhất qua các lượt vẽ để nhiều biểu đồ không dùng nhầm đường bao.
 
+## Popup dùng chính widget — 17/10
+
+Bill chung mở trực tiếp widget xanh trong dialog nền trong suốt: bỏ khung trắng, padding và tiêu đề/phụ đề bên ngoài. Chỉ còn một tiêu đề Bill chung, nhãn Trực tiếp và nút X trong đầu widget. Giữ chiều ngang đã chốt, danh sách cuộn riêng, X/Esc/bấm ngoài đóng được; sau khi RT vẽ lại, đóng popup trả focus về nút Xem thêm hiện hành. Chế độ widget riêng không đổi khung/tiêu đề của các dialog khác.
+
 ## Nguồn dữ liệu và lượt đọc
 
 `bill_live.v1.js` giữ một Map theo `storeId|YYYY-MM-DD`, bên trong là bill theo mã RT. Tổng hợp hôm nay và bảng bill dùng chung nguồn này. Một listener trên **node của đúng một ngày/điểm**, cùng `once(value)` để biết baseline đã đầy đủ (SDK dùng dữ liệu của listener). Không có một truy vấn tail riêng ngoài lượt tổng hợp ngày. Sau baseline chỉ nhận child_added/changed/removed; không gọi đọc toàn ngày theo từng bill.
@@ -44,7 +48,7 @@ Không sửa `lai_lo.v1.js`, `data_access.v9.js` hoặc engine đã phát hành.
 
 ## Kiểm tra và giao file
 
-Kết quả lượt này: 86 file test đạt; Chromium PC/tablet/điện thoại 129/129 mục; kiểm tra khung QL 56/56 và nhân sự 76/76; cú pháp, inventory, ranh giới, đường dẫn và predeploy đạt. Chưa deploy Hosting.
+Kết quả lượt này: 86 file test đạt; Chromium PC/tablet/điện thoại 147/147 mục; kiểm tra khung QL 56/56 và nhân sự 76/76; cú pháp, inventory, ranh giới, đường dẫn và predeploy đạt. Chưa deploy Hosting.
 
 - `node tests/bill_live.test.js`: baseline dùng chung, sự kiện trong lúc tải, bill lặp/sửa/xoá, năm, cách ly quán, lỗi/gỡ nguồn.
 - `node tests/lai_lo.test.js`: bản sinh khớp, cùng công thức QL, realtime không đọc Firebase thêm, không mượn ngữ cảnh quán khác.

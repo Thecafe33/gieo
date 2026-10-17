@@ -442,7 +442,7 @@ html[data-theme="dark"] .bf-pay.is-cash{background:#1f3b2a;color:#86d9a6}html[da
 .bf-line{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:4px 0;font-size:15px;font-weight:500}.bf-line>b{flex:none;font-size:15px;font-weight:700;white-space:nowrap}
 .bf-meta{margin-top:5px;padding-top:5px;border-top:1px solid var(--line)}.bf-kv{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:2px 0;font-size:13.5px;color:var(--sub)}.bf-kv>span{flex:none}.bf-kv>b{font-size:14px;font-weight:700;color:var(--ink);text-align:right;overflow-wrap:anywhere}.bf-note{margin:4px 0;color:var(--ink);font-size:14px}
 .bf-more{margin:0;flex-shrink:0}
-.dialog.bill-dialog{width:min(880px,76.8vw);max-width:880px}.bill-dialog #dialogInner{padding-top:12px}
+.dialog.bill-dialog{width:min(880px,76.8vw);max-width:880px;padding:0;border:0;background:transparent;box-shadow:none;border-radius:36px}.bill-dialog #dialogInner{padding:0;background:transparent}.bf-close{flex:none;width:36px;height:36px;border-radius:50%;background:color-mix(in srgb,var(--panel) 65%,transparent);color:var(--ink)}
 #bfModal{display:flex;max-height:70dvh;overflow:hidden}.bill-dialog .bill-widget{width:100%;max-height:70dvh;min-height:0}
 .bill-dialog .bill-widget>.widget-head{flex-shrink:0;background:none}
 .bill-dialog .bf-list{min-height:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;padding:3px;margin:13px -3px -3px}
@@ -2130,7 +2130,7 @@ function bfOn(id,w,type,k,o){
  clearTimeout(BF.timer);BF.timer=setTimeout(bfRender,40);   // lúc gắn Firebase trả liền mấy chục bill → vẽ 1 lần
 }
 function bfRender(){const el=$('#billFeed');if(el&&state.view==='rev'){el.innerHTML=bfInner();bfFit()}const modal=$('#bfModal');if(modal){const top=modal.querySelector('.bf-list')?.scrollTop||0;modal.innerHTML=bfInner(true);const list=modal.querySelector('.bf-list');if(list)list.scrollTop=top}hydrateIcons()}
-function bfMore(){openDialog('Bill chung',`<div id="bfModal">${bfInner(true)}</div>`,false,'Bill hôm nay · tự cập nhật');$('#dialog').classList.add('bill-dialog')}
+function bfMore(){openDialog('Bill chung',`<div id="bfModal">${bfInner(true)}</div>`,false,'','bill-dialog')}
 
 // Coalesce bursts, never reload the dashboard's other stores on an RT event.
 const BF_STATS=new Set();let bfStatsTimer=null;
@@ -2183,7 +2183,7 @@ function bfRow(b){
 }
 function bfInner(modal=false){
  const ids=new Set(selectedStores().map(st=>st.id)),all=BF.list.filter(b=>ids.has(b.store)),list=all.slice(0,modal?BF.keep:24);
- const head=`<div class="widget-head"><span class="widget-brandmark" aria-hidden="true">${icon('receipt')}</span><div class="widget-heading"><h3>Bill chung</h3><p>${all.length?all.length+' bill gần nhất'+(ids.size>1?' · '+ids.size+' điểm':''):'Bill bán hàng hôm nay'}</p></div>${modal?'':'<button class="bf-more" onclick="bfMore()" aria-haspopup="dialog">Xem thêm</button>'}<span class="bf-live" title="Bill mới tự hiện, không cần tải lại"><i></i>Trực tiếp</span></div>`;
+ const head=`<div class="widget-head"><span class="widget-brandmark" aria-hidden="true">${icon('receipt')}</span><div class="widget-heading"><h3${modal?' id="dialogTitle"':''}>Bill chung</h3><p>${all.length?all.length+' bill gần nhất'+(ids.size>1?' · '+ids.size+' điểm':''):'Bill bán hàng hôm nay'}</p></div>${modal?'':'<button class="bf-more" onclick="bfMore()" aria-haspopup="dialog">Xem thêm</button>'}<span class="bf-live" title="Bill mới tự hiện, không cần tải lại"><i></i>Trực tiếp</span>${modal?`<button class="icon-btn bf-close" onclick="closeDialog()" aria-label="Đóng Bill chung">${icon('close')}</button>`:''}</div>`;
  const body=list.length?`<div class="bf-list">${list.map(bfRow).join('')}</div>`:`<p class="bf-empty">${BF.err?'Không nghe được bill mới: '+esc(BF.err):'Chưa có bill nào hôm nay — bill mới sẽ tự hiện ở đây.'}</p>`;
  BF.anim.clear();
  return `<article class="outlet-widget bill-widget" style="--c:var(--green)">${head}${body}</article>`;
@@ -2345,9 +2345,9 @@ function formatGoalInput(input,days){
 function fitDashboardChart(){const wrap=$('#chartWrap');if(!wrap)return;const r=wrap.getBoundingClientRect();wrap.innerHTML=chartSvg(selectedStores().map(storeRange),{width:Math.max(180,r.width),height:Math.max(45,r.height)})+'<div id="chartTip" class="chart-tooltip"></div>'}
 window.addEventListener('resize',()=>{clearTimeout(window.chartFitTimer);window.chartFitTimer=setTimeout(fitDashboardChart,80)});
 let focusBeforeDialog=null;
-function openDialog(title,html,drawer=false,sub=''){const d=$('#dialog');focusBeforeDialog=document.activeElement;if(d.open)d.close();d.classList.remove('store-detail','store-chooser','bill-dialog');d.classList.toggle('drawer',drawer);$('#dialogInner').innerHTML=`<div class="dialog-head"><div><h2 id="dialogTitle">${title}</h2>${sub?`<p class="dialog-subtitle">${sub}</p>`:''}</div><button class="icon-btn" onclick="closeDialog()" aria-label="Đóng">${icon('close')}</button></div>${html}`;d.showModal()}
+function openDialog(title,html,drawer=false,sub='',widgetClass=''){const d=$('#dialog');focusBeforeDialog=document.activeElement;if(d.open)d.close();d.classList.remove('store-detail','store-chooser','bill-dialog');d.classList.toggle('drawer',drawer);if(widgetClass)d.classList.add(widgetClass);$('#dialogInner').innerHTML=widgetClass?html:`<div class="dialog-head"><div><h2 id="dialogTitle">${title}</h2>${sub?`<p class="dialog-subtitle">${sub}</p>`:''}</div><button class="icon-btn" onclick="closeDialog()" aria-label="Đóng">${icon('close')}</button></div>${html}`;d.showModal()}
 function closeDialog(){$('#dialog').close()}
-$('#dialog').addEventListener('close',()=>focusBeforeDialog?.isConnected&&focusBeforeDialog.focus());
+$('#dialog').addEventListener('close',()=>{if($('#dialog').open)return;const target=focusBeforeDialog?.isConnected?focusBeforeDialog:$('#dialog').classList.contains('bill-dialog')?$('#billFeed .bf-more'):null;target?.focus()});
 $('#dialog').addEventListener('click',e=>{if(e.target===$('#dialog')){const r=e.target.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)closeDialog()}});
 document.addEventListener('keydown',e=>{if(e.key==='Escape')toggleSidebar(false)});
 
