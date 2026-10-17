@@ -44,6 +44,10 @@ Kiểm tra: `tests/nhan_su_diem_ban.test.js` kiểm tương thích hồ sơ cũ,
 ## Huy hiệu «Ca hiện tại» (thanh tiêu đề)
 Ở máy tính luôn nằm **cạnh «đã cập nhật», cùng hàng với tiêu đề**, kể cả cửa sổ 853–1024px và trình duyệt/WebView không hỗ trợ container query. PC dùng `flex-wrap:nowrap`, huy hiệu một dòng gọn; tiêu đề/huy hiệu dài thu bằng dấu …, bấm huy hiệu vẫn mở chi tiết. Chỉ `html.phone-ui` mới tách huy hiệu sang dòng riêng. Không dùng ngưỡng container/màn hình để đẩy huy hiệu PC xuống hàng (đã từng gây lãng phí chiều cao như ảnh chủ dự án phản hồi).
 
+## Kế hoạch hoàn thiện các màn còn lại
+
+Đã rà điều hướng PC/mobile và các form NL/BTP ngày 17/10. Kế hoạch chi tiết: [KE_HOACH_UI_WIDGET_QUANLY.md](KE_HOACH_UI_WIDGET_QUANLY.md). Trạng thái chỉ lập kế hoạch; giữ nguyên tab Menu/Khuyến mãi, nhóm kho triển khai theo từng luồng.
+
 ## Quy tắc khi sửa tiếp
 1. **Mọi rule giao diện chung nằm trong khối `/* [MANAGE-SKIN:BEGIN] */ … /* [MANAGE-SKIN:END] */`** — khối này là CUỐI `<style>` chính nên thắng mọi khối trên. Sửa nét chung → sửa **trong khối đó**. Test `tests/ql_giao_dien.test.js` báo nếu khối không còn ở cuối hoặc nếu có màu xanh manage lọt vào.
 2. Giữ bảng màu thương hiệu. Ngoại lệ chủ dự án đã yêu cầu 17/10: nền hồng/hai quầng radial, widget lãi/lỗ tím riêng và nhóm vận hành xanh ngọc; không lấy nền xanh của manage.
