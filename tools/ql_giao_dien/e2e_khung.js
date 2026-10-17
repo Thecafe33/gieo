@@ -82,12 +82,24 @@ const server=require('http').createServer((req,res)=>{
   chk(await p.evaluate(()=>document.querySelector('#todayKhoFeed .wdg-body')!==null && document.querySelector('#todayPrepFeed .wdg-body')!==null),'widget (tablet): kho + BTP mở sẵn song song');
   chk(await p.evaluate(()=>{const a=document.getElementById('todayKhoFeed').getBoundingClientRect(),b=document.getElementById('todayPrepFeed').getBoundingClientRect();return Math.abs(a.top-b.top)<2 && a.right<=b.left+1;}),'widget (tablet): kho và BTP nằm cạnh nhau');
   await p.close();
-  // --- huy hiệu «Ca hiện tại»: máy tính thì CÙNG HÀNG với tiêu đề; chỉ xuống hàng khi thanh tiêu đề thật sự hẹp
-  const badgeTops = async (w) => { const q = await open(w, 820); await q.evaluate(() => { document.getElementById('todayShiftInfo').innerHTML = '<div class="shift-badge" onclick="openTodayShiftDetail()"><div class="shift-badge-line1">Ca hiện tại: Ca sáng</div><div class="shift-badge-line2">1 đang làm</div></div>'; });
-    await q.waitForTimeout(200); const r = await q.evaluate(() => ({ t: document.getElementById('hdrTitle').getBoundingClientRect().top, b: document.getElementById('todayShiftInfo').getBoundingClientRect().top, h: document.querySelector('#todayShiftInfo .shift-badge').getBoundingClientRect().height })); await q.close(); return r; };
-  let bt = await badgeTops(1366); chk(Math.abs(bt.b - bt.t) < 40, 'huy hiệu ca: 1366px → cùng hàng với tiêu đề ' + JSON.stringify(bt));
-  bt = await badgeTops(1180); chk(Math.abs(bt.b - bt.t) < 40, 'huy hiệu ca: 1180px → vẫn cùng hàng ' + JSON.stringify(bt));
-  bt = await badgeTops(1000); chk(bt.b > bt.t + 20 && bt.h < 45, 'huy hiệu ca: cửa sổ hẹp → xuống hàng riêng nhưng gọn một dòng ' + JSON.stringify(bt));
+  // PC: huy hiệu phải cạnh «đã cập nhật», kể cả sidebar mở/cửa sổ hẹp và trình duyệt không hiểu container query.
+  for(const w of [1366,1180,1024,1000,853]){
+    const q=await open(w,820);
+    await q.evaluate(()=>{
+      document.documentElement.classList.remove('phone-ui');document.documentElement.classList.add('tab-ui');
+      document.getElementById('todayShiftInfo').innerHTML='<div class="shift-badge" onclick="openTodayShiftDetail()"><div class="shift-badge-line1">Ca hiện tại: Ca sáng</div><div class="shift-badge-line2">1 đang làm</div></div>';
+      document.getElementById('syncTxt').textContent='đã cập nhật';
+    });
+    await q.waitForTimeout(100);
+    const layout=()=>{
+      const badge=document.getElementById('todayShiftInfo').getBoundingClientRect(),sync=document.querySelector('.sync').getBoundingClientRect(),row=document.querySelector('.topbar-row').getBoundingClientRect();
+      return {same:Math.abs((badge.top+badge.height/2)-(sync.top+sync.height/2))<2,next:badge.right<=sync.left&&sync.left-badge.right<=12,height:row.height,overflow:document.documentElement.scrollWidth>innerWidth+1};
+    };
+    let r=await q.evaluate(layout);chk(r.same&&r.next&&r.height<=60&&!r.overflow,`huy hiệu PC ${w}px: cạnh «đã cập nhật», không thêm hàng `+JSON.stringify(r));
+    await q.evaluate(()=>{const style=document.createElement('style');style.textContent='.topbar{container-type:normal;container-name:none}';document.head.appendChild(style)});
+    r=await q.evaluate(layout);chk(r.same&&r.next&&r.height<=60&&!r.overflow,`huy hiệu PC ${w}px: không có container query vẫn cùng hàng`);
+    await q.close();
+  }
   // --- tab Tiền mặt + Chi phí dạng widget — chức năng cũ còn nguyên
   p = await open(1366, 820);
   await p.evaluate(() => goEntry('exp')); await p.waitForTimeout(900);

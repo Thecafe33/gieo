@@ -17,6 +17,9 @@
 
 ## 2. Đã làm (theo thứ tự)
 
+**17/10 — huy hiệu Ca hiện tại trên PC**: luôn nằm cạnh «đã cập nhật», không xuống hàng riêng ở cửa sổ hẹp hay WebView không hỗ trợ container query. Chỉ đổi CSS; giữ nút mở chi tiết và dữ liệu ca. Đã sinh lại bản thử và ba bộ deploy.
+
+
 **Mới nhất 17/10 — giao diện biểu mẫu + nhân sự**: đồng bộ ô nhập/chọn/ngày/giờ/tháng/lý do, kể cả ngoài `.field`; widget xuất phân tích mẻ, Nhân viên (bảng máy tính/thẻ điện thoại, gom theo điểm bán + tìm tên, form thêm/sửa cùng widget), Lịch, Chấm công, Lương. Thêm `employees_gieogieo.storeTags` để phân hồ sơ theo nhiều điểm Gieo; hồ sơ cũ mặc định quán chính/GG01, không tự ghi chuyển dữ liệu. Chủ dự án chốt chỉ phân nhóm — không giới hạn check-in, không thay lương. `homeStore` vẫn riêng cho lương cứng, hiện ngay cả một quán. Chi tiết: `docs/GIAO_DIEN_QUANLY.md`. Đã sinh lại bản thử và ba bộ deploy; **chưa xác nhận deploy Hosting của lượt này**.
 
 

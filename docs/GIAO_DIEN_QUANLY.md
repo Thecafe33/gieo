@@ -8,7 +8,7 @@
 |---|---|
 | Bo góc | `--r-md:20px`, `--r-lg:24px` ở `:root` (trước 18/22); thẻ, thẻ doanh thu, nút, tab, chip đều bo tròn hơn. |
 | Font | Inter nhúng sẵn (3 khối `@font-face` chép từ manage, đầu `<style>`); `--font` / `--font-disp` dùng `"Inter Local"`. |
-| Khung máy tính | Sidebar kính nổi bo 34px (`html.tab-ui`), mục menu viên thuốc, icon tròn (màu `SB_TILE` giữ gốc), nút chọn quán `.sb-store` (viên, giữ hồng nhạt), tiêu đề trang đậm. Mục đang chọn = nền hồng nhạt `--gl` + chữ `--gm` (trước: hồng đặc chữ trắng). Huy hiệu «Ca hiện tại» tự xuống hàng riêng khi màn < 1180px. |
+| Khung máy tính | Sidebar kính nổi bo 34px (`html.tab-ui`), mục menu viên thuốc, icon tròn (màu `SB_TILE` giữ gốc), nút chọn quán `.sb-store` (viên, giữ hồng nhạt), tiêu đề trang đậm. Mục đang chọn = nền hồng nhạt `--gl` + chữ `--gm` (trước: hồng đặc chữ trắng). Huy hiệu «Ca hiện tại» luôn nằm cạnh «đã cập nhật» trên PC, kể cả khi cửa sổ hẹp. |
 | Điện thoại | **Thanh điều hướng nổi dưới đáy** `#bottomNav` (Hôm nay · Vận hành · Báo cáo · Thêm = mở menu) — `renderBottomNav()` gọi trong `renderSidebarNav()`; chỉ hiện ở `html.phone-ui`. Menu kéo ra là tấm bo tròn nổi. |
 | Thành phần | Nút / tab `.seg` `.k2-nav` / chip `.ftag` bo tròn hẳn, tiêu đề nhóm `.sec-title` đậm (bỏ chữ hoa xám), nhãn thẻ KPI chữ thường, bảng `table.kt` đầu bảng nền nhạt, popup nền mờ. |
 
@@ -34,7 +34,7 @@ Mỗi nhóm là một widget có màu (`wdg-blue/amber/green/violet/teal/red/pin
 Kiểm tra: `tests/nhan_su_diem_ban.test.js` kiểm tương thích hồ sơ cũ, phân nhiều điểm, từ chối thiếu/sai điểm, chỉ đổi phân nhóm không đổi lịch sử lương. `node tools/ql_giao_dien/e2e_nhan_su.js` chạy trình duyệt với Firebase giả ở 1366 / 853 / 390px: tạo/lưu/sửa/tìm hồ sơ, giữ draft khi đổi hình thức, lưu lịch, ca bù, lương, form xuất mẻ, ô nhập ngoài `.field`, không tràn ngang/không lỗi JS. Ảnh nằm trong `work/nhan_su/`. Hai tool e2e hỗ trợ `CHROMIUM_PATH`, phục vụ file trên loopback và chặn mạng ngoài.
 
 ## Huy hiệu «Ca hiện tại» (thanh tiêu đề)
-Ở máy tính luôn nằm góc trên phải **cùng hàng** với tiêu đề. Chỉ khi thanh tiêu đề thật sự hẹp (container query `topbar` ≤ 800px — điện thoại / cửa sổ rất hẹp) mới xuống hàng riêng và gọn **một dòng**; từ ≤ 960px nút «đã cập nhật» chỉ còn chấm để nhường chỗ. Rê chuột / bấm huy hiệu xem đủ chữ (`title`).
+Ở máy tính luôn nằm **cạnh «đã cập nhật», cùng hàng với tiêu đề**, kể cả cửa sổ 853–1024px và trình duyệt/WebView không hỗ trợ container query. PC dùng `flex-wrap:nowrap`, huy hiệu một dòng gọn; tiêu đề/huy hiệu dài thu bằng dấu …, bấm huy hiệu vẫn mở chi tiết. Chỉ `html.phone-ui` mới tách huy hiệu sang dòng riêng. Không dùng ngưỡng container/màn hình để đẩy huy hiệu PC xuống hàng (đã từng gây lãng phí chiều cao như ảnh chủ dự án phản hồi).
 
 ## Quy tắc khi sửa tiếp
 1. **Mọi rule giao diện chung nằm trong khối `/* [MANAGE-SKIN:BEGIN] */ … /* [MANAGE-SKIN:END] */`** — khối này là CUỐI `<style>` chính nên thắng mọi khối trên. Sửa nét chung → sửa **trong khối đó**. Test `tests/ql_giao_dien.test.js` báo nếu khối không còn ở cuối hoặc nếu có màu xanh manage lọt vào.
