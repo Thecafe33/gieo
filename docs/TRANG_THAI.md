@@ -17,6 +17,9 @@
 
 ## 2. Đã làm (theo thứ tự)
 
+**17/10 — nền hồng**: theo yêu cầu chủ dự án, nền xám đổi thành `#F8EFF2` + hai lớp radial hồng nhẹ như cách manage tạo nền xanh; thanh tiêu đề trong mờ và theme-color cùng tông. Giữ màu chữ, trạng thái và dữ liệu. Sinh lại bản thử và ba bộ deploy.
+
+
 **17/10 — huy hiệu Ca hiện tại trên PC**: luôn nằm cạnh «đã cập nhật», không xuống hàng riêng ở cửa sổ hẹp hay WebView không hỗ trợ container query. Chỉ đổi CSS; giữ nút mở chi tiết và dữ liệu ca. Đã sinh lại bản thử và ba bộ deploy.
 
 

@@ -1,6 +1,6 @@
 // Giao diện quanlygieo.html theo HÌNH DÁNG của manage.html (17/10/2026): font Inter, sidebar kính nổi, viên thuốc, thanh điều hướng dưới (điện thoại).
-// MÀU KHÔNG ĐỔI: chủ dự án chỉ yêu cầu UI — màu chủ đạo của quanlygieo vẫn là HỒNG (#E23A5D). Test khoá:
-// (1) bảng màu :root giữ nguyên bản gốc (hồng + nền xám ấm + màu ngữ nghĩa) — đổi màu phải hỏi chủ dự án, (2) khối CSS [MANAGE-SKIN] là khối CUỐI (thắng mọi khối trên)
+// Chủ dự án 17/10 yêu cầu nền hồng theo cách manage; màu chủ đạo vẫn HỒNG (#E23A5D). Test khoá:
+// (1) bảng màu :root giữ accent/chữ/ngữ nghĩa, nền hồng theo yêu cầu 17/10, (2) khối CSS [MANAGE-SKIN] là khối CUỐI (thắng mọi khối trên)
 // và KHÔNG chứa màu xanh manage, (3) thanh dưới chỉ trỏ tới màn có thật, (4) font Inter nhúng.
 const fs = require('fs'); const path = require('path');
 const ROOT = path.resolve(__dirname, '..');
@@ -10,7 +10,7 @@ let ok = true; const chk = (c, m) => { console.log((c ? 'ok ' : 'FAIL ') + m); i
 const css = h.slice(h.indexOf('<style>'), h.indexOf('</style>'));
 const root = css.slice(css.indexOf(':root{'), css.indexOf('/* ---------- Reset ---------- */'));
 chk(/--gd:#E23A5D;/.test(root) && /--gm:#B7284A;/.test(root) && /--gl:#FDECF0;/.test(root), ':root: màu chủ đạo vẫn là HỒNG #E23A5D (không đổi màu app)');
-chk(/--bg:#F3F2F0;/.test(root) && /--td:#17151A;/.test(root) && /--bad:#D2333F;/.test(root) && /--ok:#12855A;/.test(root), ':root: nền / chữ / màu ngữ nghĩa giữ nguyên bản gốc');
+chk(/--bg:#F8EFF2;/.test(root) && /--td:#17151A;/.test(root) && /--bad:#D2333F;/.test(root) && /--ok:#12855A;/.test(root), ':root: nền hồng mới; chữ và màu ngữ nghĩa giữ nguyên');
 chk(!/#006241|#eef1ee/i.test(css), 'không có màu xanh #006241 / nền #eef1ee của manage trong CSS');
 chk(/--font:"Inter Local"/.test(root), ':root: --font dùng Inter Local (nhúng sẵn như manage)');
 chk((css.match(/font-family:\s*'Inter Local'/g) || []).length === 3, 'nhúng đủ 3 bộ ký tự Inter (Việt / Latin mở rộng / Latin)');

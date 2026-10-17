@@ -1,6 +1,6 @@
-# Giao diện `quanlygieo.html` — hình dáng theo `manage.html`, MÀU GIỮ NGUYÊN (17/10/2026)
+# Giao diện `quanlygieo.html` — hình dáng theo `manage.html`, nền hồng theo thương hiệu (17/10/2026)
 
-**Chỉ đổi UI (hình dáng / bố cục), KHÔNG đổi màu.** Màu chủ đạo của quanlygieo vẫn là **hồng `#E23A5D`**; nền, chữ, đường kẻ, màu ngữ nghĩa, thẻ doanh thu, icon menu, «Truy cập nhanh» giữ y bản trước.
+Màu chủ đạo của quanlygieo vẫn là **hồng `#E23A5D`**. **Chủ dự án yêu cầu thêm 17/10: đổi nền xám sang hồng theo cách manage tạo nền xanh.** Nền cơ sở `--bg:#F8EFF2` + hai quầng radial hồng nhẹ ở góc trên trái/dưới phải (`body::before`, fixed, không bắt thao tác; `isolation:isolate` giữ nền dưới nội dung). Thanh tiêu đề trong mờ dùng cùng màu qua `--bg-rgb`; meta theme-color cũng đồng bộ. Chữ, đường kẻ, màu ngữ nghĩa, thẻ doanh thu, icon menu và «Truy cập nhanh» giữ nguyên.
 (Bản đầu tiên trong ngày đổi nhầm sang xanh manage → chủ dự án phản hồi → hoàn lại. **Đừng đổi màu app khi chỉ được yêu cầu «giao diện».** Đổi màu = hỏi chủ dự án trước.)
 
 ## Đã lấy từ manage (hình dáng)
@@ -38,7 +38,7 @@ Kiểm tra: `tests/nhan_su_diem_ban.test.js` kiểm tương thích hồ sơ cũ,
 
 ## Quy tắc khi sửa tiếp
 1. **Mọi rule giao diện chung nằm trong khối `/* [MANAGE-SKIN:BEGIN] */ … /* [MANAGE-SKIN:END] */`** — khối này là CUỐI `<style>` chính nên thắng mọi khối trên. Sửa nét chung → sửa **trong khối đó**. Test `tests/ql_giao_dien.test.js` báo nếu khối không còn ở cuối hoặc nếu có màu xanh manage lọt vào.
-2. **Không đặt màu mới trong khối này** (chỉ hình dáng: bo góc, cỡ chữ, khoảng cách, đổ bóng trung tính).
+2. Giữ bảng màu thương hiệu. Ngoại lệ chủ dự án đã yêu cầu 17/10: nền hồng và hai quầng radial trong khối này; không lấy nền xanh của manage.
 3. Sau mỗi sửa: `sh tools/sinh_lai_tat_ca.sh` (quy tắc 7 của CLAUDE.md) — `quanlygieo_thu.html` và `ban_deploy/*/quanlygieo.html` sinh lại từ file gốc.
 
 ## Chưa làm (cố ý)
