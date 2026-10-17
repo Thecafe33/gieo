@@ -16,6 +16,16 @@ Màu chủ đạo của quanlygieo vẫn là **hồng `#E23A5D`**. **Chủ dự 
 Ba khối **Bill bán hàng** (`#todayBills`), **Hoạt động kho hôm nay** (`#todayKhoFeed`), **Hoạt động BTP hôm nay** (`#todayPrepFeed`) và **biểu đồ theo giờ** (`.wdg-hour`) là *widget* theo `.outlet-widget` / `.bill-widget` của manage: khung kính nhuốm màu (biến `--wc`: bill/biểu đồ = hồng của app, kho = xanh lam `--bi`, BTP = chàm `#5856D6`), ô biểu tượng `.wdg-mark`, đầu widget `wdgHeadHTML()`, hàng trắng mờ bo tròn. Hàng bill: ô màu theo phương thức thanh toán (`bfMarkMau`) · giờ + số món · món · nhãn thanh toán · tiền.
 **Chỉ đổi giao diện, chức năng giữ nguyên** (khác manage mở popup): bấm hàng bill → bung chi tiết NGAY TẠI CHỖ (`bfToggle` + `bfChiTiet`), «Xem tất cả» → `goBills()`, kho/BTP giữ nút «Mở rộng» (popup đầy đủ + lật ngày), gập/mở trên điện thoại, bấm dòng BTP mở chi tiết lô. Widget rỗng thì ẩn (`.wdg:empty`). Thêm widget mới: gắn `class="wdg"` + `--wc`, dùng `wdgHeadHTML(icon, tiêu đề, dòng phụ, bên phải)`.
 
+Kho và BTP cùng xem nhanh **6 lượt gần nhất** (thay 8). Danh sách nguồn vẫn đủ và giữ thứ tự thời gian giảm dần; số tổng/lượt còn lại vẫn theo toàn bộ dữ liệu. «Mở rộng» hôm nay dùng cache sẵn có, không đọc lại Firebase; lật ngày giữ cơ chế cũ.
+
+## Hộp thông báo màn Hôm nay (17/10, tinh gọn theo phản hồi)
+
+- `#todayNotifications` chứa nút Thông báo với số việc và hộp nổi `#todayHealth`, tối đa 440px, co theo viewport điện thoại. Thay danh sách thẻ lớn hai cột bằng các dòng gọn trong một khung hồng nhẹ, cuộn riêng; mở hộp không đẩy các chỉ số xuống dưới.
+- Lọc Tất cả / Cần xử lý / Nên xem, giữ đủ nội dung, số lượng và hành động do `computeStoreHealth` trả về. Không tự đánh dấu đã xem/đã xử lý. Nút cuối mở hộp thư cảnh báo đầy đủ như cũ.
+- Đóng bằng X, Escape, bấm ra ngoài hoặc rời màn; cuộn trang ngoài đóng hộp, cuộn trong danh sách giữ mở. Escape/X trả focus về nút mở. Popup mặc định đóng khi tải trang, không dùng tuỳ chọn nhớ mở của bố cục cũ.
+- Vẽ lại giữ bộ lọc, vị trí cuộn và focus đang có trong hộp. Dùng kết quả sức khoẻ đã nạp; mở/lọc/đóng không gọi Firebase. Không sửa bộ tính, Menu/Khuyến mãi hay giao diện manage.
+- `node tools/ql_giao_dien/e2e_thong_bao.js`: 132 kiểm tra ở 1366/853/390/320px, Firebase giả và chặn mạng ngoài; kiểm 6 lượt, mở rộng đủ danh sách, thao tác hộp thông báo, cập nhật giữ trạng thái, đường điều hướng và không đọc thêm.
+
 ## Chỉ số & lãi/lỗ màn Hôm nay (17/10, lượt widget)
 
 - `#todayMini` có đúng **hai widget**, mỗi widget lưới **2×2**: Bán hàng (Số bill, Ly bán ra, AOV, IPT); Vận hành (Hao hụt, DT/giờ công, Giờ công, Vốn trong kho). PC đặt cạnh nhau, điện thoại xếp dọc. Giờ công là số đã có trong `computeStaffHoursByHour`, không thêm truy vấn hay cách tính mới.

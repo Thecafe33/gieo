@@ -17,6 +17,8 @@
 
 ## 2. Đã làm (theo thứ tự)
 
+**Mới nhất 17/10 — gọn feed Kho/BTP và hộp thông báo Hôm nay**: hai widget xem nhanh cùng 6 lượt mới nhất, Mở rộng vẫn đủ dữ liệu. Cảnh báo thành hộp nổi hồng nhẹ, danh sách cuộn riêng, lọc Cần xử lý/Nên xem, giữ hành động và đường vào hộp thư đầy đủ. Đóng bằng X/Escape/bấm ngoài; cập nhật giữ bộ lọc/cuộn/focus, không đọc Firebase khi mở/lọc/đóng. Kiểm trình duyệt riêng 132 mục ở PC/tablet/mobile. Không thay Menu/Khuyến mãi, manage, bộ tính hoặc dữ liệu. Sinh lại bản thử và ba bộ deploy; chủ dự án tự deploy Hosting. Chi tiết: `docs/GIAO_DIEN_QUANLY.md`, tool `tools/ql_giao_dien/e2e_thong_bao.js`.
+
 **Mới nhất 17/10 — hoàn thiện widget các màn còn lại (P0–P5)**: Vận hành, ghi chú, bill, cảnh báo/checklist/nhắc nhở; báo cáo/phân tích; cấu hình; kho vận hành và danh mục. Menu/Khuyến mãi cùng popup giữ nguyên, có kiểm style với bản trước rollout. NL giữ thẻ và sheet; BTP chia sáu nhóm, giữ sản lượng/giá thành luôn mở và gập riêng giải thích. Bảng cuộn trong widget, không tràn ngang trang. Khung UI không đọc Firebase, giữ id/input/sự kiện và các bộ tính. Đã sinh lại bản thử và ba bộ deploy; chưa deploy Hosting. Chi tiết: `docs/KE_HOACH_UI_WIDGET_QUANLY.md`, tool `tools/ql_giao_dien/e2e_widgets_toan_app.js`.
 
 
