@@ -1841,20 +1841,34 @@ html.phone-ui .bottom-nav{
 .bottom-nav button:active{transform:scale(.96);}
 html.phone-ui .wrap{padding-bottom:calc(104px + env(safe-area-inset-bottom));}
 html.phone-ui .toast{bottom:calc(92px + env(safe-area-inset-bottom));}
-html.phone-ui .topbar-row{flex-wrap:wrap;justify-content:flex-start;row-gap:8px;}
-html.phone-ui .brandrow{flex:1;}
-html.phone-ui .topbar-actions{display:contents;}
-html.phone-ui #todayShiftInfo{order:9;flex:1 0 100%;}
-html.phone-ui #todayShiftInfo:empty{display:none;}
-html.phone-ui .shift-badge{text-align:left;}
-/* Tablet / cửa sổ hẹp (< 1180px): huy hiệu ca xuống hàng riêng để tiêu đề không bị bóp mất */
-@media (max-width:1180px){
-  html.tab-ui .topbar-row{flex-wrap:wrap;justify-content:flex-start;row-gap:8px;}
-  html.tab-ui .brandrow{flex:1;}
-  html.tab-ui .topbar-actions{display:contents;}
-  html.tab-ui #todayShiftInfo{order:9;flex:1 0 100%;}
-  html.tab-ui #todayShiftInfo:empty{display:none;}
-  html.tab-ui .shift-badge{text-align:left;}
+/* Huy hiệu «Ca hiện tại»: ở máy tính luôn nằm góc trên phải CÙNG HÀNG với tiêu đề (như bản gốc). Chỉ khi thanh tiêu đề THẬT SỰ
+   không đủ chỗ (điện thoại / cửa sổ rất hẹp — đo bằng container query trên chính thanh tiêu đề, không đoán theo bề rộng màn hình)
+   mới xuống hàng riêng, và khi xuống thì gọn MỘT dòng, không chiếm cả khối. Bấm vào / rê chuột (title) xem đủ chữ. */
+.topbar{container-type:inline-size;container-name:topbar;}
+@container topbar (max-width:960px){
+  html .sync span:last-child,html.tab-ui .sync span:last-child{display:none;}   /* chỉ còn chấm trạng thái — nhường chỗ cho huy hiệu ca ở cùng hàng */
+  html .sync,html.tab-ui .sync{padding:9px;}
+}
+@container topbar (max-width:800px){
+  .topbar-row{flex-wrap:wrap;justify-content:flex-start;row-gap:6px;}
+  .brandrow{flex:1;}
+  .topbar-actions{display:contents;}
+  #todayShiftInfo{order:9;flex:1 0 100%;min-width:0;}
+  #todayShiftInfo:empty{display:none;}
+  .shift-badge{display:flex;align-items:center;gap:6px;width:fit-content;max-width:100%;text-align:left;padding:5px 14px;font-size:12.5px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .shift-badge-line1,.shift-badge-line2{display:inline;overflow:hidden;text-overflow:ellipsis;}
+  .shift-badge-line1::after{content:" ·";font-weight:400;}
+}
+/* Trình duyệt chưa hỗ trợ container query: giữ cách cũ theo bề rộng màn hình */
+@supports not (container-type:inline-size){
+  @media (max-width:1180px){
+    html.tab-ui .topbar-row,html.phone-ui .topbar-row{flex-wrap:wrap;justify-content:flex-start;row-gap:6px;}
+    html.tab-ui .brandrow,html.phone-ui .brandrow{flex:1;}
+    html.tab-ui .topbar-actions,html.phone-ui .topbar-actions{display:contents;}
+    html.tab-ui #todayShiftInfo,html.phone-ui #todayShiftInfo{order:9;flex:1 0 100%;}
+    html.tab-ui #todayShiftInfo:empty,html.phone-ui #todayShiftInfo:empty{display:none;}
+  }
 }
 
 /* Hàng thẻ chỉ số nhỏ: số thẻ thay đổi (6–7) → tự chia cột, không bỏ lẻ một thẻ xuống hàng */
@@ -1894,10 +1908,10 @@ html.tab-ui .feed2col .wdg{margin-top:0;}
 
 /* hàng trắng mờ bo tròn */
 .wdg-body{margin-top:16px;}
-.wdg-body .row{background:rgba(255,255,255,.72);border:1.5px solid transparent;border-radius:18px;padding:10px 16px;margin-bottom:7px;min-height:0;font-size:14px;}
-.wdg-body .row:first-child{padding-top:10px;}
-.wdg-body .row:last-child{border-bottom:1.5px solid transparent;}
-.wdg-body .row:hover{background:#fff;}
+html .wdg-body .row,html.tab-ui .wdg-body .row{background:rgba(255,255,255,.72);border:1.5px solid transparent;border-radius:18px;padding:10px 16px;margin-bottom:7px;min-height:0;font-size:14px;}
+html .wdg-body .row:first-child,html.tab-ui .wdg-body .row:first-child{padding-top:10px;}
+html .wdg-body .row:last-child{border-bottom:1.5px solid transparent;}
+html .wdg-body .row:hover{background:#fff;}
 .wdg-body .small-note{padding:2px 4px;}
 
 /* Bill bán hàng: [ô màu phương thức] [giờ + số món] [món] [nhãn thanh toán] [tiền] — như .bf-row của manage */
@@ -1932,6 +1946,51 @@ html.tab-ui .feed2col .wdg{margin-top:0;}
   .bfeed-pay{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:4px;}
   .bfeed-pay .bfeed-tag{white-space:normal;text-align:center;line-height:1.25;}
 }
+
+/* ==========================================================================
+   WIDGET cho màn Entry: tab Tiền mặt + Chi phí (và dùng lại được cho các tab khác)
+   Biến thể màu: gắn thêm class wdg-pink / wdg-blue / wdg-amber / wdg-green / wdg-red / wdg-violet / wdg-teal (đặt --wc).
+   Bên trong widget: .card = tấm trắng mờ bo tròn, .litem = hàng trắng mờ, .sec-title = tiêu đề phụ.
+   ========================================================================== */
+.wdg-pink{--wc:var(--gd);} .wdg-blue{--wc:var(--bi);} .wdg-amber{--wc:var(--warn);} .wdg-green{--wc:var(--ok);}
+.wdg-red{--wc:var(--bad);} .wdg-violet{--wc:#5856D6;} .wdg-teal{--wc:#179EA7;}
+#entryBody > .wdg{margin:0 0 16px;}
+.wdg-pair{display:grid;grid-template-columns:minmax(0,1fr);gap:16px;margin:0 0 16px;}
+html.tab-ui .wdg-pair{grid-template-columns:minmax(0,1fr) minmax(0,1fr);}
+.wdg-pair > .wdg{margin:0 !important;}
+html .wdg .card,html.tab-ui .wdg .card{background:rgba(255,255,255,.74);border:1.5px solid transparent;box-shadow:none;border-radius:20px;padding:8px 18px;margin:0 0 10px;}
+html .wdg .card:last-child{margin-bottom:0;}
+.wdg .card-h{padding-top:6px;}
+.wdg .sec-title,html.tab-ui .wdg .sec-title{font-size:13px;font-weight:750;color:var(--ink-2);margin:16px 4px 8px;}
+.wdg .sec-title:first-child{margin-top:0;}
+.wdg .litem{background:rgba(255,255,255,.74);border:1.5px solid transparent;box-shadow:none;border-radius:18px;margin-bottom:7px;}
+.wdg .litem:hover{background:#fff;}
+.wdg .muted{padding:14px 0;}
+.wdg .divider{margin:10px 0;}
+.wdg-body > .field:last-child{margin-bottom:0;}
+/* form thêm chi phí: 2 cột ở máy tính, mục dài chiếm cả hàng */
+.wdg-form{display:grid;grid-template-columns:minmax(0,1fr);gap:0 20px;align-items:start;}
+html.tab-ui .wdg-form{grid-template-columns:minmax(0,1fr) minmax(0,1fr);}
+.wdg-form > .wide,.wdg-form > .btn{grid-column:1 / -1;}
+.wdg-form > .btn{justify-self:start;width:auto;padding-left:28px;padding-right:28px;}
+.wdg-form .field{margin-bottom:14px;}
+
+/* Ô tổng hợp (KPI) đầu màn — như thẻ số liệu của manage */
+.wkpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:12px;margin:0 0 16px;}
+.wkpi{--wc:var(--gd);position:relative;display:flex;flex-direction:column;gap:3px;min-width:0;padding:16px 18px;border-radius:26px;
+  border:1px solid color-mix(in srgb,var(--wc) 14%,#fff);
+  background:radial-gradient(ellipse at 12% 0%,color-mix(in srgb,var(--wc) 18%,#fff),transparent 86%),color-mix(in srgb,var(--wc) 5%,#fff);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.55),0 5px 18px color-mix(in srgb,var(--wc) 7%,transparent);}
+.wkpi > b{font-size:12.5px;font-weight:650;color:var(--gt);}
+.wkpi > strong{font-size:24px;font-weight:800;letter-spacing:-.04em;color:var(--td);font-variant-numeric:tabular-nums;line-height:1.15;overflow-wrap:anywhere;}
+.wkpi > small{font-size:12px;color:var(--gt);line-height:1.35;}
+.wkpi.ok{--wc:var(--ok);} .wkpi.bad{--wc:var(--bad);} .wkpi.warn{--wc:var(--warn);} .wkpi.blue{--wc:var(--bi);} .wkpi.violet{--wc:#5856D6;}
+.wkpi.ok > strong{color:var(--ok);} .wkpi.bad > strong{color:var(--bad);} .wkpi.warn > strong{color:var(--warn);}
+.wkpi.hero{border:0;background:linear-gradient(140deg,#EF4A6C 0%,var(--gd) 46%,#C2264A 100%);box-shadow:0 8px 24px -10px rgba(226,58,93,.55);}
+.wkpi.hero > b,.wkpi.hero > small{color:rgba(255,255,255,.84);} .wkpi.hero > strong{color:#fff;}
+.wdg-pair{align-items:start;}
+#staleDaysBox:empty{display:none;}
+#staleDaysBox > .wdg{margin:0 0 16px;}
 /* [MANAGE-SKIN:END] */
 </style>
 </head>
@@ -13700,7 +13759,7 @@ async function renderTodayShiftInfo(){
   const paint = ()=>{
     if(curScreen !== 'today' || token!==_todayShiftInfoToken) return;
     if(closing && closing.status === 'closed'){
-      box.innerHTML = `<div class="shift-badge shift-badge-closed" onclick="openTodayShiftDetail()">${ic('lock',13)} Đã đóng quán hôm nay</div>`;
+      box.innerHTML = `<div class="shift-badge shift-badge-closed" title="Đã đóng quán hôm nay" onclick="openTodayShiftDetail()">${ic('lock',13)} Đã đóng quán hôm nay</div>`;
       return;
     }
     const dangLam = shifts.filter(s=>!s.checkedOutAt);
@@ -13708,8 +13767,9 @@ async function renderTodayShiftInfo(){
     const dong2 = !shifts.length ? 'Chưa ai check-in'
       : (dangLam.length ? `${dangLam.length} đang làm` : 'Không ai đang check-in') + (daXong.length ? ` · ${daXong.length} đã check-out` : '');
     const current = activeShiftWorkflowInfo(workflow);
-    box.innerHTML = `<div class="shift-badge ${current?'shift-badge-live':''}" onclick="openTodayShiftDetail()">
-      <div class="shift-badge-line1">${current?`${current.label} · ${current.minutes} phút`:`Ca hiện tại: ${currentShiftPeriodLabel()}`}</div>
+    const dong1 = current ? `${current.label} · ${current.minutes} phút` : `Ca hiện tại: ${currentShiftPeriodLabel()}`;
+    box.innerHTML = `<div class="shift-badge ${current?'shift-badge-live':''}" title="${escapeHtmlAttr(dong1 + ' — ' + dong2)}" onclick="openTodayShiftDetail()">
+      <div class="shift-badge-line1">${dong1}</div>
       <div class="shift-badge-line2">${dong2}</div>
     </div>`;
   };
@@ -16262,11 +16322,25 @@ async function renderEntryExp(){
   // hằng tháng (mỗi tháng một khoản chưa chi tới hạn).
   const chuaTra = list.filter(e => expenseIsUnpaid(e) && e.status!=='rejected' && e.status!=='pending_review');
   const tongChuaTra = chuaTra.reduce((t,e)=>t+(Number(e.amount)||0), 0);
+  // [GIAO DIỆN WIDGET] Ô tổng hợp đầu màn — chỉ ĐỌC lại số đã có: chi phí tính vào lãi/lỗ của THÁNG NÀY (cùng filterExpenses /
+  // expenseAllocatedAmount mà báo cáo lãi/lỗ dùng), tách cố định / biến đổi theo phân loại danh mục (splitExpensesByCostType).
+  const _m0 = new Date(new Date().getFullYear(), new Date().getMonth(), 1), _m1 = lastDayOfThisMonth();
+  const _thang = splitExpensesByCostType(filterExpenses(list, _m0, _m1), cats);
+  const _tongThang = _thang.coDinh + _thang.bienDoi;
+  const _nhanThang = `tháng ${_m0.getMonth()+1}/${_m0.getFullYear()}`;
 
   body.innerHTML = `
+    <div class="wkpi-row">
+      <div class="wkpi hero"><b>Chi phí ${_nhanThang}</b><strong>${fmt(_tongThang)}</strong><small>Phần đã tính vào lãi/lỗ của tháng</small></div>
+      <div class="wkpi blue"><b>Cố định</b><strong>${fmt(_thang.coDinh)}</strong><small>Thuê nhà, internet… trả đều dù bán hay không</small></div>
+      <div class="wkpi violet"><b>Biến đổi</b><strong>${fmt(_thang.bienDoi)}</strong><small>Đá, ship, bao bì… càng bán càng tốn</small></div>
+      <div class="wkpi ${chuaTra.length ? 'bad' : 'ok'}"><b>Chưa trả tiền</b><strong>${fmt(tongChuaTra)}</strong><small>${chuaTra.length ? chuaTra.length + ' khoản chưa rời két' : 'Không còn khoản nào'}</small></div>
+      ${pending.length ? `<div class="wkpi warn"><b>Chờ duyệt từ POS</b><strong>${pending.length} khoản</strong><small>Nhân viên ghi, chờ bạn duyệt</small></div>` : ''}
+      ${duDoan.length ? `<div class="wkpi warn"><b>Chờ số thật</b><strong>${duDoan.length} khoản</strong><small>Đang tính bằng số dự đoán</small></div>` : ''}
+    </div>
     ${usingFallbackCats ? `<div class="nudge" style="margin-bottom:12px"><span>${ic('alert')} Chưa cấu hình danh mục chi phí — đang tạm dùng danh sách mặc định. Nhân viên KHÔNG ghi được chi phí ở POS cho tới khi bạn cấu hình danh mục thật. Mở phần "Cấu hình Danh mục" bên dưới rồi bấm "Tạo nhanh" là xong.</span><button onclick="expConfigOpen=true; renderEntryExp();">Cấu hình ngay</button></div>` : ''}
     ${pending.length ? `
-    <div class="sec-title">${ic('hourglass')} Chờ duyệt từ POS (${pending.length})</div>
+    <div class="wdg wdg-amber"><div class="wdg-head">${wdgHeadHTML('hourglass', 'Chờ duyệt từ POS', `${pending.length} khoản nhân viên ghi ở POS đang chờ bạn duyệt`)}</div><div class="wdg-body">
     ${pending.map(e=>`
       <div class="litem" style="align-items:flex-start">
         <div class="li-l">
@@ -16278,31 +16352,29 @@ async function renderEntryExp(){
           <button class="iconbtn" onclick="doRejectExpense('${e.id}')">${ic('x')}</button>
         </div>
       </div>`).join('')}
-    ` : ''}
+    </div></div>` : ''}
 
     ${duDoan.length ? `
-    <div class="sec-title">${ic('hourglass')} Chờ số thật (${duDoan.length})</div>
-    <div class="card" style="border:1.5px solid var(--warn-line);background:var(--warn-bg);">
+    <div class="wdg wdg-amber"><div class="wdg-head">${wdgHeadHTML('hourglass', 'Chờ số thật', `${duDoan.length} khoản đang tính bằng số dự đoán`)}</div><div class="wdg-body">
       <div class="small-note" style="margin:0 0 8px;color:var(--warn)">Những khoản này đang tính vào lãi/lỗ bằng <b>số dự đoán</b>. Hoá đơn về thì bấm "Nhập số thật" — app tính lại đúng kỳ sử dụng của nó, tháng nào gánh chi phí tháng đó.</div>
       ${duDoan.map(e=>`<div class="litem" style="background:var(--card)">
         <div class="li-l"><div>${e.category} <span class="tier" style="margin-left:4px;background:var(--warn-bg);color:var(--warn)">Dự đoán</span></div>
           <div>${e.periodType==='period' ? `${e.startDate} → ${e.endDate}` : (e.date||'')}${e.note?' · '+e.note:''}</div></div>
         <div class="li-r">${fmt(e.amount)}<br><button class="btn outline sm" style="width:auto;padding:0 10px;margin-top:4px" onclick="openExpenseActual('${e.id}')">Nhập số thật</button></div>
       </div>`).join('')}
-    </div>` : ''}
+    </div></div>` : ''}
 
     ${chuaTra.length ? `
-    <div class="sec-title">${ic('coins')} Chưa trả tiền (${chuaTra.length}) · ${fmt(tongChuaTra)}</div>
-    <div class="card">
+    <div class="wdg wdg-red"><div class="wdg-head">${wdgHeadHTML('coins', 'Chưa trả tiền', `${chuaTra.length} khoản · ${fmt(tongChuaTra)}`)}</div><div class="wdg-body">
       <div class="small-note" style="margin:0 0 8px">Những khoản này <b>đã được tính vào lãi/lỗ</b> rồi — chi phí luôn rơi vào kỳ sử dụng của nó. Đây chỉ là tiền <b>chưa rời két</b>. Trả xong thì bấm "Đã trả".</div>
       ${chuaTra.map(e=>`<div class="litem">
         <div class="li-l"><div>${e.category}${expenseIsEstimate(e)?` <span class="tier" style="margin-left:4px;background:var(--warn-bg);color:var(--warn)">Dự đoán</span>`:''}</div>
           <div>${e.periodType==='period' ? `Kỳ sử dụng ${e.startDate} → ${e.endDate}` : (e.date||'')}${e.note?' · '+e.note:''}</div></div>
         <div class="li-r">${fmt(e.amount)}<br><button class="btn outline sm" style="width:auto;padding:0 10px;margin-top:4px" onclick="openExpensePaid('${e.id}')">Đã trả</button></div>
       </div>`).join('')}
-    </div>` : ''}
+    </div></div>` : ''}
 
-    <div class="card">
+    <div class="wdg wdg-pink"><div class="wdg-head">${wdgHeadHTML('pencil', 'Thêm chi phí', 'Ghi một khoản chi mới — một lần hoặc chia đều theo kỳ sử dụng')}</div><div class="wdg-body wdg-form">
       <div class="field"><label>Danh mục</label>
         <select id="expCat" onchange="expCatChanged()">${catOptions.map(c=>`<option>${c}</option>`).join('')}</select>
       </div>
@@ -16316,10 +16388,10 @@ async function renderEntryExp(){
         <div class="hint">"Có kỳ hạn": chi phí được chia đều theo từng ngày trong <b>kỳ sử dụng</b> bên dưới. VD: thuê 3 tháng 9.000.000đ → app tự chia đều theo đúng số ngày của 3 tháng đó, không dồn hết vào ngày ghi sổ.</div>
       </div>
 
-      <div id="expOnetimeFields" style="display:none">
+      <div id="expOnetimeFields" class="wide" style="display:none">
         <div class="field"><label>Ngày phát sinh</label><input type="date" id="expDate" value="${todayKey}"></div>
       </div>
-      <div id="expPeriodFields">
+      <div id="expPeriodFields" class="wide">
         <div class="grid2">
           <div class="field"><label>Kỳ sử dụng — từ ngày</label><input type="date" id="expStart" value="${monthStartKey}"></div>
           <div class="field"><label>đến ngày</label><input type="date" id="expEnd" value="${monthEndKey}"></div>
@@ -16346,15 +16418,13 @@ async function renderEntryExp(){
         </select>
       </div>` : ''}
 
-      <div class="field"><label>Ghi chú</label><input type="text" id="expNote" placeholder="Tuỳ chọn"></div>
+      <div class="field wide"><label>Ghi chú</label><input type="text" id="expNote" placeholder="Tuỳ chọn"></div>
       <button class="btn" onclick="submitExpense()">Thêm chi phí</button>
-    </div>
+    </div></div>
 
-    <div class="sec-title" style="display:flex;justify-content:space-between;align-items:center;">
-      <span>Cấu hình Danh mục / Hình thức thanh toán</span>
-      <button class="iconbtn" onclick="expConfigOpen=!expConfigOpen; renderEntryExp();">${expConfigOpen?ic('chevronUp'):ic('chevronDown')}</button>
-    </div>
-    ${expConfigOpen ? `
+    <div class="wdg wdg-violet">
+    <button class="wdg-head wdg-fold" aria-expanded="${expConfigOpen}" onclick="expConfigOpen=!expConfigOpen; renderEntryExp();">${wdgHeadHTML('sliders', 'Cấu hình Danh mục / Hình thức thanh toán', 'Danh mục chi phí (cố định / biến đổi) và cách thanh toán', `<span class="sf-ch">${expConfigOpen?ic('chevronUp',15):ic('chevronDown',15)}</span>`)}</button>
+    ${expConfigOpen ? `<div class="wdg-body">
     <div class="card">
       <div class="field" style="margin-bottom:8px"><label>Thêm danh mục chi phí</label>
         <div style="display:flex;gap:6px"><input type="text" id="expCatNew" placeholder="VD: Đá cây, Ship..." style="flex:1"><button class="btn" style="width:auto;padding:0 14px" onclick="submitExpenseCategory()">+</button></div>
@@ -16390,11 +16460,11 @@ async function renderEntryExp(){
       ${methods.length ? methods.map(m=>`<div class="litem"><div class="li-l">${m.label} <span class="tier tier-blue" style="margin-left:4px">${pmBaseTypeLabel(m.baseType)}</span> ${chipOnOff(m.active!==false)}</div>
         <div class="li-r"><button class="iconbtn" onclick="togglePaymentMethod('${m.id}', ${m.active===false}).then(renderEntryExp)">${m.active===false?ic('play'):ic('pause')}</button><button class="iconbtn" onclick="deletePaymentMethod('${m.id}').then(renderEntryExp)">${ic('x')}</button></div></div>`).join('')
         : `<div class="muted">Chưa có hình thức thanh toán nào cấu hình.</div>`}
-    </div>
+    </div></div>
     ` : ''}
+    </div>
 
-    <div class="sec-title">Gần đây</div>
-    <div id="expList"></div>
+    <div class="wdg wdg-teal"><div class="wdg-head">${wdgHeadHTML('receipt', 'Gần đây', `${Math.min(list.length, 30)} khoản gần nhất`)}</div><div class="wdg-body"><div id="expList"></div></div></div>
   `;
   expCatChanged();
   list.sort((a,b)=> (b.startDate||b.date||'').localeCompare(a.startDate||a.date||''));
@@ -16574,9 +16644,10 @@ function renderStaleDaysBox(stale){
   if(!box) return;
   if(!stale || !stale.length){ box.innerHTML = ''; return; }
   box.innerHTML = `
-    <div class="card" style="border-left:4px solid var(--bad)">
-      <div style="font-weight:800;font-size:13px;color:#c0392b;margin-bottom:4px">${ic('alert',14)} ${stale.length} ngày chưa đóng sổ</div>
-      <div class="small-note" style="margin-bottom:8px">Nhân viên đang thấy cảnh báo này trên POS nhưng KHÔNG tự đóng được (POS chỉ thao tác được ngày hôm nay). Đóng ở đây là đóng hành chính cho hết treo — ngày đó sẽ không có số đối soát tiền mặt thật, và lý do bạn nhập được lưu lại.</div>
+    <div class="wdg wdg-red">
+      <div class="wdg-head">${wdgHeadHTML('alert', `${stale.length} ngày chưa đóng sổ`, 'Cần đóng hành chính để POS hết báo treo')}</div>
+      <div class="wdg-body">
+      <div class="small-note" style="margin:0 0 10px">Nhân viên đang thấy cảnh báo này trên POS nhưng KHÔNG tự đóng được (POS chỉ thao tác được ngày hôm nay). Đóng ở đây là đóng hành chính cho hết treo — ngày đó sẽ không có số đối soát tiền mặt thật, và lý do bạn nhập được lưu lại.</div>
       ${stale.map(d=>`<div class="litem">
         <div class="li-l">
           <div>${fmtDateVN(new Date(d.dateKey+'T00:00:00'))}</div>
@@ -16584,6 +16655,7 @@ function renderStaleDaysBox(stale){
         </div>
         <div class="li-r"><button class="btn sm outline" onclick="forceCloseStaleDay('${d.dateKey}')">Đóng ngày</button></div>
       </div>`).join('')}
+      </div>
     </div>`;
 }
 
@@ -16673,15 +16745,22 @@ async function renderEntryCash(){
   const body = document.getElementById('entryBody');
   if(!cashViewDate) cashViewDate = dkey(new Date());
   body.innerHTML = `
-    <div class="card">
+    <div id="cashKpis" class="wkpi-row"></div>
+    <div class="wdg-pair">
+    <div class="wdg wdg-blue">
+      <div class="wdg-head">${wdgHeadHTML('calendar', 'Xem theo ngày', 'Chọn ngày cần đối soát')}</div>
+      <div class="wdg-body">
       <div class="field" style="margin-bottom:0"><label>Xem ngày</label>
         <div style="display:flex;gap:6px">
           <input type="date" id="cashViewDateInput" value="${cashViewDate}" style="flex:1">
           <button class="btn" style="width:auto;padding:0 16px" onclick="cashViewDate=document.getElementById('cashViewDateInput').value; renderEntryCash();">Xem</button>
         </div>
       </div>
+      </div>
     </div>
-    <div class="card">
+    <div class="wdg wdg-amber">
+      <div class="wdg-head">${wdgHeadHTML('sliders', 'Cấu hình đối soát', 'Dung sai và tiền giữ lại — lưu ngay khi đổi')}</div>
+      <div class="wdg-body">
       <div class="field"><label>Ngưỡng dung sai đối soát (đ) — chênh lệch trong khoảng này vẫn tính PASS</label>
         <input type="number" id="cashToleranceInput" value="${Number(FINANCE.cashToleranceAmount)||0}" onchange="submitCashSettings()">
       </div>
@@ -16692,16 +16771,26 @@ async function renderEntryCash(){
       <div class="field" style="margin-bottom:0"><label>Tiền giữ lại mặc định đầu ca hôm sau (đ)</label>
         <input type="number" id="cashRetainInput" value="${Number(FINANCE.openingCashNextDayDefault)||0}" onchange="submitCashSettings()">
       </div>
+      </div>
+    </div>
     </div>
     <div id="staleDaysBox"></div>
-    <div class="sec-title">Các đoạn ca trong ngày</div>
-    <div id="segTimeline"><div class="muted">Đang tải...</div></div>
-    <div class="sec-title" style="margin-top:14px">Đối soát tiền mặt cả ngày</div>
-    <div id="cashDetail"><div class="muted">Đang tải...</div></div>
-    <div class="sec-title" style="margin-top:14px">Mở két ngoài bán hàng</div>
-    <div id="cashDrawerLog"><div class="muted">Đang tải...</div></div>
-    <div class="sec-title" style="margin-top:14px">Lịch sử kết ca gần đây</div>
-    <div id="cashHistory"><div class="muted">Đang tải...</div></div>
+    <div class="wdg wdg-blue">
+      <div class="wdg-head">${wdgHeadHTML('clock', 'Các đoạn ca trong ngày', 'Giao ca giữa ngày và chênh lệch từng đoạn')}</div>
+      <div class="wdg-body"><div id="segTimeline"><div class="muted">Đang tải...</div></div></div>
+    </div>
+    <div class="wdg wdg-green">
+      <div class="wdg-head">${wdgHeadHTML('cashout', 'Đối soát tiền mặt cả ngày', 'Expected · thực đếm · bàn giao · bill trong ngày')}</div>
+      <div class="wdg-body"><div id="cashDetail"><div class="muted">Đang tải...</div></div></div>
+    </div>
+    <div class="wdg wdg-violet">
+      <div class="wdg-head">${wdgHeadHTML('lock', 'Mở két ngoài bán hàng', 'Những lần mở két không phải lúc thanh toán')}</div>
+      <div class="wdg-body"><div id="cashDrawerLog"><div class="muted">Đang tải...</div></div></div>
+    </div>
+    <div class="wdg wdg-teal">
+      <div class="wdg-head">${wdgHeadHTML('receipt', 'Lịch sử kết ca gần đây', 'Bấm một ngày để xem lại đối soát')}</div>
+      <div class="wdg-body"><div id="cashHistory"><div class="muted">Đang tải...</div></div></div>
+    </div>
   `;
   try{
     await ensureAuth();
@@ -16714,6 +16803,7 @@ async function renderEntryCash(){
     if(segments === null){ document.getElementById('segTimeline').innerHTML = '<div class="card"><div class="muted">Không đọc được đoạn ca.</div></div>'; }
     else renderSegmentTimeline(segments, detail.closing);
     renderCashDetail(detail, checklist);
+    const kpi = document.getElementById('cashKpis'); if(kpi) kpi.innerHTML = cashKpiHTML(detail);
     renderCashHistory(history);
     renderStaleDaysBox(stale);
     renderCashDrawerLog(cashViewDate);
@@ -16811,6 +16901,26 @@ function cashAttemptsCardHTML(closing){
     </div>`;
 }
 
+// [GIAO DIỆN WIDGET] Ô tổng hợp đầu tab Tiền mặt (như thẻ số liệu của manage) — chỉ ĐỌC LẠI đúng các số đã hiện trong
+// «Đối soát tiền mặt cả ngày» bên dưới (cùng detail / closing), không tính thêm gì.
+function cashKpiHTML(detail){
+  const { opening, closing, openingCash, cashOrders, cashSales, cashExpenseTotal, expected, expectedBank, postClose } = detail;
+  if(!opening) return `<div class="wkpi warn" style="grid-column:1 / -1"><b>Ngày ${escapeHtmlAttr(cashViewDate)}</b><strong>Chưa mở ca</strong><small>Ngày này chưa mở ca ở POS nên chưa có số để đối soát.</small></div>`;
+  const pcAfter = postClose ? postClose.afterCash + postClose.unclassifiedCash : 0;
+  const cashDone = closing && ['cash_passed','cash_variance_recorded','bank_passed','handed_over','closed'].includes(closing.status);
+  const actual = cashDone ? closing.finalActualCash : null;
+  const variance = cashDone ? closing.finalVariance : null;
+  const vCls = variance == null ? '' : (variance === 0 ? 'ok' : 'bad');
+  return `
+    <div class="wkpi hero"><b>Tiền mặt dự kiến (Expected)</b><strong>${fmt(expected - pcAfter)}</strong>
+      <small>Đầu ca ${fmt(openingCash)} + bán ${fmt(cashSales)} − chi ${fmt(cashExpenseTotal)}</small></div>
+    <div class="wkpi blue"><b>Thực đếm (Actual)</b><strong>${actual != null ? fmt(actual) : '—'}</strong>
+      <small>${actual != null ? 'Số nhân viên đếm lúc kết ca' : 'Chưa đếm / chưa kết ca'}</small></div>
+    <div class="wkpi ${vCls}"><b>Chênh lệch (Variance)</b><strong>${variance != null ? (variance > 0 ? '+' : '') + fmt(variance) : '—'}</strong>
+      <small>${variance == null ? 'Chưa có số thực đếm' : (variance === 0 ? 'Khớp sổ sách' : 'Lệch so với dự kiến')}</small></div>
+    <div class="wkpi violet"><b>Bill tiền mặt</b><strong>${cashOrders.length} bill</strong><small>${fmt(cashSales)} tiền mặt</small></div>
+    ${expectedBank > 0 ? `<div class="wkpi teal"><b>Chuyển khoản dự kiến</b><strong>${fmt(expectedBank)}</strong><small>Đối soát bank ở bước kết ca</small></div>` : ''}`;
+}
 function renderCashDetail(detail, checklist){
   const { opening, closing, openingCash, cashOrders, cashSales, cashExpenses, cashExpenseTotal, expected, bankOrders, expectedBank, handover, postClose } = detail;
   const pcAfter = postClose ? postClose.afterCash + postClose.unclassifiedCash : 0;

@@ -16,6 +16,12 @@
 Ba khối **Bill bán hàng** (`#todayBills`), **Hoạt động kho hôm nay** (`#todayKhoFeed`), **Hoạt động BTP hôm nay** (`#todayPrepFeed`) và **biểu đồ theo giờ** (`.wdg-hour`) là *widget* theo `.outlet-widget` / `.bill-widget` của manage: khung kính nhuốm màu (biến `--wc`: bill/biểu đồ = hồng của app, kho = xanh lam `--bi`, BTP = chàm `#5856D6`), ô biểu tượng `.wdg-mark`, đầu widget `wdgHeadHTML()`, hàng trắng mờ bo tròn. Hàng bill: ô màu theo phương thức thanh toán (`bfMarkMau`) · giờ + số món · món · nhãn thanh toán · tiền.
 **Chỉ đổi giao diện, chức năng giữ nguyên** (khác manage mở popup): bấm hàng bill → bung chi tiết NGAY TẠI CHỖ (`bfToggle` + `bfChiTiet`), «Xem tất cả» → `goBills()`, kho/BTP giữ nút «Mở rộng» (popup đầy đủ + lật ngày), gập/mở trên điện thoại, bấm dòng BTP mở chi tiết lô. Widget rỗng thì ẩn (`.wdg:empty`). Thêm widget mới: gắn `class="wdg"` + `--wc`, dùng `wdgHeadHTML(icon, tiêu đề, dòng phụ, bên phải)`.
 
+## Tab Tiền mặt + Chi phí (17/10/2026)
+Mỗi nhóm là một widget có màu (`wdg-blue/amber/green/violet/teal/red/pink`), đầu widget `wdgHeadHTML()`. Đầu màn có **hàng ô tổng hợp** `.wkpi-row` / `.wkpi` (như thẻ số liệu của manage): Tiền mặt = Expected · Thực đếm · Chênh lệch · Bill tiền mặt (`cashKpiHTML(detail)` — chỉ đọc lại số đã có trong «Đối soát cả ngày»); Chi phí = chi phí tháng này (`filterExpenses` + `splitExpensesByCostType`, cùng hàm lãi/lỗ) · Cố định · Biến đổi · Chưa trả tiền · Chờ duyệt · Chờ số thật. Form «Thêm chi phí» 2 cột ở máy tính (`.wdg-form`, mục dài gắn `.wide`). Bên trong widget `.card` = tấm trắng mờ, `.litem` = hàng trắng mờ. **Mọi id / hàm cũ giữ nguyên** (test khoá). Các tab Entry khác (Nhân viên, Lịch, Lương…) chưa làm — dùng lại đúng các class trên.
+
+## Huy hiệu «Ca hiện tại» (thanh tiêu đề)
+Ở máy tính luôn nằm góc trên phải **cùng hàng** với tiêu đề. Chỉ khi thanh tiêu đề thật sự hẹp (container query `topbar` ≤ 800px — điện thoại / cửa sổ rất hẹp) mới xuống hàng riêng và gọn **một dòng**; từ ≤ 960px nút «đã cập nhật» chỉ còn chấm để nhường chỗ. Rê chuột / bấm huy hiệu xem đủ chữ (`title`).
+
 ## Quy tắc khi sửa tiếp
 1. **Mọi rule giao diện chung nằm trong khối `/* [MANAGE-SKIN:BEGIN] */ … /* [MANAGE-SKIN:END] */`** — khối này là CUỐI `<style>` chính nên thắng mọi khối trên. Sửa nét chung → sửa **trong khối đó**. Test `tests/ql_giao_dien.test.js` báo nếu khối không còn ở cuối hoặc nếu có màu xanh manage lọt vào.
 2. **Không đặt màu mới trong khối này** (chỉ hình dáng: bo góc, cỡ chữ, khoảng cách, đổ bóng trung tính).

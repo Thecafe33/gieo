@@ -52,4 +52,16 @@ chk(kf.includes('openKhoFeedSheet()') && kf.includes('toggleKhoFeed()') && kf.in
 const pf = h.slice(h.indexOf('function prepFeedHTML(list){'), h.indexOf('let _prepFeedSheetDate'));
 chk(pf.includes('openPrepFeedSheet()') && pf.includes('togglePrepFeed()') && pf.includes("goKho2('prep')") && pf.includes("ctnShowDetail('${b.id}','prep_batches_gieogieo')"), 'BTP: còn nút «Mở rộng» / gập-mở / «Xem tất cả BTP» / bấm dòng mở chi tiết lô');
 chk(/<div class="wdg wdg-hour">[\s\S]*?<div id="todayHourly"><\/div>/.test(h), 'biểu đồ theo giờ nằm trong widget, #todayHourly giữ nguyên');
+// Tab Tiền mặt + Chi phí thành widget: mọi id / hàm cũ còn nguyên (chỉ đổi khung bao quanh)
+const rc = h.slice(h.indexOf('async function renderEntryCash(){'), h.indexOf('// [KẾT CA] Ai kết ca và mất bao lâu'));
+for (const id of ['cashKpis', 'cashViewDateInput', 'cashToleranceInput', 'handoverToleranceInput', 'cashRetainInput', 'staleDaysBox', 'segTimeline', 'cashDetail', 'cashDrawerLog', 'cashHistory'])
+  chk(rc.includes(`id="${id}"`), `tab Tiền mặt còn #${id}`);
+chk(rc.includes('submitCashSettings()') && rc.includes('renderEntryCash();">Xem</button>'), 'tab Tiền mặt: nút «Xem» + lưu cấu hình vẫn như cũ');
+chk(rc.includes('cashKpiHTML(detail)'), 'tab Tiền mặt: ô tổng hợp đầu màn được điền từ detail');
+const re = h.slice(h.indexOf('async function renderEntryExp(){'), h.indexOf('async function submitExpense(){'));
+for (const id of ['expCat', 'expAmt', 'expTypeSeg', 'expKindSeg', 'expOnetimeFields', 'expPeriodFields', 'expDate', 'expStart', 'expEnd', 'expPaid', 'expNote', 'expList'])
+  chk(re.includes(`id="${id}"`), `tab Chi phí còn #${id}`);
+for (const fn of ['submitExpense()', 'doApproveExpense(', 'doRejectExpense(', 'openExpenseActual(', 'openExpensePaid(', 'expConfigOpen=!expConfigOpen', 'seedExpenseCategories()'])
+  chk(re.includes(fn), `tab Chi phí còn gọi ${fn}`);
+chk(re.includes('filterExpenses(list, _m0, _m1)') && re.includes('splitExpensesByCostType('), 'tab Chi phí: ô tổng hợp dùng đúng hàm lãi/lỗ (filterExpenses + splitExpensesByCostType), không tự tính riêng');
 console.log(ok ? 'ALL PASS' : 'SOME FAIL'); process.exit(ok ? 0 : 1);

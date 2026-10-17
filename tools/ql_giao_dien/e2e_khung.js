@@ -74,6 +74,27 @@ mock += "\nfirebase.database.ServerValue={TIMESTAMP:0}; firebase.firestore.Field
   chk(await p.evaluate(()=>document.querySelector('#todayKhoFeed .wdg-body')!==null && document.querySelector('#todayPrepFeed .wdg-body')!==null),'widget (tablet): kho + BTP mở sẵn song song');
   chk(await p.evaluate(()=>{const a=document.getElementById('todayKhoFeed').getBoundingClientRect(),b=document.getElementById('todayPrepFeed').getBoundingClientRect();return Math.abs(a.top-b.top)<2 && a.right<=b.left+1;}),'widget (tablet): kho và BTP nằm cạnh nhau');
   await p.close();
+  // --- huy hiệu «Ca hiện tại»: máy tính thì CÙNG HÀNG với tiêu đề; chỉ xuống hàng khi thanh tiêu đề thật sự hẹp
+  const badgeTops = async (w) => { const q = await open(w, 820); await q.evaluate(() => { document.getElementById('todayShiftInfo').innerHTML = '<div class="shift-badge" onclick="openTodayShiftDetail()"><div class="shift-badge-line1">Ca hiện tại: Ca sáng</div><div class="shift-badge-line2">1 đang làm</div></div>'; });
+    await q.waitForTimeout(200); const r = await q.evaluate(() => ({ t: document.getElementById('hdrTitle').getBoundingClientRect().top, b: document.getElementById('todayShiftInfo').getBoundingClientRect().top, h: document.querySelector('#todayShiftInfo .shift-badge').getBoundingClientRect().height })); await q.close(); return r; };
+  let bt = await badgeTops(1366); chk(Math.abs(bt.b - bt.t) < 40, 'huy hiệu ca: 1366px → cùng hàng với tiêu đề ' + JSON.stringify(bt));
+  bt = await badgeTops(1180); chk(Math.abs(bt.b - bt.t) < 40, 'huy hiệu ca: 1180px → vẫn cùng hàng ' + JSON.stringify(bt));
+  bt = await badgeTops(1000); chk(bt.b > bt.t + 20 && bt.h < 45, 'huy hiệu ca: cửa sổ hẹp → xuống hàng riêng nhưng gọn một dòng ' + JSON.stringify(bt));
+  // --- tab Tiền mặt + Chi phí dạng widget — chức năng cũ còn nguyên
+  p = await open(1366, 820);
+  await p.evaluate(() => goEntry('exp')); await p.waitForTimeout(900);
+  chk(await p.evaluate(() => document.querySelectorAll('#entryBody .wdg').length >= 3 && document.querySelector('#entryBody .wkpi-row .wkpi.hero') !== null), 'Chi phí: có widget + ô tổng hợp đầu màn');
+  chk(await p.evaluate(() => ['expCat', 'expAmt', 'expTypeSeg', 'expKindSeg', 'expNote', 'expList'].every(i => document.getElementById(i))), 'Chi phí: form + danh sách còn đủ id');
+  await p.click('#expTypeSeg button[data-type="onetime"]'); await p.waitForTimeout(150);
+  chk(await p.evaluate(() => document.querySelector('#expTypeSeg button[data-type="onetime"]').classList.contains('active') && document.getElementById('expOnetimeFields').style.display !== 'none'), 'Chi phí: đổi «Một lần» / «Có kỳ hạn» vẫn chạy');
+  await p.click('#entryBody .wdg-fold'); await p.waitForTimeout(900);
+  chk(await p.evaluate(() => document.getElementById('expCatNew') !== null), 'Chi phí: bấm đầu widget «Cấu hình Danh mục» → mở cấu hình');
+  await p.evaluate(() => goEntry('cash')); await p.waitForTimeout(1200);
+  chk(await p.evaluate(() => document.querySelectorAll('#entryBody .wdg').length >= 5 && document.getElementById('cashKpis').children.length >= 1), 'Tiền mặt: có widget + ô tổng hợp đầu màn');
+  chk(await p.evaluate(() => ['cashViewDateInput', 'cashToleranceInput', 'handoverToleranceInput', 'cashRetainInput', 'segTimeline', 'cashDetail', 'cashDrawerLog', 'cashHistory'].every(i => document.getElementById(i))), 'Tiền mặt: các ô + vùng đối soát còn đủ id');
+  chk(await p.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), 'Tiền mặt / Chi phí: không tràn ngang');
+  chk(p.errs.length === 0, 'Tiền mặt / Chi phí: không lỗi JS ' + p.errs.slice(0, 2).join('|'));
+  await p.close();
   // --- tablet / desktop
   p=await open(1366,820);
   chk(!(await vis('#bottomNav')),'desktop: thanh dưới ẩn');
