@@ -13,6 +13,14 @@ Nhánh `Phan-tach-unit-engine`. Phạm vi yêu cầu: manage Bill chung, tooltip
 
 Popup PC/tablet giảm từ `min(1100px,96vw)` còn `min(880px,76.8vw)` (20%); điện thoại giữ chiều ngang dễ đọc. Tiêu đề kế thừa nền gradient của widget, chỉ danh sách bên dưới cuộn nên tiêu đề vẫn cố định. Đầu bill và phần chi tiết dùng chung một thẻ/nền/viền bo tròn, có mũi tên đóng/mở; chi tiết bỏ CSS hộp thoại, dùng dòng món và thông tin phụ gọn như quanlygieo. Giữ vị trí cuộn khi RT vẽ lại. Phạm vi file app sửa ở lượt này chỉ `manage.html`.
 
+## Bố cục bill và nhãn Togo — phản hồi tiếp 17/10
+
+- Chữ tên món/giá trong chi tiết 15px, mã bill/mã CK 14px đậm, màu chữ chính tương phản cao; size món dùng chữ phụ 13px.
+- Bỏ dòng Tổng bill/Thanh toán/Bed/kênh lặp với đầu bill. Không có thông tin phụ thì không tạo vùng trống. Giữ chi tiết giảm giá, khách, khuyến mãi và khách đưa/thối nếu có.
+- Topping có dòng riêng kèm số tiền, mã bill và mã CK (`bankOrderId`) đặt sát dưới nhóm món như quanlygieo; giữ nguyên cách tính dòng món.
+- Thêm số món cạnh giờ. Điện thoại gom tóm tắt món và nhãn thanh toán trên một hàng dùng chung chiều ngang, giữ Togo không bị cắt.
+- XOFA chỉ hiện nhãn **Togo** khi bill có `isToGo === true`, đúng trường POS ghi. Bill tại quán hoặc thiếu cờ không bị gán nhãn. Cả dashboard và popup dùng cùng hàm render, không đọc Firebase thêm.
+
 ## Nguồn dữ liệu và lượt đọc
 
 `bill_live.v1.js` giữ một Map theo `storeId|YYYY-MM-DD`, bên trong là bill theo mã RT. Tổng hợp hôm nay và bảng bill dùng chung nguồn này. Một listener trên **node của đúng một ngày/điểm**, cùng `once(value)` để biết baseline đã đầy đủ (SDK dùng dữ liệu của listener). Không có một truy vấn tail riêng ngoài lượt tổng hợp ngày. Sau baseline chỉ nhận child_added/changed/removed; không gọi đọc toàn ngày theo từng bill.
@@ -32,7 +40,7 @@ Không sửa `lai_lo.v1.js`, `data_access.v9.js` hoặc engine đã phát hành.
 
 ## Kiểm tra và giao file
 
-Kết quả lượt này: 86 file test đạt; Chromium PC/tablet/điện thoại 102/102 mục; kiểm tra khung QL 56/56 và nhân sự 76/76; cú pháp, inventory, ranh giới, đường dẫn và predeploy đạt. Chưa deploy Hosting.
+Kết quả lượt này: 86 file test đạt; Chromium PC/tablet/điện thoại 123/123 mục; kiểm tra khung QL 56/56 và nhân sự 76/76; cú pháp, inventory, ranh giới, đường dẫn và predeploy đạt. Chưa deploy Hosting.
 
 - `node tests/bill_live.test.js`: baseline dùng chung, sự kiện trong lúc tải, bill lặp/sửa/xoá, năm, cách ly quán, lỗi/gỡ nguồn.
 - `node tests/lai_lo.test.js`: bản sinh khớp, cùng công thức QL, realtime không đọc Firebase thêm, không mượn ngữ cảnh quán khác.

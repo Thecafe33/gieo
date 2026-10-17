@@ -23,10 +23,14 @@ const server=require('http').createServer((req,res)=>{const f=path.resolve(ROOT,
  check(await p.evaluate(v=>document.querySelector('.overview-amount').textContent!==v,before.total),'manage '+width+': tổng doanh thu tự cập nhật');
  check(await p.evaluate(v=>JSON.stringify(__READS)===JSON.stringify(v),before.reads),'manage '+width+': bill mới không phát sinh lượt đọc RT');
  check(await p.evaluate(v=>JSON.stringify(__FSREADS)===JSON.stringify(v),before.fsreads),'manage '+width+': bill mới không đọc lại chi phí/kho/lương');
- await p.evaluate(()=>{BF.list.unshift({key:'ui-preview',store:'tc33',t:Date.now(),o:{total:58000,time:'12:44',method:'TIỀN MẶT',itemsArray:[{name:'Trà long nhãn',size:'M',qty:1,price:30000},{name:'Matcha latte',size:'M',qty:1,price:28000}]}});bfRender()});
+ await p.evaluate(()=>{BF.list.unshift({key:'ui-preview',store:'xofa',t:Date.now(),o:{total:30000,time:'12:23',isToGo:true,billCode:'#05-17.10.26',bankOrderId:'XO1710122218',method:'CHUYỂN KHOẢN',itemsArray:[{name:'Trà lựu đỏ thạch dừa',size:'L',qty:1,price:25000,toppings:[{name:'Ngọc trai hồng',price:5000,qty:1}]}]}},{key:'ui-here',store:'xofa',t:0,o:{total:29000,time:'12:20',isToGo:false,method:'TIỀN MẶT'}},{key:'ui-legacy',store:'xofa',t:0,o:{total:29000,time:'12:19',method:'TIỀN MẶT'}});bfRender()});
  await p.locator('#billFeed .bf-entry:not([hidden]) .bf-row').first().click();
  check(await p.locator('#billFeed .bf-detail').count()===1,'manage '+width+': chi tiết bill mở ngay trong widget');
  check(await p.evaluate(()=>!document.getElementById('dialog').open),'manage '+width+': chi tiết bill không mở popup');
+ check(await p.locator('#billFeed .bf-row[data-k="ui-preview"] .bf-mode').innerText()==='Togo','manage '+width+': XOFA isToGo=true có nhãn Togo ngay trên đầu bill');
+ check(await p.locator('#billFeed .bf-row[data-k="ui-here"] .bf-mode,#billFeed .bf-row[data-k="ui-legacy"] .bf-mode').count()===0,'manage '+width+': bill tại quán/thiếu cờ không bị gắn Togo');
+ check(await p.locator('#billFeed .bf-detail').innerText().then(t=>t.includes('#05-17.10.26')&&t.includes('XO1710122218')&&t.includes('Ngọc trai hồng')&&t.includes('5.000đ')&&!t.includes('Tổng bill')&&!t.includes('Thanh toán')),'manage '+width+': chi tiết có mã bill/CK/topping, bỏ dòng lặp đã có trên đầu');
+ check(await p.evaluate(()=>{const d=bfDetails({o:{total:50000,method:'TIỀN MẶT',itemsArray:[{name:'Trà',qty:1,price:50000}]}});return !d.includes('bf-meta')}),'manage '+width+': bill không có thông tin phụ không sinh vùng trống');
  // More bills than viewport preview limit, header action opens same widget in dialog.
  await p.evaluate(()=>{for(let i=0;i<9;i++)BF.list.push({key:'demo'+i,store:'gg01',t:0,o:{total:1000,time:'09:00',itemsArray:[{name:'Trà',qty:1,price:1000}]}});bfRender()});
  check(await p.evaluate(()=>document.querySelector('#billFeed .bf-more').parentElement===document.querySelector('#billFeed .bf-live').parentElement),'manage '+width+': Xem thêm cạnh Trực tiếp trên đầu');
@@ -41,6 +45,10 @@ const server=require('http').createServer((req,res)=>{const f=path.resolve(ROOT,
  check(geometry.headBG==='rgba(0, 0, 0, 0)'&&geometry.detailBG==='rgba(0, 0, 0, 0)'&&Math.abs(geometry.gap)<2,'manage '+width+': đầu và chi tiết cùng một thẻ liền mạch');
  check(geometry.detailHeight<160&&geometry.stripe==='0px','manage '+width+': hai dòng món gọn, không khối trắng/viền rời');
  check(!geometry.overflow,'manage '+width+': popup không tràn ngang');
+ check(await p.locator('#bfModal .bf-row[data-k="ui-preview"] .bf-mode').innerText()==='Togo','manage '+width+': nhãn Togo cũng có trong popup');
+ check(await p.evaluate(()=>{const tag=document.querySelector('#bfModal .bf-row[data-k="ui-preview"] .bf-mode'),who=tag.closest('.bf-who');return tag.getBoundingClientRect().right<=who.getBoundingClientRect().right+1&&tag.scrollWidth<=tag.clientWidth+1}),'manage '+width+': nhãn Togo hiện trọn, không bị cắt trên điện thoại');
+ const readability=await p.evaluate(()=>{const card=document.querySelector('#bfModal .bf-entry.is-open'),line=card.querySelector('.bf-line'),value=card.querySelector('.bf-kv>b');const lum=s=>{const a=s.match(/[\d.]+/g).slice(0,3).map(Number).map(v=>{v/=255;return v<=.04045?v/12.92:Math.pow((v+.055)/1.055,2.4)});return a[0]*.2126+a[1]*.7152+a[2]*.0722};const fg=lum(getComputedStyle(line).color),bg=lum(getComputedStyle(card).backgroundColor);return{font:parseFloat(getComputedStyle(line).fontSize),valueFont:parseFloat(getComputedStyle(value).fontSize),contrast:(Math.max(fg,bg)+.05)/(Math.min(fg,bg)+.05)}});
+ check(readability.font>=15&&readability.valueFont>=14&&readability.contrast>=7,'manage '+width+': tên món/giá/mã đủ lớn, tương phản cao');
  const scroll=await p.evaluate(()=>{const head=document.querySelector('#bfModal .widget-head'),list=document.querySelector('#bfModal .bf-list'),before=head.getBoundingClientRect().top;list.scrollTop=120;const after=head.getBoundingClientRect().top,top=list.scrollTop;bfRender();return{before,after,top,restored:document.querySelector('#bfModal .bf-list').scrollTop}});
  check(scroll.top>0&&Math.abs(scroll.before-scroll.after)<1&&Math.abs(scroll.top-scroll.restored)<1,'manage '+width+': cuộn danh sách giữ tiêu đề và vị trí khi RT vẽ lại');
  await p.evaluate(()=>{document.querySelector('#bfModal .bf-list').scrollTop=0;toggleTheme()});await p.waitForTimeout(350);

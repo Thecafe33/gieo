@@ -17,6 +17,9 @@
 
 ## 2. Đã làm (theo thứ tự)
 
+**17/10 — bố cục bill + nhãn Togo XOFA**: manage tăng cỡ/độ rõ tên món, giá và mã bill/CK; bỏ Tổng bill/Thanh toán lặp ở chi tiết; topping có dòng riêng, không có dữ liệu phụ thì không tạo khoảng trống. Gom giờ/số món và tối ưu hàng món + thanh toán trên điện thoại. XOFA hiển thị Togo theo đúng `isToGo === true` ở cả widget lẫn popup. Chỉ sửa manage, không đổi dữ liệu/tổng hợp; sinh lại ba bộ deploy, gói tải riêng chỉ `manage.html`.
+
+
 **17/10 — sửa UI Bill chung theo ảnh thực tế**: manage thu popup PC/tablet 20%, bỏ dải trắng dưới tiêu đề; đầu bill và chi tiết thành một thẻ liền mạch, thông tin gọn như quanlygieo, có mũi tên mở/đóng. Danh sách cuộn riêng dưới tiêu đề, giữ vị trí khi RT vẽ lại. Chỉ sửa giao diện manage; bộ tính và nguồn RT giữ nguyên. Sinh lại ba bộ deploy; gói tải riêng lượt này chỉ cần `manage.html`.
 
 
