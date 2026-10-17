@@ -46,7 +46,7 @@ Kiểm tra: `tests/nhan_su_diem_ban.test.js` kiểm tương thích hồ sơ cũ,
 
 ## Kế hoạch hoàn thiện các màn còn lại
 
-Đã rà điều hướng PC/mobile và các form NL/BTP ngày 17/10. Kế hoạch chi tiết: [KE_HOACH_UI_WIDGET_QUANLY.md](KE_HOACH_UI_WIDGET_QUANLY.md). Trạng thái chỉ lập kế hoạch; giữ nguyên tab Menu/Khuyến mãi, nhóm kho triển khai theo từng luồng.
+Đã rà điều hướng PC/mobile và các form NL/BTP ngày 17/10. Kế hoạch chi tiết: [KE_HOACH_UI_WIDGET_QUANLY.md](KE_HOACH_UI_WIDGET_QUANLY.md). Đã triển khai P0–P5: widget opt-in theo `UI_WIDGET_PAGES`, giữ node/id và các hàm nghiệp vụ, observer childList gom qua rAF, không đọc Firebase. Giữ nguyên Menu/Khuyến mãi và popup của chúng; danh mục NL giữ thẻ/sheet, BTP chia sáu nhóm và gập riêng hướng dẫn dài. Chi tiết mã, phạm vi và kiểm tra xem phần Triển khai trong kế hoạch.
 
 ## Quy tắc khi sửa tiếp
 1. **Mọi rule giao diện chung nằm trong khối `/* [MANAGE-SKIN:BEGIN] */ … /* [MANAGE-SKIN:END] */`** — khối này là CUỐI `<style>` chính nên thắng mọi khối trên. Sửa nét chung → sửa **trong khối đó**. Test `tests/ql_giao_dien.test.js` báo nếu khối không còn ở cuối hoặc nếu có màu xanh manage lọt vào.

@@ -1,6 +1,6 @@
 # Kế hoạch hoàn thiện UI widget quanlygieo — 17/10/2026
 
-Trạng thái: **kế hoạch sau rà soát, chưa triển khai giao diện**. Bản nguồn được rà: `fcc6ea8` trên nhánh `Phan-tach-unit-engine`.
+Trạng thái: **đã triển khai và kiểm tra P0–P5 ngày 17/10/2026**. Bản nguồn được rà ban đầu: `fcc6ea8`; kế hoạch được chốt tại `dd27002`, nhánh `Phan-tach-unit-engine`.
 
 ## Phạm vi đã chốt
 
@@ -136,4 +136,14 @@ Các tiêu chí kiểm tra cho mỗi lượt:
 5. **Kho:** các luồng tem, lô, nhận từng phần, điều chỉnh, đối chiếu, đơn vị/quy cách và yield không đổi. Xác nhận và cảnh báo nghiệp vụ quan trọng phải còn nguyên.
 6. **Phát hành:** chạy kiểm tra phù hợp thay đổi, kiểm đồng bộ bộ tính dùng chung, sinh lại bản thử và `ban_deploy/{thuong,giangsinh,tet}/`, chạy predeploy. Gửi ZIP chỉ gồm file mới cần thay; chủ dự án tự deploy Hosting.
 
-Trong lượt lập kế hoạch này chỉ thêm tài liệu; không sửa HTML/CSS/JS hay bộ deploy.
+## Triển khai
+
+- Hoàn tất các nhóm P1–P5 bằng khung widget opt-in trong `quanlygieo.html`: `UI_WIDGET_PAGES` liệt kê từng màn và `uiWidgetsApply` đồng bộ các phần render bất đồng bộ, giữ nguyên các node/id/input/sự kiện hiện có. Lượt rAF gom thay đổi DOM; không polling, không gọi Firebase. Các màn có widget hoàn chỉnh trước đó không nằm trong danh sách đổi.
+- Hôm nay · Vận hành có sáu widget cố định, phần nội dung cập nhật độc lập. Bảng báo cáo cuộn cục bộ có gợi ý; Sức khoẻ tài chính/Mục tiêu dùng hai cột khi đủ rộng.
+- Danh mục NL giữ lưới/thẻ và sheet hiện hành; BTP chia sáu nhóm, sản lượng/giá thành luôn mở, hướng dẫn dài nằm trong details. Lưu/Huỷ dễ thấy; giữ draft, đơn vị, định lượng, công thức giá vốn.
+- Kho giữ thẻ tem/lô cùng màu cảnh báo; chỉ đồng bộ khung/đầu nhóm, các bảng và tác vụ, không thay bộ máy kho.
+- Popup thuộc màn được đổi dùng cùng nền/khung; Menu/Khuyến mãi cùng popup của chúng được so style/DOM với bản trước rollout tại `dd27002`.
+- Kiểm tra: `node tools/ql_giao_dien/e2e_widgets_toan_app.js` (cần checkout git có commit tham chiếu; hỗ trợ CHROMIUM_PATH), kiểm PC/tablet/mobile, Menu/Khuyến mãi và ba popup Menu, DOM ổn định, không đọc Firebase khi trang trí, giữ focus/draft, lưu ghi chú/NL/BTP qua form thật trên Firebase giả. Chặn mạng ngoài.
+- Sinh lại bản thử và ba bộ deploy theo quy trình hiện hành. Chủ dự án tự deploy Hosting.
+
+Kết quả kiểm tra: 87 file unit/regression test đạt; e2e widget toàn app 540 kiểm tra đạt ở 1366/853/390px; bill realtime 207 kiểm tra đạt; khung điều hướng 56 kiểm tra và nhân sự 76 kiểm tra đạt. Bộ tính dùng chung khớp nguyên bản, ranh giới engine/đường dẫn sạch. Gói bàn giao chỉ gồm `quanlygieo.html` và `quanlygieo_thu.html`.

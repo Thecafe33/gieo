@@ -17,6 +17,9 @@
 
 ## 2. Đã làm (theo thứ tự)
 
+**Mới nhất 17/10 — hoàn thiện widget các màn còn lại (P0–P5)**: Vận hành, ghi chú, bill, cảnh báo/checklist/nhắc nhở; báo cáo/phân tích; cấu hình; kho vận hành và danh mục. Menu/Khuyến mãi cùng popup giữ nguyên, có kiểm style với bản trước rollout. NL giữ thẻ và sheet; BTP chia sáu nhóm, giữ sản lượng/giá thành luôn mở và gập riêng giải thích. Bảng cuộn trong widget, không tràn ngang trang. Khung UI không đọc Firebase, giữ id/input/sự kiện và các bộ tính. Đã sinh lại bản thử và ba bộ deploy; chưa deploy Hosting. Chi tiết: `docs/KE_HOACH_UI_WIDGET_QUANLY.md`, tool `tools/ql_giao_dien/e2e_widgets_toan_app.js`.
+
+
 **Mới nhất 17/10 — sửa đệm thu hồi vốn**: RT thay P&L đúng ngày hôm nay trong dữ liệu đã nạp rồi tính lại luỹ kế/còn thiếu/tốc độ/dự kiến bằng công thức cũ, không đọc Firebase thêm. Tải lại bỏ đệm, lượt nạp cũ không ghi đè kết quả mới; giữ mốc 100% và ngăn ghi trùng khi nhiều bill về. Chủ dự án chốt tạm dừng đối chiếu chênh lệch thu hồi vốn trong quá khứ. Đã sinh lại bản thử và ba bộ deploy; chưa deploy Hosting. Chi tiết: `docs/BILL_REALTIME.md`.
 
 
