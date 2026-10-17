@@ -1,4 +1,4 @@
-# Hiện trạng dự án — cập nhật 04/10/2026
+# Hiện trạng dự án — cập nhật 17/10/2026
 
 Đọc file này **sau CLAUDE.md**, trước khi làm bất cứ việc gì. Nhánh làm việc: `Phan-tach-unit-engine`.
 
@@ -7,15 +7,18 @@
 | Thành phần | Bản | Ghi chú |
 |---|---|---|
 | Engine kho | `unit_engine.v18.js` (01/10/2026) | v1–v17 giữ để quay lui — **không sửa, không xoá** (cache immutable). Danh sách: `tools/engine_releases.txt` |
-| Lớp đường dẫn | `data_access.v7.js` (16/10 = v6 + đăng ký `pl_days`; v6 12/10 = v5 đổi tên; v1 đã deploy, v2–v6 — giữ quay lui) | đa cửa hàng Bước 1 + 2 + 3 (withStore cho Xem tất cả) — 2 app nạp trước engine; danh mục NL/BTP theo quán + đồng bộ; đăng nhập cửa hàng; kiểm bằng `node tools/check_paths.js` |
+| Lớp đường dẫn | `data_access.v9.js` (16/10 = v8 + tên Gấu Noel; v8 đánh dấu ngày lãi/lỗ bị đổi; các bản cũ giữ quay lui) | đa cửa hàng Bước 1 + 2 + 3 (withStore cho Xem tất cả) — 2 app nạp trước engine; danh mục NL/BTP theo quán + đồng bộ; đăng nhập cửa hàng; kiểm bằng `node tools/check_paths.js` |
 | App bán hàng | `posgieo.html` | trỏ v18 |
 | App quản lý | `quanlygieo.html` | trỏ v18 |
 | Chế độ thử | `che_do_thu.v1.js` + `posgieo_thu.html`, `quanlygieo_thu.html` | sinh lại bằng `node tools/tao_ban_thu.js .` sau **mỗi** lần sửa HTML |
-| Test | `sh tests/run_all.sh` | 50 file `tests/*.test.js`, chỉ cần `node` |
+| Test | `sh tests/run_all.sh` | 85 file `tests/*.test.js`, chỉ cần `node` |
 
 **Trạng thái deploy (chủ dự án xác nhận 04/10/2026): v18 ĐÃ DEPLOY**, chạy ổn ở cửa hàng 1 được **1–3 tuần**. Đa cửa hàng cần ≥ vài tuần ổn định (`docs/KE_HOACH_DA_CUA_HANG.md` mục 0) → theo dõi thêm rồi mới làm M0. Chủ dự án tự deploy; phiên mới hỏi lại trước việc lớn nếu đã qua lâu.
 
 ## 2. Đã làm (theo thứ tự)
+
+**Mới nhất 17/10 — giao diện biểu mẫu + nhân sự**: đồng bộ ô nhập/chọn/ngày/giờ/tháng/lý do, kể cả ngoài `.field`; widget xuất phân tích mẻ, Nhân viên (bảng máy tính/thẻ điện thoại, gom theo điểm bán + tìm tên, form thêm/sửa cùng widget), Lịch, Chấm công, Lương. Thêm `employees_gieogieo.storeTags` để phân hồ sơ theo nhiều điểm Gieo; hồ sơ cũ mặc định quán chính/GG01, không tự ghi chuyển dữ liệu. Chủ dự án chốt chỉ phân nhóm — không giới hạn check-in, không thay lương. `homeStore` vẫn riêng cho lương cứng, hiện ngay cả một quán. Chi tiết: `docs/GIAO_DIEN_QUANLY.md`. Đã sinh lại bản thử và ba bộ deploy; **chưa xác nhận deploy Hosting của lượt này**.
+
 
 - **28/09** — K0, F1–F6, E0 → E6: tách Unit Engine dùng chung, chế độ thử, `storeId` cố định `'gg01'`, giờ máy chủ. Chi tiết: `docs/luu_tru/NHAT_KY_PHIEN_28-09-2026.md`.
 - **30/09–01/10** — Engine v2 → v18:

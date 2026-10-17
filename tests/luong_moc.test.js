@@ -61,11 +61,11 @@ const P = (o) => ({ payType: 'hourly_full', hourlyRate: 20000, otEnabled: true, 
 
   // ── Form sửa nhân viên: đổi lương → thêm mốc (kèm mốc gốc), không đổi lương → không đụng payHistory ──
   {
-    const fsrc = extract('quanlygieo.html', ['submitEmployeeForm', 'payTermsOfRecord', 'empPayTermsOn']);
+    const fsrc = extract('quanlygieo.html', ['submitEmployeeForm', 'payTermsOfRecord', 'empPayTermsOn', 'nvStoreIds', 'nvStoreOptions']);
     const mkForm = (cur, vals) => {
       const saved = []; const els = { nvFullName: { value: 'Lan' }, nvPin: { value: '1234' }, nvPayType: { value: vals.payType || 'hourly_full' }, nvHourlyRate: { value: String(vals.rate) }, nvOtEnabled: { checked: true },
         nvOtThreshold: { value: '8' }, nvOtRate: { value: String(vals.ot) }, nvPayFrom: { value: vals.from } };
-      const stubs = { document: { getElementById: id => els[id] || null }, NV_ROLES: [], nvEmployeesCache: [cur], nvEditingId: cur.id, nvFormDraft: {}, toast: m => saved.push('toast:' + m), logAudit() {}, renderEntryNv() {}, dkey: () => '2026-11-15',
+      const stubs = { qlActiveStores: () => [{id:'gg01'}], qlStoreName: id => id, document: { getElementById: id => els[id] || null, querySelectorAll: () => [{value:'gg01'}] }, NV_ROLES: [], nvEmployeesCache: [cur], nvEditingId: cur.id, nvFormDraft: {}, toast: m => saved.push('toast:' + m), logAudit() {}, renderEntryNv() {}, dkey: () => '2026-11-15',
         updateEmployee: async (id, n, pin, info) => { saved.push(info); }, addEmployee: async () => ({ id: 'x' }), PAY_FIELDS: ['payType', 'hourlyRate', 'otEnabled', 'otThresholdHours', 'otRate', 'fixedMonthlySalary'] };
       const ks = Object.keys(stubs);
       return { saved, run: () => new Function(...ks, 'let nvEditingId2;' + fsrc + '\nreturn submitEmployeeForm();')(...ks.map(k => stubs[k])) };

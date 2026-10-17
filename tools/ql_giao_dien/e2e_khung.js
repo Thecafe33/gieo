@@ -6,16 +6,24 @@ const { chromium } = require('playwright'); const fs=require('fs');
 const path=require('path'); const ROOT=path.resolve(__dirname,'../..'), E2E=ROOT+'/tools/tet/e2e';
 let mock=fs.readFileSync(E2E+'/mockfb.js','utf8');
 mock += "\nfirebase.database.ServerValue={TIMESTAMP:0}; firebase.firestore.FieldValue={delete(){return null;},serverTimestamp(){return null;},increment(n){return n;},arrayUnion(){return [];}}; firebase.storage=function(){return {ref(){return {put(){return Promise.resolve()}}}}};\n(function(){const F=firebase.firestore;const nf=function(){const f=F();const nb=()=>{const b={set(){return b},update(){return b},delete(){return b},commit(){return Promise.resolve()}};return b};f.batch=nb;f.collectionGroup=c=>f.collection(c);f.doc=pth=>{const a=pth.split('/');return f.collection(a[0]).doc(a[1]||'x')};f.runTransaction=fn=>Promise.resolve();return f};Object.assign(nf,F);firebase.firestore=nf})();";
+// Chromium trong môi trường cloud có thể khoá file://; phục vụ bản thử trên loopback.
+const server=require('http').createServer((req,res)=>{
+  const file=path.resolve(ROOT, '.'+new URL(req.url,'http://localhost').pathname);
+  if(!file.startsWith(ROOT+path.sep)||!fs.existsSync(file)||!fs.statSync(file).isFile()){res.writeHead(404);return res.end();}
+  res.setHeader('Content-Type',file.endsWith('.js')?'application/javascript':file.endsWith('.html')?'text/html; charset=utf-8':'application/octet-stream');res.end(fs.readFileSync(file));
+});
 (async()=>{
-  const b=await chromium.launch({executablePath:'/opt/pw-browsers/chromium'});
+ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+ const base='http://127.0.0.1:'+server.address().port;
+  const b=await chromium.launch({executablePath:process.env.CHROMIUM_PATH || (fs.existsSync('/opt/pw-browsers/chromium') ? '/opt/pw-browsers/chromium' : '/usr/bin/chromium')});
   const R=[]; const chk=(c,m)=>R.push((c?'ok   ':'FAIL ')+m);
   async function open(w,h){const p=await b.newPage({viewport:{width:w,height:h}}); p.on('dialog',d=>d.dismiss());
     await p.route('**/*',r=>{const u=r.request().url();
       if(u.includes('firebase-app-compat'))return r.fulfill({contentType:'application/javascript',body:mock});
       if(u.includes('firebasejs'))return r.fulfill({contentType:'application/javascript',body:''});
-      if(u.startsWith('file:'))return r.continue(); return r.abort();});
+      if(u.startsWith(base+'/'))return r.continue(); return r.abort();});
     const errs=[]; p.on('pageerror',e=>errs.push(e.message)); p.errs=errs;
-    await p.goto('file://'+ROOT+'/quanlygieo.html'); await p.waitForTimeout(2500); return p;}
+    await p.goto(base+'/quanlygieo.html'); await p.waitForTimeout(2500); return p;}
   // --- điện thoại
   let p=await open(390,844);
   const vis=async s=>p.evaluate(s=>{const e=document.querySelector(s);if(!e)return false;const r=e.getBoundingClientRect();const cs=getComputedStyle(e);return cs.display!=='none'&&r.width>0&&r.height>0},s);
@@ -115,5 +123,5 @@ mock += "\nfirebase.database.ServerValue={TIMESTAMP:0}; firebase.firestore.Field
   chk(await p.evaluate(()=>document.getElementById('editSheetWrap').classList.contains('open')),'desktop: bấm chọn quán → mở bảng chọn');
   chk(p.errs.length===0,'desktop: không lỗi JS '+p.errs.slice(0,2).join('|'));
   console.log(R.join('\n')); console.log('FAIL:',R.filter(x=>x.startsWith('FAIL')).length,'/',R.length);
-  await b.close();
-})();
+  await b.close();server.close();if(R.some(x=>x.startsWith('FAIL')))process.exitCode=1;
+})().catch(e=>{console.error(e);server.close();process.exit(1)});
