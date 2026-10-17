@@ -16,11 +16,11 @@
 const fs = require('fs'), path = require('path');
 const acorn = require('acorn');
 const walk = require('acorn-walk');
-const VERSION = 1;
+const VERSION = 2;
 const ROOT = path.join(__dirname, '..');
 const OUT = path.join(ROOT, 'lai_lo.v' + VERSION + '.js');
 const ROOTS = ['computeDailyPLRange', 'plTomTatNgay', 'plBreakEven', 'plSumDays', 'configForDate', 'qlAllNapChung', 'memoDropAll',
-  'loadInventoryItems', 'loadPrepItems', 'loadCogsMaps', 'loadConfig'];
+  'loadInventoryItems', 'loadPrepItems', 'loadCogsMaps', 'loadConfig', 'salesFromLive'];
 const EXCLUDE = new Set(['fstore', 'db', 'QL_VIEW_KEY', 'QL_VIEW', 'QL_ALL', 'plLuuTomTat', 'loadExpensesAll']);
 
 function build(){
@@ -84,6 +84,7 @@ async function loadExpensesAll(){
 ${body}
 // ---- API ----
 let _khoa = Promise.resolve(), _napChungLuc = 0, _quanTruoc = null;
+const _liveCtx = {};
 const _dmQuan = {};   // danh mục NL / BTP + giá vốn nhập tay của từng quán, nhớ 10 phút (đổi quán không phải đọc lại)
 // Lãi / lỗ từng ngày [from, to] ('YYYY-MM-DD') của quán storeId. Trả { days (computeDayPL), tomTat (y bản quanlygieo ghi pl_days) }.
 // Chạy TUẦN TỰ (trạng thái dùng chung như chế độ Xem tất cả của quanlygieo). Dữ liệu dùng chung nạp lại sau 10 phút.
@@ -102,13 +103,29 @@ function tinh(opts){
       _dmQuan[_quan] = { at: Date.now(), items, preps, cogs: COGS_TOGO };
     }
     const r = await computeDailyPLRange(new Date(opts.from + 'T00:00:00'), new Date(opts.to + 'T00:00:00'));
+    _liveCtx[_quan]={inputs:r.realtime,salesRes:r.salesRes};
     const tomTat = r.days.map(d => plTomTatNgay(d, plBreakEven(d, 1 - ((configForDate(d.date).targets.cogsPct) || 0) / 100)));
     return { days: r.days, tomTat };
   });
   _khoa = p.catch(() => {});
   return p;
 }
-root.LaiLo = { VERSION: ${VERSION}, tinh, PL_TOM_TAT_KEYS };
+// No network I/O here: only the affected store's loaded context + current RT snapshot.
+function realtime(opts){
+  const p=_khoa.then(()=>{
+    const c=_liveCtx[opts.storeId],dm=_dmQuan[opts.storeId];
+    const previous=c&&c.salesRes.perDay.find(d=>d.date===opts.day);
+    if(!previous||!dm)return null;
+    _quan=opts.storeId;QL_VIEW=opts.storeId;
+    if(_quanTruoc!==_quan){_costMemo={};_quanTruoc=_quan}
+    INVENTORY_ITEMS=dm.items;PREP_ITEMS=dm.preps;COGS_TOGO=dm.cogs;
+    const sales=salesFromLive(opts.orders,previous),inputs=c.inputs;
+    const day=computeDayPL({...inputs,day:sales.perDay[0],wasteValue:inputs.wasteByDate[opts.day]||0});
+    const tomTat=plTomTatNgay(day,plBreakEven(day,1-((configForDate(day.date).targets.cogsPct)||0)/100));
+    return {day,tomTat};
+  });_khoa=p.catch(()=>{});return p;
+}
+root.LaiLo = { VERSION: ${VERSION}, tinh, realtime, PL_TOM_TAT_KEYS };
 })(typeof window !== 'undefined' ? window : globalThis);
 `;
 }

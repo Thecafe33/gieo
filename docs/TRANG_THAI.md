@@ -11,11 +11,14 @@
 | App bán hàng | `posgieo.html` | trỏ v18 |
 | App quản lý | `quanlygieo.html` | trỏ v18 |
 | Chế độ thử | `che_do_thu.v1.js` + `posgieo_thu.html`, `quanlygieo_thu.html` | sinh lại bằng `node tools/tao_ban_thu.js .` sau **mỗi** lần sửa HTML |
-| Test | `sh tests/run_all.sh` | 85 file `tests/*.test.js`, chỉ cần `node` |
+| Test | `sh tests/run_all.sh` | 86 file `tests/*.test.js`, chỉ cần `node` |
 
 **Trạng thái deploy (chủ dự án xác nhận 04/10/2026): v18 ĐÃ DEPLOY**, chạy ổn ở cửa hàng 1 được **1–3 tuần**. Đa cửa hàng cần ≥ vài tuần ổn định (`docs/KE_HOACH_DA_CUA_HANG.md` mục 0) → theo dõi thêm rồi mới làm M0. Chủ dự án tự deploy; phiên mới hỏi lại trước việc lớn nếu đã qua lâu.
 
 ## 2. Đã làm (theo thứ tự)
+
+**17/10 — Bill chung + số liệu realtime**: manage đưa Xem thêm lên đầu cạnh Trực tiếp, mở danh sách trong popup cùng UI widget; bấm từng bill mở chi tiết tại chỗ. Tooltip giờ thêm tổng và tách từng điểm Gieo. Hai app dùng `bill_live.v1.js`: dữ liệu RT hôm nay theo mã bill dùng chung cho tổng hợp và feed, add/change/remove cập nhật tại máy, không đọc lại node/quán khác. `lai_lo.v2.js` sinh từ quanlygieo, giữ v1 để máy còn HTML cũ; tái tính lãi/lỗ từ ngữ cảnh đã nạp. Bản thử và ba bộ deploy đã sinh lại; chủ dự án tự deploy. Chi tiết: `docs/BILL_REALTIME.md`.
+
 
 **17/10 — nền hồng**: theo yêu cầu chủ dự án, nền xám đổi thành `#F8EFF2` + hai lớp radial hồng nhẹ như cách manage tạo nền xanh; thanh tiêu đề trong mờ và theme-color cùng tông. Giữ màu chữ, trạng thái và dữ liệu. Sinh lại bản thử và ba bộ deploy.
 

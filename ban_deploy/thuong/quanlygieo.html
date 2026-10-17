@@ -2590,6 +2590,7 @@ html.tab-ui .hr-form{grid-template-columns:minmax(0,1fr) minmax(0,1fr);}
      tự thử lại, tự lấy đúng tên bucket trong firebaseConfig. -->
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-storage-compat.js"></script>
 <!-- [E3] Unit Engine — dùng CHUNG file với POS, nạp TRƯỚC script chính. Đổi phiên bản = đổi tên file (6.1). -->
+<script src="bill_live.v1.js"></script>
 <script src="data_access.v9.js"></script>
 <!-- [TỰ PHỤC HỒI] Nạp file lần đầu thất bại (404 bị trình duyệt NHỚ vì header immutable khi HTML lên site trước file JS, hoặc mạng chập)
      → nạp lại ĐÚNG MỘT LẦN bằng địa chỉ khác (?r=1 — khác khoá cache) trước khi script chính chạy. Không đổi tên file / không cần deploy lại. (Viết '<scr'+'ipt' để tools/predeploy_check không đếm nhầm thành thẻ thứ hai; có id để các công cụ quét — chỉ lấy khối script TRẦN (không thuộc tính) đầu tiên làm script chính — không lấy nhầm.) -->
@@ -2748,7 +2749,7 @@ async function reloadCurrent(){
   if(QL_ALL){ (curScreen === 'report' ? renderReportAll : renderTodayAll)(); return; }   // [Bước 3] Xem tất cả: Hôm nay + Báo cáo tổng hợp
   memoDropAll();   // bấm Tải lại là muốn số MỚI, không phải số trong bộ đệm
   try{ await ensureAuth(); await loadConfig(); }catch(err){ console.warn('reload config failed', err); }
-  if(curScreen==='today') renderToday();
+  if(curScreen==='today'){detachBillFeed();_todayLiveCtx=null;renderToday();}
   else if(curScreen==='inbox') renderAlertInbox();
   else if(curScreen==='today') renderToday();
   else if(curScreen==='health') renderHealth();
@@ -3138,6 +3139,8 @@ async function fetchOrdersForDate(d){
   // đã archive, hoặc archive xong mà chưa kịp xoá RTDB). Đọc cả hai, gộp theo khoá bill (RTDB
   // thắng) — trước đây RTDB có ≥1 bill là bỏ hẳn archive, bill cũ biến khỏi báo cáo.
   const byKey = {};
+  const liveDay = dkey(d)===dkey(new Date()) && typeof window!=='undefined' && window.BillLive;
+  if(liveDay)return Object.values(await window.BillLive.read({id:GieoData.storeId(),day:dkey(d),db,path:`orders_gieogieo/${month}/${day}`}));
   const cungNam = o => { if(!o || !o.date) return true; return String(o.date.split('/')[2]) === String(year); };
   try{
     const docId = `${month}_${day}_${year}`;
@@ -4157,6 +4160,13 @@ function writeCachedDay(dateKey, dayAgg){
     .catch(err=>console.warn('cache write failed', dateKey, err));
 }
 
+// Rebuild from keyed RT snapshot; add/change/remove all use the same authoritative aggregate.
+function salesFromLive(orders, previous){
+  const date=previous.date, delta=Number(previous.substitutionCogsDelta)||0;
+  const day={date,...aggregateOrders(orders,date),mix:rawMixFromOrders(orders)};
+  if(delta){day.substitutionCogsDelta=delta;day.cogsActual=(Number(day.cogsActual)||0)+delta}
+  return {perDay:[day],totals:{revenue:day.revenue,bills:day.bills,items:day.items,toppingBills:day.toppingBills,toppingRevenue:day.toppingRevenue},dayCount:1,cachedCount:0};
+}
 async function fetchSalesRange(startDate, endDate){
   // Lịch sử giá + lịch sử định mức món + lịch sử công thức mẻ phải có TRƯỚC khi
   // tính bất kỳ ngày nào — thiếu thì mọi ngày rơi về giá/định mức/công thức hiện
@@ -4175,7 +4185,7 @@ async function fetchSalesRange(startDate, endDate){
 
   const perDay = days.map(d=>{
     const key = dkey(d);
-    if(cached[key]) return {date:key, ...cached[key]};
+    if(isCacheable(d) && cached[key]) return {date:key, ...cached[key]};
     const idx = missing.findIndex(m=>dkey(m)===key);
     const orders = fetchedResults[idx];
     const agg = aggregateOrders(orders, key);
@@ -8654,7 +8664,7 @@ async function computeDailyPLRange(startDate, endDate){
     homNayKey
   }));
   plLuuTomTat(days);
-  return { days, tong: plSumDays(days), salesRes, assets };
+  return { days, tong: plSumDays(days), salesRes, assets, realtime:{expList:expAll,cats,assets,laborActual,laborPredicted,wasteByDate,wasteValueThieu:ledgerThieu,homNayKey} };
 }
 
 // ---------------------------------------------------------------------------
@@ -13856,32 +13866,41 @@ function openTodayShiftDetail(){
   openEditSheet('Ca hôm nay', body, ()=>{});
 }
 
-async function renderToday(){
-  setSync(true);
+let _todayLiveCtx=null, _todayBusy=false, _todayPending=false, _todayTimer=null, _todayReload=false;
+function todayBillChanged(){
+  _todayPending=true;clearTimeout(_todayTimer);
+  _todayTimer=setTimeout(()=>{if(curScreen==='today'&&!QL_ALL&&!_todayBusy&&_todayLiveCtx){_todayPending=false;renderToday(true)}},100);
+}
+async function renderToday(liveOnly=false){
+  if(_todayBusy){if(liveOnly)_todayPending=true;else _todayReload=true;return}
+  _todayBusy=true;
+  if(!liveOnly)setSync(true);
   document.querySelectorAll('[data-wdg-ic]').forEach(e=>{ e.innerHTML = ic(e.dataset.wdgIc, 20); });   // ô biểu tượng của các widget tĩnh
   document.getElementById('todayQuickAccess').innerHTML = todayQuickAccessHTML();
   try{
-  await ensureAuth();
-  const today = new Date();
-  const [salesRes, opsToday, expAll, assets, invItems, expCatsToday, actualLaborByDate, ledgerRealToday, empsToday, schedToday] = await Promise.all([
+  if(!liveOnly)await ensureAuth();
+  const today = new Date(), storeId=GieoData.storeId(), dayKey=dkey(today);
+  if(liveOnly&&(!_todayLiveCtx||_todayLiveCtx.storeId!==storeId||_todayLiveCtx.day!==dayKey))return;
+  const values=liveOnly?_todayLiveCtx.values:await Promise.all([
     fetchSalesRange(today, today),
     loadDailyOpsOne(dkey(today)),
     loadExpensesAll(),
     loadAssetsAll(),
     loadInventoryItems(),
     loadExpenseCategories(),
-    // Chỉ query nếu tính năng đang BẬT — tránh đọc thừa 2 collection mỗi lần vào màn
-    // Hôm nay khi chủ quán còn dùng cách tính Labor cũ (mặc định).
     HR_SETTINGS.useActualLaborCost ? computeActualLaborCostByDate(dkey(today), dkey(today)) : Promise.resolve(null),
-    // Waste + số ly đổ luôn đọc từ ledger — không còn công tắc, không còn ô gõ tay.
     computeLedgerRealMetrics(today, today),
-    // Hai thứ cho "Lãi/lỗ hôm nay": danh sách nhân viên + lịch làm việc HÔM NAY, để
-    // ngày chưa kết ca vẫn có con số lương dự đoán. Hỏng thì coi như chưa xếp lịch —
-    // lãi/lỗ vẫn tính được (rơi về chấm công thật), không kéo sập cả màn.
     loadEmployees().catch(()=>[]),
     loadSchedulesForDate(dkey(today)).catch(()=>[])
   ]);
-  const offHomNay = isStoreOff(await loadOffDays(dkey(today), dkey(today)).catch(()=>null), dkey(today), offStoreHere());
+  if(storeId!==GieoData.storeId()||curScreen!=='today')return;
+  if(!liveOnly)_todayLiveCtx={storeId,day:dayKey,values};
+  const context=_todayLiveCtx;
+  const snapshot=window.BillLive?.snapshot(storeId,dayKey);
+  if(snapshot)values[0]=salesFromLive(Object.values(snapshot),values[0].perDay[0]||{date:dayKey});
+  const [salesRes,opsToday,expAll,assets,invItems,expCatsToday,actualLaborByDate,ledgerRealToday,empsToday,schedToday]=values;
+  const offHomNay=liveOnly?context.off: isStoreOff(await loadOffDays(dayKey,dayKey).catch(()=>null),dayKey,offStoreHere());
+  context.off=offHomNay;
   const kpi = computeKPIs({
     perDaySales: salesRes.perDay, opsSum: {},
     expList: filterExpenses(expAll, today, today), assets, actualLaborByDate,
@@ -13906,7 +13925,7 @@ async function renderToday(){
   nudge.innerHTML = nudgeHtml;
 
   // [GỘP MÀN] Việc cần xử lý + băng chốt sổ, vẽ nền để không giữ các chỉ số lại chờ.
-  renderStoreHealth('todayHealth');
+  if(!liveOnly)renderStoreHealth('todayHealth');
 
   // Bảng tin bill: gắn listener (tự bỏ qua nếu đã nghe đúng ngày) rồi vẽ lại
   // ngay bằng dữ liệu đang có — renderToday() xoá sạch nội dung các ô nên không
@@ -13977,23 +13996,25 @@ async function renderToday(){
       ${plMeterHTML(kpi.revenue, plBE ? plBE.hoaVon : null, dailyTarget)}
     </div>`;
   document.getElementById('todayGrid').innerHTML = theDoanhThu + plLaiCardHTML(plHomNay, plBE);
-  renderTodayShiftInfo();
+  context.pl=plHomNay;
+  if(!liveOnly)renderTodayShiftInfo();
   // Hai ô cuối (doanh thu/giờ công và vốn trong kho) cần thêm một lượt đọc dữ liệu
   // nên để chỗ trống có nhãn sẵn, điền sau — giữ đúng khung lưới, không nhảy chỗ.
+  const oldKho=document.getElementById('miniKho')?.innerHTML;
   document.getElementById('todayMini').innerHTML =
     miniCards.map(c=>miniCardHTML(c.label, c.val, c.sub, c.st, c.onclick)).join('')
     // display:contents — ô bọc chỉ để thay nội dung sau, không được tự thành một ô
     // của lưới (nếu không thẻ mini sẽ nằm lồng bên trong, lệch hẳn hàng).
     + `<div id="miniSPLH" style="display:contents">${miniCardHTML('DT / giờ công', '…', 'Đang đọc chấm công')}</div>`
-    + `<div id="miniKho" style="display:contents">${miniCardHTML('Vốn trong kho', '…', 'Đang cộng tồn kho')}</div>`;
+    + `<div id="miniKho" style="display:contents">${liveOnly&&oldKho?oldKho:miniCardHTML('Vốn trong kho', '…', 'Đang cộng tồn kho')}</div>`;
 
   // THU HỒI VỐN — nạp NỀN. Nó phải cộng mọi ngày từ mốc bắt đầu tới hôm nay nên
   // chậm hơn hẳn phần trên; giữ cả màn lại chờ nó là vô lý. Hiện khung chờ trước.
   const thvBox = document.getElementById('todayThv');
   if(thvBox && !thvBox.innerHTML) thvBox.innerHTML = '<div class="kgrid" style="margin-top:12px"><div class="kcard" style="grid-column:1 / -1"><div class="klabel">Thu hồi vốn đầu tư</div><div class="ksub" style="margin-top:6px">Đang cộng luỹ kế từ ngày mở quán…</div></div></div>';
-  computeCapitalRecovery()
-    .then(thv => { const el = document.getElementById('todayThv');
-      if(el && curScreen === 'today') el.innerHTML = thvCardHTML(thv, plHomNay); })
+  if(!liveOnly)computeCapitalRecovery()
+    .then(thv => {context.thv=thv; const el = document.getElementById('todayThv');
+      if(el && curScreen === 'today'&&context===_todayLiveCtx) el.innerHTML = thvCardHTML(thv, context.pl); })
     .catch(err => { console.warn('[Thu hồi vốn] không tính được (bỏ qua):', err);
       const el = document.getElementById('todayThv'); if(el) el.innerHTML = ''; });
 
@@ -14003,17 +14024,17 @@ async function renderToday(){
   // Chỉ vẽ lại MỘT lần, đúng lần đầu nạp được biên tham chiếu. Không có chốt chặn
   // này thì renderToday → nạp biên (lần sau lấy từ cache, xong ngay) → renderToday →
   // lặp vô tận.
+  if(liveOnly&&context.thv&&thvBox)thvBox.innerHTML=thvCardHTML(context.thv,plHomNay);
   const cầnNạpBiên = !_bepCache;
-  computeBreakEvenWindow()
-    .then(() => { if (cầnNạpBiên && curScreen === 'today' && !(kpi.revenue > 0)) renderToday(); })
+  if(!liveOnly)computeBreakEvenWindow()
+    .then(() => { if (context===_todayLiveCtx && cầnNạpBiên && curScreen === 'today' && !(kpi.revenue > 0)) renderToday(); })
     .catch(err => console.warn('[Hoà vốn] không lấy được biên tham chiếu (bỏ qua):', err));
 
   // BIỂU ĐỒ GIỜ — vẽ ngay với doanh thu, giờ công điền sau khi đọc xong chấm công.
   const dayRow = salesRes.perDay[0] || {};
-  renderTodayGioCong(dayRow.byHour, dayRow.revByHour, null, kpi.revenue);
-  computeStaffHoursByHour(dkey(today))
-    .then(gc => {
-      if(curScreen !== 'today') return;
+  renderTodayGioCong(dayRow.byHour, dayRow.revByHour, context.gc||null, kpi.revenue);
+  const paintHours=gc => {
+      if(curScreen !== 'today'||context!==_todayLiveCtx) return;
       renderTodayGioCong(dayRow.byHour, dayRow.revByHour, gc, kpi.revenue);
       const el = document.getElementById('miniSPLH');
       if(!el) return;
@@ -14025,33 +14046,34 @@ async function renderToday(){
             `${mtDTGioCong > 0 ? `MT ${fmtGon(mtDTGioCong)} · ` : ''}${fmtNum(gc.total,1)}h công${gc.dangChay?' · '+gc.dangChay+' ca đang chạy':''}`,
             mtDTGioCong > 0 ? statusHigherBetter(dtGio, mtDTGioCong, 0.1) : null)
         : miniCardHTML('DT / giờ công', '—', gc.boQuen ? `${gc.boQuen} ca quên check-out` : 'Chưa có chấm công hôm nay');
-    })
-    .catch(err => console.warn('[Giờ công] bỏ qua:', err));
+    };
+  if(liveOnly){if(context.gc)paintHours(context.gc)}
+  else computeStaffHoursByHour(dkey(today)).then(gc=>{if(context!==_todayLiveCtx)return;context.gc=gc;todayBillChanged()}).catch(err=>console.warn('[Giờ công] bỏ qua:',err));
 
   // HOẠT ĐỘNG KHO HÔM NAY — nạp nền. Không có lượt nào thì không hiện gì cả, thay vì
   // để lại một thẻ rỗng chiếm chỗ.
-  computeKhoFeedForDate(today)
+  if(!liveOnly)computeKhoFeedForDate(today)
     .then(list => {
       const el = document.getElementById('todayKhoFeed');
-      if(el && curScreen === 'today') el.innerHTML = khoFeedHTML(list);
+      if(el && curScreen === 'today'&&context===_todayLiveCtx) el.innerHTML = khoFeedHTML(list);
     })
     .catch(err => console.warn('[Kho] không đọc được hoạt động hôm nay (bỏ qua):', err));
 
   // HOẠT ĐỘNG BTP HÔM NAY — cùng lý do với feed kho nguyên liệu ở trên, nhưng cho lô bán
   // thành phẩm: bắt đầu nấu, hoàn thành, bán hết, huỷ — những mốc trước đây không có nơi
   // nào hiện ngoài phải mở từng lô trong Kho 2.0 ▸ Bán thành phẩm mới thấy.
-  computePrepFeedForDate(today)
+  if(!liveOnly)computePrepFeedForDate(today)
     .then(list => {
       const el = document.getElementById('todayPrepFeed');
-      if(el && curScreen === 'today') el.innerHTML = prepFeedHTML(list);
+      if(el && curScreen === 'today'&&context===_todayLiveCtx) el.innerHTML = prepFeedHTML(list);
     })
     .catch(err => console.warn('[BTP] không đọc được hoạt động hôm nay (bỏ qua):', err));
 
   // VỐN TRONG KHO — nạp nền: phải đọc 30 ngày ledger nên chậm hơn phần trên.
-  computeInventoryHealth()
+  if(!liveOnly)computeInventoryHealth()
     .then(kho => {
       const el = document.getElementById('miniKho');
-      if(el && curScreen === 'today') el.innerHTML = khoMiniHTML(kho);
+      if(el && curScreen === 'today'&&context===_todayLiveCtx) el.innerHTML = khoMiniHTML(kho);
     })
     .catch(err => {
       console.warn('[Kho] không tính được vốn tồn (bỏ qua):', err);
@@ -14065,7 +14087,10 @@ async function renderToday(){
     console.error('renderToday failed', err);
     showError('Không tải được dữ liệu Hôm nay: ' + (err.code||err.message||err));
   }finally{
-    setSync(false);
+    _todayBusy=false;
+    if(!liveOnly)setSync(false);
+    if(_todayReload&&curScreen==='today'){_todayReload=false;setTimeout(()=>renderToday(),0)}
+    else if(_todayPending&&curScreen==='today')todayBillChanged();
   }
 }
 
@@ -14483,6 +14508,27 @@ function attachBillFeed(){
   _bfPath = path;
   _bfMocGan = Date.now(); _bfList = []; _bfMoi.clear(); _bfOpen.clear(); _bfAutoOpen = null;
 
+  if(window.BillLive){
+    const id=GieoData.storeId(),day=dkey(new Date());let ready=false;
+    const stop=window.BillLive.listen({id,day,db,path},(type,key,o)=>{
+      if(type==='error'){console.warn('[Bill RT]',o);return}
+      if(type==='ready'){ready=true;todayBillChanged();return}
+      if(type==='remove'){_bfOpen.delete(key);_bfList=_bfList.filter(x=>x.key!==key)}
+      else{
+        _bfList=_bfList.filter(x=>x.key!==key);_bfList.push({key,o});
+        _bfList.sort((a,b)=>Date.parse(b.o.createdAt||0)-Date.parse(a.o.createdAt||0)||b.key.localeCompare(a.key));
+        _bfList.length=Math.min(_bfList.length,BF_MAX);
+        if(ready&&type==='add'&&bfLaBillMoi(o)){
+          if(_bfAutoOpen&&_bfAutoOpen!==key)_bfOpen.delete(_bfAutoOpen);
+          _bfOpen.add(key);_bfAutoOpen=key;_bfMoi.add(key);
+          setTimeout(()=>{_bfMoi.delete(key);renderBillFeed()},6000);
+        }
+      }
+      if(ready){const all=window.BillLive.snapshot(id,day)||{};_bfList=Object.entries(all).map(([key,o])=>({key,o})).sort((a,b)=>Date.parse(b.o.createdAt||0)-Date.parse(a.o.createdAt||0)||b.key.localeCompare(a.key)).slice(0,BF_MAX)}
+      renderBillFeed();if(ready)todayBillChanged();
+    });
+    _bfRef={off:()=>{stop();window.BillLive.drop(id,day)}};return;
+  }
   // limitToLast: chỉ kéo về mấy bill cuối, không nạp cả ngày. Node này có thể
   // vài trăm bill vào cuối ngày cao điểm.
   _bfRef = db.ref(path).limitToLast(BF_MAX);

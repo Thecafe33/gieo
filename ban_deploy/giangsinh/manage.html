@@ -434,6 +434,8 @@ html[data-theme="dark"] .bf-pay.is-cash{background:#1f3b2a;color:#86d9a6}html[da
 @media(min-width:761px) and (max-width:1100px){.bf-row{grid-template-columns:36px minmax(110px,150px) minmax(0,1fr) auto auto;gap:10px}}
 @media(max-width:760px){.bf-row{grid-template-columns:36px minmax(0,1fr) auto;grid-template-areas:"m w t" "m i p";row-gap:3px;column-gap:10px;padding:9px 12px 9px 9px}.bf-mark{grid-area:m;align-self:start}.bf-who{grid-area:w}.bf-items{grid-area:i;font-size:12.5px}.bf-pay{grid-area:p;justify-self:end;font-size:11px;padding:2px 8px}.bf-total{grid-area:t;font-size:16px}.bill-feed{margin-top:14px}}
 @media(prefers-reduced-motion:reduce){.bf-row.bf-in{animation:none}.bf-live i{animation:none}}
+.bf-row{width:100%}.bf-detail{padding:6px 18px 12px;margin:0 4px 8px;border-left:3px solid var(--sc);background:var(--panel);border-radius:0 0 16px 16px}
+.bf-more{margin:0;flex-shrink:0}.bill-dialog{width:min(1100px,96vw);max-width:1100px}.bill-dialog #dialogInner{padding-top:12px}#bfModal{max-height:70dvh;overflow:auto}.bill-dialog .bill-widget>.widget-head{position:sticky;top:0;z-index:2;background:var(--panel);padding-bottom:12px}.chart-total{border-top:1px solid var(--line);margin-top:7px;padding-top:7px}
 /* [BIỂU ĐỒ] chừa đệm dưới cho hàng mốc giờ (trước chữ dính sát mép thẻ) */
 .panel.dashboard-chart{padding-bottom:22px!important}
 .outlet-widget.is-closed .widget-revenue-value,.outlet-widget.is-closed .widget-share{opacity:.7}
@@ -601,7 +603,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script><script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script><script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script><script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
 <!-- [LÃI/LỖ GIEO TỰ TÍNH] lớp đổi tên bảng theo quán + bộ tính lãi / lỗ chép nguyên văn từ quanlygieo (tools/tao_lai_lo.js) -->
-<script src="data_access.v9.js"></script><script src="lai_lo.v1.js"></script>
+<script src="bill_live.v1.js"></script>
+<script src="data_access.v9.js"></script><script src="lai_lo.v2.js"></script>
 <script>
 const backend=(()=>{
 const firebaseConfig = {
@@ -771,7 +774,7 @@ function revCacheLoad(){ try{ const j = JSON.parse(localStorage.getItem(REV_CACH
 function revCacheSave(c){ try{ localStorage.setItem(REV_CACHE_KEY, JSON.stringify(c)); }catch(e){ console.warn('[doanh thu] không lưu được đệm', e); } }
 function revCacheClear(){ try{ localStorage.removeItem(REV_CACHE_KEY); localStorage.removeItem('mg_pl_cache_v1'); localStorage.removeItem('mg_cash_cache_v1'); }catch(e){} REV_MEM = {}; }
 
-let _tcMenu = null, _tcLegacy = null;
+let _tcMenu = null, _tcLegacy = null, _tcTodayArchive = null;
 async function tcMenu(){
   if(_tcMenu) return _tcMenu;
   const snap = await db.ref('menu').once('value');
@@ -790,10 +793,13 @@ async function tcLegacyOrders(){
 async function tcFetchDay(k){
   const d = parseDkey(k);
   const y = String(d.getFullYear()), mon = MONTH_KEYS[d.getMonth()], dd = pad(d.getDate());
-  const snap = await db.ref(`orders/${y}/${mon}/${dd}`).once('value');
+  const rows = typeof window!=='undefined' && window.BillLive && k===dkey(new Date()) ? await window.BillLive.read({id:'tc33',day:k,db,path:billPath('tc33',k)}) : await db.ref(`orders/${y}/${mon}/${dd}`).once('value').then(s=>s.val());
+  const snap={exists:()=>!!rows&&Object.keys(rows).length>0,val:()=>rows};
   if(snap.exists() && snap.val()) return Object.values(snap.val()).filter(Boolean);
   const doc = await fstore.collection('orders_archive').doc(y).collection(mon).doc(dd).get();
-  return (doc.exists && doc.data() && doc.data().orders) ? Object.values(doc.data().orders).filter(Boolean) : [];
+  const archived=(doc.exists && doc.data() && doc.data().orders) ? Object.values(doc.data().orders).filter(Boolean) : [];
+  if(k===dkey(new Date()))_tcTodayArchive={day:k,orders:archived};
+  return archived;
 }
 // XOFA — đường dẫn RT KHÔNG có năm (orders_xolifa/{mon}/{dd}); POS chuyển sang orders_xolifa_archive/{mon}_{dd}_{yyyy}
 // trong cửa sổ 3→7 ngày, ghi gộp (merge) → một ngày có thể nằm ở CẢ HAI chỗ. Ngày gần: đọc cả hai rồi gộp theo
@@ -803,7 +809,7 @@ async function xoFetchDay(k){
   const mon = MONTH_KEYS[d.getMonth()], dd = pad(d.getDate()), yyyy = d.getFullYear();
   const dateStr = `${dd}/${pad(d.getMonth()+1)}/${yyyy}`;
   const age = daysBetween(k, dkey(new Date())), recent = age <= REV_STABLE_AFTER;
-  const rt = async ()=>{ const s = await db.ref(`orders_xolifa/${mon}/${dd}`).once('value'); return s.val() || {}; };
+  const rt = async ()=>{ if(typeof window!=='undefined'&&window.BillLive&&k===dkey(new Date()))return window.BillLive.read({id:'xofa',day:k,db,path:billPath('xofa',k)});const s = await db.ref(`orders_xolifa/${mon}/${dd}`).once('value'); return s.val() || {}; };
   // [GIẢM-ĐỌC] PosX chỉ chuyển sang archive các ngày 3 → 7 ngày trước: ngày < 3 ngày chưa thể có archive → không đọc thử.
   if(age < 3) return Object.values(await rt()).filter(o => o && o.date === dateStr);
   const fs = async ()=>{ const doc = await fstore.collection('orders_xolifa_archive').doc(`${mon}_${dd}_${yyyy}`).get(); return doc.exists ? (doc.data().orders || {}) : null; };
@@ -852,7 +858,7 @@ async function ggFetchDay(id, k){
   const coArchive = daysBetween(k, dkey(new Date())) >= 3;
   const [a, b] = await Promise.all([
     coArchive ? fstore.collection(ggName('orders_gieogieo_archive', id)).doc(`${mon}_${dd}_${yyyy}`).get().then(doc=>doc.exists ? (doc.data().orders || {}) : {}) : Promise.resolve({}),
-    db.ref(`${ggName('orders_gieogieo', id)}/${mon}/${dd}`).once('value').then(s=>s.val() || {})
+    typeof window!=='undefined'&&window.BillLive&&k===dkey(new Date()) ? window.BillLive.read({id,day:k,db,path:billPath(id,k)}) : db.ref(`${ggName('orders_gieogieo', id)}/${mon}/${dd}`).once('value').then(s=>s.val() || {})
   ]);
   const byKey = Object.assign({}, a);
   Object.entries(b).forEach(([key, o])=>{ if(o && (!o.date || String(o.date.split('/')[2]) === String(yyyy))) byKey[key] = o; });
@@ -1551,7 +1557,7 @@ async function readPlDays(records, from, to){
 }
 // ==========================================================================
 // [LÃI/LỖ GIEO TỰ TÍNH — 16/10] Chủ dự án: manage không phải chờ mở quanlygieo mới có lãi / lỗ. Ngày nào CHƯA CÓ
-// bản tóm tắt (pl_days) hoặc bản đã CŨ thì manage tự tính bằng lai_lo.v1.js (chép nguyên văn bộ tính của quanlygieo
+// bản tóm tắt (pl_days) hoặc bản đã CŨ thì manage tự tính bằng lai_lo.v2.js (chép nguyên văn bộ tính của quanlygieo
 // — cùng số) rồi ghi lại pl_days → quanlygieo / máy khác dùng lại, không ai tính lại ngày đã có số.
 //   · "Cũ": ngày đã qua mà bản ghi lúc ngày đó CHƯA HẾT (tính giữa ngày, sau đó còn bán); hôm nay: ghi quá 10 phút.
 //   · Chỉ tính trong PL_COMPUTE_BACK ngày gần nhất (ngày xa hơn: đã có sổ / cache ngày của quanlygieo).
@@ -1884,6 +1890,7 @@ function billYearOk(o, ymd){ return !(o && o.date) || String(o.date).split('/')[
 function billWinSlide(win, key, n){ return win.size >= n && [...win].every(k => k >= key); }
 async function watchBills(id, ymd, n, on){
   await ensureAuth(); validDate(ymd);
+  if(typeof window!=='undefined'&&window.BillLive){const stop=window.BillLive.listen({id,day:ymd,db,path:billPath(id,ymd)},on);return()=>{stop();window.BillLive.drop(id,ymd)}}
   const ref = db.ref(billPath(id, ymd)).limitToLast(n), win = new Set();
   const add = s => { win.add(s.key); const o = s.val(); if(o && typeof o === 'object' && billYearOk(o, ymd)) on('add', s.key, o); };
   const chg = s => { const o = s.val(); if(o && typeof o === 'object' && billYearOk(o, ymd)) on('change', s.key, o); };
@@ -1895,7 +1902,36 @@ async function watchBills(id, ymd, n, on){
   ref.once('value').then(() => on('ready', null, null), () => {});
   return () => { try{ ref.off('child_added', add); ref.off('child_changed', chg); ref.off('child_removed', rem); }catch(e){} };
 }
-return{readMonthClose,closeMonthTcx,reopenMonthTcx,writeMonthInput,unwatchClosings,CLOSE_W,tcxMonthSummary,closingDoc,CLOSE_KEYS,watchBills,billPath,writeEmployeeStatus,plFillMissing,plNeedDays,readOffDays,writeOffDays,isStoreOff,offStoresOf,readCash,writeCashReceipt,writeCashStart,ggCashExpected,tcxCashExpected,readAssets,writeAsset,deleteAsset,assetMonthly,assetDepDay,assetRecovered,assetEndDate,assetLive,expMonthSum,sumsToAlloc,readCosts,writeExpense,deleteExpenseDoc,reviewExpense,setExpenseActual,markExpensePaid,expPaidOf,writeExpenseCats,expAmountIn,expCostType,expCounts,expenseCats,expenseCatsAll,DEFAULT_EXPENSE_CATS,readBreakeven,writeBreakeven,deleteBreakeven,beMonthValue,tcxBreakEven,ggBreakEven,plBreakEven,readRevenue,readSettings,readEmployees,readSchedules,readAttendance,readPayroll,writeEmployee,writeEmployeeActive,writeSchedule,deleteSchedule,writeScheduleBatch,writeShift,deleteShift,writeLateGrace,writeTargets,deleteTargets,invalidateRevenue,invalidateEmployees,targetMonthValue,targetForRange,gieoTargetForRange,gieoTargetsOn,empPayTermsOn,computeWageForDayHours,laborByEmployee,shiftWorkedHours,isShiftInProgress,workStoresOf,tcSummarize,xoSummarize,ggSummarize,tcEmptySum,xoEmptySum,ggEmptySum,sumMerge};
+async function billLiveSummary(id,day){
+  const rows=window.BillLive?.snapshot(id,day);if(!rows)return null;
+  let orders=Object.values(rows);
+  if(id==='tc33'&&!orders.length&&_tcTodayArchive?.day===day)orders=_tcTodayArchive.orders;
+  if(id==='tc33')return tcSummarize(orders.concat((_tcLegacy||[]).filter(o=>{const t=new Date(o.createdAt);return !isNaN(+t)&&dkey(t)===day})),_tcMenu||[]);
+  return id==='xofa'?xoSummarize(orders):ggSummarize(orders);
+}
+const BILL_PL_SIG=new Map();
+async function billLivePL(id,day){
+  if(!window.LaiLo||PL_FILL_BUSY.has(id))return null;
+  const orders=window.BillLive?.snapshot(id,day);if(!orders)return null;
+  const revision=window.BillLive.version(id,day);PL_FILL_BUSY.add(id);
+  try{
+    let result=await window.LaiLo.realtime({storeId:id,day,orders:Object.values(orders)});
+    if(!result){await window.LaiLo.tinh({fstore,db,storeId:id,from:day,to:day});result=await window.LaiLo.realtime({storeId:id,day,orders:Object.values(window.BillLive.snapshot(id,day))})}
+    if(window.BillLive.version(id,day)!==revision)return null;
+    if(result){
+      const sig=JSON.stringify(result.tomTat),key=id+'|'+day;
+      if(BILL_PL_SIG.get(key)!==sig){
+        const at=new Date().toISOString(),x={...result.tomTat,storeId:id,updatedAt:at,by:'manage'},batch=fstore.batch();
+        batch.set(fstore.collection(ggName('pl_days_gieogieo',id)).doc(day),x);
+        const book={...x};delete book.storeId;
+        batch.set(fstore.collection(ggName('pl_book_gieogieo',id)).doc('days'),{d:{[day]:book},at,storeId:id},{merge:true});
+        await batch.commit();BILL_PL_SIG.set(key,sig);
+      }
+    }
+    return result;
+  }finally{PL_FILL_BUSY.delete(id)}
+}
+return{billLiveSummary,billLivePL,readMonthClose,closeMonthTcx,reopenMonthTcx,writeMonthInput,unwatchClosings,CLOSE_W,tcxMonthSummary,closingDoc,CLOSE_KEYS,watchBills,billPath,writeEmployeeStatus,plFillMissing,plNeedDays,readOffDays,writeOffDays,isStoreOff,offStoresOf,readCash,writeCashReceipt,writeCashStart,ggCashExpected,tcxCashExpected,readAssets,writeAsset,deleteAsset,assetMonthly,assetDepDay,assetRecovered,assetEndDate,assetLive,expMonthSum,sumsToAlloc,readCosts,writeExpense,deleteExpenseDoc,reviewExpense,setExpenseActual,markExpensePaid,expPaidOf,writeExpenseCats,expAmountIn,expCostType,expCounts,expenseCats,expenseCatsAll,DEFAULT_EXPENSE_CATS,readBreakeven,writeBreakeven,deleteBreakeven,beMonthValue,tcxBreakEven,ggBreakEven,plBreakEven,readRevenue,readSettings,readEmployees,readSchedules,readAttendance,readPayroll,writeEmployee,writeEmployeeActive,writeSchedule,deleteSchedule,writeScheduleBatch,writeShift,deleteShift,writeLateGrace,writeTargets,deleteTargets,invalidateRevenue,invalidateEmployees,targetMonthValue,targetForRange,gieoTargetForRange,gieoTargetsOn,empPayTermsOn,computeWageForDayHours,laborByEmployee,shiftWorkedHours,isShiftInProgress,workStoresOf,tcSummarize,xoSummarize,ggSummarize,tcEmptySum,xoEmptySum,ggEmptySum,sumMerge};
 
 })();
 
@@ -2055,11 +2091,11 @@ function dashboard(){
 // phiên (mỗi bill mới chỉ vài trăm byte, quay lại Tổng quan không phải đọc lại); qua ngày thì gắn sang ngày mới.
 // Chỉ hiện khi kỳ đang xem có hôm nay. Chỉ xem — sửa / xoá bill ở POS.
 // ==========================================================================
-const BF={per:15,keep:80,day:null,watch:{},list:[],fresh:new Set(),anim:new Set(),more:false,err:null,timer:null};
+const BF={per:15,keep:80,day:null,watch:{},list:[],fresh:new Set(),anim:new Set(),more:false,open:new Set(),err:null,timer:null};
 function bfShown(){const[from,to]=rangeDates(),today=currentDate();return from<=today&&today<=to}
 function bfSync(){
  const today=currentDate();
- if(BF.day!==today){Object.values(BF.watch).forEach(w=>w.stop&&w.stop());BF.watch={};BF.list=[];BF.fresh.clear();BF.anim.clear();BF.more=false;BF.err=null;BF.day=today}
+ if(BF.day!==today){BF.open.clear();Object.values(BF.watch).forEach(w=>w.stop&&w.stop());BF.watch={};BF.list=[];BF.fresh.clear();BF.anim.clear();BF.more=false;BF.err=null;BF.day=today}
  stores.filter(st=>st.active!==false).forEach(st=>{
   if(BF.watch[st.id])return;const w=BF.watch[st.id]={stop:null,at:Date.now()};
   backend.watchBills(st.id,today,BF.per,(type,k,o)=>bfOn(st.id,w,type,k,o)).then(stop=>{if(BF.watch[st.id]===w)w.stop=stop;else stop()}).catch(e=>{if(BF.watch[st.id]===w)delete BF.watch[st.id];BF.err=friendlyError(e);bfRender()});
@@ -2073,16 +2109,52 @@ function bfTime(o){const c=o&&o.createdAt,t=typeof c==='number'?c:Date.parse(c);
 function bfOn(id,w,type,k,o){
  if(BF.watch[id]!==w)return;const key=id+'_'+k;
  if(type==='error'){delete BF.watch[id];w.stop&&w.stop();BF.err=friendlyError(o);bfRender();return}
- if(type==='ready'){w.ready=true;return}
- if(type==='remove')BF.list=BF.list.filter(b=>b.key!==key);
+ if(type==='ready'){w.ready=true;bfStatsQueue(id);return}
+ if(w.ready)bfStatsQueue(id);
+ if(type==='remove'){BF.open.delete(key);BF.list=BF.list.filter(b=>b.key!==key)}
  else{const b=BF.list.find(x=>x.key===key);
   if(b){b.o=o;b.t=bfTime(o)}
   else if(type==='add'){BF.list.push({key,store:id,o,t:bfTime(o)});if(w.ready&&bfIsNew(o,w.at)){BF.fresh.add(key);BF.anim.add(key);setTimeout(()=>{BF.fresh.delete(key);bfRender()},8000)}}
   BF.list.sort((a,b)=>b.t-a.t||(a.key<b.key?1:-1));if(BF.list.length>BF.keep)BF.list.length=BF.keep}
  clearTimeout(BF.timer);BF.timer=setTimeout(bfRender,40);   // lúc gắn Firebase trả liền mấy chục bill → vẽ 1 lần
 }
-function bfRender(){const el=$('#billFeed');if(el&&state.view==='rev'){el.innerHTML=bfInner();hydrateIcons();bfFit()}}
-function bfMore(){BF.more=!BF.more;bfRender()}
+function bfRender(){const el=$('#billFeed');if(el&&state.view==='rev'){el.innerHTML=bfInner();bfFit()}const modal=$('#bfModal');if(modal){const top=modal.scrollTop;modal.innerHTML=bfInner(true);modal.scrollTop=top}hydrateIcons()}
+function bfMore(){openDialog('Bill chung',`<div id="bfModal">${bfInner(true)}</div>`,false,'Bill hôm nay · tự cập nhật');$('#dialog').classList.add('bill-dialog')}
+
+// Coalesce bursts, never reload the dashboard's other stores on an RT event.
+const BF_STATS=new Set();let bfStatsTimer=null;
+function bfStatsQueue(id){if(!window.BillLive)return;BF_STATS.add(id);clearTimeout(bfStatsTimer);bfStatsTimer=setTimeout(bfStatsFlush,100)}
+async function bfStatsFlush(){
+ const ids=[...BF_STATS];BF_STATS.clear();const day=BF.day,res=live.rev;
+ if(live.loadingKey){ids.forEach(bfStatsQueue);return}
+ if(!res||res.from>day||res.to<day)return;
+ for(const id of ids){
+  const key=id.startsWith('gg')?'gg_'+id:id,summary=await backend.billLiveSummary(id,day);
+  if(res!==live.rev||day!==BF.day)return;
+  if(summary){(res.data[key]||(res.data[key]={}))[day]=summary;bfStatsPaint(id)}
+  if(id.startsWith('gg'))try{
+   const revision=window.BillLive.version(id,day),result=await backend.billLivePL(id,day);
+   if(res!==live.rev||day!==BF.day)return;
+   if(!result||revision!==window.BillLive.version(id,day)){bfStatsQueue(id);continue}
+   if(res.pl)(res.pl[id]||(res.pl[id]={}))[day]=result.tomTat;
+   bfStatsPaint(id);
+  }catch(e){console.warn('[bill realtime] lãi/lỗ '+id,e)}
+ }
+}
+function bfStatsPaint(id){
+ if(state.view!=='rev'||live.loadingKey)return;
+ // Render from memory, replace affected point + common totals/chart only; other point widgets retain their DOM.
+ const t=document.createElement('template');t.innerHTML=dashboard();
+ for(const selector of ['.overview-card',`.outlet-widget[data-store="${id}"]`,'.stores-section-head','.dashboard-chart','.daily-revenue']){
+  const old=$('#view '+selector),next=t.content.querySelector(selector);if(old&&next)old.replaceWith(next);
+ }
+ for(const old of $$('#view .outlet-widget[data-store]')){
+  if(old.dataset.store===id)continue;
+  const next=t.content.querySelector(`.outlet-widget[data-store="${old.dataset.store}"] .widget-share`),share=old.querySelector('.widget-share');
+  if(next&&share)share.replaceWith(next);
+ }
+ hydrateIcons();live.updatedAt=Date.now();
+}
 function bfStore(id){return stores.find(st=>st.id===id)||{id,name:id,code:String(id).toUpperCase(),brand:id,c:'var(--green)'}}
 function bfTag(st){return st.brand==='gieo'?'Gieo '+st.code:st.name}
 function bfMethod(o){const m=String(o.method||'').toUpperCase();return m.includes('TIỀN MẶT')?['cash','Tiền mặt']:m.includes('CHUYỂN KHOẢN')?['bank','Chuyển khoản']:m.includes('TÍNH RIÊNG')?['split','Tính riêng']:['other',String(o.method||'—')]}
@@ -2096,12 +2168,12 @@ function bfExtra(o){const x=[],bed=String(o.bedId||'');if(bed&&bed!=='WAITING')x
 function bfRow(b){
  const st=bfStore(b.store),o=b.o,[mk,ml]=bfMethod(o),isNew=BF.fresh.has(b.key),gieo=st.brand==='gieo';
  const mark=gieo?String(st.code||'').slice(2):(st.mono||''),name=gieo?'Gieo '+st.code:st.name,extra=bfExtra(o).map(t=>t.name||t),items=bfSummary(o)||'Không có chi tiết món';
- return `<button class="bf-row${isNew?' is-new':''}${BF.anim.has(b.key)?' bf-in':''}" style="--sc:${st.c}" data-k="${esc(b.key)}" onclick="bfOpen(this.dataset.k)" aria-label="${esc(name+' · '+bfClock(o)+' · '+money(o.total)+' đồng')}"><span class="bf-mark" aria-hidden="true">${esc(mark)}</span><span class="bf-who"><b>${esc(name)}${isNew?'<i class="bf-newtag">Mới</i>':''}</b><small class="num">${esc(bfClock(o))}${extra.length?' · '+esc(extra.join(' · ')):''}</small></span><span class="bf-items" title="${esc(items)}">${esc(items)}</span><span class="bf-pay is-${mk}">${esc(ml)}</span><b class="bf-total num">${money(o.total)}<span>đ</span></b></button>`;
+ return `<article class="bf-entry" style="--sc:${st.c}"><button aria-expanded="${BF.open.has(b.key)}" class="bf-row${isNew?' is-new':''}${BF.anim.has(b.key)?' bf-in':''}" style="--sc:${st.c}" data-k="${esc(b.key)}" onclick="bfOpen(this.dataset.k)" aria-label="${esc(name+' · '+bfClock(o)+' · '+money(o.total)+' đồng')}"><span class="bf-mark" aria-hidden="true">${esc(mark)}</span><span class="bf-who"><b>${esc(name)}${isNew?'<i class="bf-newtag">Mới</i>':''}</b><small class="num">${esc(bfClock(o))}${extra.length?' · '+esc(extra.join(' · ')):''}</small></span><span class="bf-items" title="${esc(items)}">${esc(items)}</span><span class="bf-pay is-${mk}">${esc(ml)}</span><b class="bf-total num">${money(o.total)}<span>đ</span></b></button>${BF.open.has(b.key)?`<div class="bf-detail">${bfDetails(b)}</div>`:''}</article>`;
 }
-function bfInner(){
- const ids=new Set(selectedStores().map(st=>st.id)),all=BF.list.filter(b=>ids.has(b.store)),list=all.slice(0,BF.more?BF.keep:24);
- const head=`<div class="widget-head"><span class="widget-brandmark" aria-hidden="true">${icon('receipt')}</span><div class="widget-heading"><h3>Bill chung</h3><p>${all.length?all.length+' bill gần nhất'+(ids.size>1?' · '+ids.size+' điểm':''):'Bill bán hàng hôm nay'}</p></div><span class="bf-live" title="Bill mới tự hiện, không cần tải lại"><i></i>Trực tiếp</span></div>`;
- const body=list.length?`<div class="bf-list">${list.map(bfRow).join('')}</div><button class="bf-more" onclick="bfMore()" hidden></button>`:`<p class="bf-empty">${BF.err?'Không nghe được bill mới: '+esc(BF.err):'Chưa có bill nào hôm nay — bill mới sẽ tự hiện ở đây.'}</p>`;
+function bfInner(modal=false){
+ const ids=new Set(selectedStores().map(st=>st.id)),all=BF.list.filter(b=>ids.has(b.store)),list=all.slice(0,modal?BF.keep:24);
+ const head=`<div class="widget-head"><span class="widget-brandmark" aria-hidden="true">${icon('receipt')}</span><div class="widget-heading"><h3>Bill chung</h3><p>${all.length?all.length+' bill gần nhất'+(ids.size>1?' · '+ids.size+' điểm':''):'Bill bán hàng hôm nay'}</p></div>${modal?'':'<button class="bf-more" onclick="bfMore()" aria-haspopup="dialog">Xem thêm</button>'}<span class="bf-live" title="Bill mới tự hiện, không cần tải lại"><i></i>Trực tiếp</span></div>`;
+ const body=list.length?`<div class="bf-list">${list.map(bfRow).join('')}</div>`:`<p class="bf-empty">${BF.err?'Không nghe được bill mới: '+esc(BF.err):'Chưa có bill nào hôm nay — bill mới sẽ tự hiện ở đây.'}</p>`;
  BF.anim.clear();
  return `<article class="outlet-widget bill-widget" style="--c:var(--green)">${head}${body}</article>`;
 }
@@ -2109,13 +2181,14 @@ function bfInner(){
 function bfFit(){
  const g=$('#billFeed .bf-list'),btn=$('#billFeed .bf-more');if(!g)return;
  const rows=[...g.children],lim=matchMedia('(max-width:760px)').matches?4:6,total=BF.list.filter(b=>selectedStores().some(st=>st.id===b.store)).length;
- rows.forEach((r,i)=>{r.hidden=!BF.more&&i>=lim});
- if(btn){btn.hidden=total<=lim;btn.textContent=BF.more?'Thu gọn':'Xem thêm '+(total-lim)+' bill';btn.setAttribute('aria-expanded',String(BF.more))}
+ rows.forEach((r,i)=>{r.hidden=i>=lim});
+ if(btn){btn.hidden=total<=lim;btn.textContent='Xem thêm '+(total-lim)+' bill'}
 }
 window.addEventListener('resize',()=>{clearTimeout(BF.rz);BF.rz=setTimeout(bfFit,120)});
 function billFeed(){return bfShown()?`<section class="bill-feed" id="billFeed" aria-live="polite" aria-label="Bill chung các điểm bán hôm nay">${bfInner()}</section>`:''}
-function bfOpen(key){
- const b=BF.list.find(x=>x.key===key);if(!b)return;const st=bfStore(b.store),o=b.o,[,ml]=bfMethod(o);
+function bfOpen(key){if(BF.open.has(key))BF.open.delete(key);else BF.open.add(key);bfRender()}
+function bfDetails(b){
+ const o=b.o,[,ml]=bfMethod(o);
  const lines=bfItems(o).map(c=>{const q=Number(c.qty)||1,tp=(c.toppings||[]).filter(Boolean),tpSum=tp.reduce((n,t)=>n+(Number(t.price)||0)*Math.max(1,Number(t.qty)||1),0),line=((Number(c.price)||0)+tpSum)*q;
   return `<div class="detail-row bf-line"><span><b>${q}×</b> ${esc(c.name||'')}${c.size?` <small>${esc(c.size)}</small>`:''}${c.isFree?' <small>· tặng</small>':''}${tp.length?`<small class="bf-tp">+ ${esc(tp.map(t=>t.name||'').join(', '))}</small>`:''}</span><b class="num">${c.isFree||!line?'0':money(line)}</b></div>`}).join('');
  const rows=[['Tổng bill',money(o.total)+' đ'],['Thanh toán',ml]];
@@ -2124,7 +2197,7 @@ function bfOpen(key){
  const bed=String(o.bedId||'');if(bed&&bed!=='WAITING')rows.push(['Bed',bed]);
  if(o.isShip)rows.push(['Giao','Ship']);if(o.isAppSale)rows.push(['Kênh','App']);
  if(o.billCode)rows.push(['Mã bill',String(o.billCode)]);if(o.voucherUsed)rows.push(['Khuyến mãi',String(o.voucherUsed)]);
- openDialog(esc(bfTag(st))+' · '+esc(bfClock(o)),`<div class="detail-section">${lines||`<p class="inline-note">${esc(o.items||'Không có chi tiết món')}</p>`}</div><div class="detail-section">${rows.map(([k,v])=>`<div class="detail-row"><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('')}</div>`,false,'Chỉ xem — sửa / xoá bill ở POS');
+ return `<div class="detail-section">${lines||`<p class="inline-note">${esc(o.items||'Không có chi tiết món')}</p>`}</div><div class="detail-section">${rows.map(([k,v])=>`<div class="detail-row"><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('')}</div>`;
 }
 // Qua nửa đêm khi vẫn để mở Tổng quan → gắn sang ngày mới (chỉ so ngày, không đọc gì).
 setInterval(()=>{if(BF.day&&BF.day!==currentDate()&&state.view==='rev'){bfSync();bfRender()}},60000);
@@ -2132,7 +2205,7 @@ setInterval(()=>{if(BF.day&&BF.day!==currentDate()&&state.view==='rev'){bfSync()
 function storeSo(s){const[from,to]=rangeDates();if(from!==to)return'';const tc=s.id==='tc33',cur=tc?s.bill:s.rev,prev=tc?s.prevBill:s.prev;if(prev==null)return'';const v=cur-prev,pct=prev>0?Math.round(v/prev*100):null,lab=from===currentDate()?'so hôm qua':from===addDays(currentDate(),-1)?'so hôm kia':'so với ngày trước';return `<span class="widget-so ${v>=0?'up':'down'}" title="${tc?'Cả bill (gồm Ăn vặt) như thẻ So hôm qua của POS':''}"><b>${v>=0?'▲':'▼'} ${money(Math.abs(v))} ₫${pct!=null?' ('+(v>=0?'+':'−')+Math.abs(pct)+'%)':''}</b>${lab}</span>`}
 function storeCard(s,total,share){
  const p=s.target?Math.floor(s.rev/s.target*100):0,isGieo=s.brand==='gieo',heading=isGieo?'Gieo Gieo':s.name,subtitle=isGieo?s.code+' · '+s.location:s.id==='tc33'?'Đồ uống + Khác':'Không gồm Food',mark=isGieo?s.code.slice(2):s.mono;
- return `<article class="outlet-widget${storeClosedAll(s)?' is-closed':''}" style="--c:${storeClosedAll(s)?'#8d938f':s.c};--widget-number-size:${Math.min(13.8,74/(money(s.rev).length*.68+.9)).toFixed(2)}cqw" aria-label="${esc(s.name)}"><div class="widget-head"><span class="widget-brandmark" aria-hidden="true">${esc(mark)}</span><div class="widget-heading"><h3>${esc(heading)}</h3><p title="${esc(s.name)}">${esc(subtitle)}</p></div><button class="widget-open" onclick="storeDetails('${s.id}')" aria-label="Chi tiết ${esc(s.name)}">${icon('arrow')}</button></div><div class="widget-main"><div class="widget-rev-row"><button class="widget-revenue" onclick="storeDetails('${s.id}')" aria-label="Xem doanh thu ${esc(s.name)}"><span class="widget-revenue-label">Doanh thu</span><strong class="widget-revenue-value num">${money(s.rev)}<span>đ</span></strong></button><span class="widget-share" title="Chiếm ${share}% doanh thu đang xem">chiếm <b>${share}%</b></span></div>${storeSo(s)}</div><div class="widget-goal"><div class="widget-goal-row"><span>${s.offDays&&s.offDays===s.nDays?`<b class="widget-off">${icon('calendar')}Đóng cửa${s.nDays>1?' cả kỳ':rangeDates()[0]===TODAY?' hôm nay':''}</b>`:s.target?'Mục tiêu '+shortMoney(s.target)+(s.offDays?' · đóng cửa '+s.offDays+' ngày':''):'Chưa đặt mục tiêu'}</span>${s.offDays&&s.offDays===s.nDays?'':`<strong class="num ${s.target&&s.rev>=s.target?'goal-reached':''}">${s.target&&s.rev>=s.target?icon('check'):''}${s.target?p+'%':'—'}</strong>`}</div>${s.target?goalProgress(s.rev/s.target,'Mục tiêu '+s.name,true,{be:beHas(s.be)&&s.be.hoaVon>0?s.be.hoaVon/s.target:null}):beHas(s.be)&&s.be.hoaVon>0?goalProgress(s.rev/s.be.hoaVon,'Hoà vốn '+s.name,true,{mark:'Hoà vốn'}):''}</div>${beWidget(s)}<div class="widget-metrics"><div><span>Hoá đơn</span><b class="num">${money(s.count)}</b></div><div><span>Tiền mặt</span><b class="num">${money(s.cash)}</b></div><div><span>Chuyển khoản</span><b class="num">${money(s.bank)}</b></div></div></article>`;
+ return `<article data-store="${s.id}" class="outlet-widget${storeClosedAll(s)?' is-closed':''}" style="--c:${storeClosedAll(s)?'#8d938f':s.c};--widget-number-size:${Math.min(13.8,74/(money(s.rev).length*.68+.9)).toFixed(2)}cqw" aria-label="${esc(s.name)}"><div class="widget-head"><span class="widget-brandmark" aria-hidden="true">${esc(mark)}</span><div class="widget-heading"><h3>${esc(heading)}</h3><p title="${esc(s.name)}">${esc(subtitle)}</p></div><button class="widget-open" onclick="storeDetails('${s.id}')" aria-label="Chi tiết ${esc(s.name)}">${icon('arrow')}</button></div><div class="widget-main"><div class="widget-rev-row"><button class="widget-revenue" onclick="storeDetails('${s.id}')" aria-label="Xem doanh thu ${esc(s.name)}"><span class="widget-revenue-label">Doanh thu</span><strong class="widget-revenue-value num">${money(s.rev)}<span>đ</span></strong></button><span class="widget-share" title="Chiếm ${share}% doanh thu đang xem">chiếm <b>${share}%</b></span></div>${storeSo(s)}</div><div class="widget-goal"><div class="widget-goal-row"><span>${s.offDays&&s.offDays===s.nDays?`<b class="widget-off">${icon('calendar')}Đóng cửa${s.nDays>1?' cả kỳ':rangeDates()[0]===TODAY?' hôm nay':''}</b>`:s.target?'Mục tiêu '+shortMoney(s.target)+(s.offDays?' · đóng cửa '+s.offDays+' ngày':''):'Chưa đặt mục tiêu'}</span>${s.offDays&&s.offDays===s.nDays?'':`<strong class="num ${s.target&&s.rev>=s.target?'goal-reached':''}">${s.target&&s.rev>=s.target?icon('check'):''}${s.target?p+'%':'—'}</strong>`}</div>${s.target?goalProgress(s.rev/s.target,'Mục tiêu '+s.name,true,{be:beHas(s.be)&&s.be.hoaVon>0?s.be.hoaVon/s.target:null}):beHas(s.be)&&s.be.hoaVon>0?goalProgress(s.rev/s.be.hoaVon,'Hoà vốn '+s.name,true,{mark:'Hoà vốn'}):''}</div>${beWidget(s)}<div class="widget-metrics"><div><span>Hoá đơn</span><b class="num">${money(s.count)}</b></div><div><span>Tiền mặt</span><b class="num">${money(s.cash)}</b></div><div><span>Chuyển khoản</span><b class="num">${money(s.bank)}</b></div></div></article>`;
 }
 let currentBuckets=[];
 function chartSeries(points){
@@ -2148,7 +2221,7 @@ function chartSvg(points,dimensions){
  const visible=list.map((st,j)=>({st,j})).filter(x=>!state.hidden.has(x.st.id));
  const maxRaw=Math.max(1,...(stacked?labels.map((_,i)=>visible.reduce((n,x)=>n+Math.max(0,values[x.j][i]),0)):visible.flatMap(x=>values[x.j]))),pow=Math.pow(10,Math.floor(Math.log10(maxRaw))),max=Math.ceil(maxRaw/pow)*pow;
  const step=cw/Math.max(1,labels.length),bw=stacked?Math.max(4,Math.min(30,step*.6)):Math.max(.7,Math.min(16,step*.76/Math.max(1,visible.length)-2)),gap=Math.min(3,step*.035);
- currentBuckets=labels.map((label,i)=>({label:tips?tips[i]:label,rows:visible.map(({st,j})=>({name:st.name,c:st.c,value:values[j][i]}))}));
+ currentBuckets=labels.map((label,i)=>{const rows=visible.flatMap(({st,j})=>stacked?st.members.map(p=>({name:p.name,c:p.c,value:hourRev(live.rev?.data[p.brand==='gieo'?'gg_'+p.id:p.id]?.[from],p,Number.parseInt(label,10))})): [{name:st.name,c:st.c,value:values[j][i]}]);return{label:tips?tips[i]:label,rows,total:rows.reduce((n,r)=>n+r.value,0)}});
  let html=`<svg class="chart-svg column-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Biểu đồ cột doanh thu ${esc(list.map(st=>st.name).join(', '))}. Mỗi ${stacked?'cột là một giờ, chồng theo quán':'nhóm cột là một kỳ'}." preserveAspectRatio="none">`;
  [0,.5,1].forEach(f=>{const y=T+ch*(1-f);html+=`<path d="M${L} ${y}H${W-R}" stroke="var(--line)" stroke-dasharray="${f?'3 4':'0'}"/><text x="${L-8}" y="${y+4}" text-anchor="end">${f?shortMoney(max*f):'0'}</text>`});
  const every=Math.ceil(labels.length/(mob?(stacked?8:5):(stacked?24:12)));
@@ -2160,7 +2233,7 @@ function chartSvg(points,dimensions){
   html+=`<rect x="${L+step*i}" y="${T}" width="${step}" height="${ch}" fill="transparent" tabindex="0" role="button" aria-label="${esc(currentBuckets[i].label)}: ${currentBuckets[i].rows.map(r=>r.name+' '+money(r.value)+' đồng').join(', ')}" onpointerenter="chartTip(${i},this)" onpointerleave="hideChartTip()" onclick="chartTip(${i},this)" onfocus="chartTip(${i},this)" onblur="hideChartTip()" onkeydown="if(event.key==='Enter')chartTip(${i},this)"/>`;
  });return html+'</svg>';
 }
-function chartTip(i,el){const tip=$('#chartTip'),wrap=$('#chartWrap'),b=currentBuckets[i];if(!tip||!b)return;tip.innerHTML=`<b>${esc(b.label)}</b>`+b.rows.map(r=>`<div class="row"><span><i class="dot" style="background:${r.c}"></i> ${esc(r.name)}</span><b>${money(r.value)} ₫</b></div>`).join('');tip.style.display='block';const r=el.getBoundingClientRect(),w=wrap.getBoundingClientRect();tip.style.left=Math.max(tip.offsetWidth/2,Math.min(w.width-tip.offsetWidth/2,r.x+r.width/2-w.x))+'px';tip.style.top='27px'}
+function chartTip(i,el){const tip=$('#chartTip'),wrap=$('#chartWrap'),b=currentBuckets[i];if(!tip||!b)return;tip.innerHTML=`<b>${esc(b.label)}</b>`+b.rows.map(r=>`<div class="row"><span><i class="dot" style="background:${r.c}"></i> ${esc(r.name)}</span><b>${money(r.value)} ₫</b></div>`).join('');tip.innerHTML+=`<div class="row chart-total"><span>Tổng doanh thu</span><b>${money(b.total)} ₫</b></div>`;tip.style.display='block';const r=el.getBoundingClientRect(),w=wrap.getBoundingClientRect();tip.style.left=Math.max(tip.offsetWidth/2,Math.min(w.width-tip.offsetWidth/2,r.x+r.width/2-w.x))+'px';tip.style.top='27px'}
 function hideChartTip(){const t=$('#chartTip');if(t)t.style.display='none'}
 function toggleSeries(id){if(state.hidden.has(id))state.hidden.delete(id);else state.hidden.add(id);render()}
 function staffView(){const all=filteredStaff(),staff=all.filter(e=>e.status!=='resigned'),nghi=all.filter(e=>e.status==='resigned'),nLam=staff.filter(e=>e.status==='active').length,nNgung=staff.length-nLam;return '<div class="staff-page">'+pageHead('Nhân viên','Hồ sơ, đơn giá và cửa hàng làm việc.',`<button class="btn" onclick="editEmployee()">${icon('plus')}Thêm nhân viên</button>`)+`<div class="content-toolbar"><div class="row"><span class="staff-count" id="staffCount">${staff.length} nhân viên</span><span class="pill up">${nLam} đang làm</span>${nNgung?`<span class="pill">${nNgung} tạm ngưng</span>`:''}</div><label class="search">${icon('search')}<input type="search" placeholder="Tìm tên nhân viên…" value="${esc(state.query)}" oninput="searchStaff(this.value)" aria-label="Tìm nhân viên"></label></div><div class="panel table-panel desktop-records"><div class="table-scroll"><table class="table staff-table"><thead><tr><th>Nhân viên</th><th>Cửa hàng</th><th>Hình thức · đơn giá</th><th>Trạng thái</th><th class="right">Thao tác</th></tr></thead><tbody id="staffRows">${staffRows(staff)}</tbody></table></div></div><div class="mobile-records staff-cards" id="staffCards">${staffCards(staff)}</div><div id="staffResigned">${staffResigned(nghi)}</div><p class="note">Hồ sơ dùng chung với Gieo Gieo; lịch sử chấm công được giữ lại. Bấm vào ô trạng thái để đổi Đang làm / Tạm ngưng / Đã nghỉ việc.</p>${footer('secondary-footer')}</div>`}
@@ -2249,7 +2322,7 @@ function formatGoalInput(input,days){
 function fitDashboardChart(){const wrap=$('#chartWrap');if(!wrap)return;const r=wrap.getBoundingClientRect();wrap.innerHTML=chartSvg(selectedStores().map(storeRange),{width:Math.max(180,r.width),height:Math.max(45,r.height)})+'<div id="chartTip" class="chart-tooltip"></div>'}
 window.addEventListener('resize',()=>{clearTimeout(window.chartFitTimer);window.chartFitTimer=setTimeout(fitDashboardChart,80)});
 let focusBeforeDialog=null;
-function openDialog(title,html,drawer=false,sub=''){const d=$('#dialog');focusBeforeDialog=document.activeElement;if(d.open)d.close();d.classList.remove('store-detail','store-chooser');d.classList.toggle('drawer',drawer);$('#dialogInner').innerHTML=`<div class="dialog-head"><div><h2 id="dialogTitle">${title}</h2>${sub?`<p class="dialog-subtitle">${sub}</p>`:''}</div><button class="icon-btn" onclick="closeDialog()" aria-label="Đóng">${icon('close')}</button></div>${html}`;d.showModal()}
+function openDialog(title,html,drawer=false,sub=''){const d=$('#dialog');focusBeforeDialog=document.activeElement;if(d.open)d.close();d.classList.remove('store-detail','store-chooser','bill-dialog');d.classList.toggle('drawer',drawer);$('#dialogInner').innerHTML=`<div class="dialog-head"><div><h2 id="dialogTitle">${title}</h2>${sub?`<p class="dialog-subtitle">${sub}</p>`:''}</div><button class="icon-btn" onclick="closeDialog()" aria-label="Đóng">${icon('close')}</button></div>${html}`;d.showModal()}
 function closeDialog(){$('#dialog').close()}
 $('#dialog').addEventListener('close',()=>focusBeforeDialog?.isConnected&&focusBeforeDialog.focus());
 $('#dialog').addEventListener('click',e=>{if(e.target===$('#dialog')){const r=e.target.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)closeDialog()}});
@@ -2308,7 +2381,7 @@ async function loadCurrent(force=false){
   else if(view==='cc'){const[people,attendance]=await Promise.all([backend.readEmployees(),backend.readAttendance(ccStoreIds(),state.attendanceDate)]);result={people,...attendance}}
   else if(view==='luong')result=await backend.readPayroll(state.payrollMonth);
   if(token!==live.request||key!==loadKey())return;
-  if(view==='rev'){live.rev=result;live.cfg=result.cfg;live.records=result.records;goals=result.targets;stores=buildStoreCatalog(result.records)}
+  if(view==='rev'){live.rev=result;live.cfg=result.cfg;live.records=result.records;goals=result.targets;stores=buildStoreCatalog(result.records);setTimeout(()=>{if(live.rev===result)Object.entries(BF.watch).forEach(([id,w])=>{if(w.ready)bfStatsQueue(id)})},0)}
   if(view==='nv')employees=result.map(mapEmployee);
   if(view==='target'){goals=result.targets;live.cfg=result.cfg;live.records=result.records;live.tOff=result.off;stores=buildStoreCatalog(result.records)}
   if(view==='hoavon'){live.be=result;live.records=result.records;stores=buildStoreCatalog(result.records)}
@@ -2375,7 +2448,7 @@ function plAutoFill(view,res){
  const today=currentDate(),to=res.to>today?today:res.to;if(!(res.from<=to))return;
  live.plBusy=true;
  const again=()=>{if(state.view!==view||(view==='rev'?live.rev:live.be)!==res)return;const a=document.activeElement;if(a&&a.matches('input,textarea,select')&&$('#view').contains(a)){if(!again.wait){again.wait=true;a.addEventListener('blur',()=>setTimeout(()=>{again.wait=false;again()},400),{once:true})}return}render()};
- backend.plFillMissing(res.records,res.pl,res.from,to,again).catch(e=>console.warn('[lãi/lỗ Gieo]',e)).finally(()=>{live.plBusy=false;again()});
+ backend.plFillMissing(res.records,res.pl,res.from,to,id=>{again();if(view==='rev'&&res===live.rev&&BF.day===currentDate())bfStatsQueue(id)}).catch(e=>console.warn('[lãi/lỗ Gieo]',e)).finally(()=>{live.plBusy=false;again()});
 }
 function beNote(s){
  const b=s.be,gieo=s.brand==='gieo',note=[];

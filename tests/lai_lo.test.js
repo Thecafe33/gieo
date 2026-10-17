@@ -1,4 +1,4 @@
-// lai_lo.v1.js (16/10) — bộ tính lãi / lỗ Gieo dùng chung, SINH từ quanlygieo.html (tools/tao_lai_lo.js).
+// lai_lo.v2.js (16/10) — bộ tính lãi / lỗ Gieo dùng chung, SINH từ quanlygieo.html (tools/tao_lai_lo.js).
 //   · File đã sinh còn khớp quanlygieo (quanlygieo đổi công thức mà quên sinh lại → hỏng ở đây).
 //   · Chạy thật với Firestore giả: doanh thu, giá vốn, chi phí theo kỳ, khấu hao ra đúng; đọc đúng bảng của quán gg02.
 //   · Chi phí chỉ đọc khoản chạm khoảng ngày; 3 bảng lịch sử lần sau chỉ đọc mốc mới.
@@ -11,8 +11,8 @@ let ok = true;
 const eq = (a, b, m) => { if (JSON.stringify(a) !== JSON.stringify(b)) { ok = false; console.log('FAIL', m, JSON.stringify(a), '!=', JSON.stringify(b)); } else console.log('ok', m); };
 const near = (a, b, m) => eq(Math.abs(a - b) < 0.01, true, m + ' (' + a + ' ≈ ' + b + ')');
 
-try { execFileSync('node', [path.join(__dirname, '..', 'tools', 'tao_lai_lo.js'), '--check'], { stdio: 'pipe' }); eq(true, true, 'lai_lo.v1.js khớp quanlygieo.html'); }
-catch (e) { eq(String(e.stdout), 'KHỚP', 'lai_lo.v1.js khớp quanlygieo.html'); }
+try { execFileSync('node', [path.join(__dirname, '..', 'tools', 'tao_lai_lo.js'), '--check'], { stdio: 'pipe' }); eq(true, true, 'lai_lo.v2.js khớp quanlygieo.html'); }
+catch (e) { eq(String(e.stdout), 'KHỚP', 'lai_lo.v2.js khớp quanlygieo.html'); }
 
 // ---- manage: ngày nào phải tự tính (plNeedDays) ----
 {
@@ -53,7 +53,7 @@ global.firebase = { firestore: { FieldPath: { documentId: () => ID } } };
 global.localStorage = { getItem: k => (k in LS ? LS[k] : null), setItem: (k, v) => { LS[k] = String(v); } };
 const DA = require('fs').readdirSync(path.join(__dirname, '..')).filter(f => /^data_access\.v\d+\.js$/.test(f)).sort((a, b) => +a.match(/\d+/)[0] - +b.match(/\d+/)[0]).pop();
 global.GieoData = require(path.join(__dirname, '..', DA)).GieoData;
-require(path.join(__dirname, '..', 'lai_lo.v1.js'));
+require(path.join(__dirname, '..', 'lai_lo.v2.js'));
 const LaiLo = global.LaiLo;
 
 // Quán gg02: dữ liệu riêng nằm ở tên + '__gg02'; dữ liệu dùng chung (giá, công thức, cấu hình…) giữ tên cũ.
@@ -96,11 +96,19 @@ RT['orders_gieogieo__gg02/oct/15'] = {
   eq(['doanhThu', 'giaVon', 'chiPhiCoDinh', 'bienPhiKhac', 'khauHao', 'luong', 'lai'].map(k => Math.round(q[k])), ['doanhThu', 'giaVon', 'chiPhiCoDinh', 'bienPhiKhac', 'khauHao', 'luong', 'lai'].map(k => Math.round(d[k])),
     'Cùng số với computeDayPL của quanlygieo (đọc TOÀN BỘ chi phí) — đọc chi phí theo khoảng không đổi kết quả');
 
+  const beforeReads=JSON.stringify(reads);
+  const rt=await LaiLo.realtime({storeId:'gg02',day:'2026-10-15',orders:[{total:25000,method:'TIỀN MẶT',itemsArray:[{id:'cf',name:'Cà phê',size:'M',qty:1,price:25000}]}]});
+  eq(rt.day.doanhThu,25000,'Realtime tính lại bill sửa/xoá từ snapshot thay vì cộng trùng');
+  eq(JSON.stringify(reads),beforeReads,'Realtime lãi/lỗ không đọc Firebase thêm');
+  eq(await LaiLo.realtime({storeId:'gg01',day:'2026-10-15',orders:[]}),null,'Không mượn ngữ cảnh lãi/lỗ quán khác');
+  const empty=await LaiLo.realtime({storeId:'gg02',day:'2026-10-15',orders:[]});
+  eq(empty.day.doanhThu,0,'Xoá bill cuối: doanh thu về 0, chi phí vẫn còn');
+  near(empty.day.chiPhiCoDinh+empty.day.bienPhiKhac,150000,'Realtime giữ chi phí đã nạp');
   // Lịch sử giá: lần 2 chỉ đọc mốc mới
   const r1 = reads['price_history_gieogieo'];
   FS['price_history_gieogieo'].p2 = { itemId: 'sua', effectiveFrom: '2026-10-16', price: 120, createdAt: '2026-10-16T01:00:00Z' };
   reads['price_history_gieogieo'] = 0;
-  delete require.cache[require.resolve(path.join(__dirname, '..', 'lai_lo.v1.js'))]; require(path.join(__dirname, '..', 'lai_lo.v1.js'));   // mở lại app: phiên mới, máy vẫn giữ lịch sử
+  delete require.cache[require.resolve(path.join(__dirname, '..', 'lai_lo.v2.js'))]; require(path.join(__dirname, '..', 'lai_lo.v2.js'));   // mở lại app: phiên mới, máy vẫn giữ lịch sử
   await global.LaiLo.tinh({ fstore, db, storeId: 'gg02', from: '2026-10-15', to: '2026-10-15' });
   eq([r1 >= 1, reads['price_history_gieogieo'], Object.keys(JSON.parse(LS['lai_lo_hist_v1_price_history_gieogieo']).docs).length], [true, 1, 2],
     'Lịch sử giá: lần sau chỉ đọc 1 mốc mới (createdAt > mốc đã có), trong máy đủ 2 mốc');
