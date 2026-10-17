@@ -21,6 +21,10 @@ Popup PC/tablet giảm từ `min(1100px,96vw)` còn `min(880px,76.8vw)` (20%); �
 - Thêm số món cạnh giờ. Điện thoại gom tóm tắt món và nhãn thanh toán trên một hàng dùng chung chiều ngang, giữ Togo không bị cắt.
 - XOFA chỉ hiện nhãn **Togo** khi bill có `isToGo === true`, đúng trường POS ghi. Bill tại quán hoặc thiếu cờ không bị gán nhãn. Cả dashboard và popup dùng cùng hàm render, không đọc Firebase thêm.
 
+## Bo góc biểu đồ cột — 17/10
+
+Mỗi cột dùng một đường bao chỉ bo hai góc trên, đáy phẳng. Các phần màu bên trong là hình chữ nhật nối sát, không bo góc riêng và không trừ chiều cao tạo khe giữa các phần. Áp dụng cả cột chồng theo giờ và cột theo ngày/tháng; giữ dữ liệu, tooltip, màu và thao tác bật/tắt điểm bán. Mã clip duy nhất qua các lượt vẽ để nhiều biểu đồ không dùng nhầm đường bao.
+
 ## Nguồn dữ liệu và lượt đọc
 
 `bill_live.v1.js` giữ một Map theo `storeId|YYYY-MM-DD`, bên trong là bill theo mã RT. Tổng hợp hôm nay và bảng bill dùng chung nguồn này. Một listener trên **node của đúng một ngày/điểm**, cùng `once(value)` để biết baseline đã đầy đủ (SDK dùng dữ liệu của listener). Không có một truy vấn tail riêng ngoài lượt tổng hợp ngày. Sau baseline chỉ nhận child_added/changed/removed; không gọi đọc toàn ngày theo từng bill.
@@ -40,7 +44,7 @@ Không sửa `lai_lo.v1.js`, `data_access.v9.js` hoặc engine đã phát hành.
 
 ## Kiểm tra và giao file
 
-Kết quả lượt này: 86 file test đạt; Chromium PC/tablet/điện thoại 123/123 mục; kiểm tra khung QL 56/56 và nhân sự 76/76; cú pháp, inventory, ranh giới, đường dẫn và predeploy đạt. Chưa deploy Hosting.
+Kết quả lượt này: 86 file test đạt; Chromium PC/tablet/điện thoại 129/129 mục; kiểm tra khung QL 56/56 và nhân sự 76/76; cú pháp, inventory, ranh giới, đường dẫn và predeploy đạt. Chưa deploy Hosting.
 
 - `node tests/bill_live.test.js`: baseline dùng chung, sự kiện trong lúc tải, bill lặp/sửa/xoá, năm, cách ly quán, lỗi/gỡ nguồn.
 - `node tests/lai_lo.test.js`: bản sinh khớp, cùng công thức QL, realtime không đọc Firebase thêm, không mượn ngữ cảnh quán khác.

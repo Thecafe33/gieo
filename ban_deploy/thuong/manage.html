@@ -2224,7 +2224,12 @@ function storeCard(s,total,share){
  const p=s.target?Math.floor(s.rev/s.target*100):0,isGieo=s.brand==='gieo',heading=isGieo?'Gieo Gieo':s.name,subtitle=isGieo?s.code+' · '+s.location:s.id==='tc33'?'Đồ uống + Khác':'Không gồm Food',mark=isGieo?s.code.slice(2):s.mono;
  return `<article data-store="${s.id}" class="outlet-widget${storeClosedAll(s)?' is-closed':''}" style="--c:${storeClosedAll(s)?'#8d938f':s.c};--widget-number-size:${Math.min(13.8,74/(money(s.rev).length*.68+.9)).toFixed(2)}cqw" aria-label="${esc(s.name)}"><div class="widget-head"><span class="widget-brandmark" aria-hidden="true">${esc(mark)}</span><div class="widget-heading"><h3>${esc(heading)}</h3><p title="${esc(s.name)}">${esc(subtitle)}</p></div><button class="widget-open" onclick="storeDetails('${s.id}')" aria-label="Chi tiết ${esc(s.name)}">${icon('arrow')}</button></div><div class="widget-main"><div class="widget-rev-row"><button class="widget-revenue" onclick="storeDetails('${s.id}')" aria-label="Xem doanh thu ${esc(s.name)}"><span class="widget-revenue-label">Doanh thu</span><strong class="widget-revenue-value num">${money(s.rev)}<span>đ</span></strong></button><span class="widget-share" title="Chiếm ${share}% doanh thu đang xem">chiếm <b>${share}%</b></span></div>${storeSo(s)}</div><div class="widget-goal"><div class="widget-goal-row"><span>${s.offDays&&s.offDays===s.nDays?`<b class="widget-off">${icon('calendar')}Đóng cửa${s.nDays>1?' cả kỳ':rangeDates()[0]===TODAY?' hôm nay':''}</b>`:s.target?'Mục tiêu '+shortMoney(s.target)+(s.offDays?' · đóng cửa '+s.offDays+' ngày':''):'Chưa đặt mục tiêu'}</span>${s.offDays&&s.offDays===s.nDays?'':`<strong class="num ${s.target&&s.rev>=s.target?'goal-reached':''}">${s.target&&s.rev>=s.target?icon('check'):''}${s.target?p+'%':'—'}</strong>`}</div>${s.target?goalProgress(s.rev/s.target,'Mục tiêu '+s.name,true,{be:beHas(s.be)&&s.be.hoaVon>0?s.be.hoaVon/s.target:null}):beHas(s.be)&&s.be.hoaVon>0?goalProgress(s.rev/s.be.hoaVon,'Hoà vốn '+s.name,true,{mark:'Hoà vốn'}):''}</div>${beWidget(s)}<div class="widget-metrics"><div><span>Hoá đơn</span><b class="num">${money(s.count)}</b></div><div><span>Tiền mặt</span><b class="num">${money(s.cash)}</b></div><div><span>Chuyển khoản</span><b class="num">${money(s.bank)}</b></div></div></article>`;
 }
-let currentBuckets=[];
+let currentBuckets=[],chartClipSerial=0;
+// Một đường bao cho cả cột: chỉ hai góc trên bo, đáy và ranh giới các phần màu luôn phẳng.
+function chartColumnClip(id,x,y,w,h){
+ const r=Math.min(4,w/3,h/2),bottom=y+h;
+ return `<defs><clipPath id="${id}" clipPathUnits="userSpaceOnUse"><path d="M${x} ${bottom}V${y+r}Q${x} ${y} ${x+r} ${y}H${x+w-r}Q${x+w} ${y} ${x+w} ${y+r}V${bottom}Z"/></clipPath></defs>`;
+}
 function chartSeries(points){
  if(points.length===1)return [{...points[0],members:points}];
  return ['tc33','xofa','gieo'].map(brand=>{const members=points.filter(st=>st.brand===brand);return {...BRAND_META[brand],members,name:BRAND_META[brand].name+(brand==='gieo'&&members.length>1?' · '+members.length+' điểm':'')}}).filter(series=>series.members.length);
@@ -2233,7 +2238,7 @@ function chartSeries(points){
 // có bill sớm / muộn hơn (TC33 mở 7h, lễ tết đóng 23h) thì tự nới tới đúng giờ đó. Nhiều quán: các quán Gieo đã gộp một
 // chuỗi "Gieo Gieo · N điểm" (chartSeries) và cột theo giờ là CỘT CHỒNG theo thương hiệu → thêm quán không làm cột mảnh đi.
 function chartSvg(points,dimensions){
- const list=chartSeries(points),[from,to]=rangeDates(),{labels,tips,values,stacked}=chartValues(list,from,to);
+ const clipPrefix='revenue-bars-'+(++chartClipSerial)+'-',list=chartSeries(points),[from,to]=rangeDates(),{labels,tips,values,stacked}=chartValues(list,from,to);
  const mob=innerWidth<=760,W=dimensions?.width||(mob?380:900),H=dimensions?.height||190,L=mob?37:50,R=10,T=12,B=30,cw=W-L-R,ch=Math.max(15,H-T-B);
  const visible=list.map((st,j)=>({st,j})).filter(x=>!state.hidden.has(x.st.id));
  const maxRaw=Math.max(1,...(stacked?labels.map((_,i)=>visible.reduce((n,x)=>n+Math.max(0,values[x.j][i]),0)):visible.flatMap(x=>values[x.j]))),pow=Math.pow(10,Math.floor(Math.log10(maxRaw))),max=Math.ceil(maxRaw/pow)*pow;
@@ -2243,9 +2248,10 @@ function chartSvg(points,dimensions){
  [0,.5,1].forEach(f=>{const y=T+ch*(1-f);html+=`<path d="M${L} ${y}H${W-R}" stroke="var(--line)" stroke-dasharray="${f?'3 4':'0'}"/><text x="${L-8}" y="${y+4}" text-anchor="end">${f?shortMoney(max*f):'0'}</text>`});
  const every=Math.ceil(labels.length/(mob?(stacked?8:5):(stacked?24:12)));
  labels.forEach((label,i)=>{const center=L+step*(i+.5);
-  if(stacked){let y=T+ch;const segs=visible.map(({st,j})=>({st,v:Math.max(0,values[j][i])})).filter(x=>x.v>0);
-   segs.forEach((x,n)=>{const h=ch*x.v/max,top=n===segs.length-1;y-=h;html+=`<rect class="data-bar" x="${center-bw/2}" y="${y}" width="${bw}" height="${Math.max(0,h-(top?0:1))}" rx="${top?Math.min(4,bw/3):0}" fill="${x.st.c}"><title>${esc(currentBuckets[i].label)} · ${esc(x.st.name)}: ${money(x.v)}đ</title></rect>`})}
-  else{const span=visible.length*bw+Math.max(0,visible.length-1)*gap;visible.forEach(({st,j},n)=>{const v=values[j][i],h=ch*v/max;html+=`<rect class="data-bar" x="${center-span/2+n*(bw+gap)}" y="${T+ch-h}" width="${bw}" height="${h}" rx="${Math.min(3,bw/3)}" fill="${st.c}"><title>${esc(label)} · ${esc(st.name)}: ${money(v)}đ</title></rect>`})}
+  if(stacked){let y=T+ch;const segs=visible.map(({st,j})=>({st,v:Math.max(0,values[j][i])})).filter(x=>x.v>0),height=segs.reduce((n,x)=>n+ch*x.v/max,0),clipId=clipPrefix+i;
+   html+=chartColumnClip(clipId,center-bw/2,T+ch-height,bw,height)+`<g class="chart-column" clip-path="url(#${clipId})">`;
+   segs.forEach(x=>{const h=ch*x.v/max;y-=h;html+=`<rect class="data-bar" x="${center-bw/2}" y="${y}" width="${bw}" height="${h}" fill="${x.st.c}"><title>${esc(currentBuckets[i].label)} · ${esc(x.st.name)}: ${money(x.v)}đ</title></rect>`});html+='</g>'}
+  else{const span=visible.length*bw+Math.max(0,visible.length-1)*gap;visible.forEach(({st,j},n)=>{const v=values[j][i],h=ch*v/max,x=center-span/2+n*(bw+gap),clipId=clipPrefix+i+'-'+n;html+=chartColumnClip(clipId,x,T+ch-h,bw,h)+`<g class="chart-column" clip-path="url(#${clipId})"><rect class="data-bar" x="${x}" y="${T+ch-h}" width="${bw}" height="${h}" fill="${st.c}"><title>${esc(label)} · ${esc(st.name)}: ${money(v)}đ</title></rect></g>`})}
   if(i%every===0)html+=`<text x="${center}" y="${H-9}" text-anchor="middle">${esc(label)}</text>`;
   html+=`<rect x="${L+step*i}" y="${T}" width="${step}" height="${ch}" fill="transparent" tabindex="0" role="button" aria-label="${esc(currentBuckets[i].label)}: ${currentBuckets[i].rows.map(r=>r.name+' '+money(r.value)+' đồng').join(', ')}" onpointerenter="chartTip(${i},this)" onpointerleave="hideChartTip()" onclick="chartTip(${i},this)" onfocus="chartTip(${i},this)" onblur="hideChartTip()" onkeydown="if(event.key==='Enter')chartTip(${i},this)"/>`;
  });return html+'</svg>';

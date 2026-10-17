@@ -17,6 +17,9 @@
 
 ## 2. Đã làm (theo thứ tự)
 
+**17/10 — bo góc cột doanh thu manage**: bỏ bo cả bốn góc của từng đoạn màu; bo hai góc trên theo đường bao cả cột, đáy và ranh giới các phần màu phẳng, nối sát. Cùng kiểu cho cột giờ/ngày/tháng và khi ẩn/hiện điểm bán. Dữ liệu/tổng/tooltip giữ nguyên; sinh lại ba bộ deploy, gói tải riêng chỉ `manage.html`.
+
+
 **17/10 — bố cục bill + nhãn Togo XOFA**: manage tăng cỡ/độ rõ tên món, giá và mã bill/CK; bỏ Tổng bill/Thanh toán lặp ở chi tiết; topping có dòng riêng, không có dữ liệu phụ thì không tạo khoảng trống. Gom giờ/số món và tối ưu hàng món + thanh toán trên điện thoại. XOFA hiển thị Togo theo đúng `isToGo === true` ở cả widget lẫn popup. Chỉ sửa manage, không đổi dữ liệu/tổng hợp; sinh lại ba bộ deploy, gói tải riêng chỉ `manage.html`.
 
 
