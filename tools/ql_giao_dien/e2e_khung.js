@@ -45,6 +45,35 @@ mock += "\nfirebase.database.ServerValue={TIMESTAMP:0}; firebase.firestore.Field
   chk(await p.evaluate(()=>document.getElementById('editSheetWrap').classList.contains('open')),'phone: popup mở');
   chk(p.errs.length===0,'phone: không lỗi JS '+p.errs.slice(0,2).join('|'));
   await p.close();
+  // --- widget màn Hôm nay (Bill bán hàng / Hoạt động kho / Hoạt động BTP): đổi giao diện, KHÔNG đổi chức năng
+  const SEED = "_bfList=[{key:'k1',o:{time:'16:05',method:'TIỀN MẶT',total:116000,itemsArray:[{name:'Matcha',qty:2,size:'S',price:45000}],billCode:'GG-1'}},{key:'k2',o:{time:'14:20',method:'CHUYỂN KHOẢN',total:60000,itemsArray:[{name:'Trà đào',qty:1,price:60000}]}}];_bfOpen.clear();renderBillFeed();"
+    + "document.getElementById('todayKhoFeed').innerHTML=khoFeedHTML([{loai:'mo',at:new Date().toISOString(),ten:'Syrup',ma:'S-1',ai:'Minh'}]);"
+    + "document.getElementById('todayPrepFeed').innerHTML=prepFeedHTML([{loai:'start',at:new Date().toISOString(),b:{id:'b1',prepName:'Trà ủ',batchCode:'T-1',staff:'Minh'}}])";
+  p=await open(390,844);
+  await p.evaluate(SEED); await p.waitForTimeout(300);
+  chk(await p.evaluate(()=>['todayBills','todayKhoFeed','todayPrepFeed'].every(i=>document.getElementById(i).classList.contains('wdg')&&document.getElementById(i).children.length>0)),'widget: 3 khối có khung .wdg + nội dung');
+  chk(await p.evaluate(()=>document.querySelectorAll('#todayBills .bfeed-row').length===2),'widget bill: 2 hàng bill');
+  await p.click('#todayBills .bfeed-row:nth-child(1) .bfeed-head'); await p.waitForTimeout(200);
+  chk(await p.evaluate(()=>document.querySelector('#todayBills .bfeed-row:nth-child(1) .bfeed-body')!==null && document.querySelector('#todayBills .bfeed-row:nth-child(1) .bfeed-body').textContent.includes('Matcha')),'widget bill: bấm hàng → bung chi tiết NGAY TẠI CHỖ (không popup)');
+  chk(!(await p.evaluate(()=>{const w=document.getElementById('editSheetWrap');return !!(w&&w.classList.contains('open'));})),'widget bill: không mở popup');
+  await p.click('#todayBills .bfeed-row:nth-child(1) .bfeed-head'); await p.waitForTimeout(200);
+  chk(await p.evaluate(()=>document.querySelector('#todayBills .bfeed-row:nth-child(1) .bfeed-body')===null),'widget bill: bấm lần nữa → thu lại');
+  chk(await p.evaluate(()=>document.querySelector('#todayBills .wdg-head button').getAttribute('onclick')==='goBills()'),'widget bill: nút «Xem tất cả» vẫn gọi goBills()');
+  const kh=await p.evaluate(()=>document.querySelector('#todayKhoFeed .wdg-head').getAttribute('aria-expanded'));
+  chk(kh==='false','widget kho (điện thoại): mặc định gập lại');
+  await p.click('#todayKhoFeed .wdg-head'); await p.waitForTimeout(250);
+  chk(await p.evaluate(()=>document.querySelector('#todayKhoFeed .wdg-body')!==null),'widget kho: bấm đầu widget → bung ra');
+  chk(await p.evaluate(()=>[...document.querySelectorAll('#todayKhoFeed .wdg-body button')].some(b=>/openKhoFeedSheet/.test(b.getAttribute('onclick')||''))),'widget kho: còn nút «Mở rộng» (openKhoFeedSheet)');
+  await p.evaluate(()=>{ [...document.querySelectorAll('#todayKhoFeed .wdg-body button')].find(b=>/openKhoFeedSheet/.test(b.getAttribute('onclick'))).click(); }); await p.waitForTimeout(500);
+  chk(await p.evaluate(()=>{const w=document.getElementById('editSheetWrap');return !!(w&&w.classList.contains('open'));}),'widget kho: «Mở rộng» mở bảng đầy đủ như cũ');
+  chk(await p.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+1),'widget: không tràn ngang trên điện thoại');
+  chk(p.errs.length===0,'widget: không lỗi JS '+p.errs.slice(0,2).join('|'));
+  await p.close();
+  p=await open(1366,820);
+  await p.evaluate(SEED); await p.waitForTimeout(300);
+  chk(await p.evaluate(()=>document.querySelector('#todayKhoFeed .wdg-body')!==null && document.querySelector('#todayPrepFeed .wdg-body')!==null),'widget (tablet): kho + BTP mở sẵn song song');
+  chk(await p.evaluate(()=>{const a=document.getElementById('todayKhoFeed').getBoundingClientRect(),b=document.getElementById('todayPrepFeed').getBoundingClientRect();return Math.abs(a.top-b.top)<2 && a.right<=b.left+1;}),'widget (tablet): kho và BTP nằm cạnh nhau');
+  await p.close();
   // --- tablet / desktop
   p=await open(1366,820);
   chk(!(await vis('#bottomNav')),'desktop: thanh dưới ẩn');

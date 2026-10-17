@@ -40,4 +40,16 @@ const tile = h.slice(h.indexOf('const SB_TILE = {'), h.indexOf('};', h.indexOf('
 chk(/stethoscope:'#FF2D55'/.test(tile), 'icon menu (SB_TILE) giữ màu gốc');
 const qa = h.slice(h.indexOf('function todayQuickAccessHTML(){'), h.indexOf('// [MỚI] Badge "Ca hiện tại"'));
 chk(qa.includes("c:'#0062AD'") && qa.includes('style="background:${x.c}17"'), '«Truy cập nhanh» giữ ô tô màu gốc');
+// Widget màn Hôm nay (Bill bán hàng / Hoạt động kho / Hoạt động BTP): đổi GIAO DIỆN, chức năng giữ nguyên
+for (const id of ['todayBills', 'todayKhoFeed', 'todayPrepFeed']) chk(new RegExp(`<div id="${id}" class="wdg `).test(h), `#${id} là widget (.wdg)`);
+chk(skin.includes('.wdg{') && skin.includes('.wdg:empty{display:none;}'), 'CSS widget có mặt, widget rỗng thì ẩn');
+const bf = h.slice(h.indexOf('function bfTieuDe(n){'), h.indexOf('// Nhãn phương thức thanh toán'));
+chk(bf.includes('onclick="goBills()"'), 'bill: nút «Xem tất cả» vẫn gọi goBills()');
+const rb = h.slice(h.indexOf('function renderBillFeed(){'), h.indexOf('// [NEW] LỊCH SỬ BILL'));
+chk(rb.includes("bfToggle('${key}')") && rb.includes('bfChiTiet(o)'), 'bill: bấm hàng vẫn bung chi tiết ngay tại chỗ (bfToggle + bfChiTiet), không mở popup');
+const kf = h.slice(h.indexOf('function khoFeedHTML(list){'), h.indexOf('function feedDateLabel'));
+chk(kf.includes('openKhoFeedSheet()') && kf.includes('toggleKhoFeed()') && kf.includes("goContainers('open')"), 'kho: còn nút «Mở rộng» / gập-mở / «Xem hàng đang mở»');
+const pf = h.slice(h.indexOf('function prepFeedHTML(list){'), h.indexOf('let _prepFeedSheetDate'));
+chk(pf.includes('openPrepFeedSheet()') && pf.includes('togglePrepFeed()') && pf.includes("goKho2('prep')") && pf.includes("ctnShowDetail('${b.id}','prep_batches_gieogieo')"), 'BTP: còn nút «Mở rộng» / gập-mở / «Xem tất cả BTP» / bấm dòng mở chi tiết lô');
+chk(/<div class="wdg wdg-hour">[\s\S]*?<div id="todayHourly"><\/div>/.test(h), 'biểu đồ theo giờ nằm trong widget, #todayHourly giữ nguyên');
 console.log(ok ? 'ALL PASS' : 'SOME FAIL'); process.exit(ok ? 0 : 1);
