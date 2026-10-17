@@ -10,7 +10,7 @@ firebase.database=function(){const db=D();const old=db.ref;db.ref=function(p){co
 const server=require('http').createServer((req,res)=>{const f=path.resolve(ROOT,'.'+new URL(req.url,'http://localhost').pathname);if(!f.startsWith(ROOT+path.sep)||!fs.existsSync(f)){res.writeHead(404);return res.end()}res.setHeader('Content-Type',f.endsWith('.js')?'application/javascript':'text/html; charset=utf-8');res.end(fs.readFileSync(f))});
 (async()=>{await new Promise(r=>server.listen(0,'127.0.0.1',r));const base='http://127.0.0.1:'+server.address().port;const b=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium'});let count=0;
  const check=(v,m)=>{assert.ok(v,m);console.log('ok '+m);count++};
- try{for(const width of [1366,390]){const p=await b.newPage({viewport:{width,height:900},timezoneId:'Asia/Ho_Chi_Minh'}),errors=[];p.on('pageerror',e=>errors.push(e.message));p.on('console',m=>{if(m.type()==='error')console.log('browser:',m.text().slice(0,220))});
+ try{for(const width of [1366,853,390]){const p=await b.newPage({viewport:{width,height:900},timezoneId:'Asia/Ho_Chi_Minh'}),errors=[];p.on('pageerror',e=>errors.push(e.message));p.on('console',m=>{if(m.type()==='error')console.log('browser:',m.text().slice(0,220))});
  await p.route('**/*',r=>{const u=r.request().url();if(u.includes('firebase-app-compat'))return r.fulfill({contentType:'application/javascript',body:mock});if(u.includes('firebasejs'))return r.fulfill({contentType:'application/javascript',body:''});if(u.startsWith(base+'/'))return r.continue();return r.abort()});
  await p.goto(base+'/manage.html');await p.waitForFunction(()=>typeof live!=='undefined'&&live.rev&&!live.loadingKey);await p.waitForTimeout(2000);
  check(errors.length===0,'manage '+width+': mở không lỗi JS '+errors.join('|'));
@@ -23,6 +23,7 @@ const server=require('http').createServer((req,res)=>{const f=path.resolve(ROOT,
  check(await p.evaluate(v=>document.querySelector('.overview-amount').textContent!==v,before.total),'manage '+width+': tổng doanh thu tự cập nhật');
  check(await p.evaluate(v=>JSON.stringify(__READS)===JSON.stringify(v),before.reads),'manage '+width+': bill mới không phát sinh lượt đọc RT');
  check(await p.evaluate(v=>JSON.stringify(__FSREADS)===JSON.stringify(v),before.fsreads),'manage '+width+': bill mới không đọc lại chi phí/kho/lương');
+ await p.evaluate(()=>{BF.list.unshift({key:'ui-preview',store:'tc33',t:Date.now(),o:{total:58000,time:'12:44',method:'TIỀN MẶT',itemsArray:[{name:'Trà long nhãn',size:'M',qty:1,price:30000},{name:'Matcha latte',size:'M',qty:1,price:28000}]}});bfRender()});
  await p.locator('#billFeed .bf-entry:not([hidden]) .bf-row').first().click();
  check(await p.locator('#billFeed .bf-detail').count()===1,'manage '+width+': chi tiết bill mở ngay trong widget');
  check(await p.evaluate(()=>!document.getElementById('dialog').open),'manage '+width+': chi tiết bill không mở popup');
@@ -31,6 +32,20 @@ const server=require('http').createServer((req,res)=>{const f=path.resolve(ROOT,
  check(await p.evaluate(()=>document.querySelector('#billFeed .bf-more').parentElement===document.querySelector('#billFeed .bf-live').parentElement),'manage '+width+': Xem thêm cạnh Trực tiếp trên đầu');
  await p.click('#billFeed .bf-more');check(await p.locator('#bfModal .bill-widget').count()===1,'manage '+width+': Xem thêm mở popup cùng UI widget');
  check(await p.evaluate(()=>[...document.querySelectorAll('#bfModal .bf-entry')].every(e=>!e.hidden)),'manage '+width+': popup hiện toàn bộ bill đã giữ');
+ const geometry=await p.evaluate(()=>{
+  const d=document.getElementById('dialog'),header=document.querySelector('#bfModal .widget-head'),entry=document.querySelector('#bfModal .bf-entry.is-open'),head=entry.querySelector('.bf-row'),detail=entry.querySelector('.bf-detail');
+  return {width:d.getBoundingClientRect().width,headerBG:getComputedStyle(header).backgroundColor,headBG:getComputedStyle(head).backgroundColor,detailBG:getComputedStyle(detail).backgroundColor,gap:detail.getBoundingClientRect().top-head.getBoundingClientRect().bottom,detailHeight:detail.getBoundingClientRect().height,stripe:getComputedStyle(detail).borderLeftWidth,overflow:document.querySelector('#bfModal').scrollWidth>document.querySelector('#bfModal').clientWidth+1};
+ });
+ check(width<=760||Math.abs(geometry.width-Math.min(1100,width*.96)*.8)<2,'manage '+width+': popup PC/tablet giảm đúng 20%');
+ check(geometry.headerBG==='rgba(0, 0, 0, 0)','manage '+width+': tiêu đề hoà nền widget, không có dải trắng');
+ check(geometry.headBG==='rgba(0, 0, 0, 0)'&&geometry.detailBG==='rgba(0, 0, 0, 0)'&&Math.abs(geometry.gap)<2,'manage '+width+': đầu và chi tiết cùng một thẻ liền mạch');
+ check(geometry.detailHeight<160&&geometry.stripe==='0px','manage '+width+': hai dòng món gọn, không khối trắng/viền rời');
+ check(!geometry.overflow,'manage '+width+': popup không tràn ngang');
+ const scroll=await p.evaluate(()=>{const head=document.querySelector('#bfModal .widget-head'),list=document.querySelector('#bfModal .bf-list'),before=head.getBoundingClientRect().top;list.scrollTop=120;const after=head.getBoundingClientRect().top,top=list.scrollTop;bfRender();return{before,after,top,restored:document.querySelector('#bfModal .bf-list').scrollTop}});
+ check(scroll.top>0&&Math.abs(scroll.before-scroll.after)<1&&Math.abs(scroll.top-scroll.restored)<1,'manage '+width+': cuộn danh sách giữ tiêu đề và vị trí khi RT vẽ lại');
+ await p.evaluate(()=>{document.querySelector('#bfModal .bf-list').scrollTop=0;toggleTheme()});await p.waitForTimeout(350);
+ check(await p.evaluate(()=>['.bf-row','.bf-detail','.widget-head'].every(s=>getComputedStyle(document.querySelector('#bfModal '+s)).backgroundColor==='rgba(0, 0, 0, 0)')),'manage '+width+': theme tối vẫn dùng nền liền mạch');
+ fs.mkdirSync(ROOT+'/work/bill-ui',{recursive:true});await p.screenshot({path:ROOT+'/work/bill-ui/manage-dark-'+width+'.png'});await p.evaluate(()=>toggleTheme());await p.waitForTimeout(350);
  fs.mkdirSync(ROOT+'/work/bill-ui',{recursive:true});await p.screenshot({path:ROOT+'/work/bill-ui/manage-'+width+'.png'});
  await p.evaluate(()=>closeDialog());
  await p.evaluate(()=>{state.range='day';render();const i=currentBuckets.findIndex(b=>b.label.startsWith('10h'));chartTip(i,document.querySelector('#chartWrap svg rect[tabindex]'))});

@@ -9,6 +9,10 @@ Nhánh `Phan-tach-unit-engine`. Phạm vi yêu cầu: manage Bill chung, tooltip
 - Tooltip doanh thu theo giờ: từng điểm bán, kể cả nhiều điểm Gieo, và tổng các chuỗi đang bật. Biểu đồ vẫn gộp Gieo thành một màu/chuỗi khi cần để tránh cột quá nhỏ.
 - Quanlygieo giữ giao diện và thao tác bill hiện có.
 
+## Sửa giao diện theo ảnh phản hồi 17/10
+
+Popup PC/tablet giảm từ `min(1100px,96vw)` còn `min(880px,76.8vw)` (20%); điện thoại giữ chiều ngang dễ đọc. Tiêu đề kế thừa nền gradient của widget, chỉ danh sách bên dưới cuộn nên tiêu đề vẫn cố định. Đầu bill và phần chi tiết dùng chung một thẻ/nền/viền bo tròn, có mũi tên đóng/mở; chi tiết bỏ CSS hộp thoại, dùng dòng món và thông tin phụ gọn như quanlygieo. Giữ vị trí cuộn khi RT vẽ lại. Phạm vi file app sửa ở lượt này chỉ `manage.html`.
+
 ## Nguồn dữ liệu và lượt đọc
 
 `bill_live.v1.js` giữ một Map theo `storeId|YYYY-MM-DD`, bên trong là bill theo mã RT. Tổng hợp hôm nay và bảng bill dùng chung nguồn này. Một listener trên **node của đúng một ngày/điểm**, cùng `once(value)` để biết baseline đã đầy đủ (SDK dùng dữ liệu của listener). Không có một truy vấn tail riêng ngoài lượt tổng hợp ngày. Sau baseline chỉ nhận child_added/changed/removed; không gọi đọc toàn ngày theo từng bill.
@@ -28,7 +32,7 @@ Không sửa `lai_lo.v1.js`, `data_access.v9.js` hoặc engine đã phát hành.
 
 ## Kiểm tra và giao file
 
-Kết quả lượt này: 86 file test đạt; Chromium PC/điện thoại 54/54 mục; kiểm tra khung QL 56/56 và nhân sự 76/76; cú pháp, inventory, ranh giới, đường dẫn và predeploy đạt. Chưa deploy Hosting.
+Kết quả lượt này: 86 file test đạt; Chromium PC/tablet/điện thoại 102/102 mục; kiểm tra khung QL 56/56 và nhân sự 76/76; cú pháp, inventory, ranh giới, đường dẫn và predeploy đạt. Chưa deploy Hosting.
 
 - `node tests/bill_live.test.js`: baseline dùng chung, sự kiện trong lúc tải, bill lặp/sửa/xoá, năm, cách ly quán, lỗi/gỡ nguồn.
 - `node tests/lai_lo.test.js`: bản sinh khớp, cùng công thức QL, realtime không đọc Firebase thêm, không mượn ngữ cảnh quán khác.

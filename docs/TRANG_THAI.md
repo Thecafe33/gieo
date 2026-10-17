@@ -17,6 +17,9 @@
 
 ## 2. Đã làm (theo thứ tự)
 
+**17/10 — sửa UI Bill chung theo ảnh thực tế**: manage thu popup PC/tablet 20%, bỏ dải trắng dưới tiêu đề; đầu bill và chi tiết thành một thẻ liền mạch, thông tin gọn như quanlygieo, có mũi tên mở/đóng. Danh sách cuộn riêng dưới tiêu đề, giữ vị trí khi RT vẽ lại. Chỉ sửa giao diện manage; bộ tính và nguồn RT giữ nguyên. Sinh lại ba bộ deploy; gói tải riêng lượt này chỉ cần `manage.html`.
+
+
 **17/10 — Bill chung + số liệu realtime**: manage đưa Xem thêm lên đầu cạnh Trực tiếp, mở danh sách trong popup cùng UI widget; bấm từng bill mở chi tiết tại chỗ. Tooltip giờ thêm tổng và tách từng điểm Gieo. Hai app dùng `bill_live.v1.js`: dữ liệu RT hôm nay theo mã bill dùng chung cho tổng hợp và feed, add/change/remove cập nhật tại máy, không đọc lại node/quán khác. `lai_lo.v2.js` sinh từ quanlygieo, giữ v1 để máy còn HTML cũ; tái tính lãi/lỗ từ ngữ cảnh đã nạp. Bản thử và ba bộ deploy đã sinh lại; chủ dự án tự deploy. Chi tiết: `docs/BILL_REALTIME.md`.
 
 
