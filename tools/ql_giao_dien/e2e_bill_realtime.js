@@ -92,15 +92,44 @@ const server=require('http').createServer((req,res)=>{const f=path.resolve(ROOT,
  }
  check(errors.length===0,'manage '+width+': toàn luồng không lỗi JS '+errors.join('|'));
  await p.goto(base+'/quanlygieo.html');await p.waitForFunction(()=>typeof _todayLiveCtx!=='undefined'&&_todayLiveCtx&&!_todayBusy);await p.waitForTimeout(1800);
+ check(await p.locator('#todayMini>.today-metrics-widget').count()===2,'quanlygieo '+width+': hai widget chỉ số');
+ for(const w of await p.locator('#todayMini>.today-metrics-widget').all()){
+   check(await w.locator('.kmini').count()===4,'quanlygieo '+width+': mỗi widget đủ bốn ô');
+   check(await w.evaluate(el=>{const r=[...el.querySelectorAll('.kmini')].map(c=>c.getBoundingClientRect());return Math.abs(r[0].top-r[1].top)<1&&r[2].top>r[0].top&&Math.abs(r[0].left-r[2].left)<1}),'quanlygieo '+width+': lưới hai cột hai hàng');
+ }
+ check(await p.evaluate(w=>{const r=[...document.querySelectorAll('.today-metrics-widget')].map(el=>el.getBoundingClientRect());return w<768?r[1].top>=r[0].bottom:Math.abs(r[0].top-r[1].top)<1&&r[1].left>=r[0].right},width),'quanlygieo '+width+': PC cạnh nhau, điện thoại xếp dọc');
+ check(await p.locator('#miniStaffHours .kmval').innerText().then(v=>v.includes('h')),'quanlygieo '+width+': giờ công điền từ dữ liệu có sẵn');
+ check(await p.evaluate(()=>getComputedStyle(document.querySelector('.today-pl-widget')).getPropertyValue('--wc').trim()==='#7554AF'),'quanlygieo '+width+': màu riêng cho lãi lỗ');
+ await p.locator('.today-pl-widget').screenshot({path:ROOT+'/work/bill-ui/lai-lo-dong-'+width+'.png'});
+ await p.locator('#todayMini').screenshot({path:ROOT+'/work/bill-ui/chi-so-'+width+'.png'});
+ await p.click('#todayPLToggle');
+ check(await p.locator('#todayPLRows').isVisible(),'quanlygieo '+width+': mở chi phí ngay trong widget');
+ check(await p.locator('.today-pl-ledger .row').count()>=8,'quanlygieo '+width+': đủ các dòng thu chi và tổng lãi lỗ');
+ check(await p.evaluate(()=>{const els=[...document.querySelectorAll('#todayMini .kmini,.today-pl-widget,#todayPLRows .row,.today-pl-notes>div')];return els.every(el=>el.scrollWidth<=el.clientWidth+1)&&document.documentElement.scrollWidth<=innerWidth}),'quanlygieo '+width+': widget và phần mở rộng không tràn ngang');
+ await p.locator('.today-pl-widget').screenshot({path:ROOT+'/work/bill-ui/lai-lo-mo-'+width+'.png'});
  const q=await p.evaluate(()=>({path:_bfPath,revenue:_todayLiveCtx.values[0].totals.revenue,fsreads:{...__FSREADS},reads:{...__READS}}));
  await p.evaluate(({path})=>__emit(path,'child_added','rtnew',{total:55000,createdAt:new Date().toISOString(),time:'11:00',method:'TIỀN MẶT',itemsArray:[{id:'cf',name:'Cà phê',price:55000,qty:1}]}),q);
  await p.waitForFunction(v=>_todayLiveCtx.values[0].totals.revenue===v,q.revenue+55000);
  check(await p.locator('#todayGrid').innerText().then(s=>s.includes((q.revenue+55000).toLocaleString('vi-VN'))),'quanlygieo '+width+': doanh thu trên thẻ tự cập nhật');
  check(await p.evaluate(()=>_todayLiveCtx.pl.doanhThu===_todayLiveCtx.values[0].totals.revenue),'quanlygieo '+width+': lãi/lỗ cập nhật cùng doanh thu');
+ check(await p.locator('#todayPLRows').isVisible()&&await p.locator('#todayPLToggle').getAttribute('aria-expanded')==='true','quanlygieo '+width+': RT giữ nguyên phần chi phí đang mở');
+ check(await p.evaluate(()=>document.querySelector('.today-pl-ledger .rv').textContent.includes(fmt(_todayLiveCtx.pl.doanhThu))),'quanlygieo '+width+': chi phí mở vẫn cập nhật doanh thu mới');
+
  check(await p.evaluate(v=>JSON.stringify(v)===JSON.stringify(__READS),q.reads),'quanlygieo '+width+': không đọc thêm RT khi có bill');
  check(await p.evaluate(v=>JSON.stringify(__FSREADS)===JSON.stringify(v),q.fsreads),'quanlygieo '+width+': bill mới không đọc lại chi phí/kho/lương');
  await p.evaluate(({path})=>__emit(path,'child_changed','rtnew',{total:60000,createdAt:new Date().toISOString(),time:'11:00',method:'TIỀN MẶT'}),q);await p.waitForFunction(v=>_todayLiveCtx.values[0].totals.revenue===v,q.revenue+60000);
  await p.evaluate(({path})=>__emit(path,'child_removed','rtnew'),q);await p.waitForFunction(v=>_todayLiveCtx.values[0].totals.revenue===v,q.revenue);check(true,'quanlygieo '+width+': sửa/xoá bill đồng bộ đúng');
+ await p.click('#todayPLToggle');
+ check(!await p.locator('#todayPLRows').isVisible()&&await p.locator('#todayPLToggle').getAttribute('aria-expanded')==='false','quanlygieo '+width+': gập lại sau cập nhật RT');
+ // Cùng cấu trúc cho lãi, lỗ, chưa bán và biên không thể hoà vốn. Không đọc Firebase.
+ await p.evaluate(()=>{const host=document.createElement('div');host.id='plVariants';host.style.maxWidth='100%';document.querySelector('#todayMini').after(host);
+   const base=_todayLiveCtx.pl;
+   host.innerHTML=[{...base,lai:120000,laiTruocKhauHao:140000},{...base,doanhThu:0,lai:-320000,laiTruocKhauHao:-300000}].map((pl,i)=>plLaiCardHTML(pl,i?{khongTheHoaVon:true,tyLeBienPhi:1.2}:plBreakEven(pl),true)).join('');
+   // Variant preview is static: strip IDs so interactive widget remains unique.
+   host.querySelectorAll('[id]').forEach(el=>{if(el.id==='todayPLRows')el.classList.add('pl-variant-rows');el.removeAttribute('id')});
+ });
+ check(await p.locator('#plVariants .today-pl-widget').count()===2&&await p.locator('#plVariants').innerText().then(s=>s.includes('Lãi hôm nay')&&s.includes('Không có điểm hoà vốn')&&s.includes('Hôm nay chưa có doanh thu')),'quanlygieo '+width+': trạng thái lãi/chưa có doanh thu/không thể hoà vốn');
+ await p.evaluate(()=>document.querySelector('#plVariants').remove());
  await p.screenshot({path:ROOT+'/work/bill-ui/quanlygieo-'+width+'.png'});
  check(errors.length===0,'quanlygieo '+width+': không lỗi JS '+errors.join('|'));
  await p.close();}

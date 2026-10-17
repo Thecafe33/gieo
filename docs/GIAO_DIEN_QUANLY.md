@@ -16,6 +16,14 @@ Màu chủ đạo của quanlygieo vẫn là **hồng `#E23A5D`**. **Chủ dự 
 Ba khối **Bill bán hàng** (`#todayBills`), **Hoạt động kho hôm nay** (`#todayKhoFeed`), **Hoạt động BTP hôm nay** (`#todayPrepFeed`) và **biểu đồ theo giờ** (`.wdg-hour`) là *widget* theo `.outlet-widget` / `.bill-widget` của manage: khung kính nhuốm màu (biến `--wc`: bill/biểu đồ = hồng của app, kho = xanh lam `--bi`, BTP = chàm `#5856D6`), ô biểu tượng `.wdg-mark`, đầu widget `wdgHeadHTML()`, hàng trắng mờ bo tròn. Hàng bill: ô màu theo phương thức thanh toán (`bfMarkMau`) · giờ + số món · món · nhãn thanh toán · tiền.
 **Chỉ đổi giao diện, chức năng giữ nguyên** (khác manage mở popup): bấm hàng bill → bung chi tiết NGAY TẠI CHỖ (`bfToggle` + `bfChiTiet`), «Xem tất cả» → `goBills()`, kho/BTP giữ nút «Mở rộng» (popup đầy đủ + lật ngày), gập/mở trên điện thoại, bấm dòng BTP mở chi tiết lô. Widget rỗng thì ẩn (`.wdg:empty`). Thêm widget mới: gắn `class="wdg"` + `--wc`, dùng `wdgHeadHTML(icon, tiêu đề, dòng phụ, bên phải)`.
 
+## Chỉ số & lãi/lỗ màn Hôm nay (17/10, lượt widget)
+
+- `#todayMini` có đúng **hai widget**, mỗi widget lưới **2×2**: Bán hàng (Số bill, Ly bán ra, AOV, IPT); Vận hành (Hao hụt, DT/giờ công, Giờ công, Vốn trong kho). PC đặt cạnh nhau, điện thoại xếp dọc. Giờ công là số đã có trong `computeStaffHoursByHour`, không thêm truy vấn hay cách tính mới.
+- Lãi/lỗ là widget riêng `.today-pl-widget` **tím nhạt `#7554AF`** theo yêu cầu chủ dự án; số tiền vẫn xanh khi lãi, đỏ khi lỗ. Bên trái số lãi/lỗ + trước khấu hao/biên lãi, bên phải điểm hoà vốn + đã bán + còn thiếu/trên ngưỡng.
+- «Xem tách từng dòng» mở ngay trong widget: bảng thu chi rõ số tiền, ghi chú hoà vốn bên cạnh trên PC, xếp dọc trên điện thoại. Giữ toàn bộ khoản, chú thích và nút chi tiết hao hụt. Nút có `aria-controls`/`aria-expanded`, giữ trạng thái mở khi bill realtime vẽ lại.
+- `miniSPLH`, `miniStaffHours`, `miniKho` là host cập nhật bất đồng bộ; vốn kho giữ số đã nạp khi RT vẽ lại. Không đổi công thức lãi/lỗ hay file JS dùng chung; không đọc thêm Firebase cho ô mới.
+- Kiểm tra trình duyệt trong `tools/ql_giao_dien/e2e_bill_realtime.js`: đúng 8 ô/2×2, bố cục 1366/853/390px, không tràn ngang, mở/gập, lãi/lỗ/chưa bán/không thể hoà vốn, bill mới giữ mở và cập nhật số mà không thêm lượt đọc.
+
 ## Tab Tiền mặt + Chi phí (17/10/2026)
 Mỗi nhóm là một widget có màu (`wdg-blue/amber/green/violet/teal/red/pink`), đầu widget `wdgHeadHTML()`. Đầu màn có **hàng ô tổng hợp** `.wkpi-row` / `.wkpi` (như thẻ số liệu của manage): Tiền mặt = Expected · Thực đếm · Chênh lệch · Bill tiền mặt (`cashKpiHTML(detail)` — chỉ đọc lại số đã có trong «Đối soát cả ngày»); Chi phí = chi phí tháng này (`filterExpenses` + `splitExpensesByCostType`, cùng hàm lãi/lỗ) · Cố định · Biến đổi · Chưa trả tiền · Chờ duyệt · Chờ số thật. Form «Thêm chi phí» 2 cột ở máy tính (`.wdg-form`, mục dài gắn `.wide`). Bên trong widget `.card` = tấm trắng mờ, `.litem` = hàng trắng mờ. **Mọi id / hàm cũ giữ nguyên** (test khoá). Các tab Nhân viên / Lịch / Chấm công / Lương cũng dùng widget — xem mục dưới.
 
@@ -38,12 +46,12 @@ Kiểm tra: `tests/nhan_su_diem_ban.test.js` kiểm tương thích hồ sơ cũ,
 
 ## Quy tắc khi sửa tiếp
 1. **Mọi rule giao diện chung nằm trong khối `/* [MANAGE-SKIN:BEGIN] */ … /* [MANAGE-SKIN:END] */`** — khối này là CUỐI `<style>` chính nên thắng mọi khối trên. Sửa nét chung → sửa **trong khối đó**. Test `tests/ql_giao_dien.test.js` báo nếu khối không còn ở cuối hoặc nếu có màu xanh manage lọt vào.
-2. Giữ bảng màu thương hiệu. Ngoại lệ chủ dự án đã yêu cầu 17/10: nền hồng và hai quầng radial trong khối này; không lấy nền xanh của manage.
+2. Giữ bảng màu thương hiệu. Ngoại lệ chủ dự án đã yêu cầu 17/10: nền hồng/hai quầng radial, widget lãi/lỗ tím riêng và nhóm vận hành xanh ngọc; không lấy nền xanh của manage.
 3. Sau mỗi sửa: `sh tools/sinh_lai_tat_ca.sh` (quy tắc 7 của CLAUDE.md) — `quanlygieo_thu.html` và `ban_deploy/*/quanlygieo.html` sinh lại từ file gốc.
 
 ## Chưa làm (cố ý)
 - **Chế độ tối** (manage có nút ☾): quanlygieo chưa có, JS có nhiều màu cứng → làm đợt riêng nếu cần.
-- Bố cục riêng từng màn (vd. Hôm nay vẫn là thẻ Doanh thu + lưới chỉ số, chưa dựng lại theo «Tổng quan» của manage) — chỉ đổi hình dáng, không đổi cấu trúc nội dung.
+- Các màn chưa được chủ dự án yêu cầu bố cục mới vẫn giữ cấu trúc cũ. Màn Hôm nay đã có hai widget chỉ số và widget lãi/lỗ riêng như mô tả ở trên.
 
 ## Kiểm tra
 - `node tests/ql_giao_dien.test.js` (node thuần, nằm trong `tests/run_all.sh`).

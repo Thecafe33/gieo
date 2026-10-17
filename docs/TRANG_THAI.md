@@ -17,6 +17,9 @@
 
 ## 2. Đã làm (theo thứ tự)
 
+**Mới nhất 17/10 — widget chỉ số & lãi/lỗ quanlygieo**: gom 7 thẻ nhỏ thành hai widget lưới 2×2 (Bán hàng/Vận hành), bổ sung Giờ công từ dữ liệu đã nạp để đủ 8 ô. Lãi/lỗ có widget tím riêng, số tiền xanh/đỏ; chi tiết thu chi và giải thích hoà vốn bố cục gọn, giữ trạng thái mở khi bill RT về. Giữ công thức/bộ JS dùng chung, không thêm lượt đọc Firebase. Đã sinh lại bản thử và ba bộ deploy; chưa deploy Hosting. Chi tiết: `docs/GIAO_DIEN_QUANLY.md`.
+
+
 **17/10 — popup Bill chung chỉ còn widget xanh**: bỏ khung trắng, padding và tiêu đề ngoài của dialog. Tiêu đề duy nhất cùng nút X nằm trong đầu widget; giữ cuộn riêng, Esc/bấm ngoài để đóng và trả focus về Xem thêm sau khi RT vẽ lại. Các dialog khác giữ khung như trước. Chỉ sửa manage; sinh lại ba bộ deploy, gói tải riêng chỉ `manage.html`.
 
 
