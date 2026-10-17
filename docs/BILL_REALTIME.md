@@ -46,6 +46,14 @@ Khác listener limitToLast cũ: child_removed trên cửa sổ giới hạn có 
 
 Không sửa `lai_lo.v1.js`, `data_access.v9.js` hoặc engine đã phát hành. Tool bộ deploy giữ cả lai_lo.v1 để HTML cũ trong cache vẫn tải được.
 
+## Đệm thu hồi vốn quanlygieo — 17/10
+
+- Đệm giữ cả kết quả từng ngày, khoá theo quán/ngày và thế hệ nạp. Khi bill RT thêm/sửa/xoá, thay đúng P&L hôm nay rồi gọi lại `thvCompute` có sẵn: luỹ kế, còn thiếu, tốc độ 30 ngày, thời gian dự kiến và tổng tháng cùng cập nhật. Không cộng delta chồng, không truy vấn Firebase thêm.
+- Bill tới trong lúc lịch sử đang nạp: sau khi nạp xong ghép P&L mới nhất của context còn hoạt động. Kết quả từ lượt nạp trước khi đổi quán/tải lại không được ghi đè đệm mới.
+- `reloadCurrent` xoá đệm; thay tài sản/mốc bắt đầu cũng bỏ đệm và vô hiệu lượt nạp cũ. Các màn khác đọc cùng tổng đã cập nhật.
+- Giữ công thức và cách ghi mốc 100%; cờ đang ghi trên cache ngăn nhiều bill ghi mốc trùng. Không sửa JS dùng chung hoặc dữ liệu lịch sử để đối chiếu chênh lệch thu hồi vốn trong quá khứ (chủ dự án tạm dừng phần đó).
+- `tests/thu_hoi_von_cache.test.js` kiểm các nhánh thay/sửa/xoá, không đọc thêm, tốc độ/cửa sổ 30 ngày, đổi quán/ngày, reset giữa lúc đang nạp và mốc 100%. E2E kiểm số hiện trên màn hình và nút tải lại với Firebase giả.
+
 ## Kiểm tra và giao file
 
 Kết quả lượt này: 86 file test đạt; Chromium PC/tablet/điện thoại 147/147 mục; kiểm tra khung QL 56/56 và nhân sự 76/76; cú pháp, inventory, ranh giới, đường dẫn và predeploy đạt. Chưa deploy Hosting.

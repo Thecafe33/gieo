@@ -11,11 +11,14 @@
 | App bán hàng | `posgieo.html` | trỏ v18 |
 | App quản lý | `quanlygieo.html` | trỏ v18 |
 | Chế độ thử | `che_do_thu.v1.js` + `posgieo_thu.html`, `quanlygieo_thu.html` | sinh lại bằng `node tools/tao_ban_thu.js .` sau **mỗi** lần sửa HTML |
-| Test | `sh tests/run_all.sh` | 86 file `tests/*.test.js`, chỉ cần `node` |
+| Test | `sh tests/run_all.sh` | 87 file `tests/*.test.js`, chỉ cần `node` |
 
 **Trạng thái deploy (chủ dự án xác nhận 04/10/2026): v18 ĐÃ DEPLOY**, chạy ổn ở cửa hàng 1 được **1–3 tuần**. Đa cửa hàng cần ≥ vài tuần ổn định (`docs/KE_HOACH_DA_CUA_HANG.md` mục 0) → theo dõi thêm rồi mới làm M0. Chủ dự án tự deploy; phiên mới hỏi lại trước việc lớn nếu đã qua lâu.
 
 ## 2. Đã làm (theo thứ tự)
+
+**Mới nhất 17/10 — sửa đệm thu hồi vốn**: RT thay P&L đúng ngày hôm nay trong dữ liệu đã nạp rồi tính lại luỹ kế/còn thiếu/tốc độ/dự kiến bằng công thức cũ, không đọc Firebase thêm. Tải lại bỏ đệm, lượt nạp cũ không ghi đè kết quả mới; giữ mốc 100% và ngăn ghi trùng khi nhiều bill về. Chủ dự án chốt tạm dừng đối chiếu chênh lệch thu hồi vốn trong quá khứ. Đã sinh lại bản thử và ba bộ deploy; chưa deploy Hosting. Chi tiết: `docs/BILL_REALTIME.md`.
+
 
 **Mới nhất 17/10 — widget chỉ số & lãi/lỗ quanlygieo**: gom 7 thẻ nhỏ thành hai widget lưới 2×2 (Bán hàng/Vận hành), bổ sung Giờ công từ dữ liệu đã nạp để đủ 8 ô. Lãi/lỗ có widget tím riêng, số tiền xanh/đỏ; chi tiết thu chi và giải thích hoà vốn bố cục gọn, giữ trạng thái mở khi bill RT về. Giữ công thức/bộ JS dùng chung, không thêm lượt đọc Firebase. Đã sinh lại bản thử và ba bộ deploy; chưa deploy Hosting. Chi tiết: `docs/GIAO_DIEN_QUANLY.md`.
 

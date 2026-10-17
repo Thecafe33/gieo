@@ -1,12 +1,20 @@
 // Chromium thật + Firebase trong bộ nhớ, chặn mạng ngoài. Không chạm dữ liệu thật.
 const {chromium}=require('playwright'),fs=require('fs'),path=require('path'),assert=require('assert/strict');
 const ROOT=path.resolve(__dirname,'../..');let mock=fs.readFileSync(ROOT+'/tools/tet/e2e/mockfb.js','utf8');
+// Firestore set({merge:true}) gộp từng trường của map; giữ đúng hành vi thật của pl_book.
+mock=mock.replace('Object.assign({},FS[key][id]||{},d)', '(function merge(a,b){for(const k of Object.keys(b)){const v=b[k];a[k]=v&&typeof v===\'object\'&&!Array.isArray(v)?merge(a[k]&&typeof a[k]===\'object\'?a[k]:{},v):v}return a})(FS[key][id]||{},d)');
 mock+=`
 firebase.database.ServerValue={TIMESTAMP:0};firebase.firestore.FieldValue={delete(){return null},serverTimestamp(){return null},increment(n){return n},arrayUnion(){return []}};firebase.storage=()=>({ref:()=>({put:()=>Promise.resolve()})});
 (function(){const F=firebase.firestore;const nf=function(){const f=F();window.__FSREADS=window.__FSREADS||{};const coll=f.collection;const wrap=(q,c)=>{for(const method of ['where','orderBy','limit','doc'])if(q[method]){const fn=q[method];q[method]=(...a)=>wrap(fn.apply(q,a),c)}if(q.get){const get=q.get;q.get=(...a)=>{__FSREADS[c]=(__FSREADS[c]||0)+1;return get.apply(q,a)}}return q};f.collection=c=>wrap(coll(c),c);f.batch=()=>{const writes=[];return {set(ref,d,o){writes.push(()=>ref.set(d,o));return this},commit:()=>Promise.all(writes.map(fn=>fn()))}};f.collectionGroup=c=>f.collection(c);f.doc=p=>{const a=p.split('/');return f.collection(a[0]).doc(a[1]||'x')};f.runTransaction=()=>Promise.resolve();return f};Object.assign(nf,F);firebase.firestore=nf;
 const D=firebase.database, listeners=new Map();window.__READS={};window.__emit=(p,type,key,o)=>{__RT[p]=__RT[p]||{};if(type==='child_removed')delete __RT[p][key];else __RT[p][key]=o;for(const fn of listeners.get(p+'|'+type)||[])fn({key,val:()=>o})};
 firebase.database=function(){const db=D();const old=db.ref;db.ref=function(p){const r=old(p),once=r.once; r.once=function(...a){__READS[p]=(__READS[p]||0)+1;return once.apply(r,a)};const on=r.on;r.on=function(ev,fn,err){if(!ev.startsWith('child_'))return on.call(r,ev,fn,err);const k=p+'|'+ev;if(!listeners.has(k))listeners.set(k,new Set());listeners.get(k).add(fn);if(ev==='child_added')Object.entries(__RT[p]||{}).forEach(([key,o])=>fn({key,val:()=>o}));return fn};r.off=function(ev,fn){if(ev)listeners.get(p+'|'+ev)?.delete(fn);else for(const [k,v] of listeners)if(k.startsWith(p+'|'))v.clear()};return r};return db};firebase.database.ServerValue={TIMESTAMP:0};
 })();`;
+mock+=`
+if(location.pathname.includes('quanlygieo')){const t=new Date(),y=new Date(t);y.setDate(y.getDate()-1);const k=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+ __FS.assets_gieogieo={a:{purchaseCost:10000000,purchaseDate:k(y),usefulLifeMonths:12,active:true}};
+ __FS.finance_gieogieo={current:{recoveryStartDate:k(y)}};
+ __FS.pl_book_gieogieo={days:{du:k(y),d:{[k(y)]:{date:k(y),doanhThu:1000000,giaVon:200000,phiKenh:0,haoHut:0,luong:200000,chiPhiCoDinh:0,bienPhiKhac:0,khauHao:30000,lai:570000,laiTruocKhauHao:600000,mucTinCay:'chot-thang',updatedAt:t.toISOString()}}}};
+}`;
 const server=require('http').createServer((req,res)=>{const f=path.resolve(ROOT,'.'+new URL(req.url,'http://localhost').pathname);if(!f.startsWith(ROOT+path.sep)||!fs.existsSync(f)){res.writeHead(404);return res.end()}res.setHeader('Content-Type',f.endsWith('.js')?'application/javascript':'text/html; charset=utf-8');res.end(fs.readFileSync(f))});
 (async()=>{await new Promise(r=>server.listen(0,'127.0.0.1',r));const base='http://127.0.0.1:'+server.address().port;const b=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium'});let count=0;
  const check=(v,m)=>{assert.ok(v,m);console.log('ok '+m);count++};
@@ -107,11 +115,18 @@ const server=require('http').createServer((req,res)=>{const f=path.resolve(ROOT,
  check(await p.locator('.today-pl-ledger .row').count()>=8,'quanlygieo '+width+': đủ các dòng thu chi và tổng lãi lỗ');
  check(await p.evaluate(()=>{const els=[...document.querySelectorAll('#todayMini .kmini,.today-pl-widget,#todayPLRows .row,.today-pl-notes>div')];return els.every(el=>el.scrollWidth<=el.clientWidth+1)&&document.documentElement.scrollWidth<=innerWidth}),'quanlygieo '+width+': widget và phần mở rộng không tràn ngang');
  await p.locator('.today-pl-widget').screenshot({path:ROOT+'/work/bill-ui/lai-lo-mo-'+width+'.png'});
- const q=await p.evaluate(()=>({path:_bfPath,revenue:_todayLiveCtx.values[0].totals.revenue,fsreads:{...__FSREADS},reads:{...__READS}}));
+ await p.waitForFunction(()=>_todayLiveCtx.thv&&_thvCache&&_thvCache.days.length>0);
+ const q=await p.evaluate(()=>({path:_bfPath,revenue:_todayLiveCtx.values[0].totals.revenue,
+   recovered:_todayLiveCtx.thv.daThuHoi,todayRecovery:thvTienNgay(_todayLiveCtx.pl),months:_todayLiveCtx.thv.soThangConLai,
+   fsreads:{...__FSREADS},reads:{...__READS}}));
  await p.evaluate(({path})=>__emit(path,'child_added','rtnew',{total:55000,createdAt:new Date().toISOString(),time:'11:00',method:'TIỀN MẶT',itemsArray:[{id:'cf',name:'Cà phê',price:55000,qty:1}]}),q);
  await p.waitForFunction(v=>_todayLiveCtx.values[0].totals.revenue===v,q.revenue+55000);
  check(await p.locator('#todayGrid').innerText().then(s=>s.includes((q.revenue+55000).toLocaleString('vi-VN'))),'quanlygieo '+width+': doanh thu trên thẻ tự cập nhật');
  check(await p.evaluate(()=>_todayLiveCtx.pl.doanhThu===_todayLiveCtx.values[0].totals.revenue),'quanlygieo '+width+': lãi/lỗ cập nhật cùng doanh thu');
+ check(await p.evaluate(q=>Math.abs(_todayLiveCtx.thv.daThuHoi-q.recovered-(thvTienNgay(_todayLiveCtx.pl)-q.todayRecovery))<0.01,q),'quanlygieo '+width+': luỹ kế thu hồi vốn đổi đúng phần hôm nay');
+ check(await p.evaluate(()=>_thvCache.data===_todayLiveCtx.thv&&document.querySelector('#todayThv').textContent.includes(fmt(Math.max(0,_todayLiveCtx.thv.daThuHoi)))),'quanlygieo '+width+': đệm và số thu hồi trên màn hình cùng cập nhật');
+ check(await p.evaluate(q=>_todayLiveCtx.thv.soThangConLai!==q.months,q),'quanlygieo '+width+': thời gian dự kiến đổi theo bill mới');
+
  check(await p.locator('#todayPLRows').isVisible()&&await p.locator('#todayPLToggle').getAttribute('aria-expanded')==='true','quanlygieo '+width+': RT giữ nguyên phần chi phí đang mở');
  check(await p.evaluate(()=>document.querySelector('.today-pl-ledger .rv').textContent.includes(fmt(_todayLiveCtx.pl.doanhThu))),'quanlygieo '+width+': chi phí mở vẫn cập nhật doanh thu mới');
 
@@ -119,6 +134,7 @@ const server=require('http').createServer((req,res)=>{const f=path.resolve(ROOT,
  check(await p.evaluate(v=>JSON.stringify(__FSREADS)===JSON.stringify(v),q.fsreads),'quanlygieo '+width+': bill mới không đọc lại chi phí/kho/lương');
  await p.evaluate(({path})=>__emit(path,'child_changed','rtnew',{total:60000,createdAt:new Date().toISOString(),time:'11:00',method:'TIỀN MẶT'}),q);await p.waitForFunction(v=>_todayLiveCtx.values[0].totals.revenue===v,q.revenue+60000);
  await p.evaluate(({path})=>__emit(path,'child_removed','rtnew'),q);await p.waitForFunction(v=>_todayLiveCtx.values[0].totals.revenue===v,q.revenue);check(true,'quanlygieo '+width+': sửa/xoá bill đồng bộ đúng');
+ check(await p.evaluate(q=>Math.abs(_todayLiveCtx.thv.daThuHoi-q.recovered)<0.01,q),'quanlygieo '+width+': xoá bill trả đúng thu hồi vốn ban đầu');
  await p.click('#todayPLToggle');
  check(!await p.locator('#todayPLRows').isVisible()&&await p.locator('#todayPLToggle').getAttribute('aria-expanded')==='false','quanlygieo '+width+': gập lại sau cập nhật RT');
  // Cùng cấu trúc cho lãi, lỗ, chưa bán và biên không thể hoà vốn. Không đọc Firebase.
@@ -130,6 +146,10 @@ const server=require('http').createServer((req,res)=>{const f=path.resolve(ROOT,
  });
  check(await p.locator('#plVariants .today-pl-widget').count()===2&&await p.locator('#plVariants').innerText().then(s=>s.includes('Lãi hôm nay')&&s.includes('Không có điểm hoà vốn')&&s.includes('Hôm nay chưa có doanh thu')),'quanlygieo '+width+': trạng thái lãi/chưa có doanh thu/không thể hoà vốn');
  await p.evaluate(()=>document.querySelector('#plVariants').remove());
+ // Nút Tải lại phải nạp lại vốn, không tiếp tục dùng tổng trong phiên cũ.
+ await p.evaluate(()=>{__FS.assets_gieogieo.a.purchaseCost=20000000;reloadCurrent()});
+ await p.waitForFunction(()=>!_todayBusy&&_todayLiveCtx.thv?.tongVon===20000000);
+ check(await p.evaluate(()=>_thvCache.data.tongVon===20000000),'quanlygieo '+width+': nút tải lại bỏ đệm thu hồi vốn cũ');
  await p.screenshot({path:ROOT+'/work/bill-ui/quanlygieo-'+width+'.png'});
  check(errors.length===0,'quanlygieo '+width+': không lỗi JS '+errors.join('|'));
  await p.close();}

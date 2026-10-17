@@ -2803,6 +2803,7 @@ function setSync(busy){
 async function reloadCurrent(){
   clearError();
   if(QL_ALL){ (curScreen === 'report' ? renderReportAll : renderTodayAll)(); return; }   // [Bước 3] Xem tất cả: Hôm nay + Báo cáo tổng hợp
+  thvDropCache(); // Tải lại phải bỏ cả tổng thu hồi vốn và lượt nạp nền cũ.
   memoDropAll();   // bấm Tải lại là muốn số MỚI, không phải số trong bộ đệm
   try{ await ensureAuth(); await loadConfig(); }catch(err){ console.warn('reload config failed', err); }
   if(curScreen==='today'){detachBillFeed();_todayLiveCtx=null;renderToday();}
@@ -7942,7 +7943,7 @@ async function loadReceivingRecords(limitN=20){
 // Mọi thay đổi tài sản đều làm đổi TỔNG VỐN ĐẦU TƯ (mẫu số của % thu hồi vốn), mốc
 // bắt đầu, VÀ mức khấu hao đang chạy (nằm trong ngưỡng hoà vốn) — xoá cả hai cache
 // trong phiên, nếu không hai màn đó còn hiện số cũ tới hết ngày.
-function assetCacheDirty(){ _thvCache = null; _bepCache = null; }
+function assetCacheDirty(){ thvDropCache(); _bepCache = null; }
 function addAsset(data){ assetCacheDirty(); return fstore.collection('assets_gieogieo').add({...data, active:true, createdAt:new Date().toISOString()}); }
 function toggleAsset(id, active){ assetCacheDirty(); return fstore.collection('assets_gieogieo').doc(id).update({active}); }
 function deleteAsset(id){ assetCacheDirty(); return fstore.collection('assets_gieogieo').doc(id).delete(); }
@@ -9608,7 +9609,37 @@ function plLaiCardHTML(pl, be, expanded=false){
 // KHÔNG sửa một dòng nào của computeDayPL/plBreakEven/plLaiCardHTML: thẻ Lãi/lỗ
 // hôm nay phải hiện y như cũ để chủ quán vẫn đối chiếu được hai cách tính.
 // ============================================================
-let _thvCache = null;          // { key:'YYYY-MM-DD', data }
+let _thvCache = null;          // { key:'YYYY-MM-DD', scope, epoch, days, data, savingMoc }
+let _thvEpoch = 0;
+function thvDropCache(){ _thvCache = null; _thvEpoch++; }
+function thvCacheScope(){ return QL_ALL ? 'all' : ((window.GieoData && GieoData.storeId()) || QL_VIEW || 'gg01'); }
+
+// Chỉ thay ngày hôm nay trong dữ liệu đã nạp, rồi chạy lại đúng thvCompute.
+// Không cộng delta nhiều lần, không đọc lại lịch sử khi RT thêm/sửa/xoá bill.
+function thvCapNhatHomNay(pl){
+  const c = _thvCache;
+  if(!c || c.scope!==thvCacheScope() || c.epoch!==_thvEpoch || !pl ||
+     c.key!==dkey(new Date()) || pl.date!==c.key || c.data.chuaCoMoc ||
+     !c.data.batDauThat || pl.date<c.data.batDauThat) return null;
+  c.days = c.days.filter(d=>d.date!==pl.date).concat([{...pl}]);
+  c.data = {...c.data, ...thvCompute({ days:c.days, tongVon:c.data.tongVon,
+    mocDaDat:FINANCE.recoveryReachedDate || (c.data.daGhiMoc ? c.data.ngayDat : null) })};
+  thvGhiMoc(c);
+  return c.data;
+}
+
+// Giữ cơ chế ghi mốc 100% vốn đã có; RT cũng đi qua đúng nhánh này.
+// Cờ nằm trên cache (không trên data bị thay) để nhiều bill không ghi mốc trùng.
+function thvGhiMoc(c){
+  if(c!==_thvCache || c.scope!==thvCacheScope() || c.epoch!==_thvEpoch ||
+     !c.data.daDu || FINANCE.recoveryReachedDate || !c.data.ngayDat || c.savingMoc) return;
+  c.savingMoc = true;
+  saveFinance({ recoveryReachedDate:c.data.ngayDat, recoveryReachedAt:new Date().toISOString(),
+                recoveryReachedCapital:c.data.tongVon })
+    .then(()=>{ c.data.daGhiMoc=true; c.data.vonLucDatMoc=c.data.tongVon; })
+    .catch(err=>console.warn('[Thu hồi vốn] không ghi được mốc (bỏ qua):',err))
+    .finally(()=>{ c.savingMoc=false; });
+}
 const THV_MAX_DAYS = 730;      // trần an toàn: không quét quá 2 năm đổ về trước
 
 // Tiền thu hồi vốn của MỘT ngày = doanh thu − mọi chi phí vận hành, KHÔNG trừ
@@ -9685,8 +9716,10 @@ function thvCompute({ days, tongVon, mocDaDat }){
 // tới hôm nay (có thể vài trăm ngày), trong khi màn Hôm nay chỉ cần đọc 1 ngày —
 // giữ cả màn lại chờ nó là vô lý. Nhớ trong bộ nhớ phiên theo ngày hôm nay.
 async function computeCapitalRecovery(force){
+  if(force) thvDropCache();
   const homNay = dkey(new Date());
-  if(!force && _thvCache && _thvCache.key === homNay) return _thvCache.data;
+  const scope=thvCacheScope(), epoch=_thvEpoch;
+  if(!force && _thvCache && _thvCache.key===homNay && _thvCache.scope===scope && _thvCache.epoch===epoch) return _thvCache.data;
 
   const assets = await loadAssetsAll();
   const tongVon = thvTongVon(assets);
@@ -9698,7 +9731,7 @@ async function computeCapitalRecovery(force){
     const data = { ...thvCompute({ days: [], tongVon, mocDaDat: FINANCE.recoveryReachedDate }),
       moc: null, chuaCoMoc: true, batDauThat: null, biCatBot: false,
       vonKhaiTay: Number(FINANCE.initialInvestment)||0, vonLucDatMoc: Number(FINANCE.recoveryReachedCapital)||0 };
-    _thvCache = { key: homNay, data };
+    if(epoch===_thvEpoch && scope===thvCacheScope()) _thvCache={key:homNay,scope,epoch,days:[],data};
     return data;
   }
 
@@ -9718,16 +9751,11 @@ async function computeCapitalRecovery(force){
   data.vonKhaiTay = Number(FINANCE.initialInvestment)||0;
   data.vonLucDatMoc = Number(FINANCE.recoveryReachedCapital)||0;
 
-  // Vừa chạm 100% lần đầu → GHI MỐC một lần. Ghi hỏng thì chỉ mất phần "nhớ", số
-  // vẫn tính lại được ở lần sau; không kéo sập màn.
-  if(data.daDu && !FINANCE.recoveryReachedDate && data.ngayDat){
-    saveFinance({ recoveryReachedDate: data.ngayDat, recoveryReachedAt: new Date().toISOString(),
-                  recoveryReachedCapital: tongVon })
-      .then(()=>{ data.daGhiMoc = true; })
-      .catch(err=>console.warn('[Thu hồi vốn] không ghi được mốc (bỏ qua):', err));
+  // Lượt nạp trước khi đổi quán / bấm tải lại không được ghi đè đệm mới.
+  if(epoch===_thvEpoch && scope===thvCacheScope()){
+    _thvCache={key:homNay,scope,epoch,days:days.map(d=>({...d})),data};
+    thvGhiMoc(_thvCache);
   }
-
-  _thvCache = { key: homNay, data };
   return data;
 }
 
@@ -14089,10 +14117,15 @@ async function renderToday(liveOnly=false){
   const thvBox = document.getElementById('todayThv');
   if(thvBox && !thvBox.innerHTML) thvBox.innerHTML = '<div class="kgrid" style="margin-top:12px"><div class="kcard" style="grid-column:1 / -1"><div class="klabel">Thu hồi vốn đầu tư</div><div class="ksub" style="margin-top:6px">Đang cộng luỹ kế từ ngày mở quán…</div></div></div>';
   if(!liveOnly)computeCapitalRecovery()
-    .then(thv => {context.thv=thv; const el = document.getElementById('todayThv');
-      if(el && curScreen === 'today'&&context===_todayLiveCtx) el.innerHTML = thvCardHTML(thv, context.pl); })
+    .then(thv => {
+      if(curScreen!=='today' || context!==_todayLiveCtx) return;
+      // Bill có thể đến khi lịch sử còn đang nạp: luôn ghép số hôm nay MỚI NHẤT.
+      context.thv=thvCapNhatHomNay(context.pl)||thv;
+      const el=document.getElementById('todayThv');
+      if(el) el.innerHTML=thvCardHTML(context.thv,context.pl);
+    })
     .catch(err => { console.warn('[Thu hồi vốn] không tính được (bỏ qua):', err);
-      const el = document.getElementById('todayThv'); if(el) el.innerHTML = ''; });
+      const el = document.getElementById('todayThv'); if(el && context===_todayLiveCtx) el.innerHTML = ''; });
 
   // Biên đóng góp 30 ngày nạp NỀN — CHỈ dùng làm số tham chiếu cho ngày chưa có
   // doanh thu (lúc đó không đo được biên của chính hôm nay). Ngưỡng hoà vốn hiện
@@ -14100,7 +14133,10 @@ async function renderToday(liveOnly=false){
   // Chỉ vẽ lại MỘT lần, đúng lần đầu nạp được biên tham chiếu. Không có chốt chặn
   // này thì renderToday → nạp biên (lần sau lấy từ cache, xong ngay) → renderToday →
   // lặp vô tận.
-  if(liveOnly&&context.thv&&thvBox)thvBox.innerHTML=thvCardHTML(context.thv,plHomNay);
+  if(liveOnly&&context.thv&&thvBox){
+    context.thv=thvCapNhatHomNay(plHomNay)||context.thv;
+    thvBox.innerHTML=thvCardHTML(context.thv,plHomNay);
+  }
   const cầnNạpBiên = !_bepCache;
   if(!liveOnly)computeBreakEvenWindow()
     .then(() => { if (context===_todayLiveCtx && cầnNạpBiên && curScreen === 'today' && !(kpi.revenue > 0)) renderToday(); })
@@ -27742,7 +27778,7 @@ async function submitFinance(){
     recoveryStartDate: document.getElementById('fRecStart').value || null,
     usageTrackingStart: document.getElementById('fUsageStart').value || null});
   thFrom = null; // mốc đổi thì màn Lệch kho phải lấy lại khoảng mặc định mới
-  _thvCache = null; // mốc đổi thì luỹ kế phải tính lại, không dùng số cũ trong phiên
+  thvDropCache(); // mốc đổi thì luỹ kế phải tính lại, bỏ cả lượt nạp nền cũ
   toast('✅ Đã lưu tài chính');
 }
 
