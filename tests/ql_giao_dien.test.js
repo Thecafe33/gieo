@@ -1,6 +1,7 @@
-// Giao diện quanlygieo.html đồng bộ với manage.html (16–17/10/2026): bảng màu / font / khối CSS cuối / thanh điều hướng dưới.
-// Test chỉ khoá những thứ dễ vỡ khi sửa tiếp: (1) màu chủ đạo không bị trả về hồng, (2) khối CSS đồng bộ phải là khối CUỐI (thắng mọi khối trên),
-// (3) hai màn POS gốc (#screen-tg, #screen-mn) vẫn giữ màu hồng, (4) thanh dưới chỉ trỏ tới màn có thật, (5) font Inter nhúng.
+// Giao diện quanlygieo.html theo HÌNH DÁNG của manage.html (17/10/2026): font Inter, sidebar kính nổi, viên thuốc, thanh điều hướng dưới (điện thoại).
+// MÀU KHÔNG ĐỔI: chủ dự án chỉ yêu cầu UI — màu chủ đạo của quanlygieo vẫn là HỒNG (#E23A5D). Test khoá:
+// (1) bảng màu :root giữ nguyên bản gốc (hồng + nền xám ấm + màu ngữ nghĩa) — đổi màu phải hỏi chủ dự án, (2) khối CSS [MANAGE-SKIN] là khối CUỐI (thắng mọi khối trên)
+// và KHÔNG chứa màu xanh manage, (3) thanh dưới chỉ trỏ tới màn có thật, (4) font Inter nhúng.
 const fs = require('fs'); const path = require('path');
 const ROOT = path.resolve(__dirname, '..');
 const h = fs.readFileSync(path.join(ROOT, 'quanlygieo.html'), 'utf8');
@@ -8,8 +9,9 @@ let ok = true; const chk = (c, m) => { console.log((c ? 'ok ' : 'FAIL ') + m); i
 
 const css = h.slice(h.indexOf('<style>'), h.indexOf('</style>'));
 const root = css.slice(css.indexOf(':root{'), css.indexOf('/* ---------- Reset ---------- */'));
-chk(/--gd:#006241;/.test(root) && /--bg:#eef1ee;/.test(root), ':root: màu chủ đạo xanh #006241 + nền #eef1ee (như manage)');
-chk(!/#E23A5D/i.test(root.replace(/\/\*[\s\S]*?\*\//g, '')), ':root không còn màu chủ đạo hồng #E23A5D');
+chk(/--gd:#E23A5D;/.test(root) && /--gm:#B7284A;/.test(root) && /--gl:#FDECF0;/.test(root), ':root: màu chủ đạo vẫn là HỒNG #E23A5D (không đổi màu app)');
+chk(/--bg:#F3F2F0;/.test(root) && /--td:#17151A;/.test(root) && /--bad:#D2333F;/.test(root) && /--ok:#12855A;/.test(root), ':root: nền / chữ / màu ngữ nghĩa giữ nguyên bản gốc');
+chk(!/#006241|#eef1ee/i.test(css), 'không có màu xanh #006241 / nền #eef1ee của manage trong CSS');
 chk(/--font:"Inter Local"/.test(root), ':root: --font dùng Inter Local (nhúng sẵn như manage)');
 chk((css.match(/font-family:\s*'Inter Local'/g) || []).length === 3, 'nhúng đủ 3 bộ ký tự Inter (Việt / Latin mở rộng / Latin)');
 
@@ -18,7 +20,8 @@ chk(h.split(B).length === 2 && h.split(E).length === 2, 'có đúng 1 khối [MA
 const iE = h.indexOf(E);
 chk(h.slice(iE + E.length, iE + E.length + 12).trim().startsWith('</style>'), 'khối [MANAGE-SKIN] nằm CUỐI <style> chính — mọi rule giao diện mới viết TRƯỚC nó sẽ bị nó đè');
 const skin = h.slice(h.indexOf(B), iE);
-chk(/#screen-tg,#screen-mn\{--gd:#E23A5D;/.test(skin), 'hai màn POS gốc (#screen-tg, #screen-mn) giữ màu hồng (cố ý — "hoàn nguyên theo yêu cầu")');
+chk(!/#006241|#1ba96f|#12855a|#0b6644|--gd\s*:/i.test(skin), 'khối [MANAGE-SKIN] không đặt lại màu chủ đạo / gradient xanh (chỉ hình dáng)');
+chk(!/\.kcard\.kcard-wide(\.lv-[a-z]+)?\{[^}]*background/.test(skin), 'khối [MANAGE-SKIN] không đụng nền gradient thẻ doanh thu');
 chk(/\.bottom-nav\{display:none;\}/.test(skin) && /html\.phone-ui \.bottom-nav\{/.test(skin), 'thanh dưới chỉ hiện ở giao diện điện thoại (html.phone-ui)');
 
 // thanh điều hướng dưới: mỗi nút phải trỏ đúng màn có trong menu chính
@@ -32,5 +35,9 @@ const rs = h.slice(h.indexOf('function renderSidebarNav(){'), h.indexOf('functio
 chk(rs.includes('renderBottomNav();'), 'renderSidebarNav gọi renderBottomNav (đổi màn → nút sáng theo)');
 const sbs = h.slice(h.indexOf('function renderSbStore()'), h.indexOf('// Mở bảng chọn quán.'));
 chk(sbs.includes('class="sb-store') && !/#f3c6cf|#fdf1f3|#eef4ff/i.test(sbs), 'nút chọn quán dùng class .sb-store, không còn style inline hồng');
-for (const sel of ['.sb-store{', '.sidebar-item', '.shift-badge{']) chk(skin.includes(sel), `khối [MANAGE-SKIN] có ${sel}`);
+for (const sel of ['.sb-store{', '.sidebar-item']) chk(skin.includes(sel), `khối [MANAGE-SKIN] có ${sel}`);
+const tile = h.slice(h.indexOf('const SB_TILE = {'), h.indexOf('};', h.indexOf('const SB_TILE = {')));
+chk(/stethoscope:'#FF2D55'/.test(tile), 'icon menu (SB_TILE) giữ màu gốc');
+const qa = h.slice(h.indexOf('function todayQuickAccessHTML(){'), h.indexOf('// [MỚI] Badge "Ca hiện tại"'));
+chk(qa.includes("c:'#0062AD'") && qa.includes('style="background:${x.c}17"'), '«Truy cập nhanh» giữ ô tô màu gốc');
 console.log(ok ? 'ALL PASS' : 'SOME FAIL'); process.exit(ok ? 0 : 1);
