@@ -4670,6 +4670,10 @@ async function computeActualLaborCostByDate(startDate, endDate){
   while(cur <= end){
     const dateKey = dkey(cur);
     const dim = daysInMonth(cur);
+    // [THU HỒI VỐN — 18/10] Đã đọc thành công chấm công của ngày đã qua:
+    // không phát sinh lương = 0, không phải thiếu khoá ngày để P&L tự nhét
+    // ngân sách mặc định vào quá khứ. Hôm nay vẫn giữ cơ chế dự đoán hiện có.
+    if(dateKey < dkey(new Date(_now)) && byDate[dateKey]==null) byDate[dateKey] = 0;
     employees.forEach(emp=>{
       if(emp.active===false) return;
       const terms = empPayTermsOn(emp, dateKey);        // [LƯƠNG THEO MỐC] mức lương cứng đúng ngày
@@ -8726,11 +8730,27 @@ function plSumDays(days){
 // lại hàng trăm ngày. Hôm nay chỉ màn Hôm nay ghi (số chủ quán đang nhìn); các màn khác ghi các ngày đã qua.
 // Không bao giờ chặn màn hình: lỗi ghi chỉ cảnh báo.
 const PL_TOM_TAT_KEYS = ['doanhThu','giaVon','phiKenh','luong','chiPhiCoDinh','khauHao','haoHut','bienPhiKhac','tongChiPhi','lai','laiTruocKhauHao'];
+const PL_LABOR_VERSION = 1;
+// Sửa một lần các bản cũ của ngày đã qua còn dùng lương dự đoán. Hai app dùng
+// cùng hàm; chỉ tính đúng ngày cần sửa, giữ giới hạn ngày của nơi gọi.
+function plNgayLuongCanTinhLai(by, from, to, opts){
+  opts = opts || {};
+  const now = opts.now!=null ? opts.now : Date.now();
+  const vn = ms=>new Date(ms+7*3600000).toISOString().slice(0,10);
+  const today = vn(now), low = opts.back!=null ? vn(now-opts.back*86400000) : from;
+  return Object.keys(by||{}).filter(d=>d>=from && d>=low && d<=to && d<today &&
+    by[d] && by[d].mucTinCay==='dang-chay' && (Number(by[d].laborVersion||0)<PL_LABOR_VERSION ||
+      Number(by[d].laborCheckedAmount)!==Math.round((Number(by[d].luong)||0)*100)/100)).sort();
+}
 function plTomTatNgay(d, be){
   const r = v => Math.round((Number(v)||0) * 100) / 100;
   const o = { date: d.date };
   PL_TOM_TAT_KEYS.forEach(k=>{ o[k] = r(d[k]); });
   o.mucTinCay = d.mucTinCay || 'dang-chay';
+  o.laborVersion = PL_LABOR_VERSION;
+  o.laborCheckedAmount = o.luong; // bắt cả trường hợp HTML cũ ghi đè số qua merge
+  o.luongNguon = d.luongNguon || null;
+  o.luongLaDuDoan = !!d.luongLaDuDoan;
   o.hoaVon = be && be.hoaVon != null ? r(be.hoaVon) : null;
   o.bienDongGop = be ? r(be.bienDongGop * 10000) / 10000 : null;
   o.khongTheHoaVon = !!(be && be.khongTheHoaVon);
@@ -8810,7 +8830,8 @@ async function plNgayTuSo(startDate, endDate){
       if(bo > 0){ const del = firebase.firestore.FieldValue.delete(), upd = {}; ks.slice(0, bo).forEach(k=>{ upd['d.' + k] = del; }); if(ks[bo] > sd.du) upd.du = ks[bo]; soRef.update(upd).catch(()=>{}); }
     }
   }catch(err){ console.warn('[pl_days] không đọc được bản tóm tắt — tính đầy đủ:', err); return computeDailyPLRange(startDate, endDate); }
-  const need = GieoData.plNgayCanTinh(by, from, to, { marks });
+  const need = [...new Set([...GieoData.plNgayCanTinh(by, from, to, { marks }),
+    ...plNgayLuongCanTinhLai(by,from,to)])].sort();
   const map = new Map(Object.values(by).map(x=>[x.date, x]));
   let assets;
   if(need.length){
@@ -8849,7 +8870,9 @@ async function computeDailyPLRange(startDate, endDate){
       .then(v => ({ ok: true, data: v }))
       .catch(err => { console.warn('[P&L] đọc ledger (waste thật) lỗi — hao hụt sẽ hiện 0 và bị đánh dấu thiếu số liệu:', err); return { ok: false, data: null }; }),
     HR_SETTINGS.useActualLaborCost
-      ? computeActualLaborCostByDate(startKey, endKey).catch(()=>null)
+      // Lỗi đọc không phải là lương 0 hay ngân sách: không ghi đè sổ cũ bằng
+      // một kết quả thiếu nguồn rồi âm thầm làm tụt luỹ kế.
+      ? computeActualLaborCostByDate(startKey, endKey)
       : Promise.resolve(null)
   ]);
   const ledger = ledgerRes.data;

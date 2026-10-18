@@ -6,6 +6,7 @@
 'use strict';
 const fs = require('fs'), path = require('path');
 const { extract } = require('./lib/extract');
+const laborVersionDecl = fs.readFileSync(path.join(__dirname, '../quanlygieo.html'), 'utf8').match(/const PL_LABOR_VERSION = \d+;/)[0];
 let ok = true;
 const eq = (a, b, m) => { if (JSON.stringify(a) !== JSON.stringify(b)) { ok = false; console.log('FAIL', m, JSON.stringify(a), '!=', JSON.stringify(b)); } else console.log('ok', m); };
 const near = (a, b, m) => eq(Math.abs(a - b) < 0.5, true, m + ' (' + a + ' ≈ ' + b + ')');
@@ -13,7 +14,7 @@ const near = (a, b, m) => eq(Math.abs(a - b) < 0.5, true, m + ' (' + a + ' ≈ '
 const MG = ['daysInMonthYm', 'beMonthValue', 'plBreakEven', 'tcxBreakEven', 'ggBreakEven'];
 const M = new Function("const PL_SUM_KEYS=['doanhThu','giaVon','phiKenh','luong','chiPhiCoDinh','khauHao','haoHut','bienPhiKhac','tongChiPhi','lai','laiTruocKhauHao'];\n" +
   extract('manage.html', MG) + '\nreturn {' + MG.join(',') + '};')();
-const Q = new Function("const PL_TOM_TAT_KEYS=['doanhThu','giaVon','phiKenh','luong','chiPhiCoDinh','khauHao','haoHut','bienPhiKhac','tongChiPhi','lai','laiTruocKhauHao'];\n" +
+const Q = new Function(laborVersionDecl + "\nconst PL_TOM_TAT_KEYS=['doanhThu','giaVon','phiKenh','luong','chiPhiCoDinh','khauHao','haoHut','bienPhiKhac','tongChiPhi','lai','laiTruocKhauHao'];\n" +
   extract('quanlygieo.html', ['plBreakEven', 'plSumDays', 'plTomTatNgay']) + '\nreturn { plBreakEven, plSumDays, plTomTatNgay };')();
 
 eq(extract('manage.html', ['plBreakEven']), extract('quanlygieo.html', ['plBreakEven']), 'plBreakEven của manage giống hệt quanlygieo');
@@ -75,7 +76,7 @@ eq(M.ggBreakEven(null, ['2026-10-16']), null, 'Gieo: không đọc được → 
     const GieoData = { storeId: () => storeId };
     const env = { QL_ALL, fstore, GieoData, window: { GieoData }, localStorage: { getItem: k => LS[k] || null, setItem: (k, v) => { LS[k] = v; } },
       dkey: () => '2026-10-16', configForDate: () => ({ targets: { cogsPct: 35 } }), console: { warn(...a) { console.log('WARN', ...a); } } };
-    const f = new Function(...Object.keys(env), "const PL_TOM_TAT_KEYS=['doanhThu','giaVon','phiKenh','luong','chiPhiCoDinh','khauHao','haoHut','bienPhiKhac','tongChiPhi','lai','laiTruocKhauHao'];\n" +
+    const f = new Function(...Object.keys(env), laborVersionDecl + "\nconst PL_TOM_TAT_KEYS=['doanhThu','giaVon','phiKenh','luong','chiPhiCoDinh','khauHao','haoHut','bienPhiKhac','tongChiPhi','lai','laiTruocKhauHao'];\n" +
       extract('quanlygieo.html', ['plBreakEven', 'plTomTatNgay', 'plLuuTomTat']) + '\nreturn plLuuTomTat;')(...Object.values(env));
     return { f, writes, LS, so };
   };

@@ -11,11 +11,14 @@
 | App bán hàng | `posgieo.html` | trỏ v18 |
 | App quản lý | `quanlygieo.html` | trỏ v18 |
 | Chế độ thử | `che_do_thu.v1.js` + `posgieo_thu.html`, `quanlygieo_thu.html` | sinh lại bằng `node tools/tao_ban_thu.js .` sau **mỗi** lần sửa HTML |
-| Test | `sh tests/run_all.sh` | 88 file `tests/*.test.js`, chỉ cần `node` |
+| Bộ tính lãi/lỗ | `lai_lo.v3.js` | sinh từ quanlygieo; giữ v1/v2 immutable cho HTML cũ |
+| Test | `sh tests/run_all.sh` | 89 file `tests/*.test.js`, chỉ cần `node` |
 
 **Trạng thái deploy (chủ dự án xác nhận 04/10/2026): v18 ĐÃ DEPLOY**, chạy ổn ở cửa hàng 1 được **1–3 tuần**. Đa cửa hàng cần ≥ vài tuần ổn định (`docs/KE_HOACH_DA_CUA_HANG.md` mục 0) → theo dõi thêm rồi mới làm M0. Chủ dự án tự deploy; phiên mới hỏi lại trước việc lớn nếu đã qua lâu.
 
 ## 2. Đã làm (theo thứ tự)
+
+**Mới nhất 18/10 — sửa luỹ kế thu hồi vốn giảm do lương dự toán ở ngày cũ**: sau khi đọc thành công nhân viên/chấm công, ngày đã qua không phát sinh lương có số 0 rõ ràng, không rơi về ngân sách tháng. Lỗi đọc lương dừng phép tính thay vì ghi bản tổng hợp thiếu nguồn. Hai app tự sửa các ngày cũ còn ước tính lương, theo đoạn cần thiết; metadata phiên bản/số lương ngăn tính lại liên tục và phát hiện HTML cũ ghi đè qua merge. manage dùng bộ sinh mới `lai_lo.v3.js`; v1/v2 giữ nguyên. Giữ dự toán hôm nay, tiền lương thật, công thức thu hồi vốn và các khoản lỗ thật. Sinh lại bản thử/ba bộ deploy; chưa deploy Hosting. Chi tiết: `docs/THU_HOI_VON.md`.
 
 **Mới nhất 18/10 — ô nhập trắng và sửa tìm sidebar**: ô ngày/giờ/tháng cùng các biểu mẫu quản lý dùng nền trắng, thẻ nhân viên và đầu bảng nhân sự trắng, viền nhân viên nghỉ dùng cam theo nhãn. Giữ phân biệt ô thật sự disabled. Tìm sidebar sửa padding bị CSS chung ghi đè, tắt search decoration trùng, căn icon/Ctrl K và giữ một viền focus. Giữ tính năng chọn ngày, tìm/Enter, dữ liệu, bộ tính và tab Menu/Khuyến mãi. Kiểm nhân sự 76 mục đạt và xem ba trạng thái lịch ở PC/tablet/mobile. Sinh lại bản thử và ba bộ deploy; chưa deploy Hosting. Chi tiết: `docs/GIAO_DIEN_QUANLY.md`.
 

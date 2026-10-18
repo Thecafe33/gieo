@@ -49,8 +49,9 @@ function dung() {
   for (const ten of Object.keys(BO)) {
     const files = {}, js = new Set();
     for (const [dst, lay] of Object.entries(BO[ten])) { files[dst] = lay(); jsCuaApp(files[dst]).forEach(f => js.add(f)); }
-    // Keep deployed calculator v1: cached older manage HTML can still request it.
-    if(js.has('lai_lo.v2.js'))js.add('lai_lo.v1.js');
+    // HTML cũ còn trong cache vẫn xin các bộ tính immutable đã phát hành.
+    if([...js].some(f=>/^lai_lo\.v\d+\.js$/.test(f)))
+      fs.readdirSync(ROOT).filter(f=>/^lai_lo\.v\d+\.js$/.test(f)).forEach(f=>js.add(f));
     for (const f of [...js].sort()) {
       if (!fs.existsSync(path.join(ROOT, f))) throw new Error(ten + ': app nạp ' + f + ' nhưng repo không có file này');
       files[f] = fs.readFileSync(path.join(ROOT, f));
