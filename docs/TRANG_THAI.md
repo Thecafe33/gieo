@@ -12,9 +12,11 @@
 | App quản lý | `quanlygieo.html` | trỏ v18 |
 | Chế độ thử | `che_do_thu.v1.js` + `posgieo_thu.html`, `quanlygieo_thu.html` | sinh lại bằng `node tools/tao_ban_thu.js .` sau **mỗi** lần sửa HTML |
 | Bộ tính lãi/lỗ | `lai_lo.v4.js` | sinh từ quanlygieo; giữ v1/v2/v3 immutable cho HTML cũ |
-| Test | `sh tests/run_all.sh` | 91 file `tests/*.test.js`, chỉ cần `node` |
+| Test | `sh tests/run_all.sh` | 92 file `tests/*.test.js`, chỉ cần `node` |
 
 **Trạng thái deploy (chủ dự án xác nhận 04/10/2026): v18 ĐÃ DEPLOY**, chạy ổn ở cửa hàng 1 được **1–3 tuần**. Đa cửa hàng cần ≥ vài tuần ổn định (`docs/KE_HOACH_DA_CUA_HANG.md` mục 0) → theo dõi thêm rồi mới làm M0. Chủ dự án tự deploy; phiên mới hỏi lại trước việc lớn nếu đã qua lâu.
+
+**18/10 — Báo cáo tháng toàn chuỗi + bấm giải thích số**: Xem tất cả có Tổng kết tháng riêng, 6 ô quan trọng ở đầu, so sánh từng unit/giai đoạn/chênh lệch hai kỳ và tiến độ chốt; tổng thiếu nguồn ghi rõ, không giả thành 0. Bấm số trong báo cáo chuỗi và unit mở công thức + số thành phần từ dữ liệu đã tải; giờ/OT/đơn giá theo ngày. Lọc/sắp/xuất/bấm số không thêm lượt đọc; đệm chuỗi 10 phút, tải lại/quét tháng lấy mới. Dùng nguyên computeDayPL/thvTienNgay; với ALL không ghi snapshot/mốc vốn. Nguồn mở rộng giữ “Chưa đủ số liệu” vì chưa có sổ điều chuyển/quỹ/công nợ đủ. Bộ tính v4/manage giữ nguyên. Tài liệu `docs/BAO_CAO_DIEU_HANH.md`; gói tải chỉ 2 HTML: `tai_ve/fix_bao_cao_chuoi_giai_thich_18-10.zip`. Test chuỗi 24 mục, Chromium chuỗi 54 + báo cáo unit 106; dùng dữ liệu giả/chặn mạng ngoài. **Chưa deploy Hosting**.
 
 ## 2. Đã làm (theo thứ tự)
 

@@ -2118,6 +2118,24 @@ html .today-pl-ledger .row{display:flex;align-items:flex-start;gap:12px;padding:
 #thangKetBody .month-stage-summary h3{font-size:17px;margin:0 0 10px;}
 #thangKetBody .month-stage-summary .row{display:flex;justify-content:space-between;gap:12px;align-items:baseline;padding:6px 0;}
 #thangKetBody .month-stage-summary .report-money{font-size:min(var(--report-money-size),20px);}
+.report-metric-button{display:inline-flex;align-items:baseline;gap:3px;border:0;border-bottom:1px dotted currentColor;border-radius:3px;background:none;color:inherit;font:inherit;font-weight:inherit;padding:2px 0;cursor:pointer;text-align:inherit;max-width:100%;}
+.report-metric-button:focus-visible{outline:2px solid var(--gd);outline-offset:4px;}
+.report-explanation .row{display:flex;justify-content:space-between;align-items:baseline;gap:16px;padding:9px 0;border-bottom:1px solid var(--line-2);}
+.report-explanation .row>span{min-width:0;overflow-wrap:anywhere;}
+.report-explanation .row>b{white-space:normal;overflow-wrap:anywhere;max-width:60%;min-width:0;text-align:right;}
+.report-explanation .report-money{font-size:min(var(--report-money-size),20px);}
+.report-explanation h3{margin:18px 0 8px;font-size:16px;}
+.chain-month-kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;}
+.chain-month-kpis .wkpi strong .report-money{font-size:min(var(--report-money-size),26px);}
+.chain-month-table{overflow-x:auto;margin-top:12px;}
+.chain-month-table table{width:100%;border-collapse:collapse;min-width:860px;}
+.chain-month-table th,.chain-month-table td{padding:12px 10px;border-bottom:1px solid var(--line-2);text-align:right;vertical-align:top;}
+.chain-month-table th:first-child,.chain-month-table td:first-child{text-align:left;}
+.chain-month-table .report-money{font-size:min(var(--report-money-size),16px);}
+.chain-month-toolbar{display:flex;flex-wrap:wrap;gap:12px;align-items:end;margin:12px 0;}
+.chain-month-toolbar .field{flex:1;min-width:170px;}
+@media(max-width:1000px){.chain-month-kpis{grid-template-columns:repeat(2,minmax(0,1fr));}}
+@media(max-width:600px){.chain-month-kpis{grid-template-columns:minmax(0,1fr);}.report-explanation .row{gap:8px;}.report-explanation .row>b{font-size:14px;}}
 #thangKetBody .month-dept>summary{cursor:pointer;list-style:none;}
 #thangKetBody .month-dept>summary::-webkit-details-marker{display:none;}
 #thangKetBody .month-dept>summary:focus-visible{outline:2px solid var(--gd);outline-offset:5px;border-radius:12px;}
@@ -2991,7 +3009,7 @@ function setSync(busy){
 }
 async function reloadCurrent(){
   clearError();
-  if(QL_ALL){ (curScreen === 'report' ? renderReportAll : renderTodayAll)(); return; }   // [Bước 3] Xem tất cả: Hôm nay + Báo cáo tổng hợp
+  if(QL_ALL){ if(curScreen==='thangket')return renderThangKetAll(true);(curScreen === 'report' ? renderReportAll : renderTodayAll)(); return; }
   thvDropCache(); // Tải lại phải bỏ cả tổng thu hồi vốn và lượt nạp nền cũ.
   memoDropAll();   // bấm Tải lại là muốn số MỚI, không phải số trong bộ đệm
   try{ await ensureAuth(); await loadConfig(); }catch(err){ console.warn('reload config failed', err); }
@@ -4778,6 +4796,7 @@ async function computeActualLaborBreakdownByEmployee(startDate, endDate){
     const employeeId = key.slice(0,sep);
     const { amount, otHours } = computeWageForDayHours(termsByEmpDate[key], hours);
     const bucket = ensure(employeeId);
+    (bucket.dayDetails||(bucket.dayDetails=[])).push({date:key.slice(sep+1),hours,otHours,amount,terms:{...termsByEmpDate[key]}});
     bucket.hours += hours;
     bucket.otHours += otHours;
     bucket.amount += amount;
@@ -4791,7 +4810,10 @@ async function computeActualLaborBreakdownByEmployee(startDate, endDate){
     employees.forEach(emp=>{
       if(emp.active===false) return;
       const terms = empPayTermsOn(emp, dkey(cur));      // [LƯƠNG THEO MỐC]
-      if(isFixedPayType(terms) && empFixedPayHere(emp)) ensure(emp.id).amount += terms.fixedMonthlySalary/dim;
+      if(isFixedPayType(terms) && empFixedPayHere(emp)){
+        const bucket=ensure(emp.id),amount=terms.fixedMonthlySalary/dim;
+        bucket.amount+=amount;(bucket.dayDetails||(bucket.dayDetails=[])).push({date:dkey(cur),hours:0,otHours:0,amount,terms:{...terms}});
+      }
     });
     cur.setDate(cur.getDate()+1);
   }
@@ -9341,14 +9363,14 @@ function plHealthHTML(tong, days, soNgayKy, ghiChuTinhLai, book){
         <span style="font-size:13px;font-weight:700;color:var(--gt);text-transform:uppercase;letter-spacing:.05em;">${daChot ? `${laLai?'Lãi':'Lỗ'} ${book.nhan}` : `${laLai?'Lãi':'Lỗ'} ${soNgayKy||tong.soNgay} ngày`}</span>
         ${daChot ? `<span class="tier tier-green">Đã chốt sổ ${String(book.chot.closedAt||'').slice(8,10)}/${String(book.chot.closedAt||'').slice(5,7)}</span>` : plChipTinCay(tong.mucTinCay)}
       </div>
-      <div style="font-size:30px;font-weight:750;color:${mau};margin-top:2px;line-height:1.15;">${laLai?'':'−'}${fmt(Math.abs(so.lai))}</div>
+      <div data-pl-metric="lai" style="font-size:30px;font-weight:750;color:${mau};margin-top:2px;line-height:1.15;">${laLai?'':'−'}${fmt(Math.abs(so.lai))}</div>
       <div class="small-note" style="margin-top:4px">
-        Trước khấu hao: <b>${so.laiTruocKhauHao>=0?'':'−'}${fmt(Math.abs(so.laiTruocKhauHao))}</b>
-        ${so.doanhThu ? ` · biên lãi <b>${fmtPct(so.doanhThu ? so.lai/so.doanhThu : 0)}</b>` : ''}
-        ${nhieuNgay ? ` · trung bình <b>${tong.lai/Math.max(1,tong.soNgay)>=0?'':'−'}${fmt(Math.abs(tong.lai/Math.max(1,tong.soNgay)))}</b>/ngày` : ''}
+        Trước khấu hao: <b data-pl-metric="management">${so.laiTruocKhauHao>=0?'':'−'}${fmt(Math.abs(so.laiTruocKhauHao))}</b>
+        ${so.doanhThu ? ` · biên lãi <b data-pl-metric="margin">${fmtPct(so.doanhThu ? so.lai/so.doanhThu : 0)}</b>` : ''}
+        ${nhieuNgay ? ` · trung bình <b data-pl-metric="average">${tong.lai/Math.max(1,tong.soNgay)>=0?'':'−'}${fmt(Math.abs(tong.lai/Math.max(1,tong.soNgay)))}</b>/ngày` : ''}
       </div>
       ${nhieuNgay ? `<div class="small-note" style="margin-top:2px">
-        <b style="color:${tong.soNgayLo?'var(--bad)':'var(--ok)'}">${tong.soNgayLo}</b>/${tong.soNgay} ngày lỗ</div>` : ''}
+        <b data-pl-metric="lossDays" style="color:${tong.soNgayLo?'var(--bad)':'var(--ok)'}">${tong.soNgayLo}</b>/${tong.soNgay} ngày lỗ</div>` : ''}
 
       ${plChartHTML(cot)}
       ${nhieuNgay ? `<div class="small-note" style="margin-top:2px">Cột đỏ tụt xuống dưới vạch là ngày lỗ${theoThang?' — kỳ này dài nên gom theo tháng':''}.</div>` : ''}
@@ -13445,8 +13467,8 @@ function switchScreen(s){
   // đưa về đúng màn Hôm nay đã gộp.
   if(s === 'storehealth') s = 'today';
   // [Bước 3] Xem tất cả cửa hàng: chỉ có màn Hôm nay tổng hợp — mục khác hỏi chọn quán rồi mở đúng mục đó.
-  if(QL_ALL && (s === 'thangket' || s === 'health')) s = 'report';   // Báo cáo · Tất cả cửa hàng
-  if(QL_ALL && s !== 'today' && s !== 'report'){ qlOpenStorePicker({ nav: qlNavKeyFor(s) }); return; }
+  if(QL_ALL && s === 'health') s = 'report';
+  if(QL_ALL && s !== 'today' && s !== 'report' && s !== 'thangket'){ qlOpenStorePicker({ nav: qlNavKeyFor(s) }); return; }
   closeTodayHealth(false);
   curScreen = s;
   document.querySelectorAll('.screen').forEach(el=>el.classList.remove('active'));
@@ -18722,6 +18744,7 @@ function qlRunAfterSwitch(){
   try{ a = JSON.parse(sessionStorage.getItem(QL_AFTER_KEY) || 'null'); sessionStorage.removeItem(QL_AFTER_KEY); }catch(e){}
   if(!a || QL_ALL) return;
   try{
+    if(a.month && /^\d{4}-(0[1-9]|1[0-2])$/.test(a.month))thangKetMonth=a.month;
     if(a.nav){ const it = NAV_SECTIONS.flatMap(s=>s.items).find(x=>x.key===a.nav); if(it) new Function(it.go)(); }
     else if(a.js) new Function(a.js)();
   }catch(err){ console.warn('[Cửa hàng] mở mục sau khi chuyển quán lỗi', err); }
@@ -20422,6 +20445,7 @@ function thangKetRowReason(empId, loai, idx, val){
 function thangKetFinalPayChange(empId, val){
   const a = thangKetAdjust[empId]; if(!a) return;
   a.finalPay = (val===''||val==null) ? null : (Number(val)||0);
+  thangKetRedraw();
 }
 function thangKetDeXuat(empId){
   const b = (thangKetData && thangKetData.empBreakdown && thangKetData.empBreakdown[empId]) || {amount:0};
@@ -20551,7 +20575,7 @@ function thangKetEmployeeCardHTML(e, tongGioTeam){
   const pctGio = (isHourly && tongGioTeam>0) ? (b.hours/tongGioTeam*100) : null;
   const a = thangKetAdjust[e.id] || {thuong:[], phat:[], finalPay:null};
   const dx = thangKetDeXuat(e.id);
-  return `<div class="card">
+  return `<div class="card" data-report-employee="${escapeHtmlAttr(e.id)}">
     <div class="card-h"><h3>${escapeHtmlAttr(e.fullName)}</h3><span class="tier tier-blue">${payTypeLabel(e)}</span></div>
     ${isHourly ? `
     <div class="row"><span class="rl">Giờ công</span><span class="rv">${fmtNum(b.hours,1)}h${b.otHours>0?` <span class="small-note">(${fmtNum(b.otHours,1)}h OT)</span>`:''}</span></div>
@@ -20675,18 +20699,24 @@ function thangKetCanhBaoHtml(){
   return `<div class="alert amber"><span class="ic">${ic('alert',15)}</span><div>Tháng ${d.m}/${d.y} đang chạy — mới có <b>${soNgayDaQua}/${soNgayCaThang}</b> ngày. Số liệu dưới đây sẽ còn thay đổi tới hết tháng.</div></div>`;
 }
 
+function thangKetSelectMonth(){
+  const el=document.getElementById('thangKetMonthInput'),month=el?.value;
+  if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(month||'')){if(el)el.value=thangKetMonth;toast('Chọn tháng hợp lệ');return;}
+  thangKetMonth=month;renderThangKet(true);
+}
 function thangKetMonthPickerHTML(){
   return `<div class="card">
     <div class="field" style="margin-bottom:0"><label>Chọn tháng cần tổng kết</label>
       <div style="display:flex;gap:6px">
         <input type="month" id="thangKetMonthInput" value="${thangKetMonth}">
-        <button class="btn" style="width:auto;padding:0 16px" onclick="thangKetMonth=document.getElementById('thangKetMonthInput').value; renderThangKet();">Quét tháng</button>
+        <button class="btn" style="width:auto;padding:0 16px" onclick="thangKetSelectMonth()">Quét tháng</button>
       </div>
     </div>
   </div>`;
 }
 
-async function renderThangKet(){
+async function renderThangKet(force=false){
+  if(QL_ALL)return renderThangKetAll(force);
   const request=++thangKetLoadSerial, reportStore=QL_VIEW, reportMonth=thangKetMonth;
   const obsolete=()=>request!==thangKetLoadSerial||reportStore!==QL_VIEW||reportMonth!==thangKetMonth;
   renderReportSubNav();
@@ -20771,7 +20801,7 @@ async function renderThangKet(){
     thangKetAdjust=monthAdjust;
     thangKetData = { y, m, start, end, monthEnd, startKey, endKey, storeId:reportStore,
       emps: empsQuan, empAn: Math.max(0,empsDangLam.length - empsQuan.length), empBreakdown, soNgayCongByEmp,
-      mix, khoExtra, plTong, plDays, plBook, expAll, cashVar, salesRes, dataMissing, recovery };
+      mix, khoExtra, plTong, plDays, plBook, expAll, cashVar, salesRes, dataMissing, recovery, assets };
 
     thangKetRedraw();
   }catch(err){
@@ -20882,11 +20912,11 @@ function monthOwnerSummaryHTML(d, m){
       <p class="small-note">Nhập hàng chưa dùng là tồn kho. Không trừ cả tiền PO vào lãi/lỗ ngày mua hoặc trừ lại một lần nữa cuối tháng. Phí kênh bán ${fmt(m.pl.phiKenh)} đã nằm trong kết quả.</p>
     </div></section>
     <section class="wdg wdg-teal"><div class="wdg-head">${wdgHeadHTML('users','Nhân sự','Giờ công, OT và số lương cần chốt')}</div><div class="wdg-body">${!m.hrAvailable?'<p>Chưa đọc đủ dữ liệu nhân sự, không coi là không phát sinh lương.</p>':`
-      <div class="row"><span class="rl">Nhân viên có công/lương trong kỳ</span><span class="rv">${fmtNum(m.working,0)} người</span></div><div class="row"><span class="rl">Giờ công / OT</span><span class="rv">${fmtNum(m.hours,1)}h / ${fmtNum(m.ot,1)}h</span></div>${plRowHTML('Lương phải trả theo bảng đề xuất','',m.payable)}<div class="row"><span class="rl">Đã chốt số lương</span><span class="rv">${m.finalized}/${m.staff} hồ sơ</span></div>
+      <div class="row"><span class="rl">Nhân viên có công/lương trong kỳ</span><span class="rv">${fmtNum(m.working,0)} người</span></div><div class="row"><span class="rl">Giờ công / OT</span><span class="rv">${fmtNum(m.hours,1)}h / ${fmtNum(m.ot,1)}h</span></div>${plRowHTML('Lương phải trả theo bảng đề xuất','',m.payable)}<div class="row"><span class="rl">Đã nhập số lương cuối</span><span class="rv">${m.finalized}/${m.staff} hồ sơ</span></div>
       <p class="small-note">Gồm người đã nghỉ nhưng có công/lương trong kỳ. Bảng đề xuất dựa vào công và điều chỉnh; lương trong P&L có thể còn dự toán theo lịch/ngân sách. Số phải trả chưa có nghĩa là đã trả tiền.</p>`}</div></section>
     <section class="wdg wdg-violet"><div class="wdg-head">${wdgHeadHTML('package','Kho & vận hành','Hàng nhận, thất thoát và kết quả bán hàng')}</div><div class="wdg-body">
       ${m.received==null?'<p>Chưa đọc đủ dữ liệu nhận hàng.</p>':plRowHTML('Giá trị hàng nhận trong kỳ','',m.received)}${plRowHTML('Hao hụt đã ghi nhận trong P&L','',m.pl.haoHut)}
-      <p><b>Món bán chạy:</b> ${m.top.length?m.top.map(t=>`${esc(t.ten)} (${fmtNum(t.ly,0)} ly)`).join(' · '):'Chưa có số liệu'}</p><p class="small-note">Giá trị hàng nhận không phải tiền đã thanh toán. Chi tiết đếm kho và trách nhiệm chỉ xem khi cần đối chiếu.</p>
+      <p><b>Món bán chạy:</b> ${m.top.length?m.top.map(t=>`<span class="month-top-product">${esc(t.ten)} (${fmtNum(t.ly,0)} ly)</span>`).join(' · '):'Chưa có số liệu'}</p><p class="small-note">Giá trị hàng nhận không phải tiền đã thanh toán. Chi tiết đếm kho và trách nhiệm chỉ xem khi cần đối chiếu.</p>
     </div></section>
   </div>${recordedCashFlowHTML(m.flow,'Dòng tiền tháng đã ghi nhận')}`;
 }
@@ -20916,12 +20946,14 @@ function currentMonthReportData(){
   return d;
 }
 function downloadMonthOwnerReport(){
+  if(QL_ALL)return chainMonthExport(false);
   const d=currentMonthReportData();if(!d)return;
   const m=monthOwnerModel(d,thangKetAdjust),esc=escapeHtmlAttr;
   const content=`<!doctype html><html lang="vi"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Báo cáo Gieo ${esc(thangKetMonth)}</title><style>body{font:16px/1.65 system-ui;margin:40px auto;max-width:820px;padding:0 24px;color:#211c20}h1{font-size:26px}pre{font:inherit;white-space:pre-wrap}button{padding:10px 20px;border-radius:12px;border:1px solid #ddd;background:#fff}@media print{button{display:none}body{margin:0}}</style><h1>Báo cáo điều hành Gieo Gieo</h1><button onclick="window.print()">In / lưu PDF</button><pre>${esc(monthOwnerReportText(d,m))}</pre></html>`;
   const url=URL.createObjectURL(new Blob([content],{type:'text/html;charset=utf-8'})),a=document.createElement('a');a.href=url;a.download=`bao-cao-gieo-${QL_VIEW}-${thangKetMonth}.html`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
 async function copyMonthOwnerReport(){
+  if(QL_ALL)return chainMonthExport(true);
   const d=currentMonthReportData();if(!d)return;
   try{await navigator.clipboard.writeText(monthOwnerReportText(d,monthOwnerModel(d,thangKetAdjust)));toast('Đã sao chép báo cáo');}catch(err){toast('Không sao chép được; hãy dùng Tải báo cáo');}
 }
@@ -20999,11 +21031,284 @@ function thangKetRedraw(){
   const model=monthOwnerModel(d,thangKetAdjust);
   body.innerHTML = head + monthOwnerSummaryHTML(d,model) +
     department('monthFinanceDetails','coins','Chi tiết kế toán','Đối chiếu từng ngày, khoản chi và sổ đã chốt',taiChinh) +
-    department('monthHRDetails','users','Chi tiết nhân sự','Bảng công/lương và các điều chỉnh cần rà',nhanSu) +
+    department('monthHRDetails','users','Chi tiết nhân sự','Bảng công/lương và các điều chỉnh cần rà',model.hrAvailable?nhanSu:'<p>Chưa đọc đủ dữ liệu nhân sự/công/lương hoặc điều chỉnh. Quét lại tháng để bổ sung; không coi dữ liệu lỗi là lương 0.</p>') +
     department('monthStockDetails','package','Chi tiết kho','Hàng nhận và vật tư ít động theo tồn hiện tại',kho) +
     department('monthSalesDetails','receipt','Chi tiết bán hàng','Món bán chạy, bán chậm và chưa bán',banHang);
+  wireMonthUnitMetrics(body,d,model);
 }
 
+// [BÁO CÁO CHUỖI] Chỉ đọc; mọi số dùng computeDayPL/plSumDays/thvTienNgay của từng unit.
+let chainMonthData=null,chainMonthSerial=0,chainMonthSort='result',chainMonthFilter='all';
+let monthMetricRegistry=[];
+function reportMetricButton(label,html,formula,rows=[],notes=[],scope=''){
+  const id=monthMetricRegistry.push({label,html,formula,rows,notes,scope})-1;
+  return `<button type="button" class="report-metric-button" onclick="event.stopPropagation();openMonthMetric(${id})" aria-label="Giải thích ${escapeHtmlAttr(label)}">${html}</button>`;
+}
+function openMonthMetric(id){
+  const x=monthMetricRegistry[id];if(!x)return;
+  const esc=escapeHtmlAttr;
+  const body=`<div class="report-explanation"><p class="small-note">${esc(x.scope||'Báo cáo tháng đang xem')} · Dùng số liệu đã nạp của báo cáo.</p><div class="unit-explainer"><b>${esc(x.formula)}</b></div><h3>Giá trị đang xem</h3><div>${x.html}</div><h3>Số liệu thành phần</h3>${x.rows.map(r=>`<div class="row"><span>${esc(String(r[0]))}</span><b>${esc(String(r[1]))}</b></div>`).join('')||'<p>Chưa có dữ liệu thành phần để xác nhận con số.</p>'}${x.notes.map(n=>`<p class="small-note">${esc(n)}</p>`).join('')}</div>`;
+  openEditSheet(x.label,body,()=>{});
+}
+function wireMonthValue(el,label,formula,rows,notes,scope){
+  if(!el||el.querySelector('button,input,select,a')||el.closest('button'))return;
+  el.innerHTML=reportMetricButton(label,el.innerHTML,formula,rows,notes,scope);
+}
+function wireMonthCashMetrics(root,flow,scope,expenses,from,to,receiptRows){
+  const paid=(expenses||[]).filter(e=>recordedCashFlow([], [e],from,to).chi!==0);
+  const paymentRows=paid.map(e=>[`${e.reportStore?e.reportStore+' · ':''}${e.paidDate||e.date||'Không rõ ngày'} · ${e.category||'Khoản chi'}${e.note?' · '+e.note:''}`,fmt(e.amount)]);
+  const values=root.querySelectorAll('.recorded-cash-widget .kmval');
+  wireMonthValue(values[0],'Thu vào','Tổng doanh thu theo bill trong kỳ; chưa phải số dư tiền',receiptRows||[[scope,fmt(flow.thu)]],['Không gồm vốn góp/chuyển tiền nội bộ.'],scope);
+  wireMonthValue(values[1],'Chi ra đã ghi nhận','Cộng các khoản có ngày trả trong kỳ; loại dự đoán/từ chối/chưa trả',paymentRows.length?paymentRows:[['Tổng khoản chi từ các unit đã đọc',fmt(flow.chi)]],['Khoản trả tiền chưa được ghi không nằm trong số này.'],scope);
+  const v=root.querySelectorAll('.cash-flow-details .row>b');
+  wireMonthValue(v[0],'Chi mua hàng/nguyên liệu','Phần tiền chi được phân loại mua nguyên liệu hoặc mua đá',paid.filter(e=>expenseCoveredByCogs(e)).map(e=>[`${e.reportStore?e.reportStore+' · ':''}${e.paidDate||e.date} · ${e.category}`,fmt(e.amount)]),['Đây là tiền mua, không phải toàn bộ giá vốn đã bán.'],scope);
+  wireMonthValue(v[1],'Chi khác đã ghi','Tổng chi đã ghi − tiền mua nguyên liệu',[['Tổng chi',fmt(flow.chi)],['Trong đó mua hàng',fmt(flow.muaHang)],['Chi khác',fmt(flow.chi-flow.muaHang)]],[],scope);
+  wireMonthValue(v[2],'Chênh lệch tiền đã ghi','Thu vào − chi ra đã ghi',[['Thu vào',fmt(flow.thu)],['Chi ra đã ghi',fmt(flow.chi)],['Chênh lệch',fmt(flow.conLai)]],['Không dùng số này làm lợi nhuận hoặc nguồn mở unit mới.'],scope);
+}
+function monthUnitMetricSpecs(d,m){
+  const p=m.pl,r=m.recovery,days=d.plDays||[],notes=[...(m.missing||[]).map(x=>'Thiếu nguồn: '+x),...(m.estimateSources||[])],spec={};
+  const add=(key,label,formula,rows,extra=[])=>{spec[key]={label,formula,rows,notes:notes.concat(extra)};};
+  const dayRows=k=>days.map(x=>[x.date,fmt(typeof k==='function'?k(x):x[k])]);
+  [['doanhThu','Doanh thu','Cộng doanh thu bill từng ngày'],['giaVon','Giá vốn hàng đã bán','Giá vốn nguyên liệu/bao bì món và topping đã bán; phần chưa có định mức được ước tính theo cấu hình'],['luong','Tiền lương trong kết quả vận hành','Cộng lương của từng ngày: chấm công thật cho ngày đã qua, lịch/ngân sách cho phần đang dự toán'],['haoHut','Hao hụt và huỷ','Cộng giá trị hao hụt/hủy ghi ở sổ kho theo ngày'],['phiKenh','Phí kênh bán','Cộng phí kênh được tính theo bill/ngày'],['khauHao','Khấu hao','Cộng phần nguyên giá trừ giá trị thu hồi chia thời gian sử dụng và số ngày của tháng'],['bienPhiKhac','Chi phí biến đổi vận hành','Phần chi biến đổi phân bổ vào kỳ, đã loại khoản mua nằm trong giá vốn'],['chiPhiCoDinh','Chi phí cố định','Cộng khoản cố định phân bổ vào từng ngày'],['lai','Lãi/lỗ kế toán','Doanh thu − giá vốn − lương − vận hành − phí kênh − hao hụt − khấu hao'],['tongChiPhi','Tổng chi phí kế toán','Cộng giá vốn, lương, vận hành, phí kênh, hao hụt và khấu hao']].forEach(([k,l,f])=>add(k,l,f,dayRows(k)));
+  spec.luong.rows=days.map(x=>[x.date+' · '+(x.luongNguon||'theo bộ tính P&L')+(x.luongLaDuDoan?' · dự toán':''),fmt(x.luong)]);
+  spec.luong.notes.push('Bảng lương nhân sự có giờ và đơn giá theo ngày để đối chiếu; lương P&L của hôm nay có thể còn dự toán.');
+  add('management',m.managementLabel,'Doanh thu − giá vốn − lương − vận hành − phí kênh − hao hụt; chưa trừ khấu hao',dayRows(thvTienNgay));
+  add('opex','Chi phí vận hành phân bổ','Chi phí cố định + biến phí vận hành đã phân bổ',dayRows(x=>(Number(x.chiPhiCoDinh)||0)+(Number(x.bienPhiKhac)||0)));
+  add('operatingCosts','Giá vốn và chi phí vận hành','Giá vốn + lương + cố định + biến phí + phí kênh + hao hụt',dayRows(x=>(Number(x.tongChiPhi)||0)-(Number(x.khauHao)||0)));
+  add('capital','Vốn đang theo dõi','Tổng nguyên giá tài sản đang active; dùng cùng mẫu số với Thu hồi vốn',(d.assets||[]).filter(a=>a.active!==false).map(a=>[a.name||a.id,fmt(a.purchaseCost)]),['Nguyên liệu tồn kho không đưa vào tài sản cố định ở đây.']);
+  const reconciliation=r?[['Luỹ kế đầu kỳ',fmt(r.opening)],['Góp thu hồi vốn trong kỳ',fmt(r.recoveryContribution)],['Thặng dư sau mốc trong kỳ',fmt(r.operatingSurplus)],['Luỹ kế cuối kỳ',fmt(r.closing)]]:[];
+  add('closing','Luỹ kế thu hồi vốn','Luỹ kế đầu kỳ + kết quả trước khấu hao trong kỳ',reconciliation,['Đây là kết quả tạo ra; chưa xác nhận tiền đã rút/chuyển.']);
+  add('remaining','Còn cần thu hồi','Lấy lớn hơn giữa 0 và vốn đang theo dõi − luỹ kế',r?[['Vốn đang theo dõi',fmt(r.capital)],['Luỹ kế',fmt(r.closing)],['Còn cần',fmt(r.remaining)]]:[]);
+  add('recovery','Góp thu hồi vốn trong kỳ','Cộng kết quả trước khấu hao của những ngày chưa qua mốc hoàn vốn',dayRows(x=>!r?.reached||x.date<=r.reached?thvTienNgay(x):0));
+  add('surplus','Thặng dư vận hành sau mốc','Cộng kết quả trước khấu hao từ NGÀY KẾ TIẾP mốc hoàn vốn',dayRows(x=>r?.reached&&x.date>r.reached?thvTienNgay(x):0));
+  add('hours','Giờ công / OT','Cộng giờ công và OT theo từng nhân viên',(d.emps||[]).map(e=>{const b=d.empBreakdown?.[e.id]||{};return[e.fullName,`${fmtNum(b.hours||0,1)}h / ${fmtNum(b.otHours||0,1)}h OT`];}));
+  add('people','Nhân viên có công/lương','Đếm người có giờ công hoặc tiền lương trong kỳ',(d.emps||[]).filter(e=>Number(d.empBreakdown?.[e.id]?.hours)>0||Number(d.empBreakdown?.[e.id]?.amount)>0).map(e=>[e.fullName,e.id]),['Bao gồm người đã nghỉ nhưng có công/lương của kỳ này.']);
+  const wages=(d.emps||[]).flatMap(e=>{const b=d.empBreakdown?.[e.id]||{},a=thangKetAdjust[e.id]||{},sum=xs=>(xs||[]).reduce((n,x)=>n+(Number(x.amount)||0),0);return[[e.fullName+' · lương chấm công',fmt(b.amount)],[e.fullName+' · thưởng',fmt(sum(a.thuong))],[e.fullName+' · trừ lương',fmt(sum(a.phat))],[e.fullName+' · số đề xuất/phải trả',fmt(a.finalPay!=null?a.finalPay:(Number(b.amount)||0)+sum(a.thuong)-sum(a.phat))]];});
+  add('payable','Lương theo bảng đề xuất','Lương chấm công + thưởng − trừ lương; dùng số cuối đã nhập nếu có',wages,['Chưa phải xác nhận tiền đã thanh toán. Chỉnh sửa chưa lưu vẫn là bản nháp đang xem.']);
+  add('finalized','Hồ sơ đã có số lương','Đếm hồ sơ có finalPay; không phải xác nhận đã trả lương',(d.emps||[]).map(e=>[e.fullName,thangKetAdjust[e.id]?.finalPay!=null?fmt(thangKetAdjust[e.id].finalPay):'Chưa nhập số cuối']));
+  add('received','Giá trị hàng nhận','Cộng giá trị nguyên liệu nhận trong kỳ theo số lượng và giá tại ngày nhận',(d.khoExtra?.nhapList||[]).map(x=>[`${x.ten} · ${fmtNum(x.qty,1)} ${x.donVi}`,fmt(x.value)]),['Giá trị hàng nhận không xác nhận đã trả NCC.']);
+  return spec;
+}
+function monthResponsibilityMetric(label,events,cash){
+  const categories=/Hao hụt/.test(label)?['prepWaste','reportedWaste']:/Thiếu tồn/.test(label)?['shortage']:/Chênh đếm BTP/.test(label)?['prepCountShort','prepCountSurplus']:/Quy theo ca|độ tin cậy/.test(label)?['dutyShort','dutySurplus']:/Dùng vượt/.test(label)?['extraUse']:null;
+  let selected=categories?(events||[]).filter(x=>categories.includes(x.category)):[...(events||[])];
+  if(/độ tin cậy/.test(label))selected=selected.filter(x=>x.confidence==='strong'&&x.category==='dutyShort');
+  if(/nhập sai/.test(label))selected=selected.filter(x=>x.entryError);
+  if(/Chờ quản lý duyệt/.test(label))selected=selected.filter(x=>x.needsReview);
+  const cashOnly=/tiền|THIẾU|THỪA|không khớp nhân viên/.test(label)&&!categories;
+  const cashRows=(cash||[]).filter(x=>/THIẾU/.test(label)?x.v<0:/THỪA/.test(label)?x.v>0:true).map(x=>[`${x.date} · ${x.kind}`,fmt(x.v)]);
+  return {formula:cashOnly?'Cộng lệch tiền từng sự kiện trong kỳ; thiếu và thừa cộng riêng, không bù trừ':'Cộng hoặc đếm sự kiện đúng nhóm trong kỳ; các loại thiếu/thừa giữ riêng',
+    rows:cashOnly?cashRows:selected.map(x=>[`${x.date} · ${x.employeeName||''} · ${x.itemName||''} · ${{prepWaste:'Hao hụt lúc nấu',reportedWaste:'Hao hụt đã khai',shortage:'Thiếu tồn',prepCountShort:'Đếm BTP thiếu',prepCountSurplus:'Đếm BTP thừa',dutyShort:'Quy theo ca: thiếu',dutySurplus:'Quy theo ca: thừa',extraUse:'Dùng thêm'}[x.category]||x.category} · ${x.id||''}`,fmt(x.value)]),
+    notes:['Không tự coi những số này là khoản phạt. Cần xác minh và quyết định của quản lý.',...(categories||cashOnly?[]:['Các loại sự kiện và giá trị dưới đây là chi tiết tham chiếu; không cộng gộp khác loại.'])]};
+}
+function wireMonthUnitMetrics(root,d,m){
+  monthMetricRegistry=[];const specs=monthUnitMetricSpecs(d,m),scope=`${d.storeId||QL_VIEW} · ${d.startKey} → ${d.endKey}`;
+  const wire=(el,key,label)=>{const s=specs[key];if(s)wireMonthValue(el,label||s.label,s.formula,s.rows,s.notes,scope);};
+  root.querySelectorAll('.month-owner-summary .wkpi strong').forEach((el,i)=>wire(el,['doanhThu','operatingCosts','management'][i]));
+  wireMonthValue(root.querySelector('.month-owner-summary .wkpi small'),'Số bill và ly bán','Bill đếm từ giao dịch; ly bán từ tổng hợp món trong kỳ',[[String(m.bills)+' bill',String(m.cups)+' ly'],...(d.salesRes?.perDay||[]).map(p=>[p.date,(p.bills||0)+' bill']),...(d.mix?.mon||[]).filter(x=>x.ly>0).map(x=>[x.ten,x.ly+' ly'])],[],scope);
+  const stageKeys=m.recovery?(m.recovery.stage==='recovery'?['recovery','closing','capital','remaining']:m.recovery.stage==='operating'?['surplus','closing','capital']:['recovery','surplus','closing','capital']):[];
+  root.querySelectorAll('.month-stage-summary .row>b').forEach((el,i)=>wire(el,stageKeys[i]));
+  root.querySelectorAll('.month-profit-bridge .rv').forEach((el,i)=>wire(el,['doanhThu','giaVon','luong','opex','phiKenh','haoHut','management'][i]));
+  const groups=root.querySelectorAll('.month-owner-overviews>.wdg');
+  groups[0]?.querySelectorAll('.rv').forEach((el,i)=>wire(el,['giaVon','luong','opex','haoHut','khauHao','management'][i]));
+  groups[1]?.querySelectorAll('.rv').forEach((el,i)=>wire(el,['people','hours','payable','finalized'][i]));
+  groups[2]?.querySelectorAll('.rv').forEach((el,i)=>wire(el,m.received==null?'haoHut':['received','haoHut'][i]));
+  root.querySelectorAll('.month-top-product').forEach((el,i)=>{const x=m.top[i];if(x)wireMonthValue(el,x.ten,'Số ly của món theo tổng hợp bill trong kỳ',[[x.ten,x.ly+' ly'],['Tổng ly bán',m.cups+' ly']],[],scope);});
+  // Dòng số trong các phần mở rộng dùng chính dữ liệu đang nạp; không truy vấn khi bấm.
+  const prefixes=[['Doanh thu','doanhThu'],['Giá vốn','giaVon'],['Hao hụt','haoHut'],['Phí kênh','phiKenh'],['Phí sàn','phiKenh'],['Chi phí biến đổi','bienPhiKhac'],['Chi phí cố định','chiPhiCoDinh'],['Khấu hao','khauHao'],['Lương','luong'],['Lãi kỳ','lai'],['Lỗ kỳ','lai'],['Tổng chi phí','tongChiPhi']];
+  const closed=d.plBook?.chot,accounting=closed||m.pl;
+  const accountingRows=Object.entries(specs).filter(([k])=>PL_TOM_TAT_KEYS.includes(k)).map(([k,x])=>[x.label,fmt(accounting[k])]);
+  const accountingNotes=closed?['Giá trị trong khối này lấy từ sổ tháng đã chốt; các bảng công và giao dịch hiện tại có thể khác.',...(m.bookDiff?['Số mới khác sổ chốt: cần đối chiếu, không tự ghi đè sổ.']:[])]:[];
+  root.querySelectorAll('#monthFinanceDetails .row').forEach(row=>{
+    const label=row.querySelector('.rl')?.textContent||'',k=prefixes.find(([p])=>label.startsWith(p));
+    if(k){const x=specs[k[1]];wireMonthValue(row.querySelector('.rv'),label,x.formula,closed?[['Theo sổ tháng đã chốt',fmt(closed[k[1]])],['Tính lại từ dữ liệu hiện tại',fmt(m.pl[k[1]])]]:x.rows,x.notes.concat(accountingNotes),scope);}
+    else{const day=(d.plDays||[]).find(p=>label.startsWith(plNhanNgay(p.date)));if(day)wireMonthValue(row.querySelector('.rv'),'Lãi/lỗ kế toán '+day.date,specs.lai.formula,Object.entries(day).filter(([k])=>PL_TOM_TAT_KEYS.includes(k)).map(([k,v])=>[specs[k]?.label||k,fmt(v)]),[],scope);}
+  });
+  const finance=root.querySelector('#monthFinanceDetails .card');
+  const financialMetrics={lai:['Lãi/lỗ kế toán kỳ này',specs.lai.formula],management:['Trước khấu hao','Lãi/lỗ kế toán + khấu hao'],margin:['Biên lãi kế toán','Lãi/lỗ kế toán / doanh thu × 100%'],average:['Lãi/lỗ bình quân','Lãi/lỗ tính lại / số ngày'],lossDays:['Ngày lỗ','Đếm ngày có lãi/lỗ kế toán < 0']};
+  finance?.querySelectorAll('[data-pl-metric]').forEach(el=>{
+    const key=el.dataset.plMetric,x=financialMetrics[key],current=['average','lossDays'].includes(key);
+    const rows=current?d.plDays.map(p=>[p.date,fmt(p.lai)]).concat([['Số ngày',String(d.plDays.length)],['Ngày lỗ',String(m.pl.soNgayLo||0)]]):accountingRows;
+    if(x)wireMonthValue(el,x[0],x[1],rows,current?['Số này dùng các ngày tính lại hiện tại; đối chiếu riêng với sổ tháng đã chốt.']:accountingNotes,scope);
+  });
+  root.querySelectorAll('[data-report-employee]').forEach(card=>{
+    const id=card.dataset.reportEmployee,e=d.emps.find(x=>x.id===id),b=d.empBreakdown?.[id]||{},a=thangKetAdjust[id]||{},events=d.khoExtra?.responsibility?.byEmployee?.[id]?.events||[],cash=d.cashVar?.[id]?.events||[];
+    const rows=(b.dayDetails||[]).map(x=>[`${x.date} · ${fmtNum(x.hours||0,2)}h · OT ${fmtNum(x.otHours||0,2)}h`,fmt(x.amount)]);
+    const terms=(b.dayDetails||[]).map(x=>`${x.date}: ${x.terms?.payType||''}; giờ ${fmt(x.terms?.hourlyRate)}, OT ${fmt(x.terms?.otRate)} sau ${x.terms?.otThresholdHours||8}h`);
+    card.querySelectorAll('.row').forEach(row=>{const label=row.querySelector('.rl')?.textContent||'',value=row.querySelector('.rv');
+      if(/Giờ công|Số ngày làm|% giờ|Lương/.test(label))wireMonthValue(value,(e?.fullName||id)+' · '+label,'Lương theo công: cộng giờ mỗi người/ngày rồi tính OT theo điều khoản đúng ngày; đề xuất = lương + thưởng − trừ lương',rows.concat([['Giờ công',fmtNum(b.hours||0,2)+'h'],['Giờ OT',fmtNum(b.otHours||0,2)+'h'],['Số ngày có công',String(d.soNgayCongByEmp?.[id]||0)],['Tổng giờ team',(m.hours||0)+'h'],...(a.thuong||[]).map(x=>['Thưởng: '+x.reason,fmt(x.amount)]),...(a.phat||[]).map(x=>['Trừ lương: '+x.reason,fmt(x.amount)])]),terms.concat(['Điều chỉnh trên màn chưa lưu là bản nháp; tiền lương đề xuất chưa xác nhận đã trả.']),scope);
+      else{const x=monthResponsibilityMetric(label,events,cash);wireMonthValue(value,(e?.fullName||id)+' · '+label,x.formula,x.rows,x.notes,scope);}
+    });
+  });
+  root.querySelectorAll('#monthHRDetails .row').forEach(row=>{
+    if(row.closest('[data-report-employee]'))return;
+    if(row.querySelector('.rl')?.textContent?.startsWith('Không tính vào ai')){
+      const dp=d.khoExtra?.responsibility?.dutyPool||{};
+      wireMonthValue(row.querySelector('.rv'),'Chênh lệch chưa quy cho nhân viên','Giữ riêng: lỗi định mức / chưa quy hoặc chưa xác minh / đang tranh chấp',Object.entries(dp).map(([k,x])=>[({recipe:'Định mức',unknown:'Chưa quy',unverified:'Chưa xác minh',dispute:'Tranh chấp',waived:'Đã miễn'})[k]||k,`${fmt(x.value)} · ${x.count||0} lượt`]),['Không trừ các khoản này vào lương nhân viên.'],scope);return;
+    }
+    const label=row.querySelector('.rl')?.textContent||'',x=monthResponsibilityMetric(label,d.khoExtra?.responsibility?.events||[],Object.values(d.cashVar||{}).flatMap(g=>g.events||[]));
+    wireMonthValue(row.querySelector('.rv'),label,x.formula,x.rows,x.notes,scope);
+  });
+  root.querySelectorAll('#monthSalesDetails .row').forEach(row=>{const label=row.querySelector('.rl')?.textContent||'',item=d.mix?.mon?.find(x=>label===x.ten);if(item)wireMonthValue(row.querySelector('.rv'),item.ten,'Số ly theo tổng hợp bill; tỷ trọng = ly món / tổng ly bán',[[item.ten,item.ly+' ly'],['Tổng ly',String(d.mix.soLy)],['Tỷ trọng',fmtNum(d.mix.soLy?item.ly/d.mix.soLy*100:0,1)+'%']],[],scope);else wireMonthValue(row.querySelector('.rv'),label,'Tổng hợp bill theo khoảng tháng đang xem',(d.salesRes?.perDay||[]).map(p=>[p.date,`${fmt(p.revenue)} · ${p.bills||0} bill · ${p.items||0} món`]),[],scope);});
+  root.querySelectorAll('#monthStockDetails .row').forEach(row=>{const name=row.querySelector('.rl')?.textContent||'',item=d.khoExtra?.tonLau?.find(x=>x.ten===name);if(item)wireMonthValue(row.querySelector('.rv'),name,'Tồn hiện tại × giá theo cuối kỳ; không phải kiểm kê tồn cuối tháng đã chốt',[[item.ten,`${fmtNum(item.ton,1)} ${item.donVi}`],['Giá trị',fmt(item.giaTri)]],['Không có dòng sổ trong kỳ; tồn này là tồn hiện tại.'],scope);else wire(row.querySelector('.rv'),'received');});
+  root.querySelectorAll('#monthStockDetails tbody tr').forEach(row=>{const cells=row.querySelectorAll('td'),x=d.khoExtra?.nhapList?.find(x=>x.ten===cells[0]?.textContent);if(x)for(const el of [...cells].slice(1))wireMonthValue(el,x.ten+' · hàng nhận','Giá trị nhận = cộng số lượng nhận × giá theo ngày nhận',[[x.ten,`${fmtNum(x.qty,1)} ${x.donVi}`],['Giá trị hàng nhận',fmt(x.value)]],['Giá trị theo sổ nhận hàng, chưa xác nhận đã trả tiền.'],scope);});
+  wireMonthCashMetrics(root,m.flow,scope,d.expAll,d.startKey,d.endKey,(d.salesRes?.perDay||[]).map(p=>[p.date,fmt(p.revenue)]));
+}
+function chainMonthRange(month,todayKey){
+  if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(month))throw new Error('Tháng không hợp lệ');
+  const [y,m]=month.split('-').map(Number),start=new Date(y,m-1,1),last=new Date(y,m,0),endKey=month===todayKey.slice(0,7)?todayKey:dkey(last);
+  const previousStart=new Date(y,m-2,1),previousLast=new Date(y,m-1,0);
+  const previousEnd=month===todayKey.slice(0,7)?new Date(y,m-2,Math.min(Number(todayKey.slice(8)),previousLast.getDate())):previousLast;
+  return {month,start,end:new Date(endKey+'T00:00:00'),startKey:dkey(start),endKey,previousStart,previousEnd,previousStartKey:dkey(previousStart),previousEndKey:dkey(previousEnd)};
+}
+function chainBookRecovery(book,finance,assets,periodDays,range,marks){
+  const start=thvMocBatDau(assets,finance.recoveryStartDate),capital=thvTongVon(assets),by={...(book?.d||{})};
+  if(!start||!capital||!book?.du||book.du>start||range.endKey<start||daysBetweenInclusive(new Date(start+'T00:00:00'),range.end)>THV_MAX_DAYS)return null;
+  periodDays.forEach(p=>{by[p.date]=p;});
+  for(let d=new Date(start+'T00:00:00');d<=range.end;d.setDate(d.getDate()+1))if(!by[dkey(d)])return null;
+  const history=Object.fromEntries(Object.entries(by).filter(([d])=>d>=start&&d<range.previousStartKey));
+  const opts={marks};
+  if(GieoData.plNgayCanTinh(history,start,dkey(new Date(range.previousStart.getTime()-86400000)),opts).length || plNgayLuongCanTinhLai(history,start,range.endKey).length || plNgayDaCanTinhLai(history,start,range.endKey).length)return null;
+  return monthRecoveryStage({historyDays:Object.values(by),periodDays,startKey:range.startKey,endKey:range.endKey,capital,startDate:start,historyStart:start,savedReachedDate:finance.recoveryReachedDate,truncated:false});
+}
+// Đợi đủ mọi lượt đọc trước khi trả scope; một nhánh lỗi không để nhánh khác
+// gán COGS/danh mục muộn vào unit kế tiếp.
+async function chainMonthReadGroup(tasks){
+  const results=await Promise.allSettled(tasks),failed=results.find(x=>x.status==='rejected');
+  if(failed)throw failed.reason;
+  return results.map(x=>x.value);
+}
+// Điều phối đọc nghiêm ngặt cho màn chuỗi: lỗi nguồn phải hiện ở unit đó.
+// Bộ tính NGUYÊN VẸN là computeDayPL/plSumDays dùng bởi computeDailyPLRange và lai_lo.v4.
+// Không ghi pl_days/pl_book khi chỉ xem toàn chuỗi.
+async function chainMonthComputeDays(range){
+  const startKey=range.previousStartKey,endKey=range.endKey;
+  const [salesRes,expList,assets,cats,employees,schedules,waste,laborActual]=await chainMonthReadGroup([
+    fetchSalesRange(range.previousStart,range.end),loadExpensesAll(),loadAssetsAll(),loadExpenseCategories(),loadEmployees(),
+    loadSchedulesForRange(startKey,endKey),computeWasteByDateRange(range.previousStart,range.end),
+    HR_SETTINGS.useActualLaborCost?computeActualLaborCostByDate(startKey,endKey):Promise.resolve(null)
+  ]);
+  const laborPredicted=plPredictedLaborByDate(employees,schedules,startKey,endKey),homNayKey=dkey(new Date());
+  const days=salesRes.perDay.map(day=>computeDayPL({day,expList,cats,assets,laborActual,laborPredicted,wasteValue:waste?.wasteByDate?.[day.date]||0,wasteValueThieu:false,homNayKey}));
+  return {days,salesRes,assets,realtime:{expList,cats}};
+}
+async function chainMonthLoadUnit(st,range,sharedConfig){
+  return GieoData.withStore(st.id,async()=>{
+    const old={CONFIG,CONFIG_HISTORY,FINANCE,INVENTORY_ITEMS,PREP_ITEMS,COGS_TOGO};
+    try{
+      memoDropAll();_costMemo={};
+      const [items,preps,financeSnap]=await chainMonthReadGroup([loadInventoryItems(),loadPrepItems(),fstore.collection('finance_gieogieo').doc('current').get(),loadCogsMaps()]);
+      CONFIG_HISTORY=sharedConfig;FINANCE={...FINANCE_DEFAULTS,...(financeSnap.exists?financeSnap.data():{})};CONFIG=configForDate(dkey(new Date()));
+      INVENTORY_ITEMS=items;PREP_ITEMS=preps;
+      const missing=[];
+      const [calc,bookSnap,closingSnap,marks]=await chainMonthReadGroup([
+        chainMonthComputeDays(range),
+        fstore.collection('pl_book_gieogieo').doc('days').get().catch(()=>{missing.push('sổ thu hồi vốn');return null;}),
+        fstore.collection('book_closings_gieogieo').doc(range.month).get().catch(()=>{missing.push('sổ chốt tháng');return null;}),
+        GieoData.plDocDau(fstore,st.id).catch(()=>{missing.push('dấu thay đổi lịch sử');return null;})
+      ]);
+      const days=calc.days.filter(d=>d.date>=range.startKey&&d.date<=range.endKey),previousDays=calc.days.filter(d=>d.date>=range.previousStartKey&&d.date<=range.previousEndKey);
+      const pl=plSumDays(days),previous=plSumDays(previousDays),closing=closingSnap?.exists?closingSnap.data():null;
+      const bookDiff=!!closing&&PL_TOM_TAT_KEYS.some(k=>Math.abs((Number(closing[k])||0)-(Number(pl[k])||0))>1);
+      if(days.some(p=>p.wasteValueThieu))missing.push('số hao hụt');
+      const previousMissing=previousDays.some(p=>p.wasteValueThieu);
+      if(previousMissing)missing.push('hao hụt kỳ so sánh');
+      const recovery=marks&&!missing.includes('dấu thay đổi lịch sử')?chainBookRecovery(bookSnap?.exists?bookSnap.data():null,FINANCE,calc.assets,calc.days,range,marks):null;
+      if(!recovery)missing.push('lịch sử đủ để xác định giai đoạn');
+      const flow=recordedCashFlow(calc.salesRes.perDay,calc.realtime.expList,range.startKey,range.endKey);
+      const revenueDays=calc.salesRes.perDay.filter(p=>p.date>=range.startKey&&p.date<=range.endKey);
+      const pending=calc.realtime.expList.filter(e=>e.status==='pending_review'&&expenseAllocatedAmount(e,range.start,range.end)>0).length;
+      // Lịch sử vốn chưa đủ không làm mất một sổ kế toán đã chốt và khớp.
+      const financialMissing=missing.filter(x=>!['sổ thu hồi vốn','dấu thay đổi lịch sử','lịch sử đủ để xác định giai đoạn','hao hụt kỳ so sánh'].includes(x));
+      const isFinal=!!closing&&!bookDiff&&!financialMissing.length&&!pending&&pl.mucTinCay==='chot-thang';
+      return {st,days,previousDays,pl,previous,previousMissing,recovery,flow,missing,closing,bookDiff,isFinal,pending,
+        bills:revenueDays.reduce((n,p)=>n+(Number(p.bills)||0),0),openDays:revenueDays.filter(p=>(Number(p.bills)||0)>0).length,
+        contribution:thvTienNgay(pl),previousContribution:thvTienNgay(previous),expenses:calc.realtime.expList,assets:calc.assets};
+    }finally{
+      CONFIG=old.CONFIG;CONFIG_HISTORY=old.CONFIG_HISTORY;FINANCE=old.FINANCE;INVENTORY_ITEMS=old.INVENTORY_ITEMS;PREP_ITEMS=old.PREP_ITEMS;COGS_TOGO=old.COGS_TOGO;
+      memoDropAll();_costMemo={};
+    }
+  }).catch(err=>({st,error:String(err.message||err)}));
+}
+function chainMonthModel(units){
+  const good=units.filter(u=>!u.error),sum=fn=>good.reduce((n,u)=>n+(Number(fn(u))||0),0),unknown=good.filter(u=>!u.recovery);
+  const result={units,good,unknown,errors:units.filter(u=>u.error),revenue:sum(u=>u.pl.doanhThu),contribution:sum(u=>u.contribution),previousContribution:sum(u=>u.previousContribution),
+    recovery:sum(u=>u.recovery?.recoveryContribution),surplus:sum(u=>u.recovery?.operatingSurplus),unclassified:unknown.reduce((n,u)=>n+u.contribution,0),
+    closed:good.filter(u=>u.isFinal),review:good.filter(u=>u.missing.length||u.bookDiff||u.pending||u.contribution<0),flow:{thu:sum(u=>u.flow.thu),chi:sum(u=>u.flow.chi),muaHang:sum(u=>u.flow.muaHang),chuaRoNgay:sum(u=>u.flow.chuaRoNgay)}};
+  result.flow.conLai=result.flow.thu-result.flow.chi;
+  result.unclassified=result.contribution-result.recovery-result.surplus;
+  result.unclassifiedUnits=good.filter(u=>!u.recovery||Math.abs(u.contribution-(u.recovery.recoveryContribution+u.recovery.operatingSurplus))>1);
+  return result;
+}
+async function renderThangKetAll(force=false){
+  renderReportSubNav();const body=document.getElementById('thangKetBody');if(!body)return;
+  const month=thangKetMonth,request=++chainMonthSerial,obsolete=()=>request!==chainMonthSerial||month!==thangKetMonth||curScreen!=='thangket';
+  const range=chainMonthRange(month,dkey(new Date()));
+  if(range.startKey>dkey(new Date())){body.innerHTML=thangKetMonthPickerHTML()+'<p>Tháng chưa tới.</p>';return;}
+  if(!force&&chainMonthData?.range.month===month&&Date.now()-chainMonthData.at<10*60000){drawChainMonth();return;}
+  body.innerHTML=thangKetMonthPickerHTML()+'<p>Đang tổng hợp từng unit…</p>';
+  try{
+    await ensureAuth();
+    const stores=(await GieoData.stores(true)).filter(st=>GieoData.hopLe(st.id));
+    if(obsolete())return;QL_STORES=stores;renderSbStore();
+    const [configSnap]=await chainMonthReadGroup([fstore.collection('config_history_gieogieo').orderBy('effectiveFrom').get(),loadRecipes(),loadToppingRecipes(),loadPackagingPresets(),loadPackagingItemOverrides(),loadPackagingRules(),loadPackagingRulesConfig(),loadPackagingBaggingRules(),loadPackagingBaggingTable(),loadHrSettings(),ensurePriceHistory()]);
+    const sharedConfig=configSnap.docs.map(x=>({id:x.id,...x.data()}));
+    const units=[];
+    for(const st of stores){if(obsolete())return;const u=await chainMonthLoadUnit(st,range,sharedConfig);if(st.active!==false||u.error||u.closing||Math.abs(u.pl?.doanhThu||0)+Math.abs(u.pl?.tongChiPhi||0)+Math.abs(u.previous?.doanhThu||0)+Math.abs(u.previous?.tongChiPhi||0)>0)units.push(u);}
+    if(obsolete())return;
+    chainMonthData={range,units,model:chainMonthModel(units),at:Date.now()};drawChainMonth();
+  }catch(err){if(!obsolete())body.innerHTML=thangKetMonthPickerHTML()+`<p role="alert">Chưa tổng hợp được: ${escapeHtmlAttr(err.message||String(err))}. Không coi dữ liệu lỗi là số 0.</p>`;}
+}
+function chainStageName(u){return u.error?'Không đọc được':!u.recovery?'Chưa xác định':u.recovery.stage==='recovery'?'Đang thu hồi vốn':u.recovery.stage==='operating'?'Đã hoàn vốn':'Chuyển giai đoạn';}
+function chainUnitMetric(u,key){
+  const parts=key==='contribution'?['doanhThu','giaVon','luong','chiPhiCoDinh','bienPhiKhac','phiKenh','haoHut']:[];
+  const labels=['Doanh thu','Giá vốn','Lương','Cố định','Biến phí vận hành','Phí kênh','Hao hụt'];
+  const rows=parts.map((k,i)=>[labels[i],fmt(u.pl[k])]).concat(u.days.map(p=>[p.date,fmt(key==='contribution'?thvTienNgay(p):p[key])]));
+  return {rows,notes:[...u.missing.map(x=>'Chưa đủ: '+x),...new Set(u.days.flatMap(p=>p.dangUocTinh||[]))]};
+}
+function drawChainMonth(){
+  const d=chainMonthData,body=document.getElementById('thangKetBody');if(!d||!body||d.range.month!==thangKetMonth)return;
+  monthMetricRegistry=[];const m=d.model,r=d.range,esc=escapeHtmlAttr,scope=`Toàn chuỗi Gieo · ${r.startKey} → ${r.endKey}`;
+  const money=(label,value,formula,rows,notes=[])=>reportMetricButton(label,value==null?'Chưa đủ số liệu':reportMoneyHTML(value),formula,rows,notes,scope);
+  const unitRows=fn=>m.good.map(u=>[u.st.name||u.st.id,fmt(fn(u))]);
+  const coverage=[`Đã đọc ${m.good.length}/${m.units.length} unit.`,...m.errors.map(u=>u.st.id+': '+u.error)];
+  const card=(label,value,formula,rows,notes=[],cls='')=>`<div class="wkpi ${cls}"><b>${label}</b><strong>${money(label,value,formula,rows,notes)}</strong><small>Bấm số để xem cách tính</small></div>`;
+  let list=d.units.filter(u=>chainMonthFilter==='all'||(chainMonthFilter==='review'?(u.error||m.review.includes(u)):u.recovery?.stage===chainMonthFilter));
+  list=[...list].sort((a,b)=>(chainMonthSort==='name'?(a.st.name||a.st.id).localeCompare(b.st.name||b.st.id,'vi'):(chainMonthSort==='revenue'?(b.pl?.doanhThu||0)-(a.pl?.doanhThu||0):(b.contribution||0)-(a.contribution||0))));
+  const table=list.map(u=>{
+    const name=esc(u.st.name||u.st.id),stage=chainStageName(u),after=esc(JSON.stringify({nav:'thangket',month:r.month}));
+    if(u.error)return `<tr><td>${name} · ${esc(u.st.id)}</td><td colspan="5">${reportMetricButton('Lỗi đọc '+name,'Chưa có số','Không có số để cộng vào tổng chuỗi',[[u.st.id,u.error]],[],scope)}</td><td><button class="btn outline sm" data-after="${after}" onclick="qlSwitchView('${u.st.id}',this.dataset.after)">Mở unit</button></td></tr>`;
+    const amount=(key,label,val)=>{const detail=chainUnitMetric(u,key);return money(label,val,key==='contribution'?'Doanh thu − giá vốn − lương − vận hành − phí kênh − hao hụt; chưa trừ khấu hao':'Cộng doanh thu từng ngày của đúng unit trong kỳ đang xem',detail.rows,detail.notes);};
+    const change=u.contribution-u.previousContribution;
+    const compRows=[['Kỳ đang xem',`${r.startKey} → ${r.endKey}`],['Kỳ so sánh',`${r.previousStartKey} → ${r.previousEndKey}`],...['doanhThu','giaVon','luong','chiPhiCoDinh','bienPhiKhac','phiKenh','haoHut'].map((k,i)=>[['Doanh thu','Giá vốn','Lương','Cố định','Biến phí vận hành','Phí kênh','Hao hụt'][i],`${fmt(u.previous[k])} → ${fmt(u.pl[k])} (đổi ${fmt((Number(u.pl[k])||0)-(Number(u.previous[k])||0))})`]),['Kết quả kỳ này',fmt(u.contribution)],['Kết quả kỳ trước',fmt(u.previousContribution)],['Chênh lệch',fmt(change)]];
+    const rec=u.recovery;
+    return `<tr><td><b>${name}</b><div class="small-note">${esc(u.st.id)}${u.st.active===false?' · đã ngừng':''}</div></td><td>${reportMetricButton('Giai đoạn '+name,esc(stage),'Mốc hoàn vốn theo sổ từng unit; ngày đạt mốc thuộc giai đoạn 1',rec?[['Mốc đã đạt',rec.reached||'Chưa đạt'],['Luỹ kế đến cuối kỳ',fmt(rec.closing)],['Vốn đang theo dõi',fmt(rec.capital)],['Còn cần thu hồi',fmt(rec.remaining)]]:[],rec?[]:['Thiếu lịch sử đủ/sổ chưa cập nhật: mở báo cáo unit để đối chiếu.'],scope)}</td><td>${amount('doanhThu','Doanh thu '+name,u.pl.doanhThu)}</td><td>${amount('contribution','Kết quả vận hành '+name,u.contribution)}</td><td>${money('So kỳ trước '+name,u.previousMissing?null:change,'Kết quả vận hành kỳ này − kỳ trước có cùng phạm vi so sánh',compRows,['Bấm số kết quả của unit để xem từng ngày.',...(u.previousMissing?['Kỳ so sánh chưa đọc đủ số hao hụt; chưa xác nhận chênh lệch.']:[])])}</td><td>${reportMetricButton('Trạng thái số '+name,u.isFinal?'Đã chốt':u.bookDiff?'Lệch sổ chốt':'Tạm tính','Chỉ ghi đã chốt khi có sổ và các trường khớp dữ liệu đang tính',[[u.st.id,u.isFinal?'Khớp sổ đã chốt':'Còn cần đối chiếu']],u.missing.concat(u.pending?[u.pending+' khoản chi chờ duyệt']:[]),scope)}</td><td><button class="btn outline sm" data-after="${after}" onclick="qlSwitchView('${u.st.id}',this.dataset.after)">Mở unit</button></td></tr>`;
+  }).join('');
+  const concerns=m.errors.map(u=>`${u.st.name||u.st.id}: không đọc được số.`).concat(m.review.map(u=>`${u.st.name||u.st.id}: ${[u.contribution<0?'âm vận hành':null,u.bookDiff?'lệch sổ đã chốt':null,u.pending?u.pending+' khoản chờ duyệt':null,...u.missing.map(x=>'thiếu '+x)].filter(Boolean).join(' · ')}`));
+  body.innerHTML=thangKetMonthPickerHTML()+`<section class="wdg wdg-pink"><div class="wdg-head">${wdgHeadHTML('chart','Báo cáo tháng · Toàn chuỗi Gieo',scope)}</div><div class="wdg-body"><p class="small-note">${esc(new Date(d.at).toLocaleString('vi-VN',{timeZone:'Asia/Ho_Chi_Minh'}))} · ${m.good.length}/${m.units.length} unit đã đọc · ${m.closed.length} unit khớp sổ chốt. ${m.errors.length?'Tổng dưới đây còn thiếu unit đọc lỗi.':'Các unit chưa chốt vẫn là tạm tính.'}</p><div class="chain-month-kpis">
+    ${card('Doanh thu chuỗi',m.good.length?m.revenue:null,'Cộng doanh thu các unit đọc được',unitRows(u=>u.pl.doanhThu),coverage)}
+    ${card('Góp thu hồi vốn kỳ này',m.good.length>m.unknown.length?m.recovery:null,'Cộng phần trước hoặc trong ngày đạt vốn của các unit đã xác định giai đoạn',m.good.map(u=>[u.st.name||u.st.id,u.recovery?fmt(u.recovery.recoveryContribution):'Chưa phân loại, chưa cộng']),coverage.concat(m.unknown.map(u=>u.st.id+': chưa phân loại giai đoạn, chưa cộng vào số này')))}
+    ${card('Thặng dư sau hoàn vốn',m.good.length>m.unknown.length?m.surplus:null,'Cộng phần từ ngày kế tiếp mốc hoàn vốn của từng unit',m.good.map(u=>[u.st.name||u.st.id,u.recovery?fmt(u.recovery.operatingSurplus):'Chưa phân loại, chưa cộng']),coverage.concat(m.unknown.map(u=>u.st.id+': chưa phân loại giai đoạn, chưa cộng vào số này')),'ok')}
+    ${card('Nguồn mở rộng đã xác nhận',null,'Cần tiền đã chuyển về quỹ, số dư quỹ và nghĩa vụ còn phải trả; dữ liệu báo cáo hiện chưa đủ xác nhận',[],['Thặng dư trước khấu hao không xác nhận tiền đã rút/chuyển. Chưa có sổ điều chuyển vốn/quỹ chung trong báo cáo này.'])}
+    <div class="wkpi"><b>Unit khớp sổ đã chốt</b><strong>${reportMetricButton('Tiến độ chốt tháng',m.closed.length+'/'+m.units.length,'Số unit khớp sổ đã chốt / số unit trong báo cáo',d.units.map(u=>[u.st.name||u.st.id,u.error?'Đọc lỗi':u.isFinal?'Đã chốt':'Chưa chốt/thiếu nguồn']),coverage,scope)}</strong></div>
+    <div class="wkpi warn"><b>Unit cần rà soát</b><strong>${reportMetricButton('Unit cần rà soát',String(concerns.length),'Đếm unit đọc lỗi hoặc âm vận hành/thiếu nguồn/chờ duyệt/lệch sổ; mỗi unit chỉ đếm một lần',concerns.map((n,i)=>[String(i+1),n]),[],scope)}</strong></div></div>
+    <p>Kết quả vận hành cộng toàn chuỗi: ${money('Kết quả vận hành chuỗi',m.good.length?m.contribution:null,'Doanh thu − giá vốn − lương − vận hành − phí kênh − hao hụt; chưa trừ khấu hao',unitRows(u=>u.contribution),coverage)}.</p>
+    ${m.unclassifiedUnits.length?`<p class="small-note">${money('Kết quả chưa phân loại giai đoạn',m.unclassified,'Kết quả chưa phân loại hoặc ngoài mốc bắt đầu theo dõi vốn; chưa nằm trong hai ô góp vốn/thặng dư',m.unclassifiedUnits.map(u=>[u.st.name||u.st.id,fmt(u.contribution-(u.recovery?u.recovery.recoveryContribution+u.recovery.operatingSurplus:0))]))} chưa phân loại giai đoạn. Không coi phần này bằng 0.</p>`:''}
+    <div class="month-report-actions"><button class="btn outline sm" onclick="chainMonthExport(false)">Tải báo cáo gửi sếp</button><button class="btn outline sm" onclick="chainMonthExport(true)">Sao chép tóm tắt</button></div></div></section>
+    <section class="wdg wdg-amber"><div class="wdg-head">${wdgHeadHTML('check','Việc cần quyết định','Theo dữ liệu của từng unit')}</div><div class="wdg-body">${concerns.length?'<ul>'+concerns.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul>':'Chưa phát hiện việc bổ sung từ các nguồn đã đọc; cần rà thanh toán và tồn cuối kỳ trước khi điều chuyển tiền.'}</div></section>
+    <section class="wdg wdg-blue"><div class="wdg-head">${wdgHeadHTML('store','So sánh các unit','Kết quả trước khấu hao · bấm từng số để giải thích')}</div><div class="wdg-body"><div class="chain-month-toolbar"><label class="field">Lọc<select onchange="chainMonthFilter=this.value;drawChainMonth()"><option value="all">Tất cả</option><option value="recovery">Đang thu hồi</option><option value="operating">Đã hoàn vốn</option><option value="transition">Chuyển giai đoạn</option><option value="review">Cần rà soát</option></select></label><label class="field">Sắp xếp<select onchange="chainMonthSort=this.value;drawChainMonth()"><option value="result">Kết quả vận hành</option><option value="revenue">Doanh thu</option><option value="name">Tên unit</option></select></label></div><div class="chain-month-table"><table><thead><tr><th>Unit</th><th>Giai đoạn</th><th>Doanh thu</th><th>Kết quả vận hành</th><th>So kỳ trước</th><th>Trạng thái số</th><th></th></tr></thead><tbody>${table||'<tr><td colspan="7">Không có unit trong bộ lọc.</td></tr>'}</tbody></table></div><p class="small-note">Kỳ so sánh: ${r.previousStartKey} → ${r.previousEndKey}. Tháng đang chạy so cùng số ngày đầu tháng trước; số ngày có bill là dữ liệu bán hàng, chưa chứng minh quán mở cửa đủ ca. Quán đang hoàn vốn và quán đã hoàn vốn được tách giai đoạn để đánh giá.</p></div></section>${m.good.length?recordedCashFlowHTML(m.flow,'Tiền thu và chi toàn chuỗi đã ghi'):'<section class="wdg wdg-blue"><div class="wdg-body">Chưa đọc được dữ liệu thu/chi của unit nào. Chưa có số để xác nhận.</div></section>'}`;
+  body.querySelectorAll('.chain-month-toolbar select')[0].value=chainMonthFilter;body.querySelectorAll('.chain-month-toolbar select')[1].value=chainMonthSort;
+  wireMonthCashMetrics(body,m.flow,scope,m.good.flatMap(u=>u.expenses.map(e=>({...e,reportStore:u.st.name||u.st.id}))),r.startKey,r.endKey,m.good.flatMap(u=>u.days.map(p=>[`${u.st.name||u.st.id} · ${p.date}`,fmt(p.doanhThu)])));
+}
+async function chainMonthExport(copy){
+  const d=chainMonthData;if(!d||d.range.month!==thangKetMonth){toast('Chờ báo cáo đúng tháng tải xong');return;}
+  const m=d.model,known=v=>m.good.length?fmt(v):'Chưa đủ số liệu',classified=v=>m.good.length>m.unknown.length?fmt(v):'Chưa đủ số liệu',lines=[`GIEO GIEO · BÁO CÁO CHUỖI ${d.range.month}`,`${d.range.startKey} → ${d.range.endKey}`,`Đã đọc ${m.good.length}/${m.units.length} unit; ${m.closed.length} unit khớp sổ chốt.`,
+    `Doanh thu từ unit đọc được: ${known(m.revenue)}`,`Kết quả vận hành trước khấu hao: ${known(m.contribution)}`,`Góp thu hồi vốn đã phân loại: ${classified(m.recovery)}`,`Thặng dư sau hoàn vốn đã phân loại: ${classified(m.surplus)}`,`Kết quả chưa phân loại giai đoạn: ${known(m.unclassified)}`,
+    'Nguồn mở rộng: chưa đủ sổ điều chuyển vốn/quỹ và nghĩa vụ phải trả để xác nhận.',...d.units.map(u=>u.error?`${u.st.id}: ĐỌC LỖI — ${u.error}`:`${u.st.name||u.st.id}: ${chainStageName(u)}; doanh thu ${fmt(u.pl.doanhThu)}; kết quả trước khấu hao ${fmt(u.contribution)}; ${u.isFinal?'khớp sổ chốt':'tạm tính'}${u.missing.length?'; thiếu '+u.missing.join(', '):''}`),`Thu vào ${known(m.flow.thu)}; chi ra đã ghi ${known(m.flow.chi)}; chưa phải toàn bộ tiền/số dư quỹ.`].join('\n');
+  if(copy){try{await navigator.clipboard.writeText(lines);toast('Đã sao chép báo cáo chuỗi');}catch(e){toast('Hãy dùng Tải báo cáo');}return;}
+  const html='<!doctype html><html lang="vi"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Báo cáo chuỗi Gieo</title><style>body{font:16px/1.6 system-ui;max-width:900px;margin:32px auto;padding:0 20px}pre{font:inherit;white-space:pre-wrap}@media print{button{display:none}}</style><button onclick="print()">In / lưu PDF</button><pre>'+escapeHtmlAttr(lines)+'</pre></html>';
+  const url=URL.createObjectURL(new Blob([html],{type:'text/html;charset=utf-8'})),a=document.createElement('a');a.href=url;a.download='bao-cao-chuoi-gieo-'+d.range.month+'.html';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
 // ------------------------------------------------------------
 let auditViewDate = null;
 let auditIntegrityIssues = null; // null = chưa chạy, [] = chạy rồi không có lỗi

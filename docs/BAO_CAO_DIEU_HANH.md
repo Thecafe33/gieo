@@ -33,6 +33,26 @@ Chi tiết Kế toán, HR, Kho, Bán hàng dùng `details`, mặc định đóng
 
 Tải báo cáo là HTML độc lập gồm số tổng hợp/phạm vi/quán/trạng thái/việc cần quyết định, mở để In/Lưu PDF; không mang mã app/Firebase. Sao chép tóm tắt dùng clipboard trên máy người dùng; không gửi tới ai. Cả hai dùng dữ liệu đã nạp. Chặn xuất khi tháng/quán chưa khớp, chặn lượt nạp tháng trước ghi đè tháng mới. Sổ tháng đã chốt không tự ghi đè; lệch với số mới thì báo cần đối chiếu.
 
+## Báo cáo tháng cho chuỗi và giải thích chỉ số — 18/10
+
+Chủ dự án duyệt nâng báo cáo dưới góc chủ chuỗi và yêu cầu bấm số để giải thích bằng dữ liệu đang có. Ở **Xem tất cả → Tổng kết tháng** nay có màn riêng, không chuyển sang báo cáo kỳ cũ. Sáu ô đầu: doanh thu chuỗi, góp thu hồi vốn kỳ này, thặng dư sau hoàn vốn, nguồn mở rộng đã xác nhận, tiến độ chốt, unit cần rà. Kết quả trước khấu hao toàn chuỗi và phần chưa phân loại hiện ngay dưới; không bù phần chưa phân loại sang ô góp vốn/thặng dư.
+
+Bảng so sánh giữ mỗi unit một giai đoạn, gồm quán đã ngừng nhưng còn hoạt động/sổ tháng trong phạm vi. Có lọc giai đoạn/cần rà, sắp theo kết quả/doanh thu/tên, mở đúng tháng của unit để xem công/lương/kho. Tháng đang chạy so cùng số ngày đầu tháng trước (chặn ở cuối tháng nếu tháng trước ngắn hơn); tháng đã xong so toàn tháng trước. Bấm chênh lệch thấy doanh thu và từng loại chi phí hai kỳ, không chỉ hai tổng. Không lấy trung bình tỷ lệ của các quán thành tỷ lệ chuỗi.
+
+`chainMonthComputeDays` chỉ điều phối đọc, dùng nguyên `computeDayPL`, `plSumDays` và `thvTienNgay` đang có; không tạo công thức P&L thứ hai. Đi từng quán tuần tự bằng `GieoData.withStore`, trả lại cấu hình/danh mục/COGS trong `finally`; `chainMonthReadGroup` chờ mọi nhánh đọc xong kể cả khi có nhánh lỗi để không còn gán COGS muộn sang quán khác. Nguồn chi phí/nhân sự/lịch/kho lỗi thì unit đó không có số để cộng, không giả thành 0. Tổng ghi rõ số unit đọc được và phần còn thiếu. Chỉ giữ trạng thái khớp chốt khi có sổ, các trường khớp và đủ nguồn kế toán; thiếu lịch sử vốn không tự xoá một trạng thái chốt kế toán hợp lệ.
+
+Lịch sử vốn lấy từ một sổ gộp và dấu thay đổi mỗi unit, ghép đè các ngày vừa tính; không quét lại toàn bộ sổ gốc để phân giai đoạn. Sổ thiếu ngày, mốc đủ sổ không bao phủ ngày bắt đầu, quá giới hạn, dấu sửa mới hơn snapshot hoặc phiên bản lương/đá cũ chưa xử lý thì giai đoạn **chưa xác định**, hướng về báo cáo unit để bổ sung/đối chiếu. Không ghi snapshot hoặc mốc hoàn vốn khi chỉ xem chuỗi. Giữ mốc hoàn vốn đã xác nhận; mốc tương lai không áp ngược kỳ trước.
+
+Các số ở ô quản trị, dòng tiền, kế toán, công/lương, hàng nhận/tồn và món bán của báo cáo unit, cùng ô/bảng số của chuỗi, có nút giải thích. Hộp giải thích ghi phạm vi quán/kỳ, công thức, số đang bấm, thành phần theo ngày/quán/nhân viên và nguồn còn thiếu/ước tính. Lương nhân sự giữ thêm giờ, OT, tiền và điều khoản đúng ngày từ lượt đọc công sẵn có; không thay luật lương. Chi tiết kế toán đã chốt giải thích từ đúng bản chốt, tách số tính lại hiện tại. Sự kiện kho/tiền giữ đúng nhóm thiếu/thừa, không tự cộng thành phạt. Số lương cuối đã nhập có thể còn là bản nháp, không gọi là đã trả.
+
+Bấm thông số, lọc, sắp xếp, mở phần chi tiết và tải/sao chép **không đọc thêm Firebase**. Đệm chuỗi trong phiên 10 phút, cùng tháng; Quét tháng hoặc nút tải lại buộc nạp mới. Lượt tháng cũ trả chậm không ghi đè tháng vừa chọn. Xuất báo cáo dùng dữ liệu đã nạp, có phạm vi/thiếu nguồn/giai đoạn và tiền thu/chi riêng, không có mã cấu hình Firebase.
+
+**Nguồn mở rộng chưa có dữ liệu xác nhận**: chưa có sổ chuyển/rút vốn, số dư quỹ chung và nghĩa vụ phải trả đầy đủ. Ô này ghi “Chưa đủ số liệu”, không lấy đóng góp quản trị làm tiền có thể mở quán, cũng không hiển thị 0. Sổ điều chuyển vốn/quỹ và công nợ đầy đủ là phần triển khai tiếp, chưa được tạo trong lượt này.
+
+Kiểm lượt chuỗi: `tests/bao_cao_chuoi.test.js` 24 mục (phạm vi kỳ, tổng/phân loại, số âm/thiếu, snapshot/dấu sửa, mốc vốn, nhóm sự kiện, chờ đủ nhánh đọc); Chromium `tools/ql_giao_dien/e2e_bao_cao_chuoi.js` 54 mục trên PC/tablet/điện thoại. `e2e_bao_cao.js` tăng lên 106 mục, có bấm giải thích công/lương 10,5h/OT 2,5h và đơn giá đúng ngày. Dữ liệu đều giả, chặn mạng ngoài; không kiểm bằng cách ghi dữ liệu thật.
+
+Gói `tai_ve/fix_bao_cao_chuoi_giai_thich_18-10.zip` chỉ gồm hai file deploy `quanlygieo.html`, `quanlygieo_thu.html` đã sinh từ bộ Giáng sinh. Không đổi `manage.html` hoặc `lai_lo.v4.js`; `tools/tao_lai_lo.js --check` phải khớp. Các bộ thường/Tết cũng sinh lại. Chủ dự án tự upload; không Hosting deploy.
+
 ## Giới hạn và kiểm tra
 
 Tiền trả PO cũ chưa được ghi vẫn là thiếu thông tin thanh toán, không tự coi đã trả hoặc chưa phát sinh. Công nợ NCC/hoàn tiền NCC đầy đủ chưa nằm trong lượt này. Không thêm thuế, tiền trả lương, số dư ngân hàng hoặc tồn cuối tháng nếu dữ liệu chưa được ghi.
