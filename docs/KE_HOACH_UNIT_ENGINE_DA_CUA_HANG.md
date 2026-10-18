@@ -1193,3 +1193,8 @@ Cửa hàng 2 chạy 2–4 tuần (theo dõi lệch tồn, Sổ lệch, lượt 
 | Trường số lượng / trường chú thích | Trường làm đổi tồn/sổ (chỉ engine) / trường mô tả, duyệt, trách nhiệm (mọi cụm qua API chú thích) |
 | `amend` | Sửa số lượng/loại của dòng sổ đã ghi, có lưu vết |
 | `storeId` | Mã cửa hàng/kho |
+
+
+## Bổ sung được duyệt 18/10: manage đa quán
+
+Chủ dự án yêu cầu tối ưu lượt đọc sau rà soát, giữ hoà vốn TC33/XOFA theo cấu hình cơ bản. Phạm vi đã làm và phần báo cáo còn mở: `docs/MANAGE_TOI_UU_DA_QUAN.md`. Không đổi engine hoặc luật lương.

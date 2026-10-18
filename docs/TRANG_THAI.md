@@ -1,5 +1,7 @@
 # Hiện trạng dự án — cập nhật 18/10/2026
 
+**18/10 — manage tối ưu phạm vi đa quán**: đọc Tổng quan/Chi phí theo quán; listener bill theo phạm vi, gỡ khi rời màn; tính bù PL đúng quán. Không thay ngưỡng thiếu bằng doanh thu; báo nguồn lỗi; nhãn khấu hao và số tháng Gieo trước khấu hao rõ hơn. Giữ hoà vốn cơ bản TC33/XOFA. Chi tiết và việc còn lại `docs/MANAGE_TOI_UU_DA_QUAN.md`. Chưa deploy Hosting.
+
 **18/10 — nhãn ly đổi tem**: POS Gieo thiếu `_giftLabel` nên cả thanh toán thường/tách bill lưu mã `__free_stamp__<timestamp>` thành tên khuyến mãi. Nay tạo/lưu nhãn “Ly miễn phí (6 tem)”; manage, quanlygieo và lịch sử/in lại POS chuyển nhãn mã cũ ngay khi hiển thị. Không sửa bill lịch sử, khoá đổi tem, cơ chế trừ tem hay giá vốn. Chi tiết `docs/NHAN_LY_DOI_TEM.md`; sinh lại bản thử/bộ mùa, chưa deploy Hosting.
 
 

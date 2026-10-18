@@ -1,0 +1,20 @@
+const assert=require('assert/strict'),vm=require('vm'),{extract}=require('./lib/extract');
+let calls=[];
+const mark=(name,value)=>async(...args)=>{calls.push([name,...args]);return value};
+const c={console,Date,Promise,ensureAuth:async()=>{},validDate(){},daysBetween:()=>0,dkey:d=>new Date(d).toISOString().slice(0,10),addDays:(d,n)=>new Date(+d+n*864e5),parseDkey:d=>new Date(d),loadTargets:mark('targets',{}),gieoConfigHistory:mark('config',{}),gieoStores:mark('stores',[{id:'gg01'},{id:'gg02'}]),loadBreakeven:mark('be',{}),readExpenseSums:mark('expenses',{}),readOffDays:mark('off',{}),revLoadRange:mark('revenue',{}),readPlDays:mark('pl',{}),loadExpenseCfg:mark('cats',{}),loadAssets:mark('assets',[]),expenseCatsAll:()=>[],allocMerge:()=>({}),sumsToAlloc:()=>({}),expAllocate:()=>({}),EXP_COLL:{tc33:'expenses_tc33',xofa:'expenses_xofa'},tcMenu:mark('menu',[]),tcLegacyOrders:mark('legacy',[])};
+c.fstore={collection(name){calls.push(['collection',name]);return {where(){return this},get:async()=>({docs:[]})}}};
+vm.createContext(c);vm.runInContext(extract('manage.html',['readRevenue','revSources']),c);
+(async()=>{
+ await c.readRevenue('2026-10-01','2026-10-01',true,'gg02');
+ assert.deepEqual(Array.from(calls.find(x=>x[0]==='revenue')[4]),['gg_gg02']);
+ assert.deepEqual(Array.from(calls.find(x=>x[0]==='pl')[1],r=>r.id),['gg02']);
+ assert.equal(calls.some(x=>x[0]==='expenses'||x[0]==='collection'),false);
+ calls=[];await c.readRevenue('2026-10-01','2026-10-01',true,'tc33');
+ assert.deepEqual(Array.from(calls.find(x=>x[0]==='revenue')[4]),['tc33']);
+ assert.equal(calls.filter(x=>x[0]==='expenses').length,1);
+ assert.equal(calls.some(x=>x[1]==='expenses_xofa'),false);
+ assert.equal(calls.find(x=>x[0]==='pl')[1].length,0);
+ calls=[];await c.revSources(['gg_gg02']);assert.equal(calls.some(x=>['menu','legacy'].includes(x[0])),false);
+ calls=[];await c.revSources(['tc33']);assert.equal(calls.filter(x=>['menu','legacy'].includes(x[0])).length,2);
+ console.log('ALL PASS phạm vi đọc: Gieo riêng, TC33 riêng, không kéo menu/bill cũ TC33 khi xem Gieo');
+})().catch(e=>{console.error(e);process.exitCode=1});

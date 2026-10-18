@@ -28,8 +28,16 @@ const server=require('http').createServer((req,res)=>{const f=path.resolve(ROOT,
   check(await p.getByRole('button',{name:'So sánh hôm trước',exact:true}).count()===0,width+': không còn nút tải so sánh riêng');
   const counts=await p.evaluate(()=>JSON.stringify([__FSREADS,__READS]));await p.evaluate(()=>render());
   check(await p.evaluate(v=>JSON.stringify([__FSREADS,__READS])===v,counts),width+': vẽ lại số so sánh không truy vấn thêm');
+  const beforeScope=await p.evaluate(()=>({xo:__FSREADS.expenses_xofa||0,gg:__FSREADS.pl_book_gieogieo||0}));
+  await p.evaluate(()=>setStore('tc33'));await p.waitForFunction(()=>!live.loadingKey&&live.ready.rev===loadKey());
+  check(await p.evaluate(()=>Object.keys(BF.watch).join(',')==='tc33'),width+': xem TC33 chỉ giữ listener TC33');
+  check(await p.evaluate(v=>(__FSREADS.expenses_xofa||0)===v.xo&&(__FSREADS.pl_book_gieogieo||0)===v.gg,beforeScope),width+': đổi phạm vi TC33 không đọc chi phí XOFA/sổ Gieo');
+  const costBefore=await p.evaluate(()=>__FSREADS.expenses_xofa||0);
+  await p.evaluate(()=>navigate('chiphi'));await p.waitForFunction(()=>!live.loadingKey&&live.ready.chiphi===loadKey());
+  check(await p.evaluate(v=>(__FSREADS.expenses_xofa||0)===v,costBefore),width+': tab chi phí TC33 không truy vấn XOFA');
   await p.evaluate(()=>{window.__previewCalls=[];const original=backend.readMonthTcx;backend.readMonthTcx=async(...a)=>{__previewCalls.push(a.slice(0,2));return original(...a)};navigate('thangket')});
   await p.waitForFunction(()=>live.month&&!live.loadingKey&&live.ready.thangket===loadKey());
+  check(await p.evaluate(()=>Object.keys(BF.watch).length===0),width+': rời tổng quan gỡ listener bill');
   check(await p.evaluate(()=>!__previewCalls.length),width+': vào tổng kết chỉ tải sổ, không tính hai quán');
   check(await p.locator('.tk-card button').filter({hasText:'Xem tạm tính'}).count()===2,width+': có nút tạm tính riêng mỗi quán');
   const expXo=await p.evaluate(()=>__FSREADS.expenses_xofa||0);
