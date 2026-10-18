@@ -15,10 +15,10 @@ function labor(employees=[],shifts=[],error=false){
  return{fn:new Function(...Object.keys(env),extract('quanlygieo.html',names)+';return computeActualLaborCostByDate;')(...Object.values(env)),reads:()=>reads};
 }
 function calculators(){
- return new Function('Date','DEFAULTS',`const HR_SETTINGS={useActualLaborCost:true},CONFIG_HISTORY=[],PL_LABOR_VERSION=1;
+ return new Function('Date','DEFAULTS',`const HR_SETTINGS={useActualLaborCost:true},CONFIG_HISTORY=[],PL_LABOR_VERSION=1,PL_ICE_VERSION=1;
  const splitExpensesByCostType=()=>({coDinh:0,bienDoi:0}),plChannelFeeForDay=()=>0,monthlyDepreciation=()=>0;
- ${extract('quanlygieo.html',['pad','dkey','daysInMonth','configForDate','laborMonthlyTotal','computeDayPL','plTomTatNgay','plNgayLuongCanTinhLai','thvTienNgay','thvCompute'])}
- const PL_TOM_TAT_KEYS=['luong','lai','khauHao'];return{computeDayPL,plTomTatNgay,plNgayLuongCanTinhLai,thvCompute};`)(Clock,defaults);
+ ${extract('quanlygieo.html',['pad','dkey','daysInMonth','configForDate','laborMonthlyTotal','computeDayPL','plTomTatNgay','plNgayLuongCanTinhLai','plNgayDaCanTinhLai','expenseCoveredByCogs','thvTienNgay','thvCompute'])}
+ const PL_TOM_TAT_KEYS=['luong','lai','khauHao'];return{computeDayPL,plTomTatNgay,plNgayLuongCanTinhLai,plNgayDaCanTinhLai,thvCompute};`)(Clock,defaults);
 }
 (async()=>{
  const c=calculators(),empty=labor(),actual=await empty.fn('2026-09-01','2026-09-04');
@@ -61,7 +61,7 @@ function calculators(){
  const env={Date:Clock,window:{GieoData:gd},GieoData:{storeId:()=> 'gg01',plNgayCanTinh:()=>[],plDocDau:async()=>null},QL_ALL:false,localStorage:{getItem:()=>null,setItem(){}},
   fstore:{collection:()=>({doc:()=>({get:async()=>({exists:true,data:()=>({du:'2026-09-01',d:state.book})})})})},
   loadAssetsAll:async()=>[],computeDailyPLRange:async(a,b)=>{const from=a.toISOString().slice(0,10),to=b.toISOString().slice(0,10);state.ranges.push([from,to]);const fixed=days.filter(d=>d.date>=from&&d.date<=to).map(d=>({...d,...c.plTomTatNgay(d)}));for(const d of fixed)state.book[d.date]=d;return{days:fixed,assets:[]}},
-  plNgayLuongCanTinhLai:c.plNgayLuongCanTinhLai};
+  plNgayLuongCanTinhLai:c.plNgayLuongCanTinhLai,plNgayDaCanTinhLai:c.plNgayDaCanTinhLai};
  const load=new Function(...Object.keys(env),extract('quanlygieo.html',['pad','dkey','plSumDays','plNgayTuSo'])+';return plNgayTuSo;')(...Object.values(env));
  const result=await load(new Clock('2026-09-01T00:00:00Z'),new Clock('2026-09-05T00:00:00Z'));
  check(JSON.stringify(state.ranges)==='[["2026-09-01","2026-09-04"]]'&&near(result.tong.lai,250000),'nạp thu hồi vốn tự sửa đúng đoạn sai và giữ nguyên ngày khác');

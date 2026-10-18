@@ -151,6 +151,23 @@ const server=require('http').createServer((req,res)=>{const f=path.resolve(ROOT,
  await p.waitForFunction(()=>!_todayBusy&&_todayLiveCtx.thv?.tongVon===20000000);
  check(await p.evaluate(()=>_thvCache.data.tongVon===20000000),'quanlygieo '+width+': nút tải lại bỏ đệm thu hồi vốn cũ');
  await p.screenshot({path:ROOT+'/work/bill-ui/quanlygieo-'+width+'.png'});
+ // Mua đá: kiểm tra trên DOM, két và bản tổng hợp ngày cũ bằng Firebase giả.
+ await p.evaluate(()=>{const date=dkey(new Date());__FS.expenses_gieogieo={ice:{date,category:'Nước đá',amount:20000,status:'approved',baseType:'cash'},ship:{date,category:'Ship',amount:10000,status:'approved',baseType:'cash'}};__FS.expense_categories_gieogieo={ice:{label:'Nước đá',costType:'variable',active:true},ship:{label:'Ship',costType:'variable',active:true}};memoDropAll();goEntry('exp')});
+ await p.waitForSelector('#expCat');await p.selectOption('#expCat',{label:'Nước đá'});
+ check(await p.locator('#expCogsHint').isVisible()&&await p.locator('#expCogsHint').innerText().then(s=>s.includes('không trừ thêm')),'quanlygieo '+width+': chọn mua đá giải thích tiền chi và COGS');
+ check(await p.locator('.wkpi').allTextContents().then(a=>a.some(s=>s.includes('Tiền mua hàng / nguyên liệu')&&s.includes('20.000'))),'quanlygieo '+width+': widget mua đá riêng 20K');
+ check(await p.locator('#expList').innerText().then(s=>s.includes('Nước đá')&&s.includes('Đã nằm trong giá vốn')),'quanlygieo '+width+': sổ chi vẫn có khoản mua đá và nhãn rõ ràng');
+ check(await p.evaluate(async()=>{const c=await computeCashBreakdownForDate(dkey(new Date()));return c.cashExpenseTotal===30000&&c.expected===c.openingCash+c.cashSales-30000}),'quanlygieo '+width+': tiền két vẫn trừ đủ 30K mua đá và ship');
+ const iceAudit=await p.evaluate(async()=>{
+   const d=new Date();d.setDate(d.getDate()-1);const date=dkey(d),at=new Date().toISOString();for(const e of Object.values(__FS.expenses_gieogieo))e.date=date;memoDropExpenses();
+   const inputDate=new Date(date+'T00:00:00'),r=await computeDailyPLRange(inputDate,inputDate);await new Promise(ok=>setTimeout(ok,20));
+   const old={...plTomTatNgay(r.days[0]),date,updatedAt:at,bienPhiKhac:30000};delete old.iceVersion;delete old.iceCheckedExpenseAmount;
+   __FS.pl_book_gieogieo={days:{du:date,d:{[date]:old}}};
+   const compute=computeDailyPLRange;let calls=0;computeDailyPLRange=async(...args)=>{calls++;return compute(...args)};
+   try{const fixed=await plNgayTuSo(inputDate,inputDate);await new Promise(ok=>setTimeout(ok,20));const row=__FS.pl_book_gieogieo.days.d[date];await plNgayTuSo(inputDate,inputDate);return{expense:fixed.tong.bienPhiKhac,calls,version:row.iceVersion,purchase:row.chiMuaDa,raw:__FS.expenses_gieogieo.ice.amount}}finally{computeDailyPLRange=compute}
+ });
+ check(iceAudit.expense===10000&&iceAudit.version===1&&iceAudit.purchase===20000,'quanlygieo '+width+': tự sửa snapshot cũ, chỉ giữ ship trong biến phí');
+ check(iceAudit.calls===1&&iceAudit.raw===20000,'quanlygieo '+width+': không lặp tính lại, không sửa tiền mua đá gốc');
  check(errors.length===0,'quanlygieo '+width+': không lỗi JS '+errors.join('|'));
  await p.close();}
  console.log('ALL PASS '+count);

@@ -16,11 +16,11 @@
 const fs = require('fs'), path = require('path');
 const acorn = require('acorn');
 const walk = require('acorn-walk');
-const VERSION = 3;
+const VERSION = 4;
 const ROOT = path.join(__dirname, '..');
 const OUT = path.join(ROOT, 'lai_lo.v' + VERSION + '.js');
 const ROOTS = ['computeDailyPLRange', 'plTomTatNgay', 'plBreakEven', 'plSumDays', 'configForDate', 'qlAllNapChung', 'memoDropAll',
-  'loadInventoryItems', 'loadPrepItems', 'loadCogsMaps', 'loadConfig', 'salesFromLive', 'plNgayLuongCanTinhLai'];
+  'loadInventoryItems', 'loadPrepItems', 'loadCogsMaps', 'loadConfig', 'salesFromLive', 'plNgayLuongCanTinhLai', 'plNgayDaCanTinhLai'];
 const EXCLUDE = new Set(['fstore', 'db', 'QL_VIEW_KEY', 'QL_VIEW', 'QL_ALL', 'plLuuTomTat', 'loadExpensesAll']);
 
 function build(){
@@ -125,7 +125,7 @@ function realtime(opts){
     return {day,tomTat};
   });_khoa=p.catch(()=>{});return p;
 }
-root.LaiLo = { VERSION: ${VERSION}, tinh, realtime, PL_TOM_TAT_KEYS, plNgayLuongCanTinhLai };
+root.LaiLo = { VERSION: ${VERSION}, tinh, realtime, PL_TOM_TAT_KEYS, plNgayLuongCanTinhLai, plNgayDaCanTinhLai };
 })(typeof window !== 'undefined' ? window : globalThis);
 `;
 }

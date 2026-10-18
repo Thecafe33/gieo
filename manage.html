@@ -615,7 +615,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script><script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script><script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script><script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
 <!-- [LÃI/LỖ GIEO TỰ TÍNH] lớp đổi tên bảng theo quán + bộ tính lãi / lỗ chép nguyên văn từ quanlygieo (tools/tao_lai_lo.js) -->
 <script src="bill_live.v1.js"></script>
-<script src="data_access.v9.js"></script><script src="lai_lo.v3.js"></script>
+<script src="data_access.v9.js"></script><script src="lai_lo.v4.js"></script>
 <script>
 const backend=(()=>{
 const firebaseConfig = {
@@ -1568,7 +1568,7 @@ async function readPlDays(records, from, to){
 }
 // ==========================================================================
 // [LÃI/LỖ GIEO TỰ TÍNH — 16/10] Chủ dự án: manage không phải chờ mở quanlygieo mới có lãi / lỗ. Ngày nào CHƯA CÓ
-// bản tóm tắt (pl_days) hoặc bản đã CŨ thì manage tự tính bằng lai_lo.v3.js (chép nguyên văn bộ tính của quanlygieo
+// bản tóm tắt (pl_days) hoặc bản đã CŨ thì manage tự tính bằng lai_lo.v4.js (chép nguyên văn bộ tính của quanlygieo
 // — cùng số) rồi ghi lại pl_days → quanlygieo / máy khác dùng lại, không ai tính lại ngày đã có số.
 //   · "Cũ": ngày đã qua mà bản ghi lúc ngày đó CHƯA HẾT (tính giữa ngày, sau đó còn bán); hôm nay: ghi quá 10 phút.
 //   · Chỉ tính trong PL_COMPUTE_BACK ngày gần nhất (ngày xa hơn: đã có sổ / cache ngày của quanlygieo).
@@ -1580,7 +1580,8 @@ const PL_TODAY_TTL = 10 * 60000, PL_COMPUTE_BACK = 62;
 function plNeedDays(byDate, from, to, nowMs, marks){
   const opts = { marks, now: nowMs, back: PL_COMPUTE_BACK, ttl: PL_TODAY_TTL };
   return [...new Set([...window.GieoData.plNgayCanTinh(byDate, from, to, opts),
-    ...(window.LaiLo?.plNgayLuongCanTinhLai?.(byDate,from,to,opts)||[])])].sort();
+    ...(window.LaiLo?.plNgayLuongCanTinhLai?.(byDate,from,to,opts)||[]),
+    ...(window.LaiLo?.plNgayDaCanTinhLai?.(byDate,from,to,opts)||[])])].sort();
 }
 function plCachePut(id, list){
   const cutoff = dkey(addDays(new Date(), -PL_STABLE_DAYS)), cache = plCacheLoad(), c = cache[id]; if(!c) return;

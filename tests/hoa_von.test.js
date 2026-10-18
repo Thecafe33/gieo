@@ -6,7 +6,7 @@
 'use strict';
 const fs = require('fs'), path = require('path');
 const { extract } = require('./lib/extract');
-const laborVersionDecl = fs.readFileSync(path.join(__dirname, '../quanlygieo.html'), 'utf8').match(/const PL_LABOR_VERSION = \d+;/)[0];
+const laborVersionDecl = fs.readFileSync(path.join(__dirname, '../quanlygieo.html'), 'utf8').match(/const PL_(?:LABOR|ICE)_VERSION = \d+;/g).join('\n');
 let ok = true;
 const eq = (a, b, m) => { if (JSON.stringify(a) !== JSON.stringify(b)) { ok = false; console.log('FAIL', m, JSON.stringify(a), '!=', JSON.stringify(b)); } else console.log('ok', m); };
 const near = (a, b, m) => eq(Math.abs(a - b) < 0.5, true, m + ' (' + a + ' ≈ ' + b + ')');

@@ -1,4 +1,4 @@
-// lai_lo.v3.js (16/10) — bộ tính lãi / lỗ Gieo dùng chung, SINH từ quanlygieo.html (tools/tao_lai_lo.js).
+// lai_lo.v4.js (16/10) — bộ tính lãi / lỗ Gieo dùng chung, SINH từ quanlygieo.html (tools/tao_lai_lo.js).
 //   · File đã sinh còn khớp quanlygieo (quanlygieo đổi công thức mà quên sinh lại → hỏng ở đây).
 //   · Chạy thật với Firestore giả: doanh thu, giá vốn, chi phí theo kỳ, khấu hao ra đúng; đọc đúng bảng của quán gg02.
 //   · Chi phí chỉ đọc khoản chạm khoảng ngày; 3 bảng lịch sử lần sau chỉ đọc mốc mới.
@@ -11,8 +11,8 @@ let ok = true;
 const eq = (a, b, m) => { if (JSON.stringify(a) !== JSON.stringify(b)) { ok = false; console.log('FAIL', m, JSON.stringify(a), '!=', JSON.stringify(b)); } else console.log('ok', m); };
 const near = (a, b, m) => eq(Math.abs(a - b) < 0.01, true, m + ' (' + a + ' ≈ ' + b + ')');
 
-try { execFileSync('node', [path.join(__dirname, '..', 'tools', 'tao_lai_lo.js'), '--check'], { stdio: 'pipe' }); eq(true, true, 'lai_lo.v3.js khớp quanlygieo.html'); }
-catch (e) { eq(String(e.stdout), 'KHỚP', 'lai_lo.v3.js khớp quanlygieo.html'); }
+try { execFileSync('node', [path.join(__dirname, '..', 'tools', 'tao_lai_lo.js'), '--check'], { stdio: 'pipe' }); eq(true, true, 'lai_lo.v4.js khớp quanlygieo.html'); }
+catch (e) { eq(String(e.stdout), 'KHỚP', 'lai_lo.v4.js khớp quanlygieo.html'); }
 
 // ---- manage: ngày nào phải tự tính (plNeedDays) ----
 {
@@ -53,7 +53,7 @@ global.firebase = { firestore: { FieldPath: { documentId: () => ID } } };
 global.localStorage = { getItem: k => (k in LS ? LS[k] : null), setItem: (k, v) => { LS[k] = String(v); } };
 const DA = require('fs').readdirSync(path.join(__dirname, '..')).filter(f => /^data_access\.v\d+\.js$/.test(f)).sort((a, b) => +a.match(/\d+/)[0] - +b.match(/\d+/)[0]).pop();
 global.GieoData = require(path.join(__dirname, '..', DA)).GieoData;
-require(path.join(__dirname, '..', 'lai_lo.v3.js'));
+require(path.join(__dirname, '..', 'lai_lo.v4.js'));
 const LaiLo = global.LaiLo;
 
 // Quán gg02: dữ liệu riêng nằm ở tên + '__gg02'; dữ liệu dùng chung (giá, công thức, cấu hình…) giữ tên cũ.
@@ -79,7 +79,14 @@ RT['orders_gieogieo__gg02/oct/15'] = {
   const d = r.days[0], t = r.tomTat[0];
   eq([d.date, d.doanhThu], ['2026-10-15', 80000], 'Doanh thu = tổng bill của đúng quán gg02 (RT orders_gieogieo__gg02)');
   near(d.giaVon, 2 * 9000 + 30000 * 0.30, 'Giá vốn = món có giá vốn 2 × 9k + món chưa khai ước 30% (cogsPct cấu hình)');
-  near(d.chiPhiCoDinh + d.bienPhiKhac, 3100000 / 31 + 50000, 'Chi phí ngày: thuê 3,1tr ÷ 31 + đá 50k (chờ duyệt không tính)');
+  near(d.chiPhiCoDinh + d.bienPhiKhac, 3100000 / 31, 'Chi phí ngày: thuê 3,1tr ÷ 31; mua đá 50k đã nằm trong COGS');
+  eq(d.chiMuaDa,50000,'Vẫn theo dõi tiền mua đá, không xoá khoản chi');
+  // Mua hàng cho nhiều ngày: giá trị PO/nhận kho không phải chi phí riêng của ngày mua.
+  FS[S('purchase_orders_gieogieo')]={po:{status:'received',lines:[{itemId:'sua',qtyExpectedBase:50000,receivedGoodBase:50000,unitPriceBase:100}]}};
+  FS[S('receiving_records_gieogieo')]={receive:{poId:'po',businessDate:'2026-10-15',lines:[{itemId:'sua',qtyGoodBase:50000}]}};
+  const afterPO=await LaiLo.tinh({fstore,db,storeId:'gg02',from:'2026-10-15',to:'2026-10-15'});
+  near(afterPO.days[0].lai,d.lai,'PO 5 triệu + nhận kho không làm ngày mua bị trừ thêm 5 triệu');
+  eq([reads[S('purchase_orders_gieogieo')]||0,reads[S('receiving_records_gieogieo')]||0],[0,0],'P&L không đọc PO/nhận hàng để cộng thành chi phí vận hành');
   near(d.khauHao, 3100000 / 31, 'Khấu hao: 31tr ÷ 10 tháng ÷ 31 ngày');
   eq(Object.keys(t).includes('hoaVon') && t.date === '2026-10-15', true, 'Bản tóm tắt y dạng pl_days của quanlygieo');
   eq(reads['expenses_gieogieo'] || 0, 0, 'Không đọc nhầm chi phí của quán gg01');
@@ -87,7 +94,7 @@ RT['orders_gieogieo__gg02/oct/15'] = {
   // Cùng số với computeDayPL TRÍCH THẲNG từ quanlygieo.html (không qua file sinh)
   const Q = new Function('HR_SETTINGS', 'CONFIG_HISTORY', 'GieoData', 'QL_VIEW',
     "const DEFAULTS = " + require('fs').readFileSync(path.join(__dirname, '..', 'quanlygieo.html'), 'utf8').match(/const DEFAULTS = (\{[\s\S]*?\n\});/)[1] + ";\n" +
-    extract('quanlygieo.html', ['pad', 'dkey', 'configForDate', 'daysInMonth', 'laborMonthlyTotal', 'computeDayPL', 'plChannelFeeForDay', 'monthlyDepreciation', 'expenseIsEstimate', 'expenseAllocatedAmount', 'daysBetweenInclusive', 'splitExpensesByCostType', 'costTypeOf', 'guessCostType']) +
+    extract('quanlygieo.html', ['pad', 'dkey', 'configForDate', 'daysInMonth', 'laborMonthlyTotal', 'computeDayPL', 'plChannelFeeForDay', 'monthlyDepreciation', 'expenseIsEstimate', 'expenseAllocatedAmount', 'daysBetweenInclusive', 'splitExpensesByCostType', 'expenseCoveredByCogs', 'costTypeOf', 'guessCostType']) +
     "\nconst EXP_VARIABLE_HINTS = " + require('fs').readFileSync(path.join(__dirname, '..', 'quanlygieo.html'), 'utf8').match(/const EXP_VARIABLE_HINTS = (\[[\s\S]*?\]);/)[1] + ";\nreturn computeDayPL;")(
     { useActualLaborCost: false }, [{ effectiveFrom: '2026-01-01', targets: { cogsPct: 30 }, labor: {} }], { storeId: () => 'gg02' }, 'gg02');
   const expAll = Object.entries(FS[S('expenses_gieogieo')]).map(([id, e]) => ({ id, ...e }));
@@ -103,18 +110,18 @@ RT['orders_gieogieo__gg02/oct/15'] = {
   eq(await LaiLo.realtime({storeId:'gg01',day:'2026-10-15',orders:[]}),null,'Không mượn ngữ cảnh lãi/lỗ quán khác');
   const empty=await LaiLo.realtime({storeId:'gg02',day:'2026-10-15',orders:[]});
   eq(empty.day.doanhThu,0,'Xoá bill cuối: doanh thu về 0, chi phí vẫn còn');
-  near(empty.day.chiPhiCoDinh+empty.day.bienPhiKhac,150000,'Realtime giữ chi phí đã nạp');
+  near(empty.day.chiPhiCoDinh+empty.day.bienPhiKhac,100000,'Realtime giữ chi phí đã nạp, mua đá không bị trừ hai lần');
   // Lịch sử giá: lần 2 chỉ đọc mốc mới
   const r1 = reads['price_history_gieogieo'];
   FS['price_history_gieogieo'].p2 = { itemId: 'sua', effectiveFrom: '2026-10-16', price: 120, createdAt: '2026-10-16T01:00:00Z' };
   reads['price_history_gieogieo'] = 0;
-  delete require.cache[require.resolve(path.join(__dirname, '..', 'lai_lo.v3.js'))]; require(path.join(__dirname, '..', 'lai_lo.v3.js'));   // mở lại app: phiên mới, máy vẫn giữ lịch sử
+  delete require.cache[require.resolve(path.join(__dirname, '..', 'lai_lo.v4.js'))]; require(path.join(__dirname, '..', 'lai_lo.v4.js'));   // mở lại app: phiên mới, máy vẫn giữ lịch sử
   await global.LaiLo.tinh({ fstore, db, storeId: 'gg02', from: '2026-10-15', to: '2026-10-15' });
   eq([r1 >= 1, reads['price_history_gieogieo'], Object.keys(JSON.parse(LS['lai_lo_hist_v1_price_history_gieogieo']).docs).length], [true, 1, 2],
     'Lịch sử giá: lần sau chỉ đọc 1 mốc mới (createdAt > mốc đã có), trong máy đủ 2 mốc');
   // Cùng lỗi thu hồi vốn: một khoảng không có lương thật không được tự sinh ngân sách.
   FS['hr_settings_gieogieo'].current.useActualLaborCost=true;
-  delete require.cache[require.resolve(path.join(__dirname,'..','lai_lo.v3.js'))];require(path.join(__dirname,'..','lai_lo.v3.js'));
+  delete require.cache[require.resolve(path.join(__dirname,'..','lai_lo.v4.js'))];require(path.join(__dirname,'..','lai_lo.v4.js'));
   const zero=await global.LaiLo.tinh({fstore,db,storeId:'gg02',from:'2026-09-01',to:'2026-09-04'});
   eq(zero.days.map(d=>d.luong),[0,0,0,0],'bộ tính dùng chung: ngày cũ không phát sinh lương = 0');
   eq(zero.tomTat.every(d=>d.laborVersion===1&&d.laborCheckedAmount===0),true,'bộ tính dùng chung ghi dấu đã sửa lương');
