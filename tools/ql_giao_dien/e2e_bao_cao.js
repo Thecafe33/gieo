@@ -27,7 +27,7 @@ const server=require('http').createServer((req,res)=>{const f=path.resolve(ROOT,
  await new Promise(ok=>server.listen(0,'127.0.0.1',ok));const base='http://127.0.0.1:'+server.address().port;
  const b=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||(fs.existsSync('/opt/pw-browsers/chromium')?'/opt/pw-browsers/chromium':'/usr/bin/chromium')});let count=0;
  const check=(v,m)=>{assert.ok(v,m);console.log('ok '+m);count++};
- try{for(const width of [1366,853,390]){
+ try{for(const width of [1366,1024,853,390]){
  const p=await b.newPage({viewport:{width,height:1000},timezoneId:'Asia/Ho_Chi_Minh'}),errors=[];p.on('pageerror',e=>errors.push(e.message));p.on('dialog',d=>d.accept());
  await p.route('**/*',r=>{const url=r.request().url();if(url.includes('firebase-app-compat'))return r.fulfill({contentType:'application/javascript',body:mock});if(url.includes('firebasejs'))return r.fulfill({contentType:'application/javascript',body:''});if(url.startsWith(base+'/'))return r.continue();return r.abort()});
  await p.goto(base+'/quanlygieo.html');await p.waitForFunction(()=>!_todayBusy&&!!_todayLiveCtx?.pl);
@@ -44,7 +44,8 @@ const server=require('http').createServer((req,res)=>{const f=path.resolve(ROOT,
  check(await p.evaluate(v=>Math.abs(_todayLiveCtx.pl.lai-v.profit)<.01,before),width+': trả hàng 5 triệu không làm lãi/lỗ tụt 5 triệu');
  check(await p.locator('#todayCashFlow').innerText().then(t=>t.includes('5.020.000')&&t.includes('Không phải lợi nhuận')),width+': dòng tiền vẫn ghi tiền mua hàng và mua đá');
  await p.evaluate(()=>switchScreen('thangket'));await p.waitForSelector('.month-owner-summary');
- check(await p.locator('.month-owner-summary .wkpi').count()===4,width+': báo cáo chủ quán mở đầu bằng bốn chỉ số chính');
+ check(await p.locator('.month-owner-summary .wkpi').count()===3,width+': ba chỉ số quản trị, không trộn thu trừ chi vào kết quả kinh doanh');
+ check(await p.locator('.recorded-cash-widget .kmlabel').allTextContents().then(a=>a.includes('Thu vào')&&a.includes('Chi ra đã ghi nhận')&&!a.includes('Thu − chi đã ghi')),width+': tiền thu vào và chi ra có ô riêng');
  check(await p.locator('details.month-dept').count()===4&&await p.locator('details.month-dept[open]').count()===0,width+': chi tiết kế toán/HR/kho/bán hàng mặc định thu gọn');
  check(await p.evaluate(()=>thangKetData.emps.some(e=>e.id==='e1'&&e.active===false)),width+': không bỏ người đã nghỉ có công trong tháng');
  check(await p.locator('#thangKetBody').innerText().then(t=>t.includes('Việc cần quyết định')&&t.includes('Dòng tiền tháng đã ghi nhận')),width+': có việc chủ quán cần quyết định và dòng tiền riêng');
@@ -52,10 +53,26 @@ const server=require('http').createServer((req,res)=>{const f=path.resolve(ROOT,
  check(await p.locator('#monthHRDetails').getAttribute('open')!==null,width+': vẽ lại giữ phần HR đang mở');
  const reads=await p.evaluate(()=>({fs:JSON.stringify(__FSREADS),rt:JSON.stringify(__READS)}));
  const download=p.waitForEvent('download');await p.click('button[onclick="downloadMonthOwnerReport()"]');const out=await download;fs.mkdirSync(ROOT+'/work/bao-cao-dieu-hanh',{recursive:true});const file=ROOT+'/work/bao-cao-dieu-hanh/report-'+width+'.html';await out.saveAs(file);const html=fs.readFileSync(file,'utf8');
- check(html.includes('BÁO CÁO THÁNG')&&html.includes('Phạm vi:')&&html.includes('In / lưu PDF')&&!html.includes('firebaseConfig')&&!html.includes('<script'),width+': tải được báo cáo độc lập, in PDF, không mang mã Firebase');
+ check(html.includes('BÁO CÁO THÁNG')&&html.includes('Phạm vi:')&&html.includes('KẾT QUẢ QUẢN TRỊ TRƯỚC KHẤU HAO')&&html.includes('ĐỐI CHIẾU KẾ TOÁN')&&html.includes('Thu vào theo bill:')&&html.includes('Chi ra đã ghi nhận:')&&html.includes('In / lưu PDF')&&!html.includes('firebaseConfig')&&!html.includes('<script'),width+': tải báo cáo có quản trị/kế toán/thu/chi riêng, in PDF, không mang mã Firebase');
  check(await p.evaluate(v=>v.fs===JSON.stringify(__FSREADS)&&v.rt===JSON.stringify(__READS),reads),width+': mở chi tiết/xuất báo cáo không đọc Firebase');
  check(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2),width+': không tràn ngang báo cáo');
- await p.screenshot({path:ROOT+'/work/bao-cao-dieu-hanh/month-'+width+'.png',fullPage:true});
+ // Bộ số minh hoạ giả để kiểm số tiền dài và đủ ba trạng thái của giao diện.
+ await p.evaluate(()=>{
+  window.__reportFixtureOriginal=thangKetData;
+  const r={stage:'recovery',capital:100000000,opening:30000000,closing:40300000,remaining:59700000,pct:40.3,recoveryContribution:10300000,operatingSurplus:0,reached:null};
+  thangKetData={...thangKetData,recovery:r,plTong:{...thangKetData.plTong,doanhThu:22500000,giaVon:6800000,luong:4100000,chiPhiCoDinh:500000,bienPhiKhac:100000,phiKenh:400000,haoHut:300000,khauHao:3100000,tongChiPhi:15300000,lai:7200000,laiTruocKhauHao:10300000}};
+  document.querySelectorAll('details.month-dept').forEach(el=>el.open=false);thangKetRedraw();
+ });
+ check(await p.locator('.month-owner-summary .wkpi').last().innerText().then(t=>t.includes('Góp thu hồi vốn kỳ này')&&t.includes('10.300.000')),width+': giai đoạn 1 ưu tiên góp vốn trước khấu hao');
+ check(await p.locator('.month-profit-bridge .is-result').innerText().then(t=>t.includes('10.300.000'))&&await p.locator('.month-profit-bridge').innerText().then(t=>t.includes('Giá vốn nguyên liệu')&&t.includes('Tiền lương')&&t.includes('Phí kênh')),width+': bảng giải thích cộng trừ ra đúng chỉ số quản trị');
+ check(await p.evaluate(()=>[...document.querySelectorAll('.month-owner-summary .wkpi .report-money-number')].every(el=>{const r=document.createRange();r.selectNodeContents(el);const b=r.getBoundingClientRect(),c=el.closest('.wkpi').getBoundingClientRect();return r.getClientRects().length===1&&b.right<=c.right&&b.left>=c.left})),width+': đủ chữ số trên một dòng, không rơi chữ số hoặc tràn thẻ');
+ check(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2),width+': số tiền dài không làm tràn ngang');
+ await p.screenshot({path:ROOT+'/work/bao-cao-dieu-hanh/month-stage-recovery-'+width+'.png',fullPage:true});
+ await p.evaluate(()=>{thangKetData.recovery={...thangKetData.recovery,stage:'operating',reached:thangKetData.startKey,recoveryContribution:0,operatingSurplus:10300000};thangKetRedraw()});
+ check(await p.locator('.month-owner-summary .wkpi').last().innerText().then(t=>t.includes('Thặng dư vận hành')&&t.includes('10.300.000'))&&await p.locator('.month-stage-summary').innerText().then(t=>t.includes('Giai đoạn 2')),width+': sau hoàn vốn ưu tiên thặng dư, vẫn trước khấu hao');
+ await p.evaluate(()=>{thangKetData.recovery={...thangKetData.recovery,stage:'transition',recoveryContribution:4000000,operatingSurplus:6300000};thangKetRedraw()});
+ check(await p.locator('.month-stage-summary').innerText().then(t=>t.includes('Tháng chuyển')&&t.includes('4.000.000')&&t.includes('6.300.000')),width+': tháng chuyển giai đoạn tách góp vốn và thặng dư');
+ await p.evaluate(()=>{thangKetData=__reportFixtureOriginal;thangKetRedraw()});
  if(width===1366){
   await p.evaluate(()=>{window.__originalFetch=fetchSalesRange;let first=true;fetchSalesRange=async(...a)=>{if(first){first=false;window.__gated=true;await new Promise(ok=>window.__release=ok)}return __originalFetch(...a)};window.__oldMonth=renderThangKet()});
   await p.waitForFunction(()=>window.__gated);

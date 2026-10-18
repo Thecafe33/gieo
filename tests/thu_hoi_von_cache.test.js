@@ -79,5 +79,13 @@ function setup(){
  check('ghi xong: đệm hiện tại nhớ mốc đã đạt',()=>{assert.equal(api.get().data.daGhiMoc,true);assert.equal(state.finance.recoveryReachedDate,homNay)});
  api.thvCapNhatHomNay(day(homNay,13000000));
  check('bill tiếp theo không ghi lại mốc đã lưu',()=>assert.equal(state.writes,1));
+ const shared=setup();let finishShared,startShared;
+ const sharedReady=new Promise(r=>startShared=r),sharedGate=new Promise(r=>finishShared=r);
+ shared.api.setLoader(async()=>{shared.state.reads++;startShared();return sharedGate});
+ const a=shared.api.computeCapitalRecovery();await sharedReady;const b=shared.api.computeCapitalRecovery();
+ finishShared({days:shared.state.days});const results=await Promise.all([a,b]);
+ check('Hôm nay và báo cáo cùng nạp: chỉ một lượt đọc tài sản/sổ',()=>{assert.equal(shared.state.reads,2);assert.equal(results[0],results[1])});
+ shared.api.thvDropCache();await shared.api.computeCapitalRecovery(false,[{purchaseCost:10000000,purchaseDate:'2026-09-01'}]);
+ check('báo cáo tái dùng tài sản đã nạp, không đọc lại tài sản',()=>assert.equal(shared.state.reads,3));
  console.log('ALL PASS '+passed);
 })().catch(e=>{console.error('FAIL',e.stack);process.exitCode=1});
