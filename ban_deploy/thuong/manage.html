@@ -2200,6 +2200,12 @@ function bfFit(){
 window.addEventListener('resize',()=>{clearTimeout(BF.rz);BF.rz=setTimeout(bfFit,120)});
 function billFeed(){return bfShown()?`<section class="bill-feed" id="billFeed" aria-live="polite" aria-label="Bill chung các điểm bán hôm nay">${bfInner()}</section>`:''}
 function bfOpen(key){if(BF.open.has(key))BF.open.delete(key);else BF.open.add(key);bfRender()}
+// Nhãn của bill cũ: mã này là khoá đổi tem, không phải tên chương trình.
+function stampPromotionLabel(value){
+  const label=String(value==null?'':value);
+  return /^__free_stamp__\d+$/.test(label)?'Ly miễn phí (6 tem)':label;
+}
+
 function bfDetails(b){
  const o=b.o;
  const lines=bfItems(o).map(c=>{
@@ -2214,7 +2220,7 @@ function bfDetails(b){
  if(o.bankOrderId)rows.push(['Mã CK',String(o.bankOrderId)]);
  const guest=[bfGuest(o.customerName),bfGuest(o.phone||o.sdt)].filter(Boolean);if(guest.length)rows.push(['Khách',guest.join(' · ')]);
  if(Number(o.discountAmt)>0)rows.push(['Đã giảm','−'+money(o.discountAmt)+'đ']);
- if(o.voucherUsed)rows.push(['Khuyến mãi',String(o.voucherUsed)]);
+ if(o.voucherUsed)rows.push(['Khuyến mãi',stampPromotionLabel(o.voucherUsed)]);
  if(Number(o.cashGiven)>0&&Number(o.cashChange)>0)rows.push(['Khách đưa / thối',money(o.cashGiven)+'đ / '+money(o.cashChange)+'đ']);
  return `<div class="bf-lines">${lines||`<p class="bf-note">${esc(o.items||'Không có chi tiết món')}</p>`}</div>${rows.length?`<div class="bf-meta">${rows.map(([k,v])=>`<div class="bf-kv"><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('')}</div>`:''}`;
 }

@@ -3302,7 +3302,7 @@ function buildReceiptContent(order, layout) {
     })),
     { type: 'divider', style: 'solid' },
     order.discountAmt ? { type: 'text', text: `Giảm giá: -${fmt(order.discountAmt)}`, size: 14, align: 'right' } : null,
-    order.voucherUsed ? { type: 'text', text: `Voucher: ${order.voucherUsed}`, size: 14, align: 'right' } : null,
+    order.voucherUsed ? { type: 'text', text: `Voucher: ${stampPromotionLabel(order.voucherUsed)}`, size: 14, align: 'right' } : null,
     { type: 'text', text: `TỔNG: ${fmt(order.total)}`, size: 24, bold: true, align: 'right' },
     payRow,
     (order.cashChange && order.method === 'TIỀN MẶT') ? { type: 'text', text: `Thối lại: ${fmt(order.cashChange)}`, size: 17, bold: true, align: 'right' } : null,
@@ -8256,6 +8256,12 @@ function cancelTogoGift() {
   if (onProceed) onProceed();
 }
 
+// Nhãn của bill cũ: mã này là khoá đổi tem, không phải tên chương trình.
+function stampPromotionLabel(value){
+  const label=String(value==null?'':value);
+  return /^__free_stamp__\d+$/.test(label)?'Ly miễn phí (6 tem)':label;
+}
+
 function confirmTogoGift() {
   if (!togoGiftSelected) { toast('⚠ Vui lòng chọn món quà'); return; }
   const m = getActiveMenu().find(x => x.id === togoGiftSelected);
@@ -8283,7 +8289,7 @@ function confirmTogoGift() {
         const k = '__stampfree_' + opts.stampVKey;
         cart[k] = {
           itemId: m.id, name: m.name, size: gs.label, price: 0, qty: 1,
-          _vKey: opts.stampVKey, _giftType: 'item_free', _originalPrice: gs.price
+          _vKey: opts.stampVKey, _giftType: 'item_free', _giftLabel: 'Ly miễn phí (6 tem)', _originalPrice: gs.price
         };
         renderMenu(); renderCartDrawer(); updFooter();
         toast(`🎁 Đã đổi ly miễn phí: ${m.name} ${gs.label}`);
@@ -24188,7 +24194,7 @@ async function confirmPay(cashGiven, cashChange) {
     phone: document.getElementById('cuph').value || '',
     customerName: (curCustomer && curCustomer.name) || '',
     voucherUsed: _stampFreeVKey
-      ? (Object.values(cart).find(c=>c._vKey===_stampFreeVKey)?._giftLabel || _stampFreeVKey)
+      ? (Object.values(cart).find(c=>c._vKey===_stampFreeVKey)?._giftLabel || 'Ly miễn phí (6 tem)')
       : null,
     cashGiven: cashGiven !== null && cashGiven !== undefined ? cashGiven : total,
     cashChange: cashChange !== null && cashChange !== undefined ? cashChange : 0,
@@ -25673,7 +25679,7 @@ function showDet(id) {
     <div style="background:#fff;border-radius:20px;padding:22px 24px;">
       <div style="font-size:11px;font-weight:700;color:var(--gt);text-transform:uppercase;letter-spacing:.6px;margin-bottom:6px;">Tổng Bill</div>
       <div style="font-size:52px;font-weight:700;color:var(--td);line-height:1;letter-spacing:-1px;">${o.total.toLocaleString('vi-VN')}<span style="font-size:24px;color:var(--gt);">đ</span></div>
-      <div style="font-size:13px;color:var(--gt);margin-top:6px;margin-bottom:${(o.method === 'TÍNH RIÊNG' && o.splitGroups && o.splitGroups.length) ? '0' : '12px'};">Số lượng: ${totalQty} món${o.voucherUsed ? ' · 🎁 ' + o.voucherUsed : ''}</div>
+      <div style="font-size:13px;color:var(--gt);margin-top:6px;margin-bottom:${(o.method === 'TÍNH RIÊNG' && o.splitGroups && o.splitGroups.length) ? '0' : '12px'};">Số lượng: ${totalQty} món${o.voucherUsed ? ' · 🎁 ' + escHtmlPos(stampPromotionLabel(o.voucherUsed)) : ''}</div>
       ${!(o.method === 'TÍNH RIÊNG' && o.splitGroups && o.splitGroups.length) ? `
       <div style="border-top:1px solid #f0f0f0;">
         <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #f5f5f5;">
@@ -27040,7 +27046,7 @@ async function finalizeSplitPay() {
     splitGroups: spGroups,
     phone: document.getElementById('cuph').value || '',
     customerName: (curCustomer && curCustomer.name) || '',
-    voucherUsed: _stampFreeVKey ? (Object.values(cart).find(c=>c._vKey===_stampFreeVKey)?._giftLabel || _stampFreeVKey) : null,
+    voucherUsed: _stampFreeVKey ? (Object.values(cart).find(c=>c._vKey===_stampFreeVKey)?._giftLabel || 'Ly miễn phí (6 tem)') : null,
     cashGiven: total, cashChange: 0,
     // [FIX] Ghi lại tổng đã giảm — trước đây bill Tính riêng không có trường này
     // nên báo cáo không biết đơn đó đã áp khuyến mãi gì.

@@ -1,5 +1,8 @@
 # Hiện trạng dự án — cập nhật 18/10/2026
 
+**18/10 — nhãn ly đổi tem**: POS Gieo thiếu `_giftLabel` nên cả thanh toán thường/tách bill lưu mã `__free_stamp__<timestamp>` thành tên khuyến mãi. Nay tạo/lưu nhãn “Ly miễn phí (6 tem)”; manage, quanlygieo và lịch sử/in lại POS chuyển nhãn mã cũ ngay khi hiển thị. Không sửa bill lịch sử, khoá đổi tem, cơ chế trừ tem hay giá vốn. Chi tiết `docs/NHAN_LY_DOI_TEM.md`; sinh lại bản thử/bộ mùa, chưa deploy Hosting.
+
+
 **18/10 — manage tải phần bổ sung theo yêu cầu**: Tổng quan tự hiện so sánh hôm trước như cũ (chủ dự án yêu cầu bỏ nút tải riêng); Tổng kết tháng chỉ nghe sổ đã chốt, bấm Xem tạm tính mới tính đúng TC33/XOFA được chọn. Giữ kết quả theo kỳ/quán, gộp bấm lặp, lỗi thử lại riêng; thay nguồn bỏ đệm, kết quả cũ không trộn kỳ mới. Doanh thu/hoà vốn chính và RT giữ nguyên. Không sửa công thức/lai_lo.v4, không ghi dữ liệu thật, chưa deploy Hosting. Chi tiết `docs/MANAGE_DOC_THEO_YEU_CAU.md`.
 
 

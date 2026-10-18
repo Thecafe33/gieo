@@ -15402,13 +15402,19 @@ function bfDongMon(c){
     + tp.map(t => `<div class="bfeed-li bl-tp"><span>+ ${escapeHtmlAttr(t.name||'')}${Math.max(1,Number(t.qty)||1) > 1 ? ` ×${Math.max(1,Number(t.qty)||1)}` : ''}</span><span>${Number(t.price) ? fmt((Number(t.price)||0) * Math.max(1,Number(t.qty)||1)) : 'tặng'}</span></div>`).join('');
 }
 
+// Nhãn của bill cũ: mã này là khoá đổi tem, không phải tên chương trình.
+function stampPromotionLabel(value){
+  const label=String(value==null?'':value);
+  return /^__free_stamp__\d+$/.test(label)?'Ly miễn phí (6 tem)':label;
+}
+
 function bfChiTiet(o){
   const mon = (o.itemsArray || []);
   const kv = (k, v) => `<div class="bfeed-kv"><span>${k}</span><span style="color:var(--td);font-weight:650">${v}</span></div>`;
   const phu = [];
   if(o.billCode) phu.push(kv('Mã bill', escapeHtmlAttr(o.billCode)));
   if(o.customerName || o.phone) phu.push(kv('Khách', `${escapeHtmlAttr(o.customerName||'')}${o.phone ? ` · ${escapeHtmlAttr(o.phone)}` : ''}`));
-  if(o.voucherUsed) phu.push(kv('Khuyến mãi', escapeHtmlAttr(String(o.voucherUsed))));
+  if(o.voucherUsed) phu.push(kv('Khuyến mãi', escapeHtmlAttr(stampPromotionLabel(o.voucherUsed))));
   if(Number(o.discountAmt) > 0) phu.push(kv('Đã giảm', '−' + fmt(o.discountAmt)));
   if(Number(o.cashGiven) > 0 && Number(o.cashChange) > 0)
     phu.push(kv('Khách đưa / thối', `${fmt(o.cashGiven)} / ${fmt(o.cashChange)}`));
@@ -15807,7 +15813,7 @@ function qlBillDetailHTML(id){
     <div style="background:#fff;border-radius:20px;padding:22px 24px;margin-bottom:12px;">
       <div style="font-size:11px;font-weight:700;color:var(--gt);text-transform:uppercase;letter-spacing:.6px;margin-bottom:6px;">Tổng Bill</div>
       <div style="font-size:52px;font-weight:700;color:var(--td);line-height:1;letter-spacing:-1px;">${vnd(o.total)}<span style="font-size:24px;color:var(--gt);">đ</span></div>
-      <div style="font-size:13px;color:var(--gt);margin-top:6px;margin-bottom:${(o.method === 'TÍNH RIÊNG' && o.splitGroups && o.splitGroups.length) ? '0' : '12px'};">Số lượng: ${totalQty} món${o.voucherUsed ? ' · 🎁 ' + escapeHtmlAttr(String(o.voucherUsed)) : ''}</div>
+      <div style="font-size:13px;color:var(--gt);margin-top:6px;margin-bottom:${(o.method === 'TÍNH RIÊNG' && o.splitGroups && o.splitGroups.length) ? '0' : '12px'};">Số lượng: ${totalQty} món${o.voucherUsed ? ' · 🎁 ' + escapeHtmlAttr(stampPromotionLabel(o.voucherUsed)) : ''}</div>
       ${!(o.method === 'TÍNH RIÊNG' && o.splitGroups && o.splitGroups.length) ? `
       <div style="border-top:1px solid #f0f0f0;">
         <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #f5f5f5;">

@@ -31,6 +31,11 @@ const server=require('http').createServer((req,res)=>{const f=path.resolve(ROOT,
  check(await p.evaluate(v=>document.querySelector('.overview-amount').textContent!==v,before.total),'manage '+width+': tổng doanh thu tự cập nhật');
  check(await p.evaluate(v=>JSON.stringify(__READS)===JSON.stringify(v),before.reads),'manage '+width+': bill mới không phát sinh lượt đọc RT');
  check(await p.evaluate(v=>JSON.stringify(__FSREADS)===JSON.stringify(v),before.fsreads),'manage '+width+': bill mới không đọc lại chi phí/kho/lương');
+ await p.evaluate(()=>{BF.list.unshift({key:'stamp-label',store:'gg01',t:Date.now(),o:{total:0,time:'14:43',voucherUsed:'__free_stamp__1792309355252',itemsArray:[{name:'Bí đao sương sáo',size:'L',qty:1,price:0}]}});bfRender()});
+ await p.locator('#billFeed .bf-row[data-k="stamp-label"]').click();
+ check(await p.locator('#billFeed .bf-detail').innerText().then(t=>t.includes('Ly miễn phí (6 tem)')&&!t.includes('__free_stamp__')), 'manage '+width+': bill đổi tem cũ hiện nhãn dễ đọc trong widget');
+ check(await p.evaluate(v=>JSON.stringify(__READS)===JSON.stringify(v),before.reads),'manage '+width+': đổi nhãn bill cũ không đọc thêm RT');
+ await p.evaluate(()=>{BF.list=BF.list.filter(b=>b.key!=='stamp-label');BF.open.delete('stamp-label');bfRender()});
  await p.evaluate(()=>{BF.list.unshift({key:'ui-preview',store:'xofa',t:Date.now(),o:{total:30000,time:'12:23',isToGo:true,billCode:'#05-17.10.26',bankOrderId:'XO1710122218',method:'CHUYỂN KHOẢN',itemsArray:[{name:'Trà lựu đỏ thạch dừa',size:'L',qty:1,price:25000,toppings:[{name:'Ngọc trai hồng',price:5000,qty:1}]}]}},{key:'ui-here',store:'xofa',t:0,o:{total:29000,time:'12:20',isToGo:false,method:'TIỀN MẶT'}},{key:'ui-legacy',store:'xofa',t:0,o:{total:29000,time:'12:19',method:'TIỀN MẶT'}});bfRender()});
  await p.locator('#billFeed .bf-entry:not([hidden]) .bf-row').first().click();
  check(await p.locator('#billFeed .bf-detail').count()===1,'manage '+width+': chi tiết bill mở ngay trong widget');
@@ -168,6 +173,7 @@ const server=require('http').createServer((req,res)=>{const f=path.resolve(ROOT,
  });
  check(iceAudit.expense===10000&&iceAudit.version===1&&iceAudit.purchase===20000,'quanlygieo '+width+': tự sửa snapshot cũ, chỉ giữ ship trong biến phí');
  check(iceAudit.calls===1&&iceAudit.raw===20000,'quanlygieo '+width+': không lặp tính lại, không sửa tiền mua đá gốc');
+ check(await p.evaluate(()=>{const el=document.createElement('div');el.innerHTML=bfChiTiet({voucherUsed:'__free_stamp__1792309355252'});document.body.append(el);const pass=el.textContent.includes('Ly miễn phí (6 tem)')&&!el.textContent.includes('__free_stamp__');el.remove();return pass}),'quanlygieo '+width+': bill cũ hiện nhãn 6 tem');
  check(errors.length===0,'quanlygieo '+width+': không lỗi JS '+errors.join('|'));
  await p.close();}
  console.log('ALL PASS '+count);
