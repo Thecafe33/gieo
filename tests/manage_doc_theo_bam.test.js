@@ -1,0 +1,28 @@
+const assert=require('assert/strict'),vm=require('vm'),{extract}=require('./lib/extract');
+const c={console,Date,Map,Promise,HR_STORE_IDS:['tc33','xofa'],TCX_IDS:['tc33','xofa'],state:{view:'thangket',closeMonth:'2026-09'},live:{month:{month:'2026-09',closings:{}},ready:{rev:1,thangket:1}},tkPreviewCache:new Map(),currentDate:()=> '2026-10-18',render(){},friendlyError:e=>e.message,ensureAuth:async()=>{},validMonth:()=>{},gieoStores:async()=>[{id:'gg01'}],CLOSE_W:{val:{gg01:{lai:123}}},watchClosings:async()=>{},validDate:()=>{},dkey:d=>new Date(d).toISOString().slice(0,10),parseDkey:s=>new Date(s),addDays:(d,n)=>new Date(+d+n*86400000)};
+let calls=[],fail=false,release,gate=null;
+c.backend={readMonthTcx:async(month,id)=>{calls.push([month,id]);if(gate)await gate;if(fail)throw Error('nguồn lỗi');return {doanhThu:1000,lai:200}}};
+c.readMonthTcx=()=>{throw Error('không được tự đọc tạm tính')};c.revLoadRange=async(a,b)=>{calls.push([a,b]);return {tc33:{[a]:{drink:500}}}};
+c.rangeDates=()=>['2026-10-18','2026-10-18'];
+vm.createContext(c);vm.runInContext(extract('manage.html',['readMonthClose','readRevenueComparison','tkPreviewKey','tkDropPreview','tkLoadPreview','tkRefreshAfterWrite','loadRevenueComparison','invalidateViews']),c);
+let n=0;const check=(v,m)=>{assert.ok(v,m);console.log('ok '+m);n++};
+(async()=>{
+ const M=await c.readMonthClose('2026-09');check(M.closings.gg01.lai===123&&Object.keys(M.tcx).length===0&&!calls.length,'vào tổng kết chỉ lấy sổ đã chốt, không tự tính TC33/XOFA');
+ await c.tkLoadPreview('tc33');check(calls.length===1&&calls[0][1]==='tc33','bấm TC33 chỉ tính đúng quán đó');
+ await c.tkLoadPreview('tc33');check(calls.length===1,'mở lại bản tạm tính dùng kết quả đã tải');
+ fail=true;await c.tkLoadPreview('xofa');check(c.tkPreviewCache.get('2026-09|xofa').error==='nguồn lỗi'&&!c.tkPreviewCache.get('2026-09|xofa').value,'nguồn lỗi không bị diễn giải thành số 0');
+ fail=false;calls=[];await c.tkLoadPreview('xofa');check(calls.length===1&&calls[0][1]==='xofa','thử lại chỉ đọc quán lỗi');
+ calls=[];gate=new Promise(ok=>release=ok);const loading=c.tkLoadPreview('tc33',true);await c.tkLoadPreview('tc33',true);release();await loading;gate=null;check(calls.length===1,'bấm lặp trong lúc tính chỉ có một yêu cầu');
+ calls=[];c.live.month.closings.tc33={lai:300};await c.tkLoadPreview('tc33',true);await c.tkLoadPreview('gg01');check(!calls.length,'quán đã chốt và Gieo không chạy tạm tính TCX');
+ c.state.closeMonth='2026-11';c.live.month.month='2026-11';await c.tkLoadPreview('xofa');check(!calls.length,'tháng tương lai không đọc nguồn');
+ c.state.closeMonth='2026-09';c.live.month.month='2026-09';c.state.view='rev';await c.tkLoadPreview('xofa',true);check(!calls.length,'không ở Tổng kết không chạy tạm tính');
+ c.state.view='thangket';gate=new Promise(ok=>release=ok);const stale=c.tkLoadPreview('xofa',true);c.invalidateViews('chiphi');release();await stale;gate=null;
+ check(!c.tkPreviewCache.size&&!c.live.ready.thangket,'sửa nguồn bỏ đệm, lượt cũ không hồi sinh bản tạm tính');
+ calls=[];const cmp=await c.readRevenueComparison('2026-10-18');check(calls.length===1&&calls[0].join()==='2026-10-17,2026-10-17'&&cmp.day==='2026-10-17','so sánh chỉ đọc đúng một ngày trước, không kèm chi phí/lương');
+ c.state.view='rev';c.live.rev={from:'2026-10-18',to:'2026-10-18',data:{tc33:{'2026-10-18':{drink:1000}}}};
+ c.backend.readRevenueComparison=async()=>cmp;await c.loadRevenueComparison();check(c.live.rev.comparison&&c.live.rev.data.tc33['2026-10-18'].drink===1000&&c.live.rev.data.tc33['2026-10-17'].drink===500,'so sánh thêm ngày trước, giữ doanh thu kỳ hiện tại');
+ let count=0;c.backend.readRevenueComparison=async()=>{count++;return cmp};await c.loadRevenueComparison();check(count===0,'mở lại so sánh không đọc lặp');
+ const old=c.live.rev;delete old.compareState;gate=new Promise(ok=>release=ok);c.backend.readRevenueComparison=async()=>{await gate;return cmp};const p=c.loadRevenueComparison();c.live.rev={from:'2026-10-19',to:'2026-10-19',data:{}};release();await p;check(!c.live.rev.comparison&&!Object.keys(c.live.rev.data).length,'so sánh kỳ cũ trả chậm không trộn vào kỳ mới');
+ c.state.view='thangket';c.state.closeMonth='2026-10';let refreshes=0;c.loadCurrent=async()=>{refreshes++};c.tkPreviewCache.set('2026-09|tc33',{value:1});c.tkPreviewCache.set('2026-10|tc33',{value:2});await c.tkRefreshAfterWrite('tc33','2026-09');check(refreshes===0&&!c.tkPreviewCache.has('2026-09|tc33')&&c.tkPreviewCache.get('2026-10|tc33').value===2,'lưu tháng cũ không xoá đệm hoặc tải tự động tháng mới');
+ console.log('ALL PASS '+n);
+})().catch(e=>{console.error(e);process.exitCode=1});

@@ -1,5 +1,8 @@
 # Hiện trạng dự án — cập nhật 18/10/2026
 
+**18/10 — manage tải phần bổ sung theo yêu cầu**: Tổng quan bấm So sánh hôm trước mới đọc ngày so sánh; Tổng kết tháng chỉ nghe sổ đã chốt, bấm Xem tạm tính mới tính đúng TC33/XOFA được chọn. Giữ kết quả theo kỳ/quán, gộp bấm lặp, lỗi thử lại riêng; thay nguồn bỏ đệm, kết quả cũ không trộn kỳ mới. Doanh thu/hoà vốn chính và RT giữ nguyên. Không sửa công thức/lai_lo.v4, không ghi dữ liệu thật, chưa deploy Hosting. Chi tiết `docs/MANAGE_DOC_THEO_YEU_CAU.md`.
+
+
 **18/10 — tải theo nút bấm ở toàn chuỗi**: Hôm nay chỉ đọc bill để cộng doanh thu, tách Tải tồn kho/Tải cảnh báo độc lập. Báo cáo kỳ chọn kỳ trước, bấm Tải báo cáo mới đọc nguồn; mở lại/lọc/thu gọn dùng kết quả trong phiên, header/nút tải lại làm mới có chủ ý. Lỗi ghi rõ tổng thiếu; thử lại chỉ quán lỗi. Không sửa công thức hoặc lai_lo.v4, không ghi dữ liệu Firebase thật, chưa deploy Hosting. Chi tiết và các luồng cần tách tiếp: `docs/TOI_UU_TONG_HOP_CHUOI.md`.
 
 
