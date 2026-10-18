@@ -3013,7 +3013,7 @@ function setSync(busy){
 }
 async function reloadCurrent(){
   clearError();
-  if(QL_ALL){ if(curScreen==='thangket')return renderThangKetAll(true);(curScreen === 'report' ? renderReportAll : renderTodayAll)(); return; }
+  if(QL_ALL){ if(curScreen==='thangket')return renderThangKetAll(true);(curScreen === 'report' ? refreshReportAll : ()=>renderTodayAll(true))(); return; }
   thvDropCache(); // Tải lại phải bỏ cả tổng thu hồi vốn và lượt nạp nền cũ.
   memoDropAll();   // bấm Tải lại là muốn số MỚI, không phải số trong bộ đệm
   try{ await ensureAuth(); await loadConfig(); }catch(err){ console.warn('reload config failed', err); }
@@ -18764,7 +18764,7 @@ function qlNavKeyFor(s){
 // ---------- Màn Hôm nay — XEM TẤT CẢ CỬA HÀNG (chỉ xem) ----------
 let _todayAllChiCanXem = true;   // bảng tồn: chỉ món âm / dưới ngưỡng ở ít nhất 1 quán
 let _todayAllData = null;
-async function renderTodayAll(){
+async function renderTodayAll(force=false){
   const scr = document.getElementById('screen-today');
   if(!scr) return;
   let box = document.getElementById('todayAll');
@@ -18772,36 +18772,76 @@ async function renderTodayAll(){
     [...scr.children].forEach(c=>{ c.style.display = 'none'; });
     box = document.createElement('div'); box.id = 'todayAll'; scr.appendChild(box);
   }
-  box.innerHTML = '<div class="muted">Đang đọc số liệu từng cửa hàng...</div>';
+  if(!force && _todayAllData && _todayAllData.day===dkey(new Date())){
+    if(_todayAllData.loading)return;
+    if(_todayAllData.complete){drawTodayAll();return;}
+  }
+  const context=[];context.day=dkey(new Date());context.loading=true;_todayAllData=context;
+  box.innerHTML = '<div class="muted">Đang đọc doanh thu từng cửa hàng...</div>';
   setSync(true);
   try{
     await ensureAuth();
     await qlLoadStores();
     const ds = qlActiveStores();
     if(!ds.length){ box.innerHTML = '<div class="muted">Chưa có hồ sơ cửa hàng nào — chọn GG01 ở đầu sidebar, vào Cấu hình ▸ Cửa hàng để tạo.</div>'; return; }
-    await Promise.all([ensurePriceHistory().catch(()=>null), loadRecipes().catch(()=>null)]);
-    const today = new Date(), out = [];
-    // TUẦN TỰ từng quán (withStore có khoá): các hàm tính dùng chung fstore + bộ đệm — xoá đệm trước/sau mỗi quán.
+    const today = new Date();
+    // Doanh thu chỉ cần bill, không cần danh mục/giá vốn/sổ kho hay cảnh báo.
     for(const st of ds){
+      if(_todayAllData!==context || curScreen!=='today' || context.day!==dkey(new Date()))return;
       const r = await GieoData.withStore(st.id, async ()=>{
-        memoDropAll(); _costMemo = {}; INVENTORY_ITEMS = []; PREP_ITEMS = [];
-        const [items, preps] = await Promise.all([loadInventoryItems(), loadPrepItems()]);
-        INVENTORY_ITEMS = items; PREP_ITEMS = preps;
-        const [sales, health] = await Promise.all([
-          fetchSalesRange(today, today).catch(err=>({err})),
-          computeStoreHealth().catch(err=>({err}))
-        ]);
-        return { st, items, preps, sales, health };
-      }).catch(err=>({ st, err }));
-      out.push(r);
+        const orders=await fetchOrdersForDate(today);
+        return {st,sales:{perDay:[{revenue:orders.reduce((n,o)=>n+(Number(o.total)||0),0),bills:orders.length}]}};
+      }).catch(err=>({st,err}));
+      context.push(r);
     }
-    memoDropAll(); _costMemo = {}; INVENTORY_ITEMS = []; PREP_ITEMS = [];
-    _todayAllData = out;
+    context.complete=true;
+    if(_todayAllData!==context || curScreen!=='today')return;
     drawTodayAll();
   }catch(err){
     console.error('renderTodayAll lỗi', err);
-    box.innerHTML = `<div class="muted">Không đọc được số liệu: ${escapeHtmlAttr(err.message||err)}</div>`;
-  }finally{ setSync(false); }
+    if(_todayAllData===context && curScreen==='today')box.innerHTML = `<div class="muted">Không đọc được số liệu: ${escapeHtmlAttr(err.message||err)}</div>`;
+  }finally{context.loading=false;if(_todayAllData===context && curScreen==='today')setSync(false); }
+}
+// Hai khối độc lập: chỉ nút bấm mới gọi nguồn, không gọi từ render/lọc/đổi màn.
+async function loadTodayAllSection(kind){
+  if(!['health','stock'].includes(kind))return;
+  const data=_todayAllData;
+  if(!data || data.day!==dkey(new Date()) || curScreen!=='today')return;
+  const state=data[kind]||(data[kind]={});
+  if(state.loading)return;
+  if(state.ready){state.open=!state.open;drawTodayAll();return;}
+  state.loading=true;state.open=true;drawTodayAll();
+  try{
+    for(const row of data){
+      if(_todayAllData!==data || curScreen!=='today' || data.day!==dkey(new Date()))break;
+      if(row[kind+'Ready'])continue;
+      try{
+        await GieoData.withStore(row.st.id,async()=>{
+          const oldItems=INVENTORY_ITEMS,oldPreps=PREP_ITEMS;
+          memoDropAll();INVENTORY_ITEMS=[];PREP_ITEMS=[];
+          try{
+            if(kind==='stock'){
+              const [items,preps]=await chainMonthReadGroup([loadInventoryItems(),loadPrepItems()]);
+              row.items=items;row.preps=preps;
+            }else{
+              row.health=await computeStoreHealth();
+              if(row.health.some(x=>x.err))throw new Error('Một nguồn cảnh báo chưa đọc được');
+            }
+            row[kind+'Ready']=true;row[kind+'Error']=null;
+          }finally{memoDropAll();INVENTORY_ITEMS=oldItems;PREP_ITEMS=oldPreps;}
+        });
+      }catch(err){row[kind+'Error']=err;}
+    }
+    state.ready=data.every(row=>row[kind+'Ready']);
+    state.loadedAt=new Date().toLocaleString('vi-VN');
+  }finally{
+    state.loading=false;
+    if(_todayAllData===data && curScreen==='today')drawTodayAll();
+  }
+}
+function todayAllSectionButton(kind,label){
+  const state=_todayAllData[kind]||{};
+  return `<button class="btn outline sm" onclick="loadTodayAllSection('${kind}')" ${state.loading?'disabled':''}>${state.loading?'Đang tải…':state.ready?(state.open?'Thu gọn':'Xem lại'):'Tải '+label}</button>`;
 }
 function drawTodayAll(){
   const box = document.getElementById('todayAll'); if(!box || !_todayAllData) return;
@@ -18819,11 +18859,12 @@ function drawTodayAll(){
   // 2. Việc cần xử lý — gộp, gắn nhãn quán; bấm → chuyển sang quán đó rồi mở đúng việc
   const viec = [];
   out.forEach(r=>{
-    if(r.err || !Array.isArray(r.health)){ viec.push({tier:'red', st:r.st, label:'Không kiểm tra được việc cần xử lý', count:'!', onclick:''}); return; }
+    if(!r.health && !r.healthError)return;
+    if(r.healthError || !Array.isArray(r.health)){ viec.push({tier:'red', st:r.st, label:'Không kiểm tra được việc cần xử lý', count:'!', onclick:''}); return; }
     r.health.forEach(x=>viec.push({...x, st:r.st}));
   });
   const red = viec.filter(x=>x.tier==='red'), yellow = viec.filter(x=>x.tier==='yellow');
-  STORE_HEALTH_ISSUE_COUNT = red.length; renderSidebarNav();
+  if(out.health && out.health.ready){STORE_HEALTH_ISSUE_COUNT = red.length; renderSidebarNav();}
   const dongViec = x => `<div class="health-item ${x.tier}" data-after="${x.onclick?escapeHtmlAttr(JSON.stringify({js:x.onclick})):''}" onclick="qlSwitchView('${x.st.id}', this.dataset.after)">
       <div class="hi-label">${nhanQuan(x.st)}${x.label}</div><div class="hi-count">${x.count} ›</div></div>`;
   // 3. Tồn so sánh (CHỈ XEM) — mỗi NL / BTP một dòng, cột từng quán + tổng
@@ -18854,18 +18895,22 @@ function drawTodayAll(){
     <div class="sec-title">Doanh thu hôm nay</div>
     <div class="card">${dongDT}
       <div class="row" style="border-top:1.5px solid var(--line,#eee);margin-top:4px;padding-top:6px"><span class="rl"><b>${(()=>{ const loi = out.filter(r=>!(r.sales && r.sales.perDay && r.sales.perDay[0])).map(r=>r.st.id.toUpperCase()); return loi.length ? `Tổng tạm tính — thiếu ${loi.join(', ')}` : `Tổng ${out.length} cửa hàng`; })()}</b></span><span class="rv"><b>${fmt(tDT)}</b> · ${tBill} bill</span></div>
-      <div class="small-note" style="margin-top:6px">Lãi/lỗ, hoà vốn, bảng tin bill: chọn từng cửa hàng.</div>
+      <div class="small-note" style="margin-top:6px">Dữ liệu đã tải trong phiên; bấm tải lại trên header để lấy doanh thu mới. Lãi/lỗ, hoà vốn, bảng tin bill: chọn từng cửa hàng.</div>
     </div>
-    <div class="sec-title">Việc cần xử lý</div>
-    <div>
-      ${(!red.length && !yellow.length) ? `<div class="health-all-clear">${ic('check',20)} Mọi cửa hàng đều ổn</div>` : ''}
-      ${red.length ? `<div class="health-group-title">${icDot('var(--bad)')} Cần xử lý ngay (${red.length})</div>${red.map(dongViec).join('')}` : ''}
-      ${yellow.length ? `<div class="health-group-title">${icDot('var(--warn)')} Nên xem (${yellow.length})</div>${yellow.map(dongViec).join('')}` : ''}
+    <div class="card"><div class="sec-title">Việc cần xử lý ${todayAllSectionButton('health','cảnh báo')}</div>
+      <div class="small-note">Chỉ kiểm tra cảnh báo khi bấm tải; chưa tải không có nghĩa là mọi cửa hàng đều ổn.</div>
+      ${out.health && out.health.open ? `
+        ${out.health.ready && !red.length && !yellow.length ? `<div class="health-all-clear">${ic('check',20)} Không có cảnh báo trong dữ liệu vừa kiểm tra</div>` : ''}
+        ${red.length ? `<div class="health-group-title">Cần xử lý ngay (${red.length})</div>${red.map(dongViec).join('')}` : ''}
+        ${yellow.length ? `<div class="health-group-title">Nên xem (${yellow.length})</div>${yellow.map(dongViec).join('')}` : ''}` : ''}
     </div>
-    <div class="sec-title" style="display:flex;justify-content:space-between;align-items:center">Tồn kho so sánh
-      <button class="btn outline sm" onclick="_todayAllChiCanXem=!_todayAllChiCanXem;drawTodayAll()">${_todayAllChiCanXem?'Hiện tất cả':'Chỉ món cần xem'}</button></div>
-    <div class="card">${bang('nl')}</div>
-    <div class="card">${bang('btp')}</div>`;
+    <div class="card"><div class="sec-title">Tồn kho so sánh ${todayAllSectionButton('stock','tồn kho')}</div>
+      <div class="small-note">Chỉ đọc danh mục và tồn từng quán khi bấm tải. Mở lại hoặc đổi bộ lọc dùng dữ liệu đã tải; bấm tải lại trên header để lấy số mới.</div>
+      ${out.stock && out.stock.open ? `
+        ${out.some(r=>r.stockError)?`<div class="small-note" style="color:var(--bad)">Chưa đọc được ${out.filter(r=>r.stockError).map(r=>escapeHtmlAttr(r.st.id.toUpperCase())).join(', ')}. Tổng chỉ gồm phần đã tải; bấm Tải tồn kho để thử lại quán lỗi.</div>`:''}
+        <button class="btn outline sm" onclick="_todayAllChiCanXem=!_todayAllChiCanXem;drawTodayAll()">${_todayAllChiCanXem?'Hiện tất cả':'Chỉ món cần xem'}</button>
+        ${out.some(r=>r.stockReady)?bang('nl')+bang('btp'):''}` : ''}
+    </div>`;
 }
 
 // ---------- Báo cáo — XEM TẤT CẢ CỬA HÀNG (chỉ xem) ----------
@@ -18890,29 +18935,63 @@ function _rpAllRange(k){
   if(k === 'thang') return { start:new Date(nay.getFullYear(), nay.getMonth(), 1), end:nay, label:'Tháng này' };
   return { start:new Date(nay.getFullYear(), nay.getMonth()-1, 1), end:new Date(nay.getFullYear(), nay.getMonth(), 0), label:'Tháng trước' };
 }
-async function renderReportAll(){
-  const body = document.getElementById('reportBody'); if(!body) return;
+const _reportAllCache=new Map();
+function reportAllKey(){const r=_rpAllRange(_rpAllKy);return dkey(r.start)+'/'+dkey(r.end)+'/'+dkey(new Date());}
+function renderReportAll(){
+  const body=document.getElementById('reportBody');if(!body)return;
+  const wn=document.querySelector('#screen-report .weeknav');if(wn)wn.style.display='none';
+  const cached=_reportAllCache.get(reportAllKey());
+  if(cached && cached.html){body.innerHTML=cached.html;return;}
+  const r=_rpAllRange(_rpAllKy);
+  body.innerHTML=`<div class="card"><div class="sec-title">Báo cáo · Tất cả cửa hàng</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">${[['tuan','Tuần này'],['tuantruoc','Tuần trước'],['thang','Tháng này'],['thangtruoc','Tháng trước']].map(([k,t])=>`<button class="btn ${_rpAllKy===k?'':'outline'} sm" onclick="_rpAllKy='${k}';renderReportAll()">${t}</button>`).join('')}</div>
+    <div class="small-note">${fmtDateVN(r.start)} — ${fmtDateVN(r.end)}. Chưa đọc bill, lương, chi phí, tài sản hoặc sổ hao hụt của kỳ này.</div>
+    <button class="btn" onclick="loadReportAll()" ${cached&&cached.loading?'disabled':''}>${cached&&cached.loading?'Đang tải…':'Tải báo cáo'}</button></div>`;
+}
+function refreshReportAll(retryFailed=false){
+  const key=reportAllKey(),cached=_reportAllCache.get(key);
+  if(cached && cached.loading)return;
+  _reportAllCache.delete(key);
+  if(retryFailed && cached && cached.rows)_reportAllCache.set(key,{rows:cached.rows.filter(x=>!x.err)});
+  // Làm mới kết quả đã mở; không tự mở phần chưa từng yêu cầu.
+  if(cached && cached.html)return loadReportAll();
+  renderReportAll();
+}
+async function loadReportAll(){
+  const key=reportAllKey(),prior=_reportAllCache.get(key);
+  if(prior && prior.loading)return;
+  if(prior && prior.html){renderReportAll();return;}
+  const state={loading:true,rows:prior && prior.rows || []};_reportAllCache.set(key,state);
+  const current=()=>curScreen==='report' && key===reportAllKey();
+
+  const body = document.getElementById('reportBody'); if(!body){state.loading=false;return;}
   const wn = document.querySelector('#screen-report .weeknav'); if(wn) wn.style.display = 'none';
   const r = _rpAllRange(_rpAllKy);
   const chip = (k, t) => `<button class="btn ${_rpAllKy===k?'':'outline'} sm" onclick="_rpAllKy='${k}';renderReportAll()">${t}</button>`;
   const dau = `<div class="card" style="border:1.5px solid var(--gd)"><div style="font-weight:800;font-size:15px">🧾 Báo cáo · Tất cả cửa hàng</div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">${chip('tuan','Tuần này')}${chip('tuantruoc','Tuần trước')}${chip('thang','Tháng này')}${chip('thangtruoc','Tháng trước')}</div>
-      <div class="small-note" style="margin-top:8px">${fmtDateVN(r.start)} — ${fmtDateVN(r.end)}. Chỉ xem. Chi tiết từng ngày, món, ca: chọn từng cửa hàng ở đầu sidebar.</div></div>`;
+      <button class="btn outline sm" onclick="refreshReportAll()">Tải lại kỳ này</button>
+      <div class="small-note" style="margin-top:8px">${fmtDateVN(r.start)} — ${fmtDateVN(r.end)}. Chỉ xem. Kết quả được giữ trong phiên, không tự đọc lại. Bấm Tải lại kỳ này để lấy số mới; chi tiết chọn từng cửa hàng ở sidebar.</div></div>`;
   body.innerHTML = dau + '<div class="muted">Đang tính từng cửa hàng...</div>';
   setSync(true);
   try{
-    await ensureAuth(); await qlLoadStores(); await qlAllNapChung();
+    await ensureAuth();if(!current())return;await qlLoadStores();if(!current())return;await qlAllNapChung();if(!current())return;
     // Báo cáo kỳ đã qua: tính cả quán ĐÃ NGỪNG — có doanh thu trong kỳ thì vẫn phải có cột (ngừng hôm nay
     // không được làm mất doanh thu đầu tháng khỏi tổng chuỗi); không có bill nào trong kỳ thì bỏ cột.
     const ds = QL_STORES.slice();
-    if(!ds.length){ body.innerHTML = dau + '<div class="muted">Chưa có hồ sơ cửa hàng nào.</div>'; return; }
+    if(!ds.length){if(current())body.innerHTML=dau+'<div class="muted">Chưa có hồ sơ cửa hàng nào.</div>';return;}
     const kq0 = [];
     for(const st of ds){
+      if(!current())return;
+      const saved=state.rows.find(x=>x.st.id===st.id && !x.err);
+      if(saved){kq0.push(saved);continue;}
       kq0.push(await GieoData.withStore(st.id, async ()=>{
+        const oldItems=INVENTORY_ITEMS,oldPreps=PREP_ITEMS,oldCost=_costMemo;
         memoDropAll(); _costMemo = {};
-        const [items, preps] = await Promise.all([loadInventoryItems(), loadPrepItems(), loadCogsMaps(), loadConfig().catch(()=>null)]);
+        try{
+        const [items, preps] = await chainMonthReadGroup([loadInventoryItems(), loadPrepItems(), loadCogsMaps(), loadConfig().catch(()=>null)]);
         INVENTORY_ITEMS = items; PREP_ITEMS = preps;
-        const [sales, opsAll, expAll, assets, labor, led] = await Promise.all([
+        const [sales, opsAll, expAll, assets, labor, led] = await chainMonthReadGroup([
           fetchSalesRange(r.start, r.end), loadDailyOpsAll(), loadExpensesAll(), loadAssetsAll(),
           HR_SETTINGS.useActualLaborCost ? computeActualLaborCostByDate(dkey(r.start), dkey(r.end)) : Promise.resolve(null),
           computeLedgerRealMetrics(r.start, r.end)
@@ -18920,9 +18999,10 @@ async function renderReportAll(){
         const kpi = computeKPIs({ perDaySales:sales.perDay, opsSum:sumDailyOps(opsAll, r.start, r.end), expList:filterExpenses(expAll, r.start, r.end), assets,
           actualLaborByDate:labor, ledgerWasteValue: led ? led.wasteValue : null, drinkWasteCups: led ? led.drinkWasteCups : 0 });
         return { st, kpi };
+        }finally{memoDropAll();INVENTORY_ITEMS=oldItems;PREP_ITEMS=oldPreps;_costMemo=oldCost;}
       }).catch(err=>({ st, err })));
     }
-    memoDropAll(); _costMemo = {}; INVENTORY_ITEMS = []; PREP_ITEMS = [];
+    state.rows=kq0;
     const kq = kq0.filter(x=>x.err || x.st.active!==false || (Number(x.kpi.bills)||0) > 0 || (Number(x.kpi.revenue)||0) > 0);
     const ok = kq.filter(x=>x.kpi);
     const thieu = kq.filter(x=>x.err).map(x=>x.st.id.toUpperCase());
@@ -18934,7 +19014,7 @@ async function renderReportAll(){
     const cot = [...kq.map(x=>x.kpi || null), tong];
     const dong = (ten, f) => `<tr style="border-top:1px solid var(--line,#eee)"><td style="padding:6px 0">${ten}</td>${cot.map((k,i)=>`<td style="text-align:right;${i===cot.length-1?'font-weight:800':''}">${k?f(k):'<span style="color:var(--bad)">lỗi</span>'}</td>`).join('')}</tr>`;
     const tien = k => x => fmt(Number(x[k])||0);
-    body.innerHTML = dau + `<div class="card"><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
+    state.html = dau + `<div class="card"><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
       <tr style="color:var(--gt);font-size:12px"><th style="text-align:left"></th>${kq.map(x=>`<th style="text-align:right">${x.st.id.toUpperCase()}</th>`).join('')}<th style="text-align:right">${thieu.length?'Tổng tạm tính':'Tổng'}</th></tr>
       ${dong('Doanh thu', tien('revenue'))}
       ${dong('Bill', x=>fmtNum(x.bills||0,0))}
@@ -18949,11 +19029,13 @@ async function renderReportAll(){
       ${dong('Đóng góp (contribution)', tien('contribution'))}
       ${dong('Lợi nhuận (EBIT)', tien('ebit'))}
     </table></div>
-    ${thieu.length ? `<div class="small-note" style="color:var(--bad);margin-top:6px;font-weight:700">Tổng tạm tính — thiếu ${thieu.join(', ')} (đọc lỗi, KHÔNG phải doanh thu 0). Mở lại để tính lại.</div>` : ''}
+    ${thieu.length ? `<div class="small-note" style="color:var(--bad);margin-top:6px;font-weight:700">Tổng tạm tính — thiếu ${thieu.join(', ')} (đọc lỗi, KHÔNG phải doanh thu 0). Bấm Thử lại cửa hàng bị lỗi để bổ sung.</div>` : ''}
     ${kq.filter(x=>x.err).map(x=>`<div class="small-note" style="color:var(--bad);margin-top:6px">${x.st.id.toUpperCase()}: không tính được — ${escapeHtmlAttr(x.err.message||x.err)}</div>`).join('')}
     <div class="small-note" style="margin-top:8px">${kq.map(x=>`${x.st.id.toUpperCase()} = ${escapeHtmlAttr(x.st.name||'')}${x.st.active===false?' (đã ngừng)':''}`).join(' · ')}</div></div>`;
-  }catch(err){ console.error('renderReportAll lỗi', err); body.innerHTML = dau + `<div class="muted">Không tính được: ${escapeHtmlAttr(err.message||err)}</div>`; }
-  finally{ setSync(false); }
+    if(thieu.length)state.html+=`<button class="btn outline" onclick="refreshReportAll(true)">Thử lại cửa hàng bị lỗi</button>`;
+    if(current())body.innerHTML=state.html;
+  }catch(err){ console.error('renderReportAll lỗi', err); if(current())body.innerHTML = dau + `<div class="muted">Không tính được: ${escapeHtmlAttr(err.message||err)}</div>`; }
+  finally{ state.loading=false;if(current())setSync(false); }
 }
 
 // ============================================================================

@@ -1,5 +1,8 @@
 # Hiện trạng dự án — cập nhật 18/10/2026
 
+**18/10 — tải theo nút bấm ở toàn chuỗi**: Hôm nay chỉ đọc bill để cộng doanh thu, tách Tải tồn kho/Tải cảnh báo độc lập. Báo cáo kỳ chọn kỳ trước, bấm Tải báo cáo mới đọc nguồn; mở lại/lọc/thu gọn dùng kết quả trong phiên, header/nút tải lại làm mới có chủ ý. Lỗi ghi rõ tổng thiếu; thử lại chỉ quán lỗi. Không sửa công thức hoặc lai_lo.v4, không ghi dữ liệu Firebase thật, chưa deploy Hosting. Chi tiết và các luồng cần tách tiếp: `docs/TOI_UU_TONG_HOP_CHUOI.md`.
+
+
 Đọc file này **sau CLAUDE.md**, trước khi làm bất cứ việc gì. Nhánh làm việc: `Phan-tach-unit-engine`.
 
 **18/10 — Sửa màu tab Khách hàng**: rule nền trắng widget đè gradient nhưng giữ chữ trắng làm thẻ Khách quay lại gần như mất nội dung. Nền trắng chỉ áp cho thẻ thường; thẻ nổi bật khách hàng dùng nền hồng đậm, chữ/số/mô tả/thanh tỷ lệ nhìn rõ. Chỉ CSS, không đổi dữ liệu khách hoặc phép tính. Gói riêng `tai_ve/fix_mau_tab_khach_hang_18-10.zip` gồm 2 HTML quản lý; xem `docs/GIAO_DIEN_QUANLY.md`. Chưa deploy Hosting.
