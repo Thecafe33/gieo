@@ -4,6 +4,8 @@
 
 **18/10 — Sửa màu tab Khách hàng**: rule nền trắng widget đè gradient nhưng giữ chữ trắng làm thẻ Khách quay lại gần như mất nội dung. Nền trắng chỉ áp cho thẻ thường; thẻ nổi bật khách hàng dùng nền hồng đậm, chữ/số/mô tả/thanh tỷ lệ nhìn rõ. Chỉ CSS, không đổi dữ liệu khách hoặc phép tính. Gói riêng `tai_ve/fix_mau_tab_khach_hang_18-10.zip` gồm 2 HTML quản lý; xem `docs/GIAO_DIEN_QUANLY.md`. Chưa deploy Hosting.
 
+**18/10 — Tối ưu tổng hợp chuỗi, đợt 1**: Tổng kết tháng đọc `pl_book/pl_days` trước, chỉ tính ngày thiếu/hết hạn/có dấu đổi của đúng quán. Dùng quy tắc ngày của data_access và bộ tính v4 hiện có; cập nhật sổ ngày khi đủ nguồn, không sửa chốt tháng/mốc vốn. Thu/chi chỉ tải khi mở. Đầu trang còn 3 KPI, trạng thái chốt/rà thu gọn; không nạp truy vết ở màn chuỗi. Kiểm giả lập 108 ngày hợp lệ không đọc nguồn/RT/tính/ghi lại; đổi một ngày GG02 chỉ tính ngày đó. Tài liệu `docs/TOI_UU_TONG_HOP_CHUOI.md`, gói 2 HTML `tai_ve/toi_uu_bao_cao_chuoi_18-10.zip`. Hôm nay/Báo cáo kỳ toàn chuỗi chưa đổi trong đợt này. Chưa deploy Hosting.
+
 ## 1. Bản hiện hành
 
 | Thành phần | Bản | Ghi chú |
@@ -14,7 +16,7 @@
 | App quản lý | `quanlygieo.html` | trỏ v18 |
 | Chế độ thử | `che_do_thu.v1.js` + `posgieo_thu.html`, `quanlygieo_thu.html` | sinh lại bằng `node tools/tao_ban_thu.js .` sau **mỗi** lần sửa HTML |
 | Bộ tính lãi/lỗ | `lai_lo.v4.js` | sinh từ quanlygieo; giữ v1/v2/v3 immutable cho HTML cũ |
-| Test | `sh tests/run_all.sh` | 92 file `tests/*.test.js`, chỉ cần `node` |
+| Test | `sh tests/run_all.sh` | 93 file `tests/*.test.js`, chỉ cần `node` |
 
 **Trạng thái deploy (chủ dự án xác nhận 04/10/2026): v18 ĐÃ DEPLOY**, chạy ổn ở cửa hàng 1 được **1–3 tuần**. Đa cửa hàng cần ≥ vài tuần ổn định (`docs/KE_HOACH_DA_CUA_HANG.md` mục 0) → theo dõi thêm rồi mới làm M0. Chủ dự án tự deploy; phiên mới hỏi lại trước việc lớn nếu đã qua lâu.
 

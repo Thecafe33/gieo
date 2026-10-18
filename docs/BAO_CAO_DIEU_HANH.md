@@ -53,6 +53,10 @@ Kiểm lượt chuỗi: `tests/bao_cao_chuoi.test.js` 24 mục (phạm vi kỳ, 
 
 Gói `tai_ve/fix_bao_cao_chuoi_giai_thich_18-10.zip` chỉ gồm hai file deploy `quanlygieo.html`, `quanlygieo_thu.html` đã sinh từ bộ Giáng sinh. Không đổi `manage.html` hoặc `lai_lo.v4.js`; `tools/tao_lai_lo.js --check` phải khớp. Các bộ thường/Tết cũng sinh lại. Chủ dự án tự upload; không Hosting deploy.
 
+## Tối ưu đường tổng hợp — cập nhật tiếp 18/10
+
+Chủ dự án chuyển ưu tiên sang đơn giản hoá truy vấn và giao diện đa cửa hàng; đợt đầu ở báo cáo tháng chuỗi. Các mô tả phía trên về tính lại toàn kỳ, 6 KPI và không ghi sổ khi xem ALL là **bản trước tối ưu**. Bản hiện tại dùng sổ ngày còn hợp lệ, chỉ tính/cập nhật ngày cần sửa của đúng quán vào `pl_days/pl_book` hiện có; không sửa sổ chốt hoặc mốc vốn. Cấu hình/công thức/danh mục chỉ nạp khi thật sự cần tính. Thu/chi tải khi mở; đầu trang giữ 3 KPI và bảng so sánh. Chi tiết quy tắc, số đo giả lập và phạm vi còn lại: `docs/TOI_UU_TONG_HOP_CHUOI.md`. Bộ tính v4/manage giữ nguyên.
+
 ## Giới hạn và kiểm tra
 
 Tiền trả PO cũ chưa được ghi vẫn là thiếu thông tin thanh toán, không tự coi đã trả hoặc chưa phát sinh. Công nợ NCC/hoàn tiền NCC đầy đủ chưa nằm trong lượt này. Không thêm thuế, tiền trả lương, số dư ngân hàng hoặc tồn cuối tháng nếu dữ liệu chưa được ghi.

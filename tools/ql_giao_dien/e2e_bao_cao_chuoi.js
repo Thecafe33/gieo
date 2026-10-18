@@ -46,16 +46,31 @@ const server=require('http').createServer((req,res)=>{const f=path.resolve(ROOT,
  const p=await b.newPage({viewport:{width,height:1000},timezoneId:'Asia/Ho_Chi_Minh'}),errors=[];p.on('pageerror',e=>errors.push(e.message));
  await p.addInitScript(()=>localStorage.setItem('ql_view_store_v1','all'));
  await p.route('**/*',r=>{const url=r.request().url();if(url.includes('firebase-app-compat'))return r.fulfill({contentType:'application/javascript',body:mock});if(url.includes('firebasejs'))return r.fulfill({contentType:'application/javascript',body:''});if(url.startsWith(base+'/'))return r.continue();return r.abort()});
- await p.goto(base+'/quanlygieo.html');await p.waitForFunction(()=>typeof switchScreen==='function'&&QL_STORES.length>0);await p.evaluate(()=>switchScreen('thangket'));
+ await p.goto(base+'/quanlygieo.html');await p.waitForFunction(()=>typeof switchScreen==='function'&&QL_STORES.length>0);await p.evaluate(()=>{window.__chainComputeCalls=[];const compute=chainMonthComputeDays;chainMonthComputeDays=async(...a)=>{__chainComputeCalls.push([GieoData.storeId(),dkey(a[0]),dkey(a[1])]);return compute(...a)};switchScreen('thangket')});
  await p.waitForFunction(()=>!!chainMonthData&&chainMonthData.range.month===thangKetMonth,{},{timeout:60000});
  check(await p.evaluate(()=>curScreen==='thangket'),width+': Xem tất cả mở đúng báo cáo tháng mới');
  check(await p.evaluate(()=>chainMonthData.model.good.length===3&&chainMonthData.model.errors.length===1),width+': tách unit đọc lỗi khỏi các unit có số');
  const summary=await p.evaluate(()=>{const m=chainMonthData.model;return {revenue:m.revenue,result:m.contribution,rec:m.recovery,surplus:m.surplus,other:m.unclassified,stages:m.good.map(u=>[u.st.id,u.recovery?.stage])}});
  check(summary.revenue===235000&&Math.abs(summary.result-164500)<.01,width+': tổng doanh thu/kết quả đúng ba unit, không lẫn điểm');
  check(Math.abs(summary.rec-108500)<.01&&Math.abs(summary.surplus-21000)<.01&&Math.abs(summary.other-35000)<.01,width+': phần góp vốn/thặng dư/chưa phân loại khớp tổng');
- check(await p.locator('.chain-month-kpis .wkpi').count()===6,width+': số quan trọng nằm đầu trang');
- check(await p.locator('.chain-month-kpis').innerText().then(t=>t.includes('Nguồn mở rộng')&&t.includes('Chưa đủ số liệu')),width+': không gọi kết quả quản trị là tiền mở rộng đã xác nhận');
+ check(await p.locator('.chain-month-kpis .wkpi').count()===3,width+': đầu trang chỉ ba chỉ số chính');
+ check(await p.locator('#thangKetBody').textContent().then(t=>t.includes('Nguồn mở rộng chưa đủ số liệu xác nhận')),width+': giới hạn nguồn vốn nằm trong phần giải thích, không thêm ô số chưa biết');
+ check(await p.locator('#chainMonthCashDetails').getAttribute('open')===null&&await p.locator('.recorded-cash-widget').count()===0,width+': thu/chi mặc định chưa tải và không chiếm chỗ');
  check(await p.locator('.chain-month-table').innerText().then(t=>t.includes('Unit cũ')&&t.includes('đã ngừng')&&t.includes('Unit lỗi')),width+': giữ quán ngừng có bán và dòng quán đọc lỗi');
+ const optimization=await p.evaluate(async()=>{
+  const sourceReads=()=>Object.entries(__FSREADS).filter(([k])=>/expenses|employee|work_schedules|inventory_items|prep_items|recipes|stock_transactions|prep_transactions|daily_sales_cache|price_history|cogs/.test(k)).reduce((n,[,v])=>n+v,0);
+  const before={source:sourceReads(),rt:JSON.stringify(__READS),writes:__WRITES.length};
+  __chainComputeCalls=[];chainMonthData.at=0;await renderThangKetAll(false);
+  return {calls:__chainComputeCalls.length,extraSource:sourceReads()-before.source,rtUnchanged:JSON.stringify(__READS)===before.rt,writes:__WRITES.length-before.writes,reused:chainMonthData.model.good.reduce((n,u)=>n+u.readStats.reused,0)};
+ });
+ check(optimization.calls===0&&optimization.extraSource===0&&optimization.rtUnchanged&&optimization.writes===0,width+': nạp lại với sổ hợp lệ: 0 tính lại, 0 đọc nguồn/RT và 0 ghi');
+ console.log('MEASURE '+width+' '+JSON.stringify(optimization));
+ const dirty=await p.evaluate(async()=>{
+  const d=chainMonthData.range.previousStartKey;__FS.pl_dirty_gieogieo={...(__FS.pl_dirty_gieogieo||{}),gg02:{m:{[d+'_'+d]:new Date().toISOString()}}};
+  __chainComputeCalls=[];chainMonthData.at=0;await renderThangKetAll(false);
+  return {calls:__chainComputeCalls,date:d,result:chainMonthData.model.contribution};
+ });
+ check(dirty.calls.length===1&&dirty.calls[0][0]==='gg02'&&dirty.calls[0][1]===dirty.date&&dirty.calls[0][2]===dirty.date&&Math.abs(dirty.result-164500)<.01,width+': sửa một ngày GG02 chỉ tính lại đúng ngày/quán, tổng giữ đúng');
  const reads=await p.evaluate(()=>JSON.stringify([__FSREADS,__READS]));
  check(await p.evaluate(()=>{for(let i=0;i<monthMetricRegistry.length;i++){openMonthMetric(i);const x=monthMetricRegistry[i],el=document.querySelector('.report-explanation');if(!el||!el.textContent.includes(x.formula))return false;closeEditSheet(true)}return true}),width+': mọi chỉ số đăng ký mở được giải thích có công thức và thành phần');
  check(await p.evaluate(()=>{chainMonthFilter='operating';chainMonthSort='name';drawChainMonth();return document.querySelector('.chain-month-table tbody').textContent.includes('Unit B')&&!document.querySelector('.chain-month-table tbody').textContent.includes('Unit A')}),width+': lọc giai đoạn và sắp xếp dùng số đã nạp');
@@ -70,9 +85,29 @@ const server=require('http').createServer((req,res)=>{const f=path.resolve(ROOT,
  check(html.includes('BÁO CÁO CHUỖI')&&html.includes('ĐỌC LỖI')&&html.includes('chưa đủ sổ điều chuyển')&&!html.includes('firebaseConfig'),width+': tải báo cáo chuỗi nêu phạm vi/thiếu số/quỹ');
  check(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2),width+': bảng cuộn riêng, trang không tràn ngang');
  check(await p.evaluate(()=>GieoData.storeId()===null),width+': ra khỏi từng unit trả lại scope tất cả');
- check(await p.evaluate(()=>!__WRITES.some(w=>JSON.stringify(w).includes('pl_book_gieogieo')||JSON.stringify(w).includes('recoveryReachedDate'))),width+': xem báo cáo chuỗi không ghi snapshot/mốc vốn');
+ check(await p.evaluate(()=>!__WRITES.some(w=>/book_closings|finance_gieogieo/.test(w[1])||JSON.stringify(w).includes('recoveryReachedDate'))),width+': cập nhật sổ ngày nhưng không sửa chốt tháng hoặc mốc vốn');
+ const cashReads=await p.evaluate(()=>Object.entries(__FSREADS).filter(([k])=>k.startsWith('expenses_gieogieo')).reduce((n,[,v])=>n+v,0));
+ await p.locator('#chainMonthCashDetails>summary').click();await p.waitForFunction(()=>chainMonthData.cashReady);
+ check(await p.locator('.recorded-cash-widget').innerText().then(t=>t.includes('235.000')&&t.includes('70.000')),width+': chỉ mở thu/chi mới tải và cộng đúng tiền đã ghi');
+ const cashReadyReads=await p.evaluate(()=>Object.entries(__FSREADS).filter(([k])=>k.startsWith('expenses_gieogieo')).reduce((n,[,v])=>n+v,0));
+ check(cashReadyReads===cashReads+3,width+': phần thu/chi đọc một lượt chi phí cho mỗi unit có số');
+ await p.locator('#chainMonthCashDetails>summary').click();await p.locator('#chainMonthCashDetails>summary').click();
+ check(await p.evaluate(v=>Object.entries(__FSREADS).filter(([k])=>k.startsWith('expenses_gieogieo')).reduce((n,[,v])=>n+v,0)===v,cashReadyReads),width+': đóng/mở lại thu/chi không đọc lặp');
+ await p.locator('#chainMonthCashDetails>summary').click();
  await p.evaluate(()=>window.scrollTo(0,0));await p.screenshot({path:ROOT+'/work/bao-cao-chuoi/chain-'+width+'.png',fullPage:true});
  if(width===1366){
+  const retry=await p.evaluate(async()=>{
+   const d=chainMonthData,u=d.units.find(x=>x.st.id==='gg02'),original=loadExpensesAll;
+   u.flow=null;d.cashReady=false;loadExpensesAll=async()=>{if(GieoData.storeId()==='gg02')throw new Error('Lỗi thu/chi giả lập');return original()};
+   try{await loadChainMonthCash(d)}finally{loadExpensesAll=original}
+   const partial=d.model.flow===null&&document.getElementById('chainMonthCashBody').textContent.includes('Thu/chi còn thiếu');
+   const before=Object.entries(__FSREADS).filter(([k])=>k.startsWith('expenses_gieogieo')).reduce((n,[,v])=>n+v,0);
+   await loadChainMonthCash(d,true);
+   const after=Object.entries(__FSREADS).filter(([k])=>k.startsWith('expenses_gieogieo')).reduce((n,[,v])=>n+v,0);
+   return {partial,extra:after-before,total:d.model.flow.chi};
+  });
+  check(retry.partial,width+': thu/chi lỗi một quán ghi rõ tổng còn thiếu, không coi là 0');
+  check(retry.extra===1&&retry.total===70000,width+': thử lại thu/chi chỉ đọc quán lỗi và khôi phục tổng đúng');
   const cache=await p.evaluate(async()=>{window.__chainOriginal=chainMonthData;const old=loadExpenseCategories;loadExpenseCategories=async()=>{throw new Error('Lỗi danh mục chi phí giả lập')};try{await renderThangKetAll(true)}finally{loadExpenseCategories=old}return chainMonthData.model.good.length===0&&chainMonthData.model.errors.length===4&&document.querySelector('.chain-month-kpis').textContent.includes('Chưa đủ số liệu')&&!document.querySelector('.recorded-cash-widget')});
   check(cache,width+': tất cả unit lỗi không biến thành doanh thu/tiền bằng 0');
   const emptyDownload=p.waitForEvent('download');await p.evaluate(()=>chainMonthExport(false));const emptyOut=await emptyDownload;await emptyOut.saveAs(ROOT+'/work/bao-cao-chuoi/report-missing.html');
