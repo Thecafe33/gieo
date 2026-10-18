@@ -24,12 +24,10 @@ const server=require('http').createServer((req,res)=>{const f=path.resolve(ROOT,
   const p=await b.newPage({viewport:{width,height:900},timezoneId:'Asia/Ho_Chi_Minh'}),errors=[];p.on('pageerror',e=>errors.push(e.message));
   await p.route('**/*',r=>{const u=r.request().url();if(u.includes('firebase-app-compat'))return r.fulfill({contentType:'application/javascript',body:mock});if(u.includes('firebasejs'))return r.fulfill({contentType:'application/javascript',body:''});if(u.startsWith(base+'/'))return r.continue();return r.abort()});
   await p.goto(base+'/manage.html');await p.waitForFunction(()=>typeof live!=='undefined'&&live.rev&&!live.loadingKey);await p.waitForTimeout(1000);
-  check(await p.evaluate(()=>live.rev.comparison===false&&!live.rev.compareState),width+': vào Tổng quan chưa yêu cầu so sánh');
-  const baseTotal=await p.locator('.overview-amount').innerText();
-  await p.locator('button').filter({hasText:'So sánh hôm trước'}).click();await p.waitForFunction(()=>live.rev.compareState?.ready);
-  check(await p.locator('.overview-amount').innerText()===baseTotal,width+': tải so sánh giữ nguyên doanh thu chính');
-  const counts=await p.evaluate(()=>JSON.stringify([__FSREADS,__READS]));await p.evaluate(()=>loadRevenueComparison());
-  check(await p.evaluate(v=>JSON.stringify([__FSREADS,__READS])===v,counts),width+': gọi lại so sánh không truy vấn');
+  check(await p.evaluate(()=>live.rev.comparison===true),width+': Tổng quan tự tải so sánh như trước');
+  check(await p.getByRole('button',{name:'So sánh hôm trước',exact:true}).count()===0,width+': không còn nút tải so sánh riêng');
+  const counts=await p.evaluate(()=>JSON.stringify([__FSREADS,__READS]));await p.evaluate(()=>render());
+  check(await p.evaluate(v=>JSON.stringify([__FSREADS,__READS])===v,counts),width+': vẽ lại số so sánh không truy vấn thêm');
   await p.evaluate(()=>{window.__previewCalls=[];const original=backend.readMonthTcx;backend.readMonthTcx=async(...a)=>{__previewCalls.push(a.slice(0,2));return original(...a)};navigate('thangket')});
   await p.waitForFunction(()=>live.month&&!live.loadingKey&&live.ready.thangket===loadKey());
   check(await p.evaluate(()=>!__previewCalls.length),width+': vào tổng kết chỉ tải sổ, không tính hai quán');

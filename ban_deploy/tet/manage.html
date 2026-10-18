@@ -1635,11 +1635,6 @@ async function readRevenue(from,to,compare){
  return{from,to,data,targets,cfg,records,beCfg,pl,assets,off,exp:{tc33:al(expTc,pTc),xofa:al(expXo,pXo)},comparison:!!compare};
 }
 // month (tuỳ chọn): đọc thêm ngày nghỉ Gieo của tháng đó cho tab Mục tiêu (1 truy vấn).
-// Chỉ nút So sánh mới đọc đúng một ngày trước; không kéo theo P&L/chi phí.
-async function readRevenueComparison(from){
- await ensureAuth();validDate(from);const day=dkey(addDays(parseDkey(from),-1));
- return {day,data:await revLoadRange(day,day)};
-}
 async function readSettings(force=false,month){await ensureAuth();if(force){TARGETS=null;_ggConfig=null;_ggStores=null}const[targets,cfg,records]=await Promise.all([loadTargets(force),gieoConfigHistory(),gieoStores()]);let off=null;if(month){const end=month+'-'+String(daysInMonthYm(month)).padStart(2,'0');off=await readOffDays(month+'-01',end).catch(e=>{console.warn('[ngày nghỉ] không đọc được',e);return null})}return{targets,cfg,records,off}}
 async function readEmployees(force=false){await ensureAuth();return loadEmployees(force)}
 async function readSchedules(store,from,to){await ensureAuth();validStore(store);validDate(from);validDate(to);const snap=await fstore.collection(STORES[store].sched).where('date','>=',from).where('date','<=',to).get();return snap.docs.map(d=>({...d.data(),id:d.id}))}
@@ -1949,7 +1944,7 @@ async function billLivePL(id,day){
     return result;
   }finally{PL_FILL_BUSY.delete(id)}
 }
-return{readRevenueComparison,readMonthTcx,billLiveSummary,billLivePL,readMonthClose,closeMonthTcx,reopenMonthTcx,writeMonthInput,unwatchClosings,CLOSE_W,tcxMonthSummary,closingDoc,CLOSE_KEYS,watchBills,billPath,writeEmployeeStatus,plFillMissing,plNeedDays,readOffDays,writeOffDays,isStoreOff,offStoresOf,readCash,writeCashReceipt,writeCashStart,ggCashExpected,tcxCashExpected,readAssets,writeAsset,deleteAsset,assetMonthly,assetDepDay,assetRecovered,assetEndDate,assetLive,expMonthSum,sumsToAlloc,readCosts,writeExpense,deleteExpenseDoc,reviewExpense,setExpenseActual,markExpensePaid,expPaidOf,writeExpenseCats,expAmountIn,expCostType,expCounts,expenseCats,expenseCatsAll,DEFAULT_EXPENSE_CATS,readBreakeven,writeBreakeven,deleteBreakeven,beMonthValue,tcxBreakEven,ggBreakEven,plBreakEven,readRevenue,readSettings,readEmployees,readSchedules,readAttendance,readPayroll,writeEmployee,writeEmployeeActive,writeSchedule,deleteSchedule,writeScheduleBatch,writeShift,deleteShift,writeLateGrace,writeTargets,deleteTargets,invalidateRevenue,invalidateEmployees,targetMonthValue,targetForRange,gieoTargetForRange,gieoTargetsOn,empPayTermsOn,computeWageForDayHours,laborByEmployee,shiftWorkedHours,isShiftInProgress,workStoresOf,tcSummarize,xoSummarize,ggSummarize,tcEmptySum,xoEmptySum,ggEmptySum,sumMerge};
+return{readMonthTcx,billLiveSummary,billLivePL,readMonthClose,closeMonthTcx,reopenMonthTcx,writeMonthInput,unwatchClosings,CLOSE_W,tcxMonthSummary,closingDoc,CLOSE_KEYS,watchBills,billPath,writeEmployeeStatus,plFillMissing,plNeedDays,readOffDays,writeOffDays,isStoreOff,offStoresOf,readCash,writeCashReceipt,writeCashStart,ggCashExpected,tcxCashExpected,readAssets,writeAsset,deleteAsset,assetMonthly,assetDepDay,assetRecovered,assetEndDate,assetLive,expMonthSum,sumsToAlloc,readCosts,writeExpense,deleteExpenseDoc,reviewExpense,setExpenseActual,markExpensePaid,expPaidOf,writeExpenseCats,expAmountIn,expCostType,expCounts,expenseCats,expenseCatsAll,DEFAULT_EXPENSE_CATS,readBreakeven,writeBreakeven,deleteBreakeven,beMonthValue,tcxBreakEven,ggBreakEven,plBreakEven,readRevenue,readSettings,readEmployees,readSchedules,readAttendance,readPayroll,writeEmployee,writeEmployeeActive,writeSchedule,deleteSchedule,writeScheduleBatch,writeShift,deleteShift,writeLateGrace,writeTargets,deleteTargets,invalidateRevenue,invalidateEmployees,targetMonthValue,targetForRange,gieoTargetForRange,gieoTargetsOn,empPayTermsOn,computeWageForDayHours,laborByEmployee,shiftWorkedHours,isShiftInProgress,workStoresOf,tcSummarize,xoSummarize,ggSummarize,tcEmptySum,xoEmptySum,ggEmptySum,sumMerge};
 
 })();
 
@@ -2072,26 +2067,6 @@ function compositionItem(st,share){
  const gieo=st.brand==='gieo',name=gieo?'Gieo '+st.code:st.name,full=st.name+' · '+share+'% · '+money(st.rev)+' đồng';
  return `<button class="composition-item" style="--c:${brightC(st)}" onclick="storeDetails('${st.id}')" aria-label="${esc(full)}, mở chi tiết" title="${esc(full)}"><i class="composition-dot" aria-hidden="true"></i><b class="ci-name">${esc(name)}</b><span class="ci-fig"><strong class="num">${share}%</strong><span class="ci-amt"> · ${st.rev?shortMoney(st.rev):'0'}</span></span></button>`;
 }
-async function loadRevenueComparison(){
- const res=live.rev,[from,to]=rangeDates();
- if(state.view!=='rev'||!res||res.from!==from||res.to!==to||from!==to)return;
- const slot=res.compareState||(res.compareState={});
- if(slot.loading||slot.ready)return;
- slot.loading=true;slot.error=null;render();
- try{
-  const value=await backend.readRevenueComparison(from);
-  // Gắn đúng kết quả đã yêu cầu, không trộn kỳ đang xem mới.
-  Object.entries(value.data).forEach(([id,days])=>{res.data[id]={...(res.data[id]||{}),...days}});
-  slot.ready=true;res.comparison=true;
- }catch(e){slot.error=friendlyError(e)}
- finally{slot.loading=false;if(state.view==='rev'&&live.rev===res)render()}
-}
-function revenueCompareControl(from,to){
- if(from!==to)return '';
- const slot=live.rev?.compareState||{};
- if(slot.ready)return '<span class="small muted">Đã tải so sánh hôm trước</span>';
- return `<button class="btn secondary" onclick="loadRevenueComparison()" ${slot.loading?'disabled':''}>${slot.loading?'Đang tải…':slot.error?'Thử lại so sánh':'So sánh hôm trước'}</button>${slot.error?`<span class="small muted">${esc(slot.error)}</span>`:''}`;
-}
 function dashboard(){
  const list=selectedStores().map(storeRange),total=list.reduce((n,st)=>n+st.rev,0),tcOnly=state.store==='tc33'&&list.length===1,prev=tcOnly?list[0].prevBill:list.reduce((n,st)=>n+st.prev,0),count=list.reduce((n,st)=>n+st.count,0),[from,to]=rangeDates(),many=list.length>3;
  const target=state.store==='all'?goalForRange('all',from,to):list.every(st=>st.target!=null)?list.reduce((n,st)=>n+st.target,0):null,ratio=target?total/target:0,pct=Math.floor(ratio*100),level=target?revenueLevel(ratio):'green',pcts=sharePcts(list.map(st=>st.rev)),diff=prev?((tcOnly?list[0].bill:total)/prev-1)*100:0,status=ratio>=1?'Đã đạt mục tiêu':ratio>=.8?'Sắp đạt mục tiêu':'Chưa đạt mục tiêu';
@@ -2117,7 +2092,6 @@ function dashboard(){
   </div>
  </section>
 
- ${revenueCompareControl(from,to)}
  ${sectionHead}
  <section class="outlet-widgets" aria-label="Doanh thu ${list.length} cửa hàng">${list.map((st,i)=>storeCard(st,total,pcts[i])).join('')}</section>
  ${billFeed()}${dailyRevenueTable()}${revenueChart(list)}
@@ -2420,7 +2394,7 @@ async function loadCurrent(force=false){
  const view=state.view,key=loadKey();if(!force&&live.loadingKey===key)return;const token=++live.request;live.loadingKey=key;live.error=null;render();
  try{
   let result;
-  if(view==='rev')result=await backend.readRevenue(...rangeDates(),false);
+  if(view==='rev')result=await backend.readRevenue(...rangeDates(),['day','yesterday'].includes(state.range));
   else if(view==='nv')result=await backend.readEmployees(true);
   else if(view==='target')result=await backend.readSettings(force,state.targetMonth);
   else if(view==='hoavon')result=await backend.readBreakeven(state.beMonth,force);
@@ -2470,7 +2444,7 @@ function offDaysOf(id,from,to,off){let n=0;if(!off)return 0;for(let d=from;d<=to
 function storeRange(s){
  const[from,to]=rangeDates(),key=s.brand==='gieo'?'gg_'+s.id:s.id,empty=s.brand==='gieo'?backend.ggEmptySum:s.id==='tc33'?backend.tcEmptySum:backend.xoEmptySum;let sum=empty();
  for(let d=from;d<=to;d=addDays(d,1)){const value=live.rev?.data[key]?.[d];if(value)backend.sumMerge(sum,value)}
- const prev=live.rev?.comparison?live.rev?.data[key]?.[addDays(from,-1)]:null,rev=s.id==='tc33'?sum.drink+sum.khac:s.brand==='gieo'?sum.revenue:sum.total;
+ const prev=live.rev?.data[key]?.[addDays(from,-1)],rev=s.id==='tc33'?sum.drink+sum.khac:s.brand==='gieo'?sum.revenue:sum.total;
  return{...s,rev,bill:sum.total||0,prevBill:prev?prev.total||0:null,prev:prev?(s.id==='tc33'?prev.drink+prev.khac:s.brand==='gieo'?prev.revenue:prev.total):null,drink:sum.drink||0,other:sum.khac||0,food:s.id==='tc33'?sum.snack:sum.food,cash:(sum.cash||0)+(s.brand==='gieo'?sum.foodCash||0:0),bank:s.id==='tc33'?sum.transfer||0:(sum.bank||0)+(s.brand==='gieo'?sum.foodBank||0:0),foodCash:sum.foodCash||0,foodBank:sum.foodBank||0,count:sum.count||0,instore:sum.instore||0,togo:sum.togo||0,ship:sum.ship||0,shipRev:sum.shipRev||0,target:goalForRange(s.id,from,to),be:storeBreakEven(s,key,from,to),offDays:offDaysOf(s.id,from,to,live.rev?.off),nDays:Math.round((parseDate(to)-parseDate(from))/864e5)+1};
 }
 // [HOÀ VỐN] null = không đọc được / chưa có gì. Gieo: tóm tắt của quanlygieo; TC33 / XOFA: cấu hình tab Điểm hoà vốn.

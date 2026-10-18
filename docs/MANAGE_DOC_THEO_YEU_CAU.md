@@ -2,7 +2,7 @@
 
 ## Đã rà và thay đổi
 
-1. **So sánh hôm trước ở Tổng quan**: trước đây `loadCurrent` luôn truyền `compare=true` cho kỳ Hôm nay/Hôm qua, khiến `readRevenue` đọc thêm ngày trước cho mọi nguồn. Nay kỳ chính chỉ đọc đúng kỳ chính. Nút **So sánh hôm trước** gọi `readRevenueComparison`, chỉ lấy bản tổng hợp/bill của đúng một ngày trước, không gọi thêm bộ đọc chi phí, lương, tài sản hay P&L. Kết quả gắn vào đúng đối tượng kỳ đã yêu cầu; không trộn với kỳ mới khi đổi màn trong lúc đợi. Mở lại không đọc lặp. Quy tắc tính chênh lệch giữ nguyên, kể cả TC33 so toàn bill như POS; mẫu số 0 không tạo tỷ lệ giả.
+1. **So sánh hôm trước ở Tổng quan**: chủ dự án chốt khôi phục cách cũ vì nút tải riêng rườm rà. Kỳ Hôm nay/Hôm qua tự đọc thêm ngày trước và hiển thị so sánh như trước; không còn nút tải riêng. Bộ đệm doanh thu hiện có vẫn được dùng. Các tối ưu tạm tính tháng dưới đây giữ nguyên.
 2. **Tổng kết tháng**: trước đây `readMonthClose` nghe sổ đã chốt rồi tự chạy `readMonthTcx` của cả TC33 lẫn XOFA chưa chốt. Nay chỉ nghe sổ đã chốt làm số chính. Mỗi quán chưa chốt có nút **Xem tạm tính** riêng; bấm TC33 không đọc chi phí/chấm công/bill của XOFA. Chưa tải được ghi rõ **Chưa tải tạm tính**, không coi là lỗi hoặc số 0. Gieo tiếp tục chỉ dùng sổ đã chốt ở quanlygieo, không tự tính tháng ở manage.
 3. **Dùng lại và thử lại**: tạm tính giữ trong bộ nhớ phiên theo tháng + quán. Vẽ lại/quay lại không tính lại. Có nút **Tính lại quán này**; lỗi chỉ thử lại quán đó. Bấm lặp trong lúc chờ gộp vào lượt đang chạy. Tải lại tháng trên header bỏ đệm tạm tính và trở về sổ chính; không tự mở các bản tạm tính chưa yêu cầu.
 4. **Sau khi sửa số liệu**: thay đổi chi phí/tài sản/chấm công/lương qua các luồng ghi hiện có sẽ bỏ đệm tạm tính tháng. Lưu lương tháng/Mở lại chỉ cập nhật bản tạm tính của quán vừa thao tác; chốt tháng vẫn tính mới trước khi đóng băng theo cơ chế cũ. Lượt cũ không hồi sinh đệm đã xoá, thao tác tháng cũ không mở bản tạm tính tháng mới.
@@ -16,7 +16,7 @@
 
 ## Kiểm chứng
 
-- `tests/manage_doc_theo_bam.test.js`: đếm lời gọi, chỉ đúng ngày/quán, bộ đệm, gộp yêu cầu, lỗi, invalidation và kết quả trả chậm.
+- `tests/manage_doc_theo_bam.test.js`: đếm lời gọi, chỉ đúng quán, bộ đệm, gộp yêu cầu, lỗi, invalidation và kết quả trả chậm.
 - `tools/ql_giao_dien/e2e_manage_doc.js`: Chromium PC/tablet/mobile, nút bấm thật, đếm đọc Firebase giả, kiểm TC33 không đọc chi phí XOFA và không tràn ngang.
 - `tools/ql_giao_dien/e2e_bill_realtime.js`: hồi quy cập nhật bill/chỉ số, giữ widget quán khác và không phát sinh đọc khi bill về.
 
