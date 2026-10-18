@@ -78,3 +78,7 @@ Kiểm tra: `tests/nhan_su_diem_ban.test.js` kiểm tương thích hồ sơ cũ,
 - `node tests/ql_giao_dien.test.js` (node thuần, nằm trong `tests/run_all.sh`).
 - Trình duyệt thật: `node tools/ql_giao_dien/e2e_khung.js` — Firebase giả (`tools/tet/e2e/mockfb.js`), kiểm thanh dưới / menu / ☰ / Ctrl+K / chọn quán / popup, 24 mục.
 - Chụp ảnh: nạp `quanlygieo.html` với `mockfb.js` + bổ sung `firestore().batch/doc/collectionGroup` (xem đầu `e2e_khung.js`), viewport 1366×820 (máy tính), 853×1100 / 1024×768 (tablet), 390×844 (điện thoại).
+
+## 18/10 — Độ tương phản tab Khách hàng
+
+Lỗi: `.ui-metrics-grid > .kcard` đặt nền trắng lên cả `.kcard-wide`, trong khi nhãn/số/mô tả/thanh tỷ lệ của thẻ nổi bật vẫn trắng. Nền sáng widget nay chỉ áp cho thẻ thường; thẻ Khách quay lại dùng gradient hồng đậm và chữ trắng đủ tương phản. Chỉ CSS, không đổi cách nhóm khách/tỷ lệ hay đọc Firebase. Kiểm Chromium với bill giả có khách quay lại trên ba chiều ngang 1366/853/390: đo độ tương phản chữ/nền ít nhất 4,5:1 và kiểm số/thanh tỷ lệ; giữ các kiểm widget/Menu/Khuyến mãi cũ. Gói `tai_ve/fix_mau_tab_khach_hang_18-10.zip` chỉ hai HTML quản lý đã sinh. Chủ dự án tự deploy.

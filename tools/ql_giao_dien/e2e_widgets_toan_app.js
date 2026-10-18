@@ -14,6 +14,10 @@ firebase.database=function(){const db=D();const old=db.ref;db.ref=function(p){co
 })();`;
 mock+=`
 if(location.pathname.includes('quanlygieo')){const t=new Date(),y=new Date(t);y.setDate(y.getDate()-1);const k=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+ const mk=['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+ __RT['orders_gieogieo/'+mk[t.getMonth()]+'/'+String(t.getDate()).padStart(2,'0')].g1.customerId='test-return';
+ __RT['orders_gieogieo/'+mk[t.getMonth()]+'/'+String(t.getDate()).padStart(2,'0')].g2.customerId='test-new';
+ __RT['orders_gieogieo/'+mk[y.getMonth()]+'/'+String(y.getDate()).padStart(2,'0')]={a:{total:30000,customerId:'test-return',date:String(y.getDate()).padStart(2,'0')+'/'+String(y.getMonth()+1).padStart(2,'0')+'/'+y.getFullYear(),time:'10:00'}};
  __FS.assets_gieogieo={a:{purchaseCost:10000000,purchaseDate:k(y),usefulLifeMonths:12,active:true}};
  __FS.finance_gieogieo={current:{recoveryStartDate:k(y)}};
  __FS.pl_book_gieogieo={days:{du:k(y),d:{[k(y)]:{date:k(y),doanhThu:1000000,giaVon:200000,phiKenh:0,haoHut:0,luong:200000,chiPhiCoDinh:0,bienPhiKhac:0,khauHao:30000,lai:570000,laiTruocKhauHao:600000,mucTinCay:'chot-thang',updatedAt:t.toISOString()}}}};
@@ -41,6 +45,18 @@ try{for(const width of [1366,853,390]){
  for(const item of screens){
   await p.evaluate(go=>(0,eval)(go),item.go);await p.waitForTimeout(350);
   const r=await p.evaluate(()=>{uiWidgetsApply();const root=document.querySelector('.screen.active'),before=root.innerHTML,fs=JSON.stringify(__FSREADS),rt=JSON.stringify(__READS);uiWidgetsApply();uiWidgetsApply();return {widgets:root.querySelectorAll('.wdg').length,stable:before===root.innerHTML,reads:fs===JSON.stringify(__FSREADS)&&rt===JSON.stringify(__READS),overflow:document.documentElement.scrollWidth>innerWidth+1,title:currentNavKey()}});
+  if(item.key==='customer'){
+   const colors=await p.evaluate(()=>{
+    const card=document.querySelector('#customerBody .kcard-wide'),css=card&&getComputedStyle(card);
+    if(!card)return {present:false};
+    const rgb=s=>(s.match(/[\d.]+/g)||[]).map(Number),lum=a=>a.slice(0,3).map(v=>{v/=255;return v<=.04045?v/12.92:((v+.055)/1.055)**2.4}).reduce((n,v,i)=>n+v*[.2126,.7152,.0722][i],0);
+    const stops=(css.backgroundImage.match(/rgba?\([^)]+\)/g)||[]).map(rgb),els=[...card.querySelectorAll('.klabel,.kval,.ksub,.meter-foot')];
+    const contrast=els.flatMap(el=>stops.map(bg=>{const a=rgb(getComputedStyle(el).color),alpha=a[3]??1,fg=a.slice(0,3).map((v,i)=>v*alpha+bg[i]*(1-alpha)),x=lum(fg),y=lum(bg);return (Math.max(x,y)+.05)/(Math.min(x,y)+.05)}));
+    return {present:true,gradient:stops.length>=2,min:Math.min(...contrast),value:card.querySelector('.kval').textContent,fill:getComputedStyle(card.querySelector('.meter-fill')).backgroundColor};
+   });
+   check(colors.present&&colors.gradient&&colors.min>=4.5,width+': thẻ Khách quay lại có tương phản chữ/nền tối thiểu 4,5:1');
+   check(colors.value.includes('1')&&colors.value.includes('2 khách')&&colors.fill==='rgb(255, 255, 255)',width+': hiện rõ khách quay lại/tổng khách và thanh tỷ lệ');
+  }
   check(r.widgets>0,width+' '+item.key+': có widget');check(r.stable,width+' '+item.key+': gọi lại không lồng thêm khung');check(r.reads,width+' '+item.key+': trang trí không đọc Firebase');check(!r.overflow,width+' '+item.key+': không tràn ngang trang');
  }
  await p.evaluate(()=>goEntry('ops'));await p.waitForTimeout(350);await p.fill('#opsNotes','Ghi chú kiểm tra widget');await p.locator('#opsNotes').focus();

@@ -2,6 +2,8 @@
 
 Đọc file này **sau CLAUDE.md**, trước khi làm bất cứ việc gì. Nhánh làm việc: `Phan-tach-unit-engine`.
 
+**18/10 — Sửa màu tab Khách hàng**: rule nền trắng widget đè gradient nhưng giữ chữ trắng làm thẻ Khách quay lại gần như mất nội dung. Nền trắng chỉ áp cho thẻ thường; thẻ nổi bật khách hàng dùng nền hồng đậm, chữ/số/mô tả/thanh tỷ lệ nhìn rõ. Chỉ CSS, không đổi dữ liệu khách hoặc phép tính. Gói riêng `tai_ve/fix_mau_tab_khach_hang_18-10.zip` gồm 2 HTML quản lý; xem `docs/GIAO_DIEN_QUANLY.md`. Chưa deploy Hosting.
+
 ## 1. Bản hiện hành
 
 | Thành phần | Bản | Ghi chú |
