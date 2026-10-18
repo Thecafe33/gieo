@@ -42,6 +42,10 @@ Mỗi nhóm là một widget có màu (`wdg-blue/amber/green/violet/teal/red/pin
 
 ## Biểu mẫu và nhân sự (17/10/2026, lượt tiếp theo)
 
+**Cập nhật 18/10 — nền trắng và tìm sidebar:** ô nhập/chọn/lý do đang dùng trong các màn quản lý và popup dùng `--ui-control-bg:#fff`, gồm ngày/giờ/tháng/ngày-giờ. Ô thật sự disabled giữ nền/độ mờ riêng; không thay type, giá trị, showPicker hay trạng thái disabled. Không truyền biến nền mới vào tab Menu/Khuyến mãi và popup riêng của chúng. Thẻ nhân viên và đầu bảng trong nhóm nhân sự dùng trắng; viền ngày nghỉ đổi từ xám sang cam theo nhãn Nghỉ, vẫn giữ màu phân biệt chưa xếp/đã xếp/nghỉ.
+
+Ô `#navSearch` có nền trắng, padding riêng đủ chỗ icon và Ctrl K, tắt native search decoration để tránh biểu tượng trùng; icon/nhãn phím tắt căn giữa theo ô. Điện thoại bỏ khoảng trống phím tắt khi nhãn ẩn. Giữ một viền focus hồng, Ctrl K, gõ lọc và Enter mở đúng mục. Đã kiểm trình duyệt ở 1366/853/390px với ba trạng thái lịch, không có kết nối Firebase thật.
+
 - Ô nhập / select / textarea dùng cùng hình dáng manage (bo 14px, cao tối thiểu 46px, nền nhẹ, focus rõ), áp dụng cả ô ngày/giờ/tháng, quy trách nhiệm và lý do ngoài `.field`, trong popup. Giữ type/id/value và cơ chế bấm cả ô mở bảng chọn; loại trừ checkbox/radio/range/color/file/hidden/nút khỏi rule ô nhập. Không thêm bộ chọn ngày riêng.
 - Khối «Xuất dữ liệu phân tích mẻ» là widget, hai ngày có nhãn Từ ngày / Đến ngày; giữ hàm xuất và giới hạn 62 ngày.
 - **Nhân viên**: widget tạo hồ sơ, form 2 cột trên máy tính, popup sửa cùng widget; tìm tên không đọc lại Firebase. Danh sách gom mỗi điểm bán Gieo thành một widget; máy tính hiển thị bảng, điện thoại thành thẻ hồ sơ. Giữ PIN/chức năng/lương/OT, thao tác Sửa / Tắt-Bật / Xoá và lịch sử lương. Đổi hình thức lương giữ thông tin đang nhập.

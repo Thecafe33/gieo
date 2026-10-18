@@ -1,4 +1,4 @@
-# Hiện trạng dự án — cập nhật 17/10/2026
+# Hiện trạng dự án — cập nhật 18/10/2026
 
 Đọc file này **sau CLAUDE.md**, trước khi làm bất cứ việc gì. Nhánh làm việc: `Phan-tach-unit-engine`.
 
@@ -16,6 +16,8 @@
 **Trạng thái deploy (chủ dự án xác nhận 04/10/2026): v18 ĐÃ DEPLOY**, chạy ổn ở cửa hàng 1 được **1–3 tuần**. Đa cửa hàng cần ≥ vài tuần ổn định (`docs/KE_HOACH_DA_CUA_HANG.md` mục 0) → theo dõi thêm rồi mới làm M0. Chủ dự án tự deploy; phiên mới hỏi lại trước việc lớn nếu đã qua lâu.
 
 ## 2. Đã làm (theo thứ tự)
+
+**Mới nhất 18/10 — ô nhập trắng và sửa tìm sidebar**: ô ngày/giờ/tháng cùng các biểu mẫu quản lý dùng nền trắng, thẻ nhân viên và đầu bảng nhân sự trắng, viền nhân viên nghỉ dùng cam theo nhãn. Giữ phân biệt ô thật sự disabled. Tìm sidebar sửa padding bị CSS chung ghi đè, tắt search decoration trùng, căn icon/Ctrl K và giữ một viền focus. Giữ tính năng chọn ngày, tìm/Enter, dữ liệu, bộ tính và tab Menu/Khuyến mãi. Kiểm nhân sự 76 mục đạt và xem ba trạng thái lịch ở PC/tablet/mobile. Sinh lại bản thử và ba bộ deploy; chưa deploy Hosting. Chi tiết: `docs/GIAO_DIEN_QUANLY.md`.
 
 **Mới nhất 17/10 — chuông header và cảnh báo BTP đã xem**: thay tiêu đề Hôm nay trùng sidebar bằng chuông trên header cố định, bỏ nút trong nội dung và nút X. Cuộn chuột/cảm ứng hoặc đổi focus không đóng hộp; chỉ thao tác đóng có chủ ý. Sửa hộp thư chỉ tải 40 bản gần nhất: giờ lấy đủ mục chưa xem, gộp 40 lịch sử. Sau khi lưu Đã xem/Đã xử lý, cập nhật số và danh sách tại máy, không đọc lại; chống lượt nạp cũ hồi sinh cảnh báo, tách trạng thái theo quán. BTP Đã xem có nhãn đúng và vẫn xử lý tiếp được. Không sửa engine, tồn kho, lãi/lỗ, manage hay Menu/Khuyến mãi. Sinh lại bản thử và ba bộ deploy; chưa deploy Hosting. Chi tiết: `docs/GIAO_DIEN_QUANLY.md`; test `tests/thong_bao_canh_bao.test.js`, `tools/ql_giao_dien/e2e_thong_bao.js`.
 
