@@ -1,5 +1,7 @@
 # Hiện trạng dự án — cập nhật 19/10/2026
 
+**19/10 — Widget Quản lý POS TC33** (chủ dự án yêu cầu trực tiếp): `pos.html` khối CSS `[POS-MANAGER-WIDGETS]`, thanh nhóm chức năng ngang trên PC; danh sách + form thành widget xanh, ô nhập trắng/chữ rõ; điện thoại hiện lại danh sách vốn bị ẩn, cuộn dọc và nút lưu cuối form. Chỉ giao diện và nhãn “Lưu thay đổi”; không đổi JS, truy vấn, lưu cấu hình hay thanh toán. Sinh bản Tết/bộ deploy. Chưa deploy Hosting.
+
 **19/10 — Dropdown chọn điểm bán manage**: thay hộp thoại bằng menu neo dưới nút; tìm không dấu theo tên/mã/địa chỉ, chia thương hiệu, cuộn riêng cho >10 điểm, đánh dấu điểm đang xem, Enter/mũi tên/Escape. Bấm ngoài đóng, cuộn ngoài không đóng; tôn trọng reduced-motion. Không đọc thêm Firebase khi mở/tìm. Kiểm Chromium PC/mobile với 18 điểm. Giữ bộ lọc/phạm vi dữ liệu và thao tác giữ nút Gieo. Chưa deploy Hosting.
 
 **19/10 — Trần giờ trả lương**: áp dụng từ 01/10, chỉ trả phần ca thực tế nằm trong lịch; thiếu lịch chặn tính/chốt. Giữ chấm công gốc, OT tính sau giới hạn. manage + quanlygieo + bộ tính lai_lo.v5; snapshot laborVersion=2, sửa lịch đánh dấu đúng ngày. Chi tiết `docs/TRAN_GIO_CONG.md`. Chưa deploy Hosting.
