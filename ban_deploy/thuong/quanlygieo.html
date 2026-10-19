@@ -5437,13 +5437,13 @@ async function poMoSuaPhieuNhan(poId){
 
 // Nhật ký sửa nằm ngay trên phiếu. Phiếu KHÔNG được im lặng mang con số mới: sau này soát
 // lại phải đọc được "hôm đó ghi 30, sửa còn 3, ai sửa, vì sao".
-function fixRecLichSuSua(rec, itemId){
+function fixRecLichSuSua(rec, itemId, donViNhan){
   const ls = (rec.corrections||[]).filter(x=>!itemId || x.itemId===itemId);
   if(!ls.length) return '';
   const dv = itemId ? ((rec.lines||[]).find(l=>l.itemId===itemId)||{}).unit||'' : '';
   return ls.map(x=>`<div class="small-note" style="color:var(--warn);margin-top:4px">
       ${ic('alert',12)} Đã sửa ${String(x.at||'').replace('T',' ').slice(0,16)} bởi ${escapeHtmlAttr(x.by||'—')}${itemId?'':' · '+escapeHtmlAttr(x.name||'')}:
-      <b>${fmtNum(x.fromBase,0)} → ${fmtNum(x.toBase,0)} ${escapeHtmlAttr(dv)}</b> · lý do: ${escapeHtmlAttr(x.reason||'—')}
+      <b>${fmtNum(x.fromBase/(donViNhan?donViNhan.factor:1),2)} → ${fmtNum(x.toBase/(donViNhan?donViNhan.factor:1),2)} ${escapeHtmlAttr(donViNhan?donViNhan.name:dv)}</b>${donViNhan && (donViNhan.factor!==1 || donViNhan.name!==dv)?` <span class="muted-sm">(${fmtNum(x.fromBase,2)} → ${fmtNum(x.toBase,2)} ${escapeHtmlAttr(dv)})</span>`:''} · lý do: ${escapeHtmlAttr(x.reason||'—')}
       ${x.voidedCodes&&x.voidedCodes.length?`<br>Huỷ ${x.voidedCodes.length} tem: ${escapeHtmlAttr(x.voidedCodes.slice(0,10).join(', '))}${x.voidedCodes.length>10?'…':''}`:''}
     </div>`).join('');
 }
@@ -5456,6 +5456,21 @@ function fixRecHeSo(it, tem){
   if(t) return 0;                       // theo lô: 1 tem = cả lô, không quy ra "mấy cái"
   const dv = it ? itemCountUnit(it) : null;
   return dv && Number(dv.baseQty)>0 ? Number(dv.baseQty) : 1;
+}
+
+// QR đơn vị: dùng đơn vị kiểm kê trên mã. Không QR: dùng đơn vị nhập trên phiếu,
+// tuyệt đối không suy ngược từ bao bì lớn/nhỏ nhất hay countUnitName của danh mục.
+function fixRecDonViNhan(l, it, tem){
+  const t = (tem||[]).find(c=>Number(c.baseQty)>0);
+  if(t && t.trackingMode!=='batch') return {name:t.countUnitName || (it&&it.countUnitName) || l.unit || 'đơn vị', factor:Number(t.baseQty)};
+  if(!t && it && it.trackingMode==='unit') {
+    const dv = itemCountUnit(it);
+    if(dv && Number(dv.baseQty)>0) return {name:dv.name, factor:Number(dv.baseQty)};
+  }
+  const f = Number(l.receiveUnitFactor);
+  if(l.receiveUnitName && Number.isFinite(f) && f>0) return {name:l.receiveUnitName, factor:f};
+  // Phiếu cũ chỉ lưu g/ml không đủ bằng chứng để biết đã nhập 3 Chai hay 1 Thùng.
+  return {name:'', factor:0};
 }
 
 // ============================================================
@@ -5513,25 +5528,26 @@ function fixRecWizTinh(){
   const tem = (w.tem||[]).filter(c=>c.itemId===l.itemId);
   const theoLo = !!(tem.length && tem[0].trackingMode === 'batch');
   const heSo = theoLo ? 1 : fixRecHeSo(it, tem);
-  const theoDonVi = !theoLo && heSo>1 && tem.length;
+  const theoDonVi = !theoLo && heSo>0 && tem.length;
 
-  // [MỚI] Dòng KHÔNG CÓ TEM nào (kể cả món có bật dán tem nhưng lần nhận lỗi này sinh ra
-  // 0 tem — đúng kịch bản "nhập 1g thay vì 1 lon": createContainersForReceipt() làm tròn
-  // xuống 0 tem vì 1g chưa đủ 1 lon) — không có phép tính huỷ/giữ tem nào phải lo, nên cho
-  // chọn LẠI đơn vị nhập tự do (quy cách đã khai, hoặc đơn vị pha chế) thay vì bắt gõ thẳng
-  // ra gam. KHÔNG áp dụng khi tem.length>0: phép tính huỷ tem bên dưới đang ngầm định soDung
-  // là SỐ TEM (hoặc số base khi 1 tem=1 base), đổi đơn vị tự do ở đó sẽ tính sai số tem cần huỷ.
-  const coTheChonDonVi = tem.length === 0;
-  const cUnit = it ? itemCountUnit(it) : {name:l.unit||'', baseQty:1, isBase:true};
-  const freeUnitOpts = coTheChonDonVi
-    ? (cUnit.isBase ? [{label: l.unit||'', baseQty:1}] : [{label: cUnit.name, baseQty: cUnit.baseQty}, {label: l.unit||'', baseQty:1}])
-    : [];
-  const donViFactor = coTheChonDonVi ? (Number(w.donViFactor) || freeUnitOpts[0].baseQty || 1) : 1;
+  // QR đơn vị: số nhập là số tem kiểm kê, không cho tự đổi quy cách của mã.
+  // Không QR đơn vị (cả tem theo LÔ): giữ đơn vị đã nhập trên phiếu. Phiếu cũ thiếu
+  // metadata thì yêu cầu chọn rõ, không tự lấy countUnitName của danh mục làm đơn vị nhập.
+  const coTheChonDonVi = tem.length === 0 || theoLo;
+  const recordedUnit = fixRecDonViNhan(l, it, tem);
+  const freeUnitOpts = coTheChonDonVi ? [
+    ...(recordedUnit.factor>0 ? [{label:recordedUnit.name, baseQty:recordedUnit.factor}] : []),
+    ...((it&&it.packagingUnits)||[]).map(p=>({label:p.name, baseQty:Number(p.baseQty)})),
+    {label:l.unit||'', baseQty:1}
+  ].filter((o,i,a)=>o.label && Number.isFinite(o.baseQty) && o.baseQty>0 &&
+    a.findIndex(x=>x.label===o.label && x.baseQty===o.baseQty)===i) : [];
+  const chosen = freeUnitOpts.find(o=>o.baseQty===Number(w.donViFactor) && (!w.donViName || o.label===w.donViName));
+  const needsUnit = coTheChonDonVi && !chosen && !(recordedUnit.factor>0);
+  const donViFactor = chosen ? chosen.baseQty : (recordedUnit.factor || 1);
 
   const daGhiBase = Number(l.qtyGoodBase)||0;
   const factor = theoDonVi ? heSo : donViFactor;
-  const donVi = theoDonVi ? (tem[0].countUnitName || 'đơn vị')
-    : (coTheChonDonVi ? ((freeUnitOpts.find(o=>o.baseQty===donViFactor)||{}).label || l.unit || '') : (l.unit||''));
+  const donVi = theoDonVi ? recordedUnit.name : (chosen ? chosen.label : recordedUnit.name);
   const daGhi = daGhiBase/factor;
 
   const song   = tem.filter(c=>c.status==='sealed'||c.status==='open');
@@ -5544,7 +5560,7 @@ function fixRecWizTinh(){
 
   const raw = String(w.soDung).trim();
   const soDung = raw==='' ? null : Number(raw);
-  const hopLe = soDung!==null && isFinite(soDung) && soDung>=0;
+  const hopLe = !needsUnit && soDung!==null && isFinite(soDung) && soDung>=0 && (!theoDonVi || Number.isInteger(soDung));
   const baseDung = hopLe ? soDung*factor : null;
   const thua = hopLe ? daGhiBase - baseDung : null;
 
@@ -5562,7 +5578,7 @@ function fixRecWizTinh(){
   // diện, Unit Engine bên POS sẽ không biết lấy hàng đó từ đâu khi bán/nấu. Trường hợp
   // đó phải nhận lại qua đúng POS ▸ Nhận hàng để sinh tem thật.
   const coDanTem = !!(it && (it.trackingMode==='unit' || it.trackingMode==='batch'));
-  return { l, it, tem, theoLo, heSo, theoDonVi, coTheChonDonVi, freeUnitOpts, donViFactor, coDanTem, factor,
+  return { l, it, tem, theoLo, heSo, theoDonVi, coTheChonDonVi, freeUnitOpts, donViFactor, needsUnit, coDanTem, factor,
            daGhiBase, daGhi, donVi, song, daDung, nguyen,
            soDung, hopLe, baseDung, thua, huy, giu, canHuy, thieuTem, tonHienTai };
 }
@@ -5570,7 +5586,7 @@ function fixRecWizTinh(){
 function fixRecWizSet(f, v){ if(FIXREC_WIZ){ FIXREC_WIZ[f] = v; if(f==='soDung') fixRecWizRenderTomTat(); } }
 function fixRecWizGo(step){ if(!FIXREC_WIZ) return; FIXREC_WIZ.step = step; fixRecWizRender(); }
 
-function fixRecWizChonDong(i){ if(!FIXREC_WIZ) return; FIXREC_WIZ.lineIdx = i; FIXREC_WIZ.step = 2; FIXREC_WIZ.donViFactor = null; fixRecWizRender(); }
+function fixRecWizChonDong(i){ if(!FIXREC_WIZ) return; FIXREC_WIZ.lineIdx = i; FIXREC_WIZ.step = 2; FIXREC_WIZ.donViFactor = null; FIXREC_WIZ.donViName = null; fixRecWizRender(); }
 
 function fixRecWizTiepTuc(){
   const c = fixRecWizTinh();
@@ -5617,20 +5633,23 @@ function fixRecWizB1(body){
     ${dongs.map((l,i)=>{
       const tem = (w.tem||[]).filter(c=>c.itemId===l.itemId);
       const song = tem.filter(c=>c.status==='sealed'||c.status==='open').length;
+      const dv = fixRecDonViNhan(l, INVENTORY_ITEMS.find(x=>x.id===l.itemId), tem);
       return `<div class="litem" style="cursor:pointer" onclick="fixRecWizChonDong(${i})">
         <div class="li-l">
           <div>${escapeHtmlAttr(l.name||'')}</div>
-          <div class="muted-sm">Đã ghi nhận <b>${fmtNum(l.qtyGoodBase,0)} ${escapeHtmlAttr(l.unit||'')}</b>${tem.length?` · ${song} tem còn sống`:' · không dán tem'}</div>
-          ${fixRecLichSuSua(w.rec, l.itemId)}
+          <div style="font-weight:700;color:var(--td);margin-top:4px">${dv.factor>0?`Đã ghi nhận <b>${fmtNum(Number(l.qtyGoodBase)/dv.factor,2)} ${escapeHtmlAttr(dv.name)}</b>`:'Phiếu cũ chưa lưu đơn vị nhập — bấm để chọn'}${tem.length?` · ${song} tem còn sống`:''}</div>
+          ${!(dv.factor>0)?`<div class="muted-sm">Sổ cũ lưu ${fmtNum(l.qtyGoodBase,2)} ${escapeHtmlAttr(l.unit||'')}; chưa xác định được số bao bì đã nhập.</div>`:(dv.factor!==1 || dv.name!==l.unit?`<div class="muted-sm">Quy đổi: ${fmtNum(l.qtyGoodBase,2)} ${escapeHtmlAttr(l.unit||'')} · 1 ${escapeHtmlAttr(dv.name)} = ${fmtNum(dv.factor,3)} ${escapeHtmlAttr(l.unit||'')}</div>`:'')}
+          ${fixRecLichSuSua(w.rec, l.itemId, dv.factor>0?dv:null)}
         </div>
         <div class="li-r">›</div>
       </div>`;
     }).join('') || '<div class="empty-hint">Phiếu này không có dòng nào nhận hàng lành.</div>'}`;
 }
 
-function fixRecWizSetUnit(factor){
+function fixRecWizSetUnit(factor, name){
   if(!FIXREC_WIZ) return;
   FIXREC_WIZ.donViFactor = Number(factor)||1;
+  FIXREC_WIZ.donViName = name || null;
   // Đổi đơn vị thì số đã gõ (nếu có) đang tính theo đơn vị CŨ — giữ nguyên số dễ đọc nhầm
   // thành số mới đúng, nên xoá để nhập lại cho chắc thay vì âm thầm quy đổi hộ.
   FIXREC_WIZ.soDung = '';
@@ -5642,22 +5661,24 @@ function fixRecWizB2(body){
   // [MỚI] Chỉ hiện khi dòng này không có tem nào (xem giải thích ở fixRecWizTinh) — cho
   // chọn quy cách đóng gói đã khai (VD "Lon") thay vì bắt gõ thẳng ra đơn vị pha chế, cùng
   // lý do và cùng cách làm với bản vá "nhập hàng tự do" bên POS.
-  const unitPicker = (c.coTheChonDonVi && c.freeUnitOpts.length>1) ? `
+  const unitPicker = (c.coTheChonDonVi && (c.freeUnitOpts.length>1 || c.needsUnit)) ? `
     <div class="field"><label>Đơn vị nhập</label>
-      <div class="seg">${c.freeUnitOpts.map(o=>`<button type="button" class="${o.baseQty===c.donViFactor?'active':''}" onclick="fixRecWizSetUnit(${o.baseQty})">${escapeHtmlAttr(o.label)}${o.baseQty>1?` (=${fmtNum(o.baseQty,0)} ${escapeHtmlAttr(c.l.unit||'')})`:''}</button>`).join('')}</div>
+      <div class="seg">${c.freeUnitOpts.map(o=>`<button type="button" class="${!c.needsUnit && o.baseQty===c.donViFactor && o.label===c.donVi?'active':''}" onclick="fixRecWizSetUnit(${o.baseQty},${escapeHtmlAttr(JSON.stringify(o.label))})">${escapeHtmlAttr(o.label)}${o.baseQty!==1?` (=${fmtNum(o.baseQty,3)} ${escapeHtmlAttr(c.l.unit||'')})`:''}</button>`).join('')}</div>
     </div>` : '';
   body.innerHTML = `
     <div class="card" style="margin:0 0 12px;padding:14px">
       <div style="font-size:16px;font-weight:700;color:var(--td)">${escapeHtmlAttr(c.l.name||'')}</div>
-      <div class="muted-sm" style="margin-top:4px">Hệ thống đang ghi <b>${fmtNum(c.daGhi,2)} ${escapeHtmlAttr(c.donVi)}</b>${c.factor>1?` (= ${fmtNum(c.daGhiBase,0)} ${escapeHtmlAttr(c.l.unit||'')})`:''}</div>
+      <div style="color:var(--td);margin-top:4px">${c.needsUnit?'Phiếu cũ chưa lưu đơn vị nhập. Chọn lại đúng đơn vị đã nhận bên dưới.':`Hệ thống đang ghi <b>${fmtNum(c.daGhi,2)} ${escapeHtmlAttr(c.donVi)}</b>`}</div>
+      ${!c.needsUnit && (c.factor!==1 || c.donVi!==c.l.unit)?`<div class="muted-sm">Quy đổi: ${fmtNum(c.daGhiBase,2)} ${escapeHtmlAttr(c.l.unit||'')} · 1 ${escapeHtmlAttr(c.donVi)} = ${fmtNum(c.factor,3)} ${escapeHtmlAttr(c.l.unit||'')}</div>`:''}
       ${c.tem.length?`<div class="muted-sm">${c.song.length} tem còn sống${c.daDung.length?` · <b style="color:var(--warn)">${c.daDung.length} đã mở/đã dùng</b>`:''}</div>`
         : (c.coDanTem ? '<div class="muted-sm">Món có bật dán tem, nhưng lần nhận này đang có 0 tem</div>' : '<div class="muted-sm">Món này không dán tem</div>')}
-      ${fixRecLichSuSua(w.rec, c.l.itemId)}
+      ${fixRecLichSuSua(w.rec, c.l.itemId, c.needsUnit?null:{name:c.donVi, factor:c.factor})}
     </div>
     ${unitPicker}
-    <div class="field"><label>Số ĐÚNG theo đơn hàng thật (${escapeHtmlAttr(c.donVi)})</label>
-      <input type="number" step="0.01" min="0" id="fixrecQty" value="${escapeHtmlAttr(String(w.soDung))}"
+    <div class="field"><label>${c.needsUnit?'Chọn đơn vị nhập trước khi sửa số lượng':`Số ${escapeHtmlAttr(c.donVi)} thực nhận đúng`}</label>
+      <input type="number" step="${c.theoDonVi?'1':'0.01'}" min="0" id="fixrecQty" ${c.needsUnit?'disabled':''} value="${escapeHtmlAttr(String(w.soDung))}"
              oninput="fixRecWizSet('soDung', this.value)" placeholder="VD: 3"></div>
+    ${!c.needsUnit && (c.factor!==1 || c.donVi!==c.l.unit)?`<div class="small-note" style="margin:-4px 0 12px">Nhập số ${escapeHtmlAttr(c.donVi)}, hệ thống tự quy đổi sang ${escapeHtmlAttr(c.l.unit||'')}. Ví dụ: 3 ${escapeHtmlAttr(c.donVi)} = ${fmtNum(3*c.factor,3)} ${escapeHtmlAttr(c.l.unit||'')}.</div>`:''}
     <div class="field"><label>Lý do sửa (bắt buộc)</label>
       <input type="text" id="fixrecReason" value="${escapeHtmlAttr(w.lyDo||'')}"
              oninput="fixRecWizSet('lyDo', this.value)"
@@ -5683,11 +5704,12 @@ function fixRecWizRenderTomTat(){
       el.innerHTML = `<div class="small-note" style="color:var(--bad);margin-top:8px">Số mới LỚN HƠN số đang ghi, và món này có bật dán tem${c.tem.length?'':' (lần nhận này lỗi nên đang có 0 tem)'}. Màn này không sinh được tem mới cho phần nhận thêm — ghi phiếu nhận bổ sung ở app POS ▸ Kho ▸ Nhận hàng để giá vốn vào đúng lô, có tem đầy đủ.</div>`;
       return;
     }
-    el.innerHTML = `<div class="small-note" style="margin-top:8px;line-height:1.7">Món này không dán tem — sẽ <b>cộng thêm ${fmtNum(-c.thua,0)} ${escapeHtmlAttr(c.l.unit||'')}</b> vào tồn kho, không có tem nào cần huỷ/sinh.</div>`;
+    el.innerHTML = `<div class="small-note" style="margin-top:8px;line-height:1.7">Món này không dán tem — sẽ <b>cộng thêm ${fmtNum(-c.thua/c.factor,2)} ${escapeHtmlAttr(c.donVi)}</b> vào tồn kho, không có tem nào cần huỷ/sinh.</div>`;
     return;
   }
   el.innerHTML = `<div class="small-note" style="margin-top:8px;line-height:1.7">
-      Sẽ trừ <b>${fmtNum(c.thua,0)} ${escapeHtmlAttr(c.l.unit||'')}</b> khỏi tồn kho${c.huy.length?` và huỷ <b>${c.huy.length} tem</b>`:''}.
+      Sẽ trừ <b>${fmtNum(c.thua/c.factor,2)} ${escapeHtmlAttr(c.donVi)}</b> khỏi tồn kho${c.huy.length?` và huỷ <b>${c.huy.length} tem</b>`:''}.
+      ${c.factor!==1 || c.donVi!==c.l.unit?`<br><span class="muted-sm">Tương đương ${fmtNum(c.thua,2)} ${escapeHtmlAttr(c.l.unit||'')}.</span>`:''}
       ${c.thieuTem?`<br><span style="color:var(--bad)">Cần huỷ ${c.canHuy} tem nhưng chỉ còn ${c.nguyen.length} tem nguyên seal — ${c.thieuTem} con còn lại đã mở/đã dùng nên không huỷ được.</span>`:''}
     </div>`;
 }
@@ -5696,14 +5718,16 @@ function fixRecWizB3(body){
   const w = FIXREC_WIZ, c = fixRecWizTinh();
   if(!c || !c.hopLe){ body.innerHTML = '<div class="muted">Thiếu dữ liệu — quay lại bước 2.</div>'; return; }
   const dvBase = escapeHtmlAttr(c.l.unit||'');
+  const so = v => `${fmtNum(v/c.factor,2)} ${escapeHtmlAttr(c.donVi)}`;
   const hang = (nhan, cu, moi) => `<div class="row"><span class="rl">${nhan}</span><span class="rv">${cu} → <b>${moi}</b></span></div>`;
-  const poLine = w.rec.poId ? hang('Đơn đặt hàng — đã nhận', `${fmtNum(c.daGhiBase,0)} ${dvBase}`, `${fmtNum(c.baseDung,0)} ${dvBase}`) : '';
+  const poLine = w.rec.poId ? hang('Đơn đặt hàng — đã nhận', so(c.daGhiBase), so(c.baseDung)) : '';
   body.innerHTML = `
     <div class="small-note" style="margin-bottom:10px">Soát lại lần cuối. ${c.huy.length ? 'Bấm xác nhận là <b>huỷ tem vĩnh viễn</b> và ghi vào sổ kho.' : 'Bấm xác nhận là ghi vào sổ kho.'}</div>
     <div class="card" style="margin:0 0 12px;padding:14px">
       <div style="font-size:16px;font-weight:700;color:var(--td);margin-bottom:8px">${escapeHtmlAttr(c.l.name||'')}: ${fmtNum(c.daGhi,2)} → ${fmtNum(c.soDung,2)} ${escapeHtmlAttr(c.donVi)}</div>
-      ${hang('Tồn kho', `${fmtNum(c.tonHienTai,0)} ${dvBase}`, `${fmtNum(c.tonHienTai-c.thua,0)} ${dvBase}`)}
-      ${hang('Dòng NHẬP trong sổ kho', `${fmtNum(c.daGhiBase,0)} ${dvBase}`, `${fmtNum(c.baseDung,0)} ${dvBase}`)}
+      ${hang('Tồn kho', so(c.tonHienTai), so(c.tonHienTai-c.thua))}
+      ${hang('Dòng NHẬP trong sổ kho', so(c.daGhiBase), so(c.baseDung))}
+      ${c.factor!==1 || c.donVi!==c.l.unit?`<div class="muted-sm">Dòng nhập quy đổi: ${fmtNum(c.daGhiBase,2)} → ${fmtNum(c.baseDung,2)} ${dvBase}. Sổ kho vẫn lưu theo đơn vị pha chế.</div>`:''}
       ${poLine}
       ${c.tem.length?hang('Tem còn sống', `${c.song.length}`, `${c.giu.length}`):''}
       <div class="small-note" style="margin-top:8px">Lý do: <b>${escapeHtmlAttr(w.lyDo)}</b></div>

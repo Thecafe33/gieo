@@ -1,31 +1,36 @@
-# Nhận hàng Bịch/Thùng — 19/10/2026
+# Giữ đơn vị thực nhập và đơn vị kiểm kê — 19/10/2026
 
-## Lỗi tái hiện được
+## Bằng chứng và giới hạn
 
-Chủ quán báo nhận 6 bịch trân châu nhưng kho/mã ghi thành lượng tương đương 6 thùng. Cấu hình trong bản xuất đã cung cấp: Trân châu trắng có đơn vị nền g, Bịch = 2.000g, Thùng = 12.000g, đơn vị đếm/dán mã là Bịch. Không đưa bản xuất hay thông tin riêng vào repo.
+Chủ quán xác nhận: đã chọn nhận tự do **6 Bịch trân châu trắng** nhưng nhận cuối sinh **36 mã Bịch**. Ảnh phiếu ngày 19/10 cho thấy đã ghi 72.000g, chủ quán đã sửa xuống 12.000g và huỷ 30 mã, còn 6 mã sống. Không sửa dữ liệu thật trong phiên này.
 
-`poReceiveAddFreeLine` và `poReceiveLineChangeItem` trước đây chọn bao bì lớn nhất. Với cấu hình trên, mặc định Thùng; nhập 6 -> 72.000g -> 36 mã Bịch. UI chỉ ghi “Số lượng tốt”, đơn vị chọn không nằm cạnh số nhập. Đổi đơn vị vẫn giữ số cũ, có thể biến 6 Bịch thành 6 Thùng. Đây là lỗi đã tái hiện theo mã/config; chưa có chính phiếu sự cố để xác nhận nhân viên đi qua nhận tự do hay theo đơn và đơn vị lúc bấm.
+Cấu hình trong bản xuất trước đó: Bịch = 2.000g, Thùng = 12.000g, đơn vị kiểm kê/dán mã là Bịch. Khi lượng đưa vào engine là 72.000g, engine chia 2.000 và sinh đúng 36 mã; lỗi phải tìm trước bước này. Không có bằng chứng engine nhân thêm hệ số 6.
 
-Không thấy engine nhân hệ số lần hai: `_submitPoReceiveImpl` nhân số nhập với quy cách một lần, rồi `UnitEngine.lifecycle.createFromReceipt` chia lượng nền cho quy cách đơn vị đếm. Nếu chọn đúng Bịch, 6 × 2.000 = 12.000g -> 6 mã. Không sửa `unit_engine.v18.js` hoặc quy tắc tồn theo mã.
+Tái hiện trên mã trước bản vá (`4cf474a`): chọn Bịch, nhập 6, mở chọn nguyên liệu và chọn lại chính trân châu trắng -> `poReceiveLineChangeItem` giữ số 6 nhưng tự reset `unitFactor` về bao bì lớn nhất (12.000) -> nhận 72.000g, sinh 36 mã. Đây là nhánh thực thi gây đúng kết quả được báo; chưa có nhật ký thao tác của máy quầy để xác nhận nhân viên đã đi qua nhánh đó.
 
-## Bản sửa
+Bản vá đầu `dbf44cd` đã đi sai trọng tâm khi đổi mặc định sang đơn vị đếm. Bản tiếp theo trả mặc định lúc thêm mới về như cũ, tập trung giữ lựa chọn đã nhập, không ép mọi nguyên liệu về Bịch.
 
-- Nhận tự do chọn đơn vị đếm trong danh mục; nếu không có chọn bao bì nhỏ nhất hợp lệ; chỉ trở về g/ml/cái khi không có bao bì. Giữ lon/chai thành lượng nền đúng, không quay về lỗi “1 lon = 1g”. Không đổi mặc định kiểm kê/refill.
-- Nhận theo đơn tiếp tục dùng quy cách lúc đặt; giữ lựa chọn đó cả khi bao bì trong danh mục đổi. Đổi đơn vị hoặc đổi nguyên liệu xoá lượng tốt/hỏng cũ, nhân viên nhập lại theo nhãn mới. Dòng đã vào kho không đổi đơn vị khi thử lại.
-- Ô số lượng ghi rõ Bịch/Thùng, chọn quy cách hiện đơn vị nền, xem trước số tốt/hỏng và số mã NL. Quy cách dài xuống dòng trên màn hẹp. Không đọc thêm Firebase để xem trước.
-- Kiểm số hữu hạn, không âm, quy cách hợp lệ; giữ kiểm số nguyên đơn vị dán mã và trần 60 mã trước khi ghi. Nhận tốt vượt phần đơn còn thiếu cần xác nhận số và đơn vị trước mọi lượt ghi; bấm Sửa số lượng chưa thay kho.
-- Phiếu mới lưu thêm `receiveUnitName`, `receiveUnitFactor`, `qtyGoodReceived`, `qtyDamagedReceived` ngay trên từng dòng, bên cạnh lượng nền cũ. Dữ liệu cũ vẫn đọc như trước. Mã nghiệp vụ/ledger/PO/chống retry không đổi, không thêm bảng hoặc truy vấn.
+## Nhận hàng POS
 
-## Phiếu đã nhận sai
+- Chọn lại CÙNG nguyên liệu giữ nguyên đơn vị, số lượng và ghi chú. Đổi sang nguyên liệu khác xoá số cũ, tránh mang số của món trước sang món sau.
+- Chụp dòng hàng và quy cách trước bước `await` đầu tiên. Khoá thao tác sửa form khi đang nhận; mở lại cả khi PIN/ca không hợp lệ hoặc lỗi. Dùng cùng snapshot nguyên liệu cho kiểm số mã và tạo mã, không đọc lại quy cách từ cache giữa chừng.
+- Nhãn số nhập ghi đúng đơn vị đang chọn; xem trước lượng nền và số mã NL. Đổi đơn vị có chủ ý phải nhập lại số. Giữ quy cách đơn đặt và cảnh báo nhận vượt đơn.
+- Phiếu mới lưu `receiveUnitName`, `receiveUnitFactor`, `qtyGoodReceived`, `qtyDamagedReceived` bên cạnh lượng nền. Lượng này là số gốc nhân viên nhập, không suy ngược từ danh mục.
+- Không đổi engine v18, ID chống retry hoặc cấu trúc bảng. Không thêm truy vấn Firebase.
 
-Bản vá chỉ ngăn nhận mới sai; không tự giảm tồn hay huỷ tem đang có. Dùng **quanlygieo → Kho → Đặt & nhận hàng → Sửa phiếu nhận**, chọn đúng phiếu và dòng, kiểm tra số mã đã mở/đã dùng, nhập số đúng theo đơn vị màn sửa hiển thị và ghi lý do. Công cụ hiện có phối hợp sửa phiếu/đơn/ledger/tem qua engine, huỷ tem sealed chưa dùng trước; nếu đã dùng nhiều hơn lượng đúng thì phải đối soát, không tự xoá mã đã dùng.
+## Sửa phiếu nhận — quy tắc chủ quán chốt
 
-Không nhận thêm một phiếu “6 bịch” để bù, vì sẽ cộng tồn lần nữa. Chưa có phiếu sự cố cụ thể và không thực hiện bất kỳ thao tác sửa dữ liệu thật nào.
+1. **Có QR theo từng đơn vị:** số chính và ô nhập dùng đơn vị kiểm kê trên chính mã/tem của lần nhận. Ví dụ 6 Bịch; 3 Chai 340ml thì nhập số chai, tự quy đổi, không chia tay. Giữ quy cách tem cũ nếu danh mục đổi; QR đơn vị nhập số mã nguyên.
+2. **Không QR theo từng đơn vị:** dùng đúng đơn vị người nhận đã chọn trên phiếu. Cùng nguyên liệu, phiếu nhập Chai hiện Chai, phiếu nhập Thùng hiện Thùng, không lấy `countUnitName` hay bao bì lớn/nhỏ nhất làm mặc định thay thế. Tem cả lô không đồng nghĩa mỗi tem là một Chai/Hộp.
+3. Phiếu cũ không lưu đơn vị nhập không đủ bằng chứng để khôi phục: hiện thiếu đơn vị và yêu cầu chọn rõ trước khi sửa. Không tự đoán. g/ml giữ làm số đối chiếu phụ; sổ kho/engine vẫn lưu lượng nền.
+
+Danh sách chọn dòng, bước nhập, xem trước, xác nhận và lịch sử sửa đều thể hiện đơn vị này. Không sửa công thức COGS hoặc lãi/lỗ.
 
 ## Kiểm chứng
 
-`node tests/nhan_hang_don_vi.test.js`: chạy hàm POS thật và engine v18 trên Firebase giả nghiêm. Kiểm 6 Bịch/1 Thùng/đơn đặt Bịch/đặt Thùng nhận Bịch, cảnh báo giao dư và huỷ trước ghi, nhận hỏng, PO lỗi mạng rồi retry, không đổi đơn vị dòng đã ghi, lượng/quy cách sai, lon/cái rời. Đối chiếu tồn thật của fake, phiếu, trạng thái PO và số/dung lượng mã, không chỉ kiểm giao diện.
+- `tests/nhan_hang_don_vi.test.js`: hàm POS và engine thật trên Firebase giả nghiêm. Kiểm chọn Bịch/Chai/Lon rồi chọn lại cùng món, nhận đúng số mã; snapshot trước await; khoá/mở form; không QR lưu đúng đơn vị Chai dù cấu hình kiểm kê Thùng; hỏng, giao dư, retry không cộng đúp.
+- `tests/sua_phieu_don_vi.test.js`: QR dùng đơn vị mã, không QR dùng phiếu; 340ml/Chai; danh mục đổi; hệ số 1 và dưới 1; phiếu cũ thiếu metadata không tự đoán; lịch sử 36 -> 6 Bịch. Kiểm dữ liệu gửi engine vẫn là lượng nền.
+- Browser fixture dùng CSS/hàm thật, chặn toàn bộ mạng; không kiểm trên APK thật hoặc máy đã gặp sự cố.
+- Bắt buộc sinh `_thu`/ba bộ deploy, chạy bộ test đầy đủ và kiểm ranh giới/đường dẫn. Chủ quán tự deploy Hosting.
 
-Sinh lại `_thu` và ba bộ deploy bằng `sh tools/sinh_lai_tat_ca.sh`. Chủ quán tự deploy Hosting.
-
-Kết quả kiểm 19/10: bộ test đầy đủ `TẤT CẢ ĐẠT`; ranh giới engine và đường dẫn sạch; ba fixture deploy hợp lệ. `tools/nhan_hang/e2e_don_vi.js` đạt 36 kiểm tra Chromium ở 1366×768, 768×1024, 390×844 và 320×640: nhập/đổi đơn vị, nhãn/preview, giữ focus và không tràn ngang. Browser chỉ chạy màn/hàm/CSS thật với fixture tại máy; chưa kiểm trên APK hoặc dữ liệu của phiếu sự cố.
+Kết quả 19/10: bộ test đầy đủ `TẤT CẢ ĐẠT`; Chromium đạt 80 kiểm tra ở PC/tablet/mobile, gồm chọn lại cùng nguyên liệu và ba bước sửa phiếu QR/không QR; ranh giới engine/đường dẫn sạch.

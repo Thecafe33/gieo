@@ -21011,6 +21011,7 @@ let poReceiveState = { poId: null, supplier: '', lines: [], photoFiles: [], idem
 //           goodQty, damagedQty, unitFactor, wrongProduct, note }]
 
 async function openPoReceiveScreen() {
+  if (poReceiveState.submitting) { toast('⏳ Đang ghi nhận hàng, vui lòng đợi'); return; }
   showScreen('poReceiveScreen');
   poReceiveState = { poId: null, supplier: '', lines: [], photoFiles: [], idemKey: null };
   const box = document.getElementById('poReceiveBody');
@@ -21106,6 +21107,7 @@ function poLineQtyText(l, base) {
 }
 
 function poSelectPO(poId) {
+  if (poReceiveState.submitting) return;
   const po = (POS_PENDING_PO_CACHE || []).find(p => p.id === poId);
   if (!po) { toast('⚠️ Không tìm thấy đơn đặt hàng'); return; }
   poReceiveState.poId = poId;
@@ -21133,6 +21135,7 @@ function poSelectPO(poId) {
 // Chỉ khoá ở cửa vào: phiếu tự do đang ghi dở (bấm "Xác nhận" lại sau rớt mạng) không bị chặn.
 // Đơn nhận một phần mà phần thiếu không về nữa: Quản lý "Đóng đơn (thiếu)" thì nút mở lại.
 async function poSelectFree() {
+  if (poReceiveState.submitting) return;
   let pos = POS_PENDING_PO_CACHE || [];
   try {
     const snap = await fstore.collection('purchase_orders_gieogieo').where('status', 'in', ['pending', 'partial']).get();
@@ -21205,12 +21208,12 @@ function dsRenderItemPickerList(q) {
 // [MỚI-DS] Bấm "+ Thêm nguyên liệu" giờ MỞ THẲNG popup chọn (giữa màn hình), không còn
 // tự động gán đại nguyên liệu ĐẦU TIÊN còn trống rồi bắt nhân viên tự sửa lại trong một
 // cái <select> nhỏ xíu — dễ nấu sót/gõ nhầm số vào đúng dòng nhưng sai nguyên liệu.
-// Nhận theo đơn vị vật lý nhỏ nhất được dán mã, KHÔNG tự chọn kiện lớn nhất.
-// VD 1 Bịch = 2.000g, 1 Thùng = 12.000g: gõ 6 phải là 6 Bịch, không phải 6 Thùng.
+// Chỉ dùng mặc định lúc THÊM nguyên liệu mới, không dùng để dựng lại đơn vị đã chọn.
+// Giữ mặc định bao bì lớn nhất như trước; khi nhân viên chọn Bịch/Chai/Lon/... phải giữ
+// đúng lựa chọn đó đến hết lượt nhận, không tự quay về mặc định khi chọn lại cùng món.
 function poReceiveDefaultUnit(item) {
   const packs = (item.packagingUnits || []).filter(p => p.name && Number.isFinite(Number(p.baseQty)) && Number(p.baseQty) > 0);
-  const counted = packs.find(p => p.name === item.countUnitName);
-  const p = counted || packs.reduce((a, b) => !a || Number(b.baseQty) < Number(a.baseQty) ? b : a, null);
+  const p = packs.reduce((a, b) => !a || Number(b.baseQty) > Number(a.baseQty) ? b : a, null);
   return p ? { name: p.name, baseQty: Number(p.baseQty) } : { name: item.unit, baseQty: 1 };
 }
 function poReceiveUnitOptions(l) {
@@ -21248,6 +21251,7 @@ function poReceivePreviewHtml(l) {
     + (q.damagedBase > 0 ? `<span class="ds-chip bad">Hỏng ${fmtPrepQty(l.damagedQty)} ${unit} · ${fmtPrepQty(q.damagedBase)} ${baseUnit}</span>` : '') + tags;
 }
 function poReceiveAddFreeLine() {
+  if (poReceiveState.submitting) return;
   if (!KHO_ITEMS_CACHE.length) { toast('⚠️ Chưa tải được danh sách nguyên liệu'); return; }
   const usedIds = poReceiveState.lines.map(l => l.itemId);
   dsOpenItemPicker({
@@ -21255,6 +21259,7 @@ function poReceiveAddFreeLine() {
     items: KHO_ITEMS_CACHE.filter(x => x.active !== false),   // [NGỪNG SỬ DỤNG] Quản lý đã ngừng → không nhập mới
     excludeIds: usedIds,
     onPick(it) {
+      if (poReceiveState.submitting) return;
       const receivingUnit = poReceiveDefaultUnit(it);
       poReceiveState.lines.push({
         itemId: it.id, name: it.name, unit: it.unit, packagingUnits: it.packagingUnits || [],
@@ -21265,6 +21270,7 @@ function poReceiveAddFreeLine() {
   });
 }
 function poReceiveRemoveLine(idx) {
+  if (poReceiveState.submitting) return;
   // [BUG#33 FIX] Dòng đã vào kho thì xoá khỏi form là tạo ra một phiếu nhận không kể hết những gì
   // đã thật sự nhận (và `partial` tính sai theo). Sửa/huỷ phần đã vào kho là việc của
   // Quản lý ▸ Sửa phiếu nhận.
@@ -21275,12 +21281,18 @@ function poReceiveRemoveLine(idx) {
   }
   const card = document.querySelector('[data-po-card="' + idx + '"]');
   if (card) card.classList.add('leaving');
-  setTimeout(() => { poReceiveState.lines.splice(idx, 1); renderPoReceiveForm(); }, 140);
+  setTimeout(() => {
+    if (poReceiveState.submitting) { if (card) card.classList.remove('leaving'); return; }
+    const current = poReceiveState.lines.indexOf(l);
+    if (current >= 0) poReceiveState.lines.splice(current, 1);
+    renderPoReceiveForm();
+  }, 140);
 }
 // [MỚI-DS] Đổi nguyên liệu của một dòng — mở popup chọn thay vì đổi <select> tại chỗ, và
 // (mới) áp cùng khoá "đã vào kho thì không sửa nữa" mà poReceiveRemoveLine() đã có, vì đổi
 // itemId của một dòng đã ghi kho để lại đúng cùng một kiểu chứng từ mồ côi như xoá dòng đó.
 function poReceiveOpenItemPicker(idx) {
+  if (poReceiveState.submitting) return;
   const l = poReceiveState.lines[idx];
   if (l && (poReceiveState.appliedLines || {})[l.itemId]) {
     toast('⚠️ Dòng này đã vào kho ở lượt trước — không đổi nguyên liệu được. Dùng Quản lý ▸ Sửa phiếu nhận nếu cần sửa.');
@@ -21295,6 +21307,7 @@ function poReceiveOpenItemPicker(idx) {
   });
 }
 function poReceiveLineChangeItem(idx, itemId) {
+  if (poReceiveState.submitting) return;
   const it = KHO_ITEMS_CACHE.find(x => x.id === itemId); if (!it) return;
   // [BUG#31 FIX] Xem chú thích ở poReceiveAddFreeLine() — hai dòng cùng itemId làm dòng sau bị
   // bỏ qua khi ghi kho. Popup chọn đã tự loại nguyên liệu trùng khỏi danh sách (excludeIds), nên
@@ -21304,6 +21317,10 @@ function poReceiveLineChangeItem(idx, itemId) {
     return;
   }
   const l = poReceiveState.lines[idx];
+  // Chọn lại CÙNG món là giữ nguyên dòng, tuyệt đối không reset về đơn vị mặc định.
+  // Bản cũ giữ goodQty=6 nhưng gán unitFactor=Thùng -> 72.000g, sinh 36 mã Bịch.
+  if (!l || l.itemId === it.id) return;
+  if ((poReceiveState.appliedLines || {})[l.itemId]) { toast('⚠️ Dòng này đã vào kho — không đổi nguyên liệu ở lượt thử lại'); return; }
   const receivingUnit = poReceiveDefaultUnit(it);
   l.itemId = it.id; l.name = it.name; l.unit = it.unit; l.packagingUnits = it.packagingUnits || [];
   l.unitFactor = receivingUnit.baseQty;
@@ -21314,6 +21331,7 @@ function poReceiveLineChangeItem(idx, itemId) {
 // toàn bộ; goodQty/damagedQty/note chỉ cập nhật đúng phần xem trước để KHÔNG mất focus
 // đang gõ dở trên chính ô đó.
 function poReceiveLineChangeField(idx, field, val) {
+  if (poReceiveState.submitting) return;
   const l = poReceiveState.lines[idx];
   if (field === 'goodQty' || field === 'damagedQty') { l[field] = Number(val) || 0; poReceiveRefreshLinePreview(idx); return; }
   if (field === 'unitFactor') {
@@ -21330,6 +21348,7 @@ function poReceiveLineChangeField(idx, field, val) {
   if (field === 'note') { l.note = val; return; }
 }
 function poReceiveStepQty(idx, field, dir) {
+  if (poReceiveState.submitting) return;
   const l = poReceiveState.lines[idx];
   l[field] = Math.max(0, round2((Number(l[field]) || 0) + dir));
   renderPoReceiveForm();
@@ -21413,6 +21432,7 @@ function poReceiveStepperHtml(idx, field, val, disabled) {
 }
 // Quay lại danh sách đơn; đã gõ số lượng thì hỏi trước để không mất dữ liệu đang nhập.
 async function poReceiveBack() {
+  if (poReceiveState.submitting) { toast('⏳ Đang ghi nhận hàng, vui lòng đợi'); return; }
   const dirty = (poReceiveState.lines || []).some(l => (Number(l.goodQty) || 0) > 0 || (Number(l.damagedQty) || 0) > 0 || l.wrongProduct || l.note);
   if (dirty && !(await posConfirm('Quay lại danh sách đơn?\nSố lượng đã nhập ở màn này sẽ mất.', { okText: 'Quay lại', cancelText: 'Ở lại' }))) return;
   openPoReceiveScreen();
@@ -21549,11 +21569,27 @@ async function poReceiveMergeRecord(recordRef, o) {
 
 async function submitPoReceive() {
   if (_posSubmitBusy) { toast('⏳ Đang xử lý, vui lòng đợi giây lát...'); return; }
+  const state = poReceiveState;
+  const body = document.getElementById('poReceiveBody');
   _posSubmitBusy = true;
-  try { await _submitPoReceiveImpl(); } finally { _posSubmitBusy = false; }
+  state.submitting = true;
+  if (body) body.inert = true;
+  try { await _submitPoReceiveImpl(); }
+  finally {
+    state.submitting = false;
+    if (body) body.inert = false;
+    _posSubmitBusy = false;
+  }
 }
 async function _submitPoReceiveImpl() {
-  const lines = poReceiveState.lines;
+  // Chụp lựa chọn NGAY LÚC BẤM, trước await kiểm tra nhân viên/ghi kho. Không giữ
+  // tham chiếu dòng và quy cách có thể đổi giữa lúc chờ rồi đọc lại ở bước cuối.
+  const lines = poReceiveState.lines.map(l => ({ ...l,
+    packagingUnits: (l.packagingUnits || []).map(p => ({ ...p })) }));
+  const receiptItems = new Map(lines.map(l => {
+    const it = KHO_ITEMS_CACHE.find(x => x.id === l.itemId);
+    return [l.itemId, it ? { ...it, packagingUnits: (it.packagingUnits || []).map(p => ({ ...p })) } : null];
+  }));
   if (!lines.length) { toast('⚠️ Chưa có nguyên liệu nào'); return; }
   const staffEmp = await resolveStaffPinAndCheckin('poReceiveStaff');
   if (!staffEmp) return;
@@ -21613,7 +21649,7 @@ async function _submitPoReceiveImpl() {
   // khi chưa có gì được ghi. Dòng đã vào kho ở lượt trước thì bỏ qua (đã bị chốt ở trên).
   const temChan = computed.map(l => {
     if (daGhi[l.itemId] || !(l.goodBase > 0)) return null;
-    const it = KHO_ITEMS_CACHE.find(x => x.id === l.itemId);
+    const it = receiptItems.get(l.itemId);
     if (!it || it.stockManaged === false || it.trackingMode !== 'unit') return null;
     const isDiscrete = String(it.unit || '').trim().toLowerCase() === 'cái';
     const pk = (it.packagingUnits || []).find(p => p.name === it.countUnitName);
@@ -21764,7 +21800,7 @@ async function _submitPoReceiveImpl() {
     try {
       for (const l of succeeded) {
         if (!(l.goodBase > 0)) continue;
-        const it = KHO_ITEMS_CACHE.find(x => x.id === l.itemId);
+        const it = receiptItems.get(l.itemId);
         if (!it) continue;
         const made = await UnitEngine.lifecycle.createFromReceipt({
           item: it, qtyBase: l.goodBase, staff, staffEmployeeId: staffEmp.id, refId: recordRef.id,
@@ -21780,7 +21816,7 @@ async function _submitPoReceiveImpl() {
     // chốt lại theo tổng mã (tem sinh thiếu thì tồn thiếu đúng phần đó, bấm Ghi nhận lại để
     // sinh nốt — idPrefix cố định nên không sinh trùng).
     for (const l of succeeded) {
-      const it = KHO_ITEMS_CACHE.find(x => x.id === l.itemId);
+      const it = receiptItems.get(l.itemId);
       if (UnitEngine.classify.isTemTracked(it)) await UnitEngine.stock.recompute(l.itemId, STOCK_CONTAINERS_COLL).catch(() => {});
     }
     // [MỚI — đóng vòng "phiếu nhận ↔ tem"] Tem đã có receiveRefId trỏ NGƯỢC về phiếu nhận, nhưng
