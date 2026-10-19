@@ -9,6 +9,8 @@ for (const ten of Object.keys(kq)) {
   chk(JSON.stringify(co) === JSON.stringify(can), 'ban_deploy/' + ten + ': đủ đúng các file (thiếu / thừa → chạy node tools/tao_bo_deploy.js)');
   const lech = can.filter(f => co.includes(f) && !fs.readFileSync(path.join(dir, f)).equals(Buffer.from(kq[ten][f])));
   chk(!lech.length, 'ban_deploy/' + ten + ': nội dung khớp file gốc' + (lech.length ? ' — lệch: ' + lech.join(', ') + ' (chạy node tools/tao_bo_deploy.js)' : ''));
+  const eng=require('./lib/engine_file'),n=Number(/v(\d+)/.exec(eng)[1]);
+  chk(n<2 || !!kq[ten]['unit_engine.v'+(n-1)+'.js'], 'ban_deploy/'+ten+': giữ engine trước để quay lui/HTML cũ');
 }
 const s = (ten, f) => String(kq[ten][f] || '');
 chk(['pos.html', 'PosX.html', 'posgieo.html', 'kiosk.html', 'index.html', 'posgieo_thu.html'].every(f => !/gau_noel_giangsinh/.test(s('thuong', f)) && !/lixi\.v\d/.test(s('thuong', f))), 'bản thường: không Gấu Noel, không lì xì');

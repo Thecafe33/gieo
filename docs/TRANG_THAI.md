@@ -1,5 +1,7 @@
 # Hiện trạng dự án — cập nhật 19/10/2026
 
+**19/10 — Rà kho/FIFO nâng cao, engine v19 (chưa deploy)**: chạy bộ cũ và kịch bản lỗi sau commit. Xác minh ba biểu hiện: mất ACK khi mở mã gánh nợ làm nợ bị tính hai lần (800ml -> 600ml), retry báo hết dùng form cũ (100ml -> hao hụt 500ml), gọi lại báo hết ghi WASTE trùng. v19 giữ dấu chuyển nợ trong RT, báo hết lưu số thật trước khi ghi sổ, WASTE theo txId cố định; xử lý tiếp được sau lỗi/tải lại, giữ người/lý do gốc. POS và Quản lý cùng trỏ v19, v18 nguyên vẹn. Kiểm 21 kịch bản nâng cao và mô hình 200 bước; bộ snapshot gốc giữ nguyên, phần chênh 5 nhánh v19 lưu riêng. Không thêm listener/bảng, không tăng truy vấn luồng bán bình thường. Chi tiết `docs/KHO_FIFO_NANG_CAO.md`.
+
 **19/10 — Giữ đúng đơn vị đã nhập khi nhận hàng / sửa phiếu**: chủ quán xác nhận chọn 6 Bịch nhưng sinh 36 mã; ảnh đã sửa 72.000g -> 12.000g, huỷ 30 mã. Tái hiện nhánh chọn lại cùng nguyên liệu tự reset hệ số về Thùng và giữ số 6 trên mã cũ. Nay giữ nguyên dòng khi chọn lại cùng món; snapshot trước await, khoá sửa form đang nhận, kiểm/sinh mã cùng quy cách. Trả mặc định thêm mới về như trước (bản vá đầu đổi mặc định chưa đúng trọng tâm). Màn sửa: QR dùng đơn vị kiểm kê trên mã; không QR dùng đúng đơn vị đã nhập trên phiếu, không suy từ danh mục; phiếu cũ thiếu metadata phải chọn rõ. Số g/ml chỉ đối chiếu phụ. Không tăng đọc Firebase, không sửa engine hoặc dữ liệu thật. Chi tiết `docs/NHAN_HANG_DON_VI.md`. Chưa deploy Hosting.
 
 **19/10 — Sửa mật độ Quản lý PC TC33**: phản hồi thực tế bản trước chỉ thấy 1–2 món. Thanh Thêm/tìm/nhóm một hàng, công cụ chỉ mở khi bấm ngay trong thanh; hàng món gọn, hai giá cùng dòng, danh sách rộng theo viewport. Kiểm số hàng nhìn trọn trên cùng 34 món: 1024×600 từ 1 lên 6; 1366×768 từ 2 lên 9. Form vẫn đủ ô, kiểm thêm 820×600. Chi tiết và giới hạn đo trong `docs/POS_QUAN_LY_PC.md`. Chưa deploy Hosting.
@@ -39,10 +41,10 @@
 
 | Thành phần | Bản | Ghi chú |
 |---|---|---|
-| Engine kho | `unit_engine.v18.js` (01/10/2026) | v1–v17 giữ để quay lui — **không sửa, không xoá** (cache immutable). Danh sách: `tools/engine_releases.txt` |
+| Engine kho | `unit_engine.v19.js` (19/10/2026, chưa deploy) | v1–v18 giữ để quay lui — **không sửa, không xoá** (cache immutable). Danh sách: `tools/engine_releases.txt` |
 | Lớp đường dẫn | `data_access.v9.js` (16/10 = v8 + tên Gấu Noel; v8 đánh dấu ngày lãi/lỗ bị đổi; các bản cũ giữ quay lui) | đa cửa hàng Bước 1 + 2 + 3 (withStore cho Xem tất cả) — 2 app nạp trước engine; danh mục NL/BTP theo quán + đồng bộ; đăng nhập cửa hàng; kiểm bằng `node tools/check_paths.js` |
-| App bán hàng | `posgieo.html` | trỏ v18 |
-| App quản lý | `quanlygieo.html` | trỏ v18 |
+| App bán hàng | `posgieo.html` | trỏ v19 (chưa deploy) |
+| App quản lý | `quanlygieo.html` | trỏ v19 (chưa deploy) |
 | Chế độ thử | `che_do_thu.v1.js` + `posgieo_thu.html`, `quanlygieo_thu.html` | sinh lại bằng `node tools/tao_ban_thu.js .` sau **mỗi** lần sửa HTML |
 | Bộ tính lãi/lỗ | `lai_lo.v5.js` | sinh từ quanlygieo; giữ v1/v2/v3/v4 immutable cho HTML cũ |
 | Test | `sh tests/run_all.sh` | 93 file `tests/*.test.js`, chỉ cần `node` |

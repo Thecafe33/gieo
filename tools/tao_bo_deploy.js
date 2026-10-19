@@ -52,6 +52,14 @@ function dung() {
     // HTML cũ còn trong cache vẫn xin các bộ tính immutable đã phát hành.
     if([...js].some(f=>/^lai_lo\.v\d+\.js$/.test(f)))
       fs.readdirSync(ROOT).filter(f=>/^lai_lo\.v\d+\.js$/.test(f)).forEach(f=>js.add(f));
+    // Giữ engine liền trước cho HTML còn cache và để quay lui khi phát hành bản mới.
+    for(const f of [...js]) {
+      const m = /^unit_engine\.v(\d+)\.js$/.exec(f);
+      if(m && Number(m[1])>1) {
+        const old='unit_engine.v'+(Number(m[1])-1)+'.js';
+        if(fs.existsSync(path.join(ROOT,old))) js.add(old);
+      }
+    }
     for (const f of [...js].sort()) {
       if (!fs.existsSync(path.join(ROOT, f))) throw new Error(ten + ': app nạp ' + f + ' nhưng repo không có file này');
       files[f] = fs.readFileSync(path.join(ROOT, f));

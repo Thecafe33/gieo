@@ -6,7 +6,7 @@ Hai app một file HTML (không build step), Firebase compat 10.13.2, project `t
 |---|---|
 | `posgieo.html` | App bán hàng (chạy trong APK bọc web) |
 | `quanlygieo.html` | App quản lý |
-| `unit_engine.v18.js` | Engine kho theo tem/lô dùng chung 2 app (v1–v17 giữ để quay lui) |
+| `unit_engine.v19.js` | Engine kho theo tem/lô dùng chung 2 app (v1–v18 giữ để quay lui; v19 chưa deploy) |
 | `che_do_thu.v1.js`, `*_thu.html` | Chế độ thử trên bản sao dữ liệu thật |
 | `tests/` | `sh tests/run_all.sh` (chỉ cần node) |
 | `tools/` | kiểm ranh giới engine, predeploy, sinh bản thử, kiểm kê AST |

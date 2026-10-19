@@ -1,6 +1,6 @@
-# Unit Engine — tài liệu API (bản hiện hành `unit_engine.v18.js`; v1–v17 giữ để quay lui)
+# Unit Engine — tài liệu API (bản hiện hành `unit_engine.v19.js`; v1–v18 giữ để quay lui)
 
-> Phần API bên dưới viết ở v7; thay đổi từ v8 → v18 ghi theo từng mục cuối file.
+> Phần API bên dưới viết ở v7; thay đổi từ v8 → v19 ghi theo từng mục cuối file.
 
 > Viết ở E5 (28/09/2026), cập nhật E6. Kế hoạch gốc: `docs/KE_HOACH_UNIT_ENGINE_DA_CUA_HANG.md`.
 > Bảng ghi của E0 (trước khi tách): `docs/BANG_GHI_ENGINE.md`.
@@ -350,3 +350,12 @@ Giới hạn còn lại: kiểm dấu huỷ cho hoàn do sửa topping nằm nga
 - Cờ `prepWholePack: true` trên `inventory_items_gieogieo` (Quản lý: ô "Nấu dùng nguyên {gói}" ở khung tem, chỉ hiện khi có tem và quy cách kiểm kê > 1 đơn vị cơ bản). Ví dụ bí đao: đơn vị `g`, `countUnitName:'gói'`, `packagingUnits:[{name:'gói', baseQty:600}]`.
 - POS `prepWholePackSize(item)` (> 0 = loại này) → NL đi CỔNG QUÉT như cái rời, không vào đối chiếu cân (`prepReconRows` loại ra): số gói = lượng công thức × số mẻ ÷ quy cách; chỉ nhận tem `sealed` có `baseQty` đúng quy cách; chốt bằng `lifecycle.finishAtomic` (engine dùng chung, gỡ RT + suy lại tồn). Sổ kho: một dòng CONSUMPTION `deriveFromUnits` + `atomicScanned` như cái rời; Chi tiết lô ghi mỗi gói `qty = baseQty`. Huỷ mẻ: `reverseAtomicFinish` trả gói về `sealed`.
 - Số mẻ phải ra tròn gói: `prepCountQuantityError` chặn, `prepSugRatioOk` (chép y hệt ở 2 app) không gợi ý số mẻ lẻ gói.
+
+
+## Kho/FIFO v19 — 19/10/2026 (chưa deploy)
+
+- `lifecycle.open`: `_fifoCarry` lưu cùng transaction RT chuyển nợ, gồm mã thao tác và các nguồn. Mất ACK hoặc lỗi đóng Firestore không làm mất nguồn nợ. Chốt nguồn qua transaction, giữ lịch sử người báo hết; chỉ gỡ dấu sau khi Firestore xong. Dấu được mang tiếp nếu mã mới lại âm và được mã sau hấp thụ.
+- `stock.recompute`: nguồn nợ đã chuyển theo dấu RT không bị cộng lại ở nhánh Firestore open mồ côi. BTP giữ quy tắc lô mới không gánh nợ cũ.
+- `lifecycle.finish`: `_finishPending` giữ số RT/người/lý do thật trước khi chốt, WASTE `finish_{containerId}_WASTE` chống lặp. Số dương chờ hoàn tất không được phân bổ tiếp; lỗi giữ trạng thái để bấm lại. Chỉ đóng mã sau khi ghi WASTE xong, mã đã finished không ghi thêm WASTE. RT mất mà mã còn open và không có dấu thì dừng đối soát, không dùng số form.
+- API công khai giữ nguyên. Luồng bán bình thường không thêm đọc/listener; thêm 1 đọc doc ở thao tác báo hết và xác nhận nguồn khi mở mã gánh nợ. Không thêm collection hay sửa dữ liệu thật trong lượt phát triển.
+- Chi tiết, giới hạn và kiểm thử: `docs/KHO_FIFO_NANG_CAO.md`.

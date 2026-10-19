@@ -13,6 +13,10 @@ const { loadCore } = require('./lib/core_loader');
 const SNAP = path.join(__dirname, 'snapshots', 'core.json');
 const hasEngine = fs.existsSync(path.join(__dirname, '..', require('./lib/engine_file')));
 const kind = process.env.CORE || (hasEngine ? 'engine' : 'html');
+// v19 đổi có chủ ý 5 nhánh mở/báo hết. Giữ ảnh v18 gốc; chỉ lưu phần chênh đã
+// kiểm chứng bằng kho_fifo_nang_cao, mọi kịch bản khác vẫn so nguyên ảnh cũ.
+const v19 = kind === 'engine' && Number(/v(\d+)/.exec(require('./lib/engine_file'))[1]) >= 19;
+const V19_SNAP = path.join(__dirname, 'snapshots', 'core.v19.json');
 const C = 'stock_containers_gieogieo', PB = 'prep_batches_gieogieo', INV = 'inventory_items_gieogieo', PI = 'prep_items_gieogieo';
 const ITEM = { id: 'X', name: 'Sữa', unit: 'ml', trackingMode: 'unit', countUnitName: 'Hộp', packagingUnits: [{ name: 'Hộp', baseQty: 1000 }] };
 const ATOM = { id: 'K', name: 'Kit', unit: 'cái', trackingMode: 'unit', countUnitName: 'Cái', packagingUnits: [{ name: 'Cái', baseQty: 1 }] };
@@ -144,6 +148,16 @@ async function runOne(name) {
 (async () => {
   const out = {};
   for (const name of Object.keys(S)) out[name] = await runOne(name);
+  if (process.env.UPDATE_V19 === '1' && v19) {
+    const old = JSON.parse(fs.readFileSync(SNAP, 'utf8')), patch = {};
+    const allowed = new Set(['O1_mo_hap_thu_no','F1_bao_het_du','F2_bao_het_am','F3_bao_het_trong_me','F4_bao_het_loi_rt']);
+    for (const name of Object.keys(out)) if (JSON.stringify(out[name]) !== JSON.stringify(old[name])) {
+      if (!allowed.has(name)) throw new Error('v19 đổi ngoài phạm vi đã duyệt: ' + name);
+      patch[name] = out[name];
+    }
+    fs.writeFileSync(V19_SNAP, JSON.stringify(patch, null, 1));
+    console.log('ALL PASS — đã ghi phần chênh v19, giữ nguyên core.json'); return;
+  }
   if (!fs.existsSync(SNAP) || process.env.UPDATE === '1') {
     fs.mkdirSync(path.dirname(SNAP), { recursive: true });
     fs.writeFileSync(SNAP, JSON.stringify(out, null, 1));
@@ -152,6 +166,7 @@ async function runOne(name) {
     return;
   }
   const golden = JSON.parse(fs.readFileSync(SNAP, 'utf8'));
+  if (v19) Object.assign(golden, JSON.parse(fs.readFileSync(V19_SNAP, 'utf8')));
   let ok = true;
   for (const name of Object.keys(S)) {
     const a = JSON.stringify(out[name]), b = JSON.stringify(golden[name]);

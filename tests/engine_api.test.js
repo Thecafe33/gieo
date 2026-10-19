@@ -36,6 +36,11 @@ const code = async p => { try { await p; return 'OK'; } catch (e) { return e.cod
   eq(UE.units.fifoPendingFromRt({ X: { u1: { code: 'C1', unitBase: 0, openedAt: 5 }, u2: { unitBase: 3 }, u3: { unitBase: -1, finishedDebt: true }, __prepLock: {} }, P: { b: { unitBase: -1 } } }, ['X']).map(x => x.code), ['C1'], 'fifoPendingFromRt');
   // Hằng số engine phải khớp hằng số còn giữ trong app
   const html = fs.readFileSync(path.resolve(__dirname, '..', 'posgieo.html'), 'utf8');
+  for(const app of ['posgieo.html','quanlygieo.html']) {
+    const source=fs.readFileSync(path.resolve(__dirname,'..',app),'utf8');
+    const refs=[...source.matchAll(/\bsrc="(unit_engine\.v\d+\.js)/g)].map(m=>m[1]);
+    eq(refs.length>=2 && refs.every(f=>f===require('./lib/engine_file')),true,app+': nạp chính và retry cùng engine mới nhất');
+  }
   for (const [k, v] of Object.entries({ STOCK_CONTAINERS_COLL: UE.consts.STOCK_CONTAINERS_COLL, STOCK_ANOMALY_COLL: UE.consts.STOCK_ANOMALY_COLL, PREP_RECON_LOCK_COLL: UE.consts.PREP_RECON_LOCK_COLL })) {
     const m = new RegExp('const ' + k + "\\s*=\\s*'([^']+)'").exec(html);
     eq(m && m[1], v, 'hằng ' + k + ' khớp POS');
