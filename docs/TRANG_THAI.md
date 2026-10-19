@@ -1,5 +1,7 @@
 # Hiện trạng dự án — cập nhật 19/10/2026
 
+**19/10 — Nhận hàng POS Gieo sai Bịch/Thùng**: nhận tự do trước đây tự chọn bao bì lớn nhất (Thùng), ô số lượng không ghi đơn vị; tái hiện 6 bịch trân châu thành 6 thùng. Nay mặc định đơn vị đếm/dán mã, thiếu thì bao bì nhỏ nhất; ô tốt/hỏng ghi rõ đơn vị và xem trước lượng nền + số mã NL. Đổi đơn vị/nguyên liệu xoá số cũ, nhận vượt đơn phải xác nhận rõ. Giữ nguyên quy cách đơn đặt, engine v18 và chống ghi đúp; thêm đơn vị/số nhập gốc vào phiếu nhận. Test tích hợp POS thật + engine thật trên Firebase giả: 6 Bịch hoặc 1 Thùng đều = 12.000g, 6 mã Bịch; có hàng hỏng/thử lại/lượng sai. Không tự sửa phiếu hay tem thật đã sai. Hướng khắc phục: `docs/NHAN_HANG_DON_VI.md`. Chưa deploy Hosting.
+
 **19/10 — Sửa mật độ Quản lý PC TC33**: phản hồi thực tế bản trước chỉ thấy 1–2 món. Thanh Thêm/tìm/nhóm một hàng, công cụ chỉ mở khi bấm ngay trong thanh; hàng món gọn, hai giá cùng dòng, danh sách rộng theo viewport. Kiểm số hàng nhìn trọn trên cùng 34 món: 1024×600 từ 1 lên 6; 1366×768 từ 2 lên 9. Form vẫn đủ ô, kiểm thêm 820×600. Chi tiết và giới hạn đo trong `docs/POS_QUAN_LY_PC.md`. Chưa deploy Hosting.
 
 **19/10 — Làm lại toàn bộ Quản lý PC TC33**: thay đổi cả danh sách và workspace của Menu/Quà tặng/Màn hình phụ/Tem in/Máy in; tìm/lọc tại máy, thẻ có tên/giá M-L/dấu chọn, quà gom nhóm, slide đánh số và chọn, preview đặt cạnh cấu hình in. Nút in tách khỏi vùng cuộn. Chỉ năm pane thường nhận CSS mới; Gấu Noel/Lì xì đối chiếu giữ nguyên layout. Chi tiết `docs/POS_QUAN_LY_PC.md`. Chưa deploy Hosting.

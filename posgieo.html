@@ -798,6 +798,9 @@ body.assist-main-on .toast{bottom:calc(100px + var(--assist-h, 0px) + 10px);}
 .ds-seg button{flex:1;border:none;background:none;font-family:'Google Sans',sans-serif;padding:9px 8px;border-radius:11px;
   font-size:12.5px;font-weight:700;color:var(--ds-ink60);cursor:pointer;white-space:nowrap;}
 .ds-seg button.on{background:#fff;color:var(--td);box-shadow:0 1px 3px var(--ds-shadow);}
+#poReceiveScreen .ds-seg{flex-wrap:wrap;}
+#poReceiveScreen .ds-seg button{min-width:0;white-space:normal;overflow-wrap:anywhere;}
+#poReceiveScreen .ds-qty-box .lbl{white-space:normal;overflow-wrap:anywhere;}
 
 .ds-qty-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;margin-bottom:14px;}   /* minmax(0,…): hai ô luôn bằng nhau, không bị ô nhập số đẩy rộng ra */
 .ds-qty-box{background:var(--ds-card2);border-radius:16px;padding:10px 6px 12px;text-align:center;min-width:0;}
@@ -21202,6 +21205,48 @@ function dsRenderItemPickerList(q) {
 // [MỚI-DS] Bấm "+ Thêm nguyên liệu" giờ MỞ THẲNG popup chọn (giữa màn hình), không còn
 // tự động gán đại nguyên liệu ĐẦU TIÊN còn trống rồi bắt nhân viên tự sửa lại trong một
 // cái <select> nhỏ xíu — dễ nấu sót/gõ nhầm số vào đúng dòng nhưng sai nguyên liệu.
+// Nhận theo đơn vị vật lý nhỏ nhất được dán mã, KHÔNG tự chọn kiện lớn nhất.
+// VD 1 Bịch = 2.000g, 1 Thùng = 12.000g: gõ 6 phải là 6 Bịch, không phải 6 Thùng.
+function poReceiveDefaultUnit(item) {
+  const packs = (item.packagingUnits || []).filter(p => p.name && Number.isFinite(Number(p.baseQty)) && Number(p.baseQty) > 0);
+  const counted = packs.find(p => p.name === item.countUnitName);
+  const p = counted || packs.reduce((a, b) => !a || Number(b.baseQty) < Number(a.baseQty) ? b : a, null);
+  return p ? { name: p.name, baseQty: Number(p.baseQty) } : { name: item.unit, baseQty: 1 };
+}
+function poReceiveUnitOptions(l) {
+  const opts = [{ name: l.unit, baseQty: 1 }, ...(l.packagingUnits || [])];
+  // Đơn đặt giữ quy cách lúc đặt, kể cả danh mục hiện tại đã đổi.
+  if (l.orderUnitName && Number(l.orderUnitFactor) > 0 && !opts.some(p => Number(p.baseQty) === Number(l.orderUnitFactor)))
+    opts.push({ name: l.orderUnitName, baseQty: Number(l.orderUnitFactor) });
+  return opts.filter(p => p.name && Number.isFinite(Number(p.baseQty)) && Number(p.baseQty) > 0);
+}
+function poReceiveQuantities(l) {
+  const factor = Number(l.unitFactor);
+  const unit = poReceiveUnitOptions(l).find(p => Number(p.baseQty) === factor);
+  if (!unit) throw new Error(`"${l.name}": chọn lại đơn vị nhận hàng`);
+  const goodQty = Number(l.goodQty), damagedQty = Number(l.damagedQty);
+  if (![goodQty, damagedQty, goodQty * factor, damagedQty * factor].every(n => Number.isFinite(n) && n >= 0))
+    throw new Error(`"${l.name}": số lượng phải là số không âm hợp lệ`);
+  return { ...l, receiveUnitName: unit.name, unitFactor: factor,
+    goodBase: l.wrongProduct ? 0 : goodQty * factor,
+    damagedBase: l.wrongProduct ? 0 : damagedQty * factor };
+}
+function poReceivePreviewHtml(l) {
+  let q;
+  try { q = poReceiveQuantities(l); } catch (err) { return `<span class="ds-chip bad">${escHtmlPos(err.message)}</span>`; }
+  const unit = escHtmlPos(q.receiveUnitName);
+  const baseUnit = escHtmlPos(l.unit || '');
+  const it = KHO_ITEMS_CACHE.find(x => x.id === l.itemId);
+  const pk = it && (it.packagingUnits || []).find(p => p.name === it.countUnitName);
+  const countBase = pk && Number(pk.baseQty) > 0 ? Number(pk.baseQty) : (it && String(it.unit || '').trim().toLowerCase() === 'cái' ? 1 : 0);
+  const n = countBase > 0 ? q.goodBase / countBase : 0;
+  const tags = it && it.stockManaged !== false && it.trackingMode === 'unit' && q.goodBase > 0 && countBase > 0
+    ? (Math.abs(n - Math.round(n)) <= 1e-6
+      ? `<span class="ds-chip good">Tạo ${Math.round(n)} mã NL (${escHtmlPos(it.countUnitName || it.unit)})</span>`
+      : '<span class="ds-chip bad">Chưa tròn đơn vị dán mã — kiểm tra số lượng</span>') : '';
+  return `<span class="ds-chip good">Nhận ${fmtPrepQty(l.goodQty)} ${unit} · +${fmtPrepQty(q.goodBase)} ${baseUnit}</span>`
+    + (q.damagedBase > 0 ? `<span class="ds-chip bad">Hỏng ${fmtPrepQty(l.damagedQty)} ${unit} · ${fmtPrepQty(q.damagedBase)} ${baseUnit}</span>` : '') + tags;
+}
 function poReceiveAddFreeLine() {
   if (!KHO_ITEMS_CACHE.length) { toast('⚠️ Chưa tải được danh sách nguyên liệu'); return; }
   const usedIds = poReceiveState.lines.map(l => l.itemId);
@@ -21210,15 +21255,10 @@ function poReceiveAddFreeLine() {
     items: KHO_ITEMS_CACHE.filter(x => x.active !== false),   // [NGỪNG SỬ DỤNG] Quản lý đã ngừng → không nhập mới
     excludeIds: usedIds,
     onPick(it) {
-      // [FIX "nhập 1 lon thành 1g"] Mặc định đơn vị lớn nhất đã khai (Lon/Thùng/Chai...),
-      // không phải đơn vị pha chế (g/ml) — cùng lý do và cùng cách chọn với màn Kiểm kê
-      // (xem openStockCountScreen: "Mặc định chọn đơn vị LỚN NHẤT đã khai"). Nhân viên
-      // nhập hàng thực tế luôn đếm theo kiện (đơn vị pha chế chỉ dùng để TRỪ kho lúc pha),
-      // để mặc định là g/ml thì gõ "1" tưởng là 1 lon lại thành 1g, sai lệch cả nghìn lần.
-      const biggest = getBiggestPackagingUnitPOS(it);
+      const receivingUnit = poReceiveDefaultUnit(it);
       poReceiveState.lines.push({
         itemId: it.id, name: it.name, unit: it.unit, packagingUnits: it.packagingUnits || [],
-        qtyExpectedBase: null, goodQty: 0, damagedQty: 0, unitFactor: biggest ? biggest.baseQty : 1, wrongProduct: false, note: ''
+        qtyExpectedBase: null, goodQty: 0, damagedQty: 0, unitFactor: receivingUnit.baseQty, wrongProduct: false, note: ''
       });
       renderPoReceiveForm();
     }
@@ -21264,9 +21304,10 @@ function poReceiveLineChangeItem(idx, itemId) {
     return;
   }
   const l = poReceiveState.lines[idx];
-  const biggest = getBiggestPackagingUnitPOS(it);
+  const receivingUnit = poReceiveDefaultUnit(it);
   l.itemId = it.id; l.name = it.name; l.unit = it.unit; l.packagingUnits = it.packagingUnits || [];
-  l.unitFactor = biggest ? biggest.baseQty : 1; // [FIX] cùng lý do với poReceiveAddFreeLine()
+  l.unitFactor = receivingUnit.baseQty;
+  l.goodQty = 0; l.damagedQty = 0; // số cũ thuộc nguyên liệu/quy cách cũ
   renderPoReceiveForm();
 }
 // unitFactor/wrongProduct đổi cả hình dạng thẻ (bộ đếm bật/tắt, viền đỏ) nên render lại
@@ -21275,7 +21316,16 @@ function poReceiveLineChangeItem(idx, itemId) {
 function poReceiveLineChangeField(idx, field, val) {
   const l = poReceiveState.lines[idx];
   if (field === 'goodQty' || field === 'damagedQty') { l[field] = Number(val) || 0; poReceiveRefreshLinePreview(idx); return; }
-  if (field === 'unitFactor') { l.unitFactor = Number(val) || 1; renderPoReceiveForm(); return; }
+  if (field === 'unitFactor') {
+    const factor = Number(val);
+    if (!poReceiveUnitOptions(l).some(p => Number(p.baseQty) === factor) || factor === Number(l.unitFactor)) return;
+    if ((poReceiveState.appliedLines || {})[l.itemId]) { toast('⚠️ Dòng này đã vào kho — không đổi đơn vị ở lượt thử lại'); return; }
+    const hadQty = l.goodQty || l.damagedQty;
+    l.unitFactor = factor; l.goodQty = 0; l.damagedQty = 0;
+    renderPoReceiveForm();
+    if (hadQty) toast('Đã đổi đơn vị — nhập lại số lượng theo đơn vị mới');
+    return;
+  }
   if (field === 'wrongProduct') { l.wrongProduct = !!val; renderPoReceiveForm(); return; }
   if (field === 'note') { l.note = val; return; }
 }
@@ -21288,11 +21338,7 @@ function poReceiveRefreshLinePreview(idx) {
   const l = poReceiveState.lines[idx];
   const el = document.getElementById('polChips' + idx);
   if (!el || l.wrongProduct) return;
-  const factor = Number(l.unitFactor) || 1;
-  const goodBase = (Number(l.goodQty) || 0) * factor;
-  const dmgBase = (Number(l.damagedQty) || 0) * factor;
-  el.innerHTML = `<span class="ds-chip good">+${fmtPrepQty(goodBase)} ${escHtmlPos(l.unit || '')} tốt</span>`
-    + (dmgBase > 0 ? `<span class="ds-chip bad">${fmtPrepQty(dmgBase)} ${escHtmlPos(l.unit || '')} hư hỏng</span>` : '');
+  el.innerHTML = poReceivePreviewHtml(l);
 }
 
 function poReceiveOnPhotoChange(input) {
@@ -21320,20 +21366,18 @@ function renderPoReceivePhotoPreview() {
 // poReceiveUploadPhotos() vẫn giữ nguyên trong file, chỉ là không có gì gọi tới UI của
 // chúng nữa; bật lại UI này sau chỉ cần thêm lại đúng khối HTML gọi poReceiveOnPhotoChange.
 function poReceiveLineCardHtml(l, idx, isFree) {
-  const opts = [{ name: l.unit, baseQty: 1 }, ...(l.packagingUnits || [])];
+  const opts = poReceiveUnitOptions(l);
   const factor = Number(l.unitFactor) || 1;
-  const goodBase = (Number(l.goodQty) || 0) * factor;
-  const dmgBase = (Number(l.damagedQty) || 0) * factor;
+  const selectedUnit = (opts.find(p => Number(p.baseQty) === factor) || {}).name || '?';
   const segHtml = opts.map(o => {
     const on = Number(o.baseQty) === factor;
-    const label = Number(o.baseQty) > 1 ? `${String(o.name || '').split(' (')[0]} ·${o.baseQty}` : (o.name || '');
+    const label = Number(o.baseQty) > 1 ? `${o.name} = ${fmtPrepQty(Number(o.baseQty))} ${l.unit || ''}` : o.name;
     return `<button onclick="poReceiveLineChangeField(${idx},'unitFactor','${o.baseQty}')" class="${on ? 'on' : ''}">${escHtmlPos(label)}</button>`;
   }).join('');
   const chips = l.wrongProduct
     ? `<div class="ds-chips"><span class="ds-chip wrong">Sai sản phẩm — không cộng kho</span></div>`
     : `<div class="ds-chips" id="polChips${idx}">
-        <span class="ds-chip good">+${fmtPrepQty(goodBase)} ${escHtmlPos(l.unit || '')} tốt</span>
-        ${dmgBase > 0 ? `<span class="ds-chip bad">${fmtPrepQty(dmgBase)} ${escHtmlPos(l.unit || '')} hư hỏng</span>` : ''}
+        ${poReceivePreviewHtml(l)}
       </div>`;
   return `
   <div class="ds-card${l.wrongProduct ? ' wrong' : ''}" data-po-card="${idx}">
@@ -21349,21 +21393,21 @@ function poReceiveLineCardHtml(l, idx, isFree) {
     </div>`}
     ${opts.length > 1 ? `<div class="ds-seg">${segHtml}</div>` : ''}
     <div class="ds-qty-grid">
-      <div class="ds-qty-box good"><div class="lbl">Số lượng tốt</div>${poReceiveStepperHtml(idx, 'goodQty', l.goodQty, l.wrongProduct)}</div>
-      <div class="ds-qty-box bad"><div class="lbl">Hư hỏng</div>${poReceiveStepperHtml(idx, 'damagedQty', l.damagedQty, l.wrongProduct)}</div>
+      <div class="ds-qty-box good"><div class="lbl">Số ${escHtmlPos(selectedUnit)} tốt</div>${poReceiveStepperHtml(idx, 'goodQty', l.goodQty, l.wrongProduct)}</div>
+      <div class="ds-qty-box bad"><div class="lbl">Số ${escHtmlPos(selectedUnit)} hỏng</div>${poReceiveStepperHtml(idx, 'damagedQty', l.damagedQty, l.wrongProduct)}</div>
     </div>
     <label class="ds-wrongrow">
       <div class="wt"><b>Sai sản phẩm</b><span>Hàng giao không đúng — không cộng vào kho</span></div>
       <span class="ds-switch"><input type="checkbox" ${l.wrongProduct ? 'checked' : ''} onchange="poReceiveLineChangeField(${idx},'wrongProduct',this.checked)"><span class="track"></span><span class="knob"></span></span>
     </label>
     ${chips}
-    <input class="ds-note-input" placeholder="Ghi chú riêng (không bắt buộc)" value="${String(l.note || '').replace(/"/g, '&quot;')}" oninput="poReceiveLineChangeField(${idx},'note',this.value)">
+    <input class="ds-note-input" placeholder="Ghi chú riêng (không bắt buộc)" value="${escHtmlPos(l.note || '').split('"').join('&quot;')}" oninput="poReceiveLineChangeField(${idx},'note',this.value)">
   </div>`;
 }
 function poReceiveStepperHtml(idx, field, val, disabled) {
   return `<div class="ds-stepper">
     <button class="ds-stepbtn" onclick="poReceiveStepQty(${idx},'${field}',-1)" ${disabled ? 'disabled' : ''}>–</button>
-    <input class="ds-qtyval" type="number" inputmode="decimal" step="0.01" value="${val}" oninput="poReceiveLineChangeField(${idx},'${field}',this.value)" ${disabled ? 'disabled' : ''}>
+    <input class="ds-qtyval" type="number" inputmode="decimal" min="0" step="0.01" value="${val}" oninput="poReceiveLineChangeField(${idx},'${field}',this.value)" ${disabled ? 'disabled' : ''}>
     <button class="ds-stepbtn" onclick="poReceiveStepQty(${idx},'${field}',1)" ${disabled ? 'disabled' : ''}>+</button>
   </div>`;
 }
@@ -21541,12 +21585,9 @@ async function _submitPoReceiveImpl() {
   const recordRef = fstore.collection('receiving_records_gieogieo').doc(idemKey);
 
   // Tính base qty từng dòng trước, dùng lại cho cả ledger tx lẫn doc receiving_records + cập nhật PO.
-  const computed = lines.map(l => {
-    const factor = Number(l.unitFactor) || 1;
-    const goodBase = l.wrongProduct ? 0 : (Number(l.goodQty) || 0) * factor;
-    const damagedBase = l.wrongProduct ? 0 : (Number(l.damagedQty) || 0) * factor;
-    return { ...l, goodBase, damagedBase };
-  });
+  let computed;
+  try { computed = lines.map(poReceiveQuantities); }
+  catch (err) { toast('⚠️ ' + err.message); return; }
 
   // [BUG#33 FIX] Bấm lại SAU KHI một dòng đã vào kho, nhưng với SỐ KHÁC.
   // Kịch bản: lượt 1 dòng A ghi 10 thành công, dòng B lỗi → giữ form để bấm lại; nhân viên phát
@@ -21586,6 +21627,16 @@ async function _submitPoReceiveImpl() {
     return null;
   }).filter(Boolean);
   if (temChan.length) { toast('⚠️ ' + temChan[0]); return; }
+
+  // Đặt 1 thùng nhưng gõ 6 khi ô đang là Thùng: không âm thầm nhận gấp 6 lần.
+  // Vẫn cho giao dư thực tế, nhưng phải đọc lại số/đơn vị rõ ràng trước khi ghi kho.
+  const vuotDon = computed.filter(l => !daGhi[l.itemId] && l.qtyExpectedBase != null &&
+    l.goodBase > Math.max(0, Number(l.qtyExpectedBase) - (Number(l.receivedGoodBase) || 0)) + 1e-6);
+  if (vuotDon.length) {
+    const detail = vuotDon.map(l => `${l.name}: đang nhận ${fmtPrepQty(l.goodQty)} ${l.receiveUnitName} (${fmtPrepQty(l.goodBase)} ${l.unit}). Đơn còn ${poLineQtyText(l, Math.max(0, Number(l.qtyExpectedBase) - (Number(l.receivedGoodBase) || 0)))}.`).join('\n');
+    if (!(await posConfirm('Số lượng nhận vượt đơn đặt. Kiểm tra Bịch/Thùng trước khi tiếp tục.\n\n' + detail,
+      { okText: 'Đúng, nhận hàng dư', cancelText: 'Sửa số lượng' }))) return;
+  }
 
   try {
     const photoUrls = await poReceiveUploadPhotos(recordRef.id);
@@ -21656,6 +21707,8 @@ async function _submitPoReceiveImpl() {
           itemId: l.itemId, name: l.name, unit: l.unit,
           qtyExpectedBase: l.qtyExpectedBase != null ? l.qtyExpectedBase : null,
           qtyGoodBase: l.goodBase, qtyDamagedBase: l.damagedBase,
+          receiveUnitName: l.receiveUnitName, receiveUnitFactor: l.unitFactor,
+          qtyGoodReceived: Number(l.goodQty), qtyDamagedReceived: Number(l.damagedQty),
           wrongProduct: !!l.wrongProduct, note: l.note || '', status: 'completed'
         })),
         failedLines: lineOutcomes.filter(r => !r.ok).map(r => ({
