@@ -1,5 +1,7 @@
 # Hiện trạng dự án — cập nhật 19/10/2026
 
+**19/10 — Sửa mật độ Quản lý PC TC33**: phản hồi thực tế bản trước chỉ thấy 1–2 món. Thanh Thêm/tìm/nhóm một hàng, công cụ chỉ mở khi bấm ngay trong thanh; hàng món gọn, hai giá cùng dòng, danh sách rộng theo viewport. Kiểm số hàng nhìn trọn trên cùng 34 món: 1024×600 từ 1 lên 6; 1366×768 từ 2 lên 9. Form vẫn đủ ô, kiểm thêm 820×600. Chi tiết và giới hạn đo trong `docs/POS_QUAN_LY_PC.md`. Chưa deploy Hosting.
+
 **19/10 — Làm lại toàn bộ Quản lý PC TC33**: thay đổi cả danh sách và workspace của Menu/Quà tặng/Màn hình phụ/Tem in/Máy in; tìm/lọc tại máy, thẻ có tên/giá M-L/dấu chọn, quà gom nhóm, slide đánh số và chọn, preview đặt cạnh cấu hình in. Nút in tách khỏi vùng cuộn. Chỉ năm pane thường nhận CSS mới; Gấu Noel/Lì xì đối chiếu giữ nguyên layout. Chi tiết `docs/POS_QUAN_LY_PC.md`. Chưa deploy Hosting.
 
 **19/10 — Nhập món nhanh trên PC TC33**: chủ dự án xác nhận `pos.html` (ảnh TC33, không phải POS Gieo). Form Menu hai cột từ 769px; tên/phân loại, giá M/L, hàng màu và nút lưu cùng hiện trên màn PC. Gom các trường vào một widget, thu gọn thanh nhóm/header/footer; chế độ màn thấp ≤650px giảm đệm. Thứ tự DOM/Tab giữ tên → phân loại → M → L. Chỉ CSS, thêm class trình bày và rút gọn chú thích; tất cả script giống trước, không đổi lưu món/truy vấn. Bản thường/Tết/Giáng sinh sinh lại. Kiểm hiển thị đủ trường, không cuộn và nhập bằng Tab trên nhiều viewport. Chưa deploy Hosting.

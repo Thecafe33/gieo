@@ -9,7 +9,7 @@ mock+="\n__RT2.put('menu',[{name:'Bạc xỉu',type:'Cà phê',priceM:25000,pric
 const tw='document.head.insertAdjacentHTML("beforeend",'+JSON.stringify('<style>'+fs.readFileSync(process.env.TAILWIND_CSS||'/workspace/work/pos-manager/tailwind.css','utf8')+'</style>')+')';
 const server=require('http').createServer((req,res)=>{const f=path.resolve(ROOT,'.'+new URL(req.url,'http://localhost').pathname);if(!f.startsWith(ROOT+path.sep)||!fs.existsSync(f)){res.writeHead(404);return res.end()}res.setHeader('Content-Type',f.endsWith('.js')?'application/javascript':'text/html; charset=utf-8');res.end(fs.readFileSync(f))});
 (async()=>{await new Promise(r=>server.listen(0,'127.0.0.1',r));const base='http://127.0.0.1:'+server.address().port;const b=await chromium.launch({executablePath:'/usr/bin/chromium'});let n=0;const check=(v,m)=>{assert.ok(v,m);n++;console.log('ok '+m)};
-try{for(const [width,height]of [[1024,600],[1024,650],[1280,720],[1366,768],[1920,1080],[820,700],[390,844]]){
+try{for(const [width,height]of [[1024,600],[1024,650],[1280,720],[1366,768],[1920,1080],[820,600],[820,700],[390,844]]){
  const p=await b.newPage({viewport:{width,height}});p.on('dialog',d=>d.dismiss());
  await p.route('**/*',r=>{const u=r.request().url();if(u.includes('firebase-app-compat'))return r.fulfill({contentType:'application/javascript',body:mock});if(u.includes('firebasejs'))return r.fulfill({body:''});if(u.includes('cdn.tailwindcss.com'))return r.fulfill({body:tw});if(u.startsWith(base+'/'))return r.continue();return r.abort()});
  await p.goto(base+'/pos.html');await p.waitForTimeout(700);await p.evaluate(()=>switchView('discount'));await p.waitForTimeout(200);await p.evaluate(()=>menuEditorNewItem());

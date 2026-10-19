@@ -28,3 +28,22 @@ CSS mới chỉ áp qua `mgr-standard-panel` và các lớp con của đúng nă
 Chromium với Firebase giả: danh sách 34 món, tìm/lọc kết hợp, chọn đúng bản ghi, giá M/L, lưu đúng khoá gốc; quà theo loại/điều kiện; chọn slide; điều khiển nằm cạnh preview; không lỗi JS. Độ rộng 1024/1366/1920 và kiểm tra cơ bản điện thoại 390.
 
 So sánh kích thước, vị trí và style của Gấu Noel + Lì xì với HTML trước thay đổi trên 1280×720: giống nhau. Chạy lại test nhập món trên màn PC thấp và kiểm tra hồi quy toàn bộ; sinh bộ deploy thường/Tết/Giáng sinh. Chưa deploy Hosting.
+
+
+## 19/10 — Sửa mật độ danh sách sau phản hồi thực tế
+
+Bản thẻ trước dành quá nhiều chiều cao cho nút thêm, ô tìm kiếm/lọc và hai dòng giá. Đổi thành thanh tiêu đề một hàng với Thêm + nút tìm/nhóm. Hai công cụ mở ngay trong thanh này, không chiếm thêm chiều cao và không che các kết quả. Đóng bằng X, Esc hoặc bấm ngoài; tiêu chí vẫn có hiệu lực, nút có dấu để biết đang lọc. Esc chặn hành vi mặc định xoá chữ của input search.
+
+Hàng món có vạch màu nhỏ, tên tối đa hai dòng (hover xem đầy đủ), nhóm và giá M/L gọn trên một dòng. Giá ngắn dùng k, hover giá hiện tiền đầy đủ. Món hai size không tăng chiều cao so với tên tương đương. Nới tỷ lệ danh sách theo màn hình nhưng giữ form nhập hai cột; thu gọn công cụ tìm quà tương tự. Giữ bố cục các pane theo mùa.
+
+Đo bằng Chromium, cùng 34 món và cùng viewport, đếm hàng hiển thị hoàn toàn (không tính hàng bị cắt):
+
+| Viewport | Bản trước | Bản mới |
+|---|---:|---:|
+| 820×600 | 1 | 6 |
+| 1024×600 | 1 | 6 |
+| 1280×720 | 2 | 8 |
+| 1366×768 | 2 | 9 |
+| 1920×1080 | 5 | 14 |
+
+Số thực tế phụ thuộc độ dài tên và mức zoom. Test mới `e2e_pos_list_density.js` kiểm số hàng nhìn thấy, giá M/L cùng dòng, bộ lọc thu gọn và đúng kết quả khi phối hợp tìm/lọc. Test form mở rộng thêm 820×600 để tránh đổi tỷ lệ cột làm cắt bảng màu.
