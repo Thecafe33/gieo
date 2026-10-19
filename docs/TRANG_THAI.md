@@ -1,5 +1,7 @@
 # Hiện trạng dự án — cập nhật 19/10/2026
 
+**19/10 — Dropdown chọn điểm bán manage**: thay hộp thoại bằng menu neo dưới nút; tìm không dấu theo tên/mã/địa chỉ, chia thương hiệu, cuộn riêng cho >10 điểm, đánh dấu điểm đang xem, Enter/mũi tên/Escape. Bấm ngoài đóng, cuộn ngoài không đóng; tôn trọng reduced-motion. Không đọc thêm Firebase khi mở/tìm. Kiểm Chromium PC/mobile với 18 điểm. Giữ bộ lọc/phạm vi dữ liệu và thao tác giữ nút Gieo. Chưa deploy Hosting.
+
 **19/10 — Trần giờ trả lương**: áp dụng từ 01/10, chỉ trả phần ca thực tế nằm trong lịch; thiếu lịch chặn tính/chốt. Giữ chấm công gốc, OT tính sau giới hạn. manage + quanlygieo + bộ tính lai_lo.v5; snapshot laborVersion=2, sửa lịch đánh dấu đúng ngày. Chi tiết `docs/TRAN_GIO_CONG.md`. Chưa deploy Hosting.
 
 **18/10 — tinh chỉnh độ rõ manage**: chỉ CSS `[MANAGE-READABILITY]`: chữ/số widget điểm bán rõ hơn, căn hàng, wrap nhãn/nút, tổng kết tháng xếp dọc trên điện thoại và giữ số trên một dòng. Giữ góc bo, gradient và toàn bộ kiểu Bill chung/nhãn thanh toán. JS giống hệt bản trước, không tăng truy vấn. Chromium 1366/853/390: 45 kiểm tra đạt, kiểm tra ảnh. Chưa deploy.
