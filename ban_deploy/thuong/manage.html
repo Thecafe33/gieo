@@ -566,6 +566,10 @@ html[data-theme="dark"] .bf-pay.is-cash{background:#1f3b2a;color:#86d9a6}html[da
 .outlet-button>.icon:last-child{transition:transform .18s}.outlet-button[aria-expanded=true]>.icon:last-child{transform:rotate(180deg)}
 @media(prefers-reduced-motion:reduce){.store-dropdown,.outlet-button>.icon:last-child{transition:none}}
 
+
+.page-title-row{display:flex;align-items:center;flex-wrap:wrap;gap:14px}.bed-live-button{display:inline-flex;align-items:center;gap:7px;min-height:38px;padding:8px 13px;border-radius:20px;background:var(--panel);color:var(--green);border:1px solid var(--line);font-size:13px;font-weight:700}.bed-live-button small{font-size:11px;color:var(--muted)}.bed-live-button.has-overdue{color:#ba2638;border-color:#e6a2aa}.bed-live-button.has-overdue small{color:inherit}
+.bed-live-menu{background:linear-gradient(145deg,color-mix(in srgb,var(--green) 10%,var(--panel)),var(--panel));padding:18px}.bed-live-list{overflow:auto;min-height:0;overscroll-behavior:contain}.bed-live-list h3{display:flex;justify-content:space-between;font-size:13px;margin:14px 2px 8px;color:var(--muted)}.bed-live-row{display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--panel);border-radius:18px;padding:13px;margin:7px 0}.bed-live-row div{min-width:0}.bed-live-row b{font-size:14px;overflow-wrap:anywhere}.bed-live-row small{display:block;font-size:12px;margin-top:4px;color:var(--muted)}.bed-live-row strong{font-size:13px;text-align:right;color:var(--green);flex-shrink:0}.bed-live-row.overdue strong{color:#c32c40}.bed-live-row.ending strong{color:#a36a05}.bed-live-empty{font-size:13px;color:var(--sub);padding:12px}
+@media(max-width:760px){.page-title-row{gap:10px}.bed-live-button{font-size:12px;padding:7px 10px}.bed-live-button small{font-size:10px}}
 </style>
 <!-- Embedded Inter font, licensed under the SIL Open Font License:
 Copyright 2016 The Inter Project Authors (https://github.com/rsms/inter) Inter-Italic[opsz,wght].ttf: Copyright 2016 The Inter Project Authors (https://github.com/rsms/inter)
@@ -2001,6 +2005,13 @@ function billYearOk(o, ymd){ return !(o && o.date) || String(o.date).split('/')[
 // limitToLast: có bill mới thì bill cũ nhất trượt khỏi cửa sổ → Firebase báo child_removed dù bill vẫn còn. Khoá push
 // tăng theo thời gian → bị bỏ đúng khoá NHỎ NHẤT lúc cửa sổ đầy = trượt (giữ trên màn); còn lại = bill bị xoá thật.
 function billWinSlide(win, key, n){ return win.size >= n && [...win].every(k => k >= key); }
+// Bed monitor: bounded day nodes, same booking source as POS. Read-only.
+async function watchBeds(day,on,error){
+ await ensureAuth();validDate(day);
+ const ref=db.ref('bedBookings/'+day.replace(/-/g,'/'));
+ const cb=snap=>on(snap.val()||{});ref.on('value',cb,error);
+ return()=>ref.off('value',cb);
+}
 async function watchBills(id, ymd, n, on){
   await ensureAuth(); validDate(ymd);
   if(typeof window!=='undefined'&&window.BillLive){const stop=window.BillLive.listen({id,day:ymd,db,path:billPath(id,ymd)},on);return()=>{stop();window.BillLive.drop(id,ymd)}}
@@ -2044,7 +2055,7 @@ async function billLivePL(id,day){
     return result;
   }finally{PL_FILL_BUSY.delete(id)}
 }
-return{shiftPaidHours,readMonthTcx,billLiveSummary,billLivePL,readMonthClose,closeMonthTcx,reopenMonthTcx,writeMonthInput,unwatchClosings,CLOSE_W,tcxMonthSummary,closingDoc,CLOSE_KEYS,watchBills,billPath,writeEmployeeStatus,plFillMissing,plNeedDays,readOffDays,writeOffDays,isStoreOff,offStoresOf,readCash,writeCashReceipt,writeCashStart,ggCashExpected,tcxCashExpected,readAssets,writeAsset,deleteAsset,assetMonthly,assetDepDay,assetRecovered,assetEndDate,assetLive,expMonthSum,sumsToAlloc,readCosts,writeExpense,deleteExpenseDoc,reviewExpense,setExpenseActual,markExpensePaid,expPaidOf,writeExpenseCats,expAmountIn,expCostType,expCounts,expenseCats,expenseCatsAll,DEFAULT_EXPENSE_CATS,readBreakeven,writeBreakeven,deleteBreakeven,beMonthValue,tcxBreakEven,ggBreakEven,plBreakEven,readRevenue,readSettings,readEmployees,readSchedules,readAttendance,readPayroll,writeEmployee,writeEmployeeActive,writeSchedule,deleteSchedule,writeScheduleBatch,writeShift,deleteShift,writeLateGrace,writeTargets,deleteTargets,invalidateRevenue,invalidateEmployees,targetMonthValue,targetForRange,gieoTargetForRange,gieoTargetsOn,empPayTermsOn,computeWageForDayHours,laborByEmployee,shiftWorkedHours,isShiftInProgress,workStoresOf,tcSummarize,xoSummarize,ggSummarize,tcEmptySum,xoEmptySum,ggEmptySum,sumMerge};
+return{watchBeds,shiftPaidHours,readMonthTcx,billLiveSummary,billLivePL,readMonthClose,closeMonthTcx,reopenMonthTcx,writeMonthInput,unwatchClosings,CLOSE_W,tcxMonthSummary,closingDoc,CLOSE_KEYS,watchBills,billPath,writeEmployeeStatus,plFillMissing,plNeedDays,readOffDays,writeOffDays,isStoreOff,offStoresOf,readCash,writeCashReceipt,writeCashStart,ggCashExpected,tcxCashExpected,readAssets,writeAsset,deleteAsset,assetMonthly,assetDepDay,assetRecovered,assetEndDate,assetLive,expMonthSum,sumsToAlloc,readCosts,writeExpense,deleteExpenseDoc,reviewExpense,setExpenseActual,markExpensePaid,expPaidOf,writeExpenseCats,expAmountIn,expCostType,expCounts,expenseCats,expenseCatsAll,DEFAULT_EXPENSE_CATS,readBreakeven,writeBreakeven,deleteBreakeven,beMonthValue,tcxBreakEven,ggBreakEven,plBreakEven,readRevenue,readSettings,readEmployees,readSchedules,readAttendance,readPayroll,writeEmployee,writeEmployeeActive,writeSchedule,deleteSchedule,writeScheduleBatch,writeShift,deleteShift,writeLateGrace,writeTargets,deleteTargets,invalidateRevenue,invalidateEmployees,targetMonthValue,targetForRange,gieoTargetForRange,gieoTargetsOn,empPayTermsOn,computeWageForDayHours,laborByEmployee,shiftWorkedHours,isShiftInProgress,workStoresOf,tcSummarize,xoSummarize,ggSummarize,tcEmptySum,xoEmptySum,ggEmptySum,sumMerge};
 
 })();
 
@@ -2164,7 +2175,57 @@ function renderStoreChoices(query){
  $('#chooserSummary').textContent=items.length+' kết quả';
 }
 
-function pageHead(title,sub,tools=''){return `<div class="page-head"><div><h1>${title}</h1><p class="sub">${sub}</p></div>${tools?`<div class="page-tools">${tools}</div>`:''}</div>`}
+const BED_LIVE={day:'',generation:0,stop:[],data:{},ready:new Set(),error:'',open:false};
+function bedCreatedMs(b){
+ const v=b.createdAt;if(v!=null&&v!==''){const n=typeof v==='number'?v:Date.parse(v);if(Number.isFinite(n))return n}
+ const k=b.id||'',chars='-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz';if(k.length!==20)return null;
+ let n=0;for(let i=0;i<8;i++){const x=chars.indexOf(k[i]);if(x<0)return null;n=n*64+x}
+ return n>1420070400000&&n<Date.now()+86400000?n:null;
+}
+function bedRows(now=Date.now()){
+ const waiting=[],active=[];
+ for(const [day,rows]of Object.entries(BED_LIVE.data))for(const[id,b]of Object.entries(rows)){
+  if(!b||typeof b!=='object')continue;const status=String(b.status||'').toLowerCase();
+  if(/đã hủy|đã huỷ|đã xong|cancel|completed/.test(status))continue;
+  const row={...b,id,day};
+  if(/active|đang dùng/.test(status)){
+   const start=String(b.checkInTime||b.start||''),end=String(b.end||'');let due=null;
+   if(/^\d{1,2}:\d{2}$/.test(end)){due=Date.parse(day+'T'+end.padStart(5,'0')+':00+07:00');if(/^\d{1,2}:\d{2}/.test(start)&&end.padStart(5,'0')<start.slice(0,5).padStart(5,'0'))due+=86400000}
+   row.left=Number.isFinite(due)?(due-now)/60000:null;active.push(row);
+  }else if(day===BED_LIVE.day&&(!b.bedId||b.bedId==='WAITING')){row.created=bedCreatedMs(row);waiting.push(row)}
+ }
+ waiting.sort((a,b)=>(a.created||Infinity)-(b.created||Infinity));active.sort((a,b)=>(a.left??Infinity)-(b.left??Infinity));return{waiting,active};
+}
+function bedStop(){BED_LIVE.generation++;BED_LIVE.stop.splice(0).forEach(fn=>fn());BED_LIVE.day='';BED_LIVE.data={};BED_LIVE.ready.clear();bedClose()}
+function bedSync(){
+ if(state.view!=='rev'){if(BED_LIVE.day)bedStop();return}
+ const day=currentDate();if(BED_LIVE.day===day)return;
+ bedStop();BED_LIVE.day=day;BED_LIVE.error='';const generation=BED_LIVE.generation;
+ // Yesterday retained only for active overnight beds; never load booking history.
+ for(const date of [addDays(day,-1),day])backend.watchBeds(date,data=>{if(generation!==BED_LIVE.generation)return;BED_LIVE.data[date]=data;BED_LIVE.ready.add(date);bedPaint()},()=>{if(generation!==BED_LIVE.generation)return;BED_LIVE.error='Chưa đọc được trạng thái bed';bedPaint()}).then(stop=>{if(generation===BED_LIVE.generation)BED_LIVE.stop.push(stop);else stop()}).catch(()=>{if(generation===BED_LIVE.generation){BED_LIVE.error='Chưa kết nối được bed';bedPaint()}});
+}
+function bedButton(){return `<button id="bedLiveButton" class="bed-live-button" onclick="bedToggle()" aria-haspopup="dialog" aria-expanded="${BED_LIVE.open}" aria-controls="bedLiveMenu" aria-label="Xem lịch chờ và bed đang hoạt động">${icon('clock')}<span>Bed</span><small id="bedLiveCount">…</small></button>`}
+function bedClose(){BED_LIVE.open=false;const box=$('#bedLiveMenu');if(box){box.classList.remove('is-open');box.setAttribute('inert','');box.setAttribute('aria-hidden','true')}$('#bedLiveButton')?.setAttribute('aria-expanded','false')}
+function bedPosition(){const box=$('#bedLiveMenu'),btn=$('#bedLiveButton');if(!BED_LIVE.open||!box||!btn)return;const r=btn.getBoundingClientRect(),width=Math.min(430,innerWidth-24),top=Math.max(12,Math.min(r.bottom+10,innerHeight-160));box.style.width=width+'px';box.style.left=Math.max(12,Math.min(r.left,innerWidth-width-12))+'px';box.style.top=top+'px';box.style.maxHeight=Math.min(570,innerHeight-top-12)+'px'}
+function bedToggle(){if(BED_LIVE.open){bedClose();return}closeStoreChooser();let box=$('#bedLiveMenu');if(!box){box=document.createElement('div');box.id='bedLiveMenu';box.className='store-dropdown bed-live-menu';box.setAttribute('role','dialog');box.setAttribute('aria-label','Bed The cafe 33');document.body.append(box)}BED_LIVE.open=true;box.removeAttribute('inert');box.setAttribute('aria-hidden','false');box.classList.add('is-open');$('#bedLiveButton')?.setAttribute('aria-expanded','true');bedPaint();bedPosition()}
+function bedPaint(){
+ const {waiting,active}=bedRows(),count=$('#bedLiveCount'),button=$('#bedLiveButton');
+ if(count)count.textContent=BED_LIVE.error?'!':BED_LIVE.ready.size<2?'…':waiting.length+' chờ · '+active.length+' dùng';
+ button?.classList.toggle('has-overdue',active.some(b=>b.left!==null&&b.left<=0));
+ const box=$('#bedLiveMenu');if(!BED_LIVE.open||!box)return;
+ const scroll=box.querySelector('.bed-live-list')?.scrollTop||0;
+ const timing=b=>b.left===null?'Chưa có giờ kết thúc':b.left<=0?'Quá giờ '+Math.ceil(-b.left)+' phút':'Còn '+Math.ceil(b.left)+' phút';
+ const group=(label,rows,isActive)=>`<section><h3>${label}<span>${rows.length}</span></h3>${rows.map(b=>`<div class="bed-live-row ${isActive&&b.left!==null&&b.left<=0?'overdue':isActive&&b.left!==null&&b.left<=10?'ending':''}"><div><b>${isActive?'Bed '+esc(b.bedId||'?'):esc(b.name||'Khách chờ bed')}</b><small>${isActive?esc(b.name||'Khách'):esc(b.start||'--:--')+' – '+esc(b.end||'--:--')}</small></div><strong>${isActive?timing(b):b.created?'Đặt '+Math.max(0,Math.floor((Date.now()-b.created)/60000))+' phút trước':'Chưa rõ giờ đặt'}</strong></div>`).join('')||'<p class="bed-live-empty">Không có</p>'}</section>`;
+ box.innerHTML=`<div class="store-dropdown-head"><b>Bed · The cafe 33</b><span>Trực tiếp</span></div>${BED_LIVE.error?`<p role="alert">${esc(BED_LIVE.error)}</p><button class="btn secondary" onclick="bedRetry()">Thử lại</button>`:BED_LIVE.ready.size<2?'<p>Đang tải trạng thái bed…</p>':`<div class="bed-live-list">${group('Chờ nhận bed',waiting,false)}${group('Đang hoạt động',active,true)}</div>`}`;
+ if(box.querySelector('.bed-live-list'))box.querySelector('.bed-live-list').scrollTop=scroll;bedPosition();
+}
+function bedRetry(){bedStop();bedSync();bedToggle()}
+document.addEventListener('click',e=>{if(BED_LIVE.open&&!e.target.closest('#bedLiveMenu,#bedLiveButton'))bedClose()});
+document.addEventListener('keydown',e=>{if(BED_LIVE.open&&e.key==='Escape'){bedClose();$('#bedLiveButton')?.focus()}});
+window.addEventListener('resize',bedPosition);window.addEventListener('scroll',bedPosition,{passive:true});
+setInterval(()=>{bedSync();if(state.view==='rev')bedPaint()},30000);
+
+function pageHead(title,sub,tools=''){return `<div class="page-head"><div><div class="page-title-row"><h1>${title}</h1>${state.view==='rev'&&title==='Tổng quan'?bedButton():''}</div><p class="sub">${sub}</p></div>${tools?`<div class="page-tools">${tools}</div>`:''}</div>`}
 
 function revenueStores(){return stores.filter(st=>st.active!==false||storeRange(st).rev>0)}
 function selectedStores(){const list=revenueStores();if(state.store==='all')return list;if(state.store==='brand:gieo'||state.store==='gieo')return list.filter(st=>st.brand==='gieo');const point=stores.find(st=>st.id===state.store);return point?[point]:[]}
@@ -2569,12 +2630,12 @@ function friendlyError(error){const code=String(error?.code||'');if(/permission-
 async function commitAction(key,action,after){if(pendingWrites.has(key))return;pendingWrites.add(key);try{await action();await after?.();return true}catch(error){toast(friendlyError(error));return false}finally{pendingWrites.delete(key)}}
 function invalidateViews(...views){for(const v of views)delete live.ready[v];if(views.some(v=>['chiphi','taisan','cc','luong','hoavon'].includes(v))){tkPreviewCache.clear();delete live.ready.thangket}}
 function render(){
- normaliseScope();if((state.view!=='rev'||!bfShown())&&Object.keys(BF.watch).length){bfSync();delete live.ready.rev}if(state.view!=='thangket'&&backend.CLOSE_W.month){backend.unwatchClosings();delete live.ready.thangket}live.updatedAt=live.updates[state.view]||null;document.body.dataset.view=state.view;const label=NAV.find(n=>n[0]===state.view)?.[2]||'';$('#breadcrumb').textContent=label;document.title=label+' · The cafe 33 & XOFA';renderStorePicker();nav();setTheme();
+ bedSync();normaliseScope();if((state.view!=='rev'||!bfShown())&&Object.keys(BF.watch).length){bfSync();delete live.ready.rev}if(state.view!=='thangket'&&backend.CLOSE_W.month){backend.unwatchClosings();delete live.ready.thangket}live.updatedAt=live.updates[state.view]||null;document.body.dataset.view=state.view;const label=NAV.find(n=>n[0]===state.view)?.[2]||'';$('#breadcrumb').textContent=label;document.title=label+' · The cafe 33 & XOFA';renderStorePicker();nav();setTheme();
  const key=loadKey();let html;
  if(live.error?.key===key)html=pageHead(label,'')+`<section class="panel load-error" role="alert"><b>Chưa tải được dữ liệu</b><p>${esc(live.error.message)}</p><button class="btn" onclick="loadCurrent(true)">${icon('refresh')}Thử lại</button></section>`;
  else if(live.ready[state.view]!==key){html=pageHead(label,'')+'<section class="panel live-loading" role="status"><span class="loading-ring"></span><b>Đang đọc dữ liệu…</b></section>';if(live.loadingKey!==key)queueMicrotask(()=>loadCurrent())}
  else html=({rev:dashboard,nv:staffView,lich:scheduleView,cc:attendanceView,luong:payrollView,target:targetView,hoavon:breakevenView,chiphi:costView,taisan:assetView,tienmat:cashView,thangket:monthView}[state.view])();
- $('#view').innerHTML='<div class="page-enter">'+html+'</div>';hydrateIcons();const sync=$('#liveSync');sync.textContent=live.loadingKey===key?'Đang cập nhật':live.error?.key===key?'Chưa tải được':live.updatedAt?'Đã cập nhật '+clockVN(new Date(live.updatedAt).toISOString()):'Đang kết nối';sync.dataset.state=live.error?.key===key?'error':live.loadingKey===key?'loading':'ok';if(state.view==='rev'&&live.ready.rev===key){fitDashboardChart();bfFit();if(bfShown())bfSync()}
+ $('#view').innerHTML='<div class="page-enter">'+html+'</div>';hydrateIcons();bedPaint();const sync=$('#liveSync');sync.textContent=live.loadingKey===key?'Đang cập nhật':live.error?.key===key?'Chưa tải được':live.updatedAt?'Đã cập nhật '+clockVN(new Date(live.updatedAt).toISOString()):'Đang kết nối';sync.dataset.state=live.error?.key===key?'error':live.loadingKey===key?'loading':'ok';if(state.view==='rev'&&live.ready.rev===key){fitDashboardChart();bfFit();if(bfShown())bfSync()}
 }
 async function refreshLive(button,clearOld=false){if(state.view==='thangket')tkPreviewCache.clear();button?.animate([{transform:'rotate(0)'},{transform:'rotate(360deg)'}],{duration:450});if(state.view==='rev')backend.invalidateRevenue(clearOld);backend.invalidateEmployees();delete live.ready[state.view];await loadCurrent(true)}
 function networkPreviewLabel(){return scopeLabel()+' · '+revenueStores().length+' cửa hàng'}

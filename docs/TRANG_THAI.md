@@ -1,5 +1,7 @@
 # Hiện trạng dự án — cập nhật 19/10/2026
 
+**19/10 — Bed trực tiếp trong manage**: nút cạnh Tổng quan, chỉ hai nhóm chờ nhận (tên/khung giờ/đặt cách bao lâu) và đang dùng (bed/còn hoặc quá giờ). Luôn là TC33 hiện tại, độc lập bộ lọc doanh thu. Listener RT đúng 2 nhánh ngày VN hôm nay + hôm qua để giữ ca qua đêm; hôm qua chỉ hiện active, không đọc archive. Gỡ đúng callback khi rời Tổng quan, tránh nghe trùng, đổi ngày nối lại; bộ đếm 30 giây tại máy. Không ghi/sửa booking. Có loading/error/thử lại, mã push làm mốc tạo dự phòng như POS, thiếu mốc không đoán. Kiểm giả lập 16 tình huống PC/mobile + công thức thời gian/qua đêm. Chưa deploy Hosting.
+
 **19/10 — Widget Quản lý POS TC33** (chủ dự án yêu cầu trực tiếp): `pos.html` khối CSS `[POS-MANAGER-WIDGETS]`, thanh nhóm chức năng ngang trên PC; danh sách + form thành widget xanh, ô nhập trắng/chữ rõ; điện thoại hiện lại danh sách vốn bị ẩn, cuộn dọc và nút lưu cuối form. Chỉ giao diện và nhãn “Lưu thay đổi”; không đổi JS, truy vấn, lưu cấu hình hay thanh toán. Sinh bản Tết/bộ deploy. Chưa deploy Hosting.
 
 **19/10 — Dropdown chọn điểm bán manage**: thay hộp thoại bằng menu neo dưới nút; tìm không dấu theo tên/mã/địa chỉ, chia thương hiệu, cuộn riêng cho >10 điểm, đánh dấu điểm đang xem, Enter/mũi tên/Escape. Bấm ngoài đóng, cuộn ngoài không đóng; tôn trọng reduced-motion. Không đọc thêm Firebase khi mở/tìm. Kiểm Chromium PC/mobile với 18 điểm. Giữ bộ lọc/phạm vi dữ liệu và thao tác giữ nút Gieo. Chưa deploy Hosting.
