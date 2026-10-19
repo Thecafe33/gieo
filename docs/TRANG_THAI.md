@@ -1,4 +1,6 @@
-# Hiện trạng dự án — cập nhật 18/10/2026
+# Hiện trạng dự án — cập nhật 19/10/2026
+
+**19/10 — Trần giờ trả lương**: áp dụng từ 01/10, chỉ trả phần ca thực tế nằm trong lịch; thiếu lịch chặn tính/chốt. Giữ chấm công gốc, OT tính sau giới hạn. manage + quanlygieo + bộ tính lai_lo.v5; snapshot laborVersion=2, sửa lịch đánh dấu đúng ngày. Chi tiết `docs/TRAN_GIO_CONG.md`. Chưa deploy Hosting.
 
 **18/10 — tinh chỉnh độ rõ manage**: chỉ CSS `[MANAGE-READABILITY]`: chữ/số widget điểm bán rõ hơn, căn hàng, wrap nhãn/nút, tổng kết tháng xếp dọc trên điện thoại và giữ số trên một dòng. Giữ góc bo, gradient và toàn bộ kiểu Bill chung/nhãn thanh toán. JS giống hệt bản trước, không tăng truy vấn. Chromium 1366/853/390: 45 kiểm tra đạt, kiểm tra ảnh. Chưa deploy.
 
@@ -28,7 +30,7 @@
 | App bán hàng | `posgieo.html` | trỏ v18 |
 | App quản lý | `quanlygieo.html` | trỏ v18 |
 | Chế độ thử | `che_do_thu.v1.js` + `posgieo_thu.html`, `quanlygieo_thu.html` | sinh lại bằng `node tools/tao_ban_thu.js .` sau **mỗi** lần sửa HTML |
-| Bộ tính lãi/lỗ | `lai_lo.v4.js` | sinh từ quanlygieo; giữ v1/v2/v3 immutable cho HTML cũ |
+| Bộ tính lãi/lỗ | `lai_lo.v5.js` | sinh từ quanlygieo; giữ v1/v2/v3/v4 immutable cho HTML cũ |
 | Test | `sh tests/run_all.sh` | 93 file `tests/*.test.js`, chỉ cần `node` |
 
 **Trạng thái deploy (chủ dự án xác nhận 04/10/2026): v18 ĐÃ DEPLOY**, chạy ổn ở cửa hàng 1 được **1–3 tuần**. Đa cửa hàng cần ≥ vài tuần ổn định (`docs/KE_HOACH_DA_CUA_HANG.md` mục 0) → theo dõi thêm rồi mới làm M0. Chủ dự án tự deploy; phiên mới hỏi lại trước việc lớn nếu đã qua lâu.

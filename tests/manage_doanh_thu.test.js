@@ -8,7 +8,7 @@ let ok = true;
 const eq = (a, b, m) => { if (JSON.stringify(a) !== JSON.stringify(b)) { ok = false; console.log('FAIL', m, JSON.stringify(a).slice(0, 400), '!=', JSON.stringify(b).slice(0, 400)); } else console.log('ok', m); };
 
 const M = new Function(extract('manage.html', ['vnHour', 'tcEmptySum', 'tcIsTransfer', 'tcIsKhacLine', 'tcAddOrder', 'tcSummarize', 'xoEmptySum', 'xoAddOrder', 'xoSummarize',
-  'payTermsOfRecord', 'empPayTermsOn', 'computeWageForDayHours', 'isShiftInProgress', 'shiftWorkedHours', 'laborByEmployee', 'pad', 'dkey',
+  'payTermsOfRecord', 'empPayTermsOn', 'computeWageForDayHours', 'isShiftInProgress', 'shiftWorkedHours','shiftPaidHours','payScheduleMap', 'laborByEmployee', 'pad', 'dkey',
   'parseDkey', 'addDays', 'targetMonthValue', 'daysInMonthYm', 'targetForRange', 'sharePcts',
   'ggEmptySum', 'ggAddOrder', 'ggSummarize', 'gieoTargetsOn', 'isStoreOff', 'gieoTargetForRange', 'ggName', 'gieoLabel']) +
   '\nconst GIEO_LEGACY = "gg01", GIEO_TARGET_DEFAULTS = { aov:46000, billsPerDay:60 };\nreturn { tcSummarize, xoSummarize, laborByEmployee, targetMonthValue, targetForRange, sharePcts, ggSummarize, gieoTargetForRange, ggName, gieoLabel };')();
@@ -112,7 +112,7 @@ eq(M.sharePcts([1, 1, 1]), [34, 33, 33], '% đóng góp nhiều quán cộng đ�
 const emps = [{ id: 'a', payType: 'hourly_part', hourlyRate: 20000, otEnabled: true, otThresholdHours: 8, otRate: 30000 },
   { id: 'b', payType: 'fixed', fixedMonthlySalary: 9000000 },
   { id: 'c', payType: 'hourly_part', hourlyRate: 25000, payHistory: [{ effectiveFrom: '0000-00-00', legacy: true, payType: 'hourly_part', hourlyRate: 20000 }, { effectiveFrom: '2026-10-05', payType: 'hourly_part', hourlyRate: 25000 }] }];
-const sh = (id, d, a, b) => ({ employeeId: id, businessDate: d, checkedInAt: `${d}T${a}:00`, checkedOutAt: b ? `${d}T${b}:00` : null });
+const sh = (id, d, a, b) => ({ _paySchedule:{startTime:'00:00',endTime:'23:59'}, employeeId: id, businessDate: d, checkedInAt: `${d}T${a}:00+07:00`, checkedOutAt: b ? `${d}T${b}:00+07:00` : null });
 const L = M.laborByEmployee(emps, [sh('a', '2026-10-01', '07:00', '12:00'), sh('a', '2026-10-01', '13:00', '18:00'), sh('b', '2026-10-01', '07:00', '17:00'),
   sh('c', '2026-10-04', '08:00', '10:00'), sh('c', '2026-10-06', '08:00', '10:00'), sh('a', '2026-10-02', '07:00', null)], Date.now());
 eq(L.a, { hours: 10, otHours: 2, amount: 8 * 20000 + 2 * 30000 }, 'Lương: 2 ca cùng ngày gộp 10h → 2h OT; ca quên check-out ngày cũ không tính');

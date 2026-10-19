@@ -9,13 +9,13 @@ let count=0;const check=(v,m)=>{assert.ok(v,m);console.log('ok '+m);count++};
 const near=(a,b)=>Math.abs(a-b)<.01;
 function labor(employees=[],shifts=[],error=false){
  let reads=0;
- const env={Date:Clock,QL_VIEW:'gg01',GieoData:{storeId:()=> 'gg01'},loadEmployees:async()=>{reads++;return employees},
+ const env={Date:Clock,QL_VIEW:'gg01',GieoData:{storeId:()=> 'gg01'},loadSchedulesForRange:async()=>[],loadEmployees:async()=>{reads++;return employees},
  fstore:{collection:()=>({where(){return this},get:async()=>{reads++;if(error)throw Error('offline');return{docs:shifts.map(s=>({data:()=>s}))}}})}};
- const names=['pad','dkey','daysInMonth','payTermsOfRecord','empPayTermsOn','computeWageForDayHours','isFixedPayType','empFixedPayHere','isShiftInProgress','shiftWorkedHours','computeActualLaborCostByDate'];
+ const names=['pad','dkey','daysInMonth','payTermsOfRecord','empPayTermsOn','computeWageForDayHours','isFixedPayType','empFixedPayHere','isShiftInProgress','shiftWorkedHours','shiftPaidHours','payScheduleMap','computeActualLaborCostByDate'];
  return{fn:new Function(...Object.keys(env),extract('quanlygieo.html',names)+';return computeActualLaborCostByDate;')(...Object.values(env)),reads:()=>reads};
 }
 function calculators(){
- return new Function('Date','DEFAULTS',`const HR_SETTINGS={useActualLaborCost:true},CONFIG_HISTORY=[],PL_LABOR_VERSION=1,PL_ICE_VERSION=1;
+ return new Function('Date','DEFAULTS',`const HR_SETTINGS={useActualLaborCost:true},CONFIG_HISTORY=[],PL_LABOR_VERSION=2,PL_ICE_VERSION=1;
  const splitExpensesByCostType=()=>({coDinh:0,bienDoi:0}),plChannelFeeForDay=()=>0,monthlyDepreciation=()=>0;
  ${extract('quanlygieo.html',['pad','dkey','daysInMonth','configForDate','laborMonthlyTotal','computeDayPL','plTomTatNgay','plNgayLuongCanTinhLai','plNgayDaCanTinhLai','expenseCoveredByCogs','thvTienNgay','thvCompute'])}
  const PL_TOM_TAT_KEYS=['luong','lai','khauHao'];return{computeDayPL,plTomTatNgay,plNgayLuongCanTinhLai,plNgayDaCanTinhLai,thvCompute};`)(Clock,defaults);
@@ -42,7 +42,7 @@ function calculators(){
  check(near(sum.daThuHoi,10400000),'luỹ kế giữ nguyên lịch sử và tăng đúng lãi của ngày bán hàng');
  check(near(c.thvCompute({days:[base,...days,{date:'2026-10-17',lai:-100000,khauHao:0}],tongVon:20000000}).daThuHoi,9900000),'ngày lỗ thật vẫn trừ đúng, không ép luỹ kế chỉ tăng');
  const summary=c.plTomTatNgay(days[0]);
- check(summary.laborVersion===1&&summary.laborCheckedAmount===0&&summary.luongNguon==='chấm công thật','bản tổng hợp có phiên bản và nguồn lương đã tính');
+ check(summary.laborVersion===2&&summary.laborCheckedAmount===0&&summary.luongNguon==='chấm công thật','bản tổng hợp có phiên bản và nguồn lương đã tính');
  const book={};for(const d of days)book[d.date]={date:d.date,luong:100000,mucTinCay:'dang-chay',updatedAt:'2026-10-17T12:00:00Z'};
  book['2026-09-05']={date:'2026-09-05',luong:100000,mucTinCay:'chot-thang'};
  book['2026-09-06']={...summary,date:'2026-09-06',mucTinCay:'dang-chay'};

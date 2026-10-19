@@ -15,7 +15,7 @@ const HELP = "const r2 = v => Math.round(v * 100) / 100, monthEndOf = k => k.sli
   src.match(/const CLOSE_KEYS = (\[[^\]]*\]);/)[1] + ';\n';
 const N = ['pad', 'parseDkey', 'addDays', 'daysBetween', 'dkey', 'daysInMonthYm', 'expCounts', 'expIsBase', 'expCostType', 'expAmountIn', 'expIsLuong',
   'beMonthValue', 'assetEndDate', 'assetLive', 'assetMonthly', 'assetDepDay', 'shiftPayRows', 'tcxMonthSummary', 'closingDoc'];
-const M = new Function('empPayTermsOn', 'shiftWorkedHours', 'computeWageForDayHours', CATS + '\n' + HELP + extract('manage.html', N) + '\nreturn { tcxMonthSummary, closingDoc, shiftPayRows, CLOSE_KEYS };')(
+const M = new Function('empPayTermsOn', 'shiftPaidHours', 'computeWageForDayHours', CATS + '\n' + HELP + extract('manage.html', N) + '\nreturn { tcxMonthSummary, closingDoc, shiftPayRows, CLOSE_KEYS };')(
   (emp) => ({ payType: emp.payType, hourlyRate: emp.hourlyRate }), sh => sh.h, (t, h) => ({ amount: t.hourlyRate * h }));
 
 // Bộ trường quanlygieo ghi ở chotSoThang (đọc thẳng từ quanlygieo.html — đổi bên đó thì test báo).

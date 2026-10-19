@@ -4698,12 +4698,37 @@ function shiftWorkedHours(s, nowMs){
   }
   return Math.max(0, (endMs - inMs) / 3600000);
 }
+// Trần giờ trả lương từ 01/10/2026; giờ chấm công gốc giữ để đối chiếu.
+function shiftPaidHours(s, schedule, nowMs){
+  const actual = shiftWorkedHours(s, nowMs);
+  if(!s || !s.checkedInAt || String(s.businessDate) < '2026-10-01') return actual;
+  const sc = schedule === undefined ? s._paySchedule : schedule;
+  if(!sc || (!sc.isOff && (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(sc.startTime||'') || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(sc.endTime||'') || sc.startTime===sc.endTime))){
+    const e = new Error('Cần bổ sung lịch: '+(s.employeeName||s.employeeId||'Nhân viên')+' · '+s.businessDate+'. Chưa đủ cơ sở chốt lương.');
+    e.code='pay/schedule-missing'; throw e;
+  }
+  if(sc.isOff || actual<=0) return 0;
+  const start=Date.parse(s.businessDate+'T'+sc.startTime+':00+07:00');
+  let end=Date.parse(s.businessDate+'T'+sc.endTime+':00+07:00');
+  if(end<start)end+=86400000;
+  const checked=Date.parse(s.checkedInAt);
+  return Math.max(0,Math.min(checked+actual*3600000,end)-Math.max(checked,start))/3600000;
+}
+function payScheduleMap(rows){
+  return new Map((rows||[]).map(r=>[r.employeeId+'|'+r.date,r]));
+}
+function attachPaySchedules(shifts, schedules){
+  const by=payScheduleMap(schedules);
+  return (shifts||[]).map(s=>({...s,_paySchedule:by.get(s.employeeId+'|'+s.businessDate)||null}));
+}
 async function computeActualLaborCostByDate(startDate, endDate){
-  const [employees, shifts] = await Promise.all([
+  const [employees, shifts, schedules] = await Promise.all([
     loadEmployees(),
     fstore.collection('employee_shifts_gieogieo').where('businessDate','>=',startDate).where('businessDate','<=',endDate).get()
-      .then(snap=>snap.docs.map(d=>d.data()))
+      .then(snap=>snap.docs.map(d=>d.data())),
+    endDate >= '2026-10-01' ? loadSchedulesForRange(startDate,endDate) : []
   ]);
+  const paidSchedules=payScheduleMap(schedules);
   const empById = {}; employees.forEach(e=>empById[e.id]=e);
   const byDate = {}; // { dateKey: tổng chi phí lương ngày đó }
   const addTo = (date, amount) => { byDate[date] = (byDate[date]||0) + amount; };
@@ -4721,7 +4746,7 @@ async function computeActualLaborCostByDate(startDate, endDate){
     if(terms.payType!=='hourly_full' && terms.payType!=='hourly_part') return; // lương cứng không tính ở đây
     // [FIX-ca-dang-chay] Ca đang chạy của HÔM NAY được tính tạm tới hiện tại — xem
     // shiftWorkedHours(). Ca treo ngày cũ vẫn trả 0 như trước.
-    const hours = shiftWorkedHours(s, _now);
+    const hours = shiftPaidHours(s, paidSchedules.get(s.employeeId+'|'+s.businessDate), _now);
     if(hours<=0) return;
     const key = s.employeeId+'|'+s.businessDate;
     hoursByEmpDate[key] = (hoursByEmpDate[key]||0) + hours;
@@ -4769,11 +4794,13 @@ function computeHoursWorked(shiftsForDay){
 // vào 5 nơi đang gọi nó cho KPI (Hôm nay/Sức khỏe/Báo cáo) đã chạy đúng — chấp nhận lặp
 // lại một phần logic để an toàn hơn là sửa 1 hàm dùng chung nhiều nơi.
 async function computeActualLaborBreakdownByEmployee(startDate, endDate){
-  const [employees, shiftsSnap] = await Promise.all([
+  const [employees, shiftsSnap, schedules] = await Promise.all([
     loadEmployees(),
-    fstore.collection('employee_shifts_gieogieo').where('businessDate','>=',startDate).where('businessDate','<=',endDate).get()
+    fstore.collection('employee_shifts_gieogieo').where('businessDate','>=',startDate).where('businessDate','<=',endDate).get(),
+    endDate >= '2026-10-01' ? loadSchedulesForRange(startDate,endDate) : []
   ]);
   const shifts = shiftsSnap.docs.map(d=>d.data());
+  const paidSchedules=payScheduleMap(schedules);
   const empById = {}; employees.forEach(e=>empById[e.id]=e);
   const byEmp = {}; // { employeeId: {hours, otHours, amount} }
   const ensure = id => byEmp[id] || (byEmp[id] = {hours:0, otHours:0, amount:0});
@@ -4789,7 +4816,7 @@ async function computeActualLaborBreakdownByEmployee(startDate, endDate){
     const terms = empPayTermsOn(emp, s.businessDate, s.payTerms);
     if(terms.payType!=='hourly_full' && terms.payType!=='hourly_part') return;
     // [FIX-ca-dang-chay] Cùng quy tắc với computeActualLaborCostByDate.
-    const hours = shiftWorkedHours(s, _now);
+    const hours = shiftPaidHours(s, paidSchedules.get(s.employeeId+'|'+s.businessDate), _now);
     if(hours<=0) return;
     const key = s.employeeId+'|'+s.businessDate;
     hoursByEmpDate[key] = (hoursByEmpDate[key]||0) + hours;
@@ -5115,19 +5142,31 @@ async function loadSchedulesForDate(date){
   const snap = await fstore.collection('work_schedules_gieogieo').where('date','==',date).get();
   return snap.docs.map(d=>({id:d.id, ...d.data()}));
 }
+const _payScheduleReads = new Map();
 async function loadSchedulesForRange(startDate, endDate){
-  const snap = await fstore.collection('work_schedules_gieogieo').where('date','>=',startDate).where('date','<=',endDate).get();
-  return snap.docs.map(d=>({id:d.id, ...d.data()}));
+  const key=GieoData.storeId()+'|'+startDate+'|'+endDate;
+  if(_payScheduleReads.has(key))return _payScheduleReads.get(key);
+  const pending=fstore.collection('work_schedules_gieogieo').where('date','>=',startDate).where('date','<=',endDate).get().then(snap=>snap.docs.map(d=>({id:d.id,...d.data()})));
+  _payScheduleReads.set(key,pending);
+  try{return await pending}finally{if(_payScheduleReads.get(key)===pending)_payScheduleReads.delete(key)}
+}
+function schedulePayDirty(batch,date){
+  if(date<'2026-10-01')return;
+  const at=new Date().toISOString();
+  batch.set(fstore.collection('pl_dirty_gieogieo').doc(GieoData.storeId()),{m:{[date+'_'+date]:at},at},{merge:true});
+  thvDropCache();
 }
 function saveScheduleEntry(employeeId, employeeName, date, startTime, endTime, isOff){
   const id = scheduleDocId(employeeId, date);
-  return fstore.collection('work_schedules_gieogieo').doc(id).set({
+  const batch=fstore.batch();
+  batch.set(fstore.collection('work_schedules_gieogieo').doc(id),{
     employeeId, employeeName, date, startTime: isOff ? null : startTime, endTime: isOff ? null : endTime,
     isOff: !!isOff, updatedAt: new Date().toISOString()
   });
+  schedulePayDirty(batch,date);return batch.commit();
 }
 function deleteScheduleEntry(employeeId, date){
-  return fstore.collection('work_schedules_gieogieo').doc(scheduleDocId(employeeId, date)).delete();
+  const batch=fstore.batch();batch.delete(fstore.collection('work_schedules_gieogieo').doc(scheduleDocId(employeeId,date)));schedulePayDirty(batch,date);return batch.commit();
 }
 
 // hr_settings_gieogieo/current — cấu hình chung cho Nhân sự (KHÔNG dùng chung
@@ -8852,7 +8891,7 @@ function plSumDays(days){
 // lại hàng trăm ngày. Hôm nay chỉ màn Hôm nay ghi (số chủ quán đang nhìn); các màn khác ghi các ngày đã qua.
 // Không bao giờ chặn màn hình: lỗi ghi chỉ cảnh báo.
 const PL_TOM_TAT_KEYS = ['doanhThu','giaVon','phiKenh','luong','chiPhiCoDinh','khauHao','haoHut','bienPhiKhac','tongChiPhi','lai','laiTruocKhauHao'];
-const PL_LABOR_VERSION = 1;
+const PL_LABOR_VERSION = 2;
 const PL_ICE_VERSION = 1;
 // Sửa một lần các bản cũ của ngày đã qua còn dùng lương dự đoán. Hai app dùng
 // cùng hàm; chỉ tính đúng ngày cần sửa, giữ giới hạn ngày của nơi gọi.
@@ -8862,8 +8901,8 @@ function plNgayLuongCanTinhLai(by, from, to, opts){
   const vn = ms=>new Date(ms+7*3600000).toISOString().slice(0,10);
   const today = vn(now), low = opts.back!=null ? vn(now-opts.back*86400000) : from;
   return Object.keys(by||{}).filter(d=>d>=from && d>=low && d<=to && d<today &&
-    by[d] && by[d].mucTinCay==='dang-chay' && (Number(by[d].laborVersion||0)<PL_LABOR_VERSION ||
-      Number(by[d].laborCheckedAmount)!==Math.round((Number(by[d].luong)||0)*100)/100)).sort();
+    by[d] && ((d>='2026-10-01' && Number(by[d].laborVersion||0)<2) || by[d].mucTinCay==='dang-chay' && (Number(by[d].laborVersion||0)<PL_LABOR_VERSION ||
+      Number(by[d].laborCheckedAmount)!==Math.round((Number(by[d].luong)||0)*100)/100))).sort();
 }
 // Sổ cũ chưa tách mua đá khỏi chi phí vận hành. Không đọc thêm danh sách chi
 // chỉ để dò: xét ngày có khoản chi ngay từ sổ đã nạp, sửa một lần theo đoạn.
@@ -20025,6 +20064,7 @@ async function renderEntryChamCong(){
       const name = empShifts[0].employeeName;
       const sched = schedByEmp[empId];
       const hoursWorked = computeHoursWorked(empShifts);
+      let paidText;try{paidText=fmtNum(empShifts.reduce((n,x)=>n+shiftPaidHours(x,sched),0),2)+' giờ trả lương'}catch(e){paidText=e.message}
       const firstCheckIn = empShifts[0].checkedInAt;
       let lateBadge = '';
       if(sched && sched.isOff){
@@ -20043,7 +20083,7 @@ async function renderEntryChamCong(){
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
           <div style="font-weight:700;font-size:13px;color:var(--td);">${name}</div>
           ${lateBadge}
-        </div>
+        </div><div class="small-note">${escapeHtmlAttr(paidText)} · Chỉ tính trong lịch đã xếp từ 01/10/2026.</div>
         ${empShifts.map(s=>{
           const suaBadge = (s.manualEntry || s.manualEdit)
             ? '<span class="tier tier-amber" style="margin-left:6px">sửa tay</span>'
@@ -20211,7 +20251,7 @@ async function renderEntryLuong(){
       computeActualLaborBreakdownByEmployee(monthStart, monthEnd)
     ]);
   }
-  catch(err){ console.warn('computeActualLaborCostByDate/Breakdown failed', err); }
+  catch(err){ console.warn('computeActualLaborCostByDate/Breakdown failed', err);body.innerHTML='<div class="card">'+escapeHtmlAttr(err.message||'Chưa đủ dữ liệu tính lương')+'</div>';return; }
   const totalMonth = Object.values(byDate).reduce((s,v)=>s+v,0);
   const nhieuQuan = qlMultiStore();
   const empsDangLam = employees.filter(e=>e.active!==false);
@@ -20549,6 +20589,7 @@ function thangKetDeXuat(empId){
 async function thangKetSaveAdjust(empId){
   const a = thangKetAdjust[empId]; if(!a) return;
   try{
+    if(a.finalPay!=null){const range=monthRangeOf(thangKetMonth);await computeActualLaborBreakdownByEmployee(dkey(range.start),dkey(range.end));}
     await fstore.collection('payroll_month_adjustments_gieogieo').doc(a._docId).set({
       employeeId: empId, monthKey: thangKetMonth,
       thuong: a.thuong, phat: a.phat, finalPay: a.finalPay,

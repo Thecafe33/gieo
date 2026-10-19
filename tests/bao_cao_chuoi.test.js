@@ -3,7 +3,7 @@
 const assert=require('assert/strict'),fs=require('fs'),{extract}=require('./lib/extract');
 const GieoData=require('../data_access.v9.js').GieoData;
 const names=['pad','dkey','daysBetweenInclusive','totalCapex','thvTongVon','thvMocBatDau','thvTienNgay','thvCompute','monthRecoveryStage','plNgayLuongCanTinhLai','plNgayDaCanTinhLai','chainMonthReadGroup','chainMonthRange','chainBookRecovery','chainMonthModel','monthResponsibilityMetric'];
-const api=new Function('GieoData','fmt',`const THV_MAX_DAYS=730,PL_LABOR_VERSION=1,PL_ICE_VERSION=1;${extract('quanlygieo.html',names)};return{${names.join(',')}};`)(GieoData,n=>String(n??0));
+const api=new Function('GieoData','fmt',`const THV_MAX_DAYS=730,PL_LABOR_VERSION=2,PL_ICE_VERSION=1;${extract('quanlygieo.html',names)};return{${names.join(',')}};`)(GieoData,n=>String(n??0));
 let count=0;const check=(v,m)=>{assert.ok(v,m);console.log('ok '+m);count++};
 let r=api.chainMonthRange('2026-10','2026-10-18');
 check(r.startKey==='2026-10-01'&&r.endKey==='2026-10-18'&&r.previousStartKey==='2026-09-01'&&r.previousEndKey==='2026-09-18','tháng đang chạy so cùng số ngày đầu tháng trước');
@@ -21,7 +21,7 @@ m=api.chainMonthModel([unit('gg01',100,{recoveryContribution:25,operatingSurplus
 m=api.chainMonthModel([{st:{id:'gg01'},error:'Lỗi'}]);check(!m.good.length&&m.errors.length===1,'toàn bộ unit lỗi được giữ trạng thái thiếu, UI có thể chặn hiển thị số');
 // Sổ dày ngày, có phiên bản lương/đá đúng và dấu đã xử lý; chỉ tính từ sổ có sẵn.
 const start='2026-08-31',range=api.chainMonthRange('2026-10','2026-10-18'),by={};
-for(let d=new Date(start+'T12:00:00');api.dkey(d)<=range.endKey;d.setDate(d.getDate()+1)){const date=api.dkey(d);by[date]={date,lai:date===start?800:0,khauHao:0,luong:0,chiPhiCoDinh:0,bienPhiKhac:0,mucTinCay:'chot-thang',laborVersion:1,iceVersion:1,updatedAt:'2026-10-18T12:00:00Z'};}
+for(let d=new Date(start+'T12:00:00');api.dkey(d)<=range.endKey;d.setDate(d.getDate()+1)){const date=api.dkey(d);by[date]={date,lai:date===start?800:0,khauHao:0,luong:0,chiPhiCoDinh:0,bienPhiKhac:0,mucTinCay:'chot-thang',laborVersion:2,iceVersion:1,updatedAt:'2026-10-18T12:00:00Z'};}
 const assets=[{purchaseCost:1000,purchaseDate:start,active:true}],finance={recoveryStartDate:start},book={du:start,d:by},fresh=Object.values(by).filter(d=>d.date>=range.previousStartKey).map(d=>({...d,lai:d.date==='2026-10-01'?300:0}));
 const calc=(b=book,f=finance,period=fresh,marks={})=>api.chainBookRecovery(b,f,assets,period,range,marks);
 let stage=calc();check(stage.stage==='transition'&&stage.opening===800&&stage.closing===1100&&stage.recoveryContribution===300,'thay đúng snapshot kỳ hiện tại, xác định mốc vốn từ lịch sử + ngày tính mới');

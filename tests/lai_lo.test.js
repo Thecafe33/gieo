@@ -1,4 +1,4 @@
-// lai_lo.v4.js (16/10) — bộ tính lãi / lỗ Gieo dùng chung, SINH từ quanlygieo.html (tools/tao_lai_lo.js).
+// lai_lo.v5.js (16/10) — bộ tính lãi / lỗ Gieo dùng chung, SINH từ quanlygieo.html (tools/tao_lai_lo.js).
 //   · File đã sinh còn khớp quanlygieo (quanlygieo đổi công thức mà quên sinh lại → hỏng ở đây).
 //   · Chạy thật với Firestore giả: doanh thu, giá vốn, chi phí theo kỳ, khấu hao ra đúng; đọc đúng bảng của quán gg02.
 //   · Chi phí chỉ đọc khoản chạm khoảng ngày; 3 bảng lịch sử lần sau chỉ đọc mốc mới.
@@ -11,8 +11,8 @@ let ok = true;
 const eq = (a, b, m) => { if (JSON.stringify(a) !== JSON.stringify(b)) { ok = false; console.log('FAIL', m, JSON.stringify(a), '!=', JSON.stringify(b)); } else console.log('ok', m); };
 const near = (a, b, m) => eq(Math.abs(a - b) < 0.01, true, m + ' (' + a + ' ≈ ' + b + ')');
 
-try { execFileSync('node', [path.join(__dirname, '..', 'tools', 'tao_lai_lo.js'), '--check'], { stdio: 'pipe' }); eq(true, true, 'lai_lo.v4.js khớp quanlygieo.html'); }
-catch (e) { eq(String(e.stdout), 'KHỚP', 'lai_lo.v4.js khớp quanlygieo.html'); }
+try { execFileSync('node', [path.join(__dirname, '..', 'tools', 'tao_lai_lo.js'), '--check'], { stdio: 'pipe' }); eq(true, true, 'lai_lo.v5.js khớp quanlygieo.html'); }
+catch (e) { eq(String(e.stdout), 'KHỚP', 'lai_lo.v5.js khớp quanlygieo.html'); }
 
 // ---- manage: ngày nào phải tự tính (plNeedDays) ----
 {
@@ -53,7 +53,7 @@ global.firebase = { firestore: { FieldPath: { documentId: () => ID } } };
 global.localStorage = { getItem: k => (k in LS ? LS[k] : null), setItem: (k, v) => { LS[k] = String(v); } };
 const DA = require('fs').readdirSync(path.join(__dirname, '..')).filter(f => /^data_access\.v\d+\.js$/.test(f)).sort((a, b) => +a.match(/\d+/)[0] - +b.match(/\d+/)[0]).pop();
 global.GieoData = require(path.join(__dirname, '..', DA)).GieoData;
-require(path.join(__dirname, '..', 'lai_lo.v4.js'));
+require(path.join(__dirname, '..', 'lai_lo.v5.js'));
 const LaiLo = global.LaiLo;
 
 // Quán gg02: dữ liệu riêng nằm ở tên + '__gg02'; dữ liệu dùng chung (giá, công thức, cấu hình…) giữ tên cũ.
@@ -115,16 +115,16 @@ RT['orders_gieogieo__gg02/oct/15'] = {
   const r1 = reads['price_history_gieogieo'];
   FS['price_history_gieogieo'].p2 = { itemId: 'sua', effectiveFrom: '2026-10-16', price: 120, createdAt: '2026-10-16T01:00:00Z' };
   reads['price_history_gieogieo'] = 0;
-  delete require.cache[require.resolve(path.join(__dirname, '..', 'lai_lo.v4.js'))]; require(path.join(__dirname, '..', 'lai_lo.v4.js'));   // mở lại app: phiên mới, máy vẫn giữ lịch sử
+  delete require.cache[require.resolve(path.join(__dirname, '..', 'lai_lo.v5.js'))]; require(path.join(__dirname, '..', 'lai_lo.v5.js'));   // mở lại app: phiên mới, máy vẫn giữ lịch sử
   await global.LaiLo.tinh({ fstore, db, storeId: 'gg02', from: '2026-10-15', to: '2026-10-15' });
   eq([r1 >= 1, reads['price_history_gieogieo'], Object.keys(JSON.parse(LS['lai_lo_hist_v1_price_history_gieogieo']).docs).length], [true, 1, 2],
     'Lịch sử giá: lần sau chỉ đọc 1 mốc mới (createdAt > mốc đã có), trong máy đủ 2 mốc');
   // Cùng lỗi thu hồi vốn: một khoảng không có lương thật không được tự sinh ngân sách.
   FS['hr_settings_gieogieo'].current.useActualLaborCost=true;
-  delete require.cache[require.resolve(path.join(__dirname,'..','lai_lo.v4.js'))];require(path.join(__dirname,'..','lai_lo.v4.js'));
+  delete require.cache[require.resolve(path.join(__dirname,'..','lai_lo.v5.js'))];require(path.join(__dirname,'..','lai_lo.v5.js'));
   const zero=await global.LaiLo.tinh({fstore,db,storeId:'gg02',from:'2026-09-01',to:'2026-09-04'});
   eq(zero.days.map(d=>d.luong),[0,0,0,0],'bộ tính dùng chung: ngày cũ không phát sinh lương = 0');
-  eq(zero.tomTat.every(d=>d.laborVersion===1&&d.laborCheckedAmount===0),true,'bộ tính dùng chung ghi dấu đã sửa lương');
+  eq(zero.tomTat.every(d=>d.laborVersion===2&&d.laborCheckedAmount===0),true,'bộ tính dùng chung ghi dấu đã sửa lương');
   const failing={...fstore,collection:c=>{const q=fstore.collection(c);if(c===S('employee_shifts_gieogieo')){const bad=()=>({where:bad,get:async()=>{throw Error('mất mạng chấm công')}});return bad()}return q}};
   let rejected=false;try{await global.LaiLo.tinh({fstore:failing,db,storeId:'gg02',from:'2026-09-01',to:'2026-09-04'})}catch(e){rejected=/mất mạng/.test(e.message)}
   eq(rejected,true,'lỗi đọc lương không tạo bản tổng hợp ngân sách ghi đè sổ thật');

@@ -3,16 +3,16 @@
 const { extract } = require('./lib/extract');
 let ok = true;
 const eq = (a, b, m) => { if (JSON.stringify(a) !== JSON.stringify(b)) { ok = false; console.log('FAIL', m, JSON.stringify(a), '!=', JSON.stringify(b)); } else console.log('ok', m); };
-const names = ['payTermsOfRecord', 'empPayTermsOn', 'computeWageForDayHours', 'isFixedPayType', 'empFixedPayHere', 'isShiftInProgress', 'shiftWorkedHours', 'computeActualLaborCostByDate', 'computeActualLaborBreakdownByEmployee', 'plPredictedLaborByDate'];
+const names = ['payTermsOfRecord', 'empPayTermsOn', 'computeWageForDayHours', 'isFixedPayType', 'empFixedPayHere', 'isShiftInProgress', 'shiftWorkedHours','shiftPaidHours','payScheduleMap', 'computeActualLaborCostByDate', 'computeActualLaborBreakdownByEmployee', 'plPredictedLaborByDate'];
 const src = extract('quanlygieo.html', names);
 const build = (employees, shifts, quan) => {
   const dkey = d => d.toISOString().slice(0, 10);
-  const stubs = { dkey, QL_VIEW: quan || 'gg01', GieoData: { storeId: () => (quan === 'all' ? null : quan || 'gg01') }, daysInMonth: d => new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate(), plScheduledHours: s => s.hours, loadEmployees: async () => employees,
+  const stubs = { dkey, QL_VIEW: quan || 'gg01', GieoData: { storeId: () => (quan === 'all' ? null : quan || 'gg01') }, daysInMonth: d => new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate(), plScheduledHours: s => s.hours, loadEmployees: async () => employees, loadSchedulesForRange:async()=>shifts.map(s=>({employeeId:s.employeeId,date:s.businessDate,startTime:'00:00',endTime:'23:59'})),
     fstore: { collection: () => ({ where() { return this; }, get: async () => ({ docs: shifts.map(s => ({ data: () => s })) }) }) } };
   const ks = Object.keys(stubs);
   return new Function(...ks, src + '\nreturn {empPayTermsOn, computeActualLaborCostByDate, computeActualLaborBreakdownByEmployee, plPredictedLaborByDate};')(...ks.map(k => stubs[k]));
 };
-const sh = (emp, date, inH, outH, payTerms) => ({ employeeId: emp, businessDate: date, checkedInAt: date + 'T' + String(inH).padStart(2, '0') + ':00:00', checkedOutAt: date + 'T' + String(outH).padStart(2, '0') + ':00:00', ...(payTerms ? { payTerms } : {}) });
+const sh = (emp, date, inH, outH, payTerms) => ({ employeeId: emp, businessDate: date, checkedInAt: date + 'T' + String(inH).padStart(2, '0') + ':00:00+07:00', checkedOutAt: date + 'T' + String(outH).padStart(2, '0') + ':00:00+07:00', ...(payTerms ? { payTerms } : {}) });
 const P = (o) => ({ payType: 'hourly_full', hourlyRate: 20000, otEnabled: true, otThresholdHours: 8, otRate: 20000, fixedMonthlySalary: 0, ...o });
 (async () => {
   // Thử việc 20K / OT 20K → từ 01/11 là 21K / OT 25K
