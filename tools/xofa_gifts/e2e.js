@@ -31,16 +31,16 @@ mock += "\n__RT2.put('menu_xolifa',{cf1:{name:'Cafe muối',type:'Cà phê',pric
   selectTogoGift('cf1');confirmTogoGift();let key=Object.keys(cart)[0];ok(cart[key].price===0&&_captureStampFreeIntent()==='0900'&&validateSharedGifts(),'ly tem mới hợp lệ, ghi ý định');
   cartAdj(key,1);ok(cart[key].qty===1,'không tăng số ly tem');
   cartDel(key);ok(!_stampFreePhone&&!_giftVoucherKey,'xóa quà không tiêu tem');
-  cart={paid:paid()};proceeds=0;checkTogoBeforeCheckout(()=>proceeds++);await new Promise(r=>setTimeout(r,0));
-  ok(document.getElementById('togoGiftPopup')._stamp&&proceeds===0,'checkout tự mời khi có quyền 6 tem');
-  skipTogoGift();ok(!document.getElementById('togoGiftPopup')._stamp&&document.getElementById('togoGiftPopup').classList.contains('show'),'bỏ đổi tem vẫn mời quà mua X');skipTogoGift();ok(proceeds===1,'bỏ quà vẫn bán');
+  cart={paid:paid()};proceeds=0;const readsBeforeCheckout=reads;checkTogoBeforeCheckout(()=>proceeds++);
+  ok(!document.getElementById('togoGiftPopup')._stamp&&proceeds===0&&reads===readsBeforeCheckout,'checkout chỉ mời mua X, không tự mở/đọc quyền đổi tem');
+  skipTogoGift();ok(proceeds===1,'bỏ quà mua X vẫn bán');
   await consumeFreeToGoDrink('0900');selectTogoGift('cf1');togoSettings.gift.itemIds=[];confirmTogoGift();ok(!Object.values(cart).some(c=>c._vKey),'cấu hình đổi giữa popup không tặng món đã gỡ');skipTogoGift();
   togoSettings.gift.itemIds=['cf1'];await consumeFreeToGoDrink('0900');selectTogoGift('cf1');confirmTogoGift();
   togoSettings.gift.itemIds=[];ok(!_payBegin(),'kiểm lại danh sách ngay trước ghi bill');
   removeGiftVoucher();ok(validateSharedGifts(),'gỡ quà lỗi xong bán bình thường');
   togoSettings.gift.itemIds=['cf1'];await consumeFreeToGoDrink('0900');selectTogoGift('cf1');document.getElementById('cuph').value='0901';confirmTogoGift();ok(!Object.values(cart).some(c=>c._vKey),'đổi khách trong popup không gắn nhầm quà');skipTogoGift();
   renderTgCategoryList();ok(document.querySelectorAll('#tg-category-list input').length===3,'cài đặt cho chọn từng món');
-  ok(reads===5,'chỉ đọc khách khi đổi quà, không đọc theo chọn món');
+  ok(reads===4,'chỉ đọc khách khi đổi quà, không đọc theo chọn món');
   // Ghi đơn thật vào backend bộ nhớ, gồm cả quà mua X và quà tem.
   const orders=()=>{const out=[];function walk(o){for(const v of Object.values(o||{})){if(v&&v.itemsArray)out.push(v);else if(v&&typeof v==='object')walk(v);}}walk(__RT2.tree().orders_xolifa);return out;};
   document.getElementById('cuph').value='';curCustomer=null;loyaltyCustomer=null;_giftVoucherKey=null;_stampFreePhone=null;

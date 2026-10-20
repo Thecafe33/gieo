@@ -610,12 +610,37 @@
     background: #e67e22;
     animation: pulse 1.2s ease infinite;
   }
+
+  /* Danh sách quà đồng bộ từ POS, không có thao tác ghi / chọn quà trên kiosk. */
+  .gift-mirror { position:fixed;inset:0;z-index:1100;background:rgba(18,36,28,.5);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;padding:24px; }
+  .gift-mirror[hidden] { display:none; }
+  .gift-mirror-box { width:min(100%,1000px);max-height:92vh;overflow:hidden;padding:32px;border-radius:32px;background:linear-gradient(135deg,#d7eae1,#f7fbf8);box-shadow:0 24px 80px #10291e40; }
+  .gift-mirror-program { color:#286146;font-size:18px;font-weight:700;margin-bottom:10px; }
+  .gift-mirror h2 { font-size:clamp(24px,3vw,38px);color:#173f2c;margin-bottom:10px; }
+  .gift-mirror-sub { font-size:19px;color:#476657;margin-bottom:24px; }
+  .gift-mirror-grid { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px; }
+  .gift-mirror-item { padding:20px;border:2px solid transparent;border-radius:22px;background:#ffffffd9;min-width:0; }
+  .gift-mirror-item.selected { border-color:#00704a;background:#e0f6e9; }
+  .gift-mirror-name { font-size:clamp(18px,2vw,26px);font-weight:700;color:#183e2b;overflow-wrap:anywhere; }
+  .gift-mirror-meta { color:#496b58;font-size:17px;margin-top:10px; }
+  .gift-mirror-footer { display:flex;justify-content:space-between;gap:16px;margin-top:24px;font-size:17px;color:#476657; }
+  .cart-gift-label { font-size:12px;color:#167044;font-weight:700;margin-top:4px; }
+  @media (max-width:600px) { .gift-mirror{padding:12px}.gift-mirror-box{padding:20px}.gift-mirror-grid{gap:8px}.gift-mirror-item{padding:12px}.gift-mirror-sub,.gift-mirror-meta,.gift-mirror-footer{font-size:14px} }
 </style>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
 </head>
 <body>
+<div id="gift-mirror" class="gift-mirror" hidden role="dialog" aria-labelledby="gift-mirror-title">
+  <div class="gift-mirror-box">
+    <div id="gift-mirror-program" class="gift-mirror-program"></div>
+    <h2 id="gift-mirror-title">Chọn ly tặng miễn phí</h2>
+    <div id="gift-mirror-sub" class="gift-mirror-sub"></div>
+    <div id="gift-mirror-grid" class="gift-mirror-grid"></div>
+    <div class="gift-mirror-footer"><span>Vui lòng báo món bạn chọn cho nhân viên</span><span id="gift-mirror-page"></span></div>
+  </div>
+</div>
 <div id="app">
 
   <!-- LEFT: FOOD MENU (top 44%) + SLIDESHOW (bottom 56%) -->
@@ -1022,6 +1047,11 @@ function renderSession(sessionId, data) {
           toppingHtml +
         '</div>' +
         priceHtml;
+      if (it.isFree) {
+        var giftLabel = document.createElement('div'); giftLabel.className = 'cart-gift-label';
+        giftLabel.textContent = (it.giftLabel || 'Ly tặng') + ' · Miễn phí';
+        row.querySelector('.cart-item-info').appendChild(giftLabel);
+      }
       list.appendChild(row);
     });
   }
@@ -1258,11 +1288,52 @@ function hideQROverlay() {
   if (ordersList) ordersList.style.display = '';
 }
 
+/* Quà chỉ là một phần của session hiện có; phân trang tại máy, không đọc RT thêm. */
+var giftMirrorData = null, giftMirrorPage = 0, giftMirrorTimer = null;
+function renderGiftMirror(data) {
+  var overlay = document.getElementById('gift-mirror');
+  var gift = data && data.state === 'gift_selection' && data.giftSelection;
+  if (giftMirrorTimer) { clearInterval(giftMirrorTimer); giftMirrorTimer = null; }
+  if (!gift || !gift.items) { giftMirrorData = null; overlay.hidden = true; return; }
+  var items = Array.isArray(gift.items) ? gift.items.filter(Boolean) : Object.values(gift.items).filter(Boolean);
+  var old = giftMirrorData;
+  giftMirrorData = { program: gift.program, need: Number(gift.need) || 1, items: items };
+  var changed = items.findIndex(function(m) {
+    var previous = old && old.items.find(function(x) { return x.id === m.id; });
+    return Number(m.qty) > 0 && (!previous || Number(previous.qty) !== Number(m.qty));
+  });
+  var pages = Math.max(1, Math.ceil(items.length / 6));
+  giftMirrorPage = changed >= 0 ? Math.floor(changed / 6) : (old ? giftMirrorPage % pages : 0);
+  overlay.hidden = false;
+  drawGiftMirrorPage();
+  if (pages > 1) giftMirrorTimer = setInterval(function() {
+    giftMirrorPage = (giftMirrorPage + 1) % pages; drawGiftMirrorPage();
+  }, 6000);
+}
+function drawGiftMirrorPage() {
+  if (!giftMirrorData) return;
+  var data = giftMirrorData;
+  document.getElementById('gift-mirror-program').textContent = data.program || 'Ly tặng';
+  var selected = data.items.reduce(function(sum, m) { return sum + (Number(m.qty) || 0); }, 0);
+  document.getElementById('gift-mirror-sub').textContent = 'Bạn được chọn ' + data.need + ' ly · Đã chọn ' + selected + '/' + data.need;
+  var list = document.getElementById('gift-mirror-grid'); list.replaceChildren();
+  data.items.slice(giftMirrorPage * 6, giftMirrorPage * 6 + 6).forEach(function(m) {
+    var row = document.createElement('div'); row.className = 'gift-mirror-item' + (Number(m.qty) > 0 ? ' selected' : '');
+    var name = document.createElement('div'); name.className = 'gift-mirror-name'; name.textContent = m.name || '';
+    var meta = document.createElement('div'); meta.className = 'gift-mirror-meta';
+    meta.textContent = 'Size ' + (m.size || 'M') + ' · Miễn phí' + (Number(m.qty) > 0 ? ' · ✓ Đã chọn ' + m.qty + ' ly' : '');
+    row.append(name, meta); list.appendChild(row);
+  });
+  var pages = Math.max(1, Math.ceil(data.items.length / 6));
+  document.getElementById('gift-mirror-page').textContent = pages > 1 ? ('Trang ' + (giftMirrorPage + 1) + '/' + pages) : '';
+}
+
 /* ── FIREBASE LISTENERS ── */
 function startListeners() {
   // Lắng nghe trực tiếp node session_display_xolifa
   db.ref('session_display_xolifa').on('value', function(snap) {
     var data = snap.val();
+    renderGiftMirror(data);
     if (data && typeof data === 'object') {
       // Xử lý state bank_qr — hiện QR trong vùng cart
       if (data.state === 'bank_qr') {
