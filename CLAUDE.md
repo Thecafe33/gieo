@@ -18,6 +18,7 @@
 7. **Sau MỌI sửa đổi file gốc** (`pos.html`, `PosX.html`, `posgieo.html`, `quanlygieo.html`, `manage.html`, `index.html`, `kiosk.html`, `*.js`…): chạy `sh tools/sinh_lai_tat_ca.sh` — sinh lại bản Giáng sinh / Tết / thử và bộ deploy theo mùa `ban_deploy/{thuong,giangsinh,tet}/`, rồi commit CẢ các file sinh ra. Không sửa tay file sinh tự động (`index_giangsinh.html`, `*_tet.html`, `*_thu.html`, mọi thứ trong `ban_deploy/`). Gửi file cho chủ dự án: gửi bản trong `ban_deploy/<mùa đang chạy>/` (đã đặt đúng tên).
 
 ## Bối cảnh nghiệp vụ đã chốt
+- **20/10 — Tiền mặt manage**: thêm dữ kiện đối soát Gieo và hai ô nhỏ doanh thu/CK ngày, không đổi số cần lấy/`ownerReceipt`. Số trên widget là đoạn CUỐI (khi nhiều đoạn); chi tiết các đoạn chỉ đọc đúng quán/ngày khi bấm. `mg_cash_cache_v2` dùng lại v1, nâng dữ kiện riêng ngày xem, không xoá sạch để kéo lại lịch sử. Xem `docs/MANAGE_TIEN_MAT.md`. Chủ quán xác nhận các luồng vừa rà ở POS (huỷ bill, CK tay, bàn giao…) có chủ đích và **không yêu cầu sửa** trong lượt này.
 - Gieo Gieo **chỉ bán to-go** (`isToGo` là hằng `true`; nhánh "Tại quán"/Point đã gỡ ở F5).
 - **Không dùng mã giảm giá / voucher**. Khuyến mãi chỉ gồm: `togoSettings_gieogieo` (quà tặng, giảm giá to-go, tặng topping) và chiến dịch trong `sales_assist_config_gieogieo` — cấu hình ở Quản lý.
 - Tích luỹ khách = **tem → ly miễn phí** (`loyaltyAddStamps`, `consumeFreeToGoDrink`).

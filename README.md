@@ -13,3 +13,5 @@ Hai app một file HTML (không build step), Firebase compat 10.13.2, project `t
 | `docs/` | tài liệu — bắt đầu từ `docs/TRANG_THAI.md` |
 
 Quy tắc làm việc cho Claude: `CLAUDE.md`. Deploy: chủ dự án tự chạy `sh tools/predeploy_check.sh <thư mục deploy>` rồi `firebase deploy --only hosting`.
+
+20/10: tab Tiền mặt của `manage.html` bổ sung đối soát cuối ca Gieo, chi tiết từng đoạn ca khi bấm và hai số nhỏ doanh thu/chuyển khoản từng quán. Cách lấy tiền/ghi thực nhận giữ nguyên. Xem `docs/MANAGE_TIEN_MAT.md`.
