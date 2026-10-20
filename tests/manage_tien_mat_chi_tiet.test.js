@@ -33,11 +33,11 @@ console.log('ok Tiền cần lấy giữ nguyên; đối soát cuối ca / từn
  const docs=(rows)=>({docs:rows.map(([id,data])=>({id,data:()=>data}))});
  const db={collection(name){const filters=[];return{where(...f){filters.push(f);return this},async get(){calls.push({name,filters:[...filters]});return docs(name==='daily_closings_gieogieo__gg02'?[['2026-09-01',{...closing,businessDate:date}]]:[])},doc(id){return{async get(){calls.push({name,id});return{exists:false}}}}}}};
  const revCalls=[],scope={ensureAuth:async()=>{},validDate:()=>{},loadCashCfg:async()=>({startDate:'2026-10-21'}),dkey:d=>typeof d==='string'?d:today,CASH_COLL:'cash_receipts_tc33xofa',
-  gieoStores:async()=>[{id:'gg02'},{id:'gg03'}],cashCacheLoad:()=>({}),cashCacheSave:()=>{},cashQueryFrom:()=>today,
+  firebase:{firestore:{FieldPath:{documentId:()=>'__name__'}}},gieoStores:async()=>[{id:'gg02'},{id:'gg03'}],cashCacheLoad:()=>({}),cashCacheSave:()=>{},cashQueryFrom:()=>today,
   pool:async(items,n,fn)=>Promise.all(items.map(fn)),ggName:(name,id)=>name+'__'+id,
   parseDkey:d=>d,addDays:()=>today,EXP_COLL:{tc33:'expenses_tc33',xofa:'expenses_xofa'},console:{warn(){}},
   revLoadRange:async(a,b,progress,only)=>{revCalls.push({a,b,only});if(only.includes('gg_gg03'))throw new Error('Giả lập lỗi một quán');return Object.fromEntries(only.map(k=>[k,{[a]:{total:100000,revenue:100000,bank:50000,transfer:50000}}]))},fstore:db,CASH_CFG:null};
- const backend=new Function(...Object.keys(scope),extract('manage.html',['readCash','readCashGieoDay','ggCashExpected','cashDaySummary','tcxCashExpected','readCashSegments'])+';return {readCash,readCashSegments,readCashGieoDay}')( ...Object.values(scope));
+ const backend=new Function(...Object.keys(scope),extract('manage.html',['cashSourceGet','readCash','readCashGieoDay','ggCashExpected','cashDaySummary','tcxCashExpected','readCashSegments'])+';return {readCash,readCashSegments,readCashGieoDay}')( ...Object.values(scope));
  const result=await backend.readCash(date);
  assert.equal(calls.filter(c=>c.name.includes('shift_segments')).length,0,'Không tự đọc chi tiết các ca');
  assert.equal(revCalls.filter(c=>c.only.includes('gg_gg02')).length,0,'Tiền nộp hiện trước, không chờ doanh thu Gieo');
@@ -48,32 +48,12 @@ console.log('ok Tiền cần lấy giữ nguyên; đối soát cuối ca / từn
  await backend.readCashSegments('gg02',date);
  assert.deepEqual(calls.at(-1),{name:'shift_segments_gieogieo__gg02',filters:[['businessDate','==',date]]},'Chi tiết đúng ngày và đúng quán');
  await assert.rejects(()=>backend.readCashSegments('tc33',date),/không hợp lệ/);
- assert(src.includes("CASH_CACHE_KEY = 'mg_cash_cache_v1'"),'Giữ nguyên khoá đệm của bản trước sửa');
- const storage={mg_cash_cache_v1:JSON.stringify({tcx:{tc33:{[date]:{received:700000}}}})};
- const loadCache=new Function('localStorage','CASH_CACHE_KEY',extract('manage.html',['cashCacheLoad'])+';return cashCacheLoad')({getItem:k=>storage[k]||null},'mg_cash_cache_v1');
- assert.equal(loadCache().tcx.tc33[date].received,700000,'Nâng phiên bản vẫn dùng lại ngày đã nhận trong đệm cũ');
- const migrationReads=[],oldCache={tcx:{tc33:{[date]:{received:700000,expected:700000}}},gg:{gg02:{[date]:{state:'ready',expected:1225000,received:1225000}}}};
- let saved;
- const migrationScope={...scope,gieoStores:async()=>[{id:'gg02'}],cashCacheLoad:()=>oldCache,cashCacheSave:c=>{saved=c},fstore:{
-  collection(name){
-   const filters=[];
-   return {
-    where(...f){filters.push(f);return this},
-    get:async()=>{migrationReads.push({name,filters:[...filters]});return docs([])},
-    doc:id=>({get:async()=>{
-     migrationReads.push({name,id});
-     return name==='daily_closings_gieogieo__gg02'
-      ? {exists:true,id,data:()=>({...closing,businessDate:date,ownerReceipt:{received:1225000}})} : {exists:false};
-    }})
-   };
-  }
- }};
- const migrate=new Function(...Object.keys(migrationScope),extract('manage.html',['readCash','readCashGieoDay','ggCashExpected','cashDaySummary','tcxCashExpected'])+';return readCash')(...Object.values(migrationScope));
- const migrated=await migrate(date);
- assert.equal(migrated.gg.gg02[date].received,1225000,'Phiếu nhận cũ giữ nguyên dù chưa có trường UI đối soát mới');
- assert.equal(saved.tcx.tc33[date].received,700000,'Không làm mất đệm TC33 khi nâng dữ kiện Gieo');
- assert.equal(migrationReads.filter(c=>c.name==='daily_closings_gieogieo__gg02'&&c.id===date).length,0,'Không thêm đọc phiếu khi bản cũ đã có số nhận trong đệm');
- assert(migrationReads.filter(c=>c.name==='daily_closings_gieogieo__gg02'&&c.filters).every(c=>c.filters[0][2]===today),'Không lùi truy vấn cả lịch sử để nâng đệm');
- console.log('ok Đọc tiền nộp như cũ; chỉ số Gieo đọc sau đúng ngày; chi tiết chỉ tải khi bấm; giữ đệm v1');
+ assert(src.includes("CASH_CACHE_KEY = 'mg_cash_cache_v3'"),'Phiên bản mới có khoá riêng');
+ const storage={mg_cash_cache_v1:JSON.stringify({tcx:{tc33:{[date]:{received:700000}}}}),mg_cash_cache_v2:JSON.stringify({tcx:{}})};
+ const loadCache=new Function('localStorage','CASH_CACHE_KEY',extract('manage.html',['cashCacheLoad'])+';return cashCacheLoad')({getItem:k=>storage[k]||null},'mg_cash_cache_v3');
+ assert.deepEqual(loadCache(),{tcx:{},gg:{}},'Không lấy số từ v1/v2');
+ storage.mg_cash_cache_v3=JSON.stringify({schema:3,tcx:{tc33:{[date]:{received:500000}}},gg:{}});
+ assert.equal(loadCache().tcx.tc33[date].received,500000,'Chỉ dùng đệm v3 đã dựng từ nguồn');
+ console.log('ok Bộ đọc v3 độc lập v1/v2; số phụ tải sau; chi tiết chỉ tải đúng quán/ngày khi bấm');
  console.log('ALL PASS');
 })().catch(e=>{console.error(e);process.exitCode=1});

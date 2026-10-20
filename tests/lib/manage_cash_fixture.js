@@ -35,13 +35,15 @@ function makeCashFixture(options={}){
  function collection(p){const filters=[];return{
   where(k,op,v){filters.push([k,op,v]);return this},doc:id=>ref(p+'/'+id),
   async get(opts){reads.push({coll:p,filters:clone(filters),source:opts?.source});
-   const rows=options.offline||options.emptyQueries?[]:Object.entries(data[p]||{}).filter(([id,x])=>filters.every(([k,op,v])=>op==='=='?x[k]===v:op==='>='?x[k]>=v:x[k]<=v));
+   if(options.failCollection===p)throw new Error('unavailable: '+p);
+   const rows=options.offline||options.emptyQueries?[]:Object.entries(data[p]||{}).filter(([id,x])=>filters.every(([k,op,v])=>{const value=k==='__name__'?id:x[k];return op==='=='?value===v:op==='>='?value>=v:value<=v}));
    return{metadata:metadata(),docs:rows.map(([id,x])=>snapshot(p,id,x))};
   }
  }}
  const firebase={apps:[{}],database:()=>({ref:p=>({once:async()=>({val:()=>clone(rt[p]||null)})})}),firestore:()=>({collection}),auth:()=>({
   onAuthStateChanged(cb){queueMicrotask(()=>cb({uid:'fake-user'}));return()=>{}},signInWithEmailAndPassword:async()=>{}
  })};
+ firebase.firestore.FieldPath={documentId:()=>'__name__'};
  return{firebase,memory,reads,writes,data,old};
 }
 module.exports={makeCashFixture};

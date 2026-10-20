@@ -14,4 +14,4 @@ Hai app một file HTML (không build step), Firebase compat 10.13.2, project `t
 
 Quy tắc làm việc cho Claude: `CLAUDE.md`. Deploy: chủ dự án tự chạy `sh tools/predeploy_check.sh <thư mục deploy>` rồi `firebase deploy --only hosting`.
 
-20/10: tab Tiền mặt của `manage.html` giữ đối soát Gieo và hai số nhỏ doanh thu/chuyển khoản; **đường đọc tiền nộp đã trả về bản 26edad6 trước khi sửa UI**, dùng lại đệm v1, giữ thêm ngày chỉ có ở v2. A/B cùng dữ liệu xác nhận số thực nhận và truy vấn khớp bản gốc; chưa kiểm chứng Firebase thật. ZIP hiện hành: `manage_doc_tien_nop_nhu_cu_20-10.zip` (chỉ `manage.html`, dùng chung ba mùa). Xem `docs/MANAGE_TIEN_MAT.md`.
+20/10: Tiền mặt `manage.html` dùng bộ đọc/đệm **v3 độc lập v1/v2**: tải phiếu theo mã Firebase, kể cả phiếu cũ thiếu trường ngày. Xoá sạch đệm vẫn tự tải lại đúng, giữ tối ưu ngày ổn định sau lần đầu. Đối soát Gieo và hai chỉ số nhỏ giữ nguyên. ZIP hiện hành `manage_tien_nop_v3_20-10.zip`, chỉ manage.html dùng chung ba mùa. Xem `docs/MANAGE_TIEN_MAT.md`.

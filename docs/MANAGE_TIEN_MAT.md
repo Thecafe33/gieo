@@ -1,29 +1,38 @@
 # Tiền mặt trong manage — bổ sung 20/10/2026
 
-**Bản hiện hành thay bản vá 2422363:** trả đường đọc tiền nộp về mã nguồn
-26edad6 trước khi sửa UI, theo yêu cầu của chủ quán. Giữ phần đối soát Gieo và hai
-chỉ số nhỏ. Không sửa POS/engine hoặc các quy trình vận hành chủ quán yêu cầu giữ.
-ZIP **`manage_doc_tien_nop_nhu_cu_20-10.zip`** chỉ chứa `manage.html`, dùng chung ba mùa.
+**Bản v3 thay 36c8935:** tự tải lại đúng từ phiếu Firebase khi không còn bất kỳ
+đệm nào. Không lấy số từ v1/v2. Giữ đối soát Gieo và hai chỉ số nhỏ, không sửa POS/
+engine/công thức hoặc luồng ghi tiền nhận. ZIP **`manage_tien_nop_v3_20-10.zip`** chỉ
+chứa `manage.html`, dùng chung thường/Tết/Giáng sinh.
 
-## Đối chiếu với bản trước
+## Nguồn dữ liệu và phiên bản đệm
 
-`loadCashCfg`, toàn bộ phần truy vấn/ghép số/lưu đệm của `readCash`, `cashQueryFrom`,
-`writeCashReceipt`, `writeCashStart` và `cashCacheSave` giữ nguyên bản 26edad6.
-`readCash` chỉ đính kèm hai số phụ TC33/XOFA từ doanh thu đã đọc và cờ chờ tải số Gieo.
-Gỡ cách ép đọc server, tra thêm doc và khóa nhập của bản vá 2422363.
+- TC33/XOFA: `cash_receipts_tc33xofa/{store}_{YYYY-MM-DD}` — đúng mã `writeCashReceipt` ghi.
+- Gieo: `daily_closings_gieogieo[__ggNN]/{YYYY-MM-DD}.ownerReceipt` — chung quanlygieo.
+- Bộ đọc lọc khoảng theo `firebase.firestore.FieldPath.documentId()`, không lọc theo
+  `date`/`businessDate`. Mã phiếu xác định quán/ngày; thiếu trường ngày không làm mất phiếu.
+- Đệm `mg_cash_cache_v3` có `schema:3`, chỉ dựng từ số vừa đọc trên nguồn. KHÔNG đọc/nhập
+  v1/v2. Không cần giữ đệm cũ, không cần sửa phiếu lịch sử hoặc migrate Firebase.
+- Không có v3 (nâng phiên bản, máy mới, xoá sạch bộ nhớ): đọc khoảng từ mốc theo dõi.
+  Có v3: chỉ đọc phần chưa nhận và 7 ngày gần nhất. TC33/XOFA mỗi quán 1 query; Gieo
+  mỗi quán 1 query. Không quét toàn collection. Bấm ngày nằm ngoài khoảng chỉ đọc thêm
+  đúng doc quán/ngày đó, không mở rộng lịch sử. Tải lại bỏ v3 và dựng lại từ nguồn.
+- Config/phiếu đọc server. Mất mạng/snapshot cache không được coi là nguồn rỗng đầy đủ;
+  báo lỗi thay vì dựng số 0. Lỗi Gieo riêng hiện chưa tải đủ và không cho nhập đè tại quán
+  đó; các quán đọc được vẫn hiện. Không thay công thức hay hàm ghi phiếu đã dùng.
 
-Dùng lại `mg_cash_cache_v1`; v2 chỉ bổ sung ngày chưa có trong v1. Không xoá v2.
-Các ngày gần hiện tại vẫn đọc lại nguồn như bản gốc; không đổi đường dẫn hoặc mã phiếu.
+## Chứng cứ kiểm tra và giới hạn
 
-Kiểm A/B cùng dữ liệu giả/đồng hồ/đệm, so sánh với hàm gốc được đóng băng trong
-`tests/fixtures/manage_cash_before_26edad6.js`: kết quả tiền và danh sách truy vấn khớp.
-Trường hợp ngày đã cũ có số trong v1 nhưng v2 rỗng: bản gốc đọc được, 5d42060 mất số,
-bản hiện hành đọc được. Đây là hồi quy đã tái hiện, chưa khẳng định giải thích toàn bộ
-sự cố ở quán. Phiếu thiếu trường ngày cũng bị bỏ qua ở bản gốc, vì vậy KHÔNG dùng
-trường hợp đó để kết luận nguyên nhân do bản sửa UI.
+Cùng dữ liệu giả thiếu `date`/`businessDate`, sạch đệm: hàm gốc 26edad6 bỏ qua phiếu,
+v3 đọc được TC33 500.000đ, XOFA 400.000đ, Gieo 300.000đ từ mã phiếu. Phiếu đủ trường
+vẫn cho số tài chính khớp bản gốc. Các số này là fixture kiểm thử, KHÔNG phải số của quán.
+Đệm cũ chứa số sai không ảnh hưởng v3; xoá cả ba đệm giữa phiên hoặc xoá toàn bộ
+localStorage rồi reload trình duyệt vẫn tự đọc đủ phiếu. Không bổ sung trường ngày
+vào fixture để khiến phép thử qua.
 
-Chưa deploy Hosting, không đọc/ghi Firebase thật. Các phép thử không xác nhận được
-số phiếu hiện có trên server hoặc tình trạng bộ đệm tại máy chủ quán.
+Bản 36c8935 chỉ phục hồi cách đọc và ưu tiên v1 nên chưa đáp ứng điều kiện độc lập đệm;
+bản v3 thay cơ chế đó. Chưa deploy Hosting, không đọc/ghi Firebase thật và không xác nhận
+được toàn bộ nguyên nhân hoặc tình trạng phiếu tại quán từ các bài kiểm giả lập.
 
 ## Các số cần phân biệt
 
@@ -63,30 +72,29 @@ nhau về 0 vẫn hiện số đoạn lệch và nhãn “Tổng bù trừ 0”,
 ## Lượt đọc và bộ đệm
 
 Số cuối ca lấy từ phiếu kết ca `readCash` đã đọc, không thêm truy vấn lấy lại.
-Doanh thu TC33/XOFA dùng lại kết quả đọc cho tiền mặt. Sau khi tiền nộp đã hiện,
-`readCashGieoDay` chỉ đọc bill đúng ngày xem qua `revLoadRange` (dùng `BillLive`/đệm
-hiện có); không đọc doanh thu cả lịch sử chưa nhận. Lỗi số phụ không chặn số thực nhận.
-Kết quả về trễ chỉ thay hai ô nhỏ, không vẽ lại form tiền mặt và không đè ngày mới.
+TC33/XOFA dùng lại doanh thu đã tải để tính tiền mặt. `readCashGieoDay` tải hai số phụ
+sau khi tiền nhận đã hiện; chỉ ngày đang xem, qua `revLoadRange`/`BillLive`/đệm chung.
+Kết quả về trễ chỉ thay hai ô nhỏ, không vẽ lại form hoặc đè ngày mới. Lỗi số phụ
+không chặn số thực nhận.
 
-Không tự đọc các đoạn ca, không thêm listener/polling. Mở lại popup dùng Promise/kết quả
-đã tải theo khóa quán/ngày; tải lại tab xóa đệm chi tiết. Lỗi chi tiết có nút thử lại.
-Đường tải lại phiếu nhận giữ hành vi bản gốc; thay đổi lần này không thêm truy vấn
-lịch sử hoặc di chuyển dữ liệu tiền nhận.
+Chi tiết đoạn ca chỉ đọc khi bấm, dùng lại kết quả theo quán/ngày tới lúc tải lại.
+Không thêm listener/polling, không đọc doanh thu cả lịch sử Gieo để hiện hai số phụ.
 
 ## Kiểm tra
 
-- `node tests/tien_mat.test.js`: giữ nguyên tiền cần lấy, khớp quanlygieo.
-- `node tests/manage_tien_mat_chi_tiet.test.js`: đối soát/multi-ca, thiếu dữ liệu/số 0,
-  phạm vi doanh thu, chỉ tải chi tiết khi bấm và số phụ Gieo tải sau.
-- `node tests/manage_tien_mat_lich_su.test.js`: so mã nguồn và A/B kết quả + log truy vấn
-  với 26edad6; đổi ngày, mốc theo dõi, tải lại, máy mới, v1 có số/v2 rỗng, v2 có ngày riêng;
-  tái hiện lỗi ở 5d42060 và kiểm bản sửa. Firebase giả có lọc theo truy vấn thật.
-- `node tools/manage_cash/e2e.js`: kiểm UI với dữ liệu dựng sẵn tại PC/tablet/điện thoại,
-  sáng/tối, popup, xác nhận/sửa thực nhận. Không dùng bài này làm chứng cứ backend.
-- `node tools/manage_cash/e2e_history.js`: backend + UI thật với Firebase giả trên PC/
-  điện thoại, đổi ngày giữ số nhận, v1/v2, chỉ số phụ tải chậm không xoá tiền đang gõ;
-  không stub `readCash`, chặn mạng thật và theo dõi không có lệnh ghi khi chỉ xem/sửa nháp.
-- `sh tools/sinh_lai_tat_ca.sh`: sinh đủ bộ deploy thường/Giáng sinh/Tết và chạy toàn bộ test.
+- `node tests/tien_mat.test.js`: công thức số cần lấy giữ nguyên, khớp quanlygieo.
+- `node tests/manage_tien_mat_chi_tiet.test.js`: đối soát/đa ca, thiếu/số 0, số phụ tải
+  sau, chi tiết chỉ khi bấm; đệm v3 không nhập số từ v1/v2.
+- `node tests/manage_tien_mat_lich_su.test.js`: toàn bộ backend với query lọc document ID;
+  không đệm, đệm cũ sai, xoá cả v1/v2/v3, trước mốc, ngày cũ, đổi ngày, tải lại,
+  số thực nhận 0, lỗi mạng. So bản gốc trên cùng nguồn; kiểm giới hạn khoảng đọc sau
+  lần đầu và doc đúng ngày khi bấm. Không ghi nguồn giả khi chỉ xem.
+- `node tools/manage_cash/e2e_history.js`: backend + UI thật, Firebase giả thiếu trường
+  ngày, PC/điện thoại; xoá toàn localStorage rồi reload vẫn có số nhận; v3 độc lập,
+  lỗi mạng không dựng 0, chỉ số phụ không xoá tiền đang gõ. Chặn mọi mạng ngoài.
+- `node tools/manage_cash/e2e.js`: kiểm trình bày với fixture UI, không dùng làm chứng
+  cứ backend; PC/tablet/điện thoại, sáng/tối, popup, xác nhận/sửa thực nhận.
+- `sh tools/sinh_lai_tat_ca.sh`: sinh bộ deploy ba mùa và chạy toàn bộ test.
 
 Ba file `ban_deploy/{thuong,giangsinh,tet}/manage.html` giống nhau; ZIP giao chỉ chứa
 `manage.html`, dùng được cho cả ba mùa. Không cần thay engine/shared JS cho thay đổi này.
