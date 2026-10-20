@@ -37,7 +37,7 @@ console.log('ok Tiền cần lấy giữ nguyên; đối soát cuối ca / từn
   pool:async(items,n,fn)=>Promise.all(items.map(fn)),ggName:(name,id)=>name+'__'+id,
   parseDkey:d=>d,addDays:()=>today,EXP_COLL:{tc33:'expenses_tc33',xofa:'expenses_xofa'},console:{warn(){}},
   revLoadRange:async(a,b,progress,only)=>{revCalls.push({a,b,only});if(only.includes('gg_gg03'))throw new Error('Giả lập lỗi một quán');return Object.fromEntries(only.map(k=>[k,{[a]:{total:100000,revenue:100000,bank:50000,transfer:50000}}]))},fstore:db,CASH_CFG:null};
- const backend=new Function(...Object.keys(scope),extract('manage.html',['readCash','ggCashExpected','cashDaySummary','tcxCashExpected','readCashSegments'])+';return {readCash,readCashSegments}')( ...Object.values(scope));
+ const backend=new Function(...Object.keys(scope),extract('manage.html',['readCash','cashReadServer','ggCashExpected','cashDaySummary','tcxCashExpected','readCashSegments'])+';return {readCash,readCashSegments}')( ...Object.values(scope));
  const result=await backend.readCash(date);
  assert.equal(calls.filter(c=>c.name.includes('shift_segments')).length,0,'Không tự đọc chi tiết các ca');
  assert.equal(revCalls.filter(c=>c.only.includes('gg_gg02')).length,1);
@@ -67,7 +67,7 @@ console.log('ok Tiền cần lấy giữ nguyên; đối soát cuối ca / từn
    };
   }
  }};
- const migrate=new Function(...Object.keys(migrationScope),extract('manage.html',['readCash','ggCashExpected','cashDaySummary','tcxCashExpected'])+';return readCash')(...Object.values(migrationScope));
+ const migrate=new Function(...Object.keys(migrationScope),extract('manage.html',['readCash','cashReadServer','ggCashExpected','cashDaySummary','tcxCashExpected'])+';return readCash')(...Object.values(migrationScope));
  const migrated=await migrate(date);
  assert.equal(migrated.gg.gg02[date].reconciliation.countedCash,1680000);
  assert.equal(saved.tcx.tc33[date].received,700000,'Không làm mất đệm TC33 khi nâng dữ kiện Gieo');

@@ -490,6 +490,7 @@ html[data-theme="dark"] .bf-pay.is-cash{background:#1f3b2a;color:#86d9a6}html[da
 .cash-miss{display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding-top:12px;border-top:1px solid color-mix(in srgb,var(--c) 14%,transparent);font-size:12px;color:#b4232f;font-weight:700}
 .cash-miss button{min-height:30px;padding:0 10px;border-radius:999px;border:1.5px solid #f2b8bd;background:var(--panel);color:#b4232f;font:inherit;font-weight:750;cursor:pointer}
 .cash-miss button.on{background:#d2333f;border-color:#d2333f;color:#fff}.cash-miss button.open{border-style:dashed;color:var(--sub);border-color:var(--line)}
+.cash-history{display:block}.cash-history summary{cursor:pointer}.cash-history .cash-miss{border:0;padding-top:8px}.cash-history button{color:var(--green);border-color:color-mix(in srgb,var(--green) 30%,var(--line))}
 .cash-miss .cash-open{font-style:normal;color:var(--sub)}.cash-miss em{font-style:normal;color:var(--sub)}.cash-miss.done{color:var(--green)}.cash-miss.done .icon{width:15px;height:15px}
 .cash-start{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--sub);font-weight:650}.cash-start input{border:1px solid var(--line);border-radius:12px;padding:6px 8px;background:var(--panel);color:var(--ink);font:inherit}
 @media(max-width:760px){.cash-grid{grid-template-columns:1fr}.cash-exp strong{font-size:30px}.cash-start{width:100%}}
@@ -862,7 +863,7 @@ const REV_STABLE_AFTER = 8;
 let REV_MEM = {};
 function revCacheLoad(){ try{ const j = JSON.parse(localStorage.getItem(REV_CACHE_KEY) || '{}'); return (j && typeof j === 'object') ? j : {}; }catch(e){ return {}; } }
 function revCacheSave(c){ try{ localStorage.setItem(REV_CACHE_KEY, JSON.stringify(c)); }catch(e){ console.warn('[doanh thu] không lưu được đệm', e); } }
-function revCacheClear(){ try{ localStorage.removeItem(REV_CACHE_KEY); localStorage.removeItem('mg_pl_cache_v1'); localStorage.removeItem('mg_cash_cache_v1'); localStorage.removeItem('mg_cash_cache_v2'); }catch(e){} REV_MEM = {}; }
+function revCacheClear(){ try{ localStorage.removeItem(REV_CACHE_KEY); localStorage.removeItem('mg_pl_cache_v1'); }catch(e){} REV_MEM = {}; }
 
 let _tcMenu = null, _tcLegacy = null, _tcTodayArchive = null;
 async function tcMenu(){
@@ -1395,8 +1396,8 @@ const CASH_CACHE_KEY = 'mg_cash_cache_v2', CASH_FRESH_DAYS = 7;
 let CASH_CFG = null;
 async function loadCashCfg(force){
   if(CASH_CFG && !force) return CASH_CFG;
-  const d = await CASH_CFG_DOC().get();
-  if(d.exists && d.data().startDate){ CASH_CFG = d.data(); return CASH_CFG; }
+  const d = await cashReadServer(CASH_CFG_DOC());
+  if(d.exists && d.data().startDate){ validDate(d.data().startDate); CASH_CFG = d.data(); return CASH_CFG; }
   CASH_CFG = { startDate: dkey(addDays(new Date(), 1)), createdAt: new Date().toISOString() };
   await CASH_CFG_DOC().set(CASH_CFG, { merge: true });
   return CASH_CFG;
@@ -1433,7 +1434,23 @@ function tcxCashExpected(daySum, store, counterSpent){
   const sales = daySum ? (store === 'tc33' ? (daySum.cashMain != null ? daySum.cashMain : daySum.cash) : daySum.cash) || 0 : 0;
   return { sales, spent: counterSpent || 0, expected: sales - (counterSpent || 0) };
 }
-function cashCacheLoad(){ try{ const j = JSON.parse(localStorage.getItem(CASH_CACHE_KEY) || localStorage.getItem('mg_cash_cache_v1') || '{}'); return j && typeof j === 'object' ? j : {}; }catch(e){ return {}; } }
+function cashCacheLoad(){
+  const out={tcx:{},gg:{}};
+  // Đệm v2 rỗng không được che các phiếu đã nhận trong v1. Không xoá bản cũ khi nâng UI.
+  for(const key of ['mg_cash_cache_v1',CASH_CACHE_KEY]){
+    let x; try{x=JSON.parse(localStorage.getItem(key)||'{}')}catch(e){continue}
+    for(const group of ['tcx','gg'])for(const [id,days] of Object.entries(x?.[group]||{})){
+      const m=out[group][id]||(out[group][id]={});
+      for(const [d,r] of Object.entries(days||{}))if(r&&r.received!=null)m[d]={...(m[d]||{}),...r};
+    }
+  }
+  return out;
+}
+async function cashReadServer(ref){
+  const snap=await ref.get({source:'server'});
+  if(snap.metadata?.fromCache)throw new Error('Chưa xác minh được phiếu nhận trên máy chủ.');
+  return snap;
+}
 function cashCacheSave(c){ try{ localStorage.setItem(CASH_CACHE_KEY, JSON.stringify(c)); }catch(e){} }
 // [GIẢM-ĐỌC] Ngày đã nhận và cũ hơn CASH_FRESH_DAYS ngày lưu trong máy; mỗi lần mở chỉ đọc từ ngày sớm nhất còn chưa chốt.
 function cashQueryFrom(cacheMap, from, today){
@@ -1447,34 +1464,44 @@ async function readCash(date, force){
   const cfg = await loadCashCfg(force), today = dkey(new Date()), start = cfg.startDate;
   // [16/10] Mốc truy vấn = mốc theo dõi (không lùi theo ngày đang xem): xem 1 ngày trước mốc chỉ đọc riêng ngày đó (bước 1b / 2b)
   // — trước đây chọn lùi 1 năm là đọc liền cả năm doanh thu + chi phí + phiếu nhận.
-  const from = start, old = date < start, records = (await gieoStores()).filter(r=>r.active !== false);
-  const cache = force ? {} : cashCacheLoad(); cache.tcx = cache.tcx || {}; cache.gg = cache.gg || {};
+  const from = start, records = (await gieoStores()).filter(r=>r.active !== false);
+  const cache = cashCacheLoad(); cache.tcx = cache.tcx || {}; cache.gg = cache.gg || {};
+  const verified={},readErrors={};
   // 1) Thực nhận TC33 / XOFA (1 truy vấn cho cả 2 quán, từ ngày sớm nhất chưa chốt).
   const tcxMap = { tc33: {}, xofa: {} };
   ['tc33', 'xofa'].forEach(st=>Object.entries(cache.tcx[st] || {}).forEach(([d, r])=>{ tcxMap[st][d] = r; }));
   const qT = ['tc33', 'xofa'].map(st=>cashQueryFrom(tcxMap[st], from, today)).sort()[0];
-  const recSnap = await fstore.collection(CASH_COLL).where('date','>=',qT).get();
-  ['tc33', 'xofa'].forEach(st=>Object.keys(tcxMap[st]).forEach(d=>{ if(d >= qT) delete tcxMap[st][d]; }));
-  recSnap.docs.forEach(d=>{ const x = d.data(); if(x && tcxMap[x.store] && x.date) tcxMap[x.store][x.date] = x; });
-  if(old) (await fstore.collection(CASH_COLL).where('date','==',date).get()).docs.forEach(d=>{ const x = d.data(); if(x && tcxMap[x.store]) tcxMap[x.store][date] = x; });
+  try{
+    const recSnap = await cashReadServer(fstore.collection(CASH_COLL).where('date','>=',qT));
+    recSnap.docs.forEach(d=>{ const x=d.data();if(x&&tcxMap[x.store]&&x.date){tcxMap[x.store][x.date]=x;if(x.date===date)verified[x.store]=true} });
+  }catch(e){['tc33','xofa'].forEach(st=>readErrors[st]='Chưa tải đủ lịch sử nhận tiền.');}
+  // Tra khoá gốc đúng quán/ngày nếu truy vấn khoảng không trả phiếu. Không suy “không có phiếu” từ đệm/query rỗng.
+  await Promise.all(['tc33','xofa'].map(async st=>{
+    if(verified[st])return;
+    try{
+      const one=await cashReadServer(fstore.collection(CASH_COLL).doc(st+'_'+date));
+      if(one.exists){tcxMap[st][date]={...one.data(),store:st,date};verified[st]=true;}
+      else if(tcxMap[st][date]?.received!=null){verified[st]=false;readErrors[st]='Có số đã nhận trong bộ đệm nhưng chưa tìm thấy phiếu gốc. Không ghi đè.';}
+      else verified[st]=true;
+    }catch(e){verified[st]=false;readErrors[st]='Chưa đọc được phiếu nhận gốc. Không ghi đè số đã nộp.';}
+  }));
   // 2) Kết ca Gieo (1 truy vấn / quán).
   const ggMap = {};
   await pool(records, 4, async r=>{
     const m = {}; Object.entries(cache.gg[r.id] || {}).forEach(([d, v])=>{ m[d] = v; });
     const q = cashQueryFrom(m, from, today);
-    Object.keys(m).forEach(d=>{ if(d >= q) delete m[d]; });
     try{
-      const s = await fstore.collection(ggName('daily_closings_gieogieo', r.id)).where('businessDate','>=',q).where('businessDate','<=',today).get();
+      const s = await cashReadServer(fstore.collection(ggName('daily_closings_gieogieo', r.id)).where('businessDate','>=',q).where('businessDate','<=',today));
       const put = doc=>{ const cl = doc.data(), d = cl.businessDate || doc.id; m[d] = { ...ggCashExpected(cl), received: cl.ownerReceipt ? cl.ownerReceipt.received : null, receipt: cl.ownerReceipt || null }; };
-      s.docs.forEach(put);
-      // Nâng đệm v1: giữ các ngày đã nhận, chỉ bổ sung số đối soát của ngày ĐANG XEM.
-      // Không xoá toàn bộ đệm rồi đọc lại lịch sử TC33/XOFA/Gieo.
-      if((old && !m[date]) || (m[date] && !m[date].reconciliation)){
-        const one = await fstore.collection(ggName('daily_closings_gieogieo', r.id)).doc(date).get();
-        if(one.exists) put(one); else delete m[date];
-      }
-      ggMap[r.id] = m;
-    }catch(e){ console.warn('[tiền mặt] không đọc được kết ca', r.id, e); ggMap[r.id] = null; }
+      s.docs.forEach(doc=>{put(doc);if((doc.data().businessDate||doc.id)===date)verified[r.id]=true});
+    }catch(e){readErrors[r.id]='Chưa tải đủ lịch sử kết ca.';}
+    if(!verified[r.id])try{
+      const one=await cashReadServer(fstore.collection(ggName('daily_closings_gieogieo',r.id)).doc(date));
+      if(one.exists){const cl=one.data();m[date]={...ggCashExpected(cl),received:cl.ownerReceipt?.received??null,receipt:cl.ownerReceipt||null};verified[r.id]=true;}
+      else if(m[date]?.received!=null){verified[r.id]=false;readErrors[r.id]='Có số đã nhận trong bộ đệm nhưng chưa tìm thấy phiếu kết ca gốc. Không ghi đè.';}
+      else verified[r.id]=true;
+    }catch(e){verified[r.id]=false;readErrors[r.id]='Chưa đọc được phiếu kết ca gốc. Không ghi đè số đã nộp.';}
+    ggMap[r.id]=Object.keys(m).length||verified[r.id]?m:null;
   });
   // 3) Phải nộp TC33 / XOFA cho các ngày CHƯA nhận (+ ngày đang xem): doanh thu (đệm sẵn) + chi tại quầy.
   const need = new Set([date]);
@@ -1506,7 +1533,7 @@ async function readCash(date, force){
   ['tc33', 'xofa'].forEach(st=>Object.entries(tcxMap[st]).forEach(([d, r])=>{ if(r && r.received != null) nc.tcx[st][d] = r; }));
   Object.entries(ggMap).forEach(([id, m])=>{ if(!m) return; nc.gg[id] = {}; Object.entries(m).forEach(([d, v])=>{ if(v && v.received != null) nc.gg[id][d] = v; }); });
   cashCacheSave(nc);
-  return { cfg, start, today, date, records, tcx, gg: ggMap, daySummary };
+  return { cfg, start, today, date, records, tcx, gg: ggMap, daySummary, verified, readErrors };
 }
 async function writeCashReceipt(store, date, received, info){
   await ensureAuth(); validDate(date);
@@ -1516,11 +1543,11 @@ async function writeCashReceipt(store, date, received, info){
   if(store === 'tc33' || store === 'xofa'){
     const exp = Math.round(Number(info.expected) || 0);
     const rec = { store, date, received: n, expected: exp, variance: n - exp, sales: Math.round(Number(info.sales) || 0), spent: Math.round(Number(info.spent) || 0), at, by: 'manage' };
-    const ref = fstore.collection(CASH_COLL).doc(store + '_' + date), old = await ref.get();
+    const ref = fstore.collection(CASH_COLL).doc(store + '_' + date), old = await cashReadServer(ref);
     if(old.exists){ rec.createdAt = old.data().createdAt || old.data().at; rec.editedAt = at; rec.prevReceived = old.data().received; }
     await ref.set(rec);
   } else {
-    const ref = fstore.collection(ggName('daily_closings_gieogieo', store)).doc(date), cur = await ref.get();
+    const ref = fstore.collection(ggName('daily_closings_gieogieo', store)).doc(date), cur = await cashReadServer(ref);
     const e = ggCashExpected(cur.exists ? cur.data() : null);
     if(e.state !== 'ready') throw new Error('Ngày này cửa hàng chưa kết ca / chưa bàn giao tiền — chưa nhập thực nhận được.');
     const old = cur.data().ownerReceipt;
@@ -2991,7 +3018,7 @@ function cashRow(c,storeId,d){const gg=storeId!=='tc33'&&storeId!=='xofa';return
 // Gieo: chỉ ngày đã bàn giao tiền (ngày chưa kết ca báo riêng).
 function cashMissing(c,storeId){
  const out=[],gg=storeId!=='tc33'&&storeId!=='xofa';if(gg&&!c.gg?.[storeId])return out;
- for(let d=c.start;d<c.today;d=addDays(d,1)){const r=cashRow(c,storeId,d);if(r&&r.received!=null)continue;if(gg){if(r&&r.state==='ready')out.push({d,expected:r.expected});else if(r&&r.state==='open')out.push({d,open:true})}else if(!r||r.expected||r.sales)out.push({d,expected:r?r.expected:null})}
+ for(let d=c.start;d<c.today;d=addDays(d,1)){const r=cashRow(c,storeId,d);if(r&&r.received!=null)continue;if(gg){if(r&&r.state==='ready')out.push({d,expected:r.expected});else if(r&&r.state==='open')out.push({d,open:true})}else out.push({d,expected:r?r.expected:null})}
  return out;
 }
 function cashVar(v){return v===0?'<span class="cash-var ok">Khớp</span>':v>0?`<span class="cash-var up">Thừa ${money(v)} ₫</span>`:`<span class="cash-var down">Thiếu ${money(-v)} ₫</span>`}
@@ -3037,7 +3064,7 @@ async function cashShiftDetails(id,d){
  }catch(e){if(box.isConnected)box.innerHTML=`<p class="cash-msg">Chưa tải được các đoạn ca. ${esc(friendlyError(e))}</p><button class="btn secondary" onclick="cashShiftDetails('${id}','${d}')">Thử lại</button>`;}
 }
 function cashWidget(c,st){
- const id=st.id,gg=st.brand==='gieo',d=state.cashDate,r=cashRow(c,id,d)||{},key=id+'|'+d,editing=state.cashEdit===key,miss=cashMissing(c,id),isToday=d===c.today;
+ const id=st.id,gg=st.brand==='gieo',d=state.cashDate,r=cashRow(c,id,d)||{},key=id+'|'+d,canWrite=c.verified?.[id]!==false,editing=canWrite&&state.cashEdit===key,miss=cashMissing(c,id),isToday=d===c.today;
  const head=`<div class="widget-head"><span class="widget-brandmark" aria-hidden="true">${esc(gg?st.code.slice(2):st.mono)}</span><div class="widget-heading"><h3>${esc(gg?'Gieo Gieo':st.name)}</h3><p>${esc(gg?st.code+' · '+st.location:st.id==='tc33'?'Tiền mặt không gồm Ăn vặt':'Tiền mặt không gồm Food')}</p></div></div>`;
  let body='';
  if(gg&&c.gg?.[id]===null)body='<p class="cash-msg">Không đọc được kết ca của quán này.</p>';
@@ -3045,15 +3072,17 @@ function cashWidget(c,st){
  else{
   const detail=gg?`Bàn giao lúc kết ca ${money(r.handed||0)} ₫${r.after?` · bán sau kết ca +${money(r.after)} ₫`:''}${r.retained?` · giữ lại két ${money(r.retained)} ₫`:''}${r.recipient?` · ${esc(r.recipient)} nhận`:''}`:`Tiền mặt bán ${money(r.sales||0)} ₫${r.spent?` − chi tại quầy ${money(r.spent)} ₫`:''}${isToday&&r.received==null?' · tạm tính tới giờ':''}`;
   const exp=Number(r.expected)||0;
-  const recBlock=r.received!=null&&!editing?`<div class="cash-rec"><div><span>Chủ quán thực nhận</span><b class="num">${money(r.received)} ₫</b><small>${r.receipt?.by==='quanlygieo'?'Nhập ở Quản lý Gieo':'Nhập ở manage'}${r.receipt?.at?' · '+dateVN(String(r.receipt.at).slice(0,10)).slice(0,5)+' '+clockVN(r.receipt.at):''}</small></div>${cashVar(Math.round(r.received-exp))}<button class="btn secondary" onclick="state.cashEdit='${key}';render()">${icon('edit')}Sửa</button></div>`
-   :`<form class="cash-form" onsubmit="saveCash(event,'${id}','${d}')"><label for="cash-${id}">Chủ quán thực nhận</label><div class="cash-in"><input class="input num" id="cash-${id}" name="received" inputmode="numeric" autocomplete="off" maxlength="16" required placeholder="${groupMoneyInput(exp)}" value="${editing&&r.received!=null?groupMoneyInput(r.received):''}" oninput="this.value=groupMoneyInput(this.value);cashLiveVar(this,${exp})"><button class="btn" type="submit">${icon('check')}${editing?'Lưu':'Xác nhận'}</button>${editing?`<button class="btn secondary" type="button" onclick="state.cashEdit=null;render()">Huỷ</button>`:''}</div><small class="cash-live" id="cashv-${id}"></small></form>`;
+  const recBlock=r.received!=null&&!editing?`<div class="cash-rec"><div><span>Chủ quán thực nhận${canWrite?'':' · bản lưu gần nhất'}</span><b class="num">${money(r.received)} ₫</b><small>${r.receipt?.by==='quanlygieo'?'Nhập ở Quản lý Gieo':'Nhập ở manage'}${r.receipt?.at?' · '+dateVN(String(r.receipt.at).slice(0,10)).slice(0,5)+' '+clockVN(r.receipt.at):''}</small></div>${cashVar(Math.round(r.received-exp))}${canWrite?`<button class="btn secondary" onclick="state.cashEdit='${key}';render()">${icon('edit')}Sửa</button>`:''}</div>`
+   :!canWrite?'<p class="cash-msg">Chưa xác minh được phiếu nhận. Tạm dừng nhập để bảo vệ số đã nộp.</p>':`<form class="cash-form" onsubmit="saveCash(event,'${id}','${d}')"><label for="cash-${id}">Chủ quán thực nhận</label><div class="cash-in"><input class="input num" id="cash-${id}" name="received" inputmode="numeric" autocomplete="off" maxlength="16" required placeholder="${groupMoneyInput(exp)}" value="${editing&&r.received!=null?groupMoneyInput(r.received):''}" oninput="this.value=groupMoneyInput(this.value);cashLiveVar(this,${exp})"><button class="btn" type="submit">${icon('check')}${editing?'Lưu':'Xác nhận'}</button>${editing?`<button class="btn secondary" type="button" onclick="state.cashEdit=null;render()">Huỷ</button>`:''}</div><small class="cash-live" id="cashv-${id}"></small></form>`;
   body=`<div class="cash-exp"><span>${gg?'Tiền mặt cần lấy':'Phải nộp'}</span><strong class="num">${money(exp)}<span>₫</span></strong><small>${detail}</small></div>${gg?cashReconciliation(r,id,d):''}${recBlock}`;
  }
  if(gg&&r.state!=='ready'&&r.received==null)body+=cashReconciliation(r,id,d);
  const nReady=miss.filter(m=>!m.open).length,nOpen=miss.length-nReady;
  const missHtml=miss.length?`<div class="cash-miss"><span>${nReady?'Chưa nhận '+nReady+' ngày':''}${nReady&&nOpen?' · ':''}${nOpen?'<i class="cash-open">'+nOpen+' ngày chưa kết ca</i>':''}</span>${miss.slice(-8).reverse().map(m=>`<button class="${m.d===d?'on':''} ${m.open?'open':''}" onclick="state.cashDate='${m.d}';state.cashEdit=null;render()" title="${m.open?'Chưa kết ca':m.expected!=null?'Phải nộp '+money(m.expected)+' ₫':''}">${dateVN(m.d).slice(0,5)}</button>`).join('')}${miss.length>8?`<em>+${miss.length-8}</em>`:''}</div>`:`<div class="cash-miss done">${icon('check')}Đã nhận đủ từ ${dateVN(c.start).slice(0,5)}</div>`;
- const statusHtml=gg&&c.gg?.[id]===null?'<div class="cash-miss">Chưa xác định các ngày chưa nhận — tải lại để kiểm tra.</div>':missHtml;
- return `<article class="cash-widget" style="--c:${st.c}">${head}${body}${cashDayStats(c,id)}${statusHtml}</article>`;
+ const statusHtml=c.readErrors?.[id]||gg&&c.gg?.[id]===null?'<div class="cash-miss">Chưa xác minh đủ lịch sử nhận tiền — tải lại để kiểm tra.</div>':missHtml;
+ const map=gg?c.gg?.[id]:c.tcx?.[id],history=Object.entries(map||{}).filter(([day,x])=>day<c.today&&x?.received!=null).sort(([a],[b])=>b.localeCompare(a));
+ const historyHtml=history.length?`<details class="cash-miss done cash-history"><summary>Đã ghi nhận ${history.length} ngày · xem lại</summary><div class="cash-miss">${history.slice(0,8).map(([day,x])=>`<button onclick="state.cashDate='${day}';state.cashEdit=null;render()" title="Thực nhận ${money(x.received)} ₫">${dateVN(day).slice(0,5)} ✓</button>`).join('')}</div></details>`:'';
+ return `<article class="cash-widget" style="--c:${st.c}">${head}${c.readErrors?.[id]?`<p class="cash-msg" role="alert">${esc(c.readErrors[id])}</p>`:''}${body}${cashDayStats(c,id)}${statusHtml}${historyHtml}</article>`;
 }
 // ==========================================================================
 // [TỔNG KẾT THÁNG] (16/10) tab thangket — widget từng quán (cùng khung thẻ điểm bán). The cafe 33 / XOFA: tạm tính → Chốt tháng
@@ -3131,11 +3160,13 @@ function cashView(){
  const list=stores.filter(st=>HR_STORE_IDS.includes(st.id)||(st.brand==='gieo'&&st.active!==false));
  const allMiss=list.map(st=>({st,m:cashMissing(c,st.id).filter(x=>!x.open)})).filter(x=>x.m.length),nMiss=allMiss.reduce((a,x)=>a+x.m.length,0),sumMiss=allMiss.reduce((a,x)=>a+x.m.reduce((s,m)=>s+(Number(m.expected)||0),0),0);
  const tools=`<label class="cash-start" title="Ngày chưa nhận tính từ mốc này">Theo dõi từ <input type="date" value="${c.start}" max="${currentDate()}" onclick="openNativePicker(this)" onchange="setCashStart(this.value)"></label>${dateControl('date',state.cashDate,"state.cashDate=this.value;state.cashEdit=null;render()",'Ngày nộp tiền',currentDate())}`;
- const banner=nMiss?`<section class="panel cash-banner"><b>${nMiss} ngày chưa nhận tiền</b><span>· phải nộp ${money(sumMiss)} ₫ · ${allMiss.map(x=>esc(x.st.brand==='gieo'?'Gieo '+x.st.code:x.st.name)+' '+x.m.length).join(' · ')}</span></section>`:`<section class="panel cash-banner ok">${icon('check')}<b>Đã nhận đủ tiền các ngày đã qua</b><span>· từ ${dateVN(c.start)}</span></section>`;
+ const incomplete=Object.keys(c.readErrors||{}).length;
+ const banner=incomplete?`<section class="panel cash-banner" role="alert"><b>Chưa xác minh đủ lịch sử nhận tiền</b><span>· ${incomplete} điểm chưa đọc đủ. Số lưu gần nhất vẫn được giữ; chưa kết luận đã nhận đủ.</span></section>`:nMiss?`<section class="panel cash-banner"><b>${nMiss} ngày chưa ghi nhận thực nhận</b><span>· phải nộp ${money(sumMiss)} ₫ · ${allMiss.map(x=>esc(x.st.brand==='gieo'?'Gieo '+x.st.code:x.st.name)+' '+x.m.length).join(' · ')}</span></section>`:`<section class="panel cash-banner ok">${icon('check')}<b>Đã nhận đủ tiền các ngày đã qua</b><span>· từ ${dateVN(c.start)}</span></section>`;
  return '<div class="cash-page">'+pageHead('Tiền mặt',(state.cashDate===c.today?'Hôm nay · ':'')+dateVN(state.cashDate)+' — tiền mặt các cửa hàng nộp về.',tools)+banner+`<section class="cash-grid">${list.map(st=>cashWidget(c,st)).join('')}</section>${footer('secondary-footer')}</div>`;
 }
 function cashLiveVar(input,exp){const o=document.getElementById('cashv-'+input.id.slice(5));if(!o)return;const n=goalNumber(input.value);o.innerHTML=input.value===''?'':cashVar(Math.round(n-exp))}
 async function saveCash(event,storeId,date){
+ if(live.cash?.verified?.[storeId]===false){event.preventDefault();toast('Chưa xác minh được phiếu gốc — chưa ghi tiền thực nhận. Bấm tải lại.');return;}
  event.preventDefault();const f=new FormData(event.target),n=goalNumber(f.get('received')),r=cashRow(live.cash,storeId,date)||{},button=event.target.querySelector('[type="submit"]');
  button.disabled=true;const ok=await commitAction('cash:'+storeId+date,()=>backend.writeCashReceipt(storeId,date,n,{expected:r.expected,sales:r.sales,spent:r.spent}),async()=>{state.cashEdit=null;invalidateViews('tienmat');await loadCurrent(true);toast('Đã ghi thực nhận.')});if(!ok&&button.isConnected)button.disabled=false;
 }

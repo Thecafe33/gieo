@@ -14,4 +14,4 @@ Hai app một file HTML (không build step), Firebase compat 10.13.2, project `t
 
 Quy tắc làm việc cho Claude: `CLAUDE.md`. Deploy: chủ dự án tự chạy `sh tools/predeploy_check.sh <thư mục deploy>` rồi `firebase deploy --only hosting`.
 
-20/10: tab Tiền mặt của `manage.html` bổ sung đối soát cuối ca Gieo, chi tiết từng đoạn ca khi bấm và hai số nhỏ doanh thu/chuyển khoản từng quán. Cách lấy tiền/ghi thực nhận giữ nguyên. Xem `docs/MANAGE_TIEN_MAT.md`.
+20/10: tab Tiền mặt của `manage.html` bổ sung đối soát cuối ca Gieo, chi tiết từng đoạn ca khi bấm và hai số nhỏ doanh thu/chuyển khoản từng quán. **Bản vá khẩn kế tiếp** tra phiếu gốc ngày cũ, giữ số nhận trong cả đệm v1/v2 và không cho ghi đè khi chưa xác minh server. Dùng ZIP `manage_khoi_phuc_tien_nop_20-10.zip` thay ZIP `manage_tien_mat_doi_soat_20-10.zip`. Xem `docs/MANAGE_TIEN_MAT.md`.

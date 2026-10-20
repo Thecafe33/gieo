@@ -1,5 +1,24 @@
 # Tiền mặt trong manage — bổ sung 20/10/2026
 
+**Bản vá khẩn sau 5d42060:** chủ quán phản ánh chọn ngày cũ mất thực nhận. Chưa thể
+đọc Hosting/Firebase thật trong môi trường này; không kết luận phiếu tại quán đã bị xoá
+hoặc chắc chắn khôi phục được. Bản UI trước được kiểm tra bằng dữ liệu dựng sẵn nên
+chưa đủ để đảm bảo luồng nâng bộ đệm/đọc phiếu cũ.
+
+Đã tái hiện trên toàn bộ backend nguyên văn (Firebase giả, lọc where/doc thật):
+phiếu còn theo ID nhưng thiếu trường ngày bị truy vấn khoảng bỏ qua; v2 rỗng che số
+đã nhận trong v1; snapshot rỗng từ cache không được phân biệt với nguồn đầy đủ.
+Bản trước thất bại ở bài kiểm tra này, bản vá vượt qua.
+
+Bản vá ghép cả hai bộ đệm, không xoá đệm khi tải lại doanh thu, tra doc gốc đúng
+quán/ngày nếu chưa tìm thấy trong truy vấn khoảng. Chỉ xem ngày không ghi phiếu thật.
+Config/phiếu nhận bắt buộc xác minh từ server; lỗi thì giữ số lưu gần nhất kèm cảnh báo,
+không báo “đã nhận đủ”, không cho ghi đè số 0. Không tự ghi lại mốc theo dõi chỉ vì
+snapshot config offline rỗng. Đã nhận có mục mở lại; chưa xác nhận ngày TC33/XOFA
+không bị giấu chỉ vì doanh thu hiện đọc được là 0. Không cần nhập lại tiền cũ.
+
+ZIP thay thế: **`manage_khoi_phuc_tien_nop_20-10.zip`**, chỉ có `manage.html`, dùng chung ba mùa.
+
 Phạm vi: thêm dữ kiện đối soát và hai chỉ số nhỏ. Không sửa quy trình bán hàng,
 chốt/huỷ bill, chuyển khoản tay, kết ca hoặc các phép tính/ghi nhận gốc của POS.
 Chưa deploy Hosting, không đọc/ghi Firebase thật trong quá trình kiểm tra.
@@ -60,6 +79,10 @@ Lỗi một quán không biến số thiếu thành 0 hoặc làm mất các qu�
 - `node tools/manage_cash/e2e.js`: 63 kiểm tra ở 1366/1024/390px, sáng/tối, popup,
   mở lại không đọc thêm, xác nhận/sửa thực nhận hoạt động. Dữ liệu giả, chặn mọi mạng ngoài.
 - `sh tools/sinh_lai_tat_ca.sh`: sinh đủ bộ deploy thường/Giáng sinh/Tết và chạy toàn bộ test.
+- `node tests/manage_tien_mat_lich_su.test.js`: toàn bộ backend thật, query/doc có lọc,
+  ngày cũ/đệm rỗng/offline, không tự ghi dữ liệu/config, không ghi đè khi chưa xác minh.
+- `node tools/manage_cash/e2e_history.js`: 78 kiểm tra backend + UI trên PC/điện thoại;
+  không stub `readCash`, không cho mạng thật. Nguồn giả vẫn là giới hạn của kiểm tra.
 
 Ba file `ban_deploy/{thuong,giangsinh,tet}/manage.html` giống nhau; ZIP giao chỉ chứa
 `manage.html`, dùng được cho cả ba mùa. Không cần thay engine/shared JS cho thay đổi này.
