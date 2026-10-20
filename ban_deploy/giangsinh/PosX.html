@@ -400,6 +400,11 @@ body{font-family:'Google Sans',sans-serif;background:var(--bg);max-width:430px;m
 .cp-change-warn{color:#e74c3c;}
 .cp-confirm-btn{background:var(--gd);color:#fff;border:none;border-radius:30px;width:100%;padding:18px;font-family:'Google Sans',sans-serif;font-size:17px;font-weight:700;cursor:pointer;margin-top:4px;}
 .lowfx *{backdrop-filter:none!important;-webkit-backdrop-filter:none!important;}
+@media (min-width: 768px) {
+  .togo-gift-popup { align-items:center; padding:24px; }
+  .togo-gift-box { max-width:580px; border-radius:28px; max-height:85vh; }
+}
+.togo-gift-item:focus-visible { outline:3px solid var(--gm); outline-offset:2px; }
 </style>
 </head>
 <body>
@@ -984,8 +989,8 @@ body{font-family:'Google Sans',sans-serif;background:var(--bg);max-width:430px;m
         </div>
       </div>
       <div style="background:#f5f5f5;border-radius:14px;padding:14px;margin-bottom:12px;">
-        <div style="font-size:10px;font-weight:700;color:var(--gt);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">Danh mục áp dụng (ly tặng)</div>
-        <div id="tg-category-list" style="display:flex;flex-direction:column;gap:8px;"></div>
+        <div style="font-size:10px;font-weight:700;color:var(--gt);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">Danh sách ly tặng chung · Mua X tặng Y / 6 tem</div>
+        <p style="font-size:13px;line-height:1.5">Chọn từng món được phép tặng Size M. Chưa chọn món nào thì chưa tặng ly; bán hàng vẫn bình thường.</p><div id="tg-category-list" style="display:flex;flex-direction:column;gap:8px;"></div>
       </div>
       <div style="background:#f5f5f5;border-radius:14px;padding:14px;margin-bottom:12px;">
         <div style="font-size:10px;font-weight:700;color:var(--gt);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">Điều kiện size ly mua</div>
@@ -1681,6 +1686,8 @@ const TOGO_DEFAULTS = {
 function _mergeTogoDefaults(obj) {
   const o = obj && typeof obj === 'object' ? obj : {};
   const gift = Object.assign({}, TOGO_DEFAULTS.gift, o.gift || {});
+  if (!Array.isArray(gift.itemIds)) gift.itemIds = [];
+  gift.itemIds = gift.itemIds.map(String);
   if (!Array.isArray(gift.categories)) gift.categories = [];   // RT không lưu mảng rỗng
   return { gift, discount: Object.assign({}, TOGO_DEFAULTS.discount, o.discount || {}) };
 }
@@ -1841,27 +1848,35 @@ function renderTgDiscToggle() {
   if (status) status.textContent = togoSettings.discount.enabled ? 'Bật' : 'Tắt';
 }
 
+function sharedGiftMenu() {
+  const source = MENU_TOGO.length ? MENU_TOGO : MENU;
+  return source.filter(m => m.active !== false && !m.isFood && (m.sizes || []).some(s => s.label === 'M' && s.price > 0));
+}
+function sharedGiftItems() {
+  const ids = togoSettings.gift.itemIds || [];
+  return sharedGiftMenu().filter(m => ids.includes(String(m.id)));
+}
 function renderTgCategoryList() {
   const el = document.getElementById('tg-category-list');
   if (!el) return;
-  // Danh mục áp dụng quà tặng lấy từ menu To Go
-  const togoSrc = MENU_TOGO.length ? MENU_TOGO : MENU;
-  const types = [...new Set(togoSrc.map(m => m.type).filter(Boolean))];
-  el.innerHTML = types.map(t => {
-    const checked = togoSettings.gift.categories.includes(t);
-    return `<label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:6px 0;">
-      <input type="checkbox" value="${t}" ${checked ? 'checked' : ''} onchange="onTgCatChange(this)"
-        style="width:18px;height:18px;cursor:pointer;accent-color:var(--gm);">
-      <span style="font-size:14px;font-weight:600;color:var(--td);">${t}</span>
-    </label>`;
-  }).join('');
-  if (!types.length) el.innerHTML = '<div style="font-size:12px;color:#bbb;">Chưa có danh mục nào. Thêm món trước.</div>';
+  el.replaceChildren();
+  sharedGiftMenu().forEach(m => {
+    const label = document.createElement('label');
+    label.style.cssText = 'display:flex;align-items:center;gap:12px;padding:10px;background:white;border-radius:12px;cursor:pointer';
+    const cb = document.createElement('input'); cb.type = 'checkbox'; cb.value = String(m.id);
+    cb.checked = (togoSettings.gift.itemIds || []).includes(cb.value);
+    cb.onchange = () => onTgCatChange(cb);
+    const text = document.createElement('span');
+    text.textContent = m.name + ' · M · ' + fmt(m.sizes.find(s => s.label === 'M').price);
+    label.append(cb, text); el.append(label);
+  });
+  if (!el.children.length) el.textContent = 'Chưa có món Size M trong menu To Go.';
 }
-
 function onTgCatChange(cb) {
-  if (cb.checked) { if (!togoSettings.gift.categories.includes(cb.value)) togoSettings.gift.categories.push(cb.value); }
-  else { togoSettings.gift.categories = togoSettings.gift.categories.filter(c => c !== cb.value); }
-  saveTogoSettingsLocal();   // [FIX G3.3]
+  const ids = (togoSettings.gift.itemIds || []).filter(id => id !== cb.value);
+  if (cb.checked) ids.push(cb.value);
+  togoSettings.gift.itemIds = ids;
+  saveTogoSettingsLocal();
   renderTgGiftSummary();
 }
 
@@ -1897,6 +1912,7 @@ function renderTgGiftSummary() {
   const X = g.buyQty || '?', Y = g.freeQty || '?';
   const mult = (g.buyQty > 0 && g.freeQty > 0) ? ` (mua ${g.buyQty * 2} ly tặng ${g.freeQty * 2} ly…)` : '';
   el.textContent = `Hiện tại: Cứ mua ${X} ly ${buyTxt} → tặng ${Y} ly Size M${mult}`
+    + ` · ${sharedGiftItems().length} món tặng đã chọn (dùng chung đổi 6 tem)`
     + (g.capByCheapest ? ' · ly tặng không đắt hơn ly rẻ nhất đã mua' : ' · không giới hạn giá ly tặng');
 }
 
@@ -2001,15 +2017,13 @@ function giftBuyMinPrice() {
   });
   return m;
 }
-// Món được phép chọn làm ly tặng: có Size M, đúng danh mục đã chọn, và (nếu bật trần giá) giá M ≤ ly rẻ nhất đã mua
+// Danh sách món chung, quà mua X tặng Y áp thêm trần giá nếu được bật.
 function togoGiftEligibleItems() {
   const g = togoSettings.gift;
-  const cats = g.categories;
   const cap = g.capByCheapest ? giftBuyMinPrice() : Infinity;
-  return getActiveMenu().filter(m => {
+  return sharedGiftItems().filter(m => {
     const sizeM = m.sizes.find(s => s.label === 'M');
     if (!sizeM) return false;
-    if (cats && cats.length > 0 && !cats.includes(m.type)) return false;
     return sizeM.price <= cap;
   });
 }
@@ -2068,7 +2082,7 @@ function syncTogoGift() {
   let why = null;
   // 1) Gỡ ly tặng đắt hơn ly rẻ nhất đã mua (khi bật trần giá)
   Object.keys(cart).filter(isGiftKey).forEach(k => {
-    if (cart[k]._giftListPrice > cap) { delete cart[k]; why = 'ly tặng đắt hơn ly rẻ nhất đã mua'; }
+    if (!togoGiftEligibleItems().some(m => String(m.id) === String(cart[k].itemId)) || cart[k]._giftListPrice > cap) { delete cart[k]; why = 'ly tặng đắt hơn ly rẻ nhất đã mua'; }
   });
   // 2) Số ly tặng không được vượt quyền lợi hiện có (bớt món → quyền lợi giảm): cắt từ ly thêm sau cùng trở về trước
   const allowed = giftEntitledQty();
@@ -2085,7 +2099,12 @@ function syncTogoGift() {
   return !!why;
 }
 
-function checkTogoBeforeCheckout(onProceed) {
+function checkTogoBeforeCheckout(onProceed, stampChecked = false) {
+  if (!stampChecked && !_giftVoucherKey && curCustomer && loyaltyCustomer &&
+      ((loyaltyCustomer.free_drink_available || 0) + Math.floor((loyaltyCustomer.stamp_count || 0) / 6) > 0)) {
+    consumeFreeToGoDrink(curCustomer.phone, () => checkTogoBeforeCheckout(onProceed, true));
+    return;
+  }
   if (!isToGo) { onProceed(); return; }
   syncTogoGift();
   if (togoGiftOfferDue()) {
@@ -2097,11 +2116,11 @@ function checkTogoBeforeCheckout(onProceed) {
   onProceed();
 }
 
-function openTogoGiftPopup(need, onProceed) {
+function openTogoGiftPopup(need, onProceed, stamp = null) {
   togoGiftPicks = {};
   const g = togoSettings.gift;
-  // Món được phép tặng: Size M + đúng danh mục + (nếu bật) không đắt hơn ly rẻ nhất đã mua
-  const eligible = togoGiftEligibleItems();
+  // Món được phép tặng: Size M + danh sách cho phép + (nếu bật) không đắt hơn ly rẻ nhất đã mua
+  const eligible = stamp ? sharedGiftItems() : togoGiftEligibleItems();
 
   // [FIX G3.4] Không có món quà phù hợp → bỏ qua tặng ly, không để nhân viên kẹt ở màn thanh toán
   if (!eligible.length) {
@@ -2113,19 +2132,26 @@ function openTogoGiftPopup(need, onProceed) {
 
   const listEl = document.getElementById('togoGiftList');
   const subEl = document.getElementById('togoGiftSub');
-  const cap = g.capByCheapest ? giftBuyMinPrice() : Infinity;
+  const cap = !stamp && g.capByCheapest ? giftBuyMinPrice() : Infinity;
   const popup = document.getElementById('togoGiftPopup');
-  popup._subBase = `Bạn được tặng ${need} ly Size M miễn phí!` + (cap < Infinity ? ` (giá ly tặng không quá ${fmt(cap)})` : '');
+  popup._stamp = stamp;
+  popup._subBase = (stamp ? 'Đổi 6 tem · ' : 'Mua X tặng Y · ') + `Bạn được tặng ${need} ly Size M miễn phí!` + (cap < Infinity ? ` (giá ly tặng không quá ${fmt(cap)})` : '');
   subEl.textContent = popup._subBase;
 
-  listEl.innerHTML = eligible.map(m => `
-      <div class="togo-gift-item" id="tgi_${m.id}" onclick="selectTogoGift('${m.id}')">
-        <div style="width:36px;height:36px;border-radius:10px;background:${m.color||'#1a4a2e'};flex-shrink:0;"></div>
-        <span class="togo-gift-name">${m.name}</span>
-        <span class="togo-gift-size">Size M · 0đ</span>
-        <span class="togo-gift-qty" id="tgq_${m.id}"></span>
-        <button class="togo-gift-minus" id="tgm_${m.id}" style="display:none" onclick="event.stopPropagation();adjTogoGift('${m.id}',-1)">−</button>
-      </div>`).join('');
+  listEl.replaceChildren();
+  eligible.forEach(m => {
+    const row = document.createElement('div'); row.className = 'togo-gift-item'; row.id = 'tgi_' + m.id;
+    row.tabIndex = 0; row.setAttribute('role', 'button');
+    row.onclick = () => selectTogoGift(String(m.id));
+    row.onkeydown = e => { if (e.target === row && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); row.click(); } };
+    const name = document.createElement('span'); name.className = 'togo-gift-name'; name.textContent = m.name;
+    const size = document.createElement('span'); size.className = 'togo-gift-size'; size.textContent = 'Size M · 0đ';
+    const qty = document.createElement('span'); qty.className = 'togo-gift-qty'; qty.id = 'tgq_' + m.id;
+    const minus = document.createElement('button'); minus.className = 'togo-gift-minus'; minus.id = 'tgm_' + m.id;
+    minus.style.display = 'none'; minus.textContent = '−'; minus.setAttribute('aria-label', 'Bớt một ly ' + m.name);
+    minus.onclick = e => { e.stopPropagation(); adjTogoGift(String(m.id), -1); };
+    row.append(name, size, qty, minus); listEl.append(row);
+  });
 
   popup.classList.add('show');
   // Store callback
@@ -2174,7 +2200,8 @@ function skipTogoGift() {
   const onProceed = popup._onProceed;
   popup.classList.remove('show');
   togoGiftPicks = {};
-  togoGiftDeclinedQty = giftEntitledQty();
+  if (!popup._stamp) togoGiftDeclinedQty = giftEntitledQty();
+  popup._stamp = null;
   if (onProceed) onProceed();
 }
 
@@ -2186,30 +2213,44 @@ function confirmTogoGift() {
   if (picked < need) { toast(`⚠ Chọn đủ ${need} ly tặng (mới chọn ${picked})`); return; }
   const onProceed = popup._onProceed;
 
-  // Kiểm lại điều kiện lúc xác nhận: món còn Size M, đúng danh mục, đúng trần giá so với ly rẻ nhất đã mua
-  const eligible = togoGiftEligibleItems();
+  // Kiểm lại điều kiện lúc xác nhận: món còn Size M, nằm trong danh sách, đúng trần giá so với ly rẻ nhất đã mua
+  const stamp = popup._stamp;
+  if (stamp && (document.getElementById('cuph').value.trim() !== stamp.phone || _giftVoucherKey)) {
+    toast('Khách hàng hoặc quà đang áp dụng đã thay đổi. Đóng và chọn lại.'); return;
+  }
+  if (picked !== need || (!stamp && picked > giftOutstandingQty())) { toast('Quyền nhận quà đã thay đổi — vui lòng chọn lại.'); return; }
+  const eligible = stamp ? sharedGiftItems() : togoGiftEligibleItems();
   const lines = [];
   for (const [id, cnt] of Object.entries(togoGiftPicks)) {
-    if (cnt <= 0) continue;
-    const m = getActiveMenu().find(x => x.id === id);
+    if (!Number.isInteger(cnt) || cnt <= 0) { toast('Số ly tặng không hợp lệ'); return; }
+    const m = sharedGiftItems().find(x => String(x.id) === id);
     const sizeM = m && m.sizes.find(s => s.label === 'M');
     // [FIX] Món không còn Size M (menu vừa đổi): báo và giữ popup, không để onProceed treo
     if (!sizeM) { toast('⚠ Món này không còn Size M — chọn món khác'); return; }
-    if (!eligible.some(x => x.id === id)) { toast('⚠ Ly này không đủ điều kiện làm ly tặng — chọn ly khác'); return; }
+    if (!eligible.some(x => String(x.id) === id)) { toast('⚠ Ly này không đủ điều kiện làm ly tặng — chọn ly khác'); return; }
     lines.push({ m, sizeM, cnt });
   }
   popup.classList.remove('show');
 
   // Thêm ly tặng giá 0 vào giỏ (_togoGift: để syncTogoGift tự gỡ / cắt bớt khi quyền lợi giảm)
   lines.forEach(({ m, sizeM, cnt }) => {
+    if (stamp) {
+      const key = '__free_stamp__' + Date.now();
+      _giftVoucherKey = key; _giftVoucherPhone = stamp.phone; _stampFreePhone = stamp.phone;
+      _stampFreeNeedConvert = stamp.curFree <= 0; _stampFreeOriginalStamp = stamp.curStamp;
+      cart[key] = { itemId: m.id, name: m.name, size: 'M', price: 0, qty: 1,
+        _vKey: key, _giftType: 'item_free', _giftLabel: 'Ly miễn phí (6 Stamp)', _sharedGift: true };
+      return;
+    }
     const k = m.id + '_M_free';
     if (cart[k]) cart[k].qty += cnt;
     else cart[k] = { itemId: m.id, name: m.name + ' (Tặng)', size: 'M', price: 0, qty: cnt, isFree: true, _togoGift: true, _giftListPrice: sizeM.price };
   });
   togoGiftPicks = {};
-  togoGiftDeclinedQty = null;
+  if (!stamp) togoGiftDeclinedQty = null;
+  popup._stamp = null;
   // Cập nhật UI menu + cart drawer
-  renderMenu();
+  renderMenu(); renderCartDrawer(); updFooter();
   // Đẩy lên RT session_display_xolifa để màn hình phụ thấy ly tặng
   syncDisplay('ordering');
   toast(`Đã thêm ${picked} ly tặng miễn phí!`);
@@ -3184,7 +3225,7 @@ function openPO(itemId) {
 function closePO(e) { if (!e || e.target === document.getElementById('po')) document.getElementById('po').classList.remove('show'); }
 function onSize(id, label) {
   document.getElementById('po').classList.remove('show');
-  const m = getActiveMenu().find(x => x.id === id);
+  const m = sharedGiftItems().find(x => String(x.id) === id);
   if (m) { const s = m.sizes.find(x => x.label === label); if (s) addCart(m, s); }
 }
 
@@ -3561,7 +3602,7 @@ function renderCustomerInfo(totalPoints, stampCount) {
     stampHtml = '<div style="border:2px solid #34d399;background:#ecfdf5;border-radius:10px;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">'
       + '<div>'
       + '<div style="font-size:13px;font-weight:800;color:#065f46;">\u2615 ' + effectiveFree + ' Ly To-Go Mi\u1ec5n Ph\u00ed</div>'
-      + '<div style="font-size:10px;color:#059669;font-weight:600;margin-top:2px;">T\u00edch \u0111\u1ee7 6 Stamp \u2022 Th\u00eam m\u00f3n v\u00e0o gi\u1ecf r\u1ed3i b\u1ea5m \u0110\u1ed5i ngay</div>'
+      + '<div style="font-size:10px;color:#059669;font-weight:600;margin-top:2px;">T\u00edch \u0111\u1ee7 6 Stamp \u2022 B\u1ea5m \u0110\u1ed5i ngay \u0111\u1ec3 ch\u1ecdn ly trong danh s\u00e1ch qu\u00e0</div>'
       + '</div>'
       + '<button style="background:#10b981;border:none;color:#fff;border-radius:8px;padding:6px 12px;font-family:\'Google Sans\',sans-serif;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;" onclick="consumeFreeToGoDrink(\'' + curCustomer.phone + '\')">\u0110\u1ed5i ngay</button>'
       + '</div>';
@@ -4263,59 +4304,38 @@ let _stampFreePhone = null;
 let _stampFreeNeedConvert = false;
 let _stampFreeOriginalStamp = 0;
 
-function consumeFreeToGoDrink(phone) {
-  // Bước 1: Giỏ phải có món trước
-  const cartItems = Object.entries(cart).filter(([, ci]) => !ci._vKey && !ci._discountId);
-  if (!cartItems.length) {
-    toast('🛒 Chưa có món trong giỏ!\nThêm món khách muốn uống trước, rồi bấm "Đổi ngay".');
-    return;
+let _stampPickLoading = false;
+function consumeFreeToGoDrink(phone, onProceed) {
+  if (_stampPickLoading) return;
+  if (_giftVoucherKey) { toast('Hãy gỡ quà đang áp dụng trước khi đổi ly tem.'); if (onProceed) onProceed(); return; }
+  if (!sharedGiftItems().length) { toast('Chưa cấu hình danh sách ly tặng. Vẫn có thể thanh toán không đổi quà.'); if (onProceed) onProceed(); return; }
+  _stampPickLoading = true;
+  return fstore.collection('customers').doc(phone).get().then(snap => {
+    if (document.getElementById('cuph').value.trim() !== phone) { toast('Khách hàng đã thay đổi, vui lòng chọn lại.'); return; }
+    const data = snap.exists ? snap.data() : {};
+    const curFree = data.free_drink_available || 0, curStamp = data.stamp_count || 0;
+    if (curFree + Math.floor(curStamp / 6) <= 0) {
+      toast('Khách không còn ly miễn phí.'); if (onProceed) onProceed(); return;
+    }
+    openTogoGiftPopup(1, onProceed, { phone, curFree, curStamp });
+  }).catch(() => { toast('Chưa kiểm tra được quyền đổi tem. Có thể thanh toán không đổi quà.'); if (onProceed) onProceed(); })
+    .finally(() => { _stampPickLoading = false; });
+}
+
+// Kiểm tra ngay trước mọi nhánh ghi bill, không đọc thêm Firebase.
+function validateSharedGifts() {
+  const allowed = sharedGiftItems();
+  let stampQty = 0;
+  for (const c of Object.values(cart)) {
+    const stamp = String(c._vKey || '').startsWith('__free_stamp__');
+    if (!stamp && !c._togoGift) continue;
+    if (!allowed.some(m => String(m.id) === String(c.itemId)) || c.size !== 'M' || c.price !== 0 || !Number.isInteger(c.qty) || c.qty < 1) return false;
+    if (stamp) {
+      stampQty += c.qty;
+      if (!_stampFreePhone || document.getElementById('cuph').value.trim() !== _stampFreePhone) return false;
+    } else if (!togoGiftEligibleItems().some(m => String(m.id) === String(c.itemId))) return false;
   }
-
-  // Bước 2: Kiểm tra Firebase còn ly không
-  fstore.collection('customers').doc(phone).get().then(snap => {
-    if (!snap.exists) { toast('❌ Không tìm thấy khách hàng!'); return; }
-    const data = snap.data();
-    const curFree  = data.free_drink_available || 0;
-    const curStamp = data.stamp_count || 0;
-    const effectiveFree = curFree + Math.floor(curStamp / 6);
-
-    if (effectiveFree <= 0) { toast('❌ Khách không còn ly miễn phí nào.'); return; }
-
-    // Bước 3: Mở modal chọn món → áp 100% miễn phí (KHÔNG ghi DB ở đây)
-    const tempVKey = '__free_stamp__' + Date.now();
-    _giftVoucherKey   = tempVKey;
-    _giftVoucherPhone = phone;
-    openPickCartModal(
-      { type: 'item_free', label: '🎁 Ly miễn phí (6 Stamp)' },
-      tempVKey,
-      'Ly miễn phí (6 Stamp)'
-    );
-
-    // Sau khi nhân viên chọn món trong modal → lưu intent, CHƯA ghi DB
-    const modal = document.getElementById('xl-pick-modal');
-    const observer = new MutationObserver(() => {
-      if (modal.style.display === 'none') {
-        observer.disconnect();
-        const applied = Object.values(cart).some(ci => ci._vKey === tempVKey);
-        if (applied) {
-          // Lưu lại để _finalizeStampFreeAfterPay() ghi DB khi order xong
-          _stampFreePhone = phone;
-          _stampFreeNeedConvert = (curFree <= 0 && curStamp >= 6);
-          _stampFreeOriginalStamp = curStamp;
-          toast('✅ Đã chọn ly miễn phí — sẽ trừ stamp sau khi thanh toán xong!');
-          renderCartDrawer();
-          updFooter();
-        } else {
-          _giftVoucherKey   = null;
-          _giftVoucherPhone = null;
-          _stampFreePhone   = null;
-          toast('ℹ️ Chưa chọn món — ly miễn phí chưa được đổi.');
-        }
-      }
-    });
-    observer.observe(modal, { attributes: true, attributeFilter: ['style'] });
-
-  }).catch(err => toast('❌ Có lỗi xảy ra: ' + err.message));
+  return stampQty <= 1 && giftHeldQty() <= giftEntitledQty();
 }
 
 // Gọi sau khi order lưu thành công — ghi DB trừ stamp/free_drink
@@ -4876,6 +4896,7 @@ function confirmCashPay() {
 // (hoặc chuyển khoản tự xác nhận trùng lúc bấm tay) sẽ ra đơn trùng + voucher Bed trùng.
 let _payInFlight = false;
 function _payBegin() {
+  if (!validateSharedGifts()) { toast('Ly tặng không còn hợp lệ. Quay lại giỏ, gỡ ly tặng và chọn lại trong danh sách.'); return false; }
   if (_payInFlight) { toast('Đang ghi đơn — vui lòng đợi'); return false; }
   _payInFlight = true;
   setTimeout(() => { _payInFlight = false; }, 15000); // chốt an toàn nếu mạng treo

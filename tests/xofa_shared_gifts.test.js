@@ -1,0 +1,30 @@
+const assert = require('assert');
+const {extract} = require('./lib/extract');
+const names = ['sharedGiftMenu','sharedGiftItems','togoGiftEligibleItems','isPaidCupLine','_giftSizes','_boughtSize','isGiftBuyCup','giftBuyCupCount','giftBuyMinPrice','_togoGiftCountOk','giftEntitledQty','giftHeldQty','giftOutstandingQty','validateSharedGifts','syncTogoGift','_mergeTogoDefaults'];
+const ctx = new Function(`let MENU=[], MENU_TOGO=[],cart={},isToGo=true,togoSettings={gift:{}},_stampFreePhone='0900';
+const TOGO_DEFAULTS={gift:{categories:[]},discount:{}};
+const document={getElementById:()=>({value:'0900'})};function toast(){}
+${extract('PosX.html',names)}
+return {${names.join(',')},set(v){if(v.menu) MENU_TOGO=v.menu;if(v.cart)cart=v.cart;if(v.gift)togoSettings.gift=v.gift;},cart:()=>cart};`)();
+const menu=[{id:'a',name:'Cho phép',sizes:[{label:'M',price:20000}]},{id:'b',name:'Không cho phép',sizes:[{label:'M',price:15000}]},{id:'c',name:'Không M',sizes:[{label:'L',price:25000}]}];
+const gift={enabled:true,buyQty:2,freeQty:1,itemIds:['a'],categories:['Nhóm cũ'],sizes:[]};
+const paid={itemId:'b',price:30000,size:'L',qty:2};
+const free={itemId:'a',price:0,size:'M',qty:1,isFree:true,_togoGift:true};
+ctx.set({menu,gift,cart:{paid}});
+assert.deepEqual(ctx.sharedGiftItems().map(x=>x.id),['a']);
+assert.equal(ctx.togoGiftEligibleItems().length,1,'nhóm cũ không thay danh sách món');
+ctx.set({cart:{paid,free}});assert(ctx.validateSharedGifts());
+ctx.set({cart:{paid,free:{...free,itemId:'b'}}});assert(!ctx.validateSharedGifts(),'chặn quà ngoài danh sách');
+ctx.set({cart:{paid,free:{...free,qty:2}}});assert(!ctx.validateSharedGifts(),'chặn vượt quyền lợi');
+ctx.set({cart:{paid:{...paid,qty:1},free}});assert(ctx.syncTogoGift());assert(!ctx.cart().free);
+ctx.set({cart:{paid,free},gift:{...gift,itemIds:[]}});assert(ctx.syncTogoGift());assert(!ctx.cart().free);
+const stamp={itemId:'a',size:'M',qty:1,price:0,_vKey:'__free_stamp__1'};
+ctx.set({gift,cart:{stamp}});assert(ctx.validateSharedGifts(),'đổi tem không cần mua X');
+ctx.set({cart:{stamp:{...stamp,itemId:'b'}}});assert(!ctx.validateSharedGifts());
+ctx.set({cart:{stamp:{...stamp,size:'L'}}});assert(!ctx.validateSharedGifts());
+ctx.set({cart:{stamp:{...stamp,qty:2}}});assert(!ctx.validateSharedGifts());
+ctx.set({cart:{paid},gift:{...gift,capByCheapest:true}});assert.equal(ctx.togoGiftEligibleItems().length,1);
+ctx.set({cart:{paid:{...paid,price:18000}}});assert.equal(ctx.togoGiftEligibleItems().length,0);assert.equal(ctx.sharedGiftItems().length,1,'trần giá chỉ mua X tặng Y');
+assert.deepEqual(ctx._mergeTogoDefaults({gift:{itemIds:null}}).gift.itemIds,[]);
+ctx.set({gift:{...gift,itemIds:[]},cart:{paid}});assert(ctx.validateSharedGifts(),'chưa cấu hình vẫn bán bình thường');
+console.log('ok danh sách chung, size, số lượng, quyền lợi, cấu hình cũ/rỗng và kiểm tra trước ghi bill');
