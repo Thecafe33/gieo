@@ -1,5 +1,7 @@
 # Hiện trạng dự án — cập nhật 20/10/2026
 
+**20/10 — Sửa trạng thái đóng ca bị mất khi cập nhật widget, chưa deploy**: `storeCard` giờ dựng nhãn/màu từ RAM; `bfStatsPaint` thay widget không làm mất trạng thái nữa. Tái hiện lỗi trước sửa, kiểm mở trang khi đã đóng và cập nhật bill sau đóng ở PC/mobile. Không tăng truy vấn. ZIP `manage_dong_ca_v2_20-10.zip`.
+
 **20/10 — manage báo đóng quán Gieo, chưa deploy**: widget Tổng quan thêm nhãn và dịu màu theo status closed của phiếu hôm nay; nghe đúng điểm đang xem, gỡ khi rời scope/tab/kỳ có hôm nay. Không đổi số liệu. Xem `docs/MANAGE_TRANG_THAI_DONG_QUAN.md`.
 
 **20/10 — XOFA danh sách ly tặng chung, chưa deploy**: PosX dùng `gift.itemIds` cho Mua X tặng Y và đổi 6 tem; popup chọn món Size M, kiểm lại trước ghi bill. 6 tem chỉ mở qua nút Đổi ly sau nhập SĐT; mua X tặng Y mở khi thanh toán. Kiosk chiếu cùng danh sách/lựa chọn qua session sẵn có; thay cả PosX.html + kiosk.html. Cấu hình cũ cần chọn danh sách, không mặc định cho phép mọi món. Không thêm listener. Xem `docs/XOFA_DANH_SACH_LY_TANG.md`.

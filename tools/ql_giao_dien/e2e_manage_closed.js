@@ -22,17 +22,24 @@ if(location.pathname.includes('quanlygieo')){const t=new Date(),y=new Date(t);y.
 mock+=`for(const suffix of ['tc33','xofa','gieogieo']){const table=__FS['work_schedules_'+suffix]||(__FS['work_schedules_'+suffix]={});for(const sh of Object.values(__FS['employee_shifts_'+suffix]||{})){table[sh.employeeId+'_'+sh.businessDate]={employeeId:sh.employeeId,date:sh.businessDate,startTime:'00:00',endTime:'23:59',isOff:false};}}`;
 const server=require('http').createServer((req,res)=>{const f=path.resolve(ROOT,'.'+new URL(req.url,'http://localhost').pathname);if(!f.startsWith(ROOT+path.sep)||!fs.existsSync(f)){res.writeHead(404);return res.end()}res.setHeader('Content-Type',f.endsWith('.js')?'application/javascript':'text/html; charset=utf-8');res.end(fs.readFileSync(f))});
 mock+=`(function(){const F=firebase.firestore;const wrap=function(){const f=F(),coll=f.collection;window.__daySubs=[];f.collection=n=>{const c=coll(n),doc=c.doc;c.doc=id=>{const r=doc(id);if(n.startsWith('daily_closings_gieogieo'))r.onSnapshot=(on)=>{const sub={n,id,on,active:true};__daySubs.push(sub);r.get().then(on);return()=>sub.active=false};return r};return c};return f};Object.assign(wrap,F);firebase.firestore=wrap;window.__dayEmit=(n,status)=>__daySubs.filter(s=>s.active&&s.n===n).forEach(s=>s.on({exists:true,data:()=>({status})}));})();`;
+mock+=`{const d=new Date(),k=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');__FS.daily_closings_gieogieo={[k]:{status:'closed'}};}`;
 (async()=>{await new Promise(r=>server.listen(0,'127.0.0.1',r));const base='http://127.0.0.1:'+server.address().port;const b=await chromium.launch({executablePath:'/usr/bin/chromium',args:['--no-sandbox']});
 try{for(const width of [1366,390]){
 const p=await b.newPage({viewport:{width,height:900},timezoneId:'Asia/Ho_Chi_Minh'}),errs=[];p.on('pageerror',e=>errs.push(e.message));
 await p.route('**/*',r=>{const u=r.request().url();if(u.includes('firebase-app-compat'))return r.fulfill({contentType:'application/javascript',body:mock});if(u.includes('firebasejs'))return r.fulfill({contentType:'application/javascript',body:''});if(u.startsWith(base+'/'))return r.continue();return r.abort()});
 await p.goto(base+'/manage.html');await p.waitForFunction(()=>typeof live!=='undefined'&&live.rev&&!live.loadingKey);await p.waitForTimeout(300);
+assert.equal(await p.locator('.outlet-widgets [data-store="gg01"] .widget-day-closed').count(),1,'mở trang khi quán đã đóng vẫn phải hiện nhãn sau tải bill');
 const before=await p.locator('.outlet-widgets [data-store="gg01"] .widget-revenue-value').textContent();
 await p.evaluate(()=>__dayEmit('daily_closings_gieogieo','handed_over'));assert.equal(await p.locator('.widget-day-closed').count(),0);
 await p.evaluate(()=>__dayEmit('daily_closings_gieogieo','closed'));assert.equal(await p.locator('.outlet-widgets [data-store="gg01"] .widget-day-closed').textContent(),'Đã đóng quán');assert.equal(await p.locator('.outlet-widgets .is-day-closed').count(),1);
 assert.equal(await p.locator('.outlet-widgets [data-store="gg01"] .widget-revenue-value').textContent(),before);
+const readCounts=await p.evaluate(()=>({subs:__daySubs.length,fs:JSON.stringify(__FSREADS),rt:JSON.stringify(__READS)}));
+await p.evaluate(()=>bfStatsPaint('gg01'));
+assert.equal(await p.locator('.outlet-widgets [data-store="gg01"] .widget-day-closed').count(),1,'bill RT cập nhật không làm mất nhãn đóng quán');
+assert.equal(await p.locator('.outlet-widgets [data-store="gg01"].is-day-closed').count(),1,'bill RT cập nhật không làm mất màu đóng quán');
+assert.deepEqual(await p.evaluate(()=>({subs:__daySubs.length,fs:JSON.stringify(__FSREADS),rt:JSON.stringify(__READS)})),readCounts,'giữ nhãn từ bộ nhớ, không đọc lại Firebase');
 await p.evaluate(()=>render());assert.equal(await p.locator('.outlet-widgets .is-day-closed').count(),1);
 await p.evaluate(()=>__dayEmit('daily_closings_gieogieo','pending'));assert.equal(await p.locator('.widget-day-closed').count(),0);
 await p.evaluate(()=>setStore('xofa'));assert(await p.evaluate(()=>__daySubs.every(s=>!s.active)));
-assert.deepEqual(errs,[]);console.log('ok '+width+': đóng đúng quán, nhạt màu/tag, giữ số liệu, render lại, mở lại và gỡ listener');await p.close();}
+assert.deepEqual(errs,[]);console.log('ok '+width+': đóng đúng quán, nhạt màu/tag, đóng sẵn khi tải, cập nhật bill RT giữ nhãn/màu không đọc thêm, mở lại và gỡ listener');await p.close();}
 }finally{await b.close();server.close();}})().catch(e=>{console.error(e);process.exitCode=1});
