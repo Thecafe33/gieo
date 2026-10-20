@@ -1,5 +1,7 @@
 # Hiện trạng dự án — cập nhật 20/10/2026
 
+**20/10 — manage báo đóng quán Gieo, chưa deploy**: widget Tổng quan thêm nhãn và dịu màu theo status closed của phiếu hôm nay; nghe đúng điểm đang xem, gỡ khi rời scope/tab/kỳ có hôm nay. Không đổi số liệu. Xem `docs/MANAGE_TRANG_THAI_DONG_QUAN.md`.
+
 **20/10 — XOFA danh sách ly tặng chung, chưa deploy**: PosX dùng `gift.itemIds` cho Mua X tặng Y và đổi 6 tem; popup chọn món Size M, kiểm lại trước ghi bill. 6 tem chỉ mở qua nút Đổi ly sau nhập SĐT; mua X tặng Y mở khi thanh toán. Kiosk chiếu cùng danh sách/lựa chọn qua session sẵn có; thay cả PosX.html + kiosk.html. Cấu hình cũ cần chọn danh sách, không mặc định cho phép mọi món. Không thêm listener. Xem `docs/XOFA_DANH_SACH_LY_TANG.md`.
 
 **20/10 — Đã sửa ba nhóm lỗi xuyên 5 app (chưa deploy)**: addons Gieo tách đúng TM/CK của tiền gốc và từng lần mua thêm; quà TC33 giữ giá 0, không trừ giá menu ảo khỏi tiền phải nộp. Đệm doanh thu manage v4 bỏ số cũ; phiếu Thực nhận giữ nguyên, ngày được chọn tính lại Phải nộp từ bill và ghi chú nếu khác phiếu gốc. Năm app dùng lịch VN xuyên suốt, timestamp vẫn giữ thời điểm thật; kỳ lương không lệch khi máy khác múi giờ. Hai JS mới cham_cong.v4/lai_lo.v6, bản cũ immutable giữ nguyên. Không thêm listener/truy vấn theo addon, không đổi engine/luồng bán hàng, không ghi Firebase thật. Có kiểm các caller, đa múi giờ, đệm cũ và bộ test/browser; xem `docs/FIX_XUYEN_APP_20-10.md`, bằng chứng trước sửa ở `docs/KIEM_TRA_XUYEN_APP_20-10.md`.

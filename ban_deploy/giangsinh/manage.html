@@ -577,6 +577,10 @@ html[data-theme="dark"] .bf-pay.is-cash{background:#1f3b2a;color:#86d9a6}html[da
 .page-title-row{display:flex;align-items:center;flex-wrap:wrap;gap:14px}.bed-live-button{display:inline-flex;align-items:center;gap:7px;min-height:38px;padding:8px 13px;border-radius:20px;background:var(--panel);color:var(--green);border:1px solid var(--line);font-size:13px;font-weight:700}.bed-live-button small{font-size:11px;color:var(--muted)}.bed-live-button.has-overdue{color:#ba2638;border-color:#e6a2aa}.bed-live-button.has-overdue small{color:inherit}
 .bed-live-menu{background:linear-gradient(145deg,color-mix(in srgb,var(--green) 10%,var(--panel)),var(--panel));padding:18px}.bed-live-list{overflow:auto;min-height:0;overscroll-behavior:contain}.bed-live-list h3{display:flex;justify-content:space-between;font-size:13px;margin:14px 2px 8px;color:var(--muted)}.bed-live-row{display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--panel);border-radius:18px;padding:13px;margin:7px 0}.bed-live-row div{min-width:0}.bed-live-row b{font-size:14px;overflow-wrap:anywhere}.bed-live-row small{display:block;font-size:12px;margin-top:4px;color:var(--muted)}.bed-live-row strong{font-size:13px;text-align:right;color:var(--green);flex-shrink:0}.bed-live-row.overdue strong{color:#c32c40}.bed-live-row.ending strong{color:#a36a05}.bed-live-empty{font-size:13px;color:var(--sub);padding:12px}
 @media(max-width:760px){.page-title-row{gap:10px}.bed-live-button{font-size:12px;padding:7px 10px}.bed-live-button small{font-size:10px}}
+/* Đóng ngày: giảm màu nền, giữ độ tương phản của chữ/số và thao tác chi tiết. */
+.outlet-widget.is-day-closed{--c:#87918b!important;background:linear-gradient(135deg,color-mix(in srgb,var(--panel) 90%,#87918b),var(--panel));box-shadow:0 6px 20px -16px #233a2d55}
+.outlet-widget.is-day-closed .widget-brandmark{background:#819087;color:#fff}
+.widget-day-closed{display:inline-flex;align-items:center;margin-top:7px;padding:5px 10px;border-radius:99px;background:color-mix(in srgb,var(--panel) 85%,#87918b);color:var(--muted);font-size:12px;font-weight:650;line-height:1.3;white-space:nowrap}
 </style>
 <!-- Embedded Inter font, licensed under the SIL Open Font License:
 Copyright 2016 The Inter Project Authors (https://github.com/rsms/inter) Inter-Italic[opsz,wght].ttf: Copyright 2016 The Inter Project Authors (https://github.com/rsms/inter)
@@ -2119,6 +2123,11 @@ async function watchBeds(day,on,error){
  const cb=snap=>on(snap.val()||{});ref.on('value',cb,error);
  return()=>ref.off('value',cb);
 }
+async function watchGieoDayClosed(id, ymd, on, onError){
+ await ensureAuth();validDate(ymd);
+ return fstore.collection(ggName('daily_closings_gieogieo',id)).doc(ymd).onSnapshot(
+  snap=>on(!!(snap.exists&&snap.data().status==='closed')),onError);
+}
 async function watchBills(id, ymd, n, on){
   await ensureAuth(); validDate(ymd);
   if(typeof window!=='undefined'&&window.BillLive){const stop=window.BillLive.listen({id,day:ymd,db,path:billPath(id,ymd)},on);return()=>{stop();window.BillLive.drop(id,ymd)}}
@@ -2162,7 +2171,7 @@ async function billLivePL(id,day){
     return result;
   }finally{PL_FILL_BUSY.delete(id)}
 }
-return{watchBeds,shiftPaidHours,readMonthTcx,billLiveSummary,billLivePL,readMonthClose,closeMonthTcx,reopenMonthTcx,writeMonthInput,unwatchClosings,CLOSE_W,tcxMonthSummary,closingDoc,CLOSE_KEYS,watchBills,billPath,writeEmployeeStatus,plFillMissing,plNeedDays,readOffDays,writeOffDays,isStoreOff,offStoresOf,readCash,readCashSegments,readCashGieoDay,writeCashReceipt,writeCashStart,ggCashExpected,tcxCashExpected,readAssets,writeAsset,deleteAsset,assetMonthly,assetDepDay,assetRecovered,assetEndDate,assetLive,expMonthSum,sumsToAlloc,readCosts,writeExpense,deleteExpenseDoc,reviewExpense,setExpenseActual,markExpensePaid,expPaidOf,writeExpenseCats,expAmountIn,expCostType,expCounts,expenseCats,expenseCatsAll,DEFAULT_EXPENSE_CATS,readBreakeven,writeBreakeven,deleteBreakeven,beMonthValue,tcxBreakEven,ggBreakEven,plBreakEven,readRevenue,readSettings,readEmployees,readSchedules,readAttendance,readPayroll,writeEmployee,writeEmployeeActive,writeSchedule,deleteSchedule,writeScheduleBatch,writeShift,deleteShift,writeLateGrace,writeTargets,deleteTargets,invalidateRevenue,invalidateEmployees,targetMonthValue,targetForRange,gieoTargetForRange,gieoTargetsOn,empPayTermsOn,computeWageForDayHours,laborByEmployee,shiftWorkedHours,isShiftInProgress,workStoresOf,tcSummarize,xoSummarize,ggSummarize,tcEmptySum,xoEmptySum,ggEmptySum,sumMerge};
+return{watchGieoDayClosed,watchBeds,shiftPaidHours,readMonthTcx,billLiveSummary,billLivePL,readMonthClose,closeMonthTcx,reopenMonthTcx,writeMonthInput,unwatchClosings,CLOSE_W,tcxMonthSummary,closingDoc,CLOSE_KEYS,watchBills,billPath,writeEmployeeStatus,plFillMissing,plNeedDays,readOffDays,writeOffDays,isStoreOff,offStoresOf,readCash,readCashSegments,readCashGieoDay,writeCashReceipt,writeCashStart,ggCashExpected,tcxCashExpected,readAssets,writeAsset,deleteAsset,assetMonthly,assetDepDay,assetRecovered,assetEndDate,assetLive,expMonthSum,sumsToAlloc,readCosts,writeExpense,deleteExpenseDoc,reviewExpense,setExpenseActual,markExpensePaid,expPaidOf,writeExpenseCats,expAmountIn,expCostType,expCounts,expenseCats,expenseCatsAll,DEFAULT_EXPENSE_CATS,readBreakeven,writeBreakeven,deleteBreakeven,beMonthValue,tcxBreakEven,ggBreakEven,plBreakEven,readRevenue,readSettings,readEmployees,readSchedules,readAttendance,readPayroll,writeEmployee,writeEmployeeActive,writeSchedule,deleteSchedule,writeScheduleBatch,writeShift,deleteShift,writeLateGrace,writeTargets,deleteTargets,invalidateRevenue,invalidateEmployees,targetMonthValue,targetForRange,gieoTargetForRange,gieoTargetsOn,empPayTermsOn,computeWageForDayHours,laborByEmployee,shiftWorkedHours,isShiftInProgress,workStoresOf,tcSummarize,xoSummarize,ggSummarize,tcEmptySum,xoEmptySum,ggEmptySum,sumMerge};
 
 })();
 
@@ -2405,6 +2414,32 @@ function dashboard(){
 // phiên (mỗi bill mới chỉ vài trăm byte, quay lại Tổng quan không phải đọc lại); qua ngày thì gắn sang ngày mới.
 // Chỉ hiện khi kỳ đang xem có hôm nay. Chỉ xem — sửa / xoá bill ở POS.
 // ==========================================================================
+// Trạng thái vận hành hiện tại, tách khỏi lịch nghỉ và số liệu doanh thu trong kỳ.
+const GIEO_DAY={day:'',watch:{},closed:{}};
+function gieoDayPaint(){
+ document.querySelectorAll('.outlet-widgets .outlet-widget[data-store]').forEach(card=>{
+  const closed=GIEO_DAY.day===currentDate()&&GIEO_DAY.closed[card.dataset.store]===true;
+  card.classList.toggle('is-day-closed',closed);
+  let tag=card.querySelector('.widget-day-closed');
+  if(!closed){tag?.remove();return}
+  if(!tag){tag=document.createElement('span');tag.className='widget-day-closed';tag.textContent='Đã đóng quán';tag.setAttribute('role','status');card.querySelector('.widget-heading')?.append(tag)}
+  tag.title='Đã đóng quán hôm nay · '+dateVN(GIEO_DAY.day);
+ });
+}
+function gieoDaySync(){
+ const day=currentDate(),wanted=new Set(state.view==='rev'&&bfShown()?selectedStores().filter(s=>s.brand==='gieo'&&s.active!==false).map(s=>s.id):[]);
+ for(const[id,w]of Object.entries(GIEO_DAY.watch))if(w.day!==day||!wanted.has(id)){w.stop?.();delete GIEO_DAY.watch[id];delete GIEO_DAY.closed[id]}
+ GIEO_DAY.day=day;
+ for(const id of wanted){
+  if(GIEO_DAY.watch[id])continue;
+  const w=GIEO_DAY.watch[id]={day,stop:null};
+  const fail=err=>{if(GIEO_DAY.watch[id]!==w)return;delete GIEO_DAY.closed[id];gieoDayPaint();console.warn('[trạng thái quán]',id,err)};
+  backend.watchGieoDayClosed(id,day,closed=>{if(GIEO_DAY.watch[id]!==w)return;GIEO_DAY.closed[id]=closed;gieoDayPaint()},fail)
+   .then(stop=>{if(GIEO_DAY.watch[id]===w)w.stop=stop;else stop()}).catch(fail);
+ }
+ gieoDayPaint();
+}
+setInterval(gieoDaySync,60000); // chỉ đổi listener khi qua ngày/phạm vi, không đọc định kỳ
 const BF={per:15,keep:80,day:null,watch:{},list:[],fresh:new Set(),anim:new Set(),more:false,open:new Set(),err:null,timer:null};
 function bfShown(){const[from,to]=rangeDates(),today=currentDate();return from<=today&&today<=to}
 function bfSync(){
@@ -2742,7 +2777,7 @@ function render(){
  if(live.error?.key===key)html=pageHead(label,'')+`<section class="panel load-error" role="alert"><b>Chưa tải được dữ liệu</b><p>${esc(live.error.message)}</p><button class="btn" onclick="loadCurrent(true)">${icon('refresh')}Thử lại</button></section>`;
  else if(live.ready[state.view]!==key){html=pageHead(label,'')+'<section class="panel live-loading" role="status"><span class="loading-ring"></span><b>Đang đọc dữ liệu…</b></section>';if(live.loadingKey!==key)queueMicrotask(()=>loadCurrent())}
  else html=({rev:dashboard,nv:staffView,lich:scheduleView,cc:attendanceView,luong:payrollView,target:targetView,hoavon:breakevenView,chiphi:costView,taisan:assetView,tienmat:cashView,thangket:monthView}[state.view])();
- $('#view').innerHTML='<div class="page-enter">'+html+'</div>';hydrateIcons();bedPaint();const sync=$('#liveSync');sync.textContent=live.loadingKey===key?'Đang cập nhật':live.error?.key===key?'Chưa tải được':live.updatedAt?'Đã cập nhật '+clockVN(vnDate(live.updatedAt).toISOString()):'Đang kết nối';sync.dataset.state=live.error?.key===key?'error':live.loadingKey===key?'loading':'ok';if(state.view==='rev'&&live.ready.rev===key){fitDashboardChart();bfFit();if(bfShown())bfSync()}
+ $('#view').innerHTML='<div class="page-enter">'+html+'</div>';hydrateIcons();bedPaint();gieoDaySync();const sync=$('#liveSync');sync.textContent=live.loadingKey===key?'Đang cập nhật':live.error?.key===key?'Chưa tải được':live.updatedAt?'Đã cập nhật '+clockVN(vnDate(live.updatedAt).toISOString()):'Đang kết nối';sync.dataset.state=live.error?.key===key?'error':live.loadingKey===key?'loading':'ok';if(state.view==='rev'&&live.ready.rev===key){fitDashboardChart();bfFit();if(bfShown())bfSync()}
 }
 async function refreshLive(button,clearOld=false){if(state.view==='thangket')tkPreviewCache.clear();button?.animate([{transform:'rotate(0)'},{transform:'rotate(360deg)'}],{duration:450});if(state.view==='rev')backend.invalidateRevenue(clearOld);backend.invalidateEmployees();delete live.ready[state.view];await loadCurrent(true)}
 function networkPreviewLabel(){return scopeLabel()+' · '+revenueStores().length+' cửa hàng'}
