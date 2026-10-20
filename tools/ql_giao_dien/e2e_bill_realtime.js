@@ -13,8 +13,13 @@ mock+=`
 if(location.pathname.includes('quanlygieo')){const t=new Date(),y=new Date(t);y.setDate(y.getDate()-1);const k=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
  __FS.assets_gieogieo={a:{purchaseCost:10000000,purchaseDate:k(y),usefulLifeMonths:12,active:true}};
  __FS.finance_gieogieo={current:{recoveryStartDate:k(y)}};
- __FS.pl_book_gieogieo={days:{du:k(y),d:{[k(y)]:{date:k(y),doanhThu:1000000,giaVon:200000,phiKenh:0,haoHut:0,luong:200000,chiPhiCoDinh:0,bienPhiKhac:0,khauHao:30000,lai:570000,laiTruocKhauHao:600000,mucTinCay:'chot-thang',updatedAt:t.toISOString()}}}};
+ // Ngày trước có thặng dư dương đủ lớn để kịch bản dự kiến hoàn vốn có số tháng,
+ // thay vì null hợp lệ khi chi phí hiện tại làm tốc độ hai ngày không dương.
+ __FS.pl_book_gieogieo={days:{du:k(y),d:{[k(y)]:{date:k(y),doanhThu:5000000,giaVon:1000000,phiKenh:0,haoHut:0,luong:200000,chiPhiCoDinh:0,bienPhiKhac:0,khauHao:30000,lai:3770000,laiTruocKhauHao:3800000,mucTinCay:'chot-thang',laborVersion:2,laborCheckedAmount:200000,updatedAt:t.toISOString()}}}};
 }`;
+// Từ 01/10 phải có lịch mới tính lương. Fixture cũ có chấm công nhưng thiếu lịch,
+// nên kiểm RT vô tình dừng đúng ở cảnh báo nghiệp vụ này, không tới phần lãi/lỗ.
+mock+=`for(const suffix of ['tc33','xofa','gieogieo']){const table=__FS['work_schedules_'+suffix]||(__FS['work_schedules_'+suffix]={});for(const sh of Object.values(__FS['employee_shifts_'+suffix]||{})){table[sh.employeeId+'_'+sh.businessDate]={employeeId:sh.employeeId,date:sh.businessDate,startTime:'00:00',endTime:'23:59',isOff:false};}}`;
 const server=require('http').createServer((req,res)=>{const f=path.resolve(ROOT,'.'+new URL(req.url,'http://localhost').pathname);if(!f.startsWith(ROOT+path.sep)||!fs.existsSync(f)){res.writeHead(404);return res.end()}res.setHeader('Content-Type',f.endsWith('.js')?'application/javascript':'text/html; charset=utf-8');res.end(fs.readFileSync(f))});
 (async()=>{await new Promise(r=>server.listen(0,'127.0.0.1',r));const base='http://127.0.0.1:'+server.address().port;const b=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium'});let count=0;
  const check=(v,m)=>{assert.ok(v,m);console.log('ok '+m);count++};

@@ -67,7 +67,7 @@
       where(f,op,v){ return query(coll, filters.concat([[f,op,v]])); },
       orderBy(){ return this; }, limit(){ return this; },
       get(){ const docs = snapDocs(coll, filters); return Promise.resolve({ docs, empty: !docs.length, size: docs.length, forEach(cb){ docs.forEach(cb); } }); },
-      onSnapshot(cb){ const l={coll, fire:()=>setTimeout(()=>cb({docs:snapDocs(coll,filters)}),5)}; listeners.push(l); l.fire(); return ()=>{ const i=listeners.indexOf(l); if(i>=0) listeners.splice(i,1); }; },
+      onSnapshot(cb){ const l={coll, fire:()=>setTimeout(()=>{const docs=snapDocs(coll,filters);cb({docs,empty:!docs.length,size:docs.length,forEach(fn){docs.forEach(fn)}})},5)}; listeners.push(l); l.fire(); return ()=>{ const i=listeners.indexOf(l); if(i>=0) listeners.splice(i,1); }; },
       add(d){ const id='n'+Math.random().toString(36).slice(2,8); (FS[coll]=FS[coll]||{})[id]=JSON.parse(JSON.stringify(d)); window.__WRITES.push(['add',coll,id,d]); notify(coll); return Promise.resolve({id}); },
       doc(id){ const key = coll; return {
         get(){ const d=(FS[key]||{})[id]; return Promise.resolve({exists:!!d, id, data:()=>d?JSON.parse(JSON.stringify(d)):undefined}); },

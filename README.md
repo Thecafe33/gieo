@@ -15,3 +15,5 @@ Hai app một file HTML (không build step), Firebase compat 10.13.2, project `t
 Quy tắc làm việc cho Claude: `CLAUDE.md`. Deploy: chủ dự án tự chạy `sh tools/predeploy_check.sh <thư mục deploy>` rồi `firebase deploy --only hosting`.
 
 20/10: Tiền mặt `manage.html` dùng bộ đọc/đệm **v3 độc lập v1/v2**: tải phiếu theo mã Firebase, kể cả phiếu cũ thiếu trường ngày. Xoá sạch đệm vẫn tự tải lại đúng, giữ tối ưu ngày ổn định sau lần đầu. Đối soát Gieo và hai chỉ số nhỏ giữ nguyên. ZIP hiện hành `manage_tien_nop_v3_20-10.zip`, chỉ manage.html dùng chung ba mùa. Xem `docs/MANAGE_TIEN_MAT.md`.
+
+20/10: đã rà tính năng xuyên năm app, phát hiện **hai nhóm lỗi tính tiền P1 và một nhóm lệch ngày P2**, chưa sửa app trong lượt rà. Báo cáo và kịch bản tái hiện: `docs/KIEM_TRA_XUYEN_APP_20-10.md`.

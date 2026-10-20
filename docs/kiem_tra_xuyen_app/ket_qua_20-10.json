@@ -1,0 +1,242 @@
+{
+  "generatedAt": "2026-10-20T07:19:29.308Z",
+  "head": "ee8b895957e191607ceaafb6bd1a6a64d6dde984",
+  "limitations": [
+    "Firebase giả; không truy cập dữ liệu quán",
+    "Phần in/két/nhà cung cấp thanh toán bên ngoài chưa được kiểm chứng",
+    "Không thay đổi app hoặc dữ liệu; chỉ chẩn đoán"
+  ],
+  "checks": [
+    "Đối chứng: topping cùng tiền mặt khớp 35K ở cả ba app",
+    "Đối chứng múi giờ VN: ghi/đọc ngày và biên tháng khớp"
+  ],
+  "findings": [
+    {
+      "id": "ADDON_cash→bank",
+      "apps": [
+        "posgieo",
+        "quanlygieo",
+        "manage"
+      ],
+      "scenario": "Bill 30K + topping 5K, cash→bank",
+      "expected": {
+        "cash": 30000,
+        "bank": 5000
+      },
+      "actual": {
+        "pos": {
+          "cash": 30000,
+          "bank": 0
+        },
+        "quanlygieo": {
+          "cash": 35000,
+          "bank": 0
+        },
+        "manage": {
+          "cash": 35000,
+          "bank": 0
+        }
+      },
+      "refs": [
+        "posgieo:_submitAddonImpl/orderCashAmountPOS/orderBankAmountPOS",
+        "quanlygieo:orderCashAmount/orderBankAmount",
+        "manage:ggAddOrder/xoAddOrder"
+      ]
+    },
+    {
+      "id": "ADDON_bank→cash",
+      "apps": [
+        "posgieo",
+        "quanlygieo",
+        "manage"
+      ],
+      "scenario": "Bill 30K + topping 5K, bank→cash",
+      "expected": {
+        "cash": 5000,
+        "bank": 30000
+      },
+      "actual": {
+        "pos": {
+          "cash": 5000,
+          "bank": 35000
+        },
+        "quanlygieo": {
+          "cash": 0,
+          "bank": 35000
+        },
+        "manage": {
+          "cash": 0,
+          "bank": 35000
+        }
+      },
+      "refs": [
+        "posgieo:_submitAddonImpl/orderCashAmountPOS/orderBankAmountPOS",
+        "quanlygieo:orderCashAmount/orderBankAmount",
+        "manage:ggAddOrder/xoAddOrder"
+      ]
+    },
+    {
+      "id": "ADDON_split→bank",
+      "apps": [
+        "posgieo",
+        "quanlygieo",
+        "manage"
+      ],
+      "scenario": "Bill 30K + topping 5K, split→bank",
+      "expected": {
+        "cash": 15000,
+        "bank": 20000
+      },
+      "actual": {
+        "pos": {
+          "cash": 15000,
+          "bank": 15000
+        },
+        "quanlygieo": {
+          "cash": 15000,
+          "bank": 15000
+        },
+        "manage": {
+          "cash": 15000,
+          "bank": 15000
+        }
+      },
+      "refs": [
+        "posgieo:_submitAddonImpl/orderCashAmountPOS/orderBankAmountPOS",
+        "quanlygieo:orderCashAmount/orderBankAmount",
+        "manage:ggAddOrder/xoAddOrder"
+      ]
+    },
+    {
+      "id": "TC33_GIFT_ZERO",
+      "apps": [
+        "pos",
+        "manage"
+      ],
+      "scenario": "Trà 25K + Bánh 20K được tặng; khách trả tiền mặt 25K",
+      "expected": {
+        "revenue": 25000,
+        "snack": 0,
+        "cashDue": 25000
+      },
+      "actual": {
+        "saved": {
+          "id": 1792480769181,
+          "createdAt": 1792465200000,
+          "sdt": "Khách vãng lai",
+          "items": "Trà (M) x1, Bánh (M) x1",
+          "itemsArray": [
+            {
+              "name": "Trà",
+              "size": "M",
+              "price": 25000,
+              "qty": 1
+            },
+            {
+              "name": "Bánh",
+              "size": "M",
+              "price": 0,
+              "qty": 1,
+              "_vKey": "gift",
+              "_giftType": "item_free",
+              "_giftLabel": "QUA",
+              "_originalPrice": 20000,
+              "_originalName": "Bánh"
+            }
+          ],
+          "total": 25000,
+          "paid": 25000,
+          "change": 0,
+          "method": "Tiền mặt",
+          "points": 1250,
+          "bedId": "",
+          "customerName": "Khách vãng lai"
+        },
+        "manage": {
+          "total": 25000,
+          "drink": 25000,
+          "snack": 20000,
+          "cashDue": 5000,
+          "hourly": 25000
+        },
+        "pos": {
+          "drink": 25000,
+          "snack": 20000
+        }
+      },
+      "refs": [
+        "pos:applyPickedCartItem/saveOrderToFirebase/calculateStats",
+        "manage:tcAddOrder/tcxCashExpected"
+      ]
+    },
+    {
+      "id": "TIMEZONE_UTC",
+      "apps": [
+        "pos",
+        "manage"
+      ],
+      "scenario": "Cùng thời điểm 00:30 ngày 21/10 VN, máy đặt UTC",
+      "expected": {
+        "billDay": "21",
+        "reportDay": "2026-10-21",
+        "range": [
+          "2026-10-21"
+        ],
+        "payrollFrom": "2026-10-01",
+        "payrollTo": "2026-10-31"
+      },
+      "actual": {
+        "writePath": {
+          "year": "2026",
+          "month": "oct",
+          "day": "20"
+        },
+        "manageDay": "2026-10-21",
+        "manageRange": [
+          "2026-10-21"
+        ],
+        "payrollFrom": "2026-10-01",
+        "payrollTo": "2026-10-31"
+      },
+      "refs": [
+        "pos:getOrderParts",
+        "manage:dkey/parseDkey/readPayroll"
+      ]
+    },
+    {
+      "id": "TIMEZONE_Australia/Sydney",
+      "apps": [
+        "pos",
+        "manage"
+      ],
+      "scenario": "Cùng thời điểm 00:30 ngày 21/10 VN, máy đặt Australia/Sydney",
+      "expected": {
+        "billDay": "21",
+        "reportDay": "2026-10-21",
+        "range": [
+          "2026-10-21"
+        ],
+        "payrollFrom": "2026-10-01",
+        "payrollTo": "2026-10-31"
+      },
+      "actual": {
+        "writePath": {
+          "year": "2026",
+          "month": "oct",
+          "day": "21"
+        },
+        "manageDay": "2026-10-21",
+        "manageRange": [
+          "2026-10-20",
+          "2026-10-21"
+        ],
+        "payrollFrom": "2026-09-30",
+        "payrollTo": "2026-10-30"
+      },
+      "refs": [
+        "pos:getOrderParts",
+        "manage:dkey/parseDkey/readPayroll"
+      ]
+    }
+  ]
+}
