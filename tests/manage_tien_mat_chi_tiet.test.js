@@ -37,19 +37,20 @@ console.log('ok Tiền cần lấy giữ nguyên; đối soát cuối ca / từn
   pool:async(items,n,fn)=>Promise.all(items.map(fn)),ggName:(name,id)=>name+'__'+id,
   parseDkey:d=>d,addDays:()=>today,EXP_COLL:{tc33:'expenses_tc33',xofa:'expenses_xofa'},console:{warn(){}},
   revLoadRange:async(a,b,progress,only)=>{revCalls.push({a,b,only});if(only.includes('gg_gg03'))throw new Error('Giả lập lỗi một quán');return Object.fromEntries(only.map(k=>[k,{[a]:{total:100000,revenue:100000,bank:50000,transfer:50000}}]))},fstore:db,CASH_CFG:null};
- const backend=new Function(...Object.keys(scope),extract('manage.html',['readCash','cashReadServer','ggCashExpected','cashDaySummary','tcxCashExpected','readCashSegments'])+';return {readCash,readCashSegments}')( ...Object.values(scope));
+ const backend=new Function(...Object.keys(scope),extract('manage.html',['readCash','readCashGieoDay','ggCashExpected','cashDaySummary','tcxCashExpected','readCashSegments'])+';return {readCash,readCashSegments,readCashGieoDay}')( ...Object.values(scope));
  const result=await backend.readCash(date);
  assert.equal(calls.filter(c=>c.name.includes('shift_segments')).length,0,'Không tự đọc chi tiết các ca');
- assert.equal(revCalls.filter(c=>c.only.includes('gg_gg02')).length,1);
+ assert.equal(revCalls.filter(c=>c.only.includes('gg_gg02')).length,0,'Tiền nộp hiện trước, không chờ doanh thu Gieo');
+ Object.assign(result.daySummary,await backend.readCashGieoDay(date,result.records));
  assert(revCalls.every(c=>c.a===date&&c.b===date),'Doanh thu chỉ đọc ngày đang xem, không kéo về mốc theo dõi');
  assert.equal(result.daySummary.gg02.revenue,100000);
  assert.equal(result.daySummary.gg03,null,'Một quán lỗi doanh thu không làm mất số quán khác hoặc biến thành 0');
  await backend.readCashSegments('gg02',date);
  assert.deepEqual(calls.at(-1),{name:'shift_segments_gieogieo__gg02',filters:[['businessDate','==',date]]},'Chi tiết đúng ngày và đúng quán');
  await assert.rejects(()=>backend.readCashSegments('tc33',date),/không hợp lệ/);
- assert(src.includes("CASH_CACHE_KEY = 'mg_cash_cache_v2'"),'Thay phiên bản đệm để nhận các trường mới cả ngày cũ');
+ assert(src.includes("CASH_CACHE_KEY = 'mg_cash_cache_v1'"),'Giữ nguyên khoá đệm của bản trước sửa');
  const storage={mg_cash_cache_v1:JSON.stringify({tcx:{tc33:{[date]:{received:700000}}}})};
- const loadCache=new Function('localStorage','CASH_CACHE_KEY',extract('manage.html',['cashCacheLoad'])+';return cashCacheLoad')({getItem:k=>storage[k]||null},'mg_cash_cache_v2');
+ const loadCache=new Function('localStorage','CASH_CACHE_KEY',extract('manage.html',['cashCacheLoad'])+';return cashCacheLoad')({getItem:k=>storage[k]||null},'mg_cash_cache_v1');
  assert.equal(loadCache().tcx.tc33[date].received,700000,'Nâng phiên bản vẫn dùng lại ngày đã nhận trong đệm cũ');
  const migrationReads=[],oldCache={tcx:{tc33:{[date]:{received:700000,expected:700000}}},gg:{gg02:{[date]:{state:'ready',expected:1225000,received:1225000}}}};
  let saved;
@@ -67,12 +68,12 @@ console.log('ok Tiền cần lấy giữ nguyên; đối soát cuối ca / từn
    };
   }
  }};
- const migrate=new Function(...Object.keys(migrationScope),extract('manage.html',['readCash','cashReadServer','ggCashExpected','cashDaySummary','tcxCashExpected'])+';return readCash')(...Object.values(migrationScope));
+ const migrate=new Function(...Object.keys(migrationScope),extract('manage.html',['readCash','readCashGieoDay','ggCashExpected','cashDaySummary','tcxCashExpected'])+';return readCash')(...Object.values(migrationScope));
  const migrated=await migrate(date);
- assert.equal(migrated.gg.gg02[date].reconciliation.countedCash,1680000);
+ assert.equal(migrated.gg.gg02[date].received,1225000,'Phiếu nhận cũ giữ nguyên dù chưa có trường UI đối soát mới');
  assert.equal(saved.tcx.tc33[date].received,700000,'Không làm mất đệm TC33 khi nâng dữ kiện Gieo');
- assert.equal(migrationReads.filter(c=>c.name==='daily_closings_gieogieo__gg02'&&c.id===date).length,1,'Đệm Gieo cũ chỉ bổ sung đúng doc của ngày đang xem');
+ assert.equal(migrationReads.filter(c=>c.name==='daily_closings_gieogieo__gg02'&&c.id===date).length,0,'Không thêm đọc phiếu khi bản cũ đã có số nhận trong đệm');
  assert(migrationReads.filter(c=>c.name==='daily_closings_gieogieo__gg02'&&c.filters).every(c=>c.filters[0][2]===today),'Không lùi truy vấn cả lịch sử để nâng đệm');
- console.log('ok Lượt đọc: không tải đoạn ca khi mở tab; doanh thu đúng ngày; chi tiết theo quán/ngày khi yêu cầu; đệm mới');
+ console.log('ok Đọc tiền nộp như cũ; chỉ số Gieo đọc sau đúng ngày; chi tiết chỉ tải khi bấm; giữ đệm v1');
  console.log('ALL PASS');
 })().catch(e=>{console.error(e);process.exitCode=1});
