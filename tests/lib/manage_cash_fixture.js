@@ -18,6 +18,11 @@ function makeCashFixture(options={}){
   'orders/2026/oct/19':{a:{total:600000,method:'Tiền mặt',itemsArray:[{name:'Tea',qty:1,price:600000}],createdAt:'2026-10-19T04:00:00Z'}},
   'orders_xolifa/oct/19':{a:{total:700000,method:'TIỀN MẶT',date:'19/10/2026',time:'11:00',itemsArray:[]}}
  };
+ if(options.freeGift){
+  rt.menu=[{name:'Trà',type:'Trà',priceM:25000},{name:'Bánh',type:'Ăn vặt',priceM:20000}];
+  rt['orders/2026/oct/18']={gift:{total:25000,method:'Tiền mặt',createdAt:'2026-10-18T03:00:00Z',itemsArray:[{name:'Trà',qty:1,price:25000},{name:'Bánh',qty:1,price:0,_giftType:'item_free'}]}};
+  Object.assign(data.cash_receipts_tc33xofa['tc33_2026-10-18'],{received:25000,expected:5000,sales:5000});
+ }
  const old={tcx:{tc33:{'2026-10-18':{store:'tc33',date:'2026-10-18',received:500000,expected:510000,sales:510000,spent:0}}},gg:{gg01:{'2026-10-18':{state:'ready',received:300000,expected:300000,handed:300000,receipt:{received:300000}}}}};
  const memory=options.noCache?{}:{mg_cash_cache_v1:JSON.stringify(old),mg_cash_cache_v2:JSON.stringify({tcx:{},gg:{}})};
  const reads=[],writes=[];

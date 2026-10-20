@@ -694,8 +694,33 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script><script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script><script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script><script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
 <!-- [LÃI/LỖ GIEO TỰ TÍNH] lớp đổi tên bảng theo quán + bộ tính lãi / lỗ chép nguyên văn từ quanlygieo (tools/tao_lai_lo.js) -->
 <script src="bill_live.v1.js"></script>
-<script src="data_access.v9.js"></script><script src="lai_lo.v5.js"></script>
+<script src="data_access.v9.js"></script><script src="lai_lo.v6.js"></script>
 <script>
+// Ngày nghiệp vụ theo UTC+7; timestamp/ISO vẫn là thời điểm thật. Không thay Date của SDK.
+function vnDate(...args){
+  if(!vnDate.Type){
+    const NativeDate=Date,offset=7*3600000;
+    class VNDate extends NativeDate{
+      constructor(...a){
+        if(a.length>1)super(NativeDate.UTC(...a)-offset);
+        else if(a.length===1 && typeof a[0]==='string' && /^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)?$/.test(a[0]))
+          super(a[0].length===10?a[0]+'T00:00:00+07:00':a[0].replace(' ','T')+'+07:00');
+        else super(...a);
+      }
+      getTimezoneOffset(){return -420;}
+    }
+    for(const part of ['FullYear','Month','Date','Day','Hours','Minutes','Seconds','Milliseconds'])
+      VNDate.prototype['get'+part]=function(){return new NativeDate(+this+offset)['getUTC'+part]();};
+    for(const part of ['FullYear','Month','Date','Hours','Minutes','Seconds','Milliseconds'])
+      VNDate.prototype['set'+part]=function(...a){const d=new NativeDate(+this+offset);return this.setTime(d['setUTC'+part](...a)-offset);};
+    for(const method of ['toLocaleString','toLocaleDateString','toLocaleTimeString'])
+      VNDate.prototype[method]=function(locales,options){return NativeDate.prototype[method].call(this,locales,{timeZone:'Asia/Ho_Chi_Minh',...options});};
+    vnDate.Type=VNDate;
+  }
+  return new vnDate.Type(...args);
+}
+
+
 const backend=(()=>{
 const firebaseConfig = {
   apiKey:            "AIzaSyCNh1-16gYZ0P30Fkd-2tB-O89PXkPX9Lc",
@@ -731,9 +756,9 @@ const MONTH_KEYS = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct',
 
 function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function pad(n){ return String(n).padStart(2,'0'); }
-function parseDkey(k){ const [y,m,d] = String(k).split('-').map(Number); return new Date(y, m-1, d); }
-function fmtDateVN(d){ return `${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()}`; }
-function addDays(d, n){ const x = new Date(d); x.setDate(x.getDate()+n); return x; }
+function parseDkey(k){ const [y,m,d] = String(k).split('-').map(Number); return vnDate(y, m-1, d); }
+function fmtDateVN(d){ d=vnDate(d); return `${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()}`; }
+function addDays(d, n){ const x = vnDate(d); x.setDate(x.getDate()+n); return x; }
 function daysBetween(a, b){ return Math.round((parseDkey(b) - parseDkey(a)) / 86400000); }
 function dkey(d){return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Ho_Chi_Minh',year:'numeric',month:'2-digit',day:'2-digit'}).format(d)}
 function vnHour(d){return Number(new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Ho_Chi_Minh',hour:'2-digit',hourCycle:'h23'}).format(d))}
@@ -756,7 +781,8 @@ function tcAddOrder(sum, o, menu){
   const one = (name, qty, itemPrice, size)=>{
     const nm = String(name || '').toLowerCase();
     const menuItem = (menu || []).find(m => m && m.name && String(m.name).toLowerCase() === nm);
-    const finalPrice = (itemPrice > 0) ? itemPrice : (menuItem ? (Number(menuItem.priceM || menuItem.priceL) || 0) : 0);
+    const hasPrice = itemPrice != null && itemPrice !== '' && Number.isFinite(Number(itemPrice));
+    const finalPrice = hasPrice ? Number(itemPrice) : (menuItem ? (Number(menuItem.priceM || menuItem.priceL) || 0) : 0);
     const subTotal = finalPrice * qty;
     const type = menuItem ? String(menuItem.type || '').toLowerCase() : '';
     if(type.includes('ăn vặt') || type.includes('đồ ăn') || type.includes('snack')){ sum.snack += subTotal; orderSnack += subTotal; }
@@ -764,7 +790,7 @@ function tcAddOrder(sum, o, menu){
     else { sum.drink += subTotal; orderDrink += subTotal; }
   };
   if(Array.isArray(o.itemsArray)){
-    o.itemsArray.forEach(i=>{ if(i) one(i.name, Number(i.qty) || 1, Number(i.price) || 0, i.size); });
+    o.itemsArray.forEach(i=>{ if(i) one(i.name, Number(i.qty) || 1, i.price, i.size); });
   } else if(o.items){
     String(o.items).split(',').forEach(str=>{
       str = str.trim();
@@ -772,14 +798,14 @@ function tcAddOrder(sum, o, menu){
       if(x > -1){
         const qty = parseInt(str.substring(x + 1)) || 1;
         const full = str.substring(0, x).trim(), sz = full.match(/\(([^)]*)\)\s*$/);
-        one(full.split('(')[0].trim(), qty, 0, sz ? sz[1].trim() : '');
+        one(full.split('(')[0].trim(), qty, null, sz ? sz[1].trim() : '');
       }
     });
   }
   // cashMain (16/10): tiền mặt phải nộp về = tiền mặt của bill trừ phần Ăn vặt (chủ dự án: không gồm Food / Ăn vặt).
   if(tcIsTransfer(o.method)) sum.transfer += amount; else { sum.cash += amount; sum.cashMain += Math.max(0, amount - orderSnack); }
   sum.total += amount; sum.count++;
-  const d = new Date(o.createdAt || Date.now());
+  const d = vnDate(o.createdAt || Date.now());
   if(!isNaN(d)){ const hh = vnHour(d); sum.hours[Math.floor(hh/2)] += orderDrink + orderKhac; sum.h24[hh] += orderDrink + orderKhac; }   // biểu đồ POS (bật 🐶) = nước + Khác
   return sum;
 }
@@ -833,7 +859,19 @@ function xoSummarize(orders){ const s = xoEmptySum(); (orders||[]).forEach(o=>xo
 function ggEmptySum(){ return Object.assign(xoEmptySum(), { revenue:0, hoursRev:new Array(12).fill(0), h24Rev:new Array(24).fill(0) }); }
 function ggAddOrder(sum, o){
   if(!o) return sum;
+  const before={cash:sum.cash,bank:sum.bank,foodCash:sum.foodCash,foodBank:sum.foodBank};
   xoAddOrder(sum, o);
+  if(o.addons && o.addons.length){
+    const addonTotal=o.addons.reduce((n,a)=>n+(Number(a.amount)||0),0);
+    const part=method=>{
+      const added=o.addons.filter(a=>(a.method||'').includes(method)).reduce((n,a)=>n+(Number(a.amount)||0),0);
+      const base=o.method==='TÍNH RIÊNG' ? (o.splitGroups||[]).filter(g=>g.method===method).reduce((n,g)=>n+(Number(g.total)||0),0)
+        : (o.method||'').includes(method) ? Math.max(0,(Number(o.total)||0)-addonTotal) : 0;
+      return base+added;
+    };
+    sum.cash=before.cash+part('TIỀN MẶT')-(sum.foodCash-before.foodCash);
+    sum.bank=before.bank+part('CHUYỂN KHOẢN')-(sum.foodBank-before.foodBank);
+  }
   const total = Number(o.total) || 0;
   sum.revenue += total;
   const h = parseInt(String(o.time || '').split(':')[0], 10);
@@ -856,8 +894,8 @@ function sumMerge(a, b){
 // ==========================================================================
 // Ngày đã qua > 8 ngày: POS đã chuyển sang lưu trữ, hầu như không đổi nữa → giữ bản tổng hợp trong máy (N1),
 // lần sau khỏi đọc lại. Nút Tải lại xoá được. Hôm nay + 8 ngày gần nhất luôn đọc mới.
-const REV_CACHE_KEY = 'mg_rev_cache_v3';   // v2 (16/10): giờ bed / phí / nợ cũ sang nhóm Khác; v3: thêm cashMain (tiền mặt nộp về TC33)
-try{ localStorage.removeItem('mg_rev_cache_v1'); localStorage.removeItem('mg_rev_cache_v2'); }catch(e){}
+const REV_CACHE_KEY = 'mg_rev_cache_v4';   // v4: giá 0 của quà + phương thức addons; không dùng số tổng hợp sai của bản cũ
+try{ localStorage.removeItem('mg_rev_cache_v1'); localStorage.removeItem('mg_rev_cache_v2'); localStorage.removeItem('mg_rev_cache_v3'); }catch(e){}
 const REV_STABLE_AFTER = 8;
 let REV_MEM = {};
 function revCacheLoad(){ try{ const j = JSON.parse(localStorage.getItem(REV_CACHE_KEY) || '{}'); return (j && typeof j === 'object') ? j : {}; }catch(e){ return {}; } }
@@ -883,12 +921,12 @@ async function tcLegacyOrders(){
 async function tcFetchDay(k){
   const d = parseDkey(k);
   const y = String(d.getFullYear()), mon = MONTH_KEYS[d.getMonth()], dd = pad(d.getDate());
-  const rows = typeof window!=='undefined' && window.BillLive && k===dkey(new Date()) ? await window.BillLive.read({id:'tc33',day:k,db,path:billPath('tc33',k)}) : await db.ref(`orders/${y}/${mon}/${dd}`).once('value').then(s=>s.val());
+  const rows = typeof window!=='undefined' && window.BillLive && k===dkey(vnDate()) ? await window.BillLive.read({id:'tc33',day:k,db,path:billPath('tc33',k)}) : await db.ref(`orders/${y}/${mon}/${dd}`).once('value').then(s=>s.val());
   const snap={exists:()=>!!rows&&Object.keys(rows).length>0,val:()=>rows};
   if(snap.exists() && snap.val()) return Object.values(snap.val()).filter(Boolean);
   const doc = await fstore.collection('orders_archive').doc(y).collection(mon).doc(dd).get();
   const archived=(doc.exists && doc.data() && doc.data().orders) ? Object.values(doc.data().orders).filter(Boolean) : [];
-  if(k===dkey(new Date()))_tcTodayArchive={day:k,orders:archived};
+  if(k===dkey(vnDate()))_tcTodayArchive={day:k,orders:archived};
   return archived;
 }
 // XOFA — đường dẫn RT KHÔNG có năm (orders_xolifa/{mon}/{dd}); POS chuyển sang orders_xolifa_archive/{mon}_{dd}_{yyyy}
@@ -898,8 +936,8 @@ async function xoFetchDay(k){
   const d = parseDkey(k);
   const mon = MONTH_KEYS[d.getMonth()], dd = pad(d.getDate()), yyyy = d.getFullYear();
   const dateStr = `${dd}/${pad(d.getMonth()+1)}/${yyyy}`;
-  const age = daysBetween(k, dkey(new Date())), recent = age <= REV_STABLE_AFTER;
-  const rt = async ()=>{ if(typeof window!=='undefined'&&window.BillLive&&k===dkey(new Date()))return window.BillLive.read({id:'xofa',day:k,db,path:billPath('xofa',k)});const s = await db.ref(`orders_xolifa/${mon}/${dd}`).once('value'); return s.val() || {}; };
+  const age = daysBetween(k, dkey(vnDate())), recent = age <= REV_STABLE_AFTER;
+  const rt = async ()=>{ if(typeof window!=='undefined'&&window.BillLive&&k===dkey(vnDate()))return window.BillLive.read({id:'xofa',day:k,db,path:billPath('xofa',k)});const s = await db.ref(`orders_xolifa/${mon}/${dd}`).once('value'); return s.val() || {}; };
   // [GIẢM-ĐỌC] PosX chỉ chuyển sang archive các ngày 3 → 7 ngày trước: ngày < 3 ngày chưa thể có archive → không đọc thử.
   if(age < 3) return Object.values(await rt()).filter(o => o && o.date === dateStr);
   const fs = async ()=>{ const doc = await fstore.collection('orders_xolifa_archive').doc(`${mon}_${dd}_${yyyy}`).get(); return doc.exists ? (doc.data().orders || {}) : null; };
@@ -945,10 +983,10 @@ async function ggFetchDay(id, k){
   const d = parseDkey(k);
   const mon = MONTH_KEYS[d.getMonth()], dd = pad(d.getDate()), yyyy = d.getFullYear();
   // [GIẢM-ĐỌC] posgieo chỉ có archive cho ngày ≥ 3 ngày trước → ngày gần hơn chỉ đọc RT (không tốn lượt đọc Firestore).
-  const coArchive = daysBetween(k, dkey(new Date())) >= 3;
+  const coArchive = daysBetween(k, dkey(vnDate())) >= 3;
   const [a, b] = await Promise.all([
     coArchive ? fstore.collection(ggName('orders_gieogieo_archive', id)).doc(`${mon}_${dd}_${yyyy}`).get().then(doc=>doc.exists ? (doc.data().orders || {}) : {}) : Promise.resolve({}),
-    typeof window!=='undefined'&&window.BillLive&&k===dkey(new Date()) ? window.BillLive.read({id,day:k,db,path:billPath(id,k)}) : db.ref(`${ggName('orders_gieogieo', id)}/${mon}/${dd}`).once('value').then(s=>s.val() || {})
+    typeof window!=='undefined'&&window.BillLive&&k===dkey(vnDate()) ? window.BillLive.read({id,day:k,db,path:billPath(id,k)}) : db.ref(`${ggName('orders_gieogieo', id)}/${mon}/${dd}`).once('value').then(s=>s.val() || {})
   ]);
   const byKey = Object.assign({}, a);
   Object.entries(b).forEach(([key, o])=>{ if(o && (!o.date || String(o.date.split('/')[2]) === String(yyyy))) byKey[key] = o; });
@@ -1033,7 +1071,7 @@ async function offGhiBang(coll, all, ids, from, to, on, gieo){
   const P = firebase.firestore.FieldPath.documentId();
   const snap = await fstore.collection(coll).where(P, '>=', from).where(P, '<=', to).get();
   const cur = {}; snap.docs.forEach(doc=>{ cur[doc.id] = doc.data(); });
-  const batch = fstore.batch(), at = new Date().toISOString(); let n = 0;
+  const batch = fstore.batch(), at = vnDate().toISOString(); let n = 0;
   for(let d = from; d <= to; d = dkey(addDays(parseDkey(d), 1))){
     const x = cur[d] || null, list = gieo ? offStoresOf(x) : ((x && x.offStores) || []), next = offNextList(list, all, ids, on);
     if(x && JSON.stringify(list) === JSON.stringify(next) && Array.isArray(x.offStores)) continue;
@@ -1060,14 +1098,14 @@ async function revSources(only){
   const legacy = needsTc ? await tcLegacyOrders() : [];
   const gg = await gieoStores();
   return [
-    { key:'tc33', run: async k=>{ const orders = await tcFetchDay(k); return tcSummarize(orders.concat(legacy.filter(o => o && o.createdAt && dkey(new Date(o.createdAt)) === k)), menu); } },
+    { key:'tc33', run: async k=>{ const orders = await tcFetchDay(k); return tcSummarize(orders.concat(legacy.filter(o => o && o.createdAt && dkey(vnDate(o.createdAt)) === k)), menu); } },
     { key:'xofa', run: async k=> xoSummarize(await xoFetchDay(k)) }
   ].concat(gg.map(s=>({ key:'gg_' + s.id, run: async k=> ggSummarize(await ggFetchDay(s.id, k)) })));
 }
 // Trả { tc33:{dkey:sum}, xofa:{…}, gg_gg01:{…}, … } cho mọi ngày trong [from, to].
 // need24 (tuỳ chọn): ngày đang xem biểu đồ theo giờ — bản đệm cũ chưa có h24 thì đọc lại riêng ngày đó.
 async function revLoadRange(from, to, onProgress, only, need24){
-  const today = dkey(new Date());
+  const today = dkey(vnDate());
   const keys = [];
   for(let d = parseDkey(from); dkey(d) <= to; d = addDays(d, 1)) keys.push(dkey(d));
   const cache = revCacheLoad();
@@ -1116,7 +1154,7 @@ function targetMonthValue(T, ym, key){
   });
   return best;
 }
-function daysInMonthYm(ym){ const [y, m] = ym.split('-').map(Number); return new Date(y, m, 0).getDate(); }
+function daysInMonthYm(ym){ const [y, m] = ym.split('-').map(Number); return vnDate(y, m, 0).getDate(); }
 // Mục tiêu của khoảng ngày [from, to] — cộng từng ngày (mục tiêu tháng ÷ số ngày tháng đó). Không ngày nào có mức → null.
 // off (tuỳ chọn): ngày quán `key` đóng cửa → mục tiêu ngày đó = 0 (như Gieo).
 function targetForRange(T, from, to, key, off){
@@ -1138,7 +1176,7 @@ async function loadEmployees(force){
 }
 async function loadEmployeesNow(){
   const snap = await fstore.collection('employees_gieogieo').get();
-  const today = dkey(new Date());
+  const today = dkey(vnDate());
   EMP_CACHE = snap.docs.map(d=>{ const e = {...d.data(), id:d.id}; if(Array.isArray(e.payHistory) && e.payHistory.length) Object.assign(e, empPayTermsOn(e, today)); return e; })
     .sort((a,b)=>(a.fullName||'').localeCompare(b.fullName||'','vi'));
   return EMP_CACHE;
@@ -1179,13 +1217,13 @@ function computeWageForDayHours(emp, hoursInDay){
   return { amount: threshold*rate + (hoursInDay-threshold)*otRate, regularHours: threshold, otHours: hoursInDay - threshold };
 }
 // Giờ một ca: có giờ ra → ra − vào; đang mở của HÔM NAY → tạm tới hiện tại; mở của ngày đã qua → 0 (không đoán).
-function isShiftInProgress(s){ return !!s && !s.checkedOutAt && s.businessDate === dkey(new Date()); }
+function isShiftInProgress(s){ return !!s && !s.checkedOutAt && s.businessDate === dkey(vnDate()); }
 function shiftWorkedHours(s, nowMs){
   if(!s || !s.checkedInAt) return 0;
-  const inMs = new Date(s.checkedInAt).getTime();
+  const inMs = vnDate(s.checkedInAt).getTime();
   if(isNaN(inMs)) return 0;
   let endMs;
-  if(s.checkedOutAt){ endMs = new Date(s.checkedOutAt).getTime(); if(isNaN(endMs)) return 0; }
+  if(s.checkedOutAt){ endMs = vnDate(s.checkedOutAt).getTime(); if(isNaN(endMs)) return 0; }
   else { if(!isShiftInProgress(s)) return 0; endMs = nowMs || Date.now(); }
   return Math.max(0, (endMs - inMs) / 3600000);
 }
@@ -1328,7 +1366,7 @@ function allocMerge(a, b){
 // ==========================================================================
 const EXP_COLL = { tc33: 'expenses_tc33', xofa: 'expenses_xofa' };
 const EXP_CFG_DOC = () => fstore.collection('expense_config_tc33xofa').doc('categories');
-// Trùng cham_cong.v3.js (test khoá).
+// Trùng cham_cong.v4.js (test khoá).
 const DEFAULT_EXPENSE_CATS = [
   { id: 'nguyen_lieu', label: 'Nguyên liệu / mua hàng', costType: 'cogs' },
   { id: 'da', label: 'Đá', costType: 'cogs' },
@@ -1402,7 +1440,7 @@ async function loadCashCfg(force){
   if(CASH_CFG && !force) return CASH_CFG;
   const d = await cashSourceGet(CASH_CFG_DOC());
   if(d.exists && d.data().startDate){ validDate(d.data().startDate); CASH_CFG = d.data(); return CASH_CFG; }
-  CASH_CFG = { startDate: dkey(addDays(new Date(), 1)), createdAt: new Date().toISOString() };
+  CASH_CFG = { startDate: dkey(addDays(vnDate(), 1)), createdAt: vnDate().toISOString() };
   await CASH_CFG_DOC().set(CASH_CFG, { merge: true });
   return CASH_CFG;
 }
@@ -1451,7 +1489,7 @@ async function readCashGieoDay(date, records){
   // Hai chỉ số phụ đọc sau khi tiền nộp đã hiện, không tham gia đọc/lưu phiếu nhận.
   await ensureAuth(); validDate(date);
   const result={};
-  if(date > dkey(new Date()))return result;
+  if(date > dkey(vnDate()))return result;
   await pool(records, 4, async r=>{
     try{const sums=await revLoadRange(date,date,null,['gg_'+r.id]);result[r.id]=cashDaySummary(sums['gg_'+r.id]?.[date],r.id);}
     catch(e){result[r.id]=null;}
@@ -1469,7 +1507,7 @@ function cashQueryFrom(cacheMap, from, today){
 async function readCash(date, force){
   await ensureAuth(); validDate(date);
   if(force) CASH_CFG = null;
-  const cfg = await loadCashCfg(force), today = dkey(new Date()), start = cfg.startDate;
+  const cfg = await loadCashCfg(force), today = dkey(vnDate()), start = cfg.startDate;
   // [16/10] Mốc truy vấn = mốc theo dõi (không lùi theo ngày đang xem): xem 1 ngày trước mốc chỉ đọc riêng ngày đó (bước 1b / 2b)
   // — trước đây chọn lùi 1 năm là đọc liền cả năm doanh thu + chi phí + phiếu nhận.
   const from = start, records = (await gieoStores()).filter(r=>r.active !== false);
@@ -1518,7 +1556,14 @@ async function readCash(date, force){
   [['tc33', spentTc], ['xofa', spentXo]].forEach(([st, sp])=>{
     tcx[st] = {};
     needList.forEach(d=>{ tcx[st][d] = { ...tcxCashExpected(rev[st] && rev[st][d], st, sp[d]), received: null }; });
-    Object.entries(tcxMap[st]).forEach(([d, r])=>{ tcx[st][d] = { ...(tcx[st][d] || {}), ...(r.received != null ? { sales: r.sales, spent: r.spent, expected: r.expected } : {}), received: r.received, receipt: r }; });
+    Object.entries(tcxMap[st]).forEach(([d, r])=>{
+      const saved={sales:r.sales,spent:r.spent,expected:r.expected};
+      // Ngày đang xem đã có bill: hiển thị phép tính mới, không giữ cashMain sai của
+      // quà giá 0 trong phiếu cũ. Số thực nhận/phiếu gốc vẫn nguyên vẹn, không ghi lại.
+      const current=r.received!=null && d===date && rev[st][d]?.count>0 ? tcxCashExpected(rev[st][d],st,sp[d]) : null;
+      tcx[st][d]={...(tcx[st][d]||{}),...(r.received!=null?(current||saved):{}),received:r.received,receipt:r,
+        ...(current && Number(r.expected)!==current.expected ? {expectedAtReceipt:r.expected} : {})};
+    });
   });
   // Lưu đệm các ngày đã nhận.
   const nc = { tcx: { tc33: {}, xofa: {} }, gg: {} };
@@ -1534,7 +1579,7 @@ async function writeCashReceipt(store, date, received, info){
   await ensureAuth(); validDate(date);
   const n = Math.round(Number(received));
   if(!Number.isSafeInteger(n) || n < 0 || n > 10000000000) throw new Error('Nhập số tiền thực nhận (0 nếu không nhận được đồng nào).');
-  const at = new Date().toISOString();
+  const at = vnDate().toISOString();
   if(store === 'tc33' || store === 'xofa'){
     const exp = Math.round(Number(info.expected) || 0);
     const rec = { store, date, received: n, expected: exp, variance: n - exp, sales: Math.round(Number(info.sales) || 0), spent: Math.round(Number(info.spent) || 0), at, by: 'manage' };
@@ -1550,7 +1595,7 @@ async function writeCashReceipt(store, date, received, info){
   }
   try{ localStorage.removeItem(CASH_CACHE_KEY); }catch(e){}
 }
-async function writeCashStart(date){ await ensureAuth(); validDate(date); await CASH_CFG_DOC().set({ startDate: date, updatedAt: new Date().toISOString() }, { merge: true }); CASH_CFG = null; try{ localStorage.removeItem(CASH_CACHE_KEY); }catch(e){} }
+async function writeCashStart(date){ await ensureAuth(); validDate(date); await CASH_CFG_DOC().set({ startDate: date, updatedAt: vnDate().toISOString() }, { merge: true }); CASH_CFG = null; try{ localStorage.removeItem(CASH_CACHE_KEY); }catch(e){} }
 // ---- TÀI SẢN The cafe 33 / XOFA (16/10) — Gieo cấu hình ở quanlygieo (khấu hao đã nằm trong lãi/lỗ pl_days) ----
 // Một doc expense_config_tc33xofa/assets { items:[{id,store,name,purchaseCost,purchaseDate,usefulLifeMonths,active}] } — 1 lượt đọc.
 // Khấu hao y như monthlyDepreciation của quanlygieo: mỗi tháng = nguyên giá ÷ số tháng thu hồi, tính từ ngày mua tới hết
@@ -1558,7 +1603,7 @@ async function writeCashStart(date){ await ensureAuth(); validDate(date); await 
 const ASSET_DOC = () => fstore.collection('expense_config_tc33xofa').doc('assets');
 let ASSETS = null;
 async function loadAssets(force){ if(ASSETS && !force) return ASSETS; const d = await ASSET_DOC().get(); ASSETS = d.exists && Array.isArray(d.data().items) ? d.data().items : []; return ASSETS; }
-function assetEndDate(a){ const d = new Date(a.purchaseDate + 'T00:00:00'); d.setMonth(d.getMonth() + (Number(a.usefulLifeMonths) || 1)); return dkey(d); }
+function assetEndDate(a){ const d = vnDate(a.purchaseDate + 'T00:00:00'); d.setMonth(d.getMonth() + (Number(a.usefulLifeMonths) || 1)); return dkey(d); }
 function assetLive(a, store, date){ return !!a && a.active !== false && (!store || a.store === store) && !!a.purchaseDate && a.purchaseDate <= date && date < assetEndDate(a); }
 function assetMonthly(assets, store, date){ return (assets || []).filter(a=>assetLive(a, store, date)).reduce((s, a)=>s + Math.max(0, Number(a.purchaseCost) || 0) / (Number(a.usefulLifeMonths) || 1), 0); }
 function assetDepDay(assets, store, date){ return assetMonthly(assets, store, date) / daysInMonthYm(date.slice(0, 7)); }
@@ -1576,12 +1621,12 @@ async function writeAsset(id, v){
   if(!Number.isSafeInteger(cost) || cost <= 0 || cost > 100000000000) throw new Error('Nhập nguyên giá là số tiền dương.');
   validDate(v.purchaseDate);
   if(!Number.isInteger(months) || months < 1 || months > 240) throw new Error('Thời gian thu hồi từ 1 đến 240 tháng.');
-  const items = (await loadAssets(true)).slice(), rec = { store: v.store, name, purchaseCost: cost, purchaseDate: v.purchaseDate, usefulLifeMonths: months, active: v.active !== false, updatedAt: new Date().toISOString() };
+  const items = (await loadAssets(true)).slice(), rec = { store: v.store, name, purchaseCost: cost, purchaseDate: v.purchaseDate, usefulLifeMonths: months, active: v.active !== false, updatedAt: vnDate().toISOString() };
   if(id){ const i = items.findIndex(a=>a.id === id); if(i < 0) throw new Error('Tài sản không còn — tải lại.'); items[i] = { ...items[i], ...rec }; }
   else items.push({ id: 'as_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), ...rec, createdAt: rec.updatedAt });
-  await ASSET_DOC().set({ items, updatedAt: new Date().toISOString() }); ASSETS = null;
+  await ASSET_DOC().set({ items, updatedAt: vnDate().toISOString() }); ASSETS = null;
 }
-async function deleteAsset(id){ await ensureAuth(); const items = (await loadAssets(true)).filter(a=>a.id !== id); await ASSET_DOC().set({ items, updatedAt: new Date().toISOString() }); ASSETS = null; }
+async function deleteAsset(id){ await ensureAuth(); const items = (await loadAssets(true)).filter(a=>a.id !== id); await ASSET_DOC().set({ items, updatedAt: vnDate().toISOString() }); ASSETS = null; }
 async function readAssets(force){ await ensureAuth(); return { assets: await loadAssets(force), records: await gieoStores() }; }
 // ---- [GIẢM-ĐỌC] BẢN TỔNG HỢP CHI PHÍ THÁNG: expense_sums_tc33xofa/{store}_{YYYY-MM} ----
 // Tổng quan / hoà vốn đọc 1 bản / quán / tháng thay vì mọi khoản chi (mua hàng hằng ngày = hàng trăm bản ghi / tháng).
@@ -1622,7 +1667,7 @@ async function rebuildExpenseSum(store, ym){
   const from = ym + '-01', to = monthEndOf(from), col = fstore.collection(EXP_COLL[store]);
   const [list, paid] = await Promise.all([readExpensesRange(store, from, to), col.where('paidDate','>=',from).where('paidDate','<=',to).get().then(s=>s.docs.map(d=>({ ...d.data(), id: d.id })))]);
   const sum = expMonthSum(list.concat(paid), ym);
-  await fstore.collection(EXP_SUM_COLL).doc(store + '_' + ym).set({ ...sum, store, updatedAt: new Date().toISOString() });
+  await fstore.collection(EXP_SUM_COLL).doc(store + '_' + ym).set({ ...sum, store, updatedAt: vnDate().toISOString() });
   return sum;
 }
 // { 'YYYY-MM': bản tổng hợp | null } — 1 lượt đọc / tháng; tháng chưa có bản = chưa có chi phí đã duyệt.
@@ -1681,7 +1726,7 @@ async function readPlBook(id, from, to){
       let q = fstore.collection(ggName('pl_days_gieogieo', id)).where('date', '>=', from); if(x.du) q = q.where('date', '<', x.du);
       const snap = await q.get(), moi = {};
       snap.docs.forEach(doc=>{ const v = doc.data(); if(!v || !v.date || book[v.date]) return; const o = Object.assign({}, v); delete o.storeId; moi[v.date] = o; if(v.date <= to) m[v.date] = Object.assign({ date: v.date }, o); });
-      ref.set({ d: moi, du: from, at: new Date().toISOString(), storeId: id }, { merge: true }).catch(e=>console.warn('[sổ gộp] không bù được', id, e));
+      ref.set({ d: moi, du: from, at: vnDate().toISOString(), storeId: id }, { merge: true }).catch(e=>console.warn('[sổ gộp] không bù được', id, e));
     }
     return m;
   }catch(e){ return null; }
@@ -1693,7 +1738,7 @@ async function readPlDays(records, from, to){
   const conLai = (records || []).filter(r=>{ if(so[r.id]){ out[r.id] = so[r.id]; return false; } return true; });
   if(!conLai.length) return out;
   records = conLai;
-  const cutoff = dkey(addDays(new Date(), -PL_STABLE_DAYS)), cache = plCacheLoad(); let dirty = false;
+  const cutoff = dkey(addDays(vnDate(), -PL_STABLE_DAYS)), cache = plCacheLoad(); let dirty = false;
   await pool(records || [], 4, async r=>{
     try{
       const c = cache[r.id] || (cache[r.id] = {});
@@ -1726,7 +1771,7 @@ async function readPlDays(records, from, to){
 }
 // ==========================================================================
 // [LÃI/LỖ GIEO TỰ TÍNH — 16/10] Chủ dự án: manage không phải chờ mở quanlygieo mới có lãi / lỗ. Ngày nào CHƯA CÓ
-// bản tóm tắt (pl_days) hoặc bản đã CŨ thì manage tự tính bằng lai_lo.v5.js (chép nguyên văn bộ tính của quanlygieo
+// bản tóm tắt (pl_days) hoặc bản đã CŨ thì manage tự tính bằng lai_lo.v6.js (chép nguyên văn bộ tính của quanlygieo
 // — cùng số) rồi ghi lại pl_days → quanlygieo / máy khác dùng lại, không ai tính lại ngày đã có số.
 //   · "Cũ": ngày đã qua mà bản ghi lúc ngày đó CHƯA HẾT (tính giữa ngày, sau đó còn bán); hôm nay: ghi quá 10 phút.
 //   · Chỉ tính trong PL_COMPUTE_BACK ngày gần nhất (ngày xa hơn: đã có sổ / cache ngày của quanlygieo).
@@ -1742,7 +1787,7 @@ function plNeedDays(byDate, from, to, nowMs, marks){
     ...(window.LaiLo?.plNgayDaCanTinhLai?.(byDate,from,to,opts)||[])])].sort();
 }
 function plCachePut(id, list){
-  const cutoff = dkey(addDays(new Date(), -PL_STABLE_DAYS)), cache = plCacheLoad(), c = cache[id]; if(!c) return;
+  const cutoff = dkey(addDays(vnDate(), -PL_STABLE_DAYS)), cache = plCacheLoad(), c = cache[id]; if(!c) return;
   let dirty = false;
   list.forEach(o=>{ const ym = o.date.slice(0, 7); if(monthEndOf(ym + '-01') < cutoff && c[ym]){ c[ym][o.date] = o; dirty = true; } });
   if(dirty) plCacheSave(cache);
@@ -1760,7 +1805,7 @@ async function plFillMissing(records, pl, from, to, onStore){
     // Từng ĐOẠN ngày liền nhau (cách ≤ 3 ngày thì gộp) như plNgayTuSo của quanlygieo — 1 dấu ở 40 ngày trước + hôm nay không kéo theo 40 ngày.
     for(const [a, b] of plSegments(need)) try{
       const res = await window.LaiLo.tinh({ fstore, db, storeId: r.id, from: a, to: b });
-      const at = new Date().toISOString(), col = fstore.collection(ggName('pl_days_gieogieo', r.id)), batch = fstore.batch(), put = [];
+      const at = vnDate().toISOString(), col = fstore.collection(ggName('pl_days_gieogieo', r.id)), batch = fstore.batch(), put = [];
       res.tomTat.filter(o=>need.includes(o.date)).forEach(o=>{ const x = Object.assign({}, o, { storeId: r.id, updatedAt: at, by: 'manage' }); batch.set(col.doc(o.date), x); put.push(x); });
       // [SỔ GỘP] cùng lượt ghi: cập nhật đúng các ngày vừa tính trong sổ gộp của quán (ghi đè ngày đó, không cộng chồng).
       if(put.length){ const so = {}; put.forEach(x=>{ const o = Object.assign({}, x); delete o.storeId; so[x.date] = o; }); batch.set(fstore.collection(ggName('pl_book_gieogieo', r.id)).doc('days'), { d: so, at, storeId: r.id }, { merge: true }); }
@@ -1783,7 +1828,7 @@ function invalidateRevenue(clearOld=false){BE_CFG=null;EXP_CFG=null;ASSETS=null;
 function invalidateEmployees(){EMP_CACHE=null}
 async function readRevenue(from,to,compare,scope='all'){
  await ensureAuth();validDate(from);validDate(to);if(from>to||daysBetween(from,to)>730)throw new Error('Chọn khoảng ngày hợp lệ, tối đa 2 năm.');
- const today=dkey(new Date()),start=compare?dkey(addDays(parseDkey(from),-1)):from,end=to>today?today:to;
+ const today=dkey(vnDate()),start=compare?dkey(addDays(parseDkey(from),-1)):from,end=to>today?today:to;
  const missing=[];
  const [targets,cfg,records,beCfg]=await Promise.all([loadTargets(),gieoConfigHistory(),gieoStores(),loadBreakeven().catch(e=>{missing.push('cấu hình hoà vốn');return null})]);
  const selected=records.filter(r=>scope==='all'||scope==='brand:gieo'||scope==='gieo'||scope===r.id),tcx=['tc33','xofa'].filter(id=>scope==='all'||scope===id);
@@ -1808,7 +1853,7 @@ async function readAttendance(ids,date){
  return{groups,settings:{lateGraceMinutes:10,...(settings.exists?settings.data():{})}};
 }
 async function readPayroll(month){
- await ensureAuth();_ggStores=null;if(!/^\d{4}-(?:0[1-9]|1[0-2])$/.test(month))throw new Error('Tháng không hợp lệ.');const[y,m]=month.split('-').map(Number),from=dkey(new Date(y,m-1,1)),to=dkey(new Date(y,m,0));
+ await ensureAuth();_ggStores=null;if(!/^\d{4}-(?:0[1-9]|1[0-2])$/.test(month))throw new Error('Tháng không hợp lệ.');const[y,m]=month.split('-').map(Number),from=dkey(vnDate(y,m-1,1)),to=dkey(vnDate(y,m,0));
  const[emps,tc,xo,gieo,tcSchedules,xoSchedules]=await Promise.all([loadEmployees(true),shiftColl('tc33').where('businessDate','>=',from).where('businessDate','<=',to).get(),shiftColl('xofa').where('businessDate','>=',from).where('businessDate','<=',to).get(),gieoHoursByEmployee(from,to),to>='2026-10-01'?readSchedules('tc33',from,to):[],to>='2026-10-01'?readSchedules('xofa',from,to):[]]);
  const result={employees:emps,shifts:{tc33:attachPaySchedules(tc.docs.map(d=>({...d.data(),id:d.id})),tcSchedules),xofa:attachPaySchedules(xo.docs.map(d=>({...d.data(),id:d.id})),xoSchedules)},gieo};
  laborByEmployee(emps,result.shifts.tc33);laborByEmployee(emps,result.shifts.xofa);return result;
@@ -1824,57 +1869,57 @@ async function writeEmployee(id,values){
   if(!['hourly_full','hourly_part'].includes(values.type)||!Number.isFinite(hourlyRate)||hourlyRate<0||hourlyRate>1000000)throw new Error('Đơn giá hoặc hình thức lương không hợp lệ.');
   if(otEnabled&&(!Number.isFinite(otRate)||otRate<=0||otRate>1000000||!Number.isFinite(otThresholdHours)||otThresholdHours<=0||otThresholdHours>24))throw new Error('Kiểm tra số giờ cơ bản và đơn giá OT.');
   const pay={payType:values.type,hourlyRate,fixedMonthlySalary:0,otEnabled,otThresholdHours,otRate};
-  if(cur){const before=payTermsOfRecord(cur),after=payTermsOfRecord(pay);if(PAY_FIELDS.some(k=>before[k]!==after[k])){const from=validDate(values.effectiveFrom||dkey(new Date()));payFrom=from;let hist=Array.isArray(cur.payHistory)?cur.payHistory.slice():[];if(!hist.length)hist.push({effectiveFrom:'0000-00-00',legacy:true,...before});hist=hist.filter(h=>h.effectiveFrom!==from);hist.push({effectiveFrom:from,...after,changedAt:new Date().toISOString()});hist.sort((a,b)=>String(a.effectiveFrom).localeCompare(String(b.effectiveFrom)));Object.assign(patch,empPayTermsOn({payHistory:hist},dkey(new Date())),{payHistory:hist})}}
+  if(cur){const before=payTermsOfRecord(cur),after=payTermsOfRecord(pay);if(PAY_FIELDS.some(k=>before[k]!==after[k])){const from=validDate(values.effectiveFrom||dkey(vnDate()));payFrom=from;let hist=Array.isArray(cur.payHistory)?cur.payHistory.slice():[];if(!hist.length)hist.push({effectiveFrom:'0000-00-00',legacy:true,...before});hist=hist.filter(h=>h.effectiveFrom!==from);hist.push({effectiveFrom:from,...after,changedAt:vnDate().toISOString()});hist.sort((a,b)=>String(a.effectiveFrom).localeCompare(String(b.effectiveFrom)));Object.assign(patch,empPayTermsOn({payHistory:hist},dkey(vnDate())),{payHistory:hist})}}
   else Object.assign(patch,pay);
  }
- if(cur)await fstore.collection('employees_gieogieo').doc(id).update(patch);else await fstore.collection('employees_gieogieo').add({...patch,active:true,roles:[],createdAt:new Date().toISOString(),createdFrom:'manage'});
+ if(cur)await fstore.collection('employees_gieogieo').doc(id).update(patch);else await fstore.collection('employees_gieogieo').add({...patch,active:true,roles:[],createdAt:vnDate().toISOString(),createdFrom:'manage'});
  EMP_CACHE=null;
  // [16/10] Lương áp từ ngày ĐÃ QUA → dấu "ngày lãi/lỗ bị đổi" (như data_access.v8 — manage không bọc fstore) để quanlygieo / manage tính lại pl_days từ mốc đó.
- if(payFrom&&payFrom<dkey(new Date())){const at=new Date().toISOString();await fstore.collection('pl_dirty_gieogieo').doc('_all').set({m:{[payFrom+'_']:at},at},{merge:true}).catch(e=>console.warn('[lãi/lỗ] không ghi được dấu đổi lương',e))}
+ if(payFrom&&payFrom<dkey(vnDate())){const at=vnDate().toISOString();await fstore.collection('pl_dirty_gieogieo').doc('_all').set({m:{[payFrom+'_']:at},at},{merge:true}).catch(e=>console.warn('[lãi/lỗ] không ghi được dấu đổi lương',e))}
 }
 // [16/10] Trạng thái nhân viên: active (đang làm) / paused (tạm ngưng: active:false) / resigned (đã nghỉ việc: active:false + resignedAt).
 // active:false giữ nguyên nghĩa cũ cho POS / quanlygieo / lịch / chấm công (không check-in, ẩn khỏi danh sách chọn).
 async function writeEmployeeStatus(id,status,date){
  await ensureAuth();const list=await loadEmployees(true),cur=list.find(e=>e.id===id);if(!cur)throw new Error('Không tìm thấy nhân viên.');
  if(status==='active'&&list.some(e=>e.id!==id&&e.active!==false&&e.pin===cur.pin))throw new Error('PIN đang thuộc nhân viên khác; hãy sửa PIN trước khi kích hoạt.');
- const del=firebase.firestore.FieldValue.delete(),at=new Date().toISOString();
+ const del=firebase.firestore.FieldValue.delete(),at=vnDate().toISOString();
  const patch=status==='active'?{active:true,resignedAt:del}:status==='paused'?{active:false,resignedAt:del}:status==='resigned'?{active:false,resignedAt:validDate(date)}:null;
  if(!patch)throw new Error('Trạng thái không hợp lệ.');
  await fstore.collection('employees_gieogieo').doc(id).update({...patch,statusUpdatedAt:at,statusUpdatedFrom:'manage'});EMP_CACHE=null
 }
 async function writeEmployeeActive(id,active){await ensureAuth();const list=await loadEmployees(true),cur=list.find(e=>e.id===id);if(!cur)throw new Error('Không tìm thấy nhân viên.');if(active&&list.some(e=>e.id!==id&&e.active!==false&&e.pin===cur.pin))throw new Error('PIN đang thuộc nhân viên khác; hãy sửa PIN trước khi kích hoạt.');await fstore.collection('employees_gieogieo').doc(id).update({active:!!active});EMP_CACHE=null}
-function schedulePayload(store,emp,date,shift){validStore(store);validDate(date);if(!shift.off&&(!validTime(shift.start)||!validTime(shift.end)||shift.start===shift.end))throw new Error('Nhập đủ giờ vào và ra, hai giờ phải khác nhau.');return{employeeId:emp.id,employeeName:emp.fullName,date,store,startTime:shift.off?null:shift.start,endTime:shift.off?null:shift.end,isOff:!!shift.off,updatedAt:new Date().toISOString()}}
+function schedulePayload(store,emp,date,shift){validStore(store);validDate(date);if(!shift.off&&(!validTime(shift.start)||!validTime(shift.end)||shift.start===shift.end))throw new Error('Nhập đủ giờ vào và ra, hai giờ phải khác nhau.');return{employeeId:emp.id,employeeName:emp.fullName,date,store,startTime:shift.off?null:shift.start,endTime:shift.off?null:shift.end,isOff:!!shift.off,updatedAt:vnDate().toISOString()}}
 async function employeeAt(id,store){const emp=(await loadEmployees()).find(e=>e.id===id);if(!emp||emp.active===false||!worksAt(emp,store))throw new Error('Nhân viên chưa được phân công ở cửa hàng này.');return emp}
 async function writeSchedule(store,id,date,shift){await ensureAuth();const emp=await employeeAt(id,store),data=schedulePayload(store,emp,date,shift);await fstore.collection(STORES[store].sched).doc(id+'_'+date).set(data)}
 async function deleteSchedule(store,id,date){await ensureAuth();validStore(store);validDate(date);await fstore.collection(STORES[store].sched).doc(id+'_'+date).delete()}
 async function writeScheduleBatch(store,id,dates,shift){await ensureAuth();validStore(store);if(!dates.length||dates.length>120)throw new Error('Chọn từ 1 đến 120 ngày cho mỗi lần xếp lịch.');const emp=await employeeAt(id,store),batch=fstore.batch();for(const date of dates)batch.set(fstore.collection(STORES[store].sched).doc(id+'_'+date),schedulePayload(store,emp,date,shift));await batch.commit()}
-function shiftTimes(date,start,end){validDate(date);if(!validTime(start)||end&&!validTime(end)||end===start)throw new Error('Giờ chấm công không hợp lệ.');const checkedInAt=new Date(date+'T'+start+':00+07:00').toISOString();let checkedOutAt=end?new Date(date+'T'+end+':00+07:00').toISOString():null;if(checkedOutAt&&checkedOutAt<=checkedInAt)checkedOutAt=new Date(Date.parse(checkedOutAt)+86400000).toISOString();return{checkedInAt,checkedOutAt}}
+function shiftTimes(date,start,end){validDate(date);if(!validTime(start)||end&&!validTime(end)||end===start)throw new Error('Giờ chấm công không hợp lệ.');const checkedInAt=vnDate(date+'T'+start+':00+07:00').toISOString();let checkedOutAt=end?vnDate(date+'T'+end+':00+07:00').toISOString():null;if(checkedOutAt&&checkedOutAt<=checkedInAt)checkedOutAt=vnDate(Date.parse(checkedOutAt)+86400000).toISOString();return{checkedInAt,checkedOutAt}}
 async function writeShift(store,id,values){
  await ensureAuth();validStore(store);const times=shiftTimes(values.date,values.start,values.end);
- if(id){const ref=shiftColl(store).doc(id),doc=await ref.get();if(!doc.exists)throw new Error('Ca không còn tồn tại.');const old=doc.data();if(old.businessDate!==values.date||old.employeeId!==values.employeeId)throw new Error('Chỉ sửa giờ của ca hiện tại, không đổi nhân viên hoặc ngày.');await ref.update({...times,manualEdit:true,manualEditAt:new Date().toISOString(),manualEditBy:'manage'})}
- else{const emp=await employeeAt(values.employeeId,store),snap=await shiftColl(store).where('businessDate','==',values.date).get();if(snap.docs.some(d=>{const s=d.data();return s.employeeId===emp.id&&s.checkedInAt===times.checkedInAt}))throw new Error('Đã có ca với đúng giờ vào này.');await shiftColl(store).add({employeeId:emp.id,employeeName:emp.fullName,businessDate:values.date,store,...times,manualEntry:true,manualEditAt:new Date().toISOString(),manualEditBy:'manage'})}
+ if(id){const ref=shiftColl(store).doc(id),doc=await ref.get();if(!doc.exists)throw new Error('Ca không còn tồn tại.');const old=doc.data();if(old.businessDate!==values.date||old.employeeId!==values.employeeId)throw new Error('Chỉ sửa giờ của ca hiện tại, không đổi nhân viên hoặc ngày.');await ref.update({...times,manualEdit:true,manualEditAt:vnDate().toISOString(),manualEditBy:'manage'})}
+ else{const emp=await employeeAt(values.employeeId,store),snap=await shiftColl(store).where('businessDate','==',values.date).get();if(snap.docs.some(d=>{const s=d.data();return s.employeeId===emp.id&&s.checkedInAt===times.checkedInAt}))throw new Error('Đã có ca với đúng giờ vào này.');await shiftColl(store).add({employeeId:emp.id,employeeName:emp.fullName,businessDate:values.date,store,...times,manualEntry:true,manualEditAt:vnDate().toISOString(),manualEditBy:'manage'})}
 }
 async function deleteShift(store,id){await ensureAuth();validStore(store);await shiftColl(store).doc(id).delete()}
-async function writeLateGrace(value){await ensureAuth();const n=Number(value);if(!Number.isInteger(n)||n<0||n>240)throw new Error('Ngưỡng trễ từ 0 đến 240 phút.');await HR_DOC().set({lateGraceMinutes:n,updatedAt:new Date().toISOString()},{merge:true})}
-async function writeTargets(month,values){await ensureAuth();if(!/^\d{4}-(?:0[1-9]|1[0-2])$/.test(month))throw new Error('Tháng không hợp lệ.');const rec={updatedAt:new Date().toISOString()};for(const key of['tc33','xofa','all']){const value=values[key];if(value===''||value==null)continue;const n=Number(value);if(!Number.isSafeInteger(n)||n<=0||n>1000000000000)throw new Error('Mục tiêu phải là số tiền dương hợp lệ.');rec[key]=n}if(Object.keys(rec).length===1)throw new Error('Nhập ít nhất một mục tiêu.');await TARGET_DOC().set({m:{[month]:rec}},{mergeFields:['m.'+month]});TARGETS=null}
+async function writeLateGrace(value){await ensureAuth();const n=Number(value);if(!Number.isInteger(n)||n<0||n>240)throw new Error('Ngưỡng trễ từ 0 đến 240 phút.');await HR_DOC().set({lateGraceMinutes:n,updatedAt:vnDate().toISOString()},{merge:true})}
+async function writeTargets(month,values){await ensureAuth();if(!/^\d{4}-(?:0[1-9]|1[0-2])$/.test(month))throw new Error('Tháng không hợp lệ.');const rec={updatedAt:vnDate().toISOString()};for(const key of['tc33','xofa','all']){const value=values[key];if(value===''||value==null)continue;const n=Number(value);if(!Number.isSafeInteger(n)||n<=0||n>1000000000000)throw new Error('Mục tiêu phải là số tiền dương hợp lệ.');rec[key]=n}if(Object.keys(rec).length===1)throw new Error('Nhập ít nhất một mục tiêu.');await TARGET_DOC().set({m:{[month]:rec}},{mergeFields:['m.'+month]});TARGETS=null}
 async function deleteTargets(month){await ensureAuth();if(!/^\d{4}-(?:0[1-9]|1[0-2])$/.test(month))throw new Error('Tháng không hợp lệ.');await TARGET_DOC().update({['m.'+month]:firebase.firestore.FieldValue.delete()});TARGETS=null}
 async function readBreakeven(month,force=false){
  await ensureAuth();if(!/^\d{4}-(?:0[1-9]|1[0-2])$/.test(month))throw new Error('Tháng không hợp lệ.');if(force){BE_CFG=null;_ggStores=null}
- const today=dkey(new Date()),from=month+'-01',end=month+'-'+String(daysInMonthYm(month)).padStart(2,'0'),to=end>today?today:end;
+ const today=dkey(vnDate()),from=month+'-01',end=month+'-'+String(daysInMonthYm(month)).padStart(2,'0'),to=end>today?today:end;
  const[beCfg,records]=await Promise.all([loadBreakeven(force),gieoStores()]);
  return{beCfg,records,month,from,to,pl:await readPlDays(records.filter(r=>r.active!==false),from,to)};
 }
 // ---- Tab Chi phí ----
 async function readCosts(month,force=false,scope='all'){
  await ensureAuth();if(!/^\d{4}-(?:0[1-9]|1[0-2])$/.test(month))throw new Error('Tháng không hợp lệ.');if(force){_ggStores=null;EXP_CFG=null}
- const today=dkey(new Date()),from=month+'-01',end=monthEndOf(from),plTo=end>today?today:end;
+ const today=dkey(vnDate()),from=month+'-01',end=monthEndOf(from),plTo=end>today?today:end;
  const needs=st=>scope==='all'||scope===st;
  const pend=st=>!needs(st)?Promise.resolve([]):fstore.collection(EXP_COLL[st]).where('status','==','pending_review').get().then(s=>s.docs.map(d=>({...d.data(),id:d.id,store:st})));
  const paid=st=>!needs(st)?Promise.resolve([]):fstore.collection(EXP_COLL[st]).where('paidDate','>=',from).where('paidDate','<=',end).get().then(s=>s.docs.map(d=>({...d.data(),id:d.id,store:st})));
  const sumDoc=st=>!needs(st)?Promise.resolve(undefined):fstore.collection(EXP_SUM_COLL).doc(st+'_'+month).get().then(d=>d.exists?d.data():null).catch(()=>undefined);
  const[cfg,records,tc,xo,pTc,pXo,qTc,qXo,sTc,sXo,assets]=await Promise.all([loadExpenseCfg(force),gieoStores(),needs('tc33')?readExpensesRange('tc33',from,end):[],needs('xofa')?readExpensesRange('xofa',from,end):[],pend('tc33'),pend('xofa'),paid('tc33'),paid('xofa'),sumDoc('tc33'),sumDoc('xofa'),loadAssets(force)]);
  // Tự sửa bản tổng hợp: đã có đủ khoản chi thật của tháng trong tay → lệch (lần ghi trước lỗi mạng giữa chừng…) thì ghi lại.
- [['tc33',tc.concat(qTc),sTc],['xofa',xo.concat(qXo),sXo]].forEach(([st,list,cur])=>{if(cur===undefined)return;const s=expMonthSum(list,month);const same=cur&&JSON.stringify({b:cur.byDay||{},p:cur.paid||0,c:cur.count||0,k:cur.base,t:Object.entries(cur.t||{}).sort()})===JSON.stringify({b:s.byDay,p:s.paid,c:s.count,k:s.base,t:Object.entries(s.t).sort()});if(!same&&(cur||s.count||s.paid))fstore.collection(EXP_SUM_COLL).doc(st+'_'+month).set({...s,store:st,updatedAt:new Date().toISOString()}).catch(e=>console.warn('[chi phí] không ghi được tổng hợp',e))});
+ [['tc33',tc.concat(qTc),sTc],['xofa',xo.concat(qXo),sXo]].forEach(([st,list,cur])=>{if(cur===undefined)return;const s=expMonthSum(list,month);const same=cur&&JSON.stringify({b:cur.byDay||{},p:cur.paid||0,c:cur.count||0,k:cur.base,t:Object.entries(cur.t||{}).sort()})===JSON.stringify({b:s.byDay,p:s.paid,c:s.count,k:s.base,t:Object.entries(s.t).sort()});if(!same&&(cur||s.count||s.paid))fstore.collection(EXP_SUM_COLL).doc(st+'_'+month).set({...s,store:st,updatedAt:vnDate().toISOString()}).catch(e=>console.warn('[chi phí] không ghi được tổng hợp',e))});
  return{month,from,to:end,plTo,cfg,assets,cats:expenseCatsAll(cfg),records,list:{tc33:tc,xofa:xo},paid:{tc33:qTc,xofa:qXo},pending:pTc.concat(pXo).sort((a,b)=>String(a.createdAt).localeCompare(String(b.createdAt))),pl:from<=plTo?await readPlDays(records.filter(r=>r.active!==false&&(scope==='all'||scope==='gieo'||scope===r.id)),from,plTo):{}};
 }
 function expValidate(v,cats){
@@ -1897,22 +1942,22 @@ async function expMutate(store,id,write){
 }
 async function writeExpense(store,id,values){
  const cats=expenseCatsAll(await loadExpenseCfg());const doc=expValidate(values,cats);
- await expMutate(store,id,async ref=>{if(ref)return ref.update({...doc,editedAt:new Date().toISOString()});if(doc.periodType==='onetime'){delete doc.startDate;delete doc.endDate}const data={...doc,status:'approved',source:'manage',store,createdAt:new Date().toISOString()};await fstore.collection(EXP_COLL[store]).add(data);return{data}});
+ await expMutate(store,id,async ref=>{if(ref)return ref.update({...doc,editedAt:vnDate().toISOString()});if(doc.periodType==='onetime'){delete doc.startDate;delete doc.endDate}const data={...doc,status:'approved',source:'manage',store,createdAt:vnDate().toISOString()};await fstore.collection(EXP_COLL[store]).add(data);return{data}});
 }
 async function deleteExpenseDoc(store,id){await expMutate(store,id,ref=>ref.delete())}
-async function reviewExpense(store,id,approve,note){await expMutate(store,id,ref=>ref.update(approve?{status:'approved',reviewedAt:new Date().toISOString()}:{status:'rejected',reviewedAt:new Date().toISOString(),reviewNote:String(note||'').slice(0,300)}))}
+async function reviewExpense(store,id,approve,note){await expMutate(store,id,ref=>ref.update(approve?{status:'approved',reviewedAt:vnDate().toISOString()}:{status:'rejected',reviewedAt:vnDate().toISOString(),reviewNote:String(note||'').slice(0,300)}))}
 async function markExpensePaid(store,id,date){validDate(date);await expMutate(store,id,ref=>ref.update({paidDate:date}))}
 // Số dự đoán → số thật khi hoá đơn về (giữ số cũ để giải thích, như setExpenseActual của quanlygieo).
-async function setExpenseActual(store,id,amount,oldAmount){const n=Math.round(Number(amount));if(!Number.isSafeInteger(n)||n<=0)throw new Error('Nhập số tiền thật.');await expMutate(store,id,ref=>ref.update({amount:n,amountKind:'actual',estimatedAmount:Number(oldAmount)||0,actualAt:new Date().toISOString()}))}
+async function setExpenseActual(store,id,amount,oldAmount){const n=Math.round(Number(amount));if(!Number.isSafeInteger(n)||n<=0)throw new Error('Nhập số tiền thật.');await expMutate(store,id,ref=>ref.update({amount:n,amountKind:'actual',estimatedAmount:Number(oldAmount)||0,actualAt:vnDate().toISOString()}))}
 async function writeExpenseCats(items){
  await ensureAuth();const seen=new Set(),out=[];
  for(const c of items||[]){const label=String(c.label||'').trim().slice(0,60);if(!label)continue;const key=label.toLowerCase();if(seen.has(key))throw new Error('Trùng tên danh mục: '+label);seen.add(key);out.push({id:c.id||('c_'+Date.now().toString(36)+out.length),label,costType:c.costType==='cogs'?'cogs':'fixed',active:c.active!==false})}
  if(!out.some(c=>c.active))throw new Error('Cần ít nhất một danh mục đang dùng.');
- await EXP_CFG_DOC().set({items:out,updatedAt:new Date().toISOString()});EXP_CFG=null;
+ await EXP_CFG_DOC().set({items:out,updatedAt:vnDate().toISOString()});EXP_CFG=null;
 }
 async function writeBreakeven(month,values){
  await ensureAuth();if(!/^\d{4}-(?:0[1-9]|1[0-2])$/.test(month))throw new Error('Tháng không hợp lệ.');
- const rec={updatedAt:new Date().toISOString()};
+ const rec={updatedAt:vnDate().toISOString()};
  // [16/10] Chỉ còn chi phí cố định / tháng (bỏ % giá vốn).
  for(const key of['tc33','xofa']){const f=(values[key]||{}).fixed;if(f===''||f==null)continue;
   const fixed=Number(f);
@@ -2015,7 +2060,7 @@ function watchClosings(month, ids){
   })));
 }
 async function readMonthTcx(month, store, closing, force=false){
-  const from = month + '-01', to = monthEndOf(from), today = dkey(new Date()), upto = to < today ? to : today;
+  const from = month + '-01', to = monthEndOf(from), today = dkey(vnDate()), upto = to < today ? to : today;
   const [cfg, B, assets, list, inp, rev, emps, sh, schedules] = await Promise.all([
     loadExpenseCfg(force), loadBreakeven(force), loadAssets(force), readExpensesRange(store, from, to),
     fstore.collection(MONTH_IN_COLL).doc(store + '_' + month).get().then(d=>d.exists ? d.data() : {}),
@@ -2041,7 +2086,7 @@ async function closeMonthTcx(store, month){
   const sm = await readMonthTcx(month, store, null);
   if(!sm.daXong) throw new Error('Tháng chưa kết thúc, chưa chốt được.');
   if(sm.khoanCho.length) throw new Error('Còn ' + sm.khoanCho.length + ' khoản chờ số thật / chờ duyệt — xử lý xong mới chốt được.');
-  await ref.set(closingDoc(sm, new Date().toISOString()));
+  await ref.set(closingDoc(sm, vnDate().toISOString()));
   return sm;
 }
 async function reopenMonthTcx(store, month){ await ensureAuth(); validStore(store); validMonth(month); await closingRef(store, month).delete(); }
@@ -2049,7 +2094,7 @@ async function writeMonthInput(store, month, luongTay){
   await ensureAuth(); validStore(store); validMonth(month);
   const v = Math.round(Number(luongTay)); if(!Number.isSafeInteger(v) || v < 0 || v > 100000000000) throw new Error('Nhập lương là số tiền hợp lệ.');
   if((await closingRef(store, month).get()).exists) throw new Error('Tháng đã chốt — mở lại tháng rồi mới sửa lương.');
-  await fstore.collection(MONTH_IN_COLL).doc(store + '_' + month).set({ store, month, luongTay: v, updatedAt: new Date().toISOString() }, { merge: true });
+  await fstore.collection(MONTH_IN_COLL).doc(store + '_' + month).set({ store, month, luongTay: v, updatedAt: vnDate().toISOString() }, { merge: true });
 }
 // ==========================================================================
 // [BILL CHUNG] (16/10) Tổng quan nghe bill MỚI của mọi điểm bán hôm nay — như "Bill bán hàng" của quanlygieo.
@@ -2092,7 +2137,7 @@ async function billLiveSummary(id,day){
   const rows=window.BillLive?.snapshot(id,day);if(!rows)return null;
   let orders=Object.values(rows);
   if(id==='tc33'&&!orders.length&&_tcTodayArchive?.day===day)orders=_tcTodayArchive.orders;
-  if(id==='tc33')return tcSummarize(orders.concat((_tcLegacy||[]).filter(o=>{const t=new Date(o.createdAt);return !isNaN(+t)&&dkey(t)===day})),_tcMenu||[]);
+  if(id==='tc33')return tcSummarize(orders.concat((_tcLegacy||[]).filter(o=>{const t=vnDate(o.createdAt);return !isNaN(+t)&&dkey(t)===day})),_tcMenu||[]);
   return id==='xofa'?xoSummarize(orders):ggSummarize(orders);
 }
 const BILL_PL_SIG=new Map();
@@ -2107,7 +2152,7 @@ async function billLivePL(id,day){
     if(result){
       const sig=JSON.stringify(result.tomTat),key=id+'|'+day;
       if(BILL_PL_SIG.get(key)!==sig){
-        const at=new Date().toISOString(),x={...result.tomTat,storeId:id,updatedAt:at,by:'manage'},batch=fstore.batch();
+        const at=vnDate().toISOString(),x={...result.tomTat,storeId:id,updatedAt:at,by:'manage'},batch=fstore.batch();
         batch.set(fstore.collection(ggName('pl_days_gieogieo',id)).doc(day),x);
         const book={...x};delete book.storeId;
         batch.set(fstore.collection(ggName('pl_book_gieogieo',id)).doc('days'),{d:{[day]:book},at,storeId:id},{merge:true});
@@ -2130,7 +2175,7 @@ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 const money=n=>Math.round(n||0).toLocaleString('vi-VN'), amount=n=>`${money(n)} <span class="currency">₫</span>`, compact=n=>n>=1e6?(n/1e6).toLocaleString('vi-VN',{maximumFractionDigits:2})+' triệu':money(n)+' ₫';
 const shortMoney=n=>n>=1e6?(n/1e6).toLocaleString('vi-VN',{maximumFractionDigits:1})+'tr':Math.round(n/1000)+'k';
 let TODAY=currentDate();
-const parseDate=s=>new Date(s+'T12:00:00');const dateKey=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;const addDays=(s,n)=>{const d=parseDate(s);d.setDate(d.getDate()+n);return dateKey(d)};const dateVN=s=>parseDate(s).toLocaleDateString('vi-VN');
+const parseDate=s=>vnDate(s+'T12:00:00');const dateKey=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;const addDays=(s,n)=>{const d=parseDate(s);d.setDate(d.getDate()+n);return dateKey(d)};const dateVN=s=>parseDate(s).toLocaleDateString('vi-VN');
 const NAV=[['rev','overview','Tổng quan'],['target','flag','Mục tiêu'],['hoavon','trend','Điểm hoà vốn'],['chiphi','receipt','Chi phí'],['taisan','store','Tài sản'],['tienmat','cash','Tiền mặt'],['thangket','book','Tổng kết tháng'],['nv','users','Nhân viên'],['lich','calendar','Lịch làm việc'],['cc','clock','Chấm công'],['luong','wallet','Bảng lương']];
 const HR_STORE_IDS=['tc33','xofa'];
 const BRAND_META={tc33:{id:'tc33',name:'The cafe 33',short:'The cafe 33',mono:'33',c:'var(--tc)'},xofa:{id:'xofa',name:'XOFA',short:'XOFA',mono:'x',c:'var(--xo)'},gieo:{id:'gieo',name:'Gieo Gieo',short:'Gieo',mono:'g.',c:'var(--gg)'}};
@@ -2583,7 +2628,7 @@ function dateControl(type,value,change,label,max){return `<label class="date-con
 // Open shifts are elapsed calendar time in Vietnam, including a shift crossing midnight.
 
 function elapsedHourText(value){const minutes=Math.max(0,Math.round(value*60));return Math.floor(minutes/60)+'h '+String(minutes%60).padStart(2,'0')+'p'}
-function attendanceClockText(now=Date.now()){return new Intl.DateTimeFormat('vi-VN',{timeZone:'Asia/Ho_Chi_Minh',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date(now))}
+function attendanceClockText(now=Date.now()){return new Intl.DateTimeFormat('vi-VN',{timeZone:'Asia/Ho_Chi_Minh',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(vnDate(now))}
 
 
 setInterval(updateAttendanceClock,60000);
@@ -2653,8 +2698,8 @@ function rawEmployeeId(id){const e=employees.find(e=>e.id===id);if(!e)throw new 
 function buildStoreCatalog(records){return HR_STORE_IDS.map(id=>({...BRAND_META[id],brand:id,code:id==='tc33'?'TC33':'XOFA',active:true,meta:id==='tc33'?'Đồ uống + Khác':'Không gồm Food'})).concat((records||[]).map(st=>{const n=Number(st.id.slice(2)),code=st.id.toUpperCase(),label=String(st.name||'').trim();return{id:st.id,brand:'gieo',code,name:label?(/gieo/i.test(label)?label:'Gieo Gieo · '+label):'Gieo Gieo · '+code,location:label||code,mono:'g.',short:'Gieo',active:st.active!==false,c:'var(--gg-'+(Math.max(0,n-1)%8+1)+')',meta:code+(label?' · '+label:'')}}))}
 function mapEmployee(e){return{id:safeId(e.id),rawId:e.id,name:String(e.fullName||'(chưa đặt tên)'),pin:String(e.pin||''),stores:backend.workStoresOf(e),type:e.payType||'unknown',rate:Number(e.hourlyRate)||0,ot:!!e.otEnabled,otHours:Number(e.otThresholdHours)||8,otRate:Number(e.otRate)||0,active:e.active!==false,status:e.resignedAt?'resigned':e.active!==false?'active':'paused',resignedAt:String(e.resignedAt||''),raw:e}}
 function mapShift(s,store){return{id:store+'_'+safeId(s.id),rawId:s.id,employee:safeId(s.employeeId),employeeName:s.employeeName||'',store,date:s.businessDate,start:clockVN(s.checkedInAt),end:clockVN(s.checkedOutAt),raw:s}}
-function clockVN(value){if(!value)return '';const d=new Date(value);return Number.isNaN(+d)?'':new Intl.DateTimeFormat('vi-VN',{timeZone:'Asia/Ho_Chi_Minh',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(d)}
-function currentDate(){return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Ho_Chi_Minh',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date())}
+function clockVN(value){if(!value)return '';const d=vnDate(value);return Number.isNaN(+d)?'':new Intl.DateTimeFormat('vi-VN',{timeZone:'Asia/Ho_Chi_Minh',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(d)}
+function currentDate(){return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Ho_Chi_Minh',year:'numeric',month:'2-digit',day:'2-digit'}).format(vnDate())}
 function employeeType(e){return{hourly_part:'Part-time',hourly_full:'Full-time',fixed:'Lương cố định',unknown:'Chưa khai lương'}[e.type]||'Chưa khai lương'}
 function loadKey(){if(state.view==='thangket')return'thangket:'+state.closeMonth;if(state.view==='rev')return'rev:'+state.store+':'+rangeDates().join('|');if(state.view==='lich')return'lich:'+hrStore()+':'+weekDates()[0];if(state.view==='cc')return'cc:'+ccStoreIds().join(',')+':'+state.attendanceDate;if(state.view==='luong')return'luong:'+state.payrollMonth;if(state.view==='hoavon')return'hoavon:'+state.beMonth;if(state.view==='chiphi')return'chiphi:'+state.store+':'+state.costMonth;if(state.view==='tienmat')return'tienmat:'+state.cashDate;if(state.view==='target')return'target:'+state.targetMonth;return state.view}
 async function loadCurrent(force=false){
@@ -2697,14 +2742,14 @@ function render(){
  if(live.error?.key===key)html=pageHead(label,'')+`<section class="panel load-error" role="alert"><b>Chưa tải được dữ liệu</b><p>${esc(live.error.message)}</p><button class="btn" onclick="loadCurrent(true)">${icon('refresh')}Thử lại</button></section>`;
  else if(live.ready[state.view]!==key){html=pageHead(label,'')+'<section class="panel live-loading" role="status"><span class="loading-ring"></span><b>Đang đọc dữ liệu…</b></section>';if(live.loadingKey!==key)queueMicrotask(()=>loadCurrent())}
  else html=({rev:dashboard,nv:staffView,lich:scheduleView,cc:attendanceView,luong:payrollView,target:targetView,hoavon:breakevenView,chiphi:costView,taisan:assetView,tienmat:cashView,thangket:monthView}[state.view])();
- $('#view').innerHTML='<div class="page-enter">'+html+'</div>';hydrateIcons();bedPaint();const sync=$('#liveSync');sync.textContent=live.loadingKey===key?'Đang cập nhật':live.error?.key===key?'Chưa tải được':live.updatedAt?'Đã cập nhật '+clockVN(new Date(live.updatedAt).toISOString()):'Đang kết nối';sync.dataset.state=live.error?.key===key?'error':live.loadingKey===key?'loading':'ok';if(state.view==='rev'&&live.ready.rev===key){fitDashboardChart();bfFit();if(bfShown())bfSync()}
+ $('#view').innerHTML='<div class="page-enter">'+html+'</div>';hydrateIcons();bedPaint();const sync=$('#liveSync');sync.textContent=live.loadingKey===key?'Đang cập nhật':live.error?.key===key?'Chưa tải được':live.updatedAt?'Đã cập nhật '+clockVN(vnDate(live.updatedAt).toISOString()):'Đang kết nối';sync.dataset.state=live.error?.key===key?'error':live.loadingKey===key?'loading':'ok';if(state.view==='rev'&&live.ready.rev===key){fitDashboardChart();bfFit();if(bfShown())bfSync()}
 }
 async function refreshLive(button,clearOld=false){if(state.view==='thangket')tkPreviewCache.clear();button?.animate([{transform:'rotate(0)'},{transform:'rotate(360deg)'}],{duration:450});if(state.view==='rev')backend.invalidateRevenue(clearOld);backend.invalidateEmployees();delete live.ready[state.view];await loadCurrent(true)}
 function networkPreviewLabel(){return scopeLabel()+' · '+revenueStores().length+' cửa hàng'}
-function footer(extra=''){return `<footer class="view-footer ${extra}"><span>${live.updatedAt?'Cập nhật '+clockVN(new Date(live.updatedAt).toISOString()):''}</span><button onclick="showAbout()">Thông tin ${'↗'}</button></footer>`}
+function footer(extra=''){return `<footer class="view-footer ${extra}"><span>${live.updatedAt?'Cập nhật '+clockVN(vnDate(live.updatedAt).toISOString()):''}</span><button onclick="showAbout()">Thông tin ${'↗'}</button></footer>`}
 function showAbout(){openDialog('Quản lý cửa hàng',`<p class="inline-note">Doanh thu đọc từ POS của The cafe 33, XOFA và từng cửa hàng Gieo Gieo. Hồ sơ nhân viên dùng chung; lịch và chấm công ở đây quản lý riêng The cafe 33 / XOFA.</p><div class="detail-section"><div class="detail-row"><span>Ngày cũ hơn 8 ngày</span><b>Dùng bản tổng hợp đã lưu</b></div><div class="detail-row"><span>Giờ của ca đang mở hôm nay</span><b>Tạm tính đến hiện tại</b></div></div><button class="btn secondary" onclick="closeDialog();refreshLive(null,true)">${icon('refresh')}Đọc lại toàn bộ kỳ đang xem</button>`)}
-function rangeDates(){const now=currentDate(),d=parseDate(now),m=now.slice(0,7);switch(state.range){case'yesterday':return[addDays(now,-1),addDays(now,-1)];case'week':{const a=addDays(now,1-(d.getDay()||7));return[a,addDays(a,6)]}case'month':return[m+'-01',dateKey(new Date(d.getFullYear(),d.getMonth()+1,0,12))];case'year':return[now.slice(0,4)+'-01-01',now.slice(0,4)+'-12-31'];case'custom':return[state.from,state.to];default:return[now,now]}}
-function goalForMonth(month,id){if(id==='gieo'||stores.find(s=>s.id===id)?.brand==='gieo'){const end=dateKey(new Date(Number(month.slice(0,4)),Number(month.slice(5)),0,12));return backend.gieoTargetForRange(live.cfg,month+'-01',end)}return backend.targetMonthValue(goals,month,id)?.value??null}
+function rangeDates(){const now=currentDate(),d=parseDate(now),m=now.slice(0,7);switch(state.range){case'yesterday':return[addDays(now,-1),addDays(now,-1)];case'week':{const a=addDays(now,1-(d.getDay()||7));return[a,addDays(a,6)]}case'month':return[m+'-01',dateKey(vnDate(d.getFullYear(),d.getMonth()+1,0,12))];case'year':return[now.slice(0,4)+'-01-01',now.slice(0,4)+'-12-31'];case'custom':return[state.from,state.to];default:return[now,now]}}
+function goalForMonth(month,id){if(id==='gieo'||stores.find(s=>s.id===id)?.brand==='gieo'){const end=dateKey(vnDate(Number(month.slice(0,4)),Number(month.slice(5)),0,12));return backend.gieoTargetForRange(live.cfg,month+'-01',end)}return backend.targetMonthValue(goals,month,id)?.value??null}
 // [NGÀY NGHỈ GIEO] Quán Gieo nghỉ ngày nào thì mục tiêu ngày đó = 0 (off: ngày nghỉ đã đọc — mặc định của kỳ Tổng quan).
 function goalForRange(id,from,to,off){if(id==='gieo'||stores.find(s=>s.id===id)?.brand==='gieo')return backend.gieoTargetForRange(live.cfg,from,to,off===undefined?live.rev?.off:off,id==='gieo'?null:id);return backend.targetForRange(goals,from,to,id,id==='all'?null:(off===undefined?live.rev?.off:off))}
 function offDaysOf(id,from,to,off){let n=0;if(!off)return 0;for(let d=from;d<=to;d=addDays(d,1))if(backend.isStoreOff(off,d,id))n++;return n}
@@ -2819,7 +2864,7 @@ function payrollView(){
  return '<div class="payroll-page">'+pageHead('Bảng lương','Tính theo chấm công, đơn giá có hiệu lực và OT từng ngày.',tools)+`<div class="stats-strip payroll-stats"><div class="panel strip-stat"><span>Lương giờ tạm tính</span><b class="num">${money(total)}đ</b></div><div class="panel strip-stat"><span>Giờ thường</span><b class="num">${hourText(regular)}</b></div><div class="panel strip-stat ot-stat"><span>Giờ tăng ca (OT)</span><b class="num">${hourText(ot)}</b></div></div>${open||stale?`<div class="payroll-alert">${icon('clock')}<span>${open?open+' ca hôm nay đang mở, đã tính tạm đến hiện tại. ':''}${stale?stale+' ca ngày trước thiếu giờ ra chưa được tính.':''}</span><button onclick="navigate('cc')">Xem ca ${icon('arrow')}</button></div>`:''}<div class="panel table-panel desktop-records"><div class="table-scroll"><table class="table payroll-table"><thead><tr><th>Nhân viên</th><th class="right">Giờ thường</th><th class="right">Giờ OT</th><th class="right">Lương thường</th><th class="right">Tiền OT</th><th class="right">Tổng lương</th></tr></thead><tbody>${rows.map(r=>`<tr><td><div class="person"><span class="avatar">${esc(r.e.name.split(' ').slice(-2).map(n=>n[0]).join(''))}</span><div><b>${esc(r.e.name)}</b><small>${esc(locations(r))}</small>${r.gieoHours?`<small>${esc(gieo(r))}</small>`:''}</div></div></td><td class="right num">${hourText(r.regularHours)}<small class="table-sub">${rate(r)}</small></td><td class="right num ${r.otHours?'ot-text':''}"><b>${hourText(r.otHours)}</b><small class="table-sub">${r.otRates.size?rate(r,true):'Không áp dụng'}</small></td><td class="right num">${money(r.regularPay)}đ</td><td class="right num ot-text">${money(r.otPay)}đ</td><td class="right num payroll-total">${money(r.sum)}đ</td></tr>`).join('')||'<tr><td colspan="6" class="empty">Chưa có nhân viên hoặc ca trong kỳ này.</td></tr>'}</tbody></table></div></div><div class="mobile-records payroll-cards">${rows.map(r=>`<article class="panel record-card payroll-card"><div class="record-head"><div><h3>${esc(r.e.name)}</h3><p class="record-store">${esc(locations(r))}</p></div><span class="pill ${r.otRates.size?'ot-badge':''}">${r.otRates.size?'Có OT':'Không OT'}</span></div><div class="record-fields"><div><span>Giờ thường</span><b class="num">${hourText(r.regularHours)}</b><small>${rate(r)}</small></div><div class="ot-field"><span>Giờ OT</span><b class="num">${hourText(r.otHours)}</b><small>${r.otRates.size?rate(r,true):'Không áp dụng'}</small></div><div><span>Lương thường</span><b class="num">${money(r.regularPay)}đ</b></div><div class="ot-field"><span>Tiền OT</span><b class="num">${money(r.otPay)}đ</b></div>${r.gieoHours?`<div class="field-wide"><span>Giờ Gieo · chỉ tham khảo</span><b>${hourText(r.gieoHours)}</b></div>`:''}</div><div class="payroll-card-total"><span>Tổng lương</span><b class="num">${money(r.sum)}đ</b></div></article>`).join('')||'<div class="panel empty">Chưa có nhân viên hoặc ca trong kỳ này.</div>'}</div><p class="note">OT gộp các ca trong cùng ngày, từng quán. Đơn giá lấy theo lịch sử lương hoặc ảnh chụp đơn giá của ca. Lương cố định và lương phần Gieo xem tại Quản lý Gieo.</p>${footer('secondary-footer')}</div>`;
 }
 function targetView(){
- const month=state.targetMonth,days=new Date(Number(month.slice(0,4)),Number(month.slice(5)),0).getDate(),own=goals[month]||{},gieo=goalForMonth(month,'gieo'),count=live.records.filter(s=>s.active!==false).length;
+ const month=state.targetMonth,days=vnDate(Number(month.slice(0,4)),Number(month.slice(5)),0).getDate(),own=goals[month]||{},gieo=goalForMonth(month,'gieo'),count=live.records.filter(s=>s.active!==false).length;
  const mEnd=month+'-'+String(days).padStart(2,'0'),ggT=stores.filter(s=>s.brand==='gieo'&&s.active).map(st=>({st,off:offDaysOf(st.id,month+'-01',mEnd,live.tOff),goal:goalForRange(st.id,month+'-01',mEnd,live.tOff||null)}));
  return pageHead('Mục tiêu doanh thu','Mục tiêu tháng và mức đang có hiệu lực.',dateControl('month',month,'state.targetMonth=this.value;render()','Tháng mục tiêu'))+`<div class="target-layout"><form class="panel form-panel" onsubmit="saveTargets(event)"><div class="panel-head"><h2>Tháng ${month.slice(5)}/${month.slice(0,4)}</h2><span class="pill">${days} ngày</span></div>${[...hrStores(),{id:'all',name:'Mục tiêu chung',meta:'Mức kỳ vọng của toàn hệ thống',c:'var(--green)'}].map(st=>{const inherited=backend.targetMonthValue(goals,month,st.id);return `<div class="target-field"><div><label for="goal-${st.id}"><i class="swatch" style="background:${st.c}"></i>${esc(st.name)}</label><small>${st.id==='all'?'Đặt riêng, không bắt buộc bằng tổng từng quán':esc(st.meta)}</small></div><div><input class="input num" id="goal-${st.id}" name="${st.id}" type="text" inputmode="numeric" autocomplete="off" maxlength="20" value="${groupMoneyInput(own[st.id]||'')}" placeholder="${inherited?groupMoneyInput(inherited.value)+' đang dùng':'Chưa đặt'}" oninput="formatGoalInput(this,${days})" onblur="validateGoalInput(this)"><small id="daily-${st.id}" style="text-align:right">${inherited?'≈ '+money(inherited.value/days)+' ₫ / ngày':''}</small></div></div>`}).join('')}<p class="small muted">Ô trống dùng mức tháng gần nhất trước đó.</p><div class="form-actions">${goals[month]?'<button type="button" class="btn secondary" onclick="deleteTargetMonth()">Xoá mức tháng này</button>':''}<button type="submit" class="btn">${icon('check')}Lưu mục tiêu</button></div></form><aside class="panel target-explainer"><h2>Gieo Gieo · chỉ đọc</h2><p>Mục tiêu lấy từ Quản lý Gieo theo AOV × số bill/ngày, áp dụng theo từng ngày có hiệu lực.</p><div class="detail-row"><span>Tháng này · mỗi điểm</span><b>${money(gieo)}đ</b></div>${ggT.some(x=>x.off)?ggT.map(x=>`<div class="detail-row"><span>Gieo ${esc(x.st.code)} · nghỉ ${x.off} ngày</span><b>${money(x.goal)}đ</b></div>`).join('')+`<div class="detail-row"><span>${count} điểm đang mở · trừ ngày nghỉ</span><b>${money(ggT.reduce((n,x)=>n+x.goal,0))}đ</b></div>`:`<div class="detail-row"><span>${count} điểm đang mở</span><b>${money(gieo*count)}đ</b></div>`}<p>Sửa mục tiêu Gieo tại Quản lý Gieo › Cấu hình. Mục tiêu chung ở đây là mức bạn đặt riêng cho toàn hệ thống.</p><div class="target-history">${Object.keys(goals).filter(m=>['tc33','xofa','all'].some(k=>Number(goals[m]?.[k])>0)).sort().reverse().map(m=>`<button class="btn secondary" type="button" onclick="state.targetMonth='${m}';render()">Tháng ${m.slice(5)}/${m.slice(0,4)}</button>`).join('')}</div></aside></div>${offPanel(month)}${footer('secondary-footer')}`;
 }
@@ -2881,7 +2926,7 @@ function beCalc(id,days){
  out.innerHTML='Hoà vốn ≈ <b>'+money(fixed/days)+' ₫</b> / ngày (chưa gồm khấu hao tài sản)';
 }
 function breakevenView(){
- const month=state.beMonth,days=new Date(Number(month.slice(0,4)),Number(month.slice(5)),0).getDate(),B=live.be?.beCfg||{},own=B[month]||{},res=live.be||{};
+ const month=state.beMonth,days=vnDate(Number(month.slice(0,4)),Number(month.slice(5)),0).getDate(),B=live.be?.beCfg||{},own=B[month]||{},res=live.be||{};
  const dates=[];if(res.from)for(let d=res.from;d<=res.to;d=addDays(d,1))dates.push(d);
  const field=st=>{const inh=backend.beMonthValue(B,month,st.id),o=own[st.id]||{};return `<div class="be-field"><div class="be-field-head"><i class="swatch" style="background:${st.c}"></i><b>${esc(st.name)}</b><small>${st.id==='tc33'?'So với doanh thu Đồ uống + Khác':'So với doanh thu không gồm Food'}${inh&&!o.fixed?' · đang dùng mức tháng '+inh.from.slice(5)+'/'+inh.from.slice(0,4):''}</small></div><div class="be-inputs"><label class="field"><span>Chi phí cố định / tháng</span><input class="input num" id="be-${st.id}-fixed" name="${st.id}_fixed" type="text" inputmode="numeric" autocomplete="off" maxlength="20" value="${groupMoneyInput(o.fixed||'')}" placeholder="${inh?groupMoneyInput(inh.fixed)+' đang dùng':'VD 45,000,000'}" oninput="formatGoalInput(this,${days});beCalc('${st.id}',${days})" onblur="validateGoalInput(this)"></label></div><p class="be-calc" id="be-calc-${st.id}"></p></div>`};
  const gg=(res.records||[]).filter(r=>r.active!==false||beHas(backend.ggBreakEven(res.pl?.[r.id],dates))).map(r=>{const st=stores.find(x=>x.id===r.id)||{name:r.id,code:r.id.toUpperCase(),c:'var(--gg)'},b=backend.ggBreakEven(res.pl?.[r.id],dates);
@@ -2935,7 +2980,7 @@ function costView(){
 }
 function tipHtml(t,right){return `<button type="button" class="tip${right?' r':''}" data-tip="${esc(t)}" aria-label="${esc(t)}">i</button>`}
 // Kỳ N tháng tính từ ngày bắt đầu: 1/11 + 3 tháng → 31/1.
-function expEndOf(start,n){const d=parseDate(start),e=new Date(d.getFullYear(),d.getMonth()+n,d.getDate(),12);e.setDate(e.getDate()-1);return dateKey(e)}
+function expEndOf(start,n){const d=parseDate(start),e=vnDate(d.getFullYear(),d.getMonth()+n,d.getDate(),12);e.setDate(e.getDate()-1);return dateKey(e)}
 function editExpense(store,id,fromPending){
  const c=live.cost||{},e=id?((c.list?.[store]||[]).concat(c.pending||[]).find(x=>x.id===id&&x.store===store)):null;if(id&&!e){toast('Khoản chi không còn — tải lại.');return}
  const st=store||(HR_STORE_IDS.includes(state.store)?state.store:'tc33'),today=currentDate(),mStart=state.costMonth+'-01';
@@ -3002,7 +3047,7 @@ function editAsset(id){
  openDialog(id?'Sửa tài sản':'Thêm tài sản',`<form onsubmit="saveAsset(event,'${id?esc(id):''}')"><div class="form-grid"><div class="field"><label for="asStore">Cửa hàng</label><select class="input" id="asStore" name="store">${HR_STORE_IDS.map(x=>`<option value="${x}" ${x===v.store?'selected':''}>${esc(BRAND_META[x].name)}</option>`).join('')}</select></div><div class="field"><label for="asName">Tên tài sản</label><input class="input" id="asName" name="name" maxlength="80" required autocomplete="off" value="${esc(v.name)}"></div></div><div class="form-grid"><div class="field"><label for="asCost">Nguyên giá · ₫</label><input class="input num" id="asCost" name="purchaseCost" inputmode="numeric" autocomplete="off" maxlength="16" required value="${v.purchaseCost?groupMoneyInput(v.purchaseCost):''}" oninput="this.value=groupMoneyInput(this.value);assetNote()"></div><div class="field"><label for="asDate">Bắt đầu thu hồi từ</label><input class="input" id="asDate" name="purchaseDate" type="date" required value="${v.purchaseDate}" onchange="assetNote()"></div></div><div class="field"><span class="field-label">Thu hồi vốn trong</span><div class="seg-pick">${[6,12,24,36].map(n=>`<label><input type="radio" name="lifePick" value="${n}" ${Number(v.usefulLifeMonths)===n?'checked':''} onchange="document.getElementById('asLife').value=${n};assetNote()"><span>${n<12?n+' tháng':n/12+' năm'}</span></label>`).join('')}<label class="seg-num"><input class="input num" id="asLife" name="usefulLifeMonths" type="number" min="1" max="240" step="1" required value="${v.usefulLifeMonths}" oninput="document.querySelectorAll('[name=lifePick]').forEach(r=>r.checked=Number(r.value)===Number(this.value));assetNote()"><span>tháng</span></label></div><small class="exp-period-note" id="asNote"></small></div>${id?`<label class="big-check"><input type="checkbox" name="active" ${v.active!==false?'checked':''}><span>Đang khấu hao (bỏ tích khi đã bán / thanh lý — ngừng khấu hao)</span></label>`:''}<div class="form-actions">${id?`<button type="button" class="btn danger secondary" onclick="removeAsset('${esc(id)}')">Xoá</button>`:''}<button type="button" class="btn secondary" onclick="closeDialog()">Huỷ</button><button type="submit" class="btn">Lưu</button></div></form>`);
  assetNote();
 }
-function assetNote(){const o=$('#asNote'),c=goalNumber(($('#asCost')||{}).value||0),n=Number(($('#asLife')||{}).value)||0,d=($('#asDate')||{}).value;if(!o)return;if(!(c>0)||!(n>0)||!d){o.textContent='';return}const e=new Date(d+'T12:00:00');e.setMonth(e.getMonth()+n);e.setDate(e.getDate()-1);o.textContent='Khấu hao '+money(c/n)+' ₫ / tháng · thu hồi xong '+dateVN(dateKey(e))}
+function assetNote(){const o=$('#asNote'),c=goalNumber(($('#asCost')||{}).value||0),n=Number(($('#asLife')||{}).value)||0,d=($('#asDate')||{}).value;if(!o)return;if(!(c>0)||!(n>0)||!d){o.textContent='';return}const e=vnDate(d+'T12:00:00');e.setMonth(e.getMonth()+n);e.setDate(e.getDate()-1);o.textContent='Khấu hao '+money(c/n)+' ₫ / tháng · thu hồi xong '+dateVN(dateKey(e))}
 async function saveAsset(event,id){event.preventDefault();const f=new FormData(event.target),button=event.target.querySelector('[type="submit"]');const v={store:f.get('store'),name:f.get('name'),purchaseCost:goalNumber(f.get('purchaseCost')),purchaseDate:f.get('purchaseDate'),usefulLifeMonths:Number(f.get('usefulLifeMonths')),active:id?f.has('active'):true};button.disabled=true;const ok=await commitAction('asset:'+(id||'new'),()=>backend.writeAsset(id||null,v),async()=>{closeDialog();invalidateViews('taisan','rev','chiphi');await loadCurrent(true);toast('Đã lưu tài sản.')});if(!ok&&button.isConnected)button.disabled=false}
 async function removeAsset(id){if(!confirm('Xoá hẳn tài sản này? Khấu hao của nó sẽ bỏ khỏi mọi ngày, kể cả ngày đã qua. Đã bán / thanh lý thì nên bỏ tích "Đang thu hồi" thay vì xoá.'))return;await commitAction('asset:'+id,()=>backend.deleteAsset(id),async()=>{closeDialog();invalidateViews('taisan','rev','chiphi');await loadCurrent(true);toast('Đã xoá tài sản.')})}
 // ==========================================================================
@@ -3077,7 +3122,7 @@ function cashWidget(c,st){
  else{
   const detail=gg?`Bàn giao lúc kết ca ${money(r.handed||0)} ₫${r.after?` · bán sau kết ca +${money(r.after)} ₫`:''}${r.retained?` · giữ lại két ${money(r.retained)} ₫`:''}${r.recipient?` · ${esc(r.recipient)} nhận`:''}`:`Tiền mặt bán ${money(r.sales||0)} ₫${r.spent?` − chi tại quầy ${money(r.spent)} ₫`:''}${isToday&&r.received==null?' · tạm tính tới giờ':''}`;
   const exp=Number(r.expected)||0;
-  const recBlock=r.received!=null&&!editing?`<div class="cash-rec"><div><span>Chủ quán thực nhận</span><b class="num">${money(r.received)} ₫</b><small>${r.receipt?.by==='quanlygieo'?'Nhập ở Quản lý Gieo':'Nhập ở manage'}${r.receipt?.at?' · '+dateVN(String(r.receipt.at).slice(0,10)).slice(0,5)+' '+clockVN(r.receipt.at):''}</small></div>${cashVar(Math.round(r.received-exp))}<button class="btn secondary" onclick="state.cashEdit='${key}';render()">${icon('edit')}Sửa</button></div>`
+  const recBlock=r.received!=null&&!editing?`<div class="cash-rec"><div><span>Chủ quán thực nhận</span><b class="num">${money(r.received)} ₫</b><small>${r.receipt?.by==='quanlygieo'?'Nhập ở Quản lý Gieo':'Nhập ở manage'}${r.receipt?.at?' · '+dateVN(String(r.receipt.at).slice(0,10)).slice(0,5)+' '+clockVN(r.receipt.at):''}</small>${r.expectedAtReceipt!=null?`<small>Phiếu gốc tính phải nộp ${money(r.expectedAtReceipt)} ₫; bên trên đã tính lại theo bill.</small>`:''}</div>${cashVar(Math.round(r.received-exp))}<button class="btn secondary" onclick="state.cashEdit='${key}';render()">${icon('edit')}Sửa</button></div>`
    :`<form class="cash-form" onsubmit="saveCash(event,'${id}','${d}')"><label for="cash-${id}">Chủ quán thực nhận</label><div class="cash-in"><input class="input num" id="cash-${id}" name="received" inputmode="numeric" autocomplete="off" maxlength="16" required placeholder="${groupMoneyInput(exp)}" value="${editing&&r.received!=null?groupMoneyInput(r.received):''}" oninput="this.value=groupMoneyInput(this.value);cashLiveVar(this,${exp})"><button class="btn" type="submit">${icon('check')}${editing?'Lưu':'Xác nhận'}</button>${editing?`<button class="btn secondary" type="button" onclick="state.cashEdit=null;render()">Huỷ</button>`:''}</div><small class="cash-live" id="cashv-${id}"></small></form>`;
   body=`<div class="cash-exp"><span>${gg?'Tiền mặt cần lấy':'Phải nộp'}</span><strong class="num">${money(exp)}<span>₫</span></strong><small>${detail}</small></div>${gg?cashReconciliation(r,id,d):''}${recBlock}`;
  }
@@ -3110,7 +3155,7 @@ async function tkLoadPreview(id,force=false){
  finally{slot.loading=false;if(state.view==='thangket'&&state.closeMonth===month&&tkPreviewCache.get(key)===slot)render()}
 }
 const TK_STATE={'chua-tai':['wait','Chưa tải tạm tính'],'da-chot':['ok','Đã chốt'],'dang-chay':['run','Đang chạy'],'cho-so-that':['warn','Chờ số thật'],'du-so-that':['ready','Đủ số · chưa chốt'],'cho-chot':['wait','Chưa chốt sổ']};
-const tkMonthLabel=m=>'Tháng '+Number(m.slice(5))+'/'+m.slice(0,4),tkMonthEnd=m=>dateKey(new Date(Number(m.slice(0,4)),Number(m.slice(5)),0,12));
+const tkMonthLabel=m=>'Tháng '+Number(m.slice(5))+'/'+m.slice(0,4),tkMonthEnd=m=>dateKey(vnDate(Number(m.slice(0,4)),Number(m.slice(5)),0,12));
 const tkSigned=v=>(v<0?'−':'')+money(Math.abs(v));
 function tkStores(M){const gg=(M.records||[]).filter(r=>r.active!==false||M.closings?.[r.id]).map(r=>stores.find(s=>s.id===r.id)).filter(Boolean);return HR_STORE_IDS.map(id=>stores.find(s=>s.id===id)).filter(Boolean).concat(gg)}
 function monthView(){

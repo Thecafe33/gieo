@@ -1,11 +1,12 @@
 // Trích xuất dữ liệu v2 (quanlygieo.html): chuỗi BTP theo ngày, cờ nghi nhập sai, số đếm NL giao ca, dòng đối chiếu.
 'use strict';
 const fs = require('fs'), path = require('path');
+const {extract}=require('./lib/extract');
 let ok = true;
 const eq = (a, b, m) => { if (JSON.stringify(a) !== JSON.stringify(b)) { ok = false; console.log('FAIL', m, JSON.stringify(a).slice(0, 400), '!=', JSON.stringify(b).slice(0, 400)); } else console.log('ok', m); };
 const src = fs.readFileSync(path.join(__dirname, '..', 'quanlygieo.html'), 'utf8');
-const code = src.slice(src.indexOf('// ════════ [Trích xuất v2]'), src.indexOf('function _expFileName'));
-const dkey = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+const code = extract('quanlygieo.html',['vnDate'])+'\n'+src.slice(src.indexOf('// ════════ [Trích xuất v2]'), src.indexOf('function _expFileName'));
+const dkey = new Function(extract('quanlygieo.html',['pad','dkey'])+';return dkey;')();
 const F = new Function('dkey', code + ';return {_expCaLamViec,_expBtpTheoNgay,_expDemNlGiaoCa,_expDongDoiChieu,_expTomTatSoLech}')(dkey);
 const line = (day, sys, cnt) => ({ prepId: 'P', prepName: 'Cốt trà lài', unit: 'g', systemQty: sys, countedQty: cnt, varianceQty: cnt - sys, discardedQty: 0, weighMethod: 'vessel' });
 const closings = [

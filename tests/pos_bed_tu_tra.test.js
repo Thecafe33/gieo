@@ -8,7 +8,11 @@ const eq = (a, b, m) => { if (JSON.stringify(a) !== JSON.stringify(b)) { ok = fa
 const NAMES = ['_bedIsActiveStatus', '_bedHmOn', '_bedSessionBounds', '_bedNeedsAutoClose', '_bedSessionSpendOn', '_bedTodayKey', 'runBedAutoCloseStale'];
 const src = 'var BED_AUTOCLOSE_DAYS = 14; var _bedAutoCloseRunning = null;\n' + extract('pos.html', NAMES);
 const pad = n => String(n).padStart(2, '0');
-const dayParts = back => { const n = new Date(); const d = new Date(n.getFullYear(), n.getMonth(), n.getDate() - back); return [String(d.getFullYear()), pad(d.getMonth() + 1), pad(d.getDate())]; };
+// 00:30 VN: luôn chạy được ca qua đêm; fixture không phụ thuộc múi giờ máy test.
+const NOW=Date.parse('2026-10-20T17:30:00Z');
+class Clock extends Date{constructor(...a){super(...(a.length?a:[NOW]))}static now(){return NOW}}
+const vnDate=new Function('Date',extract('pos.html',['vnDate'])+';return vnDate;')(Clock);
+const dayParts = back => { const n = vnDate(); const d = vnDate(n.getFullYear(), n.getMonth(), n.getDate() - back); return [String(d.getFullYear()), pad(d.getMonth() + 1), pad(d.getDate())]; };
 
 function world({ rt = {}, fs = {}, orders = [] }) {
   const writes = []; const ls = {}; const modals = [];
@@ -22,14 +26,14 @@ function world({ rt = {}, fs = {}, orders = [] }) {
     update: async upd => { writes.push(['fs', `${y}/${m}/${d}`, upd]); }
   }) }) }) }) };
   const localStorage = { getItem: k => (k in ls ? ls[k] : null), setItem: (k, v) => { ls[k] = v; } };
-  const fn = new Function('db', 'fstore', 'fetchOrdersByDateRange', 'normalizePhone', 'localStorage', 'showAppModal', src + '\nreturn { runBedAutoCloseStale, _bedNeedsAutoClose };');
-  const api = fn(db, fstore, async () => orders, p => String(p || '').replace(/\D/g, ''), localStorage, (t, msg) => modals.push(msg));
+  const fn = new Function('Date','db', 'fstore', 'fetchOrdersByDateRange', 'normalizePhone', 'localStorage', 'showAppModal', src + '\nreturn { runBedAutoCloseStale, _bedNeedsAutoClose };');
+  const api = fn(Clock,db, fstore, async () => orders, p => String(p || '').replace(/\D/g, ''), localStorage, (t, msg) => modals.push(msg));
   return { api, writes, ls, modals, rt };
 }
 
 (async () => {
   const [y1, m1, d1] = dayParts(1), [y5, m5, d5] = dayParts(5);
-  const ordersAt = (y, m, d, hh, mm, total, sdt) => ({ sdt, total, createdAt: new Date(+y, +m - 1, +d, hh, mm).toISOString() });
+  const ordersAt = (y, m, d, hh, mm, total, sdt) => ({ sdt, total, createdAt: vnDate(+y, +m - 1, +d, hh, mm).toISOString() });
   const W = world({
     rt: { bedBookings: { [y1]: { [m1]: { [d1]: {
       A: { name: 'An', phone: '0901', start: '14:00', end: '16:00', status: 'active', bedId: 2 },
@@ -53,8 +57,8 @@ function world({ rt = {}, fs = {}, orders = [] }) {
   eq(await W.api.runBedAutoCloseStale(), 0, 'Mỗi ngày quét 1 lần');
 
   // Lịch qua đêm hôm qua chưa tới giờ kết thúc → không trả, không chốt "đã quét".
-  const now = new Date();
-  const later = new Date(now.getTime() + 2 * 3600000), earlier = new Date(now.getTime() - 20 * 3600000);
+  const now = vnDate();
+  const later = vnDate(now.getTime() + 2 * 3600000), earlier = vnDate(now.getTime() - 20 * 3600000);
   const hm = d => pad(d.getHours()) + ':' + pad(d.getMinutes());
   const W2 = world({ rt: { bedBookings: { [y1]: { [m1]: { [d1]: { N: { phone: '1', start: hm(earlier), end: hm(later), status: 'active' } } } } } } });
   const qua = W2.api._bedNeedsAutoClose({ start: hm(earlier), end: hm(later), status: 'active' }, y1, m1, d1, now.getTime());

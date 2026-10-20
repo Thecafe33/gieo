@@ -1,7 +1,7 @@
 'use strict';
 // Chạy toàn bộ backend với Firebase giả lọc FieldPath.documentId() như SDK.
 const fs=require('fs'),path=require('path'),vm=require('vm'),assert=require('assert/strict');
-const {extract}=require('./lib/extract'),{makeCashFixture}=require('./lib/manage_cash_fixture');
+const {extract,extractRaw}=require('./lib/extract'),{makeCashFixture}=require('./lib/manage_cash_fixture');
 const before=require('./fixtures/manage_cash_before_26edad6');
 const file=path.join(__dirname,'../manage.html'),html=fs.readFileSync(file,'utf8');
 const source=html.slice(html.indexOf('const backend=(()=>{'),html.indexOf("\n'use strict';\nconst paths="));
@@ -12,8 +12,8 @@ function setup(options={},original=false){
  if(options.poisonOld){for(const k of ['mg_cash_cache_v1','mg_cash_cache_v2'])m.memory[k]=JSON.stringify({tcx:{tc33:{'2026-10-18':{received:9999999}}},gg:{gg01:{'2026-10-18':{received:8888888}}}});}
  const unchanged=JSON.stringify(m.data),now=options.now||'2026-10-20';
  class FixedDate extends Date{constructor(...a){super(...(a.length?a:[now+'T02:26:00Z']))}static now(){return +new Date(now+'T02:26:00Z')}}
- let code=source;
- if(original){for(const [name,fn]of Object.entries(before))code=code.replace(extract(file,[name]),fn.toString());code=code.replace("CASH_CACHE_KEY = 'mg_cash_cache_v3'","CASH_CACHE_KEY = 'mg_cash_cache_v1'");}
+ let code=extract(file,['vnDate'])+'\n'+source;
+ if(original){for(const [name,fn]of Object.entries(before))code=code.replace(extractRaw(file,[name]),fn.toString());code=code.replace("CASH_CACHE_KEY = 'mg_cash_cache_v3'","CASH_CACHE_KEY = 'mg_cash_cache_v1'");}
  const ctx={console,Date:FixedDate,Intl,queueMicrotask,firebase:m.firebase,localStorage:{getItem:k=>m.memory[k]||null,setItem:(k,v)=>m.memory[k]=v,removeItem:k=>delete m.memory[k]}};
  vm.createContext(ctx);vm.runInContext(code+';globalThis.api=backend;',ctx);
  return{...m,api:ctx.api,unchanged(){assert.equal(JSON.stringify(m.data),unchanged);assert.equal(m.writes.length,0)}};
@@ -22,7 +22,7 @@ function money(r){return[r.tcx.tc33['2026-10-18']?.received,r.tcx.xofa['2026-10-
 function moneyRows(r){const x=JSON.parse(JSON.stringify({tcx:r.tcx,gg:r.gg}));for(const map of Object.values(x.gg))for(const row of Object.values(map||{}))delete row.reconciliation;return x;}
 function cashReads(m){return m.reads.filter(r=>/cash_receipts_tc33xofa|daily_closings_gieogieo/.test(r.coll||r.doc||''));}
 (async()=>{
- for(const name of ['writeCashReceipt','writeCashStart'])assert.equal(extract(file,[name]),before[name].toString(),name+' giữ nguyên cách ghi phiếu');
+ for(const name of ['writeCashReceipt','writeCashStart'])assert.equal(extractRaw(file,[name]).replace(/vnDate\(/g,'new Date('),before[name].toString(),name+' giữ nguyên cách ghi phiếu, timestamp vẫn thật');
  // Cùng phiếu cũ THIẾU date/businessDate, không tự bổ sung trường để làm test qua.
  const old=setup({noCache:true},true),fresh=setup({noCache:true});
  const a=await old.api.readCash('2026-10-18'),b=await fresh.api.readCash('2026-10-18');

@@ -24,6 +24,31 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
 <script>
+// Ngày nghiệp vụ theo UTC+7; timestamp/ISO vẫn là thời điểm thật. Không thay Date của SDK.
+function vnDate(...args){
+  if(!vnDate.Type){
+    const NativeDate=Date,offset=7*3600000;
+    class VNDate extends NativeDate{
+      constructor(...a){
+        if(a.length>1)super(NativeDate.UTC(...a)-offset);
+        else if(a.length===1 && typeof a[0]==='string' && /^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)?$/.test(a[0]))
+          super(a[0].length===10?a[0]+'T00:00:00+07:00':a[0].replace(' ','T')+'+07:00');
+        else super(...a);
+      }
+      getTimezoneOffset(){return -420;}
+    }
+    for(const part of ['FullYear','Month','Date','Day','Hours','Minutes','Seconds','Milliseconds'])
+      VNDate.prototype['get'+part]=function(){return new NativeDate(+this+offset)['getUTC'+part]();};
+    for(const part of ['FullYear','Month','Date','Hours','Minutes','Seconds','Milliseconds'])
+      VNDate.prototype['set'+part]=function(...a){const d=new NativeDate(+this+offset);return this.setTime(d['setUTC'+part](...a)-offset);};
+    for(const method of ['toLocaleString','toLocaleDateString','toLocaleTimeString'])
+      VNDate.prototype[method]=function(locales,options){return NativeDate.prototype[method].call(this,locales,{timeZone:'Asia/Ho_Chi_Minh',...options});};
+    vnDate.Type=VNDate;
+  }
+  return new vnDate.Type(...args);
+}
+
+
 /* [PERF] Máy yếu (RAM ≤ 3GB hoặc ≤ 4 nhân): tắt backdrop-filter (làm mờ nền) — rất nặng với GPU của máy tính bảng giá rẻ khi mở giỏ / hộp thoại */
 try { var _m = navigator.deviceMemory, _c = navigator.hardwareConcurrency; if ((_m && _m <= 3) || (_c && _c <= 4)) document.documentElement.classList.add('lowfx'); } catch (e) {}
 </script>
@@ -34,7 +59,7 @@ try { var _m = navigator.deviceMemory, _c = navigator.hardwareConcurrency; if ((
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
 <!-- Ca làm việc (check-in / check-out bằng PIN) — docs/KE_HOACH_QUANLY_TC33_XOFA.md -->
-<script src="cham_cong.v3.js"></script>
+<script src="cham_cong.v4.js"></script>
 <script>ChamCong.init({ store: 'xofa', expenses: true });</script>
 
 <!-- PWA Service Worker (chỉ đăng ký sw_xolifa.js — không đụng SW của file khác) -->
@@ -2258,7 +2283,7 @@ function saveDgSettingsLocal() {
 
 function isDgActive() {
   if (!dgSettings.enabled) return false;
-  const now   = new Date();
+  const now   = vnDate();
   const dow   = now.getDay(); // 0=Sun,1=Mon,...,6=Sat
   const hhmm  = now.getHours() * 60 + now.getMinutes();
 
@@ -2710,8 +2735,8 @@ function _attachRtListener(month, day) {
     const o = orders.find(x => x.id === key);
     if (!o || !_ordersInRam.has(key)) return;
     const [dd, mm, yy] = String(o.date || '').split('/').map(Number);
-    const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 2); cutoff.setHours(0, 0, 0, 0);
-    if (!dd || new Date(yy, mm - 1, dd) < cutoff) return;
+    const cutoff = vnDate(); cutoff.setDate(cutoff.getDate() - 2); cutoff.setHours(0, 0, 0, 0);
+    if (!dd || vnDate(yy, mm - 1, dd) < cutoff) return;
     _ordersInRam.delete(key);
     orders = orders.filter(x => x.id !== key);
     _scheduleOrdersUi();
@@ -2720,9 +2745,9 @@ function _attachRtListener(month, day) {
 
 function _refreshRtListeners() {
   // Gắn listener cho hôm nay + 2 ngày trước (tổng 3 ngày)
-  const now = new Date();
+  const now = vnDate();
   for (let i = 0; i <= 2; i++) {
-    const d = new Date(now); d.setDate(d.getDate() - i);
+    const d = vnDate(now); d.setDate(d.getDate() - i);
     _attachRtListener(MONTH_KEYS[d.getMonth()], String(d.getDate()).padStart(2, '0'));
   }
 }
@@ -2735,11 +2760,11 @@ function loadRecentOrders() {
   const dayKey = todayKey();
   if (_recentOrdersPromise && _recentOrdersDay === dayKey) return _recentOrdersPromise;
   // Gắn listener real-time (nếu chưa có); trả về Promise khi data ban đầu đã load xong
-  const now = new Date();
+  const now = vnDate();
   const jobs = [];
   let failed = false;
   for (let i = 0; i <= 2; i++) {
-    const d = new Date(now); d.setDate(d.getDate() - i);
+    const d = vnDate(now); d.setDate(d.getDate() - i);
     const month = MONTH_KEYS[d.getMonth()];
     const day = String(d.getDate()).padStart(2, '0');
     const path = 'orders_xolifa/' + month + '/' + day;
@@ -2773,9 +2798,9 @@ function loadRecentOrders() {
 }
 
 // Tự động gắn lại listener khi qua ngày mới (check mỗi phút)
-let _lastListenerDay = new Date().getDate();
+let _lastListenerDay = vnDate().getDate();
 setInterval(() => {
-  const today = new Date().getDate();
+  const today = vnDate().getDate();
   if (today !== _lastListenerDay) {
     _lastListenerDay = today;
     _refreshRtListeners(); // gắn thêm listener cho ngày mới
@@ -2819,11 +2844,11 @@ function loadArchiveDates(dateList) {
 // Tạo danh sách các ngày trong khoảng [fromDate, toDate] (Date objects)
 // bỏ qua 3 ngày gần nhất (đã có trong RT/RAM)
 function archiveDatesInRange(fromDate, toDate) {
-  const cutoff = new Date();
+  const cutoff = vnDate();
   cutoff.setDate(cutoff.getDate() - 2);
   cutoff.setHours(0, 0, 0, 0);
   const result = [];
-  const cur = new Date(fromDate);
+  const cur = vnDate(fromDate);
   cur.setHours(0, 0, 0, 0);
   while (cur <= toDate) {
     if (cur < cutoff) {
@@ -2883,7 +2908,7 @@ function showScreen(id) {
   if (id === 'dgscreen') { loadDgAdminUI(); loadDgSettings().then(() => { const scr = document.getElementById('dgscreen'); if (scr && scr.classList.contains('active')) loadDgAdminUI(); }); }
   if (id === 'kc') { kcLoadFromFirebase(); }
   if (id === 'hi') {
-    const now = new Date();
+    const now = vnDate();
     const from = weekStart();
     loadArchiveDates(archiveDatesInRange(from, now)).then(() => renderH());
     return;
@@ -3365,7 +3390,7 @@ const CAKE_ACCOUNT_NO = '0964674795';
 const CAKE_ACCOUNT_NAME = 'THE CAFE 33';
 
 function genBankOrderId() {
-  const now = new Date();
+  const now = vnDate();
   const p = n => String(n).padStart(2, '0');
   return 'DH' + p(now.getDate()) + p(now.getMonth()+1) + p(now.getHours()) + p(now.getMinutes());
 }
@@ -3634,8 +3659,8 @@ async function confirmAddMember() {
       stamps_today: 0,
       last_stamp_date: '',
       free_drink_available: 0,
-      joinDate: new Date().toISOString(),
-      lastVisit: new Date().toISOString(),
+      joinDate: vnDate().toISOString(),
+      lastVisit: vnDate().toISOString(),
       source: 'pos_xolifa'
     });
 
@@ -4226,7 +4251,7 @@ function _finalizeDiscountAfterPay() {
     jobs.push(
       fstore.collection('customers').doc(_giftVoucherPhone).update({
         [`myGifts.${_giftVoucherKey}.used`]:   true,
-        [`myGifts.${_giftVoucherKey}.usedAt`]: new Date().toISOString()
+        [`myGifts.${_giftVoucherKey}.usedAt`]: vnDate().toISOString()
       }).catch(() => {})
     );
   }
@@ -4333,7 +4358,7 @@ async function _finalizeStampFreeAfterPay(phone) {
 
 /** Lấy ngày hôm nay dạng 'YYYY-MM-DD' (giờ VN) */
 function loyaltyTodayStr() {
-  const now = new Date();
+  const now = vnDate();
   const y = now.getFullYear();
   const m = String(now.getMonth()+1).padStart(2,'0');
   const d = String(now.getDate()).padStart(2,'0');
@@ -4352,7 +4377,7 @@ async function loyaltyAddPoints(phone, billAmount) {
     const ref = fstore.collection('customers').doc(phone);
     await ref.update({
       total_points: firebase.firestore.FieldValue.increment(earned),
-      lastVisit: new Date().toISOString()
+      lastVisit: vnDate().toISOString()
     });
     if (loyaltyCustomer) loyaltyCustomer.total_points = (loyaltyCustomer.total_points || 0) + earned;
     return earned;
@@ -4403,7 +4428,7 @@ async function loyaltyAddStamps(phone, drinkCount) {
         stamps_today:         stampsToday + canAdd,
         last_stamp_date:      today,
         free_drink_available: freeDrinkCount,
-        lastVisit:            new Date().toISOString()
+        lastVisit:            vnDate().toISOString()
       });
       result = { added: canAdd, newCount: newStamp, freeDrink };
     });
@@ -4451,8 +4476,8 @@ function _computeBedVoucherCount(items, total, isTogoOrder) {
 /** Ghi N voucher Bed 1h miễn phí vào customers/{phone}.bedVouchers (1 lần ghi, gộp N key) */
 async function _writeBedVoucherEntries(phone, count, source, orderId) {
   if (!phone || count <= 0) return [];
-  const now = new Date();
-  const expiresAt = new Date(now.getTime() + BED_VOUCHER_EXPIRE_DAYS * 86400000);
+  const now = vnDate();
+  const expiresAt = vnDate(now.getTime() + BED_VOUCHER_EXPIRE_DAYS * 86400000);
   const entries = {};
   const voucherIds = [];
   for (let i = 0; i < count; i++) {
@@ -4883,7 +4908,7 @@ function confirmPay(cashGiven, cashChange) {
   let total     = getFinalTotal();
   // Làm tròn tiền mặt khi bán qua App
   if (isAppSale && curPay === 'cash') total = roundCashAmount(total);
-  const now = new Date();
+  const now = vnDate();
   const p = n => String(n).padStart(2, '0');
 
   const month = MONTH_KEYS[now.getMonth()];
@@ -4963,27 +4988,28 @@ function confirmPay(cashGiven, cashChange) {
 // ============================================================
 // REVENUE
 // ============================================================
-function todayKey() { const n = new Date(), p = x => String(x).padStart(2, '0'); return `${p(n.getDate())}/${p(n.getMonth()+1)}/${n.getFullYear()}`; }
+function todayKey() { const n = vnDate(), p = x => String(x).padStart(2, '0'); return `${p(n.getDate())}/${p(n.getMonth()+1)}/${n.getFullYear()}`; }
 /** Trả về Date là thứ 2 đầu tuần hiện tại (00:00:00) */
 function weekStart() {
-  const d = new Date(); d.setHours(0,0,0,0);
+  const d = vnDate(); d.setHours(0,0,0,0);
   const day = d.getDay(); // 0=CN, 1=T2 ... 6=T7
   d.setDate(d.getDate() - (day === 0 ? 6 : day - 1));
   return d;
 }
 
-// [FIX G5.1/5.2] 'YYYY-MM-DD' ↔ Date theo GIỜ ĐỊA PHƯƠNG. `new Date('YYYY-MM-DD')` là 0h UTC (= 7h sáng giờ VN) nên
+// [FIX G5.1/5.2] 'YYYY-MM-DD' ↔ Date theo GIỜ VIỆT NAM. `new Date('YYYY-MM-DD')` là 0h UTC (= 7h sáng giờ VN) nên
 // đơn trong ngày đầu của khoảng bị loại; `toISOString()` là giờ UTC nên 0–7h sáng bị lệch 1 ngày.
 function _ymdToLocalDate(str) {
   const [y, m, d] = String(str).split('-').map(Number);
-  return new Date(y, m - 1, d);
+  return vnDate(y, m - 1, d);
 }
 function _localDateToYMD(d) {
+  d = vnDate(d);
   const p = x => String(x).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 function openDatePicker() {
-  const today = _localDateToYMD(new Date());
+  const today = _localDateToYMD(vnDate());
   document.getElementById('dpFrom').value = today;
   document.getElementById('dpTo').value = today;
   document.getElementById('datePopup').classList.add('show');
@@ -5018,7 +5044,7 @@ function _ordersInRange(from, to) {
   if (t) t.setHours(23,59,59,999);
   return orders.filter(o => {
     const [d,m,y] = o.date.split('/');
-    const od = new Date(+y, +m-1, +d);
+    const od = vnDate(+y, +m-1, +d);
     if (f && od < f) return false;
     if (t && od > t) return false;
     return true;
@@ -5092,20 +5118,20 @@ function updRv(filtered) {
 }
 
 function _updShipStats() {
-  const now = new Date();
+  const now = vnDate();
   const p2 = x => String(x).padStart(2,'0');
   const todayKey_  = `${p2(now.getDate())}/${p2(now.getMonth()+1)}/${now.getFullYear()}`;
-  const yd = new Date(now); yd.setDate(yd.getDate()-1);
+  const yd = vnDate(now); yd.setDate(yd.getDate()-1);
   const yestKey = `${p2(yd.getDate())}/${p2(yd.getMonth()+1)}/${yd.getFullYear()}`;
-  const weekMon = weekStart ? weekStart() : new Date(now.setDate(now.getDate() - now.getDay() + 1));
-  const now2 = new Date();
+  const weekMon = weekStart ? weekStart() : vnDate(now.setDate(now.getDate() - now.getDay() + 1));
+  const now2 = vnDate();
   const mm = p2(now2.getMonth()+1), yyyy = String(now2.getFullYear());
   const shipOrders = orders.filter(o => o.isShip === true);
   const todayCnt = shipOrders.filter(o => o.date === todayKey_).length;
   const yesterdayCnt = shipOrders.filter(o => o.date === yestKey).length;
   const weekCnt = shipOrders.filter(o => {
     const [d,m,y] = o.date.split('/');
-    return new Date(+y,+m-1,+d) >= weekMon;
+    return vnDate(+y,+m-1,+d) >= weekMon;
   }).length;
   const monthOrders = shipOrders.filter(o => {
     const parts = o.date.split('/');
@@ -5124,7 +5150,7 @@ function _updShipStats() {
 function setTab(btn, period) {
   document.querySelectorAll('.tbb').forEach(b => b.classList.remove('active')); btn.classList.add('active');
   _rvFrom = null; _rvTo = null; _rvPeriod = period;
-  const now = new Date();
+  const now = vnDate();
   const p2 = x => String(x).padStart(2,'0');
 
   // Gán label ngày tháng cho từng tab
@@ -5145,7 +5171,7 @@ function setTab(btn, period) {
       filtered = orders.filter(o => o.date === todayKey());
     } else if (period === 'week') {
       const cutoff = weekStart();
-      filtered = orders.filter(o => { const [d,m,y]=o.date.split('/'); return new Date(+y,+m-1,+d) >= cutoff; });
+      filtered = orders.filter(o => { const [d,m,y]=o.date.split('/'); return vnDate(+y,+m-1,+d) >= cutoff; });
     } else if (period === 'month') {
       const mm = String(now.getMonth()+1).padStart(2,'0'), yyyy = now.getFullYear();
       filtered = orders.filter(o => o.date.slice(3,10) === `${mm}/${yyyy}`);
@@ -5163,10 +5189,10 @@ function setTab(btn, period) {
     const from = weekStart();
     loadArchiveDates(archiveDatesInRange(from, now)).then(render);
   } else if (period === 'month') {
-    const from = new Date(now.getFullYear(), now.getMonth(), 1);
+    const from = vnDate(now.getFullYear(), now.getMonth(), 1);
     loadArchiveDates(archiveDatesInRange(from, now)).then(render);
   } else { // year
-    const from = new Date(now.getFullYear(), 0, 1);
+    const from = vnDate(now.getFullYear(), 0, 1);
     loadArchiveDates(archiveDatesInRange(from, now)).then(render);
   }
 }
@@ -5196,7 +5222,7 @@ function setItemTab(btn, period) {
 }
 
 function renderItemRanking(period) {
-  const now = new Date();
+  const now = vnDate();
   const p2 = x => String(x).padStart(2,'0');
   const lbl = document.getElementById('rv-items-date-label');
   const doLoad = (from, labelTxt, filterFn) => {
@@ -5215,15 +5241,15 @@ function renderItemRanking(period) {
   } else if (period === 'week') {
     const from = weekStart();
     doLoad(from, 'Tuần này: ' + p2(from.getDate()) + '/' + p2(from.getMonth()+1) + ' – ' + p2(now.getDate()) + '/' + p2(now.getMonth()+1),
-      o => { const [d,m,y]=o.date.split('/'); return new Date(+y,+m-1,+d) >= from; });
+      o => { const [d,m,y]=o.date.split('/'); return vnDate(+y,+m-1,+d) >= from; });
   } else if (period === 'month') {
     const mm = String(now.getMonth()+1).padStart(2,'0'), yyyy = now.getFullYear();
-    const from = new Date(yyyy, now.getMonth(), 1);
+    const from = vnDate(yyyy, now.getMonth(), 1);
     doLoad(from, 'Tháng ' + (now.getMonth()+1) + '/' + yyyy,
       o => o.date.slice(3,10) === mm + '/' + yyyy);
   } else {
     const yyyy = String(now.getFullYear());
-    const from = new Date(now.getFullYear(), 0, 1);
+    const from = vnDate(now.getFullYear(), 0, 1);
     doLoad(from, 'Năm ' + yyyy, o => o.date.endsWith(yyyy));
   }
 }
@@ -5288,7 +5314,7 @@ function drawChart(period, filteredOrders) {
 
   const pl = 28, pr = 8, pt = 20, pb = 36;
   const cW = W - pl - pr, cH = H - pt - pb;
-  const now = new Date();
+  const now = vnDate();
 
   // Helper: net revenue of an order (excluding food)
   const netRv = o => o.total - (o.foodTotal || 0);
@@ -5310,14 +5336,14 @@ function drawChart(period, filteredOrders) {
     hd = Array(7).fill(0);
     labels = [];
     for (let i = 0; i < 7; i++) {
-      const d = new Date(mon); d.setDate(mon.getDate() + i);
+      const d = vnDate(mon); d.setDate(mon.getDate() + i);
       const key = `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
       hd[i] = _orders.filter(o => o.date === key).reduce((a, o) => a + netRv(o), 0);
       labels.push(dayLabels[i]);
     }
   } else if (period === 'month') {
     // Các tuần trong tháng
-    const daysInMonth = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate();
+    const daysInMonth = vnDate(now.getFullYear(), now.getMonth()+1, 0).getDate();
     const weeks = Math.ceil(daysInMonth / 7);
     hd = Array(weeks).fill(0); labels = [];
     const mm = String(now.getMonth()+1).padStart(2,'0'), yyyy = now.getFullYear();
@@ -5341,7 +5367,7 @@ function drawChart(period, filteredOrders) {
     _orders.forEach(o => { byDate[o.date] = (byDate[o.date]||0) + netRv(o); });
     const keys = Object.keys(byDate).sort((a,b)=>{
       const [da,ma,ya]=a.split('/'), [db,mb,yb]=b.split('/');
-      return new Date(+ya,+ma-1,+da) - new Date(+yb,+mb-1,+db);
+      return vnDate(+ya,+ma-1,+da) - vnDate(+yb,+mb-1,+db);
     });
     hd = keys.map(k => byDate[k]);
     labels = keys.map(k => k.slice(0,5));
@@ -5725,18 +5751,18 @@ function toast(msg) { const t = document.getElementById('toastEl'); t.textConten
 // 4. NHÁNH ARCHIVE — Dọn RT → Firestore (chạy 1 lần/ngày khi mở app)
 // ============================================================
 function runArchiveIfNeeded() {
-  const today = new Date().toDateString();
+  const today = _localDateToYMD(vnDate());
   if (localStorage.getItem('lastCleanup_pos') === today) return;
 
   console.log('[Archive] Bắt đầu dọn dẹp RT → Firestore...');
-  const now = new Date();
+  const now = vnDate();
   let archived = 0;
   let failed = false; // [FIX G5.4] có lỗi (quyền, mạng…) thì KHÔNG ghi mốc "đã dọn hôm nay" để lần mở sau thử lại
 
   // Chỉ quét "cửa sổ" 3 → 7 ngày trước (tránh treo máy)
   const jobs = [];
   for (let i = 3; i <= 7; i++) {
-    const d = new Date(now);
+    const d = vnDate(now);
     d.setDate(d.getDate() - i);
     const month = MONTH_KEYS[d.getMonth()];
     const day   = String(d.getDate()).padStart(2, '0');
@@ -5751,7 +5777,7 @@ function runArchiveIfNeeded() {
         // merge: gộp theo từng đơn, không ghi đè bản archive đã có (đơn đồng bộ muộn từ máy offline)
         return fstore.collection('orders_xolifa_archive').doc(docId).set({
           orders: data,
-          archivedAt: new Date().toISOString(),
+          archivedAt: vnDate().toISOString(),
           month, day
         }, { merge: true }).then(() => {
           return snap.ref.remove();
@@ -6517,7 +6543,7 @@ function _actualFinalizeSplitPay() {
   if (!items.length) { toast('Giỏ hàng trống!'); return; }
   if (!_payBegin()) return; // [FIX G4.1]
   const total = getCartTotal();
-  const now = new Date();
+  const now = vnDate();
   const p = n => String(n).padStart(2, '0');
   const month = MONTH_KEYS[now.getMonth()];
   const day   = p(now.getDate());
@@ -7093,7 +7119,7 @@ function _custRenderNextPage(reset) {
     const pts = Number(d.total_points || 0).toLocaleString('vi-VN');
     const stamps = Number(d.stamp_count || 0);
     const free = Number(d.free_drink_available || 0);
-    const lastVisit = d.lastVisit ? new Date(d.lastVisit).toLocaleDateString('vi-VN') : '';
+    const lastVisit = d.lastVisit ? vnDate(d.lastVisit).toLocaleDateString('vi-VN') : '';
     const card = document.createElement('div');
     card.style.cssText = 'background:#fff;border-radius:18px;padding:16px;display:flex;align-items:center;justify-content:space-between;box-shadow:0 2px 8px rgba(0,0,0,0.03);margin-bottom:10px;';
     card.innerHTML = `

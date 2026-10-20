@@ -10,7 +10,7 @@ Chủ dự án chốt áp dụng từ 01/10/2026, cho manage và quanlygieo.
 
 ## Tích hợp và lượt đọc
 
-Bảng chấm công hiện cả giờ thực tế và giờ trả lương. Bộ tính lương, tổng kết tháng, lãi/lỗ và thu hồi vốn Gieo dùng cùng phép tính. manage nạp lai_lo.v5.js sinh từ quanlygieo; v4 giữ nguyên cho bản cũ.
+Bảng chấm công hiện cả giờ thực tế và giờ trả lương. Bộ tính lương, tổng kết tháng, lãi/lỗ và thu hồi vốn Gieo dùng cùng phép tính. manage nạp lai_lo.v6.js sinh từ quanlygieo (v6 thêm lịch VN xuyên suốt, không đổi trần giờ); v1–v5 giữ nguyên cho bản cũ. Ca làm việc TC33/XOFA dùng cham_cong.v4.js.
 
 Chỉ đọc lịch trong khoảng ngày/tháng đang tính, không đọc từng nhân viên/ngày. quanlygieo gộp các truy vấn lịch cùng quán/cùng khoảng đang chạy. Màn chấm công dùng lịch đã đọc sẵn. Sửa lịch Gieo ghi dấu ngày cần tính lại cùng batch, không cần đọc thêm để tìm ngày. manage bỏ đệm lương/xem tạm tính khi sửa lịch.
 

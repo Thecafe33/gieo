@@ -6,7 +6,7 @@
 'use strict';
 const fs = require('fs'); const path = require('path');
 const { makeFake, normalize, dropStore } = require('./fakefb');
-const { extractOne } = require('./extract');
+const { extractOne, extractRaw } = require('./extract');
 const { loadEngineModule } = require('./engine');
 const ROOT = path.resolve(__dirname, '..', '..');
 
@@ -27,7 +27,8 @@ function fakeEl(id) {
 // Trích các hàm có trong file (tên nào không có thì bỏ qua — sẽ thành hàm ghi vết).
 function grabAll(file, names) {
   const out = []; const got = [];
-  for (const n of [...new Set(names)]) { const s = extractOne(file, n); if (s) { out.push(s); got.push(n); } }
+  // Khối UnitEngine.init cũng dùng lịch VN, dù target không gọi trực tiếp.
+  for (const n of [...new Set(['vnDate',...names])]) { if(extractOne(file,n)){out.push(extractRaw(file,[n]));got.push(n);} }
   return { src: out.join('\n'), got };
 }
 function initBlock(file) {

@@ -25,8 +25,33 @@
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script>
 <!-- Ca làm việc (check-in / check-out bằng PIN) — docs/KE_HOACH_QUANLY_TC33_XOFA.md -->
-<script src="cham_cong.v3.js"></script>
-<script>ChamCong.init({ store: 'tc33' });</script>
+<script src="cham_cong.v4.js"></script>
+<script>
+// Ngày nghiệp vụ theo UTC+7; timestamp/ISO vẫn là thời điểm thật. Không thay Date của SDK.
+function vnDate(...args){
+  if(!vnDate.Type){
+    const NativeDate=Date,offset=7*3600000;
+    class VNDate extends NativeDate{
+      constructor(...a){
+        if(a.length>1)super(NativeDate.UTC(...a)-offset);
+        else if(a.length===1 && typeof a[0]==='string' && /^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)?$/.test(a[0]))
+          super(a[0].length===10?a[0]+'T00:00:00+07:00':a[0].replace(' ','T')+'+07:00');
+        else super(...a);
+      }
+      getTimezoneOffset(){return -420;}
+    }
+    for(const part of ['FullYear','Month','Date','Day','Hours','Minutes','Seconds','Milliseconds'])
+      VNDate.prototype['get'+part]=function(){return new NativeDate(+this+offset)['getUTC'+part]();};
+    for(const part of ['FullYear','Month','Date','Hours','Minutes','Seconds','Milliseconds'])
+      VNDate.prototype['set'+part]=function(...a){const d=new NativeDate(+this+offset);return this.setTime(d['setUTC'+part](...a)-offset);};
+    for(const method of ['toLocaleString','toLocaleDateString','toLocaleTimeString'])
+      VNDate.prototype[method]=function(locales,options){return NativeDate.prototype[method].call(this,locales,{timeZone:'Asia/Ho_Chi_Minh',...options});};
+    vnDate.Type=VNDate;
+  }
+  return new vnDate.Type(...args);
+}
+
+ChamCong.init({ store: 'tc33' });</script>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1" rel="stylesheet" />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=League+Spartan:wght@700;800&family=Google+Sans:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
@@ -1167,7 +1192,7 @@ input, button, select, textarea { font-size: 1rem; }
         <button id="btn-nav-bed" onclick="openBedManager()" class="bg-gray-100 text-gray-400 px-6 py-3 rounded-2xl text-[11px] font-black uppercase hover:bg-gray-200 active:scale-95 transition-all tracking-widest">
             Cafe in Bed
         </button>
-        <!-- Ca làm việc: nút tròn nhỏ, mở popup (cham_cong.v3.js) -->
+        <!-- Ca làm việc: nút tròn nhỏ, mở popup (cham_cong.v4.js) -->
         <button id="btn-nav-calamviec" onclick="ChamCong.open()" title="Ca làm việc — Check-in / Check-out" aria-label="Ca làm việc" class="w-11 h-11 bg-gray-100 text-gray-500 rounded-2xl flex items-center justify-center hover:bg-[#006241] hover:text-white active:scale-95 transition-all">
             <span class="material-symbols-outlined text-[22px]">badge</span>
         </button>
@@ -2710,7 +2735,7 @@ const auth = firebase.auth();
 // ── bedBookings path helpers ──────────────────────────────────────────────
 // Parse dateStr: DD/MM/YYYY hoặc YYYY-MM-DD → { year, month, day }
 // [FIX 16/10] Ngày "YYYY-MM-DD" theo GIỜ VIỆT NAM (UTC+7) — không dùng toISOString() (ngày UTC: 0h–7h sáng VN ra ngày hôm trước).
-function _vnYmd(d) { return new Date((d ? d.getTime() : Date.now()) + 7 * 3600000).toISOString().slice(0, 10); }
+function _vnYmd(d) { return vnDate((d ? d.getTime() : Date.now()) + 7 * 3600000).toISOString().slice(0, 10); }
 function _parseDateKey(dateStr) {
     if (!dateStr) return null;
     var s = dateStr.trim();
@@ -2750,33 +2775,33 @@ function _bedBookingRef(booking, subPath) {
 // mode: 'week'|'month'|'year'|'day'|'custom', startVal/endVal: 'YYYY-MM-DD' string
 // callback(bookings[])
 function _fetchBedBookingsForStats(mode, startVal, endVal, callback) {
-    var now = new Date();
+    var now = vnDate();
     var startDate, endDate;
 
     if (mode === 'week') {
         var day = now.getDay() || 7;
-        startDate = new Date(now); startDate.setDate(now.getDate() - day + 1); startDate.setHours(0,0,0,0);
-        endDate = new Date(startDate); endDate.setDate(startDate.getDate() + 6);
+        startDate = vnDate(now); startDate.setDate(now.getDate() - day + 1); startDate.setHours(0,0,0,0);
+        endDate = vnDate(startDate); endDate.setDate(startDate.getDate() + 6);
     } else if (mode === 'month') {
-        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-        endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+        startDate = vnDate(now.getFullYear(), now.getMonth(), 1);
+        endDate = vnDate(now.getFullYear(), now.getMonth() + 1, 0);
     } else if (mode === 'year') {
-        startDate = new Date(now.getFullYear(), 0, 1);
-        endDate = new Date(now.getFullYear(), 11, 31);
+        startDate = vnDate(now.getFullYear(), 0, 1);
+        endDate = vnDate(now.getFullYear(), 11, 31);
     } else if (mode === 'custom' && startVal && endVal) {
-        startDate = new Date(startVal);
-        endDate = new Date(endVal);
+        startDate = vnDate(startVal);
+        endDate = vnDate(endVal);
     } else {
         // day hoặc fallback: chỉ hôm nay
-        startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        endDate = new Date(startDate);
+        startDate = vnDate(now.getFullYear(), now.getMonth(), now.getDate());
+        endDate = vnDate(startDate);
     }
 
     // Build danh sách ngày YYYY-MM-DD trong khoảng
     var days = [];
-    var cur = new Date(startDate);
+    var cur = vnDate(startDate);
     cur.setHours(0,0,0,0);
-    var end = new Date(endDate);
+    var end = vnDate(endDate);
     end.setHours(0,0,0,0);
     while (cur <= end) {
         var y = cur.getFullYear();
@@ -2794,8 +2819,8 @@ function _fetchBedBookingsForStats(mode, startVal, endVal, callback) {
 function _isBedBookingRecent(dateStr) {
     var d = _parseDateKey(dateStr);
     if (!d) return true; // không parse được → coi như gần, giữ RT
-    var bookingDate = new Date(+d.year, +d.month - 1, +d.day);
-    var today = new Date(); today.setHours(0,0,0,0);
+    var bookingDate = vnDate(+d.year, +d.month - 1, +d.day);
+    var today = vnDate(); today.setHours(0,0,0,0);
     var diff = (today - bookingDate) / (1000 * 60 * 60 * 24);
     return diff <= 3;
 }
@@ -2837,13 +2862,13 @@ function syncRewardsToRT() {
 function runAutoArchive() {
     // [FIX 12/10] Đang tự trả bed ngày cũ → chờ xong rồi mới archive (để archive lấy bản đã trả).
     if (typeof _bedAutoCloseRunning !== 'undefined' && _bedAutoCloseRunning) { _bedAutoCloseRunning.then(runAutoArchive, runAutoArchive); return; }
-    var now = new Date();
+    var now = vnDate();
     now.setHours(0, 0, 0, 0);
 
     // Build danh sách ngày cần kiểm tra: từ 180 ngày trước đến 4 ngày trước
     var days = [];
     for (var i = 180; i >= 4; i--) {
-        var d = new Date(now);
+        var d = vnDate(now);
         d.setDate(d.getDate() - i);
         var y = d.getFullYear();
         var m = String(d.getMonth() + 1).padStart(2, '0');
@@ -2871,7 +2896,7 @@ function runAutoArchive() {
             var fsDocRef = fstore
                 .collection('bedBookings_archive').doc(d.year)
                 .collection(d.month).doc(d.day);
-            fsDocRef.set({ bookings: data, archivedAt: new Date().toISOString() })
+            fsDocRef.set({ bookings: data, archivedAt: vnDate().toISOString() })
                 .then(function() {
                     // Xóa khỏi Realtime sau khi archive thành công
                     db.ref(rtPath).remove();
@@ -2890,13 +2915,13 @@ function runAutoArchive() {
 
 // ── Auto-archive orders cũ hơn 3 ngày sang Firestore orders_archive ──────────
 function runAutoArchiveOrders() {
-    var now = new Date();
+    var now = vnDate();
     now.setHours(0, 0, 0, 0);
 
     // Build danh sách ngày cần kiểm tra: từ 180 ngày trước đến 4 ngày trước
     var days = [];
     for (var i = 180; i >= 4; i--) {
-        var d = new Date(now);
+        var d = vnDate(now);
         d.setDate(d.getDate() - i);
         var parts = getOrderParts(d); // { year, month(jan/feb...), day }
         days.push(parts);
@@ -2920,7 +2945,7 @@ function runAutoArchiveOrders() {
             // Cùng cấu trúc với RT → đọc đồng nhất
             fstore.collection('orders_archive').doc(d.year)
                 .collection(d.month).doc(d.day)
-                .set({ orders: data, archivedAt: new Date().toISOString() })
+                .set({ orders: data, archivedAt: vnDate().toISOString() })
                 .then(function() {
                     db.ref(rtPath).remove();
                     archived++;
@@ -2965,7 +2990,7 @@ function _syncHeaderClock() {
     const cart = document.getElementById('sidebar-cart');
     const cartShown = !!(cart && cart.offsetParent !== null && getComputedStyle(cart).display !== 'none');
     el.style.display = cartShown ? 'none' : '';
-    if (!cartShown) el.innerText = new Date().toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+    if (!cartShown) el.innerText = vnDate().toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
 }
 setInterval(_syncHeaderClock, 1000);
 
@@ -3064,7 +3089,7 @@ fRgr2d+6614bnRftY9Q=
 };
 
 async function checkAndSyncDailyRevenue() {
-    const todayStr = new Date().toLocaleDateString('vi-VN', {
+    const todayStr = vnDate().toLocaleDateString('vi-VN', {
         day: '2-digit', month: '2-digit', year: 'numeric'
     });
 
@@ -3073,7 +3098,7 @@ async function checkAndSyncDailyRevenue() {
         return;
     }
 
-    const yesterday = new Date();
+    const yesterday = vnDate();
     yesterday.setDate(yesterday.getDate() - 1);
     const yesterdayStr_GB = yesterday.toLocaleDateString('en-GB');
     const dd = String(yesterday.getDate()).padStart(2, '0');
@@ -3544,7 +3569,7 @@ function addToCart(name, size, price) {
 const MONTHS = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
 
 function getOrderParts(date) {
-    const d = date || new Date();
+    const d = vnDate(date || Date.now());
     return {
         year: String(d.getFullYear()),
         month: MONTHS[d.getMonth()],
@@ -3554,22 +3579,22 @@ function getOrderParts(date) {
 
 // Ref ghi đơn mới: orders/2026/mar/13
 function getOrdersRef(date) {
-    const { year, month, day } = getOrderParts(date || new Date());
+    const { year, month, day } = getOrderParts(date || vnDate());
     return db.ref(`orders/${year}/${month}/${day}`);
 }
 
 // Fetch orders trong khoảng ngày — RT trước, fallback Firestore orders_archive
 async function fetchOrdersByDateRange(startDate, endDate) {
     const allOrders = [];
-    const cur = new Date(startDate);
+    const cur = vnDate(startDate);
     cur.setHours(0, 0, 0, 0);
-    const end = new Date(endDate);
+    const end = vnDate(endDate);
     end.setHours(23, 59, 59, 999);
 
     // Build danh sách ngày cần đọc
     const days = [];
     while (cur <= end) {
-        const { year, month, day } = getOrderParts(new Date(cur));
+        const { year, month, day } = getOrderParts(vnDate(cur));
         days.push({ year, month, day });
         cur.setDate(cur.getDate() + 1);
     }
@@ -3606,7 +3631,7 @@ async function fetchOrdersByDateRange(startDate, endDate) {
 
 // Fetch orders hôm nay
 async function fetchTodayOrders() {
-    const today = new Date();
+    const today = vnDate();
     const { year, month, day } = getOrderParts(today);
     const snaps = await Promise.all([
         db.ref(`orders/${year}/${month}/${day}`).once('value'),
@@ -3801,7 +3826,7 @@ function completeOrder_OLD() {
         itemsArray: cart,
         bedId: bedIdToSend,
         customerName: custNameToSend,
-        createdAt: new Date().toISOString(),
+        createdAt: vnDate().toISOString(),
         status: "pending_sync"
     };
 
@@ -3827,9 +3852,9 @@ function completeOrder_OLD() {
                 var checkoutTotal = (typeof currentTotal !== 'undefined') ? currentTotal : 0;
                 var _bk = globalAllBookings.find(function(b){ return (b.id || b.key) === bookingKeyToClose; });
                 if (_bk) {
-                    _updateBedBooking(_bk, { status: 'đã xong', realEndTime: new Date().toLocaleTimeString('en-GB'), totalSpend: checkoutTotal });
+                    _updateBedBooking(_bk, { status: 'đã xong', realEndTime: vnDate().toLocaleTimeString('en-GB'), totalSpend: checkoutTotal });
                 } else {
-                    db.ref('bedBookings/' + bookingKeyToClose).update({ status: 'đã xong', realEndTime: new Date().toLocaleTimeString('en-GB'), totalSpend: checkoutTotal });
+                    db.ref('bedBookings/' + bookingKeyToClose).update({ status: 'đã xong', realEndTime: vnDate().toLocaleTimeString('en-GB'), totalSpend: checkoutTotal });
                 }
                 isCheckoutFlow = false;
                 pendingBedOrder = null;
@@ -3987,8 +4012,8 @@ function openHistory() {
     switchView('history');
 
     // Lấy 7 ngày gần nhất + node cũ
-    const today = new Date();
-    const weekAgo = new Date(today);
+    const today = vnDate();
+    const weekAgo = vnDate(today);
     weekAgo.setDate(weekAgo.getDate() - 7);
     fetchOrdersByDateRange(weekAgo, today).then(allOrders => {
         document.getElementById('loading-overlay').style.display = 'none';
@@ -4012,7 +4037,7 @@ function processHistoryData(data) {
     } else {
         historyData = Object.keys(data).map(key => {
             const o = data[key];
-            const d = new Date(o.createdAt || Date.now());
+            const d = vnDate(o.createdAt || Date.now());
             return {
                 ...o,
                 id: key,
@@ -4451,26 +4476,26 @@ function openRevenue(mode) {
     var endVal = endEl ? endEl.value : null;
 
     // Xác định khoảng ngày fetch đúng theo mode
-    var now = new Date();
+    var now = vnDate();
     var fetchStart, fetchEnd;
     if (startVal && endVal) {
         // Custom range từ date picker
-        fetchStart = new Date(startVal);
-        fetchEnd   = new Date(endVal);
+        fetchStart = vnDate(startVal);
+        fetchEnd   = vnDate(endVal);
     } else if (mode === 'year') {
-        fetchStart = new Date(now.getFullYear(), 0, 1);
-        fetchEnd   = new Date(now.getFullYear(), 11, 31);
+        fetchStart = vnDate(now.getFullYear(), 0, 1);
+        fetchEnd   = vnDate(now.getFullYear(), 11, 31);
     } else if (mode === 'month') {
-        fetchStart = new Date(now.getFullYear(), now.getMonth(), 1);
-        fetchEnd   = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+        fetchStart = vnDate(now.getFullYear(), now.getMonth(), 1);
+        fetchEnd   = vnDate(now.getFullYear(), now.getMonth() + 1, 0);
     } else if (mode === 'week') {
         var dow = now.getDay() || 7;
-        fetchStart = new Date(now); fetchStart.setDate(now.getDate() - dow + 1); fetchStart.setHours(0,0,0,0);
-        fetchEnd   = new Date(fetchStart); fetchEnd.setDate(fetchStart.getDate() + 6);
+        fetchStart = vnDate(now); fetchStart.setDate(now.getDate() - dow + 1); fetchStart.setHours(0,0,0,0);
+        fetchEnd   = vnDate(fetchStart); fetchEnd.setDate(fetchStart.getDate() + 6);
     } else {
         // day hoặc fallback
-        fetchStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        fetchEnd   = new Date(fetchStart);
+        fetchStart = vnDate(now.getFullYear(), now.getMonth(), now.getDate());
+        fetchEnd   = vnDate(fetchStart);
     }
 
     fetchOrdersByDateRange(fetchStart, fetchEnd).then(function(allOrders) {
@@ -4500,7 +4525,7 @@ function _isKhacLine(name, size) {
         || n === '1h bed' || n === '1h bed từ h5';
 }
 function calculateStats(orders, mode, customStart, customEnd) {
-    var now = new Date();
+    var now = vnDate();
     var startTime, endTime;
     var labels = [];
     var chartData = [];
@@ -4508,35 +4533,35 @@ function calculateStats(orders, mode, customStart, customEnd) {
 
     if (mode === 'week') {
         var day = now.getDay() || 7;
-        startTime = new Date(now); startTime.setDate(now.getDate() - day + 1); startTime.setHours(0,0,0,0);
-        endTime = new Date(startTime); endTime.setDate(startTime.getDate() + 6); endTime.setHours(23,59,59,999);
+        startTime = vnDate(now); startTime.setDate(now.getDate() - day + 1); startTime.setHours(0,0,0,0);
+        endTime = vnDate(startTime); endTime.setDate(startTime.getDate() + 6); endTime.setHours(23,59,59,999);
         labels = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
         chartData = [0,0,0,0,0,0,0];
     }
     else if (mode === 'month') {
-        startTime = new Date(now.getFullYear(), now.getMonth(), 1);
-        endTime = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+        startTime = vnDate(now.getFullYear(), now.getMonth(), 1);
+        endTime = vnDate(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
         var daysInMonth = endTime.getDate();
         for (var i = 1; i <= daysInMonth; i++) { labels.push(i.toString()); chartData.push(0); }
     }
     else if (mode === 'year') {
-        startTime = new Date(now.getFullYear(), 0, 1);
-        endTime = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
+        startTime = vnDate(now.getFullYear(), 0, 1);
+        endTime = vnDate(now.getFullYear(), 11, 31, 23, 59, 59, 999);
         labels = ['T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11', 'T12'];
         chartData = [0,0,0,0,0,0,0,0,0,0,0,0];
         groupType = 'month';
     }
     else if (mode === 'day') {
-        startTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
-        endTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+        startTime = vnDate(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+        endTime = vnDate(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
         labels = ['0h','2h','4h','6h','8h','10h','12h','14h','16h','18h','20h','22h'];
         chartData = [0,0,0,0,0,0,0,0,0,0,0,0];
         groupType = 'hour2';
     }
     else if (mode === 'custom') {
         if (!customStart || !customEnd) return null;
-        startTime = new Date(customStart); startTime.setHours(0,0,0,0);
-        endTime = new Date(customEnd); endTime.setHours(23,59,59,999);
+        startTime = vnDate(customStart); startTime.setHours(0,0,0,0);
+        endTime = vnDate(customEnd); endTime.setHours(23,59,59,999);
         var diffTime = Math.abs(endTime - startTime);
         var diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
         if (diffDays > 31) {
@@ -4545,7 +4570,7 @@ function calculateStats(orders, mode, customStart, customEnd) {
             chartData = [0,0,0,0,0,0,0,0,0,0,0,0];
         } else {
             for (var j = 0; j <= diffDays; j++) {
-                var dTemp = new Date(startTime); dTemp.setDate(dTemp.getDate() + j);
+                var dTemp = vnDate(startTime); dTemp.setDate(dTemp.getDate() + j);
                 labels.push(dTemp.getDate() + "/" + (dTemp.getMonth()+1));
                 chartData.push(0);
             }
@@ -4560,11 +4585,11 @@ function calculateStats(orders, mode, customStart, customEnd) {
     var stats = { drinkTotal: 0, snackTotal: 0, khacTotal: 0, transferTotal: 0, cashTotal: 0, labels: labels, chartData: chartData, drinkChartData, snackChartData, khacChartData, transferChartData, cashChartData, dailyList: {}, today: 0, yesterday: 0 };
 
     var todayStr = now.toLocaleDateString('en-GB');
-    var yest = new Date(now); yest.setDate(now.getDate() - 1);
+    var yest = vnDate(now); yest.setDate(now.getDate() - 1);
     var yestStr = yest.toLocaleDateString('en-GB');
 
     orders.forEach(function(o) {
-        var d = new Date(o.createdAt || Date.now());
+        var d = vnDate(o.createdAt || Date.now());
         var dateKey = d.toLocaleDateString('en-GB');
         var amount = Number(o.total) || 0;
         if (amount <= 0) return;
@@ -4579,7 +4604,8 @@ function calculateStats(orders, mode, customStart, customEnd) {
             const processSingleItem = (name, qty, itemPrice, size) => {
                 const menuItem = menu.find(m => m.name.toLowerCase() === name.toLowerCase());
 
-                const finalPrice = (itemPrice > 0) ? itemPrice : (menuItem ? (menuItem.priceM || menuItem.priceL) : 0);
+                const hasPrice = itemPrice != null && itemPrice !== '' && Number.isFinite(Number(itemPrice));
+                const finalPrice = hasPrice ? Number(itemPrice) : (menuItem ? (menuItem.priceM || menuItem.priceL) : 0);
                 const subTotal = finalPrice * qty;
 
                 const type = menuItem ? String(menuItem.type || "").toLowerCase() : "";
@@ -4598,7 +4624,7 @@ function calculateStats(orders, mode, customStart, customEnd) {
 
             if (o.itemsArray && Array.isArray(o.itemsArray)) {
                 o.itemsArray.forEach(i => {
-                    processSingleItem(i.name, i.qty || 1, i.price || 0, i.size);
+                    processSingleItem(i.name, i.qty || 1, i.price, i.size);
                 });
             }
             else if (o.items) {
@@ -4611,7 +4637,7 @@ function calculateStats(orders, mode, customStart, customEnd) {
                         var nameFull = str.substring(0, xIndex).trim();
                         var nameOnly = nameFull.split('(')[0].trim();
                         var sizeM = nameFull.match(/\(([^)]*)\)\s*$/);
-                        processSingleItem(nameOnly, qty, 0, sizeM ? sizeM[1].trim() : '');
+                        processSingleItem(nameOnly, qty, null, sizeM ? sizeM[1].trim() : '');
                     }
                 });
             }
@@ -5050,7 +5076,7 @@ function openBedManager() {
     document.getElementById('loading-overlay').style.display = 'flex';
     switchView('bed');
 
-    const today = new Date();
+    const today = vnDate();
     const yyyy = today.getFullYear();
     const mm = String(today.getMonth() + 1).padStart(2, '0');
     const dd = String(today.getDate()).padStart(2, '0');
@@ -5086,7 +5112,7 @@ function changeBedDate(dateInputValue) {
         globalAllBookings = globalAllBookings.filter(b => b.displayDate !== targetDateStr);
         globalAllBookings = globalAllBookings.concat(bookings);
 
-        const isToday = (targetDateStr === new Date().toLocaleDateString('en-GB'));
+        const isToday = (targetDateStr === vnDate().toLocaleDateString('en-GB'));
         currentBedList = bookings.filter(b => {
             if (isToday) return b.displayDate === targetDateStr || (b.status && b.status.includes('active'));
             return b.displayDate === targetDateStr;
@@ -5095,7 +5121,7 @@ function changeBedDate(dateInputValue) {
     });
 }
 function renderBedBookings(list) {
-    const now = new Date();
+    const now = vnDate();
     const AUTO_CANCEL_MINUTES = 50;
     const todayStr = now.toLocaleDateString('en-GB');
 
@@ -5107,7 +5133,7 @@ function renderBedBookings(list) {
 
                     if (booking.start && booking.start.includes(':')) {
                         let parts = booking.start.split(':');
-                        let bookingTime = new Date();
+                        let bookingTime = vnDate();
                         bookingTime.setHours(parseInt(parts[0]), parseInt(parts[1]), 0);
 
                         let diff = (now - bookingTime) / 60000;
@@ -5911,14 +5937,14 @@ function finalizeBedCheckIn(bedId) {
     );
     if (isBusy) return alert("Bed 0" + bedId + " đang có khách rồi! Vui lòng chọn Bed khác.");
 
-    var now = new Date();
+    var now = vnDate();
 
     var partsStart = pendingBedOrder.start.split(':');
-    var bookStart = new Date();
+    var bookStart = vnDate();
     bookStart.setHours(parseInt(partsStart[0]), parseInt(partsStart[1]), 0);
 
     var partsEnd = pendingBedOrder.end.split(':');
-    var bookEnd = new Date();
+    var bookEnd = vnDate();
     bookEnd.setHours(parseInt(partsEnd[0]), parseInt(partsEnd[1]), 0);
 
     var finalStartStr = now.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
@@ -5940,7 +5966,7 @@ function finalizeBedCheckIn(bedId) {
         var newBlocks = Math.ceil(newTotalMins / 60);
 
         if (newBlocks > originalBlocks) {
-            var newEndDate = new Date(bookEnd.getTime() - (diffMinutes * 60000));
+            var newEndDate = vnDate(bookEnd.getTime() - (diffMinutes * 60000));
             finalEndStr = newEndDate.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
         } else {
         }
@@ -6062,7 +6088,7 @@ function submitNewBooking() {
     }
 
     var durationMinutes = 60;
-    var now = new Date();
+    var now = vnDate();
     var boxDur = document.getElementById('mode-duration-box');
 
     if (boxDur && !boxDur.classList.contains('hidden')) {
@@ -6075,12 +6101,12 @@ function submitNewBooking() {
 
         // [Bug fix #1+#3] Tính duration từ override_start nếu có, không phải từ now
         var overrideStartVal = (document.getElementById('override_start_time') || {}).value || '';
-        var baseForDur = new Date();
+        var baseForDur = vnDate();
         if (overrideStartVal) {
             var osp = overrideStartVal.split(':');
             baseForDur.setHours(parseInt(osp[0]), parseInt(osp[1]), 0, 0);
         }
-        var end = new Date(baseForDur);
+        var end = vnDate(baseForDur);
         end.setHours(parseInt(hh), parseInt(mm), 0, 0);
 
         if (end <= baseForDur) return alert("Giờ về phải lớn hơn giờ bắt đầu!");
@@ -6097,13 +6123,13 @@ function submitNewBooking() {
     if (overrideStart) {
         startStr = overrideStart;
         var osp2 = overrideStart.split(':');
-        var startBase = new Date();
+        var startBase = vnDate();
         startBase.setHours(parseInt(osp2[0]), parseInt(osp2[1]), 0, 0);
-        var endObj = new Date(startBase.getTime() + durationMinutes * 60000);
+        var endObj = vnDate(startBase.getTime() + durationMinutes * 60000);
         endStr = endObj.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
     } else {
         startStr = now.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
-        var endObj = new Date(now.getTime() + durationMinutes * 60000);
+        var endObj = vnDate(now.getTime() + durationMinutes * 60000);
         endStr = endObj.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
     }
 
@@ -6120,8 +6146,8 @@ function submitNewBooking() {
                 stamps_today:     0,
                 last_stamp_date:  '',
                 free_drink_available: 0,
-                joinDate:         new Date().toISOString(),
-                lastVisit:        new Date().toISOString(),
+                joinDate:         vnDate().toISOString(),
+                lastVisit:        vnDate().toISOString(),
                 compName:         compName || '',
                 compPhone:        compPhone || '',
                 pendingFee:       0,
@@ -6133,7 +6159,7 @@ function submitNewBooking() {
             fstore.collection('customers').doc(cleanPhone).update({
                 name:      name,
                 nickname:  existingCustomer.nickname || name,
-                lastVisit: new Date().toISOString(),
+                lastVisit: vnDate().toISOString(),
                 compName:  compName || '',
                 compPhone: compPhone || '',
             }).catch(e => console.error('update customer:', e));
@@ -6228,8 +6254,8 @@ function closeAppModal() {
         cb();
     }
 }
-function parseTimeObj(timeStr) { if (!timeStr) return null; var d = new Date(); var parts = timeStr.split(':'); d.setHours(parseInt(parts[0]), parseInt(parts[1]), 0, 0); return d; }
-function startPanelCountdown(endTimeStr) { stopPanelCountdown(); var clockEl = document.getElementById('detail-countdown'); if(!clockEl) return; var timeParts = endTimeStr.split(':'); if(timeParts.length < 2) return; var endDate = new Date(); endDate.setHours(parseInt(timeParts[0]), parseInt(timeParts[1]), 0); bedCountdownInterval = setInterval(function() { var diff = endDate - new Date(); var isOver = diff < 0; diff = Math.abs(diff); var h = Math.floor(diff / 3600000); var m = Math.floor((diff % 3600000) / 60000); var s = Math.floor((diff % 60000) / 1000); var fmt = v => v < 10 ? "0"+v : v; clockEl.innerText = (isOver ? '-' : '') + fmt(h) + ":" + fmt(m) + ":" + fmt(s); var box = clockEl.parentElement; if (box) { box.classList.toggle('over', isOver); box.classList.toggle('warn', !isOver && diff <= 10 * 60000); } /* [GIAO DIỆN BED 16/10] màu theo viên .nd-timer */ }, 1000); }
+function parseTimeObj(timeStr) { if (!timeStr) return null; var d = vnDate(); var parts = timeStr.split(':'); d.setHours(parseInt(parts[0]), parseInt(parts[1]), 0, 0); return d; }
+function startPanelCountdown(endTimeStr) { stopPanelCountdown(); var clockEl = document.getElementById('detail-countdown'); if(!clockEl) return; var timeParts = endTimeStr.split(':'); if(timeParts.length < 2) return; var endDate = vnDate(); endDate.setHours(parseInt(timeParts[0]), parseInt(timeParts[1]), 0); bedCountdownInterval = setInterval(function() { var diff = endDate - vnDate(); var isOver = diff < 0; diff = Math.abs(diff); var h = Math.floor(diff / 3600000); var m = Math.floor((diff % 3600000) / 60000); var s = Math.floor((diff % 60000) / 1000); var fmt = v => v < 10 ? "0"+v : v; clockEl.innerText = (isOver ? '-' : '') + fmt(h) + ":" + fmt(m) + ":" + fmt(s); var box = clockEl.parentElement; if (box) { box.classList.toggle('over', isOver); box.classList.toggle('warn', !isOver && diff <= 10 * 60000); } /* [GIAO DIỆN BED 16/10] màu theo viên .nd-timer */ }, 1000); }
 function stopPanelCountdown() { if (bedCountdownInterval) clearInterval(bedCountdownInterval); }
 function switchTimeMode(mode) {
     var btnDur = document.getElementById('tab-duration');
@@ -6253,7 +6279,7 @@ function switchTimeMode(mode) {
         if(boxEnd) boxEnd.classList.remove('hidden');
         if(boxDur) boxDur.classList.add('hidden');
 
-        var now = new Date();
+        var now = vnDate();
         now.setMinutes(now.getMinutes() + 90);
         var hh = ("0" + now.getHours()).slice(-2);
         var mm = ("0" + now.getMinutes()).slice(-2);
@@ -6284,13 +6310,13 @@ function calculateDurationFromTime() {
 
     // [Bug fix #4] Nếu có override_start_time, dùng đó làm base thay vì new Date()
     var overrideStart = (document.getElementById('override_start_time') || {}).value || '';
-    var baseDate = new Date();
+    var baseDate = vnDate();
     if (overrideStart) {
         var sp = overrideStart.split(':');
         baseDate.setHours(parseInt(sp[0]), parseInt(sp[1]), 0, 0);
     }
 
-    var endDate = new Date(baseDate);
+    var endDate = vnDate(baseDate);
     endDate.setHours(parseInt(h), parseInt(m), 0, 0);
 
     var diffMins = Math.floor((endDate - baseDate) / 60000);
@@ -6361,7 +6387,7 @@ function toggleTimeMode(mode) {
         if(boxEnd) boxEnd.classList.remove('hidden');
         if(boxDur) boxDur.classList.add('hidden');
 
-       var now = new Date();
+       var now = vnDate();
         now.setMinutes(now.getMinutes() + 90);
         var hh = ("0" + now.getHours()).slice(-2);
         var mm = ("0" + now.getMinutes()).slice(-2);
@@ -6512,7 +6538,7 @@ function selectExtendDuration(hours) {
 
     if (_extendBookingData && _extendBookingData.end) {
         var parts = _extendBookingData.end.split(':');
-        var endDate = new Date();
+        var endDate = vnDate();
         endDate.setHours(parseInt(parts[0]), parseInt(parts[1]), 0, 0);
         endDate.setTime(endDate.getTime() + hours * 60 * 60 * 1000);
         var newEnd = endDate.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
@@ -6553,8 +6579,8 @@ function calcExtendFromTime() {
 
     if (currentEnd) {
         var curParts = currentEnd.split(':');
-        var curEnd = new Date(); curEnd.setHours(parseInt(curParts[0]), parseInt(curParts[1]), 0, 0);
-        var newEnd = new Date(); newEnd.setHours(parseInt(hh), parseInt(mm), 0, 0);
+        var curEnd = vnDate(); curEnd.setHours(parseInt(curParts[0]), parseInt(curParts[1]), 0, 0);
+        var newEnd = vnDate(); newEnd.setHours(parseInt(hh), parseInt(mm), 0, 0);
 
         if (newEnd <= curEnd) {
             hint.innerText = 'Giờ về mới phải sau ' + currentEnd;
@@ -6675,7 +6701,7 @@ function findGaps(busySlots, openTime, closeTime) {
 }
 
 function openCheckLichModal() {
-    var now = new Date();
+    var now = vnDate();
     var hh = ('0' + now.getHours()).slice(-2);
     var mm = ('0' + now.getMinutes()).slice(-2);
     document.getElementById('ck-start').value = hh + ':' + mm;
@@ -6715,7 +6741,7 @@ function runCheckLich() {
     }
 
     // Tự động set ckStart = giờ hiện tại nếu nhỏ hơn
-    var nowDate = new Date();
+    var nowDate = vnDate();
     var nowMins = nowDate.getHours() * 60 + nowDate.getMinutes();
     if (ckStartMins < nowMins) {
         ckStartMins = nowMins;
@@ -6882,7 +6908,7 @@ function startBedAutoStopTimer() {
 }
 
 function checkBedAutoStop() {
-    var now = new Date();
+    var now = vnDate();
     var nowStr = now.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
     var autoStopTime = calcAutoStopTime(currentBedClosingTime);
     if (nowStr === autoStopTime && !_bedAutoStopChecked) {
@@ -6897,7 +6923,7 @@ function triggerBedAutoStop() {
         b.status && (b.status.includes('active') || b.status.includes('đang dùng'))
     );
     var count = activeBookings.length;
-    var nowStr = new Date().toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
+    var nowStr = vnDate().toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
     activeBookings.forEach(function(b) {
         var bookingId = b.id || b.key;
         if (bookingId) {
@@ -6944,7 +6970,7 @@ function _bedIsActiveStatus(b) {
 function _bedHmOn(y, m, d, hm) {
     var p = String(hm || '').split(':');
     if (p.length < 2) return null;
-    var t = new Date(+y, +m - 1, +d, +p[0], +p[1], 0);
+    var t = vnDate(+y, +m - 1, +d, +p[0], +p[1], 0);
     return isNaN(t.getTime()) ? null : t;
 }
 // Mốc bắt đầu / kết thúc thật của lịch; kết thúc ≤ bắt đầu = qua đêm (+1 ngày).
@@ -6967,13 +6993,13 @@ function _bedSessionSpendOn(orders, b, y, m, d) {
     var total = 0;
     (orders || []).forEach(function(o) {
         if (!o || normalizePhone(o.sdt) !== normalizePhone(b.phone)) return;
-        var t = new Date(o.createdAt).getTime();
+        var t = vnDate(o.createdAt).getTime();
         if (t >= from && t <= to) total += Number(o.total || 0);
     });
     return total;
 }
 function _bedTodayKey() {
-    var n = new Date();
+    var n = vnDate();
     return n.getFullYear() + '-' + String(n.getMonth() + 1).padStart(2, '0') + '-' + String(n.getDate()).padStart(2, '0');
 }
 function runBedAutoCloseStale() {
@@ -6981,10 +7007,10 @@ function runBedAutoCloseStale() {
     var todayKey = _bedTodayKey();
     try { if (localStorage.getItem('bedAutoClose_day') === todayKey) return Promise.resolve(0); } catch (e) {}
     _bedAutoCloseRunning = (async function() {
-        var now = new Date(), nowMs = now.getTime();
+        var now = vnDate(), nowMs = now.getTime();
         var closed = 0, failed = false, chuaToiGio = 0;
         for (var i = 1; i <= BED_AUTOCLOSE_DAYS; i++) {
-            var dt = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+            var dt = vnDate(now.getFullYear(), now.getMonth(), now.getDate() - i);
             var y = String(dt.getFullYear()), m = String(dt.getMonth() + 1).padStart(2, '0'), d = String(dt.getDate()).padStart(2, '0');
             var rtPath = 'bedBookings/' + y + '/' + m + '/' + d;
             try {
@@ -7003,7 +7029,7 @@ function runBedAutoCloseStale() {
                 // Lịch qua đêm còn đang dùng hợp lệ (chưa tới giờ kết thúc) → quét lại sau, không chốt "đã quét hôm nay".
                 chuaToiGio += Object.keys(data).filter(function(k) { return data[k] && _bedIsActiveStatus(data[k]) && stuck.indexOf(k) < 0; }).length;
                 if (!stuck.length) continue;
-                var orders = await fetchOrdersByDateRange(new Date(+y, +m - 1, +d), new Date(+y, +m - 1, +d + 1));
+                var orders = await fetchOrdersByDateRange(vnDate(+y, +m - 1, +d), vnDate(+y, +m - 1, +d + 1));
                 for (var j = 0; j < stuck.length; j++) {
                     var k = stuck[j], b = data[k];
                     var patch = {
@@ -7011,7 +7037,7 @@ function runBedAutoCloseStale() {
                         realEndTime: b.end || b.endTime,
                         totalSpend: _bedSessionSpendOn(orders, b, y, m, d),
                         autoCheckout: true,
-                        autoCheckoutAt: new Date().toISOString(),
+                        autoCheckoutAt: vnDate().toISOString(),
                         autoCheckoutReason: 'Quên bấm trả bed — tự trả đúng giờ kết thúc đã đặt'
                     };
                     if (fromRt) {
@@ -7055,8 +7081,8 @@ db.ref('bedAutoStopLog').limitToLast(1).on('value', function(snap) {
     if (!log || log.triggeredBy !== 'cloud_function') return;
     if (_lastSeenAutoStopLog === key) return;
     _lastSeenAutoStopLog = key;
-    var logTime = log.timestamp ? new Date(log.timestamp) : null;
-    var now = new Date();
+    var logTime = log.timestamp ? vnDate(log.timestamp) : null;
+    var now = vnDate();
     if (logTime && (now - logTime) > 10 * 60 * 1000) return;
     var countEl = document.getElementById('autostop-count');
     var timeEl = document.getElementById('autostop-time-display');
@@ -7069,15 +7095,15 @@ db.ref('bedAutoStopLog').limitToLast(1).on('value', function(snap) {
 function handleBedCheckout(booking) {
     if (!booking) return;
 
-    const now = new Date();
+    const now = vnDate();
     let endParts = booking.end.split(':');
-    let endTime = new Date();
+    let endTime = vnDate();
     endTime.setHours(parseInt(endParts[0]), parseInt(endParts[1]), 0);
 
     let diffMinutes = Math.floor((now - endTime) / 60000);
 
     let startParts = booking.start.split(':');
-    let startTime = new Date();
+    let startTime = vnDate();
     startTime.setHours(parseInt(startParts[0]), parseInt(startParts[1]), 0);
     let bookedMinutes = (endTime - startTime) / 60000;
     let paidHours = Math.ceil(bookedMinutes / 60);
@@ -7090,7 +7116,7 @@ function handleBedCheckout(booking) {
     };
 
     if (diffMinutes <= 5) {
-        let realTimeStr = new Date().toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
+        let realTimeStr = vnDate().toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
         calculateAndSaveCheckout(booking, realTimeStr);
         return;
     }
@@ -7144,7 +7170,7 @@ function confirmCheckoutFree() {
 
     closeSmartCheckout();
 
-    let realTimeStr = new Date().toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
+    let realTimeStr = vnDate().toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
     calculateAndSaveCheckout(booking, realTimeStr);
 }
 
@@ -7212,19 +7238,19 @@ function bookingCreatedAtVN(b) {
     if (!b) return '';
     var ms = null;
     if (b.createdAt != null && b.createdAt !== '') {
-        var d0 = new Date(b.createdAt);
+        var d0 = vnDate(b.createdAt);
         if (!isNaN(d0.getTime())) ms = d0.getTime();
     }
     if (ms == null) ms = _pushKeyTimeMs(b.id || b.key);
     if (ms == null) return '';
     try {
         var parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit',
-            day: '2-digit', month: '2-digit', year: 'numeric', hour12: false }).formatToParts(new Date(ms));
+            day: '2-digit', month: '2-digit', year: 'numeric', hour12: false }).formatToParts(vnDate(ms));
         var g = function(t) { var x = parts.find(function(p) { return p.type === t; }); return x ? x.value : ''; };
         return g('hour') + ':' + g('minute') + ' ' + g('day') + '/' + g('month') + '/' + g('year');
     } catch (e) {
         // Máy quá cũ không có múi giờ trong Intl: tự cộng +7 (Việt Nam không đổi giờ theo mùa).
-        var v = new Date(ms + 7 * 3600000), p2 = function(n) { return String(n).padStart(2, '0'); };
+        var v = vnDate(ms + 7 * 3600000), p2 = function(n) { return String(n).padStart(2, '0'); };
         return p2(v.getUTCHours()) + ':' + p2(v.getUTCMinutes()) + ' ' + p2(v.getUTCDate()) + '/' + p2(v.getUTCMonth() + 1) + '/' + v.getUTCFullYear();
     }
 }
@@ -7477,7 +7503,7 @@ function _bookingCreatedMs(b) {
 function _bookingStartMs(b) {
     var d = _parseDateKey(b && b.date); if (!d || !b.start) return 0;
     var p = String(b.start).split(':');
-    return new Date(+d.year, +d.month - 1, +d.day, +p[0], +p[1] || 0).getTime();
+    return vnDate(+d.year, +d.month - 1, +d.day, +p[0], +p[1] || 0).getTime();
 }
 /** Lý do tính phí (chuỗi ngắn) hoặc '' nếu không tính. */
 function _noPrebookFeeReason(b, nowMs) {
@@ -7507,7 +7533,7 @@ function processCheckoutFirebase(booking) {
 
     _updateBedBooking(booking, {
         status: 'đã xong',
-        realEndTime: new Date().toLocaleTimeString('en-GB')
+        realEndTime: vnDate().toLocaleTimeString('en-GB')
     }, (err) => {
         if(!err) openBedManager();
         else {
@@ -7584,13 +7610,13 @@ function calculateSessionSpend(phone, startTimeStr, endTimeStr) {
     return new Promise((resolve) => {
         if (!startTimeStr || !endTimeStr) { resolve(0); return; }
 
-        var now = new Date();
+        var now = vnDate();
 
         var startParts = startTimeStr.split(':');
-        var startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), parseInt(startParts[0]), parseInt(startParts[1]), 0);
+        var startDate = vnDate(now.getFullYear(), now.getMonth(), now.getDate(), parseInt(startParts[0]), parseInt(startParts[1]), 0);
 
         var endParts = endTimeStr.split(':');
-        var endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), parseInt(endParts[0]), parseInt(endParts[1]), 59);
+        var endDate = vnDate(now.getFullYear(), now.getMonth(), now.getDate(), parseInt(endParts[0]), parseInt(endParts[1]), 59);
 
         if (endDate < startDate) endDate.setDate(endDate.getDate() + 1);
 
@@ -7598,10 +7624,10 @@ function calculateSessionSpend(phone, startTimeStr, endTimeStr) {
             let total = 0;
             orders.forEach(o => {
                 if (normalizePhone(o.sdt) === normalizePhone(phone)) {
-                    var orderDate = new Date(o.createdAt);
+                    var orderDate = vnDate(o.createdAt);
 
-                    var bufferStart = new Date(startDate.getTime() - 5*60000);
-                    var bufferEnd = new Date(endDate.getTime() + 5*60000);
+                    var bufferStart = vnDate(startDate.getTime() - 5*60000);
+                    var bufferEnd = vnDate(endDate.getTime() + 5*60000);
 
                     if (orderDate >= bufferStart && orderDate <= bufferEnd) {
                         total += Number(o.total || 0);
@@ -7962,7 +7988,7 @@ function _pushPaidOrder(orderData, finalSdt, currentBooking, isCheckout, done) {
             if (finalSdt && finalSdt !== "Khách vãng lai" && earnedPoints > 0) {
                 fstore.collection('customers').doc(normalizedSdt).update({
                     total_points: firebase.firestore.FieldValue.increment(earnedPoints),
-                    lastVisit:    new Date().toISOString(),
+                    lastVisit:    vnDate().toISOString(),
                 }).catch(e => console.warn('earnPoints:', e));
             }
             // ─────────────────────────────
@@ -7991,7 +8017,7 @@ function _pushPaidOrder(orderData, finalSdt, currentBooking, isCheckout, done) {
             if (isCheckout && currentBooking) {
                 syncToCustomerDisplay('success');
 
-                let realTime = new Date().toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
+                let realTime = vnDate().toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
                 _updateBedBooking(currentBooking, { status: 'đã xong', realEndTime: realTime });
 
                 resetOrderingMode();
@@ -8035,9 +8061,9 @@ function showBillModal(bookingId) {
     var _bw = (function () {
         var st = String(booking.checkInTime || booking.start || ''), en = String(booking.end || '');
         if (!/^\d{1,2}:\d{2}/.test(st) || !/^\d{1,2}:\d{2}/.test(en)) return null;
-        var n = new Date(), ps = st.split(':'), pe = en.split(':');
-        var a = new Date(n.getFullYear(), n.getMonth(), n.getDate(), +ps[0], +ps[1], 0);
-        var z = new Date(n.getFullYear(), n.getMonth(), n.getDate(), +pe[0], +pe[1], 59);
+        var n = vnDate(), ps = st.split(':'), pe = en.split(':');
+        var a = vnDate(n.getFullYear(), n.getMonth(), n.getDate(), +ps[0], +ps[1], 0);
+        var z = vnDate(n.getFullYear(), n.getMonth(), n.getDate(), +pe[0], +pe[1], 59);
         if (z < a) z.setDate(z.getDate() + 1);
         return { from: a.getTime() - 5 * 60000, to: z.getTime() + 5 * 60000 };
     })();
@@ -8048,7 +8074,7 @@ function showBillModal(bookingId) {
         if (data) {
             Object.keys(data).forEach(function(k) {
                 var o = data[k];
-                var t = new Date(o.createdAt).getTime();
+                var t = vnDate(o.createdAt).getTime();
                 if (_bw && !(t >= _bw.from && t <= _bw.to)) return;
                 var match = _bPhone
                     ? (o.sdt && normalizePhone(o.sdt) === _bPhone)
@@ -8364,7 +8390,7 @@ function openBedManagerMobile() {
     _bedManagerMobileListenerRef = db.ref('bedBookings/' + todayParts[0] + '/' + todayParts[1] + '/' + todayParts[2]);
     _bedManagerMobileListenerRef.on('value', _bedManagerMobileListenerCb = snap => {
         _loadBedBookingsForDays([todayISO], function(bookings) {
-            globalAllBookings = globalAllBookings.filter(b => b.displayDate !== new Date().toLocaleDateString('en-GB'));
+            globalAllBookings = globalAllBookings.filter(b => b.displayDate !== vnDate().toLocaleDateString('en-GB'));
             globalAllBookings = globalAllBookings.concat(bookings);
             runAutoCancelScan(globalAllBookings);
             document.getElementById('loading-overlay').style.display = 'none';
@@ -8382,7 +8408,7 @@ function changeBedDateMobile(dateVal) {
     _loadBedBookingsForDays([dateVal], function(bookings) {
         globalAllBookings = globalAllBookings.filter(b => b.displayDate !== targetDateStr);
         globalAllBookings = globalAllBookings.concat(bookings);
-        const isToday = (targetDateStr === new Date().toLocaleDateString('en-GB'));
+        const isToday = (targetDateStr === vnDate().toLocaleDateString('en-GB'));
         const list = bookings.filter(b => {
             if (isToday) return b.displayDate === targetDateStr || (b.status && b.status.includes('active'));
             return b.displayDate === targetDateStr;
@@ -8504,9 +8530,9 @@ function getCountdownStr(endTimeStr) {
     // [GIAO DIỆN BED 16/10] style = class viên .mn-live; color = màu số đếm (trước: nhãn "CÒN LẠI" chữ trắng trên nền trắng → không đọc được)
     if (!endTimeStr || endTimeStr === "--:--") return { timeStr: "--:--", label: "...", style: "mn-live", color: "var(--bd-tc)" };
 
-    const now = new Date();
+    const now = vnDate();
     const parts = endTimeStr.split(':');
-    const end = new Date();
+    const end = vnDate();
     end.setHours(parseInt(parts[0]), parseInt(parts[1]), 0, 0);
 
     let diff = end - now;
@@ -8806,7 +8832,7 @@ function toggleSmartTimeDropdown() {
 function selectSmartTime(type) {
     toggleSmartTimeDropdown();
 
-    const now = new Date();
+    const now = vnDate();
     let start, end;
     let label = "";
     let mode = 'custom';
@@ -8821,11 +8847,11 @@ function selectSmartTime(type) {
     }
     else if (type === 'last_week') {
         let day = now.getDay() || 7;
-        let endLastWeek = new Date(now);
+        let endLastWeek = vnDate(now);
         endLastWeek.setDate(now.getDate() - day);
         endLastWeek.setHours(23,59,59,999);
 
-        let startLastWeek = new Date(endLastWeek);
+        let startLastWeek = vnDate(endLastWeek);
         startLastWeek.setDate(endLastWeek.getDate() - 6);
         startLastWeek.setHours(0,0,0,0);
 
@@ -8834,8 +8860,8 @@ function selectSmartTime(type) {
         label = "Tuần trước";
     }
     else if (type === 'last_month') {
-        start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-        end = new Date(now.getFullYear(), now.getMonth(), 0);
+        start = vnDate(now.getFullYear(), now.getMonth() - 1, 1);
+        end = vnDate(now.getFullYear(), now.getMonth(), 0);
 
         let format = (d) => {
             let y = d.getFullYear();
@@ -8966,16 +8992,16 @@ function updateRevenueItemsUI(data) {
 }
 
 function calculateTopItems(orders, mode, customStart, customEnd) {
-    var now = new Date(); var startTime, endTime;
-    if (mode === 'week') { var day = now.getDay() || 7; startTime = new Date(now); startTime.setDate(now.getDate() - day + 1); startTime.setHours(0,0,0,0); endTime = new Date(startTime); endTime.setDate(startTime.getDate() + 6); endTime.setHours(23,59,59,999); }
-    else if (mode === 'month') { startTime = new Date(now.getFullYear(), now.getMonth(), 1); endTime = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999); }
-    else if (mode === 'year') { startTime = new Date(now.getFullYear(), 0, 1); endTime = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999); }
-    else if (mode === 'day') { startTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0); endTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999); }
-    else { if(!customStart || !customEnd) return { topItems: [], totalRev: 0 }; startTime = new Date(customStart); startTime.setHours(0,0,0,0); endTime = new Date(customEnd); endTime.setHours(23,59,59,999); }
+    var now = vnDate(); var startTime, endTime;
+    if (mode === 'week') { var day = now.getDay() || 7; startTime = vnDate(now); startTime.setDate(now.getDate() - day + 1); startTime.setHours(0,0,0,0); endTime = vnDate(startTime); endTime.setDate(startTime.getDate() + 6); endTime.setHours(23,59,59,999); }
+    else if (mode === 'month') { startTime = vnDate(now.getFullYear(), now.getMonth(), 1); endTime = vnDate(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999); }
+    else if (mode === 'year') { startTime = vnDate(now.getFullYear(), 0, 1); endTime = vnDate(now.getFullYear(), 11, 31, 23, 59, 59, 999); }
+    else if (mode === 'day') { startTime = vnDate(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0); endTime = vnDate(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999); }
+    else { if(!customStart || !customEnd) return { topItems: [], totalRev: 0 }; startTime = vnDate(customStart); startTime.setHours(0,0,0,0); endTime = vnDate(customEnd); endTime.setHours(23,59,59,999); }
 
     let itemMap = {}; let totalRevenue = 0;
     orders.forEach(o => {
-        var d = new Date(o.createdAt || Date.now());
+        var d = vnDate(o.createdAt || Date.now());
         if (d >= startTime && d <= endTime) {
             totalRevenue += Number(o.total || 0);
             if (o.itemsArray && Array.isArray(o.itemsArray)) {
@@ -9103,31 +9129,31 @@ function fetchRevenueDataMobile(mode, startVal, endVal) {
     }
 
     // Xác định khoảng ngày fetch đúng theo mode (mobile)
-    var now = new Date();
+    var now = vnDate();
     var mobFetchStart, mobFetchEnd;
     if (startVal && endVal) {
-        mobFetchStart = new Date(startVal);
-        mobFetchEnd   = new Date(endVal);
+        mobFetchStart = vnDate(startVal);
+        mobFetchEnd   = vnDate(endVal);
     } else if (mode === 'year') {
-        mobFetchStart = new Date(now.getFullYear(), 0, 1);
-        mobFetchEnd   = new Date(now.getFullYear(), 11, 31);
+        mobFetchStart = vnDate(now.getFullYear(), 0, 1);
+        mobFetchEnd   = vnDate(now.getFullYear(), 11, 31);
     } else if (mode === 'month') {
-        mobFetchStart = new Date(now.getFullYear(), now.getMonth(), 1);
-        mobFetchEnd   = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+        mobFetchStart = vnDate(now.getFullYear(), now.getMonth(), 1);
+        mobFetchEnd   = vnDate(now.getFullYear(), now.getMonth() + 1, 0);
     } else if (mode === 'week') {
         var dow = now.getDay() || 7;
-        mobFetchStart = new Date(now); mobFetchStart.setDate(now.getDate() - dow + 1); mobFetchStart.setHours(0,0,0,0);
-        mobFetchEnd   = new Date(mobFetchStart); mobFetchEnd.setDate(mobFetchStart.getDate() + 6);
+        mobFetchStart = vnDate(now); mobFetchStart.setDate(now.getDate() - dow + 1); mobFetchStart.setHours(0,0,0,0);
+        mobFetchEnd   = vnDate(mobFetchStart); mobFetchEnd.setDate(mobFetchStart.getDate() + 6);
     } else {
-        mobFetchStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        mobFetchEnd   = new Date(mobFetchStart);
+        mobFetchStart = vnDate(now.getFullYear(), now.getMonth(), now.getDate());
+        mobFetchEnd   = vnDate(mobFetchStart);
     }
 
     fetchOrdersByDateRange(mobFetchStart, mobFetchEnd).then(orders => {
 
         if (currentRevenueView === 'overview') {
             const chartBox = document.getElementById('mob-rev-chart-bars');
-            let isScrollMode = (mode === 'month') || (mode === 'custom' && (!startVal || !endVal || Math.abs(new Date(endVal) - new Date(startVal)) > 12 * 86400000));
+            let isScrollMode = (mode === 'month') || (mode === 'custom' && (!startVal || !endVal || Math.abs(vnDate(endVal) - vnDate(startVal)) > 12 * 86400000));
 
             if (isScrollMode) {
                 chartBox.className = "relative h-64 w-full flex items-end justify-start gap-3 mb-8 overflow-x-auto custom-scrollbar px-2 pb-2";
@@ -9149,33 +9175,33 @@ function fetchRevenueDataMobile(mode, startVal, endVal) {
     });
 }
 function calculateGroupRevenue(orders, mode, customStart, customEnd) {
-    var now = new Date();
+    var now = vnDate();
     var startTime, endTime;
 
     if (mode === 'week') {
         var day = now.getDay() || 7;
-        startTime = new Date(now); startTime.setDate(now.getDate() - day + 1); startTime.setHours(0,0,0,0);
-        endTime = new Date(startTime); endTime.setDate(startTime.getDate() + 6); endTime.setHours(23,59,59,999);
+        startTime = vnDate(now); startTime.setDate(now.getDate() - day + 1); startTime.setHours(0,0,0,0);
+        endTime = vnDate(startTime); endTime.setDate(startTime.getDate() + 6); endTime.setHours(23,59,59,999);
     } else if (mode === 'month') {
-        startTime = new Date(now.getFullYear(), now.getMonth(), 1);
-        endTime = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+        startTime = vnDate(now.getFullYear(), now.getMonth(), 1);
+        endTime = vnDate(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
     } else if (mode === 'year') {
-        startTime = new Date(now.getFullYear(), 0, 1);
-        endTime = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
+        startTime = vnDate(now.getFullYear(), 0, 1);
+        endTime = vnDate(now.getFullYear(), 11, 31, 23, 59, 59, 999);
     } else if (mode === 'day') {
-        startTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
-        endTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+        startTime = vnDate(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+        endTime = vnDate(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
     } else {
         if(!customStart || !customEnd) return { groups: [], totalRev: 0 };
-        startTime = new Date(customStart); startTime.setHours(0,0,0,0);
-        endTime = new Date(customEnd); endTime.setHours(23,59,59,999);
+        startTime = vnDate(customStart); startTime.setHours(0,0,0,0);
+        endTime = vnDate(customEnd); endTime.setHours(23,59,59,999);
     }
 
     let groupMap = {};
     let totalRevenue = 0;
 
     orders.forEach(o => {
-        var d = new Date(o.createdAt || Date.now());
+        var d = vnDate(o.createdAt || Date.now());
         if (d >= startTime && d <= endTime) {
             totalRevenue += Number(o.total || 0);
 
@@ -9353,7 +9379,7 @@ function submitDateFilter() {
     const end = document.getElementById('filter-end-date').value;
 
     if(!start || !end) return alert("Vui lòng chọn đầy đủ ngày bắt đầu và kết thúc");
-    if(new Date(start) > new Date(end)) return alert("Ngày bắt đầu không được lớn hơn ngày kết thúc");
+    if(vnDate(start) > vnDate(end)) return alert("Ngày bắt đầu không được lớn hơn ngày kết thúc");
 
     document.getElementById('modal-date-range').classList.add('hidden');
 
@@ -9418,26 +9444,26 @@ function selectDurationNew(hours) {
     if(activeBtn) activeBtn.className = "border border-green-600 bg-green-50 text-[#006241] py-2.5 rounded-xl text-sm font-bold shadow-sm transition-all";
 }
 function calculateBedStats(bookings, mode, customStart, customEnd) {
-    var now = new Date();
+    var now = vnDate();
     var startTime, endTime;
 
     if (mode === 'week') {
         var day = now.getDay() || 7;
-        startTime = new Date(now); startTime.setDate(now.getDate() - day + 1); startTime.setHours(0,0,0,0);
-        endTime = new Date(startTime); endTime.setDate(startTime.getDate() + 6); endTime.setHours(23,59,59,999);
+        startTime = vnDate(now); startTime.setDate(now.getDate() - day + 1); startTime.setHours(0,0,0,0);
+        endTime = vnDate(startTime); endTime.setDate(startTime.getDate() + 6); endTime.setHours(23,59,59,999);
     } else if (mode === 'month') {
-        startTime = new Date(now.getFullYear(), now.getMonth(), 1);
-        endTime = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+        startTime = vnDate(now.getFullYear(), now.getMonth(), 1);
+        endTime = vnDate(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
     } else if (mode === 'year') {
-        startTime = new Date(now.getFullYear(), 0, 1);
-        endTime = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
+        startTime = vnDate(now.getFullYear(), 0, 1);
+        endTime = vnDate(now.getFullYear(), 11, 31, 23, 59, 59, 999);
     } else if (mode === 'day') {
-        startTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
-        endTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+        startTime = vnDate(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+        endTime = vnDate(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
     } else {
         if(!customStart || !customEnd) return null;
-        startTime = new Date(customStart); startTime.setHours(0,0,0,0);
-        endTime = new Date(customEnd); endTime.setHours(23,59,59,999);
+        startTime = vnDate(customStart); startTime.setHours(0,0,0,0);
+        endTime = vnDate(customEnd); endTime.setHours(23,59,59,999);
     }
 
     let stats = {
@@ -9453,7 +9479,7 @@ function calculateBedStats(bookings, mode, customStart, customEnd) {
     bookings.forEach(b => {
         let parts = (b.date || "").split('/');
         if(parts.length !== 3) return;
-        let bDate = new Date(parts[2], parts[1]-1, parts[0]);
+        let bDate = vnDate(parts[2], parts[1]-1, parts[0]);
 
         if (bDate >= startTime && bDate <= endTime) {
 
@@ -9770,9 +9796,9 @@ function _doHandleMobileBedOrder(booking) {
 function runAutoCancelScan(list) {
     if (!list || list.length === 0) return;
 
-    const now = new Date();
+    const now = vnDate();
     const AUTO_CANCEL_MINUTES = 50;
-    const todayStr = new Date().toLocaleDateString('en-GB');
+    const todayStr = vnDate().toLocaleDateString('en-GB');
 
     list.forEach(booking => {
         if ((booking.status === 'chờ khách' || !booking.status) &&
@@ -9780,7 +9806,7 @@ function runAutoCancelScan(list) {
 
             if (booking.start && booking.start.includes(':')) {
                 let parts = booking.start.split(':');
-                let bookingTime = new Date();
+                let bookingTime = vnDate();
                 bookingTime.setHours(parseInt(parts[0]), parseInt(parts[1]), 0);
 
                 let diff = (now - bookingTime) / 60000;
@@ -9995,8 +10021,8 @@ function updateStoreStatusUI() {
     if (!btn) return;
 
     if (currentStoreStatus.isOff) {
-        const now = new Date();
-        const until = new Date(currentStoreStatus.offUntil);
+        const now = vnDate();
+        const until = vnDate(currentStoreStatus.offUntil);
 
         if (now > until) {
             resumeStore();
@@ -10015,11 +10041,11 @@ function handleStoreStatusClick() {
     if (currentStoreStatus.isOff) {
         _posConfirm("Mở lại quán ngay lập tức?", "Mở lại", "Không").then(function(ok) { if (ok) resumeStore(); });
     } else {
-        const now = new Date();
+        const now = vnDate();
         now.setMinutes(now.getMinutes() + 60);
 
         const tzOffset = now.getTimezoneOffset() * 60000;
-        const localISOTime = (new Date(now - tzOffset)).toISOString().slice(0, 16);
+        const localISOTime = (vnDate(now - tzOffset)).toISOString().slice(0, 16);
 
         document.getElementById('off-until-time').value = localISOTime;
         document.getElementById('modal-store-off').classList.remove('hidden');
@@ -10052,8 +10078,8 @@ function submitStoreOff() {
     db.ref('store_status').set({
         isOff: true,
         reason: reason,
-        offUntil: new Date(untilVal).toISOString(),
-        updatedAt: new Date().toISOString()
+        offUntil: vnDate(untilVal).toISOString(),
+        updatedAt: vnDate().toISOString()
     }, (err) => {
         document.getElementById('loading-overlay').style.display = 'none';
         if (err) alert("Lỗi: " + err.message);
@@ -10137,7 +10163,7 @@ function confirmMoveBed(newBedId, _reason) {
 
     const oldBedId = bookingToMove.bedId;
     const bookingId = bookingToMove.id;
-    const timeNow = new Date().toLocaleTimeString('en-GB', {hour: '2-digit', minute:'2-digit'});
+    const timeNow = vnDate().toLocaleTimeString('en-GB', {hour: '2-digit', minute:'2-digit'});
 
     document.getElementById('loading-overlay').style.display = 'flex';
     document.getElementById('modal-move-bed').classList.add('hidden');
@@ -10588,7 +10614,7 @@ function scanGiftVouchers(phone) {
             g._key = key;
             if (g.used) return;
             if (g.redeemedAt) {
-                var age = now - new Date(g.redeemedAt).getTime();
+                var age = now - vnDate(g.redeemedAt).getTime();
                 if (age > EXPIRE) {
                     expiredUpdates['myGifts.' + key + '.used']   = true;
                     expiredUpdates['myGifts.' + key + '.usedAt'] = 'expired';
@@ -10927,7 +10953,7 @@ function giftVoucherMarkUsedAndReset(resetOnly) {
     if (!resetOnly && _giftVoucherKey && _giftVoucherPhone) {
         const _giftUpdateData = {};
         _giftUpdateData['myGifts.' + _giftVoucherKey + '.used']   = true;
-        _giftUpdateData['myGifts.' + _giftVoucherKey + '.usedAt'] = new Date().toISOString();
+        _giftUpdateData['myGifts.' + _giftVoucherKey + '.usedAt'] = vnDate().toISOString();
         fstore.collection('customers').doc(_giftVoucherPhone)
           .update(_giftUpdateData).catch(e => console.warn('markGiftUsed:', e));
     }
@@ -12325,8 +12351,8 @@ async function updateRepScore(phone, name, delta, reason, bookingId) {
         const newScore = Math.max(0, Math.min(REP_MAX, oldScore + delta));
         await ref.update({ score: newScore, name: name || val.name || 'Khách hàng', phone: normPhone });
         await ref.child('history').push({
-            date: new Date().toLocaleDateString('vi-VN'),
-            time: new Date().toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit'}),
+            date: vnDate().toLocaleDateString('vi-VN'),
+            time: vnDate().toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit'}),
             delta: delta, reason: reason,
             bookingId: bookingId || '',
             scoreBefore: oldScore, scoreAfter: newScore
@@ -12393,7 +12419,7 @@ async function sendWarning(el) {
         return;
     }
 
-    await ref.set({ count: newCount, guestName: guestName, lastWarning: new Date().toLocaleString('vi-VN') });
+    await ref.set({ count: newCount, guestName: guestName, lastWarning: vnDate().toLocaleString('vi-VN') });
 
     if (phone) {
         var pts = newCount === 1 ? -1 : newCount === 2 ? -2 : -3;
@@ -12485,7 +12511,7 @@ function repRow(phone, name, score, sub, onClick) {
 async function loadRepToday() {
     var content = document.getElementById('rep-tab-content');
     try {
-        var now = new Date();
+        var now = vnDate();
         var dd = String(now.getDate()).padStart(2,'0');
         var mm = String(now.getMonth()+1).padStart(2,'0');
         var yyyy = now.getFullYear();
@@ -13460,7 +13486,7 @@ function stickerSaveConfig() {
 async function stickerTestPrint() {
     if (!lblIsConn) { lblLog('Chưa kết nối máy in', 'err'); return; }
     var item = stickerSelectedPreviewItem || { name: 'Sữa gạo matcha', priceM: 35000 };
-    var now = new Date(); var orderTime = now.getDate().toString().padStart(2,'0')+'/'+(now.getMonth()+1).toString().padStart(2,'0')+'/'+now.getFullYear()+' '+now.getHours().toString().padStart(2,'0')+':'+now.getMinutes().toString().padStart(2,'0');
+    var now = vnDate(); var orderTime = now.getDate().toString().padStart(2,'0')+'/'+(now.getMonth()+1).toString().padStart(2,'0')+'/'+now.getFullYear()+' '+now.getHours().toString().padStart(2,'0')+':'+now.getMinutes().toString().padStart(2,'0');
     var cv = await stickerBuildCanvasAsync(item.name, 'M', item.priceM || 0, orderTime);
     var dataURL = cv.toDataURL('image/png');
     var data = await lblImgToEscPos(dataURL);
@@ -14282,7 +14308,7 @@ function keypadConfirm() {
 <script>
 var _bellRef = null, _bellCb = null, _bellDay = '', _bellAll = [], _bellList = [], _bellEnding = [], _bellSeenKey = 'pos_bell_seen_v1';
 var BELL_WARN_MIN = 10, _bellAck = {}; // _bellAck: báo hết giờ đã xem (theo lịch + mức sắp hết / quá giờ), chỉ trong phiên
-function _bellDayKey(d) { d = d || new Date(); return d.getFullYear() + '/' + String(d.getMonth() + 1).padStart(2, '0') + '/' + String(d.getDate()).padStart(2, '0'); }
+function _bellDayKey(d) { d = vnDate(d || Date.now()); return d.getFullYear() + '/' + String(d.getMonth() + 1).padStart(2, '0') + '/' + String(d.getDate()).padStart(2, '0'); }
 function _bellSeen() { try { return +localStorage.getItem(_bellSeenKey) || 0; } catch (e) { return 0; } }
 function _bellSt(b) { return String((b && b.status) || '').toLowerCase(); }
 function _bellIsWaiting(b) {
@@ -14296,7 +14322,7 @@ function _bellIsActive(b) { var st = _bellSt(b); return st.indexOf('active') >= 
 function _bellMinsLeft(b, nowMs) {
     var e = String((b && b.end) || ''), s = String((b && (b.checkInTime || b.start)) || '');
     var pe = e.split(':'); if (pe.length < 2 || isNaN(+pe[0])) return null;
-    var now = new Date(nowMs), end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), +pe[0], +pe[1] || 0, 0, 0).getTime();
+    var now = vnDate(nowMs), end = vnDate(now.getFullYear(), now.getMonth(), now.getDate(), +pe[0], +pe[1] || 0, 0, 0).getTime();
     if (s && /^\d{1,2}:\d{2}/.test(s) && e < s && now.getHours() >= 12) end += 86400000;
     return Math.trunc((end - nowMs) / 60000);
 }
@@ -14376,7 +14402,7 @@ function _bellRenderList(seen) {
     if (sub) sub.textContent = 'Hôm nay' + (parts.length ? ' · ' + parts.join(' · ') : '');
     if (!_bellList.length && !_bellEnding.length) { box.innerHTML = '<div class="text-center text-gray-400 text-sm font-bold py-10">Không có thông báo nào</div>'; return; }
     var esc = (typeof _escGiftTxt === 'function') ? _escGiftTxt : function (x) { return String(x == null ? '' : x); };
-    var now = new Date(), nowHm = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+    var now = vnDate(), nowHm = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
     var rows = [];
     if (_bellEnding.length) {
         rows.push('<div class="bell-sec">Bed sắp hết giờ</div>');
@@ -14397,7 +14423,7 @@ function _bellRenderList(seen) {
         if (_bellEnding.length) rows.push('<div class="bell-sec">Chờ nhận bed</div>');
         _bellList.forEach(function (b, i) {
             var t = (typeof _bookingCreatedMs === 'function') ? _bookingCreatedMs(b) : 0;
-            var made = t ? new Date(t).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '';
+            var made = t ? vnDate(t).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '';
             var late = b.start && String(b.start) < nowHm;
             var walk = (b.isWalkIn || b.type === 'walk-in');
             rows.push('<button type="button" class="bell-row' + (late ? ' late' : '') + '" data-k="w" data-i="' + i + '">'

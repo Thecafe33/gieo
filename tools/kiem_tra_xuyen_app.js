@@ -1,6 +1,6 @@
 // Chẩn đoán liên app, chạy hàm gốc trên Firebase giả; KHÔNG sửa app/DB thật.
-// node tools/kiem_tra_xuyen_app.js [--json đường_dẫn]
-// Exit 0 = chạy xong cuộc rà; các BUG được ghi rõ, không có nghĩa app hết lỗi.
+// node tools/kiem_tra_xuyen_app.js [--json đường_dẫn] [--assert-clean]
+// Mặc định exit 0 = chạy xong; --assert-clean trả lỗi nếu còn BUG (dùng trong hồi quy).
 'use strict';
 const assert=require('assert/strict'),vm=require('vm'),fs=require('fs'),path=require('path'),{execFileSync}=require('child_process');
 const {extract}=require('../tests/lib/extract'),{makeFake}=require('../tests/lib/fakefb');
@@ -36,7 +36,8 @@ function tcGiftCase(){
  return{saved,manage:{total:sum.total,drink:sum.drink,snack:sum.snack,cashDue:M.tcxCashExpected(sum,'tc33',0).expected,hourly:sum.h24.reduce((a,b)=>a+b,0)},pos:{drink:pc.drinkTotal,snack:pc.snackTotal}};
 }
 function timeCase(tz){
- const code=`const vm=require('vm'),{extract}=require('./tests/lib/extract');const c={MONTHS:${JSON.stringify(MONTHS)},Intl,Date};vm.createContext(c);vm.runInContext(extract('pos.html',['getOrderParts'])+'\\n'+extract('manage.html',['dkey','parseDkey','addDays']),c);const t=new Date('2026-10-20T17:30:00Z');const parts=c.getOrderParts(t);const day=c.dkey(t);const keys=[];for(let d=c.parseDkey(day);c.dkey(d)<=day;d=c.addDays(d,1)){keys.push(c.dkey(d));if(keys.length>3)throw Error('loop')};console.log(JSON.stringify({writePath:parts,manageDay:day,manageRange:keys,payrollFrom:c.dkey(new Date(2026,9,1)),payrollTo:c.dkey(new Date(2026,10,0))}));`;
+ const code=`const vm=require('vm'),{extract}=require('./tests/lib/extract');const c={MONTHS:${JSON.stringify(MONTHS)},Intl,Date};vm.createContext(c);vm.runInContext(extract('pos.html',['getOrderParts'])+'\\n'+extract('manage.html',['dkey','parseDkey','addDays','readPayroll']),c);const t=new Date('2026-10-20T17:30:00Z');const parts=c.getOrderParts(t);const day=c.dkey(t);const keys=[];for(let d=c.parseDkey(day);c.dkey(d)<=day;d=c.addDays(d,1)){keys.push(c.dkey(d));if(keys.length>3)throw Error('loop')};Object.assign(c,{ensureAuth:async()=>{},loadEmployees:async()=>[],shiftColl:()=>({where(){return this},get:async()=>({docs:[]})}),readSchedules:async()=>[],gieoHoursByEmployee:async(from,to)=>{c.bounds={from,to};return{}},attachPaySchedules:()=>[],laborByEmployee:()=>({})});c.readPayroll('2026-10').then(()=>console.log(JSON.stringify({writePath:parts,manageDay:day,manageRange:keys,payrollFrom:c.bounds.from,payrollTo:c.bounds.to})));`;
+
  return JSON.parse(execFileSync(process.execPath,['-e',code],{cwd:root,env:{...process.env,TZ:tz},encoding:'utf8'}));
 }
 (async()=>{
@@ -52,12 +53,13 @@ function timeCase(tz){
  }
  const same=await addonCase('TIỀN MẶT','TIỀN MẶT');assert.deepEqual([same.cashPOS,same.bankPOS,same.cashQL,same.bankQL,same.cashManage,same.bankManage],[35000,0,35000,0,35000,0]);pass('Đối chứng: topping cùng tiền mặt khớp 35K ở cả ba app');
  const gift=tcGiftCase();
- if(gift.manage.snack!==0||gift.manage.cashDue!==25000)record('TC33_GIFT_ZERO',['pos','manage'],'Trà 25K + Bánh 20K được tặng; khách trả tiền mặt 25K',{revenue:25000,snack:0,cashDue:25000},gift,['pos:applyPickedCartItem/saveOrderToFirebase/calculateStats','manage:tcAddOrder/tcxCashExpected']);
+ if(gift.manage.snack!==0||gift.manage.cashDue!==25000||gift.pos.snack!==0)record('TC33_GIFT_ZERO',['pos','manage'],'Trà 25K + Bánh 20K được tặng; khách trả tiền mặt 25K',{revenue:25000,snack:0,cashDue:25000},gift,['pos:applyPickedCartItem/saveOrderToFirebase/calculateStats','manage:tcAddOrder/tcxCashExpected']);else pass('Giá quà 0 giữ nguyên ở POS, doanh thu và tiền phải nộp');
  for(const tz of ['Asia/Ho_Chi_Minh','UTC','Australia/Sydney']){
   const r=timeCase(tz);if(tz==='Asia/Ho_Chi_Minh'){assert.equal(r.writePath.day,'21');assert.deepEqual(r.manageRange,['2026-10-21']);assert.equal(r.payrollFrom,'2026-10-01');pass('Đối chứng múi giờ VN: ghi/đọc ngày và biên tháng khớp');}
-  if(r.writePath.day!=='21'||!r.manageRange.includes('2026-10-21')||r.payrollFrom!=='2026-10-01'||r.payrollTo!=='2026-10-31')record('TIMEZONE_'+tz,['pos','manage'],'Cùng thời điểm 00:30 ngày 21/10 VN, máy đặt '+tz,{billDay:'21',reportDay:'2026-10-21',range:['2026-10-21'],payrollFrom:'2026-10-01',payrollTo:'2026-10-31'},r,['pos:getOrderParts','manage:dkey/parseDkey/readPayroll']);
+  if(r.writePath.day!=='21'||JSON.stringify(r.manageRange)!==JSON.stringify(['2026-10-21'])||r.payrollFrom!=='2026-10-01'||r.payrollTo!=='2026-10-31')record('TIMEZONE_'+tz,['pos','manage'],'Cùng thời điểm 00:30 ngày 21/10 VN, máy đặt '+tz,{billDay:'21',reportDay:'2026-10-21',range:['2026-10-21'],payrollFrom:'2026-10-01',payrollTo:'2026-10-31'},r,['pos:getOrderParts','manage:dkey/parseDkey/readPayroll']);else pass('Ngày và kỳ lương đúng khi máy đặt '+tz);
  }
- const report={generatedAt:new Date().toISOString(),head:execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim(),limitations:['Firebase giả; không truy cập dữ liệu quán','Phần in/két/nhà cung cấp thanh toán bên ngoài chưa được kiểm chứng','Không thay đổi app hoặc dữ liệu; chỉ chẩn đoán'],checks,findings};
+ const testedFiles=Object.fromEntries(['pos.html','PosX.html','posgieo.html','manage.html','quanlygieo.html','cham_cong.v4.js','lai_lo.v6.js'].map(f=>[f,require('crypto').createHash('sha256').update(fs.readFileSync(path.join(root,f))).digest('hex')]));
+ const report={generatedAt:new Date().toISOString(),head:execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim(),testedFiles,limitations:['Firebase giả; không truy cập dữ liệu quán','Phần in/két/nhà cung cấp thanh toán bên ngoài chưa được kiểm chứng','Tool chỉ chạy thử, không ghi Firebase thật'],checks,findings};
  const i=process.argv.indexOf('--json');if(i>=0){assert(process.argv[i+1]);fs.writeFileSync(process.argv[i+1],JSON.stringify(report,null,2)+'\n');}
- console.log('AUDIT COMPLETE: '+findings.length+' trường hợp lỗi; '+checks.length+' đối chứng đạt. Không sửa app.');
+ console.log('AUDIT COMPLETE: '+findings.length+' trường hợp lỗi; '+checks.length+' kiểm tra đạt. Không ghi Firebase thật.');if(process.argv.includes('--assert-clean')&&findings.length)process.exitCode=1;
 })().catch(e=>{console.error('AUDIT ERROR',e);process.exitCode=1});

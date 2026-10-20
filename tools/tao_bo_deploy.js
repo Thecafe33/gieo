@@ -52,6 +52,8 @@ function dung() {
     // HTML cũ còn trong cache vẫn xin các bộ tính immutable đã phát hành.
     if([...js].some(f=>/^lai_lo\.v\d+\.js$/.test(f)))
       fs.readdirSync(ROOT).filter(f=>/^lai_lo\.v\d+\.js$/.test(f)).forEach(f=>js.add(f));
+    if([...js].some(f=>/^cham_cong\.v\d+\.js$/.test(f)))
+      fs.readdirSync(ROOT).filter(f=>/^cham_cong\.v\d+\.js$/.test(f)).forEach(f=>js.add(f));
     // Giữ engine liền trước cho HTML còn cache và để quay lui khi phát hành bản mới.
     for(const f of [...js]) {
       const m = /^unit_engine\.v(\d+)\.js$/.exec(f);

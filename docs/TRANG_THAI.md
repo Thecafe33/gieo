@@ -1,6 +1,6 @@
 # Hiện trạng dự án — cập nhật 20/10/2026
 
-**20/10 — Rà tính năng xuyên 5 app (chỉ chẩn đoán, chưa sửa app)**: 104 file test cũ và 491 kiểm tra trình duyệt đạt, nhưng ca đối chiếu nghiệp vụ mới tái hiện 3 nhóm lỗi: addons Gieo khác phương thức làm lệch TM/CK giữa POS/QL/manage; quà TC33 giá 0 bị báo cáo lấy lại giá menu, tiền nộp bị giảm sai; ngày/kỳ lương lệch khi máy khác múi giờ VN. Có tool tái hiện `tools/kiem_tra_xuyen_app.js`, JSON số liệu và phạm vi chưa kiểm trong `docs/KIEM_TRA_XUYEN_APP_20-10.md`. Không ghi Firebase thật, không sửa luồng bán hàng. Chỉ sửa fixture test thiếu API SDK/lịch/snapshot hiện hành. Hai nhóm tính tiền P1 đang mở, không được coi test cũ xanh là hết bug.
+**20/10 — Đã sửa ba nhóm lỗi xuyên 5 app (chưa deploy)**: addons Gieo tách đúng TM/CK của tiền gốc và từng lần mua thêm; quà TC33 giữ giá 0, không trừ giá menu ảo khỏi tiền phải nộp. Đệm doanh thu manage v4 bỏ số cũ; phiếu Thực nhận giữ nguyên, ngày được chọn tính lại Phải nộp từ bill và ghi chú nếu khác phiếu gốc. Năm app dùng lịch VN xuyên suốt, timestamp vẫn giữ thời điểm thật; kỳ lương không lệch khi máy khác múi giờ. Hai JS mới cham_cong.v4/lai_lo.v6, bản cũ immutable giữ nguyên. Không thêm listener/truy vấn theo addon, không đổi engine/luồng bán hàng, không ghi Firebase thật. Có kiểm các caller, đa múi giờ, đệm cũ và bộ test/browser; xem `docs/FIX_XUYEN_APP_20-10.md`, bằng chứng trước sửa ở `docs/KIEM_TRA_XUYEN_APP_20-10.md`.
 
 **20/10 — Tiền nộp v3 không phụ thuộc đệm cũ (thay 36c8935, chưa deploy)**: theo yêu cầu chủ quán, xoá v1/v2 vẫn phải đọc đúng. Bộ đọc lấy phiếu TC33/XOFA theo ID `store_date`, Gieo theo ID ngày; không phụ thuộc date/businessDate trên phiếu cũ. `mg_cash_cache_v3` tự dựng từ nguồn, không nhập số v1/v2. Lần đầu tải từ mốc, lần sau giữ tối ưu ngày chưa nhận/7 ngày gần nhất; ngày được bấm ngoài khoảng đọc đúng doc. Chỉ chấp nhận kết quả server cho phiếu/config, lỗi không dựng số 0. Công thức và cách ghi phiếu không đổi; giữ đối soát/số phụ, chi tiết khi bấm. Kiểm backend + browser xoá sạch localStorage, reload, phiếu thiếu trường ngày, số 0, đệm cũ sai và lỗi mạng; chưa xác minh Firebase thật. ZIP `manage_tien_nop_v3_20-10.zip` chỉ manage.html dùng chung ba mùa. Chi tiết `docs/MANAGE_TIEN_MAT.md`.
 
@@ -50,8 +50,9 @@
 | App bán hàng | `posgieo.html` | trỏ v19 (chưa deploy) |
 | App quản lý | `quanlygieo.html` | trỏ v19 (chưa deploy) |
 | Chế độ thử | `che_do_thu.v1.js` + `posgieo_thu.html`, `quanlygieo_thu.html` | sinh lại bằng `node tools/tao_ban_thu.js .` sau **mỗi** lần sửa HTML |
-| Bộ tính lãi/lỗ | `lai_lo.v5.js` | sinh từ quanlygieo; giữ v1/v2/v3/v4 immutable cho HTML cũ |
-| Test | `sh tests/run_all.sh` | 93 file `tests/*.test.js`, chỉ cần `node` |
+| Bộ tính lãi/lỗ | `lai_lo.v6.js` | sinh từ quanlygieo; giữ v1–v5 immutable cho HTML cũ |
+| Ca làm việc TC33/XOFA | `cham_cong.v4.js` | lịch VN; giữ v1–v3 cho HTML cũ |
+| Test | `sh tests/run_all.sh` | 105 file `tests/*.test.js`, chỉ cần `node` |
 
 **Trạng thái deploy (chủ dự án xác nhận 04/10/2026): v18 ĐÃ DEPLOY**, chạy ổn ở cửa hàng 1 được **1–3 tuần**. Đa cửa hàng cần ≥ vài tuần ổn định (`docs/KE_HOACH_DA_CUA_HANG.md` mục 0) → theo dõi thêm rồi mới làm M0. Chủ dự án tự deploy; phiên mới hỏi lại trước việc lớn nếu đã qua lâu.
 

@@ -22,7 +22,7 @@ const near=(a,b)=>Math.abs(a-b)<.01;
  check(withIce.giaVon===30000&&withIce.bienPhiKhac===10000&&withIce.lai===60000,'giữ COGS, vẫn trừ ship; không trừ mua đá hai lần');
  check(withIce.lai===plain.lai&&withIce.chiMuaDa===20000,'thêm khoản mua đá không đổi lãi, vẫn có số tiền để theo dõi');
  check(api.computeDayPL({...base,laborActual:{[date]:222500},expList:[ice]}).luong===222500,'P&L dùng đúng lương theo ca đã tính');
- check(api.filterExpenses([ice,ship],new Date(date+'T00:00:00'),new Date(date+'T23:59:59')).reduce((s,e)=>s+e.amount,0)===30000,'sổ chi gốc vẫn đủ 30K; không sửa/xoá dữ liệu khoản mua');
+ check(api.filterExpenses([ice,ship],new Date(date+'T00:00:00+07:00'),new Date(date+'T23:59:59+07:00')).reduce((s,e)=>s+e.amount,0)===30000,'sổ chi gốc vẫn đủ 30K; không sửa/xoá dữ liệu khoản mua');
  const period={...ice,date:null,periodType:'period',startDate:'2026-09-01',endDate:'2026-09-30',amount:600000,amountKind:'estimate'};
  const p=api.computeDayPL({...base,expList:[period]});
  check(p.chiMuaDa===20000&&p.bienPhiKhac===0&&p.mucTinCay==='chot-thang','mua đá theo kỳ phân bổ đúng và không làm P&L chờ hoá đơn ảo');

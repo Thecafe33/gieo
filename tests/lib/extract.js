@@ -32,13 +32,16 @@ function grab(src, name) {
 }
 function extract(htmlRel, names) {
   const src = scriptsOf(path.resolve(__dirname, '..', '..', htmlRel));
-  return names.map(n => grab(src, n)).join('\n');
+  const out=names.map(n => grab(src, n)).join('\n');
+  // Trích cả lịch VN khi hàm được kiểm dùng nó, như lúc chạy trong app thật.
+  return !names.includes('vnDate') && /\bvnDate\s*\(/.test(out) ? grab(src,'vnDate')+'\n'+out : out;
 }
+function extractRaw(htmlRel,names){return names.map(n=>grab(scriptsOf(path.resolve(__dirname,'..','..',htmlRel)),n)).join('\n');}
 // Như extract nhưng một tên; không có hàm đó thì trả null (có cache nguồn theo file).
 const _cache = {};
 function extractOne(htmlRel, name) {
   const f = path.resolve(__dirname, '..', '..', htmlRel);
   const src = _cache[f] || (_cache[f] = scriptsOf(f));
-  try { return grab(src, name); } catch (e) { if (/Không tìm thấy/.test(e.message)) return null; throw e; }
+  try { const out=grab(src,name);return name!=='vnDate' && /\bvnDate\s*\(/.test(out)?grab(src,'vnDate')+'\n'+out:out; } catch (e) { if (/Không tìm thấy/.test(e.message)) return null; throw e; }
 }
-module.exports = { extract, extractOne };
+module.exports = { extract, extractOne, extractRaw };

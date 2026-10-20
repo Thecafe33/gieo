@@ -7,6 +7,7 @@ const source=fs.readFileSync(path.join(__dirname,'../quanlygieo.html'),'utf8');
 const defaults=new Function('return '+source.match(/const DEFAULTS = (\{[\s\S]*?\n\});/)[1])();
 let count=0;const check=(v,m)=>{assert.ok(v,m);console.log('ok '+m);count++};
 const near=(a,b)=>Math.abs(a-b)<.01;
+const businessDate=new Function(extract('quanlygieo.html',['pad','dkey'])+';return dkey;')();
 function labor(employees=[],shifts=[],error=false){
  let reads=0;
  const env={Date:Clock,QL_VIEW:'gg01',GieoData:{storeId:()=> 'gg01'},loadSchedulesForRange:async()=>[],loadEmployees:async()=>{reads++;return employees},
@@ -60,7 +61,7 @@ function calculators(){
  const state={ranges:[],book:old};
  const env={Date:Clock,window:{GieoData:gd},GieoData:{storeId:()=> 'gg01',plNgayCanTinh:()=>[],plDocDau:async()=>null},QL_ALL:false,localStorage:{getItem:()=>null,setItem(){}},
   fstore:{collection:()=>({doc:()=>({get:async()=>({exists:true,data:()=>({du:'2026-09-01',d:state.book})})})})},
-  loadAssetsAll:async()=>[],computeDailyPLRange:async(a,b)=>{const from=a.toISOString().slice(0,10),to=b.toISOString().slice(0,10);state.ranges.push([from,to]);const fixed=days.filter(d=>d.date>=from&&d.date<=to).map(d=>({...d,...c.plTomTatNgay(d)}));for(const d of fixed)state.book[d.date]=d;return{days:fixed,assets:[]}},
+  loadAssetsAll:async()=>[],computeDailyPLRange:async(a,b)=>{const from=businessDate(a),to=businessDate(b);state.ranges.push([from,to]);const fixed=days.filter(d=>d.date>=from&&d.date<=to).map(d=>({...d,...c.plTomTatNgay(d)}));for(const d of fixed)state.book[d.date]=d;return{days:fixed,assets:[]}},
   plNgayLuongCanTinhLai:c.plNgayLuongCanTinhLai,plNgayDaCanTinhLai:c.plNgayDaCanTinhLai};
  const load=new Function(...Object.keys(env),extract('quanlygieo.html',['pad','dkey','plSumDays','plNgayTuSo'])+';return plNgayTuSo;')(...Object.values(env));
  const result=await load(new Clock('2026-09-01T00:00:00Z'),new Clock('2026-09-05T00:00:00Z'));

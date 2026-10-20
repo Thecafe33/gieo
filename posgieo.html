@@ -2334,6 +2334,31 @@ body.assist-main-on .toast{bottom:calc(100px + var(--assist-h, 0px) + 10px);}
 <div class="toast" id="toastEl"></div>
 
 <script>
+// Ngày nghiệp vụ theo UTC+7; timestamp/ISO vẫn là thời điểm thật. Không thay Date của SDK.
+function vnDate(...args){
+  if(!vnDate.Type){
+    const NativeDate=Date,offset=7*3600000;
+    class VNDate extends NativeDate{
+      constructor(...a){
+        if(a.length>1)super(NativeDate.UTC(...a)-offset);
+        else if(a.length===1 && typeof a[0]==='string' && /^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)?$/.test(a[0]))
+          super(a[0].length===10?a[0]+'T00:00:00+07:00':a[0].replace(' ','T')+'+07:00');
+        else super(...a);
+      }
+      getTimezoneOffset(){return -420;}
+    }
+    for(const part of ['FullYear','Month','Date','Day','Hours','Minutes','Seconds','Milliseconds'])
+      VNDate.prototype['get'+part]=function(){return new NativeDate(+this+offset)['getUTC'+part]();};
+    for(const part of ['FullYear','Month','Date','Hours','Minutes','Seconds','Milliseconds'])
+      VNDate.prototype['set'+part]=function(...a){const d=new NativeDate(+this+offset);return this.setTime(d['setUTC'+part](...a)-offset);};
+    for(const method of ['toLocaleString','toLocaleDateString','toLocaleTimeString'])
+      VNDate.prototype[method]=function(locales,options){return NativeDate.prototype[method].call(this,locales,{timeZone:'Asia/Ho_Chi_Minh',...options});};
+    vnDate.Type=VNDate;
+  }
+  return new vnDate.Type(...args);
+}
+
+
 // ============================================================
 // ⚙️  FIREBASE CONFIG — Copy từ index.html, dùng chung project
 // ============================================================
@@ -2875,7 +2900,7 @@ const isToGo = true; // [F5] Gieo Gieo chỉ bán To Go — hằng số, không 
 const CF_PASSWORD = '3368';
 const CASH_DENOMS = [500000, 200000, 100000, 50000, 20000, 10000, 5000, 2000, 1000];
 function cfEmptyDenoms() { const o = {}; CASH_DENOMS.forEach(d => o[d] = 0); return o; }
-function cfDateKey(d) { d = d || new Date(); const p = x => String(x).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`; }
+function cfDateKey(d) { d = vnDate(d || Date.now()); const p = x => String(x).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`; }
 let _cfDoc = null;        // cache document quỹ tiền mặt hôm nay
 let _cfCheckoutDenoms = cfEmptyDenoms(); // số tờ khách đưa đang nhập trong popup thanh toán
 
@@ -3028,7 +3053,7 @@ class XprinterWNN58E {
       { type: 'text', text: 'IN THỬ MÁY IN', size: 26, align: 'center', bold: true },
       { type: 'divider', style: 'dashed' },
       { type: 'text', text: `Xprinter WNN58E — ${this.baudRate} baud`, size: 15, align: 'center' },
-      { type: 'text', text: new Date().toLocaleString('vi-VN'), size: 13, align: 'center' },
+      { type: 'text', text: vnDate().toLocaleString('vi-VN'), size: 13, align: 'center' },
       { type: 'divider', style: 'solid' },
       { type: 'text', text: 'Chào Gieo Gieo — tiếng Việt có dấu: ăâêôơưđ', size: 15, align: 'center' },
       ...buildFooterLines(this.layout),
@@ -3132,7 +3157,7 @@ class XprinterBillBridgeEngine {
       { type: 'text', text: 'IN THỬ MÁY IN', size: 26, align: 'center', bold: true },
       { type: 'divider', style: 'dashed' },
       { type: 'text', text: 'Xprinter WNN58E — Bluetooth (app)', size: 15, align: 'center' },
-      { type: 'text', text: new Date().toLocaleString('vi-VN'), size: 13, align: 'center' },
+      { type: 'text', text: vnDate().toLocaleString('vi-VN'), size: 13, align: 'center' },
       { type: 'divider', style: 'solid' },
       { type: 'text', text: 'Chào Gieo Gieo — tiếng Việt có dấu: ăâêôơưđ', size: 15, align: 'center' },
       ...buildFooterLines(POSPrinter.layout),
@@ -3644,7 +3669,7 @@ async function refreshStockUseBadge() {
   if (!badge) return;
   await loadOpenContainers();
   const nay = Date.now();
-  const quaHan = STOCK_OPEN_LIST.filter(c => c.expiresAt && new Date(c.expiresAt).getTime() <= nay).length;
+  const quaHan = STOCK_OPEN_LIST.filter(c => c.expiresAt && vnDate(c.expiresAt).getTime() <= nay).length;
   badge.textContent = quaHan > 99 ? '99+' : String(quaHan);
   badge.style.display = quaHan ? 'flex' : 'none';
 }
@@ -3954,7 +3979,7 @@ async function openStockUseScreen() {
 
 function stockExpiryLabel(c) {
   if (!c.expiresAt) return { text: c.openShelfLifeHours ? '' : 'Không đặt hạn', color: '#999' };
-  const con = new Date(c.expiresAt).getTime() - Date.now();
+  const con = vnDate(c.expiresAt).getTime() - Date.now();
   const gio = Math.round(con / 3600000);
   if (con <= 0) return { text: 'QUÁ HẠN ' + Math.abs(Math.round(gio / 24)) + ' ngày', color: '#c0392b' };
   if (gio <= 24) return { text: 'Còn ' + gio + ' giờ', color: '#e67e22' };
@@ -4006,7 +4031,7 @@ function renderStockUseRows() {
   const p2 = n => String(n).padStart(2, '0');
   box.innerHTML = list.map((c, i) => {
     const ex = stockExpiryLabel(c);
-    const moNgay = c.openedAt ? new Date(c.openedAt) : null;
+    const moNgay = c.openedAt ? vnDate(c.openedAt) : null;
     const moStr = moNgay && !isNaN(moNgay) ? `${p2(moNgay.getHours())}:${p2(moNgay.getMinutes())} · ${p2(moNgay.getDate())}/${p2(moNgay.getMonth() + 1)}` : '';
     const exBg = ex.color === '#c0392b' ? '#FDECEA' : ex.color === '#e67e22' ? '#FEF3E6' : '#F2F2F4';
     const exFg = ex.color === '#999' ? '#6B6B70' : ex.color;
@@ -4301,7 +4326,7 @@ async function submitOpenContainer(id, isOverride) {
     // atomic để đúng ngữ nghĩa). Gộp đọc+kiểm tra+ghi vào 1 transaction Firestore: chỉ đúng 1
     // máy "thắng" claim này, máy còn lại thấy status không còn 'sealed' ngay trong transaction
     // và tự dừng sạch, không ghi gì cả.
-    const nowISO = new Date().toISOString();
+    const nowISO = vnDate().toISOString();
     // [TEM MỞ] Nguyên liệu dùng thẳng không qua chế biến (topping đóng gói sẵn...) mà bao bì
     // gốc mang mã tem sẽ bị vứt ngay khi mở — cấu hình ở tab Nguyên liệu (quanlygieo.html).
     // Ghi cờ "cần in tem mở" NGAY TRONG transaction claim, cùng lúc với status:'open': nếu
@@ -4422,7 +4447,7 @@ async function confirmOpenLabelStuck() {
   if (!ctx) { closeStockScanSheet(); return; }
   try {
     // [E4.1] chú thích tem qua engine (chỉ trường cho phép — 3.9)
-    await UnitEngine.containers.annotate(ctx.id, { openLabelPrinted: true, openLabelPrintedAt: new Date().toISOString() });
+    await UnitEngine.containers.annotate(ctx.id, { openLabelPrinted: true, openLabelPrintedAt: vnDate().toISOString() });
   } catch (err) {
     // Không chặn nhân viên: tem đã dán thật, chỉ là hàng chờ Tem kho còn sót dòng này.
     console.error('confirmOpenLabelStuck lỗi', err);
@@ -4760,7 +4785,7 @@ async function printOnePendingOpenLabel(id) {
 async function markOpenLabelStuck(containerId) {
   try {
     // [E4.1] chú thích tem qua engine (chỉ trường cho phép — 3.9)
-    await UnitEngine.containers.annotate(containerId, { openLabelPrinted: true, openLabelPrintedAt: new Date().toISOString() });
+    await UnitEngine.containers.annotate(containerId, { openLabelPrinted: true, openLabelPrintedAt: vnDate().toISOString() });
     STOCK_OPEN_LABEL_PENDING = STOCK_OPEN_LABEL_PENDING.filter(c => c.id !== containerId);
     toast('✅ Đã đánh dấu đã dán');
     renderStockLabelList();
@@ -4877,7 +4902,7 @@ async function markStockLabelsPrinted(itemId, containerId) {
     // cái thì những cái trước vẫn được đánh dấu, không phải làm lại từ đầu.
     for (const id of ids) {
       // [E4.1] chú thích tem qua engine (chỉ trường cho phép — 3.9)
-      await UnitEngine.containers.annotate(id, { labelPrinted: true, labelPrintedAt: new Date().toISOString() });
+      await UnitEngine.containers.annotate(id, { labelPrinted: true, labelPrintedAt: vnDate().toISOString() });
     }
     STOCK_LABEL_PENDING = STOCK_LABEL_PENDING.filter(c => !ids.includes(c.id));
     if (_stockLabelQueue) _stockLabelQueue = _stockLabelQueue.filter(c => !ids.includes(c.id));
@@ -4932,9 +4957,9 @@ function laMaCu(code) { return /^[A-Z0-9]{1,8}-\d{3,4}-\d{1,4}$/.test(String(cod
 function computeOpenExpiry(hours, fromISO) {
   const h = Number(hours) || 0;
   if (h <= 0) return null;
-  const base = fromISO ? new Date(fromISO) : new Date();
+  const base = fromISO ? vnDate(fromISO) : vnDate();
   if (isNaN(base)) return null;
-  return new Date(base.getTime() + h * 3600000).toISOString();
+  return vnDate(base.getTime() + h * 3600000).toISOString();
 }
 
 // [MỚI] Container "đơn vị nguyên" — đại diện đúng MỘT cái rời (đơn vị pha chế
@@ -5780,7 +5805,7 @@ const POSTemPrinter = {
   // lưu trong bản ghi; tem in lại lúc mở nắp mới có dòng HSD thật.
   buildStockLabelLines(c) {
     const p2 = n => String(n).padStart(2, '0');
-    const d = c.receivedAt ? new Date(c.receivedAt) : new Date();
+    const d = c.receivedAt ? vnDate(c.receivedAt) : vnDate();
     const ngay = isNaN(d) ? '' : `${p2(d.getDate())}/${p2(d.getMonth() + 1)}`;
     const nvNgan = (c.receivedBy || '').trim().split(/\s+/).slice(-2).join(' ');
     const dungTich = c.trackingMode === 'batch'
@@ -5807,7 +5832,7 @@ const POSTemPrinter = {
   // chỉ thêm mốc giờ mở, để dán sang dụng cụ đựng. Xem submitOpenContainer()/openOpenLabelPrintSheet.
   buildOpenLabelLines(c) {
     const p2 = n => String(n).padStart(2, '0');
-    const d = c.openedAt ? new Date(c.openedAt) : new Date();
+    const d = c.openedAt ? vnDate(c.openedAt) : vnDate();
     const ngayGio = isNaN(d) ? '' : `${p2(d.getDate())}/${p2(d.getMonth() + 1)} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
     const nvNgan = (c.openedBy || '').trim().split(/\s+/).slice(-2).join(' ');
     return [
@@ -5829,7 +5854,7 @@ const POSTemPrinter = {
   buildPrepBatchLabelLines(b) {
     const dt = (iso) => {
       if (!iso) return null;
-      const d = new Date(iso);
+      const d = vnDate(iso);
       if (isNaN(d)) return null;
       const p = (n) => String(n).padStart(2, '0');
       return { ngay: `${p(d.getDate())}/${p(d.getMonth() + 1)}`,
@@ -5903,7 +5928,7 @@ const POSTemPrinter = {
     // In thử dùng đúng buildItemLabelLines() thật (không phải nội dung viết tay riêng) để
     // tem in thử LUÔN khớp 100% với tem in thật lúc bán hàng — kể cả cách cộng giá topping
     // và cách co giãn cỡ chữ theo nội dung.
-    const fakeOrder = { billCode: 'K01', date: new Date().toLocaleDateString('vi-VN'), time: new Date().toLocaleTimeString('vi-VN') };
+    const fakeOrder = { billCode: 'K01', date: vnDate().toLocaleDateString('vi-VN'), time: vnDate().toLocaleTimeString('vi-VN') };
     const fakeItem = {
       name: 'Lục trà Macchiato', size: 'M',
       price: 28000,
@@ -6618,11 +6643,11 @@ function hasNewCashOrdersSinceCashCount(closing) {
   if (!closing || !closing.cashPassedAt) return false;
   const bd = closing.businessDate || shiftState.businessDate;
   if (!bd) return false;
-  const cutoff = new Date(closing.cashPassedAt).getTime();
+  const cutoff = vnDate(closing.cashPassedAt).getTime();
   if (isNaN(cutoff)) return false;
   const displayDate = posDateKeyToDisplay(bd);
   return (typeof orders !== 'undefined' ? orders : []).some(o =>
-    o.date === displayDate && o.createdAt && new Date(o.createdAt).getTime() > cutoff && orderCashAmountPOS(o) > 0);
+    o.date === displayDate && o.createdAt && vnDate(o.createdAt).getTime() > cutoff && orderCashAmountPOS(o) > 0);
 }
 
 // Rời màn kết ca để bán tiếp. Chỉ một bill mới thực sự làm mất hiệu lực số đã
@@ -6644,7 +6669,7 @@ async function exitCloseShiftPOS() {
 // Lấy bill từ nguồn RTDB trước khi quyết định một lượt đếm còn hiệu lực không.
 // Không dựa vào cache orders trong máy: máy khác cũng có thể vừa bán thêm.
 async function loadCloseDayOrdersPOS(businessDate) {
-  const d = new Date(businessDate + 'T12:00:00');
+  const d = vnDate(businessDate + 'T12:00:00');
   const month = MONTH_KEYS[d.getMonth()];
   const day = String(d.getDate()).padStart(2, '0');
   const snap = await db.ref('orders_gieogieo/' + month + '/' + day).once('value');
@@ -6748,7 +6773,7 @@ async function _recheckCloseAfterSalesImplPOS() {
   const validHandover = handoverLines.filter(l => !handoverAffected.has(l.itemId));
   const validPrep = prepLines.filter(l => !prepAffected.has(l.prepId));
   const validShiftInv = shiftInvLines.filter(l => !shiftInvAffected.has(l.itemId));
-  const now = new Date().toISOString();
+  const now = vnDate().toISOString();
   const reset = {
     status: 'pending', cashPassedAt: null, finalActualCash: null, finalExpectedCash: null,
     finalVariance: null, bankPassedAt: null, bankAutoConfirmed: null,
@@ -6817,7 +6842,7 @@ async function forceRecountAfterNewOrdersPOS() {
   try {
     await fstore.collection('alerts_gieogieo').add({
       type: 'cash_recount_forced', severity: 'warning',
-      businessDate: shiftState.businessDate, createdAt: new Date().toISOString(),
+      businessDate: shiftState.businessDate, createdAt: vnDate().toISOString(),
       title: 'Phát hiện bill tiền mặt mới sau đối soát — đã bắt đếm lại',
       status: 'new'
     });
@@ -6880,7 +6905,7 @@ function logReprint(o, kind, scope, chiTiet) {
       scope,                      // 'all' | 'item' | 'unit'
       detail: chiTiet || '',
       staffOnShift: _guardStaffOnShift(),
-      at: new Date().toISOString()
+      at: vnDate().toISOString()
     }).catch(err => console.warn('[in lại] không ghi được sổ (không chặn in):', err));
   } catch (err) { console.warn('[in lại] ghi sổ lỗi:', err); }
 }
@@ -8874,7 +8899,7 @@ function renderPrepWasteForm() {
       <div class="wal-input-label" style="margin:14px 0 6px;">Lô nào bị huỷ?</div>
       ${lo.map(b => {
         const con = Number(b.qtyRemaining) || 0;
-        const quaHan = b.expiresAt && new Date(b.expiresAt).getTime() <= nay;
+        const quaHan = b.expiresAt && vnDate(b.expiresAt).getTime() <= nay;
         return `
         <div style="border:1.5px solid ${quaHan ? '#f0c9c4' : '#eee'};background:${quaHan ? '#fff6f5' : '#fff'};border-radius:14px;padding:11px 13px;margin-bottom:8px;">
           <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;">
@@ -9815,7 +9840,7 @@ function togglePrepActiveList() { _prepActiveListExpanded = !_prepActiveListExpa
 // còn" để nhân viên biết mẻ đó nấu mất bao lâu, không chỉ mỗi mốc giờ hoàn thành.
 function fmtPrepCookDuration(startedAtISO, finishedAtISO) {
   if (!startedAtISO || !finishedAtISO) return '';
-  const ms = new Date(finishedAtISO) - new Date(startedAtISO);
+  const ms = vnDate(finishedAtISO) - vnDate(startedAtISO);
   if (!(ms > 0)) return '';
   const totalMin = Math.round(ms / 60000);
   const h = Math.floor(totalMin / 60), m = totalMin % 60;
@@ -9842,7 +9867,7 @@ function computePrepExpiry(prepItem, finishedAtISO) {
   const t = prepItem && prepItem.shelfLifeType;
   if (t === 'hours') {
     const h = Number(prepItem.shelfLifeHours) || 0;
-    if (h > 0) return new Date(new Date(finishedAtISO).getTime() + h * 3600000).toISOString();
+    if (h > 0) return vnDate(vnDate(finishedAtISO).getTime() + h * 3600000).toISOString();
   }
   return null; // endOfDay / none / chưa cấu hình → không có mốc giờ cụ thể
 }
@@ -9850,13 +9875,13 @@ function computePrepExpiry(prepItem, finishedAtISO) {
 function prepExpiryLabel(batch) {
   if (batch.shelfLifeType === 'endOfDay') return 'Cuối ca hôm nay';
   if (batch.shelfLifeType === 'none' || !batch.expiresAt) return 'Không hạn';
-  const d = new Date(batch.expiresAt);
+  const d = vnDate(batch.expiresAt);
   const p2 = n => String(n).padStart(2, '0');
   return `${p2(d.getDate())}/${p2(d.getMonth() + 1)} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
 }
 
 function fmtDateTimeShort(iso) {
-  const d = new Date(iso);
+  const d = vnDate(iso);
   const p2 = n => String(n).padStart(2, '0');
   return `${p2(d.getDate())}/${p2(d.getMonth() + 1)} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
 }
@@ -9987,7 +10012,7 @@ function prepDaySumFromRows(dateKey, rows) {
     const q = Number(t.qty) || 0, note = String(t.reason || t.note || '');
     if (t.type === 'CONSUMPTION') {
       x.c += -q;
-      const d = new Date(t.createdAt); if (!isNaN(d)) h[d.getHours()] += -q;
+      const d = vnDate(t.createdAt); if (!isNaN(d)) h[d.getHours()] += -q;
     } else if (t.type === 'ADJUSTMENT' && /XOÁ ĐƠN/.test(note)) x.c -= q;
     else if (t.type === 'WASTE' && q < 0) { x.w += -q; if (PREP_SPOIL_RE.test(note)) x.sp += -q; }
     else if (t.type === 'PRODUCTION' && q > 0) x.pr += q;
@@ -9996,7 +10021,7 @@ function prepDaySumFromRows(dateKey, rows) {
   return { v: PREP_DAY_SUM_V, kind: 'prep', date: dateKey, maxCreatedAt, rowCount: (rows || []).length,
     h: h.map(r1), prep: Object.values(per).map(x => ({ p: x.p, c: r1(x.c), w: r1(x.w), pr: r1(x.pr), sp: r1(x.sp) })) };
 }
-function _prepSugShift(k, n) { const d = new Date(k + 'T00:00:00'); d.setDate(d.getDate() + n); return posDateKey(d); }
+function _prepSugShift(k, n) { const d = vnDate(k + 'T00:00:00'); d.setDate(d.getDate() + n); return posDateKey(d); }
 const _prepSug = { histDay: '', sums: [], hist: null, usedDay: '', used: {}, usedReady: false, list: [], busy: false, lastAt: 0, again: false,
   rt: {}, rtAt: 0, touched: new Set(), full: true };   // rt: prepId -> {stock, cooked} đọc từ RT
 async function prepSugLoadHistory() {
@@ -10017,7 +10042,7 @@ async function prepSugLoadHistory() {
     const last = segs[segs.length - 1];
     if (last && last.b === _prepSugShift(k, -1)) last.b = k; else segs.push({ a: k, b: k });
   }
-  const builtAt = new Date().toISOString();
+  const builtAt = vnDate().toISOString();
   for (const { a, b } of segs) {
     const rows = (await fstore.collection('prep_transactions_gieogieo').where('businessDate', '>=', a).where('businessDate', '<=', b).get()).docs.map(d => d.data());
     const byDay = {};
@@ -10093,10 +10118,10 @@ async function _prepSugRefreshImpl() {
       .sort((a, b) => String(a.code || '').localeCompare(String(b.code || ''), 'vi'));
   }
   if (typeof ensureKhoItemsPOS === 'function') await ensureKhoItemsPOS().catch(() => {});
-  const now = new Date(), nowMin = now.getHours() * 60 + now.getMinutes();
-  const dayStart = new Date(now); dayStart.setHours(0, 0, 0, 0);
+  const now = vnDate(), nowMin = now.getHours() * 60 + now.getMinutes();
+  const dayStart = vnDate(now); dayStart.setHours(0, 0, 0, 0);
   const found = [];
-  const full = _prepSug.full || Date.now() - _prepSug.rtAt > 10 * 60000 || new Date(_prepSug.rtAt).getDate() !== now.getDate();
+  const full = _prepSug.full || Date.now() - _prepSug.rtAt > 10 * 60000 || vnDate(_prepSug.rtAt).getDate() !== now.getDate();
   const touched = _prepSug.touched; _prepSug.touched = new Set(); _prepSug.full = false;
   if (full) _prepSug.rtAt = Date.now();
   for (const prep of POS_PREP_CON_DUNG()) {
@@ -10581,7 +10606,7 @@ function startPrepCountdownTicker() {
     els.forEach(el => {
       const ready = el.getAttribute('data-ready');
       if (!ready) { el.textContent = 'đang nấu'; return; }
-      const ms = new Date(ready) - new Date();
+      const ms = vnDate(ready) - vnDate();
       if (ms <= 0) {
         el.textContent = Number(el.getAttribute('data-pending')) > 0 ? 'Đủ giờ · cân NL' : 'Đủ giờ';
         el.style.color = '#15803d'; el.style.background = '#dcfce7'; return;
@@ -10715,7 +10740,7 @@ async function prepFlowToastError(err, prefix) {
         type: 'pos_prep_blocked', severity: 'warning', status: 'new',
         title: 'Đối chiếu NL khi nấu cần Quản lý xử lý',
         message: String(err.message || err), batchId: (st && st.batchId) || '', itemId: (st && st.itemId) || '',
-        itemName: (it && it.name) || '', businessDate: posDateKey(), createdAt: new Date().toISOString()
+        itemName: (it && it.name) || '', businessDate: posDateKey(), createdAt: vnDate().toISOString()
       }, { merge: true });
       toast('⚠️ ' + msg + ' — đã báo Quản lý. Có thể tự chốt theo số cân hiện có ở khung đỏ trên màn này');
     } catch (e) {
@@ -10992,7 +11017,7 @@ async function prepReconRegisterNew(batchId,itemId,unitId) {
   const save=async(qty,lines)=>{
       const opId='prep_new_'+batchId+'_'+unitId;
       try{
-        const checkpoint={stage:'new_open',at:new Date().toISOString(),batchId,
+        const checkpoint={stage:'new_open',at:vnDate().toISOString(),batchId,
           employeeId:b.staffEmployeeId||'',employeeName:b.staff||''};
         const changed=await UnitEngine.prep.reconSetUnit(itemId,unitId,qty,opId,live.unitBase,checkpoint,live.held||0);
         const delta=round2(qty-changed.before);
@@ -11036,7 +11061,7 @@ async function prepReconOpenNext(batchId,itemId) {
   }
   try{
     // [E4.6] Ghi mốc "mã cũ đã hết" vào mẻ — unit_engine.v1.js (prep.reconMarkExhausted).
-    await UnitEngine.prep.reconMarkExhausted(batchId,itemId,exhausted.id,{after:0,code:exhausted.code,at:new Date().toISOString(),
+    await UnitEngine.prep.reconMarkExhausted(batchId,itemId,exhausted.id,{after:0,code:exhausted.code,at:vnDate().toISOString(),
       manual:!!st.values[exhausted.id].manual,reason:(st.note||'').trim(),
       weighings:st.values[exhausted.id].lines||[]});
   }catch(err){prepFlowToastError(err,'Không ghi được mốc mã cũ: ');return;}
@@ -11506,7 +11531,7 @@ async function prepReconPostSave() {
         throw new Error('Không có mã thiếu tồn thuộc khoảng chưa cân trước — chọn nguyên nhân khác');
       const staffEmp=await resolveStaffPinAndCheckin('prepReconStaff');
       if(!staffEmp)return;
-      const checkpointAt=new Date().toISOString();
+      const checkpointAt=vnDate().toISOString();
       submitted=submitted.map(u=>({...u,toCheckpoint:{stage:'after',at:checkpointAt,
         batchId:st.batchId,employeeId:staffEmp.id,employeeName:staffEmp.fullName}}));
       // [E4.6] Đánh dấu "đang chốt" + lưu số đã cân — unit_engine.v1.js (prep.reconMarkProcessing).
@@ -11645,7 +11670,7 @@ async function prepForceSubmit() {
       units: f.units.map(u => ({ unitId: u.id, qty: u.qty, lines: u.lines || [], heldAt: u.held, manual: !!u.manual })) });
     // Cảnh báo "kẹt" đã được xử lý bằng tự chốt — chỉ cập nhật nếu có (update không tạo doc mới).
     fstore.collection('alerts_gieogieo').doc(prepBlockedAlertId(f.batchId, f.itemId))
-      .update({ status: 'resolved', resolvedBy: 'pos_force_settle', resolvedByName: staffEmp.fullName, resolvedAt: new Date().toISOString() }).catch(() => {});
+      .update({ status: 'resolved', resolvedBy: 'pos_force_settle', resolvedByName: staffEmp.fullName, resolvedAt: vnDate().toISOString() }).catch(() => {});
     delete _prepReconStuck[f.key];
     _prepForce = null; prepReconForm = null;
     toast(kq && kq.already ? 'ℹ️ Nguyên liệu này đã được chốt rồi' : `✅ Đã tự chốt ${f.itemName} — NL đã mở khoá, đã báo Quản lý`);
@@ -11914,7 +11939,7 @@ async function _startPrepBatchImpl(preResolvedStaff, atomicScanDone, atomicScann
         if(Math.abs((Number(fresh.data().currentStock)||0)-x.unitBase)>0.015)
           throw new Error('Tồn '+x.itemName+' đã đổi từ lúc mở cân — cân lại trước khi bắt đầu');
       }
-      const checkpoint={stage:'before',at:new Date().toISOString(),batchId:batchRef.id,
+      const checkpoint={stage:'before',at:vnDate().toISOString(),batchId:batchRef.id,
         employeeId:staffEmp.id,employeeName:staffEmp.fullName};
       if(x.id!=='__aggregate') await UnitEngine.prep.reconSetUnit(x.itemId,x.id,v.qty,opId,x.unitBase,checkpoint);
       if(Math.abs(delta)>0.005) await UnitEngine.ledger.apply({itemId:x.itemId,type:'ADJUSTMENT',qty:delta,
@@ -12036,7 +12061,7 @@ async function _startPrepBatchImpl(preResolvedStaff, atomicScanDone, atomicScann
       return;
     }
 
-    const now = new Date();
+    const now = vnDate();
     const mins = Number(p.prepTimeMinutes) || 0;
     try {
       // [E4.6] Tạo lô 'cooking' qua engine (prep.createBatch) — dữ liệu lô do engine ghi.
@@ -12045,7 +12070,7 @@ async function _startPrepBatchImpl(preResolvedStaff, atomicScanDone, atomicScann
         batchRatio: ratio,
         qtyInitial: 0, qtyRemaining: 0,       // chưa cân → điền ở bước Hoàn thành
         startedAt: now.toISOString(),
-        expectedReadyAt: mins > 0 ? new Date(now.getTime() + mins * 60000).toISOString() : null,
+        expectedReadyAt: mins > 0 ? vnDate(now.getTime() + mins * 60000).toISOString() : null,
         finishedAt: null, expiresAt: null,
         // Chép cấu hình hạn dùng vào lô để hiện tem & tra lịch sử về sau mà không
         // phải join ngược sang prep_items.
@@ -12254,7 +12279,7 @@ async function refreshPrepYieldStatsPOS(prepId) {
   const patch = {
     yieldActualAvg, yieldSampleCount: done.length,
     yieldVariancePct: lechPct == null ? null : Math.round(lechPct * 10) / 10,
-    yieldStatsAt: new Date().toISOString()
+    yieldStatsAt: vnDate().toISOString()
   };
   // Chỉ ghi đè giá vốn khi đã đủ mẫu — một lô lẻ cân sai sẽ kéo lệch cả giá vốn.
   if (done.length >= PREP_YIELD_MIN_SAMPLES && costPerUnit > 0) patch.costPerUnit = costPerUnit;
@@ -12266,7 +12291,7 @@ async function refreshPrepYieldStatsPOS(prepId) {
     const docId = ('prep_yield_' + posDateKey() + '_' + prepId).replace(/[^\w\-]/g, '_');
     await fstore.collection('alerts_gieogieo').doc(docId).set({
       type: 'prep_yield_mismatch', severity: 'warning', status: 'new',
-      businessDate: posDateKey(), createdAt: new Date().toISOString(),
+      businessDate: posDateKey(), createdAt: vnDate().toISOString(),
       title: `Yield khai lệch thực tế: ${p.name || p.code || ''}`,
       prepId, prepCode: p.code || '', prepName: p.name || '', unit: p.unit || '',
       declaredYield: khai, actualYield: Math.round(yieldActualAvg * 100) / 100,
@@ -12657,7 +12682,7 @@ async function _submitPrepCancelImpl() {
   // cả hai cùng hoàn và kho dư gấp đôi — sai nặng hơn nhiều so với việc huỷ hụt.
   // [v18] Kế hoạch huỷ (lý do, người, câu trả lời từng NL đã cân + phần cân lại) ghi CÙNG transaction —
   // app tắt/rớt mạng giữa lúc hoàn thì mẻ vẫn hiện "Hoàn tiếp" (cancelSettled:false), làm tiếp đúng kế hoạch.
-  const cancelledAt = new Date().toISOString();
+  const cancelledAt = vnDate().toISOString();
   const plan = { reason, staffName: staffEmp.fullName, staffId: staffEmp.id,
     recon: rc ? rc.items.map(g => ({ itemId: g.itemId, itemName: g.itemName, unit: g.unit, answer: g.answer, taken: g.taken,
       returns: g.answer === 'da_tra' ? g.units.filter(x => !x.gone && x.returned > 0.005).map(x => ({ unitId: x.unitId, code: x.code, returned: x.returned })) : [] })) : [] };
@@ -12826,7 +12851,7 @@ async function _submitPrepFinishImpl() {
       { okText: 'Đúng, lưu', cancelText: 'Để nhập lại' }))) return;
   }
   const inputCost = prepBatchInputCostPOS(p, ratio, freshRecon.data());
-  const finishedAt = new Date().toISOString();
+  const finishedAt = vnDate().toISOString();
   const batchCode = await UnitEngine.codes.batchCode({ id: b.prepId, code: b.prepCode }, b.businessDate || posDateKey());
   const expiresAt = computePrepExpiry({ shelfLifeType: b.shelfLifeType, shelfLifeHours: b.shelfLifeHours }, finishedAt);
 
@@ -13408,7 +13433,7 @@ async function stockCountScan() {
   line.markedEmpty = false; // có bằng chứng quét được rồi thì bỏ cờ "khai tay không còn"
   if (c.status === 'sealed') line.countedSealed++; else line.countedOpen++;
   line.countedBase = line.countedSealed * line.baseQtyPerUnit;
-  const now = new Date();
+  const now = vnDate();
   const p2 = n => String(n).padStart(2, '0');
   stockCountState.scannedLog.unshift({
     code: ma, itemId: c.itemId, itemName: line.name, status: c.status,
@@ -13645,7 +13670,7 @@ async function stockCountReportLost(code) {
   const staffEmp = stockCountState.staffEmp;
   if (!staffEmp) { toast('⚠️ Thiếu thông tin nhân viên, thử lại từ đầu'); return; }
   try {
-    const nowISO = new Date().toISOString();
+    const nowISO = vnDate().toISOString();
     const repRef = await fstore.collection(STOCK_LOST_REPORTS_COLL).add({
       containerId: m.containerId, code: m.code, itemId: m.itemId, itemName: m.itemName,
       unit: m.unit || '', baseQty: Number(m.baseQty) || 1,
@@ -13880,14 +13905,14 @@ async function bulkReprintByDatePreview() {
   showLoading(box);
   // Mốc so sánh là ĐẦU NGÀY đã chọn (00:00) — "nhận trước ngày X" nghĩa là receivedAt <
   // 00:00 ngày X, không bao gồm chính ngày X.
-  const cutoffMs = new Date(cutoff + 'T00:00:00').getTime();
+  const cutoffMs = vnDate(cutoff + 'T00:00:00').getTime();
   let preview = [], safe = [];
   try {
     let q = fstore.collection(STOCK_CONTAINERS_COLL).where('status', 'in', ['sealed', 'open']);
     if (itemId) q = q.where('itemId', '==', itemId);
     const snap = await q.get();
     const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    const rawTime = c => { const t = c.receivedAt ? new Date(c.receivedAt).getTime() : NaN; return isFinite(t) ? t : null; };
+    const rawTime = c => { const t = c.receivedAt ? vnDate(c.receivedAt).getTime() : NaN; return isFinite(t) ? t : null; };
     // [FIX] CHỈ cấp lại mã cho tem CÒN SEAL (chưa mở) nhận trước ngày mốc — bỏ hẳn tem đang
     // `open` ra khỏi diện cấp lại. Lý do: một tem đang mở nghĩa là nó ĐÃ được quét thành công
     // để "Xác nhận đã mở" — quét được tức là lúc đó mã trên tem khớp đúng với đúng vật lý đang
@@ -13939,7 +13964,7 @@ function renderBulkReprintByDatePreview() {
     </div>
     <div class="wal-section" style="margin:0 0 14px;max-height:280px;overflow-y:auto;">
       ${s.preview.map(c => `<div style="padding:6px 0;border-bottom:1px solid #f5f5f5;font-size:12.5px;color:var(--td);">
-        <b>${escHtmlPos(c.code || '—')}</b> · ${escHtmlPos(c.itemName || '')} · nhận ${c.receivedAt ? new Date(c.receivedAt).toLocaleDateString('vi-VN') : '—'}
+        <b>${escHtmlPos(c.code || '—')}</b> · ${escHtmlPos(c.itemName || '')} · nhận ${c.receivedAt ? vnDate(c.receivedAt).toLocaleDateString('vi-VN') : '—'}
       </div>`).join('')}
     </div>
     ${s.safe && s.safe.length ? `
@@ -13949,7 +13974,7 @@ function renderBulkReprintByDatePreview() {
     </div>
     <div class="wal-section" style="margin:0 0 14px;max-height:220px;overflow-y:auto;">
       ${s.safe.map(c => `<div style="padding:6px 0;border-bottom:1px solid #f5f5f5;font-size:12.5px;color:#166534;">
-        <b>${escHtmlPos(c.code || '—')}</b> · ${escHtmlPos(c.itemName || '')} · ${c.status === 'sealed' ? 'chưa mở' : 'đang mở'} · nhận ${c.receivedAt ? new Date(c.receivedAt).toLocaleDateString('vi-VN') : '—'}
+        <b>${escHtmlPos(c.code || '—')}</b> · ${escHtmlPos(c.itemName || '')} · ${c.status === 'sealed' ? 'chưa mở' : 'đang mở'} · nhận ${c.receivedAt ? vnDate(c.receivedAt).toLocaleDateString('vi-VN') : '—'}
       </div>`).join('')}
     </div>` : ''}
     <div class="wal-section" style="margin:0 0 14px;">
@@ -13972,7 +13997,7 @@ async function bulkReprintByDateConfirm() {
     if (!staffEmp) return;
     const s = bulkReprintState;
     const targets = s.preview;
-    const nowISO = new Date().toISOString();
+    const nowISO = vnDate().toISOString();
     const box = document.getElementById('reportMissingLabelBody');
     showLoading(box);
     const reprinted = [];
@@ -14149,7 +14174,7 @@ async function missingLabelDoReprint() {
     const s = missingLabelState;
     const reasonEl = document.getElementById('missingLabelReason');
     const reason = (reasonEl && reasonEl.value.trim()) || 'Không nêu lý do';
-    const nowISO = new Date().toISOString();
+    const nowISO = vnDate().toISOString();
     const reprinted = [];
     for (const m of (s.missing || [])) {
       try {
@@ -14182,7 +14207,7 @@ async function missingLabelSubmitAnomalyLog() {
   try {
     const staffEmp = await resolveStaffPinAndCheckin('missingLabelStaff');
     if (!staffEmp) return;
-    const nowISO = new Date().toISOString();
+    const nowISO = vnDate().toISOString();
     await fstore.collection(MISSING_LABEL_REPORTS_COLL).add({
       itemId: s.itemId, itemName: s.itemName,
       stockBeforeReconcile: s.expected,
@@ -14276,7 +14301,7 @@ async function _doSubmitStockCount(preResolvedStaff) {
     const scannedCodes = stockCountState.scannedLog.map(e => ({ code: e.code, itemId: e.itemId, status: e.status, timeStr: e.timeStr }));
     const scRef = await fstore.collection('stock_counts_gieogieo').add({
       items, countedBy: staff, status: 'pending_review',
-      createdAt: new Date().toISOString(), businessDate: posDateKey(), source: 'pos',
+      createdAt: vnDate().toISOString(), businessDate: posDateKey(), source: 'pos',
       scannedCodes,
       // Mã nhân viên báo "Không tìm thấy" TRONG lượt này — duyệt/từ chối phiếu kiểm kê bên
       // Quản lý chỉ xử lý đúng các phiếu báo mất này, không vơ phiếu của lượt khác.
@@ -14561,7 +14586,7 @@ async function resolveStaffPinWorkedToday(fieldId) {
 // runTransaction, không sửa currentStock trực tiếp (mục 2.1). Field ghi ra giống
 // hệt schema mục 20 mà Management đã chuẩn hoá ở Giai đoạn 3.
 function posDateKey(d) {
-  d = d || new Date();
+  d = vnDate(d || Date.now());
   const p = x => String(x).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
@@ -15003,7 +15028,7 @@ async function _submitExpensePOSImpl() {
     await fstore.collection('expenses_gieogieo').doc(idemKey).set({
       periodType: 'onetime', date: posDateKey(), category, amount, note, staff, staffEmployeeId: staffEmp.id,
       paymentMethodId: pm ? pm.id : null, paymentMethodLabel: pm ? pm.label : null, baseType,
-      status: 'pending_review', source: 'pos', createdAt: new Date().toISOString()
+      status: 'pending_review', source: 'pos', createdAt: vnDate().toISOString()
     });
     _expensePosPending = null; // xong hẳn — lượt sau là một khoản chi MỚI, cần idemKey mới
     toast('✅ Đã ghi chi phí — chờ Quản lý duyệt');
@@ -15043,19 +15068,12 @@ function posDateKeyToDisplay(dateKey) {
   return `${d}/${m}/${y}`;
 }
 function orderCashAmountPOS(o) {
-  // [NEW-addon] Phần bổ sung sau khi bấm bill có phương thức thanh toán RIÊNG: bill gốc
-  // chuyển khoản mà khách trả thêm 4K tiền mặt là chuyện thường. `o.total` đã cộng cả
-  // phần thêm vào rồi, nên phải bóc ra rồi cộng lại đúng phần trả bằng tiền mặt — nếu
-  // không, đối soát tiền mặt cuối ca sẽ lệch đúng bằng số tiền thêm.
   const adds = o.addons || [];
-  const addonTotal = adds.reduce((s, a) => s + (Number(a.amount) || 0), 0);
-  const addonCash = adds.filter(a => (a.method || '').includes('TIỀN MẶT'))
-                        .reduce((s, a) => s + (Number(a.amount) || 0), 0);
-  if (o.method === 'TÍNH RIÊNG') {
-    return (o.splitGroups || []).filter(g => g.method === 'TIỀN MẶT').reduce((s, g) => s + (Number(g.total) || 0), 0) + addonCash;
-  }
-  if ((o.method || '').includes('TIỀN MẶT')) return Math.max(0, (Number(o.total) || 0) - addonTotal) + addonCash;
-  return addonCash;
+  const addonTotal = adds.reduce((s,a)=>s+(Number(a.amount)||0),0);
+  const addonPaid = adds.filter(a=>(a.method||'').includes('TIỀN MẶT')).reduce((s,a)=>s+(Number(a.amount)||0),0);
+  // splitGroups chỉ chứa tiền gốc; total đã gồm các lần mua bổ sung.
+  if(o.method === 'TÍNH RIÊNG') return (o.splitGroups||[]).filter(g=>g.method==='TIỀN MẶT').reduce((s,g)=>s+(Number(g.total)||0),0)+addonPaid;
+  return ((o.method||'').includes('TIỀN MẶT') ? Math.max(0,(Number(o.total)||0)-addonTotal) : 0)+addonPaid;
 }
 // [BUG#36 FIX] MỘT ĐIỀU KIỆN DUY NHẤT cho "khoản chi này có thật sự rút tiền khỏi két hay không".
 // TRƯỚC ĐÂY mỗi nơi tự viết filter: P&L bên Management đã loại `voided` (khoản bị Quản lý huỷ),
@@ -15106,7 +15124,7 @@ function startShiftWorkflowPOS(phase, startedAt){
   const dateKey = shiftState.businessDate || posDateKey();
   if(_shiftWorkflowPOS && _shiftWorkflowPOS.phase===phase && _shiftWorkflowPOS.dateKey===dateKey) return;
   stopShiftWorkflowPOS();
-  const now = new Date().toISOString();
+  const now = vnDate().toISOString();
   const sessionId = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
   const start = Number.isFinite(Date.parse(startedAt||'')) ? startedAt : now;
   _shiftWorkflowPOS = { phase, dateKey, sessionId, startedAt:start };
@@ -15114,7 +15132,7 @@ function startShiftWorkflowPOS(phase, startedAt){
   _shiftWorkflowTimerPOS = setInterval(()=>{
     const current = _shiftWorkflowPOS;
     if(!current || current.sessionId!==sessionId) return;
-    _queueShiftWorkflowWritePOS(dateKey, { phase, sessionId, updatedAt:new Date().toISOString(), active:true });
+    _queueShiftWorkflowWritePOS(dateKey, { phase, sessionId, updatedAt:vnDate().toISOString(), active:true });
   }, 30000);
 }
 function stopShiftWorkflowPOS(phase){
@@ -15122,7 +15140,7 @@ function stopShiftWorkflowPOS(phase){
   if(!current || (phase && current.phase!==phase)) return;
   _shiftWorkflowPOS = null;
   if(_shiftWorkflowTimerPOS){ clearInterval(_shiftWorkflowTimerPOS); _shiftWorkflowTimerPOS=null; }
-  const now = new Date().toISOString();
+  const now = vnDate().toISOString();
   _queueShiftWorkflowWritePOS(current.dateKey, { active:false, updatedAt:now, endedAt:now, sessionId:current.sessionId });
 }
 let _shiftOpenDenoms = cfEmptyDenoms();
@@ -15211,7 +15229,7 @@ async function renderCheckinBlock() {
   showLoading(box);
   await loadEmployeeShiftsTodayCache();
   const checkedInList = _employeeShiftsTodayCache.filter(s => !s.checkedOutAt);
-  const hm = iso => new Date(iso).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+  const hm = iso => vnDate(iso).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
   box.innerHTML = `
     <div class="wal-section" style="margin:0 0 12px;padding:16px;">
       ${caTitle('Check-in / Check-out', `<span style="font-size:13px;font-weight:800;color:var(--gd);background:var(--gl);border-radius:999px;padding:4px 10px;">${checkedInList.length} đang trong ca</span>`)}
@@ -15261,13 +15279,13 @@ async function _doCheckInImpl() {
     otThresholdHours: Number(emp.otThresholdHours) || 8,
     otRate: Number(emp.otRate) || 0,
     fixedMonthlySalary: Number(emp.fixedMonthlySalary) || 0,
-    snapshotAt: new Date().toISOString()
+    snapshotAt: vnDate().toISOString()
   };
   // Chức năng làm việc (pha chế/order) chụp vào ca như payTerms: sửa hồ sơ về sau không đổi
   // lịch sử. Người được tích 'barista' chịu hao hụt định lượng trong khoảng họ có mặt.
   const roles = Array.isArray(emp.roles) ? emp.roles.filter(r => typeof r === 'string' && r) : [];
   try {
-    const checkedInAt = new Date().toISOString();
+    const checkedInAt = vnDate().toISOString();
     const ref = await fstore.collection('employee_shifts_gieogieo').add({
       employeeId: emp.id, employeeName: emp.fullName, businessDate, payTerms, roles,
       checkedInAt, checkedOutAt: null
@@ -15328,7 +15346,7 @@ async function _doCheckOutImpl() {
       { okText: 'Check-out & kết ca', cancelText: 'Chưa, để sau' }))) return;
   }
   try {
-    const checkedOutAt = new Date().toISOString();
+    const checkedOutAt = vnDate().toISOString();
     await fstore.collection('employee_shifts_gieogieo').doc(openShift.id).update({ checkedOutAt });
     openShift.checkedOutAt = checkedOutAt; // cập nhật cache tại chỗ — invalidate đúng ý "khi chính người đó check-out"
     toast(`✅ ${emp.fullName} đã check-out`);
@@ -15396,7 +15414,7 @@ async function loadStaleShiftDays() {
   const todayKey = posDateKey();
   const keys = [];
   for (let i = 1; i <= 7; i++) {
-    const d = new Date(); d.setDate(d.getDate() - i);
+    const d = vnDate(); d.setDate(d.getDate() - i);
     keys.push(posDateKey(d));
   }
   try {
@@ -15572,7 +15590,7 @@ function renderCloseGateBlockedPOS(list) {
       ${list.map(s => `
         <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid #fecaca;">
           <span style="font-size:13.5px;font-weight:700;color:#c0392b;">${s.employeeName}</span>
-          <span style="font-size:11.5px;color:#e07a6a;">Vào lúc ${new Date(s.checkedInAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}</span>
+          <span style="font-size:11.5px;color:#e07a6a;">Vào lúc ${vnDate(s.checkedInAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}</span>
         </div>`).join('')}
       <div style="font-size:12px;color:#b23c2c;margin-top:10px;line-height:1.6;">
         <b>Tất cả mọi người phải check-out trước khi kết ca.</b><br>
@@ -15618,7 +15636,7 @@ async function _submitCloseOperatorImplPOS() {
   // Nạp lại lần cuối: có thể trong lúc gõ PIN có người vừa check-in ở máy khác.
   const conTrongCa = await closeGateBlockersPOS();
   if (conTrongCa.length) { toast('🚫 Vừa có người check-in lại — phải check-out hết'); renderCloseGateBlockedPOS(conTrongCa); return; }
-  _closeSession = { employeeId: emp.id, fullName: emp.fullName, startedAt: new Date().toISOString(), businessDate: shiftState.businessDate };
+  _closeSession = { employeeId: emp.id, fullName: emp.fullName, startedAt: vnDate().toISOString(), businessDate: shiftState.businessDate };
   // Ghi xuống Firestore để (a) khôi phục được nếu app tắt giữa chừng, (b) Quản
   // lý đo được kết ca mất bao lâu (startedAt → closedAt) mà so giữa các nhân viên.
   try {
@@ -15837,7 +15855,7 @@ function renderShiftDashboard() {
       <div style="text-align:center;padding:20px 10px;">
         <div style="display:flex;justify-content:center;margin-bottom:10px;"><span style="width:56px;height:56px;border-radius:18px;background:#F6F4EF;color:var(--td);display:flex;align-items:center;justify-content:center;">${caIcon('lock', 26)}</span></div>
         <div style="font-weight:700;font-size:15px;color:var(--td);margin-bottom:6px;">Đã đóng ngày hôm nay</div>
-        <div style="font-size:12.5px;color:#999;">Đóng lúc ${new Date(closing.closedAt).toLocaleTimeString('vi-VN')}</div>
+        <div style="font-size:12.5px;color:#999;">Đóng lúc ${vnDate(closing.closedAt).toLocaleTimeString('vi-VN')}</div>
         ${closing.closeDurationMin != null ? `<div style="font-size:12.5px;color:#999;margin-top:3px;">Kết ca mất <b style="color:var(--td);">${closing.closeDurationMin} phút</b></div>` : ''}
       </div>`;
     return;
@@ -15867,7 +15885,7 @@ function renderShiftDashboard() {
   // chung một khối, 2 việc phụ nằm chung một hàng.
   const seg = currentSegmentPOS();
   const nguoiKhac = seg ? _employeeShiftsTodayCache.filter(x => !x.checkedOutAt && x.employeeId !== seg.custodianId) : [];
-  const hm = iso => new Date(iso).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+  const hm = iso => vnDate(iso).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
   box.innerHTML = renderStaleShiftWarning() + `
     ${closing && closing.reopeningAfterSaleAt && !closing.cashPassedAt ? '<div class="kc-sub" style="margin-bottom:12px;color:#a32946;font-weight:700;">Có bill mới · Cần đối soát lại trước khi đóng ngày.</div>' : ''}
     <div class="wal-section" style="margin:0 0 12px;padding:16px;">
@@ -15942,7 +15960,7 @@ async function clEnsureStarted(phase, stepKey, stepLabel, minRequiredSec) {
   if (!minRequiredSec) {
     // Không khoá thời gian thì khỏi ghi log làm gì — log này chỉ có ý nghĩa đối
     // chiếu khi CÓ ngưỡng thời gian để so.
-    _clLocalStarts[cacheKey] = { startedAt: new Date().toISOString(), minRequiredSec: 0 };
+    _clLocalStarts[cacheKey] = { startedAt: vnDate().toISOString(), minRequiredSec: 0 };
     return _clLocalStarts[cacheKey];
   }
   const id = _clLogId(phase, stepKey);
@@ -15955,7 +15973,7 @@ async function clEnsureStarted(phase, stepKey, stepLabel, minRequiredSec) {
       _clLocalStarts[cacheKey] = { startedAt: doc.data().startedAt, minRequiredSec };
       return _clLocalStarts[cacheKey];
     }
-    const startedAt = new Date().toISOString();
+    const startedAt = vnDate().toISOString();
     await ref.set({
       businessDate: shiftState.businessDate, phase, stepKey, stepLabel,
       startedAt, completedAt: null, durationSec: null,
@@ -15964,7 +15982,7 @@ async function clEnsureStarted(phase, stepKey, stepLabel, minRequiredSec) {
     _clLocalStarts[cacheKey] = { startedAt, minRequiredSec };
   } catch (err) {
     console.warn('clEnsureStarted lỗi (không chặn luồng chính, chỉ mất khoá thời gian):', err);
-    _clLocalStarts[cacheKey] = { startedAt: new Date().toISOString(), minRequiredSec: 0 };
+    _clLocalStarts[cacheKey] = { startedAt: vnDate().toISOString(), minRequiredSec: 0 };
   }
   return _clLocalStarts[cacheKey];
 }
@@ -15983,7 +16001,7 @@ async function clLogComplete(phase, stepKey, staffEmp) {
   try {
     const durationSec = Math.max(0, Math.round((Date.now() - Date.parse(s.startedAt)) / 1000));
     await fstore.collection('checklist_activity_logs_gieogieo').doc(id).set({
-      completedAt: new Date().toISOString(), durationSec,
+      completedAt: vnDate().toISOString(), durationSec,
       metMinimum: durationSec >= s.minRequiredSec,
       staff: staffEmp ? staffEmp.fullName : '', staffEmployeeId: staffEmp ? staffEmp.id : ''
     }, { merge: true });
@@ -16012,7 +16030,7 @@ let _openChecklistState = { items: [], loaded: false, staff: null };
 
 // Thứ trong tuần theo quy ước Management: 2..7 = T2..T7, 8 = CN
 function posWeekdayKey(d) {
-  const w = (d || new Date()).getDay();   // 0=CN
+  const w = (d || vnDate()).getDay();   // 0=CN
   return w === 0 ? 8 : w + 1;
 }
 
@@ -16240,7 +16258,7 @@ async function renderOpeningChecklist(silent) {
   // hay chưa, tưởng phải bấm thêm gì đó nữa.
   const _op = shiftState.opening;
   const shiftStatusBox = _op ? `
-    <div class="kc-signer" style="margin-bottom:14px;"><div><div style="font-size:11px;color:#15803d;">Ca đã mở lúc ${new Date(_op.createdAt).toLocaleTimeString('vi-VN')}</div><div style="font-size:14px;font-weight:800;">Quỹ đầu ca ${Number(_op.openingCash).toLocaleString('vi-VN')}đ</div></div><span style="color:#15803d;font-size:18px;">✓</span></div>` : `
+    <div class="kc-signer" style="margin-bottom:14px;"><div><div style="font-size:11px;color:#15803d;">Ca đã mở lúc ${vnDate(_op.createdAt).toLocaleTimeString('vi-VN')}</div><div style="font-size:14px;font-weight:800;">Quỹ đầu ca ${Number(_op.openingCash).toLocaleString('vi-VN')}đ</div></div><span style="color:#15803d;font-size:18px;">✓</span></div>` : `
     <div class="kc-sub" style="margin-bottom:14px;color:#c0392b;font-weight:800;">Chưa mở ca · Cần đếm tiền quỹ đầu ca</div>`;
 
   box.innerHTML = `
@@ -16381,7 +16399,7 @@ async function logAutoChecklistResolved(autoCheckKind, resolvedRef, staffEmp) {
     // Refill 30 món buổi sáng = 30 entry trùng, mảng phình mãi và log audit thành
     // rác. Mục đã ghi rồi thì bỏ qua — bằng chứng lần đầu là đủ.
     const already = new Set(((openDoc.exists ? openDoc.data().checklistDone : null) || []).map(x => x.id));
-    const now = new Date().toISOString();
+    const now = vnDate().toISOString();
     const entries = snap.docs.filter(d => !already.has(d.id)).map(d => ({
       id: d.id, label: d.data().label || '', checkedAt: now,
       staff: staffEmp ? staffEmp.fullName : '', staffEmployeeId: staffEmp ? staffEmp.id : '',
@@ -16410,7 +16428,7 @@ async function tickChecklistItem(itemId) {
   try {
     await fstore.collection('daily_openings_gieogieo').doc(shiftState.businessDate).set({
       checklistDone: firebase.firestore.FieldValue.arrayUnion({
-        id: itemId, label: it.label, checkedAt: new Date().toISOString(),
+        id: itemId, label: it.label, checkedAt: vnDate().toISOString(),
         staff: staffEmp.fullName, staffEmployeeId: staffEmp.id
       })
     }, { merge: true });
@@ -16448,7 +16466,7 @@ async function confirmSkipChecklistItem(itemId) {
   try {
     await fstore.collection('daily_openings_gieogieo').doc(shiftState.businessDate).set({
       checklistOverrides: firebase.firestore.FieldValue.arrayUnion({
-        id: itemId, label: it.label, reason: reason.trim(), at: new Date().toISOString(),
+        id: itemId, label: it.label, reason: reason.trim(), at: vnDate().toISOString(),
         staff: staffEmp.fullName, staffEmployeeId: staffEmp.id
       })
     }, { merge: true });
@@ -16553,7 +16571,7 @@ let _prevRetainedCache = null;
 async function loadPrevRetainedInfo() {
   if (_prevRetainedCache !== null) return _prevRetainedCache;
   for (let i = 1; i <= 7; i++) {
-    const d = new Date(); d.setDate(d.getDate() - i);
+    const d = vnDate(); d.setDate(d.getDate() - i);
     const key = posDateKey(d);
     try {
       const snap = await fstore.collection('daily_closings_gieogieo').doc(key).get();
@@ -16622,7 +16640,7 @@ async function _writeShiftOpen(staffEmp, openingCash, prev, mismatch) {
   try {
     await fstore.collection('daily_openings_gieogieo').doc(shiftState.businessDate).set({
       businessDate: shiftState.businessDate, openingCash, denominations: { ..._shiftOpenDenoms },
-      staff, staffEmployeeId: staffEmp.id, createdAt: new Date().toISOString(),
+      staff, staffEmployeeId: staffEmp.id, createdAt: vnDate().toISOString(),
       // [NEW] Vết đối chiếu với bàn giao hôm trước — Management xem lại được kể cả
       // khi khớp (prevVariance = 0), không chỉ lúc lệch.
       ...(prev ? {
@@ -16632,7 +16650,7 @@ async function _writeShiftOpen(staffEmp, openingCash, prev, mismatch) {
       } : {}),
       ...(mismatch ? { openingVarianceNote: mismatch.note, openingVarianceAcknowledged: true } : {})
     });
-    shiftState.opening = { businessDate: shiftState.businessDate, openingCash, staff, staffEmployeeId: staffEmp.id, createdAt: new Date().toISOString() };
+    shiftState.opening = { businessDate: shiftState.businessDate, openingCash, staff, staffEmployeeId: staffEmp.id, createdAt: vnDate().toISOString() };
     // [GIAO CA] Mở đoạn ca số 1 — ai đếm tiền quỹ đầu ngày, người đó giữ két.
     _segments = [];
     await ensureOpeningSegmentPOS();
@@ -16697,7 +16715,7 @@ async function renderShiftCloseReview() {
   // viên không hoang mang khi thấy cả khoản chi của ca trước trong danh sách dưới.
   const revSeg = currentSegmentPOS();
   const revFrom = revSeg && (Number(revSeg.seq) || 1) > 1
-    ? new Date(revSeg.startAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })
+    ? vnDate(revSeg.startAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })
     : null;
   const tong = list => list.reduce((t, e) => t + (Number(e.amount) || 0), 0);
   const dong = (e, i, mau) => `
@@ -16834,14 +16852,14 @@ async function _submitShiftCloseImpl() {
     // được số tiền đã đếm, bắt nhập chỉ làm kẹt nhân viên). Ghi chú là TUỲ CHỌN: có thì lưu để Quản lý đọc ở màn Tiền mặt.
     const lyDoLech = hetLuot ? ghiChuNhap : '';
 
-    const attempt = { actualCash, expectedCash: expected, variance: diff, passed, staff, staffEmployeeId: staffEmp.id, enteredAt: new Date().toISOString(), ...(lyDoLech ? { note: lyDoLech } : {}) };
+    const attempt = { actualCash, expectedCash: expected, variance: diff, passed, staff, staffEmployeeId: staffEmp.id, enteredAt: vnDate().toISOString(), ...(lyDoLech ? { note: lyDoLech } : {}) };
     const chotSo = passed || hetLuot;
     await closingRef.set({
       businessDate: shiftState.businessDate,
       status: passed ? 'cash_passed' : (hetLuot ? 'cash_variance_recorded' : 'pending'),
       attempts: firebase.firestore.FieldValue.arrayUnion(attempt),
       ...(chotSo ? {
-        cashPassedAt: new Date().toISOString(),
+        cashPassedAt: vnDate().toISOString(),
         finalActualCash: actualCash, finalExpectedCash: expected, finalVariance: diff,
         closingStaff: staff,
         varianceAccepted: hetLuot || null,
@@ -16855,7 +16873,7 @@ async function _submitShiftCloseImpl() {
       if (closeSeg) {
         try {
           await fstore.collection(SEG_COLL).doc(segDocId(shiftState.businessDate, closeSeg.seq)).set({
-            endAt: new Date().toISOString(), endType: 'close', endCash: actualCash,
+            endAt: vnDate().toISOString(), endType: 'close', endCash: actualCash,
             expectedEndCash: expected, variance: diff, withinTolerance: passed,
             ...(hetLuot ? { varianceAccepted: true, varianceNote: lyDoLech } : {}),
             ...(closeMetrics ? { cashSales: closeMetrics.cashSales, cashExpenses: closeMetrics.cashExpenses, unattributedSales: closeMetrics.unattributedSales || 0 } : {}),
@@ -16867,7 +16885,7 @@ async function _submitShiftCloseImpl() {
       }
       toast(passed ? '✅ Đã đối soát tiền mặt' : '⚠️ Đã ghi nhận mức lệch — Quản lý sẽ xem lại');
       shiftState.closing = { ...(shiftState.closing || {}), status: passed ? 'cash_passed' : 'cash_variance_recorded',
-        cashPassedAt: new Date().toISOString(), finalActualCash: actualCash, closingStaff: staff };
+        cashPassedAt: vnDate().toISOString(), finalActualCash: actualCash, closingStaff: staff };
       proceedAfterCashPass();
     } else {
       toast('⚠️ Số tiền chưa khớp — còn 1 lần đếm');
@@ -16913,11 +16931,12 @@ async function _submitShiftCloseImpl() {
 // không tiết lộ gì mới.
 // ============================================================
 function orderBankAmountPOS(o) {
-  if (o.method === 'TÍNH RIÊNG') {
-    return (o.splitGroups || []).filter(g => g.method === 'CHUYỂN KHOẢN').reduce((s, g) => s + (Number(g.total) || 0), 0);
-  }
-  if ((o.method || '').includes('CHUYỂN KHOẢN')) return Number(o.total) || 0;
-  return 0;
+  const adds = o.addons || [];
+  const addonTotal = adds.reduce((s,a)=>s+(Number(a.amount)||0),0);
+  const addonPaid = adds.filter(a=>(a.method||'').includes('CHUYỂN KHOẢN')).reduce((s,a)=>s+(Number(a.amount)||0),0);
+  // splitGroups chỉ chứa tiền gốc; total đã gồm các lần mua bổ sung.
+  if(o.method === 'TÍNH RIÊNG') return (o.splitGroups||[]).filter(g=>g.method==='CHUYỂN KHOẢN').reduce((s,g)=>s+(Number(g.total)||0),0)+addonPaid;
+  return ((o.method||'').includes('CHUYỂN KHOẢN') ? Math.max(0,(Number(o.total)||0)-addonTotal) : 0)+addonPaid;
 }
 function computeExpectedBankPOS(businessDate) {
   const displayDate = posDateKeyToDisplay(businessDate);
@@ -17098,7 +17117,7 @@ async function _submitHandoverCloseImpl() {
   if (missing.length) { toast(`⚠️ Còn ${missing.length} món chưa đếm`); return; }
   const staffEmp = await resolveStaffPinWorkedToday('handoverCloseStaff');
   if (!staffEmp) return;
-  const now = new Date().toISOString();
+  const now = vnDate().toISOString();
   const lines = _handoverCloseState.map(l => ({
     itemId: l.itemId, itemName: l.itemName, unit: l.unit, locationId: l.locationId,
     countedQty: Number(l.counted) || 0, countedAt: now,
@@ -17148,7 +17167,7 @@ let _prevHandoverCloseCache = null;
 async function loadPrevHandoverCloseInfo() {
   if (_prevHandoverCloseCache !== null) return _prevHandoverCloseCache;
   for (let i = 1; i <= 7; i++) {
-    const d = new Date(); d.setDate(d.getDate() - i);
+    const d = vnDate(); d.setDate(d.getDate() - i);
     const key = posDateKey(d);
     try {
       const snap = await fstore.collection('handover_counts_gieogieo').doc(`${key}_close`).get();
@@ -17342,7 +17361,7 @@ async function _submitHandoverOpenStage2Impl() {
 // lẫn luồng phải đếm lại), lưu handover_counts_gieogieo + tạo alerts_gieogieo
 // cho món vẫn lệch sau khi đã đếm lại (PHẦN 4.6/4.7 kế hoạch V3).
 async function _finalizeHandoverOpen() {
-  const now = new Date().toISOString();
+  const now = vnDate().toISOString();
   const lines = [];
   const alertJobs = [];
   for (const l of _handoverOpenState) {
@@ -17521,7 +17540,7 @@ async function confirmRefillOverride() {
     await fstore.collection('daily_closings_gieogieo').doc(shiftState.businessDate).set({
       refillOverrides: firebase.firestore.FieldValue.arrayUnion({
         items: _blockingRefillState.map(x => ({ itemId: x.itemId, itemName: x.itemName, curAtDest: x.curAtDest, min: x.min, destLocationName: x.destLocationName })),
-        reason, staff: staffEmp.fullName, staffEmployeeId: staffEmp.id, confirmedAt: new Date().toISOString()
+        reason, staff: staffEmp.fullName, staffEmployeeId: staffEmp.id, confirmedAt: vnDate().toISOString()
       })
     }, { merge: true });
     toast('⏭️ Đã ghi nhận — Quản lý sẽ thấy lý do này');
@@ -17656,7 +17675,7 @@ async function continueAfterRefillChecklist() {
     await fstore.collection('daily_closings_gieogieo').doc(shiftState.businessDate).set({
       refillChecklistOverrides: firebase.firestore.FieldValue.arrayUnion({
         items: _refillChecklistState.map(r => ({ itemId: r.itemId, itemName: r.itemName, unrefilled: r.unrefilled, destLocationName: r.destLocationName, isUncertain: !!r.isUncertain })),
-        staff: (shiftState.closing && shiftState.closing.closingStaff) || '', confirmedAt: new Date().toISOString()
+        staff: (shiftState.closing && shiftState.closing.closingStaff) || '', confirmedAt: vnDate().toISOString()
       })
     }, { merge: true });
   } catch (err) {
@@ -17759,7 +17778,7 @@ async function computePrepCountLinesPOS() {
     .where('status', 'in', ['active', 'cooking']).get();
   const batches = snap.docs.map(d => ({ id: d.id, ...d.data() }));
   const byPrep = {};
-  const now = new Date();
+  const now = vnDate();
   batches.forEach(b => {
     const k = b.prepId;
     if (!byPrep[k]) byPrep[k] = { prepId: k, prepName: b.prepName, unit: b.unit, batches: [], sysQty: 0, hasExpired: false, hasCooking: false };
@@ -17767,7 +17786,7 @@ async function computePrepCountLinesPOS() {
     if (b.status === 'cooking') { byPrep[k].hasCooking = true; return; }
     byPrep[k].sysQty += Number(b.qtyRemaining) || 0;
     // Hết hạn = quá mốc giờ, HOẶC loại 'endOfDay' (đóng ngày là hết hạn)
-    if (b.shelfLifeType === 'endOfDay' || (b.expiresAt && new Date(b.expiresAt) <= now)) byPrep[k].hasExpired = true;
+    if (b.shelfLifeType === 'endOfDay' || (b.expiresAt && vnDate(b.expiresAt) <= now)) byPrep[k].hasExpired = true;
   });
   const lines = Object.values(byPrep);
   lines.forEach(l => {
@@ -18001,7 +18020,7 @@ async function prepShortageSubmitAnswers(auto) {
     if (!staffEmp) return;
     _posSubmitBusy = true;
   }
-  const now = new Date().toISOString();
+  const now = vnDate().toISOString();
   const usedShort = {};
   try {
     // [CÂN THEO MÃ] NL có tem đã cân chốt cuối ca: tem đã mang số THẬT (đã gồm phần lấy đi bù),
@@ -18251,7 +18270,7 @@ function prepCountWeighBatch(i, batchId, bi) {
         const atMs = UnitEngine.clock.now();
         // Đọc sổ lỗi → VÔ HIỆU snapshot cũ của lô và KHÔNG nhận số cân mới (nếu không số cân mới sẽ ghép với sổ của lần cân trước).
         try {
-          const bk = await UnitEngine.duty.lotBookAtExact(l.prepId, batchId, atMs); (l.snaps = l.snaps || {})[batchId] = { book: bk.book, exact: bk.exact === true, at: new Date(atMs).toISOString() };
+          const bk = await UnitEngine.duty.lotBookAtExact(l.prepId, batchId, atMs); (l.snaps = l.snaps || {})[batchId] = { book: bk.book, exact: bk.exact === true, at: vnDate(atMs).toISOString() };
           if (bk.exact !== true && bk.reason === 'chua_xac_nhan_moi_may_da_cap_nhat') toast('⚠️ Quản lý chưa xác nhận mọi máy đã cập nhật — chưa chốt được số cân lại. Báo Quản lý.');
         }
         catch (err) {
@@ -18287,7 +18306,7 @@ async function prepCountToggleBatchDone(i, batchId) {
   }
   if (_prepVerifyMode && willDone) {
     const atMs = UnitEngine.clock.now();
-    try { const bk = await UnitEngine.duty.lotBookAtExact(l.prepId, batchId, atMs); (l.snaps = l.snaps || {})[batchId] = { book: bk.book, exact: bk.exact === true, at: new Date(atMs).toISOString() }; }
+    try { const bk = await UnitEngine.duty.lotBookAtExact(l.prepId, batchId, atMs); (l.snaps = l.snaps || {})[batchId] = { book: bk.book, exact: bk.exact === true, at: vnDate(atMs).toISOString() }; }
     catch (err) {
       console.warn('[duty] không chụp được sổ lô', err);
       if (l.snaps) delete l.snaps[batchId];
@@ -18336,7 +18355,7 @@ async function _submitPrepCountImpl() {
   try { shortageSnap = await prepShortageCollect(); }
   catch (err) { console.warn('[BTP âm] không chụp được khoản âm — bỏ qua đối chiếu lượt này', err); }
 
-  const now = new Date().toISOString();
+  const now = vnDate().toISOString();
   const lines = [];
   const jobs = [];
   const jobPrep = [];   // BTP của từng job (null = job phụ như cảnh báo) — job lỗi thì cân lại đúng BTP đó
@@ -18403,7 +18422,7 @@ async function dutyTasksHTMLPOS() {
   let tasks = [];
   try { await UnitEngine.duty.expireTasks(); tasks = await UnitEngine.duty.listOpenTasks(); } catch (err) { console.warn('[duty] không đọc được việc xác minh', err); }
   if (!tasks.length) return '';
-  const hm = iso => new Date(iso).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' });
+  const hm = iso => vnDate(iso).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' });
   return `<div class="wal-section" style="margin:0 0 12px;padding:16px;">
     ${caTitle('Cần cân lại', `<span style="font-size:13px;font-weight:800;color:var(--gd);background:var(--gl);border-radius:999px;padding:4px 10px;">${tasks.length}</span>`)}
     <div style="font-size:12.5px;color:#8A8A90;margin:-4px 0 10px;">Người khác phải cân lại. Làm khi rảnh — không ảnh hưởng bán hàng.</div>
@@ -18467,7 +18486,7 @@ async function _submitPrepVerifyImpl() {
   if (!emp) return;
   if (emp.id === task.firstById) { toast('⚠️ Cần người khác với người cân lần trước'); return; }
   try {
-    await UnitEngine.duty.verifyCommit(l, task, { now: new Date(UnitEngine.clock.now()).toISOString(), staff: emp, businessDate: posDateKey() });
+    await UnitEngine.duty.verifyCommit(l, task, { now: vnDate(UnitEngine.clock.now()).toISOString(), staff: emp, businessDate: posDateKey() });
     toast('✅ Đã ghi nhận số cân lại');
     // Chỉ dọn màn nếu nó vẫn là phiên đã gửi — mạng chậm mà nhân viên đã sang màn đếm kết ca thì không được xoá số đang cân.
     if (_prepVerifyMode && _prepVerifyMode.session === sess) exitPrepVerifyPOS();
@@ -18493,7 +18512,7 @@ async function loadMyDutyCasesPOS() {
   const box = document.getElementById('shiftBody'); showLoading(box);
   let list = [];
   try {
-    const to = posDateKey(), from = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+    const to = posDateKey(), from = vnDate(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
     list = (await UnitEngine.duty.listCases(from, to)).filter(c => (c.allocations || []).some(a => a.employeeId === emp.id) || (c.countedBy && c.countedBy.id === emp.id && c.status === 'dispute'));
   } catch (err) { box.innerHTML = '<div class="kc-card">Không tải được dữ liệu.</div><button onclick="openMyDutyCasesPOS()" class="kc-btn" style="background:#f1eee4;color:#666;">Thử lại</button>'; return; }
   _dutyMine = { emp, list };
@@ -18698,7 +18717,7 @@ function shiftWeighQtyError(l,u){
 }
 function shiftWeighUnitHTML(l,i,u,j){
   const code=escHtmlPos(u.code||'');
-  const mo=u.openedAt ? new Date(u.openedAt).toLocaleString('vi-VN',{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'2-digit'}) : '';
+  const mo=u.openedAt ? vnDate(u.openedAt).toLocaleString('vi-VN',{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'2-digit'}) : '';
   const btn=(label,fn,primary)=>`<button type="button" onclick="${fn}" style="flex:1;padding:11px 8px;border-radius:10px;font-weight:700;font-family:inherit;font-size:13px;${primary?'background:#0062AD;color:#fff;border:0':'background:#fff;color:#0062AD;border:1px solid #0062AD'}">${label}</button>`;
   const link=(label,fn)=>`<button type="button" onclick="${fn}" style="margin-top:8px;padding:6px 0;background:none;border:0;color:#888;font-size:12.5px;font-weight:700;font-family:inherit;text-decoration:underline">${label}</button>`;
   let body='';
@@ -18838,7 +18857,7 @@ async function shiftWeighCaptureBaselinePOS(i,j){
       toast('⚠️ Mã '+u.code+' không còn đang mở — bấm "Tải lại mã" của món này');
       shiftWeighRerenderLinePOS(i); return;
     }
-    u.gone=false; u.baseline=round2(Number(v.unitBase)||0); u.baselineSig=UnitEngine.shift.absSig(v); u.countedAt=new Date().toISOString();
+    u.gone=false; u.baseline=round2(Number(v.unitBase)||0); u.baselineSig=UnitEngine.shift.absSig(v); u.countedAt=vnDate().toISOString();
   }catch(err){
     if(my===u.seq) u.baseline=null;
     console.warn('[Cân cuối ca] không đọc được mốc sổ của mã', u.code, err);
@@ -18882,7 +18901,7 @@ const _swHealCleanDays = new Set();
 async function shiftWeighHealRecentPOS(day, savedCloseDoc, includeToday){
   const days=[];
   if(includeToday) days.push(day);
-  [1,2].forEach(n=>{ const d=new Date(day+'T12:00:00'); d.setDate(d.getDate()-n); days.push(posDateKey(d)); });
+  [1,2].forEach(n=>{ const d=vnDate(day+'T12:00:00'); d.setDate(d.getDate()-n); days.push(posDateKey(d)); });
   for(const d of days){
     if(d!==day && _swHealCleanDays.has(d)) continue;
     try{
@@ -18959,7 +18978,7 @@ function shiftInventoryCountSetQtyPOS(i,value,manual){
   const l=_shiftInventoryCountStatePOS.lines[i];
   if(!l)return;
   l.counted=value===''?null:Number(value);
-  l.countedAt=l.counted===null?null:new Date().toISOString();
+  l.countedAt=l.counted===null?null:vnDate().toISOString();
   if(manual)l.weighings=[];
   kcStepRefresh('kcInv');
 }
@@ -18967,7 +18986,7 @@ function shiftInventoryCountWeighPOS(i){
   const l=_shiftInventoryCountStatePOS.lines[i];
   if(!l)return;
   openWeighPad({itemId:l.itemId,unit:l.unit,title:'Cân '+l.itemName+' còn lại',onDone:(total,weighings)=>{
-    l.counted=total;l.countedAt=new Date().toISOString();l.weighings=weighings||[];renderShiftInventoryCountCardPOS();
+    l.counted=total;l.countedAt=vnDate().toISOString();l.weighings=weighings||[];renderShiftInventoryCountCardPOS();
   }});
 }
 function shiftInventoryOpenBackPOS(){
@@ -19021,7 +19040,7 @@ async function submitShiftInventoryCountPOS(){
     // `saved=true` sau batch.commit() ném TypeError dù phiếu ĐÃ lưu: nhân viên thấy báo lỗi và
     // luồng kết ca không đi tiếp tới khi bấm lại.
     const savedDoc=snap.exists?snap.data():{};
-    const now=new Date().toISOString();
+    const now=vnDate().toISOString();
     const counted=lines.map(l=>l.mode==='tem' ? shiftWeighSavedLinePOS(l,now)
       : ({itemId:l.itemId,itemName:l.itemName,unit:l.unit,
       expectedQty:l.expectedQty,countedQty:l.counted,countedAt:l.countedAt||now,weighings:l.weighings}));
@@ -19093,7 +19112,7 @@ async function _continueAfterShiftInventoryClosePOS() {
   try {
     await fstore.collection('daily_closings_gieogieo').doc(shiftState.businessDate).set({
       status: 'bank_passed',
-      bankPassedAt: new Date().toISOString(),
+      bankPassedAt: vnDate().toISOString(),
       // Cờ trung thực cho Quản lý: con số này do HỆ THỐNG tự chốt, KHÔNG phải nhân viên xác minh.
       bankAutoConfirmed: true,
       finalExpectedBank: expectedBank,
@@ -19103,7 +19122,7 @@ async function _continueAfterShiftInventoryClosePOS() {
     }, { merge: true });
     shiftState.closing = shiftState.closing || {};
     shiftState.closing.status = 'bank_passed';
-    shiftState.closing.bankPassedAt = new Date().toISOString();
+    shiftState.closing.bankPassedAt = vnDate().toISOString();
   } catch (err) {
     // Không chặn kết ca vì lỗi mạng ở bước ghi nhận này — tiền mặt (bước quan trọng) đã khớp rồi.
     console.warn('[Kết ca] Không lưu được trạng thái chuyển khoản tự xác nhận:', err);
@@ -19165,15 +19184,15 @@ async function _submitShiftHandoverImpl(actualCash) {
   try {
     await fstore.collection('handover_records_gieogieo').doc(shiftState.businessDate).set({
       businessDate: shiftState.businessDate, actualCash, retainedAmount, handedOverAmount,
-      recipient, recipientEmployeeId: recipientEmp.id, staff: shiftState.closing.closingStaff || '', confirmedAt: new Date().toISOString()
+      recipient, recipientEmployeeId: recipientEmp.id, staff: shiftState.closing.closingStaff || '', confirmedAt: vnDate().toISOString()
     });
     await fstore.collection('daily_closings_gieogieo').doc(shiftState.businessDate).set({
-      status: 'handed_over', handoverAt: new Date().toISOString(),
+      status: 'handed_over', handoverAt: vnDate().toISOString(),
       retainedAmount, handedOverAmount, handoverRecipient: recipient
     }, { merge: true });
     toast('✅ Đã bàn giao — hoàn tất ca hôm nay');
     shiftState.closing = { ...(shiftState.closing || {}), status: 'handed_over',
-      handoverAt: new Date().toISOString(), retainedAmount, handedOverAmount, handoverRecipient: recipient };
+      handoverAt: vnDate().toISOString(), retainedAmount, handedOverAmount, handoverRecipient: recipient };
     renderShiftDashboard();
   } catch (err) {
     console.error('submitShiftHandover failed', err);
@@ -19250,11 +19269,11 @@ async function ensureOpeningSegmentPOS() {
     businessDate, seq: 1,
     custodianId: shiftState.opening.staffEmployeeId || '',
     custodianName: shiftState.opening.staff || '',
-    startAt: shiftState.opening.createdAt || new Date().toISOString(),
+    startAt: shiftState.opening.createdAt || vnDate().toISOString(),
     startType: 'open',
     startCash: Number(shiftState.opening.openingCash) || 0,
     status: 'open',
-    createdAt: new Date().toISOString()
+    createdAt: vnDate().toISOString()
   };
   try {
     await fstore.collection(SEG_COLL).doc(segDocId(businessDate, 1)).set(seg, { merge: true });
@@ -19427,7 +19446,7 @@ function renderHandoverIntroPOS() {
 function beginHandoverCountPOS() {
   const now = Date.now();
   _handover.cutMs = now;
-  _handover.cutIso = new Date(now).toISOString();
+  _handover.cutIso = vnDate(now).toISOString();
   _handover.phase = 'out';
   startShiftWorkflowPOS('handover', _handover.cutIso);
   // Băng chỉ bật khi rời màn này sang màn bán hàng (xem showScreen) — bật ngay ở
@@ -19500,8 +19519,8 @@ async function _submitHandoverCountImplPOS() {
     if (a.id === b.id) { toast('⚠️ Hai chữ ký phải là hai người khác nhau'); return; }
     if (String(seg.custodianId || '') !== String(a.id)) { toast(`⚠️ Ô đầu phải là PIN của người đang giữ két (${seg.custodianName})`); return; }
     const total = cfDenomTotal(h.outDenoms);
-    h.out = { denoms: { ...h.outDenoms }, total, byId: a.id, byName: a.fullName, at: new Date().toISOString() };
-    h.in = { denoms: { ...h.outDenoms }, total, byId: b.id, byName: b.fullName, at: new Date().toISOString() };
+    h.out = { denoms: { ...h.outDenoms }, total, byId: a.id, byName: a.fullName, at: vnDate().toISOString() };
+    h.in = { denoms: { ...h.outDenoms }, total, byId: b.id, byName: b.fullName, at: vnDate().toISOString() };
     h.countMode = 'joint';
     await _afterHandoverAgreedPOS(total);
     return;
@@ -19514,7 +19533,7 @@ async function _submitHandoverCountImplPOS() {
       toast(`⚠️ Người giao phải là người đang giữ két (${seg.custodianName || '—'})`);
       return;
     }
-    h.out = { denoms: { ...h.outDenoms }, total: cfDenomTotal(h.outDenoms), byId: emp.id, byName: emp.fullName, at: new Date().toISOString() };
+    h.out = { denoms: { ...h.outDenoms }, total: cfDenomTotal(h.outDenoms), byId: emp.id, byName: emp.fullName, at: vnDate().toISOString() };
     h.phase = 'in';
     h.inDenoms = cfEmptyDenoms();
     delete _pinFieldForceAsk.handoverSigner;
@@ -19527,7 +19546,7 @@ async function _submitHandoverCountImplPOS() {
   if (!emp) return;
   if (String(emp.id) === String(h.out.byId)) { toast('⚠️ Người nhận phải là người khác — không tự ký cả hai lượt'); return; }
   const inTotal = cfDenomTotal(h.inDenoms);
-  h.in = { denoms: { ...h.inDenoms }, total: inTotal, byId: emp.id, byName: emp.fullName, at: new Date().toISOString() };
+  h.in = { denoms: { ...h.inDenoms }, total: inTotal, byId: emp.id, byName: emp.fullName, at: vnDate().toISOString() };
 
   if (inTotal !== h.out.total) {
     // Két chỉ có MỘT số tiền thật — hai bản lệch nhau nghĩa là có người đếm nhầm,
@@ -19554,7 +19573,7 @@ async function _afterHandoverAgreedPOS(agreedTotal) {
   if (late.length) {
     h.restartedByBill++;
     h.cutMs = Date.now();
-    h.cutIso = new Date(h.cutMs).toISOString();
+    h.cutIso = vnDate(h.cutMs).toISOString();
     h.round++;
     h.phase = 'out';
     h.outDenoms = cfEmptyDenoms();
@@ -19596,7 +19615,7 @@ async function _finishHandoverPOS(endCash, metrics, variance) {
   const tolerance = await handoverTolerancePOS();
   const withinTolerance = Math.abs(variance) <= tolerance;
   const nextSeq = (Number(seg.seq) || 1) + 1;
-  const nowIso = new Date().toISOString();
+  const nowIso = vnDate().toISOString();
   try {
     await fstore.collection(SEG_COLL).doc(segDocId(seg.businessDate, seg.seq)).set({
       endAt: h.cutIso, endType: 'handover', endCash,
@@ -19681,7 +19700,7 @@ function renderSegmentBlockPOS() {
         <span style="width:48px;height:48px;border-radius:15px;background:var(--gl);color:var(--gd);display:flex;align-items:center;justify-content:center;flex-shrink:0;">${caIcon('key', 24)}</span>
         <div style="min-width:0;">
           <div style="font-size:19px;font-weight:800;color:var(--td);line-height:1.25;">${escHtmlPos(seg.custodianName || '—')}</div>
-          <div style="font-size:13px;color:#8A8A90;margin-top:3px;">Đoạn ${seg.seq}${seg.seq > 1 ? ` · nhận ${(Number(seg.startCash) || 0).toLocaleString('vi-VN')}đ lúc ${new Date(seg.startAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}` : ' · từ lúc mở ca'}</div>
+          <div style="font-size:13px;color:#8A8A90;margin-top:3px;">Đoạn ${seg.seq}${seg.seq > 1 ? ` · nhận ${(Number(seg.startCash) || 0).toLocaleString('vi-VN')}đ lúc ${vnDate(seg.startAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}` : ' · từ lúc mở ca'}</div>
         </div>
       </div>
       ${nguoiKhac.length ? `<div style="font-size:13px;color:#8A8A90;margin-top:12px;padding-top:12px;border-top:1px solid #F0EDE6;">Cùng ca: <b style="color:var(--td);">${nguoiKhac.map(s => escHtmlPos(s.employeeName)).join(', ')}</b></div>` : ''}
@@ -19896,7 +19915,7 @@ async function tickCloseChecklistItem(itemId) {
   try {
     await fstore.collection('daily_closings_gieogieo').doc(shiftState.businessDate).set({
       closeChecklistDone: firebase.firestore.FieldValue.arrayUnion({
-        id: itemId, label: it.label, checkedAt: new Date().toISOString(),
+        id: itemId, label: it.label, checkedAt: vnDate().toISOString(),
         staff: staffEmp.fullName, staffEmployeeId: staffEmp.id
       })
     }, { merge: true });
@@ -19925,7 +19944,7 @@ async function _doSkipCloseChecklist(itemId, it, reason) {
   try {
     await fstore.collection('daily_closings_gieogieo').doc(shiftState.businessDate).set({
       closeChecklistOverrides: firebase.firestore.FieldValue.arrayUnion({
-        id: itemId, label: it.label, reason, at: new Date().toISOString(),
+        id: itemId, label: it.label, reason, at: vnDate().toISOString(),
         staff: staffEmp.fullName, staffEmployeeId: staffEmp.id
       })
     }, { merge: true });
@@ -19990,7 +20009,7 @@ async function _submitDailyCloseImpl() {
     toast(`⚠️ Phiên kết ca này của ${_closeSession.fullName} — phải chính người đó ký xác nhận`);
     return;
   }
-  const closedAt = new Date().toISOString();
+  const closedAt = vnDate().toISOString();
   // Quản lý dùng số này để so ai kết ca 10 phút, ai kết ca cả tiếng. POS chỉ
   // hiện con số trần, không kèm nhận xét gì.
   const phutKetCa = (_closeSession && _closeSession.startedAt)
@@ -20058,7 +20077,7 @@ async function closeStaleEmployeeShifts() {
         const doc = await fstore.collection('daily_closings_gieogieo').doc(dateKey).get();
         if (doc.exists && doc.data().closedAt) mark = doc.data().closedAt;
       } catch (err) { console.warn('closeStaleEmployeeShifts: không đọc được đóng ngày', dateKey, err); }
-      if (!mark) mark = new Date(dateKey + 'T23:59:00').toISOString();
+      if (!mark) mark = vnDate(dateKey + 'T23:59:00').toISOString();
       await Promise.all(byDate[dateKey].map(s =>
         fstore.collection('employee_shifts_gieogieo').doc(s.id).update({
           checkedOutAt: mark, autoCheckOut: true,
@@ -20660,7 +20679,7 @@ async function reportMissingRecipePOS(skipped) {
     const docId = ('missing_recipe_' + day + '_' + key).replace(/[^\w\-]/g, '_').slice(0, 180);
     jobs.push(fstore.collection('alerts_gieogieo').doc(docId).set({
       type: 'missing_recipe', severity: 'warning', status: 'new',
-      businessDate: day, createdAt: new Date().toISOString(),
+      businessDate: day, createdAt: vnDate().toISOString(),
       title: `Bán "${ten}" nhưng CHƯA trừ kho được`,
       itemName: ten, size: sk.size || '', reason: sk.reason || '',
       // increment để biết bán bao nhiêu lượt rồi — số càng lớn, kho lệch càng nhiều
@@ -20723,7 +20742,7 @@ async function _applySalesConsumptionCorePOS(order, orderId, businessDate) {
       // Vẫn ghi trace rỗng: app Quản lý dựa vào trace để biết POS đã xử lý kho xong cho bill này.
       UnitEngine.consume.writeTrace(orderId, {
         orderId, billCode: (order && order.billCode) || '', businessDate: businessDate || posDateKey(),
-        createdAt: new Date().toISOString(), ingredients: {}, preps: {}, noStockLines: true
+        createdAt: vnDate().toISOString(), ingredients: {}, preps: {}, noStockLines: true
       }, { merge: true }).catch(() => {});
       return;
     }
@@ -20830,7 +20849,7 @@ async function _applySalesConsumptionCorePOS(order, orderId, businessDate) {
     // đối chiếu nếu thiếu doc này).
     UnitEngine.consume.writeTrace(orderId, {
       orderId, billCode: (order && order.billCode) || '', businessDate: businessDate || posDateKey(),
-      createdAt: new Date().toISOString(),
+      createdAt: vnDate().toISOString(),
       ingredients: Object.fromEntries(ingredientIds.map(id => {
         const a = ingredientAllocations[id] || { qty: Math.abs(agg[id]), allocations: [] };
         return [id, { qty: a.qty, allocations: a.allocations, untracked: !a.allocations.length }];
@@ -20866,7 +20885,7 @@ async function _applySalesConsumptionCorePOS(order, orderId, businessDate) {
     // lúc kiểm kê thấy "hao hụt" mà thật ra là bill bị nuốt trong lúc mất mạng. Ghi cảnh báo bền.
     fstore.collection('alerts_gieogieo').doc(('gogs_outer_fail_' + orderId).replace(/[^\w\-]/g, '_').slice(0, 180)).set({
       type: 'gogs_consumption_outer_failure', severity: 'danger', status: 'new',
-      businessDate: businessDate || posDateKey(), createdAt: new Date().toISOString(),
+      businessDate: businessDate || posDateKey(), createdAt: vnDate().toISOString(),
       title: `Đơn ${(order && order.billCode) || orderId} bán xong nhưng KHÔNG trừ được kho`,
       orderId, billCode: (order && order.billCode) || '',
       errorMessage: String((err && (err.message || err.code)) || err || ''),
@@ -20887,7 +20906,7 @@ async function _ueWarnGogsConsumptionFailed(orderId, order, failedLines) {
     const docId = ('gogs_consumption_failed_' + orderId).replace(/[^\w\-]/g, '_').slice(0, 180);
     await fstore.collection('alerts_gieogieo').doc(docId).set({
       type: 'gogs_consumption_failed', severity: 'danger', status: 'new',
-      businessDate: day, createdAt: new Date().toISOString(),
+      businessDate: day, createdAt: vnDate().toISOString(),
       title: `Bill ${(order && order.billCode) || orderId} — ${failedLines.length} dòng trừ kho lỗi`,
       orderId, billCode: (order && order.billCode) || '',
       failedItems: failedLines.map(l => `${l.isPrep ? 'BTP' : 'NL'} ${l.id}: ${l.reason}`).join('; '),
@@ -20927,7 +20946,7 @@ async function applyBackfillConsumptionNoStockEffect(order, orderId, businessDat
     // biết ngày đó vẫn còn thiếu breakdown tiêu hao của bill này.
     fstore.collection('alerts_gieogieo').doc(('gogs_backfill_outer_fail_' + orderId).replace(/[^\w\-]/g, '_').slice(0, 180)).set({
       type: 'gogs_backfill_outer_failure', severity: 'warning', status: 'new',
-      businessDate: businessDate || posDateKey(), createdAt: new Date().toISOString(),
+      businessDate: businessDate || posDateKey(), createdAt: vnDate().toISOString(),
       title: `Bổ sung bill ${(order && order.billCode) || orderId} nhưng KHÔNG ghi được sổ tiêu hao`,
       orderId, billCode: (order && order.billCode) || '',
       errorMessage: String((err && (err.message || err.code)) || err || ''),
@@ -21522,7 +21541,7 @@ async function poReceiveUpdatePODoc(poId, deltasByItemId, idemKey) {
     const allReceived = lines.every(l => (Number(l.receivedGoodBase) || 0) >= (Number(l.qtyExpectedBase) || 0));
     const anyReceived = lines.some(l => (Number(l.receivedGoodBase) || 0) > 0);
     const status = allReceived ? 'received' : (anyReceived ? 'partial' : data.status);
-    t.update(poRef, { lines, status, updatedAt: new Date().toISOString() });
+    t.update(poRef, { lines, status, updatedAt: vnDate().toISOString() });
   });
 }
 
@@ -21760,7 +21779,7 @@ async function _submitPoReceiveImpl() {
         })),
         staff, staffEmployeeId: staffEmp.id, note: generalNote, photoUrls,
         failedCount, totalLines: computed.length,
-        businessDate: posDateKey(), nowISO: new Date().toISOString()
+        businessDate: posDateKey(), nowISO: vnDate().toISOString()
       });
     }
 
@@ -21790,7 +21809,7 @@ async function _submitPoReceiveImpl() {
           type: 'po_receive_sync_failed', severity: 'danger', status: 'new',
           title: 'Đã nhận hàng nhưng chưa cập nhật được đơn đặt hàng',
           note: `Phiếu nhận ${idemKey} (đơn ${poReceiveState.poId}): kho và phiếu nhận đã ghi đúng, nhưng số "đã nhận" trên đơn đặt hàng CHƯA được cập nhật (${(err && (err.message || err)) || 'lỗi không rõ'}). Nhân viên bấm "Ghi nhận" lại là hệ thống tự chạy nốt bước này (không cộng đúp); nếu không, đối soát tay trên tab Đặt hàng.`,
-          poId: poReceiveState.poId, recordId: idemKey, at: new Date().toISOString()
+          poId: poReceiveState.poId, recordId: idemKey, at: vnDate().toISOString()
         }, { merge: true }).catch(() => {});
       }
     }
@@ -21898,14 +21917,14 @@ function stPickConfig(ym, docs) {
 function stDailyTargets(ym, cfg) {
   const out = {};
   if (!cfg) return out;
-  const [y, m] = ym.split('-').map(Number), n = new Date(y, m, 0).getDate();
+  const [y, m] = ym.split('-').map(Number), n = vnDate(y, m, 0).getDate();
   const off = new Set(cfg.offDays || []), keys = [];
   for (let i = 1; i <= n; i++) keys.push(ym + '-' + String(i).padStart(2, '0'));
   const soNgayBan = keys.filter(k => !off.has(k)).length;
   keys.forEach(k => {
     if (off.has(k)) out[k] = 0;
     else if (cfg.mode === 'month') out[k] = soNgayBan ? (Number(cfg.monthTotal) || 0) / soNgayBan : 0;
-    else out[k] = Number((cfg.weekday || {})[String(new Date(k + 'T12:00:00').getDay())]) || 0;
+    else out[k] = Number((cfg.weekday || {})[String(vnDate(k + 'T12:00:00').getDay())]) || 0;
   });
   return out;
 }
@@ -21926,9 +21945,9 @@ async function stLoadConfig(ym) {
 // + RT, gộp theo khoá bill. RT của 3 ngày gần nhất đang có listener nên đọc lại không tốn lượt mạng.
 // Lỗi đọc thì NÉM — không chụp số 0 giả.
 async function stRevenueForDate(dateKey) {
-  const d = new Date(dateKey + 'T12:00:00');
+  const d = vnDate(dateKey + 'T12:00:00');
   const month = MONTH_KEYS[d.getMonth()], day = String(d.getDate()).padStart(2, '0');
-  const tuoi = Math.round((new Date(posDateKey() + 'T12:00:00') - d) / 86400000);
+  const tuoi = Math.round((vnDate(posDateKey() + 'T12:00:00') - d) / 86400000);
   const byKey = {};
   if (tuoi >= 3) {
     const a = await fstore.collection('orders_gieogieo_archive').doc(month + '_' + day + '_' + d.getFullYear()).get();
@@ -21943,12 +21962,12 @@ async function stRevenueForDate(dateKey) {
 // Chụp các ngày trong tháng (trước hôm nay) chưa có số. Ngày nào đọc lỗi thì bỏ qua, lượt sau chụp tiếp.
 async function stEnsureSnapshots(ym, days) {
   const today = posDateKey(), out = { ...(days || {}) }, moi = {};
-  const [y, m] = ym.split('-').map(Number), n = new Date(y, m, 0).getDate();
+  const [y, m] = ym.split('-').map(Number), n = vnDate(y, m, 0).getDate();
   for (let i = 1; i <= n; i++) {
     const k = ym + '-' + String(i).padStart(2, '0');
     if (k >= today) break;
     if (out[k]) continue;
-    try { moi[k] = { ...(await stRevenueForDate(k)), at: new Date().toISOString() }; out[k] = moi[k]; }
+    try { moi[k] = { ...(await stRevenueForDate(k)), at: vnDate().toISOString() }; out[k] = moi[k]; }
     catch (err) { console.warn('[Target NV] chưa chụp được ngày', k, err); }
   }
   if (Object.keys(moi).length) {
@@ -22057,19 +22076,19 @@ function _attachRtListener(month, day) {
 
 function _refreshRtListeners() {
   // Gắn listener cho hôm nay + 2 ngày trước (tổng 3 ngày)
-  const now = new Date();
+  const now = vnDate();
   for (let i = 0; i <= 2; i++) {
-    const d = new Date(now); d.setDate(d.getDate() - i);
+    const d = vnDate(now); d.setDate(d.getDate() - i);
     _attachRtListener(MONTH_KEYS[d.getMonth()], String(d.getDate()).padStart(2, '0'));
   }
 }
 
 function loadRecentOrders() {
   // Gắn listener real-time (nếu chưa có); trả về Promise khi data ban đầu đã load xong
-  const now = new Date();
+  const now = vnDate();
   const jobs = [];
   for (let i = 0; i <= 2; i++) {
-    const d = new Date(now); d.setDate(d.getDate() - i);
+    const d = vnDate(now); d.setDate(d.getDate() - i);
     const month = MONTH_KEYS[d.getMonth()];
     const day = String(d.getDate()).padStart(2, '0');
     const path = 'orders_gieogieo/' + month + '/' + day;
@@ -22101,9 +22120,9 @@ function loadRecentOrders() {
 }
 
 // Tự động gắn lại listener khi qua ngày mới (check mỗi phút)
-let _lastListenerDay = new Date().getDate();
+let _lastListenerDay = vnDate().getDate();
 setInterval(() => {
-  const today = new Date().getDate();
+  const today = vnDate().getDate();
   if (today !== _lastListenerDay) {
     _lastListenerDay = today;
     _refreshRtListeners(); // gắn thêm listener cho ngày mới
@@ -22147,11 +22166,11 @@ function loadArchiveDates(dateList) {
 // Tạo danh sách các ngày trong khoảng [fromDate, toDate] (Date objects)
 // bỏ qua 3 ngày gần nhất (đã có trong RT/RAM)
 function archiveDatesInRange(fromDate, toDate) {
-  const cutoff = new Date();
+  const cutoff = vnDate();
   cutoff.setDate(cutoff.getDate() - 2);
   cutoff.setHours(0, 0, 0, 0);
   const result = [];
-  const cur = new Date(fromDate);
+  const cur = vnDate(fromDate);
   cur.setHours(0, 0, 0, 0);
   while (cur <= toDate) {
     if (cur < cutoff) {
@@ -22223,7 +22242,7 @@ function showScreen(id) {
     }
   }
   if (id === 'hi') {
-    const now = new Date();
+    const now = vnDate();
     const from = weekStart();
     loadArchiveDates(archiveDatesInRange(from, now)).then(() => renderH());
     return;
@@ -22304,7 +22323,7 @@ async function confirmCashDrawerOpenPOS() {
   document.getElementById('cashDrawerSheet')?.remove();
   // Ghi nhật ký SAU khi lệnh đã đi (két đã bật). Mất mạng: Firestore tự xếp hàng ghi khi có mạng lại.
   fstore.collection('cash_drawer_logs_gieogieo').add({
-    businessDate: posDateKey(), createdAt: new Date().toISOString(),
+    businessDate: posDateKey(), createdAt: vnDate().toISOString(),
     employeeId: emp.id || '', employeeName: emp.fullName || '', reason: _cashDrawerReason, note,
     storeId: (window.GieoData && GieoData.storeId()) || 'gg01'
   }).catch(err => { console.warn('[Mở két] ghi nhật ký lỗi', err); toast('⚠️ Két đã mở nhưng CHƯA ghi được nhật ký — báo Quản lý'); });
@@ -22362,7 +22381,7 @@ function posStoreLoginScreen(coTheDong) {
         + '<button id="psYes" style="width:100%;margin-top:14px;padding:14px;border:0;border-radius:12px;background:#27ae60;color:#fff;font-size:15px;font-weight:800">Đúng cửa hàng này — vào bán hàng</button>'
         + '<button id="psNo" style="width:100%;margin-top:8px;padding:12px;border:0;border-radius:12px;background:#eee;color:#333;font-size:14px;font-weight:700">Không phải — nhập lại</button></div>';
       $('psYes').onclick = () => {
-        try { GieoData.binding.save({ storeId: st.id, code, name: st.name || '', address: st.address || '', at: new Date().toISOString() }); }
+        try { GieoData.binding.save({ storeId: st.id, code, name: st.name || '', address: st.address || '', at: vnDate().toISOString() }); }
         catch (e) { msg('Máy không lưu được (bộ nhớ trình duyệt bị chặn) — không vào được'); return; }
         location.reload();
       };
@@ -22587,7 +22606,7 @@ function cfRenderDashboard() {
     <div class="wal-section">
       ${midList.length ? midList.map(m => `
         <div style="display:flex;justify-content:space-between;padding:6px 0;font-size:13px;">
-          <span style="color:var(--gt);">${new Date(m.enteredAt).toLocaleTimeString('vi-VN')}</span>
+          <span style="color:var(--gt);">${vnDate(m.enteredAt).toLocaleTimeString('vi-VN')}</span>
           <span style="font-weight:700;">${m.total.toLocaleString('vi-VN')}đ</span>
         </div>
       `).join('') : `<div style="color:#bbb;font-size:13px;text-align:center;padding:8px 0;">Chưa đối soát lần nào</div>`}
@@ -22609,7 +22628,7 @@ function cfRenderDashboard() {
     <div class="wal-section">
       ${_cfDoc.close ? `
         <div style="display:flex;justify-content:space-between;padding:6px 0;">
-          <span style="color:var(--gt);font-size:13px;">Đã kết ca lúc ${new Date(_cfDoc.close.enteredAt).toLocaleTimeString('vi-VN')}</span>
+          <span style="color:var(--gt);font-size:13px;">Đã kết ca lúc ${vnDate(_cfDoc.close.enteredAt).toLocaleTimeString('vi-VN')}</span>
           <span style="font-weight:700;">${_cfDoc.close.total.toLocaleString('vi-VN')}đ</span>
         </div>
         <div style="display:flex;justify-content:space-between;padding:6px 0;">
@@ -23232,7 +23251,7 @@ const CAKE_ACCOUNT_NO = '0977570035';
 const CAKE_ACCOUNT_NAME = 'NGUYEN HUYNH LONG';
 
 function genBankOrderId() {
-  const now = new Date();
+  const now = vnDate();
   const p = n => String(n).padStart(2, '0');
   // [CHANGED] Thêm giây (trước đây chỉ tới phút) — vì giờ "Tính riêng" có thể tạo
   // nhiều mã QR liên tiếp trong cùng 1 phút (mỗi khách trả 1 phần), nếu chỉ tính
@@ -23546,8 +23565,8 @@ async function confirmAddMember() {
       stamps_today: 0,
       last_stamp_date: '',
       free_drink_available: 0,
-      joinDate: new Date().toISOString(),
-      lastVisit: new Date().toISOString(),
+      joinDate: vnDate().toISOString(),
+      lastVisit: vnDate().toISOString(),
       source: 'pos_gieogieo'
     });
 
@@ -23777,7 +23796,7 @@ async function _finalizeStampFreeAfterPay(billId, items) {
         const custRef = fstore.collection('customers').doc(phone);
         const snap = await t.get(custRef);
         if (!snap.exists) {
-          if (markerRef) t.set(markerRef, { phone, at: new Date().toISOString(), skipped: 'customer_not_found' });
+          if (markerRef) t.set(markerRef, { phone, at: vnDate().toISOString(), skipped: 'customer_not_found' });
           return;
         }
         const data = snap.data();
@@ -23791,7 +23810,7 @@ async function _finalizeStampFreeAfterPay(billId, items) {
           const bonus = Math.floor(curStamp / 6);
           t.update(custRef, { free_drink_available: bonus - 1, stamp_count: curStamp % 6 });
         }
-        if (markerRef) t.set(markerRef, { phone, at: new Date().toISOString() });
+        if (markerRef) t.set(markerRef, { phone, at: vnDate().toISOString() });
       });
     }, 3);
   } catch(e) {
@@ -23801,7 +23820,7 @@ async function _finalizeStampFreeAfterPay(billId, items) {
         type: 'stampfree_failed', severity: 'danger', status: 'new',
         title: 'Trừ ly miễn phí/stamp thất bại',
         note: 'Bill ' + billId + ' đã hưởng đổi ly miễn phí/stamp cho khách ' + phone + ' nhưng ghi DB trừ thất bại sau nhiều lần thử lại — cần đối soát tay (kiểm tra free_drink_available/stamp_count của khách này).',
-        billId, phone, at: new Date().toISOString()
+        billId, phone, at: vnDate().toISOString()
       }, { merge: true }).catch(() => {});
     }
   } finally {
@@ -23816,7 +23835,7 @@ async function _finalizeStampFreeAfterPay(billId, items) {
 
 /** Lấy ngày hôm nay dạng 'YYYY-MM-DD' (giờ VN) */
 function loyaltyTodayStr() {
-  const now = new Date();
+  const now = vnDate();
   const y = now.getFullYear();
   const m = String(now.getMonth()+1).padStart(2,'0');
   const d = String(now.getDate()).padStart(2,'0');
@@ -23864,7 +23883,7 @@ function _loyaltyAlertId(entry) { return 'loyalty_failed_' + entry.kind + '_' + 
 
 // Ghi nợ quyền lợi: localStorage TRƯỚC (chắc chắn ghi được), rồi mới thử ghi Firestore.
 async function _loyaltyGhiNo(entry, err) {
-  const e = Object.assign({ at: new Date().toISOString() }, entry);
+  const e = Object.assign({ at: vnDate().toISOString() }, entry);
   if (e.billId) {
     const arr = _loyaltyPendingRead().filter(x => !(x && x.billId === e.billId && x.kind === e.kind));
     arr.push(e);
@@ -23911,9 +23930,9 @@ async function loyaltyFlushPending() {
       }
       _loyaltyPendingDrop(e.billId, e.kind);
       fstore.collection('loyalty_pending_retry_gieogieo').doc(e.billId + '_' + e.kind)
-        .set({ status: 'done', doneAt: new Date().toISOString() }, { merge: true }).catch(() => {});
+        .set({ status: 'done', doneAt: vnDate().toISOString() }, { merge: true }).catch(() => {});
       fstore.collection('alerts_gieogieo').doc(_loyaltyAlertId(e))
-        .set({ status: 'resolved', resolvedAt: new Date().toISOString(), resolveNote: 'POS đã tự tích lại thành công.' }, { merge: true }).catch(() => {});
+        .set({ status: 'resolved', resolvedAt: vnDate().toISOString(), resolveNote: 'POS đã tự tích lại thành công.' }, { merge: true }).catch(() => {});
       console.log('[loyalty] đã tích lại được cho bill', e.billId, e.kind);
     }
   } finally { _loyaltyFlushing = false; }
@@ -23942,8 +23961,8 @@ async function loyaltyAddPoints(phone, billAmount, isWallet = false, billId, laC
       const snap = await t.get(ref);
       if (!snap.exists) return;
       const cur = Number(snap.data().total_points) || 0;
-      t.update(ref, { total_points: cur + earned, lastVisit: new Date().toISOString() });
-      if (markerRef) t.set(markerRef, { phone, kind: 'points', earned, at: new Date().toISOString() });
+      t.update(ref, { total_points: cur + earned, lastVisit: vnDate().toISOString() });
+      if (markerRef) t.set(markerRef, { phone, kind: 'points', earned, at: vnDate().toISOString() });
       actuallyEarned = earned;
     }); }, 3);
     if (actuallyEarned > 0 && loyaltyCustomer) loyaltyCustomer.total_points = (loyaltyCustomer.total_points || 0) + actuallyEarned;
@@ -23995,7 +24014,7 @@ async function loyaltyAddStamps(phone, drinkCount, billId, laChayLai) {
       const canAdd = Math.min(drinkCount, Math.max(0, 2 - stampsToday));
       if (canAdd <= 0) {
         result = { added: 0, newCount: data.stamp_count || 0, freeDrink: false };
-        if (markerRef) t.set(markerRef, { phone, kind: 'stamps', added: 0, newCount: result.newCount, freeDrink: false, at: new Date().toISOString() });
+        if (markerRef) t.set(markerRef, { phone, kind: 'stamps', added: 0, newCount: result.newCount, freeDrink: false, at: vnDate().toISOString() });
         return;
       }
 
@@ -24016,10 +24035,10 @@ async function loyaltyAddStamps(phone, drinkCount, billId, laChayLai) {
         stamps_today:         stampsToday + canAdd,
         last_stamp_date:      today,
         free_drink_available: freeDrinkCount,
-        lastVisit:            new Date().toISOString()
+        lastVisit:            vnDate().toISOString()
       });
       result = { added: canAdd, newCount: newStamp, freeDrink };
-      if (markerRef) t.set(markerRef, { phone, kind: 'stamps', added: canAdd, newCount: newStamp, freeDrink, at: new Date().toISOString() });
+      if (markerRef) t.set(markerRef, { phone, kind: 'stamps', added: canAdd, newCount: newStamp, freeDrink, at: vnDate().toISOString() });
     }); }, 3);
     return result;
   } catch(e) {
@@ -24248,8 +24267,8 @@ async function confirmPay(cashGiven, cashChange) {
   // [MỚI] Bổ sung bill thiếu: mọi mốc THỜI GIAN TRÊN BILL (giờ, ngày, đường dẫn RTDB, mã bill)
   // dùng NGÀY LÙI VỀ businessDate đã chọn — nhưng `realNow` (thời điểm nhập THẬT) vẫn được giữ
   // riêng cho `createdAt`/`backfilledAt` để không mất dấu vết audit "ai bấm lúc nào".
-  const realNow = new Date();
-  const now = _backfillMode ? new Date(_backfillMode.businessDate + 'T12:00:00') : realNow;
+  const realNow = vnDate();
+  const now = _backfillMode ? vnDate(_backfillMode.businessDate + 'T12:00:00') : realNow;
   const p = n => String(n).padStart(2, '0');
 
   const month = MONTH_KEYS[now.getMonth()];
@@ -24449,17 +24468,17 @@ async function confirmPay(cashGiven, cashChange) {
 // ============================================================
 // REVENUE
 // ============================================================
-function todayKey() { const n = new Date(), p = x => String(x).padStart(2, '0'); return `${p(n.getDate())}/${p(n.getMonth()+1)}/${n.getFullYear()}`; }
+function todayKey() { const n = vnDate(), p = x => String(x).padStart(2, '0'); return `${p(n.getDate())}/${p(n.getMonth()+1)}/${n.getFullYear()}`; }
 /** Trả về Date là thứ 2 đầu tuần hiện tại (00:00:00) */
 function weekStart() {
-  const d = new Date(); d.setHours(0,0,0,0);
+  const d = vnDate(); d.setHours(0,0,0,0);
   const day = d.getDay(); // 0=CN, 1=T2 ... 6=T7
   d.setDate(d.getDate() - (day === 0 ? 6 : day - 1));
   return d;
 }
 
 function openDatePicker() {
-  const n = new Date(), p2 = x => String(x).padStart(2, '0');
+  const n = vnDate(), p2 = x => String(x).padStart(2, '0');
   const today = `${n.getFullYear()}-${p2(n.getMonth() + 1)}-${p2(n.getDate())}`;   // ngày theo giờ máy (không dùng UTC: 0–7h sáng VN sẽ lệch về hôm trước)
   document.getElementById('dpFrom').value = today;
   document.getElementById('dpTo').value = today;
@@ -24478,8 +24497,8 @@ function applyDateFilter() {
   document.getElementById('rv-date-label').textContent =
     from === to ? `📅 Ngày ${fmt2(from)}` : `📅 ${fmt2(from)} → ${fmt2(to)}`;
 
-  const fromDate = new Date(from);
-  const toDate   = new Date(to);
+  const fromDate = vnDate(from);
+  const toDate   = vnDate(to);
   toDate.setHours(23,59,59,999);
 
   loadArchiveDates(archiveDatesInRange(fromDate, toDate)).then(() => {
@@ -24490,12 +24509,12 @@ function applyDateFilter() {
 
 function _ordersInRange(from, to) {
   // from/to: 'YYYY-MM-DD'
-  const f = from ? new Date(from) : null;
-  const t = to   ? new Date(to)   : null;
+  const f = from ? vnDate(from) : null;
+  const t = to   ? vnDate(to)   : null;
   if (t) t.setHours(23,59,59,999);
   return orders.filter(o => {
     const [d,m,y] = o.date.split('/');
-    const od = new Date(+y, +m-1, +d);
+    const od = vnDate(+y, +m-1, +d);
     if (f && od < f) return false;
     if (t && od > t) return false;
     return true;
@@ -24509,6 +24528,7 @@ function updRv(filtered) {
   let foodCash = 0, foodBank = 0;
 
   list.forEach(o => {
+    const beforeFoodCash=foodCash,beforeFoodBank=foodBank;
     const ft = o.foodTotal || 0;
     const fMethod = o.foodMethod || o.method;
     // Food revenue breakdown
@@ -24531,7 +24551,10 @@ function updRv(filtered) {
 
     // Net revenue (excluding food)
     const netAmt = ft > 0 ? (o.total - ft) : o.total;
-    if (o.method === 'TIỀN MẶT') {
+    if (o.addons && o.addons.length) {
+      cash += orderCashAmountPOS(o) - (foodCash-beforeFoodCash);
+      bank += orderBankAmountPOS(o) - (foodBank-beforeFoodBank);
+    } else if (o.method === 'TIỀN MẶT') {
       cash += netAmt;
     } else if (o.method === 'CHUYỂN KHOẢN') {
       bank += netAmt;
@@ -24565,20 +24588,20 @@ function updRv(filtered) {
 }
 
 function _updShipStats() {
-  const now = new Date();
+  const now = vnDate();
   const p2 = x => String(x).padStart(2,'0');
   const todayKey_  = `${p2(now.getDate())}/${p2(now.getMonth()+1)}/${now.getFullYear()}`;
-  const yd = new Date(now); yd.setDate(yd.getDate()-1);
+  const yd = vnDate(now); yd.setDate(yd.getDate()-1);
   const yestKey = `${p2(yd.getDate())}/${p2(yd.getMonth()+1)}/${yd.getFullYear()}`;
-  const weekMon = weekStart ? weekStart() : new Date(now.setDate(now.getDate() - now.getDay() + 1));
-  const now2 = new Date();
+  const weekMon = weekStart ? weekStart() : vnDate(now.setDate(now.getDate() - now.getDay() + 1));
+  const now2 = vnDate();
   const mm = p2(now2.getMonth()+1), yyyy = String(now2.getFullYear());
   const shipOrders = orders.filter(o => o.isShip === true);
   const todayCnt = shipOrders.filter(o => o.date === todayKey_).length;
   const yesterdayCnt = shipOrders.filter(o => o.date === yestKey).length;
   const weekCnt = shipOrders.filter(o => {
     const [d,m,y] = o.date.split('/');
-    return new Date(+y,+m-1,+d) >= weekMon;
+    return vnDate(+y,+m-1,+d) >= weekMon;
   }).length;
   const monthOrders = shipOrders.filter(o => {
     const parts = o.date.split('/');
@@ -24597,7 +24620,7 @@ function _updShipStats() {
 function setTab(btn, period) {
   document.querySelectorAll('.tbb').forEach(b => b.classList.remove('active')); btn.classList.add('active');
   _rvFrom = null; _rvTo = null;
-  const now = new Date();
+  const now = vnDate();
   const p2 = x => String(x).padStart(2,'0');
 
   // Gán label ngày tháng cho từng tab
@@ -24618,7 +24641,7 @@ function setTab(btn, period) {
       filtered = orders.filter(o => o.date === todayKey());
     } else if (period === 'week') {
       const cutoff = weekStart();
-      filtered = orders.filter(o => { const [d,m,y]=o.date.split('/'); return new Date(+y,+m-1,+d) >= cutoff; });
+      filtered = orders.filter(o => { const [d,m,y]=o.date.split('/'); return vnDate(+y,+m-1,+d) >= cutoff; });
     } else if (period === 'month') {
       const mm = String(now.getMonth()+1).padStart(2,'0'), yyyy = now.getFullYear();
       filtered = orders.filter(o => o.date.slice(3,10) === `${mm}/${yyyy}`);
@@ -24636,10 +24659,10 @@ function setTab(btn, period) {
     const from = weekStart();
     loadArchiveDates(archiveDatesInRange(from, now)).then(render);
   } else if (period === 'month') {
-    const from = new Date(now.getFullYear(), now.getMonth(), 1);
+    const from = vnDate(now.getFullYear(), now.getMonth(), 1);
     loadArchiveDates(archiveDatesInRange(from, now)).then(render);
   } else { // year
-    const from = new Date(now.getFullYear(), 0, 1);
+    const from = vnDate(now.getFullYear(), 0, 1);
     loadArchiveDates(archiveDatesInRange(from, now)).then(render);
   }
 }
@@ -24669,7 +24692,7 @@ function setItemTab(btn, period) {
 }
 
 function renderItemRanking(period) {
-  const now = new Date();
+  const now = vnDate();
   const p2 = x => String(x).padStart(2,'0');
   const lbl = document.getElementById('rv-items-date-label');
   const doLoad = (from, labelTxt, filterFn) => {
@@ -24688,15 +24711,15 @@ function renderItemRanking(period) {
   } else if (period === 'week') {
     const from = weekStart();
     doLoad(from, 'Tuần này: ' + p2(from.getDate()) + '/' + p2(from.getMonth()+1) + ' – ' + p2(now.getDate()) + '/' + p2(now.getMonth()+1),
-      o => { const [d,m,y]=o.date.split('/'); return new Date(+y,+m-1,+d) >= from; });
+      o => { const [d,m,y]=o.date.split('/'); return vnDate(+y,+m-1,+d) >= from; });
   } else if (period === 'month') {
     const mm = String(now.getMonth()+1).padStart(2,'0'), yyyy = now.getFullYear();
-    const from = new Date(yyyy, now.getMonth(), 1);
+    const from = vnDate(yyyy, now.getMonth(), 1);
     doLoad(from, 'Tháng ' + (now.getMonth()+1) + '/' + yyyy,
       o => o.date.slice(3,10) === mm + '/' + yyyy);
   } else {
     const yyyy = String(now.getFullYear());
-    const from = new Date(now.getFullYear(), 0, 1);
+    const from = vnDate(now.getFullYear(), 0, 1);
     doLoad(from, 'Năm ' + yyyy, o => o.date.endsWith(yyyy));
   }
 }
@@ -24756,7 +24779,7 @@ function drawChart(period, filteredOrders) {
 
   const pl = 28, pr = 8, pt = 20, pb = 36;
   const cW = W - pl - pr, cH = H - pt - pb;
-  const now = new Date();
+  const now = vnDate();
 
   // Helper: net revenue of an order (excluding food)
   const netRv = o => o.total - (o.foodTotal || 0);
@@ -24778,14 +24801,14 @@ function drawChart(period, filteredOrders) {
     hd = Array(7).fill(0);
     labels = [];
     for (let i = 0; i < 7; i++) {
-      const d = new Date(mon); d.setDate(mon.getDate() + i);
+      const d = vnDate(mon); d.setDate(mon.getDate() + i);
       const key = `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
       hd[i] = _orders.filter(o => o.date === key).reduce((a, o) => a + netRv(o), 0);
       labels.push(dayLabels[i]);
     }
   } else if (period === 'month') {
     // Các tuần trong tháng
-    const daysInMonth = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate();
+    const daysInMonth = vnDate(now.getFullYear(), now.getMonth()+1, 0).getDate();
     const weeks = Math.ceil(daysInMonth / 7);
     hd = Array(weeks).fill(0); labels = [];
     const mm = String(now.getMonth()+1).padStart(2,'0'), yyyy = now.getFullYear();
@@ -24809,7 +24832,7 @@ function drawChart(period, filteredOrders) {
     _orders.forEach(o => { byDate[o.date] = (byDate[o.date]||0) + netRv(o); });
     const keys = Object.keys(byDate).sort((a,b)=>{
       const [da,ma,ya]=a.split('/'), [db,mb,yb]=b.split('/');
-      return new Date(+ya,+ma-1,+da) - new Date(+yb,+mb-1,+db);
+      return vnDate(+ya,+ma-1,+da) - vnDate(+yb,+mb-1,+db);
     });
     hd = keys.map(k => byDate[k]);
     labels = keys.map(k => k.slice(0,5));
@@ -24992,7 +25015,7 @@ const ADDON_WINDOW_MIN = 10; // phút — đổi ở đây nếu quán muốn n�
 function orderAddonInfo(o) {
   if (!o) return { ok: false, minsLeft: 0, why: 'Không tìm thấy đơn' };
   if (!o.createdAt) return { ok: false, minsLeft: 0, why: 'Đơn cũ không có mốc thời gian' };
-  const ms = Date.now() - new Date(o.createdAt).getTime();
+  const ms = Date.now() - vnDate(o.createdAt).getTime();
   const minsLeft = Math.ceil((ADDON_WINDOW_MIN * 60000 - ms) / 60000);
   if (ms < 0) return { ok: false, minsLeft: 0, why: 'Mốc thời gian đơn không hợp lệ' };
   if (minsLeft <= 0) return { ok: false, minsLeft: 0, why: `Quá ${ADDON_WINDOW_MIN} phút — không bổ sung được nữa` };
@@ -25292,7 +25315,7 @@ async function _submitAddonImpl() {
     `Thêm ${st.toppings.map(t => tpLabel(t)).join(', ')}\ncho ly ${st.seq}/${st.totalCups} — ${it.name || ''}\n\nThu thêm ${fmt(amount)} (${st.method})`,
     { okText: 'Xác nhận', cancelText: 'Huỷ' }))) return;
 
-  const atISO = new Date().toISOString();
+  const atISO = vnDate().toISOString();
   const addonId = o.id + '_edit_' + Date.now().toString(36);        // mã thao tác cố định của lần bổ sung này — dùng cho việc trừ kho bền
   const before = { ...o, itemsArray: (o.itemsArray || o.items || []) };
   const { items: newItems } = _addonApplyToItems(o, st.itemIdx, st.toppings, atISO, st.unitIdx);
@@ -25497,7 +25520,7 @@ async function _applyAddonConsumptionCorePOS(orderBefore, orderAfter, orderId, n
     // nên chỉ đánh dấu RÕ là đã chỉnh sau khi bán để Bill ↔ Tem không hiển thị nhầm thành đầy đủ —
     // đối soát phần thêm/giảm bằng ledger (referenceId=orderId) khi cần chính xác tuyệt đối.
     UnitEngine.consume.writeTrace(orderId, {
-      edited: true, editedAt: new Date().toISOString()
+      edited: true, editedAt: vnDate().toISOString()
     }, { merge: true }).catch(err => console.warn('[stockTrace] đánh dấu edited lỗi', orderId, err));
     return { ok: failedLines.length === 0, failedLines };
   } catch (err) {
@@ -25550,7 +25573,7 @@ async function _addonConsumeIngredientPOS(id, qty, note, orderId, txId) {
 // ── In phiếu bổ sung ────────────────────────────────────────────────────
 function buildAddonReceiptContent(o, addon) {
   const isCash = addon.method === 'TIỀN MẶT';
-  const t = new Date(addon.at);
+  const t = vnDate(addon.at);
   const p2 = n => String(n).padStart(2, '0');
   return [
     { type: 'text', text: 'PHIẾU BỔ SUNG', size: 26, align: 'center', bold: true },
@@ -25585,7 +25608,7 @@ function printAddonReceipt(o, addon) {
 // Cố ý KHÔNG in lại tem đầy đủ của ly đó: ly trên quầy đã có tem rồi, dán thêm một tem
 // giống hệt chỉ gây rối. Tem này nói đúng việc cần làm — thêm topping gì vào ly nào.
 function buildAddonLabelLines(o, addon) {
-  const t = new Date(addon.at);
+  const t = vnDate(addon.at);
   const p2 = n => String(n).padStart(2, '0');
   return [
     { type: 'row',
@@ -25730,7 +25753,7 @@ function showDet(id) {
     <div style="background:#fff;border-radius:20px;padding:18px 20px;margin-bottom:12px;border:2px solid #1d4ed8;">
       <div style="font-size:11px;font-weight:800;color:#1d4ed8;text-transform:uppercase;letter-spacing:.6px;margin-bottom:12px;">Đã bổ sung sau khi bấm bill</div>
       ${o.addons.map((ad, ai2) => {
-        const t = new Date(ad.at);
+        const t = vnDate(ad.at);
         const p2 = n => String(n).padStart(2,'0');
         const isCashAd = (ad.method || '').includes('TIỀN MẶT');
         return `<div style="${ai2 ? 'border-top:1px solid #f0f0f0;padding-top:12px;margin-top:12px;' : ''}">
@@ -25975,7 +25998,7 @@ async function backfillPinConfirm() {
 // index chưa chắc dự án đã tạo sẵn). Lọc status==='closed' ở phía client.
 async function _findMostRecentClosedBusinessDate() {
   const today = posDateKey();
-  const from = posDateKey(new Date(Date.now() - 14 * 86400000));
+  const from = posDateKey(vnDate(Date.now() - 14 * 86400000));
   const snap = await fstore.collection('daily_closings_gieogieo')
     .where(firebase.firestore.FieldPath.documentId(), '>=', from)
     .where(firebase.firestore.FieldPath.documentId(), '<=', today)
@@ -26051,7 +26074,7 @@ function recordBackfillCashPOS(order, orderId, mode) {
   const cash = orderCashAmountPOS(order), bank = orderBankAmountPOS(order);
   if (!(cash > 0) && !(bank > 0)) return;
   const timing = mode.cashTiming || 'after_close';
-  const entry = { billCode: order.billCode || '', cash, bank, timing, at: order.createdAt || new Date().toISOString(),
+  const entry = { billCode: order.billCode || '', cash, bank, timing, at: order.createdAt || vnDate().toISOString(),
     staff: order.staff || '', total: Number(order.total) || 0 };
   const upd = { postCloseBills: { [orderId]: entry } };
   if (timing === 'after_close' && cash > 0) upd.postCloseCashPending = true;
@@ -26103,7 +26126,7 @@ function posAutoReportManager(title, detail, extra) {
   const docId = ('pos_auto_' + day + '_' + (h >>> 0).toString(36) + '_' + ref).replace(/[^\w\-]/g, '_').slice(0, 180);
   return fstore.collection('alerts_gieogieo').doc(docId).set({
     type: 'pos_auto_report', severity: 'warning', status: 'new', title: title || 'POS cần Quản lý kiểm tra',
-    message: String(detail || ''), businessDate: day, createdAt: new Date().toISOString(),
+    message: String(detail || ''), businessDate: day, createdAt: vnDate().toISOString(),
     ...(extra || {})
   }, { merge: true });
 }
@@ -26166,11 +26189,11 @@ function toast(msg) {
 // 4. NHÁNH ARCHIVE — Dọn RT → Firestore (chạy 1 lần/ngày khi mở app)
 // ============================================================
 function runArchiveIfNeeded() {
-  const today = new Date().toDateString();
+  const today = posDateKey();
   if (localStorage.getItem('lastCleanup_pos') === today) return;
 
   console.log('[Archive] Bắt đầu dọn dẹp RT → Firestore...');
-  const now = new Date();
+  const now = vnDate();
   let archived = 0;
 
   // [FIX] Trước đây chỉ quét cố định cửa sổ 3 → 7 ngày trước. Quán nghỉ dài (Tết,
@@ -26184,7 +26207,7 @@ function runArchiveIfNeeded() {
   const lastRunStr = localStorage.getItem('lastArchiveRun_pos');
   let maxAge = 7; // mặc định như cũ khi chưa có mốc (lần chạy đầu tiên sau khi cập nhật)
   if (lastRunStr) {
-    const daysSince = Math.ceil((now - new Date(lastRunStr)) / 86400000);
+    const daysSince = Math.ceil((now - vnDate(lastRunStr)) / 86400000);
     if (daysSince > 0) maxAge = Math.min(MAX_AGE_DAYS, Math.max(7, daysSince + MIN_AGE_DAYS));
   }
 
@@ -26204,7 +26227,7 @@ function runArchiveIfNeeded() {
 
   const targets = new Map(); // "month|day|year" → {month, day, year}
   for (let i = MIN_AGE_DAYS; i <= maxAge; i++) {
-    const d = new Date(now);
+    const d = vnDate(now);
     d.setDate(d.getDate() - i);
     targets.set(MONTH_KEYS[d.getMonth()] + '|' + String(d.getDate()).padStart(2, '0') + '|' + d.getFullYear(),
                 { month: MONTH_KEYS[d.getMonth()], day: String(d.getDate()).padStart(2, '0'), year: d.getFullYear() });
@@ -26230,7 +26253,7 @@ function runArchiveIfNeeded() {
         const keys = Object.keys(data);
         return fstore.collection('orders_gieogieo_archive').doc(docId).set({
           orders: data,
-          archivedAt: new Date().toISOString(),
+          archivedAt: vnDate().toISOString(),
           month: t.month, day: t.day
         }, { merge: true }).then(() => snap.ref.update(Object.fromEntries(keys.map(k => [k, null]))))
           .then(() => {
@@ -27120,8 +27143,8 @@ async function finalizeSplitPay() {
   const baseTotal = getCartTotal();
   const discAmt = Math.max(0, baseTotal - total);
   // [MỚI] Cùng cơ chế backdating với confirmPay() — xem chú thích ở đó.
-  const realNow = new Date();
-  const now = _backfillMode ? new Date(_backfillMode.businessDate + 'T12:00:00') : realNow;
+  const realNow = vnDate();
+  const now = _backfillMode ? vnDate(_backfillMode.businessDate + 'T12:00:00') : realNow;
   const p = n => String(n).padStart(2, '0');
   const month = MONTH_KEYS[now.getMonth()];
   const day   = p(now.getDate());
@@ -27329,7 +27352,7 @@ function fetchAllCustomersCache() {
         try {
           const json = _custAcPack(allCustomersCache);
           const bytes = new TextEncoder().encode(json).length;   // giới hạn doc Firestore tính theo BYTE (tiếng Việt có dấu 2–3 byte / ký tự)
-          if (bytes < CUST_AC_MAX_BYTES) docChung.set({ day: today, count: allCustomersCache.length, json, builtAt: new Date().toISOString() }).catch(e => console.warn('[gợi ý SĐT] không ghi được bản dùng chung:', e));
+          if (bytes < CUST_AC_MAX_BYTES) docChung.set({ day: today, count: allCustomersCache.length, json, builtAt: vnDate().toISOString() }).catch(e => console.warn('[gợi ý SĐT] không ghi được bản dùng chung:', e));
           else console.warn('[gợi ý SĐT] danh sách khách quá lớn để chia sẻ (' + bytes + ' byte) — mỗi máy tự đọc');
         } catch (e) { console.warn('[gợi ý SĐT] không đóng gói được bản dùng chung:', e); }
       });
@@ -27479,7 +27502,7 @@ function _custRenderNextPage(reset) {
     const pts = Number(d.total_points || 0).toLocaleString('vi-VN');
     const stamps = Number(d.stamp_count || 0);
     const free = Number(d.free_drink_available || 0);
-    const lastVisit = d.lastVisit ? new Date(d.lastVisit).toLocaleDateString('vi-VN') : '';
+    const lastVisit = d.lastVisit ? vnDate(d.lastVisit).toLocaleDateString('vi-VN') : '';
     const card = document.createElement('div');
     card.style.cssText = 'background:#fff;border-radius:18px;padding:16px;display:flex;align-items:center;justify-content:space-between;box-shadow:0 2px 8px rgba(0,0,0,0.03);margin-bottom:10px;';
     card.innerHTML = `
@@ -27995,7 +28018,7 @@ function assistProviderTogoPromo(out) {
 //     "khách đang có 2 ly M, đổi sang L thì được tặng 1 ly M".
 function _assistCampaignActive(cp) {
   if (!cp || cp.enabled === false) return false;
-  const now = new Date();
+  const now = vnDate();
   const p = n => String(n).padStart(2, '0');
   const today = `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())}`;
   if (cp.from && today < cp.from) return false;
@@ -28465,7 +28488,7 @@ function assistRefresh() {
         key: s.key, kind: s.kind,
         text: String(s.text || '').replace(/<[^>]+>/g, ''),
         meta: s.meta || {},
-        shownAt: new Date().toISOString(),
+        shownAt: vnDate().toISOString(),
         cartAtShow: { qty: sig.qty, total: sig.total, toppings: sig.toppings, sizes: sig.sizes, ice: sig.ice },
         action: null, actedAt: null
       };
@@ -28495,7 +28518,7 @@ function _assistMark(key, action) {
   const rec = _assistShown[key];
   if (!rec) return;
   rec.action = action;
-  rec.actedAt = new Date().toISOString();
+  rec.actedAt = vnDate().toISOString();
 }
 
 // Nhân viên bấm ✕ — không hiện lại gợi ý này cho tới hết đơn. Ghi nhận là
@@ -28678,7 +28701,7 @@ function assistFinalizeOrder(order, orderId) {
       ghi = {
         orderId: orderId || null,
         billCode: order.billCode || null,
-        createdAt: order.createdAt || new Date().toISOString(),
+        createdAt: order.createdAt || vnDate().toISOString(),
         businessDate: posDateKey(),
         phone: order.phone || '',
         isToGo: !!order.isToGo,
@@ -28759,7 +28782,7 @@ async function assistUpdateCustomerProfile(order, orderId) {
         items: Object.assign({}, cur.items || {}),
         sizes: Object.assign({}, cur.sizes || {}),
         appliedOrderIds: orderId ? [...appliedIds.slice(-49), orderId] : appliedIds,
-        lastAt: new Date().toISOString()
+        lastAt: vnDate().toISOString()
       };
       lines.forEach(c => {
         const q = Number(c.qty) || 1;
@@ -28775,7 +28798,7 @@ async function assistUpdateCustomerProfile(order, orderId) {
         });
       });
       tx.update(ref, { assist_profile: p });
-      if (markerRef) tx.set(markerRef, { phone, orderId, at: new Date().toISOString() });
+      if (markerRef) tx.set(markerRef, { phone, orderId, at: vnDate().toISOString() });
       if (loyaltyCustomer && loyaltyCustomer.id === phone) loyaltyCustomer.assist_profile = p;
     });
   } catch (err) {

@@ -1,4 +1,4 @@
-// Chi phí The cafe 33 / XOFA (16/10) — manage.html tab Chi phí + cham_cong.v3.js (XOFA ghi chi phí ở Ca làm việc).
+// Chi phí The cafe 33 / XOFA (16/10) — manage.html tab Chi phí + cham_cong.v4.js (XOFA ghi chi phí ở Ca làm việc).
 //   · Danh mục mặc định 2 bên trùng nhau; POS ghi đúng dạng chờ duyệt, không PIN.
 //   · Phân bổ: khoản theo kỳ chia đều theo ngày; chỉ khoản đã duyệt (như filterExpenses của quanlygieo).
 //   · Hoà vốn: tháng có chi phí thật → dùng chi phí thật (Giá vốn → giá vốn, còn lại → cần đắp); tháng chưa có → cấu hình.
@@ -9,10 +9,10 @@ let ok = true;
 const eq = (a, b, m) => { if (JSON.stringify(a) !== JSON.stringify(b)) { ok = false; console.log('FAIL', m, JSON.stringify(a), '!=', JSON.stringify(b)); } else console.log('ok', m); };
 const near = (a, b, m) => eq(Math.abs(a - b) < 0.5, true, m + ' (' + a + ' ≈ ' + b + ')');
 
-const C = require('../cham_cong.v3.js');
+const C = require('../cham_cong.v4.js');
 const src = fs.readFileSync(path.join(__dirname, '..', 'manage.html'), 'utf8');
 const mgCats = new Function(src.match(/const DEFAULT_EXPENSE_CATS = (\[[\s\S]*?\n\]);/)[0] + '\nreturn DEFAULT_EXPENSE_CATS;')();
-eq(mgCats, C.DEFAULT_EXPENSE_CATS, 'Danh mục mặc định manage.html trùng cham_cong.v3.js');
+eq(mgCats, C.DEFAULT_EXPENSE_CATS, 'Danh mục mặc định manage.html trùng cham_cong.v4.js');
 eq(C.expenseCats({ items: [{ label: 'Đá', costType: 'cogs' }, { label: 'Cũ', active: false }] }).map(c => c.label), ['Đá'], 'POS: chỉ danh mục đang dùng');
 eq(C.expenseCats(null).length, C.DEFAULT_EXPENSE_CATS.length, 'POS: chưa cấu hình → danh mục mặc định');
 const p = C.expensePayload({ category: 'Đá', amount: '25000', note: ' 2 bao ', cats: C.DEFAULT_EXPENSE_CATS, today: '2026-10-16', store: 'xofa', now: 'T' });
@@ -21,8 +21,8 @@ eq([C.expensePayload({ category: 'Đá', amount: 0, cats: C.DEFAULT_EXPENSE_CATS
   C.expensePayload({ category: 'Đá', amount: 2e8, cats: C.DEFAULT_EXPENSE_CATS }).error], ['amount', 'cat', 'big'], 'POS: chặn thiếu tiền / sai danh mục / số quá lớn');
 {
   const pos = fs.readFileSync(path.join(__dirname, '..', 'PosX.html'), 'utf8'), tc = fs.readFileSync(path.join(__dirname, '..', 'pos.html'), 'utf8');
-  eq(/cham_cong\.v3\.js/.test(pos) && /ChamCong\.init\(\{ store: 'xofa', expenses: true \}\)/.test(pos), true, 'PosX nạp v3 và bật khung chi phí');
-  eq(/cham_cong\.v3\.js/.test(tc) && /ChamCong\.init\(\{ store: 'tc33' \}\)/.test(tc), true, 'pos.html nạp v3, không bật khung chi phí');
+  eq(/cham_cong\.v4\.js/.test(pos) && /ChamCong\.init\(\{ store: 'xofa', expenses: true \}\)/.test(pos), true, 'PosX nạp v4 và bật khung chi phí');
+  eq(/cham_cong\.v4\.js/.test(tc) && /ChamCong\.init\(\{ store: 'tc33' \}\)/.test(tc), true, 'pos.html nạp v4, không bật khung chi phí');
 }
 
 const NAMES = ['pad', 'parseDkey', 'addDays', 'dkey', 'daysBetween', 'daysInMonthYm', 'beMonthValue', 'plBreakEven', 'expenseCatsAll', 'expenseCats', 'expCostType', 'expCounts', 'expAllocate', 'expAmountIn', 'tcxBreakEven', 'expPaidOf', 'expIsBase'];

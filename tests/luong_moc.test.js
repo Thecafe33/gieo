@@ -5,8 +5,8 @@ let ok = true;
 const eq = (a, b, m) => { if (JSON.stringify(a) !== JSON.stringify(b)) { ok = false; console.log('FAIL', m, JSON.stringify(a), '!=', JSON.stringify(b)); } else console.log('ok', m); };
 const names = ['payTermsOfRecord', 'empPayTermsOn', 'computeWageForDayHours', 'isFixedPayType', 'empFixedPayHere', 'isShiftInProgress', 'shiftWorkedHours','shiftPaidHours','payScheduleMap', 'computeActualLaborCostByDate', 'computeActualLaborBreakdownByEmployee', 'plPredictedLaborByDate'];
 const src = extract('quanlygieo.html', names);
+const dkey = new Function(extract('quanlygieo.html',['pad','dkey'])+';return dkey;')();
 const build = (employees, shifts, quan) => {
-  const dkey = d => d.toISOString().slice(0, 10);
   const stubs = { dkey, QL_VIEW: quan || 'gg01', GieoData: { storeId: () => (quan === 'all' ? null : quan || 'gg01') }, daysInMonth: d => new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate(), plScheduledHours: s => s.hours, loadEmployees: async () => employees, loadSchedulesForRange:async()=>shifts.map(s=>({employeeId:s.employeeId,date:s.businessDate,startTime:'00:00',endTime:'23:59'})),
     fstore: { collection: () => ({ where() { return this; }, get: async () => ({ docs: shifts.map(s => ({ data: () => s })) }) }) } };
   const ks = Object.keys(stubs);

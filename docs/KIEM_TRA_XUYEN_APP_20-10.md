@@ -1,5 +1,9 @@
 # Rà tính năng xuyên app — 20/10/2026
 
+**Cập nhật:** cả ba nhóm dưới đây đã được sửa theo yêu cầu tiếp theo. Xem
+[bản sửa và kiểm tra hồi quy](FIX_XUYEN_APP_20-10.md). Nội dung/số liệu bên dưới
+là bằng chứng trước sửa, giữ để đối chiếu.
+
 Mã ứng dụng được rà: `ee8b895957e191607ceaafb6bd1a6a64d6dde984`, nhánh
 `Phan-tach-unit-engine`. Phạm vi: `pos.html` (TC33), `PosX.html` (XOFA),
 `posgieo.html`, `manage.html`, `quanlygieo.html` và các JS đang được các app nạp.

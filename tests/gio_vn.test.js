@@ -14,7 +14,7 @@ chk(_vnYmd(at('2026-10-12T00:00:00+07:00')) === '2026-10-12', 'pos _vnYmd: 0h VN
 
 // Không còn lấy ngày bằng toISOString() ở các file của quán (giữ giờ máy / giờ VN)
 const UTC_DATE = /toISOString\(\)\s*\.\s*(split\(\s*['"]T['"]\s*\)|slice\(\s*0\s*,\s*(7|10)\s*\)|substr(ing)?\(\s*0\s*,\s*(7|10)\s*\))/;
-for (const f of ['pos.html', 'PosX.html', 'manage.html', 'index.html', 'cham_cong.v3.js']) {
+for (const f of ['pos.html', 'PosX.html', 'manage.html', 'index.html', 'cham_cong.v4.js']) {
   const p = path.join(ROOT, f); if (!fs.existsSync(p)) continue;
   const bad = fs.readFileSync(p, 'utf8').split('\n').map((l, i) => [i + 1, l]).filter(([, l]) => UTC_DATE.test(l) && !/7 \* 3600000|\+ *7 *\* *36e5|tzOffset/.test(l));
   chk(!bad.length, f + ': không lấy ngày theo UTC' + (bad.length ? ' — dòng ' + bad.map(b => b[0]).join(', ') : ''));
