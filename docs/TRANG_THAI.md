@@ -1,5 +1,7 @@
 # Hiện trạng dự án — cập nhật 20/10/2026
 
+**21/10 — COGS menu TC33/XOFA, chưa deploy**: giá vốn thủ công từng size/menu, XOFA Tại quán/To Go + topping, hiệu lực từ 01/10; mặc định tắt, chỉ bật đủ menu. Ly/bill/topping tặng 0đ vẫn có COGS; widget % và chi tiết, hoà vốn theo biên đóng góp. Tổng kết tháng chưa chốt dùng COGS món thay tiền nhập hàng. Số lượng cache cùng doanh thu, chỉ nạp bù ngày cũ khi bật/cần xem, không thêm listener; menu chỉ mở khi bấm. `docs/MANAGE_COGS_THEO_MENU.md`, ZIP chỉ manage.html.
+
 **20/10 — Sửa trạng thái đóng ca bị mất khi cập nhật widget, chưa deploy**: `storeCard` giờ dựng nhãn/màu từ RAM; `bfStatsPaint` thay widget không làm mất trạng thái nữa. Tái hiện lỗi trước sửa, kiểm mở trang khi đã đóng và cập nhật bill sau đóng ở PC/mobile. Không tăng truy vấn. ZIP `manage_dong_ca_v2_20-10.zip`.
 
 **20/10 — manage báo đóng quán Gieo, chưa deploy**: widget Tổng quan thêm nhãn và dịu màu theo status closed của phiếu hôm nay; nghe đúng điểm đang xem, gỡ khi rời scope/tab/kỳ có hôm nay. Không đổi số liệu. Xem `docs/MANAGE_TRANG_THAI_DONG_QUAN.md`.

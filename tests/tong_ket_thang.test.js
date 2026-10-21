@@ -50,6 +50,11 @@ const cfg = M.tcxMonthSummary({ ...base, store: 'xofa', list: [{ id: 'q', catego
 eq([cfg.nguonChiPhi, cfg.chiPhiCoDinh, cfg.giaVon, cfg.khauHao], ['cauhinh', 9100000, 50000, 0], 'Chưa nhập vận hành ở manage → chi phí cố định cấu hình 9tr + khoản nhân viên gửi');
 const run = M.tcxMonthSummary({ ...base, month: '2026-10', rev: { '2026-10-01': 1000000 }, list: [], luongTay: 3100000, chamCong: [] });
 eq([run.trangThai, run.soNgay, run.luong], ['dang-chay', 16, 1600000], 'Tháng đang chạy: tính tới hôm nay, lương tay chia theo ngày (16/31)');
+// COGS menu thay tiền mua nguyên liệu trong P&L khi được bật, không trừ hai lần.
+const menuCosts=Object.fromEntries(Array.from({length:30},(_,i)=>['2026-09-'+String(i+1).padStart(2,'0'),{active:true,total:i===14?500000:0}]));
+const withMenu=M.tcxMonthSummary({...base,menuCosts});
+eq(withMenu.giaVon,500000,'COGS món 500k thay khoản chi nhập nguyên liệu 3tr, không cộng hai lần');
+eq(withMenu.lai,s.lai+2500000,'lãi tháng tăng đúng phần thay thế tiền mua hàng bằng COGS đã bán');
 const d = M.closingDoc(s, '2026-10-16T05:00:00Z');
 eq([d.monthKey, d.storeId, d.closedBy, d.lai, d.luongTay, M.CLOSE_KEYS.every(k => typeof d[k] === 'number')], ['2026-09', 'tc33', 'manage', s.lai, 3000000, true], 'Ảnh chụp: trường lõi là số + phần riêng TC33 / XOFA');
 

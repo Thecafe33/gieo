@@ -29,7 +29,7 @@ const db={ref(path){if(refs.has(path))return refs.get(path);let rows={},fail,res
  // TC33 giữ đúng fallback archive của POS khi RT hôm nay rỗng; có RT thì ưu tiên RT.
  let currentRows={};
  const summarize=orders=>orders.reduce((n,o)=>n+o.total,0);
- const summary=new Function('window','_tcTodayArchive','_tcLegacy','_tcMenu','tcSummarize','xoSummarize','ggSummarize','dkey',require('./lib/extract').extract('manage.html',['billLiveSummary'])+';return billLiveSummary')({BillLive:{snapshot:()=>currentRows}},{day:opts.day,orders:[{total:175}]},[],[],summarize,summarize,summarize,()=>opts.day);
+ const summary=new Function('window','_tcTodayArchive','_tcLegacy','_tcMenu','tcSummarize','xoSummarize','ggSummarize','dkey','mcAttach',require('./lib/extract').extract('manage.html',['billLiveSummary'])+';return billLiveSummary')({BillLive:{snapshot:()=>currentRows}},{day:opts.day,orders:[{total:175}]},[],[],summarize,summarize,summarize,()=>opts.day,(_id,orders)=>summarize(orders));
  assert.equal(await summary('tc33',opts.day),175);
  currentRows={newBill:{total:250}};assert.equal(await summary('tc33',opts.day),250);
  currentRows={};assert.equal(await summary('tc33',opts.day),175);
