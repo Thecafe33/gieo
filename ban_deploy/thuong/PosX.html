@@ -2220,7 +2220,7 @@ function confirmTogoGift() {
 
   // Kiểm lại điều kiện lúc xác nhận: món còn Size M, nằm trong danh sách, đúng trần giá so với ly rẻ nhất đã mua
   const stamp = popup._stamp;
-  if (stamp && (document.getElementById('cuph').value.trim() !== stamp.phone || _giftVoucherKey)) {
+  if (stamp && (!curCustomer || curCustomer.phone !== stamp.phone || document.getElementById('cuph').value.trim() !== stamp.phone || _giftVoucherKey)) {
     toast('Khách hàng hoặc quà đang áp dụng đã thay đổi. Đóng và chọn lại.'); return;
   }
   if (picked !== need || (!stamp && picked > giftOutstandingQty())) { toast('Quyền nhận quà đã thay đổi — vui lòng chọn lại.'); return; }
@@ -3597,6 +3597,7 @@ function lookupCustomer() {
       showAddMemberHint(phone);
       return;
     }
+    dropCustomerBoundGift(phone);   // [FIX] chuyển sang khách khác (vd. chọn từ gợi ý SĐT) → gỡ ly tem / voucher của khách trước
     const fsData = { id: phone, ...snap.data() };
     loyaltyCustomer = fsData;
 
@@ -3781,7 +3782,27 @@ async function confirmAddMember() {
   }
 }
 
+// Voucher / ly đổi tem gắn với khách nào thì gỡ theo khách đó (xoá SĐT, đổi sang khách khác).
+// _giftVoucherPhone = null nghĩa là mã nhập tay (không gắn khách) → giữ nguyên.
+// keepPhone: SĐT khách vẫn đang dùng — trùng với SĐT của voucher thì không gỡ.
+function dropCustomerBoundGift(keepPhone) {
+  if (_giftVoucherKey && !_giftVoucherPhone) return false; // mã nhập tay không gắn khách
+  const ownerPhone = _giftVoucherPhone || (_pendingVoucherArgs && curCustomer && curCustomer.phone);
+  if (!ownerPhone || (keepPhone && String(keepPhone) === String(ownerPhone))) return false;
+  const wasStamp = String(_giftVoucherKey || '').indexOf('__free_stamp__') === 0;
+  _pendingVoucherFn = null; _pendingVoucherArgs = null;
+  const picker = document.getElementById('xl-pick-modal');
+  if (picker) picker.style.display = 'none';
+  const list = document.getElementById('xl-pick-list');
+  if (list) list.replaceChildren();
+  removeGiftVoucher();   // xoá dòng 0đ khỏi giỏ + huỷ ý định trừ tem + bỏ trạng thái voucher
+  _refreshSc(); refreshMenuBadges();
+  syncDisplay('ordering');
+  toast(wasStamp ? 'Đã gỡ ly đổi tem vì không còn khách này' : 'Đã gỡ voucher vì không còn khách này');
+  return true;
+}
 function clearCustomer() {
+  dropCustomerBoundGift(); // huỷ cả voucher chờ trước khi bỏ thông tin khách
   curCustomer = null;
   selectedVoucher = null;
   loyaltyCustomer = null;
@@ -3922,6 +3943,7 @@ function _refreshSc() {
 // ── Gift Voucher từ myGifts khách hàng ──────────────────────────
 function applyVoucher(key, giftName, rewardKey, giftCode) {
   if (!curCustomer) return;
+  const voucherPhone = curCustomer.phone;
   if (_appliedDiscountId)  { toast('Bill đã có mã giảm giá'); return; }
   if (_giftVoucherKey)     { removeGiftVoucher(); }
 
@@ -3939,6 +3961,7 @@ function applyVoucher(key, giftName, rewardKey, giftCode) {
   }
 
   function applyReward(r) {
+    if (!curCustomer || curCustomer.phone !== voucherPhone || _giftVoucherKey !== key || _giftVoucherPhone !== voucherPhone) return;
     if (!r) {
       _giftVoucherKey = null; _giftVoucherPhone = null;
       removeGiftVoucher();
@@ -3975,7 +3998,10 @@ function applyVoucher(key, giftName, rewardKey, giftCode) {
         _giftVoucherKey = null; _giftVoucherPhone = null;
         removeGiftVoucher(); // (cũng vẽ lại danh sách voucher)
         // Lưu lại để tự retry khi nhân viên bấm Thanh toán sau khi thêm món
-        _pendingVoucherFn = () => applyVoucher(key, giftName, rewardKey, giftCode);
+        _pendingVoucherFn = () => {
+          if (curCustomer && curCustomer.phone === voucherPhone && _pendingVoucherArgs && _pendingVoucherArgs[0] === key)
+            applyVoucher(key, giftName, rewardKey, giftCode);
+        };
         toast(`🛒 Giỏ chưa có món phù hợp\nVoucher dành cho: ${displayList}\n→ Thêm món rồi bấm Thanh toán lại`);
         return;
       }
@@ -4361,7 +4387,7 @@ function consumeFreeToGoDrink(phone, onProceed) {
   if (!sharedGiftItems().length) { toast('Chưa cấu hình danh sách ly tặng. Vẫn có thể thanh toán không đổi quà.'); if (onProceed) onProceed(); return; }
   _stampPickLoading = true;
   return fstore.collection('customers').doc(phone).get().then(snap => {
-    if (document.getElementById('cuph').value.trim() !== phone) { toast('Khách hàng đã thay đổi, vui lòng chọn lại.'); return; }
+    if (!curCustomer || curCustomer.phone !== phone || document.getElementById('cuph').value.trim() !== phone) { toast('Khách hàng đã thay đổi, vui lòng chọn lại.'); return; }
     const data = snap.exists ? snap.data() : {};
     const curFree = data.free_drink_available || 0, curStamp = data.stamp_count || 0;
     if (curFree + Math.floor(curStamp / 6) <= 0) {
@@ -7063,6 +7089,7 @@ function onPhoneInput(val) {
   let cleanVal = val.replace(/[^0-9]/g, '');
   if (/^84\d{9}$/.test(cleanVal)) cleanVal = '0' + cleanVal.slice(2);
   document.getElementById('cuph').value = cleanVal;
+  dropCustomerBoundGift(cleanVal);   // [FIX] SĐT đổi khác SĐT của voucher / ly tem → gỡ
 
   // Load nếu chưa từng load
   if (allCustomersCache.length === 0) fetchAllCustomersCache();

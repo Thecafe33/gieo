@@ -42,3 +42,11 @@ Tích hợp nguyên bản upload của chủ quán (bảy sửa đổi), không 
 - `renderCustomerInfo` xét dòng `__free_stamp__` trong giỏ và đúng khách để hiện “Đã chọn ly tem”, vô hiệu hoá nút đổi thêm. Không tự giảm `stamp_count` hay quyền lợi trong dữ liệu khách. Gỡ ly qua luồng giỏ hiện có trả lại nút Đổi ly; không đọc Firebase để vẽ lại.
 
 `node tools/xofa_gifts/checkout_e2e.js`: bấm DOM trên PC/mobile, bốn tình huống chủ quán nêu và trạng thái sau chọn/gỡ, nhiều quyền lợi vẫn một ly/bill, cảnh báo thiếu cấu hình khi bật giảm giá, badge và trạng thái từ chối. `e2e.js` chỉnh kịch bản sang To Go sau đơn trước reset về Tại quán để kiểm đúng quy tắc mới. Ghi bill/trừ tem vẫn được kiểm với Firebase bộ nhớ.
+
+## Gỡ quyền lợi khi bỏ khách — bản chủ quán gửi 21/10
+
+Nguồn: `PosX_2.html` (bản Giáng sinh do chủ quán gửi), chỉ khác `dropCustomerBoundGift` và ba điểm gọi ở xoá khách/nhập SĐT/tra khách. Giữ đúng sửa đổi này trong nguồn chung, sinh bản thường và Tết qua tool. Khi gỡ, voucher có giá gốc hoàn nguyên và gộp về dòng trả tiền; ly tem bị xoá và bỏ ý định trừ tem. Quà Mua X tặng Y và mã nhập tay không gắn khách được giữ. Cùng SĐT không tự gỡ.
+
+Nhánh bổ sung sau kiểm: khi chưa chọn món voucher, xoá khách phải đóng/xoá nội dung picker và huỷ retry. Kết quả tra voucher/quyền tem tới muộn phải kiểm lại khách trước áp dụng. Không thêm truy vấn/listener.
+
+Kiểm: `node tools/xofa_gifts/customer_e2e.js` dùng Firebase bộ nhớ trên PC/mobile, luồng xoá/nhập/chọn/cùng SĐT, free/upsize/fixed/percent, giữ mã nhập tay và quà mua X, picker cũ, retry và kết quả trả muộn. Trước bổ sung, bản upload còn 2 lỗi picker trên mỗi viewport; bản cuối kiểm lại toàn bộ.
