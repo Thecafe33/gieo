@@ -1,6 +1,6 @@
 # Hiện trạng dự án — cập nhật 20/10/2026
 
-**21/10 — XOFA sửa mở Ca làm việc, chưa deploy**: tái hiện thiếu/lỗi tải cham_cong.v4 làm ChamCong undefined; nút có tải lại khi bấm + thông báo lỗi, gộp yêu cầu và không mở trùng. Gửi kèm module v4 nguyên bản trong ZIP cùng PosX.html theo mùa. Không đổi nghiệp vụ chấm công/chi phí/bán hàng. `docs/XOFA_MO_CA_LAM_VIEC.md`.
+**21/10 — TC33/XOFA sửa mở Ca làm việc, chưa deploy**: tái hiện thiếu/lỗi tải cham_cong.v4 làm ChamCong undefined; nút có tải lại khi bấm + thông báo lỗi, gộp yêu cầu và không mở trùng. Đồng bộ nút PC/menu điện thoại của pos.html và sidebar PosX.html, đúng store/Chi phí riêng từng quán. Gửi kèm module v4 nguyên bản trong ZIP cùng pos.html + PosX.html theo mùa (`pos_ca_lam_viec_*_21-10.zip`). Không đổi nghiệp vụ chấm công/chi phí/bán hàng. `docs/XOFA_MO_CA_LAM_VIEC.md`.
 
 **21/10 — COGS menu TC33/XOFA, chưa deploy**: giá vốn thủ công từng size/menu, XOFA Tại quán/To Go + topping, hiệu lực từ 01/10; mặc định tắt, chỉ bật đủ menu. Ly/bill/topping tặng 0đ vẫn có COGS; widget % và chi tiết, hoà vốn theo biên đóng góp. Tổng kết tháng chưa chốt dùng COGS món thay tiền nhập hàng. Số lượng cache cùng doanh thu, chỉ nạp bù ngày cũ khi bật/cần xem, không thêm listener; menu chỉ mở khi bấm. `docs/MANAGE_COGS_THEO_MENU.md`, ZIP chỉ manage.html.
 
