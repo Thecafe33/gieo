@@ -1,5 +1,7 @@
 # Tiền mặt trong manage — bổ sung 20/10/2026
 
+**Bổ sung 21/10**: phần xác nhận Gieo đã thống nhất ownerReceipt/postCloseReceipt, một form nhập tổng thực nhận và transaction hai trường. Có thêm query cờ bổ sung ngày cũ khi chỉ đọc khoảng mới; v3 vẫn độc lập cache v1/v2. Quy tắc mới ghi rõ ở [GIEO_TIEN_BO_SUNG.md](GIEO_TIEN_BO_SUNG.md); các mô tả “giữ nguyên cách ghi” bên dưới là lịch sử bản v3 ngày 20/10.
+
 **Bản v3 thay 36c8935:** tự tải lại đúng từ phiếu Firebase khi không còn bất kỳ
 đệm nào. Không lấy số từ v1/v2. Giữ đối soát Gieo và hai chỉ số nhỏ, không sửa POS/
 engine/công thức hoặc luồng ghi tiền nhận. ZIP **`manage_tien_nop_v3_20-10.zip`** chỉ

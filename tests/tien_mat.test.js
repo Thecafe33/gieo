@@ -38,10 +38,10 @@ const all = {}; for (let d = 1; d <= 12; d++) all['2026-10-' + String(d).padStar
 eq(M.cashQueryFrom(all, '2026-10-01', '2026-10-20'), '2026-10-13', 'Đệm: đã nhận đủ → chỉ đọc 7 ngày gần nhất');
 
 {
-  const H = new Function('cashViewDate', 'ownerReceiptEditing', extract('quanlygieo.html', ['fmt', 'ownerReceiptExpected', 'ownerReceiptHTML']) + '\nreturn ownerReceiptHTML;');
-  const done = H('2026-10-14', null)(Object.assign({}, CL, { ownerReceipt: { received: 1240000, by: 'manage', at: '2026-10-15T10:00:00Z' } }));
+  const H = new Function('cashViewDate', 'ownerReceiptEditing', extract('quanlygieo.html', ['fmt', 'gieoReceiptState', 'ownerReceiptExpected', 'ownerReceiptHTML']) + '\nreturn ownerReceiptHTML;');
+  const done = H('2026-10-14', null)(Object.assign({}, CL, { ownerReceipt: { received: 1240000, expected:1245000, by: 'manage', at: '2026-10-15T10:00:00Z' } }));
   eq([/Sửa/.test(done), /ownerRecvInput/.test(done), /manage/.test(done), /Thiếu/.test(done)], [true, false, true, true], 'quanlygieo: manage đã nhập → khoá ô, hiện số + lệch + nút Sửa');
-  const edit = H('2026-10-14', '2026-10-14')(Object.assign({}, CL, { ownerReceipt: { received: 1240000, by: 'manage' } }));
+  const edit = H('2026-10-14', '2026-10-14')(Object.assign({}, CL, { ownerReceipt: { received: 1240000, expected:1245000, by: 'manage' } }));
   eq([/ownerRecvInput/.test(edit), /value="1240000"/.test(edit)], [true, true], 'quanlygieo: bấm Sửa → ô nhập điền sẵn số cũ');
   eq([H('2026-10-14', null)({ status: 'cash_passed' }), /ownerRecvInput/.test(H('2026-10-14', null)(CL))], ['', true], 'quanlygieo: chưa bàn giao → không hiện; đã bàn giao chưa nhận → ô nhập');
 }

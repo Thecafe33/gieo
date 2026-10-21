@@ -1568,6 +1568,36 @@ async function loadCashCfg(force){
   await CASH_CFG_DOC().set(CASH_CFG, { merge: true });
   return CASH_CFG;
 }
+// Cùng quy tắc ở manage / quanlygieo; phiếu cũ được đọc tại chỗ, không ghi migrate.
+function gieoReceiptState(closing){
+  const cl = closing || {}, handed = Number(cl.handedOverAmount) || 0;
+  const entries = Object.values(cl.postCloseBills || {}).filter(Boolean);
+  const after = entries.filter(e=>e.timing==='after_close').reduce((s,e)=>s+(Number(e.cash)||0),0);
+  const unclassified = entries.filter(e=>!['after_close','in_close_count'].includes(e.timing)).reduce((s,e)=>s+(Number(e.cash)||0),0);
+  const expected = handed + after;
+  const candidates = [['ownerReceipt',cl.ownerReceipt],['postCloseReceipt',cl.postCloseReceipt]]
+    .filter(([,r])=>r && r.received!=null && Number.isFinite(Number(r.received)) && Number(r.received)>=0)
+    .sort((a,b)=>String(b[1].at||'').localeCompare(String(a[1].at||'')));
+  const [source, raw] = candidates[0] || [];
+  const receipt = raw ? {...raw, received:Number(raw.received), expected:source==='postCloseReceipt'?raw.expectedTotal:raw.expected} : null;
+  const valid = !!receipt && !unclassified && (source==='postCloseReceipt'
+    ? Number(raw.expectedExtra)===after && raw.expectedTotal!=null && Number(raw.expectedTotal)===expected
+    : receipt.expected!=null ? Number(receipt.expected)===expected : after===0 && !cl.postCloseCashPending);
+  return {handed, after, unclassified, expected, receipt, source:source||null,
+    needsConfirmation:unclassified>0 || (!!receipt && !valid) || (after>0 && !receipt)};
+}
+function gieoReceiptPatch(closing, received, by, at, note){
+  const s = gieoReceiptState(closing), n = Math.round(Number(received));
+  if(!Number.isSafeInteger(n) || n<0 || n>10000000000) throw new Error('Nhập số tiền thực nhận hợp lệ.');
+  if(s.unclassified) throw new Error('Còn bill tiền mặt chưa phân loại. Phân loại ở Quản lý Gieo trước khi xác nhận.');
+  const old=s.receipt, ownerReceipt={received:n,expected:s.expected,variance:n-s.expected,at,by,
+    note:note==null?(old?.note||''):note,...(old?{editedAt:at,prevReceived:old.received}:{})};
+  const patch={ownerReceipt,postCloseCashPending:false};
+  if(s.after || closing.postCloseReceipt)patch.postCloseReceipt={received:n,expectedTotal:s.expected,
+    handedOverAtClose:s.handed,expectedExtra:s.after,variance:n-s.expected,note:ownerReceipt.note,at,by};
+  return patch;
+}
+
 function ggCashExpected(cl){
   if(!cl) return { state: 'none' };
   // Giữ số đếm nguyên gốc, kể cả đã đối soát nhưng còn chờ bàn giao. Thiếu trường ≠ 0.
@@ -1658,9 +1688,17 @@ async function readCash(date, force){
     const q = from<=today ? cashQueryFrom(m, from, today) : null;
     try{
       const col=fstore.collection(ggName('daily_closings_gieogieo', r.id));
-      const put = doc=>{ const cl = doc.data(), d = doc.id; if(!/^\d{4}-\d{2}-\d{2}$/.test(d))return; m[d] = { ...ggCashExpected(cl), received: cl.ownerReceipt ? cl.ownerReceipt.received : null, receipt: cl.ownerReceipt || null }; };
+      const put = doc=>{ const cl = doc.data(), d = doc.id; if(!/^\d{4}-\d{2}-\d{2}$/.test(d))return; const receipt=gieoReceiptState(cl); m[d] = { ...ggCashExpected(cl), received: receipt.receipt?.received??null, receipt: receipt.receipt, needsConfirmation:receipt.needsConfirmation, unclassified:receipt.unclassified }; };
       if(q){const s=await cashSourceGet(col.where(docId,'>=',q).where(docId,'<=',today));Object.keys(m).forEach(d=>{if(d>=q&&d<=today)delete m[d];});s.docs.forEach(put);}
       if(date<=today&&(!q||date<q)){const one=await cashSourceGet(col.doc(date));delete m[date];if(one.exists)put(one);}
+      if(q && q>from){
+        const pending=await cashSourceGet(fstore.collection(ggName('daily_closings_gieogieo',r.id)).where('postCloseCashPending','==',true)),seen=new Set();
+        pending.docs.forEach(doc=>{if(doc.id>=from&&doc.id<=today){put(doc);seen.add(doc.id)}});
+        // Phiếu từng chờ đã được xác nhận từ app khác: làm mới đúng doc đó, không quét lại lịch sử.
+        for(const [d,v] of Object.entries(m))if(d<q && v.needsConfirmation && !seen.has(d)){
+          const one=await cashSourceGet(col.doc(d));delete m[d];if(one.exists)put(one);
+        }
+      }
       ggMap[r.id] = m;
     }catch(e){ console.warn('[tiền mặt] không đọc được kết ca', r.id, e); ggMap[r.id] = null; }
   });
@@ -1711,11 +1749,13 @@ async function writeCashReceipt(store, date, received, info){
     if(old.exists){ rec.createdAt = old.data().createdAt || old.data().at; rec.editedAt = at; rec.prevReceived = old.data().received; }
     await ref.set(rec);
   } else {
-    const ref = fstore.collection(ggName('daily_closings_gieogieo', store)).doc(date), cur = await ref.get();
-    const e = ggCashExpected(cur.exists ? cur.data() : null);
-    if(e.state !== 'ready') throw new Error('Ngày này cửa hàng chưa kết ca / chưa bàn giao tiền — chưa nhập thực nhận được.');
-    const old = cur.data().ownerReceipt;
-    await ref.set({ ownerReceipt: { received: n, expected: e.expected, variance: n - e.expected, at, by: 'manage', ...(old ? { editedAt: at, prevReceived: old.received } : {}) } }, { merge: true });
+    const ref = fstore.collection(ggName('daily_closings_gieogieo', store)).doc(date);
+    await fstore.runTransaction(async tx=>{
+      const cur=await tx.get(ref), cl=cur.exists?cur.data():null, e=ggCashExpected(cl);
+      if(e.state !== 'ready') throw new Error('Ngày này cửa hàng chưa kết ca / chưa bàn giao tiền — chưa nhập thực nhận được.');
+      if(info.expected!=null && Number(info.expected)!==e.expected) throw new Error('Tiền phải nhận vừa thay đổi. Tải lại ngày này rồi xác nhận tổng mới.');
+      tx.set(ref,gieoReceiptPatch(cl,n,'manage',at),{merge:true});
+    });
   }
   try{ localStorage.removeItem(CASH_CACHE_KEY); }catch(e){}
 }
@@ -3336,7 +3376,7 @@ function cashRow(c,storeId,d){const gg=storeId!=='tc33'&&storeId!=='xofa';return
 // Gieo: chỉ ngày đã bàn giao tiền (ngày chưa kết ca báo riêng).
 function cashMissing(c,storeId){
  const out=[],gg=storeId!=='tc33'&&storeId!=='xofa';if(gg&&!c.gg?.[storeId])return out;
- for(let d=c.start;d<c.today;d=addDays(d,1)){const r=cashRow(c,storeId,d);if(r&&r.received!=null)continue;if(gg){if(r&&r.state==='ready')out.push({d,expected:r.expected});else if(r&&r.state==='open')out.push({d,open:true})}else if(!r||r.expected||r.sales)out.push({d,expected:r?r.expected:null})}
+ for(let d=c.start;d<c.today;d=addDays(d,1)){const r=cashRow(c,storeId,d);if(r&&r.received!=null&&!r.needsConfirmation)continue;if(gg){if(r&&r.state==='ready')out.push({d,expected:r.expected});else if(r&&r.state==='open')out.push({d,open:true})}else if(!r||r.expected||r.sales)out.push({d,expected:r?r.expected:null})}
  return out;
 }
 function cashVar(v){return v===0?'<span class="cash-var ok">Khớp</span>':v>0?`<span class="cash-var up">Thừa ${money(v)} ₫</span>`:`<span class="cash-var down">Thiếu ${money(-v)} ₫</span>`}
@@ -3400,8 +3440,8 @@ function cashWidget(c,st){
  else{
   const detail=gg?`Bàn giao lúc kết ca ${money(r.handed||0)} ₫${r.after?` · bán sau kết ca +${money(r.after)} ₫`:''}${r.retained?` · giữ lại két ${money(r.retained)} ₫`:''}${r.recipient?` · ${esc(r.recipient)} nhận`:''}`:`Tiền mặt bán ${money(r.sales||0)} ₫${r.spent?` − chi tại quầy ${money(r.spent)} ₫`:''}${isToday&&r.received==null?' · tạm tính tới giờ':''}`;
   const exp=Number(r.expected)||0;
-  const recBlock=r.received!=null&&!editing?`<div class="cash-rec"><div><span>Chủ quán thực nhận</span><b class="num">${money(r.received)} ₫</b><small>${r.receipt?.by==='quanlygieo'?'Nhập ở Quản lý Gieo':'Nhập ở manage'}${r.receipt?.at?' · '+dateVN(String(r.receipt.at).slice(0,10)).slice(0,5)+' '+clockVN(r.receipt.at):''}</small>${r.expectedAtReceipt!=null?`<small>Phiếu gốc tính phải nộp ${money(r.expectedAtReceipt)} ₫; bên trên đã tính lại theo bill.</small>`:''}</div>${cashVar(Math.round(r.received-exp))}<button class="btn secondary" onclick="state.cashEdit='${key}';render()">${icon('edit')}Sửa</button></div>`
-   :`<form class="cash-form" onsubmit="saveCash(event,'${id}','${d}')"><label for="cash-${id}">Chủ quán thực nhận</label><div class="cash-in"><input class="input num" id="cash-${id}" name="received" inputmode="numeric" autocomplete="off" maxlength="16" required placeholder="${groupMoneyInput(exp)}" value="${editing&&r.received!=null?groupMoneyInput(r.received):''}" oninput="this.value=groupMoneyInput(this.value);cashLiveVar(this,${exp})"><button class="btn" type="submit">${icon('check')}${editing?'Lưu':'Xác nhận'}</button>${editing?`<button class="btn secondary" type="button" onclick="state.cashEdit=null;render()">Huỷ</button>`:''}</div><small class="cash-live" id="cashv-${id}"></small></form>`;
+  const recBlock=r.received!=null&&!editing&&!r.needsConfirmation?`<div class="cash-rec"><div><span>Chủ quán thực nhận</span><b class="num">${money(r.received)} ₫</b><small>${r.receipt?.by==='manage'?'Nhập ở manage':'Nhập ở Quản lý Gieo'}${r.receipt?.at?' · '+dateVN(String(r.receipt.at).slice(0,10)).slice(0,5)+' '+clockVN(r.receipt.at):''}</small>${r.expectedAtReceipt!=null?`<small>Phiếu gốc tính phải nộp ${money(r.expectedAtReceipt)} ₫; bên trên đã tính lại theo bill.</small>`:''}</div>${cashVar(Math.round(r.received-exp))}<button class="btn secondary" onclick="state.cashEdit='${key}';render()">${icon('edit')}Sửa</button></div>`
+   :`<form class="cash-form" onsubmit="saveCash(event,'${id}','${d}')"><label for="cash-${id}">${gg?'Tổng thực nhận của ngày (bàn giao + bổ sung)':'Chủ quán thực nhận'}</label>${r.needsConfirmation?`<p class="cash-msg">${r.unclassified?'Còn bill chưa phân loại — mở Quản lý Gieo để phân loại.':'Có bill bổ sung / số phải nhận đã thay đổi.'}${r.received!=null?` Đã ghi nhận trước ${money(r.received)} ₫.`:''}</p>`:''}<div class="cash-in"><input class="input num" id="cash-${id}" name="received" inputmode="numeric" autocomplete="off" maxlength="16" required placeholder="${groupMoneyInput(exp)}" value="${(editing||r.needsConfirmation)&&r.received!=null?groupMoneyInput(r.received):''}" oninput="this.value=groupMoneyInput(this.value);cashLiveVar(this,${exp})"><button class="btn" type="submit" ${r.unclassified?'disabled':''}>${icon('check')}${editing?'Lưu':r.needsConfirmation?'Xác nhận tổng':'Xác nhận'}</button>${editing?`<button class="btn secondary" type="button" onclick="state.cashEdit=null;render()">Huỷ</button>`:''}</div><small class="cash-live" id="cashv-${id}"></small></form>`;
   body=`<div class="cash-exp"><span>${gg?'Tiền mặt cần lấy':'Phải nộp'}</span><strong class="num">${money(exp)}<span>₫</span></strong><small>${detail}</small></div>${gg?cashReconciliation(r,id,d):''}${recBlock}`;
  }
  if(gg&&r.state!=='ready'&&r.received==null)body+=cashReconciliation(r,id,d);

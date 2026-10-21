@@ -3615,6 +3615,36 @@ async function computeCashBreakdownForDate(businessDate){
 // Bill bổ sung từ trước khi có tính năng (không có trong map) hiện "chưa phân loại".
 // Số thực đếm/lệch/bàn giao lúc kết ca GIỮ NGUYÊN — không trộn tiền bán sau vào.
 // ------------------------------------------------------------
+// Cùng quy tắc ở manage / quanlygieo; phiếu cũ được đọc tại chỗ, không ghi migrate.
+function gieoReceiptState(closing){
+  const cl = closing || {}, handed = Number(cl.handedOverAmount) || 0;
+  const entries = Object.values(cl.postCloseBills || {}).filter(Boolean);
+  const after = entries.filter(e=>e.timing==='after_close').reduce((s,e)=>s+(Number(e.cash)||0),0);
+  const unclassified = entries.filter(e=>!['after_close','in_close_count'].includes(e.timing)).reduce((s,e)=>s+(Number(e.cash)||0),0);
+  const expected = handed + after;
+  const candidates = [['ownerReceipt',cl.ownerReceipt],['postCloseReceipt',cl.postCloseReceipt]]
+    .filter(([,r])=>r && r.received!=null && Number.isFinite(Number(r.received)) && Number(r.received)>=0)
+    .sort((a,b)=>String(b[1].at||'').localeCompare(String(a[1].at||'')));
+  const [source, raw] = candidates[0] || [];
+  const receipt = raw ? {...raw, received:Number(raw.received), expected:source==='postCloseReceipt'?raw.expectedTotal:raw.expected} : null;
+  const valid = !!receipt && !unclassified && (source==='postCloseReceipt'
+    ? Number(raw.expectedExtra)===after && raw.expectedTotal!=null && Number(raw.expectedTotal)===expected
+    : receipt.expected!=null ? Number(receipt.expected)===expected : after===0 && !cl.postCloseCashPending);
+  return {handed, after, unclassified, expected, receipt, source:source||null,
+    needsConfirmation:unclassified>0 || (!!receipt && !valid) || (after>0 && !receipt)};
+}
+function gieoReceiptPatch(closing, received, by, at, note){
+  const s = gieoReceiptState(closing), n = Math.round(Number(received));
+  if(!Number.isSafeInteger(n) || n<0 || n>10000000000) throw new Error('Nhập số tiền thực nhận hợp lệ.');
+  if(s.unclassified) throw new Error('Còn bill tiền mặt chưa phân loại. Phân loại ở Quản lý Gieo trước khi xác nhận.');
+  const old=s.receipt, ownerReceipt={received:n,expected:s.expected,variance:n-s.expected,at,by,
+    note:note==null?(old?.note||''):note,...(old?{editedAt:at,prevReceived:old.received}:{})};
+  const patch={ownerReceipt,postCloseCashPending:false};
+  if(s.after || closing.postCloseReceipt)patch.postCloseReceipt={received:n,expectedTotal:s.expected,
+    handedOverAtClose:s.handed,expectedExtra:s.after,variance:n-s.expected,note:ownerReceipt.note,at,by};
+  return patch;
+}
+
 let CASH_PC_STATE = null;
 function computePostCloseBills(closing, orders, expected){
   const map = (closing && closing.postCloseBills) || {};
@@ -3638,14 +3668,15 @@ function computePostCloseBills(closing, orders, expected){
     expectedAtClose: expected - afterCash - unclassifiedCash };
 }
 function postCloseCashHTML(detail){
+  CASH_PC_STATE=null;
   const pc = detail.postClose, closing = detail.closing;
   if(!pc || !pc.list.length) return '';
   const date = detail.opening && detail.opening.businessDate || cashViewDate;
   const handedOver = closing && ['handed_over','closed'].includes(closing.status);
   const daBanGiao = handedOver ? (Number(closing.handedOverAmount)||0) : null;
   const tongPhaiNhan = (daBanGiao||0) + pc.afterCash;
-  const rc = closing && closing.postCloseReceipt;
-  const rcValid = rc && Number(rc.expectedExtra) === pc.afterCash && !pc.unclassifiedCash;
+  const receiptState=gieoReceiptState(closing);
+  const rc=receiptState.receipt, rcValid=rc && !receiptState.needsConfirmation;
   CASH_PC_STATE = { date, list: pc.list, daBanGiao: daBanGiao||0, afterCash: pc.afterCash };
   const nhan = t => t==='after_close' ? '<span class="tier tier-amber">Bán sau kết ca · nộp bổ sung</span>'
     : t==='in_close_count' ? '<span class="tier tier-blue">Đã trong két lúc kết ca</span>'
@@ -3668,16 +3699,7 @@ function postCloseCashHTML(detail){
         ${daBanGiao!=null ? `<div class="row"><span class="rl">Đã bàn giao lúc kết ca</span><span class="rv">${fmt(daBanGiao)}</span></div>` : `<div class="small-note">Ngày này chưa ghi bàn giao lúc kết ca.</div>`}
         <div class="row"><span class="rl">+ Nộp bổ sung từ bill bán sau kết ca</span><span class="rv">${fmt(pc.afterCash)}</span></div>
         <div class="row"><span class="rl"><b>Tổng tiền phải nhận của ngày</b></span><span class="rv"><b>${fmt(tongPhaiNhan)}</b></span></div>
-        ${rcValid ? `
-          <div class="row"><span class="rl">Quản lý đã nhận</span><span class="rv">${fmt(rc.received)}</span></div>
-          <div class="row"><span class="rl">Lệch khi nhận</span><span class="rv" style="color:${Number(rc.variance)===0?'var(--ok)':'var(--bad)'}">${rc.variance>0?'+':''}${fmt(rc.variance)}</span></div>
-          <div class="small-note">Xác nhận lúc ${rc.at?vnDate(rc.at).toLocaleString('vi-VN'):''}${rc.note?(' · '+escapeHtmlAttr(rc.note)):''}</div>`
-        : `
-          ${rc ? `<div class="small-note" style="color:var(--warn)">Có thay đổi bill bổ sung sau lần xác nhận trước (${fmt(rc.received)}) — xác nhận lại tổng tiền nhận.</div>` : ''}
-          <div class="field" style="margin-top:8px"><label>Tổng tiền thực nhận của ngày (tiền bàn giao + nộp bổ sung, nhận trong 1 lượt)</label>
-            <input type="number" id="pcReceivedInput" placeholder="${tongPhaiNhan}"></div>
-          <div class="field"><label>Ghi chú (không bắt buộc)</label><input type="text" id="pcReceivedNote"></div>
-          <button class="btn sm" style="width:auto;padding:0 16px" ${pc.unclassifiedCash?'disabled':''} onclick="confirmPostCloseReceipt()">Xác nhận đã nhận đủ</button>`}
+        <div class="small-note" style="margin-top:8px">${rcValid ? 'Khoản bổ sung đã nằm trong tổng thực nhận được xác nhận bên dưới.' : 'Nhập và xác nhận một lần tại ô Quản lý thực nhận bên dưới, gồm cả tiền bàn giao và bổ sung.'}</div>
       ` : ''}
     </div>`;
 }
@@ -3689,11 +3711,11 @@ async function setPostCloseTiming(idx, timing){
     const entry = { billCode:e.billCode||'', cash:Number(e.cash)||0, bank:Number(e.bank)||0, timing,
       at:e.at||'', staff:e.staff||'', reclassifiedAt:vnDate().toISOString(), reclassifiedBy:'management' };
     const ref = fstore.collection('daily_closings_gieogieo').doc(st.date);
-    await ref.set({ postCloseBills: { [e.id]: entry } }, { merge:true });
-    const after = st.list.map((x,i)=>i===idx?{...x,timing}:x);
-    const afterCash = after.filter(x=>x.timing==='after_close').reduce((n,x)=>n+(Number(x.cash)||0),0);
-    const doc = await ref.get(), rc = doc.data() && doc.data().postCloseReceipt;
-    await ref.set({ postCloseCashPending: afterCash>0 && !(rc && Number(rc.expectedExtra)===afterCash) }, { merge:true });
+    await fstore.runTransaction(async tx=>{
+      const doc=await tx.get(ref),cl=doc.exists?doc.data():{};
+      const next={...cl,postCloseBills:{...(cl.postCloseBills||{}),[e.id]:entry}},rs=gieoReceiptState(next);
+      tx.set(ref,{postCloseBills:{[e.id]:entry},postCloseCashPending:rs.needsConfirmation},{merge:true});
+    });
     logAudit('update','post_close_bill_timing',st.date,{bill:e.billCode, timing});
     toast('✅ Đã đổi loại bill');
     renderEntryCash();
@@ -3709,12 +3731,7 @@ async function confirmPostCloseReceipt(){
   if(variance!==0 && !confirm(`Nhận ${fmt(received)}, phải nhận ${fmt(expectedTotal)} → lệch ${variance>0?'+':''}${fmt(variance)}. Vẫn xác nhận?`)) return;
   try{
     await ensureAuth();
-    await fstore.collection('daily_closings_gieogieo').doc(st.date).set({
-      postCloseReceipt: { received, expectedTotal, handedOverAtClose: st.daBanGiao, expectedExtra: st.afterCash,
-        variance, note: ((document.getElementById('pcReceivedNote')||{}).value||'').trim(),
-        at: vnDate().toISOString(), by: 'management' },
-      postCloseCashPending: false
-    }, { merge:true });
+    await writeGieoOwnerReceipt(st.date,received,expectedTotal,((document.getElementById('pcReceivedNote')||{}).value||'').trim());
     logAudit('update','post_close_cash_receipt',st.date,{received, expectedTotal, variance});
     toast('✅ Đã xác nhận nhận tiền ngày '+st.date);
     renderEntryCash();
@@ -13769,8 +13786,8 @@ async function computeStoreHealth(){
   {
     const snap = await postCloseP;
     if(snap && snap.size){
-      const dates = snap.docs.map(d=>d.id).sort();
-      push('red', 'Tiền nộp bổ sung từ bill bán sau kết ca chưa xác nhận ('+dates.join(', ')+')', snap.size,
+      const dates = snap.docs.filter(d=>gieoReceiptState(d.data()).needsConfirmation).map(d=>d.id).sort();
+      if(dates.length)push('red', 'Tiền nộp bổ sung từ bill bán sau kết ca chưa xác nhận ('+dates.join(', ')+')', dates.length,
         `cashViewDate='${dates[0]}'; goEntry('cash')`);
     }
   }
@@ -17978,9 +17995,9 @@ function ownerReceiptExpected(closing){
 }
 function ownerReceiptHTML(closing){
   if(!closing || closing.handedOverAmount == null) return '';
-  const exp = ownerReceiptExpected(closing), r = closing.ownerReceipt;
+  const rs=gieoReceiptState(closing),exp=rs.expected,r=rs.receipt;
   const lech = v => v === 0 ? '<span class="tier tier-green">Khớp</span>' : `<span class="tier ${v > 0 ? 'tier-blue' : 'tier-red'}">${v > 0 ? 'Thừa ' : 'Thiếu '}${fmt(Math.abs(v))}</span>`;
-  if(r && r.received != null && ownerReceiptEditing !== cashViewDate){
+  if(r && r.received != null && !rs.needsConfirmation && ownerReceiptEditing !== cashViewDate){
     return `<div class="card">
       <div class="row"><span class="rl"><b>Quản lý thực nhận</b><div class="small-note" style="margin-top:2px">Phải nhận ${fmt(exp)} · nhập ở ${r.by === 'manage' ? 'manage' : 'Quản lý Gieo'}${r.at ? ' lúc ' + vnDate(r.at).toLocaleString('vi-VN') : ''}</div></span>
         <span class="rv"><b>${fmt(r.received)}</b> ${lech(Math.round(r.received - exp))}</span></div>
@@ -17989,21 +18006,31 @@ function ownerReceiptHTML(closing){
   }
   return `<div class="card">
     <div class="row"><span class="rl"><b>Quản lý thực nhận</b><div class="small-note" style="margin-top:2px">Phải nhận ${fmt(exp)} (tiền bàn giao${exp !== Number(closing.handedOverAmount || 0) ? ' + bill bán sau kết ca' : ''}). Nhận gộp nhiều ngày thì nhập lùi từng ngày.</div></span></div>
-    <div style="display:flex;gap:8px;margin-top:8px"><input type="number" id="ownerRecvInput" min="0" step="1000" inputmode="numeric" placeholder="${exp}" value="${r && r.received != null ? r.received : ''}" style="flex:1">
-      <button class="btn" style="width:auto;padding:0 18px" onclick="saveOwnerReceipt()">${r ? 'Lưu' : 'Xác nhận'}</button>
+    ${rs.needsConfirmation ? `<div class="small-note" style="color:var(--warn)">${rs.unclassified?'Còn bill tiền mặt chưa phân loại — chọn loại ở danh sách bill bổ sung phía trên.':'Số phải nhận đã thay đổi — xác nhận tổng tiền thực nhận mới.'}${r?` Đã ghi nhận trước ${fmt(r.received)}.`:''}</div>` : ''}
+    <div class="small-note">Tổng thực nhận của ngày = tiền đã bàn giao + tiền bán bổ sung; nhập tổng, không chỉ nhập khoản thêm.</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px"><input type="number" id="ownerRecvInput" data-expected="${exp}" min="0" step="1000" inputmode="numeric" placeholder="${exp}" value="${r && r.received != null ? r.received : ''}" style="flex:1;min-width:140px">
+      <button class="btn" style="width:auto;padding:0 18px" ${rs.unclassified?'disabled':''} onclick="saveOwnerReceipt()">${r ? 'Lưu tổng' : 'Xác nhận'}</button>
       ${r ? '<button class="btn outline" style="width:auto;padding:0 14px" onclick="ownerReceiptEditing=null;renderEntryCash()">Huỷ</button>' : ''}</div>
   </div>`;
+}
+async function writeGieoOwnerReceipt(date,n,expected,note){
+  const ref=fstore.collection('daily_closings_gieogieo').doc(date);
+  await ensureAuth();
+  await fstore.runTransaction(async tx=>{
+    const doc=await tx.get(ref),cl=doc.exists?doc.data():null;
+    if(!cl || cl.handedOverAmount==null || !['handed_over','closed'].includes(cl.status)) throw new Error('Ngày này chưa bàn giao tiền.');
+    const rs=gieoReceiptState(cl);
+    if(expected!=null && Number(expected)!==rs.expected) throw new Error('Tiền phải nhận vừa thay đổi. Tải lại ngày này rồi xác nhận tổng mới.');
+    tx.set(ref,gieoReceiptPatch(cl,n,'quanlygieo',vnDate().toISOString(),note),{merge:true});
+  });
 }
 async function saveOwnerReceipt(){
   const inp = document.getElementById('ownerRecvInput'), raw = inp ? String(inp.value).trim() : '';
   const n = Math.round(Number(raw));
   if(raw === '' || !Number.isFinite(n) || n < 0){ toast('⚠️ Nhập số tiền thực nhận (0 nếu không nhận được)'); return; }
   try{
-    const ref = fstore.collection('daily_closings_gieogieo').doc(cashViewDate), cur = await ref.get();
-    const closing = cur.exists ? cur.data() : null;
-    if(!closing || closing.handedOverAmount == null){ toast('⚠️ Ngày này chưa bàn giao tiền'); return; }
-    const exp = ownerReceiptExpected(closing), at = vnDate().toISOString(), old = closing.ownerReceipt;
-    await ref.set({ ownerReceipt: { received: n, expected: exp, variance: n - exp, at, by: 'quanlygieo', ...(old ? { editedAt: at, prevReceived: old.received } : {}) } }, { merge: true });
+    const date=cashViewDate,expected=inp?.dataset?.expected;
+    await writeGieoOwnerReceipt(date,n,expected==null?null:Number(expected));
     ownerReceiptEditing = null;
     toast('✅ Đã ghi thực nhận');
     renderEntryCash();
