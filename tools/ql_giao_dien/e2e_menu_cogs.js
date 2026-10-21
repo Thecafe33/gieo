@@ -35,27 +35,30 @@ const vn=day+'/'+String(today.getMonth()+1).padStart(2,'0')+'/'+today.getFullYea
 __RT['orders_xolifa/'+mon+'/'+day]={a:{total:40000,date:vn,time:'10:00',method:'TIỀN MẶT',itemsArray:[{name:'Cà phê',size:'M',qty:2,price:20000,toppings:[{name:'Trân châu',price:0}]}]},z:{total:0,date:vn,time:'11:00',isToGo:true,itemsArray:[{name:'Cà phê (Tặng)',size:'M',qty:1,price:0,toppings:[{name:'Trân châu',price:0}]}]}};
 `;
 (async()=>{await new Promise(r=>server.listen(0,'127.0.0.1',r));const base='http://127.0.0.1:'+server.address().port;const b=await chromium.launch({executablePath:'/usr/bin/chromium',args:['--no-sandbox']});
-try{for(const width of [1440,1024,390]){
- const p=await b.newPage({viewport:{width,height:900},timezoneId:'Asia/Ho_Chi_Minh'}),errs=[];p.on('pageerror',e=>errs.push(e.message));
+try{for(const [width,height] of [[1440,900],[1366,768],[1024,768],[390,844]]){
+ const p=await b.newPage({viewport:{width,height},timezoneId:'Asia/Ho_Chi_Minh'}),errs=[];p.on('pageerror',e=>errs.push(e.message));
  await p.route('**/*',r=>{const u=r.request().url();if(u.includes('firebase-app-compat'))return r.fulfill({contentType:'application/javascript',body:mock});if(u.includes('firebasejs'))return r.fulfill({contentType:'application/javascript',body:''});if(u.startsWith(base+'/'))return r.continue();return r.abort()});
  await p.goto(base+'/manage.html');await p.waitForFunction(()=>typeof live!=='undefined'&&live.rev&&!live.loadingKey);await p.waitForTimeout(300);
- const check=(v,m)=>{assert.ok(v,m);console.log('ok '+width+': '+m)};
+ const check=(v,m)=>{assert.ok(v,m);console.log('ok '+width+'x'+height+': '+m)};
+ const saveAndReturn=async()=>{await p.locator('#mc-save').click();await p.waitForFunction(()=>!MC_EDITOR.dirty&&!$('#mc-save').disabled);await p.evaluate(()=>navigate('rev'));await p.waitForFunction(()=>state.view==='rev'&&live.ready.rev===loadKey()&&!live.loadingKey)};
  check(await p.evaluate(()=>!__READS.menu_xolifa&&!__READS.menu_togo_xolifa&&!__READS.toppings_xolifa),'không tự tải menu XOFA khi xem tổng quan');
- check((await p.locator('.outlet-widget[data-store="tc33"] .widget-cogs').textContent()).includes('Đang tắt'),'mặc định COGS tắt');
- await p.evaluate(()=>mcOpenEditor('tc33'));await p.waitForFunction(()=>MC_EDITOR?.id==='tc33');
+ check(await p.locator('.outlet-widget .widget-cogs').count()===0,'widget quán không còn dòng hoặc đường dẫn COGS');
+ await p.locator('#nav [onclick="navigate(\'cogs\')"]').evaluate(el=>el.click());await p.waitForFunction(()=>MC_EDITOR?.id==='tc33'&&live.ready.cogs===loadKey());
+ check(await p.locator('#view .mc-editor').count()===1&&await p.locator('#dialog').evaluate(el=>!el.open),'COGS có tab riêng trong sidebar, bảng nằm trên trang, không dùng popup');
+ check(await p.evaluate(()=>!__READS.menu_xolifa&&!__READS.menu_togo_xolifa),'mở COGS TC33 chưa tải menu XOFA');
  check(await p.locator('[data-mc-cost]').count()===4,'TC33 chỉ 4 ô hai size, không có bed/Food');
  await p.locator('#mc-enabled').check();await p.locator('#mc-save').click();await p.waitForTimeout(80);check((await p.locator('#mc-save-state').textContent()).includes('nhập đủ'),'không cho bật khi chưa đủ menu');
  await p.evaluate(()=>{for(const el of document.querySelectorAll('[data-mc-cost]')){const r=MC_EDITOR.rows[Number(el.dataset.mcCost)];el.value=r.name==='Cà phê'?(r.size==='M'?8000:10000):(r.size==='M'?7000:9000)}mcProgress()});
  check(await p.evaluate(()=>{const b=document.getElementById('mc-save').getBoundingClientRect();return b.bottom<=innerHeight&&b.top>=0}),'nút lưu luôn thấy trên PC/mobile');
- await p.locator('#mc-save').click();await p.waitForFunction(()=>!document.getElementById('dialog').open&&!live.loadingKey);await p.waitForTimeout(100);
+ await saveAndReturn();await p.waitForTimeout(100);
  let c=await p.evaluate(()=>storeRange(stores.find(s=>s.id==='tc33')));check(c.cogs.total===33000&&Math.abs(c.be.hoaVon-2031250)<.01,'giá vốn 33k có cả 3 ly tặng, hoà vốn đúng 2.031.250');
- check((await p.locator('.outlet-widget[data-store="tc33"] .widget-cogs').textContent()).includes('50,8%'),'widget 50,8% theo doanh thu đang xem');
- await p.locator('.outlet-widget[data-store="tc33"] .widget-cogs').click();check((await p.locator('#dialogInner').textContent()).includes('Trong đó tặng'),'bấm chỉ số giải thích giá vốn bằng số lượng thật');
+ check(Math.abs(c.cogs.total/c.rev*100-50.769230769)<.001,'COGS vẫn tính đúng 50,8% trong dữ liệu, không nới widget');
+ await p.evaluate(()=>mcOpenDetails('tc33'));check((await p.locator('#dialogInner').textContent()).includes('Trong đó tặng'),'chi tiết vẫn giải thích giá vốn bằng số lượng thật');
  const reads=await p.evaluate(()=>JSON.stringify(__READS));await p.evaluate(()=>mcOpenDetails('tc33'));check(await p.evaluate(before=>JSON.stringify(__READS)===before,reads),'xem chi tiết COGS không đọc lại Firebase');
  await p.evaluate(()=>mcOpenEditor('xofa'));await p.waitForFunction(()=>MC_EDITOR?.id==='xofa');check(await p.locator('[data-mc-cost]').count()===6,'XOFA hai menu hai size và hai phần topping');
  await p.evaluate(()=>{for(const el of document.querySelectorAll('[data-mc-cost]')){const r=MC_EDITOR.rows[Number(el.dataset.mcCost)];el.value=r.kind==='topping'?(r.channel==='togo'?500:1000):r.channel==='togo'?6000:7000}document.getElementById('mc-enabled').checked=true;mcProgress()});
  await p.locator('[data-mc-tab="togo"]').click();check(await p.locator('[data-mc-row]:visible').count()===2,'lọc To Go ngay tại máy');
- await p.locator('#mc-save').click();await p.waitForFunction(()=>!document.getElementById('dialog').open&&!live.loadingKey);
+ await saveAndReturn();
  c=await p.evaluate(()=>storeRange(stores.find(s=>s.id==='xofa')));check(c.cogs.total===22500&&c.cogs.missing.length===0,'XOFA 22.500đ: đúng giá từng menu + topping miễn phí');
  check(await p.evaluate(()=>live.rev.beCfg._cogs.tc33.enabled&&live.rev.beCfg._cogs.xofa.enabled),'lưu XOFA không ghi đè TC33');
  const beforeRT=await p.evaluate(()=>({reads:JSON.stringify(__READS),fs:JSON.stringify(__FSREADS),total:storeRange(stores.find(s=>s.id==='xofa')).cogs.total}));
@@ -69,15 +72,40 @@ try{for(const width of [1440,1024,390]){
  await p.evaluate(()=>mcOpenEditor('xofa'));await p.waitForFunction(()=>MC_EDITOR?.id==='xofa');
  check(await p.evaluate(()=>MC_EDITOR.rows.some(r=>r.name==='Món cũ'&&r.historical)),'cho nhập giá vốn món cũ từ bill đang xem, không đọc tra cứu thêm');
  await p.evaluate(()=>{for(const el of document.querySelectorAll('[data-mc-cost]'))if(MC_EDITOR.rows[Number(el.dataset.mcCost)].historical)el.value=9000});
- await p.locator('#mc-save').click();await p.waitForFunction(()=>!document.getElementById('dialog').open&&!live.loadingKey);
+ await saveAndReturn();
  check(await p.evaluate(()=>storeRange(stores.find(s=>s.id==='xofa')).cogs.missing.length===0),'bổ sung món cũ xong có thể tính đủ COGS');
- // Lưu mốc hôm nay không đổi mốc 01/10.
- await p.evaluate(()=>mcOpenEditor('tc33'));await p.waitForFunction(()=>MC_EDITOR?.id==='tc33');await p.evaluate(()=>{for(const el of document.querySelectorAll('[data-mc-cost]'))if(MC_EDITOR.rows[Number(el.dataset.mcCost)].name==='Cà phê')el.value=12000});await p.locator('#mc-save').click();await p.waitForFunction(()=>!document.getElementById('dialog').open&&!live.loadingKey);
+ // Chủ quán chọn mốc hôm nay: không đổi mốc 01/10.
+ await p.evaluate(()=>mcOpenEditor('tc33'));await p.waitForFunction(()=>MC_EDITOR?.id==='tc33');await p.evaluate(()=>{$('#mc-from').value=currentDate();mcLoadDate(currentDate());for(const el of document.querySelectorAll('[data-mc-cost]'))if(MC_EDITOR.rows[Number(el.dataset.mcCost)].name==='Cà phê')el.value=12000});await saveAndReturn();
  check(await p.evaluate(()=>{const c=live.rev.beCfg._cogs.tc33;return backend.mcVersion(c,'2026-10-01').from==='2026-10-01'&&backend.mcVersion(c,currentDate()).from===currentDate()&&c.versions.length===2}),'giữ mốc 01/10 riêng sau sửa giá hôm nay');
- await p.evaluate(()=>mcOpenEditor('tc33'));await p.waitForFunction(()=>MC_EDITOR?.id==='tc33');await p.locator('#mc-enabled').uncheck();await p.locator('#mc-save').click();await p.waitForFunction(()=>!document.getElementById('dialog').open&&!live.loadingKey);
+ await p.evaluate(()=>mcOpenEditor('tc33'));await p.waitForFunction(()=>MC_EDITOR?.id==='tc33');await p.locator('#mc-enabled').uncheck();await saveAndReturn();
  check(await p.evaluate(()=>storeRange(stores.find(s=>s.id==='tc33')).be.hoaVon===1000000),'tắt trở lại đúng hoà vốn cơ bản');
  await p.evaluate(()=>{for(let i=0;i<40;i++)__RT.menu['extra'+i]={name:'Món thử '+i,type:'Trà',priceM:25000,priceL:30000};mcOpenEditor('tc33',true)});await p.waitForFunction(()=>MC_EDITOR?.rows.length>60);
- check(await p.evaluate(()=>{const save=$('#mc-save').getBoundingClientRect(),list=$('.mc-table-wrap');return save.bottom<=innerHeight&&save.top>0&&list.clientHeight>40&&list.scrollHeight>list.clientHeight}),'menu dài vẫn thấy nút lưu và cuộn riêng danh sách');
- if(width===1440)await p.screenshot({path:'/workspace/work/manage-cogs-20-10/editor-1440.png'});
+ const geometry=await p.evaluate(()=>{const save=$('#mc-save').getBoundingClientRect(),list=$('.mc-table-wrap'),b=list.getBoundingClientRect(),rows=$$('[data-mc-row]').filter(el=>{const r=el.getBoundingClientRect();return !el.hidden&&r.top>=b.top+43&&r.bottom<=b.bottom});return{listHeight:list.clientHeight,rows:rows.length,scroll:list.scrollHeight>list.clientHeight,saveVisible:save.top>=0&&save.bottom<=innerHeight-(innerWidth<=760?80:0),overflow:document.documentElement.scrollWidth>innerWidth}});
+ console.log('geometry',width,height,JSON.stringify(geometry));
+ check(geometry.saveVisible&&geometry.scroll,'menu dài vẫn thấy nút lưu, cuộn riêng danh sách');
+ check(geometry.listHeight>=(width>760?340:240)&&geometry.rows>=(width>760?5:3),'bảng món chiếm phần lớn màn hình, hiện nhiều món đầy đủ');
+ check(!geometry.overflow,'không làm trang tràn ngang trên PC/mobile');
+ const readsDraft=await p.evaluate(()=>JSON.stringify(__READS));
+ await p.locator('[data-mc-cost]').first().fill('12345');
+ await p.locator('[data-mc-store="xofa"]').click();await p.waitForFunction(()=>MC_EDITOR?.id==='xofa'&&$('#mc-save'));
+ await p.locator('[data-mc-store="tc33"]').click();await p.waitForFunction(()=>MC_EDITOR?.id==='tc33'&&$('#mc-save'));
+ check(await p.locator('[data-mc-cost]').first().inputValue()==='12345','chuyển quán giữ nguyên ô đang nhập dở');
+ check(await p.evaluate(v=>JSON.stringify(__READS)===v,readsDraft),'chuyển giữa hai menu đã tải không đọc thêm RT');
+ p.once('dialog',d=>d.dismiss());await p.locator('[aria-label="Tải lại menu và giá vốn đã lưu"]').click();
+ check(await p.locator('[data-mc-cost]').first().inputValue()==='12345'&&await p.evaluate(v=>JSON.stringify(__READS)===v,readsDraft),'huỷ tải lại giữ bản nháp và không đọc menu');
+ // Menu đang tải về trễ không được thay bảng quán người dùng đã chuyển sang.
+ await p.evaluate(()=>{window.__mcOriginal=backend.mcReadEditor;backend.mcReadEditor=(id,force)=>id==='xofa'&&force?new Promise(resolve=>{window.__mcResume=()=>__mcOriginal(id,false).then(resolve)}):__mcOriginal(id,force);mcOpenEditor('xofa',true)});
+ await p.waitForFunction(()=>typeof __mcResume==='function');
+ await p.locator('[data-mc-store="tc33"]').click();await p.waitForFunction(()=>MC_EDITOR?.id==='tc33'&&$('#mc-save'));
+ await p.evaluate(()=>{__mcResume();backend.mcReadEditor=__mcOriginal});await p.waitForTimeout(80);
+ check(await p.locator('[data-mc-cost]').first().inputValue()==='12345'&&await p.evaluate(()=>MC_EDITOR.id==='tc33'&&!live.loadingKey),'kết quả tải về trễ không ghi đè quán đang nhập');
+
+ await p.locator('#mc-search').fill('không có món');check(await p.locator('#mc-empty').isVisible(),'bộ lọc rỗng báo rõ');await p.locator('#mc-search').fill('');
+ const first=p.locator('[data-mc-cost]').first();await first.focus();await first.press('Enter');
+ check(await p.evaluate(()=>document.activeElement===document.querySelectorAll('[data-mc-row]')[1].cells[1].querySelector('input')),'Enter chuyển đúng cột giá vốn sang món tiếp theo');
+ await p.evaluate(()=>navigate('target'));await p.waitForFunction(()=>live.ready.target===loadKey());await p.evaluate(()=>navigate('cogs'));await p.waitForFunction(()=>live.ready.cogs===loadKey()&&$('#mc-save'));
+ check(await p.locator('[data-mc-cost]').first().inputValue()==='12345','rời tab rồi quay lại vẫn giữ bản nháp trong phiên');
+ await p.waitForTimeout(250);await p.screenshot({path:'/workspace/work/manage-cogs-tab-21-10/cogs-'+width+'x'+height+'.png'});
+
  check(errs.length===0,'không lỗi JS '+errs.join('|'));await p.close();
 }}finally{await b.close();server.close()}})().catch(e=>{console.error(e);process.exitCode=1});
