@@ -1914,7 +1914,8 @@ function renderTgGiftSummary() {
   const mult = (g.buyQty > 0 && g.freeQty > 0) ? ` (mua ${g.buyQty * 2} ly tặng ${g.freeQty * 2} ly…)` : '';
   el.textContent = `Hiện tại: Cứ mua ${X} ly ${buyTxt} → tặng ${Y} ly Size M${mult}`
     + ` · ${sharedGiftItems().length} món tặng đã chọn (dùng chung đổi 6 tem)`
-    + (g.capByCheapest ? ' · ly tặng không đắt hơn ly rẻ nhất đã mua' : ' · không giới hạn giá ly tặng');
+    + (g.capByCheapest ? ' · ly tặng không đắt hơn ly rẻ nhất đã mua' : ' · không giới hạn giá ly tặng')
+    + ((g.enabled && !sharedGiftItems().length) ? ' ⚠ CHƯA CHỌN MÓN TẶNG — quà sẽ không hiện khi thanh toán' : '');
 }
 
 function saveTgGift() {
@@ -2107,8 +2108,14 @@ function checkTogoBeforeCheckout(onProceed) {
     openTogoGiftPopup(giftOutstandingQty(), onProceed);
     return;
   }
+  // Một thông báo duy nhất để giảm giá không che mất cảnh báo cấu hình quà.
+  const noGift = _togoGiftCountOk() && !togoGiftEligibleItems().length;
+  const warning = noGift ? (togoSettings.gift.capByCheapest && sharedGiftItems().length
+    ? 'Bill đủ điều kiện quà nhưng không có ly nào đủ điều kiện giá để tặng'
+    : 'Bill đủ điều kiện quà nhưng chưa chọn món tặng (Cài đặt To Go)') : '';
   const p = computePromo();
-  if (p.togo > 0) toast(`To Go: Giảm ${fmt(p.togo)} (${togoSettings.discount.pct}%)`);
+  const discountNotice = p.togo > 0 ? `To Go: Giảm ${fmt(p.togo)} (${togoSettings.discount.pct}%)` : '';
+  if (warning || discountNotice) toast([warning, discountNotice].filter(Boolean).join(' · '));
   onProceed();
 }
 
@@ -2120,7 +2127,7 @@ function openTogoGiftPopup(need, onProceed, stamp = null) {
 
   // [FIX G3.4] Không có món quà phù hợp → bỏ qua tặng ly, không để nhân viên kẹt ở màn thanh toán
   if (!eligible.length) {
-    togoGiftDeclinedQty = giftEntitledQty();
+    if (!stamp) togoGiftDeclinedQty = giftEntitledQty();   // [FIX] đổi tem không được làm ảnh hưởng lời mời quà Mua X tặng Y
     toast(g.capByCheapest ? 'Không có ly nào đủ điều kiện giá để tặng — bỏ qua tặng ly' : 'Không có món quà phù hợp — bỏ qua tặng ly');
     if (onProceed) onProceed();
     return;
@@ -2250,6 +2257,7 @@ function confirmTogoGift() {
   popup._stamp = null;
   // Cập nhật UI menu + cart drawer
   renderMenu(); renderCartDrawer(); _refreshSc();
+  if (stamp) _refreshVoucherUI();   // [FIX] vẽ lại panel voucher: tránh nút "Đổi ly" vẫn hiện sau khi đã đổi
   // Đẩy lên RT session_display_xolifa để màn hình phụ thấy ly tặng
   syncDisplay('ordering');
   toast(`Đã thêm ${picked} ly tặng miễn phí!`);
@@ -3039,7 +3047,8 @@ function getCartTotal() {
     return a + (c.price + toppingSum) * c.qty;
   }, 0);
 }
-function getQty(itemId) { return Object.values(cart).filter(c => c.itemId === itemId).reduce((a, b) => a + b.qty, 0); }
+function _isGiftLine(c) { return !!c && (c._togoGift || String(c._vKey || '').startsWith('__free_stamp__')); }   // ly tặng Mua X tặng Y / ly đổi tem
+function getQty(itemId) { return Object.values(cart).filter(c => c.itemId === itemId && !_isGiftLine(c)).reduce((a, b) => a + b.qty, 0); }
 
 function renderMenu() {
   const g = document.getElementById('mg');
@@ -3092,7 +3101,7 @@ function refreshMenuBadges() {
   const g = document.getElementById('mg');
   if (!g) return;
   const byId = {};
-  Object.values(cart).forEach(c => { if (c.itemId) byId[c.itemId] = (byId[c.itemId] || 0) + c.qty; });
+  Object.values(cart).forEach(c => { if (c.itemId && !_isGiftLine(c)) byId[c.itemId] = (byId[c.itemId] || 0) + c.qty; });
   const setBadge = (el, q) => {
     let b = null;
     for (const ch of el.children) if (ch.classList.contains('qb')) { b = ch; break; }
@@ -3245,8 +3254,7 @@ function openPO(itemId) {
 function closePO(e) { if (!e || e.target === document.getElementById('po')) document.getElementById('po').classList.remove('show'); }
 function onSize(id, label) {
   document.getElementById('po').classList.remove('show');
-  // Món bán lấy đúng menu đang chọn; danh sách ly tặng chỉ áp dụng trong popup đổi quà.
-  const m = getActiveMenu().find(x => String(x.id) === String(id));
+  const m = getActiveMenu().find(x => String(x.id) === String(id));   // [FIX] trước đây tìm trong danh sách ly tặng → món 2 size không vào giỏ
   if (m) { const s = m.sizes.find(x => x.label === label); if (s) addCart(m, s); }
 }
 
@@ -3632,15 +3640,21 @@ function renderCustomerInfo(totalPoints, stampCount) {
   // Tính tổng ly miễn phí: DB + stamp chưa convert (tránh trường hợp DB chưa cập nhật)
   const effectiveFree = _dbFree + Math.floor(_dbStamp / 6);
 
-  // Phần 1: Ly To-Go Miễn Phí — PIN trên cùng, không bị scroll ẩn
+  // Ly đã chọn là trạng thái giỏ, chưa trừ quyền lợi của khách trước khi lưu bill.
+  const stampInCart = _giftVoucherPhone === curCustomer.phone && Object.values(cart).some(c =>
+    String(c._vKey || '').startsWith('__free_stamp__') && c.qty > 0);
   let stampHtml = '';
-  if (effectiveFree > 0) {
-    stampHtml = '<div style="border:2px solid #34d399;background:#ecfdf5;border-radius:10px;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">'
+  if (effectiveFree > 0 || stampInCart) {
+    stampHtml = '<div style="border:2px solid #34d399;background:#ecfdf5;border-radius:10px;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px;">'
       + '<div>'
-      + '<div style="font-size:13px;font-weight:800;color:#065f46;">\u2615 ' + effectiveFree + ' Ly To-Go Mi\u1ec5n Ph\u00ed</div>'
-      + '<div style="font-size:10px;color:#059669;font-weight:600;margin-top:2px;">T\u00edch \u0111\u1ee7 6 Stamp \u2022 B\u1ea5m \u0110\u1ed5i ly \u0111\u1ec3 ch\u1ecdn ly trong danh s\u00e1ch qu\u00e0</div>'
+      + '<div style="font-size:13px;font-weight:800;color:#065f46;">'
+      + (stampInCart ? 'Đã chọn ly tem' : '☕ ' + effectiveFree + ' Ly To-Go Miễn Phí') + '</div>'
+      + '<div style="font-size:11px;color:#047857;font-weight:600;margin-top:2px;">'
+      + (stampInCart ? 'Ly đã có trong giỏ · Chỉ trừ tem sau khi thanh toán' : 'Tích đủ 6 Stamp · Bấm Đổi ly để chọn ly trong danh sách quà') + '</div>'
       + '</div>'
-      + '<button style="background:#10b981;border:none;color:#fff;border-radius:8px;padding:6px 12px;font-family:\'Google Sans\',sans-serif;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;" onclick="consumeFreeToGoDrink(\'' + curCustomer.phone + '\')">Đổi ly</button>'
+      + (stampInCart
+        ? '<button type="button" disabled style="background:#d1fae5;border:none;color:#065f46;border-radius:8px;padding:6px 12px;font-family:inherit;font-size:12px;font-weight:700;white-space:nowrap;">✓ Đã chọn</button>'
+        : '<button style="background:#10b981;border:none;color:#fff;border-radius:8px;padding:6px 12px;font-family:inherit;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;" onclick="consumeFreeToGoDrink(\'' + curCustomer.phone + '\')">Đổi ly</button>')
       + '</div>';
   }
 
@@ -4343,6 +4357,7 @@ let _stampFreeOriginalStamp = 0;
 let _stampPickLoading = false;
 function consumeFreeToGoDrink(phone, onProceed) {
   if (_stampPickLoading) return;
+  if (!isToGo) { toast('Chỉ đổi ly tem khi bán To Go — hãy bật To Go trước.'); return; }   // [FIX] tem chỉ tích To Go; tránh ly menu To Go lọt vào bill Tại quán
   if (_giftVoucherKey) { toast('Hãy gỡ quà đang áp dụng trước khi đổi ly tem.'); if (onProceed) onProceed(); return; }
   if (!sharedGiftItems().length) { toast('Chưa cấu hình danh sách ly tặng. Vẫn có thể thanh toán không đổi quà.'); if (onProceed) onProceed(); return; }
   _stampPickLoading = true;
@@ -6413,6 +6428,7 @@ let spGroups = [];       // [{ method, items:[{name,size,price}], total, cashGiv
 // [Q6] Bill có khuyến mãi (Đồng giá, To Go, giảm giá app, mã giảm giá / voucher, ly tặng) → không cho Tính riêng.
 function billHasPromotion() {
   if (computePromo().all > 0) return true;
+  if (togoGiftOfferDue()) return true;   // [FIX] đủ điều kiện quà nhưng chưa qua popup chọn quà → không cho Tính riêng bỏ qua quà
   return Object.values(cart).some(c => c.isFree || c._vKey || c._discountId);
 }
 function _showSplitPromoNotice() {

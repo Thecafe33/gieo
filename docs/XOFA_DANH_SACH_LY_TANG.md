@@ -33,3 +33,12 @@ Bản mới nhất: thay **cả PosX.html và kiosk.html** của mùa tương �
 - `node tests/xofa_paid_cart.test.js`: kiểm lại nguồn món/giá ở nguồn và các bản sinh.
 - `node tools/xofa_shift/cart_e2e.js`: bấm ô món và size bằng chuột thật trong Chromium, PC/mobile, ba bộ deploy; không/có danh sách quà, M/L/một size, tăng số lượng, giá từng menu và tổng thanh toán. Test trước sửa thất bại ngay ở món ngoài danh sách tặng.
 - Các test quà trước đó gán sẵn giỏ nên đã bỏ sót lỗi ở bước chọn size bán thường; hồi quy mới đi qua thao tác này.
+
+## Hoàn thiện bản chủ quán gửi — 21/10
+
+Tích hợp nguyên bản upload của chủ quán (bảy sửa đổi), không ghi đè bằng HTML cũ. Thêm hai sửa đổi đã tái hiện khi rà file:
+
+- Khi bill đủ số ly nhưng không có món tặng phù hợp, gộp cảnh báo và số tiền giảm To Go vào một toast, vẫn cho thanh toán.
+- `renderCustomerInfo` xét dòng `__free_stamp__` trong giỏ và đúng khách để hiện “Đã chọn ly tem”, vô hiệu hoá nút đổi thêm. Không tự giảm `stamp_count` hay quyền lợi trong dữ liệu khách. Gỡ ly qua luồng giỏ hiện có trả lại nút Đổi ly; không đọc Firebase để vẽ lại.
+
+`node tools/xofa_gifts/checkout_e2e.js`: bấm DOM trên PC/mobile, bốn tình huống chủ quán nêu và trạng thái sau chọn/gỡ, nhiều quyền lợi vẫn một ly/bill, cảnh báo thiếu cấu hình khi bật giảm giá, badge và trạng thái từ chối. `e2e.js` chỉnh kịch bản sang To Go sau đơn trước reset về Tại quán để kiểm đúng quy tắc mới. Ghi bill/trừ tem vẫn được kiểm với Firebase bộ nhớ.

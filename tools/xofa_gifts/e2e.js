@@ -47,7 +47,7 @@ mock += "\n__RT2.put('menu_xolifa',{cf1:{name:'Cafe muối',type:'Cà phê',pric
   cart={paid:paid()};togoGiftDeclinedQty=null;openTogoGiftPopup(1,()=>{});selectTogoGift('cf1');confirmTogoGift();
   const before=orders().length;curPay='cash';confirmPay(40000,0);await new Promise(r=>setTimeout(r,400));
   let saved=orders().at(-1);ok(orders().length===before+1&&saved.total===40000&&saved.itemsArray.some(c=>c._togoGift&&c.price===0),'thanh toán tiền mặt giữ đúng giá và ly tặng');
-  document.getElementById('cuph').value='0900';data.stamp_count=6;data.free_drink_available=0;
+  document.getElementById('cuph').value='0900';data.stamp_count=6;data.free_drink_available=0;if(!isToGo)toggleTogo();
   // Transaction giả cập nhật đúng dữ liệu đang đọc; không gọi mạng thật.
   fstore.runTransaction=async fn=>fn({get:async()=>({exists:true,data:()=>({...data})}),update:(ref,patch)=>{Object.assign(data,patch);writes++;}});
   await consumeFreeToGoDrink('0900');selectTogoGift('cf1');confirmTogoGift();
