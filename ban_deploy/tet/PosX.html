@@ -60,7 +60,7 @@ try { var _m = navigator.deviceMemory, _c = navigator.hardwareConcurrency; if ((
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
 <!-- Ca làm việc (check-in / check-out bằng PIN) — docs/KE_HOACH_QUANLY_TC33_XOFA.md -->
 <script src="cham_cong.v4.js"></script>
-<script>ChamCong.init({ store: 'xofa', expenses: true });</script>
+<script>if(window.ChamCong)ChamCong.init({ store: 'xofa', expenses: true });</script>
 
 <!-- PWA Service Worker (chỉ đăng ký sw_xolifa.js — không đụng SW của file khác) -->
 <script>
@@ -499,7 +499,7 @@ body{font-family:'Google Sans',sans-serif;background:var(--bg);max-width:430px;m
       <div style="flex:1"><div class="sdit">Màn hình phụ</div><div class="sdid">Slideshow & Menu ảnh kiosk</div></div>
       <span class="sdar">›</span>
     </div>
-    <div class="sdi" onclick="closeSdb();ChamCong.open()">
+    <div class="sdi" onclick="openXofaShift()">
       <div class="sdic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1e6b3c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4"/><path d="M10 17l5-5-5-5"/><path d="M15 12H3"/></svg></div>
       <div style="flex:1"><div class="sdit">Ca làm việc</div><div class="sdid">Check-in / Check-out</div></div>
       <span class="sdar">›</span>
@@ -2930,6 +2930,27 @@ function filterType(type, btn) {
 // ============================================================
 // NAV
 // ============================================================
+// Ca làm việc là module riêng. Không để thiếu/lỗi tải module làm nút bấm im lặng.
+let _xofaShiftOpening=null;
+function openXofaShift(){
+  closeSdb();
+  if(_xofaShiftOpening)return _xofaShiftOpening;
+  const panel=document.getElementById('ccx-root');
+  if(panel&&panel.style.display!=='none')return Promise.resolve(true);
+  const show=()=>{window.ChamCong.init({store:'xofa',expenses:true});window.ChamCong.open();return true};
+  if(window.ChamCong){try{return Promise.resolve(show())}catch(e){console.warn('[Ca làm việc]',e);toast('Chưa mở được Ca làm việc. Vui lòng tải lại trang.');return Promise.resolve(false)}}
+  toast('Đang tải Ca làm việc…');
+  _xofaShiftOpening=new Promise((resolve,reject)=>{
+    const script=document.createElement('script');
+    const timer=setTimeout(()=>reject(new Error('shift/module-timeout')),10000);
+    script.src='cham_cong.v4.js?retry='+Date.now();
+    script.onload=()=>{clearTimeout(timer);window.ChamCong?resolve():reject(new Error('shift/module-missing'))};
+    script.onerror=()=>{clearTimeout(timer);reject(new Error('shift/module-load'))};
+    document.head.appendChild(script);
+  }).then(show).catch(e=>{console.warn('[Ca làm việc]',e.message);toast('Chưa tải được Ca làm việc. Kiểm tra kết nối rồi bấm lại.');return false}).finally(()=>{_xofaShiftOpening=null});
+  return _xofaShiftOpening;
+}
+
 function showScreen(id) {
   if (id === 'sm') _dgLock = null; // [G3.7] về màn bán hàng: Đồng giá tính lại theo giờ hiện tại
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
