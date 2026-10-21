@@ -25,3 +25,11 @@ Kiểm tra lại món, Size M, số lượng, quyền lợi và khách trước 
 - `sh tools/sinh_lai_tat_ca.sh`: sinh đủ bản và bộ kiểm tra toàn dự án.
 
 Bản mới nhất: thay **cả PosX.html và kiosk.html** của mùa tương ứng; tải lại cả màn POS và kiosk. Ba ZIP `tai_ve/xofa_kiosk_ly_tang_{thuong,giangsinh,tet}_20-10.zip`, mỗi ZIP đúng hai file. Bộ `xofa_ly_tang_*` trước đó chỉ có POS, đã được thay thế bởi bộ này.
+
+## Hotfix 21/10 — Món bán bị lọc nhầm theo danh sách tặng
+
+`onSize` thuộc popup chọn size bán thường đã bị thay nhầm nguồn từ `getActiveMenu()` thành `sharedGiftItems()` trong e6e7d97. Với danh sách quà rỗng, mọi món nhiều size bấm chọn size đều không vào giỏ; với danh sách quà có món, còn có nguy cơ lấy giá To Go trong chế độ tại quán. Sửa đúng nguồn menu bán, giữ nguyên bộ lọc ở popup quà.
+
+- `node tests/xofa_paid_cart.test.js`: kiểm lại nguồn món/giá ở nguồn và các bản sinh.
+- `node tools/xofa_shift/cart_e2e.js`: bấm ô món và size bằng chuột thật trong Chromium, PC/mobile, ba bộ deploy; không/có danh sách quà, M/L/một size, tăng số lượng, giá từng menu và tổng thanh toán. Test trước sửa thất bại ngay ở món ngoài danh sách tặng.
+- Các test quà trước đó gán sẵn giỏ nên đã bỏ sót lỗi ở bước chọn size bán thường; hồi quy mới đi qua thao tác này.
