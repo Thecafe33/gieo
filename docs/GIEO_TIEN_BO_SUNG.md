@@ -33,3 +33,7 @@ Quanlygieo cũng lọc cảnh báo có cờ cũ nhưng phiếu đã xác nhận 
 - Kiểm lại lịch sử tiền mặt / bộ đệm, đối soát và browser history trước phát hành; sinh đủ ba bộ deploy.
 
 Không sửa POS/engine, không ghi Firebase thật, không deploy Hosting trong lượt làm. Các bộ deploy chứa manage.html/quanlygieo.html cùng bản tương ứng; `_thu` của quanlygieo sinh lại qua tool như quy trình.
+
+## Nhận biết trong manage
+
+Khi có tiền mặt after_close > 0, ngay dưới tổng tiền cần lấy hiện khối “Tiền bổ sung sau kết ca”, số tiền riêng và câu “Đã cộng vào tổng tiền cần lấy ở trên”. Trạng thái chờ xác nhận / đã xác nhận tổng được hiện ngay tại khối; tổng thực nhận thiếu ghi rõ số thiếu. Không cộng thêm lần nữa và không đọc thêm dữ liệu để hiển thị.

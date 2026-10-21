@@ -1,5 +1,7 @@
 # Hiện trạng dự án — cập nhật 20/10/2026
 
+**21/10 — Manage hiện rõ tiền bổ sung**: ngay dưới tổng tiền cần lấy của Gieo có khối “Tiền bổ sung sau kết ca” với số tiền riêng, ghi rõ đã cộng vào tổng và trạng thái chờ / đã xác nhận tổng thực nhận; nếu tổng nhận còn thiếu thì ghi số thiếu. Chỉ trình bày lại dữ liệu đã đọc, không thêm truy vấn hay đổi phép tính.
+
 **21/10 — Tiền bổ sung Gieo: một lần xác nhận ở manage/quanlygieo**: bỏ form xác nhận bổ sung riêng, một tổng thực nhận gồm bàn giao + bill TM after_close. Hai app đọc phiếu ownerReceipt/postCloseReceipt cũ theo thời gian và tổng, xác nhận ghi đồng thời hai field/cờ chờ trong transaction; bill mới làm hiện cần xác nhận lại, không tự tăng số nhận. Manage phát hiện bổ sung ngày cũ qua query cờ khi mở Tiền mặt, không đọc bill lịch sử/listener mới. Giữ đối soát/kết ca và tiền nhận lịch sử. Chi tiết `docs/GIEO_TIEN_BO_SUNG.md`; chưa deploy Hosting, không ghi Firebase thật.
 
 **21/10 — PosX gỡ quà theo khách (bản chủ quán gửi)**: nhận PosX_2.html dựa trên Giáng sinh; tích hợp `dropCustomerBoundGift` khi xoá/sửa/chọn SĐT, giữ khách cùng số, mã nhập tay và quà Mua X không gắn khách. Hoàn tác voucher trả nguyên giá/size, xoá ly tem và huỷ ý định trừ tem, cập nhật giỏ/kiosk, không đọc thêm Firebase. Rà thấy hộp chọn voucher đang mở vẫn áp được sau xoá khách; bổ sung đóng/xoá lựa chọn chờ, huỷ retry, bỏ kết quả quyền tem/voucher trả muộn cho khách cũ. Kiểm DOM PC/mobile với Firebase giả, sinh lại ba mùa; chưa deploy Hosting.

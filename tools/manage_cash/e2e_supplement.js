@@ -21,11 +21,15 @@ const server=require('http').createServer((req,res)=>{
  try{for(const width of [1366,390])for(const oldReceipt of [false,true]){
  legacy=oldReceipt;const p=await b.newPage({viewport:{width,height:900}}),errors=[];p.on('pageerror',e=>errors.push(e.message));await p.route('**/*',r=>r.request().url().startsWith(url)?r.continue():r.abort());await p.goto(url);await p.waitForSelector('.cash-widget');
  const gg=p.locator('.cash-widget').filter({hasText:'GG01'});
+ assert((await gg.locator('.cash-extra').innerText()).includes('Tiền bổ sung sau kết ca'));
+ assert((await gg.locator('.cash-extra').innerText()).includes('+50.000 ₫'));
+ assert((await gg.locator('.cash-extra').innerText()).includes(oldReceipt?'Đã xác nhận trong tổng thực nhận':'Chờ xác nhận tổng thực nhận'));
+
  if(oldReceipt){assert.equal(await gg.locator('.cash-form').count(),0);assert((await gg.innerText()).includes('350.000'));assert.equal(await p.evaluate(()=>cashMock.writes.length),0);}
  else{
  assert((await gg.innerText()).includes('350.000'));assert(await gg.locator('.cash-form').isVisible());assert((await gg.innerText()).includes('Đã ghi nhận trước 300.000'));
  await gg.locator('input[name="received"]').fill('350000');await gg.getByRole('button',{name:'Xác nhận tổng',exact:true}).click();await p.waitForFunction(()=>cashMock.data.daily_closings_gieogieo['2026-10-18'].ownerReceipt.received===350000);await p.waitForFunction(()=>!live.loadingKey);
- assert.equal(await gg.locator('.cash-form').count(),0);assert.equal(await p.evaluate(()=>cashMock.writes.length),1);
+ assert.equal(await gg.locator('.cash-form').count(),0);assert.equal(await p.evaluate(()=>cashMock.writes.length),1);assert((await gg.locator('.cash-extra').innerText()).includes('Đã xác nhận trong tổng thực nhận'));
  }
  // Inject đúng hàm QL, không khởi động các màn kho/lương không liên quan; cùng source Firebase giả.
  await p.evaluate(code=>{
@@ -41,7 +45,7 @@ const server=require('http').createServer((req,res)=>{
  await p.locator('#ql-test #ownerRecvInput').fill('360000');await p.locator('#ql-test button[onclick="saveOwnerReceipt()"]').click();await p.waitForFunction(()=>cashMock.data.daily_closings_gieogieo['2026-10-18'].ownerReceipt.received===360000);
  const value=await p.evaluate(()=>cashMock.data.daily_closings_gieogieo['2026-10-18']);assert.equal(value.postCloseReceipt.received,360000);assert.equal(value.postCloseCashPending,false);assert.equal(value.handedOverAmount,300000);
  assert.equal(await p.locator('#ql-test #ownerRecvInput').count(),0);
- await p.evaluate(()=>loadCurrent(true));await p.waitForFunction(()=>!live.loadingKey);assert.equal(await gg.locator('.cash-form').count(),0);assert((await gg.innerText()).includes('360.000'));assert.deepEqual(errors,[]);
+ await p.evaluate(()=>loadCurrent(true));await p.waitForFunction(()=>!live.loadingKey);assert.equal(await gg.locator('.cash-form').count(),0);assert((await gg.innerText()).includes('360.000'));assert((await gg.locator('.cash-extra').innerText()).includes('+60.000 ₫'));assert.deepEqual(errors,[]);
  console.log('ok',width,oldReceipt?'đọc phiếu bổ sung cũ không ghi migrate':'manage nhận bổ sung',': một xác nhận, hai app cùng số; bill mới QL xác nhận và manage đọc đúng');await p.close();
  }}finally{await b.close();server.close()}
 })().catch(e=>{console.error(e);server.close();process.exitCode=1});
