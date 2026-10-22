@@ -21,13 +21,21 @@ function fixture(store='gg01'){
  const d=E.decision(input);assert.deepEqual(d.allocations.map(a=>a.qty),[75,75,75,75]);assert.deepEqual(d.allocations.map(a=>a.value),[7500,7500,7500,7500]);assert.deepEqual(E.audit(d),[]);
  assert.equal(E.group([...shifts,shifts[0],{employeeId:'order',roles:['order'],checkedInAt:start,checkedOutAt:end}],start,end).people.length,4);
  assert.equal(E.split(1,['c','b','a']).reduce((s,p)=>s+Math.round(p.value*100),0),100);
+ {
+  // Chủ quán 22/10: ca không ghi chức năng (thiếu / rỗng) = pha chế; ca chỉ 'order' không được chia.
+  const raw=[{id:'s1',employeeId:'x',checkedInAt:start,checkedOutAt:end},{id:'s2',employeeId:'y',roles:[],checkedInAt:start,checkedOutAt:end},{id:'s3',employeeId:'z',roles:['order','barista'],checkedInAt:start,checkedOutAt:end},{id:'s4',employeeId:'o',roles:['order'],checkedInAt:start,checkedOutAt:end}];
+  const g=E.group(raw,start,end);assert.deepEqual(g.people.map(p=>[p.id,p.roleBasis]),[['x','not_recorded'],['y','not_recorded'],['z','recorded']]);
+  assert.equal(E.isBarista(undefined),false);assert.equal(E.isBarista({roles:['order']}),false);
+  const d1=E.decision({...input,shifts:[{id:'only',employeeId:'duy',employeeName:'Duy',checkedInAt:start,checkedOutAt:end}]});
+  assert.deepEqual(d1.allocations.map(a=>[a.employeeId,a.qty,a.value,a.roleBasis]),[['duy',300,30000,'not_recorded']]);assert.deepEqual(E.audit(d1),[]);
+ }
  const cp={id:'cp',status:'valid',containerId:'u',countedAt:'2026-10-18T01:00:00.000Z'};
  assert.deepEqual(E.decision({...input,checkpoint:cp}).allocations.map(a=>a.employeeId),['d']);
  assert.equal(E.control({level:2,manualFloor:2},'CLEAN_WINDOW_PASSED',{releaseEnabled:true,validPoints:8,activeDays:4,usedEnough:true,pending:0,ackComplete:true,daysSinceLastRelease:8}).level,2);
  assert.throws(()=>E.measurement([{vesselId:'v',variantId:'x',grossG:100,tareG:20}],{unit:'ml'}),/tỷ trọng/);
  assert.equal(E.measurement([{vesselId:'v',variantId:'x',grossG:120,tareG:20}],{unit:'g'}).net,100);
  assert.throws(()=>E.transition('task','queued','VALID_RESULT'),/INVALID/);
- console.log('ok 300g chia đều bốn pha chế; mốc mới thu hẹp nhóm, không kéo nhân viên order, không đoán tỷ trọng');
+ console.log('ok 300g chia đều bốn pha chế; mốc mới thu hẹp nhóm, không kéo nhân viên order, không đoán tỷ trọng; ca không ghi chức năng = pha chế, một người nhận 100%');
  for(const store of ['gg01','gg02']){
   const f=fixture(store),before=JSON.stringify(Object.fromEntries(Object.entries(f.FS).filter(([p])=>!p.startsWith(E.rootPath(store)))));
   const out=await f.service.finish(source.id);assert.equal(out.mode,'active');assert.equal(out.quantity,300);assert.equal(out.allocations[0].qty,75);

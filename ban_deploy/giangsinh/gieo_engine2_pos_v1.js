@@ -46,7 +46,7 @@ function modal(title,body){
  el.addEventListener('click',e=>{if(e.target===el)close();});
 }
 function close(refresh=true){const detail=!!view;document.getElementById('e2Modal')?.remove();view=null;if(refresh&&detail&&continuation){showCloseSummary().catch(e=>toast(e.message));return;}if(refresh&&continuation&&!detail)continuation=null;if(refresh){mount();load().catch(()=>{});}}
-async function staff(){const who=await resolveStaffPinWorkedToday('e2StaffPin');if(!who)return null;if(typeof _employeeShiftsTodayCache!=='undefined'&&!_employeeShiftsTodayCache.some(s=>s.employeeId===who.id&&s.roles?.includes('barista'))){toast('Người thực hiện cần có chức năng pha chế trong ca đã làm');return null;}return who;}
+async function staff(){const who=await resolveStaffPinWorkedToday('e2StaffPin');if(!who)return null;if(typeof _employeeShiftsTodayCache!=='undefined'&&!_employeeShiftsTodayCache.some(s=>s.employeeId===who.id&&E.isBarista(s))){toast('Người thực hiện cần có chức năng pha chế trong ca đã làm');return null;}return who;}
 async function open(i){
  const token=++opening,task=rows[i];if(!task)return;
  if(task.status==='in_progress'){await load();toast('Số cân đã gửi. Bộ xử lý sẽ xác nhận kết quả; không gửi lại lượt mới.');return;}

@@ -45,6 +45,7 @@ const weighCases=FS=>casesOf(FS).filter(([,d])=>d.originKind==='measurement').so
   ['tiền khác lịch sử giá',FS=>{FS['price_history_gieogieo/price'].price=120;},'VALUATION_SOURCE_MISMATCH'],
   ['trùng người',FS=>{const [p]=finishCase(FS);FS[p].allocations[1].employeeId=FS[p].allocations[0].employeeId;},'DUPLICATE_PERSON'],
   ['bỏ sót pha chế có ca',FS=>{const [p,d]=finishCase(FS);const keep=d.allocations.slice(0,3);keep[0]={...keep[0],qty:keep[0].qty+75,value:keep[0].value+7500};FS[p].allocations=keep;},'ELIGIBLE_MISSING'],
+  ['ca không ghi chức năng (= pha chế) bị bỏ sót',FS=>{FS['employee_shifts_gieogieo/norole']={employeeId:'e',employeeName:'E',checkedInAt:'2026-10-19T02:00:00.000Z',checkedOutAt:'2026-10-19T12:00:00.000Z'};},'ELIGIBLE_MISSING'],
   ['phân bổ cho người order',FS=>{const [p]=weighCases(FS)[0];FS[p].allocations[0].employeeId='o';},'INELIGIBLE_ALLOCATED'],
   ['WASTE đúp cùng tem',FS=>{FS['stock_transactions_gieogieo/dup_u_WASTE']={itemId:'jelly',referenceId:'u',type:'WASTE',qty:-300,businessDate:'2026-10-22'};},'WASTE_EXCEEDS_UNIT'],
   ['báo hết khi tem còn mở',FS=>{FS['stock_containers_gieogieo/u'].status='open';},'FINISH_WASTE_OPEN_UNIT'],

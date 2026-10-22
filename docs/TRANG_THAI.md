@@ -1,3 +1,7 @@
+# 22/10 — Engine 2 B2: chạy lại trên dữ liệu thật 52 ngày
+
+[Lộ trình](LO_TRINH_ENGINE2_CAP6.md) B2: file gg01 1/9–22/10 đủ. Chủ quán chốt: ca không ghi chức năng = pha chế (`E.isBarista`, sửa v1 chưa deploy); dữ liệu ca đúng (thường một người/ngày). `tools/automation/engine2_replay.js`: 47/47 báo hết chạy lại, 9 gán tay giữ nguyên, kiểm toán ĐẠT. Chờ quyết định giá khi thiếu lịch sử giá (47/47 «chưa đủ giá»). Đường 1 (tương thích sổ) chưa làm.
+
 # 22/10 — Engine 2 B2: «Bản kiểm toán kho»
 
 [Lộ trình](LO_TRINH_ENGINE2_CAP6.md) đổi thứ tự B2 trước B1. Quản lý › Trích xuất dữ liệu có thẻ thứ ba «Bản kiểm toán kho (Engine 2)» — `unit_engine2_export_v1.js`, chỉ đọc, theo trang có giới hạn, manifest + SHA-256 + thao tác dở; file đọc thẳng bằng `tools/automation/engine2_audit.js`. Bộ kiểm toán sửa tên bảng dùng chung (chưa phát hành). Phát hiện: worker Engine 2 sai tên bảng dùng chung ở quán ≠ gg01 (chưa sửa, chờ quyết). Chưa deploy.

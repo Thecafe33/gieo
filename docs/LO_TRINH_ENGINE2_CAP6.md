@@ -71,7 +71,7 @@ Mỗi bước chỉ bắt đầu khi bước trước đạt cửa. Bước có 
 - Sửa engine đã phát hành = bản mới (`unit_engine2_v2.js` …), không sửa v1.
 - Cửa: sau ≥ 14 ngày có hoạt động, bộ kiểm B0 chạy trên dữ liệu thật, 0 vi phạm chưa giải trình.
 
-**B2 — Công cụ xuất manifest đủ + replay 30 ngày (công cụ xuất ✅ 22/10; replay ⛔ chờ file thật).**
+**B2 — Công cụ xuất manifest đủ + replay 30 ngày (xuất ✅; đường 2 ✅ trên dữ liệu thật 52 ngày; đường 1 ⬜).**
 - Xuất theo mục 7.2 đặc tả: raw stock/prep ledger có ID, tem có `containerId`, RT `active_units`, ca/role lịch sử, lịch sử giá/bì/công thức, điểm cắt FS–RT. Thao tác bấm rõ, có giới hạn, không quét nền POS.
 - Replay hai đường (tương thích / chính sách mới). Không đủ nguồn → `BLOCKED_DATA`, không «PASS dự kiến».
 - Cửa: cấp 1–2 family 1 đạt → **chứng nhận cấp 2**.
@@ -85,7 +85,15 @@ Mỗi bước chỉ bắt đầu khi bước trước đạt cửa. Bước có 
 - **Trang riêng `kiem_toan_kho.html`** (chủ quán 22/10: app đang chạy CHƯA có Engine 2 — không deploy lại quanlygieo): chỉ cần trang này + `unit_engine2_export_v1.js`; không nạp data_access / Unit Engine (tên bảng theo quy tắc data_access, test khoá), cùng tài khoản đăng nhập Quản lý, chỉ đọc. Có trong cả 3 bộ deploy.
 - `tools/automation/engine2_audit.js` đọc thẳng file này; manifest chưa đủ → CHƯA ĐẠT.
 - Test `tests/unit_engine2_export.test.js` (xuất → kiểm toán 0/0, CLI, mã kiểm ổn định khi đổi cỡ trang, chạm giới hạn, lỗi một phần, thao tác dở, chặn 62 ngày, Timestamp, tên bảng gg02) + e2e trình duyệt `tools/ql_giao_dien/e2e_kiem_toan_kho.js` (PC + điện thoại: bấm → tải file → kiểm toán ĐẠT, không ghi, không lỗi JS).
-- **Còn lại của B2:** chủ quán deploy + xuất 30–60 ngày thật; viết công cụ chạy lại (replay) hai đường trên file đó; kiểm toán dữ liệu thật.
+- **Kết quả trên dữ liệu thật gg01 1/9–22/10 (52 ngày, 17.506 bản ghi, `complete`, mã kiểm `181366a9…`):**
+  - Kiểm toán sổ gốc: ĐẠT 0/0 — ít ý nghĩa vì chưa có hồ sơ Engine 2.
+  - Bộ đếm `stock_containers_ref.missing` (1.317) của export v1 là NHIỄU (đếm cả referenceId = mã bill của CONSUMPTION); mọi tem trong `fifoAllocations` và mọi tem WASTE trỏ tới đều có trong file. Sửa ở export v2 khi có đợt deploy khác.
+  - **Ca không ghi chức năng: 80/80** (53 thiếu trường, 27 rỗng) → luật cũ «phải có 'barista'» làm MỌI case kẹt. **Chủ quán chốt 22/10: ca không ghi chức năng (thiếu / rỗng) = pha chế; có ghi thì theo đúng chức năng** — `E.isBarista` (lõi, store bàn giao/tìm ca, worker, POS nhận việc), bộ kiểm toán viết lại độc lập; phân bổ ghi `roleBasis: recorded | not_recorded`. Sửa thẳng v1 vì Engine 2 v1 CHƯA deploy (chỉ trang trích xuất đã deploy).
+  - Dữ liệu ca đúng thực tế (chủ quán xác nhận): 10/10–22/10 mỗi ngày một người; «4 pha chế» ở case 300 g chỉ là ví dụ thiết kế.
+  - Báo hết engine cũ ghi mã NGẪU NHIÊN (chỉ 3/47 dạng `finish_<tem>_WASTE`) → Engine 2 P0 `bootstrap`/`finish` chỉ nhận mã mới sẽ BỎ SÓT lịch sử (công cụ chạy lại nhận diện thêm theo ghi chú «Báo hết» / giờ kết thúc tem).
+- **Đường 2 (chính sách mới) — `tools/automation/engine2_replay.js`**: 47/47 báo hết chạy lại được (38 chia đều, **9 quản lý đã gán tay → giữ nguyên**), bộ kiểm toán độc lập trên hồ sơ chạy lại ĐẠT 0/0; test `tests/unit_engine2_replay.test.js` (trùng quyết định runtime; dữ liệu kiểu cũ). Báo cáo có tên nhân viên → chỉ gửi chủ quán, không commit.
+  - **Định giá — chờ quyết:** 47/47 «chưa đủ giá» vì lịch sử giá chỉ có 22 dòng (đa số từ cuối tháng 9). Sổ lãi/lỗ (`itemCostOn`) dùng giá hiện tại / oldPrice dòng đầu khi thiếu lịch sử → tham khảo 528.621đ; Engine 2 theo đặc tả 2.3 không lấy giá hiện tại làm giá lịch sử.
+- **Còn lại của B2:** đường 1 (tương thích sổ — mô phỏng đúng cách engine tính tồn theo tem: lô chế biến, nợ FIFO, hoàn, mốc reset; phép cộng thô cho 233 «lệch» giả); chứng nhận cấp 2.
 - **Phát hiện ngoài phạm vi (chưa sửa — chờ quyết):** worker `functions/automation/engine2.js` tạo store Engine 2 **không truyền hàm đặt tên bảng** → ở quán ≠ gg01 đọc `prep_vessels_gieogieo__ggNN` / `price_history_gieogieo__ggNN` (không tồn tại, đó là bảng dùng chung) → mọi lượt cân bị từ chối «Dụng cụ hoặc bì đã thay đổi», giá thành «chưa đủ giá». POS / quanlygieo2 đúng (dùng `GieoData.collFor`). gg01 không bị.
 
 **B3 — Cấp 3: baseline NL có tem.** Phương pháp mục 4. Cửa: dự báo trên tuần chưa học nằm trong khoảng bất định đã công bố; một mẻ/khoảng lỗi không kéo lệch baseline (kiểm bằng lỗi cài).

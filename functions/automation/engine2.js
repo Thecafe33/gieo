@@ -22,7 +22,7 @@ function createEngine2Worker({db,rt,FieldValue,now=Date.now,documentId}){
   }else if(kind==='stock_containers'){
    if(after?.status==='finished'&&Number(after.wasteBase)>0&&after.wasteBasis==='unit_engine'&&(before?.status!==after.status||before?.wasteBase!==after.wasteBase))await service(store).enqueue('finish','finish_'+id+'_WASTE');
    if(after?.status==='open'&&(before?.status!=='open'||before?.openedAt!==after.openedAt))await service(store).enqueue('opened',id);
-  }else if(kind==='employee_shifts'&&[before,after].some(d=>d?.roles?.includes('barista'))&&E.stable(before)!==E.stable(after))await service(store).enqueue('handover',id);
+  }else if(kind==='employee_shifts'&&[before,after].some(d=>E.isBarista(d))&&E.stable(before)!==E.stable(after))await service(store).enqueue('handover',id);
   else if(kind==='price_history'&&E.stable(before)!==E.stable(after)){for(const item of new Set([before?.itemId,after?.itemId].filter(Boolean)))await service(store).enqueue('reprice',item);}
  }
  return {service,source,drain:(store,id)=>service(store).drain(id),tick:store=>service(store).retryDue()};

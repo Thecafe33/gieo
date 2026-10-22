@@ -87,7 +87,7 @@ function create(opts){
  async function handover(id,guard){
   const c=await config();if(!active(c))return;
   await enqueue('recompute_shift',id);await enqueue('discover_shift',id);
-  const s=await coll('employee_shifts').doc(id).get();if(!s.exists||!s.data().roles?.includes('barista'))return;
+  const s=await coll('employee_shifts').doc(id).get();if(!s.exists||!E.isBarista(s.data()))return;
   const at=iso(),shift=s.data();
   for(const itemId of Math.abs(now()-E.ms(shift.checkedOutAt||shift.checkedInAt))<=14*3600000?c.controlledItemIds||[]:[]){
    const ctl=await sub('controls').doc(itemId).get();if(!ctl.exists||ctl.data().level<1)continue;
@@ -234,7 +234,7 @@ function create(opts){
   else await fs.runTransaction(async t=>{await fence(t,guard);const cs=await t.get(base);if(cs.exists&&cs.data().settingsRevision===cfg.settingsRevision)t.set(base,{bootstrapFinishedAt:iso()},{merge:true});});
  }
  async function discoverShift(id,guard){
-  const shift=await coll('employee_shifts').doc(id).get();if(!shift.exists||!shift.data().roles?.includes('barista'))return;
+  const shift=await coll('employee_shifts').doc(id).get();if(!shift.exists||!E.isBarista(shift.data()))return;
   const sh=shift.data(),job=await guard.ref.get(),cursor=job.data().cursor;
   let q=sub('cases').where('interval.to','>',sh.checkedInAt).where('interval.from','<',sh.checkedOutAt||iso()).orderBy('interval.to').orderBy('interval.from').orderBy(opts.documentId||'__name__').limit(50);if(cursor)q=q.startAfter(cursor.to,cursor.from,cursor.id);
   const s=await q.get();for(const row of s.docs)await enqueue(row.data().originKind||'finish',row.data().originId||row.data().sourceId);

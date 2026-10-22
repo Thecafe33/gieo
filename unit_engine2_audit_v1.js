@@ -112,7 +112,8 @@ function check(snap){
    if(c.basis==='policy_equal_share'&&!snap.truncated?.includes('shifts')){
     const must=new Set(),may=new Set();
     for(const sh of snap.shifts||[]){
-     if(!sh.employeeId||!(sh.roles||[]).includes('barista'))continue;
+     // Chủ quán 22/10: ca không ghi chức năng (thiếu / rỗng) = pha chế; có ghi thì phải có 'barista'. Viết lại độc lập với lõi.
+     const roles=Array.isArray(sh.roles)?sh.roles:[];if(!sh.employeeId||(roles.length&&!roles.includes('barista')))continue;
      const a=ms(sh.checkedInAt),b=sh.checkedOutAt?ms(sh.checkedOutAt):NaN;
      if(!Number.isFinite(a)||a>=to)continue;
      if(Number.isFinite(b)){if(b>from)must.add(sh.employeeId);}else may.add(sh.employeeId);

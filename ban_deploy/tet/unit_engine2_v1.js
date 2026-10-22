@@ -21,16 +21,20 @@ function split(total,ids){
  const q=Math.floor(cents/people.length),r=cents%people.length;
  return people.map((id,i)=>({employeeId:id,value:(q+(i<r?1:0))/100}));
 }
+// Chủ quán chốt 22/10: ca KHÔNG ghi chức năng (thiếu trường roles hoặc rỗng) = pha chế — ở Gieo ai đứng ca cũng pha chế
+// (dữ liệu thật 1/9–22/10: không ca nào ghi chức năng). Ca có ghi chức năng thì theo đúng chức năng đó (chỉ 'order' → không).
+const isBarista=s=>!!s&&(!Array.isArray(s.roles)||!s.roles.length||s.roles.includes('barista'));
 function group(shifts,from,to){
  const start=ms(from),end=ms(to);if(!Number.isFinite(start)||!Number.isFinite(end)||start>=end)throw Error('Engine2: khoảng trách nhiệm không hợp lệ');
- const names=new Map(),refs=[];
+ const names=new Map(),refs=[],recorded=new Set();
  for(const s of shifts||[]){
-  if(!s.employeeId||!Array.isArray(s.roles)||!s.roles.includes('barista'))continue;
+  if(!s.employeeId||!isBarista(s))continue;
   const a=ms(s.checkedInAt),b=s.checkedOutAt?ms(s.checkedOutAt):Math.min(end,a+14*3600000);
   if(!Number.isFinite(a)||!Number.isFinite(b)||b<=a||a>=end||b<=start)continue;
   names.set(s.employeeId,s.employeeName||s.employeeId);if(s.id)refs.push(s.id);
+  if(Array.isArray(s.roles)&&s.roles.includes('barista'))recorded.add(s.employeeId);
  }
- return {people:[...names].sort(([a],[b])=>a.localeCompare(b)).map(([id,name])=>({id,name})),shiftIds:[...new Set(refs)].sort()};
+ return {people:[...names].sort(([a],[b])=>a.localeCompare(b)).map(([id,name])=>({id,name,roleBasis:recorded.has(id)?'recorded':'not_recorded'})),shiftIds:[...new Set(refs)].sort()};
 }
 function interval(container,checkpoint,to){
  const opened=ms(container.openedAt),end=ms(to);if(!Number.isFinite(opened)||!Number.isFinite(end)||opened>=end)throw Error('Engine2: thiếu mốc mở hợp lệ');
@@ -50,7 +54,7 @@ function decision(input){
  return {schemaVersion:1,policyVersion:POLICY,storeId:store,status:'decided',decisionMode:'auto',basis:'policy_equal_share',sourceId,
   sourcePath:collection('stock_transactions',store)+'/'+sourceId,containerId:container.id,itemId:source.itemId,itemName:container.itemName||source.itemId,unit:container.unit||'',quantity,
   interval:range,shiftIds:g.shiftIds,valuation:valuation||{status:'missing',amount:null},amount,
-  allocations:qty.map((p,i)=>({employeeId:p.employeeId,employeeName:g.people.find(e=>e.id===p.employeeId).name,qty:p.value,value:money?money[i].value:null,basis:'policy_equal_share'})),
+  allocations:qty.map((p,i)=>({employeeId:p.employeeId,employeeName:g.people.find(e=>e.id===p.employeeId).name,qty:p.value,value:money?money[i].value:null,basis:'policy_equal_share',roleBasis:g.people.find(e=>e.id===p.employeeId).roleBasis})),
   explanation:'Chia đều nhóm pha chế có ca thực tế giao với khoảng từ mốc cân hợp lệ gần nhất hoặc mở tem đến báo hết. Đây là trách nhiệm theo chính sách, không kết luận hành vi cá nhân.',
   control:{level:2,targetId:source.itemId,requirements:['checkpoint_soon','barista_handover','day_close'],manualFloor:0},
   actions:[{type:'weigh_open_units',targetId:source.itemId,assignment:'current_barista_group',handover:'next_barista_group'}]};
@@ -72,7 +76,7 @@ function measuredDecision(input){
  const qty=split(quantity,g.people.map(p=>p.id)),money=amount===null?null:split(amount,g.people.map(p=>p.id));
  return {schemaVersion:1,policyVersion:POLICY,storeId:store,status:'decided',decisionMode:'auto',basis:'policy_equal_share',sourceId,sourcePath:collection('stock_transactions',store)+'/'+sourceId,
   itemId:source.itemId,itemName:container.itemName||source.itemId,containerId:container.id,unit:container.unit||'',quantity,amount,valuation:valuation||{status:'missing',amount:null},interval:range,shiftIds:g.shiftIds,
-  allocations:qty.map((p,i)=>({employeeId:p.employeeId,employeeName:g.people.find(e=>e.id===p.employeeId).name,qty:p.value,value:money?money[i].value:null,basis:'policy_equal_share'})),
+  allocations:qty.map((p,i)=>({employeeId:p.employeeId,employeeName:g.people.find(e=>e.id===p.employeeId).name,qty:p.value,value:money?money[i].value:null,basis:'policy_equal_share',roleBasis:g.people.find(e=>e.id===p.employeeId).roleBasis})),
   explanation:'Hao hụt đã ghi trong lượt cân, chia đều pha chế thuộc khoảng giữa mốc vật lý trước và lần cân này. Không ghi thêm WASTE.'};
 }
 function transition(kind,state,event){
@@ -118,6 +122,6 @@ function outbox(storage,store){
  const read=()=>{const value=JSON.parse(storage.getItem(name)||'[]');if(!Array.isArray(value)||value.some(x=>x.storeId!==store))throw Error('Bộ nhớ công việc cần kiểm tra');return value;};
  return {read,put(command){if(!command.id||!['measurement','exception','close_exception'].includes(command.kind))throw Error('Lệnh lưu không hợp lệ');const rows=read();if(rows.some(x=>x.id===command.id))return;if(rows.length>=100)throw Error('Bộ nhớ công việc đã đầy; kết nối để đồng bộ trước');storage.setItem(name,JSON.stringify([...rows,{...command,storeId:store}]));},remove(id){storage.setItem(name,JSON.stringify(read().filter(x=>x.id!==id)));}};
 }
-const api={VERSION,POLICY,DAY,states,ms,finite,stable,storeId,collection,rootPath,key,digest,round,split,group,interval,decision,measuredDecision,audit,transition,control,measurement,outbox};
+const api={VERSION,POLICY,DAY,states,ms,finite,stable,storeId,collection,rootPath,key,digest,round,split,isBarista,group,interval,decision,measuredDecision,audit,transition,control,measurement,outbox};
 if(typeof module==='object'&&module.exports)module.exports=api;root.UnitEngine2=api;
 })(typeof window!=='undefined'?window:globalThis);
