@@ -71,8 +71,8 @@ const ROOT = path.join(__dirname, '..');
       'alerts_gieogieo__gg02/b1': { type: 'handover_cash_variance', status: 'new', createdAt: '2026-10-22T04:00:00Z' },
       'alerts_gieogieo__gg03/c1': { type: 'missing_recipe', status: 'new' }
     } });
-    const A = new Function('fstore', 'ensureAuth', 'gieoStores', 'vnDate', 'dkey', 'GIEO_LEGACY', extract('manage.html', N2) + '\nreturn {' + N2.join(',') + '};')(
-      g.fstore, async () => {}, async () => [{ id: 'gg01' }, { id: 'gg02' }, { id: 'gg03', active: false }], () => new Date('2026-10-22T19:30:00Z'), () => '2026-10-23', 'gg01');
+    const A = new Function('fstore', 'ensureAuth', 'gieoStores', 'vnDate', 'dkey', 'parseDkey', 'addDays', 'firebase', 'GIEO_LEGACY', extract('manage.html', N2) + '\nreturn {' + N2.join(',') + '};')(
+      g.fstore, async () => {}, async () => [{ id: 'gg01' }, { id: 'gg02' }, { id: 'gg03', active: false }], () => new Date('2026-10-22T19:30:00Z'), () => '2026-10-23', k => k, () => '2026-10-01', { firestore: { FieldPath: { documentId: () => '__name__' } } }, 'gg01');
     const inbox = await A.readGieoInbox();
     assert.deepStrictEqual(inbox.alerts.map(a => a.store + '/' + a.id), ['gg02/b1', 'gg01/a2', 'gg01/a1'], 'mới + đã xem, mới nhất trước; bỏ đã xử lý; bỏ quán ngừng hoạt động');
     await A.markGieoAlert('gg01', 'a1', 'seen'); assert.strictEqual(g.FS['alerts_gieogieo/a1'].status, 'seen'); assert.ok(g.FS['alerts_gieogieo/a1'].resolvedAt);
@@ -92,8 +92,8 @@ const ROOT = path.join(__dirname, '..');
       'employee_shifts_gieogieo__gg02/s3': { employeeId: 'e3', employeeName: 'Huy', businessDate: '2026-10-20', checkedInAt: '2026-10-20T13:00:00.000Z', checkedOutAt: null },
       'employee_shifts_gieogieo/s4': { employeeId: 'e4', businessDate: '2026-10-19', checkedInAt: '2026-10-19T01:00:00.000Z', checkedOutAt: '2026-10-19T09:00:00.000Z' }
     } });
-    const H = new Function('fstore', 'ensureAuth', 'gieoStores', 'vnDate', 'dkey', 'GIEO_LEGACY', extract('manage.html', N3) + '\nreturn {' + N3.join(',') + '};')(
-      g.fstore, async () => {}, async () => [{ id: 'gg01' }, { id: 'gg02' }], () => new Date('2026-10-22T19:30:00Z'), () => '2026-10-23', 'gg01');
+    const H = new Function('fstore', 'ensureAuth', 'gieoStores', 'vnDate', 'dkey', 'parseDkey', 'addDays', 'firebase', 'GIEO_LEGACY', extract('manage.html', N3) + '\nreturn {' + N3.join(',') + '};')(
+      g.fstore, async () => {}, async () => [{ id: 'gg01' }, { id: 'gg02' }], () => new Date('2026-10-22T19:30:00Z'), () => '2026-10-23', k => k, () => '2026-10-01', { firestore: { FieldPath: { documentId: () => '__name__' } } }, 'gg01');
     const inbox = await H.readGieoInbox();
     assert.deepStrictEqual(inbox.stale.map(x => x.store + '/' + x.id), ['gg02/s3', 'gg01/s1'], 'chỉ ca NGÀY CŨ chưa check-out; ca hôm nay đang làm bỏ qua');
     assert.strictEqual(H.ggShiftOutIso('2026-10-21T01:00:00.000Z', '2026-10-21', '17:30'), '2026-10-21T10:30:00.000Z');
@@ -107,6 +107,41 @@ const ROOT = path.join(__dirname, '..');
     await assert.rejects(H.closeGieoShift('gg01', 's4', '18:00'), /đã có giờ ra/);
     assert.strictEqual(g.FS['employee_shifts_gieogieo/s4'].checkedOutAt, '2026-10-19T09:00:00.000Z');
     console.log('ok Ca treo Gieo: chỉ ngày cũ; giờ ra ghi như ccSaveEdit (qua đêm sang ngày sau), dấu lãi/lỗ đúng quán; đã check-out thì không ghi đè');
+  }
+  // 5) Ngày chưa đóng sổ → Đóng ngày (y loadStaleClosingDays / forceCloseStaleDay của quanlygieo).
+  assert.match(ql, /await fstore\.collection\('daily_closings_gieogieo'\)\.doc\(dateKey\)\.set\(\{\s*businessDate: dateKey, status:'closed', closedAt: now,\s*forceClosedByManagement: true, forceCloseReason: reason\.trim\(\), forceClosedAt: now\s*\}, \{merge:true\}\);/, 'forceCloseStaleDay của quanlygieo đã đổi — cập nhật forceCloseGieoDay');
+  assert.match(ql, /checkedOutAt: mark, autoCheckOut:true,\s*autoCheckOutReason:'Quản lý đóng bù ngày '\+dateKey/, 'chốt hộ ca khi đóng bù đã đổi');
+  {
+    const g = makeFake({ fs: {
+      'daily_openings_gieogieo/2026-10-20': { businessDate: '2026-10-20' }, 'daily_closings_gieogieo/2026-10-20': { status: 'handed_over' },
+      'daily_openings_gieogieo/2026-10-21': { businessDate: '2026-10-21' }, 'daily_closings_gieogieo/2026-10-21': { status: 'closed' },
+      'daily_openings_gieogieo/2026-10-22': { businessDate: '2026-10-22' },
+      'daily_openings_gieogieo/2026-10-23': { businessDate: '2026-10-23' },
+      'daily_openings_gieogieo/2026-08-01': { businessDate: '2026-08-01' },
+      'employee_shifts_gieogieo/o1': { employeeId: 'e1', businessDate: '2026-10-22', checkedInAt: '2026-10-22T01:00:00.000Z', checkedOutAt: null },
+      'employee_shifts_gieogieo/o2': { employeeId: 'e2', businessDate: '2026-10-21', checkedInAt: '2026-10-21T01:00:00.000Z', checkedOutAt: null }
+    } });
+    // fakefb chưa có lọc theo mã tài liệu → bọc riêng cho truy vấn khoảng FieldPath.documentId().
+    const patch = c => { const w = c.where.bind(c); c.where = (f, op, v) => { if (f !== '__name__') return w(f, op, v); const fl = [[op, v]]; const q = { where(f2, op2, v2) { fl.push([op2, v2]); return q; }, async get() { const sn = await c.get(); const docs = sn.docs.filter(d => fl.every(([o, x]) => o === '>=' ? d.id >= x : o === '<=' ? d.id <= x : true)); return { docs, size: docs.length, forEach: fn => docs.forEach(fn) }; } }; return q; }; return c; };
+    const fsw = { collection: n => patch(g.fstore.collection(n)), runTransaction: fn => g.fstore.runTransaction(fn) };
+    const pDk = k => new Date(k + 'T00:00:00+07:00'), dk = d => new Date(+d + 7 * 3600000).toISOString().slice(0, 10), add = (d, n) => new Date(+d + n * 86400000);
+    const N4 = ['ggName', 'readGieoInbox', 'forceCloseGieoDay'];
+    const D = new Function('fstore', 'ensureAuth', 'gieoStores', 'vnDate', 'dkey', 'parseDkey', 'addDays', 'firebase', 'GIEO_LEGACY', extract('manage.html', N4) + '\nreturn {' + N4.join(',') + '};')(
+      fsw, async () => {}, async () => [{ id: 'gg01' }], () => new Date('2026-10-23T05:00:00Z'), d => d ? dk(d) : '2026-10-23', pDk, add, { firestore: { FieldPath: { documentId: () => '__name__' } } }, 'gg01');
+    const inbox = await D.readGieoInbox();
+    assert.deepStrictEqual(inbox.openDays.map(x => x.dateKey + ':' + x.status), ['2026-10-20:handed_over', '2026-10-22:null'], 'ngày đã mở ca, chưa đóng, trong 30 ngày trước hôm nay; bỏ ngày đã đóng / hôm nay / quá 30 ngày');
+    await assert.rejects(D.forceCloseGieoDay('gg01', '2026-10-22', '  '), /lý do/);
+    await assert.rejects(D.forceCloseGieoDay('gg01', '2026-10-23', 'x'), /ngày đã qua/);
+    const r = await D.forceCloseGieoDay('gg01', '2026-10-22', 'Quên kết ca');
+    const c = g.FS['daily_closings_gieogieo/2026-10-22'];
+    assert.deepStrictEqual([c.status, c.forceClosedByManagement, c.forceCloseReason, c.businessDate], ['closed', true, 'Quên kết ca', '2026-10-22']);
+    assert.strictEqual(r.shiftsClosed, 1); assert.deepStrictEqual([g.FS['employee_shifts_gieogieo/o1'].checkedOutAt, g.FS['employee_shifts_gieogieo/o1'].autoCheckOut], ['2026-10-22T16:59:00.000Z', true], 'chốt hộ ca còn treo đúng ngày lúc 23:59 giờ VN');
+    assert.strictEqual(g.FS['employee_shifts_gieogieo/o2'].checkedOutAt, null, 'ca ngày khác không đụng');
+    assert.ok(g.FS['pl_dirty_gieogieo/gg01'].m['2026-10-22_2026-10-22'], 'dấu lãi/lỗ ngày có ca được chốt');
+    await new Promise(r => setTimeout(r, 0));
+    assert.ok(Object.entries(g.FS).some(([k, v]) => k.startsWith('audit_logs_gieogieo/') && v.entity === 'daily_closing_force' && v.storeId === 'gg01'), 'ghi nhật ký kiểm toán dùng chung kèm quán');
+    await assert.rejects(D.forceCloseGieoDay('gg01', '2026-10-21', 'x'), /đã đóng ở nơi khác/);
+    console.log('ok Ngày chưa đóng sổ: đúng ngày như quanlygieo; Đóng ngày ghi như forceCloseStaleDay, chốt ca 23:59, dấu lãi/lỗ, nhật ký; đã đóng thì báo');
   }
   console.log('ALL PASS');
 })().catch(e => { console.error(e); process.exit(1); });

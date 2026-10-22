@@ -3,7 +3,10 @@
 const {chromium}=require('playwright'),fs=require('fs'),path=require('path'),assert=require('assert/strict');
 const ROOT=path.resolve(__dirname,'../..');let mock=fs.readFileSync(ROOT+'/tools/tet/e2e/mockfb.js','utf8');
 mock=mock.replace('Object.assign({},FS[key][id]||{},d)', '(function merge(a,b){for(const k of Object.keys(b)){const v=b[k];a[k]=v&&typeof v===\'object\'&&!Array.isArray(v)?merge(a[k]&&typeof a[k]===\'object\'?a[k]:{},v):v}return a})(FS[key][id]||{},d)');
+// Truy vấn khoảng mã tài liệu (FieldPath.documentId) cho «ngày chưa đóng sổ».
+mock=mock.replace('const x = d[f] === undefined ? undefined : d[f];',"const x = f==='__name__' ? id : (d[f] === undefined ? undefined : d[f]);");
 mock+=`
+firebase.firestore.FieldPath={documentId(){return '__name__'}};
 firebase.database.ServerValue={TIMESTAMP:0};firebase.firestore.FieldValue={delete(){return null},serverTimestamp(){return null},increment(n){return n},arrayUnion(){return []}};firebase.storage=()=>({ref:()=>({put:()=>Promise.resolve()})});
 (function(){const F=firebase.firestore;const nf=function(){const f=F();f.batch=()=>{const w=[];return {set(r,d,o){w.push(()=>r.set(d,o));return this},update(r,d){w.push(()=>r.update(d));return this},commit:()=>Promise.all(w.map(fn=>fn()))}};
  f.runTransaction=async fn=>{const w=[];const r=await fn({get:ref=>ref.get(),update:(ref,d)=>{w.push(()=>ref.update(d))},set:(ref,d,o)=>{w.push(()=>ref.set(d,o))}});for(const x of w)await x();return r};
@@ -18,6 +21,7 @@ firebase.database.ServerValue={TIMESTAMP:0};firebase.firestore.FieldValue={delet
  __FS.alerts_gieogieo__gg02={b1:{type:'handover_cash_variance',message:'Thiếu 20.000đ',status:'new',createdAt:t.toISOString()}};
  const at=(d,h)=>{const x=new Date(d);x.setHours(h,0,0,0);return x.toISOString()};
  __FS.employee_shifts_gieogieo=Object.assign(__FS.employee_shifts_gieogieo||{},{st1:{employeeId:'e2',employeeName:'Minh Cafe',businessDate:k(y),checkedInAt:at(y,8),checkedOutAt:null},st2:{employeeId:'e2',employeeName:'Đang làm',businessDate:k(t),checkedInAt:at(t,0),checkedOutAt:null}});
+ __FS.daily_openings_gieogieo={[k(y)]:{businessDate:k(y)}};__FS.daily_closings_gieogieo=Object.assign(__FS.daily_closings_gieogieo||{},{[k(y)]:{status:'bank_passed'}});
  window.__Y=k(y);})();`;
 const server=require('http').createServer((req,res)=>{const f=path.resolve(ROOT,'.'+new URL(req.url,'http://localhost').pathname);if(!f.startsWith(ROOT+path.sep)||!fs.existsSync(f)){res.writeHead(404);return res.end()}res.setHeader('Content-Type',f.endsWith('.js')?'application/javascript':'text/html; charset=utf-8');res.end(fs.readFileSync(f))});
 (async()=>{await new Promise(r=>server.listen(0,'127.0.0.1',r));const base='http://127.0.0.1:'+server.address().port;
@@ -53,7 +57,7 @@ const server=require('http').createServer((req,res)=>{const f=path.resolve(ROOT,
   // Màn «Chờ xử lý · Gieo».
   await p.evaluate(()=>navigate('duyet'));await p.waitForFunction(()=>!live.loadingKey&&live.ready.duyet===loadKey());
   const it=await p.locator('#view').innerText();
-  check(/4 việc/.test(it)&&it.includes('Minh Cafe · ca chưa check-out')&&!it.includes('Đang làm')&&it.includes('Gieo GG01')&&it.includes('Gieo GG02')&&it.includes('Trà sữa chưa có công thức')&&it.includes('Thiếu 20.000đ')&&it.includes('Vụ lệch cần xem'),width+': chờ xử lý: cảnh báo mới + đã xem từng quán, không có cảnh báo đã xử lý');
+  check(/5 việc/.test(it)&&/Ngày \d{2}\/\d{2}\/\d{4} chưa đóng sổ/.test(it)&&it.includes('đã đối soát xong, chưa bàn giao')&&it.includes('Minh Cafe · ca chưa check-out')&&!it.includes('Đang làm')&&it.includes('Gieo GG01')&&it.includes('Gieo GG02')&&it.includes('Trà sữa chưa có công thức')&&it.includes('Thiếu 20.000đ')&&it.includes('Vụ lệch cần xem'),width+': chờ xử lý: cảnh báo mới + đã xem từng quán, không có cảnh báo đã xử lý');
   check(await p.evaluate(()=>document.querySelector('#storeSwitcher').hidden&&document.documentElement.scrollWidth<=innerWidth),width+': ẩn chọn quán, không cuộn ngang');
   if(process.env.SCREENSHOT_DIR)await p.screenshot({path:path.join(process.env.SCREENSHOT_DIR,'cho_xu_ly_'+width+'.png'),fullPage:true});
   await p.locator('.cost-pend-row',{hasText:'Trà sữa'}).getByRole('button',{name:'Đã xem'}).click();
@@ -67,6 +71,10 @@ const server=require('http').createServer((req,res)=>{const f=path.resolve(ROOT,
   await p.waitForFunction(()=>!!__FS.employee_shifts_gieogieo.st1.checkedOutAt);
   check(await p.evaluate(()=>{const x=__FS.employee_shifts_gieogieo.st1,o=new Date(x.checkedOutAt);return o.getHours()===17&&o.getMinutes()===30&&x.manualEdit===true&&!!__FS.pl_dirty_gieogieo.gg01.m[__Y+'_'+__Y]}),width+': điền giờ ra ca treo → checkedOutAt 17:30 giờ VN + manualEdit + dấu lãi/lỗ');
   await p.waitForFunction(()=>!live.loadingKey&&live.ready.duyet===loadKey()&&!document.querySelector('#view').innerText.includes('ca chưa check-out'));
+  await p.getByRole('button',{name:'Đóng ngày'}).click();
+  await p.waitForFunction(()=>__FS.daily_closings_gieogieo[__Y].status==='closed');
+  check(await p.evaluate(()=>{const c=__FS.daily_closings_gieogieo[__Y];return c.forceClosedByManagement===true&&c.forceCloseReason==='Trùng hoá đơn'&&Object.values(__FS.audit_logs_gieogieo||{}).some(a=>a.entity==='daily_closing_force'&&a.storeId==='gg01')}),width+': Đóng ngày ghi như quanlygieo (lý do, cờ quản lý đóng) + nhật ký kiểm toán');
+  await p.waitForFunction(()=>!live.loadingKey&&live.ready.duyet===loadKey()&&![...document.querySelectorAll('.cost-pend-row b')].some(b=>/^Ngày .* chưa đóng sổ$/.test(b.textContent)));
   check(errors.length===0,width+': không lỗi JS '+errors.join(' | '));
   // Đặt lại dữ liệu cho cỡ màn sau.
   await p.close();
