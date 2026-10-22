@@ -8,6 +8,7 @@ const A=require('../../gieo_automation.v2');
 const {createWorker,rootPath,configPath,key}=require('../../functions/automation/worker');
 const {createQueue}=require('../../functions/automation/queue');
 const root=path.resolve(__dirname,'../..'),results=[];
+const verifyFix=process.argv.includes('--verify-fix');
 function check(id,expected,actual,detail){const pass=expected===actual;results.push({id,status:pass?'PASS':'BUG',expected,actual,detail});}
 function fixture(){
  const f=makeFake({fs:{[configPath('gg01')]:{enabled:true,mode:'active',fleet20Confirmed:true,startDate:'2026-10-01'}}});
@@ -25,7 +26,7 @@ async function backend(){
   await f.fstore.doc('prep_batches_gieogieo/b').set(before);await f.worker.processSource('gg01','prep_batches','b');
   await f.fstore.doc('prep_batches_gieogieo/b').set(after);const q=await f.queue.enqueue('gg01','prep_batches','b',before,after);if(q.queued)await f.queue.drain('gg01',q.id);
   const row=f.FS[rootPath('gg01')+'/cases/'+key('prep_batches','b')];
-  check('BTP_REVIEW_EVENT',false,row.rule==='LOT_REVIEW','Nguồn needsReview=false nhưng hồ sơ vẫn LOT_REVIEW; queued='+q.queued+', nextCheckAt='+row.nextCheckAt);
+  check('BTP_REVIEW_EVENT',false,row.rule==='LOT_REVIEW','Nguồn needsReview=false; rule='+row.rule+'; queued='+q.queued+', nextCheckAt='+row.nextCheckAt);
  }
  // A late failure from an expired lease must not poison a job already completed
  // by its replacement owner. Lease protection exists for the job but not its root error.
@@ -38,7 +39,7 @@ async function backend(){
   rejectOld(Error('old invocation timeout'));await old;
   const job=f.FS[rootPath('gg01')+'/jobs/'+j.id],sum=f.FS[rootPath('gg01')];
   check('EXPIRED_LEASE_ERROR',false,!!sum.lastSourceError,'job.dirty='+job.dirty+', job.lastError='+JSON.stringify(job.lastError)+', root='+JSON.stringify(sum.lastSourceError));
-  const n=await f.queue.retryDue('gg01');check('EXPIRED_LEASE_SELF_HEAL',true,n>0,'Không có job dirty để retry; root lỗi vẫn tồn tại');
+  const n=await f.queue.retryDue('gg01');check('EXPIRED_LEASE_SELF_HEAL',true,verifyFix?!sum.lastSourceError:n>0,verifyFix?'Lượt cũ không tạo lỗi nên không cần job retry':'Không có job dirty để retry; root lỗi vẫn tồn tại');
  }
  // Two independent errors must remain independently observable.
  {
@@ -47,7 +48,7 @@ async function backend(){
   for(const j of [a,b])await f.queue.drain('gg01',j.id).catch(()=>{});
   f.advance(60001);f.worker.processSource=actual;await f.queue.drain('gg01',b.id);
   const broken=f.FS[rootPath('gg01')+'/jobs/'+a.id],sum=f.FS[rootPath('gg01')];
-  check('OTHER_JOB_ERROR_CLEARED',true,!!sum.lastSourceError,'A còn dirty='+broken.dirty+' và lastError='+broken.lastError+' nhưng B thành công xoá lỗi root');
+  check('OTHER_JOB_ERROR_CLEARED',true,!!sum.lastSourceError,'A dirty='+broken.dirty+', lastError='+broken.lastError+'; sau B thành công, sourceErrorCount='+sum.sourceErrorCount+', rootError='+!!sum.lastSourceError);
  }
  // Controls: duplicate and out-of-order delivery are already handled correctly.
  {
@@ -76,11 +77,17 @@ async function browser(){
   return {legacy:counts.legacy,cases:counts.cases,saved:document.body.textContent.includes('Đang xem bản lưu'),sourceStatus:state.inbox[0].status};
  });
  check('LEGACY_ARGUMENT_COMPATIBILITY',true,observed.legacy>0,'Sau markAlertStatus truyền mảng: '+JSON.stringify(observed));
+ if(verifyFix){
+  await p.addScriptTag({content:extractRaw('quanlygieo.html',['_ctnDetailRender']).replace('function _ctnDetailRender(','function _ctnDetailRenderLegacy(')});
+  const hasAction=await p.evaluate(()=>{window.fmtNum=x=>String(x||0);window.fmtDateVN=x=>String(x);const box=document.createElement('div');document.body.append(box);_ctnDetailRender(box,{id:'c1',status:'finished',needsReview:true,code:'NL1'},null);return [...box.querySelectorAll('button')].some(b=>b.textContent==='Xác nhận đã xem')});
+  check('REVIEW_DETAIL_ACTION',true,hasAction,'Renderer gốc + wrapper quanlygieo2 có hành động xác nhận ngay trong chi tiết');
+ }
  await p.close();
  }finally{await b.close()}
  // Exercise the exact renderer reached by the new autoGoSource, not a UI mock.
+ if(verifyFix)return;
  const ctx={box:{innerHTML:''},fmtNum:x=>String(x||0),escapeHtmlAttr:x=>String(x||''),fmtDateVN:x=>String(x),vnDate:x=>new Date(x)};
  vm.runInNewContext(extractRaw('quanlygieo.html',['_ctnDetailRender'])+";_ctnDetailRender(box,{id:'c1',status:'finished',needsReview:true,code:'NL1'},null)",ctx);
  check('REVIEW_DETAIL_ACTION',true,/ctnMarkReviewed\(/.test(ctx.box.innerHTML),'Chi tiết tem đã mở đúng mã nhưng không có hành động Đã xem; nút nằm ở danh sách Kho khác');
 }
-(async()=>{await backend();await browser();const report={release:'46c4a8f',scope:'quanlygieo2 + automation worker',productionWrites:0,results};console.log(JSON.stringify(report,null,2));if(process.argv.includes('--json'))fs.writeFileSync(path.join(root,'docs/QUANLYGIEO2_FAULT_AUDIT_46c4a8f.json'),JSON.stringify(report,null,2)+'\n');process.exitCode=results.some(r=>r.status==='BUG')?1:0;})().catch(e=>{console.error(e);process.exit(2)});
+(async()=>{await backend();await browser();const report={release:verifyFix?'fix-v3':'46c4a8f',scope:'quanlygieo2 + automation worker',productionWrites:0,results};console.log(JSON.stringify(report,null,2));if(process.argv.includes('--json'))fs.writeFileSync(path.join(root,verifyFix?'docs/QUANLYGIEO2_FAULT_FIX_V3.json':'docs/QUANLYGIEO2_FAULT_AUDIT_46c4a8f.json'),JSON.stringify(report,null,2)+'\n');process.exitCode=results.some(r=>r.status==='BUG')?1:0;})().catch(e=>{console.error(e);process.exit(2)});

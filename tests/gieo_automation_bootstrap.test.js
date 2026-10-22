@@ -31,9 +31,9 @@ const tx=f.fstore.runTransaction.bind(f.fstore);f.fstore.runTransaction=fn=>tx(t
  await f.fstore.doc(root).set({ready:true,bootstrapPolicyVersion:1,countsVerifiedVersion:1,counts:{working:205,done:1}},{merge:true});
  for(let i=0;i<4;i++)await w.tickStore('gg01');
  assert.equal(f.FS[casePath].group,'working');assert.equal(f.FS[casePath].rule,'LOT_REVIEW');
- assert.equal(f.FS[root].counts.working,206);assert.equal(f.FS[root].counts.done,0);assert.equal(f.FS[root].countsVerifiedVersion,2);
+ assert.equal(f.FS[root].counts.working,206);assert.equal(f.FS[root].counts.done,0);assert.equal(f.FS[root].countsVerifiedVersion,3);
  const revision=f.FS[casePath].revision,beforeTick=reads;await w.tickStore('gg01');
  assert.equal(f.FS[casePath].revision,revision);assert(reads-beforeTick<20,'Không chạy lại bootstrap nguồn sau khi đã nâng phiên bản xong');
- console.log('ok Nâng v1→v2 sửa hồ sơ cũ qua bootstrap có cursor; chỉ xác nhận badge khi hoàn tất và không quét nguồn lặp lại');
+ console.log('ok Nâng v1→v3 sửa hồ sơ cũ qua bootstrap có cursor; chỉ xác nhận badge khi hoàn tất và không quét nguồn lặp lại');
  console.log('ALL PASS');
 })().catch(e=>{console.error(e);process.exit(1)});

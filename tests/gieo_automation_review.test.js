@@ -1,5 +1,5 @@
 'use strict';
-const assert=require('node:assert/strict'),A=require('../gieo_automation.v2');
+const assert=require('node:assert/strict'),A=require('../gieo_automation.v3');
 const {makeFake}=require('./lib/fakefb');
 const {createWorker,rootPath,configPath}=require('../functions/automation/worker');
 const now=Date.parse('2026-10-22T12:00:00+07:00'),cfg={enabled:true,owners:{stock:{id:'nv',name:'Kho'}}};
@@ -9,6 +9,9 @@ const now=Date.parse('2026-10-22T12:00:00+07:00'),cfg={enabled:true,owners:{stoc
  r=A.task('stock_containers','c',{status:'finished',needsReview:false,code:'NL1'},cfg,now);assert.equal(r.group,'done');
  assert.equal(A.task('stock_containers','c',{status:'voided',needsReview:true},cfg,now).group,'done');
  console.log('ok Báo hết không tự kết thúc yêu cầu kiểm tra; chỉ hết khi nguồn đã duyệt');
+ assert.equal(A.relevant('prep_batches',{status:'active',needsReview:true},{status:'active',needsReview:false}),true);
+ assert.equal(A.relevant('prep_batches',{status:'active',needsReview:false},{status:'active',needsReview:true}),true);
+ assert.equal(A.relevant('prep_batches',{status:'active',qtyRemaining:100},{status:'active',qtyRemaining:90}),false);
  assert.equal(A.task('stock_containers','c',{status:'sealed',receivedAt:'2026-10-01'},cfg,now).rule,'LABEL_PENDING');
  assert.equal(A.task('expenses','e',{status:'pending_review',amount:null},cfg,now).value,null);
  assert.deepEqual(A.counterDelta({group:'working',visible:true,rule:'SOURCE_PENDING'},{group:'done',visible:false,rule:'ENGINE_COUNT_LINK'}),{approval:0,working:-1,done:0,watch:0});
@@ -20,7 +23,7 @@ const now=Date.parse('2026-10-22T12:00:00+07:00'),cfg={enabled:true,owners:{stoc
  f.fstore.collection=p=>p===root+'/cases'?wrap(coll(p)):coll(p);
  const w=createWorker(f.fstore,{now:()=>now});
  assert.equal(await w.reconcileCounts('gg01'),false);assert.equal(f.FS[root].counts.done,9);
- assert.equal(await w.reconcileCounts('gg01'),true);assert.equal(f.FS[root].counts.done,0);assert.equal(f.FS[root].counts.working,1);assert.equal(f.FS[root].countsVerifiedVersion,2);
+ assert.equal(await w.reconcileCounts('gg01'),true);assert.equal(f.FS[root].counts.done,0);assert.equal(f.FS[root].counts.working,1);assert.equal(f.FS[root].countsVerifiedVersion,3);
  const n=queries;assert.equal(await w.reconcileCounts('gg01'),false);assert.equal(queries,n);
  console.log('ok Sửa badge cũ bằng đối chiếu một lần; không ghi đè cập nhật đồng thời và không đọc lại khi đã xong');
  console.log('ALL PASS');

@@ -1,12 +1,12 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),{chromium}=require('playwright');
-const code=fs.readFileSync('gieo_automation_pos.v2.js','utf8');
+const code=fs.readFileSync('gieo_automation_pos.v3.js','utf8');
 (async()=>{const b=await chromium.launch({executablePath:'/usr/bin/chromium',args:['--no-sandbox']});try{for(const width of [1366,390]){
  const p=await b.newPage({viewport:{width,height:850}});const errors=[];p.on('pageerror',e=>errors.push(e.message));await p.route('**/*',r=>r.abort());
  await p.setContent('<div id="shiftBody"></div>');
  await p.addScriptTag({content:`let reads=0,countScreen=false;async function renderOpeningChecklist(){if(countScreen){document.getElementById('shiftBody').innerHTML='<div class="kc-title">Đếm đầu ca</div>';return;}document.getElementById('shiftBody').innerHTML='<div class="kc-title">Việc đầu ca</div><button id="sale">Bắt đầu bán hàng</button>';}async function renderDailyClosingChecklist(){document.getElementById('shiftBody').innerHTML='<input id="dcNoMoreBills" type="checkbox"><button id="close">Tiếp tục kết ca</button>';}
  let row={kind:'stock_containers',title:'Tem sữa đã quá hạn',reason:'Kiểm tra đúng tem',assigneeName:'Duy',backupName:'An'};
  const q={where(){return this},orderBy(){return this},limit(){return this},async get(){reads++;return{docs:[{id:'t',data:()=>row}]}}};
- let status={enabled:true,mode:'active',ready:true,heartbeatAt:new Date().toISOString(),countsVerifiedVersion:2};let task={caseId:'new-case',status:'open',expireAt:new Date(Date.now()+3600000).toISOString()};
+ let status={enabled:true,mode:'active',ready:true,heartbeatAt:new Date().toISOString(),countsVerifiedVersion:3};let task={caseId:'new-case',status:'open',expireAt:new Date(Date.now()+3600000).toISOString()};
  const root={async get(){reads++;return{exists:true,data:()=>status}},collection(){return q}};const fstore={collection:name=>({doc:()=>name==='duty_tasks_gieogieo'?{async get(){reads++;return{exists:true,data:()=>task}}}:root})};
  function toast(s){window.notice=s}async function openPrepVerifyPOS(){window.verifyOpened=true;}
  function openStockUseScreen(){window.opened='stock';}function showScreen(){}function loadKhoScreen(){}`});

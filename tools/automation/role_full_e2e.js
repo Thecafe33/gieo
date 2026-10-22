@@ -7,7 +7,7 @@ mock+='\n(function(){const process={env:{}};'+fake+'\n})();';
 mock+=`\n(function(){const seed={};for(const [c,docs]of Object.entries(window.__FS))for(const[id,d]of Object.entries(docs))seed[c+'/'+id]=d;
  const day=new Date(Date.now()+7*3600000).toISOString().slice(0,10),at=new Date().toISOString(),base='duty_digests_gieogieo/_automation';
  seed['work_schedules_gieogieo/e2_'+day]={employeeId:'e2',date:day,startTime:'09:30',endTime:'20:00',isOff:false};
- seed[base]={enabled:true,ready:true,mode:'active',heartbeatAt:at,countsVerifiedVersion:2,policyVersion:2,counts:{approval:1,working:1,done:0}};
+ seed[base]={enabled:true,ready:true,mode:'active',heartbeatAt:at,countsVerifiedVersion:3,policyVersion:3,counts:{approval:1,working:1,done:0}};
  seed[base+'/cases/expense']={id:'expense',kind:'expenses',sourceId:'e1',group:'approval',title:'Chi phí nước đá',value:35000,businessDate:day,reason:'Chờ chủ quán duyệt',resultStatus:'waiting_verification',rule:'EXPENSE_APPROVAL',visible:true,updatedAt:at};
  seed[base+'/cases/stock']={id:'stock',kind:'stock_containers',sourceId:'c1',group:'working',title:'Tem nguyên liệu Sữa cần kiểm tra',businessDate:day,reason:'Đã báo hết nhưng cần kiểm tra',resultStatus:'waiting_verification',rule:'LOT_REVIEW',visible:true,updatedAt:at};
  seed['stock_containers_gieogieo/c1']={itemId:'milk',code:'ABC123',itemName:'Sữa đặc',status:'finished',needsReview:true,initialQty:1000,unit:'g',unitBase:0,receivedAt:at};
@@ -26,10 +26,12 @@ const server=http.createServer((req,res)=>{const p=path.resolve(root,'.'+new URL
  await page.getByRole('heading',{name:'Chi phí nước đá',exact:true}).waitFor();assert((await page.locator('.auto-case').innerText()).includes('35.000'));
  if(process.env.SCREENSHOT_DIR){fs.mkdirSync(process.env.SCREENSHOT_DIR,{recursive:true});await page.screenshot({path:path.join(process.env.SCREENSHOT_DIR,'inbox-'+width+'.png')});}
  await page.evaluate(()=>autoOpenTab('working'));await page.getByRole('heading',{name:'Tem nguyên liệu Sữa cần kiểm tra'}).waitFor();await page.getByRole('button',{name:'Mở nghiệp vụ'}).click();await page.locator('#ctnDetailBody').getByText('ABC123',{exact:false}).first().waitFor();
+ await page.getByRole('button',{name:'Xác nhận đã xem',exact:true}).click();await page.waitForFunction(()=>__roleFixture.FS['stock_containers_gieogieo/c1'].needsReview===false);
+ assert.equal(await page.evaluate(()=>__roleFixture.FS['stock_containers_gieogieo/c1'].unitBase),0);assert.equal(await page.getByRole('button',{name:'Đã xác nhận xem',exact:true}).isDisabled(),true);
  await page.evaluate(()=>closeEditSheet(true));await page.evaluate(()=>autoOpenTab('approval'));await page.getByRole('heading',{name:'Chi phí nước đá',exact:true}).waitFor();await page.getByRole('button',{name:'Mở khoản chi'}).click();await page.locator('[onclick="doApproveExpense(\'e1\')"]').waitFor();
  await page.locator('[onclick="doApproveExpense(\'e1\')"]').click();await page.waitForFunction(()=>__roleFixture.FS['expenses_gieogieo/e1'].status==='approved');
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);assert.deepEqual(errors,[]);
  if(process.env.SCREENSHOT_DIR){fs.mkdirSync(process.env.SCREENSHOT_DIR,{recursive:true});await page.screenshot({path:path.join(process.env.SCREENSHOT_DIR,'manager-'+width+'.png')});}
- console.log('ok Actual HTML '+width+'px: số tiền, đúng tem cần kiểm tra, duyệt đúng chi phí qua nghiệp vụ hiện có, không lỗi JS');await page.close();
+ console.log('ok Actual HTML '+width+'px: số tiền, mở đúng tem và xác nhận xem qua Engine không đổi tồn, duyệt đúng chi phí, không lỗi JS');await page.close();
  }
 }finally{await b.close();server.close()}})().catch(e=>{console.error(e);server.close();process.exit(1)});

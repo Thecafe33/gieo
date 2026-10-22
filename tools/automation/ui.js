@@ -13,11 +13,11 @@ async function autoSummary(force=false){
 }
 function autoHeartbeatFresh(s){const t=Date.parse(s?.heartbeatAt||'');return Number.isFinite(t)&&t<=Date.now()+5*60000&&Date.now()-t<=60*60000;}
 function autoCountsVerified(s){return typeof GieoAutomation!=='undefined'&&s?.countsVerifiedVersion===GieoAutomation.VERSION;}
-function autoUsable(s){return !!(s?.ready&&autoCountsVerified(s)&&s.enabled===true&&s.mode==='active'&&!s.lastError&&!s.lastSourceError&&autoHeartbeatFresh(s));}
+function autoUsable(s){return !!(s?.ready&&autoCountsVerified(s)&&s.enabled===true&&s.mode==='active'&&!s.lastError&&!s.lastSourceError&&!s.sourceErrorCount&&autoHeartbeatFresh(s));}
 function autoStatusHTML(s){
  if(!s)return '<b>Chưa có bộ xử lý nền</b><p>Đang hiển thị cảnh báo hiện có. Triển khai bộ xử lý nền rồi bật theo từng điểm bán để giao việc tự động.</p>';
  if(s.enabled===false)return '<b>Tự động đang tắt</b><p>Cảnh báo nguồn vẫn được giữ. Mở thiết lập để bật lại.</p>';
- if(s.lastError||s.lastSourceError)return '<b>Bộ xử lý cần kiểm tra</b><p>'+escapeHtmlAttr(s.lastError||s.lastSourceError?.message||'Lỗi xử lý chứng từ')+'</p>';
+ if(s.lastError||s.lastSourceError||s.sourceErrorCount)return '<b>Bộ xử lý cần kiểm tra</b><p>'+escapeHtmlAttr(s.lastError||s.lastSourceError?.message||s.sourceErrorCount+' nguồn công việc đang chờ thử lại')+'</p>';
  if(!s.ready)return '<b>Đang khởi tạo hồ sơ</b><p>Chưa đối soát hết dữ liệu cũ. Các cảnh báo nguồn vẫn hiện bên dưới.</p>';
  if(!autoCountsVerified(s))return '<b>Đang đối chiếu lại số hồ sơ</b><p>Chưa có bản tổng hợp xác nhận theo phiên bản mới. Các cảnh báo nguồn vẫn được giữ.</p>';
  if(!autoHeartbeatFresh(s))return '<b>Chưa xác nhận bộ xử lý đang hoạt động</b><p>Bản tổng hợp có thể đã cũ. Cảnh báo nguồn vẫn được giữ; số 0 trong bản lưu không có nghĩa mọi việc đã xong.</p>';
@@ -59,13 +59,15 @@ function renderTodayHealthInbox(list){
 }
 function autoOpenTab(tab){autoTab=tab;autoPage=null;autoRows=[];closeTodayHealth(false);if(curScreen==='inbox')renderAlertInbox(autoSavedView);else switchScreen('inbox');}
 async function renderAlertInbox(viewSaved=false){
+ const loadedList=Array.isArray(viewSaved)?viewSaved:undefined;viewSaved=viewSaved===true;
+ autoSavedView=viewSaved;
  const generation=++autoRequest;autoBusy=false;
  const scope=alertUiScope(),box=document.getElementById('inboxBody');if(!box)return;
  box.innerHTML='<div class="muted">Đang đọc hồ sơ…</div>';
  try{
   await ensureAuth();const s=await autoSummary();if(scope!==alertUiScope()||generation!==autoRequest)return;
   if(!autoUsable(s)&&!viewSaved){
-   await renderAlertInboxLegacy();if(scope!==alertUiScope()||generation!==autoRequest)return;
+   await renderAlertInboxLegacy(loadedList);if(scope!==alertUiScope()||generation!==autoRequest)return;
    const h=document.createElement('div');h.innerHTML=autoHeaderHTML(s)+(s?.ready?'<button class="btn outline sm" onclick="renderAlertInbox(true)">'+(s.mode==='shadow'?'Xem hồ sơ đối chiếu':'Xem bản lưu gần nhất')+'</button>':'');box.prepend(h);return;
   }
   autoPage=null;autoRows=[];autoPageStore=scope;autoSavedView=viewSaved;
@@ -89,6 +91,19 @@ async function autoLoadCases(){
 }
 function autoResultLabel(r){return ({recorded:'Đã ghi nhận',waiting_verification:'Chờ xác minh',allocated:'Đã có căn cứ phân bổ',insufficient:'Chưa đủ căn cứ',manual:'Quyết định tay',policy_closed:'Đóng theo chính sách'})[r.resultStatus]||'Đang xử lý';}
 function autoMoney(v){return v!=null&&Number.isFinite(Number(v))?Math.round(Number(v)).toLocaleString('vi-VN')+'đ':'';}
+function _ctnDetailRender(box,c,recv){
+ _ctnDetailRenderLegacy(box,c,recv);
+ if(c.needsReview){const button=document.createElement('button');button.type='button';button.className='btn';button.textContent='Xác nhận đã xem';button.onclick=()=>autoReviewContainer(c.id,button);box.append(button);
+  const note=document.createElement('p');note.className='small-note';note.textContent='Chỉ xác nhận đã xem yêu cầu kiểm tra. Không thay đổi tồn kho hoặc ghi nhận hủy hàng.';box.append(note);}
+}
+async function autoReviewContainer(id,button){
+ if(button.disabled)return;button.disabled=true;const scope=alertUiScope(),state=autoState();
+ try{await UnitEngine.containers.annotate(id,{needsReview:false,reviewedAt:vnDate().toISOString(),reviewedBy:'management'});
+  autoInvalidate(state);if(scope!==alertUiScope())return;
+  if(typeof CTN_ALL_CACHE!=='undefined')CTN_ALL_CACHE.review=null;
+  logAudit('review','stock_container',id,{});button.textContent='Đã xác nhận xem';toast('Đã xác nhận xem. Hồ sơ tự động sẽ cập nhật theo chứng từ nguồn.');
+ }catch(e){if(scope===alertUiScope()){button.disabled=false;showError('Không xác nhận được: '+(e.message||e));}}
+}
 function autoCaseHTML(r,i){
  const esc=escapeHtmlAttr;
  const who=r.group==='approval'?'Chủ quán':r.group==='working'?(r.assigneeName||r.assigneeId||'Chưa có người phụ trách'):'Đã ghi nhận kết quả';

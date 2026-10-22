@@ -3,8 +3,8 @@ const {chromium}=require('playwright'),fs=require('fs'),assert=require('node:ass
 const root=path.resolve(__dirname,'../..'),code=fs.readFileSync(path.join(__dirname,'ui.js'),'utf8');
 const fixture=`
 let scope='gg01',curScreen='inbox',STORE_HEALTH_ISSUE_COUNT=0,QL_ALL=false,dutyTab='digest',dutyFilter='todo',dutyFrom='',dutyTo='',curEntryTab='';
-window.GieoAutomation={VERSION:2};
-const sum={ready:true,enabled:true,mode:'active',countsVerifiedVersion:2,heartbeatAt:new Date().toISOString(),counts:{approval:1,working:1,done:0}};
+window.GieoAutomation={VERSION:3};
+const sum={ready:true,enabled:true,mode:'active',countsVerifiedVersion:3,heartbeatAt:new Date().toISOString(),counts:{approval:1,working:1,done:0}};
 const rows=[{id:'chi',kind:'expenses',group:'approval',title:'Khoản chi mua đá',value:35000,reason:'Chờ duyệt',sourceId:'chi',businessDate:'2026-10-01',updatedAt:new Date().toISOString(),rule:'EXPENSE_APPROVAL'},
 {id:'duty',kind:'duty_cases',sourceId:'old-case',group:'working',title:'Lệch BTP cần cân lại',reason:'Chờ kết quả cân lại',businessDate:'2026-09-01',updatedAt:new Date().toISOString(),rule:'ENGINE_VERIFY'}];
 const counts={summary:0,cases:0,history:0,days:0,writes:0,legacy:0};
@@ -39,6 +39,7 @@ await check('Tắt tự động không bị chặn bởi ngày khởi tạo cũ'
 await check('Lưu thiết lập không đổi không khởi tạo lại và không ghi Firebase',async p=>{await p.evaluate(()=>autoSettings());await p.getByRole('button',{name:'Lưu thiết lập'}).click();assert.equal(await p.evaluate(()=>counts.writes),0);assert.equal(await p.locator('#sheet').isHidden(),true)});
 await check('Bấm tải lại bỏ bộ đệm tổng hợp ngay',async p=>{await p.evaluate(()=>renderAlertInbox());assert.equal(await p.evaluate(()=>counts.summary),1);await p.evaluate(()=>{reloadCurrent();return renderAlertInbox()});assert.equal(await p.evaluate(()=>counts.summary),2)});
 await check('Chưa có tổng hợp không hiện số tiền 0 như kết quả thật',async p=>{await p.evaluate(()=>autoDayReport());const text=await p.locator('#autoDayReport').innerText();assert(text.includes('Chưa đủ dữ liệu'));assert(!text.includes('0đ'))});
-await check('Chưa đối chiếu bộ đếm phiên bản mới vẫn giữ cảnh báo nguồn',async p=>{await p.evaluate(()=>{window.GieoAutomation={VERSION:2};sum.countsVerifiedVersion=1;return renderAlertInbox()});assert.equal(await p.evaluate(()=>counts.legacy),1);assert.equal(await p.evaluate(()=>counts.cases),0)});
+await check('Chưa đối chiếu bộ đếm phiên bản mới vẫn giữ cảnh báo nguồn',async p=>{await p.evaluate(()=>{window.GieoAutomation={VERSION:3};sum.countsVerifiedVersion=1;return renderAlertInbox()});assert.equal(await p.evaluate(()=>counts.legacy),1);assert.equal(await p.evaluate(()=>counts.cases),0)});
 await check('Thiếu file chính sách không báo tự động đang hoạt động',async p=>{await p.evaluate(()=>{delete window.GieoAutomation;return renderAlertInbox()});assert.equal(await p.evaluate(()=>counts.legacy),1);assert.equal(await p.evaluate(()=>counts.cases),0)});
+await check('Bộ đếm còn nguồn lỗi vẫn giữ cảnh báo gốc dù ô lỗi cuối rỗng',async p=>{await p.evaluate(()=>{sum.sourceErrorCount=1;sum.lastSourceError=null;return renderAlertInbox()});assert.equal(await p.evaluate(()=>counts.legacy),1);assert.equal(await p.evaluate(()=>counts.cases),0)});
 }finally{await browser.close()}console.log('RESULT '+failed+' failed');if(failed)process.exitCode=1;})().catch(e=>{console.error(e);process.exit(1)});

@@ -1,3 +1,7 @@
+# 22/10 — Vá 5 lỗi debug quanlygieo2, chính sách v3
+
+Đã sửa tương thích callback hộp thư, lỗi từ lease cũ, lỗi nhiều nguồn bị che, sự kiện needsReview BTP và nút xác nhận tem trong popup. Lỗi nguồn được đếm theo document riêng; nâng dữ liệu job cũ một lần, có cursor. Engine v20 và automation v1/v2 giữ nguyên. Chưa deploy. Xem [FIX_QUANLYGIEO2_DEBUG_V3_22-10.md](FIX_QUANLYGIEO2_DEBUG_V3_22-10.md).
+
 # 22/10 — Rà soát quanlygieo2 theo vai trò
 
 Đã tái hiện/sửa lỗi số tiền, điều hướng vụ cũ, fallback khi đối chiếu/nền lỗi, kết quả tải về muộn, tắt/lưu thiết lập và badge ẩn; kiểm thêm checklist nhân viên. Dùng chính sách/module công việc v2, giữ nguyên Engine v20 và bản JS v1. Chưa deploy. Xem [RA_SOAT_QUANLYGIEO2_NHAN_VIEN_QUAN_LY.md](RA_SOAT_QUANLYGIEO2_NHAN_VIEN_QUAN_LY.md).

@@ -1,8 +1,9 @@
 'use strict';
 const crypto=require('node:crypto');
-const A=require('./shared/gieo_automation.v2.js');
+const A=require('./shared/gieo_automation.v3.js');
 const hash=x=>crypto.createHash('sha256').update(A.stable(x)).digest('hex');
 const key=(kind,id)=>hash([kind,id]);
+const {readError,writeError,setError}=require('./errors');
 const rootPath=store=>A.collection('duty_digests',store)+'/_automation';
 const configPath=store=>A.collection('duty_digests',store)+'/_automation_config';
 const BOOTSTRAP=[
@@ -78,8 +79,8 @@ function createWorker(db,opts={}){
       reason:pending.length?'Hao hụt đã ghi; còn dòng thiếu lý do cần người phụ trách bổ sung.':'Các dòng của cùng sự kiện đã được gom. Không mặc định quy lỗi cho người báo.',value:null};
    }
    const fingerprint=hash({data:parts?null:data,parts,related,owners:cfg.owners||{},decision,version:A.VERSION});
-   if(old&&old.fingerprint===fingerprint&&!alias?.visible){if(sum.lastSourceError?.path===source.path)tx.set(db.doc(rootPath(store)),{lastSourceError:null},{merge:true});return {changed:false};}
-   if(!old&&['NO_ACTION','SOURCE_REMOVED','ENGINE_COUNT_LINK'].includes(decision.rule)){if(sum.lastSourceError?.path===source.path)tx.set(db.doc(rootPath(store)),{lastSourceError:null},{merge:true});return {changed:false};}
+   if(old&&old.fingerprint===fingerprint&&!alias?.visible)return {changed:false};
+   if(!old&&['NO_ACTION','SOURCE_REMOVED','ENGINE_COUNT_LINK'].includes(decision.rule))return {changed:false};
    const at=new Date(now()).toISOString();
    const result={...decision,policyVersion:A.VERSION,storeId:store,id:caseRef.id,sourcePath:A.collection(actualKind,store)+'/'+actualId,
     fingerprint,createdAt:old?.createdAt||at,updatedAt:at,revision:(old?.revision||0)+1,
@@ -100,7 +101,7 @@ function createWorker(db,opts={}){
     sourceFingerprint:fingerprint,previousFingerprint:old?.fingerprint||'',policyVersion:A.VERSION,
     assigneeId:result.assigneeId,allocations:result.allocations,pool:result.pool
    });
-   tx.set(db.doc(rootPath(store)),{counts,countsRevision:(Number(sum.countsRevision)||0)+1,updatedAt:at,policyVersion:A.VERSION,...(sum.lastSourceError?.path===source.path?{lastSourceError:null}:{})},{merge:true});
+   tx.set(db.doc(rootPath(store)),{counts,countsRevision:(Number(sum.countsRevision)||0)+1,updatedAt:at,policyVersion:A.VERSION},{merge:true});
    return {changed:true,id:caseRef.id};
   });
   if(kind==='duty_cases'){
@@ -168,6 +169,31 @@ function createWorker(db,opts={}){
   return db.runTransaction(async tx=>{const cur=await tx.get(ref);if(!cur.exists||(Number(cur.data().countsRevision)||0)!==(Number(state.countsRevision)||0))return false;
    tx.set(ref,{counts,countsVerifiedVersion:A.VERSION,policyVersion:A.VERSION},{merge:true});return true;});
  }
+ async function migrateErrors(store,cfg){
+  const root=db.doc(rootPath(store)),sn=await root.get(),state=sn.exists?sn.data():{};
+  if(state.errorStateVersion===1)return true;
+  const cursor=state.errorMigration?.cursor||'';
+  if(!state.errorMigration?.started){
+   const path=(state.legacySourceError||state.lastSourceError)?.path||'',parts=path.split('/'),parsed=parts.length===2?A.parseCollection(parts[0]):null;
+   if(parsed?.storeId===store){
+    try{await processSource(store,parsed.kind,parts[1]);await setError(db,root,path,'',new Date(now()).toISOString());}
+    catch(e){await setError(db,root,path,String(e.message||e),new Date(now()).toISOString());}
+   }
+   if(!await progress(store,cfg,{errorMigration:{started:true,cursor:''}}))return false;
+  }
+  // One-time legacy scan, at most 100 jobs per tick; never an inbox query.
+  let q=db.collection(rootPath(store)+'/jobs').orderBy(opts.documentId||'__name__');
+  if(cursor)q=q.startAfter(cursor);
+  const jobs=(await q.limit(100).get()).docs;
+  for(const job of jobs){if(!job.data().lastError)continue;
+   await db.runTransaction(async tx=>{const current=await tx.get(job.ref),error=await readError(tx,root,job.ref.path),sum=await tx.get(root),data=current.exists?current.data():{};
+    writeError(tx,error,sum.exists?sum.data():{},data.dirty?data.lastError||'':'',new Date(now()).toISOString());});
+  }
+  if(jobs.length===100){await progress(store,cfg,{errorMigration:{started:true,cursor:jobs[99].id}});return false;}
+  return db.runTransaction(async tx=>{const cs=await tx.get(db.doc(configPath(store))),s=await tx.get(root);if(!cs.exists||A.stable(cs.data())!==A.stable(cfg)||!cs.data().enabled)return false;
+   const count=Number(s.exists?s.data().sourceErrorCount:0)||0;
+   tx.set(root,{errorStateVersion:1,legacySourceError:null,legacyErrorCaptured:true,lastSourceError:count?{path:'',message:count+' nguồn công việc còn lỗi; đang chờ thử lại.',at:new Date(now()).toISOString()}:null},{merge:true});return true;});
+ }
  async function tickStore(store){
   const ref=db.doc(rootPath(store)),cfgSnap=await db.doc(configPath(store)).get();
   const cfg=cfgSnap.exists?cfgSnap.data():{};if(!cfg.enabled)return;
@@ -177,6 +203,7 @@ function createWorker(db,opts={}){
   if(!claimed)return;
   try{
   let sum=await ref.get();
+  if(Number(sum.exists?sum.data().sourceErrorCount:0)>0&&opts.retrySourceErrors)await opts.retrySourceErrors(store);
   // Re-evaluate existing sources once per policy version, using the bounded,
   // resumable bootstrap. Merely recounting old cases cannot fix old decisions.
   if(!sum.exists||sum.data().bootstrapPolicyVersion!==A.VERSION){
@@ -189,10 +216,10 @@ function createWorker(db,opts={}){
   for(const doc of due.docs){const d=doc.data();await processSource(store,d.kind,d.sourceId);}
   const dirtyDays=await db.collection(rootPath(store)+'/days').where('dirty','==',true).limit(5).get();
   for(const d of dirtyDays.docs)await buildDay(store,d.id);
-  await reconcileCounts(store);
+  if(await migrateErrors(store,cfg))await reconcileCounts(store);
   await progress(store,cfg,{enabled:true,mode:cfg.mode==='active'&&cfg.fleet20Confirmed===true?'active':'shadow',heartbeatAt:new Date(now()).toISOString(),lastError:''});
   }finally{await db.runTransaction(async tx=>{const snap=await tx.get(ref);if(snap.exists&&snap.data().leaseToken===token)tx.set(ref,{leaseUntil:0,leaseToken:''},{merge:true});});}
  }
- return {processSource,bootstrap,tickStore,markDay,buildDay,reconcileCounts};
+ return {processSource,bootstrap,tickStore,markDay,buildDay,reconcileCounts,migrateErrors};
 }
 module.exports={createWorker,rootPath,configPath,key,BOOTSTRAP};

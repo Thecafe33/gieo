@@ -1,5 +1,7 @@
 # quanlygieo2 — tự đối soát và giao việc, bản v2 ngày 22/10/2026
 
+Bản hiện tại dùng chính sách/module POS **v3** sau khi vá 5 lỗi debug: [FIX_QUANLYGIEO2_DEBUG_V3_22-10.md](FIX_QUANLYGIEO2_DEBUG_V3_22-10.md). Cập nhật cả Hosting và worker. Engine vẫn v20; tài liệu bên dưới mô tả nền triển khai chung.
+
 Chưa deploy lên Firebase; chưa ghi dữ liệu production. Hướng triển khai dựa trên PLAN_TU_DONG_HAO_HUT_HUY_v2 do chủ quán cung cấp và đối chiếu mã nguồn thực tế.
 
 Bản rà soát tiếp theo: [RA_SOAT_QUANLYGIEO2_NHAN_VIEN_QUAN_LY.md](RA_SOAT_QUANLYGIEO2_NHAN_VIEN_QUAN_LY.md). Chính sách và module công việc đã lên v2; cần cập nhật Hosting + worker cùng nhau, Engine vẫn v20.
