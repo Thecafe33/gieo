@@ -71,8 +71,8 @@ const ROOT = path.join(__dirname, '..');
       'alerts_gieogieo__gg02/b1': { type: 'handover_cash_variance', status: 'new', createdAt: '2026-10-22T04:00:00Z' },
       'alerts_gieogieo__gg03/c1': { type: 'missing_recipe', status: 'new' }
     } });
-    const A = new Function('fstore', 'ensureAuth', 'gieoStores', 'vnDate', 'GIEO_LEGACY', extract('manage.html', N2) + '\nreturn {' + N2.join(',') + '};')(
-      g.fstore, async () => {}, async () => [{ id: 'gg01' }, { id: 'gg02' }, { id: 'gg03', active: false }], () => new Date('2026-10-22T19:30:00Z'), 'gg01');
+    const A = new Function('fstore', 'ensureAuth', 'gieoStores', 'vnDate', 'dkey', 'GIEO_LEGACY', extract('manage.html', N2) + '\nreturn {' + N2.join(',') + '};')(
+      g.fstore, async () => {}, async () => [{ id: 'gg01' }, { id: 'gg02' }, { id: 'gg03', active: false }], () => new Date('2026-10-22T19:30:00Z'), () => '2026-10-23', 'gg01');
     const inbox = await A.readGieoInbox();
     assert.deepStrictEqual(inbox.alerts.map(a => a.store + '/' + a.id), ['gg02/b1', 'gg01/a2', 'gg01/a1'], 'mới + đã xem, mới nhất trước; bỏ đã xử lý; bỏ quán ngừng hoạt động');
     await A.markGieoAlert('gg01', 'a1', 'seen'); assert.strictEqual(g.FS['alerts_gieogieo/a1'].status, 'seen'); assert.ok(g.FS['alerts_gieogieo/a1'].resolvedAt);
@@ -80,6 +80,33 @@ const ROOT = path.join(__dirname, '..');
     await assert.rejects(A.markGieoAlert('gg01', 'a3', 'seen'), /đã được xử lý ở nơi khác/);
     await assert.rejects(A.markGieoAlert('gg01', 'a1', 'deleted'), /không hợp lệ/);
     console.log('ok Chờ xử lý · Gieo: đọc mới + đã xem từng quán đang hoạt động; Đã xem / Đã xử lý ghi y quanlygieo; đã xử lý thì không ghi lại');
+  }
+  // 4) Ca ngày cũ chưa check-out — ghi như ccSaveEdit của quanlygieo.
+  assert.match(ql, /await fstore\.collection\('employee_shifts_gieogieo'\)\.doc\(shiftId\)\.update\(\{\s*checkedInAt, checkedOutAt,\s*manualEdit: true, manualEditAt: vnDate\(\)\.toISOString\(\)\s*\}\);/, 'ccSaveEdit của quanlygieo đã đổi — cập nhật closeGieoShift');
+  assert.match(da, /employee_shifts_gieogieo: \{ lookup: true, rng: x => \[x\.businessDate, x\.businessDate\] \}/, 'PL_DAU.employee_shifts_gieogieo đã đổi');
+  {
+    const N3 = ['ggName', 'ggShiftOutIso', 'closeGieoShift', 'readGieoInbox'];
+    const g = makeFake({ fs: {
+      'employee_shifts_gieogieo/s1': { employeeId: 'e1', employeeName: 'Minh', businessDate: '2026-10-21', checkedInAt: '2026-10-21T01:00:00.000Z', checkedOutAt: null },
+      'employee_shifts_gieogieo/s2': { employeeId: 'e2', employeeName: 'Lan', businessDate: '2026-10-23', checkedInAt: '2026-10-23T00:30:00.000Z', checkedOutAt: null },
+      'employee_shifts_gieogieo__gg02/s3': { employeeId: 'e3', employeeName: 'Huy', businessDate: '2026-10-20', checkedInAt: '2026-10-20T13:00:00.000Z', checkedOutAt: null },
+      'employee_shifts_gieogieo/s4': { employeeId: 'e4', businessDate: '2026-10-19', checkedInAt: '2026-10-19T01:00:00.000Z', checkedOutAt: '2026-10-19T09:00:00.000Z' }
+    } });
+    const H = new Function('fstore', 'ensureAuth', 'gieoStores', 'vnDate', 'dkey', 'GIEO_LEGACY', extract('manage.html', N3) + '\nreturn {' + N3.join(',') + '};')(
+      g.fstore, async () => {}, async () => [{ id: 'gg01' }, { id: 'gg02' }], () => new Date('2026-10-22T19:30:00Z'), () => '2026-10-23', 'gg01');
+    const inbox = await H.readGieoInbox();
+    assert.deepStrictEqual(inbox.stale.map(x => x.store + '/' + x.id), ['gg02/s3', 'gg01/s1'], 'chỉ ca NGÀY CŨ chưa check-out; ca hôm nay đang làm bỏ qua');
+    assert.strictEqual(H.ggShiftOutIso('2026-10-21T01:00:00.000Z', '2026-10-21', '17:30'), '2026-10-21T10:30:00.000Z');
+    assert.strictEqual(H.ggShiftOutIso('2026-10-20T13:00:00.000Z', '2026-10-20', '02:00'), '2026-10-20T19:00:00.000Z', 'giờ ra ≤ giờ vào → sang ngày sau (như _ccOutIso)');
+    assert.throws(() => H.ggShiftOutIso('2026-10-21T01:00:00.000Z', '2026-10-21', '7h'), /không hợp lệ/);
+    await H.closeGieoShift('gg01', 's1', '17:30');
+    const s1 = g.FS['employee_shifts_gieogieo/s1'];
+    assert.deepStrictEqual([s1.checkedOutAt, s1.manualEdit, s1.manualEditBy, s1.checkedInAt], ['2026-10-21T10:30:00.000Z', true, 'manage', '2026-10-21T01:00:00.000Z']);
+    assert.ok(g.FS['pl_dirty_gieogieo/gg01'].m['2026-10-21_2026-10-21'], 'dấu lãi/lỗ ngày ca');
+    await H.closeGieoShift('gg02', 's3', '02:00'); assert.ok(g.FS['employee_shifts_gieogieo__gg02/s3'].checkedOutAt); assert.ok(g.FS['pl_dirty_gieogieo/gg02']);
+    await assert.rejects(H.closeGieoShift('gg01', 's4', '18:00'), /đã có giờ ra/);
+    assert.strictEqual(g.FS['employee_shifts_gieogieo/s4'].checkedOutAt, '2026-10-19T09:00:00.000Z');
+    console.log('ok Ca treo Gieo: chỉ ngày cũ; giờ ra ghi như ccSaveEdit (qua đêm sang ngày sau), dấu lãi/lỗ đúng quán; đã check-out thì không ghi đè');
   }
   console.log('ALL PASS');
 })().catch(e => { console.error(e); process.exit(1); });
