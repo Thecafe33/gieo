@@ -184,7 +184,7 @@ if(require.main===module){
   process.stdout.write(JSON.stringify(res.map(r=>({fail:r.fail,metrics:r.metrics,result:{minutes:r.result.minutes}}))));process.exit(0);
  }
  if(args.includes('--calibrate')){
-  // Hiệu chuẩn khởi tạo trên MÔ PHỎNG (hạt giống 1–6), nghiệm thu trên hạt giống CHƯA dùng (101–103).
+  // Hiệu chuẩn khởi tạo trên MÔ PHỎNG (hạt giống 1–6), nghiệm thu trên hạt giống CHƯA dùng (101–110). Luật: bỏ sót KHÔNG tăng (không dung sai — auditModels kiểm).
   // Đánh giá VÒNG KÍN: mỗi bộ tham số ứng viên điều hành lại cả thư viện kịch bản trên hạt giống huấn luyện.
   const TRAIN=[1,2,3,4,5,6];
   // Đánh giá song song theo hạt giống (4 tiến trình con) — kết quả y hệt chạy tuần tự (mô phỏng tất định theo hạt giống).
@@ -195,7 +195,7 @@ if(require.main===module){
    execFileSync('/bin/sh',['-c',cmd],{stdio:'inherit'});
    return aggregate(groups.flatMap((g,i)=>JSON.parse(fs.readFileSync(path.join(tmp,'r'+i+'.json'),'utf8'))));};
   const train=runLibrary(L.DEFAULT_PARAMS,TRAIN).flatMap(x=>x.result.obs);
-  const cal=L.calibrate(L.DEFAULT_PARAMS,train,{mode:'sim',evaluator,stamp:'v1',missTolerance:0.01});
+  const cal=L.calibrate(L.DEFAULT_PARAMS,train,{mode:'sim',evaluator,stamp:'v1'});
   const holdout=runLibrary(cal.params,[101,102,103,104,105,106,107,108,109,110]),failures=holdout.filter(x=>x.fail.length),hm=aggregate(holdout);
   const P={...cal.params,record:{...cal.record,origin:'calibrated_simulation',scenarios:SCENARIOS.map(s=>s.name),trainSeeds:[1,2,3,4,5,6],holdoutSeeds:[101,102,103,104,105,106,107,108,109,110],holdoutMetrics:hm,holdoutFailures:failures.map(x=>x.scenario+'#'+x.seed+': '+x.fail.join('; '))}};
   const js='/* SINH TỰ ĐỘNG bởi node tools/automation/engine2_sim.js --calibrate — KHÔNG SỬA TAY.\n * Tham số «hiệu chuẩn mô phỏng»: điểm xuất phát cho quán thật; cấp 6 tự kiểm / chỉnh (±5%/7 ngày) / quay lui khi có số liệu thật.\n * Bản đã phát hành bất biến: hiệu chuẩn lại sau deploy = unit_engine2_params_v2.js. */\n(function(root){\'use strict\';const P='+JSON.stringify(P,null,1)+';\nif(typeof module===\'object\'&&module.exports)module.exports=P;root.UnitEngine2Params=P;\n})(typeof window!==\'undefined\'?window:globalThis);\n';
