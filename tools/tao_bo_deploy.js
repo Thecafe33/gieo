@@ -15,7 +15,7 @@ const rd = f => fs.readFileSync(path.join(ROOT, f), 'utf8');
 const giu = f => () => rd(f), go = f => () => boGauNoel(rd(f));
 
 // tên trong bộ → cách lấy nội dung
-const CHUNG = { 'quanlygieo.html': giu('quanlygieo.html'), 'manage.html': giu('manage.html'), 'quanlygieo_thu.html': giu('quanlygieo_thu.html') };
+const CHUNG = { 'quanlygieo2.html': giu('quanlygieo2.html'), 'quanlygieo.html': giu('quanlygieo.html'), 'manage.html': giu('manage.html'), 'quanlygieo_thu.html': giu('quanlygieo_thu.html') };
 const BO = {
   thuong: Object.assign({}, CHUNG, {
     'pos.html': go('pos.html'), 'PosX.html': go('PosX.html'), 'posgieo.html': go('posgieo.html'), 'posgieo_thu.html': go('posgieo_thu.html'),
@@ -54,14 +54,9 @@ function dung() {
       fs.readdirSync(ROOT).filter(f=>/^lai_lo\.v\d+\.js$/.test(f)).forEach(f=>js.add(f));
     if([...js].some(f=>/^cham_cong\.v\d+\.js$/.test(f)))
       fs.readdirSync(ROOT).filter(f=>/^cham_cong\.v\d+\.js$/.test(f)).forEach(f=>js.add(f));
-    // Giữ engine liền trước cho HTML còn cache và để quay lui khi phát hành bản mới.
-    for(const f of [...js]) {
-      const m = /^unit_engine\.v(\d+)\.js$/.exec(f);
-      if(m && Number(m[1])>1) {
-        const old='unit_engine.v'+(Number(m[1])-1)+'.js';
-        if(fs.existsSync(path.join(ROOT,old))) js.add(old);
-      }
-    }
+    // Giữ các bản Engine immutable đã phát hành: Hosting thay release có thể phục vụ HTML còn cache.
+    if([...js].some(f=>/^unit_engine\.v\d+\.js$/.test(f)))
+      fs.readdirSync(ROOT).filter(f=>/^unit_engine\.v\d+\.js$/.test(f)).forEach(f=>js.add(f));
     for (const f of [...js].sort()) {
       if (!fs.existsSync(path.join(ROOT, f))) throw new Error(ten + ': app nạp ' + f + ' nhưng repo không có file này');
       files[f] = fs.readFileSync(path.join(ROOT, f));

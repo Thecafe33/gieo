@@ -1,3 +1,7 @@
+# Bổ sung 22/10/2026 — quanlygieo2
+
+Đã triển khai quanlygieo2 dùng chung hệ thống, Engine v20 bảo vệ quyết định tay/phiên bản, worker theo sự kiện có hàng đợi và chế độ đối chiếu thử, giao việc qua checklist POS; chưa deploy. POS và quản lý gốc chỉ đổi thẻ Engine (POS thêm module công việc theo thao tác). Phạm vi, giới hạn và hướng dẫn: [TU_DONG_THONG_BAO_QUANLYGIEO2.md](TU_DONG_THONG_BAO_QUANLYGIEO2.md). Trang được sinh tự động, không sửa trực tiếp.
+
 # Hiện trạng dự án — cập nhật 20/10/2026
 
 **21/10 — Manage hiện rõ tiền bổ sung**: ngay dưới tổng tiền cần lấy của Gieo có khối “Tiền bổ sung sau kết ca” với số tiền riêng, ghi rõ đã cộng vào tổng và trạng thái chờ / đã xác nhận tổng thực nhận; nếu tổng nhận còn thiếu thì ghi số thiếu. Chỉ trình bày lại dữ liệu đã đọc, không thêm truy vấn hay đổi phép tính.

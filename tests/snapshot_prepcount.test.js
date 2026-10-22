@@ -98,7 +98,17 @@ async function runOne(name) {
 (async () => {
   const out = {}; for (const n of Object.keys(S)) out[n] = await runOne(n);
   if (process.env.UPDATE === '1') { fs.mkdirSync(path.dirname(SNAP), { recursive: true }); fs.writeFileSync(SNAP, JSON.stringify(out, null, 1)); console.log('ok đã ghi ảnh chụp (' + kind + ')'); console.log('ALL PASS'); return; }
-  const golden = JSON.parse(fs.readFileSync(SNAP, 'utf8'));
+  let golden = JSON.parse(fs.readFileSync(SNAP, 'utf8'));
+  // v20 adds only a CAS revision and atomic creation of responsibility cases.
+  // Keep the original stock/RT/money golden intact; assert these two intended changes explicitly.
+  if(kind==='engine' && Number(/v(\d+)/.exec(require('./lib/engine_file'))[1])>=20){
+    for(const state of Object.values(golden)){
+      for(const [p,d]of Object.entries(state.fs||{}))if(p.startsWith('duty_cases_gieogieo/'))d.revision=1;
+      for(const e of state.log||[])if(e[0]==='fs.set'&&e[1].startsWith('duty_cases_gieogieo/'))e[0]='fs.tx.set';
+    }
+  }
+
+  golden=normalize(golden);
   let ok = true;
   for (const n of Object.keys(S)) {
     if (JSON.stringify(out[n]) === JSON.stringify(golden[n])) { console.log('ok ' + n); continue; }

@@ -7,5 +7,7 @@ set -e
 node tools/tao_ban_giangsinh.js      # index.html        → index_giangsinh.html
 node tools/tao_ban_tet.js            # pos / PosX / index → pos_tet / PosX_tet / index_tet
 node tools/tao_ban_thu.js .          # posgieo / quanlygieo → *_thu.html
+node tools/automation/build_page.js  # quanlygieo2 dùng nghiệp vụ và JS chung
+node tools/automation/sync.js        # chính sách dùng chung browser / worker
 node tools/tao_bo_deploy.js          # → ban_deploy/{thuong,giangsinh,tet}/
 sh tests/run_all.sh | tail -1
