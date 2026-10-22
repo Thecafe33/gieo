@@ -25,6 +25,9 @@ function createEngine2Worker({db,rt,FieldValue,now=Date.now,documentId}){
   }else if(kind==='employee_shifts'&&[before,after].some(d=>E.isBarista(d))&&E.stable(before)!==E.stable(after))await service(store).enqueue('handover',id);
   else if(kind==='price_history'&&E.stable(before)!==E.stable(after)){for(const item of new Set([before?.itemId,after?.itemId].filter(Boolean)))await service(store).enqueue('reprice',item);}
  }
- return {service,source,drain:(store,id)=>service(store).drain(id),tick:store=>service(store).retryDue()};
+ // Lượt học mỗi ngày (store tự chặn chạy lại trong ngày); lỗi học không chặn hàng đợi nghiệp vụ.
+ let params=null;try{params=require('./shared/unit_engine2_params_v1.js');}catch(e){}
+ const learned=new Map(),learn=async store=>{const day=new Date(now()+7*3600000).toISOString().slice(0,10);if(learned.get(store)===day)return null;try{const r=await service(store).learnDay({params:params||undefined});if(r)learned.set(store,day);return r;}catch(e){console.error('Engine2 learn',store,e.message);return null;}};
+ return {service,source,learn,drain:(store,id)=>service(store).drain(id),tick:async store=>{const n=await service(store).retryDue();await learn(store);return n;}};
 }
 module.exports={createEngine2Worker};

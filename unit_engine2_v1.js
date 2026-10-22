@@ -123,7 +123,9 @@ function control(previous,event,evidence={}){
  else if(['CONFIG_CHANGED','RECIPE_CHANGED','MEASUREMENT_CHANGED'].includes(event)){if(evidence.requireCheckpoint===true)level=Math.max(level,1);}
  else if(event==='CLEAN_WINDOW_PASSED'){
   // Automatic release is disabled until calibrated criteria have been explicitly configured.
-  if(evidence.releaseEnabled===true&&evidence.validPoints>=5&&evidence.activeDays>=3&&evidence.usedEnough===true&&evidence.pending===0&&evidence.ackComplete===true&&evidence.daysSinceLastRelease>=7)level=Math.max(floor,level-1);
+  // Tiêu chí lấy từ bộ tham số đã hiệu chuẩn (evidence.criteria); thiếu thì dùng mốc khởi điểm đặc tả 3.3 (5 mốc / 3 ngày / cách 7 ngày).
+  const k=evidence.criteria||{validPoints:5,activeDays:3,daysBetween:7};
+  if(evidence.releaseEnabled===true&&evidence.validPoints>=k.validPoints&&evidence.activeDays>=k.activeDays&&evidence.usedEnough===true&&evidence.pending===0&&evidence.ackComplete===true&&evidence.daysSinceLastRelease>=k.daysBetween)level=Math.max(floor,level-1);
  }else if(!['ACK','TASK_RESULT','DUE','OFFLINE','NO_ACTIVITY','EXCEPTION','MANUAL_FLOOR_SET'].includes(event))throw Error('INVALID_CONTROL_EVENT');
  return {...p,level,manualFloor:floor};
 }
@@ -142,7 +144,7 @@ function measurement(lines,item){
 function outbox(storage,store){
  storeId(store);const name='gieo_engine2_outbox_v1_'+store;
  const read=()=>{const value=JSON.parse(storage.getItem(name)||'[]');if(!Array.isArray(value)||value.some(x=>x.storeId!==store))throw Error('Bộ nhớ công việc cần kiểm tra');return value;};
- return {read,put(command){if(!command.id||!['measurement','exception','close_exception'].includes(command.kind))throw Error('Lệnh lưu không hợp lệ');const rows=read();if(rows.some(x=>x.id===command.id))return;if(rows.length>=100)throw Error('Bộ nhớ công việc đã đầy; kết nối để đồng bộ trước');storage.setItem(name,JSON.stringify([...rows,{...command,storeId:store}]));},remove(id){storage.setItem(name,JSON.stringify(read().filter(x=>x.id!==id)));}};
+ return {read,put(command){if(!command.id||!['measurement','exception','close_exception','evidence'].includes(command.kind))throw Error('Lệnh lưu không hợp lệ');const rows=read();if(rows.some(x=>x.id===command.id))return;if(rows.length>=100)throw Error('Bộ nhớ công việc đã đầy; kết nối để đồng bộ trước');storage.setItem(name,JSON.stringify([...rows,{...command,storeId:store}]));},remove(id){storage.setItem(name,JSON.stringify(read().filter(x=>x.id!==id)));}};
 }
 const api={VERSION,POLICY,DAY,states,ms,finite,stable,storeId,collection,SHARED,tableName,rootPath,key,digest,round,split,isBarista,group,interval,decision,measuredDecision,audit,transition,path,caseFlow,taskStart,control,measurement,outbox};
 if(typeof module==='object'&&module.exports)module.exports=api;root.UnitEngine2=api;

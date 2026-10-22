@@ -21,6 +21,7 @@ async function deliver(command){
  const p=command.payload;
  if(command.kind==='measurement')await service.requestMeasurement(p.taskId,p.line,p.staff);
  else if(command.kind==='exception')await service.exception(p.taskId,p.staff,p.reason);
+ else if(command.kind==='evidence')await service.submitEvidence(p.taskId,p.result,p.staff);
  else{await service.ensureCloseTasks(p.day,p.cycle,p.itemIds);for(const id of p.itemIds)await service.exception(E.key('day_close',p.day,id,p.cycle),p.staff,p.reason);}
  journal.remove(command.id);
 }
@@ -37,10 +38,13 @@ async function load(){
  const target=node;loading=(async()=>{target.textContent='Đang tải…';try{
   const s=await service.sub('tasks').where('pending','==',true).orderBy('createdAt','desc').limit(40).get({source:'server'});
   if(target!==node||!document.body.contains(target))return;
-  rows=s.docs.map(d=>({...d.data(),id:d.id}));target.innerHTML=rows.map((r,i)=>'<article class="e2-task"><div><b>'+esc(r.itemName||r.itemId)+'</b><p>'+esc(r.reason||'Lấy mốc cân để theo dõi hao hụt')+'</p>'+(r.lastError?'<p class="e2-error">'+esc(r.lastError)+'</p>':'')+'<small>'+esc(r.status==='exception_recorded'?'Đã ghi tình trạng — việc vẫn được bàn giao':r.status==='in_progress'?'Đang xử lý số cân':'Pha chế trong ca thực hiện')+'</small></div><button class="kc-btn" onclick="GieoEngine2POS.open('+i+')">'+(r.status==='in_progress'?'Xem kết quả':'Cân / kiểm tra')+'</button></article>').join('')||'<p>Không có nhiệm vụ cân đang chờ.</p>';
+  rows=s.docs.map(d=>({...d.data(),id:d.id}));target.innerHTML=rows.map((r,i)=>'<article class="e2-task"><div><b>'+esc(r.itemName||r.itemId)+'</b><p>'+esc(kindLabel(r)+(r.reason?' — '+r.reason:''))+'</p>'+(r.lastError?'<p class="e2-error">'+esc(r.lastError)+'</p>':'')+'<small>'+esc(r.status==='exception_recorded'?'Đã ghi tình trạng — việc vẫn được bàn giao':r.status==='in_progress'?'Đang xử lý số cân':'Pha chế trong ca thực hiện')+'</small></div><button class="kc-btn" onclick="GieoEngine2POS.open('+i+')">'+(r.status==='in_progress'?'Xem kết quả':'Cân / kiểm tra')+'</button></article>').join('')||'<p>Không có nhiệm vụ cân đang chờ.</p>';
   if(s.docs.length===40)target.insertAdjacentHTML('beforeend','<p>Đang hiện 40 việc mới nhất; xem đầy đủ trong quanlygieo2.</p>');
  }catch(e){if(target===node)target.textContent='Chưa tải được công việc: '+e.message;}})().finally(()=>{loading=null;});return loading;
 }
+// [Cấp 3–6] Loại việc: cân kiểm soát, cân ngẫu nhiên M0, cân xác nhận độc lập M3 (người khác, không xem số cũ), chẩn đoán.
+const DIAG=['tare_check','density_proof','recipe_portion_weigh','scan_open_units','weigh_sealed_unit','reference_weigh'];
+function kindLabel(r){return {tare_check:'Kiểm bì dụng cụ',density_proof:'Đo tỷ trọng',recipe_portion_weigh:'Cân một phần theo định mức',scan_open_units:'Rà mã đang mở',weigh_sealed_unit:'Cân một tem nguyên chưa mở',reference_weigh:'Cân vật mẫu biết trước khối lượng'}[r.kind]||({random_m0:'Cân ngẫu nhiên',m3:'Cân xác nhận độc lập (người khác, không xem số trước)',resync:'Đếm/cân lại để đồng bộ sổ'}[r.sampling]||'Lấy mốc cân để theo dõi hao hụt');}
 function modal(title,body){
  close(false);const el=document.createElement('div');el.id='e2Modal';el.className='e2-overlay';el.innerHTML='<section role="dialog" aria-modal="true" aria-label="'+esc(title)+'" class="e2-dialog"><header><h2>'+esc(title)+'</h2><button type="button" aria-label="Đóng" onclick="GieoEngine2POS.close()">×</button></header><div class="e2-body">'+body+'</div><footer id="e2Footer"></footer></section>';document.body.append(el);
  el.addEventListener('click',e=>{if(e.target===el)close();});
@@ -50,6 +54,7 @@ async function staff(){const who=await resolveStaffPinWorkedToday('e2StaffPin');
 async function open(i){
  const token=++opening,task=rows[i];if(!task)return;
  if(task.status==='in_progress'){await load();toast('Số cân đã gửi. Bộ xử lý sẽ xác nhận kết quả; không gửi lại lượt mới.');return;}
+ if(DIAG.includes(task.kind))return openDiag(task,token);
  try{
   const [it,rt,v,proof]=await Promise.all([fstore.collection('inventory_items_gieogieo').doc(task.itemId).get(),UnitEngine.units.ref(task.itemId).once('value'),fstore.collection('prep_vessels_gieogieo').get(),task.caseId?service.sub('cases').doc(task.caseId).get():Promise.resolve(null)]);
   if(token!==opening)return;
@@ -59,14 +64,51 @@ async function open(i){
   const item={...it.data(),id:task.itemId};
   const reason=proof?.exists?proof.data():null;
   const evidence=reason?'<details><summary>Vì sao cần cân? Xem khoản hao hụt đã phân bổ</summary><p>'+(reason.status==='voided'?'Nguồn ban đầu đã sửa/hủy; kiểm soát vẫn được giữ để có đủ mốc đo.':'Khoản gốc '+esc(reason.quantity)+' '+esc(reason.unit||'')+'. '+esc(reason.explanation||''))+'</p>'+(reason.allocations||[]).map(a=>'<p><b>'+esc(a.employeeName||a.employeeId)+'</b> · '+esc(a.qty)+' '+esc(reason.unit||'')+'</p>').join('')+'<p>Phần này thuộc nhóm lịch sử của khoản gốc. Nhận việc cân không chuyển khoản mất đó sang ca nhận việc; không tự trừ lương.</p></details>':'';
-  modal(item.name||task.itemName,evidence+'<p>Cân đúng từng mã đang dùng. Chọn dụng cụ và nhập số tổng trên cân; hệ thống tự trừ bì.</p>'+(units.length?'<div class="e2-unit-grid">'+units.map((u,j)=>'<article class="e2-unit"><h3>'+esc(u.code)+'</h3><label>Dụng cụ đựng<select id="e2Vessel'+j+'">'+options(item)+'</select></label><label>Tổng trên cân (g)<input id="e2Gross'+j+'" type="number" inputmode="decimal" min="0" step="0.1" placeholder="Nhập số cân"></label><p class="e2-net" id="e2Net'+j+'"></p></article>').join('')+'</div>':'<p><b>Không có mã đang mở.</b> Gửi kiểm tra để hệ thống đối soát, không tạo số cân 0.</p>')+
+  modal(item.name||task.itemName,evidence+'<p><b>'+esc(kindLabel(task))+'</b>. Cân đúng từng mã đang dùng. Chọn dụng cụ và nhập số tổng trên cân; hệ thống tự trừ bì.'+(task.blind?' Không cần biết số cũ — cân độc lập.':'')+'</p>'+(units.length?'<div class="e2-unit-grid">'+units.map((u,j)=>'<article class="e2-unit"><h3>'+esc(u.code)+'</h3><label>Dụng cụ đựng<select id="e2Vessel'+j+'">'+options(item)+'</select></label><label>Tổng trên cân (g)<input id="e2Gross'+j+'" type="number" inputmode="decimal" min="0" step="0.1" placeholder="Nhập số cân"></label><p class="e2-net" id="e2Net'+j+'"></p></article>').join('')+'</div>':'<p><b>Không có mã đang mở.</b> Gửi kiểm tra để hệ thống đối soát, không tạo số cân 0.</p>')+
    (units.length&&['ml','l'].includes(String(item.unit).toLowerCase())&&!(Number(item.densityGPerMl)>0)?'<fieldset><legend>Đo tỷ trọng cho nguyên liệu này</legend><p>Đong một mẫu, cân khối lượng ròng của chính mẫu đó.</p><div class="e2-unit-grid"><label>Khối lượng ròng mẫu (g)<input id="e2DensityG" type="number" min="0" step="0.1"></label><label>Thể tích mẫu (ml)<input id="e2DensityMl" type="number" min="0" step="0.1"></label></div></fieldset>':'')+
    '<details><summary>Chưa có dụng cụ đúng? Thêm từ số bì đã cân</summary><div class="e2-unit-grid"><label>Tên dụng cụ<input id="e2NewName" placeholder="VD: Hũ thạch"></label><label>Bì dụng cụ rỗng (g)<input id="e2NewTare" type="number" min="0" step="0.1"></label></div><button class="kc-btn" onclick="GieoEngine2POS.addVessel()">Lưu dụng cụ đã đo bì</button></details><label>Tình trạng khi cần bàn giao<textarea id="e2Reason" placeholder="VD: hỏng cân, chưa có dụng cụ, không tìm thấy mã"></textarea></label><label>Mã PIN người thực hiện<input id="e2StaffPin" type="password" inputmode="numeric" autocomplete="off"></label><p id="e2Message" aria-live="polite"></p>');
-  view={task,item,units,sessionId:(window.crypto?.randomUUID?.()||Date.now()+'_'+Math.random().toString(36).slice(2)),attempt:0};
+  view={task,item,units,sessionId:(window.crypto?.randomUUID?.()||Date.now()+'_'+Math.random().toString(36).slice(2)),attempt:0,startedAt:new Date(UnitEngine.clock.now()).toISOString()};
   for(const el of document.querySelectorAll('#e2Modal input,#e2Modal select'))el.addEventListener('input',preview);
   document.getElementById('e2Footer').innerHTML='<button class="kc-btn e2-secondary" onclick="GieoEngine2POS.recordException()">Ghi tình trạng để bàn giao</button><button class="kc-btn e2-primary" onclick="GieoEngine2POS.submit()">'+(units.length?'Gửi số cân':'Xác nhận kiểm tra không có mã mở')+'</button>';
  }catch(e){toast('Chưa mở được việc cân: '+e.message);}
 }
+async function openDiag(task,token){
+ try{
+  const [it,v,rt]=await Promise.all([fstore.collection('inventory_items_gieogieo').doc(task.itemId).get(),task.kind==='tare_check'?fstore.collection('prep_vessels_gieogieo').get():Promise.resolve(null),task.kind==='scan_open_units'?UnitEngine.units.ref(task.itemId).once('value'):Promise.resolve(null)]);
+  if(token!==opening)return;const item=it.exists?{...it.data(),id:task.itemId}:{id:task.itemId,name:task.itemName||task.itemId};
+  let body='<p><b>'+esc(kindLabel(task))+'</b>. '+esc(task.reason||'')+'</p><p>Kết quả dùng để hệ thống tự kiểm tra giả thuyết — không đổi kho, không quy trách nhiệm.</p>';
+  if(task.kind==='tare_check'){library=v.docs.map(d=>({...d.data(),id:d.id})).filter(x=>x.active!==false);
+   body+='<label>Dụng cụ cần kiểm<select id="e2DiagVessel">'+library.flatMap(x=>(x.variants||[]).map(y=>'<option value="'+esc(E.key(x.id,y.id))+'"'+(x.id===task.vesselId?' selected':'')+'>'+esc(x.name+' · '+(y.label||'')+' · bì đang ghi '+y.tareG+' g')+'</option>')).join('')+'</select></label><label>Cân dụng cụ RỖNG, sạch, khô (g)<input id="e2DiagTare" type="number" inputmode="decimal" min="0" step="0.1"></label>';}
+  else if(task.kind==='density_proof')body+='<div class="e2-unit-grid"><label>Khối lượng ròng mẫu (g)<input id="e2DiagG" type="number" min="0" step="0.1"></label><label>Thể tích mẫu đong (ml)<input id="e2DiagMl" type="number" min="0" step="0.1"></label></div>';
+  else if(task.kind==='recipe_portion_weigh')body+='<p>Pha đúng một phần như bình thường, cân lượng '+esc(item.name)+' thực dùng.</p><div class="e2-unit-grid"><label>Định lượng theo công thức (g)<input id="e2DiagBook" type="number" min="0" step="0.1"></label><label>Cân thực một phần (g)<input id="e2DiagReal" type="number" min="0" step="0.1"></label></div>';
+  else if(task.kind==='weigh_sealed_unit')body+='<p>Lấy một tem NGUYÊN chưa mở của '+esc(item.name)+', cân và trừ bì bao bì.</p><div class="e2-unit-grid"><label>Dung tích ghi trên tem / phiếu nhận ('+esc(item.unit||'')+')<input id="e2DiagRec" type="number" min="0" step="0.1"></label><label>Lượng ròng cân được ('+esc(item.unit||'')+')<input id="e2DiagNet" type="number" min="0" step="0.1"></label></div>';
+  else if(task.kind==='reference_weigh')body+='<p>Đặt một vật biết chắc khối lượng (quả cân, chai nước chưa mở ghi rõ khối lượng…) lên cân đang dùng.</p><div class="e2-unit-grid"><label>Khối lượng chuẩn (g)<input id="e2DiagKnown" type="number" min="0" step="0.1"></label><label>Số cân hiện (g)<input id="e2DiagRead" type="number" min="0" step="0.1"></label></div>';
+  else if(task.kind==='scan_open_units'){const units=Object.entries(rt.val()||{}).filter(([id,u])=>id!=='__prepLock'&&u&&!u.discardPending);view={task,units};
+   body+='<p>Đánh dấu mã đang mở CÓ trên tay. Thấy hộp/chai đang dùng mà chưa quét mở thì ghi lại.</p>'+(units.map(([id,u],j)=>'<label><input type="checkbox" id="e2Has'+j+'" style="width:auto;display:inline;min-height:0"> '+esc(u.code||id)+'</label>').join('')||'<p>Không có mã đang mở trên hệ thống.</p>')+'<label>Mã / hộp đang dùng mà chưa quét mở (mỗi dòng một)<textarea id="e2Unreg"></textarea></label>';}
+  modal(item.name||task.itemId,body+'<label>Mã PIN người thực hiện<input id="e2StaffPin" type="password" inputmode="numeric" autocomplete="off"></label><p id="e2Message" aria-live="polite"></p>');
+  view={...(view&&view.task===task?view:{}),task,item,diag:true,startedAt:new Date(UnitEngine.clock.now()).toISOString()};
+  document.getElementById('e2Footer').innerHTML='<button class="kc-btn e2-secondary" onclick="GieoEngine2POS.recordException()">Ghi tình trạng để bàn giao</button><button class="kc-btn e2-primary" onclick="GieoEngine2POS.submitDiag()">Gửi kết quả</button>';
+ }catch(e){toast('Chưa mở được việc: '+e.message);}
+}
+async function submitDiag(){
+ const v=view;if(!v||!v.diag||v.busy)return;const who=await staff();if(!who||view!==v)return;v.busy=true;const msg=document.getElementById('e2Message');
+ try{
+  const t=v.task;let result;
+  if(t.kind==='tare_check'){const key=document.getElementById('e2DiagVessel').value;let vessel,variant;for(const x of library)for(const y of x.variants||[])if(E.key(x.id,y.id)===key){vessel=x;variant=y;}
+   const tare=document.getElementById('e2DiagTare').value;if(!vessel||tare==='')throw Error('Chọn dụng cụ và nhập số cân dụng cụ rỗng');result={vesselId:vessel.id,variantId:variant.id,measuredTareG:Number(tare)};
+   if(Math.abs(Number(tare)-Number(variant.tareG))>6)v.newTare={name:vessel.name+' (đo lại)',tare:Number(tare),diff:Math.round((Number(tare)-Number(variant.tareG))*10)/10};}
+  else if(t.kind==='density_proof')result={netG:Number(document.getElementById('e2DiagG').value),volumeMl:Number(document.getElementById('e2DiagMl').value)};
+  else if(t.kind==='recipe_portion_weigh')result={bookG:Number(document.getElementById('e2DiagBook').value),measuredG:Number(document.getElementById('e2DiagReal').value)};
+  else if(t.kind==='weigh_sealed_unit')result={recorded:Number(document.getElementById('e2DiagRec').value),measuredNet:Number(document.getElementById('e2DiagNet').value)};
+  else if(t.kind==='reference_weigh')result={known:Number(document.getElementById('e2DiagKnown').value),reading:Number(document.getElementById('e2DiagRead').value)};
+  else{const units=v.units||[],present=[],missing=[];units.forEach(([id,u],j)=>(document.getElementById('e2Has'+j)?.checked?present:missing).push(u.code||id));result={present,missing,unregistered:document.getElementById('e2Unreg').value.split('\n').map(x=>x.trim()).filter(Boolean)};}
+  result.startedAt=v.startedAt;result.finishedAt=new Date(UnitEngine.clock.now()).toISOString();
+  const sent=await durable({id:E.key('evidence',t.id),kind:'evidence',payload:{taskId:t.id,result,staff:{id:who.id,fullName:who.fullName}}});
+  if(v.newTare){msg.innerHTML='Bì thực lệch '+esc(v.newTare.diff)+' g so với bì đang ghi ('+esc(v.newTare.tare)+' g). <button class="kc-btn e2-primary" onclick="GieoEngine2POS.saveMeasuredTare()">Lưu bì mới đo cho dụng cụ</button>';return;}
+  if(sent){close();toast('Đã gửi kết quả kiểm tra.');}else msg.textContent='Kết quả đã giữ trên máy, sẽ đồng bộ khi có mạng.';
+ }catch(e){msg.textContent=e.message;}finally{v.busy=false;}
+}
+async function saveMeasuredTare(){const v=view;if(!v?.newTare)return;const who=await staff();if(!who)return;try{await service.registerVessel(v.newTare.name,v.newTare.tare,who);close();toast('Đã lưu dụng cụ với bì đo lại. Chọn dụng cụ này ở lần cân sau.');}catch(e){document.getElementById('e2Message').textContent=e.message;}}
 function preview(){
  if(!view)return;const item={...view.item},g=document.getElementById('e2DensityG'),ml=document.getElementById('e2DensityMl');if(g&&ml)item.densityGPerMl=Number(g.value)/Number(ml.value);
  for(let j=0;j<view.units.length;j++){const node=document.getElementById('e2Net'+j),gross=document.getElementById('e2Gross'+j)?.value,key=document.getElementById('e2Vessel'+j)?.value;node.textContent='';if(gross==='')continue;
@@ -98,7 +140,7 @@ async function submit(){
   }
   const large=units.some(u=>Math.abs(u.baseline-u.weighed)>(u.capacity>0?u.capacity:Math.max(Math.abs(u.baseline),1))*.25);
   if(large&&!v.attempt){v.attempt=1;for(let j=0;j<units.length;j++)document.getElementById('e2Gross'+j).value='';preview();throw Error('Số cân lệch lớn. Kiểm tra dụng cụ/bì và cân lại một lần trước khi gửi.');}
-  v.command={id:E.key('measurement',v.task.id,v.sessionId),kind:'measurement',payload:{taskId:v.task.id,line:{itemId:item.id,itemName:item.name,unit:item.unit,mode:'tem',businessDate:posDateKey(),sessionId:v.sessionId,units,densitySnapshot:['ml','l'].includes(String(item.unit).toLowerCase())?Number(item.densityGPerMl):null,largeDeviationConfirmed:!!v.attempt,...(densityProof?{densityProof}: {})},staff:{id:who.id,fullName:who.fullName}}};
+  v.command={id:E.key('measurement',v.task.id,v.sessionId),kind:'measurement',payload:{taskId:v.task.id,line:{itemId:item.id,itemName:item.name,unit:item.unit,mode:'tem',businessDate:posDateKey(),sessionId:v.sessionId,startedAt:v.startedAt,finishedAt:new Date(UnitEngine.clock.now()).toISOString(),units,densitySnapshot:['ml','l'].includes(String(item.unit).toLowerCase())?Number(item.densityGPerMl):null,largeDeviationConfirmed:!!v.attempt,...(densityProof?{densityProof}: {})},staff:{id:who.id,fullName:who.fullName}}};
   const sent=await durable(v.command);if(!sent){for(const el of document.querySelectorAll('[id^=e2Gross],[id^=e2Vessel],#e2DensityG,#e2DensityMl'))el.disabled=true;document.getElementById('e2Message').textContent='Số cân đã giữ trên máy, chưa đồng bộ được. Bạn có thể tiếp tục bán hàng hoặc ghi tình trạng bàn giao.';return;}
   close();toast('Đã gửi số cân. Kết quả hoặc yêu cầu cân lại sẽ hiện trong công việc.');
  }catch(e){if(view===v)document.getElementById('e2Message').textContent=e.message;}finally{v.busy=false;}
@@ -132,6 +174,6 @@ function install(){
  window.addEventListener('online',flush);
  if(typeof firebase!=='undefined'&&typeof firebase.auth==='function'&&typeof firebase.auth().onAuthStateChanged==='function')firebase.auth().onAuthStateChanged(u=>{if(u)init();else{unsubscribe?.();unsubscribe=null;service=null;state=null;}});
 }
-window.GieoEngine2POS={load,open,close,addVessel,submit,recordException,resumeClose,resumeWithException,flush};
+window.GieoEngine2POS={load,open,close,addVessel,submit,submitDiag,saveMeasuredTare,recordException,resumeClose,resumeWithException,flush};
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
 })();

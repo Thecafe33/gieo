@@ -57,6 +57,8 @@ Các phép thử trên dùng dữ liệu giả, không nối Firebase production
 
 > Thứ tự và phạm vi hiện hành: [lộ trình](LO_TRINH_ENGINE2_CAP6.md). Quy mô 10.000 quán là trục riêng, không thuộc điều kiện cấp 6.
 
+**Cập nhật 22/10 (sau P0):** đã có runtime cấp 3–6 (học baseline, giả thuyết kiểm được có hiệu chuẩn, tự hạ mức, hiệu chuẩn có rào/quay lui, kiểm toán độc lập, xuất + chạy lại đủ) — xem lộ trình mục «Kết quả B3–B6». Worker cần thêm `unit_engine2_learn_v1.js`, `unit_engine2_obs_v1.js`, `unit_engine2_params_v1.js` (chép bằng `tools/automation/sync.js`); không cần index mới. Đoạn dưới giữ nguyên mô tả lúc P0.
+
 P0 chưa triển khai mô hình baseline học theo món/ca, suy luận nguyên nhân có hiệu chuẩn, tự thay đổi tiêu chí trong biên đã kiểm định, auditor độc lập toàn sổ, mapper/replay raw đủ, chuyển toàn bộ family BTP/FIFO/nhận hàng và phân vùng worker cho quy mô 10.000 quán. FSM/core hiện có không được coi là chứng minh mọi cặp trạng thái/sự kiện của toàn đặc tả. Lịch chạy hiện dùng danh sách quán đăng ký và query việc đến hạn có giới hạn, chưa phải kiến trúc phân vùng chuỗi lớn.
 
 ## Cập nhật / quay lui

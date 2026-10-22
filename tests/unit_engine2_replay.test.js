@@ -1,7 +1,7 @@
 'use strict';
 // Lộ trình Engine 2 — B2 đường 2: chạy lại chính sách mới trên «Bản kiểm toán kho» (tools/automation/engine2_replay.js).
 const assert=require('node:assert');
-const X=require('../unit_engine2_export_v1');
+const X=require('../unit_engine2_export_v2');
 const {replay,report}=require('../tools/automation/engine2_replay');
 const {cleanState,ROOT}=require('./lib/engine2_fixture');
 

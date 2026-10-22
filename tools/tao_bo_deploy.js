@@ -61,6 +61,9 @@ function dung() {
       fs.readdirSync(ROOT).filter(f=>/^unit_engine\.v\d+\.js$/.test(f)).forEach(f=>js.add(f));
     if([...js].some(f=>/^(?:unit_engine2(?:_store)?|gieo_engine2_pos)_v\d+\.js$/.test(f)))
       fs.readdirSync(ROOT).filter(f=>/^(?:unit_engine2(?:_store)?|gieo_engine2_pos)_v\d+\.js$/.test(f)).forEach(f=>js.add(f));
+    // Bản xuất kiểm toán kho: v1 ĐÃ deploy (kiem_toan_kho.html cũ còn cache trỏ tới) → giữ mọi bản.
+    if([...js].some(f=>/^unit_engine2_export_v\d+\.js$/.test(f)))
+      fs.readdirSync(ROOT).filter(f=>/^unit_engine2_export_v\d+\.js$/.test(f)).forEach(f=>js.add(f));
     for (const f of [...js].sort()) {
       if (!fs.existsSync(path.join(ROOT, f))) throw new Error(ten + ': app nạp ' + f + ' nhưng repo không có file này');
       files[f] = fs.readFileSync(path.join(ROOT, f));

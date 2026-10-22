@@ -40,7 +40,7 @@ const server=require('http').createServer((req,res)=>{
   }
   for(const [w,h,label] of [[1366,900,'PC'],[390,844,'điện thoại']]){
     const p=await open(w,h);
-    chk(await p.evaluate(()=>!!window.UnitEngine2Export),label+': đã nạp unit_engine2_export_v1.js');
+    chk(await p.evaluate(()=>!!window.UnitEngine2Export),label+': đã nạp unit_engine2_export_v2.js');
     const btn=p.locator('button:has-text("Trích xuất bản kiểm toán kho")');chk(await btn.count()===1,label+': có nút trích xuất bản kiểm toán kho');
     await btn.click();await p.waitForSelector('#exportResult .card-h:has-text("Đã dựng bản kiểm toán kho")',{timeout:15000});
     const tier=await p.textContent('#exportResult .tier');chk(/Đủ/.test(tier)&&!/Chưa/.test(tier),label+': báo Đủ ('+tier.trim()+')');
@@ -66,7 +66,7 @@ const server=require('http').createServer((req,res)=>{
     else chk(false,'không tìm thấy QL_VIEW_KEY');
     await p.context().close();
   }
-  // Trang riêng kiem_toan_kho.html — dùng khi app đang chạy chưa có Engine 2 (chỉ cần trang + unit_engine2_export_v1.js).
+  // Trang riêng kiem_toan_kho.html — dùng khi app đang chạy chưa có Engine 2 (chỉ cần trang + unit_engine2_export_v2.js).
   for(const [w,h,label] of [[1366,900,'trang riêng PC'],[390,844,'trang riêng điện thoại']]){
     const ctx=await b.newContext({viewport:{width:w,height:h},acceptDownloads:true});const p=await ctx.newPage();
     const asked=[];
@@ -77,7 +77,7 @@ const server=require('http').createServer((req,res)=>{
     await p.addInitScript(([f,rt])=>{window.__FS_SEED=f;window.__RT_SEED=rt;},[seedFs,seedRt]);
     const errs=[];p.on('pageerror',e=>errs.push(e.message));
     await p.goto(base+'/kiem_toan_kho.html');await p.waitForTimeout(1200);
-    chk(JSON.stringify(asked.sort())===JSON.stringify(['/kiem_toan_kho.html','/unit_engine2_export_v1.js']),label+': chỉ nạp đúng 2 file cục bộ '+JSON.stringify(asked));
+    chk(JSON.stringify(asked.sort())===JSON.stringify(['/kiem_toan_kho.html','/unit_engine2_export_v2.js']),label+': chỉ nạp đúng 2 file cục bộ '+JSON.stringify(asked));
     const opts=await p.$$eval('#store option',o=>o.map(x=>x.value));chk(opts.join()==='gg01,gg02',label+': danh sách điểm bán (bỏ quán ngừng) '+opts);
     await p.fill('#from','2026-10-14');await p.fill('#to','2026-10-22');await p.click('#run');
     await p.waitForSelector('#dl',{timeout:15000});

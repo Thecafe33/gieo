@@ -2896,7 +2896,7 @@ html.tab-ui .topbar.has-notifications .topbar-actions{flex:0 0 auto;max-width:ca
 <script src="unit_engine2_store_v1.js"></script>
 <script id="ueRetry">if(!window.UnitEngine){document.write('<scr'+'ipt src="unit_engine.v21.js?r=1"><\/scr'+'ipt>');}</script>
 <!-- [Engine 2 · B2] Bản kiểm toán kho — chỉ dùng khi bấm ở Trích xuất dữ liệu; thiếu file thì nút báo, app vẫn chạy. -->
-<script src="unit_engine2_export_v1.js"></script>
+<script src="unit_engine2_export_v2.js"></script>
 <script>
 // Ngày nghiệp vụ theo UTC+7; timestamp/ISO vẫn là thời điểm thật. Không thay Date của SDK.
 function vnDate(...args){
@@ -22344,12 +22344,12 @@ async function runExport(mode){
     box.innerHTML = '<div class="card"><div class="muted">Trích xuất thất bại: '+(err.code||err.message||err)+'</div></div>';
   }finally{ _exportBusy = false; }
 }
-// [Engine 2 · B2] Bản kiểm toán kho (unit_engine2_export_v1.js): chỉ đọc, đọc theo trang có giới hạn,
+// [Engine 2 · B2] Bản kiểm toán kho (unit_engine2_export_v2.js): chỉ đọc, đọc theo trang có giới hạn,
 // manifest ghi rõ phần thiếu / thao tác dở. File đọc thẳng bằng tools/automation/engine2_audit.js.
 async function runExportKho(){
   if(_exportBusy){ toast('⏳ Đang trích xuất, đợi chút...'); return; }
   if(QL_ALL){ toast('⚠️ Chọn một điểm bán (không dùng Xem tất cả) rồi trích xuất'); return; }
-  if(!window.UnitEngine2Export){ toast('⚠️ Chưa tải được unit_engine2_export_v1.js — chép file vào thư mục deploy'); return; }
+  if(!window.UnitEngine2Export){ toast('⚠️ Chưa tải được unit_engine2_export_v2.js — chép file vào thư mục deploy'); return; }
   exportFrom = document.getElementById('exportFrom').value;
   exportTo = document.getElementById('exportTo').value;
   if(!exportFrom || !exportTo || exportFrom > exportTo){ toast('⚠️ Chọn khoảng ngày hợp lệ'); return; }
@@ -31815,7 +31815,7 @@ const Engine2QL=(()=>{
   const id=scope();if(!id){toast('Chọn một điểm bán trước');return;}const token=++request;current={id,service:service(id)};rows=[];cursor=null;
   openEditSheet('Engine 2 · '+id.toUpperCase(),'<div id="e2QBody">Đang tải…</div>');const node=document.getElementById('e2QBody');
   try{const s=await current.service.config();if(token!==request||scope()!==id||document.getElementById('e2QBody')!==node)return;
-   node.innerHTML='<section class="auto-case"><div><h3>'+esc(status(s))+'</h3><div class="auto-actions"><button class="btn outline sm" onclick="Engine2QL.execution()">POS / việc đang xử lý</button><button class="btn outline sm" onclick="Engine2QL.settings()">Thiết lập</button></div></div><p>Hệ thống phân bổ hao hụt theo nhóm pha chế trong khoảng và giao cân cho ca hiện tại. Công việc dở được bàn giao; không chuyển khoản mất của ca trước sang người nhận việc.</p><p>Phạm vi bản đầu: báo hết còn dư và cân NL. Duyệt chi giữ nguyên.</p></section><div id="e2QCases"></div><button id="e2QMore" class="btn outline" onclick="Engine2QL.more()">Tải kết quả</button>';
+   node.innerHTML='<section class="auto-case"><div><h3>'+esc(status(s))+'</h3><div class="auto-actions"><button class="btn outline sm" onclick="Engine2QL.execution()">POS / việc đang xử lý</button><button class="btn outline sm" onclick="Engine2QL.learning()">Học &amp; tự hiệu chuẩn</button><button class="btn outline sm" onclick="Engine2QL.settings()">Thiết lập</button></div></div><p>Hệ thống phân bổ hao hụt theo nhóm pha chế trong khoảng và giao cân cho ca hiện tại. Công việc dở được bàn giao; không chuyển khoản mất của ca trước sang người nhận việc.</p><p>Phạm vi bản đầu: báo hết còn dư và cân NL. Duyệt chi giữ nguyên.</p></section><div id="e2QCases"></div><button id="e2QMore" class="btn outline" onclick="Engine2QL.more()">Tải kết quả</button>';
    await more();
   }catch(e){if(document.getElementById('e2QBody')===node)node.textContent='Chưa tải được: '+e.message;}
  }
@@ -31836,6 +31836,28 @@ const Engine2QL=(()=>{
    node.innerHTML='<section class="auto-case"><h3>1. Yêu cầu kiểm soát</h3><p>'+esc(status(cfg))+' · phiên bản yêu cầu '+Number(cfg.revision||0)+'. Đã quyết định gần nhất: '+esc(qlFmtDT(cfg.lastDecisionAt))+'</p></section><section class="auto-case"><h3>2. Máy POS xác nhận đã nhận</h3>'+(devices.docs.map(d=>'<p>'+esc(d.id.slice(0,8))+' · bản kho '+esc(d.data().inventoryVersion)+' · nhận phiên bản '+Number(d.data().controlRevision||0)+' · '+esc(qlFmtDT(d.data().ackedAt))+'</p>').join('')||'<p>Chưa có xác nhận từ máy POS. Bật cấu hình chưa có nghĩa là POS đã nhận yêu cầu.</p>')+'</section><section class="auto-case"><h3>3. Việc cân còn dở</h3>'+(tasks.docs.map(d=>'<p><b>'+esc(d.data().itemName||d.data().itemId)+'</b> · '+esc(({queued:'Chờ cân',in_progress:'Đã gửi số cân, chờ đối soát',exception_recorded:'Đã ghi sự cố, ca sau tiếp tục'})[d.data().status]||d.data().status)+(d.data().lastError?' · '+esc(d.data().lastError):'')+'</p>').join('')||'<p>Không có việc cân đang chờ.</p>')+'<p>Cân hoàn tất gần nhất: '+esc(qlFmtDT(cfg.lastMeasurementAt))+'</p></section><section class="auto-case"><h3>Bộ xử lý nền</h3>'+(jobs.docs.map(d=>'<p>'+esc(d.data().kind)+' · '+esc(d.data().lastError||'Đang chờ xử lý')+'</p>').join('')||'<p>Không có công việc nền đang chờ trong trang này.</p>')+'<p>Hiển thị tối đa 20 máy, 20 việc cân và 30 công việc nền. Dữ liệu chỉ tải khi mở màn này.</p></section><button class="btn outline" onclick="Engine2QL.open()">Về danh sách</button>';
   }catch(e){if(document.getElementById('e2QExecution')===node)node.textContent='Chưa đọc được: '+e.message;}
  }
+ // Cấp 3–6: đọc 1 bản tóm tắt models/current + 30 quan sát gần nhất — chỉ khi bấm. Phần dư không quy nguyên nhân, không in %.
+ const HYP={tare:'Sai bì dụng cụ',density:'Sai tỷ trọng',recipe:'Định mức sai',unrecorded:'Tiêu hao không khai / mở mã không khai',sync:'Lỗi đồng bộ sổ',receiving:'Nhận hàng sai dung tích',scale:'Cân lệch hệ số'};
+ const STATE={trusted:'Đủ tin cậy',learning:'Đang học',cold_start:'Mới — dùng mức nhóm'};
+ const pct=x=>Number.isFinite(x)?(Math.round(x*1000)/10).toLocaleString('vi-VN')+'%':'—';
+ const itemName=id=>{try{return ((typeof _memo!=='undefined'&&_memo.items)||[]).find(x=>x.id===id)?.name||id;}catch(e){return id;}};
+ const origin=o=>/simulation/.test(o||'')?'hiệu chuẩn mô phỏng — điểm xuất phát':/live/.test(o||'')?'hiệu chuẩn tại quán':'tiên nghiệm khai báo';
+ async function learning(){
+  const ctx=current;if(!ctx||scope()!==ctx.id)return;const token=++request,node=document.getElementById('e2QBody');if(!node)return;node.textContent='Đang tải…';
+  try{const [m,o]=await Promise.all([ctx.service.base.collection('models').doc('current').get(),ctx.service.base.collection('obs').orderBy('at','desc').limit(30).get(),typeof loadInventoryItems==='function'?loadInventoryItems().catch(()=>null):null]);
+   if(token!==request||document.getElementById('e2QBody')!==node)return;
+   if(!m.exists){node.innerHTML='<section class="auto-case"><h3>Chưa có lượt học</h3><p>Bộ xử lý nền học mỗi ngày một lần khi Engine 2 đã bật. Chưa có quan sát nào được chấm.</p></section><button class="btn outline" onclick="Engine2QL.open()">Về danh sách</button>';return;}
+   const d=m.data(),ob=d.obs||{},items=Object.entries(d.items||{}).sort((a,b)=>(b[1].level||0)-(a[1].level||0)||String(itemName(a[0])).localeCompare(itemName(b[0]),'vi'));
+   const labels=Object.entries(d.labels||{}),flagged=o.docs.map(x=>x.data()).filter(x=>x.flagged);
+   node.innerHTML='<section class="auto-case"><h3>Lượt học '+esc(d.day||'')+'</h3><p>Tham số <b>'+esc(d.params?.version||'')+'</b> · '+esc(origin(d.params?.origin))+' · tự hạ mức: '+(d.autoRelease?'bật':'tắt (cần tham số đã hiệu chuẩn)')+'</p>'+
+    '<p>'+Number(ob.scored||0)+' quan sát đã chấm / '+Number(ob.total||0)+' · '+Number(ob.flagged||0)+' bất thường (không đưa vào học) · '+Number(ob.fifoDebt||0)+' khoảng nợ FIFO (lỗi ghi sổ, không học) · '+Number(ob.minutesKnown||0)+' lượt có thời gian thao tác</p>'+
+    '<p>Khoảng 90% phủ thực tế: '+pct(d.coverage90)+' (đạt khi 85–97%).'+(d.modelIssues?.length?' <b>Kiểm toán mô hình: '+d.modelIssues.length+' vấn đề</b> — '+esc(d.modelIssues.map(i=>i.code).join(', ')):' Kiểm toán mô hình: sạch.')+(d.rollback?.rollback?' Đã quay lui về '+esc(d.rollback.to)+'.':'')+(d.calibration?' Hiệu chuẩn tuần: '+esc(d.calibration.promoted?'nhận bộ mới ('+(d.calibration.changes||[]).map(c=>c.param).join(', ')+')':d.calibration.reason||''):'')+'</p></section>'+
+    '<section class="auto-case"><h3>Mức hao hụt thường từng nguyên liệu</h3>'+(items.map(([id,b])=>'<p><b>'+esc(itemName(id))+'</b> · '+pct(b.estimate)+' (khoảng '+pct(b.low)+' – '+pct(b.high)+') · '+esc(STATE[b.state]||b.state)+' · '+Number(b.informative??b.n??0)+' mốc / '+Number(b.days||0)+' ngày · M'+Number(b.level||0)+(b.capped?' · <b>chạm trần nhóm</b> — cần xác minh trước khi nhận mức cao hơn':'')+'</p>').join('')||'<p>Chưa có nguyên liệu nào đủ quan sát.</p>')+'<p>Cần ≥ 20 mốc có thông tin trong ≥ 14 ngày để «đủ tin cậy»; ít hơn thì co về mức nhóm cùng đơn vị.</p></section>'+
+    '<section class="auto-case"><h3>Giả thuyết đã kiểm bằng phép đo</h3>'+(labels.map(([h,l])=>'<p><b>'+esc(HYP[h]||h)+'</b> · '+Number(l.n||0)+' nhãn · '+(l.calibrated?'in xác suất (Brier ngoài mẫu '+(Math.round(l.calBrier*100)/100)+')':'chỉ xếp hạng, chưa in % (cần ≥ 30 nhãn và Brier ngoài mẫu ≤ 0,2)')+'</p>').join('')||'<p>Chưa có phép đo chẩn đoán nào hoàn tất.</p>')+'</section>'+
+    '<section class="auto-case"><h3>Bất thường gần đây</h3>'+(flagged.map(x=>'<p><b>'+esc(itemName(x.itemId))+'</b> · '+esc(qlFmtDT(x.at))+' · thiếu vượt mức thường '+esc(Math.round(Number(x.score?.excess)||0))+' '+esc(x.unit||'')+(x.accumulated?' (cộng dồn thiếu nhỏ)':'')+'<br>'+(x.ranking||[]).map(r=>esc(HYP[r.hypothesis]||r.hypothesis)+(r.probability!=null?' '+pct(r.probability):'')).join(' › ')+(x.residualQty>0?' · phần dư chưa giải thích '+esc(Math.round(x.residualQty))+' '+esc(x.unit||'')+' (không quy nguyên nhân)':'')+'</p>').join('')||'<p>Không có bất thường trong 30 quan sát gần nhất.</p>')+'</section>'+
+    '<p>Xác suất chỉ hiện với giả thuyết đã hiệu chỉnh đủ nhãn tại quán. Thất thoát chưa khai là phần dư — không bao giờ quy cho người và không có %.</p><button class="btn outline" onclick="Engine2QL.open()">Về danh sách</button>';
+  }catch(e){if(document.getElementById('e2QBody')===node)node.textContent='Chưa tải được: '+e.message;}
+ }
  async function settings(){
   const id=scope();if(!id)return;const token=++request,svc=service(id);openEditSheet('Engine 2 · Thiết lập '+id.toUpperCase(),'<div id="e2QSettings">Đang tải…</div>');const node=document.getElementById('e2QSettings');
   try{const s=await svc.config();if(token!==request||scope()!==id||document.getElementById('e2QSettings')!==node)return;
@@ -31847,7 +31869,7 @@ const Engine2QL=(()=>{
   if(!/^\d{4}-\d{2}-\d{2}$/.test(fromDate||'')){msg.textContent='Chọn ngày bắt đầu hợp lệ';return;}if(enabled&&mode==='active'&&!fleetConfirmed){msg.textContent='Cần cập nhật các máy POS trước khi bật tự động';return;}
   ctx.saving=true;try{await fstore.runTransaction(async t=>{const s=await t.get(ctx.service.base);t.set(ctx.service.base,{enabled,mode,fromDate,fleetConfirmed,protocolVersion:1,settingsRevision:(s.exists?s.data().settingsRevision||0:0)+1,settingsUpdatedAt:new Date().toISOString()},{merge:true});});cache.delete(ctx.id);if(scope()===ctx.id&&document.getElementById('e2QSaveMessage')===msg)msg.textContent='Đã lưu. Bộ xử lý sẽ đối chiếu theo ngày được chọn.';}catch(e){if(document.getElementById('e2QSaveMessage')===msg)msg.textContent='Chưa lưu được: '+e.message;}finally{ctx.saving=false;}
  }
- return {mount,open,more,detail,execution,settings,save};
+ return {mount,open,more,detail,execution,learning,settings,save};
 })();
 {const render=renderStoreHealth;renderStoreHealth=async function(...args){const result=await render.apply(this,args);await Engine2QL.mount(args[0]);return result;};}
 

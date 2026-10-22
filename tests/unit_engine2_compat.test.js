@@ -2,7 +2,7 @@
 // Lộ trình Engine 2 — B2 đường 1: đối chiếu tương thích (tools/automation/engine2_compat.js).
 const assert=require('node:assert');
 const fs=require('node:fs');
-const X=require('../unit_engine2_export_v1');
+const X=require('../unit_engine2_export_v2');
 const {compat,report,costOn}=require('../tools/automation/engine2_compat');
 const {cleanState}=require('./lib/engine2_fixture');
 const clone=v=>JSON.parse(JSON.stringify(v));

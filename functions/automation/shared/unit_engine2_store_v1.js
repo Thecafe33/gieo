@@ -18,6 +18,18 @@ function create(opts){
  // đặc tả 3.4 chỉ cho VALID_RESULT dẫn tới done.
  function finalOwn(status){return status==='in_progress'?{status:E.transition('task',status,'VALID_RESULT')}:['done','superseded','cancelled'].includes(status)?{}:{status:E.transition('task',status,'NEW_REVISION')};}
  function settle(t,docs,resultRef,cut){for(const w of docs){const st=w.data().status;if(E.ms(w.data().createdAt)>cut||['done','superseded','cancelled','in_progress'].includes(st))continue;t.set(w.ref,{status:E.transition('task',st,'NEW_REVISION'),pending:false,resultRef,updatedAt:iso()},{merge:true});}}
+ // [Cấp 3–6] Quan sát khoảng (đầu vào học, unit_engine2_learn_v1.js) — suy từ mốc đầu / cuối, KHÔNG đọc thêm sổ bán:
+ // used = số đo đầu khoảng − sổ lúc mốc cuối; loss = sổ − số đo. Ghi cùng giao dịch với quyết định / mốc cân.
+ function startPoint(c,point){
+  if(point&&point.status==='valid'){const m=E.finite(point.counted)?Number(point.counted):point.quality==='legacy_recorded'&&E.finite(c.lastShiftWeigh?.weighed)?Number(c.lastShiftWeigh.weighed):null;if(m!==null)return {at:point.countedAt,measured:m,weighed:true,id:point.id};}
+  return {at:typeof c.openedAt==='number'?new Date(c.openedAt).toISOString():c.openedAt,measured:Number(c.baseQty)||0,weighed:false,id:'open'};
+ }
+ function observation(c,start,end,extra){
+  const used=Math.max(0,E.round(start.measured-end.book));
+  return {schemaVersion:1,id:E.key(c.id,end.kind,end.at),storeId:store,itemId:c.itemId,unit:c.unit||'',containerId:c.id,from:start.at,fromPoint:start.id,at:end.at,day:new Date(E.ms(end.at)+7*3600000).toISOString().slice(0,10),
+   used,loss:E.round(end.book-end.measured),book:end.book,measured:end.measured,nWeigh:(start.weighed?1:0)+(end.weighed?1:0),fromOpen:start.id==='open',cap:start.id==='open'?start.measured:null,verified:used>0,scored:false,...extra,createdAt:iso()};
+ }
+ const DIAG=['tare_check','density_proof','recipe_portion_weigh','scan_open_units','weigh_sealed_unit','reference_weigh'];
  async function fence(t,guard){if(!guard)return;const s=await t.get(guard.ref);if(!s.exists||s.data().leaseToken!==guard.token||s.data().revision!==guard.revision)throw error('Lease hoặc phiên bản công việc đã thay đổi');}
  async function config(){const s=await base.get();return s.exists?s.data():{};}
  async function enqueue(kind,id,resumeCursor=false){
@@ -57,7 +69,7 @@ function create(opts){
   if(shifts.docs.length>500)throw error('Khoảng ca vượt giới hạn một lượt; chưa tự chốt trách nhiệm');
   const shiftRows=shifts.docs.map(data),valuation=await prices(source.itemId,source.businessDate,{...source,id},item);
   const input={store,sourceId:id,source,container:c,shifts:shiftRows,checkpoint:cp,valuation};
-  const result=E.decision(input);
+  const result=E.decision(input),groupKey=(result.allocations||[]).map(a=>a.employeeId).sort().join('+');
   if(['assigned_by_manager','manual'].includes(source.responsibility?.status)&&result.status!=='voided')Object.assign(result,{decisionMode:'manual',basis:'manual_source',manualSource:source.responsibility,allocations:[],pending:{qty:result.quantity,value:result.amount},explanation:'Giữ nguyên quyết định tay trong chứng từ nguồn. Engine 2 không phân bổ lại hoặc tạo khoản thu thứ hai.'});
   const faults=E.audit(result);if(faults.length)throw error('Tự kiểm toán: '+faults.join(', '));
   const fingerprint=E.stable(input),controlRef=sub('controls').doc(source.itemId),taskRef=sub('tasks').doc(E.key('baseline',id));
@@ -88,7 +100,10 @@ function create(opts){
    if(d.status==='voided'&&taskSn.exists&&!['done','cancelled','superseded'].includes(taskSn.data().status))t.set(taskRef,{status:E.transition('task',taskSn.data().status,'VALID_VOID'),pending:false,reason:'Nguồn hao hụt không còn hiệu lực',updatedAt:at},{merge:true});
    for(const sid of result.shiftIds||[])t.set(sub('shift_links').doc(sid).collection('cases').doc(caseRef.id),{sourceId:id});
    t.set(sub('item_links').doc(source.itemId).collection('cases').doc(caseRef.id),{kind:'finish',sourceId:id});
-   t.set(sub('audits').doc(decisionId),{decisionId,storeId:store,at,issues:faults,quantity:d.quantity||0,sourceId:id,policyVersion:E.POLICY});return d;
+   t.set(sub('audits').doc(decisionId),{decisionId,storeId:store,at,issues:faults,quantity:d.quantity||0,sourceId:id,policyVersion:E.POLICY});
+   // Quan sát báo hết (cả đối chiếu thử — dữ liệu học không đổi kho / trách nhiệm). Nguồn huỷ → quan sát không dùng để học.
+   const ob=observation(c,startPoint(c,cp),{kind:'finish',at:c.finishedAt,book:Number(c.wasteBase)||0,measured:0,weighed:false},{sampling:'finish',groupKey,vesselIds:[],controlled:!!(ctlSn.exists&&ctlSn.data().level>=2),ctx:{fifoDebt:false,densityProven:Number(item.densityGPerMl)>0},decisionId,mode});
+   if(d.status==='voided')Object.assign(ob,{verified:false,reason:'Nguồn hao hụt đã huỷ'});t.set(sub('obs').doc(ob.id),ob);return d;
   });
  }
  async function handover(id,guard){
@@ -141,6 +156,7 @@ function create(opts){
    if(!cfg.exists||!active(cfg.data()))return rejected('Engine2 đã dừng nhận phép cân mới; chưa thay đổi kho');
    if(!ts.exists||ts.data().itemId!==line.itemId)return rejected('Nhiệm vụ đã thay đổi — tải lại danh sách');
    if(['done','cancelled','superseded'].includes(ts.data().status))return rejected('Việc cân đã kết thúc; không áp thêm lần nữa');
+   if(ts.data().blind&&ts.data().excludeStaffId&&ts.data().excludeStaffId===staff.id)return rejected('Cân xác nhận độc lập (M3) cần người khác người cân trước');
    if(lock.exists&&lock.data().measurementId!==ref.id)return rejected('Món này có lượt cân đang xử lý; chờ kết quả để tránh cân trùng');
    if(containers.some(s=>!s.exists||s.data().itemId!==line.itemId||s.data().status!=='open'))return rejected('Mã đang mở đã đổi trạng thái — tải lại danh sách');
    if(new Set(line.units.map(u=>u.id)).size!==line.units.length)throw Error('Một mã chỉ được xuất hiện một lần trong lượt cân');
@@ -225,10 +241,147 @@ function create(opts){
    for(const [i,u] of line.units.entries()){
     if(alreadyComplete)break;
     const cp={id:E.key(id,u.id),storeId:store,itemId:m.itemId,containerId:u.id,status:'valid',countedAt:u.countedAt,byEmployeeId:m.staff.id,book:u.baseline,counted:u.weighed,weighings:u.weighings,unitSnapshot:item.unit,densitySnapshot:['ml','l'].includes(String(item.unit).toLowerCase())?Number(item.densityGPerMl):null,measurementId:id,operationId:out.opId,createdAt:at};
-    t.set(sub('checkpoints').doc(cp.id),cp);if(!previousPoints[i].exists||E.ms(previousPoints[i].data().countedAt)<=E.ms(cp.countedAt))t.set(sub('unit_checkpoints').doc(u.id),cp);
+    if(ts.exists){const tk=ts.data();Object.assign(cp,{sampling:tk.sampling||'control',blind:!!tk.blind,startedAt:line.startedAt||null,finishedAt:line.finishedAt||null});}
+    t.set(sub('checkpoints').doc(cp.id),cp);
+    const dc=decisions.find(x=>x.containerId===u.id),tk=ts.exists?ts.data():{};
+    const ob=observation({id:u.id,itemId:m.itemId,unit:item.unit,openedAt:u.openedAt,baseQty:u.capacity},startPoint({openedAt:u.openedAt,baseQty:u.capacity},u.checkpointSnapshot),{kind:'weigh',at:u.countedAt,book:Number(u.baseline),measured:Number(u.weighed),weighed:true},
+     {sampling:tk.sampling||'control',blind:!!tk.blind,groupKey:(dc?.allocations||[]).map(a=>a.employeeId).sort().join('+'),vesselIds:(u.weighings||[]).map(w=>w.vesselId),controlled:(tk.sampling||'control')==='control',measuredBy:m.staff.id,measurementId:id,
+      minutes:line.startedAt&&line.finishedAt?Math.max(0,(E.ms(line.finishedAt)-E.ms(line.startedAt))/60000):null,ctx:{fifoDebt:Number(u.baseline)<0,densityProven:!['ml','l'].includes(String(item.unit).toLowerCase())||Number(item.densityGPerMl)>0}});
+    t.set(sub('obs').doc(ob.id),ob);if(!previousPoints[i].exists||E.ms(previousPoints[i].data().countedAt)<=E.ms(cp.countedAt))t.set(sub('unit_checkpoints').doc(u.id),cp);
    }
    if(!alreadyComplete){t.delete(sub('measurement_locks').doc(m.itemId));t.set(base,{lastMeasurementAt:at,revision:(cs.exists?cs.data().revision||0:0)+1},{merge:true});}
   });
+ }
+ // Việc do worker học sinh ra (chẩn đoán / cân ngẫu nhiên M0 / xác nhận độc lập M3). Mã việc cố định → chạy lại không đúp.
+ async function createTask(kind,itemId,key,extra={}){
+  if(![...DIAG,'weigh_open_units'].includes(kind))throw Error('Engine2: loại việc không hợp lệ');
+  const ref=sub('tasks').doc(E.key(kind,itemId,key));
+  return fs.runTransaction(async t=>{const [old,cfg]=await Promise.all([t.get(ref),t.get(base)]);if(old.exists||!cfg.exists||!active(cfg.data()))return false;const at=iso();
+   t.set(ref,{id:ref.id,storeId:store,itemId,kind,status:'queued',pending:true,assignment:'current_barista_group',createdAt:at,updatedAt:at,revision:1,...extra});t.set(base,{revision:(cfg.data().revision||0)+1,lastTaskAt:at},{merge:true});return ref.id;});
+ }
+ // Kết quả việc chẩn đoán = NHÃN cho giả thuyết (worker học chấm). Không đổi kho; đề xuất đổi bì / định mức đi đường riêng.
+ async function submitEvidence(taskId,result,staff){
+  if(!staff?.id)throw Error('Cần người thực hiện');const ref=sub('tasks').doc(taskId);
+  return fs.runTransaction(async t=>{
+   const ts=await t.get(ref);if(!ts.exists)throw Error('Không có việc này');const task=ts.data();if(!DIAG.includes(task.kind))throw Error('Việc này không phải việc chẩn đoán');
+   if(['done','cancelled','superseded'].includes(task.status))return false;
+   const r={...result};
+   if(task.kind==='tare_check'){if(!r.vesselId||!r.variantId||!E.finite(r.measuredTareG)||Number(r.measuredTareG)<0)throw Error('Cân bì dụng cụ rỗng và chọn đúng dụng cụ');const v=await t.get(coll('prep_vessels').doc(r.vesselId));const vr=v.exists?(v.data().variants||[]).find(x=>x.id===r.variantId):null;if(!vr)throw Error('Dụng cụ đã thay đổi');r.recordedTareG=Number(vr.tareG);r.measuredTareG=Number(r.measuredTareG);}
+   else if(task.kind==='recipe_portion_weigh'){if(!(Number(r.bookG)>0)||!(Number(r.measuredG)>0))throw Error('Nhập định lượng theo công thức và số cân thực của một phần');r.bookG=Number(r.bookG);r.measuredG=Number(r.measuredG);}
+   else if(task.kind==='density_proof'){if(!(Number(r.netG)>0)||!(Number(r.volumeMl)>0))throw Error('Nhập khối lượng ròng và thể tích mẫu');r.density=Number(r.netG)/Number(r.volumeMl);}
+   else if(task.kind==='scan_open_units'){if(!Array.isArray(r.present)||!Array.isArray(r.unregistered))throw Error('Đánh dấu mã có trên tay và ghi mã đang mở chưa khai');}
+   else if(task.kind==='weigh_sealed_unit'){if(!(Number(r.recorded)>0)||!(Number(r.measuredNet)>0))throw Error('Cân một tem NGUYÊN chưa mở: nhập dung tích ghi trên tem và lượng ròng cân được');r.recorded=Number(r.recorded);r.measuredNet=Number(r.measuredNet);}
+   else if(task.kind==='reference_weigh'){if(!(Number(r.known)>0)||!(Number(r.reading)>=0))throw Error('Đặt vật mẫu biết trước khối lượng lên cân: nhập khối lượng chuẩn và số cân hiện');r.known=Number(r.known);r.reading=Number(r.reading);}
+   const at=iso(),start=E.taskStart(task.status);
+   t.set(sub('evidence').doc(taskId),{taskId,storeId:store,kind:task.kind,itemId:task.itemId,resolves:task.resolves||null,posterior:task.posterior??null,obsId:task.obsId||null,result:r,byEmployeeId:staff.id,at,labeled:false});
+   t.set(ref,{status:E.transition('task',start.status,'VALID_RESULT'),statusEvents:[...start.events,'VALID_RESULT'],pending:false,resultRef:sub('evidence').doc(taskId).path,updatedAt:at},{merge:true});return true;
+  });
+ }
+ /* [Cấp 3–6] Lượt HỌC hằng ngày (worker gọi; chỉ chạy một lần / ngày VN trừ khi force). Đọc có giới hạn:
+  * quan sát 90 ngày (≤ 3000), kết quả chẩn đoán chưa gắn nhãn (≤ 200), control (≤ 500). Không đụng kho / tiền.
+  * 1) gắn nhãn kết quả chẩn đoán → hiệu chuẩn giả thuyết; 2) chấm quan sát mới (bất thường / cộng dồn) → giả thuyết kiểm được →
+  * việc chẩn đoán, tăng mức (M3 → cân độc lập người khác); 3) hạ mức theo tiêu chí đã hiệu chuẩn; 4) cân ngẫu nhiên M0 theo ngân sách;
+  * 5) hiệu chuẩn có rào hằng tuần + quay lui + kiểm toán mô hình; 6) ghi models/current (QL2 + chứng nhận đọc). */
+ async function learnDay(opts={}){
+  const L=opts.learn||(typeof module==='object'&&module.exports?require('./unit_engine2_learn_v1.js'):root.UnitEngine2Learn);if(!L)throw error('Chưa nạp module học');
+  const cfg=await config();if(!cfg.enabled)return {skipped:'disabled'};
+  const day=new Date(now()+7*3600000).toISOString().slice(0,10),modelRef=sub('models').doc('current'),paramsRef=sub('models').doc('params');
+  const [mSn,pSn]=await Promise.all([modelRef.get(),paramsRef.get()]),prev=mSn.exists?mSn.data():{};
+  if(prev.day===day&&!opts.force)return {skipped:'done_today'};
+  const P=L.withDefaults(pSn.exists&&pSn.data().params?pSn.data().params:(opts.params||L.DEFAULT_PARAMS));
+  const since=new Date(now()-90*86400000).toISOString();
+  const [oSn,eSn,cSn,vSn]=await Promise.all([sub('obs').where('at','>=',since).orderBy('at').limit(3001).get(),sub('evidence').where('labeled','==',false).limit(200).get(),sub('controls').limit(501).get(),sub('model_versions').orderBy('createdAt').limit(200).get()]);
+  if(oSn.docs.length>3000)throw error('Quá 3000 quan sát trong 90 ngày — cần phân vùng học, chưa tự chốt');
+  const obs=oSn.docs.map(data),controls=Object.fromEntries(cSn.docs.map(d=>[d.id,data(d)])),at=iso(),writes=[];
+  // 1) Nhãn từ kết quả chẩn đoán (quy tắc cố định, kiểm được).
+  const labels=JSON.parse(JSON.stringify(prev.labels||{})),tareChecks=JSON.parse(JSON.stringify(prev.tareChecks||{})),recipeAudits=JSON.parse(JSON.stringify(prev.recipeAudits||{}));
+  const sealedChecks=JSON.parse(JSON.stringify(prev.sealedChecks||{})),referenceChecks=JSON.parse(JSON.stringify(prev.referenceChecks||[]));
+  for(const ev of eSn.docs.map(data)){
+   const r=ev.result||{};let y=null;
+   if(ev.kind==='tare_check'){y=Math.abs(r.measuredTareG-r.recordedTareG)>2*(P.measSigma.g||3)?1:0;(tareChecks[r.vesselId]=tareChecks[r.vesselId]||[]).push({recorded:r.recordedTareG,measured:r.measuredTareG});tareChecks[r.vesselId]=tareChecks[r.vesselId].slice(-20);}
+   else if(ev.kind==='recipe_portion_weigh'){y=Math.abs(r.measuredG-r.bookG)/r.bookG>0.05?1:0;(recipeAudits[ev.itemId]=recipeAudits[ev.itemId]||[]).push({book:r.bookG,measured:r.measuredG});recipeAudits[ev.itemId]=recipeAudits[ev.itemId].slice(-20);}
+   else if(ev.kind==='density_proof'){const it=await coll('inventory_items').doc(ev.itemId).get(),old=Number(it.exists&&it.data().densityGPerMl);y=old>0?(Math.abs(r.density-old)/old>0.03?1:0):1;}
+   else if(ev.kind==='scan_open_units')y=(r.unregistered||[]).length>0?1:0;
+   else if(ev.kind==='weigh_sealed_unit'){y=Math.abs(r.recorded-r.measuredNet)/r.recorded>0.02?1:0;(sealedChecks[ev.itemId]=sealedChecks[ev.itemId]||[]).push({recorded:r.recorded,measured:r.measuredNet});sealedChecks[ev.itemId]=sealedChecks[ev.itemId].slice(-20);}
+   else if(ev.kind==='reference_weigh'){y=Math.abs(r.reading-r.known)/r.known>0.01?1:0;referenceChecks.push({known:r.known,reading:r.reading});referenceChecks.splice(0,Math.max(0,referenceChecks.length-20));}
+   if(y!==null&&ev.resolves){const l=labels[ev.resolves]=labels[ev.resolves]||{n:0,brierSum:0,pairs:[]},p=Number(ev.posterior)||0;if(!Number.isFinite(l.brierSum))l.brierSum=(Number(l.brier)||0)*(l.n||0);l.n=(l.n||0)+1;l.brierSum+=Math.pow(p-y,2);l.pairs=[...(l.pairs||[]),[p,y]].slice(-(P.calibration.keep||300));}
+   writes.push([sub('evidence').doc(ev.taskId),{labeled:true,label:y,labeledAt:at}]);
+  }
+  // Hiệu chỉnh xác suất từng giả thuyết theo nhãn của quán (Brier ngoài mẫu) — chỉ giả thuyết đạt mới in %.
+  const calMaps=Object.fromEntries(Object.entries(labels).map(([h,l])=>[h,L.fitCalibration(l.pairs||[],P)]));
+  const evidence={tareChecks,recipeAudits,sealedChecks,referenceChecks,calibration:calMaps,labelsCount:Object.fromEntries(Object.entries(labels).map(([h,l])=>[h,l.n])),brier:Object.fromEntries(Object.entries(labels).map(([h,l])=>[h,l.brierSum/Math.max(1,l.n)]))};
+  // 2) Chấm quan sát mới theo thời gian, baseline học từ các quan sát đã chấm trước đó (mẫu bất thường không học).
+  const scored=obs.filter(o=>o.scored),fresh=obs.filter(o=>!o.scored),cusum={...(prev.cusum||{})},created=[];
+  let base=L.baseline(scored,P);
+  const residuals={};for(const o of scored)if(o.verified&&o.used>0&&o.nWeigh>0&&!o.flagged){const b=L.predict(base,o.itemId,o.unit);(residuals[o.itemId]=residuals[o.itemId]||[]).push({groupKey:o.groupKey,rate:(o.loss-b.estimate*o.used)/o.used});}
+  evidence.itemResiduals=residuals;
+  // Khoảng mở tem + khoảng cân → cân (cả mẫu đã báo bất thường) — bằng chứng lặp lại / loại trừ cho giả thuyết nhận hàng sai dung tích.
+  const openHistory={},pushOpen=(o,sc)=>{if(sc&&o.used>0&&(o.fromOpen?Number(o.cap)>0:o.nWeigh>=2))(openHistory[o.itemId]=openHistory[o.itemId]||[]).push({id:o.id,at:o.at,fromOpen:!!o.fromOpen,frac:o.fromOpen?sc.excess/o.cap:null,sdFrac:o.fromOpen?sc.sdLoss/o.cap:null,z:sc.z});};
+  for(const o of scored)if(o.verified)pushOpen(o,L.score(o,base,P));
+  evidence.openHistory=openHistory;
+  for(const o of fresh){
+   const upd={scored:true,scoredAt:at};
+   if(o.verified&&o.used>0){
+    const sc=L.score(o,base,P),acc=o.nWeigh>0?L.accumulate(cusum[o.itemId],sc,P):{S:cusum[o.itemId]||0,alarm:false};cusum[o.itemId]=acc.S;
+    Object.assign(upd,{score:{z:sc.z,excess:sc.excess,expected:sc.expected,threshold:sc.threshold,state:sc.state},flagged:sc.abnormal||acc.alarm,accumulated:acc.alarm});
+    pushOpen(o,sc);
+    if(upd.flagged&&!(o.ctx&&o.ctx.fifoDebt)){
+     const hy=L.hypotheses(o,base,evidence,P);Object.assign(upd,{explainedBy:hy.explainedBy,residualQty:hy.residual.qty,ranking:hy.ranking.slice(0,3)});
+     const test=hy.next&&hy.next.test,common={obsId:o.id,resolves:hy.next&&hy.next.resolves,posterior:hy.next?hy.posterior[hy.next.resolves]:null,reason:'Chẩn đoán: '+(hy.ranking[0]?.why||'')};
+     if(test==='tare_check'&&o.vesselIds?.[0])created.push(createTask('tare_check',o.itemId,o.id,{...common,vesselId:o.vesselIds[0],reason:'Kiểm bì dụng cụ — giả thuyết sai bì'}));
+     else if(test==='density_proof')created.push(createTask('density_proof',o.itemId,o.id,{...common,reason:'Đo lại tỷ trọng — giả thuyết sai tỷ trọng'}));
+     else if(test==='recipe_portion_weigh')created.push(createTask('recipe_portion_weigh',o.itemId,o.id,{...common,reason:'Cân một phần theo định mức — giả thuyết định mức sai'}));
+     else if(test==='scan_open_units')created.push(createTask('scan_open_units',o.itemId,o.id,{...common,reason:'Rà mã đang mở / chưa khai — giả thuyết tiêu hao không khai'}));
+     else if(test==='weigh_sealed_unit')created.push(createTask('weigh_sealed_unit',o.itemId,o.id,{...common,reason:'Cân một tem nguyên chưa mở — giả thuyết nhận hàng sai dung tích'}));
+     else if(test==='reference_weigh')created.push(createTask('reference_weigh','_scale',day,{...common,reason:'Cân vật mẫu biết trước khối lượng — giả thuyết cân lệch hệ số'}));
+     else if(test==='resync_recount')created.push(createTask('weigh_open_units',o.itemId,'resync~'+o.id,{...common,sampling:'resync',reason:'Đếm/cân lại để đồng bộ sổ — giả thuyết lỗi đồng bộ'}));
+     // «Tái diễn» chỉ tính bất thường xảy ra SAU lúc món được nâng mức (không đếm hai lần chính sự kiện đã gây nâng mức).
+     const ctl=controls[o.itemId]||{level:0,manualFloor:0},raisedAt=ctl.lastEscalationAt||ctl.updatedAt||'',adv=(ctl.level||0)>=2&&!(o.at>raisedAt)?{to:ctl.level}:L.controlAdvice(ctl,[o],base,{},P);
+     if(adv.to>(ctl.level||0)&&(cfg.mode==='active')){
+      const next=E.control(ctl,adv.to>=3&&ctl.level>=1?'MEASUREMENT_CONFLICT':'PHYSICAL_LOSS');
+      writes.push([sub('controls').doc(o.itemId),{...next,storeId:store,itemId:o.itemId,revision:(ctl.revision||0)+1,reasonObsIds:[...(ctl.reasonObsIds||[]),o.id].slice(-20),lastEscalationAt:at,updatedAt:at}]);controls[o.itemId]={...ctl,...next};
+      if(next.level>=3)created.push(createTask('weigh_open_units',o.itemId,'m3~'+o.id,{sampling:'m3',blind:true,excludeStaffId:o.measuredBy||null,obsId:o.id,reason:'Cân xác nhận độc lập (người khác, không xem số trước)'}));
+     }
+    }
+   }
+   writes.push([sub('obs').doc(o.id),upd]);Object.assign(o,upd);
+  }
+  // 3) Hạ mức theo tiêu chí đã hiệu chuẩn (chỉ khi bật tự hạ; không dưới sàn; mỗi lần một bậc).
+  const allScored=obs.filter(o=>o.scored);base=L.baseline(allScored,P);
+  const recentFrom=new Date(now()-14*86400000).toISOString(),released=[];
+  if(cfg.mode==='active'&&cfg.autoRelease!==false&&/^calibrated/.test(String(P.origin||'')))for(const [itemId,ctl] of Object.entries(controls)){
+   if(!(ctl.level>=1))continue;const recent=allScored.filter(o=>o.itemId===itemId&&o.at>=recentFrom);
+   const pend=await sub('tasks').where('itemId','==',itemId).where('pending','==',true).limit(1).get();
+   const days=ctl.lastReleaseAt?(now()-E.ms(ctl.lastReleaseAt))/86400000:99,cap=Math.max(1,...recent.map(o=>o.used||0));
+   const adv=L.controlAdvice(ctl,recent,base,{typicalUnit:cap/2,daysSinceLastRelease:days,pending:pend.docs.length,ackComplete:true},P);
+   if(adv.action!=='release')continue;
+   const clean=recent.filter(o=>!o.flagged&&['random_m0','control','m3'].includes(o.sampling));
+   const next=E.control(ctl,'CLEAN_WINDOW_PASSED',{releaseEnabled:true,validPoints:clean.length,activeDays:new Set(clean.map(o=>o.day)).size,usedEnough:true,pending:pend.docs.length,ackComplete:true,daysSinceLastRelease:days,criteria:P.release});
+   if(next.level<ctl.level){writes.push([sub('controls').doc(itemId),{...next,revision:(ctl.revision||0)+1,lastReleaseAt:at,lastReleaseReason:adv.reason,updatedAt:at}]);released.push(itemId);}
+  }
+  // 4) Cân ngẫu nhiên M0 theo ngân sách (mẫu không thiên lệch cho baseline — lộ trình điều chỉnh 2).
+  const budget=Number(cfg.randomM0PerDay??P.sampling?.perDay??2),lastM0={...(prev.lastM0||{})},act={};
+  for(const o of allScored)if(o.at>=recentFrom&&o.used>0)act[o.itemId]=(act[o.itemId]||0)+o.used;
+  const cand=Object.keys(act).filter(id=>!(controls[id]?.level>=1)&&(!lastM0[id]||lastM0[id]<new Date(now()-2*86400000).toISOString().slice(0,10))).sort((a,b)=>act[b]*(1+(lastM0[b]?0:1))-act[a]*(1+(lastM0[a]?0:1))).slice(0,Math.max(0,budget));
+  if(cfg.mode==='active')for(const id of cand){created.push(createTask('weigh_open_units',id,'m0~'+day,{sampling:'random_m0',reason:'Cân ngẫu nhiên — dữ liệu mức thường (không phải vì có nghi vấn)'}));lastM0[id]=day;}
+  // 5) Hiệu chuẩn có rào hằng tuần (live ±5%), quay lui, kiểm toán mô hình.
+  const versions=vSn.docs.map(data);let calib=null,rollback=null;const lastCal=prev.lastCalibratedDay||'';
+  if(!lastCal||(Date.parse(day)-Date.parse(lastCal))/86400000>=7){
+   const c=L.calibrate(P,allScored,{mode:'live',minValidation:30,stamp:day,evidence:()=>evidence});
+   calib={promoted:c.promoted,reason:c.reason,changes:c.record?.changes||[]};
+   if(c.promoted){const rec={...c.record,createdAt:at,params:c.params};writes.push([sub('model_versions').doc(c.params.version),rec],[paramsRef,{params:c.params,version:c.params.version,parent:P.version,updatedAt:at}]);versions.push(rec);}
+   const lastRec=versions.at(-1);if(lastRec&&lastRec.metricsAfter){const live=L.evaluate(allScored.filter(o=>o.at>=(lastRec.createdAt||'')),P);const rb=L.shouldRollback(lastRec,live);if(rb.rollback){const parent=versions.find(v=>v.version===rb.to);if(parent?.params){writes.push([paramsRef,{params:parent.params,version:parent.version,rolledBackFrom:lastRec.version,updatedAt:at}]);rollback=rb;}}}
+  }
+  const issues=L.auditModels(versions,P),evalM=L.evaluate(allScored,P);
+  const items=Object.fromEntries(Object.values(base.items).map(b=>[b.itemId,{n:b.n,informative:b.informative,days:b.days,estimate:b.estimate,low:b.low,high:b.high,state:b.state,capped:b.capped,level:controls[b.itemId]?.level||0}]));
+  const model={day,storeId:store,updatedAt:at,params:{version:P.version,origin:P.origin||null},items,groups:base.groups,excluded:base.excluded,outliers:L.outlierItems(base),drift:L.drift(allScored,L.baseline(allScored.slice(0,Math.floor(allScored.length/2)),P),P),
+   labels:Object.fromEntries(Object.entries(labels).map(([h,l])=>{const c=calMaps[h];return [h,{n:l.n,brierSum:l.brierSum,brier:l.brierSum/Math.max(1,l.n),pairs:l.pairs||[],calBrier:c.brier,a:c.a,b:c.b,calibrated:l.n>=P.calibration.minLabels&&c.calibrated}];})),
+   coverage90:evalM.coverage90,obs:{total:obs.length,scored:allScored.length,flagged:allScored.filter(o=>o.flagged).length,fifoDebt:allScored.filter(o=>o.ctx?.fifoDebt).length,minutesKnown:allScored.filter(o=>o.minutes!=null).length},
+   cusum,lastM0,tareChecks,recipeAudits,sealedChecks,referenceChecks,released,calibration:calib,rollback,modelIssues:issues,lastCalibratedDay:calib?day:lastCal,autoRelease:cfg.autoRelease!==false&&/^calibrated/.test(String(P.origin||''))};
+  for(const [ref,val] of writes)await ref.set(val,{merge:true});
+  await modelRef.set(model);
+  const tasks=(await Promise.all(created)).filter(Boolean);
+  return {day,scored:fresh.length,flagged:fresh.filter(o=>o.flagged).length,tasks,released,calibration:calib,rollback,issues};
  }
  async function exception(taskId,staff,reason){
   if(!staff?.id||!String(reason||'').trim())throw Error('Cần người ghi nhận và tình trạng thực tế');
@@ -266,7 +419,7 @@ function create(opts){
    }catch(e){await fs.runTransaction(async t=>{const s=await t.get(ref);if(!s.exists||s.data().leaseToken!==token)return;if(s.data().revision!==job.revision){t.set(ref,{leaseUntil:0,leaseToken:'',nextTryAt:now()},{merge:true});return;}t.set(ref,{leaseUntil:0,leaseToken:'',lastError:String(e.message||e),nextTryAt:now()+60000,attempt:(s.data().attempt||0)+1},{merge:true});});throw e;}
  }
  async function retryDue(){const s=await sub('requests').where('dirty','==',true).where('nextTryAt','<=',now()).orderBy('nextTryAt').limit(30).get();for(const d of s.docs)try{await drain(d.id);}catch(e){if(opts.log)opts.log(e);}return s.docs.length;}
- return {storeId:store,base,sub,config,enqueue,finish,handover,opened,ensureCloseTasks,registerVessel,requestMeasurement,measure,exception,drain,retryDue};
+ return {storeId:store,base,sub,coll,config,enqueue,finish,handover,opened,ensureCloseTasks,registerVessel,requestMeasurement,measure,createTask,submitEvidence,learnDay,exception,drain,retryDue,observation,startPoint};
 }
 const api={create};if(typeof module==='object'&&module.exports)module.exports=api;root.UnitEngine2Store=api;
 })(typeof window!=='undefined'?window:globalThis);

@@ -1,3 +1,7 @@
+# 22/10 — Engine 2 cấp 3–6: năng lực đạt trên mô phỏng, chờ dữ liệu thật
+
+[Lộ trình](LO_TRINH_ENGINE2_CAP6.md) mục «Kết quả B3–B6»: học mức thường, giả thuyết kiểm được (xác suất chỉ sau hiệu chỉnh ngoài mẫu), vòng kín nâng/hạ, tự hiệu chuẩn có phiên bản/quay lui/kiểm toán mô hình; bộ mô phỏng 24 kịch bản có sự thật biết trước + hiệu chuẩn khởi tạo (`unit_engine2_params_v1.js` sinh tự động); công cụ chứng nhận: mô phỏng cấp 6/6, dữ liệu thật gg01 cấp 2/6. Cần deploy Engine 2 + worker và chạy tự động để chứng minh cấp 3–6 trên quán. Chưa deploy.
+
 # 22/10 — Engine 2 B2 xong: cấp 1 đạt trên dữ liệu thật
 
 [Lộ trình](LO_TRINH_ENGINE2_CAP6.md): `tools/automation/engine2_compat.js` — hao hụt Engine 2 = sổ lãi/lỗ (1.325.439đ, 0 ngày lệch), tem = sự thật 38/38. Chạy lại chính sách mới 46 báo hết (8 gán tay giữ nguyên), kiểm toán 0/0. Chủ quán chốt giữ «chưa đủ giá» khi thiếu lịch sử giá. Cấp 2 chờ quyết 33 lệch FSM.

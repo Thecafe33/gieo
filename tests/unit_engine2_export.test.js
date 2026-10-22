@@ -1,10 +1,10 @@
 'use strict';
-// Lộ trình Engine 2 — B2: «Bản kiểm toán kho» (unit_engine2_export_v1.js).
+// Lộ trình Engine 2 — B2: «Bản kiểm toán kho» (unit_engine2_export_v2.js).
 // Xuất từ dữ liệu sạch dựng bằng luồng thật → đưa thẳng vào bộ kiểm toán độc lập phải ĐẠT 0/0;
 // chỉ đọc; phân trang không đổi nội dung; chạm giới hạn / lỗi một phần → manifest.complete=false.
 const assert=require('node:assert');
 const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),{spawnSync}=require('node:child_process');
-const X=require('../unit_engine2_export_v1');
+const X=require('../unit_engine2_export_v2');
 const A=require('../unit_engine2_audit_v1');
 const {makeFake}=require('./lib/fakefb');
 const {cleanState,ROOT}=require('./lib/engine2_fixture');
@@ -25,7 +25,7 @@ const writes=f=>f.log.filter(x=>/^(fs\.(set|update|delete)|rt\.(set|update|remov
  assert.equal(Object.keys(out.docs).filter(k=>k.startsWith(ROOT+'/cases/')).length,3);
  assert.equal(Object.keys(out.docs).filter(k=>k.startsWith(ROOT+'/checkpoints/')).length,2);
  assert.equal(out.rt.active_units_gieogieo.j.n.unitBase,200,'RT đúng số sau hai lượt cân');
- assert(m.sections.employee_shifts.count>=6);assert.equal(m.inflight.measurementLocks,0);assert.match(m.sha256,/^[0-9a-f]{64}$/);
+ assert(m.sections.employee_shifts.count>=6);assert.equal(m.version,2);assert(!m.sections.stock_containers_ref?.missing,'v2: không đếm mã bill là thiếu tem');assert(Object.keys(out.docs).some(k=>k.startsWith(ROOT+'/obs/')),'v2: có quan sát học');assert.equal(m.inflight.measurementLocks,0);assert.match(m.sha256,/^[0-9a-f]{64}$/);
  assert(Object.values(out.docs).every(d=>!JSON.stringify(d).includes('"seconds"')));
  console.log('ok Xuất đủ: sổ gốc, tem liên quan (kể cả nhận trước kỳ), ca, giá, dụng cụ, Engine 2, RT tem đang mở; chỉ đọc');
 
