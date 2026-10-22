@@ -2,7 +2,7 @@
  * Tham số «hiệu chuẩn mô phỏng»: điểm xuất phát cho quán thật; cấp 6 tự kiểm / chỉnh (±5%/7 ngày) / quay lui khi có số liệu thật.
  * Bản đã phát hành bất biến: hiệu chuẩn lại sau deploy = unit_engine2_params_v2.js. */
 (function(root){'use strict';const P={
- "version": "sim-cb369cb1-v1",
+ "version": "sim-92af6868-v1",
  "origin": "calibrated_simulation",
  "kEscalate": 3.30625,
  "kClean": 1.275,
@@ -23,7 +23,7 @@
  },
  "cusum": {
   "k": 0.5,
-  "h": 2.8
+  "h": 3.5580999999999996
  },
  "flagLik": {
   "anomalyGivenSync": 0.9,
@@ -66,10 +66,10 @@
    "cai": 5,
    "other": 10
   },
-  "kCap": 5
+  "kCap": 2.3
  },
  "release": {
-  "validPoints": 8,
+  "validPoints": 7,
   "activeDays": 3,
   "minUsedRatio": 2,
   "daysBetween": 7
@@ -153,47 +153,47 @@
  "liveStep": 0.05,
  "parent": "prior-1",
  "record": {
-  "version": "sim-cb369cb1-v1",
+  "version": "sim-92af6868-v1",
   "parent": "prior-1",
   "mode": "sim",
-  "dataHash": "cb369cb1",
+  "dataHash": "92af6868",
   "window": {
    "from": "2026-01-05T20:00:00.000Z",
    "to": "2026-03-05T20:00:00.000Z",
-   "train": 20326,
-   "validation": 13552
+   "train": 20299,
+   "validation": 13534
   },
   "metricsBefore": {
-   "n": 33878,
-   "flags": 1162,
-   "falseAlarm": 44,
-   "falseAlarmRate": 0.0378657487091222,
+   "n": 33833,
+   "flags": 1131,
+   "falseAlarm": 41,
+   "falseAlarmRate": 0.036251105216622455,
    "missed": 10,
-   "trueAbnormal": 1533,
-   "missRate": 0.006523157208088715,
-   "minutes": 67886,
+   "trueAbnormal": 1544,
+   "missRate": 0.006476683937823834,
+   "minutes": 67630,
    "failures": 1,
-   "coverage90": 0.9189570635997666,
+   "coverage90": 0.9231289581259693,
    "runs": 144
   },
   "metricsAfter": {
-   "n": 33746,
-   "flags": 1062,
-   "falseAlarm": 4,
-   "falseAlarmRate": 0.003766478342749529,
+   "n": 33329,
+   "flags": 1041,
+   "falseAlarm": 3,
+   "falseAlarmRate": 0.002881844380403458,
    "missed": 10,
-   "trueAbnormal": 1540,
-   "missRate": 0.006493506493506494,
-   "minutes": 67401,
+   "trueAbnormal": 1525,
+   "missRate": 0.006557377049180328,
+   "minutes": 66136,
    "failures": 0,
-   "coverage90": 0.9156972285324128,
+   "coverage90": 0.9207748019649036,
    "runs": 144
   },
   "changes": [
    {
     "param": "baseline.kCap",
     "from": 3,
-    "to": 5
+    "to": 2.3
    },
    {
     "param": "kEscalate",
@@ -218,12 +218,12 @@
    {
     "param": "cusum.h",
     "from": 4,
-    "to": 2.8
+    "to": 3.5580999999999996
    },
    {
     "param": "release.validPoints",
     "from": 5,
-    "to": 8
+    "to": 7
    }
   ],
   "rollbackRef": "prior-1",
@@ -275,21 +275,19 @@
    110
   ],
   "holdoutMetrics": {
-   "n": 56356,
-   "flags": 1734,
-   "falseAlarm": 6,
-   "falseAlarmRate": 0.0034602076124567475,
-   "missed": 22,
-   "trueAbnormal": 2662,
-   "missRate": 0.008264462809917356,
-   "minutes": 112588,
-   "failures": 1,
-   "coverage90": 0.9189192211869098,
+   "n": 55671,
+   "flags": 1700,
+   "falseAlarm": 7,
+   "falseAlarmRate": 0.00411764705882353,
+   "missed": 28,
+   "trueAbnormal": 2659,
+   "missRate": 0.010530274539300489,
+   "minutes": 110320,
+   "failures": 0,
+   "coverage90": 0.9229829867230609,
    "runs": 240
   },
-  "holdoutFailures": [
-   "can_nhieu#106: báo sai 1.6% số quan sát > 1.5%"
-  ]
+  "holdoutFailures": []
  }
 };
 if(typeof module==='object'&&module.exports)module.exports=P;root.UnitEngine2Params=P;
