@@ -38,6 +38,7 @@ const CODES={
  MEASUREMENT_LEDGER_MISSING:['violation','Lượt cân thiếu hàng nhưng không có dòng hao hụt'],
  MEASUREMENT_LEDGER_MISMATCH:['violation','Dòng hao hụt của lượt cân khác chênh lệch đo'],
  TASK_BAD_STATUS:['violation','Việc có trạng thái không có trong đặc tả'],
+ CASE_BAD_STATUS:['violation','Hồ sơ có trạng thái không có trong đặc tả'],
  TASK_DONE_WITHOUT_RESULT:['violation','Việc báo xong nhưng không có kết quả cân hợp lệ'],
  TASK_STATE_INCONSISTENT:['violation','Việc kết thúc nhưng vẫn đánh dấu còn chờ'],
  LOCK_STALE:['violation','Khoá cân treo: lượt cân đã kết thúc hoặc không tồn tại'],
@@ -52,6 +53,7 @@ const CODES={
  UNIT_CHANGED_SINCE:['warning','Đơn vị nguyên liệu đổi sau mốc cân'],
  OPEN_SHIFT_IN_INTERVAL:['warning','Ca chưa check-out giao khoảng — không xác định chắc nhóm pha chế']
 };
+const CASE_STATUS=['new','checking','ready','decided','review','closed','voided','superseded'];
 const TASK_STATUS=['queued','claimed','in_progress','waiting_dependency','retry_wait','exception_recorded','done','superseded','cancelled'];
 const ms=v=>v&&typeof v.toMillis==='function'?v.toMillis():typeof v==='number'?v:Date.parse(v||'');
 const num=v=>v!==null&&v!==undefined&&String(v).trim()!==''&&Number.isFinite(Number(v));
@@ -78,6 +80,7 @@ function check(snap){
  for(const c of cases){
   const ref='cases/'+c.id;
   if(c.storeId!==store||(c.sourcePath&&!String(c.sourcePath).startsWith(txPrefix)))add('STORE_MISMATCH',ref,{storeId:c.storeId,sourcePath:c.sourcePath});
+  if(c.status!==undefined&&!CASE_STATUS.includes(c.status))add('CASE_BAD_STATUS',ref,{status:c.status});
   if(!active(c))continue;
   if(!bySource.has(c.sourceId))bySource.set(c.sourceId,[]);bySource.get(c.sourceId).push(c);
   const s=S[c.sourceId];

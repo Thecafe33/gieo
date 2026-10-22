@@ -60,7 +60,7 @@ async function replay(dump){
    const quantity=E.round(-Number(t.qty)),valuation=priceOf(prices,t.itemId,t.businessDate,t),amount=valuation.status==='known'?valuation.amount:null;
    const q=E.split(quantity,g.people.map(p=>p.id)),money=amount===null?null:E.split(amount,g.people.map(p=>p.id));
    const caseId=E.key('finish',t.id),decisionId=caseId+'_replay';
-   const d={schemaVersion:1,policyVersion:E.POLICY,storeId:store,status:'decided',decisionMode:'auto',basis:'policy_equal_share',mode:'replay',originKind:'finish',originId:t.id,
+   const flow=E.caseFlow(null,'decided'),d={schemaVersion:1,policyVersion:E.POLICY,storeId:store,status:flow.status,statusEvents:flow.events,decisionMode:'auto',basis:'policy_equal_share',mode:'replay',originKind:'finish',originId:t.id,
     id:caseId,decisionId,sourceId:t.id,sourcePath:name('stock_transactions')+'/'+t.id,containerId:c.id,containerCode:c.code||'',itemId:t.itemId,itemName:c.itemName||items[t.itemId]?.name||t.itemId,unit:c.unit||items[t.itemId]?.unit||'',
     quantity,valuation,amount,interval:range,intervalStart:cp?cp.quality:'opened_at',shiftIds:g.shiftIds,businessDate:t.businessDate,matchedBy:byId?'id':byNote?'note':'time',
     allocations:q.map((p,i)=>({employeeId:p.employeeId,employeeName:g.people.find(e=>e.id===p.employeeId).name,qty:p.value,value:money?money[i].value:null,basis:'policy_equal_share',roleBasis:g.people.find(e=>e.id===p.employeeId).roleBasis})),

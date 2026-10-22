@@ -67,10 +67,11 @@ const writes=f=>f.log.filter(x=>/^(fs\.(set|update|delete)|rt\.(set|update|remov
  const kinds=[...X.CATALOG,...X.BY_DAY,'employee_shifts','duty_digests'];
  for(const store of ['gg01','gg02'])for(const k of kinds){
   const want=GieoData.fsName(k+'_gieogieo',store);
-  assert.equal(X.physName(k,store),want,'xuất '+k+'@'+store);assert.equal(A.collName(k,store),want,'kiểm toán '+k+'@'+store);
+  assert.equal(X.physName(k,store),want,'xuất '+k+'@'+store);assert.equal(require('../unit_engine2_v1').tableName(k,store),want,'lõi/worker '+k+'@'+store);assert.equal(A.collName(k,store),want,'kiểm toán '+k+'@'+store);
  }
  for(const k of X.SHARED)assert.equal(GieoData.fsName(k+'_gieogieo','gg02'),k+'_gieogieo','SHARED '+k+' phải là bảng dùng chung');
- assert.deepEqual(A.SHARED,X.SHARED);
+ assert.deepEqual(A.SHARED,X.SHARED);assert.deepEqual(require('../unit_engine2_v1').SHARED,X.SHARED);
+ for(const store of ['gg01','gg02'])for(const k of X.SHARED)assert.equal(require('../unit_engine2_v1').tableName(k,store),GieoData.fsName(k+'_gieogieo',store));
  console.log('ok Tên bảng theo quán khớp data_access (gg02: price_history/prep_vessels dùng chung, sổ/tem/ca có hậu tố)');
  console.log('ALL PASS');
 })().catch(e=>{console.error(e);process.exit(1)});

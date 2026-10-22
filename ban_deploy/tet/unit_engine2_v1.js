@@ -10,6 +10,9 @@ const finite=v=>v!==null&&v!==undefined&&String(v).trim()!==''&&Number.isFinite(
 const stable=v=>v===undefined?'null':v===null||typeof v!=='object'?JSON.stringify(v):Array.isArray(v)?'['+v.map(stable).join(',')+']':'{'+Object.keys(v).sort().map(k=>JSON.stringify(k)+':'+stable(v[k])).join(',')+'}';
 function storeId(id){if(!/^gg\d{2}$/.test(id))throw Error('Engine2: điểm bán không hợp lệ');return id;}
 function collection(kind,id){storeId(id);return kind+'_gieogieo'+(id==='gg01'?'':'__'+id);}
+// Bảng DÙNG CHUNG mọi quán (loại G trong data_access) — không thêm hậu tố quán. Test đối chiếu GieoData.REG.
+const SHARED=['price_history','prep_vessels','employees','recipes','recipe_history','prep_recipe_history','special_days'];
+function tableName(kind,id){storeId(id);return SHARED.includes(kind)?kind+'_gieogieo':collection(kind,id);}
 const rootPath=id=>collection('duty_digests',id)+'/_engine2';
 async function digest(value){const crypto=root.crypto||(typeof require==='function'?require('node:crypto').webcrypto:null);if(!crypto?.subtle)throw Error('Chưa có công cụ xác định mã thao tác');const b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(String(value)));return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('');}
 function key(...parts){return parts.map(x=>encodeURIComponent(String(x))).join('~');}
@@ -81,28 +84,47 @@ function measuredDecision(input){
 }
 function transition(kind,state,event){
  if(!states[kind]?.includes(state))throw Error('Engine2: trạng thái không hợp lệ');
- if(event==='RETRY'||event==='LATE_ACK')return state;
+ // Bảng theo DAC_TA 3.2–3.4 (test tích Descartes tests/unit_engine2_fsm.test.js). Trùng / đến muộn → không đổi trạng thái.
+ if(event==='RETRY'||event==='LATE_ACK'||event==='LATE_EVENT')return state;
  const table=kind==='case'?{
-  SOURCE_UPSERT:{new:'checking'},EVIDENCE_READY:{checking:'ready'},EVIDENCE_MISSING:{checking:'checking'},DECIDE:{ready:'decided'},RESULTS_CONFIRMED:{decided:'closed'},
+  CHECK_START:{new:'checking'},EVIDENCE_READY:{checking:'ready'},EVIDENCE_MISSING:{checking:'checking'},DUE:{checking:'checking'},DECIDE:{ready:'decided'},RESULTS_CONFIRMED:{decided:'closed'},
   CONTEST:{decided:'review',closed:'review'},REVIEW_RESULT:{review:'decided'},REVIEW_DUE:{review:'review'},SOURCE_CORRECTED:{checking:'checking',ready:'checking',decided:'checking',closed:'checking',review:'review'},
   SOURCE_REMOVED:{new:'checking',checking:'checking',ready:'checking',decided:'checking',closed:'checking',review:'review'},RESTORE_SOURCE:{voided:'checking'}
  }:{CLAIM:{queued:'claimed',retry_wait:'claimed'},START:{claimed:'in_progress'},NEED_INPUT:{claimed:'waiting_dependency',in_progress:'waiting_dependency'},DEPENDENCY_READY:{waiting_dependency:'queued'},
-  TRANSIENT_FAILURE:{claimed:'retry_wait',in_progress:'retry_wait'},LEASE_EXPIRED:{claimed:'retry_wait',in_progress:'retry_wait'},VALID_RESULT:{in_progress:'done'},RECOVERY:{exception_recorded:'queued'},NEXT_SHIFT:{exception_recorded:'queued'}};
+  TRANSIENT_FAILURE:{claimed:'retry_wait',in_progress:'retry_wait'},LEASE_EXPIRED:{claimed:'retry_wait',in_progress:'retry_wait'},VALID_RESULT:{in_progress:'done'},RECOVERY:{exception_recorded:'queued'},NEXT_SHIFT:{exception_recorded:'queued'},DUE:{exception_recorded:'queued'}};
  if(event==='EXPLICIT_VOID'&&kind==='case'&&!['voided','superseded'].includes(state))return 'voided';
  if(event==='CASE_MERGED'&&kind==='case'&&state!=='superseded')return 'superseded';
  if(kind==='task'&&event==='HANDOVER_EXIT_WITH_EXCEPTION'&&!['done','superseded','cancelled'].includes(state))return 'exception_recorded';
  if(kind==='task'&&['NEW_REVISION','VALID_VOID'].includes(event)&&!['done','superseded','cancelled'].includes(state))return event==='VALID_VOID'?'cancelled':'superseded';
  const result=table[event]?.[state];if(!result)throw Error('INVALID_TRANSITION: '+kind+'/'+state+'/'+event);return result;
 }
+// Đi qua từng bước; bước nào sai bảng thì ném INVALID_TRANSITION (không «đánh dấu xong» âm thầm).
+function path(kind,state,events){let s=state;for(const e of events)s=transition(kind,s,e);return s;}
+// Hồ sơ hao hụt: trạng thái mới khi worker chốt kết quả (outcome 'decided' | 'voided') — chưa có hồ sơ thì bắt đầu từ 'new'.
+function caseFlow(old,outcome){
+ const from=old||'new';
+ if(outcome==='voided'){const events=from==='voided'?[]:['EXPLICIT_VOID'];return {status:path('case',from,events),events};}
+ if(from==='review')return {status:path('case',from,['SOURCE_CORRECTED']),events:['SOURCE_CORRECTED'],hold:true};
+ const events=from==='new'?['CHECK_START','EVIDENCE_READY','DECIDE']:from==='voided'?['RESTORE_SOURCE','EVIDENCE_READY','DECIDE']:from==='checking'?['EVIDENCE_READY','DECIDE']:['SOURCE_CORRECTED','EVIDENCE_READY','DECIDE'];
+ return {status:path('case',from,events),events};
+}
+// Việc cân: bắt đầu thực hiện từ trạng thái hiện tại (nhận việc + bắt đầu, qua đúng các bước đặc tả).
+function taskStart(state){
+ const pre={queued:[],retry_wait:[],exception_recorded:['RECOVERY'],waiting_dependency:['DEPENDENCY_READY'],claimed:null,in_progress:null}[state];
+ if(state==='in_progress')return {status:'in_progress',events:[]};
+ const events=pre===null?['START']:[...(pre||[]),'CLAIM','START'];return {status:path('task',state,events),events};
+}
 function control(previous,event,evidence={}){
  const p=previous||{level:0,manualFloor:0},floor=Math.max(0,Math.min(3,Number(p.manualFloor)||0));let level=Math.max(floor,Number(p.level)||0);
  if(event==='NEED_BASELINE')level=Math.max(level,1);
  else if(event==='PHYSICAL_LOSS')level=Math.max(level,2);
- else if(event==='MEASUREMENT_CONFLICT')level=3;
+ else if(event==='MEASUREMENT_CONFLICT'){if(level<1)throw Error('INVALID_CONTROL_EVENT: MEASUREMENT_CONFLICT cần món đang được kiểm soát (mức ≥ 1)');level=3;}
+ // Đổi cấu hình / công thức / cách đo: giữ mức (không xoá rủi ro); cần mốc mới thì tối thiểu M1.
+ else if(['CONFIG_CHANGED','RECIPE_CHANGED','MEASUREMENT_CHANGED'].includes(event)){if(evidence.requireCheckpoint===true)level=Math.max(level,1);}
  else if(event==='CLEAN_WINDOW_PASSED'){
   // Automatic release is disabled until calibrated criteria have been explicitly configured.
   if(evidence.releaseEnabled===true&&evidence.validPoints>=5&&evidence.activeDays>=3&&evidence.usedEnough===true&&evidence.pending===0&&evidence.ackComplete===true&&evidence.daysSinceLastRelease>=7)level=Math.max(floor,level-1);
- }else if(!['ACK','OFFLINE','NO_ACTIVITY','EXCEPTION','MANUAL_FLOOR_SET'].includes(event))throw Error('INVALID_CONTROL_EVENT');
+ }else if(!['ACK','TASK_RESULT','DUE','OFFLINE','NO_ACTIVITY','EXCEPTION','MANUAL_FLOOR_SET'].includes(event))throw Error('INVALID_CONTROL_EVENT');
  return {...p,level,manualFloor:floor};
 }
 function measurement(lines,item){
@@ -122,6 +144,6 @@ function outbox(storage,store){
  const read=()=>{const value=JSON.parse(storage.getItem(name)||'[]');if(!Array.isArray(value)||value.some(x=>x.storeId!==store))throw Error('Bộ nhớ công việc cần kiểm tra');return value;};
  return {read,put(command){if(!command.id||!['measurement','exception','close_exception'].includes(command.kind))throw Error('Lệnh lưu không hợp lệ');const rows=read();if(rows.some(x=>x.id===command.id))return;if(rows.length>=100)throw Error('Bộ nhớ công việc đã đầy; kết nối để đồng bộ trước');storage.setItem(name,JSON.stringify([...rows,{...command,storeId:store}]));},remove(id){storage.setItem(name,JSON.stringify(read().filter(x=>x.id!==id)));}};
 }
-const api={VERSION,POLICY,DAY,states,ms,finite,stable,storeId,collection,rootPath,key,digest,round,split,isBarista,group,interval,decision,measuredDecision,audit,transition,control,measurement,outbox};
+const api={VERSION,POLICY,DAY,states,ms,finite,stable,storeId,collection,SHARED,tableName,rootPath,key,digest,round,split,isBarista,group,interval,decision,measuredDecision,audit,transition,path,caseFlow,taskStart,control,measurement,outbox};
 if(typeof module==='object'&&module.exports)module.exports=api;root.UnitEngine2=api;
 })(typeof window!=='undefined'?window:globalThis);

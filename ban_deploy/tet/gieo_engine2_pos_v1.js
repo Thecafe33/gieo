@@ -117,7 +117,7 @@ async function showCloseSummary(){
 }
 async function resumeClose(){
  if(!continuation||!service)return;let s;try{const cfg=await service.config(),extra=(cfg.controlledItemIds||[]).filter(id=>!closeItemIds.includes(id));if(extra.length){closeItemIds.push(...extra);await service.ensureCloseTasks(posDateKey(),closeCycle,extra);await showCloseSummary();toast('Có nguyên liệu vừa được bật cân. Kiểm tra việc mới trước khi bàn giao.');return;}s=await service.sub('tasks').where('closeCycle','==',closeCycle).get({source:'server'});}catch(e){toast('Chưa đọc được kết quả. Ghi sự cố để tiếp tục bàn giao.');return;}
- if(s.docs.length<closeItemIds.length||s.docs.some(d=>!['done','exception_recorded','in_progress'].includes(d.data().status))){toast('Còn việc chưa cân. Mở từng việc để cân hoặc ghi tình trạng bàn giao.');return;}
+ if(s.docs.length<closeItemIds.length||s.docs.some(d=>!['done','superseded','exception_recorded','in_progress'].includes(d.data().status))){toast('Còn việc chưa cân. Mở từng việc để cân hoặc ghi tình trạng bàn giao.');return;}
  const next=continuation;continuation=null;phaseHandoff=true;close(false);await next();
 }
 async function resumeWithException(){

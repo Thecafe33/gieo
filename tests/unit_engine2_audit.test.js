@@ -66,6 +66,7 @@ const weighCases=FS=>casesOf(FS).filter(([,d])=>d.originKind==='measurement').so
   ['dòng hao hụt khác chênh lệch đo',FS=>{const [,d]=weighCases(FS)[0];FS[d.sourcePath].qty=-45;},'MEASUREMENT_LEDGER_MISMATCH'],
   ['việc báo xong không có kết quả',FS=>{const k=Object.keys(FS).find(p=>p.startsWith(ROOT+'/tasks/')&&FS[p].status==='done');delete FS[ROOT+'/measurements/'+FS[k].resultRef.split('/').pop()];},'TASK_DONE_WITHOUT_RESULT'],
   ['việc xong vẫn còn chờ',FS=>{const k=Object.keys(FS).find(p=>p.startsWith(ROOT+'/tasks/')&&FS[p].status==='done');FS[k].pending=true;},'TASK_STATE_INCONSISTENT'],
+  ['trạng thái hồ sơ lạ',FS=>{const [p]=finishCase(FS);FS[p].status='resolved';},'CASE_BAD_STATUS'],
   ['trạng thái việc lạ',FS=>{const k=Object.keys(FS).find(p=>p.startsWith(ROOT+'/tasks/'));FS[k].status='resolved';},'TASK_BAD_STATUS'],
   ['khoá cân treo',FS=>{const [,d]=weighCases(FS)[0];FS[ROOT+'/measurement_locks/j']={measurementId:d.originId};},'LOCK_STALE'],
   ['mức kiểm soát dưới sàn',FS=>{FS[ROOT+'/controls/j'].manualFloor=3;},'CONTROL_BELOW_FLOOR'],

@@ -34,7 +34,7 @@ Trạng thái: ✅ có runtime + test · 🟡 có một phần · ⬜ chưa làm
 | Cấp | Cửa nghiệm thu (đo được) | Trạng thái 22/10 |
 |---|---|---|
 | 1 — Ghi đủ | Bộ kiểm độc lập: 0 vi phạm chưa giải trình về một nguồn tổn thất, tổng phân bổ + pending = nguồn, không WASTE đúp, đúng `storeId`; replay 30 ngày đường tương thích khớp sổ | ✅ gg01 52 ngày thật: kiểm toán độc lập 0/0 trên 46 hồ sơ chạy lại; hao hụt khớp sổ lãi/lỗ (0 ngày lệch); tem = sự thật 38/38 (B2) |
-| 2 — Luật | Cùng dữ liệu + phiên bản → cùng quyết định (replay); bảng FSM kiểm **mọi cặp** trạng thái × sự kiện; control không lan quán | 🟡 Test tích Descartes 335 cặp đã có: **33 lệch code ↔ đặc tả chờ quyết** (mục 3, B0). Store chưa đi qua `transition()`. Chưa replay |
+| 2 — Luật | Cùng dữ liệu + phiên bản → cùng quyết định (replay); bảng FSM kiểm **mọi cặp** trạng thái × sự kiện; control không lan quán | ✅ 22/10: FSM 335 cặp **0 lệch** đặc tả (33 lệch cũ sửa theo đặc tả — chủ quán duyệt); store ghi trạng thái qua `caseFlow`/`taskStart`/`transition` (lưu `statusEvents`); chạy lại = quyết định runtime; quán gg02 dùng đúng bảng dùng chung (`E.tableName`) |
 | 3 — Học mức thường | Baseline theo món/quán (gộp tầng, mục 4) với khoảng bất định; kiểm ngoài thời gian học; tách «đang học» / «đủ tin cậy» | ⬜ Chưa thu mẫu M0 ngẫu nhiên |
 | 4 — Suy luận (giả thuyết kiểm được) | Xác suất cho 4 nhóm giả thuyết kiểm được, đối chiếu nhãn M3/vật mẫu/kiểm bì; Brier/reliability báo kèm cỡ mẫu; phần dư không in % | ⬜ |
 | 5 — Vòng kín | Event → quyết định → POS ACK → đo → đối soát → **tự hạ mức** theo tiêu chí đã kiểm định; mất ACK/retry phục hồi | 🟡 Nâng mức + giao cân + ACK + mốc mới chạy được; tự hạ đang **tắt** (`releaseEnabled`) |
@@ -71,10 +71,12 @@ Mỗi bước chỉ bắt đầu khi bước trước đạt cửa. Bước có 
 - Sửa engine đã phát hành = bản mới (`unit_engine2_v2.js` …), không sửa v1.
 - Cửa: sau ≥ 14 ngày có hoạt động, bộ kiểm B0 chạy trên dữ liệu thật, 0 vi phạm chưa giải trình.
 
-**B2 — Công cụ xuất manifest đủ + replay 30 ngày (✅ 22/10 trên dữ liệu thật 52 ngày; cấp 1 đạt; cấp 2 chờ quyết FSM).**
+**B2 — Công cụ xuất manifest đủ + replay 30 ngày (✅ 22/10 trên dữ liệu thật 52 ngày; cấp 1 + cấp 2 đạt).**
 - Xuất theo mục 7.2 đặc tả: raw stock/prep ledger có ID, tem có `containerId`, RT `active_units`, ca/role lịch sử, lịch sử giá/bì/công thức, điểm cắt FS–RT. Thao tác bấm rõ, có giới hạn, không quét nền POS.
 - Replay hai đường (tương thích / chính sách mới). Không đủ nguồn → `BLOCKED_DATA`, không «PASS dự kiến».
 - Cửa: cấp 1–2 family 1 đạt → **chứng nhận cấp 2**.
+
+**Chủ quán 22/10 — mục tiêu cấp 6, «lường trước»:** dựng bộ MÔ PHỎNG nhiều kịch bản có sự thật biết trước (kể cả case chưa từng xảy ra ở quán), hiệu chuẩn ban đầu trên đó; tham số đánh dấu «hiệu chuẩn mô phỏng» — điểm xuất phát, cấp 6 tự kiểm / chỉnh / quay lui khi có số liệu thật.
 
 **Thứ tự đổi (chủ quán duyệt 22/10): B2 làm TRƯỚC B1** — xuất lịch sử thật để chạy lại/kiểm toán thay phần lớn thời gian đối chiếu thử; dữ liệu học cấp 3–6 chỉ sinh khi chạy tự động (đối chiếu thử không giao việc cân nên gần như không sinh mẫu).
 
@@ -98,7 +100,7 @@ Mỗi bước chỉ bắt đầu khi bước trước đạt cửa. Bước có 
   - **Tem = sự thật: 38/38 NL theo tem khớp** (công thức `_ueRecomputeCurrentStock` v21: tem nguyên trừ tem đã có RT + RT bỏ chờ huỷ + mở thiếu RT + bù `_ueRtStale`).
   - Phát hiện vốn có: sổ lãi/lỗ không lọc WASTE `voided` (dữ liệu này không có dòng nào) — công cụ ghi thành phát hiện, test giữ. Không sửa sổ lãi/lỗ (ngoài phạm vi).
   - (Phép cộng thô «233 tem lệch» lượt trước là SAI phương pháp — bỏ.)
-- **Trạng thái cấp — family NL có tem, gg01, 1/9–22/10:** cấp 1 **ĐẠT** (kiểm toán độc lập 0/0 trên hồ sơ chạy lại; hao hụt + tồn khớp sổ). Cấp 2 **còn chờ**: 33 lệch code ↔ đặc tả FSM (B0) chưa quyết, store chưa đi qua `transition()`; P0 `finish`/`bootstrap` chỉ nhận mã `finish_<tem>_WASTE` (báo hết từ nay đều mã mới; lịch sử cũ chỉ cần cho chạy lại).
+- **Trạng thái cấp — family NL có tem, gg01, 1/9–22/10:** cấp 1 **ĐẠT** (kiểm toán độc lập 0/0 trên hồ sơ chạy lại; hao hụt + tồn khớp sổ). Cấp 2 **ĐẠT (22/10)**: FSM khớp đặc tả, store đi qua máy trạng thái (việc bị lượt cân khác phủ → `superseded`, từ chối sau khi bắt đầu → `retry_wait`; POS đóng ca chấp nhận `superseded`), lỗi worker tên bảng dùng chung ở quán ≠ gg01 đã sửa ở lõi (`E.tableName`, store mặc định). P0 `finish`/`bootstrap` chỉ nhận mã `finish_<tem>_WASTE` — đủ cho dữ liệu từ nay.
 - **Phát hiện ngoài phạm vi (chưa sửa — chờ quyết):** worker `functions/automation/engine2.js` tạo store Engine 2 **không truyền hàm đặt tên bảng** → ở quán ≠ gg01 đọc `prep_vessels_gieogieo__ggNN` / `price_history_gieogieo__ggNN` (không tồn tại, đó là bảng dùng chung) → mọi lượt cân bị từ chối «Dụng cụ hoặc bì đã thay đổi», giá thành «chưa đủ giá». POS / quanlygieo2 đúng (dùng `GieoData.collFor`). gg01 không bị.
 
 **B3 — Cấp 3: baseline NL có tem.** Phương pháp mục 4. Cửa: dự báo trên tuần chưa học nằm trong khoảng bất định đã công bố; một mẻ/khoảng lỗi không kéo lệch baseline (kiểm bằng lỗi cài).
