@@ -279,7 +279,7 @@ Mỗi dòng ma trận A/B/F/D/T/C là một nhóm fixture có input events, star
 | 4 — Học/kiểm toán | Đã có phân lớp nhãn, chỉ số, giới hạn và các mốc thử đề xuất | Chưa có model/nhãn đủ/đánh giá; chưa thể chứng nhận cấp 4–6 |
 | 5 — Chuyển tiếp/kiểm thử | Đã đối chiếu POS/QL, ranh giới AST và writer chính; đặc tả fence/replay | Chưa có fence Engine2, feature flags chuyển family, replay hay rollout sản xuất |
 
-Điểm “chưa đọc POS” đã được xử lý đối với các đường chính trong bảng writer. **Tài liệu đã đủ để bắt đầu triển khai lõi và luồng P0.** Các quyền dữ liệu dùng cơ chế hiện có; không thêm câu hỏi ai chịu khi thiếu nhóm pha chế hoặc yêu cầu chủ thiết kế cấp quản lý khác. Dữ liệu đầy đủ, replay và kiểm chứng cấp 6 là công việc nghiệm thu trong quá trình xây dựng. Hiện vẫn giữ yêu cầu chưa code; khi được yêu cầu triển khai sẽ viết runtime/mapper/tests theo đặc tả.
+Điểm “chưa đọc POS” đã được xử lý đối với các đường chính trong bảng writer. **Tài liệu đã đủ để bắt đầu triển khai lõi và luồng P0.** Các quyền dữ liệu dùng cơ chế hiện có; không thêm câu hỏi ai chịu khi thiếu nhóm pha chế hoặc yêu cầu chủ thiết kế cấp quản lý khác. Dữ liệu đầy đủ, replay và kiểm chứng cấp 6 là công việc nghiệm thu trong quá trình xây dựng. Sau yêu cầu bắt đầu, đã triển khai [runtime P0 và kiểm thử](UNIT_ENGINE2_P0_22-10.md). Bảng trên giữ mốc thiết kế ban đầu; nghiệm thu đầy đủ của năm sản phẩm vẫn phải đạt các cửa còn lại.
 
 ## 9. Bằng chứng đọc và kiểm cục bộ
 

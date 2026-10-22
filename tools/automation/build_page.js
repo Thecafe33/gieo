@@ -5,8 +5,8 @@ for(const name of ['renderStoreHealth','renderAlertInbox','renderTodayHealthInbo
  if(!s.includes('function '+name+'('))throw Error('Thiếu điểm ghép '+name);
  s=s.replace('function '+name+'(','function '+name+'Legacy(');
 }
-s=s.replace('<script src="unit_engine.v20.js"></script>','<script src="unit_engine.v20.js"></script>\n<script src="gieo_automation.v3.js"></script>');
+s=s.replace('<script src="unit_engine.v21.js"></script>','<script src="unit_engine.v21.js"></script>\n<script src="gieo_automation.v3.js"></script>\n<script src="unit_engine2_v1.js"></script>\n<script src="unit_engine2_store_v1.js"></script>');
 s=s.replace('</style>',fs.readFileSync(path.join(__dirname,'ui.css'),'utf8')+'</style>');
-s=s.replace('</body>','<script>\n'+fs.readFileSync(path.join(__dirname,'ui.js'),'utf8')+'\n</script>\n</body>');
+s=s.replace('</body>','<script>\n'+fs.readFileSync(path.join(__dirname,'ui.js'),'utf8')+'\n'+fs.readFileSync(path.join(__dirname,'engine2_ui.js'),'utf8')+'\n</script>\n</body>');
 s=s.replace('Chịu trách nhiệm: người báo</span>',"Người ghi nhận: ${escapeHtmlAttr(t.staff||'Chưa rõ')}</span>");
 fs.writeFileSync(path.join(root,'quanlygieo2.html'),s);

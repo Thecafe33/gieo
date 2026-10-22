@@ -1,3 +1,7 @@
+# 22/10 — Engine 2: runtime P0 đã triển khai
+
+[Luồng đầu, kiểm thử và giới hạn](UNIT_ENGINE2_P0_22-10.md): báo hết còn dư → phân bổ pha chế theo khoảng → yêu cầu cân M2 → POS ghi số đo → mốc mới. Adapter v21 giữ một writer kho, receipt chống ghi lại khi mất ACK, queue/fence theo quán và projection hộp thư. Mặc định chưa bật; chưa deploy, chưa ghi Firebase thật. Học/hiệu chuẩn/auditor toàn sổ/replay raw và mở rộng các family vẫn ở lộ trình, chưa chứng nhận cấp 6. Các mục bên dưới là lịch sử trước triển khai.
+
 # 22/10 — Đủ tài liệu bắt đầu Engine 2; ca luôn có pha chế
 
 Chủ quán xác nhận không có tình huống vận hành thiếu nhóm pha chế. Đã bỏ yêu cầu thiết kế tuyến trưởng ca/vận hành khu vực và câu hỏi ai chịu khi không có nhóm. Engine tự lấy nhóm lịch sử để phân bổ; việc đo giao pha chế hiện tại, việc dở sang ca sau, không đổi người chịu khoản trước. Lỗi đọc/nối ca là lỗi kỹ thuật phải phục hồi. Đủ tài liệu để bắt đầu lõi/P0; dữ liệu replay và chứng nhận cấp 6 được kiểm trong quá trình xây dựng. Chưa code runtime theo yêu cầu hiện tại.

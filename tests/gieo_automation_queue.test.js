@@ -28,7 +28,7 @@ function fixture(){const f=makeFake({fs:{[configPath('gg01')]:{enabled:true,mode
  const c={status:'pending_verify',revision:1,value:20,variance:-2};const task={status:'open',caseId:'c',prepId:'p',expireAt:'2026-10-01',firstAt:'2026-09-29'};
  for(const store of ['gg01','gg02']){await f.fstore.doc(A.collection('duty_cases',store)+'/c').set(c);await f.fstore.doc(A.collection('duty_tasks',store)+'/t').set(task);await f.worker.processSource(store,'duty_tasks','t');}
  assert.equal(f.FS['duty_cases_gieogieo/c'].status,'pending_verify');assert.equal(f.FS['duty_cases_gieogieo__gg02/c'].status,'closed_pool');
- assert.equal(f.getEngine('gg01').VERSION,'20.0.0');
+ assert.equal(f.getEngine('gg01').VERSION,'21.0.0');
  console.log('ok Engine Node tách quán, shadow không đổi nghiệp vụ, active xử lý hạn bằng Engine');
  // Controlled failure remains retryable; a later retry may complete.
  const data={status:'pending_review',amount:5};await f.fstore.doc('expenses_gieogieo/e').set(data);const j=await f.queue.enqueue('gg01','expenses','e',null,data);

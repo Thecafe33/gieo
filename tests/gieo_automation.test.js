@@ -79,7 +79,7 @@ function fixture(){
  const html=fs.readFileSync(path.join(__dirname,'../quanlygieo2.html'),'utf8');
  const originalHTML=fs.readFileSync(path.join(__dirname,'../quanlygieo.html'),'utf8');
  const scripts=h=>[...h.matchAll(/<script\b[^>]*\bsrc="([^"]+)"/g)].map(m=>m[1]);
- assert.deepEqual(scripts(html).filter(x=>x!=='gieo_automation.v3.js'),scripts(originalHTML));
+ assert.deepEqual(scripts(html).filter(x=>!['gieo_automation.v3.js','unit_engine2_v1.js','unit_engine2_store_v1.js'].includes(x)),scripts(originalHTML));
  const acorn=require('acorn');for(const m of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi))if(!/src=|application\/ld\+json/.test(m[1]))acorn.parse(m[2],{ecmaVersion:'latest',allowReturnOutsideFunction:true});
  assert(fs.readFileSync(path.join(__dirname,'../gieo_automation.v3.js')).equals(fs.readFileSync(path.join(__dirname,'../functions/automation/shared/gieo_automation.v3.js'))));
  console.log('ok quanlygieo2 dùng đúng JS hiện tại, chính sách server/browser giống nhau, HTML hợp lệ');

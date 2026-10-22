@@ -1,6 +1,6 @@
 # Unit Engine 2 — thiết kế v1, 22/10/2026
 
-Trạng thái: **thiết kế, chưa viết runtime hoặc chuyển POS sang Engine 2**. Tiếp nối yêu cầu bàn phương án trước khi code. File dự kiến `unit_engine2_v1.js`, API `UnitEngine2`; bản sau tăng thành `unit_engine2_v2.js`, không sửa bản đã phát hành.
+Trạng thái mới: **runtime P0 đã triển khai sau lệnh bắt đầu của chủ quán**, xem [kết quả và giới hạn](UNIT_ENGINE2_P0_22-10.md). Chưa deploy/chưa chứng nhận cấp 6. Phần dưới là thiết kế đích; `unit_engine2_v1.js`, API `UnitEngine2`; bản sau tăng version, không sửa bản đã phát hành.
 
 ## Mục tiêu đã chốt
 
@@ -12,7 +12,7 @@ Không tạo kho, bill hoặc P&L thứ hai. Quanlygieo2 và POS dùng cùng k�
 
 Hai trục phải tách riêng: cấp năng lực 1–6 của hệ thống và mức kiểm soát của từng món/từng quán. Mô hình nguyên nhân không thay chính sách trách nhiệm đã chốt; học một mức hao hụt thường xuyên không được biến nó thành lượng mất được miễn ghi nhận. Hiệu chuẩn chỉ đổi tham số được phép trong giới hạn, có phiên bản/quay lui; không tự sửa lịch sử tổn thất hoặc trừ lương.
 
-Đã bổ sung [đặc tả năm sản phẩm triển khai](DAC_TA_TRIEN_KHAI_UNIT_ENGINE2_V1.md): schema, ba máy trạng thái, writer theo nghiệp vụ, học/kiểm toán và manifest replay; [15 ngoại lệ](NGOAI_LE_UNIT_ENGINE2_DE_XUAT.md) đã làm rõ theo xác nhận ca luôn có pha chế. Công việc đo giao cho pha chế hiện tại, việc dở chuyển ca sau; trách nhiệm vẫn theo nhóm lịch sử. Đủ tài liệu để bắt đầu lõi/P0. Tệp gọn 48 ngày chưa đủ chứng nhận replay đầy đủ; chưa viết mapper hoặc runtime.
+Đã bổ sung [đặc tả năm sản phẩm triển khai](DAC_TA_TRIEN_KHAI_UNIT_ENGINE2_V1.md): schema, ba máy trạng thái, writer theo nghiệp vụ, học/kiểm toán và manifest replay; [15 ngoại lệ](NGOAI_LE_UNIT_ENGINE2_DE_XUAT.md) đã làm rõ theo xác nhận ca luôn có pha chế. Công việc đo giao cho pha chế hiện tại, việc dở chuyển ca sau; trách nhiệm vẫn theo nhóm lịch sử. Đủ tài liệu để bắt đầu lõi/P0. Tệp gọn 48 ngày chưa đủ chứng nhận replay đầy đủ; mapper/replay đầy đủ chưa có; runtime P0 hiện có phạm vi trong tài liệu kết quả.
 
 ## Đối chiếu phần hiện có
 

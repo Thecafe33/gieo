@@ -4,6 +4,7 @@ const A=require('./shared/gieo_automation.v3.js');
 const hash=x=>crypto.createHash('sha256').update(A.stable(x)).digest('hex');
 const key=(kind,id)=>hash([kind,id]);
 const {readError,writeError,setError}=require('./errors');
+const E2=require('./shared/unit_engine2_v1');
 const rootPath=store=>A.collection('duty_digests',store)+'/_automation';
 const configPath=store=>A.collection('duty_digests',store)+'/_automation_config';
 const BOOTSTRAP=[
@@ -63,6 +64,13 @@ function createWorker(db,opts={}){
    const aliasSnap=aliasRef?await tx.get(aliasRef):null;
    const alias=aliasSnap?.exists?aliasSnap.data():null;
    let decision=A.task(actualKind,actualId,data,cfg,now(),related),parts=null;
+   if(actualKind==='stock_containers'&&data?.status==='finished'&&data.needsReview){
+    const proof=await tx.get(db.doc(E2.rootPath(store)+'/cases/'+E2.key('finish','finish_'+actualId+'_WASTE')));
+    if(proof.exists&&proof.data().mode==='active'&&proof.data().status==='decided'){
+     const settings=await tx.get(db.doc(E2.rootPath(store))),e=proof.data(),s=settings.exists?settings.data():{};
+     if(s.enabled&&s.mode==='active'&&s.fleetConfirmed&&s.protocolVersion===1){related.engine2DecisionId=e.decisionId;decision={...decision,group:'done',state:'recorded',resultStatus:e.decisionMode==='manual'?'manual':'allocated',rule:'ENGINE2_RESULT',nextCheckAt:0,assigneeId:'',assigneeName:'',reason:'Engine 2 đã ghi phân bổ theo khoảng pha chế và giao cân tự động tại POS. Xem căn cứ trong Engine 2; không ghi hao hụt hoặc thu tiền lần hai.',engine2CaseId:proof.id};}
+    }
+   }
    if(canonicalKind==='waste'){
     parts={...(old?.parts||{})};
     const partId=key(actualKind,actualId);
