@@ -2,12 +2,13 @@
  * Tham số «hiệu chuẩn mô phỏng»: điểm xuất phát cho quán thật; cấp 6 tự kiểm / chỉnh (±5%/7 ngày) / quay lui khi có số liệu thật.
  * Bản đã phát hành bất biến: hiệu chuẩn lại sau deploy = unit_engine2_params_v2.js. */
 (function(root){'use strict';const P={
- "version": "sim-dacde777-v1",
+ "version": "sim-cb369cb1-v1",
  "origin": "calibrated_simulation",
- "kEscalate": 2.5,
- "kClean": 1.1803312499999996,
- "coldStartFactor": 1.36,
+ "kEscalate": 3.30625,
+ "kClean": 1.275,
+ "coldStartFactor": 1,
  "minMeasLearn": 10,
+ "measUnsureFactor": 2.61625,
  "minExcess": {
   "g": 15,
   "ml": 15,
@@ -30,6 +31,29 @@
   "untrackedGivenUnrecorded": 0.9,
   "untrackedGivenOther": 0.05
  },
+ "groupPrior": {
+  "g": {
+   "mu": 0.015,
+   "tau": 0.01,
+   "sigma": 0.02
+  },
+  "ml": {
+   "mu": 0.012,
+   "tau": 0.01,
+   "sigma": 0.02
+  },
+  "cai": {
+   "mu": 0.01,
+   "tau": 0.02,
+   "sigma": 0.05
+  },
+  "other": {
+   "mu": 0.015,
+   "tau": 0.02,
+   "sigma": 0.04
+  }
+ },
+ "minGroupItems": 3,
  "baseline": {
   "minTrusted": 20,
   "minDays": 14,
@@ -41,10 +65,11 @@
    "ml": 50,
    "cai": 5,
    "other": 10
-  }
+  },
+  "kCap": 5
  },
  "release": {
-  "validPoints": 5,
+  "validPoints": 8,
   "activeDays": 3,
   "minUsedRatio": 2,
   "daysBetween": 7
@@ -55,8 +80,10 @@
   "recipe": 0.08,
   "unrecorded": 0.06,
   "sync": 0.04,
+  "receiving": 0.04,
+  "scale": 0.03,
   "physical": 0.12,
-  "noise": 0.58
+  "noise": 0.51
  },
  "tareSigma": {
   "g": 12,
@@ -68,20 +95,32 @@
   "unproven": 0.05,
   "proven": 0.01
  },
+ "receivingSigma": 0.06,
+ "receivingFirst": 0.2,
+ "scaleSigma": 0.03,
  "minutes": {
   "tare_check": 2,
   "density_proof": 4,
   "recipe_portion_weigh": 5,
   "scan_open_units": 2,
   "resync_recount": 3,
+  "weigh_sealed_unit": 2,
+  "reference_weigh": 1,
   "handover_weigh_m2": 3,
   "m3_blind": 4
  },
  "calibration": {
   "minLabels": 30,
-  "maxBrier": 0.2
+  "maxBrier": 0.2,
+  "minFit": 10,
+  "ridge": 1,
+  "keep": 300
  },
  "bounds": {
+  "baseline.kCap": [
+   2,
+   5
+  ],
   "kEscalate": [
    1.8,
    4
@@ -93,6 +132,10 @@
   "coldStartFactor": [
    1,
    2.5
+  ],
+  "measUnsureFactor": [
+   1,
+   4
   ],
   "cusum.h": [
    2.5,
@@ -110,57 +153,77 @@
  "liveStep": 0.05,
  "parent": "prior-1",
  "record": {
-  "version": "sim-dacde777-v1",
+  "version": "sim-cb369cb1-v1",
   "parent": "prior-1",
   "mode": "sim",
-  "dataHash": "dacde777",
+  "dataHash": "cb369cb1",
   "window": {
    "from": "2026-01-05T20:00:00.000Z",
    "to": "2026-03-05T20:00:00.000Z",
-   "train": 14102,
-   "validation": 9402
+   "train": 20326,
+   "validation": 13552
   },
   "metricsBefore": {
-   "n": 23504,
-   "flags": 846,
-   "falseAlarm": 80,
-   "falseAlarmRate": 0.09456264775413711,
-   "missed": 172,
-   "trueAbnormal": 938,
-   "missRate": 0.18336886993603413,
-   "minutes": 47399,
+   "n": 33878,
+   "flags": 1162,
+   "falseAlarm": 44,
+   "falseAlarmRate": 0.0378657487091222,
+   "missed": 10,
+   "trueAbnormal": 1533,
+   "missRate": 0.006523157208088715,
+   "minutes": 67886,
    "failures": 1,
-   "coverage90": 0.7291726283725312,
-   "runs": 102
+   "coverage90": 0.9189570635997666,
+   "runs": 144
   },
   "metricsAfter": {
-   "n": 23951,
-   "flags": 886,
-   "falseAlarm": 94,
-   "falseAlarmRate": 0.10609480812641084,
-   "missed": 149,
-   "trueAbnormal": 941,
-   "missRate": 0.15834218916046758,
-   "minutes": 48875,
-   "failures": 1,
-   "coverage90": 0.7327946263707016,
-   "runs": 102
+   "n": 33746,
+   "flags": 1062,
+   "falseAlarm": 4,
+   "falseAlarmRate": 0.003766478342749529,
+   "missed": 10,
+   "trueAbnormal": 1540,
+   "missRate": 0.006493506493506494,
+   "minutes": 67401,
+   "failures": 0,
+   "coverage90": 0.9156972285324128,
+   "runs": 144
   },
   "changes": [
    {
+    "param": "baseline.kCap",
+    "from": 3,
+    "to": 5
+   },
+   {
+    "param": "kEscalate",
+    "from": 2.5,
+    "to": 3.30625
+   },
+   {
     "param": "kClean",
     "from": 1.5,
-    "to": 1.1803312499999996
+    "to": 1.275
    },
    {
     "param": "coldStartFactor",
     "from": 1.6,
-    "to": 1.36
+    "to": 1
+   },
+   {
+    "param": "measUnsureFactor",
+    "from": 2.5,
+    "to": 2.61625
    },
    {
     "param": "cusum.h",
     "from": 4,
     "to": 2.8
+   },
+   {
+    "param": "release.validPoints",
+    "from": 5,
+    "to": 8
    }
   ],
   "rollbackRef": "prior-1",
@@ -182,7 +245,14 @@
    "nhieu_loi_cung_luc",
    "can_nhieu",
    "thieu_nho_lap_lai",
-   "du_hang"
+   "du_hang",
+   "nhan_hang_sai_dung_tich",
+   "can_lech_he_so",
+   "nhan_vien_moi_qua_tay",
+   "cuoi_tuan_dong",
+   "ban_dot_bien",
+   "that_thoat_sau_ha_muc",
+   "mo_nhieu_ma"
   ],
   "trainSeeds": [
    1,
@@ -205,20 +275,20 @@
    110
   ],
   "holdoutMetrics": {
-   "n": 39058,
-   "flags": 1465,
-   "falseAlarm": 133,
-   "falseAlarmRate": 0.09078498293515358,
-   "missed": 232,
-   "trueAbnormal": 1564,
-   "missRate": 0.1483375959079284,
-   "minutes": 78560,
+   "n": 56356,
+   "flags": 1734,
+   "falseAlarm": 6,
+   "falseAlarmRate": 0.0034602076124567475,
+   "missed": 22,
+   "trueAbnormal": 2662,
+   "missRate": 0.008264462809917356,
+   "minutes": 112588,
    "failures": 1,
-   "coverage90": 0.7302587549587256,
-   "runs": 170
+   "coverage90": 0.9189192211869098,
+   "runs": 240
   },
   "holdoutFailures": [
-   "can_nhieu#108: báo động sai 100% > 35%"
+   "can_nhieu#106: báo sai 1.6% số quan sát > 1.5%"
   ]
  }
 };

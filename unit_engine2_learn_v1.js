@@ -57,7 +57,10 @@ function baseline(obs,params=DEFAULT_PARAMS,accepted={}){
  const lists=Object.entries(by),gOf=list=>unitGroup(list[0].unit);
  // 1) Sai số cân HỌC theo nhóm đơn vị: phân tán bền của phần dư LƯỢNG quanh trung vị tỷ lệ của món, ở các lượt có cân — cân kém thì tự nới.
  const meas={};
- for(const [,list] of lists){const g=gOf(list),m=median(list.map(rate));for(const o of list)if(o.nWeigh>0&&Number.isFinite(m))(meas[g]=meas[g]||[]).push((o.loss-m*o.used)/Math.sqrt(o.nWeigh));}   // chuẩn hoá về MỘT lần cân
+ // Học trên MỌI lượt có cân dùng được (cả mẫu đã báo bất thường): chỉ học trên mẫu chưa báo là cắt cụt phân bố → ước thấp sai số
+ // → báo sai nhiều hơn → càng cắt cụt. MAD bền với số ít bất thường thật.
+ const allBy={};for(const o of obs)if(usable(o)&&!(o.ctx&&o.ctx.fifoDebt)&&o.nWeigh>0)(allBy[o.itemId]=allBy[o.itemId]||[]).push(o);
+ for(const [id,list] of Object.entries(allBy)){const g=unitGroup(list[0].unit),m=median((by[id]||list).map(rate));if(Number.isFinite(m))for(const o of list)(meas[g]=meas[g]||[]).push((o.loss-m*o.used)/Math.sqrt(o.nWeigh));}   // chuẩn hoá về MỘT lần cân
  const measOf=g=>Math.max(params.measSigma[g]||0,meas[g]&&meas[g].length>=10?mad(meas[g]):0);
  // 2) Từng món: tách phân tán QUÁ TRÌNH khỏi sai số cân — var(tỷ lệ) = σp² + σm²·nCân/lượng² (không cộng sai số cân hai lần).
  const stats={};
