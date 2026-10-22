@@ -60,5 +60,26 @@ const ROOT = path.join(__dirname, '..');
   const row = mg.slice(mg.indexOf('cost-pend-row is-gieo'), mg.indexOf('cost-pend-row is-gieo') + 900);
   assert.ok(/approveGieoExpense/.test(row) && /rejectGieoExpense/.test(row) && !/editExpense/.test(row), 'hàng Gieo: Duyệt / Từ chối, không Sửa');
   console.log('ok Giao diện: hàng Gieo chung khung chờ duyệt, đọc có giới hạn');
+  // 3) «Chờ xử lý · Gieo» — cảnh báo: ghi y markAlertStatus của quanlygieo.
+  assert.match(ql, /const fields = \{status, resolvedAt:vnDate\(\)\.toISOString\(\)\};\s*await fstore\.collection\('alerts_gieogieo'\)\.doc\(id\)\.update\(fields\);/, 'markAlertStatus của quanlygieo đã đổi — cập nhật markGieoAlert');
+  {
+    const N2 = ['ggName', 'readGieoInbox', 'markGieoAlert'];
+    const g = makeFake({ fs: {
+      'alerts_gieogieo/a1': { type: 'missing_recipe', status: 'new', createdAt: '2026-10-22T01:00:00Z' },
+      'alerts_gieogieo/a2': { type: 'duty_case', status: 'seen', createdAt: '2026-10-22T02:00:00Z' },
+      'alerts_gieogieo/a3': { type: 'duty_case', status: 'resolved', createdAt: '2026-10-22T03:00:00Z' },
+      'alerts_gieogieo__gg02/b1': { type: 'handover_cash_variance', status: 'new', createdAt: '2026-10-22T04:00:00Z' },
+      'alerts_gieogieo__gg03/c1': { type: 'missing_recipe', status: 'new' }
+    } });
+    const A = new Function('fstore', 'ensureAuth', 'gieoStores', 'vnDate', 'GIEO_LEGACY', extract('manage.html', N2) + '\nreturn {' + N2.join(',') + '};')(
+      g.fstore, async () => {}, async () => [{ id: 'gg01' }, { id: 'gg02' }, { id: 'gg03', active: false }], () => new Date('2026-10-22T19:30:00Z'), 'gg01');
+    const inbox = await A.readGieoInbox();
+    assert.deepStrictEqual(inbox.alerts.map(a => a.store + '/' + a.id), ['gg02/b1', 'gg01/a2', 'gg01/a1'], 'mới + đã xem, mới nhất trước; bỏ đã xử lý; bỏ quán ngừng hoạt động');
+    await A.markGieoAlert('gg01', 'a1', 'seen'); assert.strictEqual(g.FS['alerts_gieogieo/a1'].status, 'seen'); assert.ok(g.FS['alerts_gieogieo/a1'].resolvedAt);
+    await A.markGieoAlert('gg02', 'b1', 'resolved'); assert.strictEqual(g.FS['alerts_gieogieo__gg02/b1'].status, 'resolved');
+    await assert.rejects(A.markGieoAlert('gg01', 'a3', 'seen'), /đã được xử lý ở nơi khác/);
+    await assert.rejects(A.markGieoAlert('gg01', 'a1', 'deleted'), /không hợp lệ/);
+    console.log('ok Chờ xử lý · Gieo: đọc mới + đã xem từng quán đang hoạt động; Đã xem / Đã xử lý ghi y quanlygieo; đã xử lý thì không ghi lại');
+  }
   console.log('ALL PASS');
 })().catch(e => { console.error(e); process.exit(1); });

@@ -14,6 +14,8 @@ firebase.database.ServerValue={TIMESTAMP:0};firebase.firestore.FieldValue={delet
   ok:{periodType:'onetime',date:k(y),category:'Gas',amount:90000,status:'approved'}};
  __FS.expenses_gieogieo__gg02={q1:{periodType:'onetime',date:k(y),category:'Sữa',amount:64000,staff:'Huy',status:'pending_review',source:'pos',createdAt:y.toISOString()}};
  __FS.expenses_xofa=Object.assign(__FS.expenses_xofa||{},{x1:{periodType:'onetime',date:k(t),category:'Đá',amount:20000,status:'pending_review',source:'pos',store:'xofa',createdAt:t.toISOString()}});
+ __FS.alerts_gieogieo={a1:{type:'missing_recipe',title:'Trà sữa chưa có công thức',status:'new',businessDate:k(y),createdAt:y.toISOString()},a2:{type:'duty_case',status:'seen',createdAt:t.toISOString()},a3:{type:'duty_case',status:'resolved'}};
+ __FS.alerts_gieogieo__gg02={b1:{type:'handover_cash_variance',message:'Thiếu 20.000đ',status:'new',createdAt:t.toISOString()}};
  window.__Y=k(y);})();`;
 const server=require('http').createServer((req,res)=>{const f=path.resolve(ROOT,'.'+new URL(req.url,'http://localhost').pathname);if(!f.startsWith(ROOT+path.sep)||!fs.existsSync(f)){res.writeHead(404);return res.end()}res.setHeader('Content-Type',f.endsWith('.js')?'application/javascript':'text/html; charset=utf-8');res.end(fs.readFileSync(f))});
 (async()=>{await new Promise(r=>server.listen(0,'127.0.0.1',r));const base='http://127.0.0.1:'+server.address().port;
@@ -46,6 +48,19 @@ const server=require('http').createServer((req,res)=>{const f=path.resolve(ROOT,
   await p.locator('.cost-pend-row.is-gieo',{hasText:'Ly nhựa'}).getByRole('button',{name:'Duyệt'}).click();
   await p.waitForTimeout(400);
   check(await p.evaluate(()=>__FS.expenses_gieogieo.p2.reviewedAt==='QL'),width+': đã duyệt ở Quản lý Gieo → không ghi đè');
+  // Màn «Chờ xử lý · Gieo».
+  await p.evaluate(()=>navigate('duyet'));await p.waitForFunction(()=>!live.loadingKey&&live.ready.duyet===loadKey());
+  const it=await p.locator('#view').innerText();
+  check(/3 việc/.test(it)&&it.includes('Gieo GG01')&&it.includes('Gieo GG02')&&it.includes('Trà sữa chưa có công thức')&&it.includes('Thiếu 20.000đ')&&it.includes('Vụ lệch cần xem'),width+': chờ xử lý: cảnh báo mới + đã xem từng quán, không có cảnh báo đã xử lý');
+  check(await p.evaluate(()=>document.querySelector('#storeSwitcher').hidden&&document.documentElement.scrollWidth<=innerWidth),width+': ẩn chọn quán, không cuộn ngang');
+  if(process.env.SCREENSHOT_DIR)await p.screenshot({path:path.join(process.env.SCREENSHOT_DIR,'cho_xu_ly_'+width+'.png'),fullPage:true});
+  await p.locator('.cost-pend-row',{hasText:'Trà sữa'}).getByRole('button',{name:'Đã xem'}).click();
+  await p.waitForFunction(()=>__FS.alerts_gieogieo.a1.status==='seen');
+  await p.waitForFunction(()=>!live.loadingKey&&live.ready.duyet===loadKey());
+  await p.locator('.cost-pend-row',{hasText:'Thiếu 20.000đ'}).getByRole('button',{name:'Đã xử lý'}).click();
+  await p.waitForFunction(()=>__FS.alerts_gieogieo__gg02.b1.status==='resolved');
+  await p.waitForFunction(()=>!live.loadingKey&&live.ready.duyet===loadKey()&&!document.querySelector('#view').innerText.includes('Thiếu 20.000đ'));
+  check(await p.evaluate(()=>!!__FS.alerts_gieogieo__gg02.b1.resolvedAt),width+': Đã xem / Đã xử lý ghi trạng thái + resolvedAt, danh sách cập nhật');
   check(errors.length===0,width+': không lỗi JS '+errors.join(' | '));
   // Đặt lại dữ liệu cho cỡ màn sau.
   await p.close();

@@ -51,5 +51,6 @@ Căn cứ: lượt rà 22/10 — 20 loại việc chờ ở quanlygieo; quanlygi
 | Hạng mục | Trạng thái |
 |---|---|
 | 1.1 Chi phí chờ duyệt Gieo | ✅ 23/10 — `readCosts` thêm khoản chờ duyệt từng quán Gieo (limit 100), `reviewGieoExpense` (transaction, dấu `pl_dirty` quán), hàng `.cost-pend-row.is-gieo`; test `tests/manage_duyet_gieo.test.js`, e2e `tools/ql_giao_dien/e2e_manage_duyet_gieo.js` (PC + điện thoại) |
-| 1.2–1.5 | chưa |
+| 1.2 Hộp thư cảnh báo Gieo | ✅ 23/10 — màn mới «Chờ xử lý Gieo» (`duyet`, menu sau Tiền mặt): cảnh báo `new` + `seen` từng quán đang hoạt động (2 truy vấn limit 50 / quán, chỉ khi mở màn), Đã xem / Đã xử lý = `markAlertStatus` quanlygieo (`markGieoAlert`, transaction, đã xử lý thì không ghi lại); ẩn chọn quán; test + e2e chung file 1.1 |
+| 1.3 Ca treo · 1.4 Ngày chưa đóng sổ · 1.5 ô tổng Tổng quan | chưa |
 | Đợt 2, 3 | chưa — cần chủ quán xem kế hoạch Engine trong manage |
