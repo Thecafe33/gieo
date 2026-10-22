@@ -33,8 +33,8 @@ Trạng thái: ✅ có runtime + test · 🟡 có một phần · ⬜ chưa làm
 
 | Cấp | Cửa nghiệm thu (đo được) | Trạng thái 22/10 |
 |---|---|---|
-| 1 — Ghi đủ | Bộ kiểm độc lập: 0 vi phạm chưa giải trình về một nguồn tổn thất, tổng phân bổ + pending = nguồn, không WASTE đúp, đúng `storeId`; replay 30 ngày đường tương thích khớp sổ | 🟡 P0 giữ một writer + receipt; `audit()` hiện nằm **cùng file** quyết định, chỉ kiểm tổng/trùng người/khoảng → chưa độc lập. Replay ⛔ |
-| 2 — Luật | Cùng dữ liệu + phiên bản → cùng quyết định (replay); bảng FSM kiểm **mọi cặp** trạng thái × sự kiện; control không lan quán | 🟡 Chính sách `finish_equal_barista_v1`, FSM case/task/control có trong lõi; chưa có test tích Descartes, chưa replay |
+| 1 — Ghi đủ | Bộ kiểm độc lập: 0 vi phạm chưa giải trình về một nguồn tổn thất, tổng phân bổ + pending = nguồn, không WASTE đúp, đúng `storeId`; replay 30 ngày đường tương thích khớp sổ | 🟡 P0 giữ một writer + receipt. **B0 xong**: bộ kiểm độc lập `unit_engine2_audit_v1.js` (44 mã lỗi) bắt 40/40 lỗi cài trên dữ liệu giả từ luồng thật. Chưa chạy trên dữ liệu thật (B1); replay ⛔ |
+| 2 — Luật | Cùng dữ liệu + phiên bản → cùng quyết định (replay); bảng FSM kiểm **mọi cặp** trạng thái × sự kiện; control không lan quán | 🟡 Test tích Descartes 335 cặp đã có: **33 lệch code ↔ đặc tả chờ quyết** (mục 3, B0). Store chưa đi qua `transition()`. Chưa replay |
 | 3 — Học mức thường | Baseline theo món/quán (gộp tầng, mục 4) với khoảng bất định; kiểm ngoài thời gian học; tách «đang học» / «đủ tin cậy» | ⬜ Chưa thu mẫu M0 ngẫu nhiên |
 | 4 — Suy luận (giả thuyết kiểm được) | Xác suất cho 4 nhóm giả thuyết kiểm được, đối chiếu nhãn M3/vật mẫu/kiểm bì; Brier/reliability báo kèm cỡ mẫu; phần dư không in % | ⬜ |
 | 5 — Vòng kín | Event → quyết định → POS ACK → đo → đối soát → **tự hạ mức** theo tiêu chí đã kiểm định; mất ACK/retry phục hồi | 🟡 Nâng mức + giao cân + ACK + mốc mới chạy được; tự hạ đang **tắt** (`releaseEnabled`) |
@@ -52,6 +52,17 @@ Mỗi bước chỉ bắt đầu khi bước trước đạt cửa. Bước có 
 - Bộ cài lỗi giả (test + công cụ chạy trên vùng thử): trùng event, sai đơn vị/bì, worker lease cũ, sai cửa hàng, allocation lệch tổng, WASTE đúp, mất ACK, sự kiện đến muộn, sửa nguồn sau khi chốt.
 - Test tích Descartes trạng thái × sự kiện cho ba FSM.
 - Cửa: mọi lỗi cài sẵn bị phát hiện; dữ liệu sạch → 0 cảnh báo.
+
+**Kết quả B0 (22/10) — đạt cửa trên dữ liệu giả, chưa deploy:**
+- `unit_engine2_audit_v1.js` (`UnitEngine2Audit`): `collect` chỉ đọc (mọi truy vấn có giới hạn; chạm giới hạn → `complete:false`, `ok:false`), `check` thuần (không ném lỗi vì dữ liệu xấu), `run`, `summary`. Không nạp `unit_engine2_v1.js`; tự suy lại nhóm pha chế từ ca thô (ca đã check-out giao khoảng là bắt buộc; ca chưa check-out được chấp nhận cả hai cách và báo cảnh báo `OPEN_SHIFT_IN_INTERVAL`), lượng ròng từ số tổng − bì, giá từ nguồn/lịch sử giá. 38 mã vi phạm + 6 mã cảnh báo (danh mục `CODES`). Không dùng index mới (stock_transactions type+businessDate đã có).
+- `tests/unit_engine2_audit.test.js`: dữ liệu sạch dựng bằng luồng runtime thật (báo hết 300 g + hai lượt cân qua kho v21) → 0 vi phạm, 0 cảnh báo; 40 lỗi cài, mỗi lỗi bị bắt đúng mã; kiểm chỉ đọc, không nạp lõi, quán khác không lẫn, chạm giới hạn → CHƯA ĐẠT.
+- `tests/unit_engine2_fsm.test.js`: bảng mong đợi viết lại từ đặc tả 3.2–3.4, so 335 cặp. **33 lệch đã biết** liệt kê đích danh (test hỏng khi có lệch mới hoặc lệch cũ tự mất):
+  - Case: `SOURCE_UPSERT` gộp luôn `CHECK_START` (new → checking); thiếu `CHECK_START`, `DUE` (checking), `LATE_EVENT` (mọi trạng thái — đặc tả: không đổi trạng thái).
+  - Task: thiếu `DUE` cho `exception_recorded`.
+  - Control: `MEASUREMENT_CONFLICT` nhảy 0 → 3 (đặc tả chỉ 1/2 → 3); thiếu `TASK_RESULT`, `DUE`, `CONFIG/RECIPE/MEASUREMENT_CHANGED` (đặc tả: giữ hoặc tăng).
+- `tools/automation/engine2_audit.js`: chạy kiểm toán trên bản xuất JSON `{đường/dẫn: doc}`, thoát mã 1 khi CHƯA ĐẠT — dùng lại ở B2.
+- **Phát hiện khi rà:** `unit_engine2_store_v1.js` gán thẳng `status` (case đi thẳng `decided`, task `queued`/`done`), **không gọi `E.transition()`** → bảng FSM chưa gác đường ghi. Bộ kiểm toán bù bằng kiểm trạng thái/kết quả trên dữ liệu đã ghi.
+- **Chờ chủ quán quyết** (đổi hành vi → `unit_engine2_v2.js`, không sửa v1): (a) sửa 33 lệch theo đặc tả hay sửa đặc tả theo code; (b) store đi qua `transition()`; (c) gắn bộ kiểm toán vào worker/QL2 (nút «Kiểm toán» hoặc chạy theo lịch) — hiện mới là module + công cụ dòng lệnh.
 
 **B1 — Chạy đối chiếu thử (shadow) tại gg01 để thu dữ liệu thật.** Cần chủ quán deploy gói P0 (chế độ Đối chiếu thử, không ghi hiệu lực).
 - Thêm vào bản ghi việc cân: `startedAt`, `finishedAt` (thời gian thiết bị + server), số lần cân lại → phút công.

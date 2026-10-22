@@ -1,3 +1,7 @@
+# 22/10 — Engine 2 B0: kiểm toán độc lập + cài lỗi giả
+
+[Lộ trình](LO_TRINH_ENGINE2_CAP6.md) B0 đạt cửa trên dữ liệu giả: `unit_engine2_audit_v1.js` chỉ đọc, không nạp lõi quyết định, 44 mã; dữ liệu sạch từ luồng thật → 0 vi phạm/0 cảnh báo, 40/40 lỗi cài bị bắt. Test FSM 335 cặp: 33 lệch code ↔ đặc tả và store chưa đi qua `transition()` — chờ chủ quán quyết (sửa ở v2). Công cụ `tools/automation/engine2_audit.js` cho bản xuất. Chưa gắn vào worker/QL2, chưa deploy, chưa chạy dữ liệu thật.
+
 # 22/10 — Engine 2: lộ trình cấp 6 điều chỉnh (chủ quán duyệt)
 
 [Lộ trình duy nhất](LO_TRINH_ENGINE2_CAP6.md): cấp 4 chỉ cho giả thuyết kiểm được bằng phép đo; thêm cân ngẫu nhiên M0 có ngân sách + ghi thời gian thao tác; bộ kiểm toán độc lập + cài lỗi giả làm trước (B0); lát dọc family NL có tem tới cấp 6 rồi mới mở BTP/FIFO/nhận hàng; quy mô lớn là trục riêng. Chỉ tài liệu, chưa đổi code.

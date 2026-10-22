@@ -48,6 +48,7 @@ Hộp thư cũ tham chiếu quyết định Engine 2 đã có hiệu lực để
 - `node tests/unit_engine2_queue.test.js`: bootstrap 123 nguồn/3 trang; mã mới mở nhận cân đúng một lần; ca thêm mới tìm khoảng liên quan; 100 tiêu thụ không query; hộp thư tham chiếu E2 và rút liên kết khi nguồn đổi.
 - `node tools/automation/engine2_e2e.js`: POS styles thật, 1366px/390px, chọn dụng cụ chưa gắn, cân lại, ô trắng, journal bất biến, thoát đóng ca có ngoại lệ mất mạng rồi đồng bộ.
 - `node tools/automation/role_full_e2e.js`: HTML quanlygieo2 thật, PC/mobile, hộp thư cũ/duyệt chi/căn cứ E2/ACK/thông tin chưa hoàn tất/thiết lập.
+- B0 (sau P0): `node tests/unit_engine2_audit.test.js` (bộ kiểm độc lập, 40 lỗi cài) và `node tests/unit_engine2_fsm.test.js` (335 cặp FSM, 33 lệch đã biết) — xem [lộ trình](LO_TRINH_ENGINE2_CAP6.md) B0.
 - Bộ test cũ và công cụ ranh giới/đường dẫn tiếp tục chạy. Tool sinh lại nay trả exit khác 0 nếu test thất bại, không để pipeline `tail` che lỗi.
 
 Các phép thử trên dùng dữ liệu giả, không nối Firebase production. File rút gọn 1/9–18/10 thiếu ledger kho/prep đầy đủ, snapshot RT và ID tem nguồn nên chưa chứng nhận replay tài chính/FIFO 30–60 ngày thật.
