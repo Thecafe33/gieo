@@ -2,7 +2,7 @@
 
 Ngày: 22/10/2026. Mã nguồn đối chiếu: `53775f7`, nhánh `Phan-tach-unit-engine`.
 
-**Đặc tả trước code. Chưa có runtime Engine 2, mapper mới hoặc replay nghiệm thu.** Tài liệu tiếp nhận năm sản phẩm/tiêu chí chủ quán đề xuất, bổ sung đối chiếu POS thật và sửa các điểm có thể dẫn đến nghiệm thu sai. Chính sách ngoại lệ và các con số hiệu chuẩn dưới đây là **đề xuất cần chốt trước khi bật nhánh tương ứng**, không phải cấu hình đã có hiệu lực.
+**Đặc tả trước code. Chưa có runtime Engine 2, mapper mới hoặc replay nghiệm thu.** Tài liệu tiếp nhận năm sản phẩm/tiêu chí chủ quán đề xuất, bổ sung đối chiếu POS thật và sửa các điểm có thể dẫn đến nghiệm thu sai. Chủ quán đã xác nhận ca luôn có nhóm pha chế: việc đo giao nhóm đang ca, việc dở chuyển ca sau, trách nhiệm vẫn theo khoảng lịch sử. **Đủ tài liệu để bắt đầu lõi và luồng P0.** Các con số hiệu chuẩn là tham số thử nghiệm cần kiểm chứng, chưa phải cấu hình có hiệu lực.
 
 Tài liệu đi cùng: [kiến trúc](THIET_KE_UNIT_ENGINE2_V1.md), [ma trận các case và đích cấp 6](MA_TRAN_ENGINE2_TU_DONG_NANG_MUC.md), [15 ngoại lệ đề xuất](NGOAI_LE_UNIT_ENGINE2_DE_XUAT.md).
 
@@ -34,7 +34,7 @@ Tài liệu đi cùng: [kiến trúc](THIET_KE_UNIT_ENGINE2_V1.md), [ma trận c
 | **Checkpoint** | `checkpointId`, `storeId`, `itemId/prepId`, `containerIds/batchIds`, `scope` (unit hoặc aggregate), `measurementSessionId`, `method`, `countedAt`, `receivedAt`, `clockQuality`, `byEmployeeId`, `vessel:{id,variantId,revision}`, `tareSnapshot`, `gross`, `net`, `densitySnapshot` (hoặc null), `inventoryUnitSnapshot`, `bookAtMeasurement`, `bookProofRef`, `interleavedSalesRef`, `quality`, `supersedes` |
 | **Responsibility** | `responsibilityId`, `decisionId`, `lossRefs`, `interval`, `eligibleShiftRefs`, `eligibleEmployeeIds`, `basis` (policy_equal_share, verified_correction hoặc manual), `allocations`, `pool`, `pending`, `valuationRef`, `totalsCheck`. Không tạo giao dịch thu tiền/trừ lương |
 | **Control** | `controlId`, `storeId`, `targetType/targetId`, `level:0..3`, `manualFloor`, `reasonCaseRefs`, `policyVersion`, `revision`, `effectiveFrom`, `requirements`, `requiredDeviceVersion`, `ackRefs`, `lastEvaluation`, `nextEvaluationAt`, `deescalationEvidence` |
-| **Task** | `taskId`, `storeId`, `caseId/controlId`, `actionType`, `targetRefs`, `assigneeId/role`, `fallbackRoute`, `status`, `deadlineAt`, `dependencyRefs`, `idempotencyKey`, `leaseToken`, `attempt`, `nextTryAt`, `resultRef`, `exceptionRef`, `revision` |
+| **Task** | `taskId`, `storeId`, `caseId/controlId`, `actionType`, `targetRefs`, `assigneeId/role`, `handoverRule` (pha chế ca tiếp theo tại cùng quán), `status`, `deadlineAt`, `dependencyRefs`, `idempotencyKey`, `leaseToken`, `attempt`, `nextTryAt`, `resultRef`, `exceptionRef`, `revision` |
 
 ID tem là containerId ổn định, không dùng riêng chuỗi QR làm danh tính: QR có thể được cấp lại. Khi tệp cũ chỉ có code, adapter phải ghi “chưa nối được ID nguồn”; không tự sinh một tem thật hoặc đoán nối qua một code đang trùng.
 
@@ -85,7 +85,7 @@ Trạng thái tiến trình: `new`, `checking`, `ready`, `decided`, `review`, `c
 | chưa có → new | SOURCE_UPSERT | Có nguồn hợp lệ; liên kết loss, tạo việc kiểm dữ liệu | ID case ổn định theo nguồn/ngữ nghĩa, không theo mỗi alert |
 | new → checking | CHECK_START | Nhận đúng phiên bản, kiểm sổ/ca/mốc/giá | Claim theo revision; hết lease được nhận lại |
 | checking → ready | EVIDENCE_READY | Sổ đáng tin, đủ căn cứ cho chính sách áp dụng | Lưu inputHash; event cũ không thay căn cứ mới |
-| checking → checking | EVIDENCE_MISSING / DUE | Tạo/cập nhật task ngoại lệ, tuyến dự phòng, mốc hẹn | Hết hạn không đóng pool tự động; retry không sinh task trùng |
+| checking → checking | EVIDENCE_MISSING / DUE | Tạo/cập nhật việc đo cho pha chế đang ca hoặc việc phục hồi dữ liệu cho hệ thống, có mốc hẹn | Hết hạn không đóng pool tự động; retry không sinh task trùng |
 | ready → decided | DECIDE | Ghi một decision hiệu lực, phân bổ và intent control/task | Transaction đổi currentDecisionId; chỉ một revision thắng |
 | decided → closed | RESULTS_CONFIRMED | Khoản nguồn đã đối soát; phân bổ/định giá đủ theo chính sách; biện pháp ban đầu có kết quả hợp lệ | ACK đơn thuần không đủ. Control theo dõi dài hạn có vòng đời riêng |
 | decided/closed → review | CONTEST | Lưu phản đối gắn người/căn cứ; giữ nguồn tiền, không tự đảo kho | Contest ID chống gửi lại; ghi financialStatus chưa quyết toán nếu cần |
@@ -129,13 +129,13 @@ Trạng thái: `queued`, `claimed`, `in_progress`, `waiting_dependency`, `retry_
 | claimed/in_progress → waiting_dependency | NEED_INPUT | Ghi thiếu gì, giao tác vụ con có ID ổn định và hạn; không để “chờ” không có đường ra |
 | waiting_dependency → queued | DEPENDENCY_READY | Dữ liệu đã có, kiểm lại phiên bản trước khi cho làm tiếp |
 | claimed/in_progress → retry_wait | TRANSIENT_FAILURE / LEASE_EXPIRED | Lưu phần đã làm, backoff có giới hạn; không thao tác kho lần hai |
-| queued/claimed/in_progress/waiting_dependency/retry_wait → exception_recorded | HANDOVER_EXIT_WITH_EXCEPTION | Nhân viên xác nhận tình trạng thật, lý do cấu trúc, actor/time và tuyến tiếp nhận; cho luồng đóng ca đi tiếp nhưng task kiểm soát chưa đạt |
-| exception_recorded → queued/waiting_dependency | RECOVERY / NEXT_SHIFT / DUE | Tự giao lại/đổi tuyến theo ngoại lệ; không đưa ngoại lệ vào cửa sổ sạch |
+| queued/claimed/in_progress/waiting_dependency/retry_wait → exception_recorded | HANDOVER_EXIT_WITH_EXCEPTION | Nhân viên xác nhận tình trạng thật, lý do cấu trúc, actor/time và việc bàn giao ca tiếp theo; cho luồng đóng ca đi tiếp nhưng task kiểm soát chưa đạt |
+| exception_recorded → queued/waiting_dependency | RECOVERY / NEXT_SHIFT / DUE | Tự giao lại cho pha chế đang ca/ca tiếp theo; không đưa ngoại lệ vào cửa sổ sạch |
 | in_progress → done | VALID_RESULT | Có kết quả nghiệp vụ hợp lệ đúng phiên bản; số đo/sổ đối chiếu được, lưu resultRef rồi đóng |
 | * → superseded/cancelled | NEW_REVISION / VALID_VOID | Kiểm nguồn mới, giữ kết quả đã làm, hủy phần chưa cần; gắn task thay thế nếu có |
 | done/superseded/cancelled → giữ nguyên | RETRY / LATE_ACK | Trả kết quả cũ hoặc dẫn task mới; không mở lại chỉ vì client thiếu ACK |
 
-Không có trạng thái “lỗi vĩnh viễn rồi bỏ quên”: lỗi không thử lại được phải có exception và tuyến nhận rõ ràng. Không tuyên bố đã giải quyết xong nếu người/thiết bị/dữ kiện cần thiết chưa tồn tại. Tác vụ nền không nằm trên đường tạo bill.
+Không có trạng thái “lỗi vĩnh viễn rồi bỏ quên”: lỗi không thử lại được phải có exception và việc phục hồi/bàn giao rõ ràng. Không tuyên bố đã giải quyết xong khi chưa có kết quả hợp lệ. Tác vụ nền không nằm trên đường tạo bill.
 
 ## 4. Quyền ghi duy nhất và chuyển tiếp
 
@@ -177,7 +177,7 @@ Engine 2 có lõi quyết định, mô hình, điều hành và kiểm toán ri�
 
 ## 5. Chính sách ngoại lệ
 
-Bảng 15 dòng nằm tại [NGOAI_LE_UNIT_ENGINE2_DE_XUAT.md](NGOAI_LE_UNIT_ENGINE2_DE_XUAT.md). Đó là bản soạn sẵn cho chủ quán chọn/chỉnh, **chưa áp dụng**. Người nhận tác vụ đo/hoàn thiện dữ liệu không mặc định là người chịu mất tiền.
+Bảng 15 dòng nằm tại [NGOAI_LE_UNIT_ENGINE2_DE_XUAT.md](NGOAI_LE_UNIT_ENGINE2_DE_XUAT.md), đã làm rõ cách giao việc theo mô hình ca luôn có pha chế. Không yêu cầu chủ cấu hình thêm cấp quản lý/tuyến dự phòng trước khi xây Engine. Người nhận việc đo hiện tại không mặc định chịu khoản mất của khoảng trước. Chưa có thay đổi runtime nào.
 
 Điều kiện chung: không chặn bán/check-in/check-out; đóng ca có lối thoát ghi nhận được, giữ việc và rủi ro cho bên nhận tiếp. “Đã đóng ca có ngoại lệ” khác “đã kiểm đủ”. Ngoại lệ không làm WASTE biến mất và không tự thành một mẫu sạch. Duyệt chi vẫn dành chủ quán; không mở thêm hàng loạt việc chủ phải duyệt từng ngày.
 
@@ -192,7 +192,7 @@ Bảng 15 dòng nằm tại [NGOAI_LE_UNIT_ENGINE2_DE_XUAT.md](NGOAI_LE_UNIT_ENG
 | Quyết định tay | Chính sách/ngoại lệ trách nhiệm đã được người có quyền chốt | Nhãn nguyên nhân chắc chắn, hoặc tự thay chính sách theo tần suất bị ghi đè |
 | Bì/tỷ trọng đo có kiểm chứng | Phát hiện cấu hình sai, đề xuất bản cấu hình mới; tính lượng ròng theo snapshot | Tự sửa bì vật lý từ tỷ lệ thiếu hàng; thay bì lịch sử |
 | Yield/công thức thực tế đã xác minh | Dự báo, phát hiện đổi chế độ, đề xuất điều chỉnh định mức | Cứ hụt nhiều thì tự tăng định mức cho hết cảnh báo |
-| Lời khai tự do/structured reason tự báo | Dữ kiện tham khảo và tuyến xác minh | Nhãn ground truth nguyên nhân hoặc nhận lỗi mặc định |
+| Lời khai tự do/structured reason tự báo | Dữ kiện tham khảo để chọn phép kiểm tra | Nhãn ground truth nguyên nhân hoặc nhận lỗi mặc định |
 
 Tách bốn nhãn: độ đúng phép đo, sự kiện kho đã xác lập, phân bổ theo chính sách, nguyên nhân đã xác minh. Chia đều bốn barista là nhãn chính sách, không phải bốn nhãn “gây ra mất hàng”. Người sửa tay phải có reason/evidence và đúng phạm vi mới được dùng làm nhãn tương ứng.
 
@@ -275,11 +275,11 @@ Mỗi dòng ma trận A/B/F/D/T/C là một nhóm fixture có input events, star
 |---|---|---|
 | 1 — Hợp đồng dữ liệu | Đã có schema đề xuất, quy tắc nối nguồn/định giá và bản đồ export | Mapper chưa viết/chưa chạy; cần raw data đủ và đối chiếu 30 ngày |
 | 2 — Máy trạng thái | Đã có ba bảng, rule mặc định và ràng buộc revision/lease | Cần hiện thực hóa bảng và tests mọi cặp + race/fault |
-| 3 — Ngoại lệ | Đã soạn 15 dòng để chủ quán xem/chỉnh | Chưa chốt chính sách; không tự bật mặc định mới |
+| 3 — Ngoại lệ | Đã soạn 15 dòng; chốt ca luôn có pha chế, tự giao việc tại quầy và bàn giao ca sau | Hiện thực hóa/kiểm thử nhánh phục hồi; không cần thiết kế nhân sự dự phòng để bắt đầu |
 | 4 — Học/kiểm toán | Đã có phân lớp nhãn, chỉ số, giới hạn và các mốc thử đề xuất | Chưa có model/nhãn đủ/đánh giá; chưa thể chứng nhận cấp 4–6 |
 | 5 — Chuyển tiếp/kiểm thử | Đã đối chiếu POS/QL, ranh giới AST và writer chính; đặc tả fence/replay | Chưa có fence Engine2, feature flags chuyển family, replay hay rollout sản xuất |
 
-Điểm “chưa đọc POS” đã được xử lý đối với các đường chính trong bảng writer. Không tuyên bố audit mọi target động đã hoàn tất hoặc dữ liệu gọn đã đủ replay. Thứ tự tiếp theo trong phạm vi chưa code: chốt ngoại lệ/quyền bổ sung số đo và ranh giới hiệu chuẩn; khóa phiên bản hợp đồng; lập fixture manifest. Sau khi có yêu cầu triển khai mới viết runtime/mapper/tests theo đặc tả.
+Điểm “chưa đọc POS” đã được xử lý đối với các đường chính trong bảng writer. **Tài liệu đã đủ để bắt đầu triển khai lõi và luồng P0.** Các quyền dữ liệu dùng cơ chế hiện có; không thêm câu hỏi ai chịu khi thiếu nhóm pha chế hoặc yêu cầu chủ thiết kế cấp quản lý khác. Dữ liệu đầy đủ, replay và kiểm chứng cấp 6 là công việc nghiệm thu trong quá trình xây dựng. Hiện vẫn giữ yêu cầu chưa code; khi được yêu cầu triển khai sẽ viết runtime/mapper/tests theo đặc tả.
 
 ## 9. Bằng chứng đọc và kiểm cục bộ
 

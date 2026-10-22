@@ -12,7 +12,7 @@ Không tạo kho, bill hoặc P&L thứ hai. Quanlygieo2 và POS dùng cùng k�
 
 Hai trục phải tách riêng: cấp năng lực 1–6 của hệ thống và mức kiểm soát của từng món/từng quán. Mô hình nguyên nhân không thay chính sách trách nhiệm đã chốt; học một mức hao hụt thường xuyên không được biến nó thành lượng mất được miễn ghi nhận. Hiệu chuẩn chỉ đổi tham số được phép trong giới hạn, có phiên bản/quay lui; không tự sửa lịch sử tổn thất hoặc trừ lương.
 
-Đã bổ sung [đặc tả năm sản phẩm triển khai](DAC_TA_TRIEN_KHAI_UNIT_ENGINE2_V1.md): schema, ba máy trạng thái, writer theo nghiệp vụ, học/kiểm toán và manifest replay; [15 ngoại lệ](NGOAI_LE_UNIT_ENGINE2_DE_XUAT.md) là phương án đề xuất chưa chốt. Đã đối chiếu các đường POS chính và kiểm AST. Tệp gọn 48 ngày đang có thiếu ledger gốc/RT/containerId nên chưa đủ chứng nhận replay; chưa viết mapper hoặc runtime.
+Đã bổ sung [đặc tả năm sản phẩm triển khai](DAC_TA_TRIEN_KHAI_UNIT_ENGINE2_V1.md): schema, ba máy trạng thái, writer theo nghiệp vụ, học/kiểm toán và manifest replay; [15 ngoại lệ](NGOAI_LE_UNIT_ENGINE2_DE_XUAT.md) đã làm rõ theo xác nhận ca luôn có pha chế. Công việc đo giao cho pha chế hiện tại, việc dở chuyển ca sau; trách nhiệm vẫn theo nhóm lịch sử. Đủ tài liệu để bắt đầu lõi/P0. Tệp gọn 48 ngày chưa đủ chứng nhận replay đầy đủ; chưa viết mapper hoặc runtime.
 
 ## Đối chiếu phần hiện có
 
@@ -87,11 +87,11 @@ Trước runtime, đối chiếu [ma trận nâng mức](MA_TRAN_ENGINE2_TU_DONG
 
 Tiêu chí tối thiểu: case 300 g tạo đúng tổng 300 g phân bổ; bốn người nhận 75 g/người; không WASTE đúp; tự có yêu cầu cân đúng cửa hàng; chưa gắn dụng cụ vẫn cân được bằng dụng cụ hợp lệ; bill đang bán không bị chặn/ghi đè; đóng trình duyệt hoặc mất ACK vẫn xử lý tiếp; lần cân sau dùng đúng khoảng mới.
 
-## Điểm chính sách còn cần chốt trước khi triển khai nhánh tương ứng
+## Nguyên tắc triển khai đã làm rõ
 
-- Không có nhân sự barista hợp lệ, ca thiếu giờ hoặc không có giá vốn: quy tắc hoàn thiện dữ liệu tại điểm bán và cách quyết toán, không tự gán ngẫu nhiên hoặc lấy 0 làm kết quả đủ.
-- Dụng cụ/bì và tỷ trọng chưa có: ai được ghi số đo, hình thức xác nhận tại quầy.
-- Tiêu chí tăng xác nhận chéo và tự giảm kiểm soát. Chưa có quyết định thì không tự tắt biện pháp chỉ vì vài lần không lệch.
+- Ca luôn có nhóm pha chế theo chủ quán xác nhận. Engine lấy đúng nhóm ca lịch sử; nếu truy xuất lỗi thì tự phục hồi dữ liệu, không tạo nhánh kinh doanh thiếu nhóm hoặc chờ chủ gán người.
+- Việc đo/kiểm nhận giao nhóm pha chế đang ca; việc dở chuyển ca sau. Dụng cụ/bì và tỷ trọng được xử lý tại quầy theo quyền hiện có và lưu bằng chứng số đo.
+- Tiêu chí tăng xác nhận chéo/tự giảm kiểm soát được kiểm thử, hiệu chuẩn có giới hạn; không tự tắt biện pháp chỉ vì vài lần không lệch.
 - Thu/bù trừ khoản trách nhiệm là nghiệp vụ tài chính riêng, chưa được suy thành tự động khấu trừ lương.
 
-Các điểm này không yêu cầu chủ quán duyệt từng case; cần chính sách chung rõ ràng để máy thực hiện nhất quán.
+Đủ cơ sở bắt đầu triển khai lõi và luồng P0; không cần chủ quán thiết kế thêm cấp quản lý hoặc duyệt từng case. Việc học/kiểm toán cấp 6 phải có thêm bằng chứng thử nghiệm sau khi hiện thực hóa.

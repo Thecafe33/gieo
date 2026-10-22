@@ -4,7 +4,7 @@ Ngày rà: 22/10/2026. Mã nguồn đối chiếu: `abf5034`, nhánh `Phan-tach-
 
 **Trạng thái: tài liệu thiết kế, chưa sửa runtime, chưa triển khai Firebase.** Phạm vi là `posgieo.html`, Engine v20, automation v3 và `quanlygieo2`; không thay những luồng bán hàng chủ quán đã xác nhận là có chủ đích.
 
-Tiếp nối: [đặc tả triển khai năm sản phẩm](DAC_TA_TRIEN_KHAI_UNIT_ENGINE2_V1.md) và [15 ngoại lệ đề xuất](NGOAI_LE_UNIT_ENGINE2_DE_XUAT.md). Đặc tả bổ sung hợp đồng/transition/writer và kiểm độ phủ tệp 48 ngày; các mốc hiệu chuẩn/ngoại lệ chưa được coi là chính sách đã áp dụng.
+Tiếp nối: [đặc tả triển khai năm sản phẩm](DAC_TA_TRIEN_KHAI_UNIT_ENGINE2_V1.md) và [15 ngoại lệ](NGOAI_LE_UNIT_ENGINE2_DE_XUAT.md). Đã làm rõ ca luôn có pha chế, giao việc tại quầy và bàn giao việc dở cho ca sau; đủ để bắt đầu lõi/P0. Đặc tả có hợp đồng/transition/writer và kiểm độ phủ tệp 48 ngày; các mốc hiệu chuẩn vẫn cần kiểm chứng, chưa có runtime áp dụng.
 
 ## 1. Kết luận từ luồng thực thi
 
@@ -140,6 +140,8 @@ Nhóm giả thuyết cần phân biệt: số đo/bì/đơn vị sai; định m�
 Xác suất phải dựa trên dữ liệu đã kiểm chứng hoặc mô hình được kiểm định. Ban đầu chưa có dữ liệu xác minh thì chỉ ghi giả thuyết và mức thiếu căn cứ; không tự gắn “90% nhân viên lấy ăn”. Chọn phép đo có thể phân biệt các giả thuyết thay vì tiếp tục hỏi người quản lý.
 
 Khi mất vật lý đã được xác lập nhưng chưa biết hành vi, vẫn áp chính sách chia đều nhóm barista đủ điều kiện trong khoảng. Ghi rõ **phân bổ theo chính sách**, không giả là chứng minh mỗi người trực tiếp làm mất. Chưa đủ ca/role/mốc/giá vốn thì hệ thống tạo việc bổ sung tại điểm bán; tổn thất không bị bỏ khỏi sổ và hồ sơ chưa được ghi đã quyết toán đủ. Không lấy nhân sự order thế chỗ, không lấy cost=0 để đóng việc.
+
+Chủ quán xác nhận ca luôn có nhóm pha chế. Việc không đọc/nối được ca là lỗi dữ liệu cần phục hồi, không phải yêu cầu thêm chính sách “thiếu nhóm”. Công việc đo do pha chế đang ca thực hiện, việc dở chuyển ca sau; không thêm cấp duyệt vận hành khu vực và không đổi nhóm chịu trách nhiệm lịch sử vì chuyển người thực hiện.
 
 ### 5.3. Chọn phép đo và tự hạ mức
 

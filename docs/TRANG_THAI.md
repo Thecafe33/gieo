@@ -1,3 +1,7 @@
+# 22/10 — Đủ tài liệu bắt đầu Engine 2; ca luôn có pha chế
+
+Chủ quán xác nhận không có tình huống vận hành thiếu nhóm pha chế. Đã bỏ yêu cầu thiết kế tuyến trưởng ca/vận hành khu vực và câu hỏi ai chịu khi không có nhóm. Engine tự lấy nhóm lịch sử để phân bổ; việc đo giao pha chế hiện tại, việc dở sang ca sau, không đổi người chịu khoản trước. Lỗi đọc/nối ca là lỗi kỹ thuật phải phục hồi. Đủ tài liệu để bắt đầu lõi/P0; dữ liệu replay và chứng nhận cấp 6 được kiểm trong quá trình xây dựng. Chưa code runtime theo yêu cầu hiện tại.
+
 # 22/10 — Đặc tả năm sản phẩm trước code Engine 2
 
 [DAC_TA_TRIEN_KHAI_UNIT_ENGINE2_V1.md](DAC_TA_TRIEN_KHAI_UNIT_ENGINE2_V1.md): schema + nguồn tài chính có thẩm quyền (cho phép projection), ba máy trạng thái, writer theo family/epoch, nhãn học/giới hạn đề xuất, replay hai đường tương thích/chính sách mới. [15 ngoại lệ](NGOAI_LE_UNIT_ENGINE2_DE_XUAT.md) đã soạn để chủ chọn/chỉnh, chưa chốt. Đọc các caller POS/QL/Engine, AST hiện tại và kiểm ranh giới cả QL2 PASS; C.app không là khóa ownership. Kiểm lại tệp gọn 48 ngày: thiếu raw stock/prep ledger, RT và ID tem gốc; chưa đủ replay đầy đủ. Chỉ tài liệu, chưa runtime/mapper/tests mới, chưa deploy.
