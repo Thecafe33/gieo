@@ -4,6 +4,8 @@ Ngày rà: 22/10/2026. Mã nguồn đối chiếu: `abf5034`, nhánh `Phan-tach-
 
 **Trạng thái: tài liệu thiết kế, chưa sửa runtime, chưa triển khai Firebase.** Phạm vi là `posgieo.html`, Engine v20, automation v3 và `quanlygieo2`; không thay những luồng bán hàng chủ quán đã xác nhận là có chủ đích.
 
+Tiếp nối: [đặc tả triển khai năm sản phẩm](DAC_TA_TRIEN_KHAI_UNIT_ENGINE2_V1.md) và [15 ngoại lệ đề xuất](NGOAI_LE_UNIT_ENGINE2_DE_XUAT.md). Đặc tả bổ sung hợp đồng/transition/writer và kiểm độ phủ tệp 48 ngày; các mốc hiệu chuẩn/ngoại lệ chưa được coi là chính sách đã áp dụng.
+
 ## 1. Kết luận từ luồng thực thi
 
 1. POS đã có một phần tự tăng kiểm soát: khi kết ngày, NL đang mở có nợ FIFO, nhiều mã cùng mở, bán không gắn được tem, lỗi phân bổ RT hoặc Sổ lệch mở có thể tự vào danh sách cân dù chưa được cấu hình. Nhưng đây là lựa chọn tại bước cuối ngày, chưa phải trạng thái kiểm soát bền qua các ca.

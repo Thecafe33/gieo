@@ -12,6 +12,8 @@ Không tạo kho, bill hoặc P&L thứ hai. Quanlygieo2 và POS dùng cùng k�
 
 Hai trục phải tách riêng: cấp năng lực 1–6 của hệ thống và mức kiểm soát của từng món/từng quán. Mô hình nguyên nhân không thay chính sách trách nhiệm đã chốt; học một mức hao hụt thường xuyên không được biến nó thành lượng mất được miễn ghi nhận. Hiệu chuẩn chỉ đổi tham số được phép trong giới hạn, có phiên bản/quay lui; không tự sửa lịch sử tổn thất hoặc trừ lương.
 
+Đã bổ sung [đặc tả năm sản phẩm triển khai](DAC_TA_TRIEN_KHAI_UNIT_ENGINE2_V1.md): schema, ba máy trạng thái, writer theo nghiệp vụ, học/kiểm toán và manifest replay; [15 ngoại lệ](NGOAI_LE_UNIT_ENGINE2_DE_XUAT.md) là phương án đề xuất chưa chốt. Đã đối chiếu các đường POS chính và kiểm AST. Tệp gọn 48 ngày đang có thiếu ledger gốc/RT/containerId nên chưa đủ chứng nhận replay; chưa viết mapper hoặc runtime.
+
 ## Đối chiếu phần hiện có
 
 | Phần | Hiện tại | Vai trò trong Engine 2 |
