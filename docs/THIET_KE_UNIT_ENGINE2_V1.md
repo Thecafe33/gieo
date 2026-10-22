@@ -1,5 +1,7 @@
 # Unit Engine 2 — thiết kế v1, 22/10/2026
 
+> **Lộ trình & trạng thái hiện hành: [LO_TRINH_ENGINE2_CAP6.md](LO_TRINH_ENGINE2_CAP6.md)** (22/10, chủ quán duyệt). Tài liệu này là tham chiếu; thứ tự, phạm vi và định nghĩa cấp theo lộ trình.
+
 Trạng thái mới: **runtime P0 đã triển khai sau lệnh bắt đầu của chủ quán**, xem [kết quả và giới hạn](UNIT_ENGINE2_P0_22-10.md). Chưa deploy/chưa chứng nhận cấp 6. Phần dưới là thiết kế đích; `unit_engine2_v1.js`, API `UnitEngine2`; bản sau tăng version, không sửa bản đã phát hành.
 
 ## Mục tiêu đã chốt

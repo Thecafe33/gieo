@@ -1,3 +1,7 @@
+# 22/10 — Engine 2: lộ trình cấp 6 điều chỉnh (chủ quán duyệt)
+
+[Lộ trình duy nhất](LO_TRINH_ENGINE2_CAP6.md): cấp 4 chỉ cho giả thuyết kiểm được bằng phép đo; thêm cân ngẫu nhiên M0 có ngân sách + ghi thời gian thao tác; bộ kiểm toán độc lập + cài lỗi giả làm trước (B0); lát dọc family NL có tem tới cấp 6 rồi mới mở BTP/FIFO/nhận hàng; quy mô lớn là trục riêng. Chỉ tài liệu, chưa đổi code.
+
 # 22/10 — Engine 2: runtime P0 đã triển khai
 
 [Luồng đầu, kiểm thử và giới hạn](UNIT_ENGINE2_P0_22-10.md): báo hết còn dư → phân bổ pha chế theo khoảng → yêu cầu cân M2 → POS ghi số đo → mốc mới. Adapter v21 giữ một writer kho, receipt chống ghi lại khi mất ACK, queue/fence theo quán và projection hộp thư. Mặc định chưa bật; chưa deploy, chưa ghi Firebase thật. Học/hiệu chuẩn/auditor toàn sổ/replay raw và mở rộng các family vẫn ở lộ trình, chưa chứng nhận cấp 6. Các mục bên dưới là lịch sử trước triển khai.

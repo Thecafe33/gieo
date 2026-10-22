@@ -1,5 +1,7 @@
 # Engine 2 — 15 chính sách ngoại lệ đề xuất
 
+> **Lộ trình & trạng thái hiện hành: [LO_TRINH_ENGINE2_CAP6.md](LO_TRINH_ENGINE2_CAP6.md)** (22/10, chủ quán duyệt). Tài liệu này là tham chiếu; thứ tự, phạm vi và định nghĩa cấp theo lộ trình.
+
 22/10/2026. **Tài liệu trước runtime. Chủ quán xác nhận ca luôn có nhóm pha chế; không yêu cầu thiết kế nhân sự dự phòng hoặc duyệt từng case.** Các hạn/số đo thử nghiệm vẫn là chi tiết cần kiểm chứng khi triển khai. Đi cùng [đặc tả triển khai](DAC_TA_TRIEN_KHAI_UNIT_ENGINE2_V1.md).
 
 Người được giao thực hiện phép đo/hoàn thiện dữ liệu không mặc định chịu tiền mất. Dữ liệu nguồn chưa đủ không được thay bằng 0, nhân sự ngẫu nhiên hoặc giờ hiện tại. Không chặn bán hàng, check-in/check-out. Mọi bước đóng ca phải có lối thoát có ghi nhận và đường phục hồi; ngoại lệ không được tính là đã cân/đối soát đủ.

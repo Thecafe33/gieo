@@ -1,8 +1,10 @@
 # Đặc tả triển khai Unit Engine 2 v1
 
+> **Lộ trình & trạng thái hiện hành: [LO_TRINH_ENGINE2_CAP6.md](LO_TRINH_ENGINE2_CAP6.md)** (22/10, chủ quán duyệt). Tài liệu này là tham chiếu; thứ tự, phạm vi và định nghĩa cấp theo lộ trình.
+
 Ngày: 22/10/2026. Mã nguồn đối chiếu: `53775f7`, nhánh `Phan-tach-unit-engine`.
 
-**Đặc tả trước code. Chưa có runtime Engine 2, mapper mới hoặc replay nghiệm thu.** Tài liệu tiếp nhận năm sản phẩm/tiêu chí chủ quán đề xuất, bổ sung đối chiếu POS thật và sửa các điểm có thể dẫn đến nghiệm thu sai. Chủ quán đã xác nhận ca luôn có nhóm pha chế: việc đo giao nhóm đang ca, việc dở chuyển ca sau, trách nhiệm vẫn theo khoảng lịch sử. **Đủ tài liệu để bắt đầu lõi và luồng P0.** Các con số hiệu chuẩn là tham số thử nghiệm cần kiểm chứng, chưa phải cấu hình có hiệu lực.
+**Đặc tả viết trước code.** Runtime P0 đã có sau đó (`282dd00`); mapper/replay nghiệm thu chưa có — xem lộ trình. Tài liệu tiếp nhận năm sản phẩm/tiêu chí chủ quán đề xuất, bổ sung đối chiếu POS thật và sửa các điểm có thể dẫn đến nghiệm thu sai. Chủ quán đã xác nhận ca luôn có nhóm pha chế: việc đo giao nhóm đang ca, việc dở chuyển ca sau, trách nhiệm vẫn theo khoảng lịch sử. **Đủ tài liệu để bắt đầu lõi và luồng P0.** Các con số hiệu chuẩn là tham số thử nghiệm cần kiểm chứng, chưa phải cấu hình có hiệu lực.
 
 Tài liệu đi cùng: [kiến trúc](THIET_KE_UNIT_ENGINE2_V1.md), [ma trận các case và đích cấp 6](MA_TRAN_ENGINE2_TU_DONG_NANG_MUC.md), [15 ngoại lệ đề xuất](NGOAI_LE_UNIT_ENGINE2_DE_XUAT.md).
 
@@ -201,7 +203,7 @@ Tách bốn nhãn: độ đúng phép đo, sự kiện kho đã xác lập, phâ
 | Hạng mục | Mốc đề xuất, chưa phải hằng số sản xuất |
 |---|---|
 | Baseline một nhóm món/đo/công thức | ≥20 mốc hợp lệ trên ≥14 ngày có hoạt động, có lượng dùng đủ theo nhóm; chưa đủ thì cold_start, dùng mức sàn và khoảng bất định |
-| Model xác suất | Có nhãn xác minh độc lập; mốc thử ≥100 case cho nhóm đủ tương đồng và ≥30 case kiểm theo thời gian ngoài tập học. Chưa đủ chỉ xếp giả thuyết, không in xác suất chắc chắn |
+| Model xác suất | **Chỉ cho giả thuyết kiểm được bằng phép đo (lộ trình, điều chỉnh 1); mốc thử thay bằng ≥30 nhãn/≥10 ngoài thời gian.** Bản gốc: có nhãn xác minh độc lập; mốc thử ≥100 case cho nhóm đủ tương đồng và ≥30 case kiểm theo thời gian ngoài tập học. Chưa đủ chỉ xếp giả thuyết, không in xác suất chắc chắn |
 | Hiệu chuẩn | Báo Brier score, reliability theo nhóm xác suất và sai số kèm độ bất định; ECE mục tiêu thử ≤0,10 trên mẫu đủ. Mẫu nhỏ không được kết luận đã đạt chỉ vì điểm đẹp |
 | Tự đổi tham số dự báo | Chỉ tham số được phép, tối đa ±5% mỗi 7 ngày có hoạt động so với bản đã nhận; thay đơn vị/công thức/bì là đổi phiên bản đo, không ép vào quy tắc 5% |
 | Tự đổi chính sách liên quan người/tiền/định mức/bì | Không tự áp; tạo đề xuất có căn cứ. Thay chính sách chung có phiên bản; không đòi chủ duyệt mỗi case |
@@ -267,7 +269,7 @@ Replay trước 30 ngày có đủ độ phủ, mở tới 60 nếu dữ liệu 
 8. Không phát sinh chờ task/model/worker trên đường tạo bill; không trì hoãn check-out chấm công vì kiểm kê. Đóng ca có ngoại lệ giữ việc tiếp và căn cứ người giao/nhận.
 9. Model không được dùng phỏng đoán của chính mình làm ground truth, học baseline hao hụt thành mức cho phép, hoặc cập nhật tài chính/lương/định mức người mà không có thẩm quyền.
 
-Mỗi dòng ma trận A/B/F/D/T/C là một nhóm fixture có input events, starting state, expected source refs/quantities/allocations/control/tasks/reads và rollback. Thêm phép kiểm toàn bộ cặp trạng thái–event, kiểm vòng phục hồi có lối ra và inject lỗi vào bộ auditor; chưa có các test mới này trong repo.
+Mỗi dòng ma trận A/B/F/D/T/C là một nhóm fixture có input events, starting state, expected source refs/quantities/allocations/control/tasks/reads và rollback. Thêm phép kiểm toàn bộ cặp trạng thái–event, kiểm vòng phục hồi có lối ra và inject lỗi vào bộ auditor — bước B0 của [lộ trình](LO_TRINH_ENGINE2_CAP6.md), chưa làm.
 
 ## 8. Trạng thái sẵn sàng
 

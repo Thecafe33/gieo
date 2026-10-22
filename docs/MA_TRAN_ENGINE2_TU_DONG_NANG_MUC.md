@@ -1,10 +1,12 @@
 # Engine 2 — rà luồng nâng mức kiểm soát và đích cấp 6
 
+> **Lộ trình & trạng thái hiện hành: [LO_TRINH_ENGINE2_CAP6.md](LO_TRINH_ENGINE2_CAP6.md)** (22/10, chủ quán duyệt). Tài liệu này là tham chiếu; thứ tự, phạm vi và định nghĩa cấp theo lộ trình.
+
 Ngày rà: 22/10/2026. Mã nguồn đối chiếu: `abf5034`, nhánh `Phan-tach-unit-engine`.
 
-**Trạng thái: tài liệu thiết kế, chưa sửa runtime, chưa triển khai Firebase.** Phạm vi là `posgieo.html`, Engine v20, automation v3 và `quanlygieo2`; không thay những luồng bán hàng chủ quán đã xác nhận là có chủ đích.
+**Trạng thái lúc rà: tài liệu thiết kế, chưa sửa runtime.** Runtime P0 đã có sau đó (`282dd00`, chưa deploy) — xem lộ trình. Phạm vi là `posgieo.html`, Engine v20, automation v3 và `quanlygieo2`; không thay những luồng bán hàng chủ quán đã xác nhận là có chủ đích.
 
-Tiếp nối: [đặc tả triển khai năm sản phẩm](DAC_TA_TRIEN_KHAI_UNIT_ENGINE2_V1.md) và [15 ngoại lệ](NGOAI_LE_UNIT_ENGINE2_DE_XUAT.md). Đã làm rõ ca luôn có pha chế, giao việc tại quầy và bàn giao việc dở cho ca sau; đủ để bắt đầu lõi/P0. Đặc tả có hợp đồng/transition/writer và kiểm độ phủ tệp 48 ngày; các mốc hiệu chuẩn vẫn cần kiểm chứng, chưa có runtime áp dụng.
+Tiếp nối: [đặc tả triển khai năm sản phẩm](DAC_TA_TRIEN_KHAI_UNIT_ENGINE2_V1.md) và [15 ngoại lệ](NGOAI_LE_UNIT_ENGINE2_DE_XUAT.md). Đã làm rõ ca luôn có pha chế, giao việc tại quầy và bàn giao việc dở cho ca sau; đủ để bắt đầu lõi/P0. Đặc tả có hợp đồng/transition/writer và kiểm độ phủ tệp 48 ngày; các mốc hiệu chuẩn vẫn cần kiểm chứng.
 
 ## 1. Kết luận từ luồng thực thi
 
@@ -114,7 +116,7 @@ Các nhánh rule đã có: chi phí chờ duyệt; đồng hồ xác minh; kết
 
 ## 5. Đích cấp 6 và bằng chứng nghiệm thu
 
-Đây là đích hoàn thiện chủ quán yêu cầu cho Engine 2. Một bản có nhiều rule hoặc một bảng chấm điểm không được gọi là cấp 6. Từng năng lực cần dữ liệu và bằng chứng thực hiện; hiện chưa có runtime Engine 2.
+Đây là đích hoàn thiện chủ quán yêu cầu cho Engine 2. Một bản có nhiều rule hoặc một bảng chấm điểm không được gọi là cấp 6. Từng năng lực cần dữ liệu và bằng chứng thực hiện. Trạng thái từng cấp và cửa nghiệm thu đo được: [lộ trình](LO_TRINH_ENGINE2_CAP6.md) mục 2. **Cấp 4 giới hạn ở giả thuyết kiểm được bằng phép đo; thất thoát chưa khai là phần dư, không in xác suất** (chốt 22/10).
 
 | Cấp | Engine 2 phải làm được | Bằng chứng để nghiệm thu |
 |---|---|---|
@@ -189,6 +191,8 @@ Theo dõi cả reads/writes mỗi case, mỗi mốc, mỗi quán/ngày và trên
 
 ## 7. Thứ tự triển khai và kiểm chứng
 
+> **Đã thay bằng [lộ trình](LO_TRINH_ENGINE2_CAP6.md) mục 3** (22/10): kiểm toán + cài lỗi giả làm trước (B0), thu dữ liệu shadow + cân ngẫu nhiên M0 (B1), lát dọc family NL có tem tới cấp 6 rồi mới mở family khác. Danh sách dưới giữ để tra cứu.
+
 1. **Chuẩn hóa sự kiện và kiểm sổ trước phân bổ.** Map các nhánh WASTE/ADJUSTMENT/alert/duty, ID chống lặp, ca/mốc/giá vốn và cách xử lý nguồn bị sửa. Chốt chính sách chung cho nhóm thiếu dữ liệu, sai số theo đơn vị và quyền bổ sung bì/tỷ trọng; không hỏi chủ duyệt mỗi case.
 2. **Đi trọn A1 → D4 → A3/A5.** Case 500 g − 200 g đã dùng = 300 g báo hết: 4 barista hợp lệ nhận 75 g/người, theo giá vốn nguồn; không trừ kho thêm; tự bật M2 và lấy mốc cho mã còn dùng/mở mới. Bàn giao sau tách đúng nhóm và khoảng mới. Không hồi sinh tem finished.
 3. **Đóng các lối mất kết quả P0.** Unconfirmed không giả hoàn tất; nguồn kỹ thuật lỗi không quy sai; tác vụ bền, ACK, máy cũ, mất mạng và đóng trình duyệt vẫn phục hồi. Không để check-out chấm công bị kéo dài vì kiểm kê.
@@ -224,4 +228,4 @@ Phép chạy policy cục bộ trong lượt rà (không ghi Firebase):
 | Tem finished, needsReview=false, unitBase=300 | done / LOT_COMPLETE |
 | Tem finished, needsReview=true, unitBase=300 | working / LOT_REVIEW |
 
-Không lấy các fixture này làm chứng minh dữ liệu thật ở quán đã được đối soát. Lượt này chỉ bổ sung tài liệu; chưa tạo `unit_engine2_v1.js`, chưa chuyển frontend/worker và chưa sửa chính sách vận hành hiện tại.
+Không lấy các fixture này làm chứng minh dữ liệu thật ở quán đã được đối soát. Lượt rà này chỉ bổ sung tài liệu (runtime P0 làm ở commit sau).
