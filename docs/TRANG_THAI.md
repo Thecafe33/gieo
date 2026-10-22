@@ -1,3 +1,7 @@
+# 23/10 — manage duyệt nhanh quán Gieo (đợt 1)
+
+[Kế hoạch](KE_HOACH_MANAGE_DUYET_GIEO.md): chi phí chờ duyệt Gieo duyệt ở tab Chi phí (chung TC33/XOFA); màn «Chờ xử lý Gieo»: Đóng ngày chưa đóng sổ, điền giờ ra ca treo, cảnh báo Đã xem / Đã xử lý — ghi y quanlygieo + dấu lãi/lỗ. Đợt 2 (Unit Engine trong manage) chờ chủ quán duyệt. Chưa deploy.
+
 # 22/10 — Engine 2 cấp 3–6: năng lực đạt trên mô phỏng, chờ dữ liệu thật
 
 [Lộ trình](LO_TRINH_ENGINE2_CAP6.md) mục «Kết quả B3–B6»: học mức thường, giả thuyết kiểm được (xác suất chỉ sau hiệu chỉnh ngoài mẫu), vòng kín nâng/hạ, tự hiệu chuẩn có phiên bản/quay lui/kiểm toán mô hình; bộ mô phỏng 24 kịch bản có sự thật biết trước + hiệu chuẩn khởi tạo (`unit_engine2_params_v1.js` sinh tự động); công cụ chứng nhận: mô phỏng cấp 6/6, dữ liệu thật gg01 cấp 2/6. Cần deploy Engine 2 + worker và chạy tự động để chứng minh cấp 3–6 trên quán. Chưa deploy.

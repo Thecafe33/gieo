@@ -55,4 +55,6 @@ Căn cứ: lượt rà 22/10 — 20 loại việc chờ ở quanlygieo; quanlygi
 | 1.3 Ca chưa check-out ngày cũ | ✅ 23/10 — cùng màn «Chờ xử lý Gieo»: `checkedOutAt == null` limit 100 / quán (truy vấn một trường như quanlygieo), lọc ngày cũ; «Điền giờ ra» (`closeGieoShift`, transaction, như `ccSaveEdit` + `manualEditBy:'manage'`, giờ ra ≤ giờ vào sang ngày sau, > 16 giờ hỏi lại, > 24 giờ chặn) + dấu `pl_dirty` ngày ca |
 | 1.4 Ngày chưa đóng sổ | ✅ 23/10 — cùng màn: ngày đã mở ca chưa `closed` trong 30 ngày (2 truy vấn khoảng mã tài liệu / quán như `loadStaleClosingDays`), nhãn trạng thái như quanlygieo; «Đóng ngày» (`forceCloseGieoDay`: lý do bắt buộc, transaction, ghi như `forceCloseStaleDay`, chốt ca treo ngày đó 23:59 `autoCheckOut`, dấu `pl_dirty` khi có ca được chốt, `audit_logs_gieogieo` kèm `storeId`) |
 | 1.5 ô tổng trên Tổng quan | chưa — hiện vào qua menu «Chờ xử lý Gieo»; ô đếm trên Tổng quan cần thêm lượt đọc mỗi lần mở Tổng quan → chờ chủ quán quyết |
-| Đợt 2, 3 | chưa — cần chủ quán xem kế hoạch Engine trong manage |
+| Đợt 2, 3 | **dừng chờ chủ quán** (23/10 ~2:35 VN) — nạp Unit Engine vào manage là đổi kiến trúc (manage xem nhiều quán, Engine gắn một quán), cần chủ quán duyệt cách khởi tạo theo quán trước khi làm |
+
+Deploy đợt 1: chỉ `manage.html` (bộ `ban_deploy/<mùa>/` đã sinh lại). Không cần index mới (truy vấn một trường / khoảng mã tài liệu đã dùng ở quanlygieo).
