@@ -19,7 +19,7 @@ const TESTS={tare:'tare_check',density:'density_proof',recipe:'recipe_portion_we
 // Tham số mặc định = TIÊN NGHIỆM khai báo (chưa hiệu chuẩn). Bản hiệu chuẩn mô phỏng / thật thay thế qua calibrate().
 const DEFAULT_PARAMS={
  version:'prior-1',origin:'declared_prior',
- kEscalate:2.5,kClean:1.5,coldStartFactor:1.6,minMeasLearn:10,measUnsureFactor:2.5,minExcess:{g:15,ml:15,cai:2,other:5},
+ kEscalate:2.5,kClean:1.5,coldStartFactor:1.6,minMeasLearn:10,measUnsureFactor:2.5,measUpper:1,minExcess:{g:15,ml:15,cai:2,other:5},
  measSigma:{g:3,ml:4,cai:0.5,other:2},              // sai số một lần cân/đếm (đơn vị nền); đếm cái làm tròn ±0,5 → σ ≥ 0,5
  cusum:{k:0.5,h:4},                                 // cộng dồn thiếu nhỏ dưới ngưỡng từng lần (case A8)
  flagLik:{anomalyGivenSync:0.9,anomalyGivenOther:0.05,untrackedGivenUnrecorded:0.9,untrackedGivenOther:0.05},
@@ -61,7 +61,8 @@ function baseline(obs,params=DEFAULT_PARAMS,accepted={}){
  // → báo sai nhiều hơn → càng cắt cụt. MAD bền với số ít bất thường thật.
  const allBy={};for(const o of obs)if(usable(o)&&!(o.ctx&&o.ctx.fifoDebt)&&o.nWeigh>0)(allBy[o.itemId]=allBy[o.itemId]||[]).push(o);
  for(const [id,list] of Object.entries(allBy)){const g=unitGroup(list[0].unit),m=median((by[id]||list).map(rate));if(Number.isFinite(m))for(const o of list)(meas[g]=meas[g]||[]).push((o.loss-m*o.used)/Math.sqrt(o.nWeigh));}   // chuẩn hoá về MỘT lần cân
- const measOf=g=>Math.max(params.measSigma[g]||0,meas[g]&&meas[g].length>=10?mad(meas[g]):0);
+ // Cận trên theo cỡ mẫu (MAD hiệu suất ~37% → sai chuẩn ≈ σ/√(0,74·n)): ít mẫu thì nới, nhiều mẫu thì sát ước lượng.
+ const measLearned=g=>meas[g]&&meas[g].length>=10?mad(meas[g])*(1+(params.measUpper??1)/Math.sqrt(0.74*meas[g].length)):null,measOf=g=>Math.max(params.measSigma[g]||0,measLearned(g)||0);
  // 2) Từng món: tách phân tán QUÁ TRÌNH khỏi sai số cân — var(tỷ lệ) = σp² + σm²·nCân/lượng² (không cộng sai số cân hai lần).
  const stats={};
  for(const [id,list] of lists){const g=gOf(list),r=list.map(rate),raw=mad(r),mv=median(list.map(o=>o.nWeigh>0?Math.pow(measOf(g),2)*o.nWeigh/Math.pow(o.used,2):0));
@@ -73,7 +74,7 @@ function baseline(obs,params=DEFAULT_PARAMS,accepted={}){
   let mu0=median(ms.length?ms:all),tau=Math.max(P.tauFloor,mad(ms.length>1?ms:all)||0),sig=Math.max(P.sigmaFloor,median(items.map(i=>i.sp))||0);
   // Nhóm chưa đủ món có dữ liệu → trộn với tiên nghiệm khai báo theo tỷ lệ số món (không để 1–2 món nhiễu quyết mức cả nhóm).
   const k=Math.min(1,ms.length/params.minGroupItems);if(k<1){mu0=k*(Number.isFinite(mu0)?mu0:D.mu)+(1-k)*D.mu;tau=Math.max(tau,D.tau*(1-k)+tau*k);sig=Math.max(sig,D.sigma*(1-k)+sig*k);}
-  groupPrior[g]={mu0:Number.isFinite(mu0)?mu0:D.mu,tau,sigma:sig,items:items.length,dataItems:ms.length,measQty:meas[g]&&meas[g].length>=10?mad(meas[g]):null,measN:(meas[g]||[]).length};
+  groupPrior[g]={mu0:Number.isFinite(mu0)?mu0:D.mu,tau,sigma:sig,items:items.length,dataItems:ms.length,measQty:measLearned(g),measN:(meas[g]||[]).length};
  }
  // 4) Ước lượng từng món: co về nhóm; trần nhóm khi chưa xác minh.
  const out={};
@@ -224,7 +225,7 @@ function calibrate(current,obs,opts={}){
  }
  const promoted=best!==P,dataHash=hash(stable(seq.map(o=>[o.id,o.loss,o.used])));
  const changes=keys.filter(k=>get(best,k)!==get(P,k)).map(k=>({param:k,from:get(P,k),to:get(best,k)}));
- if(promoted){best.version=(mode==='sim'?'sim-':'live-')+dataHash+'-'+(opts.stamp||'');best.origin=mode==='sim'?'calibrated_simulation':'calibrated_live';best.parent=current.version;}
+ if(promoted){best.version=(mode==='sim'?'sim-':'live-')+hash(stable([dataHash,keys.map(k=>get(best,k))]))+'-'+(opts.stamp||'');/* tên theo dữ liệu + tham số: hai bộ khác nhau không trùng tên */best.origin=mode==='sim'?'calibrated_simulation':'calibrated_live';best.parent=current.version;}
  return {promoted,mode,reason:promoted?'Tốt hơn trên phần thời gian chưa học, bỏ sót không tăng':'Không có bộ tham số tốt hơn trong biên',params:promoted?best:current,
   record:{version:promoted?best.version:current.version,parent:current.version,mode,dataHash,window:{from:seq[0]?.at||null,to:seq.at(-1)?.at||null,train:cut,validation:valid.length},metricsBefore:before,metricsAfter:bestM,changes,rollbackRef:current.version}};
 }

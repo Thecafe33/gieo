@@ -37,7 +37,7 @@ const SCENARIOS=[
  {name:'doi_nha_cung_cap',note:'Ngày 25 tem trân châu đổi 2000 g → 1000 g',inject:{supplier:{item:'pearl',day:25,cap:1000}},expect:{maxFalseAlarmRate:0.3}},
  {name:'mon_it_ban',note:'Món bán rất ít (~0,6 miếng/ngày) — không được tuyên bố đủ tin cậy, không báo động sai',items:['peach','tea'],itemOverrides:{peach:{daily:0.6}},expect:{noTrustedFor:['peach'],maxFalseAlarmRate:0.25}},
  {name:'nhieu_loi_cung_luc',note:'Sai bì + thất thoát cùng lúc — phải tách được',startLevel:{jelly:2},inject:{tare:{vessel:'v_jelly',bias:-20},theft:{item:'jelly',from:25,to:45,qty:12}},expect:{identify:'tare',fixed:true,residual:true}},
- {name:'can_nhieu',note:'Cân điện tử kém (sai số 3×)',noise:3,expect:{maxFalseAlarmRate:0.35}},
+ {name:'can_nhieu',note:'Cân điện tử kém (sai số cân 3× — món đếm cái không đổi)',noise:3,expect:{maxFalseAlarmRate:0.35}},
  {name:'thieu_nho_lap_lai',note:'Thiếu nhỏ 8 g/ngày dưới ngưỡng từng lần',inject:{theft:{item:'jelly',from:10,to:55,qty:8}},expect:{flagAny:['drift','detect']}},
  {name:'du_hang',note:'Sổ thấp hơn thực (nhập thiếu sổ) — dư không phải thất thoát',inject:{surplus:{item:'pearl',from:15,to:30,qty:40}},expect:{noEscalateFor:['pearl']}},
  {name:'nhan_hang_sai_dung_tich',note:'Tem trân châu ghi 2000 g nhưng thật 1880 g (nhận hàng sai đơn vị — D1)',inject:{receiving:{item:'pearl',delta:120,from:0}},expect:{identify:'receiving',fixed:true}},
@@ -62,7 +62,7 @@ function simulate(sc,opts={}){
  let base=L.baseline([],params),pending=[],minutes=0;
  const unitKey=it=>L.unitGroup(it.unit);
  function record(it,d,kind,group){
-  const s=st[it.id],c=s.c,meas=params.measSigma[unitKey(it)]*noiseK;let measured=0,tareApp=0,densApp=0,noise=0,nWeigh=0;
+  const s=st[it.id],c=s.c,meas=params.measSigma[unitKey(it)]*(it.unit==='cái'?1:noiseK)/* cân kém chỉ ảnh hưởng món CÂN; món đếm cái không qua cân */;let measured=0,tareApp=0,densApp=0,noise=0,nWeigh=0;
   // Sổ đầu khoảng đặt theo lần cân trước → sai số lần cân đó nằm trong quan sát (kể cả báo hết).
   const startWeighed=c.fromWeigh?1:0;
   if(kind!=='finish'){nWeigh=1;const v=vessels['v_'+it.id],b=v.tareTrue-v.tareRecorded;tareApp=-b;
