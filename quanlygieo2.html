@@ -2895,6 +2895,8 @@ html.tab-ui .topbar.has-notifications .topbar-actions{flex:0 0 auto;max-width:ca
 <script src="unit_engine2_v1.js"></script>
 <script src="unit_engine2_store_v1.js"></script>
 <script id="ueRetry">if(!window.UnitEngine){document.write('<scr'+'ipt src="unit_engine.v21.js?r=1"><\/scr'+'ipt>');}</script>
+<!-- [Engine 2 · B2] Bản kiểm toán kho — chỉ dùng khi bấm ở Trích xuất dữ liệu; thiếu file thì nút báo, app vẫn chạy. -->
+<script src="unit_engine2_export_v1.js"></script>
 <script>
 // Ngày nghiệp vụ theo UTC+7; timestamp/ISO vẫn là thời điểm thật. Không thay Date của SDK.
 function vnDate(...args){
@@ -22342,6 +22344,50 @@ async function runExport(mode){
     box.innerHTML = '<div class="card"><div class="muted">Trích xuất thất bại: '+(err.code||err.message||err)+'</div></div>';
   }finally{ _exportBusy = false; }
 }
+// [Engine 2 · B2] Bản kiểm toán kho (unit_engine2_export_v1.js): chỉ đọc, đọc theo trang có giới hạn,
+// manifest ghi rõ phần thiếu / thao tác dở. File đọc thẳng bằng tools/automation/engine2_audit.js.
+async function runExportKho(){
+  if(_exportBusy){ toast('⏳ Đang trích xuất, đợi chút...'); return; }
+  if(QL_ALL){ toast('⚠️ Chọn một điểm bán (không dùng Xem tất cả) rồi trích xuất'); return; }
+  if(!window.UnitEngine2Export){ toast('⚠️ Chưa tải được unit_engine2_export_v1.js — chép file vào thư mục deploy'); return; }
+  exportFrom = document.getElementById('exportFrom').value;
+  exportTo = document.getElementById('exportTo').value;
+  if(!exportFrom || !exportTo || exportFrom > exportTo){ toast('⚠️ Chọn khoảng ngày hợp lệ'); return; }
+  _exportBusy = true;
+  const box = document.getElementById('exportResult');
+  box.innerHTML = '<div class="card"><div class="muted" id="exportStatus">Đang bắt đầu...</div></div>';
+  try{
+    await ensureAuth();
+    const out = await UnitEngine2Export.build({
+      storeId: QL_VIEW, from: exportFrom, to: exportTo,
+      coll: k => GieoData.collFor(k + '_gieogieo', QL_VIEW), nameFor: k => GieoData.fsName(k + '_gieogieo', QL_VIEW),
+      rtRef: n => db.ref(n + '_gieogieo'), rtNameFor: n => GieoData.rtPath(n + '_gieogieo', QL_VIEW),
+      serverOffset: async () => (await db.ref('.info/serverTimeOffset').once('value')).val(),
+      onStatus: t => { const el = document.getElementById('exportStatus'); if(el) el.textContent = t; },
+      meta: { app: 'quanlygieo', unitEngine: window.UnitEngine && UnitEngine.VERSION, unitEngine2: window.UnitEngine2 ? UnitEngine2.VERSION : null }
+    });
+    const m = out.manifest, text = JSON.stringify(out);
+    _exportResult = { text, filename: `gieo-${QL_VIEW}-kiemtoankho-${exportFrom}_den_${exportTo}.json` };
+    const rows = Object.entries(m.sections).map(([k, s]) => `<div class="row"><span class="rl">${k}</span><span class="rv" style="color:${s.truncated || s.error ? 'var(--bad)' : 'inherit'}">${s.count}${s.truncated ? ' · CHƯA ĐỦ' : ''}${s.missing ? ' · thiếu ' + s.missing : ''}${s.error ? ' · lỗi' : ''}</span></div>`).join('');
+    const busy = m.inflight.measurementLocks + m.inflight.dirtyRequests + m.inflight.queuedMeasurements + m.inflight.rtPrepLocks + m.inflight.rtDiscardPending;
+    box.innerHTML = `
+      <div class="card">
+        <div class="card-h"><h3>Đã dựng bản kiểm toán kho</h3><span class="tier ${m.complete ? 'tier-green' : 'tier-amber'}">${m.complete ? 'Đủ' : 'Chưa đủ'} · ${_expSizeLabel(text)}</span></div>
+        <div class="row"><span class="rl">Điểm bán · khoảng ngày</span><span class="rv">${m.store} · ${m.range.from} → ${m.range.to} (${m.range.days} ngày)</span></div>
+        <div class="row"><span class="rl">Số bản ghi</span><span class="rv">${m.docCount}</span></div>
+        <div class="row"><span class="rl">Mã kiểm</span><span class="rv" style="font-family:ui-monospace,Menlo,monospace">${String(m.sha256 || '').slice(0, 16)}…</span></div>
+        ${rows}
+      </div>
+      ${m.errors.length ? `<div class="alert red"><span class="ic">!</span><div>Có ${m.errors.length} phần không đọc được (ghi trong file ở <b>manifest.errors</b>): ${m.errors.map(e => escapeHtmlAttr(e.phan + ' — ' + e.loi)).join('; ')}.</div></div>` : ''}
+      ${Object.values(m.sections).some(s => s.truncated) ? `<div class="alert red"><span class="ic">!</span><div>Có phần chạm giới hạn đọc — thu hẹp khoảng ngày rồi xuất lại. Bộ kiểm toán sẽ báo CHƯA ĐẠT với file này.</div></div>` : ''}
+      ${busy ? `<div class="alert"><span class="ic">i</span><div>Lúc xuất có ${busy} thao tác kho/cân đang dở (ghi ở <b>manifest.inflight</b>). Nên xuất lại lúc quán vắng.</div></div>` : ''}
+      <button class="btn" onclick="saveExportFile()">${ic('download',15)} Tải file ${_exportResult.filename}</button>
+    `;
+  }catch(err){
+    console.error('runExportKho failed', err);
+    box.innerHTML = '<div class="card"><div class="muted">Trích xuất thất bại: ' + escapeHtmlAttr(err.code || err.message || err) + '</div></div>';
+  }finally{ _exportBusy = false; }
+}
 function saveExportFile(){
   if(!_exportResult){ toast('⚠️ Chưa có dữ liệu — bấm trích xuất trước'); return; }
   downloadJsonFile(_exportResult.text, _exportResult.filename);
@@ -22392,6 +22438,16 @@ function renderEntryExport(){
         khoanh được ngày hoặc nguyên liệu nghi vấn, và nên thu hẹp khoảng ngày lại.
       </div>
       <button class="btn outline" onclick="runExport('full')">Trích xuất bản đầy đủ</button>
+    </div>
+
+    <div class="card">
+      <div class="card-h"><h3>Bản kiểm toán kho (Engine 2)</h3><span class="tier tier-amber">Cho kiểm toán</span></div>
+      <div style="font-size:12.5px;color:#6b6459;line-height:1.65;margin-bottom:12px">
+        Sổ kho gốc từng dòng, <b>mọi tem liên quan</b> (cả tem nhận trước kỳ nhưng hết trong kỳ), ca làm việc,
+        lịch sử giá, dụng cụ/bì, dữ liệu Engine 2 và ảnh chụp tem đang mở — kèm bảng kê có mã kiểm.
+        Không gồm từng bill. Chỉ một điểm bán mỗi lần.
+      </div>
+      <button class="btn outline" onclick="runExportKho()">Trích xuất bản kiểm toán kho</button>
     </div>
 
     <div id="exportResult"></div>

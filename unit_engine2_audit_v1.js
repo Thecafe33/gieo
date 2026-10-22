@@ -59,7 +59,9 @@ const near=(a,b,eps=EPS)=>Math.abs(Number(a)-Number(b))<=eps;
 const sum=(rows,f)=>(rows||[]).reduce((s,r)=>s+(Number(f(r))||0),0);
 const stable=v=>v===undefined?'null':v===null||typeof v!=='object'?JSON.stringify(v):Array.isArray(v)?'['+v.map(stable).join(',')+']':'{'+Object.keys(v).sort().map(k=>JSON.stringify(k)+':'+stable(v[k])).join(',')+'}';
 function storeId(id){if(!/^gg\d{2}$/.test(id))throw Error('Kiểm toán: điểm bán không hợp lệ');return id;}
-const collName=(kind,store)=>kind+'_gieogieo'+(store==='gg01'?'':'__'+store);
+// Bảng DÙNG CHUNG mọi quán (loại G trong data_access) — không thêm hậu tố quán. Test đối chiếu với GieoData.REG.
+const SHARED=['price_history','prep_vessels','employees','recipes','recipe_history','prep_recipe_history','special_days'];
+const collName=(kind,store)=>kind+'_gieogieo'+(store==='gg01'||SHARED.includes(kind)?'':'__'+store);
 const lastSeg=p=>String(p||'').split('/').pop();
 const active=c=>!['voided','superseded'].includes(c.status);
 
@@ -198,9 +200,9 @@ function check(snap){
 
 /* Bounded, read-only loader. Each query has a limit; hitting it marks the snapshot incomplete
  * (report.ok=false) instead of silently auditing a partial picture. */
-async function collect({fstore,storeId:sid,from,to,limit=500}){
+async function collect({fstore,storeId:sid,from,to,limit=500,collection}){
  const store=storeId(sid);if(!/^\d{4}-\d{2}-\d{2}$/.test(from||'')||!/^\d{4}-\d{2}-\d{2}$/.test(to||'')||from>to)throw Error('Kiểm toán: cần khoảng ngày YYYY-MM-DD');
- const coll=k=>fstore.collection(collName(k,store)),base=coll('duty_digests').doc('_engine2'),sub=n=>base.collection(n);
+ const coll=collection||(k=>fstore.collection(collName(k,store))),base=coll('duty_digests').doc('_engine2'),sub=n=>base.collection(n);
  const fromIso=new Date(Date.parse(from+'T00:00:00+07:00')).toISOString(),toIso=new Date(Date.parse(to+'T00:00:00+07:00')+86400000).toISOString();
  const truncated=[],data=s=>s.exists?{...s.data(),id:s.id}:null;
  async function rows(name,q){const s=await q.limit(limit+1).get();if(s.docs.length>limit)truncated.push(name);return s.docs.slice(0,limit).map(data);}
@@ -234,6 +236,6 @@ function summary(report){
  const head=(report.ok?'ĐẠT':'CHƯA ĐẠT')+' — quán '+report.store+(report.range?' '+report.range.from+'→'+report.range.to:'')+': '+report.violations+' vi phạm, '+report.warnings+' cảnh báo'+(report.complete?'':' (CHƯA ĐỦ DỮ LIỆU: '+report.truncated.join(', ')+')');
  return [head,...report.issues.map(i=>(i.severity==='violation'?'✗ ':'! ')+i.code+' · '+i.ref+' — '+i.message+(i.detail?' '+JSON.stringify(i.detail):''))].join('\n');
 }
-const api={VERSION,CODES,TASK_STATUS,check,collect,run,summary};
+const api={VERSION,CODES,TASK_STATUS,SHARED,collName,check,collect,run,summary};
 if(typeof module==='object'&&module.exports)module.exports=api;root.UnitEngine2Audit=api;
 })(typeof window!=='undefined'?window:globalThis);

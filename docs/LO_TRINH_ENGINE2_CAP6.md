@@ -71,10 +71,21 @@ Mỗi bước chỉ bắt đầu khi bước trước đạt cửa. Bước có 
 - Sửa engine đã phát hành = bản mới (`unit_engine2_v2.js` …), không sửa v1.
 - Cửa: sau ≥ 14 ngày có hoạt động, bộ kiểm B0 chạy trên dữ liệu thật, 0 vi phạm chưa giải trình.
 
-**B2 — Công cụ xuất manifest đủ + replay 30 ngày (⛔ hiện tại).**
+**B2 — Công cụ xuất manifest đủ + replay 30 ngày (công cụ xuất ✅ 22/10; replay ⛔ chờ file thật).**
 - Xuất theo mục 7.2 đặc tả: raw stock/prep ledger có ID, tem có `containerId`, RT `active_units`, ca/role lịch sử, lịch sử giá/bì/công thức, điểm cắt FS–RT. Thao tác bấm rõ, có giới hạn, không quét nền POS.
 - Replay hai đường (tương thích / chính sách mới). Không đủ nguồn → `BLOCKED_DATA`, không «PASS dự kiến».
 - Cửa: cấp 1–2 family 1 đạt → **chứng nhận cấp 2**.
+
+**Thứ tự đổi (chủ quán duyệt 22/10): B2 làm TRƯỚC B1** — xuất lịch sử thật để chạy lại/kiểm toán thay phần lớn thời gian đối chiếu thử; dữ liệu học cấp 3–6 chỉ sinh khi chạy tự động (đối chiếu thử không giao việc cân nên gần như không sinh mẫu).
+
+**Kết quả B2 phần 1 — công cụ xuất (22/10, chưa deploy):**
+- `unit_engine2_export_v1.js` (`UnitEngine2Export.build`): chỉ đọc, chạy khi bấm, đọc theo trang (con trỏ snapshot) có giới hạn; tối đa 62 ngày, một điểm bán. Lấy: danh mục + lịch sử giá + dụng cụ/bì + refill_rules; theo businessDate: stock/prep_transactions, prep_batches, stock_containers, stock_anomalies, daily_closings/openings, shift_segments, duty_cases; **tem liên quan** = còn sống + có dòng sổ trong kỳ (cả tem nhận trước kỳ) + nhận trong kỳ; ca từ 14 giờ trước ngày đầu; toàn bộ dữ liệu Engine 2 (12 bảng con); RT `active_units`. Không gồm bill/khách.
+- File: `{manifest, docs:{tên_bảng_vật_lý/id: doc}, rt}`. Manifest: phiên bản, khoảng ngày, giờ máy chủ lệch, lúc chụp RT, số dòng / chạm giới hạn / thiếu / lỗi từng phần, **thao tác dở** (khoá cân, việc chờ, lượt cân xếp hàng, khoá chế biến RT, huỷ chờ), SHA-256 từng phần + tổng, ghi chú «FS và RT không phải ảnh chụp nguyên tử». Timestamp → ISO.
+- Quản lý › Trích xuất dữ liệu: thẻ thứ ba **«Bản kiểm toán kho (Engine 2)»** (`runExportKho`); hai bản gọn / đầy đủ giữ nguyên. Tên bảng qua `GieoData.collFor` / `fsName` / `rtPath` (bảng dùng chung `price_history`, `prep_vessels` không hậu tố quán — test đối chiếu `data_access`).
+- `tools/automation/engine2_audit.js` đọc thẳng file này; manifest chưa đủ → CHƯA ĐẠT.
+- Test `tests/unit_engine2_export.test.js` (xuất → kiểm toán 0/0, CLI, mã kiểm ổn định khi đổi cỡ trang, chạm giới hạn, lỗi một phần, thao tác dở, chặn 62 ngày, Timestamp, tên bảng gg02) + e2e trình duyệt `tools/ql_giao_dien/e2e_kiem_toan_kho.js` (PC + điện thoại: bấm → tải file → kiểm toán ĐẠT, không ghi, không lỗi JS).
+- **Còn lại của B2:** chủ quán deploy + xuất 30–60 ngày thật; viết công cụ chạy lại (replay) hai đường trên file đó; kiểm toán dữ liệu thật.
+- **Phát hiện ngoài phạm vi (chưa sửa — chờ quyết):** worker `functions/automation/engine2.js` tạo store Engine 2 **không truyền hàm đặt tên bảng** → ở quán ≠ gg01 đọc `prep_vessels_gieogieo__ggNN` / `price_history_gieogieo__ggNN` (không tồn tại, đó là bảng dùng chung) → mọi lượt cân bị từ chối «Dụng cụ hoặc bì đã thay đổi», giá thành «chưa đủ giá». POS / quanlygieo2 đúng (dùng `GieoData.collFor`). gg01 không bị.
 
 **B3 — Cấp 3: baseline NL có tem.** Phương pháp mục 4. Cửa: dự báo trên tuần chưa học nằm trong khoảng bất định đã công bố; một mẻ/khoảng lỗi không kéo lệch baseline (kiểm bằng lỗi cài).
 

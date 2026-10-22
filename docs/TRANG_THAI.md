@@ -1,3 +1,7 @@
+# 22/10 — Engine 2 B2: «Bản kiểm toán kho»
+
+[Lộ trình](LO_TRINH_ENGINE2_CAP6.md) đổi thứ tự B2 trước B1. Quản lý › Trích xuất dữ liệu có thẻ thứ ba «Bản kiểm toán kho (Engine 2)» — `unit_engine2_export_v1.js`, chỉ đọc, theo trang có giới hạn, manifest + SHA-256 + thao tác dở; file đọc thẳng bằng `tools/automation/engine2_audit.js`. Bộ kiểm toán sửa tên bảng dùng chung (chưa phát hành). Phát hiện: worker Engine 2 sai tên bảng dùng chung ở quán ≠ gg01 (chưa sửa, chờ quyết). Chưa deploy.
+
 # 22/10 — Engine 2 B0: kiểm toán độc lập + cài lỗi giả
 
 [Lộ trình](LO_TRINH_ENGINE2_CAP6.md) B0 đạt cửa trên dữ liệu giả: `unit_engine2_audit_v1.js` chỉ đọc, không nạp lõi quyết định, 44 mã; dữ liệu sạch từ luồng thật → 0 vi phạm/0 cảnh báo, 40/40 lỗi cài bị bắt. Test FSM 335 cặp: 33 lệch code ↔ đặc tả và store chưa đi qua `transition()` — chờ chủ quán quyết (sửa ở v2). Công cụ `tools/automation/engine2_audit.js` cho bản xuất. Chưa gắn vào worker/QL2, chưa deploy, chưa chạy dữ liệu thật.

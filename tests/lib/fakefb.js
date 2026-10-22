@@ -159,17 +159,20 @@ function makeFake(opts = {}) {
   const OPS = { '==': (a, b) => a === b, '!=': (a, b) => a !== b, '<': (a, b) => a < b, '<=': (a, b) => a <= b, '>': (a, b) => a > b, '>=': (a, b) => a >= b,
     in: (a, b) => b.includes(a), 'not-in': (a, b) => !b.includes(a), 'array-contains': (a, b) => Array.isArray(a) && a.includes(b), 'array-contains-any': (a, b) => Array.isArray(a) && a.some(x => b.includes(x)) };
   const getField = (d, f) => String(f).split('.').reduce((o, k) => (o == null ? undefined : o[k]), d);
-  function query(c, filters = [], order = [], lim = null) {
+  // Con trỏ phân trang: CHỈ hỗ trợ dạng snapshot doc (startAfter(lastDoc)); con trỏ dạng giá trị vẫn bị bỏ qua như cũ
+  // (các test cần con trỏ giá trị tự bọc riêng — xem gieo_automation_bootstrap.test.js).
+  function query(c, filters = [], order = [], lim = null, after = null) {
     const q = {
-      where: (f, op, v) => query(c, filters.concat([[f, op, v]]), order, lim),
-      orderBy: (f, dir) => query(c, filters, order.concat([[f, dir]]), lim),
-      limit: n => query(c, filters, order, n), limitToLast: n => query(c, filters, order, n),
-      startAfter: () => q,
+      where: (f, op, v) => query(c, filters.concat([[f, op, v]]), order, lim, after),
+      orderBy: (f, dir) => query(c, filters, order.concat([[f, dir]]), lim, after),
+      limit: n => query(c, filters, order, n, after), limitToLast: n => query(c, filters, order, n, after),
+      startAfter: (...a) => (a.length === 1 && a[0] && a[0].ref && typeof a[0].id === 'string' ? query(c, filters, order, lim, a[0].id) : q),
       get: async () => {
         fsFail();
         let ids = Object.keys(FS).filter(k => k.startsWith(c + '/') && !k.slice(c.length + 1).includes('/')).map(k => k.slice(c.length + 1)).sort();
         ids = ids.filter(id => filters.every(([f, op, v]) => OPS[op](getField(FS[c + '/' + id], f), v)));
         for (const [f, dir] of order.slice().reverse()) ids.sort((a, b) => { const x = getField(FS[c + '/' + a], f), y = getField(FS[c + '/' + b], f); const r = x < y ? -1 : x > y ? 1 : 0; return dir === 'desc' ? -r : r; });
+        if (after != null) { const i = ids.indexOf(after); ids = i < 0 ? ids.filter(id => id > after) : ids.slice(i + 1); }
         if (lim != null) ids = ids.slice(0, lim);
         const docs = ids.map(id => docSnap(c, id));
         return { docs, size: docs.length, empty: !docs.length, forEach: f => docs.forEach(f) };
