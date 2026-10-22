@@ -8,6 +8,10 @@ Engine 2 là lõi điều hành mới, có trạng thái kiểm soát và khả 
 
 Không tạo kho, bill hoặc P&L thứ hai. Quanlygieo2 và POS dùng cùng kết luận từ Engine 2; bộ xử lý nền tiếp tục hoạt động khi trình duyệt đóng. Luồng bán hàng không chờ worker hoặc bị khóa bởi tác vụ kiểm soát kho. Các bước bắt buộc được đặt tại bàn giao/đóng ca và nghiệp vụ kho liên quan.
 
+**Bổ sung yêu cầu 22/10: đích hoàn thiện là cấp 6.** Engine 2 phải học mức bình thường có kiểm chứng, suy luận nguyên nhân với độ bất định, tự yêu cầu phép đo và tăng/hạ kiểm soát, rồi tự hiệu chuẩn và kiểm toán chính các quyết định của mình. Đây là tiêu chí hoàn thiện, không phải khẳng định bản hiện tại đã có. Xem [ma trận luồng, các luật hiện có và tiêu chí cấp 6](MA_TRAN_ENGINE2_TU_DONG_NANG_MUC.md).
+
+Hai trục phải tách riêng: cấp năng lực 1–6 của hệ thống và mức kiểm soát của từng món/từng quán. Mô hình nguyên nhân không thay chính sách trách nhiệm đã chốt; học một mức hao hụt thường xuyên không được biến nó thành lượng mất được miễn ghi nhận. Hiệu chuẩn chỉ đổi tham số được phép trong giới hạn, có phiên bản/quay lui; không tự sửa lịch sử tổn thất hoặc trừ lương.
+
 ## Đối chiếu phần hiện có
 
 | Phần | Hiện tại | Vai trò trong Engine 2 |
@@ -68,7 +72,9 @@ Cân xác định được khoảng và nhóm chịu trách nhiệm; tự nó kh
 - Ghi ý định cùng quyết định hoặc bằng cơ chế đảm bảo không mất ý định sau commit; hàng đợi có retry, lease và giới hạn tải. Không có một vòng lặp trung tâm quét 10.000 cửa hàng để tìm case.
 - Phạm vi điều hành chuỗi là các snapshot tổng hợp, tổn thất, số tiền đã phân bổ, tái diễn và hiệu quả biện pháp. Chi tiết chỉ mở khi cần. Một lỗi điểm bán không chặn hàng đợi điểm khác.
 
-## Lộ trình và điều kiện nghiệm thu
+## Lộ trình luồng đầu và điều kiện nghiệm thu
+
+Trước runtime, đối chiếu [ma trận nâng mức](MA_TRAN_ENGINE2_TU_DONG_NANG_MUC.md): luồng hiện có, dữ kiện thiếu, sự kiện nào chưa được automation nhận và biện pháp nào cần thực thi. Sáu bước dưới là luồng đầu có thể nghiệm thu riêng; chưa đủ để gọi toàn hệ thống đạt cấp 6. Các năng lực học, xác suất, tự hạ mức, hiệu chuẩn và kiểm toán phải đạt thêm tiêu chí trong ma trận mới.
 
 1. Chốt hợp đồng sự kiện, quyết định, quyền ghi, dữ liệu trách nhiệm và trạng thái kiểm soát; dựng fixture case 300 g cùng các trường hợp thiếu dữ liệu.
 2. Xây runtime Engine 2 độc lập giao diện: chia trách nhiệm và sinh ý định kiểm soát theo phiên bản; kiểm retry/sự kiện đảo thứ tự/đa quán.

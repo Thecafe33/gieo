@@ -1,3 +1,7 @@
+# 22/10 — Rà luồng nâng mức và đích Engine 2 cấp 6
+
+Chỉ cập nhật tài liệu theo yêu cầu chưa code: [MA_TRAN_ENGINE2_TU_DONG_NANG_MUC.md](MA_TRAN_ENGINE2_TU_DONG_NANG_MUC.md). Phân biệt các luật đang thực thi với đề xuất: POS có tự chọn một số NL bất thường để cân cuối ngày, nhưng chưa giữ kiểm soát xuyên ca; finish còn dương đã ghi WASTE nhưng không tự bật cân/phân bổ mới; unconfirmed chưa phải đối soát xong; automation lọc giao dịch chỉ WASTE. Có ma trận hao hụt/kho/FIFO/BTP/lỗi kỹ thuật, đích cấp 6 với học–suy luận–đo thêm–hiệu chuẩn–kiểm toán, ngân sách đọc và nghiệm thu. Chưa tạo Engine2 hoặc sửa app/worker; chưa deploy.
+
 # 22/10 — Thiết kế Unit Engine 2 v1
 
 Chủ quán chốt hướng lõi điều hành mới `unit_engine2_v1.js`: sự kiện → trách nhiệm → biện pháp kiểm soát tại POS → đo kết quả. Bản đầu phải đi trọn case hao hụt 300 g/4 pha chế và cân bàn giao, tự chọn dụng cụ khi thiếu gắn sẵn. Hiện mới có thiết kế, chưa tạo runtime hoặc chuyển app; xem [THIET_KE_UNIT_ENGINE2_V1.md](THIET_KE_UNIT_ENGINE2_V1.md). Engine v20/automation v3 đang giữ nguyên.
