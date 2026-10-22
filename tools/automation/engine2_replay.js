@@ -48,7 +48,9 @@ async function replay(dump){
   if(t.type!=='WASTE'||t.voided||!(Number(t.qty)<0))continue;stats.wasteLines++;
   const c=C[t.containerId||t.referenceId];
   if(!c||c.status!=='finished'||!E.finite(c.wasteBase)||Math.abs(Number(c.wasteBase)+Number(t.qty))>0.01)continue;
-  const byId=/^finish_.+_WASTE$/.test(t.id),byNote=/^Báo hết\b/.test(String(t.note||'')),byTime=Math.abs(E.ms(t.createdAt)-E.ms(c.finishedAt))<=TEN_MIN;
+  // Huỷ tem có quét mã (waste_unit_ / scanned_discard) cũng đóng tem đúng lúc ghi WASTE — KHÔNG phải báo hết còn dư (case A2).
+  if(/^waste_unit_/.test(t.id)||c.wasteBasis==='scanned_discard')continue;
+  const byId=/^finish_.+_WASTE$/.test(t.id),byNote=/^Báo hết\b/.test(String(t.note||'')),byTime=/^unit_engine/.test(String(c.wasteBasis||''))&&Math.abs(E.ms(t.createdAt)-E.ms(c.finishedAt))<=TEN_MIN;
   if(!byId&&!byNote&&!byTime)continue;
   stats.finishLines++;if(byId)stats.byIdPattern++;else if(byNote)stats.byNote++;else stats.byTime++;
   try{

@@ -30,6 +30,8 @@ const {cleanState,ROOT}=require('./lib/engine2_fixture');
    'stock_transactions_gieogieo/sw_2026-09-04_x_op_L':{type:'ADJUSTMENT',qty:10,itemId:'pearl',containerId:'L',weighedQty:400,measured:true,shiftWeighOp:'sw_new',createdAt:T(4,13),businessDate:'2026-09-04'},
    'stock_transactions_gieogieo/rand2':{type:'WASTE',qty:-50,itemId:'pearl',referenceId:'M',note:'Báo hết MMMM0000',createdAt:T(8,10),businessDate:'2026-09-08',responsibility:{status:'assigned_by_manager',employeeId:'b',employeeName:'B',reason:'Hao'}},
    'stock_transactions_gieogieo/rand3':{type:'WASTE',qty:-25,itemId:'pearl',referenceId:'N',note:'Báo hết NNNN0000',createdAt:T(9,10),businessDate:'2026-09-09'},
+   'stock_containers_gieogieo/Q':{itemId:'pearl',itemName:'Trân châu',unit:'g',baseQty:1000,status:'finished',openedAt:T(10,2),finishedAt:T(10,9),wasteBase:170,wasteBasis:'scanned_discard',code:'QQQQ0000'},
+   'stock_transactions_gieogieo/waste_unit_Q':{type:'WASTE',qty:-170,itemId:'pearl',containerId:'Q',note:'Huỷ tem hỏng',createdAt:T(10,9),businessDate:'2026-09-10'},
    'stock_transactions_gieogieo/prep_variance_x':{type:'WASTE',qty:-7,itemId:'pearl',businessDate:'2026-09-05',createdAt:T(5,1)},
    'employee_shifts_gieogieo/s1':{employeeId:'a',employeeName:'A',checkedInAt:T(5,2),checkedOutAt:T(5,12)},
    'employee_shifts_gieogieo/s2':{employeeId:'b',employeeName:'B',roles:[],checkedInAt:T(6,2),checkedOutAt:T(6,12)},
@@ -40,7 +42,7 @@ const {cleanState,ROOT}=require('./lib/engine2_fixture');
    'price_history_gieogieo/p1':{itemId:'pearl',effectiveFrom:'2026-09-20',price:25,oldPrice:20}
   };
   const r=await replay({manifest:{store:'gg01',range:{from:'2026-09-01',to:'2026-09-30'},sha256:'x'},docs});
-  assert.equal(r.stats.finishLines,2,'rand1 + rand2; rand3 lệch wasteBase, prep_variance không phải báo hết');
+  assert.equal(r.stats.finishLines,2,'rand1 + rand2; rand3 lệch wasteBase, prep_variance / huỷ tem quét mã (trùng giờ đóng tem) không phải báo hết');
   assert.equal(r.stats.byNote,2);
   const d1=r.decisions.find(d=>d.sourceId==='rand1');
   assert.equal(d1.interval.from,T(4,13),'đầu khoảng = mốc cân ca mới nhất trước lúc báo hết (sw_ ngày 4, không phải lastShiftWeigh ngày 3)');

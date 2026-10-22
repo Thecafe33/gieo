@@ -1,3 +1,7 @@
+# 22/10 — Engine 2 B2 xong: cấp 1 đạt trên dữ liệu thật
+
+[Lộ trình](LO_TRINH_ENGINE2_CAP6.md): `tools/automation/engine2_compat.js` — hao hụt Engine 2 = sổ lãi/lỗ (1.325.439đ, 0 ngày lệch), tem = sự thật 38/38. Chạy lại chính sách mới 46 báo hết (8 gán tay giữ nguyên), kiểm toán 0/0. Chủ quán chốt giữ «chưa đủ giá» khi thiếu lịch sử giá. Cấp 2 chờ quyết 33 lệch FSM.
+
 # 22/10 — Engine 2 B2: chạy lại trên dữ liệu thật 52 ngày
 
 [Lộ trình](LO_TRINH_ENGINE2_CAP6.md) B2: file gg01 1/9–22/10 đủ. Chủ quán chốt: ca không ghi chức năng = pha chế (`E.isBarista`, sửa v1 chưa deploy); dữ liệu ca đúng (thường một người/ngày). `tools/automation/engine2_replay.js`: 47/47 báo hết chạy lại, 9 gán tay giữ nguyên, kiểm toán ĐẠT. Chờ quyết định giá khi thiếu lịch sử giá (47/47 «chưa đủ giá»). Đường 1 (tương thích sổ) chưa làm.
