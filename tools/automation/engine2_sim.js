@@ -73,7 +73,9 @@ function simulate(sc,opts={}){
   const o={id:sc.name+'~'+it.id+'~'+d+'~'+kind+'~'+obs.length,itemId:it.id,unit:it.unit,at:new Date(START+d*DAY+20*3600000).toISOString(),day:dayKey(d),used:c.used,loss,measured,nWeigh:nWeigh+startWeighed,vesselIds:nWeigh?['v_'+it.id]:[],groupKey:group,sampling:kind,verified:true,
    fromOpen:!!c.fromOpen,cap:c.fromOpen?c.cap:null,ctx:{untracked:a.unrecorded>0,otherOpen:!!c.otherOpen,anomalies:a.sync>0?1:0,densityProven:s.density.proven,fifoDebt:c.bookRem<0},
    truth:{normal:a.normal,abnormalQty:abn,cause:cause&&cause[1]>params.minExcess[unitKey(it)]?cause[0]:null,parts,noise},
-   controlled:s.level>=2,evidence:JSON.parse(JSON.stringify(evidence))};
+   controlled:s.level>=2};
+  // Ảnh chụp bằng chứng chỉ cần cho quan sát có bất thường THẬT (evaluate chấm giả thuyết ở đó) — không chép labelLog (tốn bộ nhớ khi hiệu chuẩn).
+  if(o.truth.cause){const {labelLog,...ev}=evidence;o.evidence=JSON.parse(JSON.stringify(ev));}
   obs.push(o);c.used=0;c.acc={normal:0,theft:0,unrecorded:0,sync:0,recipe:0,surplus:0,drift:0,receiving:0,overpour:0};c.bookRem=measured;c.trueRem=Math.max(0,c.trueRem);c.fromWeigh=kind!=='finish';c.fromOpen=false;c.otherOpen=false;
   if(kind!=='finish'){const r=o.used>0?(o.loss-base.items[it.id]?.estimate*o.used||0)/o.used:NaN;if(Number.isFinite(r))(evidence.itemResiduals[it.id]=evidence.itemResiduals[it.id]||[]).push({groupKey:group,rate:r});}
   minutes+=kind==='finish'?0:params.minutes.handover_weigh_m2;
@@ -176,11 +178,22 @@ function runLibrary(params,seeds=[1],opts={}){
 
 if(require.main===module){
  const args=process.argv.slice(2);
+ if(args[0]==='--eval'){
+  // Tiến trình con của --calibrate: chạy thư viện với bộ tham số trong file, in số đo gọn từng lượt.
+  const p=JSON.parse(fs.readFileSync(args[1],'utf8')),res=runLibrary(p,args[2].split(',').map(Number));
+  process.stdout.write(JSON.stringify(res.map(r=>({fail:r.fail,metrics:r.metrics,result:{minutes:r.result.minutes}}))));process.exit(0);
+ }
  if(args.includes('--calibrate')){
   // Hiệu chuẩn khởi tạo trên MÔ PHỎNG (hạt giống 1–6), nghiệm thu trên hạt giống CHƯA dùng (101–103).
   // Đánh giá VÒNG KÍN: mỗi bộ tham số ứng viên điều hành lại cả thư viện kịch bản trên hạt giống huấn luyện.
   const TRAIN=[1,2,3,4,5,6];
-  const evaluator=p=>aggregate(runLibrary(p,TRAIN));
+  // Đánh giá song song theo hạt giống (4 tiến trình con) — kết quả y hệt chạy tuần tự (mô phỏng tất định theo hạt giống).
+  const os=require('node:os'),{execFileSync}=require('node:child_process'),tmp=fs.mkdtempSync(path.join(os.tmpdir(),'e2cal-'));
+  const groups=[[1,5],[2,6],[3],[4]];
+  const evaluator=p=>{const pf=path.join(tmp,'p.json');fs.writeFileSync(pf,JSON.stringify(p));
+   const cmd=groups.map((g,i)=>`"${process.execPath}" "${__filename}" --eval "${pf}" ${g.join(',')} > "${path.join(tmp,'r'+i+'.json')}" &`).join(' ')+' wait';
+   execFileSync('/bin/sh',['-c',cmd],{stdio:'inherit'});
+   return aggregate(groups.flatMap((g,i)=>JSON.parse(fs.readFileSync(path.join(tmp,'r'+i+'.json'),'utf8'))));};
   const train=runLibrary(L.DEFAULT_PARAMS,TRAIN).flatMap(x=>x.result.obs);
   const cal=L.calibrate(L.DEFAULT_PARAMS,train,{mode:'sim',evaluator,stamp:'v1',missTolerance:0.01});
   const holdout=runLibrary(cal.params,[101,102,103,104,105,106,107,108,109,110]),failures=holdout.filter(x=>x.fail.length),hm=aggregate(holdout);
