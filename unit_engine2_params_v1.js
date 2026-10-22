@@ -4,11 +4,11 @@
 (function(root){'use strict';const P={
  "version": "sim-92af6868-v1",
  "origin": "calibrated_simulation",
- "kEscalate": 3.30625,
- "kClean": 1.275,
- "coldStartFactor": 1,
+ "kEscalate": 2.5,
+ "kClean": 1.5,
+ "coldStartFactor": 1.1199999999999999,
  "minMeasLearn": 10,
- "measUnsureFactor": 2.61625,
+ "measUnsureFactor": 1.75,
  "minExcess": {
   "g": 15,
   "ml": 15,
@@ -23,7 +23,7 @@
  },
  "cusum": {
   "k": 0.5,
-  "h": 3.5580999999999996
+  "h": 4
  },
  "flagLik": {
   "anomalyGivenSync": 0.9,
@@ -66,10 +66,10 @@
    "cai": 5,
    "other": 10
   },
-  "kCap": 2.3
+  "kCap": 3.9674999999999994
  },
  "release": {
-  "validPoints": 7,
+  "validPoints": 6,
   "activeDays": 3,
   "minUsedRatio": 2,
   "daysBetween": 7
@@ -177,53 +177,38 @@
    "runs": 144
   },
   "metricsAfter": {
-   "n": 33329,
-   "flags": 1041,
-   "falseAlarm": 3,
-   "falseAlarmRate": 0.002881844380403458,
-   "missed": 10,
-   "trueAbnormal": 1525,
-   "missRate": 0.006557377049180328,
-   "minutes": 66136,
+   "n": 33803,
+   "flags": 1170,
+   "falseAlarm": 39,
+   "falseAlarmRate": 0.03333333333333333,
+   "missed": 7,
+   "trueAbnormal": 1492,
+   "missRate": 0.004691689008042895,
+   "minutes": 67609,
    "failures": 0,
-   "coverage90": 0.9207748019649036,
+   "coverage90": 0.9234038608784912,
    "runs": 144
   },
   "changes": [
    {
     "param": "baseline.kCap",
     "from": 3,
-    "to": 2.3
-   },
-   {
-    "param": "kEscalate",
-    "from": 2.5,
-    "to": 3.30625
-   },
-   {
-    "param": "kClean",
-    "from": 1.5,
-    "to": 1.275
+    "to": 3.9674999999999994
    },
    {
     "param": "coldStartFactor",
     "from": 1.6,
-    "to": 1
+    "to": 1.1199999999999999
    },
    {
     "param": "measUnsureFactor",
     "from": 2.5,
-    "to": 2.61625
-   },
-   {
-    "param": "cusum.h",
-    "from": 4,
-    "to": 3.5580999999999996
+    "to": 1.75
    },
    {
     "param": "release.validPoints",
     "from": 5,
-    "to": 7
+    "to": 6
    }
   ],
   "rollbackRef": "prior-1",
@@ -275,19 +260,25 @@
    110
   ],
   "holdoutMetrics": {
-   "n": 55671,
-   "flags": 1700,
-   "falseAlarm": 7,
-   "falseAlarmRate": 0.00411764705882353,
-   "missed": 28,
-   "trueAbnormal": 2659,
-   "missRate": 0.010530274539300489,
-   "minutes": 110320,
-   "failures": 0,
-   "coverage90": 0.9229829867230609,
+   "n": 56093,
+   "flags": 1961,
+   "falseAlarm": 51,
+   "falseAlarmRate": 0.026007139214686385,
+   "missed": 15,
+   "trueAbnormal": 2444,
+   "missRate": 0.0061374795417348605,
+   "minutes": 111626,
+   "failures": 5,
+   "coverage90": 0.9224326443144316,
    "runs": 240
   },
-  "holdoutFailures": []
+  "holdoutFailures": [
+   "can_nhieu#101: báo sai 1.8% số quan sát > 1.5%",
+   "can_nhieu#103: báo sai 1.7% số quan sát > 1.5%",
+   "can_nhieu#106: báo sai 2.2% số quan sát > 1.5%",
+   "can_nhieu#107: báo sai 1.6% số quan sát > 1.5%",
+   "can_nhieu#110: báo sai 1.7% số quan sát > 1.5%"
+  ]
  }
 };
 if(typeof module==='object'&&module.exports)module.exports=P;root.UnitEngine2Params=P;
