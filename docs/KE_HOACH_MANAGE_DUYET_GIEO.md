@@ -50,6 +50,6 @@ Căn cứ: lượt rà 22/10 — 20 loại việc chờ ở quanlygieo; quanlygi
 
 | Hạng mục | Trạng thái |
 |---|---|
-| 1.1 Chi phí chờ duyệt Gieo | đang làm (23/10 ~2:10) |
+| 1.1 Chi phí chờ duyệt Gieo | ✅ 23/10 — `readCosts` thêm khoản chờ duyệt từng quán Gieo (limit 100), `reviewGieoExpense` (transaction, dấu `pl_dirty` quán), hàng `.cost-pend-row.is-gieo`; test `tests/manage_duyet_gieo.test.js`, e2e `tools/ql_giao_dien/e2e_manage_duyet_gieo.js` (PC + điện thoại) |
 | 1.2–1.5 | chưa |
 | Đợt 2, 3 | chưa — cần chủ quán xem kế hoạch Engine trong manage |
