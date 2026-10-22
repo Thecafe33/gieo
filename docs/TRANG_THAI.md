@@ -1,3 +1,7 @@
+# 22/10 — Thiết kế Unit Engine 2 v1
+
+Chủ quán chốt hướng lõi điều hành mới `unit_engine2_v1.js`: sự kiện → trách nhiệm → biện pháp kiểm soát tại POS → đo kết quả. Bản đầu phải đi trọn case hao hụt 300 g/4 pha chế và cân bàn giao, tự chọn dụng cụ khi thiếu gắn sẵn. Hiện mới có thiết kế, chưa tạo runtime hoặc chuyển app; xem [THIET_KE_UNIT_ENGINE2_V1.md](THIET_KE_UNIT_ENGINE2_V1.md). Engine v20/automation v3 đang giữ nguyên.
+
 # 22/10 — Vá 5 lỗi debug quanlygieo2, chính sách v3
 
 Đã sửa tương thích callback hộp thư, lỗi từ lease cũ, lỗi nhiều nguồn bị che, sự kiện needsReview BTP và nút xác nhận tem trong popup. Lỗi nguồn được đếm theo document riêng; nâng dữ liệu job cũ một lần, có cursor. Engine v20 và automation v1/v2 giữ nguyên. Chưa deploy. Xem [FIX_QUANLYGIEO2_DEBUG_V3_22-10.md](FIX_QUANLYGIEO2_DEBUG_V3_22-10.md).
