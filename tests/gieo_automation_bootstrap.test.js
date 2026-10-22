@@ -1,6 +1,6 @@
 'use strict';
 const assert=require('node:assert'),{makeFake}=require('./lib/fakefb');
-const {createWorker,rootPath,configPath}=require('../functions/automation/worker');
+const {createWorker,rootPath,configPath,key}=require('../functions/automation/worker');
 // Cursor-capable fixture: the old general fake intentionally does not implement startAfter.
 const f=makeFake({fs:{[configPath('gg01')]:{enabled:true,mode:'shadow',startDate:'2026-10-01'}}});
 const coll=f.fstore.collection.bind(f.fstore);let reads=0;
@@ -24,5 +24,16 @@ const tx=f.fstore.runTransaction.bind(f.fstore);f.fstore.runTransaction=fn=>tx(t
  assert.equal(revisions.length,205);assert(revisions.every(r=>r===1));
  console.log('ok Khởi tạo 205 hồ sơ qua nhiều trang và nhiều nhịp, không lặp trang đầu/không bỏ sót');
  console.log('ok Đo fixture: '+reads+' lượt đọc tài liệu hoặc query rỗng (gồm khởi tạo và transaction; không phải số đo Firebase production)');
+ // Existing v1 cases must be re-evaluated, not only recounted after an upgrade.
+ const root=rootPath('gg01'),source='stock_containers_gieogieo/finished_review',casePath=root+'/cases/'+key('stock_containers','finished_review');
+ await f.fstore.doc(source).set({status:'finished',needsReview:true,code:'NL-CU'});
+ await f.fstore.doc(casePath).set({visible:true,group:'done',kind:'stock_containers',sourceId:'finished_review',rule:'LOT_COMPLETE',fingerprint:'v1',revision:1});
+ await f.fstore.doc(root).set({ready:true,bootstrapPolicyVersion:1,countsVerifiedVersion:1,counts:{working:205,done:1}},{merge:true});
+ for(let i=0;i<4;i++)await w.tickStore('gg01');
+ assert.equal(f.FS[casePath].group,'working');assert.equal(f.FS[casePath].rule,'LOT_REVIEW');
+ assert.equal(f.FS[root].counts.working,206);assert.equal(f.FS[root].counts.done,0);assert.equal(f.FS[root].countsVerifiedVersion,2);
+ const revision=f.FS[casePath].revision,beforeTick=reads;await w.tickStore('gg01');
+ assert.equal(f.FS[casePath].revision,revision);assert(reads-beforeTick<20,'Không chạy lại bootstrap nguồn sau khi đã nâng phiên bản xong');
+ console.log('ok Nâng v1→v2 sửa hồ sơ cũ qua bootstrap có cursor; chỉ xác nhận badge khi hoàn tất và không quét nguồn lặp lại');
  console.log('ALL PASS');
 })().catch(e=>{console.error(e);process.exit(1)});

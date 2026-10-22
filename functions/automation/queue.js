@@ -1,5 +1,5 @@
 'use strict';
-const A=require('./shared/gieo_automation.v1');
+const A=require('./shared/gieo_automation.v2');
 const {key,rootPath,configPath}=require('./worker');
 function createQueue(db,worker,{now=Date.now}={}){
  const path=store=>rootPath(store)+'/jobs';

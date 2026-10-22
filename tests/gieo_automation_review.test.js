@@ -1,0 +1,27 @@
+'use strict';
+const assert=require('node:assert/strict'),A=require('../gieo_automation.v2');
+const {makeFake}=require('./lib/fakefb');
+const {createWorker,rootPath,configPath}=require('../functions/automation/worker');
+const now=Date.parse('2026-10-22T12:00:00+07:00'),cfg={enabled:true,owners:{stock:{id:'nv',name:'Kho'}}};
+(async()=>{
+ let r=A.task('stock_containers','c',{status:'finished',needsReview:true,code:'NL1'},cfg,now);
+ assert.equal(r.group,'working');assert.equal(r.rule,'LOT_REVIEW');
+ r=A.task('stock_containers','c',{status:'finished',needsReview:false,code:'NL1'},cfg,now);assert.equal(r.group,'done');
+ assert.equal(A.task('stock_containers','c',{status:'voided',needsReview:true},cfg,now).group,'done');
+ console.log('ok Báo hết không tự kết thúc yêu cầu kiểm tra; chỉ hết khi nguồn đã duyệt');
+ assert.equal(A.task('stock_containers','c',{status:'sealed',receivedAt:'2026-10-01'},cfg,now).rule,'LABEL_PENDING');
+ assert.equal(A.task('expenses','e',{status:'pending_review',amount:null},cfg,now).value,null);
+ assert.deepEqual(A.counterDelta({group:'working',visible:true,rule:'SOURCE_PENDING'},{group:'done',visible:false,rule:'ENGINE_COUNT_LINK'}),{approval:0,working:-1,done:0,watch:0});
+ console.log('ok Tem cũ thiếu cờ in vẫn được theo dõi, thiếu số tiền không thành 0, hồ sơ ẩn không tăng badge');
+ const root=rootPath('gg01'),f=makeFake({fs:{[configPath('gg01')]:cfg,[root]:{ready:true,policyVersion:1,countsVerifiedVersion:1,countsRevision:4,counts:{working:1,done:9}},[root+'/cases/work']:{visible:true,group:'working'},[root+'/cases/hidden']:{visible:false,group:'done'}}});
+ const coll=f.fstore.collection.bind(f.fstore);f.fstore.doc=p=>{const a=p.split('/'),id=a.pop();return coll(a.join('/')).doc(id)};
+ let injected=false,queries=0;
+ const wrap=q=>new Proxy(q,{get:(q,k)=>k==='get'?async()=>{queries++;const s=await q.get();if(!injected){injected=true;await f.fstore.doc(root).set({countsRevision:5},{merge:true});}return s}:['where','orderBy','limit'].includes(k)?(...a)=>wrap(q[k](...a)):q[k]});
+ f.fstore.collection=p=>p===root+'/cases'?wrap(coll(p)):coll(p);
+ const w=createWorker(f.fstore,{now:()=>now});
+ assert.equal(await w.reconcileCounts('gg01'),false);assert.equal(f.FS[root].counts.done,9);
+ assert.equal(await w.reconcileCounts('gg01'),true);assert.equal(f.FS[root].counts.done,0);assert.equal(f.FS[root].counts.working,1);assert.equal(f.FS[root].countsVerifiedVersion,2);
+ const n=queries;assert.equal(await w.reconcileCounts('gg01'),false);assert.equal(queries,n);
+ console.log('ok Sửa badge cũ bằng đối chiếu một lần; không ghi đè cập nhật đồng thời và không đọc lại khi đã xong');
+ console.log('ALL PASS');
+})().catch(e=>{console.error(e);process.exit(1)});

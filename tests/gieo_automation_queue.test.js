@@ -1,7 +1,7 @@
 'use strict';
 const assert=require('node:assert');
 const {makeFake}=require('./lib/fakefb');
-const A=require('../gieo_automation.v1');
+const A=require('../gieo_automation.v2');
 const {createWorker,rootPath,configPath,key}=require('../functions/automation/worker');
 const {createQueue}=require('../functions/automation/queue');
 const {createEngine}=require('../functions/automation/engine');

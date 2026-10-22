@@ -1,6 +1,6 @@
 'use strict';
 const crypto=require('node:crypto');
-const A=require('./shared/gieo_automation.v1.js');
+const A=require('./shared/gieo_automation.v2.js');
 const hash=x=>crypto.createHash('sha256').update(A.stable(x)).digest('hex');
 const key=(kind,id)=>hash([kind,id]);
 const rootPath=store=>A.collection('duty_digests',store)+'/_automation';
@@ -10,7 +10,7 @@ const BOOTSTRAP=[
  ['duty_cases','status','==','pending_verify'],['duty_cases','status','==','contested'],['duty_cases','status','==','dispute'],
  ['stock_containers','status','==','open'],['stock_containers','status','==','sealed'],['stock_containers','needsReview','==',true],
  ['duty_tasks','status','==','open'],['duty_tasks','status','==','processing'],
- ['prep_batches','status','==','active'],['inventory_items'],['stock_counts','status','==','pending_review'],
+ ['prep_batches','status','==','active'],['prep_batches','needsReview','==',true],['inventory_items'],['stock_counts','status','==','pending_review'],
  ['purchase_orders','status','==','pending'],['purchase_orders','status','==','partial'],['expenses','status','==','pending_review'],
  ['daily_openings','businessDate','>=','$from'],['daily_closings','businessDate','>=','$from'],
  ['stock_transactions','businessDate','>=','$from'],['prep_transactions','businessDate','>=','$from']
@@ -81,7 +81,7 @@ function createWorker(db,opts={}){
    if(old&&old.fingerprint===fingerprint&&!alias?.visible){if(sum.lastSourceError?.path===source.path)tx.set(db.doc(rootPath(store)),{lastSourceError:null},{merge:true});return {changed:false};}
    if(!old&&['NO_ACTION','SOURCE_REMOVED','ENGINE_COUNT_LINK'].includes(decision.rule)){if(sum.lastSourceError?.path===source.path)tx.set(db.doc(rootPath(store)),{lastSourceError:null},{merge:true});return {changed:false};}
    const at=new Date(now()).toISOString();
-   const result={...decision,storeId:store,id:caseRef.id,sourcePath:A.collection(actualKind,store)+'/'+actualId,
+   const result={...decision,policyVersion:A.VERSION,storeId:store,id:caseRef.id,sourcePath:A.collection(actualKind,store)+'/'+actualId,
     fingerprint,createdAt:old?.createdAt||at,updatedAt:at,revision:(old?.revision||0)+1,
     visible:!['NO_ACTION','SOURCE_REMOVED','ENGINE_COUNT_LINK'].includes(decision.rule),parts,linkedDutyId:linked||'',assigneeMissing:decision.group==='working'&&!decision.assigneeId};
    // No source ledger/stock/receipt is mutated. Manual Engine decisions remain authoritative.
@@ -100,7 +100,7 @@ function createWorker(db,opts={}){
     sourceFingerprint:fingerprint,previousFingerprint:old?.fingerprint||'',policyVersion:A.VERSION,
     assigneeId:result.assigneeId,allocations:result.allocations,pool:result.pool
    });
-   tx.set(db.doc(rootPath(store)),{counts,updatedAt:at,policyVersion:A.VERSION,...(sum.lastSourceError?.path===source.path?{lastSourceError:null}:{})},{merge:true});
+   tx.set(db.doc(rootPath(store)),{counts,countsRevision:(Number(sum.countsRevision)||0)+1,updatedAt:at,policyVersion:A.VERSION,...(sum.lastSourceError?.path===source.path?{lastSourceError:null}:{})},{merge:true});
    return {changed:true,id:caseRef.id};
   });
   if(kind==='duty_cases'){
@@ -157,6 +157,17 @@ function createWorker(db,opts={}){
  async function progress(store,cfg,fields){
   return db.runTransaction(async tx=>{const snap=await tx.get(db.doc(configPath(store)));const cur=snap.exists?snap.data():{};if(!cur.enabled||A.stable(cur)!==A.stable(cfg))return false;tx.set(db.doc(rootPath(store)),fields,{merge:true});return true;});
  }
+ async function reconcileCounts(store){
+  const ref=db.doc(rootPath(store)),before=await ref.get(),state=before.exists?before.data():{};
+  if(!state.ready||state.countsVerifiedVersion===A.VERSION)return false;
+  const counts={};
+  for(const group of ['approval','working','done','watch']){
+   const q=db.collection(rootPath(store)+'/cases').where('visible','==',true).where('group','==',group);
+   counts[group]=typeof q.count==='function'?(await q.count().get()).data().count:(await q.get()).docs.length;
+  }
+  return db.runTransaction(async tx=>{const cur=await tx.get(ref);if(!cur.exists||(Number(cur.data().countsRevision)||0)!==(Number(state.countsRevision)||0))return false;
+   tx.set(ref,{counts,countsVerifiedVersion:A.VERSION,policyVersion:A.VERSION},{merge:true});return true;});
+ }
  async function tickStore(store){
   const ref=db.doc(rootPath(store)),cfgSnap=await db.doc(configPath(store)).get();
   const cfg=cfgSnap.exists?cfgSnap.data():{};if(!cfg.enabled)return;
@@ -165,15 +176,23 @@ function createWorker(db,opts={}){
   const claimed=await db.runTransaction(async tx=>{const snap=await tx.get(ref),s=snap.exists?snap.data():{};if(Number(s.leaseUntil)>now())return false;tx.set(ref,{leaseUntil:now()+12*60000,leaseToken:token},{merge:true});return true;});
   if(!claimed)return;
   try{
-  const sum=await ref.get();if(!sum.exists||!sum.data().ready)await bootstrap(store,cfg);
+  let sum=await ref.get();
+  // Re-evaluate existing sources once per policy version, using the bounded,
+  // resumable bootstrap. Merely recounting old cases cannot fix old decisions.
+  if(!sum.exists||sum.data().bootstrapPolicyVersion!==A.VERSION){
+   if(!await progress(store,cfg,{bootstrapPolicyVersion:A.VERSION,bootstrap:{phase:0,cursor:''},ready:false,countsVerifiedVersion:0}))return;
+   sum=await ref.get();
+  }
+  if(!sum.data().ready)await bootstrap(store,cfg);
   // Only date-driven lot/day checks. No periodic read of every unresolved case or all bills.
   const due=cfg.mode==='active'&&cfg.fleet20Confirmed===true?await db.collection(rootPath(store)+'/cases').where('nextCheckAt','>',0).where('nextCheckAt','<=',now()).orderBy('nextCheckAt').limit(100).get():{docs:[]};
   for(const doc of due.docs){const d=doc.data();await processSource(store,d.kind,d.sourceId);}
   const dirtyDays=await db.collection(rootPath(store)+'/days').where('dirty','==',true).limit(5).get();
   for(const d of dirtyDays.docs)await buildDay(store,d.id);
+  await reconcileCounts(store);
   await progress(store,cfg,{enabled:true,mode:cfg.mode==='active'&&cfg.fleet20Confirmed===true?'active':'shadow',heartbeatAt:new Date(now()).toISOString(),lastError:''});
   }finally{await db.runTransaction(async tx=>{const snap=await tx.get(ref);if(snap.exists&&snap.data().leaseToken===token)tx.set(ref,{leaseUntil:0,leaseToken:''},{merge:true});});}
  }
- return {processSource,bootstrap,tickStore,markDay,buildDay};
+ return {processSource,bootstrap,tickStore,markDay,buildDay,reconcileCounts};
 }
 module.exports={createWorker,rootPath,configPath,key,BOOTSTRAP};

@@ -6,11 +6,12 @@ const fixture=`
 let scope='gg01',curScreen='inbox',STORE_HEALTH_ISSUE_COUNT=0,QL_ALL=false;
 const counts={summary:0,cases:0,history:0,days:0,writes:0},escapeHtmlAttr=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const alertUiScope=()=>scope,ensureAuth=async()=>{},qlFmtDT=x=>x,renderSidebarNav=()=>{},renderTodayHealthBar=()=>{},syncNotificationHeader=()=>{},applyTodayHealthOpen=()=>{},closeTodayHealth=()=>{};
-const sum={ready:true,enabled:true,heartbeatAt:new Date().toISOString(),counts:{approval:1,working:1,done:1}};
+const GieoAutomation={VERSION:2};
+const sum={ready:true,enabled:true,mode:'active',countsVerifiedVersion:2,heartbeatAt:new Date().toISOString(),counts:{approval:1,working:1,done:1}};
 const rows=[{id:'chi',kind:'expenses',group:'approval',title:'Chi phí mua đá',reason:'Chờ chủ quán duyệt khoản chi.',sourceId:'chi',updatedAt:'2026-10-21',rule:'EXPENSE_APPROVAL'},{id:'work',kind:'stock_containers',group:'working',title:'Tem nguyên liệu · Sữa',reason:'Đã quá hạn. Giao phụ trách kho xử lý.',assigneeName:'Quách Khánh Duy',updatedAt:'2026-10-21',rule:'LOT_EXPIRED'},{id:'done',kind:'stock_transactions',group:'done',title:'Hao hụt · 2 dòng nguyên liệu/BTP',reason:'Đã ghi nhận vào sổ; không tự quy lỗi người báo.',updatedAt:'2026-10-21',rule:'WASTE_GROUP'}];
 const rootRef={get:async()=>{counts.summary++;return{exists:true,data:()=>sum}},collection:n=>query(n)};
 function query(n){let group='';const q={where:(k,op,v)=>{if(k==='group')group=v;return q},orderBy:()=>q,limit:()=>q,startAfter:()=>q,doc:id=>({collection:()=>query('history')}),get:async()=>{counts[n]++;const list=n==='history'?[{id:'1',at:'2026-10-21',reason:'Đã ghi nhận từ nguồn.'}]:rows.filter(r=>r.group===group);return{docs:list.map(r=>({id:r.id,data:()=>r}))}}};return q;}
-const fstore={collection:()=>({doc:()=>rootRef}),batch:()=>({set(ref,data){window.saved=window.saved||[];saved.push(data);return this},async commit(){counts.writes+=2}})};
+const fstore={collection:()=>({doc:id=>id==='_automation_config'?{get:async()=>({exists:false})}:rootRef}),batch:()=>({set(ref,data){window.saved=window.saved||[];saved.push(data);return this},async commit(){counts.writes+=2}})};
 const vnDate=t=>new Date(t||Date.now()),dkey=d=>d.toISOString().slice(0,10),toast=()=>{},loadEmployees=async()=>[{id:'nv1',fullName:'Duy',active:true},{id:'nv2',fullName:'An',active:true}];
 function openEditSheet(title,body){document.getElementById('sheet').innerHTML='<h2>'+title+'</h2>'+body;document.getElementById('sheet').hidden=false;}
 function closeEditSheet(){document.getElementById('sheet').hidden=true;}

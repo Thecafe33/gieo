@@ -2,6 +2,8 @@
 
 Chưa deploy lên Firebase; chưa ghi dữ liệu production. Hướng triển khai dựa trên PLAN_TU_DONG_HAO_HUT_HUY_v2 do chủ quán cung cấp và đối chiếu mã nguồn thực tế.
 
+Bản rà soát tiếp theo: [RA_SOAT_QUANLYGIEO2_NHAN_VIEN_QUAN_LY.md](RA_SOAT_QUANLYGIEO2_NHAN_VIEN_QUAN_LY.md). Chính sách và module công việc đã lên v2; cần cập nhật Hosting + worker cùng nhau, Engine vẫn v20.
+
 ## Các phần đã triển khai
 
 - `quanlygieo2.html` sinh từ trang quản lý hiện tại; dùng chung dữ liệu và JS nghiệp vụ. Trang gốc giữ nguyên nghiệp vụ, cùng POS chuyển thẻ nạp sang Engine v20 (cả đường retry). v19 giữ nguyên để quay lui.

@@ -54,6 +54,8 @@ function dung() {
       fs.readdirSync(ROOT).filter(f=>/^lai_lo\.v\d+\.js$/.test(f)).forEach(f=>js.add(f));
     if([...js].some(f=>/^cham_cong\.v\d+\.js$/.test(f)))
       fs.readdirSync(ROOT).filter(f=>/^cham_cong\.v\d+\.js$/.test(f)).forEach(f=>js.add(f));
+    if([...js].some(f=>/^gieo_automation(?:_pos)?\.v\d+\.js$/.test(f)))
+      fs.readdirSync(ROOT).filter(f=>/^gieo_automation(?:_pos)?\.v\d+\.js$/.test(f)).forEach(f=>js.add(f));
     // Giữ các bản Engine immutable đã phát hành: Hosting thay release có thể phục vụ HTML còn cache.
     if([...js].some(f=>/^unit_engine\.v\d+\.js$/.test(f)))
       fs.readdirSync(ROOT).filter(f=>/^unit_engine\.v\d+\.js$/.test(f)).forEach(f=>js.add(f));

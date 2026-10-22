@@ -1,3 +1,7 @@
+# 22/10 — Rà soát quanlygieo2 theo vai trò
+
+Đã tái hiện/sửa lỗi số tiền, điều hướng vụ cũ, fallback khi đối chiếu/nền lỗi, kết quả tải về muộn, tắt/lưu thiết lập và badge ẩn; kiểm thêm checklist nhân viên. Dùng chính sách/module công việc v2, giữ nguyên Engine v20 và bản JS v1. Chưa deploy. Xem [RA_SOAT_QUANLYGIEO2_NHAN_VIEN_QUAN_LY.md](RA_SOAT_QUANLYGIEO2_NHAN_VIEN_QUAN_LY.md).
+
 # Bổ sung 22/10/2026 — quanlygieo2
 
 Đã triển khai quanlygieo2 dùng chung hệ thống, Engine v20 bảo vệ quyết định tay/phiên bản, worker theo sự kiện có hàng đợi và chế độ đối chiếu thử, giao việc qua checklist POS; chưa deploy. POS và quản lý gốc chỉ đổi thẻ Engine (POS thêm module công việc theo thao tác). Phạm vi, giới hạn và hướng dẫn: [TU_DONG_THONG_BAO_QUANLYGIEO2.md](TU_DONG_THONG_BAO_QUANLYGIEO2.md). Trang được sinh tự động, không sửa trực tiếp.

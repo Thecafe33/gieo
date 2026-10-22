@@ -1,0 +1,35 @@
+// Actual HTML + shared JS; all network data replaced by local Firebase fixtures.
+const {chromium}=require('playwright'),fs=require('fs'),path=require('path'),http=require('http'),assert=require('node:assert/strict');
+const root=path.resolve(__dirname,'../..');
+let mock=fs.readFileSync(path.join(root,'tools/tet/e2e/mockfb.js'),'utf8');
+const fake=fs.readFileSync(path.join(root,'tests/lib/fakefb.js'),'utf8').replace('module.exports =','window.__fakefb =');
+mock+='\n(function(){const process={env:{}};'+fake+'\n})();';
+mock+=`\n(function(){const seed={};for(const [c,docs]of Object.entries(window.__FS))for(const[id,d]of Object.entries(docs))seed[c+'/'+id]=d;
+ const day=new Date(Date.now()+7*3600000).toISOString().slice(0,10),at=new Date().toISOString(),base='duty_digests_gieogieo/_automation';
+ seed['work_schedules_gieogieo/e2_'+day]={employeeId:'e2',date:day,startTime:'09:30',endTime:'20:00',isOff:false};
+ seed[base]={enabled:true,ready:true,mode:'active',heartbeatAt:at,countsVerifiedVersion:2,policyVersion:2,counts:{approval:1,working:1,done:0}};
+ seed[base+'/cases/expense']={id:'expense',kind:'expenses',sourceId:'e1',group:'approval',title:'Chi phí nước đá',value:35000,businessDate:day,reason:'Chờ chủ quán duyệt',resultStatus:'waiting_verification',rule:'EXPENSE_APPROVAL',visible:true,updatedAt:at};
+ seed[base+'/cases/stock']={id:'stock',kind:'stock_containers',sourceId:'c1',group:'working',title:'Tem nguyên liệu Sữa cần kiểm tra',businessDate:day,reason:'Đã báo hết nhưng cần kiểm tra',resultStatus:'waiting_verification',rule:'LOT_REVIEW',visible:true,updatedAt:at};
+ seed['stock_containers_gieogieo/c1']={itemId:'milk',code:'ABC123',itemName:'Sữa đặc',status:'finished',needsReview:true,initialQty:1000,unit:'g',unitBase:0,receivedAt:at};
+ seed['inventory_items_gieogieo/milk']={name:'Sữa đặc',unit:'g',currentStock:0,costPerUnit:10,active:true};
+ seed['expenses_gieogieo/e1']={amount:35000,status:'pending_review',date:day,paidDate:day,periodType:'onetime',category:'Nước đá',description:'Chi phí nước đá',note:'Mua đá',createdAt:at};
+ const f=__fakefb.makeFake({fs:seed});window.__roleFixture=f;
+ f.fstore.doc=p=>{const a=p.split('/'),id=a.pop();return f.fstore.collection(a.join('/')).doc(id)};
+ f.fstore.enablePersistence=async()=>{};f.fstore.collectionGroup=c=>f.fstore.collection(c);
+ const fb=()=>f.fstore;fb.FieldValue=f.FieldValue;firebase.firestore=fb;
+ firebase.database.ServerValue={TIMESTAMP:0};firebase.storage=()=>({ref:()=>({})});})();`;
+const server=http.createServer((req,res)=>{const p=path.resolve(root,'.'+new URL(req.url,'http://localhost').pathname);if(!p.startsWith(root+path.sep)||!fs.existsSync(p)){res.writeHead(404);return res.end();}res.setHeader('Content-Type',p.endsWith('.js')?'application/javascript':'text/html; charset=utf-8');res.end(fs.readFileSync(p));});
+(async()=>{await new Promise(r=>server.listen(0,'127.0.0.1',r));const base='http://127.0.0.1:'+server.address().port,b=await chromium.launch({executablePath:'/usr/bin/chromium',args:['--no-sandbox']});try{
+ for(const width of [1366,390]){const page=await b.newPage({viewport:{width,height:900}}),errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('dialog',d=>d.dismiss());
+ await page.route('**/*',r=>{const url=r.request().url();if(url.includes('firebase-app-compat'))return r.fulfill({contentType:'application/javascript',body:mock});if(url.includes('firebasejs'))return r.fulfill({body:''});if(url.startsWith(base+'/'))return r.continue();return r.abort()});
+ await page.goto(base+'/quanlygieo2.html');await page.waitForTimeout(800);await page.evaluate(()=>switchScreen('inbox'));
+ await page.getByRole('heading',{name:'Chi phí nước đá',exact:true}).waitFor();assert((await page.locator('.auto-case').innerText()).includes('35.000'));
+ if(process.env.SCREENSHOT_DIR){fs.mkdirSync(process.env.SCREENSHOT_DIR,{recursive:true});await page.screenshot({path:path.join(process.env.SCREENSHOT_DIR,'inbox-'+width+'.png')});}
+ await page.evaluate(()=>autoOpenTab('working'));await page.getByRole('heading',{name:'Tem nguyên liệu Sữa cần kiểm tra'}).waitFor();await page.getByRole('button',{name:'Mở nghiệp vụ'}).click();await page.locator('#ctnDetailBody').getByText('ABC123',{exact:false}).first().waitFor();
+ await page.evaluate(()=>closeEditSheet(true));await page.evaluate(()=>autoOpenTab('approval'));await page.getByRole('heading',{name:'Chi phí nước đá',exact:true}).waitFor();await page.getByRole('button',{name:'Mở khoản chi'}).click();await page.locator('[onclick="doApproveExpense(\'e1\')"]').waitFor();
+ await page.locator('[onclick="doApproveExpense(\'e1\')"]').click();await page.waitForFunction(()=>__roleFixture.FS['expenses_gieogieo/e1'].status==='approved');
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);assert.deepEqual(errors,[]);
+ if(process.env.SCREENSHOT_DIR){fs.mkdirSync(process.env.SCREENSHOT_DIR,{recursive:true});await page.screenshot({path:path.join(process.env.SCREENSHOT_DIR,'manager-'+width+'.png')});}
+ console.log('ok Actual HTML '+width+'px: số tiền, đúng tem cần kiểm tra, duyệt đúng chi phí qua nghiệp vụ hiện có, không lỗi JS');await page.close();
+ }
+}finally{await b.close();server.close()}})().catch(e=>{console.error(e);server.close();process.exit(1)});
