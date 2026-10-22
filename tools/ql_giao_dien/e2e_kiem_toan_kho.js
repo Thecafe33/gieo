@@ -66,6 +66,32 @@ const server=require('http').createServer((req,res)=>{
     else chk(false,'không tìm thấy QL_VIEW_KEY');
     await p.context().close();
   }
+  // Trang riêng kiem_toan_kho.html — dùng khi app đang chạy chưa có Engine 2 (chỉ cần trang + unit_engine2_export_v1.js).
+  for(const [w,h,label] of [[1366,900,'trang riêng PC'],[390,844,'trang riêng điện thoại']]){
+    const ctx=await b.newContext({viewport:{width:w,height:h},acceptDownloads:true});const p=await ctx.newPage();
+    const asked=[];
+    await p.route('**/*',r=>{const u=r.request().url();
+      if(u.includes('firebase-app-compat'))return r.fulfill({contentType:'application/javascript',body:mock+';window.__FS_SEED&&Object.assign(window.__FS,window.__FS_SEED);window.__RT_SEED&&Object.assign(window.__RT,window.__RT_SEED);'});
+      if(u.includes('firebasejs'))return r.fulfill({contentType:'application/javascript',body:''});
+      if(u.startsWith(base+'/')){asked.push(new URL(u).pathname);return r.continue();} return r.abort();});
+    await p.addInitScript(([f,rt])=>{window.__FS_SEED=f;window.__RT_SEED=rt;},[seedFs,seedRt]);
+    const errs=[];p.on('pageerror',e=>errs.push(e.message));
+    await p.goto(base+'/kiem_toan_kho.html');await p.waitForTimeout(1200);
+    chk(JSON.stringify(asked.sort())===JSON.stringify(['/kiem_toan_kho.html','/unit_engine2_export_v1.js']),label+': chỉ nạp đúng 2 file cục bộ '+JSON.stringify(asked));
+    const opts=await p.$$eval('#store option',o=>o.map(x=>x.value));chk(opts.join()==='gg01,gg02',label+': danh sách điểm bán (bỏ quán ngừng) '+opts);
+    await p.fill('#from','2026-10-14');await p.fill('#to','2026-10-22');await p.click('#run');
+    await p.waitForSelector('#dl',{timeout:15000});
+    chk(/ĐỦ/.test(await p.textContent('#result'))&&!/CHƯA ĐỦ/.test(await p.textContent('#result')),label+': báo ĐỦ');
+    const [dl]=await Promise.all([p.waitForEvent('download'),p.click('#dl')]);
+    const out=JSON.parse(fs.readFileSync(await dl.path(),'utf8'));
+    chk(dl.suggestedFilename()==='gieo-gg01-kiemtoankho-2026-10-14_den_2026-10-22.json'&&out.manifest.meta.app==='kiem_toan_kho',label+': tên file + nguồn '+dl.suggestedFilename());
+    const r=await A.run({storeId:'gg01',from:'2026-10-14',to:'2026-10-22',fstore:makeFake({fs:out.docs}).fstore});
+    chk(r.ok&&r.violations===0&&r.warnings===0&&r.coverage.cases===3,label+': file → bộ kiểm toán ĐẠT 0/0');
+    chk(await p.evaluate(()=>window.__WRITES.length)===0,label+': không ghi Firebase');
+    chk(await p.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+1),label+': không cuộn ngang');
+    chk(errs.length===0,label+': không lỗi JS '+errs.slice(0,2).join('|'));
+    await ctx.close();
+  }
   await b.close();server.close();
   console.log(R.join('\n'));const bad=R.filter(x=>x.startsWith('FAIL'));console.log(bad.length?'SOME FAIL':'ALL PASS');process.exit(bad.length?1:0);
 })().catch(e=>{console.error(e);process.exit(1)});

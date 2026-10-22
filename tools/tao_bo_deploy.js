@@ -15,7 +15,7 @@ const rd = f => fs.readFileSync(path.join(ROOT, f), 'utf8');
 const giu = f => () => rd(f), go = f => () => boGauNoel(rd(f));
 
 // tên trong bộ → cách lấy nội dung
-const CHUNG = { 'quanlygieo2.html': giu('quanlygieo2.html'), 'quanlygieo.html': giu('quanlygieo.html'), 'manage.html': giu('manage.html'), 'quanlygieo_thu.html': giu('quanlygieo_thu.html') };
+const CHUNG = { 'quanlygieo2.html': giu('quanlygieo2.html'), 'kiem_toan_kho.html': giu('kiem_toan_kho.html'), 'quanlygieo.html': giu('quanlygieo.html'), 'manage.html': giu('manage.html'), 'quanlygieo_thu.html': giu('quanlygieo_thu.html') };
 const BO = {
   thuong: Object.assign({}, CHUNG, {
     'pos.html': go('pos.html'), 'PosX.html': go('PosX.html'), 'posgieo.html': go('posgieo.html'), 'posgieo_thu.html': go('posgieo_thu.html'),

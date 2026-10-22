@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kiểm toán kho</title>
+<!-- [Engine 2 · B2] Trang RIÊNG chỉ để xuất «Bản kiểm toán kho» — CHỈ ĐỌC, không đụng app đang chạy.
+     Cần đúng 2 file: trang này + unit_engine2_export_v1.js. Không nạp data_access / Unit Engine:
+     tên bảng theo đúng quy tắc data_access (gg01 giữ nguyên tên; quán khác thêm __ggNN; bảng dùng chung không hậu tố),
+     test tests/unit_engine2_export.test.js khoá. File tải về đọc bằng tools/automation/engine2_audit.js. -->
+<style>
+:root{--bg:#F8EFF2;--card:#fff;--ink:#211c20;--muted:#6b6459;--line:#e7cdd6;--brand:#E23A5D;--bad:#ad173a;--ok:#0b7857}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#1d1519;--card:#2a2025;--ink:#f4e9ee;--muted:#c4b2ba;--line:#4a3740;--brand:#ff6f8d;--bad:#ff8aa1;--ok:#5fd3a9}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:720px;margin:0 auto;padding:20px 16px 40px}
+h1{font-size:22px;margin:4px 0 4px}
+.sub{color:var(--muted);font-size:14px;margin:0 0 16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:16px;margin:12px 0}
+label{display:block;font-weight:650;font-size:14px;margin:10px 0 6px}
+select,input{width:100%;min-height:46px;border:1px solid var(--line);border-radius:14px;padding:10px 12px;font-size:16px;background:var(--card);color:var(--ink)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+button{width:100%;min-height:50px;border:0;border-radius:16px;font-size:16px;font-weight:700;cursor:pointer;margin-top:14px}
+.primary{background:var(--brand);color:#fff}.secondary{background:transparent;color:var(--brand);border:1.5px solid var(--brand)}
+button:disabled{opacity:.6;cursor:wait}
+.row{display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px dashed var(--line);font-size:14px}
+.row:last-child{border-bottom:0}.row span:last-child{text-align:right;font-variant-numeric:tabular-nums}
+.bad{color:var(--bad);font-weight:650}.ok{color:var(--ok);font-weight:700}
+.note{font-size:13px;color:var(--muted)}
+#status{font-size:14px;color:var(--muted);min-height:20px;margin-top:10px}
+@media (max-width:480px){.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<main>
+  <h1>Bản kiểm toán kho</h1>
+  <p class="sub">Gieo Gieo · Engine 2 · chỉ đọc, không sửa gì trong dữ liệu</p>
+  <div class="card">
+    <label for="store">Điểm bán</label>
+    <select id="store"><option value="gg01">GG01</option></select>
+    <div class="grid">
+      <div><label for="from">Từ ngày</label><input type="date" id="from"></div>
+      <div><label for="to">Đến ngày</label><input type="date" id="to"></div>
+    </div>
+    <p class="note">Tối đa 62 ngày một lần. Nên xuất từng 30 ngày, lúc quán vắng.</p>
+    <button class="primary" id="run">Trích xuất bản kiểm toán kho</button>
+    <div id="status"></div>
+  </div>
+  <div id="result"></div>
+  <div class="card note">
+    File gồm: sổ kho gốc từng dòng, mọi tem liên quan (cả tem nhận trước kỳ nhưng hết trong kỳ), ca làm việc,
+    lịch sử giá, dụng cụ/bì, dữ liệu Engine 2 (nếu có) và ảnh chụp tem đang mở — kèm bảng kê có mã kiểm.
+    Không gồm từng bill / thông tin khách. File có tên nhân viên: không đăng lên nơi công khai.
+  </div>
+</main>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
+<script src="unit_engine2_export_v1.js"></script>
+<script>
+firebase.initializeApp({
+  apiKey: "AIzaSyCNh1-16gYZ0P30Fkd-2tB-O89PXkPX9Lc",
+  authDomain: "the-cafe-33.firebaseapp.com",
+  databaseURL: "https://the-cafe-33-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "the-cafe-33",
+  storageBucket: "the-cafe-33.appspot.com"
+});
+const auth = firebase.auth(), fstore = firebase.firestore(), db = firebase.database();
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const vnDay = t => new Date(t + 7*3600000).toISOString().slice(0,10);
+let busy = false, lastFile = null;
+// Cùng tài khoản app Quản lý đang dùng (rules hiện tại: đã đăng nhập = đọc được).
+let authReady = null;
+function ensureAuth(){
+  if(authReady) return authReady;
+  authReady = new Promise((resolve, reject) => {
+    const unsub = auth.onAuthStateChanged(u => { if(u){ unsub(); resolve(u); } });
+    auth.signInWithEmailAndPassword('cafe33@xolifa.com', 'xolifaangiang').catch(e => { unsub(); authReady = null; reject(e); });
+  });
+  return authReady;
+}
+async function loadStores(){
+  try{
+    await ensureAuth();
+    const s = await fstore.collection('stores_gieogieo').get();
+    const ids = s.docs.filter(d => /^gg\d{2}$/.test(d.id) && d.data().active !== false).map(d => ({id:d.id, name:d.data().name || ''})).sort((a,b) => a.id.localeCompare(b.id));
+    if(ids.length) $('store').innerHTML = ids.map(x => `<option value="${x.id}">${x.id.toUpperCase()}${x.name ? ' · ' + esc(x.name) : ''}</option>`).join('');
+  }catch(e){ console.warn('Chưa đọc được danh sách điểm bán, dùng GG01', e); }
+}
+function download(text, name){
+  const url = URL.createObjectURL(new Blob([text], {type:'application/json'}));
+  const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 3000);
+}
+async function run(){
+  if(busy) return;
+  const store = $('store').value, from = $('from').value, to = $('to').value;
+  if(!from || !to || from > to){ $('status').textContent = 'Chọn khoảng ngày hợp lệ.'; return; }
+  if(!window.UnitEngine2Export){ $('status').textContent = 'Chưa tải được unit_engine2_export_v1.js — chép file vào thư mục deploy.'; return; }
+  busy = true; $('run').disabled = true; $('result').innerHTML = ''; $('status').textContent = 'Đang đăng nhập…';
+  try{
+    await ensureAuth();
+    const out = await UnitEngine2Export.build({
+      storeId: store, from, to,
+      coll: k => fstore.collection(UnitEngine2Export.physName(k, store)),
+      rtRef: n => db.ref(n + '_gieogieo' + (store === 'gg01' ? '' : '__' + store)),
+      serverOffset: async () => (await db.ref('.info/serverTimeOffset').once('value')).val(),
+      onStatus: t => { $('status').textContent = t; },
+      meta: { app: 'kiem_toan_kho', page: 1 }
+    });
+    const m = out.manifest, text = JSON.stringify(out), kb = text.length / 1024;
+    lastFile = { text, name: `gieo-${store}-kiemtoankho-${from}_den_${to}.json` };
+    const rows = Object.entries(m.sections).map(([k, s]) => `<div class="row"><span>${k}</span><span class="${s.truncated || s.error ? 'bad' : ''}">${s.count}${s.truncated ? ' · CHƯA ĐỦ' : ''}${s.missing ? ' · thiếu ' + s.missing : ''}${s.error ? ' · lỗi' : ''}</span></div>`).join('');
+    const inflight = Object.values(m.inflight).reduce((a, b) => a + b, 0);
+    $('result').innerHTML = `
+      <div class="card">
+        <div class="row"><span><b>Kết quả</b></span><span class="${m.complete ? 'ok' : 'bad'}">${m.complete ? 'ĐỦ' : 'CHƯA ĐỦ'} · ${kb > 1024 ? (kb/1024).toFixed(1) + ' MB' : Math.round(kb) + ' KB'}</span></div>
+        <div class="row"><span>Điểm bán · khoảng ngày</span><span>${m.store.toUpperCase()} · ${m.range.from} → ${m.range.to} (${m.range.days} ngày)</span></div>
+        <div class="row"><span>Số bản ghi</span><span>${m.docCount}</span></div>
+        <div class="row"><span>Mã kiểm</span><span style="font-family:ui-monospace,Menlo,monospace">${String(m.sha256 || '').slice(0, 16)}…</span></div>
+        ${rows}
+        ${m.errors.length ? `<p class="bad">Có ${m.errors.length} phần không đọc được (ghi trong file): ${m.errors.map(e => esc(e.phan + ' — ' + e.loi)).join('; ')}</p>` : ''}
+        ${Object.values(m.sections).some(s => s.truncated) ? '<p class="bad">Có phần chạm giới hạn đọc — thu hẹp khoảng ngày rồi xuất lại.</p>' : ''}
+        ${inflight ? `<p class="note">Lúc xuất có ${inflight} thao tác kho/cân đang dở (ghi trong file). Nên xuất lại lúc quán vắng.</p>` : ''}
+        <button class="primary" id="dl">Tải file ${esc(lastFile.name)}</button>
+      </div>`;
+    $('dl').onclick = () => download(lastFile.text, lastFile.name);
+    $('status').textContent = 'Xong.';
+  }catch(e){
+    console.error('Trích xuất lỗi', e);
+    $('status').textContent = 'Trích xuất thất bại: ' + (e.code || e.message || e);
+  }finally{ busy = false; $('run').disabled = false; }
+}
+const today = Date.now();
+$('to').value = vnDay(today); $('from').value = vnDay(today - 29*86400000);
+$('run').onclick = run;
+loadStores();
+</script>
+</body>
+</html>
