@@ -2,13 +2,13 @@
  * Tham số «hiệu chuẩn mô phỏng»: điểm xuất phát cho quán thật; cấp 6 tự kiểm / chỉnh (±5%/7 ngày) / quay lui khi có số liệu thật.
  * Bản đã phát hành bất biến: hiệu chuẩn lại sau deploy = unit_engine2_params_v2.js. */
 (function(root){'use strict';const P={
- "version": "sim-741233ba-v1",
+ "version": "sim-ce296084-v1",
  "origin": "calibrated_simulation",
  "kEscalate": 2.5,
  "kClean": 1.9061249999999996,
- "coldStartFactor": 1.2879999999999998,
+ "coldStartFactor": 1.1199999999999999,
  "minMeasLearn": 10,
- "measUnsureFactor": 2.7625,
+ "measUnsureFactor": 2.875,
  "measUpper": 1,
  "minExcess": {
   "g": 15,
@@ -67,7 +67,7 @@
    "cai": 5,
    "other": 10
   },
-  "kCap": 2.3
+  "kCap": 2.9899999999999998
  },
  "release": {
   "validPoints": 5,
@@ -81,7 +81,7 @@
   "recipe": 0.08,
   "unrecorded": 0.06,
   "sync": 0.04,
-  "receiving": 0.04,
+  "spec": 0.04,
   "scale": 0.03,
   "physical": 0.12,
   "noise": 0.51
@@ -96,8 +96,8 @@
   "unproven": 0.05,
   "proven": 0.01
  },
- "receivingSigma": 0.06,
- "receivingFirst": 0.2,
+ "specMinFrac": 0.15,
+ "specTol": 0.1,
  "scaleSigma": 0.03,
  "minutes": {
   "tare_check": 2,
@@ -105,7 +105,7 @@
   "recipe_portion_weigh": 5,
   "scan_open_units": 2,
   "resync_recount": 3,
-  "weigh_sealed_unit": 2,
+  "spec_confirm": 2,
   "reference_weigh": 1,
   "handover_weigh_m2": 3,
   "m3_blind": 4
@@ -154,47 +154,47 @@
  "liveStep": 0.05,
  "parent": "prior-1",
  "record": {
-  "version": "sim-741233ba-v1",
+  "version": "sim-ce296084-v1",
   "parent": "prior-1",
   "mode": "sim",
-  "dataHash": "ef7e3b8a",
+  "dataHash": "f7f6f7f3",
   "window": {
    "from": "2026-01-05T20:00:00.000Z",
    "to": "2026-03-05T20:00:00.000Z",
-   "train": 20089,
-   "validation": 13394
+   "train": 20904,
+   "validation": 13937
   },
   "metricsBefore": {
-   "n": 33483,
-   "flags": 1092,
+   "n": 34841,
+   "flags": 1096,
    "falseAlarm": 32,
-   "falseAlarmRate": 0.029304029304029304,
+   "falseAlarmRate": 0.029197080291970802,
    "missed": 10,
-   "trueAbnormal": 1529,
-   "missRate": 0.006540222367560497,
-   "minutes": 66569,
+   "trueAbnormal": 1447,
+   "missRate": 0.006910850034554251,
+   "minutes": 69044,
    "failures": 0,
-   "coverage90": 0.9349874664094389,
-   "runs": 144
+   "coverage90": 0.9363745886360891,
+   "runs": 150
   },
   "metricsAfter": {
-   "n": 33380,
-   "flags": 1114,
+   "n": 34767,
+   "flags": 1119,
    "falseAlarm": 31,
-   "falseAlarmRate": 0.027827648114901255,
+   "falseAlarmRate": 0.02770330652368186,
    "missed": 6,
-   "trueAbnormal": 1521,
-   "missRate": 0.0039447731755424065,
-   "minutes": 66143,
+   "trueAbnormal": 1420,
+   "missRate": 0.004225352112676056,
+   "minutes": 68681,
    "failures": 0,
-   "coverage90": 0.9355742568133792,
-   "runs": 144
+   "coverage90": 0.9367758753052858,
+   "runs": 150
   },
   "changes": [
    {
     "param": "baseline.kCap",
     "from": 3,
-    "to": 2.3
+    "to": 2.9899999999999998
    },
    {
     "param": "kClean",
@@ -204,12 +204,12 @@
    {
     "param": "coldStartFactor",
     "from": 1.6,
-    "to": 1.2879999999999998
+    "to": 1.1199999999999999
    },
    {
     "param": "measUnsureFactor",
     "from": 2.5,
-    "to": 2.7625
+    "to": 2.875
    }
   ],
   "rollbackRef": "prior-1",
@@ -232,7 +232,8 @@
    "can_nhieu",
    "thieu_nho_lap_lai",
    "du_hang",
-   "nhan_hang_sai_dung_tich",
+   "quy_cach_khac_khai_bao",
+   "quy_cach_mot_ma",
    "can_lech_he_so",
    "nhan_vien_moi_qua_tay",
    "cuoi_tuan_dong",
@@ -261,17 +262,17 @@
    110
   ],
   "holdoutMetrics": {
-   "n": 55479,
+   "n": 57773,
    "flags": 1846,
-   "falseAlarm": 17,
-   "falseAlarmRate": 0.009209100758396533,
+   "falseAlarm": 18,
+   "falseAlarmRate": 0.009750812567713976,
    "missed": 18,
-   "trueAbnormal": 2656,
-   "missRate": 0.00677710843373494,
-   "minutes": 109767,
+   "trueAbnormal": 2488,
+   "missRate": 0.007234726688102894,
+   "minutes": 113929,
    "failures": 0,
-   "coverage90": 0.9363385081492557,
-   "runs": 240
+   "coverage90": 0.9370010891460162,
+   "runs": 250
   },
   "holdoutFailures": []
  }
