@@ -217,7 +217,7 @@ Nút "Cập nhật" ở sidebar (`manualCheckUpdate`, dựa trên service worker
      → nạp lại ĐÚNG MỘT LẦN bằng địa chỉ khác (?r=1 — khác khoá cache) trước khi script chính chạy. Không đổi tên file / không cần deploy lại. (Viết '<scr'+'ipt' để tools/predeploy_check không đếm nhầm thành thẻ thứ hai; có id để các công cụ quét — chỉ lấy khối script TRẦN (không thuộc tính) đầu tiên làm script chính — không lấy nhầm.) -->
 <script id="gdRetry">if(!window.GieoData){document.write('<scr'+'ipt src="data_access.v9.js?r=1"><\/scr'+'ipt>');}</script>
 <script src="che_do_thu.v1.js?b=96d7f20f91"></script>
-<script src="unit_engine.v21.js?b=981d6e7c1a"></script>
+<script src="unit_engine.v21.js?b=06cdc7163b"></script>
 <script id="ueRetry">if(!window.UnitEngine){document.write('<scr'+'ipt src="unit_engine.v21.js?r=1"><\/scr'+'ipt>');}</script>
 
 <style>
@@ -5891,6 +5891,8 @@ const POSTemPrinter = {
         left:  { text: `CB ${lam ? lam.ngay + ' ' + lam.gio : ''}`, size: 15 },
         right: { text: nvNgan, size: 15 } },
       { type: 'divider' },
+      // [BTP ÂM 23/10] Tem gia hạn: ghi rõ lần gia hạn + người xác nhận (HSD bên dưới đã là hạn mới).
+      (b.expiryExtensions || []).length ? { text: `GIA HẠN lần ${b.expiryExtensions.length} · ${String((b.expiryExtensions.at(-1) || {}).by || '').trim().split(/\s+/).slice(-2).join(' ')}`, size: 15, align: 'left', bold: true, noWrap: true } : null,
       { text: hsd, size: 22, align: 'left', bold: true, noWrap: true },
     ].filter(Boolean);
   },
@@ -15327,6 +15329,8 @@ async function _doCheckOutImpl() {
     await openHandoverPOS('checkout');
     return;
   }
+  // [BTP ÂM 23/10] Ca có bán BTP lúc không còn lô → phải trả lời đã dùng gì thay rồi mới check-out được.
+  if (await prepUntrackedAskOnCheckOut(emp, openShift)) return;
   const conNguoiKhac = _employeeShiftsTodayCache.some(s => !s.checkedOutAt && s.employeeId !== emp.id);
   if (!conNguoiKhac) {
     let daDongNgay = false;
@@ -17925,6 +17929,216 @@ function prepShortageAllocate(r, picked, usedShort) {
   return { subs, uncovered: Math.max(0, left) };
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+// [BTP ÂM — chủ quán 23/10, docs/KE_HOACH_BTP_AM.md]
+// A. Lúc thanh toán: lô BTP mà lượt bán này sẽ trừ (FIFO) đã HẾT HẠN → hỏi ngay. «Vẫn còn dùng được» (PIN) = gia hạn thêm
+//    24 giờ + in tem gia hạn (không giới hạn số lần; loại hết hạn CUỐI NGÀY không được gia hạn). «Hủy» (PIN) = ghi đổ bỏ phần
+//    còn của lô, món vẫn bán (lô khác / loại thay thế). Chỉ đọc RT lô của BTP trong giỏ; Firestore chỉ đọc lô chưa có trong
+//    bộ nhớ và đúng lô sắp hỏi — ngày thường không thêm lượt đọc Firestore nào, không thêm thao tác nào.
+// B. Bán BTP lúc KHÔNG còn lô → người có ca lúc đó phải trả lời khi check-out (dùng loại nào thay theo cấu hình ở Quản lý /
+//    nấu mẻ mới kịp / không dùng gì). Câu trả lời lưu vào phiếu đối chiếu BTP âm; kết ca dùng lại, Engine 2 tự xác nhận.
+// ══════════════════════════════════════════════════════════════════════════
+const PREP_EXTEND_HOURS = 24;
+function prepLotExpired(b, nowMs, today) {
+  if (!b || b.shelfLifeType === 'none') return false;
+  if (b.shelfLifeType === 'endOfDay') return !!b.businessDate && b.businessDate < today;   // hết hạn khi đóng ngày
+  const t = b.expiresAt ? Date.parse(b.expiresAt) : NaN;
+  return Number.isFinite(t) && t <= nowMs;
+}
+// Hàm THUẦN: các lô ĐÃ HẾT HẠN mà lượt bán này sẽ trừ vào (FIFO theo lúc nấu xong / lúc mở trên RT).
+//   needs {prepId: qty} · unitsByPrep {prepId: {batchId: {unitBase, openedAt}}} (RT) · lotsById {batchId: prep_batches}
+function prepExpiryPlan(needs, unitsByPrep, lotsById, nowMs, today) {
+  const out = [];
+  Object.keys(needs || {}).forEach(prepId => {
+    let need = Number(needs[prepId]) || 0;
+    const at = (id, u) => { const b = lotsById[id]; const t = b ? Date.parse(b.finishedAt || b.startedAt || '') : NaN; return Number.isFinite(t) ? t : Number(u && u.openedAt) || 0; };
+    const lots = Object.entries(unitsByPrep[prepId] || {})
+      .filter(([id, u]) => id !== '__prepLock' && u && Number(u.unitBase) > 0.0001)
+      .map(([id, u]) => ({ id, left: Number(u.unitBase), lot: lotsById[id] || null, at: at(id, u) }))
+      .sort((a, b) => a.at - b.at);
+    for (const l of lots) {
+      if (!(need > 0.0001)) break;
+      if (l.lot && prepLotExpired(l.lot, nowMs, today))
+        out.push({ prepId, batchId: l.id, left: round2(l.left), lot: l.lot, extendable: l.lot.shelfLifeType !== 'endOfDay' });
+      need = round2(need - l.left);
+    }
+  });
+  return out;
+}
+// Gọi ở onCheckoutClick (cổng chung mọi luồng thanh toán). false = nhân viên đóng popup → chưa thanh toán.
+async function prepExpiryGateBeforePay(items) {
+  let needs = {};
+  try {
+    const [recipes, toppingRecipes, packagingPresets, packagingItemOverrides, baggingRules, pkgRulesPack, baggingTable] = await Promise.all([ensureRecipesLoadedPOS(), ensureToppingRecipesLoadedPOS(), ensurePackagingPresetsLoadedPOS(), ensurePackagingItemOverridesLoadedPOS(), ensurePackagingBaggingRulesLoadedPOS(), ensurePackagingRulesLoadedPOS(), ensurePackagingBaggingTableLoadedPOS()]);
+    needs = computeConsumptionForOrder({ itemsArray: items.map(c => ({ ...c })) }, recipes, toppingRecipes, packagingPresets, packagingItemOverrides, baggingRules, pkgRulesPack.rules, pkgRulesPack.config, baggingTable).prepAgg || {};
+  } catch (err) { console.warn('[BTP hết hạn] không tính được BTP của giỏ — bỏ qua kiểm tra', err); return true; }
+  const ids = Object.keys(needs).filter(id => Number(needs[id]) > 0);
+  if (!ids.length) return true;
+  for (let round = 0; round < 8; round++) {
+    const units = {};
+    try { await Promise.all(ids.map(async id => { units[id] = (await UnitEngine.units.ref(id).once('value')).val() || {}; })); }
+    catch (err) { console.warn('[BTP hết hạn] không đọc được lô — bỏ qua kiểm tra', err); return true; }
+    const lotsById = {}; (PREP_BATCHES_CACHE_POS || []).forEach(b => { lotsById[b.id] = b; });
+    const missing = ids.flatMap(id => Object.keys(units[id]).filter(k => k !== '__prepLock' && !lotsById[k] && Number((units[id][k] || {}).unitBase) > 0));
+    for (const bid of missing) {
+      try { const d = await fstore.collection('prep_batches_gieogieo').doc(bid).get(); if (d.exists) { lotsById[bid] = { id: bid, ...d.data() }; PREP_BATCHES_CACHE_POS.push(lotsById[bid]); } }
+      catch (e) { console.warn('[BTP hết hạn] không đọc được lô', bid, e); }
+    }
+    const plan = prepExpiryPlan(needs, units, lotsById, Date.now(), posDateKey());
+    if (!plan.length) return true;
+    // Bộ nhớ có thể cũ (lô đã được gia hạn / huỷ ở máy khác) → đọc lại ĐÚNG lô sắp hỏi.
+    const x = plan[0]; let fresh = null;
+    try { const d = await fstore.collection('prep_batches_gieogieo').doc(x.batchId).get(); fresh = d.exists ? { id: d.id, ...d.data() } : null; } catch (e) {}
+    if (fresh) { const i = PREP_BATCHES_CACHE_POS.findIndex(b => b.id === fresh.id); if (i >= 0) PREP_BATCHES_CACHE_POS[i] = fresh; else PREP_BATCHES_CACHE_POS.push(fresh); }
+    if (!fresh || fresh.status !== 'active' || !prepLotExpired(fresh, Date.now(), posDateKey())) continue;
+    const r = await prepExpiryAsk({ ...x, lot: fresh, extendable: fresh.shelfLifeType !== 'endOfDay' });
+    if (r === 'cancel') return false;
+  }
+  return true;
+}
+function prepExpiryAsk(x) {
+  return new Promise(resolve => {
+    const b = x.lot, het = b.shelfLifeType === 'endOfDay' ? 'hết hạn khi đóng ngày ' + (b.businessDate || '') : 'hết hạn lúc ' + fmtPrepTime(b.expiresAt);
+    document.getElementById('prep-exp-overlay')?.remove();
+    const ov = document.createElement('div');
+    ov.id = 'prep-exp-overlay';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:900;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(3px);';
+    const btn = (id, txt, bg, fg, bd) => `<button id="${id}" style="flex:1;padding:13px;background:${bg};color:${fg};border:${bd || 'none'};border-radius:14px;font-family:'Google Sans',sans-serif;font-size:14px;font-weight:700;cursor:pointer;">${txt}</button>`;
+    ov.innerHTML = `<div style="background:#FFFCF0;border-radius:24px;padding:20px;width:100%;max-width:420px;animation:pi .18s ease;">
+      <div style="font-size:16px;font-weight:800;color:#c0392b;margin-bottom:6px;">${escHtmlPos(b.prepName || '')} — lô ${escHtmlPos(b.batchCode || '')} đã ${escHtmlPos(het)}</div>
+      <div style="font-size:13.5px;line-height:1.5;color:var(--td);margin-bottom:10px;">Lô còn ${fmtPrepQty(x.left)} ${escHtmlPos(b.unit || '')}. Kiểm tra lại: còn dùng được không?
+        ${x.extendable ? `<br><b>Vẫn còn dùng được</b> → gia hạn thêm ${PREP_EXTEND_HOURS} giờ và in tem gia hạn.` : '<br>Loại hết hạn cuối ngày — <b>không được gia hạn</b>.'}
+        <br><b>Hủy</b> → ghi đổ bỏ phần còn của lô; món vẫn bán (lô khác hoặc loại dùng thay).</div>
+      ${renderPinInput('prepExpStaff')}
+      <div id="prepExpMsg" style="font-size:12.5px;color:#c0392b;min-height:16px;margin:6px 0"></div>
+      <div style="display:flex;gap:10px;">${btn('prepExpDiscard', 'Hủy lô này', '#fff', '#c0392b', '1.5px solid #f3b2bf')}${x.extendable ? btn('prepExpKeep', 'Vẫn còn dùng được', 'var(--gd)', '#fff') : ''}</div>
+      <button id="prepExpClose" style="width:100%;margin-top:10px;padding:10px;background:none;border:none;color:#888;font-size:13px;cursor:pointer;">Quay lại giỏ hàng</button></div>`;
+    document.body.appendChild(ov);
+    let busy = false;
+    const msg = t => { const m = document.getElementById('prepExpMsg'); if (m) m.textContent = t; };
+    const done = v => { ov.remove(); resolve(v); };
+    ov.querySelector('#prepExpClose').onclick = () => done('cancel');
+    const run = async kind => {
+      if (busy) return; busy = true;
+      try {
+        const who = await resolveStaffPinWorkedToday('prepExpStaff'); if (!who) { busy = false; return; }
+        if (kind === 'keep') await prepExtendLotPOS(b, who);
+        else await prepDiscardExpiredLotPOS(b, x.left, who);
+        done(kind === 'keep' ? 'extended' : 'discarded');
+      } catch (err) { console.error('[BTP hết hạn]', err); msg('Chưa lưu được: ' + (err.message || err)); busy = false; }
+    };
+    ov.querySelector('#prepExpDiscard').onclick = () => run('discard');
+    const keep = ov.querySelector('#prepExpKeep'); if (keep) keep.onclick = () => run('keep');
+  });
+}
+function fmtPrepTime(iso) { const d = iso ? vnDate(iso) : null; if (!d || isNaN(d)) return '—'; const p = n => String(n).padStart(2, '0'); return p(d.getHours()) + ':' + p(d.getMinutes()) + ' ' + p(d.getDate()) + '/' + p(d.getMonth() + 1); }
+async function prepExtendLotPOS(b, who) {
+  if (b.shelfLifeType === 'endOfDay') throw new Error('Loại hết hạn cuối ngày không được gia hạn');
+  const to = new Date(Date.now() + PREP_EXTEND_HOURS * 3600000).toISOString();
+  const ext = { at: vnDate().toISOString(), by: who.fullName || '', byId: who.id || '', from: b.expiresAt || null, to, source: 'pos_sale' };
+  await UnitEngine.batches.annotate(b.id, { expiresAt: to, expiryExtensions: firebase.firestore.FieldValue.arrayUnion(ext) });
+  const nb = { ...b, expiresAt: to, expiryExtensions: [...(b.expiryExtensions || []), ext] };
+  const i = PREP_BATCHES_CACHE_POS.findIndex(x => x.id === b.id); if (i >= 0) PREP_BATCHES_CACHE_POS[i] = nb;
+  try { if (await POSTemPrinter.printPrepBatchLabel(nb, 1) === false) toast('⚠️ Đã gia hạn — chưa in được tem gia hạn, in lại ở màn Chế biến'); else toast('✅ Đã gia hạn ' + PREP_EXTEND_HOURS + ' giờ — dán tem gia hạn lên khay'); }
+  catch (e) { toast('⚠️ Đã gia hạn — chưa in được tem gia hạn'); }
+}
+async function prepDiscardExpiredLotPOS(b, left, who) {
+  const qty = round2(Number(b.qtyRemaining) > 0 ? Number(b.qtyRemaining) : 0);
+  if (!(qty > 0.005)) { toast('Lô này đã hết trên sổ — bỏ qua'); return; }
+  let p = (PREP_ITEMS_CACHE_POS || []).find(i => i.id === b.prepId);
+  if (!p) { const d = await fstore.collection('prep_items_gieogieo').doc(b.prepId).get(); p = d.exists ? { id: d.id, ...d.data() } : { id: b.prepId, name: b.prepName || '', unit: b.unit || '' }; }
+  await UnitEngine.prep.discardByLots(p, { qty, lines: [{ batchId: b.id, batchCode: b.batchCode || '', qty }],
+    reason: 'Hết hạn — nhân viên xác nhận không dùng được (lúc bán)', totalCost: round2(qty * (Number(p.costPerUnit) || 0)),
+    ingredientBreakdown: [], weighings: {}, staffEmp: who });
+  const i = PREP_BATCHES_CACHE_POS.findIndex(x => x.id === b.id); if (i >= 0) PREP_BATCHES_CACHE_POS[i] = { ...b, qtyRemaining: 0, status: 'used_up' };
+  toast('✅ Đã ghi huỷ lô ' + (b.batchCode || '') + ' — ' + fmtPrepQty(qty) + ' ' + (b.unit || ''));
+}
+
+// B. Hàm THUẦN: các lượt bán BTP KHÔNG trừ được lô nào (dòng CONSUMPTION không có unitAllocations) trong (fromMs, toMs],
+// bỏ bill đã huỷ (có dòng hoàn reversal cùng referenceId).
+function prepUntrackedSales(rows, fromMs, toMs) {
+  const rev = new Set((rows || []).filter(t => String(t.type || '').toUpperCase() === 'ADJUSTMENT' && t.reversal === true).map(t => t.referenceId).filter(Boolean));
+  const events = (rows || []).filter(t => String(t.type || '').toUpperCase() === 'CONSUMPTION' && !(t.unitAllocations || []).length && !t.prepRecon && !(t.referenceId && rev.has(t.referenceId)))
+    .map(t => ({ at: t.createdAt || '', ms: Date.parse(t.createdAt || ''), qty: Math.abs(Number(t.qty) || 0), ref: t.referenceId || t.id }))
+    .filter(e => e.qty > 0 && Number.isFinite(e.ms) && e.ms > fromMs && e.ms <= toMs).sort((a, b) => a.ms - b.ms);
+  return { events, qty: round2(events.reduce((a, e) => a + e.qty, 0)) };
+}
+let _prepUntrackedAsk = null;
+// Gọi trong _doCheckOutImpl. true = đang hiện câu hỏi (chưa check-out). Lỗi đọc → không chặn check-out.
+async function prepUntrackedAskOnCheckOut(emp, shift) {
+  const day = posDateKey();
+  let preps;
+  try { preps = (await fstore.collection('prep_items_gieogieo').where('untrackedPendingDelta', '<', 0).get()).docs.map(d => ({ id: d.id, ...d.data() })); }
+  catch (err) { console.warn('[BTP âm] không đọc được BTP bán không lô — không chặn check-out', err); return false; }
+  if (!preps.length) return false;
+  const fromMs = Date.parse(shift.checkedInAt || ''), toMs = Date.now(), rows = [];
+  for (const p of preps) {
+    try {
+      const recId = (day + '_' + p.id).replace(/[^\w\-]/g, '_');
+      const [tx, rec] = await Promise.all([fstore.collection('prep_transactions_gieogieo').where('prepId', '==', p.id).where('businessDate', '==', day).get(),
+        fstore.collection(PREP_SHORTAGE_RECON_COLL).doc(recId).get()]);
+      const r = rec.exists ? rec.data() : {};
+      if ((r.checkoutAnswers || {})[shift.id] || ['substitution_confirmed', 'dismissed'].includes(r.status)) continue;
+      const u = prepUntrackedSales(tx.docs.map(d => ({ id: d.id, ...d.data() })), Number.isFinite(fromMs) ? fromMs : 0, toMs);
+      if (u.qty > 0.005) rows.push({ p, recId, ...u, subs: (p.substitutes || []).map(prepSubNorm) });
+    } catch (err) { console.warn('[BTP âm] bỏ qua câu hỏi của', p.id, err); }
+  }
+  if (!rows.length) return false;
+  const need = [...new Set(rows.flatMap(r => r.subs.map(s => s.kind + ':' + s.id)))];
+  const names = {};
+  await Promise.all(need.map(async k => { const [kind, id] = k.split(':');
+    try { const d = await fstore.collection(kind === 'item' ? 'inventory_items_gieogieo' : 'prep_items_gieogieo').doc(id).get(); names[k] = d.exists ? (d.data().name || id) : id; } catch (e) { names[k] = id; } }));
+  rows.forEach(r => { r.subs = r.subs.map(s => ({ ...s, name: names[s.kind + ':' + s.id] || s.id })); });
+  _prepUntrackedAsk = { emp, shift, day, rows, answers: {} };
+  renderPrepUntrackedAsk();
+  return true;
+}
+function renderPrepUntrackedAsk() {
+  const st = _prepUntrackedAsk; if (!st) return;
+  document.getElementById('prep-untracked-overlay')?.remove();
+  const ov = document.createElement('div');
+  ov.id = 'prep-untracked-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:900;display:flex;align-items:center;justify-content:center;padding:16px;backdrop-filter:blur(3px);';
+  const opt = (i, val, label) => `<label style="display:flex;align-items:center;gap:8px;padding:9px 10px;border:1.5px solid ${st.answers[i] === val ? 'var(--gd)' : '#e6e1d2'};border-radius:12px;margin-top:6px;cursor:pointer;background:#fff;font-size:13.5px;">
+      <input type="radio" name="pua${i}" ${st.answers[i] === val ? 'checked' : ''} onchange="_prepUntrackedAsk.answers[${i}]='${val}';renderPrepUntrackedAsk()" style="width:auto;min-height:0;margin:0"><span>${label}</span></label>`;
+  ov.innerHTML = `<div style="background:#FFFCF0;border-radius:24px;padding:20px;width:100%;max-width:460px;max-height:90vh;overflow:auto;">
+    <div style="font-size:16px;font-weight:800;color:var(--td);margin-bottom:4px;">Trả lời trước khi check-out</div>
+    <div style="font-size:13px;color:#666;margin-bottom:8px;">Trong ca của ${escHtmlPos(st.emp.fullName || '')} có bán món cần bán thành phẩm lúc <b>không còn lô nào</b>. Lúc đó đã làm thế nào?</div>
+    ${st.rows.map((r, i) => `<div style="border-top:1px solid #eee;padding-top:10px;margin-top:10px;">
+      <div style="font-weight:800">${escHtmlPos(r.p.name || '')} — ${fmtPrepQty(r.qty)} ${escHtmlPos(r.p.unit || '')}</div>
+      <div style="font-size:12px;color:#888">Lúc ${r.events.slice(0, 6).map(e => fmtPrepTime(e.at).slice(0, 5)).join(', ')}${r.events.length > 6 ? '…' : ''}</div>
+      ${r.subs.map(s => opt(i, 'sub:' + s.kind + ':' + s.id, 'Dùng <b>' + escHtmlPos(s.name) + '</b> thay')).join('')}
+      ${opt(i, 'new_batch', 'Nấu mẻ mới kịp — lấy từ nồi đang nấu')}
+      ${opt(i, 'none', 'Không dùng gì / không rõ')}</div>`).join('')}
+    <div id="puaMsg" style="font-size:12.5px;color:#c0392b;min-height:16px;margin:8px 0"></div>
+    <div style="display:flex;gap:10px;"><button onclick="document.getElementById('prep-untracked-overlay').remove();_prepUntrackedAsk=null" style="flex:1;padding:13px;background:#fff;color:#666;border:1.5px solid #ddd;border-radius:14px;font-weight:700;">Để sau</button>
+    <button onclick="prepUntrackedSubmit()" style="flex:2;padding:13px;background:var(--gd);color:#fff;border:none;border-radius:14px;font-weight:700;">Lưu &amp; check-out</button></div></div>`;
+  document.body.appendChild(ov);
+}
+async function prepUntrackedSubmit() {
+  const st = _prepUntrackedAsk; if (!st || st.busy) return;
+  if (st.rows.some((r, i) => !st.answers[i])) { document.getElementById('puaMsg').textContent = 'Trả lời hết các món trước khi check-out'; return; }
+  st.busy = true;
+  try {
+    const at = vnDate().toISOString();
+    for (let i = 0; i < st.rows.length; i++) {
+      const r = st.rows[i];
+      await fstore.collection(PREP_SHORTAGE_RECON_COLL).doc(r.recId).set({ prepId: r.p.id, prepName: r.p.name || '', unit: r.p.unit || '', businessDate: st.day, sourceKind: 'prep',
+        checkoutAnswers: { [st.shift.id]: { employeeId: st.emp.id, employeeName: st.emp.fullName || '', at, choice: st.answers[i], qty: r.qty, events: r.events.length } } }, { merge: true });
+    }
+    document.getElementById('prep-untracked-overlay')?.remove(); _prepUntrackedAsk = null;
+    toast('✅ Đã ghi câu trả lời');
+    await doCheckOut();
+  } catch (err) { console.error('[BTP âm] lưu câu trả lời lỗi', err); const m = document.getElementById('puaMsg'); if (m) m.textContent = 'Chưa lưu được: ' + (err.message || err); st.busy = false; }
+}
+// Kết ca: câu đã trả lời lúc check-out điền sẵn cho dòng «hỏi bù» (cùng mã phiếu {ngày}_{BTP}).
+function prepShortagePrefillFromCheckout(row, rec) {
+  const ans = Object.values((rec && rec.checkoutAnswers) || {});
+  if (!ans.length) return null;
+  const keys = new Set((row.candidates || []).map(c => c.kind + ':' + c.id));
+  const picked = new Set(ans.map(a => String(a.choice || '')).filter(c => c.startsWith('sub:')).map(c => c.slice(4)).filter(k => keys.has(k)));
+  return { answer: picked.size ? picked : 'none', staff: [...new Set(ans.map(a => a.employeeName).filter(Boolean))].join(', ') };
+}
 let _prepShortAsk = null; // { day, rows, answers: {idx: Set('kind:id') | 'none'} }
 
 // Gọi đầu _continueAfterShiftInventoryClosePOS. true = đang hiện màn hỏi, dừng luồng kết ca.
@@ -17969,8 +18183,19 @@ async function prepShortageAskIfNeeded() {
       await fstore.collection('daily_closings_gieogieo').doc(day).set({ prepShortageAnswered: true }, { merge: true });
       return false;
     }
-    _prepShortAsk = { day, rows, answers: {} };
-    if (!rows.some(r => r.status === 'ask')) { await prepShortageSubmitAnswers(true); return false; }
+    // [BTP ÂM 23/10] Câu đã trả lời lúc check-out điền sẵn; trả lời đủ thì không hỏi lại.
+    const answers = {};
+    await Promise.all(rows.map(async (r, i) => {
+      if (r.status !== 'ask') return;
+      try {
+        const rid = (day + (r.sourceKind === 'item' ? '_nl_' : '_') + r.prepId).replace(/[^\w\-]/g, '_');
+        const rec = await fstore.collection(PREP_SHORTAGE_RECON_COLL).doc(rid).get();
+        const pf = prepShortagePrefillFromCheckout(r, rec.exists ? rec.data() : null);
+        if (pf) { answers[i] = pf.answer; r.checkoutStaff = pf.staff; }
+      } catch (e) { console.warn('[BTP âm] không đọc được câu trả lời lúc check-out', r.prepId, e); }
+    }));
+    _prepShortAsk = { day, rows, answers };
+    if (!rows.some((r, i) => r.status === 'ask' && !answers[i])) { await prepShortageSubmitAnswers(true); return false; }
     renderPrepShortageAsk();
     return true;
   } catch (err) {
@@ -18070,18 +18295,20 @@ async function prepShortageSubmitAnswers(auto) {
         }).catch(err => console.warn('[BTP âm] ghi sổ NL dùng bù lỗi', sub.id, err));
       }
       const { candidates, ...rest } = r;
+      // merge: giữ câu trả lời lúc check-out (checkoutAnswers) đã ghi vào cùng phiếu.
+      const { checkoutStaff, ...restClean } = rest;
       await fstore.collection(PREP_SHORTAGE_RECON_COLL).doc(id).set({
-        ...rest, status, businessDate: st.day, createdAt: now,
+        ...restClean, status, businessDate: st.day, createdAt: now,
         candidates, substitutions: subs, uncoveredQty: round2(uncovered),
         staffAnswer: r.status !== 'ask' ? null : (a === 'none' ? 'none' : subs.map(x => x.kind + ':' + x.id)),
-        staff: staffEmp.fullName, staffEmployeeId: staffEmp.id
-      });
+        staff: staffEmp.fullName || checkoutStaff || '', staffEmployeeId: staffEmp.id || ''
+      }, { merge: true });
       if (status !== 'explained') {
         await fstore.collection('alerts_gieogieo').doc('prep_shortage_' + id).set({
           type: 'prep_shortage_recon', severity: status === 'unexplained' ? 'danger' : 'warning', status: 'new',
           businessDate: st.day, createdAt: now, prepId: r.prepId, itemName: r.prepName, reconId: id,
           title: status === 'substitution_pending'
-            ? `${r.prepName}: nhân viên xác nhận đã bù bằng ${subs.map(x => x.prepName).join(', ')} — cần Quản lý xác nhận`
+            ? `${r.prepName}: nhân viên xác nhận đã bù bằng ${subs.map(x => x.prepName).join(', ')} — hệ thống tự đối chiếu số cân`
             : `${r.prepName}: thiếu ${fmtPrepQty(r.remainder)} ${r.unit} chưa giải thích được`
         }, { merge: true }).catch(() => {});
       }
@@ -23075,6 +23302,8 @@ async function onCheckoutClick() {
   if (!requireOpeningChecklistDone()) return; // [GĐ5] còn việc đầu ca bắt buộc chưa xong
   const items = Object.values(cart);
   if (!items.length) { toast('Giỏ hàng trống!'); return; }
+  // [BTP ÂM 23/10] Lô BTP sắp trừ đã hết hạn → hỏi gia hạn / huỷ lô TRƯỚC khi thanh toán (chỉ khi có lô hết hạn).
+  if (!_backfillMode && !(await prepExpiryGateBeforePay(items))) return;
   // [FIX duplicate bill] Sinh idemKey CỐ ĐỊNH cho lượt thanh toán này — chỉ sinh khi CHƯA có
   // (giữ nguyên qua việc quay lại/mở lại màn thanh toán nhiều lần cho cùng giỏ hàng này). Bị xoá
   // khi cartClear() (đơn mới thật sự) hoặc sau khi 1 bill hoàn tất — xem confirmPay().

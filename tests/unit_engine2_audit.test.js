@@ -88,6 +88,7 @@ const weighCases=FS=>casesOf(FS).filter(([,d])=>d.originKind==='measurement').so
   ['tự duyệt lệch NL khác dòng sổ gốc',FS=>{withPrep(FS);FS['stock_transactions_gieogieo/prep_after_B1_j'].qty=-300;},'PREP_REVIEW_SOURCE_MISMATCH'],
   ['tự duyệt dòng trước ngày áp dụng',FS=>{withPrep(FS);FS[ROOT].fromDate='2026-10-21';},'PREP_REVIEW_BEFORE_START'],
   ['lệch lớn tự duyệt không có thông báo để biết',FS=>{withPrep(FS);delete FS['alerts_gieogieo/al1'];},'PREP_REVIEW_FYI_MISSING'],
+  ['tự xác nhận dùng thay khi thiếu lệch quá ±10%',FS=>{FS['prep_shortage_recons_gieogieo/rc1']={status:'substitution_confirmed',remainder:300,substitutions:[{observedShortQty:200,ratio:1}]};FS[ROOT+'/sub_reviews/sr1']={id:'sr1',reconId:'rc1',businessDate:'2026-10-20',mode:'active',ok:true};},'SUB_CONFIRMED_OUT_OF_TOL'],
   ['tự đóng thông báo lệch lớn',FS=>{FS['duty_cases_gieogieo/dcA']={prepId:'p',variance:-150,usageTotal:400,book:800,unit:'g',status:'auto'};FS[ROOT+'/alert_reviews/ar1']={id:'ar1',businessDate:'2026-10-20',mode:'active',type:'prep_count_variance',caseId:'dcA',caseStatus:'auto',fyi:false};},'ALERT_AUTO_CLOSED_LARGE'],
   ['xử lý thông báo khi vụ lệch chưa chốt',FS=>{FS['duty_cases_gieogieo/dcA']={prepId:'p',variance:-20,usageTotal:400,book:800,unit:'g',status:'pending_verify'};FS[ROOT+'/alert_reviews/ar1']={id:'ar1',businessDate:'2026-10-20',mode:'active',type:'prep_count_variance',caseId:'dcA',caseStatus:'pending_verify',fyi:false};},'ALERT_REVIEW_BEFORE_FINAL'],
   ['pha nhầm ghép khác nhóm',FS=>{withMixup(FS);FS[MX].shortageId='tc';},'MIXUP_CROSS_GROUP'],

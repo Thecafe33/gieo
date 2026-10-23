@@ -4851,7 +4851,7 @@
   // Trường số lượng/trạng thái (unitBase, qty, type, status…) KHÔNG nằm đây → FIELD_NOT_ANNOTATABLE.
   const ANNOTATABLE = {
     containers: ['labelPrinted', 'labelPrintedAt', 'openLabelPrinted', 'openLabelPrintedAt', 'needsReview', 'reviewedAt', 'reviewedBy', 'note'],
-    batches: ['expiresAt', 'needsReview', 'reviewedAt', 'reviewedBy', 'note'],
+    batches: ['expiresAt', 'needsReview', 'reviewedAt', 'reviewedBy', 'note', 'expiryExtensions'],
     ledger: ['responsibility', 'responsibilityOriginal', 'responsibilityHistory', 'needsReview', 'reviewedAt', 'reviewedBy', 'voided', 'voidedAt', 'voidedReason', 'note',
       'substitutionQty', 'substitutionReconId', 'substitutionFor',
       'entryErrorConfirmed', 'entryErrorQty', 'entryErrorFoundInBatch', 'entryErrorCorrectedBy', 'entryErrorCorrectedById', 'entryErrorAt',
@@ -5523,14 +5523,15 @@
       const sn = await t.get(ref); if (!sn.exists) return false; const c = sn.data();
       if (_dutyProtected(c) || (c.mixupIds || []).includes(o.mixupId)) return false;
       const v = Number(c.variance) || 0, av = _dAbs(v), sign = v < 0 ? -1 : 1, cost = Number(c.costPerUnit) || 0;
-      const pool = c.pool || [], prev = pool.filter(x => x.kind === 'mixup').reduce((a, x) => a + _dAbs(x.qty), 0);
+      const PK = ['mixup', 'substitution'], kind = o.kind === 'substitution' ? 'substitution' : 'mixup';   // [23/10] dùng thay hợp lệ (BTP âm) cùng cơ chế
+      const pool = c.pool || [], prev = pool.filter(x => PK.includes(x.kind)).reduce((a, x) => a + _dAbs(x.qty), 0);
       const take = round2(Math.min(Number(o.qty), av - prev)); if (!(take > 0.005)) return false;
-      const rest = (c.allocations || []).concat(pool.filter(x => x.kind !== 'mixup')), total = rest.reduce((a, x) => a + _dAbs(x.qty), 0);
+      const rest = (c.allocations || []).concat(pool.filter(x => !PK.includes(x.kind))), total = rest.reduce((a, x) => a + _dAbs(x.qty), 0);
       const f = total > 0 ? Math.max(0, (total - take) / total) : 0;
       const scale = x => Object.assign({}, x, { qty: round2((Number(x.qty) || 0) * f), value: round2((Number(x.value) || 0) * f) });
       t.update(ref, { allocations: (c.allocations || []).map(scale),
-        pool: pool.filter(x => x.kind === 'mixup').concat(pool.filter(x => x.kind !== 'mixup').map(scale),
-          [{ kind: 'mixup', qty: round2(sign * take), value: round2(take * cost), reason: o.reason || 'nghi_pha_nham', mixupId: o.mixupId }]),
+        pool: pool.filter(x => PK.includes(x.kind)).concat(pool.filter(x => !PK.includes(x.kind)).map(scale),
+          [{ kind, qty: round2(sign * take), value: round2(take * cost), reason: o.reason || (kind === 'substitution' ? 'dung_thay_the' : 'nghi_pha_nham'), mixupId: o.mixupId }]),
         mixupIds: C.FieldValue.arrayUnion(o.mixupId), revision: (Number(c.revision) || 0) + 1,
         history: C.FieldValue.arrayUnion({ at: now, type: 'mixup', mixupId: o.mixupId, qty: take, engineVersion: VERSION,
           before: { allocations: c.allocations || [], pool } }) });

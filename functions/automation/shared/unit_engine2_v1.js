@@ -178,6 +178,22 @@ function countAlertClass(variance,usage,book,unit){
  const v={deviation:round(Number(variance)||0),base:round(base),abs,ratio:mag/base};return {...v,...prepReviewClass(v)};
 }
 const ueKey=(...p)=>p.join('_').replace(/[^\w\-]/g,'_').slice(0,180);   // = P.key của unit_engine (mã hồ sơ vụ lệch)
+// BTP âm — dùng loại thay thế (chủ quán 23/10, docs/KE_HOACH_BTP_AM.md): hệ thống tự xác nhận khi loại thay thế THIẾU cuối
+// ngày khớp lượng cần bù trong ±10%, tối đa 30 (nhân viên còn nếm thử). Lượng thiếu của loại thay thế quy về đơn vị món bị âm.
+const SUB_TOL={frac:0.1,cap:30};
+function subCheck(r){
+ const subs=(r&&r.substitutions)||[],R=Number(r&&r.remainder)||0;
+ if(!subs.length||!(R>0))return {ok:false,reason:'no_substitution',need:R,covered:0,tol:0};
+ const covered=round(subs.reduce((a,x)=>a+(Number(x.observedShortQty)||0)/(Number(x.ratio)>0?Number(x.ratio):1),0));
+ const tol=round(Math.min(SUB_TOL.frac*R,SUB_TOL.cap)),diff=round(covered-R);
+ return {ok:Math.abs(diff)<=tol,reason:Math.abs(diff)<=tol?'match':diff<0?'substitute_short_less':'substitute_short_more',need:round(R),covered,diff,tol};
+}
+// Chênh giá vốn khi xác nhận bù — chép công thức _btpAmApplySubstitution (quanlygieo).
+function subCogsDelta(r){
+ const costA=Number(r.costPerUnit)||0;let covered=0,costB=0;
+ for(const x of r.substitutions||[]){costB+=(Number(x.expectedQty)||0)*(Number(x.costPerUnit)||0);covered+=Number(x.coversQty)>0?Number(x.coversQty):(Number(x.expectedQty)||0)/(Number(x.ratio)||1);}
+ covered=Math.min(covered,Number(r.remainder)||0);return Math.round(costB-covered*costA);
+}
 function decision(input){
  const {store,sourceId,source,container,shifts,checkpoint,valuation}=input;storeId(store);
  if(!source||source.type!=='WASTE'||source.voided===true||!(Number(source.qty)<0))return {schemaVersion:1,policyVersion:POLICY,storeId:store,sourceId,sourcePath:collection('stock_transactions',store)+'/'+sourceId,status:'voided',quantity:0,amount:0,allocations:[],reason:'SOURCE_INACTIVE'};
@@ -282,6 +298,6 @@ function outbox(storage,store){
  const read=()=>{const value=JSON.parse(storage.getItem(name)||'[]');if(!Array.isArray(value)||value.some(x=>x.storeId!==store))throw Error('Bộ nhớ công việc cần kiểm tra');return value;};
  return {read,put(command){if(!command.id||!['measurement','exception','close_exception','evidence'].includes(command.kind))throw Error('Lệnh lưu không hợp lệ');const rows=read();if(rows.some(x=>x.id===command.id))return;if(rows.length>=100)throw Error('Bộ nhớ công việc đã đầy; kết nối để đồng bộ trước');storage.setItem(name,JSON.stringify([...rows,{...command,storeId:store}]));},remove(id){storage.setItem(name,JSON.stringify(read().filter(x=>x.id!==id)));}};
 }
-const api={VERSION,POLICY,DAY,states,ms,finite,stable,storeId,collection,SHARED,tableName,rootPath,key,digest,round,split,isBarista,group,interval,SPEC,lotKey,specCheck,specOutcome,PREP_REVIEW,PREP_ROW,prepVariance,prepReviewClass,prepTrack,countAlertClass,ueKey,MIXUP,groupKey,mixTol,mixPortion,mixNoise,mixPair,mixMatch,mixReweigh,decision,measuredDecision,audit,transition,path,caseFlow,taskStart,control,measurement,outbox};
+const api={VERSION,POLICY,DAY,states,ms,finite,stable,storeId,collection,SHARED,tableName,rootPath,key,digest,round,split,isBarista,group,interval,SPEC,lotKey,specCheck,specOutcome,PREP_REVIEW,PREP_ROW,prepVariance,prepReviewClass,prepTrack,SUB_TOL,subCheck,subCogsDelta,countAlertClass,ueKey,MIXUP,groupKey,mixTol,mixPortion,mixNoise,mixPair,mixMatch,mixReweigh,decision,measuredDecision,audit,transition,path,caseFlow,taskStart,control,measurement,outbox};
 if(typeof module==='object'&&module.exports)module.exports=api;root.UnitEngine2=api;
 })(typeof window!=='undefined'?window:globalThis);

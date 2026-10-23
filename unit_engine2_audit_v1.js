@@ -24,6 +24,7 @@ const CODES={
  PREP_REVIEW_SOURCE_MISMATCH:['violation','Hồ sơ tự duyệt lệch NL khác dòng sổ gốc (số lệch / người chịu trách nhiệm) hoặc dòng sổ không mang dấu tự duyệt'],
  PREP_REVIEW_BEFORE_START:['violation','Tự duyệt dòng phát sinh trước ngày áp dụng (tồn quá khứ phải giữ nguyên)'],
  PREP_REVIEW_FYI_MISSING:['violation','Lệch > 25% đã tự duyệt nhưng không có thông báo để biết cho quản lý'],
+ SUB_CONFIRMED_OUT_OF_TOL:['violation','Hệ thống tự xác nhận dùng thay (BTP âm) khi loại thay thế thiếu lệch lượng cần bù quá ±10% / 30'],
  ALERT_AUTO_CLOSED_LARGE:['violation','Hệ thống tự ĐÓNG thông báo lệch đếm mà lệch > 25% lượng dùng (phải giữ làm thông báo để biết)'],
  ALERT_REVIEW_BEFORE_FINAL:['violation','Tự xử lý thông báo lệch đếm khi vụ lệch còn chờ cân lại / tranh chấp'],
  MIXUP_CROSS_GROUP:['violation','Sự cố pha nhầm ghép hai món KHÁC nhóm dễ nhầm (hoặc món không thuộc nhóm nào)'],
@@ -239,6 +240,13 @@ function check(snap){
   if(band!==r.band)add('PREP_REVIEW_WRONG_BAND',ref,{expected:band,recorded:r.band});
   if(r.mode==='active'&&['large','very_large'].includes(band)&&(!r.fyiAlertId||!PA[r.fyiAlertId]||PA[r.fyiAlertId].fyi!==true))add('PREP_REVIEW_FYI_MISSING',ref,{alert:r.fyiAlertId||null});
  }
+ // --- BTP âm: tự xác nhận dùng thay (23/10) — tính lại độc lập từ phiếu ---
+ const SR=snap.subRecons||{};
+ for(const r of snap.subReviews||[]){
+  if(r.mode!=='active'||!r.ok)continue;const x=SR[r.reconId];if(!x)continue;
+  const R=Number(x.remainder)||0,cov=(x.substitutions||[]).reduce((a,y)=>a+(Number(y.observedShortQty)||0)/(Number(y.ratio)>0?Number(y.ratio):1),0);
+  if(!(R>0)||Math.abs(cov-R)>Math.min(0.1*R,30)+EPS)add('SUB_CONFIRMED_OUT_OF_TOL','sub_reviews/'+r.id,{need:R,covered:Math.round(cov*100)/100});
+ }
  // --- thông báo lệch đếm tự xử lý (23/10) — tính lại độc lập từ vụ lệch gốc ---
  const AR=snap.alertReviewCases||{};
  for(const r of snap.alertReviews||[]){
@@ -297,6 +305,8 @@ async function collect({fstore,storeId:sid,from,to,limit=500,collection}){
  await byIds(sub('requests'),[...cases.map(c=>(c.originKind==='measurement'?'measurement':'finish')+'~'+encodeURIComponent(c.originId||c.sourceId)),...Object.keys(sources).filter(id=>/^finish_/.test(id)).map(id=>'finish~'+encodeURIComponent(id))],requests);
  const starts=cases.map(c=>ms(c.interval?.from)).filter(Number.isFinite),ends=cases.map(c=>ms(c.interval?.to)).filter(Number.isFinite);
  const shifts=starts.length?await rows('shifts',coll('employee_shifts').where('checkedInAt','>=',new Date(Math.min(...starts)-14*3600000).toISOString()).where('checkedInAt','<=',new Date(Math.max(...ends)).toISOString())):[];
+ const subReviews=await rows('sub_reviews',sub('sub_reviews').where('businessDate','>=',from).where('businessDate','<=',to)),subRecons={};
+ await byIds(coll('prep_shortage_recons'),subReviews.map(r=>r.reconId),subRecons);
  const alertReviews=await rows('alert_reviews',sub('alert_reviews').where('businessDate','>=',from).where('businessDate','<=',to)),alertReviewCases={};
  await byIds(coll('duty_cases'),alertReviews.map(r=>r.caseId),alertReviewCases);
  const mixups=await rows('mixups',sub('mixups').where('day','>=',from).where('day','<=',to)),mixupCatalog={},mixupCases={};
@@ -306,7 +316,7 @@ async function collect({fstore,storeId:sid,from,to,limit=500,collection}){
  await byIds(coll('stock_transactions'),prepReviews.map(r=>r.txId),prepSources);await byIds(coll('alerts'),prepReviews.map(r=>r.fyiAlertId),prepAlerts);
  const controls=(await rows('controls',sub('controls'))).map(k=>({...k,itemId:k.itemId||k.id}));
  const devices=await rows('devices',sub('devices'));
- return {store,range:{from,to},config,alertReviews,alertReviewCases,mixups,mixupCatalog,mixupCases,prepReviews,prepSources,prepAlerts,sources,containers,receipts,checkpoints,decisions,measurements,prices,items,requests,cases,shifts,tasks,locks,controls,devices,truncated};
+ return {store,range:{from,to},config,subReviews,subRecons,alertReviews,alertReviewCases,mixups,mixupCatalog,mixupCases,prepReviews,prepSources,prepAlerts,sources,containers,receipts,checkpoints,decisions,measurements,prices,items,requests,cases,shifts,tasks,locks,controls,devices,truncated};
 }
 
 async function run(opts){return check(await collect(opts));}

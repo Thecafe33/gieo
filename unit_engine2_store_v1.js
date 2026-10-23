@@ -34,7 +34,7 @@ function create(opts){
  async function fence(t,guard){if(!guard)return;const s=await t.get(guard.ref);if(!s.exists||s.data().leaseToken!==guard.token||s.data().revision!==guard.revision)throw error('Lease hoặc phiên bản công việc đã thay đổi');}
  async function config(){const s=await base.get();return s.exists?s.data():{};}
  async function enqueue(kind,id,resumeCursor=false){
-  if(!['finish','measurement','handover','bootstrap','reprice','recompute_shift','discover_shift','opened','prep_review','mixup_day','alert_review'].includes(kind))throw Error('Engine2: loại việc không hợp lệ');
+  if(!['finish','measurement','handover','bootstrap','reprice','recompute_shift','discover_shift','opened','prep_review','mixup_day','alert_review','sub_review'].includes(kind))throw Error('Engine2: loại việc không hợp lệ');
   const ref=sub('requests').doc(E.key(kind,id));
   return fs.runTransaction(async t=>{
    const [c,s]=await Promise.all([t.get(base),t.get(ref)]);const cfg=c.exists?c.data():{};
@@ -217,7 +217,9 @@ function create(opts){
   const cs=await coll('duty_cases').where('businessDate','==',day).limit(501).get();if(cs.docs.length>500)throw error('Quá nhiều vụ lệch trong ngày; chưa xét pha nhầm');
   const varOf=new Map();
   for(const d of cs.docs){const c=d.data();if(!cat.has(c.prepId)||c.status==='voided')continue;const o=varOf.get(c.prepId)||{variance:0,cases:[],from:null,to:null};
-   o.variance=E.round(o.variance+(Number(c.variance)||0));o.cases.push({id:d.id,variance:Number(c.variance)||0});
+   // Phần đã xác nhận DÙNG THAY hợp lệ (BTP âm, pool kind substitution) không phải lệch — trừ ra trước khi ghép pha nhầm.
+   const subQ=(c.pool||[]).filter(x=>x.kind==='substitution').reduce((a,x)=>a+(Number(x.qty)||0),0);
+   o.variance=E.round(o.variance+(Number(c.variance)||0)-subQ);o.cases.push({id:d.id,variance:Number(c.variance)||0});
    if(c.interval?.from&&(!o.from||E.ms(c.interval.from)<E.ms(o.from)))o.from=c.interval.from;if(c.interval?.to&&(!o.to||E.ms(c.interval.to)>E.ms(o.to)))o.to=c.interval.to;varOf.set(c.prepId,o);}
   const hot=new Set();
   for(const g of new Set([...cat.values()].map(m=>E.groupKey(m.group)))){const ms=[...cat.values()].filter(m=>E.groupKey(m.group)===g),v=ms.map(m=>varOf.get(m.id)?.variance||0);
@@ -388,6 +390,52 @@ function create(opts){
  async function sweepAlerts(){
   const cfg=await config();if(!cfg.enabled||!/^\d{4}-\d{2}-\d{2}$/.test(cfg.fromDate||''))return 0;let n=0;
   for(const d of (await coll('alerts').where('status','==','new').limit(300).get()).docs){const a=d.data();if(ALERT_TYPES.includes(a.type)&&!a.fyi&&!a.autoReview&&String(a.businessDate||'')>=cfg.fromDate){await enqueue('alert_review',d.id);n++;}}
+  return n;
+ }
+ // ── BTP âm: dùng loại thay thế (chủ quán 23/10) — thay bước quản lý bấm «Xác nhận bù» ở quanlygieo. Phiếu
+ // prep_shortage_recons «chờ xác nhận bù» từ ngày áp dụng: loại thay thế thiếu cuối ngày khớp lượng cần bù ±10% (≤ 30) →
+ // ghi y _btpAmApplySubstitution (qua Unit Engine) + phần bù không chia hao hụt (duty.markMixup kind substitution);
+ // không khớp / «không dùng gì» → để hao hụt theo luật thường + THÔNG BÁO ĐỂ BIẾT. Chế độ thử: chỉ ghi hồ sơ.
+ async function subReview(id,guard){
+  const ref=coll('prep_shortage_recons').doc(id),r=data(await ref.get());
+  if(!r||!['substitution_pending','unexplained'].includes(r.status)||r.autoReview)return false;
+  const cfg=await config();if(!cfg.enabled||!/^\d{4}-\d{2}-\d{2}$/.test(cfg.fromDate||'')||!(String(r.businessDate||'')>=cfg.fromDate))return false;
+  const chk=r.status==='unexplained'?{ok:false,reason:'staff_none',need:Number(r.remainder)||0,covered:0,tol:0}:E.subCheck(r);
+  const cs=await base.get(),cf=cs.exists?cs.data():{};const mode=active(cf)?'active':'shadow',at=iso();
+  const alertRef=coll('alerts').doc('prep_shortage_'+id),auditRef=sub('sub_reviews').doc(E.key(id));
+  const reason=chk.reason==='match'?'Loại dùng thay thiếu '+chk.covered+' — khớp lượng cần bù '+chk.need+' (±'+chk.tol+'). Hệ thống tự xác nhận bù.'
+   :chk.reason==='staff_none'?'Nhân viên trả lời không dùng gì / không rõ — '+chk.need+' '+(r.unit||'')+' tính hao hụt theo luật thường.'
+   :'Loại dùng thay thiếu '+chk.covered+', cần bù '+chk.need+' (lệch '+chk.diff+', quá ±'+chk.tol+') — không xác nhận bù, tính hao hụt theo luật thường.';
+  const rec={by:'engine2',policy:'sub_review_v1',ok:chk.ok,reason,check:chk,at,mode};
+  if(mode!=='active'){await auditRef.set({id:auditRef.id,storeId:store,reconId:id,businessDate:r.businessDate,...rec});return {mode,ok:chk.ok};}
+  if(chk.ok){
+   const eng=await dutyEngine(r.sourceKind==='item'?r.prepId:null);
+   for(const x of (r.substitutions||[]).filter(x=>(x.kind||'prep')==='prep')){
+    const id2=x.id||x.prepId,rows=(await coll('prep_transactions').where('prepId','==',id2).where('businessDate','==',r.businessDate).limit(200).get()).docs;
+    const hit=rows.find(d=>d.data().type==='ADJUSTMENT'&&d.data().fromPrepCount&&Number(d.data().qty)<0);
+    if(hit&&hit.data().substitutionReconId!==id)await eng.ledger.annotate(hit.id,{substitutionQty:E.round(Math.min(Math.abs(Number(hit.data().qty)),(Number(hit.data().substitutionQty)||0)+(Number(x.expectedQty)||0))),substitutionReconId:id,substitutionFor:r.prepId},{kind:'prep'});
+    for(const c of (await coll('duty_cases').where('prepId','==',id2).where('businessDate','==',r.businessDate).limit(10).get()).docs)
+     if(Number(c.data().variance)<0)await eng.duty.markMixup(c.id,{qty:Number(x.expectedQty)||0,mixupId:'sub_'+id,kind:'substitution',reason:'dung_thay_the'});
+   }
+   if(r.sourceKind==='item'){let ids=r.anomalyIds||[];
+    if(!ids.length)ids=(await coll('stock_anomalies').where('itemId','==',r.prepId).where('businessDate','==',r.businessDate).limit(50).get()).docs.filter(d=>d.data().status==='open'&&Number(d.data().qty)<0).map(d=>d.id);
+    for(const a of ids)await eng.anomaly.resolve(a,{status:'explained_substitution',reconId:id}).catch(()=>{});}
+  }
+  return fs.runTransaction(async t=>{
+   await fence(t,guard);const [ss,as]=await Promise.all([t.get(ref),t.get(alertRef)]);const cur=ss.exists?ss.data():null;
+   if(!cur||cur.status!==r.status||cur.autoReview)return false;
+   t.set(auditRef,{id:auditRef.id,storeId:store,reconId:id,businessDate:r.businessDate,...rec});
+   if(chk.ok)t.set(ref,{status:'substitution_confirmed',cogsDelta:E.subCogsDelta(r),confirmedAt:at,confirmedBy:'engine2_auto',autoReview:rec},{merge:true});
+   else t.set(ref,{status:'unexplained',autoReview:rec},{merge:true});
+   if(as.exists&&as.data().status==='new')t.set(alertRef,chk.ok?{status:'resolved',resolvedAt:at,resolvedBy:'engine2_auto',autoReview:{...rec,label:'Dùng thay hợp lệ'}}
+    :{fyi:true,source:'engine2',autoReview:{...rec,label:'Không xác nhận bù'},note:'Thông báo để biết — '+reason},{merge:true});
+   return {mode,ok:chk.ok};
+  });
+ }
+ async function sweepSubReviews(){
+  const cfg=await config();if(!cfg.enabled||!/^\d{4}-\d{2}-\d{2}$/.test(cfg.fromDate||''))return 0;let n=0;
+  for(const st of ['substitution_pending','unexplained'])for(const d of (await coll('prep_shortage_recons').where('status','==',st).limit(50).get()).docs)
+   if(!d.data().autoReview&&String(d.data().businessDate||'')>=cfg.fromDate){await enqueue('sub_review',d.id);n++;}
   return n;
  }
  async function handover(id,guard){
@@ -714,12 +762,12 @@ function create(opts){
   const job=await fs.runTransaction(async t=>{const [s,c]=await Promise.all([t.get(ref),t.get(base)]);if(!s.exists)return null;const j=s.data();if(j.kind!=='measurement'&&(!c.exists||!c.data().enabled))return null;if(!j.dirty||j.leaseUntil>now()||j.nextTryAt>now())return null;t.set(ref,{leaseUntil:now()+120000,leaseToken:token},{merge:true});return j;});
   if(!job)return false;
   try{
-   const guard={ref,token,revision:job.revision};if(job.kind==='finish')await finish(job.sourceId,guard);else if(job.kind==='measurement')await measure(job.sourceId,guard);else if(job.kind==='bootstrap')await bootstrap(guard);else if(['reprice','recompute_shift'].includes(job.kind))await dependencies(job.kind,job.sourceId,guard);else if(job.kind==='discover_shift')await discoverShift(job.sourceId,guard);else if(job.kind==='opened')await opened(job.sourceId,guard);else if(job.kind==='prep_review')await prepReview(job.sourceId,guard);else if(job.kind==='mixup_day')await mixupDay(job.sourceId,guard);else if(job.kind==='alert_review')await alertReview(job.sourceId,guard);else await handover(job.sourceId,guard);
+   const guard={ref,token,revision:job.revision};if(job.kind==='finish')await finish(job.sourceId,guard);else if(job.kind==='measurement')await measure(job.sourceId,guard);else if(job.kind==='bootstrap')await bootstrap(guard);else if(['reprice','recompute_shift'].includes(job.kind))await dependencies(job.kind,job.sourceId,guard);else if(job.kind==='discover_shift')await discoverShift(job.sourceId,guard);else if(job.kind==='opened')await opened(job.sourceId,guard);else if(job.kind==='prep_review')await prepReview(job.sourceId,guard);else if(job.kind==='mixup_day')await mixupDay(job.sourceId,guard);else if(job.kind==='alert_review')await alertReview(job.sourceId,guard);else if(job.kind==='sub_review')await subReview(job.sourceId,guard);else await handover(job.sourceId,guard);
    return await fs.runTransaction(async t=>{const s=await t.get(ref);if(!s.exists||s.data().leaseToken!==token)return false;t.set(ref,{dirty:s.data().revision!==job.revision,leaseUntil:0,leaseToken:'',nextTryAt:now(),lastError:'',completedAt:iso()},{merge:true});return true;});
    }catch(e){await fs.runTransaction(async t=>{const s=await t.get(ref);if(!s.exists||s.data().leaseToken!==token)return;if(s.data().revision!==job.revision){t.set(ref,{leaseUntil:0,leaseToken:'',nextTryAt:now()},{merge:true});return;}t.set(ref,{leaseUntil:0,leaseToken:'',lastError:String(e.message||e),nextTryAt:now()+60000,attempt:(s.data().attempt||0)+1},{merge:true});});throw e;}
  }
  async function retryDue(){const s=await sub('requests').where('dirty','==',true).where('nextTryAt','<=',now()).orderBy('nextTryAt').limit(30).get();for(const d of s.docs)try{await drain(d.id);}catch(e){if(opts.log)opts.log(e);}return s.docs.length;}
- return {storeId:store,base,sub,coll,config,enqueue,finish,prepReview,sweepPrepReview,mixupDay,mixupSweep,alertReview,alertsForCase,sweepAlerts,handover,opened,ensureCloseTasks,registerVessel,requestMeasurement,measure,createTask,submitEvidence,learnDay,exception,drain,retryDue,observation,startPoint};
+ return {storeId:store,base,sub,coll,config,enqueue,finish,prepReview,sweepPrepReview,mixupDay,mixupSweep,alertReview,alertsForCase,sweepAlerts,subReview,sweepSubReviews,handover,opened,ensureCloseTasks,registerVessel,requestMeasurement,measure,createTask,submitEvidence,learnDay,exception,drain,retryDue,observation,startPoint};
 }
 const api={create};if(typeof module==='object'&&module.exports)module.exports=api;root.UnitEngine2Store=api;
 })(typeof window!=='undefined'?window:globalThis);
