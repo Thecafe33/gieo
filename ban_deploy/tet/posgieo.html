@@ -17998,16 +17998,21 @@ function prepExpiryAsk(x) {
     const ov = document.createElement('div');
     ov.id = 'prep-exp-overlay';
     ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:900;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(3px);';
-    const btn = (id, txt, bg, fg, bd) => `<button id="${id}" style="flex:1;padding:13px;background:${bg};color:${fg};border:${bd || 'none'};border-radius:14px;font-family:'Google Sans',sans-serif;font-size:14px;font-weight:700;cursor:pointer;">${txt}</button>`;
-    ov.innerHTML = `<div style="background:#FFFCF0;border-radius:24px;padding:20px;width:100%;max-width:420px;animation:pi .18s ease;">
-      <div style="font-size:16px;font-weight:800;color:#c0392b;margin-bottom:6px;">${escHtmlPos(b.prepName || '')} — lô ${escHtmlPos(b.batchCode || '')} đã ${escHtmlPos(het)}</div>
-      <div style="font-size:13.5px;line-height:1.5;color:var(--td);margin-bottom:10px;">Lô còn ${fmtPrepQty(x.left)} ${escHtmlPos(b.unit || '')}. Kiểm tra lại: còn dùng được không?
+    // Cùng hệ thẻ với các bước kết ca / cân cuối ca (kc-card · kc-sub · kc-btn bo tròn nhiều).
+    ov.innerHTML = `<div class="kc-card" style="width:100%;max-width:440px;max-height:92vh;overflow:auto;margin:0;animation:pi .18s ease;">
+      <div class="kc-title" style="color:#c0392b;padding-bottom:8px">Lô bán thành phẩm đã hết hạn</div>
+      <div class="kc-sub" style="margin-bottom:12px">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><b style="font-size:15px">${escHtmlPos(b.prepName || '')}</b><span class="kc-pill" style="background:#c0392b">Lô ${escHtmlPos(b.batchCode || '')}</span></div>
+        <div style="font-size:13px;color:#555;margin-top:6px">Đã ${escHtmlPos(het)} · còn ${fmtPrepQty(x.left)} ${escHtmlPos(b.unit || '')}</div>
+      </div>
+      <div style="font-size:13.5px;line-height:1.55;color:var(--td);margin-bottom:12px">Kiểm tra lại: còn dùng được không?
         ${x.extendable ? `<br><b>Vẫn còn dùng được</b> → gia hạn thêm ${PREP_EXTEND_HOURS} giờ và in tem gia hạn.` : '<br>Loại hết hạn cuối ngày — <b>không được gia hạn</b>.'}
-        <br><b>Hủy</b> → ghi đổ bỏ phần còn của lô; món vẫn bán (lô khác hoặc loại dùng thay).</div>
+        <br><b>Hủy lô này</b> → ghi đổ bỏ phần còn của lô; món vẫn bán (lô khác hoặc loại dùng thay).</div>
       ${renderPinInput('prepExpStaff')}
-      <div id="prepExpMsg" style="font-size:12.5px;color:#c0392b;min-height:16px;margin:6px 0"></div>
-      <div style="display:flex;gap:10px;">${btn('prepExpDiscard', 'Hủy lô này', '#fff', '#c0392b', '1.5px solid #f3b2bf')}${x.extendable ? btn('prepExpKeep', 'Vẫn còn dùng được', 'var(--gd)', '#fff') : ''}</div>
-      <button id="prepExpClose" style="width:100%;margin-top:10px;padding:10px;background:none;border:none;color:#888;font-size:13px;cursor:pointer;">Quay lại giỏ hàng</button></div>`;
+      <div id="prepExpMsg" style="font-size:12.5px;color:#c0392b;min-height:16px;margin:8px 0"></div>
+      ${x.extendable ? '<button id="prepExpKeep" class="kc-btn" style="background:var(--gd);color:#fff;margin-bottom:10px">Vẫn còn dùng được</button>' : ''}
+      <button id="prepExpDiscard" class="kc-btn" style="background:#fff;color:#c0392b;border:1.5px solid #f3b2bf;margin-bottom:6px">Hủy lô này</button>
+      <button id="prepExpClose" class="kc-btn" style="background:none;color:#888;font-size:14px;font-weight:700;padding:12px">Quay lại giỏ hàng</button></div>`;
     document.body.appendChild(ov);
     let busy = false;
     const msg = t => { const m = document.getElementById('prepExpMsg'); if (m) m.textContent = t; };
@@ -18094,20 +18099,21 @@ function renderPrepUntrackedAsk() {
   const ov = document.createElement('div');
   ov.id = 'prep-untracked-overlay';
   ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:900;display:flex;align-items:center;justify-content:center;padding:16px;backdrop-filter:blur(3px);';
-  const opt = (i, val, label) => `<label style="display:flex;align-items:center;gap:8px;padding:9px 10px;border:1.5px solid ${st.answers[i] === val ? 'var(--gd)' : '#e6e1d2'};border-radius:12px;margin-top:6px;cursor:pointer;background:#fff;font-size:13.5px;">
-      <input type="radio" name="pua${i}" ${st.answers[i] === val ? 'checked' : ''} onchange="_prepUntrackedAsk.answers[${i}]='${val}';renderPrepUntrackedAsk()" style="width:auto;min-height:0;margin:0"><span>${label}</span></label>`;
-  ov.innerHTML = `<div style="background:#FFFCF0;border-radius:24px;padding:20px;width:100%;max-width:460px;max-height:90vh;overflow:auto;">
-    <div style="font-size:16px;font-weight:800;color:var(--td);margin-bottom:4px;">Trả lời trước khi check-out</div>
-    <div style="font-size:13px;color:#666;margin-bottom:8px;">Trong ca của ${escHtmlPos(st.emp.fullName || '')} có bán món cần bán thành phẩm lúc <b>không còn lô nào</b>. Lúc đó đã làm thế nào?</div>
-    ${st.rows.map((r, i) => `<div style="border-top:1px solid #eee;padding-top:10px;margin-top:10px;">
-      <div style="font-weight:800">${escHtmlPos(r.p.name || '')} — ${fmtPrepQty(r.qty)} ${escHtmlPos(r.p.unit || '')}</div>
-      <div style="font-size:12px;color:#888">Lúc ${r.events.slice(0, 6).map(e => fmtPrepTime(e.at).slice(0, 5)).join(', ')}${r.events.length > 6 ? '…' : ''}</div>
+  // Cùng hệ thẻ với các bước kết ca / cân cuối ca: kc-card, lựa chọn là kc-sub, nút tròn kc-chk, nút gửi kc-btn.
+  const opt = (i, val, label) => `<label class="kc-sub" style="display:flex;align-items:center;gap:10px;padding:12px 14px;margin-top:8px;cursor:pointer;${st.answers[i] === val ? 'border-color:var(--gd);background:#fff' : ''}">
+      <input type="radio" class="kc-chk" name="pua${i}" ${st.answers[i] === val ? 'checked' : ''} onchange="_prepUntrackedAsk.answers[${i}]='${val}';renderPrepUntrackedAsk()" style="min-height:0;margin:0"><span style="font-size:14px">${label}</span></label>`;
+  ov.innerHTML = `<div class="kc-card" style="width:100%;max-width:480px;max-height:92vh;overflow:auto;margin:0;animation:pi .18s ease;">
+    <div class="kc-title" style="padding-bottom:6px">Trả lời trước khi check-out</div>
+    <div style="font-size:13px;color:#555;margin-bottom:6px">Trong ca của ${escHtmlPos(st.emp.fullName || '')} có bán món cần bán thành phẩm lúc <b>không còn lô nào</b>. Lúc đó đã làm thế nào?</div>
+    ${st.rows.map((r, i) => `<div style="margin-top:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><b style="font-size:15px">${escHtmlPos(r.p.name || '')}</b><span class="kc-pill" style="background:#e23a5d">${fmtPrepQty(r.qty)} ${escHtmlPos(r.p.unit || '')}</span></div>
+      <div style="font-size:12px;color:#888;margin-top:2px">Lúc ${r.events.slice(0, 6).map(e => fmtPrepTime(e.at).slice(0, 5)).join(', ')}${r.events.length > 6 ? '…' : ''}</div>
       ${r.subs.map(s => opt(i, 'sub:' + s.kind + ':' + s.id, 'Dùng <b>' + escHtmlPos(s.name) + '</b> thay')).join('')}
       ${opt(i, 'new_batch', 'Nấu mẻ mới kịp — lấy từ nồi đang nấu')}
       ${opt(i, 'none', 'Không dùng gì / không rõ')}</div>`).join('')}
-    <div id="puaMsg" style="font-size:12.5px;color:#c0392b;min-height:16px;margin:8px 0"></div>
-    <div style="display:flex;gap:10px;"><button onclick="document.getElementById('prep-untracked-overlay').remove();_prepUntrackedAsk=null" style="flex:1;padding:13px;background:#fff;color:#666;border:1.5px solid #ddd;border-radius:14px;font-weight:700;">Để sau</button>
-    <button onclick="prepUntrackedSubmit()" style="flex:2;padding:13px;background:var(--gd);color:#fff;border:none;border-radius:14px;font-weight:700;">Lưu &amp; check-out</button></div></div>`;
+    <div id="puaMsg" style="font-size:12.5px;color:#c0392b;min-height:16px;margin:12px 0 8px"></div>
+    <button onclick="prepUntrackedSubmit()" class="kc-btn" style="background:var(--gd);color:#fff;margin-bottom:6px">Lưu &amp; check-out</button>
+    <button onclick="document.getElementById('prep-untracked-overlay').remove();_prepUntrackedAsk=null" class="kc-btn" style="background:none;color:#888;font-size:14px;font-weight:700;padding:12px">Để sau</button></div>`;
   document.body.appendChild(ov);
 }
 async function prepUntrackedSubmit() {

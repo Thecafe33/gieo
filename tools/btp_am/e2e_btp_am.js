@@ -41,9 +41,9 @@ const server=http.createServer((req,res)=>{const u=new URL(req.url,'http://x');
   `});
   await page.addScriptTag({content:fns.replace(/^(async )?function (\w+)/gm,(m,a,n)=>'window.'+n+'='+(a||'')+'function '+n)});
   // A1. Lô hết hạn theo giờ → gia hạn 24 giờ + tem gia hạn.
-  let gate=page.evaluate(()=>prepExpiryGateBeforePay([{}]));
+  let gate=page.evaluate(()=>prepExpiryGateBeforePay([{}]));gate.catch(()=>{});
   await page.locator('#prep-exp-overlay').waitFor();const t1=await page.locator('#prep-exp-overlay').innerText();
-  assert(t1.includes('Thạch Cafe — lô TC01 đã hết hạn lúc')&&t1.includes('Vẫn còn dùng được'),width+': popup hết hạn');
+  const t1n=t1.replace(/\s+/g,' ');assert(t1n.includes('Lô bán thành phẩm đã hết hạn')&&t1n.includes('Thạch Cafe')&&/Lô TC01/i.test(t1n)&&t1n.includes('Đã hết hạn lúc')&&t1n.includes('Vẫn còn dùng được'),width+': popup hết hạn '+t1n);
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,width+': không cuộn ngang');
   if(process.env.SCREENSHOT_DIR)await page.screenshot({path:path.join(process.env.SCREENSHOT_DIR,'btp_het_han_'+width+'.png')});
   await page.getByRole('button',{name:'Vẫn còn dùng được'}).click();await page.waitForTimeout(150);
@@ -73,7 +73,7 @@ const server=http.createServer((req,res)=>{const u=new URL(req.url,'http://x');
   // B. Check-out: bán Thạch trà lúc không còn lô → phải trả lời; lưu câu trả lời rồi mới check-out.
   const shown=page.evaluate(()=>prepUntrackedAskOnCheckOut({id:'e',fullName:'Lê Thị Lan'},{id:'sh1',checkedInAt:new Date(Date.now()-3*3600000).toISOString()}));
   await page.locator('#prep-untracked-overlay').waitFor();assert.equal(await shown,true);
-  const t2=await page.locator('#prep-untracked-overlay').innerText();const t2n=t2.replace(/\s+/g,' ');assert(t2n.includes('Thạch trà — 300 g')&&t2n.includes('Dùng Thạch Cafe thay')&&t2.includes('Không dùng gì'),width+': câu hỏi + lựa chọn từ cấu hình thay thế');
+  const t2=await page.locator('#prep-untracked-overlay').innerText();const t2n=t2.replace(/\s+/g,' ');assert(t2n.includes('Thạch trà 300 g')&&t2n.includes('Dùng Thạch Cafe thay')&&t2.includes('Không dùng gì'),width+': câu hỏi + lựa chọn từ cấu hình thay thế');
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   if(process.env.SCREENSHOT_DIR)await page.screenshot({path:path.join(process.env.SCREENSHOT_DIR,'btp_checkout_'+width+'.png')});
   await page.getByRole('button',{name:'Lưu & check-out'}).click();assert((await page.locator('#puaMsg').innerText()).includes('Trả lời hết'),width+': chưa trả lời → không check-out');
