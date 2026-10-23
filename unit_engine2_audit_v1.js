@@ -20,6 +20,10 @@ const CODES={
  SPEC_WITHOUT_LOT_EVIDENCE:['violation','Kết luận «nghi sai quy cách» khi không có mã cùng loại cùng phiếu nhận đã dùng xong cũng còn dư gần cùng tỷ lệ'],
  SPEC_WAIT_WITHOUT_SIBLING:['violation','Hồ sơ «chờ mã cùng phiếu» khi phiếu nhận không còn mã cùng loại chưa dùng xong — phải kết luận'],
  SPEC_ALLOCATED:['violation','Hồ sơ chờ / nghi sai quy cách lại phân bổ trách nhiệm cho người'],
+ PREP_REVIEW_WRONG_BAND:['violation','Tự duyệt lệch NL khi nấu mẻ sai mức (≤ max(15 g/ml, 5%) / 25% / 50%) so với số lệch và định lượng ghi trong hồ sơ'],
+ PREP_REVIEW_SOURCE_MISMATCH:['violation','Hồ sơ tự duyệt lệch NL khác dòng sổ gốc (số lệch / người chịu trách nhiệm) hoặc dòng sổ không mang dấu tự duyệt'],
+ PREP_REVIEW_BEFORE_START:['violation','Tự duyệt dòng phát sinh trước ngày áp dụng (tồn quá khứ phải giữ nguyên)'],
+ PREP_REVIEW_FYI_MISSING:['violation','Lệch > 25% đã tự duyệt nhưng không có thông báo để biết cho quản lý'],
  INTERVAL_INVALID:['violation','Khoảng trách nhiệm sai (ngoài thời gian mở/kết thúc tem)'],
  CHECKPOINT_MISSING:['violation','Khoảng bắt đầu từ mốc cân không còn bản ghi'],
  CHECKPOINT_WRONG_OBJECT:['violation','Mốc cân không thuộc đúng tem/nguyên liệu'],
@@ -209,6 +213,26 @@ function check(snap){
   if(!dev.length)add('CONTROL_NOT_ACKED','devices',{controlled:live.length});
   else{const stale=dev.filter(d=>(d.settingsRevision||0)!==(cfg.settingsRevision||0));if(stale.length)add('DEVICE_STALE','devices',{stale:stale.length,total:dev.length});}
  }
+ // --- tự duyệt lệch NL khi nấu mẻ (chủ quán 23/10) — tính lại ĐỘC LẬP từ dòng sổ gốc, không dùng mức hồ sơ tự ghi ---
+ const PS=snap.prepSources||{},PA=snap.prepAlerts||{},ABS={g:15,ml:15,kg:0.015,l:0.015};
+ for(const r of snap.prepReviews||[]){
+  const ref='prep_reviews/'+r.id,t=PS[r.txId];
+  if(r.storeId!==store)add('STORE_MISMATCH',ref,{storeId:r.storeId});
+  if(cfg.fromDate&&String(r.businessDate||'')<cfg.fromDate)add('PREP_REVIEW_BEFORE_START',ref,{businessDate:r.businessDate,fromDate:cfg.fromDate});
+  const kind=(String(r.txId||'').match(/^prep_(after|variance|surplus|pre)_/)||[])[1];
+  let dev=null,b=null;
+  if(t&&kind==='pre'){b=Number(t.bookBefore)||0;dev=-(Number(t.qty)||0);}
+  else if(t&&kind==='surplus'){b=Number(t.expectedQty)||0;dev=-(Number(t.qty)||0);}
+  else if(t&&kind){b=Number(t.expectedQty)||0;dev=(kind==='variance'?Number(t.observedDecrease):Math.abs(Number(t.qty)||0)+(Number(t.uncertainVariance)||0))-b;}
+  if(!t||dev===null||!near(dev,r.deviation)||!near(b,r.base)){add('PREP_REVIEW_SOURCE_MISMATCH',ref,{txId:r.txId});continue;}
+  const who=kind==='pre'?(t.responsibleEmployeeId||t.staffEmployeeId||''):((t.responsibility||{}).employeeId||t.staffEmployeeId||'');
+  if((r.responsible||{}).employeeId!==who)add('PREP_REVIEW_SOURCE_MISMATCH',ref,{responsible:(r.responsible||{}).employeeId,source:who});
+  if(r.mode==='active'&&r.appliedResult==='reviewed'&&!(t.needsReview===false&&t.autoReview&&t.autoReview.caseId===r.id))add('PREP_REVIEW_SOURCE_MISMATCH',ref,{txId:r.txId,needsReview:t.needsReview});
+  const a=Math.abs(dev),tol=Math.max(ABS[String(r.unit||'').toLowerCase()]||0,0.05*b),ratio=b>0?a/b:a>(ABS[String(r.unit||'').toLowerCase()]||0)?Infinity:0;
+  const band=a<=tol?'within':ratio<=0.25?'moderate':ratio<=0.5?'large':'very_large';
+  if(band!==r.band)add('PREP_REVIEW_WRONG_BAND',ref,{expected:band,recorded:r.band});
+  if(r.mode==='active'&&['large','very_large'].includes(band)&&(!r.fyiAlertId||!PA[r.fyiAlertId]||PA[r.fyiAlertId].fyi!==true))add('PREP_REVIEW_FYI_MISSING',ref,{alert:r.fyiAlertId||null});
+ }
  const violations=issues.filter(i=>i.severity==='violation').length,warnings=issues.length-violations,complete=!(snap.truncated||[]).length;
  return {version:VERSION,store,range:snap.range||null,complete,truncated:snap.truncated||[],ok:complete&&violations===0,violations,warnings,issues,
   coverage:{cases:cases.length,sources:Object.keys(S).length,containers:Object.keys(C).length,checkpoints:Object.keys(CP).length,controls:(snap.controls||[]).length,tasks:(snap.tasks||[]).length,devices:(snap.devices||[]).length}};
@@ -246,9 +270,11 @@ async function collect({fstore,storeId:sid,from,to,limit=500,collection}){
  await byIds(sub('requests'),[...cases.map(c=>(c.originKind==='measurement'?'measurement':'finish')+'~'+encodeURIComponent(c.originId||c.sourceId)),...Object.keys(sources).filter(id=>/^finish_/.test(id)).map(id=>'finish~'+encodeURIComponent(id))],requests);
  const starts=cases.map(c=>ms(c.interval?.from)).filter(Number.isFinite),ends=cases.map(c=>ms(c.interval?.to)).filter(Number.isFinite);
  const shifts=starts.length?await rows('shifts',coll('employee_shifts').where('checkedInAt','>=',new Date(Math.min(...starts)-14*3600000).toISOString()).where('checkedInAt','<=',new Date(Math.max(...ends)).toISOString())):[];
+ const prepReviews=await rows('prep_reviews',sub('prep_reviews').where('businessDate','>=',from).where('businessDate','<=',to)),prepSources={},prepAlerts={};
+ await byIds(coll('stock_transactions'),prepReviews.map(r=>r.txId),prepSources);await byIds(coll('alerts'),prepReviews.map(r=>r.fyiAlertId),prepAlerts);
  const controls=(await rows('controls',sub('controls'))).map(k=>({...k,itemId:k.itemId||k.id}));
  const devices=await rows('devices',sub('devices'));
- return {store,range:{from,to},config,sources,containers,receipts,checkpoints,decisions,measurements,prices,items,requests,cases,shifts,tasks,locks,controls,devices,truncated};
+ return {store,range:{from,to},config,prepReviews,prepSources,prepAlerts,sources,containers,receipts,checkpoints,decisions,measurements,prices,items,requests,cases,shifts,tasks,locks,controls,devices,truncated};
 }
 
 async function run(opts){return check(await collect(opts));}

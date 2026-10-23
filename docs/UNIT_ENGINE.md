@@ -127,6 +127,7 @@ Tham số là tên biến trong mã. Cột "Ghi" nêu dữ liệu bị thay đ�
 
 ### Chú thích (`annotate`) và Sổ lệch
 - `containers.annotate(id, fields)`, `batches.annotate(id, fields)`, `ledger.annotate(…)`, `anomaly.resolve(id, fields)` chỉ nhận các trường trong `UnitEngine.ANNOTATABLE`. Trường khác → lỗi `FIELD_NOT_ANNOTATABLE`.
+- `ledger.autoReview(txId, {needsReview:false, reviewedAt, reviewedBy, autoReview})` (v21, 23/10): Engine 2 tự duyệt dòng «Chờ quản lý duyệt» lệch NL khi nấu mẻ — transaction, trả `false` (không ghi) khi dòng không còn `needsReview`, đã huỷ hoặc có trách nhiệm do quản lý gán; không đổi số lượng/tiền/trách nhiệm.
 - `containers.adjust(c, qty, expected, opId, note)` là thao tác Quản lý cân lại một mã (B13).
 - `anomaly.log(docId, a)` ghi Sổ lệch.
 

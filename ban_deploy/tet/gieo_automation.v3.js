@@ -94,9 +94,11 @@ function classify(kind,id,d,config,now,related){
   return done('Đã ghi vào sổ hao hụt. Người báo là người ghi nhận, không tự coi là người gây ra.','WASTE_RECORDED');
  }
  if(kind==='alerts'){
-  r.title=text(d.title||({'handover_variance':'Chênh lệch giao ca nguyên liệu','prep_count_variance':'Lệch đếm BTP','missing_recipe':'Thiếu định mức'}[d.type])||'Cảnh báo vận hành');
+  r.title=text(d.title||({'handover_variance':'Chênh lệch giao ca nguyên liệu','prep_count_variance':'Lệch đếm BTP','missing_recipe':'Thiếu định mức','prep_variance_large':'Lệch NL khi nấu mẻ (đã tự xử lý)','prep_variance_repeat':'Lệch NL lặp lại (đã tự xử lý)'}[d.type])||'Cảnh báo vận hành');
   if(d.status==='resolved')return done('Chứng từ nguồn đã được xác nhận xử lý.','SOURCE_RESOLVED');
   // Seen is deliberately NOT equivalent to resolved.
+  // Thông báo ĐỂ BIẾT do Engine 2 tạo sau khi đã tự xử lý (lệch NL khi nấu mẻ > 25%, lệch lặp lại) — không phải việc cần làm.
+  if(d.fyi===true&&d.source==='engine2')return done('Thông báo để biết — Engine 2 đã tự xử lý và ghi vào báo cáo tháng; quản lý yêu cầu nhân viên giải trình riêng.','ENGINE2_FYI');
   if(d.type==='duty_digest')return done('Tóm tắt ngày đã lưu; công việc được theo dõi ở từng hồ sơ.','DIGEST_RECORDED');
   if(d.type==='duty_case'&&related&&related.duty)return Object.assign(task('duty_cases',d.caseId,related.duty,config,now),{kind,sourceId:id,linkedDutyId:d.caseId});
   if(d.type==='prep_count_variance'&&related&&related.duty)return Object.assign(task('duty_cases',related.dutyId,related.duty,config,now),{kind,sourceId:id,linkedDutyId:related.dutyId});

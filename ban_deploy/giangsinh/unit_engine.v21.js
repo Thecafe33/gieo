@@ -4854,7 +4854,8 @@
     batches: ['expiresAt', 'needsReview', 'reviewedAt', 'reviewedBy', 'note'],
     ledger: ['responsibility', 'responsibilityOriginal', 'responsibilityHistory', 'needsReview', 'reviewedAt', 'reviewedBy', 'voided', 'voidedAt', 'voidedReason', 'note',
       'substitutionQty', 'substitutionReconId', 'substitutionFor',
-      'entryErrorConfirmed', 'entryErrorQty', 'entryErrorFoundInBatch', 'entryErrorCorrectedBy', 'entryErrorCorrectedById', 'entryErrorAt'],
+      'entryErrorConfirmed', 'entryErrorQty', 'entryErrorFoundInBatch', 'entryErrorCorrectedBy', 'entryErrorCorrectedById', 'entryErrorAt',
+      'autoReview'],
     anomalies: ['status', 'reconId', 'resolvedAt', 'resolvedBy', 'resolution', 'resolutionNote', 'note']
   };
   function _checkAnnotate(kind, fields) {
@@ -4881,6 +4882,18 @@
       const d=sn.data(),r=d.responsibility||{};
       if(['assigned_by_manager','manual'].includes(r.status)||r.manual || (Number(r.revision)||0)!==opts.expectedRevision)return false;
       t.update(ref,Object.assign({},fields,{responsibility:Object.assign({},fields.responsibility||r,{revision:opts.expectedRevision+1,engineVersion:VERSION})}));return true;
+    });
+  }
+  // [Engine2 23/10] Tự duyệt dòng sổ «Chờ quản lý duyệt» (lệch NL khi nấu mẻ BTP). Chỉ tắt cờ + ghi căn cứ autoReview,
+  // không đổi số lượng / tiền / trách nhiệm. Bỏ qua (false) khi dòng đã được duyệt, đã huỷ hoặc có quyết định tay.
+  async function ledgerAutoReview(txId,fields) {
+    _checkAnnotate('ledger',fields);
+    if(!fields||fields.needsReview!==false||!fields.reviewedBy||!fields.reviewedAt||!fields.autoReview)throw UnitEngineError('INVALID_QTY','Tự duyệt cần needsReview:false, reviewedAt, reviewedBy và autoReview');
+    const ref=C.fstore.collection('stock_transactions_gieogieo').doc(txId);
+    return C.fstore.runTransaction(async t=>{const sn=await t.get(ref);if(!sn.exists)return false;
+      const d=sn.data(),r=d.responsibility||{};
+      if(d.needsReview!==true||d.voided===true||['assigned_by_manager','manual'].includes(r.status)||r.manual)return false;
+      t.update(ref,fields);return true;
     });
   }
   // Declared WASTE does not become a personal fault because somebody reported it.
@@ -5931,7 +5944,7 @@
     units: { fifoNotEmpty: _applyFifoNotEmpty, ref: _ueActiveUnitsRef, listOpen: loadOpenContainers, computeAllocation: _ueComputeAllocation, missingWarning: missingUnitsWarning, fifoPendingFromRt },
     codes: { reprint: codesReprint, find: findContainerByCode, generate: capMaKhoDuyNhat, containerCode: genStockContainerCode, batchCode: genPrepBatchCode },
     classify: { isTemTracked: isTemTrackedNL, isAtomic: isAtomicUnitItem },
-    ledger: { setLocationStockManual: setLocationStock, apply: applyStockTransactionPOS, applyManual: applyStockTransactionManual, transfer: applyStockTransferPOS, setLocationStock: setLocationStockFromCountPOS, annotate: ledgerAnnotate, annotateAuto: ledgerAnnotateAuto, amend: ledgerAmend, amendInTx: ledgerAmendInTx },
+    ledger: { setLocationStockManual: setLocationStock, apply: applyStockTransactionPOS, applyManual: applyStockTransactionManual, transfer: applyStockTransferPOS, setLocationStock: setLocationStockFromCountPOS, annotate: ledgerAnnotate, annotateAuto: ledgerAnnotateAuto, autoReview: ledgerAutoReview, amend: ledgerAmend, amendInTx: ledgerAmendInTx },
     containers: { adjust: ctnAdjustCore, annotate: containersAnnotate },
     batches: { annotate: batchesAnnotate },
     anomaly: { log: logStockAnomalyPOS, resolve: anomalyResolve },

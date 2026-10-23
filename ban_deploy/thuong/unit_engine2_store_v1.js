@@ -33,7 +33,7 @@ function create(opts){
  async function fence(t,guard){if(!guard)return;const s=await t.get(guard.ref);if(!s.exists||s.data().leaseToken!==guard.token||s.data().revision!==guard.revision)throw error('Lease hoặc phiên bản công việc đã thay đổi');}
  async function config(){const s=await base.get();return s.exists?s.data():{};}
  async function enqueue(kind,id,resumeCursor=false){
-  if(!['finish','measurement','handover','bootstrap','reprice','recompute_shift','discover_shift','opened'].includes(kind))throw Error('Engine2: loại việc không hợp lệ');
+  if(!['finish','measurement','handover','bootstrap','reprice','recompute_shift','discover_shift','opened','prep_review'].includes(kind))throw Error('Engine2: loại việc không hợp lệ');
   const ref=sub('requests').doc(E.key(kind,id));
   return fs.runTransaction(async t=>{
    const [c,s]=await Promise.all([t.get(base),t.get(ref)]);const cfg=c.exists?c.data():{};
@@ -122,6 +122,67 @@ function create(opts){
    if(c.receiveRefId&&!(specCheck&&specCheck.action==='wait')){const lot=E.lotKey(c),w=await sub('cases').where('waitLot','==',lot).limit(20).get().catch(()=>null);for(const x of (w?w.docs:[])){const o=x.data();if(o.status==='checking'&&o.originId&&o.originId!==id)await finish(o.originId).catch(()=>{});}}
    return d;
   });
+ }
+ // Lệch NL khi nấu mẻ BTP (dòng sổ needsReview do POS bật) — chủ quán 23/10: tự xử lý MỌI mức, chỉ từ ngày áp dụng
+ // (cfg.fromDate) trở đi; tồn trước ngày áp dụng giữ nguyên. Lệch > 25% vẫn tự duyệt nhưng ghi rõ người chịu trách nhiệm +
+ // mốc thời gian (báo cáo tháng) và tạo THÔNG BÁO ĐỂ BIẾT (fyi) — quản lý không phải thao tác. Chế độ thử: chỉ ghi hồ sơ.
+ async function prepReview(id,guard){
+  const sourceRef=coll('stock_transactions').doc(id),tx=data(await sourceRef.get());
+  if(!tx||!E.PREP_ROW.test(id)||tx.needsReview!==true||tx.voided===true)return false;
+  if(['assigned_by_manager','manual'].includes(tx.responsibility?.status))return false;
+  const cfg=await config();if(!cfg.enabled||!/^\d{4}-\d{2}-\d{2}$/.test(cfg.fromDate||'')||!(String(tx.businessDate||'')>=cfg.fromDate))return false;
+  const item=data(await coll('inventory_items').doc(tx.itemId).get());if(!item)throw error('Chưa đọc được nguyên liệu của dòng lệch');
+  const v=E.prepVariance(tx,item.unit);if(!v)return false;const cls=E.prepReviewClass(v);
+  const batch=cls.fyi&&v.batchId?data(await coll('prep_batches').doc(v.batchId).get()):null;
+  const caseRef=sub('prep_reviews').doc(E.key(id)),fingerprint=E.stable({tx,unit:item.unit||''});
+  const trackRef=cls.track?sub('prep_track').doc(E.key(v.responsible.employeeId||'_none',v.itemId,v.direction)):null;
+  const alertRef=cls.fyi?coll('alerts').doc(E.key('e2_prep_var',v.key)):null;
+  const pct=Number.isFinite(v.ratio)?Math.round(v.ratio*1000)/10:null,itemName=item.name||v.itemId,prepName=batch?.prepName||'';
+  const what=v.basis==='book'?'sổ tồn lệch so với cân thực tế':v.direction==='over'?'dùng nhiều hơn định lượng':'dùng ít hơn định lượng';
+  const plan=await fs.runTransaction(async t=>{
+   await fence(t,guard);
+   const [cs,ss,oldSn,tr,al]=await Promise.all([t.get(base),t.get(sourceRef),t.get(caseRef),trackRef?t.get(trackRef):null,alertRef?t.get(alertRef):null]);
+   if(E.stable(data(ss))!==E.stable(tx))throw error('Dòng sổ vừa đổi; tính lại');
+   const c=cs.exists?cs.data():{};if(!c.enabled)return null;
+   if(E.stable([c.enabled,c.mode,c.fromDate,c.settingsRevision])!==E.stable([cfg.enabled,cfg.mode,cfg.fromDate,cfg.settingsRevision]))throw error('Thiết lập vừa đổi — tính lại theo phiên bản mới');
+   const mode=active(c)?'active':'shadow',old=oldSn.exists?oldSn.data():null;
+   if(old&&old.fingerprint===fingerprint&&old.mode===mode&&(mode==='shadow'||old.applied))return null;
+   const at=old?.mode===mode&&old.at?old.at:iso();
+   const d={id:caseRef.id,storeId:store,txId:id,policy:'prep_review_v1',mode,fingerprint,band:cls.band,label:cls.label,severity:cls.severity||null,fyi:cls.fyi,
+    kind:v.kind,basis:v.basis,direction:v.direction,deviation:v.deviation,base:v.base,ratioPct:pct,unit:v.unit,itemId:v.itemId,itemName,batchId:v.batchId,prepName,
+    responsible:v.responsible,businessDate:v.businessDate,applied:false,at,updatedAt:iso(),revision:(old?.revision||0)+1};
+   let repeat=null;
+   if(mode==='active'&&trackRef){
+    const old2=tr.exists?tr.data():{},tk=E.prepTrack(old2.entries,v,cls,at);
+    const due=tk.repeated&&(!old2.lastAlertAt||E.ms(at)-E.ms(old2.lastAlertAt)>E.PREP_REVIEW.repeatDays*E.DAY);
+    t.set(trackRef,{storeId:store,employeeId:v.responsible.employeeId||'',employeeName:v.responsible.employeeName||'',itemId:v.itemId,itemName,direction:v.direction,entries:tk.entries,...(due?{lastAlertAt:at}:{}),updatedAt:iso()},{merge:true});
+    if(due){repeat=coll('alerts').doc(E.key('e2_prep_repeat',trackRef.id,at.slice(0,10)));
+     t.set(repeat,{type:'prep_variance_repeat',fyi:true,source:'engine2',severity:'warning',status:'new',businessDate:v.businessDate,createdAt:at,itemId:v.itemId,
+      employeeId:v.responsible.employeeId||'',employeeName:v.responsible.employeeName||'',direction:v.direction,count:tk.entries.length,txIds:tk.entries.map(e=>e.txId),
+      title:(v.responsible.employeeName||'Chưa rõ người')+' lệch '+itemName+' '+tk.entries.length+' mẻ trong '+E.PREP_REVIEW.repeatDays+' ngày ('+(v.direction==='over'?'cùng chiều thiếu / dùng nhiều':'cùng chiều thừa / dùng ít')+')',
+      note:'Thông báo để biết — hệ thống đã tự duyệt từng mẻ và ghi vào báo cáo tháng. Lặp lại cùng chiều nên quản lý trao đổi với nhân viên hoặc xem lại định lượng; không cần thao tác trên hệ thống.'});}
+   }
+   if(mode==='active'&&alertRef&&!al.exists)t.set(alertRef,{type:'prep_variance_large',fyi:true,source:'engine2',severity:cls.severity,status:'new',businessDate:v.businessDate,createdAt:at,
+    itemId:v.itemId,batchId:v.batchId,txId:id,ratioPct:pct,deviation:v.deviation,base:v.base,unit:v.unit,direction:v.direction,band:cls.band,responsible:v.responsible,
+    title:itemName+' '+what+' '+(pct===null?Math.abs(v.deviation)+' '+v.unit+' (không có định lượng)':pct+'%')+(prepName?' · mẻ '+prepName:''),
+    note:cls.label+'. Hệ thống đã tự ghi nhận vào báo cáo tháng (mốc '+new Date(E.ms(at)+7*3600000).toISOString().slice(0,16).replace('T',' ')+' giờ VN) — người chịu trách nhiệm: '+(v.responsible.employeeName||'chưa rõ')+' ('+v.responsible.role+'). Thông báo để biết; quản lý yêu cầu nhân viên giải trình riêng, không cần thao tác trên hệ thống.'});
+   d.fyiAlertId=alertRef?alertRef.id:null;d.repeatAlertId=repeat?repeat.id:null;
+   t.set(caseRef,d);return d;
+  });
+  if(!plan||plan.mode!=='active')return plan;
+  const inventory=opts.getInventory?await opts.getInventory(tx.itemId):opts.inventory;if(!inventory?.ledger?.autoReview)throw error('Chưa có inventory adapter (ledger.autoReview)');
+  const autoReview={by:'engine2',policy:plan.policy,band:plan.band,label:plan.label,ratioPct:plan.ratioPct,deviation:plan.deviation,base:plan.base,unit:plan.unit,basis:plan.basis,direction:plan.direction,
+   responsible:plan.responsible,at:plan.at,caseId:plan.id,fyiAlertId:plan.fyiAlertId};
+  const ok=await inventory.ledger.autoReview(id,{needsReview:false,reviewedAt:plan.at,reviewedBy:'engine2_auto',autoReview});
+  await caseRef.set({applied:true,appliedResult:ok?'reviewed':'skipped_source_changed',appliedAt:iso()},{merge:true});
+  return {...plan,applied:true,appliedResult:ok?'reviewed':'skipped_source_changed'};
+ }
+ // Quét dòng còn chờ duyệt từ ngày áp dụng (lượt ngày + khởi động) — bù trigger bị lỡ. 1 truy vấn một trường, có giới hạn.
+ async function sweepPrepReview(){
+  const cfg=await config();if(!cfg.enabled||!/^\d{4}-\d{2}-\d{2}$/.test(cfg.fromDate||''))return 0;
+  const s=await coll('stock_transactions').where('needsReview','==',true).limit(200).get();let n=0;
+  for(const d of s.docs)if(E.PREP_ROW.test(d.id)&&String(d.data().businessDate||'')>=cfg.fromDate&&d.data().voided!==true){await enqueue('prep_review',d.id);n++;}
+  return n;
  }
  async function handover(id,guard){
   const c=await config();if(!active(c))return;
@@ -417,7 +478,7 @@ function create(opts){
   if(cursor)q=q.startAfter(cursor.day,cursor.id);
   const s=await q.get();for(const d of s.docs)if(/^finish_.+_WASTE$/.test(d.id))await enqueue('finish',d.id);
   if(s.docs.length===50){const last=s.docs.at(-1);await fs.runTransaction(async t=>{await fence(t,guard);t.set(guard.ref,{cursor:{day:last.data().businessDate,id:last.id}},{merge:true});});await enqueue('bootstrap',job.data().sourceId,true);}
-  else await fs.runTransaction(async t=>{await fence(t,guard);const cs=await t.get(base);if(cs.exists&&cs.data().settingsRevision===cfg.settingsRevision)t.set(base,{bootstrapFinishedAt:iso()},{merge:true});});
+  else{await sweepPrepReview();await fs.runTransaction(async t=>{await fence(t,guard);const cs=await t.get(base);if(cs.exists&&cs.data().settingsRevision===cfg.settingsRevision)t.set(base,{bootstrapFinishedAt:iso()},{merge:true});});}
  }
  async function discoverShift(id,guard){
   const shift=await coll('employee_shifts').doc(id).get();if(!shift.exists||!E.isBarista(shift.data()))return;
@@ -436,12 +497,12 @@ function create(opts){
   const job=await fs.runTransaction(async t=>{const [s,c]=await Promise.all([t.get(ref),t.get(base)]);if(!s.exists)return null;const j=s.data();if(j.kind!=='measurement'&&(!c.exists||!c.data().enabled))return null;if(!j.dirty||j.leaseUntil>now()||j.nextTryAt>now())return null;t.set(ref,{leaseUntil:now()+120000,leaseToken:token},{merge:true});return j;});
   if(!job)return false;
   try{
-   const guard={ref,token,revision:job.revision};if(job.kind==='finish')await finish(job.sourceId,guard);else if(job.kind==='measurement')await measure(job.sourceId,guard);else if(job.kind==='bootstrap')await bootstrap(guard);else if(['reprice','recompute_shift'].includes(job.kind))await dependencies(job.kind,job.sourceId,guard);else if(job.kind==='discover_shift')await discoverShift(job.sourceId,guard);else if(job.kind==='opened')await opened(job.sourceId,guard);else await handover(job.sourceId,guard);
+   const guard={ref,token,revision:job.revision};if(job.kind==='finish')await finish(job.sourceId,guard);else if(job.kind==='measurement')await measure(job.sourceId,guard);else if(job.kind==='bootstrap')await bootstrap(guard);else if(['reprice','recompute_shift'].includes(job.kind))await dependencies(job.kind,job.sourceId,guard);else if(job.kind==='discover_shift')await discoverShift(job.sourceId,guard);else if(job.kind==='opened')await opened(job.sourceId,guard);else if(job.kind==='prep_review')await prepReview(job.sourceId,guard);else await handover(job.sourceId,guard);
    return await fs.runTransaction(async t=>{const s=await t.get(ref);if(!s.exists||s.data().leaseToken!==token)return false;t.set(ref,{dirty:s.data().revision!==job.revision,leaseUntil:0,leaseToken:'',nextTryAt:now(),lastError:'',completedAt:iso()},{merge:true});return true;});
    }catch(e){await fs.runTransaction(async t=>{const s=await t.get(ref);if(!s.exists||s.data().leaseToken!==token)return;if(s.data().revision!==job.revision){t.set(ref,{leaseUntil:0,leaseToken:'',nextTryAt:now()},{merge:true});return;}t.set(ref,{leaseUntil:0,leaseToken:'',lastError:String(e.message||e),nextTryAt:now()+60000,attempt:(s.data().attempt||0)+1},{merge:true});});throw e;}
  }
  async function retryDue(){const s=await sub('requests').where('dirty','==',true).where('nextTryAt','<=',now()).orderBy('nextTryAt').limit(30).get();for(const d of s.docs)try{await drain(d.id);}catch(e){if(opts.log)opts.log(e);}return s.docs.length;}
- return {storeId:store,base,sub,coll,config,enqueue,finish,handover,opened,ensureCloseTasks,registerVessel,requestMeasurement,measure,createTask,submitEvidence,learnDay,exception,drain,retryDue,observation,startPoint};
+ return {storeId:store,base,sub,coll,config,enqueue,finish,prepReview,sweepPrepReview,handover,opened,ensureCloseTasks,registerVessel,requestMeasurement,measure,createTask,submitEvidence,learnDay,exception,drain,retryDue,observation,startPoint};
 }
 const api={create};if(typeof module==='object'&&module.exports)module.exports=api;root.UnitEngine2Store=api;
 })(typeof window!=='undefined'?window:globalThis);

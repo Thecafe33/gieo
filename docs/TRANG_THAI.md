@@ -1,3 +1,7 @@
+# 23/10 — Engine 2 tự xử lý «Chờ quản lý duyệt» (lệch NL khi nấu mẻ BTP)
+
+[Lộ trình](LO_TRINH_ENGINE2_CAP6.md) mục «Tự xử lý «Chờ quản lý duyệt»»: chỉ từ ngày áp dụng; mọi mức đều tự duyệt, > 25% ghi người chịu trách nhiệm + mốc vào Báo cáo tháng và tạo thông báo để biết. Chưa deploy.
+
 # 23/10 — manage duyệt nhanh quán Gieo (đợt 1)
 
 [Kế hoạch](KE_HOACH_MANAGE_DUYET_GIEO.md): chi phí chờ duyệt Gieo duyệt ở tab Chi phí (chung TC33/XOFA); màn «Chờ xử lý Gieo»: Đóng ngày chưa đóng sổ, điền giờ ra ca treo, cảnh báo Đã xem / Đã xử lý — ghi y quanlygieo + dấu lãi/lỗ. Đợt 2 (Unit Engine trong manage) chờ chủ quán duyệt. Chưa deploy.

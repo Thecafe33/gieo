@@ -14,6 +14,16 @@ async function audit(FS){return A.run({...RANGE,fstore:makeFake({fs:clone(FS)}).
 const codes=r=>[...new Set(r.issues.map(i=>i.code))].sort();
 const casesOf=FS=>Object.entries(FS).filter(([p])=>p.startsWith(ROOT+'/cases/'));
 const finishCase=FS=>casesOf(FS).find(([,d])=>d.originKind==='finish');
+// Tự duyệt lệch NL khi nấu mẻ (23/10): một hồ sơ ĐÚNG (lệch 40% → lệch lớn + thông báo để biết) để cài lỗi lên.
+const PR=ROOT+'/prep_reviews/'+E.key('prep_after_B1_j');
+function withPrep(FS){
+ FS['stock_transactions_gieogieo/prep_after_B1_j']={itemId:'j',type:'CONSUMPTION',qty:-280,expectedQty:200,uncertainVariance:0,referenceId:'B1',businessDate:'2026-10-20',needsReview:false,reviewedBy:'engine2_auto',
+  responsibility:{employeeId:'a',employeeName:'A'},autoReview:{by:'engine2',caseId:E.key('prep_after_B1_j'),band:'large'}};
+ FS[PR]={id:E.key('prep_after_B1_j'),storeId:'gg01',txId:'prep_after_B1_j',mode:'active',band:'large',deviation:80,base:200,unit:'ml',businessDate:'2026-10-20',responsible:{employeeId:'a'},
+  applied:true,appliedResult:'reviewed',fyiAlertId:'al1'};
+ FS['alerts_gieogieo/al1']={type:'prep_variance_large',fyi:true,source:'engine2',status:'new'};
+ return FS;
+}
 const weighCases=FS=>casesOf(FS).filter(([,d])=>d.originKind==='measurement').sort((a,b)=>a[1].interval.to.localeCompare(b[1].interval.to));
 
 (async()=>{
@@ -22,6 +32,7 @@ const weighCases=FS=>casesOf(FS).filter(([,d])=>d.originKind==='measurement').so
  const clean=await audit(CLEAN);
  assert.equal(clean.complete,true);assert.equal(clean.violations,0,A.summary(clean));assert.equal(clean.warnings,0,A.summary(clean));assert.equal(clean.ok,true);
  assert(clean.coverage.cases===3&&clean.coverage.checkpoints===2&&clean.coverage.sources>=3);
+ {const r=await audit(withPrep(clone(CLEAN)));assert.equal(r.violations,0,A.summary(r));}
  // Read-only: auditor never writes.
  {const f=makeFake({fs:clone(CLEAN)});await A.run({...RANGE,fstore:f.fstore});assert.equal(f.log.filter(x=>/^fs\.(set|update|delete)/.test(x[0])).length,0);}
  // Independent: does not load the decision module.
@@ -63,6 +74,10 @@ const weighCases=FS=>casesOf(FS).filter(([,d])=>d.originKind==='measurement').so
   ['nghi sai quy cách khi không có mã cùng phiếu nhận',FS=>{const [p]=finishCase(FS);FS['stock_containers_gieogieo/u'].receiveRefId='R';Object.assign(FS[p],{basis:'spec_mismatch',allocations:[],pending:{qty:FS[p].quantity,value:FS[p].amount}});},'SPEC_WITHOUT_LOT_EVIDENCE'],
   ['chờ mã cùng phiếu khi phiếu không còn mã nào chưa dùng',FS=>{const [p]=finishCase(FS);FS['stock_containers_gieogieo/u'].receiveRefId='R';FS['stock_containers_gieogieo/u2']={itemId:'jelly',receiveRefId:'R',status:'finished',baseQty:500,wasteBase:5,openedAt:'2026-10-14T08:00:00.000Z',finishedAt:'2026-10-20T08:00:00.000Z'};Object.assign(FS[p],{basis:'waiting_sibling',status:'checking',allocations:[],pending:{qty:FS[p].quantity,value:FS[p].amount}});},'SPEC_WAIT_WITHOUT_SIBLING'],
   ['hồ sơ sai quy cách vẫn phân bổ cho người',FS=>{const [p]=finishCase(FS);FS['stock_containers_gieogieo/u'].receiveRefId='R';FS['stock_containers_gieogieo/u2']={itemId:'jelly',receiveRefId:'R',status:'finished',baseQty:500,wasteBase:310,openedAt:'2026-10-14T08:00:00.000Z',finishedAt:'2026-10-20T08:00:00.000Z'};FS[p].basis='spec_mismatch';},'SPEC_ALLOCATED'],
+  ['tự duyệt lệch NL sai mức (40% ghi là lệch vừa)',FS=>{withPrep(FS);FS[PR].band='moderate';},'PREP_REVIEW_WRONG_BAND'],
+  ['tự duyệt lệch NL khác dòng sổ gốc',FS=>{withPrep(FS);FS['stock_transactions_gieogieo/prep_after_B1_j'].qty=-300;},'PREP_REVIEW_SOURCE_MISMATCH'],
+  ['tự duyệt dòng trước ngày áp dụng',FS=>{withPrep(FS);FS[ROOT].fromDate='2026-10-21';},'PREP_REVIEW_BEFORE_START'],
+  ['lệch lớn tự duyệt không có thông báo để biết',FS=>{withPrep(FS);delete FS['alerts_gieogieo/al1'];},'PREP_REVIEW_FYI_MISSING'],
   ['mất nhật ký quyết định',FS=>{const [,d]=finishCase(FS);delete FS[ROOT+'/decisions/'+d.decisionId];},'DECISION_LOG_MISSING'],
   ['đối chiếu thử đã bật kiểm soát',FS=>{const [p,d]=finishCase(FS);FS[p].mode='shadow';FS[ROOT+'/controls/jelly'].reasonCaseIds=[d.id];},'SHADOW_EFFECT'],
   ['lượt cân thiếu nhưng mất dòng hao hụt',FS=>{const [,d]=weighCases(FS)[0];delete FS[d.sourcePath];delete FS[d.sourcePath.replace('stock_transactions_gieogieo','x')];},'MEASUREMENT_LEDGER_MISSING'],

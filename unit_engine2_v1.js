@@ -79,6 +79,41 @@ function specOutcome(result,check){
   explanation:spec?'Mã cùng loại cùng phiếu nhận cũng còn dư ~'+Math.round(check.siblingFrac*100)+'% khi báo hết (mã này '+pct+'%) → nghi nhập sai quy cách. Không quy trách nhiệm cho pha chế; đối chiếu nhãn bao với phiếu nhận.'
    :'Báo hết còn dư '+pct+'% dung tích. Phiếu nhận còn mã cùng loại chưa dùng xong → CHỜ mã đó dùng xong mới kết luận (sai quy cách hay hao hụt); chưa phân bổ trách nhiệm.'};
 }
+// Lệch NL khi nấu mẻ BTP (dòng sổ «Chờ quản lý duyệt» do POS bật) — chủ quán chốt 23/10: công thức đã R&D kỹ nên
+// không giữ lại việc nào cho quản lý. Trong sai số (≤ max(15 g/ml, 5%)) → tự duyệt; 5–25% → tự duyệt + theo dõi dồn
+// (cùng người, cùng NL, cùng chiều lặp lại → thông báo); > 25% «lệch lớn», > 50% «lệch rất lớn» → vẫn tự xử lý: ghi rõ
+// người chịu trách nhiệm + mốc thời gian vào báo cáo tháng và tạo THÔNG BÁO ĐỂ BIẾT (quản lý hỏi giải trình riêng).
+const PREP_REVIEW={absQty:{g:15,ml:15,kg:0.015,l:0.015},minor:0.05,large:0.25,veryLarge:0.5,repeatN:3,repeatDays:30};
+const PREP_ROW=/^prep_(after|variance|surplus|pre)_/;
+function prepVariance(tx,unit){
+ const t=tx||{},id=String(t.id||''),m=id.match(PREP_ROW);if(!m||t.needsReview!==true||t.voided===true)return null;
+ const kind=m[1],r=t.responsibility||{},batchId=t.referenceId||'',itemId=t.itemId||'';
+ let base,dev,basis;
+ if(kind==='pre'){base=Number(t.bookBefore)||0;dev=-(Number(t.qty)||0);basis='book';}   // cân trước mẻ: số cân − sổ = qty → lệch dương = thiếu tồn
+ else if(kind==='surplus'){base=Number(t.expectedQty)||0;dev=-(Number(t.qty)||0);basis='book';}   // sổ ghi thấp hơn thực tế (qty > 0)
+ else{base=Number(t.expectedQty)||0;basis='recipe';
+  const obs=kind==='variance'?Number(t.observedDecrease):Math.abs(Number(t.qty)||0)+(Number(t.uncertainVariance)||0);
+  if(!Number.isFinite(obs))return null;dev=obs-base;}
+ const u=String(unit||'').toLowerCase(),abs=PREP_REVIEW.absQty[u]||0,mag=Math.abs(dev);
+ const ratio=base>0?mag/base:mag>abs?Infinity:0;
+ const resp=kind==='pre'?{employeeId:t.responsibleEmployeeId||t.staffEmployeeId||'',employeeName:t.responsibleEmployeeName||t.staff||'',role:t.responsibilityRole||'người chốt cân'}
+  :{employeeId:r.employeeId||t.staffEmployeeId||'',employeeName:r.employeeName||t.staff||'',role:r.role||'người cân chốt',batchOperatorId:r.batchOperatorId||'',batchOperatorName:r.batchOperatorName||''};
+ return {kind,basis,txId:id,batchId,itemId,unit:u,base:round(base),deviation:round(dev),ratio,abs,direction:dev>0?'over':dev<0?'under':'none',
+  key:kind==='pre'?key('pre',batchId,t.containerId||id):key(batchId,itemId),responsible:resp,businessDate:t.businessDate||''};
+}
+function prepReviewClass(v){
+ if(!v)return null;const mag=Math.abs(v.deviation);
+ if(mag<=Math.max(v.abs,PREP_REVIEW.minor*v.base))return {band:'within',fyi:false,track:false,label:'Trong sai số cân'};
+ if(v.ratio<=PREP_REVIEW.large)return {band:'moderate',fyi:false,track:true,label:'Lệch vừa (5–25%) — theo dõi dồn'};
+ if(v.ratio<=PREP_REVIEW.veryLarge)return {band:'large',fyi:true,track:true,severity:'warning',label:'Lệch lớn (25–50%) — cần nhân viên giải trình'};
+ return {band:'very_large',fyi:true,track:true,severity:'danger',label:'Lệch rất lớn (> 50%) — cần người chịu trách nhiệm giải trình'};
+}
+// Theo dõi dồn: các lần lệch vừa trở lên cùng người / NL / chiều trong repeatDays (mỗi mẻ tính một lần — key).
+function prepTrack(entries,v,cls,at){
+ const cut=ms(at)-PREP_REVIEW.repeatDays*DAY,list=(entries||[]).filter(e=>ms(e.at)>=cut&&e.k!==v.key);
+ list.push({k:v.key,at,ratio:Number.isFinite(v.ratio)?round(v.ratio*100)/100:null,band:cls.band,txId:v.txId});
+ return {entries:list.slice(-20),repeated:list.length>=PREP_REVIEW.repeatN};
+}
 function decision(input){
  const {store,sourceId,source,container,shifts,checkpoint,valuation}=input;storeId(store);
  if(!source||source.type!=='WASTE'||source.voided===true||!(Number(source.qty)<0))return {schemaVersion:1,policyVersion:POLICY,storeId:store,sourceId,sourcePath:collection('stock_transactions',store)+'/'+sourceId,status:'voided',quantity:0,amount:0,allocations:[],reason:'SOURCE_INACTIVE'};
@@ -183,6 +218,6 @@ function outbox(storage,store){
  const read=()=>{const value=JSON.parse(storage.getItem(name)||'[]');if(!Array.isArray(value)||value.some(x=>x.storeId!==store))throw Error('Bộ nhớ công việc cần kiểm tra');return value;};
  return {read,put(command){if(!command.id||!['measurement','exception','close_exception','evidence'].includes(command.kind))throw Error('Lệnh lưu không hợp lệ');const rows=read();if(rows.some(x=>x.id===command.id))return;if(rows.length>=100)throw Error('Bộ nhớ công việc đã đầy; kết nối để đồng bộ trước');storage.setItem(name,JSON.stringify([...rows,{...command,storeId:store}]));},remove(id){storage.setItem(name,JSON.stringify(read().filter(x=>x.id!==id)));}};
 }
-const api={VERSION,POLICY,DAY,states,ms,finite,stable,storeId,collection,SHARED,tableName,rootPath,key,digest,round,split,isBarista,group,interval,SPEC,lotKey,specCheck,specOutcome,decision,measuredDecision,audit,transition,path,caseFlow,taskStart,control,measurement,outbox};
+const api={VERSION,POLICY,DAY,states,ms,finite,stable,storeId,collection,SHARED,tableName,rootPath,key,digest,round,split,isBarista,group,interval,SPEC,lotKey,specCheck,specOutcome,PREP_REVIEW,PREP_ROW,prepVariance,prepReviewClass,prepTrack,decision,measuredDecision,audit,transition,path,caseFlow,taskStart,control,measurement,outbox};
 if(typeof module==='object'&&module.exports)module.exports=api;root.UnitEngine2=api;
 })(typeof window!=='undefined'?window:globalThis);

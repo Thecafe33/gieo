@@ -20451,7 +20451,7 @@ function thangKetTrachNhiemNL(txs, items, costOf, prepWasteTxs, dutyCases){
       value:amountQty*costOf(t.itemId,t.businessDate),employeeId,employeeName,
       role:r.role||(employeeId?'người ghi nhận':'chưa xác minh PIN'),
       reason:r.reason||t.reason||t.note||'',reportedByName:r.reportedByName||'',needsReview:!!t.needsReview,
-      reviewedAt:t.reviewedAt||'',expectedQty:Number(t.expectedQty)||0,
+      reviewedAt:t.reviewedAt||'',autoReview:t.autoReview&&t.autoReview.by==='engine2'?t.autoReview:null,expectedQty:Number(t.expectedQty)||0,
       varianceKind:t.varianceKind||'',codeIntervals,
       varianceAllocations:Array.isArray(t.varianceAllocations)?t.varianceAllocations:[],
       unitAllocations:Array.isArray(t.unitAllocations)?t.unitAllocations:
@@ -20829,6 +20829,7 @@ function thangKetResponsibilityHTML(){
         return `<div class="row"><span class="rl">Không tính vào ai — lỗi định mức / chưa quy / chờ quản lý quyết</span><span class="rv">${fmt(v('recipe'))} / ${fmt(v('unknown')+v('unverified'))} / ${fmt(v('dispute'))}</span></div>`; })()}
       <div class="row"><span class="rl">Dùng vượt định mức · đã vào giá vốn</span><span class="rv">${fmt(sum('extraUse'))}</span></div>
       ${all.some(e=>e.entryError)?`<div class="row"><span class="rl" style="color:var(--bad)">Đã xác minh nhập sai số liệu (người cân vẫn chịu trách nhiệm)</span><span class="rv" style="color:var(--bad)">${all.filter(e=>e.entryError).length} lượt</span></div>`:''}
+      ${all.some(e=>e.autoReview&&['large','very_large'].includes(e.autoReview.band))?`<div class="row"><span class="rl" style="color:var(--bad)">Lệch NL khi nấu > 25% · hệ thống đã tự ghi nhận, cần nhân viên giải trình</span><span class="rv" style="color:var(--bad)">${all.filter(e=>e.autoReview&&['large','very_large'].includes(e.autoReview.band)).length} lượt</span></div>`:''}
       ${all.some(e=>e.needsReview)?`<div class="row"><span class="rl" style="color:var(--warn)">Chờ quản lý duyệt</span><span class="rv" style="color:var(--warn)">${all.filter(e=>e.needsReview).length} lượt</span></div>`:''}
       <div class="small-note" style="margin-top:8px">Theo PIN người cân chốt hoặc ghi nhận. Mỗi lượt có mã lô, hai mốc cân và lý do nếu POS đã ghi. Thiếu tồn chưa xác minh được tách khỏi hao hụt đã ghi; các số này không tự trừ lương.</div>
     </div>
@@ -20894,6 +20895,7 @@ function thangKetOpenResponsibilitySheet(index){
         <span class="small-note" style="color:var(--warn)">Cần quản lý xác minh nguyên nhân</span>
         <button class="btn sm" style="width:auto;padding:0 14px" onclick="thangKetDuyetSuKien('${escapeHtmlAttr(e.id)}',${index},this)">Duyệt</button></div>`
         :e.needsReview?'<div class="small-note" style="color:var(--warn)">Cần quản lý xác minh nguyên nhân</div>'
+        :e.autoReview?`<div class="small-note" style="margin-top:6px;${['large','very_large'].includes(e.autoReview.band)?'color:var(--bad)':''}"><b>Hệ thống tự duyệt ${escapeHtmlAttr(qlFmtDT(e.autoReview.at||e.reviewedAt))}:</b> ${escapeHtmlAttr(e.autoReview.label||'')}${e.autoReview.ratioPct!=null?' · lệch '+fmtNum(e.autoReview.ratioPct,1)+'%':''}${['large','very_large'].includes(e.autoReview.band)?' · người chịu trách nhiệm: '+escapeHtmlAttr((e.autoReview.responsible&&e.autoReview.responsible.employeeName)||'chưa rõ'):''}</div>`
         :e.reviewedAt?`<div class="small-note">Đã duyệt ${escapeHtmlAttr(qlFmtDT(e.reviewedAt))}</div>`:''}
     </div>`;
   }).join('');
