@@ -17,6 +17,9 @@ const CODES={
  VALUATION_SOURCE_MISMATCH:['violation','Số tiền khác căn cứ giá được ghi'],
  DUPLICATE_PERSON:['violation','Một người xuất hiện hai lần trong phân bổ'],
  MANUAL_OVERRIDDEN:['violation','Quyết định tay trên nguồn bị phân bổ lại'],
+ SPEC_WITHOUT_LOT_EVIDENCE:['violation','Kết luận «nghi sai quy cách» khi không có mã cùng loại cùng phiếu nhận đã dùng xong cũng còn dư gần cùng tỷ lệ'],
+ SPEC_WAIT_WITHOUT_SIBLING:['violation','Hồ sơ «chờ mã cùng phiếu» khi phiếu nhận không còn mã cùng loại chưa dùng xong — phải kết luận'],
+ SPEC_ALLOCATED:['violation','Hồ sơ chờ / nghi sai quy cách lại phân bổ trách nhiệm cho người'],
  INTERVAL_INVALID:['violation','Khoảng trách nhiệm sai (ngoài thời gian mở/kết thúc tem)'],
  CHECKPOINT_MISSING:['violation','Khoảng bắt đầu từ mốc cân không còn bản ghi'],
  CHECKPOINT_WRONG_OBJECT:['violation','Mốc cân không thuộc đúng tem/nguyên liệu'],
@@ -70,7 +73,7 @@ const active=c=>!['voided','superseded'].includes(c.status);
 /* Pure check over a collected snapshot. Never throws on bad data: every anomaly is an issue. */
 function check(snap){
  const store=storeId(snap.store),issues=[],add=(code,ref,detail)=>issues.push({code,severity:CODES[code][0],message:CODES[code][1],ref,detail:detail||null});
- const S=snap.sources||{},C=snap.containers||{},CP=snap.checkpoints||{},D=snap.decisions||{},M=snap.measurements||{},P=snap.prices||{},I=snap.items||{},R=snap.requests||{};
+ const S=snap.sources||{},C=snap.containers||{},RC=snap.receipts||null,CP=snap.checkpoints||{},D=snap.decisions||{},M=snap.measurements||{},P=snap.prices||{},I=snap.items||{},R=snap.requests||{};
  const txPrefix=collName('stock_transactions',store)+'/',cases=snap.cases||[],cfg=snap.config||{};
  const isActiveCfg=cfg.enabled===true&&cfg.mode==='active';
  const sourceActive=s=>s&&s.type==='WASTE'&&s.voided!==true&&Number(s.qty)<0;
@@ -99,6 +102,15 @@ function check(snap){
   }
   if(new Set(alloc.map(a=>a.employeeId)).size!==alloc.length)add('DUPLICATE_PERSON',ref);
   if(c.decisionMode==='manual'&&(alloc.length||!near(Number(c.pending?.qty)||0,c.quantity)))add('MANUAL_OVERRIDDEN',ref);
+  // Luật sai quy cách (chủ quán 23/10) — viết lại ĐỘC LẬP với lõi: chỉ kết luận theo mã cùng loại cùng phiếu nhận.
+  if(['spec_mismatch','waiting_sibling'].includes(c.basis)){
+   if(alloc.length)add('SPEC_ALLOCATED',ref);
+   const me=C[c.containerId],lot=me&&me.receiveRefId?Object.values(C).filter(x=>x.id!==me.id&&x.itemId===me.itemId&&x.receiveRefId===me.receiveRefId&&!['voided','cancelled'].includes(x.status)):[];
+   const f=me&&Number(me.baseQty)>0?((Number(c.quantity)||0)+cases.filter(k=>k.containerId===me.id&&k.originKind==='measurement'&&k.status!=='voided').reduce((a,k)=>a+(Number(k.quantity)||0),0))/Number(me.baseQty):0,msr=id=>cases.filter(k=>k.containerId===id&&k.originKind==='measurement'&&k.status!=='voided').reduce((a,k)=>a+(Number(k.quantity)||0),0),fr=x=>Number(x.baseQty)>0?((Number(x.wasteBase)||0)+msr(x.id))/Number(x.baseQty):0;
+   if(RC&&me?.receiveRefId&&!RC[me.receiveRefId])add('SPEC_WITHOUT_LOT_EVIDENCE',ref,{containerId:c.containerId,receiveRefId:me.receiveRefId,reason:'không có phiếu nhận thật'});
+   else if(c.basis==='spec_mismatch'&&!lot.some(x=>x.status==='finished'&&fr(x)>=0.15&&Math.abs(fr(x)-f)<=0.1))add('SPEC_WITHOUT_LOT_EVIDENCE',ref,{containerId:c.containerId,receiveRefId:me?.receiveRefId||null});
+   if(c.basis==='waiting_sibling'&&!lot.some(x=>x.status!=='finished'))add('SPEC_WAIT_WITHOUT_SIBLING',ref,{containerId:c.containerId});
+  }
   // interval vs raw container
   const u=C[c.containerId],iv=c.interval||{},from=ms(iv.from),to=ms(iv.to);
   if(!u||!Number.isFinite(from)||!Number.isFinite(to)||from>=to||from<ms(u.openedAt)-1||(c.originKind==='finish'&&u.finishedAt&&!near(to,ms(u.finishedAt),1)))add('INTERVAL_INVALID',ref,{from:iv.from,to:iv.to,openedAt:u?.openedAt,finishedAt:u?.finishedAt});
@@ -224,6 +236,10 @@ async function collect({fstore,storeId:sid,from,to,limit=500,collection}){
  await byIds(sub('measurements'),[...tasks.map(t=>lastSeg(t.resultRef)),...tasks.map(t=>t.measurementId),...locks.map(l=>l.measurementId),...Object.values(checkpoints).map(c=>c.measurementId)],measurements);
  for(const m of Object.values(measurements))if(m.result?.opId)await byIds(coll('stock_transactions'),(m.line?.units||[]).map(u=>m.result.opId+'_'+u.id),sources);
  await byIds(coll('stock_containers'),[...Object.values(sources).map(s=>s.containerId||s.referenceId),...cases.map(c=>c.containerId),...Object.values(checkpoints).map(c=>c.containerId)],containers);
+ // Hồ sơ chờ / nghi sai quy cách: lấy đủ các mã cùng phiếu nhận (1 truy vấn có giới hạn / phiếu).
+ const specRefs=[...new Set(cases.filter(c=>['spec_mismatch','waiting_sibling'].includes(c.basis)).map(c=>containers[c.containerId]?.receiveRefId).filter(Boolean))],receipts={};
+ for(const ref of specRefs)for(const x of await rows('lot_units',coll('stock_containers').where('receiveRefId','==',ref)))containers[x.id]=x;
+ for(const ref of specRefs){const r=await coll('receiving_records').doc(ref).get();if(r.exists)receipts[ref]=true;}
  await byIds(sub('decisions'),cases.map(c=>c.decisionId),decisions);
  await byIds(coll('price_history'),cases.map(c=>c.valuation?.priceId),prices);
  await byIds(coll('inventory_items'),Object.values(checkpoints).map(c=>c.itemId),items);
@@ -232,7 +248,7 @@ async function collect({fstore,storeId:sid,from,to,limit=500,collection}){
  const shifts=starts.length?await rows('shifts',coll('employee_shifts').where('checkedInAt','>=',new Date(Math.min(...starts)-14*3600000).toISOString()).where('checkedInAt','<=',new Date(Math.max(...ends)).toISOString())):[];
  const controls=(await rows('controls',sub('controls'))).map(k=>({...k,itemId:k.itemId||k.id}));
  const devices=await rows('devices',sub('devices'));
- return {store,range:{from,to},config,sources,containers,checkpoints,decisions,measurements,prices,items,requests,cases,shifts,tasks,locks,controls,devices,truncated};
+ return {store,range:{from,to},config,sources,containers,receipts,checkpoints,decisions,measurements,prices,items,requests,cases,shifts,tasks,locks,controls,devices,truncated};
 }
 
 async function run(opts){return check(await collect(opts));}

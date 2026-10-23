@@ -44,6 +44,41 @@ function interval(container,checkpoint,to){
  const at=checkpoint&&checkpoint.status==='valid'&&checkpoint.containerId===container.id?ms(checkpoint.countedAt):NaN;
  return {from:new Date(Number.isFinite(at)&&at>opened&&at<end?at:opened).toISOString(),to:new Date(end).toISOString(),checkpointId:Number.isFinite(at)&&at>opened&&at<end?checkpoint.id||'':null};
 }
+/* Luật «nhập sai quy cách» (chủ quán 23/10). Quán không cân hàng nhập → KHÔNG kết luận từ một mã:
+ * - báo hết còn dư < minFrac dung tích → xử lý hao hụt bình thường;
+ * - mã không thuộc phiếu nhận THẬT (vd RESET_TON_KHO — opts.receipt === false) → hao hụt;
+ * - đã đối chiếu nhãn bao mà quy cách in trên bao = khai báo (opts.rejected) → hao hụt (không phải sai quy cách);
+ * - mã DUY NHẤT của nguyên liệu đó trong phiếu nhận → kết luận HAO HỤT (như ca 300 g);
+ * - có mã cùng loại cùng phiếu nhận: mã đó đã dùng xong mà CŨNG còn dư gần cùng tỷ lệ → nghi sai quy cách (không quy pha chế);
+ *   mã đó dùng xong bình thường → hao hụt; mã đó CHƯA dùng xong → CHỜ (không phân bổ), quá maxWaitDays thì xử lý hao hụt. */
+const SPEC={minFrac:0.15,tol:0.1,maxWaitDays:45};
+function lotKey(c){return c&&c.itemId&&c.receiveRefId?c.itemId+'|'+c.receiveRefId:null;}
+// leftover = tổng phần hụt suốt đời của mã này (dư lúc báo hết + hụt đã ghi ở các lần cân); siblings[].shortfall tương tự.
+function specCheck(container,leftover,siblings,now,opts){
+ const P={...SPEC,...(opts||{})},cap=Number(container&&container.baseQty)||0,f=cap>0?(Number(leftover)||0)/cap:0;
+ if(!(cap>0)||f<P.minFrac)return {action:'decide',reason:'normal',frac:f};
+ const key=lotKey(container),sib=key?(siblings||[]).filter(s=>s&&s.id!==container.id&&lotKey(s)===key&&!['voided','cancelled'].includes(s.status)):[];
+ if(P.receipt===false)return {action:'decide',reason:'no_receipt',frac:f,lot:key};
+ if(P.rejected)return {action:'decide',reason:'spec_rejected',frac:f,lot:key};
+ if(!sib.length)return {action:'decide',reason:'only_unit',frac:f,lot:key};
+ const done=sib.filter(s=>s.status==='finished');
+ // Tổng phần hụt SUỐT ĐỜI mã (các lần cân đã ghi hụt + dư lúc báo hết) — mã đã cân giữa chừng thì lúc báo hết dư rất ít.
+ const fr=s=>Number(s.baseQty)>0?(Number(s.shortfall!=null?s.shortfall:s.wasteBase)||0)/Number(s.baseQty):0;
+ const match=done.find(s=>fr(s)>=P.minFrac&&Math.abs(fr(s)-f)<=P.tol);
+ if(match)return {action:'spec',reason:'sibling_same_shortfall',frac:f,lot:key,siblingId:match.id,siblingFrac:fr(match)};
+ if(done.length)return {action:'decide',reason:'sibling_normal',frac:f,lot:key,siblingId:done[0].id,siblingFrac:fr(done[0])};
+ const fin=ms(container.finishedAt);if(Number.isFinite(fin)&&Number.isFinite(Number(now))&&Number(now)-fin>P.maxWaitDays*DAY)return {action:'decide',reason:'wait_timeout',frac:f,lot:key};
+ return {action:'wait',reason:'waiting_sibling',frac:f,lot:key,siblingIds:sib.map(s=>s.id).sort()};
+}
+// Biến quyết định chia đều thành hồ sơ «chờ mã cùng phiếu» / «nghi sai quy cách»: không phân bổ cho người, giữ toàn bộ ở pending.
+function specOutcome(result,check){
+ if(!check||!['spec','wait'].includes(check.action)||result.status==='voided')return result;
+ const pct=Math.round(check.frac*100),spec=check.action==='spec';
+ return {...result,status:spec?'decided':'checking',basis:spec?'spec_mismatch':'waiting_sibling',allocations:[],pending:{qty:result.quantity,value:result.amount},
+  spec:{...check},waitLot:spec?null:check.lot,control:spec?null:result.control,actions:spec?[{type:'spec_confirm',targetId:result.itemId,assignment:'current_barista_group'}]:[],
+  explanation:spec?'Mã cùng loại cùng phiếu nhận cũng còn dư ~'+Math.round(check.siblingFrac*100)+'% khi báo hết (mã này '+pct+'%) → nghi nhập sai quy cách. Không quy trách nhiệm cho pha chế; đối chiếu nhãn bao với phiếu nhận.'
+   :'Báo hết còn dư '+pct+'% dung tích. Phiếu nhận còn mã cùng loại chưa dùng xong → CHỜ mã đó dùng xong mới kết luận (sai quy cách hay hao hụt); chưa phân bổ trách nhiệm.'};
+}
 function decision(input){
  const {store,sourceId,source,container,shifts,checkpoint,valuation}=input;storeId(store);
  if(!source||source.type!=='WASTE'||source.voided===true||!(Number(source.qty)<0))return {schemaVersion:1,policyVersion:POLICY,storeId:store,sourceId,sourcePath:collection('stock_transactions',store)+'/'+sourceId,status:'voided',quantity:0,amount:0,allocations:[],reason:'SOURCE_INACTIVE'};
@@ -64,7 +99,7 @@ function decision(input){
 }
 function audit(d){
  const issues=[];if(d.status==='voided')return issues;
- if(!d.allocations?.length&&d.basis!=='manual_source')issues.push('NO_BARISTA_ALLOCATION');
+ if(!d.allocations?.length&&!['manual_source','spec_mismatch','waiting_sibling'].includes(d.basis))issues.push('NO_BARISTA_ALLOCATION');
  if(Math.abs(round((d.allocations||[]).reduce((s,a)=>s+Number(a.qty),0)+(Number(d.pending?.qty)||0))-d.quantity)>0.005)issues.push('QUANTITY_MISMATCH');
  if(d.amount!==null&&Math.abs(round(d.allocations.reduce((s,a)=>s+Number(a.value),0)+(Number(d.pending?.value)||0))-d.amount)>0.005)issues.push('MONEY_MISMATCH');
  if(new Set((d.allocations||[]).map(a=>a.employeeId)).size!==d.allocations?.length)issues.push('DUPLICATE_PERSON');
@@ -104,6 +139,8 @@ function path(kind,state,events){let s=state;for(const e of events)s=transition(
 function caseFlow(old,outcome){
  const from=old||'new';
  if(outcome==='voided'){const events=from==='voided'?[]:['EXPLICIT_VOID'];return {status:path('case',from,events),events};}
+ // Chờ thêm bằng chứng (mã cùng phiếu nhận chưa dùng xong): new → checking; đang checking thì giữ (EVIDENCE_MISSING).
+ if(outcome==='checking'){if(from==='review')return {status:'review',events:[],hold:true};const events=from==='new'?['CHECK_START']:from==='checking'?['EVIDENCE_MISSING']:from==='voided'?['RESTORE_SOURCE']:['SOURCE_CORRECTED'];return {status:path('case',from,events),events};}
  if(from==='review')return {status:path('case',from,['SOURCE_CORRECTED']),events:['SOURCE_CORRECTED'],hold:true};
  const events=from==='new'?['CHECK_START','EVIDENCE_READY','DECIDE']:from==='voided'?['RESTORE_SOURCE','EVIDENCE_READY','DECIDE']:from==='checking'?['EVIDENCE_READY','DECIDE']:['SOURCE_CORRECTED','EVIDENCE_READY','DECIDE'];
  return {status:path('case',from,events),events};
@@ -146,6 +183,6 @@ function outbox(storage,store){
  const read=()=>{const value=JSON.parse(storage.getItem(name)||'[]');if(!Array.isArray(value)||value.some(x=>x.storeId!==store))throw Error('Bộ nhớ công việc cần kiểm tra');return value;};
  return {read,put(command){if(!command.id||!['measurement','exception','close_exception','evidence'].includes(command.kind))throw Error('Lệnh lưu không hợp lệ');const rows=read();if(rows.some(x=>x.id===command.id))return;if(rows.length>=100)throw Error('Bộ nhớ công việc đã đầy; kết nối để đồng bộ trước');storage.setItem(name,JSON.stringify([...rows,{...command,storeId:store}]));},remove(id){storage.setItem(name,JSON.stringify(read().filter(x=>x.id!==id)));}};
 }
-const api={VERSION,POLICY,DAY,states,ms,finite,stable,storeId,collection,SHARED,tableName,rootPath,key,digest,round,split,isBarista,group,interval,decision,measuredDecision,audit,transition,path,caseFlow,taskStart,control,measurement,outbox};
+const api={VERSION,POLICY,DAY,states,ms,finite,stable,storeId,collection,SHARED,tableName,rootPath,key,digest,round,split,isBarista,group,interval,SPEC,lotKey,specCheck,specOutcome,decision,measuredDecision,audit,transition,path,caseFlow,taskStart,control,measurement,outbox};
 if(typeof module==='object'&&module.exports)module.exports=api;root.UnitEngine2=api;
 })(typeof window!=='undefined'?window:globalThis);

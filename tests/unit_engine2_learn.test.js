@@ -60,24 +60,30 @@ function cleanSet(days=30,extraItem){const o=[];for(let i=0;i<days;i++){for(cons
  assert.equal(L.controlAdvice({level:2},clean,base,{typicalUnit:500,daysSinceLastRelease:9,pending:1}).action,'hold','còn việc chưa đối soát');
  console.log('ok Cấp 5: tăng M2/M3, hạ từng bậc chỉ với mẫu sạch đã đo, không dưới sàn, có khoảng cách, không khi còn việc dở');
 }
-// ---- Cấp 4 (bổ sung): nhận hàng sai phải LẶP theo lô; xác suất in ra chỉ sau hiệu chỉnh ngoài mẫu ----
+// ---- Cấp 4 (bổ sung): nhập sai quy cách — CHỈ theo mã cùng loại cùng phiếu nhận (chủ quán 23/10); xác suất in ra chỉ sau hiệu chỉnh ngoài mẫu ----
 {
  const base=L.baseline(cleanSet(30,'d'));
- const o=ob('d','g',31,200,4+120,{fromOpen:true,cap:2000,measured:1700,nWeigh:1});
- const first=L.hypotheses(o,base,{}).posterior.receiving;
- const rep=L.hypotheses(o,base,{openHistory:{d:[{id:'p1',at:day(28),fromOpen:true,frac:0.06,sdFrac:0.01}]}}).posterior.receiving;
- const cleanPrev=L.hypotheses(o,base,{openHistory:{d:[{id:'p1',at:day(28),fromOpen:true,frac:0,sdFrac:0.01}]}}).posterior.receiving;
- const theft=L.hypotheses(o,base,{openHistory:{d:[{id:'p1',at:day(28),fromOpen:true,frac:0.06,sdFrac:0.01},{id:'m1',at:day(29),fromOpen:false,z:4}]}}).posterior.receiving;
- assert(rep>first*2,'tem mở liền trước cũng thiếu cùng tỷ lệ → nhận hàng sai mạnh lên ('+first+' → '+rep+')');
- assert(cleanPrev<first,'tem trước không thiếu → yếu đi');assert(theft<rep/4&&theft<first,'khoảng cân → cân cũng thiếu rõ → nguyên nhân khác (không phải dung tích)');
- assert.equal(L.hypotheses(o,base,{openHistory:{d:[{id:o.id,at:o.at,fromOpen:true,frac:0.06,sdFrac:0.01}]}}).posterior.receiving,first,'không tự lấy chính mình làm bằng chứng');
+ const o=ob('d','g',31,200,4+300,{fromOpen:true,cap:1000,measured:400,nWeigh:1,receiveRefId:'R1',containerId:'c1'});
+ const hy=lots=>L.hypotheses(o,base,{lots:{'d|R1':lots}});
+ const sole=hy({size:1,units:[{id:'c1',finished:true,frac:0.3}]});
+ assert(sole.posterior.spec<1e-6,'mã duy nhất của phiếu nhận → không thể là sai quy cách');assert.notStrictEqual(sole.explainedBy,'spec');assert(sole.residual.qty>250,'thiếu giữ là phần dư (hao hụt)');
+ assert(/mã duy nhất/.test(sole.ranking.find(r=>r.hypothesis==='spec').why));
+ const wait=hy({size:2,units:[{id:'c1',finished:true,frac:0.3},{id:'c2',finished:false,frac:0}]});
+ assert.deepStrictEqual(wait.waiting,['spec']);assert(wait.posterior.spec<1e-6,'mã cùng phiếu chưa dùng xong → CHỜ, không kết luận');assert.notStrictEqual(wait.next.resolves,'spec');
+ const same=hy({size:2,units:[{id:'c1',finished:true,frac:0.3},{id:'c2',finished:true,frac:0.31}]});
+ assert.strictEqual(same.explainedBy,'spec','mã cùng phiếu cũng còn dư cùng tỷ lệ → nghi sai quy cách');assert(same.posterior.spec>0.5);
+ const normal=hy({size:2,units:[{id:'c1',finished:true,frac:0.3},{id:'c2',finished:true,frac:0.02}]});
+ assert(normal.posterior.spec<1e-6,'mã cùng phiếu dùng xong bình thường → không phải sai quy cách');
+ const small=L.hypotheses(ob('d','g',31,200,4+60,{fromOpen:true,cap:1000,measured:400,nWeigh:1,receiveRefId:'R1',containerId:'c1'}),base,{lots:{'d|R1':{size:2,units:[{id:'c2',finished:true,frac:0.06}]}}});
+ assert(small.posterior.spec<1e-6,'thiếu dưới ngưỡng tỷ lệ → không xét sai quy cách');
+ assert(!L.hypotheses(o,base,{}).ranking.some(r=>r.hypothesis==='receiving'),'không còn giả thuyết «nhận hàng sai dung tích» (quán không cân hàng nhập)');
  // Hiệu chỉnh: hậu nghiệm quá tự tin (0.6–0.9 nhưng chỉ 10% đúng) → Brier ngoài mẫu sau hiệu chỉnh đạt; ít nhãn → không in %.
  const pairs=[];for(let i=0;i<80;i++)pairs.push([0.6+0.3*((i*37)%10)/10,i%10===0?1:0]);
  const c=L.fitCalibration(pairs);assert(c.brierRaw>0.3&&c.brier<0.15&&c.calibrated,JSON.stringify(c));assert.equal(c.evaluated,80-P.calibration.minFit,'mỗi nhãn chấm bằng ánh xạ học từ nhãn TRƯỚC nó');
  assert(L.applyCalibration(c,0.8)<0.3);assert.equal(L.fitCalibration(pairs.slice(0,12)).calibrated,false);
- const shown=L.hypotheses(o,base,{calibration:{receiving:c}}).ranking.find(r=>r.hypothesis==='receiving');assert.equal(shown.calibrated,true);assert(Math.abs(shown.probability-Math.round(L.applyCalibration(c,shown.rankScore)*1000)/1000)<1e-9,'in xác suất ĐÃ hiệu chỉnh');
- assert.equal(L.hypotheses(o,base,{calibration:{receiving:{...c,brier:0.3}}}).ranking.find(r=>r.hypothesis==='receiving').probability,null,'Brier ngoài mẫu chưa đạt → không in %');
- console.log('ok Cấp 4: nhận hàng sai cần lặp ở tem trước, bị loại khi khoảng cân→cân cũng thiếu; % chỉ in sau hiệu chỉnh Brier ngoài mẫu');
+ const shown=L.hypotheses(o,base,{calibration:{spec:c},lots:{'d|R1':{size:2,units:[{id:'c2',finished:true,frac:0.31}]}}}).ranking.find(r=>r.hypothesis==='spec');assert.equal(shown.calibrated,true);assert(Math.abs(shown.probability-Math.round(L.applyCalibration(c,shown.rankScore)*1000)/1000)<1e-9,'in xác suất ĐÃ hiệu chỉnh');
+ assert.equal(L.hypotheses(o,base,{calibration:{spec:{...c,brier:0.3}}}).ranking.find(r=>r.hypothesis==='spec').probability,null,'Brier ngoài mẫu chưa đạt → không in %');
+ console.log('ok Cấp 4: sai quy cách chỉ khi mã cùng phiếu nhận cũng thiếu cùng tỷ lệ; mã duy nhất = hao hụt; còn mã chưa dùng xong = chờ; % chỉ in sau hiệu chỉnh Brier ngoài mẫu');
 }
 // ---- Cấp 6: hiệu chuẩn có rào, quay lui, drift, kiểm toán mô hình ----
 {

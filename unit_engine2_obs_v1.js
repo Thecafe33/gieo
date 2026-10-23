@@ -38,7 +38,7 @@ function build(input){
    const p0=pts[i-1],p1=pts[i],used=(alloc[c.id]||[]).filter(a=>a.at>p0.at&&a.at<=p1.at+(p1.kind==='finish'?60000:0)).reduce((s,a)=>s+a.qty,0);
    const nWeigh=(p0.kind==='open'||p0.kind==='finish'?0:1)+(p1.kind==='finish'?0:1);
    obs.push({id:c.id+'~'+i,itemId:c.itemId,unit,containerId:c.id,from:iso(p0.at),at:iso(p1.at),day:new Date(p1.at+7*3600000).toISOString().slice(0,10),
-    used,loss:p1.book-p1.measured,book:p1.book,measured:p1.measured,nWeigh,fromOpen:p0.kind==='open',cap:p0.kind==='open'?p0.measured:null,vesselIds:p1.vesselIds||[],groupKey:groupKey(shifts,p0.at,p1.at),sampling:p1.sampling||'control',
+    used,loss:p1.book-p1.measured,book:p1.book,measured:p1.measured,nWeigh,fromOpen:p0.kind==='open',cap:p0.kind==='open'?p0.measured:null,receiveRefId:c.receiveRefId||null,vesselIds:p1.vesselIds||[],groupKey:groupKey(shifts,p0.at,p1.at),sampling:p1.sampling||'control',
     verified:complete&&used>0,reason:!complete?'tem mở trước đầu kỳ dữ liệu':used>0?null:'không có tiêu hao trong khoảng',source:p1.kind,
     ctx:{fifoDebt:!!p1.fifoDebt,anomalies:(anomBy[c.itemId]||[]).filter(t=>t>p0.at&&t<=p1.at).length,otherOpen:!!c.openedWithOtherOpen,densityProven:Number(item.densityGPerMl)>0},
     minutes:p1.startedAt&&p1.finishedAt?Math.max(0,(ms(p1.finishedAt)-ms(p1.startedAt))/60000):null});

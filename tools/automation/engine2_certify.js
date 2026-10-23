@@ -46,7 +46,7 @@ async function certify(opts={}){
  const covOk=agg.coverage90!=null&&agg.coverage90>=0.85&&agg.coverage90<=0.97;
  lv[3]={name:'Học mức thường',sim:covOk&&pass('me_do_mot_lan')&&pass('mon_it_ban')&&pass('drift_mua')?SIM:FAIL,simWhy:`phủ khoảng 90% = ${(agg.coverage90*100).toFixed(1)}% · bền với mẻ lỗi · món ít bán không «đủ tin cậy» · drift`,
   real:!real?WAIT:trusted>=1&&real.learned.coverage!=null&&real.learned.coverage>=0.8?OK:WAIT,realWhy:!real?'chưa có bản xuất':`${trusted} món «đủ tin cậy» (cần ≥ 20 mốc có thông tin / 14 ngày) · ${real.learned.usable} quan sát dùng được, ${real.learned.weighed} có cân`};
- const idOk=['sai_bi','sai_ty_trong','loi_dong_bo','tieu_hao_khong_khai','nhan_hang_sai_dung_tich','can_lech_he_so','dinh_muc_thieu_giua_ky','dinh_muc_thieu_tu_dau','nhieu_loi_cung_luc'].every(pass);
+ const idOk=['sai_bi','sai_ty_trong','loi_dong_bo','tieu_hao_khong_khai','quy_cach_khac_khai_bao','quy_cach_mot_ma','can_lech_he_so','dinh_muc_thieu_giua_ky','dinh_muc_thieu_tu_dau','nhieu_loi_cung_luc'].every(pass);
  // Giả thuyết đủ nhãn phải hiệu chỉnh đạt; chưa đủ nhãn thì hệ thống tự KHÔNG in % (không tính là đạt hay trượt).
  const brierOk=Object.values(calib).filter(c=>c.n>=P.calibration.minLabels).every(c=>c.calibrated)&&Object.values(calib).some(c=>c.calibrated);
  lv[4]={name:'Suy luận (giả thuyết kiểm được)',sim:idOk&&brierOk?SIM:FAIL,simWhy:`nhận đúng 7 nhóm giả thuyết + tách lỗi kép · Brier ngoài mẫu sau hiệu chỉnh (thô): ${Object.entries(calib).map(([h,c])=>h+' '+(c.brier==null?'—':c.brier.toFixed(2))+' ('+c.brierRaw.toFixed(2)+', '+c.n+' nhãn'+(c.n<P.calibration.minLabels?', chưa đủ → không in %':'')+')').join(', ')||'—'}`,

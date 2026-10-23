@@ -14,10 +14,15 @@ function learn(dump,P=params()){
  const e2=n('duty_digests')+'/_engine2';
  const built=O.build({txs:rowsOf(docs,n('stock_transactions')),containers:rowsOf(docs,n('stock_containers')),items,shifts:rowsOf(docs,n('employee_shifts')),anomalies:rowsOf(docs,n('stock_anomalies')),checkpoints:rowsOf(docs,e2+'/checkpoints'),from:m.range?.from});
  const obs=built.obs.sort((a,b)=>a.at.localeCompare(b.at)),usable=obs.filter(o=>o.verified);
+ // Mã cùng loại cùng phiếu nhận như lúc quan sát xảy ra (chỉ coi «đã dùng xong» khi báo hết TRƯỚC quan sát) — giả thuyết sai quy cách.
+ // Phiếu nhận THẬT: bản xuất có receiving_records (export v2) thì theo đó; bản cũ không có → chỉ nhận mã dạng recv_* (RESET_TON_KHO… là phiếu giả).
+ const recs=rowsOf(docs,n('receiving_records')),realRef=recs.length?new Set(recs.map(r=>r.id)):null,isReal=ref=>realRef?realRef.has(ref):/^recv_/.test(String(ref));
+ const lotRows={};for(const c of rowsOf(docs,n('stock_containers')))if(c.receiveRefId&&isReal(c.receiveRefId)&&!['voided','cancelled'].includes(c.status))(lotRows[c.itemId+'|'+c.receiveRefId]=lotRows[c.itemId+'|'+c.receiveRefId]||[]).push(c);
+ const lotsAt=o=>{const k=o.itemId+'|'+o.receiveRefId,rows=o.receiveRefId?lotRows[k]||[]:[];return rows.length?{[k]:{size:rows.length,units:rows.map(c=>({id:c.id,finished:c.status==='finished'&&!!c.finishedAt&&String(c.finishedAt)<=o.at,frac:Number(c.baseQty)>0?(Number(c.wasteBase)||0)/Number(c.baseQty):0}))}}:{};};
  // Đi tiến theo thời gian: mỗi quan sát chấm bằng baseline học từ quan sát TRƯỚC nó; bất thường bị đánh dấu (không học).
  const flagged=[];let S={};const accounting=usable.filter(o=>o.ctx.fifoDebt);
  for(let i=0;i<usable.length;i++){const o=usable[i],base=L.baseline(usable.slice(0,i),P),s=L.score(o,base,P),acc=L.accumulate(S[o.itemId],s,P);S[o.itemId]=acc.S;
-  if(s.abnormal||acc.alarm){o.flagged=true;const hy=L.hypotheses(o,base,{},P);flagged.push({o,s,accumulated:acc.alarm,hy});}}
+  if(s.abnormal||acc.alarm){o.flagged=true;const hy=L.hypotheses(o,base,{lots:lotsAt(o)},P);flagged.push({o,s,accumulated:acc.alarm,hy});}}
  const base=L.baseline(usable,P),evalM=L.evaluate(usable,P),half=usable.filter(o=>o.at<(usable[Math.floor(usable.length/2)]||{}).at);
  return {store,range:m.range||null,params:P.version,origin:P.origin||P.record?.origin,obs:obs.length,usable:usable.length,skipped:built.skipped,
   unverified:obs.filter(o=>!o.verified).reduce((a,o)=>{a[o.reason]=(a[o.reason]||0)+1;return a;},{}),

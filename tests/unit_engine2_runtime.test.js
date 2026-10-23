@@ -33,14 +33,14 @@ const clone=v=>JSON.parse(JSON.stringify(v));
  assert.equal(m2.labels.tare.n,1);assert(Math.abs(m2.labels.tare.brier-0.09)<1e-9);assert.equal(m2.labels.tare.calibrated,false,'1 nhãn chưa đủ hiệu chuẩn');assert.equal(m2.tareChecks.v.length,1);
  assert.equal(r2.scored,0);
  // Nhận hàng sai dung tích (cân tem nguyên) + cân lệch hệ số (vật mẫu) → nhãn + bằng chứng cho giả thuyết.
- const sid=await s.createTask('weigh_sealed_unit','j','o2',{resolves:'receiving',posterior:0.4}),rid=await s.createTask('reference_weigh','_scale','2026-10-23',{resolves:'scale',posterior:0.3});
- await assert.rejects(s.submitEvidence(sid,{recorded:500},{id:'b'}),/tem NGUYÊN/);
- await s.submitEvidence(sid,{recorded:500,measuredNet:470},{id:'b'});await s.submitEvidence(rid,{known:1000,reading:1000.3},{id:'b'});
+ const sid=await s.createTask('spec_confirm','j','R1',{resolves:'spec',posterior:0.4,recordedQty:500}),rid=await s.createTask('reference_weigh','_scale','2026-10-23',{resolves:'scale',posterior:0.3});
+ await assert.rejects(s.submitEvidence(sid,{},{id:'b'}),/quy cách in trên bao/);
+ await s.submitEvidence(sid,{labelQty:250},{id:'b'});await s.submitEvidence(rid,{known:1000,reading:1000.3},{id:'b'});
  await s.learnDay({force:true});const m3d=f.FS[ROOT+'/models/current'];
- assert.equal(f.FS[ROOT+'/evidence/'+sid].label,1,'thiếu 6% dung tích → nhận hàng sai');assert.equal(f.FS[ROOT+'/evidence/'+rid].label,0,'cân đúng trong 1%');
+ assert.equal(f.FS[ROOT+'/evidence/'+sid].label,1,'nhãn bao 250 ≠ phiếu nhận 500 → sai quy cách xác nhận');assert.equal(f.FS[ROOT+'/evidence/'+rid].label,0,'cân đúng trong 1%');
  assert.equal(m3d.labels.tare.n,1,'nhãn cũ giữ qua ngày');assert(Math.abs(m3d.labels.tare.brier-0.09)<1e-9,'Brier cộng dồn đúng qua nhiều lượt học (không NaN)');assert.deepEqual(m3d.labels.tare.pairs,[[0.7,1]]);assert.equal(m3d.labels.tare.calibrated,false);
- assert.equal(m3d.sealedChecks.j[0].measured,470);assert.equal(m3d.referenceChecks.length,1);assert.equal(m3d.labels.receiving.n,1);assert.equal(m3d.labels.scale.n,1);
- console.log('ok Chẩn đoán qua máy trạng thái → nhãn (Brier) cho giả thuyết; chưa đủ nhãn thì chưa in %; cân tem nguyên / vật mẫu');
+ assert.equal(m3d.specChecks.j[0].label,250);assert.equal(m3d.referenceChecks.length,1);assert.equal(m3d.labels.spec.n,1);assert.equal(m3d.labels.scale.n,1);
+ console.log('ok Chẩn đoán qua máy trạng thái → nhãn (Brier) cho giả thuyết; chưa đủ nhãn thì chưa in %; đối chiếu nhãn bao (không cân hàng nhập) / vật mẫu');
 
  // M3: người khác cân.
  const m3=await s.createTask('weigh_open_units','j','m3~x',{sampling:'m3',blind:true,excludeStaffId:'b'});

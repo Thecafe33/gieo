@@ -75,6 +75,9 @@ async function build(opts){
   if(t.containerId)unitRefs.push(t.containerId);for(const a of t.fifoAllocations||[])if(a&&a.containerId)unitRefs.push(a.containerId);
   const m=/^finish_(.+)_WASTE$/.exec(id);if(m)unitRefs.push(m[1]);else if(t.type==='WASTE'&&t.referenceId&&!t.containerId&&!/^prep_/.test(id))unitRefs.push(t.referenceId);}   // prep_variance_* trỏ mẻ chế biến, không phải tem
  await guard('stock_containers_ref',()=>byIds('stock_containers_ref','stock_containers',unitRefs));
+ // Phiếu nhận của các tem (luật «sai quy cách» chỉ xét phiếu nhận THẬT; mã như RESET_TON_KHO không có phiếu → ghi «absent», không phải thiếu dữ liệu).
+ await guard('receiving_records',async()=>{const prefix=nameFor('receiving_records'),ids=[...new Set(Object.keys(docs).filter(k=>k.startsWith(nameFor('stock_containers')+'/')).map(k=>docs[k].receiveRefId).filter(Boolean))];
+  for(let i=0;i<ids.length;i+=20){const snaps=await Promise.all(ids.slice(i,i+20).map(id=>coll('receiving_records').doc(String(id)).get()));for(const sn of snaps)if(sn.exists)put('receiving_records',prefix,sn);else sec('receiving_records').absent=(sec('receiving_records').absent||0)+1;}});
  status('Đang đọc ca làm việc…');
  await guard('employee_shifts',()=>paged('employee_shifts',nameFor('employee_shifts'),coll('employee_shifts').where('checkedInAt','>=',new Date(Date.parse(fromIso)-14*3600000).toISOString()).where('checkedInAt','<',toIso).orderBy('checkedInAt')));
  status('Đang đọc dữ liệu Engine 2…');

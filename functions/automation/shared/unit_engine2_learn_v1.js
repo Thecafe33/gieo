@@ -14,8 +14,8 @@
 'use strict';
 const VERSION=1,Z90=1.6449,LN2=Math.log(2);
 // Kiểm được bằng phép đo: sai bì, tỷ trọng, định mức, tiêu hao không khai, đồng bộ, nhận hàng sai dung tích (D1), cân lệch hệ số.
-const HYPOTHESES=['tare','density','recipe','unrecorded','sync','receiving','scale'];
-const TESTS={tare:'tare_check',density:'density_proof',recipe:'recipe_portion_weigh',unrecorded:'scan_open_units',sync:'resync_recount',receiving:'weigh_sealed_unit',scale:'reference_weigh',physical:'handover_weigh_m2'};
+const HYPOTHESES=['tare','density','recipe','unrecorded','sync','spec','scale'];
+const TESTS={tare:'tare_check',density:'density_proof',recipe:'recipe_portion_weigh',unrecorded:'scan_open_units',sync:'resync_recount',spec:'spec_confirm',scale:'reference_weigh',physical:'handover_weigh_m2'};
 // Tham số mặc định = TIÊN NGHIỆM khai báo (chưa hiệu chuẩn). Bản hiệu chuẩn mô phỏng / thật thay thế qua calibrate().
 const DEFAULT_PARAMS={
  version:'prior-1',origin:'declared_prior',
@@ -27,9 +27,9 @@ const DEFAULT_PARAMS={
  groupPrior:{g:{mu:0.015,tau:0.01,sigma:0.02},ml:{mu:0.012,tau:0.01,sigma:0.02},cai:{mu:0.01,tau:0.02,sigma:0.05},other:{mu:0.015,tau:0.02,sigma:0.04}},minGroupItems:3,
  baseline:{minTrusted:20,minDays:14,minLearning:3,tauFloor:0.004,sigmaFloor:0.006,minObsUsed:{g:50,ml:50,cai:5,other:10},kCap:3},
  release:{validPoints:5,activeDays:3,minUsedRatio:2,daysBetween:7},
- priors:{tare:0.08,density:0.04,recipe:0.08,unrecorded:0.06,sync:0.04,receiving:0.04,scale:0.03,physical:0.12,noise:0.51},
- tareSigma:{g:12,ml:12,cai:0,other:5},densitySigma:{unproven:0.05,proven:0.01},receivingSigma:0.06,receivingFirst:0.2,scaleSigma:0.03,
- minutes:{tare_check:2,density_proof:4,recipe_portion_weigh:5,scan_open_units:2,resync_recount:3,weigh_sealed_unit:2,reference_weigh:1,handover_weigh_m2:3,m3_blind:4},
+ priors:{tare:0.08,density:0.04,recipe:0.08,unrecorded:0.06,sync:0.04,spec:0.04,scale:0.03,physical:0.12,noise:0.51},
+ tareSigma:{g:12,ml:12,cai:0,other:5},densitySigma:{unproven:0.05,proven:0.01},specMinFrac:0.15,specTol:0.1,scaleSigma:0.03,
+ minutes:{tare_check:2,density_proof:4,recipe_portion_weigh:5,scan_open_units:2,resync_recount:3,spec_confirm:2,reference_weigh:1,handover_weigh_m2:3,m3_blind:4},
  calibration:{minLabels:30,maxBrier:0.2,minFit:10,ridge:1,keep:300},
  bounds:{'baseline.kCap':[2,5],kEscalate:[1.8,4],kClean:[0.8,2.5],coldStartFactor:[1,2.5],measUnsureFactor:[1,4],'cusum.h':[2.5,8],'release.validPoints':[3,12],'release.activeDays':[2,10]},
  liveStep:0.05
@@ -125,19 +125,17 @@ function hypotheses(o,base,evidence={},params=DEFAULT_PARAMS){
  else if(groups.size>=2&&res.length>=3){const beta=median(res.map(r=>r.rate)),same=res.filter(r=>Math.sign(r.rate)===Math.sign(beta)).length/res.length;L.recipe=same>=0.8?npdf(ex,beta*o.used,Math.sqrt(sig*sig+Math.pow(0.5*Math.abs(beta)*o.used,2))):npdf(ex,0,sig)*0.2;why.recipe=groups.size+' nhóm pha chế cùng chiều lệch';}
  else{L.recipe=1e-6/cap;why.recipe='chưa đủ nhóm để tách định mức';}
  // Mở tem / tiêu hao không khai; lỗi đồng bộ — chỉ khi có dấu hiệu trong khoảng.
- // Nhận hàng sai dung tích (D1): chỉ khoảng BẮT ĐẦU từ lúc mở tem; thiếu ≈ dung tích ghi − dung tích thật (hằng theo tem).
- const sealed=evidence.sealedChecks?.[o.itemId]||[];
- if(o.fromOpen&&Number(o.cap)>0){if(sealed.length){const d=median(sealed.map(c=>(c.recorded-c.measured)/c.recorded));L.receiving=npdf(ex,d*o.cap,Math.sqrt(sig*sig+Math.pow(0.01*o.cap,2)));why.receiving='cân tem nguyên '+sealed.length+' lần';}
-  else{L.receiving=0.5*npdf(Math.abs(ex),params.receivingSigma*o.cap*0.6,Math.max(sig,0.3*params.receivingSigma*o.cap));
-   // Sai dung tích là lỗi THEO LÔ → khoảng mở tem LIỀN TRƯỚC của cùng món phải thiếu gần cùng tỷ lệ. Tỷ số khả năng của tem trước
-   // (thiếu f·dung tích ↔ không thiếu); chưa có tem trước → chỉ một lần thấy, hạ khả năng (receivingFirst) chờ lặp lại.
-   // Khoảng KHÔNG từ lúc mở tem (cân → cân) của cùng món không bị ảnh hưởng bởi sai dung tích: thiếu rõ ở đó → nguyên nhân khác.
-   const hist=(evidence.openHistory?.[o.itemId]||[]).filter(h=>h.id!==o.id&&(!h.at||!o.at||h.at<o.at));
-   const prevOpen=hist.filter(h=>h.fromOpen!==false&&Number.isFinite(h.frac)).slice(-1)[0],mid=hist.filter(h=>h.fromOpen===false&&Number.isFinite(h.z)).slice(-3);
-   if(prevOpen){const f=ex/o.cap,sd=Math.max(0.01,Number(prevOpen.sdFrac)||0.02),lr=npdf(prevOpen.frac,f,sd)/Math.max(1e-300,npdf(prevOpen.frac,0,sd));L.receiving*=Math.min(10,Math.max(0.02,lr));why.receiving='tem mở liền trước '+(prevOpen.frac>0.5*f?'cũng thiếu':'không thiếu')+' — chưa cân tem nguyên';}
-   else{L.receiving*=params.receivingFirst??0.2;why.receiving='lần đầu thấy thiếu ở khoảng mở tem — chờ lặp ở tem sau / cân tem nguyên';}
-   for(const h of mid)if(h.z>0)L.receiving*=Math.max(0.01,Math.exp(-h.z*h.z/2));}}
- else{L.receiving=1e-12;why.receiving='khoảng không bắt đầu từ lúc mở tem';}
+ // Nhập sai quy cách (chủ quán 23/10). Quán KHÔNG cân hàng nhập → không bao giờ kết luận từ một mã:
+ // chỉ khi MÃ CÙNG LOẠI CÙNG PHIẾU NHẬN đã dùng xong và cũng còn dư gần cùng tỷ lệ. Mã duy nhất của phiếu → không thể là sai quy cách
+ // (tính là hao hụt). Còn mã cùng phiếu chưa dùng xong → CHỜ (không kết luận). evidence.lots[itemId|receiveRefId] = {size, units:[{id,finished,frac}]}.
+ const lot=o.receiveRefId?evidence.lots?.[o.itemId+'|'+o.receiveRefId]:null,fSpec=Number(o.cap)>0?ex/Number(o.cap):0;let specWait=false;
+ if(!o.fromOpen||!(Number(o.cap)>0)){L.spec=1e-12;why.spec='khoảng không bắt đầu từ lúc mở tem';}
+ else if(fSpec<params.specMinFrac){L.spec=1e-12;why.spec='thiếu dưới '+Math.round(params.specMinFrac*100)+'% dung tích — không xét sai quy cách';}
+ else if(!lot||lot.size<=1){L.spec=1e-12;why.spec='mã duy nhất của phiếu nhận → không thể kết luận sai quy cách; tính là hao hụt';}
+ else{const others=(lot.units||[]).filter(u=>u.id!==o.containerId),done=others.filter(u=>u.finished),m=done.find(u=>u.frac>=params.specMinFrac&&Math.abs(u.frac-fSpec)<=params.specTol);
+  if(m){L.spec=npdf(ex,m.frac*o.cap,Math.sqrt(sig*sig+Math.pow(params.specTol*o.cap/2,2)));why.spec='mã cùng phiếu nhận cũng còn dư ~'+Math.round(m.frac*100)+'% khi báo hết → nghi nhập sai quy cách';}
+  else if(done.length){L.spec=1e-12;why.spec='mã cùng phiếu nhận dùng xong bình thường → không phải sai quy cách';}
+  else{L.spec=1e-12;specWait=true;why.spec='chờ mã cùng phiếu nhận dùng xong mới kết luận';}}
  // Cân lệch hệ số: thiếu ảo tỷ lệ với lượng đo (mọi đơn vị có cân); vật mẫu biết trước khối lượng xác minh.
  const refs=evidence.referenceChecks||[];
  if(o.nWeigh>0&&Number(o.measured)>0){if(refs.length){const gn=median(refs.map(c=>(c.reading-c.known)/c.known));L.scale=npdf(ex,-gn*o.measured,Math.sqrt(sig*sig+Math.pow(0.005*o.measured,2)));why.scale='cân vật mẫu '+refs.length+' lần';}
@@ -157,7 +155,7 @@ function hypotheses(o,base,evidence={},params=DEFAULT_PARAMS){
  const list=HYPOTHESES.map(h=>({h,p:post[h],calibrated:isCal(h),shown:evidence.calibration?.[h]?applyCalibration(evidence.calibration[h],post[h]):post[h],why:why[h]})).sort((a,b)=>b.p-a.p);
  const explained=Math.max(0,...HYPOTHESES.map(h=>post[h]>0.5?(h==='tare'&&checks.length?-median(checks.map(c=>c.measured-c.recorded))*n:ex*post[h]):0));
  const top=list[0],explainedBy=top&&top.p>=(params.minTestPosterior??0.05)?top.h:null;
- return {score:s,explainedBy,ranking:list.map(x=>({hypothesis:x.h,probability:x.calibrated?Math.round(x.shown*1000)/1000:null,rankScore:x.p,calibrated:x.calibrated,why:x.why})),
+ return {score:s,explainedBy,waiting:specWait?['spec']:[],ranking:list.map(x=>({hypothesis:x.h,probability:x.calibrated?Math.round(x.shown*1000)/1000:null,rankScore:x.p,calibrated:x.calibrated,why:x.why})),
   residual:{qty:Math.max(0,ex-explained),sd:sig,note:'Phần dư chưa giải thích bởi giả thuyết kiểm được — không quy nguyên nhân, không có xác suất.'},posterior:post,next:nextMeasurement(post,o,params)};
 }
 /* Chọn phép đo tiếp: tách được giả thuyết nào × giá trị đang rủi ro ÷ phút công. */

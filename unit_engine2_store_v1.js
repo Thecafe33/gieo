@@ -27,9 +27,9 @@ function create(opts){
  function observation(c,start,end,extra){
   const used=Math.max(0,E.round(start.measured-end.book));
   return {schemaVersion:1,id:E.key(c.id,end.kind,end.at),storeId:store,itemId:c.itemId,unit:c.unit||'',containerId:c.id,from:start.at,fromPoint:start.id,at:end.at,day:new Date(E.ms(end.at)+7*3600000).toISOString().slice(0,10),
-   used,loss:E.round(end.book-end.measured),book:end.book,measured:end.measured,nWeigh:(start.weighed?1:0)+(end.weighed?1:0),fromOpen:start.id==='open',cap:start.id==='open'?start.measured:null,verified:used>0,scored:false,...extra,createdAt:iso()};
+   used,loss:E.round(end.book-end.measured),book:end.book,measured:end.measured,nWeigh:(start.weighed?1:0)+(end.weighed?1:0),fromOpen:start.id==='open',cap:start.id==='open'?start.measured:null,receiveRefId:c.receiveRefId||null,verified:used>0,scored:false,...extra,createdAt:iso()};
  }
- const DIAG=['tare_check','density_proof','recipe_portion_weigh','scan_open_units','weigh_sealed_unit','reference_weigh'];
+ const DIAG=['tare_check','density_proof','recipe_portion_weigh','scan_open_units','spec_confirm','reference_weigh'];
  async function fence(t,guard){if(!guard)return;const s=await t.get(guard.ref);if(!s.exists||s.data().leaseToken!==guard.token||s.data().revision!==guard.revision)throw error('Lease hoặc phiên bản công việc đã thay đổi');}
  async function config(){const s=await base.get();return s.exists?s.data():{};}
  async function enqueue(kind,id,resumeCursor=false){
@@ -68,11 +68,21 @@ function create(opts){
   const shifts=await coll('employee_shifts').where('checkedInAt','>=',new Date(E.ms(range.from)-14*3600000).toISOString()).where('checkedInAt','<=',range.to).limit(501).get();
   if(shifts.docs.length>500)throw error('Khoảng ca vượt giới hạn một lượt; chưa tự chốt trách nhiệm');
   const shiftRows=shifts.docs.map(data),valuation=await prices(source.itemId,source.businessDate,{...source,id},item);
-  const input={store,sourceId:id,source,container:c,shifts:shiftRows,checkpoint:cp,valuation};
-  const result=E.decision(input),groupKey=(result.allocations||[]).map(a=>a.employeeId).sort().join('+');
+  // Luật sai quy cách (chủ quán 23/10): mã cùng loại cùng phiếu nhận — đọc khi báo hết còn dư đáng kể (≥ SPEC.minFrac), 1 truy vấn có giới hạn.
+  const leftover=-Number(source.qty)||0,needLot=c.receiveRefId&&source.type==='WASTE'&&!source.voided&&Number(c.baseQty)>0;
+  // Tổng hụt suốt đời = dư lúc báo hết + hụt đã ghi ở các lượt cân Engine 2 của chính mã (hồ sơ measurement còn hiệu lực).
+  const measuredShort=async cid=>(await sub('cases').where('containerId','==',cid).limit(100).get()).docs.map(data).filter(k=>k.originKind==='measurement'&&k.status!=='voided').reduce((a,k)=>a+(Number(k.quantity)||0),0);
+  const ownShort=needLot?leftover+await measuredShort(c.id):leftover;
+  const lotNeeded=needLot&&ownShort/Number(c.baseQty)>=E.SPEC.minFrac,siblings=lotNeeded?await Promise.all((await coll('stock_containers').where('receiveRefId','==',c.receiveRefId).limit(51).get()).docs.map(data).filter(x=>x.itemId===c.itemId&&x.id!==c.id).map(async x=>({id:x.id,itemId:x.itemId,receiveRefId:x.receiveRefId,status:x.status,baseQty:x.baseQty,wasteBase:x.wasteBase,shortfall:x.status==='finished'?(Number(x.wasteBase)||0)+await measuredShort(x.id):null}))):[];
+  const input={store,sourceId:id,source,container:c,shifts:shiftRows,checkpoint:cp,valuation,siblings};
+  // Phiếu nhận THẬT (receiving_records) + kết quả đối chiếu nhãn bao (nếu đã làm) — chỉ đọc khi cần xét.
+  let receipt,rejected=false;if(lotNeeded){const [rs,es]=await Promise.all([coll('receiving_records').doc(c.receiveRefId).get(),sub('evidence').doc(E.key('spec_confirm',c.receiveRefId,c.itemId)).get()]);receipt=rs.exists;
+   const r=es.exists?es.data().result||{}:null;rejected=!!(r&&Number(r.recordedQty)>0&&Math.abs(Number(r.labelQty)-Number(r.recordedQty))/Number(r.recordedQty)<=0.02);}
+  const specCheck=needLot?E.specCheck(c,ownShort,siblings,now(),lotNeeded?{receipt,rejected}:{}):null;
+  const result=E.specOutcome(E.decision(input),specCheck),groupKey=(result.allocations||[]).map(a=>a.employeeId).sort().join('+');
   if(['assigned_by_manager','manual'].includes(source.responsibility?.status)&&result.status!=='voided')Object.assign(result,{decisionMode:'manual',basis:'manual_source',manualSource:source.responsibility,allocations:[],pending:{qty:result.quantity,value:result.amount},explanation:'Giữ nguyên quyết định tay trong chứng từ nguồn. Engine 2 không phân bổ lại hoặc tạo khoản thu thứ hai.'});
   const faults=E.audit(result);if(faults.length)throw error('Tự kiểm toán: '+faults.join(', '));
-  const fingerprint=E.stable(input),controlRef=sub('controls').doc(source.itemId),taskRef=sub('tasks').doc(E.key('baseline',id));
+  const fingerprint=E.stable(specCheck&&specCheck.action!=='decide'||specCheck?.reason==='wait_timeout'?{input,spec:specCheck.action+':'+specCheck.reason}:input),controlRef=sub('controls').doc(source.itemId),taskRef=sub('tasks').doc(E.key('baseline',id));
   return fs.runTransaction(async t=>{
    await fence(t,guard);
    const refs=[base,sourceRef,containerRef,itemRef,cpRef,caseRef,controlRef,taskRef,...shifts.docs.map(s=>s.ref),...(valuation.priceId?[coll('price_history').doc(valuation.priceId)]:[])];
@@ -83,13 +93,13 @@ function create(opts){
    if(valuation.priceId){const p=snaps.at(-1);if(!p.exists||Number(p.data().price)!==valuation.price||p.data().effectiveFrom!==valuation.effectiveFrom)throw error('Giá vốn vừa đổi — tính lại');}
    const old=oldSn.exists?oldSn.data():null;if(old?.decisionMode==='manual'&&result.status!=='voided')return false;
    // Trạng thái hồ sơ đi qua bảng DAC_TA 3.2; hồ sơ đã gộp (superseded) / đang xem xét (review) không bị ghi đè.
-   let flow;try{flow=E.caseFlow(old?.status,result.status==='voided'?'voided':'decided');}catch(e){return false;}if(flow.hold)return false;
+   let flow;try{flow=E.caseFlow(old?.status,result.status==='voided'?'voided':result.status==='checking'?'checking':'decided');}catch(e){return false;}if(flow.hold)return false;
    const mode=active.mode==='active'&&active.protocolVersion===1&&active.fleetConfirmed===true?'active':'shadow';
    if(old?.fingerprint===fingerprint&&old.mode===mode)return false;
    const revision=(old?.revision||0)+1,at=iso(),decisionId=caseRef.id+'_'+revision;
    const d={...result,status:flow.status,statusEvents:flow.events,originKind:'finish',originId:id,containerId:c.id,itemName:c.itemName||item.name||source.itemId,storeId:store,itemId:source.itemId,id:caseRef.id,revision,decisionId,mode,fingerprint,updatedAt:at,createdAt:old?.createdAt||at};
    t.set(caseRef,d);t.set(sub('decisions').doc(decisionId),{...d,previousDecisionId:old?.decisionId||null});
-   if(d.mode==='active'&&d.status!=='voided'){
+   if(d.mode==='active'&&d.status!=='voided'&&!['spec_mismatch','waiting_sibling'].includes(d.basis)){
     const oldCtl=ctlSn.exists?ctlSn.data():{level:0,manualFloor:0};
     const control=E.control(oldCtl,'PHYSICAL_LOSS');
     t.set(controlRef,{...control,storeId:store,itemId:source.itemId,itemName:d.itemName,unit:d.unit,revision:(oldCtl.revision||0)+1,requirements:d.control.requirements,updatedAt:at,reasonCaseIds:[...new Set([...(oldCtl.reasonCaseIds||[]),caseRef.id])].slice(-20)});
@@ -103,7 +113,14 @@ function create(opts){
    t.set(sub('audits').doc(decisionId),{decisionId,storeId:store,at,issues:faults,quantity:d.quantity||0,sourceId:id,policyVersion:E.POLICY});
    // Quan sát báo hết (cả đối chiếu thử — dữ liệu học không đổi kho / trách nhiệm). Nguồn huỷ → quan sát không dùng để học.
    const ob=observation(c,startPoint(c,cp),{kind:'finish',at:c.finishedAt,book:Number(c.wasteBase)||0,measured:0,weighed:false},{sampling:'finish',groupKey,vesselIds:[],controlled:!!(ctlSn.exists&&ctlSn.data().level>=2),ctx:{fifoDebt:false,densityProven:Number(item.densityGPerMl)>0},decisionId,mode});
-   if(d.status==='voided')Object.assign(ob,{verified:false,reason:'Nguồn hao hụt đã huỷ'});t.set(sub('obs').doc(ob.id),ob);return d;
+   if(d.status==='voided')Object.assign(ob,{verified:false,reason:'Nguồn hao hụt đã huỷ'});t.set(sub('obs').doc(ob.id),ob);
+   // Nghi sai quy cách → việc đối chiếu nhãn bao với phiếu nhận (không cân) cho pha chế đang ca.
+   if(d.basis==='spec_mismatch'&&d.mode==='active')t.set(sub('tasks').doc(E.key('spec_confirm',c.receiveRefId,c.itemId)),{id:E.key('spec_confirm',c.receiveRefId,c.itemId),storeId:store,itemId:c.itemId,itemName:d.itemName,kind:'spec_confirm',status:'queued',pending:true,assignment:'current_barista_group',receiveRefId:c.receiveRefId,recordedQty:Number(c.baseQty),resolves:'spec',caseId:caseRef.id,reason:'Đối chiếu quy cách in trên bao với phiếu nhận — nghi nhập sai quy cách',createdAt:at,updatedAt:at,revision:1},{merge:true});
+   return d;
+  }).then(async d=>{
+   // Mã này vừa báo hết → hồ sơ khác của CÙNG phiếu nhận đang chờ thì tính lại ngay (không đợi lượt ngày).
+   if(c.receiveRefId&&!(specCheck&&specCheck.action==='wait')){const lot=E.lotKey(c),w=await sub('cases').where('waitLot','==',lot).limit(20).get().catch(()=>null);for(const x of (w?w.docs:[])){const o=x.data();if(o.status==='checking'&&o.originId&&o.originId!==id)await finish(o.originId).catch(()=>{});}}
+   return d;
   });
  }
  async function handover(id,guard){
@@ -261,20 +278,24 @@ function create(opts){
  }
  // Kết quả việc chẩn đoán = NHÃN cho giả thuyết (worker học chấm). Không đổi kho; đề xuất đổi bì / định mức đi đường riêng.
  async function submitEvidence(taskId,result,staff){
-  if(!staff?.id)throw Error('Cần người thực hiện');const ref=sub('tasks').doc(taskId);
+  if(!staff?.id)throw Error('Cần người thực hiện');const ref=sub('tasks').doc(taskId);let lot=null;
   return fs.runTransaction(async t=>{
-   const ts=await t.get(ref);if(!ts.exists)throw Error('Không có việc này');const task=ts.data();if(!DIAG.includes(task.kind))throw Error('Việc này không phải việc chẩn đoán');
+   const ts=await t.get(ref);if(!ts.exists)throw Error('Không có việc này');const task=ts.data();if(task.kind==='spec_confirm')lot=task.itemId+'|'+task.receiveRefId;if(!DIAG.includes(task.kind))throw Error('Việc này không phải việc chẩn đoán');
    if(['done','cancelled','superseded'].includes(task.status))return false;
    const r={...result};
    if(task.kind==='tare_check'){if(!r.vesselId||!r.variantId||!E.finite(r.measuredTareG)||Number(r.measuredTareG)<0)throw Error('Cân bì dụng cụ rỗng và chọn đúng dụng cụ');const v=await t.get(coll('prep_vessels').doc(r.vesselId));const vr=v.exists?(v.data().variants||[]).find(x=>x.id===r.variantId):null;if(!vr)throw Error('Dụng cụ đã thay đổi');r.recordedTareG=Number(vr.tareG);r.measuredTareG=Number(r.measuredTareG);}
    else if(task.kind==='recipe_portion_weigh'){if(!(Number(r.bookG)>0)||!(Number(r.measuredG)>0))throw Error('Nhập định lượng theo công thức và số cân thực của một phần');r.bookG=Number(r.bookG);r.measuredG=Number(r.measuredG);}
    else if(task.kind==='density_proof'){if(!(Number(r.netG)>0)||!(Number(r.volumeMl)>0))throw Error('Nhập khối lượng ròng và thể tích mẫu');r.density=Number(r.netG)/Number(r.volumeMl);}
    else if(task.kind==='scan_open_units'){if(!Array.isArray(r.present)||!Array.isArray(r.unregistered))throw Error('Đánh dấu mã có trên tay và ghi mã đang mở chưa khai');}
-   else if(task.kind==='weigh_sealed_unit'){if(!(Number(r.recorded)>0)||!(Number(r.measuredNet)>0))throw Error('Cân một tem NGUYÊN chưa mở: nhập dung tích ghi trên tem và lượng ròng cân được');r.recorded=Number(r.recorded);r.measuredNet=Number(r.measuredNet);}
+   else if(task.kind==='spec_confirm'){if(!(Number(r.labelQty)>0))throw Error('Nhập quy cách in trên bao (đơn vị nền)');r.recordedQty=Number(task.recordedQty)||null;}
    else if(task.kind==='reference_weigh'){if(!(Number(r.known)>0)||!(Number(r.reading)>=0))throw Error('Đặt vật mẫu biết trước khối lượng lên cân: nhập khối lượng chuẩn và số cân hiện');r.known=Number(r.known);r.reading=Number(r.reading);}
    const at=iso(),start=E.taskStart(task.status);
    t.set(sub('evidence').doc(taskId),{taskId,storeId:store,kind:task.kind,itemId:task.itemId,resolves:task.resolves||null,posterior:task.posterior??null,obsId:task.obsId||null,result:r,byEmployeeId:staff.id,at,labeled:false});
    t.set(ref,{status:E.transition('task',start.status,'VALID_RESULT'),statusEvents:[...start.events,'VALID_RESULT'],pending:false,resultRef:sub('evidence').doc(taskId).path,updatedAt:at},{merge:true});return true;
+  }).then(async ok=>{
+   // Đối chiếu nhãn bao xong → tính lại các hồ sơ «nghi sai quy cách» của phiếu đó (nhãn = khai báo → chuyển thành hao hụt).
+   if(ok&&lot){const w=await sub('cases').where('basis','==','spec_mismatch').limit(50).get().catch(()=>null);for(const x of (w?w.docs:[])){const o=x.data();if(o.spec?.lot===lot&&o.originId)await finish(o.originId).catch(()=>{});}}
+   return ok;
   });
  }
  /* [Cấp 3–6] Lượt HỌC hằng ngày (worker gọi; chỉ chạy một lần / ngày VN trừ khi force). Đọc có giới hạn:
@@ -288,6 +309,8 @@ function create(opts){
   const day=new Date(now()+7*3600000).toISOString().slice(0,10),modelRef=sub('models').doc('current'),paramsRef=sub('models').doc('params');
   const [mSn,pSn]=await Promise.all([modelRef.get(),paramsRef.get()]),prev=mSn.exists?mSn.data():{};
   if(prev.day===day&&!opts.force)return {skipped:'done_today'};
+  // Hồ sơ đang CHỜ mã cùng phiếu nhận: tính lại mỗi ngày (mã kia đã dùng xong / quá hạn chờ → kết luận). Giới hạn 50.
+  const waiting=[];try{for(const x of (await sub('cases').where('status','==','checking').limit(50).get()).docs){const o=x.data();if(o.basis==='waiting_sibling'&&o.originId){await finish(o.originId).catch(()=>{});waiting.push(o.originId);}}}catch(e){}
   const P=L.withDefaults(pSn.exists&&pSn.data().params?pSn.data().params:(opts.params||L.DEFAULT_PARAMS));
   const since=new Date(now()-90*86400000).toISOString();
   const [oSn,eSn,cSn,vSn]=await Promise.all([sub('obs').where('at','>=',since).orderBy('at').limit(3001).get(),sub('evidence').where('labeled','==',false).limit(200).get(),sub('controls').limit(501).get(),sub('model_versions').orderBy('createdAt').limit(200).get()]);
@@ -295,44 +318,43 @@ function create(opts){
   const obs=oSn.docs.map(data),controls=Object.fromEntries(cSn.docs.map(d=>[d.id,data(d)])),at=iso(),writes=[];
   // 1) Nhãn từ kết quả chẩn đoán (quy tắc cố định, kiểm được).
   const labels=JSON.parse(JSON.stringify(prev.labels||{})),tareChecks=JSON.parse(JSON.stringify(prev.tareChecks||{})),recipeAudits=JSON.parse(JSON.stringify(prev.recipeAudits||{}));
-  const sealedChecks=JSON.parse(JSON.stringify(prev.sealedChecks||{})),referenceChecks=JSON.parse(JSON.stringify(prev.referenceChecks||[]));
+  const specChecks=JSON.parse(JSON.stringify(prev.specChecks||{})),referenceChecks=JSON.parse(JSON.stringify(prev.referenceChecks||[]));
   for(const ev of eSn.docs.map(data)){
    const r=ev.result||{};let y=null;
    if(ev.kind==='tare_check'){y=Math.abs(r.measuredTareG-r.recordedTareG)>2*(P.measSigma.g||3)?1:0;(tareChecks[r.vesselId]=tareChecks[r.vesselId]||[]).push({recorded:r.recordedTareG,measured:r.measuredTareG});tareChecks[r.vesselId]=tareChecks[r.vesselId].slice(-20);}
    else if(ev.kind==='recipe_portion_weigh'){y=Math.abs(r.measuredG-r.bookG)/r.bookG>0.05?1:0;(recipeAudits[ev.itemId]=recipeAudits[ev.itemId]||[]).push({book:r.bookG,measured:r.measuredG});recipeAudits[ev.itemId]=recipeAudits[ev.itemId].slice(-20);}
    else if(ev.kind==='density_proof'){const it=await coll('inventory_items').doc(ev.itemId).get(),old=Number(it.exists&&it.data().densityGPerMl);y=old>0?(Math.abs(r.density-old)/old>0.03?1:0):1;}
    else if(ev.kind==='scan_open_units')y=(r.unregistered||[]).length>0?1:0;
-   else if(ev.kind==='weigh_sealed_unit'){y=Math.abs(r.recorded-r.measuredNet)/r.recorded>0.02?1:0;(sealedChecks[ev.itemId]=sealedChecks[ev.itemId]||[]).push({recorded:r.recorded,measured:r.measuredNet});sealedChecks[ev.itemId]=sealedChecks[ev.itemId].slice(-20);}
+   else if(ev.kind==='spec_confirm'){y=r.recordedQty>0&&Math.abs(r.labelQty-r.recordedQty)/r.recordedQty>0.02?1:0;(specChecks[ev.itemId]=specChecks[ev.itemId]||[]).push({recorded:r.recordedQty,label:r.labelQty});specChecks[ev.itemId]=specChecks[ev.itemId].slice(-20);}
    else if(ev.kind==='reference_weigh'){y=Math.abs(r.reading-r.known)/r.known>0.01?1:0;referenceChecks.push({known:r.known,reading:r.reading});referenceChecks.splice(0,Math.max(0,referenceChecks.length-20));}
    if(y!==null&&ev.resolves){const l=labels[ev.resolves]=labels[ev.resolves]||{n:0,brierSum:0,pairs:[]},p=Number(ev.posterior)||0;if(!Number.isFinite(l.brierSum))l.brierSum=(Number(l.brier)||0)*(l.n||0);l.n=(l.n||0)+1;l.brierSum+=Math.pow(p-y,2);l.pairs=[...(l.pairs||[]),[p,y]].slice(-(P.calibration.keep||300));}
    writes.push([sub('evidence').doc(ev.taskId),{labeled:true,label:y,labeledAt:at}]);
   }
   // Hiệu chỉnh xác suất từng giả thuyết theo nhãn của quán (Brier ngoài mẫu) — chỉ giả thuyết đạt mới in %.
   const calMaps=Object.fromEntries(Object.entries(labels).map(([h,l])=>[h,L.fitCalibration(l.pairs||[],P)]));
-  const evidence={tareChecks,recipeAudits,sealedChecks,referenceChecks,calibration:calMaps,labelsCount:Object.fromEntries(Object.entries(labels).map(([h,l])=>[h,l.n])),brier:Object.fromEntries(Object.entries(labels).map(([h,l])=>[h,l.brierSum/Math.max(1,l.n)]))};
+  const evidence={tareChecks,recipeAudits,specChecks,referenceChecks,calibration:calMaps,labelsCount:Object.fromEntries(Object.entries(labels).map(([h,l])=>[h,l.n])),brier:Object.fromEntries(Object.entries(labels).map(([h,l])=>[h,l.brierSum/Math.max(1,l.n)]))};
   // 2) Chấm quan sát mới theo thời gian, baseline học từ các quan sát đã chấm trước đó (mẫu bất thường không học).
   const scored=obs.filter(o=>o.scored),fresh=obs.filter(o=>!o.scored),cusum={...(prev.cusum||{})},created=[];
   let base=L.baseline(scored,P);
   const residuals={};for(const o of scored)if(o.verified&&o.used>0&&o.nWeigh>0&&!o.flagged){const b=L.predict(base,o.itemId,o.unit);(residuals[o.itemId]=residuals[o.itemId]||[]).push({groupKey:o.groupKey,rate:(o.loss-b.estimate*o.used)/o.used});}
   evidence.itemResiduals=residuals;
-  // Khoảng mở tem + khoảng cân → cân (cả mẫu đã báo bất thường) — bằng chứng lặp lại / loại trừ cho giả thuyết nhận hàng sai dung tích.
-  const openHistory={},pushOpen=(o,sc)=>{if(sc&&o.used>0&&(o.fromOpen?Number(o.cap)>0:o.nWeigh>=2))(openHistory[o.itemId]=openHistory[o.itemId]||[]).push({id:o.id,at:o.at,fromOpen:!!o.fromOpen,frac:o.fromOpen?sc.excess/o.cap:null,sdFrac:o.fromOpen?sc.sdLoss/o.cap:null,z:sc.z});};
-  for(const o of scored)if(o.verified)pushOpen(o,L.score(o,base,P));
-  evidence.openHistory=openHistory;
+  // Mã cùng loại cùng phiếu nhận (giả thuyết sai quy cách) — đọc khi cần, 1 truy vấn có giới hạn / phiếu.
+  evidence.lots={};const lotFor=async(itemId,ref,selfId)=>{const k=itemId+'|'+ref;if(evidence.lots[k])return;let rows=[];try{if((await coll('receiving_records').doc(ref).get()).exists)rows=(await coll('stock_containers').where('receiveRefId','==',ref).limit(51).get()).docs.map(data).filter(x=>x.itemId===itemId&&!['voided','cancelled'].includes(x.status));}catch(e){}
+   const lossOf=id=>obs.filter(q=>q.containerId===id&&q.verified!==false).reduce((a,q)=>a+Math.max(0,Number(q.loss)||0),0);
+   evidence.lots[k]={size:rows.length,units:rows.map(x=>({id:x.id,finished:x.status==='finished',frac:Number(x.baseQty)>0?Math.max(Number(x.wasteBase)||0,lossOf(x.id))/Number(x.baseQty):0,finishedAt:x.finishedAt||null}))};};
   for(const o of fresh){
    const upd={scored:true,scoredAt:at};
    if(o.verified&&o.used>0){
     const sc=L.score(o,base,P),acc=o.nWeigh>0?L.accumulate(cusum[o.itemId],sc,P):{S:cusum[o.itemId]||0,alarm:false};cusum[o.itemId]=acc.S;
     Object.assign(upd,{score:{z:sc.z,excess:sc.excess,expected:sc.expected,threshold:sc.threshold,state:sc.state},flagged:sc.abnormal||acc.alarm,accumulated:acc.alarm});
-    pushOpen(o,sc);
     if(upd.flagged&&!(o.ctx&&o.ctx.fifoDebt)){
+     if(o.fromOpen&&o.receiveRefId)await lotFor(o.itemId,o.receiveRefId,o.containerId);
      const hy=L.hypotheses(o,base,evidence,P);Object.assign(upd,{explainedBy:hy.explainedBy,residualQty:hy.residual.qty,ranking:hy.ranking.slice(0,3)});
      const test=hy.next&&hy.next.test,common={obsId:o.id,resolves:hy.next&&hy.next.resolves,posterior:hy.next?hy.posterior[hy.next.resolves]:null,reason:'Chẩn đoán: '+(hy.ranking[0]?.why||'')};
      if(test==='tare_check'&&o.vesselIds?.[0])created.push(createTask('tare_check',o.itemId,o.id,{...common,vesselId:o.vesselIds[0],reason:'Kiểm bì dụng cụ — giả thuyết sai bì'}));
      else if(test==='density_proof')created.push(createTask('density_proof',o.itemId,o.id,{...common,reason:'Đo lại tỷ trọng — giả thuyết sai tỷ trọng'}));
      else if(test==='recipe_portion_weigh')created.push(createTask('recipe_portion_weigh',o.itemId,o.id,{...common,reason:'Cân một phần theo định mức — giả thuyết định mức sai'}));
      else if(test==='scan_open_units')created.push(createTask('scan_open_units',o.itemId,o.id,{...common,reason:'Rà mã đang mở / chưa khai — giả thuyết tiêu hao không khai'}));
-     else if(test==='weigh_sealed_unit')created.push(createTask('weigh_sealed_unit',o.itemId,o.id,{...common,reason:'Cân một tem nguyên chưa mở — giả thuyết nhận hàng sai dung tích'}));
      else if(test==='reference_weigh')created.push(createTask('reference_weigh','_scale',day,{...common,reason:'Cân vật mẫu biết trước khối lượng — giả thuyết cân lệch hệ số'}));
      else if(test==='resync_recount')created.push(createTask('weigh_open_units',o.itemId,'resync~'+o.id,{...common,sampling:'resync',reason:'Đếm/cân lại để đồng bộ sổ — giả thuyết lỗi đồng bộ'}));
      // «Tái diễn» chỉ tính bất thường xảy ra SAU lúc món được nâng mức (không đếm hai lần chính sự kiện đã gây nâng mức).
@@ -377,7 +399,7 @@ function create(opts){
   const model={day,storeId:store,updatedAt:at,params:{version:P.version,origin:P.origin||null},items,groups:base.groups,excluded:base.excluded,outliers:L.outlierItems(base),drift:L.drift(allScored,L.baseline(allScored.slice(0,Math.floor(allScored.length/2)),P),P),
    labels:Object.fromEntries(Object.entries(labels).map(([h,l])=>{const c=calMaps[h];return [h,{n:l.n,brierSum:l.brierSum,brier:l.brierSum/Math.max(1,l.n),pairs:l.pairs||[],calBrier:c.brier,a:c.a,b:c.b,calibrated:l.n>=P.calibration.minLabels&&c.calibrated}];})),
    coverage90:evalM.coverage90,obs:{total:obs.length,scored:allScored.length,flagged:allScored.filter(o=>o.flagged).length,fifoDebt:allScored.filter(o=>o.ctx?.fifoDebt).length,minutesKnown:allScored.filter(o=>o.minutes!=null).length},
-   cusum,lastM0,tareChecks,recipeAudits,sealedChecks,referenceChecks,released,calibration:calib,rollback,modelIssues:issues,lastCalibratedDay:calib?day:lastCal,autoRelease:cfg.autoRelease!==false&&/^calibrated/.test(String(P.origin||''))};
+   cusum,lastM0,tareChecks,recipeAudits,specChecks,referenceChecks,released,calibration:calib,rollback,modelIssues:issues,lastCalibratedDay:calib?day:lastCal,autoRelease:cfg.autoRelease!==false&&/^calibrated/.test(String(P.origin||''))};
   for(const [ref,val] of writes)await ref.set(val,{merge:true});
   await modelRef.set(model);
   const tasks=(await Promise.all(created)).filter(Boolean);
