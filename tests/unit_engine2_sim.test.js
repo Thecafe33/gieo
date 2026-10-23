@@ -1,6 +1,6 @@
 'use strict';
 // Lộ trình Engine 2 — mô phỏng có sự thật biết trước + chứng nhận cấp (tools/automation/engine2_sim.js, engine2_certify.js).
-// Hạt giống 301 KHÔNG dùng để hiệu chuẩn (1–6), nghiệm thu (101–110) hay chứng nhận mặc định (201–203).
+// Hạt giống 301–303 KHÔNG dùng để hiệu chuẩn (1–6), nghiệm thu (101–110) hay chứng nhận mặc định (201–203).
 const assert=require('node:assert');
 const L=require('../unit_engine2_learn_v1');
 const S=require('../tools/automation/engine2_sim');
@@ -24,7 +24,7 @@ const RAW=require('../unit_engine2_params_v1'),P=L.withDefaults(RAW);
  console.log('ok Mô phỏng tất định theo hạt giống; sự thật biết trước');
 
  // Chứng nhận trên hạt giống chưa dùng: năng lực đủ 6 cấp, không kịch bản nào trượt; không có dữ liệu thật → không bao giờ báo đạt thật.
- const c=await certify({seeds:[301]});
+ const c=await certify({seeds:[301,302,303]});   // 3 hạt giống như công cụ chứng nhận — 1 hạt giống (~225 bất thường) quá ít mẫu để chấm ngưỡng bỏ sót 3%
  assert.deepEqual(c.failedScenarios,[],c.failedScenarios.join('\n'));
  assert.equal(c.simLevel,6,report(c));
  assert.equal(c.realLevel,0);for(let i=1;i<=6;i++)assert.equal(c.levels[i].real,'CHƯA ĐỦ DỮ LIỆU THẬT');
