@@ -244,8 +244,13 @@ function check(snap){
  const SR=snap.subRecons||{};
  for(const r of snap.subReviews||[]){
   if(r.mode!=='active'||!r.ok)continue;const x=SR[r.reconId];if(!x)continue;
-  const R=Number(x.remainder)||0,cov=(x.substitutions||[]).reduce((a,y)=>a+(Number(y.observedShortQty)||0)/(Number(y.ratio)>0?Number(y.ratio):1),0);
-  if(!(R>0)||Math.abs(cov-R)>Math.min(0.1*R,30)+EPS)add('SUB_CONFIRMED_OUT_OF_TOL','sub_reviews/'+r.id,{need:R,covered:Math.round(cov*100)/100});
+  // Tính lại độc lập: phần loại thay gắn với PHIẾU NÀY = min(đã phân bổ, thiếu thật); thiếu thừa = thiếu thật − tổng đã phân bổ cho mọi
+  // phiếu cùng ngày dùng loại đó (một loại thiếu 200 g chia cho nhiều phiếu — không so cả lượng thiếu chung với từng phiếu).
+  const R=Number(x.remainder)||0,rt=y=>Number(y.ratio)>0?Number(y.ratio):1,gv=y=>{const e=Number(y.expectedQty),sh=Number(y.observedShortQty)||0;return Number.isFinite(e)&&e>=0?Math.min(e,sh):sh;};
+  const kk=y=>(y.kind||'prep')+':'+(y.id||y.prepId),pool={};
+  for(const o of Object.values(SR))if(o.businessDate===x.businessDate&&o.status!=='dismissed')for(const y of o.substitutions||[])pool[kk(y)]=(pool[kk(y)]||0)+(Number(y.expectedQty)||0);
+  const cov=(x.substitutions||[]).reduce((a,y)=>a+gv(y)/rt(y),0),more=(x.substitutions||[]).reduce((a,y)=>a+Math.max(0,(Number(y.observedShortQty)||0)-Math.max(pool[kk(y)]||0,gv(y)))/rt(y),0),tol=Math.min(0.1*R,30);
+  if(!(R>0)||R-cov>tol+EPS||more>tol+EPS)add('SUB_CONFIRMED_OUT_OF_TOL','sub_reviews/'+r.id,{need:R,covered:Math.round(cov*100)/100,unexplainedShort:Math.round(more*100)/100});
  }
  // --- thông báo lệch đếm tự xử lý (23/10) — tính lại độc lập từ vụ lệch gốc ---
  const AR=snap.alertReviewCases||{};

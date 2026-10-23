@@ -12,10 +12,14 @@ const SCHEMA='gieo-e2-export',VERSION=2,MAX_DAYS=62;
 const SHARED=['price_history','prep_vessels','employees','recipes','recipe_history','prep_recipe_history','special_days'];
 const physName=(kind,store)=>kind+'_gieogieo'+(store==='gg01'||SHARED.includes(kind)?'':'__'+store);
 // Theo ngày nghiệp vụ (businessDate) — sổ gốc và hồ sơ liên quan family NL có tem (+ BTP cho các family sau).
-const BY_DAY=['stock_transactions','prep_transactions','prep_batches','stock_containers','stock_anomalies','daily_closings','daily_openings','shift_segments','duty_cases'];
+const BY_DAY=['stock_transactions','prep_transactions','prep_batches','stock_containers','stock_anomalies','daily_closings','daily_openings','shift_segments','duty_cases','prep_shortage_recons'];
 // Danh mục / lịch sử cần để định giá, quy đổi đơn vị và kiểm bì (đọc hết — ít dòng).
 const CATALOG=['inventory_items','prep_items','price_history','prep_vessels','refill_rules'];
-const E2_SUBS=['cases','decisions','audits','checkpoints','unit_checkpoints','controls','tasks','measurements','measurement_locks','devices','requests','operations','obs','evidence','models','model_versions'];
+const E2_SUBS=['cases','decisions','audits','checkpoints','unit_checkpoints','controls','tasks','measurements','measurement_locks','devices','requests','operations','obs','evidence','models','model_versions',
+ // Hồ sơ tự xử lý (23/10): duyệt lệch BTP, theo dõi dồn, pha nhầm, thông báo, dùng thay — bộ kiểm toán có luật cho từng nhóm.
+ 'prep_reviews','prep_track','mixups','mixup_watch','alert_reviews','sub_reviews'];
+// Phạm vi tính năng của bản xuất: manifest.scope — bản xuất thiếu một mục cần có thì complete=false (không «báo đủ» khi chưa chứa hồ sơ).
+const FEATURES={learning:['obs','evidence','models','model_versions'],auto_review:['prep_reviews','prep_track','alert_reviews','sub_reviews','mixups','mixup_watch'],sources:['prep_shortage_recons']};
 const DAY=86400000;
 const stable=v=>v===undefined?'null':v===null||typeof v!=='object'?JSON.stringify(v):Array.isArray(v)?'['+v.map(stable).join(',')+']':'{'+Object.keys(v).sort().map(k=>JSON.stringify(k)+':'+stable(v[k])).join(',')+'}';
 // Timestamp Firestore → chuỗi ISO (mất phần dưới mili-giây, ghi trong manifest). Giữ nguyên mọi trường khác.
@@ -46,7 +50,8 @@ async function build(opts){
  const fromIso=new Date(Date.parse(from+'T00:00:00+07:00')).toISOString(),toIso=new Date(Date.parse(to+'T00:00:00+07:00')+DAY).toISOString();
  function sec(name){return sections[name]||(sections[name]={count:0,truncated:false,keys:[]});}
  function put(name,prefix,snap){const key=prefix+'/'+snap.id;if(!(key in docs)){docs[key]=plain(snap.data());const s=sec(name);s.count++;s.keys.push(key);}}
- async function guard(name,fn){try{await fn();}catch(e){errors.push({phan:name,loi:String(e&&e.message||e)});sec(name).error=String(e&&e.message||e);}}
+  const attempted=new Set();   // phần đã THỬ đọc (bảng rỗng vẫn tính là đã đọc; lỗi thì có trong errors)
+ async function guard(name,fn){attempted.add(name);try{await fn();}catch(e){errors.push({phan:name,loi:String(e&&e.message||e)});sec(name).error=String(e&&e.message||e);}}
  // Đọc theo trang bằng con trỏ snapshot; chạm limit → đánh dấu chưa đủ, không cắt âm thầm.
  async function paged(name,prefix,query){
   let last=null,n=0;
@@ -84,6 +89,10 @@ async function build(opts){
  const e2=coll('duty_digests').doc('_engine2'),e2Prefix=nameFor('duty_digests')+'/_engine2';
  await guard('engine2_config',async()=>{const s=await e2.get();if(s.exists){docs[e2Prefix]=plain(s.data());sec('engine2_config').count=1;sec('engine2_config').keys.push(e2Prefix);}});
  for(const n of E2_SUBS)await guard('engine2_'+n,()=>paged('engine2_'+n,e2Prefix+'/'+n,e2.collection(n)));
+ // Thông báo mà hồ sơ tự xử lý trỏ tới (không đọc cả bảng thông báo): duyệt lệch → fyiAlertId; duyệt thông báo → alertId; dùng thay → prep_shortage_<phiếu>.
+ await guard('alerts_ref',()=>byIds('alerts_ref','alerts',Object.keys(docs).flatMap(k=>{const d=docs[k];
+  if(k.startsWith(e2Prefix+'/prep_reviews/'))return [d.fyiAlertId];if(k.startsWith(e2Prefix+'/alert_reviews/'))return [d.alertId];
+  if(k.startsWith(e2Prefix+'/sub_reviews/'))return [d.reconId?'prep_shortage_'+d.reconId:null];return [];}).filter(Boolean)));
  status('Đang chụp tem đang mở (RT)…');
  const rt={},rtName=rtNameFor('active_units');let rtAt=null;
  await guard('active_units',async()=>{const v=await opts.rtRef('active_units').once('value');rt[rtName]=plain(v.val()||{});rtAt=new Date(now()).toISOString();sec('active_units').count=Object.keys(rt[rtName]).length;});
@@ -106,7 +115,9 @@ async function build(opts){
  const manifest={
   schema:SCHEMA,version:VERSION,store,range:{from,to,days:days.length},timezone:'Asia/Ho_Chi_Minh (UTC+7)',
   startedAt,finishedAt,rtCapturedAt:rtAt,serverOffsetMs,meta:opts.meta||{},
-  complete:!errors.length&&!Object.values(sections).some(s=>s.truncated),
+  // complete: không lỗi, không cắt bớt VÀ đủ mọi phần phạm vi tính năng (phần không đọc được = không «đủ»).
+  complete:!errors.length&&!Object.values(sections).some(s=>s.truncated)&&Object.values(FEATURES).flat().every(n=>attempted.has('engine2_'+n)||attempted.has(n)),
+  scope:{version:2,features:FEATURES,sections:[...attempted].sort()},
   sections:Object.fromEntries(Object.entries(sections).map(([k,s])=>[k,{count:s.count,truncated:s.truncated,...(s.missing?{missing:s.missing}:{}),...(s.error?{error:s.error}:{})}])),
   errors,inflight,hashes,sha256:total,docCount:Object.keys(docs).length,
   notes:[
@@ -119,6 +130,6 @@ async function build(opts){
  };
  return {manifest,docs,rt};
 }
-const api={SCHEMA,VERSION,MAX_DAYS,SHARED,BY_DAY,CATALOG,E2_SUBS,physName,build};
+const api={SCHEMA,VERSION,MAX_DAYS,SHARED,BY_DAY,CATALOG,E2_SUBS,FEATURES,physName,build};
 if(typeof module==='object'&&module.exports)module.exports=api;root.UnitEngine2Export=api;
 })(typeof window!=='undefined'?window:globalThis);

@@ -181,12 +181,26 @@ const ueKey=(...p)=>p.join('_').replace(/[^\w\-]/g,'_').slice(0,180);   // = P.k
 // BTP âm — dùng loại thay thế (chủ quán 23/10, docs/KE_HOACH_BTP_AM.md): hệ thống tự xác nhận khi loại thay thế THIẾU cuối
 // ngày khớp lượng cần bù trong ±10%, tối đa 30 (nhân viên còn nếm thử). Lượng thiếu của loại thay thế quy về đơn vị món bị âm.
 const SUB_TOL={frac:0.1,cap:30};
-function subCheck(r){
+// ctx.allocated {kind:id → tổng lượng đã phân bổ cho MỌI phiếu cùng ngày dùng loại này}: một loại thay thiếu 200 g có thể chia cho nhiều
+// phiếu — mỗi phiếu chỉ được tính phần ĐÃ PHÂN BỔ cho nó (expectedQty, POS phân theo phần còn lại), không phải cả lượng thiếu chung.
+//   · thiếu phủ: Σ min(đã phân bổ, thiếu thật)/tỉ lệ so với lượng cần bù;  · thừa: phần thiếu của loại thay mà KHÔNG phiếu nào giải thích.
+// Không có ctx / phiếu cũ không có expectedQty → như cũ (so thẳng tổng thiếu với lượng cần bù).
+function subCheck(r,ctx){
  const subs=(r&&r.substitutions)||[],R=Number(r&&r.remainder)||0;
  if(!subs.length||!(R>0))return {ok:false,reason:'no_substitution',need:R,covered:0,tol:0};
- const covered=round(subs.reduce((a,x)=>a+(Number(x.observedShortQty)||0)/(Number(x.ratio)>0?Number(x.ratio):1),0));
- const tol=round(Math.min(SUB_TOL.frac*R,SUB_TOL.cap)),diff=round(covered-R);
- return {ok:Math.abs(diff)<=tol,reason:Math.abs(diff)<=tol?'match':diff<0?'substitute_short_less':'substitute_short_more',need:round(R),covered,diff,tol};
+ let covered=0,more=0;
+ for(const x of subs){
+  const ratio=Number(x.ratio)>0?Number(x.ratio):1,short=Number(x.observedShortQty)||0,exp=Number(x.expectedQty);
+  const give=Number.isFinite(exp)&&exp>=0?Math.min(exp,short):short;
+  covered+=give/ratio;
+  const key=(x.kind||'prep')+':'+(x.id||x.prepId),alloc=ctx&&ctx.allocated?Number(ctx.allocated[key]):NaN;
+  more+=Math.max(0,short-(Number.isFinite(alloc)?Math.max(alloc,give):give))/ratio;
+ }
+ covered=round(covered);more=round(more);
+ const tol=round(Math.min(SUB_TOL.frac*R,SUB_TOL.cap)),under=round(R-covered);
+ if(under>tol)return {ok:false,reason:'substitute_short_less',need:round(R),covered,diff:round(-under),tol};
+ if(more>tol)return {ok:false,reason:'substitute_short_more',need:round(R),covered,diff:more,tol};
+ return {ok:true,reason:'match',need:round(R),covered,diff:round(covered-R),tol};
 }
 // Chênh giá vốn khi xác nhận bù — chép công thức _btpAmApplySubstitution (quanlygieo).
 function subCogsDelta(r){

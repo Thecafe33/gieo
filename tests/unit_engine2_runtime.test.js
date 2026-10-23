@@ -57,6 +57,10 @@ const clone=v=>JSON.parse(JSON.stringify(v));
   for(const it of ['k','k2','k3'])for(let i=0;i<12;i++)g.FS[ROOT+'/obs/'+it+'~'+i]=ob(it,i,{sampling:it==='k2'?'control':'random_m0'});
   g.FS[ROOT+'/controls/k2']={level:2,manualFloor:0,itemId:'k2',revision:1,lastEscalationAt:day(0,1),updatedAt:day(0,1)};
   g.FS[ROOT+'/models/params']={params:{...L.DEFAULT_PARAMS,version:'sim-test',origin:'calibrated_simulation'}};
+  // Chưa có bằng chứng ACK của thiết bị POS với phiên bản yêu cầu hiện hành → KHÔNG hạ mức (không giả định đã ACK).
+  {const h0=makeFake({fs:clone(g.FS)});h0.FS[ROOT+'/devices/pos1'].controlRevision=(h0.FS[ROOT].revision||0)-1;delete h0.FS[ROOT+'/models/current'];
+   const r0=await create({storeId:'gg01',fstore:h0.fstore,now:()=>Date.parse('2026-10-23T03:00:00Z')}).learnDay({force:true});assert.deepEqual(r0.released,[],'thiết bị chưa ACK phiên bản hiện hành → giữ mức');}
+  g.FS[ROOT+'/devices/pos1'].controlRevision=g.FS[ROOT].revision||0;   // POS nhận phiên bản yêu cầu hiện hành
   const s2=create({storeId:'gg01',fstore:g.fstore,now:()=>Date.parse('2026-10-23T03:00:00Z')});
   const r=await s2.learnDay({force:true});
   assert.deepEqual(r.released,['k2'],'mẫu sạch đủ tiêu chí → hạ một bậc');assert.equal(g.FS[ROOT+'/controls/k2'].level,1);

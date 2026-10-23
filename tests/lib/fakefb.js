@@ -131,7 +131,7 @@ function makeFake(opts = {}) {
   };
   const docSnap = (c, id) => { const d = FS[c + '/' + id]; return { id, exists: d !== undefined, data: () => clone(d), get: f => (d ? clone(d[f]) : undefined), ref: docRef(c, id) }; };
   const fsFail = () => { if (FS_CTL.failNext) { const e = FS_CTL.failNext; FS_CTL.failNext = null; throw e; } };
-  const FS_CTL = { failNext: null };
+  const FS_CTL = { failNext: null, failOn: null };   // failOn(op, 'bảng/mã') → Error để gây lỗi đúng một lượt ghi
   // Phiên bản từng doc — để runTransaction phát hiện xung đột như Firestore thật (đọc xong mà doc đã bị ghi → chạy lại).
   const VER = {};
   const bump = k => { VER[k] = (VER[k] || 0) + 1; };
@@ -149,9 +149,9 @@ function makeFake(opts = {}) {
     return {
       id, path: c + '/' + id, _c: c,
       get: async () => { fsFail(); return docSnap(c, id); },
-      set: async (x, o) => { fsFail(); log.push(['fs.set', c + '/' + id]); w.set(c, id, x, o); },
-      update: async x => { fsFail(); log.push(['fs.update', c + '/' + id]); w.update(c, id, x); },
-      delete: async () => { fsFail(); log.push(['fs.delete', c + '/' + id]); w.delete(c, id); },
+      set: async (x, o) => { fsFail(); if (FS_CTL.failOn) { const e = FS_CTL.failOn('set', c + '/' + id); if (e) throw e; } log.push(['fs.set', c + '/' + id]); w.set(c, id, x, o); },
+      update: async x => { fsFail(); if (FS_CTL.failOn) { const e = FS_CTL.failOn('update', c + '/' + id); if (e) throw e; } log.push(['fs.update', c + '/' + id]); w.update(c, id, x); },
+      delete: async () => { fsFail(); if (FS_CTL.failOn) { const e = FS_CTL.failOn('delete', c + '/' + id); if (e) throw e; } log.push(['fs.delete', c + '/' + id]); w.delete(c, id); },
       collection: sub => coll(c + '/' + id + '/' + sub),
       onSnapshot: (next) => { next(docSnap(c, id)); return () => {}; }
     };
@@ -194,11 +194,12 @@ function makeFake(opts = {}) {
       fsFail();
       for (let attempt = 0; attempt < 6; attempt++) {
       const ops = [], reads = {};
+      let wrote = false;   // Firestore thật: mọi lượt ĐỌC trong transaction phải đứng TRƯỚC mọi lượt GHI
       const t = {
-        get: async r => { if (r._c) reads[r._c + '/' + r.id] = VER[r._c + '/' + r.id] || 0; return r._c ? docSnap(r._c, r.id) : r.get(); },
-        set: (r, x, o) => { strictFs(x, r.path); ops.push(() => { log.push(['fs.tx.set', r.path]); w.set(r._c, r.id, x, o); }); return t; },
-        update: (r, x) => { strictFs(x, r.path); ops.push(() => { log.push(['fs.tx.update', r.path]); w.update(r._c, r.id, x); }); return t; },
-        delete: r => { ops.push(() => { log.push(['fs.tx.delete', r.path]); w.delete(r._c, r.id); }); return t; }
+        get: async r => { if (wrote) throw new Error('Firestore transactions require all reads to be executed before all writes.'); if (r._c) reads[r._c + '/' + r.id] = VER[r._c + '/' + r.id] || 0; return r._c ? docSnap(r._c, r.id) : r.get(); },
+        set: (r, x, o) => { wrote = true; strictFs(x, r.path); ops.push(() => { log.push(['fs.tx.set', r.path]); w.set(r._c, r.id, x, o); }); return t; },
+        update: (r, x) => { wrote = true; strictFs(x, r.path); ops.push(() => { log.push(['fs.tx.update', r.path]); w.update(r._c, r.id, x); }); return t; },
+        delete: r => { wrote = true; ops.push(() => { log.push(['fs.tx.delete', r.path]); w.delete(r._c, r.id); }); return t; }
       };
       const res = await fn(t);
       if (Object.keys(reads).some(k => (VER[k] || 0) !== reads[k])) continue;   // xung đột: có ai ghi doc đã đọc → chạy lại callback

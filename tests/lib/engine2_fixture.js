@@ -13,7 +13,7 @@ async function cleanState(){
  const f=makeFake({rt:{active_units_gieogieo:{j:{n:{code:'NEXT0001',unitBase:280,capacity:500,openedAt:Date.parse('2026-10-21T03:00:00Z')}}}},fs:{
   [ROOT]:{enabled:true,mode:'active',protocolVersion:1,fleetConfirmed:true,fromDate:'2026-10-01',controlledItemIds:['j'],settingsRevision:3},
   [ROOT+'/controls/j']:{level:2,itemId:'j',itemName:'Thạch',revision:1,manualFloor:0,storeId:'gg01'},
-  [ROOT+'/devices/pos1']:{storeId:'gg01',protocolVersion:1,settingsRevision:3,controlRevision:1},
+  [ROOT+'/devices/pos1']:{storeId:'gg01',protocolVersion:1,settingsRevision:3,controlRevision:1,ackedAt:'2026-10-22T00:00:00.000Z'},
   'stock_transactions_gieogieo/finish_u_WASTE':{itemId:'jelly',referenceId:'u',type:'WASTE',qty:-300,createdAt:end,businessDate:'2026-10-22',note:'Báo hết'},
   'stock_containers_gieogieo/u':{itemId:'jelly',itemName:'Thạch hồng',unit:'g',baseQty:500,openedAt:start,finishedAt:end,status:'finished',wasteBase:300,wasteBasis:'unit_engine'},
   'inventory_items_gieogieo/jelly':{name:'Thạch hồng',unit:'g',costPerUnit:100},
@@ -38,6 +38,7 @@ async function cleanState(){
  }
  await weigh('first',300,250,'2026-10-22T03:00:00.000Z');
  current=Date.parse('2026-10-22T06:00:00Z');await weigh('second',230,200,'2026-10-22T05:00:00.000Z');
+ f.FS[ROOT+'/devices/pos1'].controlRevision=f.FS[ROOT].revision||0;   // thiết bị POS mẫu đã ACK phiên bản yêu cầu hiện hành
  return f;
 }
 module.exports={cleanState,ROOT};
