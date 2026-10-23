@@ -140,6 +140,11 @@ Mỗi bước chỉ bắt đầu khi bước trước đạt cửa. Bước có 
 
 **B6 — Cấp 6: tự hiệu chuẩn có rào + báo cáo chứng nhận.** Tham số được phép (sai số đo, baseline, lịch lấy mẫu, ngưỡng thao tác trong sàn/trần) → offline → shadow → tự nhận khi tốt hơn; tự quay về bản đáng tin khi kém/drift. Báo cáo chứng nhận theo mục 5. Cửa: toàn bộ lỗi cài (B0 + drift + baseline học hao hụt) bị phát hiện/khôi phục; báo cáo được chủ quán xem.
 
+**Tự xử lý thông báo «Lệch đếm bán thành phẩm» / «Lệch lớn» (23/10 — loại nhiều nhất còn lại: ước ~99 thông báo / 20 ngày ở gg01):**
+- Cùng nguyên tắc chủ quán đã chốt cho lệch NL khi nấu mẻ, tính so với lượng ĐÃ DÙNG trong khoảng (như `dutyBase` của Unit Engine). Chờ vụ lệch (`duty_cases`) chốt (`auto` / `closed_pool` / `no_checkpoint` / `manual`), rồi: ≤ max(15, 5%) hoặc ≤ 25% → hệ thống **đóng** thông báo (`resolvedBy:'engine2_auto'`, `autoReview` ghi ai chịu theo vụ lệch); > 25% và mọi «Lệch lớn» (`duty_case`) → **thông báo để biết** (`fyi:true`). Không đổi vụ lệch / phân bổ. Lõi `E.countAlertClass`, store `alertReview` / `alertsForCase` / `sweepAlerts`; worker: thông báo mới, vụ lệch đổi trạng thái, quét hằng ngày.
+- Trên dữ liệu thật (thử luật, không áp dụng): 51 thông báo sẽ được đóng, 48 thành thông báo để biết.
+- Giao diện: quanlygieo Hộp thư có nhóm «Để biết — hệ thống đã tự xử lý», dòng căn cứ đầu thẻ, không tính vào cảnh báo chưa xem / sức khoẻ quán; manage «Chờ xử lý Gieo» tách «Để biết» (chỉ nút Đã xem, không tính là việc). Kiểm toán `ALERT_AUTO_CLOSED_LARGE`, `ALERT_REVIEW_BEFORE_FINAL`. Test `tests/unit_engine2_alert_review.test.js`, `tests/thong_bao_de_biet.test.js`, e2e `tools/ql_giao_dien/e2e_manage_duyet_gieo.js`.
+
 **Thiết kế (chưa code) — «Pha nhầm trong nhóm dễ nhầm» cho family BTP (chủ quán 23/10):**
 - Mất mát chính là KHÁCH nhận sai món (đánh giá xấu, không quay lại), không phải lượng cốt. Từ số kho KHÔNG biết được bill nào → không bao giờ chỉ đích danh bill / người.
 - Ràng buộc chủ quán: bán hàng là ưu tiên — KHÔNG thêm thao tác lúc bán (bỏ xác nhận từng ly); BTP chỉ có tem, không mã quét; KHÔNG in cốt lên tem ly (lộ công thức); KHÔNG đo mất khách (tăng lượt đọc).

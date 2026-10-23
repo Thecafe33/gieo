@@ -24,6 +24,8 @@ const CODES={
  PREP_REVIEW_SOURCE_MISMATCH:['violation','Hồ sơ tự duyệt lệch NL khác dòng sổ gốc (số lệch / người chịu trách nhiệm) hoặc dòng sổ không mang dấu tự duyệt'],
  PREP_REVIEW_BEFORE_START:['violation','Tự duyệt dòng phát sinh trước ngày áp dụng (tồn quá khứ phải giữ nguyên)'],
  PREP_REVIEW_FYI_MISSING:['violation','Lệch > 25% đã tự duyệt nhưng không có thông báo để biết cho quản lý'],
+ ALERT_AUTO_CLOSED_LARGE:['violation','Hệ thống tự ĐÓNG thông báo lệch đếm mà lệch > 25% lượng dùng (phải giữ làm thông báo để biết)'],
+ ALERT_REVIEW_BEFORE_FINAL:['violation','Tự xử lý thông báo lệch đếm khi vụ lệch còn chờ cân lại / tranh chấp'],
  MIXUP_CROSS_GROUP:['violation','Sự cố pha nhầm ghép hai món KHÁC nhóm dễ nhầm (hoặc món không thuộc nhóm nào)'],
  MIXUP_NAMED_PERSON:['violation','Sự cố pha nhầm chỉ đích danh bill / người — từ số kho không xác định được'],
  MIXUP_CONCLUDED_WITHOUT_REWEIGH:['violation','Kết luận «nghi pha sai món» / «nhập nhầm ô» mà không có kết quả cân lại'],
@@ -237,6 +239,15 @@ function check(snap){
   if(band!==r.band)add('PREP_REVIEW_WRONG_BAND',ref,{expected:band,recorded:r.band});
   if(r.mode==='active'&&['large','very_large'].includes(band)&&(!r.fyiAlertId||!PA[r.fyiAlertId]||PA[r.fyiAlertId].fyi!==true))add('PREP_REVIEW_FYI_MISSING',ref,{alert:r.fyiAlertId||null});
  }
+ // --- thông báo lệch đếm tự xử lý (23/10) — tính lại độc lập từ vụ lệch gốc ---
+ const AR=snap.alertReviewCases||{};
+ for(const r of snap.alertReviews||[]){
+  if(r.mode!=='active')continue;const ref='alert_reviews/'+r.id,c=AR[r.caseId];if(!c)continue;
+  if(!['auto','closed_pool','no_checkpoint','manual'].includes(r.caseStatus))add('ALERT_REVIEW_BEFORE_FINAL',ref,{caseStatus:r.caseStatus});
+  const u=Number(c.usageTotal)||0,b=Number(c.book)||0,base=u>0?u:b>0?b:1,abs={g:15,ml:15,kg:0.015,l:0.015}[String(c.unit||'').toLowerCase()]||0,mag=Math.abs(Number(c.variance)||0);
+  const large=mag>Math.max(abs,0.05*base)&&mag/base>0.25;
+  if(!r.fyi&&(large||r.type==='duty_case'))add('ALERT_AUTO_CLOSED_LARGE',ref,{ratio:Math.round(mag/base*1000)/10,type:r.type});
+ }
  // --- pha nhầm trong nhóm dễ nhầm (chủ quán 23/10) — kiểm lại độc lập từ danh mục + vụ lệch gốc ---
  const MC=snap.mixupCatalog||{},MD=snap.mixupCases||{},gk=v=>String(v||'').trim().replace(/\s+/g,' ').toLowerCase();
  for(const x of snap.mixups||[]){
@@ -286,6 +297,8 @@ async function collect({fstore,storeId:sid,from,to,limit=500,collection}){
  await byIds(sub('requests'),[...cases.map(c=>(c.originKind==='measurement'?'measurement':'finish')+'~'+encodeURIComponent(c.originId||c.sourceId)),...Object.keys(sources).filter(id=>/^finish_/.test(id)).map(id=>'finish~'+encodeURIComponent(id))],requests);
  const starts=cases.map(c=>ms(c.interval?.from)).filter(Number.isFinite),ends=cases.map(c=>ms(c.interval?.to)).filter(Number.isFinite);
  const shifts=starts.length?await rows('shifts',coll('employee_shifts').where('checkedInAt','>=',new Date(Math.min(...starts)-14*3600000).toISOString()).where('checkedInAt','<=',new Date(Math.max(...ends)).toISOString())):[];
+ const alertReviews=await rows('alert_reviews',sub('alert_reviews').where('businessDate','>=',from).where('businessDate','<=',to)),alertReviewCases={};
+ await byIds(coll('duty_cases'),alertReviews.map(r=>r.caseId),alertReviewCases);
  const mixups=await rows('mixups',sub('mixups').where('day','>=',from).where('day','<=',to)),mixupCatalog={},mixupCases={};
  for(const x of mixups){for(const [id,kind] of [[x.surplusId,x.surplusKind],[x.shortageId,x.shortageKind]])if(id)await byIds(coll(kind==='item'?'inventory_items':'prep_items'),[id],mixupCatalog);
   await byIds(coll('duty_cases'),[...(x.caseIds?.surplus||[]),...(x.caseIds?.shortage||[])],mixupCases);}
@@ -293,7 +306,7 @@ async function collect({fstore,storeId:sid,from,to,limit=500,collection}){
  await byIds(coll('stock_transactions'),prepReviews.map(r=>r.txId),prepSources);await byIds(coll('alerts'),prepReviews.map(r=>r.fyiAlertId),prepAlerts);
  const controls=(await rows('controls',sub('controls'))).map(k=>({...k,itemId:k.itemId||k.id}));
  const devices=await rows('devices',sub('devices'));
- return {store,range:{from,to},config,mixups,mixupCatalog,mixupCases,prepReviews,prepSources,prepAlerts,sources,containers,receipts,checkpoints,decisions,measurements,prices,items,requests,cases,shifts,tasks,locks,controls,devices,truncated};
+ return {store,range:{from,to},config,alertReviews,alertReviewCases,mixups,mixupCatalog,mixupCases,prepReviews,prepSources,prepAlerts,sources,containers,receipts,checkpoints,decisions,measurements,prices,items,requests,cases,shifts,tasks,locks,controls,devices,truncated};
 }
 
 async function run(opts){return check(await collect(opts));}

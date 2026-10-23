@@ -13669,7 +13669,8 @@ async function loadNewAlerts(){
   state.pending = request.then(snap=>{
     // Một lượt đọc đã khởi chạy trước lúc bấm Đã xem không được hồi sinh cảnh báo.
     const list = snap.docs.map(d=>({...d.data(),id:d.id}));
-    state.unread = alertApplyChanges(list,state,version).filter(a=>a.status==='new');
+    // [Engine2 23/10] Thông báo ĐỂ BIẾT (fyi — hệ thống đã tự xử lý) không tính là việc chưa xem / cảnh báo sức khoẻ quán.
+    state.unread = alertApplyChanges(list,state,version).filter(a=>a.status==='new'&&a.fyi!==true);
     return state.unread;
   }).finally(()=>{ state.pending = null; });
   return state.pending;
@@ -14401,6 +14402,11 @@ function prepCountBatchBreakdownHTML(a){
   }).join('');
   return `<div class="prep-alert-lots"><div class="prep-alert-lots-title">Đối chiếu từng lô · Trước → Sau kiểm kê</div>${rows}</div>`;
 }
+function alertAutoNoteHTML(a){
+  const r = a && a.autoReview;
+  if(!r || r.by !== 'engine2') return a && a.fyi && a.source==='engine2' ? '<div class="small-note" style="margin:0 0 6px;color:#0062AD"><b>Để biết</b> — hệ thống đã tự xử lý, không cần thao tác.</div>' : '';
+  return `<div class="small-note" style="margin:0 0 6px;color:${a.fyi?'#C0392B':'#0062AD'}"><b>${a.fyi?'Để biết':'Hệ thống đã tự xử lý'}</b>${r.at?' · '+escapeHtmlAttr(qlFmtDT(r.at)):''} — ${escapeHtmlAttr(r.label||'')}${r.reason?'. '+escapeHtmlAttr(r.reason):''}</div>`;
+}
 async function renderAlertInbox(loadedList){
   const box = document.getElementById('inboxBody');
   showLoading(box);
@@ -14550,11 +14556,15 @@ async function renderAlertInbox(loadedList){
       </div>` : ''}
     </div>`;
   };
-  const news = list.filter(a=>a.status==='new');
+  // [Engine2 23/10] Hệ thống tự xử lý: thông báo đã đóng / để biết mang dòng căn cứ (autoReview) ngay đầu thẻ.
+  const cardX = a => { const h = card(a), b = alertAutoNoteHTML(a); if(!b) return h; const i = h.indexOf('>')+1; return h.slice(0,i)+b+h.slice(i); };
+  const news = list.filter(a=>a.status==='new'&&a.fyi!==true);
+  const fyis = list.filter(a=>a.status==='new'&&a.fyi===true);
   const rest = list.filter(a=>a.status!=='new');
   box.innerHTML = `
-    ${news.length ? `<div class="health-group-title">Chưa xem (${news.length})</div>${news.map(card).join('')}` : `<div class="health-all-clear" style="margin-bottom:14px">${ic('check',20)} Không có cảnh báo mới</div>`}
-    ${rest.length ? `<div class="health-group-title">Đã xem / đã xử lý (${rest.length})</div>${rest.map(card).join('')}` : ''}
+    ${news.length ? `<div class="health-group-title">Chưa xem (${news.length})</div>${news.map(cardX).join('')}` : `<div class="health-all-clear" style="margin-bottom:14px">${ic('check',20)} Không có cảnh báo cần xử lý</div>`}
+    ${fyis.length ? `<div class="health-group-title">Để biết — hệ thống đã tự xử lý (${fyis.length})</div>${fyis.map(cardX).join('')}` : ''}
+    ${rest.length ? `<div class="health-group-title">Đã xem / đã xử lý (${rest.length})</div>${rest.map(cardX).join('')}` : ''}
   `;
 }
 

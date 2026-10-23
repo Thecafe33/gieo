@@ -17,7 +17,7 @@ firebase.database.ServerValue={TIMESTAMP:0};firebase.firestore.FieldValue={delet
   ok:{periodType:'onetime',date:k(y),category:'Gas',amount:90000,status:'approved'}};
  __FS.expenses_gieogieo__gg02={q1:{periodType:'onetime',date:k(y),category:'Sữa',amount:64000,staff:'Huy',status:'pending_review',source:'pos',createdAt:y.toISOString()}};
  __FS.expenses_xofa=Object.assign(__FS.expenses_xofa||{},{x1:{periodType:'onetime',date:k(t),category:'Đá',amount:20000,status:'pending_review',source:'pos',store:'xofa',createdAt:t.toISOString()}});
- __FS.alerts_gieogieo={a1:{type:'missing_recipe',title:'Trà sữa chưa có công thức',status:'new',businessDate:k(y),createdAt:y.toISOString()},a2:{type:'duty_case',status:'seen',createdAt:t.toISOString()},a3:{type:'duty_case',status:'resolved'}};
+ __FS.alerts_gieogieo={a1:{type:'missing_recipe',title:'Trà sữa chưa có công thức',status:'new',businessDate:k(y),createdAt:y.toISOString()},a2:{type:'duty_case',status:'seen',createdAt:t.toISOString()},a3:{type:'duty_case',status:'resolved'},a4:{type:'prep_count_variance',title:'Lệch đếm Thạch Cafe',fyi:true,source:'engine2',status:'new',businessDate:k(y),createdAt:y.toISOString(),autoReview:{by:'engine2',reason:'Thiếu 150 g (~37,5% lượng dùng)'}}};
  __FS.alerts_gieogieo__gg02={b1:{type:'handover_cash_variance',message:'Thiếu 20.000đ',status:'new',createdAt:t.toISOString()}};
  const at=(d,h)=>{const x=new Date(d);x.setHours(h,0,0,0);return x.toISOString()};
  __FS.employee_shifts_gieogieo=Object.assign(__FS.employee_shifts_gieogieo||{},{st1:{employeeId:'e2',employeeName:'Minh Cafe',businessDate:k(y),checkedInAt:at(y,8),checkedOutAt:null},st2:{employeeId:'e2',employeeName:'Đang làm',businessDate:k(t),checkedInAt:at(t,0),checkedOutAt:null}});
@@ -58,6 +58,7 @@ const server=require('http').createServer((req,res)=>{const f=path.resolve(ROOT,
   await p.evaluate(()=>navigate('duyet'));await p.waitForFunction(()=>!live.loadingKey&&live.ready.duyet===loadKey());
   const it=await p.locator('#view').innerText();
   check(/5 việc/.test(it)&&/Ngày \d{2}\/\d{2}\/\d{4} chưa đóng sổ/.test(it)&&it.includes('đã đối soát xong, chưa bàn giao')&&it.includes('Minh Cafe · ca chưa check-out')&&!it.includes('Đang làm')&&it.includes('Gieo GG01')&&it.includes('Gieo GG02')&&it.includes('Trà sữa chưa có công thức')&&it.includes('Thiếu 20.000đ')&&it.includes('Vụ lệch cần xem'),width+': chờ xử lý: cảnh báo mới + đã xem từng quán, không có cảnh báo đã xử lý');
+  check(/1 thông báo để biết/.test(it)&&it.includes('Để biết — hệ thống đã tự xử lý (1)')&&it.includes('Thiếu 150 g')&&await p.locator('.cost-pend-row',{hasText:'Lệch đếm Thạch Cafe'}).getByRole('button',{name:'Đã xử lý'}).count()===0,width+': thông báo để biết tách riêng, không tính là việc, chỉ có «Đã xem»');
   check(await p.evaluate(()=>document.querySelector('#storeSwitcher').hidden&&document.documentElement.scrollWidth<=innerWidth),width+': ẩn chọn quán, không cuộn ngang');
   if(process.env.SCREENSHOT_DIR)await p.screenshot({path:path.join(process.env.SCREENSHOT_DIR,'cho_xu_ly_'+width+'.png'),fullPage:true});
   await p.locator('.cost-pend-row',{hasText:'Trà sữa'}).getByRole('button',{name:'Đã xem'}).click();

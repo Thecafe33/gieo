@@ -170,6 +170,14 @@ function mixReweigh(pair,read){
  if(Math.abs(dx)<=tol&&Math.abs(dy)<=tol)return {outcome:'suspected_wrong_drink',dx:round(dx),dy:round(dy)};
  return {outcome:'inconclusive',dx:round(dx),dy:round(dy)};
 }
+// Thông báo «Lệch đếm bán thành phẩm» / «Lệch lớn» (vụ lệch đếm cuối ngày) — cùng nguyên tắc chủ quán chốt 23/10 cho lệch NL
+// khi nấu mẻ: so với lượng ĐÃ DÙNG trong khoảng (như Unit Engine dutyBase), ≤ max(15, 5%) / ≤ 25% → hệ thống tự xử lý (đóng
+// thông báo); > 25% → giữ làm THÔNG BÁO ĐỂ BIẾT. Phân bổ trách nhiệm do Unit Engine (vụ lệch) quyết, ở đây không đổi.
+function countAlertClass(variance,usage,book,unit){
+ const u=Number(usage)||0,b=Number(book)||0,base=u>0?u:b>0?b:1,abs=PREP_REVIEW.absQty[String(unit||'').toLowerCase()]||0,mag=Math.abs(Number(variance)||0);
+ const v={deviation:round(Number(variance)||0),base:round(base),abs,ratio:mag/base};return {...v,...prepReviewClass(v)};
+}
+const ueKey=(...p)=>p.join('_').replace(/[^\w\-]/g,'_').slice(0,180);   // = P.key của unit_engine (mã hồ sơ vụ lệch)
 function decision(input){
  const {store,sourceId,source,container,shifts,checkpoint,valuation}=input;storeId(store);
  if(!source||source.type!=='WASTE'||source.voided===true||!(Number(source.qty)<0))return {schemaVersion:1,policyVersion:POLICY,storeId:store,sourceId,sourcePath:collection('stock_transactions',store)+'/'+sourceId,status:'voided',quantity:0,amount:0,allocations:[],reason:'SOURCE_INACTIVE'};
@@ -274,6 +282,6 @@ function outbox(storage,store){
  const read=()=>{const value=JSON.parse(storage.getItem(name)||'[]');if(!Array.isArray(value)||value.some(x=>x.storeId!==store))throw Error('Bộ nhớ công việc cần kiểm tra');return value;};
  return {read,put(command){if(!command.id||!['measurement','exception','close_exception','evidence'].includes(command.kind))throw Error('Lệnh lưu không hợp lệ');const rows=read();if(rows.some(x=>x.id===command.id))return;if(rows.length>=100)throw Error('Bộ nhớ công việc đã đầy; kết nối để đồng bộ trước');storage.setItem(name,JSON.stringify([...rows,{...command,storeId:store}]));},remove(id){storage.setItem(name,JSON.stringify(read().filter(x=>x.id!==id)));}};
 }
-const api={VERSION,POLICY,DAY,states,ms,finite,stable,storeId,collection,SHARED,tableName,rootPath,key,digest,round,split,isBarista,group,interval,SPEC,lotKey,specCheck,specOutcome,PREP_REVIEW,PREP_ROW,prepVariance,prepReviewClass,prepTrack,MIXUP,groupKey,mixTol,mixPortion,mixNoise,mixPair,mixMatch,mixReweigh,decision,measuredDecision,audit,transition,path,caseFlow,taskStart,control,measurement,outbox};
+const api={VERSION,POLICY,DAY,states,ms,finite,stable,storeId,collection,SHARED,tableName,rootPath,key,digest,round,split,isBarista,group,interval,SPEC,lotKey,specCheck,specOutcome,PREP_REVIEW,PREP_ROW,prepVariance,prepReviewClass,prepTrack,countAlertClass,ueKey,MIXUP,groupKey,mixTol,mixPortion,mixNoise,mixPair,mixMatch,mixReweigh,decision,measuredDecision,audit,transition,path,caseFlow,taskStart,control,measurement,outbox};
 if(typeof module==='object'&&module.exports)module.exports=api;root.UnitEngine2=api;
 })(typeof window!=='undefined'?window:globalThis);

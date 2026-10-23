@@ -26,6 +26,10 @@ function createEngine2Worker({db,rt,FieldValue,now=Date.now,documentId}){
   }else if(kind==='duty_cases'){
    // Vụ lệch đếm BTP / cân NL cuối ngày vừa tạo → xét «pha nhầm trong nhóm dễ nhầm» cho ngày đó (store tự lọc nhóm + ngày áp dụng).
    if(!before&&after?.businessDate)await service(store).enqueue('mixup_day',after.businessDate);
+   // Vụ lệch chốt / đổi trạng thái → xếp lại thông báo «Lệch đếm BTP» / «Lệch lớn» của chính vụ đó.
+   if(after&&before?.status!==after.status)await service(store).alertsForCase({...after,id});
+  }else if(kind==='alerts'){
+   if(!before&&['prep_count_variance','duty_case'].includes(after?.type))await service(store).enqueue('alert_review',id);
   }else if(kind==='stock_containers'){
    if(after?.status==='finished'&&Number(after.wasteBase)>0&&after.wasteBasis==='unit_engine'&&(before?.status!==after.status||before?.wasteBase!==after.wasteBase))await service(store).enqueue('finish','finish_'+id+'_WASTE');
    if(after?.status==='open'&&(before?.status!=='open'||before?.openedAt!==after.openedAt))await service(store).enqueue('opened',id);
@@ -34,7 +38,7 @@ function createEngine2Worker({db,rt,FieldValue,now=Date.now,documentId}){
  }
  // Lượt học mỗi ngày (store tự chặn chạy lại trong ngày); lỗi học không chặn hàng đợi nghiệp vụ.
  let params=null;try{params=require('./shared/unit_engine2_params_v1.js');}catch(e){}
- const learned=new Map(),learn=async store=>{const day=new Date(now()+7*3600000).toISOString().slice(0,10);if(learned.get(store)===day)return null;try{await service(store).sweepPrepReview().catch(e=>console.error('Engine2 prep sweep',store,e.message));await service(store).mixupSweep().catch(e=>console.error('Engine2 mixup sweep',store,e.message));const r=await service(store).learnDay({params:params||undefined});if(r)learned.set(store,day);return r;}catch(e){console.error('Engine2 learn',store,e.message);return null;}};
+ const learned=new Map(),learn=async store=>{const day=new Date(now()+7*3600000).toISOString().slice(0,10);if(learned.get(store)===day)return null;try{await service(store).sweepPrepReview().catch(e=>console.error('Engine2 prep sweep',store,e.message));await service(store).mixupSweep().catch(e=>console.error('Engine2 mixup sweep',store,e.message));await service(store).sweepAlerts().catch(e=>console.error('Engine2 alert sweep',store,e.message));const r=await service(store).learnDay({params:params||undefined});if(r)learned.set(store,day);return r;}catch(e){console.error('Engine2 learn',store,e.message);return null;}};
  return {service,source,learn,drain:(store,id)=>service(store).drain(id),tick:async store=>{const n=await service(store).retryDue();await learn(store);return n;}};
 }
 module.exports={createEngine2Worker};
