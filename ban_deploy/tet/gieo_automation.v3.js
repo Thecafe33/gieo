@@ -33,7 +33,15 @@ function relevant(kind,before,after){
  if(watched[kind]){const pick=d=>d&&Object.fromEntries(watched[kind].map(k=>[k,d[k]??null]));return stable(pick(before))!==stable(pick(after));}
  return stable(before)!==stable(after);
 }
+// [23/10 — chủ quán] Cấp 6 làm cho TƯƠNG LAI: việc phát sinh TRƯỚC ngày áp dụng (config.startDate) gom vào «Tồn trước ngày áp dụng»
+// (group 'backlog'): không nhắc, không giao, không đếm vào chuông; dữ liệu gốc không sửa. Khoản chi chờ duyệt (tiền) vẫn giữ để chủ quán thấy.
+function sourceDay(d){const v=d&&(d.businessDate||d.date||d.createdAt||d.receivedAt||d.openedAt);if(!v)return '';if(/^\d{4}-\d{2}-\d{2}$/.test(String(v)))return String(v);const t=time(v);return t?new Date(t+7*HOUR).toISOString().slice(0,10):'';}
 function task(kind,id,d,config,now,related){
+ const r=classify(kind,id,d,config,now,related),day=sourceDay(d),start=config&&config.startDate;
+ if(start&&day&&day<start&&['working','watch'].includes(r.group))return Object.assign(r,{group:'backlog',state:'backlog',nextCheckAt:0,deadlineAt:0,reason:'Phát sinh trước ngày áp dụng ('+start+') — không nhắc, không giao; xem ở «Tồn trước ngày áp dụng». '+r.reason});
+ return r;
+}
+function classify(kind,id,d,config,now,related){
  const role=['stock_containers','prep_batches','inventory_items','stock_counts','purchase_orders'].includes(kind)?'stock':'operations';
  const primary=(config.owners||{})[role]||{},backup=(config.backups||{})[role]||{};
  const who=primary.id?primary:backup;
@@ -137,11 +145,11 @@ function task(kind,id,d,config,now,related){
  return r;
 }
 function counterDelta(previous,next){
- const counts={approval:0,working:0,done:0,watch:0};
+ const counts={approval:0,working:0,done:0,watch:0,backlog:0};
  for(const [r,n] of [[previous,-1],[next,1]])if(r&&r.visible!==false&&Object.hasOwn(counts,r.group)&&!['NO_ACTION','SOURCE_REMOVED','ENGINE_COUNT_LINK'].includes(r.rule))counts[r.group]+=n;
  return counts;
 }
-const api={VERSION,HOUR,kinds,parseCollection,collection,stable,time,relevant,task,counterDelta};
+const api={VERSION,HOUR,kinds,parseCollection,collection,stable,time,relevant,task,sourceDay,counterDelta};
 if(typeof module==='object'&&module.exports)module.exports=api;
 root.GieoAutomation=api;
 })(typeof window!=='undefined'?window:globalThis);

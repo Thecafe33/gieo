@@ -31647,7 +31647,7 @@ async function renderStoreHealth(targetId){
   else box.innerHTML=autoHeaderHTML(s)+autoOverviewHTML(s);
  }catch(e){if(!current())return;box.innerHTML='<div class="auto-status"><b>Không đọc được trạng thái tự động</b><p>'+escapeHtmlAttr(e.message||e)+'</p><button class="btn outline" onclick="renderStoreHealth(\''+target+'\')">Thử lại</button></div>';}
 }
-function autoOverviewHTML(s,compact=false){const c=s?.counts||{},note='Số hồ sơ từ khi bật tự động; không phải tổng tiền hao hụt. Người báo không mặc định là người gây ra.';return '<div class="auto-overview '+(compact?'auto-tabs auto-overview-compact':'')+'">'+[['approval','Chờ duyệt chi'],['working','Đang xử lý'],['done','Đã có kết quả']].map(([k,label])=>'<button aria-pressed="'+(autoTab===k)+'" onclick="autoOpenTab(\''+k+'\')"><b>'+(c[k]||0)+'</b><span>'+label+'</span></button>').join('')+'</div>'+(compact?'<div class="auto-meta-actions"><details><summary>Về số hồ sơ</summary><p>'+note+'</p></details>':'<p class="small-note">'+note+'</p>')+'<button class="btn outline sm" onclick="autoDayReport()">Tổng hợp vận hành 7 ngày</button>'+(compact?'</div>':'');}
+function autoOverviewHTML(s,compact=false){const c=s?.counts||{},note='Số hồ sơ từ khi bật tự động; không phải tổng tiền hao hụt. Người báo không mặc định là người gây ra.';return '<div class="auto-overview '+(compact?'auto-tabs auto-overview-compact':'')+'">'+[['approval','Chờ duyệt chi'],['working','Đang xử lý'],['done','Đã có kết quả']].concat(c.backlog?[['backlog','Tồn trước ngày áp dụng']]:[]).map(([k,label])=>'<button aria-pressed="'+(autoTab===k)+'" onclick="autoOpenTab(\''+k+'\')"><b>'+(c[k]||0)+'</b><span>'+label+'</span></button>').join('')+'</div>'+(compact?'<div class="auto-meta-actions"><details><summary>Về số hồ sơ</summary><p>'+note+'</p></details>':'<p class="small-note">'+note+'</p>')+'<button class="btn outline sm" onclick="autoDayReport()">Tổng hợp vận hành 7 ngày</button>'+(compact?'</div>':'');}
 function renderTodayHealthInbox(list){
  const s=autoState().sum;
  if(!autoUsable(s)){renderTodayHealthInboxLegacy(list);return;}
@@ -31705,7 +31705,7 @@ async function autoReviewContainer(id,button){
 }
 function autoCaseHTML(r,i){
  const esc=escapeHtmlAttr;
- const who=r.group==='approval'?'Chủ quán':r.group==='working'?(r.assigneeName||r.assigneeId||'Chưa có người phụ trách'):'Đã ghi nhận kết quả';
+ const who=r.group==='backlog'?'Tồn trước ngày áp dụng — không giao':r.group==='approval'?'Chủ quán':r.group==='working'?(r.assigneeName||r.assigneeId||'Chưa có người phụ trách'):'Đã ghi nhận kết quả';
  return '<article class="auto-case"><div><h3>'+esc(r.title)+'</h3><span class="tier tier-'+(r.group==='approval'?'amber':r.group==='done'?'green':'blue')+'">'+esc(who)+'</span></div>'+(autoMoney(r.value)?'<p class="auto-money">'+esc(autoMoney(r.value))+'</p>':'')+'<p><b>'+esc(autoResultLabel(r))+'</b> · '+esc(r.reason)+'</p>'+(r.deadlineAt?'<p>Hạn xử lý: '+esc(qlFmtDT(r.deadlineAt))+'</p>':'')+'<small>'+(r.backupName||r.backupId?'Thay thế: '+esc(r.backupName||r.backupId)+' · ':'')+esc(r.businessDate||'')+' · '+esc(qlFmtDT(r.updatedAt))+'</small><div class="auto-actions"><button class="btn outline sm" onclick="autoCaseDetail('+i+')">Căn cứ & lịch sử</button><button class="btn sm" onclick="autoGoSource('+i+')">'+(r.group==='approval'?'Mở khoản chi':'Mở nghiệp vụ')+'</button></div></article>';
 }
 async function autoCaseDetail(i){

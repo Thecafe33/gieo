@@ -23,6 +23,14 @@ function fixture(){
  assert.equal(A.task('expenses','a',{status:'pending_review'},cfg,now).group,'approval');
  assert.equal(A.task('stock_containers','a',{status:'open',expiresAt:'2026-10-20',notEmptyChecks:[{newUnitBase:500}]},cfg,now).group,'working');
  console.log('ok Không quy lỗi người báo, không coi đã xem là xử lý, giữ duyệt chi');
+ // [23/10] Cấp 6 làm cho tương lai: việc phát sinh trước ngày áp dụng → «Tồn trước ngày áp dụng», không nhắc / không giao.
+ {const old=A.task('alerts','o',{status:'new',type:'missing_recipe',createdAt:'2026-10-10T03:00:00Z'},cfg,now);assert.deepEqual([old.group,old.nextCheckAt],['backlog',0]);assert.match(old.reason,/trước ngày áp dụng/);
+  assert.equal(A.task('daily_closings','2026-10-12',{businessDate:'2026-10-12',status:'pending'},cfg,now).group,'backlog');
+  assert.equal(A.task('daily_closings','2026-10-15',{businessDate:'2026-10-15',status:'pending'},cfg,now).group,'working','sau ngày áp dụng vẫn giao như cũ');
+  assert.equal(A.task('expenses','x',{status:'pending_review',date:'2026-10-01',amount:5},cfg,now).group,'approval','khoản chi chờ duyệt (tiền) không bị ẩn');
+  assert.equal(A.task('stock_transactions','w',{type:'WASTE',reason:'đổ',businessDate:'2026-10-01'},cfg,now).group,'done','việc đã xong giữ nguyên');
+  assert.deepEqual(A.counterDelta(null,old),{approval:0,working:0,done:0,watch:0,backlog:1},'đếm riêng, không vào chuông');
+  console.log('ok Việc trước ngày áp dụng gom vào «Tồn trước ngày áp dụng» (không nhắc, không giao); chi chờ duyệt và việc sau ngày áp dụng giữ nguyên');}
  const f=fixture(),write=(kind,id,d,store='gg01')=>f.fstore.doc(A.collection(kind,store)+'/'+id).set(d);
  await write('expenses','chi',{status:'pending_review',amount:30000});await f.worker.processSource('gg01','expenses','chi');
  assert.equal(f.FS[rootPath('gg01')].counts.approval,1);

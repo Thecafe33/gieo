@@ -14,7 +14,7 @@ const now=Date.parse('2026-10-22T12:00:00+07:00'),cfg={enabled:true,owners:{stoc
  assert.equal(A.relevant('prep_batches',{status:'active',qtyRemaining:100},{status:'active',qtyRemaining:90}),false);
  assert.equal(A.task('stock_containers','c',{status:'sealed',receivedAt:'2026-10-01'},cfg,now).rule,'LABEL_PENDING');
  assert.equal(A.task('expenses','e',{status:'pending_review',amount:null},cfg,now).value,null);
- assert.deepEqual(A.counterDelta({group:'working',visible:true,rule:'SOURCE_PENDING'},{group:'done',visible:false,rule:'ENGINE_COUNT_LINK'}),{approval:0,working:-1,done:0,watch:0});
+ assert.deepEqual(A.counterDelta({group:'working',visible:true,rule:'SOURCE_PENDING'},{group:'done',visible:false,rule:'ENGINE_COUNT_LINK'}),{approval:0,working:-1,done:0,watch:0,backlog:0});
  console.log('ok Tem cũ thiếu cờ in vẫn được theo dõi, thiếu số tiền không thành 0, hồ sơ ẩn không tăng badge');
  const root=rootPath('gg01'),f=makeFake({fs:{[configPath('gg01')]:cfg,[root]:{ready:true,policyVersion:1,countsVerifiedVersion:1,countsRevision:4,counts:{working:1,done:9}},[root+'/cases/work']:{visible:true,group:'working'},[root+'/cases/hidden']:{visible:false,group:'done'}}});
  const coll=f.fstore.collection.bind(f.fstore);f.fstore.doc=p=>{const a=p.split('/'),id=a.pop();return coll(a.join('/')).doc(id)};

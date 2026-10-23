@@ -170,7 +170,7 @@ function createWorker(db,opts={}){
   const ref=db.doc(rootPath(store)),before=await ref.get(),state=before.exists?before.data():{};
   if(!state.ready||state.countsVerifiedVersion===A.VERSION)return false;
   const counts={};
-  for(const group of ['approval','working','done','watch']){
+  for(const group of ['approval','working','done','watch','backlog']){
    const q=db.collection(rootPath(store)+'/cases').where('visible','==',true).where('group','==',group);
    counts[group]=typeof q.count==='function'?(await q.count().get()).data().count:(await q.get()).docs.length;
   }
