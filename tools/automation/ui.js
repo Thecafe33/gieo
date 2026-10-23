@@ -39,7 +39,8 @@ async function renderStoreHealth(targetId){
    await renderStoreHealthLegacy(target);
    if(!current())return;
    // Legacy checks remain visible until the worker has completed bootstrap; no false all-clear.
-   const head=document.createElement('div');head.innerHTML=autoHeaderHTML(s);box.prepend(head);
+   // Hộp thông báo (chuông) chỉ chứa THÔNG BÁO để cuộn xem; thẻ trạng thái / thiết lập nằm ở mục menu «Tự động & Engine 2».
+   if(target!=='todayHealth'){const head=document.createElement('div');head.innerHTML=autoHeaderHTML(s);box.prepend(head);}
    return;
   }
   const c=s.counts||{};STORE_HEALTH_ISSUE_COUNT=c.approval||0;renderSidebarNav();
@@ -149,7 +150,19 @@ async function autoSettings(){
   const c=snap.exists?snap.data():{},e=escapeHtmlAttr;
   const options=(role,backup=false)=>'<option value="">Chưa phân công</option>'+emps.filter(x=>x.active!==false).map(x=>'<option value="'+e(x.id)+'" '+((backup?c.backups:c.owners)?.[role]?.id===x.id?'selected':'')+'>'+e(x.fullName||x.id)+'</option>').join('');
   const b=document.getElementById('autoSettingsBody');if(!b)return;
-  b.innerHTML='<p>Dùng chung hồ sơ và Unit Engine hiện tại. Bật tại đây sau khi bộ xử lý Firebase đã được triển khai. Không tự duyệt chi, trừ lương hoặc sửa tồn.</p><div class="auto-setting-grid"><label class="field">Phụ trách vận hành<select id="autoOwnerOperations">'+options('operations')+'</select></label><label class="field">Phụ trách kho<select id="autoOwnerStock">'+options('stock')+'</select></label><label class="field">Thay thế vận hành<select id="autoBackupOperations">'+options('operations',true)+'</select></label><label class="field">Thay thế kho<select id="autoBackupStock">'+options('stock',true)+'</select></label><label class="field">Chế độ<select id="autoMode"><option value="shadow">Đối chiếu thử — giữ cảnh báo hiện tại</option><option value="active" '+(c.mode==='active'?'selected':'')+'>Tự xử lý theo chính sách</option></select></label><label><input type="checkbox" id="autoFleet" '+(c.fleet20Confirmed?'checked':'')+'> Các máy POS và quản lý đã tải lại Engine v20</label><label class="field">Khoản nhỏ chỉ ghi nhận (đ, 0 = không áp dụng)<input type="number" min="0" id="autoLowValue" value="'+Number(c.lowValueLimit||0)+'"></label><label class="field">Đọc bổ sung sổ hao hụt từ ngày<input type="date" id="autoStart" value="'+e(c.startDate||dkey(vnDate(Date.now()-7*86400000)))+'"></label></div><p class="small-note">Các cảnh báo và phiếu đang chờ vẫn được nạp đủ, kể cả trước mốc này. Khoảng sổ hao hụt tối đa 31 ngày cho lần khởi tạo.</p><label><input type="checkbox" id="autoEnabled" '+(c.enabled?'checked':'')+'> Bật tự động cho điểm bán này</label><button class="btn" id="autoSave">Lưu thiết lập</button><p id="autoSaveError"></p>';
+  const fld=(id,label,control)=>'<div class="field"><label for="'+id+'">'+label+'</label>'+control+'</div>';
+  b.innerHTML='<p class="ax-intro">Dùng chung hồ sơ và Unit Engine hiện tại. Hệ thống không tự duyệt chi, không trừ lương và không sửa tồn.</p>'
+   +'<section class="ax-sec"><h3>Người phụ trách</h3><p class="ax-sub">Việc được giao tự động sẽ báo cho người này trước; người thay thế nhận khi người chính vắng.</p><div class="ax-grid">'
+   +fld('autoOwnerOperations','Phụ trách vận hành','<select id="autoOwnerOperations">'+options('operations')+'</select>')+fld('autoOwnerStock','Phụ trách kho','<select id="autoOwnerStock">'+options('stock')+'</select>')
+   +fld('autoBackupOperations','Thay thế vận hành','<select id="autoBackupOperations">'+options('operations',true)+'</select>')+fld('autoBackupStock','Thay thế kho','<select id="autoBackupStock">'+options('stock',true)+'</select>')+'</div></section>'
+   +'<section class="ax-sec"><h3>Cách hoạt động</h3><div class="ax-grid">'
+   +fld('autoMode','Chế độ','<select id="autoMode"><option value="shadow">Đối chiếu thử — giữ cảnh báo hiện tại</option><option value="active" '+(c.mode==='active'?'selected':'')+'>Tự xử lý theo chính sách</option></select>')
+   +fld('autoLowValue','Khoản nhỏ chỉ ghi nhận (đ)','<input type="number" min="0" id="autoLowValue" value="'+Number(c.lowValueLimit||0)+'"><small class="ax-hint">0 = không áp dụng</small>')+'</div>'
+   +'<label class="ax-check"><input type="checkbox" id="autoFleet" '+(c.fleet20Confirmed?'checked':'')+'><span><b>Các máy đã tải lại Engine v20</b><small>Chỉ tick khi tất cả máy POS và máy quản lý đã mở lại bản mới.</small></span></label></section>'
+   +'<section class="ax-sec"><h3>Dữ liệu ban đầu</h3><div class="ax-grid">'+fld('autoStart','Đọc bổ sung sổ hao hụt từ ngày','<input type="date" id="autoStart" value="'+e(c.startDate||dkey(vnDate(Date.now()-7*86400000)))+'">')+'</div>'
+   +'<p class="ax-sub">Các cảnh báo và phiếu đang chờ vẫn được nạp đủ, kể cả trước mốc này. Sổ hao hụt tối đa 31 ngày cho lần khởi tạo.</p></section>'
+   +'<label class="ax-check ax-main"><input type="checkbox" id="autoEnabled" '+(c.enabled?'checked':'')+'><span><b>Bật tự động cho điểm bán này</b><small>Tắt thì giữ nguyên mọi thiết lập và cảnh báo cũ.</small></span></label>'
+   +'<div class="ax-foot"><button class="btn" id="autoSave">Lưu thiết lập</button><p id="autoSaveError" class="ax-msg"></p></div>';
   document.getElementById('autoSave').onclick=async()=>{
    const button=document.getElementById('autoSave');button.disabled=true;
    try{
@@ -198,3 +211,29 @@ async function autoDayReport(){
    (!days.length?'<p>Chưa có dữ liệu tổng hợp để đánh giá.</p>':'');
  }catch(err){const box=document.getElementById('autoDayReport');if(box===reportNode&&scope===alertUiScope())box.textContent='Chưa đọc được tổng hợp: '+(err.message||err);}
 }
+
+// ── Trung tâm «Tự động & Engine 2» ─────────────────────────────────────────────────────────────────────────────────────────
+// Trước đây hai thẻ này chèn vào hộp thông báo (chuông) làm chật khung, không cuộn xem được thông báo. Giờ là một mục menu riêng.
+async function autoControlCenter(){
+ const scope=alertUiScope();
+ if(typeof QL_VIEW==='string'&&!/^gg\d{2}$/.test(QL_VIEW)){toast('Chọn một điểm bán trước');return;}
+ try{closeTodayHealth(false);}catch(e){}
+ const e=escapeHtmlAttr;
+ openEditSheet('Tự động & Engine 2 · '+String(QL_VIEW).toUpperCase(),'<div id="autoCenterBody"><div class="muted">Đang tải…</div></div>');
+ const node=document.getElementById('autoCenterBody');
+ let sum=null,e2=null,err1='',err2='';
+ await Promise.all([
+  (async()=>{try{await ensureAuth();sum=await autoSummary();}catch(x){err1=x.message||String(x);}})(),
+  (async()=>{try{e2=await Engine2QL.summary();}catch(x){err2=x.message||String(x);}})()
+ ]);
+ if(scope!==alertUiScope()||document.getElementById('autoCenterBody')!==node)return;
+ const live1=!err1&&autoUsable(sum),tag=(ok,t)=>'<span class="ax-tag '+(ok?'ok':'')+'">'+e(t)+'</span>';
+ const s1=err1?'Chưa đọc được: '+err1:live1?'Đang chạy — nhịp gần nhất '+qlFmtDT(sum.heartbeatAt):!sum?.enabled?'Chưa bật. Đang dùng các cảnh báo hiện có.':sum.mode==='shadow'?'Đang đối chiếu thử — chưa thay cảnh báo hiện có.':'Chưa có tín hiệu từ bộ xử lý nền. Đang dùng các cảnh báo hiện có.';
+ const on2=!!e2?.enabled,act2=on2&&e2.mode==='active'&&e2.fleetConfirmed;
+ const s2=err2?'Chưa đọc được: '+err2:!on2?'Chưa bật. Bật ở chế độ đối chiếu thử trước khi áp dụng.':(act2?'Đang tự động phân bổ hao hụt và giao cân tại POS.':'Đang đối chiếu thử — chỉ xem đề xuất, vận hành giữ nguyên.')+' '+((e2.controlledItemIds||[]).length)+' nguyên liệu được theo dõi.';
+ node.innerHTML='<section class="wdg wdg-pink ax-card"><div class="wdg-head"><span class="wdg-mark">'+ic('inbox',20)+'</span><span class="wdg-title"><b>Công việc & thông báo tự động</b><small>Giao việc, duyệt chi, nhắc việc tồn</small></span>'+tag(live1,live1?'Đang chạy':'Chưa chạy')+'</div>'
+  +'<div class="wdg-body"><p class="ax-sub">'+e(s1)+'</p><div class="ax-actions"><button class="btn" onclick="autoSettings()">Thiết lập người phụ trách</button><button class="btn outline" onclick="closeEditSheet(true);switchScreen(\'inbox\')">Mở hộp thư cảnh báo</button></div></div></section>'
+  +'<section class="wdg wdg-blue ax-card"><div class="wdg-head"><span class="wdg-mark">'+ic('detective',20)+'</span><span class="wdg-title"><b>Engine 2 · Kiểm soát hao hụt</b><small>Phân bổ trách nhiệm, giao cân, tự học</small></span>'+tag(act2,act2?'Tự động':on2?'Đối chiếu thử':'Tắt')+'</div>'
+  +'<div class="wdg-body"><p class="ax-sub">'+e(s2)+'</p><div class="ax-actions"><button class="btn" onclick="Engine2QL.open()">Xem kết quả</button><button class="btn outline" onclick="Engine2QL.settings()">Thiết lập</button></div></div></section>';
+}
+if(typeof NAV_SECTIONS!=='undefined'){const g=NAV_SECTIONS.find(x=>x.group==='Phân tích & dữ liệu');if(g&&!g.items.some(i=>i.key==='auto'))g.items.push({key:'auto',ic:'sliders',label:'Tự động & Engine 2',go:'autoControlCenter()',sub:'Phụ trách, thiết lập, kết quả'});}

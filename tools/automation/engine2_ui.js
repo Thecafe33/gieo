@@ -61,7 +61,14 @@ const Engine2QL=(()=>{
  async function settings(){
   const id=scope();if(!id)return;const token=++request,svc=service(id);openEditSheet('Engine 2 · Thiết lập '+id.toUpperCase(),'<div id="e2QSettings">Đang tải…</div>');const node=document.getElementById('e2QSettings');
   try{const s=await svc.config();if(token!==request||scope()!==id||document.getElementById('e2QSettings')!==node)return;
-   current={id,service:svc};node.innerHTML='<div class="auto-setting-grid"><label class="field">Theo dõi<select id="e2Enabled"><option value="off" '+(!s.enabled?'selected':'')+'>Tắt</option><option value="on" '+(s.enabled?'selected':'')+'>Bật</option></select></label><label class="field">Cách hoạt động<select id="e2Mode"><option value="shadow" '+(s.mode!=='active'?'selected':'')+'>Đối chiếu thử — xem đề xuất</option><option value="active" '+(s.mode==='active'?'selected':'')+'>Tự động phân bổ và giao cân</option></select></label><label class="field">Tính từ ngày<input id="e2From" type="date" value="'+esc(s.fromDate||new Date(Date.now()+7*3600000).toISOString().slice(0,10))+'"></label></div><label><input type="checkbox" id="e2Fleet" '+(s.fleetConfirmed?'checked':'')+'> Các máy POS đã được cập nhật bản có Engine 2</label><p>Đối chiếu thử giữ nguyên vận hành. Chế độ tự động giao việc cân tại POS; không ghi hao hụt thêm lần nữa và không tự khấu trừ lương.</p><p>Cần triển khai bộ xử lý nền đi kèm để chạy khi đóng trình duyệt.</p><button class="btn" onclick="Engine2QL.save()">Lưu cho điểm bán này</button><p id="e2QSaveMessage"></p>';
+   current={id,service:svc};node.innerHTML=(()=>{const fld=(id,label,control)=>'<div class="field"><label for="'+id+'">'+label+'</label>'+control+'</div>';
+    return '<section class="ax-sec"><h3>Theo dõi</h3><p class="ax-sub">Bật ở chế độ đối chiếu thử trước: hệ thống chỉ ghi đề xuất, vận hành giữ nguyên.</p><div class="ax-grid">'
+    +fld('e2Enabled','Theo dõi','<select id="e2Enabled"><option value="off" '+(!s.enabled?'selected':'')+'>Tắt</option><option value="on" '+(s.enabled?'selected':'')+'>Bật</option></select>')
+    +fld('e2Mode','Cách hoạt động','<select id="e2Mode"><option value="shadow" '+(s.mode!=='active'?'selected':'')+'>Đối chiếu thử — xem đề xuất</option><option value="active" '+(s.mode==='active'?'selected':'')+'>Tự động phân bổ và giao cân</option></select>')
+    +fld('e2From','Tính từ ngày','<input id="e2From" type="date" value="'+esc(s.fromDate||new Date(Date.now()+7*3600000).toISOString().slice(0,10))+'"><small class="ax-hint">Chỉ xử lý nguồn từ ngày này trở đi</small>')+'</div></section>'
+    +'<section class="ax-sec"><h3>Máy POS</h3><label class="ax-check"><input type="checkbox" id="e2Fleet" '+(s.fleetConfirmed?'checked':'')+'><span><b>Các máy POS đã cập nhật bản có Engine 2</b><small>Chỉ cần tick khi chuyển sang chế độ tự động.</small></span></label></section>'
+    +'<section class="ax-sec ax-notes"><h3>Cần biết</h3><ul><li>Chế độ tự động giao việc cân tại POS; không ghi hao hụt thêm lần nữa và không tự khấu trừ lương.</li><li>Cần triển khai bộ xử lý nền đi kèm để chạy khi đóng trình duyệt.</li></ul></section>'
+    +'<div class="ax-foot"><button class="btn" onclick="Engine2QL.save()">Lưu cho điểm bán này</button><p id="e2QSaveMessage" class="ax-msg"></p></div>';})();
   }catch(e){if(document.getElementById('e2QSettings')===node)node.textContent=e.message;}
  }
  async function save(){
@@ -69,6 +76,6 @@ const Engine2QL=(()=>{
   if(!/^\d{4}-\d{2}-\d{2}$/.test(fromDate||'')){msg.textContent='Chọn ngày bắt đầu hợp lệ';return;}if(enabled&&mode==='active'&&!fleetConfirmed){msg.textContent='Cần cập nhật các máy POS trước khi bật tự động';return;}
   ctx.saving=true;try{await fstore.runTransaction(async t=>{const s=await t.get(ctx.service.base);t.set(ctx.service.base,{enabled,mode,fromDate,fleetConfirmed,protocolVersion:1,settingsRevision:(s.exists?s.data().settingsRevision||0:0)+1,settingsUpdatedAt:new Date().toISOString()},{merge:true});});cache.delete(ctx.id);if(scope()===ctx.id&&document.getElementById('e2QSaveMessage')===msg)msg.textContent='Đã lưu. Bộ xử lý sẽ đối chiếu theo ngày được chọn.';}catch(e){if(document.getElementById('e2QSaveMessage')===msg)msg.textContent='Chưa lưu được: '+e.message;}finally{ctx.saving=false;}
  }
- return {mount,open,more,detail,execution,learning,settings,save};
+ return {mount,open,more,detail,execution,learning,settings,save,summary:()=>summary(scope())};
 })();
-{const render=renderStoreHealth;renderStoreHealth=async function(...args){const result=await render.apply(this,args);await Engine2QL.mount(args[0]);return result;};}
+{const render=renderStoreHealth;renderStoreHealth=async function(...args){const result=await render.apply(this,args);if(args[0]!=='todayHealth')await Engine2QL.mount(args[0]);return result;};}   // hộp thông báo chỉ chứa thông báo; Engine 2 ở mục «Tự động & Engine 2»

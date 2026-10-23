@@ -3011,7 +3011,11 @@ function _ueActiveUnitsRef(itemId){ return UnitEngine.units.ref(itemId); }   // 
 // tăng tốc tuyệt đối không được có quyền làm sập app.
 try{
   if(typeof fstore.enablePersistence === 'function'){
-    fstore.enablePersistence({ synchronizeTabs: true })
+    // [FIX 23/10 — «mọi chức năng kẹt Đang tải, chỉ bấm được ngay sau khi tải lại trang»] synchronizeTabs:true → chỉ MỘT tab giữ kết nối
+    // thật, các tab cùng địa chỉ (quanlygieo, quanlygieo2, manage, POS…) đọc qua tab đó; tab giữ kết nối bị trình duyệt đóng băng ở nền
+    // (tablet) thì mọi tab khác treo vô thời hạn. false (như POS): tab nào cũng nối thẳng; tab thứ hai không giành được bộ đệm thì chạy
+    // không bộ đệm (đọc trực tiếp), không bao giờ chờ tab khác.
+    fstore.enablePersistence({ synchronizeTabs: false })
       .catch(err => console.warn('[tốc độ] không bật được bộ đệm ngoại tuyến (app vẫn chạy bình thường):', err && err.code));
   }
 }catch(err){ console.warn('[tốc độ] bỏ qua bộ đệm ngoại tuyến:', err); }
