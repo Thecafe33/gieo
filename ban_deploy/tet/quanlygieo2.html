@@ -3045,16 +3045,29 @@ try{
 // Dùng lại đúng tài khoản đăng nhập đã có ở file mẫu (GieoGieo Store OS)
 // để khớp với rules Firebase hiện tại của project "the-cafe-33".
 let _authReady = null;
+// [FIX 23/10 — «treo, phải F5 mới xem được»] Bản cũ nhớ VĨNH VIỄN lời hứa đăng nhập: một lần đăng nhập lỗi / không phản
+// hồi (4G chập chờn) là mọi màn sau đó chờ mãi hoặc lỗi mãi tới khi tải lại trang. Giờ: đã có phiên thì dùng ngay; lỗi
+// hoặc quá 20 giây → bỏ lời hứa để lượt sau thử lại.
 function ensureAuth(){
+  if(auth.currentUser) return Promise.resolve(auth.currentUser);
   if(_authReady) return _authReady;
-  _authReady = new Promise((resolve, reject)=>{
-    const unsub = auth.onAuthStateChanged(user=>{
-      if(user){ unsub(); resolve(user); }
-    });
+  const p = new Promise((resolve, reject)=>{
+    let done = false;
+    const finish = (fn, v) => { if(done) return; done = true; clearTimeout(timer); try{ unsub(); }catch(e){} fn(v); };
+    const timer = setTimeout(()=>finish(reject, Object.assign(new Error('Đăng nhập quá lâu — kiểm tra mạng rồi bấm Tải lại'), {code:'auth/timeout'})), 20000);
+    const unsub = auth.onAuthStateChanged(user=>{ if(user) finish(resolve, user); });
     auth.signInWithEmailAndPassword('cafe33@xolifa.com', 'xolifaangiang')
-      .catch(err=>{ unsub(); reject(err); });
+      .then(c=>finish(resolve, c && c.user)).catch(err=>finish(reject, err));
   });
-  return _authReady;
+  _authReady = p;
+  p.catch(()=>{ if(_authReady === p) _authReady = null; });
+  return p;
+}
+// Đá lại kết nối Firestore khi lượt đọc bị kẹt (luồng mạng treo sau khi đổi sóng / ngủ máy) — không cần F5.
+async function qlKickNetwork(){
+  try{ await fstore.disableNetwork(); }catch(e){}
+  try{ await fstore.enableNetwork(); }catch(e){}
+  if(!auth.currentUser) _authReady = null;
 }
 
 // STORE_ID giữ lại làm metadata (phòng sau này nhiều chi nhánh dùng chung
@@ -3224,8 +3237,10 @@ document.getElementById('reloadBtn').innerHTML = ic('refresh', 18);
 // ============================================================
 function showLoading(el, text){
   if(!el) return;
+  qlLoadWatch(el);
   if(!el.innerHTML.trim()){
     el.innerHTML = '<div class="muted" style="padding:8px 0">' + (text || 'Đang tải...') + '</div>';
+    el._loadMarker = el.firstChild;
     return;
   }
   el.style.transition = 'opacity .12s';
@@ -3234,6 +3249,29 @@ function showLoading(el, text){
   if(el._loadObs) return;
   el._loadObs = new MutationObserver(()=>{ el.style.opacity=''; el.style.pointerEvents=''; });
   el._loadObs.observe(el, { childList:true });
+}
+// [FIX 23/10 — «load rất lâu, đôi khi 5 phút vẫn không được»] Lượt đọc kẹt (mạng đổi, luồng Firestore treo) không bao giờ
+// báo lỗi: màn mờ + khoá bấm mãi. Canh giờ: quá 20 giây mà nội dung chưa đổi → gỡ mờ / khoá, hiện «Thử lại» (đá lại kết
+// nối Firestore rồi tải lại màn — không cần F5). Nội dung đổi (tải xong / báo lỗi) là tự huỷ canh giờ.
+function qlLoadWatch(el){
+  clearTimeout(el._loadTimer); if(el._loadWatchObs) el._loadWatchObs.disconnect();
+  const token = (el._loadToken || 0) + 1; el._loadToken = token;
+  el._loadWatchObs = new MutationObserver(muts=>{
+    if(muts.some(m=>[...m.addedNodes].some(n=>n !== el._loadMarker && !(n.classList && n.classList.contains('ql-slow'))))){ clearTimeout(el._loadTimer); el._loadWatchObs.disconnect(); }
+  });
+  el._loadWatchObs.observe(el, { childList:true });   // callback chạy sau (microtask) — lúc đó _loadMarker đã gán nên bỏ qua đúng dòng «Đang tải»
+  el._loadTimer = setTimeout(()=>{
+    if(el._loadToken !== token || !el.isConnected) return;
+    el._loadWatchObs.disconnect();
+    el.style.opacity=''; el.style.pointerEvents='';
+    if(el.querySelector(':scope > .ql-slow')) return;
+    const bar = document.createElement('div');
+    bar.className = 'ql-slow card';
+    bar.style.cssText = 'border:1px solid #F3B2BF;margin:8px 0;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap';
+    bar.innerHTML = '<span class="small-note" style="color:var(--bad)">Tải lâu hơn bình thường — có thể mạng vừa chập chờn.</span><button class="btn sm" style="width:auto;padding:0 16px">Thử lại</button>';
+    bar.querySelector('button').onclick = async ()=>{ bar.querySelector('button').disabled = true; await qlKickNetwork(); bar.remove(); reloadCurrent(); };
+    el.prepend(bar);
+  }, 20000);
 }
 
 function fmt(n){ return Math.round(n||0).toLocaleString('vi-VN') + 'đ'; }
@@ -4773,14 +4811,26 @@ function shiftWorkedHours(s, nowMs){
   return Math.max(0, (endMs - inMs) / 3600000);
 }
 // Trần giờ trả lương từ 01/10/2026; giờ chấm công gốc giữ để đối chiếu.
-function shiftPaidHours(s, schedule, nowMs){
+// [FIX 23/10] Thiếu lịch: mặc định vẫn CHẶN như quy tắc 19/10 (lãi/lỗ, chốt sổ, chốt lương — không lấy giờ thật thay lịch,
+// không ghi số 0 đè sổ). Riêng tab Lương (opts.lenient) không được trắng cả màn vì một ca thiếu lịch: ca đó KHÔNG cộng giờ
+// (trả 0, không thay bằng giờ chấm công) + ghi vào PAY_SCHED_MISSING để màn hiện «cần bổ sung lịch · chưa chốt được».
+const PAY_SCHED_MISSING = new Map();
+function payScheduleMissingList(from, to){
+  return [...PAY_SCHED_MISSING.values()].filter(x=>(!from||x.date>=from)&&(!to||x.date<=to)).sort((a,b)=>a.date.localeCompare(b.date)||String(a.name).localeCompare(String(b.name)));
+}
+function shiftPaidHours(s, schedule, nowMs, opts){
   const actual = shiftWorkedHours(s, nowMs);
   if(!s || !s.checkedInAt || String(s.businessDate) < '2026-10-01') return actual;
   const sc = schedule === undefined ? s._paySchedule : schedule;
   if(!sc || (!sc.isOff && (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(sc.startTime||'') || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(sc.endTime||'') || sc.startTime===sc.endTime))){
+    if(opts && opts.lenient){
+      PAY_SCHED_MISSING.set(s.employeeId+'|'+s.businessDate, {employeeId:s.employeeId, name:s.employeeName||s.employeeId||'Nhân viên', date:s.businessDate});
+      return 0;
+    }
     const e = new Error('Cần bổ sung lịch: '+(s.employeeName||s.employeeId||'Nhân viên')+' · '+s.businessDate+'. Chưa đủ cơ sở chốt lương.');
     e.code='pay/schedule-missing'; throw e;
   }
+  PAY_SCHED_MISSING.delete(s.employeeId+'|'+s.businessDate);
   if(sc.isOff || actual<=0) return 0;
   const start=Date.parse(s.businessDate+'T'+sc.startTime+':00+07:00');
   let end=Date.parse(s.businessDate+'T'+sc.endTime+':00+07:00');
@@ -4795,7 +4845,7 @@ function attachPaySchedules(shifts, schedules){
   const by=payScheduleMap(schedules);
   return (shifts||[]).map(s=>({...s,_paySchedule:by.get(s.employeeId+'|'+s.businessDate)||null}));
 }
-async function computeActualLaborCostByDate(startDate, endDate){
+async function computeActualLaborCostByDate(startDate, endDate, opts){
   const [employees, shifts, schedules] = await Promise.all([
     loadEmployees(),
     fstore.collection('employee_shifts_gieogieo').where('businessDate','>=',startDate).where('businessDate','<=',endDate).get()
@@ -4820,7 +4870,7 @@ async function computeActualLaborCostByDate(startDate, endDate){
     if(terms.payType!=='hourly_full' && terms.payType!=='hourly_part') return; // lương cứng không tính ở đây
     // [FIX-ca-dang-chay] Ca đang chạy của HÔM NAY được tính tạm tới hiện tại — xem
     // shiftWorkedHours(). Ca treo ngày cũ vẫn trả 0 như trước.
-    const hours = shiftPaidHours(s, paidSchedules.get(s.employeeId+'|'+s.businessDate), _now);
+    const hours = shiftPaidHours(s, paidSchedules.get(s.employeeId+'|'+s.businessDate), _now, opts);
     if(hours<=0) return;
     const key = s.employeeId+'|'+s.businessDate;
     hoursByEmpDate[key] = (hoursByEmpDate[key]||0) + hours;
@@ -4867,7 +4917,7 @@ function computeHoursWorked(shiftsForDay){
 // nhiêu tháng này". Hàm riêng, KHÔNG sửa computeActualLaborCostByDate() để tránh đụng
 // vào 5 nơi đang gọi nó cho KPI (Hôm nay/Sức khỏe/Báo cáo) đã chạy đúng — chấp nhận lặp
 // lại một phần logic để an toàn hơn là sửa 1 hàm dùng chung nhiều nơi.
-async function computeActualLaborBreakdownByEmployee(startDate, endDate){
+async function computeActualLaborBreakdownByEmployee(startDate, endDate, opts){
   const [employees, shiftsSnap, schedules] = await Promise.all([
     loadEmployees(),
     fstore.collection('employee_shifts_gieogieo').where('businessDate','>=',startDate).where('businessDate','<=',endDate).get(),
@@ -4890,7 +4940,7 @@ async function computeActualLaborBreakdownByEmployee(startDate, endDate){
     const terms = empPayTermsOn(emp, s.businessDate, s.payTerms);
     if(terms.payType!=='hourly_full' && terms.payType!=='hourly_part') return;
     // [FIX-ca-dang-chay] Cùng quy tắc với computeActualLaborCostByDate.
-    const hours = shiftPaidHours(s, paidSchedules.get(s.employeeId+'|'+s.businessDate), _now);
+    const hours = shiftPaidHours(s, paidSchedules.get(s.employeeId+'|'+s.businessDate), _now, opts);
     if(hours<=0) return;
     const key = s.employeeId+'|'+s.businessDate;
     hoursByEmpDate[key] = (hoursByEmpDate[key]||0) + hours;
@@ -20367,18 +20417,25 @@ async function renderEntryLuong(){
   let byDate = {}, byEmp = {};
   try{
     [byDate, byEmp] = await Promise.all([
-      computeActualLaborCostByDate(monthStart, monthEnd),
-      computeActualLaborBreakdownByEmployee(monthStart, monthEnd)
+      computeActualLaborCostByDate(monthStart, monthEnd, {lenient:true}),
+      computeActualLaborBreakdownByEmployee(monthStart, monthEnd, {lenient:true})
     ]);
   }
   catch(err){ console.warn('computeActualLaborCostByDate/Breakdown failed', err);body.innerHTML='<div class="card">'+escapeHtmlAttr(err.message||'Chưa đủ dữ liệu tính lương')+'</div>';return; }
   const totalMonth = Object.values(byDate).reduce((s,v)=>s+v,0);
+  // [FIX 23/10] Ca thiếu lịch: vẫn hiện bảng (tạm tính theo giờ chấm công thật), liệt kê để bổ sung — chưa chốt lương được.
+  const thieuLich = payScheduleMissingList(monthStart, monthEnd);
+  const thieuLichBy = {}; thieuLich.forEach(x=>{ (thieuLichBy[x.employeeId] = thieuLichBy[x.employeeId] || []).push(x.date); });
   const nhieuQuan = qlMultiStore();
   const empsDangLam = employees.filter(e=>e.active!==false);
   const empsQuan = empsDangLam.filter(e=>qlEmpThuocQuan(e, byEmp[e.id], null, 0));   // [ĐA CỬA HÀNG] chỉ người có ca / lương ở quán này
 
   body.innerHTML = `<div class="hr-page">${hrStoreScope()}
-    <div class="wkpi-row"><div class="wkpi hero"><b>Chi phí lương · ${m}/${y}</b><strong>${fmt(totalMonth)}</strong><small>Tại điểm bán đang xem</small></div><div class="wkpi"><b>Nhân viên trong kỳ</b><strong>${empsQuan.length}</strong><small>Có ca hoặc lương thuộc điểm bán</small></div></div>
+    ${thieuLich.length ? `<div class="card" style="border:1px solid #F3B2BF"><div style="font-weight:800;color:var(--bad)">Cần bổ sung lịch — ${thieuLich.length} ca</div>
+      <div class="small-note" style="margin-top:4px">Từ 01/10 giờ trả lương chặn theo lịch. Các ca dưới đây chưa có lịch nên <b>chưa được cộng vào lương</b> (không lấy giờ chấm công thay lịch) và <b>chưa chốt lương được</b>. Bổ sung ở Nhân sự › Lịch.</div>
+      <div class="small-note" style="margin-top:6px">${thieuLich.slice(0,30).map(x=>escapeHtmlAttr(x.name)+' · '+escapeHtmlAttr(x.date)).join(' · ')}${thieuLich.length>30?' …':''}</div>
+      <button class="btn outline sm" style="width:auto;padding:0 14px;margin-top:8px" onclick="goEntry('lich')">Mở Lịch</button></div>` : ''}
+    <div class="wkpi-row"><div class="wkpi hero"><b>Chi phí lương · ${m}/${y}${thieuLich.length?' (chưa đủ lịch)':''}</b><strong>${fmt(totalMonth)}</strong><small>Tại điểm bán đang xem</small></div><div class="wkpi"><b>Nhân viên trong kỳ</b><strong>${empsQuan.length}</strong><small>Có ca hoặc lương thuộc điểm bán</small></div></div>
     <section class="wdg wdg-amber"><div class="wdg-head">${wdgHeadHTML('sliders','Cách tính chi phí nhân công','Cấu hình dùng chấm công thực tế cho báo cáo')}</div><div class="wdg-body">
     <div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:10px;">
@@ -20419,7 +20476,7 @@ async function renderEntryLuong(){
       return `<div class="litem">
         <div class="li-l">
           <div>${e.fullName}</div>
-          <div>${payTypeLabel(e)}${isHourly ? ` · ${fmtNum(b.hours,1)}h trong tháng${otNote}` : ''}</div>
+          <div>${payTypeLabel(e)}${isHourly ? ` · ${fmtNum(b.hours,1)}h trong tháng${otNote}` : ''}${thieuLichBy[e.id] ? ` · <span style="color:var(--bad);font-weight:700">thiếu lịch ${thieuLichBy[e.id].length} ngày — chưa cộng</span>` : ''}</div>
         </div>
         <div class="li-r">${fmt(b.amount)}</div>
       </div>`;
@@ -21012,7 +21069,7 @@ async function renderThangKet(force=false){
       loadExpenseCategories().catch(()=>{dataMissing.push('danh mục chi phí');return [];}),
       loadEmployees().catch(()=>{dataMissing.push('nhân sự');return [];}),
       loadSchedulesForRange(startKey, endKey).catch(()=>{dataMissing.push('lịch làm việc');return [];}),
-      computeActualLaborBreakdownByEmployee(startKey, endKey).catch(err=>{ dataMissing.push('bảng lương'); console.warn('[Tổng kết tháng] lương lỗi', err); return {}; }),
+      computeActualLaborBreakdownByEmployee(startKey, endKey).catch(err=>{ dataMissing.push(err&&err.code==='pay/schedule-missing'?'lịch làm việc ('+err.message+')':'bảng lương'); console.warn('[Tổng kết tháng] lương lỗi', err); return {}; }),
       computeThangKetSoNgayCong(startKey, endKey).catch(err=>{ dataMissing.push('ngày công'); console.warn('[Tổng kết tháng] ngày công lỗi', err); return {}; }),
       computeMixReport(start, end).catch(err=>{ dataMissing.push('bán hàng'); console.warn('[Tổng kết tháng] bán hàng lỗi', err); return null; }),
       computeThangKetKhoExtra(startKey, endKey, INVENTORY_ITEMS).catch(err=>{ dataMissing.push('kho'); console.warn('[Tổng kết tháng] kho lỗi', err); return null; }),

@@ -21,7 +21,7 @@ function priceOf(prices,itemId,day,source){
  return {status:'missing',amount:null,method:'missing_effective_price'};
 }
 
-// Giá TẠM theo đúng cách sổ lãi/lỗ đang tính (itemCostOn của lai_lo.v6.js): lịch sử giá ≤ ngày; có lịch sử nhưng đều sau ngày
+// Giá TẠM theo đúng cách sổ lãi/lỗ đang tính (itemCostOn của lai_lo.v7.js): lịch sử giá ≤ ngày; có lịch sử nhưng đều sau ngày
 // → oldPrice (hoặc price) của dòng đầu; không có lịch sử → giá hiện tại. CHỈ để tham khảo — Engine 2 không dùng giá hiện tại
 // làm giá lịch sử (đặc tả 2.3), hồ sơ vẫn «chưa đủ giá».
 function plCostOn(prices,items,itemId,day){

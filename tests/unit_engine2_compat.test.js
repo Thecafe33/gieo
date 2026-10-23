@@ -8,14 +8,14 @@ const {cleanState}=require('./lib/engine2_fixture');
 const clone=v=>JSON.parse(JSON.stringify(v));
 
 (async()=>{
- // itemCostOn chép đúng lai_lo.v6.js (so với mã nguồn để không trôi).
- const src=fs.readFileSync(require.resolve('../lai_lo.v6.js'),'utf8');
+ // itemCostOn chép đúng lai_lo.v7.js (so với mã nguồn để không trôi).
+ const src=fs.readFileSync(require.resolve('../lai_lo.v7.js'),'utf8');
  assert.match(src,/if\(chon\) return Number\(chon\.price\)\|\|0;\s*const dau = list\[0\];\s*return dau\.oldPrice != null \? Number\(dau\.oldPrice\)\|\|0 : \(Number\(dau\.price\)\|\|0\);/,'itemCostOn của lai_lo đã đổi — cập nhật costOn');
  assert.match(src,/ghiNhan\(t, Math\.abs\(Number\(t\.qty\)\|\|0\) \* itemCostOn\(t\.itemId, t\.businessDate\)\);/);
  assert.match(src,/ghiNhan\(t, Math\.abs\(Number\(t\.totalCost\)\|\|0\)\);/);
  const items={a:{costPerUnit:9}},prices=[{itemId:'a',effectiveFrom:'2026-09-10',price:5,oldPrice:4},{itemId:'a',effectiveFrom:'2026-09-20',price:6}];
  assert.equal(costOn(prices,items,'a','2026-09-01'),4);assert.equal(costOn(prices,items,'a','2026-09-15'),5);assert.equal(costOn(prices,items,'a','2026-09-25'),6);assert.equal(costOn([],items,'a','2026-09-25'),9);
- console.log('ok Định giá chép đúng itemCostOn + cách sổ lãi/lỗ cộng hao hụt (đối chiếu mã nguồn lai_lo.v6.js)');
+ console.log('ok Định giá chép đúng itemCostOn + cách sổ lãi/lỗ cộng hao hụt (đối chiếu mã nguồn lai_lo.v7.js)');
 
  const f=await cleanState();
  const dump=await X.build({storeId:'gg01',from:'2026-10-14',to:'2026-10-22',coll:k=>f.fstore.collection(X.physName(k,'gg01')),rtRef:n=>f.db.ref(n+'_gieogieo')});

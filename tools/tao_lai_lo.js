@@ -16,7 +16,7 @@
 const fs = require('fs'), path = require('path');
 const acorn = require('acorn');
 const walk = require('acorn-walk');
-const VERSION = 6;
+const VERSION = 7;
 const ROOT = path.join(__dirname, '..');
 const OUT = path.join(ROOT, 'lai_lo.v' + VERSION + '.js');
 const ROOTS = ['computeDailyPLRange', 'plTomTatNgay', 'plBreakEven', 'plSumDays', 'configForDate', 'qlAllNapChung', 'memoDropAll',

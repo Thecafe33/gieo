@@ -136,7 +136,7 @@ Chủ quán chốt hướng lõi điều hành mới `unit_engine2_v1.js`: sự 
 | App bán hàng | `posgieo.html` | trỏ v19 (chưa deploy) |
 | App quản lý | `quanlygieo.html` | trỏ v19 (chưa deploy) |
 | Chế độ thử | `che_do_thu.v1.js` + `posgieo_thu.html`, `quanlygieo_thu.html` | sinh lại bằng `node tools/tao_ban_thu.js .` sau **mỗi** lần sửa HTML |
-| Bộ tính lãi/lỗ | `lai_lo.v6.js` | sinh từ quanlygieo; giữ v1–v5 immutable cho HTML cũ |
+| Bộ tính lãi/lỗ | `lai_lo.v7.js` | sinh từ quanlygieo; giữ v1–v6 immutable cho HTML cũ |
 | Ca làm việc TC33/XOFA | `cham_cong.v4.js` | lịch VN; giữ v1–v3 cho HTML cũ |
 | Test | `sh tests/run_all.sh` | 105 file `tests/*.test.js`, chỉ cần `node` |
 

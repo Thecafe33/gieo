@@ -3,7 +3,7 @@
 // Đối chiếu TƯƠNG THÍCH (lộ trình B2, đường 1) trên «Bản kiểm toán kho», không nối Firebase, không ghi gì.
 //   node tools/automation/engine2_compat.js <ban_kiem_toan_kho.json> [--out <thư mục>]
 // A. Hao hụt: cách Engine 2 nhận khoản mất (dòng WASTE còn hiệu lực, một nguồn) phải khớp sổ lãi/lỗ đang tính
-//    (computeWasteByDateRange của lai_lo.v6.js: NL |qty| × itemCostOn, BTP |totalCost|) theo ngày / món, cùng cách định giá cũ.
+//    (computeWasteByDateRange của lai_lo.v7.js: NL |qty| × itemCostOn, BTP |totalCost|) theo ngày / món, cùng cách định giá cũ.
 //    Chênh lệch vốn có giữa hai bên (vd. sổ lãi/lỗ không lọc dòng đã huỷ) ghi thành phát hiện, không sửa số để ép khớp.
 // B. Tem = sự thật: tồn NL theo tem trong danh mục = Σ tem nguyên (baseQty, trừ tem đã có trong RT) + Σ unitBase RT
 //    (bỏ tem chờ huỷ) + tem mở trên Firestore thiếu node RT (unitBase Firestore) + bù _ueRtStale — đúng công thức
@@ -14,7 +14,7 @@ const EPS=0.01;
 const ms=v=>typeof v==='number'?v:Date.parse(v||'');
 const r2=n=>Math.round((Number(n)+Number.EPSILON)*100)/100;
 function rowsOf(docs,prefix){return Object.entries(docs).filter(([k])=>k.startsWith(prefix+'/')&&!k.slice(prefix.length+1).includes('/')).map(([k,v])=>({...v,id:k.slice(prefix.length+1)}));}
-// Chép đúng itemCostOn (lai_lo.v6.js): lịch sử ≤ ngày; có lịch sử mà đều sau ngày → oldPrice/price dòng đầu; không lịch sử → giá hiện tại.
+// Chép đúng itemCostOn (lai_lo.v7.js): lịch sử ≤ ngày; có lịch sử mà đều sau ngày → oldPrice/price dòng đầu; không lịch sử → giá hiện tại.
 function costOn(prices,items,itemId,day){
  const now=items[itemId]?Number(items[itemId].costPerUnit)||0:0,list=prices.filter(p=>p.itemId===itemId).sort((a,b)=>String(a.effectiveFrom).localeCompare(String(b.effectiveFrom)));
  if(!day||!list.length)return now;let pick=null;for(const r of list){if(String(r.effectiveFrom)<=day)pick=r;else break;}

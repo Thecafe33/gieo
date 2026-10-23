@@ -10,11 +10,13 @@ Chủ dự án chốt áp dụng từ 01/10/2026, cho manage và quanlygieo.
 
 ## Tích hợp và lượt đọc
 
-Bảng chấm công hiện cả giờ thực tế và giờ trả lương. Bộ tính lương, tổng kết tháng, lãi/lỗ và thu hồi vốn Gieo dùng cùng phép tính. manage nạp lai_lo.v6.js sinh từ quanlygieo (v6 thêm lịch VN xuyên suốt, không đổi trần giờ); v1–v5 giữ nguyên cho bản cũ. Ca làm việc TC33/XOFA dùng cham_cong.v4.js.
+Bảng chấm công hiện cả giờ thực tế và giờ trả lương. Bộ tính lương, tổng kết tháng, lãi/lỗ và thu hồi vốn Gieo dùng cùng phép tính. manage nạp lai_lo.v7.js sinh từ quanlygieo (v6 thêm lịch VN xuyên suốt; v7 chỉ thêm nhánh `lenient` cho tab Lương — mặc định vẫn chặn, số lãi/lỗ không đổi); v1–v6 giữ nguyên cho bản cũ. Ca làm việc TC33/XOFA dùng cham_cong.v4.js.
 
 Chỉ đọc lịch trong khoảng ngày/tháng đang tính, không đọc từng nhân viên/ngày. quanlygieo gộp các truy vấn lịch cùng quán/cùng khoảng đang chạy. Màn chấm công dùng lịch đã đọc sẵn. Sửa lịch Gieo ghi dấu ngày cần tính lại cùng batch, không cần đọc thêm để tìm ngày. manage bỏ đệm lương/xem tạm tính khi sửa lịch.
 
 Snapshot lương có laborVersion=2. Ngày từ 01/10 thuộc kỳ yêu cầu dùng snapshot cũ được chọn tính lại theo giới hạn khoảng hiện hành; snapshot đã sửa dùng lại. Thiếu lịch không ghi số 0 đè sổ cũ; manage ẩn kết quả tài chính chưa hợp lệ và nêu lý do. Không tự sửa sổ tháng đã chốt; muốn thay phải mở lại/chốt lại theo quy trình hiện có.
+
+**23/10 — tab Lương không còn trắng vì thiếu lịch**: tab Lương gọi bộ tính với `{lenient:true}` → ca thiếu lịch KHÔNG cộng giờ (không lấy giờ chấm công thay), ghi vào `PAY_SCHED_MISSING`, màn hiện thẻ «Cần bổ sung lịch — N ca … chưa được cộng vào lương, chưa chốt lương được» + nút Mở Lịch, tiêu đề «(chưa đủ lịch)», từng người «thiếu lịch N ngày — chưa cộng». Lãi/lỗ, Tổng kết tháng, chốt lương giữ mặc định chặn như trên (test `tran_gio_cong.test.js`).
 
 Chưa ghi dữ liệu Firebase thật hoặc deploy Hosting. Sau khi cập nhật app, cần bổ sung lịch còn thiếu trong tháng 10 để báo cáo tính được đầy đủ.
 
