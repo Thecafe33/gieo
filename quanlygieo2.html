@@ -3069,6 +3069,35 @@ async function qlKickNetwork(){
   try{ await fstore.enableNetwork(); }catch(e){}
   if(!auth.currentUser) _authReady = null;
 }
+// [TỰ LÀNH KẾT NỐI 23/10] Máy ngủ / chuyển tab lâu / mất rồi có lại mạng làm kết nối Firestore kẹt: mọi lượt đọc treo mãi tới khi F5.
+// Quay lại tab sau > 45 giây hoặc mạng báo có lại → tự đá lại kết nối (không đụng dữ liệu, ghi chờ vẫn được giữ).
+let _qlHiddenAt = 0, _qlHealBusy = false;
+async function qlAutoHeal(why){
+  if(_qlHealBusy) return; _qlHealBusy = true;
+  try{ await qlKickNetwork(); console.info('[kết nối] đã nối lại:', why); }finally{ _qlHealBusy = false; }
+}
+document.addEventListener('visibilitychange', ()=>{
+  if(document.hidden){ _qlHiddenAt = Date.now(); return; }
+  if(_qlHiddenAt && Date.now() - _qlHiddenAt > 45000) qlAutoHeal('quay lại tab sau ' + Math.round((Date.now() - _qlHiddenAt)/1000) + ' giây');
+  _qlHiddenAt = 0;
+});
+window.addEventListener('online', ()=> qlAutoHeal('mạng có lại'));
+// Cửa sổ trượt (openEditSheet) còn chữ «Đang tải…» sau 12 giây → tự nối lại kết nối một lần; sau 25 giây vẫn chưa xong → hiện nút xử lý ngay trong cửa sổ.
+function qlSheetWatch(wrap){
+  const body = wrap.querySelector('.edit-sheet-body'); if(!body) return;
+  const stuck = ()=> wrap.isConnected && /^\s*Đang tải/.test(body.textContent || '');
+  setTimeout(()=>{ if(stuck()) qlAutoHeal('cửa sổ kẹt «Đang tải» 12 giây'); }, 12000);
+  setTimeout(()=>{
+    if(!stuck()) return;
+    const bar = document.createElement('div');
+    bar.style.cssText = 'margin-top:12px;padding:12px;border:1px solid #F3B2BF;border-radius:14px;display:flex;gap:8px;flex-wrap:wrap;align-items:center';
+    bar.innerHTML = '<span class="small-note" style="flex:1 1 100%;color:var(--bad)">Tải lâu hơn bình thường — kết nối có thể bị kẹt.</span>'
+      + '<button class="btn sm" style="width:auto;padding:0 16px" data-a="k">Nối lại</button><button class="btn outline sm" style="width:auto;padding:0 16px" data-a="r">Tải lại trang</button>';
+    bar.querySelector('[data-a=k]').onclick = async ev=>{ ev.target.disabled = true; await qlKickNetwork(); ev.target.textContent = 'Đã nối lại — mở lại chức năng'; };
+    bar.querySelector('[data-a=r]').onclick = ()=> location.reload();
+    body.appendChild(bar);
+  }, 25000);
+}
 
 // STORE_ID giữ lại làm metadata (phòng sau này nhiều chi nhánh dùng chung
 // project) — không còn dùng làm tiền tố path như bản cũ vì Firestore
@@ -3327,6 +3356,7 @@ function openEditSheet(title, bodyHtml, onClose){
   // lên sẽ không chạy (phần tử vừa tạo, vừa mở đã "open" luôn, không có gì để
   // chuyển tiếp).
   requestAnimationFrame(()=> requestAnimationFrame(()=> wrap.classList.add('open')));
+  qlSheetWatch(wrap);
 }
 function closeEditSheet(silent){
   const wrap = document.getElementById('editSheetWrap');
