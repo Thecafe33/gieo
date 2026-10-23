@@ -147,7 +147,8 @@ Mỗi bước chỉ bắt đầu khi bước trước đạt cửa. Bước có 
 - Bằng chứng ghép (trong khoảng giữa hai lần đếm BTP): dư của X ≈ k phần định lượng X, k ≤ số phần X đã bán trong khoảng (sổ bán BTP, không đọc thêm); thiếu của Y ≈ k phần (định lượng X hoặc Y). Nhóm nhiều thành viên: thử mọi cách ghép; hai cách khớp ngang nhau → «mập mờ», không kết luận.
 - Loại nguyên nhân không hại khách trước: nấu nhầm loại mẻ (lệch ≈ cỡ mẻ, khớp giờ nấu — dữ liệu sẵn có); cân/nhập nhầm ô lúc đếm (chờ chốt: cân lại riêng hai bình lúc mở ca sau, chỉ khi có sự cố).
 - Kết luận «nghi pha sai món»: sự cố CHẤT LƯỢNG, không phải hao hụt — phần ghép khớp không chia hao hụt; trách nhiệm ca / nhóm pha chế trong khoảng, ghi «không xác định được bill»; lặp lại tăng mức; thông báo để biết mức cao. Danh sách bill nghi chỉ tải khi quản lý mở sự cố (không đọc nền).
-- Còn chờ chủ quán: (1) nhóm đã đủ chưa, có cốt nào là thành phần của cốt khác không; (2) cân lại hai bình lúc mở ca sau khi có sự cố; (3) cân nhóm có sự cố lúc bàn giao ca vài ngày sau sự cố (ngoài giờ bán).
+- Chủ quán chốt: ba nhóm đã đủ, không cốt nào nấu từ cốt khác. Nhóm phải **cấu hình được ở quanlygieo** (thêm món mới dễ nhầm → gán nhóm): dự kiến trường `nhomDeNham` trên danh mục BTP / NL (loại C — `catalogMirror` tự đồng bộ sang quán khác, không thêm bảng mới), form sửa món có ô chọn nhóm / tạo nhóm, màn Kho có khung xem các nhóm.
+- Cân sau sự cố: CHỈ nhân viên có ca check-in trong ngày xảy ra sự cố mới phải cân nhóm đó (lúc bàn giao, ngoài giờ bán) — nhân viên khác không. Chờ chủ quán xác nhận cách hiểu + việc cân lại hai bình đầu ca sau (loại «nhập nhầm ô»).
 
 **B7 — Mở family tiếp theo** (BTP: A4, B1–B4 → FIFO: F1–F4 → nhận hàng/nhãn: D1–D3, D5), mỗi family đi lại B0–B6 với phần dùng chung đã có.
 
