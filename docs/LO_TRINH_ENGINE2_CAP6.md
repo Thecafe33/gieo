@@ -140,6 +140,15 @@ Mỗi bước chỉ bắt đầu khi bước trước đạt cửa. Bước có 
 
 **B6 — Cấp 6: tự hiệu chuẩn có rào + báo cáo chứng nhận.** Tham số được phép (sai số đo, baseline, lịch lấy mẫu, ngưỡng thao tác trong sàn/trần) → offline → shadow → tự nhận khi tốt hơn; tự quay về bản đáng tin khi kém/drift. Báo cáo chứng nhận theo mục 5. Cửa: toàn bộ lỗi cài (B0 + drift + baseline học hao hụt) bị phát hiện/khôi phục; báo cáo được chủ quán xem.
 
+**Thiết kế (chưa code) — «Pha nhầm trong nhóm dễ nhầm» cho family BTP (chủ quán 23/10):**
+- Mất mát chính là KHÁCH nhận sai món (đánh giá xấu, không quay lại), không phải lượng cốt. Từ số kho KHÔNG biết được bill nào → không bao giờ chỉ đích danh bill / người.
+- Ràng buộc chủ quán: bán hàng là ưu tiên — KHÔNG thêm thao tác lúc bán (bỏ xác nhận từng ly); BTP chỉ có tem, không mã quét; KHÔNG in cốt lên tem ly (lộ công thức); KHÔNG đo mất khách (tăng lượt đọc).
+- Chỉ ghép bù TRONG nhóm dễ nhầm do chủ quán khai báo (cấu hình, hệ thống không tự đoán): ① cốt trà sữa · cốt sữa gạo; ② cốt trà lài · ô long · camelia · trà đen; ③ thạch dừa Đài Loan · trân châu trắng · trân châu hoàng kim · thạch trà · thạch cafe. Khác nhóm (vd cốt trà sữa thiếu – thạch cafe dư) → hai việc riêng, luật lệch thường.
+- Bằng chứng ghép (trong khoảng giữa hai lần đếm BTP): dư của X ≈ k phần định lượng X, k ≤ số phần X đã bán trong khoảng (sổ bán BTP, không đọc thêm); thiếu của Y ≈ k phần (định lượng X hoặc Y). Nhóm nhiều thành viên: thử mọi cách ghép; hai cách khớp ngang nhau → «mập mờ», không kết luận.
+- Loại nguyên nhân không hại khách trước: nấu nhầm loại mẻ (lệch ≈ cỡ mẻ, khớp giờ nấu — dữ liệu sẵn có); cân/nhập nhầm ô lúc đếm (chờ chốt: cân lại riêng hai bình lúc mở ca sau, chỉ khi có sự cố).
+- Kết luận «nghi pha sai món»: sự cố CHẤT LƯỢNG, không phải hao hụt — phần ghép khớp không chia hao hụt; trách nhiệm ca / nhóm pha chế trong khoảng, ghi «không xác định được bill»; lặp lại tăng mức; thông báo để biết mức cao. Danh sách bill nghi chỉ tải khi quản lý mở sự cố (không đọc nền).
+- Còn chờ chủ quán: (1) nhóm đã đủ chưa, có cốt nào là thành phần của cốt khác không; (2) cân lại hai bình lúc mở ca sau khi có sự cố; (3) cân nhóm có sự cố lúc bàn giao ca vài ngày sau sự cố (ngoài giờ bán).
+
 **B7 — Mở family tiếp theo** (BTP: A4, B1–B4 → FIFO: F1–F4 → nhận hàng/nhãn: D1–D3, D5), mỗi family đi lại B0–B6 với phần dùng chung đã có.
 
 **Trục riêng — quy mô:** phân vùng hàng đợi/clock, mã quán > 100. Làm khi có kế hoạch mở rộng thật, không chặn cấp 6.
