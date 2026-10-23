@@ -236,4 +236,5 @@ async function autoControlCenter(){
   +'<section class="wdg wdg-blue ax-card"><div class="wdg-head"><span class="wdg-mark">'+ic('detective',20)+'</span><span class="wdg-title"><b>Engine 2 · Kiểm soát hao hụt</b><small>Phân bổ trách nhiệm, giao cân, tự học</small></span>'+tag(act2,act2?'Tự động':on2?'Đối chiếu thử':'Tắt')+'</div>'
   +'<div class="wdg-body"><p class="ax-sub">'+e(s2)+'</p><div class="ax-actions"><button class="btn" onclick="Engine2QL.open()">Xem kết quả</button><button class="btn outline" onclick="Engine2QL.settings()">Thiết lập</button></div></div></section>';
 }
-if(typeof NAV_SECTIONS!=='undefined'){const g=NAV_SECTIONS.find(x=>x.group==='Phân tích & dữ liệu');if(g&&!g.items.some(i=>i.key==='auto'))g.items.push({key:'auto',ic:'sliders',label:'Tự động & Engine 2',go:'autoControlCenter()',sub:'Phụ trách, thiết lập, kết quả'});}
+// Đặt NGAY DƯỚI «Hôm nay · Sức khoẻ quán» (chủ quán 23/10: dùng nhiều nhất, không phải cuộn tìm).
+if(typeof NAV_SECTIONS!=='undefined'){const g=NAV_SECTIONS.find(x=>x.items.some(i=>i.key==='today'));if(g&&!g.items.some(i=>i.key==='auto')){const at=g.items.findIndex(i=>i.key==='today')+1;g.items.splice(at,0,{key:'auto',ic:'sliders',label:'Tự động & Engine 2',go:'autoControlCenter()'});}}
