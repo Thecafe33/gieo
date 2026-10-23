@@ -4536,226 +4536,10 @@ async function loyaltyAddStamps(phone, drinkCount) {
 }
 
 // ============================================================
-// 🛏️ VOUCHER BED 1H MIỄN PHÍ — Hợp tác XOFA & The cafe 33
-// Điều kiện: mua ≥2 ly nước tại quán (dùng menu tại quán)
-//         hoặc mua ≥2 ly nước MANG ĐI (To Go) + bill > 40.000đ
-// Số lượng: cứ mỗi 2 ly nước hợp lệ → 1 voucher (2 ly→1, 4 ly→2, 6 ly→3, ...)
-// Ly khuyến mãi (isFree hoặc giá 0đ) KHÔNG được tính vào lượt đếm điều kiện.
-// Voucher: 1 giờ Bed miễn phí (giá trị 15.000đ), hạn dùng 7 ngày
-// ============================================================
-// [16/10/2026] Chủ dự án: NGỪNG chương trình voucher Bed 1h (từ bản PosX này) + huỷ voucher cũ (pos.html / app khách không áp nữa).
-// true = bật lại như cũ.
-const BED_VOUCHER_ACTIVE = false;
-const BED_VOUCHER_EXPIRE_DAYS = 7;
-const BED_VOUCHER_HOUR_VALUE  = 15000;
-
-/** Đếm số ly nước hợp lệ trong giỏ (bỏ qua món khuyến mãi/voucher/miễn phí/giá 0đ, bỏ qua Bed & phụ phí) */
-function _countQualifyingDrinks(items) {
-  return (items || []).reduce((s, c) => {
-    if (!c) return s;
-    if (c._vKey || c._discountId || c.isFree || c.isFood) return s; // [FIX G5.6 / Q3] Food không phải ly nước
-    if ((c.price || 0) === 0) return s; // ly giá 0đ — coi như khuyến mãi, không tính
-    const n = (c.name || '').toLowerCase();
-    if (n.includes('bed') || n.includes('phí chọn') || n.includes('phí ')) return s;
-    return s + (c.qty || 0);
-  }, 0);
-}
-
-/** Tính số voucher Bed được tặng cho 1 đơn: cứ 2 ly nước hợp lệ → 1 voucher (2→1, 4→2, 6→3...) */
-function _computeBedVoucherCount(items, total, isTogoOrder) {
-  const drinkQty = _countQualifyingDrinks(items);
-  if (drinkQty < 2) return 0;
-  if (isTogoOrder && (total || 0) <= 40000) return 0;
-  return Math.floor(drinkQty / 2);
-}
-
-/** Ghi N voucher Bed 1h miễn phí vào customers/{phone}.bedVouchers (1 lần ghi, gộp N key) */
-async function _writeBedVoucherEntries(phone, count, source, orderId) {
-  if (!phone || count <= 0) return [];
-  const now = vnDate();
-  const expiresAt = vnDate(now.getTime() + BED_VOUCHER_EXPIRE_DAYS * 86400000);
-  const entries = {};
-  const voucherIds = [];
-  for (let i = 0; i < count; i++) {
-    const voucherId = 'bv_' + now.getTime() + '_' + i + '_' + Math.random().toString(36).slice(2, 6);
-    const entry = {
-      hours: 1,
-      value: BED_VOUCHER_HOUR_VALUE,
-      createdAt: now.toISOString(),
-      expiresAt: expiresAt.toISOString(),
-      used: false,
-      usedAt: null,
-      reservedBooking: null,
-      source: source || 'posx_purchase'
-    };
-    if (orderId) entry.orderId = orderId;
-    entries[voucherId] = entry;
-    voucherIds.push(voucherId);
-  }
-  await fstore.collection('customers').doc(phone).set({ bedVouchers: entries }, { merge: true });
-  return voucherIds;
-}
-
-/**
- * Gọi sau khi thanh toán thành công — kiểm tra điều kiện & tặng voucher Bed nếu đạt.
- * Trả về NGAY (đồng bộ) số voucher sẽ được tặng, để dùng đẩy tín hiệu lên kiosk;
- * việc ghi Firestore chạy nền (fire-and-forget) phía sau.
- */
-function grantBedVoucherIfQualified(phone, items, total, isTogoOrder, orderId) {
-  if (!BED_VOUCHER_ACTIVE) return 0;
-  const count = _computeBedVoucherCount(items, total, isTogoOrder);
-  if (!phone || count <= 0) return 0;
-
-  _writeBedVoucherEntries(phone, count, 'posx_purchase', orderId || null).then(() => {
-    setTimeout(() => toast('🎁 Khách được tặng ' + count + ' Voucher Bed miễn phí 1h (hạn dùng 7 ngày)!'), 900);
-  }).catch(e => console.warn('[grantBedVoucher]', e));
-
-  return count;
-}
-
-/** Suy ra đường dẫn RTDB của 1 đơn hàng từ field date (dd/mm/yyyy) */
-function _getOrderRtInfo(o) {
-  const p = (o.date || '').split('/'); // [dd, mm, yyyy]
-  if (p.length !== 3) return null;
-  const month = MONTH_KEYS[parseInt(p[1], 10) - 1];
-  const day   = p[0].padStart(2, '0');
-  return { path: 'orders_xolifa/' + month + '/' + day + '/' + o.id, month, day, year: p[2] };
-}
-
-/** Đánh dấu đơn đã được "tích điểm bù nhận voucher bed" (chống cộng trùng) */
-function _markOrderBedVoucherBackfilled(o, phone) {
-  const info = _getOrderRtInfo(o);
-  if (!info) return;
-  db.ref(info.path).update({ bedVoucherBackfilled: true, bedVoucherPhone: phone }).catch(() => {
-    // Đơn có thể đã được archive sang Firestore (sau 3-7 ngày)
-    const docId = info.month + '_' + info.day + '_' + info.year;
-    const upd = {};
-    upd['orders.' + o.id + '.bedVoucherBackfilled'] = true;
-    upd['orders.' + o.id + '.bedVoucherPhone'] = phone;
-    fstore.collection('orders_xolifa_archive').doc(docId).update(upd)
-      .catch(e => console.warn('[markOrderBackfill]', e));
-  });
-  o.bedVoucherBackfilled = true;
-  o.bedVoucherPhone = phone;
-}
-
-/** Nhân viên bấm nút hồng "Tích điểm bù nhận voucher bed" trong Chi tiết đơn (khi đơn quên xin SĐT) */
-function toggleBedVoucherBackfillPanel(orderId) {
-  const panel = document.getElementById('bv-bf-panel-' + orderId);
-  if (!panel) return;
-  const showing = panel.style.display === 'block';
-  panel.style.display = showing ? 'none' : 'block';
-  if (!showing) {
-    setTimeout(() => {
-      const inp = document.getElementById('bv-bf-phone-' + orderId);
-      if (inp) inp.focus();
-    }, 50);
-  }
-}
-
-/** Autocomplete SĐT trong panel cộng voucher bù — hiện gợi ý từ 3 số, tự tra cứu khi đủ 10 số */
-function onBackfillPhoneInput(orderId, val) {
-  const ac = document.getElementById('bv-bf-ac-' + orderId);
-  const foundEl = document.getElementById('bv-bf-found-' + orderId);
-  const inp = document.getElementById('bv-bf-phone-' + orderId);
-  if (!ac || !inp) return;
-
-  let cleanVal = val.replace(/[^0-9]/g, '');
-  if (/^84\d{9}$/.test(cleanVal)) cleanVal = '0' + cleanVal.slice(2);
-  if (inp.value !== cleanVal) inp.value = cleanVal;
-
-  if (typeof allCustomersCache !== 'undefined' && allCustomersCache.length === 0 && typeof fetchAllCustomersCache === 'function') {
-    fetchAllCustomersCache();
-  }
-
-  if (foundEl) foundEl.innerHTML = '';
-
-  if (cleanVal.length === 10) {
-    ac.style.display = 'none';
-    const cust = (typeof allCustomersCache !== 'undefined') ? allCustomersCache.find(c => c.id === cleanVal) : null;
-    if (foundEl) {
-      foundEl.style.color = cust ? '#059669' : '#d97706';
-      foundEl.innerHTML = cust
-        ? ('✓ Khách quen: ' + (cust.nickname || cust.name || 'Khách hàng'))
-        : '➕ SĐT mới — chưa có trong hệ thống, vẫn cộng được voucher';
-    }
-    return;
-  }
-
-  if (cleanVal.length >= 3 && typeof allCustomersCache !== 'undefined') {
-    const matches = allCustomersCache.filter(c => c.id.startsWith(cleanVal) || c.id.includes(cleanVal));
-    if (matches.length > 0) {
-      ac.innerHTML = matches.slice(0, 8).map(c => {
-        const displayName = c.nickname || c.name || 'Khách hàng';
-        const hlPhone = c.id.replace(new RegExp('(' + cleanVal + ')'), '<span style="color:var(--gm);font-weight:900;">$1</span>');
-        return `<div onclick="selectBackfillPhone('${orderId}','${c.id}')"
-             style="padding:12px 16px;border-bottom:1px solid #f0f0f0;display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
-          <div style="font-size:15px;font-weight:700;color:var(--td);">${hlPhone}</div>
-          <div style="font-size:12px;color:var(--gt);">${displayName}</div>
-        </div>`;
-      }).join('');
-      ac.style.display = 'block';
-      return;
-    }
-  }
-  ac.style.display = 'none';
-  ac.innerHTML = '';
-}
-
-function selectBackfillPhone(orderId, phone) {
-  const inp = document.getElementById('bv-bf-phone-' + orderId);
-  if (inp) inp.value = phone;
-  const ac = document.getElementById('bv-bf-ac-' + orderId);
-  if (ac) ac.style.display = 'none';
-  onBackfillPhoneInput(orderId, phone);
-}
-
-// Đóng dropdown autocomplete khi click ra ngoài
-document.addEventListener('click', function(e) {
-  document.querySelectorAll('[id^="bv-bf-ac-"]').forEach(function(ac) {
-    const orderId = ac.id.replace('bv-bf-ac-', '');
-    const inp = document.getElementById('bv-bf-phone-' + orderId);
-    if (inp && !inp.contains(e.target) && !ac.contains(e.target)) ac.style.display = 'none';
-  });
-});
-
-async function backfillBedVoucher(orderId) {
-  const o = orders.find(x => x.id === orderId);
-  if (!o) return;
-  if (!BED_VOUCHER_ACTIVE) { toast('Chương trình voucher Bed đã ngừng.'); return; }
-  if (o.bedVoucherBackfilled) { toast('ℹ️ Đơn này đã được xử lý rồi.'); return; }
-
-  const count = _computeBedVoucherCount(o.itemsArray || (o.items && o.items.map ? o.items : []), o.total, o.isToGo);
-  if (count <= 0) {
-    if (o.isToGo) toast('❌ Đơn mang đi (To Go) cần ≥2 ly nước và bill trên 40.000đ.');
-    else toast('❌ Đơn này không đủ điều kiện (cần ≥2 ly nước).');
-    return;
-  }
-
-  const phoneInp = document.getElementById('bv-bf-phone-' + orderId);
-  const phoneRaw = phoneInp ? phoneInp.value : '';
-  const phone = (phoneRaw || '').replace(/[^0-9]/g, '');
-  if (phone.length < 9) { toast('⚠️ Vui lòng nhập số điện thoại hợp lệ!'); return; }
-
-  try {
-    await _writeBedVoucherEntries(phone, count, 'posx_backfill', orderId);
-    _markOrderBedVoucherBackfilled(o, phone);
-    toast('🎁 Đã cộng ' + count + ' Voucher Bed 1h miễn phí cho SĐT ' + phone + '!');
-    if (curOid === orderId) showDet(orderId); // refresh màn chi tiết
-  } catch (e) {
-    toast('❌ Lỗi: ' + e.message);
-  }
-}
-
-// ============================================================
 // 🔒 CỔNG XÁC NHẬN THANH TOÁN
 // - Luôn hỏi xác nhận lại 1 lần trước khi ghi đơn thật sự
-// - Nếu CHƯA có SĐT tích điểm: nhắc 1 LẦN DUY NHẤT "Xin SĐT để nhận voucher Bed"
-//   (nếu nhân viên vẫn bỏ qua, KHÔNG nhắc lại nữa cho các lần bấm thanh toán tiếp theo)
+// - [23/10/2026] Chủ dự án: BỎ popup xin SĐT ở bước thanh toán (làm chậm bán hàng) và GỠ HẲN chương trình voucher Bed 1h.
 // ============================================================
-let _bvPhoneReminderShown = false;
-
-function _bvResetPhoneReminder() { _bvPhoneReminderShown = false; }
 
 function _bvShowConfirmPayModal(total, onConfirm) {
   let m = document.getElementById('bv-confirm-pay-modal');
@@ -4778,49 +4562,9 @@ function _bvShowConfirmPayModal(total, onConfirm) {
   document.getElementById('bv-cp-ok').onclick = () => { m.style.display = 'none'; onConfirm(); };
 }
 
-function _bvShowPhoneReminderModal(onContinue) {
-  _bvPhoneReminderShown = true; // chỉ hiện đúng 1 lần
-  let m = document.getElementById('bv-phone-reminder-modal');
-  if (!m) {
-    m = document.createElement('div');
-    m.id = 'bv-phone-reminder-modal';
-    m.style.cssText = 'position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(0,0,0,0.55);backdrop-filter:blur(6px)';
-    document.body.appendChild(m);
-  }
-  m.innerHTML = '<div style="background:#fff;width:100%;max-width:360px;border-radius:26px;overflow:hidden;">'
-    + '<div style="background:linear-gradient(135deg,#ec4899,#db2777);padding:26px 24px;text-align:center;">'
-    + '<div style="font-size:40px;margin-bottom:6px;">🎁</div>'
-    + '<p style="color:#fff;font-weight:900;font-size:16px;margin:0;line-height:1.4;">' + (BED_VOUCHER_ACTIVE ? 'Xin số điện thoại tích điểm<br>để nhận voucher BED' : 'Xin số điện thoại<br>để tích điểm cho khách') + '</p>'
-    + '</div>'
-    + '<div style="padding:20px 24px;">'
-    + '<p style="font-size:12.5px;color:#6b7280;font-weight:600;text-align:center;line-height:1.6;margin:0 0 16px;">' + (BED_VOUCHER_ACTIVE ? 'Đơn hàng đủ điều kiện sẽ được tặng Voucher Bed miễn phí nếu có SĐT khách.' : 'Có SĐT thì khách được tích điểm / tem cho đơn này.') + '</p>'
-    + '<div style="display:flex;gap:10px;">'
-    + '<button id="bv-pr-back" style="flex:1;padding:13px;border:1.5px solid #e5e7eb;border-radius:14px;background:#fff;color:#6b7280;font-weight:800;font-size:12px;cursor:pointer;">Quay lại nhập SĐT</button>'
-    + '<button id="bv-pr-continue" style="flex:1;padding:13px;border:none;border-radius:14px;background:linear-gradient(135deg,#ec4899,#db2777);color:#fff;font-weight:900;font-size:12px;cursor:pointer;">Vẫn tiếp tục</button>'
-    + '</div></div></div>';
-  m.style.display = 'flex';
-  document.getElementById('bv-pr-back').onclick = () => {
-    m.style.display = 'none';
-    const inp = document.getElementById('cuph');
-    if (inp) inp.focus();
-  };
-  document.getElementById('bv-pr-continue').onclick = () => {
-    m.style.display = 'none';
-    onContinue();
-  };
-}
-
-/** Gọi trước khi chạy hàm thanh toán thật sự — nhắc SĐT (tối đa 1 lần) rồi luôn hỏi xác nhận lại */
+/** Gọi trước khi chạy hàm thanh toán thật sự — hỏi xác nhận lại 1 lần */
 function _bvGateBeforePay(total, actualPayFn) {
-  const phoneEl = document.getElementById('cuph');
-  const hasPhone = phoneEl && phoneEl.value.replace(/[^0-9]/g, '').length >= 9;
-  const showConfirm = () => _bvShowConfirmPayModal(total, actualPayFn);
-
-  if (!hasPhone && !_bvPhoneReminderShown) {
-    _bvShowPhoneReminderModal(showConfirm);
-  } else {
-    showConfirm();
-  }
+  _bvShowConfirmPayModal(total, actualPayFn);
 }
 // ============================================================
 async function loyaltyProcessAfterPay(phone, billAmount, itemCount) {
@@ -4970,7 +4714,7 @@ function confirmCashPay() {
 // 2. NHÁNH ORDER — Ghi đơn hàng vào RT theo tháng/ngày
 // ============================================================
 // [FIX G4.1] Cờ chống ghi đơn 2 lần: giỏ chỉ được xoá sau cả chuỗi Promise, trong lúc đó bấm Xác nhận lần nữa
-// (hoặc chuyển khoản tự xác nhận trùng lúc bấm tay) sẽ ra đơn trùng + voucher Bed trùng.
+// (hoặc chuyển khoản tự xác nhận trùng lúc bấm tay) sẽ ra đơn trùng.
 let _payInFlight = false;
 function _payBegin() {
   if (!validateSharedGifts()) { toast('Ly tặng không còn hợp lệ. Quay lại giỏ, gỡ ly tặng và chọn lại trong danh sách.'); return false; }
@@ -4981,18 +4725,13 @@ function _payBegin() {
 }
 function _payEnd() { _payInFlight = false; }
 
-// [FIX G4.2] Phần dùng chung sau khi đơn đã ghi thành công: tích điểm / tem, voucher Bed, trừ ly tem (tuần tự).
-// Trả về số voucher Bed được tặng.
-function _loyaltyAfterSave(items, total, orderId) {
+// [FIX G4.2] Phần dùng chung sau khi đơn đã ghi thành công: tích điểm / tem, trừ ly tem (tuần tự).
+function _loyaltyAfterSave(items, total) {
   const loyPhone = document.getElementById('cuph').value.trim();
   const stampPhone = _captureStampFreeIntent(); // chụp trước khi xoá giỏ / reset
-  let job = Promise.resolve(), bed = 0;
-  if (loyPhone) {
-    job = loyaltyProcessAfterPay(loyPhone, total, stampCupCountOf(items));
-    bed = grantBedVoucherIfQualified(loyPhone, items, total, isToGo, orderId);
-  }
+  let job = Promise.resolve();
+  if (loyPhone) job = loyaltyProcessAfterPay(loyPhone, total, stampCupCountOf(items));
   Promise.resolve(job).catch(() => {}).then(() => _finalizeStampFreeAfterPay(stampPhone));
-  return bed;
 }
 
 function confirmPay(cashGiven, cashChange) {
@@ -5053,8 +4792,8 @@ function confirmPay(cashGiven, cashChange) {
   db.ref('orders_xolifa/' + month + '/' + day).push(order).then(ref => {
     // KHÔNG thêm thủ công vào orders[] — RT listener child_added tự xử lý (có guard duplicate).
 
-    // Tích điểm / tem, voucher Bed, trừ ly tem — SAU KHI order lưu thành công, tuần tự [G2.6, G4.2]
-    const _bvGrantedCount = _loyaltyAfterSave(items, total, ref.key);
+    // Tích điểm / tem, trừ ly tem — SAU KHI order lưu thành công, tuần tự [G2.6, G4.2]
+    _loyaltyAfterSave(items, total);
 
     _finalizeDiscountAfterPay().then(() => {
       cart = {};
@@ -5067,8 +4806,7 @@ function confirmPay(cashGiven, cashChange) {
       document.getElementById('cuph').value = '';
       clearCustomer();
       selectedVoucher = null;
-      _bvResetPhoneReminder();
-      syncDisplay('done', { total, method: order.method, bedVoucherGranted: _bvGrantedCount });
+      syncDisplay('done', { total, method: order.method });
       setTimeout(() => resetDisplay(), 5000);
       renderMenu();
       renderCartDrawer();
@@ -5723,33 +5461,6 @@ function showDet(id) {
         <div style="font-size:13px;font-weight:700;color:var(--gm);">${o.method === 'TÍNH RIÊNG' ? 'TÍNH RIÊNG' : o.method}${o.splitGroups && o.splitGroups.length ? `<div style="font-size:11px;font-weight:600;color:var(--gt);margin-top:3px;">${o.splitGroups.length} nhóm</div>` : ''}</div>
       </div>
     </div>
-
-    ${(BED_VOUCHER_ACTIVE && !o.phone && !o.bedVoucherBackfilled) ? `
-    <!-- Cộng Voucher Bed (tích điểm bù) — đặt TRƯỚC tổng bill để dễ thấy -->
-    <div style="background:linear-gradient(135deg,#fdf2f8,#fce7f3);border:1.5px solid #f9a8d4;border-radius:20px;padding:16px 18px;margin-bottom:12px;">
-      <div id="bv-bf-prompt-${o.id}" style="display:flex;align-items:center;gap:12px;">
-        <div style="width:40px;height:40px;border-radius:12px;background:#fff;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;">🎁</div>
-        <div style="flex:1;min-width:0;">
-          <div style="font-size:13px;font-weight:900;color:#be185d;">Đơn quên xin SĐT tích điểm?</div>
-          <div style="font-size:11px;color:#db2777;font-weight:600;margin-top:1px;">Cộng bù Voucher Bed miễn phí cho khách</div>
-        </div>
-        <button onclick="toggleBedVoucherBackfillPanel('${o.id}')" style="flex-shrink:0;padding:11px 16px;border:none;border-radius:14px;background:linear-gradient(135deg,#ec4899,#db2777);color:#fff;font-weight:900;font-size:12px;text-transform:uppercase;letter-spacing:.02em;cursor:pointer;box-shadow:0 4px 12px rgba(219,39,119,.35);">Cộng ngay</button>
-      </div>
-      <div id="bv-bf-panel-${o.id}" style="display:none;margin-top:14px;padding-top:14px;border-top:1px dashed #f9a8d4;">
-        <div style="position:relative;">
-          <input type="tel" id="bv-bf-phone-${o.id}" oninput="onBackfillPhoneInput('${o.id}', this.value)" placeholder="Nhập SĐT khách..." autocomplete="off"
-            style="width:100%;padding:14px 16px;border:1.5px solid #f9a8d4;border-radius:14px;font-size:15px;font-weight:700;color:var(--td);outline:none;box-sizing:border-box;">
-          <div id="bv-bf-ac-${o.id}" style="display:none;position:absolute;top:calc(100% + 6px);left:0;right:0;background:#fff;border-radius:14px;box-shadow:0 8px 24px rgba(0,0,0,.15);max-height:220px;overflow-y:auto;z-index:30;"></div>
-        </div>
-        <div id="bv-bf-found-${o.id}" style="font-size:12px;font-weight:700;margin-top:8px;min-height:16px;"></div>
-        <div style="display:flex;gap:10px;margin-top:12px;">
-          <button onclick="toggleBedVoucherBackfillPanel('${o.id}')" style="flex:1;padding:12px;border:1.5px solid #e5e7eb;border-radius:14px;background:#fff;color:#6b7280;font-weight:700;font-size:12px;cursor:pointer;">Huỷ</button>
-          <button onclick="backfillBedVoucher('${o.id}')" style="flex:2;padding:12px;border:none;border-radius:14px;background:linear-gradient(135deg,#ec4899,#db2777);color:#fff;font-weight:900;font-size:12px;text-transform:uppercase;cursor:pointer;">Xác nhận cộng voucher</button>
-        </div>
-        <p style="font-size:10.5px;color:#9ca3af;font-weight:600;text-align:center;margin:8px 0 0;">Chỉ cộng voucher Bed — không cộng điểm/tem cho đơn này</p>
-      </div>
-    </div>` : (o.bedVoucherBackfilled ? `
-    <div style="background:#fdf2f8;border:1.5px solid #fbcfe8;border-radius:16px;padding:12px 16px;margin-bottom:12px;font-size:12px;color:#db2777;font-weight:700;text-align:center;">🎁 Đã cộng Voucher Bed cho SĐT ${o.bedVoucherPhone||''}</div>` : '')}
 
     <!-- Total card -->
     <div style="background:#fff;border-radius:20px;padding:22px 24px;${isDgBill ? 'border:2px solid #bfdbfe;' : ''}">
@@ -6670,8 +6381,8 @@ function _actualFinalizeSplitPay() {
   db.ref('orders_xolifa/' + month + '/' + day).push(order).then(ref => {
     // [FIX G4.2] KHÔNG thêm thủ công vào orders[] — RT listener child_added tự xử lý (có guard trùng).
     // Trước đây unshift thủ công + listener cùng thêm → đơn hiện 2 lần, doanh thu nhân đôi trong phiên.
-    // Tích điểm / tem + voucher Bed như đơn thường (trước đây Tính riêng bỏ qua tích tem).
-    const _bvGrantedCountSp = _loyaltyAfterSave(items, total, ref.key);
+    // Tích điểm / tem như đơn thường (trước đây Tính riêng bỏ qua tích tem).
+    _loyaltyAfterSave(items, total);
     cart = {};
     dgDiscountAmt = 0; togoDiscountAmt = 0;
     resetPayMethod();
@@ -6680,9 +6391,8 @@ function _actualFinalizeSplitPay() {
     document.getElementById('cuph').value = '';
     clearCustomer();
     selectedVoucher = null;
-    _bvResetPhoneReminder();
     // Đẩy state done lên kiosk → hiện thank you, 5s sau reset
-    syncDisplay('done', { total, method: order.method, bedVoucherGranted: _bvGrantedCountSp });
+    syncDisplay('done', { total, method: order.method });
     setTimeout(() => resetDisplay(), 5000);
     renderMenu();
     toast('✅ Đã hoàn tất tính riêng!');
