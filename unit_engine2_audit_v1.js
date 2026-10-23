@@ -254,7 +254,7 @@ function check(snap){
   if(!['auto','closed_pool','no_checkpoint','manual'].includes(r.caseStatus))add('ALERT_REVIEW_BEFORE_FINAL',ref,{caseStatus:r.caseStatus});
   const u=Number(c.usageTotal)||0,b=Number(c.book)||0,base=u>0?u:b>0?b:1,abs={g:15,ml:15,kg:0.015,l:0.015}[String(c.unit||'').toLowerCase()]||0,mag=Math.abs(Number(c.variance)||0);
   const large=mag>Math.max(abs,0.05*base)&&mag/base>0.25;
-  if(!r.fyi&&(large||r.type==='duty_case'))add('ALERT_AUTO_CLOSED_LARGE',ref,{ratio:Math.round(mag/base*1000)/10,type:r.type});
+  if(!r.fyi&&(large||['duty_case','shift_weigh_large_deviation'].includes(r.type)))add('ALERT_AUTO_CLOSED_LARGE',ref,{ratio:Math.round(mag/base*1000)/10,type:r.type});
  }
  // --- pha nhầm trong nhóm dễ nhầm (chủ quán 23/10) — kiểm lại độc lập từ danh mục + vụ lệch gốc ---
  const MC=snap.mixupCatalog||{},MD=snap.mixupCases||{},gk=v=>String(v||'').trim().replace(/\s+/g,' ').toLowerCase();

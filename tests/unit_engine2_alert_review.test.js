@@ -71,8 +71,19 @@ const A=(f,id='al1')=>f.FS['alerts_gieogieo/'+id];
   f.FS[k].fyi=true;f.FS[k].caseStatus='pending_verify';rep=await AUD.run({storeId:'gg01',from:D,to:D,fstore:f.fstore});assert(rep.issues.some(i=>i.code==='ALERT_REVIEW_BEFORE_FINAL'));
   console.log('ok Kiểm toán độc lập: bắt tự đóng thông báo lệch lớn / xử lý khi vụ lệch chưa chốt');}
 
+ // Đếm giao ca NL: so với số chốt ca trước; cân cuối ca lệch lớn: luôn để biết sau khi vụ lệch NL chốt.
+ {const f=fx({'alerts_gieogieo/h1':{type:'handover_variance',itemId:'sua',itemName:'Sữa tươi',unit:'ml',businessDate:D,createdAt:AT,status:'new',closeQty:2000,openQty1:1900,openQty2:1880,varianceQty:-120,recountMatched:true,closeStaff:'A',openStaff:'B'},
+   'alerts_gieogieo/h2':{type:'handover_variance',itemId:'sua',itemName:'Sữa tươi',unit:'ml',businessDate:D,createdAt:AT,status:'new',closeQty:1000,varianceQty:-400,recountMatched:true}});
+  await f.s.alertReview('h1');await f.s.alertReview('h2');
+  assert.equal(A(f,'h1').status,'resolved');assert.match(A(f,'h1').autoReview.reason,/Thiếu 120 ml \(~6% số chốt ca trước\)\. Đã đếm lại 2 lần khớp nhau/);
+  assert.equal(A(f,'h2').fyi,true,'giao ca lệch 40% → để biết');
+  const g=fx({['duty_cases_gieogieo/'+E.ueKey('nl','tct','op1')]:{type:'nl',prepId:'tct',unit:'g',businessDate:D,variance:-80,usageTotal:900,book:1000,status:'auto',shiftWeighOp:'op1',allocations:[{employeeName:'A',qty:-80}]},
+   'alerts_gieogieo/shift_weigh_large_dev_op1':{type:'shift_weigh_large_deviation',itemId:'tct',opId:'op1',businessDate:D,createdAt:AT,status:'new'}});
+  assert.equal(await g.s.alertsForCase({...g.FS['duty_cases_gieogieo/'+E.ueKey('nl','tct','op1')],id:E.ueKey('nl','tct','op1')}),1);
+  await g.s.drain(E.key('alert_review','shift_weigh_large_dev_op1'));assert.equal(A(g,'shift_weigh_large_dev_op1').fyi,true);assert.equal(A(g,'shift_weigh_large_dev_op1').status,'new');
+  console.log('ok Giao ca NL ≤ 25% đóng / > 25% để biết; cân cuối ca lệch lớn → để biết sau khi vụ lệch NL chốt');}
  const src=require('node:fs').readFileSync(require('node:path').join(__dirname,'../functions/automation/engine2.js'),'utf8');
- assert.match(src,/kind==='alerts'[\s\S]*enqueue\('alert_review',id\)/);assert.match(src,/alertsForCase\(/);assert.match(src,/sweepAlerts\(\)/);
+ assert.match(src,/'handover_variance','shift_weigh_large_deviation'\]\.includes\(after\?\.type\)\)await service\(store\)\.enqueue\('alert_review',id\)/);assert.match(src,/alertsForCase\(/);assert.match(src,/sweepAlerts\(\)/);
  console.log('ok Worker: thông báo mới / vụ lệch đổi trạng thái / quét hằng ngày');
  console.log('ALL PASS');
 })().catch(e=>{console.error(e);process.exit(1)});

@@ -29,7 +29,7 @@ function createEngine2Worker({db,rt,FieldValue,now=Date.now,documentId}){
    // Vụ lệch chốt / đổi trạng thái → xếp lại thông báo «Lệch đếm BTP» / «Lệch lớn» của chính vụ đó.
    if(after&&before?.status!==after.status)await service(store).alertsForCase({...after,id});
   }else if(kind==='alerts'){
-   if(!before&&['prep_count_variance','duty_case'].includes(after?.type))await service(store).enqueue('alert_review',id);
+   if(!before&&['prep_count_variance','duty_case','handover_variance','shift_weigh_large_deviation'].includes(after?.type))await service(store).enqueue('alert_review',id);
    // BTP âm: phiếu «chờ xác nhận bù» / «chưa giải thích» vừa ghi (thông báo prep_shortage_recon) → Engine 2 tự đối chiếu.
    if(after?.type==='prep_shortage_recon'&&after.reconId&&(!before||before.status!==after.status))await service(store).enqueue('sub_review',after.reconId);
   }else if(kind==='stock_containers'){

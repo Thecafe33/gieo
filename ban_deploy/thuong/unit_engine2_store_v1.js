@@ -350,24 +350,32 @@ function create(opts){
  // ── Thông báo lệch đếm cuối ngày (prep_count_variance / duty_case) — chủ quán 23/10: quản lý không phải xử lý thông báo
  // từ ngày áp dụng. Chờ vụ lệch Unit Engine chốt (không còn chờ cân lại / tranh chấp) rồi: ≤ 25% → đóng thông báo kèm căn cứ;
  // > 25% (và mọi «Lệch lớn») → giữ làm THÔNG BÁO ĐỂ BIẾT. Không đổi vụ lệch / phân bổ. Chế độ thử: chỉ ghi hồ sơ.
- const ALERT_TYPES=['prep_count_variance','duty_case'],CASE_FINAL=['auto','closed_pool','no_checkpoint','manual'];
+ // handover_variance (đếm giao ca NL, đã đếm lại 2 lần ở POS — không có vụ lệch): so với số chốt ca trước.
+ // shift_weigh_large_deviation (cân cuối ca theo mã lệch nhiều): vụ lệch NL của lượt cân → luôn để biết như «Lệch lớn».
+ const ALERT_TYPES=['prep_count_variance','duty_case','handover_variance','shift_weigh_large_deviation'],CASE_FINAL=['auto','closed_pool','no_checkpoint','manual'];
  async function alertReview(id,guard){
   const ref=coll('alerts').doc(id),a=data(await ref.get());
   if(!a||!ALERT_TYPES.includes(a.type)||a.status!=='new'||a.fyi===true||a.autoReview)return false;
   const cfg=await config();if(!cfg.enabled||!/^\d{4}-\d{2}-\d{2}$/.test(cfg.fromDate||'')||!(String(a.businessDate||'')>=cfg.fromDate))return false;
   let c=null;
-  if(a.type==='duty_case'&&a.caseId)c=data(await coll('duty_cases').doc(a.caseId).get());
+  if(a.type==='handover_variance'){
+   if(!E.finite(a.varianceQty))return false;
+   c={id:null,status:'auto',variance:Number(a.varianceQty),usageTotal:0,book:Math.abs(Number(a.closeQty)||0),unit:a.unit,allocations:[],handover:true};
+  }
+  else if(a.type==='shift_weigh_large_deviation'&&a.itemId&&a.opId)c=data(await coll('duty_cases').doc(E.ueKey('nl',a.itemId,a.opId)).get());
+  else if(a.type==='duty_case'&&a.caseId)c=data(await coll('duty_cases').doc(a.caseId).get());
   else if(a.prepId){c=data(await coll('duty_cases').doc(E.ueKey('prep',a.prepId,E.ms(a.createdAt))).get());
    if(!c){const q=(await coll('duty_cases').where('prepId','==',a.prepId).where('businessDate','==',a.businessDate).limit(5).get()).docs.map(data);c=q.sort((x,y)=>Math.abs(E.ms(x.createdAt)-E.ms(a.createdAt))-Math.abs(E.ms(y.createdAt)-E.ms(a.createdAt)))[0]||null;}}
   if(!c)return false;                                     // vụ lệch chưa ghi xong — trigger vụ lệch / lượt ngày sẽ gọi lại
   if(!CASE_FINAL.includes(c.status))return false;         // đang chờ cân lại / tranh chấp: đợi Unit Engine chốt
   const cls=E.countAlertClass(c.variance,c.usageTotal,c.book,c.unit||a.unit);
-  const fyi=a.type==='duty_case'||cls.fyi,pct=Number.isFinite(cls.ratio)?Math.round(cls.ratio*1000)/10:null;
+  const fyi=['duty_case','shift_weigh_large_deviation'].includes(a.type)||cls.fyi,pct=Number.isFinite(cls.ratio)?Math.round(cls.ratio*1000)/10:null;
   const who=(c.allocations||[]).filter(x=>Math.abs(Number(x.qty)||0)>0.005).map(x=>(x.employeeName||x.employeeId)+' '+E.round(Math.abs(Number(x.qty)))).join(', ');
   const mix=(c.mixupIds||[]).length?' Một phần đã ghép «nghi pha nhầm» trong nhóm dễ nhầm — xem sự cố trong Tổng kết tháng.':'';
-  const label=a.type==='duty_case'?'Lệch lớn — vụ lệch đã được Unit Engine chốt':cls.label;
-  const reason=(c.variance<0?'Thiếu ':'Dư ')+Math.abs(E.round(c.variance))+' '+(c.unit||a.unit||'')+(pct!==null?' (~'+pct+'% lượng dùng)':'')+'. '+
-   (c.status==='manual'?'Giữ quyết định của quản lý.':who?'Unit Engine đã quy theo ca: '+who+'.':'Unit Engine ghi phần chưa quy cá nhân (không đủ căn cứ).')+mix;
+  const label=a.type==='duty_case'||a.type==='shift_weigh_large_deviation'?'Lệch lớn — vụ lệch đã được Unit Engine chốt':cls.label;
+  const reason=(c.variance<0?'Thiếu ':'Dư ')+Math.abs(E.round(c.variance))+' '+(c.unit||a.unit||'')+(pct!==null?' (~'+pct+(c.handover?'% số chốt ca trước':'% lượng dùng')+')':'')+'. '+
+   (c.handover?(a.recountMatched?'Đã đếm lại 2 lần khớp nhau — lệch giữa ca trước và ca sau.':'Lần đếm lại khác lần đầu — lấy số đếm lại.')+(a.closeStaff||a.openStaff?' Ca trước: '+(a.closeStaff||'—')+' · ca sau: '+(a.openStaff||'—')+'.':'')
+    :c.status==='manual'?'Giữ quyết định của quản lý.':who?'Unit Engine đã quy theo ca: '+who+'.':'Unit Engine ghi phần chưa quy cá nhân (không đủ căn cứ).')+mix;
   const rec={by:'engine2',policy:'count_alert_v1',band:cls.band,label,ratioPct:pct,caseId:c.id||null,caseStatus:c.status,reason};
   const auditRef=sub('alert_reviews').doc(E.key(id));
   return fs.runTransaction(async t=>{
@@ -384,6 +392,7 @@ function create(opts){
  async function alertsForCase(c){
   if(!c||!CASE_FINAL.includes(c.status))return 0;const ids=new Set();
   if(c.id)for(const d of (await coll('alerts').where('caseId','==',c.id).limit(10).get()).docs)ids.add(d.id);
+  if(c.type==='nl'&&c.shiftWeighOp)ids.add(('shift_weigh_large_dev_'+c.shiftWeighOp).slice(0,180));
   if(c.prepId&&c.businessDate)for(const d of (await coll('alerts').where('prepId','==',c.prepId).where('businessDate','==',c.businessDate).limit(20).get()).docs)if(d.data().type==='prep_count_variance')ids.add(d.id);
   for(const id of ids)await enqueue('alert_review',id);return ids.size;
  }
