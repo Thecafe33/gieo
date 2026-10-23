@@ -30,3 +30,10 @@ Lưu ý dữ liệu thật gg01: nhóm 3 trộn **BTP** (Thạch trà, Thạch C
 | P6 | Kiểm toán + mô phỏng | Mã lỗi mới (ghép khác nhóm, kết luận khi chưa cân lại, chỉ đích danh bill, chia hao hụt phần đã ghép) + lỗi cài; kịch bản mô phỏng: pha nhầm thật / nhập nhầm ô / nấu nhầm mẻ / khác nhóm trùng số (không được ghép). |
 
 Thứ tự: P1 trước (chủ quán gán nhóm được ngay, chưa đổi hành vi nào), rồi P2 → P6. Chưa deploy.
+
+## Trạng thái
+
+| Bước | Trạng thái |
+|---|---|
+| P1 | ✅ 23/10 — quanlygieo: ô «Nhóm dễ nhầm» ở form BTP (`prepDraft.nhomDeNham`) và form nguyên liệu (`invNhomDeNham`), gợi ý nhóm sẵn có (`nhomDeNhamFieldHTML`), khung «Nhóm dễ nhầm» trên danh sách BTP (`nhomDeNhamPanelHTML`, gồm cả NL); gộp không phân biệt hoa thường (`nhomDeNhamGroups`). Test `tests/nhom_de_nham.test.js`. Chủ quán tự gán 3 nhóm cho từng món. |
+| P2–P6 | chưa |

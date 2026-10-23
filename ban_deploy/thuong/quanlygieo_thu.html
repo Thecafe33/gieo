@@ -23407,6 +23407,7 @@ function renderInventoryItemFormFields(editingItem){
         ${sw('invStaffCounts', !editingItem || editingItem.staffCounts !== false, '', 'Nhân viên phải kiểm kê món này', 'Tắt thì không kiểm kê, không cân khi nấu.')}
         ${sw('invIsPackaging', !!(editingItem && editingItem.isPackagingMaterial), 'renderTrackingBox()', 'Vật tư bao bì', 'Túi, ống hút, muỗng... Dùng ngưỡng lệch kiểm kê riêng.')}
         <div id="invTrackingBox"></div>
+        <div style="max-width:420px;margin-top:14px">${nhomDeNhamFieldHTML('invNhomDeNham', editingItem && editingItem.nhomDeNham)}</div>
       </div>
 
       <div class="nlf-card">
@@ -23916,6 +23917,7 @@ async function submitInventoryItem(){
   // không vô tình loại món khỏi kiểm kê chỉ vì lỗi hiển thị.
   const staffCounts = document.getElementById('invStaffCounts')?.checked !== false;
   const isPackagingMaterial = !!document.getElementById('invIsPackaging')?.checked;
+  const nhomDeNham = nhomDeNhamNorm(document.getElementById('invNhomDeNham')?.value);
   // ---- Theo dõi & kiểm kê ----
   const stockManaged = document.getElementById('invStockManaged')?.checked !== false;
   const countUnitName = stockManaged ? (document.getElementById('invCountUnit')?.value || '') : '';
@@ -23967,7 +23969,7 @@ async function submitInventoryItem(){
   try{
     if(editingItemId){
       savedItemId = editingItemId;
-      const metaLuu = { name, minStock, costPerUnit, packagingUnits, staffCounts, isPackagingMaterial,
+      const metaLuu = { name, minStock, costPerUnit, packagingUnits, staffCounts, isPackagingMaterial, nhomDeNham,
         trackingMode, countUnitName, stockManaged, openShelfLifeHours, printOpenLabel, prepWholePack, vesselIds, originalPackId,
         ...(nlIsVolumeUnit(baseUnitNow) ? { densityGPerMl } : {}) };
       // Mốc giá + bản ghi nguyên liệu ghi trong CÙNG MỘT batch: hoặc cả hai, hoặc không gì cả.
@@ -23999,7 +24001,7 @@ async function submitInventoryItem(){
       const refMoi = await addInventoryItem({
         name, unit: document.getElementById('invUnit').value,
         currentStock: v('invStart') * f('invStartUnit'),
-        minStock, costPerUnit, packagingUnits, staffCounts, isPackagingMaterial,
+        minStock, costPerUnit, packagingUnits, staffCounts, isPackagingMaterial, nhomDeNham,
         trackingMode, countUnitName, stockManaged, openShelfLifeHours, printOpenLabel, prepWholePack, vesselIds, originalPackId,
         densityGPerMl
       });
@@ -24096,6 +24098,31 @@ async function removeInventoryItem(id){
 let editingPrepId = null;
 let prepDraft = null; // {code,name,unit,wastePct,batchYield,batchInputs:[{itemId,qty}]}
 
+// [PHA NHẦM — chủ quán 23/10] Nhóm dễ nhầm: các món nhân viên có thể lấy nhầm cho nhau (cốt trà sữa ↔ cốt sữa gạo,
+// các cốt trà, các topping thạch / trân châu). Lưu tên nhóm ở trường nhomDeNham của danh mục BTP / NL — danh mục theo
+// quán (loại C) nên catalogMirror tự chép sang quán khác. Engine 2 CHỈ ghép dư / thiếu trong cùng nhóm (docs/KE_HOACH_PHA_NHAM_NHOM.md).
+function nhomDeNhamNorm(v){ return String(v||'').trim().replace(/\s+/g,' ').slice(0,60); }
+function nhomDeNhamGroups(){
+  const m = new Map();
+  const add = (x, loai) => { const g = nhomDeNhamNorm(x && x.nhomDeNham); if(!g || x.active === false) return;
+    const k = g.toLowerCase(); if(!m.has(k)) m.set(k, {ten:g, mon:[]}); m.get(k).mon.push({id:x.id, ten:x.name||x.id, loai}); };
+  (PREP_ITEMS||[]).forEach(x=>add(x,'BTP')); (INVENTORY_ITEMS||[]).forEach(x=>add(x,'NL'));
+  return [...m.values()].sort((a,b)=>a.ten.localeCompare(b.ten,'vi'));
+}
+// Ô nhập có gợi ý nhóm sẵn có (gõ tên mới = tạo nhóm mới; để trống = không thuộc nhóm nào).
+function nhomDeNhamFieldHTML(inputId, value, oninput){
+  return `<div class="field"><label for="${inputId}">Nhóm dễ nhầm (tuỳ chọn)</label>
+    <input type="text" id="${inputId}" list="${inputId}_ds" maxlength="60" value="${escapeHtmlAttr(nhomDeNhamNorm(value))}" placeholder="VD: Cốt sữa · Cốt trà · Topping thạch" ${oninput?`oninput="${oninput}"`:''}>
+    <datalist id="${inputId}_ds">${nhomDeNhamGroups().map(g=>`<option value="${escapeHtmlAttr(g.ten)}"></option>`).join('')}</datalist>
+    <div class="hint">Món nhân viên dễ lấy nhầm cho nhau. Cuối ngày, dư món này – thiếu món cùng nhóm sẽ được xét là nghi pha nhầm (khác nhóm không bao giờ ghép).</div></div>`;
+}
+function nhomDeNhamPanelHTML(){
+  const gs = nhomDeNhamGroups();
+  return `<section class="wdg" style="margin-bottom:14px"><div class="wdg-head">${wdgHeadHTML('detective','Nhóm dễ nhầm','Món nhân viên có thể lấy nhầm cho nhau')}</div><div style="padding:0 16px 14px">
+    ${gs.length ? gs.map(g=>`<div class="row"><span class="rl"><b>${escapeHtmlAttr(g.ten)}</b></span><span class="rv" style="text-align:right">${g.mon.map(x=>escapeHtmlAttr(x.ten)+' <span class="small-note">'+x.loai+'</span>').join(' · ')}</span></div>`).join('')
+      : '<div class="small-note">Chưa có nhóm nào. Gán ở ô «Nhóm dễ nhầm» khi sửa bán thành phẩm hoặc nguyên liệu.</div>'}
+    <div class="small-note" style="margin-top:6px">Sửa nhóm ở form từng món (BTP hoặc nguyên liệu). Nhóm có ít nhất 2 món mới có tác dụng.</div></div></section>`;
+}
 function newPrepDraft(){
   // Gợi ý mã CB kế tiếp theo đúng cách đánh mã trong file Excel (CB01, CB02...)
   const nums = PREP_ITEMS.map(p=>parseInt(String(p.code||'').replace(/\D/g,''),10)).filter(n=>!isNaN(n));
@@ -24115,7 +24142,7 @@ function newPrepDraft(){
            // [MỚI] Cách chế biến — hướng dẫn từng bước, POS hiện lại ngay dưới ô "Nguyên
            // liệu cần cân" và ở nút "Xem công thức" khi lô đang nấu (xem openPrepRecipeView
            // ở posgieo.html) — BTP nhiều bước không cần nhân viên nhớ hết hoặc hỏi lại.
-           instructions:'' };
+           instructions:'', nhomDeNham:'' };
 }
 function prepResetForm(){ editingPrepId=null; prepDraft=null; renderKhoPrep(); }
 function prepStartNew(){ editingPrepId=null; prepDraft=newPrepDraft(); renderKhoPrep(); }
@@ -24132,7 +24159,7 @@ function prepStartEdit(id){
                 // BTP khai trước khi có tính năng cân trừ bì chưa có field này.
                 vesselIds:(p.vesselIds||[]).slice(0),
                 // BTP khai trước khi có tính năng này thì chưa có cách chế biến — để trống.
-                instructions:p.instructions||'' };
+                instructions:p.instructions||'', nhomDeNham:nhomDeNhamNorm(p.nhomDeNham) };
   renderKhoPrep();
 }
 function prepAddInput(){
@@ -24365,6 +24392,8 @@ async function renderKhoPrep(){
     const [_p, _v] = await Promise.all([loadPrepItems(), loadVessels().catch(err=>{ console.warn('loadVessels lỗi', err); return []; }),
       ensurePrepRecipeHistory().catch(()=>{})]);
     PREP_ITEMS = _p; VESSELS = _v;
+    // Khung «Nhóm dễ nhầm» gồm cả nguyên liệu (topping có tem) — danh mục NL đã nhớ thì không đọc lại.
+    if(!INVENTORY_ITEMS.length) INVENTORY_ITEMS = await loadInventoryItems().catch(()=>[]);
   }
   catch(err){ console.error('loadPrepItems failed', err); box.innerHTML='<div class="muted">Không tải được danh sách chế biến.</div>'; return; }
 
@@ -24428,6 +24457,7 @@ async function renderKhoPrep(){
         <label>Hướng dẫn từng bước (tuỳ chọn)</label>
         <textarea rows="5" oninput="prepFieldChange('instructions',this.value)" placeholder="VD: 1. Đun sôi 2L nước. 2. Cho trà vào, ủ 15 phút. 3. Lọc bã, để nguội...">${escapeHtmlAttr(prepDraft.instructions||'')}</textarea>
       </div>
+      ${nhomDeNhamFieldHTML('prepNhomDeNham', prepDraft.nhomDeNham, "prepFieldChange('nhomDeNham',this.value)")}
       <details class="ui-help"><summary>Hướng dẫn &amp; cách tính</summary><div class="unit-explainer">POS hiện lại đúng nội dung này ngay dưới ô "Nguyên liệu cần cân" lúc chọn nấu, và ở nút "Xem công thức" khi lô đang chế biến — BTP nhiều bước khỏi phải nhớ hết hoặc hỏi lại giữa chừng.</div></details>
 
       </div></section><section class="wdg ui-prep-part"><div class="wdg-head">${wdgHeadHTML('sliders','Dụng cụ cân','Chọn đúng dụng cụ và thứ tự dùng')}</div><div class="ui-prep-content">
@@ -24449,7 +24479,7 @@ async function renderKhoPrep(){
 
   box.innerHTML = `
     ${formHtml}
-    ${prepDraft ? `<div class="sec-title">Danh sách thành phẩm (${PREP_ITEMS.length})</div>` : ''}
+    ${prepDraft ? `<div class="sec-title">Danh sách thành phẩm (${PREP_ITEMS.length})</div>` : nhomDeNhamPanelHTML()}
     ${btpGridHtml()}
   `;
   if(prepDraft){ renderPrepEditor(); renderPrepVesselPicker(); }
@@ -24537,7 +24567,8 @@ async function submitPrepItem(){
                    ? (prepDraft.vesselIds||[]).filter(id=>VESSELS.some(v=>v.id===id)).slice(0, PREP_MAX_VESSELS)
                    : [],
                  // [MỚI] Cách chế biến — xem ghi chú ở newPrepDraft().
-                 instructions: (prepDraft.instructions||'').trim() };
+                 instructions: (prepDraft.instructions||'').trim(),
+                 nhomDeNham: nhomDeNhamNorm(prepDraft.nhomDeNham) };
   try{
     if(editingPrepId){
       // [FIX — "BTP cũng cần lịch sử áp dụng"] Chép công thức CŨ trước khi ghi đè —
