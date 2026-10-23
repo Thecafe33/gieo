@@ -217,7 +217,7 @@ Nút "Cập nhật" ở sidebar (`manualCheckUpdate`, dựa trên service worker
      → nạp lại ĐÚNG MỘT LẦN bằng địa chỉ khác (?r=1 — khác khoá cache) trước khi script chính chạy. Không đổi tên file / không cần deploy lại. (Viết '<scr'+'ipt' để tools/predeploy_check không đếm nhầm thành thẻ thứ hai; có id để các công cụ quét — chỉ lấy khối script TRẦN (không thuộc tính) đầu tiên làm script chính — không lấy nhầm.) -->
 <script id="gdRetry">if(!window.GieoData){document.write('<scr'+'ipt src="data_access.v9.js?r=1"><\/scr'+'ipt>');}</script>
 <script src="che_do_thu.v1.js?b=96d7f20f91"></script>
-<script src="unit_engine.v21.js?b=06cdc7163b"></script>
+<script src="unit_engine.v21.js?b=1b9da3c354"></script>
 <script id="ueRetry">if(!window.UnitEngine){document.write('<scr'+'ipt src="unit_engine.v21.js?r=1"><\/scr'+'ipt>');}</script>
 
 <style>
@@ -3927,7 +3927,8 @@ function renderFifoAlertBar() {
   if (!dot || !bar) return;
   const n = FIFO_PENDING_CONFIRM.length;
   const cook = (typeof _prepSug !== 'undefined' && _prepSug.list) || [];
-  const tong = n + cook.length;
+  const exp = typeof expirySoonLines === 'function' ? expirySoonLines() : [];   // [HẠN DÙNG 23/10] lô sắp / đã hết hạn — chỉ dữ liệu trong máy
+  const tong = n + cook.length + exp.length;
   dot.style.display = tong ? 'flex' : 'none';
   if (badge) {
     badge.textContent = tong > 9 ? '9+' : String(tong);
@@ -3967,8 +3968,19 @@ function renderFifoAlertBar() {
           <div style="font-size:12px;color:#92400e;margin-top:2px;">${escHtmlPos(t.why)}</div>
         </button>`; }).join('')}
       <div style="font-size:11px;color:#a16207;margin-top:4px;">Bấm để mở Chế biến với số mẻ gợi ý — chỉ là gợi ý.</div>`;
+  const expHtml = !exp.length ? '' : `
+      <div class="fifo-alert-panel-h" style="${(n || cook.length) ? 'margin-top:14px;' : ''}">
+        <div style="font-size:13px;font-weight:800;color:#b91c1c;">Sắp hết hạn (${exp.length})</div>
+        ${(n || cook.length) ? '' : thuGon}
+      </div>
+      ${exp.map(x => `
+        <div class="fifo-alert-item">
+          <div style="font-size:13.5px;font-weight:700;color:var(--td);">${escHtmlPos(x.name)} <span style="font-size:11px;color:#999;font-weight:600;letter-spacing:.4px;">${escHtmlPos(x.code)}</span></div>
+          <div style="font-size:12px;color:${x.expired ? '#b91c1c' : '#a16207'};margin-top:2px;">${escHtmlPos(expiryLineWhen(x))}</div>
+        </div>`).join('')}
+      <button onclick="expiryCheckOpenSoon()" style="width:100%;margin-top:8px;padding:12px;background:var(--gd);color:#fff;border:none;border-radius:13px;font-family:'Google Sans',sans-serif;font-size:13.5px;font-weight:700;cursor:pointer;">Kiểm tra lúc rảnh</button>`;
   bar.innerHTML = `
-    <div class="fifo-alert-panel">${fifoHtml}${cookHtml}
+    <div class="fifo-alert-panel">${fifoHtml}${cookHtml}${expHtml}
     </div>`;
 }
 
@@ -4150,6 +4162,8 @@ function closeStockScanSheet() {
   const body = document.getElementById('stockScanSheetBody');
   if (overlay) overlay.style.display = 'none';
   if (body) body.innerHTML = '';
+  // [HẠN DÙNG 23/10] Màn kiểm hạn mở Báo hết NL → đóng màn (xong hoặc huỷ) thì đọc lại danh sách cần kiểm.
+  if (typeof _expAfterSheet === 'function') { const f = _expAfterSheet; _expAfterSheet = null; f(); }
 }
 // Sau khi mở/báo hết xong (hoặc bị chặn giữa chừng), danh sách "Đang dùng" cần cập
 // nhật NẾU đang đứng ở tab Kho — nhưng KHÔNG được tự ý chuyển sang tab đó nếu nhân
@@ -5849,6 +5863,10 @@ const POSTemPrinter = {
       { type: 'row',
         left:  { text: `Mở ${ngayGio}`, size: 12 },
         right: { text: nvNgan, size: 12 } },
+      // [HẠN DÙNG 23/10] Tem gia hạn (chỉ khi đã gia hạn): lần gia hạn + người xác nhận + hạn mới.
+      ...((c.expiryExtensions || []).length ? [{ type: 'divider' },
+        { text: `GIA HẠN lần ${c.expiryExtensions.length} · ${String((c.expiryExtensions.at(-1) || {}).by || '').trim().split(/\s+/).slice(-2).join(' ')}`, size: 14, align: 'left', bold: true, noWrap: true },
+        { text: `HSD: ${fmtPrepTime(c.expiresAt)}`, size: 20, align: 'left', bold: true, noWrap: true }] : []),
     ].filter(Boolean);
   },
 
@@ -15331,6 +15349,8 @@ async function _doCheckOutImpl() {
   }
   // [BTP ÂM 23/10] Ca có bán BTP lúc không còn lô → phải trả lời đã dùng gì thay rồi mới check-out được.
   if (await prepUntrackedAskOnCheckOut(emp, openShift)) return;
+  // [HẠN DÙNG 23/10] Còn lô BTP / mã NL ĐÃ quá hạn đang mở → xử lý rồi mới check-out (xong tự check-out lại).
+  if (await expiryAskOnCheckOut()) return;
   const conNguoiKhac = _employeeShiftsTodayCache.some(s => !s.checkedOutAt && s.employeeId !== emp.id);
   if (!conNguoiKhac) {
     let daDongNgay = false;
@@ -16185,9 +16205,10 @@ async function refreshOpeningChecklistGate() {
     // (đọc cả kho, cả BTP...) của mục không chặn hoặc đã tick/đã bỏ qua. Kết quả chặn/không
     // chặn y hệt cách tính cũ (chỉ các mục này mới có thể làm nó thành true).
     const gateSkip = new Set([...doneIds, ...overrideIds]);
-    const [items, shiftCountLines] = await Promise.all([computeOpeningChecklistPOS({ gateSkip }), computeShiftInventoryCountLinesPOS('open')]);
+    const [items, shiftCountLines, expLines] = await Promise.all([computeOpeningChecklistPOS({ gateSkip }), computeShiftInventoryCountLinesPOS('open'),
+      (opening.exists && opening.data().expiryCheckedAt) ? [] : loadExpiryCheckLinesPOS().catch(err => { console.warn('[Hạn dùng] cổng đầu ca: không đọc được lô (không chặn)', err); return []; })]);
     _openChecklistBlocking = items.some(it =>
-      it.blocking && !it.done && !doneIds.has(it.id) && !overrideIds.has(it.id)) || shiftCountLines.length > 0;
+      it.blocking && !it.done && !doneIds.has(it.id) && !overrideIds.has(it.id)) || shiftCountLines.length > 0 || expLines.length > 0;
     // Chỉ chốt "đã mở hẳn" khi tính THÀNH CÔNG (nhánh lỗi bên dưới cũng đặt false nhưng
     // không được chốt) và đã mở ca — trước khi mở ca thì còn kiểm tiếp như cũ.
     _openGateClearedDay = (!_openChecklistBlocking && _isShiftOpenedToday) ? posDateKey() : null;
@@ -16229,6 +16250,14 @@ async function renderOpeningChecklist(silent) {
   try { shiftCountLines = await computeShiftInventoryCountLinesPOS('open'); }
   catch(err){ box.innerHTML='<div class="kc-card">Không tải được danh sách nguyên liệu cần kiểm kê đầu ca.</div><button onclick="renderOpeningChecklist()" class="kc-btn" style="background:#0062AD;color:#fff">Thử lại</button>'; return; }
   if(shiftCountLines.length){ _openChecklistBlocking=true; await renderShiftInventoryCountPOS('open',shiftCountLines); return; }
+  // [HẠN DÙNG 23/10] Lô BTP / mã NL hết hạn trong hôm nay → kiểm ngay lúc mở ca (không hỏi lúc bán). Lỗi đọc → bỏ qua bước này.
+  // Kiểm MỘT lần mỗi ngày (dấu expiryCheckedAt trên bản ghi mở ca): tải lại app giữa ngày không chặn bán vì lô mới nấu.
+  let expLines = [];
+  try {
+    const od = await fstore.collection('daily_openings_gieogieo').doc(posDateKey()).get();
+    if (!(od.exists && od.data().expiryCheckedAt)) { expLines = await loadExpiryCheckLinesPOS(); if (!expLines.length) await expiryOpenDone().catch(err => console.warn('[Hạn dùng] chưa ghi được dấu đã kiểm', err)); }
+  } catch (err) { console.warn('[Hạn dùng] không đọc được lô — bỏ qua bước kiểm hạn', err); }
+  if (expLines.length) { _openChecklistBlocking = true; expiryCheckShow({ phase: 'open', lines: expLines }); return; }
   let items = [], doneIds = new Set(), overrideIds = new Set();
   try {
     const [list, openDoc] = await Promise.all([
@@ -17931,131 +17960,203 @@ function prepShortageAllocate(r, picked, usedShort) {
 
 // ══════════════════════════════════════════════════════════════════════════
 // [BTP ÂM — chủ quán 23/10, docs/KE_HOACH_BTP_AM.md]
-// A. Lúc thanh toán: lô BTP mà lượt bán này sẽ trừ (FIFO) đã HẾT HẠN → hỏi ngay. «Vẫn còn dùng được» (PIN) = gia hạn thêm
-//    24 giờ + in tem gia hạn (không giới hạn số lần; loại hết hạn CUỐI NGÀY không được gia hạn). «Hủy» (PIN) = ghi đổ bỏ phần
-//    còn của lô, món vẫn bán (lô khác / loại thay thế). Chỉ đọc RT lô của BTP trong giỏ; Firestore chỉ đọc lô chưa có trong
-//    bộ nhớ và đúng lô sắp hỏi — ngày thường không thêm lượt đọc Firestore nào, không thêm thao tác nào.
+// A. HẠN DÙNG — KHÔNG hỏi gì lúc thanh toán (khách đang chờ; chủ quán 23/10 bỏ popup lúc bấm bill).
+//    • Mở ca (Việc đầu ca, chặn bán như các bước đầu ca khác): mọi lô BTP / mã NL đang mở sẽ hết hạn TRONG HÔM NAY hoặc đã
+//      quá hạn → nhân viên kiểm tra và xác nhận «Còn dùng được» (PIN, gia hạn thêm PREP_EXTEND_HOURS giờ tính từ hạn cũ —
+//      đã quá hạn thì từ bây giờ — in tem gia hạn, không giới hạn số lần) hoặc «Bỏ đi» (BTP: ghi đổ bỏ phần còn của lô;
+//      NL: mở đúng màn Báo hết hiện có). Loại hết hạn CUỐI NGÀY: lô của hôm nay không hỏi (dùng trong ngày), lô ngày cũ
+//      chỉ có «Bỏ đi». Lỗi đọc → bỏ qua bước này, không chặn bán.
+//    • Trong ngày: lô sắp hết hạn (≤ EXP_SOON_MIN phút) / đã quá hạn hiện ở chuông thông báo sẵn có — chỉ dùng dữ liệu đã có
+//      trong máy (không đọc thêm), nhân viên bấm lúc rảnh.
+//    • Check-out: còn lô ĐÃ quá hạn đang mở → xử lý rồi mới check-out (không để ca sau dùng nhầm).
 // B. Bán BTP lúc KHÔNG còn lô → người có ca lúc đó phải trả lời khi check-out (dùng loại nào thay theo cấu hình ở Quản lý /
 //    nấu mẻ mới kịp / không dùng gì). Câu trả lời lưu vào phiếu đối chiếu BTP âm; kết ca dùng lại, Engine 2 tự xác nhận.
 // ══════════════════════════════════════════════════════════════════════════
 const PREP_EXTEND_HOURS = 24;
+const EXP_SOON_MIN = 30;
 function prepLotExpired(b, nowMs, today) {
   if (!b || b.shelfLifeType === 'none') return false;
   if (b.shelfLifeType === 'endOfDay') return !!b.businessDate && b.businessDate < today;   // hết hạn khi đóng ngày
   const t = b.expiresAt ? Date.parse(b.expiresAt) : NaN;
   return Number.isFinite(t) && t <= nowMs;
 }
-// Hàm THUẦN: các lô ĐÃ HẾT HẠN mà lượt bán này sẽ trừ vào (FIFO theo lúc nấu xong / lúc mở trên RT).
-//   needs {prepId: qty} · unitsByPrep {prepId: {batchId: {unitBase, openedAt}}} (RT) · lotsById {batchId: prep_batches}
-function prepExpiryPlan(needs, unitsByPrep, lotsById, nowMs, today) {
+// Hàm THUẦN: lô BTP 'active' / mã NL 'open' cần kiểm hạn. Mặc định tới hết hôm nay (giờ VN);
+// opts.untilMs = mốc khác (chuông: bây giờ + EXP_SOON_MIN); opts.expiredOnly = chỉ lô đã quá hạn (check-out).
+function expiryCheckLines(batches, containers, nowMs, today, opts) {
+  const o = opts || {};
+  const until = o.expiredOnly ? nowMs : (Number.isFinite(o.untilMs) ? o.untilMs : Date.parse(today + 'T23:59:59.999+07:00'));
   const out = [];
-  Object.keys(needs || {}).forEach(prepId => {
-    let need = Number(needs[prepId]) || 0;
-    const at = (id, u) => { const b = lotsById[id]; const t = b ? Date.parse(b.finishedAt || b.startedAt || '') : NaN; return Number.isFinite(t) ? t : Number(u && u.openedAt) || 0; };
-    const lots = Object.entries(unitsByPrep[prepId] || {})
-      .filter(([id, u]) => id !== '__prepLock' && u && Number(u.unitBase) > 0.0001)
-      .map(([id, u]) => ({ id, left: Number(u.unitBase), lot: lotsById[id] || null, at: at(id, u) }))
-      .sort((a, b) => a.at - b.at);
-    for (const l of lots) {
-      if (!(need > 0.0001)) break;
-      if (l.lot && prepLotExpired(l.lot, nowMs, today))
-        out.push({ prepId, batchId: l.id, left: round2(l.left), lot: l.lot, extendable: l.lot.shelfLifeType !== 'endOfDay' });
-      need = round2(need - l.left);
-    }
+  (batches || []).forEach(b => {
+    if (!b || b.status !== 'active' || !b.shelfLifeType || b.shelfLifeType === 'none') return;
+    const left = Number(b.qtyRemaining);
+    if (!(left > 0.005)) return;
+    if (b.shelfLifeType === 'endOfDay') { if (!prepLotExpired(b, nowMs, today)) return; }
+    else { const t = Date.parse(b.expiresAt || ''); if (!Number.isFinite(t) || t > until) return; }
+    out.push({ kind: 'prep', id: b.id, name: b.prepName || '', code: b.batchCode || '', unit: b.unit || '', left: round2(left),
+      expiresAt: b.expiresAt || null, endOfDay: b.shelfLifeType === 'endOfDay', expired: prepLotExpired(b, nowMs, today),
+      extendable: b.shelfLifeType !== 'endOfDay', ref: b });
   });
-  return out;
+  (containers || []).forEach(c => {
+    if (!c || c.status !== 'open') return;
+    const t = Date.parse(c.expiresAt || '');
+    if (!Number.isFinite(t) || t > until) return;
+    const left = Number(c.unitBase);
+    out.push({ kind: 'item', id: c.id, name: c.itemName || '', code: c.code || '', unit: c.unit || '', left: Number.isFinite(left) ? round2(left) : null,
+      expiresAt: c.expiresAt, endOfDay: false, expired: t <= nowMs, extendable: true, ref: c });
+  });
+  const at = x => x.endOfDay ? 0 : (Date.parse(x.expiresAt || '') || 0);
+  return out.sort((a, b) => at(a) - at(b));
 }
-// Gọi ở onCheckoutClick (cổng chung mọi luồng thanh toán). false = nhân viên đóng popup → chưa thanh toán.
-async function prepExpiryGateBeforePay(items) {
-  let needs = {};
-  try {
-    const [recipes, toppingRecipes, packagingPresets, packagingItemOverrides, baggingRules, pkgRulesPack, baggingTable] = await Promise.all([ensureRecipesLoadedPOS(), ensureToppingRecipesLoadedPOS(), ensurePackagingPresetsLoadedPOS(), ensurePackagingItemOverridesLoadedPOS(), ensurePackagingBaggingRulesLoadedPOS(), ensurePackagingRulesLoadedPOS(), ensurePackagingBaggingTableLoadedPOS()]);
-    needs = computeConsumptionForOrder({ itemsArray: items.map(c => ({ ...c })) }, recipes, toppingRecipes, packagingPresets, packagingItemOverrides, baggingRules, pkgRulesPack.rules, pkgRulesPack.config, baggingTable).prepAgg || {};
-  } catch (err) { console.warn('[BTP hết hạn] không tính được BTP của giỏ — bỏ qua kiểm tra', err); return true; }
-  const ids = Object.keys(needs).filter(id => Number(needs[id]) > 0);
-  if (!ids.length) return true;
-  for (let round = 0; round < 8; round++) {
-    const units = {};
-    try { await Promise.all(ids.map(async id => { units[id] = (await UnitEngine.units.ref(id).once('value')).val() || {}; })); }
-    catch (err) { console.warn('[BTP hết hạn] không đọc được lô — bỏ qua kiểm tra', err); return true; }
-    const lotsById = {}; (PREP_BATCHES_CACHE_POS || []).forEach(b => { lotsById[b.id] = b; });
-    const missing = ids.flatMap(id => Object.keys(units[id]).filter(k => k !== '__prepLock' && !lotsById[k] && Number((units[id][k] || {}).unitBase) > 0));
-    for (const bid of missing) {
-      try { const d = await fstore.collection('prep_batches_gieogieo').doc(bid).get(); if (d.exists) { lotsById[bid] = { id: bid, ...d.data() }; PREP_BATCHES_CACHE_POS.push(lotsById[bid]); } }
-      catch (e) { console.warn('[BTP hết hạn] không đọc được lô', bid, e); }
-    }
-    const plan = prepExpiryPlan(needs, units, lotsById, Date.now(), posDateKey());
-    if (!plan.length) return true;
-    // Bộ nhớ có thể cũ (lô đã được gia hạn / huỷ ở máy khác) → đọc lại ĐÚNG lô sắp hỏi.
-    const x = plan[0]; let fresh = null;
-    try { const d = await fstore.collection('prep_batches_gieogieo').doc(x.batchId).get(); fresh = d.exists ? { id: d.id, ...d.data() } : null; } catch (e) {}
-    if (fresh) { const i = PREP_BATCHES_CACHE_POS.findIndex(b => b.id === fresh.id); if (i >= 0) PREP_BATCHES_CACHE_POS[i] = fresh; else PREP_BATCHES_CACHE_POS.push(fresh); }
-    if (!fresh || fresh.status !== 'active' || !prepLotExpired(fresh, Date.now(), posDateKey())) continue;
-    const r = await prepExpiryAsk({ ...x, lot: fresh, extendable: fresh.shelfLifeType !== 'endOfDay' });
-    if (r === 'cancel') return false;
+// Gia hạn thêm PREP_EXTEND_HOURS tính từ hạn cũ; đã quá hạn thì tính từ bây giờ.
+function expiryExtendTo(expiresAt, nowMs) {
+  const t = Date.parse(expiresAt || '');
+  return new Date(Math.max(nowMs, Number.isFinite(t) ? t : 0) + PREP_EXTEND_HOURS * 3600000).toISOString();
+}
+let _expWatchPrep = [];   // lô BTP 'active' đọc ở bước kiểm đầu ca — chuông dùng lại, không đọc thêm
+async function loadExpiryCheckLinesPOS(opts) {
+  const [bs] = await Promise.all([fstore.collection('prep_batches_gieogieo').where('status', '==', 'active').get(), loadOpenContainers()]);
+  _expWatchPrep = bs.docs.map(d => ({ id: d.id, ...d.data() }));
+  return expiryCheckLines(_expWatchPrep, STOCK_OPEN_LIST, Date.now(), posDateKey(), opts);
+}
+// Chuông: chỉ dữ liệu trong máy (bước đầu ca + danh sách lô / mã đã nạp ở màn Kho, Chế biến).
+function expirySoonLines() {
+  const by = new Map();
+  [..._expWatchPrep, ...(PREP_BATCHES_CACHE_POS || [])].forEach(b => { if (b && b.id) by.set(b.id, b); });
+  const now = Date.now();
+  return expiryCheckLines([...by.values()], STOCK_OPEN_LIST, now, posDateKey(), { untilMs: now + EXP_SOON_MIN * 60000 });
+}
+let _expSoonSig = '';
+function expirySoonTick() {
+  if (document.hidden) return;
+  const sig = expirySoonLines().map(x => x.id + (x.expired ? '!' : '')).join(',');
+  if (sig !== _expSoonSig) { _expSoonSig = sig; renderFifoAlertBar(); }
+}
+setInterval(expirySoonTick, 60000);
+function fmtPrepTime(iso) { const d = iso ? vnDate(iso) : null; if (!d || isNaN(d)) return '—'; const p = n => String(n).padStart(2, '0'); return p(d.getHours()) + ':' + p(d.getMinutes()) + ' ' + p(d.getDate()) + '/' + p(d.getMonth() + 1); }
+function expiryLineWhen(x) {
+  if (x.endOfDay) return 'Hết hạn khi đóng ngày ' + (x.ref.businessDate ? posDateKeyToDisplay(x.ref.businessDate) : '') + ' — không được gia hạn';
+  return (x.expired ? 'Đã hết hạn lúc ' : 'Hết hạn lúc ') + fmtPrepTime(x.expiresAt);
+}
+
+// Màn kiểm hạn — phase 'open' (trong Việc đầu ca), 'soon' (từ chuông), 'checkout' (trước khi check-out).
+let _expCheck = null, _expAfterSheet = null;
+function expiryCheckHTML(st) {
+  const T = { open: ['Kiểm hạn dùng đầu ca', 'Các lô dưới đây hết hạn trong hôm nay. Kiểm tra ngay bây giờ để lúc bán không phải dừng lại: còn dùng được thì gia hạn thêm ' + PREP_EXTEND_HOURS + ' giờ và dán tem mới, không dùng được thì bỏ đi.'],
+    soon: ['Lô sắp hết hạn', 'Kiểm tra lúc rảnh: còn dùng được thì gia hạn thêm ' + PREP_EXTEND_HOURS + ' giờ và dán tem mới, không dùng được thì bỏ đi.'],
+    checkout: ['Còn lô đã quá hạn', 'Xử lý trước khi check-out để ca sau không dùng nhầm.'] }[st.phase];
+  return `<div class="kc-card" style="margin:0">
+    <div class="kc-title" style="color:#c0392b;padding-bottom:6px">${T[0]}</div>
+    <div style="font-size:13px;line-height:1.55;color:var(--td);margin-bottom:12px">${T[1]}</div>
+    ${renderPinInput('expChkStaff_' + st.phase)}
+    <div id="expChkMsg_${st.phase}" style="font-size:12.5px;color:#c0392b;min-height:16px;margin:8px 0"></div>
+    ${st.lines.map((x, i) => `<div class="kc-sub" style="margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><b style="font-size:15px">${escHtmlPos(x.name)}</b><span class="kc-pill" style="background:${x.expired ? '#c0392b' : '#d97706'}">${x.kind === 'prep' ? 'Lô ' : 'Mã '}${escHtmlPos(x.code)}</span></div>
+      <div style="font-size:13px;color:#555;margin:6px 0 10px">${escHtmlPos(expiryLineWhen(x))}${x.left != null ? ' · còn ' + fmtPrepQty(x.left) + ' ' + escHtmlPos(x.unit) : ''}</div>
+      <div style="display:flex;gap:8px">
+        ${x.extendable ? `<button class="kc-btn" style="flex:1;margin:0;background:var(--gd);color:#fff" onclick="expiryCheckAct(${i},'keep')">Còn dùng được</button>` : ''}
+        <button class="kc-btn" style="flex:1;margin:0;background:#fff;color:#c0392b;border:1.5px solid #f3b2bf" onclick="expiryCheckAct(${i},'discard')">Bỏ đi</button>
+      </div></div>`).join('')}
+    ${st.phase === 'open' ? '' : `<button class="kc-btn" style="background:none;color:#888;font-size:14px;font-weight:700;padding:12px" onclick="expiryCheckClose()">${st.phase === 'checkout' ? 'Quay lại' : 'Để sau'}</button>`}
+  </div>`;
+}
+function expiryCheckShow(st) {
+  _expCheck = st;
+  if (st.phase === 'open') { const box = document.getElementById('shiftBody'); if (box) box.innerHTML = expiryCheckHTML(st); return; }
+  let ov = document.getElementById('exp-check-overlay');
+  if (!ov) {
+    ov = document.createElement('div'); ov.id = 'exp-check-overlay';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:900;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(3px);';
+    document.body.appendChild(ov);
   }
+  ov.innerHTML = `<div style="width:100%;max-width:460px;max-height:92vh;overflow:auto;animation:pi .18s ease;">${expiryCheckHTML(st)}</div>`;
+}
+function expiryCheckClose() { document.getElementById('exp-check-overlay')?.remove(); _expCheck = null; }
+// Đọc lại (sự thật mới nhất) rồi vẽ lại; hết việc → bước tiếp theo của phase.
+async function expiryCheckRefresh() {
+  const st = _expCheck; if (!st) return;
+  let lines;
+  try { lines = await loadExpiryCheckLinesPOS(st.phase === 'checkout' ? { expiredOnly: true } : st.phase === 'soon' ? { untilMs: Date.now() + EXP_SOON_MIN * 60000 } : null); }
+  catch (err) { console.warn('[Hạn dùng] không đọc lại được lô', err); lines = st.lines; }
+  _expSoonSig = ''; renderFifoAlertBar();
+  if (_expCheck !== st) return;
+  if (lines.length) { expiryCheckShow({ ...st, lines }); return; }
+  if (st.phase === 'open') { _expCheck = null; await expiryOpenDone().catch(err => console.warn('[Hạn dùng] chưa ghi được dấu đã kiểm', err)); renderOpeningChecklist(true); return; }
+  expiryCheckClose();
+  if (st.phase === 'checkout') doCheckOut();
+  else toast('✅ Đã kiểm xong các lô sắp hết hạn');
+}
+async function expiryCheckAct(i, action) {
+  const st = _expCheck, x = st && st.lines[i]; if (!x || st.busy) return;
+  const msg = t => { const m = document.getElementById('expChkMsg_' + st.phase); if (m) m.textContent = t; };
+  if (x.kind === 'item' && action === 'discard') {   // NL: đúng màn Báo hết hiện có (đủ nhánh mã nguyên / mẻ đang nấu / còn thừa)
+    _expAfterSheet = () => expiryCheckRefresh();
+    if (st.phase !== 'open') document.getElementById('exp-check-overlay')?.remove();
+    openConfirmFinishSheet(x.ref, false);
+    return;
+  }
+  st.busy = true;
+  try {
+    const who = await resolveStaffPinWorkedToday('expChkStaff_' + st.phase); if (!who) { st.busy = false; return; }
+    const source = 'pos_' + st.phase;
+    if (x.kind === 'prep') {
+      if (action === 'keep') await prepExtendLotPOS(x.ref, who, source);
+      else await prepDiscardExpiredLotPOS(x.ref, x.left, who, 'Hết hạn — nhân viên xác nhận không dùng được (' + (st.phase === 'open' ? 'kiểm đầu ca' : st.phase === 'checkout' ? 'trước check-out' : 'trong ca') + ')');
+    } else await nlExtendOpenUnitPOS(x.ref, who, source);
+    st.busy = false;
+    await expiryCheckRefresh();
+  } catch (err) { console.error('[Hạn dùng]', err); msg('Chưa lưu được: ' + (err.message || err)); st.busy = false; }
+}
+async function expiryCheckOpenSoon() {
+  _fifoAlertExpanded = false; renderFifoAlertBar();
+  expiryCheckShow({ phase: 'soon', lines: expirySoonLines() });
+  await expiryCheckRefresh();
+}
+// Dấu «đã kiểm hạn đầu ca hôm nay» — sau đó lô mới trong ngày chỉ nhắc ở chuông, không chặn bán.
+// update() (KHÔNG set): bản ghi mở ca TỒN TẠI = đã mở ca (_watchShiftOpenedStatus) — không bao giờ tự tạo nó ở đây.
+function expiryOpenDone() {
+  return fstore.collection('daily_openings_gieogieo').doc(posDateKey()).update({ expiryCheckedAt: vnDate().toISOString() });
+}
+// Check-out: true = đang hiện màn kiểm hạn (dừng check-out; xử lý xong tự check-out lại). Lỗi đọc → không chặn.
+async function expiryAskOnCheckOut() {
+  let lines;
+  try { lines = await loadExpiryCheckLinesPOS({ expiredOnly: true }); }
+  catch (err) { console.warn('[Hạn dùng] không đọc được lô — không chặn check-out', err); return false; }
+  if (!lines.length) return false;
+  expiryCheckShow({ phase: 'checkout', lines });
   return true;
 }
-function prepExpiryAsk(x) {
-  return new Promise(resolve => {
-    const b = x.lot, het = b.shelfLifeType === 'endOfDay' ? 'hết hạn khi đóng ngày ' + (b.businessDate || '') : 'hết hạn lúc ' + fmtPrepTime(b.expiresAt);
-    document.getElementById('prep-exp-overlay')?.remove();
-    const ov = document.createElement('div');
-    ov.id = 'prep-exp-overlay';
-    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:900;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(3px);';
-    // Cùng hệ thẻ với các bước kết ca / cân cuối ca (kc-card · kc-sub · kc-btn bo tròn nhiều).
-    ov.innerHTML = `<div class="kc-card" style="width:100%;max-width:440px;max-height:92vh;overflow:auto;margin:0;animation:pi .18s ease;">
-      <div class="kc-title" style="color:#c0392b;padding-bottom:8px">Lô bán thành phẩm đã hết hạn</div>
-      <div class="kc-sub" style="margin-bottom:12px">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><b style="font-size:15px">${escHtmlPos(b.prepName || '')}</b><span class="kc-pill" style="background:#c0392b">Lô ${escHtmlPos(b.batchCode || '')}</span></div>
-        <div style="font-size:13px;color:#555;margin-top:6px">Đã ${escHtmlPos(het)} · còn ${fmtPrepQty(x.left)} ${escHtmlPos(b.unit || '')}</div>
-      </div>
-      <div style="font-size:13.5px;line-height:1.55;color:var(--td);margin-bottom:12px">Kiểm tra lại: còn dùng được không?
-        ${x.extendable ? `<br><b>Vẫn còn dùng được</b> → gia hạn thêm ${PREP_EXTEND_HOURS} giờ và in tem gia hạn.` : '<br>Loại hết hạn cuối ngày — <b>không được gia hạn</b>.'}
-        <br><b>Hủy lô này</b> → ghi đổ bỏ phần còn của lô; món vẫn bán (lô khác hoặc loại dùng thay).</div>
-      ${renderPinInput('prepExpStaff')}
-      <div id="prepExpMsg" style="font-size:12.5px;color:#c0392b;min-height:16px;margin:8px 0"></div>
-      ${x.extendable ? '<button id="prepExpKeep" class="kc-btn" style="background:var(--gd);color:#fff;margin-bottom:10px">Vẫn còn dùng được</button>' : ''}
-      <button id="prepExpDiscard" class="kc-btn" style="background:#fff;color:#c0392b;border:1.5px solid #f3b2bf;margin-bottom:6px">Hủy lô này</button>
-      <button id="prepExpClose" class="kc-btn" style="background:none;color:#888;font-size:14px;font-weight:700;padding:12px">Quay lại giỏ hàng</button></div>`;
-    document.body.appendChild(ov);
-    let busy = false;
-    const msg = t => { const m = document.getElementById('prepExpMsg'); if (m) m.textContent = t; };
-    const done = v => { ov.remove(); resolve(v); };
-    ov.querySelector('#prepExpClose').onclick = () => done('cancel');
-    const run = async kind => {
-      if (busy) return; busy = true;
-      try {
-        const who = await resolveStaffPinWorkedToday('prepExpStaff'); if (!who) { busy = false; return; }
-        if (kind === 'keep') await prepExtendLotPOS(b, who);
-        else await prepDiscardExpiredLotPOS(b, x.left, who);
-        done(kind === 'keep' ? 'extended' : 'discarded');
-      } catch (err) { console.error('[BTP hết hạn]', err); msg('Chưa lưu được: ' + (err.message || err)); busy = false; }
-    };
-    ov.querySelector('#prepExpDiscard').onclick = () => run('discard');
-    const keep = ov.querySelector('#prepExpKeep'); if (keep) keep.onclick = () => run('keep');
-  });
+function _expSyncCaches(kind, id, patch) {
+  const lists = kind === 'prep' ? [PREP_BATCHES_CACHE_POS, _expWatchPrep] : [STOCK_OPEN_LIST];
+  lists.forEach(l => (l || []).forEach((x, j) => { if (x.id === id) l[j] = { ...x, ...patch }; }));
 }
-function fmtPrepTime(iso) { const d = iso ? vnDate(iso) : null; if (!d || isNaN(d)) return '—'; const p = n => String(n).padStart(2, '0'); return p(d.getHours()) + ':' + p(d.getMinutes()) + ' ' + p(d.getDate()) + '/' + p(d.getMonth() + 1); }
-async function prepExtendLotPOS(b, who) {
+async function prepExtendLotPOS(b, who, source) {
   if (b.shelfLifeType === 'endOfDay') throw new Error('Loại hết hạn cuối ngày không được gia hạn');
-  const to = new Date(Date.now() + PREP_EXTEND_HOURS * 3600000).toISOString();
-  const ext = { at: vnDate().toISOString(), by: who.fullName || '', byId: who.id || '', from: b.expiresAt || null, to, source: 'pos_sale' };
+  const to = expiryExtendTo(b.expiresAt, Date.now());
+  const ext = { at: vnDate().toISOString(), by: who.fullName || '', byId: who.id || '', from: b.expiresAt || null, to, source: source || 'pos' };
   await UnitEngine.batches.annotate(b.id, { expiresAt: to, expiryExtensions: firebase.firestore.FieldValue.arrayUnion(ext) });
   const nb = { ...b, expiresAt: to, expiryExtensions: [...(b.expiryExtensions || []), ext] };
-  const i = PREP_BATCHES_CACHE_POS.findIndex(x => x.id === b.id); if (i >= 0) PREP_BATCHES_CACHE_POS[i] = nb;
-  try { if (await POSTemPrinter.printPrepBatchLabel(nb, 1) === false) toast('⚠️ Đã gia hạn — chưa in được tem gia hạn, in lại ở màn Chế biến'); else toast('✅ Đã gia hạn ' + PREP_EXTEND_HOURS + ' giờ — dán tem gia hạn lên khay'); }
+  _expSyncCaches('prep', b.id, { expiresAt: to, expiryExtensions: nb.expiryExtensions });
+  try { if (await POSTemPrinter.printPrepBatchLabel(nb, 1) === false) toast('⚠️ Đã gia hạn — chưa in được tem gia hạn, in lại ở màn Chế biến'); else toast('✅ Đã gia hạn tới ' + fmtPrepTime(to) + ' — dán tem gia hạn lên khay'); }
   catch (e) { toast('⚠️ Đã gia hạn — chưa in được tem gia hạn'); }
 }
-async function prepDiscardExpiredLotPOS(b, left, who) {
+async function nlExtendOpenUnitPOS(c, who, source) {
+  const to = expiryExtendTo(c.expiresAt, Date.now());
+  const ext = { at: vnDate().toISOString(), by: who.fullName || '', byId: who.id || '', from: c.expiresAt || null, to, source: source || 'pos' };
+  await UnitEngine.containers.annotate(c.id, { expiresAt: to, expiryExtensions: firebase.firestore.FieldValue.arrayUnion(ext) });
+  const nc = { ...c, expiresAt: to, expiryExtensions: [...(c.expiryExtensions || []), ext] };
+  _expSyncCaches('item', c.id, { expiresAt: to, expiryExtensions: nc.expiryExtensions });
+  try { if (await POSTemPrinter.printOpenLabel(nc, 1) === false) toast('⚠️ Đã gia hạn — chưa in được tem gia hạn'); else toast('✅ Đã gia hạn tới ' + fmtPrepTime(to) + ' — dán tem gia hạn lên chai / gói'); }
+  catch (e) { toast('⚠️ Đã gia hạn — chưa in được tem gia hạn'); }
+}
+async function prepDiscardExpiredLotPOS(b, left, who, reason) {
   const qty = round2(Number(b.qtyRemaining) > 0 ? Number(b.qtyRemaining) : 0);
   if (!(qty > 0.005)) { toast('Lô này đã hết trên sổ — bỏ qua'); return; }
   let p = (PREP_ITEMS_CACHE_POS || []).find(i => i.id === b.prepId);
   if (!p) { const d = await fstore.collection('prep_items_gieogieo').doc(b.prepId).get(); p = d.exists ? { id: d.id, ...d.data() } : { id: b.prepId, name: b.prepName || '', unit: b.unit || '' }; }
   await UnitEngine.prep.discardByLots(p, { qty, lines: [{ batchId: b.id, batchCode: b.batchCode || '', qty }],
-    reason: 'Hết hạn — nhân viên xác nhận không dùng được (lúc bán)', totalCost: round2(qty * (Number(p.costPerUnit) || 0)),
+    reason: reason || 'Hết hạn — nhân viên xác nhận không dùng được', totalCost: round2(qty * (Number(p.costPerUnit) || 0)),
     ingredientBreakdown: [], weighings: {}, staffEmp: who });
-  const i = PREP_BATCHES_CACHE_POS.findIndex(x => x.id === b.id); if (i >= 0) PREP_BATCHES_CACHE_POS[i] = { ...b, qtyRemaining: 0, status: 'used_up' };
+  _expSyncCaches('prep', b.id, { qtyRemaining: 0, status: 'used_up' });
   toast('✅ Đã ghi huỷ lô ' + (b.batchCode || '') + ' — ' + fmtPrepQty(qty) + ' ' + (b.unit || ''));
 }
 
@@ -23308,8 +23409,6 @@ async function onCheckoutClick() {
   if (!requireOpeningChecklistDone()) return; // [GĐ5] còn việc đầu ca bắt buộc chưa xong
   const items = Object.values(cart);
   if (!items.length) { toast('Giỏ hàng trống!'); return; }
-  // [BTP ÂM 23/10] Lô BTP sắp trừ đã hết hạn → hỏi gia hạn / huỷ lô TRƯỚC khi thanh toán (chỉ khi có lô hết hạn).
-  if (!_backfillMode && !(await prepExpiryGateBeforePay(items))) return;
   // [FIX duplicate bill] Sinh idemKey CỐ ĐỊNH cho lượt thanh toán này — chỉ sinh khi CHƯA có
   // (giữ nguyên qua việc quay lại/mở lại màn thanh toán nhiều lần cho cùng giỏ hàng này). Bị xoá
   // khi cartClear() (đơn mới thật sự) hoặc sau khi 1 bill hoàn tất — xem confirmPay().

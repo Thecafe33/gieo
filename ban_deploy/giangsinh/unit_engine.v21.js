@@ -4850,7 +4850,7 @@
   //  sổ    : wasteAssignSave, thangKetDuyetSuKien (QL), _voidBackfillConsumptionPOS (POS)
   // Trường số lượng/trạng thái (unitBase, qty, type, status…) KHÔNG nằm đây → FIELD_NOT_ANNOTATABLE.
   const ANNOTATABLE = {
-    containers: ['labelPrinted', 'labelPrintedAt', 'openLabelPrinted', 'openLabelPrintedAt', 'needsReview', 'reviewedAt', 'reviewedBy', 'note'],
+    containers: ['labelPrinted', 'labelPrintedAt', 'openLabelPrinted', 'openLabelPrintedAt', 'needsReview', 'reviewedAt', 'reviewedBy', 'note', 'expiresAt', 'expiryExtensions'],
     batches: ['expiresAt', 'needsReview', 'reviewedAt', 'reviewedBy', 'note', 'expiryExtensions'],
     ledger: ['responsibility', 'responsibilityOriginal', 'responsibilityHistory', 'needsReview', 'reviewedAt', 'reviewedBy', 'voided', 'voidedAt', 'voidedReason', 'note',
       'substitutionQty', 'substitutionReconId', 'substitutionFor',

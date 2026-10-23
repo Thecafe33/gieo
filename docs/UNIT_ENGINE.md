@@ -127,7 +127,7 @@ Tham số là tên biến trong mã. Cột "Ghi" nêu dữ liệu bị thay đ�
 
 ### Chú thích (`annotate`) và Sổ lệch
 - `containers.annotate(id, fields)`, `batches.annotate(id, fields)`, `ledger.annotate(…)`, `anomaly.resolve(id, fields)` chỉ nhận các trường trong `UnitEngine.ANNOTATABLE`. Trường khác → lỗi `FIELD_NOT_ANNOTATABLE`.
-- `batches.annotate` nhận thêm `expiryExtensions` (v21, 23/10 — lịch sử gia hạn lô lúc bán).
+- `batches.annotate` nhận thêm `expiryExtensions`; `containers.annotate` nhận thêm `expiresAt`, `expiryExtensions` (v21, 23/10 — gia hạn lô BTP / mã NL ở bước kiểm hạn đầu ca, chuông, trước check-out; chỉ đổi hạn, không đổi số / trạng thái).
 - `duty.markMixup(caseId, {qty, mixupId, reason, kind})` (v21, 23/10; `kind:'substitution'` cho dùng thay hợp lệ BTP âm): Engine 2 rút phần lệch đã ghép «pha nhầm / nhập nhầm ô / ghi nhầm mẻ» trong nhóm dễ nhầm khỏi phân bổ + pool khác theo tỉ lệ, đưa vào pool kind `mixup` (tổng = |lệch|); không đụng hồ sơ quyết định tay; cùng sự cố không trừ hai lần.
 - `ledger.autoReview(txId, {needsReview:false, reviewedAt, reviewedBy, autoReview})` (v21, 23/10): Engine 2 tự duyệt dòng «Chờ quản lý duyệt» lệch NL khi nấu mẻ — transaction, trả `false` (không ghi) khi dòng không còn `needsReview`, đã huỷ hoặc có trách nhiệm do quản lý gán; không đổi số lượng/tiền/trách nhiệm.
 - `containers.adjust(c, qty, expected, opId, note)` là thao tác Quản lý cân lại một mã (B13).
