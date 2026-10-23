@@ -5513,6 +5513,30 @@
           before:{status:c.status,allocations:c.allocations||[],pool:c.pool||[]}})});return true;
     });
   }
+  // [Engine2 pha nhầm — chủ quán 23/10] Phần lệch đã ghép «nghi pha nhầm / nhập nhầm ô» trong NHÓM DỄ NHẦM không phải hao hụt
+  // cá nhân: rút đúng lượng đó khỏi phân bổ + pool khác (theo tỉ lệ, tổng vẫn = |lệch|), đưa vào pool kind 'mixup'.
+  // Hồ sơ quyết định tay không đụng; chạy lại cùng sự cố không trừ lần hai.
+  async function dutyMarkMixup(caseId, o) {
+    if (!o || !o.mixupId || !(Number(o.qty) > 0)) throw new Error('Cần mã sự cố và lượng đã ghép');
+    const ref = C.fstore.collection(DUTY_CASES).doc(caseId), now = new Date(C.now()).toISOString();
+    return C.fstore.runTransaction(async t => {
+      const sn = await t.get(ref); if (!sn.exists) return false; const c = sn.data();
+      if (_dutyProtected(c) || (c.mixupIds || []).includes(o.mixupId)) return false;
+      const v = Number(c.variance) || 0, av = _dAbs(v), sign = v < 0 ? -1 : 1, cost = Number(c.costPerUnit) || 0;
+      const pool = c.pool || [], prev = pool.filter(x => x.kind === 'mixup').reduce((a, x) => a + _dAbs(x.qty), 0);
+      const take = round2(Math.min(Number(o.qty), av - prev)); if (!(take > 0.005)) return false;
+      const rest = (c.allocations || []).concat(pool.filter(x => x.kind !== 'mixup')), total = rest.reduce((a, x) => a + _dAbs(x.qty), 0);
+      const f = total > 0 ? Math.max(0, (total - take) / total) : 0;
+      const scale = x => Object.assign({}, x, { qty: round2((Number(x.qty) || 0) * f), value: round2((Number(x.value) || 0) * f) });
+      t.update(ref, { allocations: (c.allocations || []).map(scale),
+        pool: pool.filter(x => x.kind === 'mixup').concat(pool.filter(x => x.kind !== 'mixup').map(scale),
+          [{ kind: 'mixup', qty: round2(sign * take), value: round2(take * cost), reason: o.reason || 'nghi_pha_nham', mixupId: o.mixupId }]),
+        mixupIds: C.FieldValue.arrayUnion(o.mixupId), revision: (Number(c.revision) || 0) + 1,
+        history: C.FieldValue.arrayUnion({ at: now, type: 'mixup', mixupId: o.mixupId, qty: take, engineVersion: VERSION,
+          before: { allocations: c.allocations || [], pool } }) });
+      return true;
+    });
+  }
   async function dutyListOpenTasks() {
     // 'processing' = lượt xác minh đang làm hoặc bị đứt giữa chừng — vẫn hiện để làm lại (engine tự chặn nếu người khác đang xử lý).
     const snaps = await Promise.all([C.fstore.collection(DUTY_TASKS).where('status', '==', 'open').get(), C.fstore.collection(DUTY_TASKS).where('status', '==', 'processing').get()]);
@@ -5954,7 +5978,7 @@
       reconMarkProcessing: prepReconMarkProcessing, reconWindowSales: prepReconWindowSales, reconBookOf: prepReconBookOf, reconCommit: prepReconCommit, reconAcquire: prepReconAcquire, reconRelease: prepReconRelease, reconAssertFree: prepReconAssertFree, reconSetUnit: prepReconSetUnit, reconRecoverOrphan: prepReconRecoverOrphan },
     shift: { resetUnit: shiftWeighResetUnitPOS, healPending: shiftWeighHealPendingPOS, applyLine: shiftWeighApplyLinePOS, reclassToConsumption: shiftWeighReclassToConsumptionPOS, absSig: shiftWeighAbsSig, finish: shiftWeighFinishPOS, resFromRt: shiftWeighResFromRtPOS },
     util: { retry: _ueRetryAsync, round2, fmtQty: fmtPrepQty },
-    duty: { CFG: DUTY, wasteDecision: dutyWasteDecision, closePolicy: dutyClosePolicy, expireTask: dutyExpireTask, base: dutyBase, needsRecount: dutyNeedsRecount, needsNotify: dutyNeedsNotify, sameWeigh: dutySameWeigh, presence: dutyPresence, onDuty: dutyOnDuty,
+    duty: { CFG: DUTY, wasteDecision: dutyWasteDecision, closePolicy: dutyClosePolicy, markMixup: dutyMarkMixup, expireTask: dutyExpireTask, base: dutyBase, needsRecount: dutyNeedsRecount, needsNotify: dutyNeedsNotify, sameWeigh: dutySameWeigh, presence: dutyPresence, onDuty: dutyOnDuty,
       detectRecipeBias: dutyDetectRecipeBias, attributeInterval: dutyAttributeInterval, resolveVerification: dutyResolveVerification,
       lotBookAt: dutyLotBookAt, lotBookAtExact: dutyLotBookAtExact, fleetCompliant: dutyFleetCompliant, setFleetCompliant: dutySetFleetCompliant, recoverVerifyUndo: dutyRecoverVerifyUndo, onNlWeigh: dutyOnNlWeigh, flush: dutyFlush, bg: dutyBg, buildDigest: dutyBuildDigest, digest: dutyDigest, writeDigest: dutyWriteDigest, gateCheck: dutyGateCheck, lotBookNow: dutyLotBookNow, onCount: dutyOnCount, verifyCommit: dutyVerifyCommit, expireTasks: dutyExpireTasks, listOpenTasks: dutyListOpenTasks,
       reassign: dutyReassign, contest: dutyContest, keep: dutyKeep, resetBaseline: dutyResetBaseline, listCases: dutyListCases, usageSince: async (prepId, fromMs, toMs) => dutyUsageFromTx(await dutyLoadPrepTx(prepId, fromMs, toMs), fromMs, toMs), txTime: dutyTxTime },

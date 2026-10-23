@@ -31,4 +31,11 @@ const html = fs.readFileSync(path.join(__dirname, '../quanlygieo.html'), 'utf8')
 assert.match(html, /nhomDeNham: nhomDeNhamNorm\(prepDraft\.nhomDeNham\) \}/);
 assert.equal((html.match(/isPackagingMaterial, nhomDeNham,/g) || []).length, 2, 'nguyên liệu: lưu khi sửa và khi thêm mới');
 console.log('ok Form BTP và nguyên liệu đều lưu nhomDeNham');
+// Báo cáo tháng: khung sự cố pha nhầm — escape, nhãn kết luận, không chỉ đích danh bill.
+{const src2=extract('quanlygieo.html',['thangKetMixupHTML']);const mo=html.match(/const MIXUP_OUTCOME=\{[\s\S]*?\};/)[0];
+ const H=new Function('escapeHtmlAttr','qlFmtDT','fmtNum',mo+'\n'+src2+'\nreturn thangKetMixupHTML;')(s=>String(s).replace(/</g,'&lt;').replace(/"/g,'&quot;'),x=>'T'+x,n=>String(n));
+ const out=H([{day:'2026-10-24',group:'<b>Cốt sữa</b>',outcome:'suspected_wrong_drink',surplusName:'Cốt sữa gạo',shortageName:'Cốt trà sữa',surplus:320,shortage:310,qty:310,k:2,unit:'ml',staff:[{id:'a',name:'<i>A</i>'}],candidateCount:2,candidateBills:[{ref:'b1',at:'09:00'},{ref:'b2',at:'10:00'}]}]);
+ assert(!/<b>Cốt|<i>A/.test(out),'escape');assert.match(out,/Nghi pha sai món/);assert.match(out,/không xác định được bill/);assert.match(out,/T09:00 · T10:00/);
+ assert.equal(H([]),'','không có sự cố → không hiện khung');
+ console.log('ok Báo cáo tháng: khung sự cố pha nhầm (escape, nhãn, không chỉ đích danh bill)');}
 console.log('ALL PASS');

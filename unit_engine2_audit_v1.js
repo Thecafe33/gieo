@@ -24,6 +24,10 @@ const CODES={
  PREP_REVIEW_SOURCE_MISMATCH:['violation','Hồ sơ tự duyệt lệch NL khác dòng sổ gốc (số lệch / người chịu trách nhiệm) hoặc dòng sổ không mang dấu tự duyệt'],
  PREP_REVIEW_BEFORE_START:['violation','Tự duyệt dòng phát sinh trước ngày áp dụng (tồn quá khứ phải giữ nguyên)'],
  PREP_REVIEW_FYI_MISSING:['violation','Lệch > 25% đã tự duyệt nhưng không có thông báo để biết cho quản lý'],
+ MIXUP_CROSS_GROUP:['violation','Sự cố pha nhầm ghép hai món KHÁC nhóm dễ nhầm (hoặc món không thuộc nhóm nào)'],
+ MIXUP_NAMED_PERSON:['violation','Sự cố pha nhầm chỉ đích danh bill / người — từ số kho không xác định được'],
+ MIXUP_CONCLUDED_WITHOUT_REWEIGH:['violation','Kết luận «nghi pha sai món» / «nhập nhầm ô» mà không có kết quả cân lại'],
+ MIXUP_STILL_ALLOCATED:['violation','Phần lệch đã ghép pha nhầm vẫn bị chia hao hụt cá nhân trong vụ lệch'],
  INTERVAL_INVALID:['violation','Khoảng trách nhiệm sai (ngoài thời gian mở/kết thúc tem)'],
  CHECKPOINT_MISSING:['violation','Khoảng bắt đầu từ mốc cân không còn bản ghi'],
  CHECKPOINT_WRONG_OBJECT:['violation','Mốc cân không thuộc đúng tem/nguyên liệu'],
@@ -233,6 +237,18 @@ function check(snap){
   if(band!==r.band)add('PREP_REVIEW_WRONG_BAND',ref,{expected:band,recorded:r.band});
   if(r.mode==='active'&&['large','very_large'].includes(band)&&(!r.fyiAlertId||!PA[r.fyiAlertId]||PA[r.fyiAlertId].fyi!==true))add('PREP_REVIEW_FYI_MISSING',ref,{alert:r.fyiAlertId||null});
  }
+ // --- pha nhầm trong nhóm dễ nhầm (chủ quán 23/10) — kiểm lại độc lập từ danh mục + vụ lệch gốc ---
+ const MC=snap.mixupCatalog||{},MD=snap.mixupCases||{},gk=v=>String(v||'').trim().replace(/\s+/g,' ').toLowerCase();
+ for(const x of snap.mixups||[]){
+  const ref='mixups/'+x.id;if(x.storeId&&x.storeId!==store)add('STORE_MISMATCH',ref,{storeId:x.storeId});
+  if(!x.surplusId||x.status==='superseded')continue;
+  const a=gk(MC[x.surplusId]?.nhomDeNham),b=gk(MC[x.shortageId]?.nhomDeNham);if(!a||a!==b)add('MIXUP_CROSS_GROUP',ref,{surplus:a||null,shortage:b||null});
+  if(x.billId||x.employeeId||(x.responsibility&&x.responsibility.basis!=='shift_group'))add('MIXUP_NAMED_PERSON',ref);
+  if(['suspected_wrong_drink','entry_error','inconclusive'].includes(x.outcome)&&!(x.reweigh&&x.reweigh.evidenceTaskId))add('MIXUP_CONCLUDED_WITHOUT_REWEIGH',ref,{outcome:x.outcome});
+  if(x.mode==='active'&&x.pooled)for(const cid of x.caseIds?.shortage||[]){const c=MD[cid];if(!c||c.status==='manual'||c.manual)continue;
+   const pooled=(c.pool||[]).filter(p=>p.kind==='mixup'&&p.mixupId===x.id).reduce((s2,p)=>s2+Math.abs(Number(p.qty)||0),0);
+   if(pooled+EPS<Math.min(Number(x.qty)||0,Math.abs(Number(c.variance)||0)))add('MIXUP_STILL_ALLOCATED',ref,{caseId:cid,pooled,qty:x.qty});}
+ }
  const violations=issues.filter(i=>i.severity==='violation').length,warnings=issues.length-violations,complete=!(snap.truncated||[]).length;
  return {version:VERSION,store,range:snap.range||null,complete,truncated:snap.truncated||[],ok:complete&&violations===0,violations,warnings,issues,
   coverage:{cases:cases.length,sources:Object.keys(S).length,containers:Object.keys(C).length,checkpoints:Object.keys(CP).length,controls:(snap.controls||[]).length,tasks:(snap.tasks||[]).length,devices:(snap.devices||[]).length}};
@@ -270,11 +286,14 @@ async function collect({fstore,storeId:sid,from,to,limit=500,collection}){
  await byIds(sub('requests'),[...cases.map(c=>(c.originKind==='measurement'?'measurement':'finish')+'~'+encodeURIComponent(c.originId||c.sourceId)),...Object.keys(sources).filter(id=>/^finish_/.test(id)).map(id=>'finish~'+encodeURIComponent(id))],requests);
  const starts=cases.map(c=>ms(c.interval?.from)).filter(Number.isFinite),ends=cases.map(c=>ms(c.interval?.to)).filter(Number.isFinite);
  const shifts=starts.length?await rows('shifts',coll('employee_shifts').where('checkedInAt','>=',new Date(Math.min(...starts)-14*3600000).toISOString()).where('checkedInAt','<=',new Date(Math.max(...ends)).toISOString())):[];
+ const mixups=await rows('mixups',sub('mixups').where('day','>=',from).where('day','<=',to)),mixupCatalog={},mixupCases={};
+ for(const x of mixups){for(const [id,kind] of [[x.surplusId,x.surplusKind],[x.shortageId,x.shortageKind]])if(id)await byIds(coll(kind==='item'?'inventory_items':'prep_items'),[id],mixupCatalog);
+  await byIds(coll('duty_cases'),[...(x.caseIds?.surplus||[]),...(x.caseIds?.shortage||[])],mixupCases);}
  const prepReviews=await rows('prep_reviews',sub('prep_reviews').where('businessDate','>=',from).where('businessDate','<=',to)),prepSources={},prepAlerts={};
  await byIds(coll('stock_transactions'),prepReviews.map(r=>r.txId),prepSources);await byIds(coll('alerts'),prepReviews.map(r=>r.fyiAlertId),prepAlerts);
  const controls=(await rows('controls',sub('controls'))).map(k=>({...k,itemId:k.itemId||k.id}));
  const devices=await rows('devices',sub('devices'));
- return {store,range:{from,to},config,prepReviews,prepSources,prepAlerts,sources,containers,receipts,checkpoints,decisions,measurements,prices,items,requests,cases,shifts,tasks,locks,controls,devices,truncated};
+ return {store,range:{from,to},config,mixups,mixupCatalog,mixupCases,prepReviews,prepSources,prepAlerts,sources,containers,receipts,checkpoints,decisions,measurements,prices,items,requests,cases,shifts,tasks,locks,controls,devices,truncated};
 }
 
 async function run(opts){return check(await collect(opts));}

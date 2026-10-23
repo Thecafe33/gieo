@@ -114,6 +114,62 @@ function prepTrack(entries,v,cls,at){
  list.push({k:v.key,at,ratio:Number.isFinite(v.ratio)?round(v.ratio*100)/100:null,band:cls.band,txId:v.txId});
  return {entries:list.slice(-20),repeated:list.length>=PREP_REVIEW.repeatN};
 }
+// Pha nhầm trong NHÓM DỄ NHẦM (chủ quán 23/10, docs/KE_HOACH_PHA_NHAM_NHOM.md). Thuần, không đọc / ghi.
+// Chỉ ghép trong cùng nhóm do chủ quán khai báo (trường nhomDeNham). Không bao giờ suy ra bill / người cụ thể.
+const MIXUP={tolAbs:15,tolFrac:0.1,minQty:15,ambiguity:0.05,reweighTol:0.35,watchDays:7,watchCleanNeeded:3,zSig:3.5,zTol:2,scoop:0.15,noiseDays:30};
+const mixTol=q=>Math.max(MIXUP.tolAbs,MIXUP.tolFrac*Math.abs(Number(q)||0));
+const groupKey=v=>String(v||'').trim().replace(/\s+/g,' ').toLowerCase();
+// Phần ăn 1 ly ước từ bán trong khoảng: lượng nhỏ nhất của một bill (bill 2 ly vẫn ≥ 1 phần).
+function mixPortion(events){const q=(events||[]).map(e=>Number(e.qty)).filter(x=>x>0.0001).sort((a,b)=>a-b);return q.length?q[0]:0;}
+// m = {id, group, variance (đếm − sổ), sold, portion, production:[qty]} ; trả null nếu không hợp lệ.
+// Độ nhiễu đếm hằng ngày của một món (σ) ước từ |lệch| các ngày trước: σ ≈ trung vị |lệch| / 0.6745. Thiếu lịch sử → 0 (dùng ngưỡng cố định).
+function mixNoise(pastVariances){const a=(pastVariances||[]).map(v=>Math.abs(Number(v))).filter(Number.isFinite).sort((p,q)=>p-q);if(a.length<5)return 0;const m=a.length%2?a[(a.length-1)/2]:(a[a.length/2-1]+a[a.length/2])/2;return round(m/0.6745);}
+function mixPair(x,y){
+ const s=Number(x.variance),d=-Number(y.variance);if(!(s>=MIXUP.minQty)||!(d>=MIXUP.minQty)||groupKey(x.group)!==groupKey(y.group)||!groupKey(x.group)||x.id===y.id)return null;
+ if(!(Number(x.portion)>0))return null;
+ const nx=Number(x.noise)||0,ny=Number(y.noise)||0;
+ if(s<MIXUP.zSig*nx||d<MIXUP.zSig*ny)return null;                  // lệch phải BẤT THƯỜNG so với nhiễu đếm hằng ngày của chính món đó
+ const k=Math.round(s/Number(x.portion));if(k<1)return null;
+ if(Math.abs(s-k*x.portion)>Math.max(mixTol(s),MIXUP.zTol*nx))return null;   // dư ≈ bội số phần 1 ly của món dư
+ if(s>(Number(x.sold)||0)+mixTol(s))return null;                  // không thể pha nhầm nhiều hơn số đã bán
+ const e1=Math.abs(d-s),e2=Number(y.portion)>0?Math.abs(d-k*y.portion):Infinity,err=Math.min(e1,e2);
+ if(err>Math.max(mixTol(Math.max(s,d)),MIXUP.zTol*Math.hypot(nx,ny)+MIXUP.scoop*s))return null;   // thiếu ≈ dư (muỗng / ca của món khác lệch chút)
+ const batch=[x,y].find(m=>(m.production||[]).some(q=>Math.abs(Number(q)-s)<=mixTol(s)||Math.abs(Number(q)-d)<=mixTol(d)));
+ return {surplusId:x.id,shortageId:y.id,group:x.group,k,qty:round(Math.min(s,d)),surplus:round(s),shortage:round(d),
+  err:round(err/Math.max(s,d)+Math.abs(s-k*x.portion)/s),hypothesis:batch?'batch_mislabel':'mixup',batchItemId:batch?batch.id:null};
+}
+// Ghép một-một trong nhóm: nhiều cặp nhất, rồi sai số nhỏ nhất; cách ghép khác cùng số cặp và sai số gần bằng → mập mờ.
+function mixMatch(members,opts={}){
+ const out={pairs:[],ambiguous:[],reversed:[]},byGroup=new Map();
+ for(const m of members||[])if(groupKey(m.group)){const k=groupKey(m.group);if(!byGroup.has(k))byGroup.set(k,[]);byGroup.get(k).push(m);}
+ for(const [gk,list] of byGroup){
+  const S=list.filter(m=>Number(m.variance)>=MIXUP.minQty),T=list.filter(m=>-Number(m.variance)>=MIXUP.minQty);if(!S.length||!T.length)continue;
+  const options=[];
+  (function walk(i,used,acc){if(i===S.length){if(acc.length)options.push(acc.slice());return;}walk(i+1,used,acc);
+   for(const y of T)if(!used.has(y.id)){const p=mixPair(S[i],y);if(p){used.add(y.id);acc.push(p);walk(i+1,used,acc);acc.pop();used.delete(y.id);}}})(0,new Set(),[]);
+  if(!options.length)continue;
+  const score=o=>o.reduce((a,p)=>a+p.err,0),sig=o=>o.map(p=>p.surplusId+'>'+p.shortageId).sort().join(',');
+  options.sort((a,b)=>b.length-a.length||score(a)-score(b));
+  const best=options[0],rival=options.find(o=>o.length===best.length&&sig(o)!==sig(best)&&score(o)-score(best)<=MIXUP.ambiguity*best.length);
+  if(rival){out.ambiguous.push({group:list[0].group,options:[sig(best),sig(rival)]});continue;}
+  for(const p of best){
+   // Hôm trước kết luận «nhập nhầm ô» cho cặp ngược chiều cùng lượng → hôm nay chỉ là sổ tự đúng lại, không phải sự cố mới.
+   const rev=(opts.entryErrors||[]).find(e=>e.surplusId===p.shortageId&&e.shortageId===p.surplusId&&Math.abs(Number(e.qty)-p.qty)<=mixTol(p.qty));
+   if(rev){out.reversed.push({...p,hypothesis:'entry_error_reverse',reverseOf:rev.id||null});continue;}
+   out.pairs.push(p);
+  }
+ }
+ return out;
+}
+// Cân lại lúc mở ca (trước bán): sổ X đã bị cộng ~qty, sổ Y bị trừ ~qty nếu là nhập nhầm ô → cân lại X thấp hơn sổ ~qty, Y cao hơn ~qty.
+function mixReweigh(pair,read){
+ const dx=Number(read.surplusCounted)-Number(read.surplusBook),dy=Number(read.shortageCounted)-Number(read.shortageBook);
+ if(![dx,dy].every(Number.isFinite))return {outcome:'invalid'};
+ const tol=Math.max(mixTol(pair.qty),MIXUP.reweighTol*pair.qty);
+ if(Math.abs(dx+pair.qty)<=tol&&Math.abs(dy-pair.qty)<=tol)return {outcome:'entry_error',dx:round(dx),dy:round(dy)};
+ if(Math.abs(dx)<=tol&&Math.abs(dy)<=tol)return {outcome:'suspected_wrong_drink',dx:round(dx),dy:round(dy)};
+ return {outcome:'inconclusive',dx:round(dx),dy:round(dy)};
+}
 function decision(input){
  const {store,sourceId,source,container,shifts,checkpoint,valuation}=input;storeId(store);
  if(!source||source.type!=='WASTE'||source.voided===true||!(Number(source.qty)<0))return {schemaVersion:1,policyVersion:POLICY,storeId:store,sourceId,sourcePath:collection('stock_transactions',store)+'/'+sourceId,status:'voided',quantity:0,amount:0,allocations:[],reason:'SOURCE_INACTIVE'};
@@ -218,6 +274,6 @@ function outbox(storage,store){
  const read=()=>{const value=JSON.parse(storage.getItem(name)||'[]');if(!Array.isArray(value)||value.some(x=>x.storeId!==store))throw Error('Bộ nhớ công việc cần kiểm tra');return value;};
  return {read,put(command){if(!command.id||!['measurement','exception','close_exception','evidence'].includes(command.kind))throw Error('Lệnh lưu không hợp lệ');const rows=read();if(rows.some(x=>x.id===command.id))return;if(rows.length>=100)throw Error('Bộ nhớ công việc đã đầy; kết nối để đồng bộ trước');storage.setItem(name,JSON.stringify([...rows,{...command,storeId:store}]));},remove(id){storage.setItem(name,JSON.stringify(read().filter(x=>x.id!==id)));}};
 }
-const api={VERSION,POLICY,DAY,states,ms,finite,stable,storeId,collection,SHARED,tableName,rootPath,key,digest,round,split,isBarista,group,interval,SPEC,lotKey,specCheck,specOutcome,PREP_REVIEW,PREP_ROW,prepVariance,prepReviewClass,prepTrack,decision,measuredDecision,audit,transition,path,caseFlow,taskStart,control,measurement,outbox};
+const api={VERSION,POLICY,DAY,states,ms,finite,stable,storeId,collection,SHARED,tableName,rootPath,key,digest,round,split,isBarista,group,interval,SPEC,lotKey,specCheck,specOutcome,PREP_REVIEW,PREP_ROW,prepVariance,prepReviewClass,prepTrack,MIXUP,groupKey,mixTol,mixPortion,mixNoise,mixPair,mixMatch,mixReweigh,decision,measuredDecision,audit,transition,path,caseFlow,taskStart,control,measurement,outbox};
 if(typeof module==='object'&&module.exports)module.exports=api;root.UnitEngine2=api;
 })(typeof window!=='undefined'?window:globalThis);

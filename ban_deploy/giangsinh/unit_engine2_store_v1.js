@@ -29,11 +29,12 @@ function create(opts){
   return {schemaVersion:1,id:E.key(c.id,end.kind,end.at),storeId:store,itemId:c.itemId,unit:c.unit||'',containerId:c.id,from:start.at,fromPoint:start.id,at:end.at,day:new Date(E.ms(end.at)+7*3600000).toISOString().slice(0,10),
    used,loss:E.round(end.book-end.measured),book:end.book,measured:end.measured,nWeigh:(start.weighed?1:0)+(end.weighed?1:0),fromOpen:start.id==='open',cap:start.id==='open'?start.measured:null,receiveRefId:c.receiveRefId||null,verified:used>0,scored:false,...extra,createdAt:iso()};
  }
- const DIAG=['tare_check','density_proof','recipe_portion_weigh','scan_open_units','spec_confirm','reference_weigh'];
+ const DIAG=['tare_check','density_proof','recipe_portion_weigh','scan_open_units','spec_confirm','reference_weigh','mixup_reweigh','mixup_group_weigh'];
+ const MIX=['mixup_reweigh','mixup_group_weigh'];
  async function fence(t,guard){if(!guard)return;const s=await t.get(guard.ref);if(!s.exists||s.data().leaseToken!==guard.token||s.data().revision!==guard.revision)throw error('Lease hoặc phiên bản công việc đã thay đổi');}
  async function config(){const s=await base.get();return s.exists?s.data():{};}
  async function enqueue(kind,id,resumeCursor=false){
-  if(!['finish','measurement','handover','bootstrap','reprice','recompute_shift','discover_shift','opened','prep_review'].includes(kind))throw Error('Engine2: loại việc không hợp lệ');
+  if(!['finish','measurement','handover','bootstrap','reprice','recompute_shift','discover_shift','opened','prep_review','mixup_day'].includes(kind))throw Error('Engine2: loại việc không hợp lệ');
   const ref=sub('requests').doc(E.key(kind,id));
   return fs.runTransaction(async t=>{
    const [c,s]=await Promise.all([t.get(base),t.get(ref)]);const cfg=c.exists?c.data():{};
@@ -184,11 +185,172 @@ function create(opts){
   for(const d of s.docs)if(E.PREP_ROW.test(d.id)&&String(d.data().businessDate||'')>=cfg.fromDate&&d.data().voided!==true){await enqueue('prep_review',d.id);n++;}
   return n;
  }
+ // ── Pha nhầm trong NHÓM DỄ NHẦM (chủ quán 23/10, docs/KE_HOACH_PHA_NHAM_NHOM.md P3–P4) ──
+ // Chạy theo NGÀY sau khi đếm BTP / cân NL cuối ngày tạo vụ lệch (duty_cases). Chỉ ghép trong nhóm chủ quán khai báo
+ // (nhomDeNham). Kết quả là SỰ CỐ CHẤT LƯỢNG (mixups), không phải hao hụt: phần ghép khớp rút khỏi phân bổ (duty.markMixup);
+ // trách nhiệm ghi cho ca / nhóm pha chế trong ngày — KHÔNG xác định được bill. Không thêm thao tác lúc bán: chỉ việc cân lại
+ // lúc mở ca kế tiếp (loại «nhập nhầm ô») và cân nhóm lúc bàn giao cho đúng nhân viên có ca trong ngày sự cố.
+ const dayAdd=(d,n)=>new Date(Date.parse(d+'T00:00:00Z')+n*E.DAY).toISOString().slice(0,10);
+ const vnDay=ms=>new Date(ms+7*3600000).toISOString().slice(0,10);
+ async function dutyEngine(itemHint){if(opts.getEngine)return opts.getEngine();if(opts.inventory)return opts.inventory;if(opts.getInventory)return opts.getInventory(itemHint);throw error('Chưa có inventory adapter');}
+ function salesOf(rows,from,to){
+  const by={},prod=[];
+  for(const t of rows){const ty=String(t.type||'').toUpperCase(),q=Number(t.qty)||0,at=E.ms(t.createdAt);
+   if(ty==='PRODUCTION'&&q>0){prod.push(q);continue;}
+   if(t.prepRecon||t.substitutionFor||/^prep_/.test(String(t.id||'')))continue;   // NL dùng nấu mẻ / dùng bù — không phải bán
+   const sale=ty==='CONSUMPTION',rev=ty==='ADJUSTMENT'&&t.reversal===true;if(!sale&&!rev)continue;
+   if(from&&Number.isFinite(at)&&(at<=E.ms(from)||at>E.ms(to)))continue;
+   const k=t.referenceId||t.id,o=(by[k]=by[k]||{refId:k,qty:0,at:null});o.qty+=-q;if(sale&&t.createdAt)o.at=t.createdAt;}
+  const events=Object.values(by).filter(e=>e.qty>0.0001);
+  return {events,sold:E.round(events.reduce((a,e)=>a+e.qty,0)),portion:E.mixPortion(events),production:prod};
+ }
+ async function fyiOnce(t,ref,doc){const sn=await t.get(ref);return ()=>{if(!sn.exists)t.set(ref,{fyi:true,source:'engine2',status:'new',createdAt:iso(),...doc});};}
+ async function mixupDay(day,guard){
+  const cfg=await config();if(!cfg.enabled||!/^\d{4}-\d{2}-\d{2}$/.test(day||'')||!/^\d{4}-\d{2}-\d{2}$/.test(cfg.fromDate||'')||day<cfg.fromDate)return null;
+  const [ps,is]=await Promise.all([coll('prep_items').where('nhomDeNham','>','').limit(300).get(),coll('inventory_items').where('nhomDeNham','>','').limit(300).get()]);
+  const cat=new Map();
+  for(const d of ps.docs){const x=d.data();if(x.active!==false&&E.groupKey(x.nhomDeNham))cat.set(d.id,{id:d.id,kind:'prep',name:x.name||d.id,unit:x.unit||'',group:String(x.nhomDeNham).trim()});}
+  for(const d of is.docs){const x=d.data();if(x.active!==false&&E.groupKey(x.nhomDeNham))cat.set(d.id,{id:d.id,kind:'item',name:x.name||d.id,unit:x.unit||'',group:String(x.nhomDeNham).trim()});}
+  const size={};for(const m of cat.values())size[E.groupKey(m.group)]=(size[E.groupKey(m.group)]||0)+1;
+  for(const [id,m] of cat)if(size[E.groupKey(m.group)]<2)cat.delete(id);
+  if(!cat.size)return {day,pairs:0,reason:'no_groups'};
+  const cs=await coll('duty_cases').where('businessDate','==',day).limit(501).get();if(cs.docs.length>500)throw error('Quá nhiều vụ lệch trong ngày; chưa xét pha nhầm');
+  const varOf=new Map();
+  for(const d of cs.docs){const c=d.data();if(!cat.has(c.prepId)||c.status==='voided')continue;const o=varOf.get(c.prepId)||{variance:0,cases:[],from:null,to:null};
+   o.variance=E.round(o.variance+(Number(c.variance)||0));o.cases.push({id:d.id,variance:Number(c.variance)||0});
+   if(c.interval?.from&&(!o.from||E.ms(c.interval.from)<E.ms(o.from)))o.from=c.interval.from;if(c.interval?.to&&(!o.to||E.ms(c.interval.to)>E.ms(o.to)))o.to=c.interval.to;varOf.set(c.prepId,o);}
+  const hot=new Set();
+  for(const g of new Set([...cat.values()].map(m=>E.groupKey(m.group)))){const ms=[...cat.values()].filter(m=>E.groupKey(m.group)===g),v=ms.map(m=>varOf.get(m.id)?.variance||0);
+   if(v.some(x=>x>=E.MIXUP.minQty)&&v.some(x=>-x>=E.MIXUP.minQty))ms.forEach(m=>hot.add(m.id));}
+  const members=[],salesById={};
+  for(const id of hot){const m=cat.get(id),o=varOf.get(id)||{variance:0,cases:[]};
+   const q=m.kind==='prep'?coll('prep_transactions').where('prepId','==',id):coll('stock_transactions').where('itemId','==',id);
+   const rows=(await q.where('businessDate','==',day).limit(1001).get()).docs.map(data);if(rows.length>1000)throw error('Quá nhiều dòng sổ trong ngày; chưa xét pha nhầm');
+   const sl=salesOf(rows,o.from,o.to);salesById[id]=sl;
+   // Độ nhiễu đếm của chính món: |lệch| các ngày trước (≤ 30 ngày) — lệch phải bất thường so với nhiễu mới xét ghép.
+   const past=(await coll('duty_cases').where('prepId','==',id).limit(120).get()).docs.map(x=>x.data()).filter(c=>c.businessDate&&c.businessDate<day&&c.businessDate>=dayAdd(day,-E.MIXUP.noiseDays)&&c.status!=='voided');
+   const byDay={};for(const c of past)byDay[c.businessDate]=(byDay[c.businessDate]||0)+(Number(c.variance)||0);
+   members.push({...m,variance:o.variance,sold:sl.sold,portion:sl.portion,noise:E.mixNoise(Object.values(byDay)),production:m.kind==='prep'?sl.production:[],cases:o.cases});}
+  const prev=(await sub('mixups').where('day','==',dayAdd(day,-1)).limit(50).get()).docs.map(data).filter(x=>x.outcome==='entry_error');
+  const r=E.mixMatch(members,{entryErrors:prev});
+  const shifts=(await coll('employee_shifts').where('businessDate','==',day).limit(200).get()).docs.map(data).filter(E.isBarista);
+  const staffRows=[...new Map(shifts.filter(x=>x.employeeId).map(x=>[x.employeeId,{id:x.employeeId,name:x.employeeName||x.employeeId}])).values()].sort((a,b)=>a.id.localeCompare(b.id));
+  const found=[...r.pairs,...r.reversed],keep=new Set();
+  const results=[];
+  for(const p of found){
+   const X=cat.get(p.surplusId),Y=cat.get(p.shortageId),id=E.key('mixup',day,p.surplusId,p.shortageId);keep.add(id);
+   const candidates=(salesById[p.surplusId]?.events||[]).map(e=>({ref:e.refId,at:e.at||null})).sort((a,b)=>String(a.at).localeCompare(String(b.at))).slice(0,200);
+   const doc={id,storeId:store,day,group:X.group,surplusId:X.id,surplusName:X.name,surplusKind:X.kind,shortageId:Y.id,shortageName:Y.name,shortageKind:Y.kind,unit:X.unit||Y.unit,
+    k:p.k,qty:p.qty,surplus:p.surplus,shortage:p.shortage,err:p.err,noise:{surplus:members.find(m=>m.id===X.id)?.noise||0,shortage:members.find(m=>m.id===Y.id)?.noise||0},hypothesis:p.hypothesis,batchItemId:p.batchItemId||null,reverseOf:p.reverseOf||null,
+    caseIds:{surplus:(members.find(m=>m.id===X.id)?.cases||[]).map(c=>c.id),shortage:(members.find(m=>m.id===Y.id)?.cases||[]).map(c=>c.id)},
+    candidateBills:candidates,candidateCount:(salesById[p.surplusId]?.events||[]).length,staff:staffRows,
+    responsibility:{basis:'shift_group',note:'Không xác định được bill / người — ghi cho ca / nhóm pha chế trong ngày'}};
+   const fingerprint=E.stable(doc),ref=sub('mixups').doc(id),taskRef=sub('tasks').doc(E.key('mixup_reweigh',id));
+   const res=await fs.runTransaction(async t=>{
+    await fence(t,guard);const [c,old]=await Promise.all([t.get(base),t.get(ref)]);const cf=c.exists?c.data():{};if(!cf.enabled)return null;
+    const mode=active(cf)?'active':'shadow',o=old.exists?old.data():null;
+    if(o&&(o.fingerprint===fingerprint&&o.mode===mode||o.status==='closed'))return null;   // đã kết luận thì không mở lại
+    const at=iso(),checking=p.hypothesis==='mixup';
+    const d={...doc,fingerprint,mode,status:checking?'checking':'closed',outcome:checking?null:p.hypothesis,createdAt:o?.createdAt||at,updatedAt:at,revision:(o?.revision||0)+1,pooled:o?.pooled||false};
+    if(checking&&mode==='active'){d.reweighTaskId=taskRef.id;
+     t.set(taskRef,{id:taskRef.id,storeId:store,kind:'mixup_reweigh',itemId:X.id,itemName:X.name+' · '+Y.name,incidentId:id,status:'queued',pending:true,assignment:'opening',
+      items:[{id:X.id,kind:X.kind,name:X.name,unit:X.unit,role:'surplus'},{id:Y.id,kind:Y.kind,name:Y.name,unit:Y.unit,role:'shortage'}],
+      reason:'Cân lại 2 món lúc mở ca, TRƯỚC khi bán — hệ thống kiểm tra cuối ngày '+day+' có nhập nhầm ô hay không',businessDate:dayAdd(day,1),createdAt:at,updatedAt:at,revision:1},{merge:true});
+     t.set(base,{revision:(cf.revision||0)+1,lastTaskAt:at},{merge:true});}
+    if(!checking&&mode==='active'&&p.hypothesis==='batch_mislabel'){const add=await fyiOnce(t,coll('alerts').doc(E.key('e2_mixup',id)),{type:'mixup_batch_mislabel',severity:'warning',businessDate:day,
+     title:'Nghi ghi nhầm loại mẻ: '+X.name+' dư '+p.surplus+' – '+Y.name+' thiếu '+p.shortage+' '+(X.unit||''),note:'Lượng lệch ≈ cỡ một mẻ nấu trong ngày. Không phải hao hụt, không ảnh hưởng khách. Thông báo để biết.'});add();}
+    t.set(ref,d);return d;
+   });
+   if(res)results.push(res);
+  }
+  // Lượt trước của cùng ngày (khi chưa đủ dữ liệu đếm) ghép khác → bỏ hồ sơ cũ còn đang chờ.
+  const olds=(await sub('mixups').where('day','==',day).limit(50).get()).docs;
+  for(const o of olds)if(!keep.has(o.id)&&o.data().status==='checking')await fs.runTransaction(async t=>{const sn=await t.get(o.ref);if(!sn.exists||sn.data().status!=='checking')return;
+   const tr=sub('tasks').doc(E.key('mixup_reweigh',o.id)),ts=await t.get(tr);t.set(o.ref,{status:'superseded',updatedAt:iso()},{merge:true});
+   if(ts.exists&&!['done','cancelled','superseded'].includes(ts.data().status))t.set(tr,{status:E.transition('task',ts.data().status,'NEW_REVISION'),pending:false,updatedAt:iso()},{merge:true});});
+  for(const a of r.ambiguous){const id=E.key('mixup',day,'ambiguous',E.groupKey(a.group));
+   await sub('mixups').doc(id).set({id,storeId:store,day,group:a.group,status:'closed',outcome:'ambiguous',options:a.options,staff:staffRows,updatedAt:iso()},{merge:true});}
+  // Phần đã ghép không chia hao hụt cá nhân (chỉ chế độ chạy thật).
+  const all=(await sub('mixups').where('day','==',day).limit(50).get()).docs.map(data).filter(x=>x.mode==='active'&&!x.pooled&&['checking','closed'].includes(x.status)&&x.surplusId);
+  for(const x of all){const eng=await dutyEngine(x.surplusKind==='item'?x.surplusId:x.shortageKind==='item'?x.shortageId:x.surplusId);
+   for(const cid of [...(x.caseIds?.surplus||[]),...(x.caseIds?.shortage||[])])await eng.duty.markMixup(cid,{qty:x.qty,mixupId:x.id,reason:x.hypothesis==='batch_mislabel'?'ghi_nham_loai_me':x.hypothesis==='entry_error_reverse'?'nhap_nham_o_tu_dung_lai':'nghi_pha_nham'});
+   await sub('mixups').doc(x.id).set({pooled:true,pooledAt:iso()},{merge:true});}
+  return {day,pairs:results.length,ambiguous:r.ambiguous.length};
+ }
+ async function mixupWatchUpsert(t,inc,at){
+  const ref=sub('mixup_watch').doc(E.key(E.groupKey(inc.group))),sn=await t.get(ref),o=sn.exists?sn.data():{};
+  const items=[];const seen=new Set();for(const x of [...(o.items||[]),{id:inc.surplusId,kind:inc.surplusKind,name:inc.surplusName,unit:inc.unit},{id:inc.shortageId,kind:inc.shortageKind,name:inc.shortageName,unit:inc.unit}])if(!seen.has(x.id)){seen.add(x.id);items.push(x);}
+  const emp=new Map((o.active?o.staff||[]:[]).map(s=>[s.id,s]));for(const s of inc.staff||[])emp.set(s.id,s);
+  return ()=>t.set(ref,{id:ref.id,storeId:store,group:inc.group,items,staff:[...emp.values()],employeeIds:[...emp.keys()],active:true,from:inc.day,until:dayAdd(inc.day,E.MIXUP.watchDays),
+   clean:0,needed:E.MIXUP.watchCleanNeeded,incidentIds:[...new Set([...(o.active?o.incidentIds||[]:[]),inc.id])].slice(-20),updatedAt:at});
+ }
+ async function mixupEvidence(taskId){
+  const task=data(await sub('tasks').doc(taskId).get()),ev=data(await sub('evidence').doc(taskId).get());if(!task||!ev)return null;const r=ev.result||{};
+  if(task.kind==='mixup_reweigh'){const ref=sub('mixups').doc(task.incidentId);
+   return fs.runTransaction(async t=>{const sn=await t.get(ref);if(!sn.exists||sn.data().status!=='checking')return null;const inc=sn.data();
+    const out=E.mixReweigh(inc,{surplusCounted:r.counts[inc.surplusId],surplusBook:r.books[inc.surplusId],shortageCounted:r.counts[inc.shortageId],shortageBook:r.books[inc.shortageId]});
+    const at=iso(),wrong=out.outcome!=='entry_error';
+    const add=await fyiOnce(t,coll('alerts').doc(E.key('e2_mixup',inc.id)),wrong?{type:'mixup_suspected',severity:out.outcome==='suspected_wrong_drink'?'danger':'warning',businessDate:inc.day,
+      title:(out.outcome==='suspected_wrong_drink'?'Nghi pha sai món: ':'Nghi pha sai món hoặc nhập nhầm ô: ')+'~'+inc.k+' ly '+inc.surplusName+' có thể đã pha bằng '+inc.shortageName+' ngày '+inc.day,
+      note:'Không xác định được bill: '+inc.candidateCount+' bill có '+inc.surplusName+' trong ngày. Ca / nhóm pha chế: '+(inc.staff||[]).map(s=>s.name).join(', ')+'. Phần lệch '+inc.qty+' '+(inc.unit||'')+' không tính hao hụt. Những ngày tới, nhân viên có ca hôm đó sẽ cân nhóm «'+inc.group+'» lúc bàn giao. Thông báo để biết.',
+      incidentId:inc.id,group:inc.group}
+     :{type:'mixup_entry_error',severity:'warning',businessDate:inc.day,title:'Nhập nhầm ô khi đếm cuối ngày '+inc.day+': '+inc.surplusName+' ↔ '+inc.shortageName,
+      note:'Cân lại lúc mở ca cho thấy số của hai món bị ghi lẫn. Khách không bị ảnh hưởng; sổ tự đúng lại ở lần đếm tối nay. Thông báo để biết (lỗi nhập liệu).',incidentId:inc.id});
+    const watch=wrong?await mixupWatchUpsert(t,inc,at):null;
+    t.set(ref,{status:'closed',outcome:out.outcome,reweigh:{...out,evidenceTaskId:taskId,byEmployeeId:ev.byEmployeeId,at:ev.at},closedAt:at,updatedAt:at},{merge:true});
+    if(inc.mode==='active'){add();if(watch)watch();}
+    return out;});
+  }
+  if(task.kind==='mixup_group_weigh'){const ref=sub('mixup_watch').doc(task.watchId);
+   return fs.runTransaction(async t=>{const sn=await t.get(ref);if(!sn.exists||!sn.data().active)return null;const w=sn.data(),at=iso();
+    const d=(task.items||[]).map(x=>({id:x.id,name:x.name,delta:E.round(Number(r.counts[x.id])-Number(r.books[x.id]))}));
+    const S=d.filter(x=>x.delta>=E.MIXUP.minQty),T=d.filter(x=>-x.delta>=E.MIXUP.minQty);
+    const hit=S.flatMap(a=>T.map(b=>({a,b}))).find(({a,b})=>Math.abs(a.delta+b.delta)<=E.mixTol(Math.max(a.delta,-b.delta)));
+    const log=[...(w.log||[]),{taskId,shiftId:task.shiftId||null,employeeId:ev.byEmployeeId,at:ev.at,deltas:d,repeat:!!hit}].slice(-30);
+    if(hit){const add=await fyiOnce(t,coll('alerts').doc(E.key('e2_mixup_repeat',w.id,task.shiftId||taskId)),{type:'mixup_repeat',severity:'danger',businessDate:vnDay(now()),group:w.group,employeeId:ev.byEmployeeId,
+      title:'Lặp lại nghi pha nhầm nhóm «'+w.group+'»: '+hit.a.name+' dư '+hit.a.delta+' – '+hit.b.name+' thiếu '+(-hit.b.delta)+' lúc bàn giao ca',
+      note:'Cân bàn giao của nhân viên có ca trong ngày sự cố trước. Thông báo để biết; quản lý trao đổi riêng.'});add();
+     t.set(ref,{log,clean:0,until:dayAdd(vnDay(now()),E.MIXUP.watchDays),repeats:(w.repeats||0)+1,updatedAt:at},{merge:true});}
+    else{const clean=(w.clean||0)+1;t.set(ref,{log,clean,active:clean<(w.needed||E.MIXUP.watchCleanNeeded),updatedAt:at,...(clean>=(w.needed||E.MIXUP.watchCleanNeeded)?{closedAt:at,closedReason:'clean'}:{})},{merge:true});}
+    return {repeat:!!hit};});
+  }
+  return null;
+ }
+ // Nhân viên có ca trong ngày sự cố check-in (ngày sau) → việc cân nhóm lúc bàn giao, giao ĐÍCH DANH người đó; nhân viên khác không.
+ async function mixupHandover(shiftId,shift,guard){
+  if(!shift?.employeeId||!shift.checkedInAt||shift.checkedOutAt)return;
+  const day=shift.businessDate||vnDay(E.ms(shift.checkedInAt));
+  const ws=await sub('mixup_watch').where('employeeIds','array-contains',shift.employeeId).limit(20).get();
+  for(const w of ws.docs){const wd=w.data();if(!wd.active||day<=wd.from||day>wd.until)continue;
+   const ref=sub('tasks').doc(E.key('mixup_group_weigh',w.id,shiftId));
+   await fs.runTransaction(async t=>{await fence(t,guard);const [c,old]=await Promise.all([t.get(base),t.get(ref)]);if(!c.exists||!active(c.data())||old.exists)return;const at=iso();
+    t.set(ref,{id:ref.id,storeId:store,kind:'mixup_group_weigh',itemId:(wd.items[0]||{}).id||'',itemName:'Nhóm «'+wd.group+'»',items:wd.items,watchId:w.id,shiftId,
+     assigneeIds:[shift.employeeId],assigneeName:shift.employeeName||'',assignment:'assigned_employee',status:'queued',pending:true,businessDate:day,
+     reason:'Cân các món nhóm dễ nhầm lúc bàn giao ca (ngoài giờ bán) — chỉ nhân viên có ca trong ngày xảy ra sự cố',createdAt:at,updatedAt:at,revision:1});
+    t.set(base,{revision:(c.data().revision||0)+1,lastTaskAt:at},{merge:true});});
+  }
+ }
+ // Lượt ngày: chưa cân lại sau 36 giờ → kết luận ở mức «nghi» (không phân biệt được với nhập nhầm ô), báo để biết; hết hạn theo dõi → đóng.
+ async function mixupSweep(){
+  const cfg=await config();if(!cfg.enabled)return 0;let n=0;
+  for(const d of (await sub('mixups').where('status','==','checking').limit(50).get()).docs){const inc=d.data();if(now()-E.ms(inc.createdAt)<36*3600000)continue;
+   await fs.runTransaction(async t=>{const sn=await t.get(d.ref);if(!sn.exists||sn.data().status!=='checking')return;const at=iso();
+    const add=await fyiOnce(t,coll('alerts').doc(E.key('e2_mixup',inc.id)),{type:'mixup_suspected',severity:'warning',businessDate:inc.day,incidentId:inc.id,group:inc.group,
+     title:'Nghi pha sai món hoặc nhập nhầm ô: ~'+inc.k+' ly '+inc.surplusName+' / '+inc.shortageName+' ngày '+inc.day+' (chưa cân lại lúc mở ca)',
+     note:'Không cân lại nên không loại được nhập nhầm ô. '+inc.candidateCount+' bill có '+inc.surplusName+' trong ngày; không xác định được bill. Thông báo để biết.'});
+    const watch=await mixupWatchUpsert(t,inc,at),tr=sub('tasks').doc(E.key('mixup_reweigh',inc.id)),ts=await t.get(tr);
+    t.set(d.ref,{status:'closed',outcome:'reweigh_missed',closedAt:at,updatedAt:at},{merge:true});
+    if(inc.mode==='active'){add();watch();}
+    if(ts.exists&&!['done','cancelled','superseded'].includes(ts.data().status))t.set(tr,{status:'cancelled',pending:false,reason:'Quá hạn cân lại',updatedAt:at},{merge:true});});n++;}
+  for(const d of (await sub('mixup_watch').where('active','==',true).limit(50).get()).docs)if(vnDay(now())>d.data().until)await d.ref.set({active:false,closedAt:iso(),closedReason:'expired'},{merge:true});
+  return n;
+ }
  async function handover(id,guard){
   const c=await config();if(!active(c))return;
   await enqueue('recompute_shift',id);await enqueue('discover_shift',id);
   const s=await coll('employee_shifts').doc(id).get();if(!s.exists||!E.isBarista(s.data()))return;
   const at=iso(),shift=s.data();
+  await mixupHandover(id,shift,guard);
   for(const itemId of Math.abs(now()-E.ms(shift.checkedOutAt||shift.checkedInAt))<=14*3600000?c.controlledItemIds||[]:[]){
    const ctl=await sub('controls').doc(itemId).get();if(!ctl.exists||ctl.data().level<1)continue;
    const ref=sub('tasks').doc(E.key('handover',id,itemId,shift.checkedOutAt||shift.checkedInAt));
@@ -339,9 +501,9 @@ function create(opts){
  }
  // Kết quả việc chẩn đoán = NHÃN cho giả thuyết (worker học chấm). Không đổi kho; đề xuất đổi bì / định mức đi đường riêng.
  async function submitEvidence(taskId,result,staff){
-  if(!staff?.id)throw Error('Cần người thực hiện');const ref=sub('tasks').doc(taskId);let lot=null;
+  if(!staff?.id)throw Error('Cần người thực hiện');const ref=sub('tasks').doc(taskId);let lot=null,mixTask=null;
   return fs.runTransaction(async t=>{
-   const ts=await t.get(ref);if(!ts.exists)throw Error('Không có việc này');const task=ts.data();if(task.kind==='spec_confirm')lot=task.itemId+'|'+task.receiveRefId;if(!DIAG.includes(task.kind))throw Error('Việc này không phải việc chẩn đoán');
+   const ts=await t.get(ref);if(!ts.exists)throw Error('Không có việc này');const task=ts.data();if(task.kind==='spec_confirm')lot=task.itemId+'|'+task.receiveRefId;if(MIX.includes(task.kind))mixTask=taskId;if(!DIAG.includes(task.kind))throw Error('Việc này không phải việc chẩn đoán');
    if(['done','cancelled','superseded'].includes(task.status))return false;
    const r={...result};
    if(task.kind==='tare_check'){if(!r.vesselId||!r.variantId||!E.finite(r.measuredTareG)||Number(r.measuredTareG)<0)throw Error('Cân bì dụng cụ rỗng và chọn đúng dụng cụ');const v=await t.get(coll('prep_vessels').doc(r.vesselId));const vr=v.exists?(v.data().variants||[]).find(x=>x.id===r.variantId):null;if(!vr)throw Error('Dụng cụ đã thay đổi');r.recordedTareG=Number(vr.tareG);r.measuredTareG=Number(r.measuredTareG);}
@@ -349,12 +511,22 @@ function create(opts){
    else if(task.kind==='density_proof'){if(!(Number(r.netG)>0)||!(Number(r.volumeMl)>0))throw Error('Nhập khối lượng ròng và thể tích mẫu');r.density=Number(r.netG)/Number(r.volumeMl);}
    else if(task.kind==='scan_open_units'){if(!Array.isArray(r.present)||!Array.isArray(r.unregistered))throw Error('Đánh dấu mã có trên tay và ghi mã đang mở chưa khai');}
    else if(task.kind==='spec_confirm'){if(!(Number(r.labelQty)>0))throw Error('Nhập quy cách in trên bao (đơn vị nền)');r.recordedQty=Number(task.recordedQty)||null;}
+   else if(MIX.includes(task.kind)){
+    // Cân lại nhóm dễ nhầm: số cân từng món + sổ lúc gửi (đọc trong cùng giao dịch). Chỉ là bằng chứng — không đổi kho.
+    const items=task.items||[],counts=r.counts||{};
+    if(!items.length||items.some(x=>!E.finite(counts[x.id])||Number(counts[x.id])<0))throw Error('Cân đủ các món trong danh sách');
+    if(task.kind==='mixup_group_weigh'&&(task.assigneeIds||[]).length&&!task.assigneeIds.includes(staff.id))throw Error('Việc này giao cho nhân viên có ca trong ngày xảy ra sự cố');
+    const books={};for(const x of items){const d=await t.get(coll(x.kind==='prep'?'prep_items':'inventory_items').doc(x.id));books[x.id]=d.exists&&E.finite(d.data().currentStock)?Number(d.data().currentStock):null;}
+    if(Object.values(books).some(b=>b===null))throw Error('Chưa đọc được sổ của món cần cân');
+    r.counts=Object.fromEntries(items.map(x=>[x.id,Number(counts[x.id])]));r.books=books;
+   }
    else if(task.kind==='reference_weigh'){if(!(Number(r.known)>0)||!(Number(r.reading)>=0))throw Error('Đặt vật mẫu biết trước khối lượng lên cân: nhập khối lượng chuẩn và số cân hiện');r.known=Number(r.known);r.reading=Number(r.reading);}
    const at=iso(),start=E.taskStart(task.status);
-   t.set(sub('evidence').doc(taskId),{taskId,storeId:store,kind:task.kind,itemId:task.itemId,resolves:task.resolves||null,posterior:task.posterior??null,obsId:task.obsId||null,result:r,byEmployeeId:staff.id,at,labeled:false});
+   t.set(sub('evidence').doc(taskId),{taskId,storeId:store,kind:task.kind,itemId:task.itemId,resolves:task.resolves||null,posterior:task.posterior??null,obsId:task.obsId||null,result:r,byEmployeeId:staff.id,at,labeled:MIX.includes(task.kind)});
    t.set(ref,{status:E.transition('task',start.status,'VALID_RESULT'),statusEvents:[...start.events,'VALID_RESULT'],pending:false,resultRef:sub('evidence').doc(taskId).path,updatedAt:at},{merge:true});return true;
   }).then(async ok=>{
    // Đối chiếu nhãn bao xong → tính lại các hồ sơ «nghi sai quy cách» của phiếu đó (nhãn = khai báo → chuyển thành hao hụt).
+   if(ok&&mixTask)await mixupEvidence(mixTask);
    if(ok&&lot){const w=await sub('cases').where('basis','==','spec_mismatch').limit(50).get().catch(()=>null);for(const x of (w?w.docs:[])){const o=x.data();if(o.spec?.lot===lot&&o.originId)await finish(o.originId).catch(()=>{});}}
    return ok;
   });
@@ -497,12 +669,12 @@ function create(opts){
   const job=await fs.runTransaction(async t=>{const [s,c]=await Promise.all([t.get(ref),t.get(base)]);if(!s.exists)return null;const j=s.data();if(j.kind!=='measurement'&&(!c.exists||!c.data().enabled))return null;if(!j.dirty||j.leaseUntil>now()||j.nextTryAt>now())return null;t.set(ref,{leaseUntil:now()+120000,leaseToken:token},{merge:true});return j;});
   if(!job)return false;
   try{
-   const guard={ref,token,revision:job.revision};if(job.kind==='finish')await finish(job.sourceId,guard);else if(job.kind==='measurement')await measure(job.sourceId,guard);else if(job.kind==='bootstrap')await bootstrap(guard);else if(['reprice','recompute_shift'].includes(job.kind))await dependencies(job.kind,job.sourceId,guard);else if(job.kind==='discover_shift')await discoverShift(job.sourceId,guard);else if(job.kind==='opened')await opened(job.sourceId,guard);else if(job.kind==='prep_review')await prepReview(job.sourceId,guard);else await handover(job.sourceId,guard);
+   const guard={ref,token,revision:job.revision};if(job.kind==='finish')await finish(job.sourceId,guard);else if(job.kind==='measurement')await measure(job.sourceId,guard);else if(job.kind==='bootstrap')await bootstrap(guard);else if(['reprice','recompute_shift'].includes(job.kind))await dependencies(job.kind,job.sourceId,guard);else if(job.kind==='discover_shift')await discoverShift(job.sourceId,guard);else if(job.kind==='opened')await opened(job.sourceId,guard);else if(job.kind==='prep_review')await prepReview(job.sourceId,guard);else if(job.kind==='mixup_day')await mixupDay(job.sourceId,guard);else await handover(job.sourceId,guard);
    return await fs.runTransaction(async t=>{const s=await t.get(ref);if(!s.exists||s.data().leaseToken!==token)return false;t.set(ref,{dirty:s.data().revision!==job.revision,leaseUntil:0,leaseToken:'',nextTryAt:now(),lastError:'',completedAt:iso()},{merge:true});return true;});
    }catch(e){await fs.runTransaction(async t=>{const s=await t.get(ref);if(!s.exists||s.data().leaseToken!==token)return;if(s.data().revision!==job.revision){t.set(ref,{leaseUntil:0,leaseToken:'',nextTryAt:now()},{merge:true});return;}t.set(ref,{leaseUntil:0,leaseToken:'',lastError:String(e.message||e),nextTryAt:now()+60000,attempt:(s.data().attempt||0)+1},{merge:true});});throw e;}
  }
  async function retryDue(){const s=await sub('requests').where('dirty','==',true).where('nextTryAt','<=',now()).orderBy('nextTryAt').limit(30).get();for(const d of s.docs)try{await drain(d.id);}catch(e){if(opts.log)opts.log(e);}return s.docs.length;}
- return {storeId:store,base,sub,coll,config,enqueue,finish,prepReview,sweepPrepReview,handover,opened,ensureCloseTasks,registerVessel,requestMeasurement,measure,createTask,submitEvidence,learnDay,exception,drain,retryDue,observation,startPoint};
+ return {storeId:store,base,sub,coll,config,enqueue,finish,prepReview,sweepPrepReview,mixupDay,mixupSweep,handover,opened,ensureCloseTasks,registerVessel,requestMeasurement,measure,createTask,submitEvidence,learnDay,exception,drain,retryDue,observation,startPoint};
 }
 const api={create};if(typeof module==='object'&&module.exports)module.exports=api;root.UnitEngine2Store=api;
 })(typeof window!=='undefined'?window:globalThis);

@@ -24,6 +24,15 @@ function withPrep(FS){
  FS['alerts_gieogieo/al1']={type:'prep_variance_large',fyi:true,source:'engine2',status:'new'};
  return FS;
 }
+// Sự cố pha nhầm (23/10): một hồ sơ ĐÚNG (cùng nhóm, ca / nhóm, đã cân lại, phần ghép đã rút khỏi phân bổ) để cài lỗi lên.
+const MX=ROOT+'/mixups/mx1';
+function withMixup(FS){
+ FS['prep_items_gieogieo/sg']={name:'Cốt sữa gạo',nhomDeNham:'Cốt sữa'};FS['prep_items_gieogieo/ts']={name:'Cốt trà sữa',nhomDeNham:'cốt sữa'};FS['prep_items_gieogieo/tc']={name:'Thạch Cafe',nhomDeNham:'Topping'};
+ FS['duty_cases_gieogieo/dc_ts']={prepId:'ts',variance:-310,status:'auto',allocations:[{employeeId:'a',qty:0,value:0}],pool:[{kind:'mixup',qty:-310,mixupId:'mx1'}]};
+ FS[MX]={id:'mx1',storeId:'gg01',day:'2026-10-20',group:'Cốt sữa',surplusId:'sg',surplusKind:'prep',shortageId:'ts',shortageKind:'prep',qty:310,k:2,mode:'active',pooled:true,status:'closed',
+  outcome:'suspected_wrong_drink',reweigh:{outcome:'suspected_wrong_drink',evidenceTaskId:'t1'},caseIds:{surplus:[],shortage:['dc_ts']},responsibility:{basis:'shift_group'},staff:[{id:'a'}]};
+ return FS;
+}
 const weighCases=FS=>casesOf(FS).filter(([,d])=>d.originKind==='measurement').sort((a,b)=>a[1].interval.to.localeCompare(b[1].interval.to));
 
 (async()=>{
@@ -33,6 +42,7 @@ const weighCases=FS=>casesOf(FS).filter(([,d])=>d.originKind==='measurement').so
  assert.equal(clean.complete,true);assert.equal(clean.violations,0,A.summary(clean));assert.equal(clean.warnings,0,A.summary(clean));assert.equal(clean.ok,true);
  assert(clean.coverage.cases===3&&clean.coverage.checkpoints===2&&clean.coverage.sources>=3);
  {const r=await audit(withPrep(clone(CLEAN)));assert.equal(r.violations,0,A.summary(r));}
+ {const r=await audit(withMixup(clone(CLEAN)));assert.equal(r.violations,0,A.summary(r));}
  // Read-only: auditor never writes.
  {const f=makeFake({fs:clone(CLEAN)});await A.run({...RANGE,fstore:f.fstore});assert.equal(f.log.filter(x=>/^fs\.(set|update|delete)/.test(x[0])).length,0);}
  // Independent: does not load the decision module.
@@ -78,6 +88,10 @@ const weighCases=FS=>casesOf(FS).filter(([,d])=>d.originKind==='measurement').so
   ['tự duyệt lệch NL khác dòng sổ gốc',FS=>{withPrep(FS);FS['stock_transactions_gieogieo/prep_after_B1_j'].qty=-300;},'PREP_REVIEW_SOURCE_MISMATCH'],
   ['tự duyệt dòng trước ngày áp dụng',FS=>{withPrep(FS);FS[ROOT].fromDate='2026-10-21';},'PREP_REVIEW_BEFORE_START'],
   ['lệch lớn tự duyệt không có thông báo để biết',FS=>{withPrep(FS);delete FS['alerts_gieogieo/al1'];},'PREP_REVIEW_FYI_MISSING'],
+  ['pha nhầm ghép khác nhóm',FS=>{withMixup(FS);FS[MX].shortageId='tc';},'MIXUP_CROSS_GROUP'],
+  ['pha nhầm chỉ đích danh người',FS=>{withMixup(FS);FS[MX].employeeId='a';},'MIXUP_NAMED_PERSON'],
+  ['kết luận pha sai món khi chưa cân lại',FS=>{withMixup(FS);delete FS[MX].reweigh;},'MIXUP_CONCLUDED_WITHOUT_REWEIGH'],
+  ['phần ghép pha nhầm vẫn chia hao hụt',FS=>{withMixup(FS);FS['duty_cases_gieogieo/dc_ts'].pool=[];FS['duty_cases_gieogieo/dc_ts'].allocations=[{employeeId:'a',qty:-310}];},'MIXUP_STILL_ALLOCATED'],
   ['mất nhật ký quyết định',FS=>{const [,d]=finishCase(FS);delete FS[ROOT+'/decisions/'+d.decisionId];},'DECISION_LOG_MISSING'],
   ['đối chiếu thử đã bật kiểm soát',FS=>{const [p,d]=finishCase(FS);FS[p].mode='shadow';FS[ROOT+'/controls/jelly'].reasonCaseIds=[d.id];},'SHADOW_EFFECT'],
   ['lượt cân thiếu nhưng mất dòng hao hụt',FS=>{const [,d]=weighCases(FS)[0];delete FS[d.sourcePath];delete FS[d.sourcePath.replace('stock_transactions_gieogieo','x')];},'MEASUREMENT_LEDGER_MISSING'],

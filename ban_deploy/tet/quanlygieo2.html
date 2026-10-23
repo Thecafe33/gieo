@@ -21264,6 +21264,7 @@ function thangKetRedraw(){
   const nhanSu = `
     <div class="sec-title">Nhân sự tháng ${d.m}/${d.y}</div>
     <div id="thangKetResponsibilityBox">${d.khoExtra?thangKetResponsibilityHTML():'<div class="card"><div class="muted">Không đọc được sổ NL tháng này.</div></div>'}</div>
+    <div id="thangKetMixupBox"></div>
     ${thangKetCashVarSummaryHTML()}
     ${d.emps.length ? d.emps.map(e=>thangKetEmployeeCardHTML(e, tongGioTeam)).join('') : '<div class="card"><div class="empty-hint">Chưa có nhân viên đang hoạt động.</div></div>'}
     ${d.empAn ? `<div class="small-note" style="margin:6px 2px">Ẩn ${d.empAn} nhân viên không có ca, lương hay thưởng/phạt ở ${QL_VIEW.toUpperCase()} trong tháng này.</div>` : ''}
@@ -21278,6 +21279,45 @@ function thangKetRedraw(){
     department('monthStockDetails','package','Chi tiết kho','Hàng nhận và vật tư ít động theo tồn hiện tại',kho) +
     department('monthSalesDetails','receipt','Chi tiết bán hàng','Món bán chạy, bán chậm và chưa bán',banHang);
   wireMonthUnitMetrics(body,d,model);
+  thangKetMixupLoad().catch(err=>console.warn('[pha nhầm] chưa đọc được sự cố tháng',err));
+}
+// [PHA NHẦM — chủ quán 23/10] Sự cố «nghi pha sai món» trong nhóm dễ nhầm (Engine 2 ghi duty_digests/_engine2/mixups).
+// Một truy vấn khoảng ngày / tháng / quán, nhớ theo tháng. Danh sách bill nghi đã nằm sẵn trong hồ sơ — chỉ hiện khi bấm mở.
+// Không xác định được bill / người: trách nhiệm theo ca / nhóm pha chế trong ngày.
+const MIXUP_OUTCOME={suspected_wrong_drink:['Nghi pha sai món','tier-red'],reweigh_missed:['Nghi pha sai món hoặc nhập nhầm ô (chưa cân lại)','tier-amber'],
+  inconclusive:['Nghi pha sai món hoặc nhập nhầm ô','tier-amber'],entry_error:['Nhập nhầm ô khi đếm','tier-blue'],entry_error_reverse:['Sổ tự đúng lại sau nhập nhầm ô','tier-blue'],
+  batch_mislabel:['Nghi ghi nhầm loại mẻ','tier-blue'],ambiguous:['Mập mờ — không kết luận','tier-blue']};
+let _thangKetMixup={key:'',rows:null};
+async function thangKetMixupLoad(){
+  const box=document.getElementById('thangKetMixupBox');if(!box)return;
+  if(QL_VIEW==='all'){box.innerHTML='';return;}
+  const key=QL_VIEW+'|'+thangKetMonth;
+  if(_thangKetMixup.key!==key){
+    const [y,m]=thangKetMonth.split('-').map(Number),last=new Date(Date.UTC(y,m,0)).getUTCDate();
+    const sn=await fstore.collection('duty_digests_gieogieo').doc('_engine2').collection('mixups')
+      .where('day','>=',thangKetMonth+'-01').where('day','<=',thangKetMonth+'-'+String(last).padStart(2,'0')).limit(100).get();
+    _thangKetMixup={key,rows:sn.docs.map(d=>({id:d.id,...d.data()})).filter(x=>x.status!=='superseded'&&x.mode!=='shadow').sort((a,b)=>String(a.day).localeCompare(String(b.day)))};
+  }
+  if(document.getElementById('thangKetMixupBox')!==box)return;
+  box.innerHTML=thangKetMixupHTML(_thangKetMixup.rows||[]);
+}
+function thangKetMixupHTML(rows){
+  if(!rows.length)return '';
+  const nghi=rows.filter(x=>['suspected_wrong_drink','reweigh_missed','inconclusive'].includes(x.outcome));
+  return `<div class="card" style="border:1px solid #F3B2BF">
+    <div class="card-h"><h3>Sự cố nghi pha nhầm (nhóm dễ nhầm)</h3><span class="small-note">${nghi.length} nghi pha sai món · ${rows.length} hồ sơ</span></div>
+    ${rows.map(x=>{const o=MIXUP_OUTCOME[x.outcome]||[x.status==='checking'?'Đang chờ cân lại lúc mở ca':'—','tier-amber'];
+      const bills=(x.candidateBills||[]).map(b=>escapeHtmlAttr(b&&b.at?qlFmtDT(b.at):String((b&&b.ref)||b))).join(' · ');
+      return `<details style="border-top:1px solid #f1e3e7;padding:8px 0"><summary style="cursor:pointer">
+        <b>${escapeHtmlAttr(x.day||'')}</b> · ${escapeHtmlAttr(x.group||'')} <span class="tier ${o[1]}">${escapeHtmlAttr(o[0])}</span>
+        ${x.surplusName?`<div class="small-note">${escapeHtmlAttr(x.surplusName)} dư ${fmtNum(x.surplus,0)} – ${escapeHtmlAttr(x.shortageName)} thiếu ${fmtNum(x.shortage,0)} ${escapeHtmlAttr(x.unit||'')}${x.k?' · ~'+x.k+' ly':''}</div>`:''}</summary>
+        <div class="small-note" style="margin-top:6px"><b>Ca / nhóm pha chế:</b> ${(x.staff||[]).map(s=>escapeHtmlAttr(s.name||s.id)).join(', ')||'—'} — không xác định được bill / người cụ thể.</div>
+        ${x.qty?`<div class="small-note">Phần lệch ${fmtNum(x.qty,0)} ${escapeHtmlAttr(x.unit||'')} không tính hao hụt cá nhân.</div>`:''}
+        ${x.closedAt?`<div class="small-note">Kết luận lúc ${escapeHtmlAttr(qlFmtDT(x.closedAt))}</div>`:''}
+        ${x.candidateCount?`<div class="small-note" style="margin-top:4px"><b>${x.candidateCount} bill có ${escapeHtmlAttr(x.surplusName||'')} trong ngày (giờ bán):</b> ${bills}</div>`:''}
+      </details>`;}).join('')}
+    <div class="small-note" style="margin-top:6px">Hệ thống tự xử lý: không chia hao hụt phần đã ghép; nhân viên có ca hôm đó cân nhóm lúc bàn giao vài ngày. Thông báo để biết — quản lý trao đổi riêng.</div>
+  </div>`;
 }
 
 // [BÁO CÁO CHUỖI] Chỉ đọc; mọi số dùng computeDayPL/plSumDays/thvTienNgay của từng unit.

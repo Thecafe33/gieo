@@ -36,4 +36,21 @@ Thứ tự: P1 trước (chủ quán gán nhóm được ngay, chưa đổi hàn
 | Bước | Trạng thái |
 |---|---|
 | P1 | ✅ 23/10 — quanlygieo: ô «Nhóm dễ nhầm» ở form BTP (`prepDraft.nhomDeNham`) và form nguyên liệu (`invNhomDeNham`), gợi ý nhóm sẵn có (`nhomDeNhamFieldHTML`), khung «Nhóm dễ nhầm» trên danh sách BTP (`nhomDeNhamPanelHTML`, gồm cả NL); gộp không phân biệt hoa thường (`nhomDeNhamGroups`). Test `tests/nhom_de_nham.test.js`. Chủ quán tự gán 3 nhóm cho từng món. |
-| P2–P6 | chưa |
+| P2 | ✅ 23/10 — lõi `E.mixMatch` / `mixPair` / `mixReweigh` / `mixNoise` / `mixPortion` (`unit_engine2_v1.js`). Ngưỡng theo **độ nhiễu đếm của chính món** (σ ≈ trung vị \|lệch\| 30 ngày ÷ 0,6745): lệch phải ≥ 3,5σ mới xét; dư ≈ k phần 1 ly (sai số max(15, 10%, 2σ)), k ≤ đã bán; thiếu ≈ dư (sai số thêm 15% cho muỗng / ca món khác). Ghép một-một trong nhóm, hai cách ngang nhau → «mập mờ». Lệch ≈ cỡ mẻ → «ghi nhầm loại mẻ»; cặp ngược chiều hôm sau một lần «nhập nhầm ô» → «sổ tự đúng lại». |
+| P3 | ✅ 23/10 — store `mixupDay` (worker: vụ lệch `duty_cases` mới tạo → `mixup_day`), hồ sơ `duty_digests/_engine2/mixups` (k ly, N bill có món dư + giờ bán, ca / nhóm pha chế, «không xác định được bill / người»). Phần ghép rút khỏi phân bổ qua kho v21 `duty.markMixup` (pool kind `mixup`, tổng vụ lệch giữ nguyên, hồ sơ quyết định tay không đụng). Cân lại lúc mở ca → `mixupEvidence`: sổ đảo đúng lượng = «nhập nhầm ô» (báo lỗi nhập liệu); không đảo = «nghi pha sai món» (thông báo để biết mức cao); khác = «nghi pha sai món hoặc nhập nhầm ô». Quá 36 giờ chưa cân lại → `mixupSweep`: mức «nghi». Lượt sau cùng ngày ghép khác → hồ sơ cũ `superseded`. Chế độ thử chỉ ghi hồ sơ. |
+| P4 | ✅ 23/10 — POS (`gieo_engine2_pos_v1.js`): việc «Cân lại lúc mở ca (trước khi bán)» và «Cân nhóm dễ nhầm lúc bàn giao — tên NV» (nhập số đã trừ bì từng món, chỉ là bằng chứng). Theo dõi `mixup_watch` theo nhóm: nhân viên có ca trong ngày sự cố check-in ngày sau → việc giao ĐÍCH DANH (`mixupHandover`); NV khác không. 3 lượt sạch hoặc hết 7 ngày → thôi; lặp lại dư/thiếu cùng lượng → báo «lặp lại» + gia hạn. Không thao tác nào trong luồng bán. |
+| P5 | ✅ 23/10 — quanlygieo › Tổng kết tháng › Chi tiết nhân sự: khung «Sự cố nghi pha nhầm» (`thangKetMixupLoad`, 1 truy vấn khoảng ngày / tháng / quán, nhớ theo tháng; mở từng sự cố mới hiện giờ bán của các bill nghi — dữ liệu có sẵn trong hồ sơ). quanlygieo2 sinh từ quanlygieo nên có cùng khung; thông báo `fyi` → «xong» (`ENGINE2_FYI`). |
+| P6 | ✅ 23/10 — kiểm toán độc lập `MIXUP_CROSS_GROUP`, `MIXUP_NAMED_PERSON`, `MIXUP_CONCLUDED_WITHOUT_REWEIGH`, `MIXUP_STILL_ALLOCATED` + lỗi cài (`tests/unit_engine2_audit.test.js` 53/53); mô phỏng `tools/automation/mixup_sim.js` + `tests/mixup_sim.test.js`; test runtime `tests/unit_engine2_mixup.test.js`. |
+
+## Kết quả mô phỏng (hạt giống 11–13 không dùng khi chỉnh, 3 × 3000 ngày)
+
+| Nhiễu đếm | Bắt được pha nhầm thật | Kết luận «nghi» đúng | Báo «nghi» sai | Ghép khác nhóm |
+|---|---|---|---|---|
+| Vừa (2% lượng bán) | 66% | 81% | 1,5 / 100 ngày | 0 |
+| Như dữ liệu thật gg01 (σ ≈ 45) | 39% | 66% | 1,9 / 100 ngày | 0 |
+
+- Bỏ sót chủ yếu khi lệch của chính món bị nhiễu đếm / hao hụt khác che (đặc biệt topping: thạch trà / thạch cafe ở gg01 lệch trung bình 100–144 g / ngày). Đếm càng chính xác thì càng bắt được nhiều.
+- Báo «nghi» sai chỉ dẫn tới: thông báo để biết + vài lượt cân nhóm lúc bàn giao — không quy hao hụt, không chỉ đích danh ai.
+- Dữ liệu thật gg01 20 ngày đếm (gán 3 nhóm theo tên, chỉ trong script): **0 lần ghép** (kể cả khi tắt điều kiện nhiễu) → không báo động giả trên lịch sử.
+- Giới hạn: một món dư ghép một món thiếu (không ghép một dư – hai thiếu); món không có lượt đếm / cân trong ngày thì không xét.
+
