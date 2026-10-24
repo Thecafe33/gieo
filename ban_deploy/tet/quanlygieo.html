@@ -20690,7 +20690,7 @@ async function computeThangKetKhoExtra(startKey, endKey, items){
 // computeActualLaborBreakdownByEmployee() chỉ cộng ra tổng giờ/tổng tiền, không
 // đếm số ngày. Đọc riêng vì đây là câu hỏi khác: "đi bao nhiêu buổi" chứ không
 // phải "làm bao nhiêu giờ".
-async function computeThangKetSoNgayCong(startKey, endKey){
+async function computeThangKetSoNgayCong(startKey, endKey, sink){
   const snap = await fstore.collection('employee_shifts_gieogieo')
     .where('businessDate','>=',startKey).where('businessDate','<=',endKey).get();
   const byEmp = {}; // employeeId -> Set(businessDate)
@@ -20699,6 +20699,8 @@ async function computeThangKetSoNgayCong(startKey, endKey){
     const s = d.data();
     if(!s.employeeId || shiftWorkedHours(s, now) <= 0) return;
     (byEmp[s.employeeId] = byEmp[s.employeeId] || new Set()).add(s.businessDate);
+    // Giờ vào đầu tiên của từng ngày — phục vụ «đi trễ» trên phiếu lương, dùng lại đúng lượt đọc này.
+    if(sink && s.checkedInAt){ const m = sink[s.employeeId] || (sink[s.employeeId] = {}); if(!m[s.businessDate] || s.checkedInAt < m[s.businessDate]) m[s.businessDate] = s.checkedInAt; }
   });
   const out = {};
   Object.entries(byEmp).forEach(([id,set])=>{ out[id] = set.size; });
@@ -20722,13 +20724,13 @@ function thangKetAdjDocId(employeeId, monthKey){ return employeeId + '_' + month
 async function thangKetLoadAdjustments(monthKey, emps){
   const adjustments={};
   const ids = (emps||[]).map(e=>e.id);
-  ids.forEach(id=>{ adjustments[id] = { thuong:[], phat:[], finalPay:null, _docId: thangKetAdjDocId(id, monthKey) }; });
+  ids.forEach(id=>{ adjustments[id] = { thuong:[], phat:[], quanChiu:[], finalPay:null, _docId: thangKetAdjDocId(id, monthKey) }; });
   try{
     // Một truy vấn đúng tháng, gồm cả người đã nghỉ; không bỏ sót lương còn phải trả.
     const snap=await fstore.collection('payroll_month_adjustments_gieogieo').where('monthKey','==',monthKey).get();
     snap.forEach(d=>{
       const v = d.data();
-      adjustments[v.employeeId] = { thuong: v.thuong||[], phat: v.phat||[], finalPay: v.finalPay!=null?v.finalPay:null, _docId: d.id };
+      adjustments[v.employeeId] = { thuong: v.thuong||[], phat: v.phat||[], quanChiu: v.quanChiu||[], finalPay: v.finalPay!=null?v.finalPay:null, _docId: d.id };
     });
   }catch(err){ console.warn('[Tổng kết tháng] không đọc được thưởng/phạt đã lưu:', err); return {adjustments,readFailed:true}; }
   return {adjustments,readFailed:false};
@@ -20764,15 +20766,297 @@ function thangKetDeXuat(empId){
   const a = thangKetAdjust[empId] || {thuong:[], phat:[]};
   const tongThuong = a.thuong.reduce((s,r)=>s+(Number(r.amount)||0),0);
   const tongPhat = a.phat.reduce((s,r)=>s+(Number(r.amount)||0),0);
-  return { luongChamCong: b.amount||0, tongThuong, tongPhat, deXuat: (b.amount||0) + tongThuong - tongPhat };
+  const tongHaoHut = thangKetHaoHut(empId).tongTru;   // hao hụt đã duyệt, chưa bấm «Khấu hao vào quán»
+  return { luongChamCong: b.amount||0, tongThuong, tongPhat, tongHaoHut, deXuat: (b.amount||0) + tongThuong - tongPhat - tongHaoHut };
 }
+// ------------------------------------------------------------
+// PHIẾU LƯƠNG NHÂN VIÊN (xuất ảnh PNG) + HAO HỤT TRỪ VÀO LƯƠNG
+// Chủ quán chốt 24/10: hao hụt ĐÃ DUYỆT thuộc 3 loại (hao hụt lúc nấu, hao hụt đã khai, thiếu tồn cần giải trình) mặc định
+// TRỪ vào lương người ký; bấm «Khấu hao vào quán» thì không trừ (lưu `quanChiu` trong payroll_month_adjustments_gieogieo).
+// Khoản còn «Cần quản lý xác minh» hiện ngay trên thẻ để duyệt tại chỗ — chưa duyệt thì chưa tính tiền.
+// Không thêm lượt đọc: dùng lại sổ NL, lịch và ca đã nạp cho Tổng kết tháng.
+// ------------------------------------------------------------
+const TK_HAOHUT_TRU = ['prepWaste','reportedWaste','shortage'];
+const thangKetHHOpen = new Set();
+function thangKetEventKey(e){ return e.id || [e.category, e.date, e.itemId, e.at, e.qty].join('|'); }
+function thangKetHaoHut(empId){
+  const evs = (thangKetData && thangKetData.khoExtra && thangKetData.khoExtra.responsibility && thangKetData.khoExtra.responsibility.byEmployee
+    && thangKetData.khoExtra.responsibility.byEmployee[empId] && thangKetData.khoExtra.responsibility.byEmployee[empId].events) || [];
+  const quanSet = new Set((thangKetAdjust[empId] && thangKetAdjust[empId].quanChiu) || []);
+  const out = { tru:[], quan:[], cho:[], tongTru:0, tongQuan:0, tongCho:0 };
+  evs.forEach(ev=>{
+    if(!TK_HAOHUT_TRU.includes(ev.category) || !(Number(ev.value) > 0)) return;
+    const v = Number(ev.value) || 0;
+    if(ev.needsReview){ out.cho.push(ev); out.tongCho += v; }
+    else if(quanSet.has(thangKetEventKey(ev))){ out.quan.push(ev); out.tongQuan += v; }
+    else { out.tru.push(ev); out.tongTru += v; }
+  });
+  [out.tru, out.quan, out.cho].forEach(l=>l.sort((a,b)=>(Number(b.value)||0)-(Number(a.value)||0)));
+  return out;
+}
+function thangKetEventLoai(ev){
+  return (typeof PREP_ITEMS!=='undefined' && Array.isArray(PREP_ITEMS) && PREP_ITEMS.some(p=>p.id===ev.itemId)) ? 'BTP' : 'NL';
+}
+function thangKetEventWhen(ev){
+  if(!ev.at) return ev.date ? ev.date.slice(8,10)+'/'+ev.date.slice(5,7) : '';
+  const d = vnDate(ev.at), p = n=>String(n).padStart(2,'0');
+  return p(d.getDate())+'/'+p(d.getMonth()+1)+' '+p(d.getHours())+':'+p(d.getMinutes());
+}
+function thangKetHaoHutCardHTML(e){
+  const h = thangKetHaoHut(e.id);
+  if(!h.tru.length && !h.quan.length && !h.cho.length) return '';
+  const row = (ev, btn)=>`<div style="display:flex;gap:6px;align-items:center;margin-top:6px">
+      <div style="flex:1;min-width:0;font-size:12.5px"><b>${escapeHtmlAttr(thangKetEventWhen(ev))}</b> · ${thangKetEventLoai(ev)} ${escapeHtmlAttr(ev.containerCode||ev.itemId||'')} · ${escapeHtmlAttr(ev.itemName||'')}
+        <div class="small-note">${fmtNum(ev.qty,0)} ${escapeHtmlAttr(ev.unit||'')} · <b>${fmt(ev.value)}</b> · Lý do: ${escapeHtmlAttr(ev.reason||'Chưa ghi')}</div></div>${btn}</div>`;
+  const k = ev=>encodeURIComponent(thangKetEventKey(ev));
+  return `<details id="tk-hh-${e.id}" style="margin-top:10px" ${(thangKetHHOpen.has(e.id)||h.cho.length)?'open':''} ontoggle="this.open?thangKetHHOpen.add('${e.id}'):thangKetHHOpen.delete('${e.id}')">
+    <summary style="cursor:pointer;font-weight:700;font-size:13px">Hao hụt trừ vào lương: <span style="color:var(--bad)">−${fmt(h.tongTru)}</span>
+      <span class="small-note">(${h.tru.length} khoản${h.quan.length?` · ${h.quan.length} khấu hao vào quán`:''}${h.cho.length?` · ${h.cho.length} chờ duyệt`:''})</span></summary>
+    ${h.cho.length?`<div class="small-note" style="margin-top:8px;color:var(--warn);font-weight:700">Chờ quản lý duyệt — chưa tính tiền (${fmt(h.tongCho)})</div>`
+      + h.cho.map(ev=>row(ev, ev.id?`<button class="btn sm" style="width:auto;padding:0 12px;flex-shrink:0" onclick="thangKetDuyetNhanh('${encodeURIComponent(ev.id)}','${e.id}',this)">Duyệt</button>`:'')).join(''):''}
+    ${h.tru.length?`<div class="small-note" style="margin-top:8px;font-weight:700">Trừ vào lương</div>`
+      + h.tru.map(ev=>row(ev, `<button class="btn outline sm" style="width:auto;padding:0 10px;flex-shrink:0" onclick="thangKetQuanChiu('${e.id}','${k(ev)}',true)">Khấu hao vào quán</button>`)).join(''):''}
+    ${h.quan.length?`<div class="small-note" style="margin-top:8px;font-weight:700">Đã khấu hao vào quán — không trừ lương (${fmt(h.tongQuan)})</div>`
+      + h.quan.map(ev=>row(ev, `<button class="btn outline sm" style="width:auto;padding:0 10px;flex-shrink:0" onclick="thangKetQuanChiu('${e.id}','${k(ev)}',false)">Trừ lại vào lương</button>`)).join(''):''}
+    <div class="small-note" style="margin-top:6px">Bấm «Lưu lương tháng này» để lưu lựa chọn khấu hao.</div>
+  </details>`;
+}
+function thangKetQuanChiu(empId, encKey, vao){
+  const a = thangKetAdjust[empId]; if(!a) return;
+  const key = decodeURIComponent(encKey), set = new Set(a.quanChiu||[]);
+  if(vao) set.add(key); else set.delete(key);
+  a.quanChiu = [...set];
+  thangKetRedraw();
+}
+// Duyệt ngay trên thẻ nhân viên — cùng thao tác như nút «Duyệt» trong bảng đối chiếu mã (chỉ tắt cờ, không đổi số).
+async function thangKetDuyetNhanh(encId, empId, btn){
+  const txId = decodeURIComponent(encId); if(!txId) return;
+  if(btn){ btn.disabled = true; btn.textContent = 'Đang lưu...'; }
+  try{
+    const at = vnDate().toISOString();
+    await UnitEngine.ledger.annotate(txId, { needsReview:false, reviewedAt:at, reviewedBy:'management' });
+    ((thangKetData && thangKetData.khoExtra && thangKetData.khoExtra.responsibility && thangKetData.khoExtra.responsibility.events)||[]).forEach(ev=>{
+      if(ev.id===txId){ ev.needsReview = false; ev.reviewedAt = at; }
+    });
+    if(typeof logAudit==='function') logAudit('review','stock_transaction',txId,{});
+    toast('✅ Đã duyệt — khoản này giờ được tính vào lương đề xuất');
+    thangKetRedraw();
+  }catch(err){
+    console.error('thangKetDuyetNhanh lỗi', err);
+    if(btn){ btn.disabled = false; btn.textContent = 'Duyệt'; }
+    showError('Không duyệt được: '+(err.code||err.message||err));
+  }
+}
+
+// Nghỉ & đi trễ của một người trong tháng: từ lịch đã xếp (đã nạp) + giờ vào đầu tiên mỗi ngày (cùng lượt đọc ca).
+//  · Nghỉ theo lịch  = lịch đánh dấu nghỉ.
+//  · Vắng            = có lịch làm, ngày đã qua, không có ca nào có giờ công.
+//  · Trễ             = giờ vào đầu tiên muộn hơn giờ bắt đầu trong lịch quá ân hạn (HR_SETTINGS.lateGraceMinutes, mặc định 10 phút).
+function thangKetNghiTre(empId){
+  const d = thangKetData || {}, grace = Number((typeof HR_SETTINGS!=='undefined' && HR_SETTINGS.lateGraceMinutes)) || 0;
+  const att = (d.attendance && d.attendance[empId]) || {}, today = dkey(vnDate());
+  const nghi = [], tre = [];
+  (d.scheds||[]).forEach(sc=>{
+    if(!sc || sc.employeeId!==empId || !sc.date || sc.date<d.startKey || sc.date>d.endKey) return;
+    if(sc.isOff){ nghi.push({date:sc.date, kind:'Nghỉ theo lịch'}); return; }
+    if(!att[sc.date]){ if(sc.date < today && sc.startTime) nghi.push({date:sc.date, kind:'Vắng · không chấm công'}); return; }
+    if(!sc.startTime) return;
+    const min = Math.round((Date.parse(att[sc.date]) - Date.parse(sc.date+'T'+sc.startTime+':00+07:00'))/60000);
+    if(min > grace) tre.push({date:sc.date, min, lich:sc.startTime, vao:(typeof _ccHHMM==='function'?_ccHHMM(att[sc.date]):'')});
+  });
+  nghi.sort((a,b)=>a.date.localeCompare(b.date)); tre.sort((a,b)=>a.date.localeCompare(b.date));
+  return { nghi, tre };
+}
+function thangKetPhieuModel(e){
+  const d = thangKetData, b = d.empBreakdown[e.id] || {}, a = thangKetAdjust[e.id] || {thuong:[], phat:[]}, dx = thangKetDeXuat(e.id);
+  let gioThuong = 0, gioOT = 0, tienGio = 0, tienOT = 0, tienCung = 0, ngay = new Set(), rate = 0, otRate = 0;
+  (b.dayDetails||[]).forEach(x=>{
+    if((x.hours||0) > 0){
+      const ot = (x.otHours||0) * (Number(x.terms && x.terms.otRate)||0);
+      tienOT += ot; tienGio += (x.amount||0) - ot; gioOT += x.otHours||0; gioThuong += (x.hours||0) - (x.otHours||0);
+      ngay.add(x.date); rate = Number(x.terms && x.terms.hourlyRate)||rate; otRate = Number(x.terms && x.terms.otRate)||otRate;
+    } else tienCung += x.amount||0;
+  });
+  const h = thangKetHaoHut(e.id), nt = thangKetNghiTre(e.id);
+  const sum = xs=>(xs||[]).reduce((n,x)=>n+(Number(x.amount)||0),0);
+  const [y, mo] = [d.y, d.m], last = new Date(Date.UTC(y, mo, 0)).getUTCDate(), p = n=>String(n).padStart(2,'0');
+  return { name: e.fullName || 'Nhân viên', storeLabel: (typeof qlStoreLabel==='function'?qlStoreLabel(QL_VIEW):String(QL_VIEW||'').toUpperCase()),
+    period: '01/'+p(mo)+'/'+y+' – '+last+'/'+p(mo)+'/'+y, monthKey: y+'-'+p(mo),
+    gioThuong, gioOT, soNgay: ngay.size, tienGio, tienOT, tienCung, rate, otRate,
+    thuong: (a.thuong||[]).filter(r=>Number(r.amount)>0), tongThuong: sum(a.thuong),
+    phat: (a.phat||[]).filter(r=>Number(r.amount)>0), tongPhat: sum(a.phat),
+    hhTru: h.tru, hhQuan: h.quan, hhCho: h.cho, tongHaoHut: h.tongTru,
+    nghi: nt.nghi, tre: nt.tre,
+    luongChamCong: dx.luongChamCong, deXuat: dx.deXuat, finalPay: a.finalPay!=null ? Number(a.finalPay) : null };
+}
+
+// Vẽ phiếu bằng canvas (không dùng thư viện, chạy offline). Trả về canvas.
+function thangKetVePhieu(m){
+  const W = 680, FONT = '"Segoe UI",Roboto,Helvetica,Arial,sans-serif', PINK = '#E23A5D', RED = '#D2333F', GREEN = '#0C8A5E', INK = '#202C27', MUTED = '#53655A', SUB = '#738078';
+  const money = n=>Math.round(n||0).toLocaleString('vi-VN')+'đ';
+  const hr = n=>(Math.round((n||0)*10)/10).toLocaleString('vi-VN');
+  const paint = (cv, H, draw)=>{
+    cv.width = W*2; cv.height = Math.max(100, H)*2;
+    const c = cv.getContext('2d'); c.scale(2,2); c.textBaseline = 'alphabetic';
+    return draw(c);
+  };
+  const rr = (c,x,y,w,h,r)=>{ c.beginPath(); c.moveTo(x+r,y); c.arcTo(x+w,y,x+w,y+h,r); c.arcTo(x+w,y+h,x,y+h,r); c.arcTo(x,y+h,x,y,r); c.arcTo(x,y,x+w,y,r); c.closePath(); };
+  const T = (c,s,x,y,o)=>{ o = o||{}; c.font = (o.w||400)+' '+(o.s||14)+'px '+FONT; c.fillStyle = o.c||INK; c.textAlign = o.a||'left'; c.fillText(s, x, y); };
+  const fit = (c,s,maxW,o)=>{ c.font = ((o&&o.w)||400)+' '+((o&&o.s)||14)+'px '+FONT; if(c.measureText(s).width <= maxW) return s; while(s.length>1 && c.measureText(s+'…').width > maxW) s = s.slice(0,-1); return s+'…'; };
+  const draw = (c, withBg, Hknown)=>{
+    const X0 = 52, IW = 576; let y = 24+28;
+    if(withBg){
+      c.fillStyle = '#EEF1EE'; c.fillRect(0,0,W,Hknown);
+      rr(c,24,24,W-48,Hknown-48,40); const g = c.createRadialGradient(24+0.12*(W-48),24,0,24+0.12*(W-48),24,(W-48)*0.95);
+      g.addColorStop(0,'#F7C9D3'); g.addColorStop(0.9,'#FBE5EA'); c.fillStyle = '#FCE9ED'; c.fill(); c.fillStyle = g; c.fill();
+      c.strokeStyle = '#F2C6CF'; c.lineWidth = 1; c.stroke();
+    }
+    // đầu phiếu
+    rr(c,X0,y,52,52,18); c.fillStyle = PINK; c.fill();
+    T(c,(m.name.trim()[0]||'?').toUpperCase(),X0+26,y+35,{s:24,w:800,c:'#fff',a:'center'});
+    T(c,fit(c,m.name,IW-70,{s:26,w:800}),X0+66,y+22,{s:26,w:800});
+    T(c,'Gieo Gieo · '+m.storeLabel+' · Phiếu lương',X0+66,y+44,{s:15,c:MUTED});
+    y += 70;
+    c.font = '700 13px '+FONT; const pw = c.measureText(m.period).width+28;
+    rr(c,X0,y,pw,32,16); c.fillStyle = 'rgba(255,255,255,.75)'; c.fill(); T(c,m.period,X0+14,y+21,{s:13,w:700,c:PINK});
+    y += 62;
+    const total = m.finalPay!=null ? m.finalPay : m.deXuat;
+    T(c,'Lương cuối cùng',X0+2,y,{s:16,w:600,c:MUTED}); y += 54;
+    T(c,Math.round(total).toLocaleString('vi-VN'),X0+2,y,{s:54,w:850,c:PINK});
+    c.font = '850 54px '+FONT; const nw = c.measureText(Math.round(total).toLocaleString('vi-VN')).width; T(c,'đ',X0+6+nw,y,{s:26,w:850,c:PINK});
+    y += 22;
+    // 4 ô lớn
+    const tile = (x,yy,label,val,small)=>{ rr(c,x,yy,283,92,26); c.fillStyle = 'rgba(255,255,255,.78)'; c.fill();
+      T(c,label,x+18,yy+27,{s:14,w:600,c:MUTED}); T(c,val,x+18,yy+60,{s:30,w:850}); T(c,small,x+18,yy+81,{s:12.5,c:SUB}); };
+    const fixedOnly = m.tienCung > 0 && m.tienGio <= 0;
+    tile(X0,y,'Giờ làm việc (không OT)',hr(m.gioThuong)+' giờ',m.soNgay+' ngày công');
+    tile(X0+293,y,'Giờ OT',hr(m.gioOT)+' giờ',m.gioOT>0?(m.otRate?money(m.otRate)+' / giờ':''):'không tăng ca');
+    tile(X0,y+102,fixedOnly?'Lương cứng tháng':'Lương giờ thường',money(m.tienGio+m.tienCung),fixedOnly?'chia đều theo ngày':(m.rate?money(m.rate)+' / giờ':''));
+    tile(X0+293,y+102,'Lương OT',money(m.tienOT),m.tienOT>0?'':'không có');
+    y += 204;
+    // thưởng + nghỉ/trễ
+    const thRows = m.thuong.slice(0,6), extraTh = m.thuong.length-thRows.length;
+    const chips = [];
+    m.nghi.forEach(x=>chips.push({t:x.date.slice(8,10)+'/'+x.date.slice(5,7)+' · nghỉ', s:x.kind, k:0}));
+    m.tre.forEach(x=>chips.push({t:x.date.slice(8,10)+'/'+x.date.slice(5,7)+' · trễ '+x.min+' phút', s:'Lịch '+x.lich+(x.vao?' · vào '+x.vao:''), k:1}));
+    const shown = chips.slice(0,9), more = chips.length-shown.length;
+    // đo chiều cao khối
+    let bh = 24+44 + thRows.length*30 + (extraTh>0?24:0) + 22 + 22;
+    let cx = 0, rows = 1, pos = [];
+    if(chips.length){ shown.forEach(ch=>{ c.font='700 12.5px '+FONT; const w = Math.max(c.measureText(ch.t).width, (c.font='400 11.5px '+FONT, c.measureText(ch.s).width))+20; if(cx+w>IW-36 && cx>0){ cx=0; rows++; } pos.push({x:cx,r:rows-1,w}); cx += w+6; }); bh += rows*46 + (more>0?20:0); } else bh += 24;
+    if(withBg){
+      rr(c,X0,y,IW,bh,28); c.fillStyle = '#ECF6F1'; c.fill(); c.strokeStyle = '#BCDCCD'; c.stroke();
+      T(c,'Thưởng',X0+20,y+44,{s:16,w:700,c:MUTED}); T(c,'+'+money(m.tongThuong),X0+IW-20,y+48,{s:38,w:850,c:GREEN,a:'right'});
+      let yy = y+70;
+      thRows.forEach(r=>{ c.strokeStyle='#D3E6DC'; c.beginPath(); c.moveTo(X0+20,yy-8); c.lineTo(X0+IW-20,yy-8); c.stroke();
+        T(c,fit(c,r.reason||'Thưởng',IW-170,{s:14.5}),X0+20,yy+13,{s:14.5,c:MUTED}); T(c,'+'+money(r.amount),X0+IW-20,yy+13,{s:14.5,w:700,a:'right'}); yy += 30; });
+      if(extraTh>0){ T(c,'+ '+extraTh+' dòng thưởng khác',X0+20,yy+12,{s:12.5,c:SUB}); yy += 24; }
+      c.setLineDash([4,4]); c.strokeStyle='#B9D3C6'; c.beginPath(); c.moveTo(X0+20,yy+2); c.lineTo(X0+IW-20,yy+2); c.stroke(); c.setLineDash([]);
+      T(c,'NGHỈ & ĐI TRỄ',X0+20,yy+24,{s:12.5,w:700,c:MUTED});
+      T(c,m.nghi.length+' ngày nghỉ · '+m.tre.length+' lần trễ',X0+IW-20,yy+24,{s:12.5,w:700,c:MUTED,a:'right'});
+      yy += 36;
+      if(!chips.length) T(c,'✓ Không nghỉ ngày nào · không đi trễ',X0+20,yy+14,{s:13.5,w:700,c:GREEN});
+      shown.forEach((ch,i)=>{ const q = pos[i], px = X0+20+q.x, py = yy+q.r*46; rr(c,px,py,q.w,40,11); c.fillStyle = ch.k?'#FFF7EA':'#fff'; c.fill(); c.strokeStyle = ch.k?'#F1DCB4':'#D9E6DF'; c.stroke();
+        T(c,ch.t,px+10,py+17,{s:12.5,w:700}); T(c,ch.s,px+10,py+33,{s:11.5,c:SUB}); });
+      if(more>0) T(c,'+ '+more+' ngày khác',X0+20,yy+rows*46+12,{s:12,c:SUB});
+    }
+    y += bh + 12;
+    // trừ lương nhập tay
+    if(m.phat.length){
+      const ph = 22+36+m.phat.slice(0,5).length*26;
+      if(withBg){ rr(c,X0,y,IW,ph,24); c.fillStyle='rgba(255,255,255,.66)'; c.fill(); c.strokeStyle='#EFD9DD'; c.stroke();
+        T(c,'Trừ lương (quản lý nhập)',X0+18,y+30,{s:15,w:700}); T(c,'−'+money(m.tongPhat),X0+IW-18,y+30,{s:16,w:800,c:RED,a:'right'});
+        m.phat.slice(0,5).forEach((r,i)=>{ T(c,fit(c,r.reason||'Trừ lương',IW-170,{s:13.5}),X0+18,y+56+i*26,{s:13.5,c:MUTED}); T(c,'−'+money(r.amount),X0+IW-18,y+56+i*26,{s:13.5,w:700,a:'right',c:RED}); }); }
+      y += ph + 12;
+    }
+    // hao hụt (thu nhỏ)
+    const HM = 6, hh = m.hhTru.slice(0,HM), restTru = m.hhTru.slice(HM), restSum = restTru.reduce((n,x)=>n+(Number(x.value)||0),0), quan = m.hhQuan.slice(0,3);
+    if(m.hhTru.length || m.hhQuan.length || m.hhCho.length){
+      const hhH = 22+34 + hh.length*34 + (restTru.length?22:0) + (quan.length?10+quan.length*34:0) + (m.hhCho.length?22:0) + 8;
+      if(withBg){ rr(c,X0,y,IW,hhH,24); c.fillStyle='rgba(255,255,255,.66)'; c.fill(); c.strokeStyle='#EFD9DD'; c.stroke();
+        T(c,'Hao hụt trừ vào lương',X0+18,y+31,{s:15,w:700}); T(c,'−'+money(m.tongHaoHut),X0+IW-18,y+31,{s:17,w:800,c:RED,a:'right'});
+        let yy = y+46;
+        const line = (ev,grey)=>{ c.strokeStyle='#F1E6E8'; c.beginPath(); c.moveTo(X0+18,yy-4); c.lineTo(X0+IW-18,yy-4); c.stroke();
+          const col = grey?'#9B9B9B':INK;
+          T(c,thangKetEventWhen(ev),X0+18,yy+12,{s:11.5,c:grey?'#9B9B9B':SUB});
+          const tag = thangKetEventLoai(ev); c.font='800 9.5px '+FONT; const tw = c.measureText(tag).width+10;
+          rr(c,X0+88,yy+2,tw,14,5); c.fillStyle = tag==='BTP'?'#FDF0DC':'#E4F0EA'; c.fill(); T(c,tag,X0+88+tw/2,yy+12.5,{s:9.5,w:800,c:tag==='BTP'?'#B86E00':GREEN,a:'center'});
+          T(c,fit(c,(ev.containerCode||ev.itemId||'')+' · '+(ev.itemName||''),IW-290,{s:12,w:700}),X0+88+tw+6,yy+12,{s:12,w:700,c:col});
+          T(c,fmtNum(ev.qty,0)+' '+(ev.unit||''),X0+IW-120,yy+12,{s:12,c:col,a:'right'});
+          T(c,'−'+money(ev.value),X0+IW-18,yy+12,{s:12,w:800,c:grey?'#9B9B9B':RED,a:'right'});
+          T(c,fit(c,(grey?'Khấu hao vào quán — không trừ lương · ':'')+'Lý do: '+(ev.reason||'chưa ghi'),IW-60,{s:11}),X0+88,yy+27,{s:11,c:grey?'#9B9B9B':'#6A6258'}); yy += 34; };
+        hh.forEach(ev=>line(ev,false));
+        if(restTru.length){ T(c,'+ '+restTru.length+' khoản nhỏ khác · −'+money(restSum),X0+18,yy+12,{s:11.5,c:SUB}); yy += 22; }
+        if(quan.length){ yy += 10; quan.forEach(ev=>line(ev,true)); }
+        if(m.hhCho.length) T(c,m.hhCho.length+' khoản còn chờ quản lý duyệt — chưa tính vào lương',X0+18,yy+12,{s:11.5,c:'#B86E00'});
+      }
+      y += hhH + 12;
+    }
+    // tổng hợp
+    y += 6;
+    if(withBg){
+      c.strokeStyle='rgba(226,58,93,.25)'; c.beginPath(); c.moveTo(X0,y); c.lineTo(X0+IW,y); c.stroke();
+      const row = (l,v,col)=>{ T(c,l,X0+2,y+22,{s:15}); T(c,v,X0+IW-2,y+22,{s:15,w:700,a:'right',c:col||INK}); y += 28; };
+      y += 4;
+      row('Lương theo chấm công',money(m.luongChamCong));
+      row('Thưởng','+'+money(m.tongThuong), m.tongThuong?GREEN:INK);
+      if(m.tongPhat) row('Trừ lương (quản lý nhập)','−'+money(m.tongPhat),RED);
+      row('Hao hụt trừ vào lương','−'+money(m.tongHaoHut), m.tongHaoHut?RED:INK);
+      if(m.finalPay!=null && Math.round(m.finalPay)!==Math.round(m.deXuat)) row('Lương đề xuất → thực nhận (làm tròn)',money(m.deXuat)+' → '+money(m.finalPay));
+      y += 4;
+      rr(c,X0,y,IW,70,24); c.fillStyle = PINK; c.fill();
+      T(c,'LƯƠNG CUỐI CÙNG',X0+22,y+42,{s:14,w:700,c:'rgba(255,255,255,.92)'}); T(c,money(total),X0+IW-22,y+47,{s:34,w:850,c:'#fff',a:'right'});
+      y += 70+14;
+      const now = vnDate(), p2 = n=>String(n).padStart(2,'0');
+      T(c,'Xuất từ quanlygieo2 · '+p2(now.getDate())+'/'+p2(now.getMonth()+1)+'/'+now.getFullYear()+' '+p2(now.getHours())+':'+p2(now.getMinutes()),W/2,y+6,{s:12,c:SUB,a:'center'});
+      y += 22;
+    } else {
+      y += 4 + 28*(3 + (m.tongPhat?1:0) + ((m.finalPay!=null && Math.round(m.finalPay)!==Math.round(m.deXuat))?1:0)) + 4 + 70 + 14 + 22;
+    }
+    return y + 24;
+  };
+  const scratch = document.createElement('canvas');
+  const H = paint(scratch, 6000, c=>draw(c,false,0));
+  const out = document.createElement('canvas');
+  paint(out, H, c=>draw(c,true,H));
+  return out;
+}
+function thangKetTaiPNG(canvas, name){
+  return new Promise(res=>canvas.toBlob(b=>{
+    const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = name; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(a.href), 5000); res();
+  }, 'image/png'));
+}
+function thangKetPhieuTen(m){
+  const slug = String(m.name).normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/đ/g,'d').replace(/Đ/g,'D').replace(/[^A-Za-z0-9]+/g,'_').replace(/^_|_$/g,'') || 'nhan_vien';
+  return 'phieu_luong_'+slug+'_'+m.monthKey+'.png';
+}
+async function thangKetXuatPhieu(empId){
+  const e = (thangKetData && thangKetData.emps || []).find(x=>x.id===empId); if(!e) return;
+  try{ const m = thangKetPhieuModel(e); await thangKetTaiPNG(thangKetVePhieu(m), thangKetPhieuTen(m)); toast('Đã tạo ảnh phiếu lương · '+e.fullName); }
+  catch(err){ console.error('thangKetXuatPhieu lỗi', err); showError('Không xuất được ảnh phiếu lương: '+(err.message||err)); }
+}
+async function thangKetXuatPhieuTatCa(btn){
+  const list = (thangKetData && thangKetData.emps) || []; if(!list.length) return;
+  const old = btn ? btn.textContent : '';
+  try{
+    for(let i=0;i<list.length;i++){
+      if(btn){ btn.disabled = true; btn.textContent = 'Đang tạo ảnh '+(i+1)+'/'+list.length+'…'; }
+      const m = thangKetPhieuModel(list[i]); await thangKetTaiPNG(thangKetVePhieu(m), thangKetPhieuTen(m));
+      await new Promise(r=>setTimeout(r, 450));   // giãn nhịp để trình duyệt chấp nhận tải nhiều tệp liên tiếp
+    }
+    toast('Đã tạo '+list.length+' ảnh phiếu lương — nếu trình duyệt hỏi, chọn «Cho phép tải nhiều tệp»');
+  }catch(err){ console.error('thangKetXuatPhieuTatCa lỗi', err); showError('Không xuất được ảnh phiếu lương: '+(err.message||err)); }
+  finally{ if(btn){ btn.disabled = false; btn.textContent = old; } }
+}
+
 async function thangKetSaveAdjust(empId){
   const a = thangKetAdjust[empId]; if(!a) return;
   try{
     if(a.finalPay!=null){const range=monthRangeOf(thangKetMonth);await computeActualLaborBreakdownByEmployee(dkey(range.start),dkey(range.end));}
     await fstore.collection('payroll_month_adjustments_gieogieo').doc(a._docId).set({
       employeeId: empId, monthKey: thangKetMonth,
-      thuong: a.thuong, phat: a.phat, finalPay: a.finalPay,
+      thuong: a.thuong, phat: a.phat, quanChiu: a.quanChiu||[], finalPay: a.finalPay,
       updatedAt: vnDate().toISOString()
     }, {merge:true});
     toast('✅ Đã lưu lương tháng '+thangKetMonth);
@@ -20906,15 +21190,19 @@ function thangKetEmployeeCardHTML(e, tongGioTeam){
     <div class="row"><span class="rl">Lương tính từ chấm công</span><span class="rv"><b>${fmt(dx.luongChamCong)}</b></span></div>
     ${thangKetAdjustRowsHTML(e.id, 'thuong', 'Thưởng', 'var(--ok)')}
     ${thangKetAdjustRowsHTML(e.id, 'phat', 'Trừ lương', 'var(--bad)')}
+    ${thangKetHaoHutCardHTML(e)}
     <div class="row" style="border-top:1.5px solid var(--line);margin-top:10px;padding-top:8px">
-      <span class="rl"><b>Lương đề xuất</b> <span class="small-note">chấm công ${dx.tongThuong>0?'+ thưởng':''}${dx.tongPhat>0?' − trừ lương':''}</span></span>
+      <span class="rl"><b>Lương đề xuất</b> <span class="small-note">chấm công ${dx.tongThuong>0?'+ thưởng':''}${dx.tongPhat>0?' − trừ lương':''}${dx.tongHaoHut>0?' − hao hụt':''}</span></span>
       <span class="rv"><b>${fmt(dx.deXuat)}</b></span>
     </div>
     <div class="field" style="margin-top:8px"><label>Lương thực nhận (để trống = lấy đề xuất, chủ quán có thể làm tròn)</label>
       <input type="number" value="${a.finalPay!=null?a.finalPay:''}" placeholder="Đề xuất ${fmt(dx.deXuat)}"
         onchange="thangKetFinalPayChange('${e.id}', this.value)">
     </div>
-    <button class="btn sm" style="width:auto;padding:0 16px;margin-top:8px" onclick="thangKetSaveAdjust('${e.id}')">Lưu lương tháng này</button>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+      <button class="btn sm" style="width:auto;padding:0 16px" onclick="thangKetSaveAdjust('${e.id}')">Lưu lương tháng này</button>
+      <button class="btn outline sm" style="width:auto;padding:0 16px" onclick="thangKetXuatPhieu('${e.id}')">Tải ảnh phiếu lương</button>
+    </div>
   </div>`;
 }
 
@@ -21061,7 +21349,7 @@ async function renderThangKet(force=false){
       loadPackagingItemOverrides(), loadPackagingRules(), loadPackagingRulesConfig()
     ]);
     if(obsolete())return;
-    const dataMissing=[];
+    const dataMissing=[], attendanceSink={};
     const [salesRes, expAll, assets, ledgerReal, actualLaborByDate, expCats, emps, scheds,
            empBreakdown, soNgayCongByEmp, mix, khoExtra, bookClosings, cashVar] = await Promise.all([
       fetchSalesRange(start, end),
@@ -21073,7 +21361,7 @@ async function renderThangKet(force=false){
       loadEmployees().catch(()=>{dataMissing.push('nhân sự');return [];}),
       loadSchedulesForRange(startKey, endKey).catch(()=>{dataMissing.push('lịch làm việc');return [];}),
       computeActualLaborBreakdownByEmployee(startKey, endKey).catch(err=>{ dataMissing.push(err&&err.code==='pay/schedule-missing'?'lịch làm việc ('+err.message+')':'bảng lương'); console.warn('[Tổng kết tháng] lương lỗi', err); return {}; }),
-      computeThangKetSoNgayCong(startKey, endKey).catch(err=>{ dataMissing.push('ngày công'); console.warn('[Tổng kết tháng] ngày công lỗi', err); return {}; }),
+      computeThangKetSoNgayCong(startKey, endKey, attendanceSink).catch(err=>{ dataMissing.push('ngày công'); console.warn('[Tổng kết tháng] ngày công lỗi', err); return {}; }),
       computeMixReport(start, end).catch(err=>{ dataMissing.push('bán hàng'); console.warn('[Tổng kết tháng] bán hàng lỗi', err); return null; }),
       computeThangKetKhoExtra(startKey, endKey, INVENTORY_ITEMS).catch(err=>{ dataMissing.push('kho'); console.warn('[Tổng kết tháng] kho lỗi', err); return null; }),
       loadBookClosings().catch(()=>{dataMissing.push('sổ chốt tháng');return {};}),
@@ -21116,7 +21404,7 @@ async function renderThangKet(force=false){
     thangKetAdjust=monthAdjust;
     thangKetData = { y, m, start, end, monthEnd, startKey, endKey, storeId:reportStore,
       emps: empsQuan, empAn: Math.max(0,empsDangLam.length - empsQuan.length), empBreakdown, soNgayCongByEmp,
-      mix, khoExtra, plTong, plDays, plBook, expAll, cashVar, salesRes, dataMissing, recovery, assets };
+      mix, khoExtra, plTong, plDays, plBook, expAll, cashVar, salesRes, dataMissing, recovery, assets, scheds, attendance: attendanceSink };
 
     thangKetRedraw();
   }catch(err){
@@ -21338,6 +21626,7 @@ function thangKetRedraw(){
     <div id="thangKetResponsibilityBox">${d.khoExtra?thangKetResponsibilityHTML():'<div class="card"><div class="muted">Không đọc được sổ NL tháng này.</div></div>'}</div>
     <div id="thangKetMixupBox"></div>
     ${thangKetCashVarSummaryHTML()}
+    ${d.emps.length ? `<div class="card"><div class="card-h"><h3>Phiếu lương nhân viên</h3></div><div class="small-note">Xuất mỗi người một ảnh PNG (không nén zip) để gửi trực tiếp. Dùng số đang hiển thị ở các thẻ bên dưới — nhớ bấm «Lưu lương tháng này» để lưu thưởng, trừ lương và khấu hao vào quán.</div><button class="btn sm" style="width:auto;padding:0 16px;margin-top:8px" onclick="thangKetXuatPhieuTatCa(this)">Tải ảnh phiếu lương · tất cả ${d.emps.length} người</button></div>` : ''}
     ${d.emps.length ? d.emps.map(e=>thangKetEmployeeCardHTML(e, tongGioTeam)).join('') : '<div class="card"><div class="empty-hint">Chưa có nhân viên đang hoạt động.</div></div>'}
     ${d.empAn ? `<div class="small-note" style="margin:6px 2px">Ẩn ${d.empAn} nhân viên không có ca, lương hay thưởng/phạt ở ${QL_VIEW.toUpperCase()} trong tháng này.</div>` : ''}
   `;
@@ -21438,8 +21727,8 @@ function monthUnitMetricSpecs(d,m){
   add('surplus','Thặng dư vận hành sau mốc','Cộng kết quả trước khấu hao từ NGÀY KẾ TIẾP mốc hoàn vốn',dayRows(x=>r?.reached&&x.date>r.reached?thvTienNgay(x):0));
   add('hours','Giờ công / OT','Cộng giờ công và OT theo từng nhân viên',(d.emps||[]).map(e=>{const b=d.empBreakdown?.[e.id]||{};return[e.fullName,`${fmtNum(b.hours||0,1)}h / ${fmtNum(b.otHours||0,1)}h OT`];}));
   add('people','Nhân viên có công/lương','Đếm người có giờ công hoặc tiền lương trong kỳ',(d.emps||[]).filter(e=>Number(d.empBreakdown?.[e.id]?.hours)>0||Number(d.empBreakdown?.[e.id]?.amount)>0).map(e=>[e.fullName,e.id]),['Bao gồm người đã nghỉ nhưng có công/lương của kỳ này.']);
-  const wages=(d.emps||[]).flatMap(e=>{const b=d.empBreakdown?.[e.id]||{},a=thangKetAdjust[e.id]||{},sum=xs=>(xs||[]).reduce((n,x)=>n+(Number(x.amount)||0),0);return[[e.fullName+' · lương chấm công',fmt(b.amount)],[e.fullName+' · thưởng',fmt(sum(a.thuong))],[e.fullName+' · trừ lương',fmt(sum(a.phat))],[e.fullName+' · số đề xuất/phải trả',fmt(a.finalPay!=null?a.finalPay:(Number(b.amount)||0)+sum(a.thuong)-sum(a.phat))]];});
-  add('payable','Lương theo bảng đề xuất','Lương chấm công + thưởng − trừ lương; dùng số cuối đã nhập nếu có',wages,['Chưa phải xác nhận tiền đã thanh toán. Chỉnh sửa chưa lưu vẫn là bản nháp đang xem.']);
+  const wages=(d.emps||[]).flatMap(e=>{const b=d.empBreakdown?.[e.id]||{},a=thangKetAdjust[e.id]||{},sum=xs=>(xs||[]).reduce((n,x)=>n+(Number(x.amount)||0),0);return[[e.fullName+' · lương chấm công',fmt(b.amount)],[e.fullName+' · thưởng',fmt(sum(a.thuong))],[e.fullName+' · trừ lương',fmt(sum(a.phat))],[e.fullName+' · hao hụt trừ lương',fmt(thangKetHaoHut(e.id).tongTru)],[e.fullName+' · số đề xuất/phải trả',fmt(a.finalPay!=null?a.finalPay:thangKetDeXuat(e.id).deXuat)]];});
+  add('payable','Lương theo bảng đề xuất','Lương chấm công + thưởng − trừ lương − hao hụt trừ lương; dùng số cuối đã nhập nếu có',wages,['Chưa phải xác nhận tiền đã thanh toán. Chỉnh sửa chưa lưu vẫn là bản nháp đang xem.']);
   add('finalized','Hồ sơ đã có số lương','Đếm hồ sơ có finalPay; không phải xác nhận đã trả lương',(d.emps||[]).map(e=>[e.fullName,thangKetAdjust[e.id]?.finalPay!=null?fmt(thangKetAdjust[e.id].finalPay):'Chưa nhập số cuối']));
   add('received','Giá trị hàng nhận','Cộng giá trị nguyên liệu nhận trong kỳ theo số lượng và giá tại ngày nhận',(d.khoExtra?.nhapList||[]).map(x=>[`${x.ten} · ${fmtNum(x.qty,1)} ${x.donVi}`,fmt(x.value)]),['Giá trị hàng nhận không xác nhận đã trả NCC.']);
   return spec;
