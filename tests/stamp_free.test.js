@@ -3,8 +3,8 @@
 const fs = require('fs');
 const path = require('path');
 const src = [
-  'let cart = {}; let _stampFreePhone = null; let _stampFreeNeedConvert = false; let _stampFreeOriginalStamp = 0; let _stampFreeVKey = null;',
-  require('./lib/extract').extract('posgieo.html', ['_stampFreeSyncCart', 'resetDiscountState', '_finalizeStampFreeAfterPay', 'cartAdj', 'cartDel'])
+  'const STAMP_LEGACY_PRICE = 16000, STAMP_CAP_MARGIN = 3000, FREE_DRINK_LEGACY_CAP = 19000; let cart = {}; let _stampFreePhone = null; let _stampFreeNeedConvert = false; let _stampFreeOriginalStamp = 0; let _stampFreeVKey = null;',
+  require('./lib/extract').extract('posgieo.html', ['_stampFreeSyncCart', 'resetDiscountState', '_finalizeStampFreeAfterPay', 'cartAdj', 'cartDel', '_numList', '_stampPricesSynced', '_freeCapsSynced', '_capOfSixStamps', '_stampLedgerAdd'])
 ].join('\n');
 function mk(customers) {
   const FS = {}; const writes = []; const toasts = [];

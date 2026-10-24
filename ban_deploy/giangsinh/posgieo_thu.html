@@ -8230,9 +8230,11 @@ function cheapestPaidCupPOS() {
   return prices.length ? Math.min(...prices) : 0;
 }
 // Lý do một món KHÔNG được tặng — trả về chuỗi để hiện cho nhân viên, null nếu được.
-function giftBlockReasonPOS(m, price) {
+function giftBlockReasonPOS(m, price, stampCap) {
   const gm = togoSettings.giftMenu || {};
   const p = (typeof price === 'number') ? price : giftRefPricePOS(m);
+  // [TRẦN LY TEM] Ly đổi 6 tem không được đắt hơn (trung bình giá 6 ly đã tích tem + 3K).
+  if (Number(stampCap) > 0 && p > Number(stampCap)) return `Vượt trần ly tem ${fmt(Number(stampCap))}`;
   if (gm.itemIds && gm.itemIds.length && m && !gm.itemIds.includes(m.id)) return 'Không có trong menu quà tặng';
   const maxPrice = Number(gm.maxPrice) || 0;
   if (maxPrice > 0 && p > maxPrice) return `Vượt trần ${fmt(maxPrice)}`;
@@ -8265,12 +8267,13 @@ function openTogoGiftPopup(freeQty, onProceed, opts) {
   // Chặn tiếp bằng trần giá + "không đắt hơn ly rẻ nhất đã mua". Món bị chặn vẫn
   // HIỆN nhưng mờ và bấm không được, kèm lý do — để nhân viên giải thích được cho
   // khách vì sao món đó không tặng, thay vì món tự dưng biến mất khỏi danh sách.
-  const rows = eligible.map(m => ({ m, size: giftSizeForPOS(m), reason: giftBlockReasonPOS(m) }));
+  const stampCap = (opts && opts.stampCap) || 0;
+  const rows = eligible.map(m => ({ m, size: giftSizeForPOS(m), reason: giftBlockReasonPOS(m, undefined, stampCap) }));
   const okCount = rows.filter(r => !r.reason).length;
 
   const listEl = document.getElementById('togoGiftList');
   const subEl = document.getElementById('togoGiftSub');
-  subEl.textContent = `Bạn được tặng ${freeQty} ly miễn phí!`;
+  subEl.textContent = `Bạn được tặng ${freeQty} ly miễn phí!` + (stampCap > 0 ? ` (tối đa ${fmt(stampCap)})` : '');
 
   if (!rows.length) {
     listEl.innerHTML = '<div style="text-align:center;padding:20px;color:#bbb;">Không có món phù hợp</div>';
@@ -8327,9 +8330,9 @@ function confirmTogoGift() {
   // Kiểm tra LẠI ở đây chứ không tin vào việc nút đã bị vô hiệu trên giao diện:
   // giỏ hàng có thể vừa đổi (xoá bớt ly đắt) sau khi popup đã mở, làm điều kiện
   // "không đắt hơn ly rẻ nhất" khác đi.
-  const reason = m ? giftBlockReasonPOS(m) : 'Món không còn trong menu';
-  if (reason) { toast('⚠ Không tặng được món này: ' + reason); return; }
   const popup = document.getElementById('togoGiftPopup');
+  const reason = m ? giftBlockReasonPOS(m, undefined, (popup._opts && popup._opts.stampCap) || 0) : 'Món không còn trong menu';
+  if (reason) { toast('⚠ Không tặng được món này: ' + reason); return; }
   const freeQty = popup._freeQty || 1;
   const onProceed = popup._onProceed;
   const opts = popup._opts || null;
@@ -24080,6 +24083,11 @@ function consumeFreeToGoDrink(phone) {
       return;
     }
 
+    // Trần giá ly đổi: ly miễn phí cũ nhất trước; chưa quy đổi thì lấy 6 tem đầu.
+    const stampCap = (curFree > 0)
+      ? _freeCapsSynced(data.free_drink_caps, curFree)[0]
+      : _capOfSixStamps(_stampPricesSynced(data.stamp_prices, curStamp).slice(0, 6));
+
     const tempVKey = '__free_stamp__' + Date.now();
     // Lưu intent TRƯỚC, và chỉ ghi DB sau khi thanh toán xong (_finalizeStampFreeAfterPay).
     // Nếu nhân viên đóng popup mà không chọn gì thì dọn lại ở nhánh else bên dưới.
@@ -24099,7 +24107,7 @@ function consumeFreeToGoDrink(phone) {
         _stampFreePhone   = null;
         toast('ℹ️ Chưa chọn món — ly miễn phí chưa được đổi.');
       }
-    }, { stampVKey: tempVKey });
+    }, { stampVKey: tempVKey, stampCap });
 
   }).catch(err => toast('❌ Có lỗi xảy ra: ' + err.message));
 }
@@ -24142,12 +24150,19 @@ async function _finalizeStampFreeAfterPay(billId, items) {
         const curFree  = data.free_drink_available || 0;
         const curStamp = data.stamp_count || 0;
         if (curFree > 0) {
-          // Trường hợp thường: trừ 1 ly có sẵn
-          t.update(custRef, { free_drink_available: curFree - 1 });
+          // Trường hợp thường: trừ 1 ly có sẵn (bỏ trần của ly cũ nhất — ly vừa đổi)
+          t.update(custRef, {
+            free_drink_available: curFree - 1,
+            free_drink_caps: _freeCapsSynced(data.free_drink_caps, curFree).slice(1)
+          });
         } else if (curStamp >= 6) {
           // Trường hợp stamp chưa convert: convert rồi trừ luôn
           const bonus = Math.floor(curStamp / 6);
-          t.update(custRef, { free_drink_available: bonus - 1, stamp_count: curStamp % 6 });
+          const L = _stampLedgerAdd(data, []);
+          t.update(custRef, {
+            free_drink_available: bonus - 1, stamp_count: curStamp % 6,
+            stamp_prices: L.stamp_prices, free_drink_caps: L.free_drink_caps.slice(1)
+          });
         }
         if (markerRef) t.set(markerRef, { phone, at: vnDate().toISOString() });
       });
@@ -24260,7 +24275,7 @@ async function loyaltyFlushPending() {
       if (!e || !e.phone || !e.billId) { _loyaltyPendingDrop(e && e.billId, e && e.kind); continue; }
       try {
         if (e.kind === 'points') await loyaltyAddPoints(e.phone, Number(e.billAmount) || 0, !!e.isWallet, e.billId, true);
-        else await loyaltyAddStamps(e.phone, Number(e.drinkCount) || 0, e.billId, true);
+        else await loyaltyAddStamps(e.phone, Number(e.drinkCount) || 0, e.billId, true, e.cupPrices);
       } catch (err) {
         // Vẫn lỗi ⇒ GIỮ NGUYÊN hàng đợi và dừng vòng lặp (mạng đang hỏng, thử tiếp chỉ tốn thời
         // gian). Không bao giờ xoá một món chưa chạy được.
@@ -24325,7 +24340,62 @@ async function loyaltyAddPoints(phone, billAmount, isWallet = false, billId, laC
  * marker theo billId, nên gọi lại là cộng đúp stamp/ly miễn phí. Giờ transaction + marker
  * `loyalty_bill_effects_gieogieo/{billId}`; nếu marker đã tồn tại thì trả lại ĐÚNG kết quả đã ghi
  * lần trước (không cộng lại, không trả {added:0} sai khiến UI báo nhầm "không tích được gì"). */
-async function loyaltyAddStamps(phone, drinkCount, billId, laChayLai) {
+// ============================================================
+// [TRẦN LY TEM] Tem trước đây chỉ là SỐ ĐẾM → khách mua toàn ly 15K vẫn đổi được ly 35K.
+// Giờ mỗi tem ghi kèm GIÁ ly đã tích (customers.stamp_prices, song song stamp_count); đủ 6 tem
+// → trần của ly miễn phí = trung bình 6 giá + 3K, ghi vào customers.free_drink_caps (song song
+// free_drink_available, ly cũ nhất đứng đầu). Tem / ly cũ không có giá ghi lại (tích trước bản
+// này, hoặc app khác tích) → coi tem = 16K, ly miễn phí cũ = trần 19K. Hai mảng luôn được ép về
+// đúng độ dài số đếm, nên app khác sửa số đếm cũng không làm lệch.
+// ============================================================
+const STAMP_LEGACY_PRICE = 16000;
+const STAMP_CAP_MARGIN = 3000;
+const FREE_DRINK_LEGACY_CAP = STAMP_LEGACY_PRICE + STAMP_CAP_MARGIN;
+function _numList(arr) { return Array.isArray(arr) ? arr.map(Number).filter(n => isFinite(n) && n > 0) : []; }
+function _stampPricesSynced(arr, count) {
+  const a = _numList(arr), n = Math.max(0, count | 0);
+  if (a.length >= n) return a.slice(a.length - n);
+  return Array(n - a.length).fill(STAMP_LEGACY_PRICE).concat(a);
+}
+function _freeCapsSynced(arr, n) {
+  const a = _numList(arr); n = Math.max(0, n | 0);
+  if (a.length >= n) return a.slice(a.length - n);
+  return Array(n - a.length).fill(FREE_DRINK_LEGACY_CAP).concat(a);
+}
+function _capOfSixStamps(six) {
+  const a = _stampPricesSynced(six, 6);
+  return Math.round(a.reduce((x, y) => x + y, 0) / 6) + STAMP_CAP_MARGIN;
+}
+// Giá các tem một bill tạo ra: tối đa `canAdd` tem. 1–2 ly → chính các ly đó; 3 ly trở lên → ly
+// đắt nhất + ly rẻ nhất; chỉ còn 1 tem trong ngày → lấy ly RẺ nhất (chặt, không cho nâng trần).
+function _stampPricesPick(cupPrices, canAdd) {
+  const a = _numList(cupPrices).sort((x, y) => x - y);
+  if (!a.length) return Array(Math.max(0, canAdd)).fill(STAMP_LEGACY_PRICE);
+  let pick;
+  if (canAdd >= a.length) pick = a;
+  else if (canAdd <= 1) pick = [a[0]];
+  else pick = [a[0], a[a.length - 1]];
+  while (pick.length < canAdd) pick = pick.concat(STAMP_LEGACY_PRICE);
+  return pick.slice(0, canAdd);
+}
+// Giá từng ly (đơn giá, lặp theo số lượng) của các món được tính tem trong bill.
+function stampCupPricesOf(items) {
+  const out = [];
+  (items || []).forEach(c => {
+    if (!c || c.isFree || c._vKey) return;
+    for (let i = 0; i < (Number(c.qty) || 0); i++) out.push(Number(c.price) || 0);
+  });
+  return out;
+}
+// Sổ tem sau khi cộng `newPrices`: đủ 6 tem thì chốt thành 1 trần ly miễn phí.
+function _stampLedgerAdd(data, newPrices) {
+  const sp = _stampPricesSynced(data.stamp_prices, data.stamp_count || 0).concat(newPrices || []);
+  const caps = _freeCapsSynced(data.free_drink_caps, data.free_drink_available || 0);
+  while (sp.length >= 6) caps.push(_capOfSixStamps(sp.splice(0, 6)));
+  return { stamp_prices: sp, free_drink_caps: caps };
+}
+
+async function loyaltyAddStamps(phone, drinkCount, billId, laChayLai, cupPrices) {
   if (!phone || drinkCount <= 0) return { added: 0, newCount: 0, freeDrink: false };
   try {
     const ref  = fstore.collection('customers').doc(phone);
@@ -24369,11 +24439,14 @@ async function loyaltyAddStamps(phone, drinkCount, billId, laChayLai) {
         freeDrink = true;
       }
 
+      const ledger = _stampLedgerAdd(data, _stampPricesPick(cupPrices, canAdd));
       t.update(ref, {
         stamp_count:          newStamp,
         stamps_today:         stampsToday + canAdd,
         last_stamp_date:      today,
         free_drink_available: freeDrinkCount,
+        stamp_prices:         ledger.stamp_prices,
+        free_drink_caps:      ledger.free_drink_caps,
         lastVisit:            vnDate().toISOString()
       });
       result = { added: canAdd, newCount: newStamp, freeDrink };
@@ -24385,7 +24458,7 @@ async function loyaltyAddStamps(phone, drinkCount, billId, laChayLai) {
     // [BUG#29 FIX] Xem chú thích ở loyaltyAddPoints — ghi nợ bền vững rồi throw, KHÔNG trả
     // {added:0} như thể đã xử lý xong.
     if (laChayLai) throw e;
-    await _loyaltyGhiNo({ kind: 'stamps', phone, billId: billId || null, drinkCount }, e);
+    await _loyaltyGhiNo({ kind: 'stamps', phone, billId: billId || null, drinkCount, cupPrices: cupPrices || null }, e);
     throw e;
   }
 }
@@ -24397,11 +24470,11 @@ async function loyaltyAddStamps(phone, drinkCount, billId, laChayLai) {
  * trước khi loyalty ghi xong). */
 // [F5] Chỉ bán To Go → chỉ tích Stamp. Nhánh tích Point (Tại quán, x2 Ví) đã gỡ; loyaltyAddPoints vẫn
 // giữ để hàng đợi cũ (mục kind:'points' còn nợ) chạy nốt — xem loyaltyFlushPending.
-async function loyaltyProcessAfterPay(phone, billAmount, itemCount, billId) {
+async function loyaltyProcessAfterPay(phone, billAmount, itemCount, billId, cupPrices) {
   if (!phone) return;
   let msg = '';
   try {
-    const result = await loyaltyAddStamps(phone, itemCount, billId);
+    const result = await loyaltyAddStamps(phone, itemCount, billId, false, cupPrices);
     if (result.added > 0) {
       msg = `☕ +${result.added} Stamp! Đã có ${result.newCount}/6`;
       if (result.freeDrink) msg += ` 🎉 Chúc mừng! Đã đủ 6 Stamp — 1 Ly MIỄN PHÍ!`;
@@ -24759,7 +24832,7 @@ async function confirmPay(cashGiven, cashChange) {
         // ghi xong (mất quyền lợi nếu loyalty lỗi sau đó), và (2) hàm bên trong cộng thẳng bằng
         // FieldValue.increment không theo billId nên gọi lại là cộng đúp. Xem loyaltyAddPoints/
         // loyaltyAddStamps — giờ đã có claim theo billId trong 1 transaction.
-        else await loyaltyProcessAfterPay(loyPhone, total, drinkCount, billRef.key);
+        else await loyaltyProcessAfterPay(loyPhone, total, drinkCount, billRef.key, stampCupPricesOf(items));
       }
       // Ghi trừ stamp miễn phí SAU KHI order lưu thành công.
       // [BUG#19 FIX] Await thay vì fire-and-forget — phải biết chắc bước này đã xong (thành công
@@ -27586,7 +27659,7 @@ async function finalizeSplitPay() {
           : items.reduce((s, c) => s + (!c.isFree && !c._vKey ? c.qty : 0), 0);
         if (coLyTangMuaX) setTimeout(() => toast('Bill có ly tặng (mua X tặng Y) — không tích tem cho bill này'), 800);
         // [BUG#21 FIX] await + truyền billId — xem chú thích đầy đủ ở confirmPay().
-        else await loyaltyProcessAfterPay(loyPhone, total, drinkCount, billRef.key);
+        else await loyaltyProcessAfterPay(loyPhone, total, drinkCount, billRef.key, stampCupPricesOf(items));
       }
       // [BUG#19 FIX] Await — cùng lý do với confirmPay(), xem chú thích đầy đủ ở đó.
       await _finalizeStampFreeAfterPay(billRef.key, order.itemsArray);
