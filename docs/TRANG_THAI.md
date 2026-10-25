@@ -1,3 +1,7 @@
+# 25/10 — Tách posgieo.html: Đợt 1A (trợ lý → js/posgieo/pos_assist.v1.js) xong, chờ kiểm tra lượt 04 — CHƯA deploy
+
+Công cụ chuyển mã `tools/tach_posgieo/chuyen.js` (subagent Sonnet viết, đã xem lại). posgieo.html 1,94 → 1,88 MB. Toàn bộ test + e2e đạt. File kiểm tra: [tach_posgieo/KIEM_TRA_04_TRO_LY.md](tach_posgieo/KIEM_TRA_04_TRO_LY.md). Lượt 02, 03 chưa có kết quả kiểm tra.
+
 # 25/10 — Tách posgieo.html: 0D + 0E xong (lượt 03), chờ kiểm tra — CHƯA deploy
 
 Mã app đầu tiên ra file riêng: `escHtmlPos` → `js/posgieo/pos_ui.v1.js` (commit R `e102ba4`). 0E (commit H `bbe5a97`): module thiết yếu thiếu / chạy dở → màn đỏ + Tải lại; H1 tab khác đổi cửa hàng → phủ màn chặn. e2e Chromium 15 ca (`tools/tach_posgieo/e2e_0d.js`), toàn bộ test đạt. File kiểm tra: [tach_posgieo/KIEM_TRA_03_THU_DUONG_DI.md](tach_posgieo/KIEM_TRA_03_THU_DUONG_DI.md). Lượt 02 chưa có kết quả kiểm tra.
