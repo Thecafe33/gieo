@@ -3,7 +3,9 @@
 - Lập: 25/10/2026 (giờ Việt Nam). **Bản rà soát 3** (25/10) — đối chiếu từng khẳng định với code thật và `firebase.json` thật của Hosting do chủ dự án gửi.
 - Nguồn đã rà: `Thecafe33/gieo`, nhánh `Phan-tach-unit-engine`, HEAD `c859965` (= `0bd95a7` + tài liệu này). Commit gần nhất sửa `posgieo.html`: `6d8f947`.
 - Trạng thái: **kế hoạch; chưa tách code, chưa sửa công cụ, chưa deploy**. Kế hoạch này nằm NGOÀI `KE_HOACH_UNIT_ENGINE_DA_CUA_HANG.md` → chủ dự án duyệt riêng; khi bắt đầu ghi một dòng vào `CLAUDE.md` + `docs/TRANG_THAI.md`.
-- Trước khi làm: cập nhật HEAD, đọc các commit phát sinh sau `c859965`, hỏi chủ dự án bản nào đang chạy ở cửa hàng.
+- **Bản đang chạy ở cửa hàng (chủ dự án 25/10): bản mới nhất của mùa Giáng sinh** = `ban_deploy/giangsinh/` tại `0bd95a7` (commit cuối sửa bộ này). Trong đó `posgieo.html` giống hệt file gốc tại `6d8f947`, nạp `data_access.v9.js`, `unit_engine.v21.js`, `gau_noel_giangsinh.v2.js` (data-quan="gieo"), `gieo_automation_pos.v3.js`, `unit_engine2_v1.js`, `unit_engine2_store_v1.js`, `gieo_engine2_pos_v1.js`. **Đây là mốc nền** cho mọi so sánh trước/sau; mọi JS trong danh sách này coi là đã phát hành (không sửa nội dung).
+- Mùa đang chạy là Giáng sinh → biến thể posgieo **có Gấu Noel** là biến thể kiểm trước tiên; file giao cho chủ dự án lấy từ `ban_deploy/giangsinh/` (mục 1.4).
+- Trước khi làm: cập nhật HEAD, đọc các commit phát sinh sau `c859965`; nếu có commit sửa `posgieo.html` sau `6d8f947` mà chưa deploy thì mốc nền vẫn là `6d8f947`, ghi rõ phần chênh.
 
 ## 0. Quyết định đã chốt
 
@@ -312,7 +314,7 @@ Không cần sửa: `tools/automation/build_page.js` / `sync.js` (quanlygieo2 v�
 
 | Bước | Sản phẩm | Điều kiện đi tiếp |
 | --- | --- | --- |
-| 0A | Đúng nhánh/SHA; chạy `sh tests/run_all.sh` + `check_boundaries` + `check_paths`, lưu kết quả nền và lỗi đã có. Hỏi chủ dự án bản đang chạy ở quán (URL APK đã xác nhận — 1.3) | Biết rõ nền; có câu trả lời |
+| 0A | Đúng nhánh/SHA; chạy `sh tests/run_all.sh` + `check_boundaries` + `check_paths`, lưu kết quả nền và lỗi đã có. Mốc nền = `ban_deploy/giangsinh` @ `0bd95a7` (đã xác nhận), URL APK đã xác nhận (1.3); lưu bản sao bộ giangsinh nền để đối chiếu | Biết rõ nền; có câu trả lời |
 | 0B | Bảng: global/state/caller/handler HTML-native/lệnh tự chạy/thời điểm sẵn sàng cho các cụm của Đợt 1; bảng khóa cache/queue (4.4) | Mọi cụm sắp chuyển có chủ sở hữu, không vòng phụ thuộc chưa xử lý |
 | 0C | T1–T13 (mục 7), mỗi mục một commit nhỏ, kèm test cài lỗi | Toàn bộ test xanh; cài lỗi trong file `js/posgieo` giả làm đúng checker fail; bộ deploy / bản thử / bản đo giữ cây `js/posgieo` |
 | 0D | Thử đường đi: chuyển **một cụm hàm thuần nhỏ** chỉ POS dùng, đã có test, không Firebase/native/hook (ứng viên chọn ở 0B, ví dụ `escHtmlPos` + helper định dạng — `escHtmlPos` có 8 file test trích) vào `js/posgieo/pos_ui.v1.js`, thẻ theo 5.1 + dấu/nạp lại theo 5.3 | Test trích được hàm từ file; HTML + JS chạy thật qua HTTP (e2e) và `file://`; bản thử có `?b=`; ba bộ có file; hành vi giống nền |
@@ -389,7 +391,7 @@ Mỗi lần sửa: `sh tools/sinh_lai_tat_ca.sh` (đã gồm test), `node tools/
 
 | Đợt | Trạng thái | Commit | Bằng chứng |
 | --- | --- | --- | --- |
-| 0A Nền + câu hỏi | Chưa làm | — | Kết quả test nền, bản đang chạy ở quán (URL APK đã có) |
+| 0A Nền | Chưa làm | — | Kết quả test nền trên `0bd95a7` / biến thể Giáng sinh |
 | 0B Bản đồ phụ thuộc | Chưa làm | — | Bảng global/caller/cache |
 | 0C Công cụ T1–T13 | Chưa làm | — | Test cài lỗi |
 | 0D Thử `pos_ui.v1.js` | Chưa làm | — | e2e HTTP + file://, ba bộ |
@@ -432,6 +434,7 @@ Mỗi lần sửa: `sh tools/sinh_lai_tat_ca.sh` (đã gồm test), `node tools/
 | Checker chỉ quét `<script>` inline → mã chuyển ra ngoài thoát rào ranh giới | T6, T7 |
 | e2e phục vụ file theo basename | T12 |
 | posgieo Tết = thường | Mục 8, ma trận 10 giảm còn 2 biến thể |
+| Cửa hàng chạy bản Giáng sinh mới nhất (chủ dự án 25/10) | Mốc nền `ban_deploy/giangsinh` @ `0bd95a7`; biến thể Gấu Noel kiểm trước |
 | URL APK `https://the-cafe-33.web.app/posgieo.html` (chủ dự án 25/10) | Mục 1.3: đường tương đối `js/posgieo/…` đúng |
 | Functions ở home Termux, Hosting ở `/sdcard` (chủ dự án 25/10) | Mục 1.1: không đụng functions; quyền bộ nhớ Termux; tên viết thường, không symlink (T10) |
 
