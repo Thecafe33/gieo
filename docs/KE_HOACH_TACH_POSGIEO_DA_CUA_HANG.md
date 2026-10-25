@@ -68,11 +68,11 @@ HTML dùng đường **tương đối** như các JS hiện có: `<script src="j
 
 | File trên máy | URL sau deploy |
 | --- | --- |
-| `public/posgieo.html` | `https://<site>/posgieo.html` |
-| `public/js/posgieo/pos_ui.v1.js` | `https://<site>/js/posgieo/pos_ui.v1.js` |
+| `public/posgieo.html` | `https://the-cafe-33.web.app/posgieo.html` |
+| `public/js/posgieo/pos_ui.v1.js` | `https://the-cafe-33.web.app/js/posgieo/pos_ui.v1.js` |
 
 - Không dùng `/js/...` tuyệt đối: e2e mở `file://` từ gốc repo, đường tương đối mới chạy được ở cả hai nơi.
-- Đường tương đối đúng khi APK mở `/posgieo.html` (như các JS gốc hiện chạy được). Nếu APK mở dạng `/posgieo/` (dấu `/` cuối) thì sai → **bước 0A hỏi chủ dự án URL APK chính xác**.
+- **Đã xác nhận (chủ dự án 25/10): APK mở `https://the-cafe-33.web.app/posgieo.html`** — HTML ở gốc site, không dấu `/` cuối; `firebase.json` không có `cleanUrls`/`trailingSlash` → `js/posgieo/x.vN.js` tải từ `https://the-cafe-33.web.app/js/posgieo/x.vN.js`, đúng như các JS gốc hiện tại. Không đổi URL APK. Sau này nếu bật `cleanUrls` (trang thành `/posgieo`) đường tương đối vẫn đúng; nếu bật `trailingSlash: true` thì phải xem lại.
 
 ### 1.4. Giao file thay đổi (không ZIP)
 
@@ -312,7 +312,7 @@ Không cần sửa: `tools/automation/build_page.js` / `sync.js` (quanlygieo2 v�
 
 | Bước | Sản phẩm | Điều kiện đi tiếp |
 | --- | --- | --- |
-| 0A | Đúng nhánh/SHA; chạy `sh tests/run_all.sh` + `check_boundaries` + `check_paths`, lưu kết quả nền và lỗi đã có. Hỏi chủ dự án: URL APK chính xác (1.3), bản đang chạy ở quán | Biết rõ nền; có câu trả lời |
+| 0A | Đúng nhánh/SHA; chạy `sh tests/run_all.sh` + `check_boundaries` + `check_paths`, lưu kết quả nền và lỗi đã có. Hỏi chủ dự án bản đang chạy ở quán (URL APK đã xác nhận — 1.3) | Biết rõ nền; có câu trả lời |
 | 0B | Bảng: global/state/caller/handler HTML-native/lệnh tự chạy/thời điểm sẵn sàng cho các cụm của Đợt 1; bảng khóa cache/queue (4.4) | Mọi cụm sắp chuyển có chủ sở hữu, không vòng phụ thuộc chưa xử lý |
 | 0C | T1–T13 (mục 7), mỗi mục một commit nhỏ, kèm test cài lỗi | Toàn bộ test xanh; cài lỗi trong file `js/posgieo` giả làm đúng checker fail; bộ deploy / bản thử / bản đo giữ cây `js/posgieo` |
 | 0D | Thử đường đi: chuyển **một cụm hàm thuần nhỏ** chỉ POS dùng, đã có test, không Firebase/native/hook (ứng viên chọn ở 0B, ví dụ `escHtmlPos` + helper định dạng — `escHtmlPos` có 8 file test trích) vào `js/posgieo/pos_ui.v1.js`, thẻ theo 5.1 + dấu/nạp lại theo 5.3 | Test trích được hàm từ file; HTML + JS chạy thật qua HTTP (e2e) và `file://`; bản thử có `?b=`; ba bộ có file; hành vi giống nền |
@@ -389,7 +389,7 @@ Mỗi lần sửa: `sh tools/sinh_lai_tat_ca.sh` (đã gồm test), `node tools/
 
 | Đợt | Trạng thái | Commit | Bằng chứng |
 | --- | --- | --- | --- |
-| 0A Nền + câu hỏi | Chưa làm | — | Kết quả test nền, URL APK |
+| 0A Nền + câu hỏi | Chưa làm | — | Kết quả test nền, bản đang chạy ở quán (URL APK đã có) |
 | 0B Bản đồ phụ thuộc | Chưa làm | — | Bảng global/caller/cache |
 | 0C Công cụ T1–T13 | Chưa làm | — | Test cài lỗi |
 | 0D Thử `pos_ui.v1.js` | Chưa làm | — | e2e HTTP + file://, ba bộ |
@@ -432,6 +432,7 @@ Mỗi lần sửa: `sh tools/sinh_lai_tat_ca.sh` (đã gồm test), `node tools/
 | Checker chỉ quét `<script>` inline → mã chuyển ra ngoài thoát rào ranh giới | T6, T7 |
 | e2e phục vụ file theo basename | T12 |
 | posgieo Tết = thường | Mục 8, ma trận 10 giảm còn 2 biến thể |
+| URL APK `https://the-cafe-33.web.app/posgieo.html` (chủ dự án 25/10) | Mục 1.3: đường tương đối `js/posgieo/…` đúng |
 | Functions ở home Termux, Hosting ở `/sdcard` (chủ dự án 25/10) | Mục 1.1: không đụng functions; quyền bộ nhớ Termux; tên viết thường, không symlink (T10) |
 
 **Khuyến nghị bắt đầu:** 0A → 0E, rồi Đợt 1. Không đặt mục tiêu tách hết.
