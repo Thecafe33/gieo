@@ -3,6 +3,8 @@
 // Firebase / CDN thay bằng bản giả tối thiểu (không mạng ngoài). Máy CHƯA gắn quán → app dừng ở màn nhập mã (chốt dừng).
 // Kiểm: (1) HTTP bình thường; (2) lần tải đầu 404 → nạp lại ?r=1; (3) lần đầu máy chủ trả HTML thay JS → nạp lại;
 // (4) file ném lỗi giữa chừng (dấu 'dang') → KHÔNG nạp lại; (5) mở bằng file://; (6) bản thử posgieo_thu.html (?b=).
+// 0E: (7) nạp lại cũng hỏng → màn đỏ, không chạy tiếp (không màn nhập mã); (4b) chạy dở → màn đỏ;
+// (8) H1: hai tab cùng máy, tab kia đổi cửa hàng → tab này phủ màn «đã đổi cửa hàng»; đổi khoá khác → không phủ.
 'use strict';
 const { chromium } = require('playwright'); const http = require('http'); const fs = require('fs'); const path = require('path');
 const ROOT = path.resolve(__dirname, '..', '..');
@@ -26,8 +28,8 @@ let ok = true; const chk = (c, m) => { console.log((c ? 'ok ' : 'FAIL ') + m); i
   const server = http.createServer((req, res) => { const u = new URL(req.url, 'http://x'); if (!serveFile(ROOT, u.pathname, res)) { res.statusCode = 404; res.end('404'); } });
   await new Promise(r => server.listen(0, '127.0.0.1', r)); const base = 'http://127.0.0.1:' + server.address().port;
   const b = await chromium.launch({ executablePath: chromiumPath(), args: ['--no-sandbox', '--allow-file-access-from-files'] });
-  async function mo(url, ghiDe) {   // ghiDe: [{lan, status, body}] — thay phản hồi pos_ui theo lượt
-    const page = await b.newPage(); const loi = []; const xin = [];
+  async function mo(url, ghiDe, ctx) {   // ghiDe: [{lan, status, body}] — thay phản hồi pos_ui theo lượt
+    const page = await (ctx || b).newPage(); const loi = []; const xin = [];
     page.on('pageerror', e => loi.push(e.message));
     await page.route('**/*', async r => {
       const u = r.request().url();
@@ -42,9 +44,9 @@ let ok = true; const chk = (c, m) => { console.log((c ? 'ok ' : 'FAIL ') + m); i
     });
     await page.goto(url, { waitUntil: 'load' }).catch(e => loi.push('goto: ' + e.message));
     await page.waitForTimeout(400);
-    const tt = await page.evaluate(() => ({ ui: window.PosGieoMods && window.PosGieoMods.ui, esc: typeof escHtmlPos === 'function' ? escHtmlPos('<b>&') : null, login: !!document.getElementById('posStoreLogin'), thu: !!(window.GieoThu && GieoThu.active) }));
-    await page.close();
-    return Object.assign(tt, { loi, xin });
+    const tt = await page.evaluate(() => ({ ui: window.PosGieoMods && window.PosGieoMods.ui, esc: typeof escHtmlPos === 'function' ? escHtmlPos('<b>&') : null, login: !!document.getElementById('posStoreLogin'), modThieu: !!document.getElementById('posModThieu'), thu: !!(window.GieoThu && GieoThu.active) }));
+    if (!ctx) await page.close();
+    return Object.assign(tt, { loi, xin, page });
   }
   const chuanLoi = l => l.filter(m => !/chưa đăng nhập cửa hàng|app dừng/.test(m));   // throw có chủ đích ở chốt dừng
 
@@ -63,6 +65,23 @@ let ok = true; const chk = (c, m) => { console.log((c ? 'ok ' : 'FAIL ') + m); i
   t = await mo(base + '/posgieo.html', [{ body: DO }, { body: DO }]);
   chk(t.ui === 'dang' && t.xin.length === 1, "(4) file chạy dở (dấu 'dang') → KHÔNG nạp lại (tránh khai báo let/const lần hai)");
   chk(!t.loi.some(m => /already been declared/.test(m)), '(4) không có lỗi "Identifier has already been declared"');
+  chk(t.modThieu && !t.login, '(4b) 0E: module chạy dở → màn đỏ «Chưa tải được», KHÔNG vào màn nhập mã / nghiệp vụ');
+
+  t = await mo(base + '/posgieo.html', [{ status: 404, type: 'text/html', body: 'x' }, { status: 404, type: 'text/html', body: 'x' }]);
+  chk(t.ui === undefined && t.modThieu && !t.login && t.xin.length === 2, '(7) 0E: nạp lại cũng hỏng → màn đỏ + Tải lại, dừng app (không chạy nghiệp vụ nửa chừng)');
+
+  {   // (8) H1 — hai tab cùng máy (chung localStorage)
+    const ctx = await b.newContext();
+    await ctx.addInitScript(() => { try { if (!localStorage.getItem('gieo_store_v1')) localStorage.setItem('gieo_store_v1', JSON.stringify({ storeId: 'gg01', name: 'Gieo 1' })); } catch (e) {} });
+    const a = await mo(base + '/posgieo.html', null, ctx);
+    chk(!a.login && !a.modThieu, '(8) tab A đã gắn gg01 → qua chốt dừng (không màn nhập mã)');
+    const pb = await ctx.newPage(); await pb.goto(base + '/js/posgieo/pos_ui.v1.js');
+    await pb.evaluate(() => localStorage.setItem('khoa_khac', '1')); await a.page.waitForTimeout(300);
+    chk(!(await a.page.evaluate(() => !!document.getElementById('posStoreDoi'))), '(8) tab kia đổi khoá khác → tab A không bị phủ');
+    await pb.evaluate(() => localStorage.setItem('gieo_store_v1', JSON.stringify({ storeId: 'gg02', name: 'Gieo 2' }))); await a.page.waitForTimeout(300);
+    chk(await a.page.evaluate(() => !!document.getElementById('posStoreDoi')), '(8) H1: tab kia đổi cửa hàng gg01 → gg02 → tab A phủ màn «Máy đã đổi cửa hàng ở cửa sổ khác»');
+    await ctx.close();
+  }
 
   t = await mo('file://' + path.join(ROOT, 'posgieo.html'));
   chk(t.ui === true && t.esc === '&lt;b&gt;&amp;', '(5) mở bằng file:// → đường tương đối js/posgieo/… tải được');

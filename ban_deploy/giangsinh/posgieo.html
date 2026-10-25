@@ -2420,6 +2420,24 @@ else {
   setTimeout(() => { if (_gdTuTai) location.reload(); }, 8000);
   throw new Error('[GieoData] thiếu data_access.v9.js — dừng app');
 }
+// [TÁCH POSGIEO 0E — kế hoạch 5.3] JS riêng THIẾT YẾU (js/posgieo/…) phải CHẠY HẾT (dấu PosGieoMods.<tên> === true) trước khi
+// làm gì tiếp — kể cả màn nhập mã quán (dùng escHtmlPos). Thẻ #pgUiRetry đã nạp lại một lần nếu file chưa từng chạy; tới đây
+// vẫn thiếu (mạng hỏng hẳn / file chưa có trên máy chủ) hoặc file chạy dở ('dang') → màn đỏ + Tải lại, KHÔNG chạy nghiệp vụ nửa chừng.
+const POS_MODS_THIET_YEU = { ui: 'js/posgieo/pos_ui.v1.js' };
+{
+  const thieu = Object.keys(POS_MODS_THIET_YEU).filter(k => !(window.PosGieoMods && window.PosGieoMods[k] === true));
+  if (thieu.length) {
+    const ds = thieu.map(k => POS_MODS_THIET_YEU[k] + (window.PosGieoMods && window.PosGieoMods[k] === 'dang' ? ' (chạy dở)' : ' (chưa tải được)')).join('<br>');
+    const bar = document.createElement('div');
+    bar.id = 'posModThieu';
+    bar.style.cssText = 'position:fixed;inset:0;z-index:2147483000;background:#c0392b;color:#fff;font:700 16px sans-serif;padding:30px;text-align:center';
+    bar.innerHTML = '⚠️ Chưa tải được phần mềm bán hàng<div style="font:600 14px sans-serif;margin:14px auto 0;max-width:520px;line-height:1.6">' + ds
+      + '<br>Thường do mạng chập — bấm Tải lại. Vẫn lỗi: file phải có trên máy chủ ở <b>public/js/posgieo/</b> (giữ nguyên thư mục con).</div>'
+      + '<button onclick="location.reload()" style="margin-top:18px;padding:12px 26px;border:0;border-radius:12px;font:800 15px sans-serif;background:#fff;color:#c0392b">Tải lại</button>';
+    (document.body || document.documentElement).appendChild(bar);
+    throw new Error('[TÁCH POSGIEO] thiếu module thiết yếu: ' + thieu.join(', ') + ' — dừng app');
+  }
+}
 if (!POS_STORE) { posStoreLoginScreen(); throw new Error('[ĐA CỬA HÀNG] máy chưa đăng nhập cửa hàng — app dừng, chờ nhập mã'); }
 // [ĐA CỬA HÀNG] Dữ liệu lưu trên máy (localStorage) gắn với MỘT quán: cache cấu hình in của quán, việc dở (quét NL nấu,
 // đổ ly ghi lỗi, khoá chống trùng đơn đang chờ), gợi ý nấu, bảng tần suất trợ lý, hàng đợi lưu trữ bill. Máy đổi sang
@@ -2450,6 +2468,28 @@ function posLsViecDo() {
   if (co('gieo_prepStartScanState_v1')) ds.push('một mẻ nấu đang quét nguyên liệu dở');
   return ds;
 }
+// [H1 — tách posgieo 0E, chủ dự án 25/10: «cũng có thể xảy ra»] Cửa sổ / tab KHÁC trên cùng máy đổi cửa hàng (gieo_store_v1)
+// → tab này trước đây không biết, vẫn bán theo quán cũ trong khi dữ liệu lưu trên máy đã theo quán mới (vừa bị dọn ở trên).
+// Phát hiện qua sự kiện 'storage' + lúc quay lại tab → phủ màn chặn thao tác MỚI (việc đang ghi dở vẫn chạy tiếp tới xong),
+// chỉ còn nút Tải lại. Đăng xuất ngay tại tab này tự tải lại trang nên không bị báo nhầm. Bản thử: khoá có tiền tố riêng.
+function posBindingDoiTabKhac() {
+  let cur = null;
+  try { const v = JSON.parse(localStorage.getItem('gieo_store_v1') || 'null'); cur = (v && v.storeId) || null; } catch (e) { return false; }
+  return cur !== (_posBind ? _posBind.storeId : null);
+}
+function posKiemDoiCuaHang() {
+  if (document.getElementById('posStoreDoi') || !posBindingDoiTabKhac()) return;
+  const o = document.createElement('div');
+  o.id = 'posStoreDoi';
+  o.style.cssText = 'position:fixed;inset:0;z-index:2147483000;background:rgba(20,20,20,.92);color:#fff;display:flex;align-items:center;justify-content:center;padding:24px;text-align:center';
+  o.innerHTML = '<div style="max-width:420px"><div style="font-size:42px">🏪</div>'
+    + '<div style="font:800 19px sans-serif;margin-top:8px">Máy đã đổi cửa hàng ở cửa sổ khác</div>'
+    + '<div style="font:500 14px sans-serif;margin-top:10px;line-height:1.6;opacity:.9">Cửa sổ này đang mở theo cửa hàng cũ — không nhận đơn mới để tránh ghi nhầm quán. Tải lại để bán theo cửa hàng hiện tại của máy.</div>'
+    + '<button onclick="location.reload()" style="margin-top:18px;padding:12px 26px;border:0;border-radius:12px;font:800 15px sans-serif;background:#fff;color:#C22B49">Tải lại</button></div>';
+  (document.body || document.documentElement).appendChild(o);
+}
+window.addEventListener('storage', posKiemDoiCuaHang);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') posKiemDoiCuaHang(); });
 // [E1] Khởi tạo Unit Engine. Thiếu file engine (mạng chập lúc tải) → banner đỏ + tự tải lại sau
 // 5 giây; KHÔNG có nhánh chặn bán nào khác (D17, mục 6.3 kế hoạch).
 if (window.UnitEngine) {
