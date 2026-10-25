@@ -354,7 +354,7 @@ Không cần sửa: `tools/automation/build_page.js` / `sync.js` (quanlygieo2 v�
 
 **Quy tắc mỗi lần chuyển một cụm ra `js/posgieo/` (từ 0D, rút từ lượt 02):**
 1. Chạy `node tools/tach_posgieo/ban_do.js --cum …` → danh sách phụ thuộc / người gọi / handler / JS ngoài / lệnh tự chạy của cụm.
-2. Grep các test đọc THÔ văn bản `posgieo.html` (regex trên HTML, ~20 file) theo các tên trong cụm; chỗ liên quan chuyển sang `require('../tools/tach_posgieo/nguon').maNoi('posgieo.html')` — nhất là khẳng định "KHÔNG có X" (đạt giả khi X đã ra file).
+2. Grep các test đọc THÔ văn bản `posgieo.html` (regex trên HTML, ~20 file) theo các tên **và các chuỗi đặc trưng** (vd chữ in trên tem) trong cụm; chỗ liên quan chuyển sang `require('../tools/tach_posgieo/nguon').maNoi('posgieo.html')` — nhất là khẳng định "KHÔNG có X" (đạt giả khi X đã ra file).
 3. File mới theo `tests/tach_posgieo_nguon.test.js`: tên thường `ten.vN.js`, câu đầu `PosGieoMods.x='dang'`, câu cuối `=true`, giữa chỉ khai báo; thẻ + mẫu nạp lại theo 5.1/5.3.
 4. `sh tools/sinh_lai_tat_ca.sh`; giao file bằng `node tools/file_thay_doi.js <mốc> giangsinh --ghi` (ghi sổ phát hành).
 
@@ -432,7 +432,7 @@ Mỗi lần sửa: `sh tools/sinh_lai_tat_ca.sh` (đã gồm test), `node tools/
 | 0C Công cụ T1–T13 | Xong — chờ kiểm tra lượt 02 | — | `docs/tach_posgieo/KIEM_TRA_02_CONG_CU.md`; `tests/tach_posgieo_cong_cu.test.js` (27 ca cài lỗi) |
 | 0D Thử `pos_ui.v1.js` | Xong (`e102ba4`, R) — chờ kiểm tra lượt 03 | `e102ba4` | `docs/tach_posgieo/KIEM_TRA_03_THU_DUONG_DI.md`; e2e `tools/tach_posgieo/e2e_0d.js` |
 | 0E Hợp đồng lỗi tải + H1 | Xong (`bbe5a97`, H) — chờ kiểm tra lượt 03 | `bbe5a97` | như trên (ca 4b, 7, 8) |
-| 1 Thiết bị/trợ lý/mùa | 1A trợ lý xong (`3003478`) — chờ kiểm tra lượt 04; 1B–1D chưa | `3003478` | `docs/tach_posgieo/KIEM_TRA_04_TRO_LY.md`; công cụ `tools/tach_posgieo/chuyen.js` |
+| 1 Thiết bị/trợ lý/mùa | 1A trợ lý (lượt 04), 1B kết nối máy in (lượt 05) xong — chờ kiểm tra; 1C–1D chưa | `3003478` | `docs/tach_posgieo/KIEM_TRA_04_TRO_LY.md`; công cụ `tools/tach_posgieo/chuyen.js` |
 | 2 Kho | Chưa làm | — | Snapshot/log, cách ly S/C |
 | 3 Ca/quỹ | Chưa làm | — | Tiền, ngày VN |
 | 4 Thanh toán | Chưa làm | — | TM/CK/huỷ/mất ACK |

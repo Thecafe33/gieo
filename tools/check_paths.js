@@ -37,12 +37,19 @@ const found = [];   // {kind:'fs'|'rt'|'st', name, file, line, how}
 const chuoi = {};   // mọi chuỗi dạng …_gieogieo trong code → nơi xuất hiện (bắt cả tên truyền qua biến / tham số)
 const dynamic = []; // lời gọi không xác định được tên
 for (const hostFile of FILES) {
+  // Hằng chuỗi CẤP CAO của mọi đoạn nguồn cùng app (inline + js/…): hàm đã tách ra js/posgieo/… vẫn dùng hằng khai báo
+  // ở HTML (vd PRINTER_LAYOUT_FB_PATH) — không gộp thì tên bảng thành "không xác định" (tách posgieo Đợt 1B).
+  const hostConsts = {};
+  for (const x of nguonFile(hostFile)) {
+    try { for (const st of acorn.parse(x.code, { ecmaVersion: 'latest', allowReturnOutsideFunction: true }).body) if (st.type === 'VariableDeclaration')
+      for (const d of st.declarations) if (d.id.type === 'Identifier' && d.init && d.init.type === 'Literal' && typeof d.init.value === 'string') hostConsts[d.id.name] = d.init.value; } catch (e) {}
+  }
   for (const { file, start, code } of nguonFile(hostFile)) {
     let ast;
     try { ast = acorn.parse(code, { ecmaVersion: 'latest', locations: true, allowReturnOutsideFunction: true }); }
     catch (e) { console.log('❌ Không đọc được ' + file + ': ' + e.message); process.exit(1); }
     // hằng chuỗi cấp cao nhất + hằng trong IIFE (engine) — tên hằng → giá trị
-    const consts = {};
+    const consts = Object.assign({}, hostConsts);
     walk.simple(ast, { VariableDeclarator(d) {
       if (d.id.type === 'Identifier' && d.init && d.init.type === 'Literal' && typeof d.init.value === 'string') consts[d.id.name] = d.init.value;
     } });

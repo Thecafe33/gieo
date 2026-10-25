@@ -1,8 +1,11 @@
 // CÔNG CỤ CHUYỂN NGUYÊN VĂN khai báo cấp cao từ <script> TRẦN chính của một HTML sang file JS mới (kế hoạch tách posgieo).
-//   node tools/tach_posgieo/chuyen.js --html posgieo.html --tu <dòng> --den <dòng> --ra js/posgieo/<ten>.v1.js --dau <khoá> [--giu 12,34] [--ghi]
-// Chuyển: câu lệnh cấp cao nằm TRỌN trong dải dòng [tu, den] và là khai báo (function / class / let-const-var).
+//   node tools/tach_posgieo/chuyen.js --html posgieo.html --dai a-b[,c-d,…] --ra js/posgieo/<ten>.v1.js --dau <khoá> [--giu 12,34] [--ghi]
+//   (--tu <dòng> --den <dòng> = một dải, giữ cho tương thích). Nhiều dải: cùng một script trần, không chồng nhau;
+//   khai báo của mọi dải gom vào MỘT file ra theo thứ tự trong HTML, mỗi dải trong HTML được thay chú thích riêng.
+// Chuyển: câu lệnh cấp cao nằm TRỌN trong một dải dòng và là khai báo (function / class / let-const-var).
 // Ở lại HTML: lệnh tự chạy (đúng chỗ, đúng thứ tự), khai báo ở --giu (theo dòng bắt đầu), chú thích không liền khai báo.
-// An toàn (lỗi → mã thoát 1, không ghi gì): (a) giá trị đầu let/const/var không tham chiếu tên cấp cao còn ở HTML
+// An toàn (lỗi → mã thoát 1, không ghi gì): (a) giá trị đầu let/const/var (và `extends` / trường static của class)
+// chỉ xét phần CHẠY NGAY lúc nạp — bỏ thân hàm / mũi tên / phương thức — không tham chiếu tên cấp cao còn ở HTML
 // (hay khai báo muộn hơn trong file ra); (b) không trùng tên với JS riêng khác; (c) không ghi đè file ra;
 // (d) parse lại được cả hai và tập tên cấp cao trước = sau. Không --ghi = chạy thử.
 'use strict';
@@ -32,14 +35,42 @@ function cacThe(html) {
 const dongCua = (html, pos) => html.slice(0, pos).split('\n').length;
 const tenGon = ten => ten.length <= 6 ? ten.join(', ') : ten.slice(0, 3).join(', ') + ', … ' + ten.slice(-2).join(', ') + ' (' + ten.length + ' tên)';
 
+// Bản sao AST chỉ giữ phần chạy NGAY lúc nạp: hàm biểu thức / mũi tên / phương thức → Literal (trừ IIFE: callee chạy ngay,
+// giữ nguyên, chỉ lược các hàm lồng trong nó); trường class không static → bỏ giá trị. freeRefs trên bản sao = tham chiếu eager.
+const LIT = { type: 'Literal', value: 0, raw: '0' };
+const laHam = n => n.type === 'FunctionExpression' || n.type === 'ArrowFunctionExpression';
+function stripEager(n) {
+  if (Array.isArray(n)) return n.map(stripEager);
+  if (!n || typeof n.type !== 'string') return n;
+  if (laHam(n) || n.type === 'FunctionDeclaration') return LIT;
+  const cp = {};
+  for (const k of Object.keys(n)) {
+    if (k === 'loc') { cp[k] = n[k]; continue; }
+    const x = n[k];
+    if (n.type === 'CallExpression' && k === 'callee' && laHam(x)) {
+      const c2 = {}; for (const kk of Object.keys(x)) c2[kk] = kk === 'loc' ? x[kk] : stripEager(x[kk]); cp[k] = c2;
+    } else cp[k] = stripEager(x);
+  }
+  if (n.type === 'PropertyDefinition' && !n.static) cp.value = null;
+  return cp;
+}
+const eagerRefs = node => freeRefs(stripEager(node));
+
 function chuyen(o) {
   const loi = [], canhBao = [];
   const fail = () => ({ htmlMoi: null, fileMoi: null, ten: [], giuLai: [], canhBao, loi });
   const root = o.root || ROOT, htmlRel = o.html || 'posgieo.html';
-  const tu = +o.tu, den = +o.den, giu = new Set((o.giu || []).map(Number));
+  const giu = new Set((o.giu || []).map(Number));
+  const dai = (o.dai && o.dai.length ? o.dai : [[o.tu, o.den]]).map(d => [+d[0], +d[1]]).sort((x, y) => x[0] - y[0]);
   let html = o.htmlText;
   if (html == null) html = fs.readFileSync(path.resolve(root, htmlRel), 'utf8');
-  if (!(tu > 0 && den >= tu)) loi.push('dải dòng không hợp lệ (--tu/--den)');
+  dai.forEach((d, i) => {
+    if (!(d[0] > 0 && d[1] >= d[0])) loi.push('dải dòng không hợp lệ (--dai / --tu --den): ' + d.join('-'));
+    else if (i > 0 && dai[i - 1][1] >= d[0]) loi.push('các dải chồng nhau: ' + dai[i - 1].join('-') + ' và ' + d.join('-'));
+  });
+  const tu = dai[0][0], den = dai[dai.length - 1][1];
+  const daiTxt = dai.map(d => d[0] + '–' + d[1]).join(', ');
+  const trongDai = (a, b) => dai.find(d => a >= d[0] && b <= d[1]);
   if (!/^[a-z][A-Za-z0-9_]*$/.test(o.dau || '')) loi.push('--dau phải là tên định danh JS (vd ui, assist)');
   if (!o.ra || !laJsRieng(o.ra)) loi.push('--ra phải là đường tương đối dạng js/…/ten.vN.js');
   if (loi.length) return fail();
@@ -50,7 +81,7 @@ function chuyen(o) {
   const baseDir = path.dirname(path.resolve(root, htmlRel));
   const tran = the.filter(t => t.attrs.trim() === '');
   const main = tran.find(t => { const a = dongCua(html, t.codeStart), b = a + t.code.split('\n').length - 1; return tu >= a && den <= b; });
-  if (!main) { loi.push('không có <script> trần nào chứa trọn dải dòng ' + tu + '–' + den); return fail(); }
+  if (!main) { loi.push('không có <script> trần nào chứa trọn mọi dải dòng ' + daiTxt + ' (các dải phải cùng một script trần)'); return fail(); }
   const dong0 = dongCua(html, main.codeStart) - 1;       // dòng HTML = dong0 + loc.line
   const code = main.code;
   const comments = [];
@@ -62,12 +93,12 @@ function chuyen(o) {
   // phân loại
   const chuyenIdx = [], giuLai = [];
   body.forEach((st, i) => {
-    if (!(L(st) >= tu && E(st) <= den)) return;
+    if (!trongDai(L(st), E(st))) return;
     if (laKhaiBao(st) && !giu.has(L(st))) chuyenIdx.push(i);
     else giuLai.push({ line: L(st), loai: st.type, mo_ta: code.slice(st.start, Math.min(st.end, st.start + 80)).split('\n')[0] });
   });
   for (const g of giu) if (!body.some(st => L(st) === g && laKhaiBao(st))) loi.push('--giu ' + g + ': không có khai báo cấp cao bắt đầu ở dòng này');
-  if (!chuyenIdx.length) loi.push('không có khai báo nào để chuyển trong dải ' + tu + '–' + den);
+  if (!chuyenIdx.length) loi.push('không có khai báo nào để chuyển trong dải ' + daiTxt);
   if (loi.length) return fail();
 
   // đơn vị = chú thích liền trên (không cách dòng trống, sau câu lệnh trước, trong dải) + khai báo
@@ -76,7 +107,7 @@ function chuyen(o) {
     const st = body[i], prevEnd = i > 0 ? body[i - 1].end : 0, prevEndLine = i > 0 ? body[i - 1].loc.end.line : 0;
     let start = st.start, needLine = st.loc.start.line;
     for (;;) {
-      const c = comments.find(k => k.loc.end.line === needLine - 1 && k.end <= start && k.start >= prevEnd && k.loc.start.line > prevEndLine && dong0 + k.loc.start.line >= tu
+      const c = comments.find(k => k.loc.end.line === needLine - 1 && k.end <= start && k.start >= prevEnd && k.loc.start.line > prevEndLine && dong0 + k.loc.start.line >= trongDai(L(st), E(st))[0]
         && /^\s*$/.test(code.slice(k.end, start)) && code.slice(k.end, start).split('\n').length <= 2);
       if (!c) break;
       // // liên tiếp nhiều dòng: mỗi lần lùi một chú thích
@@ -103,17 +134,24 @@ function chuyen(o) {
   const conLai = new Set(); body.forEach((st, i) => { if (!moved.has(i) && laKhaiBao(st)) tenCua(st).forEach(n => conLai.add(n)); });
   const viTri = {}; units.forEach((u, k) => u.ten.forEach(n => { viTri[n] = [k, u.st]; }));
   units.forEach((u, k) => {
+    if (u.st.type === 'ClassDeclaration') {      // extends + trường static + static block chạy ngay lúc nạp
+      eagerRefs(u.st).forEach(r => {
+        if (conLai.has(r)) loi.push('(a) class ' + u.st.id.name + ' (dòng ' + L(u.st) + '): extends/trường static tham chiếu "' + r + '" còn ở HTML — file nạp trước script chính nên chưa có/TDZ');
+        else if (viTri[r] && viTri[r][0] > k && viTri[r][1].type !== 'FunctionDeclaration') loi.push('(a) class ' + u.st.id.name + ' (dòng ' + L(u.st) + '): extends/trường static tham chiếu "' + r + '" khai báo SAU nó (TDZ)');
+      });
+      return;
+    }
     if (u.st.type !== 'VariableDeclaration') return;
     u.st.declarations.forEach(d => {
-      const refs = new Set(d.init ? freeRefs(d.init) : []);
-      if (d.id.type !== 'Identifier') freeRefs(u.st).forEach(x => refs.add(x));   // mặc định / khoá tính toán trong mẫu
+      const refs = new Set(d.init ? eagerRefs(d.init) : []);
+      if (d.id.type !== 'Identifier') eagerRefs(u.st).forEach(x => refs.add(x));   // mặc định / khoá tính toán trong mẫu
       const ten1 = patNames(d.id, []).join(',');
       refs.forEach(r => {
         if (conLai.has(r)) loi.push('(a) ' + u.st.kind + ' ' + ten1 + ' (dòng ' + L(u.st) + '): giá trị đầu tham chiếu "' + r + '" còn ở HTML — file nạp trước script chính nên chưa có/TDZ');
         else if (viTri[r] && viTri[r][0] > k && viTri[r][1].type !== 'FunctionDeclaration') loi.push('(a) ' + u.st.kind + ' ' + ten1 + ' (dòng ' + L(u.st) + '): giá trị đầu tham chiếu "' + r + '" khai báo SAU nó (TDZ)');
       });
       if (d.init) {
-        let goi = false; acornWalk(d.init, n => { if (n.type === 'CallExpression' || n.type === 'NewExpression') goi = true; });
+        let goi = false; acornWalk(stripEager(d.init), n => { if (n.type === 'CallExpression' || n.type === 'NewExpression') goi = true; });
         if (goi) canhBao.push(u.st.kind + ' ' + ten1 + ' (dòng ' + L(u.st) + '): giá trị đầu có lời gọi hàm/new — chạy lúc nạp file, hãy xem đã an toàn chưa');
       }
     });
@@ -130,7 +168,7 @@ function chuyen(o) {
   runs.forEach(r => { moi += code.slice(pos, r.start) + '// ' + tenGon(r.ten) + ' → ' + o.ra; pos = r.end; });
   moi += code.slice(pos);
   const htmlMoi = html.slice(0, main.codeStart) + moi + html.slice(main.codeStart + code.length);
-  const dauHdr = '// Tách từ ' + htmlRel + ' dòng ' + tu + '–' + den + ' (tools/tach_posgieo/chuyen.js, ' + vnYmd() + '). ĐÃ PHÁT HÀNH thì KHÔNG sửa nội dung —\n'
+  const dauHdr = '// Tách từ ' + htmlRel + ' dòng ' + daiTxt + ' (tools/tach_posgieo/chuyen.js, ' + vnYmd() + '). ĐÃ PHÁT HÀNH thì KHÔNG sửa nội dung —\n'
     + '// tạo ' + path.basename(o.ra).replace(/\.v(\d+)\.js$/, (m, n) => '.v' + (+n + 1) + '.js') + ' và trỏ HTML tới (sổ tools/js_da_phat_hanh.json). Nạp TRƯỚC <script> chính; CHỈ khai báo.\n';
   const fileMoi = dauHdr + '(window.PosGieoMods = window.PosGieoMods || {}).' + o.dau + " = 'dang';\n\n"
     + units.map(u => u.text).join('\n\n') + '\n\nPosGieoMods.' + o.dau + ' = true;\n';
@@ -154,7 +192,8 @@ function acornWalk(node, f) {
 
 function cli(argv) {
   const a = {}; for (let i = 0; i < argv.length; i++) { const k = argv[i]; if (k === '--ghi') a.ghi = true; else if (k.startsWith('--')) a[k.slice(2)] = argv[++i]; }
-  const o = { html: a.html, tu: a.tu, den: a.den, ra: a.ra, dau: a.dau, giu: a.giu ? a.giu.split(',').filter(Boolean) : [], root: a.root ? path.resolve(a.root) : ROOT };   // --root: thư mục gốc khác (test)
+  const dai = a.dai ? a.dai.split(',').filter(Boolean).map(x => x.split('-').map(Number)) : null;
+  const o = { html: a.html, tu: a.tu, den: a.den, dai, ra: a.ra, dau: a.dau, giu: a.giu ? a.giu.split(',').filter(Boolean) : [], root: a.root ? path.resolve(a.root) : ROOT };   // --root: thư mục gốc khác (test)
   if (!o.html) { console.error('thiếu --html'); return 1; }
   let r; try { r = chuyen(o); } catch (e) { console.error('LỖI: ' + e.message); return 1; }
   if (r.loi.length) { console.error('DỪNG — không ghi gì:\n - ' + r.loi.join('\n - ')); return 1; }

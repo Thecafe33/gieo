@@ -101,6 +101,17 @@ ${body || 'function chinh(){ return escHtmlPos("<b>"); }'}
   chk(run([path.join(ROOT, 'tools/check_boundaries.js')], { CHECK_BOUNDARIES_ROOT: r }).status === 0, 'T7: gỡ lỗi cài → check_boundaries sạch');
 }
 
+// ── T7b: hàm ở js/posgieo dùng HẰNG tên bảng khai báo ở HTML → check_paths vẫn phân giải được tên (không thành «động») ──
+{
+  const r = tmp();
+  for (const f of ['data_access.v9.js', 'unit_engine.v21.js']) w(r, f, fs.readFileSync(path.join(ROOT, f)));
+  w(r, 'posgieo.html', APP('<script src="js/posgieo/dung_hang.v1.js"></script>', "const BANG_LA = 'bang_chua_dang_ky_gieogieo';\nfunction chinh(){ return 1; }"));
+  w(r, 'quanlygieo.html', APP(''));
+  w(r, 'js/posgieo/dung_hang.v1.js', 'function docBang(){ return fstore.collection(BANG_LA).get(); }\n');
+  const p = run([path.join(ROOT, 'tools/check_paths.js')], { CHECK_PATHS_ROOT: r });
+  chk(p.status !== 0 && /bang_chua_dang_ky_gieogieo/.test(p.stdout), 'T7b: check_paths phân giải hằng ở HTML cho mã trong js/posgieo (bắt được tên bảng chưa đăng ký)');
+}
+
 // ── T9 sổ JS đã phát hành ──
 {
   const ph = require(path.join(ROOT, 'tools/tach_posgieo/phat_hanh.js'));

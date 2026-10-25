@@ -1,3 +1,7 @@
+# 25/10 — Tách posgieo.html: Đợt 1B (kết nối máy in → js/posgieo/pos_printer.v1.js) xong, chờ kiểm tra lượt 05 — CHƯA deploy, chưa in thử APK
+
+posgieo.html 1,88 → 1,81 MB. Sửa `check_paths` (hằng chéo file). File kiểm tra: [tach_posgieo/KIEM_TRA_05_MAY_IN.md](tach_posgieo/KIEM_TRA_05_MAY_IN.md).
+
 # 25/10 — Tách posgieo.html: Đợt 1A (trợ lý → js/posgieo/pos_assist.v1.js) xong, chờ kiểm tra lượt 04 — CHƯA deploy
 
 Công cụ chuyển mã `tools/tach_posgieo/chuyen.js` (subagent Sonnet viết, đã xem lại). posgieo.html 1,94 → 1,88 MB. Toàn bộ test + e2e đạt. File kiểm tra: [tach_posgieo/KIEM_TRA_04_TRO_LY.md](tach_posgieo/KIEM_TRA_04_TRO_LY.md). Lượt 02, 03 chưa có kết quả kiểm tra.

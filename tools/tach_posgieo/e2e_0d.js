@@ -44,7 +44,7 @@ let ok = true; const chk = (c, m) => { console.log((c ? 'ok ' : 'FAIL ') + m); i
     });
     await page.goto(url, { waitUntil: 'load' }).catch(e => loi.push('goto: ' + e.message));
     await page.waitForTimeout(400);
-    const tt = await page.evaluate(() => ({ ui: window.PosGieoMods && window.PosGieoMods.ui, esc: typeof escHtmlPos === 'function' ? escHtmlPos('<b>&') : null, login: !!document.getElementById('posStoreLogin'), assist: window.PosGieoMods && window.PosGieoMods.assist, assistFn: typeof assistRender === 'function' && typeof assistFinalizeOrder === 'function', modThieu: !!document.getElementById('posModThieu'), thu: !!(window.GieoThu && GieoThu.active) }));
+    const tt = await page.evaluate(() => ({ ui: window.PosGieoMods && window.PosGieoMods.ui, esc: typeof escHtmlPos === 'function' ? escHtmlPos('<b>&') : null, login: !!document.getElementById('posStoreLogin'), assist: window.PosGieoMods && window.PosGieoMods.assist, assistFn: typeof assistRender === 'function' && typeof assistFinalizeOrder === 'function', printer: window.PosGieoMods && window.PosGieoMods.printer, printerFn: typeof POSPrinter === 'object' && typeof POSTemPrinter === 'object' && typeof temEnsureConnected === 'function', modThieu: !!document.getElementById('posModThieu'), thu: !!(window.GieoThu && GieoThu.active) }));
     if (!ctx) await page.close();
     return Object.assign(tt, { loi, xin, page });
   }
@@ -54,6 +54,7 @@ let ok = true; const chk = (c, m) => { console.log((c ? 'ok ' : 'FAIL ') + m); i
   chk(t.ui === true && t.esc === '&lt;b&gt;&amp;' && t.xin.length === 1, '(1) HTTP: pos_ui.v1.js nạp 1 lần, PosGieoMods.ui = true, escHtmlPos chạy đúng');
   chk(t.login, '(1) máy chưa gắn quán → màn nhập mã quán hiện (chốt dừng giữ nguyên)');
   chk(t.assist === true && t.assistFn, '(1) Đợt 1A: js/posgieo/pos_assist.v1.js nạp, PosGieoMods.assist = true, assistRender / assistFinalizeOrder có');
+  chk(t.printer === true && t.printerFn, '(1) Đợt 1B: js/posgieo/pos_printer.v1.js nạp, POSPrinter / POSTemPrinter / temEnsureConnected có');
   chk(!chuanLoi(t.loi).length, '(1) không lỗi JS ngoài throw có chủ đích ở chốt dừng' + (chuanLoi(t.loi).length ? ': ' + chuanLoi(t.loi).join(' | ') : ''));
 
   t = await mo(base + '/posgieo.html', [{ status: 404, type: 'text/html', body: 'Not Found' }]);

@@ -56,7 +56,7 @@ assert.equal(F.prepShortagePrefillFromCheckout(row,{}),null);
 console.log('ok B: kết ca dùng lại câu trả lời lúc check-out');
 
 // Nối luồng.
-const html=fs.readFileSync(path.join(__dirname,'../posgieo.html'),'utf8');
+const html=require('../tools/tach_posgieo/nguon').maNoi('posgieo.html');   // gồm cả js/posgieo/… (tem lô ở pos_printer.v1.js — Đợt 1B)
 const onCk=html.slice(html.indexOf('async function onCheckoutClick'),html.indexOf('async function onCheckoutClick')+3000);
 assert(!/prepExpiry|expiryCheck|expiryAsk/.test(onCk),'thanh toán KHÔNG hỏi hạn dùng (khách đang chờ)');
 assert.match(html,/if \(await expiryAskOnCheckOut\(\)\) return;/,'check-out: lô đã quá hạn');
