@@ -96,7 +96,7 @@ const chay = (src, ret, stubs) => { const ks = Object.keys(stubs); return new Fu
   }
   // ── 5. (10/10) Tên khách độc hại không chạy được trong gợi ý trợ lý ──
   {
-    const html = fs.readFileSync(path.join(ROOT, 'posgieo.html'), 'utf8');
+    const html = require('../tools/tach_posgieo/nguon').maNoi('posgieo.html');   // gồm cả js/posgieo/… (trợ lý tách ra file — Đợt 1A)
     const i0 = html.indexOf('function assistEsc(s) {');
     const escSrc = html.slice(i0, html.indexOf('\n}\n', i0) + 3);   // nguyên văn hàm thật (bộ tách hàm không đọc được regex /"/g)
     ok(i0 > 0 && /&lt;/.test(escSrc), 'tìm được assistEsc thật trong posgieo.html');
