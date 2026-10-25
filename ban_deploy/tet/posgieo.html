@@ -218,6 +218,11 @@ Nút "Cập nhật" ở sidebar (`manualCheckUpdate`, dựa trên service worker
 <script id="gdRetry">if(!window.GieoData){document.write('<scr'+'ipt src="data_access.v9.js?r=1"><\/scr'+'ipt>');}</script>
 <script src="unit_engine.v21.js"></script>
 <script id="ueRetry">if(!window.UnitEngine){document.write('<scr'+'ipt src="unit_engine.v21.js?r=1"><\/scr'+'ipt>');}</script>
+<!-- [TÁCH POSGIEO] JS riêng của POS Gieo trong js/posgieo/ (docs/KE_HOACH_TACH_POSGIEO_DA_CUA_HANG.md): CHỈ khai báo, nạp TRƯỚC
+     script chính (5.1). Mỗi file đặt dấu PosGieoMods.<tên> = 'dang' ở câu đầu, = true ở câu cuối. Dấu CHƯA CÓ (file chưa từng chạy:
+     mạng / 404 / file cụt) → nạp lại ĐÚNG MỘT LẦN (?r=1); chạy dở ('dang') thì KHÔNG nạp lại (5.3). -->
+<script src="js/posgieo/pos_ui.v1.js"></script>
+<script id="pgUiRetry">if(!window.PosGieoMods||PosGieoMods.ui===undefined){document.write('<scr'+'ipt src="js/posgieo/pos_ui.v1.js?r=1"><\/scr'+'ipt>');}</script>
 
 <style>
 :root{--gd:#E23A5D;--gm:#C22B49;--gl:#FDE6EA;--bg:#FFFCF0;--gt:#999;--td:#111;--bb:#E7ECFB;--bi:#1D3F91;
@@ -14052,10 +14057,7 @@ async function bulkReprintByDateConfirm() {
   } finally { _posSubmitBusy = false; }
 }
 
-// escHtmlPos — file này chưa có hàm escape HTML dùng chung; option value đã bị khoá bởi
-// chính danh sách items (không có input tự do) nên tối thiểu chỉ cần escape phần TEXT hiển
-// thị bên trong option, tránh tên món chứa dấu "<" làm vỡ layout.
-function escHtmlPos(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+// escHtmlPos → js/posgieo/pos_ui.v1.js (tách posgieo 0D — nạp trước script chính, màn nhập mã quán cũng dùng).
 
 async function missingLabelPickItem(itemId) {
   if (!itemId) return;

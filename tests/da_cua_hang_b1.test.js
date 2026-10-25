@@ -92,6 +92,7 @@ const nap = () => { const m = { exports: {} }; new Function('window', 'module', 
     ok(r0.code === 0 && /ĐƯỜNG DẪN SẠCH/.test(r0.out), 'check_paths: code hiện tại sạch');
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'paths-'));
     for (const f of fs.readdirSync(ROOT)) if (/\.(html|js)$/.test(f)) fs.copyFileSync(path.join(ROOT, f), path.join(tmp, f));
+    if (fs.existsSync(path.join(ROOT, 'js'))) fs.cpSync(path.join(ROOT, 'js'), path.join(tmp, 'js'), { recursive: true });   // JS riêng js/posgieo/… (tách posgieo)
     const p = path.join(tmp, 'posgieo.html');
     fs.writeFileSync(p, fs.readFileSync(p, 'utf8').replace("const CAKE_ACCOUNT_NO", "const __thuTen = () => fstore.collection('kho_moi_gieogieo');\nconst CAKE_ACCOUNT_NO"));
     const r1 = chay({ CHECK_PATHS_ROOT: tmp });

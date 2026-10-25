@@ -51,6 +51,7 @@ const TX = 'stock_transactions_gieogieo';
   {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'b3-'));
     for (const f of fs.readdirSync(ROOT)) if (/\.(html|js)$/.test(f)) fs.copyFileSync(path.join(ROOT, f), path.join(tmp, f));
+    if (fs.existsSync(path.join(ROOT, 'js'))) fs.cpSync(path.join(ROOT, 'js'), path.join(tmp, 'js'), { recursive: true });   // JS riêng js/posgieo/… (tách posgieo)
     const p = path.join(tmp, 'posgieo.html');
     fs.writeFileSync(p, fs.readFileSync(p, 'utf8').replace('<script src="' + BAN + '"></script>', '<script src="data_access.v1.js"></script>'));
     let out = '', code = 0;

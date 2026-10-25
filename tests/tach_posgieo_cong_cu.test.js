@@ -68,6 +68,24 @@ ${body || 'function chinh(){ return escHtmlPos("<b>"); }'}
   chk(kq2.status !== 0 && /không có file này/.test(kq2.stdout), 'T4: HTML nạp js/posgieo không tồn tại → dừng, báo lỗi');
 }
 
+// ── T5 tao_ban_dem (bản đo lượt đọc; chạy bản chép của tool trên fixture gốc riêng) ──
+{
+  const r = tmp();
+  w(r, 'tools/tao_ban_dem.js', fs.readFileSync(path.join(ROOT, 'tools/tao_ban_dem.js')));
+  w(r, 'tools/dem_luot_doc.js', fs.readFileSync(path.join(ROOT, 'tools/dem_luot_doc.js')));
+  w(r, 'tools/tach_posgieo/nguon.js', fs.readFileSync(path.join(ROOT, 'tools/tach_posgieo/nguon.js')));
+  for (const f of ['unit_engine.v21.js', 'data_access.v9.js']) w(r, f, fs.readFileSync(path.join(ROOT, f)));
+  const extra = '<script src="js/posgieo/pos_ui.v1.js"></script>\n' + RETRY;
+  w(r, 'posgieo.html', APP(extra)); w(r, 'quanlygieo.html', APP(''));
+  w(r, 'js/posgieo/pos_ui.v1.js', 'function escHtmlPos(s){return s}');
+  const out = path.join(r, 'out'); fs.mkdirSync(out);
+  const kq = run([path.join(r, 'tools/tao_ban_dem.js'), out]);
+  const hp = path.join(out, 'posgieo_dem.html');
+  const h = fs.existsSync(hp) ? fs.readFileSync(hp, 'utf8') : '';
+  chk(kq.status === 0 && h !== '' && fs.existsSync(path.join(out, 'js/posgieo/pos_ui.v1.js')), 'T5: bản đo xuất ra thư mục khác → có posgieo_dem.html và chép cả cây js/posgieo/');
+  chk(h.includes('src="js/posgieo/pos_ui.v1.js"') && !/pos_ui\.v1\.js\?b=/.test(h), 'T5: bản đo KHÔNG gắn ?b= vào js/posgieo (= app thật + bộ đếm)');
+}
+
 // ── T7 rào ranh giới / đường dẫn bắt lỗi nằm trong js/posgieo ──
 {
   const r = tmp();
@@ -105,15 +123,21 @@ ${body || 'function chinh(){ return escHtmlPos("<b>"); }'}
     { source: '/unit_engine.v*.js', headers: [{ key: 'Cache-Control', value: 'public, max-age=31536000, immutable' }] },
     { source: '/@(posgieo|quanlygieo).html', headers: [{ key: 'Cache-Control', value: 'no-cache' }] }].concat(h || []) } }));
   const pc = () => run([path.join(ROOT, 'tools/predeploy_check.js'), pub]);
-  fj();
-  chk(pc().status === 0, 'T10: firebase.json ở thư mục cha + public/ = bộ Giáng sinh hiện tại → đạt');
+  const HJS = [{ source: '/js/posgieo/**', headers: [{ key: 'Cache-Control', value: 'public, max-age=31536000, immutable' }] }];
+  // bộ thật có thể chưa / đã có js/posgieo → bảo đảm posgieo.html nạp pos_ui.v1.js và file có mặt
   const goc = fs.readFileSync(path.join(pub, 'posgieo.html'), 'utf8');
-  fs.writeFileSync(path.join(pub, 'posgieo.html'), goc.replace('<script src="unit_engine.v21.js"></script>', '<script src="unit_engine.v21.js"></script>\n<script src="js/posgieo/pos_ui.v1.js"></script>'));
+  if (!/src="js\/posgieo\/pos_ui\.v1\.js"/.test(goc)) fs.writeFileSync(path.join(pub, 'posgieo.html'), goc.replace('<script src="unit_engine.v21.js"></script>', '<script src="unit_engine.v21.js"></script>\n<script src="js/posgieo/pos_ui.v1.js"></script>'));
+  if (!fs.existsSync(path.join(pub, 'js/posgieo/pos_ui.v1.js'))) w(pub, 'js/posgieo/pos_ui.v1.js', '//');
+  const banJs = fs.readFileSync(path.join(pub, 'js/posgieo/pos_ui.v1.js'));
+  fj(HJS);
+  chk(pc().status === 0, 'T10: firebase.json ở thư mục cha + public/ = bộ Giáng sinh (có js/posgieo) + header /js/posgieo/** → đạt');
+  fs.rmSync(path.join(pub, 'js/posgieo/pos_ui.v1.js'));
   let k = pc(); chk(k.status !== 0 && /js\/posgieo\/pos_ui\.v1\.js nhưng file này KHÔNG có/.test(k.stdout), 'T10: HTML nạp js/posgieo mà thiếu file (chép phẳng / quên thư mục) → không được deploy');
-  w(pub, 'js/posgieo/pos_ui.v1.js', '//');
+  fs.writeFileSync(path.join(pub, 'js/posgieo/pos_ui.v1.js'), banJs);
+  fj();
   k = pc(); chk(k.status !== 0 && /headers cho \/js\/posgieo/.test(k.stdout), 'T10: có js/posgieo mà firebase.json thiếu header immutable → không được deploy');
-  fj([{ source: '/js/posgieo/**', headers: [{ key: 'Cache-Control', value: 'public, max-age=31536000, immutable' }] }]);
-  chk(pc().status === 0, 'T10: thêm header /js/posgieo/** → đạt');
+  fj(HJS);
+  chk(pc().status === 0, 'T10: thêm lại header /js/posgieo/** → đạt');
   w(pub, 'js/posgieo/Pos_Ui.v2.js', '//');
   k = pc(); chk(k.status !== 0 && /viết thường/.test(k.stdout), 'T10: tên có chữ hoa trong js/posgieo → không được deploy');
   fs.rmSync(path.join(pub, 'js/posgieo/Pos_Ui.v2.js'));
