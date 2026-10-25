@@ -1,3 +1,7 @@
+# 25/10 — Tách posgieo.html: 0C (công cụ T1–T13) xong, chờ kiểm tra lượt 02
+
+Lượt 01 đã kiểm độc lập + xử lý ([phản hồi](tach_posgieo/PHAN_HOI_KIEM_TRA_01.md)). 0C: bộ đọc nguồn chung, đóng gói/bản thử/bản đo giữ cây `js/posgieo/`, rào ranh giới/đường dẫn thấy mã trong `js/`, `predeploy_check` chạy đúng cấu trúc Hosting thật (bản cũ báo thiếu firebase.json), giao file thay đổi + sổ JS đã phát hành. Toàn bộ test đạt (kể cả `manage_duyet_gieo` hỏng từ trước). App không đổi. File kiểm tra: [tach_posgieo/KIEM_TRA_02_CONG_CU.md](tach_posgieo/KIEM_TRA_02_CONG_CU.md).
+
 # 25/10 — Tách posgieo.html: 0A + 0B xong, chờ kiểm tra lượt 01
 
 [Kế hoạch](KE_HOACH_TACH_POSGIEO_DA_CUA_HANG.md) (rà soát 3, chủ dự án duyệt). Mốc nền = bộ Giáng sinh @ `0bd95a7` (engine v21, ĐÃ deploy 25/10). Test nền 142/143 (hỏng có sẵn: `manage_duyet_gieo`, của manage), ranh giới + đường dẫn sạch, e2e posgieo đạt. Bản đồ phụ thuộc bằng `tools/tach_posgieo/ban_do.js` (chỉ đọc): 1.528 tên cấp cao, 59 lệnh tự chạy, chốt dừng chưa gắn quán ~dòng 2418, cụm trợ lý 28008–29256 liền khối (ứng viên 1A), máy in/tem/quét rải rác, pilot 0D = `escHtmlPos`. File kiểm tra cho agent khác: [tach_posgieo/KIEM_TRA_01_NEN_VA_BAN_DO.md](tach_posgieo/KIEM_TRA_01_NEN_VA_BAN_DO.md). Chưa sửa app.

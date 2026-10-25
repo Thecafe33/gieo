@@ -11,12 +11,12 @@ const acorn = require('acorn'), walk = require('acorn-walk');
 const ROOT = process.env.CHECK_PATHS_ROOT ? path.resolve(process.env.CHECK_PATHS_ROOT) : path.resolve(__dirname, '..');
 const LIST = process.argv.includes('--list');
 
-function scripts(file) {
-  const t = fs.readFileSync(file, 'utf8');
-  if (file.endsWith('.js')) return [[1, t]];
-  const o = [], re = /<script>([\s\S]*?)<\/script>/g; let m;
-  while ((m = re.exec(t))) o.push([t.slice(0, m.index + 8).split('\n').length, m[1]]);
-  return o;
+// HTML: <script> trần + JS riêng js/… (bộ đọc nguồn chung — kế hoạch tách posgieo T7), mỗi đoạn mang tên file thật
+// của nó (báo lỗi đúng file/dòng); file .js (engine): cả file.
+const { nguonCua } = require('./tach_posgieo/nguon');
+function nguonFile(f) {
+  if (f.endsWith('.js')) return [{ file: f, start: 1, code: fs.readFileSync(path.join(ROOT, f), 'utf8') }];
+  return nguonCua(f, { root: ROOT }).map(x => ({ file: x.file, start: x.startLine, code: x.code }));
 }
 const engineFile = (() => {
   const m = /<script src="(unit_engine\.v\d+\.js)/.exec(fs.readFileSync(path.join(ROOT, 'posgieo.html'), 'utf8'));
@@ -36,8 +36,8 @@ function loadRegistry() {
 const found = [];   // {kind:'fs'|'rt'|'st', name, file, line, how}
 const chuoi = {};   // mọi chuỗi dạng …_gieogieo trong code → nơi xuất hiện (bắt cả tên truyền qua biến / tham số)
 const dynamic = []; // lời gọi không xác định được tên
-for (const file of FILES) {
-  for (const [start, code] of scripts(path.join(ROOT, file))) {
+for (const hostFile of FILES) {
+  for (const { file, start, code } of nguonFile(hostFile)) {
     let ast;
     try { ast = acorn.parse(code, { ecmaVersion: 'latest', locations: true, allowReturnOutsideFunction: true }); }
     catch (e) { console.log('❌ Không đọc được ' + file + ': ' + e.message); process.exit(1); }

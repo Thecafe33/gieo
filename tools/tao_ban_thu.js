@@ -26,6 +26,7 @@ const hashOf = f => require('crypto').createHash('sha1').update(fs.readFileSync(
 
 const GUARD = "// [BẢN THỬ] Thiếu che_do_thu → DỪNG trước khi khởi tạo Firebase (không đọc/ghi được gì).\n" +
   "if (!window.GieoThu) { document.body.insertAdjacentHTML('afterbegin', '<div style=\"position:fixed;inset:0;z-index:2147483647;background:#b91c1c;color:#fff;font:700 18px/1.5 sans-serif;padding:30px\">⛔ BẢN THỬ không tải được ' + " + JSON.stringify(THU_FILE) + " + ' — đã dừng, không ghi gì. Tải lại trang.</div>'); throw new Error('Bản thử: thiếu che_do_thu'); }\n";
+const JS_RIENG = new Set();   // js/… mà bản thử nạp → chép kèm khi xuất ra thư mục khác
 function tao(src, dst, app) {
   let h = fs.readFileSync(path.join(ROOT, src), 'utf8');
   const one = (re, what) => { const n = (h.match(re) || []).length; if (n !== 1) throw new Error(src + ': cần đúng 1 ' + what + ', thấy ' + n); };
@@ -41,6 +42,14 @@ function tao(src, dst, app) {
   if (iS < 0) throw new Error(src + ': không thấy <script> chứa dòng tạo fstore');
   h = h.slice(0, iS + 8) + '\n' + GUARD + h.slice(iS + 8);
   h = h.replace(/(const fstore\s*=\s*firebase\.firestore\(\);)/, "$1\nGieoThu.install({ app: '" + app + "', firebase, db, fstore });   // [BẢN THỬ] mọi đọc/ghi → vùng thử");
+  // JS riêng của app (js/…): cũng gắn mã nội dung ?b= — JS dùng chung TÊN với app thật và Hosting cache lâu (immutable),
+  // sửa trong lúc thử thì máy thử phải tải bản mới. Cả thẻ thường lẫn chuỗi nạp lại document.write (?r=1 → ?b=…&r=1).
+  // (kế hoạch tách posgieo T4)
+  h = h.replace(/(src=\\?")(js\/[A-Za-z0-9_./-]+\.js)(\?[^"\\]*)?(\\?")/g, (m, a, f, q, z) => {
+    if (!fs.existsSync(path.join(ROOT, f))) throw new Error(src + ' nạp ' + f + ' nhưng không có file này');
+    JS_RIENG.add(f);
+    return a + f + '?b=' + hashOf(f) + (q ? '&' + q.slice(1) : '') + z;
+  });
   h = h.replace(/<title>/, '<title>[THỬ] ');
   // kiểm lại
   if ((h.match(/GieoThu\.install\(/g) || []).length !== 1) throw new Error(dst + ': chèn install lỗi');
@@ -54,6 +63,11 @@ try {
   tao('quanlygieo.html', 'quanlygieo_thu.html', 'quanly');
 } catch (e) { console.log('❌ ' + e.message); process.exit(1); }
 if (OUT !== ROOT) for (const f of fs.readdirSync(ROOT).filter(f => /^(unit_engine|che_do_thu|data_access)\.v\d+\.js$/.test(f))) {
+  fs.copyFileSync(path.join(ROOT, f), path.join(OUT, f)); console.log('✅ ' + f);
+}
+// Giữ nguyên cây thư mục (js/posgieo/…) — không chép phẳng (kế hoạch tách posgieo T4).
+if (OUT !== ROOT) for (const f of [...JS_RIENG].sort()) {
+  fs.mkdirSync(path.dirname(path.join(OUT, f)), { recursive: true });
   fs.copyFileSync(path.join(ROOT, f), path.join(OUT, f)); console.log('✅ ' + f);
 }
 console.log('Xong. Mở /posgieo_thu.html và /quanlygieo_thu.html sau khi deploy. App thật không đổi.');

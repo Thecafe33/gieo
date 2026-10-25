@@ -1,6 +1,6 @@
 #!/bin/sh
 # Kiểm tra trước deploy (mục 6.7 kế hoạch) — chạy trong Termux TRƯỚC `firebase deploy --only hosting`.
-#   sh tools/predeploy_check.sh <thư mục deploy>
+#   sh tools/predeploy_check.sh <thư mục deploy>      (Hosting thật 25/10: /sdcard/<thư mục>/public — firebase.json ở thư mục cha, tool tự tìm)
 # Chạy từ THƯ MỤC LÀM VIỆC (có code mới + tools/ + tests/); đối số là thư mục deploy (bỏ trống = chính thư mục này).
 # Cần: node (pkg install nodejs) và gói acorn (chạy `npm install` một lần trong thư mục này).
 # Dừng ở lỗi đầu tiên; báo "=> ĐƯỢC DEPLOY" chỉ khi mọi bước đạt. Không chạy được = KHÔNG deploy.

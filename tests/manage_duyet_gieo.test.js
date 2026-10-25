@@ -21,7 +21,7 @@ const ROOT = path.join(__dirname, '..');
 
   const NAMES = ['ggName', 'ggExpenseRange', 'ggExpenseDirtyKey', 'reviewGieoExpense'];
   let today = '2026-10-23';
-  const make = fake => new Function('fstore', 'ensureAuth', 'gieoStores', 'vnDate', 'dkey', 'GIEO_LEGACY', extract('manage.html', NAMES) + '\nreturn {' + NAMES.join(',') + '};')(
+  const make = fake => new Function('fstore', 'ensureAuth', 'gieoStores', 'vnDate', 'dkey', 'GIEO_LEGACY', extract('manage.html', NAMES, { vnDate: false }) + '\nreturn {' + NAMES.join(',') + '};')(
     fake.fstore, async () => {}, async () => [{ id: 'gg01' }, { id: 'gg02' }], () => new Date('2026-10-22T19:30:00Z'), () => today, 'gg01');
 
   const K = make(makeFake());
@@ -71,7 +71,7 @@ const ROOT = path.join(__dirname, '..');
       'alerts_gieogieo__gg02/b1': { type: 'handover_cash_variance', status: 'new', createdAt: '2026-10-22T04:00:00Z' },
       'alerts_gieogieo__gg03/c1': { type: 'missing_recipe', status: 'new' }
     } });
-    const A = new Function('fstore', 'ensureAuth', 'gieoStores', 'vnDate', 'dkey', 'parseDkey', 'addDays', 'firebase', 'GIEO_LEGACY', extract('manage.html', N2) + '\nreturn {' + N2.join(',') + '};')(
+    const A = new Function('fstore', 'ensureAuth', 'gieoStores', 'vnDate', 'dkey', 'parseDkey', 'addDays', 'firebase', 'GIEO_LEGACY', extract('manage.html', N2, { vnDate: false }) + '\nreturn {' + N2.join(',') + '};')(
       g.fstore, async () => {}, async () => [{ id: 'gg01' }, { id: 'gg02' }, { id: 'gg03', active: false }], () => new Date('2026-10-22T19:30:00Z'), () => '2026-10-23', k => k, () => '2026-10-01', { firestore: { FieldPath: { documentId: () => '__name__' } } }, 'gg01');
     const inbox = await A.readGieoInbox();
     assert.deepStrictEqual(inbox.alerts.map(a => a.store + '/' + a.id), ['gg02/b1', 'gg01/a2', 'gg01/a1'], 'mới + đã xem, mới nhất trước; bỏ đã xử lý; bỏ quán ngừng hoạt động');
@@ -92,7 +92,7 @@ const ROOT = path.join(__dirname, '..');
       'employee_shifts_gieogieo__gg02/s3': { employeeId: 'e3', employeeName: 'Huy', businessDate: '2026-10-20', checkedInAt: '2026-10-20T13:00:00.000Z', checkedOutAt: null },
       'employee_shifts_gieogieo/s4': { employeeId: 'e4', businessDate: '2026-10-19', checkedInAt: '2026-10-19T01:00:00.000Z', checkedOutAt: '2026-10-19T09:00:00.000Z' }
     } });
-    const H = new Function('fstore', 'ensureAuth', 'gieoStores', 'vnDate', 'dkey', 'parseDkey', 'addDays', 'firebase', 'GIEO_LEGACY', extract('manage.html', N3) + '\nreturn {' + N3.join(',') + '};')(
+    const H = new Function('fstore', 'ensureAuth', 'gieoStores', 'vnDate', 'dkey', 'parseDkey', 'addDays', 'firebase', 'GIEO_LEGACY', extract('manage.html', N3, { vnDate: false }) + '\nreturn {' + N3.join(',') + '};')(
       g.fstore, async () => {}, async () => [{ id: 'gg01' }, { id: 'gg02' }], () => new Date('2026-10-22T19:30:00Z'), () => '2026-10-23', k => k, () => '2026-10-01', { firestore: { FieldPath: { documentId: () => '__name__' } } }, 'gg01');
     const inbox = await H.readGieoInbox();
     assert.deepStrictEqual(inbox.stale.map(x => x.store + '/' + x.id), ['gg02/s3', 'gg01/s1'], 'chỉ ca NGÀY CŨ chưa check-out; ca hôm nay đang làm bỏ qua');
@@ -126,7 +126,7 @@ const ROOT = path.join(__dirname, '..');
     const fsw = { collection: n => patch(g.fstore.collection(n)), runTransaction: fn => g.fstore.runTransaction(fn) };
     const pDk = k => new Date(k + 'T00:00:00+07:00'), dk = d => new Date(+d + 7 * 3600000).toISOString().slice(0, 10), add = (d, n) => new Date(+d + n * 86400000);
     const N4 = ['ggName', 'readGieoInbox', 'forceCloseGieoDay'];
-    const D = new Function('fstore', 'ensureAuth', 'gieoStores', 'vnDate', 'dkey', 'parseDkey', 'addDays', 'firebase', 'GIEO_LEGACY', extract('manage.html', N4) + '\nreturn {' + N4.join(',') + '};')(
+    const D = new Function('fstore', 'ensureAuth', 'gieoStores', 'vnDate', 'dkey', 'parseDkey', 'addDays', 'firebase', 'GIEO_LEGACY', extract('manage.html', N4, { vnDate: false }) + '\nreturn {' + N4.join(',') + '};')(
       fsw, async () => {}, async () => [{ id: 'gg01' }], () => new Date('2026-10-23T05:00:00Z'), d => d ? dk(d) : '2026-10-23', pDk, add, { firestore: { FieldPath: { documentId: () => '__name__' } } }, 'gg01');
     const inbox = await D.readGieoInbox();
     assert.deepStrictEqual(inbox.openDays.map(x => x.dateKey + ':' + x.status), ['2026-10-20:handed_over', '2026-10-22:null'], 'ngày đã mở ca, chưa đóng, trong 30 ngày trước hôm nay; bỏ ngày đã đóng / hôm nay / quá 30 ngày');

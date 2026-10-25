@@ -7,13 +7,15 @@
 const fs = require('fs'); const path = require('path');
 const { makeFake, normalize, dropStore } = require('./fakefb');
 const { extractOne, extractRaw } = require('./extract');
+const { maNoi } = require('../../tools/tach_posgieo/nguon');
 const { loadEngineModule } = require('./engine');
 const ROOT = path.resolve(__dirname, '..', '..');
 
 
 // Hằng đơn giản cấp cao nhất của file (tên collection, ngưỡng số...) — trích nguyên dòng.
+// Đọc cả JS riêng của app (js/…) theo bộ đọc nguồn chung — hằng chuyển ra file vẫn thấy (kế hoạch tách posgieo T6).
 function simpleConsts(file) {
-  const html = fs.readFileSync(path.join(ROOT, file), 'utf8');
+  const html = maNoi(file);
   const re = /^const ([A-Z][A-Z0-9_]*)\s*=\s*('[^'\n]*'|-?[\d.]+(?:\s*\*\s*[\d.]+)*)\s*;/gm; let m; const seen = new Set(); const out = [];
   while ((m = re.exec(html))) if (!seen.has(m[1])) { seen.add(m[1]); out.push('const ' + m[1] + ' = ' + m[2] + ';'); }
   return out.join('\n') + '\n';
@@ -51,16 +53,24 @@ function loadThu(fake) {
 // opts.quan = 'gg01' | 'gg02' …: cài LỚP ĐƯỜNG DẪN ĐA CỬA HÀNG (data_access.v1.js) như app thật (sau chế độ thử nếu có).
 // Quán khác gg01: dữ liệu S của kịch bản được chép sang tên có hậu tố (dữ liệu của quán đó), bản gốc giữ lại làm
 // "mồi" = dữ liệu quán hiện tại; trả thêm `quan` = { gocDoi, ghiLot[], ghiChung[] } để kiểm cách ly.
-function loadData() {
+// Bản data_access ĐÚNG như HTML của app ghim (<script src="data_access.vN.js">), không lấy số lớn nhất trên đĩa
+// (kế hoạch tách posgieo T6 — test phải chạy trên đúng tài nguyên phát hành).
+function dataAccessOf(file) {
+  const m = /<script src="(data_access\.v\d+\.js)/.exec(fs.readFileSync(path.join(ROOT, file), 'utf8'));
+  if (!m) throw new Error(file + ' không nạp data_access');
+  return m[1];
+}
+function loadData(file) {
   const vm = require('vm');
   const sb = { console: { log() {}, warn() {}, error() {}, info() {} } };
   sb.window = sb; sb.globalThis = sb; vm.createContext(sb);
-  vm.runInContext(fs.readFileSync(path.join(ROOT, (require('fs').readdirSync(ROOT).filter(f => /^data_access\.v\d+\.js$/.test(f)).sort((a, b) => +a.match(/\d+/)[0] - +b.match(/\d+/)[0]).pop())), 'utf8'), sb, { filename: 'data_access (bản mới nhất)' });
+  const f = dataAccessOf(file);
+  vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), sb, { filename: f });
   return sb.GieoData;
 }
 async function runWrapped(kind, spec, opts) {
   const quanId = opts && opts.quan;
-  const GD = quanId ? loadData() : null;
+  const GD = quanId ? loadData(spec.app === 'pos' ? 'posgieo.html' : 'quanlygieo.html') : null;
   const seed = JSON.parse(JSON.stringify(spec.seed));
   // S (riêng từng quán) + C (danh mục theo quán — Bước 2) = chỗ RIÊNG của quán.
   const laS = (k, p) => { const h = String(p).replace(/^\/+/, '').split('/')[0]; return GD.REG[k][h] === 'S' || GD.REG[k][h] === 'C'; };

@@ -6,7 +6,7 @@ const fake=fs.readFileSync(root+'/tests/lib/fakefb.js','utf8').split('module.exp
 const handlers=extract('posgieo.html',['submitFinishContainer','finishContainerRemaining']);
 const engine=fs.readFileSync(root+'/'+require('../../tests/lib/engine_file'),'utf8');
 (async()=>{
- const browser=await chromium.launch({executablePath:'/usr/bin/chromium'});let checks=0;
+ const browser=await chromium.launch({executablePath:require('../../tests/lib/e2e').chromiumPath()});let checks=0;
  try{for(const [width,height]of [[1366,768],[390,844]])for(const mode of ['finishDoc','cleanup']){
   const p=await browser.newPage({viewport:{width,height}});const errors=[];p.on('pageerror',e=>errors.push(e.message));
   await p.route('**/*',r=>r.abort());

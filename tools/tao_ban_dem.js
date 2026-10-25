@@ -44,6 +44,10 @@ try {
   tao('posgieo.html', 'posgieo_dem.html');
   tao('quanlygieo.html', 'quanlygieo_dem.html');
 } catch (e) { console.log('❌ ' + e.message); process.exit(1); }
+// JS riêng của app (js/…) mà hai app nạp — chép kèm, giữ nguyên cây thư mục (kế hoạch tách posgieo T5).
+if (OUT !== ROOT) for (const f of [...new Set(['posgieo.html', 'quanlygieo.html'].flatMap(h => require('./tach_posgieo/nguon').jsCucBoCua(fs.readFileSync(path.join(ROOT, h), 'utf8'))))].filter(f => f.startsWith('js/'))) {
+  if (!fs.existsSync(path.join(OUT, f))) { fs.mkdirSync(path.dirname(path.join(OUT, f)), { recursive: true }); fs.copyFileSync(path.join(ROOT, f), path.join(OUT, f)); console.log('✅ ' + f); }
+}
 if (OUT !== ROOT) for (const f of fs.readdirSync(ROOT).filter(f => /^(unit_engine|data_access)\.v\d+\.js$/.test(f))) {
   if (!fs.existsSync(path.join(OUT, f))) { fs.copyFileSync(path.join(ROOT, f), path.join(OUT, f)); console.log('✅ ' + f); }
 }

@@ -14,6 +14,10 @@
 //   9. BẢN ĐO (posgieo_dem / quanlygieo_dem — tools/tao_ban_dem.js): nhúng đúng 1 bộ đếm, không chế độ thử;
 //      app thật và bản thử KHÔNG được nạp dem_luot_doc.
 //   8. (nhắc) thư mục deploy có tools/ tests/ docs/ … mà firebase.json không "ignore" → bị công khai trên web.
+//  11. [Tách posgieo — T10] firebase.json tìm ở thư mục deploy HOẶC thư mục cha (Hosting thật: firebase.json cạnh public/,
+//      deploy = public/) và "public" phải trỏ đúng thư mục deploy; MỌI file JS cục bộ app Gieo nạp (cả js/…, cả
+//      document.write) phải có; có js/posgieo → header immutable cho /js/posgieo/**; rewrites "**" → nhắc (JS thiếu bị trả
+//      HTML); tên trong js/ viết thường, không hai đường chỉ khác hoa/thường (bộ nhớ /sdcard không phân biệt).
 'use strict';
 const fs = require('fs'); const path = require('path');
 const SRC = path.resolve(__dirname, '..');
@@ -80,11 +84,32 @@ if (N && N > 1 && !co('unit_engine.v' + (N - 1) + '.js')) {
   }
 }
 
-// 4 + 8
-if (!co('firebase.json')) loi.push('Không thấy firebase.json trong thư mục deploy');
+// 11 — mọi JS cục bộ của app Gieo phải có trong thư mục deploy (kể cả js/posgieo/… và chuỗi nạp lại document.write)
+const { jsCucBoCua } = require('./tach_posgieo/nguon');
+const APP_GIEO = ['posgieo.html', 'quanlygieo.html', 'posgieo_thu.html', 'quanlygieo_thu.html', 'posgieo_dem.html', 'quanlygieo_dem.html', 'quanlygieo2.html'].filter(co);
+const jsApp = new Set();
+for (const h of APP_GIEO) for (const f of jsCucBoCua(doc(h))) { jsApp.add(f); if (!co(f)) loi.push(h + ' nạp ' + f + ' nhưng file này KHÔNG có trong thư mục deploy' + (f.includes('/') ? ' (chép GIỮ NGUYÊN thư mục con, không chép phẳng)' : '')); }
+const coJsPosgieo = [...jsApp].some(f => f.startsWith('js/posgieo/'));
+if (fs.existsSync(path.join(ROOT, 'js'))) {
+  const walkJs = d => fs.readdirSync(path.join(ROOT, d), { withFileTypes: true }).flatMap(e => e.isDirectory() ? walkJs(d + '/' + e.name) : [d + '/' + e.name]);
+  const tatCa = walkJs('js');
+  for (const f of tatCa) if (/^js\/posgieo\//.test(f) && f !== f.toLowerCase()) loi.push(f + ': tên trong js/posgieo phải viết thường (bộ nhớ /sdcard không phân biệt hoa/thường)');
+  const gap = {}; for (const f of tatCa.concat(fs.readdirSync(ROOT))) { const k = f.toLowerCase(); (gap[k] = gap[k] || []).push(f); }
+  for (const v of Object.values(gap)) if (v.length > 1) loi.push('Hai đường chỉ khác hoa/thường (trên /sdcard sẽ đè nhau): ' + v.join(' , '));
+}
+
+// 4 + 8 — firebase.json: ở thư mục deploy, hoặc ở thư mục cha khi deploy = <cha>/public (cấu hình Hosting thật 25/10)
+let FJ = null;
+if (co('firebase.json')) FJ = path.join(ROOT, 'firebase.json');
+else if (fs.existsSync(path.join(ROOT, '..', 'firebase.json'))) FJ = path.join(ROOT, '..', 'firebase.json');
+if (!FJ) loi.push('Không thấy firebase.json trong thư mục deploy hoặc thư mục cha của nó');
 else {
   let fj = null;
-  try { fj = JSON.parse(doc('firebase.json')); } catch (e) { loi.push('firebase.json không đọc được: ' + e.message); }
+  try { fj = JSON.parse(fs.readFileSync(FJ, 'utf8')); } catch (e) { loi.push('firebase.json không đọc được: ' + e.message); }
+  if (fj && FJ !== path.join(ROOT, 'firebase.json')) {
+    const pubs = [].concat(fj.hosting || []).map(h => path.resolve(path.dirname(FJ), h.public || '.'));
+    if (!pubs.includes(ROOT)) loi.push('firebase.json ở ' + path.dirname(FJ) + ' nhưng "public" không trỏ tới thư mục đang kiểm (' + ROOT + ') — kiểm đúng thư mục deploy chưa?');
+  }
   if (fj) {
     const hosts = [].concat(fj.hosting || []);
     const hs = [].concat(...hosts.map(h => h.headers || []));
@@ -93,6 +118,9 @@ else {
     if (dungEngine && !/immutable/.test(cc(s => /unit_engine/.test(s)))) loi.push('firebase.json thiếu headers cho unit_engine.v*.js (Cache-Control ... immutable) — xem tools/firebase_headers_gieogieo.json');
     if (N && !/no-cache/.test(cc(s => /posgieo/.test(s) && /quanlygieo/.test(s) && !/_thu/.test(s)))) loi.push('firebase.json thiếu headers no-cache cho posgieo.html / quanlygieo.html — xem tools/firebase_headers_gieogieo.json');
     if (coThu.length && !/no-cache/.test(cc(s => /_thu/.test(s)))) nhac.push('firebase.json chưa đặt no-cache cho *_thu.html — bản thử có thể chậm ~1 giờ mới thấy bản mới (xem tools/firebase_headers_gieogieo.json)');
+    if (coJsPosgieo && !/immutable/.test(cc(s => /^\/?js\/posgieo\//.test(s)))) loi.push('firebase.json thiếu headers cho /js/posgieo/** (Cache-Control ... immutable) — xem tools/firebase_headers_gieogieo.json');
+    const rw = [].concat(...hosts.map(h => h.rewrites || [])).filter(r => /\*\*/.test(r.source || ''));
+    if (rw.length) nhac.push('firebase.json có rewrites "**" → file JS thiếu sẽ bị trả về HTML (mã 200) thay vì 404; trình duyệt báo lỗi cú pháp, khó nhận ra');
     const ign = [].concat(...hosts.map(h => h.ignore || [])).join(' ');
     const lo = ['tools', 'tests', 'docs', 'node_modules'].filter(d => co(d) && !new RegExp('(^|[/ *])' + d + '(/|\\b)').test(ign));
     if (lo.length) nhac.push('Thư mục deploy có ' + lo.join(', ') + ' mà firebase.json không "ignore" → sẽ bị CÔNG KHAI trên web. Thêm vào "ignore" của firebase.json (mẫu ở docs/CHE_DO_THU.md mục 1)');

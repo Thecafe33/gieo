@@ -7,10 +7,11 @@ const walk = require('acorn-walk');
 
 const [posPath = 'posgieo.html', qlPath = 'quanlygieo.html'] = process.argv.slice(2);
 const FILES = { POS: posPath, QL: qlPath };
-function extractScripts(html) {           // [[dòng bắt đầu, mã], …] của mọi <script> inline
-  const out = []; const re = /<script>([\s\S]*?)<\/script>/g; let m;
-  while ((m = re.exec(html))) out.push([html.slice(0, m.index + 8).split('\n').length, m[1]]);
-  return out;
+// [[dòng bắt đầu, mã, file], …]: <script> trần + JS riêng js/… (bộ đọc nguồn chung — kế hoạch tách posgieo T7)
+const path = require('path');
+const { nguonCua } = require('./tach_posgieo/nguon');
+function extractScripts(file) {
+  return nguonCua(path.relative(path.resolve(__dirname, '..'), path.resolve(file))).map(x => [x.startLine, x.code, x.file]);
 }
 const FS_WRITE = new Set(['set', 'update', 'delete', 'add']);
 const RT_WRITE = new Set(['set', 'update', 'remove', 'transaction', 'push', 'setWithPriority']);
@@ -33,7 +34,7 @@ function fieldName(prop) {
 
 const result = {};
 for (const [tag, file] of Object.entries(FILES)) {
-  const scripts = extractScripts(fs.readFileSync(file, 'utf8'));
+  const scripts = extractScripts(file);
   const funcs = {};            // outerName -> record
   const consts = {};           // top-level const NAME = 'string'
   const parsed = scripts.map(([start, code]) => ({ start, ast: acorn.parse(code, { ecmaVersion: 'latest', sourceType: 'script', locations: true, allowReturnOutsideFunction: true }) }));

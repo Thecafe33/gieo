@@ -36,7 +36,7 @@ const MA_BANG_CHU = ${JSON.stringify(readConst('MA_BANG_CHU'))};
 let STOCK_OPEN_LIST = [];
 `;
 function readConst(name) {
-  const html = fs.readFileSync(path.join(ROOT, 'posgieo.html'), 'utf8');
+  const html = require('../../tools/tach_posgieo/nguon').maNoi('posgieo.html');   // gồm cả JS riêng js/… (tách posgieo T6)
   const m = new RegExp('const ' + name + "\\s*=\\s*'([^']*)'").exec(html);
   if (m) return m[1];
   const e = path.join(ROOT, require('./engine_file'));

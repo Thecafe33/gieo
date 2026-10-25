@@ -17,7 +17,7 @@ const qlFuncs=extract('quanlygieo.html',['fmtNum','escapeHtmlAttr','itemCountUni
 const item = { id: 'pearl', name: 'Trân châu trắng', unit: 'g', countUnitName: 'Bịch', trackingMode: 'unit',
   packagingUnits: [{ name: 'Bịch', baseQty: 2000 }, { name: 'Thùng', baseQty: 12000 }] };
 (async () => {
-  const b = await chromium.launch({ executablePath: '/usr/bin/chromium' });
+  const b = await chromium.launch({ executablePath: require('../../tests/lib/e2e').chromiumPath() });
   try {
     let checks = 0;
     for (const [width, height] of [[1366, 768], [768, 1024], [390, 844], [320, 640]]) {

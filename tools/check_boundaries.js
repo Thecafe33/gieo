@@ -8,7 +8,7 @@
 // Ngoại lệ đã duyệt (nếu có) khai trong tools/boundary_allow.json: { "POS:tenHam": "lý do", ... }.
 const fs = require('fs'); const path = require('path');
 const acorn = require('acorn'); const walk = require('acorn-walk');
-const ROOT = path.resolve(__dirname, '..');
+const ROOT = process.env.CHECK_BOUNDARIES_ROOT ? path.resolve(process.env.CHECK_BOUNDARIES_ROOT) : path.resolve(__dirname, '..');
 const files = process.argv.slice(2).length ? process.argv.slice(2) : ['posgieo.html', 'quanlygieo.html'];
 const ENGINE_COLLS = new Set(['stock_containers_gieogieo', 'prep_batches_gieogieo', 'stock_transactions_gieogieo', 'prep_transactions_gieogieo',
   'stock_anomalies_gieogieo', 'reversal_unit_claims_gieogieo', 'prep_ingredient_locks_gieogieo', 'order_stock_traces_gieogieo']);
@@ -19,7 +19,8 @@ const ALLOW = fs.existsSync(allowFile) ? JSON.parse(fs.readFileSync(allowFile, '
 const WRITE = new Set(['set', 'update', 'delete', 'add']);
 const RT_WRITE = new Set(['set', 'update', 'remove', 'transaction', 'push', 'setWithPriority']);
 
-function scripts(html) { const out = []; const re = /<script>([\s\S]*?)<\/script>/g; let m; while ((m = re.exec(html))) out.push([html.slice(0, m.index + 8).split('\n').length, m[1]]); return out; }
+// Mã của app = <script> trần + JS riêng js/… (bộ đọc nguồn chung — kế hoạch tách posgieo T7); engine/thư viện gốc không tính.
+const { nguonCua } = require('./tach_posgieo/nguon');
 function fieldKey(prop) {
   if (!prop || prop.type !== 'Property') return null; const k = prop.key;
   if (!prop.computed) return k.type === 'Identifier' ? k.name : (k.type === 'Literal' ? String(k.value).split('.')[0] : null);
@@ -30,14 +31,14 @@ function fieldKey(prop) {
 let violations = [];
 for (const file of files) {
   const tag = /quanly/.test(file) ? 'QL' : 'POS';
-  const parsed = scripts(fs.readFileSync(path.join(ROOT, file), 'utf8')).map(([start, code]) => ({ start, ast: acorn.parse(code, { ecmaVersion: 'latest', allowReturnOutsideFunction: true, locations: true }) }));
+  const parsed = nguonCua(file, { root: ROOT }).map(x => ({ start: x.startLine, src: x.file, ast: acorn.parse(x.code, { ecmaVersion: 'latest', allowReturnOutsideFunction: true, locations: true }) }));
   const consts = {};
   for (const { ast } of parsed) for (const st of ast.body) if (st.type === 'VariableDeclaration') for (const d of st.declarations)
     if (d.id.type === 'Identifier' && d.init && d.init.type === 'Literal' && typeof d.init.value === 'string') consts[d.id.name] = d.init.value;
   const strOf = n => { if (!n) return null; if (n.type === 'Literal' && typeof n.value === 'string') return n.value; if (n.type === 'Identifier' && consts[n.name]) return consts[n.name];
     if (n.type === 'TemplateLiteral') return n.quasis[0].value.cooked + (n.expressions.length ? '${}' : ''); if (n.type === 'BinaryExpression' && n.operator === '+') { const l = strOf(n.left); return l != null ? l + '…' : null; }
     if (n.type === 'ConditionalExpression') { const a = strOf(n.consequent), b = strOf(n.alternate); return a && b ? a + '|' + b : (a || b); } return null; };
-  for (const { start, ast } of parsed) {
+  for (const { start, src, ast } of parsed) {
     const L = n => n.loc.start.line + start - 1;
     for (const top of ast.body) {
       let fname = '(top-level)';
@@ -66,7 +67,7 @@ for (const file of files) {
         }
         return null;
       };
-      const flag = (n, what) => { const key = tag + ':' + fname; if (!ALLOW[key]) violations.push({ file, fn: fname, line: L(n), what }); };
+      const flag = (n, what) => { const key = tag + ':' + fname; if (!ALLOW[key]) violations.push({ file: src, tag, fn: fname, line: L(n), what }); };
       const isEngineTarget = t => t && (ENGINE_COLLS.has(t) || /^\(động\)$/.test(t));
       const checkFields = (target, arg, n) => {
         if (!ITEM_COLLS.has(target) || !arg || arg.type !== 'ObjectExpression') return;
@@ -101,7 +102,7 @@ for (const file of files) {
   }
 }
 const byFn = {};
-violations.forEach(v => { const k = (/quanly/.test(v.file) ? 'QL' : 'POS') + ':' + v.fn; (byFn[k] = byFn[k] || []).push(v.line + ' ' + v.what); });
+violations.forEach(v => { const k = v.tag + ':' + v.fn; (byFn[k] = byFn[k] || []).push((v.file.endsWith('.html') ? '' : v.file + ':') + v.line + ' ' + v.what); });
 if (process.argv.includes('--json')) { console.log(JSON.stringify(byFn, null, 1)); process.exit(0); }
 for (const [k, list] of Object.entries(byFn)) console.log(k.padEnd(48), list.slice(0, 3).join(' | ') + (list.length > 3 ? ' …+' + (list.length - 3) : ''));
 console.log(violations.length ? `=> ${Object.keys(byFn).length} hàm vi phạm ranh giới (${violations.length} lượt ghi)` : '=> RANH GIỚI SẠCH');

@@ -5,14 +5,14 @@
 const {chromium}=require('playwright'),fs=require('node:fs'),http=require('node:http'),path=require('node:path'),assert=require('node:assert/strict');
 const root=path.resolve(__dirname,'../..'),html=fs.readFileSync(path.join(root,'posgieo.html'),'utf8');
 const styles=[...html.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/g)].map(m=>m[1]).join('\n');
-const {extractRaw}=require(path.join(root,'tests/lib/extract'));
+const {extractRaw}=require(path.join(root,'tests/lib/extract')),{chromiumPath,serveFile}=require(path.join(root,'tests/lib/e2e'));
 const fns=extractRaw('posgieo.html',['prepLotExpired','expiryCheckLines','expiryExtendTo','loadExpiryCheckLinesPOS','expirySoonLines','fmtPrepTime','expiryLineWhen','expiryCheckHTML','expiryCheckShow','expiryCheckClose','expiryCheckRefresh','expiryCheckAct','expiryCheckOpenSoon','expiryOpenDone','expiryAskOnCheckOut','_expSyncCaches','closeStockScanSheet','posDateKeyToDisplay','prepExtendLotPOS','nlExtendOpenUnitPOS','prepDiscardExpiredLotPOS','prepUntrackedSales','prepUntrackedAskOnCheckOut','renderPrepUntrackedAsk','prepUntrackedSubmit','prepSubNorm']);
 const fake=fs.readFileSync(path.join(root,'tests/lib/fakefb.js'),'utf8').replace('module.exports =','window.__fakefb =');
 const server=http.createServer((req,res)=>{const u=new URL(req.url,'http://x');
  if(u.pathname==='/p'){res.setHeader('Content-Type','text/html;charset=utf-8');return res.end('<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>'+styles+'</style></head><body><div id="shiftBody" style="padding:12px"></div></body></html>');}
- const f=path.join(root,path.basename(u.pathname));if(fs.existsSync(f)){res.setHeader('Content-Type','text/javascript');return res.end(fs.readFileSync(f));}res.statusCode=404;res.end();});
+ if(serveFile(root,u.pathname,res))return;res.statusCode=404;res.end();});   // đường đầy đủ (js/posgieo/…) — tests/lib/e2e.js
 (async()=>{await new Promise(r=>server.listen(0,'127.0.0.1',r));const base='http://127.0.0.1:'+server.address().port;
- const b=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||['/usr/bin/chromium','/opt/pw-browsers/chromium'].find(p=>fs.existsSync(p)),args:['--no-sandbox']});
+ const b=await chromium.launch({executablePath:chromiumPath(),args:['--no-sandbox']});
  try{for(const width of [1366,390]){
   const page=await b.newPage({viewport:{width,height:860}}),errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.route('**/*',r=>r.request().url().startsWith(base)?r.continue():r.abort());await page.goto(base+'/p');

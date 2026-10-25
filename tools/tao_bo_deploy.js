@@ -36,12 +36,31 @@ const MO_TA = {
   tet: 'BẢN TẾT 2027 — lì xì (pos / PosX / index Tết), không Gấu Noel'
 };
 
-// .js cục bộ app nạp: <script src="x.js?…"> và document.write('<scr'+'ipt src="x.js?…">')
+// .js cục bộ app nạp: <script src="x.js?…">, <script src="js/posgieo/x.v1.js"> và document.write('<scr'+'ipt src="x.js?…">').
+// Trước 25/10 regex không nhận dấu '/' → file trong thư mục con bị BỎ QUA IM LẶNG (kế hoạch tách posgieo T1).
+// Nay: mọi src không có giao thức đều được xét; đường hợp lệ (tương đối, không '..', không bắt đầu bằng '/') được gom
+// theo ĐƯỜNG ĐẦY ĐỦ; đường cục bộ không hợp lệ → báo lỗi (không bỏ qua).
+const { jsCucBoCua, laJsCucBo } = require('./tach_posgieo/nguon');
 function jsCuaApp(h) {
-  const out = new Set(), re = /src=\\?"([A-Za-z0-9_.-]+\.js)(?:\?[^"\\]*)?\\?"/g; let m;
-  const bo = h.replace(/<!--[\s\S]*?-->/g, '');
-  while ((m = re.exec(bo))) out.add(m[1]);
-  return [...out];
+  const out = [];
+  for (const f of jsCucBoCua(h)) {
+    if (!laJsCucBo(f)) throw new Error('đường JS không hợp lệ cho bộ deploy (phải tương đối, không "..", không bắt đầu bằng "/"): ' + f);
+    out.push(f);
+  }
+  return out;
+}
+// Giữ MỌI bản của một họ file có số bản (ten.vN.js) trong js/posgieo/ (HTML cũ còn cache vẫn xin bản cũ) — một quy tắc
+// chung thay vì thêm regex cho từng họ (kế hoạch tách posgieo T3).
+function banCuCungHo(root, f) {
+  const m = /^(js\/posgieo\/.+)\.v\d+\.js$/.exec(f); if (!m) return [];
+  const dir = path.join(root, path.dirname(f)); if (!fs.existsSync(dir)) return [];
+  const goc = path.basename(m[1]);
+  return fs.readdirSync(dir).filter(x => new RegExp('^' + goc.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\.v\\d+\\.js$').test(x)).map(x => path.dirname(f) + '/' + x);
+}
+/** Ghi một bộ ra thư mục: tạo thư mục cha cho đường lồng nhau (kế hoạch tách posgieo T2). */
+function ghiBo(dir, files) {
+  fs.rmSync(dir, { recursive: true, force: true }); fs.mkdirSync(dir, { recursive: true });
+  for (const [f, c] of Object.entries(files)) { const dst = path.join(dir, f); fs.mkdirSync(path.dirname(dst), { recursive: true }); fs.writeFileSync(dst, c); }
 }
 /** Nội dung từng bộ: { bo: { tên: Buffer|string } } */
 function dung() {
@@ -64,25 +83,26 @@ function dung() {
     // Bản xuất kiểm toán kho: v1 ĐÃ deploy (kiem_toan_kho.html cũ còn cache trỏ tới) → giữ mọi bản.
     if([...js].some(f=>/^unit_engine2_export_v\d+\.js$/.test(f)))
       fs.readdirSync(ROOT).filter(f=>/^unit_engine2_export_v\d+\.js$/.test(f)).forEach(f=>js.add(f));
+    [...js].forEach(f => banCuCungHo(ROOT, f).forEach(x => js.add(x)));
     for (const f of [...js].sort()) {
       if (!fs.existsSync(path.join(ROOT, f))) throw new Error(ten + ': app nạp ' + f + ' nhưng repo không có file này');
       files[f] = fs.readFileSync(path.join(ROOT, f));
     }
-    files['DANH_SACH.txt'] = MO_TA[ten] + '\n\nChép TẤT CẢ file dưới đây vào thư mục deploy (ghi đè), rồi firebase deploy --only hosting.\n' +
+    files['DANH_SACH.txt'] = MO_TA[ten] + '\n\nChép TẤT CẢ file dưới đây vào thư mục deploy (public/ — ghi đè), GIỮ NGUYÊN thư mục con (vd js/posgieo/…\n' +
+      '→ public/js/posgieo/…, không chép phẳng ra public/), rồi firebase deploy --only hosting.\n' +
       'Không xoá các file .js bản cũ đang có trong thư mục deploy (máy còn bản HTML cũ trong bộ nhớ đệm vẫn xin chúng).\n\n' +
       Object.keys(files).filter(f => f !== 'DANH_SACH.txt').sort().map(f => '  ' + f).join('\n') + '\n';
     kq[ten] = files;
   }
   return kq;
 }
-module.exports = { BO, dung, jsCuaApp, OUT };
+module.exports = { BO, dung, jsCuaApp, banCuCungHo, ghiBo, OUT };
 
 if (require.main === module) {
   const kq = dung();
   for (const ten of Object.keys(kq)) {
     const dir = path.join(OUT, ten);
-    fs.rmSync(dir, { recursive: true, force: true }); fs.mkdirSync(dir, { recursive: true });
-    for (const [f, c] of Object.entries(kq[ten])) fs.writeFileSync(path.join(dir, f), c);
+    ghiBo(dir, kq[ten]);
     console.log('✅ ban_deploy/' + ten + ' — ' + Object.keys(kq[ten]).length + ' file');
   }
 }

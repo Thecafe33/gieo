@@ -2,7 +2,7 @@
 
 - Lập: 25/10/2026 (giờ Việt Nam). **Bản rà soát 3** (25/10) — đối chiếu từng khẳng định với code thật và `firebase.json` thật của Hosting do chủ dự án gửi.
 - Nguồn đã rà: `Thecafe33/gieo`, nhánh `Phan-tach-unit-engine`, HEAD `c859965` (= `0bd95a7` + tài liệu này). Commit gần nhất sửa `posgieo.html`: `6d8f947`.
-- Trạng thái: **đang làm — lượt 01 (0A + 0B) đã kiểm và xử lý phản hồi (`docs/tach_posgieo/PHAN_HOI_KIEM_TRA_01.md`); tiếp theo 0C.** Chưa tách code. Kế hoạch này nằm NGOÀI `KE_HOACH_UNIT_ENGINE_DA_CUA_HANG.md` → chủ dự án duyệt riêng; khi bắt đầu ghi một dòng vào `CLAUDE.md` + `docs/TRANG_THAI.md`.
+- Trạng thái: **đang làm — lượt 01 đã kiểm + xử lý; 0C (công cụ T1–T13) xong, chờ kiểm tra lượt 02.** Chưa tách code (chưa có file `js/posgieo/`). Kế hoạch này nằm NGOÀI `KE_HOACH_UNIT_ENGINE_DA_CUA_HANG.md` → chủ dự án duyệt riêng; khi bắt đầu ghi một dòng vào `CLAUDE.md` + `docs/TRANG_THAI.md`.
 - **Bản đang chạy ở cửa hàng (chủ dự án 25/10): bản mới nhất của mùa Giáng sinh** = `ban_deploy/giangsinh/` tại `0bd95a7` (commit cuối sửa bộ này). Trong đó `posgieo.html` giống hệt file gốc tại `6d8f947`, nạp `data_access.v9.js`, `unit_engine.v21.js` (chủ dự án xác nhận cửa hàng dùng engine v21), `gau_noel_giangsinh.v2.js` (data-quan="gieo"), `gieo_automation_pos.v3.js`, `unit_engine2_v1.js`, `unit_engine2_store_v1.js`, `gieo_engine2_pos_v1.js`. **Đây là mốc nền** cho mọi so sánh trước/sau; mọi JS trong danh sách này coi là đã phát hành (không sửa nội dung).
 - Mùa đang chạy là Giáng sinh → biến thể posgieo **có Gấu Noel** là biến thể kiểm trước tiên; file giao cho chủ dự án lấy từ `ban_deploy/giangsinh/` (mục 1.4).
 - Trước khi làm: cập nhật HEAD, đọc các commit phát sinh sau `c859965`; nếu có commit sửa `posgieo.html` sau `6d8f947` mà chưa deploy thì mốc nền vẫn là `6d8f947`, ghi rõ phần chênh.
@@ -352,6 +352,12 @@ Không cần sửa: `tools/automation/build_page.js` / `sync.js` (quanlygieo2 v�
 
 0D thất bại → sửa công cụ/ranh giới, không tách cụm lớn.
 
+**Quy tắc mỗi lần chuyển một cụm ra `js/posgieo/` (từ 0D, rút từ lượt 02):**
+1. Chạy `node tools/tach_posgieo/ban_do.js --cum …` → danh sách phụ thuộc / người gọi / handler / JS ngoài / lệnh tự chạy của cụm.
+2. Grep các test đọc THÔ văn bản `posgieo.html` (regex trên HTML, ~20 file) theo các tên trong cụm; chỗ liên quan chuyển sang `require('../tools/tach_posgieo/nguon').maNoi('posgieo.html')` — nhất là khẳng định "KHÔNG có X" (đạt giả khi X đã ra file).
+3. File mới theo `tests/tach_posgieo_nguon.test.js`: tên thường `ten.vN.js`, câu đầu `PosGieoMods.x='dang'`, câu cuối `=true`, giữa chỉ khai báo; thẻ + mẫu nạp lại theo 5.1/5.3.
+4. `sh tools/sinh_lai_tat_ca.sh`; giao file bằng `node tools/file_thay_doi.js <mốc> giangsinh --ghi` (ghi sổ phát hành).
+
 ### Đợt 1 — Thiết bị, trợ lý, mùa
 
 Tiểu đợt, mỗi tiểu đợt một điểm quay lui: (1A) trợ lý hoặc cụm độc lập 0B chứng minh, một module/lần; (1B) kết nối in/quét, gọi tạo nội dung tem qua adapter; (1C) nội dung tem kho/BTP khi rõ phụ thuộc — được giữ inline tới Đợt 2; (1D) kiểm hook theo mùa. `POSPrinter`, `POSTemPrinter` là `const` toàn cục → giữ đúng kiểu truy cập của caller. `syncPrinterLayoutFromCloud` gọi trước và sau auth → gộp là H riêng. Đổi reconnect/timer/hook là commit sau commit chuyển mã.
@@ -423,7 +429,7 @@ Mỗi lần sửa: `sh tools/sinh_lai_tat_ca.sh` (đã gồm test), `node tools/
 | --- | --- | --- | --- |
 | 0A Nền | Xong — đã kiểm lượt 01, đã xử lý phản hồi | — | `docs/tach_posgieo/KIEM_TRA_01_NEN_VA_BAN_DO.md` |
 | 0B Bản đồ phụ thuộc | Xong — đã kiểm lượt 01, công cụ sửa theo phản hồi (`scope.js`, test `tach_posgieo_ban_do`) | — | như trên; công cụ `tools/tach_posgieo/ban_do.js` |
-| 0C Công cụ T1–T13 | Chưa làm | — | Test cài lỗi |
+| 0C Công cụ T1–T13 | Xong — chờ kiểm tra lượt 02 | — | `docs/tach_posgieo/KIEM_TRA_02_CONG_CU.md`; `tests/tach_posgieo_cong_cu.test.js` (27 ca cài lỗi) |
 | 0D Thử `pos_ui.v1.js` | Chưa làm | — | e2e HTTP + file://, ba bộ |
 | 0E Hợp đồng lỗi tải | Chưa làm | — | Test thiếu/lỗi file |
 | 1 Thiết bị/trợ lý/mùa | Chưa làm | — | APK, listener, checksum |
