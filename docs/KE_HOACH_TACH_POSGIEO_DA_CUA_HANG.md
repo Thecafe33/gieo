@@ -2,7 +2,7 @@
 
 - Lập: 25/10/2026 (giờ Việt Nam). **Bản rà soát 3** (25/10) — đối chiếu từng khẳng định với code thật và `firebase.json` thật của Hosting do chủ dự án gửi.
 - Nguồn đã rà: `Thecafe33/gieo`, nhánh `Phan-tach-unit-engine`, HEAD `c859965` (= `0bd95a7` + tài liệu này). Commit gần nhất sửa `posgieo.html`: `6d8f947`.
-- Trạng thái: **kế hoạch; chưa tách code, chưa sửa công cụ, chưa deploy**. Kế hoạch này nằm NGOÀI `KE_HOACH_UNIT_ENGINE_DA_CUA_HANG.md` → chủ dự án duyệt riêng; khi bắt đầu ghi một dòng vào `CLAUDE.md` + `docs/TRANG_THAI.md`.
+- Trạng thái: **đang làm — 0A + 0B xong, chờ kiểm tra lượt 01** (mục 0.1). Chưa tách code, chưa sửa công cụ. Kế hoạch này nằm NGOÀI `KE_HOACH_UNIT_ENGINE_DA_CUA_HANG.md` → chủ dự án duyệt riêng; khi bắt đầu ghi một dòng vào `CLAUDE.md` + `docs/TRANG_THAI.md`.
 - **Bản đang chạy ở cửa hàng (chủ dự án 25/10): bản mới nhất của mùa Giáng sinh** = `ban_deploy/giangsinh/` tại `0bd95a7` (commit cuối sửa bộ này). Trong đó `posgieo.html` giống hệt file gốc tại `6d8f947`, nạp `data_access.v9.js`, `unit_engine.v21.js` (chủ dự án xác nhận cửa hàng dùng engine v21), `gau_noel_giangsinh.v2.js` (data-quan="gieo"), `gieo_automation_pos.v3.js`, `unit_engine2_v1.js`, `unit_engine2_store_v1.js`, `gieo_engine2_pos_v1.js`. **Đây là mốc nền** cho mọi so sánh trước/sau; mọi JS trong danh sách này coi là đã phát hành (không sửa nội dung).
 - Mùa đang chạy là Giáng sinh → biến thể posgieo **có Gấu Noel** là biến thể kiểm trước tiên; file giao cho chủ dự án lấy từ `ban_deploy/giangsinh/` (mục 1.4).
 - Trước khi làm: cập nhật HEAD, đọc các commit phát sinh sau `c859965`; nếu có commit sửa `posgieo.html` sau `6d8f947` mà chưa deploy thì mốc nền vẫn là `6d8f947`, ghi rõ phần chênh.
@@ -17,6 +17,17 @@
 | Q4 | Hosting: `"public": "public"`, không có `rewrites` (xem mục 1) | `firebase.json` chủ dự án gửi 25/10 |
 | Q5 | Bootstrap (tạo Firebase, cài chế độ thử, đọc binding, `GieoData.install`) ở lại inline trong HTML suốt Đợt 0–1 | Rà soát 2 |
 | Q6 | Chỉ JS **riêng POS Gieo** vào `js/posgieo/`; thư viện dùng chung và bridge đã phát hành giữ nguyên ở gốc | Rà soát 2–3 |
+
+### 0.1. Cổng kiểm tra độc lập (chủ dự án 25/10 — bắt buộc)
+
+Xong mỗi bước lớn → Claude viết `docs/tach_posgieo/KIEM_TRA_<số lượt>_<tên>.md` (tự đủ: đã làm gì, lệnh chạy lại, kết quả, điểm cần phản biện), commit, báo chủ dự án rồi **DỪNG**. Một agent khác kiểm tra; chủ dự án gửi lại kết quả → Claude xử lý phản hồi (sửa hoặc giải thích) rồi mới làm bước kế.
+
+| Lượt | Gồm |
+| --- | --- |
+| 01 | 0A mốc nền + 0B bản đồ phụ thuộc |
+| 02 | 0C sửa công cụ T1–T13 |
+| 03 | 0D bài thử `pos_ui.v1.js` + 0E hợp đồng lỗi tải |
+| 04, 05… | từng tiểu đợt 1A, 1B, 1C, 1D; mỗi đợt 2–5 tối thiểu một lượt |
 
 ## 1. Hosting thật và cách giao file
 
@@ -165,6 +176,8 @@ Tab khác đổi binding → phát hiện qua `storage` event / khi quay lại f
 
 Lập bảng kiểm kê từng khóa: phạm vi S/C/G/X/thiết bị, chủ sở hữu, thời hạn, dọn, phục hồi.
 
+**Đã có (0B xác nhận):** `POS_LS_STORE_KEY` + `POS_LS_THEO_QUAN` xoá khoá theo quán khi máy đổi quán; `posLsViecDo` chặn đăng xuất khi còn việc dở. Kiểm kê 49 lời gọi storage: không có khoá theo quán nằm ngoài danh sách (`docs/tach_posgieo/KIEM_TRA_01_NEN_VA_BAN_DO.md` mục 6). Giữ nguyên cơ chế; khoá theo quán mới → thêm vào `POS_LS_THEO_QUAN`.
+
 - Khóa riêng quán gồm `mode + storeId + loại + tham số`; theo ngày dùng ngày VN.
 - Cấu hình in theo quán ≠ hiệu chỉnh máy in theo thiết bị.
 - Queue checkout / cân / nhận hàng / mẻ giữ scope gốc; quyền lợi khách giữ billId + chống áp lại.
@@ -192,6 +205,7 @@ Giữ mã bill/CK, txId, receipt, marker chống lặp. `bank_confirmations` ch�
 | Khi một cụm buộc phải có lệnh tự chạy | Lệnh tự chạy ở lại inline, gọi vào hàm của file; hoặc file đặt **sau** script chính (cùng nhóm với bridge) và chỉ chạy khi được gọi | Ghi rõ trong manifest lý do |
 
 Lý do:
+- **Chốt dừng trong script chính** (bản đồ 0B): dòng ~2418 `if (!POS_STORE) { posStoreLoginScreen(); throw … }` và nhánh thiếu data_access `throw`. Máy chưa gắn quán → mọi lệnh sau chốt không chạy, `let/const` khai báo sau chốt ở TDZ vĩnh viễn. `posStoreLoginScreen` chạy TRƯỚC `throw` và dùng `escHtmlPos`, `vnDate`. → File đặt **trước** script chính chỉ khai báo: an toàn. File đặt **sau** script chính vẫn chạy dù script chính đã dừng → không được chứa lệnh tự chạy nghiệp vụ, và không được chứa hàm mà màn nhập mã quán cần.
 - Đặt sau script chính → code khởi động của script chính gọi hàm trong file sẽ lỗi `ReferenceError` (hoisting không vượt qua ranh giới file).
 - File đặt trước mà tự chạy → `const fstore`, `POS_STORE`… của script chính chưa khai báo (TDZ / chưa có).
 - Thẻ đặt trước script chính và sau thẻ engine → `tao_ban_thu.js` vẫn chèn `che_do_thu` trước engine, tức trước mọi module: cách ly bản thử không đổi.
@@ -289,7 +303,7 @@ Bảng dưới đây là hiện trạng đã đọc trong code. Mỗi dòng có 
 | T9 | `tools/js_da_phat_hanh.json` + `tests/js_bat_bien.test.js` (mới) | Bất biến file đã phát hành chỉ là quy ước | Ghi `{đường: sha256}` khi file `js/posgieo` được giao lần đầu; test fail nếu nội dung đổi dưới cùng tên | Sửa 1 byte file đã ghi → fail |
 | T10 | `tools/predeploy_check.js` | Chỉ kiểm tồn tại engine/data_access/che_do_thu; tìm `firebase.json` **trong thư mục deploy** — nhưng thật ra nó nằm ở thư mục **cha** của `public/` → hiện chạy trên `public` sẽ báo thiếu firebase.json | Tìm `firebase.json` ở `<deploy>` hoặc `<deploy>/..`, kiểm `hosting.public` trỏ đúng `<deploy>`; kiểm MỌI src cục bộ (cả `document.write`) tồn tại; có `js/posgieo` → kiểm header `/js/posgieo/**`; có `rewrites` `**` → nhắc nguy cơ HTML thay JS; báo lỗi nếu hai đường chỉ khác hoa/thường hoặc tên trong `js/posgieo` có chữ hoa (bộ nhớ `/sdcard` không phân biệt) | Fixture `public/` + firebase.json ở cha |
 | T11 | `tools/firebase_headers_gieogieo.json` | Không có mục `js/posgieo` | Thêm hai mục ở 1.2 | `predeploy_check` đọc mẫu |
-| T12 | Server e2e (`tools/btp_am/e2e_btp_am.js` dùng `path.basename(u.pathname)`, và các e2e tự dựng server khác) | Đường `js/posgieo/x.js` bị phục vụ nhầm file gốc hoặc 404 | Helper server chung trong `tests/lib/`: phục vụ đúng đường tương đối, chặn thoát thư mục, MIME `text/javascript` | e2e tải `js/posgieo/…` thật |
+| T12 | Server e2e (`tools/btp_am/e2e_btp_am.js` dùng `path.basename(u.pathname)`, và các e2e tự dựng server khác); `tools/kho_fifo/e2e_retry.js`, `tools/nhan_hang/e2e_don_vi.js` ghi cứng `/usr/bin/chromium` (0A: không chạy được ở máy không có đường đó) | Đường `js/posgieo/x.js` bị phục vụ nhầm file gốc hoặc 404 | Helper chung trong `tests/lib/`: server phục vụ đúng đường tương đối, chặn thoát thư mục, MIME `text/javascript`; chọn Chromium như `e2e_btp_am` (`CHROMIUM_PATH` → `/usr/bin/chromium` → `/opt/pw-browsers/chromium`) | e2e tải `js/posgieo/…` thật |
 | T13 | `tests/bo_deploy.test.js`, `gau_noel.test.js` | Kiểm theo tên file phẳng | Kiểm bộ có đủ cây, checksum lõi `js/posgieo` giống nhau ở ba bộ | — |
 
 Không cần sửa: `tools/automation/build_page.js` / `sync.js` (quanlygieo2 và worker không nạp `js/posgieo`); `tao_ban_giangsinh.js`, `tao_ban_tet.js` (không sinh từ posgieo).
@@ -391,8 +405,8 @@ Mỗi lần sửa: `sh tools/sinh_lai_tat_ca.sh` (đã gồm test), `node tools/
 
 | Đợt | Trạng thái | Commit | Bằng chứng |
 | --- | --- | --- | --- |
-| 0A Nền | Chưa làm | — | Kết quả test nền trên `0bd95a7` / biến thể Giáng sinh |
-| 0B Bản đồ phụ thuộc | Chưa làm | — | Bảng global/caller/cache |
+| 0A Nền | Xong — chờ kiểm tra lượt 01 | — | `docs/tach_posgieo/KIEM_TRA_01_NEN_VA_BAN_DO.md` |
+| 0B Bản đồ phụ thuộc | Xong — chờ kiểm tra lượt 01 | — | như trên; công cụ `tools/tach_posgieo/ban_do.js` |
 | 0C Công cụ T1–T13 | Chưa làm | — | Test cài lỗi |
 | 0D Thử `pos_ui.v1.js` | Chưa làm | — | e2e HTTP + file://, ba bộ |
 | 0E Hợp đồng lỗi tải | Chưa làm | — | Test thiếu/lỗi file |

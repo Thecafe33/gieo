@@ -1,3 +1,7 @@
+# 25/10 — Tách posgieo.html: 0A + 0B xong, chờ kiểm tra lượt 01
+
+[Kế hoạch](KE_HOACH_TACH_POSGIEO_DA_CUA_HANG.md) (rà soát 3, chủ dự án duyệt). Mốc nền = bộ Giáng sinh @ `0bd95a7` (engine v21, ĐÃ deploy 25/10). Test nền 142/143 (hỏng có sẵn: `manage_duyet_gieo`, của manage), ranh giới + đường dẫn sạch, e2e posgieo đạt. Bản đồ phụ thuộc bằng `tools/tach_posgieo/ban_do.js` (chỉ đọc): 1.528 tên cấp cao, 59 lệnh tự chạy, chốt dừng chưa gắn quán ~dòng 2418, cụm trợ lý 28008–29256 liền khối (ứng viên 1A), máy in/tem/quét rải rác, pilot 0D = `escHtmlPos`. File kiểm tra cho agent khác: [tach_posgieo/KIEM_TRA_01_NEN_VA_BAN_DO.md](tach_posgieo/KIEM_TRA_01_NEN_VA_BAN_DO.md). Chưa sửa app.
+
 # 23/10 — Engine 2 tự xử lý «Chờ quản lý duyệt» (lệch NL khi nấu mẻ BTP)
 
 [Lộ trình](LO_TRINH_ENGINE2_CAP6.md) mục «Tự xử lý «Chờ quản lý duyệt»»: chỉ từ ngày áp dụng; mọi mức đều tự duyệt, > 25% ghi người chịu trách nhiệm + mốc vào Báo cáo tháng và tạo thông báo để biết. Chưa deploy.
