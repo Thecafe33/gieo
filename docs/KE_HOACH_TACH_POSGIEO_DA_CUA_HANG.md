@@ -170,7 +170,7 @@ Dùng chung file JS ≠ dùng chung dữ liệu. Không suy phạm vi từ tên 
 
 ### 4.3. Nhiều tab / WebView cùng máy
 
-Tab khác đổi binding → phát hiện qua `storage` event / khi quay lại foreground → ngừng nhận giao dịch mới, yêu cầu tải lại có kiểm soát. Dọn cache không xoá queue tab khác đang xử lý. **Bản nền CHƯA có** (không có listener `storage`) → **H1**, việc riêng, cần chủ dự án duyệt (đổi hành vi). Máy bán hàng chạy APK một WebView nên rủi ro thấp; nhiều tab chủ yếu xảy ra khi mở bằng Chrome.
+Tab khác đổi binding → phát hiện qua `storage` event / khi quay lại foreground → ngừng nhận giao dịch mới, yêu cầu tải lại có kiểm soát. Dọn cache không xoá queue tab khác đang xử lý. **Bản nền CHƯA có** (không có listener `storage`) → **H1 — chủ dự án 25/10: «cũng có thể xảy ra» → ĐƯA VÀO PHẠM VI**, làm ở bước 0E thành commit riêng (H), trước khi phát hành bất kỳ bước R nào. Hành vi đề xuất (chốt lại với chủ dự án trước khi code): tab thấy `gieo_store_v1` đổi khác `POS_STORE` (sự kiện `storage` hoặc khi quay lại foreground) → không nhận đơn / thanh toán mới, giữ nguyên việc đang ghi dở, hiện «Máy đã đổi cửa hàng ở cửa sổ khác — Tải lại».
 
 ### 4.4. Cache, localStorage, queue
 
@@ -348,7 +348,7 @@ Không cần sửa: `tools/automation/build_page.js` / `sync.js` (quanlygieo2 v�
 | 0B | Bảng: global/state/caller/handler HTML-native/lệnh tự chạy/thời điểm sẵn sàng cho các cụm của Đợt 1; bảng khóa cache/queue (4.4) | Mọi cụm sắp chuyển có chủ sở hữu, không vòng phụ thuộc chưa xử lý |
 | 0C | T1–T13 (mục 7), mỗi mục một commit nhỏ, kèm test cài lỗi | Toàn bộ test xanh; cài lỗi trong file `js/posgieo` giả làm đúng checker fail; bộ deploy / bản thử / bản đo giữ cây `js/posgieo` |
 | 0D | Thử đường đi: chuyển **một cụm hàm thuần nhỏ** chỉ POS dùng, đã có test, không Firebase/native/hook (ứng viên chọn ở 0B, ví dụ `escHtmlPos` + helper định dạng — `escHtmlPos` có 8 file test trích) vào `js/posgieo/pos_ui.v1.js`, thẻ theo 5.1 + dấu/nạp lại theo 5.3 | Test trích được hàm từ file; HTML + JS chạy thật qua HTTP (e2e) và `file://`; bản thử có `?b=`; ba bộ có file; hành vi giống nền |
-| 0E | Chốt hợp đồng khởi động/lỗi tải (5.3) bằng test: thiếu file, file lỗi giữa chừng, bấm sớm, mạng chậm; các H cách ly bắt buộc phát hiện ở 0B làm commit riêng | Đạt hết trước khi mở rộng |
+| 0E | Chốt hợp đồng khởi động/lỗi tải (5.3) bằng test: thiếu file, file lỗi giữa chừng, bấm sớm, mạng chậm; các H cách ly bắt buộc làm commit riêng — gồm **H1** (tab khác đổi cửa hàng, 4.3) | Đạt hết trước khi mở rộng |
 
 0D thất bại → sửa công cụ/ranh giới, không tách cụm lớn.
 
