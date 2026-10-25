@@ -1,3 +1,7 @@
+# 25/10 — Tách posgieo.html: 0D + 0E xong (lượt 03), chờ kiểm tra — CHƯA deploy
+
+Mã app đầu tiên ra file riêng: `escHtmlPos` → `js/posgieo/pos_ui.v1.js` (commit R `e102ba4`). 0E (commit H `bbe5a97`): module thiết yếu thiếu / chạy dở → màn đỏ + Tải lại; H1 tab khác đổi cửa hàng → phủ màn chặn. e2e Chromium 15 ca (`tools/tach_posgieo/e2e_0d.js`), toàn bộ test đạt. File kiểm tra: [tach_posgieo/KIEM_TRA_03_THU_DUONG_DI.md](tach_posgieo/KIEM_TRA_03_THU_DUONG_DI.md). Lượt 02 chưa có kết quả kiểm tra.
+
 # 25/10 — Tách posgieo.html: 0C (công cụ T1–T13) xong, chờ kiểm tra lượt 02
 
 Lượt 01 đã kiểm độc lập + xử lý ([phản hồi](tach_posgieo/PHAN_HOI_KIEM_TRA_01.md)). 0C: bộ đọc nguồn chung, đóng gói/bản thử/bản đo giữ cây `js/posgieo/`, rào ranh giới/đường dẫn thấy mã trong `js/`, `predeploy_check` chạy đúng cấu trúc Hosting thật (bản cũ báo thiếu firebase.json), giao file thay đổi + sổ JS đã phát hành. Toàn bộ test đạt (kể cả `manage_duyet_gieo` hỏng từ trước). App không đổi. File kiểm tra: [tach_posgieo/KIEM_TRA_02_CONG_CU.md](tach_posgieo/KIEM_TRA_02_CONG_CU.md).

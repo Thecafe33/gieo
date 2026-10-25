@@ -2,7 +2,7 @@
 
 - Lập: 25/10/2026 (giờ Việt Nam). **Bản rà soát 3** (25/10) — đối chiếu từng khẳng định với code thật và `firebase.json` thật của Hosting do chủ dự án gửi.
 - Nguồn đã rà: `Thecafe33/gieo`, nhánh `Phan-tach-unit-engine`, HEAD `c859965` (= `0bd95a7` + tài liệu này). Commit gần nhất sửa `posgieo.html`: `6d8f947`.
-- Trạng thái: **đang làm — lượt 01 đã kiểm + xử lý; 0C (công cụ T1–T13) xong, chờ kiểm tra lượt 02.** Chưa tách code (chưa có file `js/posgieo/`). Kế hoạch này nằm NGOÀI `KE_HOACH_UNIT_ENGINE_DA_CUA_HANG.md` → chủ dự án duyệt riêng; khi bắt đầu ghi một dòng vào `CLAUDE.md` + `docs/TRANG_THAI.md`.
+- Trạng thái: **Đợt 0 xong phần code: 0C chờ kiểm tra lượt 02; 0D (escHtmlPos → `js/posgieo/pos_ui.v1.js`) + 0E (chốt module, H1) chờ kiểm tra lượt 03. Chưa deploy.** Kế hoạch này nằm NGOÀI `KE_HOACH_UNIT_ENGINE_DA_CUA_HANG.md` → chủ dự án duyệt riêng; khi bắt đầu ghi một dòng vào `CLAUDE.md` + `docs/TRANG_THAI.md`.
 - **Bản đang chạy ở cửa hàng (chủ dự án 25/10): bản mới nhất của mùa Giáng sinh** = `ban_deploy/giangsinh/` tại `0bd95a7` (commit cuối sửa bộ này). Trong đó `posgieo.html` giống hệt file gốc tại `6d8f947`, nạp `data_access.v9.js`, `unit_engine.v21.js` (chủ dự án xác nhận cửa hàng dùng engine v21), `gau_noel_giangsinh.v2.js` (data-quan="gieo"), `gieo_automation_pos.v3.js`, `unit_engine2_v1.js`, `unit_engine2_store_v1.js`, `gieo_engine2_pos_v1.js`. **Đây là mốc nền** cho mọi so sánh trước/sau; mọi JS trong danh sách này coi là đã phát hành (không sửa nội dung).
 - Mùa đang chạy là Giáng sinh → biến thể posgieo **có Gấu Noel** là biến thể kiểm trước tiên; file giao cho chủ dự án lấy từ `ban_deploy/giangsinh/` (mục 1.4).
 - Trước khi làm: cập nhật HEAD, đọc các commit phát sinh sau `c859965`; nếu có commit sửa `posgieo.html` sau `6d8f947` mà chưa deploy thì mốc nền vẫn là `6d8f947`, ghi rõ phần chênh.
@@ -249,7 +249,7 @@ PosGieoMods.ui = true;                                          // CÂU LỆNH C
 | `true` | Chạy hết file | Bình thường |
 | vẫn `undefined` sau khi nạp lại | Nạp lại cũng hỏng | Như `'dang'` |
 
-- Script chính kiểm `PosGieoMods.<tên> === true` của mọi module thiết yếu trước khi mở bán (đặt ngay sau chốt dừng hiện có, không trước — để màn nhập mã quán vẫn chạy).
+- Script chính kiểm `PosGieoMods.<tên> === true` của mọi module thiết yếu (`POS_MODS_THIET_YEU`) **ngay TRƯỚC chốt «chưa gắn quán»** (sửa 0E: màn nhập mã quán cũng dùng `escHtmlPos` → thiếu module thì dừng sạch bằng màn đỏ + Tải lại, không để màn nhập mã hỏng giữa chừng).
 - Ở bước R, file chỉ có khai báo nên lỗi "chạy dở" chỉ có thể đến từ giá trị đầu của `const`; nhưng vẫn phải xử lý đủ ba nhánh. Bước 0E có test cho cả ba (thiếu file, file cụt/HTML, file ném lỗi giữa chừng).
 - Không dùng `onload`/`onerror` của thẻ làm bằng chứng đã chạy xong.
 - Lỗi đọc dữ liệu / auth giữ nguyên fallback bản nền. Module mùa lỗi → chỉ tính năng đó tắt, không tự cấp quyền lợi.
@@ -430,8 +430,8 @@ Mỗi lần sửa: `sh tools/sinh_lai_tat_ca.sh` (đã gồm test), `node tools/
 | 0A Nền | Xong — đã kiểm lượt 01, đã xử lý phản hồi | — | `docs/tach_posgieo/KIEM_TRA_01_NEN_VA_BAN_DO.md` |
 | 0B Bản đồ phụ thuộc | Xong — đã kiểm lượt 01, công cụ sửa theo phản hồi (`scope.js`, test `tach_posgieo_ban_do`) | — | như trên; công cụ `tools/tach_posgieo/ban_do.js` |
 | 0C Công cụ T1–T13 | Xong — chờ kiểm tra lượt 02 | — | `docs/tach_posgieo/KIEM_TRA_02_CONG_CU.md`; `tests/tach_posgieo_cong_cu.test.js` (27 ca cài lỗi) |
-| 0D Thử `pos_ui.v1.js` | Chưa làm | — | e2e HTTP + file://, ba bộ |
-| 0E Hợp đồng lỗi tải | Chưa làm | — | Test thiếu/lỗi file |
+| 0D Thử `pos_ui.v1.js` | Xong (`e102ba4`, R) — chờ kiểm tra lượt 03 | `e102ba4` | `docs/tach_posgieo/KIEM_TRA_03_THU_DUONG_DI.md`; e2e `tools/tach_posgieo/e2e_0d.js` |
+| 0E Hợp đồng lỗi tải + H1 | Xong (`bbe5a97`, H) — chờ kiểm tra lượt 03 | `bbe5a97` | như trên (ca 4b, 7, 8) |
 | 1 Thiết bị/trợ lý/mùa | Chưa làm | — | APK, listener, checksum |
 | 2 Kho | Chưa làm | — | Snapshot/log, cách ly S/C |
 | 3 Ca/quỹ | Chưa làm | — | Tiền, ngày VN |
