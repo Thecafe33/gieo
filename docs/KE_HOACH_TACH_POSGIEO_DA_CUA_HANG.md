@@ -20,14 +20,18 @@
 
 ### 1.1. `firebase.json` hiện hành (chủ dự án gửi 25/10)
 
+Máy chủ dự án có **hai nơi tách biệt** (chủ dự án giải thích 25/10):
+
 ```text
-thu-muc-chay-firebase/          ← firebase.json nằm đây (KHÔNG nằm trong public/)
-  firebase.json
-  functions/
-  public/                       ← Firebase upload nội dung thư mục này
+~/  (thư mục home của Termux)            ← Cloud Functions: dự án firebase riêng,
+  <thư mục functions>/                       codebase gieo-automation… — kế hoạch này KHÔNG đụng
+
+/sdcard/<thư mục deploy hosting>/        ← nơi chạy `firebase deploy --only hosting`
+  firebase.json                          ← file chủ dự án gửi (KHÔNG nằm trong public/)
+  public/                                ← Firebase upload nội dung thư mục này
     posgieo.html
-    unit_engine.v21.js ...      (các JS hiện có, phẳng ở gốc)
-    js/posgieo/...              (MỚI — sau khi tách)
+    unit_engine.v21.js ...               (các JS hiện có, phẳng ở gốc)
+    js/posgieo/...                       (MỚI — sau khi tách)
 ```
 
 Đọc từ file thật:
@@ -40,7 +44,12 @@ thu-muc-chay-firebase/          ← firebase.json nằm đây (KHÔNG nằm tron
 | headers immutable | chỉ `/unit_engine.v*.js` | `data_access`, `lai_lo`, engine 2, `che_do_thu` đang theo mặc định của Firebase (mẫu `tools/firebase_headers_gieogieo.json` chưa được chép hết — **ngoài phạm vi, chỉ ghi nhận**) |
 | headers no-cache | `/@(posgieo\|quanlygieo).html` | `posgieo_thu.html` chưa có no-cache → máy thử có thể thấy bản mới trễ |
 | `/sw_gieogieo.js` | no-cache | File không tồn tại (đã loại PWA) — vô hại, không đụng |
-| `functions` | chỉ codebase `default` | CLAUDE.md ghi codebase `gieo-automation` đã deploy 23/10 — có thể file gửi là bản cũ/khác máy. **Ngoài phạm vi; hỏi lại chủ dự án**, không suy luận |
+| `functions` | khai báo codebase `default`, `source: functions` | Không dùng: Functions thật (gồm `gieo-automation`) nằm ở thư mục home Termux, deploy riêng. Lệnh `--only hosting` không đụng phần này. Kế hoạch không sửa mục này |
+
+Hệ quả vì thư mục deploy nằm trên bộ nhớ trong (`/sdcard`, tức `/storage/emulated/0`):
+
+- Termux cần quyền bộ nhớ (`termux-setup-storage`) để chép file và chạy `predeploy_check` trỏ vào đó: `sh tools/predeploy_check.sh /sdcard/<thư mục deploy hosting>/public` (chạy từ thư mục làm việc có `tools/`, `tests/`).
+- Bộ nhớ này **không phân biệt hoa/thường** và không có symlink → mọi tên trong `js/posgieo/` viết thường; không có hai đường chỉ khác hoa/thường (T10 kiểm); không dùng symlink trong bộ deploy.
 
 ### 1.2. Header cần thêm (chủ dự án tự sửa `firebase.json`, Claude không deploy)
 
@@ -276,7 +285,7 @@ Bảng dưới đây là hiện trạng đã đọc trong code. Mỗi dòng có 
 | T7 | `check_boundaries.js`, `check_paths.js`, `ast_inventory.js`, `free_idents.js`, `kiem_tra_xuyen_app.js` | Chỉ quét `<script>` TRẦN trong HTML → **code chuyển ra ngoài thoát rào ranh giới engine và rào đường dẫn** | Dùng bộ đọc nguồn T6; nhãn POS/QL theo HTML nạp file (không theo tên file); `boundary_allow.json`/`paths_allow.json` giữ khóa `POS:tenHam` | Cài một lệnh ghi `stock_transactions_gieogieo` và một đường chưa đăng ký vào file `js/posgieo` giả → hai checker fail |
 | T8 | `tools/file_thay_doi.js` (mới) | Chưa có | `node tools/file_thay_doi.js <commit mốc> <mùa>` → danh sách file đổi trong `ban_deploy/<mùa>/` + đường đích `public/…` (mục 1.4) | Test với hai commit giả |
 | T9 | `tools/js_da_phat_hanh.json` + `tests/js_bat_bien.test.js` (mới) | Bất biến file đã phát hành chỉ là quy ước | Ghi `{đường: sha256}` khi file `js/posgieo` được giao lần đầu; test fail nếu nội dung đổi dưới cùng tên | Sửa 1 byte file đã ghi → fail |
-| T10 | `tools/predeploy_check.js` | Chỉ kiểm tồn tại engine/data_access/che_do_thu; tìm `firebase.json` **trong thư mục deploy** — nhưng thật ra nó nằm ở thư mục **cha** của `public/` → hiện chạy trên `public` sẽ báo thiếu firebase.json | Tìm `firebase.json` ở `<deploy>` hoặc `<deploy>/..`, kiểm `hosting.public` trỏ đúng `<deploy>`; kiểm MỌI src cục bộ (cả `document.write`) tồn tại; có `js/posgieo` → kiểm header `/js/posgieo/**`; có `rewrites` `**` → nhắc nguy cơ HTML thay JS | Fixture `public/` + firebase.json ở cha |
+| T10 | `tools/predeploy_check.js` | Chỉ kiểm tồn tại engine/data_access/che_do_thu; tìm `firebase.json` **trong thư mục deploy** — nhưng thật ra nó nằm ở thư mục **cha** của `public/` → hiện chạy trên `public` sẽ báo thiếu firebase.json | Tìm `firebase.json` ở `<deploy>` hoặc `<deploy>/..`, kiểm `hosting.public` trỏ đúng `<deploy>`; kiểm MỌI src cục bộ (cả `document.write`) tồn tại; có `js/posgieo` → kiểm header `/js/posgieo/**`; có `rewrites` `**` → nhắc nguy cơ HTML thay JS; báo lỗi nếu hai đường chỉ khác hoa/thường hoặc tên trong `js/posgieo` có chữ hoa (bộ nhớ `/sdcard` không phân biệt) | Fixture `public/` + firebase.json ở cha |
 | T11 | `tools/firebase_headers_gieogieo.json` | Không có mục `js/posgieo` | Thêm hai mục ở 1.2 | `predeploy_check` đọc mẫu |
 | T12 | Server e2e (`tools/btp_am/e2e_btp_am.js` dùng `path.basename(u.pathname)`, và các e2e tự dựng server khác) | Đường `js/posgieo/x.js` bị phục vụ nhầm file gốc hoặc 404 | Helper server chung trong `tests/lib/`: phục vụ đúng đường tương đối, chặn thoát thư mục, MIME `text/javascript` | e2e tải `js/posgieo/…` thật |
 | T13 | `tests/bo_deploy.test.js`, `gau_noel.test.js` | Kiểm theo tên file phẳng | Kiểm bộ có đủ cây, checksum lõi `js/posgieo` giống nhau ở ba bộ | — |
@@ -303,7 +312,7 @@ Không cần sửa: `tools/automation/build_page.js` / `sync.js` (quanlygieo2 v�
 
 | Bước | Sản phẩm | Điều kiện đi tiếp |
 | --- | --- | --- |
-| 0A | Đúng nhánh/SHA; chạy `sh tests/run_all.sh` + `check_boundaries` + `check_paths`, lưu kết quả nền và lỗi đã có. Hỏi chủ dự án: URL APK chính xác (1.3), bản đang chạy ở quán, codebase functions (1.1) | Biết rõ nền; có câu trả lời |
+| 0A | Đúng nhánh/SHA; chạy `sh tests/run_all.sh` + `check_boundaries` + `check_paths`, lưu kết quả nền và lỗi đã có. Hỏi chủ dự án: URL APK chính xác (1.3), bản đang chạy ở quán | Biết rõ nền; có câu trả lời |
 | 0B | Bảng: global/state/caller/handler HTML-native/lệnh tự chạy/thời điểm sẵn sàng cho các cụm của Đợt 1; bảng khóa cache/queue (4.4) | Mọi cụm sắp chuyển có chủ sở hữu, không vòng phụ thuộc chưa xử lý |
 | 0C | T1–T13 (mục 7), mỗi mục một commit nhỏ, kèm test cài lỗi | Toàn bộ test xanh; cài lỗi trong file `js/posgieo` giả làm đúng checker fail; bộ deploy / bản thử / bản đo giữ cây `js/posgieo` |
 | 0D | Thử đường đi: chuyển **một cụm hàm thuần nhỏ** chỉ POS dùng, đã có test, không Firebase/native/hook (ứng viên chọn ở 0B, ví dụ `escHtmlPos` + helper định dạng — `escHtmlPos` có 8 file test trích) vào `js/posgieo/pos_ui.v1.js`, thẻ theo 5.1 + dấu/nạp lại theo 5.3 | Test trích được hàm từ file; HTML + JS chạy thật qua HTTP (e2e) và `file://`; bản thử có `?b=`; ba bộ có file; hành vi giống nền |
@@ -366,7 +375,7 @@ Ma trận nền: **2 biến thể posgieo × thật/thử × GG01 / GG02 / GG03 
 
 Thiếu thiết bị/số đo → ghi "chưa nghiệm thu phần này".
 
-Mỗi lần sửa: `sh tools/sinh_lai_tat_ca.sh` (đã gồm test), `node tools/check_boundaries.js`, `node tools/check_paths.js`, `node --check` từng file `js/posgieo`. Chủ dự án trước deploy: `sh tools/predeploy_check.sh <đường>/public`.
+Mỗi lần sửa: `sh tools/sinh_lai_tat_ca.sh` (đã gồm test), `node tools/check_boundaries.js`, `node tools/check_paths.js`, `node --check` từng file `js/posgieo`. Chủ dự án trước deploy: `sh tools/predeploy_check.sh /sdcard/<thư mục deploy hosting>/public`.
 
 ## 11. Phát hành và quay lui
 
@@ -423,5 +432,6 @@ Mỗi lần sửa: `sh tools/sinh_lai_tat_ca.sh` (đã gồm test), `node tools/
 | Checker chỉ quét `<script>` inline → mã chuyển ra ngoài thoát rào ranh giới | T6, T7 |
 | e2e phục vụ file theo basename | T12 |
 | posgieo Tết = thường | Mục 8, ma trận 10 giảm còn 2 biến thể |
+| Functions ở home Termux, Hosting ở `/sdcard` (chủ dự án 25/10) | Mục 1.1: không đụng functions; quyền bộ nhớ Termux; tên viết thường, không symlink (T10) |
 
 **Khuyến nghị bắt đầu:** 0A → 0E, rồi Đợt 1. Không đặt mục tiêu tách hết.
