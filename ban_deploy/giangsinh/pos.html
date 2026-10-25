@@ -2970,7 +2970,6 @@ let currentTab = "Tất cả";
 let isPaymentMode = false;
 let myChart = null;
 let selectedRefundItems = [];
-let paymentListener = null;
 let currentOrderCode = "";
 
 var currentBedList = [];
@@ -3889,8 +3888,6 @@ function setMethod(m) {
     calcChange();;
 
     if (isBank) {
-        showPaymentQR();
-
         box.style.pointerEvents = "none";
         box.style.opacity = "0.4";
         box.style.filter = "grayscale(100%)";
@@ -3900,8 +3897,12 @@ function setMethod(m) {
         box.style.filter = "none";
 
         document.getElementById('qr-modal')?.classList.add('hidden');
+        if (typeof stopBankListener === 'function') stopBankListener();   // [CK TC33 25/10] bỏ CK → thôi nghe mã QR cũ
     }
     calcChange();
+    // [CK TC33 25/10] Hiện QR SAU calcChange: calcChange ghi màn hình khách 'cash_payment' — gọi trước thì
+    // đè mất QR (PayOS cũ không bị vì QR về chậm qua mạng; VietQR dựng ngay).
+    if (isBank) showPaymentQR();
 }
 function updateSuggestions() {
     const denominations = [10000, 20000, 50000, 100000, 200000, 500000];
@@ -4092,7 +4093,7 @@ function showHistoryDetailMobile(idx) {
 
     document.getElementById('detail-mob-time').innerText = h.timeStr + " - " + h.dateStr.slice(0,5);
     document.getElementById('detail-mob-cust').innerText = h.sdt || 'Vãng lai';
-    document.getElementById('detail-mob-method').innerText = h.method;
+    document.getElementById('detail-mob-method').innerText = h.method + _ckBillNote(h);
     document.getElementById('detail-mob-total').innerText = Number(h.total).toLocaleString();
     var paidRow = document.getElementById('detail-mob-paid-row');
     var paidEl = document.getElementById('detail-mob-paid');
@@ -4339,7 +4340,7 @@ function selectBill(idx) {
             <div class="space-y-2 text-left">
                 <div class="p-2 bg-gray-50 rounded-xl text-left"><p class="text-[8px] text-gray-400 font-bold uppercase mb-0.5 text-left">Thời gian</p><p class="font-black text-[#006241] text-[10px] leading-tight text-left">${h.fullTime}</p></div>
                 <div class="p-2 bg-gray-50 rounded-xl text-left"><p class="text-[8px] text-gray-400 font-bold uppercase mb-0.5 text-left">Khách hàng</p><p class="font-black text-[#006241] text-[10px] leading-tight text-left">${h.sdt}</p></div>
-                <div class="p-2 bg-gray-50 rounded-xl border-l-4 ${h.total < 0 ? 'border-red-500 text-left' : 'border-[#006241] text-left'} text-left"><p class="text-[8px] text-gray-400 font-bold uppercase mb-0.5 text-left">Thanh toán</p><p class="font-black ${h.total < 0 ? 'text-red-500 text-left' : 'text-[#006241] text-left'} text-[10px] uppercase text-left">${h.method}</p></div>
+                <div class="p-2 bg-gray-50 rounded-xl border-l-4 ${h.total < 0 ? 'border-red-500 text-left' : 'border-[#006241] text-left'} text-left"><p class="text-[8px] text-gray-400 font-bold uppercase mb-0.5 text-left">Thanh toán</p><p class="font-black ${h.total < 0 ? 'text-red-500 text-left' : 'text-[#006241] text-left'} text-[10px] uppercase text-left">${h.method}${escapeHtmlCk(_ckBillNote(h))}</p></div>
             </div>
 
             ${isAlreadyRefund ?
@@ -7734,52 +7735,65 @@ function deletePenalty(phone, bookingId) {
         });
     });
 }
-function listenForPayment(code, amount) {
-    if (paymentListener) {
-        db.ref('payment_events').off();
-    }
+// ============================================================
+// [CK TC33 25/10] CHUYỂN KHOẢN = luồng của posgieo (VietQR Cake + bank_confirmations)
+// ============================================================
+// Bỏ hẳn PayOS (createPayment + payment_events): PayOS ngừng cấp hạn mức cho
+// doanh nghiệp nhỏ (chủ dự án 25/10). Dùng CHUNG tài khoản Cake của Gieo.
+// Webhook Cloud Run `processCakePayment` đọc mail báo có tiền của tài khoản này,
+// lấy mã bằng /TTHD ([A-Z]{2}\d+)/ rồi ghi RT bank_confirmations/{mã} — mã
+// TC33 + ddMMHHmmss khớp mẫu đó, không phải sửa webhook, không trùng GG… (Gieo)
+// hay DH… (XOFA). POS chỉ ĐỌC đúng 1 nút + xoá sau khi dùng (như posgieo).
+const CAKE_ACCOUNT_NO = '0977570035';
+const CAKE_ACCOUNT_NAME = 'NGUYEN HUYNH LONG';
 
-    paymentListener = db.ref('payment_events')
-        .limitToLast(5)
-        .on('value', (snap) => {
-            const events = snap.val();
-            if (!events) return;
-
-            Object.values(events).forEach(data => {
-
-                const eventAmount = Number(data.amount || 0);
-                const targetAmount = Number(amount || 0);
-
-                const dataCode = String(data.orderCode || "").trim();
-                const targetCode = String(code || "").trim();
-
-                const isCodeMatch = (dataCode === targetCode) ||
-                                    (data.description && data.description.includes(targetCode)) ||
-                                    (data.content && data.content.includes(targetCode));
-
-                const isAmountMatch = eventAmount >= targetAmount;
-
-                if (isCodeMatch && isAmountMatch) {
-                    handlePaymentSuccess(data.amount);
-                }
-            });
-        });
+function genBankOrderId() {
+    const now = vnDate();
+    const p = n => String(n).padStart(2, '0');
+    return 'TC33' + p(now.getDate()) + p(now.getMonth() + 1) + p(now.getHours()) + p(now.getMinutes()) + p(now.getSeconds());
 }
-function handlePaymentSuccess(receivedAmount) {
 
-    const statusEl = document.getElementById('qr-status');
-    if(statusEl) {
-        statusEl.innerHTML = `<div class="text-green-600 font-black animate-bounce">✅ ĐÃ NHẬN TIỀN!</div>`;
+let _bankListener = null;
+let _bankListenerOrderId = null;
+// Ai/cách nào xác nhận CK — saveOrderToFirebase đọc 1 lần rồi xoá (như _bankConfirmMeta của posgieo).
+let _bankConfirmMeta = null;
+
+function startBankListener(orderId) {
+    stopBankListener();
+    _bankListenerOrderId = orderId;
+    const ref = db.ref('bank_confirmations/' + orderId);
+    _bankListener = ref.on('value', snap => {
+        if (!snap.exists()) return;
+        const data = snap.val() || {};
+        stopBankListener();
+        handlePaymentSuccess(orderId, { bankConfirmMethod: 'auto' }, data.amount);
+        // Bắt tay dùng một lần: webhook ghi, POS đọc xong thì xoá (như posgieo [FIX-rtdb-phinh]).
+        db.ref('bank_confirmations/' + orderId).remove()
+            .catch(e => console.warn('[bank] không xoá được xác nhận ' + orderId, e));
+    });
+}
+
+function stopBankListener() {
+    if (_bankListenerOrderId && _bankListener) {
+        db.ref('bank_confirmations/' + _bankListenerOrderId).off('value', _bankListener);
     }
+    _bankListener = null;
+    _bankListenerOrderId = null;
+}
+
+function handlePaymentSuccess(orderId, meta, receivedAmount) {
+    const statusEl = document.getElementById('qr-status');
+    if (statusEl) {
+        const amt = receivedAmount ? Number(receivedAmount).toLocaleString('vi-VN') + 'đ' : '';
+        statusEl.innerHTML = `<div class="text-green-600 font-black animate-bounce">✅ ĐÃ NHẬN ${amt || 'TIỀN'}!</div>`;
+    }
+    _vietqrResetManualBox(true);
 
     try {
         if (typeof syncToCustomerDisplay === 'function') syncToCustomerDisplay('success');
     } catch (e) {  }
 
-    try {
-        db.ref('payment_events').off();
-        paymentListener = null;
-    } catch (e) {  }
+    _bankConfirmMeta = Object.assign({ bankOrderId: orderId }, meta || { bankConfirmMethod: 'auto' });
 
     setTimeout(() => {
         document.getElementById('qr-modal')?.classList.add('hidden');
@@ -7791,6 +7805,7 @@ function handlePaymentSuccess(receivedAmount) {
         }
     }, 1500);
 }
+
 function showPaymentQR() {
     if (!currentTotal || currentTotal < 2000) {
         alert("Vui lòng chọn món (Tối thiểu 2.000đ) để tạo mã QR!");
@@ -7798,54 +7813,115 @@ function showPaymentQR() {
         return;
     }
 
-    const API_URL = "https://us-central1-the-cafe-33.cloudfunctions.net/createPayment";
-
     const modal = document.getElementById('qr-modal');
     modal.classList.remove('hidden');
 
     const qrImg = document.getElementById('vietqr-img');
     const qrText = document.getElementById('qr-content');
     const statusEl = document.getElementById('qr-status');
+    const amountEl = document.getElementById('qr-amount');
 
-    qrImg.src = "https://i.gifer.com/ZZ5H.gif";
-    qrText.innerText = "Đang tạo QR...";
-    statusEl.innerText = "Vui lòng đợi giây lát...";
+    const total = parseInt(currentTotal);
+    currentOrderCode = genBankOrderId();
+    _bankConfirmMeta = null;
+    const addInfo = 'TTHD ' + currentOrderCode;
+    const qrUrl = `https://img.vietqr.io/image/cake-${CAKE_ACCOUNT_NO}-compact2.png`
+        + `?amount=${total}`
+        + `&addInfo=${encodeURIComponent(addInfo)}`
+        + `&accountName=${encodeURIComponent(CAKE_ACCOUNT_NAME)}`;
 
-    fetch(API_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            amount: parseInt(currentTotal)
-        })
-    })
-    .then(response => response.json())
-    .then(result => {
+    qrImg.src = qrUrl;
+    qrText.innerText = addInfo;
+    if (amountEl) amountEl.innerText = total.toLocaleString('vi-VN') + 'đ';
+    statusEl.innerHTML = '<b class="text-amber-500 animate-pulse">Đang chờ thanh toán...</b>';
+    _vietqrResetManualBox();
 
-        if (result.status === "success") {
-           var qrUrl = "https://api.qrserver.com/v1/create-qr-code/?size=400x400&margin=10&data=" + encodeURIComponent(result.qrCode);
-           qrImg.src = qrUrl;
-            if (typeof syncToCustomerDisplay === 'function') {
-                syncToCustomerDisplay('qr_payment', {
-                    qrUrl: qrUrl,
-                    amount: currentTotal
-                });
-            }
-            currentOrderCode = result.orderCodeFull;
-            qrText.innerText = currentOrderCode;
-            statusEl.innerHTML = '<b class="text-amber-500 animate-pulse">Đang chờ thanh toán...</b>';
+    if (typeof syncToCustomerDisplay === 'function') {
+        syncToCustomerDisplay('qr_payment', {
+            qrUrl: qrUrl,
+            amount: total,
+            bankAmount: total,
+            bankAddInfo: addInfo
+        });
+    }
 
-            listenForPayment(currentOrderCode, currentTotal);
-        } else {
-            alert("Lỗi từ PayOS: " + result.message);
-            modal.classList.add('hidden');
-            setMethod('Tiền mặt');
-        }
-    })
-    .catch(error => {
-        alert("Lỗi kết nối Server! Vui lòng thử lại.");
-        modal.classList.add('hidden');
-        setMethod('Tiền mặt');
-    });
+    startBankListener(currentOrderCode);
+}
+
+// ── Xác nhận tay (hệ thống chưa tự nhận): PIN nhân viên đang trong ca ở TC33 ──
+// Như posgieo (resolveStaffPinAndCheckin): đúng PIN + được phân công làm ở TC33 +
+// đang có ca mở. Tra bằng cùng hàm của Ca làm việc (ChamCong._pure) — chỉ đọc khi bấm xác nhận.
+let _vqrWrong = 0, _vqrLockUntil = 0;
+function openManualBankConfirm() {
+    document.getElementById('qr-manual-btn')?.classList.add('hidden');
+    document.getElementById('qr-manual-box')?.classList.remove('hidden');
+    const pin = document.getElementById('qr-manual-pin');
+    if (pin) { pin.value = ''; pin.focus(); }
+    const msg = document.getElementById('qr-manual-msg');
+    if (msg) msg.innerText = '';
+}
+function cancelManualBankConfirm() { _vietqrResetManualBox(); }
+function _vietqrResetManualBox(hideAll) {
+    const btn = document.getElementById('qr-manual-btn');
+    const box = document.getElementById('qr-manual-box');
+    if (btn) btn.classList.toggle('hidden', !!hideAll);
+    if (box) box.classList.add('hidden');
+    const pin = document.getElementById('qr-manual-pin');
+    if (pin) pin.value = '';
+    const msg = document.getElementById('qr-manual-msg');
+    if (msg) msg.innerText = '';
+    const ok = document.getElementById('qr-manual-ok');
+    if (ok) ok.disabled = false;
+}
+async function _resolveTc33StaffPin(pin) {
+    const CC = window.ChamCong && window.ChamCong._pure;
+    if (!CC || !CC.findByPin) return { error: 'Không tải được mô-đun Ca làm việc — tải lại trang rồi thử lại' };
+    if (!/^\d{4}$/.test(pin || '')) return { error: 'Nhập đủ mã PIN 4 số' };
+    const empSnap = await fstore.collection('employees_gieogieo').where('active', '==', true).get();
+    const employees = empSnap.docs.map(d => Object.assign({ id: d.id }, d.data()));
+    const r = CC.findByPin(employees, pin, 'tc33');
+    if (r.error === 'notassigned') return { error: r.emp.fullName + ' chưa được phân công làm ở The Cafe 33 — báo Quản lý' };
+    if (r.error) return { error: 'Mã PIN không tồn tại hoặc nhân viên đã ngừng hoạt động', wrong: true };
+    const y = vnDate(Date.now() - 86400000);
+    const shiftSnap = await fstore.collection(CC.STORES.tc33.shifts).where('businessDate', '>=', CC.dateKey(y)).get();
+    const shifts = shiftSnap.docs.map(d => Object.assign({ id: d.id }, d.data()));
+    if (!CC.openShiftOf(shifts, r.emp.id)) return { error: r.emp.fullName + ' chưa check-in — vào Ca làm việc để check-in trước' };
+    return { emp: r.emp };
+}
+async function submitManualBankConfirm() {
+    const msg = document.getElementById('qr-manual-msg');
+    const ok = document.getElementById('qr-manual-ok');
+    const say = t => { if (msg) msg.innerText = t; };
+    const remain = _vqrLockUntil - Date.now();
+    if (remain > 0) { say('🔒 Tạm khoá do nhập sai nhiều lần — thử lại sau ' + Math.ceil(remain / 1000) + 's'); return; }
+    const orderId = _bankListenerOrderId;
+    if (!orderId) { say('Mã QR đã hết hiệu lực — đóng và tạo lại'); return; }
+    const pin = (document.getElementById('qr-manual-pin')?.value || '').trim();
+    if (ok) ok.disabled = true;
+    say('Đang kiểm tra...');
+    let r;
+    try { r = await _resolveTc33StaffPin(pin); }
+    catch (e) { console.warn('[CK] kiểm PIN lỗi', e); r = { error: 'Lỗi kết nối — thử lại' }; }
+    if (ok) ok.disabled = false;
+    if (r.error) {
+        if (r.wrong && ++_vqrWrong >= 3) { _vqrWrong = 0; _vqrLockUntil = Date.now() + 60000; say('🔒 Nhập sai mã PIN 3 lần — tạm khoá 60 giây'); }
+        else say('❌ ' + r.error);
+        return;
+    }
+    _vqrWrong = 0;
+    // Hệ thống có thể vừa tự nhận trong lúc đang kiểm PIN → listener đã xử lý, không ghi đơn lần 2.
+    if (_bankListenerOrderId !== orderId) return;
+    stopBankListener();
+    handlePaymentSuccess(orderId, { bankConfirmMethod: 'manual_staff', bankConfirmedBy: r.emp.fullName || '', bankConfirmedById: r.emp.id || '' });
+}
+
+function escapeHtmlCk(t) { return String(t == null ? '' : t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+// Ghi chú CK trong chi tiết bill: mã CK + "NV tự xác nhận" (chỉ khi có người bấm tay — như _bankConfirmBadgeHTML posgieo).
+function _ckBillNote(h) {
+    if (!h) return '';
+    let s = h.bankOrderId ? ' · ' + h.bankOrderId : '';
+    if (h.bankConfirmMethod === 'manual_staff') s += ' · ⚠️ NV tự xác nhận: ' + (h.bankConfirmedBy || '(không rõ)');
+    return s;
 }
 
 function toggleMobileMenu() {
@@ -7981,6 +8057,9 @@ function saveOrderToFirebase(method) {
         bedId: currentBedId,
         customerName: finalCustName
     };
+    // [CK TC33 25/10] Bill CK ghi mã CK + cách xác nhận (auto / manual_staff + người bấm) — như posgieo.
+    if (method === 'Chuyển khoản' && _bankConfirmMeta) Object.assign(orderData, _bankConfirmMeta);
+    _bankConfirmMeta = null;
 
     // [FIX 14/10] Lịch chưa có bed: tiền đã thu nhưng CHƯA lưu đơn — mở Chọn Giường trước.
     // Chọn bed → finalizeBedCheckIn lưu đơn (kèm số bed) rồi mới active bed. Văng app / đóng bảng
@@ -11767,11 +11846,23 @@ function discountFormDelete(_ok) {
         <button onclick="closeQRModal()" class="absolute top-4 right-4 text-gray-400 text-2xl">✕</button>
         <h3 class="text-[#006241] font-black text-xl uppercase mb-6">Quét mã thanh toán</h3>
         <img id="vietqr-img" src="" class="w-64 h-64 mx-auto mb-4 rounded-xl border border-gray-100">
+        <p id="qr-amount" class="text-2xl font-black text-[#006241] mb-2">--</p>
         <div class="bg-yellow-50 p-3 rounded-xl mb-4">
             <p class="text-[10px] text-gray-500 font-bold uppercase">Nội dung chuyển khoản</p>
             <p id="qr-content" class="text-xl font-black text-[#006241]">--</p>
         </div>
         <div id="qr-status" class="text-gray-400 font-bold text-xs animate-pulse">Đang đợi tiền về...</div>
+        <!-- [CK TC33 25/10] Hệ thống chưa tự nhận mà khách đã chuyển → nhân viên xác nhận tay bằng PIN (như posgieo) -->
+        <button id="qr-manual-btn" onclick="openManualBankConfirm()" class="mt-4 w-full py-3 rounded-2xl border-2 border-gray-200 text-gray-500 font-bold text-xs uppercase active:scale-95 transition-all">Đã chuyển khoản xong?</button>
+        <div id="qr-manual-box" class="hidden mt-4 text-left">
+            <p class="text-[11px] font-bold text-amber-700 bg-amber-50 rounded-xl p-3 mb-3">⚠️ Chỉ xác nhận khi ĐÃ THẤY tiền vào tài khoản. Bill sẽ ghi tên người xác nhận.</p>
+            <input id="qr-manual-pin" type="password" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="Mã PIN nhân viên (4 số)" class="w-full p-3 rounded-xl border-2 border-gray-200 text-center text-lg font-black tracking-[0.5em] outline-none focus:border-[#006241]">
+            <p id="qr-manual-msg" class="text-[11px] font-bold text-red-500 mt-2 min-h-[16px] text-center"></p>
+            <div class="grid grid-cols-2 gap-2 mt-2">
+                <button onclick="cancelManualBankConfirm()" class="py-3 rounded-xl bg-gray-100 text-gray-500 font-bold text-xs uppercase">Huỷ</button>
+                <button id="qr-manual-ok" onclick="submitManualBankConfirm()" class="py-3 rounded-xl bg-[#006241] text-white font-black text-xs uppercase">Xác nhận đã nhận</button>
+            </div>
+        </div>
     </div>
 </div>
 <div id="modal-cancel-reason" class="hidden fixed inset-0 z-[9999] flex items-center justify-center bg-black/30 backdrop-blur-[4px] transition-opacity duration-300 p-6">
