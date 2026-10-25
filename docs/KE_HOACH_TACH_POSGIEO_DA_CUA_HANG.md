@@ -2,7 +2,7 @@
 
 - Lập: 25/10/2026 (giờ Việt Nam). **Bản rà soát 3** (25/10) — đối chiếu từng khẳng định với code thật và `firebase.json` thật của Hosting do chủ dự án gửi.
 - Nguồn đã rà: `Thecafe33/gieo`, nhánh `Phan-tach-unit-engine`, HEAD `c859965` (= `0bd95a7` + tài liệu này). Commit gần nhất sửa `posgieo.html`: `6d8f947`.
-- Trạng thái: **đang làm — 0A + 0B xong, chờ kiểm tra lượt 01** (mục 0.1). Chưa tách code, chưa sửa công cụ. Kế hoạch này nằm NGOÀI `KE_HOACH_UNIT_ENGINE_DA_CUA_HANG.md` → chủ dự án duyệt riêng; khi bắt đầu ghi một dòng vào `CLAUDE.md` + `docs/TRANG_THAI.md`.
+- Trạng thái: **đang làm — lượt 01 (0A + 0B) đã kiểm và xử lý phản hồi (`docs/tach_posgieo/PHAN_HOI_KIEM_TRA_01.md`); tiếp theo 0C.** Chưa tách code. Kế hoạch này nằm NGOÀI `KE_HOACH_UNIT_ENGINE_DA_CUA_HANG.md` → chủ dự án duyệt riêng; khi bắt đầu ghi một dòng vào `CLAUDE.md` + `docs/TRANG_THAI.md`.
 - **Bản đang chạy ở cửa hàng (chủ dự án 25/10): bản mới nhất của mùa Giáng sinh** = `ban_deploy/giangsinh/` tại `0bd95a7` (commit cuối sửa bộ này). Trong đó `posgieo.html` giống hệt file gốc tại `6d8f947`, nạp `data_access.v9.js`, `unit_engine.v21.js` (chủ dự án xác nhận cửa hàng dùng engine v21), `gau_noel_giangsinh.v2.js` (data-quan="gieo"), `gieo_automation_pos.v3.js`, `unit_engine2_v1.js`, `unit_engine2_store_v1.js`, `gieo_engine2_pos_v1.js`. **Đây là mốc nền** cho mọi so sánh trước/sau; mọi JS trong danh sách này coi là đã phát hành (không sửa nội dung).
 - Mùa đang chạy là Giáng sinh → biến thể posgieo **có Gấu Noel** là biến thể kiểm trước tiên; file giao cho chủ dự án lấy từ `ban_deploy/giangsinh/` (mục 1.4).
 - Trước khi làm: cập nhật HEAD, đọc các commit phát sinh sau `c859965`; nếu có commit sửa `posgieo.html` sau `6d8f947` mà chưa deploy thì mốc nền vẫn là `6d8f947`, ghi rõ phần chênh.
@@ -170,13 +170,13 @@ Dùng chung file JS ≠ dùng chung dữ liệu. Không suy phạm vi từ tên 
 
 ### 4.3. Nhiều tab / WebView cùng máy
 
-Tab khác đổi binding → phát hiện qua `storage` event / khi quay lại foreground → ngừng nhận giao dịch mới, yêu cầu tải lại có kiểm soát. Dọn cache không xoá queue tab khác đang xử lý. (Nếu bản nền chưa có → H riêng.)
+Tab khác đổi binding → phát hiện qua `storage` event / khi quay lại foreground → ngừng nhận giao dịch mới, yêu cầu tải lại có kiểm soát. Dọn cache không xoá queue tab khác đang xử lý. **Bản nền CHƯA có** (không có listener `storage`) → **H1**, việc riêng, cần chủ dự án duyệt (đổi hành vi). Máy bán hàng chạy APK một WebView nên rủi ro thấp; nhiều tab chủ yếu xảy ra khi mở bằng Chrome.
 
 ### 4.4. Cache, localStorage, queue
 
 Lập bảng kiểm kê từng khóa: phạm vi S/C/G/X/thiết bị, chủ sở hữu, thời hạn, dọn, phục hồi.
 
-**Đã có (0B xác nhận):** `POS_LS_STORE_KEY` + `POS_LS_THEO_QUAN` xoá khoá theo quán khi máy đổi quán; `posLsViecDo` chặn đăng xuất khi còn việc dở. Kiểm kê 49 lời gọi storage: không có khoá theo quán nằm ngoài danh sách (`docs/tach_posgieo/KIEM_TRA_01_NEN_VA_BAN_DO.md` mục 6). Giữ nguyên cơ chế; khoá theo quán mới → thêm vào `POS_LS_THEO_QUAN`.
+**Đã có (0B xác nhận, giới hạn rõ sau kiểm tra độc lập lượt 01 mục 5):** `POS_LS_STORE_KEY` + `POS_LS_THEO_QUAN` xoá khoá theo quán khi máy đổi quán (lúc mở app); `posLsViecDo` chặn đăng xuất khi còn việc dở. Kiểm kê 49 lời gọi storage chỉ chứng minh: **trong một tab**, không có khoá theo quán nằm ngoài danh sách dọn. Nó **không** chứng minh an toàn nhiều tab: posgieo **không có** listener `storage` (đã grep) → tab khác đổi binding thì tab đang mở không biết, tiếp tục bán theo `POS_STORE` cũ trong khi localStorage đã bị tab kia dọn/ghi theo quán mới. Đây là hành vi nền; xử lý = **H1** (mục 4.3), chờ chủ dự án quyết. Khoá theo quán mới → thêm vào `POS_LS_THEO_QUAN`.
 
 - Khóa riêng quán gồm `mode + storeId + loại + tham số`; theo ngày dùng ngày VN.
 - Cấu hình in theo quán ≠ hiệu chỉnh máy in theo thiết bị.
@@ -220,22 +220,38 @@ Quy tắc khác của bước R:
 
 `gieo_automation_pos.v3.js`, `gieo_engine2_pos_v1.js` tự gắn lúc DOMContentLoaded (hoặc ngay nếu DOM sẵn sàng), lấy hàm từ `window`; Engine 2 còn đọc thẳng `POS_STORE`.
 - Hàm đích phải tồn tại trước lúc bridge gắn → file chứa hàm đích nạp trước bridge (thoả mãn với vị trí 5.1).
-- Giữ thứ tự bọc: trợ lý → automation → Engine 2 → Gấu Noel; giữ giá trị trả về, Promise, lỗi, `this`.
+- Giữ thứ tự bọc (đã đối chiếu mã, kiểm tra độc lập lượt 01 mục 4): (1) **trợ lý** — `assistHookIntoPOS` chạy lúc phân tích script chính; (2) **Gấu Noel** (chỉ bản Giáng sinh) — bọc NGAY khi thẻ `gau_noel_giangsinh.v2.js` chạy (đồng bộ, không chờ DOMContentLoaded), bọc lại cả `renderCustomerInfo`/`clearCustomer` mà trợ lý đã bọc → Gấu Noel là lớp NGOÀI; (3) **automation** rồi (4) **Engine 2** — `install` lúc DOMContentLoaded theo thứ tự thẻ (hoặc ngay nếu DOM đã sẵn sàng). Giữ giá trị trả về, Promise, lỗi, `this`. Test tích hợp phải chụp chuỗi bọc của từng hàm trước/sau tách và so khớp.
 - Không khai báo lại / gán lại hàm gốc sau khi đã bị bọc.
 - Assertion "hook đã gắn" chứ không chỉ "bridge tồn tại"; test cả DOM đang tải / đã tải, auth nhanh / chậm.
 - Không sửa bridge đã phát hành; cần đổi → bản mới theo quy tắc phiên bản.
 
 ### 5.3. Lỗi tải
 
-Module thiết yếu dùng lại mẫu `#gdRetry`/`#ueRetry`:
+Module thiết yếu dùng lại ý tưởng `#gdRetry`/`#ueRetry` (nạp lại đúng một lần), nhưng **phân biệt "chưa từng chạy" với "chạy dở"** (kiểm tra độc lập lượt 01, mục 1):
 
 ```html
 <script src="js/posgieo/pos_ui.v1.js"></script>
-<script id="pgUiRetry">if(!(window.PosGieoMods&&PosGieoMods.ui)){document.write('<scr'+'ipt src="js/posgieo/pos_ui.v1.js?r=1"><\/scr'+'ipt>');}</script>
+<script id="pgUiRetry">if(!window.PosGieoMods||PosGieoMods.ui===undefined){document.write('<scr'+'ipt src="js/posgieo/pos_ui.v1.js?r=1"><\/scr'+'ipt>');}</script>
 ```
 
-- Dòng **cuối** mỗi file đặt dấu `(window.PosGieoMods=window.PosGieoMods||{}).<tên>=true;` → dấu chỉ có khi cả file chạy hết (không dùng `onload` làm bằng chứng).
-- Nạp lại chỉ đúng khi file **không tải được** (chưa khai báo gì). File đã chạy dở rồi lỗi thì không nạp lại (khai báo `let/const/class` lần hai sẽ lỗi) → script chính kiểm `PosGieoMods` của các module thiết yếu trước khi mở bán; thiếu → màn lỗi + nút tải lại trang, handler ghi dữ liệu không chạy.
+Mỗi file `js/posgieo/*` có hai dấu:
+
+```js
+(window.PosGieoMods = window.PosGieoMods || {}).ui = 'dang';   // CÂU LỆNH ĐẦU TIÊN của file
+/* … khai báo … */
+PosGieoMods.ui = true;                                          // CÂU LỆNH CUỐI CÙNG của file
+```
+
+| Trạng thái dấu sau thẻ script | Nghĩa | Xử lý |
+| --- | --- | --- |
+| `undefined` | File **chưa từng bắt đầu chạy**: lỗi mạng, 404, máy chủ trả HTML thay JS, file cụt → lỗi cú pháp. Một script lỗi cú pháp/không tải được **không tạo ra khai báo nào** | Nạp lại đúng một lần (`?r=1`) |
+| `'dang'` | File đã bắt đầu chạy rồi ném lỗi giữa chừng. Lúc script bắt đầu chạy, trình duyệt đã tạo **mọi** `let/const/class`/`function` cấp cao của file (khởi tạo khai báo toàn cục chạy trước câu lệnh đầu) → nạp lại sẽ lỗi "Identifier has already been declared" và không chạy gì | **Không nạp lại.** Script chính thấy dấu ≠ `true` → màn lỗi + nút **Tải lại trang**; handler ghi dữ liệu không chạy |
+| `true` | Chạy hết file | Bình thường |
+| vẫn `undefined` sau khi nạp lại | Nạp lại cũng hỏng | Như `'dang'` |
+
+- Script chính kiểm `PosGieoMods.<tên> === true` của mọi module thiết yếu trước khi mở bán (đặt ngay sau chốt dừng hiện có, không trước — để màn nhập mã quán vẫn chạy).
+- Ở bước R, file chỉ có khai báo nên lỗi "chạy dở" chỉ có thể đến từ giá trị đầu của `const`; nhưng vẫn phải xử lý đủ ba nhánh. Bước 0E có test cho cả ba (thiếu file, file cụt/HTML, file ném lỗi giữa chừng).
+- Không dùng `onload`/`onerror` của thẻ làm bằng chứng đã chạy xong.
 - Lỗi đọc dữ liệu / auth giữ nguyên fallback bản nền. Module mùa lỗi → chỉ tính năng đó tắt, không tự cấp quyền lợi.
 - Không làm hot-reload module.
 
@@ -297,8 +313,8 @@ Bảng dưới đây là hiện trạng đã đọc trong code. Mỗi dòng có 
 | T3 | `tao_bo_deploy.js` giữ bản cũ | Một regex cho mỗi họ | Quy tắc chung: mọi `js/posgieo/*.vN.js` có trong repo đều vào bộ (bản cũ cho máy còn cache HTML cũ) | Có `a.v1.js` + `a.v2.js`, HTML trỏ v2 → bộ có cả hai |
 | T4 | `tools/tao_ban_thu.js` | `?b=<hash>` chỉ cho engine/che_do_thu; xuất sang thư mục khác chỉ chép `unit_engine/che_do_thu/data_access` | Thêm `?b=` cho mọi `js/posgieo/*` trong bản thử; chép cả cây `js/posgieo/` khi xuất ra ngoài | Bản thử có `?b=` cho mọi thẻ `js/posgieo`; xuất ra thư mục trống đủ file |
 | T5 | `tools/tao_ban_dem.js` | Chỉ chép `unit_engine/data_access` | Chép cả cây `js/posgieo/` | Như T4 |
-| T6 | `tests/lib/extract.js` (`scriptsOf`) + `core_loader.js`, `wrap_harness.js` | Chỉ đọc `<script>` inline; `wrap_harness` chọn data_access **số cao nhất trên đĩa** | Bộ đọc nguồn chung: inline + các `src` cục bộ theo thứ tự HTML, giữ xuất xứ file/dòng; resolver theo đúng bản HTML ghim. Kiểm **một định nghĩa duy nhất** cho mỗi hàm toàn cục | Hàm chuyển ra file vẫn `extract` được; cùng hàm ở inline + file → fail |
-| T7 | `check_boundaries.js`, `check_paths.js`, `ast_inventory.js`, `free_idents.js`, `kiem_tra_xuyen_app.js` | Chỉ quét `<script>` TRẦN trong HTML → **code chuyển ra ngoài thoát rào ranh giới engine và rào đường dẫn** | Dùng bộ đọc nguồn T6; nhãn POS/QL theo HTML nạp file (không theo tên file); `boundary_allow.json`/`paths_allow.json` giữ khóa `POS:tenHam` | Cài một lệnh ghi `stock_transactions_gieogieo` và một đường chưa đăng ký vào file `js/posgieo` giả → hai checker fail |
+| T6 | `tests/lib/extract.js` (`scriptsOf`) + `core_loader.js`, `wrap_harness.js` | Chỉ đọc `<script>` inline; `wrap_harness` chọn data_access **số cao nhất trên đĩa**; `extract()` tự chèn `vnDate` THẬT khi hàm trích có gọi `vnDate` → che hàm giả ngày test truyền vào (nguyên nhân `manage_duyet_gieo` hỏng — kiểm tra độc lập lượt 01) | Bộ đọc nguồn chung: inline + các `src` cục bộ theo thứ tự HTML, giữ xuất xứ file/dòng; resolver theo đúng bản HTML ghim. Kiểm **một định nghĩa duy nhất** cho mỗi hàm toàn cục. Có cách tắt chèn `vnDate` thật khi test tự cung cấp (sửa `manage_duyet_gieo` dùng cách đó) | Hàm chuyển ra file vẫn `extract` được; cùng hàm ở inline + file → fail; `manage_duyet_gieo` đạt với ngày giả bất kể ngày chạy |
+| T7 | `check_boundaries.js`, `check_paths.js`, `ast_inventory.js`, `free_idents.js` (cùng lỗi che phạm vi như bản đồ cũ — dùng `tools/tach_posgieo/scope.js`), `kiem_tra_xuyen_app.js` | Chỉ quét `<script>` TRẦN trong HTML → **code chuyển ra ngoài thoát rào ranh giới engine và rào đường dẫn** | Dùng bộ đọc nguồn T6; nhãn POS/QL theo HTML nạp file (không theo tên file); `boundary_allow.json`/`paths_allow.json` giữ khóa `POS:tenHam` | Cài một lệnh ghi `stock_transactions_gieogieo` và một đường chưa đăng ký vào file `js/posgieo` giả → hai checker fail |
 | T8 | `tools/file_thay_doi.js` (mới) | Chưa có | `node tools/file_thay_doi.js <commit mốc> <mùa>` → danh sách file đổi trong `ban_deploy/<mùa>/` + đường đích `public/…` (mục 1.4) | Test với hai commit giả |
 | T9 | `tools/js_da_phat_hanh.json` + `tests/js_bat_bien.test.js` (mới) | Bất biến file đã phát hành chỉ là quy ước | Ghi `{đường: sha256}` khi file `js/posgieo` được giao lần đầu; test fail nếu nội dung đổi dưới cùng tên | Sửa 1 byte file đã ghi → fail |
 | T10 | `tools/predeploy_check.js` | Chỉ kiểm tồn tại engine/data_access/che_do_thu; tìm `firebase.json` **trong thư mục deploy** — nhưng thật ra nó nằm ở thư mục **cha** của `public/` → hiện chạy trên `public` sẽ báo thiếu firebase.json | Tìm `firebase.json` ở `<deploy>` hoặc `<deploy>/..`, kiểm `hosting.public` trỏ đúng `<deploy>`; kiểm MỌI src cục bộ (cả `document.write`) tồn tại; có `js/posgieo` → kiểm header `/js/posgieo/**`; có `rewrites` `**` → nhắc nguy cơ HTML thay JS; báo lỗi nếu hai đường chỉ khác hoa/thường hoặc tên trong `js/posgieo` có chữ hoa (bộ nhớ `/sdcard` không phân biệt) | Fixture `public/` + firebase.json ở cha |
@@ -405,8 +421,8 @@ Mỗi lần sửa: `sh tools/sinh_lai_tat_ca.sh` (đã gồm test), `node tools/
 
 | Đợt | Trạng thái | Commit | Bằng chứng |
 | --- | --- | --- | --- |
-| 0A Nền | Xong — chờ kiểm tra lượt 01 | — | `docs/tach_posgieo/KIEM_TRA_01_NEN_VA_BAN_DO.md` |
-| 0B Bản đồ phụ thuộc | Xong — chờ kiểm tra lượt 01 | — | như trên; công cụ `tools/tach_posgieo/ban_do.js` |
+| 0A Nền | Xong — đã kiểm lượt 01, đã xử lý phản hồi | — | `docs/tach_posgieo/KIEM_TRA_01_NEN_VA_BAN_DO.md` |
+| 0B Bản đồ phụ thuộc | Xong — đã kiểm lượt 01, công cụ sửa theo phản hồi (`scope.js`, test `tach_posgieo_ban_do`) | — | như trên; công cụ `tools/tach_posgieo/ban_do.js` |
 | 0C Công cụ T1–T13 | Chưa làm | — | Test cài lỗi |
 | 0D Thử `pos_ui.v1.js` | Chưa làm | — | e2e HTTP + file://, ba bộ |
 | 0E Hợp đồng lỗi tải | Chưa làm | — | Test thiếu/lỗi file |

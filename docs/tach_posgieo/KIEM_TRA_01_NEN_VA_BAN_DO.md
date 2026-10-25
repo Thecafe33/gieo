@@ -1,5 +1,7 @@
 # Kiểm tra lượt 01 — Bước 0A (mốc nền) + 0B (bản đồ phụ thuộc)
 
+> **ĐÃ KIỂM (25/10):** kết quả `KET_QUA_KIEM_TRA_01_DOC_LAP.md`, phản hồi + sửa `PHAN_HOI_KIEM_TRA_01.md`. Bảng «JS ngoài dùng tên của app» ở mục 3 và số «362 handler» bên dưới là bản CŨ — xem bản sửa trong phản hồi.
+
 > **Dành cho agent kiểm tra độc lập.** File này tự đủ: đọc xong là biết đã làm gì, chạy lại thế nào, và cần phản biện điểm nào.
 > Kế hoạch gốc: `docs/KE_HOACH_TACH_POSGIEO_DA_CUA_HANG.md` (bản rà soát 3). Quy tắc dự án: `CLAUDE.md` (trả lời tiếng Việt, không đọc cả file HTML lớn — tìm theo tên hàm).
 > **Chưa có thay đổi nào vào app** (`posgieo.html` và mọi JS giữ nguyên). Lượt này chỉ thêm 1 công cụ CHỈ ĐỌC + tài liệu.

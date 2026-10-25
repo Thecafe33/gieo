@@ -1,5 +1,6 @@
 // BẢN ĐỒ PHỤ THUỘC posgieo.html — bước 0B kế hoạch docs/KE_HOACH_TACH_POSGIEO_DA_CUA_HANG.md. CHỈ ĐỌC, không sửa file nào.
-//   node tools/tach_posgieo/ban_do.js [--html posgieo.html] [--json out.json] [--cum ten:dongDau-dongCuoi ...] [--ten a,b,c]
+//   node tools/tach_posgieo/ban_do.js [--html posgieo.html] [--json out.json] [--cum ten:dongDau-dongCuoi ...] [--ten a,b,c] [--ext a.js,b.js]
+// Phạm vi biến phân giải bằng tools/tach_posgieo/scope.js; test: tests/tach_posgieo_ban_do.test.js.
 // In ra (và ghi JSON nếu có --json):
 //   - khai báo cấp cao của các <script> TRẦN (tên, loại, dòng HTML, byte);
 //   - câu lệnh cấp cao KHÔNG phải khai báo thuần (lệnh tự chạy lúc nạp) + khai báo có lời gọi trong giá trị đầu;
@@ -15,7 +16,7 @@ const ROOT = path.resolve(__dirname, '..', '..');
 const arg = (k, d) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : d; };
 const argsAll = k => process.argv.reduce((a, x, i, v) => (x === k && v[i + 1] ? a.concat(v[i + 1]) : a), []);
 const HTML = arg('--html', 'posgieo.html');
-const html = fs.readFileSync(path.join(ROOT, HTML), 'utf8');
+const html = fs.readFileSync(path.resolve(ROOT, HTML), 'utf8');
 const lineAt = off => html.slice(0, off).split('\n').length;
 
 // 1. script TRẦN (giống tests/lib/extract.js, tools/check_boundaries.js)
@@ -46,35 +47,12 @@ blocks.forEach((b, bi) => {
   }
 });
 
-// 2. định danh tự do của từng tên cấp cao → đồ thị
-function declared(node) {
-  const s = new Set();
-  const addPat = p => { if (!p) return; if (p.type === 'Identifier') s.add(p.name); else if (p.type === 'ObjectPattern') p.properties.forEach(q => addPat(q.value || q.argument)); else if (p.type === 'ArrayPattern') p.elements.forEach(addPat); else if (p.type === 'RestElement') addPat(p.argument); else if (p.type === 'AssignmentPattern') addPat(p.left); };
-  walk.full(node, n => {
-    if (n.type === 'VariableDeclarator') addPat(n.id);
-    if (/Function/.test(n.type)) { if (n.id) s.add(n.id.name); n.params.forEach(addPat); }
-    if (n.type === 'CatchClause') addPat(n.param);
-    if ((n.type === 'ClassDeclaration' || n.type === 'ClassExpression') && n.id) s.add(n.id.name);
-  });
-  return s;
-}
+// 2. tham chiếu tự do của từng tên cấp cao → đồ thị (phân giải phạm vi đúng — tools/tach_posgieo/scope.js)
+const { freeRefs } = require('./scope.js');
 function freeIds(node, self) {
-  const dec = declared(node.type === 'VariableDeclarator' ? (node.init || node) : node); const used = new Set();
   const target = node.type === 'VariableDeclarator' ? node.init : node;
-  if (!target) return used;
-  walk.fullAncestor(target, (n, st, anc) => {
-    if (n.type !== 'Identifier') return;
-    const p = anc[anc.length - 2];
-    if (p && p.type === 'MemberExpression' && p.property === n && !p.computed) return;
-    if (p && (p.type === 'Property' || p.type === 'PropertyDefinition' || p.type === 'MethodDefinition') && p.key === n && !p.computed && !p.shorthand) return;
-    if (p && (p.type === 'LabeledStatement' || p.type === 'BreakStatement' || p.type === 'ContinueStatement')) return;
-    if (n.name === self) return;
-    if (dec.has(n.name) && !tops.has(n.name)) return;
-    if (dec.has(n.name)) { // tên trùng tên cấp cao nhưng khai báo cục bộ → bỏ (gần đúng)
-      return;
-    }
-    if (tops.has(n.name)) used.add(n.name);
-  });
+  const used = new Set(); if (!target) return used;
+  for (const n of freeRefs(target)) if (n !== self && tops.has(n)) used.add(n);
   return used;
 }
 const deps = new Map(), callers = new Map();
@@ -94,19 +72,31 @@ const scanHandlers = (text, where) => {
 };
 { let out = html; for (const b of blocks.slice().reverse()) out = out.slice(0, b.off) + ' '.repeat(b.code.length) + out.slice(b.off + b.code.length); scanHandlers(out, 'html'); }
 blocks.forEach(b => scanHandlers(b.code, 'js-chuỗi'));
+// Handler dựng gián tiếp: tên hàm nằm trong chuỗi/template rồi mới được ghép vào on…="" ở chỗ khác
+// (vd optsHtml(…, m => `setBatchUnitIce('${k}',${i},'${m}')`) — kiểm tra độc lập lượt 01 mục 3).
+// Mọi `tenHam(` nằm trong literal chuỗi/template của JS → 'js-chuỗi-gọi' (có thể dư, không thiếu).
+for (const { ast } of asts) walk.simple(ast, {
+  Literal(n) { if (typeof n.value === 'string') scanCalls(n.value); },
+  TemplateElement(n) { scanCalls(n.value.cooked || ''); }
+});
+function scanCalls(text) {
+  const idre = /([A-Za-z_$][\w$]*)\s*\(/g; let k;
+  while ((k = idre.exec(text))) if (tops.has(k[1]) && /function/.test(tops.get(k[1]).kind)) { if (!handlerRefs.has(k[1])) handlerRefs.set(k[1], new Set()); handlerRefs.get(k[1]).add('js-chuỗi-gọi'); }
+}
 
 // 4. JS ngoài dùng tên của app
-const EXT = ['gieo_automation_pos.v3.js', 'gieo_engine2_pos_v1.js', 'gau_noel_giangsinh.v2.js', 'unit_engine2_store_v1.js', 'unit_engine2_v1.js', 'unit_engine.v21.js', 'data_access.v9.js'];
+const EXT = arg('--ext') ? arg('--ext').split(',') : ['gieo_automation_pos.v3.js', 'gieo_engine2_pos_v1.js', 'gau_noel_giangsinh.v2.js', 'unit_engine2_store_v1.js', 'unit_engine2_v1.js', 'unit_engine.v21.js', 'data_access.v9.js'];
 const extRefs = new Map();
 for (const f of EXT) {
-  if (!fs.existsSync(path.join(ROOT, f))) continue;
-  const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
-  const seen = new Set();
+  if (!fs.existsSync(path.resolve(ROOT, f))) continue;
+  const src = fs.readFileSync(path.resolve(ROOT, f), 'utf8');
+  const seen = new Map();   // tên → 'tham-chiếu' | 'chuỗi'
+  try { for (const n of freeRefs(acorn.parse(src, { ecmaVersion: 'latest', allowReturnOutsideFunction: true }))) if (tops.has(n)) seen.set(n, 'tham-chiếu'); }
+  catch (e) { console.error('Không phân tích được ' + f + ': ' + e.message); }
   const reStr = /window\s*(?:\.\s*([A-Za-z_$][\w$]*)|\[\s*['"]([A-Za-z_$][\w$]*)['"]\s*\])/g; let m;
-  while ((m = reStr.exec(src))) seen.add(m[1] || m[2]);
-  const reQ = /['"]([A-Za-z_$][\w$]{3,})['"]/g; while ((m = reQ.exec(src))) if (tops.has(m[1])) seen.add(m[1]);
-  const reId = /\b([A-Z][A-Z0-9_]{3,})\b/g; while ((m = reId.exec(src))) if (tops.has(m[1])) seen.add(m[1]);
-  for (const n of seen) if (tops.has(n)) { if (!extRefs.has(n)) extRefs.set(n, new Set()); extRefs.get(n).add(f); }
+  while ((m = reStr.exec(src))) { const n = m[1] || m[2]; if (tops.has(n)) seen.set(n, 'tham-chiếu'); }
+  const reQ = /['"]([A-Za-z_$][\w$]{3,})['"]/g; while ((m = reQ.exec(src))) if (tops.has(m[1]) && !seen.has(m[1])) seen.set(m[1], 'chuỗi');
+  for (const [n, how] of seen) { if (!extRefs.has(n)) extRefs.set(n, new Set()); extRefs.get(n).add(f + (how === 'chuỗi' ? ' (chuỗi)' : '')); }
 }
 
 // 5. khoá storage
