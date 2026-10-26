@@ -33,6 +33,19 @@ const PREP = { id: 'tcd', name: 'Trân châu đường', code: 'TCD', unit: 'g',
   costPerUnit: 20, batchInputs: [{ itemId: 'pearl', qty: 1000 }, { itemId: 'milk', qty: 0 }] };
 const BATCH = id => ({ prepId: 'tcd', prepName: 'Trân châu đường', prepCode: 'TCD', unit: 'g', batchRatio: 1, status: 'cooking',
   startedAt: '2026-10-26T01:00:00.000Z', businessDate: '2026-10-26', startedBy: 'NV E2E', reconcileInputs: {}, shelfLifeType: 'hours', shelfLifeHours: 8 });
+// Bắt đầu nấu: NL số lượng lớn không đếm (không vào đối chiếu / nguyên gói) + NL nguyên gói phải quét mã
+const NL_NAU = {
+  sugar: { id: 'sugar', name: 'Đường cát', unit: 'g', trackingMode: 'bulk', staffCounts: false, active: true, costPerUnit: 25, currentStock: 50000 },
+  syrup: { id: 'syrup', name: 'Siro nền', unit: 'ml', trackingMode: 'bulk', staffCounts: false, active: true, costPerUnit: 30, currentStock: 20000 },
+  pearlg: { id: 'pearlg', name: 'Trân châu gói', unit: 'g', countUnitName: 'Bịch', trackingMode: 'unit', prepWholePack: true, active: true,
+    packagingUnits: [{ name: 'Bịch', baseQty: 2000 }], costPerUnit: 30, openShelfLifeHours: 48 }
+};
+const PREP_NAU = {
+  syr: { id: 'syr', name: 'Siro đường', code: 'SYR', unit: 'ml', batchYield: 1500, active: true, shelfLifeType: 'hours', shelfLifeHours: 24, costPerUnit: 18,
+    batchInputs: [{ itemId: 'sugar', qty: 1000 }, { itemId: 'syrup', qty: 500 }] },
+  tcq: { id: 'tcq', name: 'Trân châu nguyên gói', code: 'TCQ', unit: 'g', batchYield: 3000, active: true, shelfLifeType: 'hours', shelfLifeHours: 8, costPerUnit: 22,
+    batchInputs: [{ itemId: 'pearlg', qty: 2000 }] }
+};
 const ITEMS = {
   pearl: { id: 'pearl', name: 'Trân châu trắng', unit: 'g', countUnitName: 'Bịch', trackingMode: 'unit', active: true,
     packagingUnits: [{ name: 'Bịch', baseQty: 2000 }, { name: 'Thùng', baseQty: 12000 }], costPerUnit: 30, openShelfLifeHours: 48 },
@@ -187,6 +200,82 @@ const KICH_BAN = {
       [n.toasts.some(t => /^✅ Đã ghi huỷ 300 g lô TCD-261026-1/.test(t)), 'toast «Đã ghi huỷ 300 g lô …»'],
       [n.ghi.some(g => /prep_transactions_gieogieo/.test(duongGhi(g)) && g.d && g.d.type === 'WASTE'), 'sổ BTP có dòng WASTE']
     ]
+  },
+  // 2B — BẮT ĐẦU NẤU theo công thức (NL không đối chiếu / không nguyên gói): cổng startPrepBatchGate → trừ NL → tạo lô cooking
+  batDauMe: {
+    mo: 'nau',
+    chay: async () => {
+      const sleep = ms => new Promise(r => setTimeout(r, ms));
+      window.posConfirm = async () => true;
+      KHO_ITEMS_CACHE = Object.values(window.__E2E.NL_NAU).map(x => JSON.parse(JSON.stringify(x)));
+      PREP_ITEMS_CACHE_POS = Object.values(window.__E2E.PREP_NAU).map(x => JSON.parse(JSON.stringify(x)));
+      PREP_BATCHES_CACHE_POS = [];
+      showScreen('prepBatchScreen');
+      prepBatchState = { prepId: 'syr', ratio: 1, actualYield: 0 };
+      try { renderPrepBatchForm(); } catch (e) {}
+      window.__ghi = [];
+      await startPrepBatchGate(); await sleep(1500);
+      return { lo: PREP_BATCHES_CACHE_POS.map(b => ({ prepId: b.prepId, status: b.status })) };
+    },
+    bang: ["active_units_gieogieo", "inventory_items_gieogieo", "prep_batches_gieogieo", "stock_transactions_gieogieo"],
+    kiem: (n) => [
+      [n.ghi.some(g => /prep_batches_gieogieo/.test(duongGhi(g)) && g.d && g.d.status === 'cooking' && g.d.prepId === 'syr'), 'tạo lô cooking Siro đường'],
+      [n.ghi.filter(g => /stock_transactions_gieogieo/.test(duongGhi(g)) && g.d && g.d.type === 'CONSUMPTION').map(g => g.d.itemId + ':' + g.d.qty).sort().join() === 'sugar:-1000,syrup:-500', 'trừ NL theo công thức: đường −1000, siro −500 — thấy ' + n.ghi.filter(g => /stock_transactions_gieogieo/.test(duongGhi(g)) && g.d && g.d.type === 'CONSUMPTION').map(g => g.d.itemId + ':' + g.d.qty).join()],
+      [n.ghi.some(g => /prep_batches_gieogieo/.test(duongGhi(g)) && g.d && g.d.inputTrace), 'lô ghi inputTrace (truy NL đã dùng)']
+    ]
+  },
+  // 2B — BẮT ĐẦU NẤU với NL NGUYÊN GÓI: PIN → cổng quét mã (máy quét giả) → đủ gói tự bắt đầu → gói 'finished' + lô cooking
+  batDauMeQuet: {
+    mo: 'nau',
+    chay: async () => {
+      const sleep = ms => new Promise(r => setTimeout(r, ms));
+      window.posConfirm = async () => true;
+      window.AndroidScanner = { getScannerVersion: () => 1, scan: id => setTimeout(() => window.__androidScanResult({ id, ok: true, code: 'TCG00001', format: 'QR_CODE' }), 10) };
+      KHO_ITEMS_CACHE = Object.values(window.__E2E.NL_NAU).map(x => JSON.parse(JSON.stringify(x)));
+      PREP_ITEMS_CACHE_POS = Object.values(window.__E2E.PREP_NAU).map(x => JSON.parse(JSON.stringify(x)));
+      PREP_BATCHES_CACHE_POS = [];
+      showScreen('prepBatchScreen');
+      prepBatchState = { prepId: 'tcq', ratio: 1, actualYield: 0 };
+      try { renderPrepBatchForm(); } catch (e) {}
+      window.__ghi = [];
+      await startPrepBatchGate(); await sleep(200);
+      const coCong = !!(prepStartScanState && prepStartScanState.requirements && prepStartScanState.requirements.length);
+      await prepStartGateScan('pearlg'); await sleep(1500);
+      return { coCong, conCong: !!prepStartScanState, lo: PREP_BATCHES_CACHE_POS.map(b => ({ prepId: b.prepId, status: b.status })) };
+    },
+    bang: ["active_units_gieogieo", "inventory_items_gieogieo", "prep_batches_gieogieo", "stock_containers_gieogieo", "stock_transactions_gieogieo"],
+    kiem: (n) => [
+      [n.sau && n.sau.coCong, 'mở cổng quét mã (cần 1 Bịch nguyên)'],
+      [n.ghi.some(g => /stock_containers_gieogieo[^/]*\/ctn_tcg1$/.test(duongGhi(g)) && g.d && g.d.status === 'finished'), 'gói đã quét → finished'],
+      [n.ghi.some(g => /prep_batches_gieogieo/.test(duongGhi(g)) && g.d && g.d.status === 'cooking' && g.d.prepId === 'tcq'), 'tạo lô cooking Trân châu nguyên gói'],
+      [n.sau && n.sau.conCong === false, 'xong thì xoá trạng thái cổng quét']
+    ]
+  },
+  // 2B — BẮT ĐẦU NẤU LỖI giữa chừng: lượt ghi sổ kho đầu tiên lỗi (giả rớt mạng) → cuộn ngược phần đã trừ, KHÔNG tạo lô
+  batDauMeLoi: {
+    mo: 'nau',
+    chay: async () => {
+      const sleep = ms => new Promise(r => setTimeout(r, ms));
+      window.posConfirm = async () => true;
+      KHO_ITEMS_CACHE = Object.values(window.__E2E.NL_NAU).map(x => JSON.parse(JSON.stringify(x)));
+      PREP_ITEMS_CACHE_POS = Object.values(window.__E2E.PREP_NAU).map(x => JSON.parse(JSON.stringify(x)));
+      PREP_BATCHES_CACHE_POS = [];
+      showScreen('prepBatchScreen');
+      prepBatchState = { prepId: 'syr', ratio: 1, actualYield: 0 };
+      try { renderPrepBatchForm(); } catch (e) {}
+      window.__ghi = [];
+      window.__HONG = [{ op: 'tx.set', re: '^stock_transactions_gieogieo', con: 1 }];   // lượt ghi sổ kho ĐẦU TIÊN lỗi (thứ tự trong Promise.allSettled)
+      await startPrepBatchGate(); await sleep(1500);
+      return { lo: PREP_BATCHES_CACHE_POS.length };
+    },
+    bang: ["active_units_gieogieo", "inventory_items_gieogieo", "stock_transactions_gieogieo"],
+    kiem: (n) => [
+      [n.ghi.some(g => /!hong$/.test(g.op)), 'lỗi cài đúng một lượt ghi sổ kho'],
+      [!n.ghi.some(g => /prep_batches_gieogieo/.test(duongGhi(g)) && g.d && g.d.status === 'cooking'), 'KHÔNG tạo lô cooking khi trừ NL lỗi'],
+      [(() => { const st = n.ghi.filter(g => /stock_transactions_gieogieo/.test(duongGhi(g)) && g.d && g.d.itemId); const tru = st.filter(g => g.d.type === 'CONSUMPTION' && g.d.qty < 0);
+        return tru.length === 1 && st.some(g => g.d.itemId === tru[0].d.itemId && Number(g.d.qty) === -tru[0].d.qty); })(),
+        'cuộn ngược: NL đã trừ được (1 trong 2) có dòng hoàn đúng lượng — sổ kho: ' + n.ghi.filter(g => /stock_transactions_gieogieo|!hong/.test(duongGhi(g) + g.op)).map(g => g.op.replace(/@.*/, '') + ' ' + (g.d ? g.d.itemId + ':' + g.d.type + ':' + g.d.qty : '')).join(' | ')]
+    ]
   }
 };
 // Đếm trên lượt ghi đã chuẩn hoá
@@ -206,7 +295,13 @@ async function chay(b, base, store, ten) {
     const S = {}; const ten = n => GieoData.fsPath(n);   // mồi đặt ĐÚNG tên bảng của quán đang chạy (đọc qua lớp GieoData)
     for (const [id, it] of Object.entries(ITEMS)) S[ten('inventory_items_gieogieo') + '/' + id] = it;
     if (mo === 'po') S[ten('purchase_orders_gieogieo') + '/po1'] = PO;
-    window.__E2E = { ITEMS, PREP: E2E.PREP, BATCH: E2E.BATCH };
+    window.__E2E = { ITEMS, PREP: E2E.PREP, BATCH: E2E.BATCH, NL_NAU: E2E.NL_NAU, PREP_NAU: E2E.PREP_NAU };
+    if (mo === 'nau') {
+      for (const [id, it] of Object.entries(E2E.NL_NAU)) S[ten('inventory_items_gieogieo') + '/' + id] = it;
+      for (const [id, it] of Object.entries(E2E.PREP_NAU)) S[ten('prep_items_gieogieo') + '/' + id] = it;
+      S[ten('stock_containers_gieogieo') + '/ctn_tcg1'] = { code: 'TCG00001', itemId: 'pearlg', itemName: 'Trân châu gói', unit: 'g', trackingMode: 'unit', countUnitName: 'Bịch',
+        baseQty: 2000, unitBase: 2000, status: 'sealed', labelPrinted: true, receivedAt: '2026-10-25T03:00:00.000Z', businessDate: '2026-10-25', openShelfLifeHours: 48 };
+    }
     if (mo === 'prep') {
       S[ten('prep_items_gieogieo') + '/tcd'] = E2E.PREP;
       for (const id of E2E.lo) S[ten('prep_batches_gieogieo') + '/' + id] = Object.assign({}, E2E.BATCH, E2E.loActive ? { status: 'active', batchCode: 'TCD-261026-1', qtyInitial: 1000, qtyRemaining: 1000, finishedAt: '2026-10-26T02:00:00.000Z', expiresAt: '2026-10-26T10:00:00.000Z' } : {});
@@ -217,7 +312,7 @@ async function chay(b, base, store, ten) {
     let loiKB = null, sau = null;
     try { sau = await (0, eval)('(' + src + ')')({ ITEMS }); } catch (e) { loiKB = String(e && e.message || e); }
     return { ghi: (window.__ghi || []).map(g => ({ op: g.op, p: g.p, rt: !!g.rt, d: g.d })), toasts, sau, loiKB };
-  }, { src: KICH_BAN[ten].chay.toString(), dau: KB_DAU.toString(), mo: KICH_BAN[ten].mo, ITEMS, PO, E2E: { PREP, BATCH: BATCH(), lo: KICH_BAN[ten].lo || [], loActive: !!KICH_BAN[ten].loActive, tieuHao: !!KICH_BAN[ten].tieuHao } });
+  }, { src: KICH_BAN[ten].chay.toString(), dau: KB_DAU.toString(), mo: KICH_BAN[ten].mo, ITEMS, PO, E2E: { PREP, BATCH: BATCH(), NL_NAU, PREP_NAU, lo: KICH_BAN[ten].lo || [], loActive: !!KICH_BAN[ten].loActive, tieuHao: !!KICH_BAN[ten].tieuHao } });
   r.loi = t.loi.slice().sort(); r.qua = t.qua; await t.ctx.close();
   r.ghiTho = r.ghi; r.ghi = chuanGhi(r.ghi); r.sau = chuanDuLieu(r.sau);
   return r;
@@ -262,7 +357,8 @@ const lechMuc = (m, n) => SO.filter(p => JSON.stringify(m[p]) !== JSON.stringify
     // TỰ KIỂM: bản sao cài lỗi nhỏ vào file JS đã tách → kịch bản tương ứng PHẢI báo lệch ở `ghi`
     const TU_KIEM = [
       { kb: 'nhanHang', file: 'pos_receive.v1.js', tim: /(\bnote:\s*generalNote)/, thay: "$1 + '·hỏng'", mo: 'đổi ghi chú phiếu nhận' },
-      { kb: 'huyMe', file: 'pos_prep.v1.js', tim: /Hoàn kho do HUỶ MẺ/, thay: 'Hoàn kho do HUY ME', mo: 'đổi ghi chú dòng hoàn kho khi huỷ mẻ' }
+      { kb: 'huyMe', file: 'pos_prep.v1.js', tim: /Hoàn kho do HUỶ MẺ/, thay: 'Hoàn kho do HUY ME', mo: 'đổi ghi chú dòng hoàn kho khi huỷ mẻ' },
+      { kb: 'batDauMe', file: 'pos_prep.v1.js', tim: /note: `Nấu \$\{p\.code/, thay: 'note: `NAU ${p.code', mo: 'đổi ghi chú dòng trừ NL khi bắt đầu nấu' }
     ];
     for (const tk of TU_KIEM) {
       if (!dsKB.includes(tk.kb)) continue;
