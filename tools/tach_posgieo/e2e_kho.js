@@ -21,13 +21,13 @@ const KHOA_GIO = /(?:^|[a-z])At$|^at$|^ts$|^t$|^time$|^timestamp$|^rev$|[a-z]Rev
 const LA_GIO = v => (typeof v === 'string' && (/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?Z?$/.test(v) || /^\d\d:\d\d$/.test(v))) || (typeof v === 'number' && v > 1.6e12);
 const MA_NN = /(^|[^a-z0-9])([a-z][a-z0-9]*)_\d{12,}_[a-z0-9]{4,}/g;   // đầu chuỗi hoặc sau ký tự không phải chữ/số — gồm '_' / '/' (mã lồng trong ID, kiểm lượt 10)
 const doiMa = s => String(s).replace(MA_NN, '$1$2_ID');
-function chuanDuLieu(v, k) {
-  if (Array.isArray(v)) return v.map(x => chuanDuLieu(x));
-  if (v && typeof v === 'object') { const o = {}; for (const [kk, vv] of Object.entries(v)) o[doiMa(kk)] = chuanDuLieu(vv, kk); return o; }
-  if (k && KHOA_GIO.test(k) && LA_GIO(v)) return '<giờ>';
+function chuanDuLieu(v, k, giuGio) {   // giuGio: kịch bản chạy giờ CỐ ĐỊNH (gioCo) → giữ nguyên giá trị giờ (tất định ở hai bản, so được cả hạn mới)
+  if (Array.isArray(v)) return v.map(x => chuanDuLieu(x, undefined, giuGio));
+  if (v && typeof v === 'object') { const o = {}; for (const [kk, vv] of Object.entries(v)) o[doiMa(kk)] = chuanDuLieu(vv, kk, giuGio); return o; }
+  if (!giuGio && k && KHOA_GIO.test(k) && LA_GIO(v)) return '<giờ>';
   return typeof v === 'string' ? doiMa(v) : v;
 }
-const chuanGhi = ds => (ds || []).map(g => ({ op: doiMa(g.op), p: doiMa(g.p), d: chuanDuLieu(g.d) }));   // cờ rt chỉ dùng cho kiểm phạm vi (ghiTho)
+const chuanGhi = (ds, giuGio) => (ds || []).map(g => ({ op: doiMa(g.op), p: doiMa(g.p), d: chuanDuLieu(g.d, undefined, giuGio) }));   // cờ rt chỉ dùng cho kiểm phạm vi (ghiTho)
 
 const PREP = { id: 'tcd', name: 'Trân châu đường', code: 'TCD', unit: 'g', batchYield: 2000, active: true, shelfLifeType: 'hours', shelfLifeHours: 8,
   costPerUnit: 20, batchInputs: [{ itemId: 'pearl', qty: 1000 }, { itemId: 'milk', qty: 0 }] };
@@ -65,6 +65,13 @@ const DOLY = {
   rt: { code: 'SUA00003', itemName: 'Sữa tươi', unit: 'ml', unitBase: 800, capacity: 1000, openedAt: 1793000000000, rev: 1 },
   rtLo: { code: 'TCD-261026-1', itemName: 'Trân châu đường', unit: 'g', capacity: 1000, openedAt: 1793001000000, unitBase: 1000 },
   lo: { status: 'active', batchCode: 'TCD-261026-1', qtyInitial: 1000, qtyRemaining: 1000, finishedAt: '2026-10-26T02:00:00.000Z', expiresAt: '2026-10-26T10:00:00.000Z' }
+};
+// 2D — HẠN DÙNG (giờ cố định HAN_T = 14:33 giờ VN 26/10): lô BTP b1 đã quá hạn 1 giờ, b2 sắp hết hạn (20 phút), mã sữa đang mở ctn_h1 sắp hết hạn
+const HAN_T = 1793000000000, isoT = d => new Date(HAN_T + d * 60000).toISOString();
+const HAN = {
+  lo: { b1: { qtyRemaining: 400, expiresAt: isoT(-60), batchCode: 'TCD-261026-1' }, b2: { qtyRemaining: 600, expiresAt: isoT(20), batchCode: 'TCD-261026-2' } },
+  ctn: { code: 'SUA00004', itemId: 'milk', itemName: 'Sữa tươi', unit: 'ml', trackingMode: 'unit', countUnitName: 'Hộp', baseQty: 1000, unitBase: 700, status: 'open',
+    labelPrinted: true, receivedAt: '2026-10-25T03:00:00.000Z', businessDate: '2026-10-25', openedAt: isoT(-1420), openedBy: 'NV E2E', expiresAt: isoT(20), openShelfLifeHours: 24 }
 };
 const ITEMS = {
   pearl: { id: 'pearl', name: 'Trân châu trắng', unit: 'g', countUnitName: 'Bịch', trackingMode: 'unit', active: true,
@@ -376,6 +383,43 @@ const KICH_BAN = {
       [n.sau && n.sau.pendingSauCung === null, 'ghi lại xong: dọn dwPending_pos']
     ])
   },
+  // 2D — HẠN DÙNG trong ca (chuông «Lô sắp hết hạn»): danh sách lô / mã sắp hết hạn → «Còn dùng được» lô BTP b2 (PIN, gia hạn +24 giờ, in tem)
+  hanGiaHan: {
+    mo: 'han', gioCo: HAN_T,
+    chay: async () => window.KB_HAN('soon', 'prep:b2', 'keep'),
+    bang: ["prep_batches_gieogieo"],
+    kiem: (n) => kiemHan(n, ['prep:b1:true', 'prep:b2:false', 'item:ctn_h1:false']).concat([
+      [n.ghi.some(g => /prep_batches_gieogieo[^/]*\/b2$/.test(duongGhi(g)) && g.d && g.d.expiresAt === '2026-10-27T07:53:20.000Z'), 'lô b2: hạn mới = hạn cũ + 24 giờ (2026-10-27T07:53:20Z)'],
+      [n.sau && JSON.stringify(n.sau.sau) === '["prep:b1:true","item:ctn_h1:false"]', 'đọc lại: b2 không còn trong danh sách — ' + JSON.stringify(n.sau && n.sau.sau)]
+    ])
+  },
+  // 2D — mã NL đang mở sắp hết hạn → «Còn dùng được» (gia hạn mã sữa, in tem gia hạn)
+  hanGiaHanNL: {
+    mo: 'han', gioCo: HAN_T,
+    chay: async () => window.KB_HAN('soon', 'item:ctn_h1', 'keep'),
+    bang: ["stock_containers_gieogieo"],
+    kiem: (n) => kiemHan(n, ['prep:b1:true', 'prep:b2:false', 'item:ctn_h1:false']).concat([
+      [n.ghi.some(g => /stock_containers_gieogieo[^/]*\/ctn_h1$/.test(duongGhi(g)) && g.d && g.d.expiresAt === '2026-10-27T07:53:20.000Z'), 'mã ctn_h1: hạn mới = hạn cũ + 24 giờ']
+    ])
+  },
+  // 2D — CHECK-OUT còn lô đã quá hạn: chỉ hiện lô quá hạn (b1) → «Bỏ đi» (ghi huỷ phần còn 400 g) → hết việc thì check-out lại
+  hanCheckOut: {
+    mo: 'han', gioCo: HAN_T,
+    chay: async () => window.KB_HAN('checkout', 'prep:b1', 'discard'),
+    bang: ["active_units_gieogieo", "prep_batches_gieogieo", "prep_items_gieogieo", "prep_transactions_gieogieo"],
+    kiem: (n) => kiemHan(n, ['prep:b1:true']).concat([
+      [n.ghi.some(g => /prep_transactions_gieogieo/.test(duongGhi(g)) && g.d && g.d.type === 'WASTE' && Math.abs(g.d.qty) === 400), 'sổ BTP: dòng huỷ 400 g lô b1 — ' + JSON.stringify(n.ghi.filter(g => /prep_transactions/.test(duongGhi(g))).map(g => g.d && g.d.type + ':' + g.d.qty))],
+      [n.sau && n.sau.checkOut === 1 && !n.sau.conOverlay, 'hết lô quá hạn → đóng màn, gọi check-out lại đúng một lần'],
+      [n.toasts.some(t => /^✅ Đã ghi huỷ lô TCD-261026-1 — 400 g/.test(t)), 'toast «Đã ghi huỷ lô … 400 g» — ' + JSON.stringify(n.toasts)]
+    ])
+  },
+  // 2D — dấu «đã kiểm hạn đầu ca hôm nay» (update, không tạo bản ghi mở ca)
+  hanDauCa: {
+    mo: 'han', gioCo: HAN_T,
+    chay: async () => { window.__ghi = []; await expiryOpenDone(); return {}; },
+    bang: ["daily_openings_gieogieo"],
+    kiem: (n) => [[n.ghi.length === 1 && n.ghi[0].op === 'update' && /daily_openings_gieogieo[^/]*\/2026-10-26$/.test(n.ghi[0].p) && n.ghi[0].d && 'expiryCheckedAt' in n.ghi[0].d, 'update daily_openings/2026-10-26 { expiryCheckedAt } — ' + JSON.stringify(n.ghi)]]
+  },
   // 2C — KIỂM KÊ MÙ: mở màn (đọc danh mục) → đếm Trà lài 900 g → gửi phiếu chờ duyệt
   kiemKe: {
     mo: 'kho',
@@ -424,6 +468,36 @@ const KB_DOLY = async (loi) => {
   window.__buoc = 'xong'; pendingSauCung = localStorage.getItem('dwPending_pos');
   return { coCup: !!cup, xemTruoc, lyDo, pendingSauLoi, pendingSauCung, man: (document.querySelector('.screen.active') || {}).id || null };
 };
+// Phần chung hạn dùng (chạy TRONG trang): đọc danh sách thật (loadExpiryCheckLinesPOS) → màn kiểm hạn thật (phase soon / checkout)
+// → bấm nút của dòng `dich` ('prep:b2' / 'item:ctn_h1') → hàm thật gia hạn / bỏ đi → đọc lại. PIN gán đè giống nhau ở hai bản.
+const KB_HAN = async (phase, dich, viec) => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  window.posConfirm = async () => true;
+  window.resolveStaffPinWorkedToday = async () => ({ id: 'e2e_nv', fullName: 'NV E2E', pin: '0000' });
+  let checkOut = 0; window.doCheckOut = () => { checkOut++; };
+  KHO_ITEMS_CACHE = Object.values(window.__E2E.NL_KHO).map(x => JSON.parse(JSON.stringify(x)));
+  PREP_ITEMS_CACHE_POS = [JSON.parse(JSON.stringify(window.__E2E.PREP))];
+  const ma = ds => ds.map(x => x.kind + ':' + x.id + ':' + x.expired);
+  let truoc;
+  if (phase === 'checkout') { const co = await expiryAskOnCheckOut(); truoc = co ? ma(_expCheck.lines) : []; }
+  else { await expiryCheckOpenSoon(); await sleep(300); truoc = ma(_expCheck ? _expCheck.lines : []); }
+  const i = _expCheck ? _expCheck.lines.findIndex(x => x.kind + ':' + x.id === dich) : -1;
+  const nut = [...document.querySelectorAll('#exp-check-overlay button')].filter(x => (x.getAttribute('onclick') || '') === 'expiryCheckAct(' + i + ",'" + viec + "')");
+  window.__ghi = [];
+  if (nut.length === 1) {
+    const st0 = _expCheck; nut[0].click();
+    for (let k = 0; k < 100 && (st0.busy || _expCheck === st0); k++) await sleep(100);   // chờ lưu + đọc lại xong (_expCheck đổi / đóng)
+    await sleep(300);
+  }
+  const sau = _expCheck ? ma(_expCheck.lines) : null;
+  return { truoc, i, coNut: nut.length, sau, checkOut, conOverlay: !!document.getElementById('exp-check-overlay'), loiMan: (document.querySelector('[id^=expChkMsg_]') || {}).textContent || '' };
+};
+function kiemHan(n, dsTruoc) {
+  return [
+    [n.sau && JSON.stringify(n.sau.truoc) === JSON.stringify(dsTruoc), 'danh sách kiểm hạn đúng: ' + JSON.stringify(n.sau && n.sau.truoc)],
+    [n.sau && n.sau.coNut === 1, 'màn kiểm hạn có đúng một nút cho dòng cần bấm']
+  ];
+}
 // Dòng sổ kho WASTE đã ghi thành công (bỏ lượt bị cài lỗi), theo itemId → qty; dòng sổ BTP WASTE
 const soWaste = n => n.ghi.filter(g => !/!hong$/.test(g.op) && /stock_transactions_gieogieo/.test(duongGhi(g)) && g.d && g.d.type === 'WASTE');
 const soPrepWaste = n => n.ghi.filter(g => !/!hong$/.test(g.op) && /prep_transactions_gieogieo/.test(duongGhi(g)) && g.d && g.d.type === 'WASTE');
@@ -454,8 +528,8 @@ const maMa = (n, item) => new Set(n.ghi.filter(g => /^(set|tx\.set@)/.test(g.op)
 const phieu = n => n.ghi.filter(g => /receiving_records_gieogieo/.test(duongGhi(g))).map(g => g.d);
 
 async function chay(b, base, store, ten) {
-  const t = await moTrang(b, base, { authNgay: true, store, ngauNhienCo: true });
-  const r = await t.page.evaluate(async ({ src, dau, doly, mo, ITEMS, PO, E2E }) => {
+  const t = await moTrang(b, base, KICH_BAN[ten].gioCo ? { authNgay: true, store, gioCo: KICH_BAN[ten].gioCo } : { authNgay: true, store, ngauNhienCo: true });
+  const r = await t.page.evaluate(async ({ src, dau, doly, han, mo, ITEMS, PO, E2E }) => {
     const toasts = []; const _t = window.toast;
     window.toast = function (m) { toasts.push(String(m)); try { return _t.apply(this, arguments); } catch (e) {} };
     window.requireShiftOpened = () => true; window.requireOpeningChecklistDone = () => true;
@@ -464,7 +538,7 @@ async function chay(b, base, store, ten) {
     const S = {}; const ten = n => GieoData.fsPath(n);   // mồi đặt ĐÚNG tên bảng của quán đang chạy (đọc qua lớp GieoData)
     for (const [id, it] of Object.entries(ITEMS)) S[ten('inventory_items_gieogieo') + '/' + id] = it;
     if (mo === 'po') S[ten('purchase_orders_gieogieo') + '/po1'] = PO;
-    window.__E2E = { ITEMS, PREP: E2E.PREP, BATCH: E2E.BATCH, NL_NAU: E2E.NL_NAU, PREP_NAU: E2E.PREP_NAU, NL_KHO: E2E.NL_KHO, DOLY: E2E.DOLY };
+    window.__E2E = { ITEMS, PREP: E2E.PREP, BATCH: E2E.BATCH, NL_NAU: E2E.NL_NAU, PREP_NAU: E2E.PREP_NAU, NL_KHO: E2E.NL_KHO, DOLY: E2E.DOLY, HAN: E2E.HAN };
     if (mo === 'kho') {
       for (const [id, it] of Object.entries(E2E.NL_KHO)) S[ten('inventory_items_gieogieo') + '/' + id] = it;
       S[ten('stock_containers_gieogieo') + '/ctn_m1'] = E2E.CTN1; S[ten('stock_containers_gieogieo') + '/ctn_m2'] = E2E.CTN2;
@@ -481,6 +555,17 @@ async function chay(b, base, store, ten) {
       S[ten('waste_reasons_gieogieo') + '/r1'] = { label: 'Làm đổ khi pha', active: true };
       window.__SNAP = true;   // bộ đệm sống công thức / bao bì (_posLiveSubscribe) chờ ảnh đầu của onSnapshot
     }
+    if (mo === 'han') {
+      for (const [id, it] of Object.entries(E2E.NL_KHO)) S[ten('inventory_items_gieogieo') + '/' + id] = it;
+      S[ten('prep_items_gieogieo') + '/tcd'] = E2E.PREP;
+      for (const [id, l] of Object.entries(E2E.HAN.lo)) {
+        S[ten('prep_batches_gieogieo') + '/' + id] = Object.assign({}, E2E.BATCH, { status: 'active', qtyInitial: 1000, finishedAt: '2026-10-26T01:00:00.000Z' }, l);
+        S[GieoData.rtPath('active_units_gieogieo') + '/tcd/' + id] = { code: l.batchCode, itemName: 'Trân châu đường', unit: 'g', capacity: 1000, openedAt: 1792990000000, unitBase: l.qtyRemaining };
+      }
+      S[ten('stock_containers_gieogieo') + '/ctn_h1'] = E2E.HAN.ctn;
+      S[GieoData.rtPath('active_units_gieogieo') + '/milk/ctn_h1'] = { code: 'SUA00004', itemName: 'Sữa tươi', unit: 'ml', unitBase: 700, capacity: 1000, openedAt: 1792914800000, rev: 1 };
+      S[ten('daily_openings_gieogieo') + '/2026-10-26'] = { openedAt: '2026-10-26T00:30:00.000Z' };
+    }
     if (mo === 'nau') {
       for (const [id, it] of Object.entries(E2E.NL_NAU)) S[ten('inventory_items_gieogieo') + '/' + id] = it;
       for (const [id, it] of Object.entries(E2E.PREP_NAU)) S[ten('prep_items_gieogieo') + '/' + id] = it;
@@ -493,14 +578,14 @@ async function chay(b, base, store, ten) {
       if (E2E.tieuHao) S[ten('stock_transactions_gieogieo') + '/cons_b2_pearl'] = { itemId: 'pearl', type: 'CONSUMPTION', qty: -500, referenceId: 'b2', prepBatchId: 'b2', businessDate: '2026-10-26', createdAt: '2026-10-26T01:00:00.000Z', status: 'posted' };
     }
     window.__SEED = S; window.__SEED_GHI = true; window.__HONG = [];
-    window.KB_DAU = (0, eval)('(' + dau + ')'); window.KB_DOLY = (0, eval)('(' + doly + ')');
+    window.KB_DAU = (0, eval)('(' + dau + ')'); window.KB_DOLY = (0, eval)('(' + doly + ')'); window.KB_HAN = (0, eval)('(' + han + ')');
     let loiKB = null, sau = null;
     window.__buoc = '';   // kịch bản treo (lời hứa không bao giờ xong) → báo lỗi sau 45 giây kèm bước cuối, không treo cả bài
     try { sau = await Promise.race([(0, eval)('(' + src + ')')({ ITEMS }), new Promise((_, rej) => setTimeout(() => rej(new Error('kịch bản quá 45 giây — bước: ' + window.__buoc)), 45000))]); } catch (e) { loiKB = String(e && e.message || e); }
     return { ghi: (window.__ghi || []).map(g => ({ op: g.op, p: g.p, rt: !!g.rt, d: g.d })), toasts, sau, loiKB };
-  }, { src: KICH_BAN[ten].chay.toString(), dau: KB_DAU.toString(), doly: KB_DOLY.toString(), mo: KICH_BAN[ten].mo, ITEMS, PO, E2E: { PREP, BATCH: BATCH(), NL_NAU, PREP_NAU, NL_KHO, DOLY, CTN1: CTN('sealed'), CTN2: CTN('open', { unitBase: 0, openedAt: '2026-10-25T05:00:00.000Z', openedBy: 'NV E2E', expiresAt: '2026-10-26T05:00:00.000Z' }), lo: KICH_BAN[ten].lo || [], loActive: !!KICH_BAN[ten].loActive, tieuHao: !!KICH_BAN[ten].tieuHao } });
+  }, { src: KICH_BAN[ten].chay.toString(), dau: KB_DAU.toString(), doly: KB_DOLY.toString(), han: KB_HAN.toString(), mo: KICH_BAN[ten].mo, ITEMS, PO, E2E: { PREP, BATCH: BATCH(), NL_NAU, PREP_NAU, NL_KHO, DOLY, HAN, CTN1: CTN('sealed'), CTN2: CTN('open', { unitBase: 0, openedAt: '2026-10-25T05:00:00.000Z', openedBy: 'NV E2E', expiresAt: '2026-10-26T05:00:00.000Z' }), lo: KICH_BAN[ten].lo || [], loActive: !!KICH_BAN[ten].loActive, tieuHao: !!KICH_BAN[ten].tieuHao } });
   r.loi = t.loi.slice().sort(); r.qua = t.qua; await t.ctx.close();
-  r.ghiTho = r.ghi; r.ghi = chuanGhi(r.ghi); r.sau = chuanDuLieu(r.sau);
+  r.ghiTho = r.ghi; r.ghi = chuanGhi(r.ghi, !!KICH_BAN[ten].gioCo); r.sau = chuanDuLieu(r.sau, undefined, !!KICH_BAN[ten].gioCo);
   return r;
 }
 const PO = { status: 'pending', supplier: 'NCC E2E', createdAt: '2026-10-20T03:00:00.000Z', lines: [
@@ -547,6 +632,7 @@ const lechMuc = (m, n) => SO.filter(p => JSON.stringify(m[p]) !== JSON.stringify
       { kb: 'huyMe', file: 'pos_prep.v1.js', tim: /Hoàn kho do HUỶ MẺ/, thay: 'Hoàn kho do HUY ME', mo: 'đổi ghi chú dòng hoàn kho khi huỷ mẻ' },
       { kb: 'kiemKe', file: 'pos_count.v1.js', tim: /countedBy: staff, status: 'pending_review'/, thay: "countedBy: staff, status: 'pending'", mo: 'đổi trạng thái phiếu kiểm kê (chỗ ghi phiếu)' },
       { kb: 'doLy', file: 'pos_kho.v1.js', tim: /qty: -qtyUsed, txId/, thay: 'qty: -(qtyUsed + 1), txId', mo: 'đổi lượng trừ NL khi đổ ly' },
+      { kb: 'hanGiaHan', file: 'pos_expiry.v1.js', tim: /const PREP_EXTEND_HOURS = 24;/, thay: 'const PREP_EXTEND_HOURS = 25;', mo: 'đổi số giờ gia hạn' },
       { kb: 'batDauMe', file: 'pos_prep.v1.js', tim: /note: `Nấu \$\{p\.code/, thay: 'note: `NAU ${p.code', mo: 'đổi ghi chú dòng trừ NL khi bắt đầu nấu' }
     ];
     for (const tk of TU_KIEM) {

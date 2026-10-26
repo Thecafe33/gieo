@@ -69,6 +69,12 @@ let ok = true; const chk = (c, m) => { console.log((c ? 'ok ' : 'FAIL ') + m); i
     {   // 1C: qua chốt dừng, hàm đã chuyển gọi ngược vào script chính / pos_printer vẫn chạy (cùng môi trường toàn cục)
       const r = await a.page.evaluate(() => { try { const c = renderTemCanvas(['TRÀ SỮA', 'Size M']); return { dpi: temDotsPerMm(), w: c && c.width, pw: temPxW(), quet: posScanAvailable(), fresh: billIsFresh({ createdAt: new Date().toISOString() }) }; } catch (e) { return { loi: String(e.message || e) }; } });
       chk(r.dpi === 8 && r.w === r.pw && r.quet === false && typeof r.fresh === 'boolean', '(8) 1C: renderTemCanvas / temDotsPerMm (POSTemPrinter) / posScanAvailable / billIsFresh chạy sau chốt dừng' + (r.loi ? ': ' + r.loi : ''));
+      const h = await a.page.evaluate(() => { try { const now = Date.parse('2026-10-26T05:00:00Z');
+        const ds = expiryCheckLines([{ id: 'b1', status: 'active', shelfLifeType: 'hours', expiresAt: '2026-10-26T04:00:00Z', qtyRemaining: 300, prepName: 'TC', unit: 'g' },
+          { id: 'b2', status: 'active', shelfLifeType: 'hours', expiresAt: '2026-10-28T04:00:00Z', qtyRemaining: 300 }], [{ id: 'c1', status: 'open', expiresAt: '2026-10-26T10:00:00Z', unitBase: 500 }], now, '2026-10-26');
+        expirySoonTick();
+        return { ds: ds.map(x => x.kind + ':' + x.id + ':' + x.expired), gh: expiryExtendTo('2026-10-26T04:00:00Z', now), hang: PREP_EXTEND_HOURS + '/' + EXP_SOON_MIN, mod: PosGieoMods.expiry }; } catch (e) { return { loi: String(e.message || e) }; } });
+      chk(h.mod === true && JSON.stringify(h.ds) === '["prep:b1:true","item:c1:false"]' && h.gh === '2026-10-27T05:00:00.000Z' && h.hang === '24/30', '(8) 2D: hạn dùng (pos_expiry) — expiryCheckLines / expiryExtendTo / expirySoonTick chạy sau chốt dừng' + (h.loi ? ': ' + h.loi : ' — ' + JSON.stringify(h)));
     }
     const pb = await ctx.newPage(); await pb.goto(base + '/js/posgieo/pos_ui.v1.js');
     await pb.evaluate(() => localStorage.setItem('khoa_khac', '1')); await a.page.waitForTimeout(300);
@@ -79,7 +85,7 @@ let ok = true; const chk = (c, m) => { console.log((c ? 'ok ' : 'FAIL ') + m); i
   }
 
   // (11) phản hồi kiểm tra lượt 06 — chốt module bao phủ TỪNG file 1C (không chỉ pos_ui): 404 hai lần / chạy dở
-  for (const [f, k] of [['pos_print_content.v1.js', 'printContent'], ['pos_print_ui.v1.js', 'printUi'], ['pos_receive.v1.js', 'receive'], ['pos_prep.v1.js', 'prep'], ['pos_stock_units.v1.js', 'stockUnits'], ['pos_kho.v1.js', 'kho'], ['pos_count.v1.js', 'count']]) {
+  for (const [f, k] of [['pos_print_content.v1.js', 'printContent'], ['pos_print_ui.v1.js', 'printUi'], ['pos_receive.v1.js', 'receive'], ['pos_prep.v1.js', 'prep'], ['pos_stock_units.v1.js', 'stockUnits'], ['pos_kho.v1.js', 'kho'], ['pos_count.v1.js', 'count'], ['pos_expiry.v1.js', 'expiry']]) {
     const re = new RegExp('js/posgieo/' + f.replace(/\./g, '\\.'));
     let r = await mo(base + '/posgieo.html', [{ status: 404, type: 'text/html', body: 'x' }, { status: 404, type: 'text/html', body: 'x' }], null, re);
     chk(r.modThieu && !r.login && r.xin.length === 2, '(11) ' + f + ' 404 cả lần nạp lại → màn đỏ, không vào màn nhập mã');
