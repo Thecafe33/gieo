@@ -50,7 +50,7 @@ let ok = true; const chk = (c, m) => { console.log((c ? 'ok ' : 'FAIL ') + m); i
     });
     await page.goto(url, { waitUntil: 'load' }).catch(e => loi.push('goto: ' + e.message));
     await page.waitForTimeout(400);
-    const tt = await page.evaluate(() => ({ ui: window.PosGieoMods && window.PosGieoMods.ui, esc: typeof escHtmlPos === 'function' ? escHtmlPos('<b>&') : null, login: !!document.getElementById('posStoreLogin'), assist: window.PosGieoMods && window.PosGieoMods.assist, assistFn: typeof assistRender === 'function' && typeof assistFinalizeOrder === 'function', printer: window.PosGieoMods && window.PosGieoMods.printer, printerFn: (() => { try { return typeof POSTemPrinter === 'object' && typeof temEnsureConnected === 'function' && typeof XprinterBillBridgeEngine === 'function'; } catch (e) { return false; } })(), modThieu: !!document.getElementById('posModThieu'), thu: !!(window.GieoThu && GieoThu.active) }));
+    const tt = await page.evaluate(() => ({ ui: window.PosGieoMods && window.PosGieoMods.ui, esc: typeof escHtmlPos === 'function' ? escHtmlPos('<b>&') : null, login: !!document.getElementById('posStoreLogin'), assist: window.PosGieoMods && window.PosGieoMods.assist, assistFn: typeof assistRender === 'function' && typeof assistFinalizeOrder === 'function', printer: window.PosGieoMods && window.PosGieoMods.printer, printerFn: (() => { try { return typeof POSTemPrinter === 'object' && typeof temEnsureConnected === 'function' && typeof XprinterBillBridgeEngine === 'function'; } catch (e) { return false; } })(), printContent: window.PosGieoMods && window.PosGieoMods.printContent, printUi: window.PosGieoMods && window.PosGieoMods.printUi, print1cFn: ['renderReceiptCanvas','buildReceiptContent','renderTemCanvas','drawQrOnCanvas','printerTab','posScan','temReprintAll','printerReprintOrder'].every(n => typeof window[n] === 'function'), modThieu: !!document.getElementById('posModThieu'), thu: !!(window.GieoThu && GieoThu.active) }));
     if (!ctx) await page.close();
     return Object.assign(tt, { loi, xin, page });
   }
@@ -61,6 +61,7 @@ let ok = true; const chk = (c, m) => { console.log((c ? 'ok ' : 'FAIL ') + m); i
   chk(t.login, '(1) máy chưa gắn quán → màn nhập mã quán hiện (chốt dừng giữ nguyên)');
   chk(t.assist === true && t.assistFn, '(1) Đợt 1A: js/posgieo/pos_assist.v1.js nạp, PosGieoMods.assist = true, assistRender / assistFinalizeOrder có');
   chk(t.printer === true && t.printerFn, '(1) Đợt 1B: js/posgieo/pos_printer.v1.js nạp, POSTemPrinter / temEnsureConnected / class máy in có (POSPrinter ở script chính — P1/P2)');
+  chk(t.printContent === true && t.printUi === true && t.print1cFn, '(1) Đợt 1C: pos_print_content.v1.js + pos_print_ui.v1.js nạp, hàm nội dung bill/tem, màn máy in, máy quét, in lại có');
   chk(!chuanLoi(t.loi).length, '(1) không lỗi JS ngoài throw có chủ đích ở chốt dừng' + (chuanLoi(t.loi).length ? ': ' + chuanLoi(t.loi).join(' | ') : ''));
 
   t = await mo(base + '/posgieo.html', [{ status: 404, type: 'text/html', body: 'Not Found' }]);
@@ -83,6 +84,10 @@ let ok = true; const chk = (c, m) => { console.log((c ? 'ok ' : 'FAIL ') + m); i
     await ctx.addInitScript(() => { try { if (!localStorage.getItem('gieo_store_v1')) localStorage.setItem('gieo_store_v1', JSON.stringify({ storeId: 'gg01', name: 'Gieo 1' })); } catch (e) {} });
     const a = await mo(base + '/posgieo.html', null, ctx);
     chk(!a.login && !a.modThieu, '(8) tab A đã gắn gg01 → qua chốt dừng (không màn nhập mã)');
+    {   // 1C: qua chốt dừng, hàm đã chuyển gọi ngược vào script chính / pos_printer vẫn chạy (cùng môi trường toàn cục)
+      const r = await a.page.evaluate(() => { try { const c = renderTemCanvas(['TRÀ SỮA', 'Size M']); return { dpi: temDotsPerMm(), w: c && c.width, pw: temPxW(), quet: posScanAvailable(), fresh: billIsFresh({ createdAt: new Date().toISOString() }) }; } catch (e) { return { loi: String(e.message || e) }; } });
+      chk(r.dpi === 8 && r.w === r.pw && r.quet === false && typeof r.fresh === 'boolean', '(8) 1C: renderTemCanvas / temDotsPerMm (POSTemPrinter) / posScanAvailable / billIsFresh chạy sau chốt dừng' + (r.loi ? ': ' + r.loi : ''));
+    }
     const pb = await ctx.newPage(); await pb.goto(base + '/js/posgieo/pos_ui.v1.js');
     await pb.evaluate(() => localStorage.setItem('khoa_khac', '1')); await a.page.waitForTimeout(300);
     chk(!(await a.page.evaluate(() => !!document.getElementById('posStoreDoi'))), '(8) tab kia đổi khoá khác → tab A không bị phủ');

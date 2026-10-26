@@ -34,7 +34,8 @@ const rows = (fake, coll) => Object.keys(fake.FS).filter(k => k.startsWith(coll 
   // Không còn .add() nào trên collection sổ trong engine / hai app
   const bad = [];
   for (const f of [require('./lib/engine_file'), 'posgieo.html', 'quanlygieo.html']) {
-    const src = fs.readFileSync(path.resolve(__dirname, '..', f), 'utf8');
+    // HTML: quét cả JS riêng js/… (tách posgieo) — mã đã chuyển ra file vẫn phải bị kiểm
+    const src = fs.readFileSync(path.resolve(__dirname, '..', f), 'utf8') + (/\.html$/.test(f) ? '\n' + require('../tools/tach_posgieo/nguon').maNoi(f) : '');
     const re = /collection\(\s*'(stock_transactions_gieogieo|prep_transactions_gieogieo)'\s*\)\s*\.add\(/g; let m;
     while ((m = re.exec(src))) bad.push(f + ':' + src.slice(0, m.index).split('\n').length);
   }

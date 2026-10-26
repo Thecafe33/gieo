@@ -5,7 +5,8 @@ const { extract } = require('./lib/extract');
 let fail = 0;
 const ok = (c, m) => { console.log((c ? 'ok ' : 'FAIL ') + m); if (!c) fail = 1; };
 
-const html = fs.readFileSync(path.join(__dirname, '..', 'posgieo.html'), 'utf8');
+// HTML + JS riêng js/posgieo (tách posgieo) — kiểm "không có" phải quét cả mã đã chuyển ra file
+const html = fs.readFileSync(path.join(__dirname, '..', 'posgieo.html'), 'utf8') + '\n' + require('../tools/tach_posgieo/nguon').maNoi('posgieo.html');
 const src = extract('posgieo.html', ['_custAcSave', '_custAcPack', '_custAcUnpack', 'fetchAllCustomersCache']);
 
 function mayPos(ls, khach, homNay) {

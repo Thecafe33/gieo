@@ -78,7 +78,7 @@ const cup = () => ({ itemId: 'm1', name: 'Trà', size: 'M', price: 0, qty: 1, _v
   const s6 = e.api.get();
   eq([s6.cart.s.price, s6.cart.s._vKey, s6.phone, s6.vkey], [35000, undefined, null, null], 'T6 reset trả giá gốc');
   // T7: POS không còn đọc/ghi rewards, myGifts, marker voucher/discount
-  const html = fs.readFileSync(path.resolve(__dirname, '..', 'posgieo.html'), 'utf8').replace(/<!--[\s\S]*?-->/g, '');
+  const html = (fs.readFileSync(path.resolve(__dirname, '..', 'posgieo.html'), 'utf8') + '\n' + require('../tools/tach_posgieo/nguon').maNoi('posgieo.html')).replace(/<!--[\s\S]*?-->/g, '');   // + JS riêng js/posgieo
   const code = html.split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n');
   eq([/collection\(\s*['"]rewards['"]/.test(code), /myGifts\./.test(code), /voucher_effects_gieogieo|discount_effects_gieogieo/.test(code)], [false, false, false], 'T7 không còn rewards/myGifts');
   console.log(ok ? 'ALL PASS' : 'SOME FAIL');
