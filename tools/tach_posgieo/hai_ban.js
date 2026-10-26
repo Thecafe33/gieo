@@ -73,4 +73,15 @@ function chenDauHam(file, ten, chen) {
   const ms = [...t.matchAll(re)]; if (ms.length !== 1) throw new Error('chenDauHam: ' + ten + ' thấy ' + ms.length + ' chỗ trong ' + file);
   const i = ms[0].index + ms[0][0].length; fs.writeFileSync(file, t.slice(0, i) + chen + t.slice(i));
 }
-module.exports = { dungHaiBan, moTrang, banSua, chenDauHam, ROOT };
+// Như chenDauHam nhưng tìm hàm trong CẢ BỘ của posgieo: posgieo.html + js/posgieo/*.js (hàm đã tách ra file riêng vẫn tìm thấy —
+// kiểm lượt 3B: tự kiểm e2e_hook cài lỗi theo tên hàm, không được ghim vào một file). Đúng MỘT chỗ trên toàn bộ, không thì lỗi.
+function chenDauHamBo(dir, ten, chen) {
+  const jsDir = path.join(dir, 'js', 'posgieo');
+  const files = [path.join(dir, 'posgieo.html'), ...(fs.existsSync(jsDir) ? fs.readdirSync(jsDir).filter(f => f.endsWith('.js')).map(f => path.join(jsDir, f)) : [])];
+  const re = new RegExp('(?:async\\s+)?function\\s+' + ten + '\\s*\\(', 'g');
+  const co = files.filter(f => [...fs.readFileSync(f, 'utf8').matchAll(re)].length);
+  if (co.length !== 1) throw new Error('chenDauHamBo: ' + ten + ' thấy ở ' + co.length + ' file');
+  chenDauHam(co[0], ten, chen);
+  return co[0];
+}
+module.exports = { dungHaiBan, moTrang, banSua, chenDauHam, chenDauHamBo, ROOT };

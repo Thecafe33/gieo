@@ -10,7 +10,7 @@
 // Firebase / CDN giả (fb_gia.js). Cần git (worktree mốc dựng tạm ở thư mục tạm, xoá khi xong) + Playwright.
 'use strict';
 const { chromium } = require('playwright'); const fs = require('fs'); const path = require('path');
-const { dungHaiBan, moTrang, banSua, chenDauHam, ROOT } = require('./hai_ban');
+const { dungHaiBan, moTrang, banSua, chenDauHam, chenDauHamBo, ROOT } = require('./hai_ban');
 const { chromiumPath } = require(path.join(ROOT, 'tests/lib/e2e'));
 const arg = (k, d) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : d; };
 const MOC = arg('--moc', '0bd95a7'), MUA = arg('--mua', 'giangsinh');
@@ -100,8 +100,8 @@ async function chup(b, base, ten, authNgay, pt) {
     // trợ lý, gán đè một hàm sau Engine 2 → công cụ PHẢI báo đúng các tên đó (không thì chính công cụ đang mù).
     const sua = await banSua(thuMuc.nay, d => {
       const h = path.join(d, 'posgieo.html');
-      chenDauHam(h, '_continueAfterPrepCount', "throw Error('tu-kiem-goc');");
-      chenDauHam(h, 'computeShiftInventoryCountLinesPOS', "throw Error('tu-kiem-goc');");
+      chenDauHamBo(d, '_continueAfterPrepCount', "throw Error('tu-kiem-goc');");   // hàm có thể đã ra js/posgieo/* (3B) — tìm cả bộ
+      chenDauHamBo(d, 'computeShiftInventoryCountLinesPOS', "throw Error('tu-kiem-goc');");
       let t = fs.readFileSync(h, 'utf8'); const bo = "boc('cartClear', () => assistResetSession());";
       if (!t.includes(bo)) throw new Error('tự kiểm: không thấy lớp trợ lý cartClear'); t = t.replace(bo, '/*tu-kiem*/');
       const e2 = '<script src="gieo_engine2_pos_v1.js"></script>'; if (!t.includes(e2)) throw new Error('tự kiểm: không thấy thẻ Engine 2');

@@ -459,6 +459,56 @@ const KICH_BAN = {
     kiem: (n) => { const g = n.ghi.find(x => x.op === 'set' && /daily_openings_gieogieo[^/]*\/2026-10-26$/.test(x.p)); return [
       [!!g && g.d.checklistDone && g.d.checklistDone.__fv === 'arrayUnion' && g.d.checklistDone.v[0].id === 'lau' && g.d.checklistDone.v[0].staffEmployeeId === 'e2e_nv', 'daily_openings 26/10: checklistDone arrayUnion { id: lau, người ký } — ' + JSON.stringify(g && g.d)]]; }
   },
+  // 3B — KẾT CA: đối soát tiền mặt MÙ khớp — mở ca 1.000.000 − chi tiền mặt 100.000 = 900.000; đếm 1 × 500.000 + 2 × 200.000, PIN thật e1
+  ketDoiSoatKhop: {
+    mo: 'ket', gioCo: HAN_T,
+    chay: async () => window.KB_KET('khop'),
+    bang: ["daily_closings_gieogieo", "shift_segments_gieogieo"],
+    kiem: (n) => { const g = n.ghi.find(x => x.op === 'set' && /daily_closings_gieogieo[^/]*\/2026-10-26$/.test(x.p)); return [
+      [!!g && g.d.status === 'cash_passed' && g.d.finalActualCash === 900000 && g.d.finalExpectedCash === 900000 && g.d.finalVariance === 0 && g.d.attempts && g.d.attempts.__fv === 'arrayUnion' && g.d.attempts.v[0].passed === true, 'daily_closings 26/10: cash_passed, thực 900.000 = kỳ vọng 900.000, lần đếm passed — ' + JSON.stringify(g && g.d)],
+      [n.ghi.some(x => /shift_segments_gieogieo[^/]*\/2026-10-26_1$/.test(x.p) && x.d && x.d.status === 'closed' && x.d.endCash === 900000), 'chốt đoạn ca 1: closed, endCash 900.000'],
+      [n.toasts.some(t => /^✅ Đã đối soát tiền mặt/.test(t)), 'toast «Đã đối soát tiền mặt» — ' + JSON.stringify(n.toasts)]]; }
+  },
+  // 3B — KẾT CA: đếm lệch (850.000), lần đầu → pending + «còn 1 lần đếm», không chốt đoạn ca
+  ketDoiSoatLech: {
+    mo: 'ket', gioCo: HAN_T,
+    chay: async () => window.KB_KET('lech'),
+    bang: ["daily_closings_gieogieo"],
+    kiem: (n) => { const g = n.ghi.find(x => x.op === 'set' && /daily_closings_gieogieo[^/]*\/2026-10-26$/.test(x.p)); return [
+      [!!g && g.d.status === 'pending' && !('cashPassedAt' in g.d) && g.d.attempts.v[0].passed === false && g.d.attempts.v[0].variance === -50000, 'daily_closings: pending, lần đếm lệch −50.000, chưa chốt — ' + JSON.stringify(g && g.d)],
+      [!n.ghi.some(x => /shift_segments_gieogieo/.test(x.p) && x.d && x.d.status === 'closed'), 'không chốt đoạn ca'],
+      [n.toasts.some(t => /còn 1 lần đếm/.test(t)), 'toast «còn 1 lần đếm»']]; }
+  },
+  // 3B — GIAO CA GIỮA NGÀY: e1 (giữ két) đếm 900.000 → PIN thật 1234; e2 đếm 900.000 → PIN thật 5678; khớp sổ → chốt đoạn 1, mở đoạn 2 cho e2
+  ketGiaoCa: {
+    mo: 'ket', gioCo: HAN_T,
+    chay: async () => window.KB_KET('giaoca'),
+    bang: ["shift_segments_gieogieo", "shift_workflows_gieogieo"],
+    kiem: (n) => { const s1 = n.ghi.find(x => /shift_segments_gieogieo[^/]*\/2026-10-26_1$/.test(x.p) && x.d && x.d.endType); const s2 = n.ghi.find(x => /shift_segments_gieogieo[^/]*\/2026-10-26_2$/.test(x.p)); return [
+      [n.sau && JSON.stringify(n.sau.phaSau) === '["out","in"]', 'pha đếm: giao (out) → nhận (in) — ' + JSON.stringify(n.sau && n.sau.phaSau)],
+      [!!s1 && s1.d.endCash === 900000, 'đoạn 1 chốt endCash 900.000 — ' + JSON.stringify(s1 && s1.d)],
+      [!!s2 && s2.d.custodianId === 'e2' && s2.d.startCash === 900000 && s2.d.status === 'open', 'đoạn 2 mở: e2 giữ két, startCash 900.000 — ' + JSON.stringify(s2 && s2.d)]]; }
+  },
+  // 3B — ĐÓNG NGÀY: đã bàn giao, không ai trong ca → màn checklist thật → tick «không còn bill dở» → PIN thật e1 → closed
+  ketDongNgay: {
+    mo: 'ket', gioCo: HAN_T, ketDong: true,
+    chay: async () => window.KB_KET('dong'),
+    bang: ["alerts_gieogieo", "daily_closings_gieogieo", "duty_digests_gieogieo"],
+    kiem: (n) => { const g = n.ghi.find(x => x.op === 'set' && /daily_closings_gieogieo[^/]*\/2026-10-26$/.test(x.p) && x.d && x.d.status === 'closed'); return [
+      [!!g && g.d.closedByEmployeeId === 'e1' && typeof g.d.closedAt === 'string', 'daily_closings 26/10: closed, người ký e1 — ' + JSON.stringify(g && g.d)],
+      [n.sau && n.sau.coO, 'màn đóng ngày có ô «không còn bill dở»'],
+      [n.toasts.some(t => /^✅ Đã đóng ngày/.test(t)), 'toast «Đã đóng ngày» — ' + JSON.stringify(n.toasts)]]; }
+  },
+  // 3B — DỌN CA TREO ngày cũ: ca e2 hôm 25/10 chưa check-out, ngày đó đã đóng lúc 15:10Z → check-out hộ đúng giờ đóng ngày
+  ketCaTreo: {
+    mo: 'ket', gioCo: HAN_T, ketTreo: true,
+    chay: async () => window.KB_KET('treo'),
+    bang: ["employee_shifts_gieogieo"],
+    kiem: (n) => { const g = n.ghi.find(x => x.op === 'update' && /employee_shifts_gieogieo[^/]*\/s0$/.test(x.p)); return [
+      [!!g && g.d.checkedOutAt === '2026-10-25T15:10:00.000Z' && g.d.autoCheckOut === true, 'ca s0 (25/10) check-out hộ đúng giờ đóng ngày 15:10Z — ' + JSON.stringify(g && g.d)],
+      [n.sau && n.sau.so === 1, 'trả về 1 ca đã chốt'],
+      [n.toasts.some(t => /Đã chốt hộ 1 ca/.test(t)), 'toast «Đã chốt hộ 1 ca»']]; }
+  },
   // 2C — KIỂM KÊ MÙ: mở màn (đọc danh mục) → đếm Trà lài 900 g → gửi phiếu chờ duyệt
   kiemKe: {
     mo: 'kho',
@@ -568,6 +618,49 @@ const KB_CA = async (viec) => {
   window.__buoc = 'tick'; await Promise.race([tickChecklistItem('lau'), sleep(4000)]); await sleep(300);
   return { hoi, busy: _posSubmitBusy };
 };
+// Phần chung kết ca 3B (chạy TRONG trang). Mọi ô PIN đi qua resolveStaffPinWorkedToday THẬT (danh mục + ca hôm nay mồi).
+const KB_KET = async (viec) => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const pin = (id, v) => { const el = document.getElementById(id + 'Pin'); if (el) { el.value = v; el.dispatchEvent(new Event('input')); } return !!el; };
+  let hoi = 0; window.posConfirm = async () => { hoi++; return true; };
+  window.__buoc = 'nạp';
+  Object.keys(_posLive).forEach(k => _posLiveStop(k));   // mọi bộ đệm sống đăng ký lúc mở trang (chưa có ảnh đầu) → gắn lại sau khi mồi
+  await loadEmployeesCachePOS(); await loadEmployeeShiftsTodayCache();
+  showScreen('caLamViecScreen');
+  const bd = posDateKey();
+  const op = (await fstore.collection('daily_openings_gieogieo').doc(bd).get()).data();
+  const cl = await fstore.collection('daily_closings_gieogieo').doc(bd).get();
+  shiftState = { businessDate: bd, opening: op, closing: cl.exists ? cl.data() : null };
+  if (viec === 'treo') { window.__ghi = []; const so = await closeStaleEmployeeShifts(); return { so }; }
+  if (viec === 'khop' || viec === 'lech') {
+    renderShiftCloseCountForm(); await sleep(50);
+    shiftChangeCloseDenom(500000, 1); shiftChangeCloseDenom(200000, viec === 'khop' ? 2 : 1); if (viec === 'lech') { shiftChangeCloseDenom(100000, 1); shiftChangeCloseDenom(50000, 1); }
+    pin('shiftCloseStaff', '1234');
+    window.__ghi = []; window.__buoc = 'đối soát';
+    await Promise.race([submitShiftClose(), sleep(4000)]); await sleep(300);
+    return { hoi, busy: _posSubmitBusy };
+  }
+  if (viec === 'giaoca') {
+    await openHandoverPOS('manual'); await sleep(50);
+    window.__ghi = []; window.__buoc = 'giao ca';
+    beginHandoverCountPOS(); await sleep(50);
+    const phaSau = [];
+    const dem = () => { _handover[_handover.phase === 'in' ? 'inDenoms' : 'outDenoms'] = Object.assign(cfEmptyDenoms(), { 500000: 1, 200000: 2 }); };
+    phaSau.push(_handover.phase); dem(); pin('handoverSigner', '1234'); await submitHandoverCountPOS(); await sleep(100);
+    phaSau.push(_handover && _handover.phase); dem(); pin('handoverSigner', '5678');
+    await Promise.race([submitHandoverCountPOS(), sleep(4000)]); await sleep(300);
+    return { hoi, phaSau, busy: _handoverBusy };
+  }
+  // đóng ngày
+  window.__buoc = 'màn đóng ngày';
+  await Promise.race([renderDailyClosingChecklist(), sleep(4000)]); await sleep(100);
+  const o = document.getElementById('dcNoMoreBills'); if (o) o.checked = true;
+  if (!o) return { hoi, coO: false, man: ((document.getElementById('shiftBody') || {}).textContent || '').replace(/\s+/g, ' ').slice(0, 300) };
+  pin('closeFinalStaff', '1234');
+  window.__ghi = []; window.__buoc = 'đóng ngày';
+  await Promise.race([submitDailyClose(), sleep(4000)]); await sleep(300);
+  return { hoi, coO: !!o, busy: _posSubmitBusy };
+};
 // Dòng sổ kho WASTE đã ghi thành công (bỏ lượt bị cài lỗi), theo itemId → qty; dòng sổ BTP WASTE
 const soWaste = n => n.ghi.filter(g => !/!hong$/.test(g.op) && /stock_transactions_gieogieo/.test(duongGhi(g)) && g.d && g.d.type === 'WASTE');
 const soPrepWaste = n => n.ghi.filter(g => !/!hong$/.test(g.op) && /prep_transactions_gieogieo/.test(duongGhi(g)) && g.d && g.d.type === 'WASTE');
@@ -599,7 +692,7 @@ const phieu = n => n.ghi.filter(g => /receiving_records_gieogieo/.test(duongGhi(
 
 async function chay(b, base, store, ten) {
   const t = await moTrang(b, base, KICH_BAN[ten].gioCo ? { authNgay: true, store, gioCo: KICH_BAN[ten].gioCo } : { authNgay: true, store, ngauNhienCo: true });
-  const r = await t.page.evaluate(async ({ src, dau, doly, han, ca, mo, ITEMS, PO, E2E }) => {
+  const r = await t.page.evaluate(async ({ src, dau, doly, han, ca, ket, mo, ITEMS, PO, E2E }) => {
     const toasts = []; const _t = window.toast;
     window.toast = function (m) { toasts.push(String(m)); try { return _t.apply(this, arguments); } catch (e) {} };
     window.requireShiftOpened = () => true; window.requireOpeningChecklistDone = () => true;
@@ -642,6 +735,21 @@ async function chay(b, base, store, ten) {
       if (E2E.caMo) S[ten('employee_shifts_gieogieo') + '/s1'] = { employeeId: 'e1', employeeName: 'NV Một', businessDate: '2026-10-26', checkedInAt: '2026-10-26T03:30:00.000Z', checkedOutAt: null, roles: ['barista'] };
       window.__SNAP = true;
     }
+    if (mo === 'ket') {   // 3B: hai nhân viên đã làm hôm nay (ca đã check-out), mở ca 1.000.000 do e1 giữ két, chi tiền mặt 100.000
+      S['employees_gieogieo/e1'] = { fullName: 'NV Một', pin: '1234', active: true, roles: [] };
+      S['employees_gieogieo/e2'] = { fullName: 'NV Hai', pin: '5678', active: true, roles: [] };
+      S[ten('employee_shifts_gieogieo') + '/s1'] = { employeeId: 'e1', employeeName: 'NV Một', businessDate: '2026-10-26', checkedInAt: '2026-10-26T00:20:00.000Z', checkedOutAt: '2026-10-26T07:00:00.000Z' };
+      S[ten('employee_shifts_gieogieo') + '/s2'] = { employeeId: 'e2', employeeName: 'NV Hai', businessDate: '2026-10-26', checkedInAt: '2026-10-26T03:00:00.000Z', checkedOutAt: '2026-10-26T07:10:00.000Z' };
+      S[ten('daily_openings_gieogieo') + '/2026-10-26'] = { businessDate: '2026-10-26', openingCash: 1000000, staff: 'NV Một', staffEmployeeId: 'e1', createdAt: '2026-10-26T00:30:00.000Z' };
+      S[ten('shift_segments_gieogieo') + '/2026-10-26_1'] = { businessDate: '2026-10-26', seq: 1, custodianId: 'e1', custodianName: 'NV Một', startAt: '2026-10-26T00:30:00.000Z', startType: 'open', startCash: 1000000, status: 'open', createdAt: '2026-10-26T00:30:00.000Z' };
+      S[ten('expenses_gieogieo') + '/x1'] = { date: '2026-10-26', amount: 100000, baseType: 'cash', status: 'approved', note: 'Mua đá' };
+      if (E2E.ketDong) S[ten('daily_closings_gieogieo') + '/2026-10-26'] = { businessDate: '2026-10-26', status: 'handed_over', cashPassedAt: '2026-10-26T07:20:00.000Z', finalActualCash: 900000, closingStaff: 'NV Một' };
+      if (E2E.ketTreo) {
+        S[ten('employee_shifts_gieogieo') + '/s0'] = { employeeId: 'e2', employeeName: 'NV Hai', businessDate: '2026-10-25', checkedInAt: '2026-10-25T08:00:00.000Z', checkedOutAt: null };
+        S[ten('daily_closings_gieogieo') + '/2026-10-25'] = { businessDate: '2026-10-25', status: 'closed', closedAt: '2026-10-25T15:10:00.000Z' };
+      }
+      window.__SNAP = true;
+    }
     if (mo === 'nau') {
       for (const [id, it] of Object.entries(E2E.NL_NAU)) S[ten('inventory_items_gieogieo') + '/' + id] = it;
       for (const [id, it] of Object.entries(E2E.PREP_NAU)) S[ten('prep_items_gieogieo') + '/' + id] = it;
@@ -654,12 +762,12 @@ async function chay(b, base, store, ten) {
       if (E2E.tieuHao) S[ten('stock_transactions_gieogieo') + '/cons_b2_pearl'] = { itemId: 'pearl', type: 'CONSUMPTION', qty: -500, referenceId: 'b2', prepBatchId: 'b2', businessDate: '2026-10-26', createdAt: '2026-10-26T01:00:00.000Z', status: 'posted' };
     }
     window.__SEED = S; window.__SEED_GHI = true; window.__HONG = [];
-    window.KB_DAU = (0, eval)('(' + dau + ')'); window.KB_DOLY = (0, eval)('(' + doly + ')'); window.KB_HAN = (0, eval)('(' + han + ')'); window.KB_CA = (0, eval)('(' + ca + ')');
+    window.KB_DAU = (0, eval)('(' + dau + ')'); window.KB_DOLY = (0, eval)('(' + doly + ')'); window.KB_HAN = (0, eval)('(' + han + ')'); window.KB_CA = (0, eval)('(' + ca + ')'); window.KB_KET = (0, eval)('(' + ket + ')');
     let loiKB = null, sau = null;
     window.__buoc = '';   // kịch bản treo (lời hứa không bao giờ xong) → báo lỗi sau 45 giây kèm bước cuối, không treo cả bài
     try { sau = await Promise.race([(0, eval)('(' + src + ')')({ ITEMS }), new Promise((_, rej) => setTimeout(() => rej(new Error('kịch bản quá 45 giây — bước: ' + window.__buoc)), 45000))]); } catch (e) { loiKB = String(e && e.message || e); }
     return { ghi: (window.__ghi || []).map(g => ({ op: g.op, p: g.p, rt: !!g.rt, d: g.d })), toasts, sau, loiKB };
-  }, { src: KICH_BAN[ten].chay.toString(), dau: KB_DAU.toString(), doly: KB_DOLY.toString(), han: KB_HAN.toString(), ca: KB_CA.toString(), mo: KICH_BAN[ten].mo, ITEMS, PO, E2E: { PREP, BATCH: BATCH(), NL_NAU, PREP_NAU, NL_KHO, DOLY, HAN, CTN1: CTN('sealed'), CTN2: CTN('open', { unitBase: 0, openedAt: '2026-10-25T05:00:00.000Z', openedBy: 'NV E2E', expiresAt: '2026-10-26T05:00:00.000Z' }), lo: KICH_BAN[ten].lo || [], loActive: !!KICH_BAN[ten].loActive, tieuHao: !!KICH_BAN[ten].tieuHao, caMo: !!KICH_BAN[ten].caMo } });
+  }, { src: KICH_BAN[ten].chay.toString(), dau: KB_DAU.toString(), doly: KB_DOLY.toString(), han: KB_HAN.toString(), ca: KB_CA.toString(), ket: KB_KET.toString(), mo: KICH_BAN[ten].mo, ITEMS, PO, E2E: { PREP, BATCH: BATCH(), NL_NAU, PREP_NAU, NL_KHO, DOLY, HAN, CTN1: CTN('sealed'), CTN2: CTN('open', { unitBase: 0, openedAt: '2026-10-25T05:00:00.000Z', openedBy: 'NV E2E', expiresAt: '2026-10-26T05:00:00.000Z' }), lo: KICH_BAN[ten].lo || [], loActive: !!KICH_BAN[ten].loActive, tieuHao: !!KICH_BAN[ten].tieuHao, caMo: !!KICH_BAN[ten].caMo, ketDong: !!KICH_BAN[ten].ketDong, ketTreo: !!KICH_BAN[ten].ketTreo } });
   r.loi = t.loi.slice().sort(); r.qua = t.qua; await t.ctx.close();
   r.ghiTho = r.ghi; r.ghi = chuanGhi(r.ghi, !!KICH_BAN[ten].gioCo); r.sau = chuanDuLieu(r.sau, undefined, !!KICH_BAN[ten].gioCo);
   return r;
@@ -710,6 +818,8 @@ const lechMuc = (m, n) => SO.filter(p => JSON.stringify(m[p]) !== JSON.stringify
       { kb: 'doLy', file: 'pos_kho.v1.js', tim: /qty: -qtyUsed, txId/, thay: 'qty: -(qtyUsed + 1), txId', mo: 'đổi lượng trừ NL khi đổ ly' },
       { kb: 'hanGiaHan', file: 'pos_expiry.v1.js', tim: /const PREP_EXTEND_HOURS = 24;/, thay: 'const PREP_EXTEND_HOURS = 25;', mo: 'đổi số giờ gia hạn' },
       { kb: 'caCheckIn', file: 'pos_shift.v1.js', tim: /otThresholdHours: Number\(emp\.otThresholdHours\) \|\| 8,/, thay: 'otThresholdHours: Number(emp.otThresholdHours) || 9,', mo: 'đổi ngưỡng OT mặc định chụp vào ca' },
+      { kb: 'ketDoiSoatKhop', file: 'pos_shift_closing.v1.js', tim: /status: passed \? 'cash_passed'/, thay: "status: passed ? 'cash_ok'", mo: 'đổi trạng thái đối soát khớp' },
+      { kb: 'ketCaTreo', file: 'pos_handover.v1.js', tim: /'Tự chốt ca bỏ quên từ ngày '/, thay: "'Tu chot ca '", mo: 'đổi lý do chốt hộ ca treo' },
       { kb: 'batDauMe', file: 'pos_prep.v1.js', tim: /note: `Nấu \$\{p\.code/, thay: 'note: `NAU ${p.code', mo: 'đổi ghi chú dòng trừ NL khi bắt đầu nấu' }
     ];
     for (const tk of TU_KIEM) {
