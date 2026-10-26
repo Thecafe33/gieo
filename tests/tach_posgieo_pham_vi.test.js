@@ -1,0 +1,24 @@
+// Bộ kiểm phạm vi quán của e2e_kho (tools/tach_posgieo/pham_vi.js) — ca cài lỗi theo kiểm toán lượt 08 F08-1.
+'use strict';
+const path = require('path');
+const { napREG, kiemPhamVi, bangGoc } = require('../tools/tach_posgieo/pham_vi');
+let ok = true; const eq = (a, b, m) => { const s = JSON.stringify(a) === JSON.stringify(b); console.log((s ? 'ok ' : 'FAIL ') + m + (s ? '' : ' ' + JSON.stringify(a) + ' != ' + JSON.stringify(b))); if (!s) ok = false; };
+const REG = napREG(path.resolve(__dirname, '..'));
+const n = (ghi, store) => kiemPhamVi(ghi, store, REG).length;
+eq(REG.fs.receiving_records_gieogieo, 'S', 'REG đọc được: receiving_records là S');
+eq(n([{ op: 'set', p: 'receiving_records_gieogieo/x' }], 'gg01'), 0, 'gg01 ghi tên gốc S → hợp lệ');
+eq(n([{ op: 'set', p: 'receiving_records_gieogieo__gg02/x' }], 'gg02'), 0, 'gg02 ghi __gg02 → hợp lệ');
+eq(n([{ op: 'set', p: 'receiving_records_gieogieo/x' }], 'gg02'), 1, 'gg02 ghi tên gốc (bảng gg01) → vi phạm');
+eq(n([{ op: 'set', p: 'receiving_records_gieogieo__gg03/probe' }], 'gg02'), 1, 'gg02 ghi __gg03 → vi phạm (lỗi cũ: mọi hậu tố được cho qua)');
+eq(n([{ op: 'set', p: 'receiving_records_gieogieo__gg02/x' }], 'gg01'), 1, 'gg01 ghi __gg02 → vi phạm');
+eq(n([{ op: 'tx.set@stock_transactions_gieogieo__gg03/a', p: '' }], 'gg02'), 1, 'dạng tx.*@ cũng bị kiểm');
+eq(n([{ op: 'batch.update@inventory_items_gieogieo/a', p: '' }], 'gg02'), 1, 'dạng batch.*@ bảng C tên gốc ở gg02 → vi phạm');
+const G = Object.keys(REG.fs).find(k => REG.fs[k] === 'G');
+eq(n([{ op: 'set', p: G + '/x' }], 'gg02'), 0, 'bảng dùng chung G không hậu tố ở gg02 → hợp lệ (' + G + ')');
+eq(n([{ op: 'set', p: G + '__gg02/x' }], 'gg02'), 1, 'bảng dùng chung G mang hậu tố → vi phạm');
+eq(n([{ op: 'set', p: 'customers/0901' }], 'gg02'), 0, 'customers (X) không hậu tố → hợp lệ');
+eq(n([{ op: 'push', p: 'orders_gieogieo/oct/26', rt: true }], 'gg02'), 1, 'RT S tên gốc ở gg02 → vi phạm');
+eq(n([{ op: 'set', p: 'bang_la_gieogieo/x' }], 'gg01'), 1, 'bảng chưa đăng ký → vi phạm');
+eq(n([{ op: 'storage.put', p: 'receiving_photos_gieogieo/r/0.jpg' }], 'gg02'), 0, 'Storage receiving_photos (G) → hợp lệ');
+eq(bangGoc([{ op: 'tx.set@a_gieogieo__gg02/1', p: '' }, { op: 'set', p: 'b_gieogieo/2' }]), ['a_gieogieo', 'b_gieogieo'], 'bangGoc bỏ hậu tố');
+console.log(ok ? 'ALL PASS' : 'SOME FAIL'); process.exit(ok ? 0 : 1);
