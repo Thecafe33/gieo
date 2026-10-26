@@ -9,25 +9,7 @@
 const { chromium } = require('playwright'); const http = require('http'); const fs = require('fs'); const path = require('path');
 const ROOT = path.resolve(__dirname, '..', '..');
 const { chromiumPath, serveFile } = require(path.join(ROOT, 'tests/lib/e2e'));
-const FB_STUB = `(function(){
-  // Firebase giả tối thiểu, NHỚ ĐƯỜNG DẪN (che_do_thu tự kiểm collection().path / ref().toString() / storage fullPath)
-  var mk=function(p){var o={path:p,id:String(p).split('/').pop()};
-    ['where','orderBy','limit','orderByChild','equalTo','limitToLast','startAt','endAt','startAfter'].forEach(function(k){o[k]=function(){return o};});
-    o.collection=o.doc=o.child=function(n){return mk((p?p+'/':'')+(n==null?'auto':n));};
-    o.ref=function(n){return mk(n==null?'':String(n));};
-    o.toString=function(){return 'https://gia.firebaseio.com/'+p;};
-    o.get=function(){return Promise.resolve({docs:[],empty:true,exists:false,size:0,forEach:function(){},val:function(){return null},data:function(){return undefined}})};
-    o.add=function(d){(window.__ghiAdd=window.__ghiAdd||[]).push(p);return Promise.resolve(mk(p+'/auto'));};o.once=o.get;o.on=function(){};o.off=function(){};o.onSnapshot=function(){return function(){}};o.set=o.update=o.delete=o.remove=o.push=function(){return Promise.resolve()};
-    o.batch=function(){return {set:function(){},update:function(){},delete:function(){},commit:function(){return Promise.resolve()}}};
-    o.runTransaction=function(){return Promise.resolve()};o.enablePersistence=function(){return Promise.resolve()};o.settings=function(){};
-    o.enableNetwork=o.disableNetwork=function(){return Promise.resolve()};return o;};
-  var fs_=mk(''),db_=mk('');var st_={ref:function(x){var r={fullPath:String(x||''),child:function(n){return st_.ref((x?x+'/':'')+n)},put:function(){return Promise.resolve()},getDownloadURL:function(){return Promise.resolve('')},listAll:function(){return Promise.resolve({items:[],prefixes:[]})}};return r;}};
-  window.firebase={apps:[],initializeApp:function(){this.apps.push({})},database:function(){return db_},firestore:function(){return fs_},
-    auth:function(){return {onAuthStateChanged:function(){},signInWithEmailAndPassword:function(){return new Promise(function(){})},currentUser:null}},storage:function(){return st_}};
-  window.firebase.firestore.FieldValue={serverTimestamp:function(){return 0},increment:function(n){return n},arrayUnion:function(){},arrayRemove:function(){},delete:function(){}};
-  window.firebase.firestore.FieldPath={documentId:function(){return '__name__'}};
-  window.firebase.database.ServerValue={TIMESTAMP:0,increment:function(n){return n}};
-})();`;
+const { FB_STUB } = require('./fb_gia');
 let ok = true; const chk = (c, m) => { console.log((c ? 'ok ' : 'FAIL ') + m); if (!c) ok = false; };
 
 (async () => {
