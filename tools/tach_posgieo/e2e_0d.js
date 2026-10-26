@@ -17,7 +17,7 @@ const FB_STUB = `(function(){
     o.ref=function(n){return mk(n==null?'':String(n));};
     o.toString=function(){return 'https://gia.firebaseio.com/'+p;};
     o.get=function(){return Promise.resolve({docs:[],empty:true,exists:false,size:0,forEach:function(){},val:function(){return null},data:function(){return undefined}})};
-    o.once=o.get;o.on=function(){};o.off=function(){};o.onSnapshot=function(){return function(){}};o.set=o.update=o.delete=o.remove=o.push=function(){return Promise.resolve()};
+    o.add=function(d){(window.__ghiAdd=window.__ghiAdd||[]).push(p);return Promise.resolve(mk(p+'/auto'));};o.once=o.get;o.on=function(){};o.off=function(){};o.onSnapshot=function(){return function(){}};o.set=o.update=o.delete=o.remove=o.push=function(){return Promise.resolve()};
     o.batch=function(){return {set:function(){},update:function(){},delete:function(){},commit:function(){return Promise.resolve()}}};
     o.runTransaction=function(){return Promise.resolve()};o.enablePersistence=function(){return Promise.resolve()};o.settings=function(){};
     o.enableNetwork=o.disableNetwork=function(){return Promise.resolve()};return o;};
@@ -34,14 +34,14 @@ let ok = true; const chk = (c, m) => { console.log((c ? 'ok ' : 'FAIL ') + m); i
   const server = http.createServer((req, res) => { const u = new URL(req.url, 'http://x'); if (!serveFile(ROOT, u.pathname, res)) { res.statusCode = 404; res.end('404'); } });
   await new Promise(r => server.listen(0, '127.0.0.1', r)); const base = 'http://127.0.0.1:' + server.address().port;
   const b = await chromium.launch({ executablePath: chromiumPath(), args: ['--no-sandbox', '--allow-file-access-from-files'] });
-  async function mo(url, ghiDe, ctx) {   // ghiDe: [{lan, status, body}] — thay phản hồi pos_ui theo lượt
+  async function mo(url, ghiDe, ctx, fileRe) {   // ghiDe: [{lan, status, body}] — thay phản hồi file JS riêng (mặc định pos_ui) theo lượt
     const page = await (ctx || b).newPage(); const loi = []; const xin = [];
     page.on('pageerror', e => loi.push(process.env.E2E_DEBUG ? e.stack : e.message));
     await page.route('**/*', async r => {
       const u = r.request().url();
       if (/gstatic\.com\/firebasejs\/[\d.]+\/firebase-app-compat\.js/.test(u)) return r.fulfill({ contentType: 'text/javascript', body: FB_STUB });
       if (/^https?:\/\/(www\.gstatic\.com|cdn\.jsdelivr\.net)/.test(u)) return r.fulfill({ contentType: 'text/javascript', body: '' });
-      if (/js\/posgieo\/pos_ui\.v1\.js/.test(u)) {
+      if ((fileRe || /js\/posgieo\/pos_ui\.v1\.js/).test(u)) {
         xin.push(u); const g = ghiDe && ghiDe[xin.length - 1];
         if (g) return r.fulfill({ status: g.status || 200, contentType: g.type || 'text/javascript', body: g.body });
       }
@@ -93,6 +93,34 @@ let ok = true; const chk = (c, m) => { console.log((c ? 'ok ' : 'FAIL ') + m); i
     chk(!(await a.page.evaluate(() => !!document.getElementById('posStoreDoi'))), '(8) tab kia đổi khoá khác → tab A không bị phủ');
     await pb.evaluate(() => localStorage.setItem('gieo_store_v1', JSON.stringify({ storeId: 'gg02', name: 'Gieo 2' }))); await a.page.waitForTimeout(300);
     chk(await a.page.evaluate(() => !!document.getElementById('posStoreDoi')), '(8) H1: tab kia đổi cửa hàng gg01 → gg02 → tab A phủ màn «Máy đã đổi cửa hàng ở cửa sổ khác»');
+    await ctx.close();
+  }
+
+  // (11) phản hồi kiểm tra lượt 06 — chốt module bao phủ TỪNG file 1C (không chỉ pos_ui): 404 hai lần / chạy dở
+  for (const [f, k] of [['pos_print_content.v1.js', 'printContent'], ['pos_print_ui.v1.js', 'printUi']]) {
+    const re = new RegExp('js/posgieo/' + f.replace(/\./g, '\\.'));
+    let r = await mo(base + '/posgieo.html', [{ status: 404, type: 'text/html', body: 'x' }, { status: 404, type: 'text/html', body: 'x' }], null, re);
+    chk(r.modThieu && !r.login && r.xin.length === 2, '(11) ' + f + ' 404 cả lần nạp lại → màn đỏ, không vào màn nhập mã');
+    const DO2 = "(window.PosGieoMods = window.PosGieoMods || {})." + k + " = 'dang';\nconst X_DO_" + k + " = 1;\nthrow new Error('lỗi giữa chừng');";
+    r = await mo(base + '/posgieo.html', [{ body: DO2 }, { body: DO2 }], null, re);
+    chk(r.modThieu && !r.login && r.xin.length === 1 && !r.loi.some(m => /already been declared/.test(m)), '(11) ' + f + ' chạy dở → không nạp lại, màn đỏ, không lỗi khai báo lần hai');
+  }
+
+  {   // (12) phản hồi lượt 06 — máy quét (callback native giả) + nhật ký in lại ghi đúng quán GG02, hàm ở file riêng làm việc với tên ở script chính
+    const ctx = await b.newContext();
+    await ctx.addInitScript(() => { try { localStorage.setItem('gieo_store_v1', JSON.stringify({ storeId: 'gg02', name: 'Gieo 2' })); localStorage.setItem('gieo_ls_store_v1', 'gg02'); } catch (e) {} });
+    const a = await mo(base + '/posgieo.html', null, ctx);
+    const r = await a.page.evaluate(async () => {
+      const out = {};
+      out.khong = (await posScan()).error;
+      window.AndroidScanner = { getScannerVersion: () => 1, scan: id => setTimeout(() => window.__androidScanResult({ id, ok: true, code: 'SCAN-06', format: 'QR_CODE' }), 10) };
+      const kq = await posScan(); out.code = kq.code; out.format = kq.format; out.conCho = Object.keys(_scanPending).length;
+      window.__ghiAdd = []; logReprint({ id: 'o1', billCode: '#01', createdAt: new Date().toISOString() }, 'tem', 'all', 'thử');
+      out.ghi = window.__ghiAdd.slice();
+      return out;
+    });
+    chk(r.khong === 'no-scanner' && r.code === 'SCAN-06' && r.format === 'QR_CODE' && r.conCho === 0, '(12) máy quét: không cầu nối → no-scanner; callback native giả trả đúng mã, dọn lượt chờ ' + JSON.stringify(r));
+    chk(r.ghi.length === 1 && r.ghi[0] === 'label_reprints_gieogieo__gg02', '(12) logReprint (file riêng) ghi label_reprints_gieogieo__gg02 qua lớp GieoData ' + JSON.stringify(r.ghi));
     await ctx.close();
   }
 

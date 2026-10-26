@@ -432,7 +432,7 @@ Mỗi lần sửa: `sh tools/sinh_lai_tat_ca.sh` (đã gồm test), `node tools/
 | 0C Công cụ T1–T13 | Xong — chờ kiểm tra lượt 02 | — | `docs/tach_posgieo/KIEM_TRA_02_CONG_CU.md`; `tests/tach_posgieo_cong_cu.test.js` (27 ca cài lỗi) |
 | 0D Thử `pos_ui.v1.js` | Xong (`e102ba4`, R) — chờ kiểm tra lượt 03 | `e102ba4` | `docs/tach_posgieo/KIEM_TRA_03_THU_DUONG_DI.md`; e2e `tools/tach_posgieo/e2e_0d.js` |
 | 0E Hợp đồng lỗi tải + H1 | Xong (`bbe5a97`, H) — chờ kiểm tra lượt 03 | `bbe5a97` | như trên (ca 4b, 7, 8) |
-| 1 Thiết bị/trợ lý/mùa | 1A trợ lý (lượt 04), 1B kết nối máy in (lượt 05) xong — đã kiểm (lượt 02–05); 1C nội dung bill/tem + giao diện máy in/quét/in lại (lượt 06) xong — chờ kiểm tra; 1D chưa | `3003478` | `docs/tach_posgieo/KIEM_TRA_04_TRO_LY.md`; công cụ `tools/tach_posgieo/chuyen.js` |
+| 1 Thiết bị/trợ lý/mùa | 1A trợ lý (lượt 04), 1B kết nối máy in (lượt 05) xong — đã kiểm (lượt 02–05); 1C nội dung bill/tem + giao diện máy in/quét/in lại (lượt 06) xong — đã kiểm, đạt (`PHAN_HOI_KIEM_TRA_06.md`); 1D chưa | `3003478` | `docs/tach_posgieo/KIEM_TRA_04_TRO_LY.md`; công cụ `tools/tach_posgieo/chuyen.js` |
 | 2 Kho | Chưa làm | — | Snapshot/log, cách ly S/C |
 | 3 Ca/quỹ | Chưa làm | — | Tiền, ngày VN |
 | 4 Thanh toán | Chưa làm | — | TM/CK/huỷ/mất ACK |
