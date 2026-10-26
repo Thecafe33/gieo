@@ -5,35 +5,59 @@ const FB_STUB = `(function(){
   // Firebase giả tối thiểu, NHỚ ĐƯỜNG DẪN (che_do_thu tự kiểm collection().path / ref().toString() / storage fullPath)
   // Tuỳ chọn trang: window.__SEED_GHI = true → mỗi lượt ghi cập nhật lại __SEED (đọc sau ghi thấy dữ liệu mới; update = gộp nông,
   // khoá 'a.b' gộp lồng; FieldValue.increment KHÔNG cộng dồn — xấp xỉ); window.__HONG = [{op, re, con}] → lượt ghi khớp op + regex
-  // đường dẫn bị LỖI (con = số lần, mặc định 1) — giả mạng rớt giữa chừng.
+  // đường dẫn bị LỖI (con = số lần, mặc định 1) — giả mạng rớt giữa chừng. window.__SNAP = true → Firestore onSnapshot gửi MỘT ảnh đầu từ mồi
+  // (như máy chủ trả lần đầu, fromCache false; không gửi tiếp khi ghi) — tắt thì listener im lặng như trước.
   var cpv=function(v){return v==null?v:JSON.parse(JSON.stringify(v))};
   var apSeed=function(k,duong,d,merge){ if(!window.__SEED_GHI)return; var S=window.__SEED=window.__SEED||{};
     if(k==='delete'||k==='remove'){delete S[duong];return;}
     if(k==='update'||merge){var o=Object.assign({},S[duong]||{});Object.keys(d||{}).forEach(function(kk){var ps=kk.split('.'),t=o;for(var i=0;i<ps.length-1;i++){t[ps[i]]=Object.assign({},t[ps[i]]||{});t=t[ps[i]];}t[ps[ps.length-1]]=cpv(d[kk]);});S[duong]=o;return;}
     S[duong]=cpv(d); };
+  // RT là CÂY: mồi có thể đặt ở node cha ('active_units/milk') hoặc node con ('active_units/milk/ctn1') — đọc / transaction ghép
+  // cả hai (node cụ thể hơn thắng); ghi RT gom vào node tổ tiên đã có (một nguồn), set/xoá bỏ mồi con cũ của node đó.
+  var toTien=function(S,p){var g=null;Object.keys(S).forEach(function(k){if(p.indexOf(k+'/')===0&&(g===null||k.length>g.length))g=k;});return g;};
+  var rtDoc=function(S,p){var v=null,g=toTien(S,p);
+    if(Object.prototype.hasOwnProperty.call(S,p))v=cpv(S[p]);
+    else if(g!==null){v=cpv(S[g]);p.slice(g.length+1).split('/').forEach(function(x){v=(v&&typeof v==='object'&&x in v)?v[x]:null;});}
+    Object.keys(S).filter(function(k){return k.indexOf(p+'/')===0;}).sort(function(a,b){return a.length-b.length;}).forEach(function(k){if(v===null||typeof v!=='object')v={};var ps=k.slice(p.length+1).split('/'),t=v;for(var i=0;i<ps.length-1;i++){if(!t[ps[i]]||typeof t[ps[i]]!=='object')t[ps[i]]={};t=t[ps[i]];}t[ps[ps.length-1]]=cpv(S[k]);});
+    return v;};
+  var apRT=function(k,p,d,merge){if(!window.__SEED_GHI)return;var S=window.__SEED=window.__SEED||{},g=toTien(S,p),cu=rtDoc(S,p),moi;
+    if(k==='delete'||k==='remove')moi=null;
+    else if(k==='update'||merge){moi=Object.assign({},cu&&typeof cu==='object'?cu:{});Object.keys(d||{}).forEach(function(kk){var ps=kk.split('/'),t=moi;for(var i=0;i<ps.length-1;i++){t[ps[i]]=Object.assign({},t[ps[i]]&&typeof t[ps[i]]==='object'?t[ps[i]]:{});t=t[ps[i]];}if(d[kk]==null)delete t[ps[ps.length-1]];else t[ps[ps.length-1]]=cpv(d[kk]);});}
+    else moi=cpv(d);
+    Object.keys(S).forEach(function(kk){if(kk.indexOf(p+'/')===0)delete S[kk];});
+    if(g!==null){var t=S[g]=(S[g]&&typeof S[g]==='object')?S[g]:{},ps=p.slice(g.length+1).split('/');for(var i=0;i<ps.length-1;i++){if(!t[ps[i]]||typeof t[ps[i]]!=='object')t[ps[i]]={};t=t[ps[i]];}if(moi==null)delete t[ps[ps.length-1]];else t[ps[ps.length-1]]=moi;}
+    else if(moi==null)delete S[p];else S[p]=moi;};
   var hong=function(op,duong){var H=window.__HONG||[];for(var i=0;i<H.length;i++){var h=H[i];if(h.op===op&&new RegExp(h.re).test(duong)&&(h.con==null?1:h.con)>0){h.con=(h.con==null?1:h.con)-1;(window.__ghi=window.__ghi||[]).push({op:op+'!hong',p:duong,rt:false,d:null});return true;}}return false;};
-  // Bộ lọc truy vấn (cơ bản): Firestore where ==, !=, <, <=, >, >=, in, not-in, array-contains, array-contains-any (trường lồng 'a.b',
-  // FieldPath.documentId() = mã doc); RT orderByChild + equalTo. orderBy / limit / startAt… bỏ qua (thứ tự = mã doc).
+  // Bộ lọc truy vấn: Firestore where ==, !=, <, <=, >, >=, in, not-in, array-contains, array-contains-any (trường lồng 'a.b',
+  // FieldPath.documentId() = mã doc); RT orderByChild + equalTo (áp cả khi mồi là node cha lẫn từng node con).
+  // Theo Firestore: thiếu trường → không khớp MỌI toán tử (cả != / not-in); ==/in/array-contains so THEO GIÁ TRỊ (map/mảng so sâu);
+  // <,<=,>,>= chỉ so cùng kiểu số/chuỗi (map/mảng → LỖI rõ, không lặng lẽ trả sai); toán tử lạ → LỖI. orderBy / limit / startAt… bỏ qua (thứ tự = mã doc).
   var giaTri=function(d,id,f){if(f==='__name__')return id;var v=d;String(f).split('.').forEach(function(k){v=v==null?undefined:v[k];});return v;};
-  var khop=function(d,id,w){var v=giaTri(d,id,w[0]),op=w[1],x=w[2];switch(op){case '==':return v===x;case '!=':return v!==x;case '<':return v<x;case '<=':return v<=x;case '>':return v>x;case '>=':return v>=x;
-    case 'in':return (x||[]).indexOf(v)>=0;case 'not-in':return (x||[]).indexOf(v)<0;case 'array-contains':return Array.isArray(v)&&v.indexOf(x)>=0;case 'array-contains-any':return Array.isArray(v)&&v.some(function(e){return (x||[]).indexOf(e)>=0;});default:return true;}};
+  var chuan=function(v){if(v===null||typeof v!=='object')return JSON.stringify(v);if(Array.isArray(v))return '['+v.map(chuan).join(',')+']';return '{'+Object.keys(v).sort().map(function(k){return JSON.stringify(k)+':'+chuan(v[k]);}).join(',')+'}';};
+  var bang=function(a,b){return chuan(a)===chuan(b);};
+  var trong=function(v,x){if(!Array.isArray(x))throw new Error('fb_gia: in/not-in/array-contains-any cần mảng');return x.some(function(e){return bang(v,e);});};
+  var soSanh=function(v,x,f){var tv=typeof v,tx=typeof x;if((tv!=='number'&&tv!=='string'&&v!==null)||(tx!=='number'&&tx!=='string'))throw new Error('fb_gia: so sánh '+'<>'+' kiểu chưa hỗ trợ');return v!==null&&tv===tx&&f(v,x);};
+  var khop=function(d,id,w){var v=giaTri(d,id,w[0]),op=w[1],x=w[2];if(v===undefined)return false;switch(op){case '==':return bang(v,x);case '!=':return !bang(v,x);
+    case '<':return soSanh(v,x,function(a,b){return a<b});case '<=':return soSanh(v,x,function(a,b){return a<=b});case '>':return soSanh(v,x,function(a,b){return a>b});case '>=':return soSanh(v,x,function(a,b){return a>=b});
+    case 'in':return trong(v,x);case 'not-in':return !trong(v,x);case 'array-contains':return Array.isArray(v)&&v.some(function(e){return bang(e,x);});case 'array-contains-any':return Array.isArray(v)&&v.some(function(e){return trong(e,x);});
+    default:throw new Error('fb_gia: toán tử chưa hỗ trợ '+op);}};
   var mk=function(p,rt,loc){var o={path:p,id:String(p).split('/').pop(),_loc:loc||[]};   // rt: ref Realtime Database (snapshot exists() là HÀM), không: Firestore (exists là thuộc tính)
     ['orderBy','limit','limitToLast','startAt','endAt','startAfter'].forEach(function(k){o[k]=function(){return o};});
     o.where=function(f,op,x){var q=mk(p,rt,o._loc.concat([[typeof f==='string'?f:'__name__',op,x]]));return q;};
     o.orderByChild=function(f){var q=mk(p,rt,o._loc);q._child=f;return q;};
-    o.equalTo=function(x){var q=mk(p,rt,o._loc.concat(o._child?[[o._child,'==',x]]:[]));q._child=o._child;return q;};
+    o.equalTo=function(x){if(!o._child)throw new Error('fb_gia: equalTo chỉ hỗ trợ sau orderByChild');var q=mk(p,rt,o._loc.concat([[o._child,'==',x]]));q._child=o._child;return q;};
     o.collection=o.doc=o.child=function(n){return mk((p?p+'/':'')+(n==null?'auto'+(window.__autoN=(window.__autoN||0)+1):n),rt);};   // doc() không mã → mã riêng mỗi lần (bộ đếm, tất định)
     o.ref=function(n){return mk(n==null?'':String(n),rt);};
     o.toString=function(){return 'https://gia.firebaseio.com/'+p;};
-    // Dữ liệu mồi (tuỳ chọn): window.__SEED = {'đường/dẫn/doc': dữ liệu} — doc / nút RT có mồi thì đọc ra, collection = các doc con trực tiếp.
-    // Bộ lọc (where/orderBy/limit) bị bỏ qua; ghi KHÔNG cập nhật mồi (chỉ ghi nhớ vào __ghi).
+    // Dữ liệu mồi (tuỳ chọn): window.__SEED = {'đường/dẫn/doc': dữ liệu} — doc / nút RT có mồi thì đọc ra, collection = các doc con trực tiếp
+    // (đã qua bộ lọc where / orderByChild+equalTo ở trên). Ghi chỉ cập nhật mồi khi window.__SEED_GHI (đầu file).
     o.get=function(){var S=window.__SEED||{},cp=function(v){return v==null?v:JSON.parse(JSON.stringify(v))};
       var con=Object.keys(S).filter(function(k){return k.indexOf(p+'/')===0&&k.slice(p.length+1).indexOf('/')<0;}).sort().filter(function(k){return o._loc.every(function(w){return khop(S[k]||{},k.split('/').pop(),w);});});
       var docs=con.map(function(k){return {id:k.split('/').pop(),exists:true,ref:mk(k,rt),data:function(){return cp(S[k])}};});
-      var co=Object.prototype.hasOwnProperty.call(S,p),v=co?cp(S[p]):null;
-      if(rt&&!co&&con.length){v={};con.forEach(function(k){v[k.split('/').pop()]=cp(S[k]);});}
+      var co=Object.prototype.hasOwnProperty.call(S,p),v=rt?rtDoc(S,p):(co?cp(S[p]):null);
+      if(rt&&o._loc.length&&v&&typeof v==='object'){var v2={};Object.keys(v).sort().forEach(function(k){if(o._loc.every(function(w){return khop(v[k]==null?{}:v[k],k,w);}))v2[k]=v[k];});v=v2;}   // RT có lọc → chỉ con khớp (mồi node cha lẫn node con)
       return Promise.resolve({docs:docs,empty:!docs.length,exists:rt?function(){return v!=null}:co,size:docs.length,forEach:function(f){rt?Object.keys(v||{}).forEach(function(k){f({key:k,val:function(){return v[k]}})}):docs.forEach(f);},val:function(){return v},data:function(){return co?cp(S[p]):undefined},numChildren:function(){return v&&typeof v==='object'?Object.keys(v).length:0},hasChildren:function(){return !!(v&&typeof v==='object'&&Object.keys(v).length)},key:o.id,id:o.id,ref:o})};
-    var ghi=function(op,d){try{(window.__ghi=window.__ghi||[]).push({op:op,p:p,rt:!!rt,d:JSON.parse(JSON.stringify(d===undefined?null:d))});}catch(e){(window.__ghi=window.__ghi||[]).push({op:op,p:p,rt:!!rt,d:'?'});}};o.add=function(d){(window.__ghiAdd=window.__ghiAdd||[]).push(p);ghi('add',d);var id=p+'/auto'+(window.__autoN=(window.__autoN||0)+1);apSeed('set',id,d);return Promise.resolve(mk(id));};o.once=o.get;o.on=function(){};o.off=function(){};o.onSnapshot=function(){return function(){}};['set','update','delete','remove'].forEach(function(k){o[k]=function(d,opt){if(hong(k,p))return Promise.reject(new Error('e2e-hong '+k+' '+p));ghi(k,d);apSeed(k,p,d,opt&&opt.merge);return Promise.resolve()};});o.push=function(d){ghi('push',d);var c=mk(p+'/push',rt);if(d!==undefined)apSeed('set',p+'/push',d);c.then=undefined;return c;};o.transaction=function(fn){var S0=window.__SEED||{};var v=fn(window.__SEED_GHI&&Object.prototype.hasOwnProperty.call(S0,p)?cpv(S0[p]):null);ghi('transaction',v);if(v!==undefined)apSeed('set',p,v);return Promise.resolve({committed:true,snapshot:{val:function(){return v},exists:function(){return v!=null}}})};
+    var ghi=function(op,d){try{(window.__ghi=window.__ghi||[]).push({op:op,p:p,rt:!!rt,d:JSON.parse(JSON.stringify(d===undefined?null:d))});}catch(e){(window.__ghi=window.__ghi||[]).push({op:op,p:p,rt:!!rt,d:'?'});}};o.add=function(d){(window.__ghiAdd=window.__ghiAdd||[]).push(p);ghi('add',d);var id=p+'/auto'+(window.__autoN=(window.__autoN||0)+1);apSeed('set',id,d);return Promise.resolve(mk(id));};o.once=o.get;o.on=function(){};o.off=function(){};o.onSnapshot=function(cb,loi){var tat=false;if(window.__SNAP&&typeof cb==='function')setTimeout(function(){if(tat)return;Promise.resolve().then(o.get).then(function(sn){if(tat)return;sn.metadata={fromCache:false,hasPendingWrites:false};sn.docChanges=function(){return sn.docs.map(function(d){return {type:'added',doc:d}})};cb(sn);},function(e){if(!tat&&typeof loi==='function')loi(e);});},0);return function(){tat=true}};['set','update','delete','remove'].forEach(function(k){o[k]=function(d,opt){if(hong(k,p))return Promise.reject(new Error('e2e-hong '+k+' '+p));ghi(k,d);(rt?apRT:apSeed)(k,p,d,opt&&opt.merge);return Promise.resolve()};});o.push=function(d){ghi('push',d);var c=mk(p+'/push',rt);if(d!==undefined)apRT('set',p+'/push',d);c.then=undefined;return c;};o.transaction=function(fn){var S0=window.__SEED||{};var v=fn(window.__SEED_GHI?rtDoc(S0,p):null);ghi('transaction',v);if(v!==undefined)apRT('set',p,v);return Promise.resolve({committed:true,snapshot:{val:function(){return v},exists:function(){return v!=null}}})};
     o.batch=function(){var q=[];return {set:function(r,d,opt){q.push(['set',r,d,opt&&opt.merge])},update:function(r,d){q.push(['update',r,d])},delete:function(r){q.push(['delete',r,null])},commit:function(){for(var i=0;i<q.length;i++){if(hong('batch.'+q[i][0],q[i][1]&&q[i][1].path))return Promise.reject(new Error('e2e-hong batch'));}q.forEach(function(x){ghi('batch.'+x[0]+'@'+(x[1]&&x[1].path),x[2]);apSeed(x[0],x[1]&&x[1].path,x[2],x[3]);});return Promise.resolve()}}};
     o.runTransaction=function(fn){var q=[];var tx={get:function(r){return r.get()},set:function(r,d,opt){q.push(['set',r,d,opt&&opt.merge]);return tx},update:function(r,d){q.push(['update',r,d]);return tx},delete:function(r){q.push(['delete',r,null]);return tx}};return Promise.resolve().then(function(){return fn(tx);}).then(function(kq){for(var i=0;i<q.length;i++){if(hong('tx.'+q[i][0],q[i][1]&&q[i][1].path))throw new Error('e2e-hong tx.'+q[i][0]+' '+(q[i][1]&&q[i][1].path));}q.forEach(function(x){ghi('tx.'+x[0]+'@'+(x[1]&&x[1].path),x[2]);apSeed(x[0],x[1]&&x[1].path,x[2],x[3]);});return kq;});};o.enablePersistence=function(){return Promise.resolve()};o.settings=function(){};
     o.enableNetwork=o.disableNetwork=function(){return Promise.resolve()};return o;};

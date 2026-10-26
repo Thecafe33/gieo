@@ -4,7 +4,7 @@ const vm = require('vm');
 const { FB_STUB } = require('../tools/tach_posgieo/fb_gia');
 let ok = true; const eq = (a, b, m) => { const s = JSON.stringify(a) === JSON.stringify(b); console.log((s ? 'ok ' : 'FAIL ') + m + (s ? '' : ' ' + JSON.stringify(a) + ' != ' + JSON.stringify(b))); if (!s) ok = false; };
 (async () => {
-  const w = {}; w.window = w; vm.createContext(w); vm.runInContext(FB_STUB, w);
+  const w = { setTimeout }; w.window = w; vm.createContext(w); vm.runInContext(FB_STUB, w);
   const fs = w.firebase.firestore(), db = w.firebase.database();
   w.__SEED = { 'c/a': { s: 'open', n: 1, t: ['x'] }, 'c/b': { s: 'sealed', n: 5 }, 'c/c': { s: 'open', n: 9 }, 'r/k/u1': { st: 'x' }, 'r/k/u2': { st: 'y' } };
   const ids = q => q.get().then(s => s.docs.map(d => d.id));
@@ -15,6 +15,22 @@ let ok = true; const eq = (a, b, m) => { const s = JSON.stringify(a) === JSON.st
   eq(await ids(fs.collection('c').where('t', 'array-contains', 'x')), ['a'], 'array-contains');
   eq(await ids(fs.collection('c').where(w.firebase.firestore.FieldPath.documentId(), '>=', 'b')), ['b', 'c'], 'FieldPath.documentId()');
   eq(Object.keys((await db.ref('r/k').orderByChild('st').equalTo('y').get()).val()), ['u2'], 'RT orderByChild + equalTo');
+  // F10-1 (kiểm lượt 10): bốn sai lệch so với Firebase thật — nay phải đúng
+  w.__SEED = Object.assign({}, w.__SEED, { 'f/a': { n: 1, obj: { v: 1, w: [1, 2] } }, 'f/b': { n: 2, obj: { v: 2 } }, 'f/missing': {}, 'f/nul': { n: null }, 'rp/k': { u1: { st: 'x' }, u2: { st: 'y' }, u3: 5 } });
+  eq(await ids(fs.collection('f').where('n', '!=', 1)), ['b', 'nul'], "!= loại doc THIẾU trường (lỗi cũ: trả cả 'missing')");
+  eq(await ids(fs.collection('f').where('n', 'not-in', [1])), ['b', 'nul'], 'not-in loại doc thiếu trường');
+  eq(await ids(fs.collection('f').where('obj', '==', { w: [1, 2], v: 1 })), ['a'], '== so map theo giá trị, không theo thứ tự khoá (lỗi cũ: rỗng)');
+  eq(await ids(fs.collection('f').where('obj', 'in', [{ v: 2 }])), ['b'], 'in so map theo giá trị');
+  eq(Object.keys((await db.ref('rp/k').orderByChild('st').equalTo('y').get()).val()), ['u2'], 'RT orderByChild+equalTo khi mồi là NODE CHA (lỗi cũ: u1,u2)');
+  eq((await db.ref('rp/k').get()).val(), { u1: { st: 'x' }, u2: { st: 'y' }, u3: 5 }, 'RT node cha không lọc → đủ con');
+  eq(await ids(fs.collection('f').where('n', '>', 1)), ['b'], '> bỏ null / thiếu trường');
+  const loiCua = async f => { try { await f(); return null; } catch (e) { return /fb_gia/.test(e.message); } };
+  eq(await loiCua(() => fs.collection('f').where('obj', '<', { v: 3 }).get()), true, '< với map → LỖI rõ (không lặng lẽ trả sai)');
+  eq(await loiCua(() => fs.collection('f').where('n', 'lạ', 1).get()), true, 'toán tử lạ → LỖI (lỗi cũ: coi như khớp)');
+  eq(await loiCua(() => db.ref('rp/k').equalTo('y')), true, 'equalTo không orderByChild → LỖI (lỗi cũ: bỏ lọc)');
+  const snapIds = () => new Promise(r => { const un = fs.collection('c').where('s', '==', 'open').onSnapshot(sn => { un(); r([sn.metadata.fromCache, sn.docs.map(d => d.id)]); }); setTimeout(() => r('im lặng'), 100); });
+  eq(await snapIds(), 'im lặng', 'onSnapshot mặc định im lặng (các bài cũ không đổi)');
+  w.__SNAP = true; eq(await snapIds(), [false, ['a', 'c']], '__SNAP: onSnapshot gửi một ảnh đầu từ mồi, đã lọc, fromCache false'); w.__SNAP = false;
   const a1 = fs.collection('c').doc().path, a2 = fs.collection('c').doc().path;
   eq(a1 !== a2, true, 'doc() không mã → mã riêng mỗi lần (lỗi cũ: luôn "auto")');
   w.__SEED_GHI = true; w.__ghi = [];
@@ -26,6 +42,14 @@ let ok = true; const eq = (a, b, m) => { const s = JSON.stringify(a) === JSON.st
   eq([!!loi, w.__SEED['c/b'].n, 'c/z' in w.__SEED], [true, 5, false], 'giao dịch lỗi một lượt → KHÔNG ghi gì (cả lượt hợp lệ trong cùng giao dịch)');
   await fs.runTransaction(async tx => { tx.set(fs.collection('c').doc('z'), { v: 1 }); });
   eq(w.__SEED['c/z'], { v: 1 }, 'lỗi chỉ một lần → thử lại ghi được');
+  // RT là cây (kiểm lượt 10 — đổ ly): transaction / đọc thấy mồi ở node con; ghi con gom vào node cha; set cha bỏ mồi con cũ
+  w.__SEED['u/milk/c1'] = { unitBase: 800 };
+  let thay = null; await db.ref('u/milk').transaction(cur => { thay = cur; return Object.assign({}, cur, { c1: { unitBase: 750 } }); });
+  eq([thay, w.__SEED['u/milk'], 'u/milk/c1' in w.__SEED], [{ c1: { unitBase: 800 } }, { c1: { unitBase: 750 } }, false], 'RT transaction nhận mồi node con; ghi xong một nguồn ở node cha');
+  await db.ref('u/milk/c2').set({ unitBase: 5 }); await db.ref('u/milk/c1').update({ unitBase: 700 });
+  eq((await db.ref('u/milk').get()).val(), { c1: { unitBase: 700 }, c2: { unitBase: 5 } }, 'RT ghi node con khi đã có node cha → gộp vào cha');
+  await db.ref('u/milk/c2').remove();
+  eq([(await db.ref('u/milk/c2').get()).exists(), Object.keys((await db.ref('u/milk').get()).val())], [false, ['c1']], 'RT xoá node con nằm trong node cha');
   const put = await w.firebase.storage().ref('p/x.jpg').put({ name: 'x.jpg', size: 3 });
   eq([await put.ref.getDownloadURL(), w.__ghi.some(g => g.op === 'storage.put' && g.p === 'p/x.jpg')], ['https://gia.storage/p/x.jpg', true], 'storage.put ghi nhận + URL');
   console.log(ok ? 'ALL PASS' : 'SOME FAIL'); process.exit(ok ? 0 : 1);
