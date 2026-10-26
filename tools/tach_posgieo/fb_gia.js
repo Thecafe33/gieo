@@ -8,10 +8,15 @@ const FB_STUB = `(function(){
   // đường dẫn bị LỖI (con = số lần, mặc định 1) — giả mạng rớt giữa chừng. window.__SNAP = true → Firestore onSnapshot gửi MỘT ảnh đầu từ mồi
   // (như máy chủ trả lần đầu, fromCache false; không gửi tiếp khi ghi) — tắt thì listener im lặng như trước.
   var cpv=function(v){return v==null?v:JSON.parse(JSON.stringify(v))};
+  // FieldValue.arrayUnion / arrayRemove → dấu {__fv, v} (lượt ghi nhớ được giá trị); ghi-cập-nhật-mồi thực hiện phép gộp / bỏ theo giá trị.
+  var fvAp=function(cu,v){if(!v||typeof v!=='object'||!v.__fv)return cpv(v);var a=Array.isArray(cu)?cpv(cu):[],k=function(x){return JSON.stringify(x);};
+    if(v.__fv==='arrayUnion'){v.v.forEach(function(x){if(!a.some(function(y){return k(y)===k(x);}))a.push(cpv(x));});return a;}
+    if(v.__fv==='arrayRemove')return a.filter(function(y){return !v.v.some(function(x){return k(x)===k(y);});});return cpv(v);};
+  var fvDoc=function(cu,d){if(!d||typeof d!=='object')return cpv(d);var o={};Object.keys(d).forEach(function(kk){o[kk]=fvAp(cu&&cu[kk],d[kk]);});return o;};
   var apSeed=function(k,duong,d,merge){ if(!window.__SEED_GHI)return; var S=window.__SEED=window.__SEED||{};
     if(k==='delete'||k==='remove'){delete S[duong];return;}
-    if(k==='update'||merge){var o=Object.assign({},S[duong]||{});Object.keys(d||{}).forEach(function(kk){var ps=kk.split('.'),t=o;for(var i=0;i<ps.length-1;i++){t[ps[i]]=Object.assign({},t[ps[i]]||{});t=t[ps[i]];}t[ps[ps.length-1]]=cpv(d[kk]);});S[duong]=o;return;}
-    S[duong]=cpv(d); };
+    if(k==='update'||merge){var o=Object.assign({},S[duong]||{});Object.keys(d||{}).forEach(function(kk){var ps=kk.split('.'),t=o;for(var i=0;i<ps.length-1;i++){t[ps[i]]=Object.assign({},t[ps[i]]||{});t=t[ps[i]];}t[ps[ps.length-1]]=fvAp(t[ps[ps.length-1]],d[kk]);});S[duong]=o;return;}
+    S[duong]=fvDoc(null,d); };
   // RT là CÂY: mồi có thể đặt ở node cha ('active_units/milk') hoặc node con ('active_units/milk/ctn1') — đọc / transaction ghép
   // cả hai (node cụ thể hơn thắng); ghi RT gom vào node tổ tiên đã có (một nguồn), set/xoá bỏ mồi con cũ của node đó.
   // RT không giữ node rỗng: object không còn con = không có dữ liệu (val() null, exists() false), dọn cả tổ tiên rỗng sau xoá.
@@ -67,7 +72,7 @@ const FB_STUB = `(function(){
   var fs_=mk(''),db_=mk('',true);var st_={ref:function(x){var r={fullPath:String(x||''),child:function(n){return st_.ref((x?x+'/':'')+n)},put:function(f){var duong=String(x||'');if(hong('storage.put',duong))return Promise.reject(new Error('e2e-hong storage.put'));(window.__ghi=window.__ghi||[]).push({op:'storage.put',p:duong,rt:false,d:{name:f&&f.name||null,size:f&&f.size||0}});return Promise.resolve({ref:{fullPath:duong,getDownloadURL:function(){return Promise.resolve('https://gia.storage/'+duong)}}})},getDownloadURL:function(){return Promise.resolve('')},listAll:function(){return Promise.resolve({items:[],prefixes:[]})}};return r;}};
   window.firebase={apps:[],initializeApp:function(){this.apps.push({})},database:function(){return db_},firestore:function(){return fs_},
     auth:function(){return {onAuthStateChanged:function(){},signInWithEmailAndPassword:function(){return new Promise(function(){})},currentUser:null}},storage:function(){return st_}};
-  window.firebase.firestore.FieldValue={serverTimestamp:function(){return 0},increment:function(n){return n},arrayUnion:function(){},arrayRemove:function(){},delete:function(){}};
+  window.firebase.firestore.FieldValue={serverTimestamp:function(){return 0},increment:function(n){return n},arrayUnion:function(){return {__fv:'arrayUnion',v:[].slice.call(arguments)}},arrayRemove:function(){return {__fv:'arrayRemove',v:[].slice.call(arguments)}},delete:function(){}};
   window.firebase.firestore.FieldPath={documentId:function(){return '__name__'}};
   window.firebase.database.ServerValue={TIMESTAMP:0,increment:function(n){return n}};
 })();`;

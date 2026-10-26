@@ -59,6 +59,12 @@ let ok = true; const eq = (a, b, m) => { const s = JSON.stringify(a) === JSON.st
   eq((await db.ref('u/milk').get()).val(), { c1: { unitBase: 700 }, c2: { unitBase: 5 } }, 'RT ghi node con khi đã có node cha → gộp vào cha');
   await db.ref('u/milk/c2').remove();
   eq([(await db.ref('u/milk/c2').get()).exists(), Object.keys((await db.ref('u/milk').get()).val())], [false, ['c1']], 'RT xoá node con nằm trong node cha');
+  // arrayUnion / arrayRemove (kiểm lượt 10+11: «mock arrayUnion chưa thực thi») — ghi nhớ giá trị + gộp theo giá trị khi ghi-cập-nhật-mồi
+  const FV = w.firebase.firestore.FieldValue;
+  await fs.collection('c').doc('u').set({ ds: FV.arrayUnion({ id: 1 }) }, { merge: true });
+  await fs.collection('c').doc('u').set({ ds: FV.arrayUnion({ id: 1 }, { id: 2 }) }, { merge: true });
+  await fs.collection('c').doc('u').update({ ds: FV.arrayRemove({ id: 1 }) });
+  eq([w.__SEED['c/u'].ds, w.__ghi.filter(g => g.p === 'c/u')[0].d.ds], [[{ id: 2 }], { __fv: 'arrayUnion', v: [{ id: 1 }] }], 'arrayUnion gộp không trùng / arrayRemove bỏ theo giá trị; lượt ghi giữ giá trị (lỗi cũ: undefined)');
   const put = await w.firebase.storage().ref('p/x.jpg').put({ name: 'x.jpg', size: 3 });
   eq([await put.ref.getDownloadURL(), w.__ghi.some(g => g.op === 'storage.put' && g.p === 'p/x.jpg')], ['https://gia.storage/p/x.jpg', true], 'storage.put ghi nhận + URL');
   console.log(ok ? 'ALL PASS' : 'SOME FAIL'); process.exit(ok ? 0 : 1);
