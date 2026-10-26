@@ -9,14 +9,15 @@ const FB_STUB = `(function(){
   // (như máy chủ trả lần đầu, fromCache false; không gửi tiếp khi ghi) — tắt thì listener im lặng như trước.
   var cpv=function(v){return v==null?v:JSON.parse(JSON.stringify(v))};
   // FieldValue.arrayUnion / arrayRemove → dấu {__fv, v} (lượt ghi nhớ được giá trị); ghi-cập-nhật-mồi thực hiện phép gộp / bỏ theo giá trị.
-  var fvAp=function(cu,v){if(!v||typeof v!=='object'||!v.__fv)return cpv(v);var a=Array.isArray(cu)?cpv(cu):[],k=function(x){return JSON.stringify(x);};
+  // set KHÔNG merge vẫn thay mọi trường khác, nhưng trường mang phép biến đổi lấy nền là giá trị CŨ của trường đó (như set mutation của SDK).
+  var fvAp=function(cu,v){if(!v||typeof v!=='object'||!v.__fv)return cpv(v);var a=Array.isArray(cu)?cpv(cu):[],k=function(x){return chuan(x);};   // so THEO GIÁ TRỊ (map không phụ thuộc thứ tự khoá — như SDK)
     if(v.__fv==='arrayUnion'){v.v.forEach(function(x){if(!a.some(function(y){return k(y)===k(x);}))a.push(cpv(x));});return a;}
     if(v.__fv==='arrayRemove')return a.filter(function(y){return !v.v.some(function(x){return k(x)===k(y);});});return cpv(v);};
   var fvDoc=function(cu,d){if(!d||typeof d!=='object')return cpv(d);var o={};Object.keys(d).forEach(function(kk){o[kk]=fvAp(cu&&cu[kk],d[kk]);});return o;};
   var apSeed=function(k,duong,d,merge){ if(!window.__SEED_GHI)return; var S=window.__SEED=window.__SEED||{};
     if(k==='delete'||k==='remove'){delete S[duong];return;}
     if(k==='update'||merge){var o=Object.assign({},S[duong]||{});Object.keys(d||{}).forEach(function(kk){var ps=kk.split('.'),t=o;for(var i=0;i<ps.length-1;i++){t[ps[i]]=Object.assign({},t[ps[i]]||{});t=t[ps[i]];}t[ps[ps.length-1]]=fvAp(t[ps[ps.length-1]],d[kk]);});S[duong]=o;return;}
-    S[duong]=fvDoc(null,d); };
+    S[duong]=fvDoc(S[duong],d); };
   // RT là CÂY: mồi có thể đặt ở node cha ('active_units/milk') hoặc node con ('active_units/milk/ctn1') — đọc / transaction ghép
   // cả hai (node cụ thể hơn thắng); ghi RT gom vào node tổ tiên đã có (một nguồn), set/xoá bỏ mồi con cũ của node đó.
   // RT không giữ node rỗng: object không còn con = không có dữ liệu (val() null, exists() false), dọn cả tổ tiên rỗng sau xoá.

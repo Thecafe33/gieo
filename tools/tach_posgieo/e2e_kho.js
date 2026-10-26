@@ -551,7 +551,7 @@ const KB_CA = async (viec) => {
     window.__ghi = []; window.__buoc = 'check-' + viec;
     if (viec === 'in') await doCheckIn(); else await doCheckOut();
     await sleep(600);
-    return { hoi, trong: _employeeShiftsTodayCache.filter(x => !x.checkedOutAt).length, pin: (document.getElementById('checkinPin') || {}).value };
+    return { hoi, trong: _employeeShiftsTodayCache.filter(x => !x.checkedOutAt).length, pin: (document.getElementById('checkinPin') || {}).value, busy: _posSubmitBusy };
   }
   showScreen('caLamViecScreen');
   shiftState = { businessDate: posDateKey(), opening: null, closing: null };
@@ -561,12 +561,12 @@ const KB_CA = async (viec) => {
     window.__ghi = []; window.__buoc = 'mở ca';
     // phần chạy tiếp sau khi ghi (đếm giao ca / kiểm kê đầu ca — module khác) có thể chờ dữ liệu không mồi → chờ có giới hạn
     await Promise.race([submitShiftOpen(), sleep(4000)]); await sleep(300);
-    return { hoi };
+    return { hoi, busy: _posSubmitBusy };   // busy true = phần chạy tiếp (module khác) chưa xong lúc lấy log — giới hạn đã ghi (kiểm lượt 12)
   }
   _openChecklistState = { items: [{ id: 'lau', label: 'Lau quầy', minDurationSec: 0 }], loaded: true, staff: null };
   window.__ghi = [];
   window.__buoc = 'tick'; await Promise.race([tickChecklistItem('lau'), sleep(4000)]); await sleep(300);
-  return { hoi };
+  return { hoi, busy: _posSubmitBusy };
 };
 // Dòng sổ kho WASTE đã ghi thành công (bỏ lượt bị cài lỗi), theo itemId → qty; dòng sổ BTP WASTE
 const soWaste = n => n.ghi.filter(g => !/!hong$/.test(g.op) && /stock_transactions_gieogieo/.test(duongGhi(g)) && g.d && g.d.type === 'WASTE');

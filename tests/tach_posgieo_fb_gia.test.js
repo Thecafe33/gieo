@@ -65,6 +65,15 @@ let ok = true; const eq = (a, b, m) => { const s = JSON.stringify(a) === JSON.st
   await fs.collection('c').doc('u').set({ ds: FV.arrayUnion({ id: 1 }, { id: 2 }) }, { merge: true });
   await fs.collection('c').doc('u').update({ ds: FV.arrayRemove({ id: 1 }) });
   eq([w.__SEED['c/u'].ds, w.__ghi.filter(g => g.p === 'c/u')[0].d.ds], [[{ id: 2 }], { __fv: 'arrayUnion', v: [{ id: 1 }] }], 'arrayUnion gộp không trùng / arrayRemove bỏ theo giá trị; lượt ghi giữ giá trị (lỗi cũ: undefined)');
+  // F12-1 (kiểm lượt 12): so map theo giá trị (không theo thứ tự khoá) + set không merge giữ nền mảng cho trường biến đổi
+  w.__SEED['c/m'] = { ds: [{ id: 1, staff: 'a' }], khac: 1 };
+  await fs.collection('c').doc('m').set({ ds: FV.arrayUnion({ staff: 'a', id: 1 }) }, { merge: true });
+  eq(w.__SEED['c/m'].ds, [{ id: 1, staff: 'a' }], 'arrayUnion map cùng giá trị khác thứ tự khoá → không thêm (lỗi cũ: 2 phần tử)');
+  await fs.collection('c').doc('m').update({ ds: FV.arrayRemove({ staff: 'a', id: 1 }) });
+  eq(w.__SEED['c/m'].ds, [], 'arrayRemove map khác thứ tự khoá → bỏ được (lỗi cũ: vẫn còn)');
+  w.__SEED['c/s'] = { arr: [1], khac: 1 };
+  await fs.collection('c').doc('s').set({ arr: FV.arrayUnion(2) });
+  eq(w.__SEED['c/s'], { arr: [1, 2] }, 'set KHÔNG merge: arrayUnion lấy nền mảng cũ, trường khác bị thay (lỗi cũ: arr=[2])');
   const put = await w.firebase.storage().ref('p/x.jpg').put({ name: 'x.jpg', size: 3 });
   eq([await put.ref.getDownloadURL(), w.__ghi.some(g => g.op === 'storage.put' && g.p === 'p/x.jpg')], ['https://gia.storage/p/x.jpg', true], 'storage.put ghi nhận + URL');
   console.log(ok ? 'ALL PASS' : 'SOME FAIL'); process.exit(ok ? 0 : 1);
