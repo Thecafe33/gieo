@@ -10,14 +10,20 @@ const { chromium } = require('playwright'); const http = require('http'); const 
 const ROOT = path.resolve(__dirname, '..', '..');
 const { chromiumPath, serveFile } = require(path.join(ROOT, 'tests/lib/e2e'));
 const FB_STUB = `(function(){
-  var mk=function(){var o={};['collection','doc','where','orderBy','limit','ref','child','orderByChild','equalTo','limitToLast','startAt','endAt'].forEach(function(k){o[k]=function(){return o};});
-    o.get=function(){return Promise.resolve({docs:[],empty:true,exists:false,forEach:function(){},val:function(){return null},data:function(){return {}}})};
+  // Firebase giả tối thiểu, NHỚ ĐƯỜNG DẪN (che_do_thu tự kiểm collection().path / ref().toString() / storage fullPath)
+  var mk=function(p){var o={path:p,id:String(p).split('/').pop()};
+    ['where','orderBy','limit','orderByChild','equalTo','limitToLast','startAt','endAt','startAfter'].forEach(function(k){o[k]=function(){return o};});
+    o.collection=o.doc=o.child=function(n){return mk((p?p+'/':'')+(n==null?'auto':n));};
+    o.ref=function(n){return mk(n==null?'':String(n));};
+    o.toString=function(){return 'https://gia.firebaseio.com/'+p;};
+    o.get=function(){return Promise.resolve({docs:[],empty:true,exists:false,size:0,forEach:function(){},val:function(){return null},data:function(){return undefined}})};
     o.once=o.get;o.on=function(){};o.off=function(){};o.onSnapshot=function(){return function(){}};o.set=o.update=o.delete=o.remove=o.push=function(){return Promise.resolve()};
     o.batch=function(){return {set:function(){},update:function(){},delete:function(){},commit:function(){return Promise.resolve()}}};
-    o.runTransaction=function(f){return Promise.resolve()};o.enablePersistence=function(){return Promise.resolve()};o.settings=function(){};return o;};
-  var fs_=mk(),db_=mk();
+    o.runTransaction=function(){return Promise.resolve()};o.enablePersistence=function(){return Promise.resolve()};o.settings=function(){};
+    o.enableNetwork=o.disableNetwork=function(){return Promise.resolve()};return o;};
+  var fs_=mk(''),db_=mk('');var st_={ref:function(x){var r={fullPath:String(x||''),child:function(n){return st_.ref((x?x+'/':'')+n)},put:function(){return Promise.resolve()},getDownloadURL:function(){return Promise.resolve('')},listAll:function(){return Promise.resolve({items:[],prefixes:[]})}};return r;}};
   window.firebase={apps:[],initializeApp:function(){this.apps.push({})},database:function(){return db_},firestore:function(){return fs_},
-    auth:function(){return {onAuthStateChanged:function(){},signInWithEmailAndPassword:function(){return new Promise(function(){})},currentUser:null}},storage:function(){return {ref:function(){return {}}}}};
+    auth:function(){return {onAuthStateChanged:function(){},signInWithEmailAndPassword:function(){return new Promise(function(){})},currentUser:null}},storage:function(){return st_}};
   window.firebase.firestore.FieldValue={serverTimestamp:function(){return 0},increment:function(n){return n},arrayUnion:function(){},arrayRemove:function(){},delete:function(){}};
   window.firebase.firestore.FieldPath={documentId:function(){return '__name__'}};
   window.firebase.database.ServerValue={TIMESTAMP:0,increment:function(n){return n}};
@@ -30,7 +36,7 @@ let ok = true; const chk = (c, m) => { console.log((c ? 'ok ' : 'FAIL ') + m); i
   const b = await chromium.launch({ executablePath: chromiumPath(), args: ['--no-sandbox', '--allow-file-access-from-files'] });
   async function mo(url, ghiDe, ctx) {   // ghiDe: [{lan, status, body}] — thay phản hồi pos_ui theo lượt
     const page = await (ctx || b).newPage(); const loi = []; const xin = [];
-    page.on('pageerror', e => loi.push(e.message));
+    page.on('pageerror', e => loi.push(process.env.E2E_DEBUG ? e.stack : e.message));
     await page.route('**/*', async r => {
       const u = r.request().url();
       if (/gstatic\.com\/firebasejs\/[\d.]+\/firebase-app-compat\.js/.test(u)) return r.fulfill({ contentType: 'text/javascript', body: FB_STUB });
@@ -44,7 +50,7 @@ let ok = true; const chk = (c, m) => { console.log((c ? 'ok ' : 'FAIL ') + m); i
     });
     await page.goto(url, { waitUntil: 'load' }).catch(e => loi.push('goto: ' + e.message));
     await page.waitForTimeout(400);
-    const tt = await page.evaluate(() => ({ ui: window.PosGieoMods && window.PosGieoMods.ui, esc: typeof escHtmlPos === 'function' ? escHtmlPos('<b>&') : null, login: !!document.getElementById('posStoreLogin'), assist: window.PosGieoMods && window.PosGieoMods.assist, assistFn: typeof assistRender === 'function' && typeof assistFinalizeOrder === 'function', printer: window.PosGieoMods && window.PosGieoMods.printer, printerFn: typeof POSPrinter === 'object' && typeof POSTemPrinter === 'object' && typeof temEnsureConnected === 'function', modThieu: !!document.getElementById('posModThieu'), thu: !!(window.GieoThu && GieoThu.active) }));
+    const tt = await page.evaluate(() => ({ ui: window.PosGieoMods && window.PosGieoMods.ui, esc: typeof escHtmlPos === 'function' ? escHtmlPos('<b>&') : null, login: !!document.getElementById('posStoreLogin'), assist: window.PosGieoMods && window.PosGieoMods.assist, assistFn: typeof assistRender === 'function' && typeof assistFinalizeOrder === 'function', printer: window.PosGieoMods && window.PosGieoMods.printer, printerFn: (() => { try { return typeof POSTemPrinter === 'object' && typeof temEnsureConnected === 'function' && typeof XprinterBillBridgeEngine === 'function'; } catch (e) { return false; } })(), modThieu: !!document.getElementById('posModThieu'), thu: !!(window.GieoThu && GieoThu.active) }));
     if (!ctx) await page.close();
     return Object.assign(tt, { loi, xin, page });
   }
@@ -54,7 +60,7 @@ let ok = true; const chk = (c, m) => { console.log((c ? 'ok ' : 'FAIL ') + m); i
   chk(t.ui === true && t.esc === '&lt;b&gt;&amp;' && t.xin.length === 1, '(1) HTTP: pos_ui.v1.js nạp 1 lần, PosGieoMods.ui = true, escHtmlPos chạy đúng');
   chk(t.login, '(1) máy chưa gắn quán → màn nhập mã quán hiện (chốt dừng giữ nguyên)');
   chk(t.assist === true && t.assistFn, '(1) Đợt 1A: js/posgieo/pos_assist.v1.js nạp, PosGieoMods.assist = true, assistRender / assistFinalizeOrder có');
-  chk(t.printer === true && t.printerFn, '(1) Đợt 1B: js/posgieo/pos_printer.v1.js nạp, POSPrinter / POSTemPrinter / temEnsureConnected có');
+  chk(t.printer === true && t.printerFn, '(1) Đợt 1B: js/posgieo/pos_printer.v1.js nạp, POSTemPrinter / temEnsureConnected / class máy in có (POSPrinter ở script chính — P1/P2)');
   chk(!chuanLoi(t.loi).length, '(1) không lỗi JS ngoài throw có chủ đích ở chốt dừng' + (chuanLoi(t.loi).length ? ': ' + chuanLoi(t.loi).join(' | ') : ''));
 
   t = await mo(base + '/posgieo.html', [{ status: 404, type: 'text/html', body: 'Not Found' }]);
@@ -83,6 +89,21 @@ let ok = true; const chk = (c, m) => { console.log((c ? 'ok ' : 'FAIL ') + m); i
     await pb.evaluate(() => localStorage.setItem('gieo_store_v1', JSON.stringify({ storeId: 'gg02', name: 'Gieo 2' }))); await a.page.waitForTimeout(300);
     chk(await a.page.evaluate(() => !!document.getElementById('posStoreDoi')), '(8) H1: tab kia đổi cửa hàng gg01 → gg02 → tab A phủ màn «Máy đã đổi cửa hàng ở cửa sổ khác»');
     await ctx.close();
+  }
+
+  {   // (9)(10) hồi quy kiểm tra lượt 05 P1/P2: POSPrinter phải tạo SAU dọn cache theo quán và SAU GieoThu.install
+    const moSeed = async (url, seed) => {
+      const ctx = await b.newContext();
+      await ctx.addInitScript(sd => { try { if (!sessionStorage.getItem('__seeded')) { for (const [k, v] of Object.entries(sd)) localStorage.setItem(k, v); sessionStorage.setItem('__seeded', '1'); } } catch (e) {} }, seed);
+      const r = await mo(url, null, ctx); if (process.env.E2E_DEBUG) console.log('DEBUG loi', url, r.loi);
+      const st = await r.page.evaluate(() => { let p = null; try { p = { footer: POSPrinter.layout.footerText, mac: POSPrinter.layout.billPrinterMac, auto: POSPrinter.autoPrintEnabled }; } catch (e) { p = { loi: String(e.message || e) }; } return p; });
+      await ctx.close(); return st;
+    };
+    const CU = JSON.stringify({ footerText: 'REAL-GG01', billPrinterMac: 'REAL-MAC' });
+    let p = await moSeed(base + '/posgieo.html', { gieo_ls_store_v1: 'gg01', gieo_store_v1: JSON.stringify({ storeId: 'gg02', name: 'Gieo 2' }), pos_printer_layout_cache: CU });
+    chk(!p.loi && p.footer === '' && p.mac === null, '(9) P1: máy đổi GG01 → GG02 — POSPrinter KHÔNG giữ chân bill / MAC máy in của GG01 (đã dọn trước khi tạo) ' + JSON.stringify(p));
+    p = await moSeed(base + '/posgieo_thu.html', { pos_printer_layout_cache: CU, pos_auto_print: 'false', __thu__pos_printer_layout_cache: JSON.stringify({ footerText: 'TEST-ONLY', billPrinterMac: null }), __thu__pos_auto_print: 'true' });
+    chk(!p.loi && p.footer === 'TEST-ONLY' && p.mac === null && p.auto === true, '(10) P2: bản thử — POSPrinter đọc cache VÙNG THỬ, không mang cấu hình máy in thật ' + JSON.stringify(p));
   }
 
   t = await mo('file://' + path.join(ROOT, 'posgieo.html'));
