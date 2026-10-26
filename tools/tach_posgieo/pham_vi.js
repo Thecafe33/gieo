@@ -6,9 +6,14 @@
 'use strict';
 const fs = require('fs'); const path = require('path');
 
-function napREG(dir) {
-  const f = fs.readdirSync(dir).filter(x => /^data_access\.v\d+\.js$/.test(x)).sort((a, b) => +a.match(/\d+/)[0] - +b.match(/\d+/)[0]).pop();
-  if (!f) throw new Error('pham_vi: không thấy data_access.v*.js trong ' + dir);
+// data_access ĐÚNG bản mà posgieo.html của bộ đó nạp (thẻ <script src="data_access.vN.js">) — không lấy bản số cao nhất trong thư mục
+// (bộ có thể chứa bản mới HTML chưa dùng; góp ý kiểm lại lượt 08).
+function napREG(dir, html) {
+  const h = fs.readFileSync(path.join(dir, html || 'posgieo.html'), 'utf8');
+  const tim = [...h.matchAll(/<script[^>]*\bsrc="(data_access\.v\d+\.js)(?:\?[^"]*)?"/g)].map(m => m[1]);
+  if (tim.length !== 1) throw new Error('pham_vi: ' + (html || 'posgieo.html') + ' phải nạp đúng 1 data_access.vN.js, thấy ' + tim.length);
+  const f = tim[0];
+  if (!fs.existsSync(path.join(dir, f))) throw new Error('pham_vi: thiếu ' + f + ' trong ' + dir);
   const m = { exports: {} };
   new Function('window', 'module', fs.readFileSync(path.join(dir, f), 'utf8'))({}, m);
   return m.exports.GieoData.REG;
