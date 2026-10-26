@@ -35,7 +35,8 @@ const code = async p => { try { await p; return 'OK'; } catch (e) { return e.cod
   eq([t1.qty, t1.amendments.length, t1.amendments[0].before, t1.amendments[0].after, t1.amendments[0].reason], [-30, 1, { qty: -50, reclassifiedToConsumptionQty: null }, { qty: -30, reclassifiedToConsumptionQty: 20 }, 'dùng bù'], 'amend lưu vết trước/sau');
   eq(UE.units.fifoPendingFromRt({ X: { u1: { code: 'C1', unitBase: 0, openedAt: 5 }, u2: { unitBase: 3 }, u3: { unitBase: -1, finishedDebt: true }, __prepLock: {} }, P: { b: { unitBase: -1 } } }, ['X']).map(x => x.code), ['C1'], 'fifoPendingFromRt');
   // Hằng số engine phải khớp hằng số còn giữ trong app
-  const html = fs.readFileSync(path.resolve(__dirname, '..', 'posgieo.html'), 'utf8');
+  // HTML + JS riêng js/posgieo (tách posgieo — hằng có thể đã chuyển ra file, vd PREP_RECON_LOCK_COLL ở pos_prep.v1.js)
+  const html = fs.readFileSync(path.resolve(__dirname, '..', 'posgieo.html'), 'utf8') + '\n' + require('../tools/tach_posgieo/nguon').maNoi('posgieo.html');
   for(const app of ['posgieo.html','quanlygieo.html']) {
     const source=fs.readFileSync(path.resolve(__dirname,'..',app),'utf8');
     const refs=[...source.matchAll(/\bsrc="(unit_engine\.v\d+\.js)/g)].map(m=>m[1]);

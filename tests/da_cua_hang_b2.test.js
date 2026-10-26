@@ -172,6 +172,8 @@ const lay = (f, k) => f.FS[k];
     const META = new Set(['createdAt', 'createdBy']);   // chỉ lúc tạo — không cần đồng bộ / kiểm lệch
     const srcs = { 'unit_engine.v18.js': fs.readFileSync(path.join(ROOT, 'unit_engine.v18.js'), 'utf8') };
     for (const f of ['posgieo.html', 'quanlygieo.html']) srcs[f] = (fs.readFileSync(path.join(ROOT, f), 'utf8').match(/<script>([\s\S]*?)<\/script>/) || [])[1] || '';
+    // JS riêng của app (tách posgieo: js/posgieo/*) — lệnh ghi danh mục đã chuyển ra file vẫn phải bị quét
+    for (const d of require('../tools/tach_posgieo/nguon').nguonCua('posgieo.html')) if (d.kind === 'src') srcs[d.file] = d.code;
     const la = [], tong = { n: 0 };
     for (const [ten, src] of Object.entries(srcs)) {
       const ast = acorn.parse(src, { ecmaVersion: 'latest', sourceType: 'script', locations: true, allowReturnOutsideFunction: true });

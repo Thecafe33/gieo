@@ -71,7 +71,7 @@ const chay = (src, ret, stubs) => { const ks = Object.keys(stubs); return new Fu
     ok(F.conDung(L).map(x => x.id).join() === 'a,c' && F.conDung(L, 'b').map(x => x.id).join() === 'a,b,c', 'ô chọn: bỏ món ngừng dùng, giữ món đang chọn sẵn ở dòng cũ');
     const P = chay(extract('posgieo.html', ['POS_PREP_CON_DUNG']), 'POS_PREP_CON_DUNG', { PREP_ITEMS_CACHE_POS: L });
     ok(P().map(x => x.id).join() === 'a,c' && P('b').length === 3, 'POS nấu mẻ mới: bỏ BTP ngừng dùng (danh sách đầy đủ vẫn giữ cho engine)');
-    const pos = fs.readFileSync(path.join(ROOT, 'posgieo.html'), 'utf8');
+    const pos = fs.readFileSync(path.join(ROOT, 'posgieo.html'), 'utf8') + '\n' + require('../tools/tach_posgieo/nguon').maNoi('posgieo.html');   // + js/posgieo (pos_prep.v1.js gán PREP_ITEMS_CACHE_POS)
     ok(!/PREP_ITEMS_CACHE_POS = [^;\n]*\.filter\([a-z] => [a-z]\.active !== false\)/.test(pos) && !/PREP_ITEMS_CACHE_POS = [^\n]*\n\s*\.filter\(\w => \w\.active !== false\)/.test(pos), 'POS nạp ĐỦ BTP vào PREP_ITEMS_CACHE_POS (engine dò BTP qua getPreps)');
   }
   // ── 4. POS: dữ liệu lưu trên máy theo quán ──
