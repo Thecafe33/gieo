@@ -107,8 +107,10 @@ else {
   let fj = null;
   try { fj = JSON.parse(fs.readFileSync(FJ, 'utf8')); } catch (e) { loi.push('firebase.json không đọc được: ' + e.message); }
   if (fj && FJ !== path.join(ROOT, 'firebase.json')) {
-    const pubs = [].concat(fj.hosting || []).map(h => path.resolve(path.dirname(FJ), h.public || '.'));
-    if (!pubs.includes(ROOT)) loi.push('firebase.json ở ' + path.dirname(FJ) + ' nhưng "public" không trỏ tới thư mục đang kiểm (' + ROOT + ') — kiểm đúng thư mục deploy chưa?');
+    // realpath hai phía: đường symlink (Termux ~/storage/shared ↔ /sdcard) là cùng một chỗ
+    const real = q => { try { return fs.realpathSync(q); } catch (e) { return path.resolve(q); } };
+    const pubs = [].concat(fj.hosting || []).map(h => real(path.resolve(real(path.dirname(FJ)), h.public || '.')));
+    if (!pubs.includes(real(ROOT))) loi.push('firebase.json ở ' + path.dirname(FJ) + ' nhưng "public" không trỏ tới thư mục đang kiểm (' + ROOT + ') — kiểm đúng thư mục deploy chưa?');
   }
   if (fj) {
     const hosts = [].concat(fj.hosting || []);

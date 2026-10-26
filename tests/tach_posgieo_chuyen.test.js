@@ -178,13 +178,22 @@ chk(a1 > 0 && b1 > a1 && a2 > 0 && b2 > a2 && a3 > 0 && b3 > a3 && a4 > 0 && b4 
 const d4 = [[a1, b1], [a2, b2], [a3, b3], [a4, b4]];
 const r11 = chuyen({ html: 'posgieo.html', htmlText: html11, dai: d4, ra: 'js/posgieo/_thu_may_in.v1.js', dau: 'mayin', root: ROOT });
 // POSPrinter có `layout: loadPrinterLayout()` chạy NGAY lúc nạp; hàm đó nằm ngoài 4 dải → phải bị chặn (đúng), thêm dải chứa nó thì sạch
-chk(r11.loi.length === 1 && /^\(a\) const POSPrinter.*"loadPrinterLayout"/.test(r11.loi[0]), '11: 4 dải gốc → đúng một lỗi (a): POSPrinter cần loadPrinterLayout (còn ở HTML) — ' + r11.loi.join(' | '));
+const loiE11 = r11.loi.filter(l => /^\(e\)/.test(l)), loiA11 = r11.loi.filter(l => /^\(a\)/.test(l));
+chk(loiA11.length === 1 && /^\(a\) const POSPrinter.*"loadPrinterLayout"/.test(loiA11[0]), '11: 4 dải gốc → lỗi (a): POSPrinter cần loadPrinterLayout (còn ở HTML) — ' + loiA11.join(' | '));
+chk(loiE11.length >= 1 && loiE11.some(l => /POSPrinter/.test(l) && /localStorage/.test(l)), '11: POSPrinter đọc localStorage lúc nạp → lỗi (e) — ' + loiE11.join(' | '));
 const aL = ln(/^function loadPrinterLayout/), bL = ln(/^const PRINTER_LAYOUT_FB_PATH/) - 1;
 const r11b = chuyen({ html: 'posgieo.html', htmlText: html11, dai: d4.concat([[aL, bL]]), ra: 'js/posgieo/_thu_may_in.v1.js', dau: 'mayin', root: ROOT });
-chk(r11b.loi.length === 0, '11: thêm dải chứa loadPrinterLayout → không lỗi' + (r11b.loi.length ? ' — ' + r11b.loi.join(' | ') : ''));
-chk(r11b.fileMoi && quyTac(r11b.fileMoi) && !fs.existsSync(path.join(ROOT, 'js/posgieo/_thu_may_in.v1.js')), '11: file ra hợp quy tắc, không ghi vào repo');
-console.log('--- ca 11 (5 dải) tên (' + r11b.ten.length + '): ' + r11b.ten.join(', '));
-console.log('--- ca 11: lệnh tự chạy giữ lại (' + r11b.giuLai.length + ')'); r11b.giuLai.forEach(g => console.log('    dòng ' + g.line + ' [' + g.loai + '] ' + g.mo_ta));
-console.log('--- ca 11: cảnh báo (' + r11b.canhBao.length + '):'); r11b.canhBao.forEach(w => console.log('    ' + w));
+chk(r11b.loi.length > 0 && r11b.loi.every(l => /^\(e\)/.test(l)) && r11b.loi.some(l => /POSPrinter/.test(l) && /loadPrinterLayout\(\) → localStorage/.test(l)), '11: thêm dải chứa loadPrinterLayout → hết lỗi (a), còn lỗi (e) bắc cầu qua loadPrinterLayout — ' + r11b.loi.join(' | '));
+// 12: (e) đọc trạng thái máy lúc nạp
+const loiE = r => r.loi.some(l => /^\(e\)/.test(l));
+chk(loiE(eg("const o = { a: localStorage.getItem('k') };")), '12: giá trị thuộc tính đọc localStorage → lỗi (e)');
+chk(!eg("const o = { f() { return localStorage.getItem('k'); } };").loi.length, '12: đọc localStorage trong phương thức → không lỗi');
+chk(loiE(eg("function g() { return localStorage.getItem('k'); }\nconst o = { a: g() };")), '12: gọi lúc nạp hàm cùng chuyển có đọc localStorage → lỗi (e) bắc cầu');
+chk(loiE(eg("function h() { return localStorage.getItem('k'); }\nfunction g() { return h(); }\nconst o = { a: g() };")), '12: bắc cầu hai tầng → lỗi (e)');
+chk(!eg("function g() { return localStorage.getItem('k'); }\nconst o = { a: 1, f: () => g() };").loi.length, '12: chỉ tham chiếu hàm trong mũi tên → không lỗi');
+chk(!eg('const s = new Set();').loi.length, '12: const s = new Set() → không lỗi');
+chk(loiE(eg("const o = window.localStorage;")) && loiE(eg("const c = document.cookie;")) && loiE(eg("const u = navigator.userAgent;")) && loiE(eg("const l = location.href;")) && loiE(eg("const d = indexedDB;")) && loiE(eg("const t = window.sessionStorage;")), '12: window.localStorage / document.cookie / navigator / location / indexedDB / sessionStorage → lỗi (e)');
+chk(loiE(eg("function g(){ return 1; }\nfunction k() { return localStorage.length; }\nclass A { static s = k(); }")), '12: class static gọi hàm đọc localStorage → lỗi (e)');
+chk(!eg("function a() { return a(); }\nfunction b() { return b(); }\nconst o = a();").loi.some(l => /^\(e\)/.test(l)), '12: hàm đệ quy không trạng thái → không lỗi, không lặp vô hạn');
 
 console.log(ok ? 'ALL PASS' : 'SOME FAIL'); process.exit(ok ? 0 : 1);

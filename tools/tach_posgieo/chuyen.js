@@ -6,7 +6,9 @@
 // Ở lại HTML: lệnh tự chạy (đúng chỗ, đúng thứ tự), khai báo ở --giu (theo dòng bắt đầu), chú thích không liền khai báo.
 // An toàn (lỗi → mã thoát 1, không ghi gì): (a) giá trị đầu let/const/var (và `extends` / trường static của class)
 // chỉ xét phần CHẠY NGAY lúc nạp — bỏ thân hàm / mũi tên / phương thức — không tham chiếu tên cấp cao còn ở HTML
-// (hay khai báo muộn hơn trong file ra); (b) không trùng tên với JS riêng khác; (c) không ghi đè file ra;
+// (hay khai báo muộn hơn trong file ra); (e) phần CHẠY NGAY đó (và thân các hàm cấp cao chuyển cùng mà nó gọi, bắc cầu)
+// không đọc trạng thái máy (localStorage / sessionStorage / indexedDB / document.cookie / navigator / location — kể cả qua
+// window.…) vì file nạp TRƯỚC GieoThu.install và trước bước dọn cache theo quán; (b) không trùng tên với JS riêng khác; (c) không ghi đè file ra;
 // (d) parse lại được cả hai và tập tên cấp cao trước = sau. Không --ghi = chạy thử.
 'use strict';
 const fs = require('fs'), path = require('path'), acorn = require('acorn');
@@ -56,6 +58,33 @@ function stripEager(n) {
 }
 const eagerRefs = node => freeRefs(stripEager(node));
 
+// (e) tham chiếu trạng thái máy
+const STATE_TEN = new Set(['localStorage', 'sessionStorage', 'indexedDB', 'navigator', 'location']);
+const GLOBAL_TEN = new Set(['window', 'self', 'globalThis', 'top', 'parent']);
+const tenThuoc = m => m.computed ? (m.property.type === 'Literal' ? String(m.property.value) : null) : (m.property.type === 'Identifier' ? m.property.name : null);
+function stateRefs(node) {
+  const out = new Set();
+  freeRefs(node).forEach(r => { if (STATE_TEN.has(r)) out.add(r); });
+  acornWalk(node, n => {
+    if (n.type !== 'MemberExpression' || n.object.type !== 'Identifier') return;
+    const p = tenThuoc(n);
+    if (GLOBAL_TEN.has(n.object.name) && STATE_TEN.has(p)) out.add('window.' + p);
+    else if (n.object.name === 'document' && p === 'cookie') out.add('document.cookie');
+    else if (GLOBAL_TEN.has(n.object.name) && p === 'document') out.add('window.document');
+  });
+  return out;
+}
+// tên được GỌI (callee Identifier / tag) trong node
+function goiTen(node) {
+  const out = new Set();
+  acornWalk(node, n => {
+    if ((n.type === 'CallExpression' || n.type === 'NewExpression') && n.callee.type === 'Identifier') out.add(n.callee.name);
+    else if (n.type === 'TaggedTemplateExpression' && n.tag.type === 'Identifier') out.add(n.tag.name);
+  });
+  return out;
+}
+
+const E_LYDO = 'file js/posgieo nạp TRƯỚC script chính, tức trước GieoThu.install (bản thử chuyển localStorage sang vùng thử) và trước bước dọn cache theo quán (POS_LS_THEO_QUAN) → đọc cache quán cũ / bản thật. Để phần đọc này ở HTML hoặc đổi thành đọc lười (trong hàm, gọi sau khi khởi động)';
 function chuyen(o) {
   const loi = [], canhBao = [];
   const fail = () => ({ htmlMoi: null, fileMoi: null, ten: [], giuLai: [], canhBao, loi });
@@ -129,6 +158,27 @@ function chuyen(o) {
     catch (e) { loi.push('không parse được ' + s[1] + ': ' + e.message); }
   }
   ten.forEach(n => { if (trongKhac[n]) loi.push('(b) tên "' + n + '" đã khai báo trong ' + trongKhac[n].join(', ')); });
+
+  // (e) đọc trạng thái máy lúc nạp (trực tiếp hoặc qua hàm cấp cao chuyển cùng, bắc cầu tối đa 4 tầng, chống vòng)
+  const dinhNghia = {}; units.forEach(u => { if (u.st.type === 'FunctionDeclaration' || u.st.type === 'ClassDeclaration') dinhNghia[u.st.id.name] = u.st; });
+  const thanChua = (ten, cap, thamQua) => {       // trả về chuỗi mô tả đường đi tới trạng thái máy, hoặc null
+    if (thamQua.has(ten) || cap > 4 || !dinhNghia[ten]) return null;
+    thamQua.add(ten);
+    const nd = dinhNghia[ten], tt = stateRefs(nd);
+    if (tt.size) return ten + '() → ' + [...tt].join(', ');
+    for (const g of goiTen(nd)) { if (g === ten) continue; const r = thanChua(g, cap + 1, thamQua); if (r) return ten + '() → ' + r; }
+    return null;
+  };
+  const kiemE = (nhan, dong, eagerNode) => {
+    const st = eagerNode ? stripEager(eagerNode) : null; if (!st) return;
+    const tt = stateRefs(st);
+    if (tt.size) loi.push('(e) ' + nhan + ' (dòng ' + dong + '): phần chạy ngay lúc nạp đọc trạng thái máy (' + [...tt].join(', ') + ') — ' + E_LYDO);
+    goiTen(st).forEach(g => { const r = thanChua(g, 1, new Set()); if (r) loi.push('(e) ' + nhan + ' (dòng ' + dong + '): gọi lúc nạp ' + r + ' — ' + E_LYDO); });
+  };
+  units.forEach(u => {
+    if (u.st.type === 'ClassDeclaration') kiemE('class ' + u.st.id.name, L(u.st), u.st);
+    else if (u.st.type === 'VariableDeclaration') u.st.declarations.forEach(d => kiemE(u.st.kind + ' ' + patNames(d.id, []).join(','), L(u.st), d.id.type === 'Identifier' ? d.init : d));
+  });
 
   // (a) giá trị đầu của biến chuyển đi
   const conLai = new Set(); body.forEach((st, i) => { if (!moved.has(i) && laKhaiBao(st)) tenCua(st).forEach(n => conLai.add(n)); });

@@ -36,6 +36,20 @@ ${body || 'function chinh(){ return escHtmlPos("<b>"); }'}
   chk(/không có file này/.test(loi), 'nguồn: HTML nạp js/… không tồn tại → báo lỗi (không bỏ qua)');
 }
 
+// ── bộ đọc nguồn: cú pháp chưa hỗ trợ → THROW (không bỏ sót im lặng) ──
+{
+  const { nguonCua } = require(path.join(ROOT, 'tools/tach_posgieo/nguon.js'));
+  const r = tmp(); w(r, 'js/posgieo/pos_ui.v1.js', '//');
+  const thu = html => { w(r, 'b.html', html); try { nguonCua('b.html', { root: r }); return ''; } catch (e) { return e.message; } };
+  chk(/chưa hỗ trợ/.test(thu('<script type="module">const a=1;</script>')), 'nguồn: <script type="module"> inline không id → throw');
+  chk(/chưa hỗ trợ/.test(thu('<script defer>const a=1;</script>')), 'nguồn: <script defer> inline → throw');
+  chk(thu('<script type="module"></script>') === '', 'nguồn: thẻ có thuộc tính nhưng nội dung rỗng → không throw');
+  chk(thu(RETRY) === '' && thu('<script id="x" type="module">1</script>') === '', 'nguồn: thẻ có id (khối nạp lại) → không throw');
+  chk(/nháy kép/.test(thu("<script src='js/posgieo/pos_ui.v1.js'></script>")), "nguồn: src nháy đơn trỏ js/ → throw 'dùng src nháy kép'");
+  chk(/nháy kép/.test(thu('<script src=js/posgieo/pos_ui.v1.js></script>')), 'nguồn: src không nháy trỏ js/ → throw');
+  chk(thu("<script src='https://cdn/x.js'></script>") === '' && thu('<script src="js/posgieo/pos_ui.v1.js" defer></script>') === '', 'nguồn: src nháy đơn tới CDN / src nháy kép + defer → không throw');
+}
+
 // ── T1–T3 tao_bo_deploy ──
 {
   const t = require(path.join(ROOT, 'tools/tao_bo_deploy.js'));
@@ -154,6 +168,24 @@ ${body || 'function chinh(){ return escHtmlPos("<b>"); }'}
   fs.rmSync(path.join(pub, 'js/posgieo/Pos_Ui.v2.js'));
   w(r, 'firebase.json', JSON.stringify({ hosting: { public: 'khac' } }));
   k = pc(); chk(k.status !== 0 && /không trỏ tới thư mục đang kiểm/.test(k.stdout), 'T10: firebase.json cha trỏ "public" chỗ khác → báo kiểm nhầm thư mục');
+}
+
+// ── T10b: đường symlink tới thư mục public (Termux ~/storage/shared ↔ /sdcard) coi là cùng chỗ ──
+{
+  const r = tmp(), pub = path.join(r, 'public');
+  fs.cpSync(path.join(ROOT, 'ban_deploy/giangsinh'), pub, { recursive: true });
+  const fjs = JSON.parse(fs.readFileSync(path.join(ROOT, 'tools/firebase_headers_gieogieo.json'), 'utf8'));
+  w(r, 'firebase.json', JSON.stringify({ hosting: Object.assign({ public: 'public' }, fjs.hosting || fjs) }));
+  const goc = run([path.join(ROOT, 'tools/predeploy_check.js'), pub]);
+  // đường vào KHÁC chữ nhưng cùng chỗ: <cha>/lien_ket → public (firebase.json ở <cha> ghi "public")
+  const link = path.join(r, 'lien_ket');
+  let tao = true; try { fs.symlinkSync(pub, link, 'dir'); } catch (e) { tao = false; }
+  if (!tao) console.log('bỏ qua T10b: không tạo được symlink');
+  else {
+    const qua = run([path.join(ROOT, 'tools/predeploy_check.js'), link]);
+    chk(!/không trỏ tới thư mục đang kiểm/.test(qua.stdout), 'T10b: kiểm qua symlink tới thư mục public → không báo kiểm nhầm thư mục');
+    chk(qua.status === goc.status, 'T10b: kết quả qua symlink = kết quả qua đường thật (mã thoát ' + goc.status + ')');
+  }
 }
 
 // ── T12 tiện ích e2e ──

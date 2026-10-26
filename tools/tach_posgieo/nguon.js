@@ -38,6 +38,10 @@ function nguonCua(htmlRel, opts) {
   for (const t of cacThe(html)) {
     if (t.attrs.trim() === '') { out.push({ file: htmlRel, startLine: html.slice(0, t.codeStart).split('\n').length, code: t.code, kind: 'inline' }); continue; }
     const s = /\bsrc\s*=\s*"([^"?#]+)(?:[?#][^"]*)?"/.exec(t.attrs);
+    // cú pháp chưa hỗ trợ có thể làm BỎ SÓT mã của app → báo lỗi rõ ràng (không bỏ qua im lặng)
+    const khac = /(?<![\w-])src\s*=\s*(?:'([^']*)'|([^\s"'>]+))/.exec(t.attrs);
+    if (!s && khac) { const v = (khac[1] != null ? khac[1] : khac[2]).replace(/[?#].*$/, ''); if (laJsRieng(v)) throw new Error(htmlRel + ': <script src=' + (khac[1] != null ? "'" : '') + v + '…> chưa hỗ trợ — dùng src nháy kép (src="' + v + '")'); }
+    if (!s && !khac && t.code.trim() !== '' && !/(?<![\w-])id\s*=/.test(t.attrs)) throw new Error(htmlRel + ': <script' + t.attrs + '> inline có thuộc tính nhưng không có id — chưa hỗ trợ (bộ đọc nguồn chỉ đọc <script> trần + <script id=…> nạp lại); mã trong đó sẽ bị bỏ sót');
     if (!s || !laJsRieng(s[1])) continue;
     const abs = path.resolve(dir, s[1]);
     if (!fs.existsSync(abs)) throw new Error(htmlRel + ' nạp ' + s[1] + ' nhưng không có file này');
