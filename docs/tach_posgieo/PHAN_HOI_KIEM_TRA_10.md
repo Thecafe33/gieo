@@ -58,3 +58,15 @@ node tools/tach_posgieo/e2e_kho.js               # 15 kịch bản × gg01/gg02 
 node tools/tach_posgieo/e2e_0d.js; node tools/tach_posgieo/e2e_ban.js; node tools/tach_posgieo/e2e_hook.js   # ALL PASS
 sh tools/sinh_lai_tat_ca.sh                      # TẤT CẢ ĐẠT, file sinh không đổi
 ```
+
+---
+
+# Phản hồi kiểm lại lượt 10 (`KET_QUA_KIEM_TRA_LAI_10_D34DDE8.md`, commit `e452616`)
+
+Người kiểm: **đạt** đổ ly / ghi lại / báo hết còn dư (cài thêm 2 lỗi FIFO / idempotency → đều bị bắt), không hồi quy app. Còn F10-1 (`not-in` có null) và F10-2 (RT rỗng báo có dữ liệu) — lỗi công cụ. Phản biện: đồng ý cả hai. App không đổi.
+
+- **F10-1 (null)**: mock nói rõ mô phỏng **phía máy chủ** (vì ảnh gửi `fromCache:false`, theo tài liệu truy vấn hiện hành): `!=` / `not-in` loại cả trường null; `not-in` có null trong mảng → không khớp gì (khớp cả `NotInFilter` SDK 10.13.2). Kỳ vọng hai ca cũ đổi từ `['b','nul']` → `['b']`; thêm ca `not-in [1, null]` → rỗng và `== null`.
+- **F10-2**: RT không giữ node rỗng — đọc / truy vấn không khớp con / xoá mã cuối → `val() null`, `exists() false`; tổ tiên rỗng bị dọn khỏi mồi; transaction nhận null.
+- Test `tach_posgieo_fb_gia`: 31 ca; chạy trên `fb_gia.js` của `d34dde8` trượt đúng 5 ca mới / đổi.
+- Chạy lại: `e2e_kho` 405 khẳng định ALL PASS; `e2e_0d` / `e2e_ban` / `e2e_hook` ALL PASS; `sinh_lai_tat_ca.sh` TẤT CẢ ĐẠT.
+- Giới hạn giữ nguyên như báo cáo (orderBy/limit bỏ qua, increment xấp xỉ, onSnapshot một ảnh đầu, chưa APK / Firebase thật / hai quán đồng thời; các nhánh kho ghi ở mục «CHƯA phủ»).

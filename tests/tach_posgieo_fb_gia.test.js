@@ -17,13 +17,22 @@ let ok = true; const eq = (a, b, m) => { const s = JSON.stringify(a) === JSON.st
   eq(Object.keys((await db.ref('r/k').orderByChild('st').equalTo('y').get()).val()), ['u2'], 'RT orderByChild + equalTo');
   // F10-1 (kiểm lượt 10): bốn sai lệch so với Firebase thật — nay phải đúng
   w.__SEED = Object.assign({}, w.__SEED, { 'f/a': { n: 1, obj: { v: 1, w: [1, 2] } }, 'f/b': { n: 2, obj: { v: 2 } }, 'f/missing': {}, 'f/nul': { n: null }, 'rp/k': { u1: { st: 'x' }, u2: { st: 'y' }, u3: 5 } });
-  eq(await ids(fs.collection('f').where('n', '!=', 1)), ['b', 'nul'], "!= loại doc THIẾU trường (lỗi cũ: trả cả 'missing')");
-  eq(await ids(fs.collection('f').where('n', 'not-in', [1])), ['b', 'nul'], 'not-in loại doc thiếu trường');
+  eq(await ids(fs.collection('f').where('n', '!=', 1)), ['b'], "!= loại doc THIẾU trường (lỗi cũ: trả cả 'missing') và trường null (máy chủ — kiểm lại 10)");
+  eq(await ids(fs.collection('f').where('n', 'not-in', [1])), ['b'], 'not-in loại doc thiếu trường và trường null');
+  eq(await ids(fs.collection('f').where('n', 'not-in', [1, null])), [], 'not-in có null trong mảng → rỗng (F10-1 kiểm lại; NotInFilter SDK 10.13.2)');
+  eq(await ids(fs.collection('f').where('n', '==', null)), ['nul'], '== null khớp trường null, không khớp thiếu trường');
   eq(await ids(fs.collection('f').where('obj', '==', { w: [1, 2], v: 1 })), ['a'], '== so map theo giá trị, không theo thứ tự khoá (lỗi cũ: rỗng)');
   eq(await ids(fs.collection('f').where('obj', 'in', [{ v: 2 }])), ['b'], 'in so map theo giá trị');
   eq(Object.keys((await db.ref('rp/k').orderByChild('st').equalTo('y').get()).val()), ['u2'], 'RT orderByChild+equalTo khi mồi là NODE CHA (lỗi cũ: u1,u2)');
   eq((await db.ref('rp/k').get()).val(), { u1: { st: 'x' }, u2: { st: 'y' }, u3: 5 }, 'RT node cha không lọc → đủ con');
   eq(await ids(fs.collection('f').where('n', '>', 1)), ['b'], '> bỏ null / thiếu trường');
+  // F10-2 (kiểm lại 10): RT không có dữ liệu → val() null, exists() false (không phải {} / true)
+  const ba = sn => [sn.val(), sn.exists(), sn.hasChildren()];
+  eq(ba(await db.ref('rp/k').orderByChild('st').equalTo('absent').get()), [null, false, false], 'RT truy vấn không khớp con nào → rỗng thật (lỗi cũ: {}, true)');
+  w.__SEED_GHI = true; w.__SEED['re/k'] = { u1: { st: 'x' }, u2: { st: 'y' } };
+  await db.ref('re/k/u1').remove(); await db.ref('re/k/u2').remove();
+  eq([ba(await db.ref('re/k').get()), 're/k' in w.__SEED], [[null, false, false], false], 'RT xoá mã cuối → node cha rỗng bị dọn, đọc lại rỗng thật');
+  w.__SEED_GHI = false;
   const loiCua = async f => { try { await f(); return null; } catch (e) { return /fb_gia/.test(e.message); } };
   eq(await loiCua(() => fs.collection('f').where('obj', '<', { v: 3 }).get()), true, '< với map → LỖI rõ (không lặng lẽ trả sai)');
   eq(await loiCua(() => fs.collection('f').where('n', 'lạ', 1).get()), true, 'toán tử lạ → LỖI (lỗi cũ: coi như khớp)');
