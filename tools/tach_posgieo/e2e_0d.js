@@ -79,7 +79,7 @@ let ok = true; const chk = (c, m) => { console.log((c ? 'ok ' : 'FAIL ') + m); i
   }
 
   // (11) phản hồi kiểm tra lượt 06 — chốt module bao phủ TỪNG file 1C (không chỉ pos_ui): 404 hai lần / chạy dở
-  for (const [f, k] of [['pos_print_content.v1.js', 'printContent'], ['pos_print_ui.v1.js', 'printUi'], ['pos_receive.v1.js', 'receive'], ['pos_prep.v1.js', 'prep']]) {
+  for (const [f, k] of [['pos_print_content.v1.js', 'printContent'], ['pos_print_ui.v1.js', 'printUi'], ['pos_receive.v1.js', 'receive'], ['pos_prep.v1.js', 'prep'], ['pos_stock_units.v1.js', 'stockUnits'], ['pos_kho.v1.js', 'kho'], ['pos_count.v1.js', 'count']]) {
     const re = new RegExp('js/posgieo/' + f.replace(/\./g, '\\.'));
     let r = await mo(base + '/posgieo.html', [{ status: 404, type: 'text/html', body: 'x' }, { status: 404, type: 'text/html', body: 'x' }], null, re);
     chk(r.modThieu && !r.login && r.xin.length === 2, '(11) ' + f + ' 404 cả lần nạp lại → màn đỏ, không vào màn nhập mã');

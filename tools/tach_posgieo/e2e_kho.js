@@ -46,6 +46,15 @@ const PREP_NAU = {
   tcq: { id: 'tcq', name: 'Trân châu nguyên gói', code: 'TCQ', unit: 'g', batchYield: 3000, active: true, shelfLifeType: 'hours', shelfLifeHours: 8, costPerUnit: 22,
     batchInputs: [{ itemId: 'pearlg', qty: 2000 }] }
 };
+// 2C: NL dán tem theo đơn vị (mở / báo hết) + NL đếm theo số lượng (kiểm kê mù)
+const NL_KHO = {
+  milk: { id: 'milk', name: 'Sữa tươi', unit: 'ml', countUnitName: 'Hộp', trackingMode: 'unit', active: true,
+    packagingUnits: [{ name: 'Hộp', baseQty: 1000 }], costPerUnit: 40, openShelfLifeHours: 24 },
+  tra: { id: 'tra', name: 'Trà lài', unit: 'g', active: true, costPerUnit: 300, currentStock: 1000,
+    packagingUnits: [{ name: 'Gói', baseQty: 500 }] }
+};
+const CTN = (st, extra) => Object.assign({ code: st === 'open' ? 'SUA00002' : 'SUA00001', itemId: 'milk', itemName: 'Sữa tươi', unit: 'ml', trackingMode: 'unit', countUnitName: 'Hộp',
+  baseQty: 1000, unitBase: 1000, status: st, labelPrinted: true, receivedAt: '2026-10-25T03:00:00.000Z', businessDate: '2026-10-25', openShelfLifeHours: 24 }, extra || {});
 const ITEMS = {
   pearl: { id: 'pearl', name: 'Trân châu trắng', unit: 'g', countUnitName: 'Bịch', trackingMode: 'unit', active: true,
     packagingUnits: [{ name: 'Bịch', baseQty: 2000 }, { name: 'Thùng', baseQty: 12000 }], costPerUnit: 30, openShelfLifeHours: 48 },
@@ -276,6 +285,58 @@ const KICH_BAN = {
         return tru.length === 1 && st.some(g => g.d.itemId === tru[0].d.itemId && Number(g.d.qty) === -tru[0].d.qty); })(),
         'cuộn ngược: NL đã trừ được (1 trong 2) có dòng hoàn đúng lượng — sổ kho: ' + n.ghi.filter(g => /stock_transactions_gieogieo|!hong/.test(duongGhi(g) + g.op)).map(g => g.op.replace(/@.*/, '') + ' ' + (g.d ? g.d.itemId + ':' + g.d.type + ':' + g.d.qty : '')).join(' | ')]
     ]
+  },
+  // 2C — MỞ mã NL (sealed → open): PIN → engine lifecycle mở + RT mã đang mở + hạn dùng sau mở
+  moMa: {
+    mo: 'kho',
+    chay: async () => {
+      const sleep = ms => new Promise(r => setTimeout(r, ms));
+      window.posConfirm = async () => true;
+      KHO_ITEMS_CACHE = Object.values(window.__E2E.NL_KHO).map(x => JSON.parse(JSON.stringify(x)));
+      window.__ghi = [];
+      await submitOpenContainer('ctn_m1'); await sleep(900);
+      return {};
+    },
+    bang: ["active_units_gieogieo", "inventory_items_gieogieo", "stock_containers_gieogieo"],
+    kiem: (n) => [
+      [n.ghi.some(g => /stock_containers_gieogieo[^/]*\/ctn_m1$/.test(duongGhi(g)) && g.d && g.d.status === 'open'), 'mã ctn_m1 → open — toast: ' + JSON.stringify(n.toasts) + ' lỗi: ' + JSON.stringify(n.loi)],
+      [n.ghi.some(g => /active_units_gieogieo/.test(duongGhi(g))), 'ghi RT mã đang mở']
+    ]
+  },
+  // 2C — BÁO HẾT mã NL đang mở (đã quét, còn 0): engine lifecycle.finish → finished + gỡ RT
+  baoHet: {
+    mo: 'kho',
+    chay: async () => {
+      const sleep = ms => new Promise(r => setTimeout(r, ms));
+      window.posConfirm = async () => true;
+      KHO_ITEMS_CACHE = Object.values(window.__E2E.NL_KHO).map(x => JSON.parse(JSON.stringify(x)));
+      window.__ghi = [];
+      await submitFinishContainer('ctn_m2', true); await sleep(900);
+      return {};
+    },
+    bang: ["active_units_gieogieo", "stock_containers_gieogieo"],
+    kiem: (n) => [
+      [n.ghi.some(g => /stock_containers_gieogieo[^/]*\/ctn_m2$/.test(duongGhi(g)) && g.d && g.d.status === 'finished'), 'mã ctn_m2 → finished']
+    ]
+  },
+  // 2C — KIỂM KÊ MÙ: mở màn (đọc danh mục) → đếm Trà lài 900 g → gửi phiếu chờ duyệt
+  kiemKe: {
+    mo: 'kho',
+    chay: async () => {
+      const sleep = ms => new Promise(r => setTimeout(r, ms));
+      window.posConfirm = async () => true;
+      await openStockCountScreen(); await sleep(400);
+      const l = (stockCountState.items || []).find(x => x.itemId === 'tra');
+      if (l) { l.countedBase = 900; l.countedInput = 900; l.unitFactor = (l.unitOptions && l.unitOptions[0] && l.unitOptions[0].baseQty) || 1; }
+      window.__ghi = [];
+      await submitStockCount(); await sleep(900);
+      return { coDong: !!l, soDong: (stockCountState.items || []).length };
+    },
+    bang: ["stock_counts_gieogieo"],
+    kiem: (n) => [
+      [n.sau && n.sau.coDong, 'màn kiểm kê có dòng Trà lài'],
+      [n.ghi.some(g => /stock_counts_gieogieo/.test(duongGhi(g)) && g.d && g.d.status === 'pending_review' && JSON.stringify(g.d.items).includes('"countedBase":900')), 'gửi phiếu kiểm kê chờ duyệt, Trà lài đếm 900']
+    ]
   }
 };
 // Đếm trên lượt ghi đã chuẩn hoá
@@ -295,7 +356,12 @@ async function chay(b, base, store, ten) {
     const S = {}; const ten = n => GieoData.fsPath(n);   // mồi đặt ĐÚNG tên bảng của quán đang chạy (đọc qua lớp GieoData)
     for (const [id, it] of Object.entries(ITEMS)) S[ten('inventory_items_gieogieo') + '/' + id] = it;
     if (mo === 'po') S[ten('purchase_orders_gieogieo') + '/po1'] = PO;
-    window.__E2E = { ITEMS, PREP: E2E.PREP, BATCH: E2E.BATCH, NL_NAU: E2E.NL_NAU, PREP_NAU: E2E.PREP_NAU };
+    window.__E2E = { ITEMS, PREP: E2E.PREP, BATCH: E2E.BATCH, NL_NAU: E2E.NL_NAU, PREP_NAU: E2E.PREP_NAU, NL_KHO: E2E.NL_KHO };
+    if (mo === 'kho') {
+      for (const [id, it] of Object.entries(E2E.NL_KHO)) S[ten('inventory_items_gieogieo') + '/' + id] = it;
+      S[ten('stock_containers_gieogieo') + '/ctn_m1'] = E2E.CTN1; S[ten('stock_containers_gieogieo') + '/ctn_m2'] = E2E.CTN2;
+      S[GieoData.rtPath('active_units_gieogieo') + '/milk/ctn_m2'] = { code: 'SUA00002', itemName: 'Sữa tươi', unit: 'ml', unitBase: 0, capacity: 1000, openedAt: 1793000000000, rev: 1 };
+    }
     if (mo === 'nau') {
       for (const [id, it] of Object.entries(E2E.NL_NAU)) S[ten('inventory_items_gieogieo') + '/' + id] = it;
       for (const [id, it] of Object.entries(E2E.PREP_NAU)) S[ten('prep_items_gieogieo') + '/' + id] = it;
@@ -312,7 +378,7 @@ async function chay(b, base, store, ten) {
     let loiKB = null, sau = null;
     try { sau = await (0, eval)('(' + src + ')')({ ITEMS }); } catch (e) { loiKB = String(e && e.message || e); }
     return { ghi: (window.__ghi || []).map(g => ({ op: g.op, p: g.p, rt: !!g.rt, d: g.d })), toasts, sau, loiKB };
-  }, { src: KICH_BAN[ten].chay.toString(), dau: KB_DAU.toString(), mo: KICH_BAN[ten].mo, ITEMS, PO, E2E: { PREP, BATCH: BATCH(), NL_NAU, PREP_NAU, lo: KICH_BAN[ten].lo || [], loActive: !!KICH_BAN[ten].loActive, tieuHao: !!KICH_BAN[ten].tieuHao } });
+  }, { src: KICH_BAN[ten].chay.toString(), dau: KB_DAU.toString(), mo: KICH_BAN[ten].mo, ITEMS, PO, E2E: { PREP, BATCH: BATCH(), NL_NAU, PREP_NAU, NL_KHO, CTN1: CTN('sealed'), CTN2: CTN('open', { unitBase: 0, openedAt: '2026-10-25T05:00:00.000Z', openedBy: 'NV E2E', expiresAt: '2026-10-26T05:00:00.000Z' }), lo: KICH_BAN[ten].lo || [], loActive: !!KICH_BAN[ten].loActive, tieuHao: !!KICH_BAN[ten].tieuHao } });
   r.loi = t.loi.slice().sort(); r.qua = t.qua; await t.ctx.close();
   r.ghiTho = r.ghi; r.ghi = chuanGhi(r.ghi); r.sau = chuanDuLieu(r.sau);
   return r;
@@ -358,6 +424,7 @@ const lechMuc = (m, n) => SO.filter(p => JSON.stringify(m[p]) !== JSON.stringify
     const TU_KIEM = [
       { kb: 'nhanHang', file: 'pos_receive.v1.js', tim: /(\bnote:\s*generalNote)/, thay: "$1 + '·hỏng'", mo: 'đổi ghi chú phiếu nhận' },
       { kb: 'huyMe', file: 'pos_prep.v1.js', tim: /Hoàn kho do HUỶ MẺ/, thay: 'Hoàn kho do HUY ME', mo: 'đổi ghi chú dòng hoàn kho khi huỷ mẻ' },
+      { kb: 'kiemKe', file: 'pos_count.v1.js', tim: /countedBy: staff, status: 'pending_review'/, thay: "countedBy: staff, status: 'pending'", mo: 'đổi trạng thái phiếu kiểm kê (chỗ ghi phiếu)' },
       { kb: 'batDauMe', file: 'pos_prep.v1.js', tim: /note: `Nấu \$\{p\.code/, thay: 'note: `NAU ${p.code', mo: 'đổi ghi chú dòng trừ NL khi bắt đầu nấu' }
     ];
     for (const tk of TU_KIEM) {

@@ -12,15 +12,23 @@ const FB_STUB = `(function(){
     if(k==='update'||merge){var o=Object.assign({},S[duong]||{});Object.keys(d||{}).forEach(function(kk){var ps=kk.split('.'),t=o;for(var i=0;i<ps.length-1;i++){t[ps[i]]=Object.assign({},t[ps[i]]||{});t=t[ps[i]];}t[ps[ps.length-1]]=cpv(d[kk]);});S[duong]=o;return;}
     S[duong]=cpv(d); };
   var hong=function(op,duong){var H=window.__HONG||[];for(var i=0;i<H.length;i++){var h=H[i];if(h.op===op&&new RegExp(h.re).test(duong)&&(h.con==null?1:h.con)>0){h.con=(h.con==null?1:h.con)-1;(window.__ghi=window.__ghi||[]).push({op:op+'!hong',p:duong,rt:false,d:null});return true;}}return false;};
-  var mk=function(p,rt){var o={path:p,id:String(p).split('/').pop()};   // rt: ref Realtime Database (snapshot exists() là HÀM), không: Firestore (exists là thuộc tính)
-    ['where','orderBy','limit','orderByChild','equalTo','limitToLast','startAt','endAt','startAfter'].forEach(function(k){o[k]=function(){return o};});
+  // Bộ lọc truy vấn (cơ bản): Firestore where ==, !=, <, <=, >, >=, in, not-in, array-contains, array-contains-any (trường lồng 'a.b',
+  // FieldPath.documentId() = mã doc); RT orderByChild + equalTo. orderBy / limit / startAt… bỏ qua (thứ tự = mã doc).
+  var giaTri=function(d,id,f){if(f==='__name__')return id;var v=d;String(f).split('.').forEach(function(k){v=v==null?undefined:v[k];});return v;};
+  var khop=function(d,id,w){var v=giaTri(d,id,w[0]),op=w[1],x=w[2];switch(op){case '==':return v===x;case '!=':return v!==x;case '<':return v<x;case '<=':return v<=x;case '>':return v>x;case '>=':return v>=x;
+    case 'in':return (x||[]).indexOf(v)>=0;case 'not-in':return (x||[]).indexOf(v)<0;case 'array-contains':return Array.isArray(v)&&v.indexOf(x)>=0;case 'array-contains-any':return Array.isArray(v)&&v.some(function(e){return (x||[]).indexOf(e)>=0;});default:return true;}};
+  var mk=function(p,rt,loc){var o={path:p,id:String(p).split('/').pop(),_loc:loc||[]};   // rt: ref Realtime Database (snapshot exists() là HÀM), không: Firestore (exists là thuộc tính)
+    ['orderBy','limit','limitToLast','startAt','endAt','startAfter'].forEach(function(k){o[k]=function(){return o};});
+    o.where=function(f,op,x){var q=mk(p,rt,o._loc.concat([[typeof f==='string'?f:'__name__',op,x]]));return q;};
+    o.orderByChild=function(f){var q=mk(p,rt,o._loc);q._child=f;return q;};
+    o.equalTo=function(x){var q=mk(p,rt,o._loc.concat(o._child?[[o._child,'==',x]]:[]));q._child=o._child;return q;};
     o.collection=o.doc=o.child=function(n){return mk((p?p+'/':'')+(n==null?'auto'+(window.__autoN=(window.__autoN||0)+1):n),rt);};   // doc() không mã → mã riêng mỗi lần (bộ đếm, tất định)
     o.ref=function(n){return mk(n==null?'':String(n),rt);};
     o.toString=function(){return 'https://gia.firebaseio.com/'+p;};
     // Dữ liệu mồi (tuỳ chọn): window.__SEED = {'đường/dẫn/doc': dữ liệu} — doc / nút RT có mồi thì đọc ra, collection = các doc con trực tiếp.
     // Bộ lọc (where/orderBy/limit) bị bỏ qua; ghi KHÔNG cập nhật mồi (chỉ ghi nhớ vào __ghi).
     o.get=function(){var S=window.__SEED||{},cp=function(v){return v==null?v:JSON.parse(JSON.stringify(v))};
-      var con=Object.keys(S).filter(function(k){return k.indexOf(p+'/')===0&&k.slice(p.length+1).indexOf('/')<0;}).sort();
+      var con=Object.keys(S).filter(function(k){return k.indexOf(p+'/')===0&&k.slice(p.length+1).indexOf('/')<0;}).sort().filter(function(k){return o._loc.every(function(w){return khop(S[k]||{},k.split('/').pop(),w);});});
       var docs=con.map(function(k){return {id:k.split('/').pop(),exists:true,ref:mk(k,rt),data:function(){return cp(S[k])}};});
       var co=Object.prototype.hasOwnProperty.call(S,p),v=co?cp(S[p]):null;
       if(rt&&!co&&con.length){v={};con.forEach(function(k){v[k.split('/').pop()]=cp(S[k]);});}
