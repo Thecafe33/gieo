@@ -14,6 +14,7 @@
 'use strict';
 const fs = require('fs'), path = require('path');
 const acorn = require('acorn'), walk = require('acorn-walk');
+const { nguonCua } = require('./tach_posgieo/nguon');
 const ROOT = path.resolve(__dirname, '..');
 const storeId = process.argv[2];
 const JSON_OUT = process.argv.includes('--json');
@@ -41,15 +42,17 @@ const OP_KHOANG = new Set(['<', '<=', '>', '>=', '!=', 'not-in']);
 
 function quet() {
   const GD = napGieoData();
-  const nguon = { 'posgieo.html': null, 'quanlygieo.html': null };
-  for (const f of Object.keys(nguon)) nguon[f] = (fs.readFileSync(path.join(ROOT, f), 'utf8').match(/<script>([\s\S]*?)<\/script>/) || [])[1] || '';
+  // Mã app = MỌI đoạn nguồn (script trần + js/posgieo/* — tách posgieo); hằng tên bảng gộp theo app (hằng ở script chính, dùng ở file JS).
+  const nhom = [];
+  for (const f of ['posgieo.html', 'quanlygieo.html']) nhom.push(nguonCua(f).map(d => ({ ten: d.file, src: d.code })));
   const eng = moiNhat(/^unit_engine\.v\d+\.js$/);
-  nguon[eng] = fs.readFileSync(path.join(ROOT, eng), 'utf8');
+  nhom.push([{ ten: eng, src: fs.readFileSync(path.join(ROOT, eng), 'utf8') }]);
   const out = new Map();
-  for (const [ten, src] of Object.entries(nguon)) {
-    const ast = acorn.parse(src, { ecmaVersion: 'latest', sourceType: 'script', locations: true, allowReturnOutsideFunction: true });
+  for (const doan of nhom) {
+    const asts = doan.map(d => acorn.parse(d.src, { ecmaVersion: 'latest', sourceType: 'script', locations: true, allowReturnOutsideFunction: true }));
     const hang = {};   // const X = 'tên_gieogieo'
-    walk.full(ast, n => { if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.init && n.init.type === 'Literal' && typeof n.init.value === 'string') hang[n.id.name] = n.init.value; });
+    asts.forEach(ast => walk.full(ast, n => { if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.init && n.init.type === 'Literal' && typeof n.init.value === 'string') hang[n.id.name] = n.init.value; }));
+  doan.forEach(({ ten, src }, iDoan) => { const ast = asts[iDoan];
     const giaTri = a => a && (a.type === 'Literal' ? a.value : a.type === 'Identifier' ? hang[a.name] : a.type === 'TemplateLiteral' && !a.expressions.length ? a.quasis[0].value.cooked : undefined);
     walk.ancestor(ast, {
       CallExpression(n, anc) {
@@ -86,6 +89,7 @@ function quet() {
         out.get(key).noi.add(ten + ':' + n.loc.start.line);
       }
     });
+  });
   }
   THEM.forEach(([coll, truong, noi]) => { const key = coll + '|' + truong.map(t => t.join(':')).join(','); if (!out.has(key)) out.set(key, { coll, truong, noi: new Set([noi]) }); });
   return [...out.values()].sort((a, b) => (a.coll + a.truong.join()).localeCompare(b.coll + b.truong.join()));

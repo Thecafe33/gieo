@@ -20,7 +20,7 @@ async function dungHaiBan(moc, mua) {
   return { dir, base, dong() { for (const s of Object.values(sv)) s.close(); execFileSync('git', ['-C', ROOT, 'worktree', 'remove', '--force', tam]); } };
 }
 
-// opts: authNgay (auth trả về ngay), gioCo (Date cố định, ms), lechGio (cộng ms vào giờ thật — giả chạy lúc khác), store (mặc định gg01), canh (regex console cần gom)
+// opts: authNgay (auth trả về ngay), gioCo (Date cố định, ms), ngauNhienCo (Math.random + crypto.getRandomValues theo hạt giống cố định), lechGio (cộng ms vào giờ thật — giả chạy lúc khác), store (mặc định gg01), canh (regex console cần gom)
 async function moTrang(b, base, opts) {
   opts = opts || {};
   const ctx = await b.newContext();
@@ -31,12 +31,18 @@ async function moTrang(b, base, opts) {
       // eslint-disable-next-line no-global-assign
       Date = class extends D { constructor(...a) { if (!a.length) super(T + (n++)); else super(...a); } static now() { return T + (n++); } };
       let s = 12345; Math.random = () => ((s = (s * 1103515245 + 12345) % 2147483648) / 2147483648);
-    } else if (o.lechGio) {
+    }
+    if (o.ngauNhienCo && !o.gioCo) {   // cùng chuỗi ngẫu nhiên ở hai bản (mã tem / mã lô…) — giờ vẫn là giờ thật
+      let s = 987654321; const nx = () => (s = (s * 1103515245 + 12345) % 2147483648);
+      Math.random = () => nx() / 2147483648;
+      try { const C = window.crypto; const goc = C.getRandomValues.bind(C); C.getRandomValues = a => { if (!a || !a.length) return goc(a); for (let i = 0; i < a.length; i++) a[i] = nx() % 256; return a; }; } catch (e) {}
+    }
+    if (o.lechGio) {
       const L = o.lechGio, D = Date;
       // eslint-disable-next-line no-global-assign
       Date = class extends D { constructor(...a) { if (!a.length) super(D.now() + L); else super(...a); } static now() { return D.now() + L; } };
     }
-  }, { store: opts.store, gioCo: opts.gioCo, lechGio: opts.lechGio });
+  }, { store: opts.store, gioCo: opts.gioCo, lechGio: opts.lechGio, ngauNhienCo: opts.ngauNhienCo });
   const page = await ctx.newPage(); const loi = [], canh = [];
   page.on('pageerror', e => loi.push(e.message));
   if (opts.canh) page.on('console', m => { if (opts.canh.test(m.text())) canh.push(m.text()); });

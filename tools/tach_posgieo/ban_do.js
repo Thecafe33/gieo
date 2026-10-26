@@ -124,10 +124,13 @@ const jsonOut = arg('--json'); if (jsonOut) fs.writeFileSync(jsonOut, JSON.strin
 const byName = new Map(result.tops.map(t => [t.name, t]));
 function cum(spec) {
   const [ten, r] = spec.split(':'); const [a, z] = r.split('-').map(Number);
-  const inside = result.tops.filter(t => t.file === result.blocks[0].file && t.start >= a && t.end <= z);   // dải dòng của file HTML const set = new Set(inside.map(t => t.name));
+  // dải dòng của file HTML (không phải đoạn nguồn đầu — từ khi có js/posgieo/* nạp trước script chính, đoạn đầu là file JS)
+  const htmlFile = (result.blocks.find(b => !/\.js$/.test(b.file)) || result.blocks[0]).file;   // tên file HTML đúng như đoạn nguồn ghi (tương đối ROOT)
+  const inside = result.tops.filter(t => t.file === htmlFile && t.start >= a && t.end <= z);
+  const set = new Set(inside.map(t => t.name));
   const out = new Map(), inn = new Map();
   for (const t of inside) { for (const d of t.deps) if (!set.has(d)) { if (!out.has(d)) out.set(d, new Set()); out.get(d).add(t.name); } for (const c of t.callers) if (!set.has(c)) { if (!inn.has(t.name)) inn.set(t.name, new Set()); inn.get(t.name).add(c); } }
-  const eff = result.effects.filter(e => e.file === result.blocks[0].file && e.line >= a && e.line <= z);
+  const eff = result.effects.filter(e => e.file === htmlFile && e.line >= a && e.line <= z);
   const lex = inside.filter(t => /^(let|const|class)$/.test(t.kind)).map(t => t.name);
   return { ten, dong: [a, z], soTen: inside.length, byte: inside.reduce((s, t) => s + t.bytes, 0), ten_trong_cum: inside.map(t => t.name),
     phuThuocRaNgoai: [...out].map(([k, v]) => ({ ten: k, loai: (byName.get(k) || {}).kind, dong: (byName.get(k) || {}).start, dungBoi: [...v] })).sort((x, y) => x.dong - y.dong),
@@ -135,7 +138,7 @@ function cum(spec) {
     handlerHTML: inside.filter(t => t.handlers.length).map(t => t.name + ' (' + t.handlers.join('+') + ')'),
     jsNgoaiDung: inside.filter(t => t.ext.length).map(t => t.name + ' ← ' + t.ext.join(', ')),
     lenhTuChay: eff, letConstClass: lex,
-    storage: result.storage.filter(s => s.file === result.blocks[0].file && s.line >= a && s.line <= z) };
+    storage: result.storage.filter(s => s.file === htmlFile && s.line >= a && s.line <= z) };
 }
 const cums = argsAll('--cum').map(cum);
 if (cums.length) console.log(JSON.stringify(cums, null, 1));

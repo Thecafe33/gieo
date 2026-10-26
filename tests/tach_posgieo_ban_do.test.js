@@ -38,5 +38,11 @@ eq(by.khongGoi.handlers, [], 'bản đồ: hàm không ai gọi từ chuỗi →
 eq(by.curOid.ext.length, 1, 'bản đồ: JS ngoài đọc biến thường (curOid) được thấy');
 eq(by.dung.ext.map(x => /\(chuỗi\)$/.test(x)), [true], 'bản đồ: tên trong chuỗi (boc(\'dung\')) đánh dấu riêng');
 eq(by.helper.ext, [], 'bản đồ: JS ngoài tự khai báo trùng tên → không tính');
+// --cum phải lấy dải dòng của FILE HTML, kể cả khi có JS riêng js/… nạp TRƯỚC script chính (lỗi cũ: lấy đoạn nguồn đầu)
+fs.mkdirSync(path.join(dir, 'js'));
+fs.writeFileSync(path.join(dir, 'js', 'm.js'), 'function tuFile(){ return 1; }\n');
+fs.writeFileSync(path.join(dir, 'b.html'), '<html><body><script src="js/m.js"></script>\n<script>\nfunction a1(){ return tuFile() + a2(); }\nfunction a2(){ return 2; }\nfunction b1(){ return a1(); }\n</script></body></html>');
+const cumOut = JSON.parse(execFileSync('node', [path.join(ROOT, 'tools/tach_posgieo/ban_do.js'), '--html', path.join(dir, 'b.html'), '--cum', 'x:3-4'], { encoding: 'utf8' }))[0];
+eq([cumOut.ten_trong_cum, cumOut.phuThuocRaNgoai.map(x => x.ten), cumOut.benNgoaiGoiVao.map(x => x.ten + '←' + x.goiBoi)], [['a1', 'a2'], ['tuFile'], ['a1←b1']], 'bản đồ --cum: dải dòng theo HTML dù JS riêng nạp trước; phụ thuộc ra ngoài / bên ngoài gọi vào đúng');
 fs.rmSync(dir, { recursive: true, force: true });
 console.log(ok ? 'ALL PASS' : 'SOME FAIL'); process.exit(ok ? 0 : 1);
