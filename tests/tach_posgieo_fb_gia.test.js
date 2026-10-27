@@ -74,6 +74,12 @@ let ok = true; const eq = (a, b, m) => { const s = JSON.stringify(a) === JSON.st
   w.__SEED['c/s'] = { arr: [1], khac: 1 };
   await fs.collection('c').doc('s').set({ arr: FV.arrayUnion(2) });
   eq(w.__SEED['c/s'], { arr: [1, 2] }, 'set KHÔNG merge: arrayUnion lấy nền mảng cũ, trường khác bị thay (lỗi cũ: arr=[2])');
+  // kiểm lượt 14: add() cài lỗi được (__HONG op 'add') — lỗi một lần, không ghi gì; lần sau ghi bình thường
+  w.__HONG = [{ op: 'add', re: '^nk$' }];
+  let loiAdd = null; try { await fs.collection('nk').add({ v: 1 }); } catch (e) { loiAdd = e; }
+  const sauLoi = Object.keys(w.__SEED).filter(k => /^nk\//.test(k)).length;
+  await fs.collection('nk').add({ v: 2 });
+  eq([!!loiAdd, sauLoi, Object.keys(w.__SEED).filter(k => /^nk\//.test(k)).length, w.__ghi.some(g => g.op === 'add!hong' && g.p === 'nk')], [true, 0, 1, true], 'add() cài lỗi một lần → reject, không ghi; lần sau ghi được (lỗi cũ: add bỏ qua __HONG)');
   const put = await w.firebase.storage().ref('p/x.jpg').put({ name: 'x.jpg', size: 3 });
   eq([await put.ref.getDownloadURL(), w.__ghi.some(g => g.op === 'storage.put' && g.p === 'p/x.jpg')], ['https://gia.storage/p/x.jpg', true], 'storage.put ghi nhận + URL');
   console.log(ok ? 'ALL PASS' : 'SOME FAIL'); process.exit(ok ? 0 : 1);

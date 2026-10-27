@@ -595,6 +595,27 @@ const KICH_BAN = {
       [n.sau && n.sau.conTam === true && n.sau.nutBat === true, 'lệnh lỗi → tấm còn, nút Mở két bật lại'],
       [n.toasts.some(t => /^❌ Không gửi được lệnh mở két/.test(t)), 'toast «Không gửi được lệnh mở két»']]
   },
+  // 3C (kiểm lượt 14 đề nghị) — MỞ KÉT hai người trong ca: không tự điền → PIN sai (không lệnh, không nhật ký) → PIN đúng e2 → nhật ký e2
+  moKetPin: {
+    mo: 'quy', gioCo: HAN_T, quyHai: true,
+    chay: async () => window.KB_QUY('ket_pin'),
+    bang: ["cash_drawer_logs_gieogieo"],
+    kiem: (n) => { const g = n.ghi.filter(x => x.op === 'add' && /cash_drawer_logs_gieogieo/.test(x.p)); return [
+      [n.sau && n.sau.oPin === true, 'hai người trong ca → hiện ô PIN (không tự điền)'],
+      [n.sau && n.sau.lenhSai === 0 && n.toasts.some(t => /Mã PIN không tồn tại/.test(t)), 'PIN sai → không gửi lệnh, báo'],
+      [n.sau && n.sau.lenh === 1 && n.sau.conTam === false, 'PIN đúng → đúng 1 lệnh mở két, đóng tấm'],
+      [g.length === 1 && g[0].d.employeeId === 'e2' && g[0].d.reason === 'Kiểm đếm két', 'đúng một nhật ký: e2, Kiểm đếm két — ' + JSON.stringify(g.map(x => x.d))]]; }
+  },
+  // 3C (kiểm lượt 14 đề nghị) — MỞ KÉT được nhưng GHI NHẬT KÝ LỖI (Firebase giả cài lỗi add): đúng 1 lệnh, tấm đóng, cảnh báo «CHƯA ghi được nhật ký»
+  moKetNhatKyLoi: {
+    mo: 'quy', gioCo: HAN_T,
+    chay: async () => window.KB_QUY('ket_nhatky_loi'),
+    bang: ["cash_drawer_logs_gieogieo"],   // chỉ lượt bị cài lỗi (add!hong)
+    kiem: (n) => [
+      [n.ghi.some(x => x.op === 'add!hong' && /cash_drawer_logs_gieogieo/.test(x.p)) && !n.ghi.some(x => x.op === 'add'), 'lỗi thật sự được cài vào lượt ghi nhật ký (add!hong), không có nhật ký nào ghi được'],
+      [n.sau && n.sau.lenh === 1 && n.sau.conTam === false, 'két vẫn mở đúng 1 lần, tấm đóng'],
+      [n.toasts.some(t => /Két đã mở nhưng CHƯA ghi được nhật ký/.test(t)), 'toast cảnh báo «Két đã mở nhưng CHƯA ghi được nhật ký» — ' + JSON.stringify(n.toasts)]]
+  },
   // 2C — KIỂM KÊ MÙ: mở màn (đọc danh mục) → đếm Trà lài 900 g → gửi phiếu chờ duyệt
   kiemKe: {
     mo: 'kho',
@@ -793,8 +814,29 @@ const KB_QUY = async (viec) => {
   window.__buoc = 'nạp';
   Object.keys(_posLive).forEach(k => _posLiveStop(k));
   await loadEmployeesCachePOS(); await loadEmployeeShiftsTodayCache();
-  if (viec === 'ket_tien' || viec === 'ket_loi') {
+  if (viec === 'ket_tien' || viec === 'ket_loi' || viec === 'ket_pin' || viec === 'ket_nhatky_loi') {
     let lenh = 0;
+    if (viec === 'ket_pin') {
+      POSPrinter.connected = true; POSPrinter.engine = { openDrawer: async () => { lenh++; } };
+      openCashDrawerSheetPOS(); await sleep(50);
+      const o = document.getElementById('cashDrawerPin'); const oPin = !!o && o.type !== 'hidden';
+      cashDrawerPickReasonPOS(document.querySelector('#cdReasons button[data-r="Kiểm đếm két"]'));
+      window.__ghi = []; window.__buoc = 'mở két PIN sai';
+      if (o) { o.value = '9999'; o.dispatchEvent(new Event('input')); } await confirmCashDrawerOpenPOS(); await sleep(100);
+      const lenhSai = lenh;
+      const o2 = document.getElementById('cashDrawerPin'); if (o2) { o2.value = '5678'; o2.dispatchEvent(new Event('input')); }
+      window.__buoc = 'mở két PIN đúng'; document.getElementById('cdGo').click(); await sleep(400);
+      return { lenh, lenhSai, oPin, conTam: !!document.getElementById('cashDrawerSheet') };
+    }
+    if (viec === 'ket_nhatky_loi') {
+      POSPrinter.connected = true; POSPrinter.engine = { openDrawer: async () => { lenh++; } };
+      openCashDrawerSheetPOS(); await sleep(50);
+      cashDrawerPickReasonPOS(document.querySelector('#cdReasons button[data-r="Đổi tiền lẻ"]'));
+      window.__HONG = [{ op: 'add', re: 'cash_drawer_logs_gieogieo' }];
+      window.__ghi = []; window.__buoc = 'mở két, nhật ký lỗi';
+      document.getElementById('cdGo').click(); await sleep(400);
+      return { lenh, conTam: !!document.getElementById('cashDrawerSheet') };
+    }
     if (viec === 'ket_loi') {
       POSPrinter.connected = false; window.__ghi = [];
       openCashDrawerSheetPOS(); const tamChuaKetNoi = !!document.getElementById('cashDrawerSheet');
@@ -947,6 +989,7 @@ async function chay(b, base, store, ten) {
       S['employees_gieogieo/e1'] = { fullName: 'NV Một', pin: '1234', active: true, roles: [] };
       S['employees_gieogieo/e2'] = { fullName: 'NV Hai', pin: '5678', active: true, roles: [] };
       S[ten('employee_shifts_gieogieo') + '/s1'] = { employeeId: 'e1', employeeName: 'NV Một', businessDate: '2026-10-26', checkedInAt: '2026-10-26T03:30:00.000Z', checkedOutAt: null };
+      if (E2E.quyHai) S[ten('employee_shifts_gieogieo') + '/s2'] = { employeeId: 'e2', employeeName: 'NV Hai', businessDate: '2026-10-26', checkedInAt: '2026-10-26T03:40:00.000Z', checkedOutAt: null };
       if (E2E.quyDoc) S[ten('cashfund_gieogieo') + '/2026-10-26'] = { date: '2026-10-26', open: { denominations: { 500000: 1, 200000: 2, 100000: 1 }, total: 1000000, enteredAt: 1792990000000, locked: true },
         currentDenominations: { 500000: 1, 200000: 2, 100000: 1, 50000: 0, 20000: 0, 10000: 0, 5000: 0, 2000: 0, 1000: 0 }, mid: [], expenses: [] };
       window.__SNAP = true;
@@ -968,7 +1011,7 @@ async function chay(b, base, store, ten) {
     window.__buoc = '';   // kịch bản treo (lời hứa không bao giờ xong) → báo lỗi sau 45 giây kèm bước cuối, không treo cả bài
     try { sau = await Promise.race([(0, eval)('(' + src + ')')({ ITEMS }), new Promise((_, rej) => setTimeout(() => rej(new Error('kịch bản quá 45 giây — bước: ' + window.__buoc)), 45000))]); } catch (e) { loiKB = String(e && e.message || e); }
     return { ghi: (window.__ghi || []).map(g => ({ op: g.op, p: g.p, rt: !!g.rt, d: g.d })), toasts, sau, loiKB };
-  }, { src: KICH_BAN[ten].chay.toString(), dau: KB_DAU.toString(), doly: KB_DOLY.toString(), han: KB_HAN.toString(), ca: KB_CA.toString(), ket: KB_KET.toString(), quy: KB_QUY.toString(), mo: KICH_BAN[ten].mo, ITEMS, PO, E2E: { PREP, BATCH: BATCH(), NL_NAU, PREP_NAU, NL_KHO, DOLY, HAN, CTN1: CTN('sealed'), CTN2: CTN('open', { unitBase: 0, openedAt: '2026-10-25T05:00:00.000Z', openedBy: 'NV E2E', expiresAt: '2026-10-26T05:00:00.000Z' }), lo: KICH_BAN[ten].lo || [], loActive: !!KICH_BAN[ten].loActive, tieuHao: !!KICH_BAN[ten].tieuHao, caMo: !!KICH_BAN[ten].caMo, ketDong: !!KICH_BAN[ten].ketDong, ketTreo: !!KICH_BAN[ten].ketTreo, caDayDu: !!KICH_BAN[ten].caDayDu, ketBTP: !!KICH_BAN[ten].ketBTP, quyDoc: !!KICH_BAN[ten].quyDoc } });
+  }, { src: KICH_BAN[ten].chay.toString(), dau: KB_DAU.toString(), doly: KB_DOLY.toString(), han: KB_HAN.toString(), ca: KB_CA.toString(), ket: KB_KET.toString(), quy: KB_QUY.toString(), mo: KICH_BAN[ten].mo, ITEMS, PO, E2E: { PREP, BATCH: BATCH(), NL_NAU, PREP_NAU, NL_KHO, DOLY, HAN, CTN1: CTN('sealed'), CTN2: CTN('open', { unitBase: 0, openedAt: '2026-10-25T05:00:00.000Z', openedBy: 'NV E2E', expiresAt: '2026-10-26T05:00:00.000Z' }), lo: KICH_BAN[ten].lo || [], loActive: !!KICH_BAN[ten].loActive, tieuHao: !!KICH_BAN[ten].tieuHao, caMo: !!KICH_BAN[ten].caMo, ketDong: !!KICH_BAN[ten].ketDong, ketTreo: !!KICH_BAN[ten].ketTreo, caDayDu: !!KICH_BAN[ten].caDayDu, ketBTP: !!KICH_BAN[ten].ketBTP, quyDoc: !!KICH_BAN[ten].quyDoc, quyHai: !!KICH_BAN[ten].quyHai } });
   r.loi = t.loi.slice().sort(); r.qua = t.qua; await t.ctx.close();
   r.ghiTho = r.ghi; r.ghi = chuanGhi(r.ghi, !!KICH_BAN[ten].gioCo); r.sau = chuanDuLieu(r.sau, undefined, !!KICH_BAN[ten].gioCo);
   return r;
@@ -1025,6 +1068,7 @@ const lechMuc = (m, n) => SO.filter(p => JSON.stringify(m[p]) !== JSON.stringify
       { kb: 'caMoCaDayDu', file: 'pos_shift_closing.v1.js', tim: /expectedQty:l\.expectedQty,countedQty:l\.counted,/, thay: 'expectedQty:l.expectedQty,countedQty:l.counted+1,', mo: 'lệch số kiểm kê đầu ca +1' },
       { kb: 'ketDemBTP', file: 'pos_shift_closing.v1.js', tim: /await _continueAfterPrepCount\(\);(\n  \} catch \(err\) \{\n    console\.error\('submitPrepCount failed')/, thay: 'await _continueAfterPrepCount(); await _continueAfterPrepCount();$1', mo: 'gọi bước tiếp sau đếm BTP hai lần' },
       { kb: 'quyChiTieu', file: 'pos_cashfund.v1.js', tim: /const netAmount = takenOutTotal - changeTotal;/, thay: 'const netAmount = takenOutTotal - changeTotal + 1;', mo: 'lệch số tiền chi thực tế +1' },
+      { kb: 'moKetPin', file: 'pos_cashfund.v1.js', tim: /await POSPrinter\.engine\.openDrawer\(\);/, thay: 'await POSPrinter.engine.openDrawer(); await POSPrinter.engine.openDrawer();', mo: 'gửi lệnh mở két hai lần', muc: 'sau' },
       { kb: 'moKet', file: 'pos_cashfund.v1.js', tim: /employeeId: emp\.id \|\| '', employeeName/, thay: "employeeId: 'x', employeeName", mo: 'đổi người mở két trong nhật ký' },
       { kb: 'batDauMe', file: 'pos_prep.v1.js', tim: /note: `Nấu \$\{p\.code/, thay: 'note: `NAU ${p.code', mo: 'đổi ghi chú dòng trừ NL khi bắt đầu nấu' }
     ];
@@ -1035,7 +1079,7 @@ const lechMuc = (m, n) => SO.filter(p => JSON.stringify(m[p]) !== JSON.stringify
         fs.writeFileSync(f, t.replace(tk.tim, tk.thay));
         if (fs.readFileSync(f, 'utf8') === t) throw new Error('tự kiểm: không cài được lỗi vào ' + tk.file);
       });
-      try { const h = await chay(b, sua.base, 'gg01', tk.kb); const l = lechMuc(goc[tk.kb], h); chk(l.includes('ghi'), `(tự kiểm ${tk.kb}) bản cài lỗi ${tk.mo} → báo lệch mục ghi` + (l.length ? '' : ': KHÔNG thấy lệch')); }
+      try { const h = await chay(b, sua.base, 'gg01', tk.kb); const l = lechMuc(goc[tk.kb], h); chk(l.includes(tk.muc || 'ghi'), `(tự kiểm ${tk.kb}) bản cài lỗi ${tk.mo} → báo lệch mục ${tk.muc || 'ghi'}` + (l.length ? '' : ': KHÔNG thấy lệch')); }
       finally { sua.dong(); }
     }
   } finally { await b.close(); hb.dong(); }
