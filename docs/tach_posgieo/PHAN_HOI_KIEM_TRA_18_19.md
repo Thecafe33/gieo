@@ -42,3 +42,6 @@ node tools/tach_posgieo/e2e_kho.js                                       # cả 
 
 ## Kết quả cả bộ sau sửa
 `node tools/tach_posgieo/e2e_kho.js`: **1568 khẳng định, ALL PASS** (1500 cũ + 68 mới: `ttDoiLy`, `ttMatAck`, 4 negative control oracle, 2 tự kiểm mới); `sinh_lai_tat_ca` TẤT CẢ ĐẠT.
+
+## Quyết định O19-1 (chủ dự án 27/10)
+Giữ nguyên hành vi hiện tại: QR VietQR đã gắn cố định số tiền (`amount` trong URL), khách quét bằng app ngân hàng thì không đổi được số tiền → không thêm bước so `amount` ở POS. Không sửa mã.
