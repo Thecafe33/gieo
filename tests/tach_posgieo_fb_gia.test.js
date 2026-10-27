@@ -80,6 +80,10 @@ let ok = true; const eq = (a, b, m) => { const s = JSON.stringify(a) === JSON.st
   const sauLoi = Object.keys(w.__SEED).filter(k => /^nk\//.test(k)).length;
   await fs.collection('nk').add({ v: 2 });
   eq([!!loiAdd, sauLoi, Object.keys(w.__SEED).filter(k => /^nk\//.test(k)).length, w.__ghi.some(g => g.op === 'add!hong' && g.p === 'nk')], [true, 0, 1, true], 'add() cài lỗi một lần → reject, không ghi; lần sau ghi được (lỗi cũ: add bỏ qua __HONG)');
+  // F19-1 (kiểm lượt 18–19): RTDB Reference.key = đoạn cuối đường dẫn, gốc = null; Firestore ref không có key (dùng id)
+  { const r = db.ref('orders_gieogieo/oct/26').child('bill_probe');
+    eq([r.key, db.ref('orders_gieogieo/oct/26').key, db.ref('').key, db.ref().key], ['bill_probe', '26', null, null], 'F19-1 RT ref.key = đoạn cuối, gốc null (lỗi cũ: undefined → claim/marker hậu thanh toán sai ID)');
+    eq([fs.collection('c').doc('a').key, fs.collection('c').doc('a').id], [undefined, 'a'], 'F19-1 Firestore ref: id, không có key'); }
   // F15-1 (kiểm lượt 15): log lỗi mang đúng loại nguồn — RTDB rt:true, Firestore rt:false (bộ kiểm phạm vi phân loại theo cờ này)
   w.__HONG = [{ op: 'set', re: '^menu_probe/push$' }, { op: 'set', re: '^fsprobe/x$' }];
   await db.ref('menu_probe/push').set({ name: 'p' }).catch(() => {});

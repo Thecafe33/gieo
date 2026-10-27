@@ -50,7 +50,7 @@ const FB_STUB = `(function(){
     case '<':return soSanh(v,x,function(a,b){return a<b});case '<=':return soSanh(v,x,function(a,b){return a<=b});case '>':return soSanh(v,x,function(a,b){return a>b});case '>=':return soSanh(v,x,function(a,b){return a>=b});
     case 'in':return trong(v,x);case 'not-in':if(!Array.isArray(x))throw new Error('fb_gia: not-in cần mảng');return v!==null&&x.indexOf(null)<0&&!trong(v,x);case 'array-contains':return Array.isArray(v)&&v.some(function(e){return bang(e,x);});case 'array-contains-any':return Array.isArray(v)&&v.some(function(e){return trong(e,x);});
     default:throw new Error('fb_gia: toán tử chưa hỗ trợ '+op);}};
-  var mk=function(p,rt,loc){var o={path:p,id:String(p).split('/').pop(),_loc:loc||[]};   // rt: ref Realtime Database (snapshot exists() là HÀM), không: Firestore (exists là thuộc tính)
+  var mk=function(p,rt,loc){var o={path:p,id:String(p).split('/').pop(),_loc:loc||[]};if(rt)o.key=p?String(p).split('/').pop():null;   // RTDB Reference.key = đoạn cuối đường dẫn, gốc = null (như SDK) — confirmPay/finalizeSplitPay truyền billRef.key vào claim hậu thanh toán, tích tem, ly miễn phí   // rt: ref Realtime Database (snapshot exists() là HÀM), không: Firestore (exists là thuộc tính)
     ['orderBy','limit','limitToLast','startAt','endAt','startAfter'].forEach(function(k){o[k]=function(){return o};});
     o.where=function(f,op,x){var q=mk(p,rt,o._loc.concat([[typeof f==='string'?f:'__name__',op,x]]));return q;};
     o.orderByChild=function(f){var q=mk(p,rt,o._loc);q._child=f;return q;};

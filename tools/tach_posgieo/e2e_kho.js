@@ -781,7 +781,7 @@ const KICH_BAN = {
       [o.length === 1 && d.method === 'TIỀN MẶT' && d.total === 85000, 'ghi đúng MỘT đơn TIỀN MẶT tổng 85.000 — ' + JSON.stringify(o.map(x => x.d && [x.d.method, x.d.total]))],
       [d && d.cashGiven === 100000 && d.cashChange === 15000, 'khách đưa 100.000, thối 15.000 — ' + (d && [d.cashGiven, d.cashChange])],
       [d && Array.isArray(d.itemsArray) && d.itemsArray.length === 3 && /^#/.test(d.billCode || ''), '3 dòng món + mã bill — ' + (d && d.billCode)],
-      [n.sau && n.sau.manTien === 'cs' || n.sau && n.sau.manTien, 'selM(cash) mở màn nhập tiền — ' + (n.sau && n.sau.manTien)],
+      [!!n.sau && n.sau.manTien === 'cp', 'selM(cash) mở màn nhập tiền (cp) — ' + (n.sau && n.sau.manTien)],
       [n.sau && n.sau.gioSau === 0, 'xong giỏ trống — ' + (n.sau && n.sau.gioSau)],
       [n.toasts.some(t => /Thanh toán thành công/.test(t)), 'toast «Thanh toán thành công» — ' + JSON.stringify(n.toasts)]]; }
   },
@@ -792,7 +792,7 @@ const KICH_BAN = {
     bang: ["bank_confirmations", "billCounters_gieogieo", "checkout_side_effects_gieogieo", "orders_gieogieo", "sales_assist_logs_gieogieo"],
     kiem: (n) => { const o = n.ghi.filter(g => /orders_gieogieo(?:__\w+)?\/.+\/bill_/.test(g.p) && g.op === 'set'); const d = o[0] && o[0].d; const x = n.sau || {}; return [
       [x.qr === 'flex' || x.qr === 'block', 'popup QR mở — ' + x.qr],
-      [x.qrAmount === '85000' && /^TTHD TC?[A-Z]*\d+/.test(x.qrNoiDung) || /^TTHD /.test(x.qrNoiDung || ''), 'QR đúng 85.000đ, nội dung «TTHD <mã>» — ' + x.qrAmount + ' / ' + x.qrNoiDung],
+      [x.qrAmount === '85000' && x.qrNoiDung === 'TTHD ' + x.id && /^TTHD [A-Z]{2}\d+$/.test(x.qrNoiDung || ''), 'QR đúng 85.000đ, nội dung «TTHD <đúng mã đơn>» — ' + x.qrAmount + ' / ' + x.qrNoiDung + ' / ' + x.id],
       [o.length === 1 && d.method === 'CHUYỂN KHOẢN' && d.total === 85000, 'ghi đúng MỘT đơn CHUYỂN KHOẢN 85.000 — ' + JSON.stringify(o.map(q => q.d && [q.d.method, q.d.total]))],
       [d && d.bankConfirmMethod === 'auto', 'đánh dấu xác nhận tự động — ' + (d && d.bankConfirmMethod)],
       [n.ghi.some(g => /bank_confirmations\//.test(g.p) && /remove/.test(g.op)), 'xoá bản bank_confirmations sau khi dùng'],
@@ -820,6 +820,33 @@ const KICH_BAN = {
       [o.length === 1 && d.method === 'TÍNH RIÊNG' && d.total === 85000 && d.splitGroups.length === 2, 'ghi MỘT đơn TÍNH RIÊNG 85.000 hai nhóm — ' + JSON.stringify(o.map(q => q.d && [q.d.method, q.d.total, (q.d.splitGroups || []).length]))],
       [x.gioSau === 0, 'giỏ trống sau chốt']]; }
   },
+  // 4D — KHÁCH ĐỔI LY MIỄN PHÍ: «Đổi ngay» → popup quà (trần 30.000) → Cà phê 0đ vào giỏ → thanh toán tiền mặt: quyền lợi 1 → 0, dấu đổi ly và claim hậu thanh toán CÙNG mã bill, tích tem cho ly trả tiền
+  ttDoiLy: {
+    mo: 'khach', khachLy: true, gioCo: HAN_T, khongGiuGio: true,
+    chay: async () => window.KB_TT('doily'),
+    bang: ["assist_profile_effects_gieogieo", "billCounters_gieogieo", "checkout_side_effects_gieogieo", "customers", "loyalty_bill_effects_gieogieo", "orders_gieogieo", "sales_assist_logs_gieogieo", "stamp_free_redemptions_gieogieo"],
+    kiem: (n) => { const x = n.sau || {}; const o = n.ghi.filter(g => /orders_gieogieo(?:__\w+)?\/.+\/bill_/.test(g.p) && g.op === 'set'); const d = o[0] && o[0].d; const bill = o[0] && o[0].p.split('/').pop(); const dau = n.ghi.filter(g => /stamp_free_redemptions_gieogieo\//.test(duongGhi(g))); const cl = n.ghi.filter(g => /checkout_side_effects_gieogieo/.test(duongGhi(g))).map(g => duongGhi(g).split('/').pop()); const kh = n.ghi.filter(g => /customers\/0901234567$/.test(duongGhi(g)) && /update/.test(g.op)).map(g => g.d); return [
+      [x.popupHien === true && /1 ly miễn phí/.test(x.sub) && /30\.000/.test(x.sub), 'popup quà mở, «tặng 1 ly miễn phí (tối đa 30.000)» — ' + x.sub],
+      [JSON.stringify(x.dongQua) === '[["Cà phê",0,20000]]' && x.tongSauQua === 85000, 'ly Cà phê vào giỏ giá 0đ (gốc 20.000), tổng vẫn 85.000 (3 ly trả tiền) — ' + JSON.stringify([x.dongQua, x.tongSauQua])],
+      [o.length === 1 && d.method === 'TIỀN MẶT' && d.total === 85000 && /Ly miễn phí/.test(d.voucherUsed || ''), 'MỘT đơn TIỀN MẶT 85.000, ghi voucherUsed «Ly miễn phí…» — ' + JSON.stringify(o.map(q => q.d && [q.d.method, q.d.total, q.d.voucherUsed]))],
+      [dau.length === 1 && duongGhi(dau[0]).endsWith('/' + bill), 'dấu đổi ly ghi ĐÚNG mã bill (stamp_free_redemptions_gieogieo/' + bill + ') — ' + JSON.stringify(dau.map(q => duongGhi(q)))],
+      [cl.length >= 2 && cl.every(id => /^bill_/.test(id)) && new Set(cl).size === 1 && cl[0] === bill, 'claim + done hậu thanh toán CÙNG mã bill (không auto1/auto3) — ' + JSON.stringify(cl)],
+      [kh.some(u => u.free_drink_available === 0), 'quyền lợi ly miễn phí 1 → 0 — ' + JSON.stringify(kh)],
+      [x.gioSau === 0 && x.vKeySau === null, 'giỏ trống, ý định đổi ly được dọn — ' + JSON.stringify([x.gioSau, x.vKeySau])]]; }
+  },
+  // 4D — MẤT ACK RỒI BẤM LẠI: server đã ghi bill nhưng client nhận lỗi → giỏ + mã đơn còn, nhả khoá → bấm lại: KHÔNG ghi bill thứ hai, claim/done hậu thanh toán đúng một lần cùng mã bill
+  ttMatAck: {
+    mo: 'gio', gioCo: HAN_T, khongGiuGio: true,
+    chay: async () => window.KB_TT('matack'),
+    bang: ["billCounters_gieogieo", "checkout_side_effects_gieogieo", "orders_gieogieo", "sales_assist_logs_gieogieo"],
+    kiem: (n) => { const x = n.sau || {}; const o = n.ghi.filter(g => /orders_gieogieo(?:__\w+)?\/.+\/bill_/.test(g.p) && g.op === 'set'); const bill = o[0] && o[0].p.split('/').pop(); const cl = n.ghi.filter(g => /checkout_side_effects_gieogieo/.test(duongGhi(g))).map(g => duongGhi(g).split('/').pop()); return [
+      [x.sau1 && x.sau1.gio === 3 && x.sau1.khoa === true && x.sau1.busy === false, 'sau lỗi ACK: giỏ còn 3 dòng, mã đơn còn, khoá bấm đã nhả — ' + JSON.stringify(x.sau1)],
+      [n.toasts.some(t => /Lỗi lưu đơn/.test(t)), 'báo «Lỗi lưu đơn — thử lại!» — ' + JSON.stringify(n.toasts)],
+      [o.length === 1, 'đúng MỘT lần ghi bill dù bấm hai lần — ' + o.length],
+      [cl.length >= 2 && new Set(cl).size === 1 && cl[0] === bill, 'claim + done hậu thanh toán đúng một lượt, cùng mã bill — ' + JSON.stringify(cl) + ' / ' + bill],
+      [x.gioSau === 0 && x.khoaSau === false && x.busySau === false, 'xong giỏ trống, mã đơn xoá, khoá nhả — ' + JSON.stringify([x.gioSau, x.khoaSau, x.busySau])],
+      [n.toasts.some(t => /Thanh toán thành công/.test(t)), 'lần bấm lại báo «Thanh toán thành công»']]; }
+  },
   // 4D — GIẢM GIÁ TO GO: giảm 5.000 → getFinalTotal 80.000 → thanh toán tiền mặt → đơn ghi tổng 80.000 + discountAmt
   ttGiamGia: {
     mo: 'gio', gioCo: HAN_T, khongGiuGio: true,
@@ -828,7 +855,7 @@ const KICH_BAN = {
     kiem: (n) => { const o = n.ghi.filter(g => /orders_gieogieo(?:__\w+)?\/.+\/bill_/.test(g.p) && g.op === 'set'); const d = o[0] && o[0].d; const x = n.sau || {}; return [
       [x.goc === 85000 && x.sauGiam === 80000, 'giỏ 85.000 − giảm 5.000 = 80.000 — ' + JSON.stringify([x.goc, x.sauGiam])],
       [o.length === 1 && d.total === 80000 && d.cashChange === 20000, 'đơn tổng 80.000, thối 20.000 — ' + JSON.stringify(o.map(q => q.d && [q.d.total, q.d.cashChange]))],
-      [d && (d.discountAmt === 5000 || d.discount === 5000 || d.allDiscount === 5000 || JSON.stringify(d).includes('5000')), 'đơn ghi khoản giảm 5.000 — ' + (d && JSON.stringify(Object.keys(d).filter(k => /disc/i.test(k)).map(k => [k, d[k]])))],
+      [!!d && d.discountAmt === 5000, 'đơn ghi discountAmt = 5.000 — ' + (d && JSON.stringify(Object.keys(d).filter(k => /disc/i.test(k)).map(k => [k, d[k]])))],
       [x.gioSau === 0 && x.giamSau === 0, 'giỏ trống, giảm giá về 0']]; }
   },
   // 4D-1 — CHẶN SỚM Ở NÚT THANH TOÁN (onCheckoutClick): giỏ trống → «Giỏ hàng trống»; có món nhưng ngày đã đóng ca → «Ngày hôm nay đã đóng ca»; không ghi gì, không mở màn thanh toán
@@ -1298,8 +1325,8 @@ const KB_TT = async (viec) => {
   MENU = MENU_TOGO; FOOD_MENU = []; TOPPINGS = [{ id: 't1', name: 'Trân châu', price: 7000, priceTogo: 7000 }];
   cart = {}; curFilter = 'all'; togoDiscountAmt = 0; showScreen('sm'); renderMenu();
   window.__ghi = [];
-  const cho = async (dk, ms) => { for (let i = 0; i < ms / 40 && !dk(); i++) await sleep(40); };   // đếm vòng, không đo Date.now (đồng hồ giả có thể đứng)
-  const donhang = () => (window.__ghi || []).filter(g => /orders_gieogieo\/.+\/.+\/bill_/.test(g.p) && g.op === 'set');
+  const cho = async (dk, ms) => { for (let i = 0; i < ms / 40 && !dk(); i++) await sleep(40); if (!dk()) throw new Error('hết thời gian chờ điều kiện (' + ms + ' ms) — bước: ' + window.__buoc); };   // đếm vòng, không đo Date.now (đồng hồ giả có thể đứng)
+  const donhang = () => (window.__ghi || []).filter(g => /orders_gieogieo(?:__\w+)?\/.+\/.+\/bill_/.test(g.p) && g.op === 'set');
   const them = () => { addCart(MENU_TOGO[0], MENU_TOGO[0].sizes[0]); addCart(MENU_TOGO[0], MENU_TOGO[0].sizes[1]); addCart(MENU_TOGO[1], MENU_TOGO[1].sizes[0]); };
   const man = () => (document.querySelector('.screen.active') || {}).id || null;
   // RT .on() của Firebase giả là hàm rỗng → giữ hàm nghe của bank_confirmations rồi gọi với một snapshot giả (như webhook ghi vào)
@@ -1336,6 +1363,28 @@ const KB_TT = async (viec) => {
     const nhom = spGroups.map(g => [g.method, g.total, g.cashGiven || null, g.bankOrderId ? 'coMa' : null, g.bankConfirmMethod || null]);
     window.__buoc = 'chốt bill'; await finalizeSplitPay(); await cho(() => donhang().length, 8000); await sleep(600);
     return { tong, nMon, manSp, nhom, paidAmt: spPaidAmt, gioSau: Object.keys(cart).length, manSau: man() };
+  }
+  if (viec === 'doily') {
+    // khách Lan có 1 ly miễn phí (trần 30.000) → «Đổi ngay» → popup quà → chọn Cà phê → thanh toán tiền mặt → quyền lợi 1 → 0 + dấu đổi ly theo ĐÚNG mã bill
+    document.getElementById('cuph').value = '0901234567'; curCustomer = { phone: '0901234567', name: 'Lan', note: '' };
+    togoSettings.gift = Object.assign({}, togoSettings.gift || {}, { categories: [] }); togoSettings.giftMenu = {};
+    window.__buoc = 'đổi ngay'; consumeFreeToGoDrink('0901234567'); await cho(() => document.getElementById('togoGiftPopup').classList.contains('show'), 4000);
+    const popupHien = document.getElementById('togoGiftPopup').classList.contains('show'), sub = (document.getElementById('togoGiftSub') || {}).textContent || '';
+    selectTogoGift('m2'); confirmTogoGift(); await sleep(80);
+    const dongQua = Object.values(cart).filter(c => c._giftType === 'item_free').map(c => [c.name, c.price, c._originalPrice]), tongSauQua = getFinalTotal();
+    window.__buoc = 'thanh toán'; selM('cash'); await sleep(60);
+    await confirmPay(100000, 100000 - tongSauQua); await cho(() => donhang().length, 8000); await sleep(800);
+    return { popupHien, sub, dongQua, tongSauQua, gioSau: Object.keys(cart).length, vKeySau: _stampFreeVKey || null };
+  }
+  if (viec === 'matack') {
+    // server đã ghi bill nhưng client nhận lỗi (mất ACK): giỏ + mã đơn còn → bấm thanh toán lại → KHÔNG ghi bill thứ hai, hậu thanh toán đúng một lần
+    let moi = false; const refGoc2 = db.ref;
+    db.ref = function (p) { const r = refGoc2.call(db, p); if (/^orders_gieogieo(__\w+)?\/\w+\/\d+$/.test(p)) { const c0 = r.child.bind(r); r.child = n => { const c = c0(n), s0 = c.set.bind(c); c.set = async d => { await s0(d); if (!moi) { moi = true; throw new Error('e2e mất ACK'); } }; return c; }; } return r; };
+    window.__buoc = 'lần 1 (mất ACK)'; selM('cash'); await sleep(60);
+    await confirmPay(100000, 100000 - tong); await sleep(300);
+    const sau1 = { gio: Object.keys(cart).length, khoa: !!_checkoutIdemKey, busy: _posSubmitBusy, bill: donhang().length };
+    window.__buoc = 'lần 2 (bấm lại)'; await confirmPay(100000, 100000 - tong); await cho(() => Object.keys(cart).length === 0, 8000); await sleep(800);
+    return { tong, sau1, gioSau: Object.keys(cart).length, khoaSau: !!_checkoutIdemKey, busySau: _posSubmitBusy };
   }
   if (viec === 'giamgia') {
     window.__buoc = 'giảm giá To Go'; togoDiscountAmt = 5000;
@@ -1476,6 +1525,7 @@ async function chay(b, base, store, ten) {
       S['customers/0901234567'] = kh('0901234567', 'Lan', 1200, 5);
       S['customers/0902222222'] = kh('0902222222', 'Minh', 300, 2);
       S['customers/0903333333'] = kh('0903333333', 'Hoa', 50, 0);
+      if (E2E.khachLy) S['customers/0901234567'] = Object.assign({}, S['customers/0901234567'], { stamp_count: 0, stamp_prices: [], free_drink_available: 1, free_drink_caps: [30000] });   // 4D: Lan có 1 ly miễn phí (trần 30.000)
     }
     if (mo === 'nau') {
       for (const [id, it] of Object.entries(E2E.NL_NAU)) S[ten('inventory_items_gieogieo') + '/' + id] = it;
@@ -1494,7 +1544,7 @@ async function chay(b, base, store, ten) {
     window.__buoc = '';   // kịch bản treo (lời hứa không bao giờ xong) → báo lỗi sau 45 giây kèm bước cuối, không treo cả bài
     try { sau = await Promise.race([(0, eval)('(' + src + ')')({ ITEMS }), new Promise((_, rej) => setTimeout(() => rej(new Error('kịch bản quá 45 giây — bước: ' + window.__buoc)), 45000))]); } catch (e) { loiKB = String(e && e.message || e); }
     return { ghi: (window.__ghi || []).map(g => ({ op: g.op, p: g.p, rt: !!g.rt, d: g.d })), toasts, sau, loiKB };
-  }, { src: KICH_BAN[ten].chay.toString(), dau: KB_DAU.toString(), doly: KB_DOLY.toString(), han: KB_HAN.toString(), ca: KB_CA.toString(), ket: KB_KET.toString(), quy: KB_QUY.toString(), menu: KB_MENU.toString(), ban: KB_BAN.toString(), khach: KB_KHACH.toString(), gio: KB_GIO.toString(), tt: KB_TT.toString(), mo: KICH_BAN[ten].mo, ITEMS, PO, E2E: { PREP, BATCH: BATCH(), NL_NAU, PREP_NAU, NL_KHO, DOLY, HAN, CTN1: CTN('sealed'), CTN2: CTN('open', { unitBase: 0, openedAt: '2026-10-25T05:00:00.000Z', openedBy: 'NV E2E', expiresAt: '2026-10-26T05:00:00.000Z' }), lo: KICH_BAN[ten].lo || [], loActive: !!KICH_BAN[ten].loActive, tieuHao: !!KICH_BAN[ten].tieuHao, caMo: !!KICH_BAN[ten].caMo, ketDong: !!KICH_BAN[ten].ketDong, ketTreo: !!KICH_BAN[ten].ketTreo, caDayDu: !!KICH_BAN[ten].caDayDu, ketBTP: !!KICH_BAN[ten].ketBTP, quyDoc: !!KICH_BAN[ten].quyDoc, quyHai: !!KICH_BAN[ten].quyHai } });
+  }, { src: KICH_BAN[ten].chay.toString(), dau: KB_DAU.toString(), doly: KB_DOLY.toString(), han: KB_HAN.toString(), ca: KB_CA.toString(), ket: KB_KET.toString(), quy: KB_QUY.toString(), menu: KB_MENU.toString(), ban: KB_BAN.toString(), khach: KB_KHACH.toString(), gio: KB_GIO.toString(), tt: KB_TT.toString(), mo: KICH_BAN[ten].mo, ITEMS, PO, E2E: { PREP, BATCH: BATCH(), NL_NAU, PREP_NAU, NL_KHO, DOLY, HAN, CTN1: CTN('sealed'), CTN2: CTN('open', { unitBase: 0, openedAt: '2026-10-25T05:00:00.000Z', openedBy: 'NV E2E', expiresAt: '2026-10-26T05:00:00.000Z' }), lo: KICH_BAN[ten].lo || [], loActive: !!KICH_BAN[ten].loActive, tieuHao: !!KICH_BAN[ten].tieuHao, caMo: !!KICH_BAN[ten].caMo, ketDong: !!KICH_BAN[ten].ketDong, ketTreo: !!KICH_BAN[ten].ketTreo, caDayDu: !!KICH_BAN[ten].caDayDu, ketBTP: !!KICH_BAN[ten].ketBTP, quyDoc: !!KICH_BAN[ten].quyDoc, quyHai: !!KICH_BAN[ten].quyHai, khachLy: !!KICH_BAN[ten].khachLy } });
   r.loi = t.loi.slice().sort(); r.qua = t.qua; await t.ctx.close();
   const giuGio = !!KICH_BAN[ten].gioCo && !KICH_BAN[ten].khongGiuGio;   // khongGiuGio: kịch bản chờ nhiều bước bất đồng bộ → đồng hồ giả tiến theo thời gian thực, giá trị giờ lệch vài ms giữa hai bản → vẫn chuẩn hoá giờ (ngày cố định giữ nguyên)
   r.ghiTho = r.ghi; r.ghi = chuanGhi(r.ghi, giuGio); r.sau = chuanDuLieu(r.sau, undefined, giuGio);
@@ -1539,6 +1589,15 @@ const lechMuc = (m, n) => SO.filter(p => JSON.stringify(m[p]) !== JSON.stringify
       if (process.env.E2E_KHO_DUMP) fs.writeFileSync(path.join(process.env.E2E_KHO_DUMP, kb + '_' + store + '.json'), JSON.stringify({ moc: m, nay: n }, null, 1));   // gỡ lỗi: lượt ghi đã chuẩn hoá hai bản
     }
     // TỰ KIỂM: bản sao cài lỗi nhỏ vào file JS đã tách → kịch bản tương ứng PHẢI báo lệch ở `ghi`
+    // Tự kiểm ORACLE (F19-2): đưa dữ liệu SAI vào đúng hàm kiem của ba ca thanh toán — mỗi ý phải báo SAI (không nhận giá trị sai là đạt)
+    for (const [kb, n, tien, mo] of [
+      ['ttTienMat', { ghi: [], toasts: [], sau: { manTien: 'sm' } }, 'selM(cash)', 'màn «sm» thay vì «cp»'],
+      ['ttChuyenKhoan', { ghi: [], toasts: [], sau: { id: 'GG123', qrAmount: '1', qrNoiDung: 'TTHD GG123' } }, 'QR đúng', 'QR 1đ'],
+      ['ttChuyenKhoan', { ghi: [], toasts: [], sau: { id: 'GG123', qrAmount: '85000', qrNoiDung: 'TTHD GG999' } }, 'QR đúng', 'nội dung QR khác mã đơn'],
+      ['ttGiamGia', { ghi: [{ op: 'set', p: 'orders_gieogieo/oct/26/bill_x', d: { discountAmt: 0, baseTotal: 85000 } }], toasts: [], sau: {} }, 'đơn ghi discountAmt', 'discountAmt 0 nhưng có số 5000 ở trường khác']]) {
+      const y = KICH_BAN[kb].kiem(n).find(q => String(q[1]).startsWith(tien));
+      chk(!!y && !y[0], `(tự kiểm oracle ${kb}) ý «${tien}» báo SAI khi ${mo}`);
+    }
     const TU_KIEM = [
       { kb: 'nhanHang', file: 'pos_receive.v1.js', tim: /(\bnote:\s*generalNote)/, thay: "$1 + '·hỏng'", mo: 'đổi ghi chú phiếu nhận' },
       { kb: 'huyMe', file: 'pos_prep.v1.js', tim: /Hoàn kho do HUỶ MẺ/, thay: 'Hoàn kho do HUY ME', mo: 'đổi ghi chú dòng hoàn kho khi huỷ mẻ' },
@@ -1567,6 +1626,8 @@ const lechMuc = (m, n) => SO.filter(p => JSON.stringify(m[p]) !== JSON.stringify
       { kb: 'ttChuyenKhoanTay', file: 'pos_thanh_toan.v1.js', tim: /manualConfirm: true, staffId: staffEmp\.id/, thay: 'manualConfirm: true, staffId: "x"', mo: 'đổi người xác nhận tay' },
       { kb: 'ttTinhRieng', file: 'pos_thanh_toan.v1.js', tim: /grp\.cashGiven = cashGiven \|\| subTotal;/, thay: 'grp.cashGiven = (cashGiven || subTotal) + 1;', mo: 'lệch tiền khách đưa của nhóm Tính riêng' },
       { kb: 'ttGiamGia', file: 'pos_thanh_toan.v1.js', tim: /return Math\.max\(0, getCartTotal\(\) - togoDisc - appDisc\);/, thay: 'return Math.max(0, getCartTotal() - togoDisc - appDisc + 1);', mo: 'lệch tổng cuối +1', muc: 'sau' },
+      { kb: 'ttDoiLy', file: 'pos_customers.v1.js', tim: /if \(markerRef\) t\.set\(markerRef, \{ phone, at: vnDate\(\)\.toISOString\(\) \}\);/, thay: '', mo: 'bỏ ghi dấu đổi ly' },
+      { kb: 'ttMatAck', file: 'pos_thanh_toan.v1.js', tim: /if \(!isNewBill\) \{\n      Object\.assign\(order, existingSnap\.val\(\)\);/, thay: 'if (false) {\n      Object.assign(order, existingSnap.val());', mo: 'bỏ nhánh dùng lại bill đã tồn tại (bấm lại ghi bill thứ hai)' },
       { kb: 'batDauMe', file: 'pos_prep.v1.js', tim: /note: `Nấu \$\{p\.code/, thay: 'note: `NAU ${p.code', mo: 'đổi ghi chú dòng trừ NL khi bắt đầu nấu' }
     ];
     for (const tk of TU_KIEM) {
