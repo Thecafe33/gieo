@@ -59,7 +59,7 @@ node tools/tach_posgieo/e2e_0d.js; node tools/tach_posgieo/e2e_ban.js; node tool
 
 ## 5. Kết quả cả bộ `e2e_kho`
 
-(ghi sau khi chạy xong — xem commit)
+56 kịch bản × gg01/gg02 + 28 tự kiểm → **1500 khẳng định, ALL PASS** (không hồi quy các kịch bản cũ). 5 kịch bản thanh toán mới và 5 tự kiểm mới đều đạt; `check_boundaries` / `check_paths` sạch; `e2e_0d` / `e2e_ban` / `e2e_hook` ALL PASS.
 
 ## 6. Điểm nhờ người kiểm phản biện
 
