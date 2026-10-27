@@ -48,7 +48,7 @@ node tools/automation/e2e_shift_work.js     # cần /usr/bin/chromium (môi trư
 
 ## 5. Giới hạn
 
-- Chưa so mốc: toàn bộ 8 bước nối nhau (đối soát → CK → đếm giao ca → đếm BTP → kiểm kê ca → bàn giao → checklist → đóng ngày) trong một lượt; đếm hết lượt ghi nhận lệch (`cash_variance_recorded`); giao ca đếm lệch / đếm chung / bill tiền mặt chen giữa; đóng ngày bị chặn (còn người trong ca, bill mới sau đối soát, việc bắt buộc); qua nửa đêm VN. Bài `e2e_btp_am` (bộ hiện tại, không so mốc) đi qua đếm BTP cuối ca + phần B.
+- Chưa so mốc: toàn bộ 8 bước nối nhau (đối soát → CK → đếm giao ca → đếm BTP → kiểm kê ca → bàn giao → checklist → đóng ngày) trong một lượt; đếm hết lượt ghi nhận lệch (`cash_variance_recorded`); giao ca đếm lệch / đếm chung / bill tiền mặt chen giữa; đóng ngày bị chặn (còn người trong ca, bill mới sau đối soát, việc bắt buộc); qua nửa đêm VN. ~~Bài `e2e_btp_am` (bộ hiện tại, không so mốc) đi qua đếm BTP cuối ca + phần B.~~ **Đính chính (F13-1, kiểm lượt 13):** `e2e_btp_am` chỉ trích một số hàm (`extractRaw`) — kiểm hạn đầu ca / chuông / trước check-out và câu hỏi BTP bán không lô lúc check-out (phần B); **không** chạy màn đếm BTP cuối ca (`renderPrepCountScreen` / `renderPrepCountCard` / `submitPrepCount`). Màn này nay có kịch bản so mốc `ketDemBTP` (`PHAN_HOI_KIEM_TRA_13.md`).
 - Firebase giả: orderBy / limit bỏ qua, increment xấp xỉ, onSnapshot một ảnh đầu; chưa APK / Firebase thật / hai quán đồng thời.
 
 ## 6. Điểm nhờ người kiểm phản biện
