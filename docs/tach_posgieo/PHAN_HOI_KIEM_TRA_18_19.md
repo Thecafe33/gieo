@@ -39,3 +39,6 @@ node tools/tach_posgieo/e2e_kho.js --chi ttDoiLy,ttMatAck,ttTienMat,ttChuyenKhoa
 sh tools/sinh_lai_tat_ca.sh                                              # TẤT CẢ ĐẠT
 node tools/tach_posgieo/e2e_kho.js                                       # cả bộ: xem dưới
 ```
+
+## Kết quả cả bộ sau sửa
+`node tools/tach_posgieo/e2e_kho.js`: **1568 khẳng định, ALL PASS** (1500 cũ + 68 mới: `ttDoiLy`, `ttMatAck`, 4 negative control oracle, 2 tự kiểm mới); `sinh_lai_tat_ca` TẤT CẢ ĐẠT.
