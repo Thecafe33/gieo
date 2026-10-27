@@ -616,6 +616,43 @@ const KICH_BAN = {
       [n.sau && n.sau.lenh === 1 && n.sau.conTam === false, 'két vẫn mở đúng 1 lần, tấm đóng'],
       [n.toasts.some(t => /Két đã mở nhưng CHƯA ghi được nhật ký/.test(t)), 'toast cảnh báo «Két đã mở nhưng CHƯA ghi được nhật ký» — ' + JSON.stringify(n.toasts)]]
   },
+  // 4A — SỬA DANH MỤC món To Go: thêm (thiếu tên bị chặn) → sửa giá L món m1 → xoá món m1 (posConfirm) — nút bấm thật trên màn Quản lý menu
+  menuMon: {
+    mo: 'menu', gioCo: HAN_T,
+    chay: async () => window.KB_MENU('mon'),
+    bang: ["menu_togo_gieogieo"],
+    kiem: (n) => { const g = n.ghi.filter(x => /menu_togo_gieogieo/.test(x.p)); return [
+      [n.toasts.some(t => /Vui lòng nhập tên món/.test(t)), 'thiếu tên → chặn, báo'],
+      [g.some(x => x.op === 'set' && /\/push$/.test(x.p) && x.d.name === 'Trà vải E2E' && x.d.type === 'Trà' && x.d.priceM === 32000 && x.d.priceL === 0), 'thêm món: Trà vải E2E, Trà, M 32.000 — ' + JSON.stringify(g)],
+      [g.some(x => x.op === 'set' && /\/m1$/.test(x.p) && x.d.name === 'Trà đào' && x.d.priceL === 40000 && x.d.priceM === 30000), 'sửa m1: L 40.000, giữ M 30.000'],
+      [g.some(x => x.op === 'remove' && /\/m1$/.test(x.p)) && n.sau && n.sau.hoi === 1, 'xoá m1 sau 1 lần xác nhận'],
+      [n.sau && JSON.stringify(n.sau.mon) === '["Trà vải E2E"]', 'danh sách To Go sau cùng: chỉ Trà vải E2E — ' + JSON.stringify(n.sau && n.sau.mon)],
+      [n.toasts.some(t => /^✅ Đã thêm món mới/.test(t)) && n.toasts.some(t => /^✅ Đã cập nhật món/.test(t)) && n.toasts.some(t => /^🗑 Đã xoá món/.test(t)), 'toast thêm / cập nhật / xoá']]; }
+  },
+  // 4A — SỬA DANH MỤC Food: thêm (thiếu giá bị chặn) → sửa giá f1 → xoá f1
+  menuFood: {
+    mo: 'menu', gioCo: HAN_T,
+    chay: async () => window.KB_MENU('food'),
+    bang: ["food_gieogieo"],
+    kiem: (n) => { const g = n.ghi.filter(x => /food_gieogieo/.test(x.p)); return [
+      [n.toasts.some(t => /Vui lòng nhập giá món/.test(t)), 'thiếu giá → chặn, báo'],
+      [g.some(x => x.op === 'set' && /\/push$/.test(x.p) && x.d.name === 'Bánh E2E' && x.d.price === 18000 && x.d.color === '#b45309'), 'thêm Food: Bánh E2E 18.000'],
+      [g.some(x => x.op === 'set' && /\/f1$/.test(x.p) && x.d.price === 22000), 'sửa f1: 22.000'],
+      [g.some(x => x.op === 'remove' && /\/f1$/.test(x.p)), 'xoá f1'],
+      [n.sau && JSON.stringify(n.sau.food) === '["Bánh E2E"]', 'Food sau cùng: chỉ Bánh E2E — ' + JSON.stringify(n.sau && n.sau.food)]]; }
+  },
+  // 4A — SỬA DANH MỤC topping (tab Toppings): thêm → sửa giá To Go t1 → xoá t1
+  menuTopping: {
+    mo: 'menu', gioCo: HAN_T,
+    chay: async () => window.KB_MENU('topping'),
+    bang: ["toppings_gieogieo"],
+    kiem: (n) => { const g = n.ghi.filter(x => /toppings_gieogieo/.test(x.p)); return [
+      [g.some(x => x.op === 'set' && /\/push$/.test(x.p) && x.d.name === 'Thạch E2E' && x.d.price === 5000 && x.d.priceTogo === 6000), 'thêm topping: Thạch E2E 5.000 / To Go 6.000'],
+      [g.some(x => x.op === 'set' && /\/t1$/.test(x.p) && x.d.name === 'Trân châu' && x.d.priceTogo === 8000), 'sửa t1: To Go 8.000'],
+      [g.some(x => x.op === 'remove' && /\/t1$/.test(x.p)), 'xoá t1'],
+      [n.sau && JSON.stringify(n.sau.tp) === '["Thạch E2E"]', 'topping sau cùng: chỉ Thạch E2E — ' + JSON.stringify(n.sau && n.sau.tp)],
+      [n.sau && n.sau.tabTp === true, 'màn danh sách topping hiện đúng tab']]; }
+  },
   // 2C — KIỂM KÊ MÙ: mở màn (đọc danh mục) → đếm Trà lài 900 g → gửi phiếu chờ duyệt
   kiemKe: {
     mo: 'kho',
@@ -885,6 +922,40 @@ const KB_QUY = async (viec) => {
   bam(/^cfSubmitForm\(\)$/); await sleep(600);
   return { hoi };
 };
+// Phần chung 4A sửa danh mục (chạy TRONG trang) — bấm nút thật trên màn Quản lý menu
+const KB_MENU = async (viec) => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  let hoi = 0; window.posConfirm = async () => { hoi++; return true; };
+  const dat = (id, v) => { const el = document.getElementById(id); el.value = v; el.dispatchEvent(new Event('input')); };
+  const nap = async () => { MENU_TOGO = parseMenuSnap((await db.ref('menu_togo_gieogieo').once('value')).val()); FOOD_MENU = parseFoodMenuSnap((await db.ref('food_gieogieo').once('value')).val());
+    const t = (await db.ref('toppings_gieogieo').once('value')).val(); TOPPINGS = t ? Object.entries(t).map(([id, v]) => ({ id, name: v.name || '', price: Number(v.price) || 0, priceTogo: Number(v.priceTogo) || 0 })) : []; };
+  window.__buoc = 'nạp danh mục'; await nap();
+  showScreen('mn'); await sleep(100);
+  window.__ghi = [];
+  if (viec === 'mon') {
+    window.__buoc = 'thêm món'; openMenuForm(null); await sleep(50);
+    document.querySelector('#mn-popup button[onclick="saveMenuItem()"]') ? document.querySelector('#mn-popup button[onclick="saveMenuItem()"]').click() : saveMenuItem(); await sleep(50);
+    dat('mn-f-name', 'Trà vải E2E'); dat('mn-f-type', 'Trà'); dat('mn-f-pm', '32000');
+    saveMenuItem(); await sleep(400);
+    window.__buoc = 'sửa món'; openMenuForm('m1'); await sleep(50); dat('mn-f-pl', '40000'); saveMenuItem(); await sleep(400);
+    window.__buoc = 'xoá món'; openMenuForm('m1'); await sleep(50); await deleteMenuItem(); await sleep(400);
+    return { hoi, mon: MENU_TOGO.map(m => m.name) };
+  }
+  if (viec === 'food') {
+    window.__buoc = 'thêm Food'; openFoodForm(null); await sleep(50); dat('food-f-name', 'Bánh E2E'); saveFoodItem(); await sleep(50);
+    dat('food-f-price', '18000'); saveFoodItem(); await sleep(400);
+    window.__buoc = 'sửa Food'; openFoodForm('f1'); await sleep(50); dat('food-f-price', '22000'); saveFoodItem(); await sleep(400);
+    window.__buoc = 'xoá Food'; openFoodForm('f1'); await sleep(50); await deleteFoodItem(); await sleep(400);
+    return { hoi, food: FOOD_MENU.map(f => f.name) };
+  }
+  window.__buoc = 'tab topping'; document.getElementById('mn-tab-topping').click(); await sleep(50);
+  const tabTp = /Trân châu/.test((document.getElementById('mn-list') || {}).textContent || '');
+  window.__buoc = 'thêm topping'; document.querySelector('#mn .btn-add-item').click(); await sleep(50);
+  dat('tp-f-name', 'Thạch E2E'); dat('tp-f-price', '5000'); dat('tp-f-price-togo', '6000'); saveTopping(); await sleep(400);
+  window.__buoc = 'sửa topping'; openToppingForm('t1'); await sleep(50); dat('tp-f-price-togo', '8000'); saveTopping(); await sleep(400);
+  window.__buoc = 'xoá topping'; openToppingForm('t1'); await sleep(50); await deleteTopping(); await sleep(400);
+  return { hoi, tp: TOPPINGS.map(t => t.name), tabTp };
+};
 // Dòng sổ kho WASTE đã ghi thành công (bỏ lượt bị cài lỗi), theo itemId → qty; dòng sổ BTP WASTE
 const soWaste = n => n.ghi.filter(g => !/!hong$/.test(g.op) && /stock_transactions_gieogieo/.test(duongGhi(g)) && g.d && g.d.type === 'WASTE');
 const soPrepWaste = n => n.ghi.filter(g => !/!hong$/.test(g.op) && /prep_transactions_gieogieo/.test(duongGhi(g)) && g.d && g.d.type === 'WASTE');
@@ -916,7 +987,7 @@ const phieu = n => n.ghi.filter(g => /receiving_records_gieogieo/.test(duongGhi(
 
 async function chay(b, base, store, ten) {
   const t = await moTrang(b, base, KICH_BAN[ten].gioCo ? { authNgay: true, store, gioCo: KICH_BAN[ten].gioCo } : { authNgay: true, store, ngauNhienCo: true });
-  const r = await t.page.evaluate(async ({ src, dau, doly, han, ca, ket, quy, mo, ITEMS, PO, E2E }) => {
+  const r = await t.page.evaluate(async ({ src, dau, doly, han, ca, ket, quy, menu, mo, ITEMS, PO, E2E }) => {
     const toasts = []; const _t = window.toast;
     window.toast = function (m) { toasts.push(String(m)); try { return _t.apply(this, arguments); } catch (e) {} };
     window.requireShiftOpened = () => true; window.requireOpeningChecklistDone = () => true;
@@ -994,6 +1065,11 @@ async function chay(b, base, store, ten) {
         currentDenominations: { 500000: 1, 200000: 2, 100000: 1, 50000: 0, 20000: 0, 10000: 0, 5000: 0, 2000: 0, 1000: 0 }, mid: [], expenses: [] };
       window.__SNAP = true;
     }
+    if (mo === 'menu') {   // 4A: danh mục RT (đường qua GieoData.rtPath — đúng bảng của quán / bảng chung)
+      S[GieoData.rtPath('menu_togo_gieogieo') + '/m1'] = { name: 'Trà đào', type: 'Trà', color: '#E23A5D', priceM: 30000, priceL: 35000 };
+      S[GieoData.rtPath('food_gieogieo') + '/f1'] = { name: 'Bánh mì', price: 20000, color: '#b45309' };
+      S[GieoData.rtPath('toppings_gieogieo') + '/t1'] = { name: 'Trân châu', price: 7000, priceTogo: 7000 };
+    }
     if (mo === 'nau') {
       for (const [id, it] of Object.entries(E2E.NL_NAU)) S[ten('inventory_items_gieogieo') + '/' + id] = it;
       for (const [id, it] of Object.entries(E2E.PREP_NAU)) S[ten('prep_items_gieogieo') + '/' + id] = it;
@@ -1006,12 +1082,12 @@ async function chay(b, base, store, ten) {
       if (E2E.tieuHao) S[ten('stock_transactions_gieogieo') + '/cons_b2_pearl'] = { itemId: 'pearl', type: 'CONSUMPTION', qty: -500, referenceId: 'b2', prepBatchId: 'b2', businessDate: '2026-10-26', createdAt: '2026-10-26T01:00:00.000Z', status: 'posted' };
     }
     window.__SEED = S; window.__SEED_GHI = true; window.__HONG = [];
-    window.KB_DAU = (0, eval)('(' + dau + ')'); window.KB_DOLY = (0, eval)('(' + doly + ')'); window.KB_HAN = (0, eval)('(' + han + ')'); window.KB_CA = (0, eval)('(' + ca + ')'); window.KB_KET = (0, eval)('(' + ket + ')'); window.KB_QUY = (0, eval)('(' + quy + ')');
+    window.KB_DAU = (0, eval)('(' + dau + ')'); window.KB_DOLY = (0, eval)('(' + doly + ')'); window.KB_HAN = (0, eval)('(' + han + ')'); window.KB_CA = (0, eval)('(' + ca + ')'); window.KB_KET = (0, eval)('(' + ket + ')'); window.KB_QUY = (0, eval)('(' + quy + ')'); window.KB_MENU = (0, eval)('(' + menu + ')');
     let loiKB = null, sau = null;
     window.__buoc = '';   // kịch bản treo (lời hứa không bao giờ xong) → báo lỗi sau 45 giây kèm bước cuối, không treo cả bài
     try { sau = await Promise.race([(0, eval)('(' + src + ')')({ ITEMS }), new Promise((_, rej) => setTimeout(() => rej(new Error('kịch bản quá 45 giây — bước: ' + window.__buoc)), 45000))]); } catch (e) { loiKB = String(e && e.message || e); }
     return { ghi: (window.__ghi || []).map(g => ({ op: g.op, p: g.p, rt: !!g.rt, d: g.d })), toasts, sau, loiKB };
-  }, { src: KICH_BAN[ten].chay.toString(), dau: KB_DAU.toString(), doly: KB_DOLY.toString(), han: KB_HAN.toString(), ca: KB_CA.toString(), ket: KB_KET.toString(), quy: KB_QUY.toString(), mo: KICH_BAN[ten].mo, ITEMS, PO, E2E: { PREP, BATCH: BATCH(), NL_NAU, PREP_NAU, NL_KHO, DOLY, HAN, CTN1: CTN('sealed'), CTN2: CTN('open', { unitBase: 0, openedAt: '2026-10-25T05:00:00.000Z', openedBy: 'NV E2E', expiresAt: '2026-10-26T05:00:00.000Z' }), lo: KICH_BAN[ten].lo || [], loActive: !!KICH_BAN[ten].loActive, tieuHao: !!KICH_BAN[ten].tieuHao, caMo: !!KICH_BAN[ten].caMo, ketDong: !!KICH_BAN[ten].ketDong, ketTreo: !!KICH_BAN[ten].ketTreo, caDayDu: !!KICH_BAN[ten].caDayDu, ketBTP: !!KICH_BAN[ten].ketBTP, quyDoc: !!KICH_BAN[ten].quyDoc, quyHai: !!KICH_BAN[ten].quyHai } });
+  }, { src: KICH_BAN[ten].chay.toString(), dau: KB_DAU.toString(), doly: KB_DOLY.toString(), han: KB_HAN.toString(), ca: KB_CA.toString(), ket: KB_KET.toString(), quy: KB_QUY.toString(), menu: KB_MENU.toString(), mo: KICH_BAN[ten].mo, ITEMS, PO, E2E: { PREP, BATCH: BATCH(), NL_NAU, PREP_NAU, NL_KHO, DOLY, HAN, CTN1: CTN('sealed'), CTN2: CTN('open', { unitBase: 0, openedAt: '2026-10-25T05:00:00.000Z', openedBy: 'NV E2E', expiresAt: '2026-10-26T05:00:00.000Z' }), lo: KICH_BAN[ten].lo || [], loActive: !!KICH_BAN[ten].loActive, tieuHao: !!KICH_BAN[ten].tieuHao, caMo: !!KICH_BAN[ten].caMo, ketDong: !!KICH_BAN[ten].ketDong, ketTreo: !!KICH_BAN[ten].ketTreo, caDayDu: !!KICH_BAN[ten].caDayDu, ketBTP: !!KICH_BAN[ten].ketBTP, quyDoc: !!KICH_BAN[ten].quyDoc, quyHai: !!KICH_BAN[ten].quyHai } });
   r.loi = t.loi.slice().sort(); r.qua = t.qua; await t.ctx.close();
   r.ghiTho = r.ghi; r.ghi = chuanGhi(r.ghi, !!KICH_BAN[ten].gioCo); r.sau = chuanDuLieu(r.sau, undefined, !!KICH_BAN[ten].gioCo);
   return r;
@@ -1070,6 +1146,8 @@ const lechMuc = (m, n) => SO.filter(p => JSON.stringify(m[p]) !== JSON.stringify
       { kb: 'quyChiTieu', file: 'pos_cashfund.v1.js', tim: /const netAmount = takenOutTotal - changeTotal;/, thay: 'const netAmount = takenOutTotal - changeTotal + 1;', mo: 'lệch số tiền chi thực tế +1' },
       { kb: 'moKetPin', file: 'pos_cashfund.v1.js', tim: /await POSPrinter\.engine\.openDrawer\(\);/, thay: 'await POSPrinter.engine.openDrawer(); await POSPrinter.engine.openDrawer();', mo: 'gửi lệnh mở két hai lần', muc: 'sau' },
       { kb: 'moKet', file: 'pos_cashfund.v1.js', tim: /employeeId: emp\.id \|\| '', employeeName/, thay: "employeeId: 'x', employeeName", mo: 'đổi người mở két trong nhật ký' },
+      { kb: 'menuMon', file: 'pos_catalog_admin.v1.js', tim: /priceL: priceL \|\| 0\n/, thay: 'priceL: (priceL || 0) + 1\n', mo: 'lệch giá L khi lưu món' },
+      { kb: 'menuTopping', file: 'pos_catalog_admin.v1.js', tim: /const data = \{ name, price, priceTogo \};/, thay: 'const data = { name, price, priceTogo: priceTogo + 1 };', mo: 'lệch giá To Go topping' },
       { kb: 'batDauMe', file: 'pos_prep.v1.js', tim: /note: `Nấu \$\{p\.code/, thay: 'note: `NAU ${p.code', mo: 'đổi ghi chú dòng trừ NL khi bắt đầu nấu' }
     ];
     for (const tk of TU_KIEM) {
