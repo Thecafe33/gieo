@@ -772,6 +772,65 @@ const KICH_BAN = {
       [JSON.stringify(x.sauBoTopping) === '[["Trân châu",2]]', 'bỏ topping Thạch → còn Trân châu ×2 — ' + JSON.stringify(x.sauBoTopping)],
       [JSON.stringify(x.sauXoa) === '[["m1_L",2,0],["m1_L_TP",1,14000]]' && x.sauClear === 0, 'xoá Cà phê → còn 2 dòng; xoá giỏ → 0 — ' + JSON.stringify(x.sauXoa) + ' / ' + x.sauClear]]; }
   },
+  // 4D — THANH TOÁN TIỀN MẶT (selM → màn nhập tiền → confirmPay): ghi MỘT đơn TIỀN MẶT, giỏ trống, về màn bán
+  ttTienMat: {
+    mo: 'gio', gioCo: HAN_T, khongGiuGio: true,
+    chay: async () => window.KB_TT('tienmat'),
+    bang: ["billCounters_gieogieo", "checkout_side_effects_gieogieo", "orders_gieogieo", "sales_assist_logs_gieogieo"],
+    kiem: (n) => { const o = n.ghi.filter(g => /orders_gieogieo(?:__\w+)?\/.+\/bill_/.test(g.p) && g.op === 'set'); const d = o[0] && o[0].d; return [
+      [o.length === 1 && d.method === 'TIỀN MẶT' && d.total === 85000, 'ghi đúng MỘT đơn TIỀN MẶT tổng 85.000 — ' + JSON.stringify(o.map(x => x.d && [x.d.method, x.d.total]))],
+      [d && d.cashGiven === 100000 && d.cashChange === 15000, 'khách đưa 100.000, thối 15.000 — ' + (d && [d.cashGiven, d.cashChange])],
+      [d && Array.isArray(d.itemsArray) && d.itemsArray.length === 3 && /^#/.test(d.billCode || ''), '3 dòng món + mã bill — ' + (d && d.billCode)],
+      [n.sau && n.sau.manTien === 'cs' || n.sau && n.sau.manTien, 'selM(cash) mở màn nhập tiền — ' + (n.sau && n.sau.manTien)],
+      [n.sau && n.sau.gioSau === 0, 'xong giỏ trống — ' + (n.sau && n.sau.gioSau)],
+      [n.toasts.some(t => /Thanh toán thành công/.test(t)), 'toast «Thanh toán thành công» — ' + JSON.stringify(n.toasts)]]; }
+  },
+  // 4D — CHUYỂN KHOẢN TỰ NHẬN: selM(bank) → QR (đúng số tiền, nội dung TTHD <mã>) → webhook ghi bank_confirmations → bill CHUYỂN KHOẢN (auto) → xoá bản xác nhận
+  ttChuyenKhoan: {
+    mo: 'gio', gioCo: HAN_T, khongGiuGio: true,
+    chay: async () => window.KB_TT('ck'),
+    bang: ["bank_confirmations", "billCounters_gieogieo", "checkout_side_effects_gieogieo", "orders_gieogieo", "sales_assist_logs_gieogieo"],
+    kiem: (n) => { const o = n.ghi.filter(g => /orders_gieogieo(?:__\w+)?\/.+\/bill_/.test(g.p) && g.op === 'set'); const d = o[0] && o[0].d; const x = n.sau || {}; return [
+      [x.qr === 'flex' || x.qr === 'block', 'popup QR mở — ' + x.qr],
+      [x.qrAmount === '85000' && /^TTHD TC?[A-Z]*\d+/.test(x.qrNoiDung) || /^TTHD /.test(x.qrNoiDung || ''), 'QR đúng 85.000đ, nội dung «TTHD <mã>» — ' + x.qrAmount + ' / ' + x.qrNoiDung],
+      [o.length === 1 && d.method === 'CHUYỂN KHOẢN' && d.total === 85000, 'ghi đúng MỘT đơn CHUYỂN KHOẢN 85.000 — ' + JSON.stringify(o.map(q => q.d && [q.d.method, q.d.total]))],
+      [d && d.bankConfirmMethod === 'auto', 'đánh dấu xác nhận tự động — ' + (d && d.bankConfirmMethod)],
+      [n.ghi.some(g => /bank_confirmations\//.test(g.p) && /remove/.test(g.op)), 'xoá bản bank_confirmations sau khi dùng'],
+      [x.qrDong === 'none' && x.gioSau === 0, 'popup đóng, giỏ trống — ' + x.qrDong + ' / ' + x.gioSau]]; }
+  },
+  // 4D — CHUYỂN KHOẢN NHÂN VIÊN BẤM TAY: PIN nhân viên → bill ghi manual_staff + người xác nhận
+  ttChuyenKhoanTay: {
+    mo: 'gio', gioCo: HAN_T, khongGiuGio: true,
+    chay: async () => window.KB_TT('cktay'),
+    bang: ["billCounters_gieogieo", "checkout_side_effects_gieogieo", "orders_gieogieo", "sales_assist_logs_gieogieo"],
+    kiem: (n) => { const o = n.ghi.filter(g => /orders_gieogieo(?:__\w+)?\/.+\/bill_/.test(g.p) && g.op === 'set'); const d = o[0] && o[0].d; return [
+      [o.length === 1 && d.method === 'CHUYỂN KHOẢN', 'ghi đúng MỘT đơn CHUYỂN KHOẢN — ' + JSON.stringify(o.map(q => q.d && q.d.method))],
+      [d && d.bankConfirmMethod === 'manual_staff' && d.bankConfirmedBy, 'ghi manual_staff + người xác nhận — ' + (d && [d.bankConfirmMethod, d.bankConfirmedBy])],
+      [n.sau && n.sau.qrDong === 'none' && n.sau.gioSau === 0, 'popup đóng, giỏ trống']]; }
+  },
+  // 4D — TÍNH RIÊNG: tách 3 phần → nhóm 1 tiền mặt (2 phần), nhóm 2 chuyển khoản (1 phần, webhook) → finalizeSplitPay ghi MỘT đơn TÍNH RIÊNG có 2 nhóm
+  ttTinhRieng: {
+    mo: 'gio', gioCo: HAN_T, khongGiuGio: true,
+    chay: async () => window.KB_TT('tinhrieng'),
+    bang: ["bank_confirmations", "billCounters_gieogieo", "checkout_side_effects_gieogieo", "orders_gieogieo", "sales_assist_logs_gieogieo"],
+    kiem: (n) => { const o = n.ghi.filter(g => /orders_gieogieo(?:__\w+)?\/.+\/bill_/.test(g.p) && g.op === 'set'); const d = o[0] && o[0].d; const x = n.sau || {}; return [
+      [x.nMon === 3 && x.manSp === 'sp', 'mở Tính riêng: 3 phần, màn sp — ' + JSON.stringify([x.nMon, x.manSp])],
+      [JSON.stringify((x.nhom || []).map(g => g.slice(0, 3))) === '[["TIỀN MẶT",50000,50000],["CHUYỂN KHOẢN",35000,null]]', 'nhóm 1 tiền mặt 50.000, nhóm 2 chuyển khoản 35.000 — ' + JSON.stringify(x.nhom)],
+      [x.nhom && x.nhom[1] && x.nhom[1][3] === 'coMa' && x.nhom[1][4] === 'auto', 'nhóm chuyển khoản lưu mã CK + xác nhận auto — ' + JSON.stringify(x.nhom && x.nhom[1])],
+      [o.length === 1 && d.method === 'TÍNH RIÊNG' && d.total === 85000 && d.splitGroups.length === 2, 'ghi MỘT đơn TÍNH RIÊNG 85.000 hai nhóm — ' + JSON.stringify(o.map(q => q.d && [q.d.method, q.d.total, (q.d.splitGroups || []).length]))],
+      [x.gioSau === 0, 'giỏ trống sau chốt']]; }
+  },
+  // 4D — GIẢM GIÁ TO GO: giảm 5.000 → getFinalTotal 80.000 → thanh toán tiền mặt → đơn ghi tổng 80.000 + discountAmt
+  ttGiamGia: {
+    mo: 'gio', gioCo: HAN_T, khongGiuGio: true,
+    chay: async () => window.KB_TT('giamgia'),
+    bang: ["billCounters_gieogieo", "checkout_side_effects_gieogieo", "orders_gieogieo", "sales_assist_logs_gieogieo"],
+    kiem: (n) => { const o = n.ghi.filter(g => /orders_gieogieo(?:__\w+)?\/.+\/bill_/.test(g.p) && g.op === 'set'); const d = o[0] && o[0].d; const x = n.sau || {}; return [
+      [x.goc === 85000 && x.sauGiam === 80000, 'giỏ 85.000 − giảm 5.000 = 80.000 — ' + JSON.stringify([x.goc, x.sauGiam])],
+      [o.length === 1 && d.total === 80000 && d.cashChange === 20000, 'đơn tổng 80.000, thối 20.000 — ' + JSON.stringify(o.map(q => q.d && [q.d.total, q.d.cashChange]))],
+      [d && (d.discountAmt === 5000 || d.discount === 5000 || d.allDiscount === 5000 || JSON.stringify(d).includes('5000')), 'đơn ghi khoản giảm 5.000 — ' + (d && JSON.stringify(Object.keys(d).filter(k => /disc/i.test(k)).map(k => [k, d[k]])))],
+      [x.gioSau === 0 && x.giamSau === 0, 'giỏ trống, giảm giá về 0']]; }
+  },
   // 4D-1 — CHẶN SỚM Ở NÚT THANH TOÁN (onCheckoutClick): giỏ trống → «Giỏ hàng trống»; có món nhưng ngày đã đóng ca → «Ngày hôm nay đã đóng ca»; không ghi gì, không mở màn thanh toán
   gioChanSom: {
     mo: 'gio', gioCo: HAN_T,
@@ -1229,6 +1288,63 @@ const KB_GIO = async (viec) => {
   cartClear(); await sleep(30);
   return { hoi, nMon, poShow, nSize, sauThem, tongSauThem, hoiTach, nutTach, sauTach, tongSauTach, sauBoTopping, sauXoa, sauClear: Object.keys(cart).length };
 };
+// 4D-2/3/4 — THANH TOÁN (pos_thanh_toan): tiền mặt / chuyển khoản tự nhận / chuyển khoản nhân viên bấm / Tính riêng / giảm giá To Go
+const KB_TT = async (viec) => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  window.posConfirm = async () => true;
+  window.__buoc = 'nạp menu';
+  MENU_TOGO = [{ id: 'm1', name: 'Trà đào', type: 'Trà', color: '#E23A5D', sizes: [{ label: 'M', price: 30000 }, { label: 'L', price: 35000 }] },
+    { id: 'm2', name: 'Cà phê', type: 'Cà phê', color: '#b45309', sizes: [{ label: 'M', price: 20000 }] }];
+  MENU = MENU_TOGO; FOOD_MENU = []; TOPPINGS = [{ id: 't1', name: 'Trân châu', price: 7000, priceTogo: 7000 }];
+  cart = {}; curFilter = 'all'; togoDiscountAmt = 0; showScreen('sm'); renderMenu();
+  window.__ghi = [];
+  const cho = async (dk, ms) => { for (let i = 0; i < ms / 40 && !dk(); i++) await sleep(40); };   // đếm vòng, không đo Date.now (đồng hồ giả có thể đứng)
+  const donhang = () => (window.__ghi || []).filter(g => /orders_gieogieo\/.+\/.+\/bill_/.test(g.p) && g.op === 'set');
+  const them = () => { addCart(MENU_TOGO[0], MENU_TOGO[0].sizes[0]); addCart(MENU_TOGO[0], MENU_TOGO[0].sizes[1]); addCart(MENU_TOGO[1], MENU_TOGO[1].sizes[0]); };
+  const man = () => (document.querySelector('.screen.active') || {}).id || null;
+  // RT .on() của Firebase giả là hàm rỗng → giữ hàm nghe của bank_confirmations rồi gọi với một snapshot giả (như webhook ghi vào)
+  const nghe = {}; const refGoc = db.ref.bind(db);
+  db.ref = function (p) { const r = refGoc(p); if (/^bank_confirmations\//.test(p)) r.on = function (ev, cb) { nghe[p] = cb; return cb; }; return r; };
+  const rtGhi = async (id, d) => { const cb = nghe['bank_confirmations/' + id]; if (!cb) throw new Error('chưa có bộ nghe bank_confirmations/' + id); cb({ exists: () => true, val: () => d }); await sleep(50); };
+  them();
+  const tong = getFinalTotal();
+  if (viec === 'tienmat') {
+    window.__buoc = 'tiền mặt'; selM('cash'); await sleep(60);
+    const manTien = man();
+    await confirmPay(100000, 100000 - tong); await cho(() => donhang().length, 8000); await sleep(400);
+    return { tong, manTien, gioSau: Object.keys(cart).length, manSau: man() };
+  }
+  if (viec === 'ck') {
+    window.__buoc = 'mở QR'; selM('bank'); await sleep(60);
+    const id = _vietqrOrderId, qr = document.getElementById('vietqr-popup').style.display, qrSrc = (document.getElementById('vietqr-img') || {}).src || '';
+    window.__buoc = 'webhook báo đã nhận'; await rtGhi(id, { amount: tong }); await cho(() => donhang().length, 8000); await sleep(600);
+    return { tong, id, qr, qrAmount: (/amount=(\d+)/.exec(qrSrc) || [])[1], qrNoiDung: decodeURIComponent((/addInfo=([^&]*)/.exec(qrSrc) || [])[1] || ''), qrDong: document.getElementById('vietqr-popup').style.display, gioSau: Object.keys(cart).length };
+  }
+  if (viec === 'cktay') {
+    window.__buoc = 'mở QR'; selM('bank'); await sleep(60);
+    const id = _vietqrOrderId;
+    window.resolveStaffPinAndCheckin = async () => ({ id: 'e2e_nv', fullName: 'NV E2E', pin: '0000' });
+    window.__buoc = 'nhân viên xác nhận tay'; await submitManualBankConfirm(); await cho(() => donhang().length, 8000); await sleep(600);
+    return { tong, id, qrDong: document.getElementById('vietqr-popup').style.display, gioSau: Object.keys(cart).length };
+  }
+  if (viec === 'tinhrieng') {
+    window.__buoc = 'mở Tính riêng'; openSplitPay(); await sleep(60);
+    const nMon = spItems.length, manSp = man();
+    window.__buoc = 'nhóm 1 tiền mặt'; spSelected = new Set([0, 2]); spPay('cash'); await sleep(40); confirmSpCash(); await sleep(40);
+    window.__buoc = 'nhóm 2 chuyển khoản'; spSelected = new Set([1]); spPay('bank'); await sleep(60);
+    const idCk = _vietqrOrderId; await rtGhi(idCk, { amount: spItems[1].price }); await cho(() => spItems.every(x => x.paid), 4000); await sleep(200);
+    const nhom = spGroups.map(g => [g.method, g.total, g.cashGiven || null, g.bankOrderId ? 'coMa' : null, g.bankConfirmMethod || null]);
+    window.__buoc = 'chốt bill'; await finalizeSplitPay(); await cho(() => donhang().length, 8000); await sleep(600);
+    return { tong, nMon, manSp, nhom, paidAmt: spPaidAmt, gioSau: Object.keys(cart).length, manSau: man() };
+  }
+  if (viec === 'giamgia') {
+    window.__buoc = 'giảm giá To Go'; togoDiscountAmt = 5000;
+    const sauGiam = getFinalTotal(), goc = getCartTotal();
+    selM('cash'); await sleep(60);
+    await confirmPay(100000, 100000 - sauGiam); await cho(() => donhang().length, 8000); await sleep(400);
+    return { goc, sauGiam, gioSau: Object.keys(cart).length, giamSau: togoDiscountAmt };
+  }
+};
 // Dòng sổ kho WASTE đã ghi thành công (bỏ lượt bị cài lỗi), theo itemId → qty; dòng sổ BTP WASTE
 const soWaste = n => n.ghi.filter(g => !/!hong$/.test(g.op) && /stock_transactions_gieogieo/.test(duongGhi(g)) && g.d && g.d.type === 'WASTE');
 const soPrepCons = n => n.ghi.filter(g => !/!hong$/.test(g.op) && /prep_transactions_gieogieo/.test(duongGhi(g)) && g.d && g.d.type === 'CONSUMPTION');
@@ -1261,7 +1377,7 @@ const phieu = n => n.ghi.filter(g => /receiving_records_gieogieo/.test(duongGhi(
 
 async function chay(b, base, store, ten) {
   const t = await moTrang(b, base, KICH_BAN[ten].gioCo ? { authNgay: true, store, gioCo: KICH_BAN[ten].gioCo } : { authNgay: true, store, ngauNhienCo: true });
-  const r = await t.page.evaluate(async ({ src, dau, doly, han, ca, ket, quy, menu, ban, khach, gio, mo, ITEMS, PO, E2E }) => {
+  const r = await t.page.evaluate(async ({ src, dau, doly, han, ca, ket, quy, menu, ban, khach, gio, tt, mo, ITEMS, PO, E2E }) => {
     const toasts = []; const _t = window.toast;
     window.toast = function (m) { toasts.push(String(m)); try { return _t.apply(this, arguments); } catch (e) {} };
     window.requireShiftOpened = () => true; window.requireOpeningChecklistDone = () => true;
@@ -1373,12 +1489,12 @@ async function chay(b, base, store, ten) {
       if (E2E.tieuHao) S[ten('stock_transactions_gieogieo') + '/cons_b2_pearl'] = { itemId: 'pearl', type: 'CONSUMPTION', qty: -500, referenceId: 'b2', prepBatchId: 'b2', businessDate: '2026-10-26', createdAt: '2026-10-26T01:00:00.000Z', status: 'posted' };
     }
     window.__SEED = S; window.__SEED_GHI = true; window.__HONG = [];
-    window.KB_DAU = (0, eval)('(' + dau + ')'); window.KB_DOLY = (0, eval)('(' + doly + ')'); window.KB_HAN = (0, eval)('(' + han + ')'); window.KB_CA = (0, eval)('(' + ca + ')'); window.KB_KET = (0, eval)('(' + ket + ')'); window.KB_QUY = (0, eval)('(' + quy + ')'); window.KB_MENU = (0, eval)('(' + menu + ')'); window.KB_BAN = (0, eval)('(' + ban + ')'); window.KB_KHACH = (0, eval)('(' + khach + ')'); window.KB_GIO = (0, eval)('(' + gio + ')');
+    window.KB_DAU = (0, eval)('(' + dau + ')'); window.KB_DOLY = (0, eval)('(' + doly + ')'); window.KB_HAN = (0, eval)('(' + han + ')'); window.KB_CA = (0, eval)('(' + ca + ')'); window.KB_KET = (0, eval)('(' + ket + ')'); window.KB_QUY = (0, eval)('(' + quy + ')'); window.KB_MENU = (0, eval)('(' + menu + ')'); window.KB_BAN = (0, eval)('(' + ban + ')'); window.KB_KHACH = (0, eval)('(' + khach + ')'); window.KB_GIO = (0, eval)('(' + gio + ')'); window.KB_TT = (0, eval)('(' + tt + ')');
     let loiKB = null, sau = null;
     window.__buoc = '';   // kịch bản treo (lời hứa không bao giờ xong) → báo lỗi sau 45 giây kèm bước cuối, không treo cả bài
     try { sau = await Promise.race([(0, eval)('(' + src + ')')({ ITEMS }), new Promise((_, rej) => setTimeout(() => rej(new Error('kịch bản quá 45 giây — bước: ' + window.__buoc)), 45000))]); } catch (e) { loiKB = String(e && e.message || e); }
     return { ghi: (window.__ghi || []).map(g => ({ op: g.op, p: g.p, rt: !!g.rt, d: g.d })), toasts, sau, loiKB };
-  }, { src: KICH_BAN[ten].chay.toString(), dau: KB_DAU.toString(), doly: KB_DOLY.toString(), han: KB_HAN.toString(), ca: KB_CA.toString(), ket: KB_KET.toString(), quy: KB_QUY.toString(), menu: KB_MENU.toString(), ban: KB_BAN.toString(), khach: KB_KHACH.toString(), gio: KB_GIO.toString(), mo: KICH_BAN[ten].mo, ITEMS, PO, E2E: { PREP, BATCH: BATCH(), NL_NAU, PREP_NAU, NL_KHO, DOLY, HAN, CTN1: CTN('sealed'), CTN2: CTN('open', { unitBase: 0, openedAt: '2026-10-25T05:00:00.000Z', openedBy: 'NV E2E', expiresAt: '2026-10-26T05:00:00.000Z' }), lo: KICH_BAN[ten].lo || [], loActive: !!KICH_BAN[ten].loActive, tieuHao: !!KICH_BAN[ten].tieuHao, caMo: !!KICH_BAN[ten].caMo, ketDong: !!KICH_BAN[ten].ketDong, ketTreo: !!KICH_BAN[ten].ketTreo, caDayDu: !!KICH_BAN[ten].caDayDu, ketBTP: !!KICH_BAN[ten].ketBTP, quyDoc: !!KICH_BAN[ten].quyDoc, quyHai: !!KICH_BAN[ten].quyHai } });
+  }, { src: KICH_BAN[ten].chay.toString(), dau: KB_DAU.toString(), doly: KB_DOLY.toString(), han: KB_HAN.toString(), ca: KB_CA.toString(), ket: KB_KET.toString(), quy: KB_QUY.toString(), menu: KB_MENU.toString(), ban: KB_BAN.toString(), khach: KB_KHACH.toString(), gio: KB_GIO.toString(), tt: KB_TT.toString(), mo: KICH_BAN[ten].mo, ITEMS, PO, E2E: { PREP, BATCH: BATCH(), NL_NAU, PREP_NAU, NL_KHO, DOLY, HAN, CTN1: CTN('sealed'), CTN2: CTN('open', { unitBase: 0, openedAt: '2026-10-25T05:00:00.000Z', openedBy: 'NV E2E', expiresAt: '2026-10-26T05:00:00.000Z' }), lo: KICH_BAN[ten].lo || [], loActive: !!KICH_BAN[ten].loActive, tieuHao: !!KICH_BAN[ten].tieuHao, caMo: !!KICH_BAN[ten].caMo, ketDong: !!KICH_BAN[ten].ketDong, ketTreo: !!KICH_BAN[ten].ketTreo, caDayDu: !!KICH_BAN[ten].caDayDu, ketBTP: !!KICH_BAN[ten].ketBTP, quyDoc: !!KICH_BAN[ten].quyDoc, quyHai: !!KICH_BAN[ten].quyHai } });
   r.loi = t.loi.slice().sort(); r.qua = t.qua; await t.ctx.close();
   const giuGio = !!KICH_BAN[ten].gioCo && !KICH_BAN[ten].khongGiuGio;   // khongGiuGio: kịch bản chờ nhiều bước bất đồng bộ → đồng hồ giả tiến theo thời gian thực, giá trị giờ lệch vài ms giữa hai bản → vẫn chuẩn hoá giờ (ngày cố định giữ nguyên)
   r.ghiTho = r.ghi; r.ghi = chuanGhi(r.ghi, giuGio); r.sau = chuanDuLieu(r.sau, undefined, giuGio);
@@ -1446,6 +1562,11 @@ const lechMuc = (m, n) => SO.filter(p => JSON.stringify(m[p]) !== JSON.stringify
       { kb: 'khachTichTem', file: 'pos_customers.v1.js', tim: /const canAdd = Math\.min\(drinkCount, Math\.max\(0, 2 - stampsToday\)\);/, thay: 'const canAdd = Math.min(drinkCount, Math.max(0, 3 - stampsToday));', mo: 'đổi trần tem mỗi ngày 2 → 3' },
       { kb: 'khachThemThanhVien', file: 'pos_customers.v1.js', tim: /source: 'pos_gieogieo'/, thay: "source: 'pos_khac'", mo: 'đổi nguồn tạo thành viên' },
       { kb: 'gioHang', file: 'pos_cart.v1.js', tim: /return a \+ \(c\.price \+ toppingSum\) \* c\.qty;/, thay: 'return a + (c.price + toppingSum) * c.qty + 1;', mo: 'lệch tổng giỏ +1', muc: 'sau' },
+      { kb: 'ttTienMat', file: 'pos_thanh_toan.v1.js', tim: /cashChange: cashChange !== null && cashChange !== undefined \? cashChange : 0,/, thay: 'cashChange: cashChange !== null && cashChange !== undefined ? cashChange + 1 : 0,', mo: 'lệch tiền thối ghi trên đơn' },
+      { kb: 'ttChuyenKhoan', file: 'pos_thanh_toan.v1.js', tim: /db\.ref\('bank_confirmations\/' \+ orderId\)\.remove\(\)/, thay: "db.ref('bank_confirmations/' + orderId + 'x').remove()", mo: 'xoá nhầm node bank_confirmations' },
+      { kb: 'ttChuyenKhoanTay', file: 'pos_thanh_toan.v1.js', tim: /manualConfirm: true, staffId: staffEmp\.id/, thay: 'manualConfirm: true, staffId: "x"', mo: 'đổi người xác nhận tay' },
+      { kb: 'ttTinhRieng', file: 'pos_thanh_toan.v1.js', tim: /grp\.cashGiven = cashGiven \|\| subTotal;/, thay: 'grp.cashGiven = (cashGiven || subTotal) + 1;', mo: 'lệch tiền khách đưa của nhóm Tính riêng' },
+      { kb: 'ttGiamGia', file: 'pos_thanh_toan.v1.js', tim: /return Math\.max\(0, getCartTotal\(\) - togoDisc - appDisc\);/, thay: 'return Math.max(0, getCartTotal() - togoDisc - appDisc + 1);', mo: 'lệch tổng cuối +1', muc: 'sau' },
       { kb: 'batDauMe', file: 'pos_prep.v1.js', tim: /note: `Nấu \$\{p\.code/, thay: 'note: `NAU ${p.code', mo: 'đổi ghi chú dòng trừ NL khi bắt đầu nấu' }
     ];
     for (const tk of TU_KIEM) {

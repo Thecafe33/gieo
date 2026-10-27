@@ -18,7 +18,7 @@ const src = fs.readFileSync(path.join(ROOT, 'pos.html'), 'utf8');
 chk(!/payment_events|createPayment|PayOS/i.test(src.replace(/\/\/[^\n]*/g, '')), 'pos.html không còn gọi PayOS / payment_events');
 chk(/img\.vietqr\.io\/image\/cake-\$\{CAKE_ACCOUNT_NO\}/.test(src), 'QR VietQR Cake');
 const acc = s => (/const CAKE_ACCOUNT_NO = '(\d+)'/.exec(s) || [])[1];
-chk(acc(src) && acc(src) === acc(fs.readFileSync(path.join(ROOT, 'posgieo.html'), 'utf8')), 'cùng số tài khoản với posgieo');
+chk(acc(src) && acc(src) === acc(require('../tools/tach_posgieo/nguon').maNoi('posgieo.html')), 'cùng số tài khoản với posgieo');
 chk(/db\.ref\('bank_confirmations\/' \+ orderId\)\.remove\(\)/.test(src), 'xoá bank_confirmations sau khi dùng (như posgieo)');
 
 console.log(ok ? 'ALL PASS' : 'SOME FAIL'); process.exit(ok ? 0 : 1);

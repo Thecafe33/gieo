@@ -94,7 +94,7 @@ const nap = () => { const m = { exports: {} }; new Function('window', 'module', 
     for (const f of fs.readdirSync(ROOT)) if (/\.(html|js)$/.test(f)) fs.copyFileSync(path.join(ROOT, f), path.join(tmp, f));
     if (fs.existsSync(path.join(ROOT, 'js'))) fs.cpSync(path.join(ROOT, 'js'), path.join(tmp, 'js'), { recursive: true });   // JS riêng js/posgieo/… (tách posgieo)
     const p = path.join(tmp, 'posgieo.html');
-    fs.writeFileSync(p, fs.readFileSync(p, 'utf8').replace("const CAKE_ACCOUNT_NO", "const __thuTen = () => fstore.collection('kho_moi_gieogieo');\nconst CAKE_ACCOUNT_NO"));
+    fs.writeFileSync(p, fs.readFileSync(p, 'utf8').replace("const POS_MODS_THIET_YEU", "const __thuTen = () => fstore.collection('kho_moi_gieogieo');\nconst POS_MODS_THIET_YEU"));
     const r1 = chay({ CHECK_PATHS_ROOT: tmp });
     ok(r1.code === 1 && /kho_moi_gieogieo/.test(r1.out), 'check_paths: bắt collection mới chưa đăng ký');
     fs.writeFileSync(p, fs.readFileSync(path.join(ROOT, 'posgieo.html'), 'utf8').replace(/if \(window\.GieoData\) GieoData\.install\(/, 'if (window.GieoData) GieoData.khongCai('));
