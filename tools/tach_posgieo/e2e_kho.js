@@ -537,6 +537,64 @@ const KICH_BAN = {
       [n.sau && n.sau.cb === 1, 'bước tiếp sau đếm BTP gọi ĐÚNG 1 lần — ' + (n.sau && n.sau.cb)],
       [n.sau && n.sau.busy === false, 'khoá bấm được nhả']]; }
   },
+  // 3C — QUỸ TIỀN MẶT (màn ẩn ở sidebar, vẫn mở được bằng showScreen): chưa có quỹ hôm nay → form «Bắt đầu ca» tự do
+  // (không mật khẩu) → 2 × 500.000 + 1 × 100.000 → Xác nhận (posConfirm) → set cashfund/2026-10-26
+  quyMoCa: {
+    mo: 'quy', gioCo: HAN_T,
+    chay: async () => window.KB_QUY('moca'),
+    bang: ["cashfund_gieogieo"],
+    kiem: (n) => { const g = n.ghi.find(x => x.op === 'set' && /cashfund_gieogieo[^/]*\/2026-10-26$/.test(x.p)); return [
+      [n.sau && n.sau.coForm, 'chưa có quỹ → hiện form nhập tiền đầu ca (không hỏi mật khẩu)'],
+      [!!g && g.d.date === '2026-10-26' && g.d.open && g.d.open.total === 1100000 && g.d.open.locked === true && g.d.currentDenominations['500000'] === 2 && g.d.currentDenominations['100000'] === 1, 'cashfund 26/10: quỹ đầu ca 1.100.000 (2 × 500k + 1 × 100k), khoá — ' + JSON.stringify(g && g.d)],
+      [n.sau && n.sau.hoi === 1, 'hỏi xác nhận đúng 1 lần'],
+      [n.toasts.some(t => /^✅ Đã lưu tiền quỹ đầu ca/.test(t)), 'toast «Đã lưu tiền quỹ đầu ca» — ' + JSON.stringify(n.toasts)]]; }
+  },
+  // 3C — GHI CHI TIÊU: quỹ đã mở 1.000.000 → bấm «+ Ghi chi tiêu» (mật khẩu SAI trước: không vào form) → mật khẩu đúng →
+  // lấy ra 1 × 100.000, thối về 1 × 20.000 → update expenses (arrayUnion) + currentDenominations (increment)
+  quyChiTieu: {
+    mo: 'quy', gioCo: HAN_T, quyDoc: true,
+    chay: async () => window.KB_QUY('chi'),
+    bang: ["cashfund_gieogieo"],
+    kiem: (n) => { const g = n.ghi.find(x => x.op === 'update' && /cashfund_gieogieo[^/]*\/2026-10-26$/.test(x.p)); const e = g && g.d.expenses && g.d.expenses.v && g.d.expenses.v[0]; return [
+      [n.sau && n.sau.saiMK === false && n.toasts.some(t => /^❌ Sai mật khẩu/.test(t)), 'mật khẩu sai → toast «Sai mật khẩu», không vào form'],
+      [!!e && g.d.expenses.__fv === 'arrayUnion' && e.note === 'Mua đá' && e.takenOutTotal === 100000 && e.changeTotal === 20000 && e.netAmount === 80000, 'expenses arrayUnion: Mua đá, lấy 100.000, thối 20.000, chi 80.000 — ' + JSON.stringify(g && g.d)],
+      [!!g && g.d['currentDenominations.100000'] === -1 && g.d['currentDenominations.20000'] === 1 && Object.keys(g.d).length === 3, 'tồn mệnh giá: 100k −1, 20k +1 (increment — Firebase giả ghi số gia), không đụng mệnh giá khác'],
+      [n.toasts.some(t => /^✅ Đã ghi chi tiêu/.test(t)), 'toast «Đã ghi chi tiêu»']]; }
+  },
+  // 3C — KẾT CA QUỸ: quỹ 1.000.000, một bill tiền mặt 50.000 hôm nay → «Kết ca ngày hôm nay» (mật khẩu đúng) → đếm 1.000.000
+  // → close { cashRevenueToday 50.000, expectedTotal 1.050.000, diff −50.000 }
+  quyKetCa: {
+    mo: 'quy', gioCo: HAN_T, quyDoc: true,
+    chay: async () => window.KB_QUY('ket'),
+    bang: ["cashfund_gieogieo"],
+    kiem: (n) => { const g = n.ghi.find(x => x.op === 'set' && /cashfund_gieogieo[^/]*\/2026-10-26$/.test(x.p)); const c = g && g.d.close; return [
+      [!!c && c.total === 1000000 && c.cashRevenueToday === 50000 && c.expectedTotal === 1050000 && c.diff === -50000, 'close: đếm 1.000.000, doanh thu tiền mặt 50.000, kỳ vọng 1.050.000, lệch −50.000 — ' + JSON.stringify(g && g.d)],
+      [n.toasts.some(t => /^✅ Đã kết ca/.test(t)), 'toast «Đã kết ca»']]; }
+  },
+  // 3C — MỞ KÉT TAY: máy in Bill giả đã kết nối (giống nhau ở hai bản) → tấm Mở két → «Khác» không ghi chú (bị chặn) → «Đổi tiền lẻ»
+  // → người ký tự điền (một mình trong ca) → lệnh mở két đúng 1 lần → nhật ký cash_drawer_logs
+  moKet: {
+    mo: 'quy', gioCo: HAN_T,
+    chay: async () => window.KB_QUY('ket_tien'),
+    bang: ["cash_drawer_logs_gieogieo"],
+    kiem: (n) => { const g = n.ghi.find(x => x.op === 'add' && /cash_drawer_logs_gieogieo/.test(x.p)); return [
+      [n.sau && n.sau.lyDo === 4 && n.sau.kyTen === 'NV Một', 'tấm Mở két: 4 lý do, người ký tự điền NV Một'],
+      [n.toasts.some(t => /Ghi rõ lý do vào ô ghi chú/.test(t)), '«Khác» không ghi chú → bị chặn'],
+      [n.sau && n.sau.lenh === 1 && n.sau.conTam === false, 'gửi lệnh mở két đúng 1 lần, đóng tấm'],
+      [!!g && g.d.reason === 'Đổi tiền lẻ' && g.d.employeeId === 'e1' && g.d.employeeName === 'NV Một' && g.d.businessDate === '2026-10-26' && g.d.note === '', 'nhật ký: Đổi tiền lẻ, e1, 26/10 — ' + JSON.stringify(g && g.d)],
+      [n.toasts.some(t => /^✅ Đã mở két — đã ghi nhật ký/.test(t)), 'toast «Đã mở két — đã ghi nhật ký»']]; }
+  },
+  // 3C — MỞ KÉT lỗi lệnh (máy in giả ném lỗi): không ghi nhật ký, nút Mở két bật lại, tấm còn; máy in chưa kết nối → không mở tấm
+  moKetLoi: {
+    mo: 'quy', gioCo: HAN_T,
+    chay: async () => window.KB_QUY('ket_loi'),
+    bang: [],
+    kiem: (n) => [
+      [n.ghi.length === 0, 'không có lượt ghi'],
+      [n.sau && n.sau.tamChuaKetNoi === false && n.toasts.some(t => /Máy in Bill chưa kết nối/.test(t)), 'chưa kết nối máy in → không mở tấm, báo'],
+      [n.sau && n.sau.conTam === true && n.sau.nutBat === true, 'lệnh lỗi → tấm còn, nút Mở két bật lại'],
+      [n.toasts.some(t => /^❌ Không gửi được lệnh mở két/.test(t)), 'toast «Không gửi được lệnh mở két»']]
+  },
   // 2C — KIỂM KÊ MÙ: mở màn (đọc danh mục) → đếm Trà lài 900 g → gửi phiếu chờ duyệt
   kiemKe: {
     mo: 'kho',
@@ -727,6 +785,64 @@ const KB_KET = async (viec) => {
   await Promise.race([submitDailyClose(), sleep(4000)]); await sleep(300);
   return { hoi, coO: !!o, busy: _posSubmitBusy };
 };
+// Phần chung 3C quỹ tiền mặt / mở két (chạy TRONG trang)
+const KB_QUY = async (viec) => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  let hoi = 0; window.posConfirm = async () => { hoi++; return true; };
+  const bam = (re) => { const b = [...document.querySelectorAll('#cf-content button')].find(x => re.test(x.getAttribute('onclick') || '')); if (b) b.click(); return !!b; };
+  window.__buoc = 'nạp';
+  Object.keys(_posLive).forEach(k => _posLiveStop(k));
+  await loadEmployeesCachePOS(); await loadEmployeeShiftsTodayCache();
+  if (viec === 'ket_tien' || viec === 'ket_loi') {
+    let lenh = 0;
+    if (viec === 'ket_loi') {
+      POSPrinter.connected = false; window.__ghi = [];
+      openCashDrawerSheetPOS(); const tamChuaKetNoi = !!document.getElementById('cashDrawerSheet');
+      POSPrinter.connected = true; POSPrinter.engine = { openDrawer: async () => { lenh++; throw new Error('máy in giả lỗi'); } };
+      openCashDrawerSheetPOS(); await sleep(50);
+      cashDrawerPickReasonPOS(document.querySelector('#cdReasons button[data-r="Kiểm đếm két"]'));
+      window.__buoc = 'mở két lỗi'; await confirmCashDrawerOpenPOS(); await sleep(300);
+      const nut = document.getElementById('cdGo');
+      return { lenh, tamChuaKetNoi, conTam: !!document.getElementById('cashDrawerSheet'), nutBat: !!nut && !nut.disabled };
+    }
+    POSPrinter.connected = true; POSPrinter.engine = { openDrawer: async () => { lenh++; } };
+    openCashDrawerSheetPOS(); await sleep(50);
+    const lyDo = document.querySelectorAll('#cdReasons button').length;
+    const kyTen = ((document.getElementById('cashDrawerBox') || {}).textContent || '').includes('NV Một') ? 'NV Một' : null;
+    window.__ghi = []; window.__buoc = 'mở két';
+    cashDrawerPickReasonPOS(document.querySelector('#cdReasons button[data-r="Khác"]'));
+    await confirmCashDrawerOpenPOS();
+    cashDrawerPickReasonPOS(document.querySelector('#cdReasons button[data-r="Đổi tiền lẻ"]'));
+    document.getElementById('cdGo').click(); await sleep(400);
+    return { lenh, lyDo, kyTen, conTam: !!document.getElementById('cashDrawerSheet') };
+  }
+  if (viec === 'ket') orders = [{ id: 'o1', date: todayKey(), total: 50000, method: 'TIỀN MẶT' }];   // một bill tiền mặt hôm nay (giống nhau ở hai bản)
+  window.__buoc = 'màn quỹ';
+  showScreen('cashfundScreen'); for (let k = 0; k < 40 && !document.querySelector('#cf-content button'); k++) await sleep(50);
+  if (viec === 'moca') {
+    const coForm = !!document.getElementById('cf-form-grid');
+    cfChangeFormDenom(500000, 1); cfChangeFormDenom(500000, 1); cfChangeFormDenom(100000, 1);
+    window.__ghi = []; window.__buoc = 'lưu quỹ đầu ca';
+    bam(/^cfSubmitForm\(\)$/); await sleep(600);
+    return { hoi, coForm };
+  }
+  if (viec === 'chi') {
+    window.__ghi = [];
+    window.prompt = () => '0000'; bam(/cfShowExpenseForm/); await sleep(50);
+    const saiMK = !!document.getElementById('cf-exp-note');
+    window.prompt = () => '3368'; bam(/cfShowExpenseForm/); await sleep(50);
+    document.getElementById('cf-exp-note').value = 'Mua đá';
+    cfChangeExpenseOut(100000, 1); cfChangeExpenseChange(20000, 1);
+    window.__buoc = 'ghi chi tiêu'; bam(/^cfSubmitExpense\(\)$/); await sleep(600);
+    return { hoi, saiMK };
+  }
+  // kết ca quỹ
+  window.prompt = () => '3368'; bam(/mode:'close'/); await sleep(50);
+  cfChangeFormDenom(500000, 2);
+  window.__ghi = []; window.__buoc = 'kết ca quỹ';
+  bam(/^cfSubmitForm\(\)$/); await sleep(600);
+  return { hoi };
+};
 // Dòng sổ kho WASTE đã ghi thành công (bỏ lượt bị cài lỗi), theo itemId → qty; dòng sổ BTP WASTE
 const soWaste = n => n.ghi.filter(g => !/!hong$/.test(g.op) && /stock_transactions_gieogieo/.test(duongGhi(g)) && g.d && g.d.type === 'WASTE');
 const soPrepWaste = n => n.ghi.filter(g => !/!hong$/.test(g.op) && /prep_transactions_gieogieo/.test(duongGhi(g)) && g.d && g.d.type === 'WASTE');
@@ -758,7 +874,7 @@ const phieu = n => n.ghi.filter(g => /receiving_records_gieogieo/.test(duongGhi(
 
 async function chay(b, base, store, ten) {
   const t = await moTrang(b, base, KICH_BAN[ten].gioCo ? { authNgay: true, store, gioCo: KICH_BAN[ten].gioCo } : { authNgay: true, store, ngauNhienCo: true });
-  const r = await t.page.evaluate(async ({ src, dau, doly, han, ca, ket, mo, ITEMS, PO, E2E }) => {
+  const r = await t.page.evaluate(async ({ src, dau, doly, han, ca, ket, quy, mo, ITEMS, PO, E2E }) => {
     const toasts = []; const _t = window.toast;
     window.toast = function (m) { toasts.push(String(m)); try { return _t.apply(this, arguments); } catch (e) {} };
     window.requireShiftOpened = () => true; window.requireOpeningChecklistDone = () => true;
@@ -827,6 +943,14 @@ async function chay(b, base, store, ten) {
       }
       window.__SNAP = true;
     }
+    if (mo === 'quy') {   // 3C: e1 một mình trong ca (người ký mở két tự điền); quỹ hôm nay đã mở 1.000.000 (quyDoc)
+      S['employees_gieogieo/e1'] = { fullName: 'NV Một', pin: '1234', active: true, roles: [] };
+      S['employees_gieogieo/e2'] = { fullName: 'NV Hai', pin: '5678', active: true, roles: [] };
+      S[ten('employee_shifts_gieogieo') + '/s1'] = { employeeId: 'e1', employeeName: 'NV Một', businessDate: '2026-10-26', checkedInAt: '2026-10-26T03:30:00.000Z', checkedOutAt: null };
+      if (E2E.quyDoc) S[ten('cashfund_gieogieo') + '/2026-10-26'] = { date: '2026-10-26', open: { denominations: { 500000: 1, 200000: 2, 100000: 1 }, total: 1000000, enteredAt: 1792990000000, locked: true },
+        currentDenominations: { 500000: 1, 200000: 2, 100000: 1, 50000: 0, 20000: 0, 10000: 0, 5000: 0, 2000: 0, 1000: 0 }, mid: [], expenses: [] };
+      window.__SNAP = true;
+    }
     if (mo === 'nau') {
       for (const [id, it] of Object.entries(E2E.NL_NAU)) S[ten('inventory_items_gieogieo') + '/' + id] = it;
       for (const [id, it] of Object.entries(E2E.PREP_NAU)) S[ten('prep_items_gieogieo') + '/' + id] = it;
@@ -839,12 +963,12 @@ async function chay(b, base, store, ten) {
       if (E2E.tieuHao) S[ten('stock_transactions_gieogieo') + '/cons_b2_pearl'] = { itemId: 'pearl', type: 'CONSUMPTION', qty: -500, referenceId: 'b2', prepBatchId: 'b2', businessDate: '2026-10-26', createdAt: '2026-10-26T01:00:00.000Z', status: 'posted' };
     }
     window.__SEED = S; window.__SEED_GHI = true; window.__HONG = [];
-    window.KB_DAU = (0, eval)('(' + dau + ')'); window.KB_DOLY = (0, eval)('(' + doly + ')'); window.KB_HAN = (0, eval)('(' + han + ')'); window.KB_CA = (0, eval)('(' + ca + ')'); window.KB_KET = (0, eval)('(' + ket + ')');
+    window.KB_DAU = (0, eval)('(' + dau + ')'); window.KB_DOLY = (0, eval)('(' + doly + ')'); window.KB_HAN = (0, eval)('(' + han + ')'); window.KB_CA = (0, eval)('(' + ca + ')'); window.KB_KET = (0, eval)('(' + ket + ')'); window.KB_QUY = (0, eval)('(' + quy + ')');
     let loiKB = null, sau = null;
     window.__buoc = '';   // kịch bản treo (lời hứa không bao giờ xong) → báo lỗi sau 45 giây kèm bước cuối, không treo cả bài
     try { sau = await Promise.race([(0, eval)('(' + src + ')')({ ITEMS }), new Promise((_, rej) => setTimeout(() => rej(new Error('kịch bản quá 45 giây — bước: ' + window.__buoc)), 45000))]); } catch (e) { loiKB = String(e && e.message || e); }
     return { ghi: (window.__ghi || []).map(g => ({ op: g.op, p: g.p, rt: !!g.rt, d: g.d })), toasts, sau, loiKB };
-  }, { src: KICH_BAN[ten].chay.toString(), dau: KB_DAU.toString(), doly: KB_DOLY.toString(), han: KB_HAN.toString(), ca: KB_CA.toString(), ket: KB_KET.toString(), mo: KICH_BAN[ten].mo, ITEMS, PO, E2E: { PREP, BATCH: BATCH(), NL_NAU, PREP_NAU, NL_KHO, DOLY, HAN, CTN1: CTN('sealed'), CTN2: CTN('open', { unitBase: 0, openedAt: '2026-10-25T05:00:00.000Z', openedBy: 'NV E2E', expiresAt: '2026-10-26T05:00:00.000Z' }), lo: KICH_BAN[ten].lo || [], loActive: !!KICH_BAN[ten].loActive, tieuHao: !!KICH_BAN[ten].tieuHao, caMo: !!KICH_BAN[ten].caMo, ketDong: !!KICH_BAN[ten].ketDong, ketTreo: !!KICH_BAN[ten].ketTreo, caDayDu: !!KICH_BAN[ten].caDayDu, ketBTP: !!KICH_BAN[ten].ketBTP } });
+  }, { src: KICH_BAN[ten].chay.toString(), dau: KB_DAU.toString(), doly: KB_DOLY.toString(), han: KB_HAN.toString(), ca: KB_CA.toString(), ket: KB_KET.toString(), quy: KB_QUY.toString(), mo: KICH_BAN[ten].mo, ITEMS, PO, E2E: { PREP, BATCH: BATCH(), NL_NAU, PREP_NAU, NL_KHO, DOLY, HAN, CTN1: CTN('sealed'), CTN2: CTN('open', { unitBase: 0, openedAt: '2026-10-25T05:00:00.000Z', openedBy: 'NV E2E', expiresAt: '2026-10-26T05:00:00.000Z' }), lo: KICH_BAN[ten].lo || [], loActive: !!KICH_BAN[ten].loActive, tieuHao: !!KICH_BAN[ten].tieuHao, caMo: !!KICH_BAN[ten].caMo, ketDong: !!KICH_BAN[ten].ketDong, ketTreo: !!KICH_BAN[ten].ketTreo, caDayDu: !!KICH_BAN[ten].caDayDu, ketBTP: !!KICH_BAN[ten].ketBTP, quyDoc: !!KICH_BAN[ten].quyDoc } });
   r.loi = t.loi.slice().sort(); r.qua = t.qua; await t.ctx.close();
   r.ghiTho = r.ghi; r.ghi = chuanGhi(r.ghi, !!KICH_BAN[ten].gioCo); r.sau = chuanDuLieu(r.sau, undefined, !!KICH_BAN[ten].gioCo);
   return r;
@@ -900,6 +1024,8 @@ const lechMuc = (m, n) => SO.filter(p => JSON.stringify(m[p]) !== JSON.stringify
       { kb: 'caMoCaDayDu', file: 'pos_shift_closing.v1.js', tim: /if\(phase==='open'\)await _continueAfterShiftInventoryOpenPOS\(\);/, thay: "if(phase==='open'){await _continueAfterShiftInventoryOpenPOS();await _continueAfterShiftInventoryOpenPOS();}", mo: 'gọi bước tiếp sau kiểm kê đầu ca hai lần' },
       { kb: 'caMoCaDayDu', file: 'pos_shift_closing.v1.js', tim: /expectedQty:l\.expectedQty,countedQty:l\.counted,/, thay: 'expectedQty:l.expectedQty,countedQty:l.counted+1,', mo: 'lệch số kiểm kê đầu ca +1' },
       { kb: 'ketDemBTP', file: 'pos_shift_closing.v1.js', tim: /await _continueAfterPrepCount\(\);(\n  \} catch \(err\) \{\n    console\.error\('submitPrepCount failed')/, thay: 'await _continueAfterPrepCount(); await _continueAfterPrepCount();$1', mo: 'gọi bước tiếp sau đếm BTP hai lần' },
+      { kb: 'quyChiTieu', file: 'pos_cashfund.v1.js', tim: /const netAmount = takenOutTotal - changeTotal;/, thay: 'const netAmount = takenOutTotal - changeTotal + 1;', mo: 'lệch số tiền chi thực tế +1' },
+      { kb: 'moKet', file: 'pos_cashfund.v1.js', tim: /employeeId: emp\.id \|\| '', employeeName/, thay: "employeeId: 'x', employeeName", mo: 'đổi người mở két trong nhật ký' },
       { kb: 'batDauMe', file: 'pos_prep.v1.js', tim: /note: `Nấu \$\{p\.code/, thay: 'note: `NAU ${p.code', mo: 'đổi ghi chú dòng trừ NL khi bắt đầu nấu' }
     ];
     for (const tk of TU_KIEM) {
