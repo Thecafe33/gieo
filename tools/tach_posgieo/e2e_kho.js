@@ -690,6 +690,28 @@ const KICH_BAN = {
       [n.sau && n.sau.hi1 > 0, 'lịch sử (không gõ) có đơn — ' + (n.sau && n.sau.hi1)],
       [n.sau && n.sau.hiMa >= 1, 'gõ mã bill tìm ra đơn — ' + (n.sau && n.sau.hiMa)]]
   },
+  // 4A (kiểm lượt 15, probe 5.1) — LƯU MÓN LỖI RỒI THỬ LẠI: cài đúng MỘT lỗi ghi RT ở món mới → toast «Lỗi», form CÒN, danh sách chưa có món; lưu lại → thành công, form đóng, màn bán (#mg) có món mới
+  menuLoiThuLai: {
+    mo: 'menu', gioCo: HAN_T,
+    chay: async () => window.KB_MENU('loi'),
+    bang: ["menu_togo_gieogieo"],
+    kiem: (n) => [
+      [n.ghi.some(x => x.op === 'set!hong' && x.rt === true) || n.ghi.some(x => x.op === 'set!hong'), 'lượt ghi bị cài lỗi được ghi nhận (set!hong)'],
+      [n.sau && n.sau.formConSauLoi === true && n.sau.cuaSauLoi === false, 'lỗi → form CÒN mở, món chưa vào danh sách'],
+      [n.toasts.some(t => /^❌ Lỗi:/.test(t)), 'toast «Lỗi» — ' + JSON.stringify(n.toasts)],
+      [n.sau && n.sau.formDongSauThu === true && n.sau.cuaSauThu === true && n.sau.manBanCo === true, 'thử lại → form đóng, món có trong danh sách và màn bán (#mg)'],
+      [n.ghi.filter(x => x.op === 'set' && /\/push$/.test(x.p) && x.d && x.d.name === 'Trà lỗi E2E').length === 1, 'đúng MỘT lượt ghi thành công (lượt lỗi không tính)']]
+  },
+  // 4B (kiểm lượt 16, probe 5.3) — XOÁ BILL KHI CÒN VIỆC TRỪ KHO ĐANG CHẠY: node bill có consumeJobs.j1 running (còn hạn) → xoá (mã đúng) phải DỪNG ở nhánh chờ: không cờ xoá dở, không hoàn kho, không xoá bill, báo «Đang trừ kho»
+  xoaBillJobChay: {
+    mo: 'ban', gioCo: HAN_T,
+    chay: async () => window.KB_BAN('xoaJob'),
+    bang: [],
+    kiem: (n) => [
+      [!n.ghi.some(x => x.op === 'remove') && !n.ghi.some(x => x.op === 'transaction' && x.d && x.d.deletionPending), 'không xoá node bill, không ghi cờ xoá dở'],
+      [n.toasts.some(t => /Đang trừ kho phần bổ sung topping/.test(t)), 'toast «Đang trừ kho phần bổ sung topping … CHƯA xoá» — ' + JSON.stringify(n.toasts)],
+      [n.sau && n.sau.conTrongRam === true && n.sau.jobConNguyen === true, 'bill còn trong RAM + RT, việc trừ kho vẫn running']]
+  },
   // 2C — KIỂM KÊ MÙ: mở màn (đọc danh mục) → đếm Trà lài 900 g → gửi phiếu chờ duyệt
   kiemKe: {
     mo: 'kho',
@@ -978,6 +1000,15 @@ const KB_MENU = async (viec) => {
     window.__buoc = 'xoá món'; openMenuForm('m1'); await sleep(50); await deleteMenuItem(); await sleep(400);
     return { hoi, mon: MENU_TOGO.map(m => m.name) };
   }
+  if (viec === 'loi') {
+    window.__buoc = 'form món'; openMenuForm(null); await sleep(50);
+    dat('mn-f-name', 'Trà lỗi E2E'); dat('mn-f-type', 'Trà'); dat('mn-f-pm', '33000');
+    window.__HONG = [{ op: 'set', re: 'menu_togo_gieogieo.*/push$' }];   // đúng MỘT lỗi ghi RT ở lượt đầu
+    window.__buoc = 'lưu lỗi'; saveMenuItem(); await sleep(500);
+    const formConSauLoi = document.getElementById('mn-popup').style.display !== 'none', cuaSauLoi = MENU_TOGO.some(m => m.name === 'Trà lỗi E2E');
+    window.__buoc = 'lưu lại'; saveMenuItem(); await sleep(800);
+    return { hoi, formConSauLoi, cuaSauLoi, formDongSauThu: document.getElementById('mn-popup').style.display === 'none', cuaSauThu: MENU_TOGO.some(m => m.name === 'Trà lỗi E2E'), manBanCo: /Trà lỗi E2E/.test((document.getElementById('mg') || {}).textContent || '') };
+  }
   if (viec === 'food') {
     window.__buoc = 'thêm Food'; openFoodForm(null); await sleep(50); dat('food-f-name', 'Bánh E2E'); saveFoodItem(); await sleep(50);
     dat('food-f-price', '18000'); saveFoodItem(); await sleep(400);
@@ -1015,6 +1046,16 @@ const KB_BAN = async (viec) => {
     for (let k = 0; k < 150; k++) { const v = (await db.ref('orders_gieogieo/oct/26/o1').once('value')).val() || {}; if (Object.values(v.consumeJobs || {}).some(j => j.status === 'done' || j.status === 'failed')) break; await sleep(100); }
     await sleep(300);
     return { hoi };
+  }
+  if (viec === 'xoaJob') {
+    await db.ref('orders_gieogieo/oct/26/o1/consumeJobs/j1').set({ status: 'running', at: Date.now(), owner: 'wkhac', startedAt: Date.now(), tries: 1 });   // việc trừ kho của máy khác, còn hạn
+    window.__buoc = 'chi tiết đơn'; showDet('o1'); await sleep(50);
+    window.__ghi = [];
+    delOrder(); await sleep(150);
+    document.getElementById('del-pin-input').value = '3367';
+    window.__buoc = 'xoá khi job chạy'; await delOrderConfirm(); await sleep(800);
+    const cur = (await db.ref('orders_gieogieo/oct/26/o1').once('value')).val() || {};
+    return { hoi, conTrongRam: orders.some(x => x.id === 'o1'), jobConNguyen: !!(cur.consumeJobs && cur.consumeJobs.j1 && cur.consumeJobs.j1.status === 'running') };
   }
   if (viec === 'xoa') {
     window.__buoc = 'chi tiết đơn'; showDet('o1'); await sleep(50);
@@ -1244,6 +1285,7 @@ const lechMuc = (m, n) => SO.filter(p => JSON.stringify(m[p]) !== JSON.stringify
       { kb: 'menuTopping', file: 'pos_catalog_admin.v1.js', tim: /const data = \{ name, price, priceTogo \};/, thay: 'const data = { name, price, priceTogo: priceTogo + 1 };', mo: 'lệch giá To Go topping' },
       { kb: 'muaThem', file: 'pos_orders.v1.js', tim: /const cashChange = isCash \? cashGiven - amount : 0;/, thay: 'const cashChange = isCash ? cashGiven - amount + 1 : 0;', mo: 'lệch tiền thối khi mua thêm' },
       { kb: 'xoaBill', file: 'pos_orders.v1.js', tim: /return \{ \.\.\.cur, consumeJobs: jobs, deletionPending: true \};/, thay: 'return { ...cur, consumeJobs: jobs, deletionPending: 1 };', mo: 'đổi cờ xoá dở' },
+      { kb: 'xoaBillJobChay', file: 'pos_orders.v1.js', tim: /if \(busy\) return;/, thay: '/* bỏ chặn busy */', mo: 'bỏ chặn xoá khi việc trừ kho đang chạy' },
       { kb: 'batDauMe', file: 'pos_prep.v1.js', tim: /note: `Nấu \$\{p\.code/, thay: 'note: `NAU ${p.code', mo: 'đổi ghi chú dòng trừ NL khi bắt đầu nấu' }
     ];
     for (const tk of TU_KIEM) {

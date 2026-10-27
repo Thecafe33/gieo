@@ -80,6 +80,20 @@ let ok = true; const eq = (a, b, m) => { const s = JSON.stringify(a) === JSON.st
   const sauLoi = Object.keys(w.__SEED).filter(k => /^nk\//.test(k)).length;
   await fs.collection('nk').add({ v: 2 });
   eq([!!loiAdd, sauLoi, Object.keys(w.__SEED).filter(k => /^nk\//.test(k)).length, w.__ghi.some(g => g.op === 'add!hong' && g.p === 'nk')], [true, 0, 1, true], 'add() cài lỗi một lần → reject, không ghi; lần sau ghi được (lỗi cũ: add bỏ qua __HONG)');
+  // F15-1 (kiểm lượt 15): log lỗi mang đúng loại nguồn — RTDB rt:true, Firestore rt:false (bộ kiểm phạm vi phân loại theo cờ này)
+  w.__HONG = [{ op: 'set', re: '^menu_probe/push$' }, { op: 'set', re: '^fsprobe/x$' }];
+  await db.ref('menu_probe/push').set({ name: 'p' }).catch(() => {});
+  await fs.collection('fsprobe').doc('x').set({ n: 1 }).catch(() => {});
+  const lg = op => (w.__ghi || []).filter(g => g.op === 'set!hong' && g.p === op).map(g => g.rt);
+  eq([lg('menu_probe/push'), lg('fsprobe/x')], [[true], [false]], 'F15-1 log lỗi RTDB rt:true, Firestore rt:false (lỗi cũ: cả hai false)');
+  // F16-1 (kiểm lượt 16): transaction RTDB callback trả undefined = HUỶ — committed:false, snapshot giữ dữ liệu đầu vào, seed không đổi, không có lượt ghi (SDK 10.13.2 Repo.ts)
+  w.__SEED['tx/a'] = { v: 1 }; w.__ghi = [];
+  const ab = await db.ref('tx/a').transaction(() => undefined);
+  eq([ab.committed, ab.snapshot.val(), w.__SEED['tx/a'], (w.__ghi || []).filter(g => g.op === 'transaction').length], [false, { v: 1 }, { v: 1 }, 0], 'F16-1 transaction huỷ: committed false, snapshot = dữ liệu hiện tại, seed giữ nguyên, không ghi (lỗi cũ: committed true, snapshot undefined)');
+  const cm = await db.ref('tx/a').transaction(c => Object.assign({}, c, { v: 2 }));
+  eq([cm.committed, cm.snapshot.val(), w.__SEED['tx/a']], [true, { v: 2 }, { v: 2 }], 'F16-1 transaction commit giá trị mới: committed true, seed cập nhật');
+  const xo = await db.ref('tx/a').transaction(() => null);
+  eq([xo.committed, xo.snapshot.exists(), 'tx/a' in w.__SEED], [true, false, false], 'F16-1 transaction commit null: xoá node');
   const put = await w.firebase.storage().ref('p/x.jpg').put({ name: 'x.jpg', size: 3 });
   eq([await put.ref.getDownloadURL(), w.__ghi.some(g => g.op === 'storage.put' && g.p === 'p/x.jpg')], ['https://gia.storage/p/x.jpg', true], 'storage.put ghi nhận + URL');
   console.log(ok ? 'ALL PASS' : 'SOME FAIL'); process.exit(ok ? 0 : 1);
