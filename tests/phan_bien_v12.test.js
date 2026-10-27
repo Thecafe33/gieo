@@ -122,7 +122,7 @@ const closedByNew = async (f, T0) => {                 // việc mới xác minh
     const fn = new Function('ADDON_WINDOW_MIN', 'posDateKeyToDisplay', 'posDateKey', '_deletingOrderIds', src + '\nreturn orderAddonInfo;')(60, () => '23/09/2026', () => '2026-09-23', new Set());
     const o = { id: 'x', createdAt: new Date().toISOString(), date: '23/09/2026', method: 'TIỀN MẶT' };
     eq([fn(o).ok, fn(Object.assign({}, o, { deletionPending: true })).ok], [true, false], 'L47 bill có cờ xoá dở → không bổ sung được');
-    const html = require('fs').readFileSync(require('path').join(__dirname, '..', 'posgieo.html'), 'utf8');
+    const html = require('../tools/tach_posgieo/nguon').maNoi('posgieo.html');   // gồm cả js/posgieo/… (xoá bill ở pos_orders.v1.js — Đợt 4B)
     const iFlag = html.indexOf("consumeJobs: jobs, deletionPending: true }"), iRev = html.indexOf('UnitEngine.consume.reverseSales(o, delId)');
     eq([iFlag > 0, iFlag < iRev], [true, true], 'L47 cờ xoá dở được đặt TRƯỚC khi hoàn kho');
   }
