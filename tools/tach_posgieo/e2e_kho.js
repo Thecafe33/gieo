@@ -712,6 +712,50 @@ const KICH_BAN = {
       [n.toasts.some(t => /Đang trừ kho phần bổ sung topping/.test(t)), 'toast «Đang trừ kho phần bổ sung topping … CHƯA xoá» — ' + JSON.stringify(n.toasts)],
       [n.sau && n.sau.conTrongRam === true && n.sau.jobConNguyen === true, 'bill còn trong RAM + RT, việc trừ kho vẫn running']]
   },
+  // 4C — TRA CỨU KHÁCH (chỉ đọc): gõ SĐT có thành viên (0901234567: 5 tem) → tên + «5/6 Stamp»; gõ SĐT lạ → gợi ý «thêm thành viên»; gõ +84… chuẩn về 0…
+  khachTraCuu: {
+    mo: 'khach', gioCo: HAN_T,
+    chay: async () => window.KB_KHACH('tracuu'),
+    bang: ["customer_ac_cache_gieogieo"],   // gõ SĐT lần đầu trong ngày → dựng bản gợi ý DÙNG CHUNG (hành vi có sẵn ở mốc); không ghi gì vào customers
+    kiem: (n) => [
+      [n.ghi.length >= 1 && n.ghi.every(x => /customer_ac_cache_gieogieo/.test(duongGhi(x))) && !n.ghi.some(x => /(^|\/)customers\//.test(duongGhi(x))), 'chỉ ghi bản gợi ý dùng chung, KHÔNG ghi vào customers — ' + n.ghi.map(x => duongGhi(x)).join(',')],
+      [n.sau && n.sau.ten === 'Lan' && /5\/6 Stamp/.test(n.sau.pts) && /1\.200 Point/.test(n.sau.pts), 'khách có thành viên: tên «Lan», 1.200 Point, 5/6 Stamp — ' + (n.sau && n.sau.pts)],
+      [n.sau && n.sau.chuaCoGoiY === true && n.sau.goiYSdt === '0999999999', 'SĐT lạ → hiện gợi ý thêm thành viên đúng SĐT'],
+      [n.sau && n.sau.chuan84 === 'Lan', '+84901234567 → chuẩn về 0901234567, tìm ra «Lan»']]
+  },
+  // 4C — THÊM THÀNH VIÊN MỚI: SĐT 0911111111 chưa có → gợi ý → popup → thiếu tên bị chặn → «Minh Anh» → customers/0911111111 đủ trường, tự chọn vào đơn
+  khachThemThanhVien: {
+    mo: 'khach', gioCo: HAN_T,
+    chay: async () => window.KB_KHACH('them'),
+    bang: ["customers"],
+    kiem: (n) => { const g = n.ghi.find(x => x.op === 'set' && /customers\/0911111111$/.test(x.p)); return [
+      [n.toasts.some(t => /Vui lòng nhập tên thành viên/.test(t)), 'thiếu tên → chặn, báo'],
+      [!!g && g.d.nickname === 'Minh Anh' && g.d.total_points === 0 && g.d.stamp_count === 0 && g.d.free_drink_available === 0 && g.d.source === 'pos_gieogieo', 'ghi customers/0911111111: Minh Anh, 0 điểm / 0 tem, nguồn pos_gieogieo — ' + JSON.stringify(g && g.d)],
+      [n.sau && n.sau.ten === 'Minh Anh' && n.sau.popupDong === true, 'đóng popup, tự chọn thành viên mới vào đơn'],
+      [n.toasts.some(t => /^✅ Đã thêm thành viên: Minh Anh/.test(t)), 'toast «Đã thêm thành viên»']]; }
+  },
+  // 4C — TÍCH TEM SAU THANH TOÁN: Lan 5 tem, bill1 hai ly 30.000 → +2 (đủ 6 → +1 ly miễn phí, còn 1) → bấm LẠI cùng bill1 (idempotent, không cộng lần hai) → bill2 trong cùng ngày (đã đạt trần 2 tem/ngày → không cộng, báo)
+  khachTichTem: {
+    mo: 'khach', gioCo: HAN_T,
+    chay: async () => window.KB_KHACH('tichtem'),
+    bang: ["customers", "loyalty_bill_effects_gieogieo"],
+    kiem: (n) => { const up = n.ghi.filter(x => /customers\/0901234567$/.test(duongGhi(x)) && /update/.test(x.op)); const u = up[0] && up[0].d; const mk = n.ghi.filter(x => /loyalty_bill_effects_gieogieo\/bill[12]$/.test(duongGhi(x))); return [
+      [up.length === 1 && u.stamp_count === 1 && u.stamps_today === 2 && u.free_drink_available === 1 && u.free_drink_caps.length === 1 && u.stamp_prices.length === 1, 'đúng MỘT lần cập nhật khách: tem 5 → 1, hôm nay 2, +1 ly miễn phí (1 trần ly) — ' + JSON.stringify(u)],
+      [mk.length === 2 && mk[0].d.added === 2 && mk[0].d.freeDrink === true && mk[1].d.added === 0, 'dấu bill: bill1 added 2 + freeDrink, bill2 added 0 (không lặp bill1) — ' + JSON.stringify(mk.map(x => x.d))],
+      [n.toasts.some(t => /^☕ \+2 Stamp! Đã có 1\/6 🎉/.test(t)), 'toast «+2 Stamp … 1 Ly MIỄN PHÍ» — ' + JSON.stringify(n.toasts)],
+      [n.toasts.some(t => /Đã đạt 2 Stamp hôm nay/.test(t)), 'bill2 → «Đã đạt 2 Stamp hôm nay — không thể thêm»']]; }
+  },
+  // 4C — DANH SÁCH KHÁCH (chỉ đọc): mở màn → đọc cả bảng → 3 khách → ô đếm; gõ «0902» lọc còn 1; xoá ô tìm → đủ 3
+  khachDanhSach: {
+    mo: 'khach', gioCo: HAN_T,
+    chay: async () => window.KB_KHACH('danhsach'),
+    bang: [],
+    kiem: (n) => [
+      [n.ghi.length === 0, 'chỉ đọc — không lượt ghi nào'],
+      [n.sau && n.sau.tong === 3 && /3/.test(n.sau.nhan), 'tải đủ 3 khách, nhãn đếm — ' + (n.sau && n.sau.nhan)],
+      [n.sau && n.sau.loc === 1 && n.sau.locSdt === '0902222222', 'gõ «0902» → còn 1 khách đúng SĐT'],
+      [n.sau && n.sau.xoaLoc === 3, 'xoá ô tìm → đủ 3 khách']]
+  },
   // 2C — KIỂM KÊ MÙ: mở màn (đọc danh mục) → đếm Trà lài 900 g → gửi phiếu chờ duyệt
   kiemKe: {
     mo: 'kho',
@@ -1079,6 +1123,49 @@ const KB_BAN = async (viec) => {
   const hiMa = document.querySelectorAll('#hl [onclick*="showDet"]').length;
   return { hoi, rv, hi1, hiMa };
 };
+// Phần chung 4C khách (chạy TRONG trang) — gõ ô SĐT thật, gọi hàm như nút bấm
+const KB_KHACH = async (viec) => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  let hoi = 0; window.posConfirm = async () => { hoi++; return true; };
+  const dat = (id, v) => { const el = document.getElementById(id); el.value = v; el.dispatchEvent(new Event('input')); };
+  const txt = id => ((document.getElementById(id) || {}).textContent || '').replace(/\s+/g, ' ').trim();
+  window.checkFreeToppingMemberPromo = window.checkFreeToppingMemberPromo || (() => {});
+  window.__buoc = 'nạp';
+  window.__ghi = [];
+  if (viec === 'tracuu') {
+    dat('cuph', '0901234567'); window.__buoc = 'tra cứu'; lookupCustomer(); await sleep(400);
+    const ten = txt('custName'), pts = txt('custPts');
+    clearCustomer(); await sleep(50);
+    dat('cuph', '0999999999'); lookupCustomer(); await sleep(400);
+    const chuaCoGoiY = document.getElementById('addMemberHint').style.display === 'block', goiYSdt = txt('addMemberHintPhone');
+    clearCustomer(); await sleep(50);
+    dat('cuph', '+84901234567'); lookupCustomer(); await sleep(400);
+    return { hoi, ten, pts, chuaCoGoiY, goiYSdt, chuan84: txt('custName') };
+  }
+  if (viec === 'them') {
+    dat('cuph', '0911111111'); lookupCustomer(); await sleep(400);
+    window.__buoc = 'popup thêm'; openAddMemberPopup(); await sleep(50);
+    window.__ghi = [];
+    await confirmAddMember();   // thiếu tên
+    dat('addMem-name', 'Minh Anh'); window.__buoc = 'xác nhận thêm'; await confirmAddMember(); await sleep(400);
+    return { hoi, ten: txt('custName'), popupDong: document.getElementById('addMemberPopup').style.display === 'none' };
+  }
+  if (viec === 'tichtem') {
+    loyaltyCustomer = { id: '0901234567' };
+    window.__buoc = 'tích bill1'; await loyaltyProcessAfterPay('0901234567', 60000, 2, 'bill1', [30000, 30000]); await sleep(1300);
+    window.__buoc = 'tích lại bill1'; await loyaltyProcessAfterPay('0901234567', 60000, 2, 'bill1', [30000, 30000]); await sleep(1300);
+    window.__buoc = 'tích bill2'; await loyaltyProcessAfterPay('0901234567', 30000, 1, 'bill2', [30000]); await sleep(1300);
+    return { hoi };
+  }
+  window.__buoc = 'danh sách'; showScreen('customers'); loadCustomerList(); await sleep(600);
+  const cont = () => document.getElementById('customer-list-container').textContent || '';
+  const dem = () => ['0901234567', '0902222222', '0903333333'].filter(p => cont().includes(p)).length;
+  const tong = dem(), nhan = txt('cust-count-label');
+  const o = document.getElementById('cust-search-input'); o.value = '0902'; o.dispatchEvent(new Event('input')); await sleep(500);
+  const loc = dem(), locSdt = cont().includes('0902222222') ? '0902222222' : null;
+  clearCustSearch(); await sleep(500);
+  return { hoi, tong, nhan, loc, locSdt, xoaLoc: dem() };
+};
 // Dòng sổ kho WASTE đã ghi thành công (bỏ lượt bị cài lỗi), theo itemId → qty; dòng sổ BTP WASTE
 const soWaste = n => n.ghi.filter(g => !/!hong$/.test(g.op) && /stock_transactions_gieogieo/.test(duongGhi(g)) && g.d && g.d.type === 'WASTE');
 const soPrepCons = n => n.ghi.filter(g => !/!hong$/.test(g.op) && /prep_transactions_gieogieo/.test(duongGhi(g)) && g.d && g.d.type === 'CONSUMPTION');
@@ -1111,7 +1198,7 @@ const phieu = n => n.ghi.filter(g => /receiving_records_gieogieo/.test(duongGhi(
 
 async function chay(b, base, store, ten) {
   const t = await moTrang(b, base, KICH_BAN[ten].gioCo ? { authNgay: true, store, gioCo: KICH_BAN[ten].gioCo } : { authNgay: true, store, ngauNhienCo: true });
-  const r = await t.page.evaluate(async ({ src, dau, doly, han, ca, ket, quy, menu, ban, mo, ITEMS, PO, E2E }) => {
+  const r = await t.page.evaluate(async ({ src, dau, doly, han, ca, ket, quy, menu, ban, khach, mo, ITEMS, PO, E2E }) => {
     const toasts = []; const _t = window.toast;
     window.toast = function (m) { toasts.push(String(m)); try { return _t.apply(this, arguments); } catch (e) {} };
     window.requireShiftOpened = () => true; window.requireOpeningChecklistDone = () => true;
@@ -1205,6 +1292,12 @@ async function chay(b, base, store, ten) {
       S[ten('topping_recipes_gieogieo') + '/t1'] = { batchYield: 1000, yieldMode: 'weight', qtyPerServing: 30, batchInputs: [{ refType: 'prep', prepId: 'tcd', qty: 1000 }] };   // 1 phần Trân châu = 30 g BTP lô b3
       window.__SNAP = true;
     }
+    if (mo === 'khach') {   // 4C: khách (collection chung `customers`) — Lan 5 tem; hai khách khác cho danh sách
+      const kh = (id, ten, diem, tem) => ({ phone: id, nickname: ten, name: ten, total_points: diem, stamp_count: tem, stamps_today: 0, last_stamp_date: '', free_drink_available: 0, stamp_prices: tem ? Array(tem).fill(30000) : [], free_drink_caps: [] });
+      S['customers/0901234567'] = kh('0901234567', 'Lan', 1200, 5);
+      S['customers/0902222222'] = kh('0902222222', 'Minh', 300, 2);
+      S['customers/0903333333'] = kh('0903333333', 'Hoa', 50, 0);
+    }
     if (mo === 'nau') {
       for (const [id, it] of Object.entries(E2E.NL_NAU)) S[ten('inventory_items_gieogieo') + '/' + id] = it;
       for (const [id, it] of Object.entries(E2E.PREP_NAU)) S[ten('prep_items_gieogieo') + '/' + id] = it;
@@ -1217,12 +1310,12 @@ async function chay(b, base, store, ten) {
       if (E2E.tieuHao) S[ten('stock_transactions_gieogieo') + '/cons_b2_pearl'] = { itemId: 'pearl', type: 'CONSUMPTION', qty: -500, referenceId: 'b2', prepBatchId: 'b2', businessDate: '2026-10-26', createdAt: '2026-10-26T01:00:00.000Z', status: 'posted' };
     }
     window.__SEED = S; window.__SEED_GHI = true; window.__HONG = [];
-    window.KB_DAU = (0, eval)('(' + dau + ')'); window.KB_DOLY = (0, eval)('(' + doly + ')'); window.KB_HAN = (0, eval)('(' + han + ')'); window.KB_CA = (0, eval)('(' + ca + ')'); window.KB_KET = (0, eval)('(' + ket + ')'); window.KB_QUY = (0, eval)('(' + quy + ')'); window.KB_MENU = (0, eval)('(' + menu + ')'); window.KB_BAN = (0, eval)('(' + ban + ')');
+    window.KB_DAU = (0, eval)('(' + dau + ')'); window.KB_DOLY = (0, eval)('(' + doly + ')'); window.KB_HAN = (0, eval)('(' + han + ')'); window.KB_CA = (0, eval)('(' + ca + ')'); window.KB_KET = (0, eval)('(' + ket + ')'); window.KB_QUY = (0, eval)('(' + quy + ')'); window.KB_MENU = (0, eval)('(' + menu + ')'); window.KB_BAN = (0, eval)('(' + ban + ')'); window.KB_KHACH = (0, eval)('(' + khach + ')');
     let loiKB = null, sau = null;
     window.__buoc = '';   // kịch bản treo (lời hứa không bao giờ xong) → báo lỗi sau 45 giây kèm bước cuối, không treo cả bài
     try { sau = await Promise.race([(0, eval)('(' + src + ')')({ ITEMS }), new Promise((_, rej) => setTimeout(() => rej(new Error('kịch bản quá 45 giây — bước: ' + window.__buoc)), 45000))]); } catch (e) { loiKB = String(e && e.message || e); }
     return { ghi: (window.__ghi || []).map(g => ({ op: g.op, p: g.p, rt: !!g.rt, d: g.d })), toasts, sau, loiKB };
-  }, { src: KICH_BAN[ten].chay.toString(), dau: KB_DAU.toString(), doly: KB_DOLY.toString(), han: KB_HAN.toString(), ca: KB_CA.toString(), ket: KB_KET.toString(), quy: KB_QUY.toString(), menu: KB_MENU.toString(), ban: KB_BAN.toString(), mo: KICH_BAN[ten].mo, ITEMS, PO, E2E: { PREP, BATCH: BATCH(), NL_NAU, PREP_NAU, NL_KHO, DOLY, HAN, CTN1: CTN('sealed'), CTN2: CTN('open', { unitBase: 0, openedAt: '2026-10-25T05:00:00.000Z', openedBy: 'NV E2E', expiresAt: '2026-10-26T05:00:00.000Z' }), lo: KICH_BAN[ten].lo || [], loActive: !!KICH_BAN[ten].loActive, tieuHao: !!KICH_BAN[ten].tieuHao, caMo: !!KICH_BAN[ten].caMo, ketDong: !!KICH_BAN[ten].ketDong, ketTreo: !!KICH_BAN[ten].ketTreo, caDayDu: !!KICH_BAN[ten].caDayDu, ketBTP: !!KICH_BAN[ten].ketBTP, quyDoc: !!KICH_BAN[ten].quyDoc, quyHai: !!KICH_BAN[ten].quyHai } });
+  }, { src: KICH_BAN[ten].chay.toString(), dau: KB_DAU.toString(), doly: KB_DOLY.toString(), han: KB_HAN.toString(), ca: KB_CA.toString(), ket: KB_KET.toString(), quy: KB_QUY.toString(), menu: KB_MENU.toString(), ban: KB_BAN.toString(), khach: KB_KHACH.toString(), mo: KICH_BAN[ten].mo, ITEMS, PO, E2E: { PREP, BATCH: BATCH(), NL_NAU, PREP_NAU, NL_KHO, DOLY, HAN, CTN1: CTN('sealed'), CTN2: CTN('open', { unitBase: 0, openedAt: '2026-10-25T05:00:00.000Z', openedBy: 'NV E2E', expiresAt: '2026-10-26T05:00:00.000Z' }), lo: KICH_BAN[ten].lo || [], loActive: !!KICH_BAN[ten].loActive, tieuHao: !!KICH_BAN[ten].tieuHao, caMo: !!KICH_BAN[ten].caMo, ketDong: !!KICH_BAN[ten].ketDong, ketTreo: !!KICH_BAN[ten].ketTreo, caDayDu: !!KICH_BAN[ten].caDayDu, ketBTP: !!KICH_BAN[ten].ketBTP, quyDoc: !!KICH_BAN[ten].quyDoc, quyHai: !!KICH_BAN[ten].quyHai } });
   r.loi = t.loi.slice().sort(); r.qua = t.qua; await t.ctx.close();
   r.ghiTho = r.ghi; r.ghi = chuanGhi(r.ghi, !!KICH_BAN[ten].gioCo); r.sau = chuanDuLieu(r.sau, undefined, !!KICH_BAN[ten].gioCo);
   return r;
@@ -1286,6 +1379,8 @@ const lechMuc = (m, n) => SO.filter(p => JSON.stringify(m[p]) !== JSON.stringify
       { kb: 'muaThem', file: 'pos_orders.v1.js', tim: /const cashChange = isCash \? cashGiven - amount : 0;/, thay: 'const cashChange = isCash ? cashGiven - amount + 1 : 0;', mo: 'lệch tiền thối khi mua thêm' },
       { kb: 'xoaBill', file: 'pos_orders.v1.js', tim: /return \{ \.\.\.cur, consumeJobs: jobs, deletionPending: true \};/, thay: 'return { ...cur, consumeJobs: jobs, deletionPending: 1 };', mo: 'đổi cờ xoá dở' },
       { kb: 'xoaBillJobChay', file: 'pos_orders.v1.js', tim: /if \(busy\) return;/, thay: '/* bỏ chặn busy */', mo: 'bỏ chặn xoá khi việc trừ kho đang chạy' },
+      { kb: 'khachTichTem', file: 'pos_customers.v1.js', tim: /const canAdd = Math\.min\(drinkCount, Math\.max\(0, 2 - stampsToday\)\);/, thay: 'const canAdd = Math.min(drinkCount, Math.max(0, 3 - stampsToday));', mo: 'đổi trần tem mỗi ngày 2 → 3' },
+      { kb: 'khachThemThanhVien', file: 'pos_customers.v1.js', tim: /source: 'pos_gieogieo'/, thay: "source: 'pos_khac'", mo: 'đổi nguồn tạo thành viên' },
       { kb: 'batDauMe', file: 'pos_prep.v1.js', tim: /note: `Nấu \$\{p\.code/, thay: 'note: `NAU ${p.code', mo: 'đổi ghi chú dòng trừ NL khi bắt đầu nấu' }
     ];
     for (const tk of TU_KIEM) {
