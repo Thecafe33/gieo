@@ -656,7 +656,7 @@ const KICH_BAN = {
   // 4B — MUA THÊM topping sau khi bấm bill: đơn o1 (Trà sữa E2E M, tiền mặt 30.000, tạo 2 phút trước) → mở tấm bổ sung → chọn ly 1
   // → Trân châu × 1 → thanh toán tiền mặt khách đưa 10.000 → xác nhận (PIN gán đè như mọi kịch bản) → transaction node bill + trừ kho phần thêm
   muaThem: {
-    mo: 'ban', gioCo: HAN_T,
+    mo: 'ban', gioCo: HAN_T, khongGiuGio: true,
     chay: async () => window.KB_BAN('them'),
     bang: ["active_units_gieogieo", "order_stock_traces_gieogieo", "orders_gieogieo", "prep_batches_gieogieo", "prep_items_gieogieo", "prep_transactions_gieogieo"],
     kiem: (n) => { const g = n.ghi.find(x => x.op === 'transaction' && /orders_gieogieo[^/]*\/oct\/26\/o1$/.test(x.p) && x.d && x.d.addons); const a = g && g.d.addons[0]; return [
@@ -755,6 +755,33 @@ const KICH_BAN = {
       [n.sau && n.sau.tong === 3 && /3/.test(n.sau.nhan), 'tải đủ 3 khách, nhãn đếm — ' + (n.sau && n.sau.nhan)],
       [n.sau && n.sau.loc === 1 && n.sau.locSdt === '0902222222', 'gõ «0902» → còn 1 khách đúng SĐT'],
       [n.sau && n.sau.xoaLoc === 3, 'xoá ô tìm → đủ 3 khách']]
+  },
+  // 4D-1 — GIỎ HÀNG (UI thuần, không ghi Firebase): menu 2 món (Trà đào 2 size, Cà phê 1 size) → chọn size → thêm → cộng / bớt → tách ly có topping (hỏi tách → picker) → đặt topping 2 + 1 phần, bỏ một → xoá món → xoá giỏ
+  gioHang: {
+    mo: 'gio', gioCo: HAN_T,
+    chay: async () => window.KB_GIO('giohang'),
+    bang: [],
+    kiem: (n) => { const x = n.sau || {}; return [
+      [n.ghi.length === 0, 'giỏ là UI thuần — không lượt ghi nào'],
+      [x.nMon === 2 && x.poShow === true && x.nSize === 2, 'menu 2 món; món 2 size mở popup chọn size (2 nút); món 1 size thêm thẳng — ' + JSON.stringify([x.nMon, x.poShow, x.nSize])],
+      [JSON.stringify(x.sauThem) === '[["m1_L",1,0],["m2_M",1,0]]', 'sau chọn L + Cà phê: m1_L ×1, m2_M ×1 — ' + JSON.stringify(x.sauThem)],
+      [x.tongSauThem === 55000, 'tổng 35.000 + 20.000 = 55.000 — ' + x.tongSauThem],
+      [x.hoiTach === true && x.nutTach === 3, 'ly ×3 chưa topping → hỏi tách (3 nút 1–3 ly)'],
+      [JSON.stringify(x.sauTach) === '[["m1_L",2,0],["m1_L_TP",1,19000],["m2_M",1,0]]', 'tách 1 ly: m1_L ×2 + dòng mới ×1 mang topping (2 Trân châu + 1 Thạch = 19.000) — ' + JSON.stringify(x.sauTach)],
+      [x.tongSauTach === 144000, 'tổng 2×35.000 + (35.000 + 19.000) + 20.000 = 144.000 — ' + x.tongSauTach],
+      [JSON.stringify(x.sauBoTopping) === '[["Trân châu",2]]', 'bỏ topping Thạch → còn Trân châu ×2 — ' + JSON.stringify(x.sauBoTopping)],
+      [JSON.stringify(x.sauXoa) === '[["m1_L",2,0],["m1_L_TP",1,14000]]' && x.sauClear === 0, 'xoá Cà phê → còn 2 dòng; xoá giỏ → 0 — ' + JSON.stringify(x.sauXoa) + ' / ' + x.sauClear]]; }
+  },
+  // 4D-1 — CHẶN SỚM Ở NÚT THANH TOÁN (onCheckoutClick): giỏ trống → «Giỏ hàng trống»; có món nhưng ngày đã đóng ca → «Ngày hôm nay đã đóng ca»; không ghi gì, không mở màn thanh toán
+  gioChanSom: {
+    mo: 'gio', gioCo: HAN_T,
+    chay: async () => window.KB_GIO('chan'),
+    bang: [],
+    kiem: (n) => [
+      [n.ghi.length === 0, 'chặn sớm — không lượt ghi nào'],
+      [n.toasts.some(t => /^Giỏ hàng trống!/.test(t)), 'giỏ trống → toast «Giỏ hàng trống!» — ' + JSON.stringify(n.toasts)],
+      [n.toasts.some(t => /Ngày hôm nay đã đóng ca/.test(t)), 'ngày đã đóng → toast «đã đóng ca — không thể tạo bill mới»'],
+      [n.sau && n.sau.manSauChan === 'sm', 'vẫn ở màn bán, không mở màn thanh toán — ' + (n.sau && n.sau.manSauChan)]]
   },
   // 2C — KIỂM KÊ MÙ: mở màn (đọc danh mục) → đếm Trà lài 900 g → gửi phiếu chờ duyệt
   kiemKe: {
@@ -1166,6 +1193,42 @@ const KB_KHACH = async (viec) => {
   clearCustSearch(); await sleep(500);
   return { hoi, tong, nhan, loc, locSdt, xoaLoc: dem() };
 };
+// Phần chung 4D-1 giỏ hàng (chạy TRONG trang) — gọi hàm như nút bấm; key dòng tách có mốc giờ `_tp<ms>` → chuẩn hoá `_TP`
+const KB_GIO = async (viec) => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  let hoi = 0; window.posConfirm = async () => { hoi++; return true; };
+  const ds = () => Object.entries(cart).map(([k, c]) => [k.replace(/_tp\d+$/, '_TP'), c.qty, tpSum(c.toppings)]);
+  window.__buoc = 'nạp menu';
+  MENU_TOGO = [{ id: 'm1', name: 'Trà đào', type: 'Trà', color: '#E23A5D', sizes: [{ label: 'M', price: 30000 }, { label: 'L', price: 35000 }] },
+    { id: 'm2', name: 'Cà phê', type: 'Cà phê', color: '#b45309', sizes: [{ label: 'M', price: 20000 }] }];
+  FOOD_MENU = []; TOPPINGS = [{ id: 't1', name: 'Trân châu', price: 7000, priceTogo: 7000 }, { id: 't2', name: 'Thạch', price: 5000, priceTogo: 5000 }];
+  cart = {}; curFilter = 'all'; window.__ghi = [];
+  showScreen('sm'); renderMenu(); await sleep(50);
+  const nMon = document.querySelectorAll('#mg .mi').length;
+  if (viec === 'chan') {
+    window.requireShiftOpened = () => true; window.requireOpeningChecklistDone = () => true;
+    window.__buoc = 'giỏ trống'; await onCheckoutClick(); await sleep(50);
+    onSize('m1', 'L'); const cu = _isDayClosedToday; _isDayClosedToday = true;
+    window.__buoc = 'ngày đã đóng'; await onCheckoutClick(); await sleep(50); _isDayClosedToday = cu;
+    return { hoi, manSauChan: (document.querySelector('.screen.active') || {}).id || null };
+  }
+  window.__buoc = 'chọn size'; openPO('m1'); const poShow = document.getElementById('po').classList.contains('show'), nSize = document.querySelectorAll('#so .sb').length;
+  onSize('m1', 'L'); openPO('m2'); await sleep(30);
+  const sauThem = ds(), tongSauThem = getCartTotal();
+  window.__buoc = 'cộng ly'; cartAdj('m1_L', 1); cartAdj('m1_L', 1); await sleep(30);   // m1_L ×3
+  window.__buoc = 'tách ly'; openCartDrawer(); openToppingPickerSplit('m1_L'); await sleep(50);
+  const ov = document.getElementById('split-qty-overlay'), hoiTach = !!ov, nutTach = ov ? ov.querySelectorAll('button').length : 0;
+  doSplitAndOpen('m1_L', 1, 3); await sleep(50);
+  setCartToppingQty('t1', 2); setCartToppingQty('t2', 1); await sleep(30);
+  const nk = Object.keys(cart).find(k => /_tp\d+$/.test(k));
+  const sauTach = ds().sort((a, b) => a[0] < b[0] ? -1 : 1), tongSauTach = getCartTotal();
+  window.__buoc = 'bỏ topping'; removeCartTopping(nk, 1); await sleep(30);
+  const sauBoTopping = (cart[nk].toppings || []).map(t => [t.name, tpQty(t)]);
+  window.__buoc = 'xoá món'; cartDel('m2_M'); await sleep(30);
+  const sauXoa = ds().sort((a, b) => a[0] < b[0] ? -1 : 1);
+  cartClear(); await sleep(30);
+  return { hoi, nMon, poShow, nSize, sauThem, tongSauThem, hoiTach, nutTach, sauTach, tongSauTach, sauBoTopping, sauXoa, sauClear: Object.keys(cart).length };
+};
 // Dòng sổ kho WASTE đã ghi thành công (bỏ lượt bị cài lỗi), theo itemId → qty; dòng sổ BTP WASTE
 const soWaste = n => n.ghi.filter(g => !/!hong$/.test(g.op) && /stock_transactions_gieogieo/.test(duongGhi(g)) && g.d && g.d.type === 'WASTE');
 const soPrepCons = n => n.ghi.filter(g => !/!hong$/.test(g.op) && /prep_transactions_gieogieo/.test(duongGhi(g)) && g.d && g.d.type === 'CONSUMPTION');
@@ -1198,7 +1261,7 @@ const phieu = n => n.ghi.filter(g => /receiving_records_gieogieo/.test(duongGhi(
 
 async function chay(b, base, store, ten) {
   const t = await moTrang(b, base, KICH_BAN[ten].gioCo ? { authNgay: true, store, gioCo: KICH_BAN[ten].gioCo } : { authNgay: true, store, ngauNhienCo: true });
-  const r = await t.page.evaluate(async ({ src, dau, doly, han, ca, ket, quy, menu, ban, khach, mo, ITEMS, PO, E2E }) => {
+  const r = await t.page.evaluate(async ({ src, dau, doly, han, ca, ket, quy, menu, ban, khach, gio, mo, ITEMS, PO, E2E }) => {
     const toasts = []; const _t = window.toast;
     window.toast = function (m) { toasts.push(String(m)); try { return _t.apply(this, arguments); } catch (e) {} };
     window.requireShiftOpened = () => true; window.requireOpeningChecklistDone = () => true;
@@ -1310,14 +1373,15 @@ async function chay(b, base, store, ten) {
       if (E2E.tieuHao) S[ten('stock_transactions_gieogieo') + '/cons_b2_pearl'] = { itemId: 'pearl', type: 'CONSUMPTION', qty: -500, referenceId: 'b2', prepBatchId: 'b2', businessDate: '2026-10-26', createdAt: '2026-10-26T01:00:00.000Z', status: 'posted' };
     }
     window.__SEED = S; window.__SEED_GHI = true; window.__HONG = [];
-    window.KB_DAU = (0, eval)('(' + dau + ')'); window.KB_DOLY = (0, eval)('(' + doly + ')'); window.KB_HAN = (0, eval)('(' + han + ')'); window.KB_CA = (0, eval)('(' + ca + ')'); window.KB_KET = (0, eval)('(' + ket + ')'); window.KB_QUY = (0, eval)('(' + quy + ')'); window.KB_MENU = (0, eval)('(' + menu + ')'); window.KB_BAN = (0, eval)('(' + ban + ')'); window.KB_KHACH = (0, eval)('(' + khach + ')');
+    window.KB_DAU = (0, eval)('(' + dau + ')'); window.KB_DOLY = (0, eval)('(' + doly + ')'); window.KB_HAN = (0, eval)('(' + han + ')'); window.KB_CA = (0, eval)('(' + ca + ')'); window.KB_KET = (0, eval)('(' + ket + ')'); window.KB_QUY = (0, eval)('(' + quy + ')'); window.KB_MENU = (0, eval)('(' + menu + ')'); window.KB_BAN = (0, eval)('(' + ban + ')'); window.KB_KHACH = (0, eval)('(' + khach + ')'); window.KB_GIO = (0, eval)('(' + gio + ')');
     let loiKB = null, sau = null;
     window.__buoc = '';   // kịch bản treo (lời hứa không bao giờ xong) → báo lỗi sau 45 giây kèm bước cuối, không treo cả bài
     try { sau = await Promise.race([(0, eval)('(' + src + ')')({ ITEMS }), new Promise((_, rej) => setTimeout(() => rej(new Error('kịch bản quá 45 giây — bước: ' + window.__buoc)), 45000))]); } catch (e) { loiKB = String(e && e.message || e); }
     return { ghi: (window.__ghi || []).map(g => ({ op: g.op, p: g.p, rt: !!g.rt, d: g.d })), toasts, sau, loiKB };
-  }, { src: KICH_BAN[ten].chay.toString(), dau: KB_DAU.toString(), doly: KB_DOLY.toString(), han: KB_HAN.toString(), ca: KB_CA.toString(), ket: KB_KET.toString(), quy: KB_QUY.toString(), menu: KB_MENU.toString(), ban: KB_BAN.toString(), khach: KB_KHACH.toString(), mo: KICH_BAN[ten].mo, ITEMS, PO, E2E: { PREP, BATCH: BATCH(), NL_NAU, PREP_NAU, NL_KHO, DOLY, HAN, CTN1: CTN('sealed'), CTN2: CTN('open', { unitBase: 0, openedAt: '2026-10-25T05:00:00.000Z', openedBy: 'NV E2E', expiresAt: '2026-10-26T05:00:00.000Z' }), lo: KICH_BAN[ten].lo || [], loActive: !!KICH_BAN[ten].loActive, tieuHao: !!KICH_BAN[ten].tieuHao, caMo: !!KICH_BAN[ten].caMo, ketDong: !!KICH_BAN[ten].ketDong, ketTreo: !!KICH_BAN[ten].ketTreo, caDayDu: !!KICH_BAN[ten].caDayDu, ketBTP: !!KICH_BAN[ten].ketBTP, quyDoc: !!KICH_BAN[ten].quyDoc, quyHai: !!KICH_BAN[ten].quyHai } });
+  }, { src: KICH_BAN[ten].chay.toString(), dau: KB_DAU.toString(), doly: KB_DOLY.toString(), han: KB_HAN.toString(), ca: KB_CA.toString(), ket: KB_KET.toString(), quy: KB_QUY.toString(), menu: KB_MENU.toString(), ban: KB_BAN.toString(), khach: KB_KHACH.toString(), gio: KB_GIO.toString(), mo: KICH_BAN[ten].mo, ITEMS, PO, E2E: { PREP, BATCH: BATCH(), NL_NAU, PREP_NAU, NL_KHO, DOLY, HAN, CTN1: CTN('sealed'), CTN2: CTN('open', { unitBase: 0, openedAt: '2026-10-25T05:00:00.000Z', openedBy: 'NV E2E', expiresAt: '2026-10-26T05:00:00.000Z' }), lo: KICH_BAN[ten].lo || [], loActive: !!KICH_BAN[ten].loActive, tieuHao: !!KICH_BAN[ten].tieuHao, caMo: !!KICH_BAN[ten].caMo, ketDong: !!KICH_BAN[ten].ketDong, ketTreo: !!KICH_BAN[ten].ketTreo, caDayDu: !!KICH_BAN[ten].caDayDu, ketBTP: !!KICH_BAN[ten].ketBTP, quyDoc: !!KICH_BAN[ten].quyDoc, quyHai: !!KICH_BAN[ten].quyHai } });
   r.loi = t.loi.slice().sort(); r.qua = t.qua; await t.ctx.close();
-  r.ghiTho = r.ghi; r.ghi = chuanGhi(r.ghi, !!KICH_BAN[ten].gioCo); r.sau = chuanDuLieu(r.sau, undefined, !!KICH_BAN[ten].gioCo);
+  const giuGio = !!KICH_BAN[ten].gioCo && !KICH_BAN[ten].khongGiuGio;   // khongGiuGio: kịch bản chờ nhiều bước bất đồng bộ → đồng hồ giả tiến theo thời gian thực, giá trị giờ lệch vài ms giữa hai bản → vẫn chuẩn hoá giờ (ngày cố định giữ nguyên)
+  r.ghiTho = r.ghi; r.ghi = chuanGhi(r.ghi, giuGio); r.sau = chuanDuLieu(r.sau, undefined, giuGio);
   return r;
 }
 const PO = { status: 'pending', supplier: 'NCC E2E', createdAt: '2026-10-20T03:00:00.000Z', lines: [
@@ -1381,6 +1445,7 @@ const lechMuc = (m, n) => SO.filter(p => JSON.stringify(m[p]) !== JSON.stringify
       { kb: 'xoaBillJobChay', file: 'pos_orders.v1.js', tim: /if \(busy\) return;/, thay: '/* bỏ chặn busy */', mo: 'bỏ chặn xoá khi việc trừ kho đang chạy' },
       { kb: 'khachTichTem', file: 'pos_customers.v1.js', tim: /const canAdd = Math\.min\(drinkCount, Math\.max\(0, 2 - stampsToday\)\);/, thay: 'const canAdd = Math.min(drinkCount, Math.max(0, 3 - stampsToday));', mo: 'đổi trần tem mỗi ngày 2 → 3' },
       { kb: 'khachThemThanhVien', file: 'pos_customers.v1.js', tim: /source: 'pos_gieogieo'/, thay: "source: 'pos_khac'", mo: 'đổi nguồn tạo thành viên' },
+      { kb: 'gioHang', file: 'pos_cart.v1.js', tim: /return a \+ \(c\.price \+ toppingSum\) \* c\.qty;/, thay: 'return a + (c.price + toppingSum) * c.qty + 1;', mo: 'lệch tổng giỏ +1', muc: 'sau' },
       { kb: 'batDauMe', file: 'pos_prep.v1.js', tim: /note: `Nấu \$\{p\.code/, thay: 'note: `NAU ${p.code', mo: 'đổi ghi chú dòng trừ NL khi bắt đầu nấu' }
     ];
     for (const tk of TU_KIEM) {
