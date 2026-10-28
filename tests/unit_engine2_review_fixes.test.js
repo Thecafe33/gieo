@@ -179,6 +179,7 @@ async function line(ctx,cycle,baseline,weighed,at,tare=100){
   for(const k of Object.keys(g.FS))if(k.startsWith(ROOT+'/obs/'))delete g.FS[k];
   g.FS['stock_containers_gieogieo/mk']={itemId:'milk',itemName:'Sữa',unit:'g',status:'open',baseQty:1000,unitBase:700,openedAt:'2026-10-22T01:00:00Z',code:'MILK1'};
   g.FS[ROOT+'/controls/j']={...g.FS[ROOT+'/controls/j'],level:0};
+  g.FS['inventory_items_gieogieo/milk']={...(g.FS['inventory_items_gieogieo/milk']||{name:'Sữa',unit:'g'}),shiftCountTiming:'close',stockManaged:true};   // store v2 ưu tiên món đã nằm trong danh sách cân bắt buộc
   await create({storeId:'gg01',fstore:g.fstore,now:()=>Date.parse('2026-10-23T03:00:00Z')}).learnDay({force:true});
   assert(Object.values(g.FS).some(t=>t&&t.sampling==='random_m0'&&t.itemId==='milk'),'món chưa có quan sát nhưng có mã mở được giao cân M0 đầu tiên');
   console.log('ok 9. M0 khởi động nguội: lấy mẫu từ mọi món đang có mã mở, xoay vòng');

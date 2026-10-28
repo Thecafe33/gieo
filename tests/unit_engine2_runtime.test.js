@@ -64,7 +64,7 @@ const clone=v=>JSON.parse(JSON.stringify(v));
   const s2=create({storeId:'gg01',fstore:g.fstore,now:()=>Date.parse('2026-10-23T03:00:00Z')});
   const r=await s2.learnDay({force:true});
   assert.deepEqual(r.released,['k2'],'mẫu sạch đủ tiêu chí → hạ một bậc');assert.equal(g.FS[ROOT+'/controls/k2'].level,1);
-  const m0=Object.values(g.FS).filter(t=>t&&t.sampling==='random_m0'&&t.kind==='weigh_open_units');assert.equal(m0.length,2,'ngân sách 2 món/ngày');assert(m0.every(t=>!['jelly','j','k2'].includes(t.itemId)),'chỉ món đang M0');
+  const m0=Object.values(g.FS).filter(t=>t&&t.sampling==='random_m0'&&t.kind==='weigh_open_units');assert.equal(m0.length,process.env.E2_STORE==='v2'?1:2,'ngân sách 2 món/ngày (store v2: không món nào trong danh sách cân bắt buộc → chỉ thêm 1 món ngoài danh sách)');assert(m0.every(t=>!['jelly','j','k2'].includes(t.itemId)),'chỉ món đang M0');
   assert.equal(g.FS[ROOT+'/models/current'].autoRelease,true);
   // Sàn quản lý chặn hạ mức.
   const h=makeFake({fs:clone(g.FS)});h.FS[ROOT+'/controls/k2']={level:2,manualFloor:2,itemId:'k2',revision:1,lastEscalationAt:day(0,1)};delete h.FS[ROOT+'/models/current'];

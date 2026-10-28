@@ -13,7 +13,7 @@ function scan(file){
  }
  return bad;
 }
-const bad=['unit_engine2_store_v1.js','unit_engine.v21.js','unit_engine2_v1.js'].flatMap(scan);
+const bad=['unit_engine2_store_v1.js','unit_engine2_store_v2.js','unit_engine.v21.js','unit_engine2_v1.js','unit_engine2_staffing_v1.js'].flatMap(scan);
 assert.deepEqual(bad,[],'transaction đọc sau ghi: '+bad.join(', '));
 // Bộ quét phải bắt được lỗi cũ (chống quét hỏng im lặng).
 const tmp=path.join(__dirname,'..','.tx_probe.tmp.js');

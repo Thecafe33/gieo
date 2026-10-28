@@ -8,12 +8,15 @@
  *      kho với cờ engine2Owner. Tiến trình nền thấy kho đã áp (phiếu inventoryResult) nên chỉ ghi nốt trách nhiệm + mốc cân.
  *      Điều kiện nào không chắc chắn → POS ghi như thường (người ghi trách nhiệm cũ). KHÔNG BAO GIỜ chặn kết ca.
  *   3. shiftWeighLineHTML: bỏ dòng «Cần cân hôm nay vì …» (không giải thích cho nhân viên).
- * Chưa làm (đợt 2): mô hình vận hành theo nhân sự, cân đầu ca khi người mở = người kết, cân độc lập / chẩn đoán / nhóm dễ nhầm.
- * Các việc loại đó vẫn nằm ở trạng thái chờ, không hiện ở đâu cả. */
+ * Đợt 2 (nhân sự — chủ quán chốt 28/10):
+ *   4. Người mở ca duy nhất = người kết ca hôm trước → KHÔNG yêu cầu cân / đếm bất cứ thứ gì ở đầu ca (danh sách kiểm kê đầu ca VÀ đếm giao ca đầu ca) —
+ *      cuối ca đã cân hết, bắt chính người đó cân lại chỉ thêm công. Chưa biết ai mở hoặc có từ hai người → hỏi như thường (thận trọng).
+ *   5. Cân độc lập (M3) chỉ ở đầu ca và chỉ khi có người KHÁC người cân trước đang mở ca (số cân của người nhận ca chính là phép đo độc lập; không việc riêng).
+ * Chưa làm: việc chẩn đoán / nhóm dễ nhầm (nằm chờ, chưa hiện ở đâu). */
 (function(){
 'use strict';
 if(!window.UnitEngine2||!window.UnitEngine2Store)return;
-const E=window.UnitEngine2;
+const E=window.UnitEngine2,S=window.UnitEngine2Staffing||null;
 let service=null,state=null,unsubscribe=null,journal=null,flushing=false,ackSent='';
 let vesselCache={at:0,list:null},taskCache={day:'',at:0,promise:null};
 const CYCLE='c';                                   // một việc «cân cuối ngày» cố định cho mỗi (ngày, món)
@@ -47,12 +50,12 @@ async function wanted(day){
  const now=Date.now();
  if(taskCache.day===day&&now-taskCache.at<TASK_CACHE_MS&&taskCache.promise)return taskCache.promise;
  const p=(async()=>{
-  const m0={};
+  const m0={},m3={};
   try{
    const s=await service.sub('tasks').where('pending','==',true).orderBy('createdAt','desc').limit(40).get({source:'server'});
-   s.docs.forEach(d=>{const t=d.data();if(t.kind==='weigh_open_units'&&t.sampling==='random_m0'&&t.itemId&&!m0[t.itemId])m0[t.itemId]=d.id;});
-  }catch(e){console.warn('Engine2: chưa đọc được việc cân ngẫu nhiên',e.message);}
-  return {controlled:[...(state.controlledItemIds||[])],m0};
+   s.docs.forEach(d=>{const t=d.data();if(t.kind!=='weigh_open_units'||!t.itemId)return;if((t.sampling==='random_m0'||t.sampling==='resync')&&!m0[t.itemId])m0[t.itemId]=d.id;else if(t.sampling==='m3'&&!m3[t.itemId])m3[t.itemId]={taskId:d.id,excludeStaffId:t.excludeStaffId||''};});
+  }catch(e){console.warn('Engine2: chưa đọc được việc cân ngẫu nhiên / độc lập',e.message);}
+  return {controlled:[...(state.controlledItemIds||[])],m0,m3};
  })();
  taskCache={day,at:now,promise:p};
  return p;
@@ -94,6 +97,49 @@ async function extendCloseLines(lines){
  if(controlledIds.length){try{await service.ensureCloseTasks(day,CYCLE,controlledIds);}catch(e){console.warn('Engine2: chưa tạo việc cân cuối ngày',e.message);return lines;}}
  for(const l of all)if(tasks.has(l.itemId))l.e2={taskId:tasks.get(l.itemId)};
  return extra.length?all.sort(byName):all;
+}
+
+// ── Đầu ca: không làm việc thừa ─────────────────────────────────────────────────
+// Người kết ca hôm trước = pha chế có giờ ra muộn nhất của ngày làm việc gần nhất có ca (lùi tối đa 7 ngày). Nhớ theo ngày làm việc.
+let closerCache={day:'',id:''};
+async function previousCloser(day){
+ if(closerCache.day===day)return closerCache.id;
+ let id='';
+ for(let i=1;i<=7&&!id;i++){
+  const d=posDateKey(new Date(Date.parse(day+'T12:00:00+07:00')-i*86400000));
+  const snap=await fstore.collection('employee_shifts_gieogieo').where('businessDate','==',d).get();
+  id=S.lastCloser(snap.docs.map(x=>x.data()));
+ }
+ closerCache={day,id};return id;
+}
+async function openersNow(){await loadEmployeeShiftsTodayCache();return S.openBaristas(_employeeShiftsTodayCache);}
+const businessDay=()=>(typeof shiftState!=='undefined'&&shiftState.businessDate)||posDateKey();
+// true = người mở ca duy nhất chính là người kết ca hôm trước → không được yêu cầu cân / đếm bất cứ thứ gì ở đầu ca.
+async function sameOperatorOpening(){
+ if(!S||typeof loadEmployeeShiftsTodayCache!=='function')return false;
+ try{const openers=await openersNow();if(openers.length!==1)return false;return S.sameOperator(openers,await previousCloser(businessDay()));}
+ catch(e){console.warn('Engine2: chưa xác định người mở ca, hỏi như thường —',e.message);return false;}
+}
+// Cân độc lập (M3): chỉ khi có người KHÁC người cân trước đang mở ca. Số cân của người nhận ca chính là phép đo độc lập — dòng nằm trong
+// danh sách kiểm kê đầu ca sẵn có, không việc riêng, không cân thêm lần nào.
+async function extendOpenLines(lines){
+ if(!active()||!service||!S)return lines;
+ const day=businessDay();let w;try{w=await wanted(day);}catch(e){return lines;}
+ const ids=Object.keys(w.m3||{});if(!ids.length)return lines;
+ try{
+  const openers=await openersNow(),have=new Set(lines.map(l=>l.itemId));
+  await ensureKhoItemsPOS();
+  const snap=await fstore.collection('daily_openings_gieogieo').doc(day).get();
+  const done=new Set(((snap.exists?snap.data().shiftInventoryOpenLines:[])||[]).map(l=>l.itemId));
+  const extra=[];
+  for(const id of ids){
+   const t=w.m3[id];if(have.has(id)||done.has(id)||!S.independentPossible(openers,t.excludeStaffId))continue;
+   const it=(KHO_ITEMS_CACHE||[]).find(x=>x.id===id);if(!it||it.stockManaged===false||!shiftWeighIsTemItemPOS(it))continue;
+   const line=shiftWeighTemLinePOS(it,(await UnitEngine.units.ref(id).once('value')).val(),[]);if(!line)continue;
+   line.e2={taskId:t.taskId};extra.push(line);
+  }
+  return extra.length?lines.concat(extra).sort(byName):lines;
+ }catch(e){console.warn('Engine2: chưa dựng được dòng cân độc lập đầu ca',e.message);return lines;}
 }
 
 // ── Đưa số cân của dòng POS cho Engine 2 ───────────────────────────────────────
@@ -141,9 +187,14 @@ function install(){
  // 1) Danh sách cân cuối ca = danh sách sẵn có + món Engine 2 điều phối.
  const compute=window.computeShiftInventoryCountLinesPOS;
  if(typeof compute==='function')window.computeShiftInventoryCountLinesPOS=async function(...args){
-  init();const lines=await compute.apply(this,args);
+  init();
+  if(args[0]==='open'){if(await sameOperatorOpening())return [];return extendOpenLines(await compute.apply(this,args));}
+  const lines=await compute.apply(this,args);
   return args[0]==='close'?extendCloseLines(lines):lines;
  };
+ // Đếm giao ca đầu ca (đối chiếu số ca tối hôm qua) cũng không hỏi khi chính người đó đã kết ca hôm trước.
+ const handover=window.computeHandoverOpenLinesPOS;
+ if(typeof handover==='function')window.computeHandoverOpenLinesPOS=async function(...args){if(await sameOperatorOpening())return [];return handover.apply(this,args);};
  // 2) Ghi số cân: dòng của Engine 2 đi qua mã lượt của Engine 2, kho vẫn do chính POS áp ngay (đồng bộ, như mọi dòng khác).
  const shift=window.UnitEngine&&UnitEngine.shift;
  if(shift&&typeof shift.applyLine==='function'){

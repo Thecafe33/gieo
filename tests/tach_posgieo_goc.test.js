@@ -10,7 +10,7 @@ const chk = (c, m) => { console.log((c ? 'ok ' : 'FAIL ') + m); if (!c) ok = fal
 // thư viện dùng chung ở gốc (đối chiếu thực tế các HTML bên dưới)
 const GOC = [
   /^data_access\.v\d+\.js$/, /^unit_engine\.v\d+\.js$/, /^che_do_thu\.v\d+\.js$/, /^gau_noel_giangsinh\.v\d+\.js$/,
-  /^gieo_automation(_pos)?\.v\d+\.js$/, /^unit_engine2(_store|_learn|_obs|_params|_export|_audit)?_v\d+\.js$/,
+  /^gieo_automation(_pos)?\.v\d+\.js$/, /^unit_engine2(_store|_staffing|_learn|_obs|_params|_export|_audit)?_v\d+\.js$/,
   /^gieo_engine2_pos_v\d+\.js$/, /^lai_lo\.v\d+\.js$/, /^cham_cong\.v\d+\.js$/, /^lixi\.v\d+\.js$/,
   /^bill_live\.v\d+\.js$/,   // quanlygieo.html nạp (thực tế)
 ];
