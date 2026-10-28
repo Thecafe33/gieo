@@ -13,6 +13,7 @@
 1. Trả lời bằng **tiếng Việt**.
 2. **Phản biện trước khi sửa**: trước mỗi sửa đổi, kiểm tra xem đã có cơ chế nào xử lý chưa (tìm theo tên hàm, đọc chú thích `[FIX]`, `[GIẢM-ĐỌC]`, `[TEM = SỰ THẬT]`…). Báo kết quả phản biện trước, sửa sau.
 3. **Không lan man**: chỉ làm hạng mục có trong kế hoạch (`docs/KE_HOACH_UNIT_ENGINE_DA_CUA_HANG.md`). Phát hiện vấn đề mới → báo ngắn, không tự thêm vào phạm vi.
+3b. **Chức năng mới, chưa quen thuộc → không viết từ con số 0**: trước khi bắt tay làm, tìm các dự án mã nguồn mở trên GitHub làm cùng loại việc để so sánh ý tưởng / cách tiếp cận, rồi báo tóm tắt những gì rút ra (kèm link repo). Chỉ lấy ý tưởng, không chép mã (chú ý giấy phép); vẫn phải giữ nguyên các bất biến B1–B15 và quy tắc ở trên.
 4. Đổi **hành vi nghiệp vụ** (không chỉ sắp xếp code) → hỏi trước.
 5. File rất lớn: **không đọc cả file**; tìm theo tên hàm (`grep -n "function tenHam"`), đọc từng đoạn. Số dòng trong tài liệu sẽ trôi — luôn tìm theo tên.
 6. Sau mỗi sửa đổi: chạy kiểm tra ở mục "Kiểm tra" bên dưới.
