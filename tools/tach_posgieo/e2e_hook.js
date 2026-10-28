@@ -25,7 +25,7 @@ const KY_VONG = ['_afterIceChange', '_continueAfterPrepCount', 'addCart', 'addFo
 // Nguồn có thể bọc: file bọc ở gốc + MỌI mã app (script trần posgieo.html + js/posgieo/*).
 function nguonBoc(dir) {
   const out = [];
-  for (const f of ['gau_noel_giangsinh.v2.js', 'gieo_automation_pos.v3.js', 'gieo_engine2_pos_v1.js']) if (fs.existsSync(path.join(dir, f))) out.push({ f, t: fs.readFileSync(path.join(dir, f), 'utf8'), boc: true });
+  for (const f of ['gau_noel_giangsinh.v2.js', 'gieo_automation_pos.v3.js', 'gieo_engine2_pos_v1.js', 'gieo_engine2_pos_v2.js']) if (fs.existsSync(path.join(dir, f))) out.push({ f, t: fs.readFileSync(path.join(dir, f), 'utf8'), boc: true });
   const h = fs.readFileSync(path.join(dir, 'posgieo.html'), 'utf8'); out.push({ f: 'posgieo.html', t: h });
   const i = h.indexOf('(function assistHookIntoPOS'); if (i > 0) out.push({ f: 'assistHookIntoPOS', t: h.slice(i, i + 6000), boc: true });
   const jd = path.join(dir, 'js', 'posgieo'); if (fs.existsSync(jd)) for (const f of fs.readdirSync(jd)) out.push({ f: 'js/posgieo/' + f, t: fs.readFileSync(path.join(jd, f), 'utf8') });
@@ -104,7 +104,7 @@ async function chup(b, base, ten, authNgay, pt) {
       chenDauHamBo(d, 'computeShiftInventoryCountLinesPOS', "throw Error('tu-kiem-goc');");
       let t = fs.readFileSync(h, 'utf8'); const bo = "boc('cartClear', () => assistResetSession());";
       if (!t.includes(bo)) throw new Error('tự kiểm: không thấy lớp trợ lý cartClear'); t = t.replace(bo, '/*tu-kiem*/');
-      const e2 = '<script src="gieo_engine2_pos_v1.js"></script>'; if (!t.includes(e2)) throw new Error('tự kiểm: không thấy thẻ Engine 2');
+      const e2 = ['v2', 'v1'].map(v => '<script src="gieo_engine2_pos_' + v + '.js"></script>').find(x => t.includes(x)); if (!e2) throw new Error('tự kiểm: không thấy thẻ Engine 2');
       fs.writeFileSync(h, t.replace(e2, e2 + '\n<script>window.updCoTotal = function(){};</script>'));
     });
     try {
