@@ -119,6 +119,7 @@ const KICH_BAN = {
       await openPoReceiveScreen(); await sleep(400);
       KHO_ITEMS_CACHE = Object.values(ITEMS).map(x => JSON.parse(JSON.stringify(x)));
       poSelectPO('po1'); await sleep(50);
+      poReceiveLineChangeField(0, 'unitFactor', 12000);   // chọn đơn vị đặt Thùng (mặc định nay là đơn vị kiểm kê)
       poReceiveLineChangeField(0, 'goodQty', 1);   // 1 Thùng = 12000 g (đủ)
       poReceiveLineChangeField(1, 'goodQty', 1);   // 1 Hộp / đặt 2 → nhận một phần
       poReceiveState.photoFiles = [new File(['hoadon'], 'hd.jpg', { type: 'image/jpeg' })];
@@ -1599,10 +1600,10 @@ const lechMuc = (m, n) => SO.filter(p => JSON.stringify(m[p]) !== JSON.stringify
       chk(!!y && !y[0], `(tự kiểm oracle ${kb}) ý «${tien}» báo SAI khi ${mo}`);
     }
     const TU_KIEM = [
-      { kb: 'nhanHang', file: 'pos_receive.v1.js', tim: /(\bnote:\s*generalNote)/, thay: "$1 + '·hỏng'", mo: 'đổi ghi chú phiếu nhận' },
+      { kb: 'nhanHang', file: 'pos_receive.v2.js', tim: /(\bnote:\s*generalNote)/, thay: "$1 + '·hỏng'", mo: 'đổi ghi chú phiếu nhận' },
       { kb: 'huyMe', file: 'pos_prep.v1.js', tim: /Hoàn kho do HUỶ MẺ/, thay: 'Hoàn kho do HUY ME', mo: 'đổi ghi chú dòng hoàn kho khi huỷ mẻ' },
       { kb: 'kiemKe', file: 'pos_count.v1.js', tim: /countedBy: staff, status: 'pending_review'/, thay: "countedBy: staff, status: 'pending'", mo: 'đổi trạng thái phiếu kiểm kê (chỗ ghi phiếu)' },
-      { kb: 'doLy', file: 'pos_kho.v1.js', tim: /qty: -qtyUsed, txId/, thay: 'qty: -(qtyUsed + 1), txId', mo: 'đổi lượng trừ NL khi đổ ly' },
+      { kb: 'doLy', file: 'pos_kho.v2.js', tim: /qty: -qtyUsed, txId/, thay: 'qty: -(qtyUsed + 1), txId', mo: 'đổi lượng trừ NL khi đổ ly' },
       { kb: 'hanGiaHan', file: 'pos_expiry.v1.js', tim: /const PREP_EXTEND_HOURS = 24;/, thay: 'const PREP_EXTEND_HOURS = 25;', mo: 'đổi số giờ gia hạn' },
       { kb: 'caCheckIn', file: 'pos_shift.v1.js', tim: /otThresholdHours: Number\(emp\.otThresholdHours\) \|\| 8,/, thay: 'otThresholdHours: Number(emp.otThresholdHours) || 9,', mo: 'đổi ngưỡng OT mặc định chụp vào ca' },
       { kb: 'ketDoiSoatKhop', file: 'pos_shift_closing.v1.js', tim: /status: passed \? 'cash_passed'/, thay: "status: passed ? 'cash_ok'", mo: 'đổi trạng thái đối soát khớp' },

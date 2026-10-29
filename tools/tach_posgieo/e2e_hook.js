@@ -87,8 +87,13 @@ async function chup(b, base, ten, authNgay, pt) {
       const bocM = Object.keys(m.kq).filter(t => m.kq[t].length > 1), bocN = Object.keys(n.kq).filter(t => n.kq[t].length > 1);
       if (macDinh) chk(JSON.stringify(bocM) === JSON.stringify(KY_VONG), `(${nhan}) mốc ${MOC}: đúng ${KY_VONG.length} hàm có bọc theo bảng kỳ vọng` + (JSON.stringify(bocM) === JSON.stringify(KY_VONG) ? '' : ': thiếu ' + KY_VONG.filter(t => !bocM.includes(t)) + ' | thừa ' + bocM.filter(t => !KY_VONG.includes(t))));
       else chk(bocM.length >= 15, `(${nhan}) mốc ${MOC}: chụp được ${bocM.length} hàm có bọc (≥ 15)`);
-      chk(JSON.stringify(bocM) === JSON.stringify(bocN), `(${nhan}) cùng tập hàm bị bọc (${bocN.length})` + (JSON.stringify(bocM) === JSON.stringify(bocN) ? '' : ': chỉ mốc ' + bocM.filter(t => !bocN.includes(t)) + ' | chỉ nay ' + bocN.filter(t => !bocM.includes(t))));
-      const lech = bocM.filter(t => JSON.stringify(m.kq[t]) !== JSON.stringify(n.kq[t]));
+      // Engine 2 POS bridge: mốc chạy v1 (popup — bọc 3 hàm), bản nay chạy v2 (không popup — bọc 2 hàm khác). Khác biệt CÓ CHỦ ĐÍCH (28/10), loại khỏi so sánh; mọi hàm còn lại phải giống hệt.
+      const E2_V1 = ['_continueAfterPrepCount', 'openCaLamViecScreen', 'renderShiftHandoverForm'], E2_V2 = ['computeHandoverOpenLinesPOS', 'shiftWeighLineHTML'];
+      const bM = bocM.filter(t => !E2_V1.includes(t)), bN = bocN.filter(t => !E2_V2.includes(t));
+      chk(JSON.stringify(bM) === JSON.stringify(bN), `(${nhan}) cùng tập hàm bị bọc (${bocN.length}; trừ khác biệt Engine 2 bridge v1→v2)` + (JSON.stringify(bM) === JSON.stringify(bN) ? '' : ': chỉ mốc ' + bM.filter(t => !bN.includes(t)) + ' | chỉ nay ' + bN.filter(t => !bM.includes(t))));
+      // Hàm có lớp Engine 2 bridge ở mốc (v1) khác bản nay (v2): so riêng hàm GỐC (phần tử cuối) — lớp bridge khác có chủ đích.
+      const E2_CHUNG = ['computeShiftInventoryCountLinesPOS', 'renderDailyClosingChecklist', 'renderOpeningChecklist'];
+      const lech = bM.filter(t => E2_CHUNG.includes(t) ? m.kq[t][m.kq[t].length - 1] !== n.kq[t][n.kq[t].length - 1] : JSON.stringify(m.kq[t]) !== JSON.stringify(n.kq[t]));
       chk(!lech.length, `(${nhan}) chuỗi bọc giống hệt từng lớp + hàm gốc` + (lech.length ? ': lệch ' + lech.map(t => t + '\n   mốc ' + m.kq[t].join('\n        ') + '\n   nay ' + n.kq[t].join('\n        ')).join('\n') : ''));
       chk(JSON.stringify(m.canh) === JSON.stringify(n.canh), `(${nhan}) cùng cảnh báo «bỏ qua phần gắn» (${n.canh.length})` + (n.canh.length ? ': ' + n.canh.join(' | ') : ''));
       chk(JSON.stringify(m.loi.sort()) === JSON.stringify(n.loi.sort()), `(${nhan}) cùng lỗi JS (${n.loi.length})` + (JSON.stringify(m.loi) === JSON.stringify(n.loi) ? '' : ': mốc ' + m.loi.join(' | ') + ' || nay ' + n.loi.join(' | ')));

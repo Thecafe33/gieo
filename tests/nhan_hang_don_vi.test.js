@@ -8,7 +8,7 @@ const { loadCore } = require('./lib/core_loader');
 const ITEM = { id: 'pearl', name: 'Trân châu trắng', unit: 'g', trackingMode: 'unit',
   countUnitName: 'Bịch', packagingUnits: [{ name: 'Bịch', baseQty: 2000 }, { name: 'Thùng', baseQty: 12000 }], currentStock: 0 };
 const COLL = 'stock_containers_gieogieo/';
-const names = ['escHtmlPos', 'poReceiveDefaultUnit', 'poReceiveUnitOptions', 'poReceiveQuantities', 'poReceivePreviewHtml',
+const names = ['escHtmlPos', 'poReceiveDefaultUnit', 'poReceiveCountUnit', 'poReceiveInitialFactor', 'rcTint', 'rcStatusText', 'rcStatusClass', 'rcMoreOpen', 'rcMoreSummary', 'poReceiveToggleMore', 'poReceiveUnitOptions', 'poReceiveQuantities', 'poReceivePreviewHtml',
   'poReceiveAddFreeLine', 'poReceiveLineChangeItem', 'poReceiveLineChangeField', 'poReceiveRefreshLinePreview',
   'poReceiveLineCardHtml', 'poReceiveStepperHtml', 'poReceiveStepQty', 'poLineQtyText', 'poSelectPO',
   'poReceiveMergeRecord', 'poReceiveUpdatePODoc', 'submitPoReceive', '_submitPoReceiveImpl'];
@@ -64,9 +64,9 @@ function checkReceipt(h, qty, grams) {
     const h = make(); addSelected(h);
     assert.equal(h.api.state.lines[0].unitFactor, 2000);
     h.api.poReceiveLineChangeField(0, 'goodQty', 6);
-    assert.match(h.chips.innerHTML, /Nhận 6 Bịch/); assert.match(h.chips.innerHTML, /Tạo 6 mã NL/);
+    assert.match(h.chips.innerHTML, /Vào kho <b>\+12\.000 g<\/b>.*\(6 Bịch\)/); assert.match(h.chips.innerHTML, /tạo <b>6 mã NL/);
     const html = h.api.poReceiveLineCardHtml(h.api.state.lines[0], 0, true);
-    assert.match(html, /Số Bịch tốt/); assert.match(html, /Thùng = 12.000 g/);
+    assert.match(html, /class="u">Bịch</); assert.ok(!/Số Bịch hỏng/.test(html), 'Hỏng / Sai sản phẩm / Ghi chú gập gọn khi chưa có dữ liệu'); const mo = h.api.poReceiveLineCardHtml({ ...h.api.state.lines[0], moreOpen: true }, 0, true); assert.match(mo, /Số Bịch hỏng/); assert.match(mo, /Sai sản phẩm/); assert.match(mo, /Ghi chú riêng/); assert.match(html, /Thùng<small>= 12\.000 g/); assert.match(html, /class="on"[^>]*>Bịch/); assert.match(html, /<button type="button" onclick="poReceiveLineChangeField\(0,'unitFactor','2000'\)" class="on">/);
     h.api.state.lines[0].note = 'Kiểm "6 bịch" <đúng>';
     assert.match(h.api.poReceiveLineCardHtml(h.api.state.lines[0], 0, true), /value="Kiểm &quot;6 bịch&quot; &lt;đúng&gt;"/);
     await h.api._submitPoReceiveImpl(); checkReceipt(h, 6, 12000);
@@ -78,7 +78,7 @@ function checkReceipt(h, qty, grams) {
     h.api.poReceiveLineChangeField(0, 'unitFactor', 12000);
     assert.equal(h.api.state.lines[0].goodQty, 0);
     h.api.poReceiveLineChangeField(0, 'goodQty', 1);
-    assert.match(h.chips.innerHTML, /Nhận 1 Thùng/); assert.match(h.chips.innerHTML, /Tạo 6 mã NL/);
+    assert.match(h.chips.innerHTML, /Vào kho <b>\+12\.000 g<\/b>.*\(1 Thùng\)/); assert.match(h.chips.innerHTML, /tạo <b>6 mã NL/);
     await h.api._submitPoReceiveImpl(); checkReceipt(h, 6, 12000);
     console.log('ok đổi Bịch -> Thùng xoá số cũ; nhận 1 Thùng vẫn đúng 6 mã Bịch');
   }
@@ -91,14 +91,16 @@ function checkReceipt(h, qty, grams) {
   }
   {
     const h = make({ po: poOf(12000, 1) }); h.api.poSelectPO('po1');
-    assert.equal(h.api.state.lines[0].unitFactor, 12000);
-    h.api.poReceiveLineChangeField(0, 'unitFactor', 2000); h.api.state.lines[0].goodQty = 6;
+    assert.equal(h.api.state.lines[0].unitFactor, 2000, 'đặt 1 Thùng nhưng đơn vị kiểm kê là Bịch → ô nhập mặc định Bịch (chủ dự án 29/10)');
+    assert.equal(h.api.state.lines[0].orderUnitFactor, 12000, 'dòng Đặt vẫn giữ đúng quy cách lúc đặt');
+    h.api.poReceiveLineChangeField(0, 'unitFactor', 12000); h.api.poReceiveLineChangeField(0, 'unitFactor', 2000); h.api.state.lines[0].goodQty = 6;
     await h.api._submitPoReceiveImpl(); checkReceipt(h, 6, 12000);
     assert.equal(h.fake.FS['purchase_orders_gieogieo/po1'].status, 'received');
-    console.log('ok đặt 1 Thùng, nhận theo 6 Bịch -> 6 mã, PO đủ đúng 12.000g');
+    console.log('ok đặt 1 Thùng, mặc định nhập Bịch (đơn vị kiểm kê) -> 6 mã, PO đủ đúng 12.000g');
   }
   {
     const h = make({ po: poOf(12000, 1), confirm: false }); h.api.poSelectPO('po1');
+    h.api.poReceiveLineChangeField(0, 'unitFactor', 12000);   // mặc định là đơn vị kiểm kê (Bịch) — nhân viên chủ động chọn Thùng
     h.api.state.lines[0].goodQty = 6;
     await h.api._submitPoReceiveImpl();
     assert.equal(h.calls.confirms.length, 1); assert.match(h.calls.confirms[0], /đang nhận 6 Thùng/);
@@ -107,6 +109,7 @@ function checkReceipt(h, qty, grams) {
   }
   {
     const h = make({ po: poOf(12000, 1), confirm: true }); h.api.poSelectPO('po1');
+    h.api.poReceiveLineChangeField(0, 'unitFactor', 12000);
     h.api.state.lines[0].goodQty = 2;
     await h.api._submitPoReceiveImpl(); checkReceipt(h, 12, 24000);
     assert.equal(h.calls.confirms.length, 1);
@@ -136,10 +139,15 @@ function checkReceipt(h, qty, grams) {
   }
   {
     const h = make();
-    assert.equal(h.api.poReceiveDefaultUnit({ unit: 'ml', packagingUnits: [{ name: 'Thùng', baseQty: 6000 }, { name: 'Chai', baseQty: 500 }] }).baseQty, 6000);
+    // [ĐƠN VỊ KIỂM KÊ — chủ dự án 29/10] mặc định = countUnitName; không khai → đơn vị pha chế
+    const pk = [{ name: 'Thùng', baseQty: 6000 }, { name: 'Chai', baseQty: 500 }];
+    assert.equal(h.api.poReceiveDefaultUnit({ unit: 'ml', packagingUnits: pk, countUnitName: 'Chai' }).baseQty, 500);
+    assert.equal(h.api.poReceiveDefaultUnit({ unit: 'ml', packagingUnits: pk, countUnitName: 'Thùng' }).baseQty, 6000);
+    assert.equal(h.api.poReceiveDefaultUnit({ unit: 'ml', packagingUnits: pk }).baseQty, 1, 'không khai đơn vị kiểm kê → đơn vị pha chế');
+    assert.equal(h.api.poReceiveDefaultUnit({ unit: 'ml', packagingUnits: pk, countUnitName: 'Hộp' }).baseQty, 1, 'đơn vị kiểm kê không còn trong quy cách → đơn vị pha chế');
     assert.equal(h.api.poReceiveDefaultUnit({ unit: 'cái' }).baseQty, 1);
-    assert.equal(h.api.poReceiveDefaultUnit({ unit: 'g', packagingUnits: [{ name: 'Lon', baseQty: 1280 }] }).baseQty, 1280);
-    console.log('ok mặc định lúc thêm mới giữ như trước; không ép mọi nguyên liệu thành Bịch');
+    assert.equal(h.api.poReceiveDefaultUnit({ unit: 'g', packagingUnits: [{ name: 'Lon', baseQty: 1280 }], countUnitName: 'Lon' }).baseQty, 1280);
+    console.log('ok đơn vị nhập nhanh mặc định = đơn vị kiểm kê (không khai → đơn vị pha chế)');
   }
   for (const [name, unit, amount, outer] of [['Bịch','g',2000,12000], ['Chai','ml',340,2040], ['Lon','g',1280,7680]]) {
     const item = { ...ITEM, name:'NL thử '+name, unit, countUnitName:name,

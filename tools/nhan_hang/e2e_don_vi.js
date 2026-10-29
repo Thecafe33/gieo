@@ -7,6 +7,7 @@ const html = fs.readFileSync(path.join(root, 'posgieo.html'), 'utf8');
 const css = [...html.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/g)].map(m => m[1]).join('\n');
 const funcs = extract('posgieo.html', ['escHtmlPos', 'poReceiveDefaultUnit', 'poReceiveUnitOptions', 'poReceiveQuantities',
   'poReceivePreviewHtml', 'poReceiveLineChangeField', 'poReceiveRefreshLinePreview', 'poReceiveStepQty',
+  'poReceiveCountUnit', 'poReceiveInitialFactor', 'rcTint', 'rcStatusText', 'rcStatusClass', 'rcMoreOpen', 'rcMoreSummary', 'poReceiveToggleMore',
   'poReceiveLineCardHtml', 'poReceiveStepperHtml', 'renderPoReceiveForm', 'poLineQtyText', 'poReceiveOpenItemPicker', 'poReceiveLineChangeItem']);
 const qlHtml=fs.readFileSync(path.join(root,'quanlygieo.html'),'utf8');
 const qlCss=[...qlHtml.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/g)].map(m=>m[1]).join('\n');
@@ -32,22 +33,24 @@ const item = { id: 'pearl', name: 'Trân châu trắng', unit: 'g', countUnitNam
         const toast=()=>{}, renderPinInput=()=>'<input placeholder="PIN nhân viên">', dsOpenItemPicker=o=>o.onPick(KHO_ITEMS_CACHE[0]);
         ${funcs}
         renderPoReceiveForm();` });
-      const good = p.locator('.ds-qty-box.good input'), bad = p.locator('.ds-qty-box.bad input');
-      assert.match(await p.locator('.ds-qty-box.good .lbl').textContent(), /Bịch/); checks++;
+      const good = p.locator('#polGood0');
+      assert.match(await p.locator('#poReceiveScreen .rc-qty .u').textContent(), /Bịch/); checks++;
       await good.fill('6');
-      assert.match(await p.locator('#polChips0').textContent(), /Nhận 6 Bịch.*12.000 g.*Tạo 6 mã NL/s); checks++;
+      assert.match(await p.locator('#polChips0').textContent(), /Vào kho.*12\.000 g.*6 Bịch.*tạo 6 mã NL/s); checks++;
       assert.equal(await good.evaluate(el => document.activeElement === el), true); checks++;
-      await p.locator('.ds-picker-row').click();
+      await p.locator('.rc-pick').click();
       assert.equal(await good.inputValue(),'6'); checks++;
-      assert.match(await p.locator('.ds-qty-box.good .lbl').textContent(),/Bịch/); checks++;
+      assert.match(await p.locator('#poReceiveScreen .rc-qty .u').textContent(),/Bịch/); checks++;
+      await p.evaluate(() => poReceiveToggleMore(0));
+      const bad = p.locator('#polBad0');
       await bad.fill('1');
-      await p.getByRole('button', { name: 'Thùng = 12.000 g', exact: true }).click();
-      assert.equal(await good.inputValue(), '0'); assert.equal(await bad.inputValue(), '0'); checks += 2;
-      assert.match(await p.locator('.ds-qty-box.good .lbl').textContent(), /Thùng/); checks++;
+      await p.locator('.rc-units button', { hasText: 'Thùng' }).click();
+      assert.equal(await good.inputValue(), ''); checks++;
+      assert.match(await p.locator('#poReceiveScreen .rc-qty .u').textContent(), /Thùng/); checks++;
       await good.fill('1');
-      assert.match(await p.locator('#polChips0').textContent(), /Nhận 1 Thùng.*12.000 g.*Tạo 6 mã NL/s); checks++;
+      assert.match(await p.locator('#polChips0').textContent(), /Vào kho.*12\.000 g.*1 Thùng.*tạo 6 mã NL/s); checks++;
       const overflow = await p.evaluate(() => {
-        const els = [...document.querySelectorAll('#poReceiveScreen .ds-card, #poReceiveScreen .ds-seg button, #poReceiveScreen .ds-qty-box')];
+        const els = [...document.querySelectorAll('#poReceiveScreen .rc-w, #poReceiveScreen .rc-units button, #poReceiveScreen .rc-qty')];
         return els.some(el => { const r = el.getBoundingClientRect(); return r.left < -1 || r.right > innerWidth + 1 || el.scrollWidth > el.clientWidth + 2; });
       });
       assert.equal(overflow, false); checks++;
