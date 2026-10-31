@@ -21386,11 +21386,13 @@ async function renderThangKet(force=false){
       loadExpensesAll(),
       loadAssetsAll(),
       computeLedgerRealMetrics(start, end),
-      HR_SETTINGS.useActualLaborCost ? computeActualLaborCostByDate(startKey, endKey) : Promise.resolve(null),
+      // [FIX 31/10] Tổng kết tháng là màn XEM: ca thiếu lịch không được làm trắng cả màn («Không quét được: pay/schedule-missing»).
+      // Dùng lenient như tab Lương (ca đó chưa cộng giờ) + báo vào dataMissing → tháng KHÔNG được coi là «đã chốt». Chốt sổ / chốt lương vẫn CHẶN chặt.
+      HR_SETTINGS.useActualLaborCost ? computeActualLaborCostByDate(startKey, endKey, {lenient:true}) : Promise.resolve(null),
       loadExpenseCategories().catch(()=>{dataMissing.push('danh mục chi phí');return [];}),
       loadEmployees().catch(()=>{dataMissing.push('nhân sự');return [];}),
       loadSchedulesForRange(startKey, endKey).catch(()=>{dataMissing.push('lịch làm việc');return [];}),
-      computeActualLaborBreakdownByEmployee(startKey, endKey).catch(err=>{ dataMissing.push(err&&err.code==='pay/schedule-missing'?'lịch làm việc ('+err.message+')':'bảng lương'); console.warn('[Tổng kết tháng] lương lỗi', err); return {}; }),
+      computeActualLaborBreakdownByEmployee(startKey, endKey, {lenient:true}).catch(err=>{ dataMissing.push(err&&err.code==='pay/schedule-missing'?'lịch làm việc ('+err.message+')':'bảng lương'); console.warn('[Tổng kết tháng] lương lỗi', err); return {}; }),
       computeThangKetSoNgayCong(startKey, endKey, attendanceSink).catch(err=>{ dataMissing.push('ngày công'); console.warn('[Tổng kết tháng] ngày công lỗi', err); return {}; }),
       computeMixReport(start, end).catch(err=>{ dataMissing.push('bán hàng'); console.warn('[Tổng kết tháng] bán hàng lỗi', err); return null; }),
       computeThangKetKhoExtra(startKey, endKey, INVENTORY_ITEMS).catch(err=>{ dataMissing.push('kho'); console.warn('[Tổng kết tháng] kho lỗi', err); return null; }),
@@ -21399,6 +21401,8 @@ async function renderThangKet(force=false){
     ]);
 
     if(obsolete())return;
+    const thieuLich = payScheduleMissingList(startKey, endKey);
+    if(thieuLich.length) dataMissing.push('lịch làm việc: '+thieuLich.length+' ca chưa có lịch nên chưa tính lương ('+thieuLich.slice(0,6).map(x=>x.name+' '+x.date.slice(8)+'/'+x.date.slice(5,7)).join(', ')+(thieuLich.length>6?'…':'')+') — bổ sung ở Lịch làm việc');
     const plLaborDuDoan = plPredictedLaborByDate(emps, scheds, startKey, endKey);
     const plWasteByDate = (ledgerReal && ledgerReal.wasteByDate) || {};
     const plHomNayKey = dkey(vnDate());
