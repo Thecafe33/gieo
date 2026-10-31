@@ -259,8 +259,10 @@ Nút "Cập nhật" ở sidebar (`manualCheckUpdate`, dựa trên service worker
 <script id="pgOrdersRetry">if(!window.PosGieoMods||PosGieoMods.orders===undefined){document.write('<scr'+'ipt src="js/posgieo/pos_orders.v1.js?r=1"><\/scr'+'ipt>');}</script>
 <script src="js/posgieo/pos_customers.v1.js"></script>
 <script id="pgCustomersRetry">if(!window.PosGieoMods||PosGieoMods.customers===undefined){document.write('<scr'+'ipt src="js/posgieo/pos_customers.v1.js?r=1"><\/scr'+'ipt>');}</script>
-<script src="js/posgieo/pos_cart.v1.js"></script>
-<script id="pgCartRetry">if(!window.PosGieoMods||PosGieoMods.cart===undefined){document.write('<scr'+'ipt src="js/posgieo/pos_cart.v1.js?r=1"><\/scr'+'ipt>');}</script>
+<script src="js/posgieo/pos_cart.v2.js"></script>
+<script id="pgCartRetry">if(!window.PosGieoMods||PosGieoMods.cart===undefined){document.write('<scr'+'ipt src="js/posgieo/pos_cart.v2.js?r=1"><\/scr'+'ipt>');}</script>
+<script src="js/posgieo/pos_pick_topping.v1.js"></script>
+<script id="pgPickTpRetry">if(!window.PosGieoMods||PosGieoMods.pickTp===undefined){document.write('<scr'+'ipt src="js/posgieo/pos_pick_topping.v1.js?r=1"><\/scr'+'ipt>');}</script>
 <script src="js/posgieo/pos_thanh_toan.v1.js"></script>
 <script id="pgThanhToanRetry">if(!window.PosGieoMods||PosGieoMods.thanhtoan===undefined){document.write('<scr'+'ipt src="js/posgieo/pos_thanh_toan.v1.js?r=1"><\/scr'+'ipt>');}</script>
 
@@ -2392,6 +2394,37 @@ body.assist-main-on .toast{bottom:calc(100px + var(--assist-h, 0px) + 10px);}
   </div>
 </div>
 
+<!-- KHÁCH TỰ CHỌN TOPPING — POPUP DANH SÁCH LY (pos_pick_topping.v1.js) -->
+<div class="togo-gift-popup center" id="pickTpUnitsPopup">
+  <div class="togo-gift-box">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
+      <div style="min-width:0;">
+        <div class="togo-gift-title">🧋 Khách tự chọn topping</div>
+        <div class="togo-gift-sub">Bấm vào từng ly để chọn topping (miễn phí)</div>
+      </div>
+      <button onclick="closePickTpUnits()" style="background:#e0e0e0;border:none;border-radius:50%;width:32px;height:32px;cursor:pointer;color:#666;font-size:15px;flex-shrink:0;">✕</button>
+    </div>
+    <div class="togo-gift-list" id="pickTpUnitsList" style="margin-top:14px;"></div>
+    <button class="togo-gift-confirm" id="pickTpUnitsDoneBtn" onclick="finishPickTpUnits()" style="display:none;">✅ Hoàn tất</button>
+  </div>
+</div>
+
+<!-- KHÁCH TỰ CHỌN TOPPING — POPUP CHỌN CHO 1 LY -->
+<div class="togo-gift-popup center" id="pickTpPopup" style="z-index:501;">
+  <div class="togo-gift-box">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
+      <div style="min-width:0;">
+        <div class="togo-gift-title" id="pickTpCount">Đã chọn 0</div>
+        <div class="togo-gift-sub" id="pickTpSub" style="font-size:17px;font-weight:800;color:var(--td);">Chọn topping cho ly này</div>
+      </div>
+      <button onclick="closePickTpPicker()" style="background:#e0e0e0;border:none;border-radius:50%;width:32px;height:32px;cursor:pointer;color:#666;font-size:15px;flex-shrink:0;">✕</button>
+    </div>
+    <div class="togo-gift-list" id="pickTpList" style="margin-top:14px;"></div>
+    <button class="togo-gift-confirm" id="pickTpConfirmBtn" onclick="confirmPickTp()">Xác nhận chọn topping</button>
+    <button onclick="pickTpNone()" style="width:100%;margin-top:8px;padding:13px;background:none;border:1px solid #ddd;color:#888;border-radius:14px;font-family:'Google Sans',sans-serif;font-size:14px;font-weight:700;cursor:pointer;">Khách không lấy topping</button>
+  </div>
+</div>
+
 <!-- CASH FUND SCREEN — [HIDDEN-CHANGE] xem mục 9 trong ghi chú ẩn cuối file -->
 <div id="cashfundScreen" class="screen" style="background:var(--bg);">
   <div style="background:var(--bg);padding:16px 16px 0;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:10;">
@@ -2598,7 +2631,7 @@ else {
 // [TÁCH POSGIEO 0E — kế hoạch 5.3] JS riêng THIẾT YẾU (js/posgieo/…) phải CHẠY HẾT (dấu PosGieoMods.<tên> === true) trước khi
 // làm gì tiếp — kể cả màn nhập mã quán (dùng escHtmlPos). Thẻ #pgUiRetry đã nạp lại một lần nếu file chưa từng chạy; tới đây
 // vẫn thiếu (mạng hỏng hẳn / file chưa có trên máy chủ) hoặc file chạy dở ('dang') → màn đỏ + Tải lại, KHÔNG chạy nghiệp vụ nửa chừng.
-const POS_MODS_THIET_YEU = { ui: 'js/posgieo/pos_ui.v1.js', assist: 'js/posgieo/pos_assist.v1.js', printer: 'js/posgieo/pos_printer.v1.js', printContent: 'js/posgieo/pos_print_content.v1.js', printUi: 'js/posgieo/pos_print_ui.v1.js', receive: 'js/posgieo/pos_receive.v2.js', prep: 'js/posgieo/pos_prep.v1.js', stockUnits: 'js/posgieo/pos_stock_units.v1.js', kho: 'js/posgieo/pos_kho.v2.js', count: 'js/posgieo/pos_count.v1.js', expiry: 'js/posgieo/pos_expiry.v1.js', shift: 'js/posgieo/pos_shift.v1.js', shiftClosing: 'js/posgieo/pos_shift_closing.v1.js', handover: 'js/posgieo/pos_handover.v1.js', cashfund: 'js/posgieo/pos_cashfund.v1.js', catalogAdmin: 'js/posgieo/pos_catalog_admin.v1.js', reports: 'js/posgieo/pos_reports.v1.js', orders: 'js/posgieo/pos_orders.v1.js', customers: 'js/posgieo/pos_customers.v1.js', cart: 'js/posgieo/pos_cart.v1.js', thanhtoan: 'js/posgieo/pos_thanh_toan.v1.js' };   // trợ lý: confirmPay gọi thẳng assistFinalizeOrder; máy in: lệnh tự chạy lúc mở app dùng POSPrinter / temEnsureConnected; nội dung bill/tem + giao diện máy in/quét/in lại: thanh toán và màn máy in gọi thẳng; nhận hàng: màn Kho / automation gọi thẳng; chế biến BTP: UnitEngine.init (getPreps, phân loại đối chiếu NL) + kho / kết ca gọi thẳng; mở chai / báo hết, màn Kho / hao hụt / cân, kiểm kê: UnitEngine.init (getItems) + màn Kho / kết ca / automation gọi thẳng; hạn dùng: Việc đầu ca / chuông (setInterval expirySoonTick ở lại script chính) / check-out gọi thẳng; ca (PIN nhân viên, check-in/out, Việc đầu ca, mở ca): mọi màn ký PIN + cổng bán (requireOpeningChecklistDone) gọi thẳng; kết ca / giao ca / đóng ngày: màn Ca làm việc, check-out, cổng bán (chặn khi đã đóng ngày) gọi thẳng; quỹ tiền mặt / mở két: lưới đếm mệnh giá (cfEmptyDenoms / cfRenderDenomGrid / cfDenomTotal) của mở ca / kết ca / giao ca + cfEmptyDenoms lúc nạp script chính (_shiftOpenDenoms), nút mở két ở màn bán gọi thẳng; sửa danh mục (món / Food / topping): màn Quản lý menu, ô giá cài đặt To Go (fmtPriceInput), trình nghe click toàn trang (hideTypeDropdown) gọi thẳng; doanh thu / xếp hạng / lịch sử: todayKey dùng khắp app (giỏ, khuyến mãi, kết ca); mua thêm / chi tiết / xoá bill / bổ sung bill: thanh toán đọc _backfillMode, màn Lịch sử gọi thẳng; khách (tra cứu SĐT, tích tem / ly miễn phí theo tem, danh sách khách): ô SĐT ở giỏ / thanh toán, confirmPay (loyaltyProcessAfterPay, _finalizeStampFreeAfterPay), listener scroll / click gọi thẳng; giỏ hàng / menu bán / chọn size / topping (renderMenu, giỏ, openPO, topping có số lượng, onCheckoutClick): màn bán, mọi nút món, thanh toán, khuyến mãi, trợ lý gọi thẳng; khuyến mãi / quà / giảm giá / To Go, thanh toán (VietQR, nghe chuyển khoản, tiền mặt, confirmPay), Tính riêng: giỏ (onCheckoutClick, getFinalTotal), màn bán, trợ lý, kết ca gọi thẳng
+const POS_MODS_THIET_YEU = { ui: 'js/posgieo/pos_ui.v1.js', assist: 'js/posgieo/pos_assist.v1.js', printer: 'js/posgieo/pos_printer.v1.js', printContent: 'js/posgieo/pos_print_content.v1.js', printUi: 'js/posgieo/pos_print_ui.v1.js', receive: 'js/posgieo/pos_receive.v2.js', prep: 'js/posgieo/pos_prep.v1.js', stockUnits: 'js/posgieo/pos_stock_units.v1.js', kho: 'js/posgieo/pos_kho.v2.js', count: 'js/posgieo/pos_count.v1.js', expiry: 'js/posgieo/pos_expiry.v1.js', shift: 'js/posgieo/pos_shift.v1.js', shiftClosing: 'js/posgieo/pos_shift_closing.v1.js', handover: 'js/posgieo/pos_handover.v1.js', cashfund: 'js/posgieo/pos_cashfund.v1.js', catalogAdmin: 'js/posgieo/pos_catalog_admin.v1.js', reports: 'js/posgieo/pos_reports.v1.js', orders: 'js/posgieo/pos_orders.v1.js', customers: 'js/posgieo/pos_customers.v1.js', cart: 'js/posgieo/pos_cart.v2.js', pickTp: 'js/posgieo/pos_pick_topping.v1.js', thanhtoan: 'js/posgieo/pos_thanh_toan.v1.js' };   // trợ lý: confirmPay gọi thẳng assistFinalizeOrder; máy in: lệnh tự chạy lúc mở app dùng POSPrinter / temEnsureConnected; nội dung bill/tem + giao diện máy in/quét/in lại: thanh toán và màn máy in gọi thẳng; nhận hàng: màn Kho / automation gọi thẳng; chế biến BTP: UnitEngine.init (getPreps, phân loại đối chiếu NL) + kho / kết ca gọi thẳng; mở chai / báo hết, màn Kho / hao hụt / cân, kiểm kê: UnitEngine.init (getItems) + màn Kho / kết ca / automation gọi thẳng; hạn dùng: Việc đầu ca / chuông (setInterval expirySoonTick ở lại script chính) / check-out gọi thẳng; ca (PIN nhân viên, check-in/out, Việc đầu ca, mở ca): mọi màn ký PIN + cổng bán (requireOpeningChecklistDone) gọi thẳng; kết ca / giao ca / đóng ngày: màn Ca làm việc, check-out, cổng bán (chặn khi đã đóng ngày) gọi thẳng; quỹ tiền mặt / mở két: lưới đếm mệnh giá (cfEmptyDenoms / cfRenderDenomGrid / cfDenomTotal) của mở ca / kết ca / giao ca + cfEmptyDenoms lúc nạp script chính (_shiftOpenDenoms), nút mở két ở màn bán gọi thẳng; sửa danh mục (món / Food / topping): màn Quản lý menu, ô giá cài đặt To Go (fmtPriceInput), trình nghe click toàn trang (hideTypeDropdown) gọi thẳng; doanh thu / xếp hạng / lịch sử: todayKey dùng khắp app (giỏ, khuyến mãi, kết ca); mua thêm / chi tiết / xoá bill / bổ sung bill: thanh toán đọc _backfillMode, màn Lịch sử gọi thẳng; khách (tra cứu SĐT, tích tem / ly miễn phí theo tem, danh sách khách): ô SĐT ở giỏ / thanh toán, confirmPay (loyaltyProcessAfterPay, _finalizeStampFreeAfterPay), listener scroll / click gọi thẳng; giỏ hàng / menu bán / chọn size / topping (renderMenu, giỏ, openPO, topping có số lượng, onCheckoutClick): màn bán, mọi nút món, thanh toán, khuyến mãi, trợ lý gọi thẳng; khuyến mãi / quà / giảm giá / To Go, thanh toán (VietQR, nghe chuyển khoản, tiền mặt, confirmPay), Tính riêng: giỏ (onCheckoutClick, getFinalTotal), màn bán, trợ lý, kết ca gọi thẳng
 {
   const thieu = Object.keys(POS_MODS_THIET_YEU).filter(k => !(window.PosGieoMods && window.PosGieoMods[k] === true));
   if (thieu.length) {
@@ -2971,7 +3004,7 @@ function mergePlainCartLines() {
   Object.entries(cart).forEach(([k, c]) => {
     if (!c || !c.itemId) return;
     if (c.toppings && c.toppings.length) return;
-    if (c._vKey || c._discountId || c.isFree || c.freeTpApplied) return;
+    if (c._vKey || c._discountId || c.isFree || c.freeTpApplied || c.pickTpApplied) return;
     try { if (_freeTpUnits && _freeTpUnits.includes(k)) return; } catch (e) {}
     const sig = [c.itemId, c.size, c.price, iceMode(c), c.isFood ? 1 : 0].join('|');
     if (seen[sig]) { cart[seen[sig]].qty += c.qty; delete cart[k]; }
@@ -4164,11 +4197,11 @@ auth.signInWithEmailAndPassword(POS_AUTH_EMAIL, POS_AUTH_PASS)
 function parseMenuSnap(data) {
   if (!data) return [];
   return Object.entries(data).map(([key, val]) => {
-    const { color, name, priceM, priceL, type } = val;
+    const { color, name, priceM, priceL, type, pickTopping } = val;
     const sizes = [];
     if (priceM && Number(priceM) > 0) sizes.push({ label: 'M', price: Number(priceM) });
     if (priceL && Number(priceL) > 0) sizes.push({ label: 'L', price: Number(priceL) });
-    return { id: key, name: name || '', color: color || '#E23A5D', type: type || '', sizes };
+    return { id: key, name: name || '', color: color || '#E23A5D', type: type || '', sizes, pickTopping: normPickToppingCfg(pickTopping) };  // [TỰ CHỌN TOPPING] pos_pick_topping.v1.js
   }).filter(m => m.name && m.sizes.length > 0);
 }
 

@@ -2804,6 +2804,22 @@ html.tab-ui .topbar.has-notifications .topbar-actions{flex:0 0 auto;max-width:ca
         </div>
       </div>
 
+      <!-- [TỰ CHỌN TOPPING] Chỉ menu To Go. Khách tự chọn đúng N topping (miễn phí, được chọn trùng) khi thanh toán. -->
+      <div id="mn-pick-wrap" style="background:#fff;border-radius:18px;padding:16px;">
+        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+          <input id="mn-f-pick" type="checkbox" onchange="mnPickToggle()" style="width:20px;height:20px;">
+          <span style="font-size:14px;font-weight:700;color:var(--td);">Khách tự chọn topping (miễn phí)</span>
+        </label>
+        <div id="mn-pick-body" style="display:none;margin-top:12px;">
+          <div style="font-size:11px;font-weight:700;color:var(--gt);text-transform:uppercase;letter-spacing:.6px;margin-bottom:6px;">Số topping khách được chọn</div>
+          <input id="mn-f-pick-n" type="number" min="1" max="10" step="1" inputmode="numeric" placeholder="VD: 2"
+            style="width:100%;border:1px solid var(--line,#ddd);border-radius:12px;padding:10px 12px;outline:none;font-family:inherit;font-size:15px;font-weight:700;color:var(--td);background:transparent;">
+          <div style="font-size:11px;font-weight:700;color:var(--gt);text-transform:uppercase;letter-spacing:.6px;margin:12px 0 6px;">Topping được chọn</div>
+          <div id="mn-pick-list" style="display:flex;flex-direction:column;gap:6px;max-height:220px;overflow-y:auto;"></div>
+          <div style="font-size:12px;color:var(--gt);margin-top:8px;">Hiện khi bấm Thanh toán, trước bước chọn đá. Khách chọn đúng số lượng (được chọn trùng loại) hoặc không lấy topping. Giá vốn tính theo topping thực chọn.</div>
+        </div>
+      </div>
+
       <!-- Màu thẻ -->
       <div style="background:#fff;border-radius:18px;padding:16px;">
         <div style="font-size:11px;font-weight:700;color:var(--gt);text-transform:uppercase;letter-spacing:.6px;margin-bottom:12px;">Màu thẻ</div>
@@ -3490,6 +3506,14 @@ async function saveCogsMap(updates){ // updates: {itemId:{M,L}, ...}
 }
 
 // Đọc menu THẬT từ POS (menu_gieogieo / menu_togo_gieogieo) — cùng logic parse với posgieotest.html
+// [TỰ CHỌN TOPPING] Cấu hình món «khách tự chọn N topping miễn phí trong danh sách». null = món thường.
+// Hợp lệ khi n ≥ 1 và có ít nhất 1 topping — khớp normPickToppingCfg bên posgieo.html.
+function normPickToppingCfg(v){
+  if(!v || typeof v !== 'object') return null;
+  const n = Math.floor(Number(v.n)) || 0;
+  const ids = Array.isArray(v.toppingIds) ? v.toppingIds.filter(x => typeof x === 'string' && x) : [];
+  return (n >= 1 && ids.length) ? { n, toppingIds: ids } : null;
+}
 function parseMenuSnap(data){
   if(!data) return [];
   return Object.entries(data).map(([key,val])=>{
@@ -3497,7 +3521,8 @@ function parseMenuSnap(data){
     const sizes = [];
     if(priceM && Number(priceM)>0) sizes.push({label:'M', price:Number(priceM)});
     if(priceL && Number(priceL)>0) sizes.push({label:'L', price:Number(priceL)});
-    return {id:key, name:name||'', type:type||'', sizes};
+    // [TỰ CHỌN TOPPING] {n, toppingIds} — giữ nguyên qua lần đọc để sửa món không làm mất cấu hình.
+    return {id:key, name:name||'', type:type||'', sizes, pickTopping: normPickToppingCfg(val.pickTopping)};
   }).filter(m=>m.name && m.sizes.length>0);
 }
 async function loadPosMenu(kind){
@@ -30149,6 +30174,24 @@ function openFoodForm(id) {
   popup.style.display = 'flex';
 }
 
+// [TỰ CHỌN TOPPING] Ô cấu hình trong form món. Chỉ hiện ở menu To Go (menu Tại quán đã ẩn, POS chỉ bán To Go).
+function mnPickFill(cfg) {
+  const wrap = document.getElementById('mn-pick-wrap');
+  if (wrap) wrap.style.display = _curMenuTab === 'togo' ? '' : 'none';
+  document.getElementById('mn-f-pick').checked = !!cfg;
+  document.getElementById('mn-f-pick-n').value = cfg ? cfg.n : '';
+  const sel = new Set(cfg ? cfg.toppingIds : []);
+  const list = document.getElementById('mn-pick-list');
+  list.innerHTML = (TOPPINGS || []).length
+    ? TOPPINGS.map(t => `<label style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:#f7f7f7;border-radius:10px;cursor:pointer;">
+        <input type="checkbox" class="mn-pick-cb" value="${escapeHtmlAttr(t.id)}" ${sel.has(t.id) ? 'checked' : ''} style="width:18px;height:18px;">
+        <span style="font-size:14px;font-weight:600;color:var(--td);">${escapeHtmlAttr(t.name || t.id)}</span></label>`).join('')
+    : '<div style="color:#bbb;font-size:13px;padding:8px;">Chưa có topping nào (thêm ở tab Topping).</div>';
+  mnPickToggle();
+}
+function mnPickToggle() {
+  document.getElementById('mn-pick-body').style.display = document.getElementById('mn-f-pick').checked ? 'block' : 'none';
+}
 function openMenuForm(id) {
   _mnEditId = id;
   buildColorPicker();
@@ -30170,6 +30213,7 @@ function openMenuForm(id) {
     document.getElementById('mn-f-pl').value = pl ? pl.price.toLocaleString('vi-VN') : '';
     _mnColor = m.color || '#E23A5D';
     delBtn.style.display = 'block';
+    mnPickFill(m.pickTopping);
   } else {
     title.textContent = 'Thêm món mới' + tabLabel;
     document.getElementById('mn-f-name').value = '';
@@ -30178,6 +30222,7 @@ function openMenuForm(id) {
     document.getElementById('mn-f-pl').value = '';
     _mnColor = '#E23A5D';
     delBtn.style.display = 'none';
+    mnPickFill(null);
   }
   refreshColorPicker();
   document.getElementById('mn-popup').style.display = 'flex';
@@ -30244,6 +30289,7 @@ function renderMnList() {
           <div style="width:44px;height:44px;border-radius:12px;background:${m.color||'#E23A5D'};flex-shrink:0;"></div>
           <div style="flex:1;min-width:0;">
             <div style="font-size:16px;font-weight:700;color:var(--td);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${m.name}</div>
+            ${m.pickTopping ? `<div style="font-size:11px;font-weight:700;color:#b45309;margin-top:2px;">🧋 Khách tự chọn ${m.pickTopping.n} topping</div>` : ''}
             <div style="font-size:12px;color:var(--gt);margin-top:3px;">
               ${priceM ? 'M: '+priceM.price.toLocaleString('vi-VN') : ''}${priceM && priceL ? ' · ' : ''}${priceL ? 'L: '+priceL.price.toLocaleString('vi-VN') : ''}đ
             </div>
@@ -30449,6 +30495,15 @@ function saveMenuItem() {
     priceM: priceM || 0,
     priceL: priceL || 0
   };
+
+  // [TỰ CHỌN TOPPING] Chỉ lưu khi bật; tắt = không ghi trường (ref.set ghi đè nên cấu hình cũ tự mất).
+  if (_curMenuTab === 'togo' && document.getElementById('mn-f-pick').checked) {
+    const n = Math.floor(Number(document.getElementById('mn-f-pick-n').value)) || 0;
+    const ids = Array.from(document.querySelectorAll('#mn-pick-list .mn-pick-cb:checked')).map(cb => cb.value);
+    if (n < 1) { toast('Nhập số topping khách được chọn (≥ 1)!'); return; }
+    if (!ids.length) { toast('Chọn ít nhất 1 topping cho khách chọn!'); return; }
+    data.pickTopping = { n, toppingIds: ids };
+  }
 
   const fbNode = getMnFirebaseRef();
   const ref = _mnEditId
