@@ -703,17 +703,6 @@ input, button, select, textarea { font-size: 1rem; }
     height: calc(100vh - 80px) !important;
     overflow: hidden;
 }
-    #bed-dynamic-island {
-    transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
-}
-    @keyframes slide-up-island {
-    from { opacity: 0; transform: translateY(-6px); }
-    to { opacity: 1; transform: translateY(0); }
-}
-#bed-dynamic-island:not(.hidden) {
-    display: flex !important;
-    animation: slide-up-island 0.4s cubic-bezier(0.16, 1, 0.3, 1);
-}
 
 /* FIX: Mobile layout cho view-discount (tab Quản lý) */
 @media only screen and (max-width: 768px) {
@@ -3031,21 +3020,7 @@ fstore.collection('customers').onSnapshot(snap => {
     snap.forEach(doc => { customerMap[doc.id] = { phone: doc.id, ...doc.data() }; });
 }, err => console.error('[customerMap]', err));
 
-    db.ref('beds').on('value', (snapshot) => {
-        const data = snapshot.val();
-        currentBedList = [];
-        if(data) {
-            Object.keys(data).forEach(key => {
-                let item = data[key];
-                item.key = key;
-                currentBedList.push(item);
-            });
-        }
-        const viewBed = document.getElementById('view-bed');
-        if(viewBed && !viewBed.classList.contains('hidden')) {
-            renderBedBookings(currentBedList);
-        }
-    });
+    // [DỌN 03/11] Bỏ listener node 'beds' cũ: không có nơi nào ghi vào node này; nếu còn dữ liệu rác nó ghi đè danh sách bed thật.
     switchView('menu');
     listenToClientInput();
     _bellInit();
@@ -5121,6 +5096,27 @@ function changeBedDate(dateInputValue) {
         renderBedBookings(currentBedList);
     });
 }
+// [FIX 03/11] Bed nào đang có khách: gom cả danh sách điện thoại (globalAllBookings) và PC (currentBedList).
+// Trước đây 3 chỗ (Xếp bed / Đổi bed / chọn bed) chỉ xem currentBedList — điện thoại không nạp danh sách này → bed đang bận vẫn hiện "trống", xếp trùng được.
+function _bedBusyOn(bedId, exceptId) {
+    var seen = {}, all = [].concat(globalAllBookings || [], currentBedList || []);
+    for (var i = 0; i < all.length; i++) {
+        var b = all[i]; if (!b) continue;
+        var id = b.id || b.key;
+        if (id && seen[id]) continue; if (id) seen[id] = 1;
+        if (id && id === exceptId) continue;
+        if (b.bedId == bedId && b.status && (b.status.includes('active') || b.status.includes('đang dùng'))) return b;
+    }
+    return null;
+}
+// Chữ ký các trường làm thay đổi màn chi tiết — chỉ dựng lại chi tiết khi chữ ký đổi (không đọc thêm, không giật màn mỗi lần dữ liệu nhấp nháy)
+function _bedSig(b) {
+    if (!b) return '';
+    return [b.status, b.bedId, b.start, b.end, b.realEndTime, b.totalSpend, b.hasPenalty, b.penaltyAmount, b.rescheduleCount, b.cancelType, b.preferredBed,
+        b.preorder ? b.preorder.status + ':' + _countPreorderQty(b.preorder) : ''].join('|');
+}
+function _bedIsFinal(b) { var st = String((b && b.status) || ''); return st.includes('đã xong') || st.includes('đã hủy'); }
+var _pcSel = null;   // lịch đang mở ở khung chi tiết PC: {id, sig}
 function renderBedBookings(list) {
     const now = vnDate();
     const AUTO_CANCEL_MINUTES = 50;
@@ -5164,6 +5160,20 @@ function renderBedBookings(list) {
         });
     }
 
+    // [FIX 03/11] Trước đây MỌI lần dữ liệu đổi (khách đặt / đổi giờ trên app, gia hạn, phí vệ sinh…) đều đóng khung chi tiết PC về trống.
+    // Nay giữ nguyên lịch đang mở (chỉ dựng lại khi nội dung của nó đổi); lịch đã xong / huỷ / biến mất → về trống như cũ.
+    if (_pcSel) {
+        var _ni = (list || []).findIndex(function (b) { return (b.id || b.key) === _pcSel.id; });
+        if (_ni > -1 && !_bedIsFinal(list[_ni])) {
+            var _same = _bedSig(list[_ni]) === _pcSel.sig;
+            selectedBedIndex = _ni;
+            renderLeftColumnList();
+            renderRightColumnMap();
+            if (!_same) selectBedItem(_ni);
+            return;
+        }
+    }
+    _pcSel = null;
     selectedBedIndex = -1;
 
     document.getElementById('detail-empty-state')?.classList.remove('hidden');
@@ -5357,6 +5367,7 @@ function selectBedItem(index) {
     renderLeftColumnList();
 
     var data = currentBedList[index];
+    if (data) _pcSel = { id: data.id || data.key, sig: _bedSig(data) };
     var panel = document.getElementById('detail-content-panel');
     var empty = document.getElementById('detail-empty-state');
 
@@ -5629,10 +5640,15 @@ function selectBedItem(index) {
                         </div>
 
                         <div class="nd-dash pt-3 flex justify-center gap-2">
-                            <button onclick="copyBedNotification('${data.end}')"
+                            <button onclick="copyBedStartNotice('${bookingId}')"
                                 class="nd-chipbtn transition-all active:scale-95">
                                 <span class="material-symbols-outlined">content_copy</span>
-                                Copy thông báo kết thúc
+                                Copy bắt đầu
+                            </button>
+                            <button onclick="copyBedEndNotice('${bookingId}')"
+                                class="nd-chipbtn transition-all active:scale-95">
+                                <span class="material-symbols-outlined">content_copy</span>
+                                Copy hết giờ
                             </button>
                             <button onclick="sendWarning(this)" data-id="${bookingId}" data-name="${data.name||'Khách hàng'}"
                                 id="warn-btn-pc-${bookingId}"
@@ -5920,13 +5936,6 @@ function _doShowBedDetail(booking, bedId) {
             + '<button type="button" class="cbp-x" title="Thoát order bed" aria-label="Thoát order bed" onclick="resetOrderingMode()"><span class="material-symbols-outlined">close</span></button>';
     }
 
-    const island = document.getElementById('bed-dynamic-island');
-    if (island && booking && false) { // [14/10] thay bằng pill ở đầu giỏ hàng (#cart-bed-info)
-        document.getElementById('island-cust-name').innerText = booking.name || "Khách lẻ";
-        document.getElementById('island-time-range').innerText = `${booking.start} - ${booking.end}`;
-        document.getElementById('island-duration').innerText = getDurationLabel(booking.start, booking.end);
-        island.classList.remove('hidden');
-    }
 }
 function finalizeBedCheckIn(bedId) {
     if (!pendingBedOrder) return alert("Lỗi: Không tìm thấy thông tin khách hàng!");
@@ -5934,10 +5943,7 @@ function finalizeBedCheckIn(bedId) {
     var bookingId = pendingBedOrder.id || pendingBedOrder.key;
     if (!bookingId) return alert("Lỗi dữ liệu: Không tìm thấy mã đơn hàng trên hệ thống.");
 
-    const isBusy = currentBedList.find(b =>
-        (b.status && (b.status.includes('active') || b.status.includes('đang dùng')))
-        && b.bedId == bedId
-    );
+    const isBusy = _bedBusyOn(bedId);
     if (isBusy) return alert("Bed 0" + bedId + " đang có khách rồi! Vui lòng chọn Bed khác.");
 
     var now = vnDate();
@@ -6468,6 +6474,12 @@ function submitCancelBooking(type) {
     }, (err) => {
         document.getElementById('loading-overlay').style.display = 'none';
         if (!err) {
+            // [FIX 03/11] điện thoại: đóng màn chi tiết + báo đã huỷ (trước: màn chi tiết đứng nguyên, không biết đã huỷ chưa)
+            var _ms = document.getElementById('mob-bed-detail-screen');
+            if (window.currentMobileBooking && window.currentMobileBooking.id === bookingId && _ms && !_ms.classList.contains('translate-x-full')) {
+                closeMobileBedDetail();
+                showAppModal('Đã huỷ lịch', '<b>' + String(guestName).replace(/</g, '&lt;') + '</b> · ' + (booking.start || '') + ' – ' + (booking.end || ''), '✅');
+            }
             openBedManager();
         } else {
             alert("Lỗi: " + err.message);
@@ -6650,6 +6662,8 @@ function confirmExtendTime() {
         booking.end = newEndStr;
         if (window.currentMobileBooking && window.currentMobileBooking.id === bookingId) window.currentMobileBooking.end = newEndStr;
         if (window.currentPcBooking && window.currentPcBooking.id === bookingId) window.currentPcBooking.end = newEndStr;
+        var _ms = document.getElementById('mob-bed-detail-screen');
+        if (window.currentMobileBooking && window.currentMobileBooking.id === bookingId && _ms && !_ms.classList.contains('translate-x-full')) _showMobileBedDetailRender(window.currentMobileBooking);   // [FIX 03/11] nhãn "Kết thúc" mới
         if (globalAllBookings) {
             var idx = globalAllBookings.findIndex(b => b.id === bookingId);
             if (idx > -1) globalAllBookings[idx].end = newEndStr;
@@ -7651,9 +7665,7 @@ function renderBedSelection() {
     var orderMap = [1, 3, 2, 4];
 
     orderMap.forEach(i => {
-        var isBusy = currentBedList.find(b =>
-            b.bedId == i && b.status && (b.status.includes('active') || b.status.includes('đang dùng'))
-        );
+        var isBusy = _bedBusyOn(i);
         var isPreferred = preferredBed === String(i);
 
         var btnHTML = "";
@@ -8580,7 +8592,17 @@ function changeBedDateMobile(dateVal) {
         });
         renderMobileBedList(list);
         if (typeof _bedEndDecorate === 'function') _bedEndDecorate();
+        _mobDetailRefresh();
     });
+}
+// [FIX 03/11] Màn chi tiết điện thoại phủ lên danh sách và giữ bản chụp lịch lúc mở → huỷ / đổi bed / xếp bed / phí vệ sinh / khách đổi giờ xong màn này vẫn hiện trạng thái cũ.
+// Dữ liệu danh sách vừa nạp (đã có sẵn, không đọc thêm) → nếu nội dung lịch đang mở đã đổi thì dựng lại.
+function _mobDetailRefresh() {
+    var cur = window.currentMobileBooking, scr = document.getElementById('mob-bed-detail-screen');
+    if (!cur || !scr || scr.classList.contains('translate-x-full')) return;
+    var fresh = (globalAllBookings || []).find(function (b) { return b.id === cur.id; });
+    if (!fresh || _bedSig(fresh) === _bedSig(cur)) return;
+    _showMobileBedDetailRender(fresh);
 }
 
 function renderMobileBedList(list) {
@@ -8824,14 +8846,19 @@ function renderDetailContentMobile(b) {
 
     <!-- Nút copy + cảnh báo (active) -->
     ${isActive ? `
-    <div class="flex gap-3">
-        <button onclick="copyBedNotification('${b.end}')"
-            class="nd-btn plain flex-1 h-11 rounded-[1rem]" style="font-size:12.5px">
-            <span class="material-symbols-outlined" style="font-size:17px">content_copy</span>
-            Copy TB
+    <div class="flex gap-2">
+        <button onclick="copyBedStartNotice('${b.id}')"
+            class="nd-btn plain flex-1 h-11 rounded-[1rem]" style="font-size:12px;padding-left:6px;padding-right:6px">
+            <span class="material-symbols-outlined" style="font-size:16px">content_copy</span>
+            Bắt đầu
+        </button>
+        <button onclick="copyBedEndNotice('${b.id}')"
+            class="nd-btn plain flex-1 h-11 rounded-[1rem]" style="font-size:12px;padding-left:6px;padding-right:6px">
+            <span class="material-symbols-outlined" style="font-size:16px">content_copy</span>
+            Hết giờ
         </button>
         <button onclick="sendWarning(this)" data-id="${b.id}" data-name="${b.name||'Khách hàng'}"
-            class="warn-mob-btn nd-btn soft amber relative flex-1 h-11 rounded-[1rem]" style="font-size:12.5px">
+            class="warn-mob-btn nd-btn soft amber relative flex-1 h-11 rounded-[1rem]" style="font-size:12px;padding-left:6px;padding-right:6px">
             <span class="material-symbols-outlined" style="font-size:17px">warning</span>
             Cảnh báo
             <span class="warn-mob-badge bd-cnt hidden"></span>
@@ -10057,9 +10084,6 @@ function resetOrderingMode(isSilent = false) {
     activeOrderingBedId = null;
     isCheckoutFlow = false;
 
-    const island = document.getElementById('bed-dynamic-island');
-    if (island) island.classList.add('hidden');
-
     const cartInfo = document.getElementById('cart-bed-info');
     if (cartInfo) cartInfo.remove();
 
@@ -10269,24 +10293,59 @@ function submitStoreOff() {
 function resumeStore() {
     db.ref('store_status').set({ isOff: false });
 }
-function copyBedNotification(endTime) {
-    const text = `🌟 Chào bạn đến Cafe in Bed 🌟
-Thời gian sử dụng Bed của bạn kết thúc lúc ${endTime}.
-Vui lòng tự theo dõi thời gian, hệ thống không gửi thông báo kết thúc.
-The Cafe 33 nghiêm cấm mọi hành vi vi phạm thuần phong mỹ tục trong khu vực Bed.
-Mọi vi phạm sẽ bị xử lý theo đúng nội quy đã cam kết, bao gồm bồi thường 2.244.000đ nếu phát sinh thiệt hại.
-Vui lòng không làm bẩn nệm. Phí vệ sinh 30–50K sẽ được áp dụng nếu vi phạm.
-Hãy sử dụng dịch vụ văn minh – đúng quy định.
-🤖 The Cafe 33`;
-
-    navigator.clipboard.writeText(text).then(() => {
-        if(typeof showAppModal === 'function') {
-            showAppModal("Đã sao chép", "Nội dung thông báo đã được sao chép!<br> gửi cho khách ngay.", "📋");
-        } else {
-            alert("Đã sao chép nội dung thông báo!");
+// [COPY BED 03/11] Hai nút copy thông báo gửi khách (Zalo / tin nhắn): bắt đầu bed + sắp hết / quá giờ (tính theo LÚC BẤM).
+// Thay nút "Copy thông báo kết thúc" cũ (nội dung cũ là lời chào đầu bed, tự bỏ qua lỗi sao chép → bấm không có phản hồi).
+function _bedFind(id) {
+    var a = (globalAllBookings || []).find(function (b) { return b && (b.id || b.key) === id; });
+    return a || (currentBedList || []).find(function (b) { return b && (b.id || b.key) === id; }) || null;
+}
+function _bedCopyText(text) {
+    return new Promise(function (ok, fail) {
+        function fallback() {
+            try {
+                var ta = document.createElement('textarea');
+                ta.value = text; ta.setAttribute('readonly', ''); ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+                document.body.appendChild(ta); ta.focus(); ta.select(); ta.setSelectionRange(0, text.length);
+                var done = document.execCommand('copy'); document.body.removeChild(ta);
+                done ? ok() : fail();
+            } catch (e) { fail(e); }
         }
-    }).catch(err => {
+        if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(ok, fallback); else fallback();
     });
+}
+function _bedCopyNotice(title, text) {
+    _bedCopyText(text).then(function () {
+        showAppModal('Đã sao chép', title + '<br><span style="color:#9ca3af;font-size:12px">Dán gửi cho khách ngay.</span>', '📋');
+    }, function () {
+        var e = (typeof _escGiftTxt === 'function') ? _escGiftTxt : function (x) { return String(x == null ? '' : x); };
+        showAppModal('Chưa sao chép được', 'Máy chặn sao chép — bấm giữ vào nội dung dưới để tự chép:<div style="margin-top:8px;padding:10px;border-radius:12px;background:#f4f6f3;font-size:12.5px;text-align:left;white-space:pre-wrap;user-select:text;-webkit-user-select:text">' + e(text) + '</div>', '⚠️');
+    });
+}
+function copyBedStartNotice(bookingId) {
+    var b = _bedFind(bookingId); if (!b) return;
+    var n = (b.name || '').trim() || 'bạn';
+    _bedCopyNotice('Thông báo bắt đầu bed', 'Chào ' + n + ',\n'
+        + 'Lịch đặt bed của ' + n + ' bắt đầu lúc ' + b.start + ', kết thúc lúc ' + b.end + '.\n'
+        + 'Để theo dõi thời gian bed còn lại, vui lòng truy cập lại trang đặt bed https://the-cafe-33.web.app để biết thêm chi tiết.\n'
+        + 'The Cafe 33 xin cảm ơn.');
+}
+function copyBedEndNotice(bookingId) {
+    var b = _bedFind(bookingId); if (!b) return;
+    var n = (b.name || '').trim() || 'bạn';
+    var now = Date.now(), raw = _bellMinsLeft(b, now);
+    var left = raw === null ? null : (raw >= 0 ? _bellMinsLeft(b, now - 59999) : raw);   // còn lại làm tròn LÊN, quá giờ làm tròn xuống
+    var head;
+    if (left === null) head = 'Lịch đặt bed của bạn sắp kết thúc (lúc ' + b.end + ').';
+    else if (left > 0) head = 'Lịch đặt bed của bạn sẽ kết thúc sau ' + left + ' phút nữa (lúc ' + b.end + ').';
+    else if (left === 0) head = 'Lịch đặt bed của bạn đã đến giờ kết thúc (' + b.end + ').';
+    else head = 'Lịch đặt bed của bạn đã quá ' + (-left) + ' phút so với giờ kết thúc (' + b.end + ').';
+    var fee = (left !== null && left < -5)
+        ? 'Đã quá 5 phút kể từ giờ kết thúc, quán sẽ tính phí 15K.'
+        : 'Nếu quá 5 phút kể từ thời gian kết thúc mà vẫn chưa rời bed, quán sẽ tính phí 15K.';
+    _bedCopyNotice('Thông báo sắp hết / quá giờ bed', 'Chào ' + n + ',\n' + head + '\n'
+        + 'Vui lòng chuẩn bị rời khỏi bed, The Cafe 33 cần chuẩn bị cho khách hàng tiếp theo.\n'
+        + 'Lịch bed của bạn không thể gia hạn thêm. ' + fee + '\n'
+        + 'The Cafe 33 xin cảm ơn.');
 }
 let bookingToMove = null;
 
@@ -10306,12 +10365,7 @@ function openMoveBedModal(bookingId) {
     grid.innerHTML = "";
 
     [1, 2, 3, 4].forEach(i => {
-        const isBusy = currentBedList.find(b =>
-            b.bedId == i &&
-            b.status &&
-            (b.status.includes('active') || b.status.includes('đang dùng')) &&
-            b.id !== bookingId
-        );
+        const isBusy = _bedBusyOn(i, bookingId);
 
         let btnHtml = "";
 
