@@ -6464,6 +6464,8 @@ async function ctnLoadPrepEvents(c){
   }
 }
 function _ctnDetailRender(box, c, recv, prepEvents){
+  // Vẽ lại (vd sau "Khôi phục") không truyền lại sự kiện nấu mẻ → dùng bản đã nạp lúc mở Chi tiết tem, không mất dòng nào.
+  if(prepEvents) box._ctnPrepEvents = prepEvents; else prepEvents = box._ctnPrepEvents || [];
   const dt = iso => {
     const d = iso ? vnDate(iso) : null;
     return (d && !isNaN(d)) ? `${fmtDateVN(d)} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}` : '';
@@ -6677,7 +6679,7 @@ async function ctnRestoreAtomicSealed(containerId){
     logAudit('adjust','stock_container',containerId,{restoreAtomicSealed: Number(c.baseQty)||0});
     toast('✅ Đã khôi phục tem về "chưa mở"');
     const box = document.getElementById('ctnDetailBody');
-    if(box){ const fresh = await ref.get(); const cf = {id:containerId, ...fresh.data()}; _ctnDetailRender(box, cf, null, await ctnLoadPrepEvents(cf)); }
+    if(box){ const fresh = await ref.get(); _ctnDetailRender(box, {id:containerId, ...fresh.data()}, null); }
     if(typeof renderKhoAllItemsBody === 'function' && document.getElementById('ctnAllBody')) renderKhoAllItemsBody(true);
   }catch(err){
     console.error('ctnRestoreAtomicSealed lỗi', err);
