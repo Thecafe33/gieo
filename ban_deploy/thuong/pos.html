@@ -7313,22 +7313,27 @@ function _reschedHTML(b) {
     var list = _reschedList(b);
     var e = (typeof _escGiftTxt === 'function') ? _escGiftTxt : function (x) { return String(x == null ? '' : x); };
     var dm = function (d) { var p = String(d || '').split('/'); return p.length >= 2 ? p[0] + '/' + p[1] : e(d); };
-    var slot = function (d, s0, e0) { return '<b>' + dm(d) + ' · ' + e(s0 || '--:--') + '–' + e(e0 || '--:--') + '</b>'; };
+    var slot = function (cls, d, s0, e0) {
+        return '<div class="rs-sl ' + cls + '"><i>' + (d ? dm(d) : '--') + '</i><b>' + (s0 ? e(s0) + '–' + e(e0) : '--:--') + '</b></div>';
+    };
+    var last = list.length ? list[list.length - 1] : null;
+    var lastWhen = last && last.at ? bookingCreatedAtVN({ createdAt: last.at }) : '';
     var rows = list.map(function (h, i) {
         var when = h.at ? bookingCreatedAtVN({ createdAt: h.at }) : '';
-        var sameDay = h.fd && h.fd === h.td;
-        return '<div style="margin-top:6px;font-size:12.5px;line-height:1.5;font-weight:600">'
-            + '<span style="font-weight:800;color:#c2410c">Lần ' + (i + 1) + '</span>' + (when ? ' · lúc ' + e(when) : '') + '<br>'
-            + '<span style="text-decoration:line-through;opacity:.65">' + (h.fs ? dm(h.fd) + ' · ' + e(h.fs) + '–' + e(h.fe) : 'không rõ giờ cũ') + '</span>'
-            + ' → <span style="color:#c2410c">' + slot(h.td, h.ts, h.te) + '</span>'
-            + (sameDay ? '' : ' <span style="font-weight:800;color:#c2410c">(đổi ngày)</span>')
-            + (h.fb ? '<br><span style="opacity:.75">Đã mất BED 0' + e(h.fb) + ' đã xếp, cần xếp lại</span>' : '')
+        var chips = (h.fd && h.td && h.fd !== h.td ? '<span class="rs-tag">Đổi ngày</span>' : '')
+            + (h.fb ? '<span class="rs-tag bad">Mất BED 0' + e(h.fb) + ' · xếp lại</span>' : '');
+        return '<div class="rs-row"><span class="rs-i">' + (i + 1) + '</span>'
+            + '<div class="rs-flow">' + slot('old', h.fd, h.fs, h.fe) + '<span class="material-symbols-outlined rs-ar">arrow_forward</span>' + slot('new', h.td, h.ts, h.te) + '</div>'
+            + ((when || chips) ? '<div class="rs-meta">' + (when ? '<span>lúc ' + e(when) + '</span>' : '') + chips + '</div>' : '')
             + '</div>';
     }).join('');
     var missing = n - list.length;
-    if (missing > 0) rows += '<div style="margin-top:6px;font-size:11.5px;font-weight:600;opacity:.7">' + missing + ' lần đổi trước khi hệ thống ghi lịch sử — không có giờ cũ</div>';
-    return '<div class="nd-tile rounded-[1.5rem] p-4" style="border:1px solid #fdba74;background:#fff7ed">'
-        + '<p class="nd-lab" style="color:#c2410c">Khách đã đổi giờ ' + n + '/2 lần</p>' + rows + '</div>';
+    if (missing > 0) rows += '<div class="rs-note">' + missing + ' lần đổi trước khi hệ thống ghi lịch sử — không có giờ cũ</div>';
+    return '<div class="rs">'
+        + '<div class="rs-h"><span class="rs-ic"><span class="material-symbols-outlined">event_repeat</span></span>'
+        + '<div class="min-w-0 flex-1"><p class="rs-t">Khách đã đổi giờ</p>' + (lastWhen ? '<p class="rs-s">Gần nhất lúc ' + e(lastWhen) + '</p>' : '') + '</div>'
+        + '<span class="rs-n' + (n >= 2 ? ' full' : '') + '">' + n + '/2 lần</span></div>'
+        + rows + '</div>';
 }
 function _reschedChip(b) {
     var n = _reschedCount(b);
@@ -14388,6 +14393,32 @@ function keypadConfirm() {
 .nb-card.bk-warn{--c:var(--bd-warn)}.nb-card.bk-over{--c:var(--bd-over)}
 .nb-card.bk-warn::after,.nb-card.bk-over::after{content:attr(data-bk-tag);position:absolute;z-index:20;top:-8px;left:50%;transform:translateX(-50%);font-size:10px;font-weight:800;letter-spacing:.02em;padding:3px 10px;border-radius:99px;white-space:nowrap;color:#fff;background:var(--c);box-shadow:0 4px 10px -3px color-mix(in srgb,var(--c) 60%,transparent)}
 .nb-card.is-sel.bk-warn::after,.nb-card.is-sel.bk-over::after{background:#fff;color:var(--c)}
+
+/* [ĐỔI GIỜ 03/11] Khối "Khách đã đổi giờ" (chi tiết PC + mobile) — pha từ --bd-warn như thẻ trạng thái, cùng nhịp bo / chữ với nd-tile */
+.rs{--c:var(--bd-warn);--ct:color-mix(in srgb,var(--c) 84%,#111827);border-radius:1.5rem;padding:14px 16px;border:1px solid color-mix(in srgb,var(--c) 22%,var(--bd-panel));
+  background:radial-gradient(ellipse at 8% 0%,color-mix(in srgb,var(--c) 14%,var(--bd-panel)),transparent 70%),color-mix(in srgb,var(--c) 5%,var(--bd-panel))}
+.rs-h{display:flex;align-items:center;gap:10px}
+.rs-ic{width:34px;height:34px;border-radius:99px;display:flex;align-items:center;justify-content:center;flex-shrink:0;background:color-mix(in srgb,var(--c) 14%,var(--bd-panel));color:var(--ct)}
+.rs-ic .material-symbols-outlined{font-size:19px}
+.rs-t{color:var(--bd-ink);font-weight:850;font-size:14px;letter-spacing:-.2px;line-height:1.2}
+.rs-s{color:var(--bd-sub);font-weight:650;font-size:11px;margin-top:1px;font-variant-numeric:tabular-nums}
+.rs-n{flex-shrink:0;border-radius:99px;padding:4px 10px;font-size:11px;font-weight:800;color:var(--ct);background:color-mix(in srgb,var(--c) 12%,var(--bd-panel));border:1px solid color-mix(in srgb,var(--c) 26%,var(--bd-panel))}
+.rs-n.full{background:var(--c);color:#fff;border-color:var(--c)}
+.rs-row{margin-top:10px;padding-top:10px;border-top:1px dashed color-mix(in srgb,var(--c) 26%,var(--bd-line));display:grid;grid-template-columns:22px 1fr;column-gap:10px;row-gap:6px;align-items:center}
+.rs-row:first-of-type{}
+.rs-i{width:22px;height:22px;border-radius:99px;font-size:11px;font-weight:850;display:flex;align-items:center;justify-content:center;color:#fff;background:var(--c)}
+.rs-flow{display:flex;align-items:center;gap:8px;min-width:0}
+.rs-ar{font-size:18px;color:var(--ct);flex-shrink:0}
+.rs-sl{display:flex;flex-direction:column;align-items:center;justify-content:center;flex:1;min-width:0;border-radius:14px;padding:6px 8px;font-variant-numeric:tabular-nums;line-height:1.25}
+.rs-sl i{font-style:normal;font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase}
+.rs-sl b{font-size:15px;font-weight:850;letter-spacing:-.3px}
+.rs-sl.old{background:var(--bd-fill);color:var(--bd-sub)}
+.rs-sl.old b{text-decoration:line-through;text-decoration-thickness:1.5px;font-weight:700}
+.rs-sl.new{background:color-mix(in srgb,var(--c) 13%,var(--bd-panel));color:var(--ct);border:1px solid color-mix(in srgb,var(--c) 30%,var(--bd-panel))}
+.rs-meta{grid-column:2;display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:11px;font-weight:650;color:var(--bd-sub);font-variant-numeric:tabular-nums}
+.rs-tag{border-radius:99px;padding:2px 8px;font-size:10.5px;font-weight:800;color:var(--ct);background:color-mix(in srgb,var(--c) 12%,var(--bd-panel));border:1px solid color-mix(in srgb,var(--c) 24%,var(--bd-panel))}
+.rs-tag.bad{color:var(--bd-over);background:color-mix(in srgb,var(--bd-over) 9%,var(--bd-panel));border-color:color-mix(in srgb,var(--bd-over) 24%,var(--bd-panel))}
+.rs-note{margin-top:10px;font-size:11.5px;font-weight:650;color:var(--bd-sub);padding:8px 12px;border-radius:12px;background:var(--bd-fill)}
 
 /* Khung chi tiết PC (selectBedItem) — bo 20px khớp khung trắng ngoài (trước 2.5rem lồng trong 20px → lộ góc trắng) */
 .nd{background:radial-gradient(ellipse at 8% 0%,color-mix(in srgb,var(--c) 16%,var(--bd-panel)),transparent 62%),color-mix(in srgb,var(--c) 3%,#f6f7f5)}
