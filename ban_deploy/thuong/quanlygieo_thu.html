@@ -6222,7 +6222,7 @@ async function ctnShowDetail(containerId, coll, onBack){
         if(r.exists) recv = { id: r.id, ...r.data() };
       }catch(err){ console.warn('[Chi tiết tem] đọc phiếu nhận gốc lỗi', err); }
     }
-    _ctnDetailRender(box, c, recv);
+    _ctnDetailRender(box, c, recv, await ctnLoadPrepEvents(c));
   }catch(err){
     console.error('ctnShowDetail lỗi', err);
     box.innerHTML = '<div class="muted">Không đọc được: '+(err.code||err.message||err)+'</div>';
@@ -6396,7 +6396,74 @@ async function _fillLechDinhLuongLo(b){
     box.innerHTML = '<div class="muted">Không tính được: '+(err.code||err.message||err)+'</div>';
   }
 }
-function _ctnDetailRender(box, c, recv){
+// [FIX "Dòng thời gian tem không thấy phần NẤU MẺ" — 03/11/2026] Nấu mẻ BTP theo chế độ cân trước/sau (prepRecon)
+// KHÔNG ghi `usageEvents` lên tem: engine đặt thẳng unitBase = số cân rồi ghi hai dòng SỔ KHO — prep_after_{mẻ}_{NL}
+// (CONSUMPTION, phân bổ `fifoAllocations`), prep_variance_{mẻ}_{NL} (chênh lệch, `varianceAllocations`) và khi sổ ghi thiếu
+// prep_surplus_{mẻ}_{NL} (`surplusLots`). Kho vẫn đúng (Σ tem = sự thật) nhưng timeline chỉ đọc usageEvents nên thiếu cả
+// 450 g nấu lẫn phần chênh. Hàm này DỰNG LẠI các sự kiện đó từ sổ (chỉ đọc, không đổi dữ liệu) — thuần, test được.
+// rows = dòng sổ kho đã đọc; batches = {batchId: doc mẻ} (tuỳ chọn, để hiện tên mẻ + mã lô).
+function ctnPrepEventsFromLedger(c, rows, batches){
+  const id = c && c.id, unit = (c && c.unit) || '', out = [];
+  if(!id) return out;
+  const seen = new Set(((c.usageEvents)||[]).map(e=>e && e.refId).filter(Boolean));   // đã có trên tem (đường allocate) → không lặp
+  const qtyOn = arr => (Array.isArray(arr)?arr:[]).filter(a=>a && (a.containerId===id || a.unitId===id))
+    .reduce((s,a)=>s+(Number(a.qty)||0), 0);
+  (rows||[]).forEach(t=>{
+    if(!t) return;
+    const bId = t.referenceId || '';
+    if(bId && seen.has(bId)) return;
+    const b = (batches && batches[bId]) || {};
+    const meInfo = ['Mẻ chế biến' + (b.prepName?(' '+b.prepName):''), b.batchCode?('mã lô '+b.batchCode):''].filter(Boolean).join(' · ');
+    const who = t.responsibility || {};
+    const base = { at: t.createdAt || '', kind: 'prep', goBatch: /^[A-Za-z0-9_-]+$/.test(bId) ? bId : '' };
+    if(t.prepRecon && t.type === 'CONSUMPTION'){
+      if(t.forcedSettle){   // tự chốt khi đối chiếu kẹt: sổ không có phân bổ theo mã → lấy mức giảm của mã trong số đã cân
+        const w = (Array.isArray(t.weighings)?t.weighings:[]).find(x=>x && x.id===id);
+        const q = w ? Math.max(0, (Number(w.baseline)||0) - (w.finished ? 0 : (Number(w.after)||0))) : 0;
+        if(q > 0.005) out.push({ ...base, grp:'nau', qty:q, label:'Trừ '+fmtNum(q,2)+' '+unit+' (tự chốt khi đối chiếu bị kẹt)', detail:[meInfo, t.staff&&('bởi '+t.staff)].filter(Boolean).join(' · ') });
+        return;
+      }
+      const q = qtyOn(t.fifoAllocations);
+      if(q > 0.005) out.push({ ...base, grp:'nau', qty:q, label:'Trừ '+fmtNum(q,2)+' '+unit+' (nấu mẻ)', detail:[meInfo, 'lượng cân thực tế', t.staff&&('bởi '+t.staff)].filter(Boolean).join(' · ') });
+    }else if(t.prepReconVariance && !t.forcedSettle){
+      const q = qtyOn(t.varianceAllocations);
+      const nhan = t.type === 'WASTE' ? 'hao hụt lúc nấu' : (t.varianceKind === 'prior_variance' ? 'lệch tồn từ mốc trước' : 'chênh lệch cần giải trình');
+      if(q > 0.005) out.push({ ...base, grp:'lech', qty:q, label:'Trừ '+fmtNum(q,2)+' '+unit+' ('+nhan+')',
+        detail:[meInfo, who.employeeName&&('người giải trình: '+who.employeeName), who.reason&&('ghi chú: '+who.reason), t.needsReview&&'chờ xem lại'].filter(Boolean).join(' · ') });
+    }else if(t.prepReconSurplus){
+      const q = qtyOn(t.surplusLots);
+      if(q > 0.005) out.push({ ...base, grp:'cong', qty:-q, label:'Cộng lại '+fmtNum(q,2)+' '+unit+' (sổ ghi thiếu lần cân trước)', detail:[meInfo, who.employeeName&&('người giải trình: '+who.employeeName)].filter(Boolean).join(' · ') });
+    }
+  });
+  return out;
+}
+// Đọc sổ kho các dòng nấu-đối chiếu của NL này rồi dựng sự kiện cho tem. Chỉ lấy dòng có cờ prepRecon* (số dòng = số mẻ
+// từng dùng NL, nhỏ) — KHÔNG kéo cả sổ NL. Lỗi đọc → trả [] (timeline vẫn hiện phần còn lại, không chặn Chi tiết tem).
+async function ctnLoadPrepEvents(c){
+  try{
+    if(!c || !c.id || !c.itemId) return [];
+    const col = fstore.collection('stock_transactions_gieogieo');
+    const rows = [], add = s => s.forEach(d=>rows.push({ id:d.id, ...d.data() }));
+    try{
+      const snaps = await Promise.all(['prepRecon','prepReconVariance','prepReconSurplus'].map(f=>col.where('itemId','==',c.itemId).where(f,'==',true).get()));
+      snaps.forEach(add);
+    }catch(err){
+      console.warn('[Chi tiết tem] truy vấn theo cờ lỗi — đọc theo NL rồi lọc', err);
+      rows.length = 0; add(await col.where('itemId','==',c.itemId).get());
+    }
+    const lien = rows.filter(t=>t && (t.prepRecon || t.prepReconVariance || t.prepReconSurplus));
+    const batchIds = [...new Set(ctnPrepEventsFromLedger(c, lien, {}).map(e=>e.goBatch).filter(Boolean))];
+    const batches = {};
+    await Promise.all(batchIds.map(async bid=>{
+      try{ const d = await fstore.collection('prep_batches_gieogieo').doc(bid).get(); if(d.exists) batches[bid] = d.data(); }catch(e){}
+    }));
+    return ctnPrepEventsFromLedger(c, lien, batches);
+  }catch(err){
+    console.warn('[Chi tiết tem] đọc sổ nấu mẻ lỗi', err);
+    return [];
+  }
+}
+function _ctnDetailRender(box, c, recv, prepEvents){
   const dt = iso => {
     const d = iso ? vnDate(iso) : null;
     return (d && !isNaN(d)) ? `${fmtDateVN(d)} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}` : '';
@@ -6415,6 +6482,7 @@ function _ctnDetailRender(box, c, recv){
       detail: [refLabel, e.refId, e.note].filter(Boolean).join(' · ')
     });
   });
+  (prepEvents||[]).forEach(e=>events.push(e));   // nấu mẻ + chênh lệch (dựng từ sổ kho — xem ctnPrepEventsFromLedger)
   (c.notEmptyChecks||[]).forEach(e=>{
     events.push({ at: e.at, label: 'Báo "chưa hết" (hệ thống tính nhầm)', detail: 'Cân lại còn '+fmtNum(e.newUnitBase,2)+' '+(c.unit||'')+(e.by?(' · '+e.by):'') });
   });
@@ -6429,10 +6497,18 @@ function _ctnDetailRender(box, c, recv){
   });
   events.sort((a,b)=> String(a.at||'').localeCompare(String(b.at||'')));
 
-  const noUsageWarning = !(c.usageEvents||[]).length && c.status !== 'sealed' && c.finishReason !== 'discarded'
+  const noUsageWarning = !(c.usageEvents||[]).length && !(prepEvents||[]).length && c.status !== 'sealed' && c.finishReason !== 'discarded'
     ? `<div class="small-note" style="margin-top:10px;color:var(--warn)">Tem này chưa có nhật ký "trừ" nào dù đã ${c.status==='finished'?'báo hết':'mở'} — hoặc được tạo/tiêu thụ TRƯỚC khi có tính năng ghi nhật ký, hoặc đã bị trừ qua một đường không đi qua Unit Engine (kiểm tra lại đối chiếu bằng kiểm kê).</div>`
     : '';
 
+  // Đối chiếu "đã đi đâu": Σ ghi trên tem (bill…) + nấu mẻ + chênh lệch ≈ dung tích khai báo (chỉ hiện khi có dòng nấu mẻ).
+  let tongTruHtml = '';
+  if((prepEvents||[]).length){
+    const sum = g => (prepEvents||[]).filter(e=>e.grp===g).reduce((n,e)=>n+(Number(e.qty)||0),0);
+    const bill = (c.usageEvents||[]).reduce((n,e)=>n+(Number(e.qty)||0),0), nau = sum('nau'), lech = sum('lech') + sum('cong');
+    const u = escapeHtmlAttr(c.unit||'');
+    tongTruHtml = `<div class="small-note" style="margin-top:8px">Tổng đã trừ khỏi tem: bill/đường trừ khác <b>${fmtNum(bill,2)}</b> + nấu mẻ <b>${fmtNum(nau,2)}</b> + chênh lệch/hao hụt <b>${fmtNum(lech,2)}</b> = <b>${fmtNum(bill+nau+lech,2)}</b> / ${fmtNum(c.baseQty,2)} ${u}${Number(c.unitBase)?` (còn ${fmtNum(c.unitBase,2)})`:''}</div>`;
+  }
   box.innerHTML = `
     <div class="row"><span class="rl">Mã tem</span><span class="rv"><b>${escapeHtmlAttr(c.code||'')}</b></span></div>
     <div class="row"><span class="rl">Nguyên liệu</span><span class="rv">${escapeHtmlAttr(c.itemName||'')}</span></div>
@@ -6445,9 +6521,10 @@ function _ctnDetailRender(box, c, recv){
     <div class="sec-title" style="margin-top:14px">Dòng thời gian</div>
     ${events.length ? events.map(e=>`
       <div class="row" style="align-items:flex-start">
-        <span class="rl" style="flex:1;min-width:0"><b>${escapeHtmlAttr(e.label)}</b>${e.detail?`<div class="small-note" style="margin-top:2px">${escapeHtmlAttr(e.detail)}</div>`:''}</span>
+        <span class="rl" style="flex:1;min-width:0"><b>${escapeHtmlAttr(e.label)}</b>${e.detail?`<div class="small-note" style="margin-top:2px">${escapeHtmlAttr(e.detail)}</div>`:''}${e.goBatch?`<button class="btn outline sm" style="width:auto;padding:0 10px;margin-top:4px" onclick="ctnShowDetail('${e.goBatch}','prep_batches_gieogieo')">Xem mẻ</button>`:''}</span>
         <span class="rv" style="white-space:nowrap;font-weight:400">${dt(e.at)}</span>
       </div>`).join('') : '<div class="muted">Chưa có sự kiện nào.</div>'}
+    ${tongTruHtml}
     ${noUsageWarning}
     ${(c.status==='finished' && c.wasteBasis==='don_vi_nguyen' && !c.revertedFinish) ? `
     <div class="small-note" style="margin-top:14px;padding:10px;border:1px solid var(--warn);border-radius:10px;color:var(--warn)">
@@ -6600,7 +6677,7 @@ async function ctnRestoreAtomicSealed(containerId){
     logAudit('adjust','stock_container',containerId,{restoreAtomicSealed: Number(c.baseQty)||0});
     toast('✅ Đã khôi phục tem về "chưa mở"');
     const box = document.getElementById('ctnDetailBody');
-    if(box){ const fresh = await ref.get(); _ctnDetailRender(box, {id:containerId, ...fresh.data()}, null); }
+    if(box){ const fresh = await ref.get(); const cf = {id:containerId, ...fresh.data()}; _ctnDetailRender(box, cf, null, await ctnLoadPrepEvents(cf)); }
     if(typeof renderKhoAllItemsBody === 'function' && document.getElementById('ctnAllBody')) renderKhoAllItemsBody(true);
   }catch(err){
     console.error('ctnRestoreAtomicSealed lỗi', err);
