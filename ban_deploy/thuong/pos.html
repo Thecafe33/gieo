@@ -5235,6 +5235,7 @@ const sortedPCList = [...currentBedList].map((item, idx) => ({...item, originalI
                 <span>${timeDisplay}</span>
                 ${b.totalSpend ? `<span class="nb-amt px-1.5 text-[9px]">${Number(b.totalSpend).toLocaleString()}đ</span>` : ''}
             </div>
+            ${_reschedCount(b) ? `<div style="margin-top:6px;">${_reschedChip(b)}</div>` : ''}
             ${(b.preorder && (_hasActivePreorder(b) || b.preorder.status === 'loaded'))
                 ? `<div style="margin-top:6px;"><span class="nb-chip"><span class="material-symbols-outlined">ramen_dining</span>Pre-order</span></div>`
                 : ''
@@ -5453,6 +5454,7 @@ function selectBedItem(index) {
                 </div>
             </div>
             ${bookingCreatedAtVN(data) ? `<p class="text-center text-[11.5px] font-semibold nd-meta -mt-2">Đặt lúc <b>${bookingCreatedAtVN(data)}</b></p>` : ''}
+            ${_reschedHTML(data)}
 
             <div id="row-checkout-time" class="hidden nd-out text-center rounded-2xl p-2">
                 <span class="nd-lab">${isCancelled ? 'Lý do' : 'Thực tế check-out lúc'}</span>
@@ -7297,6 +7299,42 @@ function bookingCreatedAtVN(b) {
     }
 }
 
+// [ĐỔI GIỜ 03/11] Khách đổi lịch trên app (index.html) → ghi rescheduleHistory/{lần} = {at, fd/fs/fe (cũ), fb (bed cũ), td/ts/te (mới)}.
+// POS chỉ ĐỌC. Lịch đổi trước khi có ghi lịch sử chỉ có rescheduleCount → báo "không có giờ cũ".
+function _reschedList(b) {
+    var h = b && b.rescheduleHistory;
+    if (!h) return [];
+    if (Array.isArray(h)) return h.filter(Boolean);
+    return Object.keys(h).sort(function (a, c) { return (+a) - (+c); }).map(function (k) { return h[k]; }).filter(Boolean);
+}
+function _reschedCount(b) { return Math.max(parseInt(b && b.rescheduleCount) || 0, _reschedList(b).length); }
+function _reschedHTML(b) {
+    var n = _reschedCount(b); if (!n) return '';
+    var list = _reschedList(b);
+    var e = (typeof _escGiftTxt === 'function') ? _escGiftTxt : function (x) { return String(x == null ? '' : x); };
+    var dm = function (d) { var p = String(d || '').split('/'); return p.length >= 2 ? p[0] + '/' + p[1] : e(d); };
+    var slot = function (d, s0, e0) { return '<b>' + dm(d) + ' · ' + e(s0 || '--:--') + '–' + e(e0 || '--:--') + '</b>'; };
+    var rows = list.map(function (h, i) {
+        var when = h.at ? bookingCreatedAtVN({ createdAt: h.at }) : '';
+        var sameDay = h.fd && h.fd === h.td;
+        return '<div style="margin-top:6px;font-size:12.5px;line-height:1.5;font-weight:600">'
+            + '<span style="font-weight:800;color:#c2410c">Lần ' + (i + 1) + '</span>' + (when ? ' · lúc ' + e(when) : '') + '<br>'
+            + '<span style="text-decoration:line-through;opacity:.65">' + (h.fs ? dm(h.fd) + ' · ' + e(h.fs) + '–' + e(h.fe) : 'không rõ giờ cũ') + '</span>'
+            + ' → <span style="color:#c2410c">' + slot(h.td, h.ts, h.te) + '</span>'
+            + (sameDay ? '' : ' <span style="font-weight:800;color:#c2410c">(đổi ngày)</span>')
+            + (h.fb ? '<br><span style="opacity:.75">Đã mất BED 0' + e(h.fb) + ' đã xếp, cần xếp lại</span>' : '')
+            + '</div>';
+    }).join('');
+    var missing = n - list.length;
+    if (missing > 0) rows += '<div style="margin-top:6px;font-size:11.5px;font-weight:600;opacity:.7">' + missing + ' lần đổi trước khi hệ thống ghi lịch sử — không có giờ cũ</div>';
+    return '<div class="nd-tile rounded-[1.5rem] p-4" style="border:1px solid #fdba74;background:#fff7ed">'
+        + '<p class="nd-lab" style="color:#c2410c">Khách đã đổi giờ ' + n + '/2 lần</p>' + rows + '</div>';
+}
+function _reschedChip(b) {
+    var n = _reschedCount(b);
+    return n ? '<span class="nb-chip" style="--k:#ea580c">Đổi giờ ×' + n + '</span>' : '';
+}
+
 // [MỚI] Hiển thị "Đi cùng" — khi đi 3 người, app gộp 2 người đi cùng vào chung
 // compName/compPhone dạng "Tên A, Tên B" — POS tách ra hiển thị danh sách.
 function _companionHTML(b, nameCls, phoneCls) {
@@ -8594,6 +8632,7 @@ function renderMobileBedList(list) {
                 <span class="material-symbols-outlined text-[14px]">schedule</span>
                 <span>${isDone ? "Check-out lúc " + (b.realEndTime || b.end) : b.start + " – " + b.end}</span>
             </div>
+            ${_reschedCount(b) ? `<div style="margin-top:8px;">${_reschedChip(b)}</div>` : ''}
         </div>`;
     }).join('');
 }
@@ -8740,6 +8779,8 @@ function renderDetailContentMobile(b) {
             <span id="mob-live-timer" class="mn-digits text-3xl" style="color:${countdown.color}">${countdown.timeStr}</span>
         </div>` : ''}
     </div>
+
+    ${_reschedHTML(b)}
 
     <!-- Info grid: Đi cùng + Tags -->
     <div class="grid grid-cols-2 gap-3">

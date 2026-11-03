@@ -4825,9 +4825,11 @@ function submitReschedule() {
             return;
         }
 
+        _reschedBefore = liveBooking || null;   // [ĐỔI GIỜ 03/11] giữ lịch TRƯỚC khi đổi để ghi lịch sử cho POS
         _doSubmitReschedule(changeCount);
     });
 }
+var _reschedBefore = null;
 
 function _doSubmitReschedule(changeCount) {
 
@@ -4862,11 +4864,21 @@ function _doSubmitReschedule(changeCount) {
             const newCount = changeCount + 1;
             // Dùng _editingBookingPath đã lưu sẵn — đúng path, không cần cache
             var _editPath = _editingBookingPath || ('bedBookings/' + editingBookingKey);
-            db.ref(_editPath).update({
+            var _upd = {
                 date: dateStr, start: start, end: end,
                 status: 'chờ xếp bed', bedId: "",
                 rescheduleCount: newCount
-            }, (error) => {
+            };
+            // [ĐỔI GIỜ 03/11] CHỈ THÊM: lưu giờ cũ → giờ mới + bed cũ (bị xoá khi đổi) + lúc đổi (giờ máy chủ) để POS hiện khách đổi lịch ra sao.
+            // Nhánh con theo số lần (0, 1) → không ghi đè nhau; các trường cũ giữ nguyên.
+            var _b0 = _reschedBefore || {};
+            _upd['rescheduleHistory/' + changeCount] = {
+                at: firebase.database.ServerValue.TIMESTAMP,
+                fd: _b0.date || '', fs: _b0.start || '', fe: _b0.end || '',
+                fb: (_b0.bedId && _b0.bedId !== 'WAITING') ? String(_b0.bedId) : '',
+                td: dateStr, ts: start, te: end
+            };
+            db.ref(_editPath).update(_upd, (error) => {
                 document.getElementById('loading-overlay').classList.add('hidden');
                 document.getElementById('reschedule-modal').classList.add('hidden');
                 if (error) alert("Lỗi: " + error.message);
