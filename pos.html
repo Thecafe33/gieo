@@ -7225,6 +7225,15 @@ function calculateAndSaveCheckout(booking, realTimeStr) {
     let btnCheckout = document.getElementById('btn-action-checkout');
     if(btnCheckout) btnCheckout.innerHTML = 'Đang tính tiền...';
 
+    // [MOBILE 03/11] Màn chi tiết điện thoại phủ lên danh sách: trước đây trả bed xong màn này đứng nguyên, đồng hồ vẫn chạy → không biết đã trả.
+    // Nay: nút đổi thành "Đang trả bed…" (chống bấm 2 lần) → trả xong đóng chi tiết + hộp xác nhận; lỗi thì dựng lại nút. PC không đổi.
+    var mobOpen = !!(window.currentMobileBooking && window.currentMobileBooking.id === booking.id
+        && document.getElementById('mob-bed-detail-screen') && !document.getElementById('mob-bed-detail-screen').classList.contains('translate-x-full'));
+    if (mobOpen) {
+        var _mobAct = document.getElementById('mob-detail-actions');
+        if (_mobAct) _mobAct.innerHTML = '<div class="p-4 pb-6"><button type="button" disabled class="nd-btn solid w-full h-14 rounded-[1.5rem]" style="font-size:14px;opacity:.7"><span class="material-symbols-outlined animate-spin">progress_activity</span>Đang trả bed...</button></div>';
+    }
+
     calculateSessionSpend(booking.phone, booking.start, realTimeStr).then(total => {
 
         let bookingId = booking.id || booking.key;
@@ -7235,11 +7244,17 @@ function calculateAndSaveCheckout(booking, realTimeStr) {
             totalSpend: total
         }, (err) => {
             if(!err) {
+                if (mobOpen) {
+                    closeMobileBedDetail();
+                    var _e = (typeof _escGiftTxt === 'function') ? _escGiftTxt : function (x) { return String(x == null ? '' : x); };
+                    showAppModal('Đã trả BED 0' + _e(booking.bedId), '<b>' + _e(booking.name || 'Khách lẻ') + '</b><br>Trả lúc <b>' + _e(realTimeStr) + '</b><br>Tổng chi tiêu: <b>' + Number(total || 0).toLocaleString() + 'đ</b>', '✅');
+                }
                 openBedManager();
             }
             else {
                 alert("Lỗi: " + err.message);
                 if(btnCheckout) btnCheckout.innerHTML = '<span class="material-symbols-outlined">logout</span>Trả bed';
+                if (mobOpen && window.currentMobileBooking) renderDetailContentMobile(window.currentMobileBooking);
             }
         });
     });
@@ -7363,7 +7378,7 @@ function loadPreorderToCart(bookingKey) {
     });
 }
 
-function showPreorderModal(data, bookingId) {
+function showPreorderModal(data, bookingId, onConfirm) {   // [MOBILE 03/11] onConfirm: điện thoại giữ nguyên bước nhận đơn riêng sau khi xem trước
     var modal = document.getElementById('modal-preorder-preview');
     var guestEl = document.getElementById('preorder-modal-guest');
     var itemsEl = document.getElementById('preorder-modal-items');
@@ -7418,6 +7433,7 @@ function showPreorderModal(data, bookingId) {
 
         confirmBtn.onclick = function() {
             modal.classList.add('hidden');
+            if (typeof onConfirm === 'function') { onConfirm(); return; }
             pendingBedOrder = data;
             activeOrderingBedId = data.bedId || 'WAITING';
             // _doShowBedDetail lo toàn bộ: SĐT, phí bed, dynamic island, session display, switchView
@@ -8555,7 +8571,7 @@ function renderMobileBedList(list) {
         // [GIAO DIỆN BED 16/10] phong cách thẻ điểm bán, giữ khung squircle p-5 và màu cũ:
         // huỷ đỏ · đang dùng xanh · chờ xếp vàng · xong xám nhạt · đã xếp bed chờ khách trắng
         let k = "k-idle",
-            dotStyle = ' style="--dot:#cbd5e1"',
+            dotStyle = '',
             statusLabel = b.bedId && b.bedId != "WAITING" ? `BED 0${b.bedId}` : "CHỜ XẾP";
 
         if (isCancelled) {
@@ -9832,6 +9848,17 @@ function filterHistoryMobile(keyword) {
 function handleMobileBedOrder(bookingId) {
     const booking = globalAllBookings.find(b => b.id === bookingId);
     if (!booking) return;
+
+    // [MOBILE 03/11] Có pre-order chưa nạp → xem trước popup như PC (trước đây điện thoại nạp thẳng vào giỏ, 2 giao diện lệch bước).
+    // Xác nhận rồi mới chạy đúng luồng điện thoại cũ (_doHandleMobileBedOrder đã tự nạp pre-order). Gọi món thường: không đổi.
+    if (_hasActivePreorder(booking)) {
+        showPreorderModal(booking, booking.key || booking.id, function () {
+            activeOrderingBedId = booking.bedId || "WAITING";
+            pendingBedOrder = booking;
+            _doHandleMobileBedOrder(booking);
+        });
+        return;
+    }
 
     activeOrderingBedId = booking.bedId || "WAITING";
     pendingBedOrder = booking;
@@ -14252,7 +14279,7 @@ function keypadConfirm() {
      Chỉ dùng 1 listener RT bedBookings/{hôm nay} — đếm giờ tính lại trên máy mỗi 30 giây, không đọc thêm. -->
 <style>
 .bell-btn.bell-has{ background:#006241 !important; color:#fff !important; }
-.bell-btn.bell-warn{ background:#d97706 !important; color:#fff !important; }
+.bell-btn.bell-warn{ background:#ea580c !important; color:#fff !important; }
 .bell-btn.bell-over{ background:#dc2626 !important; color:#fff !important; }
 .bell-btn.bell-new .material-symbols-outlined{ animation: bellRing 1.6s ease-in-out infinite; transform-origin: 50% 10%; }
 @keyframes bellRing{ 0%,60%,100%{transform:rotate(0)} 10%{transform:rotate(14deg)} 20%{transform:rotate(-12deg)} 30%{transform:rotate(9deg)} 40%{transform:rotate(-6deg)} 50%{transform:rotate(3deg)} }
@@ -14261,17 +14288,17 @@ function keypadConfirm() {
 #bell-modal .bell-row:active{ background:#f0fdf4; }
 #bell-modal .bell-time{ flex-shrink:0; min-width:58px; height:44px; padding:0 6px; border-radius:14px; background:#e8f5ee; color:#006241; font-weight:900; font-size:15px; display:flex; align-items:center; justify-content:center; }
 #bell-modal .bell-row.late .bell-time{ background:#fef3c7; color:#b45309; }
-#bell-modal .bell-row.warn{ background:#fffbeb; box-shadow:inset 0 0 0 2px #fcd34d; }
-#bell-modal .bell-row.warn .bell-time{ background:#f59e0b; color:#fff; }
+#bell-modal .bell-row.warn{ background:#fff7ed; box-shadow:inset 0 0 0 2px #fdba74; }
+#bell-modal .bell-row.warn .bell-time{ background:#ea580c; color:#fff; }
 #bell-modal .bell-row.over{ background:#fef2f2; box-shadow:inset 0 0 0 2px #fca5a5; }
 #bell-modal .bell-row.over .bell-time{ background:#dc2626; color:#fff; }
 /* Thẻ bed (danh sách PC, Live Status, danh sách điện thoại): cam = còn ≤ 10 phút, đỏ = quá giờ — _bedEndDecorate */
-[data-bk]:not(.nb-card).bk-warn{ background:#fffbeb !important; border-color:#f59e0b !important; color:#92400e !important; box-shadow:0 0 0 2px #fcd34d !important; }
+[data-bk]:not(.nb-card).bk-warn{ background:#fff7ed !important; border-color:#ea580c !important; color:#9a3412 !important; box-shadow:0 0 0 2px #fdba74 !important; }
 [data-bk]:not(.nb-card).bk-over{ background:#fef2f2 !important; border-color:#ef4444 !important; color:#991b1b !important; box-shadow:0 0 0 2px #fca5a5 !important; }
-[data-bk].bk-tile.bk-warn{ background:#d97706 !important; color:#fff !important; box-shadow:0 10px 24px -6px rgba(217,119,6,.5) !important; }
+[data-bk].bk-tile.bk-warn{ background:#ea580c !important; color:#fff !important; box-shadow:0 10px 24px -6px rgba(234,88,12,.5) !important; }
 [data-bk].bk-tile.bk-over{ background:#dc2626 !important; color:#fff !important; box-shadow:0 10px 24px -6px rgba(220,38,38,.5) !important; }
 [data-bk]:not(.nb-card).bk-warn::after, [data-bk]:not(.nb-card).bk-over::after{ content:attr(data-bk-tag); position:absolute; z-index:20; top:8px; left:50%; transform:translateX(-50%); font-size:10px; font-weight:900; letter-spacing:.04em; padding:2px 8px; border-radius:99px; white-space:nowrap; color:#fff; }
-[data-bk]:not(.nb-card).bk-warn::after{ background:#d97706; }
+[data-bk]:not(.nb-card).bk-warn::after{ background:#ea580c; }
 [data-bk]:not(.nb-card).bk-over::after{ background:#dc2626; }
 [data-bk].bk-tile.bk-warn::after, [data-bk].bk-tile.bk-over::after{ background:rgba(0,0,0,.25); }
 #bell-modal .bell-new-tag{ background:#ef4444; color:#fff; font-size:9px; font-weight:900; padding:2px 7px; border-radius:99px; letter-spacing:.05em; margin-left:6px; vertical-align:middle; }
@@ -14284,7 +14311,8 @@ function keypadConfirm() {
 :root{
   --bd-panel:#ffffff; --bd-ink:#202c27; --bd-sub:#738078; --bd-muted:#53655a; --bd-line:#e7ece7; --bd-fill:#f4f6f3;
   /* màu trạng thái theo bản cũ */
-  --bd-tc:#006241; --bd-warn:#d97706; --bd-over:#dc2626; --bd-wait:#f59e0b; --bd-done:#9ca3af; --bd-cancel:#ef4444; --bd-idle:#94a3b8; --bd-booked:#2563eb;
+  /* [MÀU BED 03/11] mỗi trạng thái MỘT sắc riêng: xanh lá đang dùng · vàng chờ xếp bed · cam sắp hết giờ · đỏ quá giờ · tím huỷ · xanh dương đã xếp bed chờ khách · xám đã xong */
+  --bd-tc:#006241; --bd-warn:#ea580c; --bd-over:#dc2626; --bd-wait:#ca8a04; --bd-done:#9ca3af; --bd-cancel:#7c3aed; --bd-idle:#2563eb; --bd-booked:#2563eb;
   --bd-pre:#a16207; --bd-bedc:#0369a1; --bd-bonus:#15803d; --bd-rose:#e11d48; --bd-amber:#b45309;
 }
 .nb-card,.wg,.nd{--c:var(--bd-tc);--ct:color-mix(in srgb,var(--c) 84%,#111827);color:var(--bd-ink)}
@@ -14293,7 +14321,7 @@ function keypadConfirm() {
   box-shadow:inset 0 1px 0 #ffffff80,0 4px 14px color-mix(in srgb,var(--c) 8%,transparent)}
 .wg{border:1px solid color-mix(in srgb,var(--c) 16%,var(--bd-panel))}
 .nb-card:hover{box-shadow:inset 0 1px 0 #ffffff80,0 8px 20px color-mix(in srgb,var(--c) 16%,transparent)}
-.k-active{--c:var(--bd-tc)}.k-wait{--c:var(--bd-wait)}.k-idle{--c:var(--bd-idle);--dot:var(--bd-wait)}.k-done{--c:var(--bd-done)}.k-cancel{--c:var(--bd-cancel)}.k-booked{--c:var(--bd-booked)}
+.k-active{--c:var(--bd-tc)}.k-wait{--c:var(--bd-wait)}.k-idle{--c:var(--bd-idle)}.k-done{--c:var(--bd-done)}.k-cancel{--c:var(--bd-cancel)}.k-booked{--c:var(--bd-booked)}
 .nb-label{color:var(--ct);letter-spacing:.12em}
 .nb-dot{background:var(--dot,var(--c))}
 .nb-dot.pulse,.nd-badge.pulse i,.mn-live i{animation:bdPulse 1.8s ease-out infinite}
@@ -14529,7 +14557,7 @@ function _bellRenderList(seen) {
                 + '<span class="bell-time">BED 0' + esc(b.bedId) + '</span>'
                 + '<span class="flex-1 min-w-0">'
                 + '<span class="block text-[15px] font-black text-gray-900 truncate">' + esc(b.name || 'Khách') + '</span>'
-                + '<span class="block text-[12px] font-bold mt-0.5 ' + (over ? 'text-red-600' : 'text-amber-700') + '">' + txt + ' · trả lúc ' + esc(b.end || '') + '</span>'
+                + '<span class="block text-[12px] font-bold mt-0.5 ' + (over ? 'text-red-600' : 'text-orange-700') + '">' + txt + ' · trả lúc ' + esc(b.end || '') + '</span>'
                 + '</span>'
                 + '<span class="material-symbols-outlined text-gray-300">chevron_right</span>'
                 + '</button>');
