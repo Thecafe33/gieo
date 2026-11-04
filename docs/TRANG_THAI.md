@@ -1,3 +1,7 @@
+# 04/11 — SỬA kẹt kết ca: «Nhập đủ mã PIN 4 số» ở Kiểm kê cuối ca dù khung «Người thực hiện» đã hiện tên — CHƯA deploy
+
+Nguyên nhân (tái hiện bằng Firebase giả): ở bất kỳ bước kết ca nào, bấm «<» xem lại bước trước rồi «Tiếp →» quay về → bước đang làm được dựng lại từ ẢNH CHỤP (`closeStepSnapshotPOS` cố ý xoá ô ẩn / ô PIN) → khung «Người thực hiện» vẫn hiện tên nhưng ô ẩn `__signer__` rỗng → bấm xác nhận báo «Nhập đủ mã PIN 4 số» (chỉ «Đổi người» + gõ PIN mới thoát). KHÔNG do Engine 2: cùng thao tác ở chế độ «chỉ theo dõi» cũng kẹt; không bấm quay lại thì «phân bổ tự động» vẫn lưu bình thường. Sửa: `js/posgieo/pos_shift_closing.v2.js` (= v1 + cất DOM thật của bước đang làm khi đi xem lại, gắn lại y nguyên khi quay về; v1 đã phát hành giữ nguyên), posgieo trỏ v2. Kiểm hồi quy: `node tools/ket_ca/e2e_quay_lai_buoc.js` (Engine 2 active + shadow, tự kiểm với v1). File giao: `giao_file/dot_04-11/`.
+
 # 25/10 — Tách posgieo.html: Đợt 1B (kết nối máy in → js/posgieo/pos_printer.v1.js) xong, chờ kiểm tra lượt 05 — CHƯA deploy, chưa in thử APK
 
 posgieo.html 1,88 → 1,81 MB. Sửa `check_paths` (hằng chéo file). File kiểm tra: [tach_posgieo/KIEM_TRA_05_MAY_IN.md](tach_posgieo/KIEM_TRA_05_MAY_IN.md).

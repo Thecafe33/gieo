@@ -245,8 +245,8 @@ Nút "Cập nhật" ở sidebar (`manualCheckUpdate`, dựa trên service worker
 <script id="pgExpiryRetry">if(!window.PosGieoMods||PosGieoMods.expiry===undefined){document.write('<scr'+'ipt src="js/posgieo/pos_expiry.v1.js?r=1"><\/scr'+'ipt>');}</script>
 <script src="js/posgieo/pos_shift.v1.js"></script>
 <script id="pgShiftRetry">if(!window.PosGieoMods||PosGieoMods.shift===undefined){document.write('<scr'+'ipt src="js/posgieo/pos_shift.v1.js?r=1"><\/scr'+'ipt>');}</script>
-<script src="js/posgieo/pos_shift_closing.v1.js"></script>
-<script id="pgShiftClosingRetry">if(!window.PosGieoMods||PosGieoMods.shiftClosing===undefined){document.write('<scr'+'ipt src="js/posgieo/pos_shift_closing.v1.js?r=1"><\/scr'+'ipt>');}</script>
+<script src="js/posgieo/pos_shift_closing.v2.js"></script>
+<script id="pgShiftClosingRetry">if(!window.PosGieoMods||PosGieoMods.shiftClosing===undefined){document.write('<scr'+'ipt src="js/posgieo/pos_shift_closing.v2.js?r=1"><\/scr'+'ipt>');}</script>
 <script src="js/posgieo/pos_handover.v1.js"></script>
 <script id="pgHandoverRetry">if(!window.PosGieoMods||PosGieoMods.handover===undefined){document.write('<scr'+'ipt src="js/posgieo/pos_handover.v1.js?r=1"><\/scr'+'ipt>');}</script>
 <script src="js/posgieo/pos_cashfund.v1.js"></script>
@@ -2631,7 +2631,7 @@ else {
 // [TÁCH POSGIEO 0E — kế hoạch 5.3] JS riêng THIẾT YẾU (js/posgieo/…) phải CHẠY HẾT (dấu PosGieoMods.<tên> === true) trước khi
 // làm gì tiếp — kể cả màn nhập mã quán (dùng escHtmlPos). Thẻ #pgUiRetry đã nạp lại một lần nếu file chưa từng chạy; tới đây
 // vẫn thiếu (mạng hỏng hẳn / file chưa có trên máy chủ) hoặc file chạy dở ('dang') → màn đỏ + Tải lại, KHÔNG chạy nghiệp vụ nửa chừng.
-const POS_MODS_THIET_YEU = { ui: 'js/posgieo/pos_ui.v1.js', assist: 'js/posgieo/pos_assist.v1.js', printer: 'js/posgieo/pos_printer.v1.js', printContent: 'js/posgieo/pos_print_content.v1.js', printUi: 'js/posgieo/pos_print_ui.v1.js', receive: 'js/posgieo/pos_receive.v2.js', prep: 'js/posgieo/pos_prep.v1.js', stockUnits: 'js/posgieo/pos_stock_units.v1.js', kho: 'js/posgieo/pos_kho.v2.js', count: 'js/posgieo/pos_count.v1.js', expiry: 'js/posgieo/pos_expiry.v1.js', shift: 'js/posgieo/pos_shift.v1.js', shiftClosing: 'js/posgieo/pos_shift_closing.v1.js', handover: 'js/posgieo/pos_handover.v1.js', cashfund: 'js/posgieo/pos_cashfund.v1.js', catalogAdmin: 'js/posgieo/pos_catalog_admin.v1.js', reports: 'js/posgieo/pos_reports.v1.js', orders: 'js/posgieo/pos_orders.v1.js', customers: 'js/posgieo/pos_customers.v1.js', cart: 'js/posgieo/pos_cart.v2.js', pickTp: 'js/posgieo/pos_pick_topping.v1.js', thanhtoan: 'js/posgieo/pos_thanh_toan.v1.js' };   // trợ lý: confirmPay gọi thẳng assistFinalizeOrder; máy in: lệnh tự chạy lúc mở app dùng POSPrinter / temEnsureConnected; nội dung bill/tem + giao diện máy in/quét/in lại: thanh toán và màn máy in gọi thẳng; nhận hàng: màn Kho / automation gọi thẳng; chế biến BTP: UnitEngine.init (getPreps, phân loại đối chiếu NL) + kho / kết ca gọi thẳng; mở chai / báo hết, màn Kho / hao hụt / cân, kiểm kê: UnitEngine.init (getItems) + màn Kho / kết ca / automation gọi thẳng; hạn dùng: Việc đầu ca / chuông (setInterval expirySoonTick ở lại script chính) / check-out gọi thẳng; ca (PIN nhân viên, check-in/out, Việc đầu ca, mở ca): mọi màn ký PIN + cổng bán (requireOpeningChecklistDone) gọi thẳng; kết ca / giao ca / đóng ngày: màn Ca làm việc, check-out, cổng bán (chặn khi đã đóng ngày) gọi thẳng; quỹ tiền mặt / mở két: lưới đếm mệnh giá (cfEmptyDenoms / cfRenderDenomGrid / cfDenomTotal) của mở ca / kết ca / giao ca + cfEmptyDenoms lúc nạp script chính (_shiftOpenDenoms), nút mở két ở màn bán gọi thẳng; sửa danh mục (món / Food / topping): màn Quản lý menu, ô giá cài đặt To Go (fmtPriceInput), trình nghe click toàn trang (hideTypeDropdown) gọi thẳng; doanh thu / xếp hạng / lịch sử: todayKey dùng khắp app (giỏ, khuyến mãi, kết ca); mua thêm / chi tiết / xoá bill / bổ sung bill: thanh toán đọc _backfillMode, màn Lịch sử gọi thẳng; khách (tra cứu SĐT, tích tem / ly miễn phí theo tem, danh sách khách): ô SĐT ở giỏ / thanh toán, confirmPay (loyaltyProcessAfterPay, _finalizeStampFreeAfterPay), listener scroll / click gọi thẳng; giỏ hàng / menu bán / chọn size / topping (renderMenu, giỏ, openPO, topping có số lượng, onCheckoutClick): màn bán, mọi nút món, thanh toán, khuyến mãi, trợ lý gọi thẳng; khuyến mãi / quà / giảm giá / To Go, thanh toán (VietQR, nghe chuyển khoản, tiền mặt, confirmPay), Tính riêng: giỏ (onCheckoutClick, getFinalTotal), màn bán, trợ lý, kết ca gọi thẳng
+const POS_MODS_THIET_YEU = { ui: 'js/posgieo/pos_ui.v1.js', assist: 'js/posgieo/pos_assist.v1.js', printer: 'js/posgieo/pos_printer.v1.js', printContent: 'js/posgieo/pos_print_content.v1.js', printUi: 'js/posgieo/pos_print_ui.v1.js', receive: 'js/posgieo/pos_receive.v2.js', prep: 'js/posgieo/pos_prep.v1.js', stockUnits: 'js/posgieo/pos_stock_units.v1.js', kho: 'js/posgieo/pos_kho.v2.js', count: 'js/posgieo/pos_count.v1.js', expiry: 'js/posgieo/pos_expiry.v1.js', shift: 'js/posgieo/pos_shift.v1.js', shiftClosing: 'js/posgieo/pos_shift_closing.v2.js', handover: 'js/posgieo/pos_handover.v1.js', cashfund: 'js/posgieo/pos_cashfund.v1.js', catalogAdmin: 'js/posgieo/pos_catalog_admin.v1.js', reports: 'js/posgieo/pos_reports.v1.js', orders: 'js/posgieo/pos_orders.v1.js', customers: 'js/posgieo/pos_customers.v1.js', cart: 'js/posgieo/pos_cart.v2.js', pickTp: 'js/posgieo/pos_pick_topping.v1.js', thanhtoan: 'js/posgieo/pos_thanh_toan.v1.js' };   // trợ lý: confirmPay gọi thẳng assistFinalizeOrder; máy in: lệnh tự chạy lúc mở app dùng POSPrinter / temEnsureConnected; nội dung bill/tem + giao diện máy in/quét/in lại: thanh toán và màn máy in gọi thẳng; nhận hàng: màn Kho / automation gọi thẳng; chế biến BTP: UnitEngine.init (getPreps, phân loại đối chiếu NL) + kho / kết ca gọi thẳng; mở chai / báo hết, màn Kho / hao hụt / cân, kiểm kê: UnitEngine.init (getItems) + màn Kho / kết ca / automation gọi thẳng; hạn dùng: Việc đầu ca / chuông (setInterval expirySoonTick ở lại script chính) / check-out gọi thẳng; ca (PIN nhân viên, check-in/out, Việc đầu ca, mở ca): mọi màn ký PIN + cổng bán (requireOpeningChecklistDone) gọi thẳng; kết ca / giao ca / đóng ngày: màn Ca làm việc, check-out, cổng bán (chặn khi đã đóng ngày) gọi thẳng; quỹ tiền mặt / mở két: lưới đếm mệnh giá (cfEmptyDenoms / cfRenderDenomGrid / cfDenomTotal) của mở ca / kết ca / giao ca + cfEmptyDenoms lúc nạp script chính (_shiftOpenDenoms), nút mở két ở màn bán gọi thẳng; sửa danh mục (món / Food / topping): màn Quản lý menu, ô giá cài đặt To Go (fmtPriceInput), trình nghe click toàn trang (hideTypeDropdown) gọi thẳng; doanh thu / xếp hạng / lịch sử: todayKey dùng khắp app (giỏ, khuyến mãi, kết ca); mua thêm / chi tiết / xoá bill / bổ sung bill: thanh toán đọc _backfillMode, màn Lịch sử gọi thẳng; khách (tra cứu SĐT, tích tem / ly miễn phí theo tem, danh sách khách): ô SĐT ở giỏ / thanh toán, confirmPay (loyaltyProcessAfterPay, _finalizeStampFreeAfterPay), listener scroll / click gọi thẳng; giỏ hàng / menu bán / chọn size / topping (renderMenu, giỏ, openPO, topping có số lượng, onCheckoutClick): màn bán, mọi nút món, thanh toán, khuyến mãi, trợ lý gọi thẳng; khuyến mãi / quà / giảm giá / To Go, thanh toán (VietQR, nghe chuyển khoản, tiền mặt, confirmPay), Tính riêng: giỏ (onCheckoutClick, getFinalTotal), màn bán, trợ lý, kết ca gọi thẳng
 {
   const thieu = Object.keys(POS_MODS_THIET_YEU).filter(k => !(window.PosGieoMods && window.PosGieoMods[k] === true));
   if (thieu.length) {
@@ -4817,7 +4817,7 @@ async function _submitExpensePOSImpl() {
   }
 }
 
-// posDateKeyToDisplay, orderCashAmountPOS, isExpenseIncludedInCash, … startShiftWorkflowPOS, stopShiftWorkflowPOS (12 tên) → js/posgieo/pos_shift_closing.v1.js
+// posDateKeyToDisplay, orderCashAmountPOS, isExpenseIncludedInCash, … startShiftWorkflowPOS, stopShiftWorkflowPOS (12 tên) → js/posgieo/pos_shift_closing.v2.js
 let _shiftOpenDenoms = cfEmptyDenoms();
 let _shiftCloseDenoms = cfEmptyDenoms();
 
@@ -4852,7 +4852,7 @@ let _shiftCloseDenoms = cfEmptyDenoms();
 // đang trong ca là chuyện bình thường và bắt buộc.
 // ============================================================================
 
-// CLOSE_PIPELINE_PIN_FIELDS, _closeSession, closeSessionEmployeePOS, … closeStepNavBack, closeStepNavForward (28 tên) → js/posgieo/pos_shift_closing.v1.js
+// CLOSE_PIPELINE_PIN_FIELDS, _closeSession, closeSessionEmployeePOS, … closeStepNavBack, closeStepNavForward (28 tên) → js/posgieo/pos_shift_closing.v2.js
 // Ghi lại giao diện sau mỗi lần render và giá trị ô nhập khi nhân viên đang gõ.
 // Observer vẫn bắt được các bước chuyển tự động sau khi Firebase hoàn tất.
 document.addEventListener('DOMContentLoaded', () => {
@@ -4862,7 +4862,7 @@ document.addEventListener('DOMContentLoaded', () => {
   box.addEventListener('input', closeStepTrackPOS);
   box.addEventListener('change', closeStepTrackPOS);
 });
-// _closeElapsedTimer, startCloseElapsedTickPOS, renderShiftDashboard → js/posgieo/pos_shift_closing.v1.js
+// _closeElapsedTimer, startCloseElapsedTickPOS, renderShiftDashboard → js/posgieo/pos_shift_closing.v2.js
 
 // _clLogId, _clLocalStarts, clEnsureStarted, … countRefillBelowMinPOS, _openChecklistBlocking (16 tên) → js/posgieo/pos_shift.v1.js   // true = còn mục bắt buộc chưa xong
 // _openGateClearedDay → js/posgieo/pos_shift.v1.js       // ngày cổng đã mở hẳn (đã mở ca + việc đầu ca xong)
@@ -4870,7 +4870,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // confirmOpenDespiteMismatch, _writeShiftOpen, _continueAfterHandoverOpenGate, _continueAfterHandoverOpen, _continueAfterShiftInventoryOpenPOS → js/posgieo/pos_shift.v1.js
 
-// renderShiftCloseReview, renderShiftCloseCountForm, shiftChangeCloseDenom, … _continueAfterHandoverClose, computePrepCountLinesPOS (57 tên) → js/posgieo/pos_shift_closing.v1.js
+// renderShiftCloseReview, renderShiftCloseCountForm, shiftChangeCloseDenom, … _continueAfterHandoverClose, computePrepCountLinesPOS (57 tên) → js/posgieo/pos_shift_closing.v2.js
 
 // [FIX 2026-09] ĐÃ BỎ prepDistributeSmartFIFO (chia 1 số TỔNG cân được cho từng lô).
 // Lý do bỏ: kể cả khi chỉ dùng để "gợi ý", con số chia ra vẫn là số ĐOÁN chứ không
@@ -4879,29 +4879,29 @@ document.addEventListener('DOMContentLoaded', () => {
 // BẮT BUỘC cân riêng từng lô theo tem (xem renderPrepCountCard); không còn
 // bất kỳ đường nào nhập một số tổng gộp cho nhiều lô.
 
-// PREP_SHORTAGE_RECON_COLL, PREP_SHORTAGE_TOL_PCT, prepSubNorm, prepShortageCollect, prepShortageBuild, prepShortageAllocate → js/posgieo/pos_shift_closing.v1.js
+// PREP_SHORTAGE_RECON_COLL, PREP_SHORTAGE_TOL_PCT, prepSubNorm, prepShortageCollect, prepShortageBuild, prepShortageAllocate → js/posgieo/pos_shift_closing.v2.js
 
 // PREP_EXTEND_HOURS, EXP_SOON_MIN, prepLotExpired, expiryCheckLines, expiryExtendTo, _expWatchPrep → js/posgieo/pos_expiry.v1.js   // lô BTP 'active' đọc ở bước kiểm đầu ca — chuông dùng lại, không đọc thêm
 // loadExpiryCheckLinesPOS, expirySoonLines, _expSoonSig, expirySoonTick → js/posgieo/pos_expiry.v1.js
 setInterval(expirySoonTick, 60000);
 // fmtPrepTime, expiryLineWhen, _expCheck, … nlExtendOpenUnitPOS, prepDiscardExpiredLotPOS (16 tên) → js/posgieo/pos_expiry.v1.js
 
-// prepUntrackedSales, _prepUntrackedAsk, prepUntrackedAskOnCheckOut, … prepShortagePrefillFromCheckout, _prepShortAsk (7 tên) → js/posgieo/pos_shift_closing.v1.js // { day, rows, answers: {idx: Set('kind:id') | 'none'} }
+// prepUntrackedSales, _prepUntrackedAsk, prepUntrackedAskOnCheckOut, … prepShortagePrefillFromCheckout, _prepShortAsk (7 tên) → js/posgieo/pos_shift_closing.v2.js // { day, rows, answers: {idx: Set('kind:id') | 'none'} }
 
-// prepShortageAskIfNeeded, renderPrepShortageAsk, prepShortagePick, prepShortageSubmitAnswers, _prepCountState, _prepVerifyMode → js/posgieo/pos_shift_closing.v1.js   // {task, session} khi màn đếm đang dùng để CÂN LẠI xác minh (không phải đếm cuối ca)
-// _prepVerifySeq → js/posgieo/pos_shift_closing.v1.js       // mã phiên của màn cân lại — lượt gửi cũ hoàn tất muộn không được dọn màn của phiên mới
-// _prepCountCardIdx, renderPrepCountScreen, _prepCountApplyDiscardAll, … SHIFT_INVENTORY_COUNTS_COLL, _kcStep (32 tên) → js/posgieo/pos_shift_closing.v1.js   // key -> {idx, total, isDone}
-// kcStepReset, kcStepApply, kcStepRefresh, … shiftWeighTemLinePOS, shiftWeighAnomalyItemsPOS (13 tên) → js/posgieo/pos_shift_closing.v1.js
+// prepShortageAskIfNeeded, renderPrepShortageAsk, prepShortagePick, prepShortageSubmitAnswers, _prepCountState, _prepVerifyMode → js/posgieo/pos_shift_closing.v2.js   // {task, session} khi màn đếm đang dùng để CÂN LẠI xác minh (không phải đếm cuối ca)
+// _prepVerifySeq → js/posgieo/pos_shift_closing.v2.js       // mã phiên của màn cân lại — lượt gửi cũ hoàn tất muộn không được dọn màn của phiên mới
+// _prepCountCardIdx, renderPrepCountScreen, _prepCountApplyDiscardAll, … SHIFT_INVENTORY_COUNTS_COLL, _kcStep (32 tên) → js/posgieo/pos_shift_closing.v2.js   // key -> {idx, total, isDone}
+// kcStepReset, kcStepApply, kcStepRefresh, … shiftWeighTemLinePOS, shiftWeighAnomalyItemsPOS (13 tên) → js/posgieo/pos_shift_closing.v2.js
 // [E4.5] Chuyển vào unit_engine.v1.js (chép nguyên văn) — tên cũ giữ làm lớp chuyển tiếp.
 
 
-// shiftWeighUnitPOS, shiftWeighQtyError, shiftWeighUnitHTML, … _continueAfterPrepCount, _continueAfterShiftInventoryClosePOS (28 tên) → js/posgieo/pos_shift_closing.v1.js
+// shiftWeighUnitPOS, shiftWeighQtyError, shiftWeighUnitHTML, … _continueAfterPrepCount, _continueAfterShiftInventoryClosePOS (28 tên) → js/posgieo/pos_shift_closing.v2.js
 
 // [BỎ-KIỂM-KÊ-CHUYỂN-KHOẢN] Đã xoá 3 hàm của bước nhập tay số tiền chuyển khoản:
 //   renderShiftBankReconForm() / submitShiftBankRecon() / _submitShiftBankReconImpl()
 // Lý do đầy đủ ghi ở _continueAfterPrepCount() phía trên. Không còn nơi nào gọi tới chúng.
 
-// renderShiftHandoverForm, shiftUpdateHandoverPreview, submitShiftHandover, _submitShiftHandoverImpl → js/posgieo/pos_shift_closing.v1.js
+// renderShiftHandoverForm, shiftUpdateHandoverPreview, submitShiftHandover, _submitShiftHandoverImpl → js/posgieo/pos_shift_closing.v2.js
 
 
 // ============================================================================
