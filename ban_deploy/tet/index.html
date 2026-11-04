@@ -19,7 +19,7 @@
   <script src="https://cdn.jsdelivr.net/npm/bcryptjs@2.4.3/dist/bcrypt.min.js"></script>
 
   <script src="https://cdn.tailwindcss.com"></script>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=League+Spartan:wght@700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=League+Spartan:wght@700;800&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&display=swap" rel="stylesheet">
   
   <style>
     /* GIỮ NGUYÊN CSS CŨ [cite: 6034-6062] */
@@ -69,6 +69,18 @@
   .bs-enter { opacity: 0; transform: scale(0.88) translateY(20px); }
   .bs-show  { opacity: 1; transform: scale(1) translateY(0); }
   .bs-card  { transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1); }
+  /* [04/11] Vé đặt bed (modal Đặt thành công + Lịch sử › Vé của bạn) — phẳng, chữ đen */
+  .bs-ticket-wrap::before { display: none !important; }
+  .bs-ticket svg { display: block; width: 100%; height: auto; }
+  #booking-success-overlay .bs-card { background: #fff !important; border-color: #fff !important; }
+  .tk-strip { display: flex; gap: 12px; overflow-x: auto; scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch;
+    scrollbar-width: none; margin: 0 -24px; padding: 0 24px; scroll-padding: 0 24px; overscroll-behavior-x: contain; }
+  .tk-strip::-webkit-scrollbar { display: none; }
+  .tk-strip .tk-item { flex: 0 0 100%; scroll-snap-align: center; min-width: 0; }
+  .tk-strip.multi .tk-item { flex-basis: 88%; }
+  .tk-dots { display: flex; justify-content: center; gap: 6px; margin-top: 10px; }
+  .tk-dots i { width: 6px; height: 6px; border-radius: 3px; background: #d6cbb4; transition: width .25s, background .25s; }
+  .tk-dots i.on { width: 16px; background: #85745a; }
   
   @keyframes slideUp {
     from { opacity: 0; transform: translateY(40px) scale(0.95); }
@@ -3743,7 +3755,7 @@ function handleBooking() {
                             showBookingSuccessModal(startVal, endVal, function() {
                                 document.getElementById('book-date').value = _vnTodayYmd();
                                 showTab('user');
-                            });
+                            }, bookingData);
                         }).catch(function(e){ clearTimeout(safetyTimer); loading.classList.add('hidden'); alert('Lỗi: '+e.message); });
                     });
 
@@ -3764,11 +3776,99 @@ function handleBooking() {
 // =============================================================
 
 // --- MODAL ĐẶT BED THÀNH CÔNG (CÓ ẢNH ĐẬU XE) ---
-function showBookingSuccessModal(startVal, endVal, cb) {
+// [04/11] Vé đặt bed (modal Đặt thành công + mục «Vé của bạn» trong Lịch sử): SVG một khối, phẳng (không bóng, không dập nổi), chữ đen, co giãn theo bề ngang.
+// Tên khách do người dùng nhập → escape trước khi chèn.
+var _bsTkSeq = 0;
+function _bsTicketSvg(info) {
+    var MK = 'bsTkMask' + (++_bsTkSeq);              // mỗi vé một mask riêng (nhiều vé cùng trang)
+    var esc = function (x) { return String(x == null ? '' : x).replace(/[&<>"']/g, function (c) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); };
+    var W = 340, H = 212, SX = 266, R = 4.6, N = 9.5;     // SX = đường xé cuống vé
+    // Viền ngoài: răng cưa hai mép trái/phải, khuyết tròn trên/dưới ở đường xé (theo chiều kim đồng hồ)
+    var cnt = Math.round((H - 20) / 13) + 1, step = (H - 20) / (cnt - 1), ys = [];
+    for (var i = 0; i < cnt; i++) ys.push(10 + i * step);
+    var d = 'M0 0 H' + (SX - N) + ' A' + N + ' ' + N + ' 0 0 0 ' + (SX + N) + ' 0 H' + W;
+    ys.forEach(function (y) { d += ' V' + (y - R).toFixed(2) + ' A' + R + ' ' + R + ' 0 0 0 ' + W + ' ' + (y + R).toFixed(2); });
+    d += ' V' + H + ' H' + (SX + N) + ' A' + N + ' ' + N + ' 0 0 0 ' + (SX - N) + ' ' + H + ' H0';
+    ys.slice().reverse().forEach(function (y) { d += ' V' + (y + R).toFixed(2) + ' A' + R + ' ' + R + ' 0 0 0 0 ' + (y - R).toFixed(2); });
+    d += ' Z';
+    // Viền trong: khung chữ nhật góc khuyết
+    var a = 12, b = 6, x2 = SX - 8, y2 = H - 12;
+    var inner = 'M' + (a + b) + ' ' + a + ' H' + (x2 - b) + ' A' + b + ' ' + b + ' 0 0 0 ' + x2 + ' ' + (a + b) +
+        ' V' + (y2 - b) + ' A' + b + ' ' + b + ' 0 0 0 ' + (x2 - b) + ' ' + y2 + ' H' + (a + b) +
+        ' A' + b + ' ' + b + ' 0 0 0 ' + a + ' ' + (y2 - b) + ' V' + (a + b) + ' A' + b + ' ' + b + ' 0 0 0 ' + (a + b) + ' ' + a + ' Z';
+    var holes = '';
+    for (var hy = 24; hy <= H - 24; hy += 12) holes += '<circle cx="' + SX + '" cy="' + hy + '" r="2.4" fill="#000"/>';
+    var INK = '#1c1a17', MUTE = '#85745a', RULE = '#9a8462', PAPER = '#ecd9ac', DIV = 62;
+    var SERIF = "font-family=\"'Source Serif 4', Georgia, 'Times New Roman', serif\" font-weight=\"600\"";
+    var SANS = "font-family=\"'Source Serif 4', Georgia, serif\"";
+    var BRAND = "font-family=\"'League Spartan', sans-serif\" font-weight=\"800\" letter-spacing=\"-0.15\"";
+    var tx = function (x, y, txt, attr, col) { return '<text x="' + x + '" y="' + y + '" fill="' + (col || INK) + '" ' + attr + '>' + txt + '</text>'; };
+    var LAB = "font-family=\"Inter, system-ui, sans-serif\"";
+    var lab = function (x, y, txt) { return tx(x, y, esc(txt), LAB + ' font-size="6.4" font-weight="600" letter-spacing="1.3"', MUTE); };
+    var val = function (x, y, txt, sz) { return tx(x, y, esc(txt), SANS + ' font-size="' + (sz || 11.5) + '" font-weight="500"'); };
+    var line = function (x1, y1, xx, yy) { return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + xx + '" y2="' + yy + '" stroke="' + RULE + '" stroke-width="0.7"/>'; };
+    var admit = 'VÉ ' + info.guests + ' KHÁCH';
+    var C1 = DIV + 14, C2 = DIV + 104, R2 = x2 - 12;
+    return '<svg viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Vé đặt bed ' + esc(info.date) + ' ' + esc(info.time) + '">' +
+        '<defs><mask id="' + MK + '"><path d="' + d + '" fill="#fff"/>' + holes + '</mask></defs>' +
+        '<rect x="0" y="0" width="' + W + '" height="' + H + '" fill="' + PAPER + '" mask="url(#' + MK + ')"/>' +
+        '<path d="' + inner + '" fill="none" stroke="' + RULE + '" stroke-width="0.8"/>' +
+        line(DIV, a, DIV, y2) +
+        tx(0, 0, esc(admit), SERIF + ' font-size="15" letter-spacing="3.2" text-anchor="middle" transform="translate(' + ((a + DIV) / 2 + 7) + ' ' + (H / 2) + ') rotate(-90)"') +
+        tx(C1, 39, 'The cafe 33', BRAND + ' font-size="14"') +
+        tx(C1 - 1, 66, 'Cafe in Bed', SERIF + ' font-size="22"') +
+        tx(C1, 83, esc(info.who), SANS + ' font-size="9.5" font-style="italic"', MUTE) +
+        lab(C1, 110, 'NGÀY') + lab(C2, 110, 'GIỜ') +
+        val(C1, 126, info.date) + val(C2, 126, info.time) +
+        line(C1, 141, R2, 141) +
+        lab(C1, 160, 'BED') + lab(C2, 160, 'THỜI LƯỢNG') +
+        val(C1, 176, info.bed) + val(C2, 176, info.dur) +
+        tx(0, 0, esc(info.stub), SANS + ' font-size="10" font-weight="600" letter-spacing="1.6" text-anchor="middle" transform="translate(' + ((SX + W) / 2 - 3) + ' ' + (H / 2) + ') rotate(90)"') +
+        tx(0, 0, esc(info.start), LAB + ' font-size="6.4" font-weight="600" letter-spacing="1.3" text-anchor="middle" transform="translate(' + ((SX + W) / 2 + 10) + ' ' + (H / 2) + ') rotate(90)"', MUTE) +
+        '</svg>';
+}
+
+function _bsTicketInfo(startVal, endVal, bk) {
+    bk = bk || {};
+    startVal = String(startVal || ''); endVal = String(endVal || '');
+    var dk = _parseBedDateKey(String(bk.date || bk.bookingDate || '')), dateTxt = String(bk.date || ''), stub = startVal;
+    if (dk) {
+        var dt = new Date(+dk.year, +dk.month - 1, +dk.day);
+        var wd = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'][dt.getDay()];
+        dateTxt = wd + ', ' + dk.day + '/' + dk.month + '/' + dk.year;
+        stub = dk.day + '.' + dk.month + '.' + dk.year;
+    }
+    var ps = String(startVal).split(':'), pe = String(endVal).split(':');
+    var mins = (+pe[0] * 60 + +pe[1]) - (+ps[0] * 60 + +ps[1]); if (mins <= 0) mins += 1440;
+    var dur = isNaN(mins) ? '' : (Math.floor(mins / 60) ? Math.floor(mins / 60) + ' giờ' : '') + (mins % 60 ? ' ' + (mins % 60) + ' phút' : '');
+    var who = [String(bk.name || '').trim(), String(bk.compName || '').trim()].filter(Boolean).join(', ');
+    if (who.length > 40) who = who.slice(0, 39) + '…';
+    return {
+        guests: parseInt(bk.guestCount, 10) || 1, who: who, date: dateTxt,
+        time: startVal + ' – ' + endVal, start: 'VÀO LÚC ' + startVal, dur: dur.trim(),
+        // bed quán đã xếp → ô khách đã chọn → chưa có: '....'
+        bed: (bk.bedId && bk.bedId !== 'WAITING') ? 'Bed 0' + bk.bedId : (bk.preferredBed ? 'Bed 0' + bk.preferredBed : '....'),
+        stub: stub
+    };
+}
+
+// [04/11] Lịch sử đặt bed › «Lịch trình hôm nay»: mỗi lịch hôm nay là một vé (+ nút Đổi giờ / Huỷ dưới vé).
+// ≥ 2 vé → dải trượt ngang (scroll-snap) + chấm vị trí; hàm này chỉ gắn chấm theo vị trí cuộn.
+function _tkStripBind() {
+    var strip = document.getElementById('ticket-strip'), dots = document.getElementById('ticket-dots');
+    if (!strip || !dots || strip.children.length < 2) return;
+    strip.onscroll = function () {
+        var items = strip.children, best = 0, bd = 1e9, c = strip.scrollLeft + strip.clientWidth / 2;
+        for (var i = 0; i < items.length; i++) { var m = Math.abs(items[i].offsetLeft + items[i].offsetWidth / 2 - c); if (m < bd) { bd = m; best = i; } }
+        for (var j = 0; j < dots.children.length; j++) dots.children[j].className = j === best ? 'on' : '';
+    };
+}
+
+function showBookingSuccessModal(startVal, endVal, cb, bookingData) {
     _noPrebookOkFor = null;
     _upCacheAt = 0; // [13/10] đặt xong → lần mở tab Đặt bed sau đọc lại Lịch sắp tới
     const overlay = document.getElementById('booking-success-overlay');
-    document.getElementById('bs-time').innerHTML = `${startVal} – ${endVal}`;
+    document.getElementById('bs-ticket').innerHTML = _bsTicketSvg(_bsTicketInfo(startVal, endVal, bookingData));
     overlay.classList.remove('hidden');
     setTimeout(() => {
         overlay.querySelector('.bs-card').classList.remove('bs-enter');
@@ -4126,21 +4226,20 @@ function openHistory() {
         const todayStr2 = `${y}-${m}-${d}`;
 
         // Tìm đơn hôm nay
-        let todayBooking = _historyCache.find(h => {
+        // [04/11] Mọi lịch hôm nay (cùng điều kiện cũ) → mỗi lịch một vé, sớm nhất trước
+        const todayList = _historyCache.filter(h => {
             const s = (h.status || "").toLowerCase();
             const isActive = (s !== 'đã hủy' && s !== 'đã xong');
             const isToday = (h.date === todayStr1 || h.date === todayStr2);
             return isActive && isToday;
-        });
+        }).sort((a, b) => String(a.start || '').localeCompare(String(b.start || '')));
 
         // Vẽ thẻ Active (Hôm nay)
         activeDiv.classList.remove('hidden');
         let activeContent = '';
         
-        if (todayBooking) {
-            const h = todayBooking;
-            const bedText = (h.bedId && h.bedId != "WAITING") ? "BED 0" + h.bedId : "Đặt thành công";
-            const isWaiting = (h.status || "").includes("chờ");
+        if (todayList.length) {
+            activeContent = '<div id="ticket-strip" class="tk-strip' + (todayList.length > 1 ? ' multi' : '') + '">' + todayList.map(function (h) {
 
             // Tính phút còn lại
             const nowMs2 = new Date();
@@ -4185,28 +4284,19 @@ function openHistory() {
             }
 
             const changeInfoHtml = changeCount > 0
-                ? '<p class="text-[10px] font-bold mt-1" style="color:#fbbf24;">Đã đổi giờ: ' + changeCount + '/2 lần</p>'
+                ? '<p class="text-[10px] font-bold mt-2 text-center" style="color:#85745a;">Đã đổi giờ: ' + changeCount + '/2 lần</p>'
                 : "";
 
-            const badgeStyle = isBeingUsed
-                ? 'background:linear-gradient(135deg,#f25a79,#a30d2b);color:#371018;'
-                : 'background:linear-gradient(135deg,#f3e2ab,#c9a94e 60%,#a9873c);color:#3a2e0d;';
-            const badgeLabel = isBeingUsed ? '🛏️ ĐANG DÙNG' : 'HÔM NAY';
-
-            activeContent = '<div id="active-card" class="rounded-[1.75rem] shadow-lg overflow-hidden relative" style="background:linear-gradient(155deg,#0d1210 0%,#372529 50%,#0a0d0b 100%);">'
-                + '<div class="absolute top-0 right-0 p-4 z-20"><span class="text-[9px] font-black uppercase tracking-widest px-3 py-1.5 rounded-full" style="' + badgeStyle + 'box-shadow:0 3px 10px rgba(0,0,0,0.35);">' + badgeLabel + '</span></div>'
-                + '<div class="absolute -bottom-10 -right-10 w-36 h-36 rounded-full pointer-events-none" style="background:rgba(204,16,54,0.18);filter:blur(28px);"></div>'
-                + '<div class="p-6 pb-5 text-white relative z-10">'
-                + '<p class="text-[10px] font-bold uppercase tracking-widest opacity-50 mb-1.5">📅 ' + h.date + '</p>'
-                + '<p class="text-4xl font-black tracking-tight" style="font-family:\'League Spartan\',sans-serif;text-shadow:0 2px 8px rgba(0,0,0,0.4);">' + h.start + '</p>'
-                + '<p class="text-sm font-bold opacity-60 mt-1.5">Đến ' + h.end + ' · <span style="color:#f25a79;">' + bedText + '</span></p>'
-                + changeInfoHtml
-                + '</div>'
-                + '<div class="bg-white p-4 flex gap-2 relative z-10">'
+            return '<div class="tk-item">'
+                + _bsTicketSvg(_bsTicketInfo(h.start, h.end, h))
+                + '<div class="flex gap-2 mt-3">'
                 + '<button ' + (reschedFinalDisabled ? '' : 'onclick="openRescheduleModal(\'' + h.key + '\')"') + ' class="' + reschedClass + '">' + reschedLabel + '</button>'
                 + '<button ' + cancelOnclick + ' class="' + cancelClass + '">' + cancelLabel + '</button>'
                 + '</div>'
+                + changeInfoHtml
                 + '</div>';
+            }).join('') + '</div>'
+                + (todayList.length > 1 ? '<div id="ticket-dots" class="tk-dots">' + todayList.map(function (_, i) { return '<i' + (i ? '' : ' class="on"') + '></i>'; }).join('') + '</div>' : '');
         } else {
             activeContent = '<div class="rounded-[1.75rem] p-7 text-center" style="background:linear-gradient(180deg,#f5f5f7 0%,#ffffff 100%);border:1px solid rgba(0,0,0,0.05);">'
                 + '<p class="text-3xl mb-2">🛏️</p>'
@@ -4215,13 +4305,14 @@ function openHistory() {
                 + '</div>';
         }
         activeDiv.innerHTML = `<h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 ml-1">Lịch trình hôm nay</h3>` + activeContent;
+        _tkStripBind();
 
         // Vẽ danh sách lịch sử cũ
         if (_historyCache.length === 0) {
             listDiv.innerHTML = '<div style="text-align:center;padding:40px 0;color:#9ca3af;font-size:13px;">Chưa có lịch sử nào.</div>';
         } else {
             _historyCache.forEach(h => {
-                if (todayBooking && h.key === todayBooking.key) return;
+                if (todayList.some(t => t.key === h.key)) return; // đã hiện thành vé ở Lịch trình hôm nay
 
                 const st = (h.status || '').toLowerCase();
                 const isDone      = st.includes('xong');
@@ -5022,16 +5113,9 @@ window.handleLogout = function() {
 
 <div id="booking-success-overlay" class="fixed inset-0 z-[150] hidden flex items-center justify-center p-4" style="background: rgba(0,0,0,0.55); backdrop-filter: blur(12px);">
   <div class="bs-card bs-enter w-full max-w-sm rounded-[2.5rem] overflow-hidden shadow-[0_30px_80px_rgba(0,0,0,0.35)] bg-white">
-    <!-- Header xanh (thu gọn, bỏ dấu check) -->
-    <div class="bg-gradient-to-br from-[#760a1f] to-[#67081b] px-6 pt-6 pb-6 text-center relative overflow-hidden">
-      <div class="absolute -top-6 -right-6 w-32 h-32 bg-white/5 rounded-full blur-2xl"></div>
-      <div class="absolute -bottom-8 -left-8 w-40 h-40 bg-white/5 rounded-full blur-3xl"></div>
-      <p class="text-white/60 text-[10px] font-bold uppercase tracking-widest mb-1">The cafe 33 · Cafe in Bed</p>
-      <h2 class="brand-font text-white text-2xl font-black mb-3">Đặt thành công!</h2>
-      <div class="bg-white/15 backdrop-blur-sm rounded-2xl px-6 py-3 inline-block border border-white/20">
-        <p class="text-white/60 text-[10px] font-bold uppercase tracking-widest mb-0.5">Khung giờ đặt</p>
-        <p id="bs-time" class="text-white font-black text-xl brand-font">--:-- – --:--</p>
-      </div>
+    <!-- Vé đặt bed (thay header xanh) — dựng bằng _bsTicketSvg() -->
+    <div class="bs-ticket-wrap px-4 pt-5 pb-1">
+      <div id="bs-ticket" class="bs-ticket"></div>
     </div>
 
     <!-- Cảnh báo 30 phút + ảnh đậu xe + nút -->
