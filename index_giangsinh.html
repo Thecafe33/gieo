@@ -3818,7 +3818,7 @@ function handleBooking() {
 // Tên khách do người dùng nhập → escape trước khi chèn.
 var _bsTkSeq = 0;
 function _bsTicketSvg(info) {
-    var MK = 'bsTkMask' + (++_bsTkSeq);              // mỗi vé một mask riêng (nhiều vé cùng trang)
+    var MK = 'bsTkMask' + (++_bsTkSeq), PT = 'bsTkPat' + _bsTkSeq;   // mỗi vé một mask / hoạ tiết riêng (nhiều vé cùng trang)
     var esc = function (x) { return String(x == null ? '' : x).replace(/[&<>"']/g, function (c) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); };
     var W = 340, H = 212, SX = 266, R = 4.6, N = 9.5;     // SX = đường xé cuống vé
     // Viền ngoài: răng cưa hai mép trái/phải, khuyết tròn trên/dưới ở đường xé (theo chiều kim đồng hồ)
@@ -3848,8 +3848,15 @@ function _bsTicketSvg(info) {
     var admit = 'VÉ ' + info.guests + ' KHÁCH';
     var C1 = DIV + 14, C2 = DIV + 104, R2 = x2 - 12;
     return '<svg viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Vé đặt bed ' + esc(info.date) + ' ' + esc(info.time) + '">' +
-        '<defs><mask id="' + MK + '"><path d="' + d + '" fill="#fff"/>' + holes + '</mask></defs>' +
+        '<defs>' +
+          // hoạ tiết chìm: số 33 (League Spartan) xếp chéo, thưa, rất nhạt — như watermark vé thật
+          '<pattern id="' + PT + '" patternUnits="userSpaceOnUse" width="66" height="54" patternTransform="rotate(-28)">' +
+            '<text x="3" y="21" font-family="\'League Spartan\', sans-serif" font-weight="800" font-size="19" fill="#85745a">33</text>' +
+            '<text x="36" y="48" font-family="\'League Spartan\', sans-serif" font-weight="800" font-size="19" fill="#85745a">33</text>' +
+          '</pattern>' +
+          '<mask id="' + MK + '"><path d="' + d + '" fill="#fff"/>' + holes + '</mask></defs>' +
         '<rect x="0" y="0" width="' + W + '" height="' + H + '" fill="' + PAPER + '" mask="url(#' + MK + ')"/>' +
+        '<rect x="0" y="0" width="' + W + '" height="' + H + '" fill="url(#' + PT + ')" opacity=".08" mask="url(#' + MK + ')"/>' +
         '<path d="' + inner + '" fill="none" stroke="' + RULE + '" stroke-width="0.8"/>' +
         line(DIV, a, DIV, y2) +
         tx(0, 0, esc(admit), SERIF + ' font-size="15" letter-spacing="3.2" text-anchor="middle" transform="translate(' + ((a + DIV) / 2 + 7) + ' ' + (H / 2) + ') rotate(-90)"') +
