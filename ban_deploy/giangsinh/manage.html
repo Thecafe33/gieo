@@ -433,7 +433,7 @@ html[data-theme="dark"] .bf-pay.is-cash{background:#1f3b2a;color:#86d9a6}html[da
 @keyframes bfIn{0%{opacity:0;transform:translateY(-14px)}100%{opacity:1;transform:none}}
 .bf-more{display:block;margin:12px auto 0;font-size:12.5px;font-weight:700;color:var(--green);padding:8px 18px;border-radius:99px;background:color-mix(in srgb,var(--panel) 72%,transparent);border:1px solid var(--line);cursor:pointer}
 .bf-empty{margin:14px 0 2px;color:var(--sub);font-size:13px}
-.bf-line small{color:var(--sub);font-size:13px}.bf-line>span{min-width:0}.bf-topping{padding-left:14px!important}.bf-gift{color:var(--green);font-size:12px;font-weight:700}
+.bf-line small{color:var(--sub);font-size:13px}.bf-line>span{min-width:0}.bf-topping{padding-left:14px!important}.bf-gift{color:var(--green);font-size:12px;font-weight:700}.bf-dgtag{display:inline-block;font-size:11.5px;font-weight:800;line-height:1.3;padding:1px 6px;border-radius:6px;background:#dbeafe;color:#1d4ed8}html[data-theme="dark"] .bf-dgtag{background:#1e3a5f;color:#bfdbfe}.bf-amt{display:flex;flex-direction:column;align-items:flex-end;flex:none}.bf-amt s{font-size:12px;font-weight:500;color:var(--sub)}.bf-mode.bf-dg{background:#dbeafe;color:#1d4ed8}html[data-theme="dark"] .bf-mode.bf-dg{background:#1e3a5f;color:#bfdbfe}
 @media(min-width:761px) and (max-width:1100px){.bf-row{grid-template-columns:36px minmax(96px,130px) minmax(0,1fr) auto auto 16px;gap:10px}}
 @media(max-width:760px){.bf-row{grid-template-columns:36px minmax(0,1fr) auto 16px;grid-template-areas:"m w t c" ". s s s";row-gap:3px;column-gap:10px;padding:9px 12px 9px 9px}.bf-chevron{grid-area:c}.bf-sub{grid-area:s;display:flex;align-items:center;justify-content:space-between;gap:8px;min-width:0}.bf-who b{flex-wrap:wrap;white-space:normal;overflow:visible;row-gap:3px}.bf-mark{grid-area:m;align-self:start}.bf-who{grid-area:w}.bf-items{flex:1;font-size:14px}.bf-pay{flex:none;justify-self:end;font-size:11px;padding:2px 8px}.bf-total{grid-area:t;font-size:16px}.bill-feed{margin-top:14px}}
 @media(prefers-reduced-motion:reduce){.bf-entry.bf-in{animation:none}.bf-live i{animation:none}}
@@ -2757,7 +2757,7 @@ function bfExtra(o){const x=[],bed=String(o.bedId||'');if(bed&&bed!=='WAITING')x
 function bfRow(b){
  const st=bfStore(b.store),o=b.o,[mk,ml]=bfMethod(o),isNew=BF.fresh.has(b.key),gieo=st.brand==='gieo';
  const mark=gieo?String(st.code||'').slice(2):(st.mono||''),name=gieo?'Gieo '+st.code:st.name,extra=bfExtra(o).map(t=>t.name||t),items=bfSummary(o)||'Không có chi tiết món',qty=bfItems(o).reduce((n,c)=>n+(Number(c.qty)||1),0),togo=st.id==='xofa'&&o.isToGo===true;
- return `<article class="bf-entry${BF.open.has(b.key)?' is-open':''}${isNew?' is-new':''}${BF.anim.has(b.key)?' bf-in':''}" style="--sc:${st.c}"><button aria-expanded="${BF.open.has(b.key)}" class="bf-row" style="--sc:${st.c}" data-k="${esc(b.key)}" onclick="bfOpen(this.dataset.k)" aria-label="${esc(name+' · '+bfClock(o)+' · '+money(o.total)+' đồng')}"><span class="bf-mark" aria-hidden="true">${esc(mark)}</span><span class="bf-who"><b>${esc(name)}${togo?'<span class="bf-mode">Togo</span>':''}${isNew?'<i class="bf-newtag">Mới</i>':''}</b><small class="num"><span class="bf-time">${esc(bfClock(o))}</span>${qty?'<span>'+qty+' món</span>':''}${extra.length?'<span>'+esc(extra.join(' · '))+'</span>':''}</small></span><span class="bf-sub"><span class="bf-items" title="${esc(items)}">${esc(items)}</span><span class="bf-pay is-${mk}">${esc(ml)}</span></span><b class="bf-total num">${money(o.total)}<span>đ</span></b><span class="bf-chevron" aria-hidden="true">${icon('down')}</span></button>${BF.open.has(b.key)?`<div class="bf-detail">${bfDetails(b)}</div>`:''}</article>`;
+ return `<article class="bf-entry${BF.open.has(b.key)?' is-open':''}${isNew?' is-new':''}${BF.anim.has(b.key)?' bf-in':''}" style="--sc:${st.c}"><button aria-expanded="${BF.open.has(b.key)}" class="bf-row" style="--sc:${st.c}" data-k="${esc(b.key)}" onclick="bfOpen(this.dataset.k)" aria-label="${esc(name+' · '+bfClock(o)+' · '+money(o.total)+' đồng')}"><span class="bf-mark" aria-hidden="true">${esc(mark)}</span><span class="bf-who"><b>${esc(name)}${togo?'<span class="bf-mode">Togo</span>':''}${bfIsDg(o)?'<span class="bf-mode bf-dg">Đồng giá</span>':''}${isNew?'<i class="bf-newtag">Mới</i>':''}</b><small class="num"><span class="bf-time">${esc(bfClock(o))}</span>${qty?'<span>'+qty+' món</span>':''}${extra.length?'<span>'+esc(extra.join(' · '))+'</span>':''}</small></span><span class="bf-sub"><span class="bf-items" title="${esc(items)}">${esc(items)}</span><span class="bf-pay is-${mk}">${esc(ml)}</span></span><b class="bf-total num">${money(o.total)}<span>đ</span></b><span class="bf-chevron" aria-hidden="true">${icon('down')}</span></button>${BF.open.has(b.key)?`<div class="bf-detail">${bfDetails(b)}</div>`:''}</article>`;
 }
 function bfInner(modal=false){
  const ids=new Set(selectedStores().map(st=>st.id)),all=BF.list.filter(b=>ids.has(b.store)),list=all.slice(0,modal?BF.keep:24);
@@ -2782,20 +2782,46 @@ function stampPromotionLabel(value){
   return /^__free_stamp__\d+$/.test(label)?'Ly miễn phí (6 tem)':label;
 }
 
+// [FIX 04/11] Hiển thị bill chung cho khớp tổng tiền:
+//  · Dòng ly CHỈ là giá ly (giá gốc, hoặc giá Đồng giá nếu có); mỗi topping một dòng riêng cộng thêm → cộng các dòng = tổng bill.
+//    (Trước đây dòng ly đã gồm topping rồi topping lại hiện giá lần nữa → 25k + 5k trân châu đọc ra 30k + 5k.)
+//  · Đồng giá (XOFA) gắn ĐÚNG món được giảm: POS lưu giá GỐC từng món + dgItemIds / dgFixedPrice(L) cấp bill, ta tính lại đúng công thức
+//    dgUnitPrice của PosX. Chỉ gắn khi tổng giảm tính lại KHỚP dgDiscount của bill; không khớp (bill cũ thiếu dgItemIds…) thì giữ dòng
+//    «Đồng giá −X» ở phần thông tin chung, không đoán món.
+function bfIsDg(o){return Number(o&&o.dgDiscount)>0}
+function bfDgPlan(o){
+ if(!bfIsDg(o))return null;
+ const ids=Array.isArray(o.dgItemIds)?o.dgItemIds.map(String):[],fm=Number(o.dgFixedPrice)||0,fl=Number(o.dgFixedPriceL)||0;
+ if(!ids.length||fm<=0)return null;
+ const unitOf=c=>{
+  if(!c||c.isFree||c.isFood||c._vKey||c._discountId||!ids.includes(String(c.itemId||'')))return null;
+  const price=Number(c.price)||0,fixed=String(c.size||'').toUpperCase()==='L'?(fl>0?fl:price):fm,u=Math.min(price,fixed);
+  return u<price?u:null;
+ };
+ let sum=0;bfItems(o).forEach(c=>{const u=unitOf(c);if(u!=null)sum+=((Number(c.price)||0)-u)*(Number(c.qty)||1)});
+ return Math.abs(sum-Number(o.dgDiscount))<=1?{unitOf}:null;
+}
+// Một dòng ly + các dòng topping, đã tính sẵn số tiền (mỗi dòng = đơn giá × số ly); tổng các dòng = (giá ly + topping) × số ly như POS.
+function bfLineModel(c,plan){
+ const q=Number(c.qty)||1,price=Number(c.price)||0,dgUnit=plan?plan.unitOf(c):null,unit=c.isFree?0:(dgUnit!=null?dgUnit:price);
+ const tops=(c.toppings||[]).filter(Boolean).map(t=>{const tq=Math.max(1,Number(t.qty)||1);return{name:t.name||'',count:tq*q,amount:(Number(t.price)||0)*tq*q}});
+ return{q,unit,amount:unit*q,was:dgUnit!=null?price*q:0,dg:dgUnit!=null,tops};
+}
 function bfDetails(b){
- const o=b.o;
+ const o=b.o,plan=bfDgPlan(o);
  const lines=bfItems(o).map(c=>{
-  const q=Number(c.qty)||1,tp=(c.toppings||[]).filter(Boolean),tpSum=tp.reduce((n,t)=>n+(Number(t.price)||0)*Math.max(1,Number(t.qty)||1),0),line=((Number(c.price)||0)+tpSum)*q;
-  const ice={rieng:'Đá riêng',khong:'Không đá'}[c.ice]||'';
-  return `<div class="bf-line"><span><b>${q}×</b> ${esc(c.name||'')}${c.size?` <small>${esc(c.size)}</small>`:''}${ice?` <small>· ${esc(ice)}</small>`:''}${c.isFree?' <span class="bf-gift">Tặng</span>':''}</span><b class="num">${money(c.isFree?0:line)}đ</b></div>`
-   +tp.map(t=>{const tq=Math.max(1,Number(t.qty)||1),amount=(Number(t.price)||0)*tq;return `<div class="bf-line bf-topping"><span>+ ${esc(t.name||'')}${tq>1?' ×'+tq:''}</span><b class="num">${amount?money(amount)+'đ':'Tặng'}</b></div>`}).join('');
+  const m=bfLineModel(c,plan),ice={rieng:'Đá riêng',khong:'Không đá'}[c.ice]||'';
+  return `<div class="bf-line"><span><b>${m.q}×</b> ${esc(c.name||'')}${c.size?` <small>${esc(c.size)}</small>`:''}${ice?` <small>· ${esc(ice)}</small>`:''}${m.dg?' <span class="bf-dgtag">Đồng giá</span>':''}${c.isFree?' <span class="bf-gift">Tặng</span>':''}</span><span class="bf-amt"><b class="num">${money(m.amount)}đ</b>${m.dg?`<s class="num">${money(m.was)}đ</s>`:''}</span></div>`
+   +m.tops.map(t=>`<div class="bf-line bf-topping"><span>+ ${esc(t.name)}${t.count>1?' ×'+t.count:''}</span><b class="num">${t.amount?money(t.amount)+'đ':'Tặng'}</b></div>`).join('');
  }).join('');
  // Tổng tiền / phương thức / kênh / Bed đã nằm trên đầu bill: chỉ hiện thông tin bổ sung như quanlygieo.
  const rows=[];
  if(o.billCode)rows.push(['Mã bill',String(o.billCode)]);
  if(o.bankOrderId)rows.push(['Mã CK',String(o.bankOrderId)]);
  const guest=[bfGuest(o.customerName),bfGuest(o.phone||o.sdt)].filter(Boolean);if(guest.length)rows.push(['Khách',guest.join(' · ')]);
- if(Number(o.discountAmt)>0)rows.push(['Đã giảm','−'+money(o.discountAmt)+'đ']);
+ const dg=Number(o.dgDiscount)||0,all=Number(o.discountAmt)||0,rest=Math.max(0,all-dg);
+ if(dg>0)rows.push(['Đồng giá','−'+money(dg)+'đ'+(plan?' (đã trừ vào từng món)':' (bill cũ — không rõ món nào)')]);
+ if(dg>0?rest>0.5:all>0)rows.push([dg>0?'Giảm giá khác':'Giảm giá','−'+money(dg>0?rest:all)+'đ'+' (trừ chung cả bill, không gắn vào món)']);
  if(o.voucherUsed)rows.push(['Khuyến mãi',stampPromotionLabel(o.voucherUsed)]);
  if(Number(o.cashGiven)>0&&Number(o.cashChange)>0)rows.push(['Khách đưa / thối',money(o.cashGiven)+'đ / '+money(o.cashChange)+'đ']);
  return `<div class="bf-lines">${lines||`<p class="bf-note">${esc(o.items||'Không có chi tiết món')}</p>`}</div>${rows.length?`<div class="bf-meta">${rows.map(([k,v])=>`<div class="bf-kv"><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('')}</div>`:''}`;
