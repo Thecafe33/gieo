@@ -23,7 +23,7 @@ const receipt=new Function('fmt',extract('posgieo.html',['stampPromotionLabel','
 const bill={voucherUsed:key,total:0,itemsArray:[],method:'TIỀN MẶT'},before=JSON.stringify(bill);
 check(receipt(bill,{}).some(r=>r.text==='Voucher: '+label),'in lại bill cũ cũng dùng nhãn dễ đọc');
 const esc=x=>String(x??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-const details=new Function('esc','money','bfItems','bfGuest',extract('manage.html',['stampPromotionLabel','bfDetails'])+';return bfDetails')(esc,String,()=>[],()=> '');
+const details=new Function('esc','money','bfItems','bfGuest',extract('manage.html',['stampPromotionLabel','bfIsDg','bfDgPlan','bfLineModel','bfDetails'],{vnDate:false})+';return bfDetails')(esc,String,()=>[],()=> '');
 check(details({o:bill}).includes(label)&&!details({o:bill}).includes(key),'manage Bill chung sửa nhãn bill cũ khi hiển thị');
 check(details({o:{voucherUsed:'<b>Khác</b>'}}).includes('&lt;b&gt;'),'nhãn chương trình khác vẫn escape trước khi hiển thị');
 const gieo=new Function('escapeHtmlAttr','fmt',extract('quanlygieo.html',['stampPromotionLabel','bfChiTiet'])+';return bfChiTiet')(esc,String);

@@ -445,7 +445,7 @@ const KICH_BAN = {
   },
   // 3A — MỞ CA: đếm tiền quỹ (2 × 500.000 + 1 × 200.000) → submitShiftOpen → bản ghi mở ca + đoạn ca số 1
   caMoCa: {
-    mo: 'ca', gioCo: HAN_T, caMo: true,
+    mo: 'ca', gioCo: HAN_T, caMo: true, khongGiuGio: true,   // khongGiuGio: bridge Engine 2 v2 (đợt 2, khác mốc có chủ đích) gọi thêm loadEmployeeShiftsTodayCache → posDateKey() lúc mở ca → đồng hồ giả nhích 1 ms; dữ liệu ghi giống hệt
     chay: async () => window.KB_CA('moca'),
     bang: ["daily_openings_gieogieo", "shift_segments_gieogieo", "staff_target_days_gieogieo"],
     kiem: (n) => { const g = n.ghi.find(x => x.op === 'set' && /daily_openings_gieogieo[^/]*\/2026-10-26$/.test(x.p)); return [
@@ -513,7 +513,7 @@ const KICH_BAN = {
   // 3A/3B (kiểm lượt 13 đề nghị) — MỞ CA ĐẦY ĐỦ: mở ca (PIN thật) → kiểm kê đầu ca 900 g (PIN thật) → tick việc bắt buộc (PIN thật)
   // → nút «Xong việc đầu ca» → về màn bán; chờ HOÀN TẤT từng bước (không cắt 4 giây), đếm số lần gọi bước tiếp sau kiểm kê
   caMoCaDayDu: {
-    mo: 'ca', gioCo: HAN_T, caMo: true, caDayDu: true,
+    mo: 'ca', gioCo: HAN_T, caMo: true, caDayDu: true, khongGiuGio: true,   // khongGiuGio: bridge Engine 2 v2 (đợt 2, khác mốc có chủ đích) gọi thêm loadEmployeeShiftsTodayCache → posDateKey() lúc mở ca → đồng hồ giả nhích 1 ms; dữ liệu ghi giống hệt
     chay: async () => window.KB_CA('mocaFull'),
     bang: ["daily_openings_gieogieo", "shift_inventory_counts_gieogieo", "shift_segments_gieogieo", "shift_workflows_gieogieo", "staff_target_days_gieogieo"],
     kiem: (n) => { const op = n.ghi.find(x => x.op === 'set' && /daily_openings_gieogieo[^/]*\/2026-10-26$/.test(x.p) && x.d && x.d.openingCash); const kk = n.ghi.find(x => /shift_inventory_counts_gieogieo[^/]*\/2026-10-26_open$/.test(duongGhi(x))); return [
@@ -1608,7 +1608,7 @@ const lechMuc = (m, n) => SO.filter(p => JSON.stringify(m[p]) !== JSON.stringify
       { kb: 'caCheckIn', file: 'pos_shift.v1.js', tim: /otThresholdHours: Number\(emp\.otThresholdHours\) \|\| 8,/, thay: 'otThresholdHours: Number(emp.otThresholdHours) || 9,', mo: 'đổi ngưỡng OT mặc định chụp vào ca' },
       { kb: 'ketDoiSoatKhop', file: 'pos_shift_closing.v2.js', tim: /status: passed \? 'cash_passed'/, thay: "status: passed ? 'cash_ok'", mo: 'đổi trạng thái đối soát khớp' },
       { kb: 'ketCaTreo', file: 'pos_handover.v1.js', tim: /'Tự chốt ca bỏ quên từ ngày '/, thay: "'Tu chot ca '", mo: 'đổi lý do chốt hộ ca treo' },
-      { kb: 'caMoCaDayDu', file: 'pos_shift_closing.v2.js', tim: /if\(phase==='open'\)await _continueAfterShiftInventoryOpenPOS\(\);/, thay: "if(phase==='open'){await _continueAfterShiftInventoryOpenPOS();await _continueAfterShiftInventoryOpenPOS();}", mo: 'gọi bước tiếp sau kiểm kê đầu ca hai lần' },
+      { kb: 'caMoCaDayDu', file: 'pos_shift_closing.v2.js', tim: /if\(phase==='open'\)await _continueAfterShiftInventoryOpenPOS\(\);/, thay: "if(phase==='open'){await _continueAfterShiftInventoryOpenPOS();await _continueAfterShiftInventoryOpenPOS();}", mo: 'gọi bước tiếp sau kiểm kê đầu ca hai lần', muc: 'sau' },   // không thêm lượt ghi (giờ đã chuẩn hoá) — lộ ở số lần gọi cb
       { kb: 'caMoCaDayDu', file: 'pos_shift_closing.v2.js', tim: /expectedQty:l\.expectedQty,countedQty:l\.counted,/, thay: 'expectedQty:l.expectedQty,countedQty:l.counted+1,', mo: 'lệch số kiểm kê đầu ca +1' },
       { kb: 'ketDemBTP', file: 'pos_shift_closing.v2.js', tim: /await _continueAfterPrepCount\(\);(\n  \} catch \(err\) \{\n    console\.error\('submitPrepCount failed')/, thay: 'await _continueAfterPrepCount(); await _continueAfterPrepCount();$1', mo: 'gọi bước tiếp sau đếm BTP hai lần' },
       { kb: 'quyChiTieu', file: 'pos_cashfund.v1.js', tim: /const netAmount = takenOutTotal - changeTotal;/, thay: 'const netAmount = takenOutTotal - changeTotal + 1;', mo: 'lệch số tiền chi thực tế +1' },
