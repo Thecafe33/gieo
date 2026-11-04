@@ -9931,6 +9931,44 @@ function cacThangCanNhac(expList, closings){
 
 // Chốt sổ một tháng. Tính lại lãi/lỗ của tháng đó NGAY LÚC BẤM rồi ghi lại thành
 // ảnh chụp — từ đó màn hình đọc số đã ghi, không tính lại nữa.
+// [FIX 04/11] Chốt sổ gặp «pay/schedule-missing» phải CHỈ ĐÚNG ca cần bổ sung (trước đây chỉ in mã lỗi, chủ quán tự mò).
+// Chốt sổ vẫn CHẶN (không lấy giờ chấm công thay lịch) — ở đây chỉ QUÉT LẠI cả tháng bằng chế độ liệt kê để lấy đủ danh sách
+// (lỗi chặt dừng ở ca đầu tiên) rồi hiện từng người · từng ngày, bấm là nhảy thẳng tới ngày đó trong Lịch làm việc.
+// Danh sách = PAY_SCHED_MISSING / payScheduleMissingList (cùng nguồn với thẻ «Cần bổ sung lịch» ở tab Lương).
+function chotSoCaThieuLichHtml(list, monthKey){
+  const byEmp = new Map();
+  (list||[]).forEach(x=>{ if(!byEmp.has(x.employeeId)) byEmp.set(x.employeeId, {name:x.name, id:x.employeeId, dates:[]}); byEmp.get(x.employeeId).dates.push(x.date); });
+  const okId = v => /^[A-Za-z0-9_-]+$/.test(String(v||'')), okDate = v => /^\d{4}-\d{2}-\d{2}$/.test(String(v||''));
+  const dm = d => d.slice(8,10)+'/'+d.slice(5,7);
+  const rows = [...byEmp.values()].sort((a,b)=>String(a.name).localeCompare(String(b.name))).map(e=>`
+    <div class="row" style="align-items:flex-start;flex-direction:column;gap:6px">
+      <span class="rl"><b>${escapeHtmlAttr(e.name)}</b> · ${e.dates.length} ca</span>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">${e.dates.sort().map(d=> okId(e.id) && okDate(d)
+        ? `<button class="btn outline sm" style="width:auto;padding:0 12px" onclick="chotSoMoLich('${e.id}','${d}')">${dm(d)} · Xếp lịch</button>`
+        : `<span class="small-note">${escapeHtmlAttr(String(d))}</span>`).join('')}</div>
+    </div>`).join('');
+  return `<div class="small-note" style="color:var(--bad);margin-bottom:8px"><b>Chưa chốt sổ được ${escapeHtmlAttr(monthLabelVN(monthKey))}.</b> Có ${(list||[]).length} ca chấm công chưa có lịch làm việc hợp lệ (thiếu lịch, hoặc giờ vào = giờ ra). Từ 01/10 giờ trả lương chặn theo lịch nên chưa thể chốt khi còn các ca này.</div>
+    ${rows}
+    <div class="small-note" style="margin:10px 0 6px">Bấm từng ngày để mở đúng ngày đó trong Lịch làm việc. Nếu hôm đó người ấy thực sự nghỉ thì đánh dấu NGHỈ. Xếp xong quay lại bấm «Kiểm tra lại».</div>
+    <button class="btn" style="width:100%" onclick="chotSoKiemTraLai('${monthKey}')">Kiểm tra lại &amp; chốt sổ</button>`;
+}
+function chotSoMoLich(employeeId, date){
+  closeEditSheet(true);
+  lichViewDate = date;
+  bulkLichDraft.employeeId = employeeId; bulkLichDraft.startDate = date; bulkLichDraft.endDate = date;
+  goEntry('lich');
+}
+function chotSoKiemTraLai(monthKey){ closeEditSheet(true); chotSoThang(monthKey); }
+// Trả true nếu đã hiện danh sách (lỗi đã được xử lý); false nếu không tìm được ca nào (để nơi gọi báo lỗi thường).
+async function chotSoHienCaThieuLich(monthKey){
+  const { start, end } = monthRangeOf(monthKey), a = dkey(start), b = dkey(end);
+  [...PAY_SCHED_MISSING.keys()].forEach(k=>{ const v = PAY_SCHED_MISSING.get(k); if(v && v.date>=a && v.date<=b) PAY_SCHED_MISSING.delete(k); });   // bỏ dấu cũ của tháng này — quét lại cho đúng hiện tại
+  await computeActualLaborCostByDate(a, b, {lenient:true});
+  const list = payScheduleMissingList(a, b);
+  if(!list.length) return false;
+  openEditSheet('Cần bổ sung lịch trước khi chốt sổ', chotSoCaThieuLichHtml(list, monthKey));
+  return true;
+}
 async function chotSoThang(monthKey){
   try{
     const [expAll, closings] = await Promise.all([loadExpensesAll(), loadBookClosings()]);
@@ -9957,6 +9995,13 @@ async function chotSoThang(monthKey){
     if(curScreen==='health') renderHealth();
   }catch(err){
     console.error('chotSoThang lỗi', err);
+    if(err && err.code==='pay/schedule-missing'){
+      let daHien = false;
+      try{ daHien = await chotSoHienCaThieuLich(monthKey); }catch(e2){ console.warn('[Chốt sổ] liệt kê ca thiếu lịch lỗi', e2); }
+      if(daHien) return;
+      showError('Không chốt sổ được: ' + (err.message||err.code));   // không liệt kê được → ít nhất nói rõ ai/ngày nào
+      return;
+    }
     showError('Không chốt sổ được: ' + (err.code||err.message||err));
   }finally{ setSync(false); }
 }
