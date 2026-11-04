@@ -1621,7 +1621,7 @@ const lechMuc = (m, n) => SO.filter(p => JSON.stringify(m[p]) !== JSON.stringify
       { kb: 'xoaBillJobChay', file: 'pos_orders.v1.js', tim: /if \(busy\) return;/, thay: '/* bỏ chặn busy */', mo: 'bỏ chặn xoá khi việc trừ kho đang chạy' },
       { kb: 'khachTichTem', file: 'pos_customers.v1.js', tim: /const canAdd = Math\.min\(drinkCount, Math\.max\(0, 2 - stampsToday\)\);/, thay: 'const canAdd = Math.min(drinkCount, Math.max(0, 3 - stampsToday));', mo: 'đổi trần tem mỗi ngày 2 → 3' },
       { kb: 'khachThemThanhVien', file: 'pos_customers.v1.js', tim: /source: 'pos_gieogieo'/, thay: "source: 'pos_khac'", mo: 'đổi nguồn tạo thành viên' },
-      { kb: 'gioHang', file: 'pos_cart.v1.js', tim: /return a \+ \(c\.price \+ toppingSum\) \* c\.qty;/, thay: 'return a + (c.price + toppingSum) * c.qty + 1;', mo: 'lệch tổng giỏ +1', muc: 'sau' },
+      { kb: 'gioHang', file: 'pos_cart.v2.js', tim: /return a \+ \(c\.price \+ toppingSum\) \* c\.qty;/, thay: 'return a + (c.price + toppingSum) * c.qty + 1;', mo: 'lệch tổng giỏ +1', muc: 'sau' },
       { kb: 'ttTienMat', file: 'pos_thanh_toan.v1.js', tim: /cashChange: cashChange !== null && cashChange !== undefined \? cashChange : 0,/, thay: 'cashChange: cashChange !== null && cashChange !== undefined ? cashChange + 1 : 0,', mo: 'lệch tiền thối ghi trên đơn' },
       { kb: 'ttChuyenKhoan', file: 'pos_thanh_toan.v1.js', tim: /db\.ref\('bank_confirmations\/' \+ orderId\)\.remove\(\)/, thay: "db.ref('bank_confirmations/' + orderId + 'x').remove()", mo: 'xoá nhầm node bank_confirmations' },
       { kb: 'ttChuyenKhoanTay', file: 'pos_thanh_toan.v1.js', tim: /manualConfirm: true, staffId: staffEmp\.id/, thay: 'manualConfirm: true, staffId: "x"', mo: 'đổi người xác nhận tay' },
