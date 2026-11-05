@@ -1,19 +1,23 @@
 # 05/11 — TRẠNG THÁI DEPLOY ENGINE 2 (chủ dự án xác nhận)
-- ĐÃ deploy: cầu nối POS v3 + store v3 + worker store v3 (Hosting + Functions `gieo-automation`).
-- CHƯA deploy: lượt 2 (F1/F2 — việc mồ côi, dọn việc treo), lượt 3 (học dồn, bộ đếm, phiên bản máy POS, xếp hàng một lần) và lượt 4
-  (chặn nhập sai khi nấu mẻ — `pos_prep.v2.js` + chính sách `prep_review_v2`). Tất cả nằm trong store v4 / cầu nối v4 / pos_prep v2 → deploy
-  bằng MỘT gói `giao_file/dot_05-11_engine2_v4/` (Hosting + Functions). Không có gói riêng cho lượt 2.
+- ĐÃ deploy 05/11 (chủ dự án xác nhận): gói `giao_file/dot_05-11_engine2_v4/` — lượt 2 (F1/F2 — việc mồ côi, dọn việc treo), lượt 3
+  (học dồn, bộ đếm, phiên bản máy POS, xếp hàng một lần) và lượt 4 (chặn nhập sai khi nấu mẻ — `pos_prep.v2.js` + chính sách
+  `prep_review_v2`). Hosting `/sdcard/MyCafeWeb/public` + Functions `~/MyCafeWeb/gieo-automation` (`functions:gieo-automation`).
+  Trên máy chủ nay là: posgieo nạp `gieo_engine2_pos_v4.js` + `unit_engine2_store_v4.js` + `js/posgieo/pos_prep.v2.js`; worker dùng store v4.
+  Bản v3 (cầu nối / store / worker) đã deploy trước đó 05/11, giữ trên máy để quay lui.
+- Cách giao lần sau: Hosting chép vào `/sdcard/MyCafeWeb/public/` rồi `cd /sdcard/MyCafeWeb && firebase deploy --only hosting`; Functions
+  chép vào `~/MyCafeWeb/gieo-automation/` rồi `cd ~/MyCafeWeb && firebase deploy --only functions:gieo-automation` (hai `firebase.json` khác nhau).
+  Chủ dự án giải nén gói ở `/sdcard/Download/Giải nén codex/<tên gói>/`.
 
-# 05/11 (lượt 4) — Chặn nhập sai số còn lại khi nấu mẻ (vụ trà ô long): lệch lớn → hỏi lại một lần nói rõ hậu quả; «cân trước» ra nhiều hơn sổ → khoản dư quy NGƯỜI GHI LẦN TRƯỚC (không phải người phát hiện), đánh dấu nhập sai + báo Quản lý; Engine 2 không tính dòng nhập sai là hao hụt — CHƯA deploy
+# 05/11 (lượt 4) — Chặn nhập sai số còn lại khi nấu mẻ (vụ trà ô long): lệch lớn → hỏi lại một lần nói rõ hậu quả; «cân trước» ra nhiều hơn sổ → khoản dư quy NGƯỜI GHI LẦN TRƯỚC (không phải người phát hiện), đánh dấu nhập sai + báo Quản lý; Engine 2 không tính dòng nhập sai là hao hụt — ĐÃ deploy 05/11
 
 [ENGINE2_POS_V3_05-11.md](ENGINE2_POS_V3_05-11.md) mục «Lượt 4». POS `js/posgieo/pos_prep.v2.js` (v1 giữ quay lui). Giao: `giao_file/dot_05-11_engine2_v4/`.
-Còn mở: báo cáo tháng quanlygieo vẫn tính dòng đã xác minh nhập sai vào «thiếu» của người nhập sai — chờ chủ quán quyết.
+ĐÃ deploy 05/11 (cùng gói v4). Còn mở: báo cáo tháng quanlygieo vẫn tính dòng đã xác minh nhập sai vào «thiếu» của người nhập sai — chờ chủ quán quyết.
 
-# 05/11 (lượt 3) — Engine 2 mức hệ thống: học dồn (hết «dừng học khi > 3000 quan sát», đọc ít hơn ~4–5 lần), bộ đếm Engine 2 nhận / POS tự ghi, phiên bản máy POS, xếp hàng lượt cân một lần — CHƯA deploy (Hosting + Functions)
+# 05/11 (lượt 3) — Engine 2 mức hệ thống: học dồn (hết «dừng học khi > 3000 quan sát», đọc ít hơn ~4–5 lần), bộ đếm Engine 2 nhận / POS tự ghi, phiên bản máy POS, xếp hàng lượt cân một lần — ĐÃ deploy 05/11 (gói v4, Hosting + Functions)
 
 [ENGINE2_POS_V3_05-11.md](ENGINE2_POS_V3_05-11.md) mục «Lượt 3». Giao: `giao_file/dot_05-11_engine2_v4/` (thay gói lượt 2).
 
-# 05/11 (lượt 2) — Engine 2 worker store v4: việc cân mồ côi chặn hạ mức kiểm soát → không tạo + dọn hằng ngày; giảm lượt đọc — CHƯA deploy (chỉ Functions)
+# 05/11 (lượt 2) — Engine 2 worker store v4: việc cân mồ côi chặn hạ mức kiểm soát → không tạo + dọn hằng ngày; giảm lượt đọc — ĐÃ deploy 05/11 (gói v4)
 
 [ENGINE2_POS_V3_05-11.md](ENGINE2_POS_V3_05-11.md) mục «Lượt 2». Giao: `giao_file/dot_05-11_engine2_v4/`.
 
@@ -21,7 +25,7 @@ Còn mở: báo cáo tháng quanlygieo vẫn tính dòng đã xác minh nhập s
 
 [ENGINE2_POS_V3_05-11.md](ENGINE2_POS_V3_05-11.md). `gieo_engine2_pos_v3.js` + `unit_engine2_store_v3.js`; worker store v3 + `workerHeartbeatAt`; quanlygieo2 hiện «POS tự ghi» + trạng thái bộ xử lý nền. Test v3 chạy lại toàn bộ kịch bản v2 + 9 bộ store v1 + nhân sự v2. Giao: `giao_file/dot_05-11_engine2/`.
 
-# 04/11 — SỬA kẹt kết ca: «Nhập đủ mã PIN 4 số» ở Kiểm kê cuối ca dù khung «Người thực hiện» đã hiện tên — CHƯA deploy
+# 04/11 — SỬA kẹt kết ca: «Nhập đủ mã PIN 4 số» ở Kiểm kê cuối ca dù khung «Người thực hiện» đã hiện tên — đang chạy (posgieo v3 / v4 đã deploy nạp `pos_shift_closing.v2.js`; thiếu file thì POS màn đỏ)
 
 Nguyên nhân (tái hiện bằng Firebase giả): ở bất kỳ bước kết ca nào, bấm «<» xem lại bước trước rồi «Tiếp →» quay về → bước đang làm được dựng lại từ ẢNH CHỤP (`closeStepSnapshotPOS` cố ý xoá ô ẩn / ô PIN) → khung «Người thực hiện» vẫn hiện tên nhưng ô ẩn `__signer__` rỗng → bấm xác nhận báo «Nhập đủ mã PIN 4 số» (chỉ «Đổi người» + gõ PIN mới thoát). KHÔNG do Engine 2: cùng thao tác ở chế độ «chỉ theo dõi» cũng kẹt; không bấm quay lại thì «phân bổ tự động» vẫn lưu bình thường. Sửa: `js/posgieo/pos_shift_closing.v2.js` (= v1 + cất DOM thật của bước đang làm khi đi xem lại, gắn lại y nguyên khi quay về; v1 đã phát hành giữ nguyên), posgieo trỏ v2. Kiểm hồi quy: `node tools/ket_ca/e2e_quay_lai_buoc.js` (Engine 2 active + shadow, tự kiểm với v1). File giao: `giao_file/dot_04-11/`.
 

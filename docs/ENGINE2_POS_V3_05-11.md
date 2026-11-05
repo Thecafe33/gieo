@@ -31,7 +31,7 @@ Chỉ mục ghép Firestore `tasks (pending, createdAt↓)` và `employee_shifts
 (`tools/automation/firestore.indexes.fragment.json`, `node tools/automation/indexes.js gg01`). Thiếu → Engine 2 không nhận lượt nào; nay
 quanlygieo2 thấy được qua mục «POS tự ghi» (lý do `request_failed`).
 
-## Lượt 2 (05/11): store v4 cho worker — F1 + F2 + giảm lượt đọc (chủ quán duyệt; **chưa deploy**, chỉ Functions)
+## Lượt 2 (05/11): store v4 cho worker — F1 + F2 + giảm lượt đọc (chủ quán duyệt; **ĐÃ deploy 05/11** cùng gói v4)
 Rà tiếp phía worker: tái hiện (store v3 thật + Firebase giả) — cân cuối ngày xong, đóng ngày tự check-out → worker tạo việc `handover~`
 cho mỗi món kiểm soát; POS (từ v2 bỏ popup) không có chỗ làm việc `handover~` / `opened~` / `baseline~` → nằm chờ → lượt học 00:xx thấy
 «món còn việc chờ» (`controlAdvice`: `!(pending>0)`) → **không bao giờ hạ mức kiểm soát**; việc treo còn chiếm cửa sổ 40 việc POS đọc
@@ -51,7 +51,7 @@ lượt đọc. Giao: `giao_file/dot_05-11_engine2_v4/` (chỉ Functions).
 Ghi nhận, chưa sửa (rủi ro thấp): worker xử lý lượt cân trước khi POS kịp ghi kho (~1 giây) đúng lúc quản lý vừa đổi bì → lượt bị từ chối
 sau khi kho đã bỏ ghi trách nhiệm. Hai bên kiểm cùng điều kiện nên rất hiếm.
 
-## Lượt 3 (05/11): rà mức hệ thống — học dồn, bộ đếm, phiên bản máy POS, giảm đọc (chủ quán chọn 1a + 4 «chỉ đếm»; **chưa deploy**, Hosting + Functions)
+## Lượt 3 (05/11): rà mức hệ thống — học dồn, bộ đếm, phiên bản máy POS, giảm đọc (chủ quán chọn 1a + 4 «chỉ đếm»; **ĐÃ deploy 05/11**, gói v4 — Hosting + Functions)
 Phát hiện: (1) lượt học đọc lại toàn bộ quan sát 90 ngày mỗi đêm và **quá 3000 thì ném lỗi, dừng học** (~33 quan sát/ngày — quán 15 món kiểm
 soát chạm sau ~75 ngày); (2) mỗi lượt cân bị xếp hàng hai lần (POS + trigger) → xử lý lại tốn ~20 lượt đọc / mã, không đổi kết quả (đo
 bằng store thật); (3) `fleetConfirmed` là ô tick tay, xác nhận máy POS không ghi phiên bản cầu nối → không biết máy nào còn bản cũ; (4) Engine 2
@@ -73,7 +73,7 @@ Sửa (store v4 — chưa phát hành nên sửa thẳng; `gieo_engine2_pos_v4.j
 `engine2_ui_v4.test.js`; Firebase giả thêm `count()` (Admin SDK có) — `gieo_automation_review.test.js` nay kiểm đúng nhánh `count()` chạy thật.
 Giao: `giao_file/dot_05-11_engine2_v4/` (thay gói «chỉ Functions» của lượt 2).
 
-## Lượt 4 (05/11): chặn nhập sai số còn lại khi nấu mẻ (vụ trà ô long) — **chưa deploy**, đi chung gói `dot_05-11_engine2_v4`
+## Lượt 4 (05/11): chặn nhập sai số còn lại khi nấu mẻ (vụ trà ô long) — **ĐÃ deploy 05/11**, gói `dot_05-11_engine2_v4`
 Vụ: Vỹ nấu trà ô long dùng 5 túi, mở hộp mới 25 → còn 20, nhưng nhập «còn 2» → sổ ghi mất 18 (Vỹ chịu). Hôm sau A «Cân trước khi lấy NL»
 đếm 20 → POS v1 ghi khoản +18 với trách nhiệm **A** («người chốt cân và giải trình»); Engine 2 cũng quy A và theo dõi dồn A. Quán không mất gì.
 Phản biện: màn hoàn thành chỉ bắt chọn nguyên nhân + ghi lý do, **không hỏi lại số**; nhánh «cân ra nhiều hơn sổ» lúc HOÀN THÀNH mẻ (engine v21
