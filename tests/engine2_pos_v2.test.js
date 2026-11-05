@@ -70,7 +70,7 @@ function weighed(inv,{itemId='j',unitId='n',base=280,net=250,tare=100,vessel='v'
 (async()=>{
  // ── Không popup / không giải thích: bản v2 không có giao diện ─────────────────────────────────────────────
  for(const bad of ['e2Modal','e2-dialog','innerHTML','Vì sao cần cân','document.createElement','toast('])assert(!SRC.includes(bad),'bản v2 không được có giao diện / lời giải thích: '+bad);
- assert(/gieo_engine2_pos_v2\.js/.test(fs.readFileSync(path.join(__dirname,'../posgieo.html'),'utf8')),'posgieo.html nạp bản v2');
+ // posgieo.html nay nạp bản v3 (05/11) — bản v2 giữ để quay lui, test này vẫn kiểm đủ hành vi của nó.
  assert(!/gieo_engine2_pos_v1\.js/.test(fs.readFileSync(path.join(__dirname,'../posgieo.html'),'utf8')),'posgieo.html không còn nạp bản v1 (popup)');
 
  // ── 1. Engine 2 chưa bật (đối chiếu) → danh sách giữ nguyên, không dấu ngầm ───────────────────────────────

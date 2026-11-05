@@ -25,7 +25,7 @@ const KY_VONG = ['_afterIceChange', '_continueAfterPrepCount', 'addCart', 'addFo
 // Nguồn có thể bọc: file bọc ở gốc + MỌI mã app (script trần posgieo.html + js/posgieo/*).
 function nguonBoc(dir) {
   const out = [];
-  for (const f of ['gau_noel_giangsinh.v2.js', 'gieo_automation_pos.v3.js', 'gieo_engine2_pos_v1.js', 'gieo_engine2_pos_v2.js']) if (fs.existsSync(path.join(dir, f))) out.push({ f, t: fs.readFileSync(path.join(dir, f), 'utf8'), boc: true });
+  for (const f of ['gau_noel_giangsinh.v2.js', 'gieo_automation_pos.v3.js', 'gieo_engine2_pos_v1.js', 'gieo_engine2_pos_v2.js', 'gieo_engine2_pos_v3.js']) if (fs.existsSync(path.join(dir, f))) out.push({ f, t: fs.readFileSync(path.join(dir, f), 'utf8'), boc: true });
   const h = fs.readFileSync(path.join(dir, 'posgieo.html'), 'utf8'); out.push({ f: 'posgieo.html', t: h });
   const i = h.indexOf('(function assistHookIntoPOS'); if (i > 0) out.push({ f: 'assistHookIntoPOS', t: h.slice(i, i + 6000), boc: true });
   const jd = path.join(dir, 'js', 'posgieo'); if (fs.existsSync(jd)) for (const f of fs.readdirSync(jd)) out.push({ f: 'js/posgieo/' + f, t: fs.readFileSync(path.join(jd, f), 'utf8') });
@@ -87,13 +87,17 @@ async function chup(b, base, ten, authNgay, pt) {
       const bocM = Object.keys(m.kq).filter(t => m.kq[t].length > 1), bocN = Object.keys(n.kq).filter(t => n.kq[t].length > 1);
       if (macDinh) chk(JSON.stringify(bocM) === JSON.stringify(KY_VONG), `(${nhan}) mốc ${MOC}: đúng ${KY_VONG.length} hàm có bọc theo bảng kỳ vọng` + (JSON.stringify(bocM) === JSON.stringify(KY_VONG) ? '' : ': thiếu ' + KY_VONG.filter(t => !bocM.includes(t)) + ' | thừa ' + bocM.filter(t => !KY_VONG.includes(t))));
       else chk(bocM.length >= 15, `(${nhan}) mốc ${MOC}: chụp được ${bocM.length} hàm có bọc (≥ 15)`);
-      // Engine 2 POS bridge: mốc chạy v1 (popup — bọc 3 hàm), bản nay chạy v2 (không popup — bọc 2 hàm khác). Khác biệt CÓ CHỦ ĐÍCH (28/10), loại khỏi so sánh; mọi hàm còn lại phải giống hệt.
+      // Engine 2 POS bridge: mốc chạy v1 (popup — bọc 3 hàm), bản nay chạy v3 (= v2 về các hàm bọc) (không popup — bọc 2 hàm khác). Khác biệt CÓ CHỦ ĐÍCH (28/10), loại khỏi so sánh; mọi hàm còn lại phải giống hệt.
       const E2_V1 = ['_continueAfterPrepCount', 'openCaLamViecScreen', 'renderShiftHandoverForm'], E2_V2 = ['computeHandoverOpenLinesPOS', 'shiftWeighLineHTML'];
       const bM = bocM.filter(t => !E2_V1.includes(t)), bN = bocN.filter(t => !E2_V2.includes(t));
       chk(JSON.stringify(bM) === JSON.stringify(bN), `(${nhan}) cùng tập hàm bị bọc (${bocN.length}; trừ khác biệt Engine 2 bridge v1→v2)` + (JSON.stringify(bM) === JSON.stringify(bN) ? '' : ': chỉ mốc ' + bM.filter(t => !bN.includes(t)) + ' | chỉ nay ' + bN.filter(t => !bM.includes(t))));
       // Hàm có lớp Engine 2 bridge ở mốc (v1) khác bản nay (v2): so riêng hàm GỐC (phần tử cuối) — lớp bridge khác có chủ đích.
       const E2_CHUNG = ['computeShiftInventoryCountLinesPOS', 'renderDailyClosingChecklist', 'renderOpeningChecklist'];
-      const lech = bM.filter(t => E2_CHUNG.includes(t) ? m.kq[t][m.kq[t].length - 1] !== n.kq[t][n.kq[t].length - 1] : JSON.stringify(m.kq[t]) !== JSON.stringify(n.kq[t]));
+      // Hàm GỐC đổi có chủ đích sau mốc (không phải lỗi tách): addCart, cartAdj, onCheckoutClick — pos_cart.v2 (2698fb6, tự chọn topping).
+      // So các LỚP bọc như thường, bỏ qua riêng hàm gốc (phần tử cuối).
+      const GOC_DOI = ['addCart', 'cartAdj', 'onCheckoutClick'];
+      const boGoc = a => a.slice(0, -1);
+      const lech = bM.filter(t => GOC_DOI.includes(t) ? JSON.stringify(boGoc(m.kq[t])) !== JSON.stringify(boGoc(n.kq[t])) : E2_CHUNG.includes(t) ? m.kq[t][m.kq[t].length - 1] !== n.kq[t][n.kq[t].length - 1] : JSON.stringify(m.kq[t]) !== JSON.stringify(n.kq[t]));
       chk(!lech.length, `(${nhan}) chuỗi bọc giống hệt từng lớp + hàm gốc` + (lech.length ? ': lệch ' + lech.map(t => t + '\n   mốc ' + m.kq[t].join('\n        ') + '\n   nay ' + n.kq[t].join('\n        ')).join('\n') : ''));
       chk(JSON.stringify(m.canh) === JSON.stringify(n.canh), `(${nhan}) cùng cảnh báo «bỏ qua phần gắn» (${n.canh.length})` + (n.canh.length ? ': ' + n.canh.join(' | ') : ''));
       chk(JSON.stringify(m.loi.sort()) === JSON.stringify(n.loi.sort()), `(${nhan}) cùng lỗi JS (${n.loi.length})` + (JSON.stringify(m.loi) === JSON.stringify(n.loi) ? '' : ': mốc ' + m.loi.join(' | ') + ' || nay ' + n.loi.join(' | ')));
@@ -109,7 +113,7 @@ async function chup(b, base, ten, authNgay, pt) {
       chenDauHamBo(d, 'computeShiftInventoryCountLinesPOS', "throw Error('tu-kiem-goc');");
       let t = fs.readFileSync(h, 'utf8'); const bo = "boc('cartClear', () => assistResetSession());";
       if (!t.includes(bo)) throw new Error('tự kiểm: không thấy lớp trợ lý cartClear'); t = t.replace(bo, '/*tu-kiem*/');
-      const e2 = ['v2', 'v1'].map(v => '<script src="gieo_engine2_pos_' + v + '.js"></script>').find(x => t.includes(x)); if (!e2) throw new Error('tự kiểm: không thấy thẻ Engine 2');
+      const e2 = ['v3', 'v2', 'v1'].map(v => '<script src="gieo_engine2_pos_' + v + '.js"></script>').find(x => t.includes(x)); if (!e2) throw new Error('tự kiểm: không thấy thẻ Engine 2');
       fs.writeFileSync(h, t.replace(e2, e2 + '\n<script>window.updCoTotal = function(){};</script>'));
     });
     try {

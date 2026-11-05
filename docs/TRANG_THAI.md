@@ -1,3 +1,7 @@
+# 05/11 — Engine 2 giao tiếp POS v3: rà soát + sửa A (bì bao gói gốc) / B (POS tự ghi → đóng việc kèm lý do, M0 hết lặp) / C (chỉ giao lượt khi worker còn chạy) — CHƯA deploy (Hosting + Functions)
+
+[ENGINE2_POS_V3_05-11.md](ENGINE2_POS_V3_05-11.md). `gieo_engine2_pos_v3.js` + `unit_engine2_store_v3.js`; worker store v3 + `workerHeartbeatAt`; quanlygieo2 hiện «POS tự ghi» + trạng thái bộ xử lý nền. Test v3 chạy lại toàn bộ kịch bản v2 + 9 bộ store v1 + nhân sự v2. Giao: `giao_file/dot_05-11_engine2/`.
+
 # 04/11 — SỬA kẹt kết ca: «Nhập đủ mã PIN 4 số» ở Kiểm kê cuối ca dù khung «Người thực hiện» đã hiện tên — CHƯA deploy
 
 Nguyên nhân (tái hiện bằng Firebase giả): ở bất kỳ bước kết ca nào, bấm «<» xem lại bước trước rồi «Tiếp →» quay về → bước đang làm được dựng lại từ ẢNH CHỤP (`closeStepSnapshotPOS` cố ý xoá ô ẩn / ô PIN) → khung «Người thực hiện» vẫn hiện tên nhưng ô ẩn `__signer__` rỗng → bấm xác nhận báo «Nhập đủ mã PIN 4 số» (chỉ «Đổi người» + gõ PIN mới thoát). KHÔNG do Engine 2: cùng thao tác ở chế độ «chỉ theo dõi» cũng kẹt; không bấm quay lại thì «phân bổ tự động» vẫn lưu bình thường. Sửa: `js/posgieo/pos_shift_closing.v2.js` (= v1 + cất DOM thật của bước đang làm khi đi xem lại, gắn lại y nguyên khi quay về; v1 đã phát hành giữ nguyên), posgieo trỏ v2. Kiểm hồi quy: `node tools/ket_ca/e2e_quay_lai_buoc.js` (Engine 2 active + shadow, tự kiểm với v1). File giao: `giao_file/dot_04-11/`.

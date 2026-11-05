@@ -77,7 +77,9 @@ function chenDauHam(file, ten, chen) {
 // kiểm lượt 3B: tự kiểm e2e_hook cài lỗi theo tên hàm, không được ghim vào một file). Đúng MỘT chỗ trên toàn bộ, không thì lỗi.
 function chenDauHamBo(dir, ten, chen) {
   const jsDir = path.join(dir, 'js', 'posgieo');
-  const files = [path.join(dir, 'posgieo.html'), ...(fs.existsSync(jsDir) ? fs.readdirSync(jsDir).filter(f => f.endsWith('.js')).map(f => path.join(jsDir, f)) : [])];
+  // Chỉ các file posgieo.html THỰC SỰ nạp — thư mục còn giữ bản cũ đã phát hành (vd pos_shift_closing.v1 bên cạnh v2) để máy còn HTML cũ.
+  const html = fs.readFileSync(path.join(dir, 'posgieo.html'), 'utf8');
+  const files = [path.join(dir, 'posgieo.html'), ...(fs.existsSync(jsDir) ? fs.readdirSync(jsDir).filter(f => f.endsWith('.js') && html.includes('src="js/posgieo/' + f + '"')).map(f => path.join(jsDir, f)) : [])];
   const re = new RegExp('(?:async\\s+)?function\\s+' + ten + '\\s*\\(', 'g');
   const co = files.filter(f => [...fs.readFileSync(f, 'utf8').matchAll(re)].length);
   if (co.length !== 1) throw new Error('chenDauHamBo: ' + ten + ' thấy ở ' + co.length + ' file');

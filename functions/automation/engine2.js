@@ -1,6 +1,6 @@
 'use strict';
 const E=require('./shared/unit_engine2_v1');
-const {create}=require('./shared/unit_engine2_store_v2');
+const {create}=require('./shared/unit_engine2_store_v3');   // v3 (05/11): bì bao gói gốc, đóng việc khi POS tự ghi, dấu «còn sống»
 const {createEngine}=require('./engine');
 function createEngine2Worker({db,rt,FieldValue,now=Date.now,documentId}){
  const services=new Map();
@@ -41,6 +41,9 @@ function createEngine2Worker({db,rt,FieldValue,now=Date.now,documentId}){
  // Lượt học mỗi ngày (store tự chặn chạy lại trong ngày); lỗi học không chặn hàng đợi nghiệp vụ.
  let params=null;try{params=require('./shared/unit_engine2_params_v1.js');}catch(e){}
  const learned=new Map(),learn=async store=>{const day=new Date(now()+7*3600000).toISOString().slice(0,10);if(learned.get(store)===day)return null;try{await service(store).sweepPrepReview().catch(e=>console.error('Engine2 prep sweep',store,e.message));await service(store).mixupSweep().catch(e=>console.error('Engine2 mixup sweep',store,e.message));await service(store).sweepAlerts().catch(e=>console.error('Engine2 alert sweep',store,e.message));await service(store).sweepSubReviews().catch(e=>console.error('Engine2 sub sweep',store,e.message));const r=await service(store).learnDay({params:params||undefined});if(r)learned.set(store,day);return r;}catch(e){console.error('Engine2 learn',store,e.message);return null;}};
- return {service,source,learn,drain:(store,id)=>service(store).drain(id),tick:async store=>{const n=await service(store).retryDue();await learn(store);return n;}};
+ return {service,source,learn,drain:(store,id)=>service(store).drain(id),tick:async store=>{const n=await service(store).retryDue();
+  // [v3-C] Dấu «bộ xử lý nền còn chạy» — chỉ sau khi chạy lại hàng đợi thành công; POS chỉ giao lượt cân khi dấu còn mới (45 phút).
+  await service(store).heartbeat().catch(e=>console.error('Engine2 heartbeat',store,e.message));
+  await learn(store);return n;}};
 }
 module.exports={createEngine2Worker};
