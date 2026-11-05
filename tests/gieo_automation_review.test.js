@@ -19,7 +19,9 @@ const now=Date.parse('2026-10-22T12:00:00+07:00'),cfg={enabled:true,owners:{stoc
  const root=rootPath('gg01'),f=makeFake({fs:{[configPath('gg01')]:cfg,[root]:{ready:true,policyVersion:1,countsVerifiedVersion:1,countsRevision:4,counts:{working:1,done:9}},[root+'/cases/work']:{visible:true,group:'working'},[root+'/cases/hidden']:{visible:false,group:'done'}}});
  const coll=f.fstore.collection.bind(f.fstore);f.fstore.doc=p=>{const a=p.split('/'),id=a.pop();return coll(a.join('/')).doc(id)};
  let injected=false,queries=0;
- const wrap=q=>new Proxy(q,{get:(q,k)=>k==='get'?async()=>{queries++;const s=await q.get();if(!injected){injected=true;await f.fstore.doc(root).set({countsRevision:5},{merge:true});}return s}:['where','orderBy','limit'].includes(k)?(...a)=>wrap(q[k](...a)):q[k]});
+ // Chặn cả get() lẫn count().get() (Admin SDK thật có count() → worker đi nhánh count; Firebase giả nay cũng có): lần đọc đầu tiên giả lập ghi tranh chấp.
+ const hit=async run=>{queries++;const s=await run();if(!injected){injected=true;await f.fstore.doc(root).set({countsRevision:5},{merge:true});}return s};
+ const wrap=q=>new Proxy(q,{get:(q,k)=>k==='get'?()=>hit(()=>q.get()):k==='count'&&typeof q.count==='function'?()=>({get:()=>hit(()=>q.count().get())}):['where','orderBy','limit'].includes(k)?(...a)=>wrap(q[k](...a)):q[k]});
  f.fstore.collection=p=>p===root+'/cases'?wrap(coll(p)):coll(p);
  const w=createWorker(f.fstore,{now:()=>now});
  assert.equal(await w.reconcileCounts('gg01'),false);assert.equal(f.FS[root].counts.done,9);

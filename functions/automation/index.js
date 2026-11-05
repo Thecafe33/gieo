@@ -43,7 +43,8 @@ for(const store of stores){
   const a=event.data.after.exists?event.data.after.data():null,b=event.data.before.exists?event.data.before.data():null;if((a||b)?.originKind==='finish'&&(a||b).containerId)await worker.processSource(store,'stock_containers',(a||b).containerId);
  });
  exports[store+'_engine2_measurement']=onDocumentWritten({document:A.collection('duty_digests',store)+'/_engine2/measurements/{id}',region:'asia-southeast1',retry:true,maxInstances:2},async event=>{
-  if(!event.data.before.exists&&event.data.after.exists&&event.data.after.data().acceptedProtocol===1)await engine2.service(store).enqueue('measurement',event.params.id);
+  // [v4] Lưới an toàn khi POS chưa kịp xếp hàng lượt cân: chỉ xếp khi CHƯA có (onlyNew) — trước mỗi lượt cân bị xử lý hai lần.
+  if(!event.data.before.exists&&event.data.after.exists&&event.data.after.data().acceptedProtocol===1)await engine2.service(store).enqueue('measurement',event.params.id,false,true);
  });
  exports[store+'_engine2_settings']=onDocumentWritten({document:A.collection('duty_digests',store)+'/_engine2',region:'asia-southeast1',retry:true,maxInstances:2},async event=>{
   const a=event.data.after.exists?event.data.after.data():null,b=event.data.before.exists?event.data.before.data():null;
@@ -51,7 +52,8 @@ for(const store of stores){
  });
 }
 exports.gieoAutomationClock=onSchedule({schedule:'every 15 minutes',timeZone:'Asia/Ho_Chi_Minh',region:'asia-southeast1',timeoutSeconds:540,maxInstances:1},async()=>{
- for(const store of stores)try{await engine2.tick(store);await queue.retryDue(store);await worker.tickStore(store);}catch(e){
-  await db.doc(rootPath(store)).set({lastError:String(e.message||e),errorAt:new Date().toISOString()},{merge:true});console.error('Gieo automation',store,e);
+ // [v4] Mỗi phần một khối lỗi riêng: Engine 2 lỗi không làm bỏ nhịp của hàng đợi / worker tự động hoá (và ngược lại).
+ for(const store of stores)for(const [name,run] of [['engine2',()=>engine2.tick(store)],['queue',()=>queue.retryDue(store)],['worker',()=>worker.tickStore(store)]])try{await run();}catch(e){
+  await db.doc(rootPath(store)).set({lastError:String(e.message||e),errorAt:new Date().toISOString(),errorPart:name},{merge:true}).catch(()=>{});console.error('Gieo automation',store,name,e);
  }
 });

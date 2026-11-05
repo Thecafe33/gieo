@@ -50,3 +50,25 @@ lượt đọc. Giao: `giao_file/dot_05-11_engine2_v4/` (chỉ Functions).
 
 Ghi nhận, chưa sửa (rủi ro thấp): worker xử lý lượt cân trước khi POS kịp ghi kho (~1 giây) đúng lúc quản lý vừa đổi bì → lượt bị từ chối
 sau khi kho đã bỏ ghi trách nhiệm. Hai bên kiểm cùng điều kiện nên rất hiếm.
+
+## Lượt 3 (05/11): rà mức hệ thống — học dồn, bộ đếm, phiên bản máy POS, giảm đọc (chủ quán chọn 1a + 4 «chỉ đếm»; **chưa deploy**, Hosting + Functions)
+Phát hiện: (1) lượt học đọc lại toàn bộ quan sát 90 ngày mỗi đêm và **quá 3000 thì ném lỗi, dừng học** (~33 quan sát/ngày — quán 15 món kiểm
+soát chạm sau ~75 ngày); (2) mỗi lượt cân bị xếp hàng hai lần (POS + trigger) → xử lý lại tốn ~20 lượt đọc / mã, không đổi kết quả (đo
+bằng store thật); (3) `fleetConfirmed` là ô tick tay, xác nhận máy POS không ghi phiên bản cầu nối → không biết máy nào còn bản cũ; (4) Engine 2
+chỉ học từ lượt cân qua bàn cân — chưa đo được tỉ lệ; (5) Engine 2 lỗi trong nhịp đồng hồ làm bỏ nhịp của hàng đợi / worker tự động hoá.
+
+Sửa (store v4 — chưa phát hành nên sửa thẳng; `gieo_engine2_pos_v4.js`; `functions/automation/index.js`; `tools/automation/engine2_ui.js`):
+- **1a học dồn**: quan sát đóng dấu `updatedAt` khi worker ghi; gói tuần `obs_weeks/<thứ Hai>~<phần>` (≤ 400 quan sát / ≤ 700 KB) + mốc
+  `models/obs_sync`. Đêm: mốc + gói (~14) + quan sát đổi từ mốc (lùi 10 phút) + `count()` đối chiếu số lượng (lệch → đọc toàn bộ). Đọc toàn
+  bộ theo trang (không ném lỗi): lần đầu, cứ 7 ngày, khi mốc `dirty` (lượt học chết giữa lúc ghi nhãn / gói). Nhãn do chính lượt học ghi
+  không đóng dấu (gói ghi ngay sau). Chặn an toàn 20 000. Ý tưởng: tài liệu tổng hợp cập nhật thưa (Google Cloud — Firestore distributed
+  counters / roll-up document), không chép mã.
+- **4 bộ đếm** `e2Daily` (14 ngày) trên tài liệu điều khiển: «Engine 2 nhận» (worker hoàn tất lượt cân, không đếm khi xử lý lại) / «POS tự
+  ghi» theo mã lý do — trong transaction vốn đã đọc tài liệu đó, 0 lượt đọc thêm; quanlygieo2 bảng 7 ngày (tỉ lệ nhận, lý do chính).
+- **2** `enqueue(kind,id,resume,onlyNew)` — trigger `_engine2_measurement` chỉ xếp khi chưa có. **5** nhịp đồng hồ: mỗi phần một khối lỗi (`errorPart`).
+- **3** cầu nối v4 = v3 + xác nhận ghi `bridgeVersion` / `storeVersion`; quanlygieo2 hiện phiên bản từng máy + cảnh báo máy chạy bản cũ trong 7 ngày.
+
+Đo (2 thế giới giống hệt, 4 đêm, có quan sát mới + nhãn muộn): kết quả học **giống hệt** cách đọc toàn bộ; lượt đọc mỗi đêm học dồn 52–86 so với
+282–312. Store v3 dừng học khi > 3000 quan sát; v4 học bình thường. Test: `unit_engine2_store_v4.test.js`, `engine2_pos_v4.test.js`,
+`engine2_ui_v4.test.js`; Firebase giả thêm `count()` (Admin SDK có) — `gieo_automation_review.test.js` nay kiểm đúng nhánh `count()` chạy thật.
+Giao: `giao_file/dot_05-11_engine2_v4/` (thay gói «chỉ Functions» của lượt 2).

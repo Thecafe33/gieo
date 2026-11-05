@@ -16,7 +16,16 @@
  *       40 việc POS đọc (M0 / M3 có thể biến mất). Món kiểm soát vẫn cân mỗi tối qua day_close. Bật lại: cfg.legacyWeighTasks=true.
  *   F2. Lượt học hằng ngày dọn việc treo TRƯỚC khi xét hạ mức: MỘT truy vấn việc đang chờ (giới hạn), ghi gộp một batch (không đọc lại
  *       từng việc): việc mồ côi (F1, việc chẩn đoán khi cfg.diagTasks tắt) và mọi việc quá hạn STALE_DAYS (3) ngày → cancelled kèm lý do.
- *   Giảm đọc: heartbeat ghi thẳng (update, không đọc trước); hàng đợi thử lại giãn dần 1 phút × 2^lần (tối đa 6 giờ) thay vì mỗi phút mãi mãi. */
+ *   Giảm đọc: heartbeat ghi thẳng (update, không đọc trước); hàng đợi thử lại giãn dần 1 phút × 2^lần (tối đa 6 giờ) thay vì mỗi phút mãi mãi.
+ *   1a HỌC DỒN (chủ quán chọn): trước mỗi đêm đọc lại TOÀN BỘ quan sát 90 ngày và quá 3000 thì ném lỗi, DỪNG học. Nay quan sát đóng dấu
+ *       updatedAt; quan sát 90 ngày nằm trong gói tuần obs_weeks/<thứ Hai>~<phần> + mốc models/obs_sync; mỗi đêm đọc mốc + các gói + CHỈ
+ *       quan sát đổi từ mốc (lùi 10 phút). Lần đầu (chưa có gói) và cứ 7 ngày một lần: đọc toàn bộ theo trang (không ném lỗi) và dựng lại
+ *       gói — tự lành nếu có quan sát ghi không dấu; mỗi đêm còn đối chiếu số lượng bằng count() (lệch → đọc toàn bộ). Nhãn do chính lượt học
+ *       ghi không đóng dấu (gói ghi ngay sau); mốc gắn cờ dirty trong lúc ghi nhãn + gói — chết giữa chừng → đêm sau đọc toàn bộ.
+ *       Danh sách đưa vào học y hệt trước.
+ *   4  Bộ đếm theo ngày trên tài liệu điều khiển (e2Daily, 14 ngày): «Engine 2 nhận» (worker hoàn tất lượt cân) / «POS tự ghi» theo mã lý
+ *       do — ghi trong transaction vốn đã đọc tài liệu đó, không thêm lượt đọc; quanlygieo2 đọc sẵn qua config().
+ *   2  enqueue(…, onlyNew): trigger lượt cân chỉ xếp hàng khi chưa có (POS đã xếp) — trước mỗi lượt cân bị xử lý hai lần (~20 lượt đọc / mã). */
 (function(root){
 'use strict';
 const E=typeof module==='object'&&module.exports?require('./unit_engine2_v1.js'):root.UnitEngine2;
@@ -65,7 +74,7 @@ function create(opts){
  function observation(c,start,end,extra){
   const used=Math.max(0,E.round(start.measured-end.book));
   return {schemaVersion:1,id:E.key(c.id,end.kind,end.at),storeId:store,itemId:c.itemId,unit:c.unit||'',containerId:c.id,from:start.at,fromPoint:start.id,at:end.at,day:new Date(E.ms(end.at)+7*3600000).toISOString().slice(0,10),
-   used,loss:E.round(end.book-end.measured),book:end.book,measured:end.measured,nWeigh:(start.weighed?1:0)+(end.weighed?1:0),fromOpen:start.id==='open',cap:start.id==='open'?start.measured:null,receiveRefId:c.receiveRefId||null,verified:used>0,scored:false,...extra,createdAt:iso()};
+   used,loss:E.round(end.book-end.measured),book:end.book,measured:end.measured,nWeigh:(start.weighed?1:0)+(end.weighed?1:0),fromOpen:start.id==='open',cap:start.id==='open'?start.measured:null,receiveRefId:c.receiveRefId||null,verified:used>0,scored:false,...extra,createdAt:iso(),updatedAt:iso()};
  }
  const DIAG=['tare_check','density_proof','recipe_portion_weigh','scan_open_units','spec_confirm','reference_weigh','mixup_reweigh','mixup_group_weigh'];
  const MIX=['mixup_reweigh','mixup_group_weigh'];
@@ -82,11 +91,12 @@ function create(opts){
    t.set(base,{controlledItemIds:all,revision:(cur.revision||0)+1,lastDecisionAt:iso()},{merge:true});return true;
   });
  }
- async function enqueue(kind,id,resumeCursor=false){
+ async function enqueue(kind,id,resumeCursor=false,onlyNew=false){
   if(!['finish','measurement','handover','bootstrap','reprice','recompute_shift','discover_shift','opened','prep_review','mixup_day','alert_review','sub_review'].includes(kind))throw Error('Engine2: loại việc không hợp lệ');
   const ref=sub('requests').doc(E.key(kind,id));
   return fs.runTransaction(async t=>{
    const [c,s]=await Promise.all([t.get(base),t.get(ref)]);const cfg=c.exists?c.data():{};
+   if(onlyNew&&s.exists)return false;   // [v4-2] đã có trong hàng (POS tự xếp lúc gửi lượt cân) → không xếp lại
    if(!cfg.enabled){if(kind!=='measurement')return false;const accepted=await t.get(sub('measurements').doc(id));if(!accepted.exists||accepted.data().acceptedProtocol!==1)return false;}const old=s.exists?s.data():{};
    t.set(ref,{...old,cursor:resumeCursor?old.cursor||null:null,kind,sourceId:id,storeId:store,dirty:true,revision:(old.revision||0)+1,nextTryAt:now(),leaseUntil:old.leaseUntil||0,updatedAt:iso()});return ref.id;
   });
@@ -659,7 +669,9 @@ function create(opts){
       minutes:line.startedAt&&line.finishedAt?Math.max(0,(E.ms(line.finishedAt)-E.ms(line.startedAt))/60000):null,ctx:{fifoDebt:Number(u.baseline)<0,densityProven:!['ml','l'].includes(String(item.unit).toLowerCase())||Number(item.densityGPerMl)>0}});
     t.set(sub('obs').doc(ob.id),ob);if(!previousPoints[i].exists||E.ms(previousPoints[i].data().countedAt)<=E.ms(cp.countedAt))t.set(sub('unit_checkpoints').doc(u.id),cp);
    }
-   if(!alreadyComplete){t.delete(sub('measurement_locks').doc(m.itemId));t.set(base,{lastMeasurementAt:at,revision:(cs.exists?cs.data().revision||0:0)+1},{merge:true});}
+   if(!alreadyComplete){t.delete(sub('measurement_locks').doc(m.itemId));
+    if(cs.exists)t.update(base,{lastMeasurementAt:at,revision:(cs.data().revision||0)+1,e2Daily:bumpDaily(cs.data().e2Daily,vnDay(now()),'e2')});   // [v4-4] đếm «Engine 2 nhận»
+    else t.set(base,{lastMeasurementAt:at,revision:1},{merge:true});}
   });
  }
  // Việc do worker học sinh ra (chẩn đoán / cân ngẫu nhiên M0 / xác nhận độc lập M3). Mã việc cố định → chạy lại không đúp.
@@ -706,6 +718,51 @@ function create(opts){
   * 1) gắn nhãn kết quả chẩn đoán → hiệu chuẩn giả thuyết; 2) chấm quan sát mới (bất thường / cộng dồn) → giả thuyết kiểm được →
   * việc chẩn đoán, tăng mức (M3 → cân độc lập người khác); 3) hạ mức theo tiêu chí đã hiệu chuẩn; 4) cân ngẫu nhiên M0 theo ngân sách;
   * 5) hiệu chuẩn có rào hằng tuần + quay lui + kiểm toán mô hình; 6) ghi models/current (QL2 + chứng nhận đọc). */
+ // [v4-1a] Học dồn — gói tuần quan sát. Đọc: mốc (1) + gói trong cửa sổ (~14) + quan sát đổi từ mốc. Ghi: gói tuần có thay đổi + mốc.
+ const FULL_EVERY_MS=7*86400000,OBS_WINDOW_DAYS=90,OBS_PART_ROWS=400,OBS_PART_BYTES=700000,OBS_MAX=20000,SYNC_MARGIN_MS=10*60000,PAGE=500;
+ const weekOf=at=>{const d=new Date(E.ms(at)+7*3600000),dow=(d.getUTCDay()+6)%7;d.setUTCDate(d.getUTCDate()-dow);return d.toISOString().slice(0,10);};
+ const byAt=(a,b)=>String(a.at)<String(b.at)?-1:String(a.at)>String(b.at)?1:a.id<b.id?-1:a.id>b.id?1:0;
+ async function pages(q,each){let last=null;for(;;){const sn=await (last?q.startAfter(last):q).limit(PAGE).get();sn.docs.forEach(d=>each(data(d)));if(sn.docs.length<PAGE)return;last=sn.docs[sn.docs.length-1];}}
+ async function loadObsWindow(since){
+  const metaRef=sub('models').doc('obs_sync'),startedAt=now(),meta=await metaRef.get(),m=meta.exists?meta.data():null,rows=new Map(),touched=new Set();
+  let mode='bootstrap';
+  // Đối soát toàn bộ định kỳ (7 ngày): quan sát ghi không dấu updatedAt (vd quay lui worker về bản cũ rồi lên lại) không bị sót vĩnh viễn.
+  if(m&&m.version===1&&m.cursor&&!m.dirty&&now()-E.ms(m.lastFullAt||0)<FULL_EVERY_MS){
+   mode='incremental';
+   const keep=(m.parts||[]).filter(x=>x.week>=weekOf(since)),cq=sub('obs').where('at','>=',since);
+   const [snaps,cnt]=await Promise.all([Promise.all(keep.map(x=>sub('obs_weeks').doc(x.id).get())),typeof cq.count==='function'?cq.count().get().then(r=>r.data().count).catch(()=>null):null]);
+   for(const sn of snaps)if(sn.exists)for(const o of sn.data().rows||[])rows.set(o.id,o);
+   await pages(sub('obs').where('updatedAt','>=',new Date(E.ms(m.cursor)-SYNC_MARGIN_MS).toISOString()).orderBy('updatedAt'),o=>{rows.set(o.id,o);touched.add(o.id);});
+   // Đối chiếu số lượng (count() ~1 lượt đọc / 1000 dòng): lệch → có quan sát ghi không dấu / gói hỏng → đọc toàn bộ ngay đêm nay.
+   if(cnt!=null&&cnt!==[...rows.values()].filter(o=>String(o.at||'')>=since).length){mode='bootstrap';rows.clear();touched.clear();}
+  }
+  if(mode==='bootstrap')await pages(sub('obs').where('at','>=',since).orderBy('at'),o=>{rows.set(o.id,o);touched.add(o.id);});
+  const obs=[...rows.values()].filter(o=>String(o.at||'')>=since).sort(byAt);
+  if(obs.length>OBS_MAX)throw error('Quá '+OBS_MAX+' quan sát trong '+OBS_WINDOW_DAYS+' ngày — cần xem lại phân vùng học, chưa tự chốt');
+  return {obs,touched,mode,startedAt,metaRef,oldParts:m?.parts||[],lastFullAt:mode==='bootstrap'?new Date(startedAt).toISOString():m.lastFullAt};
+ }
+ // Ghi lại gói tuần: chỉ tuần có quan sát đổi (đồng bộ / nhãn mới đêm nay) hoặc mọi tuần khi dựng lần đầu; xoá gói ngoài cửa sổ; ghi mốc SAU CÙNG
+ // (hỏng giữa chừng → đêm sau đọc lại từ mốc cũ, gộp theo mã nên không đôi).
+ async function saveObsWindow(win,obs,changedIds){
+  const weeks=new Map();for(const o of obs){const w=weekOf(o.at);if(!weeks.has(w))weeks.set(w,[]);weeks.get(w).push(o);}
+  const dirty=new Set(win.mode==='bootstrap'?[...weeks.keys()]:obs.filter(o=>win.touched.has(o.id)||changedIds.has(o.id)).map(o=>weekOf(o.at)));
+  const parts=win.oldParts.filter(x=>weeks.has(x.week)&&!dirty.has(x.week)),stale=win.oldParts.filter(x=>!weeks.has(x.week)||dirty.has(x.week));
+  for(const w of [...dirty].sort()){
+   let cur=[],bytes=0,i=0;const flush=async()=>{const id=w+'~'+i++;await sub('obs_weeks').doc(id).set({week:w,rows:cur,updatedAt:iso()});parts.push({id,week:w,n:cur.length});cur=[];bytes=0;};
+   for(const o of weeks.get(w)){const b=JSON.stringify(o).length;if(cur.length&&(cur.length>=OBS_PART_ROWS||bytes+b>OBS_PART_BYTES))await flush();cur.push(o);bytes+=b;}
+   if(cur.length)await flush();
+  }
+  const ids=new Set(parts.map(x=>x.id));for(const x of stale)if(!ids.has(x.id))await sub('obs_weeks').doc(x.id).delete();
+  await win.metaRef.set({version:1,cursor:new Date(win.startedAt).toISOString(),lastFullAt:win.lastFullAt,parts:parts.sort((a,b)=>a.id<b.id?-1:1),total:obs.length,updatedAt:iso()});
+  return {weeksWritten:dirty.size,parts:parts.length};
+ }
+ // [v4-4] Bộ đếm 14 ngày: {ngày: {e2: n, fb: {mã: n}, fbTotal: n}} — giữ trên tài liệu điều khiển (đọc sẵn trong transaction).
+ function bumpDaily(map,day,kind,code){
+  const out={};for(const k of Object.keys(map||{}).sort().reverse().filter(k=>k!==day).slice(0,13))out[k]=map[k];
+  const cur=JSON.parse(JSON.stringify((map||{})[day]||{}));
+  if(kind==='e2')cur.e2=(cur.e2||0)+1;else{cur.fb={...(cur.fb||{}),[code]:((cur.fb||{})[code]||0)+1};cur.fbTotal=(cur.fbTotal||0)+1;}
+  out[day]=cur;return out;
+ }
  // [v4] Thử lại giãn dần: 1, 2, 4, 8 … phút, tối đa 6 giờ — việc hỏng vĩnh viễn không bị đọc lại mỗi nhịp đồng hồ.
  const retryDelay=attempt=>Math.min(60000*2**Math.max(0,attempt-1),6*3600000);
  // [v4-F2] Việc cân POS không có chỗ làm (F1) — nhận theo tiền tố mã việc (E.key) và loại việc.
@@ -741,9 +798,9 @@ function create(opts){
   const waiting=[];try{for(const x of (await sub('cases').where('status','==','checking').limit(50).get()).docs){const o=x.data();if(o.basis==='waiting_sibling'&&o.originId){await finish(o.originId).catch(()=>{});waiting.push(o.originId);}}}catch(e){}
   const P=L.withDefaults(pSn.exists&&pSn.data().params?pSn.data().params:(opts.params||L.DEFAULT_PARAMS));
   const since=new Date(now()-90*86400000).toISOString();
-  const [oSn,eSn,cSn,vSn]=await Promise.all([sub('obs').where('at','>=',since).orderBy('at').limit(3001).get(),sub('evidence').where('labeled','==',false).limit(200).get(),sub('controls').limit(501).get(),sub('model_versions').orderBy('createdAt').limit(200).get()]);
-  if(oSn.docs.length>3000)throw error('Quá 3000 quan sát trong 90 ngày — cần phân vùng học, chưa tự chốt');
-  const obs=oSn.docs.map(data),controls=Object.fromEntries(cSn.docs.map(d=>[d.id,data(d)])),at=iso(),writes=[];
+  // [v4-1a] Quan sát 90 ngày từ gói tuần + phần đổi từ mốc (thay cho đọc lại toàn bộ và dừng khi quá 3000).
+  const [win,eSn,cSn,vSn]=await Promise.all([loadObsWindow(since),sub('evidence').where('labeled','==',false).limit(200).get(),sub('controls').limit(501).get(),sub('model_versions').orderBy('createdAt').limit(200).get()]);
+  const obs=win.obs,controls=Object.fromEntries(cSn.docs.map(d=>[d.id,data(d)])),at=iso(),writes=[];
   // [Nhân sự 28/10] Mô hình vận hành theo ca thật (28 ngày): một người làm xuyên suốt = mô hình chủ đích, không phải thiếu nhân sự.
   let operating={model:'unknown',recentIds:[],people:[],windowDays:28,recentDays:14,shifts:0};
   try{const shSn=await coll('employee_shifts').where('checkedInAt','>=',new Date(now()-28*86400000).toISOString()).limit(501).get();operating=S.operatingModel(shSn.docs.map(data),{now:now()});}catch(e){if(opts.log)opts.log(e);}
@@ -808,7 +865,7 @@ function create(opts){
      }
     }
    }
-   late.push([sub('obs').doc(o.id),upd]);Object.assign(o,upd);
+   late.push([sub('obs').doc(o.id),upd]);Object.assign(o,upd);   // nhãn của chính lượt học: gói tuần ghi ngay sau (mốc dirty che khoảng giữa)
   }
   // 3) Hạ mức theo tiêu chí đã hiệu chuẩn (chỉ khi bật tự hạ; không dưới sàn; mỗi lần một bậc).
   const allScored=obs.filter(o=>o.scored);base=L.baseline(allScored,P);
@@ -871,9 +928,13 @@ function create(opts){
   if(cfg.mode==='active')await publishControls(Object.entries(controls).filter(([,c])=>Number(c.level)>=1).map(([id])=>id));
   model.consumedEvidence=[...consumed].slice(-400);
   await modelRef.set(model);
+  // [v4-1a] Đánh dấu mốc «dở» TRƯỚC khi ghi nhãn quan sát; gói tuần + mốc mới ghi xong mới gỡ. Chết giữa chừng → đêm sau đọc toàn bộ.
+  await win.metaRef.set({dirty:true,dirtyAt:at},{merge:true});
   for(const [ref,val] of late)await ref.set(val,{merge:true});
+  const lateObs=new Set(late.filter(([r])=>r.path&&r.path.includes('/obs/')).map(([r])=>r.id));
+  let obsSync=null;try{obsSync={mode:win.mode,...await saveObsWindow(win,obs,lateObs)};}catch(e){opts.log?.(e);}   // lỗi ghi gói: đêm sau đọc lại từ mốc cũ
   const tasks=(await Promise.all(created)).filter(Boolean);
-  return {day,swept,scored:fresh.length,flagged:fresh.filter(o=>o.flagged).length,tasks,released,calibration:calib,rollback,issues,operating:operating.model,independentWanted:independentWanted.length};
+  return {day,swept,obsSync,scored:fresh.length,flagged:fresh.filter(o=>o.flagged).length,tasks,released,calibration:calib,rollback,issues,operating:operating.model,independentWanted:independentWanted.length};
  }
  async function exception(taskId,staff,reason){
   if(!staff?.id||!String(reason||'').trim())throw Error('Cần người ghi nhận và tình trạng thực tế');
@@ -923,7 +984,7 @@ function create(opts){
    const at=iso(),task=s.data(),note={taskId,itemId:task.itemId||'',itemName:task.itemName||'',sampling:task.sampling||'',code,detail:String(detail||'').slice(0,200),
     byEmployeeId:staff?.id||'',byName:staff?.fullName||'',at};
    t.set(ref,{status:E.transition('task',task.status,'VALID_VOID'),pending:false,posFallback:note,updatedAt:at,revision:(task.revision||0)+1},{merge:true});
-   if(c.exists)t.set(base,{posFallbacks:[...(c.data().posFallbacks||[]),note].slice(-20),lastPosFallbackAt:at},{merge:true});
+   if(c.exists)t.update(base,{posFallbacks:[...(c.data().posFallbacks||[]),note].slice(-20),lastPosFallbackAt:at,e2Daily:bumpDaily(c.data().e2Daily,vnDay(now()),'fb',code)});
    return true;
   });
  }

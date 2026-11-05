@@ -16,13 +16,15 @@ console.log('ok 1. 10 bộ test cũ đạt trên v4 khi bật lại việc cũ �
 {const r=run('alias_store_v4.js','engine2_pos_v3');assert.equal(r.status,0,'engine2_pos_v3 trên store v4:\n'+(r.stdout+r.stderr).split('\n').slice(-12).join('\n'));}
 console.log('ok 2. Bộ POS v3 đạt trên store v4 (giao lượt cân, POS tự ghi, nhịp — POS vẫn nạp store v3, hàm giống hệt)');
 
-// Bộ đếm lượt đọc quanh Firestore giả: mọi .get() trên tham chiếu / truy vấn và t.get() trong transaction.
+// Bộ đếm lượt đọc quanh Firestore giả, TÍNH NHƯ FIRESTORE TÍNH PHÍ: đọc một tài liệu = 1; truy vấn = số tài liệu trả về (tối thiểu 1);
+// count() = 1 lượt / 1000 dòng. Gồm cả t.get() trong transaction.
+const bill=r=>r&&Array.isArray(r.docs)?Math.max(1,r.docs.length):r&&typeof r.data==='function'&&r.exists===undefined&&r.data()&&typeof r.data().count==='number'?Math.max(1,Math.ceil(r.data().count/1000)):1;
 function counted(fs){
  const c={n:0};
  const wrap=o=>new Proxy(o,{get(target,k){
   const v=target[k];if(typeof v!=='function')return v;
-  if(k==='get')return (...a)=>{c.n++;return v.apply(target,a);};
-  if(k==='runTransaction')return fn=>v.call(target,t=>fn(new Proxy(t,{get(tt,kk){const vv=tt[kk];return kk==='get'?(...a)=>{c.n++;return vv.apply(tt,a);}:typeof vv==='function'?vv.bind(tt):vv;}})));
+  if(k==='get')return (...a)=>Promise.resolve(v.apply(target,a)).then(r=>{c.n+=bill(r);return r;});
+  if(k==='runTransaction')return fn=>v.call(target,t=>fn(new Proxy(t,{get(tt,kk){const vv=tt[kk];return kk==='get'?(...a)=>Promise.resolve(vv.apply(tt,a)).then(r=>{c.n+=bill(r);return r;}):typeof vv==='function'?vv.bind(tt):vv;}})));
   return (...a)=>{const r=v.apply(target,a);return r&&typeof r==='object'&&typeof r.then!=='function'?wrap(r):r;};
  }});
  return {fs:wrap(fs),c};
@@ -82,7 +84,7 @@ const tasks=f=>Object.entries(f.FS).filter(([p])=>p.startsWith(ROOT+'/tasks/')).
   assert(/Không có chỗ làm/.test(byId['handover~sa~j~x'].expired.reason)&&/Quá hạn 3 ngày/.test(byId['m3~old'].expired.reason));
   for(const id of [E.key('day_close','2026-10-25','j','c'),'m0~fresh'])assert(byId[id].pending===true&&byId[id].status==='queued','việc còn hạn giữ nguyên: '+id);
   assert(byId['busy~old'].status==='in_progress'&&byId['busy~old'].pending,'việc đang xử lý một lượt cân không đụng');
-  assert.equal(n,6);assert.equal(c.n,1,'dọn việc: đúng MỘT lượt truy vấn, không đọc lại từng việc (ghi gộp một batch)');
+  assert.equal(n,6);assert.equal(c.n,9,'dọn việc: một truy vấn — đọc đúng 9 việc đang chờ, không đọc lại từng việc (ghi gộp một batch)');
   assert.equal(f.FS[ROOT].revision,7,'không tăng revision (POS không phải xác nhận lại)');
   const g=world({...T('tare~1',{kind:'tare_check',createdAt:ago(1)})});g.f.FS[ROOT].diagTasks=true;await g.s.sweepStaleTasks(g.f.FS[ROOT]);
   assert(tasks(g.f)[0].pending,'cfg.diagTasks=true → việc chẩn đoán có chỗ làm, không đóng');
@@ -123,6 +125,72 @@ const tasks=f=>Object.entries(f.FS).filter(([p])=>p.startsWith(ROOT+'/tasks/')).
   assert(/require\('\.\/shared\/unit_engine2_store_v4'\)/.test(w),'worker dùng store v4');
   assert.equal(require('fs').readFileSync(path.join(__dirname,'../functions/automation/shared/unit_engine2_store_v4.js'),'utf8'),require('fs').readFileSync(path.join(__dirname,'../unit_engine2_store_v4.js'),'utf8'),'bản Functions khớp gốc');
  }
+
+ // ── 1a HỌC DỒN: hai thế giới giống hệt — A học dồn (gói tuần + phần đổi), B bị xoá mốc mỗi đêm (luôn đọc toàn bộ như cách cũ). ──
+ {
+  const {cleanState}=require('./lib/engine2_fixture');
+  const T0=Date.parse('2026-10-23T03:00:00.000Z'),DAYMS=86400000;
+  const mk=async()=>{const f=await cleanState();const tpl=Object.entries(f.FS).find(([p])=>/\/obs\/n~weigh~2026-10-22T03/.test(p))[1];return {f,tpl};};
+  const synth=(tpl,i,base)=>{const at=new Date(base+i*6*3600000).toISOString(),id='syn'+i+'~weigh~'+at,loss=5+(i*7)%45;
+   return [ROOT+'/obs/'+id,{...tpl,id,containerId:'syn'+i,itemId:i%3?'j':'k',at,day:new Date(Date.parse(at)+7*3600000).toISOString().slice(0,10),loss,book:300,measured:300-loss,used:200,scored:false,flagged:false,updatedAt:at}];};
+  const A=await mk(),B=await mk();
+  const seed=(w,rows)=>{for(const [k,v] of rows)w.f.FS[k]=JSON.parse(JSON.stringify(v));};
+  const first=Array.from({length:240},(_,i)=>synth(A.tpl,i,Date.parse('2026-08-01T03:00:00Z')));seed(A,first);seed(B,first);
+  const cA=counted(A.f.fstore),cB=counted(B.f.fstore);
+  const sA=n=>create({storeId:'gg01',fstore:cA.fs,now:()=>T0+n*DAYMS}),sB=n=>create({storeId:'gg01',fstore:cB.fs,now:()=>T0+n*DAYMS});
+  const pick=w=>JSON.stringify(Object.fromEntries(Object.entries(w.f.FS).filter(([p])=>p.startsWith(ROOT+'/')&&!/\/(obs_weeks|requests|devices)\/|\/models\/obs_sync$/.test(p)).map(([p,v])=>[p,p===ROOT?{...v}:v]).sort()));
+  const reads=[];
+  for(let night=0;night<4;night++){
+   if(night>0){
+    const more=Array.from({length:15},(_,i)=>synth(A.tpl,1000+night*100+i,T0+(night-1)*DAYMS+3600000));seed(A,more);seed(B,more);
+    // nhãn / chỉnh muộn trên một quan sát cũ (như measure/finish ghi lại) — đóng dấu updatedAt
+    const old=ROOT+'/obs/'+first[night*10][1].id,upd={verified:night%2===0,updatedAt:new Date(T0+(night-1)*DAYMS+7200000).toISOString()};
+    Object.assign(A.f.FS[old],upd);Object.assign(B.f.FS[old],upd);
+   }
+   delete B.f.FS[ROOT+'/models/obs_sync'];
+   cA.c.n=0;const ra=await sA(night).learnDay({force:true});const na=cA.c.n;
+   cB.c.n=0;const rb=await sB(night).learnDay({force:true});const nb=cB.c.n;
+   reads.push([na,nb]);
+   assert.equal(ra.obsSync.mode,night?'incremental':'bootstrap');assert.equal(rb.obsSync.mode,'bootstrap');
+   assert.equal(pick(A),pick(B),'đêm '+night+': kết quả học (mô hình, mức kiểm soát, việc, nhãn quan sát) GIỐNG HỆT cách đọc toàn bộ');
+  }
+  for(let i=1;i<reads.length;i++)assert(reads[i][0]<reads[i][1]/3,'đêm '+i+': học dồn đọc ít hơn hẳn ('+reads[i][0]+' so với '+reads[i][1]+')');
+  console.log('   lượt đọc mỗi đêm [học dồn, đọc toàn bộ]: '+JSON.stringify(reads));
+  const parts=A.f.FS[ROOT+'/models/obs_sync'].parts;assert(parts.length>=10&&parts.every(x=>/^\d{4}-\d{2}-\d{2}~\d+$/.test(x.id)),'gói theo tuần: '+parts.length);
+ }
+ {
+  // Quả bom hẹn giờ cũ: quá 3000 quan sát / 90 ngày → store v3 ném lỗi và DỪNG học; v4 học bình thường.
+  const {cleanState}=require('./lib/engine2_fixture');
+  const T0=Date.parse('2026-10-23T03:00:00.000Z');
+  const f3=await cleanState(),f4=await cleanState();
+  const tpl=Object.entries(f3.FS).find(([p])=>/\/obs\/n~weigh~2026-10-22T03/.test(p))[1];
+  for(let i=0;i<3200;i++){const at=new Date(Date.parse('2026-07-27T00:00:00Z')+i*2*3600000).toISOString(),id='big'+i+'~weigh~'+at,o={...tpl,id,containerId:'big'+i,at,day:at.slice(0,10),scored:false,updatedAt:at};f3.FS[ROOT+'/obs/'+id]=o;f4.FS[ROOT+'/obs/'+id]={...o};}
+  await assert.rejects(require('../unit_engine2_store_v3').create({storeId:'gg01',fstore:f3.fstore,now:()=>T0}).learnDay(),/Quá 3000/,'v3: dừng học');
+  const r=await create({storeId:'gg01',fstore:f4.fstore,now:()=>T0}).learnDay();
+  assert(r.scored>3000,'v4: học bình thường trên '+r.scored+' quan sát');
+  const parts=f4.FS[ROOT+'/models/obs_sync'].parts;assert(parts.every(x=>x.n<=400),'mỗi gói ≤ 400 quan sát');
+  for(const x of parts)assert(JSON.stringify(f4.FS[ROOT+'/obs_weeks/'+x.id]).length<900000,'mỗi gói < 1 MB');
+ }
+ // ── 2: xếp hàng lượt cân một lần ──────────────────────────────────────────────────────────────────
+ {
+  const {f,s}=world({[ROOT+'/measurements/m1']:{acceptedProtocol:1,status:'queued'}});
+  const id=await s.enqueue('measurement','m1');const rev=f.FS[ROOT+'/requests/'+id].revision;
+  assert.equal(await s.enqueue('measurement','m1',false,true),false,'trigger: đã có trong hàng → không xếp lại');
+  assert.equal(f.FS[ROOT+'/requests/'+id].revision,rev,'không tăng revision → không xử lý lần hai');
+  const idx=require('fs').readFileSync(path.join(__dirname,'../functions/automation/index.js'),'utf8');
+  assert(/enqueue\('measurement',event\.params\.id,false,true\)/.test(idx),'trigger _engine2_measurement dùng onlyNew');
+  assert(/\['engine2',\(\)=>engine2\.tick\(store\)\],\['queue'/.test(idx),'[5] nhịp đồng hồ: mỗi phần một khối lỗi riêng');
+ }
+ // ── 4: bộ đếm 14 ngày ──────────────────────────────────────────────────────────────────────────────
+ {
+  const old=Object.fromEntries(Array.from({length:20},(_,i)=>[new Date(NOW-(i+1)*86400000+7*3600000).toISOString().slice(0,10),{e2:i}]));
+  const {f,s}=world({[ROOT+'/tasks/t1']:{itemId:'j',kind:'weigh_open_units',status:'queued',pending:true},[ROOT+'/tasks/t2']:{itemId:'j',kind:'weigh_open_units',status:'queued',pending:true}});
+  f.FS[ROOT].e2Daily=old;
+  await s.posFallback('t1',{id:'b'},'manual_entry');await s.posFallback('t2',{id:'b'},'worker_stale');
+  const d=f.FS[ROOT].e2Daily,today=new Date(NOW+7*3600000).toISOString().slice(0,10);
+  assert.deepEqual(d[today],{fb:{manual_entry:1,worker_stale:1},fbTotal:2});assert.equal(Object.keys(d).length,14,'giữ 14 ngày gần nhất');
+ }
  console.log('ok 3. v4 mặc định: không tạo việc mồ côi; dọn việc treo (1 truy vấn, ghi gộp) trước khi xét hạ mức; nhịp không đọc trước; thử lại giãn dần tới 6 giờ');
+ console.log('ok 4. Học dồn = kết quả y hệt đọc toàn bộ, đọc ít hơn hẳn; v4 không dừng khi quá 3000; xếp hàng lượt cân một lần; bộ đếm 14 ngày; nhịp đồng hồ tách lỗi');
  console.log('ALL PASS');
 })().catch(e=>{console.error(e);process.exit(1);});

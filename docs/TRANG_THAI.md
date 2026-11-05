@@ -1,3 +1,7 @@
+# 05/11 (lượt 3) — Engine 2 mức hệ thống: học dồn (hết «dừng học khi > 3000 quan sát», đọc ít hơn ~4–5 lần), bộ đếm Engine 2 nhận / POS tự ghi, phiên bản máy POS, xếp hàng lượt cân một lần — CHƯA deploy (Hosting + Functions)
+
+[ENGINE2_POS_V3_05-11.md](ENGINE2_POS_V3_05-11.md) mục «Lượt 3». Giao: `giao_file/dot_05-11_engine2_v4/` (thay gói lượt 2).
+
 # 05/11 (lượt 2) — Engine 2 worker store v4: việc cân mồ côi chặn hạ mức kiểm soát → không tạo + dọn hằng ngày; giảm lượt đọc — CHƯA deploy (chỉ Functions)
 
 [ENGINE2_POS_V3_05-11.md](ENGINE2_POS_V3_05-11.md) mục «Lượt 2». Giao: `giao_file/dot_05-11_engine2_v4/`.

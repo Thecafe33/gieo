@@ -177,7 +177,9 @@ function makeFake(opts = {}) {
         const docs = ids.map(id => docSnap(c, id));
         return { docs, size: docs.length, empty: !docs.length, forEach: f => docs.forEach(f) };
       },
-      onSnapshot: (next) => { q.get().then(s => next({ ...s, metadata: { fromCache: false }, docChanges: () => [] })); return () => {}; }
+      onSnapshot: (next) => { q.get().then(s => next({ ...s, metadata: { fromCache: false }, docChanges: () => [] })); return () => {}; },
+      // Truy vấn tổng hợp count() (Admin SDK): đếm theo bộ lọc, giới hạn nếu có (như Firestore thật).
+      count: () => ({ get: async () => { const s = await query(c, filters, order, lim, after).get(); return { data: () => ({ count: s.size }) }; } })
     };
     return q;
   }
