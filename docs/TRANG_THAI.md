@@ -1,3 +1,8 @@
+# 05/11 — TRẠNG THÁI DEPLOY ENGINE 2 (chủ dự án xác nhận)
+- ĐÃ deploy: cầu nối POS v3 + store v3 + worker store v3 (Hosting + Functions `gieo-automation`).
+- CHƯA deploy: lượt 2 (F1/F2 — việc mồ côi, dọn việc treo) và lượt 3 (học dồn, bộ đếm, phiên bản máy POS, xếp hàng một lần). Cả hai nằm
+  trong store v4 / cầu nối v4 → deploy bằng MỘT gói `giao_file/dot_05-11_engine2_v4/` (Hosting + Functions). Không có gói riêng cho lượt 2.
+
 # 05/11 (lượt 3) — Engine 2 mức hệ thống: học dồn (hết «dừng học khi > 3000 quan sát», đọc ít hơn ~4–5 lần), bộ đếm Engine 2 nhận / POS tự ghi, phiên bản máy POS, xếp hàng lượt cân một lần — CHƯA deploy (Hosting + Functions)
 
 [ENGINE2_POS_V3_05-11.md](ENGINE2_POS_V3_05-11.md) mục «Lượt 3». Giao: `giao_file/dot_05-11_engine2_v4/` (thay gói lượt 2).
