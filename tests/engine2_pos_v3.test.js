@@ -328,7 +328,7 @@ function weighed(inv,{itemId='j',unitId='n',base=280,net=250,tare=100,vessel='v'
   const g=world();delete g.FS[ROOT];const st2=create({storeId:'gg01',fstore:g.fstore,now:()=>Date.now()});
   assert.equal(await st2.heartbeat(),false,'chưa có tài liệu điều khiển → không tự tạo');assert(!g.FS[ROOT]);
   const w=fs.readFileSync(path.join(__dirname,'../functions/automation/engine2.js'),'utf8');
-  assert(/unit_engine2_store_v3/.test(w)&&/heartbeat\(\)/.test(w),'worker dùng store v3 và ghi nhịp mỗi lượt đồng hồ');
+  assert(/unit_engine2_store_v[34]/.test(w)&&/heartbeat\(\)/.test(w),'worker dùng store v3 / v4 (v4 = v3 + dọn việc treo) và ghi nhịp mỗi lượt đồng hồ');
   assert.equal(fs.readFileSync(path.join(__dirname,'../functions/automation/shared/unit_engine2_store_v3.js'),'utf8'),fs.readFileSync(path.join(__dirname,'../unit_engine2_store_v3.js'),'utf8'),'bản Functions khớp bản gốc (tools/automation/sync.js)');
  }
  console.log('ok Engine 2 POS v3: A bì bao gói gốc; B POS tự ghi → đóng việc kèm lý do, M0 không lặp, gửi bù khi mất mạng; C chỉ giao lượt khi bộ xử lý nền còn chạy');

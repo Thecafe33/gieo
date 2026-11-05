@@ -30,3 +30,23 @@ Test: `tests/engine2_pos_v3.test.js` (chạy lại toàn bộ kịch bản v2 tr
 Chỉ mục ghép Firestore `tasks (pending, createdAt↓)` và `employee_shifts_gieogieo (employeeId, checkedInAt)` đã có trên máy chủ
 (`tools/automation/firestore.indexes.fragment.json`, `node tools/automation/indexes.js gg01`). Thiếu → Engine 2 không nhận lượt nào; nay
 quanlygieo2 thấy được qua mục «POS tự ghi» (lý do `request_failed`).
+
+## Lượt 2 (05/11): store v4 cho worker — F1 + F2 + giảm lượt đọc (chủ quán duyệt; **chưa deploy**, chỉ Functions)
+Rà tiếp phía worker: tái hiện (store v3 thật + Firebase giả) — cân cuối ngày xong, đóng ngày tự check-out → worker tạo việc `handover~`
+cho mỗi món kiểm soát; POS (từ v2 bỏ popup) không có chỗ làm việc `handover~` / `opened~` / `baseline~` → nằm chờ → lượt học 00:xx thấy
+«món còn việc chờ» (`controlAdvice`: `!(pending>0)`) → **không bao giờ hạ mức kiểm soát**; việc treo còn chiếm cửa sổ 40 việc POS đọc
+(M0 / M3 có thể biến mất); M3 kẹt khi người thứ hai nghỉ.
+
+`unit_engine2_store_v4.js` (worker; POS vẫn store v3 — hàm POS gọi giống hệt):
+- **F1** không tạo `baseline~` / `handover~` / `opened~` (bật lại: `cfg.legacyWeighTasks=true`); món kiểm soát vẫn cân mỗi tối qua `day_close`.
+  `opened()` kiểm công tắc trước khi đọc mã (1 lượt đọc).
+- **F2** lượt học (1 lần / ngày) dọn việc treo TRƯỚC khi xét hạ mức: một truy vấn `pending==true` (giới hạn 300), ghi gộp một batch:
+  việc mồ côi (F1; việc chẩn đoán khi `diagTasks` tắt) + mọi việc quá hạn 3 ngày → `cancelled`, `expired.reason`. Bỏ qua `in_progress`.
+- **Giảm đọc**: nhịp «còn sống» ghi thẳng (`update`, 0 lượt đọc, không tự tạo tài liệu điều khiển); hàng đợi thử lại giãn dần
+  1 → 2 → 4 … phút, tối đa 6 giờ (trước: mỗi phút, mãi mãi).
+
+Test `tests/unit_engine2_store_v4.test.js`: 10 bộ cũ trên v4 khi bật lại việc cũ (giống hệt), bộ POS v3 trên v4, hành vi mặc định + đếm
+lượt đọc. Giao: `giao_file/dot_05-11_engine2_v4/` (chỉ Functions).
+
+Ghi nhận, chưa sửa (rủi ro thấp): worker xử lý lượt cân trước khi POS kịp ghi kho (~1 giây) đúng lúc quản lý vừa đổi bì → lượt bị từ chối
+sau khi kho đã bỏ ghi trách nhiệm. Hai bên kiểm cùng điều kiện nên rất hiếm.
