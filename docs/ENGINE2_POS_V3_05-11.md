@@ -1,7 +1,6 @@
 # Engine 2 — giao tiếp POS v3 (05/11/2026): rà soát + sửa A / B / C
 
-Chủ quán yêu cầu rà soát giao tiếp posgieo ↔ Engine 2 («không muốn lỗi ngớ ngẩn»), duyệt cả A + B + C. Trạng thái: **xong, chưa deploy**
-(cần Hosting + Functions). v2 (`gieo_engine2_pos_v2.js`, `unit_engine2_store_v2.js`) giữ nguyên để quay lui.
+Chủ quán yêu cầu rà soát giao tiếp posgieo ↔ Engine 2 («không muốn lỗi ngớ ngẩn»), duyệt cả A + B + C. Trạng thái: **ĐÃ deploy 05/11/2026** (Hosting + Functions codebase `gieo-automation`, chủ dự án xác nhận). v2 (`gieo_engine2_pos_v2.js`, `unit_engine2_store_v2.js`) giữ nguyên để quay lui.
 
 ## Đã kiểm, không lỗi
 - Không ghi kho đôi: POS và worker dùng chung `engine2OpId`; RT kiểm «lượt này đã áp» trong transaction; dòng sổ txId cố định + kiểm tồn tại trong transaction.

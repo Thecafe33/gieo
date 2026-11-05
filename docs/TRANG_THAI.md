@@ -1,4 +1,4 @@
-# 05/11 — Engine 2 giao tiếp POS v3: rà soát + sửa A (bì bao gói gốc) / B (POS tự ghi → đóng việc kèm lý do, M0 hết lặp) / C (chỉ giao lượt khi worker còn chạy) — CHƯA deploy (Hosting + Functions)
+# 05/11 — Engine 2 giao tiếp POS v3: rà soát + sửa A (bì bao gói gốc) / B (POS tự ghi → đóng việc kèm lý do, M0 hết lặp) / C (chỉ giao lượt khi worker còn chạy) — ĐÃ deploy 05/11 (Hosting + Functions `firebase deploy --only functions:gieo-automation`)
 
 [ENGINE2_POS_V3_05-11.md](ENGINE2_POS_V3_05-11.md). `gieo_engine2_pos_v3.js` + `unit_engine2_store_v3.js`; worker store v3 + `workerHeartbeatAt`; quanlygieo2 hiện «POS tự ghi» + trạng thái bộ xử lý nền. Test v3 chạy lại toàn bộ kịch bản v2 + 9 bộ store v1 + nhân sự v2. Giao: `giao_file/dot_05-11_engine2/`.
 
