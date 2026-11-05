@@ -4,4 +4,9 @@ const api=new Function('BED_LIVE',extract('manage.html',['bedCreatedMs','bedRows
 state.data={'2026-10-19':{w:{bedId:'WAITING',status:'pending',name:'Khách',createdAt:'2026-10-19T09:00:00+07:00'},a:{bedId:1,status:'active',start:'09:00',end:'10:00'},o:{bedId:2,status:'đang dùng',start:'08:00',end:'09:00'},done:{status:'đã xong'},cancel:{status:'đã hủy'}},'2026-10-18':{night:{status:'active',bedId:3,start:'23:00',end:'10:00'},old:{bedId:'WAITING'}}};
 const r=api.bedRows(Date.parse('2026-10-19T09:30:00+07:00'));
 assert.equal(r.waiting.length,1);assert.equal(r.active.length,3);assert.equal(r.active.find(b=>b.id==='a').left,30);assert.equal(r.active.find(b=>b.id==='o').left,-30);assert.equal(r.active.find(b=>b.id==='night').left,30);assert.equal(api.bedCreatedMs({id:'unknown'}),null);
-console.log('ALL PASS 6');
+// Thời lượng: dưới 60 phút giữ «phút», từ 60 phút đổi sang giờ (600 phút → 10 giờ), từ 24 giờ thêm ngày.
+const bedDur=new Function(extract('manage.html',['bedDur'])+';return bedDur')();
+assert.equal(bedDur(0),'0 phút');assert.equal(bedDur(45),'45 phút');assert.equal(bedDur(59.4),'59 phút');
+assert.equal(bedDur(60),'1 giờ');assert.equal(bedDur(85),'1 giờ 25 phút');assert.equal(bedDur(600),'10 giờ');
+assert.equal(bedDur(1500),'1 ngày 1 giờ');assert.equal(bedDur(1441),'1 ngày 1 phút');assert.equal(bedDur(-5),'0 phút');
+console.log('ALL PASS 15');
