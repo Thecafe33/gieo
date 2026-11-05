@@ -232,13 +232,24 @@ function check(snap){
   else if(t&&kind==='surplus'){b=Number(t.expectedQty)||0;dev=-(Number(t.qty)||0);}
   else if(t&&kind){b=Number(t.expectedQty)||0;dev=(kind==='variance'?Number(t.observedDecrease):Math.abs(Number(t.qty)||0)+(Number(t.uncertainVariance)||0))-b;}
   if(!t||dev===null||!near(dev,r.deviation)||!near(b,r.base)){add('PREP_REVIEW_SOURCE_MISMATCH',ref,{txId:r.txId});continue;}
-  const who=kind==='pre'?(t.responsibleEmployeeId||t.staffEmployeeId||''):((t.responsibility||{}).employeeId||t.staffEmployeeId||'');
+  // [05/11 — chính sách prep_review_v2, nhập sai] dòng đã xác minh nhập sai chỉ còn phần lệch thật (lệch − entryErrorQty);
+  // dòng «sổ ghi thấp» (cân trước ra nhiều hơn sổ / prep_surplus) quy cho người ghi lần trước, không phải hao hụt.
+  const ee=r.policy==='prep_review_v2'?(t.entryErrorConfirmed===true?'confirmed':(kind==='surplus'||(kind==='pre'&&(Number(t.qty)||0)>0.005))?'found':null):null;
+  let who=kind==='pre'?(t.responsibleEmployeeId||t.staffEmployeeId||''):((t.responsibility||{}).employeeId||t.staffEmployeeId||'');
+  if(ee==='found'){
+   if(kind==='pre')who=(t.responsibility||{}).classification==='book_understated'?(t.responsibleEmployeeId||''):((t.fromCheckpoint||{}).employeeId||'');
+   else who=((Array.isArray(t.previousWeighers)?t.previousWeighers:[]).slice().sort((x,y)=>(Number(y.qty)||0)-(Number(x.qty)||0))[0]||{}).employeeId||'';
+  }
   if((r.responsible||{}).employeeId!==who)add('PREP_REVIEW_SOURCE_MISMATCH',ref,{responsible:(r.responsible||{}).employeeId,source:who});
   if(r.mode==='active'&&r.appliedResult==='reviewed'&&!(t.needsReview===false&&t.autoReview&&t.autoReview.caseId===r.id))add('PREP_REVIEW_SOURCE_MISMATCH',ref,{txId:r.txId,needsReview:t.needsReview});
-  const a=Math.abs(dev),tol=Math.max(ABS[String(r.unit||'').toLowerCase()]||0,0.05*b),ratio=b>0?a/b:a>(ABS[String(r.unit||'').toLowerCase()]||0)?Infinity:0;
-  const band=a<=tol?'within':ratio<=0.25?'moderate':ratio<=0.5?'large':'very_large';
+  const AB=ABS[String(r.unit||'').toLowerCase()]||0,cut=x=>{const q=Math.abs(Number(t.entryErrorQty)||0);return ee==='confirmed'?(q>0?Math.max(0,x-q):0):x;};
+  const bandOf=a=>{const ratio=b>0?a/b:a>AB?Infinity:0;return a<=Math.max(AB,0.05*b)?'within':ratio<=0.25?'moderate':ratio<=0.5?'large':'very_large';};
+  const rawBand=bandOf(Math.abs(dev));let band=bandOf(cut(Math.abs(dev)));
+  if(ee==='confirmed'&&band==='within')band='entry_error';
+  if(ee==='found'&&band!=='within')band='entry_error_found';
   if(band!==r.band)add('PREP_REVIEW_WRONG_BAND',ref,{expected:band,recorded:r.band});
-  if(r.mode==='active'&&['large','very_large'].includes(band)&&(!r.fyiAlertId||!PA[r.fyiAlertId]||PA[r.fyiAlertId].fyi!==true))add('PREP_REVIEW_FYI_MISSING',ref,{alert:r.fyiAlertId||null});
+  const needFyi=['large','very_large'].includes(band)||(ee==='found'&&kind==='pre'&&!t.entryErrorAlertId&&['large','very_large'].includes(rawBand));
+  if(r.mode==='active'&&needFyi&&(!r.fyiAlertId||!PA[r.fyiAlertId]||PA[r.fyiAlertId].fyi!==true))add('PREP_REVIEW_FYI_MISSING',ref,{alert:r.fyiAlertId||null});
  }
  // --- BTP âm: tự xác nhận dùng thay (23/10) — tính lại độc lập từ phiếu ---
  const SR=snap.subRecons||{};

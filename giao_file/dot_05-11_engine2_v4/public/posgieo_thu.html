@@ -234,8 +234,8 @@ Nút "Cập nhật" ở sidebar (`manualCheckUpdate`, dựa trên service worker
 <script id="pgPrintUiRetry">if(!window.PosGieoMods||PosGieoMods.printUi===undefined){document.write('<scr'+'ipt src="js/posgieo/pos_print_ui.v1.js?b=03bf396b36&r=1"><\/scr'+'ipt>');}</script>
 <script src="js/posgieo/pos_receive.v2.js?b=495ad890cc"></script>
 <script id="pgReceiveRetry">if(!window.PosGieoMods||PosGieoMods.receive===undefined){document.write('<scr'+'ipt src="js/posgieo/pos_receive.v2.js?b=495ad890cc&r=1"><\/scr'+'ipt>');}</script>
-<script src="js/posgieo/pos_prep.v1.js?b=24b2b75f0b"></script>
-<script id="pgPrepRetry">if(!window.PosGieoMods||PosGieoMods.prep===undefined){document.write('<scr'+'ipt src="js/posgieo/pos_prep.v1.js?b=24b2b75f0b&r=1"><\/scr'+'ipt>');}</script>
+<script src="js/posgieo/pos_prep.v2.js?b=bb19cd9b6a"></script>
+<script id="pgPrepRetry">if(!window.PosGieoMods||PosGieoMods.prep===undefined){document.write('<scr'+'ipt src="js/posgieo/pos_prep.v2.js?b=bb19cd9b6a&r=1"><\/scr'+'ipt>');}</script>
 <script src="js/posgieo/pos_stock_units.v1.js?b=33134ec6cc"></script>
 <script id="pgStockUnitsRetry">if(!window.PosGieoMods||PosGieoMods.stockUnits===undefined){document.write('<scr'+'ipt src="js/posgieo/pos_stock_units.v1.js?b=33134ec6cc&r=1"><\/scr'+'ipt>');}</script>
 <script src="js/posgieo/pos_kho.v2.js?b=d2f240c98e"></script>
@@ -2636,7 +2636,7 @@ else {
 // [TÁCH POSGIEO 0E — kế hoạch 5.3] JS riêng THIẾT YẾU (js/posgieo/…) phải CHẠY HẾT (dấu PosGieoMods.<tên> === true) trước khi
 // làm gì tiếp — kể cả màn nhập mã quán (dùng escHtmlPos). Thẻ #pgUiRetry đã nạp lại một lần nếu file chưa từng chạy; tới đây
 // vẫn thiếu (mạng hỏng hẳn / file chưa có trên máy chủ) hoặc file chạy dở ('dang') → màn đỏ + Tải lại, KHÔNG chạy nghiệp vụ nửa chừng.
-const POS_MODS_THIET_YEU = { ui: 'js/posgieo/pos_ui.v1.js', assist: 'js/posgieo/pos_assist.v1.js', printer: 'js/posgieo/pos_printer.v1.js', printContent: 'js/posgieo/pos_print_content.v1.js', printUi: 'js/posgieo/pos_print_ui.v1.js', receive: 'js/posgieo/pos_receive.v2.js', prep: 'js/posgieo/pos_prep.v1.js', stockUnits: 'js/posgieo/pos_stock_units.v1.js', kho: 'js/posgieo/pos_kho.v2.js', count: 'js/posgieo/pos_count.v1.js', expiry: 'js/posgieo/pos_expiry.v1.js', shift: 'js/posgieo/pos_shift.v1.js', shiftClosing: 'js/posgieo/pos_shift_closing.v2.js', handover: 'js/posgieo/pos_handover.v1.js', cashfund: 'js/posgieo/pos_cashfund.v1.js', catalogAdmin: 'js/posgieo/pos_catalog_admin.v1.js', reports: 'js/posgieo/pos_reports.v1.js', orders: 'js/posgieo/pos_orders.v1.js', customers: 'js/posgieo/pos_customers.v1.js', cart: 'js/posgieo/pos_cart.v2.js', pickTp: 'js/posgieo/pos_pick_topping.v1.js', thanhtoan: 'js/posgieo/pos_thanh_toan.v1.js' };   // trợ lý: confirmPay gọi thẳng assistFinalizeOrder; máy in: lệnh tự chạy lúc mở app dùng POSPrinter / temEnsureConnected; nội dung bill/tem + giao diện máy in/quét/in lại: thanh toán và màn máy in gọi thẳng; nhận hàng: màn Kho / automation gọi thẳng; chế biến BTP: UnitEngine.init (getPreps, phân loại đối chiếu NL) + kho / kết ca gọi thẳng; mở chai / báo hết, màn Kho / hao hụt / cân, kiểm kê: UnitEngine.init (getItems) + màn Kho / kết ca / automation gọi thẳng; hạn dùng: Việc đầu ca / chuông (setInterval expirySoonTick ở lại script chính) / check-out gọi thẳng; ca (PIN nhân viên, check-in/out, Việc đầu ca, mở ca): mọi màn ký PIN + cổng bán (requireOpeningChecklistDone) gọi thẳng; kết ca / giao ca / đóng ngày: màn Ca làm việc, check-out, cổng bán (chặn khi đã đóng ngày) gọi thẳng; quỹ tiền mặt / mở két: lưới đếm mệnh giá (cfEmptyDenoms / cfRenderDenomGrid / cfDenomTotal) của mở ca / kết ca / giao ca + cfEmptyDenoms lúc nạp script chính (_shiftOpenDenoms), nút mở két ở màn bán gọi thẳng; sửa danh mục (món / Food / topping): màn Quản lý menu, ô giá cài đặt To Go (fmtPriceInput), trình nghe click toàn trang (hideTypeDropdown) gọi thẳng; doanh thu / xếp hạng / lịch sử: todayKey dùng khắp app (giỏ, khuyến mãi, kết ca); mua thêm / chi tiết / xoá bill / bổ sung bill: thanh toán đọc _backfillMode, màn Lịch sử gọi thẳng; khách (tra cứu SĐT, tích tem / ly miễn phí theo tem, danh sách khách): ô SĐT ở giỏ / thanh toán, confirmPay (loyaltyProcessAfterPay, _finalizeStampFreeAfterPay), listener scroll / click gọi thẳng; giỏ hàng / menu bán / chọn size / topping (renderMenu, giỏ, openPO, topping có số lượng, onCheckoutClick): màn bán, mọi nút món, thanh toán, khuyến mãi, trợ lý gọi thẳng; khuyến mãi / quà / giảm giá / To Go, thanh toán (VietQR, nghe chuyển khoản, tiền mặt, confirmPay), Tính riêng: giỏ (onCheckoutClick, getFinalTotal), màn bán, trợ lý, kết ca gọi thẳng
+const POS_MODS_THIET_YEU = { ui: 'js/posgieo/pos_ui.v1.js', assist: 'js/posgieo/pos_assist.v1.js', printer: 'js/posgieo/pos_printer.v1.js', printContent: 'js/posgieo/pos_print_content.v1.js', printUi: 'js/posgieo/pos_print_ui.v1.js', receive: 'js/posgieo/pos_receive.v2.js', prep: 'js/posgieo/pos_prep.v2.js', stockUnits: 'js/posgieo/pos_stock_units.v1.js', kho: 'js/posgieo/pos_kho.v2.js', count: 'js/posgieo/pos_count.v1.js', expiry: 'js/posgieo/pos_expiry.v1.js', shift: 'js/posgieo/pos_shift.v1.js', shiftClosing: 'js/posgieo/pos_shift_closing.v2.js', handover: 'js/posgieo/pos_handover.v1.js', cashfund: 'js/posgieo/pos_cashfund.v1.js', catalogAdmin: 'js/posgieo/pos_catalog_admin.v1.js', reports: 'js/posgieo/pos_reports.v1.js', orders: 'js/posgieo/pos_orders.v1.js', customers: 'js/posgieo/pos_customers.v1.js', cart: 'js/posgieo/pos_cart.v2.js', pickTp: 'js/posgieo/pos_pick_topping.v1.js', thanhtoan: 'js/posgieo/pos_thanh_toan.v1.js' };   // trợ lý: confirmPay gọi thẳng assistFinalizeOrder; máy in: lệnh tự chạy lúc mở app dùng POSPrinter / temEnsureConnected; nội dung bill/tem + giao diện máy in/quét/in lại: thanh toán và màn máy in gọi thẳng; nhận hàng: màn Kho / automation gọi thẳng; chế biến BTP: UnitEngine.init (getPreps, phân loại đối chiếu NL) + kho / kết ca gọi thẳng; mở chai / báo hết, màn Kho / hao hụt / cân, kiểm kê: UnitEngine.init (getItems) + màn Kho / kết ca / automation gọi thẳng; hạn dùng: Việc đầu ca / chuông (setInterval expirySoonTick ở lại script chính) / check-out gọi thẳng; ca (PIN nhân viên, check-in/out, Việc đầu ca, mở ca): mọi màn ký PIN + cổng bán (requireOpeningChecklistDone) gọi thẳng; kết ca / giao ca / đóng ngày: màn Ca làm việc, check-out, cổng bán (chặn khi đã đóng ngày) gọi thẳng; quỹ tiền mặt / mở két: lưới đếm mệnh giá (cfEmptyDenoms / cfRenderDenomGrid / cfDenomTotal) của mở ca / kết ca / giao ca + cfEmptyDenoms lúc nạp script chính (_shiftOpenDenoms), nút mở két ở màn bán gọi thẳng; sửa danh mục (món / Food / topping): màn Quản lý menu, ô giá cài đặt To Go (fmtPriceInput), trình nghe click toàn trang (hideTypeDropdown) gọi thẳng; doanh thu / xếp hạng / lịch sử: todayKey dùng khắp app (giỏ, khuyến mãi, kết ca); mua thêm / chi tiết / xoá bill / bổ sung bill: thanh toán đọc _backfillMode, màn Lịch sử gọi thẳng; khách (tra cứu SĐT, tích tem / ly miễn phí theo tem, danh sách khách): ô SĐT ở giỏ / thanh toán, confirmPay (loyaltyProcessAfterPay, _finalizeStampFreeAfterPay), listener scroll / click gọi thẳng; giỏ hàng / menu bán / chọn size / topping (renderMenu, giỏ, openPO, topping có số lượng, onCheckoutClick): màn bán, mọi nút món, thanh toán, khuyến mãi, trợ lý gọi thẳng; khuyến mãi / quà / giảm giá / To Go, thanh toán (VietQR, nghe chuyển khoản, tiền mặt, confirmPay), Tính riêng: giỏ (onCheckoutClick, getFinalTotal), màn bán, trợ lý, kết ca gọi thẳng
 {
   const thieu = Object.keys(POS_MODS_THIET_YEU).filter(k => !(window.PosGieoMods && window.PosGieoMods[k] === true));
   if (thieu.length) {
@@ -4310,9 +4310,9 @@ function getActiveMenu() {
 
 // PREP_VESSELS_CACHE_POS, _prepVesselsLoadedAt, POS_VESSEL_UNIT_FACTOR, … renderWeighPad, weighSummaryHTML (48 tên) → js/posgieo/pos_kho.v2.js
 
-// PREP_ITEMS_CACHE_POS, POS_PREP_CON_DUNG, prepBatchState, PREP_BATCHES_CACHE_POS → js/posgieo/pos_prep.v1.js   // lô đang 'cooking' hoặc 'active'
-// _prepActiveListExpanded, PREP_ACTIVE_PREVIEW → js/posgieo/pos_prep.v1.js   // số lô gần nhất hiện khi chưa bấm "Xem tất cả"
-// _prepBackFn, prepSetBack, prepHeadBtnClick, togglePrepActiveList, fmtPrepCookDuration → js/posgieo/pos_prep.v1.js
+// PREP_ITEMS_CACHE_POS, POS_PREP_CON_DUNG, prepBatchState, PREP_BATCHES_CACHE_POS → js/posgieo/pos_prep.v2.js   // lô đang 'cooking' hoặc 'active'
+// _prepActiveListExpanded, PREP_ACTIVE_PREVIEW → js/posgieo/pos_prep.v2.js   // số lô gần nhất hiện khi chưa bấm "Xem tất cả"
+// _prepBackFn, prepSetBack, prepHeadBtnClick, togglePrepActiveList, fmtPrepCookDuration → js/posgieo/pos_prep.v2.js
 
 // ============================================================
 // [GĐ2] LÔ BÁN THÀNH PHẨM — prep_batches_gieogieo
@@ -4326,20 +4326,20 @@ function getActiveMenu() {
 // là lớp chi tiết bổ sung, KHÔNG thay thế — giảm rủi ro khi triển khai.
 // ============================================================
 
-// computePrepExpiry, prepExpiryLabel, fmtDateTimeShort, … _prepSugShift, _prepSug (17 tên) → js/posgieo/pos_prep.v1.js   // rt: prepId -> {stock, cooked} đọc từ RT
-// prepSugLoadHistory, _prepSugInitUsed, prepSugOnUsage, … prepCountQuantityError, prepReconRows (48 tên) → js/posgieo/pos_prep.v1.js
+// computePrepExpiry, prepExpiryLabel, fmtDateTimeShort, … _prepSugShift, _prepSug (17 tên) → js/posgieo/pos_prep.v2.js   // rt: prepId -> {stock, cooked} đọc từ RT
+// prepSugLoadHistory, _prepSugInitUsed, prepSugOnUsage, … prepCountQuantityError, prepReconRows (48 tên) → js/posgieo/pos_prep.v2.js
 // [E4.6] Chuyển vào unit_engine.v1.js (chép nguyên văn) — tên cũ giữ làm lớp chuyển tiếp.
 
 
-// prepReconLowHint, prepReconRiskUnits, PREP_RESIDUE_RATIO, … prepReconPostSave, _prepForce (32 tên) → js/posgieo/pos_prep.v1.js   // {key, batchId, itemId, itemName, unit, batchName, countable, multi, msg, units:[{id,code,book,qty,held,lines,manual,verified}], vanished, finished}
-// prepReconStuckReason, prepForcePrepare, prepForceUnitsHTML, … _finishingBatchId, PREP_YIELD_WINDOW (18 tên) → js/posgieo/pos_prep.v1.js        // lấy trung bình mấy lô gần nhất
-// PREP_YIELD_MIN_SAMPLES → js/posgieo/pos_prep.v1.js   // dưới ngưỡng này chưa đủ tin để ghi đè giá vốn
-// PREP_YIELD_ALERT_PCT → js/posgieo/pos_prep.v1.js    // lệch quá % này thì báo Quản lý sửa số khai
-// PREP_FINISH_CONFIRM_PCT → js/posgieo/pos_prep.v1.js // nhập lệch quá % này thì hỏi lại 1 lần
+// prepReconLowHint, prepReconRiskUnits, PREP_RESIDUE_RATIO, … prepReconPostSave, _prepForce (32 tên) → js/posgieo/pos_prep.v2.js   // {key, batchId, itemId, itemName, unit, batchName, countable, multi, msg, units:[{id,code,book,qty,held,lines,manual,verified}], vanished, finished}
+// prepReconStuckReason, prepForcePrepare, prepForceUnitsHTML, … _finishingBatchId, PREP_YIELD_WINDOW (18 tên) → js/posgieo/pos_prep.v2.js        // lấy trung bình mấy lô gần nhất
+// PREP_YIELD_MIN_SAMPLES → js/posgieo/pos_prep.v2.js   // dưới ngưỡng này chưa đủ tin để ghi đè giá vốn
+// PREP_YIELD_ALERT_PCT → js/posgieo/pos_prep.v2.js    // lệch quá % này thì báo Quản lý sửa số khai
+// PREP_FINISH_CONFIRM_PCT → js/posgieo/pos_prep.v2.js // nhập lệch quá % này thì hỏi lại 1 lần
 
-// _prepFinishSuggest → js/posgieo/pos_prep.v1.js   // số theo công thức — GIỮ TRONG BIẾN, không đổ ra ô nhập
+// _prepFinishSuggest → js/posgieo/pos_prep.v2.js   // số theo công thức — GIỮ TRONG BIẾN, không đổ ra ô nhập
 
-// prepBatchInputCostPOS, onPrepFinishQtyInput, refreshPrepYieldStatsPOS, … openPrepFinishWeigh, openPrepRecipeView (7 tên) → js/posgieo/pos_prep.v1.js
+// prepBatchInputCostPOS, onPrepFinishQtyInput, refreshPrepYieldStatsPOS, … openPrepFinishWeigh, openPrepRecipeView (7 tên) → js/posgieo/pos_prep.v2.js
 
 // ══════════════════════════════════════════════════════════════════════════
 // [NEW] HUỶ MẺ ĐANG CHẾ BIẾN — hoàn nguyên liệu về kho
@@ -4359,9 +4359,9 @@ function getActiveMenu() {
 // xoá đơn, dùng lại nguyên hàm _reverseIngredientConsumptionPOS() của luồng đó.
 // ══════════════════════════════════════════════════════════════════════════
 
-// _loadBatchConsumptionTxPOS, _reversePrepBatchInputsPOS, _cancellingBatchId, … _yieldEditingBatchId, _yieldEditOpId (22 tên) → js/posgieo/pos_prep.v1.js   // [E4.0 — F3] một lượt sửa định lượng = một id dòng sổ
+// _loadBatchConsumptionTxPOS, _reversePrepBatchInputsPOS, _cancellingBatchId, … _yieldEditingBatchId, _yieldEditOpId (22 tên) → js/posgieo/pos_prep.v2.js   // [E4.0 — F3] một lượt sửa định lượng = một id dòng sổ
 
-// openPrepYieldEditForm, submitPrepYieldEdit, _applyPrepYieldEdit, … submitPrepWaste, _submitPrepWasteImpl (9 tên) → js/posgieo/pos_prep.v1.js
+// openPrepYieldEditForm, submitPrepYieldEdit, _applyPrepYieldEdit, … submitPrepWaste, _submitPrepWasteImpl (9 tên) → js/posgieo/pos_prep.v2.js
 
 // stockCountState → js/posgieo/pos_count.v1.js // [{itemId, name, unit, unitOptions, unitFactor, expectedBase, countedInput, countedBase}]
 

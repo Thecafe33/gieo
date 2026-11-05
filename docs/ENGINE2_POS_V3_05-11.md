@@ -72,3 +72,31 @@ Sửa (store v4 — chưa phát hành nên sửa thẳng; `gieo_engine2_pos_v4.j
 282–312. Store v3 dừng học khi > 3000 quan sát; v4 học bình thường. Test: `unit_engine2_store_v4.test.js`, `engine2_pos_v4.test.js`,
 `engine2_ui_v4.test.js`; Firebase giả thêm `count()` (Admin SDK có) — `gieo_automation_review.test.js` nay kiểm đúng nhánh `count()` chạy thật.
 Giao: `giao_file/dot_05-11_engine2_v4/` (thay gói «chỉ Functions» của lượt 2).
+
+## Lượt 4 (05/11): chặn nhập sai số còn lại khi nấu mẻ (vụ trà ô long) — **chưa deploy**, đi chung gói `dot_05-11_engine2_v4`
+Vụ: Vỹ nấu trà ô long dùng 5 túi, mở hộp mới 25 → còn 20, nhưng nhập «còn 2» → sổ ghi mất 18 (Vỹ chịu). Hôm sau A «Cân trước khi lấy NL»
+đếm 20 → POS v1 ghi khoản +18 với trách nhiệm **A** («người chốt cân và giải trình»); Engine 2 cũng quy A và theo dõi dồn A. Quán không mất gì.
+Phản biện: màn hoàn thành chỉ bắt chọn nguyên nhân + ghi lý do, **không hỏi lại số**; nhánh «cân ra nhiều hơn sổ» lúc HOÀN THÀNH mẻ (engine v21
+`book_understated`) đã đánh dấu lượt trước nhập sai, còn ở bước CÂN TRƯỚC thì không; Engine 2 không đọc dấu «đã xác minh nhập sai».
+
+Sửa (chủ quán 05/11: «hỏi xác nhận lại 1 lần … cần nhiệm vụ ngăn chặn», «giảm trách nhiệm cho A»):
+- **POS `js/posgieo/pos_prep.v2.js`** (v1 giữ quay lui; posgieo trỏ v2):
+  1. Hoàn thành mẻ: lệch định mức ≥ 25% lượng mẻ cần (tối thiểu 1 cái / 15 g·ml) → hỏi lại MỘT lần: «Bạn nhập còn 2. Mẻ này theo định mức
+     dùng 5 → lẽ ra còn khoảng 20. Nếu đúng, 18 bị ghi là DÙNG VƯỢT / MẤT — trách nhiệm ghi cho Vỹ.» [Đếm lại] / [Đúng, tôi chắc chắn].
+     «Đếm lại» = chưa ghi gì.
+  2. Cân trước khi lấy NL: lệch sổ lớn → hỏi lại; dư → nêu người ghi lần trước + giờ, «bạn KHÔNG chịu phần chênh»; thiếu → «phần thiếu ghi
+     trách nhiệm cho BẠN». «Đếm lại / Cân lại» xoá số vừa ghi (giữ lý do). Dòng chênh dưới mã ghi rõ hai trường hợp.
+  3. Bắt đầu mẻ: dư ở cân trước → dòng `prep_pre_…` quy **người ghi lần trước** (lần ghi gần nhất: mốc mẻ trước / cân cuối ca / Quản lý sửa
+     tồn / người mở mã), `responsibility.discoveredBy*` = người phát hiện; lệch lớn → đánh dấu dòng sổ của lần ghi đó «đã xác minh nhập sai»
+     (`ledger.annotate`, chạy nền) + báo Quản lý `prep_entry_error`. Thiếu so với sổ: giữ như cũ.
+- **Engine 2 store v4 — chính sách `prep_review_v2`**: dòng đã đánh dấu nhập sai chỉ còn phần lệch thật (lệch − `entryErrorQty`) → hết lệch =
+  «entry_error» (gỡ khỏi theo dõi dồn, đóng thông báo lệch lớn cũ); dòng «sổ ghi thấp» (cân trước dư / `prep_surplus`) quy người ghi lần
+  trước, «entry_error_found», không theo dõi dồn; chạy thật thì tự đánh dấu dòng lần trước nếu chưa ai đánh dấu (dòng POS cũ); dòng đã duyệt
+  chỉ xét lại khi Engine 2 đã có hồ sơ. Nâng chính sách MỘT lần cho hồ sơ cũ (mốc `models/prep_policy`) → vụ Vỹ / A cũ được sửa sau deploy
+  nếu Engine 2 đã có hồ sơ của nó. Worker: dòng vừa được đánh dấu nhập sai → xếp xét lại. `unit_engine2_audit_v1.js` tính lại cùng quy tắc.
+- Test: `chan_nhap_sai_pos.test.js` (hàm POS thật + engine thật trên Firebase giả: hỏi lại, «Đếm lại», quy người ghi trước, đánh dấu, báo),
+  `unit_engine2_prep_entry_error.test.js` (8 kịch bản + kiểm toán 0 vi phạm); `snapshot_wrap` / `ban_trong_luc_can` nạp thêm hàm hỏi lại.
+
+**Còn mở — cần chủ quán quyết (đổi hành vi báo cáo):** báo cáo tháng quanlygieo (`thangKetTrachNhiemNL`) vẫn cộng 18 túi vào «thiếu» của Vỹ
+dù dòng đã đánh dấu nhập sai (chỉ hiện ghi chú «đã xác minh nhập sai số»). Đề xuất: dòng đã xác minh nhập sai → «nhập sai, không tính tiền»
+(vẫn đếm số lần nhập sai theo người).

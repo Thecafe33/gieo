@@ -21,6 +21,9 @@ function createEngine2Worker({db,rt,FieldValue,now=Date.now,documentId}){
    if(owned&&before&&E.stable(before)!==E.stable(after)){const op=await service(store).sub('operations').doc(owned.shiftWeighOp).get();if(op.exists)await service(store).enqueue('measurement',op.data().measurementId);return;}
    // Lệch NL khi nấu mẻ BTP vừa được POS gắn «Chờ quản lý duyệt» → Engine 2 tự xử lý (store tự chặn ngày trước ngày áp dụng).
    if(E.PREP_ROW.test(id)&&after?.needsReview===true&&before?.needsReview!==true){await service(store).enqueue('prep_review',id);return;}
+   // [05/11 nhập sai] Dòng lệch vừa được đánh dấu «đã xác minh nhập sai» (POS / engine / Engine 2) → xét lại hồ sơ
+   // (store chỉ xét dòng đã duyệt khi Engine 2 đã có hồ sơ của dòng đó).
+   if(E.PREP_ROW.test(id)&&after&&after.entryErrorConfirmed===true&&before?.entryErrorConfirmed!==true){await service(store).enqueue('prep_review',id);return;}
    if(!/^finish_.+_WASTE$/.test(id)||![before,after].some(d=>d?.type==='WASTE'))return;
    await service(store).enqueue('finish',id);
   }else if(kind==='duty_cases'){

@@ -186,19 +186,79 @@ function create(opts){
  // Lệch NL khi nấu mẻ BTP (dòng sổ needsReview do POS bật) — chủ quán 23/10: tự xử lý MỌI mức, chỉ từ ngày áp dụng
  // (cfg.fromDate) trở đi; tồn trước ngày áp dụng giữ nguyên. Lệch > 25% vẫn tự duyệt nhưng ghi rõ người chịu trách nhiệm +
  // mốc thời gian (báo cáo tháng) và tạo THÔNG BÁO ĐỂ BIẾT (fyi) — quản lý không phải thao tác. Chế độ thử: chỉ ghi hồ sơ.
+ // [CHẶN NHẬP SAI 05/11 — chính sách prep_review_v2] Vụ trà ô long: nhập «còn 2» thay vì 20 → sổ ghi mất 18; lần cân sau
+ // đếm ra 20 → khoản dư. Quán KHÔNG mất hàng: (1) dòng đã được xác minh «nhập sai» (entryErrorConfirmed, do POS / engine
+ // đánh dấu) chỉ còn phần lệch THẬT (lệch − entryErrorQty) → hết lệch thì mức «entry_error», không theo dõi dồn, đóng thông
+ // báo lệch lớn cũ; (2) dòng «sổ ghi thấp hơn thực tế» (cân trước mẻ ra nhiều hơn sổ / prep_surplus) quy cho NGƯỜI GHI LẦN
+ // TRƯỚC, mức «entry_error_found» (không phải hao hụt, không theo dõi dồn); chế độ chạy thật thì đánh dấu dòng sổ của lần
+ // ghi đó «đã xác minh nhập sai» nếu POS / engine chưa đánh dấu. Dòng đã duyệt chỉ được xét lại khi đã có hồ sơ Engine 2.
+ const PREP_POLICY='prep_review_v2';
+ const PREP_PREV_ROLE='người ghi lần trước — sổ ghi thấp hơn thực tế (nhập sai)';
+ function prepEntryKind(id,tx){
+  const k=(String(id).match(E.PREP_ROW)||[])[1];if(!k)return null;
+  if(tx.entryErrorConfirmed===true)return 'confirmed';
+  if(k==='surplus'||(k==='pre'&&(Number(tx.qty)||0)>0.005))return 'found';
+  return null;
+ }
+ // Người ghi lần trước của dòng «sổ ghi thấp»: POS v2 ghi sẵn (responsibility.classification book_understated) → giữ;
+ // dòng cũ (POS v1) lấy mốc fromCheckpoint; prep_surplus lấy lô dư nhiều nhất trong previousWeighers.
+ function prepPrevRecord(id,tx){
+  const k=(String(id).match(E.PREP_ROW)||[])[1];
+  if(k==='pre'){
+   if(tx.responsibility?.classification==='book_understated')return {...(tx.previousRecord||{}),employeeId:tx.responsibleEmployeeId||'',employeeName:tx.responsibleEmployeeName||'',unitId:tx.containerId||''};
+   const cp=tx.fromCheckpoint||null;return cp?{stage:cp.stage||'',batchId:cp.batchId||'',at:cp.at||'',employeeId:cp.employeeId||'',employeeName:cp.employeeName||'',unitId:tx.containerId||''}:null;
+  }
+  if(k==='surplus'){const l=(Array.isArray(tx.previousWeighers)?tx.previousWeighers:[]).slice().sort((a,b)=>(Number(b.qty)||0)-(Number(a.qty)||0))[0];
+   return l?{stage:l.stage||'',batchId:l.batchId||'',at:l.at||'',employeeId:l.employeeId||'',employeeName:l.employeeName||'',unitId:l.unitId||''}:null;}
+  return null;
+ }
+ // Dòng sổ của lần ghi trước (txId cố định — cùng quy tắc POS pos_prep.v2 prepPriorRowIds).
+ function prepPriorRowIds(prev,itemId){
+  if(!prev)return [];
+  if(prev.stage==='after'&&prev.batchId)return ['prep_after_'+prev.batchId+'_'+itemId,'prep_variance_'+prev.batchId+'_'+itemId];
+  if(prev.stage==='before'&&prev.batchId&&prev.unitId)return ['prep_pre_'+prev.batchId+'_'+prev.unitId];
+  if(prev.stage==='new_open'&&prev.batchId&&prev.unitId)return ['prep_new_'+prev.batchId+'_'+prev.unitId];
+  if(prev.stage==='shift'&&prev.op&&prev.unitId)return [prev.op+'_'+prev.unitId];
+  return [];
+ }
+ // Phân loại theo chính sách v2 (dùng chung cho kiểm toán — unit_engine2_audit_v1 tính lại độc lập cùng quy tắc).
+ function prepPolicy(id,tx,unit){
+  const raw=E.prepVariance(tx.needsReview===true?tx:{...tx,needsReview:true},unit);if(!raw)return null;
+  const ee=prepEntryKind(id,tx);let v=raw,cls=E.prepReviewClass(raw),entryError=null;
+  if(ee==='confirmed'){
+   const q=Math.abs(Number(tx.entryErrorQty)||0),mag=Math.abs(raw.deviation),left=q>0?Math.max(0,mag-q):0,resid=E.round(Math.sign(raw.deviation)*left);
+   const rv={...raw,deviation:resid,ratio:raw.base>0?left/raw.base:left>raw.abs?Infinity:0},rc=E.prepReviewClass(rv);
+   entryError={kind:'confirmed',qty:q||mag,residual:resid,foundIn:tx.entryErrorFoundInBatch||'',correctedBy:tx.entryErrorCorrectedBy||'',correctedById:tx.entryErrorCorrectedById||''};
+   if(rc.band==='within')cls={band:'entry_error',fyi:false,track:false,label:'Nhập sai số — lần cân sau đã xác minh, quán không mất hàng (không tính hao hụt)'};
+   else{cls={...rc,label:'Nhập sai một phần (đã trừ '+E.round(q)+') — '+rc.label};v={...rv,deviation:raw.deviation};}
+   v.effectiveDeviation=resid;
+  }else if(ee==='found'){
+   const prev=prepPrevRecord(id,tx);
+   v={...raw,responsible:{employeeId:prev?.employeeId||'',employeeName:prev?.employeeName||'',role:PREP_PREV_ROLE,
+    discoveredById:tx.responsibility?.discoveredById||tx.staffEmployeeId||'',discoveredByName:tx.responsibility?.discoveredByName||tx.staff||''}};
+   entryError={kind:'found',qty:Math.abs(Number(tx.qty)||0),previous:prev};
+   if(cls.band!=='within')cls={band:'entry_error_found',fyi:['large','very_large'].includes(cls.band)&&raw.kind==='pre'&&!tx.entryErrorAlertId,track:false,severity:'warning',
+    label:'Sổ ghi thấp hơn thực tế — lần ghi trước nhập sai (quán không mất hàng); trách nhiệm: người ghi lần trước'};
+  }
+  return {v,cls,entryError};
+ }
  async function prepReview(id,guard){
   const sourceRef=coll('stock_transactions').doc(id),tx=data(await sourceRef.get());
-  if(!tx||!E.PREP_ROW.test(id)||tx.needsReview!==true||tx.voided===true)return false;
+  if(!tx||!E.PREP_ROW.test(id)||tx.voided===true)return false;
   if(['assigned_by_manager','manual'].includes(tx.responsibility?.status))return false;
+  // Dòng đã duyệt (needsReview false): chỉ xét lại theo chính sách nhập sai, và chỉ khi Engine 2 đã có hồ sơ của dòng đó.
+  const review=tx.needsReview===true;if(!review&&!prepEntryKind(id,tx))return false;
+  const caseRef=sub('prep_reviews').doc(E.key(id));
+  if(!review&&!(await caseRef.get()).exists)return false;
   const cfg=await config();if(!cfg.enabled||!/^\d{4}-\d{2}-\d{2}$/.test(cfg.fromDate||'')||!(String(tx.businessDate||'')>=cfg.fromDate))return false;
   const item=data(await coll('inventory_items').doc(tx.itemId).get());if(!item)throw error('Chưa đọc được nguyên liệu của dòng lệch');
-  const v=E.prepVariance(tx,item.unit);if(!v)return false;const cls=E.prepReviewClass(v);
+  const pol=prepPolicy(id,tx,item.unit);if(!pol)return false;const {v,cls,entryError}=pol;
   const batch=cls.fyi&&v.batchId?data(await coll('prep_batches').doc(v.batchId).get()):null;
-  const caseRef=sub('prep_reviews').doc(E.key(id)),fingerprint=E.stable({tx,unit:item.unit||''});
+  const fingerprint=E.stable({tx,unit:item.unit||'',policy:PREP_POLICY});
   const trackRef=cls.track?sub('prep_track').doc(E.key(v.responsible.employeeId||'_none',v.itemId,v.direction)):null;
   const alertRef=cls.fyi?coll('alerts').doc(E.key('e2_prep_var',v.key)):null;
   const pct=Number.isFinite(v.ratio)?Math.round(v.ratio*1000)/10:null,itemName=item.name||v.itemId,prepName=batch?.prepName||'';
-  const what=v.basis==='book'?'sổ tồn lệch so với cân thực tế':v.direction==='over'?'dùng nhiều hơn định lượng':'dùng ít hơn định lượng';
+  const what=entryError?.kind==='found'?'sổ ghi thấp hơn cân thực tế (lần ghi trước nhập sai)':v.basis==='book'?'sổ tồn lệch so với cân thực tế':v.direction==='over'?'dùng nhiều hơn định lượng':'dùng ít hơn định lượng';
   const plan=await fs.runTransaction(async t=>{
    await fence(t,guard);
    const [cs,ss,oldSn,tr,al]=await Promise.all([t.get(base),t.get(sourceRef),t.get(caseRef),trackRef?t.get(trackRef):null,alertRef?t.get(alertRef):null]);
@@ -207,10 +267,20 @@ function create(opts){
    if(E.stable([c.enabled,c.mode,c.fromDate,c.settingsRevision])!==E.stable([cfg.enabled,cfg.mode,cfg.fromDate,cfg.settingsRevision]))throw error('Thiết lập vừa đổi — tính lại theo phiên bản mới');
    const mode=active(c)?'active':'shadow',old=oldSn.exists?oldSn.data():null;
    if(old&&old.fingerprint===fingerprint&&old.mode===mode&&(mode==='shadow'||old.applied))return null;
+   // Hồ sơ cũ đang theo dõi dồn ở chỗ khác (đổi người chịu / hết lệch) hoặc có thông báo lệch lớn không còn đúng → gỡ (chạy thật).
+   const oldTrackId=old&&['moderate','large','very_large'].includes(old.band)?E.key(old.responsible?.employeeId||'_none',old.itemId,old.direction):null;
+   const untrackRef=mode==='active'&&oldTrackId&&oldTrackId!==(trackRef?trackRef.id:null)?sub('prep_track').doc(oldTrackId):null;
+   const closeRef=mode==='active'&&old?.fyiAlertId&&old.fyiAlertId!==(alertRef?alertRef.id:null)?coll('alerts').doc(old.fyiAlertId):null;
+   const [ut,ca]=await Promise.all([untrackRef?t.get(untrackRef):null,closeRef?t.get(closeRef):null]);
    const at=old?.mode===mode&&old.at?old.at:iso();
-   const d={id:caseRef.id,storeId:store,txId:id,policy:'prep_review_v1',mode,fingerprint,band:cls.band,label:cls.label,severity:cls.severity||null,fyi:cls.fyi,
+   const d={id:caseRef.id,storeId:store,txId:id,policy:PREP_POLICY,mode,fingerprint,band:cls.band,label:cls.label,severity:cls.severity||null,fyi:cls.fyi,
     kind:v.kind,basis:v.basis,direction:v.direction,deviation:v.deviation,base:v.base,ratioPct:pct,unit:v.unit,itemId:v.itemId,itemName,batchId:v.batchId,prepName,
-    responsible:v.responsible,businessDate:v.businessDate,applied:false,at,updatedAt:iso(),revision:(old?.revision||0)+1};
+    responsible:v.responsible,businessDate:v.businessDate,applied:false,at,updatedAt:iso(),revision:(old?.revision||0)+1,
+    ...(entryError?{entryError}:{}),...(v.effectiveDeviation!==undefined?{effectiveDeviation:v.effectiveDeviation}:{}),...(review?{}:{reReview:true}),
+    ...(old&&(old.band!==cls.band||old.responsible?.employeeId!==v.responsible.employeeId)?{previous:{band:old.band||'',policy:old.policy||'',responsible:old.responsible||null,at:old.at||''}}:{})};
+   if(ut&&ut.exists){const en=(Array.isArray(ut.data().entries)?ut.data().entries:[]).filter(e=>e&&e.txId!==id);t.set(untrackRef,{entries:en,updatedAt:iso()},{merge:true});}
+   if(ca&&ca.exists&&ca.data().status==='new')t.set(closeRef,{status:'resolved',resolvedAt:at,resolvedBy:'engine2_auto',
+    autoReview:{by:'engine2',policy:PREP_POLICY,band:cls.band,label:cls.label,txId:id,responsible:v.responsible,at}},{merge:true});
    let repeat=null;
    if(mode==='active'&&trackRef){
     const old2=tr.exists?tr.data():{},tk=E.prepTrack(old2.entries,v,cls,at);
@@ -222,7 +292,7 @@ function create(opts){
       title:(v.responsible.employeeName||'Chưa rõ người')+' lệch '+itemName+' '+tk.entries.length+' mẻ trong '+E.PREP_REVIEW.repeatDays+' ngày ('+(v.direction==='over'?'cùng chiều thiếu / dùng nhiều':'cùng chiều thừa / dùng ít')+')',
       note:'Thông báo để biết — hệ thống đã tự duyệt từng mẻ và ghi vào báo cáo tháng. Lặp lại cùng chiều nên quản lý trao đổi với nhân viên hoặc xem lại định lượng; không cần thao tác trên hệ thống.'});}
    }
-   if(mode==='active'&&alertRef&&!al.exists)t.set(alertRef,{type:'prep_variance_large',fyi:true,source:'engine2',severity:cls.severity,status:'new',businessDate:v.businessDate,createdAt:at,
+   if(mode==='active'&&alertRef&&!al.exists)t.set(alertRef,{type:entryError?.kind==='found'?'prep_entry_error':'prep_variance_large',fyi:true,source:'engine2',severity:cls.severity,status:'new',businessDate:v.businessDate,createdAt:at,
     itemId:v.itemId,batchId:v.batchId,txId:id,ratioPct:pct,deviation:v.deviation,base:v.base,unit:v.unit,direction:v.direction,band:cls.band,responsible:v.responsible,
     title:itemName+' '+what+' '+(pct===null?Math.abs(v.deviation)+' '+v.unit+' (không có định lượng)':pct+'%')+(prepName?' · mẻ '+prepName:''),
     note:cls.label+'. Hệ thống đã tự ghi nhận vào báo cáo tháng (mốc '+new Date(E.ms(at)+7*3600000).toISOString().slice(0,16).replace('T',' ')+' giờ VN) — người chịu trách nhiệm: '+(v.responsible.employeeName||'chưa rõ')+' ('+v.responsible.role+'). Thông báo để biết; quản lý yêu cầu nhân viên giải trình riêng, không cần thao tác trên hệ thống.'});
@@ -231,17 +301,43 @@ function create(opts){
   });
   if(!plan||plan.mode!=='active')return plan;
   const inventory=opts.getInventory?await opts.getInventory(tx.itemId):opts.inventory;if(!inventory?.ledger?.autoReview)throw error('Chưa có inventory adapter (ledger.autoReview)');
+  // «Sổ ghi thấp» lệch rõ (không trong sai số): đánh dấu dòng sổ của lần ghi trước «đã xác minh nhập sai» nếu chưa ai đánh dấu
+  // (POS v1 / dòng prep_variance mà engine không đánh dấu). Đọc từng dòng trước — không ghi đè dấu đã có.
+  let marked=[];
+  if(entryError?.kind==='found'&&plan.band==='entry_error_found'&&inventory?.ledger?.annotate){
+   for(const pid of prepPriorRowIds(entryError.previous,tx.itemId)){
+    if(pid===id)continue;const pr=data(await coll('stock_transactions').doc(pid).get().catch(()=>null));
+    if(!pr||pr.entryErrorConfirmed===true||pr.voided===true)continue;
+    const ok=await inventory.ledger.annotate(pid,{entryErrorConfirmed:true,entryErrorQty:entryError.qty,entryErrorFoundInBatch:tx.referenceId||'',
+     entryErrorCorrectedBy:plan.responsible.discoveredByName||'',entryErrorCorrectedById:plan.responsible.discoveredById||'',entryErrorAt:plan.at}).then(()=>true,()=>false);
+    if(ok)marked.push(pid);
+   }
+  }
+  if(!review){await caseRef.set({applied:true,appliedResult:'policy_update',appliedAt:iso(),...(marked.length?{markedPrior:marked}:{})},{merge:true});
+   return {...plan,applied:true,appliedResult:'policy_update',markedPrior:marked};}
   const autoReview={by:'engine2',policy:plan.policy,band:plan.band,label:plan.label,ratioPct:plan.ratioPct,deviation:plan.deviation,base:plan.base,unit:plan.unit,basis:plan.basis,direction:plan.direction,
    responsible:plan.responsible,at:plan.at,caseId:plan.id,fyiAlertId:plan.fyiAlertId};
   const ok=await inventory.ledger.autoReview(id,{needsReview:false,reviewedAt:plan.at,reviewedBy:'engine2_auto',autoReview});
-  await caseRef.set({applied:true,appliedResult:ok?'reviewed':'skipped_source_changed',appliedAt:iso()},{merge:true});
-  return {...plan,applied:true,appliedResult:ok?'reviewed':'skipped_source_changed'};
+  await caseRef.set({applied:true,appliedResult:ok?'reviewed':'skipped_source_changed',appliedAt:iso(),...(marked.length?{markedPrior:marked}:{})},{merge:true});
+  return {...plan,applied:true,appliedResult:ok?'reviewed':'skipped_source_changed',markedPrior:marked};
  }
  // Quét dòng còn chờ duyệt từ ngày áp dụng (lượt ngày + khởi động) — bù trigger bị lỡ. 1 truy vấn một trường, có giới hạn.
  async function sweepPrepReview(){
   const cfg=await config();if(!cfg.enabled||!/^\d{4}-\d{2}-\d{2}$/.test(cfg.fromDate||''))return 0;
   const s=await coll('stock_transactions').where('needsReview','==',true).limit(200).get();let n=0;
   for(const d of s.docs)if(E.PREP_ROW.test(d.id)&&String(d.data().businessDate||'')>=cfg.fromDate&&d.data().voided!==true){await enqueue('prep_review',d.id);n++;}
+  // [v2 — nhập sai] MỘT lần cho mỗi phiên bản chính sách (mốc models/prep_policy): xét lại hồ sơ cũ có thể đổi — dòng «sổ ghi
+  // thấp» (pre / surplus) và dòng đã được đánh dấu nhập sai. Sau đó chỉ trigger (needsReview / entryErrorConfirmed đổi) lo.
+  const mref=sub('models').doc('prep_policy'),m=await mref.get();
+  if(!m.exists||m.data().version!==PREP_POLICY){
+   const ids=new Set();
+   const [a,b]=await Promise.all([sub('prep_reviews').where('kind','in',['pre','surplus']).limit(500).get(),
+    coll('stock_transactions').where('entryErrorConfirmed','==',true).limit(500).get()]);
+   for(const d of a.docs){const x=d.data();if(x.policy!==PREP_POLICY&&x.txId)ids.add(x.txId);}
+   for(const d of b.docs)if(E.PREP_ROW.test(d.id)&&String(d.data().businessDate||'')>=cfg.fromDate)ids.add(d.id);
+   for(const id of ids){await enqueue('prep_review',id);n++;}
+   await mref.set({version:PREP_POLICY,at:iso(),queued:ids.size},{merge:true});
+  }
   return n;
  }
  // ── Pha nhầm trong NHÓM DỄ NHẦM (chủ quán 23/10, docs/KE_HOACH_PHA_NHAM_NHOM.md P3–P4) ──
@@ -992,7 +1088,7 @@ function create(opts){
  // [v4] Ghi thẳng (update thất bại khi chưa có tài liệu điều khiển — không tự tạo), không đọc trước: bớt 96 lượt đọc / ngày.
  async function heartbeat(){try{await base.update({workerHeartbeatAt:iso(),workerStoreVersion:4});return true;}catch(e){if(e&&(e.code===5||e.code==='not-found'||/NOT_FOUND|No document/i.test(e.message||'')))return false;throw e;}}
  async function retryDue(){const s=await sub('requests').where('dirty','==',true).where('nextTryAt','<=',now()).orderBy('nextTryAt').limit(30).get();for(const d of s.docs)try{await drain(d.id);}catch(e){if(opts.log)opts.log(e);}return s.docs.length;}
- return {storeId:store,base,sub,coll,config,posFallback,heartbeat,sweepStaleTasks,tareOf:w=>tareOf(w,tareLookups),enqueue,finish,prepReview,sweepPrepReview,mixupDay,mixupSweep,alertReview,alertsForCase,sweepAlerts,subReview,sweepSubReviews,handover,opened,ensureCloseTasks,registerVessel,requestMeasurement,measure,createTask,submitEvidence,learnDay,exception,drain,retryDue,observation,startPoint};
+ return {storeId:store,base,sub,coll,config,posFallback,heartbeat,sweepStaleTasks,tareOf:w=>tareOf(w,tareLookups),enqueue,finish,prepReview,prepPolicy,sweepPrepReview,mixupDay,mixupSweep,alertReview,alertsForCase,sweepAlerts,subReview,sweepSubReviews,handover,opened,ensureCloseTasks,registerVessel,requestMeasurement,measure,createTask,submitEvidence,learnDay,exception,drain,retryDue,observation,startPoint};
 }
 const api={create,tareOf,VERSION:4};if(typeof module==='object'&&module.exports)module.exports=api;root.UnitEngine2Store=api;
 })(typeof window!=='undefined'?window:globalThis);

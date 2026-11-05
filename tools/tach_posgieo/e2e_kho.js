@@ -1601,7 +1601,7 @@ const lechMuc = (m, n) => SO.filter(p => JSON.stringify(m[p]) !== JSON.stringify
     }
     const TU_KIEM = [
       { kb: 'nhanHang', file: 'pos_receive.v2.js', tim: /(\bnote:\s*generalNote)/, thay: "$1 + '·hỏng'", mo: 'đổi ghi chú phiếu nhận' },
-      { kb: 'huyMe', file: 'pos_prep.v1.js', tim: /Hoàn kho do HUỶ MẺ/, thay: 'Hoàn kho do HUY ME', mo: 'đổi ghi chú dòng hoàn kho khi huỷ mẻ' },
+      { kb: 'huyMe', file: 'pos_prep.v2.js', tim: /Hoàn kho do HUỶ MẺ/, thay: 'Hoàn kho do HUY ME', mo: 'đổi ghi chú dòng hoàn kho khi huỷ mẻ' },
       { kb: 'kiemKe', file: 'pos_count.v1.js', tim: /countedBy: staff, status: 'pending_review'/, thay: "countedBy: staff, status: 'pending'", mo: 'đổi trạng thái phiếu kiểm kê (chỗ ghi phiếu)' },
       { kb: 'doLy', file: 'pos_kho.v2.js', tim: /qty: -qtyUsed, txId/, thay: 'qty: -(qtyUsed + 1), txId', mo: 'đổi lượng trừ NL khi đổ ly' },
       { kb: 'hanGiaHan', file: 'pos_expiry.v1.js', tim: /const PREP_EXTEND_HOURS = 24;/, thay: 'const PREP_EXTEND_HOURS = 25;', mo: 'đổi số giờ gia hạn' },
@@ -1629,7 +1629,7 @@ const lechMuc = (m, n) => SO.filter(p => JSON.stringify(m[p]) !== JSON.stringify
       { kb: 'ttGiamGia', file: 'pos_thanh_toan.v1.js', tim: /return Math\.max\(0, getCartTotal\(\) - togoDisc - appDisc\);/, thay: 'return Math.max(0, getCartTotal() - togoDisc - appDisc + 1);', mo: 'lệch tổng cuối +1', muc: 'sau' },
       { kb: 'ttDoiLy', file: 'pos_customers.v1.js', tim: /if \(markerRef\) t\.set\(markerRef, \{ phone, at: vnDate\(\)\.toISOString\(\) \}\);/, thay: '', mo: 'bỏ ghi dấu đổi ly' },
       { kb: 'ttMatAck', file: 'pos_thanh_toan.v1.js', tim: /if \(!isNewBill\) \{\n      Object\.assign\(order, existingSnap\.val\(\)\);/, thay: 'if (false) {\n      Object.assign(order, existingSnap.val());', mo: 'bỏ nhánh dùng lại bill đã tồn tại (bấm lại ghi bill thứ hai)' },
-      { kb: 'batDauMe', file: 'pos_prep.v1.js', tim: /note: `Nấu \$\{p\.code/, thay: 'note: `NAU ${p.code', mo: 'đổi ghi chú dòng trừ NL khi bắt đầu nấu' }
+      { kb: 'batDauMe', file: 'pos_prep.v2.js', tim: /note: `Nấu \$\{p\.code/, thay: 'note: `NAU ${p.code', mo: 'đổi ghi chú dòng trừ NL khi bắt đầu nấu' }
     ];
     for (const tk of TU_KIEM) {
       if (!dsKB.includes(tk.kb)) continue;

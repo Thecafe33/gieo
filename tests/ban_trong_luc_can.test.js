@@ -21,7 +21,7 @@ const mkSeed = agg => ({
           : { id: 'A', code: 'AAA', baseline: 1000, bookBaseline: 1000, heldAtBook: 0, preVerified: true }] } } }
   }
 });
-const H = ['prepReconReadUnits', 'prepReconIsLow', 'prepReconIsCountable', 'prepReconClassifyUsage', 'prepReconResidueAuto', 'prepReconExtraNeedsReview'];
+const H = ['prepReconReadUnits', 'prepReconIsLow', 'prepReconIsCountable', 'prepReconClassifyUsage', 'prepReconResidueAuto', 'prepReconExtraNeedsReview', 'prepReconConfirmBigDiff', 'prepBigDev', 'prepConfirmMin'];   // + hỏi lại lệch lớn (pos_prep.v2)
 const spec = (agg, flow, extra) => ({
   app: 'pos', target: 'prepReconPostSave', exports: ['prepReconWeigh', 'prepReconSnapBook'], helpers: H, seed: mkSeed(agg),
   scope: (f, r) => {
@@ -30,7 +30,7 @@ const spec = (agg, flow, extra) => ({
       KHO_ITEMS_CACHE: [{ id: 'X', ...(agg ? ITEM_FREE : ITEM_TEM), stockManaged: true }], getPrimaryRefillRulePOS: () => null, getBiggestPackagingUnitPOS: () => null,
       toast: r('toast'), toastAutoReport: r('toastAutoReport'), refreshFifoAlert: async () => {}, escHtmlPos: x => String(x), renderPinInput: () => '',
       openPrepReconForm: async () => r('openPrepReconForm')(), openPrepBatchScreen: r('openPrepBatchScreen'), setBtnBusy: () => () => {},
-      prepReconScanExact: async () => true, itemCanWeighPOS: () => true, __box: box, __uid: uid,
+      prepReconScanExact: async () => true, itemCanWeighPOS: () => true, posConfirm: async () => true, __box: box, __uid: uid,
       openWeighPad: o => { box.p = o.onDone(box.qty, [{ w: box.qty + 50, tare: 50 }]); },
       prepReconForm: { batchId: 'c1', itemId: 'X', values: {}, ...(extra || {}) } };
   },

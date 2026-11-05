@@ -144,7 +144,7 @@ const SEED_RECON = (rtX, row) => () => {
 };
 const ROW = { status: 'pending', units: [{ id: 'A', code: 'AAA', baseline: 400 }] };
 const RECON_SCOPE = (f, r, extra) => ({ ...POS_COMMON(f, r), openPrepReconForm: async (...a) => r('openPrepReconForm')(...a),
-  prepFlowToastError: (e, pre) => r('prepFlowToastError')((pre || '') + String(e && e.message || e)), escHtmlPos: x => String(x), renderPinInput: () => '', ...(extra || {}) });
+  prepFlowToastError: (e, pre) => r('prepFlowToastError')((pre || '') + String(e && e.message || e)), escHtmlPos: x => String(x), renderPinInput: () => '', posConfirm: async () => true, ...(extra || {}) });
 S.POS_doi_chieu_ghi_moc_ma_moi = { app: 'pos', target: 'prepReconRegisterNew', helpers: RECON_HELPERS,
   seed: (() => { const s = SEED_RECON({ __prepLock: { batchId: 'c1' }, A: { code: 'AAA', unitBase: 400, capacity: 1000, openedAt: 1000 }, N: { code: 'NNN', unitBase: 1000, capacity: 1000, openedAt: 2000 } }, ROW)();
     s.fs['prep_ingredient_locks_gieogieo/X'] = { batchId: 'c1' }; return s; })(),
@@ -160,7 +160,9 @@ S.POS_doi_chieu_nap_lai_moc = { app: 'pos', target: 'prepReconRefreshStale', hel
   scope: (f, r) => RECON_SCOPE(f, r, { prepReconForm: { batchId: 'c1', itemId: 'X', values: { A: { qty: 1 } } } }),
   call: async (F, fake, base) => { await F.prepReconRefreshStale('c1', 'X'); return base.prepReconForm; } };
 
-const POST_HELPERS = [...RECON_HELPERS, 'prepReconClassifyUsage', 'prepReconResidueAuto', 'prepReconExtraNeedsReview'];
+// pos_prep.v2 (05/11 — CHẶN NHẬP SAI): lệch lớn hỏi lại một lần (prepReconConfirmBigDiff → posConfirm). Có chủ đích, không có ở
+// bản gốc — ở đây posConfirm trả «Đúng, tôi chắc chắn» để so phần dữ liệu; nhánh «Đếm lại» kiểm ở tests/chan_nhap_sai_pos.test.js.
+const POST_HELPERS = [...RECON_HELPERS, 'prepReconClassifyUsage', 'prepReconResidueAuto', 'prepReconExtraNeedsReview', 'prepReconConfirmBigDiff', 'prepBigDev', 'prepConfirmMin'];
 const SEED_POST = () => { const s = SEED_RECON({ __prepLock: { batchId: 'c1' }, A: { code: 'AAA', unitBase: 400, capacity: 1000, openedAt: 1000 } },
   { status: 'pending', expected: 150, unit: 'ml', units: [{ id: 'A', code: 'AAA', baseline: 400, preVerified: true }] })();
   s.fs['prep_ingredient_locks_gieogieo/X'] = { batchId: 'c1' }; return s; };

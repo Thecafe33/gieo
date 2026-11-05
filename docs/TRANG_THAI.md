@@ -1,7 +1,13 @@
 # 05/11 — TRẠNG THÁI DEPLOY ENGINE 2 (chủ dự án xác nhận)
 - ĐÃ deploy: cầu nối POS v3 + store v3 + worker store v3 (Hosting + Functions `gieo-automation`).
-- CHƯA deploy: lượt 2 (F1/F2 — việc mồ côi, dọn việc treo) và lượt 3 (học dồn, bộ đếm, phiên bản máy POS, xếp hàng một lần). Cả hai nằm
-  trong store v4 / cầu nối v4 → deploy bằng MỘT gói `giao_file/dot_05-11_engine2_v4/` (Hosting + Functions). Không có gói riêng cho lượt 2.
+- CHƯA deploy: lượt 2 (F1/F2 — việc mồ côi, dọn việc treo), lượt 3 (học dồn, bộ đếm, phiên bản máy POS, xếp hàng một lần) và lượt 4
+  (chặn nhập sai khi nấu mẻ — `pos_prep.v2.js` + chính sách `prep_review_v2`). Tất cả nằm trong store v4 / cầu nối v4 / pos_prep v2 → deploy
+  bằng MỘT gói `giao_file/dot_05-11_engine2_v4/` (Hosting + Functions). Không có gói riêng cho lượt 2.
+
+# 05/11 (lượt 4) — Chặn nhập sai số còn lại khi nấu mẻ (vụ trà ô long): lệch lớn → hỏi lại một lần nói rõ hậu quả; «cân trước» ra nhiều hơn sổ → khoản dư quy NGƯỜI GHI LẦN TRƯỚC (không phải người phát hiện), đánh dấu nhập sai + báo Quản lý; Engine 2 không tính dòng nhập sai là hao hụt — CHƯA deploy
+
+[ENGINE2_POS_V3_05-11.md](ENGINE2_POS_V3_05-11.md) mục «Lượt 4». POS `js/posgieo/pos_prep.v2.js` (v1 giữ quay lui). Giao: `giao_file/dot_05-11_engine2_v4/`.
+Còn mở: báo cáo tháng quanlygieo vẫn tính dòng đã xác minh nhập sai vào «thiếu» của người nhập sai — chờ chủ quán quyết.
 
 # 05/11 (lượt 3) — Engine 2 mức hệ thống: học dồn (hết «dừng học khi > 3000 quan sát», đọc ít hơn ~4–5 lần), bộ đếm Engine 2 nhận / POS tự ghi, phiên bản máy POS, xếp hàng lượt cân một lần — CHƯA deploy (Hosting + Functions)
 
