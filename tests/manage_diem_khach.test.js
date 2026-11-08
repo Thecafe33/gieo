@@ -113,6 +113,6 @@ const base=()=>({customers:{
  console.log('ok Lọc xem trước theo số tháng và loại: đúng khách, chưa rõ ngày ghé xếp cuối');
 
  // --- gắn vào menu ---
- assert(/id="cuCapBox"/.test(html)&&/\['diemkh','users','Điểm khách hàng'\]/.test(html)&&/diemkh:cusView/.test(html)&&/view==='diemkh'/.test(html));
+ assert(/id="cuCapBox"/.test(html)&&/\['diemkh','users','Điểm-tem'\]/.test(html)&&/diemkh:cusView/.test(html)&&/view==='diemkh'/.test(html));
  console.log('ALL PASS');
 })().catch(e=>{console.error(e);process.exit(1)});
