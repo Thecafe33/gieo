@@ -297,6 +297,7 @@ html[data-theme="dark"] .outlet-widget{background:radial-gradient(ellipse at 12%
 .cost-pend-row>div:first-child{min-width:0}.cost-pend-row b{display:block;font-size:14px}.cost-pend-row small{display:block;font-size:12px;color:var(--sub);margin-top:2px;overflow-wrap:anywhere}
 .cost-actions{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
 .cost-actions .record-edit.danger{color:var(--red)}
+.cus-search{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px}.cus-search .input{flex:1 1 220px;min-width:0}.cus-card{border:1px solid var(--line);border-radius:16px;padding:14px;margin-top:12px}.cus-card-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}.cus-tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:10px}.cus-tiles .cost-tile{padding:10px 12px}.cus-tiles .cost-tile b{font-size:20px}.cus-ctl{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px}.cus-kinds{display:flex;gap:14px;flex-wrap:wrap}.cus-run{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-top:12px}.cus-run .btn[disabled]{opacity:.5}
 .cost-tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px;margin-bottom:16px}
 .cost-tile{padding:16px 18px;display:flex;flex-direction:column;gap:4px;min-width:0}
 .cost-tile span{display:flex;align-items:center;font-size:13px;font-weight:650;color:var(--sub)}
@@ -1794,6 +1795,68 @@ async function writeAsset(id, v){
 }
 async function deleteAsset(id){ await ensureAuth(); const items = (await loadAssets(true)).filter(a=>a.id !== id); await ASSET_DOC().set({ items, updatedAt: vnDate().toISOString() }); ASSETS = null; }
 async function readAssets(force){ await ensureAuth(); return { assets: await loadAssets(force), records: await gieoStores() }; }
+// ---- ĐIỂM KHÁCH HÀNG (tab «Điểm khách hàng») ----
+// customers/{sđt} DÙNG CHUNG TC33 / XOFA / Gieo Gieo: chỉ ghi lại GIÁ TRỊ các trường đã có (total_points, stamp_count,
+// free_drink_available + hai mảng đi kèm stamp_prices / free_drink_caps của posgieo) — không thêm, không đổi cấu trúc.
+// Mỗi lần sửa ghi 1 dòng lịch sử rất nhẹ customer_adjust_logs_gieogieo: số TRƯỚC khi đổi + giờ (sửa 1 khách có thêm số sau).
+// 16K / 19K = STAMP_LEGACY_PRICE / FREE_DRINK_LEGACY_CAP của posgieo (tem / ly không có giá ghi lại).
+const CUS_LOG = 'customer_adjust_logs_gieogieo', CUS_LEGACY_PRICE = 16000, CUS_LEGACY_CAP = 19000;
+const cusInt = v => Math.max(0, Math.floor(Number(v) || 0));
+function cusPack(id, d){ d = d || {}; return { id, name: String(d.nickname || d.name || ''), pts: cusInt(d.total_points), stamp: cusInt(d.stamp_count), free: cusInt(d.free_drink_available), last: typeof d.lastVisit === 'string' ? d.lastVisit : '' }; }
+function cusSyncList(arr, n, pad){ const a = Array.isArray(arr) ? arr.map(Number).filter(x => isFinite(x) && x > 0) : []; n = cusInt(n); return a.length >= n ? a.slice(a.length - n) : Array(n - a.length).fill(pad).concat(a); }
+async function readCustomer(phone){ await ensureAuth(); const p = String(phone || '').replace(/\D/g, ''); if(p.length < 9) return null; const s = await fstore.collection('customers').doc(p).get(); return s.exists ? cusPack(p, s.data()) : null; }
+async function readAllCustomers(){ await ensureAuth(); const s = await fstore.collection('customers').get(); return s.docs.map(d => cusPack(d.id, d.data())); }
+async function readCustomerLogs(){ await ensureAuth(); const s = await fstore.collection(CUS_LOG).orderBy('at', 'desc').limit(20).get(); return s.docs.map(d => ({ id: d.id, ...d.data() })); }
+// Sửa 1 khách: ghi đè thẳng 3 số. Transaction để không đè lên lượt tích của POS đang chạy.
+async function writeCustomerCounts(phone, v){
+  await ensureAuth();
+  const pts = Math.floor(Number(v.pts)), stamp = Math.floor(Number(v.stamp)), free = Math.floor(Number(v.free));
+  if(![pts, stamp, free].every(n => Number.isFinite(n) && n >= 0)) throw new Error('Nhập số nguyên từ 0 trở lên.');
+  if(pts > 1e9 || free > 99) throw new Error('Số quá lớn — kiểm tra lại.');
+  const ref = fstore.collection('customers').doc(String(phone)), logRef = fstore.collection(CUS_LOG).doc();
+  return fstore.runTransaction(async t => {
+    const snap = await t.get(ref); if(!snap.exists) throw new Error('Khách không còn — tìm lại.');
+    const d = snap.data(), b = cusPack(phone, d);
+    if(stamp !== b.stamp && stamp > 5) throw new Error('Tem chỉ từ 0 đến 5 (đủ 6 tem POS tự đổi thành 1 ly miễn phí — hãy tăng «Ly miễn phí»).');
+    const patch = {};
+    if(pts !== b.pts) patch.total_points = pts;
+    if(stamp !== b.stamp){ patch.stamp_count = stamp; patch.stamp_prices = cusSyncList(d.stamp_prices, stamp, CUS_LEGACY_PRICE); }
+    if(free !== b.free){ patch.free_drink_available = free; patch.free_drink_caps = cusSyncList(d.free_drink_caps, free, CUS_LEGACY_CAP); }
+    if(!Object.keys(patch).length) return { changed: false, before: b, after: b };
+    const now = vnDate().toISOString();
+    t.update(ref, patch);
+    t.set(logRef, { kind: 'edit', phone: String(phone), name: b.name, before: { pts: b.pts, stamp: b.stamp, free: b.free }, after: { pts, stamp, free }, at: now, source: 'manage' });
+    return { changed: true, before: b, after: { ...b, pts, stamp, free } };
+  });
+}
+// Dọn hàng loạt khách lâu không đến. items = [{id,last}] (ngày ghé cuối lúc xem trước); kinds = ['pts','stamp','free'].
+// Mỗi nhóm ≤ 200 khách / 1 transaction + 1 dòng lịch sử. Khách vừa ghé lại / vừa đổi điểm sau lúc xem trước → BỎ QUA (không dọn nhầm).
+async function expireCustomers(items, kinds){
+  await ensureAuth();
+  const K = new Set(kinds || []); if(!K.size) throw new Error('Chọn ít nhất một loại để dọn.');
+  const done = [], skipped = [];
+  for(let i = 0; i < items.length; i += 200){
+    const chunk = items.slice(i, i + 200), logRef = fstore.collection(CUS_LOG).doc();
+    const res = await fstore.runTransaction(async t => {
+      const snaps = await Promise.all(chunk.map(it => t.get(fstore.collection('customers').doc(String(it.id)))));
+      const ok = [], skip = [], log = [], now = vnDate().toISOString();
+      snaps.forEach((snap, j) => {
+        const it = chunk[j]; if(!snap.exists){ skip.push(it.id); return; }
+        const d = snap.data(), b = cusPack(it.id, d), patch = {};
+        if((b.last || '') !== (it.last || '')){ skip.push(it.id); return; }
+        if(K.has('pts') && b.pts) patch.total_points = 0;
+        if(K.has('stamp') && b.stamp){ patch.stamp_count = 0; patch.stamp_prices = []; }
+        if(K.has('free') && b.free){ patch.free_drink_available = 0; patch.free_drink_caps = []; }
+        if(!Object.keys(patch).length){ skip.push(it.id); return; }
+        t.update(snap.ref, patch); ok.push(it.id); log.push({ p: it.id, pts: b.pts, st: b.stamp, fr: b.free });
+      });
+      if(ok.length) t.set(logRef, { kind: 'expire', kinds: [...K], n: ok.length, items: log, at: now, source: 'manage' });
+      return { ok, skip };
+    });
+    done.push(...res.ok); skipped.push(...res.skip);
+  }
+  return { done, skipped };
+}
 // ---- [GIẢM-ĐỌC] BẢN TỔNG HỢP CHI PHÍ THÁNG: expense_sums_tc33xofa/{store}_{YYYY-MM} ----
 // Tổng quan / hoà vốn đọc 1 bản / quán / tháng thay vì mọi khoản chi (mua hàng hằng ngày = hàng trăm bản ghi / tháng).
 // Dựng lại mỗi khi manage ghi khoản chi (thêm / sửa / duyệt / từ chối / xoá / số thật / đã trả — POS chỉ gửi khoản CHỜ
@@ -2404,7 +2467,7 @@ async function billLivePL(id,day){
     return result;
   }finally{PL_FILL_BUSY.delete(id)}
 }
-return{mcReadEditor,mcSave,mcVersion,mcDay,mcRange,mcBreakEven,watchGieoDayClosed,watchBeds,shiftPaidHours,readMonthTcx,billLiveSummary,billLivePL,readMonthClose,closeMonthTcx,reopenMonthTcx,writeMonthInput,unwatchClosings,CLOSE_W,tcxMonthSummary,closingDoc,CLOSE_KEYS,watchBills,billPath,writeEmployeeStatus,plFillMissing,plNeedDays,readOffDays,writeOffDays,isStoreOff,offStoresOf,readCash,readCashSegments,readCashGieoDay,writeCashReceipt,writeCashStart,ggCashExpected,tcxCashExpected,readAssets,writeAsset,deleteAsset,assetMonthly,assetDepDay,assetRecovered,assetEndDate,assetLive,expMonthSum,sumsToAlloc,readCosts,writeExpense,deleteExpenseDoc,reviewExpense,reviewGieoExpense,readGieoInbox,markGieoAlert,closeGieoShift,forceCloseGieoDay,ggShiftOutIso,ggExpenseDirtyKey,setExpenseActual,markExpensePaid,expPaidOf,writeExpenseCats,expAmountIn,expCostType,expCounts,expenseCats,expenseCatsAll,DEFAULT_EXPENSE_CATS,readBreakeven,writeBreakeven,deleteBreakeven,beMonthValue,tcxBreakEven,ggBreakEven,plBreakEven,readRevenue,readSettings,readEmployees,readSchedules,readAttendance,readPayroll,writeEmployee,writeEmployeeActive,writeSchedule,deleteSchedule,writeScheduleBatch,writeShift,deleteShift,writeLateGrace,writeTargets,deleteTargets,invalidateRevenue,invalidateEmployees,targetMonthValue,targetForRange,gieoTargetForRange,gieoTargetsOn,empPayTermsOn,computeWageForDayHours,laborByEmployee,shiftWorkedHours,isShiftInProgress,workStoresOf,tcSummarize,xoSummarize,ggSummarize,tcEmptySum,xoEmptySum,ggEmptySum,sumMerge};
+return{mcReadEditor,mcSave,mcVersion,mcDay,mcRange,mcBreakEven,watchGieoDayClosed,watchBeds,shiftPaidHours,readMonthTcx,billLiveSummary,billLivePL,readMonthClose,closeMonthTcx,reopenMonthTcx,writeMonthInput,unwatchClosings,CLOSE_W,tcxMonthSummary,closingDoc,CLOSE_KEYS,watchBills,billPath,writeEmployeeStatus,plFillMissing,plNeedDays,readOffDays,writeOffDays,isStoreOff,offStoresOf,readCash,readCashSegments,readCashGieoDay,writeCashReceipt,writeCashStart,ggCashExpected,tcxCashExpected,readAssets,writeAsset,deleteAsset,readCustomer,readAllCustomers,readCustomerLogs,writeCustomerCounts,expireCustomers,assetMonthly,assetDepDay,assetRecovered,assetEndDate,assetLive,expMonthSum,sumsToAlloc,readCosts,writeExpense,deleteExpenseDoc,reviewExpense,reviewGieoExpense,readGieoInbox,markGieoAlert,closeGieoShift,forceCloseGieoDay,ggShiftOutIso,ggExpenseDirtyKey,setExpenseActual,markExpensePaid,expPaidOf,writeExpenseCats,expAmountIn,expCostType,expCounts,expenseCats,expenseCatsAll,DEFAULT_EXPENSE_CATS,readBreakeven,writeBreakeven,deleteBreakeven,beMonthValue,tcxBreakEven,ggBreakEven,plBreakEven,readRevenue,readSettings,readEmployees,readSchedules,readAttendance,readPayroll,writeEmployee,writeEmployeeActive,writeSchedule,deleteSchedule,writeScheduleBatch,writeShift,deleteShift,writeLateGrace,writeTargets,deleteTargets,invalidateRevenue,invalidateEmployees,targetMonthValue,targetForRange,gieoTargetForRange,gieoTargetsOn,empPayTermsOn,computeWageForDayHours,laborByEmployee,shiftWorkedHours,isShiftInProgress,workStoresOf,tcSummarize,xoSummarize,ggSummarize,tcEmptySum,xoEmptySum,ggEmptySum,sumMerge};
 
 })();
 
@@ -2418,7 +2481,7 @@ const money=n=>Math.round(n||0).toLocaleString('vi-VN'), amount=n=>`${money(n)} 
 const shortMoney=n=>n>=1e6?(n/1e6).toLocaleString('vi-VN',{maximumFractionDigits:1})+'tr':Math.round(n/1000)+'k';
 let TODAY=currentDate();
 const parseDate=s=>vnDate(s+'T12:00:00');const dateKey=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;const addDays=(s,n)=>{const d=parseDate(s);d.setDate(d.getDate()+n);return dateKey(d)};const dateVN=s=>parseDate(s).toLocaleDateString('vi-VN');
-const NAV=[['rev','overview','Tổng quan'],['target','flag','Mục tiêu'],['hoavon','trend','Điểm hoà vốn'],['cogs','book','COGS'],['chiphi','receipt','Chi phí'],['taisan','store','Tài sản'],['tienmat','cash','Tiền mặt'],['duyet','bell','Chờ xử lý Gieo'],['thangket','book','Tổng kết tháng'],['nv','users','Nhân viên'],['lich','calendar','Lịch làm việc'],['cc','clock','Chấm công'],['luong','wallet','Bảng lương']];
+const NAV=[['rev','overview','Tổng quan'],['target','flag','Mục tiêu'],['hoavon','trend','Điểm hoà vốn'],['cogs','book','COGS'],['chiphi','receipt','Chi phí'],['taisan','store','Tài sản'],['tienmat','cash','Tiền mặt'],['duyet','bell','Chờ xử lý Gieo'],['thangket','book','Tổng kết tháng'],['diemkh','users','Điểm khách hàng'],['nv','users','Nhân viên'],['lich','calendar','Lịch làm việc'],['cc','clock','Chấm công'],['luong','wallet','Bảng lương']];
 const HR_STORE_IDS=['tc33','xofa'];
 const BRAND_META={tc33:{id:'tc33',name:'The cafe 33',short:'The cafe 33',mono:'33',c:'var(--tc)'},xofa:{id:'xofa',name:'XOFA',short:'XOFA',mono:'x',c:'var(--xo)'},gieo:{id:'gieo',name:'Gieo Gieo',short:'Gieo',mono:'g.',c:'var(--gg)'}};
 let stores=buildStoreCatalog([]);   // TC33 + XOFA có sẵn — Lịch / Chấm công không phụ thuộc màn Tổng quan đã tải
@@ -2432,13 +2495,13 @@ function toast(t){$('#toast').textContent=t;$('#toast').classList.add('show');cl
 function toggleSidebar(force){const open=force??!$('#sidebar').classList.contains('open');$('#sidebar').classList.toggle('open',open);$('#overlay').classList.toggle('open',open);$('#menuButton').setAttribute('aria-expanded',String(open));if(open)$('#nav button').focus()}
 function setTheme(){document.documentElement.dataset.theme=state.theme;$('#themeButton').innerHTML=icon(state.theme==='dark'?'sun':'moon');$('#themeButton').setAttribute('aria-label',state.theme==='dark'?'Đổi sang giao diện sáng':'Đổi sang giao diện tối')}
 function toggleTheme(){state.theme=state.theme==='dark'?'light':'dark';persist('theme',state.theme);setTheme()}
-const NAV_COLOURS={rev:'#087e57',target:'#e98b10',hoavon:'#d2333f',cogs:'#177f79',chiphi:'#b45309',duyet:'#c2410c',taisan:'#4f46e5',tienmat:'#0f766e',thangket:'#7c3aed',nv:'#2776d9',lich:'#9a4ddd',cc:'#ed5c49',luong:'#179ea7',more:'#58718b'};
+const NAV_COLOURS={rev:'#087e57',target:'#e98b10',hoavon:'#d2333f',cogs:'#177f79',chiphi:'#b45309',duyet:'#c2410c',taisan:'#4f46e5',tienmat:'#0f766e',thangket:'#7c3aed',diemkh:'#e23a5d',nv:'#2776d9',lich:'#9a4ddd',cc:'#ed5c49',luong:'#179ea7',more:'#58718b'};
 function navGlyph(k,i){return `<span class="nav-glyph" style="--navc:${NAV_COLOURS[k]}">${icon(i)}</span>`}
 function nav(){
  let html='<div class="nav-label">Kinh doanh</div>';
  NAV.forEach(([k,i,t],n)=>{if(k==='nv')html+='<div class="nav-label">Nhân sự</div>';html+=`<button class="nav-item ${state.view===k?'active':''}" onclick="navigate('${k}')" ${state.view===k?'aria-current="page"':''} title="${t}">${navGlyph(k,i)}<span class="nav-text">${t}</span></button>`});
  $('#nav').innerHTML=html;
- $('#bottomNav').innerHTML=[['rev','overview','Tổng quan'],['target','flag','Mục tiêu'],['lich','calendar','Lịch làm'],['more','more','Thêm']].map(([k,i,t])=>`<button class="${state.view===k||k==='more'&&['hoavon','cogs','chiphi','taisan','tienmat','duyet','thangket','nv','cc','luong'].includes(state.view)?'active':''}" onclick="${k==='more'?'toggleSidebar()':`navigate('${k}')`}" ${state.view===k?'aria-current="page"':''}>${navGlyph(k,i)}<span>${t}</span></button>`).join('');
+ $('#bottomNav').innerHTML=[['rev','overview','Tổng quan'],['target','flag','Mục tiêu'],['lich','calendar','Lịch làm'],['more','more','Thêm']].map(([k,i,t])=>`<button class="${state.view===k||k==='more'&&['hoavon','cogs','chiphi','taisan','tienmat','duyet','thangket','diemkh','nv','cc','luong'].includes(state.view)?'active':''}" onclick="${k==='more'?'toggleSidebar()':`navigate('${k}')`}" ${state.view===k?'aria-current="page"':''}>${navGlyph(k,i)}<span>${t}</span></button>`).join('');
 }
 function normaliseScope(){
  if(state.view==='rev'){if(state.store==='gieo')state.store='brand:gieo';if(!['all','brand:gieo'].includes(state.store)&&!stores.some(st=>st.id===state.store))state.store='all'}
@@ -2451,7 +2514,7 @@ function scopeLabel(){if(state.store==='all')return 'Toàn hệ thống';if(stat
 function renderStorePicker(){
  const gieoCount=revenueStores().filter(st=>st.brand==='gieo').length;
  const showGieo=['rev','nv','chiphi'].includes(state.view),opts=[...(state.view==='lich'?[]:[{id:'all',name:'Tất cả',short:'Tất cả',mono:'',c:'var(--green)'}]),BRAND_META.tc33,BRAND_META.xofa,...(showGieo?[{...BRAND_META.gieo,id:['nv','chiphi'].includes(state.view)?'gieo':'brand:gieo',name:'Gieo Gieo',count:state.view==='rev'?gieoCount:0}]:[])];
- $('#storeSwitcher').hidden=['target','hoavon','cogs','taisan','tienmat','duyet','thangket'].includes(state.view);$('#outletButton').hidden=['target','hoavon','cogs','taisan','tienmat','duyet','thangket'].includes(state.view);$('#storeSwitcher').dataset.storeTabs=opts.length;
+ $('#storeSwitcher').hidden=['target','hoavon','cogs','taisan','tienmat','duyet','thangket','diemkh'].includes(state.view);$('#outletButton').hidden=['target','hoavon','cogs','taisan','tienmat','duyet','thangket','diemkh'].includes(state.view);$('#storeSwitcher').dataset.storeTabs=opts.length;
  $('#storeSwitcher').innerHTML=opts.map(st=>{const active=state.store===st.id||(st.id==='brand:gieo'&&stores.find(point=>point.id===state.store)?.brand==='gieo'),hold=state.view==='rev'&&st.id==='brand:gieo';return `<button class="brand-tab ${active?'active':''}" style="--c:${st.c}" onclick="setStore('${st.id}')" ${hold?'data-gieo-hold aria-haspopup="dialog" aria-keyshortcuts="ArrowDown Shift+Enter" aria-description="Bấm xem tổng Gieo Gieo. Nhấn giữ để chọn một điểm riêng." title="Bấm xem tổng · Nhấn giữ chọn điểm"':''} aria-label="${st.id==='all'?'Tất cả cửa hàng':st.name}" aria-pressed="${active}"><span class="brand-tab-mark">${st.id==='all'?icon('overview'):esc(st.mono)}</span><span class="brand-tab-label"><span class="desktop-brand-label">${esc(st.name)}</span><span class="mobile-brand-label">${esc(st.short||st.name)}</span>${st.count?`<span class="brand-point-count">${st.count}</span>`:''}</span></button>`}).join('');
  const count=state.view==='rev'?selectedStores().length:['lich','cc','luong'].includes(state.view)?HR_STORE_IDS.length:workplaceOptions().length;
  const selected=stores.find(st=>st.id===state.store),label=selected?.brand==='gieo'?selected.code:state.store==='all'?'Chọn điểm':scopeLabel();
@@ -3024,6 +3087,7 @@ async function loadCurrent(force=false){
   else if(view==='chiphi')result=await backend.readCosts(state.costMonth,force,state.store);
   else if(view==='taisan')result=await backend.readAssets(force);
   else if(view==='duyet')result=await backend.readGieoInbox();
+  else if(view==='diemkh')result=await backend.readCustomerLogs();
   else if(view==='tienmat'){if(force)cashSegmentCache.clear();result=await backend.readCash(state.cashDate,force);}
   else if(view==='thangket')result=await backend.readMonthClose(state.closeMonth);
   else if(view==='lich'){const ds=weekDates(),store=hrStore();result={store,employees:await backend.readEmployees(),records:await backend.readSchedules(store,ds[0],ds[6])}}
@@ -3038,6 +3102,7 @@ async function loadCurrent(force=false){
   if(view==='rev'||view==='hoavon')setTimeout(()=>plAutoFill(view,result),0);
   if(view==='chiphi'){live.cost=result;live.records=result.records;stores=buildStoreCatalog(result.records)}
   if(view==='duyet'){live.inbox=result;live.records=result.records;stores=buildStoreCatalog(result.records)}
+  if(view==='diemkh')live.cusLogs=result;
   if(view==='taisan'){live.assets=result.assets;live.records=result.records;stores=buildStoreCatalog(result.records)}
   if(view==='tienmat'){live.cash=result;live.records=result.records;stores=buildStoreCatalog(result.records)}
   if(view==='thangket'){live.month=result;live.records=result.records;stores=buildStoreCatalog(result.records)}
@@ -3056,7 +3121,7 @@ function render(){
  const key=loadKey();let html;
  if(live.error?.key===key)html=(state.view==='cogs'?mcPageHead():pageHead(label,''))+`<section class="panel load-error" role="alert"><b>Chưa tải được dữ liệu</b><p>${esc(live.error.message)}</p><button class="btn" onclick="loadCurrent(true)">${icon('refresh')}Thử lại</button></section>`;
  else if(live.ready[state.view]!==key){html=(state.view==='cogs'?mcPageHead():pageHead(label,''))+'<section class="panel live-loading" role="status"><span class="loading-ring"></span><b>Đang đọc dữ liệu…</b></section>';if(live.loadingKey!==key)queueMicrotask(()=>loadCurrent())}
- else html=({rev:dashboard,nv:staffView,lich:scheduleView,cc:attendanceView,luong:payrollView,target:targetView,hoavon:breakevenView,cogs:cogsView,chiphi:costView,duyet:gieoInboxView,taisan:assetView,tienmat:cashView,thangket:monthView}[state.view])();
+ else html=({rev:dashboard,nv:staffView,lich:scheduleView,cc:attendanceView,luong:payrollView,target:targetView,hoavon:breakevenView,cogs:cogsView,chiphi:costView,duyet:gieoInboxView,taisan:assetView,tienmat:cashView,thangket:monthView,diemkh:cusView}[state.view])();
  $('#view').innerHTML='<div class="page-enter">'+html+'</div>';if(state.view==='cogs'&&MC_EDITOR?.id===state.cogsStore){mcFilter();mcProgress()}hydrateIcons();bedPaint();gieoDaySync();const sync=$('#liveSync');sync.textContent=live.loadingKey===key?'Đang cập nhật':live.error?.key===key?'Chưa tải được':live.updatedAt?'Đã cập nhật '+clockVN(vnDate(live.updatedAt).toISOString()):'Đang kết nối';sync.dataset.state=live.error?.key===key?'error':live.loadingKey===key?'loading':'ok';if(state.view==='rev'&&live.ready.rev===key){fitDashboardChart();bfFit();if(bfShown())bfSync()}
 }
 async function refreshLive(button,clearOld=false){if(state.view==='cogs'){await mcOpenEditor(state.cogsStore,true);return}if(state.view==='thangket')tkPreviewCache.clear();button?.animate([{transform:'rotate(0)'},{transform:'rotate(360deg)'}],{duration:450});if(state.view==='rev')backend.invalidateRevenue(clearOld);backend.invalidateEmployees();delete live.ready[state.view];await loadCurrent(true)}
@@ -3505,6 +3570,100 @@ function editAsset(id){
 function assetNote(){const o=$('#asNote'),c=goalNumber(($('#asCost')||{}).value||0),n=Number(($('#asLife')||{}).value)||0,d=($('#asDate')||{}).value;if(!o)return;if(!(c>0)||!(n>0)||!d){o.textContent='';return}const e=vnDate(d+'T12:00:00');e.setMonth(e.getMonth()+n);e.setDate(e.getDate()-1);o.textContent='Khấu hao '+money(c/n)+' ₫ / tháng · thu hồi xong '+dateVN(dateKey(e))}
 async function saveAsset(event,id){event.preventDefault();const f=new FormData(event.target),button=event.target.querySelector('[type="submit"]');const v={store:f.get('store'),name:f.get('name'),purchaseCost:goalNumber(f.get('purchaseCost')),purchaseDate:f.get('purchaseDate'),usefulLifeMonths:Number(f.get('usefulLifeMonths')),active:id?f.has('active'):true};button.disabled=true;const ok=await commitAction('asset:'+(id||'new'),()=>backend.writeAsset(id||null,v),async()=>{closeDialog();invalidateViews('taisan','rev','chiphi');await loadCurrent(true);toast('Đã lưu tài sản.')});if(!ok&&button.isConnected)button.disabled=false}
 async function removeAsset(id){if(!confirm('Xoá hẳn tài sản này? Khấu hao của nó sẽ bỏ khỏi mọi ngày, kể cả ngày đã qua. Đã bán / thanh lý thì nên bỏ tích "Đang thu hồi" thay vì xoá.'))return;await commitAction('asset:'+id,()=>backend.deleteAsset(id),async()=>{closeDialog();invalidateViews('taisan','rev','chiphi');await loadCurrent(true);toast('Đã xoá tài sản.')})}
+// ==========================================================================
+// TAB ĐIỂM KHÁCH HÀNG — sửa Point / tem / ly miễn phí của 1 khách; dọn điểm khách lâu không đến (customers dùng chung 3 thương hiệu).
+// Không tự đọc cả bảng khách khi mở tab: tìm theo SĐT = 1 lượt đọc; «Tải danh sách khách» (~1 lần đọc cả bảng) khi cần tìm theo tên / dọn hàng loạt.
+// ==========================================================================
+const CUS={q:'',found:null,list:null,loading:false,months:12,kinds:{pts:true,stamp:false,free:false},rows:null,sel:new Set()};
+const CUS_KINDS=[['pts','Point'],['stamp','Tem'],['free','Ly miễn phí']];
+const cusDay=iso=>{const d=iso?new Date(iso):null;return d&&!Number.isNaN(+d)?new Intl.DateTimeFormat('vi-VN',{timeZone:'Asia/Ho_Chi_Minh'}).format(d):''};
+const cusAt=iso=>cusDay(iso)?cusDay(iso)+' '+clockVN(iso):'';
+const cusLastText=iso=>cusDay(iso)||'Chưa rõ';
+function cusGet(id){return (CUS.found||[]).find(c=>c.id===id)||(CUS.list||[]).find(c=>c.id===id)||null}
+function cusPatchLocal(id,v){for(const c of [...(CUS.found||[]),...(CUS.list||[]).filter(x=>x.id===id)])if(c.id===id)Object.assign(c,v)}
+function cusTiles(c){return `<div class="cus-tiles"><div class="panel cost-tile"><span>Point</span><b class="num">${money(c.pts)}</b></div><div class="panel cost-tile"><span>Tem</span><b class="num">${c.stamp}/6</b></div><div class="panel cost-tile"><span>Ly miễn phí</span><b class="num">${c.free}</b></div></div>`}
+function cusFoundHtml(){
+ const f=CUS.found;if(f==null)return'';
+ if(!f.length)return '<p class="inline-note">Không tìm thấy khách nào.</p>';
+ return f.slice(0,20).map(c=>`<div class="cus-card"><div class="cus-card-head"><div><b>${esc(c.name||'Khách chưa đặt tên')}</b><small class="table-sub">${esc(c.id)} · ghé cuối ${esc(cusLastText(c.last))}</small></div><button class="btn" onclick="cusEdit('${esc(c.id)}')">${icon('edit')}Sửa điểm</button></div>${cusTiles(c)}</div>`).join('')+(f.length>20?`<p class="small muted">Còn ${f.length-20} khách khác — gõ rõ hơn để thu hẹp.</p>`:'');
+}
+function cusRows(){
+ const cut=new Date();cut.setMonth(cut.getMonth()-(Number(CUS.months)||12));const t=+cut,K=CUS.kinds;
+ return (CUS.list||[]).filter(c=>{const old=!c.last||Number.isNaN(Date.parse(c.last))||Date.parse(c.last)<t;return old&&((K.pts&&c.pts)||(K.stamp&&c.stamp)||(K.free&&c.free))}).sort((a,b)=>{const t=c=>c.last&&!Number.isNaN(Date.parse(c.last))?Date.parse(c.last):Infinity,x=t(a),y=t(b);return x<y?-1:x>y?1:0});
+}
+function cusRecalc(){CUS.rows=CUS.list?cusRows():null;CUS.sel=new Set((CUS.rows||[]).filter(c=>c.last).map(c=>c.id))}
+function cusCleanHtml(){
+ const rows=CUS.rows,kindBox=CUS_KINDS.map(([k,l])=>`<label class="big-check"><input type="checkbox" ${CUS.kinds[k]?'checked':''} onchange="cusKind('${k}',this.checked)"><span>${l}</span></label>`).join('');
+ let body='';
+ if(CUS.loading)body='<p class="inline-note">Đang tải danh sách khách…</p>';
+ else if(!CUS.list)body='<p class="inline-note">Bấm «Xem danh sách» để tải khách và lọc theo lần ghé cuối (đọc cả bảng khách một lần).</p>';
+ else{
+  const sum=rows.filter(c=>CUS.sel.has(c.id)).reduce((a,c)=>({pts:a.pts+c.pts,stamp:a.stamp+c.stamp,free:a.free+c.free}),{pts:0,stamp:0,free:0});
+  body=`<p class="small muted">Tổng ${CUS.list.length} khách · <b>${rows.length}</b> khách quá ${Number(CUS.months)||12} tháng không ghé còn điểm ở loại đã chọn. Khách «Chưa rõ» ngày ghé mặc định không tick.</p>`+(rows.length?`<div class="table-scroll" style="max-height:56vh;overflow:auto"><table class="table"><thead><tr><th><input type="checkbox" aria-label="Chọn tất cả" ${CUS.sel.size===rows.length?'checked':''} onchange="cusTickAll(this.checked)"></th><th>Khách</th><th>Ghé cuối</th><th class="right">Point</th><th class="right">Tem</th><th class="right">Ly free</th></tr></thead><tbody>${rows.map(c=>`<tr><td><input type="checkbox" aria-label="Chọn ${esc(c.name||c.id)}" data-cus="${esc(c.id)}" ${CUS.sel.has(c.id)?'checked':''} onchange="cusTick('${esc(c.id)}',this.checked)"></td><td><b>${esc(c.name||'Khách chưa đặt tên')}</b><small class="table-sub">${esc(c.id)}</small></td><td>${esc(cusLastText(c.last))}</td><td class="right num">${money(c.pts)}</td><td class="right num">${c.stamp}</td><td class="right num">${c.free}</td></tr>`).join('')}</tbody></table></div><div class="cus-run"><span id="cusCount">${cusCountText(sum)}</span><button class="btn danger" id="cusRunBtn" onclick="cusRun()" ${CUS.sel.size?'':'disabled'}>Dọn ${CUS.sel.size} khách đã chọn</button></div>`:'<p class="inline-note">Không có khách nào cần dọn theo mốc này.</p>');
+ }
+ return `<section class="panel"><div class="panel-head"><h2>Dọn điểm khách lâu không đến</h2></div><div class="cus-ctl"><div class="field"><label for="cusMonths">Quá bao nhiêu tháng không ghé</label><input class="input num" id="cusMonths" type="number" min="1" max="120" step="1" value="${Number(CUS.months)||12}" onchange="cusMonths(this.value)"></div><div class="field"><label>Loại cần dọn về 0</label><div class="cus-kinds">${kindBox}</div></div><button class="btn secondary" onclick="cusLoadList()" ${CUS.loading?'disabled':''}>${icon('refresh')}${CUS.list?'Tải lại danh sách':'Xem danh sách'}</button></div>${body}</section>`;
+}
+function cusCountText(sum){return `Sẽ xoá: Point <b class="num">${money(sum.pts)}</b> · tem <b class="num">${sum.stamp}</b> · ly free <b class="num">${sum.free}</b> (chỉ các loại đã chọn ở trên)`}
+function cusLogHtml(){
+ const L=live.cusLogs||[];
+ if(!L.length)return '<p class="inline-note">Chưa có thay đổi nào.</p>';
+ const trio=o=>o?`Point ${money(o.pts)} · Tem ${o.stamp} · Free ${o.free}`:'';
+ return `<div class="table-scroll"><table class="table"><thead><tr><th>Lúc</th><th>Việc</th><th>Chi tiết (số trước khi đổi)</th></tr></thead><tbody>${L.map(l=>l.kind==='expire'?`<tr><td>${esc(cusAt(l.at))}</td><td>Dọn ${Number(l.n)||0} khách</td><td class="small">Loại dọn: ${esc((l.kinds||[]).map(k=>(CUS_KINDS.find(x=>x[0]===k)||[k,k])[1]).join(' + '))}<br>Trước đó cộng lại: Point ${money((l.items||[]).reduce((n,x)=>n+(Number(x.pts)||0),0))} · Tem ${(l.items||[]).reduce((n,x)=>n+(Number(x.st)||0),0)} · Free ${(l.items||[]).reduce((n,x)=>n+(Number(x.fr)||0),0)}</td></tr>`:`<tr><td>${esc(cusAt(l.at))}</td><td>Sửa 1 khách</td><td class="small"><b>${esc(l.name||'Khách')}</b> ${esc(l.phone||'')}<br>Trước: ${esc(trio(l.before))}<br>Sau: ${esc(trio(l.after))}</td></tr>`).join('')}</tbody></table></div>`;
+}
+function cusView(){
+ return '<div class="cost-page">'+pageHead('Điểm khách hàng','Sửa điểm, tem, ly miễn phí của khách và dọn điểm khách lâu không đến. Khách dùng chung The cafe 33 / XOFA / Gieo Gieo.')+
+ `<section class="panel"><div class="panel-head"><h2>Sửa điểm một khách</h2></div><form class="cus-search" onsubmit="cusFind(event)"><input class="input" id="cusQ" inputmode="search" autocomplete="off" placeholder="Số điện thoại, hoặc tên (sau khi tải danh sách)" value="${esc(CUS.q)}" oninput="CUS.q=this.value"><button class="btn" type="submit">${icon('search')}Tìm</button><button class="btn secondary" type="button" onclick="cusLoadList(true)" ${CUS.loading?'disabled':''}>${CUS.list?'Đã tải '+CUS.list.length+' khách':'Tải danh sách khách'}</button></form>${cusFoundHtml()}</section>`+
+ cusCleanHtml()+
+ `<section class="panel"><div class="panel-head"><h2>Lịch sử thay đổi</h2><small class="muted">20 lần gần nhất</small></div>${cusLogHtml()}</section>`+footer('secondary-footer')+'</div>';
+}
+async function cusFind(event){
+ event.preventDefault();const q=($('#cusQ')?.value||'').trim();CUS.q=q;if(!q){CUS.found=null;render();return}
+ const digits=q.replace(/\D/g,'');
+ if(/^[\d\s.+-]+$/.test(q)&&digits.length>=9){
+  const ok=await commitAction('cus:find',async()=>{const c=await backend.readCustomer(digits);CUS.found=c?[c]:[]},()=>render());
+  return;
+ }
+ if(!CUS.list){toast('Tìm theo tên cần «Tải danh sách khách» trước. Hoặc nhập đủ số điện thoại.');return}
+ const key=q.toLowerCase();CUS.found=CUS.list.filter(c=>(/^\d+$/.test(q)&&c.id.includes(q))||(c.name||'').toLowerCase().includes(key)).slice(0,60);render();
+}
+async function cusLoadList(){
+ if(CUS.loading)return;CUS.loading=true;render();
+ const ok=await commitAction('cus:list',async()=>{CUS.list=await backend.readAllCustomers();cusRecalc()},null);
+ CUS.loading=false;render();if(ok)toast('Đã tải '+CUS.list.length+' khách.');
+}
+function cusMonths(v){const n=Math.floor(Number(v));CUS.months=n>=1&&n<=120?n:12;if(CUS.list){cusRecalc()}render()}
+function cusKind(k,on){CUS.kinds[k]=!!on;if(CUS.list)cusRecalc();render()}
+function cusTick(id,on){on?CUS.sel.add(id):CUS.sel.delete(id);cusCountUpdate()}
+function cusTickAll(on){CUS.sel=new Set(on?(CUS.rows||[]).map(c=>c.id):[]);document.querySelectorAll('input[data-cus]').forEach(i=>{i.checked=on});cusCountUpdate()}
+function cusCountUpdate(){
+ const sum=(CUS.rows||[]).filter(c=>CUS.sel.has(c.id)).reduce((a,c)=>({pts:a.pts+c.pts,stamp:a.stamp+c.stamp,free:a.free+c.free}),{pts:0,stamp:0,free:0});
+ const n=$('#cusCount'),b=$('#cusRunBtn');if(n)n.innerHTML=cusCountText(sum);if(b){b.textContent='Dọn '+CUS.sel.size+' khách đã chọn';b.disabled=!CUS.sel.size}
+}
+async function cusRun(){
+ const picked=(CUS.rows||[]).filter(c=>CUS.sel.has(c.id)),kinds=CUS_KINDS.filter(([k])=>CUS.kinds[k]).map(([k])=>k);
+ if(!picked.length||!kinds.length)return;
+ const names=CUS_KINDS.filter(([k])=>CUS.kinds[k]).map(x=>x[1]).join(' + ');
+ if(!confirm('Đưa '+names+' của '+picked.length+' khách về 0?\nSố cũ được lưu trong «Lịch sử thay đổi». Khách vừa ghé lại sau lúc xem danh sách sẽ được bỏ qua.'))return;
+ let res=null;
+ await commitAction('cus:expire',async()=>{res=await backend.expireCustomers(picked.map(c=>({id:c.id,last:c.last})),kinds)},async()=>{
+  const z={};if(kinds.includes('pts'))z.pts=0;if(kinds.includes('stamp'))z.stamp=0;if(kinds.includes('free'))z.free=0;
+  res.done.forEach(id=>cusPatchLocal(id,z));cusRecalc();delete live.ready.diemkh;await loadCurrent(true);
+  toast('Đã dọn '+res.done.length+' khách'+(res.skipped.length?' · bỏ qua '+res.skipped.length+' (đã đổi hoặc không còn gì để dọn)':'')+'.');
+ });
+}
+function cusEdit(id){
+ const c=cusGet(id);if(!c){toast('Không còn khách này — tìm lại.');return}
+ openDialog('Sửa điểm · '+esc(c.name||id),`<form onsubmit="cusSave(event,'${esc(id)}')"><p class="inline-note">${esc(c.name||'Khách')} · ${esc(id)} · ghé cuối ${esc(cusLastText(c.last))}</p><div class="form-grid"><div class="field"><label for="cuPts">Point</label><input class="input num" id="cuPts" name="pts" type="number" inputmode="numeric" min="0" step="1" required value="${c.pts}"></div><div class="field"><label for="cuStamp">Tem (0–5)</label><input class="input num" id="cuStamp" name="stamp" type="number" inputmode="numeric" min="0" max="5" step="1" required value="${Math.min(c.stamp,99)}"></div><div class="field"><label for="cuFree">Ly miễn phí</label><input class="input num" id="cuFree" name="free" type="number" inputmode="numeric" min="0" max="99" step="1" required value="${c.free}"></div></div><p class="small muted">Ghi đè thẳng số mới; số cũ được lưu vào Lịch sử thay đổi. Đủ 6 tem POS tự đổi thành 1 ly miễn phí nên ô Tem chỉ 0–5. Tem / ly tăng thêm tính giá mặc định 16K (trần ly free 19K) như tem cũ không có giá.</p><div class="form-actions"><button type="button" class="btn secondary" onclick="closeDialog()">Huỷ</button><button type="submit" class="btn">Lưu</button></div></form>`);
+}
+async function cusSave(event,id){
+ event.preventDefault();const f=new FormData(event.target),button=event.target.querySelector('[type="submit"]');button.disabled=true;
+ let r=null;
+ const ok=await commitAction('cus:save:'+id,async()=>{r=await backend.writeCustomerCounts(id,{pts:f.get('pts'),stamp:f.get('stamp'),free:f.get('free')})},async()=>{
+  closeDialog();if(r.changed)cusPatchLocal(id,{pts:r.after.pts,stamp:r.after.stamp,free:r.after.free});
+  if(CUS.list)cusRecalc();delete live.ready.diemkh;await loadCurrent(true);toast(r.changed?'Đã lưu. Số cũ có trong Lịch sử thay đổi.':'Không có gì thay đổi.');
+ });
+ if(!ok&&button.isConnected)button.disabled=false;
+}
 // ==========================================================================
 // TAB TIỀN MẶT — phải nộp / thực nhận / chênh lệch từng cửa hàng theo ngày; ngày chưa nhận từ mốc bắt đầu
 // ==========================================================================
