@@ -1813,6 +1813,10 @@ async function writeCustomerCounts(phone, v){
   const pts = Math.floor(Number(v.pts)), stamp = Math.floor(Number(v.stamp)), free = Math.floor(Number(v.free));
   if(![pts, stamp, free].every(n => Number.isFinite(n) && n >= 0)) throw new Error('Nhập số nguyên từ 0 trở lên.');
   if(pts > 1e9 || free > 99) throw new Error('Số quá lớn — kiểm tra lại.');
+  // Giá mỗi tem thêm / trần mỗi ly thêm (chỉ dùng khi TĂNG): mặc định 16K / 19K như tem, ly không có giá ghi lại.
+  const sp = v.stampPrice === undefined || v.stampPrice === '' ? CUS_LEGACY_PRICE : Math.floor(Number(v.stampPrice));
+  const fc = v.freeCap === undefined || v.freeCap === '' ? CUS_LEGACY_CAP : Math.floor(Number(v.freeCap));
+  if(![sp, fc].every(n => Number.isFinite(n) && n >= 1000 && n <= 1e6)) throw new Error('Giá tem / trần ly thêm nhập từ 1.000 đến 1.000.000 ₫.');
   const ref = fstore.collection('customers').doc(String(phone)), logRef = fstore.collection(CUS_LOG).doc();
   return fstore.runTransaction(async t => {
     const snap = await t.get(ref); if(!snap.exists) throw new Error('Khách không còn — tìm lại.');
@@ -1820,8 +1824,10 @@ async function writeCustomerCounts(phone, v){
     if(stamp !== b.stamp && stamp > 5) throw new Error('Tem chỉ từ 0 đến 5 (đủ 6 tem POS tự đổi thành 1 ly miễn phí — hãy tăng «Ly miễn phí»).');
     const patch = {};
     if(pts !== b.pts) patch.total_points = pts;
-    if(stamp !== b.stamp){ patch.stamp_count = stamp; patch.stamp_prices = cusSyncList(d.stamp_prices, stamp, CUS_LEGACY_PRICE); }
-    if(free !== b.free){ patch.free_drink_available = free; patch.free_drink_caps = cusSyncList(d.free_drink_caps, free, CUS_LEGACY_CAP); }
+    // Giảm: bỏ phần CŨ NHẤT (như POS khi đổi ly). Tăng: phần thêm xếp CUỐI (đổi sau các ly / tem thật của khách).
+    const grow = (arr, from, to, pad, fill) => to <= from ? cusSyncList(arr, to, pad) : cusSyncList(arr, from, pad).concat(Array(to - from).fill(fill));
+    if(stamp !== b.stamp){ patch.stamp_count = stamp; patch.stamp_prices = grow(d.stamp_prices, b.stamp, stamp, CUS_LEGACY_PRICE, sp); }
+    if(free !== b.free){ patch.free_drink_available = free; patch.free_drink_caps = grow(d.free_drink_caps, b.free, free, CUS_LEGACY_CAP, fc); }
     if(!Object.keys(patch).length) return { changed: false, before: b, after: b };
     const now = vnDate().toISOString();
     t.update(ref, patch);
@@ -3653,12 +3659,16 @@ async function cusRun(){
 }
 function cusEdit(id){
  const c=cusGet(id);if(!c){toast('Không còn khách này — tìm lại.');return}
- openDialog('Sửa điểm · '+esc(c.name||id),`<form onsubmit="cusSave(event,'${esc(id)}')"><p class="inline-note">${esc(c.name||'Khách')} · ${esc(id)} · ghé cuối ${esc(cusLastText(c.last))}</p><div class="form-grid"><div class="field"><label for="cuPts">Point</label><input class="input num" id="cuPts" name="pts" type="number" inputmode="numeric" min="0" step="1" required value="${c.pts}"></div><div class="field"><label for="cuStamp">Tem (0–5)</label><input class="input num" id="cuStamp" name="stamp" type="number" inputmode="numeric" min="0" max="5" step="1" required value="${Math.min(c.stamp,99)}"></div><div class="field"><label for="cuFree">Ly miễn phí</label><input class="input num" id="cuFree" name="free" type="number" inputmode="numeric" min="0" max="99" step="1" required value="${c.free}"></div></div><p class="small muted">Ghi đè thẳng số mới; số cũ được lưu vào Lịch sử thay đổi. Đủ 6 tem POS tự đổi thành 1 ly miễn phí nên ô Tem chỉ 0–5. Tem / ly tăng thêm tính giá mặc định 16K (trần ly free 19K) như tem cũ không có giá.</p><div class="form-actions"><button type="button" class="btn secondary" onclick="closeDialog()">Huỷ</button><button type="submit" class="btn">Lưu</button></div></form>`);
+ openDialog('Sửa điểm · '+esc(c.name||id),`<form onsubmit="cusSave(event,'${esc(id)}')" data-stamp="${c.stamp}" data-free="${c.free}" oninput="cusEditHint(this)"><p class="inline-note">${esc(c.name||'Khách')} · ${esc(id)} · ghé cuối ${esc(cusLastText(c.last))}</p><div class="form-grid"><div class="field"><label for="cuPts">Point</label><input class="input num" id="cuPts" name="pts" type="number" inputmode="numeric" min="0" step="1" required value="${c.pts}"></div><div class="field"><label for="cuStamp">Tem (0–5)</label><input class="input num" id="cuStamp" name="stamp" type="number" inputmode="numeric" min="0" max="5" step="1" required value="${Math.min(c.stamp,99)}"></div><div class="field"><label for="cuFree">Ly miễn phí</label><input class="input num" id="cuFree" name="free" type="number" inputmode="numeric" min="0" max="99" step="1" required value="${c.free}"></div></div><div class="form-grid"><div class="field" id="cuPriceBox" style="display:none"><label for="cuPrice">Giá mỗi tem thêm · ₫</label><input class="input num" id="cuPrice" name="stampPrice" type="number" inputmode="numeric" min="1000" max="1000000" step="500" value="16000"></div><div class="field" id="cuCapBox" style="display:none"><label for="cuCap">Trần giá mỗi ly miễn phí thêm · ₫</label><input class="input num" id="cuCap" name="freeCap" type="number" inputmode="numeric" min="1000" max="1000000" step="500" value="19000"></div></div><p class="small muted">Ghi đè thẳng số mới; số cũ được lưu vào Lịch sử thay đổi. Đủ 6 tem POS tự đổi thành 1 ly miễn phí nên ô Tem chỉ 0–5. Khi TĂNG tem / ly, phần thêm xếp vào CUỐI (đổi sau các tem / ly thật của khách) và hiện ô nhập giá; muốn tặng ly tối đa bao nhiêu thì nhập bấy nhiêu. Giảm thì bỏ phần cũ nhất, như POS khi đổi ly.</p><div class="form-actions"><button type="button" class="btn secondary" onclick="closeDialog()">Huỷ</button><button type="submit" class="btn">Lưu</button></div></form>`);
+}
+function cusEditHint(form){
+ const n=name=>Number(form.elements[name].value)||0,show=(box,on)=>{const e=document.getElementById(box);if(e)e.style.display=on?'':'none'};
+ show('cuPriceBox',n('stamp')>Number(form.dataset.stamp));show('cuCapBox',n('free')>Number(form.dataset.free));
 }
 async function cusSave(event,id){
  event.preventDefault();const f=new FormData(event.target),button=event.target.querySelector('[type="submit"]');button.disabled=true;
  let r=null;
- const ok=await commitAction('cus:save:'+id,async()=>{r=await backend.writeCustomerCounts(id,{pts:f.get('pts'),stamp:f.get('stamp'),free:f.get('free')})},async()=>{
+ const ok=await commitAction('cus:save:'+id,async()=>{r=await backend.writeCustomerCounts(id,{pts:f.get('pts'),stamp:f.get('stamp'),free:f.get('free'),stampPrice:f.get('stampPrice'),freeCap:f.get('freeCap')})},async()=>{
   closeDialog();if(r.changed)cusPatchLocal(id,{pts:r.after.pts,stamp:r.after.stamp,free:r.after.free});
   if(CUS.list)cusRecalc();delete live.ready.diemkh;await loadCurrent(true);toast(r.changed?'Đã lưu. Số cũ có trong Lịch sử thay đổi.':'Không có gì thay đổi.');
  });

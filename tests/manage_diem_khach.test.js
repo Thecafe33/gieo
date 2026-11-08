@@ -41,7 +41,7 @@ const base=()=>({customers:{
  let c=f.data.customers['0900000001'];
  assert.equal(r.changed,true);assert.equal(c.total_points,0);assert.equal(c.stamp_count,1);assert.equal(c.free_drink_available,2);
  assert.deepEqual(plain(c.stamp_prices),[30000],'giảm tem: giữ tem mới nhất, như _stampPricesSynced của posgieo');
- assert.deepEqual(plain(c.free_drink_caps),[19000,19000],'tăng ly free: thêm trần mặc định 19K');
+ assert.deepEqual(plain(c.free_drink_caps),[19000,19000],'tăng ly free không nhập trần: mặc định 19K');
  assert.equal(c.xofa_field,'giữ','không đụng trường khác của khách');assert.equal(c.lastVisit,old,'không đổi ngày ghé');
  const logs=Object.values(f.data.customer_adjust_logs_gieogieo);assert.equal(logs.length,1);
  assert.deepEqual(plain(logs[0].before),{pts:500,stamp:3,free:0});assert.deepEqual(plain(logs[0].after),{pts:0,stamp:1,free:2});assert(logs[0].at&&logs[0].kind==='edit');
@@ -50,6 +50,17 @@ const base=()=>({customers:{
  f=fake(base());await f.api.writeCustomerCounts('0900000002',{pts:70,stamp:2,free:2});
  assert.deepEqual(plain(f.data.customers['0900000002'].stamp_prices),[16000,16000]);
  assert.deepEqual(plain(f.data.customers['0900000002'].free_drink_caps),[21000,22000],'ly free không đổi → không ghi lại mảng');
+ // tăng có nhập giá: phần thêm xếp CUỐI, ly / tem thật giữ nguyên thứ tự
+ f=fake(base());await f.api.writeCustomerCounts('0900000002',{pts:70,stamp:1,free:3,stampPrice:30000,freeCap:40000});
+ assert.deepEqual(plain(f.data.customers['0900000002'].free_drink_caps),[21000,22000,40000],'ly cộng tay xếp CUỐI với trần đã nhập');
+ assert.deepEqual(plain(f.data.customers['0900000002'].stamp_prices),[30000]);
+ f=fake(base());await f.api.writeCustomerCounts('0900000001',{pts:500,stamp:5,free:0,stampPrice:18000});
+ assert.deepEqual(plain(f.data.customers['0900000001'].stamp_prices),[20000,25000,30000,18000,18000],'tem thêm xếp cuối, tem thật giữ nguyên');
+ // giảm ly: bỏ ly CŨ NHẤT như POS
+ f=fake(base());await f.api.writeCustomerCounts('0900000002',{pts:70,stamp:0,free:1});
+ assert.deepEqual(plain(f.data.customers['0900000002'].free_drink_caps),[22000]);
+ for(const bad of [{stampPrice:500},{freeCap:'abc'},{freeCap:2e6}]){f=fake(base());await assert.rejects(()=>f.api.writeCustomerCounts('0900000002',{pts:70,stamp:1,free:3,...bad}),/1\.000/);assert.equal(f.writes.length,0)}
+ console.log('ok Tăng tem / ly: phần thêm xếp CUỐI với giá / trần nhập tay (mặc định 16K / 19K); giảm bỏ phần cũ nhất; giá sai bị từ chối');
  // không đổi gì
  f=fake(base());r=await f.api.writeCustomerCounts('0900000001',{pts:500,stamp:3,free:0});
  assert.equal(r.changed,false);assert.equal(f.writes.length,0);assert.equal(f.data.customer_adjust_logs_gieogieo,undefined);
@@ -102,6 +113,6 @@ const base=()=>({customers:{
  console.log('ok Lọc xem trước theo số tháng và loại: đúng khách, chưa rõ ngày ghé xếp cuối');
 
  // --- gắn vào menu ---
- assert(/\['diemkh','users','Điểm khách hàng'\]/.test(html)&&/diemkh:cusView/.test(html)&&/view==='diemkh'/.test(html));
+ assert(/id="cuCapBox"/.test(html)&&/\['diemkh','users','Điểm khách hàng'\]/.test(html)&&/diemkh:cusView/.test(html)&&/view==='diemkh'/.test(html));
  console.log('ALL PASS');
 })().catch(e=>{console.error(e);process.exit(1)});
