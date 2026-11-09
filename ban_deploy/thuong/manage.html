@@ -494,6 +494,13 @@ html[data-theme="dark"] .bf-pay.is-cash{background:#1f3b2a;color:#86d9a6}html[da
 .cash-miss button{min-height:30px;padding:0 10px;border-radius:999px;border:1.5px solid #f2b8bd;background:var(--panel);color:#b4232f;font:inherit;font-weight:750;cursor:pointer}
 .cash-miss button.on{background:#d2333f;border-color:#d2333f;color:#fff}.cash-miss button.open{border-style:dashed;color:var(--sub);border-color:var(--line)}
 .cash-miss .cash-open{font-style:normal;color:var(--sub)}.cash-miss em{font-style:normal;color:var(--sub)}.cash-miss.done{color:var(--green)}.cash-miss.done .icon{width:15px;height:15px}
+.cash-miss .cash-bulk{display:inline-flex;align-items:center;gap:6px;background:#d2333f;border-color:#d2333f;color:#fff;margin-right:4px}.cash-miss .cash-bulk .icon{width:14px;height:14px}
+.cashm-top{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;font-size:13px}.cashm-list{display:flex;flex-direction:column;gap:8px;max-height:58vh;overflow:auto;margin-bottom:14px}
+.cashm-row{border:1.5px solid var(--line);border-radius:14px;background:var(--panel)}.cashm-row[open]{border-color:color-mix(in srgb,var(--green) 40%,var(--line))}
+.cashm-row summary{display:grid;grid-template-columns:64px 1fr 150px;align-items:center;gap:6px 10px;padding:10px 12px;cursor:pointer;list-style:none}.cashm-row summary::-webkit-details-marker{display:none}
+.cashm-date{font-weight:800;font-size:15px;display:flex;flex-direction:column;line-height:1.15}.cashm-date small{font-weight:600;font-size:11px;color:var(--sub)}.cashm-exp{font-size:12px;color:var(--sub)}.cashm-exp b{display:block;font-size:14px;color:var(--ink)}
+.cashm-in{min-height:42px;text-align:right}.cashm-var{grid-column:2 / 4;justify-self:end;font-size:12px;min-height:0}.cashm-var:empty{display:none}
+.cashm-detail{padding:2px 14px 12px;border-top:1px dashed var(--line)}@media(max-width:560px){.cashm-row summary{grid-template-columns:52px 1fr}.cashm-in{grid-column:1 / 3}.cashm-var{grid-column:1 / 3}}
 .cash-start{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--sub);font-weight:650}.cash-start input{border:1px solid var(--line);border-radius:12px;padding:6px 8px;background:var(--panel);color:var(--ink);font:inherit}
 @media(max-width:760px){.cash-grid{grid-template-columns:1fr}.cash-exp strong{font-size:30px}.cash-start{width:100%}}
 /* [SIDEBAR] 10 mục (thêm Điểm hoà vốn / Chi phí / Tài sản / Tiền mặt): danh sách tự cuộn trong sidebar, gọn lại khi màn thấp;
@@ -3047,11 +3054,18 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape')toggleSidebar(false)
 
 
 function showRevenueInfo(){const list=selectedStores().map(storeRange),all=list.reduce((a,s)=>a+s.rev+(s.brand==='gieo'?0:s.food),0);openDialog('Đọc đúng doanh thu.',`<div class="detail-row"><span>The cafe 33</span><b>Đồ uống + Khác, không gồm Ăn vặt</b></div><div class="detail-row"><span>XOFA</span><b>Không gồm Food</b></div><div class="detail-row"><span>Gieo Gieo</span><b>Tổng doanh thu bill</b></div><div class="revenue-colour-key"><h3>Màu của ô doanh thu chung</h3><span><i style="background:#d2333f"></i>Dưới 50%</span><span><i style="background:#b87d12"></i>50–79%</span><span><i style="background:#2b57a8"></i>80–99%</span><span><i style="background:#12855a"></i>Từ 100% · đã đạt</span></div><div class="detail-section"><h3>Ở kỳ và cửa hàng đang chọn</h3><div class="detail-row"><span>Tổng thu cả bill, gồm Food</span><b>${money(all)} ₫</b></div></div><div class="detail-section"><h3>Điểm hoà vốn</h3><div class="detail-row"><span>The cafe 33 · XOFA</span><b>Chi phí cố định ÷ (1 − giá vốn %), cấu hình ở tab Điểm hoà vốn</b></div><div class="detail-row"><span>Gieo Gieo</span><b>Y chang Quản lý Gieo (lãi / lỗ từng ngày)</b></div><div class="detail-row"><span>Vạch trên thanh</span><b>Cộng hoà vốn các quán đang xem, tính tới hôm nay</b></div></div><p class="inline-note">Cách cộng bám theo file gốc. Tiền mặt và chuyển khoản của The cafe 33 tính cả Ăn vặt; các khoản Food của XOFA xem riêng trong chi tiết. “Trung bình / hoá đơn” lấy doanh thu chung chia tổng số bill.</p>`)}
+// Tổng chi = vận hành + khấu hao + giá vốn món đã bán; Lãi = doanh thu − tổng chi. Chỉ hiện khi MỌI ngày trong kỳ đã tính COGS theo món
+// (kỳ lẫn ngày trước ngày áp dụng COGS thì giá vốn thiếu → lãi sẽ ảo, không hiện).
+function beProfit(s){
+ const b=s.be,c=s.cogs;if(!b||b.cogs==null||b.cogsMissing||b.cogsNoRevenue||!c||c.activeDays!==b.soNgay)return'';
+ const chi=(Number(b.chiPhiCoDinh)||0)+(Number(b.khauHao)||0)+(Number(b.cogs)||0),lai=Math.round((Number(b.doanhThu)||0)-chi);
+ return `<div class="detail-row"><span>Tổng chi (vận hành + giá vốn)</span><b class="num">${money(chi)} ₫</b></div><div class="detail-row"><span>${lai<0?'Lỗ':'Lãi'} (doanh thu − tổng chi)</span><b class="num ${lai<0?'be-loss':'be-ok'}">${lai<0?'−':''}${money(Math.abs(lai))} ₫</b></div>`;
+}
 function storeDetails(id,keepClose){
  const s=storeRange(stores.find(s=>s.id===id));
  const kv=(a,b)=>`<div class="detail-row"><span>${a}</span><b class="num">${money(b)} ₫</b></div>`;
  const category=id==='tc33'?`<div class="detail-section"><h3>Theo nhóm món</h3>${kv('Đồ uống',s.drink)}${kv('Khác',s.other)}${kv('Ăn vặt · ngoài doanh thu chung',s.food)}</div>`:id==='xofa'?`<div class="detail-section"><h3>Theo hình thức</h3>${kv('Tại quán',s.instore)}${kv('Mang đi',s.togo)}<div class="detail-row"><span>Đơn ship</span><b>${s.ship} đơn · ${money(s.shipRev)} ₫</b></div></div>`:'';
- const b=s.be,gieo=s.brand==='gieo',beSec=`<div class="detail-section detail-be"><h3>Điểm hoà vốn · ${beHas(b)?beNguon(b):gieo?'số của Quản lý Gieo':'chưa có số'}</h3>${beHas(b)?`${kv('Doanh thu hoà vốn',b.hoaVon)}<div class="detail-row"><span>Trạng thái</span><b class="${b.dat?'be-ok':'be-loss'}">${b.dat?'Đã hoà vốn':'Chưa hoà vốn'}</b></div>${gieo?kv(b.dat?'Lãi':'Đang lỗ',Math.abs(b.lai)):kv(b.dat?'Vượt hoà vốn':'Còn thiếu',b.dat?b.vuot:b.conThieu)+kv('Chi phí vận hành',b.chiPhiCoDinh)+(b.cogs!=null?kv('Giá vốn món đã bán / tặng',b.cogs)+'<p class="small muted">Hoà vốn = (vận hành + khấu hao) ÷ (1 − COGS/doanh thu).</p>':'')+(b.khauHao?kv('Khấu hao tài sản',b.khauHao):'')}${gieo?`<div class="detail-row"><span>Số ngày có số</span><b>${b.soNgay}/${b.soNgay+b.thieu}${b.mucTinCay?' · '+MUC_TIN_CAY[b.mucTinCay]:''}</b></div>`:''}`:`<p class="inline-note">${esc(beEmptyReason(s))}</p>`}</div>`;
+ const b=s.be,gieo=s.brand==='gieo',beSec=`<div class="detail-section detail-be"><h3>Điểm hoà vốn · ${beHas(b)?beNguon(b):gieo?'số của Quản lý Gieo':'chưa có số'}</h3>${beHas(b)?`${kv('Doanh thu hoà vốn',b.hoaVon)}<div class="detail-row"><span>Trạng thái</span><b class="${b.dat?'be-ok':'be-loss'}">${b.dat?'Đã hoà vốn':'Chưa hoà vốn'}</b></div>${gieo?kv(b.dat?'Lãi':'Đang lỗ',Math.abs(b.lai)):kv(b.dat?'Vượt hoà vốn':'Còn thiếu',b.dat?b.vuot:b.conThieu)+kv('Chi phí vận hành',b.chiPhiCoDinh)+(b.cogs!=null?kv('Giá vốn món đã bán / tặng',b.cogs)+'<p class="small muted">Hoà vốn = (vận hành + khấu hao) ÷ (1 − COGS/doanh thu).</p>':'')+(b.khauHao?kv('Khấu hao tài sản',b.khauHao):'')+beProfit(s)}${gieo?`<div class="detail-row"><span>Số ngày có số</span><b>${b.soNgay}/${b.soNgay+b.thieu}${b.mucTinCay?' · '+MUC_TIN_CAY[b.mucTinCay]:''}</b></div>`:''}`:`<p class="inline-note">${esc(beEmptyReason(s))}</p>`}</div>`;
  openDialog(esc(s.name),`<div class="detail-revenue-head" style="--c:${s.c}"><div><p class="small muted">${esc(s.meta)}</p><div class="detail-total num">${amount(s.rev)}</div><p class="small muted">${rangeDates()[0]===rangeDates()[1]?dateVN(rangeDates()[0]):rangeDates().map(dateVN).join(' – ')}</p></div><span class="store-monogram">${s.mono}</span></div><div class="detail-grid"><div class="detail-tile"><span>Hoá đơn</span><b class="num">${money(s.count)}</b></div><div class="detail-tile"><span>Đạt mục tiêu</span><b class="num">${storeClosedAll(s)?'Đóng cửa':s.target?Math.floor(s.rev/s.target*100)+'%':'Chưa đặt'}</b></div></div><div class="detail-columns"><div class="detail-section"><h3>Thanh toán ${id==='tc33'?'· cả bill':''}</h3>${kv('Tiền mặt',s.cash)}${kv('Chuyển khoản',s.bank)}</div>${category}</div>${id==='xofa'?`<div class="detail-section detail-food"><h3>Food · ngoài doanh thu chung</h3><div class="detail-food-grid">${kv('Tổng Food',s.food)}${kv('Tiền mặt',s.foodCash)}${kv('Chuyển khoản',s.foodBank)}</div></div>`:''}<div class="inline-note">${id==='tc33'?'Tiền mặt + chuyển khoản bao gồm Ăn vặt. Doanh thu chung của quán chỉ gồm Đồ uống + Khác.':id==='xofa'?'Food được tách riêng, không cộng vào doanh thu chung. Đơn ship nằm trong doanh thu quán.':'Chi tiết món, giá vốn và kho tiếp tục xem ở hệ thống Quản lý Gieo.'}</div>${beSec}${true?`<details class="detail-section detail-close" id="close-det"${keepClose?' open':''}><summary><span class="close-sum-t">${icon('calendar')}Đóng cửa</span><span class="close-sum-s" id="close-sum">${storeClosedAll(s)?'Đang đóng cửa':''}</span></summary><div id="close-body" data-id="${esc(id)}"><p class="small muted">Đang đọc lịch đóng cửa…</p></div></details>`:''}`,false);
  $('#dialog').classList.add('store-detail');
  closeSecLoad(id);if(keepClose)$('#close-det')?.scrollIntoView({block:'nearest'});
@@ -3754,7 +3768,7 @@ function cashWidget(c,st){
  }
  if(gg&&r.state!=='ready'&&r.received==null)body+=cashReconciliation(r,id,d);
  const nReady=miss.filter(m=>!m.open).length,nOpen=miss.length-nReady;
- const missHtml=miss.length?`<div class="cash-miss"><span>${nReady?'Chưa nhận '+nReady+' ngày':''}${nReady&&nOpen?' · ':''}${nOpen?'<i class="cash-open">'+nOpen+' ngày chưa kết ca</i>':''}</span>${miss.slice(-8).reverse().map(m=>`<button class="${m.d===d?'on':''} ${m.open?'open':''}" onclick="state.cashDate='${m.d}';state.cashEdit=null;render()" title="${m.open?'Chưa kết ca':m.expected!=null?'Phải nộp '+money(m.expected)+' ₫':''}">${dateVN(m.d).slice(0,5)}</button>`).join('')}${miss.length>8?`<em>+${miss.length-8}</em>`:''}</div>`:`<div class="cash-miss done">${icon('check')}Đã nhận đủ từ ${dateVN(c.start).slice(0,5)}</div>`;
+ const missHtml=miss.length?`<div class="cash-miss">${nReady>=2?`<button class="cash-bulk" onclick="cashBulk('${id}')">${icon('edit')}Nhập ${nReady} ngày một lượt</button>`:''}<span>${nReady?'Chưa nhận '+nReady+' ngày':''}${nReady&&nOpen?' · ':''}${nOpen?'<i class="cash-open">'+nOpen+' ngày chưa kết ca</i>':''}</span>${miss.slice(-8).reverse().map(m=>`<button class="${m.d===d?'on':''} ${m.open?'open':''}" onclick="state.cashDate='${m.d}';state.cashEdit=null;render()" title="${m.open?'Chưa kết ca':m.expected!=null?'Phải nộp '+money(m.expected)+' ₫':''}">${dateVN(m.d).slice(0,5)}</button>`).join('')}${miss.length>8?`<em>+${miss.length-8}</em>`:''}</div>`:`<div class="cash-miss done">${icon('check')}Đã nhận đủ từ ${dateVN(c.start).slice(0,5)}</div>`;
  const statusHtml=gg&&c.gg?.[id]===null?'<div class="cash-miss">Chưa xác định các ngày chưa nhận — tải lại để kiểm tra.</div>':missHtml;
  return `<article class="cash-widget" style="--c:${st.c}">${head}${body}${cashDayStats(c,id)}${statusHtml}</article>`;
 }
@@ -3842,6 +3856,49 @@ function cashLiveVar(input,exp){const o=document.getElementById('cashv-'+input.i
 async function saveCash(event,storeId,date){
  event.preventDefault();const f=new FormData(event.target),n=goalNumber(f.get('received')),r=cashRow(live.cash,storeId,date)||{},button=event.target.querySelector('[type="submit"]');
  button.disabled=true;const ok=await commitAction('cash:'+storeId+date,()=>backend.writeCashReceipt(storeId,date,n,{expected:r.expected,sales:r.sales,spent:r.spent}),async()=>{state.cashEdit=null;invalidateViews('tienmat');await loadCurrent(true);toast('Đã ghi thực nhận.')});if(!ok&&button.isConnected)button.disabled=false;
+}
+// ---- Nhập nhiều ngày một lượt (tab Tiền mặt): mỗi ngày chưa nhận là 1 dòng, bấm dòng để xem chi tiết ngày đó ----
+let CASHM=null;
+function cashBulkRows(storeId){const c=live.cash;return cashMissing(c,storeId).filter(m=>!m.open).map(m=>({d:m.d,r:cashRow(c,storeId,m.d)||{}})).filter(x=>!(storeId!=='tc33'&&storeId!=='xofa'&&x.r.unclassified))}
+function cashBulkDetail(id,r){
+ const gg=id!=='tc33'&&id!=='xofa',row=(a,b)=>`<div class="detail-row"><span>${a}</span><b class="num">${b}</b></div>`;
+ let h=gg?row('Bàn giao lúc kết ca',money(r.handed||0)+' ₫')+(r.retained?row('Giữ lại két',money(r.retained)+' ₫'):'')+(Number(r.after)>0?row('Bổ sung sau kết ca','+'+money(r.after)+' ₫'):'')+(r.recipient?row('Người nhận',esc(r.recipient)):''):row('Tiền mặt bán',money(r.sales||0)+' ₫')+(r.spent?row('Chi tại quầy','−'+money(r.spent)+' ₫'):'');
+ if(r.reconciliation&&r.reconciliation.countedCash!=null)h+=row('Nhân viên đã đếm',cashNumber(r.reconciliation.countedCash))+row('Theo hệ thống trong két',cashNumber(r.reconciliation.expectedCash));
+ if(r.needsConfirmation)h+=`<p class="cash-msg">Có bill bổ sung / số phải nhận đã đổi.${r.received!=null?' Đã ghi nhận trước '+money(r.received)+' ₫.':''}</p>`;
+ return h;
+}
+function cashBulk(id){
+ const rows=cashBulkRows(id);if(!rows.length){toast('Không còn ngày nào chờ nhập.');return}
+ CASHM={id,rows:rows.map(x=>x.d)};
+ const st=stores.find(x=>x.id===id)||{},name=st.brand==='gieo'?'Gieo '+(st.code||''):st.name;
+ openDialog('Nhập thực nhận · '+esc(name||id),`<form onsubmit="cashBulkSave(event)"><div class="cashm-top"><span id="cashmSum"></span><button type="button" class="btn secondary" onclick="cashBulkFill()">Điền đủ theo phải nộp</button></div><div class="cashm-list">${rows.map(({d,r})=>{const exp=Number(r.expected)||0;return `<details class="cashm-row" data-d="${d}"><summary><span class="cashm-date">${d.slice(8)}/${d.slice(5,7)}<small>${['CN','T2','T3','T4','T5','T6','T7'][parseDate(d).getDay()]}</small></span><span class="cashm-exp">Phải nộp <b class="num">${money(exp)} ₫</b></span><input class="input num cashm-in" name="r_${d}" inputmode="numeric" autocomplete="off" maxlength="16" placeholder="${groupMoneyInput(exp)}" value="${r.needsConfirmation&&r.received!=null?groupMoneyInput(r.received):''}" aria-label="Thực nhận ${dateVN(d)}" onclick="event.stopPropagation()" onkeydown="if(event.key===' ')event.stopPropagation()" oninput="this.value=groupMoneyInput(this.value);cashBulkLive()"><span class="cashm-var" id="cashmv-${d}"></span></summary><div class="cashm-detail">${cashBulkDetail(id,r)}</div></details>`}).join('')}</div><div class="form-actions"><button type="button" class="btn secondary" onclick="closeDialog()">Huỷ</button><button type="submit" class="btn" id="cashmSave">Lưu</button></div></form>`);
+ $('#dialog').classList.add('store-detail','keep-open');cashBulkLive();
+}
+function cashBulkLive(){
+ if(!CASHM)return;const rows=cashBulkRows(CASHM.id),form=$('#dialog form');if(!form)return;
+ let n=0,got=0,exp=0;
+ for(const{d,r}of rows){const e=Number(r.expected)||0,v=form.elements['r_'+d]?.value||'',o=document.getElementById('cashmv-'+d);exp+=e;if(o)o.innerHTML=v===''?'':cashVar(Math.round(goalNumber(v)-e));if(v!==''){n++;got+=goalNumber(v)}}
+ $('#cashmSum').innerHTML=`Phải nộp <b class="num">${money(exp)} ₫</b> · đã nhập <b class="num">${money(got)} ₫</b> (${n}/${rows.length} ngày)`;
+ const b=$('#cashmSave');if(b){b.textContent=n?'Lưu '+n+' ngày':'Lưu';b.disabled=!n}
+}
+function cashBulkFill(){
+ const form=$('#dialog form');if(!form||!CASHM)return;
+ for(const{d,r}of cashBulkRows(CASHM.id)){const el=form.elements['r_'+d];if(el&&el.value==='')el.value=groupMoneyInput(Number(r.expected)||0)}
+ cashBulkLive();
+}
+async function cashBulkSave(event){
+ event.preventDefault();if(!CASHM)return;const form=event.target,id=CASHM.id,button=$('#cashmSave'),todo=[];
+ for(const{d,r}of cashBulkRows(id)){const v=form.elements['r_'+d]?.value||'';if(v!=='')todo.push({d,r,n:goalNumber(v)})}
+ if(!todo.length)return;button.disabled=true;
+ const bad=[];let ok=0;
+ await commitAction('cashm:'+id,async()=>{
+  for(const t of todo){try{await backend.writeCashReceipt(id,t.d,t.n,{expected:t.r.expected,sales:t.r.sales,spent:t.r.spent});ok++}catch(e){bad.push(t.d.slice(8)+'/'+t.d.slice(5,7)+': '+friendlyError(e))}}
+ },async()=>{
+  state.cashEdit=null;invalidateViews('tienmat');await loadCurrent(true);
+  if(!bad.length){closeDialog();toast('Đã ghi thực nhận '+ok+' ngày.');return}
+  toast('Đã ghi '+ok+' ngày, lỗi '+bad.length+' ngày.');if($('#dialog').open)cashBulk(id);alert('Chưa ghi được:\n'+bad.join('\n'));
+ });
+ if(button.isConnected)button.disabled=false;
 }
 async function setCashStart(v){if(!v||v>currentDate())return;const back=Math.round((parseDate(currentDate())-parseDate(v))/864e5);if(back>62&&!confirm('Mốc lùi '+back+' ngày — mọi ngày chưa nhận từ mốc đó sẽ hiện ra để nhập (đọc doanh thu từng ngày). Tiếp tục?'))return;await commitAction('cashstart',()=>backend.writeCashStart(v),async()=>{invalidateViews('tienmat');await loadCurrent(true);toast('Đã đổi mốc theo dõi.')})}
 async function saveBreakeven(event){event.preventDefault();const form=event.target,f=new FormData(form),month=state.beMonth,button=form.querySelector('[type="submit"]'),v=id=>({fixed:f.get(id+'_fixed')===''?'':goalNumber(f.get(id+'_fixed'))});button.disabled=true;const ok=await commitAction('be:'+month,()=>backend.writeBreakeven(month,{tc33:v('tc33'),xofa:v('xofa')}),async()=>{invalidateViews('hoavon','rev');await loadCurrent(true);toast('Đã lưu điểm hoà vốn tháng.')});if(!ok&&button.isConnected)button.disabled=false}
