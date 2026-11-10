@@ -1,51 +1,5 @@
-/* gau_noel_giangsinh.v3.js — QUAY TRÚNG GẤU GIÁNG SINH 2026, dùng chung 3 quán + app khách:
- *   pos.html (The cafe 33) · PosX.html (XOFA) · posgieo.html (Gieo Gieo) — BỐC THĂM lúc thanh toán đơn có SĐT, Đổi quà,
- *     Mở lượt tại quầy, huỷ bill (PosX / Gieo). The cafe 33: popup QR sau thanh toán. Gieo: QR cuối bill in.
- *   kiosk.html (màn hình phụ XOFA) — data-quan="kiosk": QR + số lượt sau thanh toán, chiếu lại «Mở lượt tại quầy» (RT gau_noel_2026_kiosk).
- *   index_giangsinh.html (app khách) — data-quan="khach" (chèn bởi tools/tao_ban_giangsinh.js): popup «Bạn có N lượt quay» khi có lượt,
- *     quay = MỞ lượt đã bốc, thẻ «Gấu Noel của bạn» dưới thẻ thành viên (mã nhận, quán nhận, đã nhận).
- *   pos.html → Quản lý → «Gấu Noel»: CÔNG TẮC BẬT / TẮT chương trình (cả 3 quán chỉ chạy khi bật), ngày bắt đầu,
- *     nhập kho từng quán, thống kê, XOÁ HẾT dữ liệu khi hết đợt.
- * Kế hoạch: docs/KE_HOACH_GAU_NOEL_2026.md. Chủ dự án chốt 16/10/2026:
- *   - Mua 2 ly tính tiền = 1 lượt (4–5 ly = 2, từ 6 ly = 3 lượt, chắc ≥ 1 gấu). Không giới hạn lượt / SĐT / ngày.
- *   - Tỉ lệ 1 lượt = số ly × giá đơn × lịch sử SĐT × ngày/giờ × kho (trần 60%). Trượt đủ lượt VÀ đủ lãi tích luỹ → lượt sau chắc trúng.
- *     23–25/12: tỉ lệ ×3, chắc trúng sớm hơn. The cafe 33: bill bed trên 160K (không tính ăn vặt) = trúng chắc.
- *   - Mỗi loại lượt có KHO RIÊNG (số con cụ thể theo chặng) — hết kho thì loại lượt đó ngừng trúng. Không có mẫu gấu: khách chọn tại quầy.
- *   - Kết quả bốc ở POS (rules Firebase hiện "đã đăng nhập = toàn quyền" → không bốc trên máy khách); khách quay lúc nào cũng được
- *     tới hạn nhận = MỞ kết quả. Trúng ở quán nào nhận ở quán đó: nhân viên nhập SĐT → Đổi quà → mã hết hiệu lực.
- *   - Hạn nhận 31/12/2026; gấu chưa nhận quay về kho (dùng cho chương trình sau).
- *   - Chỉ chạy khi CÔNG TẮC BẬT (gau_noel_2026_kho/_cfg.bat — tab Quản lý pos) VÀ trong ngày của đợt (giờ máy chủ .info/serverTimeOffset).
- *     Tắt (mặc định) = không bốc, không hiện gì, không ghi gì; chỉ nghe 1 doc _cfg.
- *   - Dữ liệu riêng (không đụng customers): gau_noel_2026/{sđt}, gau_noel_2026_kho/{quán | _cfg}.
- *   - Gắn vào app bằng ĐÚNG 1 THẺ trước </body>: <script src="gau_noel_giangsinh.v3.js" data-quan="tc33|xofa|gieo"></script>
- *     Phần gắn chỉ BỌC hàm sẵn có của app từ bên ngoài (không sửa code bên trong app).
- * v2 (16/10): v1 đã deploy bị sửa tại chỗ (vòng quay, nút Đổi gấu sidebar, quay tại quầy tự «Đã nhận», bed 160K lúc vào active, bán qua app
- *     không lượt, dashboard…) → máy giữ v1 trong bộ nhớ đệm không thấy → đổi tên v2. v1 giữ nguyên trên hosting (máy còn HTML cũ xin nó).
- * v3 (10/11): (1) khung «Gấu Noel của khách» ở quầy CHỈ hiện gấu của lượt khách ĐÃ quay (mở) — gấu của lượt chưa quay không lộ mã / kết quả,
- *     không đổi được trước khi quay (khớp app khách vốn đã giấu); (2) TC33: dòng «Nợ cũ» không tính vào mốc bed trên 160K.
- *     v2 giữ nguyên trên hosting (máy còn HTML cũ trong bộ nhớ đệm vẫn xin nó).
- * Sửa file này sau khi đã deploy = tạo gau_noel_giangsinh.v4.js (cùng quy tắc phiên bản như engine).
- *
- * ═══ GỠ CHƯƠNG TRÌNH SẠCH SẼ KHI HẾT GIÁNG SINH (sau 31/12/2026) ═══
- *   1. pos.html (The cafe 33) → Quản lý → tab «Gấu Noel»:
- *        a. Bấm TẮT chương trình (3 quán ngừng ngay, không cần deploy).
- *        b. (Tuỳ chọn) Tải thống kê, chụp màn hình để lưu số liệu đợt.
- *        c. Bấm «Xoá dữ liệu Gấu Noel…», nhập mã 2512 → xoá hết gau_noel_2026 (khách, lượt, mã) + gau_noel_2026_kho (kho, công tắc)
- *           + Realtime gau_noel_2026_kiosk (màn hình phụ).
- *           Không đụng customers, đơn hàng, điểm, tem. Báo lỗi giữa chừng → bấm lại, xoá tiếp phần còn lại.
- *   2. Deploy bộ ban_deploy/thuong/ (đã bỏ sẵn thẻ Gấu Noel — xem ban_deploy/README.md). Muốn bỏ hẳn khỏi file gốc trong repo:
- *      gỡ 1 thẻ <script src="gau_noel_giangsinh.v…js" …> trước </body> ở: pos.html, PosX.html, posgieo.html
- *      + kiosk.html (màn hình phụ XOFA)
- *      + index_giangsinh.html: đặt GAU_NOEL = '' trong tools/tao_ban_giangsinh.js rồi chạy lại node tools/tao_ban_giangsinh.js
- *        (hoặc deploy lại index.html bình thường nếu hết mùa Giáng sinh).
- *      Tìm nhanh: grep -n "gau_noel_giangsinh" *.html
- *   3. Chạy lại bản sinh tự động có chép từ các file trên: node tools/tao_ban_tet.js (pos_tet / PosX_tet), node tools/tao_ban_thu.js
- *      (posgieo_thu / quanlygieo_thu); chạy sh tests/run_all.sh — xoá luôn tests/gau_noel.test.js.
- *   4. Deploy (chủ dự án tự chạy). Sau đó xoá file gau_noel_giangsinh.v*.js khỏi thư mục deploy ở lần deploy KẾ TIẾP
- *      (để máy còn bản HTML cũ trong bộ nhớ đệm không lỗi khi xin file).
- *   5. data_access.v9.js giữ nguyên (2 tên gau_noel_2026* trong bảng đăng ký không ảnh hưởng gì) — không tạo bản mới chỉ để bỏ tên.
- *   6. Xoá docs/KE_HOACH_GAU_NOEL_2026.md hoặc chuyển vào docs/luu_tru/, bỏ dòng Gấu Noel trong CLAUDE.md.
- *   Bỏ qua bước 1c trước khi gỡ thẻ script = dữ liệu còn nằm trên Firebase (không hại gì, nhưng phải gắn lại file để xoá).
+/* gau_noel_giangsinh.v3.js — Quay trúng gấu Giáng sinh 2026.
+ * Tài liệu, luật chơi và hướng dẫn gỡ chương trình: docs/HUONG_DAN_GAU_NOEL.md (không nằm trong bộ deploy).
  */
 (function (root) {
   'use strict';
@@ -232,7 +186,7 @@
 
   // ── Firebase ──────────────────────────────────────────────
   var FS = null, FV = null, DB = null;
-  var KIOSK_ROOT = 'gau_noel_2026_kiosk';   // RT: màn hình phụ XOFA (kiosk.html) — { xofa: { bat, ev } }
+  var KIOSK_ROOT = 'gau_noel_2026_kiosk';   // RT: màn hình phụ — { xofa: { bat, ev } }
   function init(o) {
     o = o || {};
     FS = o.fstore || FS;
@@ -404,7 +358,7 @@
     }).then(function () { return kq; });
   }
 
-  // ── Quản lý (pos.html) ────────────────────────────────────
+  // ── Quản lý ────────────────────────────────────
   /** Ghi cấu hình kho 1 quán: cap (trần từng kho ngẫu nhiên) + tong (số gấu thật). Không đụng số đã phát. */
   function luuKho(store, cap, tong) {
     if (!hopLeQuan(store)) return Promise.reject(new Error('quan'));
@@ -535,15 +489,7 @@
   if (typeof module !== 'undefined' && module.exports) module.exports = GauNoel;
 })(typeof window !== 'undefined' ? window : globalThis);
 
-/* ═══ PHẦN GẮN VÀO APP ═══ (chỉ chạy trong trình duyệt, theo data-quan của thẻ script)
- * Chỉ BỌC hàm sẵn có của app — không sửa code bên trong app. App đổi tên hàm → phần gắn tự bỏ qua (cảnh báo console).
- *   tc33 (pos.html):    _pushPaidOrder + clearDebtAfterPayment (chỉ chạy khi đơn lưu thành công) → bốc → popup QR;
- *                       checkSdtLive / resetPhoneInput → khung Gấu Noel (Đổi quà, Mở lượt tại quầy); tab Quản lý «Gấu Noel».
- *   xofa (PosX.html):   _loyaltyAfterSave → bốc → hỏi «Quay tại quán / Quét mã» (màn hình phụ: vòng quay hoặc QR); renderCustomerInfo / clearCustomer → khung; delOrderConfirm → huỷ bill.
- *   gieo (posgieo.html): assistFinalizeOrder → bốc; POSPrinter.autoPrintIfEnabled → hỏi «Quay tại quán / Quét mã ở nhà» trước khi in;
- *                       buildReceiptContent / renderReceiptCanvas → QR cuối bill (bỏ khi quay tại quán);
- *                       renderCustomerInfo / clearCustomer → khung; delOrderConfirm → huỷ bill.
- */
+/* Phần gắn vào app (chạy trong trình duyệt, theo data-quan của thẻ script). */
 (function () {
   'use strict';
   if (typeof document === 'undefined' || !window.GauNoel) return;
@@ -662,7 +608,7 @@
   }
   function dongOv() { var o = $('gn-ov'); if (o) o.style.display = 'none'; }
   G.dongManHinh = dongOv;
-  G.onManHinh = null;   // PosX: đồng bộ màn hình phụ (gắn sau khi có file màn hình phụ) — fn(loai, dữ liệu)
+  G.onManHinh = null;   // đồng bộ màn hình phụ — fn(loai, dữ liệu)
   function phat(loai, d) { try { if (typeof G.onManHinh === 'function') G.onManHinh(loai, d); } catch (e) { console.warn('[gấu] màn hình phụ', e); } }
 
   /** Popup QR sau thanh toán (The cafe 33) */
@@ -779,7 +725,7 @@
       panel.style.display = veKhung(panel, sdt, st, function () { quet(sdt, true); }) ? 'block' : 'none';
     }).catch(function (e) { console.warn('[gấu] đọc khách', e); });
   }
-  /** Popup «Đổi gấu Noel» (nút ở sidebar PosX / posgieo) — không cần có món trong giỏ. */
+  /** Popup «Đổi gấu Noel» (nút ở sidebar) — không cần có món trong giỏ. */
   function moDoiGau(sdtSan) {
     if (!G.dangNhan()) { toast('Chương trình Gấu Noel đang tắt'); return; }
     var o = ov('<h3>🧸 Đổi gấu Noel</h3><p>Nhập SĐT khách để xem gấu chưa nhận / lượt chưa quay</p>' +
@@ -874,7 +820,7 @@
 
   // ── XOFA ──
   if (APP === 'xofa') {
-    // màn hình phụ (kiosk.html nghe gau_noel_2026_kiosk/xofa): chỉ ghi khi có sự kiện; SĐT chỉ gửi 3 số cuối
+    // màn hình phụ nghe gau_noel_2026_kiosk/xofa: chỉ ghi khi có sự kiện; SĐT chỉ gửi 3 số cuối
     var KREF = null; try { KREF = db0 && db0.ref(G.KIOSK_ROOT + '/xofa'); } catch (e) {}
     var batDaGhi = null;
     G.onManHinh = function (loai, d) {
@@ -950,7 +896,7 @@
         noiQuay.set(order, 'cho');
         hoiNoiQuay(order, function () { inCu.apply(self, args); });
       };
-      else console.warn('[gấu] posgieo không có POSPrinter.autoPrintIfEnabled — bỏ qua hỏi nơi quay');
+      else console.warn('[gấu] app không có POSPrinter.autoPrintIfEnabled — bỏ qua hỏi nơi quay');
     } catch (e) { console.warn('[gấu] không thấy POSPrinter', e); }
     // QR cuối bill in: dòng đánh dấu {type:'gauNoel'} → renderReceiptCanvas vẽ khối QR (renderer gốc không có loại 'qr')
     boc('buildReceiptContent', function (cu) {
@@ -1010,7 +956,7 @@
     });
   }
 
-  // ── nút «🧸 Đổi gấu» góc trái trên sidebar (PosX / posgieo — giỏ trống vẫn đổi được, khách chỉ ghé nhận gấu) ──
+  // ── nút «🧸 Đổi gấu» góc trái trên sidebar (giỏ trống vẫn đổi được, khách chỉ ghé nhận gấu) ──
   var nutSdb = null;
   if ((APP === 'xofa' || APP === 'gieo') && $('sdb')) {
     nutSdb = document.createElement('button'); nutSdb.id = 'gn-sdb-btn'; nutSdb.type = 'button';
@@ -1023,7 +969,7 @@
   // ── nghe công tắc: tắt → ẩn mọi thứ ──
   G.ngheCfg(function () { if (nutSdb) nutSdb.classList.toggle('on', G.dangNhan()); if (!G.dangNhan()) { anPanel(); dongOv(); } });
 
-  // ── pos.html → Quản lý → «Gấu Noel» ──
+  // ── Quản lý → «Gấu Noel» ──
   function ganTabQuanLy() {
     function mkBtn(src, id) {
       if (!src) return null;
@@ -1163,7 +1109,7 @@
         '<div style="margin-top:10px;padding:16px;border-radius:16px;border:1.5px dashed #fca5a5;background:#fff5f5;">' +
         '<div style="font-weight:900;color:#b91c1c;">Xoá toàn bộ dữ liệu Gấu Noel (khi hết đợt)</div>' +
         '<div style="font-size:12.5px;color:#7f1d1d;margin:6px 0 12px;line-height:1.6;">Xoá hết lượt, mã nhận, kho và công tắc trên Firebase. Không đụng hồ sơ khách, đơn hàng, điểm, tem. Không hoàn tác được. ' +
-        'Sau khi xoá: gỡ thẻ script gau_noel_giangsinh ở pos.html, PosX.html, posgieo.html (hướng dẫn đầu file gau_noel_giangsinh.v3.js).</div>' +
+        'Sau khi xoá: gỡ thẻ script gấu Noel khỏi các POS (xem tài liệu dự án).</div>' +
         '<button class="gn-btn" id="gn-xoa">Xoá dữ liệu Gấu Noel…</button><div id="gn-xoa-msg" style="font-size:12.5px;margin-top:10px;color:#7f1d1d;"></div></div>';
       pane.querySelector('#gn-bat').onclick = function () {
         var on = !G.dangBat();
@@ -1237,7 +1183,7 @@
     });
   }
 
-  // ── kiosk.html (màn hình phụ XOFA) — chỉ hiển thị, không Firestore. Nghe RT gau_noel_2026_kiosk/xofa ──
+  // ── màn hình phụ — chỉ hiển thị, không Firestore. Nghe RT gau_noel_2026_kiosk/xofa ──
   function ganKiosk() {
     var dbk = null; try { dbk = db; } catch (e) {}
     if (!dbk || !dbk.ref) { console.warn('[gấu] kiosk không thấy db'); return; }
@@ -1311,12 +1257,12 @@
         cuoi = ev;
       }, function (e) { console.warn('[gấu] kiosk', e); });
     }
-    // kiosk đăng nhập rồi mới nghe (rules cần đăng nhập) — gắn lại mỗi khi trạng thái đăng nhập đổi
+    // nghe sau khi đăng nhập — gắn lại mỗi khi trạng thái đăng nhập đổi
     try { firebase.auth().onAuthStateChanged(function () { gan(); }); } catch (e) { gan(); }
     G.kioskVe = ve;   // test
   }
 
-  // ── index_giangsinh.html (app khách The cafe 33) — quay = MỞ lượt đã bốc ở POS; thẻ gấu dưới thẻ thành viên ──
+  // ── app khách — quay = MỞ lượt đã bốc ở POS; thẻ gấu dưới thẻ thành viên ──
   // Đọc: 1 doc công tắc + doc của chính khách (nghe khi đang bật, để vừa thanh toán xong quét QR là thấy lượt). Tắt = không đọc doc khách.
   function ganKhach(fsk) {
     var css = document.createElement('style');
