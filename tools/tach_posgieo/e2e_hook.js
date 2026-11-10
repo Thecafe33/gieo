@@ -25,7 +25,7 @@ const KY_VONG = ['_afterIceChange', '_continueAfterPrepCount', 'addCart', 'addFo
 // Nguồn có thể bọc: file bọc ở gốc + MỌI mã app (script trần posgieo.html + js/posgieo/*).
 function nguonBoc(dir) {
   const out = [];
-  for (const f of ['gau_noel_giangsinh.v2.js', 'gieo_automation_pos.v3.js', 'gieo_engine2_pos_v1.js', 'gieo_engine2_pos_v2.js', 'gieo_engine2_pos_v3.js', 'gieo_engine2_pos_v4.js']) if (fs.existsSync(path.join(dir, f))) out.push({ f, t: fs.readFileSync(path.join(dir, f), 'utf8'), boc: true });
+  for (const f of ['gau_noel_giangsinh.v3.js', 'gieo_automation_pos.v3.js', 'gieo_engine2_pos_v1.js', 'gieo_engine2_pos_v2.js', 'gieo_engine2_pos_v3.js', 'gieo_engine2_pos_v4.js']) if (fs.existsSync(path.join(dir, f))) out.push({ f, t: fs.readFileSync(path.join(dir, f), 'utf8'), boc: true });
   const h = fs.readFileSync(path.join(dir, 'posgieo.html'), 'utf8'); out.push({ f: 'posgieo.html', t: h });
   const i = h.indexOf('(function assistHookIntoPOS'); if (i > 0) out.push({ f: 'assistHookIntoPOS', t: h.slice(i, i + 6000), boc: true });
   const jd = path.join(dir, 'js', 'posgieo'); if (fs.existsSync(jd)) for (const f of fs.readdirSync(jd)) out.push({ f: 'js/posgieo/' + f, t: fs.readFileSync(path.join(jd, f), 'utf8') });

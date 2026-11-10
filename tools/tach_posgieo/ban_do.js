@@ -85,7 +85,7 @@ function scanCalls(text) {
 }
 
 // 4. JS ngoài dùng tên của app
-const EXT = arg('--ext') ? arg('--ext').split(',') : ['gieo_automation_pos.v3.js', 'gieo_engine2_pos_v1.js', 'gau_noel_giangsinh.v2.js', 'unit_engine2_store_v1.js', 'unit_engine2_v1.js', 'unit_engine.v21.js', 'data_access.v9.js'];
+const EXT = arg('--ext') ? arg('--ext').split(',') : ['gieo_automation_pos.v3.js', 'gieo_engine2_pos_v1.js', 'gau_noel_giangsinh.v3.js', 'unit_engine2_store_v1.js', 'unit_engine2_v1.js', 'unit_engine.v21.js', 'data_access.v9.js'];
 const extRefs = new Map();
 for (const f of EXT) {
   if (!fs.existsSync(path.resolve(ROOT, f))) continue;

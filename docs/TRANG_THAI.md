@@ -10,7 +10,8 @@
 
 **Lỗi (nghiêm trọng, chỉ XOFA):** `PosX.html` gọi `_loyaltyAfterSave(items, total)` KHÔNG kèm mã bill, trong khi phần gắn Gấu Noel (`gau_noel_giangsinh.v2.js`) đọc mã bill ở tham số thứ 3 → `bill = ''` → `GauNoel.boc` chặn (`hopLeBill`) → mọi đơn XOFA đều «không có lượt». e2e cũ không bắt được vì tự gọi hàm với tham số giả `'XK1'`.
 **Sửa:** `PosX.html` 2 nơi gọi (confirmPay + Tính riêng) truyền `ref.key`. KHÔNG đổi `gau_noel_giangsinh.v2.js` (phần gắn đã đúng). **Chặn tái phát:** `tests/gau_noel_hooks.test.js` (tĩnh: mọi nơi gọi hàm bị bọc truyền đủ mã bill, hàm còn toàn cục, thẻ gấu nạp SAU module; cố ý hỏng lại → test báo FAIL). Sửa e2e `tools/gau_noel/e2e_gau.js` K3/K8 (kiosk.html không còn `bed-voucher-banner` → test cũ dừng giữa chừng, K4–K9 chưa từng chạy; nay 80/80 đạt).
-Còn để chủ quán quyết (không tự đổi): xem báo cáo cuối phiên 10/11 (khung Đổi quà hiện cả gấu của lượt chưa quay, popup «Khách quay ở đâu?» giữ bill tới 15 giây, huỷ bill TC33 không trả kho…).
+**Chủ quán chốt 10/11 → làm `gau_noel_giangsinh.v3.js`** (v2 giữ nguyên trên hosting; 3 POS + kiosk + index Giáng sinh trỏ v3): (1) khung «Gấu Noel của khách» ở quầy CHỈ hiện gấu của lượt khách ĐÃ quay — lượt chưa quay không lộ mã / không đổi được; (2) TC33: dòng «Nợ cũ» không tính vào mốc bed trên 160K. Giữ nguyên: popup «Khách quay ở đâu?» (Gieo/XOFA), huỷ bill TC33 không trả kho. Chưa rõ, chờ hỏi lại: Gieo chờ tối đa 30 giây để thấy bill đã xoá rồi mới trả lượt/kho. Test: `tests/gau_noel_hooks.test.js`; e2e `tools/gau_noel/e2e_gau.js` thêm 12 / 12b / 16b.
+Cần deploy: `gau_noel_giangsinh.v3.js`, `pos.html`, `PosX.html`, `posgieo.html`, `kiosk.html`, `index.html` (bản Giáng sinh) — mọi file ở `ban_deploy/giangsinh/`.
 
 # 05/11 — TRẠNG THÁI DEPLOY ENGINE 2 (chủ dự án xác nhận)
 - ĐÃ deploy 05/11 (chủ dự án xác nhận): gói `giao_file/dot_05-11_engine2_v4/` — lượt 2 (F1/F2 — việc mồ côi, dọn việc treo), lượt 3

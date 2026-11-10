@@ -98,7 +98,10 @@ const CHUNG = (fake) => {
     // nhập SĐT → khung khách
     reset(); $('kh-sdt').value = P; checkSdtLive(); await sleep(1300);
     const pn = $('gn-panel');
-    chk(pn.style.display === 'block' && pn.textContent.includes(qua[0][0]) && /Còn 3 lượt chưa quay/.test(pn.textContent), '12. nhập SĐT → khung Gấu Noel: quà chưa nhận + 3 lượt chưa quay', pn.textContent);
+    chk(pn.style.display === 'block' && /Còn 3 lượt chưa quay/.test(pn.textContent) && !pn.textContent.includes(qua[0][0]) && !pn.querySelector('[data-doi]'), '12. [v3] khách CHƯA quay: khung chỉ báo 3 lượt chưa quay, KHÔNG lộ mã / không có nút Đổi quà (chưa có kết quả)', pn.textContent);
+    for (let i = 0; i < 6; i++) { try { await GauNoel.mo(P); } catch (e) { break; } }   // khách quay hết lượt (như quay ở app)
+    resetPhoneInput(); await sleep(50); reset(); $('kh-sdt').value = P; checkSdtLive(); await sleep(1300);   // gõ lại SĐT (không dùng bộ nhớ 15 giây của lần đọc trước)
+    chk(pn.style.display === 'block' && pn.textContent.includes(qua[0][0]) && !!pn.querySelector('[data-doi]'), '12b. [v3] khách ĐÃ quay xong: khung hiện quà chưa nhận + nút Đổi quà', pn.textContent);
     await window.__shot('gau_panel');
     pn.querySelector('[data-doi]').click(); await sleep(600);
     chk(DB['gau_noel_2026/' + P].qua[qua[0][0]].used === true && DB['gau_noel_2026_kho/tc33'].doi === 1, '13. Đổi quà → mã hết hiệu lực, kho đếm đã nhận');
@@ -124,6 +127,14 @@ const CHUNG = (fake) => {
     let d2 = DB['gau_noel_2026/' + P2], l2 = d2 ? Object.values(d2.luot) : [];
     chk(l2.length === 1 && l2[0].k === 'bed' && l2[0].win, '16. bill LÚC VÀO ACTIVE BED: 150K giờ bed + 25K nước = 175K (bỏ 20K ăn vặt) → trúng chắc', l2);
     $('gn-ov') && $('gn-ov').querySelector('[data-a=x]') && $('gn-ov').querySelector('[data-a=x]').click();
+    // [v3] «Nợ cũ» không tính vào mốc 160K: 120K giờ bed + 25K nước = 145K (+ 30K nợ cũ = 175K) → KHÔNG trúng chắc
+    const P2b = '0912000224', bk2b = { id: 'BKY', key: 'BKY', phone: P2b, name: 'Khách bed 2', bedId: 'WAITING', status: 'chờ khách', start: '13:00', end: '23:00' };
+    reset();
+    for (let i = 0; i < 8; i++) addToCart('1h bed', 'M', 15000); addToCart('Bạc xỉu', 'M', 25000); cart.push({ name: 'Nợ cũ', size: 'M', qty: 1, price: 30000 });
+    const od2b = { id: Date.now() + 1, createdAt: 0, sdt: P2b, items: '', itemsArray: cart.slice(), total: 175000, paid: 175000, change: 0, method: 'Chuyển khoản', points: 0, bedId: '3', customerName: 'Khách bed 2' };
+    await new Promise(res => _pushPaidOrder(od2b, P2b, bk2b, false, function () { res(); })); await sleep(900);
+    chk(!DB['gau_noel_2026/' + P2b], '16b. [v3] vào bed: 120K giờ bed + 25K nước + 30K «Nợ cũ» = 175K nhưng nợ cũ KHÔNG tính vào mốc 160K → không trúng chắc (1 ly, không lượt)', DB['gau_noel_2026/' + P2b]);
+    $('gn-ov') && $('gn-ov').querySelector('[data-a=x]') && $('gn-ov').querySelector('[data-a=x]').click();
     const P3 = '0912000333';
     reset(); activeOrderingBedId = '4';
     for (let i = 0; i < 10; i++) addToCart('1h bed', 'M', 15000); addToCart('Bạc xỉu', 'M', 25000);
@@ -143,7 +154,7 @@ const CHUNG = (fake) => {
     chk(!Object.keys(DB).some(x => x.indexOf('gau_noel_2026') === 0), '21. Xoá dữ liệu (mã 2512) → hết mọi bản ghi gau_noel_2026*');
     Math.random = rnd;
     const o = (function () { const t = __RT2.tree().orders || {}; let n = 0; (function w(x) { Object.keys(x || {}).forEach(k => { const v = x[k]; if (v && v.itemsArray) n++; else if (v && typeof v === 'object') w(v); }); })(t); return n; })();
-    chk(o === 5, '22. 5 đơn đều lưu bình thường (chương trình không chặn thanh toán)', o);
+    chk(o === 6, '22. 6 đơn đều lưu bình thường (chương trình không chặn thanh toán)', o);
     return R;
   }, [fake, CHUNG.toString()]).catch(async e => (await p.evaluate(() => window.__R || []).catch(() => [])).concat(['FAIL dừng giữa chừng: ' + e.message.split('\n')[0]]));
   inKq('pos.html (The cafe 33)', R, errs); await p.close();
@@ -229,7 +240,7 @@ const CHUNG = (fake) => {
   R = await p.evaluate(async ([kQr, kKq]) => {
     const R = []; window.__R = R; const chk = (c, m, x) => R.push((c ? 'ok   ' : 'FAIL ') + m + (c || x === undefined ? '' : ' → ' + JSON.stringify(x)));
     const sleep = ms => new Promise(r => setTimeout(r, ms)); const $ = id => document.getElementById(id);
-    if (!window.GauNoel) { chk(false, 'K0. kiosk không nạp được gau_noel_giangsinh.v2.js'); return R; }
+    if (!window.GauNoel) { chk(false, 'K0. kiosk không nạp được gau_noel_giangsinh.v3.js'); return R; }
     const now = o => Object.assign({}, o, { ev: Object.assign({}, o.ev, { at: Date.now() }) });
     chk(!$('gn-k').classList.contains('on') && !$('gn-kb').classList.contains('on'), 'K1. chưa có dữ liệu → không hiện gì');
     await db.ref('gau_noel_2026_kiosk/xofa').set(now(kQr)); await sleep(150);
@@ -264,7 +275,7 @@ const CHUNG = (fake) => {
   ({ p, errs } = await moTrang(b, 'posgieo.html', { width: 1280, height: 800 }));
   R = await p.evaluate(async ([fake, chung]) => {
     const R = []; window.__R = R; const chk = (c, m, x) => R.push((c ? 'ok   ' : 'FAIL ') + m + (c || x === undefined ? '' : ' → ' + JSON.stringify(x)));
-    if (!window.GauNoel) { chk(false, 'G0. trang không nạp được gau_noel_giangsinh.v2.js'); return R; }
+    if (!window.GauNoel) { chk(false, 'G0. trang không nạp được gau_noel_giangsinh.v3.js'); return R; }
     const { cap } = (eval('(' + chung + ')'))(fake);
     const sleep = ms => new Promise(r => setTimeout(r, ms)); const DB = window.__LXFS, G = GauNoel;
     if (window.GieoData) GieoData.storeId = () => 'gg01';
@@ -332,7 +343,7 @@ const CHUNG = (fake) => {
     R = await pg.evaluate(async ([fake]) => {
       const R = []; window.__R = R; const chk = (c, m, x) => R.push((c ? 'ok   ' : 'FAIL ') + m + (c || x === undefined ? '' : ' → ' + JSON.stringify(x)));
       const sleep = ms => new Promise(r => setTimeout(r, ms)); const $ = id => document.getElementById(id);
-      if (!window.GauNoel) { chk(false, 'I0. index_giangsinh không nạp gau_noel_giangsinh.v2.js'); return R; }
+      if (!window.GauNoel) { chk(false, 'I0. index_giangsinh không nạp gau_noel_giangsinh.v3.js'); return R; }
       eval(fake); const F = window.__lxFake, DB = window.__LXFS, G = GauNoel;
       // Firestore giả + nghe doc (onSnapshot)
       const LS = [], oc = F.fstore.collection, ot = F.fstore.runTransaction;

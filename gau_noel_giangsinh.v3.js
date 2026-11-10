@@ -1,4 +1,4 @@
-/* gau_noel_giangsinh.v2.js — QUAY TRÚNG GẤU GIÁNG SINH 2026, dùng chung 3 quán + app khách:
+/* gau_noel_giangsinh.v3.js — QUAY TRÚNG GẤU GIÁNG SINH 2026, dùng chung 3 quán + app khách:
  *   pos.html (The cafe 33) · PosX.html (XOFA) · posgieo.html (Gieo Gieo) — BỐC THĂM lúc thanh toán đơn có SĐT, Đổi quà,
  *     Mở lượt tại quầy, huỷ bill (PosX / Gieo). The cafe 33: popup QR sau thanh toán. Gieo: QR cuối bill in.
  *   kiosk.html (màn hình phụ XOFA) — data-quan="kiosk": QR + số lượt sau thanh toán, chiếu lại «Mở lượt tại quầy» (RT gau_noel_2026_kiosk).
@@ -17,11 +17,14 @@
  *   - Chỉ chạy khi CÔNG TẮC BẬT (gau_noel_2026_kho/_cfg.bat — tab Quản lý pos) VÀ trong ngày của đợt (giờ máy chủ .info/serverTimeOffset).
  *     Tắt (mặc định) = không bốc, không hiện gì, không ghi gì; chỉ nghe 1 doc _cfg.
  *   - Dữ liệu riêng (không đụng customers): gau_noel_2026/{sđt}, gau_noel_2026_kho/{quán | _cfg}.
- *   - Gắn vào app bằng ĐÚNG 1 THẺ trước </body>: <script src="gau_noel_giangsinh.v2.js" data-quan="tc33|xofa|gieo"></script>
+ *   - Gắn vào app bằng ĐÚNG 1 THẺ trước </body>: <script src="gau_noel_giangsinh.v3.js" data-quan="tc33|xofa|gieo"></script>
  *     Phần gắn chỉ BỌC hàm sẵn có của app từ bên ngoài (không sửa code bên trong app).
  * v2 (16/10): v1 đã deploy bị sửa tại chỗ (vòng quay, nút Đổi gấu sidebar, quay tại quầy tự «Đã nhận», bed 160K lúc vào active, bán qua app
  *     không lượt, dashboard…) → máy giữ v1 trong bộ nhớ đệm không thấy → đổi tên v2. v1 giữ nguyên trên hosting (máy còn HTML cũ xin nó).
- * Sửa file này sau khi đã deploy = tạo gau_noel_giangsinh.v3.js (cùng quy tắc phiên bản như engine).
+ * v3 (10/11): (1) khung «Gấu Noel của khách» ở quầy CHỈ hiện gấu của lượt khách ĐÃ quay (mở) — gấu của lượt chưa quay không lộ mã / kết quả,
+ *     không đổi được trước khi quay (khớp app khách vốn đã giấu); (2) TC33: dòng «Nợ cũ» không tính vào mốc bed trên 160K.
+ *     v2 giữ nguyên trên hosting (máy còn HTML cũ trong bộ nhớ đệm vẫn xin nó).
+ * Sửa file này sau khi đã deploy = tạo gau_noel_giangsinh.v4.js (cùng quy tắc phiên bản như engine).
  *
  * ═══ GỠ CHƯƠNG TRÌNH SẠCH SẼ KHI HẾT GIÁNG SINH (sau 31/12/2026) ═══
  *   1. pos.html (The cafe 33) → Quản lý → tab «Gấu Noel»:
@@ -731,7 +734,9 @@
   function anPanel() { panel.style.display = 'none'; panel.innerHTML = ''; dangQuet = ''; }
   /** Vẽ khung gấu của 1 SĐT vào el (khung cạnh ô SĐT · popup Đổi gấu ở sidebar). lamMoi() = đọc lại + vẽ lại. Trả có nội dung không. */
   function veKhung(el, sdt, st, lamMoi) {
-    var q = store(), cho = st.qua.filter(function (x) { return !x.used; });
+    // [v3] gấu của lượt khách CHƯA quay thì chưa hiện (chưa có «kết quả»); đã nhận (used) / không gắn lượt vẫn hiện
+    var moRoi = {}; st.luot.forEach(function (l) { if (l.opened) moRoi[l.id] = 1; });
+    var q = store(), cho = st.qua.filter(function (x) { return !x.used && (!x.luot || moRoi[x.luot]); });
     var tai = cho.filter(function (x) { return x.store === q; }), khac = cho.filter(function (x) { return x.store !== q; });
     if (!tai.length && !khac.length && !st.chuaMo.length) { el.innerHTML = ''; return false; }
     var h = '<div class="gn-h">🧸 Gấu Noel của khách <span class="gn-tag">GIÁNG SINH</span></div>';
@@ -849,7 +854,8 @@
     G.donTc33 = function (orderData, finalSdt, booking, vaoBed) {   // tách riêng để test
       var items = (orderData && orderData.itemsArray) || [];
       var n = demLy(items, function (c) { return !laAnVat(c) && !laKhac(c); });
-      var bedTien = 0; items.forEach(function (c) { if (c && !laAnVat(c)) bedTien += (Number(c.price) || 0) * (Number(c.qty) || 0); });
+      // [v3] «Nợ cũ» (khách trả nợ) không phải tiền bed / nước → không tính vào mốc 160K (giữ nguyên cách nhận dạng của _isKhacLine)
+      var bedTien = 0; items.forEach(function (c) { if (c && !laAnVat(c) && String(c.name || '').trim().toLowerCase().indexOf('nợ cũ') !== 0) bedTien += (Number(c.price) || 0) * (Number(c.qty) || 0); });
       return { store: 'tc33', sdt: finalSdt, bill: String(orderData && orderData.id || ''), ly: n.ly, tienNuoc: n.tien, bed160: !!(vaoBed && booking) && bedTien > G.CFG.bedToiThieu };
     };
     boc('_pushPaidOrder', function (cu) { return function (orderData, finalSdt, currentBooking, isCheckout, done) { cho = { o: orderData, s: finalSdt, b: currentBooking, vao: typeof done === 'function' && !isCheckout }; return cu.apply(this, arguments); }; });
@@ -1157,7 +1163,7 @@
         '<div style="margin-top:10px;padding:16px;border-radius:16px;border:1.5px dashed #fca5a5;background:#fff5f5;">' +
         '<div style="font-weight:900;color:#b91c1c;">Xoá toàn bộ dữ liệu Gấu Noel (khi hết đợt)</div>' +
         '<div style="font-size:12.5px;color:#7f1d1d;margin:6px 0 12px;line-height:1.6;">Xoá hết lượt, mã nhận, kho và công tắc trên Firebase. Không đụng hồ sơ khách, đơn hàng, điểm, tem. Không hoàn tác được. ' +
-        'Sau khi xoá: gỡ thẻ script gau_noel_giangsinh ở pos.html, PosX.html, posgieo.html (hướng dẫn đầu file gau_noel_giangsinh.v2.js).</div>' +
+        'Sau khi xoá: gỡ thẻ script gau_noel_giangsinh ở pos.html, PosX.html, posgieo.html (hướng dẫn đầu file gau_noel_giangsinh.v3.js).</div>' +
         '<button class="gn-btn" id="gn-xoa">Xoá dữ liệu Gấu Noel…</button><div id="gn-xoa-msg" style="font-size:12.5px;margin-top:10px;color:#7f1d1d;"></div></div>';
       pane.querySelector('#gn-bat').onclick = function () {
         var on = !G.dangBat();

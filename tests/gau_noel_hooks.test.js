@@ -1,4 +1,4 @@
-// Gấu Noel 2026 — HỢP ĐỒNG GẮN VÀO APP (tĩnh): phần gắn của gau_noel_giangsinh.v2.js chỉ BỌC hàm sẵn có của 3 POS, nên
+// Gấu Noel 2026 — HỢP ĐỒNG GẮN VÀO APP (tĩnh): phần gắn của gau_noel_giangsinh.v3.js chỉ BỌC hàm sẵn có của 3 POS, nên
 // (1) hàm bị bọc phải còn là hàm toàn cục, (2) nơi gọi phải truyền đủ tham số mà phần gắn đọc (mã bill!), (3) thẻ <script> gấu
 // phải nằm SAU mọi script nạp hàm đó. e2e (tools/gau_noel/e2e_gau.js) tự gọi hàm bằng tham số giả nên KHÔNG bắt được lỗi
 // «nơi gọi thật không truyền mã bill» (PosX 10/11: _loyaltyAfterSave(items, total) → bill rỗng → XOFA không bao giờ có lượt).
@@ -67,7 +67,7 @@ function khaiBao(src, ten) {
   chk(kb && kb.join() === 'order,orderId', 'Gieo: assistFinalizeOrder(order, orderId) đúng thứ tự phần gắn đọc', kb);
   const g = loiGoi(th, 'assistFinalizeOrder');
   chk(g.length >= 2 && g.every(a => a.length === 2 && /billRef\.key/.test(a[1])), 'Gieo: MỌI nơi gọi assistFinalizeOrder truyền billRef.key (mã bill)', g.map(a => a.join('|')));
-  const tag = html.indexOf('gau_noel_giangsinh.v2.js');
+  const tag = html.indexOf('gau_noel_giangsinh.v3.js');
   const nap = f => html.indexOf('src="' + f + '"');
   const mods = { assistFinalizeOrder: 'js/posgieo/pos_assist.v1.js', buildReceiptContent: 'js/posgieo/pos_print_content.v1.js', renderReceiptCanvas: 'js/posgieo/pos_print_content.v1.js',
     renderCustomerInfo: 'js/posgieo/pos_customers.v1.js', clearCustomer: 'js/posgieo/pos_customers.v1.js', delOrderConfirm: 'js/posgieo/pos_orders.v1.js' };
@@ -80,8 +80,8 @@ function khaiBao(src, ten) {
 
 // ── thẻ gấu phải là script CUỐI của app (sau mọi script khác nạp hàm bị bọc) và có đủ data-quan
 for (const [f, q] of [['pos.html', 'tc33'], ['PosX.html', 'xofa'], ['posgieo.html', 'gieo'], ['kiosk.html', 'kiosk'], ['index_giangsinh.html', 'khach']]) {
-  const s = rd(f), tag = s.indexOf('<script src="gau_noel_giangsinh.v2.js"'), conLai = s.slice(tag + 30);
-  chk(tag > 0 && new RegExp('gau_noel_giangsinh\\.v2\\.js"\\s+data-quan="' + q + '"').test(s), f + ': có thẻ gấu data-quan="' + q + '"');
+  const s = rd(f), tag = s.indexOf('<script src="gau_noel_giangsinh.v3.js"'), conLai = s.slice(tag + 30);
+  chk(tag > 0 && new RegExp('gau_noel_giangsinh\\.v3\\.js"\\s+data-quan="' + q + '"').test(s), f + ': có thẻ gấu data-quan="' + q + '"');
   // posgieo: sau thẻ gấu còn các file Engine 2 / trợ lý tự động — không khai báo lại hàm gấu bọc (kiểm ngay dưới)
   const sau = (conLai.match(/<script[^>]*\ssrc="([^"]+)"/g) || []).map(x => /src="([^"]+)"/.exec(x)[1]);
   const duocPhep = f === 'posgieo.html' ? ['gieo_automation_pos.v3.js', 'unit_engine2_v1.js', 'unit_engine2_staffing_v1.js', 'unit_engine2_store_v4.js', 'gieo_engine2_pos_v4.js'] : [];
@@ -90,7 +90,7 @@ for (const [f, q] of [['pos.html', 'tc33'], ['PosX.html', 'xofa'], ['posgieo.htm
 }
 {
   const ban = rd('ban_deploy/giangsinh/index.html');
-  chk(/gau_noel_giangsinh\.v2\.js"\s+data-quan="khach"/.test(ban), 'bản deploy giangsinh/index.html (app khách) có thẻ gấu');
+  chk(/gau_noel_giangsinh\.v3\.js"\s+data-quan="khach"/.test(ban), 'bản deploy giangsinh/index.html (app khách) có thẻ gấu');
   chk(!/gau_noel_giangsinh/.test(rd('index.html')), 'index.html gốc không mang thẻ gấu (chỉ bản Giáng sinh)');
 }
 console.log(ok ? 'ALL PASS' : 'SOME FAIL'); if (!ok) process.exit(1);

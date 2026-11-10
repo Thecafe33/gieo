@@ -1,8 +1,8 @@
-// gau_noel_giangsinh.v2.js — quay trúng gấu Giáng sinh 2026: chặng, tỉ lệ 5 yếu tố, luật chắc trúng, trần kho, giao dịch POS / app khách.
+// gau_noel_giangsinh.v3.js — quay trúng gấu Giáng sinh 2026: chặng, tỉ lệ 5 yếu tố, luật chắc trúng, trần kho, giao dịch POS / app khách.
 const { makeFake } = require('./lib/fakefb');
 let ok = true; const chk = (c, m) => { console.log((c ? 'ok ' : 'FAIL ') + m); if (!c) ok = false; };
-delete require.cache[require.resolve('../gau_noel_giangsinh.v2.js')];
-const G = require('../gau_noel_giangsinh.v2.js');
+delete require.cache[require.resolve('../gau_noel_giangsinh.v3.js')];
+const G = require('../gau_noel_giangsinh.v3.js');
 const at = iso => Date.parse(iso + '+07:00');
 const setNow = iso => G._setOffset(at(iso) - Date.now());
 G.apCfg({ bat: true });   // phần thuần + giao dịch: coi như đã bật (công tắc test riêng bên dưới)
