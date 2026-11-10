@@ -177,7 +177,7 @@ const CHUNG = (fake) => {
     chk(mox() && /Khách quay ở đâu/.test(ovx().textContent) && !(__RT2.get('gau_noel_2026_kiosk/xofa') || {}).ev, 'X2. thanh toán xong → POS hỏi «Khách quay ở đâu?», màn hình phụ CHƯA hiện gì');
     ovx().querySelector('[data-a=nha]').click(); await sleep(200);
     Math.random = rnd;
-    chk(typeof window.delOrderConfirm === 'function' && /3367/.test(String(window.delOrderConfirm)), 'X3. đã bọc delOrderConfirm (huỷ bill trả kho)');
+    chk(typeof window.delOrderConfirm === 'function' && /huyBill/.test(String(window.delOrderConfirm)), 'X3. đã bọc delOrderConfirm (huỷ bill trả kho)');
     isAppSale = true; document.getElementById('cuph').value = '0933000999';
     _loyaltyAfterSave([{ name: 'Trà sữa', price: 30000, qty: 6 }], 180000, 'XAPP'); await sleep(500); isAppSale = false;
     chk(!DB['gau_noel_2026/0933000999'] && !mox(), 'X3b. đơn BÁN QUA APP → không lượt, không hỏi');

@@ -93,4 +93,11 @@ for (const [f, q] of [['pos.html', 'tc33'], ['PosX.html', 'xofa'], ['posgieo.htm
   chk(/gau_noel_giangsinh\.v3\.js"\s+data-quan="khach"/.test(ban), 'bản deploy giangsinh/index.html (app khách) có thẻ gấu');
   chk(!/gau_noel_giangsinh/.test(rd('index.html')), 'index.html gốc không mang thẻ gấu (chỉ bản Giáng sinh)');
 }
+// ── file mà app KHÁCH nạp được (gau_noel_giangsinh.v3.js): không mang PIN xoá bill, không nhắc tên file POS / chú thích về rules
+{
+  const g = rd('gau_noel_giangsinh.v3.js');
+  chk(!/3367/.test(g), 'gấu v3 (file khách nạp): không chứa PIN xoá bill');
+  chk(!/\b(PosX|posgieo|pos|manage|quanlygieo|kiosk)\.html\b/i.test(g), 'gấu v3 (file khách nạp): không nhắc tên file POS / quản lý');
+  chk(!/toàn quyền/.test(g), 'gấu v3 (file khách nạp): không có chú thích về rules Firebase');
+}
 console.log(ok ? 'ALL PASS' : 'SOME FAIL'); if (!ok) process.exit(1);

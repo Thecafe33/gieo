@@ -938,11 +938,11 @@
     boc('clearCustomer', function (cu) { return function () { anPanel(); return cu.apply(this, arguments); }; });
     boc('delOrderConfirm', function (cu) {
       return function () {
-        var pin = (($('del-pin-input') || {}).value || '').trim(), id = null, o = null;
+        var id = null, o = null;
         try { id = curOid; o = (orders || []).find(function (x) { return x.id === id; }); } catch (e) {}
         var r = cu.apply(this, arguments);
-        if (pin === '3367' && o && o.phone && (G.dangMua() || G.dangNhan())) {
-          // chờ app xoá xong (đơn rời khỏi danh sách orders) rồi mới trả lượt / kho
+        if (o && o.phone && (G.dangMua() || G.dangNhan())) {
+          // chờ app xoá xong (đơn rời khỏi danh sách orders) rồi mới trả lượt / kho; xoá không thành (sai mã, lỗi) → đơn còn nguyên → không trả gì
           var lan = 0, q = store();
           var doi = function () {
             var con = true; try { con = (orders || []).some(function (x) { return x.id === id; }); } catch (e) {}
