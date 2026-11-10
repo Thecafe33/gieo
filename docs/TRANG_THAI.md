@@ -6,6 +6,12 @@
 
 `manage.html` (+ 3 bản `ban_deploy/*/manage.html`), test `tests/manage_diem_khach.test.js`. Ghi thẳng giá trị các trường có sẵn của `customers` (`total_points`, `stamp_count`, `free_drink_available` + mảng `stamp_prices` / `free_drink_caps` cho khớp posgieo), không đổi cấu trúc. Mỗi lần sửa ghi 1 dòng `customer_adjust_logs_gieogieo` (số trước + giờ; sửa 1 khách có thêm số sau). Dọn hàng loạt: lọc theo số tháng không ghé + tick loại (Point / Tem / Ly free), khách vừa ghé lại sau lúc xem danh sách bị bỏ qua. Tab không tự đọc cả bảng khách: tìm SĐT = 1 lượt đọc, «Tải danh sách khách» ≈ 1 lần đọc cả bảng. Lưu ý: gợi ý SĐT của POS (`customer_ac_cache_gieogieo`) giữ `total_points` cũ tới lần làm mới kế tiếp. Khi TĂNG tem / ly: phần thêm xếp CUỐI danh sách (đổi sau tem / ly thật của khách), có ô nhập giá tem thêm (mặc định 16K) / trần ly thêm (mặc định 19K); giảm thì bỏ phần cũ nhất như POS. Trần ly thật của khách = trung bình 6 giá tem + 3K (19K chỉ là mức cho tem không có giá). Chưa có nút khôi phục từ lịch sử.
 
+# 10/11 — Gấu Noel: rà 3 POS + app khách trước ngày bắt đầu 15/11 — SỬA XOFA không bốc được lượt (thiếu mã bill) — CHƯA deploy
+
+**Lỗi (nghiêm trọng, chỉ XOFA):** `PosX.html` gọi `_loyaltyAfterSave(items, total)` KHÔNG kèm mã bill, trong khi phần gắn Gấu Noel (`gau_noel_giangsinh.v2.js`) đọc mã bill ở tham số thứ 3 → `bill = ''` → `GauNoel.boc` chặn (`hopLeBill`) → mọi đơn XOFA đều «không có lượt». e2e cũ không bắt được vì tự gọi hàm với tham số giả `'XK1'`.
+**Sửa:** `PosX.html` 2 nơi gọi (confirmPay + Tính riêng) truyền `ref.key`. KHÔNG đổi `gau_noel_giangsinh.v2.js` (phần gắn đã đúng). **Chặn tái phát:** `tests/gau_noel_hooks.test.js` (tĩnh: mọi nơi gọi hàm bị bọc truyền đủ mã bill, hàm còn toàn cục, thẻ gấu nạp SAU module; cố ý hỏng lại → test báo FAIL). Sửa e2e `tools/gau_noel/e2e_gau.js` K3/K8 (kiosk.html không còn `bed-voucher-banner` → test cũ dừng giữa chừng, K4–K9 chưa từng chạy; nay 80/80 đạt).
+Còn để chủ quán quyết (không tự đổi): xem báo cáo cuối phiên 10/11 (khung Đổi quà hiện cả gấu của lượt chưa quay, popup «Khách quay ở đâu?» giữ bill tới 15 giây, huỷ bill TC33 không trả kho…).
+
 # 05/11 — TRẠNG THÁI DEPLOY ENGINE 2 (chủ dự án xác nhận)
 - ĐÃ deploy 05/11 (chủ dự án xác nhận): gói `giao_file/dot_05-11_engine2_v4/` — lượt 2 (F1/F2 — việc mồ côi, dọn việc treo), lượt 3
   (học dồn, bộ đếm, phiên bản máy POS, xếp hàng một lần) và lượt 4 (chặn nhập sai khi nấu mẻ — `pos_prep.v2.js` + chính sách

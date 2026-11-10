@@ -234,7 +234,7 @@ const CHUNG = (fake) => {
     chk(!$('gn-k').classList.contains('on') && !$('gn-kb').classList.contains('on'), 'K1. chưa có dữ liệu → không hiện gì');
     await db.ref('gau_noel_2026_kiosk/xofa').set(now(kQr)); await sleep(150);
     chk($('gn-k').classList.contains('on') && /2 lượt/.test($('gn-k').textContent) && $('gn-k').querySelector('svg path') && /…111/.test($('gn-k').textContent), 'K2. sau thanh toán: QR + "2 lượt" + SĐT …111 ở khung phải', $('gn-k').textContent);
-    chk($('gn-kb').classList.contains('on') && $('bed-voucher-banner').style.display === 'none', 'K3. đang bật: banner «quay trúng gấu bông» thay banner voucher bed cũ');
+    chk($('gn-kb').classList.contains('on') && (!$('bed-voucher-banner') || $('bed-voucher-banner').style.display === 'none'), 'K3. đang bật: banner «quay trúng gấu bông» thay banner voucher bed cũ');
     await window.__shot('gau_kiosk_qr');
     await db.ref('session_display_xolifa').set({ state: 'idle', cart: [], total: 0 }); await sleep(100);
     chk($('gn-k').classList.contains('on'), 'K4. POS về «idle» 5 giây sau thanh toán → QR vẫn giữ');
@@ -253,7 +253,7 @@ const CHUNG = (fake) => {
     chk(/Trúng 1 gấu bông/.test($('gn-k').textContent) && /GAUAB2CD/.test($('gn-k').textContent) && /XOFA/.test($('gn-k').textContent), 'K7. trúng → gấu + mã + quán nhận');
     await window.__shot('gau_kiosk_trung');
     await db.ref('gau_noel_2026_kiosk/xofa/bat').set(false); await sleep(150);
-    chk(!$('gn-k').classList.contains('on') && !$('gn-kb').classList.contains('on') && $('bed-voucher-banner').style.display === '', 'K8. TẮT → ẩn hết, kiosk về như cũ');
+    chk(!$('gn-k').classList.contains('on') && !$('gn-kb').classList.contains('on') && (!$('bed-voucher-banner') || $('bed-voucher-banner').style.display === ''), 'K8. TẮT → ẩn hết, kiosk về như cũ');
     await db.ref('gau_noel_2026_kiosk/xofa').set({ bat: true, ev: { loai: 'qr', soLuot: 1, at: Date.now() - 11 * 60e3 } }); await sleep(150);
     chk(!$('gn-k').classList.contains('on'), 'K9. sự kiện cũ hơn 10 phút (mở lại kiosk) → không hiện');
     return R;
