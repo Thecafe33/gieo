@@ -151,5 +151,50 @@ const txCount=f=>{let n=0;const rt=f.fstore.runTransaction;f.fstore.runTransacti
   assert(d<3600,'dựng danh sách không chờ Engine 2 quá ~3 giây ('+d+' ms)');assert.deepEqual(out,[],'trả đúng danh sách sẵn có của POS (ở đây rỗng)');
   f.fstore.runTransaction=rt;}
  console.log('ok 5. B5 — mạng treo: nhân viên chờ Engine 2 tối đa trần của cả lần kết ca, POS tự ghi; lượt nhận muộn được rút lại, kho không ghi đôi');
+ // ── 6. Đua kho: lượt xin trễ tới máy chủ, POS hết trần chờ — kho KHÔNG BAO GIỜ trừ đôi, nhân viên không phải cân lại ─────────
+ const rows=f=>Object.entries(f.FS).filter(([p])=>p.startsWith('stock_transactions_gieogieo/')).map(([p,d])=>({id:p.split('/')[1],type:d.type,qty:d.qty,e2:!!d.engine2Owner}));
+ const meas=f=>Object.entries(f.FS).filter(([p])=>p.startsWith(ROOT+'/measurements/')).map(([p,d])=>({id:p.split('/').pop(),...d}));
+ {
+  // (a) Yêu cầu ĐÃ ghi ở máy chủ nhưng câu trả lời về trễ; worker áp kho TRƯỚC khi POS tự ghi → POS nhận lại lượt, không cân lại.
+  const f=world(),inv=await load(f);const lines=await computeShiftInventoryCountLinesPOS('close');const limit=GieoEngine2POS._budget().limit;
+  const rt=f.fstore.runTransaction;let first=true,committed;
+  f.fstore.runTransaction=fn=>{if(!first)return rt.call(f.fstore,fn);first=false;const p=rt.call(f.fstore,fn);committed=p;return p.then(r=>sleep(limit+500).then(()=>r));};
+  const l=fill(f,inv,lines.find(x=>x.itemId==='j')),staff={id:'b',fullName:'B'};
+  const w=Store.create({storeId:'gg01',fstore:f.fstore,now:()=>Date.now()+2000,inventory:inv});
+  const applying=UnitEngine.shift.applyLine(l,DAY,staff,'seed6a');           // POS bấm xác nhận
+  await sleep(300);await committed;const m0=meas(f)[0];assert.equal(m0.status,'queued','yêu cầu đã nằm ở máy chủ');
+  await w.drain(E.key('measurement',m0.id));                                  // worker xử lý trong lúc POS còn chờ câu trả lời
+  assert.equal(f.rtGet('active_units_gieogieo/j/n').unitBase,380,'worker đã áp kho bằng mã lượt Engine 2');
+  const out=await applying;                                                   // KHÔNG ném «cân lại mã đó»
+  assert.equal(out.status,'reconciled');assert(l.engine2Owner&&l.engine2OpId===m0.operationId,'POS nhận lại đúng lượt của Engine 2');
+  assert.equal(l.units[0].weighed,380,'số vừa cân còn nguyên — nhân viên không phải cân lại');
+  assert.equal(f.rtGet('active_units_gieogieo/j/n').unitBase,380,'kho chỉ trừ MỘT lần');
+  assert.deepEqual(rows(f).map(r=>[r.type,r.qty,r.e2]),[['WASTE',-20,true]],'đúng MỘT dòng hao hụt, thuộc Engine 2');
+  await sleep(limit+900);
+  assert.equal(meas(f)[0].status,'done');assert.equal(f.FS[ROOT+'/tasks/'+l.e2.taskId].status,'done','việc xong, không bị rút');
+  assert(!f.FS[ROOT].e2Daily||!Object.values(f.FS[ROOT].e2Daily)[0].fbTotal,'không đếm nhầm là «POS tự ghi»');
+  assert.equal(Object.keys(f.FS).filter(p=>p.startsWith(ROOT+'/cases/')).length,1,'trách nhiệm ghi một lần (hồ sơ Engine 2)');
+  f.fstore.runTransaction=rt;
+ }
+ {
+  // (b) POS tự ghi TRƯỚC, worker tới sau → worker từ chối (kho đã đổi), việc được đóng kèm lý do — không treo, không trừ đôi.
+  const f=world(),inv=await load(f);const lines=await computeShiftInventoryCountLinesPOS('close');const limit=GieoEngine2POS._budget().limit;
+  const rt=f.fstore.runTransaction;let first=true,committed;
+  f.fstore.runTransaction=fn=>{if(!first)return rt.call(f.fstore,fn);first=false;const p=rt.call(f.fstore,fn);committed=p;return p.then(r=>sleep(limit+500).then(()=>r));};
+  const l=fill(f,inv,lines.find(x=>x.itemId==='j')),staff={id:'b',fullName:'B'};
+  const out=await UnitEngine.shift.applyLine(l,DAY,staff,'seed6b');           // hết trần → POS tự ghi
+  assert.equal(out.status,'reconciled');assert(!l.engine2Owner);assert.equal(f.rtGet('active_units_gieogieo/j/n').unitBase,380);
+  const w=Store.create({storeId:'gg01',fstore:f.fstore,now:()=>Date.now()+2000,inventory:inv});
+  await w.drain(E.key('measurement',meas(f)[0].id)).catch(()=>{});            // worker tới sau
+  assert.equal(f.rtGet('active_units_gieogieo/j/n').unitBase,380,'worker KHÔNG trừ lần hai');assert.equal(meas(f)[0].status,'rejected');
+  await sleep(900);                                                           // câu trả lời trễ về → rút / đóng việc
+  const t=f.FS[ROOT+'/tasks/'+l.e2.taskId];assert.equal(t.status,'cancelled','việc không treo ở «chờ cân lại»');assert.equal(t.pending,false);assert.equal(t.posFallback.code,'request_failed');
+  assert.deepEqual(rows(f).map(r=>[r.type,r.qty,r.e2]),[['WASTE',-20,false]],'đúng MỘT dòng hao hụt, do POS ghi (trách nhiệm theo kho như khi chưa bật Engine 2)');
+  assert.equal(Object.keys(f.FS).filter(p=>p.startsWith(ROOT+'/cases/')).length,0,'Engine 2 không ghi trách nhiệm lần hai');
+  assert.equal(Object.keys(f.FS).filter(p=>p.startsWith('duty_cases_gieogieo/')).length,1,'kho ghi vụ lệch của lượt cân (một lần)');
+  assert.equal(Object.values(f.FS[ROOT].e2Daily)[0].fbTotal,1);
+  f.fstore.runTransaction=rt;
+ }
+ console.log('ok 6. Đua kho khi mạng chậm: worker áp trước → POS nhận lại lượt, không cân lại; POS ghi trước → worker không trừ lần hai, việc đóng kèm lý do — luôn MỘT dòng hao hụt');
  console.log('ALL PASS');
 })().catch(e=>{console.error('FAIL',e.stack||e.message);process.exit(1);});

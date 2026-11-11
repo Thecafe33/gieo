@@ -224,7 +224,7 @@ async function engage(l,day,staff){
   const who={id:staff.id,fullName:staff.fullName||''},pending=service.requestMeasurementEx(l.e2.taskId,line,who);
   let r;try{r=await timed(pending,left());}
   catch(e){
-   if(e&&e.code==='E2_WAIT'){l._e2Late=pending.then(x=>x&&x.status==='queued'&&!x.existed?service.withdraw(x.id,who,'quá thời gian chờ').then(ok=>{if(ok)l._e2Reported=true;}):null).catch(()=>{});
+   if(e&&e.code==='E2_WAIT'){l._e2Timeout={mid:E.key(l.e2.taskId,l.itemId,line.sessionId)};l._e2Late=pending.then(x=>x&&x.status==='queued'&&!x.existed?service.withdraw(x.id,who,'quá thời gian chờ').then(ok=>{if(ok)l._e2Reported=true;}):null).catch(()=>{});
     return no('request_failed','quá thời gian chờ');}
    throw e;
   }
@@ -234,6 +234,17 @@ async function engage(l,day,staff){
   l.engine2Owner=true;l.engine2OpId=r.operationId;return {ok:true};
  }catch(e){console.warn('Engine2: không nhận lượt cân, POS ghi như thường —',e.message);return no('request_failed',e.code==='E2_WAIT'?'quá thời gian chờ':e.message);}
  finally{waitUsed+=Date.now()-t0;}
+}
+// [v5-B5] POS tự ghi sau khi hết trần chờ nhưng kho báo mã vừa đổi: kiểm biên nhận kho của CHÍNH lượt Engine 2 này (mã lượt tính được
+// tại máy). Có biên nhận = worker đã áp đúng số cân này → dòng thuộc Engine 2: trả lại số vừa cân, ghi nốt phần sổ bằng mã lượt đó
+// (kho nhận ra biên nhận, không áp lần hai). Không có → để lỗi «tải lại mã» đi tiếp như thường.
+async function adopt(l,keep){
+ const opId='e2sw_'+(await E.digest(l._e2Timeout.mid)).slice(0,32);
+ const doc=await timed(service.sub('operations').doc(opId).get(),2000);
+ if(!doc.exists||!doc.data().inventoryResult||doc.data().measurementId!==l._e2Timeout.mid)return false;
+ l.units.forEach((u,i)=>{if(keep[i])Object.assign(u,keep[i]);});
+ l.engine2Owner=true;l.engine2OpId=opId;l._e2Reported=true;l._e2Why=null;l.needReload=false;
+ return true;
 }
 // [v5-B5] Chờ có trần: quá hạn → lỗi mã E2_WAIT (lời hứa gốc vẫn chạy tiếp ở nền, nơi gọi tự xử lý kết quả muộn).
 function timed(p,ms){
@@ -273,9 +284,13 @@ function install(){
   const apply=shift.applyLine;
   shift.applyLine=async function(l,day,staff,seed){
    if(l&&l.e2&&!l._applied){try{const r=await engage(l,day,staff);l._e2Why=r.ok?null:r;}catch(e){l._e2Why=no('request_failed',e&&e.message);console.warn('Engine2',e&&e.message);}}
+   // [v5-B5] Giữ bản chụp số cân: nếu lượt xin trễ đã tới máy chủ và worker ÁP KHO TRƯỚC POS, kho báo «mã vừa được chỉnh ở nơi khác»
+   // và xoá số vừa cân — không được bắt nhân viên cân lại một lần cân đã được ghi.
+   const keep=l&&l._e2Timeout&&!l.engine2Owner?l.units.map(u=>({weighed:u.weighed,baseline:u.baseline,baselineSig:u.baselineSig,weighings:u.weighings,countedAt:u.countedAt,state:u.state})):null;
    let out;
    try{out=await apply.call(this,l,day,staff,seed);}
    catch(e){
+    if(keep&&e&&e.code==='SW_RELOAD'){const got=await adopt(l,keep).catch(()=>false);if(got){out=await apply.call(this,l,day,staff,seed);return out;}}
     // Số sổ đã đổi giữa lúc cân và lúc ghi (cần tải lại mã): lượt Engine 2 đã xin không còn đúng → xin lại ở lần ghi sau.
     if(l&&l.engine2Owner&&e&&e.code==='SW_RELOAD'){l.engine2Owner=false;delete l.engine2OpId;l._e2Session=null;}
     throw e;

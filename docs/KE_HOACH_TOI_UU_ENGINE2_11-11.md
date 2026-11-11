@@ -201,6 +201,22 @@ Thứ tự deploy an toàn cả hai chiều như gói v3: POS v5 chạy được
 
 **Giới hạn của số đo:** Firebase giả + thế giới mẫu; số thật ở gg01 cần đối chiếu Firebase Console › Usage sau deploy. Chưa chạy trên Firebase thật, chưa thử trên máy POS thật (đặc biệt: trần chờ 4 giây khi mạng yếu thật).
 
+## 10. Rà soát trừ kho / tính hao hụt của bản v5 (11/11, sau khi code) — 3 chỗ hở, đã sửa tại chỗ (v5 chưa deploy)
+
+Cách rà: dựng 6 tình huống đua bằng mã thật (kho v21 + store v5 + cầu nối v5): lượt xin Engine 2 tới máy chủ nhưng POS hết trần chờ và tự ghi kho; worker xử lý trước / sau / giữa; số cân lệch sổ và số cân bằng sổ.
+
+**Không có lỗ hổng trừ đôi:** ở mọi thứ tự, tồn của mã chỉ đổi MỘT lần và sổ chỉ có MỘT dòng hao hụt. Lý do nằm ở kho v21 (không đổi): mỗi lần áp số cân đóng dấu mã lượt lên mã đang mở, lần áp thứ hai bằng mã lượt khác bị kho từ chối («mã vừa được chỉnh ở nơi khác»); áp lại bằng CÙNG mã lượt thì kho nhận ra và không áp nữa.
+
+| # | Chỗ hở (chỉ ở bản v5 mới viết) | Hậu quả nếu để | Đã sửa |
+|---|---|---|---|
+| 1 | POS tự ghi trước, worker tới sau và từ chối lượt → việc cân nằm ở «chờ cân lại», lệnh rút không đụng tới | Việc treo tới 3 ngày: món bị thêm vào danh sách cân lặp lại, chặn hạ mức kiểm soát | `store.withdraw` đóng luôn việc của lượt đã bị worker từ chối (kèm lý do «POS tự ghi») |
+| 2 | Worker áp kho TRƯỚC khi POS tự ghi (câu trả lời về trễ) → kho báo «cân lại mã đó» và xoá số vừa cân | Nhân viên phải cân lại một lần cân đã được ghi — trái ưu tiên 2 | Cầu nối giữ bản chụp số cân; gặp lỗi này thì kiểm biên nhận kho của chính lượt đó (1 lượt đọc) → có thì nhận lại lượt, ghi nốt sổ bằng mã lượt cũ, không cân lại |
+| 3 | Cổng tín hiệu: máy chủ chết giữa lúc xử lý lượt cân / báo hết (không ai báo lỗi) → chỉ lưới an toàn 6 giờ mới chạy lại | Trách nhiệm của lượt cân đã áp kho ghi trễ tới 6 giờ (bản trước: ≤ 15 phút) | Trigger gõ cửa nhịp TRƯỚC khi xử lý việc `measurement` / `finish` → nhịp kế tiếp chạy lại như bản trước |
+
+Test: `engine2_pos_v5_nhanh.test.js` mục 6 (hai chiều đua, kiểm tồn + số dòng sổ + trách nhiệm ghi một lần), `unit_engine2_store_v5.test.js` (rút lượt).
+
+**Chưa rà trong lượt này:** đường trừ kho lúc BÁN (bill → FIFO), nấu mẻ BTP, nhận hàng, Sổ lệch — các đường đó bản v5 không chạm tới.
+
 ## Phụ lục — phương án lần 2: đánh thức hoàn toàn theo tín hiệu (ĐỂ DÀNH, không làm trong kế hoạch này)
 
 > Giữ lại để tra cứu. Lý do không chọn: T2 đổi cơ chế «còn sống», T3 đổi thời điểm học, T4 làm trễ thông báo, cần thêm hạ tầng Cloud Tasks. Chỉ xem lại khi số quán lớn tới mức cổng tín hiệu (mục 4) không còn đủ.

@@ -44,7 +44,12 @@ for(const store of stores){
   await engine2.source(store,'price_history',event.params.id,event.data.before.exists?event.data.before.data():null,event.data.after.exists?event.data.after.data():null);
  });
  exports[store+'_engine2_request']=onDocumentWritten({document:A.collection('duty_digests',store)+'/_engine2/requests/{id}',region:'asia-southeast1',retry:true,maxInstances:2},async event=>{
-  const d=event.data.after.exists?event.data.after.data():null;if(d?.dirty&&Number(d.leaseUntil)<=Date.now()&&Number(d.nextTryAt)<=Date.now())await engine2.drain(store,event.params.id);
+  const d=event.data.after.exists?event.data.after.data():null;
+  if(!(d?.dirty&&Number(d.leaseUntil)<=Date.now()&&Number(d.nextTryAt)<=Date.now()))return;
+  // [v5] Việc gắn với KHO (lượt cân đã áp kho, báo hết còn dư): gõ cửa nhịp TRƯỚC khi xử lý — nếu instance chết giữa chừng (việc còn
+  // dirty, không ai báo lỗi) thì nhịp kế tiếp vẫn vào quán và chạy lại như bản trước, không phải chờ lưới an toàn 6 giờ.
+  if(['measurement','finish'].includes(d.kind))await fleet.poke(store);
+  await engine2.drain(store,event.params.id);
  });
  exports[store+'_engine2_case']=onDocumentWritten({document:A.collection('duty_digests',store)+'/_engine2/cases/{id}',region:'asia-southeast1',retry:true,maxInstances:2},async event=>{
   const a=event.data.after.exists?event.data.after.data():null,b=event.data.before.exists?event.data.before.data():null;if((a||b)?.originKind==='finish'&&(a||b).containerId)await worker.processSource(store,'stock_containers',(a||b).containerId);

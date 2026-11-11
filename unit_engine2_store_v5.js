@@ -727,12 +727,15 @@ function create(opts){
  async function withdraw(measurementId,staff,detail=''){
   const ref=sub('measurements').doc(measurementId);
   return fs.runTransaction(async t=>{
-   const ms=await t.get(ref);if(!ms.exists||ms.data().status!=='queued')return false;
+   // Lượt còn chờ (queued) → rút. Lượt đã bị worker TỪ CHỐI vì kho vừa đổi (POS tự ghi trước khi worker tới) → lượt giữ nguyên, nhưng
+   // việc của nó đang «chờ cân lại» (retry_wait) mà POS đã ghi xong → vẫn phải đóng việc, không để treo 3 ngày chặn hạ mức.
+   const ms=await t.get(ref);if(!ms.exists||!['queued','rejected'].includes(ms.data().status)||!ms.data().operationId)return false;
    const m=ms.data(),taskRef=sub('tasks').doc(m.taskId),lockRef=sub('measurement_locks').doc(m.itemId);
    const [op,ts,lock,c]=await Promise.all([t.get(sub('operations').doc(m.operationId)),t.get(taskRef),t.get(lockRef),t.get(base)]);
-   if(op.exists&&op.data().inventoryResult)return false;
+   if(op.exists&&op.data().inventoryResult)return false;                       // kho đã áp theo mã lượt của Engine 2 → Engine 2 giữ lượt này
+   if(m.status==='rejected'&&!(ts.exists&&ts.data().measurementId===measurementId&&ts.data().status==='retry_wait'))return false;
    const at=iso(),why='POS đã tự ghi kho (quá thời gian chờ Engine 2)';
-   t.set(ref,{status:'rejected',lastError:why,withdrawnAt:at,updatedAt:at},{merge:true});
+   if(m.status==='queued')t.set(ref,{status:'rejected',lastError:why,withdrawnAt:at,updatedAt:at},{merge:true});
    if(lock.exists&&lock.data().measurementId===measurementId)t.delete(lockRef);
    if(ts.exists&&!['done','cancelled','superseded'].includes(ts.data().status)){
     const task=ts.data(),note={taskId:m.taskId,itemId:task.itemId||'',itemName:task.itemName||'',sampling:task.sampling||'',code:'request_failed',detail:String(detail||'quá thời gian chờ').slice(0,200),byEmployeeId:staff?.id||'',byName:staff?.fullName||'',at};
