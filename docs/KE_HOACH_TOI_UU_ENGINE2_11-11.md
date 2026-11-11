@@ -69,6 +69,31 @@ Ba điều rút ra:
 2. Phần «có việc» của Engine 2 vốn đã theo tín hiệu và **đúng cơ chế** — không cần đổi cách nó quyết định, chỉ bớt đọc lặp trong từng việc (mục 2).
 3. **Nói thật về tiền:** với giá Firestore hiện hành, 540.000 đọc + 185.000 ghi / tháng chỉ khoảng dưới 1 USD. Lợi ích thật là (a) không ăn vào hạn mức miễn phí 50.000 đọc / 20.000 ghi mỗi ngày **dùng chung với XOFA và TC33**; (b) rủi ro A1 — khởi động lạnh có thể nhân lượt quét lên hàng chục lần, khi đó 10 quán vượt hạn mức; (c) vòng lặp tuần tự qua các quán trong một hàm 540 giây sẽ thành giới hạn khi số quán lớn.
 
+### 3.1 Kết quả Đ0 — số ĐO (11/11, thay cho ước lượng ở trên)
+
+Công cụ `node tools/automation/engine2_do_tai.js` chạy **mã thật** (worker, store v4, cầu nối POS v4, kho v21) trên Firebase giả, đếm như Firestore tính phí; mốc khoá ở `tests/engine2_do_tai.test.js`. Thế giới mẫu: 5 món kiểm soát + 2 cân ngẫu nhiên + 3 món chỉ bắt buộc, 40 thông báo «để biết» và 30 dòng `needsReview` tồn cũ.
+
+| Đo được (một quán) | Đọc | Ghi | Vòng mạng |
+|---|---|---|---|
+| Một nhịp 15 phút không có việc | 11 | 4 | 12 |
+| — trong đó `worker.tickStore` cả ngày | 864 | 288 | |
+| — `engine2.tick` cả ngày (gồm 1 lượt học 125 đọc) | 343 | 109 | |
+| — `queue.retryDue` cả ngày | 96 | 0 | |
+| **96 nhịp, instance ấm** | **1.303** | **397** | |
+| **96 nhịp, instance LẠNH mỗi nhịp (A1)** | **9.011** | 397 | |
+| POS dựng danh sách cân cuối ca (dựng lại: 24) | 17 | 0 | 7 |
+| POS ghi một dòng thường (kho v21) | 11 | 9 | 13,7 |
+| **Engine 2 thêm vào mỗi dòng cân** | **+11** | **+4** | **+3,8** |
+| Worker hoàn tất 7 lượt cân | 197 | 119 | |
+| Báo hết còn dư | 28 | 12 | |
+| Một lần đổi ca | 26 | 9 | |
+| Bán một bill (12 lần gọi function) | **0** | **0** | 0 |
+
+- **Một quán / ngày: 1.800 đọc + 642 ghi — 67% lượt đọc và 60% lần ghi là «không có việc».** Mười quán: ~18.000 đọc + ~6.400 ghi / ngày.
+- **A1 là rủi ro lớn nhất, đã xác nhận:** chỉ với 70 tài liệu tồn cũ, instance lạnh mỗi nhịp làm 10 quán tốn ~90.000 lượt đọc / ngày riêng phần nhịp — **vượt hạn mức miễn phí 50.000 / ngày** dùng chung với XOFA / TC33.
+- Ưu tiên 1 giữ đúng: bán hàng không làm Engine 2 đọc / ghi gì.
+- Ưu tiên 2: kết ca 7 dòng Engine 2 → nhân viên chờ thêm ~27 vòng mạng (mạng 150 ms ≈ 4 giây; mạng yếu 500 ms ≈ 13 giây). Đây là chỗ B1 / B2 / B5 nhắm tới.
+
 ## 4. Hướng tối ưu mới — «cổng tín hiệu», giữ nguyên cơ chế
 
 **Nguyên tắc:** không đổi luật, không đổi thời điểm, không đổi cách POS và worker tin nhau. Chỉ đặt một **cổng rẻ** trước mỗi việc: *có tín hiệu thì Engine 2 vào làm, không có thì không bước qua cổng*. Nhịp 15 phút còn lại chỉ là người gác cổng (vài lượt đọc cho **cả chuỗi**), không phải Engine 2.
